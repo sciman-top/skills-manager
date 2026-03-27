@@ -1,0 +1,10 @@
+# build/cache
+/vendor/
+/agent/
+
+# backups created when linking
+**/*.bak.*
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify generated script sync
+        shell: powershell
+        run: .\tests\check-generated-sync.ps1
+
+      - name: Run tests
+        shell: powershell
+        run: .\tests\run.ps1

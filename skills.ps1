@@ -1,0 +1,5394 @@
+﻿#requires -Version 5.1
+param(
+    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "锁定", "生成锁文件", "打开配置", "解除关联", "清理备份", "帮助", "doctor", "add", "npx", "安装MCP", "卸载MCP", "同步MCP", "mcp-install", "mcp-uninstall", "mcp-sync")]
+    [string]$Cmd = "menu",
+    [string]$Filter = "",
+    [switch]$DryRun,
+    [switch]$Locked,
+    [switch]$Plan,
+    [switch]$Upgrade
+)
+
+$ErrorActionPreference = "Stop"
+try {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    [Console]::InputEncoding = [System.Text.Encoding]::UTF8
+}
+catch {}
+ 
+ $Root = (Resolve-Path ".").Path
+$CfgPath = Join-Path $Root "skills.json"
+$LogPath = Join-Path $Root "build.log"
+$VendorDir = Join-Path $Root "vendor"
+$AgentDir = Join-Path $Root "agent"
+$OverridesDir = Join-Path $Root "overrides"
+$ManualDir = Join-Path $Root "manual"
+$ImportDir = Join-Path $Root "imports"
+
+function Get-LogRotateMaxBytes {
+    $v = $null
+    if ($null -ne $script:LogMaxBytes) { $v = $script:LogMaxBytes }
+    elseif ($null -ne $global:LogMaxBytes) { $v = $global:LogMaxBytes }
+    try {
+        $n = [int64]$v
+        if ($n -gt 0) { return $n }
+    }
+    catch {}
+    return 1048576
+}
+function Get-LogMaxBackups {
+    $v = $null
+    if ($null -ne $script:LogMaxBackups) { $v = $script:LogMaxBackups }
+    elseif ($null -ne $global:LogMaxBackups) { $v = $global:LogMaxBackups }
+    try {
+        $n = [int]$v
+        if ($n -gt 0) { return $n }
+    }
+    catch {}
+    return 5
+}
+function Rotate-LogIfNeeded {
+    if ([string]::IsNullOrWhiteSpace($LogPath)) { return }
+    if (-not (Test-Path $LogPath)) { return }
+    $maxBytes = Get-LogRotateMaxBytes
+    $maxBackups = Get-LogMaxBackups
+    try {
+        $size = (Get-Item $LogPath -ErrorAction Stop).Length
+        if ($size -lt $maxBytes) { return }
+        for ($i = $maxBackups; $i -ge 1; $i--) {
+            $src = if ($i -eq 1) { $LogPath } else { "{0}.{1}" -f $LogPath, ($i - 1) }
+            $dst = "{0}.{1}" -f $LogPath, $i
+            if (-not (Test-Path $src)) { continue }
+            if (Test-Path $dst) { Remove-Item -Force $dst }
+            Move-Item -Force $src $dst
+        }
+    }
+    catch {}
+}
+function Write-LogRecord([string]$Level, [string]$Message, [object]$Data) {
+    if ($DryRun) { return }
+    Rotate-LogIfNeeded
+    $record = [ordered]@{
+        ts    = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+        level = $Level.ToUpperInvariant()
+        msg   = $Message
+    }
+    if ($null -ne $Data) { $record.data = $Data }
+    ($record | ConvertTo-Json -Depth 20 -Compress) | Out-File -FilePath $LogPath -Append -Encoding UTF8
+}
+function Log([string]$msg, [string]$Level = "INFO", [switch]$NoHost, [object]$Data) {
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $lvl = $Level.ToUpperInvariant()
+    $line = "[{0}][{1}] {2}" -f $timestamp, $lvl, $msg
+    if (-not $NoHost) {
+        switch ($lvl) {
+            "WARN" { Write-Host $line -ForegroundColor Yellow }
+            "ERROR" { Write-Host $line -ForegroundColor Red }
+            "DEBUG" { Write-Host $line -ForegroundColor DarkGray }
+            default { Write-Host $line }
+        }
+    }
+    Write-LogRecord $lvl $msg $Data
+}
+function Invoke-WithMetric(
+    [string]$Metric,
+    [scriptblock]$Action,
+    [hashtable]$Data = $null,
+    [switch]$NoHost
+) {
+    Need (-not [string]::IsNullOrWhiteSpace($Metric)) "metric 不能为空"
+    Need ($null -ne $Action) "Action 不能为空"
+
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $ok = $false
+    try {
+        $result = & $Action
+        $ok = $true
+        return $result
+    }
+    finally {
+        $sw.Stop()
+        $payload = [ordered]@{
+            metric = $Metric
+            duration_ms = [int]$sw.ElapsedMilliseconds
+            success = $ok
+        }
+        if ($Data) {
+            foreach ($k in $Data.Keys) {
+                $payload[$k] = $Data[$k]
+            }
+        }
+        Log ("性能埋点：{0}" -f $Metric) "INFO" -NoHost:$NoHost $payload
+    }
+}
+
+function Invoke-RemoveItem([string]$path, [switch]$Recurse) {
+    if (-not (Test-Path $path)) { return }
+    $recurseFlag = if ($Recurse) { "-Recurse " } else { "" }
+    Log ("Remove-Item {0}{1}" -f $recurseFlag, $path)
+    if (-not $DryRun) {
+        if ($Recurse) { Remove-Item -Recurse -Force $path }
+        else { Remove-Item -Force $path }
+    }
+}
+function Invoke-RemoveItemWithRetry(
+    [string]$path,
+    [switch]$Recurse,
+    [int]$MaxAttempts = 4,
+    [int]$DelayMs = 250,
+    [switch]$IgnoreFailure,
+    [switch]$SilentIgnore
+) {
+    if (-not (Test-Path $path)) { return $true }
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            Invoke-RemoveItem $path -Recurse:$Recurse
+            return $true
+        }
+        catch {
+            if ($attempt -ge $MaxAttempts) {
+                if ($IgnoreFailure) {
+                    if (-not $SilentIgnore) {
+                        Log ("清理失败（已忽略）：{0}；原因：{1}" -f $path, $_.Exception.Message) "WARN"
+                    }
+                    return $false
+                }
+                throw
+            }
+            Start-Sleep -Milliseconds $DelayMs
+        }
+    }
+    return $false
+}
+function Invoke-MoveItem([string]$src, [string]$dst) {
+    Log ("Move-Item {0} -> {1}" -f $src, $dst)
+    if (-not $DryRun) { Move-Item -Force $src $dst }
+}
+function Invoke-StartProcess([string]$file, [string]$args) {
+    Log ("Start-Process {0} {1}" -f $file, $args)
+    if (-not $DryRun) {
+        if ([string]::IsNullOrWhiteSpace($args)) {
+            Start-Process -FilePath $file
+        }
+        else {
+            Start-Process -FilePath $file -ArgumentList $args
+        }
+    }
+}
+function Invoke-MklinkJunction([string]$linkPath, [string]$targetPath) {
+    Log ("cmd /c mklink /J `"{0}`" `"{1}`"" -f $linkPath, $targetPath)
+    if ($DryRun) { return }
+    & cmd /c mklink /J "$linkPath" "$targetPath" | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "mklink 失败：$linkPath -> $targetPath" }
+}
+function EnsureDir([string]$p) {
+    if ($DryRun) { return }
+    if (-not (Test-Path $p)) { New-Item -ItemType Directory -Force -Path $p | Out-Null }
+}
+function Set-ContentUtf8([string]$path, [string]$content) {
+    if ($DryRun) { return }
+    $parent = Split-Path $path -Parent
+    if (-not [string]::IsNullOrWhiteSpace($parent)) { EnsureDir $parent }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $bytes = $utf8NoBom.GetBytes($content)
+    $maxAttempts = 4
+    $delayMs = 200
+    for ($attempt = 0; $attempt -lt $maxAttempts; $attempt++) {
+        try {
+            [System.IO.File]::WriteAllBytes($path, $bytes)
+            return
+        }
+        catch {
+            $baseException = $_.Exception
+            if ($baseException -is [System.Management.Automation.MethodInvocationException] -and $baseException.InnerException) {
+                $baseException = $baseException.InnerException
+            }
+            $isRetryable = ($baseException -is [System.UnauthorizedAccessException]) -or ($baseException -is [System.IO.IOException])
+            if (-not $isRetryable) { throw }
+
+            if (Test-Path -LiteralPath $path -PathType Leaf) {
+                try {
+                    $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+                    $resetAttrs = [System.IO.FileAttributes]::ReadOnly -bor [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
+                    if (($item.Attributes -band $resetAttrs) -ne 0) {
+                        $item.Attributes = ($item.Attributes -band (-bnot $resetAttrs))
+                    }
+                }
+                catch {}
+            }
+
+            if ($attempt -ge ($maxAttempts - 1)) { throw $baseException }
+            Start-Sleep -Milliseconds $delayMs
+        }
+    }
+}
+function Get-ContentUtf8([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    $bytes = [System.IO.File]::ReadAllBytes($path)
+    return ([System.Text.Encoding]::UTF8.GetString($bytes))
+}
+function Resolve-RelativeSkillPlaceholderTarget([string]$skillFile, [string]$rootPath) {
+    if ([string]::IsNullOrWhiteSpace($skillFile) -or [string]::IsNullOrWhiteSpace($rootPath)) { return $null }
+    if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { return $null }
+    if (-not (Test-Path -LiteralPath $rootPath)) { return $null }
+
+    $raw = Get-Content -LiteralPath $skillFile -Raw -ErrorAction SilentlyContinue
+    if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+
+    $lines = @($raw -split "\r?\n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($lines.Count -ne 1) { return $null }
+
+    $relative = $lines[0].Trim()
+    if ([string]::IsNullOrWhiteSpace($relative)) { return $null }
+    if ([System.IO.Path]::IsPathRooted($relative)) { return $null }
+    if (-not ($relative -match "\.md$")) { return $null }
+
+    $baseDir = Split-Path -Parent $skillFile
+    $candidate = [System.IO.Path]::GetFullPath((Join-Path $baseDir $relative))
+    $rootFull = [System.IO.Path]::GetFullPath($rootPath)
+    $selfFull = [System.IO.Path]::GetFullPath($skillFile)
+    if ($candidate -eq $selfFull) { return $null }
+    if (-not (Is-PathInsideOrEqual $candidate $rootFull)) { return $null }
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { return $null }
+
+    $targetRaw = Get-ContentUtf8 $candidate
+    if ([string]::IsNullOrWhiteSpace($targetRaw)) { return $null }
+    $targetNormalized = $targetRaw.TrimStart([char]0xFEFF).TrimStart()
+    if ($targetNormalized -notmatch "^---(\r?\n|$)") { return $null }
+    return $candidate
+}
+function Expand-RelativeSkillPlaceholders([string]$rootPath) {
+    if ([string]::IsNullOrWhiteSpace($rootPath)) { return 0 }
+    if (-not (Test-Path -LiteralPath $rootPath)) { return 0 }
+
+    $count = 0
+    foreach ($skillFile in (Get-ChildItem -LiteralPath $rootPath -Recurse -Filter "SKILL.md" -File -ErrorAction SilentlyContinue)) {
+        $target = Resolve-RelativeSkillPlaceholderTarget $skillFile.FullName $rootPath
+        if ([string]::IsNullOrWhiteSpace($target)) { continue }
+        $content = Get-ContentUtf8 $target
+        Set-ContentUtf8 $skillFile.FullName $content
+        $count++
+    }
+    return $count
+}
+function Get-FileContentHash([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::OpenRead($path)
+        try {
+            $hash = $sha.ComputeHash($stream)
+            return ([System.BitConverter]::ToString($hash) -replace "-", "").ToLowerInvariant()
+        }
+        finally {
+            $stream.Dispose()
+        }
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+function Need($cond, [string]$msg) { if (-not $cond) { throw $msg } }
+function Read-HostSafe([string]$prompt) {
+    $value = Read-Host $prompt
+    if ($null -eq $value) { return "" }
+    return $value.Trim()
+}
+function Is-Yes([string]$answer) {
+    if ([string]::IsNullOrWhiteSpace($answer)) { return $false }
+    $v = $answer.Trim().ToLowerInvariant()
+    return ($v -eq "y" -or $v -eq "yes")
+}
+function Confirm-Action([string]$prompt, [string]$token = "Y", [switch]$DefaultNo) {
+    if ([string]::IsNullOrWhiteSpace($token)) { $token = "Y" }
+    $suffix = if ($DefaultNo) { " (默认=N)" } else { "" }
+    $userInput = Read-HostSafe ("{0}，输入 {1} 继续{2}" -f $prompt, $token, $suffix)
+    if ($token -eq "Y") { return (Is-Yes $userInput) }
+    if ([string]::IsNullOrWhiteSpace($userInput)) { return $false }
+    return ($userInput.Equals($token, [System.StringComparison]::OrdinalIgnoreCase))
+}
+function Print-PreviewList([string]$title, [string[]]$items, [int]$maxShow = 20) {
+    Write-Host $title
+    if ($items.Count -eq 0) {
+        Write-Host "- 无"
+        return
+    }
+    $shown = 0
+    foreach ($p in ($items | Sort-Object)) {
+        Write-Host ("- {0}" -f $p)
+        $shown++
+        if ($shown -ge $maxShow) { break }
+    }
+    if ($items.Count -gt $maxShow) {
+        Write-Host ("... 另有 {0} 项未显示" -f ($items.Count - $maxShow))
+    }
+}
+function Print-ActionSummary([string]$title, [string[]]$items) {
+    $count = if ($null -eq $items) { 0 } else { $items.Count }
+    Write-Host ("{0}（{1} 项）" -f $title, $count)
+    Print-PreviewList "预览（部分）：" $items
+}
+function Confirm-WithSummary([string]$title, [string[]]$items, [string]$confirmPrompt, [string]$token = "Y") {
+    Print-ActionSummary $title $items
+    return (Confirm-Action $confirmPrompt $token -DefaultNo)
+}
+function Skip-IfDryRun([string]$action) {
+    if (-not $DryRun) { return $false }
+    Write-Host ("DRYRUN：{0} 已跳过执行。" -f $action)
+    return $true
+}
+function Start-DryRunMirrorCollect {
+    if (-not $DryRun) { return }
+    $script:CollectDryRunMirror = $true
+    $script:DryRunMirrorCommands = New-Object System.Collections.Generic.List[string]
+}
+function Stop-DryRunMirrorCollect {
+    $script:CollectDryRunMirror = $false
+}
+function Write-DryRunMirrorSummary([string]$title = "DRYRUN Robocopy 预览", [int]$maxShow = 20) {
+    if (-not $DryRun) { return }
+    if (-not $script:DryRunMirrorCommands) { return }
+    $count = $script:DryRunMirrorCommands.Count
+    if ($count -eq 0) { return }
+    Write-Host ("{0}：共 {1} 条" -f $title, $count)
+    $shown = 0
+    foreach ($cmd in $script:DryRunMirrorCommands) {
+        Write-Host $cmd
+        $shown++
+        if ($shown -ge $maxShow) { break }
+    }
+    if ($count -gt $maxShow) {
+        Write-Host ("... 另有 {0} 条未显示" -f ($count - $maxShow))
+    }
+}
+function Get-BuildSummary($cfg) {
+    $manualCount = (收集ManualSkills $cfg).Count
+    $overrideCount = (Get-OverridesDirs).Count
+    return ("构建摘要：mappings={0}，imports(manual)={1}，overrides={2}，targets={3}，sync_mode={4}" -f $cfg.mappings.Count, $manualCount, $overrideCount, $cfg.targets.Count, $cfg.sync_mode)
+}
+function Write-BuildSummary($cfg = $null) {
+    try {
+        if ($null -eq $cfg) { $cfg = LoadCfg }
+        Write-Host (Get-BuildSummary $cfg)
+    }
+    catch {}
+}
+function Format-VendorPreview($vendors) {
+    return ($vendors | ForEach-Object { "$($_.name) :: $($_.repo)" })
+}
+function Get-DisplayVendor($item) {
+    if ($null -eq $item) { return "" }
+    if ($item.PSObject.Properties.Match("display_vendor").Count -gt 0) {
+        $display = [string]$item.display_vendor
+        if (-not [string]::IsNullOrWhiteSpace($display)) { return $display }
+    }
+    return [string]$item.vendor
+}
+function Format-MappingPreview($items, [string]$targetPrefix = "") {
+    $prefix = if ([string]::IsNullOrWhiteSpace($targetPrefix)) { "" } else { ($targetPrefix + " ") }
+    return ($items | ForEach-Object { "$prefix$(Get-DisplayVendor $_) :: $($_.from) -> $($_.to)" })
+}
+function Format-SkillPreview($items) {
+    return ($items | ForEach-Object { "$(Get-DisplayVendor $_) :: $($_.from)" })
+}
+function Preflight {
+    Need (Get-Command git -ErrorAction SilentlyContinue) "未找到 git，请先安装 Git 并确保在 PATH 中。"
+    Need (Get-Command robocopy -ErrorAction SilentlyContinue) "未找到 robocopy，请确保在 PATH 中（Windows 默认包含）。"
+    EnsureDir $VendorDir
+    EnsureDir $AgentDir
+    EnsureDir $OverridesDir
+    EnsureDir $ImportDir
+}
+function RoboMirror([string]$src, [string]$dst) {
+    EnsureDir $dst
+    $cmd = "robocopy `"$src`" `"$dst`" /MIR /NFL /NDL /NJH /NJS /NP"
+    if ($DryRun) {
+        if ($script:CollectDryRunMirror) {
+            if (-not $script:DryRunMirrorCommands) {
+                $script:DryRunMirrorCommands = New-Object System.Collections.Generic.List[string]
+            }
+            $script:DryRunMirrorCommands.Add($cmd) | Out-Null
+        }
+        else {
+            Write-Host $cmd
+        }
+        return
+    }
+    & robocopy $src $dst /MIR /NFL /NDL /NJH /NJS /NP 2>&1 |
+    Where-Object { $_ -and $_.Trim() } |
+    Out-Host
+    if ($LASTEXITCODE -ge 8) { throw "robocopy 失败（exit=$LASTEXITCODE）：$src -> $dst" }
+}
+function Is-ReparsePoint([string]$path) {
+    if (-not (Test-Path $path)) { return $false }
+    $item = Get-Item $path -Force
+    return [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+}
+function Is-PathUnder([string]$path, [string]$root) {
+    if ([string]::IsNullOrWhiteSpace($path) -or [string]::IsNullOrWhiteSpace($root)) { return $false }
+    $rootNorm = $root.TrimEnd("\")
+    return $path.StartsWith(($rootNorm + "\"), [System.StringComparison]::OrdinalIgnoreCase)
+}
+function Is-PathInsideOrEqual([string]$path, [string]$root) {
+    if ([string]::IsNullOrWhiteSpace($path) -or [string]::IsNullOrWhiteSpace($root)) { return $false }
+    try {
+        $pathNorm = [System.IO.Path]::GetFullPath($path).TrimEnd("\")
+        $rootNorm = [System.IO.Path]::GetFullPath($root).TrimEnd("\")
+    }
+    catch {
+        return $false
+    }
+    if ($pathNorm.Equals($rootNorm, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    return $pathNorm.StartsWith(($rootNorm + "\"), [System.StringComparison]::OrdinalIgnoreCase)
+}
+function Is-DriveRoot([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    try {
+        $full = [System.IO.Path]::GetFullPath($path).TrimEnd("\")
+    }
+    catch {
+        return $false
+    }
+    return ($full -match "^[A-Za-z]:$")
+}
+function Test-SafeRelativePath([string]$path, [switch]$AllowDot) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    $p = $path.Trim().Replace("/", "\")
+    if ([System.IO.Path]::IsPathRooted($p)) { return $false }
+    if ($p -match "^[A-Za-z]:") { return $false }
+    $parts = $p.Split("\") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    foreach ($part in $parts) {
+        if ($part -eq "..") { return $false }
+    }
+    if (-not $AllowDot -and $p -eq ".") { return $false }
+    return $true
+}
+function Assert-SafeTargetDir([string]$targetPath) {
+    Need (-not [string]::IsNullOrWhiteSpace($targetPath)) "target path 不能为空"
+    Need (-not (Is-DriveRoot $targetPath)) ("target path 不能是盘符根目录：{0}" -f $targetPath)
+    Need (-not (Is-PathInsideOrEqual $Root $targetPath)) ("target path 不能是仓库根或其父级：{0}" -f $targetPath)
+    Need (-not (Is-PathInsideOrEqual $AgentDir $targetPath)) ("target path 不能是 agent/ 或其父级：{0}" -f $targetPath)
+    Need (-not (Is-PathInsideOrEqual $targetPath $AgentDir)) ("target path 不能位于 agent/ 内部：{0}" -f $targetPath)
+}
+function Is-ExcludedPath([string]$path, [string[]]$roots) {
+    foreach ($r in $roots) {
+        if (Is-PathUnder $path $r) { return $true }
+    }
+    return $false
+}
+function Backup-DirIfNeeded([string]$path) {
+    if (-not (Test-Path $path)) { return $null }
+    if (Is-ReparsePoint $path) { return $null }
+    $parent = Split-Path $path -Parent
+    $leaf = Split-Path $path -Leaf
+    $bak = Join-Path $parent ("{0}.bak.{1}" -f $leaf, (Get-Date -Format "yyyyMMdd-HHmmss"))
+    Invoke-MoveItem $path $bak
+    return $bak
+}
+function Backup-OverrideDir([string]$overrideName) {
+    $src = Join-Path $OverridesDir $overrideName
+    if (-not (Test-Path $src)) { return $null }
+    $bakRoot = Join-Path $OverridesDir ".bak"
+    EnsureDir $bakRoot
+    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $bakName = "{0}.bak.{1}" -f $overrideName, $stamp
+    $bakPath = Join-Path $bakRoot $bakName
+    Invoke-MoveItem $src $bakPath
+    return $bakPath
+}
+function New-Junction([string]$linkPath, [string]$targetPath) {
+    EnsureDir $targetPath
+    EnsureDir (Split-Path $linkPath -Parent)
+
+    if (Test-Path $linkPath) {
+        if (Is-ReparsePoint $linkPath) {
+            Invoke-RemoveItem $linkPath -Recurse
+        }
+        else {
+            Backup-DirIfNeeded $linkPath | Out-Null
+        }
+    }
+
+    # mklink /J: 不需要管理员权限（Junction）
+    Invoke-MklinkJunction $linkPath $targetPath
+}
+function Find-LatestBackup([string]$path) {
+    $parent = Split-Path $path -Parent
+    $leaf = Split-Path $path -Leaf
+    $pattern = "{0}.bak.*" -f $leaf
+    Get-ChildItem $parent -Directory -Filter $pattern -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+}
+function Remove-JunctionAndRestore([string]$linkPath) {
+    if ((Test-Path $linkPath) -and (Is-ReparsePoint $linkPath)) {
+        Invoke-RemoveItem $linkPath -Recurse
+        $bak = Find-LatestBackup $linkPath
+        if ($bak) {
+            Invoke-MoveItem $bak.FullName $linkPath
+        }
+    }
+    else {
+        $bak = Find-LatestBackup $linkPath
+        if ($bak) {
+            if (Confirm-Action ("检测到备份：{0}，是否恢复？" -f $bak.Name) "Y" -DefaultNo) {
+                if (Test-Path $linkPath) { Backup-DirIfNeeded $linkPath | Out-Null }
+                Invoke-MoveItem $bak.FullName $linkPath
+            }
+            else {
+                Write-Host ("已保留备份未恢复：{0}" -f $bak.FullName)
+            }
+        }
+        else {
+            Write-Host "当前不是链接目录：$linkPath"
+        }
+    }
+}
+function VendorPath([string]$vendorName) {
+    return (Join-Path $VendorDir $vendorName)
+}
+function Normalize-Name([string]$name) {
+    if ([string]::IsNullOrWhiteSpace($name)) { return $null }
+    $n = $name.Trim()
+    $n = $n -replace "[\\/]", "-"
+    $n = $n -replace "[^A-Za-z0-9_-]", "-"
+    $n = $n -replace "_", "-"
+    $n = $n -replace "-{2,}", "-"
+    $n = $n.Trim("-")
+    $n = $n.ToLowerInvariant()
+    if ([string]::IsNullOrWhiteSpace($n)) { return $null }
+    return $n
+}
+function Normalize-NameWithNotice([string]$name, [string]$label = "名称") {
+    $norm = Normalize-Name $name
+    Need (-not [string]::IsNullOrWhiteSpace($norm)) ("{0} 无法规范化，请更换名称：{1}" -f $label, $name)
+    if ($name -ne $norm) {
+        Write-Host ("{0} 已自动规范化：{1} -> {2}" -f $label, $name, $norm) -ForegroundColor Yellow
+    }
+    return $norm
+}
+function Normalize-SkillPath([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return "." }
+    $p = $path.Trim()
+    $p = $p -replace "/", "\"
+    $p = $p.Trim("\")
+    if ([string]::IsNullOrWhiteSpace($p)) { return "." }
+    return $p
+}
+function To-GitPath([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return "." }
+    $p = $path -replace "\\", "/"
+    if ($p -eq ".") { return "." }
+    return $p
+}
+function Clear-SkillsCache {
+    $script:SkillCandidatesCache = @{}
+    $script:SkillListCache = @{}
+}
+function Test-IsSkillDir([string]$path) {
+    if (-not (Test-Path $path)) { return $false }
+    $markers = @("SKILL.md", "AGENTS.md", "GEMINI.md", "CLAUDE.md")
+    foreach ($m in $markers) {
+        if (Test-Path (Join-Path $path $m)) { return $true }
+    }
+    return $false
+}
+function Get-SkillCandidates([string]$base) {
+    if (-not $script:SkillCandidatesCache) { $script:SkillCandidatesCache = @{} }
+    if ($script:SkillCandidatesCache.ContainsKey($base)) {
+        return ,@($script:SkillCandidatesCache[$base])
+    }
+    $items = @()
+    if (-not (Test-Path $base)) { return ,$items }
+  
+    # Find all potential marker files
+    $found = Get-ChildItem $base -Recurse -File -ErrorAction SilentlyContinue | 
+    Where-Object { $_.Name -match "^(SKILL|AGENTS|GEMINI|CLAUDE)\.md$" }
+    
+    $seenDirs = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($f in $found) {
+        $dir = $f.Directory.FullName
+        if (-not $seenDirs.Add($dir)) { continue }
+    
+        $rel = $dir.Substring($base.Length).TrimStart("\\")
+        if ([string]::IsNullOrWhiteSpace($rel)) { $rel = "." }
+        $items += [pscustomobject]@{ rel = $rel; leaf = (Split-Path $rel -Leaf) }
+    }
+    # Keep array shape for single-item results; callers rely on .Count.
+    $items = @($items | Sort-Object rel)
+    $script:SkillCandidatesCache[$base] = $items
+    return ,$items
+}
+function Format-SkillCandidates([object[]]$items, [string]$base) {
+    if ($items.Count -eq 0) { return "" }
+    $lines = @()
+    $lines += ("可选路径（共 {0}）：" -f $items.Count)
+    foreach ($i in ($items | Select-Object -First 20)) {
+        $lines += ("- {0}" -f $i.rel)
+    }
+    if ($items.Count -gt 20) {
+        $lines += ("... 另有 {0} 项未显示" -f ($items.Count - 20))
+    }
+    $lines += ("提示：仓库内未发现 SKILL.md，但已搜索 AGENTS.md, GEMINI.md, CLAUDE.md 等入口文件。")
+    return ($lines -join [Environment]::NewLine)
+}
+function Resolve-SkillPath([string]$base, [string]$skillPath) {
+    $src = if ($skillPath -eq ".") { $base } else { Join-Path $base $skillPath }
+    if (Test-IsSkillDir $src) { return $skillPath }
+
+    # Common shorthand: allow "--skill foo" to resolve to "skills/foo".
+    if ($skillPath -ne "." -and $skillPath -notmatch "[\\/]") {
+        $prefixed = Join-Path "skills" $skillPath
+        $prefixedSrc = Join-Path $base $prefixed
+        if (Test-IsSkillDir $prefixedSrc) {
+            Write-Host ("未找到指定路径，已自动补全为：{0}" -f $prefixed)
+            return $prefixed
+        }
+    }
+
+    $candidates = Get-SkillCandidates $base
+    Need ($candidates.Count -gt 0) "仓库内未发现任何有效的技能标记文件（SKILL.md, AGENTS.md, GEMINI.md, CLAUDE.md）"
+
+    if ($skillPath -ne ".") {
+        $leaf = Split-Path $skillPath -Leaf
+        $matches = $candidates | Where-Object { $_.leaf -eq $leaf }
+        if ($matches.Count -eq 1) {
+            Write-Host ("未找到指定路径，已按同名目录自动修正为：{0}" -f $matches[0].rel)
+            return $matches[0].rel
+        }
+        if ($matches.Count -gt 1) {
+            $msg = "未找到技能入口文件：{0}。提示：同名候选过多，请用 --skill 指定准确路径。" -f $src
+            $msg += [Environment]::NewLine + (Format-SkillCandidates $matches $base)
+            throw $msg
+        }
+
+        $leafNorm = Normalize-Name $leaf
+        if (-not [string]::IsNullOrWhiteSpace($leafNorm)) {
+            $fuzzyMatches = @($candidates | Where-Object {
+                    $candNorm = Normalize-Name $_.leaf
+                    if ([string]::IsNullOrWhiteSpace($candNorm)) { return $false }
+                    return ($leafNorm -eq $candNorm) -or ($leafNorm.EndsWith("-$candNorm"))
+                })
+            if ($fuzzyMatches.Count -eq 1) {
+                Write-Host ("未找到指定路径，已按后缀匹配自动修正为：{0}" -f $fuzzyMatches[0].rel)
+                return $fuzzyMatches[0].rel
+            }
+            if ($fuzzyMatches.Count -gt 1) {
+                $msg = "未找到技能入口文件：{0}。提示：后缀匹配候选过多，请用 --skill 指定准确路径。" -f $src
+                $msg += [Environment]::NewLine + (Format-SkillCandidates $fuzzyMatches $base)
+                throw $msg
+            }
+        }
+
+        if ($candidates.Count -eq 1) {
+            Write-Host ("未找到指定路径，仓库仅有一个技能入口目录，已自动使用：{0}" -f $candidates[0].rel)
+            return $candidates[0].rel
+        }
+    }
+
+    if ($skillPath -eq "." -and $candidates.Count -eq 1) {
+        Write-Host ("仓库仅有一个技能入口目录，已自动使用：{0}" -f $candidates[0].rel)
+        return $candidates[0].rel
+    }
+
+    $msg = "未找到技能入口文件：{0}。提示：请用 --skill 指定子目录（常见前缀：skills/、plugins/<plugin>/skills/）。" -f $src
+    $msg += [Environment]::NewLine + (Format-SkillCandidates $candidates $base)
+    throw $msg
+}
+function Split-Args([string]$line) {
+    if ([string]::IsNullOrWhiteSpace($line)) { return @() }
+    $tokens = New-Object System.Collections.Generic.List[string]
+    $sb = New-Object System.Text.StringBuilder
+    $inSingle = $false
+    $inDouble = $false
+    $everQuoted = $false
+    $chars = $line.ToCharArray()
+    for ($i = 0; $i -lt $chars.Length; $i++) {
+        $ch = $chars[$i]
+        if ($inDouble -and $ch -eq "\") {
+            if ($i + 1 -lt $chars.Length -and ($chars[$i + 1] -eq '"' -or $chars[$i + 1] -eq "\")) {
+                $i++
+                $null = $sb.Append($chars[$i])
+                continue
+            }
+        }
+        if ($ch -eq "'" -and -not $inDouble) {
+            $inSingle = -not $inSingle
+            $everQuoted = $true
+            continue
+        }
+        if ($ch -eq '"' -and -not $inSingle) {
+            $inDouble = -not $inDouble
+            $everQuoted = $true
+            continue
+        }
+        if ([char]::IsWhiteSpace($ch) -and -not $inSingle -and -not $inDouble) {
+            if ($sb.Length -gt 0 -or $everQuoted) {
+                $tokens.Add($sb.ToString()) | Out-Null
+                $sb.Clear() | Out-Null
+                $everQuoted = $false
+            }
+            continue
+        }
+        $null = $sb.Append($ch)
+    }
+    if ($inSingle -or $inDouble) {
+        throw "参数解析失败：存在未闭合的引号。"
+    }
+    if ($sb.Length -gt 0 -or $everQuoted) { $tokens.Add($sb.ToString()) | Out-Null }
+    return $tokens.ToArray()
+}
+function Split-RepoSkillSuffix([string]$repoToken) {
+    if ([string]::IsNullOrWhiteSpace($repoToken)) { return $null }
+    $token = $repoToken.Trim()
+    if ($token -notmatch "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@.+$") { return $null }
+    $parts = $token.Split("@", 2)
+    if ($parts.Count -ne 2) { return $null }
+    if ([string]::IsNullOrWhiteSpace($parts[0]) -or [string]::IsNullOrWhiteSpace($parts[1])) { return $null }
+    return [pscustomobject]@{
+        repo = $parts[0]
+        skill = $parts[1]
+    }
+}
+function Parse-AddArgs([string[]]$tokens) {
+    $result = [ordered]@{ repo = $null; skills = @(); ref = $null; mode = "manual"; sparse = $false; name = $null }
+    for ($i = 0; $i -lt $tokens.Count; $i++) {
+        $t = $tokens[$i]
+        if ($t -match "^-") {
+            $key = $t.ToLowerInvariant()
+            if ($key -eq "--sparse") { $result.sparse = $true; continue }
+            if ($key -match "^--skill=") {
+                $val = $t.Substring(8)
+                if ([string]::IsNullOrWhiteSpace($val)) { throw "参数值不能为空：--skill" }
+                $result.skills += $val
+                continue
+            }
+            if ($key -match "^--ref=") {
+                $val = $t.Substring(6)
+                if ([string]::IsNullOrWhiteSpace($val)) { throw "参数值不能为空：--ref" }
+                $result.ref = $val
+                continue
+            }
+            if ($key -match "^--mode=") {
+                $val = $t.Substring(7)
+                if ([string]::IsNullOrWhiteSpace($val)) { throw "参数值不能为空：--mode" }
+                $result.mode = $val
+                continue
+            }
+            if ($key -match "^--name=") {
+                $val = $t.Substring(7)
+                if ([string]::IsNullOrWhiteSpace($val)) { throw "参数值不能为空：--name" }
+                $result.name = $val
+                continue
+            }
+      
+            if ($key -eq "--skill" -or $key -eq "--ref" -or $key -eq "--mode" -or $key -eq "--name") {
+                if ($i + 1 -ge $tokens.Count) { throw "参数缺少值：$t" }
+                $val = $tokens[++$i]
+                if ($val -match "^-") { throw "参数缺少值：$t" }
+                if ([string]::IsNullOrWhiteSpace($val)) { throw ("参数值不能为空：{0}" -f $key) }
+                switch ($key) {
+                    "--skill" { $result.skills += $val }
+                    "--ref" { $result.ref = $val }
+                    "--mode" { $result.mode = $val }
+                    "--name" { $result.name = $val }
+                }
+                continue
+            }
+      
+            # Handle flags that take a value but we want to ignore (like --agent, -a)
+            if ($key -eq "--agent" -or $key -eq "-a") {
+                if ($i + 1 -lt $tokens.Count) { $i++ }
+                continue
+            }
+      
+            # Handle boolean flags we want to ignore
+            if ($key -eq "-g" -or $key -eq "--global" -or $key -eq "-y" -or $key -eq "--yes") {
+                continue
+            }
+
+            Log ("未知参数：$t，已跳过。") "WARN"
+        }
+        else {
+            if (-not $result.repo) { $result.repo = $t }
+        }
+    }
+    Need (-not [string]::IsNullOrWhiteSpace($result.repo)) "缺少 repo 参数。示例：add <repo> --skill <name>"
+    $repoSkill = Split-RepoSkillSuffix $result.repo
+    if ($repoSkill -and $result.skills.Count -eq 0) {
+        $result.repo = $repoSkill.repo
+        $result.skills += $repoSkill.skill
+        Write-Host ("检测到 repo@skill 写法，已自动转换为：repo={0} --skill {1}" -f $repoSkill.repo, $repoSkill.skill) -ForegroundColor Yellow
+    }
+    if ($result.skills.Count -eq 0) { $result.skills += "." }
+    foreach ($skill in $result.skills) {
+        if ([string]::IsNullOrWhiteSpace([string]$skill)) { throw "参数值不能为空：--skill" }
+        $normalizedSkill = Normalize-SkillPath ([string]$skill)
+        Need (Test-SafeRelativePath $normalizedSkill -AllowDot) ("skill 路径非法（仅允许相对路径，禁止 .. 与绝对路径）：{0}" -f $skill)
+    }
+    return $result
+}
+function Get-AddTokensFromNpx([string[]]$tokens) {
+    if ($tokens.Count -eq 1) { $tokens = Split-Args $tokens[0] }
+    if ($tokens.Count -eq 0) { throw "npx 参数为空。" }
+    $first = $tokens[0].ToLowerInvariant()
+    if ($first -eq "npx" -or $first -eq "npx.cmd") {
+        if ($tokens.Count -eq 1) { throw "npx 参数为空。" }
+        $tokens = $tokens[1..($tokens.Count - 1)]
+    }
+    if ($tokens.Count -ge 2 -and $tokens[0].ToLowerInvariant() -eq "skills" -and $tokens[1].ToLowerInvariant() -eq "add") {
+        if ($tokens.Count -lt 3) { throw "缺少 repo 参数。示例：add <repo> --skill <name>" }
+        return $tokens[2..($tokens.Count - 1)]
+    }
+    if ($tokens[0].ToLowerInvariant() -eq "add-skill") {
+        if ($tokens.Count -ge 2) { return $tokens[1..($tokens.Count - 1)] }
+        throw "缺少 repo 参数。示例：add <repo> --skill <name>"
+    }
+    throw "不支持的 npx 子命令。仅支持：skills add / add-skill"
+}
+function Get-AddTokensFromCommandLineTokens([string[]]$tokens) {
+    if (-not $tokens -or $tokens.Count -eq 0) { return @() }
+
+    $normalized = New-Object System.Collections.Generic.List[string]
+    foreach ($t in $tokens) {
+        if ([string]::IsNullOrWhiteSpace($t)) { continue }
+        $normalized.Add($t)
+    }
+    if ($normalized.Count -eq 0) { return @() }
+    $tokens = $normalized.ToArray()
+
+    $head = $tokens[0].Trim().Trim("'`"")
+    $headNorm = ($head -replace "/", "\").ToLowerInvariant()
+    if ($headNorm -match "(^|\\)skills\.(ps1|cmd)$") {
+        if ($tokens.Count -eq 1) { throw "缺少子命令。示例：add <repo> --skill <name>" }
+        $tokens = $tokens[1..($tokens.Count - 1)]
+        if ($tokens.Count -eq 0) { throw "缺少子命令。示例：add <repo> --skill <name>" }
+        $headNorm = ($tokens[0].Trim().Trim("'`"") -replace "/", "\").ToLowerInvariant()
+    }
+
+    if ($headNorm -eq "npx" -or $headNorm -eq "npx.cmd") {
+        return Get-AddTokensFromNpx $tokens
+    }
+    if ($headNorm -eq "skills") {
+        if ($tokens.Count -eq 1) { throw "缺少子命令。仅支持：skills add <repo> --skill <name>" }
+        $sub = $tokens[1].ToLowerInvariant()
+        if ($sub -ne "add") { throw "不支持的 skills 子命令。仅支持：skills add" }
+        if ($tokens.Count -lt 3) { throw "缺少 repo 参数。示例：add <repo> --skill <name>" }
+        return $tokens[2..($tokens.Count - 1)]
+    }
+    if ($headNorm -eq "add") {
+        if ($tokens.Count -eq 1) { throw "缺少 repo 参数。示例：add <repo> --skill <name>" }
+        return $tokens[1..($tokens.Count - 1)]
+    }
+    return $tokens
+}
+function Merge-FilterAndArgs([string]$filter, [string[]]$tokens) {
+    $merged = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($filter)) {
+        $merged.Add($filter) | Out-Null
+    }
+    if ($tokens) {
+        foreach ($t in $tokens) {
+            if ($null -eq $t) { continue }
+            $merged.Add([string]$t) | Out-Null
+        }
+    }
+    return $merged.ToArray()
+}
+ 
+ function Normalize-RepoUrl([string]$repo) {
+    $r = $repo.Trim()
+    if ($r -match "^(git@github.com:).+") {
+        if (-not $r.EndsWith(".git")) { return ($r + ".git") }
+        return $r
+    }
+    if ($r -match "^https?://github.com/.+") {
+        if (-not $r.EndsWith(".git")) { return ($r + ".git") }
+        return $r
+    }
+    if ($r -match "^github.com/.+") {
+        $u = "https://{0}" -f $r
+        if (-not $u.EndsWith(".git")) { $u += ".git" }
+        return $u
+    }
+    if ($r -match "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$") {
+        return ("https://github.com/{0}.git" -f $r)
+    }
+    return $r
+}
+function Guess-VendorName([string]$repo) {
+    $r = $repo.Trim().TrimEnd("/")
+    if ($r.EndsWith(".git")) { $r = $r.Substring(0, $r.Length - 4) }
+    $leaf = Split-Path $r -Leaf
+    $name = Normalize-Name $leaf
+    if ([string]::IsNullOrWhiteSpace($name)) {
+        if ($repo -match "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@.+$") {
+            throw "无法从 URL 推断 vendor 名称。检测到 repo@skill 写法，请改用：<repo> --skill <name>（例如：vercel-labs/skills --skill skills/find-skills）"
+        }
+        throw "无法从 URL 推断 vendor 名称，请手动输入名称。"
+    }
+    return $name
+}
+function Invoke-Git([string[]]$GitArgs) {
+    if ($DryRun) {
+        Log ("DRYRUN git {0}" -f ($GitArgs -join " "))
+        return
+    }
+    $cmdText = ("git {0}" -f ($GitArgs -join " "))
+    $retriedAfterLockRecovery = $false
+    $canTuneNativeErrPref = ($PSVersionTable.PSVersion.Major -ge 7)
+    while ($true) {
+        Log $cmdText
+        $prevNativeErrorPref = $null
+        $prevErrorActionPreference = $ErrorActionPreference
+        try {
+            if ($canTuneNativeErrPref) {
+                $prevNativeErrorPref = $PSNativeCommandUseErrorActionPreference
+                $PSNativeCommandUseErrorActionPreference = $false
+            }
+            $ErrorActionPreference = "Continue"
+            $output = & git @GitArgs 2>&1
+            $exitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $prevErrorActionPreference
+            if ($canTuneNativeErrPref) {
+                $PSNativeCommandUseErrorActionPreference = $prevNativeErrorPref
+            }
+        }
+        if ($output) {
+            foreach ($line in @($output)) {
+                if ($null -eq $line) { continue }
+                Write-Host ([string]$line)
+            }
+        }
+        if ($exitCode -eq 0) { return }
+        if (-not $retriedAfterLockRecovery) {
+            $repaired = $false
+            if (Repair-StaleGitLockFromOutput $output) {
+                $repaired = $true
+            }
+            elseif (Repair-StaleGitLockAfterFailure (Get-Location).Path $output) {
+                $repaired = $true
+            }
+            if ($repaired) {
+                $retriedAfterLockRecovery = $true
+                continue
+            }
+        }
+        $summary = Get-GitOutputSummary $output
+        if ([string]::IsNullOrWhiteSpace($summary)) {
+            throw ("git 失败：{0}" -f $cmdText)
+        }
+        throw ("git 失败：{0}；详情：{1}" -f $cmdText, $summary)
+    }
+}
+function Invoke-GitCapture([string[]]$GitArgs) {
+    if ($DryRun) {
+        Log ("DRYRUN git {0}" -f ($GitArgs -join " "))
+        return ""
+    }
+    Log ("git {0}" -f ($GitArgs -join " "))
+    $canTuneNativeErrPref = ($PSVersionTable.PSVersion.Major -ge 7)
+    $prevNativeErrorPref = $null
+    $prevErrorActionPreference = $ErrorActionPreference
+    try {
+        if ($canTuneNativeErrPref) {
+            $prevNativeErrorPref = $PSNativeCommandUseErrorActionPreference
+            $PSNativeCommandUseErrorActionPreference = $false
+        }
+        $ErrorActionPreference = "Continue"
+        $out = & git @GitArgs 2>$null
+        if ($LASTEXITCODE -ne 0) { return $null }
+    }
+    finally {
+        $ErrorActionPreference = $prevErrorActionPreference
+        if ($canTuneNativeErrPref) {
+            $PSNativeCommandUseErrorActionPreference = $prevNativeErrorPref
+        }
+    }
+    if ($null -eq $out) { return "" }
+    return (($out | Select-Object -First 1).ToString().Trim())
+}
+function Assert-RepoReachable([string]$repo) {
+    Need (-not [string]::IsNullOrWhiteSpace($repo)) "Repo URL 不能为空。"
+    if (Test-LocalZipRepoInput $repo) {
+        return
+    }
+    $out = Invoke-GitCapture @("ls-remote", "--exit-code", $repo, "HEAD")
+    if ([string]::IsNullOrWhiteSpace($out)) {
+        throw ("仓库不可访问或不存在：{0}。请检查 owner/repo 是否正确，或确认仓库是否私有且当前 git 凭据可访问。" -f $repo)
+    }
+}
+function Test-LocalZipRepoInput([string]$repo) {
+    if ([string]::IsNullOrWhiteSpace($repo)) { return $false }
+    $r = $repo.Trim().Trim("'`"")
+    if ($r -notmatch "(?i)\.zip$") { return $false }
+    return (Test-Path -LiteralPath $r -PathType Leaf)
+}
+function Invoke-WithRetry([scriptblock]$Action, [int]$MaxAttempts = 3, [int]$DelayMs = 250) {
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            & $Action
+            return
+        }
+        catch {
+            if ($attempt -ge $MaxAttempts) { throw }
+            Start-Sleep -Milliseconds $DelayMs
+        }
+    }
+}
+function Resolve-ZipExtractionRoot([string]$extractDir) {
+    Need (Test-Path $extractDir) ("解压目录不存在：{0}" -f $extractDir)
+    $children = @(Get-ChildItem -LiteralPath $extractDir -Force -ErrorAction SilentlyContinue)
+    $dirs = @($children | Where-Object { $_.PSIsContainer })
+    $files = @($children | Where-Object { -not $_.PSIsContainer })
+    if ($files.Count -eq 0 -and $dirs.Count -eq 1) {
+        return $dirs[0].FullName
+    }
+    return $extractDir
+}
+function Ensure-RepoFromZip([string]$path, [string]$zipPath, [bool]$forceClean = $true) {
+    $zip = $zipPath.Trim().Trim("'`"")
+    Need (Test-Path -LiteralPath $zip -PathType Leaf) ("zip 文件不存在：{0}" -f $zipPath)
+
+    if (Test-Path $path) {
+        Need $forceClean ("缓存目录已存在且 update_force=false：{0}" -f $path)
+        Invoke-RemoveItemWithRetry $path -Recurse
+    }
+    EnsureDir (Split-Path $path -Parent)
+
+    $tmpName = ("_zip_{0}" -f ([Guid]::NewGuid().ToString("N").Substring(0, 8)))
+    $tmpBase = Join-Path $ImportDir $tmpName
+    $tmpZip = Join-Path $tmpBase "source.zip"
+    $extractDir = Join-Path $tmpBase "extract"
+    EnsureDir $tmpBase
+    try {
+        Log ("Copy-Item {0} -> {1}" -f $zip, $tmpZip)
+        Invoke-WithRetry { Copy-Item -LiteralPath $zip -Destination $tmpZip -Force } 3 250
+
+        Log ("Expand-Archive {0} -> {1}" -f $tmpZip, $extractDir)
+        Invoke-WithRetry { Expand-Archive -LiteralPath $tmpZip -DestinationPath $extractDir -Force } 3 250
+
+        $sourceRoot = Resolve-ZipExtractionRoot $extractDir
+        Invoke-MoveItem $sourceRoot $path
+    }
+    catch {
+        $msg = $_.Exception.Message
+        if ($msg -match "由另一进程使用|being used by another process") {
+            throw ("zip 文件当前被占用：{0}。请关闭占用进程后重试。" -f $zipPath)
+        }
+        throw
+    }
+    finally {
+        Invoke-RemoveItemWithRetry $tmpBase -Recurse -IgnoreFailure
+    }
+}
+function Parse-DefaultBranchFromSymref([string]$line) {
+    if ([string]::IsNullOrWhiteSpace($line)) { return $null }
+    $text = $line.Trim()
+    if ($text -match "^ref:\s+refs/heads/(.+?)\s+HEAD$") {
+        $branch = $Matches[1].Trim()
+        if (-not [string]::IsNullOrWhiteSpace($branch)) { return $branch }
+    }
+    return $null
+}
+function Get-RepoDefaultBranch([string]$repo) {
+    Need (-not [string]::IsNullOrWhiteSpace($repo)) "Repo URL 不能为空。"
+
+    $symrefLine = Invoke-GitCapture @("ls-remote", "--symref", $repo, "HEAD")
+    $branch = Parse-DefaultBranchFromSymref $symrefLine
+    if (-not [string]::IsNullOrWhiteSpace($branch)) { return $branch }
+
+    foreach ($fallback in @("main", "master")) {
+        $probe = Invoke-GitCapture @("ls-remote", "--exit-code", $repo, ("refs/heads/{0}" -f $fallback))
+        if (-not [string]::IsNullOrWhiteSpace($probe)) {
+            Log ("未能从 symref 解析默认分支，回退为已存在分支：{0}" -f $fallback)
+            return $fallback
+        }
+    }
+
+    Log "未能探测仓库默认分支，回退为 main。"
+    return "main"
+}
+function Get-GitHeadBranch {
+    $head = Invoke-GitCapture @("rev-parse", "--abbrev-ref", "HEAD")
+    if ([string]::IsNullOrWhiteSpace($head) -or $head -eq "HEAD") { return $null }
+    return $head
+}
+function Has-GitUpstream {
+    $up = Invoke-GitCapture @("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+    return -not [string]::IsNullOrWhiteSpace($up)
+}
+function Has-GitChanges {
+    $out = Invoke-GitCapture @("status", "--porcelain")
+    return -not [string]::IsNullOrWhiteSpace($out)
+}
+function Get-GitLockPathFromOutputLine([string]$line) {
+    if ([string]::IsNullOrWhiteSpace($line)) { return $null }
+    $m = [regex]::Match($line, "Unable to create '([^']+index\.lock)'", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if ($m.Success) { return $m.Groups[1].Value }
+    $m = [regex]::Match($line, '无法创建[“"]([^“"'']+index\.lock)[”"]')
+    if ($m.Success) { return $m.Groups[1].Value }
+    $m = [regex]::Match($line, "unable to unlink '([^']+index\.lock)'", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if ($m.Success) { return $m.Groups[1].Value }
+    $m = [regex]::Match($line, '无法取消链接[“"]([^“"'']+index\.lock)[”"]')
+    if ($m.Success) { return $m.Groups[1].Value }
+    return $null
+}
+function Test-GitIndexLockIssue($outputLines) {
+    foreach ($line in @($outputLines)) {
+        $text = [string]$line
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        if ($text -match "index\.lock|Could not write new index file|无法写入新的索引文件") {
+            return $true
+        }
+    }
+    return $false
+}
+function Get-GitOutputSummary($outputLines) {
+    $lines = @()
+    foreach ($line in @($outputLines)) {
+        $text = ([string]$line).Trim()
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        $lines += $text
+    }
+    if ($lines.Count -eq 0) { return $null }
+    return (($lines | Select-Object -Last 2) -join " | ")
+}
+function Test-GitProcessRunning {
+    try {
+        $gitProcesses = @(Get-Process -Name git,git-remote-http,git-remote-https,git-lfs,ssh,sh -ErrorAction SilentlyContinue)
+        return ($gitProcesses.Count -gt 0)
+    }
+    catch {
+        return $false
+    }
+}
+function Remove-GitLockFile([string]$lockPath) {
+    if ([string]::IsNullOrWhiteSpace($lockPath)) { return $false }
+    if (-not (Test-Path -LiteralPath $lockPath -PathType Leaf)) { return $false }
+    try {
+        [System.IO.File]::SetAttributes($lockPath, [System.IO.FileAttributes]::Normal)
+    }
+    catch {}
+    Invoke-RemoveItemWithRetry $lockPath -MaxAttempts 6 -DelayMs 200 | Out-Null
+    return (-not (Test-Path -LiteralPath $lockPath -PathType Leaf))
+}
+function Repair-StaleGitLockFromOutput($outputLines) {
+    $lockPath = $null
+    foreach ($line in @($outputLines)) {
+        $lockPath = Get-GitLockPathFromOutputLine ([string]$line)
+        if (-not [string]::IsNullOrWhiteSpace($lockPath)) { break }
+    }
+    if ([string]::IsNullOrWhiteSpace($lockPath)) { return $false }
+    if (-not (Test-Path -LiteralPath $lockPath -PathType Leaf)) { return $false }
+    Log ("检测到陈旧 Git 锁文件，已自动移除：{0}" -f $lockPath) "WARN"
+    if (Remove-GitLockFile $lockPath) { return $true }
+    if (Test-GitProcessRunning) {
+        throw ("检测到 Git 锁文件且自动移除失败（可能仍有 git 进程占用），请先等待或结束相关进程后重试：{0}" -f $lockPath)
+    }
+    throw ("检测到 Git 锁文件，但自动移除失败：{0}" -f $lockPath)
+}
+function Repair-StaleGitLockInRepo([string]$repoPath) {
+    if ([string]::IsNullOrWhiteSpace($repoPath)) { return $false }
+    $lockPath = Join-Path $repoPath ".git\index.lock"
+    if (-not (Test-Path -LiteralPath $lockPath -PathType Leaf)) { return $false }
+    Log ("检测到仓库残留 Git 锁文件，已自动移除：{0}" -f $lockPath) "WARN"
+    if (Remove-GitLockFile $lockPath) { return $true }
+    if (Test-GitProcessRunning) {
+        throw ("检测到 Git 锁文件且自动移除失败（可能仍有 git 进程占用），请先等待或结束相关进程后重试：{0}" -f $lockPath)
+    }
+    throw ("检测到 Git 锁文件，但自动移除失败：{0}" -f $lockPath)
+}
+function Confirm-CleanRepo([string]$path) {
+    if (-not (Test-Path $path)) { return $true }
+    Push-Location $path
+    try {
+        if (-not (Has-GitChanges)) { return $true }
+    }
+    finally { Pop-Location }
+    if (-not (Confirm-Action "检测到本地改动，继续将丢弃这些改动吗？" "CLEAN" -DefaultNo)) { return $false }
+    return $true
+}
+function Git-HardResetClean([bool]$forceClean) {
+    if (-not $forceClean) { return }
+    Repair-StaleGitLockInRepo (Get-Location).Path | Out-Null
+    Invoke-Git @("reset", "--hard")
+    Repair-StaleGitLockInRepo (Get-Location).Path | Out-Null
+    Invoke-Git @("clean", "-fd")
+}
+function Repair-StaleGitLockAfterFailure([string]$repoPath, $outputLines) {
+    if (-not (Test-GitIndexLockIssue $outputLines)) { return $false }
+    return (Repair-StaleGitLockInRepo $repoPath)
+}
+function Ensure-Repo([string]$path, [string]$repo, [string]$ref, [string]$sparsePath, [bool]$forceClean = $true, [bool]$confirmClean = $false, [bool]$doFetch = $true) {
+    if ($DryRun) {
+        Log ("DRYRUN Ensure-Repo {0} <= {1} ({2})" -f $path, $repo, $ref)
+        return
+    }
+    if (Test-LocalZipRepoInput $repo) {
+        Need (-not $sparsePath -or $sparsePath -eq ".") "zip 导入不支持 --sparse，请去掉 --sparse 后重试。"
+        Ensure-RepoFromZip $path $repo $forceClean
+        return
+    }
+    if (-not (Test-Path $path)) {
+        if ($sparsePath -and $sparsePath -ne ".") {
+            Invoke-Git @("clone", "--filter=blob:none", "--no-checkout", $repo, $path)
+            Push-Location $path
+            try {
+                Invoke-Git @("sparse-checkout", "init", "--cone")
+                Invoke-Git @("sparse-checkout", "set", $sparsePath)
+                Invoke-Git @("checkout", $ref)
+            }
+            finally { Pop-Location }
+        }
+        else {
+            Invoke-Git @("clone", $repo, $path)
+            Push-Location $path
+            try { Invoke-Git @("checkout", $ref) } finally { Pop-Location }
+        }
+    }
+    else {
+        Push-Location $path
+        try {
+            if ($forceClean -and $confirmClean) {
+                if (-not (Confirm-CleanRepo $path)) { throw "已取消：存在本地改动，未执行清理。" }
+            }
+            Git-HardResetClean $forceClean
+            if (-not $sparsePath -or $sparsePath -eq ".") {
+                try { Invoke-Git @("sparse-checkout", "disable") } catch {}
+            }
+            if ($sparsePath -and $sparsePath -ne ".") {
+                Invoke-Git @("sparse-checkout", "init", "--cone")
+                Invoke-Git @("sparse-checkout", "set", $sparsePath)
+            }
+            if ($doFetch) {
+                Invoke-Git @("fetch", "--all", "--tags")
+            }
+            Invoke-Git @("checkout", $ref)
+            $branch = Get-GitHeadBranch
+            if ($branch -and (Has-GitUpstream)) {
+                Invoke-Git @("pull")
+            }
+            else {
+                Log "跳过 git pull：当前为 detached HEAD 或无 upstream。"
+            }
+        }
+        finally { Pop-Location }
+    }
+}
+ 
+ function Get-CfgCountSnapshot($cfg) {
+    if ($null -eq $cfg) { return @{} }
+    return [ordered]@{
+        vendors = @($cfg.vendors).Count
+        targets = @($cfg.targets).Count
+        mappings = @($cfg.mappings).Count
+        imports = @($cfg.imports).Count
+        mcp_servers = @($cfg.mcp_servers).Count
+        mcp_targets = @($cfg.mcp_targets).Count
+    }
+}
+function Get-CfgChangeSummaryLines([string]$oldRaw, $newCfg) {
+    $keys = @("vendors", "targets", "mappings", "imports", "mcp_servers", "mcp_targets")
+    $newSnap = Get-CfgCountSnapshot $newCfg
+    $oldSnap = [ordered]@{}
+    foreach ($k in $keys) { $oldSnap[$k] = 0 }
+
+    if (-not [string]::IsNullOrWhiteSpace($oldRaw)) {
+        try {
+            $clean = $oldRaw -replace "(?m)^\s*//.*", ""
+            $oldCfg = $clean | ConvertFrom-Json
+            $oldSnap = Get-CfgCountSnapshot $oldCfg
+        }
+        catch {}
+    }
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($k in $keys) {
+        $oldVal = if ($oldSnap.Contains($k)) { [int]$oldSnap[$k] } else { 0 }
+        $newVal = if ($newSnap.Contains($k)) { [int]$newSnap[$k] } else { 0 }
+        if ($oldVal -ne $newVal) {
+            $lines.Add(("{0}: {1} -> {2}" -f $k, $oldVal, $newVal)) | Out-Null
+        }
+    }
+    return $lines.ToArray()
+}
+function Write-CfgChangeSummary([string]$oldRaw, $newCfg) {
+    $lines = Get-CfgChangeSummaryLines $oldRaw $newCfg
+    if ($lines.Count -eq 0) { return }
+    Write-Host "配置变更摘要："
+    foreach ($l in $lines) { Write-Host ("- {0}" -f $l) }
+}
+function Get-DirtyUpdateTargets($cfg) {
+    $items = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $cfg) { return @() }
+
+    foreach ($v in @($cfg.vendors)) {
+        $path = VendorPath $v.name
+        if (-not (Test-Path $path)) { continue }
+        Push-Location $path
+        try {
+            if (Has-GitChanges) {
+                $items.Add([pscustomobject]@{ kind = "vendor"; name = [string]$v.name; path = $path }) | Out-Null
+            }
+        }
+        finally { Pop-Location }
+    }
+    foreach ($i in @($cfg.imports)) {
+        if ($i.mode -ne "manual") { continue }
+        $cache = Join-Path $ImportDir $i.name
+        if (-not (Test-Path $cache)) { continue }
+        Push-Location $cache
+        try {
+            if (Has-GitChanges) {
+                $items.Add([pscustomobject]@{ kind = "import"; name = [string]$i.name; path = $cache }) | Out-Null
+            }
+        }
+        finally { Pop-Location }
+    }
+    return $items.ToArray()
+}
+function Confirm-UpdateForce($cfg, [ref]$SkipForceClean) {
+    if ($null -eq $SkipForceClean.Value) { $SkipForceClean.Value = @{} }
+    if (-not $cfg.update_force) { return $true }
+    if (-not (Confirm-Action "更新将逐项确认是否丢弃本地改动，继续吗？" "Y" -DefaultNo)) {
+        Write-Host "已取消更新。"
+        return $false
+    }
+
+    $dirty = Get-DirtyUpdateTargets $cfg
+    if ($dirty.Count -eq 0) {
+        Write-Host "未检测到 vendor/imports 本地改动，将按默认策略更新。"
+        return $true
+    }
+
+    Write-Host ("检测到 {0} 个本地改动项，将逐项确认：" -f $dirty.Count)
+    foreach ($d in $dirty) {
+        $key = "{0}|{1}" -f $d.kind, $d.name
+        $label = "{0}/{1}" -f $d.kind, $d.name
+        if (Confirm-Action ("是否在更新时丢弃该项改动：{0}" -f $label) "Y" -DefaultNo) {
+            continue
+        }
+        $SkipForceClean.Value[$key] = $true
+        Write-Host ("将保留本地改动并跳过强制清理：{0}" -f $label) -ForegroundColor Yellow
+    }
+    return $true
+}
+
+function LoadCfg() {
+    Need (Test-Path $CfgPath) "缺少配置文件：$CfgPath"
+    $raw = Get-Content $CfgPath -Raw
+    # 保守注释支持：仅移除整行 // 注释，避免误伤字符串内容。
+    $clean = $raw -replace "(?m)^\s*//.*", ""
+    try {
+        $cfg = $clean | ConvertFrom-Json
+    }
+    catch {
+        throw ("skills.json 解析失败：{0}。请检查 JSON 格式；注释仅支持整行 //。" -f $_.Exception.Message)
+    }
+    Need ($cfg.vendors -ne $null) "skills.json 缺少 vendors"
+    Need ($cfg.targets -ne $null) "skills.json 缺少 targets"
+    $cfg = Normalize-Cfg $cfg
+    $changed = $false
+    $dirMigrations = [ordered]@{
+        vendors = @()
+        imports = @()
+    }
+    Normalize-ArrayField $cfg "vendors" ([ref]$changed)
+    Normalize-ArrayField $cfg "targets" ([ref]$changed)
+    Normalize-ArrayField $cfg "mappings" ([ref]$changed)
+    Normalize-ArrayField $cfg "imports" ([ref]$changed)
+    Normalize-ArrayField $cfg "mcp_servers" ([ref]$changed)
+    Normalize-ArrayField $cfg "mcp_targets" ([ref]$changed)
+    Fix-Cfg $cfg ([ref]$changed) ([ref]$dirMigrations)
+    Assert-Cfg $cfg
+    Apply-DirectoryMigrations $dirMigrations ([ref]$changed)
+    if ($changed) {
+        Log "已自动修复 skills.json 中的无效项/重复项。" "WARN"
+        SaveCfgSafe $cfg $raw
+    }
+    return $cfg
+}
+function Normalize-Cfg($cfg) {
+    if (-not $cfg.PSObject.Properties.Match("mappings").Count) { $cfg | Add-Member -NotePropertyName mappings -NotePropertyValue @() }
+    if (-not $cfg.PSObject.Properties.Match("imports").Count) { $cfg | Add-Member -NotePropertyName imports -NotePropertyValue @() }
+    if (-not $cfg.PSObject.Properties.Match("mcp_servers").Count) { $cfg | Add-Member -NotePropertyName mcp_servers -NotePropertyValue @() }
+    if (-not $cfg.PSObject.Properties.Match("mcp_targets").Count) { $cfg | Add-Member -NotePropertyName mcp_targets -NotePropertyValue @() }
+    if (-not $cfg.PSObject.Properties.Match("update_force").Count) { $cfg | Add-Member -NotePropertyName update_force -NotePropertyValue $true }
+    if ($cfg.mappings -eq $null) { $cfg.mappings = @() }
+    if ($cfg.imports -eq $null) { $cfg.imports = @() }
+    if ($cfg.mcp_servers -eq $null) { $cfg.mcp_servers = @() }
+    if ($cfg.mcp_targets -eq $null) { $cfg.mcp_targets = @() }
+    if ($cfg.update_force -eq $null) { $cfg.update_force = $true }
+    if ([string]::IsNullOrWhiteSpace($cfg.sync_mode)) { $cfg.sync_mode = "link" }
+    return $cfg
+}
+function Normalize-ArrayField($cfg, [string]$name, [ref]$changed) {
+    if (-not $cfg.PSObject.Properties.Match($name).Count) {
+        $cfg | Add-Member -NotePropertyName $name -NotePropertyValue @()
+        $changed.Value = $true
+        Log ("缺少 {0}，已自动补为空数组。" -f $name) "WARN"
+        return
+    }
+    $val = $cfg.$name
+    if ($null -eq $val) {
+        $cfg.$name = @()
+        $changed.Value = $true
+        Log ("{0} 为空，已自动补为空数组。" -f $name) "WARN"
+        return
+    }
+    if (Assert-IsArray $val) { return }
+    if ($val -is [hashtable] -or $val -is [pscustomobject]) {
+        $cfg.$name = @($val)
+        $changed.Value = $true
+        Log ("{0} 非数组，已自动包裹为数组。" -f $name) "WARN"
+        return
+    }
+    throw ("skills.json 的 {0} 必须是数组" -f $name)
+}
+function Assert-IsArray($value) {
+    return ($value -is [System.Collections.IList]) -and -not ($value -is [string])
+}
+function Get-DuplicateValues([object[]]$items) {
+    if ($null -eq $items) { return @() }
+    return $items | Group-Object | Where-Object { $_.Count -gt 1 } | Select-Object -ExpandProperty Name
+}
+function Migrate-DirName([string]$baseDir, [string]$oldName, [string]$newName, [string]$label, [ref]$changed) {
+    if ([string]::IsNullOrWhiteSpace($oldName) -or [string]::IsNullOrWhiteSpace($newName)) { return }
+    if ($oldName -eq $newName) { return }
+    $src = Join-Path $baseDir $oldName
+    if (-not (Test-Path $src)) { return }
+    $dst = Join-Path $baseDir $newName
+    if (Test-Path $dst) {
+        Log ("{0} 目录迁移跳过：目标已存在 {1}" -f $label, $dst) "WARN"
+        return
+    }
+    Invoke-MoveItem $src $dst
+    Log ("{0} 目录已迁移：{1} -> {2}" -f $label, $oldName, $newName) "WARN"
+    $changed.Value = $true
+}
+function Apply-DirectoryMigrations($dirMigrations, [ref]$changed) {
+    if ($null -eq $dirMigrations) { return }
+    $seen = New-Object System.Collections.Generic.HashSet[string]
+
+    foreach ($v in $dirMigrations.vendors) {
+        $key = ("vendor|{0}|{1}" -f $v.old, $v.new)
+        if (-not $seen.Add($key)) { continue }
+        Migrate-DirName $VendorDir $v.old $v.new "vendor" ([ref]$changed)
+    }
+    foreach ($i in $dirMigrations.imports) {
+        $cacheKey = ("import-cache|{0}|{1}" -f $i.old, $i.new)
+        if ($seen.Add($cacheKey)) {
+            Migrate-DirName $ImportDir $i.old $i.new "import 缓存" ([ref]$changed)
+        }
+        if ($i.mode -eq "manual") {
+            $manualKey = ("manual|{0}|{1}" -f $i.old, $i.new)
+            if ($seen.Add($manualKey)) {
+                Migrate-DirName $ManualDir $i.old $i.new "manual 技能" ([ref]$changed)
+            }
+        }
+    }
+}
+function Fix-Cfg($cfg, [ref]$changed, [ref]$dirMigrations) {
+    if ($null -eq $dirMigrations.Value) {
+        $dirMigrations.Value = [ordered]@{ vendors = @(); imports = @() }
+    }
+    $vendorRenameMap = @{}
+    foreach ($v in $cfg.vendors) {
+        $old = [string]$v.name
+        $new = Normalize-Name $old
+        Need (-not [string]::IsNullOrWhiteSpace($new)) ("vendor 名称无法规范化：{0}" -f $old)
+        if ($old -ne $new) {
+            Log ("vendor 名称已自动规范化：{0} -> {1}" -f $old, $new) "WARN"
+            $v.name = $new
+            $dirMigrations.Value.vendors += [pscustomobject]@{ old = $old; new = $new }
+            $changed.Value = $true
+        }
+        $vendorRenameMap[$old] = $new
+    }
+
+    foreach ($i in $cfg.imports) {
+        if ($null -eq $i.name) { continue }
+        $oldImport = [string]$i.name
+        $newImport = Normalize-Name $oldImport
+        Need (-not [string]::IsNullOrWhiteSpace($newImport)) ("import 名称无法规范化：{0}" -f $oldImport)
+        if ($i.PSObject.Properties.Match("mode").Count -gt 0 -and $i.mode -eq "vendor") {
+            if ($vendorRenameMap.ContainsKey($oldImport)) { $newImport = $vendorRenameMap[$oldImport] }
+        }
+        if ($oldImport -ne $newImport) {
+            Log ("import 名称已自动规范化：{0} -> {1}" -f $oldImport, $newImport) "WARN"
+            $i.name = $newImport
+            $mode = if ($i.PSObject.Properties.Match("mode").Count -gt 0) { [string]$i.mode } else { "manual" }
+            $dirMigrations.Value.imports += [pscustomobject]@{ old = $oldImport; new = $newImport; mode = $mode }
+            $changed.Value = $true
+        }
+    }
+
+    foreach ($m in $cfg.mappings) {
+        if ($null -eq $m.vendor) { continue }
+        $oldVendor = [string]$m.vendor
+        $newVendor = $oldVendor
+        if ($oldVendor.ToLowerInvariant() -eq "manual") {
+            $newVendor = "manual"
+        }
+        else {
+            $normVendor = Normalize-Name $oldVendor
+            Need (-not [string]::IsNullOrWhiteSpace($normVendor)) ("mapping.vendor 无法规范化：{0}" -f $oldVendor)
+            $newVendor = $normVendor
+            if ($vendorRenameMap.ContainsKey($oldVendor)) { $newVendor = $vendorRenameMap[$oldVendor] }
+        }
+        if ($oldVendor -ne $newVendor) {
+            Log ("mapping.vendor 已自动规范化：{0} -> {1}" -f $oldVendor, $newVendor) "WARN"
+            $m.vendor = $newVendor
+            $changed.Value = $true
+        }
+    }
+
+    if (($cfg.sync_mode -ne "link") -and ($cfg.sync_mode -ne "sync")) {
+        Log ("sync_mode 无效，已重置为 link：{0}" -f $cfg.sync_mode) "WARN"
+        $cfg.sync_mode = "link"
+        $changed.Value = $true
+    }
+
+    $dedupVendors = @()
+    $seenVendors = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($v in $cfg.vendors) {
+        if ($seenVendors.Add($v.name)) {
+            $dedupVendors += $v
+        }
+        else {
+            Log ("发现重复 vendor，已移除：{0}" -f $v.name) "WARN"
+            $changed.Value = $true
+        }
+    }
+    $cfg.vendors = $dedupVendors
+
+    $dedupImports = @()
+    $seenImports = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($i in $cfg.imports) {
+        if ($seenImports.Add($i.name)) {
+            if ($i.PSObject.Properties.Match("mode").Count -gt 0) {
+                if ($i.mode -ne "manual" -and $i.mode -ne "vendor") {
+                    Log ("import mode 无效，已改为 manual：{0}" -f $i.name) "WARN"
+                    $i.mode = "manual"
+                    $changed.Value = $true
+                }
+            }
+            $dedupImports += $i
+        }
+        else {
+            Log ("发现重复 import，已移除：{0}" -f $i.name) "WARN"
+            $changed.Value = $true
+        }
+    }
+    $cfg.imports = $dedupImports
+
+    $dedupTargets = @()
+    $seenTargets = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($t in $cfg.targets) {
+        if ($seenTargets.Add($t.path)) {
+            $dedupTargets += $t
+        }
+        else {
+            Log ("发现重复 target，已移除：{0}" -f $t.path) "WARN"
+            $changed.Value = $true
+        }
+    }
+    $cfg.targets = $dedupTargets
+
+    $dedupMcpServers = @()
+    $seenMcpServers = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($s in $cfg.mcp_servers) {
+        if ($null -eq $s) { continue }
+        $rawName = [string]$s.name
+        $normName = Normalize-Name $rawName
+        Need (-not [string]::IsNullOrWhiteSpace($normName)) ("mcp_server.name 无效：{0}" -f $rawName)
+        if ($rawName -ne $normName) {
+            Log ("MCP 服务名已自动规范化：{0} -> {1}" -f $rawName, $normName) "WARN"
+            $s.name = $normName
+            $changed.Value = $true
+        }
+        if ($s.PSObject.Properties.Match("transport").Count -eq 0 -or [string]::IsNullOrWhiteSpace([string]$s.transport)) {
+            $s | Add-Member -NotePropertyName transport -NotePropertyValue "stdio" -Force
+            $changed.Value = $true
+        }
+        else {
+            $s.transport = ([string]$s.transport).ToLowerInvariant()
+        }
+
+        if ($seenMcpServers.Add($s.name)) {
+            $dedupMcpServers += $s
+        }
+        else {
+            Log ("发现重复 mcp_server，已移除：{0}" -f $s.name) "WARN"
+            $changed.Value = $true
+        }
+    }
+    $cfg.mcp_servers = $dedupMcpServers
+
+    $dedupMcpTargets = @()
+    $seenMcpTargets = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($mt in $cfg.mcp_targets) {
+        if ($mt -is [string]) {
+            $pathValue = [string]$mt
+            if (-not [string]::IsNullOrWhiteSpace($pathValue) -and $seenMcpTargets.Add($pathValue)) {
+                $dedupMcpTargets += $pathValue
+            }
+            continue
+        }
+        if ($null -eq $mt -or $mt.PSObject.Properties.Match("path").Count -eq 0) { continue }
+        $pathValue = [string]$mt.path
+        if ([string]::IsNullOrWhiteSpace($pathValue)) { continue }
+        if ($seenMcpTargets.Add($pathValue)) {
+            $dedupMcpTargets += $mt
+        }
+        else {
+            Log ("发现重复 mcp_target，已移除：{0}" -f $pathValue) "WARN"
+            $changed.Value = $true
+        }
+    }
+    $cfg.mcp_targets = $dedupMcpTargets
+
+    $vendorNames = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($v in $cfg.vendors) { $vendorNames.Add($v.name) | Out-Null }
+    $vendorNames.Add("manual") | Out-Null
+
+    $dedupMappings = @()
+    $seenMappings = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($m in $cfg.mappings) {
+        $key = "$($m.vendor)|$($m.from)|$($m.to)"
+        if (-not $vendorNames.Contains($m.vendor)) {
+            Log ("mapping 引用了不存在的 vendor，已移除：{0}" -f $m.vendor) "WARN"
+            $changed.Value = $true
+            continue
+        }
+        if ($seenMappings.Add($key)) {
+            $dedupMappings += $m
+        }
+        else {
+            Log ("发现重复 mapping，已移除：{0}" -f $key) "WARN"
+            $changed.Value = $true
+        }
+    }
+    $cfg.mappings = $dedupMappings
+}
+
+function Match-VendorByRepo($cfg, [string]$repo) {
+    if ([string]::IsNullOrWhiteSpace($repo)) { return $null }
+    $normRepo = Normalize-RepoUrl $repo
+    foreach ($v in $cfg.vendors) {
+        $vRepo = Normalize-RepoUrl $v.repo
+        if ($vRepo -eq $normRepo) { return $v }
+    }
+    return $null
+}
+
+function Migrate-ManualToVendor($cfg, [string]$vendorName, [string]$repo) {
+    $normRepo = Normalize-RepoUrl $repo
+    $migratedCount = 0
+    
+    # 1. Start by finding manual imports that match this repo
+    # Note: 'manual' items in imports list might not strictly have 'repo' field populated correctly in all legacy cases,
+    # but new ones do. We also check if we can infer it.
+    
+    $manualImports = @()
+    foreach ($i in $cfg.imports) {
+        if ($i.mode -eq "manual" -and (Normalize-RepoUrl $i.repo) -eq $normRepo) {
+            $manualImports += $i
+        }
+    }
+
+    # Migrate in a single pass to avoid mutating import names before legacy cleanup.
+    $importsToRemove = @()
+    foreach ($imp in $manualImports) {
+        $oldName = $imp.name
+        $skillPath = $imp.skill
+        if ([string]::IsNullOrWhiteSpace($skillPath)) { $skillPath = "." }
+        
+        $vPath = VendorPath $vendorName
+        $src = if ($skillPath -eq ".") { $vPath } else { Join-Path $vPath $skillPath }
+        
+        if (Test-IsSkillDir $src) {
+            $targetSuffix = if ($skillPath -eq ".") { $vendorName } else { $skillPath }
+            $targetName = Make-TargetName $vendorName $targetSuffix
+            Ensure-ImportVendorMapping $cfg $vendorName $skillPath $targetName
+             
+            # Add vendor-mode import
+            $newImport = @{ name = $vendorName; repo = $repo; ref = $imp.ref; skill = $skillPath; mode = "vendor"; sparse = $imp.sparse }
+            Upsert-Import $cfg $newImport
+             
+            $importsToRemove += $imp
+
+            $migratedCount++
+            Log ("已迁移手动技能：manual/{0} -> vendor/{1}/{2}" -f $oldName, $vendorName, $skillPath)
+             
+            # Remove Manual Directory
+            $manualDirPath = Join-Path $ManualDir $oldName
+            if (Test-Path $manualDirPath) {
+                Invoke-RemoveItem $manualDirPath -Recurse
+            }
+        }
+    }
+    
+    # Remove old manual imports
+    $cfg.imports = $cfg.imports | Where-Object { $importsToRemove -notcontains $_ }
+    
+    return $migratedCount
+}
+
+function Optimize-Imports($cfg) {
+    if ($null -eq $cfg) { return }
+    $total = 0
+    foreach ($v in $cfg.vendors) {
+        if (-not [string]::IsNullOrWhiteSpace($v.repo)) {
+            $total += Migrate-ManualToVendor $cfg $v.name $v.repo
+        }
+    }
+    if ($total -gt 0) {
+        Log ("优化完成：共自动迁移 {0} 个手动技能到对应 Vendor。" -f $total) "WARN"
+    }
+}
+
+function Assert-Cfg($cfg) {
+    Need (Assert-IsArray $cfg.vendors) "skills.json 的 vendors 必须是数组"
+    Need (Assert-IsArray $cfg.targets) "skills.json 的 targets 必须是数组"
+    Need (Assert-IsArray $cfg.mappings) "skills.json 的 mappings 必须是数组"
+    Need (Assert-IsArray $cfg.imports) "skills.json 的 imports 必须是数组"
+    Need (Assert-IsArray $cfg.mcp_servers) "skills.json 的 mcp_servers 必须是数组"
+    Need (Assert-IsArray $cfg.mcp_targets) "skills.json 的 mcp_targets 必须是数组"
+    foreach ($v in $cfg.vendors) {
+        Need (-not [string]::IsNullOrWhiteSpace($v.name)) "vendor 缺少 name"
+        Need (-not [string]::IsNullOrWhiteSpace($v.repo)) "vendor $($v.name) 缺少 repo"
+    }
+    foreach ($t in $cfg.targets) {
+        Need (-not [string]::IsNullOrWhiteSpace($t.path)) "target 缺少 path"
+    }
+    foreach ($m in $cfg.mappings) {
+        Need (-not [string]::IsNullOrWhiteSpace($m.vendor)) "mapping 缺少 vendor"
+        Need (-not [string]::IsNullOrWhiteSpace($m.from)) "mapping 缺少 from"
+        Need (-not [string]::IsNullOrWhiteSpace($m.to)) "mapping 缺少 to"
+        Need (Test-SafeRelativePath $m.from -AllowDot) ("mapping.from 非法（仅允许相对路径，禁止 .. 与绝对路径）：{0}" -f $m.from)
+        Need (Test-SafeRelativePath $m.to) ("mapping.to 非法（仅允许相对路径，禁止 .. 与绝对路径）：{0}" -f $m.to)
+    }
+    foreach ($i in $cfg.imports) {
+        Need (-not [string]::IsNullOrWhiteSpace($i.name)) "import 缺少 name"
+        Need (-not [string]::IsNullOrWhiteSpace($i.repo)) "import 缺少 repo"
+        $importSkill = Normalize-SkillPath ([string]$i.skill)
+        Need (Test-SafeRelativePath $importSkill -AllowDot) ("import.skill 非法（仅允许相对路径，禁止 .. 与绝对路径）：{0}" -f $i.skill)
+    }
+    foreach ($s in $cfg.mcp_servers) {
+        Need (-not [string]::IsNullOrWhiteSpace($s.name)) "mcp_server 缺少 name"
+        $transport = if ($s.PSObject.Properties.Match("transport").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$s.transport)) { [string]$s.transport } else { "stdio" }
+        Need (($transport -eq "stdio") -or ($transport -eq "sse") -or ($transport -eq "http")) ("mcp_server.transport 仅支持 stdio/sse/http：{0}" -f $s.name)
+        if ($transport -eq "stdio") {
+            Need ($s.PSObject.Properties.Match("command").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$s.command)) ("mcp_server(stdio) 缺少 command：{0}" -f $s.name)
+        }
+        else {
+            Need ($s.PSObject.Properties.Match("url").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$s.url)) ("mcp_server({0}) 缺少 url：{1}" -f $transport, $s.name)
+        }
+    }
+    foreach ($mt in $cfg.mcp_targets) {
+        if ($mt -is [string]) {
+            Need (-not [string]::IsNullOrWhiteSpace([string]$mt)) "mcp_targets 不能包含空字符串"
+            continue
+        }
+        Need ($mt.PSObject.Properties.Match("path").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$mt.path)) "mcp_targets 项缺少 path"
+    }
+
+    $mode = $cfg.sync_mode
+    Need (($mode -eq "link") -or ($mode -eq "sync")) "sync_mode 仅支持 link 或 sync"
+
+    $dupVendors = Get-DuplicateValues ($cfg.vendors | ForEach-Object { $_.name })
+    Need ($dupVendors.Count -eq 0) ("vendor 名称重复：{0}" -f ($dupVendors -join ", "))
+
+    $dupImports = Get-DuplicateValues ($cfg.imports | ForEach-Object { $_.name })
+    Need ($dupImports.Count -eq 0) ("import 名称重复：{0}" -f ($dupImports -join ", "))
+
+    $dupTargets = Get-DuplicateValues ($cfg.targets | ForEach-Object { $_.path })
+    if ($dupTargets.Count -gt 0) {
+        Log ("目标路径重复（建议去重）：{0}" -f ($dupTargets -join ", ")) "WARN"
+    }
+
+    $dupTo = Get-DuplicateValues ($cfg.mappings | ForEach-Object { $_.to })
+    if ($dupTo.Count -gt 0) {
+        Log ("mappings 的 to 重复（可能覆盖）：{0}" -f ($dupTo -join ", ")) "WARN"
+    }
+
+    $vendorNames = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($v in $cfg.vendors) { $vendorNames.Add($v.name) | Out-Null }
+    $vendorNames.Add("manual") | Out-Null
+    foreach ($m in $cfg.mappings) {
+        Need ($vendorNames.Contains($m.vendor)) ("mapping 引用了不存在的 vendor：{0}" -f $m.vendor)
+    }
+
+    foreach ($i in $cfg.imports) {
+        if ($i.PSObject.Properties.Match("mode").Count -gt 0) {
+            Need (($i.mode -eq "manual") -or ($i.mode -eq "vendor")) ("import mode 仅支持 manual 或 vendor：{0}" -f $i.name)
+        }
+    }
+}
+function SaveCfg($cfg) {
+    if (-not $DryRun) {
+        $oldRaw = if (Test-Path $CfgPath) { Get-Content $CfgPath -Raw } else { "" }
+        Write-CfgChangeSummary $oldRaw $cfg
+        $json = $cfg | ConvertTo-Json -Depth 50
+        Set-ContentUtf8 $CfgPath $json
+    }
+}
+function SaveCfgSafe($cfg, [string]$rawBackup) {
+    if ($DryRun) { return }
+    try {
+        $oldRaw = $rawBackup
+        if ([string]::IsNullOrWhiteSpace($oldRaw) -and (Test-Path $CfgPath)) {
+            $oldRaw = Get-Content $CfgPath -Raw
+        }
+        Write-CfgChangeSummary $oldRaw $cfg
+        $json = $cfg | ConvertTo-Json -Depth 50
+        Set-ContentUtf8 $CfgPath $json
+    }
+    catch {
+        if ($rawBackup) {
+            Set-ContentUtf8 $CfgPath $rawBackup
+        }
+        throw
+    }
+}
+
+function Get-LockPath {
+    return (Join-Path $Root "skills.lock.json")
+}
+
+function Get-RepoHeadCommit([string]$repoPath) {
+    Need (-not [string]::IsNullOrWhiteSpace($repoPath)) "repoPath 不能为空"
+    Need (Test-Path $repoPath) ("仓库目录不存在：{0}" -f $repoPath)
+    Push-Location $repoPath
+    try {
+        $head = Invoke-GitCapture @("rev-parse", "HEAD")
+        Need (-not [string]::IsNullOrWhiteSpace($head)) ("无法读取仓库 HEAD：{0}" -f $repoPath)
+        return $head
+    }
+    finally { Pop-Location }
+}
+
+function Get-VendorSparsePaths($cfg, [string]$vendorName) {
+    $paths = @()
+    foreach ($i in @($cfg.imports)) {
+        if ($i.mode -ne "vendor") { continue }
+        if ($i.name -ne $vendorName) { continue }
+        if (-not $i.sparse) { continue }
+        $p = To-GitPath (Normalize-SkillPath $i.skill)
+        if ($p -and $p -ne ".") { $paths += $p }
+    }
+    foreach ($m in @($cfg.mappings)) {
+        if ($m.vendor -ne $vendorName) { continue }
+        $p = To-GitPath (Normalize-SkillPath $m.from)
+        if ($p -and $p -ne ".") { $paths += $p }
+    }
+    return @($paths | Select-Object -Unique)
+}
+
+function New-LockData($cfg) {
+    if ($null -eq $cfg) { $cfg = LoadCfg }
+    $vendors = @()
+    foreach ($v in @($cfg.vendors | Sort-Object name)) {
+        $path = VendorPath $v.name
+        Need (Test-Path $path) ("生成锁文件失败：缺少 vendor 目录 {0}" -f $path)
+        $vendors += [ordered]@{
+            name = [string]($v.name)
+            repo = [string]($v.repo)
+            ref = if ([string]::IsNullOrWhiteSpace([string]($v.ref))) { "main" } else { [string]($v.ref) }
+            commit = Get-RepoHeadCommit $path
+        }
+    }
+
+    $imports = @()
+    foreach ($i in @($cfg.imports | Sort-Object @{Expression="name"}, @{Expression="mode"})) {
+        $mode = if ($i.PSObject.Properties.Match("mode").Count -gt 0) { [string]($i.mode) } else { "manual" }
+        $repoPath = if ($mode -eq "vendor") { VendorPath ([string]($i.name)) } else { Join-Path $ImportDir ([string]($i.name)) }
+        Need (Test-Path $repoPath) ("生成锁文件失败：缺少 import 缓存目录 {0}" -f $repoPath)
+        $imports += [ordered]@{
+            name = [string]($i.name)
+            mode = $mode
+            repo = [string]($i.repo)
+            ref = if ([string]::IsNullOrWhiteSpace([string]($i.ref))) { "main" } else { [string]($i.ref) }
+            skill = Normalize-SkillPath ([string]($i.skill))
+            sparse = [bool]$i.sparse
+            commit = Get-RepoHeadCommit $repoPath
+        }
+    }
+
+    return [ordered]@{
+        version = 1
+        generated_at = (Get-Date).ToUniversalTime().ToString("o")
+        vendors = $vendors
+        imports = $imports
+    }
+}
+
+function Save-LockData($cfg = $null) {
+    if ($null -eq $cfg) { $cfg = LoadCfg }
+    $lock = New-LockData $cfg
+    if ($DryRun) {
+        Write-Host ("DRYRUN：将写入锁文件 -> {0}" -f (Get-LockPath))
+        return $lock
+    }
+    $json = $lock | ConvertTo-Json -Depth 50
+    Set-ContentUtf8 (Get-LockPath) $json
+    return $lock
+}
+
+function Load-LockData {
+    $path = Get-LockPath
+    Need (Test-Path $path) ("缺少锁文件：{0}。请先执行 .\skills.ps1 锁定" -f $path)
+    $raw = Get-Content $path -Raw
+    Need (-not [string]::IsNullOrWhiteSpace($raw)) ("锁文件为空：{0}" -f $path)
+    try {
+        $lock = $raw | ConvertFrom-Json
+    }
+    catch {
+        throw ("锁文件解析失败：{0}" -f $_.Exception.Message)
+    }
+    Need ($lock.PSObject.Properties.Match("version").Count -gt 0) "锁文件缺少 version"
+    Need ($lock.version -eq 1) ("不支持的锁文件版本：{0}" -f $lock.version)
+    Need ($lock.PSObject.Properties.Match("vendors").Count -gt 0 -and (Assert-IsArray $lock.vendors)) "锁文件 vendors 无效"
+    Need ($lock.PSObject.Properties.Match("imports").Count -gt 0 -and (Assert-IsArray $lock.imports)) "锁文件 imports 无效"
+    return $lock
+}
+
+function Assert-LockMatchesCfg($cfg, $lock) {
+    Need ($null -ne $cfg) "cfg 不能为空"
+    Need ($null -ne $lock) "lock 不能为空"
+
+    $vendorExpected = @{}
+    foreach ($v in @($cfg.vendors)) {
+        $vendorExpected[[string]($v.name)] = [ordered]@{
+            repo = [string]($v.repo)
+            ref = if ([string]::IsNullOrWhiteSpace([string]($v.ref))) { "main" } else { [string]($v.ref) }
+        }
+    }
+    $vendorActual = @{}
+    foreach ($v in @($lock.vendors)) {
+        $vendorActual[[string]($v.name)] = [ordered]@{
+            repo = [string]($v.repo)
+            ref = if ([string]::IsNullOrWhiteSpace([string]($v.ref))) { "main" } else { [string]($v.ref) }
+        }
+    }
+    $expVendorJson = ($vendorExpected | ConvertTo-Json -Depth 20 -Compress)
+    $actVendorJson = ($vendorActual | ConvertTo-Json -Depth 20 -Compress)
+    Need ($expVendorJson -eq $actVendorJson) "锁文件与当前 vendors 配置不一致，请重新执行 .\skills.ps1 锁定"
+
+    $importExpected = @{}
+    foreach ($i in @($cfg.imports)) {
+        $mode = if ($i.PSObject.Properties.Match("mode").Count -gt 0) { [string]($i.mode) } else { "manual" }
+        $key = ("{0}|{1}" -f $mode, [string]($i.name))
+        $importExpected[$key] = [ordered]@{
+            repo = [string]($i.repo)
+            ref = if ([string]::IsNullOrWhiteSpace([string]($i.ref))) { "main" } else { [string]($i.ref) }
+            skill = Normalize-SkillPath ([string]($i.skill))
+            sparse = [bool]$i.sparse
+        }
+    }
+    $importActual = @{}
+    foreach ($i in @($lock.imports)) {
+        $mode = if ([string]::IsNullOrWhiteSpace([string]($i.mode))) { "manual" } else { [string]($i.mode) }
+        $key = ("{0}|{1}" -f $mode, [string]($i.name))
+        $importActual[$key] = [ordered]@{
+            repo = [string]($i.repo)
+            ref = if ([string]::IsNullOrWhiteSpace([string]($i.ref))) { "main" } else { [string]($i.ref) }
+            skill = Normalize-SkillPath ([string]($i.skill))
+            sparse = [bool]$i.sparse
+        }
+    }
+    $expImportJson = ($importExpected | ConvertTo-Json -Depth 20 -Compress)
+    $actImportJson = ($importActual | ConvertTo-Json -Depth 20 -Compress)
+    Need ($expImportJson -eq $actImportJson) "锁文件与当前 imports 配置不一致，请重新执行 .\skills.ps1 锁定"
+}
+
+function Assert-LockMatchesWorkspace($cfg, $lock) {
+    foreach ($v in @($lock.vendors)) {
+        $path = VendorPath ([string]($v.name))
+        $actual = Get-RepoHeadCommit $path
+        Need ($actual -eq [string]($v.commit)) ("vendor 提交不匹配：{0}（lock={1}, actual={2}）" -f [string]($v.name), [string]($v.commit), [string]$actual)
+    }
+    foreach ($i in @($lock.imports)) {
+        $mode = if ([string]::IsNullOrWhiteSpace([string]($i.mode))) { "manual" } else { [string]($i.mode) }
+        $path = if ($mode -eq "vendor") { VendorPath ([string]($i.name)) } else { Join-Path $ImportDir ([string]($i.name)) }
+        $actual = Get-RepoHeadCommit $path
+        Need ($actual -eq [string]($i.commit)) ("import 提交不匹配：{0}/{1}（lock={2}, actual={3}）" -f $mode, [string]($i.name), [string]($i.commit), [string]$actual)
+    }
+}
+
+function Ensure-LockedState($cfg = $null) {
+    if ($null -eq $cfg) { $cfg = LoadCfg }
+    $lock = Load-LockData
+    Assert-LockMatchesCfg $cfg $lock
+    Assert-LockMatchesWorkspace $cfg $lock
+    return $lock
+}
+
+function Apply-LockToWorkspace($cfg, $lock) {
+    foreach ($v in @($lock.vendors)) {
+        $name = [string]($v.name)
+        $repo = [string]($v.repo)
+        $ref = if ([string]::IsNullOrWhiteSpace([string]($v.ref))) { "main" } else { [string]($v.ref) }
+        $commit = [string]($v.commit)
+        $path = VendorPath $name
+        Ensure-Repo $path $repo $ref $null ([bool]$cfg.update_force) $false $true
+        Push-Location $path
+        try {
+            $sparsePaths = Get-VendorSparsePaths $cfg $name
+            if ($sparsePaths.Count -gt 0) {
+                Invoke-Git @("sparse-checkout", "init", "--cone")
+                Invoke-Git (@("sparse-checkout", "set") + $sparsePaths)
+            }
+            else {
+                try { Invoke-Git @("sparse-checkout", "disable") } catch {}
+            }
+            Invoke-Git @("checkout", $commit)
+        }
+        finally { Pop-Location }
+    }
+
+    foreach ($i in @($lock.imports)) {
+        $mode = if ([string]::IsNullOrWhiteSpace([string]($i.mode))) { "manual" } else { [string]($i.mode) }
+        if ($mode -ne "manual") { continue }
+        $name = [string]($i.name)
+        $repo = [string]($i.repo)
+        $ref = if ([string]::IsNullOrWhiteSpace([string]($i.ref))) { "main" } else { [string]($i.ref) }
+        $skillPath = Normalize-SkillPath ([string]($i.skill))
+        $gitSkillPath = To-GitPath $skillPath
+        $sparse = [bool]$i.sparse
+        if ($gitSkillPath -eq "." -and $sparse) { $sparse = $false }
+        $sparsePath = if ($sparse) { $gitSkillPath } else { $null }
+        $path = Join-Path $ImportDir $name
+        Ensure-Repo $path $repo $ref $sparsePath ([bool]$cfg.update_force) $false $true
+        Push-Location $path
+        try { Invoke-Git @("checkout", [string]($i.commit)) }
+        finally { Pop-Location }
+    }
+    Clear-SkillsCache
+}
+
+function 锁定 {
+    $cfg = LoadCfg
+    $lock = Save-LockData $cfg
+    Write-Host ("已写入锁文件：{0}" -f (Get-LockPath))
+    Write-Host ("锁定摘要：vendors={0}, imports={1}" -f @($lock.vendors).Count, @($lock.imports).Count)
+}
+ 
+ function Get-PerfSummaryFromLogLines([string[]]$lines, [int]$RecentPerMetric = 3) {
+    $events = @()
+    if ($null -eq $lines) { return @() }
+    foreach ($line in $lines) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        try {
+            $record = $line | ConvertFrom-Json
+        }
+        catch { continue }
+        if ($null -eq $record -or $null -eq $record.data) { continue }
+        if (-not $record.data.PSObject.Properties.Match("metric").Count) { continue }
+        if (-not $record.data.PSObject.Properties.Match("duration_ms").Count) { continue }
+        $metric = [string]$record.data.metric
+        if ([string]::IsNullOrWhiteSpace($metric)) { continue }
+        $duration = 0
+        try { $duration = [int]$record.data.duration_ms } catch { continue }
+        if ($duration -lt 0) { continue }
+        $events += [pscustomobject]@{
+            metric = $metric
+            duration_ms = $duration
+            ts = [string]$record.ts
+        }
+    }
+    if ($events.Count -eq 0) { return @() }
+
+    $summary = @()
+    $groups = $events | Group-Object metric
+    foreach ($g in $groups) {
+        $recent = $g.Group | Select-Object -Last $RecentPerMetric
+        if ($recent.Count -eq 0) { continue }
+        $avg = [math]::Round((($recent | Measure-Object -Property duration_ms -Average).Average), 0)
+        $last = ($recent | Select-Object -Last 1)
+        $summary += [pscustomobject]@{
+            metric = $g.Name
+            samples = @($recent).Count
+            avg_ms = [int]$avg
+            last_ms = [int]$last.duration_ms
+            last_ts = [string]$last.ts
+        }
+    }
+    return ($summary | Sort-Object metric)
+}
+
+function Parse-DoctorArgs([string[]]$tokens) {
+    $opts = [ordered]@{
+        json = $false
+        fix = $false
+        dry_run_fix = $false
+        strict = $false
+        threshold_ms = 5000
+    }
+    if ($null -eq $tokens) { return [pscustomobject]$opts }
+
+    for ($i = 0; $i -lt $tokens.Count; $i++) {
+        $t = [string]$tokens[$i]
+        if ([string]::IsNullOrWhiteSpace($t)) { continue }
+        $k = $t.Trim().ToLowerInvariant()
+        switch ($k) {
+            "--json" { $opts.json = $true; continue }
+            "-j" { $opts.json = $true; continue }
+            "--fix" { $opts.fix = $true; continue }
+            "--dry-run-fix" { $opts.dry_run_fix = $true; continue }
+            "--strict" { $opts.strict = $true; continue }
+            "--threshold-ms" {
+                Need ($i + 1 -lt $tokens.Count) "参数缺少值：--threshold-ms"
+                $raw = [string]$tokens[++$i]
+                $n = 0
+                Need ([int]::TryParse($raw, [ref]$n)) ("--threshold-ms 必须是整数：{0}" -f $raw)
+                Need ($n -gt 0) "--threshold-ms 必须大于 0"
+                $opts.threshold_ms = $n
+                continue
+            }
+            default { throw ("未知 doctor 参数：{0}" -f $t) }
+        }
+    }
+    return [pscustomobject]$opts
+}
+
+function Apply-DoctorFixes($cfg, [switch]$Preview) {
+    $result = [ordered]@{
+        changed = $false
+        applied = @()
+    }
+    if ($null -eq $cfg) { return [pscustomobject]$result }
+
+    # low-risk fix #1: dedupe duplicate targets.path (keep first)
+    if ($cfg.PSObject.Properties.Match("targets").Count -gt 0 -and $cfg.targets -ne $null) {
+        $seenTarget = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+        $newTargets = @()
+        foreach ($t in @($cfg.targets)) {
+            if ($null -eq $t) { continue }
+            $path = if ($t.PSObject.Properties.Match("path").Count -gt 0) { [string]$t.path } else { "" }
+            if ([string]::IsNullOrWhiteSpace($path)) {
+                $newTargets += $t
+                continue
+            }
+            $norm = $path.Trim()
+            if ($seenTarget.Add($norm)) {
+                $newTargets += $t
+            }
+            else {
+                $result.applied += ("删除重复 targets.path：{0}" -f $norm)
+                $result.changed = $true
+            }
+        }
+        if ($result.changed -and -not $Preview) { $cfg.targets = @($newTargets) }
+    }
+
+    # low-risk fix #2: remove mappings referencing missing vendor
+    if ($cfg.PSObject.Properties.Match("mappings").Count -gt 0 -and $cfg.mappings -ne $null) {
+        $vendorSet = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+        $vendorSet.Add("manual") | Out-Null
+        $vendorSet.Add("overrides") | Out-Null
+        if ($cfg.PSObject.Properties.Match("vendors").Count -gt 0 -and $cfg.vendors -ne $null) {
+            foreach ($v in @($cfg.vendors)) {
+                if ($null -eq $v) { continue }
+                $name = if ($v.PSObject.Properties.Match("name").Count -gt 0) { [string]$v.name } else { "" }
+                if ([string]::IsNullOrWhiteSpace($name)) { continue }
+                $vendorSet.Add($name) | Out-Null
+            }
+        }
+
+        $newMappings = @()
+        foreach ($m in @($cfg.mappings)) {
+            if ($null -eq $m) { continue }
+            $vendor = if ($m.PSObject.Properties.Match("vendor").Count -gt 0) { [string]$m.vendor } else { "" }
+            if ([string]::IsNullOrWhiteSpace($vendor) -or $vendorSet.Contains($vendor)) {
+                $newMappings += $m
+                continue
+            }
+            $from = if ($m.PSObject.Properties.Match("from").Count -gt 0) { [string]$m.from } else { "" }
+            $to = if ($m.PSObject.Properties.Match("to").Count -gt 0) { [string]$m.to } else { "" }
+            $result.applied += ("删除无效 mapping：vendor={0}, from={1}, to={2}" -f $vendor, $from, $to)
+            $result.changed = $true
+        }
+        if ($result.changed -and -not $Preview) { $cfg.mappings = @($newMappings) }
+    }
+
+    $result.applied = @($result.applied)
+    return [pscustomobject]$result
+}
+
+function Get-PerfAnomalyItems($summary, [int]$WarnThresholdMs = 5000, [int]$MinSamples = 3) {
+    $items = @()
+    if ($null -eq $summary) { return @() }
+    foreach ($p in $summary) {
+        if ($null -eq $p) { continue }
+        $last = 0
+        $avg = 0
+        $samples = 0
+        try { $last = [int]$p.last_ms } catch { continue }
+        try { $avg = [int]$p.avg_ms } catch { continue }
+        try { $samples = [int]$p.samples } catch { $samples = 0 }
+        if ($samples -lt $MinSamples) { continue }
+        if ($last -ge $WarnThresholdMs -or $avg -ge $WarnThresholdMs) {
+            $items += ("{0}: last={1}ms avg={2}ms threshold={3}ms" -f [string]$p.metric, $last, $avg, $WarnThresholdMs)
+        }
+    }
+    return ,@($items)
+}
+
+function Get-DoctorConfigRisks($cfg) {
+    $risks = @()
+    if ($null -eq $cfg) { return @() }
+
+    $targetPaths = @()
+    if ($cfg.PSObject.Properties.Match("targets").Count -gt 0 -and $cfg.targets -ne $null) {
+        foreach ($t in $cfg.targets) {
+            if ($null -eq $t) { continue }
+            $path = if ($t.PSObject.Properties.Match("path").Count -gt 0) { [string]$t.path } else { "" }
+            if ([string]::IsNullOrWhiteSpace($path)) { continue }
+            $targetPaths += $path.Trim()
+        }
+    }
+    $dupTargets = @($targetPaths | Group-Object | Where-Object { $_.Count -gt 1 } | ForEach-Object { $_.Name })
+    if ($dupTargets.Count -gt 0) {
+        $risks += ("检测到重复 targets.path：{0}" -f ($dupTargets -join ", "))
+    }
+
+    $mappingTo = @()
+    if ($cfg.PSObject.Properties.Match("mappings").Count -gt 0 -and $cfg.mappings -ne $null) {
+        foreach ($m in $cfg.mappings) {
+            if ($null -eq $m) { continue }
+            $to = if ($m.PSObject.Properties.Match("to").Count -gt 0) { [string]$m.to } else { "" }
+            if ([string]::IsNullOrWhiteSpace($to)) { continue }
+            $mappingTo += $to.Trim()
+        }
+    }
+    $dupTo = @($mappingTo | Group-Object | Where-Object { $_.Count -gt 1 } | ForEach-Object { $_.Name })
+    if ($dupTo.Count -gt 0) {
+        $risks += ("检测到重复 mappings.to（可能互相覆盖）：{0}" -f ($dupTo -join ", "))
+    }
+
+    $vendorSet = New-Object System.Collections.Generic.HashSet[string]
+    $vendorSet.Add("manual") | Out-Null
+    $vendorSet.Add("overrides") | Out-Null
+    if ($cfg.PSObject.Properties.Match("vendors").Count -gt 0 -and $cfg.vendors -ne $null) {
+        foreach ($v in $cfg.vendors) {
+            if ($null -eq $v) { continue }
+            $name = if ($v.PSObject.Properties.Match("name").Count -gt 0) { [string]$v.name } else { "" }
+            if ([string]::IsNullOrWhiteSpace($name)) { continue }
+            $vendorSet.Add($name) | Out-Null
+        }
+    }
+    if ($cfg.PSObject.Properties.Match("mappings").Count -gt 0 -and $cfg.mappings -ne $null) {
+        foreach ($m in $cfg.mappings) {
+            if ($null -eq $m) { continue }
+            $vendor = if ($m.PSObject.Properties.Match("vendor").Count -gt 0) { [string]$m.vendor } else { "" }
+            if ([string]::IsNullOrWhiteSpace($vendor)) { continue }
+            if (-not $vendorSet.Contains($vendor)) {
+                $from = if ($m.PSObject.Properties.Match("from").Count -gt 0) { [string]$m.from } else { "" }
+                $to = if ($m.PSObject.Properties.Match("to").Count -gt 0) { [string]$m.to } else { "" }
+                $risks += ("mapping 引用了不存在的 vendor：{0} (from={1}, to={2})" -f $vendor, $from, $to)
+            }
+        }
+    }
+
+    return @($risks)
+}
+
+function Invoke-Doctor([string[]]$tokens = @()) {
+    $opts = Parse-DoctorArgs $tokens
+    if (-not $opts.json) {
+        Write-Host "=== Skills Manager Doctor ===" -ForegroundColor Cyan
+    }
+    $pass = $true
+    $cfgObj = $null
+    $report = [ordered]@{
+        pass = $true
+        strict = [bool]$opts.strict
+        checks = [ordered]@{}
+        risks = @()
+        performance = [ordered]@{
+            threshold_ms = [int]$opts.threshold_ms
+            summary = @()
+            anomalies = @()
+        }
+        summary = [ordered]@{
+            errors = @()
+            warnings = @()
+            error_count = 0
+            warn_count = 0
+        }
+        fix = [ordered]@{
+            requested = [bool]$opts.fix
+            changed = $false
+            applied = @()
+        }
+    }
+
+    # 1. System Checks
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem
+        $report.checks.os = ("{0} {1}" -f $os.Caption, $os.OSArchitecture)
+        if (-not $opts.json) { Write-Host ("OS: {0} {1}" -f $os.Caption, $os.OSArchitecture) }
+    }
+    catch {
+        $report.checks.os = "unknown"
+        if (-not $opts.json) { Write-Host "OS: unknown（读取失败）" -ForegroundColor Yellow }
+    }
+
+    # 2. Git Check
+    try {
+        if ($DryRun) {
+            $gitOut = & git version 2>$null
+            if ($LASTEXITCODE -ne 0 -or $null -eq $gitOut) { throw "git version failed" }
+            $gitVer = ($gitOut | Select-Object -First 1).ToString().Trim()
+        }
+        else {
+            $gitVer = Invoke-GitCapture @("version")
+        }
+        if ([string]::IsNullOrWhiteSpace($gitVer)) { throw "git version is empty" }
+        $report.checks.git = [ordered]@{ ok = $true; value = $gitVer }
+        if (-not $opts.json) { Write-Host "✅ Git: $gitVer" -ForegroundColor Green }
+    }
+    catch {
+        $report.checks.git = [ordered]@{ ok = $false; value = "" }
+        if (-not $opts.json) { Write-Host "❌ Git: Not found or error" -ForegroundColor Red }
+        $pass = $false
+    }
+
+    # 3. Robocopy Check
+    if (Get-Command robocopy -ErrorAction SilentlyContinue) {
+        $report.checks.robocopy = [ordered]@{ ok = $true }
+        if (-not $opts.json) { Write-Host "✅ Robocopy: Available" -ForegroundColor Green }
+    }
+    else {
+        $report.checks.robocopy = [ordered]@{ ok = $false }
+        if (-not $opts.json) { Write-Host "❌ Robocopy: Not found" -ForegroundColor Red }
+        $pass = $false
+    }
+
+    # 4. Long Paths
+    try {
+        $lp = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -ErrorAction SilentlyContinue
+        if ($lp -and $lp.LongPathsEnabled -eq 1) {
+            $report.checks.long_paths = [ordered]@{ ok = $true; value = 1 }
+            if (-not $opts.json) { Write-Host "✅ LongPathsEnabled: 1 (On)" -ForegroundColor Green }
+        }
+        else {
+            $report.checks.long_paths = [ordered]@{ ok = $false; value = 0 }
+            if (-not $opts.json) { Write-Host "⚠️ LongPathsEnabled: 0 (Off) - Deep paths may fail." -ForegroundColor Yellow }
+        }
+    }
+    catch {
+        $report.checks.long_paths = [ordered]@{ ok = $false; value = "unknown" }
+        if (-not $opts.json) { Write-Host "⚠️ LongPathsEnabled: Check failed" -ForegroundColor Yellow }
+    }
+
+    # 5. Config Check
+    if (Test-Path $CfgPath) {
+        try {
+            $cfg = Get-Content $CfgPath -Raw | ConvertFrom-Json
+            if ($cfg) {
+                $cfgObj = $cfg
+                $report.checks.config = [ordered]@{ ok = $true; vendors = @($cfg.vendors).Count; mappings = @($cfg.mappings).Count }
+                if (-not $opts.json) {
+                    Write-Host "✅ skills.json: Valid JSON" -ForegroundColor Green
+                    Write-Host ("   - Vendors: {0}" -f $cfg.vendors.Count)
+                    Write-Host ("   - Mappings: {0}" -f $cfg.mappings.Count)
+                }
+            }
+            else {
+                $report.checks.config = [ordered]@{ ok = $false; reason = "invalid_or_empty" }
+                if (-not $opts.json) { Write-Host "❌ skills.json: Invalid/Empty" -ForegroundColor Red }
+                $pass = $false
+            }
+        }
+        catch {
+            $report.checks.config = [ordered]@{ ok = $false; reason = ("parse_error: {0}" -f $_.Exception.Message) }
+            if (-not $opts.json) { Write-Host ("❌ skills.json: Parse Error - {0}" -f $_.Exception.Message) -ForegroundColor Red }
+            $pass = $false
+        }
+    }
+    else {
+        $report.checks.config = [ordered]@{ ok = $false; reason = "not_found" }
+        if (-not $opts.json) { Write-Host "⚠️ skills.json: Not found (Run init or add first)" -ForegroundColor Yellow }
+    }
+
+    # 6. Config Risk Scan
+    try {
+        if ($null -ne $cfgObj) {
+            $risks = Get-DoctorConfigRisks $cfgObj
+            $report.risks = @($risks)
+            if ($risks.Count -gt 0) {
+                if (-not $opts.json) {
+                    Write-Host ("⚠️ 配置风险（{0} 项）：" -f $risks.Count) -ForegroundColor Yellow
+                    foreach ($risk in $risks) {
+                        Write-Host ("   - {0}" -f $risk) -ForegroundColor Yellow
+                    }
+                }
+            }
+        }
+    }
+    catch {
+        if (-not $opts.json) { Write-Host "⚠️ 配置风险扫描失败（已忽略）" -ForegroundColor Yellow }
+    }
+
+    # 6.5 Optional auto-fix for low-risk config issues
+    if (($opts.fix -or $opts.dry_run_fix) -and $null -ne $cfgObj) {
+        try {
+            $fixResult = Apply-DoctorFixes $cfgObj -Preview:$opts.dry_run_fix
+            $report.fix.changed = [bool]$fixResult.changed
+            $report.fix.applied = @($fixResult.applied)
+            $report.fix.preview = [bool]$opts.dry_run_fix
+            if ($fixResult.changed) {
+                if (-not $DryRun -and -not $opts.dry_run_fix) {
+                    $json = $cfgObj | ConvertTo-Json -Depth 50
+                    Set-ContentUtf8 $CfgPath $json
+                }
+                if (-not $opts.json) {
+                    if ($opts.dry_run_fix) {
+                        Write-Host ("doctor --dry-run-fix 预览 {0} 项可修复内容。" -f @($fixResult.applied).Count) -ForegroundColor Yellow
+                    }
+                    else {
+                        Write-Host ("✅ doctor --fix 已应用 {0} 项修复。" -f @($fixResult.applied).Count) -ForegroundColor Green
+                    }
+                    foreach ($line in @($fixResult.applied)) {
+                        if ($opts.dry_run_fix) {
+                            Write-Host ("   - {0}" -f $line) -ForegroundColor Yellow
+                        }
+                        else {
+                            Write-Host ("   - {0}" -f $line) -ForegroundColor Green
+                        }
+                    }
+                }
+            }
+            elseif (-not $opts.json) {
+                if ($opts.dry_run_fix) { Write-Host "doctor --dry-run-fix：未发现可自动修复项。" }
+                else { Write-Host "doctor --fix：未发现可自动修复项。" }
+            }
+        }
+        catch {
+            if (-not $opts.json) { Write-Host ("⚠️ doctor --fix 执行失败：{0}" -f $_.Exception.Message) -ForegroundColor Yellow }
+        }
+    }
+
+    # 7. Network Check (Optional)
+    try {
+        $ping = Test-NetConnection "github.com" -Port 443 -InformationLevel Quiet
+        if ($ping) {
+            $report.checks.network = [ordered]@{ ok = $true }
+            if (-not $opts.json) { Write-Host "✅ GitHub Connection: OK" -ForegroundColor Green }
+        }
+        else {
+            $report.checks.network = [ordered]@{ ok = $false }
+            if (-not $opts.json) { Write-Host "❌ GitHub Connection: Failed" -ForegroundColor Red }
+            $pass = $false
+        }
+    }
+    catch {
+        $report.checks.network = [ordered]@{ ok = $false; skipped = $true }
+        if (-not $opts.json) { Write-Host "⚠️ Network Check: Skipped" -ForegroundColor Yellow }
+    }
+
+    # 8. Performance Summary
+    try {
+        if (Test-Path $LogPath) {
+            $lines = Get-Content $LogPath -ErrorAction SilentlyContinue
+            $perf = Get-PerfSummaryFromLogLines $lines 3
+            $report.performance.summary = @($perf)
+            if ($perf.Count -gt 0) {
+                if (-not $opts.json) {
+                    Write-Host "最近性能摘要（最近 3 次）："
+                    foreach ($p in $perf) {
+                        Write-Host ("   - {0}: last={1}ms avg={2}ms samples={3}" -f $p.metric, $p.last_ms, $p.avg_ms, $p.samples)
+                    }
+                }
+                $anomalies = Get-PerfAnomalyItems $perf $opts.threshold_ms
+                $report.performance.anomalies = @($anomalies)
+                if ($anomalies.Count -gt 0) {
+                    if (-not $opts.json) {
+                        Write-Host ("⚠️ 性能异常（阈值 {0}ms，{1} 项）：" -f $opts.threshold_ms, $anomalies.Count) -ForegroundColor Yellow
+                        foreach ($a in $anomalies) {
+                            Write-Host ("   - {0}" -f $a) -ForegroundColor Yellow
+                        }
+                    }
+                }
+            }
+        }
+    }
+    catch {
+        if (-not $opts.json) { Write-Host "⚠️ 性能摘要读取失败（已忽略）" -ForegroundColor Yellow }
+    }
+
+    $report.pass = $pass
+    if (-not $report.checks.git.ok) { $report.summary.errors += "git_unavailable" }
+    if (-not $report.checks.robocopy.ok) { $report.summary.errors += "robocopy_unavailable" }
+    if (-not $report.checks.config.ok) {
+        $reason = if ($report.checks.config.reason) { [string]$report.checks.config.reason } else { "config_invalid" }
+        if ($reason -like "parse_error*") { $report.summary.errors += "config_parse_error" }
+        else { $report.summary.warnings += "config_not_ready" }
+    }
+    if ($report.checks.long_paths.value -eq 0) { $report.summary.warnings += "long_paths_off" }
+    if (@($report.risks).Count -gt 0) { $report.summary.warnings += "config_risks_present" }
+    if (@($report.performance.anomalies).Count -gt 0) { $report.summary.warnings += "perf_anomalies_present" }
+
+    if ($opts.strict -and (@($report.risks).Count -gt 0 -or @($report.performance.anomalies).Count -gt 0)) {
+        $report.pass = $false
+    }
+    $report.summary.error_count = @($report.summary.errors).Count
+    $report.summary.warn_count = @($report.summary.warnings).Count
+    if ($opts.json) {
+        Write-Host ($report | ConvertTo-Json -Depth 30)
+        return [pscustomobject]$report
+    }
+
+    Write-Host ""
+    if ($report.pass) {
+        Write-Host "Your system is ready for skills-manager." -ForegroundColor Green
+    }
+    else {
+        Write-Host "Some checks failed. Please review issues above." -ForegroundColor Red
+    }
+    return [pscustomobject]$report
+}
+ 
+ function Upsert-Import($cfg, $import) {
+    $existing = $cfg.imports | Where-Object { $_.name -eq $import.name } | Select-Object -First 1
+    if ($existing) {
+        $existing.repo = $import.repo
+        $existing.ref = $import.ref
+        $existing.skill = $import.skill
+        $existing.mode = $import.mode
+        $existing.sparse = $import.sparse
+    }
+    else {
+        $cfg.imports += $import
+    }
+}
+
+function Ensure-ImportVendorMapping($cfg, [string]$vendorName, [string]$skillPath, [string]$targetName) {
+    $skillPath = Normalize-SkillPath $skillPath
+    $from = $skillPath
+    if ($from -eq ".") { $from = "." }
+    $exists = $cfg.mappings | Where-Object { $_.vendor -eq $vendorName -and $_.from -eq $from } | Select-Object -First 1
+    if (-not $exists) {
+        $cfg.mappings += @{ vendor = $vendorName; from = $from; to = $targetName }
+    }
+}
+function Resolve-SkillsWithProbe([string]$repo, [string]$ref, [string[]]$skillPaths, [bool]$forceClean) {
+    $probeName = ("_probe_{0}" -f ([Guid]::NewGuid().ToString("N").Substring(0, 8)))
+    $probePath = Join-Path $ImportDir $probeName
+    $resolved = @()
+    try {
+        Ensure-Repo $probePath $repo $ref $null $forceClean $false
+        if ($script:SkillCandidatesCache) { $script:SkillCandidatesCache.Remove($probePath) | Out-Null }
+        foreach ($p in $skillPaths) {
+            $normalized = Normalize-SkillPath $p
+            try {
+                $resolved += (Resolve-SkillPath $probePath $normalized)
+            }
+            catch {
+                $candidates = @()
+                try { $candidates = Get-SkillCandidates $probePath } catch {}
+                $hint = @()
+                if ($candidates.Count -gt 0) {
+                    $hint += ("可用技能路径候选（Top {0}）：" -f ([Math]::Min(12, $candidates.Count)))
+                    foreach ($c in ($candidates | Select-Object -First 12)) {
+                        $hint += ("- {0}" -f $c.rel)
+                    }
+                    if ($candidates.Count -gt 12) {
+                        $hint += ("... 另有 {0} 项未显示" -f ($candidates.Count - 12))
+                    }
+                }
+                $msg = ("技能路径预检失败：--skill {0}`n{1}" -f $normalized, $_.Exception.Message)
+                if ($hint.Count -gt 0) { $msg += ("`n" + ($hint -join "`n")) }
+                throw $msg
+            }
+        }
+        return $resolved
+    }
+    finally {
+        if (Test-Path $probePath) { Invoke-RemoveItemWithRetry $probePath -Recurse -IgnoreFailure | Out-Null }
+        if ($script:SkillCandidatesCache) { $script:SkillCandidatesCache.Remove($probePath) | Out-Null }
+    }
+}
+function Get-InstallErrorSuggestedSkillPath([string]$msg, [string[]]$skillPaths) {
+    if (-not [string]::IsNullOrWhiteSpace($msg)) {
+        $bulletMatches = [regex]::Matches($msg, "(?m)^-\s+(.+)$")
+        foreach ($m in $bulletMatches) {
+            $candidate = $m.Groups[1].Value.Trim()
+            if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+            if ($candidate -eq ".") { continue }
+            return ($candidate -replace "\\", "/")
+        }
+    }
+
+    $sample = if ($skillPaths -and $skillPaths.Count -gt 0) { $skillPaths[0] } else { "<skill>" }
+    $sample = ($sample -replace "\\", "/").Trim()
+    if ([string]::IsNullOrWhiteSpace($sample)) { return "skills/<skill>" }
+    if ($sample -eq ".") { return "." }
+    if ($sample.Contains("/")) { return $sample }
+
+    $leaf = Split-Path $sample -Leaf
+    if ([string]::IsNullOrWhiteSpace($leaf)) { $leaf = "<skill>" }
+    return ("skills/{0}" -f $leaf)
+}
+function Write-InstallErrorHint([string]$msg, [string]$repo, [string[]]$skillPaths) {
+    if ([string]::IsNullOrWhiteSpace($msg)) { return }
+    if ($msg -match "zip 文件当前被占用|由另一进程使用|being used by another process") {
+        Write-Host "提示：检测到 zip 被占用。请关闭资源管理器预览/压缩软件/同步盘后重试；工具已自动采用“临时复制 + 重试解压”策略。" -ForegroundColor Yellow
+        return
+    }
+    if ($msg -match "仓库不可访问或不存在|Repository not found|repository '.+' not found") {
+        if (Test-LocalZipRepoInput $repo) {
+            Write-Host "提示：你传入的是本地 zip，已按本地压缩包处理；若仍失败，请确认 zip 可读且未被占用。" -ForegroundColor Yellow
+            return
+        }
+        Write-Host "提示：请先在浏览器确认仓库地址可访问，私有仓库需先配置 git 凭据。" -ForegroundColor Yellow
+        return
+    }
+    if ($msg -match "仓库内未发现任何有效的技能标记文件") {
+        Write-Host "提示：该仓库可能不是本工具支持的 skills 仓库（缺少 SKILL.md/AGENTS.md/GEMINI.md/CLAUDE.md）。" -ForegroundColor Yellow
+        return
+    }
+    if ($msg -match "未找到技能入口文件") {
+        $suggestedSkillPath = Get-InstallErrorSuggestedSkillPath $msg $skillPaths
+        Write-Host ("提示：请改用真实路径，例如：--skill {0}" -f $suggestedSkillPath) -ForegroundColor Yellow
+        Write-Host ("提示：当前 repo = {0}" -f $repo) -ForegroundColor Yellow
+    }
+}
+
+function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
+    Preflight
+    $cfgRaw = ""
+    $cfg = LoadCfg
+    if (Test-Path $CfgPath) { $cfgRaw = Get-Content $CfgPath -Raw }
+
+    $parsed = Parse-AddArgs $tokens
+    $repo = Normalize-RepoUrl $parsed.repo
+    $ref = $parsed.ref
+    $refIsAuto = $false
+    if ([string]::IsNullOrWhiteSpace($ref)) {
+        $ref = "main"
+        $refIsAuto = $true
+    }
+    $mode = $parsed.mode
+    if ([string]::IsNullOrWhiteSpace($mode)) { $mode = "manual" }
+    $mode = $mode.ToLowerInvariant()
+    Need ($mode -eq "manual" -or $mode -eq "vendor") "mode 仅支持 manual 或 vendor"
+
+    $sparse = [bool]$parsed.sparse
+
+    if ($DryRun) {
+        Write-Host ("DRYRUN：将从 {0} ({1}) 导入 {2} 个技能，模式：{3}，Sparse：{4}" -f $repo, $ref, $parsed.skills.Count, $mode, $sparse)
+        if (-not $NoBuild) { Write-Host "DRYRUN：将执行【构建生效】" }
+        return $true
+    }
+
+    try {
+        # Strict precheck: repo must be reachable.
+        Assert-RepoReachable $repo
+
+        if ($refIsAuto) {
+            $ref = Get-RepoDefaultBranch $repo
+            Log ("未指定 --ref，自动使用仓库默认分支：{0}" -f $ref)
+        }
+
+        # Auto-detect mode if not specified (or default manual)
+        if ($mode -eq "manual") {
+            Need (-not [string]::IsNullOrWhiteSpace($repo)) "Repo URL cannot be empty"
+            $matchedVendor = Match-VendorByRepo $cfg $repo
+            if ($matchedVendor) {
+                $mode = "vendor"
+                $vendorName = $matchedVendor.name
+                $parsed.name = $vendorName # Override name to vendor name
+                Log ("自动检测到已存在的 Vendor：{0}。切换为 Vendor 模式安装。" -f $vendorName)
+            }
+        }
+
+        # Strict precheck: resolve all skill paths before writing config.
+        $resolvedSkillPaths = Resolve-SkillsWithProbe $repo $ref $parsed.skills $cfg.update_force
+
+        if ($mode -eq "manual") {
+            $baseName = $null
+            if (-not [string]::IsNullOrWhiteSpace($parsed.name)) {
+                $baseName = Normalize-NameWithNotice $parsed.name "导入名称"
+            }
+            foreach ($skillPath in $resolvedSkillPaths) {
+                $name = $baseName
+                if ([string]::IsNullOrWhiteSpace($name) -or $resolvedSkillPaths.Count -gt 1) {
+                    $leaf = if ($skillPath -eq ".") { Guess-VendorName $repo } else { Split-Path $skillPath -Leaf }
+                    $curName = Normalize-Name $leaf
+                    $name = if (-not [string]::IsNullOrWhiteSpace($name)) { "$name-$curName" } else { $curName }
+                }
+                $name = Normalize-NameWithNotice $name "导入名称"
+
+                $cache = Join-Path $ImportDir $name
+                $gitSkillPath = To-GitPath $skillPath
+                $curSparse = $sparse
+                if ($gitSkillPath -eq "." -and $curSparse) { $curSparse = $false }
+                $sparsePath = if ($curSparse) { $gitSkillPath } else { $null }
+
+                Ensure-Repo $cache $repo $ref $sparsePath $cfg.update_force $true
+                if ($script:SkillCandidatesCache) { $script:SkillCandidatesCache.Remove($cache) | Out-Null }
+
+                if ($curSparse) {
+                    Ensure-Repo $cache $repo $ref (To-GitPath $skillPath) $cfg.update_force $true
+                }
+                $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
+                Need (Test-IsSkillDir $src) "未找到技能入口文件（SKILL.md/AGENTS.md/GEMINI.md/CLAUDE.md）：$src"
+
+                $import = @{ name = $name; repo = $repo; ref = $ref; skill = $skillPath; mode = "manual"; sparse = $curSparse }
+                Upsert-Import $cfg $import
+            }
+        }
+        else {
+            $vendorName = $parsed.name
+            if ([string]::IsNullOrWhiteSpace($vendorName)) { $vendorName = Guess-VendorName $repo }
+            $vendorName = Normalize-NameWithNotice $vendorName "vendor 名称"
+            $vendorPath = VendorPath $vendorName
+      
+            Ensure-Repo $vendorPath $repo $ref $null $cfg.update_force $true
+      
+            foreach ($skillPath in $resolvedSkillPaths) {
+                if ($script:SkillCandidatesCache) { $script:SkillCandidatesCache.Remove($vendorPath) | Out-Null }
+                $src = if ($skillPath -eq ".") { $vendorPath } else { Join-Path $vendorPath $skillPath }
+                Need (Test-IsSkillDir $src) "未找到技能入口文件（SKILL.md/AGENTS.md/GEMINI.md/CLAUDE.md）：$src"
+
+                $targetSuffix = if ($skillPath -eq ".") { $vendorName } else { $skillPath }
+                $targetName = Make-TargetName $vendorName $targetSuffix
+                Ensure-ImportVendorMapping $cfg $vendorName $skillPath $targetName
+        
+                $import = @{ name = $vendorName; repo = $repo; ref = $ref; skill = $skillPath; mode = "vendor"; sparse = $sparse }
+                Upsert-Import $cfg $import
+            }
+      
+            $vendor = $cfg.vendors | Where-Object { $_.name -eq $vendorName } | Select-Object -First 1
+            if (-not $vendor) {
+                $cfg.vendors += @{ name = $vendorName; repo = $repo; ref = $ref }
+            }
+            else {
+                $vendor.repo = $repo
+                $vendor.ref = $ref
+            }
+        }
+
+        SaveCfgSafe $cfg $cfgRaw
+        Clear-SkillsCache
+
+        if (-not $NoBuild) {
+            Write-Host "导入完成。开始【构建生效】..."
+            构建生效
+        }
+        else {
+            Write-Host "导入完成。"
+        }
+        return $true
+    }
+    catch {
+        if (-not $DryRun -and $cfgRaw) { Set-ContentUtf8 $CfgPath $cfgRaw }
+        Write-Host ("❌ 导入失败: {0}" -f $_.Exception.Message) -ForegroundColor Red
+        Write-InstallErrorHint $_.Exception.Message $repo $parsed.skills
+        return $false
+    }
+}
+
+function 初始化 {
+    Preflight
+    $cfg = LoadCfg
+
+    foreach ($v in $cfg.vendors) {
+        Need (-not [string]::IsNullOrWhiteSpace($v.name)) "vendor 缺少 name"
+        Need (-not [string]::IsNullOrWhiteSpace($v.repo)) "vendor $($v.name) 缺少 repo"
+        if ([string]::IsNullOrWhiteSpace($v.ref)) { $v.ref = "main" }
+
+        $path = VendorPath $v.name
+        if (Test-Path $path) {
+            Write-Host "已存在：vendor/$($v.name)（跳过 clone）"
+            continue
+        }
+
+        Invoke-Git @("clone", $v.repo, $path)
+        Push-Location $path
+        Invoke-Git @("checkout", $v.ref)
+        Pop-Location
+    }
+
+    # 初始化后建议先安装/卸载
+    Write-Host "初始化完成。建议下一步：直接【安装】。"
+    Clear-SkillsCache
+}
+
+function 新增技能库 {
+    Preflight
+    $repoInput = Read-Host "请输入技能库地址（留空=仅初始化已有 vendors）"
+    if ([string]::IsNullOrWhiteSpace($repoInput)) {
+        初始化
+        return
+    }
+    $repo = Normalize-RepoUrl $repoInput
+    $ref = Read-Host "可选：输入分支/Tag（留空默认 main）"
+    if ([string]::IsNullOrWhiteSpace($ref)) { $ref = "main" }
+    if ($ref -match "^\d+$") {
+        $confirm = Read-Host "你输入的 ref 是纯数字，可能误填了菜单序号。继续使用该 ref？(y/N)"
+        if (-not (Is-Yes $confirm)) { throw "已取消：请重新输入正确的分支/Tag。" }
+    }
+    $name = Read-Host "可选：输入自定义名称（留空自动从 URL 推断）"
+    if ([string]::IsNullOrWhiteSpace($name)) { $name = Guess-VendorName $repo }
+    $name = Normalize-NameWithNotice $name "vendor 名称"
+
+    $cfgRaw = ""
+    if (Test-Path $CfgPath) { $cfgRaw = Get-Content $CfgPath -Raw }
+    $tmp = Join-Path $VendorDir ("_tmp_" + $name)
+
+    try {
+        if (Test-Path $tmp) { Invoke-RemoveItem $tmp -Recurse }
+        Invoke-Git @("clone", $repo, $tmp)
+        Push-Location $tmp
+        try {
+            Invoke-Git @("checkout", $ref)
+        }
+        finally {
+            Pop-Location
+        }
+
+        $cfg = LoadCfg
+        if (Test-Path $CfgPath) { $cfgRaw = Get-Content $CfgPath -Raw }
+        Need (-not ($cfg.vendors | Where-Object { $_.name -eq $name })) "vendor 名称已存在：$name"
+        $cfg.vendors += @{ name = $name; repo = $repo; ref = $ref }
+        SaveCfgSafe $cfg $cfgRaw
+
+        $dst = VendorPath $name
+        Need (-not (Test-Path $dst)) "vendor 已存在：$name"
+        Invoke-MoveItem $tmp $dst
+
+        Write-Host "新增完成。"
+        
+        # Auto-migrate orphan manual skills
+        $migrated = Migrate-ManualToVendor $cfg $name $repo
+        if ($migrated -gt 0) {
+            SaveCfgSafe $cfg $cfgRaw # Save again with migrations
+            Write-Host ("已自动迁移 {0} 个无需手动维护的技能到新 Vendor。" -f $migrated) -ForegroundColor Yellow
+        }
+
+        Clear-SkillsCache
+    }
+    catch {
+        if (Test-Path $tmp) { Invoke-RemoveItem $tmp -Recurse }
+        if (-not $DryRun -and $cfgRaw) { Set-ContentUtf8 $CfgPath $cfgRaw }
+        Write-Host ("❌ 操作失败: {0}" -f $_.Exception.Message) -ForegroundColor Red
+    }
+}
+
+function 删除技能库 {
+    Preflight
+    $cfg = LoadCfg
+    Need ($cfg.vendors.Count -gt 0) "当前没有可删除的技能库。"
+
+    $toRemove = Select-Items $cfg.vendors `
+    { param($idx, $v) return ("{0,3}) {1} :: {2}" -f $idx, $v.name, $v.repo) } `
+        "请选择要删除的技能库" `
+        "未解析到有效序号（可能是分隔符或范围格式问题）。已取消删除。"
+    if ($toRemove.Count -eq 0) {
+        Write-Host "未选择任何技能库。"
+        return
+    }
+    $preview = Format-VendorPreview $toRemove
+    if (-not (Confirm-WithSummary "将删除以下技能库" $preview "确认删除所选技能库？" "Y")) {
+        Write-Host "已取消删除。"
+        return
+    }
+    if (Skip-IfDryRun "删除技能库") { return }
+
+    $cfgRaw = ""
+    if (Test-Path $CfgPath) { $cfgRaw = Get-Content $CfgPath -Raw }
+    try {
+        $removeNames = New-Object System.Collections.Generic.HashSet[string]
+        foreach ($v in $toRemove) { $removeNames.Add($v.name) | Out-Null }
+
+        $cfg.vendors = $cfg.vendors | Where-Object { -not $removeNames.Contains($_.name) }
+        $cfg.mappings = $cfg.mappings | Where-Object { -not $removeNames.Contains($_.vendor) }
+        $cfg.imports = $cfg.imports | Where-Object { -not ($_.mode -eq "vendor" -and $removeNames.Contains($_.name)) }
+        SaveCfgSafe $cfg $cfgRaw
+
+        foreach ($v in $toRemove) {
+            $path = VendorPath $v.name
+            if (Test-Path $path) { Invoke-RemoveItem $path -Recurse }
+        }
+        Write-Host ("已删除技能库：{0} 项。" -f $toRemove.Count)
+        Clear-SkillsCache
+        构建生效
+    }
+    catch {
+        if (-not $DryRun -and $cfgRaw) { Set-ContentUtf8 $CfgPath $cfgRaw }
+        Write-Host ("❌ 删除失败: {0}" -f $_.Exception.Message) -ForegroundColor Red
+    }
+}
+
+function Get-SkillsUnder([string]$base, [string]$vendorName) {
+    if (-not $script:SkillListCache) { $script:SkillListCache = @{} }
+    $key = "{0}|{1}" -f $vendorName, $base
+    if ($script:SkillListCache.ContainsKey($key)) {
+        return $script:SkillListCache[$key]
+    }
+    $items = @()
+    if (Test-Path $base) {
+        # Search for all supported markers
+        $found = Get-ChildItem $base -Recurse -File -ErrorAction SilentlyContinue | 
+        Where-Object { $_.Name -match "^(SKILL|AGENTS|GEMINI|CLAUDE)\.md$" }
+      
+        $seenDirs = New-Object System.Collections.Generic.HashSet[string]
+        foreach ($f in $found) {
+            $dir = $f.Directory.FullName
+            if (-not $seenDirs.Add($dir)) { continue }
+      
+            $rel = $dir.Substring($base.Length).TrimStart("\\")
+            if ([string]::IsNullOrWhiteSpace($rel)) { $rel = "." }
+            $items += [pscustomobject]@{ vendor = $vendorName; from = $rel; full = $dir }
+        }
+    }
+    $items = ($items | Sort-Object vendor, from)
+    $script:SkillListCache[$key] = $items
+    return $items
+}
+
+function 收集Skills([string]$filter, $cfg = $null, $manualItems = $null) {
+    if ($null -eq $cfg) { $cfg = LoadCfg }
+    $items = @()
+
+    foreach ($v in $cfg.vendors) {
+        $base = VendorPath $v.name
+        if (-not (Test-Path $base)) { continue }
+        $items += Get-SkillsUnder $base $v.name
+    }
+
+    if ($null -eq $manualItems) { $manualItems = 收集ManualSkills $cfg }
+    $items += $manualItems
+
+    if ($filter) {
+        $items = Filter-Skills $items $filter
+    }
+
+    return ($items | Sort-Object vendor, from)
+}
+
+function Resolve-ManualImportSkillPath($cfg, [string]$importName, [switch]$AllowLegacyFallback) {
+    if ($null -eq $cfg) { $cfg = LoadCfg }
+    if ([string]::IsNullOrWhiteSpace($importName)) { return $null }
+    $imp = $cfg.imports | Where-Object { $_.mode -eq "manual" -and $_.name -eq $importName } | Select-Object -First 1
+    if ($imp) {
+        $skillPath = Normalize-SkillPath $imp.skill
+        $cache = Join-Path $ImportDir $imp.name
+        $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
+        if (Test-IsSkillDir $src) { return $src }
+    }
+    if ($AllowLegacyFallback) {
+        $legacyPath = Join-Path $ManualDir $importName
+        if (Test-IsSkillDir $legacyPath) { return $legacyPath }
+    }
+    return $null
+}
+
+function Get-ManualDisplayVendorFromRepo([string]$repo) {
+    if ([string]::IsNullOrWhiteSpace($repo)) { return "manual" }
+    $r = [string]$repo
+    $r = $r.Trim().Trim("'`"").TrimEnd("/")
+    if ([string]::IsNullOrWhiteSpace($r)) { return "manual" }
+    if ($r -match "^[A-Za-z]+://") {
+        try {
+            $uri = [Uri]$r
+            $r = [string]$uri.AbsolutePath
+        }
+        catch {}
+    }
+    $r = $r.Trim().Trim("/")
+    if ([string]::IsNullOrWhiteSpace($r)) { return "manual" }
+    $r = $r -replace "\\", "/"
+    $parts = @($r -split "/" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $leaf = if ($parts.Count -gt 0) { [string]$parts[$parts.Count - 1] } else { $r }
+    if ($leaf.EndsWith(".git", [System.StringComparison]::OrdinalIgnoreCase)) {
+        $leaf = $leaf.Substring(0, $leaf.Length - 4)
+    }
+    $leafNorm = Normalize-Name $leaf
+    if ([string]::IsNullOrWhiteSpace($leafNorm)) { return "manual" }
+    $first = @($leafNorm -split "-" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
+    if ($first.Count -gt 0) { return [string]$first[0] }
+    return $leafNorm
+}
+
+function 收集ManualSkills($cfg = $null, [switch]$IncludeLegacyManualDir) {
+    if ($null -eq $cfg) { $cfg = LoadCfg }
+    $items = @()
+    $seen = New-Object System.Collections.Generic.HashSet[string]
+
+    foreach ($i in $cfg.imports) {
+        if ($i.mode -ne "manual") { continue }
+        if ([string]::IsNullOrWhiteSpace($i.name)) { continue }
+        $src = Resolve-ManualImportSkillPath $cfg $i.name -AllowLegacyFallback
+        if (-not $src) { continue }
+        $from = [string]$i.name
+        if ($seen.Add($from)) {
+            $items += [pscustomobject]@{
+                vendor = "manual"
+                display_vendor = Get-ManualDisplayVendorFromRepo ([string]$i.repo)
+                from = $from
+                full = $src
+                source = if ((Join-Path $ManualDir $from) -eq $src) { "legacy-manual-dir" } else { "imports" }
+            }
+        }
+    }
+
+    if ($IncludeLegacyManualDir) {
+        foreach ($legacy in (Get-SkillsUnder $ManualDir "manual")) {
+            if ($seen.Add($legacy.from)) {
+                $items += [pscustomobject]@{
+                    vendor = "manual"
+                    display_vendor = "manual"
+                    from = $legacy.from
+                    full = $legacy.full
+                    source = "legacy-manual-dir"
+                }
+            }
+        }
+    }
+
+    return ($items | Sort-Object vendor, from)
+}
+
+function Get-OverridesDirs {
+    if (-not (Test-Path $OverridesDir)) {
+        return @()
+    }
+    return Get-ChildItem $OverridesDir -Directory -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -ne ".bak" }
+}
+
+function 收集OverridesSkills {
+    $items = @()
+    foreach ($d in (Get-OverridesDirs)) {
+        $items += [pscustomobject]@{ vendor = "overrides"; from = $d.Name; full = $d.FullName }
+    }
+    return $items
+}
+
+function Get-InstalledSet($cfg, $manualItems = $null, $overrideItems = $null) {
+    $installed = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($m in $cfg.mappings) {
+        $installed.Add("$($m.vendor)|$($m.from)") | Out-Null
+    }
+    if ($null -eq $manualItems) { $manualItems = 收集ManualSkills $cfg }
+    foreach ($m in $manualItems) {
+        $installed.Add("manual|$($m.from)") | Out-Null
+    }
+    if ($null -eq $overrideItems) { $overrideItems = 收集OverridesSkills }
+    foreach ($m in $overrideItems) {
+        $installed.Add("overrides|$($m.from)") | Out-Null
+    }
+    return $installed
+}
+
+function Parse-IndexSelection([string]$selText, [int]$max) {
+    if ($null -eq $selText) { return @() }
+    $selText = $selText.Trim()
+    if ([string]::IsNullOrWhiteSpace($selText)) { return @() }
+    $low = $selText.ToLowerInvariant()
+    if ($low -eq "all") { return 1..$max }
+    if ($low -eq "0") { return @() }
+    if ($low -eq "none") { return @() }
+
+    # Normalize common non-ASCII separators/dashes from IME input.
+    $selText = $selText -replace "[，、；;/;\\s]+", ","
+    $selText = $selText -replace "[－–—−]", "-"
+
+    $set = New-Object System.Collections.Generic.HashSet[int]
+    foreach ($part in $selText.Split(",") | ForEach-Object { $_.Trim() }) {
+        if ($part -match "^\d+$") {
+            $n = [int]$part
+            if ($n -ge 1 -and $n -le $max) { $set.Add($n) | Out-Null }
+        }
+        elseif ($part -match "^(\d+)-(\d+)$") {
+            $a = [int]$Matches[1]; $b = [int]$Matches[2]
+            if ($a -gt $b) { $tmp = $a; $a = $b; $b = $tmp }
+            for ($i = $a; $i -le $b; $i++) {
+                if ($i -ge 1 -and $i -le $max) { $set.Add($i) | Out-Null }
+            }
+        }
+    }
+    return $set | Sort-Object
+}
+
+function Write-SelectionHint {
+    Write-Host ""
+    Write-Host "输入多选：如 1,3,5-10；输入 all 全选；输入 0 取消。"
+}
+
+function Read-SelectionIndices([string]$prompt, [int]$count, [string]$invalidMsg) {
+    $sel = Read-HostSafe $prompt
+    $idx = Parse-IndexSelection $sel $count
+    if ($idx.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($sel) -and $sel.ToLowerInvariant() -ne "0") {
+        Write-Host $invalidMsg
+        return @()
+    }
+    return $idx
+}
+function Select-Items($items, [scriptblock]$formatter, [string]$prompt, [string]$invalidMsg) {
+    if ($items.Count -eq 0) { return @() }
+    Write-ItemsInColumns $items $formatter
+    Write-SelectionHint
+    $idx = Read-SelectionIndices $prompt $items.Count $invalidMsg
+    if ($idx.Count -eq 0) { return @() }
+    $selected = @()
+    foreach ($n in $idx) { $selected += $items[$n - 1] }
+    return $selected
+}
+
+function Filter-Skills($items, [string]$filter) {
+    if ([string]::IsNullOrWhiteSpace($filter)) { return $items }
+    $f = $filter.Trim()
+    if ($f.StartsWith("/") -and $f.EndsWith("/") -and $f.Length -gt 2) {
+        $pattern = $f.Trim("/")
+        try {
+            return $items | Where-Object { $_.vendor -match $pattern -or $_.from -match $pattern }
+        }
+        catch {
+            Write-Warning "无效的正则表达式：$pattern"
+            return @()
+        }
+    }
+    $terms = $f.Split(" ", [System.StringSplitOptions]::RemoveEmptyEntries)
+    foreach ($t in $terms) {
+        $safeT = [WildcardPattern]::Escape($t)
+        $items = $items | Where-Object { $_.vendor -like "*$safeT*" -or $_.from -like "*$safeT*" }
+    }
+    return $items
+}
+
+function Write-ItemsInColumns($items, [scriptblock]$formatter) {
+    $count = $items.Count
+    if ($count -eq 0) { return }
+    $width = 120
+    try { $width = [int]$Host.UI.RawUI.WindowSize.Width } catch {}
+    $sample = @()
+    for ($i = 0; $i -lt $count; $i++) {
+        $sample += (& $formatter ($i + 1) $items[$i])
+    }
+    $maxLen = ($sample | Measure-Object -Maximum -Property Length).Maximum
+    if (-not $maxLen) { $maxLen = 40 }
+    $colWidth = $maxLen + 2
+    $cols = [Math]::Max(1, [Math]::Floor($width / $colWidth))
+    $rows = [Math]::Ceiling($count / $cols)
+    for ($r = 0; $r -lt $rows; $r++) {
+        for ($c = 0; $c -lt $cols; $c++) {
+            $i = $r + ($c * $rows)
+            if ($i -ge $count) { continue }
+            $text = (& $formatter ($i + 1) $items[$i])
+            $pad = " " * ($colWidth - $text.Length)
+            Write-Host -NoNewline ($text + $pad)
+        }
+        Write-Host ""
+    }
+}
+
+function Make-TargetName([string]$vendor, [string]$from) {
+    $suffix = ($from -replace "[\\\\/]", "-")
+    return ("{0}-{1}" -f $vendor, $suffix)
+}
+
+function 安装 {
+    Preflight
+    $cfg = LoadCfg
+    $manualItems = 收集ManualSkills $cfg
+    $filter = Read-Host "可选：关键词过滤（空格=AND，或 /regex/）"
+    $all = 收集Skills "" $cfg $manualItems
+    Need ($all.Count -gt 0) "未发现任何 skills。请先【新增技能库】。"
+    $list = Filter-Skills $all $filter
+    if ($list.Count -eq 0) {
+        Write-Host "未发现匹配项。"
+        return
+    }
+    $installed = Get-InstalledSet $cfg $manualItems
+
+    $available = $list | Where-Object { -not $installed.Contains("$($_.vendor)|$($_.from)") }
+    if ($available.Count -eq 0) {
+        Write-Host "没有可安装的新技能。将直接执行【构建生效】。"
+        构建生效
+        return
+    }
+
+    $newMappings = @()
+    foreach ($m in $cfg.mappings) { $newMappings += $m }
+    $existing = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($m in $cfg.mappings) { $existing.Add("$($m.vendor)|$($m.from)") | Out-Null }
+    $previewAdded = @()
+    $previewMappings = @()
+
+    $added = 0
+    $selected = Select-Items $available `
+    { param($idx, $item)
+        $displayVendor = Get-DisplayVendor $item
+        $leaf = Split-Path $item.from -Leaf
+        if ($item.from -eq ".") { $leaf = $displayVendor }
+        return ("{0,3}) [{1}] {2}" -f $idx, $displayVendor, $leaf)
+    } `
+        "请选择要安装的技能（批量安装到白名单）" `
+        "未解析到有效序号（可能是分隔符或范围格式问题）。已取消写入白名单。"
+    if ($selected.Count -eq 0) {
+        Write-Host "未选择新增技能。将直接执行【构建生效】。"
+        构建生效
+        return
+    }
+
+    foreach ($item in $selected) {
+        $key = "$($item.vendor)|$($item.from)"
+        if ($existing.Contains($key)) { continue }
+        $to = Make-TargetName $item.vendor $item.from
+
+        $newMappings += @{ vendor = $item.vendor; from = $item.from; to = $to }
+        $existing.Add($key) | Out-Null
+        $added++
+        $previewItem = [ordered]@{ vendor = $item.vendor; from = $item.from; to = $to }
+        if ($item.PSObject.Properties.Match("display_vendor").Count -gt 0) {
+            $previewItem.display_vendor = [string]$item.display_vendor
+        }
+        $previewMappings += [pscustomobject]$previewItem
+    }
+
+    if ($added -eq 0) {
+        Write-Host "未新增任何技能。将直接执行【构建生效】。"
+        构建生效
+        return
+    }
+
+    $previewAdded = Format-MappingPreview $previewMappings
+    if (-not (Confirm-WithSummary "将新增以下白名单映射" $previewAdded "确认写入白名单并构建生效？" "Y")) {
+        Write-Host "已取消安装。"
+        return
+    }
+    if (Skip-IfDryRun "安装技能") { return }
+
+    $cfg.mappings = $newMappings
+    SaveCfg $cfg
+
+    Write-Host ("已追加安装：{0} 项。开始【构建生效】..." -f $added)
+    构建生效
+}
+
+function 卸载 {
+    Preflight
+    $cfg = LoadCfg
+    $manualItems = 收集ManualSkills $cfg
+    $overrideItems = 收集OverridesSkills
+    $filter = Read-Host "可选：关键词过滤（空格=AND，或 /regex/）"
+
+    # 卸载范围：vendor 映射 + manual 目录 + overrides 目录（含已禁用）
+    $installedSet = Get-InstalledSet $cfg $manualItems $overrideItems
+    $all = 收集Skills "" $cfg $manualItems
+    $all += $overrideItems
+    Need ($all.Count -gt 0) "未发现任何 skills。请先【新增技能库】。"
+    $list = Filter-Skills $all $filter
+    if ($list.Count -eq 0) {
+        Write-Host "未发现匹配项。"
+        return
+    }
+
+    # 筛选已安装的技能
+    $onlyInstalled = $list | Where-Object { $installedSet.Contains("$($_.vendor)|$($_.from)") }
+    if ($onlyInstalled.Count -eq 0) {
+        Write-Host "没有已安装的技能可卸载。"
+        return
+    }
+
+    $selectedItems = Select-Items $onlyInstalled `
+    { param($idx, $item)
+        $label = Get-DisplayVendor $item
+        $leaf = Split-Path $item.from -Leaf
+        if ($item.from -eq ".") { $leaf = $label }
+        return ("{0,3}) [{1}] {2}" -f $idx, $label, $leaf)
+    } `
+        "请选择要卸载的技能（从白名单移除）" `
+        "未解析到有效序号（可能是分隔符或范围格式问题）。已取消操作。"
+    if ($selectedItems.Count -eq 0) {
+        Write-Host "未选择任何技能。"
+        return
+    }
+
+    # 区分处理：vendor 移除白名单；manual 删除 imports 条目（兼容清理 legacy manual 目录）；overrides 备份后删除
+    $preview = Format-SkillPreview $selectedItems
+    if (-not (Confirm-WithSummary "将卸载以下技能" $preview "确认卸载所选技能？" "Y")) {
+        Write-Host "已取消卸载。"
+        return
+    }
+    if (Skip-IfDryRun "卸载技能") { return }
+
+    $removedMappings = 0
+    $deletedManualImports = 0
+    $deletedLegacyManualDirs = 0
+    $deletedOverrides = 0
+    $backedOverrides = 0
+    foreach ($item in $selectedItems) {
+        if ($item.vendor -eq "manual") {
+            $before = @($cfg.imports).Count
+            $cfg.imports = @($cfg.imports | Where-Object { -not ($_.mode -eq "manual" -and $_.name -eq $item.from) })
+            $deletedManualImports += ($before - @($cfg.imports).Count)
+
+            $legacyPath = Join-Path $ManualDir $item.from
+            if (Test-Path $legacyPath) {
+                Invoke-RemoveItem $legacyPath -Recurse
+                $deletedLegacyManualDirs++
+            }
+            $cfg.mappings = $cfg.mappings | Where-Object { -not ("$($_.vendor)|$($_.from)" -eq "manual|$($item.from)") }
+        }
+        elseif ($item.vendor -eq "overrides") {
+            $bak = Backup-OverrideDir $item.from
+            if ($bak) { $backedOverrides++ }
+            $deletedOverrides++
+        }
+        else {
+            # mapping 技能：从 mappings 移除
+            $cfg.mappings = $cfg.mappings | Where-Object { -not ("$($_.vendor)|$($_.from)" -eq "$($item.vendor)|$($item.from)") }
+            $removedMappings++
+        }
+    }
+
+    SaveCfg $cfg
+    $parts = @()
+    if ($removedMappings -gt 0) { $parts += "移除白名单 $removedMappings 项" }
+    if ($deletedManualImports -gt 0) { $parts += "删除 manual 导入 $deletedManualImports 项" }
+    if ($deletedLegacyManualDirs -gt 0) { $parts += "清理 legacy manual 目录 $deletedLegacyManualDirs 项" }
+    if ($deletedOverrides -gt 0) { $parts += "删除 overrides $deletedOverrides 项（已备份 $backedOverrides 项）" }
+    Write-Host ("已完成：{0}。开始【构建生效】..." -f ($parts -join "，"))
+    if ($backedOverrides -gt 0) {
+        Write-Host "提示：overrides 备份已保存到 overrides/.bak/，如需彻底清理可手动删除该目录或其中备份。"
+    }
+    Clear-SkillsCache
+    构建生效
+}
+
+function 选择 {
+    Write-Host "提示：已改为独立【安装/卸载】菜单。"
+    安装
+}
+
+
+function 发现 {
+    Invoke-WithMetric "discover" {
+        Preflight
+        $cfg = LoadCfg
+        $manualItems = 收集ManualSkills $cfg
+        $f = $Filter
+        if ([string]::IsNullOrWhiteSpace($f)) {
+            $f = Read-Host "可选：关键词过滤（空格=AND，或 /regex/）"
+        }
+        $all = 收集Skills "" $cfg $manualItems
+        Need ($all.Count -gt 0) "未发现任何 skills。请先【新增技能库】。"
+        $list = Filter-Skills $all $f
+        if ($list.Count -eq 0) {
+            Write-Host "未发现匹配项。"
+            return
+        }
+        $installed = Get-InstalledSet $cfg $manualItems
+        Write-ItemsInColumns $list { param($idx, $item)
+            $mark = if ($installed.Contains("$($item.vendor)|$($item.from)")) { "*" } else { " " }
+            $displayVendor = Get-DisplayVendor $item
+            $leaf = Split-Path $item.from -Leaf
+            if ($item.from -eq ".") { $leaf = $displayVendor }
+            return ("{0,3}) [{1}] [{2}] {3}" -f $idx, $mark, $displayVendor, $leaf)
+        }
+    } @{ command = "发现" } -NoHost
+}
+
+function 清空Agent目录 {
+    if (Test-Path $AgentDir) {
+        Invoke-RemoveItemWithRetry $AgentDir -Recurse | Out-Null
+    }
+    EnsureDir $AgentDir
+}
+
+function Resolve-SourceBase([string]$vendorName, $cfg) {
+    if ($vendorName -eq "manual") { return $null }
+    $v = $cfg.vendors | Where-Object { $_.name -eq $vendorName } | Select-Object -First 1
+    if (-not $v) { throw "白名单引用了不存在的 vendor：$vendorName" }
+    return (VendorPath $v.name)
+}
+
+function Get-BuildCachePath {
+    return (Join-Path $Root ".build-cache.json")
+}
+
+function ConvertTo-Hashtable($obj) {
+    $table = @{}
+    if ($null -eq $obj) { return $table }
+    if ($obj -is [hashtable]) { return $obj }
+    if ($obj -is [pscustomobject]) {
+        foreach ($p in $obj.PSObject.Properties) { $table[[string]$p.Name] = $p.Value }
+    }
+    return $table
+}
+
+function Load-BuildCache {
+    $path = Get-BuildCachePath
+    if (-not (Test-Path $path)) { return @{} }
+    try {
+        $raw = Get-Content $path -Raw
+        if ([string]::IsNullOrWhiteSpace($raw)) { return @{} }
+        $obj = $raw | ConvertFrom-Json
+        return (ConvertTo-Hashtable $obj)
+    }
+    catch {
+        Log ("构建缓存读取失败，已忽略并重建：{0}" -f $_.Exception.Message) "WARN"
+        return @{}
+    }
+}
+
+function Save-BuildCache($cache) {
+    if ($DryRun) { return }
+    try {
+        $json = $cache | ConvertTo-Json -Depth 20
+        Set-ContentUtf8 (Get-BuildCachePath) $json
+    }
+    catch {
+        Log ("构建缓存保存失败（已忽略）：{0}" -f $_.Exception.Message) "WARN"
+    }
+}
+
+function Get-DirectoryFingerprint([string]$dir) {
+    if (-not (Test-Path $dir)) { return "missing" }
+    $files = Get-ChildItem $dir -Recurse -File -ErrorAction SilentlyContinue | Sort-Object FullName
+    $parts = New-Object System.Collections.Generic.List[string]
+    foreach ($f in $files) {
+        $rel = $f.FullName.Substring($dir.Length).TrimStart("\")
+        $parts.Add(("{0}|{1}|{2}" -f $rel, [string]$f.Length, [string]$f.LastWriteTimeUtc.Ticks)) | Out-Null
+    }
+    $input = $parts -join "`n"
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($input)
+        $hash = $sha.ComputeHash($bytes)
+        return ([System.BitConverter]::ToString($hash) -replace "-", "").ToLowerInvariant()
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+
+function Mirror-SkillWithCache(
+    [string]$src,
+    [string]$dst,
+    [string]$cacheKey,
+    [hashtable]$oldCache,
+    [hashtable]$newCache,
+    $stats
+) {
+    $fp = Get-DirectoryFingerprint $src
+    $newCache[$cacheKey] = $fp
+    $old = if ($oldCache.ContainsKey($cacheKey)) { [string]$oldCache[$cacheKey] } else { "" }
+    if ((Test-Path $dst) -and $old -eq $fp) {
+        $expanded = Expand-RelativeSkillPlaceholders $dst
+        if ($expanded -gt 0) {
+            Log ("命中构建缓存后补展开相对路径 SKILL 占位文件：{0} 项 [{1}]" -f $expanded, $cacheKey)
+        }
+        $stats.skipped++
+        Log ("命中构建缓存，跳过复制：{0}" -f $cacheKey)
+        return
+    }
+    RoboMirror $src $dst
+    $expanded = Expand-RelativeSkillPlaceholders $dst
+    if ($expanded -gt 0) {
+        Log ("已展开相对路径 SKILL 占位文件：{0} 项 [{1}]" -f $expanded, $cacheKey)
+    }
+    $stats.mirrored++
+}
+
+function Get-SkillNameConflictBuckets([string]$agentRoot) {
+    $nameToPaths = @{}
+    foreach ($skillFile in (Get-ChildItem $agentRoot -Recurse -Filter "SKILL.md" -File -ErrorAction SilentlyContinue)) {
+        $declaredName = $null
+        foreach ($line in (Get-Content $skillFile.FullName -TotalCount 80 -ErrorAction SilentlyContinue)) {
+            if ($line -match "^\s*name:\s*(.+?)\s*$") {
+                $declaredName = $Matches[1].Trim().Trim("'`"")
+                break
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($declaredName)) { continue }
+        if (-not $nameToPaths.ContainsKey($declaredName)) {
+            $nameToPaths[$declaredName] = New-Object System.Collections.Generic.List[string]
+        }
+        $nameToPaths[$declaredName].Add($skillFile.FullName) | Out-Null
+    }
+    return $nameToPaths
+}
+
+function Test-SkillNameDuplicateContentAllowed([string[]]$paths) {
+    if ($null -eq $paths -or $paths.Count -le 1) { return $true }
+    $hashes = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($path in $paths) {
+        $hash = Get-FileContentHash $path
+        if ([string]::IsNullOrWhiteSpace($hash)) { return $false }
+        $hashes.Add($hash) | Out-Null
+    }
+    return ($hashes.Count -le 1)
+}
+
+function Test-SkillNameSystemOverrideAllowed([string[]]$paths) {
+    if ($null -eq $paths -or $paths.Count -le 1) { return $false }
+    $hasSystemPath = $false
+    $hasNonSystemPath = $false
+    foreach ($path in $paths) {
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        if ($path -match "[\\/]\.system[\\/]") { $hasSystemPath = $true }
+        else { $hasNonSystemPath = $true }
+    }
+    return ($hasSystemPath -and $hasNonSystemPath)
+}
+
+function Start-BuildTransaction {
+    $txnRoot = Join-Path $Root ".txn"
+    $txnId = [Guid]::NewGuid().ToString("N").Substring(0, 10)
+    $path = Join-Path $txnRoot ("build-{0}" -f $txnId)
+    $backupAgent = Join-Path $path "agent.backup"
+    $state = [ordered]@{
+        path = $path
+        backup_agent = $backupAgent
+        has_backup_agent = $false
+    }
+    if ($DryRun) { return [pscustomobject]$state }
+    EnsureDir $txnRoot
+    EnsureDir $path
+    if (Test-Path $AgentDir) {
+        try {
+            Invoke-MoveItem $AgentDir $backupAgent
+            $state.has_backup_agent = $true
+        }
+        catch {
+            if (Test-Path $backupAgent) { Invoke-RemoveItemWithRetry $backupAgent -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
+            Log ("旧 agent/ 无法挪入事务备份，后续将直接在原目录上构建：{0}" -f $_.Exception.Message)
+        }
+    }
+    return [pscustomobject]$state
+}
+
+function Rollback-BuildTransaction($txn) {
+    if ($DryRun -or $null -eq $txn) { return }
+    try {
+        if (Test-Path $AgentDir) { Invoke-RemoveItemWithRetry $AgentDir -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
+        if ($txn.has_backup_agent -and (Test-Path $txn.backup_agent)) {
+            Invoke-MoveItem $txn.backup_agent $AgentDir
+            Write-Host "已回滚 agent/ 到构建前状态。" -ForegroundColor Yellow
+        }
+    }
+    finally {
+        if (Test-Path $txn.path) { Invoke-RemoveItemWithRetry $txn.path -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
+    }
+}
+
+function Complete-BuildTransaction($txn) {
+    if ($DryRun -or $null -eq $txn) { return }
+    if (Test-Path $txn.path) { Invoke-RemoveItemWithRetry $txn.path -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
+}
+
+function 构建Agent($cfg = $null, [switch]$SkipPreflight) {
+    return (Invoke-WithMetric "build_agent" {
+        if (-not $SkipPreflight) { Preflight }
+        if ($null -eq $cfg) { $cfg = LoadCfg }
+        Log "开始构建 Agent..."
+        $reusedExistingAgent = $false
+        try {
+            清空Agent目录
+        }
+        catch {
+            $reusedExistingAgent = $true
+            EnsureDir $AgentDir
+            Log ("清空 agent/ 失败，将在现有目录上继续覆盖构建：{0}" -f $_.Exception.Message)
+        }
+        $failures = New-Object System.Collections.Generic.List[string]
+        $stats = [pscustomobject]@{ mirrored = 0; skipped = 0; reused = $reusedExistingAgent }
+        $oldCache = if ($DryRun) { @{} } else { Load-BuildCache }
+        $newCache = @{}
+
+        $count = 0
+        foreach ($m in $cfg.mappings) {
+            try {
+                Need (Test-SafeRelativePath $m.from -AllowDot) ("非法 mapping.from：{0}" -f $m.from)
+                Need (Test-SafeRelativePath $m.to) ("非法 mapping.to：{0}" -f $m.to)
+                $base = Resolve-SourceBase $m.vendor $cfg
+                if ($m.vendor -eq "manual") {
+                    $src = Resolve-ManualImportSkillPath $cfg $m.from -AllowLegacyFallback
+                    Need (-not [string]::IsNullOrWhiteSpace($src)) ("manual 导入不存在或无效：{0}" -f $m.from)
+                }
+                else {
+                    $src = Join-Path $base $m.from
+                    Need (Is-PathInsideOrEqual $src $base) ("mapping.from 越界：{0}" -f $m.from)
+                }
+                $dst = Join-Path $AgentDir $m.to
+                Need (Is-PathInsideOrEqual $dst $AgentDir) ("mapping.to 越界：{0}" -f $m.to)
+
+                if (-not (Test-IsSkillDir $src)) {
+                    Write-Host ("❌ 跳过无效技能（缺少标记文件）：{0}" -f $src) -ForegroundColor Red
+                    continue
+                }
+                $cacheKey = ("mapping|{0}|{1}|{2}" -f $m.vendor, $m.from, $m.to)
+                Mirror-SkillWithCache $src $dst $cacheKey $oldCache $newCache $stats
+                $count++
+            }
+            catch {
+                Write-Host ("❌ 处理技能失败 [{0}/{1}]: {2}" -f $m.vendor, $m.from, $_.Exception.Message) -ForegroundColor Red
+                $failures.Add(("mapping:{0}/{1} => {2}" -f $m.vendor, $m.from, $_.Exception.Message)) | Out-Null
+            }
+        }
+
+        $manualItems = 收集ManualSkills $cfg
+        if ($manualItems.Count -gt 0) {
+            $manualMapped = New-Object System.Collections.Generic.HashSet[string]
+            $existingTo = New-Object System.Collections.Generic.HashSet[string]
+            foreach ($m in $cfg.mappings) {
+                $existingTo.Add($m.to) | Out-Null
+                if ($m.vendor -eq "manual") { $manualMapped.Add($m.from) | Out-Null }
+            }
+
+            foreach ($item in $manualItems) {
+                try {
+                    if ($manualMapped.Contains($item.from)) {
+                        Log ("跳过手动技能（已存在 manual 映射）：{0}" -f $item.from) "WARN"
+                        continue
+                    }
+                    $toSuffix = ($item.from -replace "[\\\\/]", "-")
+                    $to = "manual-$toSuffix"
+                    if ($existingTo.Contains($to)) {
+                        Log ("跳过手动技能（to 冲突）：{0} -> {1}" -f $item.from, $to) "WARN"
+                        continue
+                    }
+                    $src = $item.full
+                    $dst = Join-Path $AgentDir $to
+
+                    if (-not (Test-IsSkillDir $src)) {
+                        Write-Host ("❌ 跳过无效技能（缺少标记文件）：{0}" -f $src) -ForegroundColor Red
+                        continue
+                    }
+                    $cacheKey = ("manual|{0}|{1}" -f $item.from, $to)
+                    Mirror-SkillWithCache $src $dst $cacheKey $oldCache $newCache $stats
+                    $count++
+                }
+                catch {
+                    Write-Host ("❌ 处理手动技能失败 [{0}]: {1}" -f $item.from, $_.Exception.Message) -ForegroundColor Red
+                    $failures.Add(("manual:{0} => {1}" -f $item.from, $_.Exception.Message)) | Out-Null
+                }
+            }
+        }
+
+        # overrides 覆盖层（可选）：同名目录将覆盖 agent 中对应技能
+        foreach ($d in (Get-OverridesDirs)) {
+            try {
+                $dst = Join-Path $AgentDir $d.Name
+                $cacheKey = ("override|{0}" -f $d.Name)
+                Mirror-SkillWithCache $d.FullName $dst $cacheKey $oldCache $newCache $stats
+                Log ("应用覆盖层: {0}" -f $d.Name)
+            }
+            catch {
+                Write-Host ("❌ 应用覆盖层失败 [{0}]: {1}" -f $d.Name, $_.Exception.Message) -ForegroundColor Red
+                $failures.Add(("override:{0} => {1}" -f $d.Name, $_.Exception.Message)) | Out-Null
+            }
+        }
+
+        $nameToPaths = Get-SkillNameConflictBuckets $AgentDir
+        foreach ($name in $nameToPaths.Keys | Sort-Object) {
+            $paths = @($nameToPaths[$name])
+            if ($paths.Count -le 1) { continue }
+            if (Test-SkillNameDuplicateContentAllowed $paths) {
+                Log ("检测到同名同内容技能别名，已跳过冲突：{0}" -f $name)
+                continue
+            }
+            if (Test-SkillNameSystemOverrideAllowed $paths) {
+                Log ("检测到系统技能与普通技能同名，已保留系统技能优先：{0}" -f $name)
+                continue
+            }
+            Write-Host ("❌ 技能名冲突：{0}" -f $name) -ForegroundColor Red
+            foreach ($p in $paths) {
+                Write-Host ("   - {0}" -f $p) -ForegroundColor Red
+            }
+            $failures.Add(("skill-name-conflict:{0} => {1}" -f $name, ($paths -join " | "))) | Out-Null
+        }
+
+        if (-not $DryRun) { Save-BuildCache $newCache }
+        if ($stats.skipped -gt 0) {
+            Log ("增量构建：复用缓存 {0} 项，实际复制 {1} 项。" -f $stats.skipped, $stats.mirrored)
+        }
+        if ($stats.reused) {
+            Log "本次构建未能清空旧 agent/，已按目录增量覆盖；若仍有陈旧技能残留，可在释放相关文件占用后重试。"
+        }
+        Log ("构建完成：agent/ (共 {0} 项技能)" -f $count)
+        return $failures.ToArray()
+    } @{ command = "构建Agent" } -NoHost)
+}
+
+function Resolve-TargetDir([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    if ($path.StartsWith("~")) {
+        $homeDir = [Environment]::GetFolderPath("UserProfile")
+        $path = $path -replace "^~", $homeDir
+    }
+    # Normalize slashes for Windows CMD compatibility
+    $path = $path.Replace("/", "\")
+  
+    if ([System.IO.Path]::IsPathRooted($path)) {
+        return $path
+    }
+    return (Join-Path $Root $path)
+}
+
+function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight) {
+    return (Invoke-WithMetric "apply_targets" {
+        if (-not $SkipPreflight) { Preflight }
+        if ($null -eq $cfg) { $cfg = LoadCfg }
+        $mode = $cfg.sync_mode
+        if ([string]::IsNullOrWhiteSpace($mode)) { $mode = "link" }
+        $failures = New-Object System.Collections.Generic.List[string]
+
+        foreach ($t in $cfg.targets) {
+            try {
+                $target = Resolve-TargetDir $t.path
+                if (-not $target) { continue }
+                Assert-SafeTargetDir $target
+
+                if ($mode -eq "sync") {
+                    EnsureDir $target
+                    RoboMirror $AgentDir $target
+                    Log ("已同步（拷贝）：{0}" -f $t.path)
+                }
+                else {
+                    New-Junction $target $AgentDir
+                    Log ("已关联（链接）：{0} -> agent/" -f $t.path)
+                }
+            }
+            catch {
+                Write-Host ("❌ 同步目标失败 [{0}]: {1}" -f $t.path, $_.Exception.Message) -ForegroundColor Red
+                $failures.Add(("target:{0} => {1}" -f $t.path, $_.Exception.Message)) | Out-Null
+            }
+        }
+        return $failures.ToArray()
+    } @{ command = "应用到ClaudeCodex" } -NoHost)
+}
+function Write-FailureSummary([string]$title, [string[]]$failures, [string]$detailHint = "") {
+    if ($null -eq $failures -or $failures.Count -eq 0) { return }
+    $msg = ("{0}（{1} 项）" -f $title, $failures.Count)
+    if (-not [string]::IsNullOrWhiteSpace($detailHint)) {
+        $msg = ("{0}，{1}" -f $msg, $detailHint)
+    }
+    Write-Host $msg -ForegroundColor Yellow
+    foreach ($f in ($failures | Select-Object -First 10)) {
+        Write-Host ("- {0}" -f $f) -ForegroundColor Yellow
+    }
+    if ($failures.Count -gt 10) {
+        Write-Host ("... 另有 {0} 项未显示" -f ($failures.Count - 10)) -ForegroundColor Yellow
+    }
+}
+
+function 构建生效 {
+    Invoke-WithMetric "build_apply_total" {
+        Preflight
+        $cfg = LoadCfg
+        if ($Locked) {
+            Ensure-LockedState $cfg | Out-Null
+        }
+        $txn = Start-BuildTransaction
+        $needRollback = $false
+
+        # Optimization/Migration check
+        Optimize-Imports $cfg
+
+        Write-BuildSummary $cfg
+        Log "=== 启动构建生效流程 ==="
+        Start-DryRunMirrorCollect
+        try {
+            $failures = @()
+            $buildFailures = 构建Agent $cfg -SkipPreflight
+            if ($buildFailures) { $failures += $buildFailures }
+            if ($buildFailures -and $buildFailures.Count -gt 0) {
+                Log "检测到构建失败，已跳过同步阶段。" "WARN"
+                Write-Host "⚠️ 构建失败，未执行同步。请先修复上方错误后重试【构建生效】。" -ForegroundColor Yellow
+            }
+            else {
+                $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight
+                if ($syncFailures) { $failures += $syncFailures }
+            }
+            Write-FailureSummary "构建生效部分失败" $failures
+            if ($failures.Count -gt 0) { $needRollback = $true }
+            Write-DryRunMirrorSummary "DRYRUN Robocopy 预览（构建生效）"
+        }
+        finally {
+            Stop-DryRunMirrorCollect
+        }
+        if ($needRollback) {
+            Rollback-BuildTransaction $txn
+            Write-Host "⚠️ 已回滚本次构建产物（agent/）。同步目标可能仍需手动重建。" -ForegroundColor Yellow
+        }
+        else {
+            Complete-BuildTransaction $txn
+        }
+        Log "=== 构建生效流程完成 ==="
+    } @{ command = "构建生效" } -NoHost
+}
+
+function 命令导入安装 {
+    Write-Host "可一次性粘贴一条或多条命令，空行结束。示例："
+    Write-Host "  add <repo> --skill <name> [--ref <branch/tag>] [--mode manual|vendor] [--sparse]"
+    Write-Host "  npx skills add <repo> --skill <name> [--ref <branch/tag>] [--mode manual|vendor] [--sparse]"
+    Write-Host "说明："
+    Write-Host "  - 支持连续粘贴多条 add / npx skills add / npx add-skill 命令"
+    Write-Host "  - 行尾用 \\ 可续行，脚本会自动拼接为一条命令"
+    $lines = New-Object System.Collections.Generic.List[string]
+    while ($true) {
+        $line = Read-Host "输入命令"
+        if ([string]::IsNullOrWhiteSpace($line)) { break }
+        $trim = $line.Trim()
+        if ($trim.StartsWith("#") -or $trim.StartsWith("//")) { continue }
+        $lines.Add($line) | Out-Null
+    }
+    if ($lines.Count -eq 0) {
+        Write-Host "未输入参数，已取消。"
+        return
+    }
+
+    $commands = New-Object System.Collections.Generic.List[string]
+    $pending = ""
+    foreach ($raw in $lines) {
+        $part = [string]$raw
+        $trimmed = $part.TrimEnd()
+        $continued = $trimmed.EndsWith("\")
+        if ($continued) {
+            $trimmed = $trimmed.Substring(0, $trimmed.Length - 1).TrimEnd()
+        }
+        if ([string]::IsNullOrWhiteSpace($pending)) { $pending = $trimmed }
+        else { $pending = ("{0} {1}" -f $pending, $trimmed).Trim() }
+        if (-not $continued) {
+            if (-not [string]::IsNullOrWhiteSpace($pending)) { $commands.Add($pending) | Out-Null }
+            $pending = ""
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($pending)) {
+        Write-Host "警告：检测到末行续行符 '\\'，已按当前内容尝试执行。" -ForegroundColor Yellow
+        $commands.Add($pending) | Out-Null
+    }
+
+    $successCount = 0
+    foreach ($line in $commands) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        $lineTrim = $line.Trim()
+        if ($lineTrim.StartsWith("#") -or $lineTrim.StartsWith("//")) { continue }
+        $tokens = Split-Args $line
+        if ($tokens.Count -eq 0) { continue }
+        try {
+            $tokens = Get-AddTokensFromCommandLineTokens $tokens
+            if ($tokens.Count -eq 0) { continue }
+            if (Add-ImportFromArgs $tokens -NoBuild) { $successCount++ }
+        }
+        catch {
+            Write-Host ("❌ 解析失败（已跳过）：{0}" -f $_.Exception.Message) -ForegroundColor Red
+            if ($line -match "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@.+$") {
+                Write-Host "提示：你可能使用了 repo@skill 语法。可改为：npx ""skills add <repo> --skill <path>""" -ForegroundColor Yellow
+            }
+        }
+    }
+    if ($successCount -gt 0) {
+        Write-Host ("多行导入完成：{0} 项。开始【构建生效】..." -f $successCount)
+        Clear-SkillsCache
+        构建生效
+    }
+}
+
+function 单技能安装 {
+    命令导入安装
+}
+ 
+ function Should-ForceCleanTarget($cfg, $SkipForceClean, [string]$kind, [string]$name) {
+    if ($null -eq $cfg -or -not $cfg.update_force) { return $false }
+    if ($null -eq $SkipForceClean) { return $true }
+    $key = "{0}|{1}" -f $kind, $name
+    return (-not $SkipForceClean.ContainsKey($key))
+}
+
+function Get-UpdateParallelism($cfg) {
+    $n = 1
+    if ($null -ne $cfg -and $cfg.PSObject.Properties.Match("update_parallelism").Count -gt 0) {
+        try { $n = [int]$cfg.update_parallelism } catch { $n = 1 }
+    }
+    if ($n -lt 1) { $n = 1 }
+    return $n
+}
+
+function Invoke-ParallelGitPrefetch($cfg, [int]$Parallelism = 1) {
+    if ($DryRun) { return }
+    if ($Parallelism -le 1) { return }
+    if (-not (Get-Command Start-Job -ErrorAction SilentlyContinue)) { return }
+    if ($null -eq $cfg) { return }
+
+    $paths = New-Object System.Collections.Generic.List[string]
+    foreach ($v in @($cfg.vendors)) {
+        $p = VendorPath $v.name
+        if (Test-Path $p) { $paths.Add($p) | Out-Null }
+    }
+    foreach ($i in @($cfg.imports)) {
+        if ($i.mode -ne "manual") { continue }
+        $p = Join-Path $ImportDir $i.name
+        if (Test-Path $p) { $paths.Add($p) | Out-Null }
+    }
+    $paths = @($paths | Select-Object -Unique)
+    if ($paths.Count -eq 0) { return }
+
+    $running = @()
+    $errors = New-Object System.Collections.Generic.List[string]
+    foreach ($p in $paths) {
+        while (@($running).Count -ge $Parallelism) {
+            $done = Wait-Job -Job $running -Any
+            if ($null -eq $done) { break }
+            $output = Receive-Job $done -ErrorAction SilentlyContinue
+            Remove-Job $done -Force -ErrorAction SilentlyContinue
+            $running = @($running | Where-Object { $_.Id -ne $done.Id })
+            if ($output -and $output.ok -eq $false) { $errors.Add([string]$output.msg) | Out-Null }
+        }
+        $job = Start-Job -ScriptBlock {
+            param($repoPath)
+            try {
+                $prevErrorActionPreference = $ErrorActionPreference
+                try {
+                    $ErrorActionPreference = "Continue"
+                    & git -C $repoPath fetch --all --tags 2>$null | Out-Null
+                }
+                finally {
+                    $ErrorActionPreference = $prevErrorActionPreference
+                }
+                if ($LASTEXITCODE -ne 0) {
+                    return [pscustomobject]@{ ok = $false; msg = ("prefetch failed: {0}" -f $repoPath) }
+                }
+                return [pscustomobject]@{ ok = $true; msg = "" }
+            }
+            catch {
+                return [pscustomobject]@{ ok = $false; msg = ("prefetch exception: {0} -> {1}" -f $repoPath, $_.Exception.Message) }
+            }
+        } -ArgumentList $p
+        $running += $job
+    }
+    foreach ($j in @($running)) {
+        Wait-Job $j | Out-Null
+        $output = Receive-Job $j -ErrorAction SilentlyContinue
+        Remove-Job $j -Force -ErrorAction SilentlyContinue
+        if ($output -and $output.ok -eq $false) { $errors.Add([string]$output.msg) | Out-Null }
+    }
+    if ($errors.Count -gt 0) {
+        Log ("并行预取完成（部分失败 {0} 项，后续将按原流程继续）。" -f $errors.Count) "WARN"
+    }
+    else {
+        Log ("并行预取完成：{0} 个仓库路径（并发={1}）。" -f $paths.Count, $Parallelism)
+    }
+}
+
+function Get-CurrentRepoCommit([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    if (-not (Test-Path $path)) { return $null }
+    Push-Location $path
+    try {
+        return (Invoke-GitCapture @("rev-parse", "HEAD"))
+    }
+    finally { Pop-Location }
+}
+
+function Resolve-RemoteCommit([string]$repo, [string]$ref) {
+    $targetRef = if ([string]::IsNullOrWhiteSpace($ref)) { "main" } else { $ref }
+    $candidates = @(
+        $targetRef,
+        ("refs/heads/{0}" -f $targetRef),
+        ("refs/tags/{0}^{}" -f $targetRef),
+        ("refs/tags/{0}" -f $targetRef)
+    )
+    foreach ($candidate in $candidates) {
+        $line = Invoke-GitCapture @("ls-remote", $repo, $candidate)
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        if ($line -match "^[0-9a-fA-F]{40}") {
+            return (($line -split "\s+")[0]).Trim()
+        }
+    }
+    return $null
+}
+
+function Get-UpdatePlanItems($cfg) {
+    $items = @()
+    foreach ($v in @($cfg.vendors)) {
+        $ref = if ([string]::IsNullOrWhiteSpace([string]$v.ref)) { "main" } else { [string]$v.ref }
+        $current = Get-CurrentRepoCommit (VendorPath $v.name)
+        $remote = Resolve-RemoteCommit ([string]$v.repo) $ref
+        $items += [pscustomobject]@{
+            type = "vendor"
+            name = [string]$v.name
+            ref = $ref
+            current = if ([string]::IsNullOrWhiteSpace($current)) { "missing" } else { $current }
+            target = if ([string]::IsNullOrWhiteSpace($remote)) { "unknown" } else { $remote }
+            changed = (-not [string]::IsNullOrWhiteSpace($remote)) -and ($remote -ne $current)
+        }
+    }
+
+    foreach ($i in @($cfg.imports)) {
+        if ($i.mode -eq "vendor") { continue }
+        $name = [string]$i.name
+        $ref = if ([string]::IsNullOrWhiteSpace([string]$i.ref)) { "main" } else { [string]$i.ref }
+        $path = Join-Path $ImportDir $name
+        $current = Get-CurrentRepoCommit $path
+        $remote = Resolve-RemoteCommit ([string]$i.repo) $ref
+        $items += [pscustomobject]@{
+            type = "import"
+            name = $name
+            ref = $ref
+            current = if ([string]::IsNullOrWhiteSpace($current)) { "missing" } else { $current }
+            target = if ([string]::IsNullOrWhiteSpace($remote)) { "unknown" } else { $remote }
+            changed = (-not [string]::IsNullOrWhiteSpace($remote)) -and ($remote -ne $current)
+        }
+    }
+    return @($items)
+}
+
+function Show-UpdatePlan($cfg) {
+    Write-Host "=== 更新预览（--plan）==="
+    $items = Get-UpdatePlanItems $cfg
+    if ($items.Count -eq 0) {
+        Write-Host "未发现可规划项（vendors/imports 为空）。"
+        return @()
+    }
+    $changed = @($items | Where-Object { $_.changed })
+    foreach ($it in $items) {
+        $mark = if ($it.changed) { "UPGRADE" } else { "UNCHANGED" }
+        Write-Host ("[{0}] {1}/{2} ref={3}" -f $mark, $it.type, $it.name, $it.ref)
+        Write-Host ("  current: {0}" -f $it.current)
+        Write-Host ("  target : {0}" -f $it.target)
+    }
+    Write-Host ("计划摘要：total={0}, upgrade={1}, unchanged={2}" -f $items.Count, $changed.Count, ($items.Count - $changed.Count))
+    return $items
+}
+
+function 更新Vendor($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $null, [switch]$SkipFetch) {
+    return (Invoke-WithMetric "update_vendor" {
+        if (-not $SkipPreflight) { Preflight }
+        if ($null -eq $cfg) { $cfg = LoadCfg }
+        $failures = New-Object System.Collections.Generic.List[string]
+
+        foreach ($v in $cfg.vendors) {
+            try {
+                $path = VendorPath $v.name
+                if (-not (Test-Path $path)) {
+                    Write-Host ("❌ 未找到 vendor/{0} (跳过)" -f $v.name) -ForegroundColor Red
+                    continue 
+                }
+                if ([string]::IsNullOrWhiteSpace($v.ref)) { $v.ref = "main" }
+
+                Push-Location $path
+                try {
+                    $forceClean = Should-ForceCleanTarget $cfg $SkipForceClean "vendor" $v.name
+                    Git-HardResetClean $forceClean
+                    if (-not $SkipFetch) {
+                        Invoke-Git @("fetch", "--all", "--tags")
+                    }
+                    $sparsePaths = @()
+                    foreach ($i in $cfg.imports) {
+                        if ($i.mode -ne "vendor") { continue }
+                        if ($i.name -ne $v.name) { continue }
+                        if (-not $i.sparse) { continue }
+                        $p = To-GitPath (Normalize-SkillPath $i.skill)
+                        if ($p -and $p -ne ".") { $sparsePaths += $p }
+                    }
+                    foreach ($m in $cfg.mappings) {
+                        if ($m.vendor -ne $v.name) { continue }
+                        $p = To-GitPath (Normalize-SkillPath $m.from)
+                        if ($p -and $p -ne ".") { $sparsePaths += $p }
+                    }
+                    $sparsePaths = $sparsePaths | Select-Object -Unique
+                    if ($sparsePaths.Count -gt 0) {
+                        Invoke-Git @("sparse-checkout", "init", "--cone")
+                        Invoke-Git (@("sparse-checkout", "set") + $sparsePaths)
+                    }
+                    else {
+                        try { Invoke-Git @("sparse-checkout", "disable") } catch {}
+                    }
+                    Invoke-Git @("checkout", $v.ref)
+                    $branch = Get-GitHeadBranch
+                    if ($branch -and (Has-GitUpstream)) {
+                        Invoke-Git @("pull")
+                    }
+                    else {
+                        Log ("跳过 git pull：{0} 处于 detached HEAD 或无 upstream。" -f $v.name)
+                    }
+                }
+                finally {
+                    Pop-Location
+                }
+            }
+            catch {
+                Write-Host ("❌ 更新失败 [{0}]: {1}" -f $v.name, $_.Exception.Message) -ForegroundColor Red
+                $failures.Add(("vendor:{0} => {1}" -f $v.name, $_.Exception.Message)) | Out-Null
+            }
+        }
+        if ($failures.Count -eq 0) {
+            Write-Host "上游仓库更新完成。"
+        }
+        else {
+            Write-Host ("上游仓库更新完成（部分失败：{0} 项）。" -f $failures.Count) -ForegroundColor Yellow
+        }
+        Clear-SkillsCache
+        return $failures.ToArray()
+    } @{ command = "更新Vendor" } -NoHost)
+}
+
+function 更新Imports($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $null, [switch]$SkipFetch) {
+    return (Invoke-WithMetric "update_imports" {
+        if (-not $SkipPreflight) { Preflight }
+        if ($null -eq $cfg) { $cfg = LoadCfg }
+        $cfgRaw = if (Test-Path $CfgPath) { Get-Content $CfgPath -Raw } else { "" }
+        $cfgChanged = $false
+
+        # Optimization/Migration before update
+        Optimize-Imports $cfg
+
+        if ($cfg.imports.Count -eq 0) { return @() }
+        $failures = New-Object System.Collections.Generic.List[string]
+        foreach ($i in $cfg.imports) {
+            if ($i.mode -ne "manual") { continue }
+            try {
+                $name = $i.name
+                $repo = Normalize-RepoUrl $i.repo
+                $ref = $i.ref
+                if ([string]::IsNullOrWhiteSpace($ref)) { $ref = "main" }
+                $skillPath = Normalize-SkillPath $i.skill
+                $gitSkillPath = To-GitPath $skillPath
+                $sparse = [bool]$i.sparse
+                if ($gitSkillPath -eq "." -and $sparse) { $sparse = $false }
+                $sparsePath = $null
+                if ($sparse) { $sparsePath = $gitSkillPath }
+                $cache = Join-Path $ImportDir $name
+
+                $forceClean = Should-ForceCleanTarget $cfg $SkipForceClean "import" $i.name
+                try {
+                    Ensure-Repo $cache $repo $ref $sparsePath $forceClean $false (-not $SkipFetch)
+                }
+                catch {
+                    $lockPath = Join-Path $cache ".git\index.lock"
+                    $fallbackSkillPath = Resolve-SkillPath $cache $skillPath
+                    $fallbackSrc = if ($fallbackSkillPath -eq ".") { $cache } else { Join-Path $cache $fallbackSkillPath }
+                    if ((Test-Path -LiteralPath $lockPath -PathType Leaf) -and (Test-IsSkillDir $fallbackSrc)) {
+                        Log ("导入更新遇到 Git 索引锁异常，已保留现有缓存：{0} [{1}]；原因：{2}" -f $name, $repo, $_.Exception.Message) "WARN"
+                        if ($fallbackSkillPath -ne $skillPath) {
+                            $i.skill = $fallbackSkillPath
+                            $cfgChanged = $true
+                            $skillPath = $fallbackSkillPath
+                        }
+                    }
+                    else {
+                        throw
+                    }
+                }
+                $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
+                if (-not (Test-IsSkillDir $src)) {
+                    $resolvedSkillPath = Resolve-SkillPath $cache $skillPath
+                    if ($resolvedSkillPath -ne $skillPath) {
+                        $i.skill = $resolvedSkillPath
+                        $cfgChanged = $true
+                        $skillPath = $resolvedSkillPath
+                        $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
+                        Log ("导入技能路径已自动修正：{0} -> {1} [{2}]" -f [string]$i.name, $skillPath, $repo) "WARN"
+                    }
+                }
+                Need (Test-IsSkillDir $src) "未找到技能入口文件（SKILL.md/AGENTS.md/GEMINI.md/CLAUDE.md）：$src"
+                Write-Host ("已更新导入技能缓存：{0}" -f $name)
+            }
+            catch {
+                Write-Host ("❌ 导入更新失败 [{0}]: {1}" -f $i.name, $_.Exception.Message) -ForegroundColor Red
+                $failures.Add(("import:{0} => {1}" -f $i.name, $_.Exception.Message)) | Out-Null
+            }
+        }
+        if ($cfgChanged) {
+            SaveCfgSafe $cfg $cfgRaw
+        }
+        Clear-SkillsCache
+        return $failures.ToArray()
+    } @{ command = "更新Imports" } -NoHost)
+}
+
+function 更新 {
+    Invoke-WithMetric "update_total" {
+        $cfg = LoadCfg
+        if ($Locked -and ($Plan -or $Upgrade)) {
+            throw "-Locked 不能与 -Plan 或 -Upgrade 同时使用。"
+        }
+        if ($Plan) {
+            Preflight
+            Show-UpdatePlan $cfg | Out-Null
+            return
+        }
+        if ($Locked) {
+            $lock = Load-LockData
+            Assert-LockMatchesCfg $cfg $lock
+            Apply-LockToWorkspace $cfg $lock
+            构建生效
+            Write-Host "已按锁文件固定版本完成更新与构建。"
+            return
+        }
+        $skipForceClean = @{}
+        if (-not (Confirm-UpdateForce $cfg ([ref]$skipForceClean))) { return }
+        if (Skip-IfDryRun "更新") { return }
+        Preflight
+        $parallelism = Get-UpdateParallelism $cfg
+        $didPrefetch = $false
+        if ($parallelism -gt 1) {
+            Invoke-ParallelGitPrefetch $cfg $parallelism
+            $didPrefetch = $true
+        }
+        $failures = @()
+        $importFailures = 更新Imports $cfg -SkipPreflight -SkipForceClean $skipForceClean -SkipFetch:$didPrefetch
+        if ($importFailures) { $failures += $importFailures }
+        $vendorFailures = 更新Vendor $cfg -SkipPreflight -SkipForceClean $skipForceClean -SkipFetch:$didPrefetch
+        if ($vendorFailures) { $failures += $vendorFailures }
+        构建生效
+        if ($Upgrade -and $failures.Count -eq 0) {
+            Save-LockData $cfg | Out-Null
+            Write-Host ("已刷新锁文件：{0}" -f (Get-LockPath))
+        }
+        if ($failures.Count -gt 0) {
+            Write-FailureSummary "更新部分失败" $failures "请查看上方错误并重试。"
+        }
+        else {
+            Write-Host "更新完成。若某 CLI 未立即识别新技能，重启该 CLI 会话即可。"
+        }
+    } @{ command = "更新" } -NoHost
+}
+ 
+ function Parse-KeyValueToken([string]$token, [string]$flagName) {
+    Need (-not [string]::IsNullOrWhiteSpace($token)) ("{0} 参数不能为空" -f $flagName)
+    $pair = $token.Split("=", 2)
+    Need ($pair.Count -eq 2) ("{0} 参数格式必须是 KEY=VALUE：{1}" -f $flagName, $token)
+    $key = $pair[0].Trim()
+    Need (-not [string]::IsNullOrWhiteSpace($key)) ("{0} 参数的 KEY 不能为空：{1}" -f $flagName, $token)
+    return [pscustomobject]@{
+        key = $key
+        value = $pair[1]
+    }
+}
+
+function Normalize-McpProcessArgs([string[]]$processArgs) {
+    $normalized = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $processArgs) { return @() }
+    for ($i = 0; $i -lt $processArgs.Count; $i++) {
+        $t = [string]$processArgs[$i]
+        if ($t -eq "--arg") {
+            if ($i + 1 -lt $processArgs.Count) {
+                $normalized.Add([string]$processArgs[++$i]) | Out-Null
+            }
+            continue
+        }
+        if ($t.ToLowerInvariant().StartsWith("--arg=")) {
+            $normalized.Add($t.Substring(6)) | Out-Null
+            continue
+        }
+        $normalized.Add($t) | Out-Null
+    }
+    return $normalized.ToArray()
+}
+
+function Parse-McpStdioCommandLine([string]$name, [string]$commandLine) {
+    $tokens = Split-Args $commandLine
+    $tokens = Normalize-McpProcessArgs @($tokens)
+    Need ($tokens.Count -gt 0) ("MCP 服务命令不能为空：{0}" -f $name)
+    return [pscustomobject]@{
+        command = [string]$tokens[0]
+        args = if ($tokens.Count -gt 1) { @($tokens[1..($tokens.Count - 1)]) } else { @() }
+    }
+}
+
+function Parse-McpInstallArgs([string[]]$tokens) {
+    Need ($tokens -and $tokens.Count -gt 0) "缺少 MCP 服务参数。示例：安装MCP context7 --cmd npx -- -y @upstash/context7-mcp"
+    $result = [ordered]@{
+        name = $null
+        transport = "stdio"
+        command = $null
+        args = @()
+        url = $null
+        env = @{}
+        headers = @{}
+    }
+    $collectProcessArgs = $false
+
+    for ($i = 0; $i -lt $tokens.Count; $i++) {
+        $t = $tokens[$i]
+        if ($t -eq "--") {
+            if ($i + 1 -lt $tokens.Count) {
+                $result.args += $tokens[($i + 1)..($tokens.Count - 1)]
+            }
+            break
+        }
+
+        if ($collectProcessArgs) {
+            $result.args += $t
+            continue
+        }
+
+        if (-not $t.StartsWith("-")) {
+            if (-not $result.name) {
+                $result.name = $t
+                continue
+            }
+            # Backward compatible: allow "name <cmd> <args...>" without --cmd or "--".
+            if ($result.transport -eq "stdio" -and [string]::IsNullOrWhiteSpace($result.command) -and [string]::IsNullOrWhiteSpace($result.url)) {
+                $collectProcessArgs = $true
+                $result.args += $t
+                continue
+            }
+            $result.args += $t
+            continue
+        }
+
+        $key = $t.ToLowerInvariant()
+        if ($key -eq "--transport" -or $key -eq "-t") {
+            Need ($i + 1 -lt $tokens.Count) ("参数缺少值：{0}" -f $t)
+            $nextVal = [string]$tokens[++$i]
+            Need (-not $nextVal.StartsWith("-")) ("参数缺少值：{0}" -f $t)
+            $result.transport = $nextVal
+            continue
+        }
+        if ($key -eq "--cmd" -or $key -eq "--command") {
+            Need ($i + 1 -lt $tokens.Count) ("参数缺少值：{0}" -f $t)
+            $nextVal = [string]$tokens[++$i]
+            Need (-not $nextVal.StartsWith("-")) ("参数缺少值：{0}" -f $t)
+            $result.command = $nextVal
+            continue
+        }
+        if ($key -eq "--url") {
+            Need ($i + 1 -lt $tokens.Count) "参数缺少值：--url"
+            $nextVal = [string]$tokens[++$i]
+            Need (-not $nextVal.StartsWith("-")) "参数缺少值：--url"
+            $result.url = $nextVal
+            continue
+        }
+        if ($key -eq "--arg") {
+            Need ($i + 1 -lt $tokens.Count) "参数缺少值：--arg"
+            $result.args += $tokens[++$i]
+            continue
+        }
+        if ($key -eq "--env") {
+            Need ($i + 1 -lt $tokens.Count) "参数缺少值：--env"
+            $pair = Parse-KeyValueToken $tokens[++$i] "--env"
+            $result.env[$pair.key] = $pair.value
+            continue
+        }
+        if ($key -eq "--header") {
+            Need ($i + 1 -lt $tokens.Count) "参数缺少值：--header"
+            $pair = Parse-KeyValueToken $tokens[++$i] "--header"
+            $result.headers[$pair.key] = $pair.value
+            continue
+        }
+
+        # Backward compatible: once name is present, unknown options in stdio mode
+        # are treated as process arguments, so users can omit "--".
+        if (-not [string]::IsNullOrWhiteSpace($result.name) -and $result.transport -eq "stdio" -and [string]::IsNullOrWhiteSpace($result.command) -and [string]::IsNullOrWhiteSpace($result.url)) {
+            $collectProcessArgs = $true
+            $result.args += $t
+            continue
+        }
+        throw ("未知参数：{0}" -f $t)
+    }
+
+    Need (-not [string]::IsNullOrWhiteSpace($result.name)) "缺少 MCP 服务名称。示例：安装MCP context7 --cmd npx -- -y @upstash/context7-mcp"
+    $result.name = Normalize-NameWithNotice $result.name "MCP 服务名"
+
+    if (-not [string]::IsNullOrWhiteSpace($result.transport)) {
+        $result.transport = $result.transport.Trim().ToLowerInvariant()
+    }
+    if ([string]::IsNullOrWhiteSpace($result.transport)) { $result.transport = "stdio" }
+    Need (($result.transport -eq "stdio") -or ($result.transport -eq "sse") -or ($result.transport -eq "http")) "transport 仅支持 stdio/sse/http"
+
+    if ($result.transport -eq "stdio") {
+        $result.args = Normalize-McpProcessArgs @($result.args)
+        if ([string]::IsNullOrWhiteSpace($result.command) -and $result.args.Count -gt 0) {
+            $result.command = [string]$result.args[0]
+            if ($result.args.Count -gt 1) {
+                $result.args = $result.args[1..($result.args.Count - 1)]
+            }
+            else {
+                $result.args = @()
+            }
+        }
+        Need (-not [string]::IsNullOrWhiteSpace($result.command)) "stdio MCP 需要 --cmd/--command"
+        if ($result.command.Contains(" ") -and $result.args.Count -eq 0) {
+            $parts = Split-Args $result.command
+            Need ($parts.Count -gt 0) "无法解析 --cmd 命令"
+            $result.command = $parts[0]
+            if ($parts.Count -gt 1) {
+                $result.args = $parts[1..($parts.Count - 1)]
+            }
+        }
+    }
+    else {
+        Need (-not [string]::IsNullOrWhiteSpace($result.url)) "sse/http MCP 需要 --url"
+    }
+
+    return [pscustomobject]$result
+}
+
+function New-McpServerObject($parsed) {
+    $obj = [ordered]@{
+        name = $parsed.name
+        transport = $parsed.transport
+    }
+    if ($parsed.transport -eq "stdio") {
+        $obj.command = $parsed.command
+        $obj.args = @($parsed.args)
+        if ($parsed.env.Count -gt 0) { $obj.env = $parsed.env }
+    }
+    else {
+        $obj.url = $parsed.url
+        if ($parsed.headers.Count -gt 0) { $obj.headers = $parsed.headers }
+    }
+    return [pscustomobject]$obj
+}
+
+function Convert-McpServersToConfigMap($servers) {
+    $map = [ordered]@{}
+    if ($null -eq $servers) { return [pscustomobject]$map }
+
+    foreach ($s in $servers) {
+        if ([string]::IsNullOrWhiteSpace([string]$s.name)) { continue }
+        $entry = [ordered]@{}
+        $transport = if ([string]::IsNullOrWhiteSpace([string]$s.transport)) { "stdio" } else { [string]$s.transport }
+        $entry.transport = $transport
+        if ($transport -eq "stdio") {
+            if (-not [string]::IsNullOrWhiteSpace([string]$s.command)) { $entry.command = [string]$s.command }
+            if ($s.PSObject.Properties.Match("args").Count -gt 0 -and $s.args -ne $null) { $entry.args = @($s.args) }
+            if ($s.PSObject.Properties.Match("env").Count -gt 0 -and $s.env -ne $null) { $entry.env = $s.env }
+        }
+        else {
+            if ($s.PSObject.Properties.Match("url").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$s.url)) { $entry.url = [string]$s.url }
+            if ($s.PSObject.Properties.Match("headers").Count -gt 0 -and $s.headers -ne $null) { $entry.headers = $s.headers }
+        }
+        $map[[string]$s.name] = [pscustomobject]$entry
+    }
+    return [pscustomobject]$map
+}
+
+function Convert-McpServersToGeminiConfigMap($servers) {
+    $map = [ordered]@{}
+    if ($null -eq $servers) { return [pscustomobject]$map }
+
+    foreach ($s in $servers) {
+        if ([string]::IsNullOrWhiteSpace([string]$s.name)) { continue }
+        $entry = [ordered]@{}
+        $transport = if ([string]::IsNullOrWhiteSpace([string]$s.transport)) { "stdio" } else { ([string]$s.transport).Trim().ToLowerInvariant() }
+        if ($transport -eq "stdio") {
+            if (-not [string]::IsNullOrWhiteSpace([string]$s.command)) { $entry.command = [string]$s.command }
+            if ($s.PSObject.Properties.Match("args").Count -gt 0 -and $s.args -ne $null) { $entry.args = @($s.args) }
+            if ($s.PSObject.Properties.Match("env").Count -gt 0 -and $s.env -ne $null) { $entry.env = $s.env }
+        }
+        else {
+            if ($s.PSObject.Properties.Match("url").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$s.url)) {
+                if ($transport -eq "http") { $entry.httpUrl = [string]$s.url }
+                else { $entry.url = [string]$s.url }
+            }
+            if ($s.PSObject.Properties.Match("headers").Count -gt 0 -and $s.headers -ne $null) { $entry.headers = $s.headers }
+        }
+        $map[[string]$s.name] = [pscustomobject]$entry
+    }
+    return [pscustomobject]$map
+}
+
+function Get-NativeMcpKeyValueFlags($data, [string]$flagName) {
+    $flags = @()
+    if ($null -eq $data) { return $flags }
+
+    if ($data -is [hashtable] -or $data -is [System.Collections.IDictionary]) {
+        foreach ($k in $data.Keys) {
+            $key = [string]$k
+            if ([string]::IsNullOrWhiteSpace($key)) { continue }
+            $value = [string]$data[$k]
+            $flags += @($flagName, ("{0}={1}" -f $key, $value))
+        }
+        return $flags
+    }
+
+    if ($data -is [pscustomobject]) {
+        foreach ($p in $data.PSObject.Properties) {
+            $key = [string]$p.Name
+            if ([string]::IsNullOrWhiteSpace($key)) { continue }
+            $value = [string]$p.Value
+            $flags += @($flagName, ("{0}={1}" -f $key, $value))
+        }
+        return $flags
+    }
+
+    return $flags
+}
+
+function Get-NativeMcpAddArgs($server, [string]$scope = "user") {
+    Need ($null -ne $server) "MCP 服务不能为空"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$server.name)) "MCP 服务缺少 name"
+    Need (($scope -eq "local") -or ($scope -eq "user")) ("不支持的 scope：{0}" -f $scope)
+
+    $name = [string]$server.name
+    $transport = if ([string]::IsNullOrWhiteSpace([string]$server.transport)) { "stdio" } else { [string]$server.transport }
+    $transport = $transport.Trim().ToLowerInvariant()
+    $args = @("mcp", "add", "--scope", $scope)
+
+    if ($transport -eq "stdio") {
+        $envFlags = @()
+        if ($server.PSObject.Properties.Match("env").Count -gt 0) {
+            $envFlags = Get-NativeMcpKeyValueFlags $server.env "-e"
+        }
+        if ($envFlags.Count -gt 0) { $args += $envFlags }
+        $args += @($name, "--")
+        $cmd = [string]$server.command
+        Need (-not [string]::IsNullOrWhiteSpace($cmd)) ("stdio MCP 缺少 command：{0}" -f $name)
+        $args += $cmd
+        if ($server.PSObject.Properties.Match("args").Count -gt 0 -and $server.args -ne $null) {
+            $args += @($server.args | ForEach-Object { [string]$_ })
+        }
+        return $args
+    }
+
+    $headerFlags = @()
+    if ($server.PSObject.Properties.Match("headers").Count -gt 0) {
+        $headerFlags = Get-NativeMcpKeyValueFlags $server.headers "-H"
+    }
+    if ($headerFlags.Count -gt 0) { $args += $headerFlags }
+    $url = if ($server.PSObject.Properties.Match("url").Count -gt 0) { [string]$server.url } else { "" }
+    Need (-not [string]::IsNullOrWhiteSpace($url)) ("{0} MCP 缺少 url：{1}" -f $transport, $name)
+    $args += @("--transport", $transport, $name, $url)
+    return $args
+}
+
+function Invoke-NativeMcpSync($servers) {
+    if (-not (Get-Command "claude" -ErrorAction SilentlyContinue)) {
+        Log "未检测到 claude 命令，已跳过原生 MCP 同步（仅写入 .mcp.json）。" "WARN"
+        return
+    }
+    if ($null -eq $servers -or $servers.Count -eq 0) {
+        Log "当前 mcp_servers 为空，跳过原生 MCP 注册。" "WARN"
+        return
+    }
+
+    foreach ($s in $servers) {
+        $scope = "user"
+        try {
+            $args = Get-NativeMcpAddArgs $s $scope
+            $cmdText = "claude {0}" -f (($args | ForEach-Object { [string]$_ }) -join " ")
+            if ($DryRun) {
+                Write-Host ("DRYRUN：将执行原生 MCP 同步 -> {0}" -f $cmdText)
+                continue
+            }
+            Push-Location $script:Root
+            try { & claude @args | Out-Host } finally { Pop-Location }
+            Log ("已同步原生 MCP：{0}（scope={1}）" -f [string]$s.name, $scope)
+        }
+        catch {
+            Log ("原生 MCP 同步失败（已忽略）：{0}（scope={1}） -> {2}" -f [string]$s.name, $scope, $_.Exception.Message) "WARN"
+        }
+    }
+}
+
+function Get-NativeMcpCleanupCommands([string]$name) {
+    Need (-not [string]::IsNullOrWhiteSpace($name)) "MCP 服务名不能为空"
+    return @(
+        [pscustomobject]@{ command = "claude"; args = @("mcp", "remove", $name, "--scope", "user"); project = $false }
+        [pscustomobject]@{ command = "claude"; args = @("mcp", "remove", $name); project = $true }
+    )
+}
+
+function Invoke-NativeMcpCleanup([string]$name) {
+    $ops = Get-NativeMcpCleanupCommands $name
+    foreach ($op in $ops) {
+        if (-not (Get-Command $op.command -ErrorAction SilentlyContinue)) { continue }
+        $cmdText = "{0} {1}" -f $op.command, (($op.args | ForEach-Object { [string]$_ }) -join " ")
+        if ($DryRun) {
+            Write-Host ("DRYRUN：清理原生 MCP -> {0}" -f $cmdText)
+            continue
+        }
+        try {
+            if ($op.project) {
+                Push-Location $script:Root
+                try { & $op.command @($op.args) | Out-Host } finally { Pop-Location }
+            }
+            else {
+                & $op.command @($op.args) | Out-Host
+            }
+            Log ("已执行原生 MCP 清理：{0}" -f $cmdText)
+        }
+        catch {
+            Log ("原生 MCP 清理失败（已忽略）：{0} -> {1}" -f $cmdText, $_.Exception.Message) "WARN"
+        }
+    }
+}
+
+function Build-GeminiSettingsPayload([string]$existingContent, $servers) {
+    $base = [ordered]@{}
+    if (-not [string]::IsNullOrWhiteSpace($existingContent)) {
+        try {
+            $parsed = $existingContent | ConvertFrom-Json
+            if ($parsed -ne $null) {
+                foreach ($p in $parsed.PSObject.Properties) {
+                    $base[[string]$p.Name] = $p.Value
+                }
+            }
+        }
+        catch {
+            Log ("Gemini settings.json 解析失败，将使用最小配置重建：{0}" -f $_.Exception.Message) "WARN"
+        }
+    }
+    $base["mcpServers"] = Convert-McpServersToGeminiConfigMap $servers
+    return [pscustomobject]$base
+}
+
+function ConvertTo-TomlBasicValue($value) {
+    if ($null -eq $value) { return '""' }
+    if ($value -is [bool]) { return ($(if ($value) { "true" } else { "false" })) }
+    if ($value -is [int] -or $value -is [long] -or $value -is [double] -or $value -is [decimal]) { return [string]$value }
+    $text = [string]$value
+    $text = $text.Replace("\", "\\").Replace('"', '\"')
+    return ('"{0}"' -f $text)
+}
+
+function Build-CodexConfigToml([string]$existingToml, $servers) {
+    $lines = @()
+    if (-not [string]::IsNullOrWhiteSpace($existingToml)) {
+        $lines = $existingToml -split "`r?`n"
+    }
+    $kept = New-Object System.Collections.Generic.List[string]
+    $skipMcpSection = $false
+    foreach ($line in $lines) {
+        if ($line -match '^\s*\[mcp_servers\.[^\]]+\]\s*$') {
+            $skipMcpSection = $true
+            continue
+        }
+        if ($skipMcpSection -and $line -match '^\s*\[[^\]]+\]\s*$') {
+            $skipMcpSection = $false
+        }
+        if (-not $skipMcpSection) {
+            $kept.Add($line) | Out-Null
+        }
+    }
+
+    while ($kept.Count -gt 0 -and [string]::IsNullOrWhiteSpace($kept[$kept.Count - 1])) {
+        $kept.RemoveAt($kept.Count - 1)
+    }
+
+    $output = New-Object System.Collections.Generic.List[string]
+    $output.AddRange($kept)
+
+    $map = Convert-McpServersToConfigMap $servers
+    $names = @($map.PSObject.Properties.Name | Sort-Object)
+    if ($names.Count -gt 0) {
+        if ($output.Count -gt 0) { $output.Add("") | Out-Null }
+        foreach ($name in $names) {
+            $entry = $map.$name
+            $output.Add(("[mcp_servers.{0}]" -f $name)) | Out-Null
+            foreach ($prop in $entry.PSObject.Properties) {
+                $key = [string]$prop.Name
+                $val = $prop.Value
+                if ($null -eq $val) { continue }
+                if ($val -is [Array]) {
+                    $arr = @($val | ForEach-Object { ConvertTo-TomlBasicValue $_ })
+                    $output.Add(("{0} = [{1}]" -f $key, ($arr -join ", "))) | Out-Null
+                    continue
+                }
+                if ($val -is [hashtable] -or $val -is [System.Collections.IDictionary] -or $val -is [pscustomobject]) {
+                    $dict = @{}
+                    if ($val -is [pscustomobject]) {
+                        foreach ($p in $val.PSObject.Properties) { $dict[[string]$p.Name] = $p.Value }
+                    }
+                    else {
+                        foreach ($k in $val.Keys) { $dict[[string]$k] = $val[$k] }
+                    }
+                    $pairs = @($dict.Keys | Sort-Object | ForEach-Object { "{0} = {1}" -f $_, (ConvertTo-TomlBasicValue $dict[$_]) })
+                    $output.Add(("{0} = {{ {1} }}" -f $key, ($pairs -join ", "))) | Out-Null
+                    continue
+                }
+                $output.Add(("{0} = {1}" -f $key, (ConvertTo-TomlBasicValue $val))) | Out-Null
+            }
+            $output.Add("") | Out-Null
+        }
+        while ($output.Count -gt 0 -and [string]::IsNullOrWhiteSpace($output[$output.Count - 1])) {
+            $output.RemoveAt($output.Count - 1)
+        }
+    }
+
+    return ($output -join "`r`n")
+}
+
+function Resolve-GeminiAntigravityRootsFromCandidates($paths) {
+    $roots = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if ($null -eq $paths) { return @() }
+    $token = ".gemini\antigravity"
+    $tokenLower = $token.ToLowerInvariant()
+    foreach ($p in $paths) {
+        if ([string]::IsNullOrWhiteSpace([string]$p)) { continue }
+        $norm = ([string]$p).Replace("/", "\")
+        $lower = $norm.ToLowerInvariant()
+        $searchStart = 0
+        while ($searchStart -lt $lower.Length) {
+            $idx = $lower.IndexOf($tokenLower, $searchStart)
+            if ($idx -lt 0) { break }
+            if ($idx -gt 0 -and $norm[$idx - 1] -ne '\') {
+                $searchStart = $idx + 1
+                continue
+            }
+            $end = $idx + $token.Length
+            # Require a directory boundary to avoid false matches like antigravity-backup.
+            if ($end -lt $norm.Length -and $norm[$end] -ne '\') {
+                $searchStart = $idx + 1
+                continue
+            }
+            $root = $norm.Substring(0, $idx + $token.Length)
+            if (-not [string]::IsNullOrWhiteSpace($root)) { $roots.Add($root) | Out-Null }
+            $searchStart = $idx + $token.Length
+        }
+    }
+    # Keep array shape when only one root is found.
+    return ,@($roots | Sort-Object)
+}
+
+function Get-TraeProjectMcpConfigPath([string]$repoRoot) {
+    Need (-not [string]::IsNullOrWhiteSpace($repoRoot)) "repoRoot 不能为空"
+    return (Join-Path (Join-Path $repoRoot ".trae") "mcp.json")
+}
+
+function Get-McpTargetCandidatePaths($cfg) {
+    $paths = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $cfg) { return @() }
+    if ($cfg.PSObject.Properties.Match("mcp_targets").Count -gt 0 -and $cfg.mcp_targets -ne $null) {
+        foreach ($mt in $cfg.mcp_targets) {
+            if ($mt -is [string]) {
+                if (-not [string]::IsNullOrWhiteSpace($mt)) { $paths.Add($mt) | Out-Null }
+            }
+            elseif ($mt.PSObject.Properties.Match("path").Count -gt 0) {
+                $v = [string]$mt.path
+                if (-not [string]::IsNullOrWhiteSpace($v)) { $paths.Add($v) | Out-Null }
+            }
+        }
+    }
+    foreach ($t in $cfg.targets) {
+        if ($t.PSObject.Properties.Match("path").Count -gt 0) {
+            $v = [string]$t.path
+            if (-not [string]::IsNullOrWhiteSpace($v)) { $paths.Add($v) | Out-Null }
+        }
+    }
+    $resolved = New-Object System.Collections.Generic.List[string]
+    foreach ($path in $paths) {
+        $r = Resolve-TargetDir $path
+        if (-not [string]::IsNullOrWhiteSpace($r)) { $resolved.Add($r.Replace("/", "\")) | Out-Null }
+    }
+    return @($resolved)
+}
+
+function Resolve-McpTargetRootsFromCfg($cfg) {
+    $roots = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if ($null -eq $cfg) { return @() }
+
+    $candidates = Get-McpTargetCandidatePaths $cfg
+    foreach ($path in $candidates) {
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        $norm = $path.Replace("/", "\")
+        $lower = $norm.ToLowerInvariant()
+
+        $dotDirs = @(".claude", ".codex", ".gemini", ".trae")
+        $matched = $false
+        $bestIdx = -1
+        $bestNeedleLen = 0
+        foreach ($dotDir in $dotDirs) {
+            $needle = "\" + $dotDir.ToLowerInvariant()
+            $searchStart = 0
+            while ($searchStart -lt $lower.Length) {
+                $idx = $lower.IndexOf($needle, $searchStart)
+                if ($idx -lt 0) { break }
+                $end = $idx + $needle.Length
+                # Require directory boundary so ".gemini_backup" does not match ".gemini".
+                if ($end -lt $norm.Length -and $norm[$end] -ne '\') {
+                    $searchStart = $idx + 1
+                    continue
+                }
+                if ($bestIdx -lt 0 -or $idx -lt $bestIdx) {
+                    $bestIdx = $idx
+                    $bestNeedleLen = $needle.Length
+                }
+                $matched = $true
+                break
+            }
+        }
+        if ($matched -and $bestIdx -ge 0) {
+            $root = $norm.Substring(0, $bestIdx + $bestNeedleLen)
+            $roots.Add($root) | Out-Null
+        }
+        if ($matched) { continue }
+
+        $leaf = Split-Path $norm -Leaf
+        if ($leaf.Equals("skills", [System.StringComparison]::OrdinalIgnoreCase)) {
+            $parent = Split-Path $norm -Parent
+            if (-not [string]::IsNullOrWhiteSpace($parent)) { $roots.Add($parent) | Out-Null }
+            continue
+        }
+
+        $roots.Add($norm) | Out-Null
+    }
+
+    # Keep array shape when only one root is found.
+    return ,@($roots | Sort-Object)
+}
+
+function 安装MCP([string[]]$tokens = @()) {
+    $cfg = LoadCfg
+    $cfgRaw = Get-Content $CfgPath -Raw
+
+    $tokenList = @($tokens | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    if ($tokenList.Count -eq 1 -and $tokenList[0] -is [string] -and $tokenList[0].Contains(" ")) {
+        $tokenList = Split-Args $tokenList[0]
+    }
+
+    $parsed = $null
+    if ($tokenList.Count -gt 0) {
+        $parsed = Parse-McpInstallArgs $tokenList
+    }
+    else {
+        $name = Normalize-NameWithNotice (Read-HostSafe "MCP 服务名（如 context7）") "MCP 服务名"
+        $transport = Read-HostSafe "transport（stdio/sse/http，默认 stdio）"
+        if ([string]::IsNullOrWhiteSpace($transport)) { $transport = "stdio" }
+        $transport = $transport.Trim().ToLowerInvariant()
+        if ($transport -ne "stdio" -and $transport -ne "sse" -and $transport -ne "http") {
+            Write-Host "无效 transport，已使用默认值 stdio"
+            $transport = "stdio"
+        }
+
+        if ($transport -eq "stdio") {
+            $cmdLine = Read-HostSafe "命令（示例：npx -y @upstash/context7-mcp）"
+            $parts = Split-Args $cmdLine
+            Need ($parts.Count -gt 0) "命令不能为空"
+            $parsed = [pscustomobject]@{
+                name = $name
+                transport = "stdio"
+                command = $parts[0]
+                args = if ($parts.Count -gt 1) { $parts[1..($parts.Count - 1)] } else { @() }
+                url = $null
+                env = @{}
+                headers = @{}
+            }
+        }
+        else {
+            $url = Read-HostSafe "URL（示例：https://example.com/mcp）"
+            Need (-not [string]::IsNullOrWhiteSpace($url)) "URL 不能为空"
+            $parsed = [pscustomobject]@{
+                name = $name
+                transport = $transport
+                command = $null
+                args = @()
+                url = $url
+                env = @{}
+                headers = @{}
+            }
+        }
+    }
+
+    $server = New-McpServerObject $parsed
+    $existing = @($cfg.mcp_servers)
+    $updated = @()
+    $replaced = $false
+    foreach ($s in $existing) {
+        if ([string]$s.name -eq [string]$server.name) {
+            $updated += $server
+            $replaced = $true
+        }
+        else {
+            $updated += $s
+        }
+    }
+    if (-not $replaced) { $updated += $server }
+    $cfg.mcp_servers = $updated
+    SaveCfgSafe $cfg $cfgRaw
+
+    if ($replaced) {
+        Write-Host ("已更新 MCP 服务：{0}" -f $server.name)
+    }
+    else {
+        Write-Host ("已安装 MCP 服务：{0}" -f $server.name)
+    }
+    同步MCP
+}
+
+function 卸载MCP([string[]]$tokens = @()) {
+    $cfg = LoadCfg
+    $cfgRaw = Get-Content $CfgPath -Raw
+    $servers = @($cfg.mcp_servers)
+    if ($servers.Count -eq 0) {
+        Write-Host "当前没有已安装的 MCP 服务。"
+        return
+    }
+
+    $name = $null
+    $tokenList = @($tokens | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    if ($tokenList.Count -gt 0) {
+        $name = Normalize-NameWithNotice ([string]$tokenList[0]) "MCP 服务名"
+    }
+    if ([string]::IsNullOrWhiteSpace($name)) {
+        Write-Host "已安装 MCP 服务："
+        for ($i = 0; $i -lt $servers.Count; $i++) {
+            Write-Host ("{0,3}) {1}" -f ($i + 1), $servers[$i].name)
+        }
+        $picked = Read-HostSafe "输入序号或名称"
+        if ($picked -match "^\d+$") {
+            $idx = [int]$picked - 1
+            Need ($idx -ge 0 -and $idx -lt $servers.Count) "序号越界。"
+            $name = [string]$servers[$idx].name
+        }
+        else {
+            $name = Normalize-NameWithNotice $picked "MCP 服务名"
+        }
+    }
+
+    $remaining = @()
+    $removed = $false
+    foreach ($s in $servers) {
+        if ([string]$s.name -eq $name) {
+            $removed = $true
+        }
+        else {
+            $remaining += $s
+        }
+    }
+    Need $removed ("未找到 MCP 服务：{0}" -f $name)
+
+    $cfg.mcp_servers = $remaining
+    SaveCfgSafe $cfg $cfgRaw
+    Write-Host ("已卸载 MCP 服务：{0}" -f $name)
+    Invoke-NativeMcpCleanup $name
+    同步MCP
+}
+
+function 同步MCP {
+    Invoke-WithMetric "sync_mcp" {
+        $cfg = LoadCfg
+        $servers = @($cfg.mcp_servers)
+
+        $roots = Resolve-McpTargetRootsFromCfg $cfg
+        Need ($roots.Count -gt 0) "未找到可同步的 MCP 目标目录（请检查 targets/mcp_targets 配置）。"
+        $candidatePaths = Get-McpTargetCandidatePaths $cfg
+
+        $payload = [ordered]@{
+            mcpServers = Convert-McpServersToConfigMap $servers
+        }
+        $json = $payload | ConvertTo-Json -Depth 50
+
+        $written = @()
+        foreach ($targetRoot in $roots) {
+            $file = Join-Path $targetRoot ".mcp.json"
+            if ($DryRun) {
+                Write-Host ("DRYRUN：将写入 MCP 配置 -> {0}" -f $file)
+                $written += $file
+                continue
+            }
+            EnsureDir $targetRoot
+            Set-ContentUtf8 $file $json
+            $written += $file
+            Log ("已同步 MCP 配置：{0}" -f $file)
+        }
+
+        $geminiRoots = @($roots | Where-Object { (Split-Path ([string]$_) -Leaf).Equals(".gemini", [System.StringComparison]::OrdinalIgnoreCase) })
+        foreach ($geminiRoot in $geminiRoots) {
+            $settingsPath = Join-Path $geminiRoot "settings.json"
+            $existing = if (Test-Path $settingsPath) { Get-Content -Raw -Path $settingsPath } else { "" }
+            $payloadObj = Build-GeminiSettingsPayload $existing $servers
+            $content = $payloadObj | ConvertTo-Json -Depth 100
+            if ($DryRun) {
+                Write-Host ("DRYRUN：将写入 Gemini 配置 -> {0}" -f $settingsPath)
+                $written += $settingsPath
+            }
+            else {
+                EnsureDir $geminiRoot
+                Set-ContentUtf8 $settingsPath $content
+                $written += $settingsPath
+                Log ("已同步 Gemini MCP 配置：{0}" -f $settingsPath)
+            }
+        }
+
+        $antigravityRoots = Resolve-GeminiAntigravityRootsFromCandidates $candidatePaths
+        foreach ($agRoot in $antigravityRoots) {
+            $settingsPath = Join-Path $agRoot "settings.json"
+            $existing = if (Test-Path $settingsPath) { Get-Content -Raw -Path $settingsPath } else { "" }
+            $payloadObj = Build-GeminiSettingsPayload $existing $servers
+            $content = $payloadObj | ConvertTo-Json -Depth 100
+            if ($DryRun) {
+                Write-Host ("DRYRUN：将写入 Gemini Antigravity 配置 -> {0}" -f $settingsPath)
+                $written += $settingsPath
+            }
+            else {
+                EnsureDir $agRoot
+                Set-ContentUtf8 $settingsPath $content
+                $written += $settingsPath
+                Log ("已同步 Gemini Antigravity MCP 配置：{0}" -f $settingsPath)
+            }
+        }
+
+        $codexRoots = @($roots | Where-Object { (Split-Path ([string]$_) -Leaf).Equals(".codex", [System.StringComparison]::OrdinalIgnoreCase) })
+        foreach ($codexRoot in $codexRoots) {
+            $cfgPath = Join-Path $codexRoot "config.toml"
+            $existing = if (Test-Path $cfgPath) { Get-Content -Raw -Path $cfgPath } else { "" }
+            $toml = Build-CodexConfigToml $existing $servers
+            if ($DryRun) {
+                Write-Host ("DRYRUN：将写入 Codex MCP 配置 -> {0}" -f $cfgPath)
+                $written += $cfgPath
+            }
+            else {
+                EnsureDir $codexRoot
+                Set-ContentUtf8 $cfgPath $toml
+                $written += $cfgPath
+                Log ("已同步 Codex MCP 配置：{0}" -f $cfgPath)
+            }
+        }
+
+        $traeRoots = @($roots | Where-Object { (Split-Path ([string]$_) -Leaf).Equals(".trae", [System.StringComparison]::OrdinalIgnoreCase) })
+        foreach ($traeRoot in $traeRoots) {
+            $traePath = Join-Path $traeRoot "mcp.json"
+            if ($DryRun) {
+                Write-Host ("DRYRUN：将写入 Trae MCP 配置 -> {0}" -f $traePath)
+                $written += $traePath
+            }
+            else {
+                EnsureDir $traeRoot
+                Set-ContentUtf8 $traePath $json
+                $written += $traePath
+                Log ("已同步 Trae MCP 配置：{0}" -f $traePath)
+            }
+        }
+
+        $projectTraePath = Get-TraeProjectMcpConfigPath $script:Root
+        if ($DryRun) {
+            Write-Host ("DRYRUN：将写入项目级 Trae MCP 配置 -> {0}" -f $projectTraePath)
+            $written += $projectTraePath
+        }
+        else {
+            $projectTraeDir = Split-Path $projectTraePath -Parent
+            EnsureDir $projectTraeDir
+            Set-ContentUtf8 $projectTraePath $json
+            $written += $projectTraePath
+            Log ("已同步项目级 Trae MCP 配置：{0}" -f $projectTraePath)
+        }
+
+        Write-Host ("已同步 MCP 服务配置到 {0} 个目标。" -f $written.Count)
+        Invoke-NativeMcpSync $servers
+        if ($servers.Count -eq 0) {
+            Write-Host "提示：当前 mcp_servers 为空，已将各目标写为空配置。"
+        }
+    } @{ command = "同步MCP" } -NoHost
+}
+ 
+ function 打开配置 {
+    Need (Test-Path $CfgPath) "缺少配置文件：$CfgPath"
+    if (Get-Command code -ErrorAction SilentlyContinue) {
+        Invoke-StartProcess "code" "`"$CfgPath`""
+    }
+    else {
+        Invoke-StartProcess "notepad" "`"$CfgPath`""
+    }
+}
+
+function 解除关联 {
+    Preflight
+    $cfg = LoadCfg
+    foreach ($t in $cfg.targets) {
+        $target = Resolve-TargetDir $t.path
+        if ($target) {
+            Remove-JunctionAndRestore $target
+        }
+    }
+    Write-Host "解除完成。"
+}
+
+function 清理备份 {
+    $excludeRoots = @($VendorDir, $AgentDir, $ImportDir, (Join-Path $Root ".git"))
+    $bakDirs = @()
+    $bakFiles = @()
+    $stack = New-Object System.Collections.Generic.Stack[string]
+    $stack.Push($Root)
+    while ($stack.Count -gt 0) {
+        $dir = $stack.Pop()
+        if (Is-ExcludedPath $dir $excludeRoots) { continue }
+        try {
+            $entries = Get-ChildItem $dir -Force -ErrorAction SilentlyContinue
+        }
+        catch { continue }
+        foreach ($e in $entries) {
+            if ($e.PSIsContainer) {
+                if (Is-ReparsePoint $e.FullName) { continue }
+                if ($e.Name -eq ".bak" -or $e.Name -like "*.bak.*") { $bakDirs += $e }
+                $stack.Push($e.FullName)
+            }
+            else {
+                if ($e.Name -like "*.bak.*") { $bakFiles += $e }
+            }
+        }
+    }
+
+    if ($bakDirs.Count -eq 0 -and $bakFiles.Count -eq 0) {
+        Write-Host "未发现备份文件或目录。"
+        return
+    }
+
+    # 排除已包含在 .bak 目录下的文件，避免重复/噪声
+    $filteredFiles = @()
+    foreach ($f in $bakFiles) {
+        $inBakDir = $false
+        foreach ($d in $bakDirs) {
+            if ($f.FullName.StartsWith($d.FullName + "\")) {
+                $inBakDir = $true
+                break
+            }
+        }
+        if (-not $inBakDir) { $filteredFiles += $f }
+    }
+
+    $total = $bakDirs.Count + $filteredFiles.Count
+    Write-Host ("将清理备份项共 {0} 个（目录 {1}，文件 {2}）。" -f $total, $bakDirs.Count, $filteredFiles.Count)
+
+    $preview = @()
+    foreach ($d in $bakDirs) { $preview += $d.FullName }
+    foreach ($f in $filteredFiles) { $preview += $f.FullName }
+    if (-not (Confirm-WithSummary "将清理以下备份项" $preview "输入 DELETE 确认彻底清理备份" "DELETE")) {
+        Write-Host "已取消清理。"
+        return
+    }
+    if (Skip-IfDryRun "清理备份") { return }
+
+    foreach ($d in ($bakDirs | Sort-Object { $_.FullName.Length } -Descending)) {
+        if (-not (Is-PathInsideOrEqual $d.FullName $Root)) { continue }
+        Invoke-RemoveItem $d.FullName -Recurse
+    }
+    foreach ($f in $filteredFiles) {
+        if (-not (Is-PathInsideOrEqual $f.FullName $Root)) { continue }
+        Invoke-RemoveItem $f.FullName
+    }
+    Write-Host "清理完成。"
+}
+
+function 帮助 {
+    @"
+Skills 管理器（极简版，中文菜单）
+
+推荐使用顺序：
+  1) 接入来源：先新增技能库，或直接粘贴 add / npx 命令导入技能
+  2) 发现：查看当前已接入技能库里有哪些技能，可先按关键词过滤
+  3) 安装：
+     - 命令导入安装：粘贴一条或多条 add / npx skills add / npx add-skill 命令
+     - 从技能库选择安装：从已接入技能库中勾选技能，写入 mappings 白名单
+  4) 构建并生效：按当前配置重建 agent/，再同步到 targets
+  5) 更新：拉取上游 vendor/imports，处理本地改动后再重建同步
+
+主要功能说明：
+  - 发现：列出当前技能库中的可用技能；只查看，不改配置
+  - 命令导入安装：解析粘贴的 add / npx 命令；支持一次导入多个技能，并自动构建生效
+  - 从技能库选择安装：从技能库中勾选多个技能，追加到 mappings 白名单并自动构建生效
+  - 卸载：从 mappings 白名单移除技能；必要时清理 imports 条目、legacy manual 目录和对应 overrides 备份
+  - 新增技能库：向 vendors 写入仓库地址并初始化；留空时仅初始化已配置 vendors
+  - 删除技能库：移除 vendors 中的仓库，并按当前配置重新构建生效
+  - 更新：拉取 vendor/imports 上游内容，逐项确认如何处理本地改动，然后重建并同步
+  - 构建并生效：仅使用当前本地配置与文件源（imports / overrides / mappings）重建输出并同步；可配合 -Locked 做严格校验
+  - 锁定：生成 skills.lock.json，记录当前 vendor/import commit
+  - 安装MCP：向 skills.json 登记 MCP 服务（支持 stdio / sse / http），并自动同步
+  - 卸载MCP：从 skills.json 移除 MCP 服务，并自动同步
+  - 同步MCP：仅重新同步 MCP 配置，不处理技能构建
+  - 打开配置：打开 skills.json 进行手工检查或编辑
+  - 解除关联：移除 link 模式下创建的目录关联
+  - 清理备份：删除仓库内 *.bak.* 文件和 .bak 目录（排除 vendor / agent / imports / .git）
+
+说明：
+  - 手动更新会访问上游仓库；如果你只想让本地改动重新输出，请用“构建并生效”。
+  - 命令导入安装默认先做严格预检：校验仓库可达、技能路径存在，再执行导入。
+  - 命令导入安装会自动补全 owner/repo URL；若技能不唯一，会提示候选路径。
+  - 从技能库选择安装更适合浏览后再批量勾选；命令导入安装更适合直接粘贴已有命令。
+
+命令行：
+  .\skills.ps1 发现
+  .\skills.ps1 发现技能
+  .\skills.ps1 命令导入安装
+  .\skills.ps1 安装
+  .\skills.ps1 从技能库选择安装
+  .\skills.ps1 卸载
+  .\skills.ps1 卸载技能
+  .\skills.ps1 新增技能库
+  .\skills.ps1 删除技能库
+  .\skills.ps1 add <repo> --skill <name> [--ref <branch/tag>] [--mode manual|vendor] [--sparse]
+  .\skills.ps1 npx "skills add <repo> --skill <name> [--ref <branch/tag>] [--mode manual|vendor] [--sparse]"
+  .\skills.ps1 npx "add-skill <repo> --skill <name> [--ref <branch/tag>] [--mode manual|vendor] [--sparse]"
+  .\skills.ps1 更新
+  .\skills.ps1 更新上游并重建
+  .\skills.ps1 更新 -Plan
+  .\skills.ps1 更新 -Upgrade
+  .\skills.ps1 构建生效
+  .\skills.ps1 构建并生效
+  .\skills.ps1 锁定
+  .\skills.ps1 生成锁文件
+  .\skills.ps1 打开配置
+  .\skills.ps1 解除关联
+  .\skills.ps1 清理备份
+  .\skills.ps1 安装MCP <name> -- <command> [args...]          （推荐）
+  .\skills.ps1 安装MCP <name> --cmd <command> [--arg <arg>...] （兼容）
+  .\skills.ps1 卸载MCP <name>
+  .\skills.ps1 同步MCP（可选：手动兜底）
+  .\skills.ps1 doctor [--json] [--fix] [--dry-run-fix] [--strict] [--threshold-ms <ms>]
+  通用参数：
+  -DryRun：仅预演（跳过写入/删除/同步/拉取）
+  -Locked：严格锁定（需 skills.lock.json 且 commit 全匹配）
+  -Plan：仅输出更新预览（不改动）
+  -Upgrade：执行更新后自动刷新 skills.lock.json
+
+配置：skills.json
+  - vendors：上游仓库 URL
+  - mappings：白名单（安装/卸载）
+  - mcp_servers：MCP 服务清单（安装MCP/卸载MCP会自动同步）
+  - mcp_targets：可选 MCP 目标目录（未配置时从 targets 自动推断）
+  - sync_mode：Windows 优先 link（Junction），受限环境用 sync（兜底）
+
+过滤语法（批量安装/卸载/发现命令）：
+  - 多关键词：空格分隔，AND 过滤（如：docx pdf）
+  - 正则：用 /.../ 包裹（如：/docx|pdf/）
+
+本地技能：
+  - add/npx 导入默认落入 imports（mode=manual），可用 --mode vendor 改为 vendor 管理。
+  - manual/ 仅保留 legacy 兼容读取，建议将自定义改动放入 overrides/。
+  - “命令导入安装”支持多行输入 add / npx skills add / npx add-skill。
+  - 为兼容旧习惯，`安装` / `卸载` / `更新` / `构建生效` / `锁定` 等旧命令仍然保留可用。
+
+提示：如遇 PowerShell 脚本执行被拦，可在当前窗口临时放开：
+  Set-ExecutionPolicy -Scope Process Bypass
+"@ | Write-Host
+}
+
+function 菜单 {
+    while ($true) {
+        Write-Host ""
+        Write-Host "=== Skills 管理器（极简版）==="
+        Write-Host "技能操作"
+        Write-Host "1) 发现技能（浏览已接入技能库）"
+        Write-Host "2) 命令导入安装（粘贴一条或多条 add / npx 命令）"
+        Write-Host "3) 从技能库选择安装（勾选后写入白名单）"
+        Write-Host "4) 卸载技能（移除白名单并清理相关本地项）"
+        Write-Host "5) 构建并生效（按当前配置重建并同步）"
+        Write-Host "6) 更新上游并重建（拉取后重建并同步）"
+        Write-Host ""
+        Write-Host "来源与配置"
+        Write-Host "7) 新增技能库（写入 vendors 并初始化）"
+        Write-Host "8) 删除技能库（移除 vendor 并重建）"
+        Write-Host "9) 打开配置（skills.json）"
+        Write-Host "10) 生成锁文件（skills.lock.json）"
+        Write-Host ""
+        Write-Host "MCP 管理"
+        Write-Host "11) 安装MCP（登记 MCP 服务并自动同步）"
+        Write-Host "12) 卸载MCP（移除 MCP 服务并自动同步）"
+        Write-Host "13) 同步MCP（仅重新同步 MCP 配置）"
+        Write-Host ""
+        Write-Host "维护"
+        Write-Host "14) 解除关联（仅 link 模式需要）"
+        Write-Host "15) 清理备份（删除仓库内 *.bak.* / .bak，排除 vendor/agent/imports/.git）"
+        Write-Host "98) 帮助"
+        Write-Host "0) 退出"
+        $c = Read-HostSafe "请选择"
+        switch ($c) {
+            "1" { 发现 }
+            "2" { 命令导入安装 }
+            "3" { 安装 }
+            "4" { 卸载 }
+            "5" { 构建生效 }
+            "6" { 更新 }
+            "7" { 新增技能库 }
+            "8" { 删除技能库 }
+            "9" { 打开配置 }
+            "10" { 锁定 }
+            "11" { 安装MCP }
+            "12" { 卸载MCP }
+            "13" { 同步MCP }
+            "14" { 解除关联 }
+            "15" { 清理备份 }
+            "98" { 帮助 }
+            "0" { return }
+            default { Write-Host "无效选择。" }
+        }
+    }
+}
+ 
+ # Main Entry Point
+# ----------------
+# This file is used to assemble the final script.
+# It includes the main dispatch logic.
+
+if ($MyInvocation.InvocationName -ne '.') {
+    try {
+        switch ($Cmd) {
+            "menu" { 菜单 }
+            "初始化" { 初始化 }
+            "新增技能库" { 新增技能库 }
+            "删除技能库" { 删除技能库 }
+            "发现" { 发现 }
+            "发现技能" { 发现 }
+            "命令导入安装" { 命令导入安装 }
+            "add" { Add-ImportFromArgs (Merge-FilterAndArgs $Filter $args) }
+            "npx" { Add-ImportFromArgs (Get-AddTokensFromNpx (Merge-FilterAndArgs $Filter $args)) }
+            "安装" { 安装 }
+            "从技能库选择安装" { 安装 }
+            "卸载" { 卸载 }
+            "卸载技能" { 卸载 }
+            "选择" { 选择 }
+            "构建生效" { 构建生效 }
+            "构建并生效" { 构建生效 }
+            "更新" { 更新 }
+            "更新上游并重建" { 更新 }
+            "锁定" { 锁定 }
+            "生成锁文件" { 锁定 }
+            "安装MCP" {
+                $mcpTokens = @()
+                if (-not [string]::IsNullOrWhiteSpace($Filter)) { $mcpTokens += $Filter }
+                $mcpTokens += @($args)
+                安装MCP $mcpTokens
+            }
+            "卸载MCP" {
+                $mcpTokens = @()
+                if (-not [string]::IsNullOrWhiteSpace($Filter)) { $mcpTokens += $Filter }
+                $mcpTokens += @($args)
+                卸载MCP $mcpTokens
+            }
+            "同步MCP" { 同步MCP }
+            "mcp-install" {
+                $mcpTokens = @()
+                if (-not [string]::IsNullOrWhiteSpace($Filter)) { $mcpTokens += $Filter }
+                $mcpTokens += @($args)
+                安装MCP $mcpTokens
+            }
+            "mcp-uninstall" {
+                $mcpTokens = @()
+                if (-not [string]::IsNullOrWhiteSpace($Filter)) { $mcpTokens += $Filter }
+                $mcpTokens += @($args)
+                卸载MCP $mcpTokens
+            }
+            "mcp-sync" { 同步MCP }
+            "打开配置" { 打开配置 }
+            "解除关联" { 解除关联 }
+            "清理备份" { 清理备份 }
+            "帮助" { 帮助 }
+            "doctor" {
+                $doctorTokens = @()
+                if (-not [string]::IsNullOrWhiteSpace($Filter)) { $doctorTokens += $Filter }
+                $doctorTokens += @($args)
+                $doctorResult = Invoke-Doctor $doctorTokens
+                $strictRequested = ($doctorTokens | Where-Object { ([string]$_).Trim().ToLowerInvariant() -eq "--strict" }).Count -gt 0
+                if ($strictRequested -and $doctorResult -and $doctorResult.PSObject.Properties.Match("pass").Count -gt 0 -and -not [bool]$doctorResult.pass) {
+                    exit 2
+                }
+            }
+        }
+    }
+    catch {
+        $msg = $_.Exception.Message
+        Log ("未处理错误：{0}" -f $msg) "ERROR"
+        Write-Host ("❌ 发生错误：{0}" -f $msg) -ForegroundColor Red
+        exit 1
+    }
+}
+ 
