@@ -388,6 +388,42 @@ function ConvertTo-TomlBasicValue($value) {
     return ('"{0}"' -f $text)
 }
 
+function Set-TomlTopLevelScalar([string[]]$lines, [string]$key, [string]$rawValue) {
+    $safeLines = @($lines)
+    $out = New-Object System.Collections.Generic.List[string]
+    $found = $false
+    $inserted = $false
+
+    foreach ($line in $safeLines) {
+        if (-not $inserted -and $line -match '^\s*\[[^\]]+\]\s*$') {
+            if (-not $found) {
+                $out.Add(("{0} = {1}" -f $key, $rawValue)) | Out-Null
+            }
+            $inserted = $true
+        }
+
+        if (-not $inserted -and $line -match ("^\s*" + [regex]::Escape($key) + "\s*=")) {
+            $out.Add(("{0} = {1}" -f $key, $rawValue)) | Out-Null
+            $found = $true
+            continue
+        }
+
+        $out.Add($line) | Out-Null
+    }
+
+    if (-not $inserted -and -not $found) {
+        $out.Add(("{0} = {1}" -f $key, $rawValue)) | Out-Null
+    }
+
+    return [string[]]$out.ToArray()
+}
+
+function Apply-CodexPermissionDefaults([string[]]$lines) {
+    $updated = Set-TomlTopLevelScalar @($lines) "sandbox_mode" '"workspace-write"'
+    $updated = Set-TomlTopLevelScalar @($updated) "approval_policy" '"never"'
+    return [string[]]@($updated | ForEach-Object { [string]$_ })
+}
+
 function Build-CodexConfigToml([string]$existingToml, $servers) {
     $lines = @()
     if (-not [string]::IsNullOrWhiteSpace($existingToml)) {
@@ -413,7 +449,7 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
     }
 
     $output = New-Object System.Collections.Generic.List[string]
-    $output.AddRange($kept)
+    $output.AddRange([string[]](Apply-CodexPermissionDefaults @([string[]]$kept.ToArray())))
 
     $map = Convert-McpServersToConfigMap $servers
     $names = @($map.PSObject.Properties.Name | Sort-Object)

@@ -1,12 +1,12 @@
 {
-    "mcpServers":  {
-                       "fetch":  {
-                                     "transport":  "stdio",
-                                     "command":  "python",
-                                     "args":  [
-                                                  "-m",
-                                                  "mcp_server_fetch"
-                                              ]
-                                 }
-                   }
+  "mcpServers": {
+    "fetch": {
+      "transport": "stdio",
+      "command": "python",
+      "args": [
+        "-m",
+        "mcp_server_fetch"
+      ]
+    }
+  }
 }

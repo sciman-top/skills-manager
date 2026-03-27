@@ -7121,3 +7121,720 @@
 {"ts":"2026-03-27 20:15:50","level":"INFO","msg":"=== 构建生效流程完成 ==="}
 {"ts":"2026-03-27 20:15:50","level":"INFO","msg":"性能埋点：build_apply_total","data":{"metric":"build_apply_total","duration_ms":6372,"success":true,"command":"构建生效"}}
 {"ts":"2026-03-27 20:15:50","level":"INFO","msg":"性能埋点：update_total","data":{"metric":"update_total","duration_ms":111464,"success":true,"command":"更新"}}
+{"ts":"2026-03-27 21:13:17","level":"INFO","msg":"已同步 MCP 配置：C:\\Users\\sciman\\.claude\\.mcp.json"}
+{"ts":"2026-03-27 21:13:17","level":"INFO","msg":"已同步 MCP 配置：C:\\Users\\sciman\\.codex\\.mcp.json"}
+{"ts":"2026-03-27 21:13:17","level":"INFO","msg":"已同步 MCP 配置：C:\\Users\\sciman\\.gemini\\.mcp.json"}
+{"ts":"2026-03-27 21:13:17","level":"INFO","msg":"已同步 MCP 配置：C:\\Users\\sciman\\.trae\\.mcp.json"}
+{"ts":"2026-03-27 21:13:17","level":"INFO","msg":"已同步 Gemini MCP 配置：C:\\Users\\sciman\\.gemini\\settings.json"}
+{"ts":"2026-03-27 21:13:17","level":"INFO","msg":"已同步 Gemini Antigravity MCP 配置：C:\\Users\\sciman\\.gemini\\antigravity\\settings.json"}
+{"ts":"2026-03-27 21:13:17","level":"INFO","msg":"性能埋点：sync_mcp","data":{"metric":"sync_mcp","duration_ms":595,"success":false,"command":"同步MCP"}}
+{"ts":"2026-03-27 21:13:17","level":"ERROR","msg":"未处理错误：Cannot convert argument \"collection\", with value: \"System.Object[]\", for \"AddRange\" to type \"System.Collections.Generic.IEnumerable`1[System.String]\": \"Cannot convert the \"System.Object[]\" value of type \"System.Object[]\" to type \"System.Collections.Generic.IEnumerable`1[System.String]\".\""}
+{"ts":"2026-03-27 21:13:18","level":"INFO","msg":"Move-Item E:\\CODE\\skills-manager\\agent -> E:\\CODE\\skills-manager\\.txn\\build-f5107d0d95\\agent.backup"}
+{"ts":"2026-03-27 21:13:18","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-f5107d0d95\\agent.backup"}
+{"ts":"2026-03-27 21:13:18","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-f5107d0d95\\agent.backup"}
+{"ts":"2026-03-27 21:13:18","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-f5107d0d95\\agent.backup"}
+{"ts":"2026-03-27 21:13:18","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-f5107d0d95\\agent.backup"}
+{"ts":"2026-03-27 21:13:18","level":"INFO","msg":"旧 agent/ 无法挪入事务备份，后续将直接在原目录上构建：Access to the path is denied."}
+{"ts":"2026-03-27 21:13:19","level":"INFO","msg":"=== 启动构建生效流程 ==="}
+{"ts":"2026-03-27 21:13:19","level":"INFO","msg":"开始构建 Agent..."}
+{"ts":"2026-03-27 21:13:19","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\agent"}
+{"ts":"2026-03-27 21:13:19","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\agent"}
+{"ts":"2026-03-27 21:13:19","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\agent"}
+{"ts":"2026-03-27 21:13:20","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\agent"}
+{"ts":"2026-03-27 21:13:20","level":"INFO","msg":"清空 agent/ 失败，将在现有目录上继续覆盖构建：Access to the path 'E:\\CODE\\skills-manager\\agent\\.system\\imagegen\\agents\\openai.yaml' is denied."}
+{"ts":"2026-03-27 21:13:20","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\docx|anthropics-skills-docx"}
+{"ts":"2026-03-27 21:13:20","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\pdf|anthropics-skills-pdf"}
+{"ts":"2026-03-27 21:13:20","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\pptx|anthropics-skills-pptx"}
+{"ts":"2026-03-27 21:13:20","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\xlsx|anthropics-skills-xlsx"}
+{"ts":"2026-03-27 21:13:20","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\doc-coauthoring|anthropics-skills-skills-doc-coauthoring"}
+{"ts":"2026-03-27 21:13:20","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\canvas-design|anthropics-skills-skills-canvas-design"}
+{"ts":"2026-03-27 21:13:20","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\web-artifacts-builder|anthropics-skills-skills-web-artifacts-builder"}
+{"ts":"2026-03-27 21:13:20","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\executing-plans|superpowers-skills-executing-plans"}
+{"ts":"2026-03-27 21:13:20","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\verification-before-completion|superpowers-skills-verification-before-completion"}
+{"ts":"2026-03-27 21:13:20","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\subagent-driven-development|superpowers-skills-subagent-driven-development"}
+{"ts":"2026-03-27 21:13:20","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\using-git-worktrees|superpowers-skills-using-git-worktrees"}
+{"ts":"2026-03-27 21:13:20","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\requesting-code-review|superpowers-skills-requesting-code-review"}
+{"ts":"2026-03-27 21:13:20","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|agent-skills|skills\\composition-patterns|agent-skills-skills-composition-patterns"}
+{"ts":"2026-03-27 21:13:20","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|skills|skills\\.curated\\security-best-practices|skills-skills-.curated-security-best-practices"}
+{"ts":"2026-03-27 21:13:20","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\dispatching-parallel-agents|superpowers-skills-dispatching-parallel-agents"}
+{"ts":"2026-03-27 21:13:20","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\finishing-a-development-branch|superpowers-skills-finishing-a-development-branch"}
+{"ts":"2026-03-27 21:13:20","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\test-driven-development|superpowers-skills-test-driven-development"}
+{"ts":"2026-03-27 21:13:20","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\skill-creator|anthropics-skills-skills-skill-creator"}
+{"ts":"2026-03-27 21:13:20","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|baoyu-skills|skills\\baoyu-compress-image|baoyu-skills-skills-baoyu-compress-image"}
+{"ts":"2026-03-27 21:13:20","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|baoyu-skills|skills\\baoyu-cover-image|baoyu-skills-skills-baoyu-cover-image"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|agent-browser|manual-agent-browser"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|architecture-patterns|manual-architecture-patterns"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"已展开相对路径 SKILL 占位文件：2 项 [manual|claude-mem|manual-claude-mem]"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|content-strategy|manual-content-strategy"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|copy-editing|manual-copy-editing"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|copywriting|manual-copywriting"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|d3-viz|manual-d3-viz"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|debug-dotnet|manual-debug-dotnet"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|dotnet-backend-patterns|manual-dotnet-backend-patterns"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|error-handling-patterns|manual-error-handling-patterns"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|find-skills|manual-find-skills"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|humanizer-zh|manual-humanizer-zh"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|prompt-engineering-patterns|manual-prompt-engineering-patterns"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|python-design-patterns|manual-python-design-patterns"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|python-performance-optimization|manual-python-performance-optimization"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|python-testing-patterns|manual-python-testing-patterns"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|shadcn-ui|manual-shadcn-ui"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|social-content|manual-social-content"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|storyboard-creation|manual-storyboard-creation"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|tailwind-design-system|manual-tailwind-design-system"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|technical-blog-writing|manual-technical-blog-writing"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|ui-ux-pro-max|manual-ui-ux-pro-max"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|vite|manual-vite"}
+{"ts":"2026-03-27 21:13:21","level":"INFO","msg":"命中构建缓存，跳过复制：manual|windows-app-developer-skill|manual-windows-app-developer-skill"}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"检测到同名同内容技能别名，已跳过冲突：do"}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"检测到同名同内容技能别名，已跳过冲突：imagegen"}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"检测到同名同内容技能别名，已跳过冲突：make-plan"}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"检测到同名同内容技能别名，已跳过冲突：openai-docs"}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"检测到系统技能与普通技能同名，已保留系统技能优先：skill-creator"}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"检测到系统技能与普通技能同名，已保留系统技能优先：skill-installer"}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"增量构建：复用缓存 43 项，实际复制 15 项。"}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"本次构建未能清空旧 agent/，已按目录增量覆盖；若仍有陈旧技能残留，可在释放相关文件占用后重试。"}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"构建完成：agent/ (共 58 项技能)"}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"性能埋点：build_agent","data":{"metric":"build_agent","duration_ms":2861,"success":true,"command":"构建Agent"}}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.claude\\skills"}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.claude\\skills\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"已关联（链接）：~/.claude/skills -> agent/"}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.codex\\skills"}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.codex\\skills\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"已关联（链接）：~/.codex/skills -> agent/"}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.gemini\\skills"}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.gemini\\skills\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"已关联（链接）：~/.gemini/skills -> agent/"}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.gemini\\antigravity\\skills\\"}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.gemini\\antigravity\\skills\\\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"已关联（链接）：~/.gemini/antigravity/skills/ -> agent/"}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.trae\\skills\\"}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.trae\\skills\\\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"已关联（链接）：~/.trae/skills/ -> agent/"}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"性能埋点：apply_targets","data":{"metric":"apply_targets","duration_ms":177,"success":true,"command":"应用到ClaudeCodex"}}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-f5107d0d95"}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-f5107d0d95"}
+{"ts":"2026-03-27 21:13:22","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-f5107d0d95"}
+{"ts":"2026-03-27 21:13:23","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-f5107d0d95"}
+{"ts":"2026-03-27 21:13:23","level":"INFO","msg":"=== 构建生效流程完成 ==="}
+{"ts":"2026-03-27 21:13:23","level":"INFO","msg":"性能埋点：build_apply_total","data":{"metric":"build_apply_total","duration_ms":5155,"success":true,"command":"构建生效"}}
+{"ts":"2026-03-27 21:13:42","level":"INFO","msg":"已同步 MCP 配置：C:\\Users\\sciman\\.claude\\.mcp.json"}
+{"ts":"2026-03-27 21:13:42","level":"INFO","msg":"已同步 MCP 配置：C:\\Users\\sciman\\.codex\\.mcp.json"}
+{"ts":"2026-03-27 21:13:42","level":"INFO","msg":"已同步 MCP 配置：C:\\Users\\sciman\\.gemini\\.mcp.json"}
+{"ts":"2026-03-27 21:13:42","level":"INFO","msg":"已同步 MCP 配置：C:\\Users\\sciman\\.trae\\.mcp.json"}
+{"ts":"2026-03-27 21:13:42","level":"INFO","msg":"已同步 Gemini MCP 配置：C:\\Users\\sciman\\.gemini\\settings.json"}
+{"ts":"2026-03-27 21:13:42","level":"INFO","msg":"已同步 Gemini Antigravity MCP 配置：C:\\Users\\sciman\\.gemini\\antigravity\\settings.json"}
+{"ts":"2026-03-27 21:13:42","level":"INFO","msg":"已同步 Codex MCP 配置：C:\\Users\\sciman\\.codex\\config.toml"}
+{"ts":"2026-03-27 21:13:42","level":"INFO","msg":"已同步 Trae MCP 配置：C:\\Users\\sciman\\.trae\\mcp.json"}
+{"ts":"2026-03-27 21:13:42","level":"INFO","msg":"已同步项目级 Trae MCP 配置：E:\\CODE\\skills-manager\\.trae\\mcp.json"}
+{"ts":"2026-03-27 21:13:42","level":"INFO","msg":"已同步原生 MCP：fetch（scope=user）"}
+{"ts":"2026-03-27 21:13:42","level":"INFO","msg":"性能埋点：sync_mcp","data":{"metric":"sync_mcp","duration_ms":863,"success":true,"command":"同步MCP"}}
+{"ts":"2026-03-27 21:14:20","level":"INFO","msg":"性能埋点：discover","data":{"metric":"discover","duration_ms":540,"success":true,"command":"发现"}}
+{"ts":"2026-03-27 21:16:03","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.claude\\skills"}
+{"ts":"2026-03-27 21:16:03","level":"INFO","msg":"Move-Item C:\\Users\\sciman\\.claude\\skills.bak.20260124-113747 -> C:\\Users\\sciman\\.claude\\skills"}
+{"ts":"2026-03-27 21:16:03","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.codex\\skills"}
+{"ts":"2026-03-27 21:16:03","level":"INFO","msg":"Move-Item C:\\Users\\sciman\\.codex\\skills.bak.20260124-113747 -> C:\\Users\\sciman\\.codex\\skills"}
+{"ts":"2026-03-27 21:16:03","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.gemini\\skills"}
+{"ts":"2026-03-27 21:16:03","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.gemini\\antigravity\\skills\\"}
+{"ts":"2026-03-27 21:16:03","level":"INFO","msg":"Move-Item C:\\Users\\sciman\\.gemini\\antigravity\\skills.bak.20260124-142400 -> C:\\Users\\sciman\\.gemini\\antigravity\\skills\\"}
+{"ts":"2026-03-27 21:16:03","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.trae\\skills\\"}
+{"ts":"2026-03-27 21:16:08","level":"INFO","msg":"Move-Item E:\\CODE\\skills-manager\\agent -> E:\\CODE\\skills-manager\\.txn\\build-511d8fd7b5\\agent.backup"}
+{"ts":"2026-03-27 21:16:08","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-511d8fd7b5\\agent.backup"}
+{"ts":"2026-03-27 21:16:08","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-511d8fd7b5\\agent.backup"}
+{"ts":"2026-03-27 21:16:08","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-511d8fd7b5\\agent.backup"}
+{"ts":"2026-03-27 21:16:09","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-511d8fd7b5\\agent.backup"}
+{"ts":"2026-03-27 21:16:09","level":"INFO","msg":"旧 agent/ 无法挪入事务备份，后续将直接在原目录上构建：Access to the path is denied."}
+{"ts":"2026-03-27 21:16:09","level":"INFO","msg":"=== 启动构建生效流程 ==="}
+{"ts":"2026-03-27 21:16:09","level":"INFO","msg":"开始构建 Agent..."}
+{"ts":"2026-03-27 21:16:09","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\agent"}
+{"ts":"2026-03-27 21:16:09","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\agent"}
+{"ts":"2026-03-27 21:16:09","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\agent"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\agent"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"清空 agent/ 失败，将在现有目录上继续覆盖构建：Access to the path 'E:\\CODE\\skills-manager\\agent\\.system\\imagegen\\agents\\openai.yaml' is denied."}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\docx|anthropics-skills-docx"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\pdf|anthropics-skills-pdf"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\pptx|anthropics-skills-pptx"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\xlsx|anthropics-skills-xlsx"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\doc-coauthoring|anthropics-skills-skills-doc-coauthoring"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\systematic-debugging|superpowers-skills-systematic-debugging"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\canvas-design|anthropics-skills-skills-canvas-design"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\web-artifacts-builder|anthropics-skills-skills-web-artifacts-builder"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\executing-plans|superpowers-skills-executing-plans"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\verification-before-completion|superpowers-skills-verification-before-completion"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\subagent-driven-development|superpowers-skills-subagent-driven-development"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\using-git-worktrees|superpowers-skills-using-git-worktrees"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\requesting-code-review|superpowers-skills-requesting-code-review"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|agent-skills|skills\\react-best-practices|agent-skills-skills-react-best-practices"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|skills-2|skills\\remotion|skills-2-skills-remotion"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|agent-skills|skills\\composition-patterns|agent-skills-skills-composition-patterns"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|skills|skills\\.curated\\cloudflare-deploy|skills-skills-.curated-cloudflare-deploy"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|skills|skills\\.curated\\imagegen|skills-skills-.curated-imagegen"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|skills|skills\\.curated\\openai-docs|skills-skills-.curated-openai-docs"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|skills|skills\\.curated\\playwright|skills-skills-.curated-playwright"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|skills|skills\\.curated\\screenshot|skills-skills-.curated-screenshot"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|skills|skills\\.curated\\security-best-practices|skills-skills-.curated-security-best-practices"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|skills|skills\\.curated\\transcribe|skills-skills-.curated-transcribe"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|skills|skills\\.system\\skill-installer|skills-skills-.system-skill-installer"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\dispatching-parallel-agents|superpowers-skills-dispatching-parallel-agents"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\finishing-a-development-branch|superpowers-skills-finishing-a-development-branch"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\test-driven-development|superpowers-skills-test-driven-development"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\skill-creator|anthropics-skills-skills-skill-creator"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|baoyu-skills|skills\\baoyu-compress-image|baoyu-skills-skills-baoyu-compress-image"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|baoyu-skills|skills\\baoyu-cover-image|baoyu-skills-skills-baoyu-cover-image"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|baoyu-skills|skills\\baoyu-format-markdown|baoyu-skills-skills-baoyu-format-markdown"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|baoyu-skills|skills\\baoyu-post-to-wechat|baoyu-skills-skills-baoyu-post-to-wechat"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|skills|skills\\.curated\\develop-web-game|skills-skills-.curated-develop-web-game"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：manual|agent-browser|manual-agent-browser"}
+{"ts":"2026-03-27 21:16:10","level":"INFO","msg":"命中构建缓存，跳过复制：manual|architecture-patterns|manual-architecture-patterns"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|claude-mem|manual-claude-mem"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|content-strategy|manual-content-strategy"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|copy-editing|manual-copy-editing"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|copywriting|manual-copywriting"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|d3-viz|manual-d3-viz"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|debug-dotnet|manual-debug-dotnet"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|dotnet-backend-patterns|manual-dotnet-backend-patterns"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|error-handling-patterns|manual-error-handling-patterns"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|find-skills|manual-find-skills"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|humanizer-zh|manual-humanizer-zh"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|pretty-mermaid-skills|manual-pretty-mermaid-skills"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|prompt-engineering-patterns|manual-prompt-engineering-patterns"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|python-design-patterns|manual-python-design-patterns"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|python-performance-optimization|manual-python-performance-optimization"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|python-testing-patterns|manual-python-testing-patterns"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|shadcn-ui|manual-shadcn-ui"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|social-content|manual-social-content"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|storyboard-creation|manual-storyboard-creation"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|tailwind-design-system|manual-tailwind-design-system"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|technical-blog-writing|manual-technical-blog-writing"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|ui-ux-pro-max|manual-ui-ux-pro-max"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|vite|manual-vite"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"命中构建缓存，跳过复制：manual|windows-app-developer-skill|manual-windows-app-developer-skill"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"检测到同名同内容技能别名，已跳过冲突：do"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"检测到同名同内容技能别名，已跳过冲突：imagegen"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"检测到同名同内容技能别名，已跳过冲突：make-plan"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"检测到同名同内容技能别名，已跳过冲突：openai-docs"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"检测到系统技能与普通技能同名，已保留系统技能优先：skill-creator"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"检测到系统技能与普通技能同名，已保留系统技能优先：skill-installer"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"增量构建：复用缓存 58 项，实际复制 0 项。"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"本次构建未能清空旧 agent/，已按目录增量覆盖；若仍有陈旧技能残留，可在释放相关文件占用后重试。"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"构建完成：agent/ (共 58 项技能)"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"性能埋点：build_agent","data":{"metric":"build_agent","duration_ms":2443,"success":true,"command":"构建Agent"}}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"Move-Item C:\\Users\\sciman\\.claude\\skills -> C:\\Users\\sciman\\.claude\\skills.bak.20260327-211611"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.claude\\skills\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"已关联（链接）：~/.claude/skills -> agent/"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"Move-Item C:\\Users\\sciman\\.codex\\skills -> C:\\Users\\sciman\\.codex\\skills.bak.20260327-211611"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.codex\\skills\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"已关联（链接）：~/.codex/skills -> agent/"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.gemini\\skills\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"已关联（链接）：~/.gemini/skills -> agent/"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"Move-Item C:\\Users\\sciman\\.gemini\\antigravity\\skills\\ -> C:\\Users\\sciman\\.gemini\\antigravity\\skills.bak.20260327-211611"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.gemini\\antigravity\\skills\\\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"已关联（链接）：~/.gemini/antigravity/skills/ -> agent/"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.trae\\skills\\\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"已关联（链接）：~/.trae/skills/ -> agent/"}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"性能埋点：apply_targets","data":{"metric":"apply_targets","duration_ms":160,"success":true,"command":"应用到ClaudeCodex"}}
+{"ts":"2026-03-27 21:16:11","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-511d8fd7b5"}
+{"ts":"2026-03-27 21:16:12","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-511d8fd7b5"}
+{"ts":"2026-03-27 21:16:12","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-511d8fd7b5"}
+{"ts":"2026-03-27 21:16:12","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-511d8fd7b5"}
+{"ts":"2026-03-27 21:16:12","level":"INFO","msg":"=== 构建生效流程完成 ==="}
+{"ts":"2026-03-27 21:16:12","level":"INFO","msg":"性能埋点：build_apply_total","data":{"metric":"build_apply_total","duration_ms":4642,"success":true,"command":"构建生效"}}
+{"ts":"2026-03-27 21:22:52","level":"INFO","msg":"Move-Item E:\\CODE\\skills-manager\\agent -> E:\\CODE\\skills-manager\\.txn\\build-7e67ef5641\\agent.backup"}
+{"ts":"2026-03-27 21:22:52","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-7e67ef5641\\agent.backup"}
+{"ts":"2026-03-27 21:22:52","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-7e67ef5641\\agent.backup"}
+{"ts":"2026-03-27 21:22:52","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-7e67ef5641\\agent.backup"}
+{"ts":"2026-03-27 21:22:53","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-7e67ef5641\\agent.backup"}
+{"ts":"2026-03-27 21:22:53","level":"INFO","msg":"旧 agent/ 无法挪入事务备份，后续将直接在原目录上构建：Access to the path is denied."}
+{"ts":"2026-03-27 21:22:53","level":"INFO","msg":"=== 启动构建生效流程 ==="}
+{"ts":"2026-03-27 21:22:53","level":"INFO","msg":"开始构建 Agent..."}
+{"ts":"2026-03-27 21:22:53","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\agent"}
+{"ts":"2026-03-27 21:22:53","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\agent"}
+{"ts":"2026-03-27 21:22:53","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\agent"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\agent"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"清空 agent/ 失败，将在现有目录上继续覆盖构建：Access to the path 'E:\\CODE\\skills-manager\\agent\\.system\\imagegen\\agents\\openai.yaml' is denied."}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\docx|anthropics-skills-docx"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\pdf|anthropics-skills-pdf"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\pptx|anthropics-skills-pptx"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\xlsx|anthropics-skills-xlsx"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\doc-coauthoring|anthropics-skills-skills-doc-coauthoring"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\systematic-debugging|superpowers-skills-systematic-debugging"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\canvas-design|anthropics-skills-skills-canvas-design"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\web-artifacts-builder|anthropics-skills-skills-web-artifacts-builder"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\executing-plans|superpowers-skills-executing-plans"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\verification-before-completion|superpowers-skills-verification-before-completion"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\subagent-driven-development|superpowers-skills-subagent-driven-development"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\using-git-worktrees|superpowers-skills-using-git-worktrees"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\requesting-code-review|superpowers-skills-requesting-code-review"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|agent-skills|skills\\react-best-practices|agent-skills-skills-react-best-practices"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|skills-2|skills\\remotion|skills-2-skills-remotion"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|agent-skills|skills\\composition-patterns|agent-skills-skills-composition-patterns"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|skills|skills\\.curated\\cloudflare-deploy|skills-skills-.curated-cloudflare-deploy"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|skills|skills\\.curated\\imagegen|skills-skills-.curated-imagegen"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|skills|skills\\.curated\\openai-docs|skills-skills-.curated-openai-docs"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|skills|skills\\.curated\\playwright|skills-skills-.curated-playwright"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|skills|skills\\.curated\\screenshot|skills-skills-.curated-screenshot"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|skills|skills\\.curated\\security-best-practices|skills-skills-.curated-security-best-practices"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|skills|skills\\.curated\\transcribe|skills-skills-.curated-transcribe"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|skills|skills\\.system\\skill-installer|skills-skills-.system-skill-installer"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\dispatching-parallel-agents|superpowers-skills-dispatching-parallel-agents"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\finishing-a-development-branch|superpowers-skills-finishing-a-development-branch"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|superpowers|skills\\test-driven-development|superpowers-skills-test-driven-development"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|anthropics-skills|skills\\skill-creator|anthropics-skills-skills-skill-creator"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|baoyu-skills|skills\\baoyu-compress-image|baoyu-skills-skills-baoyu-compress-image"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|baoyu-skills|skills\\baoyu-cover-image|baoyu-skills-skills-baoyu-cover-image"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|baoyu-skills|skills\\baoyu-format-markdown|baoyu-skills-skills-baoyu-format-markdown"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|baoyu-skills|skills\\baoyu-post-to-wechat|baoyu-skills-skills-baoyu-post-to-wechat"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：mapping|skills|skills\\.curated\\develop-web-game|skills-skills-.curated-develop-web-game"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：manual|agent-browser|manual-agent-browser"}
+{"ts":"2026-03-27 21:22:54","level":"INFO","msg":"命中构建缓存，跳过复制：manual|architecture-patterns|manual-architecture-patterns"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|claude-mem|manual-claude-mem"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|content-strategy|manual-content-strategy"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|copy-editing|manual-copy-editing"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|copywriting|manual-copywriting"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|d3-viz|manual-d3-viz"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|debug-dotnet|manual-debug-dotnet"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|dotnet-backend-patterns|manual-dotnet-backend-patterns"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|error-handling-patterns|manual-error-handling-patterns"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|find-skills|manual-find-skills"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|humanizer-zh|manual-humanizer-zh"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|pretty-mermaid-skills|manual-pretty-mermaid-skills"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|prompt-engineering-patterns|manual-prompt-engineering-patterns"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|python-design-patterns|manual-python-design-patterns"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|python-performance-optimization|manual-python-performance-optimization"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|python-testing-patterns|manual-python-testing-patterns"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|shadcn-ui|manual-shadcn-ui"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|social-content|manual-social-content"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|storyboard-creation|manual-storyboard-creation"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|tailwind-design-system|manual-tailwind-design-system"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|technical-blog-writing|manual-technical-blog-writing"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|ui-ux-pro-max|manual-ui-ux-pro-max"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|vite|manual-vite"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"命中构建缓存，跳过复制：manual|windows-app-developer-skill|manual-windows-app-developer-skill"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"检测到同名同内容技能别名，已跳过冲突：do"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"检测到同名同内容技能别名，已跳过冲突：imagegen"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"检测到同名同内容技能别名，已跳过冲突：make-plan"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"检测到同名同内容技能别名，已跳过冲突：openai-docs"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"检测到系统技能与普通技能同名，已保留系统技能优先：skill-creator"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"检测到系统技能与普通技能同名，已保留系统技能优先：skill-installer"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"增量构建：复用缓存 58 项，实际复制 0 项。"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"本次构建未能清空旧 agent/，已按目录增量覆盖；若仍有陈旧技能残留，可在释放相关文件占用后重试。"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"构建完成：agent/ (共 58 项技能)"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"性能埋点：build_agent","data":{"metric":"build_agent","duration_ms":2541,"success":true,"command":"构建Agent"}}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.claude\\skills"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.claude\\skills\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"已关联（链接）：~/.claude/skills -> agent/"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.codex\\skills"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.codex\\skills\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"已关联（链接）：~/.codex/skills -> agent/"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.gemini\\skills"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.gemini\\skills\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"已关联（链接）：~/.gemini/skills -> agent/"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.gemini\\antigravity\\skills\\"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.gemini\\antigravity\\skills\\\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"已关联（链接）：~/.gemini/antigravity/skills/ -> agent/"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.trae\\skills\\"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.trae\\skills\\\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"已关联（链接）：~/.trae/skills/ -> agent/"}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"性能埋点：apply_targets","data":{"metric":"apply_targets","duration_ms":168,"success":true,"command":"应用到ClaudeCodex"}}
+{"ts":"2026-03-27 21:22:55","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-7e67ef5641"}
+{"ts":"2026-03-27 21:22:56","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-7e67ef5641"}
+{"ts":"2026-03-27 21:22:56","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-7e67ef5641"}
+{"ts":"2026-03-27 21:22:56","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-7e67ef5641"}
+{"ts":"2026-03-27 21:22:56","level":"INFO","msg":"=== 构建生效流程完成 ==="}
+{"ts":"2026-03-27 21:22:56","level":"INFO","msg":"性能埋点：build_apply_total","data":{"metric":"build_apply_total","duration_ms":4784,"success":true,"command":"构建生效"}}
+{"ts":"2026-03-27 21:26:32","level":"INFO","msg":"Move-Item E:\\CODE\\skills-manager\\agent -\u003e E:\\CODE\\skills-manager\\.txn\\build-40de16aa53\\agent.backup"}
+{"ts":"2026-03-27 21:26:34","level":"INFO","msg":"=== 启动构建生效流程 ==="}
+{"ts":"2026-03-27 21:26:34","level":"INFO","msg":"开始构建 Agent..."}
+{"ts":"2026-03-27 21:26:37","level":"INFO","msg":"已展开相对路径 SKILL 占位文件：2 项 [manual|claude-mem|manual-claude-mem]"}
+{"ts":"2026-03-27 21:26:38","level":"INFO","msg":"检测到同名同内容技能别名，已跳过冲突：do"}
+{"ts":"2026-03-27 21:26:38","level":"INFO","msg":"检测到同名同内容技能别名，已跳过冲突：make-plan"}
+{"ts":"2026-03-27 21:26:38","level":"INFO","msg":"构建完成：agent/ (共 58 项技能)"}
+{"ts":"2026-03-27 21:26:38","level":"INFO","msg":"性能埋点：build_agent","data":{"metric":"build_agent","duration_ms":4434,"success":true,"command":"构建Agent"}}
+{"ts":"2026-03-27 21:26:38","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.claude\\skills"}
+{"ts":"2026-03-27 21:26:38","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.claude\\skills\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:26:38","level":"INFO","msg":"已关联（链接）：~/.claude/skills -\u003e agent/"}
+{"ts":"2026-03-27 21:26:38","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.codex\\skills"}
+{"ts":"2026-03-27 21:26:38","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.codex\\skills\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:26:38","level":"INFO","msg":"已关联（链接）：~/.codex/skills -\u003e agent/"}
+{"ts":"2026-03-27 21:26:38","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.gemini\\skills"}
+{"ts":"2026-03-27 21:26:38","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.gemini\\skills\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:26:38","level":"INFO","msg":"已关联（链接）：~/.gemini/skills -\u003e agent/"}
+{"ts":"2026-03-27 21:26:38","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.gemini\\antigravity\\skills\\"}
+{"ts":"2026-03-27 21:26:38","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.gemini\\antigravity\\skills\\\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:26:38","level":"INFO","msg":"已关联（链接）：~/.gemini/antigravity/skills/ -\u003e agent/"}
+{"ts":"2026-03-27 21:26:38","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.trae\\skills\\"}
+{"ts":"2026-03-27 21:26:38","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.trae\\skills\\\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:26:38","level":"INFO","msg":"已关联（链接）：~/.trae/skills/ -\u003e agent/"}
+{"ts":"2026-03-27 21:26:38","level":"INFO","msg":"性能埋点：apply_targets","data":{"metric":"apply_targets","duration_ms":146,"success":true,"command":"应用到ClaudeCodex"}}
+{"ts":"2026-03-27 21:26:38","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-40de16aa53"}
+{"ts":"2026-03-27 21:26:39","level":"INFO","msg":"=== 构建生效流程完成 ==="}
+{"ts":"2026-03-27 21:26:39","level":"INFO","msg":"性能埋点：build_apply_total","data":{"metric":"build_apply_total","duration_ms":6991,"success":true,"command":"构建生效"}}
+{"ts":"2026-03-27 21:27:09","level":"INFO","msg":"性能埋点：discover","data":{"metric":"discover","duration_ms":521,"success":true,"command":"发现"}}
+{"ts":"2026-03-27 21:28:04","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:04","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:04","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:04","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:04","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:04","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:04","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:04","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:04","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:04","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:04","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:04","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:04","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:04","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:04","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:04","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:04","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:04","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:05","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:05","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:05","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:05","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:05","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:05","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:05","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:05","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:05","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:05","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:05","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:05","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:05","level":"INFO","msg":"git status --porcelain"}
+{"ts":"2026-03-27 21:28:08","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\social-content\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:08","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\social-content\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:08","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:28:08","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:28:08","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:28:08","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:28:09","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:28:09","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:28:09","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:28:09","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:28:10","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\humanizer-zh\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:10","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\humanizer-zh\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:10","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:28:10","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:28:11","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:28:11","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:28:12","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:28:12","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:28:12","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:28:12","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:28:13","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\find-skills\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:13","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\find-skills\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:13","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:28:13","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:28:13","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:28:13","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:28:15","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:28:15","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:28:15","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:28:15","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:28:16","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\agent-browser\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:16","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\agent-browser\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:16","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:28:16","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:28:16","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:28:16","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:28:18","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:28:18","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:28:18","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:28:18","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:28:19","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\vite\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:19","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\vite\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:19","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:28:19","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:28:19","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:28:20","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:28:21","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:28:21","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:28:21","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:28:21","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:28:22","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\architecture-patterns\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:22","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\architecture-patterns\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:22","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:28:22","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:28:22","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:28:22","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:28:24","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:28:24","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:28:24","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:28:24","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:28:25","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\error-handling-patterns\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:25","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\error-handling-patterns\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:25","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:28:25","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:28:25","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:28:25","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:28:26","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:28:26","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:28:27","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:28:27","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:28:28","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\python-performance-optimization\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:28","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\python-performance-optimization\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:28","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:28:28","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:28:28","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:28:28","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:28:29","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:28:29","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:28:29","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:28:29","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:28:31","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\python-testing-patterns\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:31","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\python-testing-patterns\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:31","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:28:31","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:28:31","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:28:31","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:28:32","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:28:32","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:28:32","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:28:33","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:28:34","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\tailwind-design-system\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:34","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\tailwind-design-system\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:34","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:28:34","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:28:34","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:28:34","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:28:35","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:28:35","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:28:35","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:28:35","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:28:37","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\content-strategy\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:37","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\content-strategy\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:37","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:28:37","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:28:37","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:28:37","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:28:38","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:28:38","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:28:38","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:28:38","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:28:40","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\copy-editing\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:40","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\copy-editing\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:40","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:28:40","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:28:40","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:28:40","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:28:41","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:28:41","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:28:41","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:28:41","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:28:42","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\copywriting\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:42","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\copywriting\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:42","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:28:42","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:28:42","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:28:43","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:28:44","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:28:44","level":"WARN","msg":"检测到陈旧 Git 锁文件，已自动移除：E:/CODE/skills-manager/imports/copywriting/.git/index.lock"}
+{"ts":"2026-03-27 21:28:44","level":"INFO","msg":"Remove-Item E:/CODE/skills-manager/imports/copywriting/.git/index.lock"}
+{"ts":"2026-03-27 21:28:44","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:28:44","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:28:44","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:28:44","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:28:45","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\prompt-engineering-patterns\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:45","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\prompt-engineering-patterns\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:45","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:28:45","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:28:45","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:28:45","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:28:47","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:28:47","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:28:47","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:28:47","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:28:48","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\python-design-patterns\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:48","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\python-design-patterns\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:48","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:28:48","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:28:48","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:28:48","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:28:49","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:28:50","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:28:50","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:28:50","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:28:51","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\dotnet-backend-patterns\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:51","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\dotnet-backend-patterns\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:51","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:28:51","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:28:51","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:28:51","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:28:52","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:28:52","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:28:52","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:28:52","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:28:54","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\debug-dotnet\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:54","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\debug-dotnet\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:54","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:28:54","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:28:54","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:28:54","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:28:55","level":"INFO","msg":"git checkout master"}
+{"ts":"2026-03-27 21:28:55","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:28:55","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:28:55","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:28:57","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\d3-viz\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:57","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\d3-viz\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:57","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:28:57","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:28:57","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:28:57","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:28:58","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:28:58","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:28:58","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:28:58","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:28:59","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\windows-app-developer-skill\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:59","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\windows-app-developer-skill\\.git\\index.lock"}
+{"ts":"2026-03-27 21:28:59","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:28:59","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:28:59","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:28:59","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:29:01","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:29:01","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:29:01","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:29:01","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:29:02","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\storyboard-creation\\.git\\index.lock"}
+{"ts":"2026-03-27 21:29:02","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\storyboard-creation\\.git\\index.lock"}
+{"ts":"2026-03-27 21:29:02","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:29:02","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:29:02","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:29:02","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:29:04","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:29:04","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:29:04","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:29:04","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:29:05","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\technical-blog-writing\\.git\\index.lock"}
+{"ts":"2026-03-27 21:29:05","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\technical-blog-writing\\.git\\index.lock"}
+{"ts":"2026-03-27 21:29:05","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:29:05","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:29:05","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:29:06","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:29:07","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:29:07","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:29:07","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:29:07","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:29:08","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\pretty-mermaid-skills\\.git\\index.lock"}
+{"ts":"2026-03-27 21:29:08","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\pretty-mermaid-skills\\.git\\index.lock"}
+{"ts":"2026-03-27 21:29:08","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:29:09","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:29:09","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:29:09","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:29:10","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:29:10","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:29:10","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:29:10","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:29:11","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\ui-ux-pro-max\\.git\\index.lock"}
+{"ts":"2026-03-27 21:29:11","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\ui-ux-pro-max\\.git\\index.lock"}
+{"ts":"2026-03-27 21:29:11","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:29:11","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:29:11","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:29:11","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:29:13","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:29:13","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:29:13","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:29:13","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:29:14","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\shadcn-ui\\.git\\index.lock"}
+{"ts":"2026-03-27 21:29:14","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\shadcn-ui\\.git\\index.lock"}
+{"ts":"2026-03-27 21:29:14","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:29:14","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:29:14","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:29:14","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:29:16","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:29:16","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:29:16","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:29:16","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:29:17","level":"WARN","msg":"检测到仓库残留 Git 锁文件，已自动移除：E:\\CODE\\skills-manager\\imports\\claude-mem\\.git\\index.lock"}
+{"ts":"2026-03-27 21:29:17","level":"INFO","msg":"Remove-Item E:\\CODE\\skills-manager\\imports\\claude-mem\\.git\\index.lock"}
+{"ts":"2026-03-27 21:29:17","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:29:17","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:29:17","level":"INFO","msg":"git sparse-checkout disable"}
+{"ts":"2026-03-27 21:29:17","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:29:19","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:29:19","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:29:19","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:29:19","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:29:20","level":"INFO","msg":"性能埋点：update_imports","data":{"metric":"update_imports","duration_ms":72709,"success":true,"command":"更新Imports"}}
+{"ts":"2026-03-27 21:29:20","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:29:20","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:29:20","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:29:22","level":"INFO","msg":"git sparse-checkout init --cone"}
+{"ts":"2026-03-27 21:29:22","level":"INFO","msg":"git sparse-checkout set skills/docx skills/pdf skills/pptx skills/xlsx skills/doc-coauthoring skills/canvas-design skills/web-artifacts-builder skills/skill-creator"}
+{"ts":"2026-03-27 21:29:22","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:29:22","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:29:22","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:29:22","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:29:23","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:29:23","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:29:23","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:29:26","level":"INFO","msg":"git sparse-checkout init --cone"}
+{"ts":"2026-03-27 21:29:26","level":"INFO","msg":"git sparse-checkout set skills/systematic-debugging skills/executing-plans skills/verification-before-completion skills/subagent-driven-development skills/using-git-worktrees skills/requesting-code-review skills/dispatching-parallel-agents skills/finishing-a-development-branch skills/test-driven-development"}
+{"ts":"2026-03-27 21:29:26","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:29:26","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:29:26","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:29:26","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:29:27","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:29:27","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:29:27","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:29:28","level":"INFO","msg":"git sparse-checkout init --cone"}
+{"ts":"2026-03-27 21:29:28","level":"INFO","msg":"git sparse-checkout set skills/.curated/cloudflare-deploy skills/.curated/imagegen skills/.curated/openai-docs skills/.curated/playwright skills/.curated/screenshot skills/.curated/security-best-practices skills/.curated/transcribe skills/.system/skill-installer skills/.curated/develop-web-game"}
+{"ts":"2026-03-27 21:29:29","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:29:29","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:29:29","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:29:29","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:29:30","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:29:30","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:29:30","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:29:31","level":"INFO","msg":"git sparse-checkout init --cone"}
+{"ts":"2026-03-27 21:29:31","level":"INFO","msg":"git sparse-checkout set skills/react-best-practices skills/composition-patterns"}
+{"ts":"2026-03-27 21:29:31","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:29:32","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:29:32","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:29:32","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:29:33","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:29:33","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:29:33","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:29:35","level":"INFO","msg":"git sparse-checkout init --cone"}
+{"ts":"2026-03-27 21:29:35","level":"INFO","msg":"git sparse-checkout set skills/remotion"}
+{"ts":"2026-03-27 21:29:35","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:29:35","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:29:35","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:29:35","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:29:37","level":"INFO","msg":"git reset --hard"}
+{"ts":"2026-03-27 21:29:37","level":"INFO","msg":"git clean -fd"}
+{"ts":"2026-03-27 21:29:37","level":"INFO","msg":"git fetch --all --tags"}
+{"ts":"2026-03-27 21:29:38","level":"INFO","msg":"git sparse-checkout init --cone"}
+{"ts":"2026-03-27 21:29:38","level":"INFO","msg":"git sparse-checkout set skills/baoyu-compress-image skills/baoyu-cover-image skills/baoyu-format-markdown skills/baoyu-post-to-wechat"}
+{"ts":"2026-03-27 21:29:38","level":"INFO","msg":"git checkout main"}
+{"ts":"2026-03-27 21:29:38","level":"INFO","msg":"git rev-parse --abbrev-ref HEAD"}
+{"ts":"2026-03-27 21:29:38","level":"INFO","msg":"git rev-parse --abbrev-ref --symbolic-full-name @{u}"}
+{"ts":"2026-03-27 21:29:38","level":"INFO","msg":"git pull"}
+{"ts":"2026-03-27 21:29:40","level":"INFO","msg":"性能埋点：update_vendor","data":{"metric":"update_vendor","duration_ms":19537,"success":true,"command":"更新Vendor"}}
+{"ts":"2026-03-27 21:29:40","level":"INFO","msg":"Move-Item E:\\CODE\\skills-manager\\agent -\u003e E:\\CODE\\skills-manager\\.txn\\build-60723e65c3\\agent.backup"}
+{"ts":"2026-03-27 21:29:40","level":"INFO","msg":"=== 启动构建生效流程 ==="}
+{"ts":"2026-03-27 21:29:40","level":"INFO","msg":"开始构建 Agent..."}
+{"ts":"2026-03-27 21:29:43","level":"INFO","msg":"已展开相对路径 SKILL 占位文件：2 项 [manual|claude-mem|manual-claude-mem]"}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"检测到同名同内容技能别名，已跳过冲突：do"}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"检测到同名同内容技能别名，已跳过冲突：make-plan"}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"构建完成：agent/ (共 58 项技能)"}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"性能埋点：build_agent","data":{"metric":"build_agent","duration_ms":3611,"success":true,"command":"构建Agent"}}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.claude\\skills"}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.claude\\skills\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"已关联（链接）：~/.claude/skills -\u003e agent/"}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.codex\\skills"}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.codex\\skills\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"已关联（链接）：~/.codex/skills -\u003e agent/"}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.gemini\\skills"}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.gemini\\skills\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"已关联（链接）：~/.gemini/skills -\u003e agent/"}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.gemini\\antigravity\\skills\\"}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.gemini\\antigravity\\skills\\\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"已关联（链接）：~/.gemini/antigravity/skills/ -\u003e agent/"}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"Remove-Item -Recurse C:\\Users\\sciman\\.trae\\skills\\"}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"cmd /c mklink /J \"C:\\Users\\sciman\\.trae\\skills\\\" \"E:\\CODE\\skills-manager\\agent\""}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"已关联（链接）：~/.trae/skills/ -\u003e agent/"}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"性能埋点：apply_targets","data":{"metric":"apply_targets","duration_ms":105,"success":true,"command":"应用到ClaudeCodex"}}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"Remove-Item -Recurse E:\\CODE\\skills-manager\\.txn\\build-60723e65c3"}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"=== 构建生效流程完成 ==="}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"性能埋点：build_apply_total","data":{"metric":"build_apply_total","duration_ms":4314,"success":true,"command":"构建生效"}}
+{"ts":"2026-03-27 21:29:44","level":"INFO","msg":"性能埋点：update_total","data":{"metric":"update_total","duration_ms":103088,"success":true,"command":"更新"}}
