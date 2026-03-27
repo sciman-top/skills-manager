@@ -313,6 +313,7 @@ function 更新 {
         if ($Locked -and ($Plan -or $Upgrade)) {
             throw "-Locked 不能与 -Plan 或 -Upgrade 同时使用。"
         }
+        Invoke-PrebuildCheck
         if ($Plan) {
             Preflight
             Show-UpdatePlan $cfg | Out-Null

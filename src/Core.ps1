@@ -383,6 +383,20 @@ function Preflight {
     EnsureDir $OverridesDir
     EnsureDir $ImportDir
 }
+function Invoke-PrebuildCheck([switch]$Strict) {
+    $scriptPath = Join-Path $Root "scripts\prebuild-check.ps1"
+    if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+        Log ("未找到预检脚本，跳过：{0}" -f $scriptPath) "WARN"
+        return
+    }
+    $args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $scriptPath)
+    if ($Strict) { $args += "-Strict" }
+    Log ("执行预检脚本：{0}" -f $scriptPath)
+    & powershell @args
+    if ($LASTEXITCODE -ne 0) {
+        throw ("预检失败（exit={0}）：请先修复后再执行构建/更新。" -f $LASTEXITCODE)
+    }
+}
 function RoboMirror([string]$src, [string]$dst) {
     EnsureDir $dst
     $cmd = "robocopy `"$src`" `"$dst`" /MIR /NFL /NDL /NJH /NJS /NP"
@@ -543,6 +557,56 @@ function Normalize-Name([string]$name) {
     if ([string]::IsNullOrWhiteSpace($n)) { return $null }
     return $n
 }
+function Normalize-CompactName([string]$name) {
+    if ([string]::IsNullOrWhiteSpace($name)) { return $null }
+    $n = $name.ToLowerInvariant()
+    $n = $n -replace "[^a-z0-9]", ""
+    if ([string]::IsNullOrWhiteSpace($n)) { return $null }
+    return $n
+}
+function Get-SkillCandidatesByRelevance([object[]]$items, [string]$query) {
+    $ordered = @($items | Sort-Object rel)
+    if ($ordered.Count -le 1 -or [string]::IsNullOrWhiteSpace($query)) { return $ordered }
+
+    $qLeaf = Split-Path $query -Leaf
+    $qNorm = Normalize-Name $qLeaf
+    $qCompact = Normalize-CompactName $qLeaf
+
+    $scored = @()
+    foreach ($item in $ordered) {
+        $leaf = [string]$item.leaf
+        $rel = [string]$item.rel
+        $leafNorm = Normalize-Name $leaf
+        $leafCompact = Normalize-CompactName $leaf
+        $score = 0
+
+        if (-not [string]::IsNullOrWhiteSpace($qNorm) -and -not [string]::IsNullOrWhiteSpace($leafNorm)) {
+            if ($qNorm -eq $leafNorm) { $score += 1000 }
+            elseif ($qNorm.EndsWith("-$leafNorm") -or $leafNorm.EndsWith("-$qNorm")) { $score += 700 }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($qCompact) -and -not [string]::IsNullOrWhiteSpace($leafCompact)) {
+            if ($qCompact -eq $leafCompact) { $score += 900 }
+            elseif ($qCompact.Contains($leafCompact) -or $leafCompact.Contains($qCompact)) { $score += 500 }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($qNorm) -and -not [string]::IsNullOrWhiteSpace($leafNorm)) {
+            if ($qNorm -match "(^|-)motion(s)?($|-)|(^|-)anim(ation|ate|ations)?($|-)") {
+                if ($leafNorm -match "(^|-)motion(s)?($|-)|(^|-)anim(ation|ate|ations)?($|-)") {
+                    $score += 650
+                }
+            }
+        }
+
+        $relGit = ($rel -replace "\\", "/")
+        if ($relGit -match "^(\\.claude/skills|skills)(/|$)") { $score += 20 }
+
+        $scored += [pscustomobject]@{
+            item  = $item
+            score = $score
+        }
+    }
+
+    return @($scored | Sort-Object @{Expression = "score"; Descending = $true }, @{Expression = { $_.item.rel } } | ForEach-Object { $_.item })
+}
 function Normalize-NameWithNotice([string]$name, [string]$label = "名称") {
     $norm = Normalize-Name $name
     Need (-not [string]::IsNullOrWhiteSpace($norm)) ("{0} 无法规范化，请更换名称：{1}" -f $label, $name)
@@ -603,15 +667,16 @@ function Get-SkillCandidates([string]$base) {
     $script:SkillCandidatesCache[$base] = $items
     return ,$items
 }
-function Format-SkillCandidates([object[]]$items, [string]$base) {
+function Format-SkillCandidates([object[]]$items, [string]$base, [string]$query = $null) {
     if ($items.Count -eq 0) { return "" }
+    $ranked = Get-SkillCandidatesByRelevance $items $query
     $lines = @()
-    $lines += ("可选路径（共 {0}）：" -f $items.Count)
-    foreach ($i in ($items | Select-Object -First 20)) {
+    $lines += ("可选路径（共 {0}）：" -f $ranked.Count)
+    foreach ($i in ($ranked | Select-Object -First 20)) {
         $lines += ("- {0}" -f $i.rel)
     }
-    if ($items.Count -gt 20) {
-        $lines += ("... 另有 {0} 项未显示" -f ($items.Count - 20))
+    if ($ranked.Count -gt 20) {
+        $lines += ("... 另有 {0} 项未显示" -f ($ranked.Count - 20))
     }
     $lines += ("提示：仓库内未发现 SKILL.md，但已搜索 AGENTS.md, GEMINI.md, CLAUDE.md 等入口文件。")
     return ($lines -join [Environment]::NewLine)
@@ -642,11 +707,12 @@ function Resolve-SkillPath([string]$base, [string]$skillPath) {
         }
         if ($matches.Count -gt 1) {
             $msg = "未找到技能入口文件：{0}。提示：同名候选过多，请用 --skill 指定准确路径。" -f $src
-            $msg += [Environment]::NewLine + (Format-SkillCandidates $matches $base)
+            $msg += [Environment]::NewLine + (Format-SkillCandidates $matches $base $skillPath)
             throw $msg
         }
 
         $leafNorm = Normalize-Name $leaf
+        $leafCompact = Normalize-CompactName $leaf
         if (-not [string]::IsNullOrWhiteSpace($leafNorm)) {
             $fuzzyMatches = @($candidates | Where-Object {
                     $candNorm = Normalize-Name $_.leaf
@@ -659,7 +725,39 @@ function Resolve-SkillPath([string]$base, [string]$skillPath) {
             }
             if ($fuzzyMatches.Count -gt 1) {
                 $msg = "未找到技能入口文件：{0}。提示：后缀匹配候选过多，请用 --skill 指定准确路径。" -f $src
-                $msg += [Environment]::NewLine + (Format-SkillCandidates $fuzzyMatches $base)
+                $msg += [Environment]::NewLine + (Format-SkillCandidates $fuzzyMatches $base $skillPath)
+                throw $msg
+            }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($leafCompact)) {
+            $compactMatches = @($candidates | Where-Object {
+                    $candCompact = Normalize-CompactName $_.leaf
+                    if ([string]::IsNullOrWhiteSpace($candCompact)) { return $false }
+                    return ($leafCompact -eq $candCompact) -or ($leafCompact.Contains($candCompact)) -or ($candCompact.Contains($leafCompact))
+                })
+            if ($compactMatches.Count -eq 1) {
+                Write-Host ("未找到指定路径，已按紧凑匹配自动修正为：{0}" -f $compactMatches[0].rel)
+                return $compactMatches[0].rel
+            }
+            if ($compactMatches.Count -gt 1) {
+                $msg = "未找到技能入口文件：{0}。提示：紧凑匹配候选过多，请用 --skill 指定准确路径。" -f $src
+                $msg += [Environment]::NewLine + (Format-SkillCandidates $compactMatches $base $skillPath)
+                throw $msg
+            }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($leafNorm) -and $leafNorm -match "(^|-)motion(s)?($|-)|(^|-)anim(ation|ate|ations)?($|-)") {
+            $semanticMatches = @($candidates | Where-Object {
+                    $candNorm = Normalize-Name $_.leaf
+                    if ([string]::IsNullOrWhiteSpace($candNorm)) { return $false }
+                    return ($candNorm -match "(^|-)motion(s)?($|-)|(^|-)anim(ation|ate|ations)?($|-)")
+                })
+            if ($semanticMatches.Count -eq 1) {
+                Write-Host ("未找到指定路径，已按语义匹配自动修正为：{0}" -f $semanticMatches[0].rel)
+                return $semanticMatches[0].rel
+            }
+            if ($semanticMatches.Count -gt 1) {
+                $msg = "未找到技能入口文件：{0}。提示：语义匹配候选过多，请用 --skill 指定准确路径。" -f $src
+                $msg += [Environment]::NewLine + (Format-SkillCandidates $semanticMatches $base $skillPath)
                 throw $msg
             }
         }
@@ -676,7 +774,7 @@ function Resolve-SkillPath([string]$base, [string]$skillPath) {
     }
 
     $msg = "未找到技能入口文件：{0}。提示：请用 --skill 指定子目录（常见前缀：skills/、plugins/<plugin>/skills/）。" -f $src
-    $msg += [Environment]::NewLine + (Format-SkillCandidates $candidates $base)
+    $msg += [Environment]::NewLine + (Format-SkillCandidates $candidates $base $skillPath)
     throw $msg
 }
 function Split-Args([string]$line) {

@@ -39,11 +39,6 @@
                          "vendor":  "anthropics-skills"
                      },
                      {
-                         "to":  "anthropics-skills-pdf",
-                         "from":  "skills\\pdf",
-                         "vendor":  "anthropics-skills"
-                     },
-                     {
                          "to":  "anthropics-skills-pptx",
                          "from":  "skills\\pptx",
                          "vendor":  "anthropics-skills"
@@ -89,24 +84,9 @@
                          "vendor":  "superpowers"
                      },
                      {
-                         "from":  "skills\\using-git-worktrees",
-                         "to":  "superpowers-skills-using-git-worktrees",
-                         "vendor":  "superpowers"
-                     },
-                     {
-                         "from":  "skills\\requesting-code-review",
-                         "to":  "superpowers-skills-requesting-code-review",
-                         "vendor":  "superpowers"
-                     },
-                     {
                          "from":  "skills\\react-best-practices",
                          "to":  "agent-skills-skills-react-best-practices",
                          "vendor":  "agent-skills"
-                     },
-                     {
-                         "from":  "skills\\remotion",
-                         "to":  "skills-2-skills-remotion",
-                         "vendor":  "skills-2"
                      },
                      {
                          "from":  "skills\\composition-patterns",
@@ -149,18 +129,8 @@
                          "vendor":  "skills"
                      },
                      {
-                         "from":  "skills\\.system\\skill-installer",
-                         "to":  "skills-skills-.system-skill-installer",
-                         "vendor":  "skills"
-                     },
-                     {
                          "from":  "skills\\dispatching-parallel-agents",
                          "to":  "superpowers-skills-dispatching-parallel-agents",
-                         "vendor":  "superpowers"
-                     },
-                     {
-                         "from":  "skills\\finishing-a-development-branch",
-                         "to":  "superpowers-skills-finishing-a-development-branch",
                          "vendor":  "superpowers"
                      },
                      {
@@ -194,9 +164,29 @@
                          "vendor":  "baoyu-skills"
                      },
                      {
-                         "from":  "skills\\.curated\\develop-web-game",
-                         "to":  "skills-skills-.curated-develop-web-game",
-                         "vendor":  "skills"
+                         "from":  "skills\\frontend-design",
+                         "to":  "anthropics-skills-skills-frontend-design",
+                         "vendor":  "anthropics-skills"
+                     },
+                     {
+                         "from":  "skills\\theme-factory",
+                         "to":  "anthropics-skills-skills-theme-factory",
+                         "vendor":  "anthropics-skills"
+                     },
+                     {
+                         "from":  "skills\\webapp-testing",
+                         "to":  "anthropics-skills-skills-webapp-testing",
+                         "vendor":  "anthropics-skills"
+                     },
+                     {
+                         "from":  "skills\\pdf",
+                         "to":  "anthropics-skills-skills-pdf",
+                         "vendor":  "anthropics-skills"
+                     },
+                     {
+                         "from":  "skills\\remotion",
+                         "to":  "skills-2-skills-remotion",
+                         "vendor":  "skills-2"
                      }
                  ],
     "imports":  [
@@ -213,7 +203,7 @@
                         "name":  "anthropics-skills",
                         "sparse":  false,
                         "ref":  "main",
-                        "skill":  "skills\\web-artifacts-builder",
+                        "skill":  "skills\\pdf",
                         "repo":  "https://github.com/anthropics/skills.git"
                     },
                     {
@@ -377,14 +367,6 @@
                         "mode":  "manual"
                     },
                     {
-                        "name":  "technical-blog-writing",
-                        "skill":  "guides\\writing\\technical-blog-writing",
-                        "sparse":  false,
-                        "repo":  "https://github.com/inference-sh-6/skills.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
                         "name":  "agent-skills",
                         "skill":  "skills\\react-best-practices",
                         "sparse":  false,
@@ -401,22 +383,6 @@
                         "mode":  "vendor"
                     },
                     {
-                        "name":  "pretty-mermaid-skills",
-                        "skill":  ".",
-                        "sparse":  false,
-                        "repo":  "https://github.com/imxv/pretty-mermaid-skills.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "ui-ux-pro-max",
-                        "skill":  ".claude\\skills\\ui-ux-pro-max",
-                        "sparse":  false,
-                        "repo":  "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
                         "name":  "shadcn-ui",
                         "skill":  "skills\\shadcn-ui",
                         "sparse":  false,
@@ -429,6 +395,86 @@
                         "skill":  ".",
                         "sparse":  false,
                         "repo":  "https://github.com/thedotmack/claude-mem.git",
+                        "ref":  "main",
+                        "mode":  "manual"
+                    },
+                    {
+                        "name":  "data-visualization",
+                        "skill":  "data\\skills\\data-visualization",
+                        "sparse":  false,
+                        "repo":  "https://github.com/anthropics/knowledge-work-plugins.git",
+                        "ref":  "main",
+                        "mode":  "manual"
+                    },
+                    {
+                        "name":  "openpyxl",
+                        "skill":  ".claude\\skills\\data\\office\\openpyxl",
+                        "sparse":  false,
+                        "repo":  "https://github.com/vamseeachanta/workspace-hub.git",
+                        "ref":  "main",
+                        "mode":  "manual"
+                    },
+                    {
+                        "name":  "powerpoint-automation",
+                        "skill":  "powerpoint-automation",
+                        "sparse":  false,
+                        "repo":  "https://github.com/aktsmm/agent-skills.git",
+                        "ref":  "master",
+                        "mode":  "manual"
+                    },
+                    {
+                        "name":  "drawio-diagram-forge",
+                        "skill":  "drawio-diagram-forge",
+                        "sparse":  false,
+                        "repo":  "https://github.com/aktsmm/agent-skills.git",
+                        "ref":  "master",
+                        "mode":  "manual"
+                    },
+                    {
+                        "name":  "modern-python",
+                        "skill":  "plugins\\modern-python\\skills\\modern-python",
+                        "sparse":  false,
+                        "repo":  "https://github.com/trailofbits/skills.git",
+                        "ref":  "main",
+                        "mode":  "manual"
+                    },
+                    {
+                        "name":  "manimce-best-practices",
+                        "skill":  "skills\\manimce-best-practices",
+                        "sparse":  false,
+                        "repo":  "https://github.com/adithya-s-k/manim_skill.git",
+                        "ref":  "main",
+                        "mode":  "manual"
+                    },
+                    {
+                        "name":  "manim-composer",
+                        "skill":  "skills\\manim-composer",
+                        "sparse":  false,
+                        "repo":  "https://github.com/adithya-s-k/manim_skill.git",
+                        "ref":  "main",
+                        "mode":  "manual"
+                    },
+                    {
+                        "name":  "python-pptx",
+                        "skill":  ".claude\\skills\\data\\office\\python-pptx",
+                        "sparse":  false,
+                        "repo":  "https://github.com/vamseeachanta/workspace-hub.git",
+                        "ref":  "main",
+                        "mode":  "manual"
+                    },
+                    {
+                        "name":  "python-docx",
+                        "skill":  ".claude\\skills\\data\\office\\python-docx",
+                        "sparse":  false,
+                        "repo":  "https://github.com/vamseeachanta/workspace-hub.git",
+                        "ref":  "main",
+                        "mode":  "manual"
+                    },
+                    {
+                        "name":  "ui-animation",
+                        "skill":  "skills\\ui-animation",
+                        "sparse":  false,
+                        "repo":  "https://github.com/mblode/agent-skills.git",
                         "ref":  "main",
                         "mode":  "manual"
                     }

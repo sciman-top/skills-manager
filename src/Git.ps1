@@ -60,8 +60,9 @@ function Invoke-Git([string[]]$GitArgs) {
         }
         if ($output) {
             foreach ($line in @($output)) {
-                if ($null -eq $line) { continue }
-                Write-Host ([string]$line)
+                $text = Convert-GitOutputLineToText $line
+                if ([string]::IsNullOrWhiteSpace($text)) { continue }
+                Write-Host $text
             }
         }
         if ($exitCode -eq 0) { return }
@@ -111,6 +112,71 @@ function Invoke-GitCapture([string[]]$GitArgs) {
     }
     if ($null -eq $out) { return "" }
     return (($out | Select-Object -First 1).ToString().Trim())
+}
+function Invoke-GitCaptureLines([string[]]$GitArgs) {
+    if ($DryRun) {
+        Log ("DRYRUN git {0}" -f ($GitArgs -join " "))
+        return @()
+    }
+    Log ("git {0}" -f ($GitArgs -join " "))
+    $canTuneNativeErrPref = ($PSVersionTable.PSVersion.Major -ge 7)
+    $prevNativeErrorPref = $null
+    $prevErrorActionPreference = $ErrorActionPreference
+    try {
+        if ($canTuneNativeErrPref) {
+            $prevNativeErrorPref = $PSNativeCommandUseErrorActionPreference
+            $PSNativeCommandUseErrorActionPreference = $false
+        }
+        $ErrorActionPreference = "Continue"
+        $out = & git @GitArgs 2>$null
+        if ($LASTEXITCODE -ne 0) { return @() }
+    }
+    finally {
+        $ErrorActionPreference = $prevErrorActionPreference
+        if ($canTuneNativeErrPref) {
+            $PSNativeCommandUseErrorActionPreference = $prevNativeErrorPref
+        }
+    }
+    $lines = @()
+    foreach ($line in @($out)) {
+        $text = Convert-GitOutputLineToText $line
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        $lines += $text
+    }
+    return ,$lines
+}
+function Get-SkillCandidatesFromGitRepo([string]$repo, [string]$ref) {
+    Need (-not [string]::IsNullOrWhiteSpace($repo)) "Repo URL 不能为空。"
+    Need (-not [string]::IsNullOrWhiteSpace($ref)) "ref 不能为空。"
+
+    $tmpName = ("_tree_{0}" -f ([Guid]::NewGuid().ToString("N").Substring(0, 8)))
+    $tmpBase = Join-Path $ImportDir $tmpName
+    $barePath = Join-Path $tmpBase "repo.git"
+    EnsureDir $tmpBase
+    try {
+        Invoke-Git @("clone", "--bare", $repo, $barePath)
+        $gitDirArg = "--git-dir={0}" -f $barePath
+        $allFiles = Invoke-GitCaptureLines @($gitDirArg, "ls-tree", "-r", "--name-only", $ref)
+        $seenDirs = New-Object System.Collections.Generic.HashSet[string]
+        $candidates = @()
+        foreach ($f in $allFiles) {
+            if ([string]::IsNullOrWhiteSpace($f)) { continue }
+            if ($f -notmatch "(^|/)(SKILL|AGENTS|GEMINI|CLAUDE)\.md$") { continue }
+            $dir = Split-Path ($f -replace "/", "\") -Parent
+            if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
+            $dirGit = ($dir -replace "\\", "/")
+            if ($dirGit -match "(^|/)_archive(/|$)") { continue }
+            if (-not $seenDirs.Add($dir)) { continue }
+            $candidates += [pscustomobject]@{
+                rel = $dir
+                leaf = (Split-Path $dir -Leaf)
+            }
+        }
+        return ,@($candidates | Sort-Object rel)
+    }
+    finally {
+        Invoke-RemoveItemWithRetry $tmpBase -Recurse -IgnoreFailure | Out-Null
+    }
 }
 function Assert-RepoReachable([string]$repo) {
     Need (-not [string]::IsNullOrWhiteSpace($repo)) "Repo URL 不能为空。"
@@ -186,6 +252,94 @@ function Ensure-RepoFromZip([string]$path, [string]$zipPath, [bool]$forceClean =
         Invoke-RemoveItemWithRetry $tmpBase -Recurse -IgnoreFailure
     }
 }
+function Ensure-RepoFromGitArchive([string]$path, [string]$repo, [string]$ref, [string]$skillPath, [bool]$forceClean = $true) {
+    Need (-not [string]::IsNullOrWhiteSpace($repo)) "Repo URL 不能为空。"
+    Need (-not [string]::IsNullOrWhiteSpace($ref)) "ref 不能为空。"
+    $normalizedSkill = Normalize-SkillPath $skillPath
+    Need ($normalizedSkill -ne ".") "git archive 回退模式不支持根路径 '.'，请指定具体子目录。"
+
+    if (Test-Path $path) {
+        Need $forceClean ("缓存目录已存在且 update_force=false：{0}" -f $path)
+        Invoke-RemoveItemWithRetry $path -Recurse
+    }
+    EnsureDir (Split-Path $path -Parent)
+    EnsureDir $path
+
+    $tmpName = ("_archive_{0}" -f ([Guid]::NewGuid().ToString("N").Substring(0, 8)))
+    $tmpBase = Join-Path $ImportDir $tmpName
+    $barePath = Join-Path $tmpBase "repo.git"
+    $zipPath = Join-Path $tmpBase "export.zip"
+    EnsureDir $tmpBase
+    try {
+        Invoke-Git @("clone", "--bare", $repo, $barePath)
+        $gitDirArg = "--git-dir={0}" -f $barePath
+        $gitPath = To-GitPath $normalizedSkill
+        Invoke-Git @($gitDirArg, "archive", "--format=zip", "--output", $zipPath, $ref, $gitPath)
+        Expand-Archive -LiteralPath $zipPath -DestinationPath $path -Force
+    }
+    finally {
+        Invoke-RemoveItemWithRetry $tmpBase -Recurse -IgnoreFailure
+    }
+}
+function Resolve-GitHubOwnerRepo([string]$repo) {
+    if ([string]::IsNullOrWhiteSpace($repo)) { return $null }
+    $r = $repo.Trim().Trim("'`"")
+    if ($r -match "^git@github\.com:(.+?)/(.+?)(?:\.git)?$") {
+        return [pscustomobject]@{ owner = $Matches[1]; name = $Matches[2] }
+    }
+    if ($r -match "^https?://github\.com/(.+?)/(.+?)(?:\.git)?/?$") {
+        return [pscustomobject]@{ owner = $Matches[1]; name = $Matches[2] }
+    }
+    if ($r -match "^github\.com/(.+?)/(.+?)(?:\.git)?/?$") {
+        return [pscustomobject]@{ owner = $Matches[1]; name = $Matches[2] }
+    }
+    return $null
+}
+function Ensure-RepoFromGitHubTreeSnapshot([string]$path, [string]$repo, [string]$ref, [string]$skillPath, [bool]$forceClean = $true) {
+    Need (-not [string]::IsNullOrWhiteSpace($repo)) "Repo URL 不能为空。"
+    Need (-not [string]::IsNullOrWhiteSpace($ref)) "ref 不能为空。"
+    $normalizedSkill = Normalize-SkillPath $skillPath
+    Need ($normalizedSkill -ne ".") "GitHub 快照回退不支持根路径 '.'，请指定具体子目录。"
+
+    $ownerRepo = Resolve-GitHubOwnerRepo $repo
+    Need ($null -ne $ownerRepo) ("GitHub 快照回退仅支持 github.com 仓库：{0}" -f $repo)
+
+    if (Test-Path $path) {
+        Need $forceClean ("缓存目录已存在且 update_force=false：{0}" -f $path)
+        Invoke-RemoveItemWithRetry $path -Recurse
+    }
+    EnsureDir (Split-Path $path -Parent)
+    EnsureDir $path
+
+    $headers = @{
+        "User-Agent" = "skills-manager"
+        "Accept" = "application/vnd.github+json"
+    }
+    $encodedRef = [System.Uri]::EscapeDataString($ref)
+    $treeUrl = ("https://api.github.com/repos/{0}/{1}/git/trees/{2}?recursive=1" -f $ownerRepo.owner, $ownerRepo.name, $encodedRef)
+    $treeResp = Invoke-RestMethod -Uri $treeUrl -Headers $headers -Method Get -ErrorAction Stop
+    Need ($treeResp -and $treeResp.tree) ("GitHub 树接口返回为空：{0}" -f $treeUrl)
+
+    $prefix = (To-GitPath $normalizedSkill).Trim("/")
+    Need (-not [string]::IsNullOrWhiteSpace($prefix)) "技能路径无效。"
+    $prefixSlash = "$prefix/"
+
+    $blobs = @($treeResp.tree | Where-Object {
+            $_.type -eq "blob" -and $_.path -is [string] -and ($_.path -eq $prefix -or $_.path.StartsWith($prefixSlash))
+        })
+    Need ($blobs.Count -gt 0) ("GitHub 快照回退未找到目标路径：{0}" -f $normalizedSkill)
+
+    foreach ($blob in $blobs) {
+        $blobPath = [string]$blob.path
+        if ([string]::IsNullOrWhiteSpace($blobPath)) { continue }
+        $relPath = $blobPath -replace "/", "\"
+        $dstPath = Join-Path $path $relPath
+        EnsureDir (Split-Path $dstPath -Parent)
+
+        $rawUrl = ("https://raw.githubusercontent.com/{0}/{1}/{2}/{3}" -f $ownerRepo.owner, $ownerRepo.name, $ref, $blobPath)
+        Invoke-WebRequest -Uri $rawUrl -Headers @{ "User-Agent" = "skills-manager" } -OutFile $dstPath -ErrorAction Stop | Out-Null
+    }
+}
 function Parse-DefaultBranchFromSymref([string]$line) {
     if ([string]::IsNullOrWhiteSpace($line)) { return $null }
     $text = $line.Trim()
@@ -218,6 +372,33 @@ function Get-GitHeadBranch {
     if ([string]::IsNullOrWhiteSpace($head) -or $head -eq "HEAD") { return $null }
     return $head
 }
+function Get-RepoIdentity([string]$repo) {
+    if ([string]::IsNullOrWhiteSpace($repo)) { return $null }
+    $r = $repo.Trim().Trim("'`"")
+    if ($r -match "^git@github\.com:(.+)$") {
+        $r = "https://github.com/$($Matches[1])"
+    }
+    if ($r -match "^https?://github\.com/(.+)$") {
+        $path = $Matches[1]
+        $path = $path.TrimEnd("/")
+        if ($path.EndsWith(".git")) { $path = $path.Substring(0, $path.Length - 4) }
+        $parts = $path.Split("/") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        if ($parts.Count -ge 2) {
+            return ("github.com/{0}/{1}" -f $parts[0], $parts[1]).ToLowerInvariant()
+        }
+        return ("github.com/{0}" -f $path).ToLowerInvariant()
+    }
+    $n = Normalize-RepoUrl $r
+    if ([string]::IsNullOrWhiteSpace($n)) { return $r.ToLowerInvariant() }
+    if ($n.EndsWith(".git")) { $n = $n.Substring(0, $n.Length - 4) }
+    return $n.TrimEnd("/").ToLowerInvariant()
+}
+function Is-SameRepoIdentity([string]$a, [string]$b) {
+    $ia = Get-RepoIdentity $a
+    $ib = Get-RepoIdentity $b
+    if ([string]::IsNullOrWhiteSpace($ia) -or [string]::IsNullOrWhiteSpace($ib)) { return $false }
+    return ($ia -eq $ib)
+}
 function Has-GitUpstream {
     $up = Invoke-GitCapture @("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
     return -not [string]::IsNullOrWhiteSpace($up)
@@ -248,10 +429,26 @@ function Test-GitIndexLockIssue($outputLines) {
     }
     return $false
 }
+function Convert-GitOutputLineToText($line) {
+    if ($null -eq $line) { return $null }
+    if ($line -is [System.Management.Automation.ErrorRecord]) {
+        if ($line.Exception -and -not [string]::IsNullOrWhiteSpace($line.Exception.Message)) {
+            return $line.Exception.Message.Trim()
+        }
+        $fallback = $line.ToString()
+        if ([string]::IsNullOrWhiteSpace($fallback)) { return $null }
+        if ($fallback -eq "System.Management.Automation.RemoteException") { return $null }
+        return $fallback.Trim()
+    }
+    $text = ([string]$line).Trim()
+    if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+    if ($text -eq "System.Management.Automation.RemoteException") { return $null }
+    return $text
+}
 function Get-GitOutputSummary($outputLines) {
     $lines = @()
     foreach ($line in @($outputLines)) {
-        $text = ([string]$line).Trim()
+        $text = Convert-GitOutputLineToText $line
         if ([string]::IsNullOrWhiteSpace($text)) { continue }
         $lines += $text
     }
@@ -352,6 +549,27 @@ function Ensure-Repo([string]$path, [string]$repo, [string]$ref, [string]$sparse
         }
     }
     else {
+        $gitDir = Join-Path $path ".git"
+        if (-not (Test-Path -LiteralPath $gitDir -PathType Container)) {
+            Need $forceClean ("缓存目录已存在但不是 git 仓库且 update_force=false：{0}" -f $path)
+            Log ("缓存目录不是 git 仓库，已重建：{0}" -f $path) "WARN"
+            Invoke-RemoveItemWithRetry $path -Recurse
+            Ensure-Repo $path $repo $ref $sparsePath $forceClean $confirmClean $doFetch
+            return
+        }
+        $existingOrigin = $null
+        Push-Location $path
+        try {
+            $existingOrigin = Invoke-GitCapture @("remote", "get-url", "origin")
+        }
+        finally { Pop-Location }
+        if (-not (Is-SameRepoIdentity $existingOrigin $repo)) {
+            Need $forceClean ("缓存目录已存在但来源仓库不匹配且 update_force=false：{0}" -f $path)
+            Log ("检测到缓存目录来源不匹配，已重建：{0} (old={1}, new={2})" -f $path, $existingOrigin, $repo) "WARN"
+            Invoke-RemoveItemWithRetry $path -Recurse
+            Ensure-Repo $path $repo $ref $sparsePath $forceClean $confirmClean $doFetch
+            return
+        }
         Push-Location $path
         try {
             if ($forceClean -and $confirmClean) {

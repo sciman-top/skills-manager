@@ -96,6 +96,18 @@ Describe "Core Functions" {
         }
     }
 
+    Context "Resolve-SkillPath" {
+        It "Auto-resolves compact name variants like uni-app -> skills\\uniapp" {
+            $base = Join-Path $TestDrive "repo-compact"
+            $skillDir = Join-Path $base "skills\\uniapp"
+            New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
+            New-Item -ItemType File -Path (Join-Path $skillDir "AGENTS.md") -Force | Out-Null
+
+            Clear-SkillsCache
+            Resolve-SkillPath $base "uni-app" | Should Be "skills\\uniapp"
+        }
+    }
+
     Context "Parse-DefaultBranchFromSymref" {
         It "Parses main branch from ls-remote symref output" {
             Parse-DefaultBranchFromSymref "ref: refs/heads/main`tHEAD" | Should Be "main"

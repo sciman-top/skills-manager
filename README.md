@@ -239,12 +239,24 @@ skills add <repo> --skill <name> [--ref <branch/tag>] [--sparse]
 
 - `mklink` 失败 / link 不生效：把 `sync_mode` 改为 `sync`，再运行“构建并生效”。
 - CLI 未立即识别新技能：重启该 CLI 会话通常最稳。
+- 构建前预检（推荐）：`powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\prebuild-check.ps1`
+  - 预检会检查：`git status`、`.git` ACL 显式 DENY、常见客户端进程占用。
+  - 严格模式：`.\scripts\prebuild-check.ps1 -Strict`（有 WARN 即失败）。
 - 可运行 `.\skills.ps1 doctor` 查看环境检查与最近性能摘要（每个流程最近 3 次 `last/avg/samples`）。
 - `doctor` 还会做配置风险扫描（重复 `targets.path`、重复 `mappings.to`、映射引用不存在 vendor）并提示性能异常（默认阈值 5000ms）。
 - 机器可读输出与低风险自修复：`.\skills.ps1 doctor --json`、`.\skills.ps1 doctor --fix`、`.\skills.ps1 doctor --dry-run-fix`。
 - 严格模式：`.\skills.ps1 doctor --json --strict`（有配置风险或性能异常时 `pass=false`，便于 CI 阻断）。
 - 性能阈值：`.\skills.ps1 doctor --json --threshold-ms 3000`。
 - `doctor --strict` 在命令行会返回非 0 退出码（当前为 `2`），可直接接入 CI。
+
+---
+
+## 本地提交门禁（pre-commit）
+
+- 安装：`powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-githooks.ps1`
+- 生效后会阻断以下提交：
+  - 临时产物：`.txn/`、`build.log`、`.build-cache.json`
+  - 任意 dirty submodule（`git submodule status` 包含 `-dirty`）
 
 ---
 
