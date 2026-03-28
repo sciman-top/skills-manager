@@ -1,0 +1,22 @@
+# pack-refs with: peeled fully-peeled sorted 
+52b223982235e19d4582edffa8ad1bdbe5a79ed3 refs/heads/chore/WRK-1142-stage-micro-skills
+2f730da289bd2e94b1674dcc8dcbdf330374ee53 refs/heads/chore/revert-pr2-58e3f21
+f6eb5eaad4e6eb03b0375f649fb6df84dca3375e refs/heads/chore/wrk-470-windows-merge-fix
+76e289e47f7d6ff9c80ede3f2be2e6cc1682c732 refs/heads/feature/WRK-1072-release-management
+76e289e47f7d6ff9c80ede3f2be2e6cc1682c732 refs/heads/feature/WRK-1113-doc-corpus-extraction
+134204bd9275b98cd9f19e95f5b46a63b40cf444 refs/heads/feature/WRK-1251-freecad-deep-parametric-engineering
+fb641c0ab0c0ae491883a298235f6ffa6853b251 refs/heads/feature/WRK-205-skills-knowledge-graph
+76686ccfcfd79c029829cab6a9d3753d47df0374 refs/heads/main
+f6f5ca3d88bd934ffbabf177cdc13e4cd4c87364 refs/heads/worktree-agent-a1e19d35
+17f1dafcdbe68a196a2e6d2f9748fe9d9b5d1074 refs/heads/worktree-agent-a3b54023
+f32573baeb6cb38368b28637e33319ca5ccceafc refs/heads/worktree-agent-a440cd91
+7d32c40d97b6cb08e5837b2695239cfb9dfd1bb5 refs/heads/worktree-agent-a78219eb
+c5824bd843ec793ac3c1391139e52ec92294b44d refs/heads/worktree-agent-a78a9c51
+b9ba6230954eef606ff03d1f98d17140d3743c9f refs/heads/worktree-agent-a799b47d
+be74fe6474310bdfd488ff06b157acebea02b723 refs/heads/worktree-agent-a9574247
+34f6fc347bf0abe55cb0b6bfcb1dca37ebe4730b refs/heads/worktree-agent-a9577636
+69b4749c960ec70526fb1c0c067a1db4543c991f refs/heads/worktree-agent-aa243fcf
+cf7620eb7f37b5b746a1cd93bf284f22c25e9c4f refs/heads/worktree-agent-abce91dd
+55a9a4970f288bbfa491c8d941a8ce74dd46efeb refs/heads/worktree-agent-acf403a6
+bb53386e913bb2de649ea998f763871b0fcea7e1 refs/heads/worktree-agent-ad8ed7b5
+e446db525cc0cd4333285971574ff60260d0e47d refs/heads/worktree-agent-afa4ed19

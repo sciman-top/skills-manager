@@ -254,8 +254,6 @@ function Resolve-RelativeSkillPlaceholderTarget([string]$skillFile, [string]$roo
 
     $targetRaw = Get-ContentUtf8 $candidate
     if ([string]::IsNullOrWhiteSpace($targetRaw)) { return $null }
-    $targetNormalized = $targetRaw.TrimStart([char]0xFEFF).TrimStart()
-    if ($targetNormalized -notmatch "^---(\r?\n|$)") { return $null }
     return $candidate
 }
 function Expand-RelativeSkillPlaceholders([string]$rootPath) {
@@ -271,6 +269,71 @@ function Expand-RelativeSkillPlaceholders([string]$rootPath) {
         $count++
     }
     return $count
+}
+function Escape-YamlSingleQuoted([string]$value) {
+    if ($null -eq $value) { return "''" }
+    $v = [string]$value
+    return ("'" + $v.Replace("'", "''") + "'")
+}
+function Test-HasYamlFrontmatter([string]$content) {
+    if ([string]::IsNullOrWhiteSpace($content)) { return $false }
+    $normalized = $content.TrimStart([char]0xFEFF)
+    return ($normalized -match '^---\r?\n[\s\S]*?\r?\n---(\r?\n|$)')
+}
+function Get-SkillFrontmatterDefaults([string]$skillFile, [string]$rawContent) {
+    $dirName = Split-Path -Leaf (Split-Path -Parent $skillFile)
+    if ([string]::IsNullOrWhiteSpace($dirName)) { $dirName = "unnamed-skill" }
+    $nameCandidate = $dirName.Trim().ToLowerInvariant()
+    if ([string]::IsNullOrWhiteSpace($nameCandidate)) { $nameCandidate = "unnamed-skill" }
+    $safeName = [System.Text.RegularExpressions.Regex]::Replace($nameCandidate, '[^a-z0-9._-]+', '-')
+    $safeName = [System.Text.RegularExpressions.Regex]::Replace($safeName, '-{2,}', '-').Trim('-')
+    if ([string]::IsNullOrWhiteSpace($safeName)) { $safeName = "unnamed-skill" }
+
+    $title = $null
+    foreach ($line in ($rawContent -split "\r?\n")) {
+        if ($line -match '^\s*#+\s+(.+?)\s*$') {
+            $title = $Matches[1].Trim()
+            break
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($title)) { $title = $dirName }
+    if ([string]::IsNullOrWhiteSpace($title)) { $title = "Skill entrypoint" }
+    $desc = "Auto-generated frontmatter for skill '$title'."
+
+    return [pscustomobject]@{
+        name = $safeName
+        description = $desc
+    }
+}
+function Ensure-SkillFrontmatterInFile([string]$skillFile) {
+    if ([string]::IsNullOrWhiteSpace($skillFile)) { return $false }
+    if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { return $false }
+
+    $raw = Get-ContentUtf8 $skillFile
+    if ([string]::IsNullOrWhiteSpace($raw)) { return $false }
+    if (Test-HasYamlFrontmatter $raw) { return $false }
+
+    $meta = Get-SkillFrontmatterDefaults $skillFile $raw
+    $normalizedBody = $raw.TrimStart([char]0xFEFF)
+    $frontmatter = @(
+        "---"
+        ("name: {0}" -f (Escape-YamlSingleQuoted $meta.name))
+        ("description: {0}" -f (Escape-YamlSingleQuoted $meta.description))
+        "---"
+        ""
+    ) -join "`n"
+
+    Set-ContentUtf8 $skillFile ($frontmatter + $normalizedBody)
+    return $true
+}
+function Ensure-SkillFrontmatterTree([string]$rootPath) {
+    if ([string]::IsNullOrWhiteSpace($rootPath)) { return 0 }
+    if (-not (Test-Path -LiteralPath $rootPath)) { return 0 }
+    $fixed = 0
+    foreach ($skillFile in (Get-ChildItem -LiteralPath $rootPath -Recurse -Filter "SKILL.md" -File -ErrorAction SilentlyContinue)) {
+        if (Ensure-SkillFrontmatterInFile $skillFile.FullName) { $fixed++ }
+    }
+    return $fixed
 }
 function Get-FileContentHash([string]$path) {
     if ([string]::IsNullOrWhiteSpace($path)) { return $null }
@@ -679,6 +742,33 @@ function Test-IsSkillDir([string]$path) {
     }
     return $false
 }
+function Get-SkillCandidatesFromGitHead([string]$repoPath) {
+    $items = @()
+    if ([string]::IsNullOrWhiteSpace($repoPath)) { return ,$items }
+    if (-not (Test-Path -LiteralPath $repoPath -PathType Container)) { return ,$items }
+    $gitDir = Join-Path $repoPath ".git"
+    if (-not (Test-Path -LiteralPath $gitDir -PathType Container)) { return ,$items }
+
+    Push-Location $repoPath
+    try {
+        $allFiles = Invoke-GitCaptureLines @("ls-tree", "-r", "--name-only", "HEAD")
+    }
+    catch {
+        return ,$items
+    }
+    finally { Pop-Location }
+
+    $seenDirs = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($f in @($allFiles)) {
+        if ([string]::IsNullOrWhiteSpace($f)) { continue }
+        if ($f -notmatch "(^|/)(SKILL|AGENTS|GEMINI|CLAUDE)\.md$") { continue }
+        $dir = Split-Path ($f -replace "/", "\") -Parent
+        if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
+        if (-not $seenDirs.Add($dir)) { continue }
+        $items += [pscustomobject]@{ rel = $dir; leaf = (Split-Path $dir -Leaf) }
+    }
+    return ,@($items | Sort-Object rel)
+}
 function Get-SkillCandidates([string]$base) {
     if (-not $script:SkillCandidatesCache) { $script:SkillCandidatesCache = @{} }
     if ($script:SkillCandidatesCache.ContainsKey($base)) {
@@ -702,6 +792,9 @@ function Get-SkillCandidates([string]$base) {
     }
     # Keep array shape for single-item results; callers rely on .Count.
     $items = @($items | Sort-Object rel)
+    if ($items.Count -eq 0) {
+        $items = @(Get-SkillCandidatesFromGitHead $base)
+    }
     $script:SkillCandidatesCache[$base] = $items
     return ,$items
 }
@@ -737,6 +830,11 @@ function Resolve-SkillPath([string]$base, [string]$skillPath) {
     Need ($candidates.Count -gt 0) "仓库内未发现任何有效的技能标记文件（SKILL.md, AGENTS.md, GEMINI.md, CLAUDE.md）"
 
     if ($skillPath -ne ".") {
+        $exact = @($candidates | Where-Object { $_.rel -eq $skillPath })
+        if ($exact.Count -eq 1) {
+            return $exact[0].rel
+        }
+
         $leaf = Split-Path $skillPath -Leaf
         $matches = $candidates | Where-Object { $_.leaf -eq $leaf }
         if ($matches.Count -eq 1) {
@@ -1196,6 +1294,30 @@ function Get-SkillCandidatesFromGitRepo([string]$repo, [string]$ref) {
         Invoke-RemoveItemWithRetry $tmpBase -Recurse -IgnoreFailure | Out-Null
     }
 }
+function Try-MaterializeSkillPath([string]$repoPath, [string]$skillPath) {
+    if ([string]::IsNullOrWhiteSpace($repoPath) -or -not (Test-Path -LiteralPath $repoPath -PathType Container)) { return $false }
+    $gitDir = Join-Path $repoPath ".git"
+    if (-not (Test-Path -LiteralPath $gitDir -PathType Container)) { return $false }
+
+    $normalized = Normalize-SkillPath $skillPath
+    $gitSkillPath = To-GitPath $normalized
+    Push-Location $repoPath
+    try {
+        if ($gitSkillPath -eq ".") {
+            Invoke-Git @("checkout", "HEAD", "--", ".")
+        }
+        else {
+            # Sparse repo 可能缺失路径；先尝试纳入 sparse 集合，再补出工作树文件。
+            try { Invoke-Git @("sparse-checkout", "add", $gitSkillPath) } catch {}
+            Invoke-Git @("checkout", "HEAD", "--", $gitSkillPath)
+        }
+        return $true
+    }
+    catch {
+        return $false
+    }
+    finally { Pop-Location }
+}
 function Assert-RepoReachable([string]$repo) {
     Need (-not [string]::IsNullOrWhiteSpace($repo)) "Repo URL 不能为空。"
     if (Test-LocalZipRepoInput $repo) {
@@ -1240,7 +1362,7 @@ function Ensure-RepoFromZip([string]$path, [string]$zipPath, [bool]$forceClean =
 
     if (Test-Path $path) {
         Need $forceClean ("缓存目录已存在且 update_force=false：{0}" -f $path)
-        Invoke-RemoveItemWithRetry $path -Recurse
+        Invoke-RemoveItemWithRetry $path -Recurse | Out-Null
     }
     EnsureDir (Split-Path $path -Parent)
 
@@ -1267,7 +1389,7 @@ function Ensure-RepoFromZip([string]$path, [string]$zipPath, [bool]$forceClean =
         throw
     }
     finally {
-        Invoke-RemoveItemWithRetry $tmpBase -Recurse -IgnoreFailure
+        Invoke-RemoveItemWithRetry $tmpBase -Recurse -IgnoreFailure | Out-Null
     }
 }
 function Ensure-RepoFromGitArchive([string]$path, [string]$repo, [string]$ref, [string]$skillPath, [bool]$forceClean = $true) {
@@ -1294,6 +1416,62 @@ function Ensure-RepoFromGitArchive([string]$path, [string]$repo, [string]$ref, [
         $gitPath = To-GitPath $normalizedSkill
         Invoke-Git @($gitDirArg, "archive", "--format=zip", "--output", $zipPath, $ref, $gitPath)
         Expand-Archive -LiteralPath $zipPath -DestinationPath $path -Force
+    }
+    finally {
+        Invoke-RemoveItemWithRetry $tmpBase -Recurse -IgnoreFailure
+    }
+}
+function Export-GitBlobToFile([string]$gitDirArg, [string]$blobSpec, [string]$outPath) {
+    $outDir = Split-Path -Parent $outPath
+    if (-not [string]::IsNullOrWhiteSpace($outDir)) { EnsureDir $outDir }
+    $tmpName = ("_blob_{0}.tmp" -f ([Guid]::NewGuid().ToString("N").Substring(0, 8)))
+    $tmpOut = Join-Path ([System.IO.Path]::GetTempPath()) $tmpName
+    $tmpErr = Join-Path ([System.IO.Path]::GetTempPath()) ($tmpName + ".err")
+    try {
+        $args = @($gitDirArg, "show", $blobSpec)
+        $proc = Start-Process -FilePath "git" -ArgumentList $args -NoNewWindow -Wait -PassThru -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr
+        if ($proc.ExitCode -ne 0) {
+            $errText = if (Test-Path -LiteralPath $tmpErr -PathType Leaf) { (Get-Content -LiteralPath $tmpErr -Raw) } else { "" }
+            throw ("git show 失败：{0}" -f $errText.Trim())
+        }
+        Invoke-MoveItem $tmpOut $outPath
+    }
+    finally {
+        if (Test-Path -LiteralPath $tmpOut -PathType Leaf) { Invoke-RemoveItemWithRetry $tmpOut -IgnoreFailure | Out-Null }
+        if (Test-Path -LiteralPath $tmpErr -PathType Leaf) { Invoke-RemoveItemWithRetry $tmpErr -IgnoreFailure | Out-Null }
+    }
+}
+function Ensure-RepoFromGitPathExport([string]$path, [string]$repo, [string]$ref, [string]$skillPath, [bool]$forceClean = $true) {
+    Need (-not [string]::IsNullOrWhiteSpace($repo)) "Repo URL 不能为空。"
+    Need (-not [string]::IsNullOrWhiteSpace($ref)) "ref 不能为空。"
+    $normalizedSkill = Normalize-SkillPath $skillPath
+    Need ($normalizedSkill -ne ".") "路径导出回退不支持根路径 '.'，请指定具体子目录。"
+
+    if (Test-Path $path) {
+        Need $forceClean ("缓存目录已存在且 update_force=false：{0}" -f $path)
+        Invoke-RemoveItemWithRetry $path -Recurse
+    }
+    EnsureDir (Split-Path $path -Parent)
+    EnsureDir $path
+
+    $tmpName = ("_pathexport_{0}" -f ([Guid]::NewGuid().ToString("N").Substring(0, 8)))
+    $tmpBase = Join-Path $ImportDir $tmpName
+    $barePath = Join-Path $tmpBase "repo.git"
+    EnsureDir $tmpBase
+    try {
+        Invoke-Git @("clone", "--bare", $repo, $barePath)
+        $gitDirArg = "--git-dir={0}" -f $barePath
+        $gitPath = To-GitPath $normalizedSkill
+        $files = Invoke-GitCaptureLines @($gitDirArg, "ls-tree", "-r", "--name-only", $ref, "--", $gitPath)
+        Need ($files.Count -gt 0) ("未在仓库中找到路径：{0}" -f $gitPath)
+        foreach ($f in $files) {
+            if ([string]::IsNullOrWhiteSpace($f)) { continue }
+            if ($f -notlike "$gitPath*") { continue }
+            $rel = ($f -replace "/", "\")
+            if ([string]::IsNullOrWhiteSpace($rel)) { continue }
+            $outPath = Join-Path $path $rel
+            Export-GitBlobToFile $gitDirArg ("{0}:{1}" -f $ref, $f) $outPath
+        }
     }
     finally {
         Invoke-RemoveItemWithRetry $tmpBase -Recurse -IgnoreFailure
@@ -1691,10 +1869,6 @@ function Get-DirtyUpdateTargets($cfg) {
 function Confirm-UpdateForce($cfg, [ref]$SkipForceClean) {
     if ($null -eq $SkipForceClean.Value) { $SkipForceClean.Value = @{} }
     if (-not $cfg.update_force) { return $true }
-    if (-not (Confirm-Action "更新将逐项确认是否丢弃本地改动，继续吗？" "Y" -DefaultNo)) {
-        Write-Host "已取消更新。"
-        return $false
-    }
 
     $dirty = Get-DirtyUpdateTargets $cfg
     if ($dirty.Count -eq 0) {
@@ -1702,16 +1876,17 @@ function Confirm-UpdateForce($cfg, [ref]$SkipForceClean) {
         return $true
     }
 
-    Write-Host ("检测到 {0} 个本地改动项，将逐项确认：" -f $dirty.Count)
+    Write-Host ("检测到 {0} 个本地改动项。" -f $dirty.Count)
+    if (Confirm-Action "是否在本次更新中统一丢弃这些本地改动？" "Y" -DefaultNo) {
+        Write-Host "将统一丢弃本地改动并执行强制清理。"
+        return $true
+    }
+
     foreach ($d in $dirty) {
         $key = "{0}|{1}" -f $d.kind, $d.name
-        $label = "{0}/{1}" -f $d.kind, $d.name
-        if (Confirm-Action ("是否在更新时丢弃该项改动：{0}" -f $label) "Y" -DefaultNo) {
-            continue
-        }
         $SkipForceClean.Value[$key] = $true
-        Write-Host ("将保留本地改动并跳过强制清理：{0}" -f $label) -ForegroundColor Yellow
     }
+    Write-Host "将统一保留本地改动并跳过强制清理。" -ForegroundColor Yellow
     return $true
 }
 
@@ -4050,6 +4225,10 @@ function Mirror-SkillWithCache(
         if ($expanded -gt 0) {
             Log ("命中构建缓存后补展开相对路径 SKILL 占位文件：{0} 项 [{1}]" -f $expanded, $cacheKey)
         }
+        $frontmatterFixed = Ensure-SkillFrontmatterTree $dst
+        if ($frontmatterFixed -gt 0) {
+            Log ("命中构建缓存后自动补全 SKILL frontmatter：{0} 项 [{1}]" -f $frontmatterFixed, $cacheKey)
+        }
         $stats.skipped++
         Log ("命中构建缓存，跳过复制：{0}" -f $cacheKey)
         return
@@ -4058,6 +4237,10 @@ function Mirror-SkillWithCache(
     $expanded = Expand-RelativeSkillPlaceholders $dst
     if ($expanded -gt 0) {
         Log ("已展开相对路径 SKILL 占位文件：{0} 项 [{1}]" -f $expanded, $cacheKey)
+    }
+    $frontmatterFixed = Ensure-SkillFrontmatterTree $dst
+    if ($frontmatterFixed -gt 0) {
+        Log ("已自动补全 SKILL frontmatter：{0} 项 [{1}]" -f $frontmatterFixed, $cacheKey)
     }
     $stats.mirrored++
 }
@@ -4738,9 +4921,31 @@ function 更新Imports($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $
 
                 $forceClean = Should-ForceCleanTarget $cfg $SkipForceClean "import" $i.name
                 try {
-                    Ensure-Repo $cache $repo $ref $sparsePath $forceClean $false (-not $SkipFetch)
+                    $null = Ensure-Repo $cache $repo $ref $sparsePath $forceClean $false (-not $SkipFetch)
                 }
                 catch {
+                    if ((Test-NeedsSparseProbeFallback $_.Exception.Message) -and ($gitSkillPath -ne ".")) {
+                        Log ("检测到平台路径限制，已自动切换为路径导出回退：{0} [{1}] -> {2}" -f $name, $repo, $gitSkillPath) "WARN"
+                        try {
+                            $null = Ensure-RepoFromGitPathExport $cache $repo $ref $skillPath $forceClean
+                        }
+                        catch {
+                            try {
+                                $null = Ensure-RepoFromGitArchive $cache $repo $ref $skillPath $forceClean
+                            }
+                            catch {
+                                if ($repo -match "github\.com") {
+                                    $null = Ensure-RepoFromGitHubTreeSnapshot $cache $repo $ref $skillPath $forceClean
+                                }
+                                else {
+                                    throw
+                                }
+                            }
+                        }
+                        $postSrc = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
+                        if (-not (Test-IsSkillDir $postSrc)) { throw }
+                    }
+                    else {
                     $lockPath = Join-Path $cache ".git\index.lock"
                     $fallbackSkillPath = Resolve-SkillPath $cache $skillPath
                     $fallbackSrc = if ($fallbackSkillPath -eq ".") { $cache } else { Join-Path $cache $fallbackSkillPath }
@@ -4755,6 +4960,7 @@ function 更新Imports($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $
                     else {
                         throw
                     }
+                    }
                 }
                 $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
                 if (-not (Test-IsSkillDir $src)) {
@@ -4765,6 +4971,11 @@ function 更新Imports($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $
                         $skillPath = $resolvedSkillPath
                         $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
                         Log ("导入技能路径已自动修正：{0} -> {1} [{2}]" -f [string]$i.name, $skillPath, $repo) "WARN"
+                    }
+                }
+                if (-not (Test-IsSkillDir $src) -and $forceClean) {
+                    if (Try-MaterializeSkillPath $cache $skillPath) {
+                        $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
                     }
                 }
                 Need (Test-IsSkillDir $src) "未找到技能入口文件（SKILL.md/AGENTS.md/GEMINI.md/CLAUDE.md）：$src"

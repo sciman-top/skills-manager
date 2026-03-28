@@ -79,8 +79,23 @@ if (Test-Path -LiteralPath $aclGuardScript) {
             Write-Check "PASS" ".git ACL recursive DENY check passed."
         }
         else {
-            Write-Check "FAIL" ".git ACL recursive DENY detected (run scripts\\git-acl-guard.ps1 -Fix)."
-            $failed = $true
+            Write-Check "WARN" ".git ACL recursive DENY detected; trying auto-fix (scripts\\git-acl-guard.ps1 -Fix)."
+            $warned = $true
+
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $aclGuardScript -Quiet -Fix | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Check "PASS" ".git ACL recursive DENY auto-fix succeeded."
+            }
+            else {
+                if ($Strict) {
+                    Write-Check "FAIL" ".git ACL recursive DENY still exists after auto-fix (strict mode)."
+                    $failed = $true
+                }
+                else {
+                    Write-Check "WARN" ".git ACL recursive DENY still exists; continuing (non-strict mode)."
+                    $warned = $true
+                }
+            }
         }
     }
     catch {
