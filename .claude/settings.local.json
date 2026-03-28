@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(powershell:*)",
+      "Bash(*)",
+      "Read",
+      "Edit",
+      "MultiEdit",
+      "Write",
       "WebSearch"
     ]
   }

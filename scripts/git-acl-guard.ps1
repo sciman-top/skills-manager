@@ -2,7 +2,9 @@ param(
     [switch]$Fix,
     [string]$GitDir = '.git',
     [string]$BackupPath,
-    [switch]$Quiet
+    [switch]$Quiet,
+    [string]$ScanAllGitUnder,
+    [string]$JsonReport
 )
 
 $ErrorActionPreference = 'Stop'
@@ -28,49 +30,96 @@ function Write-Status {
 function Invoke-Cmd {
     param([string]$CommandLine)
 
-    cmd /c $CommandLine
+    cmd /c $CommandLine | Out-Null
     return $LASTEXITCODE
 }
 
-function Get-DenyLines {
+function Resolve-SidValue {
+    param([System.Security.Principal.IdentityReference]$IdentityReference)
+
+    if (-not $IdentityReference) { return '<null>' }
+
+    if ($IdentityReference -is [System.Security.Principal.SecurityIdentifier]) {
+        return $IdentityReference.Value
+    }
+
+    try {
+        return $IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+    }
+    catch {
+        return $IdentityReference.Value
+    }
+}
+
+function Get-DenySnapshot {
     param([string]$Target)
 
-    $cmd = 'icacls "{0}" /T /C | findstr /I "(DENY)"' -f $Target
-    $lines = @(cmd /c $cmd 2>$null)
-    if ($LASTEXITCODE -eq 0) {
-        return $lines
+    $items = New-Object 'System.Collections.Generic.List[System.IO.FileSystemInfo]'
+    $samples = New-Object 'System.Collections.Generic.List[string]'
+    $sidCounts = @{}
+    $denyCount = 0
+
+    try {
+        $items.Add((Get-Item -LiteralPath $Target -Force -ErrorAction Stop))
     }
-    return @()
+    catch {
+        return [pscustomobject]@{
+            DenyCount = -1
+            SidCounts = @{}
+            Samples = @("TARGET_UNREADABLE: $Target; $($_.Exception.Message)")
+        }
+    }
+
+    try {
+        foreach ($child in Get-ChildItem -LiteralPath $Target -Recurse -Force -ErrorAction SilentlyContinue) {
+            $items.Add($child)
+        }
+    }
+    catch {}
+
+    foreach ($item in $items) {
+        try {
+            $acl = Get-Acl -LiteralPath $item.FullName -ErrorAction Stop
+            foreach ($rule in $acl.Access) {
+                if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Deny) { continue }
+
+                $denyCount++
+                $sid = Resolve-SidValue -IdentityReference $rule.IdentityReference
+                if (-not $sidCounts.ContainsKey($sid)) { $sidCounts[$sid] = 0 }
+                $sidCounts[$sid]++
+
+                if ($samples.Count -lt 10) {
+                    $samples.Add(('{0} {1} {2}' -f $item.FullName, $sid, $rule.FileSystemRights))
+                }
+            }
+        }
+        catch {
+            $denyCount++
+            if (-not $sidCounts.ContainsKey('ACL_READ_ERROR')) { $sidCounts['ACL_READ_ERROR'] = 0 }
+            $sidCounts['ACL_READ_ERROR']++
+            if ($samples.Count -lt 10) {
+                $samples.Add(('{0} ACL_READ_ERROR {1}' -f $item.FullName, $_.Exception.Message))
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        DenyCount = $denyCount
+        SidCounts = $sidCounts
+        Samples = @($samples)
+    }
 }
 
-function Get-DenySids {
-    param([string[]]$Lines)
-
-    $sidRegex = 'S-\d-(?:\d+-){1,14}\d+'
-    $all = @()
-    foreach ($line in $Lines) {
-        $all += ([regex]::Matches($line, $sidRegex) | ForEach-Object { $_.Value })
-    }
-    return @($all | Sort-Object -Unique)
-}
-
-function Remove-DenyRulesBySid {
+function Remove-RootDenyRulesBySid {
     param(
         [string]$Target,
         [string]$Sid
     )
 
-    # icacls needs '*' prefix for unresolved/orphan SID.
-    $removeCode = Invoke-Cmd "icacls \"$Target\" /remove:d *$Sid /T /C"
-    if ($removeCode -ne 0) {
-        Write-Status WARN "icacls /remove:d returned $removeCode for SID: $Sid"
-    }
-
-    # Some explicit deny ACEs on root folder survive icacls; clear via ACL API.
     $rootAcl = Get-Acl -LiteralPath $Target
     $rootDeny = @($rootAcl.Access | Where-Object {
         $_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Deny -and
-        $_.IdentityReference.Value -eq $Sid
+        (Resolve-SidValue -IdentityReference $_.IdentityReference) -eq $Sid
     })
 
     if ($rootDeny.Count -gt 0) {
@@ -81,90 +130,160 @@ function Remove-DenyRulesBySid {
     }
 }
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-Set-Location $repoRoot
+function Repair-GitAcl {
+    param(
+        [string]$Target,
+        [int]$Index,
+        [string]$BaseBackupPath
+    )
 
-$gitPath = Join-Path $repoRoot $GitDir
-if (-not (Test-Path -LiteralPath $gitPath)) {
-    Write-Status FAIL "Git directory not found: $gitPath"
+    $before = Get-DenySnapshot -Target $Target
+    $beforeSids = @($before.SidCounts.Keys | Sort-Object)
+
+    $report = [ordered]@{
+        Target = $Target
+        BeforeDenyCount = $before.DenyCount
+        BeforeDenySids = $beforeSids
+        Fixed = $false
+        BackupPath = $null
+        AfterDenyCount = $before.DenyCount
+        AfterDenySids = $beforeSids
+        Success = $false
+    }
+
+    if ($before.DenyCount -eq 0) {
+        Write-Status PASS ("ACL clean: {0}" -f $Target)
+        $report.Success = $true
+        return [pscustomobject]$report
+    }
+
+    Write-Status WARN ("DENY found ({0}): {1}" -f $before.DenyCount, $Target)
+    $before.Samples | Select-Object -First 10 | ForEach-Object { Write-Host "  $_" }
+
+    if (-not $Fix) {
+        Write-Status FAIL 'DENY detected. Re-run with -Fix to auto-repair.'
+        return [pscustomobject]$report
+    }
+
+    if ([string]::IsNullOrWhiteSpace($BaseBackupPath)) {
+        $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+        $BaseBackupPath = Join-Path $script:RepoRoot ("acl-backup-git-{0}.txt" -f $timestamp)
+    }
+
+    $backupDir = Split-Path -Parent $BaseBackupPath
+    if ([string]::IsNullOrWhiteSpace($backupDir)) { $backupDir = $script:RepoRoot }
+    $backupExt = [IO.Path]::GetExtension($BaseBackupPath)
+    if ([string]::IsNullOrWhiteSpace($backupExt)) { $backupExt = '.txt' }
+    $backupName = [IO.Path]::GetFileNameWithoutExtension($BaseBackupPath)
+    $backupPath = Join-Path $backupDir ("{0}-{1}{2}" -f $backupName, $Index, $backupExt)
+
+    Write-Status INFO "Backup ACL to: $backupPath"
+    $saveCode = Invoke-Cmd ('icacls "{0}" /save "{1}" /T /C' -f $Target, $backupPath)
+    if ($saveCode -ne 0) {
+        Write-Status FAIL 'Failed to backup ACL.'
+        $report.BackupPath = $backupPath
+        return [pscustomobject]$report
+    }
+
+    Write-Status INFO 'Take ownership recursively (best effort)...'
+    $takeownCode = Invoke-Cmd ('takeown /F "{0}" /R /D Y' -f $Target)
+    if ($takeownCode -ne 0) {
+        Write-Status WARN 'takeown returned non-zero; continuing.'
+    }
+
+    Write-Status INFO 'Reset ACL recursively...'
+    if ((Invoke-Cmd ('icacls "{0}" /reset /T /C' -f $Target)) -ne 0) {
+        Write-Status FAIL 'ACL reset failed.'
+        $report.BackupPath = $backupPath
+        return [pscustomobject]$report
+    }
+
+    Write-Status INFO 'Enable inheritance recursively...'
+    if ((Invoke-Cmd ('icacls "{0}" /inheritance:e /T /C' -f $Target)) -ne 0) {
+        Write-Status FAIL 'Enabling inheritance failed.'
+        $report.BackupPath = $backupPath
+        return [pscustomobject]$report
+    }
+
+    Write-Status INFO 'Grant current user full control recursively...'
+    $currentPrincipal = "{0}\{1}" -f $env:USERDOMAIN, $env:USERNAME
+    if ((Invoke-Cmd ('icacls "{0}" /grant:r "{1}:(OI)(CI)F" /T /C' -f $Target, $currentPrincipal)) -ne 0) {
+        Write-Status FAIL 'Granting current user full control failed.'
+        $report.BackupPath = $backupPath
+        return [pscustomobject]$report
+    }
+
+    foreach ($sid in $beforeSids) {
+        if ($sid -eq 'ACL_READ_ERROR') { continue }
+        Write-Status INFO "Removing DENY rules for SID: $sid"
+        [void](Invoke-Cmd ('icacls "{0}" /remove:d *{1} /T /C' -f $Target, $sid))
+        Remove-RootDenyRulesBySid -Target $Target -Sid $sid
+    }
+
+    $after = Get-DenySnapshot -Target $Target
+    $report.Fixed = $true
+    $report.BackupPath = $backupPath
+    $report.AfterDenyCount = $after.DenyCount
+    $report.AfterDenySids = @($after.SidCounts.Keys | Sort-Object)
+    $report.Success = ($after.DenyCount -eq 0)
+
+    if ($report.Success) {
+        Write-Status PASS ("ACL repaired: {0}" -f $Target)
+        Write-Status INFO ("Rollback command: icacls . /restore `"{0}`"" -f $backupPath)
+    }
+    else {
+        Write-Status FAIL ("Repair attempted but DENY still exists ({0}): {1}" -f $after.DenyCount, $Target)
+        $after.Samples | Select-Object -First 10 | ForEach-Object { Write-Host "  $_" }
+    }
+
+    return [pscustomobject]$report
+}
+
+$script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+Set-Location $script:RepoRoot
+
+$targets = New-Object 'System.Collections.Generic.List[string]'
+if (-not [string]::IsNullOrWhiteSpace($ScanAllGitUnder)) {
+    $scanRoot = (Resolve-Path $ScanAllGitUnder).Path
+    foreach ($d in Get-ChildItem -Path $scanRoot -Directory -Filter .git -Recurse -Force -ErrorAction SilentlyContinue) {
+        $targets.Add($d.FullName)
+    }
+}
+else {
+    $resolvedTarget = if ([IO.Path]::IsPathRooted($GitDir)) { $GitDir } else { Join-Path $script:RepoRoot $GitDir }
+    if (-not (Test-Path -LiteralPath $resolvedTarget)) {
+        Write-Status FAIL "Git directory not found: $resolvedTarget"
+        exit 2
+    }
+    $targets.Add((Resolve-Path $resolvedTarget).Path)
+}
+
+if ($targets.Count -eq 0) {
+    Write-Status FAIL 'No .git directory found for the given scope.'
     exit 2
 }
 
-Write-Status INFO "Repo root: $repoRoot"
-Write-Status INFO "Target: $gitPath"
+$results = @()
+$idx = 1
+foreach ($t in ($targets | Sort-Object -Unique)) {
+    Write-Status INFO "Target: $t"
+    $results += Repair-GitAcl -Target $t -Index $idx -BaseBackupPath $BackupPath
+    $idx++
+}
 
-$beforeDeny = Get-DenyLines -Target $gitPath
-if ($beforeDeny.Count -eq 0) {
-    Write-Status PASS '.git ACL is clean (no DENY found).'
+if (-not [string]::IsNullOrWhiteSpace($JsonReport)) {
+    $outPath = if ([IO.Path]::IsPathRooted($JsonReport)) { $JsonReport } else { Join-Path $script:RepoRoot $JsonReport }
+    $results | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $outPath -Encoding utf8
+    Write-Status INFO "JSON report written: $outPath"
+}
+
+$failed = @($results | Where-Object { -not $_.Success })
+if ($failed.Count -eq 0) {
     exit 0
 }
 
-Write-Status WARN ("Found DENY entries: {0}" -f $beforeDeny.Count)
-$beforeDeny | Select-Object -First 10 | ForEach-Object { Write-Host "  $_" }
-
-if (-not $Fix) {
-    Write-Status FAIL 'DENY detected. Re-run with -Fix to auto-repair.'
-    exit 3
-}
-
-if ([string]::IsNullOrWhiteSpace($BackupPath)) {
-    $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $BackupPath = Join-Path $repoRoot ("acl-backup-git-{0}.txt" -f $timestamp)
-}
-
-Write-Status INFO "Backup ACL to: $BackupPath"
-$saveCode = Invoke-Cmd "icacls \"$gitPath\" /save \"$BackupPath\" /T /C"
-if ($saveCode -ne 0) {
-    Write-Status FAIL 'Failed to backup ACL.'
-    exit 4
-}
-
-Write-Status INFO 'Take ownership recursively (best effort)...'
-$takeownCode = Invoke-Cmd "takeown /F \"$gitPath\" /R /D Y"
-if ($takeownCode -ne 0) {
-    Write-Status WARN 'takeown returned non-zero; continuing with ACL repair.'
-}
-
-Write-Status INFO 'Reset ACL recursively...'
-$resetCode = Invoke-Cmd "icacls \"$gitPath\" /reset /T /C"
-if ($resetCode -ne 0) {
-    Write-Status FAIL 'ACL reset failed.'
-    exit 5
-}
-
-Write-Status INFO 'Enable inheritance recursively...'
-$inheritCode = Invoke-Cmd "icacls \"$gitPath\" /inheritance:e /T /C"
-if ($inheritCode -ne 0) {
-    Write-Status FAIL 'Enabling inheritance failed.'
-    exit 6
-}
-
-Write-Status INFO 'Grant current user full control recursively...'
-$currentPrincipal = "{0}\{1}" -f $env:USERDOMAIN, $env:USERNAME
-$grantCode = Invoke-Cmd "icacls \"$gitPath\" /grant:r \"${currentPrincipal}:(OI)(CI)F\" /T /C"
-if ($grantCode -ne 0) {
-    Write-Status FAIL 'Granting current user full control failed.'
-    exit 7
-}
-
-$remainingDeny = Get-DenyLines -Target $gitPath
-if ($remainingDeny.Count -gt 0) {
-    $sids = Get-DenySids -Lines $remainingDeny
-    Write-Status WARN ("Residual DENY SIDs detected: {0}" -f ($sids -join ', '))
-
-    foreach ($sid in $sids) {
-        Write-Status INFO "Removing DENY rules for SID: $sid"
-        Remove-DenyRulesBySid -Target $gitPath -Sid $sid
-    }
-}
-
-$afterDeny = Get-DenyLines -Target $gitPath
-if ($afterDeny.Count -gt 0) {
-    Write-Status FAIL ("Repair attempted but DENY still exists: {0}" -f $afterDeny.Count)
-    $afterDeny | Select-Object -First 10 | ForEach-Object { Write-Host "  $_" }
+if ($Fix) {
     exit 8
 }
 
-Write-Status PASS '.git ACL repaired successfully (DENY cleared).'
-Write-Status INFO ("Rollback command: icacls . /restore `"{0}`"" -f $BackupPath)
-exit 0
+exit 3

@@ -1,5 +1,6 @@
 param(
-    [switch]$Strict
+    [switch]$Strict,
+    [bool]$ScanAllGitInProject = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,37 +16,6 @@ function Write-Check {
         "FAIL" { Write-Host ("[FAIL] {0}" -f $Message) -ForegroundColor Red }
         default { Write-Host ("[{0}] {1}" -f $Status, $Message) }
     }
-}
-
-function Get-CurrentPrincipalSids {
-    $ids = New-Object "System.Collections.Generic.HashSet[string]" ([System.StringComparer]::OrdinalIgnoreCase)
-    try {
-        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
-        if ($identity -and $identity.User) {
-            [void]$ids.Add($identity.User.Value)
-        }
-        if ($identity -and $identity.Groups) {
-            foreach ($g in $identity.Groups) {
-                if ($g) { [void]$ids.Add($g.Value) }
-            }
-        }
-    }
-    catch {}
-
-    $wellKnown = @(
-        [System.Security.Principal.WellKnownSidType]::WorldSid,
-        [System.Security.Principal.WellKnownSidType]::AuthenticatedUserSid,
-        [System.Security.Principal.WellKnownSidType]::BuiltinUsersSid,
-        [System.Security.Principal.WellKnownSidType]::InteractiveSid
-    )
-    foreach ($wk in $wellKnown) {
-        try {
-            $sid = New-Object System.Security.Principal.SecurityIdentifier($wk, $null)
-            [void]$ids.Add($sid.Value)
-        }
-        catch {}
-    }
-    return $ids
 }
 
 $root = Split-Path -Parent $PSScriptRoot
@@ -74,15 +44,25 @@ else {
 $aclGuardScript = Join-Path $PSScriptRoot "git-acl-guard.ps1"
 if (Test-Path -LiteralPath $aclGuardScript) {
     try {
-        & powershell -NoProfile -ExecutionPolicy Bypass -File $aclGuardScript -Quiet | Out-Null
+        $scanArg = @()
+        if ($ScanAllGitInProject) {
+            $scanArg = @('-ScanAllGitUnder', $root)
+        }
+
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $aclGuardScript -Quiet @scanArg | Out-Null
         if ($LASTEXITCODE -eq 0) {
-            Write-Check "PASS" ".git ACL recursive DENY check passed."
+            if ($ScanAllGitInProject) {
+                Write-Check "PASS" ".git ACL recursive DENY check passed (all project .git)."
+            }
+            else {
+                Write-Check "PASS" ".git ACL recursive DENY check passed."
+            }
         }
         else {
             Write-Check "WARN" ".git ACL recursive DENY detected; trying auto-fix (scripts\\git-acl-guard.ps1 -Fix)."
             $warned = $true
 
-            & powershell -NoProfile -ExecutionPolicy Bypass -File $aclGuardScript -Quiet -Fix | Out-Null
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $aclGuardScript -Quiet -Fix @scanArg | Out-Null
             if ($LASTEXITCODE -eq 0) {
                 Write-Check "PASS" ".git ACL recursive DENY auto-fix succeeded."
             }
@@ -109,14 +89,10 @@ else {
 }
 
 # 3) common process occupation check
-$watchPatterns = @("codex", "claude", "gemini", "trae", "cursor", "code")
-$running = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
-    $name = $_.ProcessName.ToLowerInvariant()
-    foreach ($p in $watchPatterns) {
-        if ($name -like ("*{0}*" -f $p)) { return $true }
-    }
-    return $false
-} | Select-Object -ExpandProperty ProcessName -Unique)
+$watchSet = @('codex', 'claude', 'gemini', 'code', 'cursor', 'trae')
+$running = @(Get-Process -ErrorAction SilentlyContinue |
+    Where-Object { $watchSet -contains $_.ProcessName.ToLowerInvariant() } |
+    Select-Object -ExpandProperty ProcessName -Unique)
 
 if ($running.Count -gt 0) {
     Write-Check "WARN" ("Potential skill-consuming processes are running: {0}" -f ($running -join ", "))
