@@ -9,3 +9,7 @@
 .DS_Store
 Thumbs.db
 .txn/
+build.log
+build.log.*
+.build-cache.json
+acl-backup-git-*.txt
