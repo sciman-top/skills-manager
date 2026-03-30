@@ -1,6 +1,6 @@
 param(
     [switch]$Strict,
-    [bool]$ScanAllGitInProject = $true
+    [bool]$ScanAllGitInProject = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -40,22 +40,23 @@ else {
     $warned = $true
 }
 
-# 2) .git ACL recursive deny guard
+# 2) .git ACL recursive deny guard (+ index.lock probe)
 $aclGuardScript = Join-Path $PSScriptRoot "git-acl-guard.ps1"
 if (Test-Path -LiteralPath $aclGuardScript) {
     try {
-        $scanArg = @()
+        $scanArg = @("-ProbeLockFile")
         if ($ScanAllGitInProject) {
             $scanArg = @('-ScanAllGitUnder', $root)
+            $scanArg += @("-ProbeLockFile")
         }
 
         & powershell -NoProfile -ExecutionPolicy Bypass -File $aclGuardScript -Quiet @scanArg | Out-Null
         if ($LASTEXITCODE -eq 0) {
             if ($ScanAllGitInProject) {
-                Write-Check "PASS" ".git ACL recursive DENY check passed (all project .git)."
+                Write-Check "PASS" ".git ACL recursive DENY check passed (all project .git, with index.lock probe)."
             }
             else {
-                Write-Check "PASS" ".git ACL recursive DENY check passed."
+                Write-Check "PASS" ".git ACL recursive DENY check passed (repo .git, with index.lock probe)."
             }
         }
         else {
@@ -64,7 +65,7 @@ if (Test-Path -LiteralPath $aclGuardScript) {
 
             & powershell -NoProfile -ExecutionPolicy Bypass -File $aclGuardScript -Quiet -Fix @scanArg | Out-Null
             if ($LASTEXITCODE -eq 0) {
-                Write-Check "PASS" ".git ACL recursive DENY auto-fix succeeded."
+                Write-Check "PASS" ".git ACL recursive DENY auto-fix succeeded (with index.lock probe)."
             }
             else {
                 if ($Strict) {

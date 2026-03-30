@@ -2641,6 +2641,7 @@ function Parse-DoctorArgs([string[]]$tokens) {
         dry_run_fix = $false
         strict = $false
         threshold_ms = 5000
+        scan_all_git = $false
     }
     if ($null -eq $tokens) { return [pscustomobject]$opts }
 
@@ -2654,6 +2655,7 @@ function Parse-DoctorArgs([string[]]$tokens) {
             "--fix" { $opts.fix = $true; continue }
             "--dry-run-fix" { $opts.dry_run_fix = $true; continue }
             "--strict" { $opts.strict = $true; continue }
+            "--scan-all-git" { $opts.scan_all_git = $true; continue }
             "--threshold-ms" {
                 Need ($i + 1 -lt $tokens.Count) "参数缺少值：--threshold-ms"
                 $raw = [string]$tokens[++$i]
@@ -2872,6 +2874,109 @@ function Invoke-Doctor([string[]]$tokens = @()) {
         $pass = $false
     }
 
+    # 2.5 .git ACL Guard + index.lock probe
+    try {
+        $aclScript = Join-Path $Root "scripts\git-acl-guard.ps1"
+        if (-not (Test-Path -LiteralPath $aclScript -PathType Leaf)) {
+            $report.checks.git_acl = [ordered]@{ ok = $false; reason = "script_missing" }
+            if (-not $opts.json) { Write-Host "⚠️ Git ACL Guard: script missing (scripts\\git-acl-guard.ps1)" -ForegroundColor Yellow }
+            $pass = $false
+        }
+        else {
+            $aclReportPath = Join-Path ([IO.Path]::GetTempPath()) ("skills-acl-guard-{0}.json" -f ([Guid]::NewGuid().ToString("N")))
+            $aclArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $aclScript, "-Quiet", "-ProbeLockFile", "-JsonReport", $aclReportPath)
+            if ($opts.scan_all_git) { $aclArgs += @("-ScanAllGitUnder", $Root) }
+
+            $aclExit = 0
+            $autoFixAttempted = $false
+            $autoFixSucceeded = $false
+
+            & powershell @aclArgs | Out-Null
+            $aclExit = $LASTEXITCODE
+
+            if ($aclExit -ne 0 -and $opts.fix) {
+                $autoFixAttempted = $true
+                & powershell @($aclArgs + @("-Fix")) | Out-Null
+                $aclExit = $LASTEXITCODE
+                $autoFixSucceeded = ($aclExit -eq 0)
+            }
+
+            $aclRows = @()
+            if (Test-Path -LiteralPath $aclReportPath) {
+                try {
+                    $aclRaw = Get-Content -LiteralPath $aclReportPath -Raw -ErrorAction Stop
+                    if (-not [string]::IsNullOrWhiteSpace($aclRaw)) {
+                        $aclRows = @($aclRaw | ConvertFrom-Json)
+                    }
+                }
+                catch {}
+                finally {
+                    Remove-Item -LiteralPath $aclReportPath -Force -ErrorAction SilentlyContinue
+                }
+            }
+
+            $denyBefore = 0
+            $denyAfter = 0
+            $probeFailCount = 0
+            $backupPaths = @()
+            $operatorSids = @()
+            foreach ($row in $aclRows) {
+                try { $denyBefore += [int]$row.BeforeDenyCount } catch {}
+                try { $denyAfter += [int]$row.AfterDenyCount } catch {}
+                if ($row.PSObject.Properties.Match("BackupPath").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$row.BackupPath)) {
+                    $backupPaths += [string]$row.BackupPath
+                }
+                if ($row.PSObject.Properties.Match("OperatorSid").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$row.OperatorSid)) {
+                    $operatorSids += [string]$row.OperatorSid
+                }
+                if ($row.PSObject.Properties.Match("LockProbe").Count -gt 0 -and $row.LockProbe -ne $null) {
+                    $requested = $false
+                    $ok = $true
+                    try { $requested = [bool]$row.LockProbe.requested } catch {}
+                    try { $ok = [bool]$row.LockProbe.ok } catch {}
+                    if ($requested -and -not $ok) { $probeFailCount++ }
+                }
+            }
+            $backupPaths = @($backupPaths | Sort-Object -Unique)
+            $operatorSids = @($operatorSids | Sort-Object -Unique)
+            $aclOk = ($aclExit -eq 0)
+
+            $report.checks.git_acl = [ordered]@{
+                ok = $aclOk
+                scope = $(if ($opts.scan_all_git) { "all_project_git" } else { "repo_git" })
+                auto_fix_attempted = $autoFixAttempted
+                auto_fix_succeeded = $autoFixSucceeded
+                deny_before = $denyBefore
+                deny_after = $denyAfter
+                index_lock_probe_failures = $probeFailCount
+                backup_paths = @($backupPaths)
+                operator_sids = @($operatorSids)
+            }
+
+            if ($aclOk) {
+                if (-not $opts.json) {
+                    Write-Host ("✅ Git ACL Guard: OK (scope={0}, deny_before={1}, deny_after={2}, index_lock_probe_failures={3})" -f $report.checks.git_acl.scope, $denyBefore, $denyAfter, $probeFailCount) -ForegroundColor Green
+                    if ($autoFixAttempted -and $autoFixSucceeded -and $backupPaths.Count -gt 0) {
+                        Write-Host ("   - ACL backup: {0}" -f ($backupPaths -join ", "))
+                    }
+                }
+            }
+            else {
+                if (-not $opts.json) {
+                    Write-Host ("❌ Git ACL Guard: FAILED (scope={0}, deny_before={1}, deny_after={2}, index_lock_probe_failures={3})" -f $report.checks.git_acl.scope, $denyBefore, $denyAfter, $probeFailCount) -ForegroundColor Red
+                    if ($operatorSids.Count -gt 0) { Write-Host ("   - operator_sid: {0}" -f ($operatorSids -join ", ")) -ForegroundColor Yellow }
+                    if ($backupPaths.Count -gt 0) { Write-Host ("   - acl_backup: {0}" -f ($backupPaths -join ", ")) -ForegroundColor Yellow }
+                }
+                $pass = $false
+            }
+        }
+    }
+    catch {
+        $report.checks.git_acl = [ordered]@{ ok = $false; reason = ("run_error: {0}" -f $_.Exception.Message) }
+        if (-not $opts.json) { Write-Host ("❌ Git ACL Guard: run error - {0}" -f $_.Exception.Message) -ForegroundColor Red }
+        $pass = $false
+    }
+
     # 3. Robocopy Check
     if (Get-Command robocopy -ErrorAction SilentlyContinue) {
         $report.checks.robocopy = [ordered]@{ ok = $true }
@@ -3038,6 +3143,9 @@ function Invoke-Doctor([string[]]$tokens = @()) {
 
     $report.pass = $pass
     if (-not $report.checks.git.ok) { $report.summary.errors += "git_unavailable" }
+    if ($report.checks.PSObject.Properties.Match("git_acl").Count -gt 0 -and -not $report.checks.git_acl.ok) {
+        $report.summary.errors += "git_acl_guard_failed"
+    }
     if (-not $report.checks.robocopy.ok) { $report.summary.errors += "robocopy_unavailable" }
     if (-not $report.checks.config.ok) {
         $reason = if ($report.checks.config.reason) { [string]$report.checks.config.reason } else { "config_invalid" }
@@ -6051,7 +6159,7 @@ Skills 管理器（极简版，中文菜单）
   .\skills.ps1 安装MCP <name> --cmd <command> [--arg <arg>...] （兼容）
   .\skills.ps1 卸载MCP <name>
   .\skills.ps1 同步MCP（可选：手动兜底）
-  .\skills.ps1 doctor [--json] [--fix] [--dry-run-fix] [--strict] [--threshold-ms <ms>]
+  .\skills.ps1 doctor [--json] [--fix] [--dry-run-fix] [--strict] [--scan-all-git] [--threshold-ms <ms>]
   通用参数：
   -DryRun：仅预演（跳过写入/删除/同步/拉取）
   -Locked：严格锁定（需 skills.lock.json 且 commit 全匹配）

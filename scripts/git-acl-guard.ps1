@@ -4,7 +4,8 @@ param(
     [string]$BackupPath,
     [switch]$Quiet,
     [string]$ScanAllGitUnder,
-    [string]$JsonReport
+    [string]$JsonReport,
+    [switch]$ProbeLockFile
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,6 +49,53 @@ function Resolve-SidValue {
     }
     catch {
         return $IdentityReference.Value
+    }
+}
+
+function Get-CurrentIdentitySnapshot {
+    $name = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    return [pscustomobject]@{
+        Name = $name
+        Sid = $sid
+        CheckedAtUtc = [DateTime]::UtcNow.ToString("o")
+    }
+}
+
+function Format-SidSummaryLine {
+    param([hashtable]$SidCounts)
+    if ($null -eq $SidCounts -or $SidCounts.Count -eq 0) { return "none" }
+    $parts = @()
+    foreach ($k in ($SidCounts.Keys | Sort-Object)) {
+        $parts += ("{0}={1}" -f $k, $SidCounts[$k])
+    }
+    return ($parts -join "; ")
+}
+
+function Test-IndexLockProbe {
+    param([string]$GitTarget)
+
+    $indexLock = Join-Path $GitTarget "index.lock"
+    if (Test-Path -LiteralPath $indexLock) {
+        return [pscustomobject]@{
+            Ok = $false
+            Message = "index.lock already exists; skip probe to avoid interfering with active git operation."
+        }
+    }
+
+    try {
+        New-Item -ItemType File -Path $indexLock -Force -ErrorAction Stop | Out-Null
+        Remove-Item -LiteralPath $indexLock -Force -ErrorAction Stop
+        return [pscustomobject]@{
+            Ok = $true
+            Message = "index.lock create/remove probe succeeded."
+        }
+    }
+    catch {
+        return [pscustomobject]@{
+            Ok = $false
+            Message = $_.Exception.Message
+        }
     }
 }
 
@@ -134,30 +182,52 @@ function Repair-GitAcl {
     param(
         [string]$Target,
         [int]$Index,
-        [string]$BaseBackupPath
+        [string]$BaseBackupPath,
+        [switch]$ProbeLockFile
     )
 
     $before = Get-DenySnapshot -Target $Target
     $beforeSids = @($before.SidCounts.Keys | Sort-Object)
+    $identity = Get-CurrentIdentitySnapshot
 
     $report = [ordered]@{
         Target = $Target
+        CheckedAtUtc = $identity.CheckedAtUtc
+        Operator = $identity.Name
+        OperatorSid = $identity.Sid
         BeforeDenyCount = $before.DenyCount
         BeforeDenySids = $beforeSids
+        BeforeDenySidCounts = $before.SidCounts
         Fixed = $false
         BackupPath = $null
         AfterDenyCount = $before.DenyCount
         AfterDenySids = $beforeSids
+        AfterDenySidCounts = $before.SidCounts
+        LockProbe = [ordered]@{
+            requested = [bool]$ProbeLockFile
+            ok = $null
+            message = ""
+        }
         Success = $false
     }
 
     if ($before.DenyCount -eq 0) {
         Write-Status PASS ("ACL clean: {0}" -f $Target)
+        if ($ProbeLockFile) {
+            $probe = Test-IndexLockProbe -GitTarget $Target
+            $report.LockProbe.ok = [bool]$probe.Ok
+            $report.LockProbe.message = [string]$probe.Message
+            if ($probe.Ok) { Write-Status PASS "index.lock probe passed." }
+            else { Write-Status FAIL ("index.lock probe failed: {0}" -f $probe.Message) }
+            $report.Success = [bool]$probe.Ok
+            return [pscustomobject]$report
+        }
         $report.Success = $true
         return [pscustomobject]$report
     }
 
     Write-Status WARN ("DENY found ({0}): {1}" -f $before.DenyCount, $Target)
+    Write-Status INFO ("DENY SID summary: {0}" -f (Format-SidSummaryLine $before.SidCounts))
     $before.Samples | Select-Object -First 10 | ForEach-Object { Write-Host "  $_" }
 
     if (-not $Fix) {
@@ -225,11 +295,22 @@ function Repair-GitAcl {
     $report.BackupPath = $backupPath
     $report.AfterDenyCount = $after.DenyCount
     $report.AfterDenySids = @($after.SidCounts.Keys | Sort-Object)
+    $report.AfterDenySidCounts = $after.SidCounts
     $report.Success = ($after.DenyCount -eq 0)
+
+    if ($report.Success -and $ProbeLockFile) {
+        $probe = Test-IndexLockProbe -GitTarget $Target
+        $report.LockProbe.ok = [bool]$probe.Ok
+        $report.LockProbe.message = [string]$probe.Message
+        if ($probe.Ok) { Write-Status PASS "index.lock probe passed." }
+        else { Write-Status FAIL ("index.lock probe failed: {0}" -f $probe.Message) }
+        if (-not $probe.Ok) { $report.Success = $false }
+    }
 
     if ($report.Success) {
         Write-Status PASS ("ACL repaired: {0}" -f $Target)
         Write-Status INFO ("Rollback command: icacls . /restore `"{0}`"" -f $backupPath)
+        Write-Status INFO ("Operator: {0} ({1}), checked_at_utc={2}" -f $identity.Name, $identity.Sid, $identity.CheckedAtUtc)
     }
     else {
         Write-Status FAIL ("Repair attempted but DENY still exists ({0}): {1}" -f $after.DenyCount, $Target)
@@ -267,7 +348,7 @@ $results = @()
 $idx = 1
 foreach ($t in ($targets | Sort-Object -Unique)) {
     Write-Status INFO "Target: $t"
-    $results += Repair-GitAcl -Target $t -Index $idx -BaseBackupPath $BackupPath
+    $results += Repair-GitAcl -Target $t -Index $idx -BaseBackupPath $BackupPath -ProbeLockFile:$ProbeLockFile
     $idx++
 }
 
