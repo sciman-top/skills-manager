@@ -1,87 +1,111 @@
 # CLAUDE.md — Skills Manager（Claude 项目级）
+**项目**: skills-manager  
 **适用范围**: 项目级（仓库根）  
-**版本**: 1.7  
-**最后更新**: 2026-01-24
-
-## 0. 变更记录
-- 2026-01-24 v1.7：收敛表述并提升可操作性。
-- 2026-01-24 v1.6：全量优化结构与措辞；强化协作边界；与全局规则对齐。
-- 2026-01-21 v1.0–v1.5：项目结构与模板完善。
+**版本**: 3.78  
+**最后更新**: 2026-03-30
 
 ## 1. 阅读指引（必读）
-- 本文件仅补充仓库差异；跨项目通用规则在 `GlobalUser/CLAUDE.md`。
-- 三层结构：共性基线 + 平台差异 + 项目差异；冲突以项目级为准并说明采用。
-- 默认中文沟通，必要时保留英文术语/命令/日志。
+- 本文件承接 `GlobalUser/CLAUDE.md`，仅定义 Skills Manager 的仓库落地动作（WHERE/HOW）。
+- 固定结构：`1 / A / B / C / D`。
+- 裁决链：`运行事实/代码 > 项目级文件 > 全局文件 > 临时上下文`。
 
-## A. 共性基线（项目级）
-### A.1 入口与生成目录
-- `skills.ps1` 为唯一入口；`skills.json` 为唯一配置源。
-- `vendor/`、`agent/` 为自动生成；**禁止手改** `agent/`（构建会清空）。
-- 定制优先走 `overrides/`，不要直接修改 `vendor/`。
+## A. 共性基线（仅本仓）
+### A.1 事实边界
+- 单一入口：`skills.ps1`；单一配置源：`skills.json`。
+- `agent/` 与 `vendor/` 为生成/缓存目录；`agent/` 禁止手改。
+- 自定义改动优先放 `overrides/` 或 `imports/`，避免直接改第三方缓存内容。
 
-### A.2 协作与优先级
-- 继承 `GlobalUser/CLAUDE.md`，项目级规则优先于全局规则。
-- 项目级只补充仓库差异，不复写全局共性条款。
-- 规则来源：`GlobalUser/CLAUDE.md` → `CLAUDE.md`。
+### A.2 执行锚点
+- 先定归宿再改动：`source/project/skills-manager/*` 为规则唯一归宿。
+- 批量改动最小化回归面，优先根因修复，不做无证据预抽象。
+- 每次变更留痕：`依据 -> 命令 -> 证据 -> 回滚`。
 
-### A.3 操作与验证范式
-- 操作顺序：初始化 → 发现 → 选择 → 构建生效 →（可选）更新。
-- 只读必要文件，避免遍历 `vendor/`、`agent/` 等生成目录。
-- 批量改动（>=2 文件或规则改写）需填 C.6 模板并列出受影响文件清单。
-- 验证优先最小相关命令（见 C.4）；未执行需说明原因与风险。
+### A.3 N/A 策略
+- `platform_na`：平台能力缺失或命令不支持。
+- `gate_na`：仅纯文档/注释/排版或门禁脚本客观缺失时允许。
+- 最低字段：`reason`、`alternative_verification`、`evidence_link`、`expires_at`。
+- N/A 不得改变门禁顺序：`build -> test -> contract/invariant -> hotspot`。
 
-## B. 平台差异（Claude 项目内）
-- `targets` 包含 `.claude/skills` 时，需确认其指向或同步到 `agent/`。
-- 扩展说明优先使用 `@` 引用仓库内文件，避免重复粘贴。
+## B. Claude 平台差异（项目内）
+### B.1 加载与覆盖
+- 推荐目录：`~/.claude`；实际以 CLI 加载结果为准。
+- 优先级：`CLAUDE.override.md > CLAUDE.md > fallback`（平台支持时）。
+- override 仅用于短期排障，结论后必须清理并复测。
 
-## C. 项目差异（Skills Manager）
-### C.1 目录与职责
-- `skills.ps1`：中文菜单脚本（初始化、发现、选择、构建生效、更新）。
-- `skills.json`：`vendors`、`mappings`、`sync_mode`、`targets`。
-- `vendor/`：上游缓存；`agent/`：合并输出；`overrides/`：覆盖层。
+### B.2 最小诊断矩阵
+- 必做：`claude --version -> claude --help`。
+- 状态/加载链类命令按“若支持则执行”。
+- 留痕最低字段：`cmd`、`exit_code`、`key_output`、`timestamp`。
 
-### C.2 配置示例（最小）
-- `vendors`/`overrides`：
-```json
-{
-  "vendors": { "anthropics": "https://example.com/skills.git" },
-  "overrides": ["overrides/anthropics"]
-}
-```
-- `targets`：
-```json
-{
-  "sync_mode": "link",
-  "mappings": { "skill-a": true },
-  "targets": [".claude/skills", ".codex/skills"]
-}
-```
+### B.3 平台能力剖面
+- 状态命令能力不可强制假定存在。
+- CLI 未显式展示加载链时，补记 `active_rule_path` 与来源。
+- override 能力不可用时，按 `reason + alternative_verification + evidence_link` 落证。
 
-### C.3 关键命令
-```powershell
-.\skills.ps1
-.\skills.ps1 发现
-.\skills.ps1 构建生效
-.\skills.ps1 更新
-```
+### B.4 平台异常回退
+- 命令缺失或行为不一致时，必须记录：`platform_na/gate_na`、原因、替代命令、证据位置。
+- 替代命令仅用于补证据，不得改变门禁顺序与阻断语义。
 
-### C.4 构建/验证/回滚
-- 构建：`.\skills.ps1 构建生效`。
-- 验证：`agent/` 生成 + `targets` 同步到 `agent/`。
-- 最小验证：`.\skills.ps1 发现` 或 `.\skills.ps1 构建生效`。
-- 回滚：恢复 `skills.json` 或撤销 `overrides/` 后重建。
-- 运行/发布：无固定流程，需用户指定。
-- 备注：`mappings` 为空不会构建任何技能。
+## C. 项目差异（领域与技术）
+### C.1 模块职责与归宿
+- `skills.ps1`：统一命令调度（发现/安装/构建/更新/doctor/MCP）。
+- `build.ps1`：拼装 `src/*` 生成根目录 `skills.ps1`。
+- `skills.json`：`vendors/mappings/targets/sync_mode/mcp_servers` 唯一配置源。
+- `overrides/`、`imports/`：本地可维护输入层；`agent/`：最终分发产物。
 
-### C.5 同步模式
-- `link`：Windows 优先 Junction，立即生效（推荐）。
-- `sync`：`robocopy /MIR` 镜像，适合链接受限环境。
+### C.2 门禁命令与顺序（硬门禁）
+- build：`./build.ps1`
+- test：`./skills.ps1 发现`
+- contract/invariant：`./skills.ps1 doctor --strict`
+- hotspot：`./skills.ps1 构建生效`
+- fixed order：`build -> test -> contract/invariant -> hotspot`
 
-### C.6 变更影响模板（批量改动必填）
-- 模板：影响模块=；影响数据/配置=；同步/生成目录=；平台差异=；验证与回滚=。
-- 示例：影响模块=脚本/配置；影响数据/配置=skills.json；同步/生成目录=agent/；平台差异=无；验证与回滚=未测/恢复 skills.json 后重建。
+### C.3 命令存在性与 N/A 回退验证
+- precheck：`Get-Command powershell`、`Test-Path ./skills.ps1`、`Test-Path ./build.ps1`。
+- `doctor --strict` 不可执行：标记 contract/invariant=gate_na，执行 `发现 + 构建生效` 并记录契约风险。
+- `构建生效` 受环境限制：标记 hotspot=gate_na，至少完成 `build + doctor --strict` 并记录未覆盖风险。
+
+### C.4 失败分流与阻断
+- build 失败：阻断，先修构建脚本与入口拼装错误。
+- test 失败：阻断，先修发现链路与映射异常。
+- contract/invariant 失败：高风险阻断，禁止分发。
+- hotspot 失败：阻断；若 gate_na 按 C.3 补齐替代验证与证据。
+
+### C.5 构建、生效与回滚
+- 构建：`./build.ps1`。
+- 生效：`./skills.ps1 构建生效`。
+- 最小验证：`./skills.ps1 doctor --strict`。
+- 回滚：恢复 `skills.json` 与 `overrides/` 后重新执行 `构建生效`。
+
+### C.6 同步与目录策略
+- `sync_mode=link` 优先；`sync_mode=sync` 作为受限环境回退。
+- 若 `skills.json.targets` 含 `.claude/skills`，必须验证其与 `agent/` 同步状态。
+
+### C.7 目标仓直改回灌策略
+- source of truth：`E:/CODE/governance-kit/source/project/skills-manager/*`。
+- 允许在 `E:/CODE/skills-manager` 临时直改试验，但同日必须回灌并留证据。
+- 回灌后必须执行：`powershell -File E:/CODE/governance-kit/scripts/install.ps1 -Mode safe`。
+- 未完成“回灌 + 复验”前，禁止再次 `sync/install` 覆盖未沉淀改动。
+
+### C.8 CI 与仓内校验入口
+- GitHub Actions：`.github/workflows/quality-gates.yml`
+- Azure Pipelines：`azure-pipelines.yml`
+- GitLab CI：`.gitlab-ci.yml`
+- Hooks：`Test-Path .git/hooks/pre-commit`、`Test-Path .git/hooks/pre-push`
+- Git 配置：`git config --get commit.template`、`git config --get governance.kitRoot`
+- 模板：`Test-Path docs/change-evidence/template.md`、`Test-Path docs/governance/waiver-template.md`、`Test-Path docs/governance/metrics-template.md`
+
+### C.9 承接映射（Global -> Repo）
+- R1：A.2 + C.1 + C.7（归宿先行与回灌闭环）。
+- R2/R3：A.2 + C.2 + C.3（小步闭环与根因优先）。
+- R4/R6：C.2 + C.3 + C.4（硬门禁、N/A 回退与阻断）。
+- R7：A.1 + C.1（边界与兼容保护）。
+- R8/E3：A.2 + C.5（证据与回滚可追溯）。
+- E4/E5/E6：C.4 + C.6 + C.8（指标、供应链与结构变更配套校验）。
 
 ## D. 维护校验清单（项目级）
-- 三文件结构一致，版本/日期同步。
-- 批量改动需说明验证与风险，并列出受影响文件清单。
-- 平台差异触发条件新增时同步更新三文件。
+- 仅落地本仓事实，不复述全局规则正文。
+- 与全局职责互补，不重叠、不缺失。
+- 协同链完整：`规则 -> 落点 -> 命令 -> 证据 -> 回滚`。
+- 三文件同构约束：`A/C/D` 必须语义一致，仅 `B` 允许平台差异。
+- 升级后同步校验三文件版本、日期、承接映射与门禁命令一致性。

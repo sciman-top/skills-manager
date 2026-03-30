@@ -1,0 +1,10 @@
+stages:
+  - quality
+
+quality:
+  stage: quality
+  tags: []
+  script:
+    - pwsh -NoProfile -Command "if (Test-Path 'scripts/quality/run-local-quality-gates.ps1') { powershell -File scripts/quality/run-local-quality-gates.ps1 -Profile quick } else { Write-Host 'No project quality script found, skip.' }"
+    - pwsh -NoProfile -Command "if (Test-Path 'scripts/quality/run-supply-chain-checks.ps1') { powershell -File scripts/quality/run-supply-chain-checks.ps1 -Profile quick } else { Write-Host 'No supply-chain script found, skip.' }"
+    - pwsh -NoProfile -Command "if (Test-Path 'scripts/quality/check-waivers.ps1') { powershell -File scripts/quality/check-waivers.ps1 } else { Write-Host 'No waiver-check script found, skip.' }"
