@@ -2555,6 +2555,28 @@ function Get-PerfThresholdMs([string]$Metric, [int]$DefaultThresholdMs = 5000) {
     }
 }
 
+function Add-PerfThresholdMetadata($summary, [int]$DefaultThresholdMs = 5000) {
+    $annotated = @()
+    if ($null -eq $summary) { return @() }
+
+    foreach ($p in @($summary)) {
+        if ($null -eq $p) { continue }
+        $metricName = ""
+        try { $metricName = [string]$p.metric } catch { $metricName = "" }
+        $metricThreshold = Get-PerfThresholdMs $metricName $DefaultThresholdMs
+
+        $item = [ordered]@{}
+        foreach ($prop in $p.PSObject.Properties) {
+            $item[$prop.Name] = $prop.Value
+        }
+        $item.effective_threshold_ms = $metricThreshold
+        $item.anomaly_check_enabled = ($null -ne $metricThreshold)
+        $annotated += [pscustomobject]$item
+    }
+
+    return @($annotated)
+}
+
 function Get-PerfAnomalyItems($summary, [int]$WarnThresholdMs = 5000, [int]$MinSamples = 3) {
     $items = @()
     if ($null -eq $summary) { return @() }
@@ -2835,15 +2857,15 @@ function Invoke-Doctor([string[]]$tokens = @()) {
         if (Test-Path $LogPath) {
             $lines = Get-Content $LogPath -ErrorAction SilentlyContinue
             $perf = Get-PerfSummaryFromLogLines $lines 3
-            $report.performance.summary = @($perf)
+            $report.performance.summary = @(Add-PerfThresholdMetadata $perf $opts.threshold_ms)
             if ($perf.Count -gt 0) {
                 if (-not $opts.json) {
                     Write-Host "最近性能摘要（最近 3 次）："
-                    foreach ($p in $perf) {
+                    foreach ($p in $report.performance.summary) {
                         Write-Host ("   - {0}: last={1}ms avg={2}ms samples={3}" -f $p.metric, $p.last_ms, $p.avg_ms, $p.samples)
                     }
                 }
-                $anomalies = Get-PerfAnomalyItems $perf $opts.threshold_ms
+                $anomalies = Get-PerfAnomalyItems $report.performance.summary $opts.threshold_ms
                 $report.performance.anomalies = @($anomalies)
                 if ($anomalies.Count -gt 0) {
                     if (-not $opts.json) {

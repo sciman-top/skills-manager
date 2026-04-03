@@ -41,4 +41,28 @@ Describe "Doctor Performance Summary" {
             $apply.avg_ms | Should Be 100
         }
     }
+
+    Context "Add-PerfThresholdMetadata" {
+        It "Annotates summary items with effective thresholds and anomaly flags" {
+            $summary = @(
+                [pscustomobject]@{ metric = "build_agent"; samples = 3; avg_ms = 5200; last_ms = 5400; last_ts = "2026-02-20 10:00:03" },
+                [pscustomobject]@{ metric = "update_total"; samples = 3; avg_ms = 300000; last_ms = 400000; last_ts = "2026-02-20 10:00:04" },
+                [pscustomobject]@{ metric = "custom_metric"; samples = 3; avg_ms = 1200; last_ms = 1400; last_ts = "2026-02-20 10:00:05" }
+            )
+
+            $annotated = Add-PerfThresholdMetadata $summary 5000
+            $build = $annotated | Where-Object { $_.metric -eq "build_agent" } | Select-Object -First 1
+            $update = $annotated | Where-Object { $_.metric -eq "update_total" } | Select-Object -First 1
+            $custom = $annotated | Where-Object { $_.metric -eq "custom_metric" } | Select-Object -First 1
+
+            $build.anomaly_check_enabled | Should Be $true
+            $build.effective_threshold_ms | Should Be 7000
+
+            $update.anomaly_check_enabled | Should Be $false
+            $update.effective_threshold_ms | Should Be $null
+
+            $custom.anomaly_check_enabled | Should Be $true
+            $custom.effective_threshold_ms | Should Be 5000
+        }
+    }
 }
