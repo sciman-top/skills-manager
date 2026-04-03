@@ -113,12 +113,34 @@ Describe "Doctor Enhancements" {
     Context "Get-PerfAnomalyItems" {
         It "Returns anomaly items when last or avg exceeds threshold" {
             $summary = @(
-                [pscustomobject]@{ metric = "build_agent"; last_ms = 1200; avg_ms = 900; samples = 3 },
+                [pscustomobject]@{ metric = "custom_metric"; last_ms = 1200; avg_ms = 900; samples = 3 },
                 [pscustomobject]@{ metric = "sync_mcp"; last_ms = 200; avg_ms = 150; samples = 3 }
             )
             $items = Get-PerfAnomalyItems $summary 1000
             $items.Count | Should Be 1
-            $items[0] | Should Match "build_agent"
+            $items[0] | Should Match "custom_metric"
+        }
+
+        It "Uses metric-specific thresholds for build metrics" {
+            $summary = @(
+                [pscustomobject]@{ metric = "build_agent"; last_ms = 6500; avg_ms = 6200; samples = 3 },
+                [pscustomobject]@{ metric = "build_apply_total"; last_ms = 18000; avg_ms = 17500; samples = 3 }
+            )
+
+            $items = Get-PerfAnomalyItems $summary 5000
+
+            $items.Count | Should Be 0
+        }
+
+        It "Ignores update metrics in anomaly checks by default" {
+            $summary = @(
+                [pscustomobject]@{ metric = "update_imports"; last_ms = 120000; avg_ms = 100000; samples = 3 },
+                [pscustomobject]@{ metric = "update_total"; last_ms = 600000; avg_ms = 450000; samples = 3 }
+            )
+
+            $items = Get-PerfAnomalyItems $summary 5000
+
+            $items.Count | Should Be 0
         }
 
         It "Ignores high latency when samples are insufficient" {

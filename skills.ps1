@@ -2538,6 +2538,23 @@ function Apply-DoctorFixes($cfg, [switch]$Preview) {
     return [pscustomobject]$result
 }
 
+function Get-PerfThresholdMs([string]$Metric, [int]$DefaultThresholdMs = 5000) {
+    if ([string]::IsNullOrWhiteSpace($Metric)) { return $DefaultThresholdMs }
+
+    $metricKey = $Metric.Trim().ToLowerInvariant()
+    switch ($metricKey) {
+        "discover" { return 5000 }
+        "build_agent" { return 7000 }
+        "apply_targets" { return 5000 }
+        "build_apply_total" { return 20000 }
+        "sync_mcp" { return 10000 }
+        "update_vendor" { return $null }
+        "update_imports" { return $null }
+        "update_total" { return $null }
+        default { return $DefaultThresholdMs }
+    }
+}
+
 function Get-PerfAnomalyItems($summary, [int]$WarnThresholdMs = 5000, [int]$MinSamples = 3) {
     $items = @()
     if ($null -eq $summary) { return @() }
@@ -2550,8 +2567,10 @@ function Get-PerfAnomalyItems($summary, [int]$WarnThresholdMs = 5000, [int]$MinS
         try { $avg = [int]$p.avg_ms } catch { continue }
         try { $samples = [int]$p.samples } catch { $samples = 0 }
         if ($samples -lt $MinSamples) { continue }
-        if ($last -ge $WarnThresholdMs -or $avg -ge $WarnThresholdMs) {
-            $items += ("{0}: last={1}ms avg={2}ms threshold={3}ms" -f [string]$p.metric, $last, $avg, $WarnThresholdMs)
+        $metricThreshold = Get-PerfThresholdMs ([string]$p.metric) $WarnThresholdMs
+        if ($null -eq $metricThreshold) { continue }
+        if ($last -ge $metricThreshold -or $avg -ge $metricThreshold) {
+            $items += ("{0}: last={1}ms avg={2}ms threshold={3}ms" -f [string]$p.metric, $last, $avg, $metricThreshold)
         }
     }
     return ,@($items)
