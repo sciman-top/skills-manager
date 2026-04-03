@@ -11,6 +11,10 @@ steps:
 - checkout: self
 
 - powershell: |
+    powershell -File scripts/quality/check-repo-hygiene.ps1
+  displayName: Check repository hygiene
+
+- powershell: |
     if (Test-Path "scripts/quality/run-local-quality-gates.ps1") {
       powershell -File scripts/quality/run-local-quality-gates.ps1 -Profile quick
     } else {

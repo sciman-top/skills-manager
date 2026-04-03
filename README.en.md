@@ -2,113 +2,98 @@
 
 [中文](README.md) | English
 
-`skills-manager` is a Windows-first PowerShell tool for aggregating, curating, building, and syncing AI agent skills from multiple upstream repositories into a single local workspace.
+`skills-manager` is a Windows-first PowerShell tool that turns scattered AI agent skills into one controlled local workspace.
 
-It is designed for users who want one controlled entry point for Claude, Codex, Gemini, Trae, and similar tools without manually cloning, copying, and reconciling skill folders.
+It is built for the common case where you use multiple agents, pull from multiple skill sources, and do not want to keep cloning, copying, patching, and re-syncing directories by hand.
 
-## What It Does
+## Positioning
 
-- Aggregates skills from multiple upstream repositories.
-- Lets you enable only the skills you want through explicit mappings and imports.
-- Builds a clean local skill bundle into `agent/`.
-- Syncs that bundle to local targets such as `~/.claude/skills` or `~/.codex/skills`.
-- Supports both linked and mirrored deployment modes on Windows.
-- Keeps the workflow scriptable while still providing an interactive Chinese menu.
+Think of this repository as a local skill assembly layer:
 
-## Why This Repo Exists
+- upstream: aggregate multiple skill repositories
+- local: decide what to enable, import, or override
+- downstream: sync one built output to Claude, Codex, Gemini, Trae, and similar targets
 
-Managing skills manually breaks down quickly:
+All of that is driven by a single configuration file: `skills.json`.
 
-- different vendors use different layouts
-- local overrides get mixed with upstream content
-- updates become risky
-- target directories drift out of sync
+## Why It Exists
 
-`skills-manager` standardizes that workflow around:
+- avoid hand-maintaining several `~/.xxx/skills` directories
+- enable only the skills you actually want
+- keep local patches in `overrides/` instead of editing cached upstream content
+- make the final build output explicit in `agent/`
+- support both junction-based and mirrored sync on Windows
 
-- one entry script: `skills.ps1`
-- one source of truth: `skills.json`
-- one generated output: `agent/`
+## Core Model
 
-## Core Concepts
+- single entry point: `skills.ps1`
+- single config source: `skills.json`
+- single generated output: `agent/`
 
-### Source Layers
+Source layers:
 
-- `vendors`: full upstream repositories managed as configured sources
-- `imports`: manually imported skills or targeted subpaths
-- `overrides`: local patches or custom additions that should win over upstream content
-
-### Generated Output
-
-- `agent/`: the built skill set produced from vendor mappings, manual imports, and overrides
-
-### Target Sync
-
-- `link`: preferred on Windows; uses junctions to point target directories at `agent/`
-- `sync`: falls back to mirrored copies when links are not allowed
+- `vendors`: full upstream repositories
+- `imports`: targeted skill or subpath imports
+- `overrides`: local patches and custom additions
 
 ## Repository Layout
 
 ```text
 repo/
   skills.ps1        # main entry point
-  skills.json       # single config source
+  skills.json       # single configuration source
   build.ps1         # rebuilds skills.ps1 from src/
-  src/              # source modules for the main script
-  tests/            # unit and end-to-end tests
-  overrides/        # local maintained overrides
-  imports/          # imported skill sources
+  src/              # source modules
+  tests/            # unit and end-to-end verification
+  overrides/        # local override layer
+  imports/          # targeted imported sources
   vendor/           # upstream cache, generated locally
   agent/            # built output, generated locally
 ```
 
-## Quick Start
+## Typical Flow
 
-### Prerequisites
+```powershell
+.\skills.ps1 发现
+.\skills.ps1 构建生效
+.\skills.ps1 doctor --strict
+```
 
-- Windows 10 or 11
-- PowerShell 5.1 or later
-- Git available in `PATH`
-- `robocopy` available on the system
-
-### Run the Interactive Menu
+For first-time setup, you can start from the interactive menu:
 
 ```powershell
 .\skills.ps1
 ```
 
-### Recommended First-Time Flow
+Recommended order:
 
-1. Add one or more vendor repositories.
-2. Select the skills you want to enable.
-3. Build and apply.
-4. Verify the targets were updated correctly.
+1. add one or more upstream repositories
+2. enable the skills you want
+3. build and apply
+4. verify the result with `doctor --strict`
 
-### Useful Commands
+## Sync Modes
 
-```powershell
-.\skills.ps1 发现
-.\skills.ps1 构建生效
-.\skills.ps1 更新
-.\skills.ps1 doctor --strict
-```
+`skills.json` supports two sync strategies through `sync_mode`:
 
-## Configuration
+- `link`: preferred on Windows; uses junctions to point target directories at `agent/`
+- `sync`: mirrors the built output with `robocopy /MIR`
 
-`skills.json` is the single configuration source for:
+Use `link` when you want direct local iteration. Use `sync` when links are restricted.
 
-- `vendors`
-- `mappings`
-- `imports`
-- `targets`
-- `sync_mode`
-- `mcp_servers`
+## Imports and Locking
 
-This keeps repository behavior explicit and reviewable.
+Common operations:
 
-## Development
+- import one skill: `.\skills.ps1 add <repo> --skill <name>`
+- write lock data: `.\skills.ps1 锁定`
+- strict build from lock: `.\skills.ps1 构建生效 -Locked`
+- preview upgrades: `.\skills.ps1 更新 -Plan`
+- upgrade and refresh lock data: `.\skills.ps1 更新 -Upgrade`
 
-Quality gates in this repository run in the following order:
+## Quality Gates
+
+This repository validates changes in a fixed order:
 
 ```powershell
 ./build.ps1
@@ -117,19 +102,18 @@ Quality gates in this repository run in the following order:
 ./skills.ps1 构建生效
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution expectations.
+That sequence is the minimum pre-submit verification set.
 
 ## Repository Hygiene
 
-This repository intentionally does not treat local IDE or agent state as distributable project content.
-
-Examples of local-only content:
+The remote repository must not include local-only agent state or temporary artifacts, including:
 
 - `.claude/`, `.codex/`, `.gemini/`, `.trae/`
-- temporary logs and backup files
-- temporary probe/debug snapshots created during import or diagnosis
+- local agent rule files such as `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`
+- logs, backups, and temporary files
+- `_probe_*`, `_debug_*`, and `_tree_*` import snapshots
 
-Those files may exist locally, but they are not part of the remote repository contract.
+Those files may exist locally, but they are outside the repository contract. CI now checks this explicitly.
 
 ## Related Docs
 
