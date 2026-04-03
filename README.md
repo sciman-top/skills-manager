@@ -1,302 +1,185 @@
 # skills-manager
 
-> 一个面向 Claude/Codex/Gemini 的本地技能聚合与分发管理器（Windows + PowerShell）。
-> A local skill aggregation and distribution manager for Claude/Codex/Gemini on Windows.
+中文 | [English](README.en.md)
 
-## 项目定位（用于 GitHub About）
+`skills-manager` 是一个面向 Windows 与 PowerShell 的本地技能聚合、构建和分发工具，用来把多个上游技能仓库整理成一套可控、可复用、可同步的本地 AI agent skills 工作区。
 
-- Description：`Windows + PowerShell skills manager for Claude/Codex/Gemini: aggregate, whitelist, build, and sync skills from multiple vendors.`
-- Topics：`powershell`, `skills`, `ai-agent`, `claude`, `codex`, `gemini`, `windows`, `automation`
+它的目标不是“再造一个技能市场”，而是把多来源 skills 的日常管理收敛成一条清晰流程：
 
-## GitHub 快速入口
+- 统一收集
+- 精确启用
+- 本地覆盖
+- 一键构建
+- 同步到 Claude / Codex / Gemini / Trae 等目标目录
 
-- 贡献指南：`CONTRIBUTING.md`
-- 安全策略：`SECURITY.md`
-- 行为准则：`CODE_OF_CONDUCT.md`
-- PR 模板：`.github/pull_request_template.md`
-- 质量门禁：`.github/workflows/quality-gates.yml`
+## 核心价值
 
----
+- 多源聚合：同时管理多个上游 skills 仓库。
+- 白名单装配：只启用你明确选择的 skills。
+- 覆盖优先：允许通过 `overrides/` 做本地修正，而不污染上游缓存。
+- 构建产物清晰：所有组合结果统一落到 `agent/`。
+- 同步方式可控：支持 `link` 和 `sync` 两种模式。
+- 交互与脚本兼容：既能跑中文菜单，也能直接走命令行。
 
-# Skills 管理器（极简版）
+## 适用场景
 
-目标：用一个中文菜单脚本，完成你最常用的 4 类动作：
+- 你同时使用 Claude、Codex、Gemini 等多个 agent 工具。
+- 你不想手工维护多个 `~/.xxx/skills` 目录。
+- 你需要在上游 skills 基础上叠加本地规则或修补。
+- 你希望更新过程可预览、可回滚、可审计。
 
-1. **添加/删除技能库 URL**（菜单“新增/删除技能库”自动维护 `vendors`）
-2. **从技能库里选择启用哪些技能（白名单）**（菜单“安装/卸载”自动写 `mappings`）
-3. **构建并生效**（把白名单技能汇总到 `agent/`，并合并 `imports(mode=manual)` 与 `overrides/` 后同步到目标）
-4. **手动更新上游**（`git pull` 后重建并生效）
+## 仓库结构
 
-本项目刻意做到：目录少、概念少、可控更新（不做定时自动更新）。
-
----
-
-## 目录结构
-
-```
+```text
 repo/
-  skills.ps1        # 唯一入口（中文菜单）
-  skills.json       # 唯一配置（vendors + 白名单 + link/sync 模式）
-  vendor/           # 上游技能库缓存（自动生成）
-  agent/            # 最终技能集合（自动生成）
-  imports/          # 单技能导入缓存（自动生成）
-  overrides/        # 可选：你的覆盖层（同名目录会覆盖上游构建结果）
-  .claude/skills    # link/sync 指向 agent/
-  .codex/skills     # link/sync 指向 agent/
-  .gemini/skills    # link/sync 指向 agent/（如 Gemini 支持）
+  skills.ps1        # 主入口
+  skills.json       # 唯一配置源
+  build.ps1         # 从 src/ 重建 skills.ps1
+  src/              # 脚本源码
+  tests/            # 单元测试与端到端测试
+  overrides/        # 本地覆盖层
+  imports/          # 手工导入或定向导入来源
+  vendor/           # 上游缓存，构建期生成
+  agent/            # 构建输出，生效期生成
 ```
 
----
+## 核心模型
 
-## 前置条件
+### 单一入口
+
+- `skills.ps1`：统一调度发现、安装、更新、构建、doctor、MCP 等动作。
+
+### 单一配置源
+
+- `skills.json`：统一描述 `vendors`、`mappings`、`imports`、`targets`、`sync_mode` 与 `mcp_servers`。
+
+### 单一构建产物
+
+- `agent/`：由 vendor 映射、manual imports、overrides 合成后的最终技能集合。
+
+## 快速开始
+
+### 前置条件
 
 - Windows 10/11
-- PowerShell 5.1+（或 PowerShell 7+）
-- Git（命令行可用：`git --version`）
-- `robocopy`（Windows 自带）
+- PowerShell 5.1+ 或 PowerShell 7+
+- Git
+- `robocopy`
 
-如遇脚本无法运行，可在当前 PowerShell 会话临时放开执行策略：
+如当前 PowerShell 会话限制脚本执行，可临时放开：
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
----
+### 首次使用
 
-## 快速开始（推荐流程）
-
-1) 运行中文菜单：
+运行交互菜单：
 
 ```powershell
 .\skills.ps1
 ```
 
-可选：加上 `-DryRun` 仅预演（跳过写入/删除/同步/拉取）：
+推荐顺序：
+
+1. 新增技能库
+2. 选择需要启用的技能
+3. 构建并生效
+4. 用 `doctor --strict` 做完整检查
+
+### 常用命令
 
 ```powershell
-.\skills.ps1 -DryRun
+.\skills.ps1 发现
+.\skills.ps1 构建生效
+.\skills.ps1 更新
+.\skills.ps1 doctor --strict
 ```
 
-2) 按菜单顺序执行：
-
-- **1 新增技能库**：输入 URL，自动写入并初始化
-- **4 批量安装**：多选要启用的技能（=白名单）
-- **6 手动更新**：拉取上游 vendor/imports → 重建 → 同步
-- **7 构建并生效**（可选）：重建 `agent/`（含 `imports(mode=manual)` 与 `overrides/`）并让 Claude/Codex 使用
-  - 注意事项：手动更新会逐项确认是否丢弃 vendor/imports 的本地改动；仅需本地改动生效时用“构建并生效”
-
-可选命令：
-- `.\skills.ps1 发现`：单独列出可用 skills（含已安装标记）
-- `.\skills.ps1 发现 -DryRun`：仅预演模式（不会写入/删除/同步/拉取）
-
-3) 隔一段时间手动更新：
-
-- **6 手动更新**：拉取上游 vendor/imports → 重建 → 同步
-  - 注意事项：手动更新会逐项确认是否丢弃 vendor/imports 的本地改动；仅需本地改动生效时用“构建并生效”
-
----
-
-## 场景速查
-
-- 首次安装：
-  - 运行 `.\skills.ps1`
-  - 依次执行“新增技能库”→“批量安装”→“构建并生效”
-- 迁移新机器：
-  - 拷贝 `skills.json` 与 `overrides/`（如有）
-  - 执行 `.\skills.ps1 构建生效`（必要时先“新增技能库”初始化）
-- 权限受限（无法创建链接）：
-  - 将 `sync_mode` 改为 `sync`
-  - 重新执行 `.\skills.ps1 构建生效`
-- 回滚到上次配置：
-  - 恢复 `skills.json`（或移除本次 `overrides/` 变更）
-  - 执行 `.\skills.ps1 构建生效`
-
----
-
-## MCP（fetch）统一写法
-
-推荐统一使用同一条启动命令：
+仅做预演时可加 `-DryRun`：
 
 ```powershell
-python -m mcp_server_fetch
+.\skills.ps1 发现 -DryRun
 ```
 
-先安装依赖（一次即可）：
+## 同步模式
+
+在 `skills.json` 中通过 `sync_mode` 控制：
+
+- `link`
+  - Windows 下优先使用 Junction，把目标目录直接指向 `agent/`
+  - 适合本地长期使用，改动能立即反映
+- `sync`
+  - 使用 `robocopy /MIR` 镜像复制到目标目录
+  - 适合不允许链接或需要纯复制部署的环境
+
+## 单技能导入
+
+当你不想把整个仓库纳入 `vendors`，可以按单技能导入到 `imports/`：
+
+```powershell
+.\skills.ps1 add <repo> --skill <name> [--ref <branch/tag>] [--sparse]
+.\skills.ps1 npx "skills add <repo> --skill <name> [--ref <branch/tag>] [--sparse]"
+```
+
+常用参数：
+
+- `--mode manual|vendor`
+- `--ref`
+- `--sparse`
+
+## 版本锁定
+
+如需固定上游版本：
+
+- 生成锁文件：`.\skills.ps1 锁定`
+- 严格构建：`.\skills.ps1 构建生效 -Locked`
+- 严格更新：`.\skills.ps1 更新 -Locked`
+- 预览升级：`.\skills.ps1 更新 -Plan`
+- 升级并刷新锁：`.\skills.ps1 更新 -Upgrade`
+
+## MCP 管理
+
+示例：安装 `fetch` MCP 服务
 
 ```powershell
 python -m pip install --user mcp-server-fetch
+.\skills.ps1 安装MCP fetch --cmd python --arg -m --arg mcp_server_fetch
 ```
 
-交互式安装（菜单/命令都可）：
+交互式安装也可直接执行：
 
 ```powershell
 .\skills.ps1 安装MCP
 ```
 
-按提示输入：
-- 服务名：`fetch`
-- transport：`stdio`（或回车）
-- 命令：`python -m mcp_server_fetch`
+## 开发与质量门禁
 
-非交互一行命令：
+本仓库按固定顺序执行质量门禁：
 
 ```powershell
-.\skills.ps1 安装MCP fetch --cmd python --arg -m --arg mcp_server_fetch
+./build.ps1
+./skills.ps1 发现
+./skills.ps1 doctor --strict
+./skills.ps1 构建生效
 ```
 
----
+这也是提交前的最小验证集合。
 
-## 关于“安装 / 卸载”
+## 仓库边界
 
-- **安装**：在菜单“安装”里勾选技能（写入白名单），然后“构建并生效”。
-- **卸载**：
-  - vendor：从白名单移除（不删除 vendor 物理目录）
-  - manual：删除 `imports` 中的 manual 条目（兼容清理 `manual/<skill>` legacy 目录）
-  - overrides：先备份到 `overrides/.bak/`，再删除覆盖层目录
+本仓库不把以下内容视为远端分发物：
 
-项目默认每次构建前会清空 `agent/`，因此不会残留已卸载技能。
-如需彻底清理 overrides 备份，可手动删除 `overrides/.bak/`。
+- `.claude/`、`.codex/`、`.gemini/`、`.trae/` 等本地 agent 目录
+- 本地日志、备份、临时文件
+- import 过程产生的 `_probe_*`、`_debug_*`、`_tree_*` 调试快照
 
----
+这些文件允许在本地存在，但不应构成远端仓库契约的一部分。
 
-## 关于“清理备份”
+## 相关文档
 
-- 会删除仓库内的 `*.bak.*` 和 `.bak` 目录（排除 `vendor/`、`agent/`、`imports/`、`.git`；包含 overrides 备份）。
-- 需输入 `DELETE` 才会执行。
-
----
-
-## 单技能安装（npx 风格兼容）
-
-默认落入 `imports/`（`mode=manual`），构建后自动生效：
-
-```powershell
-.\skills.ps1 add <repo> --skill <name> [--ref <branch/tag>] [--sparse]
-.\skills.ps1 npx "skills add <repo> --skill <name> [--ref <branch/tag>] [--sparse]"
-.\skills.ps1 npx "add-skill <repo> --skill <name> [--ref <branch/tag>] [--sparse]"
-```
-
-菜单入口（一次性输入整行参数）也支持以下形式：
-
-```text
-npx skills add <repo> --skill <name> [--ref <branch/tag>] [--sparse]
-npx add-skill <repo> --skill <name> [--ref <branch/tag>] [--sparse]
-skills add <repo> --skill <name> [--ref <branch/tag>] [--sparse]
-```
-
-可选参数：
-- `--mode manual|vendor`：默认 manual；vendor 会写入 vendors/mappings（适合想纳入“技能库”生态）
-- `--ref`：指定分支或标签（如 `main`、`v1.2.3`）
-- `--sparse`：启用 `git sparse-checkout`（适合大仓库只取子目录）
- 
-单技能安装会自动补全 `owner/repo` 为 GitHub URL；若未指定 `--skill` 或路径不正确，将自动扫描仓库：
-- 只有 1 个候选时自动修正并继续
-- 多个候选时提示错误并列出候选路径与列举命令
-
----
-
-## link / sync 模式（自动同步）
-
-在 `skills.json` 中配置：
-
-- Windows 优先 Junction，受限环境用 sync。
-
-- `"sync_mode": "link"`（默认推荐）
-  - `.claude/skills`、`.codex/skills`、`.gemini/skills` 通过 **Junction** 指向 `agent/`（如 Gemini 支持）
-  - 构建后立即生效；后续 `agent/` 变化对 CLI 等同“自动同步”
-
-- `"sync_mode": "sync"`
-  - 构建后用 `robocopy /MIR` 镜像复制到目标目录（含 `.gemini/skills` 如已配置）
-  - 适合 link 被安全策略拦截的环境
-
----
-
-## 更新策略（update_force）
-
-在 `skills.json` 中配置：
-
-- `"update_force": true`（默认）
-  - 更新 imports/vendor 时会进入逐项确认，可按 vendor/import 决定是否执行强制清理（`git reset --hard` + `git clean -fd`）
-  - 运行“更新”时会先提示是否进入逐项确认
-- `"update_force": false`
-  - 保留 imports/vendor 的本地改动；如果与上游冲突，可能需要手动处理
-
----
-
-## 锁定版本（skills.lock.json）
-
-- 生成锁文件：`.\skills.ps1 锁定`
-  - 记录当前 `vendors/imports` 的 `repo/ref/commit` 快照到 `skills.lock.json`。
-- 严格锁定执行：`.\skills.ps1 构建生效 -Locked` 或 `.\skills.ps1 更新 -Locked`
-  - 缺少锁文件、配置与锁不一致、或本地缓存 commit 与锁不一致时会直接失败。
-  - `更新 -Locked` 会按锁文件中的 commit 回放工作区，再执行构建生效。
-- 升级与预览：
-  - `.\skills.ps1 更新 -Plan`：预览 vendors/imports 的当前 commit 与目标 commit（不改动）
-  - `.\skills.ps1 更新 -Upgrade`：执行更新，并在成功后自动刷新 `skills.lock.json`
-
----
-
-## 添加/删除技能库 URL（vendors）
-
-使用菜单即可完成：
-
-- **新增技能库**：输入 Git URL，自动写入 `skills.json` 并初始化
-- 也可留空仅初始化已配置的 vendors
-- **删除技能库**：选择已配置 vendor 删除，并同步移除相关映射与目录，然后自动构建生效
-
----
-
-## overrides（可选覆盖层）
-
-如果你想对某个 skill 做定制（例如增加中文说明、加门控），可：
-
-- 在 `overrides/<同名目录>/` 放入你自己的 `SKILL.md` 或其它文件
-- 构建时会在最后覆盖到 `agent/` 同名目录
-
----
-
-## 故障排查
-
-- `mklink` 失败 / link 不生效：把 `sync_mode` 改为 `sync`，再运行“构建并生效”。
-- CLI 未立即识别新技能：重启该 CLI 会话通常最稳。
-- 构建前预检（推荐）：`powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\prebuild-check.ps1`
-  - 预检会检查：`git status`、`.git` ACL 显式 DENY、常见客户端进程占用。
-  - 严格模式：`.\scripts\prebuild-check.ps1 -Strict`（有 WARN 即失败）。
-- 可运行 `.\skills.ps1 doctor` 查看环境检查与最近性能摘要（每个流程最近 3 次 `last/avg/samples`）。
-- `doctor` 还会做配置风险扫描（重复 `targets.path`、重复 `mappings.to`、映射引用不存在 vendor）并提示性能异常（默认阈值 5000ms）。
-- 机器可读输出与低风险自修复：`.\skills.ps1 doctor --json`、`.\skills.ps1 doctor --fix`、`.\skills.ps1 doctor --dry-run-fix`。
-- 严格模式：`.\skills.ps1 doctor --json --strict`（有配置风险或性能异常时 `pass=false`，便于 CI 阻断）。
-- 性能阈值：`.\skills.ps1 doctor --json --threshold-ms 3000`。
-- `doctor --strict` 在命令行会返回非 0 退出码（当前为 `2`），可直接接入 CI。
-
----
-
-## 本地提交门禁（pre-commit）
-
-- 安装：`powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-githooks.ps1`
-- 生效后会阻断以下提交：
-  - 临时产物：`.txn/`、`build.log`、`.build-cache.json`
-  - 任意 dirty submodule（`git submodule status` 包含 `-dirty`）
-
----
-
-## 构建优化与回滚
-
-- 已启用增量构建缓存：未变化技能目录会跳过复制，减少 `构建生效` 耗时。
-- 构建流程带事务回滚：若构建/同步阶段失败，会自动回滚 `agent/` 到构建前状态（同步目标可能仍需手动重建）。
-
----
-
-## 开发校验（CI 同款）
-
-```powershell
-.\tests\check-generated-sync.ps1   # 校验 src/ 与 skills.ps1 产物一致
-.\tests\run.ps1                    # 运行 Unit + E2E
-```
-
----
-
-## 过滤语法（安装/卸载/发现命令）
-
-- 多关键词：空格分隔，按 **AND** 过滤（如：`docx pdf`）
-- 正则：用 `/.../` 包裹（如：`/docx|pdf/`）
+- [英文版 README](README.en.md)
+- [贡献指南](CONTRIBUTING.md)
+- [安全策略](SECURITY.md)
+- [行为准则](CODE_OF_CONDUCT.md)
+- [PR 模板](.github/pull_request_template.md)
