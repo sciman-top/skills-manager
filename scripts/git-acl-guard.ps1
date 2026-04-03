@@ -1,5 +1,7 @@
 param(
     [switch]$Fix,
+    [switch]$LightFix,
+    [switch]$AutoFix,
     [string]$GitDir = '.git',
     [string]$BackupPath,
     [switch]$Quiet,
@@ -178,6 +180,29 @@ function Remove-RootDenyRulesBySid {
     }
 }
 
+function Remove-DenyRulesRecursivelyBySid {
+    param(
+        [string]$Target,
+        [string]$Sid
+    )
+
+    [void](Invoke-Cmd ('icacls "{0}" /remove:d *{1} /T /C' -f $Target, $Sid))
+    Remove-RootDenyRulesBySid -Target $Target -Sid $Sid
+}
+
+function Invoke-LightRepairBySid {
+    param(
+        [string]$Target,
+        [string[]]$Sids
+    )
+
+    foreach ($sid in $Sids) {
+        if ($sid -eq 'ACL_READ_ERROR') { continue }
+        Write-Status INFO "Light repair removing DENY for SID: $sid"
+        Remove-DenyRulesRecursivelyBySid -Target $Target -Sid $sid
+    }
+}
+
 function Repair-GitAcl {
     param(
         [string]$Target,
@@ -230,7 +255,7 @@ function Repair-GitAcl {
     Write-Status INFO ("DENY SID summary: {0}" -f (Format-SidSummaryLine $before.SidCounts))
     $before.Samples | Select-Object -First 10 | ForEach-Object { Write-Host "  $_" }
 
-    if (-not $Fix) {
+    if (-not $Fix -and -not $LightFix -and -not $AutoFix) {
         Write-Status FAIL 'DENY detected. Re-run with -Fix to auto-repair.'
         return [pscustomobject]$report
     }
@@ -255,39 +280,56 @@ function Repair-GitAcl {
         return [pscustomobject]$report
     }
 
-    Write-Status INFO 'Take ownership recursively (best effort)...'
-    $takeownCode = Invoke-Cmd ('takeown /F "{0}" /R /D Y' -f $Target)
-    if ($takeownCode -ne 0) {
-        Write-Status WARN 'takeown returned non-zero; continuing.'
+    $usedStrategy = 'none'
+    $lightSucceeded = $false
+
+    if ($LightFix -or $AutoFix) {
+        $usedStrategy = 'light'
+        Invoke-LightRepairBySid -Target $Target -Sids $beforeSids
+        $lightAfter = Get-DenySnapshot -Target $Target
+        if ($lightAfter.DenyCount -eq 0) {
+            $lightSucceeded = $true
+        }
+        elseif ($LightFix -and -not $AutoFix) {
+            Write-Status FAIL ("Light repair attempted but DENY still exists ({0})." -f $lightAfter.DenyCount)
+        }
+        else {
+            Write-Status WARN ("Light repair incomplete; DENY remains ({0}), escalating to aggressive repair." -f $lightAfter.DenyCount)
+        }
     }
 
-    Write-Status INFO 'Reset ACL recursively...'
-    if ((Invoke-Cmd ('icacls "{0}" /reset /T /C' -f $Target)) -ne 0) {
-        Write-Status FAIL 'ACL reset failed.'
-        $report.BackupPath = $backupPath
-        return [pscustomobject]$report
-    }
+    if (-not $lightSucceeded -and ($Fix -or $AutoFix)) {
+        $usedStrategy = if ($usedStrategy -eq 'light') { 'light+aggressive' } else { 'aggressive' }
 
-    Write-Status INFO 'Enable inheritance recursively...'
-    if ((Invoke-Cmd ('icacls "{0}" /inheritance:e /T /C' -f $Target)) -ne 0) {
-        Write-Status FAIL 'Enabling inheritance failed.'
-        $report.BackupPath = $backupPath
-        return [pscustomobject]$report
-    }
+        Write-Status INFO 'Take ownership recursively (best effort)...'
+        $takeownCode = Invoke-Cmd ('takeown /F "{0}" /R /D Y' -f $Target)
+        if ($takeownCode -ne 0) {
+            Write-Status WARN 'takeown returned non-zero; continuing.'
+        }
 
-    Write-Status INFO 'Grant current user full control recursively...'
-    $currentPrincipal = "{0}\{1}" -f $env:USERDOMAIN, $env:USERNAME
-    if ((Invoke-Cmd ('icacls "{0}" /grant:r "{1}:(OI)(CI)F" /T /C' -f $Target, $currentPrincipal)) -ne 0) {
-        Write-Status FAIL 'Granting current user full control failed.'
-        $report.BackupPath = $backupPath
-        return [pscustomobject]$report
-    }
+        Write-Status INFO 'Reset ACL recursively...'
+        if ((Invoke-Cmd ('icacls "{0}" /reset /T /C' -f $Target)) -ne 0) {
+            Write-Status FAIL 'ACL reset failed.'
+            $report.BackupPath = $backupPath
+            return [pscustomobject]$report
+        }
 
-    foreach ($sid in $beforeSids) {
-        if ($sid -eq 'ACL_READ_ERROR') { continue }
-        Write-Status INFO "Removing DENY rules for SID: $sid"
-        [void](Invoke-Cmd ('icacls "{0}" /remove:d *{1} /T /C' -f $Target, $sid))
-        Remove-RootDenyRulesBySid -Target $Target -Sid $sid
+        Write-Status INFO 'Enable inheritance recursively...'
+        if ((Invoke-Cmd ('icacls "{0}" /inheritance:e /T /C' -f $Target)) -ne 0) {
+            Write-Status FAIL 'Enabling inheritance failed.'
+            $report.BackupPath = $backupPath
+            return [pscustomobject]$report
+        }
+
+        Write-Status INFO 'Grant current user full control recursively...'
+        $currentPrincipal = "{0}\{1}" -f $env:USERDOMAIN, $env:USERNAME
+        if ((Invoke-Cmd ('icacls "{0}" /grant:r "{1}:(OI)(CI)F" /T /C' -f $Target, $currentPrincipal)) -ne 0) {
+            Write-Status FAIL 'Granting current user full control failed.'
+            $report.BackupPath = $backupPath
+            return [pscustomobject]$report
+        }
+
+        Invoke-LightRepairBySid -Target $Target -Sids $beforeSids
     }
 
     $after = Get-DenySnapshot -Target $Target
@@ -309,6 +351,9 @@ function Repair-GitAcl {
 
     if ($report.Success) {
         Write-Status PASS ("ACL repaired: {0}" -f $Target)
+        if ($usedStrategy -ne 'none') {
+            Write-Status INFO ("Repair strategy: {0}" -f $usedStrategy)
+        }
         Write-Status INFO ("Rollback command: icacls . /restore `"{0}`"" -f $backupPath)
         Write-Status INFO ("Operator: {0} ({1}), checked_at_utc={2}" -f $identity.Name, $identity.Sid, $identity.CheckedAtUtc)
     }
@@ -363,8 +408,16 @@ if ($failed.Count -eq 0) {
     exit 0
 }
 
-if ($Fix) {
+if ($Fix -or $LightFix -or $AutoFix) {
     exit 8
 }
 
 exit 3
+$enabledFixSwitches = 0
+if ($Fix) { $enabledFixSwitches++ }
+if ($LightFix) { $enabledFixSwitches++ }
+if ($AutoFix) { $enabledFixSwitches++ }
+if ($enabledFixSwitches -gt 1) {
+    Write-Status FAIL 'Use only one of -Fix, -LightFix, -AutoFix.'
+    exit 2
+}
