@@ -1,6 +1,12 @@
 # skills-manager
 
 > 一个面向 Claude/Codex/Gemini 的本地技能聚合与分发管理器（Windows + PowerShell）。
+> A local skill aggregation and distribution manager for Claude/Codex/Gemini on Windows.
+
+## 项目定位（用于 GitHub About）
+
+- Description：`Windows + PowerShell skills manager for Claude/Codex/Gemini: aggregate, whitelist, build, and sync skills from multiple vendors.`
+- Topics：`powershell`, `skills`, `ai-agent`, `claude`, `codex`, `gemini`, `windows`, `automation`
 
 ## GitHub 快速入口
 
