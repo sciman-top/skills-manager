@@ -1,0 +1,46 @@
+name: Bug Report
+description: Report a reproducible bug
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+      placeholder: Briefly describe the bug
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction Steps
+      description: Provide minimal reproducible steps
+      placeholder: |
+        1. Run command...
+        2. Use config...
+        3. Observe error...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Screenshots
+      description: Paste key logs or screenshots
+
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: OS / PowerShell / Git version
+      placeholder: "Windows 11, PowerShell 7.5, Git 2.49"

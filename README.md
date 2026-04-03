@@ -1,3 +1,17 @@
+# skills-manager
+
+> 一个面向 Claude/Codex/Gemini 的本地技能聚合与分发管理器（Windows + PowerShell）。
+
+## GitHub 快速入口
+
+- 贡献指南：`CONTRIBUTING.md`
+- 安全策略：`SECURITY.md`
+- 行为准则：`CODE_OF_CONDUCT.md`
+- PR 模板：`.github/pull_request_template.md`
+- 质量门禁：`.github/workflows/quality-gates.yml`
+
+---
+
 # Skills 管理器（极简版）
 
 目标：用一个中文菜单脚本，完成你最常用的 4 类动作：
