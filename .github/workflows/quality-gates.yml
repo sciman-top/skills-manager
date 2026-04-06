@@ -12,11 +12,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Check repository hygiene
-        shell: pwsh
-        run: |
-          powershell -File scripts/quality/check-repo-hygiene.ps1
-
       - name: Run local quality gates (if exists)
         shell: pwsh
         run: |

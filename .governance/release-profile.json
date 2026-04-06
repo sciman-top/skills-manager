@@ -1,8 +1,14 @@
 ﻿{
     "schema_version":  "1.0",
-    "project_type":  "generic",
+    "project_type":  "script",
     "release_enabled":  false,
     "owner":  "skills-manager",
+    "classification":  {
+                           "release_decision":  "disabled-no-release-signals",
+                           "detected_release_signals":  [
+
+                                                        ]
+                       },
     "policies":  {
                      "signing":  {
                                      "required":  false,
@@ -11,8 +17,7 @@
                      "compatibility":  {
                                            "matrix_required":  false,
                                            "minimum_os":  [
-                                                              "Windows 10 22H2",
-                                                              "Windows 11 22H2"
+                                                              "Windows 10 22H2"
                                                           ],
                                            "architectures":  [
                                                                  "x64"
