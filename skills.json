@@ -1,514 +1,521 @@
 {
-    "sync_mode":  "link",
-    "vendors":  [
-                    {
-                        "name":  "anthropics-skills",
-                        "repo":  "https://github.com/anthropics/skills.git",
-                        "ref":  "main"
-                    },
-                    {
-                        "name":  "superpowers",
-                        "repo":  "https://github.com/obra/superpowers.git",
-                        "ref":  "main"
-                    },
-                    {
-                        "ref":  "main",
-                        "name":  "skills",
-                        "repo":  "https://github.com/openai/skills.git"
-                    },
-                    {
-                        "ref":  "main",
-                        "name":  "agent-skills",
-                        "repo":  "https://github.com/vercel-labs/agent-skills.git"
-                    },
-                    {
-                        "ref":  "main",
-                        "name":  "skills-2",
-                        "repo":  "https://github.com/remotion-dev/skills.git"
-                    },
-                    {
-                        "ref":  "main",
-                        "name":  "baoyu-skills",
-                        "repo":  "https://github.com/jimliu/baoyu-skills.git"
-                    }
-                ],
-    "mappings":  [
-                     {
-                         "to":  "anthropics-skills-docx",
-                         "from":  "skills\\docx",
-                         "vendor":  "anthropics-skills"
-                     },
-                     {
-                         "to":  "anthropics-skills-pptx",
-                         "from":  "skills\\pptx",
-                         "vendor":  "anthropics-skills"
-                     },
-                     {
-                         "to":  "anthropics-skills-xlsx",
-                         "from":  "skills\\xlsx",
-                         "vendor":  "anthropics-skills"
-                     },
-                     {
-                         "from":  "skills\\doc-coauthoring",
-                         "to":  "anthropics-skills-skills-doc-coauthoring",
-                         "vendor":  "anthropics-skills"
-                     },
-                     {
-                         "from":  "skills\\systematic-debugging",
-                         "to":  "superpowers-skills-systematic-debugging",
-                         "vendor":  "superpowers"
-                     },
-                     {
-                         "from":  "skills\\canvas-design",
-                         "to":  "anthropics-skills-skills-canvas-design",
-                         "vendor":  "anthropics-skills"
-                     },
-                     {
-                         "from":  "skills\\web-artifacts-builder",
-                         "to":  "anthropics-skills-skills-web-artifacts-builder",
-                         "vendor":  "anthropics-skills"
-                     },
-                     {
-                         "from":  "skills\\executing-plans",
-                         "to":  "superpowers-skills-executing-plans",
-                         "vendor":  "superpowers"
-                     },
-                     {
-                         "from":  "skills\\verification-before-completion",
-                         "to":  "superpowers-skills-verification-before-completion",
-                         "vendor":  "superpowers"
-                     },
-                     {
-                         "from":  "skills\\subagent-driven-development",
-                         "to":  "superpowers-skills-subagent-driven-development",
-                         "vendor":  "superpowers"
-                     },
-                     {
-                         "from":  "skills\\react-best-practices",
-                         "to":  "agent-skills-skills-react-best-practices",
-                         "vendor":  "agent-skills"
-                     },
-                     {
-                         "from":  "skills\\composition-patterns",
-                         "to":  "agent-skills-skills-composition-patterns",
-                         "vendor":  "agent-skills"
-                     },
-                     {
-                         "from":  "skills\\.curated\\cloudflare-deploy",
-                         "to":  "skills-skills-.curated-cloudflare-deploy",
-                         "vendor":  "skills"
-                     },
-                     {
-                         "from":  "skills\\.curated\\imagegen",
-                         "to":  "skills-skills-.curated-imagegen",
-                         "vendor":  "skills"
-                     },
-                     {
-                         "from":  "skills\\.curated\\openai-docs",
-                         "to":  "skills-skills-.curated-openai-docs",
-                         "vendor":  "skills"
-                     },
-                     {
-                         "from":  "skills\\.curated\\playwright",
-                         "to":  "skills-skills-.curated-playwright",
-                         "vendor":  "skills"
-                     },
-                     {
-                         "from":  "skills\\.curated\\screenshot",
-                         "to":  "skills-skills-.curated-screenshot",
-                         "vendor":  "skills"
-                     },
-                     {
-                         "from":  "skills\\.curated\\security-best-practices",
-                         "to":  "skills-skills-.curated-security-best-practices",
-                         "vendor":  "skills"
-                     },
-                     {
-                         "from":  "skills\\.curated\\transcribe",
-                         "to":  "skills-skills-.curated-transcribe",
-                         "vendor":  "skills"
-                     },
-                     {
-                         "from":  "skills\\dispatching-parallel-agents",
-                         "to":  "superpowers-skills-dispatching-parallel-agents",
-                         "vendor":  "superpowers"
-                     },
-                     {
-                         "from":  "skills\\test-driven-development",
-                         "to":  "superpowers-skills-test-driven-development",
-                         "vendor":  "superpowers"
-                     },
-                     {
-                         "from":  "skills\\skill-creator",
-                         "to":  "anthropics-skills-skills-skill-creator",
-                         "vendor":  "anthropics-skills"
-                     },
-                     {
-                         "from":  "skills\\baoyu-compress-image",
-                         "to":  "baoyu-skills-skills-baoyu-compress-image",
-                         "vendor":  "baoyu-skills"
-                     },
-                     {
-                         "from":  "skills\\baoyu-cover-image",
-                         "to":  "baoyu-skills-skills-baoyu-cover-image",
-                         "vendor":  "baoyu-skills"
-                     },
-                     {
-                         "from":  "skills\\baoyu-format-markdown",
-                         "to":  "baoyu-skills-skills-baoyu-format-markdown",
-                         "vendor":  "baoyu-skills"
-                     },
-                     {
-                         "from":  "skills\\baoyu-post-to-wechat",
-                         "to":  "baoyu-skills-skills-baoyu-post-to-wechat",
-                         "vendor":  "baoyu-skills"
-                     },
-                     {
-                         "from":  "skills\\frontend-design",
-                         "to":  "anthropics-skills-skills-frontend-design",
-                         "vendor":  "anthropics-skills"
-                     },
-                     {
-                         "from":  "skills\\theme-factory",
-                         "to":  "anthropics-skills-skills-theme-factory",
-                         "vendor":  "anthropics-skills"
-                     },
-                     {
-                         "from":  "skills\\webapp-testing",
-                         "to":  "anthropics-skills-skills-webapp-testing",
-                         "vendor":  "anthropics-skills"
-                     },
-                     {
-                         "from":  "skills\\pdf",
-                         "to":  "anthropics-skills-skills-pdf",
-                         "vendor":  "anthropics-skills"
-                     },
-                     {
-                         "from":  "skills\\remotion",
-                         "to":  "skills-2-skills-remotion",
-                         "vendor":  "skills-2"
-                     }
-                 ],
-    "imports":  [
-                    {
-                        "mode":  "vendor",
-                        "sparse":  false,
-                        "skill":  "skills\\requesting-code-review",
-                        "ref":  "main",
-                        "repo":  "https://github.com/obra/superpowers.git",
-                        "name":  "superpowers"
-                    },
-                    {
-                        "mode":  "vendor",
-                        "name":  "anthropics-skills",
-                        "sparse":  false,
-                        "ref":  "main",
-                        "skill":  "skills\\pdf",
-                        "repo":  "https://github.com/anthropics/skills.git"
-                    },
-                    {
-                        "name":  "social-content",
-                        "skill":  "skills\\social-content",
-                        "sparse":  false,
-                        "repo":  "https://github.com/coreyhaines31/marketingskills.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "humanizer-zh",
-                        "skill":  ".",
-                        "sparse":  false,
-                        "repo":  "https://github.com/op7418/humanizer-zh.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "find-skills",
-                        "skill":  "skills\\find-skills",
-                        "sparse":  false,
-                        "repo":  "https://github.com/vercel-labs/skills.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "agent-browser",
-                        "skill":  "skills\\agent-browser",
-                        "sparse":  false,
-                        "repo":  "https://github.com/vercel-labs/agent-browser.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "vite",
-                        "skill":  "skills\\vite",
-                        "sparse":  false,
-                        "repo":  "https://github.com/antfu/skills.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "architecture-patterns",
-                        "skill":  "plugins\\backend-development\\skills\\architecture-patterns",
-                        "sparse":  false,
-                        "repo":  "https://github.com/wshobson/agents.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "error-handling-patterns",
-                        "skill":  "plugins\\developer-essentials\\skills\\error-handling-patterns",
-                        "sparse":  false,
-                        "repo":  "https://github.com/wshobson/agents.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "python-performance-optimization",
-                        "skill":  "plugins\\python-development\\skills\\python-performance-optimization",
-                        "sparse":  false,
-                        "repo":  "https://github.com/wshobson/agents.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "python-testing-patterns",
-                        "skill":  "plugins\\python-development\\skills\\python-testing-patterns",
-                        "sparse":  false,
-                        "repo":  "https://github.com/wshobson/agents.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "tailwind-design-system",
-                        "skill":  "plugins\\frontend-mobile-development\\skills\\tailwind-design-system",
-                        "sparse":  false,
-                        "repo":  "https://github.com/wshobson/agents.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "content-strategy",
-                        "skill":  "skills\\content-strategy",
-                        "sparse":  false,
-                        "repo":  "https://github.com/coreyhaines31/marketingskills.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "copy-editing",
-                        "skill":  "skills\\copy-editing",
-                        "sparse":  false,
-                        "repo":  "https://github.com/coreyhaines31/marketingskills.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "copywriting",
-                        "skill":  "skills\\copywriting",
-                        "sparse":  false,
-                        "repo":  "https://github.com/coreyhaines31/marketingskills.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "prompt-engineering-patterns",
-                        "skill":  "plugins\\llm-application-dev\\skills\\prompt-engineering-patterns",
-                        "sparse":  false,
-                        "repo":  "https://github.com/wshobson/agents.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "python-design-patterns",
-                        "skill":  "plugins\\python-development\\skills\\python-design-patterns",
-                        "sparse":  false,
-                        "repo":  "https://github.com/wshobson/agents.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "dotnet-backend-patterns",
-                        "skill":  "skills\\dotnet-backend-patterns",
-                        "sparse":  false,
-                        "repo":  "https://github.com/rmyndharis/antigravity-skills.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "debug-dotnet",
-                        "skill":  "plugins\\debug-and-refactor\\skills\\debug-dotnet",
-                        "sparse":  false,
-                        "repo":  "https://github.com/snakeo/claude-debug-and-refactor-skills-plugin.git",
-                        "ref":  "master",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "d3-viz",
-                        "skill":  "myskills\\downloaded-skills\\d3-viz",
-                        "sparse":  false,
-                        "repo":  "https://github.com/jarmen423/skills.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "windows-app-developer-skill",
-                        "skill":  "windows-app-developer-skill",
-                        "sparse":  false,
-                        "repo":  "https://github.com/404kidwiz/claude-supercode-skills.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "storyboard-creation",
-                        "skill":  "guides\\video\\storyboard-creation",
-                        "sparse":  false,
-                        "repo":  "https://github.com/inference-sh-6/skills.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "agent-skills",
-                        "skill":  "skills\\react-best-practices",
-                        "sparse":  false,
-                        "repo":  "https://github.com/vercel-labs/agent-skills.git",
-                        "ref":  "main",
-                        "mode":  "vendor"
-                    },
-                    {
-                        "name":  "skills-2",
-                        "skill":  "skills\\remotion",
-                        "sparse":  false,
-                        "repo":  "https://github.com/remotion-dev/skills.git",
-                        "ref":  "main",
-                        "mode":  "vendor"
-                    },
-                    {
-                        "name":  "shadcn-ui",
-                        "skill":  "skills\\shadcn-ui",
-                        "sparse":  false,
-                        "repo":  "https://github.com/google-labs-code/stitch-skills.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "claude-mem",
-                        "skill":  ".",
-                        "sparse":  false,
-                        "repo":  "https://github.com/thedotmack/claude-mem.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "data-visualization",
-                        "skill":  "data\\skills\\data-visualization",
-                        "sparse":  false,
-                        "repo":  "https://github.com/anthropics/knowledge-work-plugins.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "openpyxl",
-                        "skill":  ".claude\\skills\\data\\office\\openpyxl",
-                        "sparse":  false,
-                        "repo":  "https://github.com/vamseeachanta/workspace-hub.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "powerpoint-automation",
-                        "skill":  "powerpoint-automation",
-                        "sparse":  false,
-                        "repo":  "https://github.com/aktsmm/agent-skills.git",
-                        "ref":  "master",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "drawio-diagram-forge",
-                        "skill":  "drawio-diagram-forge",
-                        "sparse":  false,
-                        "repo":  "https://github.com/aktsmm/agent-skills.git",
-                        "ref":  "master",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "modern-python",
-                        "skill":  "plugins\\modern-python\\skills\\modern-python",
-                        "sparse":  false,
-                        "repo":  "https://github.com/trailofbits/skills.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "manimce-best-practices",
-                        "skill":  "skills\\manimce-best-practices",
-                        "sparse":  false,
-                        "repo":  "https://github.com/adithya-s-k/manim_skill.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "manim-composer",
-                        "skill":  "skills\\manim-composer",
-                        "sparse":  false,
-                        "repo":  "https://github.com/adithya-s-k/manim_skill.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "python-pptx",
-                        "skill":  ".claude\\skills\\data\\office\\python-pptx",
-                        "sparse":  false,
-                        "repo":  "https://github.com/vamseeachanta/workspace-hub.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "python-docx",
-                        "skill":  ".claude\\skills\\data\\office\\python-docx",
-                        "sparse":  false,
-                        "repo":  "https://github.com/vamseeachanta/workspace-hub.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    },
-                    {
-                        "name":  "ui-animation",
-                        "skill":  "skills\\ui-animation",
-                        "sparse":  false,
-                        "repo":  "https://github.com/mblode/agent-skills.git",
-                        "ref":  "main",
-                        "mode":  "manual"
-                    }
-                ],
-    "targets":  [
-                    {
-                        "path":  "~/.claude/skills"
-                    },
-                    {
-                        "path":  "~/.codex/skills"
-                    },
-                    {
-                        "path":  "~/.gemini/skills"
-                    },
-                    {
-                        "path":  "~/.gemini/antigravity/skills/"
-                    },
-                    {
-                        "path":  "~/.trae/skills/"
-                    }
-                ],
-    "update_force":  true,
-    "mcp_servers":  [
-                        {
-                            "name":  "fetch",
-                            "transport":  "stdio",
-                            "command":  "python",
-                            "args":  [
-                                         "-m",
-                                         "mcp_server_fetch"
-                                     ]
-                        }
-                    ],
-    "mcp_targets":  [
-
-                    ]
+  "sync_mode": "link",
+  "vendors": [
+    {
+      "name": "anthropics-skills",
+      "repo": "https://github.com/anthropics/skills.git",
+      "ref": "main"
+    },
+    {
+      "name": "superpowers",
+      "repo": "https://github.com/obra/superpowers.git",
+      "ref": "main"
+    },
+    {
+      "ref": "main",
+      "name": "skills",
+      "repo": "https://github.com/openai/skills.git"
+    },
+    {
+      "ref": "main",
+      "name": "agent-skills",
+      "repo": "https://github.com/vercel-labs/agent-skills.git"
+    },
+    {
+      "ref": "main",
+      "name": "skills-2",
+      "repo": "https://github.com/remotion-dev/skills.git"
+    },
+    {
+      "ref": "main",
+      "name": "baoyu-skills",
+      "repo": "https://github.com/jimliu/baoyu-skills.git"
+    }
+  ],
+  "mappings": [
+    {
+      "to": "anthropics-skills-docx",
+      "from": "skills\\docx",
+      "vendor": "anthropics-skills"
+    },
+    {
+      "to": "anthropics-skills-pptx",
+      "from": "skills\\pptx",
+      "vendor": "anthropics-skills"
+    },
+    {
+      "to": "anthropics-skills-xlsx",
+      "from": "skills\\xlsx",
+      "vendor": "anthropics-skills"
+    },
+    {
+      "from": "skills\\doc-coauthoring",
+      "to": "anthropics-skills-skills-doc-coauthoring",
+      "vendor": "anthropics-skills"
+    },
+    {
+      "from": "skills\\systematic-debugging",
+      "to": "superpowers-skills-systematic-debugging",
+      "vendor": "superpowers"
+    },
+    {
+      "from": "skills\\canvas-design",
+      "to": "anthropics-skills-skills-canvas-design",
+      "vendor": "anthropics-skills"
+    },
+    {
+      "from": "skills\\web-artifacts-builder",
+      "to": "anthropics-skills-skills-web-artifacts-builder",
+      "vendor": "anthropics-skills"
+    },
+    {
+      "from": "skills\\executing-plans",
+      "to": "superpowers-skills-executing-plans",
+      "vendor": "superpowers"
+    },
+    {
+      "from": "skills\\verification-before-completion",
+      "to": "superpowers-skills-verification-before-completion",
+      "vendor": "superpowers"
+    },
+    {
+      "from": "skills\\subagent-driven-development",
+      "to": "superpowers-skills-subagent-driven-development",
+      "vendor": "superpowers"
+    },
+    {
+      "from": "skills\\react-best-practices",
+      "to": "agent-skills-skills-react-best-practices",
+      "vendor": "agent-skills"
+    },
+    {
+      "from": "skills\\composition-patterns",
+      "to": "agent-skills-skills-composition-patterns",
+      "vendor": "agent-skills"
+    },
+    {
+      "from": "skills\\.curated\\cloudflare-deploy",
+      "to": "skills-skills-.curated-cloudflare-deploy",
+      "vendor": "skills"
+    },
+    {
+      "from": "skills\\.curated\\imagegen",
+      "to": "skills-skills-.curated-imagegen",
+      "vendor": "skills"
+    },
+    {
+      "from": "skills\\.curated\\openai-docs",
+      "to": "skills-skills-.curated-openai-docs",
+      "vendor": "skills"
+    },
+    {
+      "from": "skills\\.curated\\playwright",
+      "to": "skills-skills-.curated-playwright",
+      "vendor": "skills"
+    },
+    {
+      "from": "skills\\.curated\\screenshot",
+      "to": "skills-skills-.curated-screenshot",
+      "vendor": "skills"
+    },
+    {
+      "from": "skills\\.curated\\security-best-practices",
+      "to": "skills-skills-.curated-security-best-practices",
+      "vendor": "skills"
+    },
+    {
+      "from": "skills\\.curated\\transcribe",
+      "to": "skills-skills-.curated-transcribe",
+      "vendor": "skills"
+    },
+    {
+      "from": "skills\\dispatching-parallel-agents",
+      "to": "superpowers-skills-dispatching-parallel-agents",
+      "vendor": "superpowers"
+    },
+    {
+      "from": "skills\\test-driven-development",
+      "to": "superpowers-skills-test-driven-development",
+      "vendor": "superpowers"
+    },
+    {
+      "from": "skills\\skill-creator",
+      "to": "anthropics-skills-skills-skill-creator",
+      "vendor": "anthropics-skills"
+    },
+    {
+      "from": "skills\\baoyu-compress-image",
+      "to": "baoyu-skills-skills-baoyu-compress-image",
+      "vendor": "baoyu-skills"
+    },
+    {
+      "from": "skills\\baoyu-cover-image",
+      "to": "baoyu-skills-skills-baoyu-cover-image",
+      "vendor": "baoyu-skills"
+    },
+    {
+      "from": "skills\\baoyu-format-markdown",
+      "to": "baoyu-skills-skills-baoyu-format-markdown",
+      "vendor": "baoyu-skills"
+    },
+    {
+      "from": "skills\\baoyu-post-to-wechat",
+      "to": "baoyu-skills-skills-baoyu-post-to-wechat",
+      "vendor": "baoyu-skills"
+    },
+    {
+      "from": "skills\\frontend-design",
+      "to": "anthropics-skills-skills-frontend-design",
+      "vendor": "anthropics-skills"
+    },
+    {
+      "from": "skills\\theme-factory",
+      "to": "anthropics-skills-skills-theme-factory",
+      "vendor": "anthropics-skills"
+    },
+    {
+      "from": "skills\\webapp-testing",
+      "to": "anthropics-skills-skills-webapp-testing",
+      "vendor": "anthropics-skills"
+    },
+    {
+      "from": "skills\\pdf",
+      "to": "anthropics-skills-skills-pdf",
+      "vendor": "anthropics-skills"
+    },
+    {
+      "from": "skills\\remotion",
+      "to": "skills-2-skills-remotion",
+      "vendor": "skills-2"
+    }
+  ],
+  "imports": [
+    {
+      "mode": "vendor",
+      "sparse": false,
+      "skill": "skills\\requesting-code-review",
+      "ref": "main",
+      "repo": "https://github.com/obra/superpowers.git",
+      "name": "superpowers"
+    },
+    {
+      "mode": "vendor",
+      "name": "anthropics-skills",
+      "sparse": false,
+      "ref": "main",
+      "skill": "skills\\pdf",
+      "repo": "https://github.com/anthropics/skills.git"
+    },
+    {
+      "name": "social-content",
+      "skill": "skills\\social-content",
+      "sparse": false,
+      "repo": "https://github.com/coreyhaines31/marketingskills.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "humanizer-zh",
+      "skill": ".",
+      "sparse": false,
+      "repo": "https://github.com/op7418/humanizer-zh.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "find-skills",
+      "skill": "skills\\find-skills",
+      "sparse": false,
+      "repo": "https://github.com/vercel-labs/skills.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "agent-browser",
+      "skill": "skills\\agent-browser",
+      "sparse": false,
+      "repo": "https://github.com/vercel-labs/agent-browser.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "vite",
+      "skill": "skills\\vite",
+      "sparse": false,
+      "repo": "https://github.com/antfu/skills.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "architecture-patterns",
+      "skill": "plugins\\backend-development\\skills\\architecture-patterns",
+      "sparse": false,
+      "repo": "https://github.com/wshobson/agents.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "error-handling-patterns",
+      "skill": "plugins\\developer-essentials\\skills\\error-handling-patterns",
+      "sparse": false,
+      "repo": "https://github.com/wshobson/agents.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "python-performance-optimization",
+      "skill": "plugins\\python-development\\skills\\python-performance-optimization",
+      "sparse": false,
+      "repo": "https://github.com/wshobson/agents.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "python-testing-patterns",
+      "skill": "plugins\\python-development\\skills\\python-testing-patterns",
+      "sparse": false,
+      "repo": "https://github.com/wshobson/agents.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "tailwind-design-system",
+      "skill": "plugins\\frontend-mobile-development\\skills\\tailwind-design-system",
+      "sparse": false,
+      "repo": "https://github.com/wshobson/agents.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "content-strategy",
+      "skill": "skills\\content-strategy",
+      "sparse": false,
+      "repo": "https://github.com/coreyhaines31/marketingskills.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "copy-editing",
+      "skill": "skills\\copy-editing",
+      "sparse": false,
+      "repo": "https://github.com/coreyhaines31/marketingskills.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "copywriting",
+      "skill": "skills\\copywriting",
+      "sparse": false,
+      "repo": "https://github.com/coreyhaines31/marketingskills.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "prompt-engineering-patterns",
+      "skill": "plugins\\llm-application-dev\\skills\\prompt-engineering-patterns",
+      "sparse": false,
+      "repo": "https://github.com/wshobson/agents.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "python-design-patterns",
+      "skill": "plugins\\python-development\\skills\\python-design-patterns",
+      "sparse": false,
+      "repo": "https://github.com/wshobson/agents.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "dotnet-backend-patterns",
+      "skill": "skills\\dotnet-backend-patterns",
+      "sparse": false,
+      "repo": "https://github.com/rmyndharis/antigravity-skills.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "debug-dotnet",
+      "skill": "plugins\\debug-and-refactor\\skills\\debug-dotnet",
+      "sparse": false,
+      "repo": "https://github.com/snakeo/claude-debug-and-refactor-skills-plugin.git",
+      "ref": "master",
+      "mode": "manual"
+    },
+    {
+      "name": "d3-viz",
+      "skill": "myskills\\downloaded-skills\\d3-viz",
+      "sparse": false,
+      "repo": "https://github.com/jarmen423/skills.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "windows-app-developer-skill",
+      "skill": "windows-app-developer-skill",
+      "sparse": false,
+      "repo": "https://github.com/404kidwiz/claude-supercode-skills.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "storyboard-creation",
+      "skill": "guides\\video\\storyboard-creation",
+      "sparse": false,
+      "repo": "https://github.com/inference-sh-6/skills.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "agent-skills",
+      "skill": "skills\\react-best-practices",
+      "sparse": false,
+      "repo": "https://github.com/vercel-labs/agent-skills.git",
+      "ref": "main",
+      "mode": "vendor"
+    },
+    {
+      "name": "skills-2",
+      "skill": "skills\\remotion",
+      "sparse": false,
+      "repo": "https://github.com/remotion-dev/skills.git",
+      "ref": "main",
+      "mode": "vendor"
+    },
+    {
+      "name": "shadcn-ui",
+      "skill": "skills\\shadcn-ui",
+      "sparse": false,
+      "repo": "https://github.com/google-labs-code/stitch-skills.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "claude-mem",
+      "skill": ".",
+      "sparse": false,
+      "repo": "https://github.com/thedotmack/claude-mem.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "data-visualization",
+      "skill": "data\\skills\\data-visualization",
+      "sparse": false,
+      "repo": "https://github.com/anthropics/knowledge-work-plugins.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "openpyxl",
+      "skill": ".claude\\skills\\data\\office\\openpyxl",
+      "sparse": false,
+      "repo": "https://github.com/vamseeachanta/workspace-hub.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "powerpoint-automation",
+      "skill": "powerpoint-automation",
+      "sparse": false,
+      "repo": "https://github.com/aktsmm/agent-skills.git",
+      "ref": "master",
+      "mode": "manual"
+    },
+    {
+      "name": "drawio-diagram-forge",
+      "skill": "drawio-diagram-forge",
+      "sparse": false,
+      "repo": "https://github.com/aktsmm/agent-skills.git",
+      "ref": "master",
+      "mode": "manual"
+    },
+    {
+      "name": "modern-python",
+      "skill": "plugins\\modern-python\\skills\\modern-python",
+      "sparse": false,
+      "repo": "https://github.com/trailofbits/skills.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "manimce-best-practices",
+      "skill": "skills\\manimce-best-practices",
+      "sparse": false,
+      "repo": "https://github.com/adithya-s-k/manim_skill.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "manim-composer",
+      "skill": "skills\\manim-composer",
+      "sparse": false,
+      "repo": "https://github.com/adithya-s-k/manim_skill.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "python-pptx",
+      "skill": ".claude\\skills\\data\\office\\python-pptx",
+      "sparse": false,
+      "repo": "https://github.com/vamseeachanta/workspace-hub.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "python-docx",
+      "skill": ".claude\\skills\\data\\office\\python-docx",
+      "sparse": false,
+      "repo": "https://github.com/vamseeachanta/workspace-hub.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "ui-animation",
+      "skill": "skills\\ui-animation",
+      "sparse": false,
+      "repo": "https://github.com/mblode/agent-skills.git",
+      "ref": "main",
+      "mode": "manual"
+    }
+  ],
+  "targets": [
+    {
+      "path": "~/.claude/skills"
+    },
+    {
+      "path": "~/.codex/skills"
+    },
+    {
+      "path": "~/.gemini/skills"
+    },
+    {
+      "path": "~/.gemini/antigravity/skills/"
+    },
+    {
+      "path": "~/.trae/skills/"
+    }
+  ],
+  "update_force": true,
+  "mcp_servers": [
+    {
+      "name": "fetch",
+      "transport": "stdio",
+      "command": "python",
+      "args": [
+        "-m",
+        "mcp_server_fetch"
+      ]
+    },
+    {
+      "name": "context7",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp"
+      ]
+    }
+  ],
+  "mcp_targets": []
 }

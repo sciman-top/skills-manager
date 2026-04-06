@@ -661,6 +661,14 @@ Describe "Core Functions" {
             $parsed.args[1] | Should Be "@modelcontextprotocol/server-fetch"
         }
 
+        It "Supports stdio args that start with '-' after --cmd without explicit -- separator" {
+            $parsed = Parse-McpInstallArgs @("context7", "--cmd", "npx", "-y", "@upstash/context7-mcp")
+            $parsed.command | Should Be "npx"
+            $parsed.args.Count | Should Be 2
+            $parsed.args[0] | Should Be "-y"
+            $parsed.args[1] | Should Be "@upstash/context7-mcp"
+        }
+
         It "Supports command tail without explicit -- separator" {
             $parsed = Parse-McpInstallArgs @("git", "uvx", "mcp-server-git", "--repository", "E:\\CODE\\skills-manager")
             $parsed.command | Should Be "uvx"

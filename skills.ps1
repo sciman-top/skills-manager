@@ -4975,9 +4975,13 @@ function Parse-McpInstallArgs([string[]]$tokens) {
             continue
         }
 
-        # Backward compatible: once name is present, unknown options in stdio mode
-        # are treated as process arguments, so users can omit "--".
-        if (-not [string]::IsNullOrWhiteSpace($result.name) -and $result.transport -eq "stdio" -and [string]::IsNullOrWhiteSpace($result.command) -and [string]::IsNullOrWhiteSpace($result.url)) {
+        # Backward compatible: in stdio mode, unknown options are treated as process
+        # arguments so users can omit "--" (PowerShell may swallow the separator).
+        if (-not [string]::IsNullOrWhiteSpace($result.name) -and $result.transport -eq "stdio" -and [string]::IsNullOrWhiteSpace($result.url)) {
+            if (-not [string]::IsNullOrWhiteSpace($result.command)) {
+                $result.args += $t
+                continue
+            }
             $collectProcessArgs = $true
             $result.args += $t
             continue
