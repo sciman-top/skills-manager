@@ -254,6 +254,44 @@ function Expand-RelativeSkillPlaceholders([string]$rootPath) {
     }
     return $count
 }
+function Test-YamlFrontmatterSkillFile([string]$skillFile) {
+    if ([string]::IsNullOrWhiteSpace($skillFile)) { return $false }
+    if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { return $false }
+    $raw = Get-ContentUtf8 $skillFile
+    if ([string]::IsNullOrWhiteSpace($raw)) { return $false }
+    $normalized = $raw.TrimStart([char]0xFEFF).TrimStart()
+    return ($normalized -match "^---(\r?\n|$)")
+}
+function Remove-InvalidSkillMarkdownFiles([string]$rootPath) {
+    $result = [ordered]@{
+        removed = 0
+        failed = 0
+        removed_paths = @()
+        failed_paths = @()
+    }
+    if ([string]::IsNullOrWhiteSpace($rootPath)) { return [pscustomobject]$result }
+    if (-not (Test-Path -LiteralPath $rootPath)) { return [pscustomobject]$result }
+
+    foreach ($skillFile in (Get-ChildItem -LiteralPath $rootPath -Recurse -Filter "SKILL.md" -File -ErrorAction SilentlyContinue)) {
+        if (Test-YamlFrontmatterSkillFile $skillFile.FullName) { continue }
+        try {
+            $ok = Invoke-RemoveItemWithRetry $skillFile.FullName
+            if ($ok) {
+                $result.removed++
+                $result.removed_paths += $skillFile.FullName
+            }
+            else {
+                $result.failed++
+                $result.failed_paths += $skillFile.FullName
+            }
+        }
+        catch {
+            $result.failed++
+            $result.failed_paths += $skillFile.FullName
+        }
+    }
+    return [pscustomobject]$result
+}
 function Get-FileContentHash([string]$path) {
     if ([string]::IsNullOrWhiteSpace($path)) { return $null }
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }

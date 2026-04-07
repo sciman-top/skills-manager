@@ -1362,6 +1362,16 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
             }
         }
 
+        $invalidSkillCleanup = Remove-InvalidSkillMarkdownFiles $AgentDir
+        if ($invalidSkillCleanup.removed -gt 0) {
+            Log ("已清理无效 SKILL.md（缺少 YAML frontmatter）：{0} 项" -f $invalidSkillCleanup.removed) "WARN"
+        }
+        if ($invalidSkillCleanup.failed -gt 0) {
+            foreach ($path in $invalidSkillCleanup.failed_paths) {
+                $failures.Add(("build-invalid-skill-md-cleanup:{0}" -f $path)) | Out-Null
+            }
+        }
+
         $nameToPaths = Get-SkillNameConflictBuckets $AgentDir
         foreach ($name in $nameToPaths.Keys | Sort-Object) {
             $paths = @($nameToPaths[$name])

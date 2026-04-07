@@ -272,6 +272,44 @@ function Expand-RelativeSkillPlaceholders([string]$rootPath) {
     }
     return $count
 }
+function Test-YamlFrontmatterSkillFile([string]$skillFile) {
+    if ([string]::IsNullOrWhiteSpace($skillFile)) { return $false }
+    if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { return $false }
+    $raw = Get-ContentUtf8 $skillFile
+    if ([string]::IsNullOrWhiteSpace($raw)) { return $false }
+    $normalized = $raw.TrimStart([char]0xFEFF).TrimStart()
+    return ($normalized -match "^---(\r?\n|$)")
+}
+function Remove-InvalidSkillMarkdownFiles([string]$rootPath) {
+    $result = [ordered]@{
+        removed = 0
+        failed = 0
+        removed_paths = @()
+        failed_paths = @()
+    }
+    if ([string]::IsNullOrWhiteSpace($rootPath)) { return [pscustomobject]$result }
+    if (-not (Test-Path -LiteralPath $rootPath)) { return [pscustomobject]$result }
+
+    foreach ($skillFile in (Get-ChildItem -LiteralPath $rootPath -Recurse -Filter "SKILL.md" -File -ErrorAction SilentlyContinue)) {
+        if (Test-YamlFrontmatterSkillFile $skillFile.FullName) { continue }
+        try {
+            $ok = Invoke-RemoveItemWithRetry $skillFile.FullName
+            if ($ok) {
+                $result.removed++
+                $result.removed_paths += $skillFile.FullName
+            }
+            else {
+                $result.failed++
+                $result.failed_paths += $skillFile.FullName
+            }
+        }
+        catch {
+            $result.failed++
+            $result.failed_paths += $skillFile.FullName
+        }
+    }
+    return [pscustomobject]$result
+}
 function Get-FileContentHash([string]$path) {
     if ([string]::IsNullOrWhiteSpace($path)) { return $null }
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
@@ -4275,6 +4313,16 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
             catch {
                 Write-Host ("❌ 应用覆盖层失败 [{0}]: {1}" -f $d.Name, $_.Exception.Message) -ForegroundColor Red
                 $failures.Add(("override:{0} => {1}" -f $d.Name, $_.Exception.Message)) | Out-Null
+            }
+        }
+
+        $invalidSkillCleanup = Remove-InvalidSkillMarkdownFiles $AgentDir
+        if ($invalidSkillCleanup.removed -gt 0) {
+            Log ("已清理无效 SKILL.md（缺少 YAML frontmatter）：{0} 项" -f $invalidSkillCleanup.removed) "WARN"
+        }
+        if ($invalidSkillCleanup.failed -gt 0) {
+            foreach ($path in $invalidSkillCleanup.failed_paths) {
+                $failures.Add(("build-invalid-skill-md-cleanup:{0}" -f $path)) | Out-Null
             }
         }
 
