@@ -886,6 +886,9 @@ function Parse-AddArgs([string[]]$tokens) {
             if ($key -match "^--ref=") {
                 $val = $t.Substring(6)
                 if ([string]::IsNullOrWhiteSpace($val)) { throw "参数值不能为空：--ref" }
+                if (Test-LooksLikeRepoUrl $val) {
+                    throw ("--ref 不能是仓库地址：{0}。如果你想安装该仓库，请把它放在 repo 位置；如果是分支名，请传真实 branch/tag。" -f $val)
+                }
                 $result.ref = $val
                 continue
             }
@@ -909,7 +912,12 @@ function Parse-AddArgs([string[]]$tokens) {
                 if ([string]::IsNullOrWhiteSpace($val)) { throw ("参数值不能为空：{0}" -f $key) }
                 switch ($key) {
                     "--skill" { $result.skills += $val }
-                    "--ref" { $result.ref = $val }
+                    "--ref" {
+                        if (Test-LooksLikeRepoUrl $val) {
+                            throw ("--ref 不能是仓库地址：{0}。如果你想安装该仓库，请把它放在 repo 位置；如果是分支名，请传真实 branch/tag。" -f $val)
+                        }
+                        $result.ref = $val
+                    }
                     "--mode" { $result.mode = $val }
                     "--name" { $result.name = $val }
                 }

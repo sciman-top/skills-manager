@@ -378,7 +378,9 @@ function Get-RepoIdentity([string]$repo) {
     if ($r -match "^git@github\.com:(.+)$") {
         $r = "https://github.com/$($Matches[1])"
     }
-    if ($r -match "^https?://github\.com/(.+)$") {
+    $n = Normalize-RepoUrl $r
+    if ([string]::IsNullOrWhiteSpace($n)) { return $r.ToLowerInvariant() }
+    if ($n -match "^https?://github\.com/(.+)$") {
         $path = $Matches[1]
         $path = $path.TrimEnd("/")
         if ($path.EndsWith(".git")) { $path = $path.Substring(0, $path.Length - 4) }
@@ -388,8 +390,6 @@ function Get-RepoIdentity([string]$repo) {
         }
         return ("github.com/{0}" -f $path).ToLowerInvariant()
     }
-    $n = Normalize-RepoUrl $r
-    if ([string]::IsNullOrWhiteSpace($n)) { return $r.ToLowerInvariant() }
     if ($n.EndsWith(".git")) { $n = $n.Substring(0, $n.Length - 4) }
     return $n.TrimEnd("/").ToLowerInvariant()
 }
@@ -398,6 +398,33 @@ function Is-SameRepoIdentity([string]$a, [string]$b) {
     $ib = Get-RepoIdentity $b
     if ([string]::IsNullOrWhiteSpace($ia) -or [string]::IsNullOrWhiteSpace($ib)) { return $false }
     return ($ia -eq $ib)
+}
+function Test-LooksLikeRepoUrl([string]$value) {
+    if ([string]::IsNullOrWhiteSpace($value)) { return $false }
+    $v = $value.Trim().Trim("'`"")
+    if ($v -match "^(git@github\.com:|https?://github\.com/|github\.com/)") { return $true }
+    if ($v -match "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\.git$") { return $true }
+    return $false
+}
+function Test-InstalledVendorPath([string]$path, [string]$repo) {
+    if ([string]::IsNullOrWhiteSpace($path) -or [string]::IsNullOrWhiteSpace($repo)) { return $false }
+    if (-not (Test-Path -LiteralPath $path -PathType Container)) { return $false }
+    if (-not (Test-Path -LiteralPath (Join-Path $path ".git") -PathType Container)) { return $false }
+
+    $origin = $null
+    Push-Location $path
+    try {
+        $origin = Invoke-GitCapture @("remote", "get-url", "origin")
+    }
+    catch {
+        return $false
+    }
+    finally {
+        Pop-Location
+    }
+
+    if ([string]::IsNullOrWhiteSpace($origin)) { return $false }
+    return (Is-SameRepoIdentity $origin $repo)
 }
 function Has-GitUpstream {
     $up = Invoke-GitCapture @("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")

@@ -469,9 +469,20 @@ function 初始化 {
         if ([string]::IsNullOrWhiteSpace($v.ref)) { $v.ref = "main" }
 
         $path = VendorPath $v.name
-        if (Test-Path $path) {
-            Write-Host "已存在：vendor/$($v.name)（跳过 clone）"
+        if (Test-InstalledVendorPath $path $v.repo) {
+            Write-Host "已存在：vendor/$($v.name)（来源匹配，跳过 clone）"
             continue
+        }
+
+        if (Test-Path $path) {
+            $origin = $null
+            try {
+                Push-Location $path
+                try { $origin = Invoke-GitCapture @("remote", "get-url", "origin") } finally { Pop-Location }
+            }
+            catch {}
+            $originText = if ([string]::IsNullOrWhiteSpace($origin)) { "unknown" } else { $origin }
+            throw ("vendor/{0} 已存在，但来源不匹配或不是 git 仓库：current={1}, expected={2}" -f $v.name, $originText, $v.repo)
         }
 
         Invoke-Git @("clone", $v.repo, $path)
@@ -502,6 +513,43 @@ function 新增技能库 {
     $name = Read-Host "可选：输入自定义名称（留空自动从 URL 推断）"
     if ([string]::IsNullOrWhiteSpace($name)) { $name = Guess-VendorName $repo }
     $name = Normalize-NameWithNotice $name "vendor 名称"
+
+    $cfg = LoadCfg
+    $sameNameVendor = $cfg.vendors | Where-Object { $_.name -eq $name } | Select-Object -First 1
+    if ($sameNameVendor) {
+        if (Is-SameRepoIdentity ([string]$sameNameVendor.repo) $repo) {
+            $installedPath = VendorPath $name
+            if (Test-InstalledVendorPath $installedPath $repo) {
+                Write-Host ("已存在：vendor/{0}（来源匹配，跳过新增）" -f $name)
+                return
+            }
+
+            Write-Host ("已存在：vendor/{0}（来源匹配，检测到本地目录缺失或异常）" -f $name) -ForegroundColor Yellow
+            Write-Host "将自动执行【初始化】补齐本地仓库..." -ForegroundColor Yellow
+            初始化
+            return
+        }
+        Need $false ("vendor 名称已存在：{0}（当前来源：{1}，期望来源：{2}）" -f $name, [string]$sameNameVendor.repo, $repo)
+    }
+
+    $sameRepoVendor = Match-VendorByRepo $cfg $repo
+    if ($sameRepoVendor) {
+        $installedPath = VendorPath $sameRepoVendor.name
+        if (Test-InstalledVendorPath $installedPath $repo) {
+            if ($sameRepoVendor.name -ne $name) {
+                Write-Host ("该仓库已接入：vendor/{0}（忽略新名称：{1}，跳过新增）" -f $sameRepoVendor.name, $name)
+            }
+            else {
+                Write-Host ("已存在：vendor/{0}（来源匹配，跳过新增）" -f $sameRepoVendor.name)
+            }
+            return
+        }
+
+        Write-Host ("该仓库已接入：vendor/{0}（检测到本地目录缺失或异常）" -f $sameRepoVendor.name) -ForegroundColor Yellow
+        Write-Host "将自动执行【初始化】补齐本地仓库..." -ForegroundColor Yellow
+        初始化
+        return
+    }
 
     $cfgRaw = ""
     if (Test-Path $CfgPath) { $cfgRaw = Get-Content $CfgPath -Raw }

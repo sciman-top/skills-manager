@@ -205,6 +205,19 @@ Describe "Core Functions" {
             $parsed.ref | Should Be "master"
         }
 
+        It "Rejects repo URLs passed as --ref values" {
+            $thrown = $false
+            try {
+                Parse-AddArgs @("owner/repo", "--skill", "foo", "--ref", "https://github.com/google-labs-code/stitch-skills.git") | Out-Null
+            }
+            catch {
+                $thrown = $true
+                $_.Exception.Message | Should Match "--ref"
+                $_.Exception.Message | Should Match "仓库地址"
+            }
+            $thrown | Should Be $true
+        }
+
         It "Rejects empty --skill value" {
             $thrown = $false
             try {
@@ -615,6 +628,64 @@ Describe "Core Functions" {
 
         It "Builds stable identity key for ssh URL" {
             (Get-RepoIdentityKey "ssh://git@github.com/openai/skills.git") | Should Be "github.com/openai/skills"
+        }
+    }
+
+    Context "Installed state detection" {
+        It "Treats a vendor directory as installed only when the remote origin matches" {
+            $vendorPath = Join-Path $TestDrive "vendor-same"
+            New-Item -ItemType Directory -Path $vendorPath -Force | Out-Null
+            git -C $vendorPath init | Out-Null
+            git -C $vendorPath remote add origin https://github.com/openai/skills.git
+
+            (Test-InstalledVendorPath $vendorPath "openai/skills") | Should Be $true
+        }
+
+        It "Does not treat a vendor directory as installed when the remote origin differs" {
+            $vendorPath = Join-Path $TestDrive "vendor-diff"
+            New-Item -ItemType Directory -Path $vendorPath -Force | Out-Null
+            git -C $vendorPath init | Out-Null
+            git -C $vendorPath remote add origin https://github.com/vercel-labs/skills.git
+
+            (Test-InstalledVendorPath $vendorPath "openai/skills") | Should Be $false
+        }
+
+        It "Recognizes equivalent MCP server configs even when names differ" {
+            $a = [pscustomobject]@{
+                name      = "context7"
+                transport = "stdio"
+                command   = "npx"
+                args      = @("-y", "@upstash/context7-mcp")
+                env       = @{ }
+            }
+            $b = [pscustomobject]@{
+                name      = "context7-alt"
+                transport = "stdio"
+                command   = "npx"
+                args      = @("-y", "@upstash/context7-mcp")
+                env       = @{ }
+            }
+
+            (Test-McpServerEquivalent $a $b) | Should Be $true
+            (Find-EquivalentMcpServer @($a) $b).name | Should Be "context7"
+        }
+
+        It "Does not treat different MCP endpoints as equivalent" {
+            $a = [pscustomobject]@{
+                name      = "context7"
+                transport = "stdio"
+                command   = "npx"
+                args      = @("-y", "@upstash/context7-mcp")
+            }
+            $b = [pscustomobject]@{
+                name      = "fetch"
+                transport = "stdio"
+                command   = "npx"
+                args      = @("-y", "@modelcontextprotocol/server-fetch")
+            }
+
+            (Test-McpServerEquivalent $a $b) | Should Be $false
+            (Find-EquivalentMcpServer @($a) $b) | Should Be $null
         }
     }
 

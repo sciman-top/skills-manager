@@ -678,6 +678,82 @@ function Resolve-McpTargetRootsFromCfg($cfg) {
     return ,@($roots | Sort-Object)
 }
 
+function ConvertTo-OrderedSignatureValue($value) {
+    if ($null -eq $value) { return $null }
+    if ($value -is [string]) { return [string]$value }
+    if ($value -is [System.Collections.IDictionary]) {
+        $ordered = [ordered]@{}
+        foreach ($k in @($value.Keys | Sort-Object)) {
+            $ordered[[string]$k] = ConvertTo-OrderedSignatureValue $value[$k]
+        }
+        return [pscustomobject]$ordered
+    }
+    if ($value -is [pscustomobject]) {
+        $ordered = [ordered]@{}
+        foreach ($p in @($value.PSObject.Properties | Sort-Object Name)) {
+            $ordered[[string]$p.Name] = ConvertTo-OrderedSignatureValue $p.Value
+        }
+        return [pscustomobject]$ordered
+    }
+    if ($value -is [System.Collections.IEnumerable] -and -not ($value -is [byte[]])) {
+        $items = New-Object System.Collections.Generic.List[object]
+        foreach ($item in @($value)) {
+            $items.Add((ConvertTo-OrderedSignatureValue $item)) | Out-Null
+        }
+        return @($items)
+    }
+    return $value
+}
+
+function Get-McpServerSignature($server) {
+    if ($null -eq $server) { return $null }
+    $transport = if ($server.PSObject.Properties.Match("transport").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.transport)) {
+        [string]$server.transport
+    }
+    else {
+        "stdio"
+    }
+    $transport = $transport.Trim().ToLowerInvariant()
+    $sig = [ordered]@{ transport = $transport }
+    if ($transport -eq "stdio") {
+        if ($server.PSObject.Properties.Match("command").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.command)) {
+            $sig.command = [string]$server.command
+        }
+        if ($server.PSObject.Properties.Match("args").Count -gt 0) {
+            $sig.args = @($server.args)
+        }
+        if ($server.PSObject.Properties.Match("env").Count -gt 0 -and $null -ne $server.env) {
+            $sig.env = ConvertTo-OrderedSignatureValue $server.env
+        }
+    }
+    else {
+        if ($server.PSObject.Properties.Match("url").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.url)) {
+            $sig.url = [string]$server.url
+        }
+        if ($server.PSObject.Properties.Match("headers").Count -gt 0 -and $null -ne $server.headers) {
+            $sig.headers = ConvertTo-OrderedSignatureValue $server.headers
+        }
+        if ($server.PSObject.Properties.Match("bearer_token_env_var").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.bearer_token_env_var)) {
+            $sig.bearer_token_env_var = [string]$server.bearer_token_env_var
+        }
+    }
+    return ($sig | ConvertTo-Json -Depth 30 -Compress)
+}
+
+function Test-McpServerEquivalent($a, $b) {
+    $sa = Get-McpServerSignature $a
+    $sb = Get-McpServerSignature $b
+    if ([string]::IsNullOrWhiteSpace($sa) -or [string]::IsNullOrWhiteSpace($sb)) { return $false }
+    return ($sa -eq $sb)
+}
+
+function Find-EquivalentMcpServer($servers, $candidate) {
+    foreach ($server in @($servers)) {
+        if (Test-McpServerEquivalent $server $candidate) { return $server }
+    }
+    return $null
+}
+
 function 安装MCP([string[]]$tokens = @()) {
     $cfg = LoadCfg
     $cfgRaw = Get-Content $CfgPath -Raw
@@ -732,8 +808,14 @@ function 安装MCP([string[]]$tokens = @()) {
 
     $server = New-McpServerObject $parsed
     $existing = @($cfg.mcp_servers)
+    $existingSameName = $existing | Where-Object { [string]$_.name -eq [string]$server.name } | Select-Object -First 1
     $updated = @()
     $replaced = $false
+    $equivalent = Find-EquivalentMcpServer $existing $server
+    if ($existingSameName -and (Test-McpServerEquivalent $existingSameName $server)) {
+        Write-Host ("MCP 服务已存在且配置一致：{0}" -f $server.name)
+        return
+    }
     foreach ($s in $existing) {
         if ([string]$s.name -eq [string]$server.name) {
             $updated += $server
@@ -742,6 +824,10 @@ function 安装MCP([string[]]$tokens = @()) {
         else {
             $updated += $s
         }
+    }
+    if ($equivalent -and -not $replaced) {
+        Write-Host ("已存在等效 MCP 服务：{0}（名称：{1}），已跳过" -f $server.name, [string]$equivalent.name)
+        return
     }
     if (-not $replaced) { $updated += $server }
     $cfg.mcp_servers = $updated

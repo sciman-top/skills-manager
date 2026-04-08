@@ -904,6 +904,9 @@ function Parse-AddArgs([string[]]$tokens) {
             if ($key -match "^--ref=") {
                 $val = $t.Substring(6)
                 if ([string]::IsNullOrWhiteSpace($val)) { throw "参数值不能为空：--ref" }
+                if (Test-LooksLikeRepoUrl $val) {
+                    throw ("--ref 不能是仓库地址：{0}。如果你想安装该仓库，请把它放在 repo 位置；如果是分支名，请传真实 branch/tag。" -f $val)
+                }
                 $result.ref = $val
                 continue
             }
@@ -927,7 +930,12 @@ function Parse-AddArgs([string[]]$tokens) {
                 if ([string]::IsNullOrWhiteSpace($val)) { throw ("参数值不能为空：{0}" -f $key) }
                 switch ($key) {
                     "--skill" { $result.skills += $val }
-                    "--ref" { $result.ref = $val }
+                    "--ref" {
+                        if (Test-LooksLikeRepoUrl $val) {
+                            throw ("--ref 不能是仓库地址：{0}。如果你想安装该仓库，请把它放在 repo 位置；如果是分支名，请传真实 branch/tag。" -f $val)
+                        }
+                        $result.ref = $val
+                    }
                     "--mode" { $result.mode = $val }
                     "--name" { $result.name = $val }
                 }
@@ -1414,7 +1422,9 @@ function Get-RepoIdentity([string]$repo) {
     if ($r -match "^git@github\.com:(.+)$") {
         $r = "https://github.com/$($Matches[1])"
     }
-    if ($r -match "^https?://github\.com/(.+)$") {
+    $n = Normalize-RepoUrl $r
+    if ([string]::IsNullOrWhiteSpace($n)) { return $r.ToLowerInvariant() }
+    if ($n -match "^https?://github\.com/(.+)$") {
         $path = $Matches[1]
         $path = $path.TrimEnd("/")
         if ($path.EndsWith(".git")) { $path = $path.Substring(0, $path.Length - 4) }
@@ -1424,8 +1434,6 @@ function Get-RepoIdentity([string]$repo) {
         }
         return ("github.com/{0}" -f $path).ToLowerInvariant()
     }
-    $n = Normalize-RepoUrl $r
-    if ([string]::IsNullOrWhiteSpace($n)) { return $r.ToLowerInvariant() }
     if ($n.EndsWith(".git")) { $n = $n.Substring(0, $n.Length - 4) }
     return $n.TrimEnd("/").ToLowerInvariant()
 }
@@ -1434,6 +1442,33 @@ function Is-SameRepoIdentity([string]$a, [string]$b) {
     $ib = Get-RepoIdentity $b
     if ([string]::IsNullOrWhiteSpace($ia) -or [string]::IsNullOrWhiteSpace($ib)) { return $false }
     return ($ia -eq $ib)
+}
+function Test-LooksLikeRepoUrl([string]$value) {
+    if ([string]::IsNullOrWhiteSpace($value)) { return $false }
+    $v = $value.Trim().Trim("'`"")
+    if ($v -match "^(git@github\.com:|https?://github\.com/|github\.com/)") { return $true }
+    if ($v -match "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\.git$") { return $true }
+    return $false
+}
+function Test-InstalledVendorPath([string]$path, [string]$repo) {
+    if ([string]::IsNullOrWhiteSpace($path) -or [string]::IsNullOrWhiteSpace($repo)) { return $false }
+    if (-not (Test-Path -LiteralPath $path -PathType Container)) { return $false }
+    if (-not (Test-Path -LiteralPath (Join-Path $path ".git") -PathType Container)) { return $false }
+
+    $origin = $null
+    Push-Location $path
+    try {
+        $origin = Invoke-GitCapture @("remote", "get-url", "origin")
+    }
+    catch {
+        return $false
+    }
+    finally {
+        Pop-Location
+    }
+
+    if ([string]::IsNullOrWhiteSpace($origin)) { return $false }
+    return (Is-SameRepoIdentity $origin $repo)
 }
 function Has-GitUpstream {
     $up = Invoke-GitCapture @("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
@@ -3423,9 +3458,20 @@ function 初始化 {
         if ([string]::IsNullOrWhiteSpace($v.ref)) { $v.ref = "main" }
 
         $path = VendorPath $v.name
-        if (Test-Path $path) {
-            Write-Host "已存在：vendor/$($v.name)（跳过 clone）"
+        if (Test-InstalledVendorPath $path $v.repo) {
+            Write-Host "已存在：vendor/$($v.name)（来源匹配，跳过 clone）"
             continue
+        }
+
+        if (Test-Path $path) {
+            $origin = $null
+            try {
+                Push-Location $path
+                try { $origin = Invoke-GitCapture @("remote", "get-url", "origin") } finally { Pop-Location }
+            }
+            catch {}
+            $originText = if ([string]::IsNullOrWhiteSpace($origin)) { "unknown" } else { $origin }
+            throw ("vendor/{0} 已存在，但来源不匹配或不是 git 仓库：current={1}, expected={2}" -f $v.name, $originText, $v.repo)
         }
 
         Invoke-Git @("clone", $v.repo, $path)
@@ -3456,6 +3502,43 @@ function 新增技能库 {
     $name = Read-Host "可选：输入自定义名称（留空自动从 URL 推断）"
     if ([string]::IsNullOrWhiteSpace($name)) { $name = Guess-VendorName $repo }
     $name = Normalize-NameWithNotice $name "vendor 名称"
+
+    $cfg = LoadCfg
+    $sameNameVendor = $cfg.vendors | Where-Object { $_.name -eq $name } | Select-Object -First 1
+    if ($sameNameVendor) {
+        if (Is-SameRepoIdentity ([string]$sameNameVendor.repo) $repo) {
+            $installedPath = VendorPath $name
+            if (Test-InstalledVendorPath $installedPath $repo) {
+                Write-Host ("已存在：vendor/{0}（来源匹配，跳过新增）" -f $name)
+                return
+            }
+
+            Write-Host ("已存在：vendor/{0}（来源匹配，检测到本地目录缺失或异常）" -f $name) -ForegroundColor Yellow
+            Write-Host "将自动执行【初始化】补齐本地仓库..." -ForegroundColor Yellow
+            初始化
+            return
+        }
+        Need $false ("vendor 名称已存在：{0}（当前来源：{1}，期望来源：{2}）" -f $name, [string]$sameNameVendor.repo, $repo)
+    }
+
+    $sameRepoVendor = Match-VendorByRepo $cfg $repo
+    if ($sameRepoVendor) {
+        $installedPath = VendorPath $sameRepoVendor.name
+        if (Test-InstalledVendorPath $installedPath $repo) {
+            if ($sameRepoVendor.name -ne $name) {
+                Write-Host ("该仓库已接入：vendor/{0}（忽略新名称：{1}，跳过新增）" -f $sameRepoVendor.name, $name)
+            }
+            else {
+                Write-Host ("已存在：vendor/{0}（来源匹配，跳过新增）" -f $sameRepoVendor.name)
+            }
+            return
+        }
+
+        Write-Host ("该仓库已接入：vendor/{0}（检测到本地目录缺失或异常）" -f $sameRepoVendor.name) -ForegroundColor Yellow
+        Write-Host "将自动执行【初始化】补齐本地仓库..." -ForegroundColor Yellow
+        初始化
+        return
+    }
 
     $cfgRaw = ""
     if (Test-Path $CfgPath) { $cfgRaw = Get-Content $CfgPath -Raw }
@@ -5579,6 +5662,82 @@ function Resolve-McpTargetRootsFromCfg($cfg) {
     return ,@($roots | Sort-Object)
 }
 
+function ConvertTo-OrderedSignatureValue($value) {
+    if ($null -eq $value) { return $null }
+    if ($value -is [string]) { return [string]$value }
+    if ($value -is [System.Collections.IDictionary]) {
+        $ordered = [ordered]@{}
+        foreach ($k in @($value.Keys | Sort-Object)) {
+            $ordered[[string]$k] = ConvertTo-OrderedSignatureValue $value[$k]
+        }
+        return [pscustomobject]$ordered
+    }
+    if ($value -is [pscustomobject]) {
+        $ordered = [ordered]@{}
+        foreach ($p in @($value.PSObject.Properties | Sort-Object Name)) {
+            $ordered[[string]$p.Name] = ConvertTo-OrderedSignatureValue $p.Value
+        }
+        return [pscustomobject]$ordered
+    }
+    if ($value -is [System.Collections.IEnumerable] -and -not ($value -is [byte[]])) {
+        $items = New-Object System.Collections.Generic.List[object]
+        foreach ($item in @($value)) {
+            $items.Add((ConvertTo-OrderedSignatureValue $item)) | Out-Null
+        }
+        return @($items)
+    }
+    return $value
+}
+
+function Get-McpServerSignature($server) {
+    if ($null -eq $server) { return $null }
+    $transport = if ($server.PSObject.Properties.Match("transport").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.transport)) {
+        [string]$server.transport
+    }
+    else {
+        "stdio"
+    }
+    $transport = $transport.Trim().ToLowerInvariant()
+    $sig = [ordered]@{ transport = $transport }
+    if ($transport -eq "stdio") {
+        if ($server.PSObject.Properties.Match("command").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.command)) {
+            $sig.command = [string]$server.command
+        }
+        if ($server.PSObject.Properties.Match("args").Count -gt 0) {
+            $sig.args = @($server.args)
+        }
+        if ($server.PSObject.Properties.Match("env").Count -gt 0 -and $null -ne $server.env) {
+            $sig.env = ConvertTo-OrderedSignatureValue $server.env
+        }
+    }
+    else {
+        if ($server.PSObject.Properties.Match("url").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.url)) {
+            $sig.url = [string]$server.url
+        }
+        if ($server.PSObject.Properties.Match("headers").Count -gt 0 -and $null -ne $server.headers) {
+            $sig.headers = ConvertTo-OrderedSignatureValue $server.headers
+        }
+        if ($server.PSObject.Properties.Match("bearer_token_env_var").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.bearer_token_env_var)) {
+            $sig.bearer_token_env_var = [string]$server.bearer_token_env_var
+        }
+    }
+    return ($sig | ConvertTo-Json -Depth 30 -Compress)
+}
+
+function Test-McpServerEquivalent($a, $b) {
+    $sa = Get-McpServerSignature $a
+    $sb = Get-McpServerSignature $b
+    if ([string]::IsNullOrWhiteSpace($sa) -or [string]::IsNullOrWhiteSpace($sb)) { return $false }
+    return ($sa -eq $sb)
+}
+
+function Find-EquivalentMcpServer($servers, $candidate) {
+    foreach ($server in @($servers)) {
+        if (Test-McpServerEquivalent $server $candidate) { return $server }
+    }
+    return $null
+}
+
 function 安装MCP([string[]]$tokens = @()) {
     $cfg = LoadCfg
     $cfgRaw = Get-Content $CfgPath -Raw
@@ -5633,8 +5792,14 @@ function 安装MCP([string[]]$tokens = @()) {
 
     $server = New-McpServerObject $parsed
     $existing = @($cfg.mcp_servers)
+    $existingSameName = $existing | Where-Object { [string]$_.name -eq [string]$server.name } | Select-Object -First 1
     $updated = @()
     $replaced = $false
+    $equivalent = Find-EquivalentMcpServer $existing $server
+    if ($existingSameName -and (Test-McpServerEquivalent $existingSameName $server)) {
+        Write-Host ("MCP 服务已存在且配置一致：{0}" -f $server.name)
+        return
+    }
     foreach ($s in $existing) {
         if ([string]$s.name -eq [string]$server.name) {
             $updated += $server
@@ -5643,6 +5808,10 @@ function 安装MCP([string[]]$tokens = @()) {
         else {
             $updated += $s
         }
+    }
+    if ($equivalent -and -not $replaced) {
+        Write-Host ("已存在等效 MCP 服务：{0}（名称：{1}），已跳过" -f $server.name, [string]$equivalent.name)
+        return
     }
     if (-not $replaced) { $updated += $server }
     $cfg.mcp_servers = $updated
