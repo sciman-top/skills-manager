@@ -4931,6 +4931,47 @@ function Normalize-McpProcessArgs([string[]]$processArgs) {
     return $normalized.ToArray()
 }
 
+function Get-StableHashSuffix([string]$seed, [int]$len = 10) {
+    if ([string]::IsNullOrWhiteSpace($seed)) { return $null }
+    $sha1 = [System.Security.Cryptography.SHA1]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($seed)
+        $hashBytes = $sha1.ComputeHash($bytes)
+        $hex = ([System.BitConverter]::ToString($hashBytes)).Replace("-", "").ToLowerInvariant()
+        if ($len -le 0) { return $hex }
+        if ($hex.Length -le $len) { return $hex }
+        return $hex.Substring(0, $len)
+    }
+    finally {
+        $sha1.Dispose()
+    }
+}
+
+function Normalize-McpServiceNameWithFallback([string]$name, [string]$fallbackSeed = $null) {
+    $norm = Normalize-Name $name
+    if (-not [string]::IsNullOrWhiteSpace($norm)) { return $norm }
+
+    $seed = $null
+    if (-not [string]::IsNullOrWhiteSpace($fallbackSeed)) {
+        $seed = $fallbackSeed
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($name)) {
+        $seed = $name
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($seed)) {
+        $suffix = Get-StableHashSuffix $seed 10
+        if (-not [string]::IsNullOrWhiteSpace($suffix)) {
+            $autoName = "mcp-{0}" -f $suffix
+            Write-Host ("MCP 服务名无法规范化，已自动生成：{0} -> {1}" -f $name, $autoName) -ForegroundColor Yellow
+            return $autoName
+        }
+    }
+
+    Need $false ("MCP 服务名 无法规范化，请更换名称：{0}" -f $name)
+    return $null
+}
+
 function Parse-McpStdioCommandLine([string]$name, [string]$commandLine) {
     $tokens = Split-Args $commandLine
     $tokens = Normalize-McpProcessArgs @($tokens)
@@ -4951,6 +4992,7 @@ function Parse-McpInstallArgs([string[]]$tokens) {
         url = $null
         env = @{}
         headers = @{}
+        bearer_token_env_var = $null
     }
     $collectProcessArgs = $false
 
@@ -5022,6 +5064,11 @@ function Parse-McpInstallArgs([string[]]$tokens) {
             $result.headers[$pair.key] = $pair.value
             continue
         }
+        if ($key -eq "--bearer-token-env-var") {
+            Need ($i + 1 -lt $tokens.Count) "参数缺少值：--bearer-token-env-var"
+            $result.bearer_token_env_var = [string]$tokens[++$i]
+            continue
+        }
 
         # Backward compatible: in stdio mode, unknown options are treated as process
         # arguments so users can omit "--" (PowerShell may swallow the separator).
@@ -5038,7 +5085,6 @@ function Parse-McpInstallArgs([string[]]$tokens) {
     }
 
     Need (-not [string]::IsNullOrWhiteSpace($result.name)) "缺少 MCP 服务名称。示例：安装MCP context7 --cmd npx -- -y @upstash/context7-mcp"
-    $result.name = Normalize-NameWithNotice $result.name "MCP 服务名"
 
     if (-not [string]::IsNullOrWhiteSpace($result.transport)) {
         $result.transport = $result.transport.Trim().ToLowerInvariant()
@@ -5069,7 +5115,19 @@ function Parse-McpInstallArgs([string[]]$tokens) {
     }
     else {
         Need (-not [string]::IsNullOrWhiteSpace($result.url)) "sse/http MCP 需要 --url"
+        if (-not [string]::IsNullOrWhiteSpace([string]$result.bearer_token_env_var)) {
+            $result.bearer_token_env_var = [string]$result.bearer_token_env_var.Trim()
+        }
     }
+
+    $fallbackSeed = $null
+    if (-not [string]::IsNullOrWhiteSpace([string]$result.command)) {
+        $fallbackSeed = [string]$result.command
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace([string]$result.url)) {
+        $fallbackSeed = [string]$result.url
+    }
+    $result.name = Normalize-McpServiceNameWithFallback $result.name $fallbackSeed
 
     return [pscustomobject]$result
 }
@@ -5087,6 +5145,9 @@ function New-McpServerObject($parsed) {
     else {
         $obj.url = $parsed.url
         if ($parsed.headers.Count -gt 0) { $obj.headers = $parsed.headers }
+        if (-not [string]::IsNullOrWhiteSpace([string]$parsed.bearer_token_env_var)) {
+            $obj.bearer_token_env_var = [string]$parsed.bearer_token_env_var
+        }
     }
     return [pscustomobject]$obj
 }
@@ -5108,6 +5169,9 @@ function Convert-McpServersToConfigMap($servers) {
         else {
             if ($s.PSObject.Properties.Match("url").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$s.url)) { $entry.url = [string]$s.url }
             if ($s.PSObject.Properties.Match("headers").Count -gt 0 -and $s.headers -ne $null) { $entry.headers = $s.headers }
+            if ($s.PSObject.Properties.Match("bearer_token_env_var").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$s.bearer_token_env_var)) {
+                $entry.bearer_token_env_var = [string]$s.bearer_token_env_var
+            }
         }
         $map[[string]$s.name] = [pscustomobject]$entry
     }
@@ -5909,6 +5973,7 @@ Skills 管理器（极简版，中文菜单）
   .\skills.ps1 清理备份
   .\skills.ps1 安装MCP <name> -- <command> [args...]          （推荐）
   .\skills.ps1 安装MCP <name> --cmd <command> [--arg <arg>...] （兼容）
+  .\skills.ps1 安装MCP <name> --transport http --url <url> [--bearer-token-env-var <ENV>] 
   .\skills.ps1 卸载MCP <name>
   .\skills.ps1 同步MCP（可选：手动兜底）
   .\skills.ps1 doctor [--json] [--fix] [--dry-run-fix] [--strict] [--threshold-ms <ms>]

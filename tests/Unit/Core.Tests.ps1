@@ -697,6 +697,13 @@ Describe "Core Functions" {
             }
             $thrown | Should Be $true
         }
+
+        It "Parses bearer token env var for remote MCP servers" {
+            $parsed = Parse-McpInstallArgs @("github", "--transport", "http", "--url", "https://api.githubcopilot.com/mcp/readonly", "--bearer-token-env-var", "GITHUB_PERSONAL_ACCESS_TOKEN")
+            $parsed.name | Should Be "github"
+            $parsed.transport | Should Be "http"
+            $parsed.bearer_token_env_var | Should Be "GITHUB_PERSONAL_ACCESS_TOKEN"
+        }
     }
 
     Context "Parse-McpStdioCommandLine" {
@@ -768,10 +775,10 @@ Describe "Core Functions" {
         It "Replaces mcp_servers tables and preserves other codex config fields" {
             $servers = @(
                 [pscustomobject]@{
-                    name      = "fetch"
-                    transport = "stdio"
-                    command   = "python"
-                    args      = @("-m", "mcp_server_fetch")
+                    name                   = "github"
+                    transport              = "http"
+                    url                    = "https://api.githubcopilot.com/mcp/readonly"
+                    bearer_token_env_var   = "GITHUB_PERSONAL_ACCESS_TOKEN"
                 }
             )
             $existing = @'
@@ -789,9 +796,9 @@ sandbox = "elevated"
             $toml | Should Match "model = ""gpt-5.3-codex"""
             $toml | Should Match "\[windows\]"
             $toml | Should Not Match "\[mcp_servers\.old\]"
-            $toml | Should Match "\[mcp_servers\.fetch\]"
-            $toml | Should Match "command = ""python"""
-            $toml | Should Match "args = \[""-m"", ""mcp_server_fetch""\]"
+            $toml | Should Match "\[mcp_servers\.github\]"
+            $toml | Should Match "url = ""https://api.githubcopilot.com/mcp/readonly"""
+            $toml | Should Match "bearer_token_env_var = ""GITHUB_PERSONAL_ACCESS_TOKEN"""
         }
     }
 

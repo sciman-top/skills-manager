@@ -184,9 +184,19 @@
       "vendor": "anthropics-skills"
     },
     {
-      "from": "skills\\remotion",
+      "vendor": "agent-skills",
+      "from": "skills\\web-design-guidelines",
+      "to": "agent-skills-skills-web-design-guidelines"
+    },
+    {
       "to": "skills-2-skills-remotion",
+      "from": "skills\\remotion",
       "vendor": "skills-2"
+    },
+    {
+      "to": "superpowers-skills-writing-plans",
+      "vendor": "superpowers",
+      "from": "skills\\writing-plans"
     }
   ],
   "imports": [
@@ -197,6 +207,14 @@
       "ref": "main",
       "repo": "https://github.com/obra/superpowers.git",
       "name": "superpowers"
+    },
+    {
+      "mode": "vendor",
+      "sparse": false,
+      "skill": "skills\\writing-plans",
+      "ref": "main",
+      "repo": "https://github.com/obra/superpowers.git",
+      "name": "superpowers-writing-plans"
     },
     {
       "mode": "vendor",
@@ -375,6 +393,14 @@
       "mode": "vendor"
     },
     {
+      "name": "agent-skills-web-design-guidelines",
+      "skill": "skills\\web-design-guidelines",
+      "sparse": false,
+      "repo": "https://github.com/vercel-labs/agent-skills.git",
+      "ref": "main",
+      "mode": "vendor"
+    },
+    {
       "name": "skills-2",
       "skill": "skills\\remotion",
       "sparse": false,
@@ -499,15 +525,6 @@
   "update_force": true,
   "mcp_servers": [
     {
-      "name": "fetch",
-      "transport": "stdio",
-      "command": "python",
-      "args": [
-        "-m",
-        "mcp_server_fetch"
-      ]
-    },
-    {
       "name": "context7",
       "transport": "stdio",
       "command": "npx",
@@ -515,6 +532,17 @@
         "-y",
         "@upstash/context7-mcp"
       ]
+    },
+    {
+      "name": "github",
+      "transport": "http",
+      "url": "https://api.githubcopilot.com/mcp/readonly",
+      "bearer_token_env_var": "GITHUB_PERSONAL_ACCESS_TOKEN"
+    },
+    {
+      "name": "microsoft-learn",
+      "transport": "http",
+      "url": "https://learn.microsoft.com/api/mcp"
     }
   ],
   "mcp_targets": []

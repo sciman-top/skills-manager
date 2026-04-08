@@ -148,6 +148,7 @@ Skills 管理器（极简版，中文菜单）
   .\skills.ps1 清理备份
   .\skills.ps1 安装MCP <name> -- <command> [args...]          （推荐）
   .\skills.ps1 安装MCP <name> --cmd <command> [--arg <arg>...] （兼容）
+  .\skills.ps1 安装MCP <name> --transport http --url <url> [--bearer-token-env-var <ENV>] 
   .\skills.ps1 卸载MCP <name>
   .\skills.ps1 同步MCP（可选：手动兜底）
   .\skills.ps1 doctor [--json] [--fix] [--dry-run-fix] [--strict] [--threshold-ms <ms>]
