@@ -12,7 +12,8 @@
     "policies":  {
                      "signing":  {
                                      "required":  false,
-                                     "mode":  "none-personal"
+                                     "mode":  "none-personal",
+                                     "allow_paid_signing":  false
                                  },
                      "compatibility":  {
                                            "matrix_required":  false,
@@ -25,7 +26,15 @@
                                        },
                      "packaging":  {
                                        "default_channel":  "none",
-                                       "channels":  "none",
+                                       "channels":  [
+                                                        "none"
+                                                    ],
+                                       "distribution_forms":  [
+                                                                  "portable"
+                                                              ],
+                                       "network_modes":  [
+                                                             "online"
+                                                         ],
                                        "require_framework_dependent":  false,
                                        "require_self_contained":  false
                                    },
