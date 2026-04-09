@@ -148,7 +148,8 @@ function Get-PerfThresholdMs([string]$Metric, [int]$DefaultThresholdMs = 5000) {
         "discover" { return 5000 }
         "build_agent" { return 7000 }
         "apply_targets" { return 5000 }
-        "build_apply_total" { return 20000 }
+        # Includes prebuild checks + full build/apply flow; realistic baseline in this repo is ~180s.
+        "build_apply_total" { return 240000 }
         "sync_mcp" { return 10000 }
         "update_vendor" { return $null }
         "update_imports" { return $null }

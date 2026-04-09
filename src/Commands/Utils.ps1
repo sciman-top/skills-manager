@@ -105,7 +105,7 @@ Skills 管理器（极简版，中文菜单）
   - 从技能库选择安装：从技能库中勾选多个技能，追加到 mappings 白名单并自动构建生效
   - 卸载：从 mappings 白名单移除技能；必要时清理 imports 条目、legacy manual 目录和对应 overrides 备份
   - 新增技能库：向 vendors 写入仓库地址并初始化；留空时仅初始化已配置 vendors
-  - 删除技能库：移除 vendors 中的仓库，并按当前配置重新构建生效
+  - 删除技能库：移除 vendors 中的仓库；可选择是否保留其已安装技能（转为 manual）后重建生效
   - 更新：拉取 vendor/imports 上游内容，逐项确认如何处理本地改动，然后重建并同步
   - 构建并生效：仅使用当前本地配置与文件源（imports / overrides / mappings）重建输出并同步；可配合 -Locked 做严格校验
   - 锁定：生成 skills.lock.json，记录当前 vendor/import commit
@@ -132,9 +132,9 @@ Skills 管理器（极简版，中文菜单）
   .\skills.ps1 卸载技能
   .\skills.ps1 新增技能库
   .\skills.ps1 删除技能库
-  .\skills.ps1 add <repo> --skill <name> [--ref <branch/tag>] [--mode manual|vendor] [--sparse]
-  .\skills.ps1 npx "skills add <repo> --skill <name> [--ref <branch/tag>] [--mode manual|vendor] [--sparse]"
-  .\skills.ps1 npx "add-skill <repo> --skill <name> [--ref <branch/tag>] [--mode manual|vendor] [--sparse]"
+  .\skills.ps1 add <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]
+  .\skills.ps1 npx "skills add <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]"
+  .\skills.ps1 npx "add-skill <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]"
   .\skills.ps1 更新
   .\skills.ps1 更新上游并重建
   .\skills.ps1 更新 -Plan
@@ -170,7 +170,8 @@ Skills 管理器（极简版，中文菜单）
   - 正则：用 /.../ 包裹（如：/docx|pdf/）
 
 本地技能：
-  - add/npx 导入默认落入 imports（mode=manual），可用 --mode vendor 改为 vendor 管理。
+  - add/npx 未指定 --skill 时仅新增技能库（vendor），不会自动安装整库技能。
+  - add/npx 显式指定 --skill 时默认落入 imports（mode=manual），可用 --mode vendor 改为 vendor 管理。
   - manual/ 仅保留 legacy 兼容读取，建议将自定义改动放入 overrides/。
   - “命令导入安装”支持多行输入 add / npx skills add / npx add-skill。
   - 为兼容旧习惯，`安装` / `卸载` / `更新` / `构建生效` / `锁定` 等旧命令仍然保留可用。

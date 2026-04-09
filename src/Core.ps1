@@ -1096,7 +1096,7 @@ function Parse-AddArgs([string[]]$tokens) {
             if (-not $result.repo) { $result.repo = $t }
         }
     }
-    Need (-not [string]::IsNullOrWhiteSpace($result.repo)) "缺少 repo 参数。示例：add <repo> --skill <name>"
+    Need (-not [string]::IsNullOrWhiteSpace($result.repo)) "缺少 repo 参数。示例：add <repo> [--skill <name>]"
     Need (Looks-LikeRepoInput $result.repo) ("输入并非有效的 GitHub 仓库格式：{0}" -f $result.repo)
     $repoSkill = Split-RepoSkillSuffix $result.repo
     if ($repoSkill -and $result.skills.Count -eq 0) {
@@ -1122,12 +1122,12 @@ function Get-AddTokensFromNpx([string[]]$tokens) {
         $tokens = $tokens[1..($tokens.Count - 1)]
     }
     if ($tokens.Count -ge 2 -and $tokens[0].ToLowerInvariant() -eq "skills" -and $tokens[1].ToLowerInvariant() -eq "add") {
-        if ($tokens.Count -lt 3) { throw "缺少 repo 参数。示例：add <repo> --skill <name>" }
+        if ($tokens.Count -lt 3) { throw "缺少 repo 参数。示例：add <repo> [--skill <name>]" }
         return $tokens[2..($tokens.Count - 1)]
     }
     if ($tokens[0].ToLowerInvariant() -eq "add-skill") {
         if ($tokens.Count -ge 2) { return $tokens[1..($tokens.Count - 1)] }
-        throw "缺少 repo 参数。示例：add <repo> --skill <name>"
+        throw "缺少 repo 参数。示例：add <repo> [--skill <name>]"
     }
     throw "不支持的 npx 子命令。仅支持：skills add / add-skill"
 }
@@ -1145,9 +1145,9 @@ function Get-AddTokensFromCommandLineTokens([string[]]$tokens) {
     $head = $tokens[0].Trim().Trim("'`"")
     $headNorm = ($head -replace "/", "\").ToLowerInvariant()
     if ($headNorm -match "(^|\\)skills\.(ps1|cmd)$") {
-        if ($tokens.Count -eq 1) { throw "缺少子命令。示例：add <repo> --skill <name>" }
+        if ($tokens.Count -eq 1) { throw "缺少子命令。示例：add <repo> [--skill <name>]" }
         $tokens = $tokens[1..($tokens.Count - 1)]
-        if ($tokens.Count -eq 0) { throw "缺少子命令。示例：add <repo> --skill <name>" }
+        if ($tokens.Count -eq 0) { throw "缺少子命令。示例：add <repo> [--skill <name>]" }
         $headNorm = ($tokens[0].Trim().Trim("'`"") -replace "/", "\").ToLowerInvariant()
     }
 
@@ -1155,14 +1155,14 @@ function Get-AddTokensFromCommandLineTokens([string[]]$tokens) {
         return Get-AddTokensFromNpx $tokens
     }
     if ($headNorm -eq "skills") {
-        if ($tokens.Count -eq 1) { throw "缺少子命令。仅支持：skills add <repo> --skill <name>" }
+        if ($tokens.Count -eq 1) { throw "缺少子命令。仅支持：skills add <repo> [--skill <name>]" }
         $sub = $tokens[1].ToLowerInvariant()
         if ($sub -ne "add") { throw "不支持的 skills 子命令。仅支持：skills add" }
-        if ($tokens.Count -lt 3) { throw "缺少 repo 参数。示例：add <repo> --skill <name>" }
+        if ($tokens.Count -lt 3) { throw "缺少 repo 参数。示例：add <repo> [--skill <name>]" }
         return $tokens[2..($tokens.Count - 1)]
     }
     if ($headNorm -eq "add") {
-        if ($tokens.Count -eq 1) { throw "缺少 repo 参数。示例：add <repo> --skill <name>" }
+        if ($tokens.Count -eq 1) { throw "缺少 repo 参数。示例：add <repo> [--skill <name>]" }
         return $tokens[1..($tokens.Count - 1)]
     }
     return $tokens

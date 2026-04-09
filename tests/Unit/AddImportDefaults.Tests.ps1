@@ -19,7 +19,7 @@ Describe "Add Import Defaults" {
         $parsed.skills[0] | Should Be "."
     }
 
-    It "Imports repo-only add as vendor library" {
+    It "Registers repo-only add as vendor library without installing skills" {
         $oldCfgPath = $script:CfgPath
         $oldImportDir = $script:ImportDir
         $oldVendorDir = $script:VendorDir
@@ -45,16 +45,23 @@ Describe "Add Import Defaults" {
                     sync_mode = "link"
                 }
             }
-            Mock Get-SkillCandidatesFromGitRepo {
-                @(
-                    [pscustomobject]@{ rel = "."; leaf = "web-quality-skills" }
-                    [pscustomobject]@{ rel = "skills\web-quality-audit"; leaf = "web-quality-audit" }
-                )
-            }
             Mock Resolve-SkillsWithProbe {}
+            Mock Get-SkillCandidatesFromGitRepo {}
             Mock Ensure-Repo {}
+            Mock Ensure-ImportVendorMapping {
+                param($cfg, $vendorName, $skillPath, $targetName)
+                $cfg.mappings += [pscustomobject]@{
+                    vendor = $vendorName
+                    from = $skillPath
+                    to = $targetName
+                }
+            }
             Mock Test-IsSkillDir { $true }
-            Mock SaveCfgSafe {}
+            $script:savedCfg = $null
+            Mock SaveCfgSafe {
+                param($cfg, $cfgRaw)
+                $script:savedCfg = $cfg
+            }
             Mock Clear-SkillsCache {}
             Mock 构建生效 {}
 
@@ -76,18 +83,88 @@ Describe "Add Import Defaults" {
 
             Add-ImportFromArgs @("addyosmani/web-quality-skills")
 
-            Assert-MockCalled Get-SkillCandidatesFromGitRepo -Times 1 -Exactly
+            Assert-MockCalled Get-SkillCandidatesFromGitRepo -Times 0 -Exactly
             Assert-MockCalled Resolve-SkillsWithProbe -Times 0 -Exactly
             Assert-MockCalled Ensure-Repo -Times 1 -Exactly
             Assert-MockCalled 构建生效 -Times 1 -Exactly
-            $script:vendorMappings.Count | Should Be 2
-            @($script:importWrites | Where-Object { $_.mode -eq "vendor" }).Count | Should Be 1
+            $script:vendorMappings.Count | Should Be 0
+            @($script:importWrites | Where-Object { $_.mode -eq "vendor" }).Count | Should Be 0
             @($script:importWrites | Where-Object { $_.mode -eq "manual" }).Count | Should Be 0
+            @($script:savedCfg.vendors).Count | Should Be 1
+            ((@($script:savedCfg.imports).Count) -le 1) | Should Be $true
+            @($script:savedCfg.mappings).Count | Should Be 0
+            $script:savedCfg.vendors[0].name | Should Be "web-quality-skills"
         }
         finally {
             $script:CfgPath = $oldCfgPath
             $script:ImportDir = $oldImportDir
             $script:VendorDir = $oldVendorDir
+        }
+    }
+
+    It "Repo-only add links existing manual skills from same repo to the new vendor" {
+        $oldCfgPath = $script:CfgPath
+        $oldImportDir = $script:ImportDir
+        $oldVendorDir = $script:VendorDir
+        $oldManualDir = $script:ManualDir
+        try {
+            $script:CfgPath = Join-Path $TestDrive "skills.json"
+            $script:ImportDir = Join-Path $TestDrive "imports"
+            $script:VendorDir = Join-Path $TestDrive "vendor"
+            $script:ManualDir = Join-Path $TestDrive "manual"
+            New-Item -ItemType Directory -Path $script:ImportDir -Force | Out-Null
+            New-Item -ItemType Directory -Path $script:VendorDir -Force | Out-Null
+            New-Item -ItemType Directory -Path $script:ManualDir -Force | Out-Null
+
+            Mock Preflight {}
+            Mock Assert-RepoReachable {}
+            Mock Get-RepoDefaultBranch { "main" }
+            Mock LoadCfg {
+                [pscustomobject]@{
+                    vendors = @()
+                    mappings = @(
+                        [pscustomobject]@{ vendor = "manual"; from = "content-strategy"; to = "content-strategy" }
+                    )
+                    imports = @(
+                        [pscustomobject]@{
+                            name = "content-strategy"
+                            repo = "https://github.com/coreyhaines31/marketingskills.git"
+                            ref = "main"
+                            skill = "skills\\content-strategy"
+                            mode = "manual"
+                            sparse = $false
+                        }
+                    )
+                    targets = @()
+                    mcp_servers = @()
+                    mcp_targets = @()
+                    update_force = $false
+                    sync_mode = "link"
+                }
+            }
+            Mock Resolve-SkillsWithProbe {}
+            Mock Get-SkillCandidatesFromGitRepo {}
+            Mock Ensure-Repo {}
+            Mock Test-IsSkillDir { $true }
+            $script:savedCfg2 = $null
+            Mock SaveCfgSafe {
+                param($cfg, $cfgRaw)
+                $script:savedCfg2 = $cfg
+            }
+            Mock Clear-SkillsCache {}
+            Mock 构建生效 {}
+
+            Add-ImportFromArgs @("https://github.com/coreyhaines31/marketingskills")
+
+            @($script:savedCfg2.vendors | Where-Object { $_.name -eq "marketingskills" }).Count | Should Be 1
+            @($script:savedCfg2.imports | Where-Object { $_.mode -eq "manual" -and $_.name -eq "content-strategy" }).Count | Should Be 0
+            @($script:savedCfg2.mappings | Where-Object { $_.vendor -eq "manual" -and $_.from -eq "content-strategy" }).Count | Should Be 0
+        }
+        finally {
+            $script:CfgPath = $oldCfgPath
+            $script:ImportDir = $oldImportDir
+            $script:VendorDir = $oldVendorDir
+            $script:ManualDir = $oldManualDir
         }
     }
 

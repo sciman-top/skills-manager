@@ -35,6 +35,16 @@
       "repo": "https://github.com/addyosmani/web-quality-skills.git",
       "ref": "main",
       "name": "web-quality-skills"
+    },
+    {
+      "repo": "https://github.com/remotion-dev/skills.git",
+      "name": "skills-2",
+      "ref": "main"
+    },
+    {
+      "repo": "https://github.com/coreyhaines31/marketingskills.git",
+      "ref": "main",
+      "name": "marketingskills"
     }
   ],
   "mappings": [
@@ -255,11 +265,6 @@
     },
     {
       "vendor": "web-quality-skills",
-      "to": "web-quality-skills-web-quality-skills",
-      "from": "."
-    },
-    {
-      "vendor": "web-quality-skills",
       "to": "web-quality-skills-skills-accessibility",
       "from": "skills\\accessibility"
     },
@@ -332,6 +337,21 @@
       "to": "superpowers-skills-writing-skills",
       "from": "skills\\writing-skills",
       "vendor": "superpowers"
+    },
+    {
+      "from": "content-strategy",
+      "to": "content-strategy",
+      "vendor": "manual"
+    },
+    {
+      "from": "social-content",
+      "to": "social-content",
+      "vendor": "manual"
+    },
+    {
+      "from": "playwright-best-practices",
+      "to": "playwright-best-practices",
+      "vendor": "manual"
     }
   ],
   "imports": [
@@ -569,14 +589,6 @@
     },
     {
       "mode": "vendor",
-      "skill": ".",
-      "name": "web-quality-skills",
-      "repo": "https://github.com/addyosmani/web-quality-skills.git",
-      "sparse": false,
-      "ref": "main"
-    },
-    {
-      "mode": "vendor",
       "skill": "skills\\performance-optimization",
       "name": "agent-skills-2",
       "repo": "https://github.com/addyosmani/agent-skills.git",
@@ -598,6 +610,30 @@
       "mode": "manual",
       "ref": "main",
       "repo": "https://github.com/remotion-dev/skills.git"
+    },
+    {
+      "name": "content-strategy",
+      "skill": "skills\\content-strategy",
+      "sparse": false,
+      "repo": "https://github.com/coreyhaines31/marketingskills.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "social-content",
+      "skill": "skills\\social-content",
+      "sparse": false,
+      "repo": "https://github.com/coreyhaines31/marketingskills.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "playwright-best-practices",
+      "skill": ".",
+      "sparse": false,
+      "repo": "https://github.com/currents-dev/playwright-best-practices-skill.git",
+      "ref": "main",
+      "mode": "manual"
     }
   ],
   "targets": [

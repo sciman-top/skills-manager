@@ -104,6 +104,54 @@ Describe "Config And Update Enhancements" {
             $cfg.imports[0].skill | Should Be "skills\theme-factory"
             @($cfg.mappings).Count | Should Be 0
         }
+
+        It "Prunes vendor root mapping and root import automatically" {
+            $cfg = [pscustomobject]@{
+                vendors = @(
+                    [pscustomobject]@{ name = "web-quality-skills"; repo = "https://github.com/addyosmani/web-quality-skills.git"; ref = "main" }
+                )
+                targets = @()
+                mappings = @(
+                    [pscustomobject]@{ vendor = "web-quality-skills"; from = "."; to = "web-quality-skills-web-quality-skills" }
+                    [pscustomobject]@{ vendor = "web-quality-skills"; from = "skills\accessibility"; to = "web-quality-skills-skills-accessibility" }
+                )
+                imports = @(
+                    [pscustomobject]@{
+                        name = "web-quality-skills"
+                        mode = "vendor"
+                        repo = "https://github.com/addyosmani/web-quality-skills.git"
+                        ref = "main"
+                        skill = "."
+                        sparse = $false
+                    }
+                    [pscustomobject]@{
+                        name = "web-quality-skills"
+                        mode = "vendor"
+                        repo = "https://github.com/addyosmani/web-quality-skills.git"
+                        ref = "main"
+                        skill = "skills\accessibility"
+                        sparse = $false
+                    }
+                )
+                mcp_servers = @()
+                mcp_targets = @()
+                update_force = $true
+                sync_mode = "link"
+            }
+            $changed = $false
+            $dirMigrations = [ordered]@{
+                vendors = @()
+                imports = @()
+            }
+
+            Fix-Cfg $cfg ([ref]$changed) ([ref]$dirMigrations)
+
+            $changed | Should Be $true
+            (@($cfg.mappings | Where-Object { $_.from -eq "." })).Count | Should Be 0
+            (@($cfg.mappings | Where-Object { $_.from -eq "skills\accessibility" })).Count | Should Be 1
+            (@($cfg.imports | Where-Object { $_.mode -eq "vendor" -and $_.skill -eq "." })).Count | Should Be 0
+            (@($cfg.imports | Where-Object { $_.mode -eq "vendor" -and $_.skill -eq "skills\accessibility" })).Count | Should Be 1
+        }
     }
 
     Context "Fine-Grained update_force" {

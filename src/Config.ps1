@@ -285,6 +285,7 @@ function Fix-Cfg($cfg, [ref]$changed, [ref]$dirMigrations) {
     $cfg.vendors = $dedupVendors
 
     Repair-VendorImports $cfg $changed
+    Prune-VendorRootEntries $cfg $changed
 
     $dedupImports = @()
     $seenImports = New-Object System.Collections.Generic.HashSet[string]
@@ -396,6 +397,39 @@ function Fix-Cfg($cfg, [ref]$changed, [ref]$dirMigrations) {
     $cfg.mappings = $dedupMappings
 }
 
+function Prune-VendorRootEntries($cfg, [ref]$changed) {
+    if ($null -eq $cfg) { return }
+
+    # Normalize: vendor 根入口不作为实际同步输入，统一移除避免“配置显示与同步结果”分叉。
+    $rootMappings = @($cfg.mappings | Where-Object {
+            $_ -ne $null -and [string]$_.from -eq "." -and
+            [string]$_.vendor -ne "manual" -and [string]$_.vendor -ne "overrides"
+        })
+    if ($rootMappings.Count -gt 0) {
+        foreach ($m in $rootMappings) {
+            Log ("移除 vendor 根映射（统一按具体技能路径管理）：{0}|{1}|{2}" -f [string]$m.vendor, [string]$m.from, [string]$m.to) "WARN"
+        }
+        $cfg.mappings = @($cfg.mappings | Where-Object { $rootMappings -notcontains $_ })
+        $changed.Value = $true
+    }
+
+    $rootVendorImports = @()
+    foreach ($imp in @($cfg.imports)) {
+        if ($null -eq $imp) { continue }
+        $mode = if ($imp.PSObject.Properties.Match("mode").Count -gt 0) { [string]$imp.mode } else { "manual" }
+        if ($mode -ne "vendor") { continue }
+        $skillPath = Normalize-SkillPath ([string]$imp.skill)
+        if ($skillPath -eq ".") { $rootVendorImports += $imp }
+    }
+    if ($rootVendorImports.Count -gt 0) {
+        foreach ($i in $rootVendorImports) {
+            Log ("移除 vendor 根导入（skill='.'）：{0}" -f [string]$i.name) "WARN"
+        }
+        $cfg.imports = @($cfg.imports | Where-Object { $rootVendorImports -notcontains $_ })
+        $changed.Value = $true
+    }
+}
+
 function Match-VendorByRepo($cfg, [string]$repo) {
     if ([string]::IsNullOrWhiteSpace($repo)) { return $null }
     $normRepo = Normalize-RepoUrl $repo
@@ -468,6 +502,22 @@ function Migrate-ManualToVendor($cfg, [string]$vendorName, [string]$repo) {
             Upsert-Import $cfg $newImport
              
             $importsToRemove += $imp
+
+            # Remove stale manual mappings for this migrated import to avoid dangling manual refs.
+            $legacyFrom = Normalize-SkillPath ([string]$oldName)
+            $skillFrom = Normalize-SkillPath ([string]$skillPath)
+            $beforeMappings = @($cfg.mappings).Count
+            $cfg.mappings = @($cfg.mappings | Where-Object {
+                    $vendor = [string]$_.vendor
+                    if ($vendor -ne "manual") { return $true }
+                    $from = Normalize-SkillPath ([string]$_.from)
+                    if ([string]::IsNullOrWhiteSpace($from)) { return $true }
+                    return ($from -ne $legacyFrom) -and ($from -ne $skillFrom)
+                })
+            $removedLegacyMappings = $beforeMappings - @($cfg.mappings).Count
+            if ($removedLegacyMappings -gt 0) {
+                Log ("已清理迁移遗留 manual 映射：{0} 项（manual/{1}）" -f $removedLegacyMappings, $oldName)
+            }
 
             $migratedCount++
             Log ("已迁移手动技能：manual/{0} -> vendor/{1}/{2}" -f $oldName, $vendorName, $skillPath)

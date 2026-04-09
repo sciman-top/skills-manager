@@ -1048,7 +1048,11 @@ sandbox = "elevated"
                             sparse = $false
                         }
                     )
-                    mappings = @()
+                    mappings = @(
+                        [pscustomobject]@{ vendor = "manual"; from = "demo-manual"; to = "demo-manual" }
+                        [pscustomobject]@{ vendor = "manual"; from = "skills\\demo"; to = "demo-legacy-skill-path" }
+                        [pscustomobject]@{ vendor = "manual"; from = "keep-me"; to = "keep-me" }
+                    )
                 }
 
                 $migrated = Migrate-ManualToVendor $cfg "myvendor" "https://example.com/repo.git"
@@ -1056,6 +1060,9 @@ sandbox = "elevated"
                 (Test-Path $manualLegacyDir) | Should Be $false
                 @($cfg.imports | Where-Object { $_.name -eq "demo-manual" }).Count | Should Be 0
                 @($cfg.imports | Where-Object { $_.name -eq "myvendor" -and $_.mode -eq "vendor" }).Count | Should Be 1
+                @($cfg.mappings | Where-Object { $_.vendor -eq "manual" -and $_.from -eq "demo-manual" }).Count | Should Be 0
+                @($cfg.mappings | Where-Object { $_.vendor -eq "manual" -and $_.from -eq "skills\\demo" }).Count | Should Be 0
+                @($cfg.mappings | Where-Object { $_.vendor -eq "manual" -and $_.from -eq "keep-me" }).Count | Should Be 1
             }
             finally {
                 $script:VendorDir = $oldVendorDir
@@ -1094,17 +1101,65 @@ sandbox = "elevated"
                             sparse = $false
                         }
                     )
-                    mappings = @()
+                    mappings = @(
+                        [pscustomobject]@{ vendor = "manual"; from = "demo-manual"; to = "demo-manual" }
+                    )
                 }
 
                 $migrated = Migrate-ManualToVendor $cfg "myvendor" "https://example.com/repo.git"
                 $migrated | Should Be 1
                 @($cfg.imports | Where-Object { $_.name -eq "demo-manual" }).Count | Should Be 0
                 @($cfg.imports | Where-Object { $_.name -eq "myvendor" -and $_.mode -eq "vendor" }).Count | Should Be 1
+                @($cfg.mappings | Where-Object { $_.vendor -eq "manual" -and $_.from -eq "demo-manual" }).Count | Should Be 0
             }
             finally {
                 $script:VendorDir = $oldVendorDir
                 $script:ManualDir = $oldManualDir
+                $script:ImportDir = $oldImportDir
+            }
+        }
+    }
+
+    Context "Convert-InstalledVendorSkillsToManual" {
+        It "Converts installed vendor mappings to manual imports while preserving target names" {
+            $oldVendorDir = $script:VendorDir
+            $oldImportDir = $script:ImportDir
+            try {
+                $script:VendorDir = Join-Path $TestDrive "vendor-convert"
+                $script:ImportDir = Join-Path $TestDrive "imports-convert"
+                New-Item -ItemType Directory -Path $script:VendorDir -Force | Out-Null
+                New-Item -ItemType Directory -Path $script:ImportDir -Force | Out-Null
+
+                $skillSrc = Join-Path $script:VendorDir "demo-vendor\\skills\\content-strategy"
+                New-Item -ItemType Directory -Path $skillSrc -Force | Out-Null
+                Set-Content -Path (Join-Path $skillSrc "SKILL.md") -Value "---`nname: content-strategy`ndescription: x`n---"
+
+                $cfg = [pscustomobject]@{
+                    vendors = @(
+                        [pscustomobject]@{ name = "demo-vendor"; repo = "https://example.com/demo.git"; ref = "main" }
+                    )
+                    imports = @(
+                        [pscustomobject]@{ name = "demo-vendor"; repo = "https://example.com/demo.git"; ref = "main"; skill = "skills\\content-strategy"; mode = "vendor"; sparse = $false }
+                    )
+                    mappings = @(
+                        [pscustomobject]@{ vendor = "demo-vendor"; from = "skills\\content-strategy"; to = "demo-vendor-skills-content-strategy" }
+                    )
+                }
+                $vendorItem = [pscustomobject]@{ name = "demo-vendor"; repo = "https://example.com/demo.git"; ref = "main" }
+
+                $result = Convert-InstalledVendorSkillsToManual $cfg $vendorItem
+
+                $result.converted | Should Be 1
+                @($cfg.mappings | Where-Object { $_.vendor -eq "demo-vendor" }).Count | Should Be 0
+                @($cfg.imports | Where-Object { $_.mode -eq "manual" }).Count | Should Be 1
+                $manualImport = @($cfg.imports | Where-Object { $_.mode -eq "manual" })[0]
+                $manualImport.skill | Should Be "."
+                $manualName = [string]$manualImport.name
+                (Test-Path (Join-Path $script:ImportDir ($manualName + "\\SKILL.md"))) | Should Be $true
+                @($cfg.mappings | Where-Object { $_.vendor -eq "manual" -and $_.from -eq $manualName -and $_.to -eq "demo-vendor-skills-content-strategy" }).Count | Should Be 1
+            }
+            finally {
+                $script:VendorDir = $oldVendorDir
                 $script:ImportDir = $oldImportDir
             }
         }
