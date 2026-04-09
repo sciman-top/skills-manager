@@ -888,8 +888,155 @@ function Split-RepoSkillSuffix([string]$repoToken) {
         skill = $parts[1]
     }
 }
+function Looks-LikeRepoInput([string]$value) {
+    if ([string]::IsNullOrWhiteSpace($value)) { return $false }
+    $v = $value.Trim().Trim("'`"")
+    if (Test-LocalZipRepoInput $v) { return $true }
+    if ($v -match "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$") { return $true }
+    if ($v -match "^(git@github\.com:|ssh://git@github\.com/|https?://github\.com/|github\.com/)") { return $true }
+    return $false
+}
+function Extract-SkillFromGitHubTreeUrl([string]$value) {
+    if ([string]::IsNullOrWhiteSpace($value)) { return $null }
+    $v = $value.Trim().Trim("'`"").TrimEnd(".", ",", "。", "，", ";", "；")
+    if ($v -notmatch "^https?://github\.com/[^/]+/[^/]+/tree/[^/]+/(.+)$") { return $null }
+    return $Matches[1]
+}
+function Convert-GitHubTreeUrlToAddTokens([string]$value) {
+    $skill = Extract-SkillFromGitHubTreeUrl $value
+    if ([string]::IsNullOrWhiteSpace($skill)) { return $null }
+    $trimmed = $value.Trim().Trim("'`"").TrimEnd(".", ",", "。", "，", ";", "；")
+    if ($trimmed -notmatch "^https?://github\.com/([^/]+)/([^/]+)/tree/[^/]+/.+$") { return $null }
+    $repo = "https://github.com/{0}/{1}.git" -f $Matches[1], $Matches[2]
+    return ,@($repo, "--skill", $skill)
+}
+function Get-InstallScriptMappings() {
+    if ($null -ne $script:InstallScriptMappingsOverride) { return @($script:InstallScriptMappingsOverride) }
+    return @()
+}
+function Resolve-InstallScriptMapping([string]$url) {
+    if ([string]::IsNullOrWhiteSpace($url)) { return $null }
+    foreach ($entry in @(Get-InstallScriptMappings)) {
+        $match = [string]$entry.match
+        if ([string]::IsNullOrWhiteSpace($match)) { continue }
+        $isMatch = if ($entry.PSObject.Properties.Match("regex").Count -gt 0 -and [bool]$entry.regex) {
+            $url -match $match
+        }
+        else {
+            $url.Contains($match)
+        }
+        if (-not $isMatch) { continue }
+        $repo = [string]$entry.repo
+        if ([string]::IsNullOrWhiteSpace($repo)) { continue }
+        $tokens = @((Normalize-RepoUrl $repo))
+        $skill = $null
+        if ($entry.PSObject.Properties.Match("skill").Count -gt 0) { $skill = [string]$entry.skill }
+        if (-not [string]::IsNullOrWhiteSpace($skill)) { $tokens += @("--skill", $skill) }
+        return $tokens
+    }
+    return $null
+}
+function Resolve-AddTokensFromAnyFormat([string[]]$tokens) {
+    if (-not $tokens -or $tokens.Count -eq 0) { return $null }
+    $items = @($tokens | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    if ($items.Count -eq 0) { return $null }
+    $first = ([string]$items[0]).Trim()
+
+    if ($first -eq "/plugin") {
+        if ($items.Count -ge 4 -and ([string]$items[1]).ToLowerInvariant() -eq "marketplace" -and ([string]$items[2]).ToLowerInvariant() -eq "add") {
+            return ,@($items[3..($items.Count - 1)])
+        }
+        if ($items.Count -ge 3 -and ([string]$items[1]).ToLowerInvariant() -eq "install") {
+            $target = [string]$items[2]
+            if ($target -notmatch "/") { $target = "thedotmack/$target" }
+            $rest = @($items | Select-Object -Skip 3)
+            return ,@(@($target) + $rest)
+        }
+    }
+
+    if ($first -eq '$skill-installer') {
+        $rest = @($items | Select-Object -Skip 1)
+        if ($rest.Count -gt 0 -and ([string]$rest[0]).ToLowerInvariant() -eq "install") {
+            $rest = @($rest | Select-Object -Skip 1)
+        }
+        if ($rest.Count -eq 0) { return $null }
+        $target = [string]$rest[0]
+        $targetTokens = Convert-GitHubTreeUrlToAddTokens $target
+        if ($targetTokens) { return ,@(@($targetTokens) + @($rest | Select-Object -Skip 1)) }
+        if ($target -match "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$") {
+            return ,@(@($target) + @($rest | Select-Object -Skip 1))
+        }
+        return ,@(@("https://github.com/openai/skills.git", "--skill", ("skills/.curated/{0}" -f $target)) + @($rest | Select-Object -Skip 1))
+    }
+
+    $treeTokens = Convert-GitHubTreeUrlToAddTokens $first
+    if ($items.Count -eq 1 -and $treeTokens) { return ,@($treeTokens) }
+
+    if ($first -eq "npm" -and $items.Count -ge 4) {
+        $verb = ([string]$items[1]).ToLowerInvariant()
+        $flag = ([string]$items[2]).ToLowerInvariant()
+        $pkg = [string]$items[3]
+        if (($verb -eq "install" -or $verb -eq "i") -and $flag -eq "-g") {
+            if ($pkg -match "^@([^/]+)/([^/]+)$") { return ,@("{0}/{1}" -f $Matches[1], $Matches[2]) }
+            throw "npm install -g 仅支持 scoped package（例如 @owner/repo）。"
+        }
+    }
+
+    if ($first -eq "curl" -or $first -eq "Invoke-RestMethod") {
+        $url = $null
+        foreach ($item in $items) {
+            $candidate = [string]$item
+            if ($candidate -match "^https?://") { $url = $candidate; break }
+        }
+        $mapped = Resolve-InstallScriptMapping $url
+        if ($mapped) { return ,@($mapped) }
+        throw ("暂不支持直接解析 {0} 安装脚本，请先定位其对应仓库。" -f $first)
+    }
+
+    return $null
+}
+function Try-ParseAddLikeInput([string]$line) {
+    if ([string]::IsNullOrWhiteSpace($line)) { return $null }
+    $tokens = Split-Args $line
+    $resolved = Resolve-AddTokensFromAnyFormat $tokens
+    if ($resolved) { $tokens = $resolved }
+    else { $tokens = Get-AddTokensFromCommandLineTokens $tokens }
+    $parsed = Parse-AddArgs $tokens
+    return [pscustomobject]@{
+        repo = $parsed.repo
+        ref = $parsed.ref
+        skills = @($parsed.skills)
+    }
+}
+function Resolve-UniqueVendorName($cfg, [string]$vendorName, [string]$repo, [bool]$AllowExistingSameRepo = $false) {
+    $baseName = Normalize-NameWithNotice $vendorName "vendor 名称"
+    $identityKey = Get-RepoIdentityKey $repo
+    $existing = @($cfg.vendors | Where-Object { $_.name -eq $baseName })
+    if ($existing.Count -eq 0) { return $baseName }
+    foreach ($item in $existing) {
+        if (Is-SameRepository ([string]$item.repo) $repo) {
+            if ($AllowExistingSameRepo) { return $baseName }
+            throw ("同一技能库已存在，禁止重复占用 vendor 名称：{0}；identityKey={1}" -f $baseName, $identityKey)
+        }
+    }
+    $suffix = 2
+    while ($true) {
+        $candidate = "{0}-{1}" -f $baseName, $suffix
+        if ((@($cfg.vendors | Where-Object { $_.name -eq $candidate }).Count) -eq 0) { return $candidate }
+        $suffix++
+    }
+}
 function Parse-AddArgs([string[]]$tokens) {
-    $result = [ordered]@{ repo = $null; skills = @(); ref = $null; mode = "manual"; sparse = $false; name = $null }
+    $result = [ordered]@{
+        repo = $null
+        skills = @()
+        ref = $null
+        mode = "manual"
+        sparse = $false
+        name = $null
+        skillSpecified = $false
+        modeSpecified = $false
+    }
     for ($i = 0; $i -lt $tokens.Count; $i++) {
         $t = $tokens[$i]
         if ($t -match "^-") {
@@ -899,6 +1046,7 @@ function Parse-AddArgs([string[]]$tokens) {
                 $val = $t.Substring(8)
                 if ([string]::IsNullOrWhiteSpace($val)) { throw "参数值不能为空：--skill" }
                 $result.skills += $val
+                $result.skillSpecified = $true
                 continue
             }
             if ($key -match "^--ref=") {
@@ -914,6 +1062,7 @@ function Parse-AddArgs([string[]]$tokens) {
                 $val = $t.Substring(7)
                 if ([string]::IsNullOrWhiteSpace($val)) { throw "参数值不能为空：--mode" }
                 $result.mode = $val
+                $result.modeSpecified = $true
                 continue
             }
             if ($key -match "^--name=") {
@@ -929,14 +1078,20 @@ function Parse-AddArgs([string[]]$tokens) {
                 if ($val -match "^-") { throw "参数缺少值：$t" }
                 if ([string]::IsNullOrWhiteSpace($val)) { throw ("参数值不能为空：{0}" -f $key) }
                 switch ($key) {
-                    "--skill" { $result.skills += $val }
+                    "--skill" {
+                        $result.skills += $val
+                        $result.skillSpecified = $true
+                    }
                     "--ref" {
                         if (Test-LooksLikeRepoUrl $val) {
                             throw ("--ref 不能是仓库地址：{0}。如果你想安装该仓库，请把它放在 repo 位置；如果是分支名，请传真实 branch/tag。" -f $val)
                         }
                         $result.ref = $val
                     }
-                    "--mode" { $result.mode = $val }
+                    "--mode" {
+                        $result.mode = $val
+                        $result.modeSpecified = $true
+                    }
                     "--name" { $result.name = $val }
                 }
                 continue
@@ -960,10 +1115,12 @@ function Parse-AddArgs([string[]]$tokens) {
         }
     }
     Need (-not [string]::IsNullOrWhiteSpace($result.repo)) "缺少 repo 参数。示例：add <repo> --skill <name>"
+    Need (Looks-LikeRepoInput $result.repo) ("输入并非有效的 GitHub 仓库格式：{0}" -f $result.repo)
     $repoSkill = Split-RepoSkillSuffix $result.repo
     if ($repoSkill -and $result.skills.Count -eq 0) {
         $result.repo = $repoSkill.repo
         $result.skills += $repoSkill.skill
+        $result.skillSpecified = $true
         Write-Host ("检测到 repo@skill 写法，已自动转换为：repo={0} --skill {1}" -f $repoSkill.repo, $repoSkill.skill) -ForegroundColor Yellow
     }
     if ($result.skills.Count -eq 0) { $result.skills += "." }
@@ -1059,6 +1216,14 @@ function Merge-FilterAndArgs([string]$filter, [string[]]$tokens) {
     }
     if ($r -match "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$") {
         return ("https://github.com/{0}.git" -f $r)
+    }
+    return $r
+}
+function Remove-GitHubTreeSuffix([string]$repo) {
+    if ([string]::IsNullOrWhiteSpace($repo)) { return $repo }
+    $r = $repo.Trim().Trim("'`"")
+    if ($r -match "^(https?://github\.com/[^/]+/[^/]+?)(?:\.git)?/tree/[^/]+/.+$") {
+        return ($Matches[1] + ".git")
     }
     return $r
 }
@@ -1327,7 +1492,8 @@ function Ensure-RepoFromGitArchive([string]$path, [string]$repo, [string]$ref, [
 }
 function Resolve-GitHubOwnerRepo([string]$repo) {
     if ([string]::IsNullOrWhiteSpace($repo)) { return $null }
-    $r = $repo.Trim().Trim("'`"")
+    $r = Remove-GitHubTreeSuffix $repo
+    $r = $r.Trim().Trim("'`"")
     if ($r -match "^git@github\.com:(.+?)/(.+?)(?:\.git)?$") {
         return [pscustomobject]@{ owner = $Matches[1]; name = $Matches[2] }
     }
@@ -1418,7 +1584,11 @@ function Get-GitHeadBranch {
 }
 function Get-RepoIdentity([string]$repo) {
     if ([string]::IsNullOrWhiteSpace($repo)) { return $null }
-    $r = $repo.Trim().Trim("'`"")
+    $r = Remove-GitHubTreeSuffix $repo
+    $r = $r.Trim().Trim("'`"")
+    if ($r -match "^ssh://git@github\.com/(.+?)/(.+?)(?:\.git)?/?$") {
+        return ("github.com/{0}/{1}" -f $Matches[1], $Matches[2]).ToLowerInvariant()
+    }
     if ($r -match "^git@github\.com:(.+)$") {
         $r = "https://github.com/$($Matches[1])"
     }
@@ -1437,11 +1607,17 @@ function Get-RepoIdentity([string]$repo) {
     if ($n.EndsWith(".git")) { $n = $n.Substring(0, $n.Length - 4) }
     return $n.TrimEnd("/").ToLowerInvariant()
 }
+function Get-RepoIdentityKey([string]$repo) {
+    return (Get-RepoIdentity $repo)
+}
 function Is-SameRepoIdentity([string]$a, [string]$b) {
     $ia = Get-RepoIdentity $a
     $ib = Get-RepoIdentity $b
     if ([string]::IsNullOrWhiteSpace($ia) -or [string]::IsNullOrWhiteSpace($ib)) { return $false }
     return ($ia -eq $ib)
+}
+function Is-SameRepository([string]$a, [string]$b) {
+    return (Is-SameRepoIdentity $a $b)
 }
 function Test-LooksLikeRepoUrl([string]$value) {
     if ([string]::IsNullOrWhiteSpace($value)) { return $false }
@@ -1956,6 +2132,8 @@ function Fix-Cfg($cfg, [ref]$changed, [ref]$dirMigrations) {
     }
     $cfg.vendors = $dedupVendors
 
+    Repair-VendorImports $cfg $changed
+
     $dedupImports = @()
     $seenImports = New-Object System.Collections.Generic.HashSet[string]
     foreach ($i in $cfg.imports) {
@@ -2074,6 +2252,33 @@ function Match-VendorByRepo($cfg, [string]$repo) {
         if ($vRepo -eq $normRepo) { return $v }
     }
     return $null
+}
+
+function Repair-VendorImports($cfg, [ref]$changed) {
+    if ($null -eq $cfg -or $null -eq $cfg.imports) { return }
+    foreach ($i in @($cfg.imports)) {
+        $mode = if ($i.PSObject.Properties.Match("mode").Count -gt 0) { [string]$i.mode } else { "manual" }
+        if ($mode -ne "vendor") { continue }
+
+        $vendorName = [string]$i.name
+        $matchedVendor = Match-VendorByRepo $cfg ([string]$i.repo)
+        if ($matchedVendor) {
+            $canonicalName = [string]$matchedVendor.name
+            if ($vendorName -ne $canonicalName) {
+                Log ("vendor import 名称已按 repo 自动归并：{0} -> {1}" -f $vendorName, $canonicalName) "WARN"
+                $i.name = $canonicalName
+                $vendorName = $canonicalName
+                $changed.Value = $true
+            }
+        }
+
+        $skillPath = Normalize-SkillPath ([string]$i.skill)
+        if ([string]::IsNullOrWhiteSpace($skillPath)) { $skillPath = "." }
+        if ([string]$i.skill -ne $skillPath) {
+            $i.skill = $skillPath
+            $changed.Value = $true
+        }
+    }
 }
 
 function Migrate-ManualToVendor($cfg, [string]$vendorName, [string]$repo) {
@@ -3274,12 +3479,29 @@ function Write-InstallErrorHint([string]$msg, [string]$repo, [string[]]$skillPat
     }
 }
 
+function Get-DeclaredSkillNameFromDir([string]$skillDir) {
+    if ([string]::IsNullOrWhiteSpace($skillDir)) { return $null }
+    $skillFile = Join-Path $skillDir "SKILL.md"
+    if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { return $null }
+    foreach ($line in (Get-Content -LiteralPath $skillFile -TotalCount 80 -ErrorAction SilentlyContinue)) {
+        if ($line -match "^\s*name:\s*(.+?)\s*$") {
+            $declaredName = $Matches[1].Trim().Trim("'`"")
+            if (-not [string]::IsNullOrWhiteSpace($declaredName)) {
+                return $declaredName
+            }
+        }
+    }
+    return $null
+}
+
 function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
     Preflight
     $cfgRaw = ""
     $cfg = LoadCfg
     if (Test-Path $CfgPath) { $cfgRaw = Get-Content $CfgPath -Raw }
 
+    $resolvedTokens = Resolve-AddTokensFromAnyFormat $tokens
+    if ($resolvedTokens) { $tokens = $resolvedTokens }
     $parsed = Parse-AddArgs $tokens
     $repo = Normalize-RepoUrl $parsed.repo
     $ref = $parsed.ref
@@ -3310,6 +3532,8 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
             Log ("未指定 --ref，自动使用仓库默认分支：{0}" -f $ref)
         }
 
+        $resolvedSkillPaths = $null
+
         # Auto-detect mode if not specified (or default manual)
         if ($mode -eq "manual") {
             Need (-not [string]::IsNullOrWhiteSpace($repo)) "Repo URL cannot be empty"
@@ -3320,10 +3544,22 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
                 $parsed.name = $vendorName # Override name to vendor name
                 Log ("自动检测到已存在的 Vendor：{0}。切换为 Vendor 模式安装。" -f $vendorName)
             }
+            elseif (-not [bool]$parsed.skillSpecified -and -not [bool]$parsed.modeSpecified) {
+                $resolvedSkillPaths = @((Get-SkillCandidatesFromGitRepo $repo $ref | ForEach-Object { [string]$_.rel }))
+                if ($resolvedSkillPaths.Count -gt 0) {
+                    $mode = "vendor"
+                    Log ("未显式指定 --skill，已按整库导入处理：{0} 个技能入口。" -f $resolvedSkillPaths.Count)
+                }
+            }
         }
 
         # Strict precheck: resolve all skill paths before writing config.
-        $resolvedSkillPaths = Resolve-SkillsWithProbe $repo $ref $parsed.skills $cfg.update_force
+        if ($null -eq $resolvedSkillPaths) {
+            $resolvedSkillPaths = @(Resolve-SkillsWithProbe $repo $ref $parsed.skills $cfg.update_force)
+        }
+        else {
+            $resolvedSkillPaths = @($resolvedSkillPaths)
+        }
 
         if ($mode -eq "manual") {
             $baseName = $null
@@ -3332,7 +3568,8 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
             }
             foreach ($skillPath in $resolvedSkillPaths) {
                 $name = $baseName
-                if ([string]::IsNullOrWhiteSpace($name) -or $resolvedSkillPaths.Count -gt 1) {
+                $allowDeclaredName = [string]::IsNullOrWhiteSpace($name)
+                if ($allowDeclaredName -or $resolvedSkillPaths.Count -gt 1) {
                     $leaf = if ($skillPath -eq ".") { Guess-VendorName $repo } else { Split-Path $skillPath -Leaf }
                     $curName = Normalize-Name $leaf
                     $name = if (-not [string]::IsNullOrWhiteSpace($name)) { "$name-$curName" } else { $curName }
@@ -3372,6 +3609,22 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
                 $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
                 Need (Test-IsSkillDir $src) "未找到技能入口文件（SKILL.md/AGENTS.md/GEMINI.md/CLAUDE.md）：$src"
 
+                if ($allowDeclaredName) {
+                    $declaredName = Get-DeclaredSkillNameFromDir $src
+                    if (-not [string]::IsNullOrWhiteSpace($declaredName)) {
+                        $preferredName = Normalize-NameWithNotice $declaredName "导入名称"
+                        if ($preferredName -ne $name) {
+                            $preferredCache = Join-Path $ImportDir $preferredName
+                            if ($cache -ne $preferredCache -and -not (Test-Path $preferredCache)) {
+                                Invoke-MoveItem $cache $preferredCache
+                                $cache = $preferredCache
+                                $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
+                            }
+                            $name = $preferredName
+                        }
+                    }
+                }
+
                 $import = @{ name = $name; repo = $repo; ref = $ref; skill = $skillPath; mode = "manual"; sparse = $curSparse }
                 Upsert-Import $cfg $import
             }
@@ -3379,7 +3632,8 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
         else {
             $vendorName = $parsed.name
             if ([string]::IsNullOrWhiteSpace($vendorName)) { $vendorName = Guess-VendorName $repo }
-            $vendorName = Normalize-NameWithNotice $vendorName "vendor 名称"
+            $allowExistingVendor = ($cfg.vendors | Where-Object { $_.name -eq $vendorName -and (Is-SameRepository ([string]$_.repo) $repo) } | Select-Object -First 1) -ne $null
+            $vendorName = Resolve-UniqueVendorName $cfg $vendorName $repo $allowExistingVendor
             $vendorPath = VendorPath $vendorName
       
             Ensure-Repo $vendorPath $repo $ref $null $cfg.update_force $true
@@ -3392,10 +3646,11 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
                 $targetSuffix = if ($skillPath -eq ".") { $vendorName } else { $skillPath }
                 $targetName = Make-TargetName $vendorName $targetSuffix
                 Ensure-ImportVendorMapping $cfg $vendorName $skillPath $targetName
-        
-                $import = @{ name = $vendorName; repo = $repo; ref = $ref; skill = $skillPath; mode = "vendor"; sparse = $sparse }
-                Upsert-Import $cfg $import
             }
+
+            $primarySkillPath = if ($resolvedSkillPaths -contains ".") { "." } else { [string]$resolvedSkillPaths[0] }
+            $import = @{ name = $vendorName; repo = $repo; ref = $ref; skill = $primarySkillPath; mode = "vendor"; sparse = $sparse }
+            Upsert-Import $cfg $import
       
             $vendor = $cfg.vendors | Where-Object { $_.name -eq $vendorName } | Select-Object -First 1
             if (-not $vendor) {
@@ -3790,6 +4045,34 @@ function Get-InstalledSet($cfg, $manualItems = $null, $overrideItems = $null) {
     return $installed
 }
 
+function Hide-VendorRootSkills($items) {
+    $arr = @($items)
+    if ($arr.Count -eq 0) { return @() }
+
+    $vendorsWithChildren = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($item in $arr) {
+        if ($null -eq $item) { continue }
+        $vendor = [string]$item.vendor
+        $from = [string]$item.from
+        if ([string]::IsNullOrWhiteSpace($vendor)) { continue }
+        if ($from -ne ".") {
+            $vendorsWithChildren.Add($vendor) | Out-Null
+        }
+    }
+
+    if ($vendorsWithChildren.Count -eq 0) { return $arr }
+
+    $filtered = @()
+    foreach ($item in $arr) {
+        if ($null -eq $item) { continue }
+        $vendor = [string]$item.vendor
+        $from = [string]$item.from
+        if ($from -eq "." -and $vendorsWithChildren.Contains($vendor)) { continue }
+        $filtered += $item
+    }
+    return $filtered
+}
+
 function Parse-IndexSelection([string]$selText, [int]$max) {
     if ($null -eq $selText) { return @() }
     $selText = $selText.Trim()
@@ -3830,19 +4113,22 @@ function Read-SelectionIndices([string]$prompt, [int]$count, [string]$invalidMsg
     $idx = Parse-IndexSelection $sel $count
     if ($idx.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($sel) -and $sel.ToLowerInvariant() -ne "0") {
         Write-Host $invalidMsg
-        return @()
+        return [pscustomobject]@{ indices = @(); canceled = $false }
     }
-    return $idx
+    $canceled = -not [string]::IsNullOrWhiteSpace($sel) -and $sel.Trim().ToLowerInvariant() -eq "0"
+    return [pscustomobject]@{ indices = $idx; canceled = $canceled }
 }
 function Select-Items($items, [scriptblock]$formatter, [string]$prompt, [string]$invalidMsg) {
-    if ($items.Count -eq 0) { return @() }
+    if ($items.Count -eq 0) { return [pscustomobject]@{ items = @(); canceled = $false } }
     Write-ItemsInColumns $items $formatter
     Write-SelectionHint
-    $idx = Read-SelectionIndices $prompt $items.Count $invalidMsg
-    if ($idx.Count -eq 0) { return @() }
+    $selection = Read-SelectionIndices $prompt $items.Count $invalidMsg
+    if ($selection.canceled) { return [pscustomobject]@{ items = @(); canceled = $true } }
+    $idx = $selection.indices
+    if ($idx.Count -eq 0) { return [pscustomobject]@{ items = @(); canceled = $false } }
     $selected = @()
     foreach ($n in $idx) { $selected += $items[$n - 1] }
-    return $selected
+    return [pscustomobject]@{ items = $selected; canceled = $false }
 }
 
 function Filter-Skills($items, [string]$filter) {
@@ -3904,7 +4190,7 @@ function 安装 {
     $filter = Read-Host "可选：关键词过滤（空格=AND，或 /regex/）"
     $all = 收集Skills "" $cfg $manualItems
     Need ($all.Count -gt 0) "未发现任何 skills。请先【新增技能库】。"
-    $list = Filter-Skills $all $filter
+    $list = Hide-VendorRootSkills (Filter-Skills $all $filter)
     if ($list.Count -eq 0) {
         Write-Host "未发现匹配项。"
         return
@@ -3926,7 +4212,7 @@ function 安装 {
     $previewMappings = @()
 
     $added = 0
-    $selected = Select-Items $available `
+    $selection = Select-Items $available `
     { param($idx, $item)
         $displayVendor = Get-DisplayVendor $item
         $leaf = Split-Path $item.from -Leaf
@@ -3935,6 +4221,11 @@ function 安装 {
     } `
         "请选择要安装的技能（批量安装到白名单）" `
         "未解析到有效序号（可能是分隔符或范围格式问题）。已取消写入白名单。"
+    if ($selection.canceled) {
+        Write-Host "已取消安装。"
+        return
+    }
+    $selected = $selection.items
     if ($selected.Count -eq 0) {
         Write-Host "未选择新增技能。将直接执行【构建生效】。"
         构建生效
@@ -3996,12 +4287,13 @@ function 卸载 {
 
     # 筛选已安装的技能
     $onlyInstalled = $list | Where-Object { $installedSet.Contains("$($_.vendor)|$($_.from)") }
+    $onlyInstalled = Hide-VendorRootSkills $onlyInstalled
     if ($onlyInstalled.Count -eq 0) {
         Write-Host "没有已安装的技能可卸载。"
         return
     }
 
-    $selectedItems = Select-Items $onlyInstalled `
+    $selection = Select-Items $onlyInstalled `
     { param($idx, $item)
         $label = Get-DisplayVendor $item
         $leaf = Split-Path $item.from -Leaf
@@ -4010,6 +4302,11 @@ function 卸载 {
     } `
         "请选择要卸载的技能（从白名单移除）" `
         "未解析到有效序号（可能是分隔符或范围格式问题）。已取消操作。"
+    if ($selection.canceled) {
+        Write-Host "已取消卸载。"
+        return
+    }
+    $selectedItems = $selection.items
     if ($selectedItems.Count -eq 0) {
         Write-Host "未选择任何技能。"
         return
@@ -4024,6 +4321,7 @@ function 卸载 {
     if (Skip-IfDryRun "卸载技能") { return }
 
     $removedMappings = 0
+    $removedVendorImports = 0
     $deletedManualImports = 0
     $deletedLegacyManualDirs = 0
     $deletedOverrides = 0
@@ -4048,14 +4346,29 @@ function 卸载 {
         }
         else {
             # mapping 技能：从 mappings 移除
-            $cfg.mappings = $cfg.mappings | Where-Object { -not ("$($_.vendor)|$($_.from)" -eq "$($item.vendor)|$($item.from)") }
+            $cfg.mappings = @($cfg.mappings | Where-Object { -not ("$($_.vendor)|$($_.from)" -eq "$($item.vendor)|$($item.from)") })
             $removedMappings++
+
+            $skillPath = Normalize-SkillPath ([string]$item.from)
+            $hasSameMapping = @($cfg.mappings | Where-Object { $_.vendor -eq $item.vendor -and $_.from -eq $skillPath }).Count -gt 0
+            if (-not $hasSameMapping) {
+                $beforeImports = @($cfg.imports).Count
+                $cfg.imports = @($cfg.imports | Where-Object {
+                        $mode = if ($_.PSObject.Properties.Match("mode").Count -gt 0) { [string]$_.mode } else { "manual" }
+                        if ($mode -ne "vendor") { return $true }
+                        if ([string]$_.name -ne [string]$item.vendor) { return $true }
+                        $importSkill = Normalize-SkillPath ([string]$_.skill)
+                        return ($importSkill -ne $skillPath)
+                    })
+                $removedVendorImports += ($beforeImports - @($cfg.imports).Count)
+            }
         }
     }
 
     SaveCfg $cfg
     $parts = @()
     if ($removedMappings -gt 0) { $parts += "移除白名单 $removedMappings 项" }
+    if ($removedVendorImports -gt 0) { $parts += "删除 vendor 导入 $removedVendorImports 项" }
     if ($deletedManualImports -gt 0) { $parts += "删除 manual 导入 $deletedManualImports 项" }
     if ($deletedLegacyManualDirs -gt 0) { $parts += "清理 legacy manual 目录 $deletedLegacyManualDirs 项" }
     if ($deletedOverrides -gt 0) { $parts += "删除 overrides $deletedOverrides 项（已备份 $backedOverrides 项）" }
@@ -4084,7 +4397,7 @@ function 发现 {
         }
         $all = 收集Skills "" $cfg $manualItems
         Need ($all.Count -gt 0) "未发现任何 skills。请先【新增技能库】。"
-        $list = Filter-Skills $all $f
+        $list = Hide-VendorRootSkills (Filter-Skills $all $f)
         if ($list.Count -eq 0) {
             Write-Host "未发现匹配项。"
             return

@@ -870,8 +870,155 @@ function Split-RepoSkillSuffix([string]$repoToken) {
         skill = $parts[1]
     }
 }
+function Looks-LikeRepoInput([string]$value) {
+    if ([string]::IsNullOrWhiteSpace($value)) { return $false }
+    $v = $value.Trim().Trim("'`"")
+    if (Test-LocalZipRepoInput $v) { return $true }
+    if ($v -match "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$") { return $true }
+    if ($v -match "^(git@github\.com:|ssh://git@github\.com/|https?://github\.com/|github\.com/)") { return $true }
+    return $false
+}
+function Extract-SkillFromGitHubTreeUrl([string]$value) {
+    if ([string]::IsNullOrWhiteSpace($value)) { return $null }
+    $v = $value.Trim().Trim("'`"").TrimEnd(".", ",", "。", "，", ";", "；")
+    if ($v -notmatch "^https?://github\.com/[^/]+/[^/]+/tree/[^/]+/(.+)$") { return $null }
+    return $Matches[1]
+}
+function Convert-GitHubTreeUrlToAddTokens([string]$value) {
+    $skill = Extract-SkillFromGitHubTreeUrl $value
+    if ([string]::IsNullOrWhiteSpace($skill)) { return $null }
+    $trimmed = $value.Trim().Trim("'`"").TrimEnd(".", ",", "。", "，", ";", "；")
+    if ($trimmed -notmatch "^https?://github\.com/([^/]+)/([^/]+)/tree/[^/]+/.+$") { return $null }
+    $repo = "https://github.com/{0}/{1}.git" -f $Matches[1], $Matches[2]
+    return ,@($repo, "--skill", $skill)
+}
+function Get-InstallScriptMappings() {
+    if ($null -ne $script:InstallScriptMappingsOverride) { return @($script:InstallScriptMappingsOverride) }
+    return @()
+}
+function Resolve-InstallScriptMapping([string]$url) {
+    if ([string]::IsNullOrWhiteSpace($url)) { return $null }
+    foreach ($entry in @(Get-InstallScriptMappings)) {
+        $match = [string]$entry.match
+        if ([string]::IsNullOrWhiteSpace($match)) { continue }
+        $isMatch = if ($entry.PSObject.Properties.Match("regex").Count -gt 0 -and [bool]$entry.regex) {
+            $url -match $match
+        }
+        else {
+            $url.Contains($match)
+        }
+        if (-not $isMatch) { continue }
+        $repo = [string]$entry.repo
+        if ([string]::IsNullOrWhiteSpace($repo)) { continue }
+        $tokens = @((Normalize-RepoUrl $repo))
+        $skill = $null
+        if ($entry.PSObject.Properties.Match("skill").Count -gt 0) { $skill = [string]$entry.skill }
+        if (-not [string]::IsNullOrWhiteSpace($skill)) { $tokens += @("--skill", $skill) }
+        return $tokens
+    }
+    return $null
+}
+function Resolve-AddTokensFromAnyFormat([string[]]$tokens) {
+    if (-not $tokens -or $tokens.Count -eq 0) { return $null }
+    $items = @($tokens | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    if ($items.Count -eq 0) { return $null }
+    $first = ([string]$items[0]).Trim()
+
+    if ($first -eq "/plugin") {
+        if ($items.Count -ge 4 -and ([string]$items[1]).ToLowerInvariant() -eq "marketplace" -and ([string]$items[2]).ToLowerInvariant() -eq "add") {
+            return ,@($items[3..($items.Count - 1)])
+        }
+        if ($items.Count -ge 3 -and ([string]$items[1]).ToLowerInvariant() -eq "install") {
+            $target = [string]$items[2]
+            if ($target -notmatch "/") { $target = "thedotmack/$target" }
+            $rest = @($items | Select-Object -Skip 3)
+            return ,@(@($target) + $rest)
+        }
+    }
+
+    if ($first -eq '$skill-installer') {
+        $rest = @($items | Select-Object -Skip 1)
+        if ($rest.Count -gt 0 -and ([string]$rest[0]).ToLowerInvariant() -eq "install") {
+            $rest = @($rest | Select-Object -Skip 1)
+        }
+        if ($rest.Count -eq 0) { return $null }
+        $target = [string]$rest[0]
+        $targetTokens = Convert-GitHubTreeUrlToAddTokens $target
+        if ($targetTokens) { return ,@(@($targetTokens) + @($rest | Select-Object -Skip 1)) }
+        if ($target -match "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$") {
+            return ,@(@($target) + @($rest | Select-Object -Skip 1))
+        }
+        return ,@(@("https://github.com/openai/skills.git", "--skill", ("skills/.curated/{0}" -f $target)) + @($rest | Select-Object -Skip 1))
+    }
+
+    $treeTokens = Convert-GitHubTreeUrlToAddTokens $first
+    if ($items.Count -eq 1 -and $treeTokens) { return ,@($treeTokens) }
+
+    if ($first -eq "npm" -and $items.Count -ge 4) {
+        $verb = ([string]$items[1]).ToLowerInvariant()
+        $flag = ([string]$items[2]).ToLowerInvariant()
+        $pkg = [string]$items[3]
+        if (($verb -eq "install" -or $verb -eq "i") -and $flag -eq "-g") {
+            if ($pkg -match "^@([^/]+)/([^/]+)$") { return ,@("{0}/{1}" -f $Matches[1], $Matches[2]) }
+            throw "npm install -g 仅支持 scoped package（例如 @owner/repo）。"
+        }
+    }
+
+    if ($first -eq "curl" -or $first -eq "Invoke-RestMethod") {
+        $url = $null
+        foreach ($item in $items) {
+            $candidate = [string]$item
+            if ($candidate -match "^https?://") { $url = $candidate; break }
+        }
+        $mapped = Resolve-InstallScriptMapping $url
+        if ($mapped) { return ,@($mapped) }
+        throw ("暂不支持直接解析 {0} 安装脚本，请先定位其对应仓库。" -f $first)
+    }
+
+    return $null
+}
+function Try-ParseAddLikeInput([string]$line) {
+    if ([string]::IsNullOrWhiteSpace($line)) { return $null }
+    $tokens = Split-Args $line
+    $resolved = Resolve-AddTokensFromAnyFormat $tokens
+    if ($resolved) { $tokens = $resolved }
+    else { $tokens = Get-AddTokensFromCommandLineTokens $tokens }
+    $parsed = Parse-AddArgs $tokens
+    return [pscustomobject]@{
+        repo = $parsed.repo
+        ref = $parsed.ref
+        skills = @($parsed.skills)
+    }
+}
+function Resolve-UniqueVendorName($cfg, [string]$vendorName, [string]$repo, [bool]$AllowExistingSameRepo = $false) {
+    $baseName = Normalize-NameWithNotice $vendorName "vendor 名称"
+    $identityKey = Get-RepoIdentityKey $repo
+    $existing = @($cfg.vendors | Where-Object { $_.name -eq $baseName })
+    if ($existing.Count -eq 0) { return $baseName }
+    foreach ($item in $existing) {
+        if (Is-SameRepository ([string]$item.repo) $repo) {
+            if ($AllowExistingSameRepo) { return $baseName }
+            throw ("同一技能库已存在，禁止重复占用 vendor 名称：{0}；identityKey={1}" -f $baseName, $identityKey)
+        }
+    }
+    $suffix = 2
+    while ($true) {
+        $candidate = "{0}-{1}" -f $baseName, $suffix
+        if ((@($cfg.vendors | Where-Object { $_.name -eq $candidate }).Count) -eq 0) { return $candidate }
+        $suffix++
+    }
+}
 function Parse-AddArgs([string[]]$tokens) {
-    $result = [ordered]@{ repo = $null; skills = @(); ref = $null; mode = "manual"; sparse = $false; name = $null }
+    $result = [ordered]@{
+        repo = $null
+        skills = @()
+        ref = $null
+        mode = "manual"
+        sparse = $false
+        name = $null
+        skillSpecified = $false
+        modeSpecified = $false
+    }
     for ($i = 0; $i -lt $tokens.Count; $i++) {
         $t = $tokens[$i]
         if ($t -match "^-") {
@@ -881,6 +1028,7 @@ function Parse-AddArgs([string[]]$tokens) {
                 $val = $t.Substring(8)
                 if ([string]::IsNullOrWhiteSpace($val)) { throw "参数值不能为空：--skill" }
                 $result.skills += $val
+                $result.skillSpecified = $true
                 continue
             }
             if ($key -match "^--ref=") {
@@ -896,6 +1044,7 @@ function Parse-AddArgs([string[]]$tokens) {
                 $val = $t.Substring(7)
                 if ([string]::IsNullOrWhiteSpace($val)) { throw "参数值不能为空：--mode" }
                 $result.mode = $val
+                $result.modeSpecified = $true
                 continue
             }
             if ($key -match "^--name=") {
@@ -911,14 +1060,20 @@ function Parse-AddArgs([string[]]$tokens) {
                 if ($val -match "^-") { throw "参数缺少值：$t" }
                 if ([string]::IsNullOrWhiteSpace($val)) { throw ("参数值不能为空：{0}" -f $key) }
                 switch ($key) {
-                    "--skill" { $result.skills += $val }
+                    "--skill" {
+                        $result.skills += $val
+                        $result.skillSpecified = $true
+                    }
                     "--ref" {
                         if (Test-LooksLikeRepoUrl $val) {
                             throw ("--ref 不能是仓库地址：{0}。如果你想安装该仓库，请把它放在 repo 位置；如果是分支名，请传真实 branch/tag。" -f $val)
                         }
                         $result.ref = $val
                     }
-                    "--mode" { $result.mode = $val }
+                    "--mode" {
+                        $result.mode = $val
+                        $result.modeSpecified = $true
+                    }
                     "--name" { $result.name = $val }
                 }
                 continue
@@ -942,10 +1097,12 @@ function Parse-AddArgs([string[]]$tokens) {
         }
     }
     Need (-not [string]::IsNullOrWhiteSpace($result.repo)) "缺少 repo 参数。示例：add <repo> --skill <name>"
+    Need (Looks-LikeRepoInput $result.repo) ("输入并非有效的 GitHub 仓库格式：{0}" -f $result.repo)
     $repoSkill = Split-RepoSkillSuffix $result.repo
     if ($repoSkill -and $result.skills.Count -eq 0) {
         $result.repo = $repoSkill.repo
         $result.skills += $repoSkill.skill
+        $result.skillSpecified = $true
         Write-Host ("检测到 repo@skill 写法，已自动转换为：repo={0} --skill {1}" -f $repoSkill.repo, $repoSkill.skill) -ForegroundColor Yellow
     }
     if ($result.skills.Count -eq 0) { $result.skills += "." }

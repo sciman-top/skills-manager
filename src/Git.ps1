@@ -18,6 +18,14 @@ function Normalize-RepoUrl([string]$repo) {
     }
     return $r
 }
+function Remove-GitHubTreeSuffix([string]$repo) {
+    if ([string]::IsNullOrWhiteSpace($repo)) { return $repo }
+    $r = $repo.Trim().Trim("'`"")
+    if ($r -match "^(https?://github\.com/[^/]+/[^/]+?)(?:\.git)?/tree/[^/]+/.+$") {
+        return ($Matches[1] + ".git")
+    }
+    return $r
+}
 function Guess-VendorName([string]$repo) {
     $r = $repo.Trim().TrimEnd("/")
     if ($r.EndsWith(".git")) { $r = $r.Substring(0, $r.Length - 4) }
@@ -283,7 +291,8 @@ function Ensure-RepoFromGitArchive([string]$path, [string]$repo, [string]$ref, [
 }
 function Resolve-GitHubOwnerRepo([string]$repo) {
     if ([string]::IsNullOrWhiteSpace($repo)) { return $null }
-    $r = $repo.Trim().Trim("'`"")
+    $r = Remove-GitHubTreeSuffix $repo
+    $r = $r.Trim().Trim("'`"")
     if ($r -match "^git@github\.com:(.+?)/(.+?)(?:\.git)?$") {
         return [pscustomobject]@{ owner = $Matches[1]; name = $Matches[2] }
     }
@@ -374,7 +383,11 @@ function Get-GitHeadBranch {
 }
 function Get-RepoIdentity([string]$repo) {
     if ([string]::IsNullOrWhiteSpace($repo)) { return $null }
-    $r = $repo.Trim().Trim("'`"")
+    $r = Remove-GitHubTreeSuffix $repo
+    $r = $r.Trim().Trim("'`"")
+    if ($r -match "^ssh://git@github\.com/(.+?)/(.+?)(?:\.git)?/?$") {
+        return ("github.com/{0}/{1}" -f $Matches[1], $Matches[2]).ToLowerInvariant()
+    }
     if ($r -match "^git@github\.com:(.+)$") {
         $r = "https://github.com/$($Matches[1])"
     }
@@ -393,11 +406,17 @@ function Get-RepoIdentity([string]$repo) {
     if ($n.EndsWith(".git")) { $n = $n.Substring(0, $n.Length - 4) }
     return $n.TrimEnd("/").ToLowerInvariant()
 }
+function Get-RepoIdentityKey([string]$repo) {
+    return (Get-RepoIdentity $repo)
+}
 function Is-SameRepoIdentity([string]$a, [string]$b) {
     $ia = Get-RepoIdentity $a
     $ib = Get-RepoIdentity $b
     if ([string]::IsNullOrWhiteSpace($ia) -or [string]::IsNullOrWhiteSpace($ib)) { return $false }
     return ($ia -eq $ib)
+}
+function Is-SameRepository([string]$a, [string]$b) {
+    return (Is-SameRepoIdentity $a $b)
 }
 function Test-LooksLikeRepoUrl([string]$value) {
     if ([string]::IsNullOrWhiteSpace($value)) { return $false }

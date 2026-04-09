@@ -23,13 +23,18 @@
     },
     {
       "ref": "main",
-      "name": "skills-2",
-      "repo": "https://github.com/remotion-dev/skills.git"
+      "name": "baoyu-skills",
+      "repo": "https://github.com/jimliu/baoyu-skills.git"
     },
     {
       "ref": "main",
-      "name": "baoyu-skills",
-      "repo": "https://github.com/jimliu/baoyu-skills.git"
+      "name": "agent-skills-2",
+      "repo": "https://github.com/addyosmani/agent-skills.git"
+    },
+    {
+      "repo": "https://github.com/addyosmani/web-quality-skills.git",
+      "ref": "main",
+      "name": "web-quality-skills"
     }
   ],
   "mappings": [
@@ -69,18 +74,8 @@
       "vendor": "anthropics-skills"
     },
     {
-      "from": "skills\\executing-plans",
-      "to": "superpowers-skills-executing-plans",
-      "vendor": "superpowers"
-    },
-    {
       "from": "skills\\verification-before-completion",
       "to": "superpowers-skills-verification-before-completion",
-      "vendor": "superpowers"
-    },
-    {
-      "from": "skills\\subagent-driven-development",
-      "to": "superpowers-skills-subagent-driven-development",
       "vendor": "superpowers"
     },
     {
@@ -129,11 +124,6 @@
       "vendor": "skills"
     },
     {
-      "from": "skills\\dispatching-parallel-agents",
-      "to": "superpowers-skills-dispatching-parallel-agents",
-      "vendor": "superpowers"
-    },
-    {
       "from": "skills\\test-driven-development",
       "to": "superpowers-skills-test-driven-development",
       "vendor": "superpowers"
@@ -169,11 +159,6 @@
       "vendor": "anthropics-skills"
     },
     {
-      "from": "skills\\theme-factory",
-      "to": "anthropics-skills-skills-theme-factory",
-      "vendor": "anthropics-skills"
-    },
-    {
       "from": "skills\\webapp-testing",
       "to": "anthropics-skills-skills-webapp-testing",
       "vendor": "anthropics-skills"
@@ -189,56 +174,174 @@
       "to": "agent-skills-skills-web-design-guidelines"
     },
     {
-      "to": "skills-2-skills-remotion",
-      "from": "skills\\remotion",
-      "vendor": "skills-2"
+      "from": "skills\\api-and-interface-design",
+      "to": "agent-skills-2-skills-api-and-interface-design",
+      "vendor": "agent-skills-2"
     },
     {
+      "from": "skills\\code-review-and-quality",
+      "to": "agent-skills-2-skills-code-review-and-quality",
+      "vendor": "agent-skills-2"
+    },
+    {
+      "from": "skills\\code-simplification",
+      "to": "agent-skills-2-skills-code-simplification",
+      "vendor": "agent-skills-2"
+    },
+    {
+      "from": "skills\\context-engineering",
+      "to": "agent-skills-2-skills-context-engineering",
+      "vendor": "agent-skills-2"
+    },
+    {
+      "from": "skills\\debugging-and-error-recovery",
+      "to": "agent-skills-2-skills-debugging-and-error-recovery",
+      "vendor": "agent-skills-2"
+    },
+    {
+      "from": "skills\\deprecation-and-migration",
+      "to": "agent-skills-2-skills-deprecation-and-migration",
+      "vendor": "agent-skills-2"
+    },
+    {
+      "from": "skills\\documentation-and-adrs",
+      "to": "agent-skills-2-skills-documentation-and-adrs",
+      "vendor": "agent-skills-2"
+    },
+    {
+      "from": "skills\\git-workflow-and-versioning",
+      "to": "agent-skills-2-skills-git-workflow-and-versioning",
+      "vendor": "agent-skills-2"
+    },
+    {
+      "from": "skills\\incremental-implementation",
+      "to": "agent-skills-2-skills-incremental-implementation",
+      "vendor": "agent-skills-2"
+    },
+    {
+      "from": "skills\\planning-and-task-breakdown",
+      "to": "agent-skills-2-skills-planning-and-task-breakdown",
+      "vendor": "agent-skills-2"
+    },
+    {
+      "from": "skills\\security-and-hardening",
+      "to": "agent-skills-2-skills-security-and-hardening",
+      "vendor": "agent-skills-2"
+    },
+    {
+      "from": "skills\\spec-driven-development",
+      "to": "agent-skills-2-skills-spec-driven-development",
+      "vendor": "agent-skills-2"
+    },
+    {
+      "to": "baoyu-skills-skills-baoyu-slide-deck",
+      "vendor": "baoyu-skills",
+      "from": "skills\\baoyu-slide-deck"
+    },
+    {
+      "to": "baoyu-skills-skills-baoyu-article-illustrator",
+      "vendor": "baoyu-skills",
+      "from": "skills\\baoyu-article-illustrator"
+    },
+    {
+      "to": "agent-skills-2-skills-frontend-ui-engineering",
+      "vendor": "agent-skills-2",
+      "from": "skills\\frontend-ui-engineering"
+    },
+    {
+      "to": "agent-skills-2-skills-performance-optimization",
+      "vendor": "agent-skills-2",
+      "from": "skills\\performance-optimization"
+    },
+    {
+      "vendor": "web-quality-skills",
+      "to": "web-quality-skills-web-quality-skills",
+      "from": "."
+    },
+    {
+      "vendor": "web-quality-skills",
+      "to": "web-quality-skills-skills-accessibility",
+      "from": "skills\\accessibility"
+    },
+    {
+      "vendor": "web-quality-skills",
+      "to": "web-quality-skills-skills-core-web-vitals",
+      "from": "skills\\core-web-vitals"
+    },
+    {
+      "vendor": "web-quality-skills",
+      "to": "web-quality-skills-skills-performance",
+      "from": "skills\\performance"
+    },
+    {
+      "vendor": "web-quality-skills",
+      "to": "web-quality-skills-skills-web-quality-audit",
+      "from": "skills\\web-quality-audit"
+    },
+    {
+      "from": "skills\\using-superpowers",
+      "to": "superpowers-skills-using-superpowers",
+      "vendor": "superpowers"
+    },
+    {
+      "from": "skills\\brainstorming",
+      "to": "superpowers-skills-brainstorming",
+      "vendor": "superpowers"
+    },
+    {
+      "from": "skills\\executing-plans",
+      "to": "superpowers-skills-executing-plans",
+      "vendor": "superpowers"
+    },
+    {
+      "from": "skills\\writing-plans",
       "to": "superpowers-skills-writing-plans",
+      "vendor": "superpowers"
+    },
+    {
+      "from": "skills\\requesting-code-review",
       "vendor": "superpowers",
-      "from": "skills\\writing-plans"
+      "to": "superpowers-skills-requesting-code-review"
+    },
+    {
+      "from": "skills\\receiving-code-review",
+      "vendor": "superpowers",
+      "to": "superpowers-skills-receiving-code-review"
+    },
+    {
+      "from": "skills\\using-git-worktrees",
+      "vendor": "superpowers",
+      "to": "superpowers-skills-using-git-worktrees"
+    },
+    {
+      "from": "skills\\finishing-a-development-branch",
+      "vendor": "superpowers",
+      "to": "superpowers-skills-finishing-a-development-branch"
+    },
+    {
+      "from": "skills\\subagent-driven-development",
+      "to": "superpowers-skills-subagent-driven-development",
+      "vendor": "superpowers"
+    },
+    {
+      "vendor": "superpowers",
+      "to": "superpowers-skills-dispatching-parallel-agents",
+      "from": "skills\\dispatching-parallel-agents"
+    },
+    {
+      "to": "superpowers-skills-writing-skills",
+      "from": "skills\\writing-skills",
+      "vendor": "superpowers"
     }
   ],
   "imports": [
     {
       "mode": "vendor",
       "sparse": false,
-      "skill": "skills\\requesting-code-review",
+      "skill": "skills\\writing-skills",
       "ref": "main",
       "repo": "https://github.com/obra/superpowers.git",
       "name": "superpowers"
-    },
-    {
-      "mode": "vendor",
-      "sparse": false,
-      "skill": "skills\\writing-plans",
-      "ref": "main",
-      "repo": "https://github.com/obra/superpowers.git",
-      "name": "superpowers-writing-plans"
-    },
-    {
-      "mode": "vendor",
-      "name": "anthropics-skills",
-      "sparse": false,
-      "ref": "main",
-      "skill": "skills\\pdf",
-      "repo": "https://github.com/anthropics/skills.git"
-    },
-    {
-      "name": "social-content",
-      "skill": "skills\\social-content",
-      "sparse": false,
-      "repo": "https://github.com/coreyhaines31/marketingskills.git",
-      "ref": "main",
-      "mode": "manual"
-    },
-    {
-      "name": "humanizer-zh",
-      "skill": ".",
-      "sparse": false,
-      "repo": "https://github.com/op7418/humanizer-zh.git",
-      "ref": "main",
-      "mode": "manual"
     },
     {
       "name": "find-skills",
@@ -305,24 +408,8 @@
       "mode": "manual"
     },
     {
-      "name": "content-strategy",
-      "skill": "skills\\content-strategy",
-      "sparse": false,
-      "repo": "https://github.com/coreyhaines31/marketingskills.git",
-      "ref": "main",
-      "mode": "manual"
-    },
-    {
       "name": "copy-editing",
       "skill": "skills\\copy-editing",
-      "sparse": false,
-      "repo": "https://github.com/coreyhaines31/marketingskills.git",
-      "ref": "main",
-      "mode": "manual"
-    },
-    {
-      "name": "copywriting",
-      "skill": "skills\\copywriting",
       "sparse": false,
       "repo": "https://github.com/coreyhaines31/marketingskills.git",
       "ref": "main",
@@ -391,38 +478,6 @@
       "repo": "https://github.com/vercel-labs/agent-skills.git",
       "ref": "main",
       "mode": "vendor"
-    },
-    {
-      "name": "agent-skills-web-design-guidelines",
-      "skill": "skills\\web-design-guidelines",
-      "sparse": false,
-      "repo": "https://github.com/vercel-labs/agent-skills.git",
-      "ref": "main",
-      "mode": "vendor"
-    },
-    {
-      "name": "skills-2",
-      "skill": "skills\\remotion",
-      "sparse": false,
-      "repo": "https://github.com/remotion-dev/skills.git",
-      "ref": "main",
-      "mode": "vendor"
-    },
-    {
-      "name": "shadcn-ui",
-      "skill": "skills\\shadcn-ui",
-      "sparse": false,
-      "repo": "https://github.com/google-labs-code/stitch-skills.git",
-      "ref": "main",
-      "mode": "manual"
-    },
-    {
-      "name": "claude-mem",
-      "skill": ".",
-      "sparse": false,
-      "repo": "https://github.com/thedotmack/claude-mem.git",
-      "ref": "main",
-      "mode": "manual"
     },
     {
       "name": "data-visualization",
@@ -503,6 +558,46 @@
       "repo": "https://github.com/mblode/agent-skills.git",
       "ref": "main",
       "mode": "manual"
+    },
+    {
+      "mode": "vendor",
+      "skill": "skills\\baoyu-article-illustrator",
+      "name": "baoyu-skills",
+      "repo": "https://github.com/jimliu/baoyu-skills.git",
+      "sparse": false,
+      "ref": "main"
+    },
+    {
+      "mode": "vendor",
+      "skill": ".",
+      "name": "web-quality-skills",
+      "repo": "https://github.com/addyosmani/web-quality-skills.git",
+      "sparse": false,
+      "ref": "main"
+    },
+    {
+      "mode": "vendor",
+      "skill": "skills\\performance-optimization",
+      "name": "agent-skills-2",
+      "repo": "https://github.com/addyosmani/agent-skills.git",
+      "sparse": false,
+      "ref": "main"
+    },
+    {
+      "name": "ui-ux-pro-max",
+      "skill": ".claude\\skills\\ui-ux-pro-max",
+      "sparse": false,
+      "repo": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git",
+      "ref": "main",
+      "mode": "manual"
+    },
+    {
+      "name": "remotion-best-practices",
+      "sparse": false,
+      "skill": "skills\\remotion",
+      "mode": "manual",
+      "ref": "main",
+      "repo": "https://github.com/remotion-dev/skills.git"
     }
   ],
   "targets": [

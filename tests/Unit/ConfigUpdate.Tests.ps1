@@ -33,6 +33,79 @@ Describe "Config And Update Enhancements" {
         }
     }
 
+    Context "Vendor import normalization" {
+        It "Canonicalizes vendor import names by repo without restoring deleted mappings" {
+            $cfg = [pscustomobject]@{
+                vendors = @(
+                    [pscustomobject]@{ name = "superpowers"; repo = "https://github.com/obra/superpowers.git"; ref = "main" }
+                )
+                targets = @()
+                mappings = @()
+                imports = @(
+                    [pscustomobject]@{
+                        name = "superpowers-writing-plans"
+                        mode = "vendor"
+                        repo = "https://github.com/obra/superpowers.git"
+                        ref = "main"
+                        skill = "skills\writing-plans"
+                        sparse = $false
+                    }
+                )
+                mcp_servers = @()
+                mcp_targets = @()
+                update_force = $true
+                sync_mode = "link"
+            }
+            $changed = $false
+            $dirMigrations = [ordered]@{
+                vendors = @()
+                imports = @()
+            }
+
+            Fix-Cfg $cfg ([ref]$changed) ([ref]$dirMigrations)
+
+            $changed | Should Be $true
+            @($cfg.imports).Count | Should Be 1
+            $cfg.imports[0].name | Should Be "superpowers"
+            @($cfg.mappings).Count | Should Be 0
+        }
+
+        It "Does not recreate mapping for previously removed vendor skill" {
+            $cfg = [pscustomobject]@{
+                vendors = @(
+                    [pscustomobject]@{ name = "anthropics-skills"; repo = "https://github.com/anthropics/skills.git"; ref = "main" }
+                )
+                targets = @()
+                mappings = @()
+                imports = @(
+                    [pscustomobject]@{
+                        name = "anthropics-skills"
+                        mode = "vendor"
+                        repo = "https://github.com/anthropics/skills.git"
+                        ref = "main"
+                        skill = "skills\theme-factory"
+                        sparse = $false
+                    }
+                )
+                mcp_servers = @()
+                mcp_targets = @()
+                update_force = $true
+                sync_mode = "link"
+            }
+            $changed = $false
+            $dirMigrations = [ordered]@{
+                vendors = @()
+                imports = @()
+            }
+
+            Fix-Cfg $cfg ([ref]$changed) ([ref]$dirMigrations)
+
+            @($cfg.imports).Count | Should Be 1
+            $cfg.imports[0].skill | Should Be "skills\theme-factory"
+            @($cfg.mappings).Count | Should Be 0
+        }
+    }
+
     Context "Fine-Grained update_force" {
         It "Records skip key when target-level force clean is denied" {
             $cfg = [pscustomobject]@{

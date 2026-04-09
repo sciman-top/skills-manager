@@ -284,6 +284,8 @@ function Fix-Cfg($cfg, [ref]$changed, [ref]$dirMigrations) {
     }
     $cfg.vendors = $dedupVendors
 
+    Repair-VendorImports $cfg $changed
+
     $dedupImports = @()
     $seenImports = New-Object System.Collections.Generic.HashSet[string]
     foreach ($i in $cfg.imports) {
@@ -402,6 +404,33 @@ function Match-VendorByRepo($cfg, [string]$repo) {
         if ($vRepo -eq $normRepo) { return $v }
     }
     return $null
+}
+
+function Repair-VendorImports($cfg, [ref]$changed) {
+    if ($null -eq $cfg -or $null -eq $cfg.imports) { return }
+    foreach ($i in @($cfg.imports)) {
+        $mode = if ($i.PSObject.Properties.Match("mode").Count -gt 0) { [string]$i.mode } else { "manual" }
+        if ($mode -ne "vendor") { continue }
+
+        $vendorName = [string]$i.name
+        $matchedVendor = Match-VendorByRepo $cfg ([string]$i.repo)
+        if ($matchedVendor) {
+            $canonicalName = [string]$matchedVendor.name
+            if ($vendorName -ne $canonicalName) {
+                Log ("vendor import 名称已按 repo 自动归并：{0} -> {1}" -f $vendorName, $canonicalName) "WARN"
+                $i.name = $canonicalName
+                $vendorName = $canonicalName
+                $changed.Value = $true
+            }
+        }
+
+        $skillPath = Normalize-SkillPath ([string]$i.skill)
+        if ([string]::IsNullOrWhiteSpace($skillPath)) { $skillPath = "." }
+        if ([string]$i.skill -ne $skillPath) {
+            $i.skill = $skillPath
+            $changed.Value = $true
+        }
+    }
 }
 
 function Migrate-ManualToVendor($cfg, [string]$vendorName, [string]$repo) {

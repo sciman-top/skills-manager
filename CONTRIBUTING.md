@@ -34,6 +34,7 @@
 - `skills.json` 是唯一配置源。
 - `agent/` 与 `vendor/` 属于生成/缓存产物，不应作为手工维护入口。
 - 本地自定义内容优先放到 `overrides/` 或 `imports/`。
+- `overrides/` 建议使用分组命名：`custom-*`（纯自定义）、`patch-*`（上游补丁变体）、`<skill-name>`（同名覆盖）。
 - `.claude/`、`.codex/`、`.gemini/`、`.trae/`、日志、临时快照等本地状态不应进入远端仓库。
 - CI 会执行 `scripts/quality/check-repo-hygiene.ps1`，拦截已被跟踪的本地专用文件、调试快照和临时产物。
 
@@ -75,6 +76,7 @@ Thank you for contributing to `skills-manager`.
 - `skills.json` is the single source of configuration truth.
 - `agent/` and `vendor/` are generated or cache-oriented directories and should not be hand-maintained.
 - Put local customizations in `overrides/` or `imports/`.
+- For `overrides/`, prefer grouped naming: `custom-*` (fully custom), `patch-*` (patched upstream variants), and `<skill-name>` (same-name override).
 - Local agent state such as `.claude/`, `.codex/`, `.gemini/`, `.trae/`, logs, and temporary probe artifacts should not be committed.
 - CI runs `scripts/quality/check-repo-hygiene.ps1` to block tracked local-only agent files, debug snapshots, and temporary artifacts.
 

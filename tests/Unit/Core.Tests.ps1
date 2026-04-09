@@ -97,14 +97,14 @@ Describe "Core Functions" {
     }
 
     Context "Resolve-SkillPath" {
-        It "Auto-resolves compact name variants like uni-app -> skills\\uniapp" {
+        It "Auto-resolves compact name variants like uni-app -> skills\uniapp" {
             $base = Join-Path $TestDrive "repo-compact"
             $skillDir = Join-Path $base "skills\\uniapp"
             New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
             New-Item -ItemType File -Path (Join-Path $skillDir "AGENTS.md") -Force | Out-Null
 
             Clear-SkillsCache
-            Resolve-SkillPath $base "uni-app" | Should Be "skills\\uniapp"
+            Resolve-SkillPath $base "uni-app" | Should Be "skills\uniapp"
         }
     }
 
@@ -606,6 +606,16 @@ Describe "Core Functions" {
             }
             $name = Resolve-UniqueVendorName $cfg "skills" "vercel-labs/agent-skills"
             $name | Should Be "skills-2"
+        }
+
+        It "Allows reusing existing vendor name for same repo when explicitly requested" {
+            $cfg = [pscustomobject]@{
+                vendors = @(
+                    [pscustomobject]@{ name = "superpowers"; repo = "https://github.com/obra/superpowers.git"; ref = "main" }
+                )
+            }
+            $name = Resolve-UniqueVendorName $cfg "superpowers" "https://github.com/obra/superpowers.git" $true
+            $name | Should Be "superpowers"
         }
     }
 

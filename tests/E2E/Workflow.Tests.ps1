@@ -35,7 +35,12 @@ Describe "E2E Workflows" {
 
             $skillDir = Join-Path $script:VendorDir "demo\skills\hello"
             New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
-            Set-Content -Path (Join-Path $skillDir "SKILL.md") -Value "# demo"
+            Set-Content -Path (Join-Path $skillDir "SKILL.md") -Value @'
+---
+name: hello
+description: demo skill
+---
+'@
 
             $cfg = [pscustomobject]@{
                 vendors = @([pscustomobject]@{ name = "demo"; repo = "https://example.com/demo.git"; ref = "main" })

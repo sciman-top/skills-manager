@@ -36,6 +36,16 @@ Source layers:
 - `imports`: targeted skill or subpath imports
 - `overrides`: local patches and custom additions
 
+## overrides Grouping Convention
+
+Use grouped naming under `overrides/` with clear prefixes:
+
+- `custom-*`: fully custom skills (not a direct upstream replacement)
+- `patch-*`: local patched variants of upstream skills
+- `<skill-name>`: direct same-name override when replacement is intentional
+
+Recommendation: prefer `custom-*` and `patch-*` for clarity, and use `<skill-name>` only when you explicitly need same-name override behavior.
+
 ## Repository Layout
 
 ```text
