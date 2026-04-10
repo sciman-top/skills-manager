@@ -27,8 +27,10 @@ $ImportDir = Join-Path $Root "imports"
 
 function Get-LogRotateMaxBytes {
     $v = $null
-    if ($null -ne $script:LogMaxBytes) { $v = $script:LogMaxBytes }
-    elseif ($null -ne $global:LogMaxBytes) { $v = $global:LogMaxBytes }
+    $scriptVar = Get-Variable -Name LogMaxBytes -Scope Script -ErrorAction SilentlyContinue
+    $globalVar = Get-Variable -Name LogMaxBytes -Scope Global -ErrorAction SilentlyContinue
+    if ($null -ne $scriptVar) { $v = $scriptVar.Value }
+    elseif ($null -ne $globalVar) { $v = $globalVar.Value }
     try {
         $n = [int64]$v
         if ($n -gt 0) { return $n }
@@ -38,8 +40,10 @@ function Get-LogRotateMaxBytes {
 }
 function Get-LogMaxBackups {
     $v = $null
-    if ($null -ne $script:LogMaxBackups) { $v = $script:LogMaxBackups }
-    elseif ($null -ne $global:LogMaxBackups) { $v = $global:LogMaxBackups }
+    $scriptVar = Get-Variable -Name LogMaxBackups -Scope Script -ErrorAction SilentlyContinue
+    $globalVar = Get-Variable -Name LogMaxBackups -Scope Global -ErrorAction SilentlyContinue
+    if ($null -ne $scriptVar) { $v = $scriptVar.Value }
+    elseif ($null -ne $globalVar) { $v = $globalVar.Value }
     try {
         $n = [int]$v
         if ($n -gt 0) { return $n }
