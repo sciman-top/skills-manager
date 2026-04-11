@@ -266,6 +266,33 @@ function Test-YamlFrontmatterSkillFile([string]$skillFile) {
     $normalized = $raw.TrimStart([char]0xFEFF).TrimStart()
     return ($normalized -match "^---(\r?\n|$)")
 }
+function Normalize-SkillMarkdownFiles([string]$rootPath) {
+    $result = [ordered]@{
+        normalized = 0
+        failed = 0
+        normalized_paths = @()
+        failed_paths = @()
+    }
+    if ([string]::IsNullOrWhiteSpace($rootPath)) { return [pscustomobject]$result }
+    if (-not (Test-Path -LiteralPath $rootPath)) { return [pscustomobject]$result }
+
+    foreach ($skillFile in (Get-ChildItem -LiteralPath $rootPath -Recurse -Filter "SKILL.md" -File -ErrorAction SilentlyContinue)) {
+        try {
+            $raw = Get-ContentUtf8 $skillFile.FullName
+            if ([string]::IsNullOrEmpty($raw)) { continue }
+            if (-not $raw.StartsWith([char]0xFEFF)) { continue }
+            $normalized = $raw.TrimStart([char]0xFEFF)
+            Set-ContentUtf8 $skillFile.FullName $normalized
+            $result.normalized++
+            $result.normalized_paths += $skillFile.FullName
+        }
+        catch {
+            $result.failed++
+            $result.failed_paths += $skillFile.FullName
+        }
+    }
+    return [pscustomobject]$result
+}
 function Remove-InvalidSkillMarkdownFiles([string]$rootPath) {
     $result = [ordered]@{
         removed = 0

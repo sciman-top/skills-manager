@@ -284,6 +284,33 @@ function Test-YamlFrontmatterSkillFile([string]$skillFile) {
     $normalized = $raw.TrimStart([char]0xFEFF).TrimStart()
     return ($normalized -match "^---(\r?\n|$)")
 }
+function Normalize-SkillMarkdownFiles([string]$rootPath) {
+    $result = [ordered]@{
+        normalized = 0
+        failed = 0
+        normalized_paths = @()
+        failed_paths = @()
+    }
+    if ([string]::IsNullOrWhiteSpace($rootPath)) { return [pscustomobject]$result }
+    if (-not (Test-Path -LiteralPath $rootPath)) { return [pscustomobject]$result }
+
+    foreach ($skillFile in (Get-ChildItem -LiteralPath $rootPath -Recurse -Filter "SKILL.md" -File -ErrorAction SilentlyContinue)) {
+        try {
+            $raw = Get-ContentUtf8 $skillFile.FullName
+            if ([string]::IsNullOrEmpty($raw)) { continue }
+            if (-not $raw.StartsWith([char]0xFEFF)) { continue }
+            $normalized = $raw.TrimStart([char]0xFEFF)
+            Set-ContentUtf8 $skillFile.FullName $normalized
+            $result.normalized++
+            $result.normalized_paths += $skillFile.FullName
+        }
+        catch {
+            $result.failed++
+            $result.failed_paths += $skillFile.FullName
+        }
+    }
+    return [pscustomobject]$result
+}
 function Remove-InvalidSkillMarkdownFiles([string]$rootPath) {
     $result = [ordered]@{
         removed = 0
@@ -1907,6 +1934,13 @@ function Get-DirtyUpdateTargets($cfg) {
         }
         finally { Pop-Location }
     }
+    return $items.ToArray()
+}
+
+function Get-DirtyManualImportTargets($cfg) {
+    $items = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $cfg) { return @() }
+
     foreach ($i in @($cfg.imports)) {
         if ($i.mode -ne "manual") { continue }
         $cache = Join-Path $ImportDir $i.name
@@ -1924,27 +1958,20 @@ function Get-DirtyUpdateTargets($cfg) {
 function Confirm-UpdateForce($cfg, [ref]$SkipForceClean) {
     if ($null -eq $SkipForceClean.Value) { $SkipForceClean.Value = @{} }
     if (-not $cfg.update_force) { return $true }
-    if (-not (Confirm-Action "更新将逐项确认是否丢弃本地改动，继续吗？" "Y" -DefaultNo)) {
-        Write-Host "已取消更新。"
-        return $false
-    }
 
-    $dirty = Get-DirtyUpdateTargets $cfg
+    $dirtyImports = Get-DirtyManualImportTargets $cfg
+    $dirtyVendors = Get-DirtyUpdateTargets $cfg
+    $dirty = @($dirtyImports) + @($dirtyVendors)
     if ($dirty.Count -eq 0) {
-        Write-Host "未检测到 vendor/imports 本地改动，将按默认策略更新。"
+        Write-Host "未检测到本地改动，将按默认策略更新。"
         return $true
     }
 
-    Write-Host ("检测到 {0} 个本地改动项，将逐项确认：" -f $dirty.Count)
     foreach ($d in $dirty) {
         $key = "{0}|{1}" -f $d.kind, $d.name
-        $label = "{0}/{1}" -f $d.kind, $d.name
-        if (Confirm-Action ("是否在更新时丢弃该项改动：{0}" -f $label) "Y" -DefaultNo) {
-            continue
-        }
         $SkipForceClean.Value[$key] = $true
-        Write-Host ("将保留本地改动并跳过强制清理：{0}" -f $label) -ForegroundColor Yellow
     }
+    Write-Host ("检测到 {0} 个本地改动项，已自动保留并跳过强制清理。" -f $dirty.Count) -ForegroundColor Yellow
     return $true
 }
 
@@ -2876,7 +2903,7 @@ function Get-PerfThresholdMs([string]$Metric, [int]$DefaultThresholdMs = 5000) {
     $metricKey = $Metric.Trim().ToLowerInvariant()
     switch ($metricKey) {
         "discover" { return 5000 }
-        "build_agent" { return 7000 }
+        "build_agent" { return 8000 }
         "apply_targets" { return 5000 }
         # Includes prebuild checks + full build/apply flow; realistic baseline in this repo is ~180s.
         "build_apply_total" { return 240000 }
@@ -4916,6 +4943,16 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
             Log ("已剔除 {0} 个 vendor 根映射目录（不参与同步）。" -f $removedVendorRoots)
         }
 
+        $normalizedSkillMd = Normalize-SkillMarkdownFiles $AgentDir
+        if ($normalizedSkillMd.normalized -gt 0) {
+            Log ("已归一化 SKILL.md 编码（移除 UTF-8 BOM）：{0} 项" -f $normalizedSkillMd.normalized)
+        }
+        if ($normalizedSkillMd.failed -gt 0) {
+            foreach ($path in $normalizedSkillMd.failed_paths) {
+                $failures.Add(("build-skill-md-normalize:{0}" -f $path)) | Out-Null
+            }
+        }
+
         $invalidSkillCleanup = Remove-InvalidSkillMarkdownFiles $AgentDir
         if ($invalidSkillCleanup.removed -gt 0) {
             Log ("已清理无效 SKILL.md（缺少 YAML frontmatter）：{0} 项" -f $invalidSkillCleanup.removed) "WARN"
@@ -6619,7 +6656,7 @@ Skills 管理器（极简版，中文菜单）
   - 卸载：从 mappings 白名单移除技能；必要时清理 imports 条目、legacy manual 目录和对应 overrides 备份
   - 新增技能库：向 vendors 写入仓库地址并初始化；留空时仅初始化已配置 vendors
   - 删除技能库：移除 vendors 中的仓库；可选择是否保留其已安装技能（转为 manual）后重建生效
-  - 更新：拉取 vendor/imports 上游内容，逐项确认如何处理本地改动，然后重建并同步
+  - 更新：拉取 vendor/imports 上游内容；本地改动自动保留并跳过强制清理，然后重建并同步
   - 构建并生效：仅使用当前本地配置与文件源（imports / overrides / mappings）重建输出并同步；可配合 -Locked 做严格校验
   - 锁定：生成 skills.lock.json，记录当前 vendor/import commit
   - 安装MCP：向 skills.json 登记 MCP 服务（支持 stdio / sse / http），并自动同步

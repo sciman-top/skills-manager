@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "promoted": [
+    {
+      "issue_signature": "pwsh-encoding-mojibake-loop-20260411",
+      "skill_name": "custom-auto-pwsh-encoding-mojibake-l-a9b049cd",
+      "promoted_at": "2026-04-11T16:44:50+08:00",
+      "hit_count": 12,
+      "repos": [
+        "E:/CODE/skills-manager"
+      ],
+      "signature_variants": [
+        "pwsh-encoding-mojibake-loop-20260411-a",
+        "pwsh-encoding-mojibake-loop-20260411-b",
+        "pwsh-encoding-mojibake-loop-20260411-c",
+        "pwsh-encoding-mojibake-loop-20260411-d"
+      ]
+    }
+  ]
+}

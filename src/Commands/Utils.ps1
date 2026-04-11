@@ -106,7 +106,7 @@ Skills 管理器（极简版，中文菜单）
   - 卸载：从 mappings 白名单移除技能；必要时清理 imports 条目、legacy manual 目录和对应 overrides 备份
   - 新增技能库：向 vendors 写入仓库地址并初始化；留空时仅初始化已配置 vendors
   - 删除技能库：移除 vendors 中的仓库；可选择是否保留其已安装技能（转为 manual）后重建生效
-  - 更新：拉取 vendor/imports 上游内容，逐项确认如何处理本地改动，然后重建并同步
+  - 更新：拉取 vendor/imports 上游内容；本地改动自动保留并跳过强制清理，然后重建并同步
   - 构建并生效：仅使用当前本地配置与文件源（imports / overrides / mappings）重建输出并同步；可配合 -Locked 做严格校验
   - 锁定：生成 skills.lock.json，记录当前 vendor/import commit
   - 安装MCP：向 skills.json 登记 MCP 服务（支持 stdio / sse / http），并自动同步

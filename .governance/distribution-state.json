@@ -1,0 +1,358 @@
+﻿{
+    "version":  1,
+    "tool":  "repo-governance-hub",
+    "updated_at":  "2026-04-12T02:35:53",
+    "managed_count":  70,
+    "managed_files":  [
+                          {
+                              "path":  ".agents/plugins/marketplace.json",
+                              "source":  "source/project/skills-manager/custom/.agents/plugins/marketplace.json",
+                              "sha256":  "659A609E6C966703D84567987F660BA336BDB43A1FC0A547A8E2A2C0B99DC1A7"
+                          },
+                          {
+                              "path":  ".agents/skills/governance-refactor-safe/SKILL.md",
+                              "source":  "source/project/skills-manager/custom/.agents/skills/governance-refactor-safe/SKILL.md",
+                              "sha256":  "57CCE3A1EED77D2EF24038B08598E5BA566491497366EE69964EA79DB45171C3"
+                          },
+                          {
+                              "path":  ".agents/skills/governance-reuse-analyst/SKILL.md",
+                              "source":  "source/project/skills-manager/custom/.agents/skills/governance-reuse-analyst/SKILL.md",
+                              "sha256":  "4B0B54C7EA89D258D043E4D697D5EA006B68610AD556A4F230EE7D9CE55B79F1"
+                          },
+                          {
+                              "path":  ".codex/agents/planner.toml",
+                              "source":  "source/project/skills-manager/custom/.codex/agents/planner.toml",
+                              "sha256":  "3677A818F2122F7A92C056EE60F2B677A37DD9DA96C32C46279362AD4D37CA01"
+                          },
+                          {
+                              "path":  ".codex/agents/reuse-analyst.toml",
+                              "source":  "source/project/skills-manager/custom/.codex/agents/reuse-analyst.toml",
+                              "sha256":  "C5C12A4A9FFB9B5C7BDD62794AFFB215CBA9BC787EC10BCDAFCE03DF479FE935"
+                          },
+                          {
+                              "path":  ".codex/agents/reviewer.toml",
+                              "source":  "source/project/skills-manager/custom/.codex/agents/reviewer.toml",
+                              "sha256":  "93AB0EA0862DFF0E6064D05D5E2CEE1C5EA0FC949717B841EAE50E65736AEE80"
+                          },
+                          {
+                              "path":  ".codex/config.toml",
+                              "source":  "source/project/skills-manager/custom/.codex/config.toml",
+                              "sha256":  "5F1C20A889E33C74308264AE92E5850D1A12859278C8CCDCD7659708936868EA"
+                          },
+                          {
+                              "path":  ".github/workflows/quality-gates.yml",
+                              "source":  "source/project/skills-manager/custom/.github/workflows/quality-gates.yml",
+                              "sha256":  "9D70A2A93DDE8BF9CD6715C16E2F82DCD5F51877D6CA91731AA1C36146E554A0"
+                          },
+                          {
+                              "path":  ".github/workflows/sbom.yml",
+                              "source":  "source/project/_common/custom/.github/workflows/sbom.yml",
+                              "sha256":  "B22A385917917273AB5E85F31CA7544AC54FFCC8268C6D1282A15D01B1A0F4B7"
+                          },
+                          {
+                              "path":  ".github/workflows/scorecard.yml",
+                              "source":  "source/project/_common/custom/.github/workflows/scorecard.yml",
+                              "sha256":  "BEECDA3C53827C304F4D91ACF0C14ED39C34171449DA35B38717B46D520B0241"
+                          },
+                          {
+                              "path":  ".github/workflows/slsa.yml",
+                              "source":  "source/project/_common/custom/.github/workflows/slsa.yml",
+                              "sha256":  "5D590D97AA27BBE2612B3BC7E6A9B766E1A88F389995CE2B9C5ECD71AAECEDEB"
+                          },
+                          {
+                              "path":  ".governance/anti-bloat-policy.json",
+                              "source":  "source/project/_common/custom/.governance/anti-bloat-policy.json",
+                              "sha256":  "60756DC85E191A080A2AFDE3264756A4B67B6C6E56C7F4DB062199C2F165A7C3"
+                          },
+                          {
+                              "path":  ".governance/external-baseline-policy.json",
+                              "source":  "source/project/_common/custom/.governance/external-baseline-policy.json",
+                              "sha256":  "9FFFDCA473B05573B4A6A4B25C70AEB2F74B5E49086C0023AB8398E7BD262A9E"
+                          },
+                          {
+                              "path":  ".governance/growth-pack/CHECKLIST.md",
+                              "source":  "source/project/_common/custom/.governance/growth-pack/CHECKLIST.md",
+                              "sha256":  "61943A7D82F50E0CA0F96E39BD4FA4383B213F7B27C8745B384AD9093BFC65E5"
+                          },
+                          {
+                              "path":  ".governance/growth-pack/ISSUE_TEMPLATE/bug_report.yml",
+                              "source":  "source/project/_common/custom/.governance/growth-pack/ISSUE_TEMPLATE/bug_report.yml",
+                              "sha256":  "90E8E99203227D3E5160A054F1937342687FB23CF3EF8554726E9FA234ECA35F"
+                          },
+                          {
+                              "path":  ".governance/growth-pack/ISSUE_TEMPLATE/feature_request.yml",
+                              "source":  "source/project/_common/custom/.governance/growth-pack/ISSUE_TEMPLATE/feature_request.yml",
+                              "sha256":  "7625D6F106055A51AB61C75CD7770D4DCA87CC617C99864142E3730CBF801345"
+                          },
+                          {
+                              "path":  ".governance/growth-pack/pull_request_template.md",
+                              "source":  "source/project/_common/custom/.governance/growth-pack/pull_request_template.md",
+                              "sha256":  "8DD378C4F39404567AFAED179912F2594F5F68AC43D3100BBDD9B71FF2C229C3"
+                          },
+                          {
+                              "path":  ".governance/growth-pack/README.template.md",
+                              "source":  "source/project/_common/custom/.governance/growth-pack/README.template.md",
+                              "sha256":  "F72F1102561F9F772D8E52ADEAF090BF0FD061C9484F428FCD985D3F26151CDC"
+                          },
+                          {
+                              "path":  ".governance/growth-pack/RELEASE_TEMPLATE.md",
+                              "source":  "source/project/_common/custom/.governance/growth-pack/RELEASE_TEMPLATE.md",
+                              "sha256":  "FD21C56B207E40482AF80EE8DC21EFE0C187E7B4CD683524B016E8A763734DDD"
+                          },
+                          {
+                              "path":  ".governance/practice-stack-policy.json",
+                              "source":  "source/project/_common/custom/.governance/practice-stack-policy.json",
+                              "sha256":  "0E44384F566843EEAE5F52F914D701AA624CF91FB06613B294404E0E68379B10"
+                          },
+                          {
+                              "path":  ".governance/proactive-suggestion-policy.json",
+                              "source":  "source/project/_common/custom/.governance/proactive-suggestion-policy.json",
+                              "sha256":  "26FE199FD5A6BEAA42C712D47C36CA150491E6D92D73D30E7B53E0E501E5EE1E"
+                          },
+                          {
+                              "path":  ".governance/release-profile.json",
+                              "source":  "source/project/skills-manager/custom/.governance/release-profile.json",
+                              "sha256":  "0198865C0B9C88803D7D31C4D7B3CE974946E6FA1C0954AF5E2CC7FDA17216E8"
+                          },
+                          {
+                              "path":  ".governance/skill-candidates/trigger-eval-runs.sample.jsonl",
+                              "source":  "source/project/_common/custom/.governance/skill-candidates/trigger-eval-runs.sample.jsonl",
+                              "sha256":  "B6C826D0482F837C045177BB6B7157DB71FDEF73FD748DAA2DEBA21DCB62AACF"
+                          },
+                          {
+                              "path":  ".governance/skill-promotion-policy.json",
+                              "source":  "source/project/_common/custom/.governance/skill-promotion-policy.json",
+                              "sha256":  "787E8D3D1E69BF4F03D6C1748CF259570DEB086F1E92059D08F8719613DA80D4"
+                          },
+                          {
+                              "path":  ".governance/subagent-trigger-policy.json",
+                              "source":  "source/project/_common/custom/.governance/subagent-trigger-policy.json",
+                              "sha256":  "5C235DE5E9A36FA85ADC552636218FC2A9A41E1CA7CE6D94DB580A9E482251AF"
+                          },
+                          {
+                              "path":  ".governance/templates/clarification-trigger.md",
+                              "source":  "source/project/_common/custom/.governance/templates/clarification-trigger.md",
+                              "sha256":  "06481554BF5BBED78A9076FE0DD542D734E56809EFE5D3769936554E5E855F8D"
+                          },
+                          {
+                              "path":  ".governance/templates/evidence-minimal.md",
+                              "source":  "source/project/_common/custom/.governance/templates/evidence-minimal.md",
+                              "sha256":  "2811999DFE40CA838E8ADBE04FFB4E6813326029B251FD9434E66B7C3ABEFA21"
+                          },
+                          {
+                              "path":  ".governance/templates/lite-response.md",
+                              "source":  "source/project/_common/custom/.governance/templates/lite-response.md",
+                              "sha256":  "FE3AD0DE9AB0C67B66FA69B80C5D46841DD613DCC3E1E5EB67C24163519C06AA"
+                          },
+                          {
+                              "path":  ".governance/templates/task-snapshot-minimal.md",
+                              "source":  "source/project/_common/custom/.governance/templates/task-snapshot-minimal.md",
+                              "sha256":  "88B97CAED00655BA920DF033C28FE833E85907402AB3F9C40461F3A2561F3E8C"
+                          },
+                          {
+                              "path":  ".governance/token-balance-policy.json",
+                              "source":  "source/project/_common/custom/.governance/token-balance-policy.json",
+                              "sha256":  "C9EC85889AC951C3E630D95CF64A042F09EEBFC6AFF3EBED70F0D0A0C6A96FD2"
+                          },
+                          {
+                              "path":  ".governance/token-saver-policy.json",
+                              "source":  "source/project/_common/custom/.governance/token-saver-policy.json",
+                              "sha256":  "C5D748C9134537E9F45CA9F926F800A3940C254616D54A333883D8D937A04933"
+                          },
+                          {
+                              "path":  ".governance/tracked-files-policy.json",
+                              "source":  "source/project/skills-manager/custom/.governance/tracked-files-policy.json",
+                              "sha256":  "101AE6C8D423613D33E8C90D2613A473CDB8BD7F1FD417E0FACF47BAED67B1B5"
+                          },
+                          {
+                              "path":  "AGENTS.md",
+                              "source":  "source/project/skills-manager/AGENTS.md",
+                              "sha256":  "7183BB08278F26A8994849A37CF78070C39EFCDDDAE630AFB939B795C7F80C30"
+                          },
+                          {
+                              "path":  "CLAUDE.md",
+                              "source":  "source/project/skills-manager/CLAUDE.md",
+                              "sha256":  "845D480CAEA378C64DF4A76E7592FE3F5DE9A063AE1A0E9ABE3C2FCE3698B80A"
+                          },
+                          {
+                              "path":  "config/clarification-policy.json",
+                              "source":  "source/project/_common/custom/config/clarification-policy.json",
+                              "sha256":  "D3C556822D71F40869C198BB26880ECFA8CE5840CF5D774AD763C7A0DC857C2F"
+                          },
+                          {
+                              "path":  "docs/governance/sbom-policy.md",
+                              "source":  "source/project/_common/custom/docs/governance/sbom-policy.md",
+                              "sha256":  "3CA7B8654546522E688B828C3C9CD1D1DA8591C321232D08FE99C78A9CE04D78"
+                          },
+                          {
+                              "path":  "docs/governance/scorecard-policy.md",
+                              "source":  "source/project/_common/custom/docs/governance/scorecard-policy.md",
+                              "sha256":  "0F1AE25A2C0702B7BA7194FDF201C6B68EAA64BE25B551399474BA3297812923"
+                          },
+                          {
+                              "path":  "docs/governance/skill-trigger-eval-runbook.md",
+                              "source":  "source/project/_common/custom/docs/governance/skill-trigger-eval-runbook.md",
+                              "sha256":  "479E6AD7E14EDB89ABB54B5BE10CA9D5BF0910743E2970223491A96704753B95"
+                          },
+                          {
+                              "path":  "docs/governance/slsa-target-level.md",
+                              "source":  "source/project/_common/custom/docs/governance/slsa-target-level.md",
+                              "sha256":  "EC2EBEE862A37970170E1C9B59FD7086D06F7627A1DA971A77B009CF5179BE06"
+                          },
+                          {
+                              "path":  "docs/governance/ssdf-mapping.md",
+                              "source":  "source/project/_common/custom/docs/governance/ssdf-mapping.md",
+                              "sha256":  "FBA3048290C923E65EDC2F8246DD20FA350A27BCDED345969EB23550AD8403F5"
+                          },
+                          {
+                              "path":  "docs/PLANS.md",
+                              "source":  "source/project/skills-manager/custom/docs/PLANS.md",
+                              "sha256":  "07909689CF5CCE5FFF26D3AC8FCA06EF719C381940408604030340963A327D2C"
+                          },
+                          {
+                              "path":  "GEMINI.md",
+                              "source":  "source/project/skills-manager/GEMINI.md",
+                              "sha256":  "99BE9DCB055E77510B9BE9B8694CB8122B6B9E7C11A28A6B0B9E8254B590FE19"
+                          },
+                          {
+                              "path":  "overrides/custom-windows-encoding-guard/scripts/bootstrap.ps1",
+                              "source":  "source/project/skills-manager/custom/overrides/custom-windows-encoding-guard/scripts/bootstrap.ps1",
+                              "sha256":  "ECA214CC1BE7EAE0CBA6118E705198FB9294A81BD1EA0EE69254B4EC5EE2431A"
+                          },
+                          {
+                              "path":  "overrides/custom-windows-encoding-guard/SKILL.md",
+                              "source":  "source/project/skills-manager/custom/overrides/custom-windows-encoding-guard/SKILL.md",
+                              "sha256":  "03559CC7F6FC9B1B53F1EC42E3CC18B03DE19077723A71081968D675B82D7AA1"
+                          },
+                          {
+                              "path":  "plugins/repo-governance-hub-internal/.codex-plugin/plugin.json",
+                              "source":  "source/project/skills-manager/custom/plugins/repo-governance-hub-internal/.codex-plugin/plugin.json",
+                              "sha256":  "3CBDC5626A39C55B3D61DAE8567C9850FB25E374D8A7FA3119A1A65058B69068"
+                          },
+                          {
+                              "path":  "plugins/repo-governance-hub-internal/skills/governance-refactor-safe/SKILL.md",
+                              "source":  "source/project/skills-manager/custom/plugins/repo-governance-hub-internal/skills/governance-refactor-safe/SKILL.md",
+                              "sha256":  "E56E4C122DB3DB9F9A82B1A024708B085872C2F37EDF07EA142FE0489E38D82B"
+                          },
+                          {
+                              "path":  "plugins/repo-governance-hub-internal/skills/governance-reuse-analyst/SKILL.md",
+                              "source":  "source/project/skills-manager/custom/plugins/repo-governance-hub-internal/skills/governance-reuse-analyst/SKILL.md",
+                              "sha256":  "F65AB56780A55B7FCEA980B4280B26C52C62939CEAB285C17B85132D405D54F7"
+                          },
+                          {
+                              "path":  "scripts/governance/apply-growth-pack.ps1",
+                              "source":  "source/project/_common/custom/scripts/governance/apply-growth-pack.ps1",
+                              "sha256":  "3531C45D53E7B42DDFB01F9DFAA55EFE77C5EA7FA5E727BB8FF0CF25AD017A38"
+                          },
+                          {
+                              "path":  "scripts/governance/check-anti-bloat-budgets.ps1",
+                              "source":  "source/project/_common/custom/scripts/governance/check-anti-bloat-budgets.ps1",
+                              "sha256":  "166CE83FC8B2F14A8DFDC63D29912C6F394DE19A551D05437FFA3B3948572C4D"
+                          },
+                          {
+                              "path":  "scripts/governance/check-external-baselines.ps1",
+                              "source":  "source/project/_common/custom/scripts/governance/check-external-baselines.ps1",
+                              "sha256":  "E3AA32A00F656DA0116BA57E9B5E21195B1F3BBA4C6121952C14A571BF9801CB"
+                          },
+                          {
+                              "path":  "scripts/governance/check-practice-stack.ps1",
+                              "source":  "source/project/_common/custom/scripts/governance/check-practice-stack.ps1",
+                              "sha256":  "B1AFBCBE536C366D584E906EC5BC66D926B6C459C2F37FA082C06848F0855FAA"
+                          },
+                          {
+                              "path":  "scripts/governance/check-skill-trigger-evals.ps1",
+                              "source":  "source/project/_common/custom/scripts/governance/check-skill-trigger-evals.ps1",
+                              "sha256":  "1BDC3C148DEF3A06E7B3D49A0057DB0AE795CD59D7365FA9C9FAFAD91FAE6046"
+                          },
+                          {
+                              "path":  "scripts/governance/check-token-balance.ps1",
+                              "source":  "source/project/_common/custom/scripts/governance/check-token-balance.ps1",
+                              "sha256":  "42F76BB375D2A0AFD4D2A5F359E70A2F1B0203E0959BA33607852B662A6BD289"
+                          },
+                          {
+                              "path":  "scripts/governance/check-tracked-files.ps1",
+                              "source":  "source/project/skills-manager/custom/scripts/governance/check-tracked-files.ps1",
+                              "sha256":  "498AF7E2074F20CF7BB61A60A8F1A2FC5A4B7D8D18AC409531A5F7DCCB539B61"
+                          },
+                          {
+                              "path":  "scripts/governance/check-update-triggers.ps1",
+                              "source":  "source/project/skills-manager/custom/scripts/governance/check-update-triggers.ps1",
+                              "sha256":  "B11668F44AD67A67E935EE2BCA833BF8F6CFA5610C179CA630589349486CB80E"
+                          },
+                          {
+                              "path":  "scripts/governance/promote-skill-candidates.ps1",
+                              "source":  "source/project/_common/custom/scripts/governance/promote-skill-candidates.ps1",
+                              "sha256":  "95EF52C0776C60236B122D06F4C55D0DF4E977094EDB794C2F7764BC4C253712"
+                          },
+                          {
+                              "path":  "scripts/governance/register-skill-candidate.ps1",
+                              "source":  "source/project/_common/custom/scripts/governance/register-skill-candidate.ps1",
+                              "sha256":  "671C5482CF368557624C4B60BBB04C4DF2584C7E3374199705D01580C5E15BCA"
+                          },
+                          {
+                              "path":  "scripts/governance/register-skill-trigger-eval-run.ps1",
+                              "source":  "source/project/_common/custom/scripts/governance/register-skill-trigger-eval-run.ps1",
+                              "sha256":  "4FC38E09DD9532696475A8AED2582E6AACF5B633FFEF142FA768383F42262DF2"
+                          },
+                          {
+                              "path":  "scripts/governance/report-growth-readiness.ps1",
+                              "source":  "source/project/_common/custom/scripts/governance/report-growth-readiness.ps1",
+                              "sha256":  "7F3731AF89DB949F237D9E58F4B334E0CAF5F58F3DC97563143C43656138B2E9"
+                          },
+                          {
+                              "path":  "scripts/governance/run-monthly-policy-review.ps1",
+                              "source":  "source/project/skills-manager/custom/scripts/governance/run-monthly-policy-review.ps1",
+                              "sha256":  "05958334120C56D025E75565F383A02B6D7A73D5320C01D5E89E8077F0618BD3"
+                          },
+                          {
+                              "path":  "scripts/governance/run-project-governance-cycle.ps1",
+                              "source":  "source/project/skills-manager/custom/scripts/governance/run-project-governance-cycle.ps1",
+                              "sha256":  "FC21A5707B8299C4C7E3B0FE7880AC7A7C45348DF8F025C1328B843D2ABB5930"
+                          },
+                          {
+                              "path":  "scripts/governance/run-recurring-review.ps1",
+                              "source":  "source/project/skills-manager/custom/scripts/governance/run-recurring-review.ps1",
+                              "sha256":  "9A43E7847A3A6DE68FFE829160CCE7CAD277E406240A58BFA833586FA970A75F"
+                          },
+                          {
+                              "path":  "scripts/governance/run-target-autopilot.ps1",
+                              "source":  "source/project/skills-manager/custom/scripts/governance/run-target-autopilot.ps1",
+                              "sha256":  "D03ECD8D6E0332D6EB013ED0E47562720FEC5C4498906E03B1D6B513CE2D3439"
+                          },
+                          {
+                              "path":  "scripts/governance/verify-growth-pack.ps1",
+                              "source":  "source/project/_common/custom/scripts/governance/verify-growth-pack.ps1",
+                              "sha256":  "34626E6FC1CE10DE2F1D2057C60E2001916C69A705CF61EBA362D120F5DC28AC"
+                          },
+                          {
+                              "path":  "scripts/install-githooks.ps1",
+                              "source":  "source/project/skills-manager/custom/scripts/install-githooks.ps1",
+                              "sha256":  "18B3677D3B61A72BAB9C92578819BF0B384545F8206409579DB9E6A28675F58A"
+                          },
+                          {
+                              "path":  "scripts/prebuild-check.ps1",
+                              "source":  "source/project/skills-manager/custom/scripts/prebuild-check.ps1",
+                              "sha256":  "2D3ED58DD8D2CAFE008D4CE2645C111B94422859D0269D85A00A5BD4AE1FF593"
+                          },
+                          {
+                              "path":  "scripts/quality/run-supply-chain-checks.ps1",
+                              "source":  "source/project/_common/custom/scripts/quality/run-supply-chain-checks.ps1",
+                              "sha256":  "B13040D532035A9DD25985993F2868E8E4152A18380E10EEB5DDAFD3208CDC33"
+                          },
+                          {
+                              "path":  "tools/browser-session/README.md",
+                              "source":  "source/project/skills-manager/custom/tools/browser-session/README.md",
+                              "sha256":  "772516C03F0D72E168E44D26B340F3707DB94D9E10EF4441DE72E31F59799E9D"
+                          },
+                          {
+                              "path":  "tools/browser-session/start-browser-session.bat",
+                              "source":  "source/project/skills-manager/custom/tools/browser-session/start-browser-session.bat",
+                              "sha256":  "EF7A52EB67010DD55E112855E5B16D2103F807B159EE46BFA2FB7369C0140348"
+                          },
+                          {
+                              "path":  "tools/browser-session/start-browser-session.ps1",
+                              "source":  "source/project/skills-manager/custom/tools/browser-session/start-browser-session.ps1",
+                              "sha256":  "F7F9FC0DC9B30BA345A93B43E4D9CACAC42064B5A7D74FE732997654E377A6EB"
+                          }
+                      ]
+}

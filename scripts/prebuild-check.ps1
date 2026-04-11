@@ -103,6 +103,60 @@ else {
     Write-Check "PASS" "No common occupying process found."
 }
 
+# 4) UTF-8 encoding guard (Windows/PowerShell)
+$encodingGuardScript = Join-Path $root "overrides\custom-windows-encoding-guard\scripts\bootstrap.ps1"
+if (Test-Path -LiteralPath $encodingGuardScript -PathType Leaf) {
+    try {
+        $resultJson = & powershell -NoProfile -ExecutionPolicy Bypass -File $encodingGuardScript -AsJson
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace([string]($resultJson | Out-String))) {
+            $result = ($resultJson | Out-String | ConvertFrom-Json)
+            if ($result.compliant_after -eq $true) {
+                Write-Check "PASS" "UTF-8 encoding guard is compliant."
+            }
+            else {
+                if ($Strict) {
+                    Write-Check "FAIL" "UTF-8 encoding guard is not compliant in strict mode."
+                    $failed = $true
+                }
+                else {
+                    Write-Check "WARN" "UTF-8 encoding guard is not compliant."
+                    $warned = $true
+                }
+            }
+        }
+        else {
+            if ($Strict) {
+                Write-Check "FAIL" "UTF-8 encoding guard script execution failed in strict mode."
+                $failed = $true
+            }
+            else {
+                Write-Check "WARN" "UTF-8 encoding guard script execution failed."
+                $warned = $true
+            }
+        }
+    }
+    catch {
+        if ($Strict) {
+            Write-Check "FAIL" ("UTF-8 encoding guard error in strict mode: {0}" -f $_.Exception.Message)
+            $failed = $true
+        }
+        else {
+            Write-Check "WARN" ("UTF-8 encoding guard error: {0}" -f $_.Exception.Message)
+            $warned = $true
+        }
+    }
+}
+else {
+    if ($Strict) {
+        Write-Check "FAIL" "UTF-8 encoding guard script missing: overrides\\custom-windows-encoding-guard\\scripts\\bootstrap.ps1"
+        $failed = $true
+    }
+    else {
+        Write-Check "WARN" "UTF-8 encoding guard script missing: overrides\\custom-windows-encoding-guard\\scripts\\bootstrap.ps1"
+        $warned = $true
+    }
+}
+
 if ($failed) {
     Write-Host "Result: FAILED. Fix FAIL items before build." -ForegroundColor Red
     exit 2

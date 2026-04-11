@@ -1,0 +1,32 @@
+﻿{
+    "schema_version":  "1.0",
+    "status":  "ok",
+    "policy_path":  "E:/CODE/governance-kit/.governance/skill-promotion-policy.json",
+    "event_window_start":  "2026-03-28T17:17:02.0569074+08:00",
+    "threshold_count":  3,
+    "scanned_event_count":  12,
+    "grouped_signature_count":  1,
+    "eligible_signature_count":  0,
+    "selected_signature_count":  0,
+    "promoted_count":  0,
+    "created_count":  0,
+    "optimized_count":  0,
+    "blocked_create_count":  0,
+    "apply_without_ack_count":  0,
+    "cleanup_removed_count":  0,
+    "gates_ran":  false,
+    "require_user_ack":  true,
+    "user_ack_satisfied":  false,
+    "user_ack_env_var":  "SKILL_PROMOTION_ACK",
+    "skills_root":  "E:/CODE/skills-manager",
+    "overrides_root":  "E:/CODE/skills-manager/overrides",
+    "planned_promotions":  [
+
+                           ],
+    "promoted":  [
+
+                 ],
+    "cleanup_removed":  [
+
+                        ]
+}

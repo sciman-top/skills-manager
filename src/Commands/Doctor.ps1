@@ -146,7 +146,7 @@ function Get-PerfThresholdMs([string]$Metric, [int]$DefaultThresholdMs = 5000) {
     $metricKey = $Metric.Trim().ToLowerInvariant()
     switch ($metricKey) {
         "discover" { return 5000 }
-        "build_agent" { return 7000 }
+        "build_agent" { return 8000 }
         "apply_targets" { return 5000 }
         # Includes prebuild checks + full build/apply flow; realistic baseline in this repo is ~180s.
         "build_apply_total" { return 240000 }

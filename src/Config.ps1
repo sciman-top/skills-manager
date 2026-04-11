@@ -55,6 +55,13 @@ function Get-DirtyUpdateTargets($cfg) {
         }
         finally { Pop-Location }
     }
+    return $items.ToArray()
+}
+
+function Get-DirtyManualImportTargets($cfg) {
+    $items = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $cfg) { return @() }
+
     foreach ($i in @($cfg.imports)) {
         if ($i.mode -ne "manual") { continue }
         $cache = Join-Path $ImportDir $i.name
@@ -72,27 +79,20 @@ function Get-DirtyUpdateTargets($cfg) {
 function Confirm-UpdateForce($cfg, [ref]$SkipForceClean) {
     if ($null -eq $SkipForceClean.Value) { $SkipForceClean.Value = @{} }
     if (-not $cfg.update_force) { return $true }
-    if (-not (Confirm-Action "更新将逐项确认是否丢弃本地改动，继续吗？" "Y" -DefaultNo)) {
-        Write-Host "已取消更新。"
-        return $false
-    }
 
-    $dirty = Get-DirtyUpdateTargets $cfg
+    $dirtyImports = Get-DirtyManualImportTargets $cfg
+    $dirtyVendors = Get-DirtyUpdateTargets $cfg
+    $dirty = @($dirtyImports) + @($dirtyVendors)
     if ($dirty.Count -eq 0) {
-        Write-Host "未检测到 vendor/imports 本地改动，将按默认策略更新。"
+        Write-Host "未检测到本地改动，将按默认策略更新。"
         return $true
     }
 
-    Write-Host ("检测到 {0} 个本地改动项，将逐项确认：" -f $dirty.Count)
     foreach ($d in $dirty) {
         $key = "{0}|{1}" -f $d.kind, $d.name
-        $label = "{0}/{1}" -f $d.kind, $d.name
-        if (Confirm-Action ("是否在更新时丢弃该项改动：{0}" -f $label) "Y" -DefaultNo) {
-            continue
-        }
         $SkipForceClean.Value[$key] = $true
-        Write-Host ("将保留本地改动并跳过强制清理：{0}" -f $label) -ForegroundColor Yellow
     }
+    Write-Host ("检测到 {0} 个本地改动项，已自动保留并跳过强制清理。" -f $dirty.Count) -ForegroundColor Yellow
     return $true
 }
 
