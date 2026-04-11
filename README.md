@@ -67,6 +67,20 @@ repo/
 .\skills.ps1 doctor --strict
 ```
 
+## Quick Start
+
+```powershell
+.\skills.ps1 发现
+.\skills.ps1 构建生效
+.\skills.ps1 doctor --strict
+```
+
+Expected Output:
+
+- `发现` 能列出可用 skills 与配置摘要
+- `构建生效` 结束后目标目录完成同步（`link` 或 `sync`）
+- `doctor --strict` 返回通过且无阻断项
+
 首次使用时，也可以直接运行交互菜单：
 
 ```powershell
