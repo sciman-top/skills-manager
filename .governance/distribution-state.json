@@ -1,13 +1,13 @@
 ﻿{
     "version":  1,
     "tool":  "repo-governance-hub",
-    "updated_at":  "2026-04-12T02:35:53",
-    "managed_count":  70,
+    "updated_at":  "2026-04-12T12:29:02",
+    "managed_count":  73,
     "managed_files":  [
                           {
                               "path":  ".agents/plugins/marketplace.json",
                               "source":  "source/project/skills-manager/custom/.agents/plugins/marketplace.json",
-                              "sha256":  "659A609E6C966703D84567987F660BA336BDB43A1FC0A547A8E2A2C0B99DC1A7"
+                              "sha256":  "27DDE4BC3AAF78DD1101479B31B0B0B0F6C63A8E051C5B96D039FD86F1AA53A9"
                           },
                           {
                               "path":  ".agents/skills/governance-refactor-safe/SKILL.md",
@@ -120,9 +120,14 @@
                               "sha256":  "B6C826D0482F837C045177BB6B7157DB71FDEF73FD748DAA2DEBA21DCB62AACF"
                           },
                           {
+                              "path":  ".governance/skill-lifecycle-policy.json",
+                              "source":  "source/project/_common/custom/.governance/skill-lifecycle-policy.json",
+                              "sha256":  "97A19D45D3DCE2C5A51FD71BC1DC71659793BD6EF33FBAD3526A7E229B4D7CF2"
+                          },
+                          {
                               "path":  ".governance/skill-promotion-policy.json",
                               "source":  "source/project/_common/custom/.governance/skill-promotion-policy.json",
-                              "sha256":  "787E8D3D1E69BF4F03D6C1748CF259570DEB086F1E92059D08F8719613DA80D4"
+                              "sha256":  "67C0DBF9290D6FD239CBB50683AF7CB9B99307EDCC6EC7FC5332C5C368B30E26"
                           },
                           {
                               "path":  ".governance/subagent-trigger-policy.json",
@@ -167,12 +172,12 @@
                           {
                               "path":  "AGENTS.md",
                               "source":  "source/project/skills-manager/AGENTS.md",
-                              "sha256":  "7183BB08278F26A8994849A37CF78070C39EFCDDDAE630AFB939B795C7F80C30"
+                              "sha256":  "83498AFBAC9CA1967FE4CD5A80ECBEC3FDCB18888123B9000A15BDF7AA2E0E01"
                           },
                           {
                               "path":  "CLAUDE.md",
                               "source":  "source/project/skills-manager/CLAUDE.md",
-                              "sha256":  "845D480CAEA378C64DF4A76E7592FE3F5DE9A063AE1A0E9ABE3C2FCE3698B80A"
+                              "sha256":  "377CC6BF2E152AD09794B91EC6A3A63D1A746CEFE474EF127EB5E6855F3B133B"
                           },
                           {
                               "path":  "config/clarification-policy.json",
@@ -192,7 +197,7 @@
                           {
                               "path":  "docs/governance/skill-trigger-eval-runbook.md",
                               "source":  "source/project/_common/custom/docs/governance/skill-trigger-eval-runbook.md",
-                              "sha256":  "479E6AD7E14EDB89ABB54B5BE10CA9D5BF0910743E2970223491A96704753B95"
+                              "sha256":  "0BA36F2B1B987702FBB20566C5BAFF2401082ED5ECD6CDC2D0578BE50538933E"
                           },
                           {
                               "path":  "docs/governance/slsa-target-level.md",
@@ -212,7 +217,7 @@
                           {
                               "path":  "GEMINI.md",
                               "source":  "source/project/skills-manager/GEMINI.md",
-                              "sha256":  "99BE9DCB055E77510B9BE9B8694CB8122B6B9E7C11A28A6B0B9E8254B590FE19"
+                              "sha256":  "F854F9F3E5A8BEC26F128D02B614BFCE35F996DF5B7E01A5784A7C712A455290"
                           },
                           {
                               "path":  "overrides/custom-windows-encoding-guard/scripts/bootstrap.ps1",
@@ -277,12 +282,17 @@
                           {
                               "path":  "scripts/governance/check-update-triggers.ps1",
                               "source":  "source/project/skills-manager/custom/scripts/governance/check-update-triggers.ps1",
-                              "sha256":  "B11668F44AD67A67E935EE2BCA833BF8F6CFA5610C179CA630589349486CB80E"
+                              "sha256":  "D3AFC8CBBC63DAFC049755E5D03416B483980BE77F8B6991A44E695E34CB3C68"
+                          },
+                          {
+                              "path":  "scripts/governance/migrate-skill-registry-v2.ps1",
+                              "source":  "source/project/_common/custom/scripts/governance/migrate-skill-registry-v2.ps1",
+                              "sha256":  "C58FE7A12B5A663932DEDA0ACF51715258C7A8516F733929361CDB11B7977BDF"
                           },
                           {
                               "path":  "scripts/governance/promote-skill-candidates.ps1",
                               "source":  "source/project/_common/custom/scripts/governance/promote-skill-candidates.ps1",
-                              "sha256":  "95EF52C0776C60236B122D06F4C55D0DF4E977094EDB794C2F7764BC4C253712"
+                              "sha256":  "10B530077E999E38590C5CB8156FE58A9F4507088979101597A0C1F65648188A"
                           },
                           {
                               "path":  "scripts/governance/register-skill-candidate.ps1",
@@ -302,22 +312,27 @@
                           {
                               "path":  "scripts/governance/run-monthly-policy-review.ps1",
                               "source":  "source/project/skills-manager/custom/scripts/governance/run-monthly-policy-review.ps1",
-                              "sha256":  "05958334120C56D025E75565F383A02B6D7A73D5320C01D5E89E8077F0618BD3"
+                              "sha256":  "EA5C3D37D3B9E51F547EFA1AF0283EA68CEC5896B82A508EAB13D3D781195992"
                           },
                           {
                               "path":  "scripts/governance/run-project-governance-cycle.ps1",
                               "source":  "source/project/skills-manager/custom/scripts/governance/run-project-governance-cycle.ps1",
-                              "sha256":  "FC21A5707B8299C4C7E3B0FE7880AC7A7C45348DF8F025C1328B843D2ABB5930"
+                              "sha256":  "8E2F53E0CEDBD18F91B10ED73CFD1378FD9B358EE2BAFA069884EB0AD8B2C23B"
                           },
                           {
                               "path":  "scripts/governance/run-recurring-review.ps1",
                               "source":  "source/project/skills-manager/custom/scripts/governance/run-recurring-review.ps1",
-                              "sha256":  "9A43E7847A3A6DE68FFE829160CCE7CAD277E406240A58BFA833586FA970A75F"
+                              "sha256":  "8B9625B9032D8DB57EBDC170A018BCA0D8A5C385C1741AFA073D183F5A3CB10F"
+                          },
+                          {
+                              "path":  "scripts/governance/run-skill-lifecycle-review.ps1",
+                              "source":  "source/project/_common/custom/scripts/governance/run-skill-lifecycle-review.ps1",
+                              "sha256":  "EDD58956C6C85A54719322923683AA1DEAC2AE771E160D01864AD8D07FF38CF7"
                           },
                           {
                               "path":  "scripts/governance/run-target-autopilot.ps1",
                               "source":  "source/project/skills-manager/custom/scripts/governance/run-target-autopilot.ps1",
-                              "sha256":  "D03ECD8D6E0332D6EB013ED0E47562720FEC5C4498906E03B1D6B513CE2D3439"
+                              "sha256":  "7B8D1AD8DAFE70ED50B85C250A44863DF89DCF52AF549F77BBBBD98CF47D8D40"
                           },
                           {
                               "path":  "scripts/governance/verify-growth-pack.ps1",

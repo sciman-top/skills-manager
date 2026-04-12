@@ -302,6 +302,86 @@ function Convert-McpServersToGeminiConfigMap($servers) {
     return [pscustomobject]$map
 }
 
+function Get-McpServerNameSet($servers) {
+    $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if ($null -eq $servers) { return $set }
+    foreach ($s in $servers) {
+        $name = [string]$s.name
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $set.Add($name) | Out-Null
+    }
+    return $set
+}
+
+function Convert-McpMapToOrderedMap($mapLike) {
+    $map = [ordered]@{}
+    if ($null -eq $mapLike) { return $map }
+
+    if ($mapLike -is [hashtable] -or $mapLike -is [System.Collections.IDictionary]) {
+        foreach ($k in $mapLike.Keys) {
+            $name = [string]$k
+            if ([string]::IsNullOrWhiteSpace($name)) { continue }
+            $map[$name] = $mapLike[$k]
+        }
+        return $map
+    }
+
+    if ($mapLike -is [pscustomobject]) {
+        foreach ($p in $mapLike.PSObject.Properties) {
+            $name = [string]$p.Name
+            if ([string]::IsNullOrWhiteSpace($name)) { continue }
+            $map[$name] = $p.Value
+        }
+    }
+    return $map
+}
+
+function Merge-McpConfigMaps($existingMapLike, $managedMapLike, $managedNameSet) {
+    $merged = [ordered]@{}
+    $existing = Convert-McpMapToOrderedMap $existingMapLike
+    foreach ($name in $existing.Keys) {
+        if ($managedNameSet.Contains([string]$name)) { continue }
+        $merged[[string]$name] = $existing[$name]
+    }
+
+    $managed = Convert-McpMapToOrderedMap $managedMapLike
+    foreach ($name in $managed.Keys) {
+        $merged[[string]$name] = $managed[$name]
+    }
+    return [pscustomobject]$merged
+}
+
+function Build-GenericMcpPayload([string]$existingContent, $servers) {
+    $base = [ordered]@{}
+    if (-not [string]::IsNullOrWhiteSpace($existingContent)) {
+        try {
+            $parsed = $existingContent | ConvertFrom-Json
+            if ($parsed -ne $null) {
+                foreach ($p in $parsed.PSObject.Properties) {
+                    $base[[string]$p.Name] = $p.Value
+                }
+            }
+        }
+        catch {
+            Log ("MCP JSON 解析失败，将使用最小配置重建：{0}" -f $_.Exception.Message) "WARN"
+        }
+    }
+
+    $existingMap = $null
+    if ($base.Contains("mcpServers")) {
+        $existingMap = $base["mcpServers"]
+    }
+    elseif ($base.Contains("mcp_servers")) {
+        $existingMap = $base["mcp_servers"]
+    }
+
+    $managedMap = Convert-McpServersToConfigMap $servers
+    $managedNameSet = Get-McpServerNameSet $servers
+    $base["mcpServers"] = Merge-McpConfigMaps $existingMap $managedMap $managedNameSet
+    if ($base.Contains("mcp_servers")) { $base.Remove("mcp_servers") }
+    return [pscustomobject]$base
+}
+
 function Get-NativeMcpKeyValueFlags($data, [string]$flagName) {
     $flags = @()
     if ($null -eq $data) { return $flags }
@@ -443,7 +523,18 @@ function Build-GeminiSettingsPayload([string]$existingContent, $servers) {
             Log ("Gemini settings.json 解析失败，将使用最小配置重建：{0}" -f $_.Exception.Message) "WARN"
         }
     }
-    $base["mcpServers"] = Convert-McpServersToGeminiConfigMap $servers
+
+    $existingMap = $null
+    if ($base.Contains("mcpServers")) {
+        $existingMap = $base["mcpServers"]
+    }
+    elseif ($base.Contains("mcp_servers")) {
+        $existingMap = $base["mcp_servers"]
+    }
+    $managedMap = Convert-McpServersToGeminiConfigMap $servers
+    $managedNameSet = Get-McpServerNameSet $servers
+    $base["mcpServers"] = Merge-McpConfigMaps $existingMap $managedMap $managedNameSet
+    if ($base.Contains("mcp_servers")) { $base.Remove("mcp_servers") }
     return [pscustomobject]$base
 }
 
@@ -497,17 +588,32 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
     if (-not [string]::IsNullOrWhiteSpace($existingToml)) {
         $lines = $existingToml -split "`r?`n"
     }
+    $managedMap = Convert-McpServersToConfigMap $servers
+    $managedNames = @($managedMap.PSObject.Properties.Name | Sort-Object)
+    $managedNameSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($n in $managedNames) { if (-not [string]::IsNullOrWhiteSpace([string]$n)) { $managedNameSet.Add([string]$n) | Out-Null } }
+
     $kept = New-Object System.Collections.Generic.List[string]
-    $skipMcpSection = $false
+    $skipManagedSection = $false
     foreach ($line in $lines) {
-        if ($line -match '^\s*\[mcp_servers\.[^\]]+\]\s*$') {
-            $skipMcpSection = $true
+        if ($line -match '^\s*\[mcp_servers\.([^\]]+)\]\s*$') {
+            $name = [string]$matches[1]
+            if ($managedNameSet.Contains($name)) {
+                $skipManagedSection = $true
+                continue
+            }
+            $skipManagedSection = $false
+            $kept.Add($line) | Out-Null
             continue
         }
-        if ($skipMcpSection -and $line -match '^\s*\[[^\]]+\]\s*$') {
-            $skipMcpSection = $false
+
+        if ($skipManagedSection -and $line -match '^\s*\[[^\]]+\]\s*$') {
+            $skipManagedSection = $false
+            $kept.Add($line) | Out-Null
+            continue
         }
-        if (-not $skipMcpSection) {
+
+        if (-not $skipManagedSection) {
             $kept.Add($line) | Out-Null
         }
     }
@@ -519,12 +625,10 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
     $output = New-Object System.Collections.Generic.List[string]
     $output.AddRange([string[]](Apply-CodexPermissionDefaults @([string[]]$kept.ToArray())))
 
-    $map = Convert-McpServersToConfigMap $servers
-    $names = @($map.PSObject.Properties.Name | Sort-Object)
-    if ($names.Count -gt 0) {
+    if ($managedNames.Count -gt 0) {
         if ($output.Count -gt 0) { $output.Add("") | Out-Null }
-        foreach ($name in $names) {
-            $entry = $map.$name
+        foreach ($name in $managedNames) {
+            $entry = $managedMap.$name
             $output.Add(("[mcp_servers.{0}]" -f $name)) | Out-Null
             foreach ($prop in $entry.PSObject.Properties) {
                 $key = [string]$prop.Name
@@ -900,11 +1004,6 @@ function 同步MCP {
         Need ($roots.Count -gt 0) "未找到可同步的 MCP 目标目录（请检查 targets/mcp_targets 配置）。"
         $candidatePaths = Get-McpTargetCandidatePaths $cfg
 
-        $payload = [ordered]@{
-            mcpServers = Convert-McpServersToConfigMap $servers
-        }
-        $json = $payload | ConvertTo-Json -Depth 50
-
         $written = @()
         foreach ($targetRoot in $roots) {
             $file = Join-Path $targetRoot ".mcp.json"
@@ -914,6 +1013,9 @@ function 同步MCP {
                 continue
             }
             EnsureDir $targetRoot
+            $existing = if (Test-Path $file) { Get-Content -Raw -Path $file } else { "" }
+            $payloadObj = Build-GenericMcpPayload $existing $servers
+            $json = $payloadObj | ConvertTo-Json -Depth 100
             Set-ContentUtf8 $file $json
             $written += $file
             Log ("已同步 MCP 配置：{0}" -f $file)
@@ -981,6 +1083,9 @@ function 同步MCP {
             }
             else {
                 EnsureDir $traeRoot
+                $existing = if (Test-Path $traePath) { Get-Content -Raw -Path $traePath } else { "" }
+                $payloadObj = Build-GenericMcpPayload $existing $servers
+                $json = $payloadObj | ConvertTo-Json -Depth 100
                 Set-ContentUtf8 $traePath $json
                 $written += $traePath
                 Log ("已同步 Trae MCP 配置：{0}" -f $traePath)
@@ -995,6 +1100,9 @@ function 同步MCP {
         else {
             $projectTraeDir = Split-Path $projectTraePath -Parent
             EnsureDir $projectTraeDir
+            $existing = if (Test-Path $projectTraePath) { Get-Content -Raw -Path $projectTraePath } else { "" }
+            $payloadObj = Build-GenericMcpPayload $existing $servers
+            $json = $payloadObj | ConvertTo-Json -Depth 100
             Set-ContentUtf8 $projectTraePath $json
             $written += $projectTraePath
             Log ("已同步项目级 Trae MCP 配置：{0}" -f $projectTraePath)

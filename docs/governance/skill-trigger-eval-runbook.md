@@ -3,6 +3,7 @@
 ## Goal
 - Generate `.governance/skill-candidates/trigger-eval-summary.json` with stable validation metrics.
 - Unblock `create` action in `promote-skill-candidates.ps1` when `require_trigger_eval_for_create=true`.
+- Recurring review now auto-runs `check-skill-trigger-evals.ps1`; keep eval runs fresh to avoid stale summary alerts.
 
 ## Inputs
 - Trigger eval run log: `.governance/skill-candidates/trigger-eval-runs.jsonl`
