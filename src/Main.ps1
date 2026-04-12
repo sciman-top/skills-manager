@@ -55,6 +55,7 @@ if ($MyInvocation.InvocationName -ne '.') {
             "打开配置" { 打开配置 }
             "解除关联" { 解除关联 }
             "清理备份" { 清理备份 }
+            "自动更新设置" { 自动更新设置 }
             "帮助" { 帮助 }
             "doctor" {
                 $doctorTokens = @()

@@ -25,7 +25,8 @@
       ".java",
       ".kt",
       ".rb",
-      ".php"
+      ".php",
+      ".md"
     ],
     "exclude_paths": [
       ".git/",

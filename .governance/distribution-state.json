@@ -1,8 +1,8 @@
 ﻿{
     "version":  1,
     "tool":  "repo-governance-hub",
-    "updated_at":  "2026-04-12T12:29:02",
-    "managed_count":  73,
+    "updated_at":  "2026-04-12T14:42:22",
+    "managed_count":  74,
     "managed_files":  [
                           {
                               "path":  ".agents/plugins/marketplace.json",
@@ -62,7 +62,7 @@
                           {
                               "path":  ".governance/anti-bloat-policy.json",
                               "source":  "source/project/_common/custom/.governance/anti-bloat-policy.json",
-                              "sha256":  "60756DC85E191A080A2AFDE3264756A4B67B6C6E56C7F4DB062199C2F165A7C3"
+                              "sha256":  "CCCA4ABC95520131F7F94DD91B2A330D0766CA9769A5E3483574730DEC7B1C2F"
                           },
                           {
                               "path":  ".governance/external-baseline-policy.json",
@@ -72,7 +72,12 @@
                           {
                               "path":  ".governance/growth-pack/CHECKLIST.md",
                               "source":  "source/project/_common/custom/.governance/growth-pack/CHECKLIST.md",
-                              "sha256":  "61943A7D82F50E0CA0F96E39BD4FA4383B213F7B27C8745B384AD9093BFC65E5"
+                              "sha256":  "4D2875386AEA797EE246127CE12979FA86485EEDA1787B9C77D7C42CCB40CD18"
+                          },
+                          {
+                              "path":  ".governance/growth-pack/GITHUB-PRESENCE.md",
+                              "source":  "source/project/_common/custom/.governance/growth-pack/GITHUB-PRESENCE.md",
+                              "sha256":  "A0A7A6D5C0D090984E4B2DCCAE4C2FD9CFFA0A17037961BDB65304D17C2EBB85"
                           },
                           {
                               "path":  ".governance/growth-pack/ISSUE_TEMPLATE/bug_report.yml",
@@ -92,12 +97,12 @@
                           {
                               "path":  ".governance/growth-pack/README.template.md",
                               "source":  "source/project/_common/custom/.governance/growth-pack/README.template.md",
-                              "sha256":  "F72F1102561F9F772D8E52ADEAF090BF0FD061C9484F428FCD985D3F26151CDC"
+                              "sha256":  "CBD10278E65F6E1BF292983FE9D74510F98C86152BFDC3202245C784812C7C70"
                           },
                           {
                               "path":  ".governance/growth-pack/RELEASE_TEMPLATE.md",
                               "source":  "source/project/_common/custom/.governance/growth-pack/RELEASE_TEMPLATE.md",
-                              "sha256":  "FD21C56B207E40482AF80EE8DC21EFE0C187E7B4CD683524B016E8A763734DDD"
+                              "sha256":  "74CE1FB55365968B395F44C1F5C10FC3AC4AD667F4E82504B5647D8200A8C407"
                           },
                           {
                               "path":  ".governance/practice-stack-policy.json",
@@ -162,7 +167,7 @@
                           {
                               "path":  ".governance/token-saver-policy.json",
                               "source":  "source/project/_common/custom/.governance/token-saver-policy.json",
-                              "sha256":  "C5D748C9134537E9F45CA9F926F800A3940C254616D54A333883D8D937A04933"
+                              "sha256":  "B8C079D8A69ED74B36B2BA1262DA1C86AC594590A591382D44D6E21EB61600E7"
                           },
                           {
                               "path":  ".governance/tracked-files-policy.json",
@@ -337,7 +342,7 @@
                           {
                               "path":  "scripts/governance/verify-growth-pack.ps1",
                               "source":  "source/project/_common/custom/scripts/governance/verify-growth-pack.ps1",
-                              "sha256":  "34626E6FC1CE10DE2F1D2057C60E2001916C69A705CF61EBA362D120F5DC28AC"
+                              "sha256":  "CCC8A42B01E226C72B94FFB448EB708576608767971661CCFAC2F3CFA32B3435"
                           },
                           {
                               "path":  "scripts/install-githooks.ps1",

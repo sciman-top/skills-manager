@@ -1,6 +1,6 @@
 ﻿#requires -Version 5.1
 param(
-    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "锁定", "生成锁文件", "打开配置", "解除关联", "清理备份", "帮助", "doctor", "add", "npx", "安装MCP", "卸载MCP", "同步MCP", "mcp-install", "mcp-uninstall", "mcp-sync")]
+    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "锁定", "生成锁文件", "打开配置", "解除关联", "清理备份", "自动更新设置", "帮助", "doctor", "add", "npx", "安装MCP", "卸载MCP", "同步MCP", "mcp-install", "mcp-uninstall", "mcp-sync")]
     [string]$Cmd = "menu",
     [string]$Filter = "",
     [switch]$DryRun,
@@ -6743,6 +6743,91 @@ function 清理备份 {
     }
     Write-Host "清理完成。"
 }
+function Get-自动更新任务名 {
+    return "skills-manager-weekly-update-friday-2000"
+}
+function Get-自动更新脚本路径 {
+    return (Join-Path $Root "scripts/weekly-auto-update.ps1")
+}
+function 获取自动更新任务 {
+    if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) { return $null }
+    try { return (Get-ScheduledTask -TaskName (Get-自动更新任务名) -ErrorAction Stop) }
+    catch { return $null }
+}
+function 查看自动更新状态 {
+    $taskName = Get-自动更新任务名
+    $task = 获取自动更新任务
+    if ($null -eq $task) {
+        Write-Host ("自动更新：未启用（任务名：{0}）" -f $taskName) -ForegroundColor Yellow
+        return
+    }
+
+    $info = $null
+    try { $info = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction Stop } catch {}
+    $state = [string]$task.State
+    $nextRun = "未知"
+    $lastRun = "未知"
+    if ($null -ne $info) {
+        if ($info.NextRunTime -and $info.NextRunTime -gt [datetime]::MinValue) { $nextRun = $info.NextRunTime.ToString("yyyy-MM-dd HH:mm:ss") }
+        if ($info.LastRunTime -and $info.LastRunTime -gt [datetime]::MinValue) { $lastRun = $info.LastRunTime.ToString("yyyy-MM-dd HH:mm:ss") }
+    }
+    Write-Host ("自动更新：已启用（每周五 20:00，本机时间）")
+    Write-Host ("任务名：{0}" -f $taskName)
+    Write-Host ("状态：{0}" -f $state)
+    Write-Host ("下次运行：{0}" -f $nextRun)
+    Write-Host ("上次运行：{0}" -f $lastRun)
+}
+function 启用自动更新 {
+    $taskName = Get-自动更新任务名
+    $runnerPath = Get-自动更新脚本路径
+    Need (Test-Path $runnerPath) ("缺少自动更新脚本：{0}" -f $runnerPath)
+    Need (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue) "当前环境不支持 ScheduledTasks 模块。"
+    Need (Get-Command New-ScheduledTaskAction -ErrorAction SilentlyContinue) "当前环境不支持 ScheduledTasks 模块。"
+    Need (Get-Command powershell -ErrorAction SilentlyContinue) "未找到 powershell 可执行文件。"
+
+    if (Skip-IfDryRun "启用自动更新计划任务") { return }
+
+    $pwsh = (Get-Command powershell -ErrorAction Stop).Source
+    $args = ('-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $runnerPath)
+    $action = New-ScheduledTaskAction -Execute $pwsh -Argument $args -WorkingDirectory $Root
+    $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Friday -At "20:00"
+    $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
+    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "skills-manager 每周五 20:00 自动执行 更新 + 同步MCP" -Force | Out-Null
+    Write-Host "✅ 已启用自动更新：每周五 20:00（本机时间）。"
+    查看自动更新状态
+}
+function 禁用自动更新 {
+    $taskName = Get-自动更新任务名
+    if (Skip-IfDryRun "禁用自动更新计划任务") { return }
+    $task = 获取自动更新任务
+    if ($null -eq $task) {
+        Write-Host "自动更新任务不存在，无需禁用。"
+        return
+    }
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Stop
+    Write-Host "✅ 已禁用自动更新任务。"
+}
+function 自动更新设置 {
+    while ($true) {
+        Write-Host ""
+        Write-Host "=== 自动更新设置 ==="
+        Write-Host "目标：每周五 20:00 自动执行【更新 + 同步MCP】"
+        查看自动更新状态
+        Write-Host "1) 启用（每周五 20:00）"
+        Write-Host "2) 禁用"
+        Write-Host "3) 查看状态"
+        Write-Host "0) 返回"
+        $c = Read-HostSafe "请选择"
+        switch ($c) {
+            "1" { 启用自动更新 }
+            "2" { 禁用自动更新 }
+            "3" { 查看自动更新状态 }
+            "0" { return }
+            default { Write-Host "无效选择。" }
+        }
+    }
+}
 
 function 帮助 {
     @"
@@ -6770,6 +6855,7 @@ Skills 管理器（极简版，中文菜单）
   - 安装MCP：向 skills.json 登记 MCP 服务（支持 stdio / sse / http），并自动同步
   - 卸载MCP：从 skills.json 移除 MCP 服务，并自动同步
   - 同步MCP：仅重新同步 MCP 配置，不处理技能构建
+  - 自动更新设置：配置本机计划任务，每周五 20:00 自动执行“更新 + 同步MCP”
   - 打开配置：打开 skills.json 进行手工检查或编辑
   - 解除关联：移除 link 模式下创建的目录关联
   - 清理备份：删除仓库内 *.bak.* 文件和 .bak 目录（排除 vendor / agent / imports / .git）
@@ -6804,6 +6890,7 @@ Skills 管理器（极简版，中文菜单）
   .\skills.ps1 打开配置
   .\skills.ps1 解除关联
   .\skills.ps1 清理备份
+  .\skills.ps1 自动更新设置
   .\skills.ps1 安装MCP <name> -- <command> [args...]          （推荐）
   .\skills.ps1 安装MCP <name> --cmd <command> [--arg <arg>...] （兼容）
   .\skills.ps1 安装MCP <name> --transport http --url <url> [--bearer-token-env-var <ENV>] 
@@ -6865,6 +6952,7 @@ function 菜单 {
         Write-Host "维护"
         Write-Host "14) 解除关联（仅 link 模式需要）"
         Write-Host "15) 清理备份（删除仓库内 *.bak.* / .bak，排除 vendor/agent/imports/.git）"
+        Write-Host "16) 自动更新设置（每周五 20:00 自动执行 更新 + 同步MCP）"
         Write-Host "98) 帮助"
         Write-Host "0) 退出"
         $c = Read-HostSafe "请选择"
@@ -6884,6 +6972,7 @@ function 菜单 {
             "13" { 同步MCP }
             "14" { 解除关联 }
             "15" { 清理备份 }
+            "16" { 自动更新设置 }
             "98" { 帮助 }
             "0" { return }
             default { Write-Host "无效选择。" }
@@ -6948,6 +7037,7 @@ if ($MyInvocation.InvocationName -ne '.') {
             "打开配置" { 打开配置 }
             "解除关联" { 解除关联 }
             "清理备份" { 清理备份 }
+            "自动更新设置" { 自动更新设置 }
             "帮助" { 帮助 }
             "doctor" {
                 $doctorTokens = @()
