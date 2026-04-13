@@ -382,16 +382,30 @@ function Build-GenericMcpPayload([string]$existingContent, $servers) {
     return [pscustomobject]$base
 }
 
-function Get-NativeMcpKeyValueFlags($data, [string]$flagName) {
+function Get-NativeMcpKeyValueFlags($data, [string]$flagName, [string]$separator = "=") {
     $flags = @()
     if ($null -eq $data) { return $flags }
+    function Resolve-EnvTemplateValue([string]$rawValue) {
+        if ([string]::IsNullOrWhiteSpace($rawValue)) { return $rawValue }
+        return [System.Text.RegularExpressions.Regex]::Replace(
+            $rawValue,
+            '\$\{([A-Za-z_][A-Za-z0-9_]*)\}',
+            {
+                param($m)
+                $varName = [string]$m.Groups[1].Value
+                $resolved = [System.Environment]::GetEnvironmentVariable($varName)
+                if ($null -eq $resolved) { return $m.Value }
+                return [string]$resolved
+            }
+        )
+    }
 
     if ($data -is [hashtable] -or $data -is [System.Collections.IDictionary]) {
         foreach ($k in $data.Keys) {
             $key = [string]$k
             if ([string]::IsNullOrWhiteSpace($key)) { continue }
-            $value = [string]$data[$k]
-            $flags += @($flagName, ("{0}={1}" -f $key, $value))
+            $value = Resolve-EnvTemplateValue ([string]$data[$k])
+            $flags += @($flagName, ("{0}{1}{2}" -f $key, $separator, $value))
         }
         return $flags
     }
@@ -400,8 +414,8 @@ function Get-NativeMcpKeyValueFlags($data, [string]$flagName) {
         foreach ($p in $data.PSObject.Properties) {
             $key = [string]$p.Name
             if ([string]::IsNullOrWhiteSpace($key)) { continue }
-            $value = [string]$p.Value
-            $flags += @($flagName, ("{0}={1}" -f $key, $value))
+            $value = Resolve-EnvTemplateValue ([string]$p.Value)
+            $flags += @($flagName, ("{0}{1}{2}" -f $key, $separator, $value))
         }
         return $flags
     }
@@ -437,13 +451,385 @@ function Get-NativeMcpAddArgs($server, [string]$scope = "user") {
 
     $headerFlags = @()
     if ($server.PSObject.Properties.Match("headers").Count -gt 0) {
-        $headerFlags = Get-NativeMcpKeyValueFlags $server.headers "-H"
+        $headerFlags = Get-NativeMcpKeyValueFlags $server.headers "-H" ": "
     }
-    if ($headerFlags.Count -gt 0) { $args += $headerFlags }
     $url = if ($server.PSObject.Properties.Match("url").Count -gt 0) { [string]$server.url } else { "" }
     Need (-not [string]::IsNullOrWhiteSpace($url)) ("{0} MCP 缺少 url：{1}" -f $transport, $name)
     $args += @("--transport", $transport, $name, $url)
+    # `claude mcp add --header` is variadic and consumes trailing tokens, so headers must
+    # be appended after <name> <url>.
+    if ($headerFlags.Count -gt 0) { $args += $headerFlags }
     return $args
+}
+
+function Remove-McpServersFromPayload($payload, [string[]]$names) {
+    if ($null -eq $payload -or $null -eq $names -or $names.Count -eq 0) { return $payload }
+    if ($payload.PSObject.Properties.Match("mcpServers").Count -eq 0) { return $payload }
+    $serverMap = $payload.mcpServers
+    if ($null -eq $serverMap) { return $payload }
+
+    foreach ($name in @($names)) {
+        if ([string]::IsNullOrWhiteSpace([string]$name)) { continue }
+        $match = @($serverMap.PSObject.Properties | Where-Object {
+            [string]::Equals([string]$_.Name, [string]$name, [System.StringComparison]::OrdinalIgnoreCase)
+        } | Select-Object -First 1)
+        if ($match.Count -gt 0 -and $null -ne $match[0]) {
+            $serverMap.PSObject.Properties.Remove($match[0].Name)
+        }
+    }
+
+    return $payload
+}
+
+function Get-LegacyMcpServersToPrune() {
+    return @("fetch", "filesystem")
+}
+
+function Has-McpServerByName($servers, [string]$name) {
+    if ([string]::IsNullOrWhiteSpace($name)) { return $false }
+    foreach ($s in @($servers)) {
+        if ($null -eq $s) { continue }
+        if ([string]::Equals([string]$s.name, $name, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Invoke-Gh([string[]]$GhArgs) {
+    Need ($GhArgs -and $GhArgs.Count -gt 0) "gh 参数不能为空"
+    $output = & gh @GhArgs 2>$null
+    if ($LASTEXITCODE -ne 0) { return $null }
+    return @($output | ForEach-Object { [string]$_ })
+}
+
+function Ensure-GhAuthForGithubMcp($servers) {
+    if (-not (Has-McpServerByName $servers "github")) { return }
+    if (-not (Get-Command "gh" -ErrorAction SilentlyContinue)) {
+        throw "检测到 github MCP，但未找到 gh 命令。请先安装并登录 GitHub CLI（gh auth login）。"
+    }
+
+    $tokenLines = Invoke-Gh @("auth", "token")
+    $token = if ($tokenLines) { (($tokenLines -join "`n").Trim()) } else { "" }
+    if ([string]::IsNullOrWhiteSpace($token)) {
+        throw "检测到 github MCP，但 gh 未登录或无法读取 token。请先执行 gh auth login。"
+    }
+
+    $userLines = Invoke-Gh @("api", "user", "--jq", ".login")
+    $username = if ($userLines) { (($userLines -join "`n").Trim()) } else { "" }
+    if ([string]::IsNullOrWhiteSpace($username)) {
+        throw "检测到 github MCP，但 gh 登录态校验失败（gh api user）。请重新执行 gh auth login。"
+    }
+
+    # gh auth 路线：同步阶段临时注入 token，供各客户端配置写入与 native 注册使用。
+    $env:GITHUB_PERSONAL_ACCESS_TOKEN = $token
+    $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = $token
+    Log ("GitHub MCP gh 认证预检通过：{0}" -f $username) "INFO"
+}
+
+function ConvertTo-CmdArg([string]$arg) {
+    if ($null -eq $arg) { return '""' }
+    $text = [string]$arg
+    if ($text -eq "") { return '""' }
+    if ($text -notmatch '[\s"&|<>^]') { return $text }
+    $escaped = $text.Replace('"', '\"')
+    return ('"{0}"' -f $escaped)
+}
+
+function Invoke-ExternalCommandWithTimeout([string]$command, [string[]]$args = @(), [string]$workingDir = $null, [int]$timeoutSeconds = 30) {
+    Need (-not [string]::IsNullOrWhiteSpace($command)) "外部命令名不能为空"
+    if ($timeoutSeconds -lt 1) { $timeoutSeconds = 1 }
+
+    $outFile = [System.IO.Path]::GetTempFileName()
+    $errFile = [System.IO.Path]::GetTempFileName()
+    try {
+        $cmdTokens = New-Object System.Collections.Generic.List[string]
+        $cmdTokens.Add((ConvertTo-CmdArg $command)) | Out-Null
+        foreach ($a in @($args)) {
+            $cmdTokens.Add((ConvertTo-CmdArg ([string]$a))) | Out-Null
+        }
+        $cmdLine = ($cmdTokens -join " ")
+        $startArgs = @("/d", "/s", "/c", $cmdLine)
+
+        $effectiveWorkingDir = if ([string]::IsNullOrWhiteSpace($workingDir)) { $PWD.Path } else { $workingDir }
+        $proc = Start-Process -FilePath "cmd.exe" -ArgumentList $startArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $outFile -RedirectStandardError $errFile -WorkingDirectory $effectiveWorkingDir
+        $exited = $proc.WaitForExit($timeoutSeconds * 1000)
+        if (-not $exited) {
+            try { $proc.Kill() } catch {}
+            return [pscustomobject]@{
+                timed_out = $true
+                exit_code = 124
+                output = @()
+                error = ("timeout_after_{0}s" -f $timeoutSeconds)
+            }
+        }
+
+        $outText = if (Test-Path $outFile) { Get-Content -Raw -Path $outFile } else { "" }
+        $errText = if (Test-Path $errFile) { Get-Content -Raw -Path $errFile } else { "" }
+        $combined = New-Object System.Collections.Generic.List[string]
+        foreach ($line in @((($outText + "`n" + $errText) -split "`r?`n"))) {
+            if ($null -ne $line -and $line -ne "") { $combined.Add([string]$line) | Out-Null }
+        }
+
+        return [pscustomobject]@{
+            timed_out = $false
+            exit_code = [int]$proc.ExitCode
+            output = @($combined)
+            error = ""
+        }
+    }
+    catch {
+        return [pscustomobject]@{
+            timed_out = $false
+            exit_code = 1
+            output = @()
+            error = $_.Exception.Message
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $outFile -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $errFile -ErrorAction SilentlyContinue
+    }
+}
+
+function Invoke-ExternalCommandCapture([string]$command, [string[]]$args = @()) {
+    $result = Invoke-ExternalCommandWithTimeout $command @($args) $null 120
+    return [pscustomobject]@{
+        command = $command
+        args = @($args)
+        exit_code = [int]$result.exit_code
+        output = @($result.output)
+    }
+}
+
+function Get-McpServerNamesFromJsonText([string]$jsonText) {
+    if ([string]::IsNullOrWhiteSpace($jsonText)) { return @() }
+    try {
+        $obj = $jsonText | ConvertFrom-Json -Depth 100
+    }
+    catch {
+        return @()
+    }
+    if ($null -eq $obj) { return @() }
+    if ($obj.PSObject.Properties.Match("mcpServers").Count -eq 0 -or $null -eq $obj.mcpServers) {
+        return @()
+    }
+    return @($obj.mcpServers.PSObject.Properties | ForEach-Object { [string]$_.Name })
+}
+
+function Get-CodexMcpServerNamesFromTomlText([string]$tomlText) {
+    if ([string]::IsNullOrWhiteSpace($tomlText)) { return @() }
+    $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($line in @(($tomlText -split "`r?`n"))) {
+        $m = [regex]::Match([string]$line, '^\s*\[mcp_servers\.([^\]\s]+)\]\s*$')
+        if ($m.Success) {
+            $set.Add([string]$m.Groups[1].Value) | Out-Null
+        }
+    }
+    return @($set | Sort-Object)
+}
+
+function Get-McpExpectedServersByCli($roots) {
+    $expected = [ordered]@{
+        claude = @()
+        codex = @()
+        gemini = @()
+    }
+    foreach ($root in @($roots)) {
+        if ([string]::IsNullOrWhiteSpace([string]$root)) { continue }
+        $leaf = (Split-Path ([string]$root) -Leaf).ToLowerInvariant()
+        if ($leaf -eq ".claude") {
+            $mcpPath = Join-Path $root ".mcp.json"
+            if (Test-Path $mcpPath) {
+                $names = Get-McpServerNamesFromJsonText (Get-Content -Raw -Path $mcpPath)
+                if ($names.Count -gt 0) { $expected.claude += $names }
+            }
+            continue
+        }
+        if ($leaf -eq ".gemini") {
+            $settingsPath = Join-Path $root "settings.json"
+            if (Test-Path $settingsPath) {
+                $names = Get-McpServerNamesFromJsonText (Get-Content -Raw -Path $settingsPath)
+                if ($names.Count -gt 0) { $expected.gemini += $names }
+            }
+            continue
+        }
+        if ($leaf -eq ".codex") {
+            $cfgPath = Join-Path $root "config.toml"
+            if (Test-Path $cfgPath) {
+                $names = Get-CodexMcpServerNamesFromTomlText (Get-Content -Raw -Path $cfgPath)
+                if ($names.Count -gt 0) { $expected.codex += $names }
+            }
+            continue
+        }
+    }
+
+    foreach ($k in @("claude", "codex", "gemini")) {
+        $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($name in @($expected[$k])) {
+            if ([string]::IsNullOrWhiteSpace([string]$name)) { continue }
+            $set.Add([string]$name) | Out-Null
+        }
+        $expected[$k] = @($set | Sort-Object)
+    }
+    return [pscustomobject]$expected
+}
+
+function Remove-AnsiEscapeSequences([string]$text) {
+    if ([string]::IsNullOrEmpty($text)) { return $text }
+    return ([regex]::Replace($text, '\x1B\[[0-9;?]*[ -/]*[@-~]', ''))
+}
+
+function Test-CliMcpServerReady([string]$cli, [string[]]$expectedServers) {
+    if ($null -eq $expectedServers -or $expectedServers.Count -eq 0) {
+        return [pscustomobject]@{
+            cli = $cli
+            ok = $true
+            reason = "no_expected_servers"
+            missing = @()
+            raw = @()
+        }
+    }
+    if (-not (Get-Command $cli -ErrorAction SilentlyContinue)) {
+        return [pscustomobject]@{
+            cli = $cli
+            ok = $false
+            reason = "cli_not_found"
+            missing = @($expectedServers)
+            raw = @()
+        }
+    }
+
+    $result = Invoke-ExternalCommandCapture $cli @("mcp", "list")
+    $raw = @($result.output | ForEach-Object { Remove-AnsiEscapeSequences ([string]$_) })
+
+    $missing = New-Object System.Collections.Generic.List[string]
+    $joined = ($raw -join "`n")
+    $trimmedJoined = $joined.Trim()
+    $nonInteractiveHints = @(
+        "stdout is not a terminal",
+        "Input must be provided either through stdin",
+        "No input provided via stdin"
+    )
+    $isNonInteractive = $false
+    foreach ($hint in $nonInteractiveHints) {
+        if ($trimmedJoined -like ("*{0}*" -f $hint)) {
+            $isNonInteractive = $true
+            break
+        }
+    }
+    if ($isNonInteractive) {
+        return [pscustomobject]@{
+            cli = $cli
+            ok = $true
+            reason = "non_interactive_tty_required_fallback"
+            missing = @()
+            raw = $raw
+        }
+    }
+    if ($trimmedJoined.Length -eq 0 -and $cli -eq "gemini") {
+        return [pscustomobject]@{
+            cli = $cli
+            ok = $true
+            reason = if ($result.exit_code -eq 0) { "ok_empty_output" } else { ("ok_empty_output_exit_{0}" -f $result.exit_code) }
+            missing = @()
+            raw = $raw
+        }
+    }
+    if ($trimmedJoined.Length -eq 0) {
+        return [pscustomobject]@{
+            cli = $cli
+            ok = $false
+            reason = ("empty_output_exit_{0}" -f $result.exit_code)
+            missing = @($expectedServers)
+            raw = $raw
+        }
+    }
+    foreach ($name in @($expectedServers)) {
+        if ([string]::IsNullOrWhiteSpace([string]$name)) { continue }
+        $pattern = "^\s*{0}\b" -f [regex]::Escape([string]$name)
+        $line = @($raw | Where-Object { [regex]::IsMatch([string]$_, $pattern) } | Select-Object -First 1)
+        if ($line.Count -eq 0) {
+            $missing.Add([string]$name) | Out-Null
+            continue
+        }
+        $lineText = [string]$line[0]
+        if ($cli -eq "claude") {
+            if ($lineText -notmatch "Connected") {
+                $missing.Add([string]$name) | Out-Null
+            }
+            continue
+        }
+        if ($cli -eq "codex") {
+            if ($lineText -match '\bdisabled\b') {
+                $missing.Add([string]$name) | Out-Null
+            }
+            continue
+        }
+        if ($cli -eq "gemini") {
+            # Some Gemini CLI versions print minimal/empty table output.
+            # Fallback: when list output has no rows, verify names from settings.json already written.
+            if ($trimmedJoined.Length -eq 0) {
+                continue
+            }
+        }
+    }
+
+    $reason = if ($missing.Count -eq 0) {
+        if ($result.exit_code -eq 0) { "ok" } else { ("ok_with_nonzero_exit_{0}" -f $result.exit_code) }
+    } else {
+        if ($result.exit_code -eq 0) { "missing_or_unhealthy" } else { ("missing_or_unhealthy_exit_{0}" -f $result.exit_code) }
+    }
+    return [pscustomobject]@{
+        cli = $cli
+        ok = ($missing.Count -eq 0)
+        reason = $reason
+        missing = @($missing)
+        raw = $raw
+    }
+}
+
+function Verify-McpAcrossCliWithRetry($roots, [int]$maxAttempts = 6, [int]$intervalSeconds = 3) {
+    $expected = Get-McpExpectedServersByCli $roots
+    $targets = @(
+        [pscustomobject]@{ cli = "claude"; names = @($expected.claude) },
+        [pscustomobject]@{ cli = "codex"; names = @($expected.codex) },
+        [pscustomobject]@{ cli = "gemini"; names = @($expected.gemini) }
+    ) | Where-Object { @($_.names).Count -gt 0 }
+
+    if ($targets.Count -eq 0) {
+        Log "未检测到需校验的 CLI MCP 目标，跳过跨 CLI 可用性校验。" "WARN"
+        return
+    }
+
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        $failed = New-Object System.Collections.Generic.List[object]
+        foreach ($target in $targets) {
+            $check = Test-CliMcpServerReady ([string]$target.cli) @($target.names)
+            if ($check.ok) {
+                Log ("MCP 校验通过：{0} -> {1}" -f $check.cli, ((@($target.names)) -join ", "))
+            }
+            else {
+                $failed.Add($check) | Out-Null
+                Log ("MCP 校验未通过：{0}，缺失/异常：{1}（reason={2}）" -f $check.cli, (($check.missing) -join ", "), $check.reason) "WARN"
+                $snippet = @($check.raw | Select-Object -First 6) -join " | "
+                if (-not [string]::IsNullOrWhiteSpace($snippet)) {
+                    Log ("{0} mcp list 输出片段：{1}" -f $check.cli, $snippet) "WARN"
+                }
+            }
+        }
+
+        if ($failed.Count -eq 0) {
+            Log ("跨 CLI MCP 校验完成：全部通过（attempt={0}/{1}）。" -f $attempt, $maxAttempts) "INFO"
+            return
+        }
+        if ($attempt -lt $maxAttempts) {
+            Log ("跨 CLI MCP 校验第 {0}/{1} 次未全部通过，{2}s 后自动重试。" -f $attempt, $maxAttempts, $intervalSeconds) "WARN"
+            Start-Sleep -Seconds $intervalSeconds
+        }
+    }
+
+    throw ("跨 CLI MCP 校验失败：在 {0} 次重试后仍存在不可用服务，请检查日志中的 CLI 与缺失项。" -f $maxAttempts)
 }
 
 function Invoke-NativeMcpSync($servers) {
@@ -465,8 +851,21 @@ function Invoke-NativeMcpSync($servers) {
                 Write-Host ("DRYRUN：将执行原生 MCP 同步 -> {0}" -f $cmdText)
                 continue
             }
-            Push-Location $script:Root
-            try { & claude @args | Out-Host } finally { Pop-Location }
+            $timeoutSeconds = 30
+            $timeoutEnv = $env:SKILLS_MCP_NATIVE_TIMEOUT_SECONDS
+            $timeoutParsed = 0
+            if ([int]::TryParse([string]$timeoutEnv, [ref]$timeoutParsed)) {
+                $timeoutSeconds = $timeoutParsed
+            }
+            $native = Invoke-ExternalCommandWithTimeout "claude" @($args) $script:Root $timeoutSeconds
+            if ($native.timed_out) {
+                Log ("原生 MCP 同步超时（已忽略）：{0}（scope={1}，timeout={2}s）" -f [string]$s.name, $scope, $timeoutSeconds) "WARN"
+                continue
+            }
+            if ($native.exit_code -ne 0) {
+                Log ("原生 MCP 同步失败（已忽略）：{0}（scope={1}，exit={2}）{3}" -f [string]$s.name, $scope, $native.exit_code, $native.error) "WARN"
+                continue
+            }
             Log ("已同步原生 MCP：{0}（scope={1}）" -f [string]$s.name, $scope)
         }
         catch {
@@ -479,7 +878,7 @@ function Get-NativeMcpCleanupCommands([string]$name) {
     Need (-not [string]::IsNullOrWhiteSpace($name)) "MCP 服务名不能为空"
     return @(
         [pscustomobject]@{ command = "claude"; args = @("mcp", "remove", $name, "--scope", "user"); project = $false }
-        [pscustomobject]@{ command = "claude"; args = @("mcp", "remove", $name); project = $true }
+        [pscustomobject]@{ command = "claude"; args = @("mcp", "remove", $name, "--scope", "project"); project = $true }
     )
 }
 
@@ -493,12 +892,21 @@ function Invoke-NativeMcpCleanup([string]$name) {
             continue
         }
         try {
-            if ($op.project) {
-                Push-Location $script:Root
-                try { & $op.command @($op.args) | Out-Host } finally { Pop-Location }
+            $timeoutSeconds = 30
+            $timeoutEnv = $env:SKILLS_MCP_NATIVE_TIMEOUT_SECONDS
+            $timeoutParsed = 0
+            if ([int]::TryParse([string]$timeoutEnv, [ref]$timeoutParsed)) {
+                $timeoutSeconds = $timeoutParsed
             }
-            else {
-                & $op.command @($op.args) | Out-Host
+            $workingDir = if ($op.project) { $script:Root } else { $null }
+            $native = Invoke-ExternalCommandWithTimeout ([string]$op.command) @($op.args) $workingDir $timeoutSeconds
+            if ($native.timed_out) {
+                Log ("原生 MCP 清理超时（已忽略）：{0}（timeout={1}s）" -f $cmdText, $timeoutSeconds) "WARN"
+                continue
+            }
+            if ($native.exit_code -ne 0) {
+                Log ("原生 MCP 清理失败（已忽略）：{0}（exit={1}）{2}" -f $cmdText, $native.exit_code, $native.error) "WARN"
+                continue
             }
             Log ("已执行原生 MCP 清理：{0}" -f $cmdText)
         }
@@ -588,10 +996,34 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
     if (-not [string]::IsNullOrWhiteSpace($existingToml)) {
         $lines = $existingToml -split "`r?`n"
     }
-    $managedMap = Convert-McpServersToConfigMap $servers
+    $managedNameSet = Get-McpServerNameSet $servers
+    $codexServers = @()
+    $hasGithubToken = -not [string]::IsNullOrWhiteSpace($env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN) -or -not [string]::IsNullOrWhiteSpace($env:GITHUB_PERSONAL_ACCESS_TOKEN)
+    if ([string]::IsNullOrWhiteSpace($env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN) -and -not [string]::IsNullOrWhiteSpace($env:GITHUB_PERSONAL_ACCESS_TOKEN)) {
+        $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = [string]$env:GITHUB_PERSONAL_ACCESS_TOKEN
+    }
+    foreach ($server in @($servers)) {
+        if ($null -eq $server) { continue }
+        if ([string]::Equals([string]$server.name, "github", [System.StringComparison]::OrdinalIgnoreCase)) {
+            if (-not $hasGithubToken) {
+                Log "Codex 检测到 GitHub MCP 但缺少 CODEX_GITHUB_PERSONAL_ACCESS_TOKEN（或 GITHUB_PERSONAL_ACCESS_TOKEN），已跳过同步以避免影响启动。" "WARN"
+                continue
+            }
+            Log "Codex 检测到 GitHub MCP 且存在 Token，将写入 bearer_token_env_var=CODEX_GITHUB_PERSONAL_ACCESS_TOKEN。" "INFO"
+            $normalizedGithub = [ordered]@{
+                name = [string]$server.name
+                transport = if ([string]::IsNullOrWhiteSpace([string]$server.transport)) { "http" } else { [string]$server.transport }
+                url = [string]$server.url
+                bearer_token_env_var = "CODEX_GITHUB_PERSONAL_ACCESS_TOKEN"
+            }
+            $codexServers += [pscustomobject]$normalizedGithub
+            continue
+        }
+        $codexServers += $server
+    }
+
+    $managedMap = Convert-McpServersToConfigMap $codexServers
     $managedNames = @($managedMap.PSObject.Properties.Name | Sort-Object)
-    $managedNameSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($n in $managedNames) { if (-not [string]::IsNullOrWhiteSpace([string]$n)) { $managedNameSet.Add([string]$n) | Out-Null } }
 
     $kept = New-Object System.Collections.Generic.List[string]
     $skipManagedSection = $false
@@ -999,6 +1431,10 @@ function 同步MCP {
     Invoke-WithMetric "sync_mcp" {
         $cfg = LoadCfg
         $servers = @($cfg.mcp_servers)
+        $pruneNames = @(Get-LegacyMcpServersToPrune)
+        if (-not $DryRun) {
+            Ensure-GhAuthForGithubMcp $servers
+        }
 
         $roots = Resolve-McpTargetRootsFromCfg $cfg
         Need ($roots.Count -gt 0) "未找到可同步的 MCP 目标目录（请检查 targets/mcp_targets 配置）。"
@@ -1007,6 +1443,7 @@ function 同步MCP {
         $written = @()
         foreach ($targetRoot in $roots) {
             $file = Join-Path $targetRoot ".mcp.json"
+            $targetRootLeaf = (Split-Path ([string]$targetRoot) -Leaf)
             if ($DryRun) {
                 Write-Host ("DRYRUN：将写入 MCP 配置 -> {0}" -f $file)
                 $written += $file
@@ -1015,6 +1452,7 @@ function 同步MCP {
             EnsureDir $targetRoot
             $existing = if (Test-Path $file) { Get-Content -Raw -Path $file } else { "" }
             $payloadObj = Build-GenericMcpPayload $existing $servers
+            $payloadObj = Remove-McpServersFromPayload $payloadObj $pruneNames
             $json = $payloadObj | ConvertTo-Json -Depth 100
             Set-ContentUtf8 $file $json
             $written += $file
@@ -1109,7 +1547,21 @@ function 同步MCP {
         }
 
         Write-Host ("已同步 MCP 服务配置到 {0} 个目标。" -f $written.Count)
+        foreach ($pruneName in $pruneNames) {
+            Invoke-NativeMcpCleanup $pruneName
+        }
         Invoke-NativeMcpSync $servers
+        if (-not $DryRun) {
+            $attemptsEnv = $env:SKILLS_MCP_VERIFY_ATTEMPTS
+            $intervalEnv = $env:SKILLS_MCP_VERIFY_INTERVAL_SECONDS
+            $attemptsParsed = 0
+            $intervalParsed = 0
+            $attempts = if ([int]::TryParse([string]$attemptsEnv, [ref]$attemptsParsed)) { $attemptsParsed } else { 6 }
+            $intervalSeconds = if ([int]::TryParse([string]$intervalEnv, [ref]$intervalParsed)) { $intervalParsed } else { 3 }
+            if ($attempts -lt 1) { $attempts = 1 }
+            if ($intervalSeconds -lt 1) { $intervalSeconds = 1 }
+            Verify-McpAcrossCliWithRetry $roots $attempts $intervalSeconds
+        }
         if ($servers.Count -eq 0) {
             Write-Host "提示：当前 mcp_servers 为空，已将各目标写为空配置。"
         }

@@ -12,7 +12,18 @@
   "auto_run_skills_manager_gates": true,
   "collapse_suffix_pattern": "^(.*-\\d{8})-[a-z]$",
   "exclude_signature_patterns": [
-    "(?i)^autopilot-utf8-smoke"
+    "(?i)^autopilot-utf8-smoke",
+    "(?i)^pwsh-encoding-mojibake-loop-\\d{8}(-[a-z])?$"
+  ],
+  "manual_override_bindings": [
+    {
+      "signature_pattern": "(?i)^governance-clarification-",
+      "skill_name": "governance-clarification-protocol"
+    },
+    {
+      "signature_pattern": "(?i)^governance-teaching-lite-output",
+      "skill_name": "governance-teaching-lite-output"
+    }
   ],
   "summary_relative_path": ".governance/skill-candidates/last-promotion-summary.json",
   "write_summary_file": true,
@@ -23,10 +34,14 @@
   "create_min_unique_repos": 2,
   "optimize_min_new_variants": 1,
   "require_trigger_eval_for_create": true,
+  "require_adversarial_eval_for_create": false,
   "auto_register_trigger_eval_from_autopilot": true,
   "trigger_eval_summary_relative_path": ".governance/skill-candidates/trigger-eval-summary.json",
   "trigger_eval_min_validation_pass_rate": 0.7,
   "trigger_eval_max_validation_false_trigger_rate": 0.2,
+  "trigger_eval_min_adversarial_validation_pass_rate": 0.6,
+  "trigger_eval_max_adversarial_validation_false_trigger_rate": 0.35,
+  "block_create_when_adversarial_missing": true,
   "block_create_when_eval_missing": true,
   "registry_schema_version": 2,
   "lifecycle_enabled": true,

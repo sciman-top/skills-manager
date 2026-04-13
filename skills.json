@@ -685,26 +685,28 @@
                 ],
     "update_force":  true,
     "mcp_servers":  [
-                        {
-                            "name":  "context7",
-                            "transport":  "stdio",
-                            "command":  "npx",
-                            "args":  [
-                                         "-y",
-                                         "@upstash/context7-mcp"
-                                     ]
-                        },
-                        {
-                            "name":  "github",
-                            "transport":  "http",
-                            "url":  "https://api.githubcopilot.com/mcp/readonly",
-                            "bearer_token_env_var":  "GITHUB_PERSONAL_ACCESS_TOKEN"
-                        },
-                        {
-                            "name":  "microsoft-learn",
-                            "transport":  "http",
-                            "url":  "https://learn.microsoft.com/api/mcp"
-                        }
+                    {
+                        "name":  "context7",
+                        "transport":  "stdio",
+                        "command":  "npx",
+                        "args":  [
+                                     "-y",
+                                     "@upstash/context7-mcp"
+                                 ]
+                    },
+                    {
+                        "name":  "github",
+                        "transport":  "http",
+                        "url":  "https://api.githubcopilot.com/mcp/",
+                        "headers":  {
+                                        "Authorization":  "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"
+                                    }
+                    },
+                    {
+                        "name":  "microsoft-learn",
+                        "transport":  "http",
+                        "url":  "https://learn.microsoft.com/api/mcp"
+                    }
                     ],
     "mcp_targets":  [
 

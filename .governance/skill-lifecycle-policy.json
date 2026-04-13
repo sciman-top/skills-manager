@@ -25,7 +25,10 @@
     "retire": {
       "enabled": true,
       "inactive_days": 60,
-      "min_invocations": 3
+      "min_invocations": 3,
+      "require_replacement_coverage": true,
+      "minimum_active_replacements": 1,
+      "require_rollback_fallback": true
     }
   },
   "metrics": {

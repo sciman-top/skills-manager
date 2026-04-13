@@ -31,10 +31,6 @@
 - <second workflow>
 - <third workflow>
 
-## Demo / Examples
-- <link to demo, sample repo, or screenshot>
-- <link to example input/output>
-
 ## FAQ
 - Q: <common failure>
 - A: <fix or command>

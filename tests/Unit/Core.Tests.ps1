@@ -854,15 +854,20 @@ Describe "Core Functions" {
 
     Context "Build-CodexConfigToml" {
         It "Replaces mcp_servers tables and preserves other codex config fields" {
-            $servers = @(
-                [pscustomobject]@{
-                    name                   = "github"
-                    transport              = "http"
-                    url                    = "https://api.githubcopilot.com/mcp/readonly"
-                    bearer_token_env_var   = "GITHUB_PERSONAL_ACCESS_TOKEN"
-                }
-            )
-            $existing = @'
+            $oldToken = $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN
+            $oldGithubToken = $env:GITHUB_PERSONAL_ACCESS_TOKEN
+            Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+            Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+            try {
+                $servers = @(
+                    [pscustomobject]@{
+                        name                 = "github"
+                        transport            = "http"
+                        url                  = "https://api.githubcopilot.com/mcp/readonly"
+                        bearer_token_env_var = "GITHUB_PERSONAL_ACCESS_TOKEN"
+                    }
+                )
+                $existing = @'
 model = "gpt-5.3-codex"
 personality = "pragmatic"
 
@@ -873,13 +878,151 @@ args = ["/c", "echo", "old"]
 [windows]
 sandbox = "elevated"
 '@
-            $toml = Build-CodexConfigToml $existing $servers
-            $toml | Should Match "model = ""gpt-5.3-codex"""
-            $toml | Should Match "\[windows\]"
-            $toml | Should Not Match "\[mcp_servers\.old\]"
-            $toml | Should Match "\[mcp_servers\.github\]"
-            $toml | Should Match "url = ""https://api.githubcopilot.com/mcp/readonly"""
-            $toml | Should Match "bearer_token_env_var = ""GITHUB_PERSONAL_ACCESS_TOKEN"""
+                $toml = Build-CodexConfigToml $existing $servers
+                $toml | Should Match "model = ""gpt-5.3-codex"""
+                $toml | Should Match "\[windows\]"
+                $toml | Should Match "\[mcp_servers\.old\]"
+                $toml | Should Not Match "\[mcp_servers\.github\]"
+                $toml | Should Not Match "url = ""https://api.githubcopilot.com/mcp/readonly"""
+                $toml | Should Not Match "bearer_token_env_var = ""CODEX_GITHUB_PERSONAL_ACCESS_TOKEN"""
+            }
+            finally {
+                if ($null -ne $oldToken) {
+                    $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = $oldToken
+                }
+                else {
+                    Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+                }
+                if ($null -ne $oldGithubToken) {
+                    $env:GITHUB_PERSONAL_ACCESS_TOKEN = $oldGithubToken
+                }
+                else {
+                    Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+                }
+            }
+        }
+
+        It "Skips GitHub MCP when GitHub token is unavailable" {
+            $oldToken = $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN
+            $oldGithubToken = $env:GITHUB_PERSONAL_ACCESS_TOKEN
+            Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+            Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+            try {
+                $servers = @(
+                    [pscustomobject]@{
+                        name                 = "github"
+                        transport            = "http"
+                        url                  = "https://api.githubcopilot.com/mcp/readonly"
+                        bearer_token_env_var = "GITHUB_PERSONAL_ACCESS_TOKEN"
+                    }
+                    [pscustomobject]@{
+                        name      = "microsoft-learn"
+                        transport = "http"
+                        url       = "https://learn.microsoft.com/api/mcp"
+                    }
+                )
+
+                $toml = Build-CodexConfigToml "" $servers
+                $toml | Should Not Match "\[mcp_servers\.github\]"
+                $toml | Should Match "\[mcp_servers\.microsoft-learn\]"
+                $toml | Should Match "url = ""https://learn.microsoft.com/api/mcp"""
+            }
+            finally {
+                if ($null -ne $oldToken) {
+                    $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = $oldToken
+                }
+                else {
+                    Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+                }
+                if ($null -ne $oldGithubToken) {
+                    $env:GITHUB_PERSONAL_ACCESS_TOKEN = $oldGithubToken
+                }
+                else {
+                    Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+                }
+            }
+        }
+
+        It "Includes GitHub MCP when GitHub token is available" {
+            $oldToken = $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN
+            $oldGithubToken = $env:GITHUB_PERSONAL_ACCESS_TOKEN
+            $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = "unit-test-token"
+            try {
+                $servers = @(
+                    [pscustomobject]@{
+                        name                 = "github"
+                        transport            = "http"
+                        url                  = "https://api.githubcopilot.com/mcp/readonly"
+                        bearer_token_env_var = "GITHUB_PERSONAL_ACCESS_TOKEN"
+                    }
+                    [pscustomobject]@{
+                        name      = "microsoft-learn"
+                        transport = "http"
+                        url       = "https://learn.microsoft.com/api/mcp"
+                    }
+                )
+
+                $toml = Build-CodexConfigToml "" $servers
+                $toml | Should Match "\[mcp_servers\.github\]"
+                $toml | Should Match "url = ""https://api.githubcopilot.com/mcp/readonly"""
+                $toml | Should Match "bearer_token_env_var = ""CODEX_GITHUB_PERSONAL_ACCESS_TOKEN"""
+                $toml | Should Match "\[mcp_servers\.microsoft-learn\]"
+            }
+            finally {
+                if ($null -ne $oldToken) {
+                    $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = $oldToken
+                }
+                else {
+                    Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+                }
+                if ($null -ne $oldGithubToken) {
+                    $env:GITHUB_PERSONAL_ACCESS_TOKEN = $oldGithubToken
+                }
+                else {
+                    Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+                }
+            }
+        }
+
+        It "Skips GitHub MCP when GitHub token is unavailable" {
+            $oldToken = $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN
+            $oldGithubToken = $env:GITHUB_PERSONAL_ACCESS_TOKEN
+            Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+            Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+            try {
+                $servers = @(
+                    [pscustomobject]@{
+                        name                 = "github"
+                        transport            = "http"
+                        url                  = "https://api.githubcopilot.com/mcp/readonly"
+                        bearer_token_env_var = "GITHUB_PERSONAL_ACCESS_TOKEN"
+                    }
+                    [pscustomobject]@{
+                        name      = "microsoft-learn"
+                        transport = "http"
+                        url       = "https://learn.microsoft.com/api/mcp"
+                    }
+                )
+
+                $toml = Build-CodexConfigToml "" $servers
+                $toml | Should Not Match "\[mcp_servers\.github\]"
+                $toml | Should Match "\[mcp_servers\.microsoft-learn\]"
+                $toml | Should Match "url = ""https://learn.microsoft.com/api/mcp"""
+            }
+            finally {
+                if ($null -ne $oldToken) {
+                    $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = $oldToken
+                }
+                else {
+                    Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+                }
+                if ($null -ne $oldGithubToken) {
+                    $env:GITHUB_PERSONAL_ACCESS_TOKEN = $oldGithubToken
+                }
+                else {
+                    Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+                }
+            }
         }
     }
 
@@ -934,14 +1077,117 @@ sandbox = "elevated"
             $cmds = Get-NativeMcpCleanupCommands "fetch"
             $serialized = $cmds | ForEach-Object { "$($_.command) $($_.args -join ' ')" }
             ($serialized -join "`n") | Should Match "claude mcp remove fetch --scope user"
-            ($serialized -join "`n") | Should Match "claude mcp remove fetch"
+            ($serialized -join "`n") | Should Match "claude mcp remove fetch --scope project"
+        }
+    }
+
+    Context "Get-NativeMcpAddArgs" {
+        It "Places HTTP headers after name/url and expands env placeholders for Claude native MCP sync" {
+            $oldUnitToken = $env:UNIT_TEST_MCP_TOKEN
+            $env:UNIT_TEST_MCP_TOKEN = "unit-test-token"
+            try {
+                $server = [pscustomobject]@{
+                    name      = "github"
+                    transport = "http"
+                    url       = "https://api.githubcopilot.com/mcp"
+                    headers   = [pscustomobject]@{
+                        Authorization = 'Bearer ${UNIT_TEST_MCP_TOKEN}'
+                    }
+                }
+
+                $args = Get-NativeMcpAddArgs $server "user"
+                $joined = $args -join ' '
+                $joined | Should Match '--transport http github https://api\.githubcopilot\.com/mcp'
+                $joined | Should Match '-H Authorization: Bearer unit-test-token'
+                $joined | Should Not Match 'Authorization=Bearer'
+            }
+            finally {
+                if ($null -ne $oldUnitToken) {
+                    $env:UNIT_TEST_MCP_TOKEN = $oldUnitToken
+                }
+                else {
+                    Remove-Item Env:\UNIT_TEST_MCP_TOKEN -ErrorAction SilentlyContinue
+                }
+            }
+        }
+    }
+
+    Context "Remove-McpServersFromPayload" {
+        It "Removes legacy MCP servers from merged payloads" {
+            $payload = [pscustomobject]@{
+                mcpServers = [pscustomobject]@{
+                    context7 = [pscustomobject]@{ type = "stdio" }
+                    fetch = [pscustomobject]@{ type = "stdio" }
+                    filesystem = [pscustomobject]@{ type = "stdio" }
+                    microsoft_learn = [pscustomobject]@{ type = "http" }
+                }
+            }
+
+            $updated = Remove-McpServersFromPayload $payload @("fetch", "filesystem")
+            $updated.mcpServers.PSObject.Properties.Name -contains "context7" | Should Be $true
+            $updated.mcpServers.PSObject.Properties.Name -contains "fetch" | Should Be $false
+            $updated.mcpServers.PSObject.Properties.Name -contains "filesystem" | Should Be $false
+            $updated.mcpServers.PSObject.Properties.Name -contains "microsoft_learn" | Should Be $true
+        }
+    }
+
+    Context "Get-LegacyMcpServersToPrune" {
+        It "Returns fetch and filesystem as legacy MCP names" {
+            $names = Get-LegacyMcpServersToPrune
+            @($names).Count | Should Be 2
+            ($names -contains "fetch") | Should Be $true
+            ($names -contains "filesystem") | Should Be $true
+        }
+    }
+
+    Context "Get-McpServerNamesFromJsonText" {
+        It "Extracts mcpServers property names from JSON payload" {
+            $json = '{"mcpServers":{"context7":{"type":"stdio"},"github":{"type":"http"}}}'
+            $names = Get-McpServerNamesFromJsonText $json
+            @($names).Count | Should Be 2
+            ($names -contains "context7") | Should Be $true
+            ($names -contains "github") | Should Be $true
+        }
+    }
+
+    Context "Get-CodexMcpServerNamesFromTomlText" {
+        It "Extracts codex mcp server section names from toml" {
+            $toml = @'
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp"]
+
+[mcp_servers.github]
+url = "https://api.githubcopilot.com/mcp/"
+'@
+            $names = Get-CodexMcpServerNamesFromTomlText $toml
+            @($names).Count | Should Be 2
+            ($names -contains "context7") | Should Be $true
+            ($names -contains "github") | Should Be $true
+        }
+    }
+
+    Context "Has-McpServerByName" {
+        It "Returns true when target MCP name exists in server list" {
+            $servers = @(
+                [pscustomobject]@{ name = "context7"; transport = "stdio" },
+                [pscustomobject]@{ name = "github"; transport = "http" }
+            )
+            (Has-McpServerByName $servers "github") | Should Be $true
+        }
+
+        It "Returns false when target MCP name does not exist in server list" {
+            $servers = @(
+                [pscustomobject]@{ name = "context7"; transport = "stdio" }
+            )
+            (Has-McpServerByName $servers "github") | Should Be $false
         }
     }
 
     Context "Resolve-McpTargetRootsFromCfg" {
         It "Detects unique MCP root dirs from target skill paths" {
             $cfg = [pscustomobject]@{
-                targets     = @(
+                targets     = @( 
                     [pscustomobject]@{ path = "~/.claude/skills" },
                     [pscustomobject]@{ path = "~/.codex/skills" },
                     [pscustomobject]@{ path = "~/.gemini/skills" },

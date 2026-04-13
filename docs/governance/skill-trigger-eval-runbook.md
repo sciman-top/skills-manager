@@ -16,7 +16,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/governance/register-
   -Query "windows powershell output appears as garbled chinese text" `
   -ShouldTrigger $true `
   -Split validation `
-  -SkillName custom-auto-pwsh-encoding-mojibake-l-a9b049cd `
+  -SkillName custom-windows-encoding-guard `
   -Triggered true
 ```
 
@@ -43,3 +43,5 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/governance/promote-s
 - `eval_summary_missing_metrics`: ensure each jsonl line includes `query`, `should_trigger`, `triggered`.
 - `no_validation_split`: add records with `split=validation`.
 - High false trigger rate: add more `should_trigger=false` near-miss queries and improve skill description boundaries.
+
+

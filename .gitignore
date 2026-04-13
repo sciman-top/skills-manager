@@ -35,3 +35,8 @@ acl-backup-git-*.txt
 # ad hoc governance outputs
 /docs/governance/merge-report.md
 /scripts/governance/
+
+# Git worktrees (local fallback)
+.worktrees/
+worktrees/
+

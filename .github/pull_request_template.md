@@ -1,24 +1,15 @@
-## Summary
+## Goal
+- <what this PR changes>
 
-## Rule Version / Rollout Window
+## Verification
+- [ ] Build passed
+- [ ] Tests passed
+- [ ] Contract/invariant unchanged or updated with migration notes
 
-## Risk Level
-- [ ] low
-- [ ] medium
-- [ ] high
+## Evidence
+- Command output:
+- Screenshots or logs:
 
-## Waiver
-- [ ] none
-- [ ] active (owner + expiry + recovery plan required)
-
-## Compatibility Impact
-
-## Supply Chain / Security Checks
-
-## Verification Evidence
-
-## Post-release Validation
-
-## Data Migration / Rollback
-
-## Rollback Plan
+## Risks and Rollback
+- Risk:
+- Rollback:
