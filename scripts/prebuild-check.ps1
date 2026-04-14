@@ -91,8 +91,31 @@ else {
 
 # 3) common process occupation check
 $watchSet = @('codex', 'claude', 'gemini', 'code', 'cursor', 'trae')
+function Get-ProcessLineageIds {
+    param([int]$StartProcessId)
+
+    $lineage = New-Object 'System.Collections.Generic.HashSet[int]'
+    $current = $StartProcessId
+    while ($current -gt 0 -and -not $lineage.Contains($current)) {
+        $lineage.Add($current) | Out-Null
+        try {
+            $proc = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $current) -ErrorAction Stop
+        }
+        catch {
+            break
+        }
+        if ($null -eq $proc -or $proc.ParentProcessId -le 0) { break }
+        $current = [int]$proc.ParentProcessId
+    }
+    return $lineage
+}
+
+$selfLineage = Get-ProcessLineageIds -StartProcessId $PID
 $running = @(Get-Process -ErrorAction SilentlyContinue |
-    Where-Object { $watchSet -contains $_.ProcessName.ToLowerInvariant() } |
+    Where-Object {
+        $name = $_.ProcessName.ToLowerInvariant()
+        $watchSet -contains $name -and -not $selfLineage.Contains($_.Id)
+    } |
     Select-Object -ExpandProperty ProcessName -Unique)
 
 if ($running.Count -gt 0) {
@@ -100,7 +123,7 @@ if ($running.Count -gt 0) {
     $warned = $true
 }
 else {
-    Write-Check "PASS" "No common occupying process found."
+    Write-Check "PASS" "No common occupying process found outside the current session."
 }
 
 # 4) UTF-8 encoding guard (Windows/PowerShell)
