@@ -40,36 +40,22 @@ Source layers:
 
 Use grouped naming under `overrides/` with clear prefixes:
 
-- `custom-*`: fully custom skills (not a direct upstream replacement)
+- `custom-*`: fully custom skills
 - `patch-*`: local patched variants of upstream skills
 - `<skill-name>`: direct same-name override when replacement is intentional
 
-Recommendation: prefer `custom-*` and `patch-*` for clarity, and use `<skill-name>` only when you explicitly need same-name override behavior.
+Prefer `custom-*` and `patch-*` for clarity. Use `<skill-name>` only when same-name override behavior is required.
 
-## Repository Layout
-
-```text
-repo/
-  skills.ps1        # main entry point
-  skills.json       # single configuration source
-  build.ps1         # rebuilds skills.ps1 from src/
-  src/              # source modules
-  tests/            # unit and end-to-end verification
-  overrides/        # local override layer
-  imports/          # targeted imported sources
-  vendor/           # upstream cache, generated locally
-  agent/            # built output, generated locally
-```
-
-## Typical Flow
+## Quick Start
 
 ```powershell
+.\skills.ps1
 .\skills.ps1 发现
-.\skills.ps1 构建生效
 .\skills.ps1 doctor --strict
+.\skills.ps1 构建生效
 ```
 
-For first-time setup, you can start from the interactive menu:
+For first-time setup, start from the interactive menu:
 
 ```powershell
 .\skills.ps1
@@ -123,7 +109,7 @@ The remote repository must not include local-only agent state or temporary artif
 - logs, backups, and temporary files
 - `_probe_*`, `_debug_*`, and `_tree_*` import snapshots
 
-Those files may exist locally, but they are outside the repository contract. CI now checks this explicitly.
+Those files may exist locally, but they are outside the repository contract. CI checks this explicitly.
 
 ## Related Docs
 

@@ -63,9 +63,10 @@ Describe "Core Functions" {
 
     Context "Get-InstallErrorSuggestedSkillPath" {
         It "Prefers candidate path from error message" {
+            $repoRoot = Join-Path $TestDrive "skills-manager"
             $msg = @"
 技能路径预检失败：--skill remotion-best-practices
-未找到技能入口文件：E:\CODE\skills-manager\imports\_probe_xxx\remotion-best-practices
+未找到技能入口文件：$([System.IO.Path]::Combine($repoRoot, 'imports\_probe_xxx\remotion-best-practices'))
 可选路径（共 2）：
 - .
 - skills\remotion
@@ -1067,8 +1068,9 @@ sandbox = "elevated"
 
     Context "Get-TraeProjectMcpConfigPath" {
         It "Builds project-level Trae MCP config path under repo root" {
-            $path = Get-TraeProjectMcpConfigPath "E:\CODE\skills-manager"
-            $path | Should Be "E:\CODE\skills-manager\.trae\mcp.json"
+            $repoRoot = Join-Path $TestDrive "skills-manager"
+            $path = Get-TraeProjectMcpConfigPath $repoRoot
+            $path | Should Be (Join-Path $repoRoot ".trae\mcp.json")
         }
     }
 

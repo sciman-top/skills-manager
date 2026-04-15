@@ -1,0 +1,112 @@
+# Smart Agent Router Configuration
+# Version: 2.0.0
+# Defines tier routing, dimension weights, confidence thresholds, and model selection
+
+version: 2.0.0
+
+tiers:
+  SIMPLE:
+    primary: claude
+    fallbacks: [hermes, codex, gemini]
+    max_context_tokens: 8000
+    description: Short factual queries, status checks, simple lookups
+  STANDARD:
+    primary: claude
+    fallbacks: [codex, hermes, gemini]
+    max_context_tokens: 32000
+    description: Implementation tasks, bug fixes, refactoring
+  COMPLEX:
+    primary: claude
+    fallbacks: [gemini, codex]
+    max_context_tokens: 128000
+    description: Architecture decisions, multi-file changes, design
+  REASONING:
+    primary: claude
+    fallbacks: [gemini, codex]
+    max_context_tokens: 200000
+    description: Proofs, convergence analysis, deep trade-off evaluation
+
+dimensions:
+  reasoning_depth:
+    weight: 0.20
+    provider_signal: claude
+  code_density:
+    weight: 0.18
+    provider_signal: claude
+  architecture_scope:
+    weight: 0.15
+    provider_signal: claude
+  implementation_action:
+    weight: 0.12
+    provider_signal: codex
+  research_analysis:
+    weight: 0.10
+    provider_signal: hermes
+  task_complexity:
+    weight: 0.08
+    provider_signal: tier
+  agentic_markers:
+    weight: 0.06
+    provider_signal: codex
+  review_quality:
+    weight: 0.05
+    provider_signal: all
+  data_processing:
+    weight: 0.04
+    provider_signal: hermes
+  simple_indicators:
+    weight: 0.02
+    provider_signal: cheapest
+
+confidence:
+  auto_route_threshold: 0.70
+  suggest_threshold: 0.50
+
+session_pinning:
+  enabled: true
+  ttl_minutes: 30
+
+models:
+  registry: model-registry.yaml
+  capability_radar: ../ai-tools/agent-capability-scores.yaml
+  adaptive_routing:
+    enabled: true
+    ewma_override: false  # Set true to override registry EWMA params here
+
+cross_modes:
+  cross_plan:
+    SIMPLE: false       # Route A: single planner sufficient
+    STANDARD: false     # Route B: single planner (cross-plan optional)
+    COMPLEX: true       # Route C: all 3 plan independently, Claude synthesizes
+    REASONING: true     # Full ensemble planning
+  cross_review:
+    SIMPLE: false       # Route A: single-provider review only
+    STANDARD: true      # Route B: 2-of-3 cross-review
+    COMPLEX: true       # Route C: full 3-of-3 with synthesis
+    REASONING: true     # Full 3-of-3 cross-review
+
+agents:
+  hermes:
+    display_name: "Hermes Agent"
+    provider: copilot
+    models:
+      primary: claude-sonnet-4.6
+      strong: claude-opus-4-6
+    roles:
+      - docs
+      - data-analysis
+      - skills
+      - delegation
+      - overnight-batch
+    strengths:
+      - documentation and report generation
+      - data analysis and structured transformations
+      - skill management and memory-driven maintenance
+      - parallel delegation and orchestration workflows
+      - overnight batch task planning and execution
+    cost_tier: medium
+    context_window: 200000
+    notes: >
+      Hermes is the documentation, data-analysis, skill, and delegation specialist.
+      Preferred for overnight batch work due to its delegation toolchain and
+      self-contained prompt generation capabilities.

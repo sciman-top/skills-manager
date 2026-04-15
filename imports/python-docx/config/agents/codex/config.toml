@@ -1,0 +1,15 @@
+model = "gpt-5.4"
+model_reasoning_effort = "medium"
+
+[status_line]
+enabled = true
+items = [
+  "model",
+  "project_root",
+  "git_branch",
+  "cwd",
+  "context_window_used_percentage",
+  "limit_5h_remaining_percentage",
+  "limit_weekly_remaining_percentage",
+  "token_count"
+]

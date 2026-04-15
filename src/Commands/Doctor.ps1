@@ -47,6 +47,7 @@ function Parse-DoctorArgs([string[]]$tokens) {
         fix = $false
         dry_run_fix = $false
         strict = $false
+        strict_perf = $false
         threshold_ms = 5000
     }
     if ($null -eq $tokens) { return [pscustomobject]$opts }
@@ -61,6 +62,7 @@ function Parse-DoctorArgs([string[]]$tokens) {
             "--fix" { $opts.fix = $true; continue }
             "--dry-run-fix" { $opts.dry_run_fix = $true; continue }
             "--strict" { $opts.strict = $true; continue }
+            "--strict-perf" { $opts.strict_perf = $true; continue }
             "--threshold-ms" {
                 Need ($i + 1 -lt $tokens.Count) "参数缺少值：--threshold-ms"
                 $raw = [string]$tokens[++$i]
@@ -270,6 +272,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     $report = [ordered]@{
         pass = $true
         strict = [bool]$opts.strict
+        strict_perf = [bool]$opts.strict_perf
         checks = [ordered]@{}
         risks = @()
         performance = [ordered]@{
@@ -497,7 +500,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     if (@($report.risks).Count -gt 0) { $report.summary.warnings += "config_risks_present" }
     if (@($report.performance.anomalies).Count -gt 0) { $report.summary.warnings += "perf_anomalies_present" }
 
-    if ($opts.strict -and (@($report.risks).Count -gt 0 -or @($report.performance.anomalies).Count -gt 0)) {
+    if ($opts.strict -and (@($report.risks).Count -gt 0 -or ([bool]$opts.strict_perf -and @($report.performance.anomalies).Count -gt 0))) {
         $report.pass = $false
     }
     $report.summary.error_count = @($report.summary.errors).Count
@@ -505,6 +508,9 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     if ($opts.json) {
         Write-Host ($report | ConvertTo-Json -Depth 30)
         return [pscustomobject]$report
+    }
+    if ($opts.strict -and -not $opts.strict_perf -and @($report.performance.anomalies).Count -gt 0) {
+        Write-Host "提示：性能异常仅告警，不影响 --strict 结果。使用 --strict-perf 可将其纳入阻断。" -ForegroundColor Yellow
     }
 
     Write-Host ""

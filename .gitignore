@@ -20,6 +20,11 @@ acl-backup-git-*.txt
 /.codex/
 /.gemini/
 /.trae/
+/imports/**/.venv/
+/imports/**/nohup.out
+/AGENTS.md
+/CLAUDE.md
+/GEMINI.md
 /.gitmessage.txt
 /.tmp_*
 

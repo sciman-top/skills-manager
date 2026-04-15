@@ -758,6 +758,7 @@ function 收集Skills([string]$filter, $cfg = $null, $manualItems = $null) {
 
     if ($null -eq $manualItems) { $manualItems = 收集ManualSkills $cfg }
     $items += $manualItems
+    $items += 收集OverridesSkills
 
     if ($filter) {
         $items = Filter-Skills $items $filter
@@ -869,10 +870,6 @@ function Get-InstalledSet($cfg, $manualItems = $null, $overrideItems = $null) {
     $installed = New-Object System.Collections.Generic.HashSet[string]
     foreach ($m in $cfg.mappings) {
         $installed.Add("$($m.vendor)|$($m.from)") | Out-Null
-    }
-    if ($null -eq $manualItems) { $manualItems = 收集ManualSkills $cfg }
-    foreach ($m in $manualItems) {
-        $installed.Add("manual|$($m.from)") | Out-Null
     }
     if ($null -eq $overrideItems) { $overrideItems = 收集OverridesSkills }
     foreach ($m in $overrideItems) {
@@ -1220,10 +1217,9 @@ function 卸载 {
     $overrideItems = 收集OverridesSkills
     $filter = Read-Host "可选：关键词过滤（空格=AND，或 /regex/）"
 
-    # 卸载范围：vendor 映射 + manual 目录 + overrides 目录（含已禁用）
+    # 卸载范围：已映射技能 + overrides
     $installedSet = Get-InstalledSet $cfg $manualItems $overrideItems
     $all = 收集Skills "" $cfg $manualItems
-    $all += $overrideItems
     Need ($all.Count -gt 0) "未发现任何 skills。请先【新增技能库】。"
     $list = Filter-Skills $all $filter
     if ($list.Count -eq 0) {
@@ -1612,39 +1608,12 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
         $manualItems = 收集ManualSkills $cfg
         if ($manualItems.Count -gt 0) {
             $manualMapped = New-Object System.Collections.Generic.HashSet[string]
-            $existingTo = New-Object System.Collections.Generic.HashSet[string]
-            foreach ($m in $cfg.mappings) {
-                $existingTo.Add($m.to) | Out-Null
-                if ($m.vendor -eq "manual") { $manualMapped.Add($m.from) | Out-Null }
+            foreach ($m in @($cfg.mappings)) {
+                if ($m.vendor -eq "manual") { $manualMapped.Add([string]$m.from) | Out-Null }
             }
-
-            foreach ($item in $manualItems) {
-                try {
-                    if ($manualMapped.Contains($item.from)) {
-                        Log ("跳过手动技能（已存在 manual 映射）：{0}" -f $item.from) "WARN"
-                        continue
-                    }
-                    $toSuffix = ($item.from -replace "[\\\\/]", "-")
-                    $to = "manual-$toSuffix"
-                    if ($existingTo.Contains($to)) {
-                        Log ("跳过手动技能（to 冲突）：{0} -> {1}" -f $item.from, $to) "WARN"
-                        continue
-                    }
-                    $src = $item.full
-                    $dst = Join-Path $AgentDir $to
-
-                    if (-not (Test-IsSkillDir $src)) {
-                        Write-Host ("❌ 跳过无效技能（缺少标记文件）：{0}" -f $src) -ForegroundColor Red
-                        continue
-                    }
-                    $cacheKey = ("manual|{0}|{1}" -f $item.from, $to)
-                    Mirror-SkillWithCache $src $dst $cacheKey $oldCache $newCache $stats
-                    $count++
-                }
-                catch {
-                    Write-Host ("❌ 处理手动技能失败 [{0}]: {1}" -f $item.from, $_.Exception.Message) -ForegroundColor Red
-                    $failures.Add(("manual:{0} => {1}" -f $item.from, $_.Exception.Message)) | Out-Null
-                }
+            $unmappedManual = @($manualItems | Where-Object { -not $manualMapped.Contains([string]$_.from) })
+            if ($unmappedManual.Count -gt 0) {
+                Log ("检测到 {0} 个 manual imports 未映射；按白名单策略不会进入 agent（可通过【安装】写入 mapping 后生效）。" -f $unmappedManual.Count) "WARN"
             }
         }
 
@@ -1797,7 +1766,13 @@ function 构建生效 {
         $needRollback = $false
 
         # Optimization/Migration check
+        $cfgRawBeforeOptimize = if (Test-Path $CfgPath) { Get-Content $CfgPath -Raw } else { "" }
         Optimize-Imports $cfg
+        $optChanges = Get-CfgChangeSummaryLines $cfgRawBeforeOptimize $cfg
+        if ($optChanges.Count -gt 0) {
+            SaveCfg $cfg
+            Log ("已写回自动迁移配置：{0}" -f ($optChanges -join "; ")) "WARN"
+        }
 
         Write-BuildSummary $cfg
         Log "=== 启动构建生效流程 ==="

@@ -30,5 +30,5 @@
   - 重新执行 `./build.ps1` 和 `./skills.ps1 同步MCP`。
 
 ## 已知限制
-- `fetch`、`filesystem` 是否保留，取决于你是否需要跨项目网页抓取或本地文件系统 MCP；它们不是 `E:\CODE` 项目日常必需项。
+- `fetch`、`filesystem` 是否保留，取决于你是否需要跨项目网页抓取或本地文件系统 MCP；它们不是 `D:\OneDrive\CODE` 项目日常必需项。
 - `claude` 侧 `github` 仍可能因认证/运行时支持差异出现 health check 失败，需要按 Claude 的 MCP 认证支持再做进一步收敛。

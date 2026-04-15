@@ -238,7 +238,7 @@ Skills 管理器（极简版，中文菜单）
   .\skills.ps1 安装MCP <name> --transport http --url <url> [--bearer-token-env-var <ENV>] 
   .\skills.ps1 卸载MCP <name>
   .\skills.ps1 同步MCP（可选：手动兜底）
-  .\skills.ps1 doctor [--json] [--fix] [--dry-run-fix] [--strict] [--threshold-ms <ms>]
+  .\skills.ps1 doctor [--json] [--fix] [--dry-run-fix] [--strict] [--strict-perf] [--threshold-ms <ms>]
   通用参数：
   -DryRun：仅预演（跳过写入/删除/同步/拉取）
   -Locked：严格锁定（需 skills.lock.json 且 commit 全匹配）

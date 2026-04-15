@@ -2804,6 +2804,7 @@ function Parse-DoctorArgs([string[]]$tokens) {
         fix = $false
         dry_run_fix = $false
         strict = $false
+        strict_perf = $false
         threshold_ms = 5000
     }
     if ($null -eq $tokens) { return [pscustomobject]$opts }
@@ -2818,6 +2819,7 @@ function Parse-DoctorArgs([string[]]$tokens) {
             "--fix" { $opts.fix = $true; continue }
             "--dry-run-fix" { $opts.dry_run_fix = $true; continue }
             "--strict" { $opts.strict = $true; continue }
+            "--strict-perf" { $opts.strict_perf = $true; continue }
             "--threshold-ms" {
                 Need ($i + 1 -lt $tokens.Count) "参数缺少值：--threshold-ms"
                 $raw = [string]$tokens[++$i]
@@ -3027,6 +3029,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     $report = [ordered]@{
         pass = $true
         strict = [bool]$opts.strict
+        strict_perf = [bool]$opts.strict_perf
         checks = [ordered]@{}
         risks = @()
         performance = [ordered]@{
@@ -3254,7 +3257,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     if (@($report.risks).Count -gt 0) { $report.summary.warnings += "config_risks_present" }
     if (@($report.performance.anomalies).Count -gt 0) { $report.summary.warnings += "perf_anomalies_present" }
 
-    if ($opts.strict -and (@($report.risks).Count -gt 0 -or @($report.performance.anomalies).Count -gt 0)) {
+    if ($opts.strict -and (@($report.risks).Count -gt 0 -or ([bool]$opts.strict_perf -and @($report.performance.anomalies).Count -gt 0))) {
         $report.pass = $false
     }
     $report.summary.error_count = @($report.summary.errors).Count
@@ -3262,6 +3265,9 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     if ($opts.json) {
         Write-Host ($report | ConvertTo-Json -Depth 30)
         return [pscustomobject]$report
+    }
+    if ($opts.strict -and -not $opts.strict_perf -and @($report.performance.anomalies).Count -gt 0) {
+        Write-Host "提示：性能异常仅告警，不影响 --strict 结果。使用 --strict-perf 可将其纳入阻断。" -ForegroundColor Yellow
     }
 
     Write-Host ""
@@ -4034,6 +4040,7 @@ function 收集Skills([string]$filter, $cfg = $null, $manualItems = $null) {
 
     if ($null -eq $manualItems) { $manualItems = 收集ManualSkills $cfg }
     $items += $manualItems
+    $items += 收集OverridesSkills
 
     if ($filter) {
         $items = Filter-Skills $items $filter
@@ -4145,10 +4152,6 @@ function Get-InstalledSet($cfg, $manualItems = $null, $overrideItems = $null) {
     $installed = New-Object System.Collections.Generic.HashSet[string]
     foreach ($m in $cfg.mappings) {
         $installed.Add("$($m.vendor)|$($m.from)") | Out-Null
-    }
-    if ($null -eq $manualItems) { $manualItems = 收集ManualSkills $cfg }
-    foreach ($m in $manualItems) {
-        $installed.Add("manual|$($m.from)") | Out-Null
     }
     if ($null -eq $overrideItems) { $overrideItems = 收集OverridesSkills }
     foreach ($m in $overrideItems) {
@@ -4496,10 +4499,9 @@ function 卸载 {
     $overrideItems = 收集OverridesSkills
     $filter = Read-Host "可选：关键词过滤（空格=AND，或 /regex/）"
 
-    # 卸载范围：vendor 映射 + manual 目录 + overrides 目录（含已禁用）
+    # 卸载范围：已映射技能 + overrides
     $installedSet = Get-InstalledSet $cfg $manualItems $overrideItems
     $all = 收集Skills "" $cfg $manualItems
-    $all += $overrideItems
     Need ($all.Count -gt 0) "未发现任何 skills。请先【新增技能库】。"
     $list = Filter-Skills $all $filter
     if ($list.Count -eq 0) {
@@ -4888,39 +4890,12 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
         $manualItems = 收集ManualSkills $cfg
         if ($manualItems.Count -gt 0) {
             $manualMapped = New-Object System.Collections.Generic.HashSet[string]
-            $existingTo = New-Object System.Collections.Generic.HashSet[string]
-            foreach ($m in $cfg.mappings) {
-                $existingTo.Add($m.to) | Out-Null
-                if ($m.vendor -eq "manual") { $manualMapped.Add($m.from) | Out-Null }
+            foreach ($m in @($cfg.mappings)) {
+                if ($m.vendor -eq "manual") { $manualMapped.Add([string]$m.from) | Out-Null }
             }
-
-            foreach ($item in $manualItems) {
-                try {
-                    if ($manualMapped.Contains($item.from)) {
-                        Log ("跳过手动技能（已存在 manual 映射）：{0}" -f $item.from) "WARN"
-                        continue
-                    }
-                    $toSuffix = ($item.from -replace "[\\\\/]", "-")
-                    $to = "manual-$toSuffix"
-                    if ($existingTo.Contains($to)) {
-                        Log ("跳过手动技能（to 冲突）：{0} -> {1}" -f $item.from, $to) "WARN"
-                        continue
-                    }
-                    $src = $item.full
-                    $dst = Join-Path $AgentDir $to
-
-                    if (-not (Test-IsSkillDir $src)) {
-                        Write-Host ("❌ 跳过无效技能（缺少标记文件）：{0}" -f $src) -ForegroundColor Red
-                        continue
-                    }
-                    $cacheKey = ("manual|{0}|{1}" -f $item.from, $to)
-                    Mirror-SkillWithCache $src $dst $cacheKey $oldCache $newCache $stats
-                    $count++
-                }
-                catch {
-                    Write-Host ("❌ 处理手动技能失败 [{0}]: {1}" -f $item.from, $_.Exception.Message) -ForegroundColor Red
-                    $failures.Add(("manual:{0} => {1}" -f $item.from, $_.Exception.Message)) | Out-Null
-                }
+            $unmappedManual = @($manualItems | Where-Object { -not $manualMapped.Contains([string]$_.from) })
+            if ($unmappedManual.Count -gt 0) {
+                Log ("检测到 {0} 个 manual imports 未映射；按白名单策略不会进入 agent（可通过【安装】写入 mapping 后生效）。" -f $unmappedManual.Count) "WARN"
             }
         }
 
@@ -5073,7 +5048,13 @@ function 构建生效 {
         $needRollback = $false
 
         # Optimization/Migration check
+        $cfgRawBeforeOptimize = if (Test-Path $CfgPath) { Get-Content $CfgPath -Raw } else { "" }
         Optimize-Imports $cfg
+        $optChanges = Get-CfgChangeSummaryLines $cfgRawBeforeOptimize $cfg
+        if ($optChanges.Count -gt 0) {
+            SaveCfg $cfg
+            Log ("已写回自动迁移配置：{0}" -f ($optChanges -join "; ")) "WARN"
+        }
 
         Write-BuildSummary $cfg
         Log "=== 启动构建生效流程 ==="
@@ -7348,7 +7329,7 @@ Skills 管理器（极简版，中文菜单）
   .\skills.ps1 安装MCP <name> --transport http --url <url> [--bearer-token-env-var <ENV>] 
   .\skills.ps1 卸载MCP <name>
   .\skills.ps1 同步MCP（可选：手动兜底）
-  .\skills.ps1 doctor [--json] [--fix] [--dry-run-fix] [--strict] [--threshold-ms <ms>]
+  .\skills.ps1 doctor [--json] [--fix] [--dry-run-fix] [--strict] [--strict-perf] [--threshold-ms <ms>]
   通用参数：
   -DryRun：仅预演（跳过写入/删除/同步/拉取）
   -Locked：严格锁定（需 skills.lock.json 且 commit 全匹配）

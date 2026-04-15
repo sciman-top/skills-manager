@@ -7,8 +7,11 @@
   "max_promotions_per_run": 3,
   "event_relative_path": ".governance/skill-candidates/events.jsonl",
   "registry_relative_path": ".governance/skill-candidates/promotion-registry.json",
-  "skills_root": "E:/CODE/skills-manager",
+  "skills_root": "${WORKSPACE_ROOT}/skills-manager",
+  "skills_manager_root": "${WORKSPACE_ROOT}/skills-manager",
   "overrides_relative_path": "overrides",
+  "overrides_source_root": "${WORKSPACE_ROOT}/repo-governance-hub/source/project/repo-governance-hub",
+  "overrides_source_relative_path": "custom/overrides",
   "auto_run_skills_manager_gates": true,
   "collapse_suffix_pattern": "^(.*-\\d{8})-[a-z]$",
   "exclude_signature_patterns": [

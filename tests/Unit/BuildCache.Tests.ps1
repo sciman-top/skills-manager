@@ -214,9 +214,10 @@ description: Create a detailed, phased implementation plan with documentation di
         }
 
         It "Allows system skills to override same-named non-system skills" {
+            $repoRoot = Join-Path $TestDrive "skills-manager"
             $paths = @(
-                "E:\CODE\skills-manager\agent\.system\skill-installer\SKILL.md",
-                "E:\CODE\skills-manager\agent\skills-skills-.system-skill-installer\SKILL.md"
+                (Join-Path $repoRoot "agent\.system\skill-installer\SKILL.md"),
+                (Join-Path $repoRoot "agent\skills-skills-.system-skill-installer\SKILL.md")
             )
 
             (Test-SkillNameDuplicateContentAllowed $paths) | Should Be $false

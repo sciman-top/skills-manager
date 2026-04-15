@@ -1,0 +1,502 @@
+{
+  "generated_at": "2026-04-14T09:20:06.343264Z",
+  "apply_mode": false,
+  "threshold": 0.9,
+  "eligible_count": 4,
+  "applied": [],
+  "candidates": [
+    {
+      "number": 2249,
+      "title": "feat(doc-intel): triage index-level other bucket into bounded context packs",
+      "url": "https://github.com/vamseeachanta/workspace-hub/issues/2249",
+      "labels": [
+        "enhancement",
+        "priority:high",
+        "cat:data-pipeline",
+        "cat:document-intelligence",
+        "status:plan-approved"
+      ],
+      "updatedAt": "2026-04-13T14:20:08Z",
+      "execution_ready": true,
+      "priority_rank": 1,
+      "suggested_provider": "claude",
+      "routing_reason": "strategy/workflow/architecture language",
+      "provider_priority": "high",
+      "provider_status": "underused",
+      "work_type": [
+        "research",
+        "implementation",
+        "strategy"
+      ],
+      "target_label": "agent:claude",
+      "confidence": 0.9,
+      "confidence_reasons": [
+        "execution-ready",
+        "priority-labeled",
+        "strong-claude-language-match",
+        "provider-high-priority"
+      ],
+      "eligible": true
+    },
+    {
+      "number": 2046,
+      "title": "Audit compliance of strict issue planning workflow after rollout",
+      "url": "https://github.com/vamseeachanta/workspace-hub/issues/2046",
+      "labels": [
+        "priority:medium",
+        "cat:ai-orchestration",
+        "cat:operations",
+        "status:plan-approved"
+      ],
+      "updatedAt": "2026-04-13T14:20:31Z",
+      "execution_ready": true,
+      "priority_rank": 2,
+      "suggested_provider": "claude",
+      "routing_reason": "strategy/workflow/architecture language",
+      "provider_priority": "high",
+      "provider_status": "underused",
+      "work_type": [
+        "research",
+        "strategy"
+      ],
+      "target_label": "agent:claude",
+      "confidence": 0.9,
+      "confidence_reasons": [
+        "execution-ready",
+        "priority-labeled",
+        "strong-claude-language-match",
+        "provider-high-priority"
+      ],
+      "eligible": true
+    },
+    {
+      "number": 2096,
+      "title": "feat(knowledge): intelligence accessibility map for llm-wikis and document/resource intelligence",
+      "url": "https://github.com/vamseeachanta/workspace-hub/issues/2096",
+      "labels": [
+        "enhancement",
+        "priority:medium",
+        "cat:documentation",
+        "cat:harness",
+        "status:plan-approved"
+      ],
+      "updatedAt": "2026-04-13T14:33:56Z",
+      "execution_ready": true,
+      "priority_rank": 2,
+      "suggested_provider": "claude",
+      "routing_reason": "strategy/workflow/architecture language",
+      "provider_priority": "high",
+      "provider_status": "underused",
+      "work_type": [
+        "research",
+        "implementation",
+        "strategy"
+      ],
+      "target_label": "agent:claude",
+      "confidence": 0.9,
+      "confidence_reasons": [
+        "execution-ready",
+        "priority-labeled",
+        "strong-claude-language-match",
+        "provider-high-priority"
+      ],
+      "eligible": true
+    },
+    {
+      "number": 2105,
+      "title": "chore(knowledge): define freshness cadences and staleness signals for intelligence assets",
+      "url": "https://github.com/vamseeachanta/workspace-hub/issues/2105",
+      "labels": [
+        "enhancement",
+        "priority:medium",
+        "cat:documentation",
+        "cat:harness",
+        "status:plan-approved"
+      ],
+      "updatedAt": "2026-04-13T14:33:53Z",
+      "execution_ready": true,
+      "priority_rank": 2,
+      "suggested_provider": "claude",
+      "routing_reason": "strategy/workflow/architecture language",
+      "provider_priority": "high",
+      "provider_status": "underused",
+      "work_type": [
+        "research",
+        "strategy"
+      ],
+      "target_label": "agent:claude",
+      "confidence": 0.9,
+      "confidence_reasons": [
+        "execution-ready",
+        "priority-labeled",
+        "strong-claude-language-match",
+        "provider-high-priority"
+      ],
+      "eligible": true
+    },
+    {
+      "number": 2116,
+      "title": "feat(gtm): aceengineer.com demo gallery page \u2014 embed GIFs + report links",
+      "url": "https://github.com/vamseeachanta/workspace-hub/issues/2116",
+      "labels": [
+        "enhancement",
+        "priority:high",
+        "cat:business",
+        "domain:gtm"
+      ],
+      "updatedAt": "2026-04-10T15:53:07Z",
+      "execution_ready": false,
+      "priority_rank": 1,
+      "suggested_provider": "gemini",
+      "routing_reason": "research/triage/audit language",
+      "provider_priority": "highest",
+      "provider_status": "underused",
+      "work_type": [
+        "research"
+      ],
+      "target_label": "agent:gemini",
+      "confidence": 0.6,
+      "confidence_reasons": [
+        "priority-labeled",
+        "strong-gemini-language-match",
+        "provider-highest-priority"
+      ],
+      "eligible": false
+    },
+    {
+      "number": 2118,
+      "title": "chore(gtm): run all 5 demos end-to-end and validate HTML reports",
+      "url": "https://github.com/vamseeachanta/workspace-hub/issues/2118",
+      "labels": [
+        "priority:high",
+        "cat:engineering",
+        "domain:gtm"
+      ],
+      "updatedAt": "2026-04-10T15:53:21Z",
+      "execution_ready": false,
+      "priority_rank": 1,
+      "suggested_provider": "codex",
+      "routing_reason": "implementation/test/fix language",
+      "provider_priority": "highest",
+      "provider_status": "underused",
+      "work_type": [
+        "implementation"
+      ],
+      "target_label": "agent:codex",
+      "confidence": 0.6,
+      "confidence_reasons": [
+        "priority-labeled",
+        "strong-codex-language-match",
+        "provider-highest-priority"
+      ],
+      "eligible": false
+    },
+    {
+      "number": 2037,
+      "title": "feat(gtm): manim mooring layout / force explainer animation",
+      "url": "https://github.com/vamseeachanta/workspace-hub/issues/2037",
+      "labels": [
+        "enhancement",
+        "priority:medium",
+        "cat:business",
+        "domain:gtm"
+      ],
+      "updatedAt": "2026-04-08T17:40:07Z",
+      "execution_ready": false,
+      "priority_rank": 2,
+      "suggested_provider": "codex",
+      "routing_reason": "implementation/test/fix language",
+      "provider_priority": "highest",
+      "provider_status": "underused",
+      "work_type": [
+        "research",
+        "implementation"
+      ],
+      "target_label": "agent:codex",
+      "confidence": 0.6,
+      "confidence_reasons": [
+        "priority-labeled",
+        "strong-codex-language-match",
+        "provider-highest-priority"
+      ],
+      "eligible": false
+    },
+    {
+      "number": 2038,
+      "title": "feat(gtm): manim installation sequence / operability envelope animation",
+      "url": "https://github.com/vamseeachanta/workspace-hub/issues/2038",
+      "labels": [
+        "enhancement",
+        "priority:medium",
+        "cat:business",
+        "domain:gtm"
+      ],
+      "updatedAt": "2026-04-08T17:40:14Z",
+      "execution_ready": false,
+      "priority_rank": 2,
+      "suggested_provider": "codex",
+      "routing_reason": "implementation/test/fix language",
+      "provider_priority": "highest",
+      "provider_status": "underused",
+      "work_type": [
+        "research",
+        "implementation"
+      ],
+      "target_label": "agent:codex",
+      "confidence": 0.6,
+      "confidence_reasons": [
+        "priority-labeled",
+        "strong-codex-language-match",
+        "provider-highest-priority"
+      ],
+      "eligible": false
+    },
+    {
+      "number": 2039,
+      "title": "feat: engineering wiki \u2014 ingest remaining high-value sources (skills metadata, closed issues)",
+      "url": "https://github.com/vamseeachanta/workspace-hub/issues/2039",
+      "labels": [
+        "enhancement",
+        "priority:medium",
+        "domain:knowledge-management"
+      ],
+      "updatedAt": "2026-04-09T20:54:43Z",
+      "execution_ready": false,
+      "priority_rank": 2,
+      "suggested_provider": "gemini",
+      "routing_reason": "research/triage/audit language",
+      "provider_priority": "highest",
+      "provider_status": "underused",
+      "work_type": [
+        "research"
+      ],
+      "target_label": "agent:gemini",
+      "confidence": 0.6,
+      "confidence_reasons": [
+        "priority-labeled",
+        "strong-gemini-language-match",
+        "provider-highest-priority"
+      ],
+      "eligible": false
+    },
+    {
+      "number": 2149,
+      "title": "feat(knowledge): generate seeded intelligence accessibility registry from existing inventories",
+      "url": "https://github.com/vamseeachanta/workspace-hub/issues/2149",
+      "labels": [
+        "enhancement",
+        "priority:medium",
+        "cat:documentation",
+        "cat:harness"
+      ],
+      "updatedAt": "2026-04-10T17:03:48Z",
+      "execution_ready": false,
+      "priority_rank": 2,
+      "suggested_provider": "codex",
+      "routing_reason": "implementation/test/fix language",
+      "provider_priority": "highest",
+      "provider_status": "underused",
+      "work_type": [
+        "research",
+        "implementation"
+      ],
+      "target_label": "agent:codex",
+      "confidence": 0.6,
+      "confidence_reasons": [
+        "priority-labeled",
+        "strong-codex-language-match",
+        "provider-highest-priority"
+      ],
+      "eligible": false
+    },
+    {
+      "number": 2157,
+      "title": "feat(operations): implement native PowerShell probe collector for Windows readiness bundles",
+      "url": "https://github.com/vamseeachanta/workspace-hub/issues/2157",
+      "labels": [
+        "enhancement",
+        "priority:medium",
+        "cat:operations",
+        "cat:harness"
+      ],
+      "updatedAt": "2026-04-10T19:56:07Z",
+      "execution_ready": false,
+      "priority_rank": 2,
+      "suggested_provider": "codex",
+      "routing_reason": "implementation/test/fix language",
+      "provider_priority": "highest",
+      "provider_status": "underused",
+      "work_type": [
+        "research",
+        "implementation"
+      ],
+      "target_label": "agent:codex",
+      "confidence": 0.6,
+      "confidence_reasons": [
+        "priority-labeled",
+        "strong-codex-language-match",
+        "provider-highest-priority"
+      ],
+      "eligible": false
+    },
+    {
+      "number": 2158,
+      "title": "feat(operations): add Git Bash launcher and path-normalization bridge for Windows evidence writer",
+      "url": "https://github.com/vamseeachanta/workspace-hub/issues/2158",
+      "labels": [
+        "enhancement",
+        "priority:medium",
+        "cat:operations",
+        "cat:harness"
+      ],
+      "updatedAt": "2026-04-10T19:56:10Z",
+      "execution_ready": false,
+      "priority_rank": 2,
+      "suggested_provider": "codex",
+      "routing_reason": "implementation/test/fix language",
+      "provider_priority": "highest",
+      "provider_status": "underused",
+      "work_type": [
+        "research",
+        "implementation"
+      ],
+      "target_label": "agent:codex",
+      "confidence": 0.6,
+      "confidence_reasons": [
+        "priority-labeled",
+        "strong-codex-language-match",
+        "provider-highest-priority"
+      ],
+      "eligible": false
+    },
+    {
+      "number": 2161,
+      "title": "feat(knowledge): ingest provider-session ecosystem audit reads into seeded accessibility registry",
+      "url": "https://github.com/vamseeachanta/workspace-hub/issues/2161",
+      "labels": [
+        "enhancement",
+        "priority:medium",
+        "cat:documentation",
+        "cat:harness"
+      ],
+      "updatedAt": "2026-04-10T19:56:18Z",
+      "execution_ready": false,
+      "priority_rank": 2,
+      "suggested_provider": "codex",
+      "routing_reason": "implementation/test/fix language",
+      "provider_priority": "highest",
+      "provider_status": "underused",
+      "work_type": [
+        "research",
+        "implementation"
+      ],
+      "target_label": "agent:codex",
+      "confidence": 0.6,
+      "confidence_reasons": [
+        "priority-labeled",
+        "strong-codex-language-match",
+        "provider-highest-priority"
+      ],
+      "eligible": false
+    },
+    {
+      "number": 2041,
+      "title": "chore: add LaTeX to manim-env for MathTex rendering",
+      "url": "https://github.com/vamseeachanta/workspace-hub/issues/2041",
+      "labels": [
+        "enhancement",
+        "priority:low"
+      ],
+      "updatedAt": "2026-04-08T17:40:21Z",
+      "execution_ready": false,
+      "priority_rank": 3,
+      "suggested_provider": "gemini",
+      "routing_reason": "research/triage/audit language",
+      "provider_priority": "highest",
+      "provider_status": "underused",
+      "work_type": [
+        "research"
+      ],
+      "target_label": "agent:gemini",
+      "confidence": 0.45,
+      "confidence_reasons": [
+        "strong-gemini-language-match",
+        "provider-highest-priority"
+      ],
+      "eligible": false
+    },
+    {
+      "number": 2042,
+      "title": "feat: engineering wiki \u2014 ingest skill metadata as wiki pages",
+      "url": "https://github.com/vamseeachanta/workspace-hub/issues/2042",
+      "labels": [
+        "enhancement",
+        "cat:harness",
+        "domain:knowledge-management"
+      ],
+      "updatedAt": "2026-04-08T17:40:25Z",
+      "execution_ready": false,
+      "priority_rank": 4,
+      "suggested_provider": "gemini",
+      "routing_reason": "research/triage/audit language",
+      "provider_priority": "highest",
+      "provider_status": "underused",
+      "work_type": [
+        "research"
+      ],
+      "target_label": "agent:gemini",
+      "confidence": 0.45,
+      "confidence_reasons": [
+        "strong-gemini-language-match",
+        "provider-highest-priority"
+      ],
+      "eligible": false
+    },
+    {
+      "number": 2123,
+      "title": "feat(llm-wiki): add llm-wiki search to OrcaFlex/OrcaWave agent skill invocation",
+      "url": "https://github.com/vamseeachanta/workspace-hub/issues/2123",
+      "labels": [],
+      "updatedAt": "2026-04-10T16:00:58Z",
+      "execution_ready": false,
+      "priority_rank": 4,
+      "suggested_provider": "gemini",
+      "routing_reason": "research/triage/audit language",
+      "provider_priority": "highest",
+      "provider_status": "underused",
+      "work_type": [
+        "research"
+      ],
+      "target_label": "agent:gemini",
+      "confidence": 0.45,
+      "confidence_reasons": [
+        "strong-gemini-language-match",
+        "provider-highest-priority"
+      ],
+      "eligible": false
+    },
+    {
+      "number": 2125,
+      "title": "feat(llm-wiki): auto-refresh ingestion on new Orcina releases",
+      "url": "https://github.com/vamseeachanta/workspace-hub/issues/2125",
+      "labels": [],
+      "updatedAt": "2026-04-10T16:00:58Z",
+      "execution_ready": false,
+      "priority_rank": 4,
+      "suggested_provider": "gemini",
+      "routing_reason": "research/triage/audit language",
+      "provider_priority": "highest",
+      "provider_status": "underused",
+      "work_type": [
+        "research"
+      ],
+      "target_label": "agent:gemini",
+      "confidence": 0.45,
+      "confidence_reasons": [
+        "strong-gemini-language-match",
+        "provider-highest-priority"
+      ],
+      "eligible": false
+    }
+  ]
+}

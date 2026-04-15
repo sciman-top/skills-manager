@@ -1,5 +1,5 @@
-period=2026-04-13
-repo=E:/CODE/skills-manager
+period=2026-04-15
+repo=D:/OneDrive/CODE/skills-manager
 rule_version=9.38
 gate_pass_rate=N/A
 rollback_rate=N/A
@@ -15,7 +15,7 @@ evidence_completeness_rate=0.00%
 learning_loop_evidence_rate=0.00%
 waiver_active_count=0
 waiver_expired_unrecovered_count=0
-update_trigger_alert_count=0
+update_trigger_alert_count=1
 gate_latency_delta_ms=N/A
 practice_stack_ssdf_enabled_rate=100.00%
 practice_stack_slsa_enabled_rate=100.00%
