@@ -418,7 +418,8 @@ function Stop-DryRunMirrorCollect {
 }
 function Write-DryRunMirrorSummary([string]$title = "DRYRUN Robocopy 预览", [int]$maxShow = 20) {
     if (-not $DryRun) { return }
-    if (-not $script:DryRunMirrorCommands) { return }
+    if (-not (Get-Variable -Name DryRunMirrorCommands -Scope Script -ErrorAction SilentlyContinue)) { return }
+    if ($null -eq $script:DryRunMirrorCommands) { return }
     $count = $script:DryRunMirrorCommands.Count
     if ($count -eq 0) { return }
     Write-Host ("{0}：共 {1} 条" -f $title, $count)
@@ -433,8 +434,8 @@ function Write-DryRunMirrorSummary([string]$title = "DRYRUN Robocopy 预览", [i
     }
 }
 function Get-BuildSummary($cfg) {
-    $manualCount = (收集ManualSkills $cfg).Count
-    $overrideCount = (Get-OverridesDirs).Count
+    $manualCount = @(收集ManualSkills $cfg).Count
+    $overrideCount = @(Get-OverridesDirs).Count
     return ("构建摘要：mappings={0}，imports(manual)={1}，overrides={2}，targets={3}，sync_mode={4}" -f $cfg.mappings.Count, $manualCount, $overrideCount, $cfg.targets.Count, $cfg.sync_mode)
 }
 function Write-BuildSummary($cfg = $null) {
@@ -729,7 +730,8 @@ function Test-IsSkillDir([string]$path) {
     return $false
 }
 function Get-SkillCandidates([string]$base) {
-    if (-not $script:SkillCandidatesCache) { $script:SkillCandidatesCache = @{} }
+    if (-not (Get-Variable -Name SkillCandidatesCache -Scope Script -ErrorAction SilentlyContinue)) { $script:SkillCandidatesCache = @{} }
+    if ($null -eq $script:SkillCandidatesCache) { $script:SkillCandidatesCache = @{} }
     if ($script:SkillCandidatesCache.ContainsKey($base)) {
         return ,@($script:SkillCandidatesCache[$base])
     }
@@ -2477,18 +2479,18 @@ function Assert-Cfg($cfg) {
     $mode = $cfg.sync_mode
     Need (($mode -eq "link") -or ($mode -eq "sync")) "sync_mode 仅支持 link 或 sync"
 
-    $dupVendors = Get-DuplicateValues ($cfg.vendors | ForEach-Object { $_.name })
+    $dupVendors = @(Get-DuplicateValues ($cfg.vendors | ForEach-Object { $_.name }))
     Need ($dupVendors.Count -eq 0) ("vendor 名称重复：{0}" -f ($dupVendors -join ", "))
 
-    $dupImports = Get-DuplicateValues ($cfg.imports | ForEach-Object { $_.name })
+    $dupImports = @(Get-DuplicateValues ($cfg.imports | ForEach-Object { $_.name }))
     Need ($dupImports.Count -eq 0) ("import 名称重复：{0}" -f ($dupImports -join ", "))
 
-    $dupTargets = Get-DuplicateValues ($cfg.targets | ForEach-Object { $_.path })
+    $dupTargets = @(Get-DuplicateValues ($cfg.targets | ForEach-Object { $_.path }))
     if ($dupTargets.Count -gt 0) {
         Log ("目标路径重复（建议去重）：{0}" -f ($dupTargets -join ", ")) "WARN"
     }
 
-    $dupTo = Get-DuplicateValues ($cfg.mappings | ForEach-Object { $_.to })
+    $dupTo = @(Get-DuplicateValues ($cfg.mappings | ForEach-Object { $_.to }))
     if ($dupTo.Count -gt 0) {
         Log ("mappings 的 to 重复（可能覆盖）：{0}" -f ($dupTo -join ", ")) "WARN"
     }
@@ -4002,7 +4004,8 @@ function 删除技能库 {
 }
 
 function Get-SkillsUnder([string]$base, [string]$vendorName) {
-    if (-not $script:SkillListCache) { $script:SkillListCache = @{} }
+    if (-not (Get-Variable -Name SkillListCache -Scope Script -ErrorAction SilentlyContinue)) { $script:SkillListCache = @{} }
+    if ($null -eq $script:SkillListCache) { $script:SkillListCache = @{} }
     $key = "{0}|{1}" -f $vendorName, $base
     if ($script:SkillListCache.ContainsKey($key)) {
         return $script:SkillListCache[$key]
@@ -4378,6 +4381,7 @@ function Filter-Skills($items, [string]$filter) {
 }
 
 function Write-ItemsInColumns($items, [scriptblock]$formatter) {
+    $items = @($items)
     $count = $items.Count
     if ($count -eq 0) { return }
     $width = 120
@@ -5051,7 +5055,7 @@ function 构建生效 {
         $cfgRawBeforeOptimize = if (Test-Path $CfgPath) { Get-Content $CfgPath -Raw } else { "" }
         Optimize-Imports $cfg
         $optChanges = Get-CfgChangeSummaryLines $cfgRawBeforeOptimize $cfg
-        if ($optChanges.Count -gt 0) {
+        if (@($optChanges).Count -gt 0) {
             SaveCfg $cfg
             Log ("已写回自动迁移配置：{0}" -f ($optChanges -join "; ")) "WARN"
         }
@@ -5063,7 +5067,7 @@ function 构建生效 {
             $failures = @()
             $buildFailures = 构建Agent $cfg -SkipPreflight -Txn $txn
             if ($buildFailures) { $failures += $buildFailures }
-            if ($buildFailures -and $buildFailures.Count -gt 0) {
+            if ($buildFailures -and @($buildFailures).Count -gt 0) {
                 Log "检测到构建失败，已跳过同步阶段。" "WARN"
                 Write-Host "⚠️ 构建失败，未执行同步。请先修复上方错误后重试【构建生效】。" -ForegroundColor Yellow
             }
@@ -7477,7 +7481,7 @@ if ($MyInvocation.InvocationName -ne '.') {
                 if (-not [string]::IsNullOrWhiteSpace($Filter)) { $doctorTokens += $Filter }
                 $doctorTokens += @($args)
                 $doctorResult = Invoke-Doctor $doctorTokens
-                $strictRequested = ($doctorTokens | Where-Object { ([string]$_).Trim().ToLowerInvariant() -eq "--strict" }).Count -gt 0
+                $strictRequested = @($doctorTokens | Where-Object { ([string]$_).Trim().ToLowerInvariant() -eq "--strict" }).Count -gt 0
                 if ($strictRequested -and $doctorResult -and $doctorResult.PSObject.Properties.Match("pass").Count -gt 0 -and -not [bool]$doctorResult.pass) {
                     exit 2
                 }
@@ -7486,6 +7490,12 @@ if ($MyInvocation.InvocationName -ne '.') {
     }
     catch {
         $msg = $_.Exception.Message
+        if ($env:SKILLS_DEBUG_STACK -eq "1") {
+            $stack = $_.ScriptStackTrace
+            if (-not [string]::IsNullOrWhiteSpace($stack)) {
+                Write-Host ("[DEBUG_STACK] " + $stack) -ForegroundColor DarkYellow
+            }
+        }
         Log ("未处理错误：{0}" -f $msg) "ERROR"
         Write-Host ("❌ 发生错误：{0}" -f $msg) -ForegroundColor Red
         exit 1

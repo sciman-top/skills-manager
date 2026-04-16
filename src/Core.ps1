@@ -400,7 +400,8 @@ function Stop-DryRunMirrorCollect {
 }
 function Write-DryRunMirrorSummary([string]$title = "DRYRUN Robocopy 预览", [int]$maxShow = 20) {
     if (-not $DryRun) { return }
-    if (-not $script:DryRunMirrorCommands) { return }
+    if (-not (Get-Variable -Name DryRunMirrorCommands -Scope Script -ErrorAction SilentlyContinue)) { return }
+    if ($null -eq $script:DryRunMirrorCommands) { return }
     $count = $script:DryRunMirrorCommands.Count
     if ($count -eq 0) { return }
     Write-Host ("{0}：共 {1} 条" -f $title, $count)
@@ -415,8 +416,8 @@ function Write-DryRunMirrorSummary([string]$title = "DRYRUN Robocopy 预览", [i
     }
 }
 function Get-BuildSummary($cfg) {
-    $manualCount = (收集ManualSkills $cfg).Count
-    $overrideCount = (Get-OverridesDirs).Count
+    $manualCount = @(收集ManualSkills $cfg).Count
+    $overrideCount = @(Get-OverridesDirs).Count
     return ("构建摘要：mappings={0}，imports(manual)={1}，overrides={2}，targets={3}，sync_mode={4}" -f $cfg.mappings.Count, $manualCount, $overrideCount, $cfg.targets.Count, $cfg.sync_mode)
 }
 function Write-BuildSummary($cfg = $null) {
@@ -711,7 +712,8 @@ function Test-IsSkillDir([string]$path) {
     return $false
 }
 function Get-SkillCandidates([string]$base) {
-    if (-not $script:SkillCandidatesCache) { $script:SkillCandidatesCache = @{} }
+    if (-not (Get-Variable -Name SkillCandidatesCache -Scope Script -ErrorAction SilentlyContinue)) { $script:SkillCandidatesCache = @{} }
+    if ($null -eq $script:SkillCandidatesCache) { $script:SkillCandidatesCache = @{} }
     if ($script:SkillCandidatesCache.ContainsKey($base)) {
         return ,@($script:SkillCandidatesCache[$base])
     }

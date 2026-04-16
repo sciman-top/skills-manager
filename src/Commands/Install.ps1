@@ -720,7 +720,8 @@ function 删除技能库 {
 }
 
 function Get-SkillsUnder([string]$base, [string]$vendorName) {
-    if (-not $script:SkillListCache) { $script:SkillListCache = @{} }
+    if (-not (Get-Variable -Name SkillListCache -Scope Script -ErrorAction SilentlyContinue)) { $script:SkillListCache = @{} }
+    if ($null -eq $script:SkillListCache) { $script:SkillListCache = @{} }
     $key = "{0}|{1}" -f $vendorName, $base
     if ($script:SkillListCache.ContainsKey($key)) {
         return $script:SkillListCache[$key]
@@ -1096,6 +1097,7 @@ function Filter-Skills($items, [string]$filter) {
 }
 
 function Write-ItemsInColumns($items, [scriptblock]$formatter) {
+    $items = @($items)
     $count = $items.Count
     if ($count -eq 0) { return }
     $width = 120
@@ -1769,7 +1771,7 @@ function 构建生效 {
         $cfgRawBeforeOptimize = if (Test-Path $CfgPath) { Get-Content $CfgPath -Raw } else { "" }
         Optimize-Imports $cfg
         $optChanges = Get-CfgChangeSummaryLines $cfgRawBeforeOptimize $cfg
-        if ($optChanges.Count -gt 0) {
+        if (@($optChanges).Count -gt 0) {
             SaveCfg $cfg
             Log ("已写回自动迁移配置：{0}" -f ($optChanges -join "; ")) "WARN"
         }
@@ -1781,7 +1783,7 @@ function 构建生效 {
             $failures = @()
             $buildFailures = 构建Agent $cfg -SkipPreflight -Txn $txn
             if ($buildFailures) { $failures += $buildFailures }
-            if ($buildFailures -and $buildFailures.Count -gt 0) {
+            if ($buildFailures -and @($buildFailures).Count -gt 0) {
                 Log "检测到构建失败，已跳过同步阶段。" "WARN"
                 Write-Host "⚠️ 构建失败，未执行同步。请先修复上方错误后重试【构建生效】。" -ForegroundColor Yellow
             }

@@ -62,7 +62,7 @@ if ($MyInvocation.InvocationName -ne '.') {
                 if (-not [string]::IsNullOrWhiteSpace($Filter)) { $doctorTokens += $Filter }
                 $doctorTokens += @($args)
                 $doctorResult = Invoke-Doctor $doctorTokens
-                $strictRequested = ($doctorTokens | Where-Object { ([string]$_).Trim().ToLowerInvariant() -eq "--strict" }).Count -gt 0
+                $strictRequested = @($doctorTokens | Where-Object { ([string]$_).Trim().ToLowerInvariant() -eq "--strict" }).Count -gt 0
                 if ($strictRequested -and $doctorResult -and $doctorResult.PSObject.Properties.Match("pass").Count -gt 0 -and -not [bool]$doctorResult.pass) {
                     exit 2
                 }
@@ -71,6 +71,12 @@ if ($MyInvocation.InvocationName -ne '.') {
     }
     catch {
         $msg = $_.Exception.Message
+        if ($env:SKILLS_DEBUG_STACK -eq "1") {
+            $stack = $_.ScriptStackTrace
+            if (-not [string]::IsNullOrWhiteSpace($stack)) {
+                Write-Host ("[DEBUG_STACK] " + $stack) -ForegroundColor DarkYellow
+            }
+        }
         Log ("未处理错误：{0}" -f $msg) "ERROR"
         Write-Host ("❌ 发生错误：{0}" -f $msg) -ForegroundColor Red
         exit 1

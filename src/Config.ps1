@@ -598,18 +598,18 @@ function Assert-Cfg($cfg) {
     $mode = $cfg.sync_mode
     Need (($mode -eq "link") -or ($mode -eq "sync")) "sync_mode 仅支持 link 或 sync"
 
-    $dupVendors = Get-DuplicateValues ($cfg.vendors | ForEach-Object { $_.name })
+    $dupVendors = @(Get-DuplicateValues ($cfg.vendors | ForEach-Object { $_.name }))
     Need ($dupVendors.Count -eq 0) ("vendor 名称重复：{0}" -f ($dupVendors -join ", "))
 
-    $dupImports = Get-DuplicateValues ($cfg.imports | ForEach-Object { $_.name })
+    $dupImports = @(Get-DuplicateValues ($cfg.imports | ForEach-Object { $_.name }))
     Need ($dupImports.Count -eq 0) ("import 名称重复：{0}" -f ($dupImports -join ", "))
 
-    $dupTargets = Get-DuplicateValues ($cfg.targets | ForEach-Object { $_.path })
+    $dupTargets = @(Get-DuplicateValues ($cfg.targets | ForEach-Object { $_.path }))
     if ($dupTargets.Count -gt 0) {
         Log ("目标路径重复（建议去重）：{0}" -f ($dupTargets -join ", ")) "WARN"
     }
 
-    $dupTo = Get-DuplicateValues ($cfg.mappings | ForEach-Object { $_.to })
+    $dupTo = @(Get-DuplicateValues ($cfg.mappings | ForEach-Object { $_.to }))
     if ($dupTo.Count -gt 0) {
         Log ("mappings 的 to 重复（可能覆盖）：{0}" -f ($dupTo -join ", ")) "WARN"
     }
