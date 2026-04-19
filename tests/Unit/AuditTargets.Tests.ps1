@@ -127,4 +127,30 @@ Describe "Audit Targets" {
             (@($scan.detected.agent_rule_files) -contains "AGENTS.md") | Should Be $true
         }
     }
+
+    Context "Installed skill facts" {
+        It "Extracts declared name and description from installed manual skills" {
+            $oldImportDir = $script:ImportDir
+            try {
+                $script:ImportDir = Join-Path $TestDrive "imports"
+                New-Item -ItemType Directory -Path (Join-Path $script:ImportDir "demo-skill") -Force | Out-Null
+                Set-Content -Path (Join-Path $script:ImportDir "demo-skill\SKILL.md") -Value "---`nname: demo-skill`ndescription: Demo description.`n---`nBody trigger text."
+                $cfg = [pscustomobject]@{
+                    vendors = @()
+                    imports = @([pscustomobject]@{ name = "demo-skill"; repo = "https://example.com/demo.git"; ref = "main"; skill = "."; mode = "manual" })
+                    mappings = @([pscustomobject]@{ vendor = "manual"; from = "demo-skill"; to = "demo-skill" })
+                }
+
+                $facts = Get-InstalledSkillFacts $cfg
+
+                @($facts).Count | Should Be 1
+                $facts[0].declared_name | Should Be "demo-skill"
+                $facts[0].description | Should Be "Demo description."
+                $facts[0].source_kind | Should Be "manual"
+            }
+            finally {
+                $script:ImportDir = $oldImportDir
+            }
+        }
+    }
 }
