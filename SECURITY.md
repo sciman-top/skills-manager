@@ -6,11 +6,18 @@
 | latest | yes |
 
 ## Reporting a Vulnerability
-- Contact: <security email>
-- Include: impact, steps to reproduce, expected risk
-- SLA: initial response within <N> business days
 
-## Security expectations for contributors
+Report vulnerabilities through the repository's private security advisory channel when available. If that is not available, contact the maintainers before sharing details publicly.
+
+Include:
+
+- affected command, file, or workflow
+- impact and expected risk
+- steps to reproduce
+- relevant logs with secrets removed
+
+## Contributor Expectations
 - Do not paste secrets into issues, PRs, examples, or screenshots.
 - Redact tokens, keys, and customer data before sharing logs.
 - Prefer minimal reproducible examples over production data.
+- Do not commit local CLI config, credentials, or generated agent state.

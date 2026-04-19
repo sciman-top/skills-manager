@@ -1,6 +1,6 @@
 # overrides/
 
-Local override layer for skills.
+Local override layer for skills. Put custom skills and local patches here instead of editing upstream caches.
 
 Naming convention:
 

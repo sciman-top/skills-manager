@@ -1,22 +1,33 @@
 # Contributing
 
 ## Scope
-- Issues: bug, feature, question
-- Pull requests: docs, tests, code
+- Issues: bugs, feature requests, and questions
+- Pull requests: documentation, tests, and code
 
 ## Basic Workflow
-1. Fork and create branch
-2. Run local gates
-3. Open PR with context and test evidence
+1. Fork the repository and create a branch.
+2. Make one focused change.
+3. Run the local gates in order.
+4. Open a PR with context and verification evidence.
 
-## What to include in a good PR
+## Local Gates
+
+```powershell
+./build.ps1
+./skills.ps1 发现
+./skills.ps1 doctor --strict --threshold-ms 8000
+./skills.ps1 构建生效
+```
+
+## PR Checklist
 - What user problem this change addresses
 - How to reproduce or validate the change
 - Screenshots, logs, or sample output when relevant
 - Any release note or migration impact
-- Any README or demo update if the user-facing flow changed
+- README or demo updates if user-facing behavior changed
 
-## Minimal Quality Gate
-- Build passes
-- Tests pass
-- No contract or invariant break
+## Scope Discipline
+
+- Do not edit generated `agent/` output by hand.
+- Keep custom skills and local patches in `overrides/`.
+- Avoid committing local agent state, logs, caches, or temporary files.

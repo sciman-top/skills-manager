@@ -8072,39 +8072,39 @@ function 自动更新设置 {
 
 function 帮助 {
     @"
-Skills 管理器（极简版，中文菜单）
+Skills 管理器（中文菜单）
 
 推荐使用顺序：
-  1) 接入来源：先新增技能库，或直接粘贴 add / npx 命令导入技能
-  2) 发现：查看当前已接入技能库里有哪些技能，可先按关键词过滤
+  1) 接入来源：新增技能库，或粘贴 add / npx 命令导入单个技能
+  2) 发现：查看已接入技能库中的可用技能
   3) 安装：
      - 命令导入安装：粘贴一条或多条 add / npx skills add / npx add-skill 命令
      - 从技能库选择安装：从已接入技能库中勾选技能，写入 mappings 白名单
-  4) 构建并生效：按当前配置重建 agent/，再同步到 targets
-  5) 更新：拉取上游 vendor/imports，处理本地改动后再重建同步
+  4) 构建并生效：重建 agent/，并同步到 targets
+  5) 更新：拉取上游后重建并同步
 
 主要功能说明：
   - 发现：列出当前技能库中的可用技能；只查看，不改配置
-  - 命令导入安装：解析粘贴的 add / npx 命令；支持一次导入多个技能，并自动构建生效
-  - 从技能库选择安装：从技能库中勾选多个技能，追加到 mappings 白名单并自动构建生效
-  - 卸载：从 mappings 白名单移除技能；必要时清理 imports 条目、legacy manual 目录和对应 overrides 备份
-  - 新增技能库：向 vendors 写入仓库地址并初始化；留空时仅初始化已配置 vendors
-  - 删除技能库：移除 vendors 中的仓库；可选择是否保留其已安装技能（转为 manual）后重建生效
-  - 更新：拉取 vendor/imports 上游内容；本地改动自动保留并跳过强制清理，然后重建并同步
-  - 构建并生效：仅使用当前本地配置与文件源（imports / overrides / mappings）重建输出并同步；可配合 -Locked 做严格校验
+  - 命令导入安装：解析 add / npx 命令；支持批量导入并自动构建生效
+  - 从技能库选择安装：勾选技能，追加到 mappings 并自动构建生效
+  - 卸载：从 mappings 移除技能；必要时清理 imports、legacy manual 目录和 overrides 备份
+  - 新增技能库：向 vendors 写入仓库地址并初始化；留空则只初始化已配置 vendors
+  - 删除技能库：移除 vendors 仓库；可选择保留已安装技能并转为 manual
+  - 更新：拉取 vendor/imports 上游内容；保留本地改动，然后重建并同步
+  - 构建并生效：使用当前本地配置与文件源重建输出并同步；可配合 -Locked 校验锁文件
   - 锁定：生成 skills.lock.json，记录当前 vendor/import commit
-  - 安装MCP：向 skills.json 登记 MCP 服务（支持 stdio / sse / http），并自动同步
+  - 安装MCP：向 skills.json 登记 MCP 服务（stdio / sse / http），并自动同步
   - 卸载MCP：从 skills.json 移除 MCP 服务，并自动同步
-  - 同步MCP：仅重新同步 MCP 配置，不处理技能构建
+  - 同步MCP：只同步 MCP 配置，不构建 skills
   - 审查目标：登记目标仓、生成审查包、应用外层 AI 写入的 recommendations.json
   - 自动更新设置：配置本机计划任务，每周五 20:00 自动执行“更新 + 同步MCP”
-  - 打开配置：打开 skills.json 进行手工检查或编辑
+  - 打开配置：打开 skills.json
   - 解除关联：移除 link 模式下创建的目录关联
   - 清理备份：删除仓库内 *.bak.* 文件和 .bak 目录（排除 vendor / agent / imports / .git）
 
 说明：
   - 手动更新会访问上游仓库；如果你只想让本地改动重新输出，请用“构建并生效”。
-  - 命令导入安装默认先做严格预检：校验仓库可达、技能路径存在，再执行导入。
+  - 命令导入安装会先预检仓库可达性和技能路径，再执行导入。
   - 命令导入安装会自动补全 owner/repo URL；若技能不唯一，会提示候选路径。
   - 从技能库选择安装更适合浏览后再批量勾选；命令导入安装更适合直接粘贴已有命令。
 
@@ -8150,7 +8150,7 @@ Skills 管理器（极简版，中文菜单）
   - mappings：白名单（安装/卸载）
   - mcp_servers：MCP 服务清单（安装MCP/卸载MCP会自动同步）
   - mcp_targets：可选 MCP 目标目录（未配置时从 targets 自动推断）
-  - sync_mode：Windows 优先 link（Junction），受限环境用 sync（兜底）
+  - sync_mode：Windows 优先 link（junction），受限环境用 sync
 
 过滤语法（批量安装/卸载/发现命令）：
   - 多关键词：空格分隔，AND 过滤（如：docx pdf）
@@ -8159,9 +8159,9 @@ Skills 管理器（极简版，中文菜单）
 本地技能：
   - add/npx 未指定 --skill 时仅新增技能库（vendor），不会自动安装整库技能。
   - add/npx 显式指定 --skill 时默认落入 imports（mode=manual），可用 --mode vendor 改为 vendor 管理。
-  - manual/ 仅保留 legacy 兼容读取，建议将自定义改动放入 overrides/。
+  - manual/ 仅用于旧数据兼容；自定义改动请放入 overrides/。
   - “命令导入安装”支持多行输入 add / npx skills add / npx add-skill。
-  - 为兼容旧习惯，`安装` / `卸载` / `更新` / `构建生效` / `锁定` 等旧命令仍然保留可用。
+  - `安装` / `卸载` / `更新` / `构建生效` / `锁定` 等旧命令仍可使用。
 
 提示：如遇 PowerShell 脚本执行被拦，可在当前窗口临时放开：
   Set-ExecutionPolicy -Scope Process Bypass
@@ -8171,7 +8171,7 @@ Skills 管理器（极简版，中文菜单）
 function 菜单 {
     while ($true) {
         Write-Host ""
-        Write-Host "=== Skills 管理器（极简版）==="
+        Write-Host "=== Skills 管理器 ==="
         Write-Host "技能操作"
         Write-Host "1) 发现技能（浏览已接入技能库）"
         Write-Host "2) 命令导入安装（粘贴一条或多条 add / npx 命令）"
