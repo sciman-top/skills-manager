@@ -7708,6 +7708,37 @@ function Get-AuditApplyReportPath([string]$recommendationsPath) {
     return (Join-Path $dir "apply-report.json")
 }
 
+function Ensure-AuditNewManualImportsMapped($beforeCfg) {
+    $before = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($i in @($beforeCfg.imports)) {
+        if ($null -eq $i) { continue }
+        $before.Add([string]$i.name) | Out-Null
+    }
+
+    $cfg = LoadCfg
+    $existingMappings = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($m in @($cfg.mappings)) {
+        if ($null -eq $m) { continue }
+        $existingMappings.Add(("{0}|{1}" -f [string]$m.vendor, [string]$m.from)) | Out-Null
+    }
+
+    $changed = $false
+    foreach ($i in @($cfg.imports)) {
+        if ($null -eq $i) { continue }
+        $mode = if ($i.PSObject.Properties.Match("mode").Count -gt 0) { [string]$i.mode } else { "manual" }
+        if ($mode -ne "manual") { continue }
+        $name = [string]$i.name
+        if ($before.Contains($name)) { continue }
+        $key = "manual|{0}" -f $name
+        if ($existingMappings.Contains($key)) { continue }
+        $cfg.mappings += @{ vendor = "manual"; from = $name; to = $name }
+        $existingMappings.Add($key) | Out-Null
+        $changed = $true
+    }
+    if ($changed) { SaveCfg $cfg }
+    return $changed
+}
+
 function Invoke-AuditTargetsScan {
     param(
         [string]$Target,
@@ -7798,7 +7829,51 @@ function Invoke-AuditRecommendationsApply {
         return [pscustomobject]$report
     }
 
-    throw "审查目标安装执行将在后续任务实现。"
+    $applied = @()
+    try {
+        foreach ($item in @($plan.items)) {
+            $commandText = ".\skills.ps1 add {0}" -f ($item.tokens -join " ")
+            try {
+                Write-Host ("Installing recommended skill: {0}" -f $item.name) -ForegroundColor Cyan
+                $beforeCfg = LoadCfg
+                $ok = Add-ImportFromArgs $item.tokens -NoBuild
+                if (-not $ok) { throw ("推荐技能安装失败：{0}" -f $item.name) }
+                Ensure-AuditNewManualImportsMapped $beforeCfg | Out-Null
+                $item.status = "installed"
+                $item | Add-Member -NotePropertyName command -NotePropertyValue $commandText -Force
+                $applied += $item
+                $report.rollback += ("Remove matching imports/mappings for recommended skill '{0}' if rollback is required." -f $item.name)
+            }
+            catch {
+                $item.status = "failed"
+                $item | Add-Member -NotePropertyName command -NotePropertyValue $commandText -Force
+                $item | Add-Member -NotePropertyName error -NotePropertyValue $_.Exception.Message -Force
+                $report.success = $false
+                $report.items = @($plan.items)
+                Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+                throw
+            }
+        }
+
+        构建生效
+        $doctorResult = Invoke-Doctor @("--strict", "--threshold-ms", "8000")
+        if ($doctorResult -and $doctorResult.PSObject.Properties.Match("pass").Count -gt 0 -and -not [bool]$doctorResult.pass) {
+            $report.success = $false
+            $report.items = @($plan.items)
+            Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+            throw "doctor --strict failed after applying recommendations"
+        }
+
+        $report.items = @($plan.items)
+        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+        return [pscustomobject]$report
+    }
+    catch {
+        if ($report.success) { $report.success = $false }
+        $report.items = @($plan.items)
+        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+        throw
+    }
 }
 
 function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
