@@ -44,6 +44,18 @@
 5. 外层 AI 必须基于“用户基本需求 + 目标仓”输出推荐。
 6. `应用` 继续先 dry-run，只有 `--apply --yes` 才真正改配置和执行门禁。
 
+## Networking Authorization Model
+
+联网行为采用“流程内授权、状态变更单独确认”的模型：
+
+- 默认情况下，未进入审查流程时，脚本和外层 AI 不主动联网搜索技能来源。
+- 一旦用户明确发起审查流程，例如执行 `审查目标 扫描`，就视为用户已经授权外层 AI 在本次审查任务范围内自主联网研究。
+- 该授权仅覆盖信息获取与推荐生成，不覆盖本地状态变更。
+- 真正安装技能仍然必须通过 `应用 --apply --yes` 明确确认。
+- 第一版不自动卸载技能，因此不存在“联网后自动卸载”的路径。
+
+该模型要在帮助文案、README、`ai-brief.md` 中明确写出，避免外层 AI 或用户把“可联网搜索”和“可自动安装”混为一谈。
+
 ## Config Shape
 
 `audit-targets.json` 扩展为：
@@ -203,6 +215,40 @@
 - 外层 AI 判断技能取舍时，必须同时参考 `user-profile.json` 和目标仓扫描结果。
 - 如果 recommendation 未体现“用户基本需求”和“目标仓”的双重依据，则视为不完整推荐。
 - 卸载建议、新增建议、保留建议都必须说明两类依据分别是什么。
+- 用户已通过启动审查流程授权外层 AI 在本次任务范围内联网搜索；但安装仍需 `--apply --yes`。
+
+## Source Strategy
+
+来源策略采用“三层模型”：
+
+### 1. 基础必查来源
+
+这些来源内置为默认检查项，外层 AI 在正式审查时必须覆盖：
+
+- 官方文档
+- `skills.sh`
+- `find-skills`
+- GitHub 上高质量社区项目或参考仓库
+- GitHub Trending
+
+### 2. 条件性扩展来源
+
+外层 AI 可以根据“用户基本需求 + 目标仓”自主判断是否补充其它来源，例如：
+
+- 特定框架或语言的官方最佳实践文档
+- 特定技术栈的 curated lists
+- 社区 benchmark、starter、reference implementations
+- 与目标仓相邻生态的高质量实践文章或项目
+
+### 3. 结果留痕
+
+`recommendations.json` 中必须记录实际使用过的来源；如果某一类来源未使用，也应在总结里说明原因，或说明现有证据已足够。
+
+原则：
+
+- 不采用“全部来源都写死”的策略，避免流程僵化。
+- 也不采用“完全交给 AI 临场发挥”的策略，避免结果不稳定。
+- 通过“基础必查 + 条件扩展 + 来源留痕”兼顾稳定性和弹性。
 
 ## Recommendations Schema Changes
 
@@ -216,7 +262,8 @@
   "decision_basis": {
     "user_profile_used": true,
     "target_scan_used": true,
-    "summary": "Recommendations are based on the user's daily workflow constraints and the target repo's detected stack."
+    "source_strategy_used": true,
+    "summary": "Recommendations are based on the user's daily workflow constraints, the target repo's detected stack, and the documented source search strategy."
   },
   "new_skills": [],
   "overlap_findings": [],
@@ -230,6 +277,7 @@
 - `schema_version` 升级到 `2`。
 - `decision_basis.user_profile_used` 必须为 `true`。
 - `decision_basis.target_scan_used` 必须为 `true`。
+- `decision_basis.source_strategy_used` 必须为 `true`。
 - `decision_basis.summary` 必须非空。
 - `removal_candidates` 为新增报告字段，只做建议，不自动执行卸载。
 
@@ -241,6 +289,7 @@
 脚本可做最低限度校验：
 
 - 要求存在 `basis.user_profile` / `basis.target_repo` 之类字段，或统一要求 `reason_user_profile` 与 `reason_target_repo`。
+- 同时要求推荐项保留来源证据，例如 `sources[]`，并允许记录 `source_categories[]`。
 
 推荐第一版采用更稳定的字段：
 
@@ -272,6 +321,9 @@
 - 目标仓是项目级上下文。
 - 外层 AI 对技能取舍的判断必须同时基于两者。
 - 没有用户基本需求时，不应开始正式审查。
+- 用户启动审查流程后，外层 AI 可以在本次流程内自主联网研究。
+- 联网搜索不等于自动安装；安装仍需 `--apply --yes`。
+- 基础来源是内置默认检查项，但外层 AI 可以按需要扩展其它来源。
 
 ## Tests
 
