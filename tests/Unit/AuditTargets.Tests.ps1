@@ -66,4 +66,32 @@ Describe "Audit Targets" {
             }
         }
     }
+
+    Context "Command parsing" {
+        It "Parses init/add/list/scan/apply subcommands" {
+            (Parse-AuditTargetsArgs @("init")).action | Should Be "init"
+
+            $add = Parse-AuditTargetsArgs @("add", "demo", "..\demo")
+            $add.action | Should Be "add"
+            $add.name | Should Be "demo"
+            $add.path | Should Be "..\demo"
+
+            (Parse-AuditTargetsArgs @("list")).action | Should Be "list"
+            (Parse-AuditTargetsArgs @("scan", "--target", "demo")).target | Should Be "demo"
+
+            $apply = Parse-AuditTargetsArgs @("apply", "--recommendations", "r.json", "--apply", "--yes")
+            $apply.action | Should Be "apply"
+            $apply.recommendations | Should Be "r.json"
+            $apply.apply | Should Be $true
+            $apply.yes | Should Be $true
+        }
+
+        It "Accepts Chinese subcommands" {
+            (Parse-AuditTargetsArgs @("初始化")).action | Should Be "init"
+            (Parse-AuditTargetsArgs @("添加", "demo", "..\demo")).action | Should Be "add"
+            (Parse-AuditTargetsArgs @("列表")).action | Should Be "list"
+            (Parse-AuditTargetsArgs @("扫描")).action | Should Be "scan"
+            (Parse-AuditTargetsArgs @("应用", "--recommendations", "r.json")).action | Should Be "apply"
+        }
+    }
 }

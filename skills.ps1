@@ -1,6 +1,6 @@
 ﻿#requires -Version 5.1
 param(
-    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "锁定", "生成锁文件", "打开配置", "解除关联", "清理备份", "自动更新设置", "帮助", "doctor", "add", "npx", "安装MCP", "卸载MCP", "同步MCP", "mcp-install", "mcp-uninstall", "mcp-sync")]
+    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "锁定", "生成锁文件", "打开配置", "解除关联", "清理备份", "自动更新设置", "帮助", "doctor", "add", "npx", "安装MCP", "卸载MCP", "同步MCP", "mcp-install", "mcp-uninstall", "mcp-sync", "审查目标", "audit-targets")]
     [string]$Cmd = "menu",
     [string]$Filter = "",
     [switch]$DryRun,
@@ -7189,6 +7189,144 @@ function Add-AuditTargetConfigEntry([string]$name, [string]$path, [string[]]$tag
     Save-AuditTargetsConfig $cfg
     return $cfg
 }
+
+function Parse-AuditTargetsArgs([string[]]$tokens) {
+    $result = [ordered]@{
+        action = "list"
+        name = $null
+        path = $null
+        target = $null
+        out = $null
+        recommendations = $null
+        apply = $false
+        yes = $false
+        tags = @()
+        notes = ""
+    }
+
+    $items = @($tokens | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    if ($items.Count -gt 0) {
+        $head = ([string]$items[0]).ToLowerInvariant()
+        switch ($head) {
+            "初始化" { $result.action = "init"; $items = @($items | Select-Object -Skip 1) }
+            "init" { $result.action = "init"; $items = @($items | Select-Object -Skip 1) }
+            "添加" { $result.action = "add"; $items = @($items | Select-Object -Skip 1) }
+            "add" { $result.action = "add"; $items = @($items | Select-Object -Skip 1) }
+            "列表" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
+            "list" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
+            "扫描" { $result.action = "scan"; $items = @($items | Select-Object -Skip 1) }
+            "scan" { $result.action = "scan"; $items = @($items | Select-Object -Skip 1) }
+            "应用" { $result.action = "apply"; $items = @($items | Select-Object -Skip 1) }
+            "apply" { $result.action = "apply"; $items = @($items | Select-Object -Skip 1) }
+            default { throw ("未知审查目标子命令：{0}" -f $items[0]) }
+        }
+    }
+
+    $positional = @()
+    for ($i = 0; $i -lt $items.Count; $i++) {
+        $t = [string]$items[$i]
+        $key = $t.ToLowerInvariant()
+        switch ($key) {
+            "--target" {
+                Need ($i + 1 -lt $items.Count) "--target 缺少值"
+                $result.target = [string]$items[++$i]
+                continue
+            }
+            "--out" {
+                Need ($i + 1 -lt $items.Count) "--out 缺少值"
+                $result.out = [string]$items[++$i]
+                continue
+            }
+            "--recommendations" {
+                Need ($i + 1 -lt $items.Count) "--recommendations 缺少值"
+                $result.recommendations = [string]$items[++$i]
+                continue
+            }
+            "--apply" {
+                $result.apply = $true
+                continue
+            }
+            "--yes" {
+                $result.yes = $true
+                continue
+            }
+            "--tag" {
+                Need ($i + 1 -lt $items.Count) "--tag 缺少值"
+                $result.tags += [string]$items[++$i]
+                continue
+            }
+            "--notes" {
+                Need ($i + 1 -lt $items.Count) "--notes 缺少值"
+                $result.notes = [string]$items[++$i]
+                continue
+            }
+            default {
+                $positional += $t
+            }
+        }
+    }
+
+    if ($result.action -eq "add") {
+        Need ($positional.Count -ge 2) "添加目标仓需要 name 和 path"
+        $result.name = [string]$positional[0]
+        $result.path = [string]$positional[1]
+    }
+    return [pscustomobject]$result
+}
+
+function Write-AuditTargetsList {
+    $cfg = Load-AuditTargetsConfig
+    $items = @($cfg.targets)
+    if ($items.Count -eq 0) {
+        Write-Host "未登记目标仓。"
+        return
+    }
+    foreach ($t in $items) {
+        $resolved = Resolve-AuditTargetPath ([string]$t.path)
+        $exists = Test-Path -LiteralPath $resolved
+        $enabled = if ($t.PSObject.Properties.Match("enabled").Count -gt 0) { [bool]$t.enabled } else { $true }
+        $enabledText = if ($enabled) { "enabled" } else { "disabled" }
+        Write-Host ("- {0} [{1}] {2} -> {3} exists={4}" -f [string]$t.name, $enabledText, [string]$t.path, $resolved, $exists)
+    }
+}
+
+function Invoke-AuditTargetsScan {
+    param(
+        [string]$Target,
+        [string]$OutDir
+    )
+    throw "审查目标扫描尚未实现。"
+}
+
+function Invoke-AuditRecommendationsApply {
+    param(
+        [string]$RecommendationsPath,
+        [switch]$Apply,
+        [switch]$Yes
+    )
+    throw "审查目标应用尚未实现。"
+}
+
+function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
+    $opts = Parse-AuditTargetsArgs $tokens
+    switch ($opts.action) {
+        "init" {
+            if (Initialize-AuditTargetsConfig) {
+                Write-Host "已创建 audit-targets.json" -ForegroundColor Green
+            }
+            else {
+                Write-Host "audit-targets.json 已存在，未覆盖。" -ForegroundColor Yellow
+            }
+        }
+        "add" {
+            Add-AuditTargetConfigEntry $opts.name $opts.path $opts.tags $opts.notes | Out-Null
+            Write-Host ("已登记目标仓：{0}" -f (Normalize-Name $opts.name)) -ForegroundColor Green
+        }
+        "list" { Write-AuditTargetsList }
+        "scan" { Invoke-AuditTargetsScan -Target $opts.target -OutDir $opts.out | Out-Null }
+        "apply" { Invoke-AuditRecommendationsApply -RecommendationsPath $opts.recommendations -Apply:$opts.apply -Yes:$opts.yes | Out-Null }
+    }
+}
  
  function 打开配置 {
     Need (Test-Path $CfgPath) "缺少配置文件：$CfgPath"
@@ -7389,6 +7527,7 @@ Skills 管理器（极简版，中文菜单）
   - 安装MCP：向 skills.json 登记 MCP 服务（支持 stdio / sse / http），并自动同步
   - 卸载MCP：从 skills.json 移除 MCP 服务，并自动同步
   - 同步MCP：仅重新同步 MCP 配置，不处理技能构建
+  - 审查目标：登记目标仓、生成审查包、应用外层 AI 写入的 recommendations.json
   - 自动更新设置：配置本机计划任务，每周五 20:00 自动执行“更新 + 同步MCP”
   - 打开配置：打开 skills.json 进行手工检查或编辑
   - 解除关联：移除 link 模式下创建的目录关联
@@ -7568,6 +7707,8 @@ if ($MyInvocation.InvocationName -ne '.') {
                 卸载MCP $mcpTokens
             }
             "mcp-sync" { 同步MCP }
+            "审查目标" { Invoke-AuditTargetsCommand (Merge-FilterAndArgs $Filter $args) }
+            "audit-targets" { Invoke-AuditTargetsCommand (Merge-FilterAndArgs $Filter $args) }
             "打开配置" { 打开配置 }
             "解除关联" { 解除关联 }
             "清理备份" { 清理备份 }

@@ -197,6 +197,7 @@ Skills 管理器（极简版，中文菜单）
   - 安装MCP：向 skills.json 登记 MCP 服务（支持 stdio / sse / http），并自动同步
   - 卸载MCP：从 skills.json 移除 MCP 服务，并自动同步
   - 同步MCP：仅重新同步 MCP 配置，不处理技能构建
+  - 审查目标：登记目标仓、生成审查包、应用外层 AI 写入的 recommendations.json
   - 自动更新设置：配置本机计划任务，每周五 20:00 自动执行“更新 + 同步MCP”
   - 打开配置：打开 skills.json 进行手工检查或编辑
   - 解除关联：移除 link 模式下创建的目录关联
