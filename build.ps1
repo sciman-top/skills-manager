@@ -12,6 +12,7 @@ $Files = @(
     "Commands/Install.ps1",
     "Commands/Update.ps1",
     "Commands/Mcp.ps1",
+    "Commands/AuditTargets.ps1",
     "Commands/Utils.ps1",
     "Main.ps1"
 )

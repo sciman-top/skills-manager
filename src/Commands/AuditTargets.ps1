@@ -1,0 +1,803 @@
+function Get-AuditTargetsConfigPath {
+    return (Join-Path $script:Root "audit-targets.json")
+}
+
+function New-DefaultAuditTargetsConfig {
+    return [pscustomobject]@{
+        version = 1
+        path_base = "skills_manager_root"
+        targets = @()
+    }
+}
+
+function Save-AuditTargetsConfig($cfg) {
+    $json = $cfg | ConvertTo-Json -Depth 20
+    Set-ContentUtf8 (Get-AuditTargetsConfigPath) $json
+}
+
+function Initialize-AuditTargetsConfig {
+    $path = Get-AuditTargetsConfigPath
+    if (Test-Path -LiteralPath $path -PathType Leaf) { return $false }
+    Save-AuditTargetsConfig (New-DefaultAuditTargetsConfig)
+    return $true
+}
+
+function Load-AuditTargetsConfig {
+    $path = Get-AuditTargetsConfigPath
+    Need (Test-Path -LiteralPath $path -PathType Leaf) "缺少 audit-targets.json，请先运行：./skills.ps1 审查目标 初始化"
+    try {
+        $cfg = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+    }
+    catch {
+        throw ("audit-targets.json 解析失败：{0}" -f $_.Exception.Message)
+    }
+
+    if (-not $cfg.PSObject.Properties.Match("version").Count) {
+        $cfg | Add-Member -NotePropertyName version -NotePropertyValue 1
+    }
+    if (-not $cfg.PSObject.Properties.Match("path_base").Count) {
+        $cfg | Add-Member -NotePropertyName path_base -NotePropertyValue "skills_manager_root"
+    }
+    if (-not $cfg.PSObject.Properties.Match("targets").Count -or $null -eq $cfg.targets) {
+        $cfg | Add-Member -NotePropertyName targets -NotePropertyValue @() -Force
+    }
+
+    Need ([int]$cfg.version -eq 1) "audit-targets.json version 仅支持 1"
+    Need ([string]$cfg.path_base -eq "skills_manager_root") "audit-targets.json path_base 仅支持 skills_manager_root"
+    if (-not (Assert-IsArray $cfg.targets)) { $cfg.targets = @($cfg.targets) }
+    return $cfg
+}
+
+function Resolve-AuditTargetPath([string]$path) {
+    Need (-not [string]::IsNullOrWhiteSpace($path)) "目标仓路径不能为空"
+    $expanded = [Environment]::ExpandEnvironmentVariables($path.Trim())
+    if ($expanded -eq "~" -or $expanded.StartsWith("~\") -or $expanded.StartsWith("~/")) {
+        $userHome = [Environment]::GetFolderPath("UserProfile")
+        if ($expanded.Length -eq 1) {
+            $expanded = $userHome
+        }
+        else {
+            $expanded = Join-Path $userHome $expanded.Substring(2)
+        }
+    }
+    if ([System.IO.Path]::IsPathRooted($expanded)) {
+        return [System.IO.Path]::GetFullPath($expanded)
+    }
+    return [System.IO.Path]::GetFullPath((Join-Path $script:Root $expanded))
+}
+
+function Add-AuditTargetConfigEntry([string]$name, [string]$path, [string[]]$tags = @(), [string]$notes = "") {
+    Initialize-AuditTargetsConfig | Out-Null
+    $cfg = Load-AuditTargetsConfig
+    $normName = Normalize-NameWithNotice $name "target 名称"
+    Need (-not [string]::IsNullOrWhiteSpace($normName)) "target 名称不能为空"
+    Need (-not [string]::IsNullOrWhiteSpace($path)) "target path 不能为空"
+
+    $entry = [pscustomobject]@{
+        name = $normName
+        path = $path
+        enabled = $true
+        tags = @($tags | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+        notes = $notes
+    }
+
+    $existing = @($cfg.targets | Where-Object { $_.name -eq $normName })
+    if ($existing.Count -gt 0) {
+        $existing[0].path = $entry.path
+        $existing[0].enabled = $entry.enabled
+        $existing[0].tags = $entry.tags
+        $existing[0].notes = $entry.notes
+    }
+    else {
+        $cfg.targets += $entry
+    }
+    Save-AuditTargetsConfig $cfg
+    return $cfg
+}
+
+function Parse-AuditTargetsArgs([string[]]$tokens) {
+    $result = [ordered]@{
+        action = "list"
+        name = $null
+        path = $null
+        target = $null
+        out = $null
+        recommendations = $null
+        apply = $false
+        yes = $false
+        tags = @()
+        notes = ""
+    }
+
+    $items = @($tokens | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    if ($items.Count -gt 0) {
+        $head = ([string]$items[0]).ToLowerInvariant()
+        switch ($head) {
+            "初始化" { $result.action = "init"; $items = @($items | Select-Object -Skip 1) }
+            "init" { $result.action = "init"; $items = @($items | Select-Object -Skip 1) }
+            "添加" { $result.action = "add"; $items = @($items | Select-Object -Skip 1) }
+            "add" { $result.action = "add"; $items = @($items | Select-Object -Skip 1) }
+            "列表" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
+            "list" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
+            "扫描" { $result.action = "scan"; $items = @($items | Select-Object -Skip 1) }
+            "scan" { $result.action = "scan"; $items = @($items | Select-Object -Skip 1) }
+            "应用" { $result.action = "apply"; $items = @($items | Select-Object -Skip 1) }
+            "apply" { $result.action = "apply"; $items = @($items | Select-Object -Skip 1) }
+            default { throw ("未知审查目标子命令：{0}" -f $items[0]) }
+        }
+    }
+
+    $positional = @()
+    for ($i = 0; $i -lt $items.Count; $i++) {
+        $t = [string]$items[$i]
+        $key = $t.ToLowerInvariant()
+        switch ($key) {
+            "--target" {
+                Need ($i + 1 -lt $items.Count) "--target 缺少值"
+                $result.target = [string]$items[++$i]
+                continue
+            }
+            "--out" {
+                Need ($i + 1 -lt $items.Count) "--out 缺少值"
+                $result.out = [string]$items[++$i]
+                continue
+            }
+            "--recommendations" {
+                Need ($i + 1 -lt $items.Count) "--recommendations 缺少值"
+                $result.recommendations = [string]$items[++$i]
+                continue
+            }
+            "--apply" {
+                $result.apply = $true
+                continue
+            }
+            "--yes" {
+                $result.yes = $true
+                continue
+            }
+            "--tag" {
+                Need ($i + 1 -lt $items.Count) "--tag 缺少值"
+                $result.tags += [string]$items[++$i]
+                continue
+            }
+            "--notes" {
+                Need ($i + 1 -lt $items.Count) "--notes 缺少值"
+                $result.notes = [string]$items[++$i]
+                continue
+            }
+            default {
+                $positional += $t
+            }
+        }
+    }
+
+    if ($result.action -eq "add") {
+        Need ($positional.Count -ge 2) "添加目标仓需要 name 和 path"
+        $result.name = [string]$positional[0]
+        $result.path = [string]$positional[1]
+    }
+    return [pscustomobject]$result
+}
+
+function Write-AuditTargetsList {
+    $cfg = Load-AuditTargetsConfig
+    $items = @($cfg.targets)
+    if ($items.Count -eq 0) {
+        Write-Host "未登记目标仓。"
+        return
+    }
+    foreach ($t in $items) {
+        $resolved = Resolve-AuditTargetPath ([string]$t.path)
+        $exists = Test-Path -LiteralPath $resolved
+        $enabled = if ($t.PSObject.Properties.Match("enabled").Count -gt 0) { [bool]$t.enabled } else { $true }
+        $enabledText = if ($enabled) { "enabled" } else { "disabled" }
+        Write-Host ("- {0} [{1}] {2} -> {3} exists={4}" -f [string]$t.name, $enabledText, [string]$t.path, $resolved, $exists)
+    }
+}
+
+function Get-AuditRunId {
+    return (Get-Date -Format "yyyyMMdd-HHmmss")
+}
+
+function Get-AuditReportRoot([string]$runId) {
+    return (Join-Path $script:Root (Join-Path "reports\skill-audit" $runId))
+}
+
+function Test-AuditFile([string]$root, [string]$relative) {
+    return (Test-Path -LiteralPath (Join-Path $root $relative) -PathType Leaf)
+}
+
+function Add-AuditUniqueValue([System.Collections.Generic.List[string]]$items, [string]$value) {
+    if ([string]::IsNullOrWhiteSpace($value)) { return }
+    if (-not $items.Contains($value)) { $items.Add($value) | Out-Null }
+}
+
+function Get-AuditPackageJson([string]$root) {
+    $path = Join-Path $root "package.json"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    try { return (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json) }
+    catch { return $null }
+}
+
+function Get-AuditPackagePropertyNames($obj, [string]$propertyName) {
+    if ($null -eq $obj) { return @() }
+    if (-not $obj.PSObject.Properties.Match($propertyName).Count) { return @() }
+    $value = $obj.$propertyName
+    if ($null -eq $value) { return @() }
+    return @($value.PSObject.Properties | ForEach-Object { $_.Name })
+}
+
+function Get-AuditPackageScriptNames($pkg) {
+    if ($null -eq $pkg) { return @() }
+    if (-not $pkg.PSObject.Properties.Match("scripts").Count -or $null -eq $pkg.scripts) { return @() }
+    return @($pkg.scripts.PSObject.Properties | ForEach-Object { $_.Name })
+}
+
+function Get-AuditGitInfo([string]$resolvedPath) {
+    $info = [ordered]@{
+        is_repo = $false
+        branch = ""
+        commit = ""
+        dirty = $false
+    }
+    if (-not (Test-Path -LiteralPath $resolvedPath -PathType Container)) { return [pscustomobject]$info }
+
+    Push-Location $resolvedPath
+    try {
+        $inside = (& git rev-parse --is-inside-work-tree 2>$null)
+        if ($LASTEXITCODE -eq 0 -and [string]$inside -eq "true") {
+            $info.is_repo = $true
+            $branch = (& git rev-parse --abbrev-ref HEAD 2>$null)
+            if ($LASTEXITCODE -eq 0) { $info.branch = ([string]$branch).Trim() }
+            $commit = (& git rev-parse HEAD 2>$null)
+            if ($LASTEXITCODE -eq 0) { $info.commit = ([string]$commit).Trim() }
+            $status = @(& git status --porcelain 2>$null)
+            if ($LASTEXITCODE -eq 0) { $info.dirty = ($status.Count -gt 0) }
+        }
+    }
+    finally {
+        Pop-Location
+    }
+    return [pscustomobject]$info
+}
+
+function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$inputPath) {
+    $exists = Test-Path -LiteralPath $resolvedPath -PathType Container
+    $risks = New-Object System.Collections.Generic.List[string]
+    $languages = New-Object System.Collections.Generic.List[string]
+    $packageManagers = New-Object System.Collections.Generic.List[string]
+    $frameworks = New-Object System.Collections.Generic.List[string]
+    $buildCommands = New-Object System.Collections.Generic.List[string]
+    $testCommands = New-Object System.Collections.Generic.List[string]
+    $agentRuleFiles = New-Object System.Collections.Generic.List[string]
+    $notableFiles = New-Object System.Collections.Generic.List[string]
+
+    if (-not $exists) {
+        Add-AuditUniqueValue $risks "target_missing"
+    }
+
+    $gitInfo = Get-AuditGitInfo $resolvedPath
+    if ($exists -and -not $gitInfo.is_repo) {
+        Add-AuditUniqueValue $risks "not_a_git_repo"
+    }
+    if ($gitInfo.dirty) {
+        Add-AuditUniqueValue $risks "git_dirty"
+    }
+
+    if ($exists) {
+        $pkg = Get-AuditPackageJson $resolvedPath
+        if ($pkg) {
+            Add-AuditUniqueValue $packageManagers "npm"
+            Add-AuditUniqueValue $languages "javascript"
+            Add-AuditUniqueValue $notableFiles "package.json"
+
+            $deps = @()
+            $deps += Get-AuditPackagePropertyNames $pkg "dependencies"
+            $deps += Get-AuditPackagePropertyNames $pkg "devDependencies"
+            foreach ($dep in $deps) {
+                switch -Regex ($dep) {
+                    "^vite$" { Add-AuditUniqueValue $frameworks "vite" }
+                    "^next$" { Add-AuditUniqueValue $frameworks "nextjs" }
+                    "^react$" { Add-AuditUniqueValue $frameworks "react" }
+                    "^vue$" { Add-AuditUniqueValue $frameworks "vue" }
+                    "^svelte$" { Add-AuditUniqueValue $frameworks "svelte" }
+                    "^@playwright/test$" { Add-AuditUniqueValue $frameworks "playwright" }
+                }
+            }
+
+            $scripts = Get-AuditPackageScriptNames $pkg
+            if ($scripts -contains "build") { Add-AuditUniqueValue $buildCommands "npm run build" }
+            if ($scripts -contains "test") { Add-AuditUniqueValue $testCommands "npm test" }
+        }
+
+        if (Test-AuditFile $resolvedPath "pnpm-lock.yaml") { Add-AuditUniqueValue $packageManagers "pnpm"; Add-AuditUniqueValue $notableFiles "pnpm-lock.yaml" }
+        if (Test-AuditFile $resolvedPath "yarn.lock") { Add-AuditUniqueValue $packageManagers "yarn"; Add-AuditUniqueValue $notableFiles "yarn.lock" }
+        if (Test-AuditFile $resolvedPath "package-lock.json") { Add-AuditUniqueValue $packageManagers "npm"; Add-AuditUniqueValue $notableFiles "package-lock.json" }
+        if (Test-AuditFile $resolvedPath "pyproject.toml") { Add-AuditUniqueValue $languages "python"; Add-AuditUniqueValue $notableFiles "pyproject.toml" }
+        if (Test-AuditFile $resolvedPath "requirements.txt") { Add-AuditUniqueValue $languages "python"; Add-AuditUniqueValue $notableFiles "requirements.txt" }
+        if (Test-AuditFile $resolvedPath "uv.lock") { Add-AuditUniqueValue $packageManagers "uv"; Add-AuditUniqueValue $notableFiles "uv.lock" }
+        if (Test-AuditFile $resolvedPath "go.mod") { Add-AuditUniqueValue $languages "go"; Add-AuditUniqueValue $notableFiles "go.mod" }
+        if (Test-AuditFile $resolvedPath "Cargo.toml") { Add-AuditUniqueValue $languages "rust"; Add-AuditUniqueValue $notableFiles "Cargo.toml" }
+
+        foreach ($viteFile in @("vite.config.js", "vite.config.ts", "vite.config.mjs", "vite.config.mts")) {
+            if (Test-AuditFile $resolvedPath $viteFile) {
+                Add-AuditUniqueValue $frameworks "vite"
+                Add-AuditUniqueValue $notableFiles $viteFile
+            }
+        }
+        foreach ($nextFile in @("next.config.js", "next.config.ts", "next.config.mjs")) {
+            if (Test-AuditFile $resolvedPath $nextFile) {
+                Add-AuditUniqueValue $frameworks "nextjs"
+                Add-AuditUniqueValue $notableFiles $nextFile
+            }
+        }
+        foreach ($playwrightFile in @("playwright.config.js", "playwright.config.ts", "playwright.config.mjs")) {
+            if (Test-AuditFile $resolvedPath $playwrightFile) {
+                Add-AuditUniqueValue $frameworks "playwright"
+                Add-AuditUniqueValue $notableFiles $playwrightFile
+            }
+        }
+        foreach ($ruleFile in @("AGENTS.md", "CLAUDE.md", "GEMINI.md")) {
+            if (Test-AuditFile $resolvedPath $ruleFile) {
+                Add-AuditUniqueValue $agentRuleFiles $ruleFile
+                Add-AuditUniqueValue $notableFiles $ruleFile
+            }
+        }
+        $slnFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.sln" -File -ErrorAction SilentlyContinue)
+        $csprojFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.csproj" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 10)
+        if ($slnFiles.Count -gt 0 -or $csprojFiles.Count -gt 0) { Add-AuditUniqueValue $languages "dotnet" }
+    }
+
+    return [pscustomobject]([ordered]@{
+        schema_version = 1
+        scanned_at = (Get-Date).ToString("o")
+        target = [ordered]@{
+            name = $targetName
+            path = $inputPath
+            resolved_path = $resolvedPath
+            exists = $exists
+        }
+        git = $gitInfo
+        detected = [ordered]@{
+            languages = @($languages)
+            package_managers = @($packageManagers)
+            frameworks = @($frameworks)
+            build_commands = @($buildCommands)
+            test_commands = @($testCommands)
+            agent_rule_files = @($agentRuleFiles)
+            notable_files = @($notableFiles)
+        }
+        risks = @($risks)
+    })
+}
+
+function Write-AuditJsonFile([string]$path, $data) {
+    EnsureDir (Split-Path $path -Parent)
+    Set-ContentUtf8 $path ($data | ConvertTo-Json -Depth 40)
+}
+
+function Write-AuditAiBrief([string]$path, $scanData, $installedSkillsPath, $templatePath) {
+    $targetNames = @($scanData | ForEach-Object { $_.target.name })
+    $content = @"
+# Skill Audit Brief
+
+Run ID: $(Split-Path (Split-Path $path -Parent) -Leaf)
+Targets: $($targetNames -join ", ")
+
+Use the generated repo scan JSON and installed skills JSON to decide:
+
+- Which installed skills are appropriate for each target repository.
+- Which installed skills have obvious functional overlap and should be reviewed.
+- Which missing skills are strongly justified for these targets.
+
+External research is intentionally performed by the outer AI agent. Search official documentation, strong community projects, best practices, https://skills.sh/, GitHub Trending, and the find-skills workflow. Write final recommendations to:
+
+$templatePath
+
+Rules:
+
+- New installs require source links, reason, confidence, repo, skill path, ref, and mode.
+- Overlap findings are report-only; do not recommend automatic uninstall.
+- Prefer high-reputation sources and avoid weak duplicate skills.
+- Keep recommendations machine-readable JSON matching the template.
+
+Installed skills JSON: $installedSkillsPath
+"@
+    Set-ContentUtf8 $path $content
+}
+
+function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName) {
+    return [pscustomobject]([ordered]@{
+        schema_version = 1
+        run_id = $runId
+        target = $targetName
+        new_skills = @()
+        overlap_findings = @()
+        do_not_install = @()
+    })
+}
+
+function Get-SkillMetadataFromFile([string]$skillFile) {
+    $meta = [ordered]@{
+        declared_name = ""
+        description = ""
+        trigger_summary = ""
+    }
+    if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) {
+        return [pscustomobject]$meta
+    }
+
+    $lines = @(Get-Content -LiteralPath $skillFile -TotalCount 120 -ErrorAction SilentlyContinue)
+    foreach ($line in $lines) {
+        if ([string]::IsNullOrWhiteSpace($meta.declared_name) -and $line -match "^\s*name:\s*(.+?)\s*$") {
+            $meta.declared_name = $Matches[1].Trim().Trim("'`"")
+        }
+        if ([string]::IsNullOrWhiteSpace($meta.description) -and $line -match "^\s*description:\s*(.+?)\s*$") {
+            $meta.description = $Matches[1].Trim().Trim("'`"")
+        }
+        if ([string]::IsNullOrWhiteSpace($meta.trigger_summary) -and $line -match "(?i)trigger|use when|when to use|使用场景") {
+            $meta.trigger_summary = $line.Trim()
+        }
+    }
+    return [pscustomobject]$meta
+}
+
+function Resolve-InstalledSkillLocalPath($cfg, $mapping) {
+    if ($null -eq $mapping) { return "" }
+    $vendor = [string]$mapping.vendor
+    $from = [string]$mapping.from
+    if ($vendor -eq "manual") {
+        $imp = @($cfg.imports | Where-Object { $_.name -eq $from } | Select-Object -First 1)
+        if ($imp.Count -eq 0) { return (Join-Path $script:ImportDir $from) }
+        $skillPath = Normalize-SkillPath ([string]$imp[0].skill)
+        if ([string]::IsNullOrWhiteSpace($skillPath) -or $skillPath -eq ".") {
+            return (Join-Path $script:ImportDir $from)
+        }
+        return (Join-Path (Join-Path $script:ImportDir $from) $skillPath)
+    }
+    if ($vendor -eq "overrides") {
+        return (Join-Path $script:OverridesDir $from)
+    }
+    return (Join-Path (VendorPath $vendor) $from)
+}
+
+function Get-InstalledSkillFacts($cfg = $null) {
+    if ($null -eq $cfg) { $cfg = LoadCfg }
+    $facts = @()
+    foreach ($m in @($cfg.mappings)) {
+        if ($null -eq $m) { continue }
+        if (-not (Should-SyncMappingToAgent $m)) { continue }
+        $vendor = [string]$m.vendor
+        $from = [string]$m.from
+        $to = [string]$m.to
+        $localPath = Resolve-InstalledSkillLocalPath $cfg $m
+        $skillFile = Join-Path $localPath "SKILL.md"
+        $meta = Get-SkillMetadataFromFile $skillFile
+
+        $repo = ""
+        $ref = ""
+        $skillPath = $from
+        if ($vendor -eq "manual") {
+            $imp = @($cfg.imports | Where-Object { $_.name -eq $from } | Select-Object -First 1)
+            if ($imp.Count -gt 0) {
+                $repo = [string]$imp[0].repo
+                $ref = [string]$imp[0].ref
+                $skillPath = [string]$imp[0].skill
+            }
+        }
+        elseif ($vendor -ne "overrides") {
+            $v = @($cfg.vendors | Where-Object { $_.name -eq $vendor } | Select-Object -First 1)
+            if ($v.Count -gt 0) {
+                $repo = [string]$v[0].repo
+                $ref = [string]$v[0].ref
+            }
+        }
+
+        $facts += [pscustomobject]([ordered]@{
+            name = if ([string]::IsNullOrWhiteSpace($meta.declared_name)) { $to } else { $meta.declared_name }
+            source_kind = $vendor
+            vendor = $vendor
+            from = $from
+            to = $to
+            repo = $repo
+            ref = $ref
+            skill_path = $skillPath
+            declared_name = $meta.declared_name
+            description = $meta.description
+            trigger_summary = $meta.trigger_summary
+            local_path = $localPath
+        })
+    }
+    return @($facts)
+}
+
+function Ensure-AuditArrayProperty($obj, [string]$name) {
+    if (-not $obj.PSObject.Properties.Match($name).Count -or $null -eq $obj.$name) {
+        $obj | Add-Member -NotePropertyName $name -NotePropertyValue @() -Force
+    }
+    elseif (-not (Assert-IsArray $obj.$name)) {
+        $obj.$name = @($obj.$name)
+    }
+}
+
+function Assert-AuditRecommendationItem($item) {
+    Need ($null -ne $item) "推荐项不能为空"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.name)) "推荐项缺少 name"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.reason)) ("推荐项缺少 reason：{0}" -f [string]$item.name)
+    Need ($item.PSObject.Properties.Match("install").Count -gt 0 -and $null -ne $item.install) ("推荐项缺少 install：{0}" -f [string]$item.name)
+
+    $install = $item.install
+    Need (-not [string]::IsNullOrWhiteSpace([string]$install.repo)) ("推荐项缺少 install.repo：{0}" -f [string]$item.name)
+    Need (Looks-LikeRepoInput ([string]$install.repo)) ("install.repo 不是有效仓库输入：{0}" -f [string]$install.repo)
+
+    Need ($install.PSObject.Properties.Match("skill").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$install.skill)) ("推荐项缺少 install.skill：{0}" -f [string]$item.name)
+    $skillPath = [string]$install.skill
+    $normalizedSkill = Normalize-SkillPath $skillPath
+    Need (Test-SafeRelativePath $normalizedSkill -AllowDot) ("install.skill 路径非法：{0}" -f $skillPath)
+    $install.skill = $normalizedSkill
+
+    Need ($install.PSObject.Properties.Match("mode").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$install.mode)) ("推荐项缺少 install.mode：{0}" -f [string]$item.name)
+    $mode = [string]$install.mode
+    $mode = $mode.ToLowerInvariant()
+    Need ($mode -eq "manual" -or $mode -eq "vendor") ("install.mode 仅支持 manual 或 vendor：{0}" -f $mode)
+    $install.mode = $mode
+
+    $confidence = ([string]$item.confidence).ToLowerInvariant()
+    Need ($confidence -eq "low" -or $confidence -eq "medium" -or $confidence -eq "high") ("confidence 仅支持 low/medium/high：{0}" -f [string]$item.confidence)
+    $item.confidence = $confidence
+
+    Ensure-AuditArrayProperty $item "sources"
+    Need (@($item.sources).Count -gt 0) ("推荐项至少需要一个 source：{0}" -f [string]$item.name)
+}
+
+function Load-AuditRecommendations([string]$path) {
+    Need (-not [string]::IsNullOrWhiteSpace($path)) "--recommendations 缺少值"
+    Need (Test-Path -LiteralPath $path -PathType Leaf) ("recommendations 文件不存在：{0}" -f $path)
+    try {
+        $rec = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+    }
+    catch {
+        throw ("recommendations JSON 解析失败：{0}" -f $_.Exception.Message)
+    }
+
+    Need ([int]$rec.schema_version -eq 1) "recommendations.schema_version 仅支持 1"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$rec.run_id)) "recommendations 缺少 run_id"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$rec.target)) "recommendations 缺少 target"
+    Ensure-AuditArrayProperty $rec "new_skills"
+    Ensure-AuditArrayProperty $rec "overlap_findings"
+    Ensure-AuditArrayProperty $rec "do_not_install"
+
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in @($rec.new_skills)) {
+        Assert-AuditRecommendationItem $item
+        $install = $item.install
+        $key = "{0}|{1}|{2}" -f (Normalize-RepoUrl ([string]$install.repo)), (Normalize-SkillPath ([string]$install.skill)), ([string]$install.mode)
+        Need ($seen.Add($key)) ("重复推荐安装项：{0}" -f $key)
+    }
+    return $rec
+}
+
+function New-AuditInstallPlan($recommendations, $cfg = $null) {
+    $items = @()
+    foreach ($item in @($recommendations.new_skills)) {
+        $install = $item.install
+        $tokens = @([string]$install.repo, "--skill", [string]$install.skill)
+        if ($install.PSObject.Properties.Match("ref").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$install.ref)) {
+            $tokens += @("--ref", [string]$install.ref)
+        }
+        if ($install.PSObject.Properties.Match("mode").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$install.mode)) {
+            $tokens += @("--mode", [string]$install.mode)
+        }
+        $items += [pscustomobject]([ordered]@{
+            name = [string]$item.name
+            reason = [string]$item.reason
+            confidence = [string]$item.confidence
+            sources = @($item.sources)
+            tokens = @($tokens)
+            status = "planned"
+        })
+    }
+    return [pscustomobject]([ordered]@{
+        schema_version = 1
+        run_id = [string]$recommendations.run_id
+        target = [string]$recommendations.target
+        items = @($items)
+        overlap_findings = @($recommendations.overlap_findings)
+        do_not_install = @($recommendations.do_not_install)
+    })
+}
+
+function Get-AuditApplyReportPath([string]$recommendationsPath) {
+    $dir = Split-Path $recommendationsPath -Parent
+    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
+    return (Join-Path $dir "apply-report.json")
+}
+
+function Ensure-AuditNewManualImportsMapped($beforeCfg) {
+    $before = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($i in @($beforeCfg.imports)) {
+        if ($null -eq $i) { continue }
+        $before.Add([string]$i.name) | Out-Null
+    }
+
+    $cfg = LoadCfg
+    $existingMappings = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($m in @($cfg.mappings)) {
+        if ($null -eq $m) { continue }
+        $existingMappings.Add(("{0}|{1}" -f [string]$m.vendor, [string]$m.from)) | Out-Null
+    }
+
+    $changed = $false
+    foreach ($i in @($cfg.imports)) {
+        if ($null -eq $i) { continue }
+        $mode = if ($i.PSObject.Properties.Match("mode").Count -gt 0) { [string]$i.mode } else { "manual" }
+        if ($mode -ne "manual") { continue }
+        $name = [string]$i.name
+        if ($before.Contains($name)) { continue }
+        $key = "manual|{0}" -f $name
+        if ($existingMappings.Contains($key)) { continue }
+        $cfg.mappings += @{ vendor = "manual"; from = $name; to = $name }
+        $existingMappings.Add($key) | Out-Null
+        $changed = $true
+    }
+    if ($changed) { SaveCfg $cfg }
+    return $changed
+}
+
+function Invoke-AuditTargetsScan {
+    param(
+        [string]$Target,
+        [string]$OutDir
+    )
+    $cfg = Load-AuditTargetsConfig
+    $targets = @($cfg.targets)
+    if (-not [string]::IsNullOrWhiteSpace($Target)) {
+        $targets = @($targets | Where-Object { $_.name -eq (Normalize-Name $Target) })
+        Need ($targets.Count -gt 0) ("未找到目标仓：{0}" -f $Target)
+    }
+    else {
+        $targets = @($targets | Where-Object {
+                if ($_.PSObject.Properties.Match("enabled").Count -eq 0) { return $true }
+                return [bool]$_.enabled
+            })
+    }
+    Need ($targets.Count -gt 0) "没有可扫描的目标仓。"
+
+    $runId = Get-AuditRunId
+    $reportRoot = if ([string]::IsNullOrWhiteSpace($OutDir)) {
+        Get-AuditReportRoot $runId
+    }
+    else {
+        Resolve-AuditTargetPath $OutDir
+    }
+    EnsureDir $reportRoot
+
+    $scans = @()
+    foreach ($t in $targets) {
+        $resolved = Resolve-AuditTargetPath ([string]$t.path)
+        $scans += New-AuditRepoScan ([string]$t.name) $resolved ([string]$t.path)
+    }
+
+    if ($scans.Count -eq 1) {
+        Write-AuditJsonFile (Join-Path $reportRoot "repo-scan.json") $scans[0]
+    }
+    else {
+        Write-AuditJsonFile (Join-Path $reportRoot "repo-scans.json") ([pscustomobject]@{ schema_version = 1; run_id = $runId; scans = @($scans) })
+    }
+
+    $installedPath = Join-Path $reportRoot "installed-skills.json"
+    $installedSkills = @()
+    try { $installedSkills = @(Get-InstalledSkillFacts) } catch { $installedSkills = @() }
+    Write-AuditJsonFile $installedPath ([pscustomobject]@{ schema_version = 1; skills = @($installedSkills) })
+
+    $templatePath = Join-Path $reportRoot "recommendations.template.json"
+    $templateTarget = if ($scans.Count -eq 1) { [string]$scans[0].target.name } else { "*" }
+    Write-AuditJsonFile $templatePath (New-AuditRecommendationsTemplate $runId $templateTarget)
+
+    Write-AuditAiBrief (Join-Path $reportRoot "ai-brief.md") $scans $installedPath $templatePath
+    Write-Host ("审查包已生成：{0}" -f $reportRoot) -ForegroundColor Green
+    return [pscustomobject]@{
+        run_id = $runId
+        path = $reportRoot
+        scans = @($scans)
+    }
+}
+
+function Invoke-AuditRecommendationsApply {
+    param(
+        [string]$RecommendationsPath,
+        [switch]$Apply,
+        [switch]$Yes
+    )
+    if ($Apply -and -not $Yes) {
+        throw "执行安装必须同时传入 --apply --yes"
+    }
+    $rec = Load-AuditRecommendations $RecommendationsPath
+    $plan = New-AuditInstallPlan $rec
+    $report = [ordered]@{
+        schema_version = 1
+        run_id = [string]$rec.run_id
+        target = [string]$rec.target
+        mode = if ($Apply) { "apply" } else { "dry_run" }
+        success = $true
+        items = @($plan.items)
+        overlap_findings = @($plan.overlap_findings)
+        do_not_install = @($plan.do_not_install)
+        rollback = @()
+    }
+
+    if (-not $Apply) {
+        foreach ($item in @($plan.items)) {
+            Write-Host ("DRYRUN install: {0}" -f ($item.tokens -join " "))
+        }
+        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+        return [pscustomobject]$report
+    }
+
+    $applied = @()
+    try {
+        foreach ($item in @($plan.items)) {
+            $commandText = ".\skills.ps1 add {0}" -f ($item.tokens -join " ")
+            try {
+                Write-Host ("Installing recommended skill: {0}" -f $item.name) -ForegroundColor Cyan
+                $beforeCfg = LoadCfg
+                $ok = Add-ImportFromArgs $item.tokens -NoBuild
+                if (-not $ok) { throw ("推荐技能安装失败：{0}" -f $item.name) }
+                Ensure-AuditNewManualImportsMapped $beforeCfg | Out-Null
+                $item.status = "installed"
+                $item | Add-Member -NotePropertyName command -NotePropertyValue $commandText -Force
+                $applied += $item
+                $report.rollback += ("Remove matching imports/mappings for recommended skill '{0}' if rollback is required." -f $item.name)
+            }
+            catch {
+                $item.status = "failed"
+                $item | Add-Member -NotePropertyName command -NotePropertyValue $commandText -Force
+                $item | Add-Member -NotePropertyName error -NotePropertyValue $_.Exception.Message -Force
+                $report.success = $false
+                $report.items = @($plan.items)
+                Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+                throw
+            }
+        }
+
+        构建生效
+        $doctorResult = Invoke-Doctor @("--strict", "--threshold-ms", "8000")
+        if ($doctorResult -and $doctorResult.PSObject.Properties.Match("pass").Count -gt 0 -and -not [bool]$doctorResult.pass) {
+            $report.success = $false
+            $report.items = @($plan.items)
+            Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+            throw "doctor --strict failed after applying recommendations"
+        }
+
+        $report.items = @($plan.items)
+        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+        return [pscustomobject]$report
+    }
+    catch {
+        if ($report.success) { $report.success = $false }
+        $report.items = @($plan.items)
+        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+        throw
+    }
+}
+
+function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
+    $opts = Parse-AuditTargetsArgs $tokens
+    switch ($opts.action) {
+        "init" {
+            if (Initialize-AuditTargetsConfig) {
+                Write-Host "已创建 audit-targets.json" -ForegroundColor Green
+            }
+            else {
+                Write-Host "audit-targets.json 已存在，未覆盖。" -ForegroundColor Yellow
+            }
+        }
+        "add" {
+            Add-AuditTargetConfigEntry $opts.name $opts.path $opts.tags $opts.notes | Out-Null
+            Write-Host ("已登记目标仓：{0}" -f (Normalize-Name $opts.name)) -ForegroundColor Green
+        }
+        "list" { Write-AuditTargetsList }
+        "scan" { Invoke-AuditTargetsScan -Target $opts.target -OutDir $opts.out | Out-Null }
+        "apply" { Invoke-AuditRecommendationsApply -RecommendationsPath $opts.recommendations -Apply:$opts.apply -Yes:$opts.yes | Out-Null }
+    }
+}
