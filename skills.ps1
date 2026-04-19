@@ -7290,12 +7290,283 @@ function Write-AuditTargetsList {
     }
 }
 
+function Get-AuditRunId {
+    return (Get-Date -Format "yyyyMMdd-HHmmss")
+}
+
+function Get-AuditReportRoot([string]$runId) {
+    return (Join-Path $script:Root (Join-Path "reports\skill-audit" $runId))
+}
+
+function Test-AuditFile([string]$root, [string]$relative) {
+    return (Test-Path -LiteralPath (Join-Path $root $relative) -PathType Leaf)
+}
+
+function Add-AuditUniqueValue([System.Collections.Generic.List[string]]$items, [string]$value) {
+    if ([string]::IsNullOrWhiteSpace($value)) { return }
+    if (-not $items.Contains($value)) { $items.Add($value) | Out-Null }
+}
+
+function Get-AuditPackageJson([string]$root) {
+    $path = Join-Path $root "package.json"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    try { return (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json) }
+    catch { return $null }
+}
+
+function Get-AuditPackagePropertyNames($obj, [string]$propertyName) {
+    if ($null -eq $obj) { return @() }
+    if (-not $obj.PSObject.Properties.Match($propertyName).Count) { return @() }
+    $value = $obj.$propertyName
+    if ($null -eq $value) { return @() }
+    return @($value.PSObject.Properties | ForEach-Object { $_.Name })
+}
+
+function Get-AuditPackageScriptNames($pkg) {
+    if ($null -eq $pkg) { return @() }
+    if (-not $pkg.PSObject.Properties.Match("scripts").Count -or $null -eq $pkg.scripts) { return @() }
+    return @($pkg.scripts.PSObject.Properties | ForEach-Object { $_.Name })
+}
+
+function Get-AuditGitInfo([string]$resolvedPath) {
+    $info = [ordered]@{
+        is_repo = $false
+        branch = ""
+        commit = ""
+        dirty = $false
+    }
+    if (-not (Test-Path -LiteralPath $resolvedPath -PathType Container)) { return [pscustomobject]$info }
+
+    Push-Location $resolvedPath
+    try {
+        $inside = (& git rev-parse --is-inside-work-tree 2>$null)
+        if ($LASTEXITCODE -eq 0 -and [string]$inside -eq "true") {
+            $info.is_repo = $true
+            $branch = (& git rev-parse --abbrev-ref HEAD 2>$null)
+            if ($LASTEXITCODE -eq 0) { $info.branch = ([string]$branch).Trim() }
+            $commit = (& git rev-parse HEAD 2>$null)
+            if ($LASTEXITCODE -eq 0) { $info.commit = ([string]$commit).Trim() }
+            $status = @(& git status --porcelain 2>$null)
+            if ($LASTEXITCODE -eq 0) { $info.dirty = ($status.Count -gt 0) }
+        }
+    }
+    finally {
+        Pop-Location
+    }
+    return [pscustomobject]$info
+}
+
+function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$inputPath) {
+    $exists = Test-Path -LiteralPath $resolvedPath -PathType Container
+    $risks = New-Object System.Collections.Generic.List[string]
+    $languages = New-Object System.Collections.Generic.List[string]
+    $packageManagers = New-Object System.Collections.Generic.List[string]
+    $frameworks = New-Object System.Collections.Generic.List[string]
+    $buildCommands = New-Object System.Collections.Generic.List[string]
+    $testCommands = New-Object System.Collections.Generic.List[string]
+    $agentRuleFiles = New-Object System.Collections.Generic.List[string]
+    $notableFiles = New-Object System.Collections.Generic.List[string]
+
+    if (-not $exists) {
+        Add-AuditUniqueValue $risks "target_missing"
+    }
+
+    $gitInfo = Get-AuditGitInfo $resolvedPath
+    if ($exists -and -not $gitInfo.is_repo) {
+        Add-AuditUniqueValue $risks "not_a_git_repo"
+    }
+    if ($gitInfo.dirty) {
+        Add-AuditUniqueValue $risks "git_dirty"
+    }
+
+    if ($exists) {
+        $pkg = Get-AuditPackageJson $resolvedPath
+        if ($pkg) {
+            Add-AuditUniqueValue $packageManagers "npm"
+            Add-AuditUniqueValue $languages "javascript"
+            Add-AuditUniqueValue $notableFiles "package.json"
+
+            $deps = @()
+            $deps += Get-AuditPackagePropertyNames $pkg "dependencies"
+            $deps += Get-AuditPackagePropertyNames $pkg "devDependencies"
+            foreach ($dep in $deps) {
+                switch -Regex ($dep) {
+                    "^vite$" { Add-AuditUniqueValue $frameworks "vite" }
+                    "^next$" { Add-AuditUniqueValue $frameworks "nextjs" }
+                    "^react$" { Add-AuditUniqueValue $frameworks "react" }
+                    "^vue$" { Add-AuditUniqueValue $frameworks "vue" }
+                    "^svelte$" { Add-AuditUniqueValue $frameworks "svelte" }
+                    "^@playwright/test$" { Add-AuditUniqueValue $frameworks "playwright" }
+                }
+            }
+
+            $scripts = Get-AuditPackageScriptNames $pkg
+            if ($scripts -contains "build") { Add-AuditUniqueValue $buildCommands "npm run build" }
+            if ($scripts -contains "test") { Add-AuditUniqueValue $testCommands "npm test" }
+        }
+
+        if (Test-AuditFile $resolvedPath "pnpm-lock.yaml") { Add-AuditUniqueValue $packageManagers "pnpm"; Add-AuditUniqueValue $notableFiles "pnpm-lock.yaml" }
+        if (Test-AuditFile $resolvedPath "yarn.lock") { Add-AuditUniqueValue $packageManagers "yarn"; Add-AuditUniqueValue $notableFiles "yarn.lock" }
+        if (Test-AuditFile $resolvedPath "package-lock.json") { Add-AuditUniqueValue $packageManagers "npm"; Add-AuditUniqueValue $notableFiles "package-lock.json" }
+        if (Test-AuditFile $resolvedPath "pyproject.toml") { Add-AuditUniqueValue $languages "python"; Add-AuditUniqueValue $notableFiles "pyproject.toml" }
+        if (Test-AuditFile $resolvedPath "requirements.txt") { Add-AuditUniqueValue $languages "python"; Add-AuditUniqueValue $notableFiles "requirements.txt" }
+        if (Test-AuditFile $resolvedPath "uv.lock") { Add-AuditUniqueValue $packageManagers "uv"; Add-AuditUniqueValue $notableFiles "uv.lock" }
+        if (Test-AuditFile $resolvedPath "go.mod") { Add-AuditUniqueValue $languages "go"; Add-AuditUniqueValue $notableFiles "go.mod" }
+        if (Test-AuditFile $resolvedPath "Cargo.toml") { Add-AuditUniqueValue $languages "rust"; Add-AuditUniqueValue $notableFiles "Cargo.toml" }
+
+        foreach ($viteFile in @("vite.config.js", "vite.config.ts", "vite.config.mjs", "vite.config.mts")) {
+            if (Test-AuditFile $resolvedPath $viteFile) {
+                Add-AuditUniqueValue $frameworks "vite"
+                Add-AuditUniqueValue $notableFiles $viteFile
+            }
+        }
+        foreach ($nextFile in @("next.config.js", "next.config.ts", "next.config.mjs")) {
+            if (Test-AuditFile $resolvedPath $nextFile) {
+                Add-AuditUniqueValue $frameworks "nextjs"
+                Add-AuditUniqueValue $notableFiles $nextFile
+            }
+        }
+        foreach ($playwrightFile in @("playwright.config.js", "playwright.config.ts", "playwright.config.mjs")) {
+            if (Test-AuditFile $resolvedPath $playwrightFile) {
+                Add-AuditUniqueValue $frameworks "playwright"
+                Add-AuditUniqueValue $notableFiles $playwrightFile
+            }
+        }
+        foreach ($ruleFile in @("AGENTS.md", "CLAUDE.md", "GEMINI.md")) {
+            if (Test-AuditFile $resolvedPath $ruleFile) {
+                Add-AuditUniqueValue $agentRuleFiles $ruleFile
+                Add-AuditUniqueValue $notableFiles $ruleFile
+            }
+        }
+        $slnFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.sln" -File -ErrorAction SilentlyContinue)
+        $csprojFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.csproj" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 10)
+        if ($slnFiles.Count -gt 0 -or $csprojFiles.Count -gt 0) { Add-AuditUniqueValue $languages "dotnet" }
+    }
+
+    return [pscustomobject]([ordered]@{
+        schema_version = 1
+        scanned_at = (Get-Date).ToString("o")
+        target = [ordered]@{
+            name = $targetName
+            path = $inputPath
+            resolved_path = $resolvedPath
+            exists = $exists
+        }
+        git = $gitInfo
+        detected = [ordered]@{
+            languages = @($languages)
+            package_managers = @($packageManagers)
+            frameworks = @($frameworks)
+            build_commands = @($buildCommands)
+            test_commands = @($testCommands)
+            agent_rule_files = @($agentRuleFiles)
+            notable_files = @($notableFiles)
+        }
+        risks = @($risks)
+    })
+}
+
+function Write-AuditJsonFile([string]$path, $data) {
+    EnsureDir (Split-Path $path -Parent)
+    Set-ContentUtf8 $path ($data | ConvertTo-Json -Depth 40)
+}
+
+function Write-AuditAiBrief([string]$path, $scanData, $installedSkillsPath, $templatePath) {
+    $targetNames = @($scanData | ForEach-Object { $_.target.name })
+    $content = @"
+# Skill Audit Brief
+
+Run ID: $(Split-Path (Split-Path $path -Parent) -Leaf)
+Targets: $($targetNames -join ", ")
+
+Use the generated repo scan JSON and installed skills JSON to decide:
+
+- Which installed skills are appropriate for each target repository.
+- Which installed skills have obvious functional overlap and should be reviewed.
+- Which missing skills are strongly justified for these targets.
+
+External research is intentionally performed by the outer AI agent. Search official documentation, strong community projects, best practices, https://skills.sh/, GitHub Trending, and the find-skills workflow. Write final recommendations to:
+
+`$templatePath`
+
+Rules:
+
+- New installs require source links, reason, confidence, repo, skill path, ref, and mode.
+- Overlap findings are report-only; do not recommend automatic uninstall.
+- Prefer high-reputation sources and avoid weak duplicate skills.
+- Keep recommendations machine-readable JSON matching the template.
+
+Installed skills JSON: `$installedSkillsPath`
+"@
+    Set-ContentUtf8 $path $content
+}
+
+function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName) {
+    return [pscustomobject]([ordered]@{
+        schema_version = 1
+        run_id = $runId
+        target = $targetName
+        new_skills = @()
+        overlap_findings = @()
+        do_not_install = @()
+    })
+}
+
 function Invoke-AuditTargetsScan {
     param(
         [string]$Target,
         [string]$OutDir
     )
-    throw "审查目标扫描尚未实现。"
+    $cfg = Load-AuditTargetsConfig
+    $targets = @($cfg.targets)
+    if (-not [string]::IsNullOrWhiteSpace($Target)) {
+        $targets = @($targets | Where-Object { $_.name -eq (Normalize-Name $Target) })
+        Need ($targets.Count -gt 0) ("未找到目标仓：{0}" -f $Target)
+    }
+    else {
+        $targets = @($targets | Where-Object {
+                if ($_.PSObject.Properties.Match("enabled").Count -eq 0) { return $true }
+                return [bool]$_.enabled
+            })
+    }
+    Need ($targets.Count -gt 0) "没有可扫描的目标仓。"
+
+    $runId = Get-AuditRunId
+    $reportRoot = if ([string]::IsNullOrWhiteSpace($OutDir)) {
+        Get-AuditReportRoot $runId
+    }
+    else {
+        Resolve-AuditTargetPath $OutDir
+    }
+    EnsureDir $reportRoot
+
+    $scans = @()
+    foreach ($t in $targets) {
+        $resolved = Resolve-AuditTargetPath ([string]$t.path)
+        $scans += New-AuditRepoScan ([string]$t.name) $resolved ([string]$t.path)
+    }
+
+    if ($scans.Count -eq 1) {
+        Write-AuditJsonFile (Join-Path $reportRoot "repo-scan.json") $scans[0]
+    }
+    else {
+        Write-AuditJsonFile (Join-Path $reportRoot "repo-scans.json") ([pscustomobject]@{ schema_version = 1; run_id = $runId; scans = @($scans) })
+    }
+
+    $installedPath = Join-Path $reportRoot "installed-skills.json"
+    Write-AuditJsonFile $installedPath ([pscustomobject]@{ schema_version = 1; skills = @() })
+
+    $templatePath = Join-Path $reportRoot "recommendations.template.json"
+    $templateTarget = if ($scans.Count -eq 1) { [string]$scans[0].target.name } else { "*" }
+    Write-AuditJsonFile $templatePath (New-AuditRecommendationsTemplate $runId $templateTarget)
+
+    Write-AuditAiBrief (Join-Path $reportRoot "ai-brief.md") $scans $installedPath $templatePath
+    Write-Host ("审查包已生成：{0}" -f $reportRoot) -ForegroundColor Green
+    return [pscustomobject]@{
+        run_id = $runId
+        path = $reportRoot
+        scans = @($scans)
+    }
 }
 
 function Invoke-AuditRecommendationsApply {

@@ -94,4 +94,37 @@ Describe "Audit Targets" {
             (Parse-AuditTargetsArgs @("应用", "--recommendations", "r.json")).action | Should Be "apply"
         }
     }
+
+    Context "Repository scan" {
+        It "Detects target repo facts from deterministic files" {
+            $repo = Join-Path $TestDrive "target-repo"
+            New-Item -ItemType Directory -Path $repo -Force | Out-Null
+            Push-Location $repo
+            try {
+                git init | Out-Null
+                git config user.email "test@example.com" | Out-Null
+                git config user.name "Test User" | Out-Null
+                Set-Content -Path "package.json" -Value '{"scripts":{"build":"vite build","test":"vitest"},"dependencies":{"vite":"latest","react":"latest"}}'
+                Set-Content -Path "vite.config.ts" -Value "export default {}"
+                Set-Content -Path "AGENTS.md" -Value "rules"
+                git add . | Out-Null
+                git commit -m init | Out-Null
+            }
+            finally {
+                Pop-Location
+            }
+
+            $scan = New-AuditRepoScan "demo" $repo "..\target-repo"
+
+            $scan.target.name | Should Be "demo"
+            $scan.target.exists | Should Be $true
+            $scan.git.is_repo | Should Be $true
+            (@($scan.detected.package_managers) -contains "npm") | Should Be $true
+            (@($scan.detected.frameworks) -contains "vite") | Should Be $true
+            (@($scan.detected.frameworks) -contains "react") | Should Be $true
+            (@($scan.detected.build_commands) -contains "npm run build") | Should Be $true
+            (@($scan.detected.test_commands) -contains "npm test") | Should Be $true
+            (@($scan.detected.agent_rule_files) -contains "AGENTS.md") | Should Be $true
+        }
+    }
 }
