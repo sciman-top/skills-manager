@@ -530,14 +530,14 @@ function Assert-AuditRecommendationItem($item) {
     Need (-not [string]::IsNullOrWhiteSpace([string]$install.repo)) ("推荐项缺少 install.repo：{0}" -f [string]$item.name)
     Need (Looks-LikeRepoInput ([string]$install.repo)) ("install.repo 不是有效仓库输入：{0}" -f [string]$install.repo)
 
-    $skillPath = if ($install.PSObject.Properties.Match("skill").Count -gt 0) { [string]$install.skill } else { "." }
-    if ([string]::IsNullOrWhiteSpace($skillPath)) { $skillPath = "." }
+    Need ($install.PSObject.Properties.Match("skill").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$install.skill)) ("推荐项缺少 install.skill：{0}" -f [string]$item.name)
+    $skillPath = [string]$install.skill
     $normalizedSkill = Normalize-SkillPath $skillPath
     Need (Test-SafeRelativePath $normalizedSkill -AllowDot) ("install.skill 路径非法：{0}" -f $skillPath)
     $install.skill = $normalizedSkill
 
-    $mode = if ($install.PSObject.Properties.Match("mode").Count -gt 0) { [string]$install.mode } else { "manual" }
-    if ([string]::IsNullOrWhiteSpace($mode)) { $mode = "manual" }
+    Need ($install.PSObject.Properties.Match("mode").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$install.mode)) ("推荐项缺少 install.mode：{0}" -f [string]$item.name)
+    $mode = [string]$install.mode
     $mode = $mode.ToLowerInvariant()
     Need ($mode -eq "manual" -or $mode -eq "vendor") ("install.mode 仅支持 manual 或 vendor：{0}" -f $mode)
     $install.mode = $mode

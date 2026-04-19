@@ -180,6 +180,20 @@ Describe "Audit Targets" {
             $thrown | Should Be $true
         }
 
+        It "Rejects recommendation without explicit skill path" {
+            $path = Join-Path $TestDrive "recommendations-missing-skill.json"
+            Set-Content -Path $path -Value '{"schema_version":1,"run_id":"r1","target":"demo","new_skills":[{"name":"a","reason":"r","install":{"repo":"owner/repo","mode":"manual"},"confidence":"high","sources":["local"]}],"overlap_findings":[],"do_not_install":[]}'
+
+            $thrown = $false
+            try {
+                Load-AuditRecommendations $path | Out-Null
+            }
+            catch {
+                $thrown = $true
+            }
+            $thrown | Should Be $true
+        }
+
         It "Builds install plan without modifying config" {
             $path = Join-Path $TestDrive "recommendations-ok.json"
             Set-Content -Path $path -Value '{"schema_version":1,"run_id":"r1","target":"demo","new_skills":[{"name":"a","reason":"r","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["local"]}],"overlap_findings":[],"do_not_install":[]}'
