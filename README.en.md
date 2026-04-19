@@ -2,51 +2,27 @@
 
 [中文](README.md) | English
 
-`skills-manager` is a Windows-first PowerShell tool that turns scattered AI agent skills into one controlled local workspace.
+`skills-manager` is a Windows-first PowerShell tool for assembling AI agent skills from multiple sources into one controlled local workspace.
 
-It is built for the common case where you use multiple agents, pull from multiple skill sources, and do not want to keep cloning, copying, patching, and re-syncing directories by hand.
+Use it when you:
 
-## Positioning
-
-Think of this repository as a local skill assembly layer:
-
-- upstream: aggregate multiple skill repositories
-- local: decide what to enable, import, or override
-- downstream: sync one built output to Claude, Codex, Gemini, Trae, and similar targets
-
-All of that is driven by a single configuration file: `skills.json`.
-
-## Why It Exists
-
-- avoid hand-maintaining several `~/.xxx/skills` directories
-- enable only the skills you actually want
-- keep local patches in `overrides/` instead of editing cached upstream content
-- make the final build output explicit in `agent/`
-- support both junction-based and mirrored sync on Windows
+- run multiple agents such as Claude, Codex, Gemini, or Trae
+- import skills from several repositories
+- want local patches in `overrides/` instead of editing upstream caches
+- want one generated output in `agent/`, then sync it to each CLI target
 
 ## Core Model
 
-- single entry point: `skills.ps1`
-- single config source: `skills.json`
-- single generated output: `agent/`
-
-Source layers:
-
+- `skills.ps1`: single command entry point
+- `skills.json`: single configuration source
+- `agent/`: generated output and sync source
 - `vendors`: full upstream repositories
 - `imports`: targeted skill or subpath imports
-- `overrides`: local patches and custom additions
-
-## overrides Grouping Convention
-
-Use grouped naming under `overrides/` with clear prefixes:
-
-- `custom-*`: fully custom skills
-- `patch-*`: local patched variants of upstream skills
-- `<skill-name>`: direct same-name override when replacement is intentional
-
-Prefer `custom-*` and `patch-*` for clarity. Use `<skill-name>` only when same-name override behavior is required.
+- `overrides`: local patches and custom skills
 
 ## Quick Start
+
+Chinese commands:
 
 ```powershell
 .\skills.ps1
@@ -55,41 +31,79 @@ Prefer `custom-*` and `patch-*` for clarity. Use `<skill-name>` only when same-n
 .\skills.ps1 构建生效
 ```
 
+English aliases:
+
+```powershell
+.\skills.ps1
+.\skills.ps1 doctor --strict
+```
+
+`发现` and `构建生效` currently have no English aliases (N/A).
+
 For first-time setup, start from the interactive menu:
 
 ```powershell
 .\skills.ps1
 ```
 
-Recommended order:
+Recommended flow:
 
-1. add one or more upstream repositories
-2. enable the skills you want
-3. build and apply
-4. verify the result with `doctor --strict`
+1. Add a skill repository, or import one skill with an `add` / `npx` command.
+2. Run `发现` to list available skills.
+3. Install the skills you need into `mappings`.
+4. Run `构建生效` to generate `agent/` and sync targets.
+5. Run `doctor --strict` to validate configuration and sync state.
+
+## Common Commands
+
+Chinese commands:
+
+```powershell
+.\skills.ps1 add <repo> --skill <name>
+.\skills.ps1 锁定
+.\skills.ps1 构建生效 -Locked
+.\skills.ps1 更新 -Plan
+.\skills.ps1 更新 -Upgrade
+```
+
+English aliases:
+
+```powershell
+.\skills.ps1 add <repo> --skill <name>
+```
+
+`锁定`, `构建生效`, and `更新` currently have no English aliases (N/A).
+
+Notes:
+
+- Without `--skill`, `add` only registers a vendor. It does not install every skill in that repository.
+- With `--skill`, imports default to `manual` mode under `imports`; use `--mode vendor` for vendor-managed installs.
+- `更新` fetches upstream repositories. Use `构建生效` when you only need to rebuild local configuration.
 
 ## Sync Modes
 
-`skills.json` supports two sync strategies through `sync_mode`:
+`skills.json` selects sync behavior through `sync_mode`:
 
-- `link`: preferred on Windows; uses junctions to point target directories at `agent/`
-- `sync`: mirrors the built output with `robocopy /MIR`
+- `link`: recommended on Windows; uses junctions to point target directories at `agent/`
+- `sync`: mirrors `agent/` with `robocopy /MIR`
 
-Use `link` when you want direct local iteration. Use `sync` when links are restricted.
+Use `link` for local iteration. Use `sync` when links are restricted.
 
-## Imports and Locking
+## overrides Naming
 
-Common operations:
+Use clear prefixes under `overrides/`:
 
-- import one skill: `.\skills.ps1 add <repo> --skill <name>`
-- write lock data: `.\skills.ps1 锁定`
-- strict build from lock: `.\skills.ps1 构建生效 -Locked`
-- preview upgrades: `.\skills.ps1 更新 -Plan`
-- upgrade and refresh lock data: `.\skills.ps1 更新 -Upgrade`
+- `custom-*`: fully custom skills
+- `patch-*`: locally patched variants of upstream skills
+- `<skill-name>`: intentional same-name replacement of generated output
+
+Prefer `custom-*` and `patch-*`. Use same-name overrides only when replacement is intentional.
 
 ## Target Repository Skill Audit
 
 Outer AI agents can ask the script to generate a target repository audit bundle, perform their own research using official docs, community best practices, `skills.sh`, GitHub Trending, or `find-skills`, and then hand recommendations back as JSON.
+
+Chinese commands:
 
 ```powershell
 .\skills.ps1 审查目标 初始化
@@ -101,33 +115,70 @@ Outer AI agents can ask the script to generate a target repository audit bundle,
 
 `应用` defaults to dry-run. It installs new skills only when `--apply --yes` is provided, then runs build/apply and doctor. Overlapping skills are reported only and are not removed automatically.
 
-## Quality Gates
+Equivalent English aliases:
 
-This repository validates changes in a fixed order:
+```powershell
+.\skills.ps1 audit-targets init
+.\skills.ps1 audit-targets add my-repo ..\my-repo
+.\skills.ps1 audit-targets scan --target my-repo
+.\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json
+.\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes
+```
+
+## Repository Layout
+
+```text
+repo/
+  skills.ps1        # main entry point, generated from src/
+  skills.json       # single configuration source
+  build.ps1         # rebuilds skills.ps1 from src/
+  src/              # source modules
+  tests/            # unit and end-to-end verification
+  overrides/        # local override layer
+  imports/          # targeted imported sources
+  vendor/           # upstream cache, generated locally
+  agent/            # generated output, generated locally
+```
+
+## Local Gates
+
+Run these in order before submitting changes:
+
+Chinese commands:
 
 ```powershell
 ./build.ps1
 ./skills.ps1 发现
-./skills.ps1 doctor --strict
+./skills.ps1 doctor --strict --threshold-ms 8000
 ./skills.ps1 构建生效
 ```
 
-That sequence is the minimum pre-submit verification set.
+English aliases:
+
+```powershell
+./build.ps1
+./skills.ps1 doctor --strict --threshold-ms 8000
+```
+
+`发现` and `构建生效` currently have no English aliases (N/A).
 
 ## Repository Hygiene
 
-The remote repository must not include local-only agent state or temporary artifacts, including:
+Do not commit local-only agent state, logs, caches, or temporary artifacts, including:
 
 - `.claude/`, `.codex/`, `.gemini/`, `.trae/`
-- local agent rule files such as `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`
+- local rule files such as `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`
 - logs, backups, and temporary files
 - `_probe_*`, `_debug_*`, and `_tree_*` import snapshots
 
-Those files may exist locally, but they are outside the repository contract. CI checks this explicitly.
+Those files may exist locally, but they are outside the repository contract.
 
 ## Related Docs
 
-- [Chinese README](README.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security Policy](SECURITY.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
+
+## License
+
+MIT
