@@ -103,26 +103,74 @@ Prefer `custom-*` and `patch-*`. Use same-name overrides only when replacement i
 
 Outer AI agents can ask the script to generate a target repository audit bundle, perform their own research using official docs, community best practices, `skills.sh`, GitHub Trending, or `find-skills`, and then hand recommendations back as JSON.
 
+After each `scan`, prefer handing the run-local `outer-ai-prompt.md` to the outer AI instead of only handing over `ai-brief.md`. That runtime prompt already defines the expected execution order:
+
+- read `ai-brief.md`
+- fill `recommendations.json` using the `recommendations.template.json` schema
+- run `apply-flow` first (dry-run -> confirmation token -> apply)
+- present numbered add/remove recommendation lists
+- or run `apply --apply --yes` directly when explicit execution is intended
+
+Formal audits must always use both context layers:
+
+- global user profile: long-lived work types, preferences, constraints, and common tasks
+- target repository: current project stack, rule files, build facts, and test facts
+
+Do not start a formal audit without a user profile. Once the audit workflow starts, the outer AI may research online within that workflow, but research does not imply automatic install or automatic removal.
+
+After `profile-set` saves the raw long-form input, the script automatically enters the structured-profile import flow:
+
+- press Enter: use the default path `reports\skill-audit\user-profile.structured.json`
+- provide a custom value: use your custom path and filename
+- if the target file does not exist: the script creates a structured-profile draft file for AI or manual completion
+- enter `0`: skip structured import for now
+
 Chinese commands:
 
 ```powershell
 .\skills.ps1 审查目标 初始化
+.\skills.ps1 审查目标 需求设置
+.\skills.ps1 审查目标 需求查看
+.\skills.ps1 审查目标 需求结构化 --profile reports\profile.json
 .\skills.ps1 审查目标 添加 my-repo ..\my-repo
 .\skills.ps1 审查目标 扫描 --target my-repo
+.\skills.ps1 审查目标 状态
+.\skills.ps1 审查目标 应用确认 --recommendations reports\skill-audit\<run-id>\recommendations.json
 .\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json
+.\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json --dry-run-ack "我知道未落盘"
 .\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes
+.\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes --add-indexes "1,3" --remove-indexes "2"
 ```
 
-`应用` defaults to dry-run. It installs new skills only when `--apply --yes` is provided, then runs build/apply and doctor. Overlapping skills are reported only and are not removed automatically.
+`应用` defaults to dry-run. Only `--apply --yes` executes the specific installs and removals you selected, then runs build/apply and doctor.
+`应用确认` is the single-entry two-stage flow: it runs dry-run first, then requires confirmation token `APPLY <run-id>` before any persisted changes.
+In dry-run mode, the script prints a red non-persisted warning and requires explicit ack token `我知道未落盘` (for non-interactive runs, pass `--dry-run-ack`).
+`状态` reads the latest `apply-report.json` and shows `mode / success / persisted / changed_counts`.
+
+Before applying, the script prints two independent recommendation lists:
+
+- add recommendations: each item has an index, skill name, user-profile reason, and target-repo reason
+- removal recommendations: each item has an index, skill name, installed locator, user-profile reason, and target-repo reason
+
+You can choose items interactively by entering add indexes and remove indexes, or pass them non-interactively through `--add-indexes` and `--remove-indexes`. The two lists have independent numbering; choosing removals never changes the add-list index mapping.
+
+If the outer AI has workspace execution capability, the most direct handoff is to ask it to execute the run-local `outer-ai-prompt.md`.
 
 Equivalent English aliases:
 
 ```powershell
 .\skills.ps1 audit-targets init
+.\skills.ps1 audit-targets profile-set
+.\skills.ps1 audit-targets profile-show
+.\skills.ps1 audit-targets profile-structure --profile reports\profile.json
 .\skills.ps1 audit-targets add my-repo ..\my-repo
 .\skills.ps1 audit-targets scan --target my-repo
+.\skills.ps1 audit-targets status
+.\skills.ps1 audit-targets apply-flow --recommendations reports\skill-audit\<run-id>\recommendations.json
 .\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json
+.\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json --dry-run-ack "我知道未落盘"
 .\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes
+.\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes --add-indexes "1,3" --remove-indexes "2"
 ```
 
 ## Repository Layout

@@ -177,11 +177,22 @@ function Set-ContentUtf8([string]$path, [string]$content) {
     if (-not [string]::IsNullOrWhiteSpace($parent)) { EnsureDir $parent }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     $bytes = $utf8NoBom.GetBytes($content)
+    $tempPath = "{0}.tmp-{1}" -f $path, ([System.Guid]::NewGuid().ToString("N"))
+    $backupPath = "{0}.bak-{1}" -f $path, ([System.Guid]::NewGuid().ToString("N"))
     $maxAttempts = 4
     $delayMs = 200
     for ($attempt = 0; $attempt -lt $maxAttempts; $attempt++) {
         try {
-            [System.IO.File]::WriteAllBytes($path, $bytes)
+            [System.IO.File]::WriteAllBytes($tempPath, $bytes)
+            if (Test-Path -LiteralPath $path -PathType Leaf) {
+                [System.IO.File]::Replace($tempPath, $path, $backupPath, $true)
+                if (Test-Path -LiteralPath $backupPath -PathType Leaf) {
+                    Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
+                }
+            }
+            else {
+                [System.IO.File]::Move($tempPath, $path)
+            }
             return
         }
         catch {
@@ -192,6 +203,12 @@ function Set-ContentUtf8([string]$path, [string]$content) {
             $isRetryable = ($baseException -is [System.UnauthorizedAccessException]) -or ($baseException -is [System.IO.IOException])
             if (-not $isRetryable) { throw }
 
+            if (Test-Path -LiteralPath $tempPath -PathType Leaf) {
+                try { Remove-Item -LiteralPath $tempPath -Force -ErrorAction Stop } catch {}
+            }
+            if (Test-Path -LiteralPath $backupPath -PathType Leaf) {
+                try { Remove-Item -LiteralPath $backupPath -Force -ErrorAction Stop } catch {}
+            }
             if (Test-Path -LiteralPath $path -PathType Leaf) {
                 try {
                     $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop

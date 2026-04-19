@@ -27,8 +27,44 @@ function Set-AuditTestWorkspace([string]$root) {
 }
 
 Describe "Skill Audit E2E" {
+    Context "Audit bundle" {
+        It "Emits outer AI prompt file in the audit bundle" {
+            $root = Join-Path $TestDrive "ws-skill-audit-bundle"
+            New-Item -ItemType Directory -Path $root -Force | Out-Null
+            Set-AuditTestWorkspace $root
+
+            $cfg = [pscustomobject]@{
+                vendors = @()
+                targets = @()
+                mappings = @()
+                imports = @()
+                mcp_servers = @()
+                mcp_targets = @()
+                update_force = $false
+                sync_mode = "sync"
+            }
+            SaveCfg $cfg
+            Initialize-AuditTargetsConfig | Out-Null
+            Set-AuditUserProfileRawText "I maintain repo governance workflows."
+
+            $repo = Join-Path $root "demo-repo"
+            New-Item -ItemType Directory -Path $repo -Force | Out-Null
+            Add-AuditTargetConfigEntry "demo" ".\demo-repo" | Out-Null
+            Mock Get-InstalledSkillFacts { @() }
+
+            $result = Invoke-AuditTargetsScan -Target "demo"
+            $promptPath = Join-Path $result.path "outer-ai-prompt.md"
+
+            (Test-Path -LiteralPath $promptPath) | Should Be $true
+            $prompt = Get-Content -LiteralPath $promptPath -Raw
+            $prompt | Should Match "Required Execution Sequence"
+            $prompt | Should Match "单目标扫描"
+            $prompt | Should Match "repo-scan.json"
+        }
+    }
+
     Context "Recommendation apply" {
-        It "Applies a local recommended skill through existing install flow and writes report" {
+        It "Applies selected add/remove recommendations and keeps add indexes stable" {
             $root = Join-Path $TestDrive "ws-skill-audit-apply"
             New-Item -ItemType Directory -Path $root -Force | Out-Null
             Set-AuditTestWorkspace $root
@@ -45,23 +81,57 @@ Describe "Skill Audit E2E" {
             }
             SaveCfg $cfg
 
+            $installedSkillDir = Join-Path $root "imports\\old-skill"
+            New-Item -ItemType Directory -Path $installedSkillDir -Force | Out-Null
+            Set-Content -Path (Join-Path $installedSkillDir "SKILL.md") -Value "---`nname: old-skill`ndescription: Old skill.`n---`nUse when old."
+            $cfg = LoadCfg
+            $cfg.imports += [pscustomobject]@{ name = "old-skill"; repo = "https://example.com/old.git"; ref = "main"; skill = "."; mode = "manual" }
+            $cfg.mappings += [pscustomobject]@{ vendor = "manual"; from = "old-skill"; to = "old-skill" }
+            SaveCfg $cfg
+
             $skillRepo = Join-Path $TestDrive "skill-source"
             New-Item -ItemType Directory -Path $skillRepo -Force | Out-Null
             Set-Content -Path (Join-Path $skillRepo "SKILL.md") -Value "---`nname: demo-skill`ndescription: Demo skill.`n---`nUse when testing audit apply."
             $zip = Join-Path $TestDrive "skill-source.zip"
             Compress-Archive -Path (Join-Path $skillRepo "*") -DestinationPath $zip -Force
 
+            $skillRepo2 = Join-Path $TestDrive "skill-source-2"
+            New-Item -ItemType Directory -Path $skillRepo2 -Force | Out-Null
+            Set-Content -Path (Join-Path $skillRepo2 "SKILL.md") -Value "---`nname: demo-skill-2`ndescription: Demo skill 2.`n---`nUse when testing audit apply."
+            $zip2 = Join-Path $TestDrive "skill-source-2.zip"
+            Compress-Archive -Path (Join-Path $skillRepo2 "*") -DestinationPath $zip2 -Force
+
             $recommendationsPath = Join-Path $root "recommendations.json"
             $recommendations = [pscustomobject]@{
-                schema_version = 1
+                schema_version = 2
                 run_id = "r1"
                 target = "demo-target"
+                decision_basis = [pscustomobject]@{
+                    user_profile_used = $true
+                    target_scan_used = $true
+                    source_strategy_used = $true
+                    summary = "ok"
+                }
                 new_skills = @(
                     [pscustomobject]@{
                         name = "demo-skill"
-                        reason = "Local fixture for audit apply."
+                        reason_user_profile = "User needs audit automation."
+                        reason_target_repo = "Target repo needs this workflow."
                         install = [pscustomobject]@{
                             repo = $zip
+                            skill = "."
+                            ref = "main"
+                            mode = "manual"
+                        }
+                        confidence = "high"
+                        sources = @("local-fixture")
+                    },
+                    [pscustomobject]@{
+                        name = "demo-skill-2"
+                        reason_user_profile = "User needs a second workflow."
+                        reason_target_repo = "Target repo also needs this second workflow."
+                        install = [pscustomobject]@{
+                            repo = $zip2
                             skill = "."
                             ref = "main"
                             mode = "manual"
@@ -71,6 +141,18 @@ Describe "Skill Audit E2E" {
                     }
                 )
                 overlap_findings = @()
+                removal_candidates = @(
+                    [pscustomobject]@{
+                        name = "old-skill"
+                        reason_user_profile = "User no longer needs it."
+                        reason_target_repo = "Target repo no longer matches it."
+                        sources = @("local-fixture")
+                        installed = [pscustomobject]@{
+                            vendor = "manual"
+                            from = "old-skill"
+                        }
+                    }
+                )
                 do_not_install = @()
             }
             Set-ContentUtf8 $recommendationsPath ($recommendations | ConvertTo-Json -Depth 20)
@@ -78,14 +160,18 @@ Describe "Skill Audit E2E" {
             Mock 构建生效 {}
             Mock Invoke-Doctor { [pscustomobject]@{ pass = $true } }
 
-            $report = Invoke-AuditRecommendationsApply -RecommendationsPath $recommendationsPath -Apply -Yes
+            $report = Invoke-AuditRecommendationsApply -RecommendationsPath $recommendationsPath -Apply -Yes -AddSelection "2" -RemoveSelection "1"
             $saved = LoadCfg
 
             $report.success | Should Be $true
             (Test-Path (Join-Path $root "apply-report.json")) | Should Be $true
+            $report.persisted | Should Be $true
+            $report.changed_counts.add_installed | Should Be 1
+            $report.changed_counts.remove_removed | Should Be 1
             @($saved.imports).Count | Should Be 1
             @($saved.mappings).Count | Should Be 1
-            $saved.mappings[0].to | Should Be "demo-skill"
+            $saved.mappings[0].to | Should Be "demo-skill-2"
+            $report.removal_candidates[0].status | Should Be "removed"
             Assert-MockCalled 构建生效 -Times 1 -Exactly
             Assert-MockCalled Invoke-Doctor -Times 1 -Exactly
         }

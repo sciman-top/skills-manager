@@ -89,21 +89,6 @@
       "vendor": "superpowers"
     },
     {
-      "from": "skills\\react-best-practices",
-      "to": "agent-skills-skills-react-best-practices",
-      "vendor": "agent-skills"
-    },
-    {
-      "from": "skills\\composition-patterns",
-      "to": "agent-skills-skills-composition-patterns",
-      "vendor": "agent-skills"
-    },
-    {
-      "from": "skills\\.curated\\cloudflare-deploy",
-      "to": "skills-skills-.curated-cloudflare-deploy",
-      "vendor": "skills"
-    },
-    {
       "from": "skills\\.curated\\imagegen",
       "to": "skills-skills-.curated-imagegen",
       "vendor": "skills"
@@ -499,11 +484,6 @@
       "vendor": "baoyu-skills"
     },
     {
-      "to": "skills-2-skills-remotion",
-      "vendor": "skills-2",
-      "from": "skills\\remotion"
-    },
-    {
       "to": "marketingskills-skills-copy-editing",
       "vendor": "marketingskills",
       "from": "skills\\copy-editing"
@@ -517,6 +497,11 @@
       "to": "marketingskills-skills-social-content",
       "vendor": "marketingskills",
       "from": "skills\\social-content"
+    },
+    {
+      "from": "skills\\copywriting",
+      "vendor": "marketingskills",
+      "to": "marketingskills-skills-copywriting"
     }
   ],
   "imports": [
@@ -641,14 +626,6 @@
       "mode": "manual"
     },
     {
-      "name": "agent-skills",
-      "skill": "skills\\react-best-practices",
-      "sparse": false,
-      "repo": "https://github.com/vercel-labs/agent-skills.git",
-      "ref": "main",
-      "mode": "vendor"
-    },
-    {
       "name": "data-visualization",
       "skill": "data\\skills\\data-visualization",
       "sparse": false,
@@ -761,16 +738,8 @@
       "mode": "manual"
     },
     {
-      "repo": "https://github.com/remotion-dev/skills.git",
-      "skill": "skills\\remotion",
-      "sparse": false,
-      "mode": "vendor",
-      "ref": "main",
-      "name": "skills-2"
-    },
-    {
       "repo": "https://github.com/coreyhaines31/marketingskills.git",
-      "skill": "skills\\copy-editing",
+      "skill": "skills\\copywriting",
       "sparse": false,
       "mode": "vendor",
       "ref": "main",

@@ -103,26 +103,74 @@ English aliases：
 
 外层 AI 代理可以让脚本生成目标仓审查包，再由 AI 自行研究官方文档、社区最佳实践、`skills.sh`、GitHub Trending 或 `find-skills` 结果，并把推荐写回 `recommendations.json`。
 
+每次“生成审查包”后，优先把本次 run 目录里的 `outer-ai-prompt.md` 交给外层 AI，而不是只交 `ai-brief.md`。这份运行态提示词已经写明了应执行的顺序：
+
+- 读取 `ai-brief.md`
+- 按 `recommendations.template.json` 的 schema 填写 `recommendations.json`
+- 先执行 `应用确认（两阶段：dry-run -> 确认口令 -> apply）`
+- 列出新增/卸载建议清单及序号
+- 或按需使用 `应用 recommendations（--apply --yes，可按序号选择增删）`
+
+正式审查时必须同时基于两类上下文：
+
+- 全局“用户基本需求”：长期工作类型、偏好、约束、常见任务
+- 目标仓：当前项目的技术栈、规则文件、构建和测试事实
+
+没有用户基本需求时，不应开始正式审查。启动审查流程后，外层 AI 可以在本次流程内自主联网研究，但联网不等于自动安装或自动卸载。
+
+`需求设置` 保存原始长文本后，会自动进入结构化导入流程：
+
+- 回车：使用默认路径 `reports\skill-audit\user-profile.structured.json`
+- 自定义输入：使用你给定的路径和文件名
+- 若目标文件不存在：脚本会自动生成结构化草稿文件，供 AI 或人工补全后再导入
+- 输入 `0`：跳过本次结构化导入
+
 中文命令：
 
 ```powershell
 .\skills.ps1 审查目标 初始化
+.\skills.ps1 审查目标 需求设置
+.\skills.ps1 审查目标 需求查看
+.\skills.ps1 审查目标 需求结构化 --profile reports\profile.json
 .\skills.ps1 审查目标 添加 my-repo ..\my-repo
 .\skills.ps1 审查目标 扫描 --target my-repo
+.\skills.ps1 审查目标 状态
+.\skills.ps1 审查目标 应用确认 --recommendations reports\skill-audit\<run-id>\recommendations.json
 .\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json
+.\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json --dry-run-ack "我知道未落盘"
 .\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes
+.\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes --add-indexes "1,3" --remove-indexes "2"
 ```
 
-默认 `应用` 只做 dry-run。只有同时传入 `--apply --yes` 才会安装新增技能、构建生效并运行 doctor。重叠技能只写入报告，不会自动卸载。
+默认 `应用` 只做 dry-run。只有同时传入 `--apply --yes` 才会真正执行你选中的新增和卸载、构建生效并运行 doctor。
+`应用确认` 提供单入口两阶段流程：先 dry-run，再要求输入确认口令 `APPLY <run-id>` 才会执行落盘。
+在 dry-run 模式下，脚本会以红色警示“未落盘”，并要求显式确认口令 `我知道未落盘`（非交互场景可用 `--dry-run-ack` 传入）。
+`状态` 命令会读取最近一次 `apply-report.json`，展示 `mode / success / persisted / changed_counts`。
+
+执行 `应用` 时，脚本会先展示两份独立的建议清单：
+
+- 新增建议：每项有序号、技能名、用户需求依据、目标仓依据
+- 卸载建议：每项有序号、技能名、已安装定位信息、用户需求依据、目标仓依据
+
+你可以在交互中分别输入“新增序号”和“卸载序号”，也可以用 `--add-indexes` / `--remove-indexes` 非交互传入。两份清单独立编号，卸载选择不会改变新增清单的序号及命中关系。
+
+如果外层 AI 具备工作区执行能力，最直接的交付方式是让它代理执行本次 run 目录中的 `outer-ai-prompt.md`。
 
 English aliases：
 
 ```powershell
 .\skills.ps1 audit-targets init
+.\skills.ps1 audit-targets profile-set
+.\skills.ps1 audit-targets profile-show
+.\skills.ps1 audit-targets profile-structure --profile reports\profile.json
 .\skills.ps1 audit-targets add my-repo ..\my-repo
 .\skills.ps1 audit-targets scan --target my-repo
+.\skills.ps1 audit-targets status
+.\skills.ps1 audit-targets apply-flow --recommendations reports\skill-audit\<run-id>\recommendations.json
 .\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json
+.\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json --dry-run-ack "我知道未落盘"
 .\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes
+.\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes --add-indexes "1,3" --remove-indexes "2"
 ```
 
 ## 仓库结构
