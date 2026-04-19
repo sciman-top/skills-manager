@@ -7606,6 +7606,108 @@ function Get-InstalledSkillFacts($cfg = $null) {
     return @($facts)
 }
 
+function Ensure-AuditArrayProperty($obj, [string]$name) {
+    if (-not $obj.PSObject.Properties.Match($name).Count -or $null -eq $obj.$name) {
+        $obj | Add-Member -NotePropertyName $name -NotePropertyValue @() -Force
+    }
+    elseif (-not (Assert-IsArray $obj.$name)) {
+        $obj.$name = @($obj.$name)
+    }
+}
+
+function Assert-AuditRecommendationItem($item) {
+    Need ($null -ne $item) "推荐项不能为空"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.name)) "推荐项缺少 name"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.reason)) ("推荐项缺少 reason：{0}" -f [string]$item.name)
+    Need ($item.PSObject.Properties.Match("install").Count -gt 0 -and $null -ne $item.install) ("推荐项缺少 install：{0}" -f [string]$item.name)
+
+    $install = $item.install
+    Need (-not [string]::IsNullOrWhiteSpace([string]$install.repo)) ("推荐项缺少 install.repo：{0}" -f [string]$item.name)
+    Need (Looks-LikeRepoInput ([string]$install.repo)) ("install.repo 不是有效仓库输入：{0}" -f [string]$install.repo)
+
+    $skillPath = if ($install.PSObject.Properties.Match("skill").Count -gt 0) { [string]$install.skill } else { "." }
+    if ([string]::IsNullOrWhiteSpace($skillPath)) { $skillPath = "." }
+    $normalizedSkill = Normalize-SkillPath $skillPath
+    Need (Test-SafeRelativePath $normalizedSkill -AllowDot) ("install.skill 路径非法：{0}" -f $skillPath)
+    $install.skill = $normalizedSkill
+
+    $mode = if ($install.PSObject.Properties.Match("mode").Count -gt 0) { [string]$install.mode } else { "manual" }
+    if ([string]::IsNullOrWhiteSpace($mode)) { $mode = "manual" }
+    $mode = $mode.ToLowerInvariant()
+    Need ($mode -eq "manual" -or $mode -eq "vendor") ("install.mode 仅支持 manual 或 vendor：{0}" -f $mode)
+    $install.mode = $mode
+
+    $confidence = ([string]$item.confidence).ToLowerInvariant()
+    Need ($confidence -eq "low" -or $confidence -eq "medium" -or $confidence -eq "high") ("confidence 仅支持 low/medium/high：{0}" -f [string]$item.confidence)
+    $item.confidence = $confidence
+
+    Ensure-AuditArrayProperty $item "sources"
+    Need (@($item.sources).Count -gt 0) ("推荐项至少需要一个 source：{0}" -f [string]$item.name)
+}
+
+function Load-AuditRecommendations([string]$path) {
+    Need (-not [string]::IsNullOrWhiteSpace($path)) "--recommendations 缺少值"
+    Need (Test-Path -LiteralPath $path -PathType Leaf) ("recommendations 文件不存在：{0}" -f $path)
+    try {
+        $rec = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+    }
+    catch {
+        throw ("recommendations JSON 解析失败：{0}" -f $_.Exception.Message)
+    }
+
+    Need ([int]$rec.schema_version -eq 1) "recommendations.schema_version 仅支持 1"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$rec.run_id)) "recommendations 缺少 run_id"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$rec.target)) "recommendations 缺少 target"
+    Ensure-AuditArrayProperty $rec "new_skills"
+    Ensure-AuditArrayProperty $rec "overlap_findings"
+    Ensure-AuditArrayProperty $rec "do_not_install"
+
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in @($rec.new_skills)) {
+        Assert-AuditRecommendationItem $item
+        $install = $item.install
+        $key = "{0}|{1}|{2}" -f (Normalize-RepoUrl ([string]$install.repo)), (Normalize-SkillPath ([string]$install.skill)), ([string]$install.mode)
+        Need ($seen.Add($key)) ("重复推荐安装项：{0}" -f $key)
+    }
+    return $rec
+}
+
+function New-AuditInstallPlan($recommendations, $cfg = $null) {
+    $items = @()
+    foreach ($item in @($recommendations.new_skills)) {
+        $install = $item.install
+        $tokens = @([string]$install.repo, "--skill", [string]$install.skill)
+        if ($install.PSObject.Properties.Match("ref").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$install.ref)) {
+            $tokens += @("--ref", [string]$install.ref)
+        }
+        if ($install.PSObject.Properties.Match("mode").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$install.mode)) {
+            $tokens += @("--mode", [string]$install.mode)
+        }
+        $items += [pscustomobject]([ordered]@{
+            name = [string]$item.name
+            reason = [string]$item.reason
+            confidence = [string]$item.confidence
+            sources = @($item.sources)
+            tokens = @($tokens)
+            status = "planned"
+        })
+    }
+    return [pscustomobject]([ordered]@{
+        schema_version = 1
+        run_id = [string]$recommendations.run_id
+        target = [string]$recommendations.target
+        items = @($items)
+        overlap_findings = @($recommendations.overlap_findings)
+        do_not_install = @($recommendations.do_not_install)
+    })
+}
+
+function Get-AuditApplyReportPath([string]$recommendationsPath) {
+    $dir = Split-Path $recommendationsPath -Parent
+    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
+    return (Join-Path $dir "apply-report.json")
+}
+
 function Invoke-AuditTargetsScan {
     param(
         [string]$Target,
@@ -7671,7 +7773,32 @@ function Invoke-AuditRecommendationsApply {
         [switch]$Apply,
         [switch]$Yes
     )
-    throw "审查目标应用尚未实现。"
+    if ($Apply -and -not $Yes) {
+        throw "执行安装必须同时传入 --apply --yes"
+    }
+    $rec = Load-AuditRecommendations $RecommendationsPath
+    $plan = New-AuditInstallPlan $rec
+    $report = [ordered]@{
+        schema_version = 1
+        run_id = [string]$rec.run_id
+        target = [string]$rec.target
+        mode = if ($Apply) { "apply" } else { "dry_run" }
+        success = $true
+        items = @($plan.items)
+        overlap_findings = @($plan.overlap_findings)
+        do_not_install = @($plan.do_not_install)
+        rollback = @()
+    }
+
+    if (-not $Apply) {
+        foreach ($item in @($plan.items)) {
+            Write-Host ("DRYRUN install: {0}" -f ($item.tokens -join " "))
+        }
+        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+        return [pscustomobject]$report
+    }
+
+    throw "审查目标安装执行将在后续任务实现。"
 }
 
 function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
