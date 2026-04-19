@@ -1,7 +1,7 @@
 规则ID=R1,R2,R3,R4,R6,R7,R8,E5,E6
 规则版本=GlobalUser/AGENTS.md v9.39; project AGENTS.md v3.91
 兼容窗口(观察期/强制期)=observe
-影响模块=src/Commands/AuditTargets.ps1,src/Main.ps1,src/Version.ps1,src/Commands/Utils.ps1,build.ps1,skills.ps1,tests/Unit/AuditTargets.Tests.ps1,tests/E2E/SkillAudit.Tests.ps1
+影响模块=src/Commands/AuditTargets.ps1,src/Main.ps1,src/Version.ps1,src/Commands/Utils.ps1,build.ps1,skills.ps1,tests/Unit/AuditTargets.Tests.ps1,tests/E2E/SkillAudit.Tests.ps1,README.md,README.en.md
 当前落点=C:\Users\sciman\.config\superpowers\worktrees\skills-manager\skill-audit-targets
 目标归宿=AI-orchestrated skill audit workflow
 迁移批次=skill-audit-implementation-20260419

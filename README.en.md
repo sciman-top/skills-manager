@@ -87,6 +87,20 @@ Common operations:
 - preview upgrades: `.\skills.ps1 更新 -Plan`
 - upgrade and refresh lock data: `.\skills.ps1 更新 -Upgrade`
 
+## Target Repository Skill Audit
+
+Outer AI agents can ask the script to generate a target repository audit bundle, perform their own research using official docs, community best practices, `skills.sh`, GitHub Trending, or `find-skills`, and then hand recommendations back as JSON.
+
+```powershell
+.\skills.ps1 审查目标 初始化
+.\skills.ps1 审查目标 添加 my-repo ..\my-repo
+.\skills.ps1 审查目标 扫描 --target my-repo
+.\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json
+.\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes
+```
+
+`应用` defaults to dry-run. It installs new skills only when `--apply --yes` is provided, then runs build/apply and doctor. Overlapping skills are reported only and are not removed automatically.
+
 ## Quality Gates
 
 This repository validates changes in a fixed order:

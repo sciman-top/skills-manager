@@ -34,6 +34,20 @@
 - `.\skills.ps1 更新 -Plan`
 - `.\skills.ps1 更新 -Upgrade`
 
+## 目标仓技能审查
+
+外层 AI 代理可以让脚本生成目标仓审查包，再由 AI 自行研究官方文档、社区最佳实践、`skills.sh`、GitHub Trending 或 `find-skills` 结果，并把推荐写回 `recommendations.json`。
+
+```powershell
+.\skills.ps1 审查目标 初始化
+.\skills.ps1 审查目标 添加 my-repo ..\my-repo
+.\skills.ps1 审查目标 扫描 --target my-repo
+.\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json
+.\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes
+```
+
+默认 `应用` 只做 dry-run。只有同时传入 `--apply --yes` 才会安装新增技能、构建生效并运行 doctor。重叠技能只写入报告，不会自动卸载。
+
 ## Repository Layout
 ```text
 repo/
