@@ -13,7 +13,7 @@ jobs:
 
       - name: Verify generated script sync
         shell: powershell
-        run: .\tests\check-generated-sync.ps1
+        run: .\tests\check-generated-sync.ps1 -StrictNoGit
 
       - name: Run tests
         shell: powershell

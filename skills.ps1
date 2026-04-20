@@ -15,8 +15,8 @@ try {
     [Console]::InputEncoding = [System.Text.Encoding]::UTF8
 }
 catch {}
- 
- $Root = (Resolve-Path ".").Path
+
+$Root = (Resolve-Path ".").Path
 $CfgPath = Join-Path $Root "skills.json"
 $LogPath = Join-Path $Root "build.log"
 $VendorDir = Join-Path $Root "vendor"
@@ -1253,8 +1253,8 @@ function Merge-FilterAndArgs([string]$filter, [string[]]$tokens) {
     }
     return $merged.ToArray()
 }
- 
- function Normalize-RepoUrl([string]$repo) {
+
+function Normalize-RepoUrl([string]$repo) {
     $r = $repo.Trim()
     if ($r -match "^(git@github.com:).+") {
         if (-not $r.EndsWith(".git")) { return ($r + ".git") }
@@ -1900,8 +1900,8 @@ function Ensure-Repo([string]$path, [string]$repo, [string]$ref, [string]$sparse
         finally { Pop-Location }
     }
 }
- 
- function Get-CfgCountSnapshot($cfg) {
+
+function Get-CfgCountSnapshot($cfg) {
     if ($null -eq $cfg) { return @{} }
     return [ordered]@{
         vendors = @($cfg.vendors).Count
@@ -2778,8 +2778,8 @@ function 锁定 {
     Write-Host ("已写入锁文件：{0}" -f (Get-LockPath))
     Write-Host ("锁定摘要：vendors={0}, imports={1}" -f @($lock.vendors).Count, @($lock.imports).Count)
 }
- 
- function Get-PerfSummaryFromLogLines([string[]]$lines, [int]$RecentPerMetric = 3) {
+
+function Get-PerfSummaryFromLogLines([string[]]$lines, [int]$RecentPerMetric = 3) {
     $events = @()
     if ($null -eq $lines) { return @() }
     foreach ($line in $lines) {
@@ -3307,8 +3307,8 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     }
     return [pscustomobject]$report
 }
- 
- function Upsert-Import($cfg, $import) {
+
+function Upsert-Import($cfg, $import) {
     $existing = $cfg.imports | Where-Object { $_.name -eq $import.name } | Select-Object -First 1
     if ($existing) {
         $existing.repo = $import.repo
@@ -5190,8 +5190,8 @@ function 命令导入安装 {
 function 单技能安装 {
     命令导入安装
 }
- 
- function Should-ForceCleanTarget($cfg, $SkipForceClean, [string]$kind, [string]$name) {
+
+function Should-ForceCleanTarget($cfg, $SkipForceClean, [string]$kind, [string]$name) {
     if ($null -eq $cfg -or -not $cfg.update_force) { return $false }
     if ($null -eq $SkipForceClean) { return $true }
     $key = "{0}|{1}" -f $kind, $name
@@ -5548,8 +5548,8 @@ function 更新 {
         }
     } @{ command = "更新" } -NoHost
 }
- 
- function Parse-KeyValueToken([string]$token, [string]$flagName) {
+
+function Parse-KeyValueToken([string]$token, [string]$flagName) {
     Need (-not [string]::IsNullOrWhiteSpace($token)) ("{0} 参数不能为空" -f $flagName)
     $pair = $token.Split("=", 2)
     Need ($pair.Count -eq 2) ("{0} 参数格式必须是 KEY=VALUE：{1}" -f $flagName, $token)
@@ -7118,8 +7118,8 @@ function 同步MCP {
         }
     } @{ command = "同步MCP" } -NoHost
 }
- 
- function Get-AuditTargetsConfigPath {
+
+function Get-AuditTargetsConfigPath {
     return (Join-Path $script:Root "audit-targets.json")
 }
 
@@ -8990,8 +8990,8 @@ function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
         "apply" { Invoke-AuditRecommendationsApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -DryRunAck $opts.dry_run_ack -RequireDryRunAck (-not $opts.apply) -Apply:$opts.apply -Yes:$opts.yes | Out-Null }
     }
 }
- 
- function 打开配置 {
+
+function 打开配置 {
     Need (Test-Path $CfgPath) "缺少配置文件：$CfgPath"
     if (Get-Command code -ErrorAction SilentlyContinue) {
         Invoke-StartProcess "code" "`"$CfgPath`""
@@ -9487,8 +9487,8 @@ function 菜单 {
         }
     }
 }
- 
- # Main Entry Point
+
+# Main Entry Point
 # ----------------
 # This file is used to assemble the final script.
 # It includes the main dispatch logic.
@@ -9574,4 +9574,4 @@ if ($MyInvocation.InvocationName -ne '.') {
         exit 1
     }
 }
- 
+

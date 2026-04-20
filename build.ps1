@@ -30,7 +30,8 @@ foreach ($f in $Files) {
 # Use bytes explicitly to avoid host/runtime encoding differences.
 $utf8NoBom = [System.Text.Encoding]::UTF8
 $bom = (New-Object System.Text.UTF8Encoding($true)).GetPreamble()
-$payload = $utf8NoBom.GetBytes($Content)
+$payloadText = ($Content -join "")
+$payload = $utf8NoBom.GetBytes($payloadText)
 $bytes = New-Object byte[] ($bom.Length + $payload.Length)
 [Array]::Copy($bom, 0, $bytes, 0, $bom.Length)
 [Array]::Copy($payload, 0, $bytes, $bom.Length, $payload.Length)
