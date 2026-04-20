@@ -189,10 +189,23 @@ function EnsureDir([string]$p) {
     if ($DryRun) { return }
     if (-not (Test-Path $p)) { New-Item -ItemType Directory -Force -Path $p | Out-Null }
 }
+function Clear-FileWriteBlockAttributes([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return }
+    try {
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        $resetAttrs = [System.IO.FileAttributes]::ReadOnly -bor [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
+        if (($item.Attributes -band $resetAttrs) -ne 0) {
+            $item.Attributes = ($item.Attributes -band (-bnot $resetAttrs))
+        }
+    }
+    catch {}
+}
 function Set-ContentUtf8([string]$path, [string]$content) {
     if ($DryRun) { return }
     $parent = Split-Path $path -Parent
     if (-not [string]::IsNullOrWhiteSpace($parent)) { EnsureDir $parent }
+    Clear-FileWriteBlockAttributes $path
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     $bytes = $utf8NoBom.GetBytes($content)
     $tempPath = "{0}.tmp-{1}" -f $path, ([System.Guid]::NewGuid().ToString("N"))
@@ -211,6 +224,7 @@ function Set-ContentUtf8([string]$path, [string]$content) {
             else {
                 [System.IO.File]::Move($tempPath, $path)
             }
+            Clear-FileWriteBlockAttributes $path
             return
         }
         catch {
@@ -227,16 +241,7 @@ function Set-ContentUtf8([string]$path, [string]$content) {
             if (Test-Path -LiteralPath $backupPath -PathType Leaf) {
                 try { Remove-Item -LiteralPath $backupPath -Force -ErrorAction Stop } catch {}
             }
-            if (Test-Path -LiteralPath $path -PathType Leaf) {
-                try {
-                    $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
-                    $resetAttrs = [System.IO.FileAttributes]::ReadOnly -bor [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
-                    if (($item.Attributes -band $resetAttrs) -ne 0) {
-                        $item.Attributes = ($item.Attributes -band (-bnot $resetAttrs))
-                    }
-                }
-                catch {}
-            }
+            Clear-FileWriteBlockAttributes $path
 
             if ($attempt -ge ($maxAttempts - 1)) { throw $baseException }
             Start-Sleep -Milliseconds $delayMs
@@ -3131,7 +3136,11 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     # 5. Config Check
     if (Test-Path $CfgPath) {
         try {
-            $cfg = Get-Content $CfgPath -Raw | ConvertFrom-Json
+            # Keep parser behavior aligned with LoadCfg:
+            # support whole-line comments in skills.json.
+            $rawCfg = Get-Content $CfgPath -Raw
+            $cleanCfg = $rawCfg -replace "(?m)^\s*//.*", ""
+            $cfg = $cleanCfg | ConvertFrom-Json
             if ($cfg) {
                 $cfgObj = $cfg
                 $report.checks.config = [ordered]@{ ok = $true; vendors = @($cfg.vendors).Count; mappings = @($cfg.mappings).Count }

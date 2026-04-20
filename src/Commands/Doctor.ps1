@@ -355,7 +355,11 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     # 5. Config Check
     if (Test-Path $CfgPath) {
         try {
-            $cfg = Get-Content $CfgPath -Raw | ConvertFrom-Json
+            # Keep parser behavior aligned with LoadCfg:
+            # support whole-line comments in skills.json.
+            $rawCfg = Get-Content $CfgPath -Raw
+            $cleanCfg = $rawCfg -replace "(?m)^\s*//.*", ""
+            $cfg = $cleanCfg | ConvertFrom-Json
             if ($cfg) {
                 $cfgObj = $cfg
                 $report.checks.config = [ordered]@{ ok = $true; vendors = @($cfg.vendors).Count; mappings = @($cfg.mappings).Count }

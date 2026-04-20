@@ -2,6 +2,8 @@
 /vendor/
 /agent/
 /reports/*.log
+/reports/
+/docs/runtime-*.txt
 
 # backups created when linking
 **/*.bak.*
