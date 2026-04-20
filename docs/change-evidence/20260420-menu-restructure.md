@@ -48,6 +48,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "Import-Module Pester; In
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Import-Module Pester; Invoke-Pester -Script tests\Unit\Workflow.Tests.ps1"
 => Passed: 9 Failed: 0
 
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Import-Module Pester; Invoke-Pester -Script tests\Unit\*.ps1"
+=> Passed: 240 Failed: 3
+   failing file: tests\Unit\GeneratedSyncScript.Tests.ps1
+   failure class: generated temporary `check-generated-sync.ps1` parser errors with mojibake text
+   scope assessment: unrelated to menu/help/README/workflow-copy changes; this branch did not modify generated-sync scripts or tests
+
 ./skills.ps1 发现
 => exit 0; listed 3 workspace skills
 
