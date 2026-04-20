@@ -9590,6 +9590,67 @@ function 自动更新设置 {
     }
 }
 
+function MCP菜单 {
+    while ($true) {
+        Write-Host ""
+        Write-Host "=== MCP 服务 ==="
+        Write-Host "1) 新增 MCP 服务"
+        Write-Host "2) 卸载 MCP 服务"
+        Write-Host "3) 同步 MCP 配置"
+        Write-Host "0) 返回"
+        $c = Read-HostSafe "请选择"
+        switch ($c) {
+            "1" { 安装MCP }
+            "2" { 卸载MCP }
+            "3" { 同步MCP }
+            "0" { return }
+            default { Write-Host "无效选择。" }
+        }
+    }
+}
+
+function 技能库管理菜单 {
+    while ($true) {
+        Write-Host ""
+        Write-Host "=== 技能库管理 ==="
+        Write-Host "1) 新增技能库"
+        Write-Host "2) 删除技能库"
+        Write-Host "3) 生成锁文件"
+        Write-Host "4) 打开配置"
+        Write-Host "0) 返回"
+        $c = Read-HostSafe "请选择"
+        switch ($c) {
+            "1" { 新增技能库 }
+            "2" { 删除技能库 }
+            "3" { 锁定 }
+            "4" { 打开配置 }
+            "0" { return }
+            default { Write-Host "无效选择。" }
+        }
+    }
+}
+
+function 更多菜单 {
+    while ($true) {
+        Write-Host ""
+        Write-Host "=== 更多 ==="
+        Write-Host "1) 一键工作流"
+        Write-Host "2) 自动更新设置"
+        Write-Host "3) 解除关联"
+        Write-Host "4) 清理备份"
+        Write-Host "0) 返回"
+        $c = Read-HostSafe "请选择"
+        switch ($c) {
+            "1" { Invoke-Workflow @() }
+            "2" { 自动更新设置 }
+            "3" { 解除关联 }
+            "4" { 清理备份 }
+            "0" { return }
+            default { Write-Host "无效选择。" }
+        }
+    }
+}
+
 function 帮助 {
     @"
 Skills 管理器（中文菜单）
@@ -9875,54 +9936,32 @@ function 菜单 {
     while ($true) {
         Write-Host ""
         Write-Host "=== Skills 管理器 ==="
-        Write-Host "技能操作"
-        Write-Host "1) 发现技能（浏览已接入技能库）"
-        Write-Host "2) 命令导入安装（粘贴一条或多条 add / npx 命令）"
-        Write-Host "3) 从技能库选择安装（勾选后写入白名单）"
-        Write-Host "4) 卸载技能（移除白名单并清理相关本地项）"
-        Write-Host "5) 构建并生效（按当前配置重建并同步）"
-        Write-Host "6) 更新上游并重建（拉取后重建并同步）"
-        Write-Host ""
-        Write-Host "来源与配置"
-        Write-Host "7) 新增技能库（写入 vendors 并初始化）"
-        Write-Host "8) 删除技能库（移除 vendor 并重建）"
-        Write-Host "9) 打开配置（skills.json）"
-        Write-Host "10) 生成锁文件（skills.lock.json）"
-        Write-Host ""
-        Write-Host "MCP 管理"
-        Write-Host "11) 安装MCP（登记 MCP 服务并自动同步）"
-        Write-Host "12) 卸载MCP（移除 MCP 服务并自动同步）"
-        Write-Host "13) 同步MCP（仅重新同步 MCP 配置）"
-        Write-Host ""
-        Write-Host "维护"
-        Write-Host "14) 解除关联（仅 link 模式需要）"
-        Write-Host "15) 清理备份（删除仓库内 *.bak.* / .bak，排除 vendor/agent/imports/.git）"
-        Write-Host "16) 自动更新设置（每周五 20:00 自动执行 更新 + 同步MCP）"
-        Write-Host "17) 审查目标（需求 / 目标仓 / 审查包 / 自检后 dry-run / 按原序号选择增删）"
-        Write-Host "18) 一键工作流（新手/维护/审查/全流程）"
-        Write-Host "98) 帮助"
-        Write-Host "0) 退出"
+        Write-Host "1) 浏览技能"
+        Write-Host "2) 选择安装"
+        Write-Host "3) 粘贴命令导入"
+        Write-Host "4) 卸载技能"
+        Write-Host "5) 重建并同步"
+        Write-Host "6) 更新上游"
+        Write-Host "7) 目标仓审查"
+        Write-Host "8) MCP 服务"
+        Write-Host "9) 技能库管理"
+        Write-Host "10) 更多"
+        Write-Host "11) 帮助"
+        Write-Host "12) 退出"
         $c = Read-HostSafe "请选择"
         switch ($c) {
             "1" { 发现 }
-            "2" { 命令导入安装 }
-            "3" { 安装 }
+            "2" { 安装 }
+            "3" { 命令导入安装 }
             "4" { 卸载 }
             "5" { 构建生效 }
             "6" { 更新 }
-            "7" { 新增技能库 }
-            "8" { 删除技能库 }
-            "9" { 打开配置 }
-            "10" { 锁定 }
-            "11" { 安装MCP }
-            "12" { 卸载MCP }
-            "13" { 同步MCP }
-            "14" { 解除关联 }
-            "15" { 清理备份 }
-            "16" { 自动更新设置 }
-            "17" { 审查目标菜单 }
-            "18" { Invoke-Workflow @() }
-            "98" { 帮助 }
+            "7" { 审查目标菜单 }
+            "8" { MCP菜单 }
+            "9" { 技能库管理菜单 }
+            "10" { 更多菜单 }
+            "11" { 帮助 }
+            "12" { return }
             "0" { return }
             default { Write-Host "无效选择。" }
         }
