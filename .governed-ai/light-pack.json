@@ -1,5 +1,5 @@
 {
-  "adapter_preference": "process_bridge",
+  "adapter_preference": "native_attach",
   "binding_id": "binding-skills-manager",
   "gate_profile": "default",
   "pack_kind": "repo_attachment_light_pack",
