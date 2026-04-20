@@ -515,14 +515,16 @@ Describe "Audit Targets" {
 
     Context "Recommendations" {
         It "Documents audit entry in help source" {
-            (Get-Content -LiteralPath (Join-Path $Root "src/Commands/Utils.ps1") -Raw) | Should Match "17\) 审查目标"
+            (Get-Content -LiteralPath (Join-Path $Root "src/Commands/Utils.ps1") -Raw) | Should Match "7\) 目标仓审查"
         }
 
         It "Documents audit prompt menu entries in help source" {
             $raw = Get-Content -LiteralPath (Join-Path $Root "src/Commands/Utils.ps1") -Raw
-            $raw | Should Match "12\) 查看最近审查应用状态"
-            $raw | Should Match "13\) 查看外层 AI 审查提示词"
-            $raw | Should Match "14\) 编辑外层 AI 审查提示词"
+            $raw | Should Match "=== 目标仓审查 ==="
+            $raw | Should Match "5\) 应用建议（推荐）"
+            $raw | Should Match "12\) 查看 AI 提示词"
+            $raw | Should Match "13\) 编辑 AI 提示词"
+            $raw | Should Match "14\) 直接执行建议（高级）"
         }
 
         It "Documents audit help source with self-check and prompt-source guidance" {
@@ -530,7 +532,8 @@ Describe "Audit Targets" {
             $raw | Should Match "先写并自检 recommendations"
             $raw | Should Match "不要直接手改 run 目录产物"
             $raw | Should Match "沿用原序号"
-            $raw | Should Match "17\) 审查目标（需求 / 目标仓 / 审查包 / 自检后 dry-run / 按原序号选择增删）"
+            $raw | Should Not Match "17\) 审查目标（需求 / 目标仓 / 审查包 / 自检后 dry-run / 按原序号选择增删）"
+            $raw | Should Match "7\) 目标仓审查"
         }
 
         It "Documents audit runtime summary wording with original-index and empty-list guidance" {

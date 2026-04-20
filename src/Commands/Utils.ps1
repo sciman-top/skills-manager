@@ -264,7 +264,7 @@ Skills 管理器（中文菜单）
   - 卸载MCP：从 skills.json 移除 MCP 服务，并自动同步
  - 同步MCP：只同步 MCP 配置，不构建 skills
   - 一键工作流：按场景执行多步骤编排；支持 `--list`、`--no-prompt`、`--continue-on-error`
-  - 审查目标：维护全局用户基本需求，新增/修改/删除目标仓，生成审查包，交给外层 AI 先写并自检 recommendations，再按原序号决定增删技能
+  - 目标仓审查：维护全局用户基本需求，管理目标仓，生成审查包，并通过外层 AI 先写并自检 recommendations
   - 自动更新设置：配置本机计划任务，每周五 20:00 自动执行“更新 + 同步MCP”
   - 打开配置：打开 skills.json
   - 解除关联：移除 link 模式下创建的目录关联
@@ -367,45 +367,70 @@ Skills 管理器（中文菜单）
 function 审查目标菜单 {
     while ($true) {
         Write-Host ""
-        Write-Host "=== 审查目标 ==="
-        Write-Host "1) 初始化审查配置"
-        Write-Host "2) 设置用户基本需求"
-        Write-Host "3) 查看用户基本需求"
-        Write-Host "4) 导入结构化需求（回车用默认路径）"
-        Write-Host "5) 添加目标仓"
-        Write-Host "6) 修改目标仓"
-        Write-Host "7) 删除目标仓"
-        Write-Host "8) 列出目标仓"
-        Write-Host "9) 生成审查包（交给外层 AI 先写并自检 recommendations）"
-        Write-Host "10) 应用 recommendations（两阶段：dry-run -> 确认口令 -> apply）"
-        Write-Host "11) 应用 recommendations（直接 --apply --yes，可按原序号选择增删）"
-        Write-Host "12) 查看最近审查应用状态"
-        Write-Host "13) 查看外层 AI 审查提示词"
-        Write-Host "14) 编辑外层 AI 审查提示词"
+        Write-Host "=== 目标仓审查 ==="
+        Write-Host "1) 查看需求"
+        Write-Host "2) 编辑需求"
+        Write-Host "3) 目标仓列表"
+        Write-Host "4) 生成审查包"
+        Write-Host "5) 应用建议（推荐）"
+        Write-Host "6) 查看最近状态"
+        Write-Host "7) 新增目标仓"
+        Write-Host "8) 修改目标仓"
+        Write-Host "9) 删除目标仓"
+        Write-Host "10) 导入结构化需求"
+        Write-Host "11) 初始化审查配置"
+        Write-Host "12) 查看 AI 提示词"
+        Write-Host "13) 编辑 AI 提示词"
+        Write-Host "14) 直接执行建议（高级）"
         Write-Host "0) 返回"
         $c = Read-HostSafe "请选择"
         switch ($c) {
-            "1" { Invoke-AuditTargetsCommand @("init") }
+            "1" { Invoke-AuditTargetsCommand @("profile-show") }
             "2" { Invoke-AuditTargetsCommand @("profile-set") }
-            "3" { Invoke-AuditTargetsCommand @("profile-show") }
+            "3" { Invoke-AuditTargetsCommand @("list") }
             "4" {
-                $defaultPath = Get-AuditStructuredProfileDefaultPath
-                $profile = Read-HostSafe ("请输入结构化 profile 文件路径（回车使用默认：{0}）" -f $defaultPath)
-                if ([string]::IsNullOrWhiteSpace($profile)) {
-                    Invoke-AuditTargetsCommand @("profile-structure")
+                $cfg = Load-AuditTargetsConfig
+                $targets = @($cfg.targets)
+                if ($targets.Count -eq 0) {
+                    Write-Host "未登记目标仓。"
+                    continue
+                }
+                Write-Host "留空将扫描全部 enabled 目标仓。"
+                $selection = Select-Items $targets `
+                { param($idx, $item)
+                    $enabled = if ($item.PSObject.Properties.Match("enabled").Count -gt 0) { [bool]$item.enabled } else { $true }
+                    $enabledText = if ($enabled) { "enabled" } else { "disabled" }
+                    return ("{0,3}) [{1}] {2} -> {3}" -f $idx, $enabledText, [string]$item.name, [string]$item.path)
+                } `
+                    "请选择要扫描的目标仓（输入 0 或直接回车=全部 enabled）" `
+                    "未解析到有效序号，已取消生成审查包。"
+                if ($selection.canceled) {
+                    Invoke-AuditTargetsCommand @("scan")
+                    continue
+                }
+                $picked = @($selection.items)
+                if ($picked.Count -eq 0) {
+                    Invoke-AuditTargetsCommand @("scan")
                 }
                 else {
-                    Invoke-AuditTargetsCommand @("profile-structure", "--profile", $profile)
+                    Invoke-AuditTargetsCommand @("scan", "--target", [string]$picked[0].name)
                 }
             }
             "5" {
+                $path = Read-HostSafe "recommendations 文件路径"
+                if (-not [string]::IsNullOrWhiteSpace($path)) {
+                    Invoke-AuditTargetsCommand @("apply-flow", "--recommendations", $path)
+                }
+            }
+            "6" { Invoke-AuditTargetsCommand @("status") }
+            "7" {
                 $name = Read-HostSafe "目标仓名称"
                 $path = Read-HostSafe "目标仓路径"
                 if (-not [string]::IsNullOrWhiteSpace($name) -and -not [string]::IsNullOrWhiteSpace($path)) {
                     Invoke-AuditTargetsCommand @("add", $name, $path)
                 }
             }
-            "6" {
+            "8" {
                 $cfg = Load-AuditTargetsConfig
                 $targets = @($cfg.targets)
                 if ($targets.Count -eq 0) {
@@ -430,7 +455,7 @@ function 审查目标菜单 {
                     Invoke-AuditTargetsCommand @("update", $name, $path)
                 }
             }
-            "7" {
+            "9" {
                 $cfg = Load-AuditTargetsConfig
                 $targets = @($cfg.targets)
                 if ($targets.Count -eq 0) {
@@ -463,50 +488,25 @@ function 审查目标菜单 {
                     Invoke-AuditTargetsCommand @("remove", $name)
                 }
             }
-            "8" { Invoke-AuditTargetsCommand @("list") }
-            "9" {
-                $cfg = Load-AuditTargetsConfig
-                $targets = @($cfg.targets)
-                if ($targets.Count -eq 0) {
-                    Write-Host "未登记目标仓。"
-                    continue
-                }
-                Write-Host "留空将扫描全部 enabled 目标仓。"
-                $selection = Select-Items $targets `
-                { param($idx, $item)
-                    $enabled = if ($item.PSObject.Properties.Match("enabled").Count -gt 0) { [bool]$item.enabled } else { $true }
-                    $enabledText = if ($enabled) { "enabled" } else { "disabled" }
-                    return ("{0,3}) [{1}] {2} -> {3}" -f $idx, $enabledText, [string]$item.name, [string]$item.path)
-                } `
-                    "请选择要扫描的目标仓（输入 0 或直接回车=全部 enabled）" `
-                    "未解析到有效序号，已取消生成审查包。"
-                if ($selection.canceled) {
-                    Invoke-AuditTargetsCommand @("scan")
-                    continue
-                }
-                $picked = @($selection.items)
-                if ($picked.Count -eq 0) {
-                    Invoke-AuditTargetsCommand @("scan")
+            "10" {
+                $defaultPath = Get-AuditStructuredProfileDefaultPath
+                $profile = Read-HostSafe ("请输入结构化 profile 文件路径（回车使用默认：{0}）" -f $defaultPath)
+                if ([string]::IsNullOrWhiteSpace($profile)) {
+                    Invoke-AuditTargetsCommand @("profile-structure")
                 }
                 else {
-                    Invoke-AuditTargetsCommand @("scan", "--target", [string]$picked[0].name)
+                    Invoke-AuditTargetsCommand @("profile-structure", "--profile", $profile)
                 }
             }
-            "10" {
-                $path = Read-HostSafe "recommendations 文件路径"
-                if (-not [string]::IsNullOrWhiteSpace($path)) {
-                    Invoke-AuditTargetsCommand @("apply-flow", "--recommendations", $path)
-                }
-            }
-            "11" {
+            "11" { Invoke-AuditTargetsCommand @("init") }
+            "12" { Show-AuditOuterAiPromptTemplate }
+            "13" { Edit-AuditOuterAiPromptTemplate }
+            "14" {
                 $path = Read-HostSafe "recommendations 文件路径"
                 if (-not [string]::IsNullOrWhiteSpace($path)) {
                     Invoke-AuditTargetsCommand @("apply", "--recommendations", $path, "--apply", "--yes")
                 }
             }
-            "12" { Invoke-AuditTargetsCommand @("status") }
-            "13" { Show-AuditOuterAiPromptTemplate }
-            "14" { Edit-AuditOuterAiPromptTemplate }
             "0" { return }
             default { Write-Host "无效选择。" }
         }
