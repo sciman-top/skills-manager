@@ -1,6 +1,39 @@
 # Dot-source the main script to load functions
 . $PSScriptRoot\..\..\skills.ps1
 
+function Get-FunctionBody {
+    param(
+        [string]$Text,
+        [string]$FunctionName
+    )
+
+    $start = $Text.IndexOf("function $FunctionName {")
+    if ($start -lt 0) {
+        throw "Failed to locate function $FunctionName"
+    }
+
+    $cursor = $Text.IndexOf("{", $start)
+    if ($cursor -lt 0) {
+        throw "Failed to locate opening brace for $FunctionName"
+    }
+
+    $depth = 0
+    for ($i = $cursor; $i -lt $Text.Length; $i++) {
+        $ch = $Text[$i]
+        if ($ch -eq "{") {
+            $depth++
+        }
+        elseif ($ch -eq "}") {
+            $depth--
+            if ($depth -eq 0) {
+                return $Text.Substring($start, $i - $start + 1)
+            }
+        }
+    }
+
+    throw "Failed to extract function body for $FunctionName"
+}
+
 Describe "Audit Targets" {
     Context "Target config" {
         It "Creates default audit target config without overwriting existing file" {
@@ -515,25 +548,29 @@ Describe "Audit Targets" {
 
     Context "Recommendations" {
         It "Documents audit entry in help source" {
-            (Get-Content -LiteralPath (Join-Path $Root "src/Commands/Utils.ps1") -Raw) | Should Match "7\) 目标仓审查"
+            $raw = Get-Content -LiteralPath (Join-Path $Root "src/Commands/Utils.ps1") -Raw
+            $menuBody = Get-FunctionBody $raw "菜单"
+            $menuBody | Should Match "7\) 目标仓审查"
         }
 
         It "Documents audit prompt menu entries in help source" {
             $raw = Get-Content -LiteralPath (Join-Path $Root "src/Commands/Utils.ps1") -Raw
-            $raw | Should Match "=== 目标仓审查 ==="
-            $raw | Should Match "5\) 应用建议（推荐）"
-            $raw | Should Match "12\) 查看 AI 提示词"
-            $raw | Should Match "13\) 编辑 AI 提示词"
-            $raw | Should Match "14\) 直接执行建议（高级）"
+            $auditBody = Get-FunctionBody $raw "审查目标菜单"
+            $auditBody | Should Match "=== 目标仓审查 ==="
+            $auditBody | Should Match "5\) 应用建议（推荐）"
+            $auditBody | Should Match "12\) 查看 AI 提示词"
+            $auditBody | Should Match "13\) 编辑 AI 提示词"
+            $auditBody | Should Match "14\) 直接执行建议（高级）"
         }
 
         It "Documents audit help source with self-check and prompt-source guidance" {
             $raw = Get-Content -LiteralPath (Join-Path $Root "src/Commands/Utils.ps1") -Raw
+            $auditBody = Get-FunctionBody $raw "审查目标菜单"
             $raw | Should Match "先写并自检 recommendations"
             $raw | Should Match "不要直接手改 run 目录产物"
             $raw | Should Match "沿用原序号"
-            $raw | Should Not Match "17\) 审查目标（需求 / 目标仓 / 审查包 / 自检后 dry-run / 按原序号选择增删）"
-            $raw | Should Match "7\) 目标仓审查"
+            $auditBody | Should Not Match "17\) 审查目标（需求 / 目标仓 / 审查包 / 自检后 dry-run / 按原序号选择增删）"
+            $auditBody | Should Match "4\) 生成审查包"
         }
 
         It "Documents audit runtime summary wording with original-index and empty-list guidance" {

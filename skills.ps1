@@ -9683,7 +9683,7 @@ Skills 管理器（中文菜单）
   - 卸载MCP：从 skills.json 移除 MCP 服务，并自动同步
  - 同步MCP：只同步 MCP 配置，不构建 skills
   - 一键工作流：按场景执行多步骤编排；支持 `--list`、`--no-prompt`、`--continue-on-error`
-  - 目标仓审查：维护全局用户基本需求，管理目标仓，生成审查包，并通过外层 AI 先写并自检 recommendations
+  - 审查目标：维护全局用户基本需求，新增/修改/删除目标仓，生成审查包，交给外层 AI 先写并自检 recommendations，再按原序号决定增删技能
   - 自动更新设置：配置本机计划任务，每周五 20:00 自动执行“更新 + 同步MCP”
   - 打开配置：打开 skills.json
   - 解除关联：移除 link 模式下创建的目录关联
