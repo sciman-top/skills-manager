@@ -18,6 +18,31 @@ Describe "Core Functions" {
         }
     }
 
+    Context "Junction handling" {
+        It "Replaces a broken target junction" {
+            if ($env:OS -ne "Windows_NT") { return }
+
+            $link = Join-Path $TestDrive "skills-link"
+            $oldTarget = Join-Path $TestDrive "old-agent"
+            $newTarget = Join-Path $TestDrive "new-agent"
+
+            New-Item -ItemType Directory -Path $oldTarget -Force | Out-Null
+            & cmd /c mklink /J "$link" "$oldTarget" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "test mklink failed" }
+
+            Remove-Item -LiteralPath $oldTarget -Recurse -Force
+
+            (Test-PathEntry $link) | Should Be $true
+            (Is-ReparsePoint $link) | Should Be $true
+
+            New-Junction $link $newTarget
+
+            $item = Get-Item -LiteralPath $link -Force
+            $item.LinkType | Should Be "Junction"
+            $item.Target | Should Be $newTarget
+        }
+    }
+
     Context "Split-Args" {
         It "Splits simple arguments" {
             $tokens = Split-Args "foo bar baz"

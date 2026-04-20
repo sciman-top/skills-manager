@@ -109,12 +109,12 @@ function Invoke-WithMetric(
 }
 
 function Invoke-RemoveItem([string]$path, [switch]$Recurse) {
-    if (-not (Test-Path $path)) { return }
+    if (-not (Test-PathEntry $path)) { return }
     $recurseFlag = if ($Recurse) { "-Recurse " } else { "" }
     Log ("Remove-Item {0}{1}" -f $recurseFlag, $path)
     if (-not $DryRun) {
-        if ($Recurse) { Remove-Item -Recurse -Force $path }
-        else { Remove-Item -Force $path }
+        if ($Recurse) { Remove-Item -LiteralPath $path -Recurse -Force }
+        else { Remove-Item -LiteralPath $path -Force }
     }
 }
 function Invoke-RemoveItemWithRetry(
@@ -509,10 +509,25 @@ function RoboMirror([string]$src, [string]$dst) {
     Out-Host
     if ($LASTEXITCODE -ge 8) { throw "robocopy 失败（exit=$LASTEXITCODE）：$src -> $dst" }
 }
+function Test-PathEntry([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    try {
+        Get-Item -LiteralPath $path -Force -ErrorAction Stop | Out-Null
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
 function Is-ReparsePoint([string]$path) {
-    if (-not (Test-Path $path)) { return $false }
-    $item = Get-Item $path -Force
-    return [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    try {
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        return [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+    }
+    catch {
+        return $false
+    }
 }
 function Is-PathUnder([string]$path, [string]$root) {
     if ([string]::IsNullOrWhiteSpace($path) -or [string]::IsNullOrWhiteSpace($root)) { return $false }
@@ -567,7 +582,7 @@ function Is-ExcludedPath([string]$path, [string[]]$roots) {
     return $false
 }
 function Backup-DirIfNeeded([string]$path) {
-    if (-not (Test-Path $path)) { return $null }
+    if (-not (Test-PathEntry $path)) { return $null }
     if (Is-ReparsePoint $path) { return $null }
     $parent = Split-Path $path -Parent
     $leaf = Split-Path $path -Leaf
@@ -590,7 +605,7 @@ function New-Junction([string]$linkPath, [string]$targetPath) {
     EnsureDir $targetPath
     EnsureDir (Split-Path $linkPath -Parent)
 
-    if (Test-Path $linkPath) {
+    if (Test-PathEntry $linkPath) {
         if (Is-ReparsePoint $linkPath) {
             Invoke-RemoveItem $linkPath -Recurse
         }
@@ -611,7 +626,7 @@ function Find-LatestBackup([string]$path) {
     Select-Object -First 1
 }
 function Remove-JunctionAndRestore([string]$linkPath) {
-    if ((Test-Path $linkPath) -and (Is-ReparsePoint $linkPath)) {
+    if (Is-ReparsePoint $linkPath) {
         Invoke-RemoveItem $linkPath -Recurse
         $bak = Find-LatestBackup $linkPath
         if ($bak) {
