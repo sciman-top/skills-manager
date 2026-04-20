@@ -54,6 +54,8 @@ if ($MyInvocation.InvocationName -ne '.') {
             "mcp-sync" { 同步MCP }
             "审查目标" { Invoke-AuditTargetsCommand (Merge-FilterAndArgs $Filter $args) }
             "audit-targets" { Invoke-AuditTargetsCommand (Merge-FilterAndArgs $Filter $args) }
+            "一键" { Invoke-Workflow (Merge-FilterAndArgs $Filter $args) }
+            "workflow" { Invoke-Workflow (Merge-FilterAndArgs $Filter $args) }
             "打开配置" { 打开配置 }
             "解除关联" { 解除关联 }
             "清理备份" { 清理备份 }

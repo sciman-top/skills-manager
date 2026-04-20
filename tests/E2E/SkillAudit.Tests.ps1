@@ -60,6 +60,8 @@ Describe "Skill Audit E2E" {
             $prompt | Should Match "Required Execution Sequence"
             $prompt | Should Match "单目标扫描"
             $prompt | Should Match "repo-scan.json"
+            $prompt | Should Match "Blocking Conditions"
+            $prompt | Should Match "无新增建议"
         }
     }
 

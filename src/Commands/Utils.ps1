@@ -176,6 +176,11 @@ function 帮助 {
 Skills 管理器（中文菜单）
 
 推荐使用顺序：
+  0) 一键工作流（推荐）
+     - 新手：.\skills.ps1 一键 新手
+     - 维护：.\skills.ps1 一键 维护
+     - 审查：.\skills.ps1 一键 审查
+     - 全流程：.\skills.ps1 一键 全流程
   1) 接入来源：新增技能库，或粘贴 add / npx 命令导入单个技能
   2) 发现：查看已接入技能库中的可用技能
   3) 安装：
@@ -196,8 +201,9 @@ Skills 管理器（中文菜单）
   - 锁定：生成 skills.lock.json，记录当前 vendor/import commit
   - 安装MCP：向 skills.json 登记 MCP 服务（stdio / sse / http），并自动同步
   - 卸载MCP：从 skills.json 移除 MCP 服务，并自动同步
-  - 同步MCP：只同步 MCP 配置，不构建 skills
-  - 审查目标：维护全局用户基本需求，新增/修改/删除目标仓，生成审查包，展示新增/卸载建议清单，并按序号决定增删技能
+ - 同步MCP：只同步 MCP 配置，不构建 skills
+  - 一键工作流：按场景执行多步骤编排；支持 `--list`、`--no-prompt`、`--continue-on-error`
+  - 审查目标：维护全局用户基本需求，新增/修改/删除目标仓，生成审查包，交给外层 AI 先写并自检 recommendations，再按原序号决定增删技能
   - 自动更新设置：配置本机计划任务，每周五 20:00 自动执行“更新 + 同步MCP”
   - 打开配置：打开 skills.json
   - 解除关联：移除 link 模式下创建的目录关联
@@ -222,6 +228,11 @@ Skills 管理器（中文菜单）
   .\skills.ps1 add <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]
   .\skills.ps1 npx "skills add <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]"
   .\skills.ps1 npx "add-skill <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]"
+  .\skills.ps1 一键 --list
+  .\skills.ps1 一键 新手
+  .\skills.ps1 一键 维护 --continue-on-error
+  .\skills.ps1 一键 审查 --no-prompt
+  .\skills.ps1 workflow all --no-prompt
   .\skills.ps1 更新
   .\skills.ps1 更新上游并重建
   .\skills.ps1 更新 -Plan
@@ -278,11 +289,13 @@ Skills 管理器（中文菜单）
   - 用户基本需求是全局长期上下文；目标仓是项目级上下文。外层 AI 必须同时基于两者判断技能保留、卸载与新增。
   - 启动审查流程后，外层 AI 可以在本次流程内自主联网研究；联网不等于自动安装。
   - 设置用户基本需求后会自动进入结构化导入流程；回车使用默认路径 `reports\skill-audit\user-profile.structured.json`，不存在时会自动生成草稿文件。
-  - 已内置“外层 AI 审查提示词”；生成审查包时会输出 `outer-ai-prompt.md`，也可在菜单中查看或编辑默认提示词。
+  - 已内置“外层 AI 审查提示词”；生成审查包时会输出运行态 `outer-ai-prompt.md`，优先把它交给外层 AI，而不是只交 `ai-brief.md`。
+  - 运行态 `ai-brief.md` / `outer-ai-prompt.md` 属于审查包产物；如需改默认提示词，请改 `src/Commands/AuditTargets.ps1` 或 `overrides/audit-outer-ai-prompt.md`，不要直接手改 run 目录产物。
+  - 外层 AI 应先写完并自检 `recommendations.json`（schema、占位符、双理由、真实来源），再进入 dry-run。
   - `应用确认` 是单入口两阶段流程：先 dry-run，再要求输入确认口令 `APPLY <run-id>` 才执行落盘。
   - `应用` 默认只做 dry-run，且需显式确认口令 `我知道未落盘`；只有 `--apply --yes` 才会真正执行选中的新增/卸载。
   - `状态` 可查看最近一次 `apply-report.json` 的 `mode/success/persisted/changed_counts`。
-  - 执行前会分别列出“新增建议”和“卸载建议”两份带序号清单，每项都显示简短依据。
+  - 执行前会分别列出“新增建议”和“卸载建议”两份带序号清单；dry-run 后向用户汇报时必须沿用原序号，并同时展示用户需求 / 目标仓两条简短依据。
   - `--add-indexes` 和 `--remove-indexes` 分别作用于各自清单；两份清单独立编号，先选卸载不会改变新增清单的序号映射。
 
 提示：如遇 PowerShell 脚本执行被拦，可在当前窗口临时放开：
@@ -302,9 +315,9 @@ function 审查目标菜单 {
         Write-Host "6) 修改目标仓"
         Write-Host "7) 删除目标仓"
         Write-Host "8) 列出目标仓"
-        Write-Host "9) 生成审查包"
+        Write-Host "9) 生成审查包（交给外层 AI 先写并自检 recommendations）"
         Write-Host "10) 应用 recommendations（两阶段：dry-run -> 确认口令 -> apply）"
-        Write-Host "11) 应用 recommendations（直接 --apply --yes，可按序号选择增删）"
+        Write-Host "11) 应用 recommendations（直接 --apply --yes，可按原序号选择增删）"
         Write-Host "12) 查看最近审查应用状态"
         Write-Host "13) 查看外层 AI 审查提示词"
         Write-Host "14) 编辑外层 AI 审查提示词"
@@ -466,7 +479,8 @@ function 菜单 {
         Write-Host "14) 解除关联（仅 link 模式需要）"
         Write-Host "15) 清理备份（删除仓库内 *.bak.* / .bak，排除 vendor/agent/imports/.git）"
         Write-Host "16) 自动更新设置（每周五 20:00 自动执行 更新 + 同步MCP）"
-        Write-Host "17) 审查目标（需求 / 目标仓 / 审查包 / 按序号选择增删）"
+        Write-Host "17) 审查目标（需求 / 目标仓 / 审查包 / 自检后 dry-run / 按原序号选择增删）"
+        Write-Host "18) 一键工作流（新手/维护/审查/全流程）"
         Write-Host "98) 帮助"
         Write-Host "0) 退出"
         $c = Read-HostSafe "请选择"
@@ -488,6 +502,7 @@ function 菜单 {
             "15" { 清理备份 }
             "16" { 自动更新设置 }
             "17" { 审查目标菜单 }
+            "18" { Invoke-Workflow @() }
             "98" { 帮助 }
             "0" { return }
             default { Write-Host "无效选择。" }

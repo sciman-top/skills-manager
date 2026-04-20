@@ -54,6 +54,23 @@ English aliases：
 4. 运行 `构建生效` 生成 `agent/` 并同步到目标目录。
 5. 用 `doctor --strict` 检查配置和同步状态。
 
+## 一键工作流（推荐）
+
+```powershell
+.\skills.ps1 一键 --list
+.\skills.ps1 一键 新手
+.\skills.ps1 一键 维护 --continue-on-error
+.\skills.ps1 一键 审查 --no-prompt
+.\skills.ps1 workflow all --no-prompt
+```
+
+场景说明：
+
+- `新手`：`发现 -> 安装 -> 构建生效 -> doctor --strict`
+- `维护`：`更新 -> 构建生效 -> 同步MCP -> doctor --strict`
+- `审查`：`审查目标 需求查看 -> 列表 -> 扫描 -> 状态`
+- `全流程`：`更新 -> 发现 -> 构建生效 -> 同步MCP -> doctor --strict`
+
 ## 常用命令
 
 中文命令：
@@ -107,8 +124,9 @@ English aliases：
 
 - 读取 `ai-brief.md`
 - 按 `recommendations.template.json` 的 schema 填写 `recommendations.json`
-- 先执行 `应用确认（两阶段：dry-run -> 确认口令 -> apply）`
-- 列出新增/卸载建议清单及序号
+- 先做自检：schema、占位符、双理由、真实来源全部通过
+- 再执行 `应用确认（两阶段：dry-run -> 确认口令 -> apply）`
+- 按 dry-run 原序号列出新增/卸载建议清单
 - 或按需使用 `应用 recommendations（--apply --yes，可按序号选择增删）`
 
 正式审查时必须同时基于两类上下文：
@@ -154,7 +172,7 @@ English aliases：
 
 你可以在交互中分别输入“新增序号”和“卸载序号”，也可以用 `--add-indexes` / `--remove-indexes` 非交互传入。两份清单独立编号，卸载选择不会改变新增清单的序号及命中关系。
 
-如果外层 AI 具备工作区执行能力，最直接的交付方式是让它代理执行本次 run 目录中的 `outer-ai-prompt.md`。
+如果外层 AI 具备工作区执行能力，最直接的交付方式是让它代理执行本次 run 目录中的 `outer-ai-prompt.md`；要求它先完成 `recommendations.json` 自检，再进入 dry-run。
 
 English aliases：
 

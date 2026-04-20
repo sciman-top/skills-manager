@@ -1,8 +1,8 @@
 # AGENTS.md — Skills Manager（Codex 项目级）
 **项目**: skills-manager  
 **适用范围**: 项目级（仓库根）  
-**版本**: 3.91  
-**最后更新**: 2026-04-17
+**版本**: 3.92  
+**最后更新**: 2026-04-20
 
 ## 1. 阅读指引（必读）
 - 本文件承接 `GlobalUser/AGENTS.md`，仅定义本仓落地动作（WHERE/HOW）。
@@ -15,6 +15,7 @@
 - 单一入口：`skills.ps1`；单一配置源：`skills.json`。
 - `agent/` 与 `vendor/` 为生成/缓存目录；`agent/` 禁止手改。
 - 自定义改动优先放 `overrides/` 或 `imports/`，避免直接改第三方缓存内容。
+- `reports/skill-audit/<run-id>/` 下的 `ai-brief.md` / `outer-ai-prompt.md` 属于运行态产物；禁止直接手改，提示词源码在 `src/Commands/AuditTargets.ps1`，默认覆写入口是 `overrides/audit-outer-ai-prompt.md`。
 
 ### A.2 执行锚点
 - 每次改动先声明：当前落点 -> 目标归宿 -> 验证方式。
@@ -54,6 +55,7 @@
 - `build.ps1`：从 `src/*` 生成根目录 `skills.ps1`。
 - `skills.json`：`vendors/mappings/targets/sync_mode/mcp_servers` 的唯一配置源。
 - `overrides/`、`imports/`：可维护输入层；`agent/`：分发产物层。
+- `src/Commands/AuditTargets.ps1`：目标仓审查链路与内置外层 AI 提示词源码，负责生成 `ai-brief.md`、`outer-ai-prompt.md` 和 `recommendations.template.json`。
 
 ### C.2 门禁命令与顺序（硬门禁）
 - build：`./build.ps1`

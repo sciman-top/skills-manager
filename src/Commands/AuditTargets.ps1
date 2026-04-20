@@ -25,30 +25,43 @@ function Get-DefaultAuditOuterAiPrompt {
    - ``reason_user_profile``（简短，1 句话）
    - ``reason_target_repo``（简短，1 句话）
    - ``sources``（可追溯来源链接）
-5. 在 recommendations.json 验证通过后再执行 dry-run。
-6. 读取 dry-run 结果并向用户汇总可安装/可卸载项及其原始序号。
-7. 若“新增建议”或“卸载建议”为空，必须明确写出“无该类建议”并给 1 句简短原因。
-8. 在没有用户明确确认前，不执行真正的安装或卸载。
+5. 对研究过但当前不应安装的技能，写入 ``do_not_install``；重叠信息仅写入 ``overlap_findings``，不要据此自动卸载。
+6. 在 recommendations.json 自检通过后再执行 dry-run。
+7. 读取 dry-run 结果并向用户汇总可安装/可卸载项及其原始序号。
+8. 若“新增建议”或“卸载建议”为空，必须明确写出“无该类建议”并给 1 句简短原因。
+9. 在没有用户明确确认前，不执行真正的安装或卸载。
 
 ## 强制阶段门禁（不可跳步）
 
 阶段 1：读取输入
 - 必须先读 ai-brief.md + user-profile.json + installed-skills.json。
-- 在 repo-scan.json / repo-scans.json 中按实际存在文件读取，不得臆测缺失内容。
+- 在 repo-scan.json / repo-scans.json 中按实际存在文件读取；若路径写成 ``N/A``，表示该输入未提供，不得臆测缺失内容。
+- 任一必需本地文件缺失、为空或无法读取时，立即停止，并向用户报告阻断项；不要跳过后继续 dry-run。
 
 阶段 2：写 recommendations.json
 - 仅输出机器可读 JSON，不夹带解释性正文。
 - 不要改变 recommendations.template.json 的 schema 与字段命名。
+- 模板中的 ``<...>`` 占位符必须全部替换或删除对应示例项，不得原样保留。
+- ``decision_basis.user_profile_used``、``decision_basis.target_scan_used``、``decision_basis.source_strategy_used`` 必须保持布尔值 ``true``，且 ``decision_basis.summary`` 不能为空。
+- 新增建议的 ``install.mode`` 只能是 ``manual`` 或 ``vendor``，``confidence`` 只能是 ``low`` / ``medium`` / ``high``。
 - 任一建议缺少 ``reason_user_profile`` 或 ``reason_target_repo``，视为未完成。
 - 证据不足时，宁可不推荐；不要“猜测式”新增或卸载。
 
-阶段 3：执行 dry-run
-- 顺序必须是：先写 recommendations.json -> 再 dry-run -> 再输出带理由的序号清单。
-- dry-run 结果中的序号必须原样保留，不得重排或改号。
+阶段 3：执行前自检
+- recommendations.json 必须可解析为 JSON，且 ``schema_version`` 必须是 ``2``。
+- 每条新增/卸载建议都必须包含双理由与至少 1 个真实 ``sources``。
+- ``sources`` 只能填写你在本轮真实查看过的来源；不要引用未打开、未读取或不可访问的来源。
+- 自检任一项失败，都必须先停下并汇报问题，不得进入 dry-run。
 
-阶段 4：等待确认后 apply
+阶段 4：执行 dry-run
+- 顺序必须是：先写 recommendations.json -> 再自检 -> 再 dry-run -> 再输出带理由的序号清单。
+- dry-run 结果中的序号必须原样保留，不得重排或改号。
+- 向用户汇报时，每条建议都要保留原始序号，并同时展示两条简短理由。
+
+阶段 5：等待确认后 apply
 - 真正执行状态变更前，必须先经过 dry-run。
 - 未收到用户明确确认，不得执行 --apply --yes。
+- 如果用户只确认部分序号，必须沿用 dry-run 原序号做选择，不得自行映射或重排。
 
 ## 质量与来源要求
 
@@ -56,12 +69,16 @@ function Get-DefaultAuditOuterAiPrompt {
 - 优先参考官方文档、skills.sh、find-skills、GitHub 高质量项目、GitHub Trending。
 - 每条建议都要能回答两个问题：为什么适合用户长期工作流、为什么符合该目标仓现状。
 - 若来源相互冲突，选择更高可信来源并在 ``sources`` 中保留依据。
+- ``overlap_findings`` 仅作报告，不可直接视为卸载建议；确需卸载时，必须单独给出双理由。
+- ``do_not_install`` 用于记录“已研究但当前不建议安装”的技能，避免重复研究。
+- 不得伪造仓库事实、来源链接、来源结论，或把模板示例伪装成真实结论。
 
 ## 交付方式
 
 - 如果用户让你“代理执行审查流程”，你应先完成 ``recommendations.json``。
 - 然后执行 dry-run。
-- 最后按 dry-run 结果向用户列出新增/卸载建议清单（逐项含简短理由），等待用户确认要执行的序号。
+- 最后按 dry-run 结果向用户列出新增/卸载建议清单（逐项含原始序号 + 双理由），等待用户确认要执行的序号。
+- 若存在阻断项或证据不足，先汇报阻断项或“无该类建议”的原因，再等待用户决策。
 "@
 }
 
@@ -842,30 +859,50 @@ Scan inputs:
 Rules:
 
 - All decisions must be based on BOTH user-profile.json and target repo scan facts.
+- Treat any scan path shown as `N/A` as "not provided"; do not infer hidden content from it.
+- If any required local input is missing, unreadable, or empty, stop and report the blocker instead of guessing.
 - Network research is authorized within this audit workflow, but installation still requires --apply --yes.
+- Replace every template placeholder wrapped in `<...>` or delete the example entry entirely; do not leave placeholder values in the final file.
+- Keep `decision_basis.user_profile_used`, `decision_basis.target_scan_used`, and `decision_basis.source_strategy_used` as boolean `true`, and provide a non-empty `decision_basis.summary`.
 - New installs require ``reason_user_profile``, ``reason_target_repo``, source links, confidence, repo, skill path, ref, and mode.
 - Removal recommendations must include ``reason_user_profile``, ``reason_target_repo``, sources, and the exact installed ``vendor``/``from`` pair.
+- `install.mode` must stay `manual` or `vendor`; `confidence` must stay `low`, `medium`, or `high`.
 - Each add/remove recommendation must keep both reasons concise and user-readable.
 - If either reason field is missing on any recommendation, treat the run as incomplete and stop before dry-run summary.
 - Overlap findings are report-only; do not recommend automatic uninstall.
+- Use `do_not_install` for researched options that should stay out of the repo right now.
 - Prefer high-reputation sources and avoid weak duplicate skills.
 - Cover the built-in default sources and record the actual sources you used.
 - Keep recommendations machine-readable JSON matching the template.
 - The template already includes placeholder example items. Replace placeholder values or delete the example entries you do not need; do not invent a different schema.
-- Do not fabricate repository facts or sources that are not present/accessible.
+- Cite only sources you actually inspected during this run. Do not fabricate repository facts, source links, or source conclusions.
 - If evidence is insufficient, leave the category empty and explain briefly instead of forcing low-quality recommendations.
 - After dry-run, show numbered add/remove lists with one-line reasons per item (``reason_user_profile`` + ``reason_target_repo``).
 - If a list is empty, explicitly output "no add recommendations" or "no removal recommendations" with a brief reason.
 - Keep dry-run numbering stable; do not renumber or reorder indexes in the user-facing summary.
 
+Pre-dry-run self-check:
+
+- recommendations.json parses as JSON and keeps `schema_version = 2`.
+- `decision_basis` keeps all required boolean flags at `true`.
+- No remaining placeholder values wrapped in `<...>`.
+- Each add/remove item has both reasons plus at least one real source.
+- Stop before dry-run if any self-check item fails.
+
 Execution order:
 
-1) Read all inputs
+1) Read all local inputs
 2) Write ``recommendations.json`` from ``recommendations.template.json``
-3) Validate required reason/source fields
+3) Run the self-check and stop if any item fails
 4) Execute dry-run
-5) Summarize dry-run with original indexes
+5) Summarize dry-run with original indexes and one-line dual-reason entries
 6) Wait for explicit user confirmation before apply
+
+User-facing dry-run summary format:
+
+- add: `[index] <skill-name> | user: <reason_user_profile> | repo: <reason_target_repo>`
+- remove: `[index] <skill-name> | user: <reason_user_profile> | repo: <reason_target_repo>`
+- empty category: `no add recommendations: <brief reason>` / `no removal recommendations: <brief reason>`
 
 User profile JSON: $userProfilePath
 Installed skills JSON: $installedSkillsPath
@@ -895,10 +932,12 @@ $(Get-AuditOuterAiPromptContent)
 
 1. 阅读 ai-brief.md，并按存在文件读取 repo-scan.json / repo-scans.json
 2. 按 recommendations.template.json schema v2 写出 recommendations.json
-3. 先做自检（通过后再 dry-run）：
-   - recommendations.json 可解析为 JSON
-   - recommendations.json 与模板字段同构
-   - 每条新增/卸载建议都包含 ``reason_user_profile`` + ``reason_target_repo`` + ``sources``
+3. 先做自检（全部通过后再 dry-run）：
+   - recommendations.json 可解析为 JSON，且 ``schema_version = 2``
+   - recommendations.json 与模板字段同构，``decision_basis`` 三个布尔字段都为 ``true``
+   - 不保留模板占位符 ``<...>`` 或未替换的示例值
+   - 每条新增/卸载建议都包含 ``reason_user_profile`` + ``reason_target_repo`` + 至少 1 个真实 ``sources``
+   - 新增建议的 ``install.mode`` 只能是 ``manual`` 或 ``vendor``，``confidence`` 只能是 ``low`` / ``medium`` / ``high``
 4. 执行 dry-run：
    .\skills.ps1 审查目标 应用 --recommendations "$([System.IO.Path]::Combine($reportRoot, 'recommendations.json'))" --dry-run-ack "我知道未落盘"
 5. 根据 dry-run 结果，向用户列出“新增建议 / 卸载建议”及序号
@@ -911,10 +950,24 @@ $(Get-AuditOuterAiPromptContent)
 - 新增与卸载建议都必须保留双依据和来源，且每项理由要简短可读
 - 若任一建议缺少 ``reason_user_profile`` 或 ``reason_target_repo``，视为未完成，不得进入下一步
 - 若证据不足，允许不推荐；不得“猜测式”新增/卸载
+- ``overlap_findings`` 仅用于报告重叠，``do_not_install`` 用于记录“已研究但当前不应安装”的技能
+- ``sources`` 只能填写本轮真实查看过的来源；不得伪造仓库事实或来源结论
 - 如果你继续执行 dry-run，请在总结里按 dry-run 原序号列出“新增建议 / 卸载建议”
 - 每条建议必须同时展示两条简短理由（用户需求 + 目标仓）
 - 某一类为空时，必须显式写“无该类建议”并给 1 句简短原因
 - 未经用户明确确认，不得执行 --apply --yes
+
+## Blocking Conditions
+
+- 任一必需输入文件缺失、为空或不可读时，立即停止并汇报阻断项
+- 若 ``repo-scan.json`` / ``repo-scans.json`` 路径显示为 ``N/A``，表示该输入未提供，不可臆造其内容
+- 若自检失败、仍有 ``<...>`` 占位符、或来源并非本轮真实查看结果，必须先修正再继续
+
+## User Summary Format
+
+- 新增建议：``[序号] <skill-name> | 用户需求：<reason_user_profile> | 目标仓：<reason_target_repo>``
+- 卸载建议：``[序号] <skill-name> | 用户需求：<reason_user_profile> | 目标仓：<reason_target_repo>``
+- 空列表：``无新增建议：<简短原因>`` / ``无卸载建议：<简短原因>``
 "@
     Set-ContentUtf8 $path $content
 }
@@ -1339,23 +1392,34 @@ function Write-AuditRecommendationSummary($plan) {
     Write-Host ""
     Write-Host "=== 审查建议摘要 ==="
     Write-Host ("决策依据: {0}" -f [string]$plan.decision_basis.summary)
+    Write-Host "提示：以下序号为原序号；后续 dry-run 汇报与 apply 选择必须沿用原序号。"
     Write-Host ""
     Write-Host ("新增建议: {0} 项" -f @($plan.items).Count)
-    $index = 1
-    foreach ($item in @($plan.items)) {
-        Write-Host ("{0}) {1}" -f $index, [string]$item.name)
-        Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
-        Write-Host ("   目标仓: {0}" -f [string]$item.reason_target_repo)
-        $index++
+    if (@($plan.items).Count -eq 0) {
+        Write-Host "无新增建议：当前输入证据未形成可执行新增项。"
+    }
+    else {
+        $index = 1
+        foreach ($item in @($plan.items)) {
+            Write-Host ("{0}) {1}" -f $index, [string]$item.name)
+            Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
+            Write-Host ("   目标仓: {0}" -f [string]$item.reason_target_repo)
+            $index++
+        }
     }
     Write-Host ""
     Write-Host ("卸载建议: {0} 项" -f @($plan.removal_candidates).Count)
-    $index = 1
-    foreach ($item in @($plan.removal_candidates)) {
-        Write-Host ("{0}) {1} [{2}|{3}] status={4}" -f $index, [string]$item.name, [string]$item.vendor, [string]$item.from, [string]$item.status)
-        Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
-        Write-Host ("   目标仓: {0}" -f [string]$item.reason_target_repo)
-        $index++
+    if (@($plan.removal_candidates).Count -eq 0) {
+        Write-Host "无卸载建议：当前输入证据未形成可执行卸载项。"
+    }
+    else {
+        $index = 1
+        foreach ($item in @($plan.removal_candidates)) {
+            Write-Host ("{0}) {1} [{2}|{3}] status={4}" -f $index, [string]$item.name, [string]$item.vendor, [string]$item.from, [string]$item.status)
+            Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
+            Write-Host ("   目标仓: {0}" -f [string]$item.reason_target_repo)
+            $index++
+        }
     }
 }
 
@@ -1575,7 +1639,7 @@ function Invoke-AuditTargetsScan {
     Write-Host ("- ai-brief.md: {0}" -f $briefPath)
     Write-Host ("- outer-ai-prompt.md: {0}" -f $outerAiPromptPath)
     Write-Host ("- recommendations.template.json: {0}" -f $templatePath)
-    Write-Host "下一步：把 outer-ai-prompt.md 交给 AI；AI 应先填写 recommendations.json，再执行 dry-run，并向用户列出新增/卸载清单。" -ForegroundColor Yellow
+    Write-Host "下一步：把 outer-ai-prompt.md 交给 AI；AI 应先填写并自检 recommendations.json，再执行 dry-run，并按原序号列出新增/卸载清单。" -ForegroundColor Yellow
     return [pscustomobject]@{
         run_id = $runId
         path = $reportRoot
@@ -1617,6 +1681,7 @@ function Invoke-AuditRecommendationsApply {
     Write-AuditRecommendationSummary $plan
 
     if (-not $Apply) {
+        Write-Host "dry-run 预览（沿用原序号）："
         foreach ($item in @($plan.items)) {
             Write-Host ("DRYRUN install: {0}" -f ($item.tokens -join " "))
         }
@@ -1755,13 +1820,13 @@ function Invoke-AuditRecommendationsTwoStageApply {
     )
     $dryRunReport = Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -DryRunAck $DryRunAck -RequireDryRunAck $true
     if ($dryRunReport.PSObject.Properties.Match("success").Count -gt 0 -and -not [bool]$dryRunReport.success) {
-        Write-Host "两阶段执行结束：dry-run 未完成确认，未执行落盘。" -ForegroundColor Yellow
+        Write-Host "应用确认结束：dry-run 未完成确认，未执行落盘。" -ForegroundColor Yellow
         return $dryRunReport
     }
     $plannedAdds = @($dryRunReport.items | Where-Object { [string]$_.status -eq "planned" }).Count
     $plannedRemoves = @($dryRunReport.removal_candidates | Where-Object { [string]$_.status -eq "planned" }).Count
     if ($plannedAdds -eq 0 -and $plannedRemoves -eq 0) {
-        Write-Host "两阶段执行结束：无可执行变更，保持当前状态。" -ForegroundColor Yellow
+        Write-Host "应用确认结束：无可执行变更，保持当前状态。" -ForegroundColor Yellow
         return $dryRunReport
     }
 

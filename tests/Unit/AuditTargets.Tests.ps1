@@ -525,11 +525,30 @@ Describe "Audit Targets" {
             $raw | Should Match "14\) 编辑外层 AI 审查提示词"
         }
 
+        It "Documents audit help source with self-check and prompt-source guidance" {
+            $raw = Get-Content -LiteralPath (Join-Path $Root "src/Commands/Utils.ps1") -Raw
+            $raw | Should Match "先写并自检 recommendations"
+            $raw | Should Match "不要直接手改 run 目录产物"
+            $raw | Should Match "沿用原序号"
+            $raw | Should Match "17\) 审查目标（需求 / 目标仓 / 审查包 / 自检后 dry-run / 按原序号选择增删）"
+        }
+
+        It "Documents audit runtime summary wording with original-index and empty-list guidance" {
+            $raw = Get-Content -LiteralPath (Join-Path $Root "src/Commands/AuditTargets.ps1") -Raw
+            $raw | Should Match "以下序号为原序号"
+            $raw | Should Match "无新增建议："
+            $raw | Should Match "无卸载建议："
+            $raw | Should Match "dry-run 预览（沿用原序号）"
+            $raw | Should Match "应用确认结束：dry-run 未完成确认"
+        }
+
         It "Returns a built-in outer AI prompt" {
             $prompt = Get-AuditOuterAiPromptContent
             $prompt | Should Match "Outer AI Audit Prompt"
             $prompt | Should Match "recommendations.template.json"
             $prompt | Should Match "dry-run"
+            $prompt | Should Match "do_not_install"
+            $prompt | Should Match "N/A"
         }
 
         It "Keeps built-in prompt markdown inline code literal without control-character corruption" {
@@ -547,6 +566,38 @@ Describe "Audit Targets" {
                 }
             }
             $hasBareCr | Should Be $false
+        }
+
+        It "Writes audit brief with explicit self-check and blocker guidance" {
+            $path = Join-Path $TestDrive "ai-brief.md"
+            $scanData = @([pscustomobject]@{
+                target = [pscustomobject]@{
+                    name = "demo"
+                }
+            })
+
+            Write-AuditAiBrief $path $scanData "user-profile.json" "repo-scan.json" "repo-scans.json" "installed-skills.json" "recommendations.template.json"
+            $brief = Get-Content -LiteralPath $path -Raw
+
+            $brief | Should Match "Pre-dry-run self-check"
+            $brief | Should Match "do_not_install"
+            $brief | Should Match "Cite only sources you actually inspected during this run"
+            $brief | Should Match "User-facing dry-run summary format"
+            $brief | Should Match "Stop before dry-run if any self-check item fails"
+        }
+
+        It "Writes runtime outer AI prompt with blocker and summary format sections" {
+            $path = Join-Path $TestDrive "outer-ai-prompt.md"
+            $reportRoot = Join-Path $TestDrive "skill-audit-run"
+
+            Write-AuditOuterAiPromptFile $path $reportRoot "ai-brief.md" "user-profile.json" "repo-scan.json" "repo-scans.json" "installed-skills.json" "recommendations.template.json"
+            $prompt = Get-Content -LiteralPath $path -Raw
+
+            $prompt | Should Match "## Blocking Conditions"
+            $prompt | Should Match "do_not_install"
+            $prompt | Should Match "无新增建议"
+            $prompt | Should Match "install.mode"
+            $prompt | Should Match "sources`` 只能填写本轮真实查看过的来源"
         }
 
         It "Builds recommendations template with placeholder examples" {

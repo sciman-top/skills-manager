@@ -54,6 +54,23 @@ Recommended flow:
 4. Run `构建生效` to generate `agent/` and sync targets.
 5. Run `doctor --strict` to validate configuration and sync state.
 
+## One-Click Workflows (Recommended)
+
+```powershell
+.\skills.ps1 一键 --list
+.\skills.ps1 一键 新手
+.\skills.ps1 一键 维护 --continue-on-error
+.\skills.ps1 一键 审查 --no-prompt
+.\skills.ps1 workflow all --no-prompt
+```
+
+Workflow profiles:
+
+- `新手`: `发现 -> 安装 -> 构建生效 -> doctor --strict`
+- `维护`: `更新 -> 构建生效 -> 同步MCP -> doctor --strict`
+- `审查`: `审查目标 需求查看 -> 列表 -> 扫描 -> 状态`
+- `all`: `更新 -> 发现 -> 构建生效 -> 同步MCP -> doctor --strict`
+
 ## Common Commands
 
 Chinese commands:
@@ -107,8 +124,9 @@ After each `scan`, prefer handing the run-local `outer-ai-prompt.md` to the oute
 
 - read `ai-brief.md`
 - fill `recommendations.json` using the `recommendations.template.json` schema
-- run `apply-flow` first (dry-run -> confirmation token -> apply)
-- present numbered add/remove recommendation lists
+- run a self-check first: schema, placeholders, dual reasons, and real sources must all pass
+- run `apply-flow` after that (dry-run -> confirmation token -> apply)
+- present add/remove recommendation lists with the original dry-run indexes
 - or run `apply --apply --yes` directly when explicit execution is intended
 
 Formal audits must always use both context layers:
@@ -154,7 +172,7 @@ Before applying, the script prints two independent recommendation lists:
 
 You can choose items interactively by entering add indexes and remove indexes, or pass them non-interactively through `--add-indexes` and `--remove-indexes`. The two lists have independent numbering; choosing removals never changes the add-list index mapping.
 
-If the outer AI has workspace execution capability, the most direct handoff is to ask it to execute the run-local `outer-ai-prompt.md`.
+If the outer AI has workspace execution capability, the most direct handoff is to ask it to execute the run-local `outer-ai-prompt.md`, with the expectation that it self-checks `recommendations.json` before dry-run.
 
 Equivalent English aliases:
 
