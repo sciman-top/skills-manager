@@ -46,6 +46,19 @@ For first-time setup, start from the interactive menu:
 .\skills.ps1
 ```
 
+The interactive menu is organized around expert-first direct actions. The top level now prioritizes:
+
+- Browse Skills
+- Pick Install
+- Paste Command Import
+- Remove Skills
+- Rebuild and Sync (CLI command remains `构建生效`)
+- Update Upstream (CLI command remains `更新`)
+- Target Repo Audit
+- MCP Services
+- Skill Library Admin
+- More
+
 Recommended flow:
 
 1. Add a skill repository, or import one skill with an `add` / `npx` command.
