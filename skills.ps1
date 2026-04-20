@@ -9946,8 +9946,8 @@ function 菜单 {
         Write-Host "8) MCP 服务"
         Write-Host "9) 技能库管理"
         Write-Host "10) 更多"
-        Write-Host "11) 帮助"
-        Write-Host "12) 退出"
+        Write-Host "98) 帮助"
+        Write-Host "0) 退出"
         $c = Read-HostSafe "请选择"
         switch ($c) {
             "1" { 发现 }
@@ -9960,8 +9960,7 @@ function 菜单 {
             "8" { MCP菜单 }
             "9" { 技能库管理菜单 }
             "10" { 更多菜单 }
-            "11" { 帮助 }
-            "12" { return }
+            "98" { 帮助 }
             "0" { return }
             default { Write-Host "无效选择。" }
         }
