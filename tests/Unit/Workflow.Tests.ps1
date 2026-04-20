@@ -41,6 +41,21 @@ Describe "Workflow command" {
     }
 
     Context "Invoke-Workflow" {
+        It "Uses menu-aligned wording in the workflow catalog" {
+            $catalog = Get-WorkflowCatalog
+            $catalog.quickstart.steps[0].title | Should Be "浏览技能"
+            $catalog.quickstart.steps[1].title | Should Be "选择安装"
+            $catalog.quickstart.steps[2].title | Should Be "重建并同步"
+            $catalog.maintenance.description | Should Match "重建并同步"
+            $catalog.audit.description | Should Match "目标仓审查"
+        }
+
+        It "Uses menu-aligned wording in the interactive workflow picker source" {
+            $raw = Get-Content -LiteralPath (Join-Path $Root "src/Commands/Workflow.ps1") -Raw
+            $raw | Should Match '1\) 新手（浏览技能 -> 选择安装 -> 重建并同步 -> doctor --strict）'
+            $raw | Should Match '2\) 维护（更新上游 -> 重建并同步 -> 同步MCP -> doctor --strict）'
+        }
+
         It "Runs maintenance workflow in order under no-prompt mode" {
             $script:callOrder = New-Object System.Collections.Generic.List[string]
             Mock 更新 { $script:callOrder.Add("更新") | Out-Null }

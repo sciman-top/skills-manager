@@ -15,23 +15,23 @@ function Get-WorkflowCatalog {
         quickstart = [pscustomobject]@{
             key = "quickstart"
             name = "新手"
-            description = "从浏览技能到安装、构建和严格检查的一条龙流程。"
+            description = "从浏览技能到安装、重建并同步、严格检查的一条龙流程。"
             steps = @(
                 [pscustomobject]@{
                     id = "discover"
-                    title = "发现可用技能"
+                    title = "浏览技能"
                     command = "发现"
                     action = { 发现 }
                 },
                 [pscustomobject]@{
                     id = "install_interactive"
-                    title = "交互选择安装"
+                    title = "选择安装"
                     command = "安装"
                     action = { 安装 }
                 },
                 [pscustomobject]@{
                     id = "build_apply"
-                    title = "构建并生效"
+                    title = "重建并同步"
                     command = "构建生效"
                     action = { 构建生效 }
                 },
@@ -41,17 +41,17 @@ function Get-WorkflowCatalog {
         maintenance = [pscustomobject]@{
             key = "maintenance"
             name = "维护"
-            description = "适合日常维护：更新、构建生效、同步 MCP、严格检查。"
+            description = "适合日常维护：更新上游、重建并同步、同步 MCP、严格检查。"
             steps = @(
                 [pscustomobject]@{
                     id = "update"
-                    title = "更新上游并重建"
+                    title = "更新上游"
                     command = "更新"
                     action = { 更新 }
                 },
                 [pscustomobject]@{
                     id = "build_apply"
-                    title = "构建并生效"
+                    title = "重建并同步"
                     command = "构建生效"
                     action = { 构建生效 }
                 },
@@ -67,17 +67,17 @@ function Get-WorkflowCatalog {
         audit = [pscustomobject]@{
             key = "audit"
             name = "审查"
-            description = "聚焦目标仓审查：查看上下文、生成审查包、回看最近应用状态。"
+            description = "聚焦目标仓审查：查看需求、生成审查包、回看最近状态。"
             steps = @(
                 [pscustomobject]@{
                     id = "audit_profile_show"
-                    title = "查看用户基本需求"
+                    title = "查看需求"
                     command = "审查目标 需求查看"
                     action = { Invoke-AuditTargetsCommand @("profile-show") }
                 },
                 [pscustomobject]@{
                     id = "audit_target_list"
-                    title = "列出目标仓"
+                    title = "目标仓列表"
                     command = "审查目标 列出"
                     action = { Invoke-AuditTargetsCommand @("list") }
                 },
@@ -89,7 +89,7 @@ function Get-WorkflowCatalog {
                 },
                 [pscustomobject]@{
                     id = "audit_status"
-                    title = "查看最近应用状态"
+                    title = "查看最近状态"
                     command = "审查目标 状态"
                     action = { Invoke-AuditTargetsCommand @("status") }
                 }
@@ -98,23 +98,23 @@ function Get-WorkflowCatalog {
         all = [pscustomobject]@{
             key = "all"
             name = "全流程"
-            description = "通用一键巡检：更新、发现、构建生效、同步 MCP、严格检查。"
+            description = "通用一键巡检：更新上游、浏览技能、重建并同步、同步 MCP、严格检查。"
             steps = @(
                 [pscustomobject]@{
                     id = "update"
-                    title = "更新上游并重建"
+                    title = "更新上游"
                     command = "更新"
                     action = { 更新 }
                 },
                 [pscustomobject]@{
                     id = "discover"
-                    title = "发现可用技能"
+                    title = "浏览技能"
                     command = "发现"
                     action = { 发现 }
                 },
                 [pscustomobject]@{
                     id = "build_apply"
-                    title = "构建并生效"
+                    title = "重建并同步"
                     command = "构建生效"
                     action = { 构建生效 }
                 },
@@ -211,10 +211,10 @@ function Select-WorkflowProfileInteractively($catalog) {
     while ($true) {
         Write-Host ""
         Write-Host "=== 选择一键工作流场景 ==="
-        Write-Host "1) 新手（发现 -> 安装 -> 构建生效 -> doctor --strict）"
-        Write-Host "2) 维护（更新 -> 构建生效 -> 同步MCP -> doctor --strict）"
-        Write-Host "3) 审查（需求查看 -> 目标仓列表 -> 扫描 -> 状态）"
-        Write-Host "4) 全流程（更新 -> 发现 -> 构建生效 -> 同步MCP -> doctor --strict）"
+        Write-Host "1) 新手（浏览技能 -> 选择安装 -> 重建并同步 -> doctor --strict）"
+        Write-Host "2) 维护（更新上游 -> 重建并同步 -> 同步MCP -> doctor --strict）"
+        Write-Host "3) 审查（查看需求 -> 目标仓列表 -> 生成审查包 -> 查看最近状态）"
+        Write-Host "4) 全流程（更新上游 -> 浏览技能 -> 重建并同步 -> 同步MCP -> doctor --strict）"
         Write-Host "0) 取消"
         $choice = Read-HostSafe "请选择"
         switch ($choice) {

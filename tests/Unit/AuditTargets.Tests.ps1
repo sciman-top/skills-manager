@@ -566,7 +566,7 @@ Describe "Audit Targets" {
         It "Documents audit help source with self-check and prompt-source guidance" {
             $raw = Get-Content -LiteralPath (Join-Path $Root "src/Commands/Utils.ps1") -Raw
             $auditBody = Get-FunctionBody $raw "审查目标菜单"
-            $raw | Should Match "先写并自检 recommendations"
+            $raw | Should Match "先写完并自检 .*recommendations\.json"
             $raw | Should Match "不要直接手改 run 目录产物"
             $raw | Should Match "沿用原序号"
             $auditBody | Should Not Match "17\) 审查目标（需求 / 目标仓 / 审查包 / 自检后 dry-run / 按原序号选择增删）"

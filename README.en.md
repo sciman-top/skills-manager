@@ -79,10 +79,10 @@ Recommended flow:
 
 Workflow profiles:
 
-- `新手`: `发现 -> 安装 -> 构建生效 -> doctor --strict`
-- `维护`: `更新 -> 构建生效 -> 同步MCP -> doctor --strict`
-- `审查`: `审查目标 需求查看 -> 列表 -> 扫描 -> 状态`
-- `all`: `更新 -> 发现 -> 构建生效 -> 同步MCP -> doctor --strict`
+- `新手`: `浏览技能 -> 选择安装 -> 重建并同步 -> doctor --strict`
+- `维护`: `更新上游 -> 重建并同步 -> 同步MCP -> doctor --strict`
+- `审查`: `查看需求 -> 目标仓列表 -> 生成审查包 -> 查看最近状态`
+- `all`: `更新上游 -> 浏览技能 -> 重建并同步 -> 同步MCP -> doctor --strict`
 
 ## Common Commands
 
