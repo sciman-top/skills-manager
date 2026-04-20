@@ -304,88 +304,8 @@
       "vendor": "superpowers"
     },
     {
-      "from": "playwright-best-practices",
-      "to": "playwright-best-practices",
-      "vendor": "manual"
-    },
-    {
-      "from": "agent-browser",
-      "to": "agent-browser",
-      "vendor": "manual"
-    },
-    {
-      "from": "architecture-patterns",
-      "to": "architecture-patterns",
-      "vendor": "manual"
-    },
-    {
-      "from": "d3-viz",
-      "to": "d3-viz",
-      "vendor": "manual"
-    },
-    {
-      "from": "data-visualization",
-      "to": "data-visualization",
-      "vendor": "manual"
-    },
-    {
-      "from": "debug-dotnet",
-      "to": "debug-dotnet",
-      "vendor": "manual"
-    },
-    {
-      "from": "dotnet-backend-patterns",
-      "to": "dotnet-backend-patterns",
-      "vendor": "manual"
-    },
-    {
-      "from": "drawio-diagram-forge",
-      "to": "drawio-diagram-forge",
-      "vendor": "manual"
-    },
-    {
-      "from": "error-handling-patterns",
-      "to": "error-handling-patterns",
-      "vendor": "manual"
-    },
-    {
-      "from": "find-skills",
-      "to": "find-skills",
-      "vendor": "manual"
-    },
-    {
-      "from": "manim-composer",
-      "to": "manim-composer",
-      "vendor": "manual"
-    },
-    {
-      "from": "manimce-best-practices",
-      "to": "manimce-best-practices",
-      "vendor": "manual"
-    },
-    {
-      "from": "modern-python",
-      "to": "modern-python",
-      "vendor": "manual"
-    },
-    {
       "from": "openpyxl",
       "to": "openpyxl",
-      "vendor": "manual"
-    },
-    {
-      "from": "powerpoint-automation",
-      "to": "powerpoint-automation",
-      "vendor": "manual"
-    },
-    {
-      "from": "prompt-engineering-patterns",
-      "to": "prompt-engineering-patterns",
-      "vendor": "manual"
-    },
-    {
-      "from": "python-design-patterns",
-      "to": "python-design-patterns",
       "vendor": "manual"
     },
     {
@@ -394,68 +314,8 @@
       "vendor": "manual"
     },
     {
-      "from": "python-performance-optimization",
-      "to": "python-performance-optimization",
-      "vendor": "manual"
-    },
-    {
       "from": "python-pptx",
       "to": "python-pptx",
-      "vendor": "manual"
-    },
-    {
-      "from": "python-testing-patterns",
-      "to": "python-testing-patterns",
-      "vendor": "manual"
-    },
-    {
-      "from": "storyboard-creation",
-      "to": "storyboard-creation",
-      "vendor": "manual"
-    },
-    {
-      "from": "tailwind-design-system",
-      "to": "tailwind-design-system",
-      "vendor": "manual"
-    },
-    {
-      "from": "ui-animation",
-      "to": "ui-animation",
-      "vendor": "manual"
-    },
-    {
-      "from": "ui-ux-pro-max",
-      "to": "ui-ux-pro-max",
-      "vendor": "manual"
-    },
-    {
-      "from": "vite",
-      "to": "vite",
-      "vendor": "manual"
-    },
-    {
-      "from": "grill-me",
-      "to": "grill-me",
-      "vendor": "manual"
-    },
-    {
-      "from": "write-a-prd",
-      "to": "write-a-prd",
-      "vendor": "manual"
-    },
-    {
-      "from": "prd-to-plan",
-      "to": "prd-to-plan",
-      "vendor": "manual"
-    },
-    {
-      "from": "prd-to-issues",
-      "to": "prd-to-issues",
-      "vendor": "manual"
-    },
-    {
-      "from": "improve-codebase-architecture",
-      "to": "improve-codebase-architecture",
       "vendor": "manual"
     },
     {
