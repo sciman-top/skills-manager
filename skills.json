@@ -439,11 +439,6 @@
       "vendor": "manual"
     },
     {
-      "from": "prd-to-plan",
-      "to": "prd-to-plan",
-      "vendor": "manual"
-    },
-    {
       "from": "prd-to-issues",
       "to": "prd-to-issues",
       "vendor": "manual"
@@ -755,14 +750,6 @@
       "skill": "to-prd",
       "mode": "manual",
       "ref": "main"
-    },
-    {
-      "repo": "https://github.com/mattpocock/skills.git",
-      "ref": "main",
-      "sparse": false,
-      "skill": "to-issues",
-      "mode": "manual",
-      "name": "prd-to-plan"
     },
     {
       "repo": "https://github.com/mattpocock/skills.git",

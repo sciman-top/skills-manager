@@ -41,6 +41,10 @@ function Get-DenyIdentities([string]$path) {
     return @($idents)
 }
 
+function Get-DefaultAclBackupRoot([string]$ResolvedRepoRoot) {
+    return (Join-Path $ResolvedRepoRoot "reports\runtime\acl-backups")
+}
+
 Assert-Admin
 
 $gitDir = Join-Path $RepoRoot ".git"
@@ -49,7 +53,11 @@ if (-not (Test-Path -LiteralPath $gitDir -PathType Container)) {
 }
 
 $ts = Get-Date -Format "yyyyMMdd-HHmmss"
-$backupPath = Join-Path $RepoRoot ("acl-backup-git-" + $ts + ".txt")
+$backupRoot = Get-DefaultAclBackupRoot $RepoRoot
+if (-not (Test-Path -LiteralPath $backupRoot)) {
+    New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
+}
+$backupPath = Join-Path $backupRoot ("acl-backup-git-" + $ts + ".txt")
 
 Write-Step ("RepoRoot: " + $RepoRoot)
 Write-Step ("GitDir  : " + $gitDir)

@@ -13,6 +13,12 @@ $Files = @(
     "Commands/Update.ps1",
     "Commands/Mcp.ps1",
     "Commands/AuditTargets.ps1",
+    "Commands/AuditTargets.Template.ps1",
+    "Commands/AuditTargets.Snapshot.ps1",
+    "Commands/AuditTargets.Plan.ps1",
+    "Commands/AuditTargets.Bundle.ps1",
+    "Commands/AuditTargets.Apply.ps1",
+    "Commands/AuditTargets.Args.ps1",
     "Commands/Workflow.ps1",
     "Commands/Utils.ps1",
     "Main.ps1"

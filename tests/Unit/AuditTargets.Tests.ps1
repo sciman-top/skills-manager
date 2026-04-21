@@ -641,7 +641,7 @@ Describe "Audit Targets" {
         }
 
         It "Documents audit runtime summary wording with original-index and empty-list guidance" {
-            $raw = Get-Content -LiteralPath (Join-Path $Root "src/Commands/AuditTargets.ps1") -Raw
+            $raw = Get-Content -LiteralPath (Join-Path $Root "skills.ps1") -Raw
             $raw | Should Match "以下序号为原序号"
             $raw | Should Match "无新增建议："
             $raw | Should Match "无卸载建议："

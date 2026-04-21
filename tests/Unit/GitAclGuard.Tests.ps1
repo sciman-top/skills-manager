@@ -4,6 +4,15 @@ Describe "git-acl-guard script" {
     BeforeAll {
         $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
         $scriptPath = Join-Path $repoRoot "scripts\git-acl-guard.ps1"
+        $fixScriptPath = Join-Path $repoRoot "scripts\fix-git-acl.ps1"
+    }
+
+    It "Stores ACL backups under reports/runtime/acl-backups by default" {
+        $raw = Get-Content -LiteralPath $scriptPath -Raw
+        $raw | Should Match "reports\\runtime\\acl-backups"
+
+        $fixRaw = Get-Content -LiteralPath $fixScriptPath -Raw
+        $fixRaw | Should Match "reports\\runtime\\acl-backups"
     }
 
     It "Writes FailureReason and JSON fields when DENY exists without fix mode" {

@@ -8,22 +8,12 @@ Describe "Build script" {
         New-Item -ItemType Directory -Path $commandsRoot -Force | Out-Null
 
         $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-        Copy-Item -LiteralPath (Join-Path $repoRoot "build.ps1") -Destination (Join-Path $workspace "build.ps1")
+        $buildPath = Join-Path $repoRoot "build.ps1"
+        Copy-Item -LiteralPath $buildPath -Destination (Join-Path $workspace "build.ps1")
 
-        $files = @(
-            "Version.ps1",
-            "Core.ps1",
-            "Git.ps1",
-            "Config.ps1",
-            "Commands/Doctor.ps1",
-            "Commands/Install.ps1",
-            "Commands/Update.ps1",
-            "Commands/Mcp.ps1",
-            "Commands/AuditTargets.ps1",
-            "Commands/Workflow.ps1",
-            "Commands/Utils.ps1",
-            "Main.ps1"
-        )
+        $buildRaw = Get-Content -LiteralPath $buildPath -Raw
+        $files = @([regex]::Matches($buildRaw, '"([^"]+\.ps1)"') | ForEach-Object { $_.Groups[1].Value })
+        $files = @($files | Where-Object { $_ -ne "skills.ps1" })
 
         $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
         $contents = @{}

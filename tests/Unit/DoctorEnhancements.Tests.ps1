@@ -132,7 +132,7 @@ Describe "Doctor Enhancements" {
             $items.Count | Should Be 0
         }
 
-        It "Ignores update metrics in anomaly checks by default" {
+        It "Flags update metrics when their metric-specific thresholds are exceeded" {
             $summary = @(
                 [pscustomobject]@{ metric = "update_imports"; last_ms = 120000; avg_ms = 100000; samples = 3 },
                 [pscustomobject]@{ metric = "update_total"; last_ms = 600000; avg_ms = 450000; samples = 3 }
@@ -140,7 +140,8 @@ Describe "Doctor Enhancements" {
 
             $items = Get-PerfAnomalyItems $summary 5000
 
-            $items.Count | Should Be 0
+            $items.Count | Should Be 1
+            $items[0] | Should Match "update_total"
         }
 
         It "Ignores high latency when samples are insufficient" {

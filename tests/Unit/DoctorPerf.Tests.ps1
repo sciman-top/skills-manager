@@ -58,8 +58,8 @@ Describe "Doctor Performance Summary" {
             $build.anomaly_check_enabled | Should Be $true
             $build.effective_threshold_ms | Should Be 8000
 
-            $update.anomaly_check_enabled | Should Be $false
-            $update.effective_threshold_ms | Should Be $null
+            $update.anomaly_check_enabled | Should Be $true
+            $update.effective_threshold_ms | Should Be 240000
 
             $custom.anomaly_check_enabled | Should Be $true
             $custom.effective_threshold_ms | Should Be 5000

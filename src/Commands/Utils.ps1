@@ -91,6 +91,82 @@ function Get-自动更新任务名 {
 function Get-自动更新脚本路径 {
     return (Join-Path $Root "scripts/weekly-auto-update.ps1")
 }
+function Get-自动更新默认模式 {
+    return "weekly"
+}
+function Get-自动更新默认时间 {
+    return "20:00"
+}
+function Get-自动更新默认星期 {
+    return "Friday"
+}
+function Get-自动更新星期别名映射 {
+    return [ordered]@{
+        "mon" = "Monday"; "monday" = "Monday"; "1" = "Monday"; "周一" = "Monday"; "星期一" = "Monday"
+        "tue" = "Tuesday"; "tues" = "Tuesday"; "tuesday" = "Tuesday"; "2" = "Tuesday"; "周二" = "Tuesday"; "星期二" = "Tuesday"
+        "wed" = "Wednesday"; "wednesday" = "Wednesday"; "3" = "Wednesday"; "周三" = "Wednesday"; "星期三" = "Wednesday"
+        "thu" = "Thursday"; "thur" = "Thursday"; "thurs" = "Thursday"; "thursday" = "Thursday"; "4" = "Thursday"; "周四" = "Thursday"; "星期四" = "Thursday"
+        "fri" = "Friday"; "friday" = "Friday"; "5" = "Friday"; "周五" = "Friday"; "星期五" = "Friday"
+        "sat" = "Saturday"; "saturday" = "Saturday"; "6" = "Saturday"; "周六" = "Saturday"; "星期六" = "Saturday"
+        "sun" = "Sunday"; "sunday" = "Sunday"; "7" = "Sunday"; "周日" = "Sunday"; "星期日" = "Sunday"; "周天" = "Sunday"; "星期天" = "Sunday"
+    }
+}
+function Normalize-自动更新模式([string]$mode) {
+    if ([string]::IsNullOrWhiteSpace($mode)) { return (Get-自动更新默认模式) }
+    $v = $mode.Trim().ToLowerInvariant()
+    if ($v -eq "daily" -or $v -eq "每天" -or $v -eq "每日") { return "daily" }
+    if ($v -eq "weekly" -or $v -eq "每周") { return "weekly" }
+    throw ("自动更新模式仅支持 daily 或 weekly：{0}" -f $mode)
+}
+function Normalize-自动更新时间([string]$at) {
+    $value = if ([string]::IsNullOrWhiteSpace($at)) { Get-自动更新默认时间 } else { $at.Trim() }
+    Need ($value -match "^\d{1,2}:\d{2}$") ("时间格式无效：{0}（请使用 HH:mm）" -f $value)
+    $parts = $value.Split(":")
+    $hour = [int]$parts[0]
+    $minute = [int]$parts[1]
+    Need ($hour -ge 0 -and $hour -le 23) ("小时无效：{0}（0-23）" -f $hour)
+    Need ($minute -ge 0 -and $minute -le 59) ("分钟无效：{0}（0-59）" -f $minute)
+    return ("{0:D2}:{1:D2}" -f $hour, $minute)
+}
+function Normalize-自动更新星期([string]$day) {
+    $raw = if ([string]::IsNullOrWhiteSpace($day)) { Get-自动更新默认星期 } else { $day.Trim() }
+    $key = $raw.ToLowerInvariant()
+    $map = Get-自动更新星期别名映射
+    if ($map.Contains($key)) { return [string]$map[$key] }
+    $allowed = @("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+    foreach ($item in $allowed) {
+        if ($item.Equals($raw, [System.StringComparison]::OrdinalIgnoreCase)) { return $item }
+    }
+    throw ("星期无效：{0}（可用 Monday..Sunday / 周一..周日）" -f $day)
+}
+function Format-自动更新计划说明([string]$mode, [string]$at, [string]$dayOfWeek) {
+    if ($mode -eq "daily") {
+        return ("每天 {0}" -f $at)
+    }
+    return ("每周 {0} {1}" -f $dayOfWeek, $at)
+}
+function Get-自动更新任务描述([string]$mode, [string]$at, [string]$dayOfWeek) {
+    return ("skills-manager 自动执行 更新 + 同步MCP | mode={0};at={1};day={2}" -f $mode, $at, $dayOfWeek)
+}
+function Parse-自动更新任务描述([string]$description) {
+    $result = [ordered]@{
+        found = $false
+        mode = (Get-自动更新默认模式)
+        at = (Get-自动更新默认时间)
+        day = (Get-自动更新默认星期)
+    }
+    if ([string]::IsNullOrWhiteSpace($description)) { return [pscustomobject]$result }
+    if ($description -notmatch "mode=([^;|]+)") { return [pscustomobject]$result }
+    $result.mode = Normalize-自动更新模式 $Matches[1]
+    if ($description -match "at=([^;|]+)") {
+        $result.at = Normalize-自动更新时间 $Matches[1]
+    }
+    if ($description -match "day=([^;|]+)") {
+        $result.day = Normalize-自动更新星期 $Matches[1]
+    }
+    $result.found = $true
+    return [pscustomobject]$result
+}
 function 获取自动更新任务 {
     if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) { return $null }
     try { return (Get-ScheduledTask -TaskName (Get-自动更新任务名) -ErrorAction Stop) }
@@ -113,13 +189,15 @@ function 查看自动更新状态 {
         if ($info.NextRunTime -and $info.NextRunTime -gt [datetime]::MinValue) { $nextRun = $info.NextRunTime.ToString("yyyy-MM-dd HH:mm:ss") }
         if ($info.LastRunTime -and $info.LastRunTime -gt [datetime]::MinValue) { $lastRun = $info.LastRunTime.ToString("yyyy-MM-dd HH:mm:ss") }
     }
-    Write-Host ("自动更新：已启用（每周五 20:00，本机时间）")
+    $parsed = Parse-自动更新任务描述 ([string]$task.Description)
+    $schedule = if ($parsed.found) { Format-自动更新计划说明 ([string]$parsed.mode) ([string]$parsed.at) ([string]$parsed.day) } else { "（旧任务：计划信息未记录）" }
+    Write-Host ("自动更新：已启用（{0}，本机时间）" -f $schedule)
     Write-Host ("任务名：{0}" -f $taskName)
     Write-Host ("状态：{0}" -f $state)
     Write-Host ("下次运行：{0}" -f $nextRun)
     Write-Host ("上次运行：{0}" -f $lastRun)
 }
-function 启用自动更新 {
+function 启用自动更新([string]$Mode = "", [string]$At = "", [string]$DayOfWeek = "") {
     $taskName = Get-自动更新任务名
     $runnerPath = Get-自动更新脚本路径
     Need (Test-Path $runnerPath) ("缺少自动更新脚本：{0}" -f $runnerPath)
@@ -127,16 +205,26 @@ function 启用自动更新 {
     Need (Get-Command New-ScheduledTaskAction -ErrorAction SilentlyContinue) "当前环境不支持 ScheduledTasks 模块。"
     Need (Get-Command powershell -ErrorAction SilentlyContinue) "未找到 powershell 可执行文件。"
 
+    $modeNormalized = Normalize-自动更新模式 $Mode
+    $atNormalized = Normalize-自动更新时间 $At
+    $dayNormalized = if ($modeNormalized -eq "weekly") { Normalize-自动更新星期 $DayOfWeek } else { Get-自动更新默认星期 }
+
     if (Skip-IfDryRun "启用自动更新计划任务") { return }
 
     $pwsh = (Get-Command powershell -ErrorAction Stop).Source
     $args = ('-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $runnerPath)
     $action = New-ScheduledTaskAction -Execute $pwsh -Argument $args -WorkingDirectory $Root
-    $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Friday -At "20:00"
+    $trigger = if ($modeNormalized -eq "daily") {
+        New-ScheduledTaskTrigger -Daily -At $atNormalized
+    }
+    else {
+        New-ScheduledTaskTrigger -Weekly -DaysOfWeek $dayNormalized -At $atNormalized
+    }
     $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "skills-manager 每周五 20:00 自动执行 更新 + 同步MCP" -Force | Out-Null
-    Write-Host "✅ 已启用自动更新：每周五 20:00（本机时间）。"
+    $description = Get-自动更新任务描述 $modeNormalized $atNormalized $dayNormalized
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description $description -Force | Out-Null
+    Write-Host ("✅ 已启用自动更新：{0}（本机时间）。" -f (Format-自动更新计划说明 $modeNormalized $atNormalized $dayNormalized))
     查看自动更新状态
 }
 function 禁用自动更新 {
@@ -154,15 +242,24 @@ function 自动更新设置 {
     while ($true) {
         Write-Host ""
         Write-Host "=== 自动更新设置 ==="
-        Write-Host "目标：每周五 20:00 自动执行【更新 + 同步MCP】"
+        Write-Host "目标：按计划自动执行【更新 + 同步MCP】"
         查看自动更新状态
-        Write-Host "1) 启用（每周五 20:00）"
+        Write-Host "1) 启用/更新计划（daily/weekly）"
         Write-Host "2) 禁用"
         Write-Host "3) 查看状态"
         Write-Host "0) 返回"
         $c = Read-HostSafe "请选择"
         switch ($c) {
-            "1" { 启用自动更新 }
+            "1" {
+                $modeInput = Read-HostSafe ("计划模式（daily/weekly，默认 {0}）" -f (Get-自动更新默认模式))
+                $atInput = Read-HostSafe ("执行时间（HH:mm，默认 {0}）" -f (Get-自动更新默认时间))
+                $modeNormalized = Normalize-自动更新模式 $modeInput
+                $dayInput = ""
+                if ($modeNormalized -eq "weekly") {
+                    $dayInput = Read-HostSafe ("每周几执行（Monday..Sunday 或 周一..周日，默认 {0}）" -f (Get-自动更新默认星期))
+                }
+                启用自动更新 -Mode $modeNormalized -At $atInput -DayOfWeek $dayInput
+            }
             "2" { 禁用自动更新 }
             "3" { 查看自动更新状态 }
             "0" { return }
@@ -197,14 +294,14 @@ function 技能库管理菜单 {
         Write-Host "1) 新增技能库"
         Write-Host "2) 删除技能库"
         Write-Host "3) 生成锁文件"
-        Write-Host "4) 清理无效映射"
+        Write-Host "4) 打开配置"
         Write-Host "0) 返回"
         $c = Read-HostSafe "请选择"
         switch ($c) {
             "1" { 新增技能库 }
             "2" { 删除技能库 }
             "3" { 锁定 }
-            "4" { 清理无效映射 }
+            "4" { 打开配置 }
             "0" { return }
             default { Write-Host "无效选择。" }
         }
@@ -245,7 +342,7 @@ Skills 管理器（中文菜单）
 
 菜单分组：
   - MCP 服务：新增、卸载、同步 MCP
-  - 技能库管理：新增/删除技能库、生成锁文件、清理无效映射
+  - 技能库管理：新增/删除技能库、生成锁文件、打开配置
   - 更多：一键工作流、自动更新设置、解除关联、清理备份
 
 主要功能说明：
@@ -264,7 +361,7 @@ Skills 管理器（中文菜单）
   - 同步MCP：只同步 MCP 配置，不构建 skills
   - 一键工作流：按场景执行多步骤编排；支持 `--list`、`--no-prompt`、`--continue-on-error`
   - 目标仓审查：维护需求上下文、目标仓列表、审查包生成和建议应用
-  - 自动更新设置：配置本机计划任务，每周五 20:00 自动执行“更新 + 同步MCP”
+  - 自动更新设置：配置本机计划任务，按 daily/weekly + HH:mm 自动执行“更新 + 同步MCP”
   - 解除关联：移除 link 模式下创建的目录关联
   - 清理备份：删除仓库内 *.bak.* 文件和 .bak 目录（排除 vendor / agent / imports / .git）
 
@@ -313,14 +410,14 @@ Skills 管理器（中文菜单）
   .\skills.ps1 审查目标 需求设置
   .\skills.ps1 审查目标 需求查看
   .\skills.ps1 审查目标 需求结构化 --profile <file>
-  .\skills.ps1 审查目标 扫描 [--target <name>] [--out <dir>]
-  .\skills.ps1 审查目标 发现新技能 [--query <text>] [--out <dir>]
+  .\skills.ps1 审查目标 扫描 [--target <name>] [--out <dir>] [--force]
+  .\skills.ps1 审查目标 发现新技能 [--query <text>] [--out <dir>] [--force]
   .\skills.ps1 审查目标 状态
   .\skills.ps1 审查目标 修改 <name> <path>
   .\skills.ps1 审查目标 删除 <name>
-  .\skills.ps1 审查目标 应用确认 --recommendations <file>
-  .\skills.ps1 审查目标 应用 --recommendations <file> [--dry-run-ack "我知道未落盘"]
-  .\skills.ps1 审查目标 应用 --recommendations <file> --apply --yes [--add-indexes "1,3"] [--remove-indexes "2"]
+  .\skills.ps1 审查目标 应用确认 --recommendations <file> [--allow-stale-snapshot] [--stale-ack "<token>"]
+  .\skills.ps1 审查目标 应用 --recommendations <file> [--dry-run-ack "我知道未落盘"] [--allow-stale-snapshot] [--stale-ack "<token>"]
+  .\skills.ps1 审查目标 应用 --recommendations <file> --apply --yes [--add-indexes "1,3"] [--remove-indexes "2"] [--allow-stale-snapshot] [--stale-ack "<token>"]
   .\skills.ps1 doctor [--json] [--fix] [--dry-run-fix] [--strict] [--strict-perf] [--threshold-ms <ms>]
   通用参数：
   -DryRun：仅预演（跳过写入/删除/同步/拉取）
@@ -356,6 +453,11 @@ Skills 管理器（中文菜单）
   - 外层 AI 应先写完并自检 `recommendations.json`（schema、占位符、双理由、真实来源），再进入 dry-run。
   - `应用确认` 是单入口两阶段流程：先 dry-run，再要求输入确认口令 `APPLY <run-id>` 才执行落盘。
   - `应用` 默认只做 dry-run，且需显式确认口令 `我知道未落盘`；只有 `--apply --yes` 才会真正执行选中的新增/卸载。
+  - `应用`/`应用确认` 会校验同目录 `installed-skills.json` 快照与当前 live mappings 指纹；若快照过期（stale_snapshot）会阻断并要求先重新 `审查目标 扫描`。
+  - 仅在你明确接受风险时可加 `--allow-stale-snapshot` 跳过该阻断（报告会标记 stale 风险）。
+  - 使用 `--allow-stale-snapshot` 时会触发红色警告并要求二次确认口令；非交互环境请用 `--stale-ack "<token>"` 提前传入。
+  - `--out` 若指向已存在且非空目录，默认阻断，防止覆盖旧审查包；如确需复用，显式追加 `--force`。
+  - 若路径里仍包含 `<run-id>` 这类占位符，命令会直接阻断并给出可用 run-id 提示。
   - `状态` 可查看最近一次 `apply-report.json` 的 `mode/success/persisted/changed_counts`。
   - 执行前会分别列出“新增建议”和“卸载建议”两份带序号清单；dry-run 后向用户汇报时必须沿用原序号，并同时展示用户需求 / 目标仓两条简短依据。
   - `--add-indexes` 和 `--remove-indexes` 分别作用于各自清单；两份清单独立编号，先选卸载不会改变新增清单的序号映射。

@@ -3132,9 +3132,10 @@ function Get-PerfThresholdMs([string]$Metric, [int]$DefaultThresholdMs = 5000) {
         # Includes prebuild checks + full build/apply flow; realistic baseline in this repo is ~180s.
         "build_apply_total" { return 240000 }
         "sync_mcp" { return 10000 }
-        "update_vendor" { return $null }
-        "update_imports" { return $null }
-        "update_total" { return $null }
+        # Update flow is network-heavy but should still surface regressions in doctor warnings.
+        "update_vendor" { return 60000 }
+        "update_imports" { return 180000 }
+        "update_total" { return 240000 }
         default { return $DefaultThresholdMs }
     }
 }
@@ -8018,141 +8019,6 @@ function Invoke-AuditStructuredProfileFlow([string]$profilePath = "") {
     Write-Host "请让 AI 或手动填写该文件后，再运行：./skills.ps1 审查目标 需求结构化" -ForegroundColor Yellow
 }
 
-function Parse-AuditTargetsArgs([string[]]$tokens) {
-    $result = [ordered]@{
-        action = "list"
-        name = $null
-        path = $null
-        profile = $null
-        target = $null
-        out = $null
-        query = $null
-        recommendations = $null
-        dry_run_ack = $null
-        add_selection = $null
-        remove_selection = $null
-        apply = $false
-        yes = $false
-        tags = @()
-        notes = ""
-    }
-
-    $items = @($tokens | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
-    if ($items.Count -gt 0) {
-        $head = ([string]$items[0]).ToLowerInvariant()
-        switch ($head) {
-            "初始化" { $result.action = "init"; $items = @($items | Select-Object -Skip 1) }
-            "init" { $result.action = "init"; $items = @($items | Select-Object -Skip 1) }
-            "需求设置" { $result.action = "profile_set"; $items = @($items | Select-Object -Skip 1) }
-            "profile-set" { $result.action = "profile_set"; $items = @($items | Select-Object -Skip 1) }
-            "需求查看" { $result.action = "profile_show"; $items = @($items | Select-Object -Skip 1) }
-            "profile-show" { $result.action = "profile_show"; $items = @($items | Select-Object -Skip 1) }
-            "需求结构化" { $result.action = "profile_structure"; $items = @($items | Select-Object -Skip 1) }
-            "profile-structure" { $result.action = "profile_structure"; $items = @($items | Select-Object -Skip 1) }
-            "添加" { $result.action = "add"; $items = @($items | Select-Object -Skip 1) }
-            "add" { $result.action = "add"; $items = @($items | Select-Object -Skip 1) }
-            "修改" { $result.action = "update"; $items = @($items | Select-Object -Skip 1) }
-            "update" { $result.action = "update"; $items = @($items | Select-Object -Skip 1) }
-            "删除" { $result.action = "remove"; $items = @($items | Select-Object -Skip 1) }
-            "remove" { $result.action = "remove"; $items = @($items | Select-Object -Skip 1) }
-            "列表" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
-            "list" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
-            "扫描" { $result.action = "scan"; $items = @($items | Select-Object -Skip 1) }
-            "scan" { $result.action = "scan"; $items = @($items | Select-Object -Skip 1) }
-            "发现新技能" { $result.action = "discover_skills"; $items = @($items | Select-Object -Skip 1) }
-            "discover-skills" { $result.action = "discover_skills"; $items = @($items | Select-Object -Skip 1) }
-            "discover" { $result.action = "discover_skills"; $items = @($items | Select-Object -Skip 1) }
-            "状态" { $result.action = "status"; $items = @($items | Select-Object -Skip 1) }
-            "status" { $result.action = "status"; $items = @($items | Select-Object -Skip 1) }
-            "应用确认" { $result.action = "apply_flow"; $items = @($items | Select-Object -Skip 1) }
-            "apply-flow" { $result.action = "apply_flow"; $items = @($items | Select-Object -Skip 1) }
-            "应用" { $result.action = "apply"; $items = @($items | Select-Object -Skip 1) }
-            "apply" { $result.action = "apply"; $items = @($items | Select-Object -Skip 1) }
-            default { throw ("未知审查目标子命令：{0}" -f $items[0]) }
-        }
-    }
-
-    $positional = @()
-    for ($i = 0; $i -lt $items.Count; $i++) {
-        $t = [string]$items[$i]
-        $key = $t.ToLowerInvariant()
-        switch ($key) {
-            "--target" {
-                Need ($i + 1 -lt $items.Count) "--target 缺少值"
-                $result.target = [string]$items[++$i]
-                continue
-            }
-            "--profile" {
-                Need ($i + 1 -lt $items.Count) "--profile 缺少值"
-                $result.profile = [string]$items[++$i]
-                continue
-            }
-            "--out" {
-                Need ($i + 1 -lt $items.Count) "--out 缺少值"
-                $result.out = [string]$items[++$i]
-                continue
-            }
-            "--query" {
-                Need ($i + 1 -lt $items.Count) "--query 缺少值"
-                $result.query = [string]$items[++$i]
-                continue
-            }
-            "--recommendations" {
-                Need ($i + 1 -lt $items.Count) "--recommendations 缺少值"
-                $result.recommendations = [string]$items[++$i]
-                continue
-            }
-            "--dry-run-ack" {
-                Need ($i + 1 -lt $items.Count) "--dry-run-ack 缺少值"
-                $result.dry_run_ack = [string]$items[++$i]
-                continue
-            }
-            "--add-indexes" {
-                Need ($i + 1 -lt $items.Count) "--add-indexes 缺少值"
-                $result.add_selection = [string]$items[++$i]
-                continue
-            }
-            "--remove-indexes" {
-                Need ($i + 1 -lt $items.Count) "--remove-indexes 缺少值"
-                $result.remove_selection = [string]$items[++$i]
-                continue
-            }
-            "--apply" {
-                $result.apply = $true
-                continue
-            }
-            "--yes" {
-                $result.yes = $true
-                continue
-            }
-            "--tag" {
-                Need ($i + 1 -lt $items.Count) "--tag 缺少值"
-                $result.tags += [string]$items[++$i]
-                continue
-            }
-            "--notes" {
-                Need ($i + 1 -lt $items.Count) "--notes 缺少值"
-                $result.notes = [string]$items[++$i]
-                continue
-            }
-            default {
-                $positional += $t
-            }
-        }
-    }
-
-    if ($result.action -eq "add" -or $result.action -eq "update") {
-        Need ($positional.Count -ge 2) "目标仓操作需要 name 和 path"
-        $result.name = [string]$positional[0]
-        $result.path = [string]$positional[1]
-    }
-    elseif ($result.action -eq "remove") {
-        Need ($positional.Count -ge 1) "删除目标仓需要 name"
-        $result.name = [string]$positional[0]
-    }
-    return [pscustomobject]$result
-}
-
 function Write-AuditTargetsList {
     $cfg = Load-AuditTargetsConfig
     $items = @($cfg.targets)
@@ -8192,67 +8058,32 @@ function Get-AuditUserProfileOutput($cfg) {
     }
 }
 
-function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query = "") {
-    $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
-    Need ($normalizedMode -eq "target-repo" -or $normalizedMode -eq "profile-only") ("未知审查来源模式：{0}" -f $Mode)
-    return [pscustomobject]([ordered]@{
-        schema_version = 1
-        mode = $normalizedMode
-        query = [string]$Query
-        sources = @(
-            [ordered]@{
-                id = "official-docs"
-                name = "Official documentation"
-                use_for = "Verify current APIs, platform rules, support status, and recommended implementation patterns."
-            },
-            [ordered]@{
-                id = "skills-sh"
-                name = "skills.sh"
-                use_for = "Discover skill-packaged implementations and compare skill metadata quality."
-            },
-            [ordered]@{
-                id = "github-trending-monthly"
-                name = "GitHub Trending monthly"
-                url = "https://github.com/trending?since=monthly"
-                use_for = "Find active, recently relevant community projects; never treat popularity alone as enough evidence."
-            },
-            [ordered]@{
-                id = "strong-community-projects"
-                name = "High-quality community projects"
-                use_for = "Check maintenance activity, examples, issues, releases, and adoption fit."
-            },
-            [ordered]@{
-                id = "best-practices"
-                name = "Best-practice guides"
-                use_for = "Compare proposed skills against mature workflow and operational guidance."
-            },
-            [ordered]@{
-                id = "find-skills"
-                name = "Installed find-skills workflow"
-                use_for = "Use the local skill discovery workflow as an input source when available."
-            }
-        )
-        scoring = [ordered]@{
-            authority = "Prefer first-party documentation and maintained source repositories."
-            fit = "Match the user's structured profile and, in target-repo mode, concrete repo scan facts."
-            duplication_risk = "Penalize recommendations that duplicate installed skills without a clear incremental benefit."
-            maintenance = "Prefer projects with recent activity, clear license, and usable documentation."
-            operational_cost = "Prefer skills that are easy to install, verify, and roll back."
-        }
-        required_evidence = @(
-            "Every add/remove recommendation must cite sources inspected in this run.",
-            "Do not fabricate repository facts, source links, or source conclusions.",
-            "For profile-only mode, explain reason_target_repo as installed-skill inventory / profile-only context, not as a target repository claim."
-        )
-    })
-}
-
 function Get-AuditRunId {
     return (Get-Date -Format "yyyyMMdd-HHmmss-fff")
 }
 
 function Get-AuditReportRoot([string]$runId) {
     return (Join-Path $script:Root (Join-Path "reports\skill-audit" $runId))
+}
+
+function Test-AuditPlaceholderToken([string]$text) {
+    if ([string]::IsNullOrWhiteSpace($text)) { return $false }
+    return ([regex]::IsMatch($text, "<[^>]+>"))
+}
+
+function Get-AuditKnownRunIds {
+    $auditRoot = Join-Path $script:Root "reports\skill-audit"
+    if (-not (Test-Path -LiteralPath $auditRoot -PathType Container)) { return @() }
+    $dirs = @(Get-ChildItem -LiteralPath $auditRoot -Directory -ErrorAction SilentlyContinue)
+    return @($dirs | Select-Object -ExpandProperty Name | Sort-Object)
+}
+
+function Get-AuditRunIdHintText {
+    $ids = @(Get-AuditKnownRunIds)
+    if ($ids.Count -eq 0) {
+        return "可用 run-id：无（请先运行：.\skills.ps1 审查目标 扫描）"
+    }
+    return ("可用 run-id：{0}" -f ($ids -join ", "))
 }
 
 function Test-AuditFile([string]$root, [string]$relative) {
@@ -8445,7 +8276,7 @@ Mode: profile-only skill discovery
 Targets: N/A
 Discovery query: $queryText
 
-Use the generated user profile JSON, installed skills JSON, and source strategy JSON to decide:
+Use the generated user profile JSON, installed-skills snapshot JSON, and source strategy JSON to decide:
 
 - Which installed skills should be kept for the user's long-term workflow.
 - Which installed skills should be proposed for removal because they no longer fit.
@@ -8465,7 +8296,7 @@ Scan inputs:
 Rules:
 
 - Profile-only mode has no target repo scan; do not fabricate repository facts.
-- All decisions must be based on user-profile.json, installed-skills.json, source-strategy.json, and real external research.
+- All decisions must be based on user-profile.json, installed-skills.json (audit snapshot, not live source of truth), source-strategy.json, and real external research.
 - Use ``reason_target_repo`` to explain the current installed-skill inventory / profile-only context; do not claim target repository evidence.
 - If any required local input is missing, unreadable, or empty, stop and report the blocker instead of guessing.
 - Network research is authorized within this audit workflow, but installation still requires --apply --yes.
@@ -8528,7 +8359,7 @@ Source strategy JSON: $SourceStrategyPath
 Run ID: $(Split-Path (Split-Path $path -Parent) -Leaf)
 Targets: $($targetNames -join ", ")
 
-Use the generated user profile JSON, repo scan JSON, and installed skills JSON to decide:
+Use the generated user profile JSON, repo scan JSON, and installed-skills snapshot JSON to decide:
 
 - Which installed skills should be kept for each target repository.
 - Which installed skills should be proposed for removal.
@@ -8687,6 +8518,63 @@ $modeBlocking
     Set-ContentUtf8 $path $content
 }
 
+
+
+function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query = "") {
+    $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
+    Need ($normalizedMode -eq "target-repo" -or $normalizedMode -eq "profile-only") ("未知审查来源模式：{0}" -f $Mode)
+    return [pscustomobject]([ordered]@{
+        schema_version = 1
+        mode = $normalizedMode
+        query = [string]$Query
+        sources = @(
+            [ordered]@{
+                id = "official-docs"
+                name = "Official documentation"
+                use_for = "Verify current APIs, platform rules, support status, and recommended implementation patterns."
+            },
+            [ordered]@{
+                id = "skills-sh"
+                name = "skills.sh"
+                use_for = "Discover skill-packaged implementations and compare skill metadata quality."
+            },
+            [ordered]@{
+                id = "github-trending-monthly"
+                name = "GitHub Trending monthly"
+                url = "https://github.com/trending?since=monthly"
+                use_for = "Find active, recently relevant community projects; never treat popularity alone as enough evidence."
+            },
+            [ordered]@{
+                id = "strong-community-projects"
+                name = "High-quality community projects"
+                use_for = "Check maintenance activity, examples, issues, releases, and adoption fit."
+            },
+            [ordered]@{
+                id = "best-practices"
+                name = "Best-practice guides"
+                use_for = "Compare proposed skills against mature workflow and operational guidance."
+            },
+            [ordered]@{
+                id = "find-skills"
+                name = "Installed find-skills workflow"
+                use_for = "Use the local skill discovery workflow as an input source when available."
+            }
+        )
+        scoring = [ordered]@{
+            authority = "Prefer first-party documentation and maintained source repositories."
+            fit = "Match the user's structured profile and, in target-repo mode, concrete repo scan facts."
+            duplication_risk = "Penalize recommendations that duplicate installed skills without a clear incremental benefit."
+            maintenance = "Prefer projects with recent activity, clear license, and usable documentation."
+            operational_cost = "Prefer skills that are easy to install, verify, and roll back."
+        }
+        required_evidence = @(
+            "Every add/remove recommendation must cite sources inspected in this run.",
+            "Do not fabricate repository facts, source links, or source conclusions.",
+            "For profile-only mode, explain reason_target_repo as installed-skill inventory / profile-only context, not as a target repository claim."
+        )
+    })
+}
+
 function Test-AuditJsonProperty($obj, [string]$name) {
     if ($null -eq $obj) { return $false }
     return ($obj.PSObject.Properties.Match($name).Count -gt 0)
@@ -8717,6 +8605,9 @@ function Assert-AuditBundleFileContent([string]$path, [string]$label) {
         "installed-skills.json" {
             Need (Test-AuditJsonProperty $data "skills") ("installed-skills 缺少 skills：{0}" -f $path)
             Need (Assert-IsArray $data.skills) ("installed-skills.skills 必须为数组：{0}" -f $path)
+            if (Test-AuditJsonProperty $data "snapshot_kind") {
+                Need ([string]$data.snapshot_kind -eq "audit_input") ("installed-skills.snapshot_kind 必须为 audit_input：{0}" -f $path)
+            }
         }
         "source-strategy.json" {
             Need (Test-AuditJsonProperty $data "mode") ("source-strategy 缺少 mode：{0}" -f $path)
@@ -8938,6 +8829,109 @@ function Get-InstalledSkillFacts($cfg = $null) {
     return @($facts)
 }
 
+function Get-AuditFingerprintFromVendorFromPairs($pairs) {
+    $normalized = New-Object System.Collections.Generic.List[string]
+    foreach ($pair in @($pairs)) {
+        if ($null -eq $pair) { continue }
+        $text = ([string]$pair).Trim()
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        $normalized.Add($text.ToLowerInvariant()) | Out-Null
+    }
+    $ordered = @($normalized | Sort-Object -Unique)
+    $payload = ($ordered -join "`n")
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
+        $hashBytes = $sha.ComputeHash($bytes)
+        return ([System.BitConverter]::ToString($hashBytes)).Replace("-", "").ToLowerInvariant()
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+
+function Get-AuditFingerprintFromSkillFacts($facts) {
+    $pairs = @()
+    foreach ($item in @($facts)) {
+        if ($null -eq $item) { continue }
+        $vendor = ""
+        $from = ""
+        if ($item.PSObject.Properties.Match("vendor").Count -gt 0) { $vendor = [string]$item.vendor }
+        if ($item.PSObject.Properties.Match("from").Count -gt 0) { $from = [string]$item.from }
+        if ([string]::IsNullOrWhiteSpace($vendor) -or [string]::IsNullOrWhiteSpace($from)) { continue }
+        $pairs += ("{0}|{1}" -f $vendor, $from)
+    }
+    return (Get-AuditFingerprintFromVendorFromPairs $pairs)
+}
+
+function Get-AuditLiveInstalledState($cfg = $null) {
+    if ($null -eq $cfg) { $cfg = LoadCfg }
+    $facts = @(Get-InstalledSkillFacts $cfg)
+    return [pscustomobject]([ordered]@{
+        source_of_truth = "live_mappings"
+        captured_at = (Get-Date).ToString("o")
+        skill_count = @($facts).Count
+        fingerprint = (Get-AuditFingerprintFromSkillFacts $facts)
+    })
+}
+
+function New-AuditInstalledFactsFallbackCfg {
+    return [pscustomobject]([ordered]@{
+        vendors = @()
+        targets = @()
+        mappings = @()
+        imports = @()
+        mcp_servers = @()
+        mcp_targets = @()
+        update_force = $false
+        sync_mode = "sync"
+    })
+}
+
+function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
+    Need (-not [string]::IsNullOrWhiteSpace($snapshotPath)) "installed-skills 快照路径不能为空"
+    Need (Test-Path -LiteralPath $snapshotPath -PathType Leaf) ("缺少 installed-skills 快照：{0}" -f $snapshotPath)
+    try {
+        $raw = Get-ContentUtf8 $snapshotPath
+        Need (-not [string]::IsNullOrWhiteSpace($raw)) ("installed-skills 快照为空：{0}" -f $snapshotPath)
+        $data = $raw | ConvertFrom-Json
+    }
+    catch {
+        throw ("installed-skills 快照解析失败：{0}" -f $_.Exception.Message)
+    }
+    Need (Test-AuditJsonProperty $data "skills") ("installed-skills 快照缺少 skills：{0}" -f $snapshotPath)
+    Need (Assert-IsArray $data.skills) ("installed-skills.skills 必须为数组：{0}" -f $snapshotPath)
+    $skills = @($data.skills)
+    $fingerprint = ""
+    if (Test-AuditJsonProperty $data "live_fingerprint") {
+        $fingerprint = ([string]$data.live_fingerprint).Trim().ToLowerInvariant()
+    }
+    if ([string]::IsNullOrWhiteSpace($fingerprint)) {
+        $fingerprint = (Get-AuditFingerprintFromSkillFacts $skills)
+    }
+    $capturedAt = ""
+    if (Test-AuditJsonProperty $data "captured_at") { $capturedAt = [string]$data.captured_at }
+    $snapshotKind = ""
+    if (Test-AuditJsonProperty $data "snapshot_kind") { $snapshotKind = [string]$data.snapshot_kind }
+    return [pscustomobject]([ordered]@{
+        path = $snapshotPath
+        snapshot_kind = $snapshotKind
+        captured_at = $capturedAt
+        skill_count = $skills.Count
+        fingerprint = $fingerprint
+    })
+}
+
+function New-AuditInstalledSnapshotFallbackState($liveState, [string]$snapshotPath) {
+    return [pscustomobject]([ordered]@{
+        path = $snapshotPath
+        snapshot_kind = "legacy_live_fallback"
+        captured_at = [string]$liveState.captured_at
+        skill_count = [int]$liveState.skill_count
+        fingerprint = [string]$liveState.fingerprint
+    })
+}
+
 function Ensure-AuditArrayProperty($obj, [string]$name) {
     if (-not $obj.PSObject.Properties.Match($name).Count -or $null -eq $obj.$name) {
         $obj | Add-Member -NotePropertyName $name -NotePropertyValue @() -Force
@@ -9145,10 +9139,13 @@ function New-AuditChangedCounts($items, $removals) {
     })
 }
 
-function Write-AuditRecommendationSummary($plan) {
+function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveState = $null) {
     Write-Host ""
     Write-Host "=== 审查建议摘要 ==="
     Write-Host ("决策依据: {0}" -f [string]$plan.decision_basis.summary)
+    if ($null -ne $snapshotState -and $null -ne $liveState) {
+        Write-Host ("口径: live={0} (source_of_truth), snapshot={1} (audit_input)" -f [int]$liveState.skill_count, [int]$snapshotState.skill_count)
+    }
     Write-Host "提示：以下序号为原序号；后续 dry-run 汇报与 apply 选择必须沿用原序号。"
     Write-Host ""
     Write-Host ("新增建议: {0} 项" -f @($plan.items).Count)
@@ -9297,7 +9294,8 @@ function Ensure-AuditNewManualImportsMapped($beforeCfg) {
 function Invoke-AuditTargetsScan {
     param(
         [string]$Target,
-        [string]$OutDir
+        [string]$OutDir,
+        [switch]$Force
     )
     $cfg = Load-AuditTargetsConfig
     Assert-AuditUserProfileReady $cfg
@@ -9320,6 +9318,12 @@ function Invoke-AuditTargetsScan {
     }
     else {
         Resolve-AuditTargetPath $OutDir
+    }
+    if (-not [string]::IsNullOrWhiteSpace($OutDir) -and (Test-Path -LiteralPath $reportRoot -PathType Container) -and -not $Force) {
+        $existing = @(Get-ChildItem -LiteralPath $reportRoot -Force -ErrorAction SilentlyContinue)
+        if ($existing.Count -gt 0) {
+            throw ("--out 目录已存在且非空，请使用新的 run-id 目录，或显式追加 --force：{0}" -f $reportRoot)
+        }
     }
     EnsureDir $reportRoot
 
@@ -9346,12 +9350,28 @@ function Invoke-AuditTargetsScan {
     $installedPath = Join-Path $reportRoot "installed-skills.json"
     $installedSkills = @()
     try {
-        $installedSkills = @(Get-InstalledSkillFacts)
+        try {
+            $liveCfg = LoadCfg
+        }
+        catch {
+            Log ("审查包生成时读取 skills.json 失败，已回退为空安装快照：{0}" -f $_.Exception.Message) "WARN"
+            $liveCfg = New-AuditInstalledFactsFallbackCfg
+        }
+        $installedSkills = @(Get-InstalledSkillFacts $liveCfg)
     }
     catch {
         throw ("生成 installed-skills.json 失败：{0}" -f $_.Exception.Message)
     }
-    Write-AuditJsonFile $installedPath ([pscustomobject]@{ schema_version = 1; skills = @($installedSkills) })
+    $liveState = Get-AuditLiveInstalledState $liveCfg
+    Write-AuditJsonFile $installedPath ([pscustomobject]@{
+            schema_version = 1
+            snapshot_kind = "audit_input"
+            source_of_truth = "live_mappings"
+            captured_at = (Get-Date).ToString("o")
+            live_skill_count = [int]$liveState.skill_count
+            live_fingerprint = [string]$liveState.fingerprint
+            skills = @($installedSkills)
+        })
 
     $sourceStrategyPath = Join-Path $reportRoot "source-strategy.json"
     Write-AuditJsonFile $sourceStrategyPath (New-AuditSourceStrategy "target-repo" "")
@@ -9404,7 +9424,8 @@ function Invoke-AuditTargetsScan {
 function Invoke-AuditSkillDiscovery {
     param(
         [string]$Query,
-        [string]$OutDir
+        [string]$OutDir,
+        [switch]$Force
     )
     $cfg = Load-AuditTargetsConfig
     Assert-AuditUserProfileReady $cfg
@@ -9416,6 +9437,12 @@ function Invoke-AuditSkillDiscovery {
     else {
         Resolve-AuditTargetPath $OutDir
     }
+    if (-not [string]::IsNullOrWhiteSpace($OutDir) -and (Test-Path -LiteralPath $reportRoot -PathType Container) -and -not $Force) {
+        $existing = @(Get-ChildItem -LiteralPath $reportRoot -Force -ErrorAction SilentlyContinue)
+        if ($existing.Count -gt 0) {
+            throw ("--out 目录已存在且非空，请使用新的 run-id 目录，或显式追加 --force：{0}" -f $reportRoot)
+        }
+    }
     EnsureDir $reportRoot
 
     $userProfilePath = Join-Path $reportRoot "user-profile.json"
@@ -9424,12 +9451,28 @@ function Invoke-AuditSkillDiscovery {
     $installedPath = Join-Path $reportRoot "installed-skills.json"
     $installedSkills = @()
     try {
-        $installedSkills = @(Get-InstalledSkillFacts)
+        try {
+            $liveCfg = LoadCfg
+        }
+        catch {
+            Log ("新技能发现生成时读取 skills.json 失败，已回退为空安装快照：{0}" -f $_.Exception.Message) "WARN"
+            $liveCfg = New-AuditInstalledFactsFallbackCfg
+        }
+        $installedSkills = @(Get-InstalledSkillFacts $liveCfg)
     }
     catch {
         throw ("生成 installed-skills.json 失败：{0}" -f $_.Exception.Message)
     }
-    Write-AuditJsonFile $installedPath ([pscustomobject]@{ schema_version = 1; skills = @($installedSkills) })
+    $liveState = Get-AuditLiveInstalledState $liveCfg
+    Write-AuditJsonFile $installedPath ([pscustomobject]@{
+            schema_version = 1
+            snapshot_kind = "audit_input"
+            source_of_truth = "live_mappings"
+            captured_at = (Get-Date).ToString("o")
+            live_skill_count = [int]$liveState.skill_count
+            live_fingerprint = [string]$liveState.fingerprint
+            skills = @($installedSkills)
+        })
 
     $sourceStrategyPath = Join-Path $reportRoot "source-strategy.json"
     Write-AuditJsonFile $sourceStrategyPath (New-AuditSourceStrategy "profile-only" $Query)
@@ -9475,6 +9518,8 @@ function Invoke-AuditRecommendationsApply {
         [string]$AddSelection,
         [string]$RemoveSelection,
         [string]$DryRunAck,
+        [string]$StaleAck,
+        [switch]$AllowStaleSnapshot,
         [bool]$RequireDryRunAck = $true,
         [switch]$Apply,
         [switch]$Yes
@@ -9483,6 +9528,109 @@ function Invoke-AuditRecommendationsApply {
         throw "执行安装必须同时传入 --apply --yes"
     }
     $rec = Load-AuditRecommendations $RecommendationsPath
+    $recommendationDir = Split-Path -Parent $RecommendationsPath
+    if ([string]::IsNullOrWhiteSpace($recommendationDir)) { $recommendationDir = "." }
+    $snapshotPath = Join-Path $recommendationDir "installed-skills.json"
+    $liveState = Get-AuditLiveInstalledState
+    if (Test-Path -LiteralPath $snapshotPath -PathType Leaf) {
+        $snapshotState = Get-AuditInstalledSnapshotState $snapshotPath
+    }
+    else {
+        Log ("recommendations 同目录缺少 installed-skills.json，已回退为 live state 快照：{0}" -f $snapshotPath) "WARN"
+        $snapshotState = New-AuditInstalledSnapshotFallbackState $liveState $snapshotPath
+    }
+    $isSnapshotStale = ([string]$snapshotState.fingerprint -ne [string]$liveState.fingerprint)
+    if ($isSnapshotStale -and -not $AllowStaleSnapshot) {
+        $staleMessage = "审查快照与当前生效配置不一致（stale_snapshot）。请先运行：.\skills.ps1 审查目标 扫描 重新生成 run 后再应用 recommendations。"
+        $staleReport = [ordered]@{
+            schema_version = 2
+            run_id = [string]$rec.run_id
+            target = [string]$rec.target
+            mode = if ($Apply) { "apply" } else { "dry_run" }
+            success = $false
+            persisted = $false
+            error_code = "stale_snapshot"
+            error_message = $staleMessage
+            snapshot_state = $snapshotState
+            live_state = $liveState
+            changed_counts = New-AuditChangedCounts @() @()
+            items = @()
+            removal_candidates = @()
+            overlap_findings = @()
+            do_not_install = @()
+            rollback = @()
+        }
+        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$staleReport)
+        throw $staleMessage
+    }
+    if ($isSnapshotStale -and $AllowStaleSnapshot) {
+        $staleAckToken = Get-AuditStaleSnapshotAckToken ([string]$rec.run_id)
+        Write-Host ""
+        Write-Host "WARNING: 当前正在使用过期审查快照（stale_snapshot）继续执行。" -ForegroundColor Red
+        Write-Host ("WARNING: live={0}, snapshot={1}" -f [int]$liveState.skill_count, [int]$snapshotState.skill_count) -ForegroundColor Red
+        $staleAckInput = ""
+        if (-not [string]::IsNullOrWhiteSpace($StaleAck)) {
+            $staleAckInput = [string]$StaleAck
+        }
+        elseif (-not [Console]::IsInputRedirected) {
+            $staleAckInput = Read-HostSafe ("请输入二次确认口令 `"{0}`"（回车取消）" -f $staleAckToken)
+        }
+        else {
+            $hint = ("当前为非交互环境。请追加参数：--stale-ack `"{0}`"" -f $staleAckToken)
+            $staleReport = [ordered]@{
+                schema_version = 2
+                run_id = [string]$rec.run_id
+                target = [string]$rec.target
+                mode = if ($Apply) { "apply" } else { "dry_run" }
+                success = $false
+                persisted = $false
+                error_code = "stale_snapshot_ack_required"
+                error_message = $hint
+                snapshot_state = $snapshotState
+                live_state = $liveState
+                changed_counts = New-AuditChangedCounts @() @()
+                items = @()
+                removal_candidates = @()
+                overlap_findings = @()
+                do_not_install = @()
+                rollback = @()
+                allow_stale_snapshot = $true
+                stale_snapshot_detected = $true
+                stale_acknowledged = $false
+                stale_ack_expected = $staleAckToken
+                stale_ack_received = ""
+            }
+            Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$staleReport)
+            throw $hint
+        }
+        if ([string]::IsNullOrWhiteSpace($staleAckInput) -or $staleAckInput.Trim() -ne $staleAckToken) {
+            $staleReport = [ordered]@{
+                schema_version = 2
+                run_id = [string]$rec.run_id
+                target = [string]$rec.target
+                mode = if ($Apply) { "apply" } else { "dry_run" }
+                success = $false
+                persisted = $false
+                error_code = "stale_snapshot_ack_mismatch"
+                error_message = "二次确认口令不匹配，已取消执行。"
+                snapshot_state = $snapshotState
+                live_state = $liveState
+                changed_counts = New-AuditChangedCounts @() @()
+                items = @()
+                removal_candidates = @()
+                overlap_findings = @()
+                do_not_install = @()
+                rollback = @()
+                allow_stale_snapshot = $true
+                stale_snapshot_detected = $true
+                stale_acknowledged = $false
+                stale_ack_expected = $staleAckToken
+                stale_ack_received = [string]$staleAckInput
+            }
+            Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$staleReport)
+            throw "二次确认失败：未通过过期快照确认。"
+        }
+    }
     $plan = New-AuditInstallPlan $rec
     $report = [ordered]@{
         schema_version = 2
@@ -9492,7 +9640,12 @@ function Invoke-AuditRecommendationsApply {
         mode = if ($Apply) { "apply" } else { "dry_run" }
         success = $true
         persisted = $false
+        allow_stale_snapshot = [bool]$AllowStaleSnapshot
+        stale_snapshot_detected = [bool]$isSnapshotStale
+        stale_acknowledged = if ($isSnapshotStale -and $AllowStaleSnapshot) { $true } else { $false }
         changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates
+        snapshot_state = $snapshotState
+        live_state = $liveState
         items = @($plan.items)
         removal_candidates = @($plan.removal_candidates)
         overlap_findings = @($plan.overlap_findings)
@@ -9500,7 +9653,7 @@ function Invoke-AuditRecommendationsApply {
         rollback = @()
     }
 
-    Write-AuditRecommendationSummary $plan
+    Write-AuditRecommendationSummary $plan $snapshotState $liveState
 
     if (-not $Apply) {
         Write-Host "dry-run 预览（沿用原序号）："
@@ -9633,14 +9786,21 @@ function Get-AuditDryRunAckToken {
     return "我知道未落盘"
 }
 
+function Get-AuditStaleSnapshotAckToken([string]$runId) {
+    if ([string]::IsNullOrWhiteSpace($runId)) { return "我确认使用过期快照" }
+    return ("我确认使用过期快照 {0}" -f $runId)
+}
+
 function Invoke-AuditRecommendationsTwoStageApply {
     param(
         [string]$RecommendationsPath,
         [string]$AddSelection,
         [string]$RemoveSelection,
-        [string]$DryRunAck
+        [string]$DryRunAck,
+        [string]$StaleAck,
+        [switch]$AllowStaleSnapshot
     )
-    $dryRunReport = Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -DryRunAck $DryRunAck -RequireDryRunAck $true
+    $dryRunReport = Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -DryRunAck $DryRunAck -StaleAck $StaleAck -AllowStaleSnapshot:$AllowStaleSnapshot -RequireDryRunAck $true
     if ($dryRunReport.PSObject.Properties.Match("success").Count -gt 0 -and -not [bool]$dryRunReport.success) {
         Write-Host "应用确认结束：dry-run 未完成确认，未执行落盘。" -ForegroundColor Yellow
         return $dryRunReport
@@ -9669,7 +9829,7 @@ function Invoke-AuditRecommendationsTwoStageApply {
             received_confirmation = [string]$confirmation
         })
     }
-    return (Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -Apply -Yes)
+    return (Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -StaleAck $StaleAck -AllowStaleSnapshot:$AllowStaleSnapshot -Apply -Yes)
 }
 
 function Get-AuditLatestApplyReportPath {
@@ -9708,6 +9868,163 @@ function Show-AuditLatestStatus {
     if ([string]$report.mode -eq "dry_run" -and -not $persisted) {
         Write-Host "警告：最近一次仅为 dry-run，未落盘。" -ForegroundColor Red
     }
+}
+
+function Parse-AuditTargetsArgs([string[]]$tokens) {
+    $result = [ordered]@{
+        action = "list"
+        name = $null
+        path = $null
+        profile = $null
+        target = $null
+        out = $null
+        query = $null
+        recommendations = $null
+        dry_run_ack = $null
+        stale_ack = $null
+        allow_stale_snapshot = $false
+        force = $false
+        add_selection = $null
+        remove_selection = $null
+        apply = $false
+        yes = $false
+        tags = @()
+        notes = ""
+    }
+
+    $items = @($tokens | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    if ($items.Count -gt 0) {
+        $head = ([string]$items[0]).ToLowerInvariant()
+        switch ($head) {
+            "初始化" { $result.action = "init"; $items = @($items | Select-Object -Skip 1) }
+            "init" { $result.action = "init"; $items = @($items | Select-Object -Skip 1) }
+            "需求设置" { $result.action = "profile_set"; $items = @($items | Select-Object -Skip 1) }
+            "profile-set" { $result.action = "profile_set"; $items = @($items | Select-Object -Skip 1) }
+            "需求查看" { $result.action = "profile_show"; $items = @($items | Select-Object -Skip 1) }
+            "profile-show" { $result.action = "profile_show"; $items = @($items | Select-Object -Skip 1) }
+            "需求结构化" { $result.action = "profile_structure"; $items = @($items | Select-Object -Skip 1) }
+            "profile-structure" { $result.action = "profile_structure"; $items = @($items | Select-Object -Skip 1) }
+            "添加" { $result.action = "add"; $items = @($items | Select-Object -Skip 1) }
+            "add" { $result.action = "add"; $items = @($items | Select-Object -Skip 1) }
+            "修改" { $result.action = "update"; $items = @($items | Select-Object -Skip 1) }
+            "update" { $result.action = "update"; $items = @($items | Select-Object -Skip 1) }
+            "删除" { $result.action = "remove"; $items = @($items | Select-Object -Skip 1) }
+            "remove" { $result.action = "remove"; $items = @($items | Select-Object -Skip 1) }
+            "列表" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
+            "list" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
+            "扫描" { $result.action = "scan"; $items = @($items | Select-Object -Skip 1) }
+            "scan" { $result.action = "scan"; $items = @($items | Select-Object -Skip 1) }
+            "发现新技能" { $result.action = "discover_skills"; $items = @($items | Select-Object -Skip 1) }
+            "discover-skills" { $result.action = "discover_skills"; $items = @($items | Select-Object -Skip 1) }
+            "discover" { $result.action = "discover_skills"; $items = @($items | Select-Object -Skip 1) }
+            "状态" { $result.action = "status"; $items = @($items | Select-Object -Skip 1) }
+            "status" { $result.action = "status"; $items = @($items | Select-Object -Skip 1) }
+            "应用确认" { $result.action = "apply_flow"; $items = @($items | Select-Object -Skip 1) }
+            "apply-flow" { $result.action = "apply_flow"; $items = @($items | Select-Object -Skip 1) }
+            "应用" { $result.action = "apply"; $items = @($items | Select-Object -Skip 1) }
+            "apply" { $result.action = "apply"; $items = @($items | Select-Object -Skip 1) }
+            default { throw ("未知审查目标子命令：{0}" -f $items[0]) }
+        }
+    }
+
+    $positional = @()
+    for ($i = 0; $i -lt $items.Count; $i++) {
+        $t = [string]$items[$i]
+        $key = $t.ToLowerInvariant()
+        switch ($key) {
+            "--target" {
+                Need ($i + 1 -lt $items.Count) "--target 缺少值"
+                $result.target = [string]$items[++$i]
+                continue
+            }
+            "--profile" {
+                Need ($i + 1 -lt $items.Count) "--profile 缺少值"
+                $result.profile = [string]$items[++$i]
+                continue
+            }
+            "--out" {
+                Need ($i + 1 -lt $items.Count) "--out 缺少值"
+                $result.out = [string]$items[++$i]
+                if (Test-AuditPlaceholderToken $result.out) {
+                    throw ("--out 路径包含未替换占位符：{0}`n{1}" -f $result.out, (Get-AuditRunIdHintText))
+                }
+                continue
+            }
+            "--query" {
+                Need ($i + 1 -lt $items.Count) "--query 缺少值"
+                $result.query = [string]$items[++$i]
+                continue
+            }
+            "--recommendations" {
+                Need ($i + 1 -lt $items.Count) "--recommendations 缺少值"
+                $result.recommendations = [string]$items[++$i]
+                if (Test-AuditPlaceholderToken $result.recommendations) {
+                    throw ("--recommendations 路径包含未替换占位符：{0}`n{1}" -f $result.recommendations, (Get-AuditRunIdHintText))
+                }
+                continue
+            }
+            "--dry-run-ack" {
+                Need ($i + 1 -lt $items.Count) "--dry-run-ack 缺少值"
+                $result.dry_run_ack = [string]$items[++$i]
+                continue
+            }
+            "--stale-ack" {
+                Need ($i + 1 -lt $items.Count) "--stale-ack 缺少值"
+                $result.stale_ack = [string]$items[++$i]
+                continue
+            }
+            "--allow-stale-snapshot" {
+                $result.allow_stale_snapshot = $true
+                continue
+            }
+            "--force" {
+                $result.force = $true
+                continue
+            }
+            "--add-indexes" {
+                Need ($i + 1 -lt $items.Count) "--add-indexes 缺少值"
+                $result.add_selection = [string]$items[++$i]
+                continue
+            }
+            "--remove-indexes" {
+                Need ($i + 1 -lt $items.Count) "--remove-indexes 缺少值"
+                $result.remove_selection = [string]$items[++$i]
+                continue
+            }
+            "--apply" {
+                $result.apply = $true
+                continue
+            }
+            "--yes" {
+                $result.yes = $true
+                continue
+            }
+            "--tag" {
+                Need ($i + 1 -lt $items.Count) "--tag 缺少值"
+                $result.tags += [string]$items[++$i]
+                continue
+            }
+            "--notes" {
+                Need ($i + 1 -lt $items.Count) "--notes 缺少值"
+                $result.notes = [string]$items[++$i]
+                continue
+            }
+            default {
+                $positional += $t
+            }
+        }
+    }
+
+    if ($result.action -eq "add" -or $result.action -eq "update") {
+        Need ($positional.Count -ge 2) "目标仓操作需要 name 和 path"
+        $result.name = [string]$positional[0]
+        $result.path = [string]$positional[1]
+    }
+    elseif ($result.action -eq "remove") {
+        Need ($positional.Count -ge 1) "删除目标仓需要 name"
+        $result.name = [string]$positional[0]
+    }
+    return [pscustomobject]$result
 }
 
 function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
@@ -9751,10 +10068,10 @@ function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
         }
         "list" { Write-AuditTargetsList }
         "status" { Show-AuditLatestStatus }
-        "scan" { Invoke-AuditTargetsScan -Target $opts.target -OutDir $opts.out | Out-Null }
-        "discover_skills" { Invoke-AuditSkillDiscovery -Query $opts.query -OutDir $opts.out | Out-Null }
-        "apply_flow" { Invoke-AuditRecommendationsTwoStageApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -DryRunAck $opts.dry_run_ack | Out-Null }
-        "apply" { Invoke-AuditRecommendationsApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -DryRunAck $opts.dry_run_ack -RequireDryRunAck (-not $opts.apply) -Apply:$opts.apply -Yes:$opts.yes | Out-Null }
+        "scan" { Invoke-AuditTargetsScan -Target $opts.target -OutDir $opts.out -Force:$opts.force | Out-Null }
+        "discover_skills" { Invoke-AuditSkillDiscovery -Query $opts.query -OutDir $opts.out -Force:$opts.force | Out-Null }
+        "apply_flow" { Invoke-AuditRecommendationsTwoStageApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -DryRunAck $opts.dry_run_ack -StaleAck $opts.stale_ack -AllowStaleSnapshot:$opts.allow_stale_snapshot | Out-Null }
+        "apply" { Invoke-AuditRecommendationsApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -DryRunAck $opts.dry_run_ack -StaleAck $opts.stale_ack -AllowStaleSnapshot:$opts.allow_stale_snapshot -RequireDryRunAck (-not $opts.apply) -Apply:$opts.apply -Yes:$opts.yes | Out-Null }
     }
 }
 
@@ -10212,6 +10529,82 @@ function Get-自动更新任务名 {
 function Get-自动更新脚本路径 {
     return (Join-Path $Root "scripts/weekly-auto-update.ps1")
 }
+function Get-自动更新默认模式 {
+    return "weekly"
+}
+function Get-自动更新默认时间 {
+    return "20:00"
+}
+function Get-自动更新默认星期 {
+    return "Friday"
+}
+function Get-自动更新星期别名映射 {
+    return [ordered]@{
+        "mon" = "Monday"; "monday" = "Monday"; "1" = "Monday"; "周一" = "Monday"; "星期一" = "Monday"
+        "tue" = "Tuesday"; "tues" = "Tuesday"; "tuesday" = "Tuesday"; "2" = "Tuesday"; "周二" = "Tuesday"; "星期二" = "Tuesday"
+        "wed" = "Wednesday"; "wednesday" = "Wednesday"; "3" = "Wednesday"; "周三" = "Wednesday"; "星期三" = "Wednesday"
+        "thu" = "Thursday"; "thur" = "Thursday"; "thurs" = "Thursday"; "thursday" = "Thursday"; "4" = "Thursday"; "周四" = "Thursday"; "星期四" = "Thursday"
+        "fri" = "Friday"; "friday" = "Friday"; "5" = "Friday"; "周五" = "Friday"; "星期五" = "Friday"
+        "sat" = "Saturday"; "saturday" = "Saturday"; "6" = "Saturday"; "周六" = "Saturday"; "星期六" = "Saturday"
+        "sun" = "Sunday"; "sunday" = "Sunday"; "7" = "Sunday"; "周日" = "Sunday"; "星期日" = "Sunday"; "周天" = "Sunday"; "星期天" = "Sunday"
+    }
+}
+function Normalize-自动更新模式([string]$mode) {
+    if ([string]::IsNullOrWhiteSpace($mode)) { return (Get-自动更新默认模式) }
+    $v = $mode.Trim().ToLowerInvariant()
+    if ($v -eq "daily" -or $v -eq "每天" -or $v -eq "每日") { return "daily" }
+    if ($v -eq "weekly" -or $v -eq "每周") { return "weekly" }
+    throw ("自动更新模式仅支持 daily 或 weekly：{0}" -f $mode)
+}
+function Normalize-自动更新时间([string]$at) {
+    $value = if ([string]::IsNullOrWhiteSpace($at)) { Get-自动更新默认时间 } else { $at.Trim() }
+    Need ($value -match "^\d{1,2}:\d{2}$") ("时间格式无效：{0}（请使用 HH:mm）" -f $value)
+    $parts = $value.Split(":")
+    $hour = [int]$parts[0]
+    $minute = [int]$parts[1]
+    Need ($hour -ge 0 -and $hour -le 23) ("小时无效：{0}（0-23）" -f $hour)
+    Need ($minute -ge 0 -and $minute -le 59) ("分钟无效：{0}（0-59）" -f $minute)
+    return ("{0:D2}:{1:D2}" -f $hour, $minute)
+}
+function Normalize-自动更新星期([string]$day) {
+    $raw = if ([string]::IsNullOrWhiteSpace($day)) { Get-自动更新默认星期 } else { $day.Trim() }
+    $key = $raw.ToLowerInvariant()
+    $map = Get-自动更新星期别名映射
+    if ($map.Contains($key)) { return [string]$map[$key] }
+    $allowed = @("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+    foreach ($item in $allowed) {
+        if ($item.Equals($raw, [System.StringComparison]::OrdinalIgnoreCase)) { return $item }
+    }
+    throw ("星期无效：{0}（可用 Monday..Sunday / 周一..周日）" -f $day)
+}
+function Format-自动更新计划说明([string]$mode, [string]$at, [string]$dayOfWeek) {
+    if ($mode -eq "daily") {
+        return ("每天 {0}" -f $at)
+    }
+    return ("每周 {0} {1}" -f $dayOfWeek, $at)
+}
+function Get-自动更新任务描述([string]$mode, [string]$at, [string]$dayOfWeek) {
+    return ("skills-manager 自动执行 更新 + 同步MCP | mode={0};at={1};day={2}" -f $mode, $at, $dayOfWeek)
+}
+function Parse-自动更新任务描述([string]$description) {
+    $result = [ordered]@{
+        found = $false
+        mode = (Get-自动更新默认模式)
+        at = (Get-自动更新默认时间)
+        day = (Get-自动更新默认星期)
+    }
+    if ([string]::IsNullOrWhiteSpace($description)) { return [pscustomobject]$result }
+    if ($description -notmatch "mode=([^;|]+)") { return [pscustomobject]$result }
+    $result.mode = Normalize-自动更新模式 $Matches[1]
+    if ($description -match "at=([^;|]+)") {
+        $result.at = Normalize-自动更新时间 $Matches[1]
+    }
+    if ($description -match "day=([^;|]+)") {
+        $result.day = Normalize-自动更新星期 $Matches[1]
+    }
+    $result.found = $true
+    return [pscustomobject]$result
+}
 function 获取自动更新任务 {
     if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) { return $null }
     try { return (Get-ScheduledTask -TaskName (Get-自动更新任务名) -ErrorAction Stop) }
@@ -10234,13 +10627,15 @@ function 查看自动更新状态 {
         if ($info.NextRunTime -and $info.NextRunTime -gt [datetime]::MinValue) { $nextRun = $info.NextRunTime.ToString("yyyy-MM-dd HH:mm:ss") }
         if ($info.LastRunTime -and $info.LastRunTime -gt [datetime]::MinValue) { $lastRun = $info.LastRunTime.ToString("yyyy-MM-dd HH:mm:ss") }
     }
-    Write-Host ("自动更新：已启用（每周五 20:00，本机时间）")
+    $parsed = Parse-自动更新任务描述 ([string]$task.Description)
+    $schedule = if ($parsed.found) { Format-自动更新计划说明 ([string]$parsed.mode) ([string]$parsed.at) ([string]$parsed.day) } else { "（旧任务：计划信息未记录）" }
+    Write-Host ("自动更新：已启用（{0}，本机时间）" -f $schedule)
     Write-Host ("任务名：{0}" -f $taskName)
     Write-Host ("状态：{0}" -f $state)
     Write-Host ("下次运行：{0}" -f $nextRun)
     Write-Host ("上次运行：{0}" -f $lastRun)
 }
-function 启用自动更新 {
+function 启用自动更新([string]$Mode = "", [string]$At = "", [string]$DayOfWeek = "") {
     $taskName = Get-自动更新任务名
     $runnerPath = Get-自动更新脚本路径
     Need (Test-Path $runnerPath) ("缺少自动更新脚本：{0}" -f $runnerPath)
@@ -10248,16 +10643,26 @@ function 启用自动更新 {
     Need (Get-Command New-ScheduledTaskAction -ErrorAction SilentlyContinue) "当前环境不支持 ScheduledTasks 模块。"
     Need (Get-Command powershell -ErrorAction SilentlyContinue) "未找到 powershell 可执行文件。"
 
+    $modeNormalized = Normalize-自动更新模式 $Mode
+    $atNormalized = Normalize-自动更新时间 $At
+    $dayNormalized = if ($modeNormalized -eq "weekly") { Normalize-自动更新星期 $DayOfWeek } else { Get-自动更新默认星期 }
+
     if (Skip-IfDryRun "启用自动更新计划任务") { return }
 
     $pwsh = (Get-Command powershell -ErrorAction Stop).Source
     $args = ('-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $runnerPath)
     $action = New-ScheduledTaskAction -Execute $pwsh -Argument $args -WorkingDirectory $Root
-    $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Friday -At "20:00"
+    $trigger = if ($modeNormalized -eq "daily") {
+        New-ScheduledTaskTrigger -Daily -At $atNormalized
+    }
+    else {
+        New-ScheduledTaskTrigger -Weekly -DaysOfWeek $dayNormalized -At $atNormalized
+    }
     $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "skills-manager 每周五 20:00 自动执行 更新 + 同步MCP" -Force | Out-Null
-    Write-Host "✅ 已启用自动更新：每周五 20:00（本机时间）。"
+    $description = Get-自动更新任务描述 $modeNormalized $atNormalized $dayNormalized
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description $description -Force | Out-Null
+    Write-Host ("✅ 已启用自动更新：{0}（本机时间）。" -f (Format-自动更新计划说明 $modeNormalized $atNormalized $dayNormalized))
     查看自动更新状态
 }
 function 禁用自动更新 {
@@ -10275,15 +10680,24 @@ function 自动更新设置 {
     while ($true) {
         Write-Host ""
         Write-Host "=== 自动更新设置 ==="
-        Write-Host "目标：每周五 20:00 自动执行【更新 + 同步MCP】"
+        Write-Host "目标：按计划自动执行【更新 + 同步MCP】"
         查看自动更新状态
-        Write-Host "1) 启用（每周五 20:00）"
+        Write-Host "1) 启用/更新计划（daily/weekly）"
         Write-Host "2) 禁用"
         Write-Host "3) 查看状态"
         Write-Host "0) 返回"
         $c = Read-HostSafe "请选择"
         switch ($c) {
-            "1" { 启用自动更新 }
+            "1" {
+                $modeInput = Read-HostSafe ("计划模式（daily/weekly，默认 {0}）" -f (Get-自动更新默认模式))
+                $atInput = Read-HostSafe ("执行时间（HH:mm，默认 {0}）" -f (Get-自动更新默认时间))
+                $modeNormalized = Normalize-自动更新模式 $modeInput
+                $dayInput = ""
+                if ($modeNormalized -eq "weekly") {
+                    $dayInput = Read-HostSafe ("每周几执行（Monday..Sunday 或 周一..周日，默认 {0}）" -f (Get-自动更新默认星期))
+                }
+                启用自动更新 -Mode $modeNormalized -At $atInput -DayOfWeek $dayInput
+            }
             "2" { 禁用自动更新 }
             "3" { 查看自动更新状态 }
             "0" { return }
@@ -10318,14 +10732,14 @@ function 技能库管理菜单 {
         Write-Host "1) 新增技能库"
         Write-Host "2) 删除技能库"
         Write-Host "3) 生成锁文件"
-        Write-Host "4) 清理无效映射"
+        Write-Host "4) 打开配置"
         Write-Host "0) 返回"
         $c = Read-HostSafe "请选择"
         switch ($c) {
             "1" { 新增技能库 }
             "2" { 删除技能库 }
             "3" { 锁定 }
-            "4" { 清理无效映射 }
+            "4" { 打开配置 }
             "0" { return }
             default { Write-Host "无效选择。" }
         }
@@ -10366,7 +10780,7 @@ Skills 管理器（中文菜单）
 
 菜单分组：
   - MCP 服务：新增、卸载、同步 MCP
-  - 技能库管理：新增/删除技能库、生成锁文件、清理无效映射
+  - 技能库管理：新增/删除技能库、生成锁文件、打开配置
   - 更多：一键工作流、自动更新设置、解除关联、清理备份
 
 主要功能说明：
@@ -10385,7 +10799,7 @@ Skills 管理器（中文菜单）
   - 同步MCP：只同步 MCP 配置，不构建 skills
   - 一键工作流：按场景执行多步骤编排；支持 `--list`、`--no-prompt`、`--continue-on-error`
   - 目标仓审查：维护需求上下文、目标仓列表、审查包生成和建议应用
-  - 自动更新设置：配置本机计划任务，每周五 20:00 自动执行“更新 + 同步MCP”
+  - 自动更新设置：配置本机计划任务，按 daily/weekly + HH:mm 自动执行“更新 + 同步MCP”
   - 解除关联：移除 link 模式下创建的目录关联
   - 清理备份：删除仓库内 *.bak.* 文件和 .bak 目录（排除 vendor / agent / imports / .git）
 
@@ -10434,14 +10848,14 @@ Skills 管理器（中文菜单）
   .\skills.ps1 审查目标 需求设置
   .\skills.ps1 审查目标 需求查看
   .\skills.ps1 审查目标 需求结构化 --profile <file>
-  .\skills.ps1 审查目标 扫描 [--target <name>] [--out <dir>]
-  .\skills.ps1 审查目标 发现新技能 [--query <text>] [--out <dir>]
+  .\skills.ps1 审查目标 扫描 [--target <name>] [--out <dir>] [--force]
+  .\skills.ps1 审查目标 发现新技能 [--query <text>] [--out <dir>] [--force]
   .\skills.ps1 审查目标 状态
   .\skills.ps1 审查目标 修改 <name> <path>
   .\skills.ps1 审查目标 删除 <name>
-  .\skills.ps1 审查目标 应用确认 --recommendations <file>
-  .\skills.ps1 审查目标 应用 --recommendations <file> [--dry-run-ack "我知道未落盘"]
-  .\skills.ps1 审查目标 应用 --recommendations <file> --apply --yes [--add-indexes "1,3"] [--remove-indexes "2"]
+  .\skills.ps1 审查目标 应用确认 --recommendations <file> [--allow-stale-snapshot] [--stale-ack "<token>"]
+  .\skills.ps1 审查目标 应用 --recommendations <file> [--dry-run-ack "我知道未落盘"] [--allow-stale-snapshot] [--stale-ack "<token>"]
+  .\skills.ps1 审查目标 应用 --recommendations <file> --apply --yes [--add-indexes "1,3"] [--remove-indexes "2"] [--allow-stale-snapshot] [--stale-ack "<token>"]
   .\skills.ps1 doctor [--json] [--fix] [--dry-run-fix] [--strict] [--strict-perf] [--threshold-ms <ms>]
   通用参数：
   -DryRun：仅预演（跳过写入/删除/同步/拉取）
@@ -10477,6 +10891,11 @@ Skills 管理器（中文菜单）
   - 外层 AI 应先写完并自检 `recommendations.json`（schema、占位符、双理由、真实来源），再进入 dry-run。
   - `应用确认` 是单入口两阶段流程：先 dry-run，再要求输入确认口令 `APPLY <run-id>` 才执行落盘。
   - `应用` 默认只做 dry-run，且需显式确认口令 `我知道未落盘`；只有 `--apply --yes` 才会真正执行选中的新增/卸载。
+  - `应用`/`应用确认` 会校验同目录 `installed-skills.json` 快照与当前 live mappings 指纹；若快照过期（stale_snapshot）会阻断并要求先重新 `审查目标 扫描`。
+  - 仅在你明确接受风险时可加 `--allow-stale-snapshot` 跳过该阻断（报告会标记 stale 风险）。
+  - 使用 `--allow-stale-snapshot` 时会触发红色警告并要求二次确认口令；非交互环境请用 `--stale-ack "<token>"` 提前传入。
+  - `--out` 若指向已存在且非空目录，默认阻断，防止覆盖旧审查包；如确需复用，显式追加 `--force`。
+  - 若路径里仍包含 `<run-id>` 这类占位符，命令会直接阻断并给出可用 run-id 提示。
   - `状态` 可查看最近一次 `apply-report.json` 的 `mode/success/persisted/changed_counts`。
   - 执行前会分别列出“新增建议”和“卸载建议”两份带序号清单；dry-run 后向用户汇报时必须沿用原序号，并同时展示用户需求 / 目标仓两条简短依据。
   - `--add-indexes` 和 `--remove-indexes` 分别作用于各自清单；两份清单独立编号，先选卸载不会改变新增清单的序号映射。

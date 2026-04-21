@@ -1,82 +1,76 @@
 {
-    "version":  2,
-    "path_base":  "skills_manager_root",
-    "user_profile":  {
-                         "raw_text":  "制作PPT课件。制作初中教师日常使用的教学、办公软件，可能常在windows系统下。公众号、知乎文章的写作、素材、排版、配图、自动发布等。初中物理动画，可能包括web、SVG网页等。",
-                         "summary":  "面向初中教师场景，主要在 Windows 环境下进行 PPT 课件制作、教学办公工具开发、公众号/知乎内容生产与自动发布，以及基于 Web/SVG 的物理教学动画制作。",
-                         "structured":  {
-                                            "primary_work_types":  [
-                                                                       "教学课件制作",
-                                                                       "教育办公工具开发",
-                                                                       "内容生产与分发",
-                                                                       "教学动画制作"
-                                                                   ],
-                                            "preferred_agents":  [
-                                                                     "powerpoint-automation",
-                                                                     "baoyu-post-to-wechat",
-                                                                     "frontend-design",
-                                                                     "manim-composer"
-                                                                 ],
-                                            "tech_stack":  [
-                                                               "Windows",
-                                                               "PowerPoint/PPTX",
-                                                               "Web (HTML/CSS/JavaScript)",
-                                                               "SVG",
-                                                               "微信公众号",
-                                                               "知乎"
-                                                           ],
-                                            "common_tasks":  [
-                                                                 "制作和迭代初中教学 PPT 课件",
-                                                                 "开发初中教师日常教学/办公软件",
-                                                                 "撰写并排版公众号与知乎文章",
-                                                                 "准备配图与素材并自动发布内容",
-                                                                 "制作初中物理教学动画（Web/SVG）"
-                                                             ],
-                                            "constraints":  [
-                                                                "主要在 Windows 系统下使用与运行",
-                                                                "产出需贴合初中教师日常教学和办公场景",
-                                                                "写作、排版、配图、发布需要端到端衔接"
-                                                            ],
-                                            "avoidances":  [
-                                                               "与教学场景无关的复杂企业化流程",
-                                                               "只给概念不提供可落地执行步骤"
-                                                           ],
-                                            "decision_preferences":  [
-                                                                         "优先选择可直接落地的自动化方案",
-                                                                         "优先支持中文内容创作与发布链路",
-                                                                         "优先强调可视化呈现与课堂演示效果"
-                                                                     ]
-                                        },
-                         "last_structured_at":  "",
-                         "structured_by":  "outer-ai"
-                     },
-    "targets":  [
-                    {
-                        "name":  "classroomtoolkit",
-                        "path":  "D:\\OneDrive\\CODE\\ClassroomToolkit",
-                        "enabled":  true,
-                        "tags":  [
-
-                                 ],
-                        "notes":  ""
-                    },
-                    {
-                        "name":  "governed-ai-coding-runtime",
-                        "path":  "D:\\OneDrive\\CODE\\governed-ai-coding-runtime",
-                        "enabled":  true,
-                        "tags":  [
-
-                                 ],
-                        "notes":  ""
-                    },
-                    {
-                        "name":  "skills-manager",
-                        "path":  "D:\\OneDrive\\CODE\\skills-manager",
-                        "enabled":  true,
-                        "tags":  [
-
-                                 ],
-                        "notes":  ""
-                    }
-                ]
+  "version": 2,
+  "path_base": "skills_manager_root",
+  "user_profile": {
+    "raw_text": "制作PPT课件。制作初中教师日常使用的教学、办公软件，可能常在windows系统下。公众号、知乎文章的写作、素材、排版、配图、自动发布等。初中物理动画，可能包括web、SVG网页等。",
+    "summary": "面向初中教师场景，主要在 Windows 环境下进行 PPT 课件制作、教学办公工具开发、公众号/知乎内容生产与自动发布，以及基于 Web/SVG 的物理教学动画制作。",
+    "structured": {
+      "primary_work_types": [
+        "教学课件制作",
+        "教育办公工具开发",
+        "内容生产与分发",
+        "教学动画制作"
+      ],
+      "preferred_agents": [
+        "powerpoint-automation",
+        "baoyu-post-to-wechat",
+        "frontend-design",
+        "manim-composer"
+      ],
+      "tech_stack": [
+        "Windows",
+        "PowerPoint/PPTX",
+        "Web (HTML/CSS/JavaScript)",
+        "SVG",
+        "微信公众号",
+        "知乎"
+      ],
+      "common_tasks": [
+        "制作和迭代初中教学 PPT 课件",
+        "开发初中教师日常教学/办公软件",
+        "撰写并排版公众号与知乎文章",
+        "准备配图与素材并自动发布内容",
+        "制作初中物理教学动画（Web/SVG）"
+      ],
+      "constraints": [
+        "主要在 Windows 系统下使用与运行",
+        "产出需贴合初中教师日常教学和办公场景",
+        "写作、排版、配图、发布需要端到端衔接"
+      ],
+      "avoidances": [
+        "与教学场景无关的复杂企业化流程",
+        "只给概念不提供可落地执行步骤"
+      ],
+      "decision_preferences": [
+        "优先选择可直接落地的自动化方案",
+        "优先支持中文内容创作与发布链路",
+        "优先强调可视化呈现与课堂演示效果"
+      ]
+    },
+    "last_structured_at": "",
+    "structured_by": "outer-ai"
+  },
+  "targets": [
+    {
+      "name": "classroomtoolkit",
+      "path": "D:\\OneDrive\\CODE\\ClassroomToolkit",
+      "enabled": true,
+      "tags": [],
+      "notes": ""
+    },
+    {
+      "name": "governed-ai-coding-runtime",
+      "path": "D:\\OneDrive\\CODE\\governed-ai-coding-runtime",
+      "enabled": true,
+      "tags": [],
+      "notes": ""
+    },
+    {
+      "name": "skills-manager",
+      "path": "D:\\OneDrive\\CODE\\skills-manager",
+      "enabled": true,
+      "tags": [],
+      "notes": ""
+    }
+  ]
 }

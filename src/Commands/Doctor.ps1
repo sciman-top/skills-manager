@@ -153,9 +153,10 @@ function Get-PerfThresholdMs([string]$Metric, [int]$DefaultThresholdMs = 5000) {
         # Includes prebuild checks + full build/apply flow; realistic baseline in this repo is ~180s.
         "build_apply_total" { return 240000 }
         "sync_mcp" { return 10000 }
-        "update_vendor" { return $null }
-        "update_imports" { return $null }
-        "update_total" { return $null }
+        # Update flow is network-heavy but should still surface regressions in doctor warnings.
+        "update_vendor" { return 60000 }
+        "update_imports" { return 180000 }
+        "update_total" { return 240000 }
         default { return $DefaultThresholdMs }
     }
 }

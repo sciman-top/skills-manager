@@ -468,6 +468,10 @@ function Invoke-LightRepairBySid {
     }
 }
 
+function Get-DefaultAclBackupRoot {
+    return (Join-Path $script:RepoRoot "reports\runtime\acl-backups")
+}
+
 function Repair-GitAcl {
     param(
         [string]$Target,
@@ -587,7 +591,7 @@ function Repair-GitAcl {
 
     if ([string]::IsNullOrWhiteSpace($BaseBackupPath)) {
         $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-        $BaseBackupPath = Join-Path $script:RepoRoot ("acl-backup-git-{0}.txt" -f $timestamp)
+        $BaseBackupPath = Join-Path (Get-DefaultAclBackupRoot) ("acl-backup-git-{0}.txt" -f $timestamp)
     }
 
     $backupDir = Split-Path -Parent $BaseBackupPath
