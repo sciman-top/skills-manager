@@ -1,6 +1,6 @@
 ﻿#requires -Version 5.1
 param(
-    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "锁定", "生成锁文件", "打开配置", "解除关联", "清理备份", "自动更新设置", "帮助", "doctor", "add", "npx", "安装MCP", "卸载MCP", "同步MCP", "mcp-install", "mcp-uninstall", "mcp-sync", "审查目标", "audit-targets", "一键", "workflow")]
+    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "锁定", "生成锁文件", "清理无效映射", "打开配置", "解除关联", "清理备份", "自动更新设置", "帮助", "doctor", "add", "npx", "安装MCP", "卸载MCP", "同步MCP", "mcp-install", "mcp-uninstall", "mcp-sync", "审查目标", "audit-targets", "一键", "workflow", "prune-invalid-mappings")]
     [string]$Cmd = "menu",
     [string]$Filter = "",
     [switch]$DryRun,
@@ -24,6 +24,33 @@ $AgentDir = Join-Path $Root "agent"
 $OverridesDir = Join-Path $Root "overrides"
 $ManualDir = Join-Path $Root "manual"
 $ImportDir = Join-Path $Root "imports"
+$script:ActiveLogPath = $null
+$script:LogPathFallbackWarned = $false
+
+function Resolve-ActiveLogPath {
+    if (-not [string]::IsNullOrWhiteSpace($script:ActiveLogPath)) { return $script:ActiveLogPath }
+    $candidates = @()
+    if (-not [string]::IsNullOrWhiteSpace($LogPath)) { $candidates += $LogPath }
+    $tempRoot = $env:TEMP
+    if ([string]::IsNullOrWhiteSpace($tempRoot)) { $tempRoot = [System.IO.Path]::GetTempPath() }
+    if (-not [string]::IsNullOrWhiteSpace($tempRoot)) {
+        $candidates += (Join-Path $tempRoot "skills-manager-build.log")
+    }
+    foreach ($candidate in $candidates) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+        try {
+            $parent = Split-Path -Parent $candidate
+            if (-not [string]::IsNullOrWhiteSpace($parent) -and -not (Test-Path -LiteralPath $parent)) {
+                New-Item -ItemType Directory -Path $parent -Force | Out-Null
+            }
+            [System.IO.File]::AppendAllText($candidate, "")
+            $script:ActiveLogPath = $candidate
+            return $script:ActiveLogPath
+        }
+        catch {}
+    }
+    return $null
+}
 
 function Get-LogRotateMaxBytes {
     $v = $null
@@ -51,34 +78,55 @@ function Get-LogMaxBackups {
     catch {}
     return 5
 }
-function Rotate-LogIfNeeded {
-    if ([string]::IsNullOrWhiteSpace($LogPath)) { return }
-    if (-not (Test-Path $LogPath)) { return }
+function Rotate-LogIfNeeded([string]$TargetPath) {
+    if ([string]::IsNullOrWhiteSpace($TargetPath)) { return }
+    if (-not (Test-Path -LiteralPath $TargetPath)) { return }
     $maxBytes = Get-LogRotateMaxBytes
     $maxBackups = Get-LogMaxBackups
     try {
-        $size = (Get-Item $LogPath -ErrorAction Stop).Length
+        $size = (Get-Item -LiteralPath $TargetPath -ErrorAction Stop).Length
         if ($size -lt $maxBytes) { return }
         for ($i = $maxBackups; $i -ge 1; $i--) {
-            $src = if ($i -eq 1) { $LogPath } else { "{0}.{1}" -f $LogPath, ($i - 1) }
-            $dst = "{0}.{1}" -f $LogPath, $i
-            if (-not (Test-Path $src)) { continue }
-            if (Test-Path $dst) { Remove-Item -Force $dst }
-            Move-Item -Force $src $dst
+            $src = if ($i -eq 1) { $TargetPath } else { "{0}.{1}" -f $TargetPath, ($i - 1) }
+            $dst = "{0}.{1}" -f $TargetPath, $i
+            if (-not (Test-Path -LiteralPath $src)) { continue }
+            if (Test-Path -LiteralPath $dst) { Remove-Item -LiteralPath $dst -Force }
+            Move-Item -LiteralPath $src -Destination $dst -Force
         }
     }
     catch {}
 }
 function Write-LogRecord([string]$Level, [string]$Message, [object]$Data) {
     if ($DryRun) { return }
-    Rotate-LogIfNeeded
+    $targetPath = Resolve-ActiveLogPath
+    if ([string]::IsNullOrWhiteSpace($targetPath)) { return }
+    Rotate-LogIfNeeded $targetPath
     $record = [ordered]@{
         ts    = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
         level = $Level.ToUpperInvariant()
         msg   = $Message
     }
     if ($null -ne $Data) { $record.data = $Data }
-    ($record | ConvertTo-Json -Depth 20 -Compress) | Out-File -FilePath $LogPath -Append -Encoding UTF8
+    $json = ($record | ConvertTo-Json -Depth 20 -Compress)
+    try {
+        $json | Out-File -FilePath $targetPath -Append -Encoding UTF8
+        return
+    }
+    catch {}
+    if ($targetPath -ne $LogPath) { return }
+
+    # 主日志路径不可写时，自动回退到 TEMP，避免日志故障中断主流程
+    $script:ActiveLogPath = $null
+    $fallbackPath = Resolve-ActiveLogPath
+    if ([string]::IsNullOrWhiteSpace($fallbackPath) -or $fallbackPath -eq $targetPath) { return }
+    try {
+        $json | Out-File -FilePath $fallbackPath -Append -Encoding UTF8
+        if (-not $script:LogPathFallbackWarned) {
+            Write-Host ("[WARN] 日志路径不可写，已切换到：{0}" -f $fallbackPath) -ForegroundColor Yellow
+            $script:LogPathFallbackWarned = $true
+        }
+    }
+    catch {}
 }
 function Log([string]$msg, [string]$Level = "INFO", [switch]$NoHost, [object]$Data) {
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -1772,6 +1820,100 @@ function Get-GitOutputSummary($outputLines) {
     if ($lines.Count -eq 0) { return $null }
     return (($lines | Select-Object -Last 2) -join " | ")
 }
+function Get-GitCleanFailurePathsFromMessage([string]$message) {
+    if ([string]::IsNullOrWhiteSpace($message)) { return @() }
+    $paths = New-Object System.Collections.Generic.List[string]
+    foreach ($segment in @($message -split "\|")) {
+        $text = [string]$segment
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        $trimmed = $text.Trim()
+        $match = [regex]::Match($trimmed, "failed to remove(?: directory)?\s+'([^']+)'", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        if (-not $match.Success) {
+            $match = [regex]::Match($trimmed, "failed to remove(?: directory)?\s+([^:]+?)(?::|$)", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        }
+        if (-not $match.Success) { continue }
+        $pathText = $match.Groups[1].Value
+        if ([string]::IsNullOrWhiteSpace($pathText)) { continue }
+        $paths.Add($pathText.Trim()) | Out-Null
+    }
+    return @($paths | Select-Object -Unique)
+}
+function Resolve-GitCleanFailurePath([string]$repoPath, [string]$rawPath) {
+    if ([string]::IsNullOrWhiteSpace($repoPath) -or [string]::IsNullOrWhiteSpace($rawPath)) { return $null }
+    $candidate = $rawPath.Trim().Trim("'`"").Trim()
+    if ([string]::IsNullOrWhiteSpace($candidate)) { return $null }
+    $candidate = $candidate -replace "/", "\"
+    try {
+        $repoFull = [System.IO.Path]::GetFullPath($repoPath)
+    }
+    catch {
+        return $null
+    }
+
+    $fullPath = $null
+    try {
+        if ([System.IO.Path]::IsPathRooted($candidate)) {
+            $fullPath = [System.IO.Path]::GetFullPath($candidate)
+        }
+        else {
+            $fullPath = [System.IO.Path]::GetFullPath((Join-Path $repoFull $candidate))
+        }
+    }
+    catch {
+        return $null
+    }
+    if (-not (Is-PathInsideOrEqual $fullPath $repoFull)) { return $null }
+    return $fullPath
+}
+function Clear-ReadOnlyAttribute([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return }
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    try {
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReadOnly) -ne 0) {
+            $item.Attributes = ($item.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly))
+        }
+    }
+    catch {}
+}
+function Clear-ReadOnlyAttributesRecursively([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return }
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    Clear-ReadOnlyAttribute $path
+    try {
+        foreach ($child in @(Get-ChildItem -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue)) {
+            Clear-ReadOnlyAttribute $child.FullName
+        }
+    }
+    catch {}
+}
+function Repair-GitCleanPermissionDenied([string]$repoPath, [string]$errorMessage) {
+    if ([string]::IsNullOrWhiteSpace($errorMessage)) { return $false }
+    if ($errorMessage -notmatch "git clean\s+-fd") { return $false }
+    if ($errorMessage -notmatch "failed to remove|Permission denied|拒绝访问|Directory not empty") { return $false }
+
+    $rawPaths = @(Get-GitCleanFailurePathsFromMessage $errorMessage)
+    if ($rawPaths.Count -eq 0) { return $false }
+    $repaired = $false
+    foreach ($raw in $rawPaths) {
+        $fullPath = Resolve-GitCleanFailurePath $repoPath $raw
+        if ([string]::IsNullOrWhiteSpace($fullPath)) {
+            Log ("git clean 修复跳过（路径超出仓库边界或无效）：{0}" -f $raw) "WARN"
+            continue
+        }
+        if (-not (Test-Path -LiteralPath $fullPath)) { continue }
+        Clear-ReadOnlyAttributesRecursively $fullPath
+        $removed = Invoke-RemoveItemWithRetry $fullPath -Recurse -IgnoreFailure -SilentIgnore
+        if ($removed -or -not (Test-Path -LiteralPath $fullPath)) {
+            Log ("git clean 权限修复完成：{0}" -f $fullPath) "WARN"
+            $repaired = $true
+        }
+        else {
+            Log ("git clean 权限修复未完成：{0}" -f $fullPath) "WARN"
+        }
+    }
+    return $repaired
+}
 function Test-GitProcessRunning {
     try {
         $gitProcesses = @(Get-Process -Name git,git-remote-http,git-remote-https,git-lfs,ssh,sh -ErrorAction SilentlyContinue)
@@ -1832,7 +1974,19 @@ function Git-HardResetClean([bool]$forceClean) {
     Repair-StaleGitLockInRepo (Get-Location).Path | Out-Null
     Invoke-Git @("reset", "--hard")
     Repair-StaleGitLockInRepo (Get-Location).Path | Out-Null
-    Invoke-Git @("clean", "-fd")
+    $repoPath = (Get-Location).Path
+    $maxCleanAttempts = 12
+    for ($attempt = 1; $attempt -le $maxCleanAttempts; $attempt++) {
+        try {
+            Invoke-Git @("clean", "-fd")
+            return
+        }
+        catch {
+            if ($attempt -ge $maxCleanAttempts) { throw }
+            if (-not (Repair-GitCleanPermissionDenied $repoPath $_.Exception.Message)) { throw }
+            Log ("git clean 失败，已执行权限修复并重试（{0}/{1}）" -f $attempt, $maxCleanAttempts) "WARN"
+        }
+    }
 }
 function Repair-StaleGitLockAfterFailure([string]$repoPath, $outputLines) {
     if (-not (Test-GitIndexLockIssue $outputLines)) { return $false }
@@ -1965,6 +2119,7 @@ function Get-DirtyUpdateTargets($cfg) {
     foreach ($v in @($cfg.vendors)) {
         $path = VendorPath $v.name
         if (-not (Test-Path $path)) { continue }
+        if (-not (Test-IsGitRepoRoot $path)) { continue }
         Push-Location $path
         try {
             if (Has-GitChanges) {
@@ -1984,6 +2139,7 @@ function Get-DirtyManualImportTargets($cfg) {
         if ($i.mode -ne "manual") { continue }
         $cache = Join-Path $ImportDir $i.name
         if (-not (Test-Path $cache)) { continue }
+        if (-not (Test-IsGitRepoRoot $cache)) { continue }
         Push-Location $cache
         try {
             if (Has-GitChanges) {
@@ -1993,6 +2149,33 @@ function Get-DirtyManualImportTargets($cfg) {
         finally { Pop-Location }
     }
     return $items.ToArray()
+}
+function Test-IsGitRepoRoot([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    if (-not (Test-Path -LiteralPath $path -PathType Container)) { return $false }
+    Push-Location $path
+    try {
+        $top = Invoke-GitCapture @("rev-parse", "--show-toplevel")
+    }
+    finally { Pop-Location }
+    if ([string]::IsNullOrWhiteSpace($top)) { return $false }
+
+    try {
+        $resolvedPath = (Resolve-Path -LiteralPath $path -ErrorAction Stop).Path
+    }
+    catch {
+        $resolvedPath = $path
+    }
+    try {
+        $resolvedTop = (Resolve-Path -LiteralPath $top -ErrorAction Stop).Path
+    }
+    catch {
+        $resolvedTop = $top
+    }
+
+    $resolvedPath = $resolvedPath.TrimEnd('\', '/')
+    $resolvedTop = $resolvedTop.TrimEnd('\', '/')
+    return [string]::Equals($resolvedPath, $resolvedTop, [System.StringComparison]::OrdinalIgnoreCase)
 }
 function Confirm-UpdateForce($cfg, [ref]$SkipForceClean) {
     if ($null -eq $SkipForceClean.Value) { $SkipForceClean.Value = @{} }
@@ -4323,6 +4506,128 @@ function Should-SyncMappingToAgent($mapping) {
     return $true
 }
 
+function Get-InvalidMappings($cfg = $null) {
+    if ($null -eq $cfg) { $cfg = LoadCfg }
+    $invalid = New-Object System.Collections.Generic.List[object]
+    $mappings = @($cfg.mappings)
+    for ($idx = 0; $idx -lt $mappings.Count; $idx++) {
+        $m = $mappings[$idx]
+        if ($null -eq $m) { continue }
+        if (-not (Should-SyncMappingToAgent $m)) { continue }
+
+        $vendor = [string]$m.vendor
+        $from = [string]$m.from
+        $to = [string]$m.to
+        $src = $null
+        $reason = $null
+        try {
+            if (-not (Test-SafeRelativePath $from -AllowDot)) {
+                $reason = "非法 mapping.from"
+            }
+            elseif (-not (Test-SafeRelativePath $to)) {
+                $reason = "非法 mapping.to"
+            }
+            elseif ($vendor -eq "manual") {
+                $src = Resolve-ManualImportSkillPath $cfg $from -AllowLegacyFallback
+                if ([string]::IsNullOrWhiteSpace($src)) {
+                    $reason = "manual 导入不存在或无效"
+                }
+            }
+            else {
+                $base = Resolve-SourceBase $vendor $cfg
+                $src = Join-Path $base $from
+                if (-not (Is-PathInsideOrEqual $src $base)) {
+                    $reason = "mapping.from 越界"
+                }
+            }
+        }
+        catch {
+            $reason = $_.Exception.Message
+        }
+
+        if ([string]::IsNullOrWhiteSpace($reason)) {
+            if (-not (Test-Path -LiteralPath $src -PathType Container)) {
+                $reason = "源目录不存在"
+            }
+            elseif (-not (Test-IsSkillDir $src)) {
+                $reason = "缺少标记文件"
+            }
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($reason)) {
+            $invalid.Add([pscustomobject]@{
+                    index = $idx
+                    vendor = $vendor
+                    from = $from
+                    to = $to
+                    src = [string]$src
+                    reason = $reason
+                }) | Out-Null
+        }
+    }
+    return $invalid.ToArray()
+}
+
+function Parse-CleanupInvalidMappingsArgs([string[]]$tokens) {
+    $result = [ordered]@{
+        yes = $false
+        no_build = $false
+    }
+    foreach ($t in @($tokens)) {
+        if ([string]::IsNullOrWhiteSpace([string]$t)) { continue }
+        switch (([string]$t).Trim().ToLowerInvariant()) {
+            "--yes" { $result.yes = $true; continue }
+            "--no-build" { $result.no_build = $true; continue }
+            default { throw ("未知参数：{0}（支持 --yes, --no-build）" -f [string]$t) }
+        }
+    }
+    return [pscustomobject]$result
+}
+
+function 清理无效映射([string[]]$tokens = @()) {
+    $opts = Parse-CleanupInvalidMappingsArgs $tokens
+    $cfg = LoadCfg
+    $invalid = @(Get-InvalidMappings $cfg)
+    if ($invalid.Count -eq 0) {
+        Write-Host "未发现失效 mappings。"
+        return
+    }
+
+    $preview = @()
+    foreach ($item in $invalid) {
+        $preview += ("[{0}] {1} -> {2} ({3})" -f [string]$item.vendor, [string]$item.from, [string]$item.to, [string]$item.reason)
+    }
+    if (-not $opts.yes) {
+        if (-not (Confirm-WithSummary "将删除以下失效 mappings" $preview "确认删除并写回 skills.json？" "Y")) {
+            Write-Host "已取消清理。"
+            return
+        }
+    }
+
+    if (Skip-IfDryRun "清理无效映射") {
+        Write-Host ("DRYRUN：预计删除失效 mappings {0} 项。" -f $invalid.Count)
+        return
+    }
+
+    $dropIndexes = New-Object System.Collections.Generic.HashSet[int]
+    foreach ($item in $invalid) { $dropIndexes.Add([int]$item.index) | Out-Null }
+    $nextMappings = New-Object System.Collections.Generic.List[object]
+    $all = @($cfg.mappings)
+    for ($i = 0; $i -lt $all.Count; $i++) {
+        if ($dropIndexes.Contains($i)) { continue }
+        $nextMappings.Add($all[$i]) | Out-Null
+    }
+    $cfg.mappings = @($nextMappings)
+    SaveCfg $cfg
+    Clear-SkillsCache
+
+    Write-Host ("已清理失效 mappings：{0} 项。" -f $invalid.Count) -ForegroundColor Green
+    if (-not $opts.no_build) {
+        Write-Host "开始【构建生效】..." -ForegroundColor Cyan
+        构建生效
+    }
+}
+
 function Remove-VendorRootMappingOutputsFromAgent($cfg) {
     if ($null -eq $cfg) { return 0 }
     $removed = 0
@@ -4890,6 +5195,7 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
             Log ("清空 agent/ 失败，将在现有目录上继续覆盖构建：{0}" -f $_.Exception.Message)
         }
         $failures = New-Object System.Collections.Generic.List[string]
+        $invalidMappings = New-Object System.Collections.Generic.List[object]
         if ($null -ne $Txn -and $Txn.PSObject.Properties.Match("backup_error").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($Txn.backup_error)) {
             $failures.Add(("build-txn:agent-backup => {0}" -f $Txn.backup_error)) | Out-Null
         }
@@ -4919,7 +5225,15 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
                 Need (Is-PathInsideOrEqual $dst $AgentDir) ("mapping.to 越界：{0}" -f $m.to)
 
                 if (-not (Test-IsSkillDir $src)) {
-                    Write-Host ("❌ 跳过无效技能（缺少标记文件）：{0}" -f $src) -ForegroundColor Red
+                    $invalidReason = if (-not (Test-Path -LiteralPath $src -PathType Container)) { "源目录不存在" } else { "缺少标记文件" }
+                    Write-Host ("⚠️ 跳过无效技能（{0}）：{1}" -f $invalidReason, $src) -ForegroundColor Yellow
+                    $invalidMappings.Add([pscustomobject]@{
+                            vendor = [string]$m.vendor
+                            from = [string]$m.from
+                            to = [string]$m.to
+                            src = [string]$src
+                            reason = $invalidReason
+                        }) | Out-Null
                     continue
                 }
                 $cacheKey = ("mapping|{0}|{1}|{2}" -f $m.vendor, $m.from, $m.to)
@@ -5012,6 +5326,18 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
             Write-Host "   建议：先执行【解除关联】并关闭占用进程，再重试【构建生效】。" -ForegroundColor Red
             if ([string]::IsNullOrWhiteSpace($cleanAgentError)) { $cleanAgentError = "unknown error" }
             $failures.Add(("build-agent-reused-existing-dir => {0}" -f $cleanAgentError)) | Out-Null
+        }
+        if ($invalidMappings.Count -gt 0) {
+            Log ("检测到 {0} 条失效 mappings（源目录不存在或缺少标记文件），建议清理 skills.json。" -f $invalidMappings.Count) "WARN"
+            Write-Host ("⚠️ 检测到 {0} 条失效 mappings（未参与同步）。" -f $invalidMappings.Count) -ForegroundColor Yellow
+            $preview = @($invalidMappings | Select-Object -First 10)
+            foreach ($item in $preview) {
+                Write-Host ("   - [{0}] {1} -> {2} ({3})" -f [string]$item.vendor, [string]$item.from, [string]$item.to, [string]$item.reason) -ForegroundColor Yellow
+            }
+            if ($invalidMappings.Count -gt $preview.Count) {
+                Write-Host ("   ... 另有 {0} 条未显示" -f ($invalidMappings.Count - $preview.Count)) -ForegroundColor Yellow
+            }
+            Write-Host "   建议：删除上述 mappings 后再执行【构建生效】。" -ForegroundColor Yellow
         }
         $count = @((Get-ChildItem -LiteralPath $AgentDir -Directory -ErrorAction SilentlyContinue)).Count
         Log ("构建完成：agent/ (共 {0} 项技能)" -f $count)
@@ -5220,6 +5546,12 @@ function Get-UpdateParallelism($cfg) {
     }
     if ($n -lt 1) { $n = 1 }
     return $n
+}
+
+function Test-WindowsInvalidPathIssue([string]$message) {
+    if ([string]::IsNullOrWhiteSpace($message)) { return $false }
+    if ($message -notmatch "invalid path") { return $false }
+    return ($message -match "git\s+(pull|checkout|reset)")
 }
 
 function Invoke-ParallelGitPrefetch($cfg, [int]$Parallelism = 1) {
@@ -5470,22 +5802,75 @@ function 更新Imports($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $
 
                 $forceClean = Should-ForceCleanTarget $cfg $SkipForceClean "import" $i.name
                 try {
-                    Ensure-Repo $cache $repo $ref $sparsePath $forceClean $false (-not $SkipFetch)
+                    $null = Ensure-Repo $cache $repo $ref $sparsePath $forceClean $false (-not $SkipFetch)
                 }
                 catch {
-                    $lockPath = Join-Path $cache ".git\index.lock"
-                    $fallbackSkillPath = Resolve-SkillPath $cache $skillPath
-                    $fallbackSrc = if ($fallbackSkillPath -eq ".") { $cache } else { Join-Path $cache $fallbackSkillPath }
-                    if ((Test-Path -LiteralPath $lockPath -PathType Leaf) -and (Test-IsSkillDir $fallbackSrc)) {
-                        Log ("导入更新遇到 Git 索引锁异常，已保留现有缓存：{0} [{1}]；原因：{2}" -f $name, $repo, $_.Exception.Message) "WARN"
-                        if ($fallbackSkillPath -ne $skillPath) {
-                            $i.skill = $fallbackSkillPath
-                            $cfgChanged = $true
-                            $skillPath = $fallbackSkillPath
+                    if ((Test-WindowsInvalidPathIssue $_.Exception.Message) -and $gitSkillPath -ne ".") {
+                        $invalidPathForceClean = $forceClean
+                        if (-not $invalidPathForceClean -and (Test-Path -LiteralPath $cache)) {
+                            $expectedSrc = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
+                            if (-not (Test-IsSkillDir $expectedSrc)) {
+                                $invalidPathForceClean = $true
+                                Log ("导入缓存已不可用，非法路径回退临时启用强制清理：{0} [{1}]" -f $name, $repo) "WARN"
+                            }
                         }
+                        $fallbackDone = $false
+                        $sparseFallbackError = $null
+                        if (-not $sparse) {
+                            try {
+                                $fallbackSparsePath = $gitSkillPath
+                                Log ("导入更新检测到 Windows 非法路径，先回退为 sparse checkout：{0} [{1}] -> {2}" -f $name, $repo, $fallbackSparsePath) "WARN"
+                                $null = Ensure-Repo $cache $repo $ref $fallbackSparsePath $invalidPathForceClean $false (-not $SkipFetch)
+                                $sparse = $true
+                                $sparsePath = $fallbackSparsePath
+                                if (-not [bool]$i.sparse) {
+                                    $i.sparse = $true
+                                    $cfgChanged = $true
+                                }
+                                $fallbackDone = $true
+                            }
+                            catch {
+                                $sparseFallbackError = $_.Exception.Message
+                                Log ("sparse checkout 回退失败，改用归档回退：{0} [{1}]；原因：{2}" -f $name, $repo, $sparseFallbackError) "WARN"
+                            }
+                        }
+                        if (-not $fallbackDone) {
+                            try {
+                                Ensure-RepoFromGitArchive $cache $repo $ref $skillPath $invalidPathForceClean | Out-Null
+                                Log ("导入更新已回退为 git archive：{0} [{1}] -> {2}" -f $name, $repo, $skillPath) "WARN"
+                                $fallbackDone = $true
+                            }
+                            catch {
+                                $archiveError = $_.Exception.Message
+                                try {
+                                    Ensure-RepoFromGitHubTreeSnapshot $cache $repo $ref $skillPath $invalidPathForceClean | Out-Null
+                                    Log ("导入更新已回退为 GitHub tree 快照：{0} [{1}] -> {2}" -f $name, $repo, $skillPath) "WARN"
+                                    $fallbackDone = $true
+                                }
+                                catch {
+                                    $snapshotError = $_.Exception.Message
+                                    $prefix = if ([string]::IsNullOrWhiteSpace($sparseFallbackError)) { "" } else { ("sparse={0} | " -f $sparseFallbackError) }
+                                    throw ("Windows 非法路径回退失败：{0}archive={1} | snapshot={2}" -f $prefix, $archiveError, $snapshotError)
+                                }
+                            }
+                        }
+                        if (-not $fallbackDone) { throw }
                     }
                     else {
-                        throw
+                        $lockPath = Join-Path $cache ".git\index.lock"
+                        $fallbackSkillPath = Resolve-SkillPath $cache $skillPath
+                        $fallbackSrc = if ($fallbackSkillPath -eq ".") { $cache } else { Join-Path $cache $fallbackSkillPath }
+                        if ((Test-Path -LiteralPath $lockPath -PathType Leaf) -and (Test-IsSkillDir $fallbackSrc)) {
+                            Log ("导入更新遇到 Git 索引锁异常，已保留现有缓存：{0} [{1}]；原因：{2}" -f $name, $repo, $_.Exception.Message) "WARN"
+                            if ($fallbackSkillPath -ne $skillPath) {
+                                $i.skill = $fallbackSkillPath
+                                $cfgChanged = $true
+                                $skillPath = $fallbackSkillPath
+                            }
+                        }
+                        else {
+                            throw
+                        }
                     }
                 }
                 $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
@@ -7150,12 +7535,12 @@ function Get-DefaultAuditOuterAiPrompt {
     return @"
 # Outer AI Audit Prompt
 
-你正在代理执行 skills-manager 的目标仓技能审查流程。
+你正在代理执行 skills-manager 的技能审查流程；可能是目标仓审查，也可能是 profile-only 的新技能发现。
 
 ## 任务目标
 
 1. 阅读本次审查包中的 ai-brief.md。
-2. 阅读 user-profile.json、repo-scan.json / repo-scans.json、installed-skills.json。
+2. 阅读 user-profile.json、installed-skills.json、source-strategy.json；若本轮绑定目标仓，再阅读 repo-scan.json / repo-scans.json。
 3. 严格按 recommendations.template.json 的 schema v2 产出完整 recommendations.json。
 4. 建议结果优先覆盖“新增建议”与“卸载建议”，并确保每项都包含：
    - ``reason_user_profile``（简短，1 句话）
@@ -7172,13 +7557,15 @@ function Get-DefaultAuditOuterAiPrompt {
 阶段 1：读取输入
 - 必须先读 ai-brief.md + user-profile.json + installed-skills.json。
 - 在 repo-scan.json / repo-scans.json 中按实际存在文件读取；若路径写成 ``N/A``，表示该输入未提供，不得臆测缺失内容。
+- profile-only 模式不绑定目标仓，必须把 ``reason_target_repo`` 解释为“当前已安装技能 / profile-only 场景”依据，而不是仓库事实。
 - 任一必需本地文件缺失、为空或无法读取时，立即停止，并向用户报告阻断项；不要跳过后继续 dry-run。
 
 阶段 2：写 recommendations.json
 - 仅输出机器可读 JSON，不夹带解释性正文。
 - 不要改变 recommendations.template.json 的 schema 与字段命名。
 - 模板中的 ``<...>`` 占位符必须全部替换或删除对应示例项，不得原样保留。
-- ``decision_basis.user_profile_used``、``decision_basis.target_scan_used``、``decision_basis.source_strategy_used`` 必须保持布尔值 ``true``，且 ``decision_basis.summary`` 不能为空。
+- 目标仓审查模式：``decision_basis.user_profile_used``、``decision_basis.target_scan_used``、``decision_basis.source_strategy_used`` 必须保持布尔值 ``true``，且 ``decision_basis.summary`` 不能为空。
+- profile-only 模式：``recommendation_mode`` 必须为 ``profile-only``，``decision_basis.user_profile_used`` 与 ``decision_basis.source_strategy_used`` 必须为 ``true``，``decision_basis.target_scan_used`` 必须为 ``false``。
 - 新增建议的 ``install.mode`` 只能是 ``manual`` 或 ``vendor``，``confidence`` 只能是 ``low`` / ``medium`` / ``high``。
 - 任一建议缺少 ``reason_user_profile`` 或 ``reason_target_repo``，视为未完成。
 - 证据不足时，宁可不推荐；不要“猜测式”新增或卸载。
@@ -7201,9 +7588,9 @@ function Get-DefaultAuditOuterAiPrompt {
 
 ## 质量与来源要求
 
-- 必须同时基于“用户基本需求”和“目标仓事实”做判断。
+- 目标仓审查必须同时基于“用户基本需求”和“目标仓事实”做判断；profile-only 新技能发现必须同时基于“用户基本需求”“已安装技能清单”和“来源策略”做判断。
 - 优先参考官方文档、skills.sh、find-skills、GitHub 高质量项目、GitHub Trending。
-- 每条建议都要能回答两个问题：为什么适合用户长期工作流、为什么符合该目标仓现状。
+- 每条建议都要能回答两个问题：为什么适合用户长期工作流、为什么符合目标仓事实或 profile-only 场景。
 - 若来源相互冲突，选择更高可信来源并在 ``sources`` 中保留依据。
 - ``overlap_findings`` 仅作报告，不可直接视为卸载建议；确需卸载时，必须单独给出双理由。
 - ``do_not_install`` 用于记录“已研究但当前不建议安装”的技能，避免重复研究。
@@ -7639,6 +8026,7 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
         profile = $null
         target = $null
         out = $null
+        query = $null
         recommendations = $null
         dry_run_ack = $null
         add_selection = $null
@@ -7671,6 +8059,9 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             "list" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
             "扫描" { $result.action = "scan"; $items = @($items | Select-Object -Skip 1) }
             "scan" { $result.action = "scan"; $items = @($items | Select-Object -Skip 1) }
+            "发现新技能" { $result.action = "discover_skills"; $items = @($items | Select-Object -Skip 1) }
+            "discover-skills" { $result.action = "discover_skills"; $items = @($items | Select-Object -Skip 1) }
+            "discover" { $result.action = "discover_skills"; $items = @($items | Select-Object -Skip 1) }
             "状态" { $result.action = "status"; $items = @($items | Select-Object -Skip 1) }
             "status" { $result.action = "status"; $items = @($items | Select-Object -Skip 1) }
             "应用确认" { $result.action = "apply_flow"; $items = @($items | Select-Object -Skip 1) }
@@ -7699,6 +8090,11 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             "--out" {
                 Need ($i + 1 -lt $items.Count) "--out 缺少值"
                 $result.out = [string]$items[++$i]
+                continue
+            }
+            "--query" {
+                Need ($i + 1 -lt $items.Count) "--query 缺少值"
+                $result.query = [string]$items[++$i]
                 continue
             }
             "--recommendations" {
@@ -7783,6 +8179,72 @@ function Assert-AuditUserProfileReady($cfg) {
     if ([string]::IsNullOrWhiteSpace([string]$cfg.user_profile.summary)) {
         Write-Host "提示：用户结构化 summary 为空，建议先完善结构化需求后再生成审查包。" -ForegroundColor Yellow
     }
+}
+
+function Get-AuditUserProfileOutput($cfg) {
+    return [pscustomobject]@{
+        schema_version = 1
+        raw_text = [string]$cfg.user_profile.raw_text
+        summary = [string]$cfg.user_profile.summary
+        structured = $cfg.user_profile.structured
+        last_structured_at = [string]$cfg.user_profile.last_structured_at
+        structured_by = [string]$cfg.user_profile.structured_by
+    }
+}
+
+function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query = "") {
+    $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
+    Need ($normalizedMode -eq "target-repo" -or $normalizedMode -eq "profile-only") ("未知审查来源模式：{0}" -f $Mode)
+    return [pscustomobject]([ordered]@{
+        schema_version = 1
+        mode = $normalizedMode
+        query = [string]$Query
+        sources = @(
+            [ordered]@{
+                id = "official-docs"
+                name = "Official documentation"
+                use_for = "Verify current APIs, platform rules, support status, and recommended implementation patterns."
+            },
+            [ordered]@{
+                id = "skills-sh"
+                name = "skills.sh"
+                use_for = "Discover skill-packaged implementations and compare skill metadata quality."
+            },
+            [ordered]@{
+                id = "github-trending-monthly"
+                name = "GitHub Trending monthly"
+                url = "https://github.com/trending?since=monthly"
+                use_for = "Find active, recently relevant community projects; never treat popularity alone as enough evidence."
+            },
+            [ordered]@{
+                id = "strong-community-projects"
+                name = "High-quality community projects"
+                use_for = "Check maintenance activity, examples, issues, releases, and adoption fit."
+            },
+            [ordered]@{
+                id = "best-practices"
+                name = "Best-practice guides"
+                use_for = "Compare proposed skills against mature workflow and operational guidance."
+            },
+            [ordered]@{
+                id = "find-skills"
+                name = "Installed find-skills workflow"
+                use_for = "Use the local skill discovery workflow as an input source when available."
+            }
+        )
+        scoring = [ordered]@{
+            authority = "Prefer first-party documentation and maintained source repositories."
+            fit = "Match the user's structured profile and, in target-repo mode, concrete repo scan facts."
+            duplication_risk = "Penalize recommendations that duplicate installed skills without a clear incremental benefit."
+            maintenance = "Prefer projects with recent activity, clear license, and usable documentation."
+            operational_cost = "Prefer skills that are easy to install, verify, and roll back."
+        }
+        required_evidence = @(
+            "Every add/remove recommendation must cite sources inspected in this run.",
+            "Do not fabricate repository facts, source links, or source conclusions.",
+            "For profile-only mode, explain reason_target_repo as installed-skill inventory / profile-only context, not as a target repository claim."
+        )
+    })
 }
 
 function Get-AuditRunId {
@@ -7966,10 +8428,100 @@ function Write-AuditJsonFile([string]$path, $data) {
     Set-ContentUtf8 $path ($data | ConvertTo-Json -Depth 40)
 }
 
-function Write-AuditAiBrief([string]$path, $scanData, [string]$userProfilePath, [string]$repoScanPath, [string]$repoScansPath, [string]$installedSkillsPath, [string]$templatePath) {
+function Write-AuditAiBrief([string]$path, $scanData, [string]$userProfilePath, [string]$repoScanPath, [string]$repoScansPath, [string]$installedSkillsPath, [string]$templatePath, [string]$Mode = "target-repo", [string]$Query = "", [string]$SourceStrategyPath = "") {
+    $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
     $targetNames = @($scanData | ForEach-Object { $_.target.name })
     if ([string]::IsNullOrWhiteSpace($repoScanPath)) { $repoScanPath = "N/A" }
     if ([string]::IsNullOrWhiteSpace($repoScansPath)) { $repoScansPath = "N/A" }
+    if ([string]::IsNullOrWhiteSpace($SourceStrategyPath)) { $SourceStrategyPath = "N/A" }
+
+    if ($normalizedMode -eq "profile-only") {
+        $queryText = if ([string]::IsNullOrWhiteSpace($Query)) { "N/A" } else { $Query }
+        $content = @"
+# Skill Audit Brief
+
+Run ID: $(Split-Path (Split-Path $path -Parent) -Leaf)
+Mode: profile-only skill discovery
+Targets: N/A
+Discovery query: $queryText
+
+Use the generated user profile JSON, installed skills JSON, and source strategy JSON to decide:
+
+- Which installed skills should be kept for the user's long-term workflow.
+- Which installed skills should be proposed for removal because they no longer fit.
+- Which missing skills are strongly justified without binding the decision to a target repository.
+
+External research is intentionally performed by the outer AI agent. Search official documentation, strong community projects, best practices, https://skills.sh/, GitHub Trending, and the find-skills workflow.
+
+Primary output file (must be valid JSON, no prose):
+
+$templatePath
+
+Scan inputs:
+- Single-target scan JSON: N/A
+- Multi-target scans JSON: N/A
+- Source strategy JSON: $SourceStrategyPath
+
+Rules:
+
+- Profile-only mode has no target repo scan; do not fabricate repository facts.
+- All decisions must be based on user-profile.json, installed-skills.json, source-strategy.json, and real external research.
+- Use ``reason_target_repo`` to explain the current installed-skill inventory / profile-only context; do not claim target repository evidence.
+- If any required local input is missing, unreadable, or empty, stop and report the blocker instead of guessing.
+- Network research is authorized within this audit workflow, but installation still requires --apply --yes.
+- Replace every template placeholder wrapped in `<...>` or delete the example entry entirely; do not leave placeholder values in the final file.
+- Keep ``recommendation_mode`` as ``profile-only``.
+- Keep ``decision_basis.user_profile_used`` and ``decision_basis.source_strategy_used`` as boolean ``true``; keep ``decision_basis.target_scan_used`` as boolean ``false``; provide a non-empty ``decision_basis.summary``.
+- New installs require ``reason_user_profile``, ``reason_target_repo``, source links, confidence, repo, skill path, ref, and mode.
+- Removal recommendations must include ``reason_user_profile``, ``reason_target_repo``, sources, and the exact installed ``vendor``/``from`` pair.
+- `install.mode` must stay `manual` or `vendor`; `confidence` must stay `low`, `medium`, or `high`.
+- Each add/remove recommendation must keep both reasons concise and user-readable.
+- If either reason field is missing on any recommendation, treat the run as incomplete and stop before dry-run summary.
+- Overlap findings are report-only; do not recommend automatic uninstall.
+- Use `do_not_install` for researched options that should stay out of the repo right now.
+- Prefer high-reputation sources and avoid weak duplicate skills.
+- Cover the built-in default sources and record the actual sources you used.
+- Keep recommendations machine-readable JSON matching the template.
+- The template already includes placeholder example items. Replace placeholder values or delete the example entries you do not need; do not invent a different schema.
+- Cite only sources you actually inspected during this run. Do not fabricate source links or source conclusions.
+- If evidence is insufficient, leave the category empty and explain briefly instead of forcing low-quality recommendations.
+- After dry-run, show numbered add/remove lists with one-line reasons per item (``reason_user_profile`` + ``reason_target_repo``).
+- If a list is empty, explicitly output "no add recommendations" or "no removal recommendations" with a brief reason.
+- Keep dry-run numbering stable; do not renumber or reorder indexes in the user-facing summary.
+
+Pre-dry-run self-check:
+
+- recommendations.json parses as JSON and keeps `schema_version = 2`.
+- ``recommendation_mode`` is ``profile-only``.
+- ``decision_basis.user_profile_used`` and ``decision_basis.source_strategy_used`` are ``true``.
+- ``decision_basis.target_scan_used`` is ``false``.
+- No remaining placeholder values wrapped in `<...>`.
+- Each add/remove item has both reasons plus at least one real source.
+- Stop before dry-run if any self-check item fails.
+
+Execution order:
+
+1) Read all local inputs
+2) Write ``recommendations.json`` from ``recommendations.template.json``
+3) Run the self-check and stop if any item fails
+4) Execute dry-run
+5) Summarize dry-run with original indexes and one-line dual-reason entries
+6) Wait for explicit user confirmation before apply
+
+User-facing dry-run summary format:
+
+- add: `[index] <skill-name> | user: <reason_user_profile> | context: <reason_target_repo>`
+- remove: `[index] <skill-name> | user: <reason_user_profile> | context: <reason_target_repo>`
+- empty category: `no add recommendations: <brief reason>` / `no removal recommendations: <brief reason>`
+
+User profile JSON: $userProfilePath
+Installed skills JSON: $installedSkillsPath
+Source strategy JSON: $SourceStrategyPath
+"@
+        Set-ContentUtf8 $path $content
+        return
+    }
+
     $content = @"
 # Skill Audit Brief
 
@@ -7991,10 +8543,12 @@ $templatePath
 Scan inputs:
 - Single-target scan JSON: $repoScanPath
 - Multi-target scans JSON: $repoScansPath
+- Source strategy JSON: $SourceStrategyPath
 
 Rules:
 
 - All decisions must be based on BOTH user-profile.json and target repo scan facts.
+- Use source-strategy.json to cover the built-in source set and explain source tradeoffs.
 - Treat any scan path shown as `N/A` as "not provided"; do not infer hidden content from it.
 - If any required local input is missing, unreadable, or empty, stop and report the blocker instead of guessing.
 - Network research is authorized within this audit workflow, but installation still requires --apply --yes.
@@ -8042,13 +8596,35 @@ User-facing dry-run summary format:
 
 User profile JSON: $userProfilePath
 Installed skills JSON: $installedSkillsPath
+Source strategy JSON: $SourceStrategyPath
 "@
     Set-ContentUtf8 $path $content
 }
 
-function Write-AuditOuterAiPromptFile([string]$path, [string]$reportRoot, [string]$briefPath, [string]$userProfilePath, [string]$repoScanPath, [string]$repoScansPath, [string]$installedSkillsPath, [string]$templatePath) {
+function Write-AuditOuterAiPromptFile([string]$path, [string]$reportRoot, [string]$briefPath, [string]$userProfilePath, [string]$repoScanPath, [string]$repoScansPath, [string]$installedSkillsPath, [string]$templatePath, [string]$Mode = "target-repo", [string]$Query = "", [string]$SourceStrategyPath = "") {
+    $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
     if ([string]::IsNullOrWhiteSpace($repoScanPath)) { $repoScanPath = "N/A" }
     if ([string]::IsNullOrWhiteSpace($repoScansPath)) { $repoScansPath = "N/A" }
+    if ([string]::IsNullOrWhiteSpace($SourceStrategyPath)) { $SourceStrategyPath = "N/A" }
+    $queryText = if ([string]::IsNullOrWhiteSpace($Query)) { "N/A" } else { $Query }
+    $inputReadStep = if ($normalizedMode -eq "profile-only") {
+        "1. 阅读 ai-brief.md、user-profile.json、installed-skills.json、source-strategy.json；repo-scan 输入为 N/A 时代表本轮不绑定目标仓。"
+    }
+    else {
+        "1. 阅读 ai-brief.md，并按存在文件读取 repo-scan.json / repo-scans.json，同时读取 source-strategy.json。"
+    }
+    $basisCheckStep = if ($normalizedMode -eq "profile-only") {
+        "   - recommendations.json 与模板字段同构，``recommendation_mode = profile-only``，``decision_basis.user_profile_used`` / ``decision_basis.source_strategy_used`` 为 ``true``，``decision_basis.target_scan_used`` 为 ``false``"
+    }
+    else {
+        "   - recommendations.json 与模板字段同构，``decision_basis`` 三个布尔字段都为 ``true``"
+    }
+    $modeBlocking = if ($normalizedMode -eq "profile-only") {
+        '- 本轮是 profile-only；不得编造目标仓事实，``reason_target_repo`` 必须解释当前已安装技能 / profile-only 场景依据'
+    }
+    else {
+        "- 若 ``repo-scan.json`` / ``repo-scans.json`` 路径显示为 ``N/A``，表示该输入未提供，不可臆造其内容"
+    }
     $content = @"
 $(Get-AuditOuterAiPromptContent)
 
@@ -8057,20 +8633,23 @@ $(Get-AuditOuterAiPromptContent)
 ## Current Audit Run Files
 
 - 审查包目录：$reportRoot
+- 模式：$normalizedMode
+- 发现查询：$queryText
 - 任务说明：$briefPath
 - 用户画像：$userProfilePath
 - 单目标扫描：$repoScanPath
 - 多目标扫描：$repoScansPath
 - 已安装技能：$installedSkillsPath
+- 来源策略：$SourceStrategyPath
 - 推荐模板：$templatePath
 
 ## Required Execution Sequence
 
-1. 阅读 ai-brief.md，并按存在文件读取 repo-scan.json / repo-scans.json
+$inputReadStep
 2. 按 recommendations.template.json schema v2 写出 recommendations.json
 3. 先做自检（全部通过后再 dry-run）：
    - recommendations.json 可解析为 JSON，且 ``schema_version = 2``
-   - recommendations.json 与模板字段同构，``decision_basis`` 三个布尔字段都为 ``true``
+$basisCheckStep
    - 不保留模板占位符 ``<...>`` 或未替换的示例值
    - 每条新增/卸载建议都包含 ``reason_user_profile`` + ``reason_target_repo`` + 至少 1 个真实 ``sources``
    - 新增建议的 ``install.mode`` 只能是 ``manual`` 或 ``vendor``，``confidence`` 只能是 ``low`` / ``medium`` / ``high``
@@ -8089,20 +8668,20 @@ $(Get-AuditOuterAiPromptContent)
 - ``overlap_findings`` 仅用于报告重叠，``do_not_install`` 用于记录“已研究但当前不应安装”的技能
 - ``sources`` 只能填写本轮真实查看过的来源；不得伪造仓库事实或来源结论
 - 如果你继续执行 dry-run，请在总结里按 dry-run 原序号列出“新增建议 / 卸载建议”
-- 每条建议必须同时展示两条简短理由（用户需求 + 目标仓）
+- 每条建议必须同时展示两条简短理由（用户需求 + 目标仓/场景）
 - 某一类为空时，必须显式写“无该类建议”并给 1 句简短原因
 - 未经用户明确确认，不得执行 --apply --yes
 
 ## Blocking Conditions
 
 - 任一必需输入文件缺失、为空或不可读时，立即停止并汇报阻断项
-- 若 ``repo-scan.json`` / ``repo-scans.json`` 路径显示为 ``N/A``，表示该输入未提供，不可臆造其内容
+$modeBlocking
 - 若自检失败、仍有 ``<...>`` 占位符、或来源并非本轮真实查看结果，必须先修正再继续
 
 ## User Summary Format
 
-- 新增建议：``[序号] <skill-name> | 用户需求：<reason_user_profile> | 目标仓：<reason_target_repo>``
-- 卸载建议：``[序号] <skill-name> | 用户需求：<reason_user_profile> | 目标仓：<reason_target_repo>``
+- 新增建议：``[序号] <skill-name> | 用户需求：<reason_user_profile> | 目标仓/场景：<reason_target_repo>``
+- 卸载建议：``[序号] <skill-name> | 用户需求：<reason_user_profile> | 目标仓/场景：<reason_target_repo>``
 - 空列表：``无新增建议：<简短原因>`` / ``无卸载建议：<简短原因>``
 "@
     Set-ContentUtf8 $path $content
@@ -8139,6 +8718,12 @@ function Assert-AuditBundleFileContent([string]$path, [string]$label) {
             Need (Test-AuditJsonProperty $data "skills") ("installed-skills 缺少 skills：{0}" -f $path)
             Need (Assert-IsArray $data.skills) ("installed-skills.skills 必须为数组：{0}" -f $path)
         }
+        "source-strategy.json" {
+            Need (Test-AuditJsonProperty $data "mode") ("source-strategy 缺少 mode：{0}" -f $path)
+            Need (Test-AuditJsonProperty $data "sources") ("source-strategy 缺少 sources：{0}" -f $path)
+            Need (Assert-IsArray $data.sources) ("source-strategy.sources 必须为数组：{0}" -f $path)
+            Need (@($data.sources).Count -gt 0) ("source-strategy.sources 不能为空：{0}" -f $path)
+        }
         "recommendations.template.json" {
             Need (Test-AuditJsonProperty $data "schema_version") ("recommendations.template 缺少 schema_version：{0}" -f $path)
             Need ([int]$data.schema_version -eq 2) ("recommendations.template schema_version 必须为 2：{0}" -f $path)
@@ -8168,27 +8753,52 @@ function Assert-AuditBundleRequiredFiles([object[]]$files) {
     }
 }
 
-function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName) {
-    return [pscustomobject]([ordered]@{
-        schema_version = 2
-        run_id = $runId
-        target = $targetName
-        template_notes = @(
+function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [string]$Mode = "target-repo", [string]$Query = "") {
+    $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
+    Need ($normalizedMode -eq "target-repo" -or $normalizedMode -eq "profile-only") ("未知 recommendations 模式：{0}" -f $Mode)
+    $isProfileOnly = ($normalizedMode -eq "profile-only")
+    $targetScanUsed = -not $isProfileOnly
+    $templateNotes = if ($isProfileOnly) {
+        @(
+            "Replace placeholder values wrapped in <> before using this file.",
+            "Delete example entries that are not needed, but keep the schema shape unchanged.",
+            "This is profile-only skill discovery: reason_target_repo means installed-skill inventory / profile-only context, not target repository facts."
+        )
+    }
+    else {
+        @(
             "Replace placeholder values wrapped in <> before using this file.",
             "Delete example entries that are not needed, but keep the schema shape unchanged.",
             "All install/remove decisions must cite both user-profile and target-repo reasons."
         )
+    }
+    $basisSummary = if ($isProfileOnly) {
+        "<why these recommendations reflect the user profile, installed-skill inventory, and source strategy without target repo facts>"
+    }
+    else {
+        "<why these recommendations reflect both the user profile and the target repo facts>"
+    }
+    $targetReasonInstall = if ($isProfileOnly) { "<which installed-skill inventory or profile-only context justifies this skill>" } else { "<which detected target-repo facts justify this skill>" }
+    $targetReasonRemoval = if ($isProfileOnly) { "<why the installed-skill inventory or profile-only context no longer justifies this skill>" } else { "<why the target repo no longer justifies this skill>" }
+    $targetReasonDoNotInstall = if ($isProfileOnly) { "<why the profile-only context does not justify it>" } else { "<why the target repo does not justify it>" }
+    return [pscustomobject]([ordered]@{
+        schema_version = 2
+        run_id = $runId
+        target = $targetName
+        recommendation_mode = $normalizedMode
+        discovery_query = [string]$Query
+        template_notes = @($templateNotes)
         decision_basis = [ordered]@{
             user_profile_used = $true
-            target_scan_used = $true
+            target_scan_used = $targetScanUsed
             source_strategy_used = $true
-            summary = "<why these recommendations reflect both the user profile and the target repo facts>"
+            summary = $basisSummary
         }
         new_skills = @(
             [ordered]@{
                 name = "<new-skill-name>"
                 reason_user_profile = "<why the user's long-term workflow benefits from this skill>"
-                reason_target_repo = "<which detected target-repo facts justify this skill>"
+                reason_target_repo = $targetReasonInstall
                 install = [ordered]@{
                     repo = "<owner/repo-or-local-path>"
                     skill = "<relative-skill-path-or-.>"
@@ -8204,7 +8814,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName) {
             [ordered]@{
                 name = "<existing-skill-or-skill-pair>"
                 reason_user_profile = "<why overlap matters for the user's workflow>"
-                reason_target_repo = "<which repo facts make this overlap relevant>"
+                reason_target_repo = $targetReasonInstall
                 sources = @("<source-url-1>")
                 note = "<report-only observation; no automatic uninstall>"
             }
@@ -8213,7 +8823,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName) {
             [ordered]@{
                 name = "<installed-skill-name>"
                 reason_user_profile = "<why the user profile no longer justifies this skill>"
-                reason_target_repo = "<why the target repo no longer justifies this skill>"
+                reason_target_repo = $targetReasonRemoval
                 sources = @("<source-url-1>")
                 source_categories = @("official-docs")
                 installed = [ordered]@{
@@ -8226,7 +8836,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName) {
             [ordered]@{
                 name = "<skill-not-recommended>"
                 reason_user_profile = "<why the user profile does not justify it>"
-                reason_target_repo = "<why the target repo does not justify it>"
+                reason_target_repo = $targetReasonDoNotInstall
                 sources = @("<source-url-1>")
                 note = "<why it should not be added now>"
             }
@@ -8389,7 +8999,7 @@ function Assert-AuditRecommendationItem($item) {
     $confidence = ([string]$item.confidence).ToLowerInvariant()
     Need ($confidence -eq "low" -or $confidence -eq "medium" -or $confidence -eq "high") ("confidence 仅支持 low/medium/high：{0}" -f [string]$item.confidence)
     $item.confidence = $confidence
-    $item | Add-Member -NotePropertyName reason -NotePropertyValue ("用户需求：{0}；目标仓：{1}" -f [string]$item.reason_user_profile, [string]$item.reason_target_repo) -Force
+    $item | Add-Member -NotePropertyName reason -NotePropertyValue ("用户需求：{0}；目标仓/场景：{1}" -f [string]$item.reason_user_profile, [string]$item.reason_target_repo) -Force
 }
 
 function Assert-AuditRemovalCandidate($item) {
@@ -8420,8 +9030,19 @@ function Load-AuditRecommendations([string]$path) {
     Need (Test-AuditJsonProperty $rec.decision_basis "user_profile_used") "decision_basis 缺少 user_profile_used"
     Need (Test-AuditJsonProperty $rec.decision_basis "target_scan_used") "decision_basis 缺少 target_scan_used"
     Need (Test-AuditJsonProperty $rec.decision_basis "source_strategy_used") "decision_basis 缺少 source_strategy_used"
+    $recommendationMode = "target-repo"
+    if ($rec.PSObject.Properties.Match("recommendation_mode").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$rec.recommendation_mode)) {
+        $recommendationMode = ([string]$rec.recommendation_mode).ToLowerInvariant()
+    }
+    Need ($recommendationMode -eq "target-repo" -or $recommendationMode -eq "profile-only") ("recommendation_mode 仅支持 target-repo 或 profile-only：{0}" -f $recommendationMode)
     Assert-AuditRequiredBooleanTrue $rec.decision_basis.user_profile_used "decision_basis.user_profile_used"
-    Assert-AuditRequiredBooleanTrue $rec.decision_basis.target_scan_used "decision_basis.target_scan_used"
+    Need ($rec.decision_basis.target_scan_used -is [bool]) "decision_basis.target_scan_used 必须是布尔值"
+    if ($recommendationMode -eq "profile-only") {
+        Need (-not [bool]$rec.decision_basis.target_scan_used) "profile-only 模式下 decision_basis.target_scan_used 必须为 false"
+    }
+    else {
+        Assert-AuditRequiredBooleanTrue $rec.decision_basis.target_scan_used "decision_basis.target_scan_used"
+    }
     Assert-AuditRequiredBooleanTrue $rec.decision_basis.source_strategy_used "decision_basis.source_strategy_used"
     Need (-not [string]::IsNullOrWhiteSpace([string]$rec.decision_basis.summary)) "decision_basis.summary 不能为空"
     Ensure-AuditArrayProperty $rec "new_skills"
@@ -8480,7 +9101,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             name = [string]$item.name
             vendor = [string]$item.installed.vendor
             from = [string]$item.installed.from
-            reason = ("用户需求：{0}；目标仓：{1}" -f [string]$item.reason_user_profile, [string]$item.reason_target_repo)
+            reason = ("用户需求：{0}；目标仓/场景：{1}" -f [string]$item.reason_user_profile, [string]$item.reason_target_repo)
             reason_user_profile = [string]$item.reason_user_profile
             reason_target_repo = [string]$item.reason_target_repo
             sources = @($item.sources)
@@ -8539,7 +9160,7 @@ function Write-AuditRecommendationSummary($plan) {
         foreach ($item in @($plan.items)) {
             Write-Host ("{0}) {1}" -f $index, [string]$item.name)
             Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
-            Write-Host ("   目标仓: {0}" -f [string]$item.reason_target_repo)
+            Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
             $index++
         }
     }
@@ -8553,7 +9174,7 @@ function Write-AuditRecommendationSummary($plan) {
         foreach ($item in @($plan.removal_candidates)) {
             Write-Host ("{0}) {1} [{2}|{3}] status={4}" -f $index, [string]$item.name, [string]$item.vendor, [string]$item.from, [string]$item.status)
             Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
-            Write-Host ("   目标仓: {0}" -f [string]$item.reason_target_repo)
+            Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
             $index++
         }
     }
@@ -8702,16 +9323,8 @@ function Invoke-AuditTargetsScan {
     }
     EnsureDir $reportRoot
 
-    $profileOut = [pscustomobject]@{
-        schema_version = 1
-        raw_text = [string]$cfg.user_profile.raw_text
-        summary = [string]$cfg.user_profile.summary
-        structured = $cfg.user_profile.structured
-        last_structured_at = [string]$cfg.user_profile.last_structured_at
-        structured_by = [string]$cfg.user_profile.structured_by
-    }
     $userProfilePath = Join-Path $reportRoot "user-profile.json"
-    Write-AuditJsonFile $userProfilePath $profileOut
+    Write-AuditJsonFile $userProfilePath (Get-AuditUserProfileOutput $cfg)
 
     $scans = @()
     foreach ($t in $targets) {
@@ -8740,14 +9353,17 @@ function Invoke-AuditTargetsScan {
     }
     Write-AuditJsonFile $installedPath ([pscustomobject]@{ schema_version = 1; skills = @($installedSkills) })
 
+    $sourceStrategyPath = Join-Path $reportRoot "source-strategy.json"
+    Write-AuditJsonFile $sourceStrategyPath (New-AuditSourceStrategy "target-repo" "")
+
     $templatePath = Join-Path $reportRoot "recommendations.template.json"
     $templateTarget = if ($scans.Count -eq 1) { [string]$scans[0].target.name } else { "*" }
-    Write-AuditJsonFile $templatePath (New-AuditRecommendationsTemplate $runId $templateTarget)
+    Write-AuditJsonFile $templatePath (New-AuditRecommendationsTemplate $runId $templateTarget "target-repo")
 
     $briefPath = Join-Path $reportRoot "ai-brief.md"
-    Write-AuditAiBrief $briefPath $scans $userProfilePath $repoScanPath $repoScansPath $installedPath $templatePath
+    Write-AuditAiBrief $briefPath $scans $userProfilePath $repoScanPath $repoScansPath $installedPath $templatePath "target-repo" "" $sourceStrategyPath
     $outerAiPromptPath = Join-Path $reportRoot "outer-ai-prompt.md"
-    Write-AuditOuterAiPromptFile $outerAiPromptPath $reportRoot $briefPath $userProfilePath $repoScanPath $repoScansPath $installedPath $templatePath
+    Write-AuditOuterAiPromptFile $outerAiPromptPath $reportRoot $briefPath $userProfilePath $repoScanPath $repoScansPath $installedPath $templatePath "target-repo" "" $sourceStrategyPath
 
     $requiredFiles = New-Object System.Collections.Generic.List[object]
     $requiredFiles.Add([pscustomobject]@{ label = "user-profile.json"; path = $userProfilePath }) | Out-Null
@@ -8758,6 +9374,7 @@ function Invoke-AuditTargetsScan {
         $requiredFiles.Add([pscustomobject]@{ label = "repo-scans.json"; path = $repoScansPath }) | Out-Null
     }
     $requiredFiles.Add([pscustomobject]@{ label = "installed-skills.json"; path = $installedPath }) | Out-Null
+    $requiredFiles.Add([pscustomobject]@{ label = "source-strategy.json"; path = $sourceStrategyPath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "recommendations.template.json"; path = $templatePath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "ai-brief.md"; path = $briefPath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "outer-ai-prompt.md"; path = $outerAiPromptPath }) | Out-Null
@@ -8772,6 +9389,7 @@ function Invoke-AuditTargetsScan {
         Write-Host ("- repo-scans.json: {0}" -f $repoScansPath)
     }
     Write-Host ("- installed-skills.json: {0}" -f $installedPath)
+    Write-Host ("- source-strategy.json: {0}" -f $sourceStrategyPath)
     Write-Host ("- ai-brief.md: {0}" -f $briefPath)
     Write-Host ("- outer-ai-prompt.md: {0}" -f $outerAiPromptPath)
     Write-Host ("- recommendations.template.json: {0}" -f $templatePath)
@@ -8780,6 +9398,74 @@ function Invoke-AuditTargetsScan {
         run_id = $runId
         path = $reportRoot
         scans = @($scans)
+    }
+}
+
+function Invoke-AuditSkillDiscovery {
+    param(
+        [string]$Query,
+        [string]$OutDir
+    )
+    $cfg = Load-AuditTargetsConfig
+    Assert-AuditUserProfileReady $cfg
+
+    $runId = Get-AuditRunId
+    $reportRoot = if ([string]::IsNullOrWhiteSpace($OutDir)) {
+        Get-AuditReportRoot $runId
+    }
+    else {
+        Resolve-AuditTargetPath $OutDir
+    }
+    EnsureDir $reportRoot
+
+    $userProfilePath = Join-Path $reportRoot "user-profile.json"
+    Write-AuditJsonFile $userProfilePath (Get-AuditUserProfileOutput $cfg)
+
+    $installedPath = Join-Path $reportRoot "installed-skills.json"
+    $installedSkills = @()
+    try {
+        $installedSkills = @(Get-InstalledSkillFacts)
+    }
+    catch {
+        throw ("生成 installed-skills.json 失败：{0}" -f $_.Exception.Message)
+    }
+    Write-AuditJsonFile $installedPath ([pscustomobject]@{ schema_version = 1; skills = @($installedSkills) })
+
+    $sourceStrategyPath = Join-Path $reportRoot "source-strategy.json"
+    Write-AuditJsonFile $sourceStrategyPath (New-AuditSourceStrategy "profile-only" $Query)
+
+    $templatePath = Join-Path $reportRoot "recommendations.template.json"
+    Write-AuditJsonFile $templatePath (New-AuditRecommendationsTemplate $runId "profile-only" "profile-only" $Query)
+
+    $briefPath = Join-Path $reportRoot "ai-brief.md"
+    Write-AuditAiBrief $briefPath @() $userProfilePath "" "" $installedPath $templatePath "profile-only" $Query $sourceStrategyPath
+    $outerAiPromptPath = Join-Path $reportRoot "outer-ai-prompt.md"
+    Write-AuditOuterAiPromptFile $outerAiPromptPath $reportRoot $briefPath $userProfilePath "" "" $installedPath $templatePath "profile-only" $Query $sourceStrategyPath
+
+    $requiredFiles = New-Object System.Collections.Generic.List[object]
+    $requiredFiles.Add([pscustomobject]@{ label = "user-profile.json"; path = $userProfilePath }) | Out-Null
+    $requiredFiles.Add([pscustomobject]@{ label = "installed-skills.json"; path = $installedPath }) | Out-Null
+    $requiredFiles.Add([pscustomobject]@{ label = "source-strategy.json"; path = $sourceStrategyPath }) | Out-Null
+    $requiredFiles.Add([pscustomobject]@{ label = "recommendations.template.json"; path = $templatePath }) | Out-Null
+    $requiredFiles.Add([pscustomobject]@{ label = "ai-brief.md"; path = $briefPath }) | Out-Null
+    $requiredFiles.Add([pscustomobject]@{ label = "outer-ai-prompt.md"; path = $outerAiPromptPath }) | Out-Null
+    Assert-AuditBundleRequiredFiles ($requiredFiles.ToArray())
+
+    Write-Host ("新技能发现包已生成：{0}" -f $reportRoot) -ForegroundColor Green
+    Write-Host "关键产物：" -ForegroundColor Cyan
+    Write-Host ("- user-profile.json: {0}" -f $userProfilePath)
+    Write-Host ("- installed-skills.json: {0}" -f $installedPath)
+    Write-Host ("- source-strategy.json: {0}" -f $sourceStrategyPath)
+    Write-Host ("- ai-brief.md: {0}" -f $briefPath)
+    Write-Host ("- outer-ai-prompt.md: {0}" -f $outerAiPromptPath)
+    Write-Host ("- recommendations.template.json: {0}" -f $templatePath)
+    Write-Host "下一步：把 outer-ai-prompt.md 交给 AI；AI 应先填写并自检 recommendations.json，再执行 dry-run，并按原序号列出新增/卸载清单。" -ForegroundColor Yellow
+    return [pscustomobject]@{
+        run_id = $runId
+        path = $reportRoot
+        mode = "profile-only"
+        query = [string]$Query
+        scans = @()
     }
 }
 
@@ -9066,6 +9752,7 @@ function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
         "list" { Write-AuditTargetsList }
         "status" { Show-AuditLatestStatus }
         "scan" { Invoke-AuditTargetsScan -Target $opts.target -OutDir $opts.out | Out-Null }
+        "discover_skills" { Invoke-AuditSkillDiscovery -Query $opts.query -OutDir $opts.out | Out-Null }
         "apply_flow" { Invoke-AuditRecommendationsTwoStageApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -DryRunAck $opts.dry_run_ack | Out-Null }
         "apply" { Invoke-AuditRecommendationsApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -DryRunAck $opts.dry_run_ack -RequireDryRunAck (-not $opts.apply) -Apply:$opts.apply -Yes:$opts.yes | Out-Null }
     }
@@ -9631,14 +10318,14 @@ function 技能库管理菜单 {
         Write-Host "1) 新增技能库"
         Write-Host "2) 删除技能库"
         Write-Host "3) 生成锁文件"
-        Write-Host "4) 打开配置"
+        Write-Host "4) 清理无效映射"
         Write-Host "0) 返回"
         $c = Read-HostSafe "请选择"
         switch ($c) {
             "1" { 新增技能库 }
             "2" { 删除技能库 }
             "3" { 锁定 }
-            "4" { 打开配置 }
+            "4" { 清理无效映射 }
             "0" { return }
             default { Write-Host "无效选择。" }
         }
@@ -9679,7 +10366,7 @@ Skills 管理器（中文菜单）
 
 菜单分组：
   - MCP 服务：新增、卸载、同步 MCP
-  - 技能库管理：新增/删除技能库、生成锁文件、打开配置
+  - 技能库管理：新增/删除技能库、生成锁文件、清理无效映射
   - 更多：一键工作流、自动更新设置、解除关联、清理备份
 
 主要功能说明：
@@ -9692,13 +10379,13 @@ Skills 管理器（中文菜单）
   - 更新上游：拉取 vendor/imports 上游内容；保留本地改动，然后重建并同步
   - 重建并同步：使用当前本地配置重建输出并同步到 targets
   - 锁定：生成 skills.lock.json，记录当前 vendor/import commit
+  - 清理无效映射：删除 mappings 中已失效项（源目录不存在或缺少标记文件）
   - 安装MCP：向 skills.json 登记 MCP 服务（stdio / sse / http），并自动同步
   - 卸载MCP：从 skills.json 移除 MCP 服务，并自动同步
   - 同步MCP：只同步 MCP 配置，不构建 skills
   - 一键工作流：按场景执行多步骤编排；支持 `--list`、`--no-prompt`、`--continue-on-error`
   - 目标仓审查：维护需求上下文、目标仓列表、审查包生成和建议应用
   - 自动更新设置：配置本机计划任务，每周五 20:00 自动执行“更新 + 同步MCP”
-  - 打开配置：打开 skills.json
   - 解除关联：移除 link 模式下创建的目录关联
   - 清理备份：删除仓库内 *.bak.* 文件和 .bak 目录（排除 vendor / agent / imports / .git）
 
@@ -9734,7 +10421,8 @@ Skills 管理器（中文菜单）
   .\skills.ps1 构建并生效
   .\skills.ps1 锁定
   .\skills.ps1 生成锁文件
-  .\skills.ps1 打开配置
+  .\skills.ps1 清理无效映射 [--yes] [--no-build]
+  .\skills.ps1 prune-invalid-mappings [--yes] [--no-build]
   .\skills.ps1 解除关联
   .\skills.ps1 清理备份
   .\skills.ps1 自动更新设置
@@ -9747,6 +10435,7 @@ Skills 管理器（中文菜单）
   .\skills.ps1 审查目标 需求查看
   .\skills.ps1 审查目标 需求结构化 --profile <file>
   .\skills.ps1 审查目标 扫描 [--target <name>] [--out <dir>]
+  .\skills.ps1 审查目标 发现新技能 [--query <text>] [--out <dir>]
   .\skills.ps1 审查目标 状态
   .\skills.ps1 审查目标 修改 <name> <path>
   .\skills.ps1 审查目标 删除 <name>
@@ -9780,6 +10469,7 @@ Skills 管理器（中文菜单）
 
 目标仓审查：
   - 用户基本需求是全局长期上下文；目标仓是项目级上下文。外层 AI 必须同时基于两者判断技能保留、卸载与新增。
+  - `发现新技能` 是不绑定目标仓的 profile-only 模式，复用同一套审查包、提示词、recommendations.json、dry-run/apply 流程。
   - 启动审查流程后，外层 AI 可以在本次流程内自主联网研究；联网不等于自动安装。
   - 设置用户基本需求后会自动进入结构化导入流程；回车使用默认路径 `reports\skill-audit\user-profile.structured.json`，不存在时会自动生成草稿文件。
   - 已内置“外层 AI 审查提示词”；生成审查包时会输出运行态 `outer-ai-prompt.md`，优先把它交给外层 AI，而不是只交 `ai-brief.md`。
@@ -9814,6 +10504,7 @@ function 审查目标菜单 {
         Write-Host "12) 查看 AI 提示词"
         Write-Host "13) 编辑 AI 提示词"
         Write-Host "14) 直接执行建议（高级）"
+        Write-Host "15) 发现新技能（不绑定目标仓）"
         Write-Host "0) 返回"
         $c = Read-HostSafe "请选择"
         switch ($c) {
@@ -9939,6 +10630,15 @@ function 审查目标菜单 {
                     Invoke-AuditTargetsCommand @("apply", "--recommendations", $path, "--apply", "--yes")
                 }
             }
+            "15" {
+                $query = Read-HostSafe "发现查询（可留空）"
+                if ([string]::IsNullOrWhiteSpace($query)) {
+                    Invoke-AuditTargetsCommand @("discover-skills")
+                }
+                else {
+                    Invoke-AuditTargetsCommand @("discover-skills", "--query", $query)
+                }
+            }
             "0" { return }
             default { Write-Host "无效选择。" }
         }
@@ -10008,6 +10708,8 @@ if ($MyInvocation.InvocationName -ne '.') {
             "更新上游并重建" { 更新 }
             "锁定" { 锁定 }
             "生成锁文件" { 锁定 }
+            "清理无效映射" { 清理无效映射 (Merge-FilterAndArgs $Filter $args) }
+            "prune-invalid-mappings" { 清理无效映射 (Merge-FilterAndArgs $Filter $args) }
             "安装MCP" {
                 $mcpTokens = @()
                 if (-not [string]::IsNullOrWhiteSpace($Filter)) { $mcpTokens += $Filter }

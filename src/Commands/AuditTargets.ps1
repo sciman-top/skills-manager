@@ -14,12 +14,12 @@ function Get-DefaultAuditOuterAiPrompt {
     return @"
 # Outer AI Audit Prompt
 
-你正在代理执行 skills-manager 的目标仓技能审查流程。
+你正在代理执行 skills-manager 的技能审查流程；可能是目标仓审查，也可能是 profile-only 的新技能发现。
 
 ## 任务目标
 
 1. 阅读本次审查包中的 ai-brief.md。
-2. 阅读 user-profile.json、repo-scan.json / repo-scans.json、installed-skills.json。
+2. 阅读 user-profile.json、installed-skills.json、source-strategy.json；若本轮绑定目标仓，再阅读 repo-scan.json / repo-scans.json。
 3. 严格按 recommendations.template.json 的 schema v2 产出完整 recommendations.json。
 4. 建议结果优先覆盖“新增建议”与“卸载建议”，并确保每项都包含：
    - ``reason_user_profile``（简短，1 句话）
@@ -36,13 +36,15 @@ function Get-DefaultAuditOuterAiPrompt {
 阶段 1：读取输入
 - 必须先读 ai-brief.md + user-profile.json + installed-skills.json。
 - 在 repo-scan.json / repo-scans.json 中按实际存在文件读取；若路径写成 ``N/A``，表示该输入未提供，不得臆测缺失内容。
+- profile-only 模式不绑定目标仓，必须把 ``reason_target_repo`` 解释为“当前已安装技能 / profile-only 场景”依据，而不是仓库事实。
 - 任一必需本地文件缺失、为空或无法读取时，立即停止，并向用户报告阻断项；不要跳过后继续 dry-run。
 
 阶段 2：写 recommendations.json
 - 仅输出机器可读 JSON，不夹带解释性正文。
 - 不要改变 recommendations.template.json 的 schema 与字段命名。
 - 模板中的 ``<...>`` 占位符必须全部替换或删除对应示例项，不得原样保留。
-- ``decision_basis.user_profile_used``、``decision_basis.target_scan_used``、``decision_basis.source_strategy_used`` 必须保持布尔值 ``true``，且 ``decision_basis.summary`` 不能为空。
+- 目标仓审查模式：``decision_basis.user_profile_used``、``decision_basis.target_scan_used``、``decision_basis.source_strategy_used`` 必须保持布尔值 ``true``，且 ``decision_basis.summary`` 不能为空。
+- profile-only 模式：``recommendation_mode`` 必须为 ``profile-only``，``decision_basis.user_profile_used`` 与 ``decision_basis.source_strategy_used`` 必须为 ``true``，``decision_basis.target_scan_used`` 必须为 ``false``。
 - 新增建议的 ``install.mode`` 只能是 ``manual`` 或 ``vendor``，``confidence`` 只能是 ``low`` / ``medium`` / ``high``。
 - 任一建议缺少 ``reason_user_profile`` 或 ``reason_target_repo``，视为未完成。
 - 证据不足时，宁可不推荐；不要“猜测式”新增或卸载。
@@ -65,9 +67,9 @@ function Get-DefaultAuditOuterAiPrompt {
 
 ## 质量与来源要求
 
-- 必须同时基于“用户基本需求”和“目标仓事实”做判断。
+- 目标仓审查必须同时基于“用户基本需求”和“目标仓事实”做判断；profile-only 新技能发现必须同时基于“用户基本需求”“已安装技能清单”和“来源策略”做判断。
 - 优先参考官方文档、skills.sh、find-skills、GitHub 高质量项目、GitHub Trending。
-- 每条建议都要能回答两个问题：为什么适合用户长期工作流、为什么符合该目标仓现状。
+- 每条建议都要能回答两个问题：为什么适合用户长期工作流、为什么符合目标仓事实或 profile-only 场景。
 - 若来源相互冲突，选择更高可信来源并在 ``sources`` 中保留依据。
 - ``overlap_findings`` 仅作报告，不可直接视为卸载建议；确需卸载时，必须单独给出双理由。
 - ``do_not_install`` 用于记录“已研究但当前不建议安装”的技能，避免重复研究。
@@ -503,6 +505,7 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
         profile = $null
         target = $null
         out = $null
+        query = $null
         recommendations = $null
         dry_run_ack = $null
         add_selection = $null
@@ -535,6 +538,9 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             "list" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
             "扫描" { $result.action = "scan"; $items = @($items | Select-Object -Skip 1) }
             "scan" { $result.action = "scan"; $items = @($items | Select-Object -Skip 1) }
+            "发现新技能" { $result.action = "discover_skills"; $items = @($items | Select-Object -Skip 1) }
+            "discover-skills" { $result.action = "discover_skills"; $items = @($items | Select-Object -Skip 1) }
+            "discover" { $result.action = "discover_skills"; $items = @($items | Select-Object -Skip 1) }
             "状态" { $result.action = "status"; $items = @($items | Select-Object -Skip 1) }
             "status" { $result.action = "status"; $items = @($items | Select-Object -Skip 1) }
             "应用确认" { $result.action = "apply_flow"; $items = @($items | Select-Object -Skip 1) }
@@ -563,6 +569,11 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             "--out" {
                 Need ($i + 1 -lt $items.Count) "--out 缺少值"
                 $result.out = [string]$items[++$i]
+                continue
+            }
+            "--query" {
+                Need ($i + 1 -lt $items.Count) "--query 缺少值"
+                $result.query = [string]$items[++$i]
                 continue
             }
             "--recommendations" {
@@ -647,6 +658,72 @@ function Assert-AuditUserProfileReady($cfg) {
     if ([string]::IsNullOrWhiteSpace([string]$cfg.user_profile.summary)) {
         Write-Host "提示：用户结构化 summary 为空，建议先完善结构化需求后再生成审查包。" -ForegroundColor Yellow
     }
+}
+
+function Get-AuditUserProfileOutput($cfg) {
+    return [pscustomobject]@{
+        schema_version = 1
+        raw_text = [string]$cfg.user_profile.raw_text
+        summary = [string]$cfg.user_profile.summary
+        structured = $cfg.user_profile.structured
+        last_structured_at = [string]$cfg.user_profile.last_structured_at
+        structured_by = [string]$cfg.user_profile.structured_by
+    }
+}
+
+function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query = "") {
+    $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
+    Need ($normalizedMode -eq "target-repo" -or $normalizedMode -eq "profile-only") ("未知审查来源模式：{0}" -f $Mode)
+    return [pscustomobject]([ordered]@{
+        schema_version = 1
+        mode = $normalizedMode
+        query = [string]$Query
+        sources = @(
+            [ordered]@{
+                id = "official-docs"
+                name = "Official documentation"
+                use_for = "Verify current APIs, platform rules, support status, and recommended implementation patterns."
+            },
+            [ordered]@{
+                id = "skills-sh"
+                name = "skills.sh"
+                use_for = "Discover skill-packaged implementations and compare skill metadata quality."
+            },
+            [ordered]@{
+                id = "github-trending-monthly"
+                name = "GitHub Trending monthly"
+                url = "https://github.com/trending?since=monthly"
+                use_for = "Find active, recently relevant community projects; never treat popularity alone as enough evidence."
+            },
+            [ordered]@{
+                id = "strong-community-projects"
+                name = "High-quality community projects"
+                use_for = "Check maintenance activity, examples, issues, releases, and adoption fit."
+            },
+            [ordered]@{
+                id = "best-practices"
+                name = "Best-practice guides"
+                use_for = "Compare proposed skills against mature workflow and operational guidance."
+            },
+            [ordered]@{
+                id = "find-skills"
+                name = "Installed find-skills workflow"
+                use_for = "Use the local skill discovery workflow as an input source when available."
+            }
+        )
+        scoring = [ordered]@{
+            authority = "Prefer first-party documentation and maintained source repositories."
+            fit = "Match the user's structured profile and, in target-repo mode, concrete repo scan facts."
+            duplication_risk = "Penalize recommendations that duplicate installed skills without a clear incremental benefit."
+            maintenance = "Prefer projects with recent activity, clear license, and usable documentation."
+            operational_cost = "Prefer skills that are easy to install, verify, and roll back."
+        }
+        required_evidence = @(
+            "Every add/remove recommendation must cite sources inspected in this run.",
+            "Do not fabricate repository facts, source links, or source conclusions.",
+            "For profile-only mode, explain reason_target_repo as installed-skill inventory / profile-only context, not as a target repository claim."
+        )
+    })
 }
 
 function Get-AuditRunId {
@@ -830,10 +907,100 @@ function Write-AuditJsonFile([string]$path, $data) {
     Set-ContentUtf8 $path ($data | ConvertTo-Json -Depth 40)
 }
 
-function Write-AuditAiBrief([string]$path, $scanData, [string]$userProfilePath, [string]$repoScanPath, [string]$repoScansPath, [string]$installedSkillsPath, [string]$templatePath) {
+function Write-AuditAiBrief([string]$path, $scanData, [string]$userProfilePath, [string]$repoScanPath, [string]$repoScansPath, [string]$installedSkillsPath, [string]$templatePath, [string]$Mode = "target-repo", [string]$Query = "", [string]$SourceStrategyPath = "") {
+    $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
     $targetNames = @($scanData | ForEach-Object { $_.target.name })
     if ([string]::IsNullOrWhiteSpace($repoScanPath)) { $repoScanPath = "N/A" }
     if ([string]::IsNullOrWhiteSpace($repoScansPath)) { $repoScansPath = "N/A" }
+    if ([string]::IsNullOrWhiteSpace($SourceStrategyPath)) { $SourceStrategyPath = "N/A" }
+
+    if ($normalizedMode -eq "profile-only") {
+        $queryText = if ([string]::IsNullOrWhiteSpace($Query)) { "N/A" } else { $Query }
+        $content = @"
+# Skill Audit Brief
+
+Run ID: $(Split-Path (Split-Path $path -Parent) -Leaf)
+Mode: profile-only skill discovery
+Targets: N/A
+Discovery query: $queryText
+
+Use the generated user profile JSON, installed skills JSON, and source strategy JSON to decide:
+
+- Which installed skills should be kept for the user's long-term workflow.
+- Which installed skills should be proposed for removal because they no longer fit.
+- Which missing skills are strongly justified without binding the decision to a target repository.
+
+External research is intentionally performed by the outer AI agent. Search official documentation, strong community projects, best practices, https://skills.sh/, GitHub Trending, and the find-skills workflow.
+
+Primary output file (must be valid JSON, no prose):
+
+$templatePath
+
+Scan inputs:
+- Single-target scan JSON: N/A
+- Multi-target scans JSON: N/A
+- Source strategy JSON: $SourceStrategyPath
+
+Rules:
+
+- Profile-only mode has no target repo scan; do not fabricate repository facts.
+- All decisions must be based on user-profile.json, installed-skills.json, source-strategy.json, and real external research.
+- Use ``reason_target_repo`` to explain the current installed-skill inventory / profile-only context; do not claim target repository evidence.
+- If any required local input is missing, unreadable, or empty, stop and report the blocker instead of guessing.
+- Network research is authorized within this audit workflow, but installation still requires --apply --yes.
+- Replace every template placeholder wrapped in `<...>` or delete the example entry entirely; do not leave placeholder values in the final file.
+- Keep ``recommendation_mode`` as ``profile-only``.
+- Keep ``decision_basis.user_profile_used`` and ``decision_basis.source_strategy_used`` as boolean ``true``; keep ``decision_basis.target_scan_used`` as boolean ``false``; provide a non-empty ``decision_basis.summary``.
+- New installs require ``reason_user_profile``, ``reason_target_repo``, source links, confidence, repo, skill path, ref, and mode.
+- Removal recommendations must include ``reason_user_profile``, ``reason_target_repo``, sources, and the exact installed ``vendor``/``from`` pair.
+- `install.mode` must stay `manual` or `vendor`; `confidence` must stay `low`, `medium`, or `high`.
+- Each add/remove recommendation must keep both reasons concise and user-readable.
+- If either reason field is missing on any recommendation, treat the run as incomplete and stop before dry-run summary.
+- Overlap findings are report-only; do not recommend automatic uninstall.
+- Use `do_not_install` for researched options that should stay out of the repo right now.
+- Prefer high-reputation sources and avoid weak duplicate skills.
+- Cover the built-in default sources and record the actual sources you used.
+- Keep recommendations machine-readable JSON matching the template.
+- The template already includes placeholder example items. Replace placeholder values or delete the example entries you do not need; do not invent a different schema.
+- Cite only sources you actually inspected during this run. Do not fabricate source links or source conclusions.
+- If evidence is insufficient, leave the category empty and explain briefly instead of forcing low-quality recommendations.
+- After dry-run, show numbered add/remove lists with one-line reasons per item (``reason_user_profile`` + ``reason_target_repo``).
+- If a list is empty, explicitly output "no add recommendations" or "no removal recommendations" with a brief reason.
+- Keep dry-run numbering stable; do not renumber or reorder indexes in the user-facing summary.
+
+Pre-dry-run self-check:
+
+- recommendations.json parses as JSON and keeps `schema_version = 2`.
+- ``recommendation_mode`` is ``profile-only``.
+- ``decision_basis.user_profile_used`` and ``decision_basis.source_strategy_used`` are ``true``.
+- ``decision_basis.target_scan_used`` is ``false``.
+- No remaining placeholder values wrapped in `<...>`.
+- Each add/remove item has both reasons plus at least one real source.
+- Stop before dry-run if any self-check item fails.
+
+Execution order:
+
+1) Read all local inputs
+2) Write ``recommendations.json`` from ``recommendations.template.json``
+3) Run the self-check and stop if any item fails
+4) Execute dry-run
+5) Summarize dry-run with original indexes and one-line dual-reason entries
+6) Wait for explicit user confirmation before apply
+
+User-facing dry-run summary format:
+
+- add: `[index] <skill-name> | user: <reason_user_profile> | context: <reason_target_repo>`
+- remove: `[index] <skill-name> | user: <reason_user_profile> | context: <reason_target_repo>`
+- empty category: `no add recommendations: <brief reason>` / `no removal recommendations: <brief reason>`
+
+User profile JSON: $userProfilePath
+Installed skills JSON: $installedSkillsPath
+Source strategy JSON: $SourceStrategyPath
+"@
+        Set-ContentUtf8 $path $content
+        return
+    }
+
     $content = @"
 # Skill Audit Brief
 
@@ -855,10 +1022,12 @@ $templatePath
 Scan inputs:
 - Single-target scan JSON: $repoScanPath
 - Multi-target scans JSON: $repoScansPath
+- Source strategy JSON: $SourceStrategyPath
 
 Rules:
 
 - All decisions must be based on BOTH user-profile.json and target repo scan facts.
+- Use source-strategy.json to cover the built-in source set and explain source tradeoffs.
 - Treat any scan path shown as `N/A` as "not provided"; do not infer hidden content from it.
 - If any required local input is missing, unreadable, or empty, stop and report the blocker instead of guessing.
 - Network research is authorized within this audit workflow, but installation still requires --apply --yes.
@@ -906,13 +1075,35 @@ User-facing dry-run summary format:
 
 User profile JSON: $userProfilePath
 Installed skills JSON: $installedSkillsPath
+Source strategy JSON: $SourceStrategyPath
 "@
     Set-ContentUtf8 $path $content
 }
 
-function Write-AuditOuterAiPromptFile([string]$path, [string]$reportRoot, [string]$briefPath, [string]$userProfilePath, [string]$repoScanPath, [string]$repoScansPath, [string]$installedSkillsPath, [string]$templatePath) {
+function Write-AuditOuterAiPromptFile([string]$path, [string]$reportRoot, [string]$briefPath, [string]$userProfilePath, [string]$repoScanPath, [string]$repoScansPath, [string]$installedSkillsPath, [string]$templatePath, [string]$Mode = "target-repo", [string]$Query = "", [string]$SourceStrategyPath = "") {
+    $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
     if ([string]::IsNullOrWhiteSpace($repoScanPath)) { $repoScanPath = "N/A" }
     if ([string]::IsNullOrWhiteSpace($repoScansPath)) { $repoScansPath = "N/A" }
+    if ([string]::IsNullOrWhiteSpace($SourceStrategyPath)) { $SourceStrategyPath = "N/A" }
+    $queryText = if ([string]::IsNullOrWhiteSpace($Query)) { "N/A" } else { $Query }
+    $inputReadStep = if ($normalizedMode -eq "profile-only") {
+        "1. 阅读 ai-brief.md、user-profile.json、installed-skills.json、source-strategy.json；repo-scan 输入为 N/A 时代表本轮不绑定目标仓。"
+    }
+    else {
+        "1. 阅读 ai-brief.md，并按存在文件读取 repo-scan.json / repo-scans.json，同时读取 source-strategy.json。"
+    }
+    $basisCheckStep = if ($normalizedMode -eq "profile-only") {
+        "   - recommendations.json 与模板字段同构，``recommendation_mode = profile-only``，``decision_basis.user_profile_used`` / ``decision_basis.source_strategy_used`` 为 ``true``，``decision_basis.target_scan_used`` 为 ``false``"
+    }
+    else {
+        "   - recommendations.json 与模板字段同构，``decision_basis`` 三个布尔字段都为 ``true``"
+    }
+    $modeBlocking = if ($normalizedMode -eq "profile-only") {
+        '- 本轮是 profile-only；不得编造目标仓事实，``reason_target_repo`` 必须解释当前已安装技能 / profile-only 场景依据'
+    }
+    else {
+        "- 若 ``repo-scan.json`` / ``repo-scans.json`` 路径显示为 ``N/A``，表示该输入未提供，不可臆造其内容"
+    }
     $content = @"
 $(Get-AuditOuterAiPromptContent)
 
@@ -921,20 +1112,23 @@ $(Get-AuditOuterAiPromptContent)
 ## Current Audit Run Files
 
 - 审查包目录：$reportRoot
+- 模式：$normalizedMode
+- 发现查询：$queryText
 - 任务说明：$briefPath
 - 用户画像：$userProfilePath
 - 单目标扫描：$repoScanPath
 - 多目标扫描：$repoScansPath
 - 已安装技能：$installedSkillsPath
+- 来源策略：$SourceStrategyPath
 - 推荐模板：$templatePath
 
 ## Required Execution Sequence
 
-1. 阅读 ai-brief.md，并按存在文件读取 repo-scan.json / repo-scans.json
+$inputReadStep
 2. 按 recommendations.template.json schema v2 写出 recommendations.json
 3. 先做自检（全部通过后再 dry-run）：
    - recommendations.json 可解析为 JSON，且 ``schema_version = 2``
-   - recommendations.json 与模板字段同构，``decision_basis`` 三个布尔字段都为 ``true``
+$basisCheckStep
    - 不保留模板占位符 ``<...>`` 或未替换的示例值
    - 每条新增/卸载建议都包含 ``reason_user_profile`` + ``reason_target_repo`` + 至少 1 个真实 ``sources``
    - 新增建议的 ``install.mode`` 只能是 ``manual`` 或 ``vendor``，``confidence`` 只能是 ``low`` / ``medium`` / ``high``
@@ -953,20 +1147,20 @@ $(Get-AuditOuterAiPromptContent)
 - ``overlap_findings`` 仅用于报告重叠，``do_not_install`` 用于记录“已研究但当前不应安装”的技能
 - ``sources`` 只能填写本轮真实查看过的来源；不得伪造仓库事实或来源结论
 - 如果你继续执行 dry-run，请在总结里按 dry-run 原序号列出“新增建议 / 卸载建议”
-- 每条建议必须同时展示两条简短理由（用户需求 + 目标仓）
+- 每条建议必须同时展示两条简短理由（用户需求 + 目标仓/场景）
 - 某一类为空时，必须显式写“无该类建议”并给 1 句简短原因
 - 未经用户明确确认，不得执行 --apply --yes
 
 ## Blocking Conditions
 
 - 任一必需输入文件缺失、为空或不可读时，立即停止并汇报阻断项
-- 若 ``repo-scan.json`` / ``repo-scans.json`` 路径显示为 ``N/A``，表示该输入未提供，不可臆造其内容
+$modeBlocking
 - 若自检失败、仍有 ``<...>`` 占位符、或来源并非本轮真实查看结果，必须先修正再继续
 
 ## User Summary Format
 
-- 新增建议：``[序号] <skill-name> | 用户需求：<reason_user_profile> | 目标仓：<reason_target_repo>``
-- 卸载建议：``[序号] <skill-name> | 用户需求：<reason_user_profile> | 目标仓：<reason_target_repo>``
+- 新增建议：``[序号] <skill-name> | 用户需求：<reason_user_profile> | 目标仓/场景：<reason_target_repo>``
+- 卸载建议：``[序号] <skill-name> | 用户需求：<reason_user_profile> | 目标仓/场景：<reason_target_repo>``
 - 空列表：``无新增建议：<简短原因>`` / ``无卸载建议：<简短原因>``
 "@
     Set-ContentUtf8 $path $content
@@ -1003,6 +1197,12 @@ function Assert-AuditBundleFileContent([string]$path, [string]$label) {
             Need (Test-AuditJsonProperty $data "skills") ("installed-skills 缺少 skills：{0}" -f $path)
             Need (Assert-IsArray $data.skills) ("installed-skills.skills 必须为数组：{0}" -f $path)
         }
+        "source-strategy.json" {
+            Need (Test-AuditJsonProperty $data "mode") ("source-strategy 缺少 mode：{0}" -f $path)
+            Need (Test-AuditJsonProperty $data "sources") ("source-strategy 缺少 sources：{0}" -f $path)
+            Need (Assert-IsArray $data.sources) ("source-strategy.sources 必须为数组：{0}" -f $path)
+            Need (@($data.sources).Count -gt 0) ("source-strategy.sources 不能为空：{0}" -f $path)
+        }
         "recommendations.template.json" {
             Need (Test-AuditJsonProperty $data "schema_version") ("recommendations.template 缺少 schema_version：{0}" -f $path)
             Need ([int]$data.schema_version -eq 2) ("recommendations.template schema_version 必须为 2：{0}" -f $path)
@@ -1032,27 +1232,52 @@ function Assert-AuditBundleRequiredFiles([object[]]$files) {
     }
 }
 
-function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName) {
-    return [pscustomobject]([ordered]@{
-        schema_version = 2
-        run_id = $runId
-        target = $targetName
-        template_notes = @(
+function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [string]$Mode = "target-repo", [string]$Query = "") {
+    $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
+    Need ($normalizedMode -eq "target-repo" -or $normalizedMode -eq "profile-only") ("未知 recommendations 模式：{0}" -f $Mode)
+    $isProfileOnly = ($normalizedMode -eq "profile-only")
+    $targetScanUsed = -not $isProfileOnly
+    $templateNotes = if ($isProfileOnly) {
+        @(
+            "Replace placeholder values wrapped in <> before using this file.",
+            "Delete example entries that are not needed, but keep the schema shape unchanged.",
+            "This is profile-only skill discovery: reason_target_repo means installed-skill inventory / profile-only context, not target repository facts."
+        )
+    }
+    else {
+        @(
             "Replace placeholder values wrapped in <> before using this file.",
             "Delete example entries that are not needed, but keep the schema shape unchanged.",
             "All install/remove decisions must cite both user-profile and target-repo reasons."
         )
+    }
+    $basisSummary = if ($isProfileOnly) {
+        "<why these recommendations reflect the user profile, installed-skill inventory, and source strategy without target repo facts>"
+    }
+    else {
+        "<why these recommendations reflect both the user profile and the target repo facts>"
+    }
+    $targetReasonInstall = if ($isProfileOnly) { "<which installed-skill inventory or profile-only context justifies this skill>" } else { "<which detected target-repo facts justify this skill>" }
+    $targetReasonRemoval = if ($isProfileOnly) { "<why the installed-skill inventory or profile-only context no longer justifies this skill>" } else { "<why the target repo no longer justifies this skill>" }
+    $targetReasonDoNotInstall = if ($isProfileOnly) { "<why the profile-only context does not justify it>" } else { "<why the target repo does not justify it>" }
+    return [pscustomobject]([ordered]@{
+        schema_version = 2
+        run_id = $runId
+        target = $targetName
+        recommendation_mode = $normalizedMode
+        discovery_query = [string]$Query
+        template_notes = @($templateNotes)
         decision_basis = [ordered]@{
             user_profile_used = $true
-            target_scan_used = $true
+            target_scan_used = $targetScanUsed
             source_strategy_used = $true
-            summary = "<why these recommendations reflect both the user profile and the target repo facts>"
+            summary = $basisSummary
         }
         new_skills = @(
             [ordered]@{
                 name = "<new-skill-name>"
                 reason_user_profile = "<why the user's long-term workflow benefits from this skill>"
-                reason_target_repo = "<which detected target-repo facts justify this skill>"
+                reason_target_repo = $targetReasonInstall
                 install = [ordered]@{
                     repo = "<owner/repo-or-local-path>"
                     skill = "<relative-skill-path-or-.>"
@@ -1068,7 +1293,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName) {
             [ordered]@{
                 name = "<existing-skill-or-skill-pair>"
                 reason_user_profile = "<why overlap matters for the user's workflow>"
-                reason_target_repo = "<which repo facts make this overlap relevant>"
+                reason_target_repo = $targetReasonInstall
                 sources = @("<source-url-1>")
                 note = "<report-only observation; no automatic uninstall>"
             }
@@ -1077,7 +1302,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName) {
             [ordered]@{
                 name = "<installed-skill-name>"
                 reason_user_profile = "<why the user profile no longer justifies this skill>"
-                reason_target_repo = "<why the target repo no longer justifies this skill>"
+                reason_target_repo = $targetReasonRemoval
                 sources = @("<source-url-1>")
                 source_categories = @("official-docs")
                 installed = [ordered]@{
@@ -1090,7 +1315,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName) {
             [ordered]@{
                 name = "<skill-not-recommended>"
                 reason_user_profile = "<why the user profile does not justify it>"
-                reason_target_repo = "<why the target repo does not justify it>"
+                reason_target_repo = $targetReasonDoNotInstall
                 sources = @("<source-url-1>")
                 note = "<why it should not be added now>"
             }
@@ -1253,7 +1478,7 @@ function Assert-AuditRecommendationItem($item) {
     $confidence = ([string]$item.confidence).ToLowerInvariant()
     Need ($confidence -eq "low" -or $confidence -eq "medium" -or $confidence -eq "high") ("confidence 仅支持 low/medium/high：{0}" -f [string]$item.confidence)
     $item.confidence = $confidence
-    $item | Add-Member -NotePropertyName reason -NotePropertyValue ("用户需求：{0}；目标仓：{1}" -f [string]$item.reason_user_profile, [string]$item.reason_target_repo) -Force
+    $item | Add-Member -NotePropertyName reason -NotePropertyValue ("用户需求：{0}；目标仓/场景：{1}" -f [string]$item.reason_user_profile, [string]$item.reason_target_repo) -Force
 }
 
 function Assert-AuditRemovalCandidate($item) {
@@ -1284,8 +1509,19 @@ function Load-AuditRecommendations([string]$path) {
     Need (Test-AuditJsonProperty $rec.decision_basis "user_profile_used") "decision_basis 缺少 user_profile_used"
     Need (Test-AuditJsonProperty $rec.decision_basis "target_scan_used") "decision_basis 缺少 target_scan_used"
     Need (Test-AuditJsonProperty $rec.decision_basis "source_strategy_used") "decision_basis 缺少 source_strategy_used"
+    $recommendationMode = "target-repo"
+    if ($rec.PSObject.Properties.Match("recommendation_mode").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$rec.recommendation_mode)) {
+        $recommendationMode = ([string]$rec.recommendation_mode).ToLowerInvariant()
+    }
+    Need ($recommendationMode -eq "target-repo" -or $recommendationMode -eq "profile-only") ("recommendation_mode 仅支持 target-repo 或 profile-only：{0}" -f $recommendationMode)
     Assert-AuditRequiredBooleanTrue $rec.decision_basis.user_profile_used "decision_basis.user_profile_used"
-    Assert-AuditRequiredBooleanTrue $rec.decision_basis.target_scan_used "decision_basis.target_scan_used"
+    Need ($rec.decision_basis.target_scan_used -is [bool]) "decision_basis.target_scan_used 必须是布尔值"
+    if ($recommendationMode -eq "profile-only") {
+        Need (-not [bool]$rec.decision_basis.target_scan_used) "profile-only 模式下 decision_basis.target_scan_used 必须为 false"
+    }
+    else {
+        Assert-AuditRequiredBooleanTrue $rec.decision_basis.target_scan_used "decision_basis.target_scan_used"
+    }
     Assert-AuditRequiredBooleanTrue $rec.decision_basis.source_strategy_used "decision_basis.source_strategy_used"
     Need (-not [string]::IsNullOrWhiteSpace([string]$rec.decision_basis.summary)) "decision_basis.summary 不能为空"
     Ensure-AuditArrayProperty $rec "new_skills"
@@ -1344,7 +1580,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             name = [string]$item.name
             vendor = [string]$item.installed.vendor
             from = [string]$item.installed.from
-            reason = ("用户需求：{0}；目标仓：{1}" -f [string]$item.reason_user_profile, [string]$item.reason_target_repo)
+            reason = ("用户需求：{0}；目标仓/场景：{1}" -f [string]$item.reason_user_profile, [string]$item.reason_target_repo)
             reason_user_profile = [string]$item.reason_user_profile
             reason_target_repo = [string]$item.reason_target_repo
             sources = @($item.sources)
@@ -1403,7 +1639,7 @@ function Write-AuditRecommendationSummary($plan) {
         foreach ($item in @($plan.items)) {
             Write-Host ("{0}) {1}" -f $index, [string]$item.name)
             Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
-            Write-Host ("   目标仓: {0}" -f [string]$item.reason_target_repo)
+            Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
             $index++
         }
     }
@@ -1417,7 +1653,7 @@ function Write-AuditRecommendationSummary($plan) {
         foreach ($item in @($plan.removal_candidates)) {
             Write-Host ("{0}) {1} [{2}|{3}] status={4}" -f $index, [string]$item.name, [string]$item.vendor, [string]$item.from, [string]$item.status)
             Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
-            Write-Host ("   目标仓: {0}" -f [string]$item.reason_target_repo)
+            Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
             $index++
         }
     }
@@ -1566,16 +1802,8 @@ function Invoke-AuditTargetsScan {
     }
     EnsureDir $reportRoot
 
-    $profileOut = [pscustomobject]@{
-        schema_version = 1
-        raw_text = [string]$cfg.user_profile.raw_text
-        summary = [string]$cfg.user_profile.summary
-        structured = $cfg.user_profile.structured
-        last_structured_at = [string]$cfg.user_profile.last_structured_at
-        structured_by = [string]$cfg.user_profile.structured_by
-    }
     $userProfilePath = Join-Path $reportRoot "user-profile.json"
-    Write-AuditJsonFile $userProfilePath $profileOut
+    Write-AuditJsonFile $userProfilePath (Get-AuditUserProfileOutput $cfg)
 
     $scans = @()
     foreach ($t in $targets) {
@@ -1604,14 +1832,17 @@ function Invoke-AuditTargetsScan {
     }
     Write-AuditJsonFile $installedPath ([pscustomobject]@{ schema_version = 1; skills = @($installedSkills) })
 
+    $sourceStrategyPath = Join-Path $reportRoot "source-strategy.json"
+    Write-AuditJsonFile $sourceStrategyPath (New-AuditSourceStrategy "target-repo" "")
+
     $templatePath = Join-Path $reportRoot "recommendations.template.json"
     $templateTarget = if ($scans.Count -eq 1) { [string]$scans[0].target.name } else { "*" }
-    Write-AuditJsonFile $templatePath (New-AuditRecommendationsTemplate $runId $templateTarget)
+    Write-AuditJsonFile $templatePath (New-AuditRecommendationsTemplate $runId $templateTarget "target-repo")
 
     $briefPath = Join-Path $reportRoot "ai-brief.md"
-    Write-AuditAiBrief $briefPath $scans $userProfilePath $repoScanPath $repoScansPath $installedPath $templatePath
+    Write-AuditAiBrief $briefPath $scans $userProfilePath $repoScanPath $repoScansPath $installedPath $templatePath "target-repo" "" $sourceStrategyPath
     $outerAiPromptPath = Join-Path $reportRoot "outer-ai-prompt.md"
-    Write-AuditOuterAiPromptFile $outerAiPromptPath $reportRoot $briefPath $userProfilePath $repoScanPath $repoScansPath $installedPath $templatePath
+    Write-AuditOuterAiPromptFile $outerAiPromptPath $reportRoot $briefPath $userProfilePath $repoScanPath $repoScansPath $installedPath $templatePath "target-repo" "" $sourceStrategyPath
 
     $requiredFiles = New-Object System.Collections.Generic.List[object]
     $requiredFiles.Add([pscustomobject]@{ label = "user-profile.json"; path = $userProfilePath }) | Out-Null
@@ -1622,6 +1853,7 @@ function Invoke-AuditTargetsScan {
         $requiredFiles.Add([pscustomobject]@{ label = "repo-scans.json"; path = $repoScansPath }) | Out-Null
     }
     $requiredFiles.Add([pscustomobject]@{ label = "installed-skills.json"; path = $installedPath }) | Out-Null
+    $requiredFiles.Add([pscustomobject]@{ label = "source-strategy.json"; path = $sourceStrategyPath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "recommendations.template.json"; path = $templatePath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "ai-brief.md"; path = $briefPath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "outer-ai-prompt.md"; path = $outerAiPromptPath }) | Out-Null
@@ -1636,6 +1868,7 @@ function Invoke-AuditTargetsScan {
         Write-Host ("- repo-scans.json: {0}" -f $repoScansPath)
     }
     Write-Host ("- installed-skills.json: {0}" -f $installedPath)
+    Write-Host ("- source-strategy.json: {0}" -f $sourceStrategyPath)
     Write-Host ("- ai-brief.md: {0}" -f $briefPath)
     Write-Host ("- outer-ai-prompt.md: {0}" -f $outerAiPromptPath)
     Write-Host ("- recommendations.template.json: {0}" -f $templatePath)
@@ -1644,6 +1877,74 @@ function Invoke-AuditTargetsScan {
         run_id = $runId
         path = $reportRoot
         scans = @($scans)
+    }
+}
+
+function Invoke-AuditSkillDiscovery {
+    param(
+        [string]$Query,
+        [string]$OutDir
+    )
+    $cfg = Load-AuditTargetsConfig
+    Assert-AuditUserProfileReady $cfg
+
+    $runId = Get-AuditRunId
+    $reportRoot = if ([string]::IsNullOrWhiteSpace($OutDir)) {
+        Get-AuditReportRoot $runId
+    }
+    else {
+        Resolve-AuditTargetPath $OutDir
+    }
+    EnsureDir $reportRoot
+
+    $userProfilePath = Join-Path $reportRoot "user-profile.json"
+    Write-AuditJsonFile $userProfilePath (Get-AuditUserProfileOutput $cfg)
+
+    $installedPath = Join-Path $reportRoot "installed-skills.json"
+    $installedSkills = @()
+    try {
+        $installedSkills = @(Get-InstalledSkillFacts)
+    }
+    catch {
+        throw ("生成 installed-skills.json 失败：{0}" -f $_.Exception.Message)
+    }
+    Write-AuditJsonFile $installedPath ([pscustomobject]@{ schema_version = 1; skills = @($installedSkills) })
+
+    $sourceStrategyPath = Join-Path $reportRoot "source-strategy.json"
+    Write-AuditJsonFile $sourceStrategyPath (New-AuditSourceStrategy "profile-only" $Query)
+
+    $templatePath = Join-Path $reportRoot "recommendations.template.json"
+    Write-AuditJsonFile $templatePath (New-AuditRecommendationsTemplate $runId "profile-only" "profile-only" $Query)
+
+    $briefPath = Join-Path $reportRoot "ai-brief.md"
+    Write-AuditAiBrief $briefPath @() $userProfilePath "" "" $installedPath $templatePath "profile-only" $Query $sourceStrategyPath
+    $outerAiPromptPath = Join-Path $reportRoot "outer-ai-prompt.md"
+    Write-AuditOuterAiPromptFile $outerAiPromptPath $reportRoot $briefPath $userProfilePath "" "" $installedPath $templatePath "profile-only" $Query $sourceStrategyPath
+
+    $requiredFiles = New-Object System.Collections.Generic.List[object]
+    $requiredFiles.Add([pscustomobject]@{ label = "user-profile.json"; path = $userProfilePath }) | Out-Null
+    $requiredFiles.Add([pscustomobject]@{ label = "installed-skills.json"; path = $installedPath }) | Out-Null
+    $requiredFiles.Add([pscustomobject]@{ label = "source-strategy.json"; path = $sourceStrategyPath }) | Out-Null
+    $requiredFiles.Add([pscustomobject]@{ label = "recommendations.template.json"; path = $templatePath }) | Out-Null
+    $requiredFiles.Add([pscustomobject]@{ label = "ai-brief.md"; path = $briefPath }) | Out-Null
+    $requiredFiles.Add([pscustomobject]@{ label = "outer-ai-prompt.md"; path = $outerAiPromptPath }) | Out-Null
+    Assert-AuditBundleRequiredFiles ($requiredFiles.ToArray())
+
+    Write-Host ("新技能发现包已生成：{0}" -f $reportRoot) -ForegroundColor Green
+    Write-Host "关键产物：" -ForegroundColor Cyan
+    Write-Host ("- user-profile.json: {0}" -f $userProfilePath)
+    Write-Host ("- installed-skills.json: {0}" -f $installedPath)
+    Write-Host ("- source-strategy.json: {0}" -f $sourceStrategyPath)
+    Write-Host ("- ai-brief.md: {0}" -f $briefPath)
+    Write-Host ("- outer-ai-prompt.md: {0}" -f $outerAiPromptPath)
+    Write-Host ("- recommendations.template.json: {0}" -f $templatePath)
+    Write-Host "下一步：把 outer-ai-prompt.md 交给 AI；AI 应先填写并自检 recommendations.json，再执行 dry-run，并按原序号列出新增/卸载清单。" -ForegroundColor Yellow
+    return [pscustomobject]@{
+        run_id = $runId
+        path = $reportRoot
+        mode = "profile-only"
+        query = [string]$Query
+        scans = @()
     }
 }
 
@@ -1930,6 +2231,7 @@ function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
         "list" { Write-AuditTargetsList }
         "status" { Show-AuditLatestStatus }
         "scan" { Invoke-AuditTargetsScan -Target $opts.target -OutDir $opts.out | Out-Null }
+        "discover_skills" { Invoke-AuditSkillDiscovery -Query $opts.query -OutDir $opts.out | Out-Null }
         "apply_flow" { Invoke-AuditRecommendationsTwoStageApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -DryRunAck $opts.dry_run_ack | Out-Null }
         "apply" { Invoke-AuditRecommendationsApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -DryRunAck $opts.dry_run_ack -RequireDryRunAck (-not $opts.apply) -Apply:$opts.apply -Yes:$opts.yes | Out-Null }
     }

@@ -14,6 +14,12 @@ function Get-UpdateParallelism($cfg) {
     return $n
 }
 
+function Test-WindowsInvalidPathIssue([string]$message) {
+    if ([string]::IsNullOrWhiteSpace($message)) { return $false }
+    if ($message -notmatch "invalid path") { return $false }
+    return ($message -match "git\s+(pull|checkout|reset)")
+}
+
 function Invoke-ParallelGitPrefetch($cfg, [int]$Parallelism = 1) {
     if ($DryRun) { return }
     if ($Parallelism -le 1) { return }
@@ -262,22 +268,75 @@ function 更新Imports($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $
 
                 $forceClean = Should-ForceCleanTarget $cfg $SkipForceClean "import" $i.name
                 try {
-                    Ensure-Repo $cache $repo $ref $sparsePath $forceClean $false (-not $SkipFetch)
+                    $null = Ensure-Repo $cache $repo $ref $sparsePath $forceClean $false (-not $SkipFetch)
                 }
                 catch {
-                    $lockPath = Join-Path $cache ".git\index.lock"
-                    $fallbackSkillPath = Resolve-SkillPath $cache $skillPath
-                    $fallbackSrc = if ($fallbackSkillPath -eq ".") { $cache } else { Join-Path $cache $fallbackSkillPath }
-                    if ((Test-Path -LiteralPath $lockPath -PathType Leaf) -and (Test-IsSkillDir $fallbackSrc)) {
-                        Log ("导入更新遇到 Git 索引锁异常，已保留现有缓存：{0} [{1}]；原因：{2}" -f $name, $repo, $_.Exception.Message) "WARN"
-                        if ($fallbackSkillPath -ne $skillPath) {
-                            $i.skill = $fallbackSkillPath
-                            $cfgChanged = $true
-                            $skillPath = $fallbackSkillPath
+                    if ((Test-WindowsInvalidPathIssue $_.Exception.Message) -and $gitSkillPath -ne ".") {
+                        $invalidPathForceClean = $forceClean
+                        if (-not $invalidPathForceClean -and (Test-Path -LiteralPath $cache)) {
+                            $expectedSrc = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
+                            if (-not (Test-IsSkillDir $expectedSrc)) {
+                                $invalidPathForceClean = $true
+                                Log ("导入缓存已不可用，非法路径回退临时启用强制清理：{0} [{1}]" -f $name, $repo) "WARN"
+                            }
                         }
+                        $fallbackDone = $false
+                        $sparseFallbackError = $null
+                        if (-not $sparse) {
+                            try {
+                                $fallbackSparsePath = $gitSkillPath
+                                Log ("导入更新检测到 Windows 非法路径，先回退为 sparse checkout：{0} [{1}] -> {2}" -f $name, $repo, $fallbackSparsePath) "WARN"
+                                $null = Ensure-Repo $cache $repo $ref $fallbackSparsePath $invalidPathForceClean $false (-not $SkipFetch)
+                                $sparse = $true
+                                $sparsePath = $fallbackSparsePath
+                                if (-not [bool]$i.sparse) {
+                                    $i.sparse = $true
+                                    $cfgChanged = $true
+                                }
+                                $fallbackDone = $true
+                            }
+                            catch {
+                                $sparseFallbackError = $_.Exception.Message
+                                Log ("sparse checkout 回退失败，改用归档回退：{0} [{1}]；原因：{2}" -f $name, $repo, $sparseFallbackError) "WARN"
+                            }
+                        }
+                        if (-not $fallbackDone) {
+                            try {
+                                Ensure-RepoFromGitArchive $cache $repo $ref $skillPath $invalidPathForceClean | Out-Null
+                                Log ("导入更新已回退为 git archive：{0} [{1}] -> {2}" -f $name, $repo, $skillPath) "WARN"
+                                $fallbackDone = $true
+                            }
+                            catch {
+                                $archiveError = $_.Exception.Message
+                                try {
+                                    Ensure-RepoFromGitHubTreeSnapshot $cache $repo $ref $skillPath $invalidPathForceClean | Out-Null
+                                    Log ("导入更新已回退为 GitHub tree 快照：{0} [{1}] -> {2}" -f $name, $repo, $skillPath) "WARN"
+                                    $fallbackDone = $true
+                                }
+                                catch {
+                                    $snapshotError = $_.Exception.Message
+                                    $prefix = if ([string]::IsNullOrWhiteSpace($sparseFallbackError)) { "" } else { ("sparse={0} | " -f $sparseFallbackError) }
+                                    throw ("Windows 非法路径回退失败：{0}archive={1} | snapshot={2}" -f $prefix, $archiveError, $snapshotError)
+                                }
+                            }
+                        }
+                        if (-not $fallbackDone) { throw }
                     }
                     else {
-                        throw
+                        $lockPath = Join-Path $cache ".git\index.lock"
+                        $fallbackSkillPath = Resolve-SkillPath $cache $skillPath
+                        $fallbackSrc = if ($fallbackSkillPath -eq ".") { $cache } else { Join-Path $cache $fallbackSkillPath }
+                        if ((Test-Path -LiteralPath $lockPath -PathType Leaf) -and (Test-IsSkillDir $fallbackSrc)) {
+                            Log ("导入更新遇到 Git 索引锁异常，已保留现有缓存：{0} [{1}]；原因：{2}" -f $name, $repo, $_.Exception.Message) "WARN"
+                            if ($fallbackSkillPath -ne $skillPath) {
+                                $i.skill = $fallbackSkillPath
+                                $cfgChanged = $true
+                                $skillPath = $fallbackSkillPath
+                            }
+                        }
+                        else {
+                            throw
+                        }
                     }
                 }
                 $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }

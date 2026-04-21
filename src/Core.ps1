@@ -6,6 +6,33 @@ $AgentDir = Join-Path $Root "agent"
 $OverridesDir = Join-Path $Root "overrides"
 $ManualDir = Join-Path $Root "manual"
 $ImportDir = Join-Path $Root "imports"
+$script:ActiveLogPath = $null
+$script:LogPathFallbackWarned = $false
+
+function Resolve-ActiveLogPath {
+    if (-not [string]::IsNullOrWhiteSpace($script:ActiveLogPath)) { return $script:ActiveLogPath }
+    $candidates = @()
+    if (-not [string]::IsNullOrWhiteSpace($LogPath)) { $candidates += $LogPath }
+    $tempRoot = $env:TEMP
+    if ([string]::IsNullOrWhiteSpace($tempRoot)) { $tempRoot = [System.IO.Path]::GetTempPath() }
+    if (-not [string]::IsNullOrWhiteSpace($tempRoot)) {
+        $candidates += (Join-Path $tempRoot "skills-manager-build.log")
+    }
+    foreach ($candidate in $candidates) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+        try {
+            $parent = Split-Path -Parent $candidate
+            if (-not [string]::IsNullOrWhiteSpace($parent) -and -not (Test-Path -LiteralPath $parent)) {
+                New-Item -ItemType Directory -Path $parent -Force | Out-Null
+            }
+            [System.IO.File]::AppendAllText($candidate, "")
+            $script:ActiveLogPath = $candidate
+            return $script:ActiveLogPath
+        }
+        catch {}
+    }
+    return $null
+}
 
 function Get-LogRotateMaxBytes {
     $v = $null
@@ -33,34 +60,55 @@ function Get-LogMaxBackups {
     catch {}
     return 5
 }
-function Rotate-LogIfNeeded {
-    if ([string]::IsNullOrWhiteSpace($LogPath)) { return }
-    if (-not (Test-Path $LogPath)) { return }
+function Rotate-LogIfNeeded([string]$TargetPath) {
+    if ([string]::IsNullOrWhiteSpace($TargetPath)) { return }
+    if (-not (Test-Path -LiteralPath $TargetPath)) { return }
     $maxBytes = Get-LogRotateMaxBytes
     $maxBackups = Get-LogMaxBackups
     try {
-        $size = (Get-Item $LogPath -ErrorAction Stop).Length
+        $size = (Get-Item -LiteralPath $TargetPath -ErrorAction Stop).Length
         if ($size -lt $maxBytes) { return }
         for ($i = $maxBackups; $i -ge 1; $i--) {
-            $src = if ($i -eq 1) { $LogPath } else { "{0}.{1}" -f $LogPath, ($i - 1) }
-            $dst = "{0}.{1}" -f $LogPath, $i
-            if (-not (Test-Path $src)) { continue }
-            if (Test-Path $dst) { Remove-Item -Force $dst }
-            Move-Item -Force $src $dst
+            $src = if ($i -eq 1) { $TargetPath } else { "{0}.{1}" -f $TargetPath, ($i - 1) }
+            $dst = "{0}.{1}" -f $TargetPath, $i
+            if (-not (Test-Path -LiteralPath $src)) { continue }
+            if (Test-Path -LiteralPath $dst) { Remove-Item -LiteralPath $dst -Force }
+            Move-Item -LiteralPath $src -Destination $dst -Force
         }
     }
     catch {}
 }
 function Write-LogRecord([string]$Level, [string]$Message, [object]$Data) {
     if ($DryRun) { return }
-    Rotate-LogIfNeeded
+    $targetPath = Resolve-ActiveLogPath
+    if ([string]::IsNullOrWhiteSpace($targetPath)) { return }
+    Rotate-LogIfNeeded $targetPath
     $record = [ordered]@{
         ts    = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
         level = $Level.ToUpperInvariant()
         msg   = $Message
     }
     if ($null -ne $Data) { $record.data = $Data }
-    ($record | ConvertTo-Json -Depth 20 -Compress) | Out-File -FilePath $LogPath -Append -Encoding UTF8
+    $json = ($record | ConvertTo-Json -Depth 20 -Compress)
+    try {
+        $json | Out-File -FilePath $targetPath -Append -Encoding UTF8
+        return
+    }
+    catch {}
+    if ($targetPath -ne $LogPath) { return }
+
+    # 主日志路径不可写时，自动回退到 TEMP，避免日志故障中断主流程
+    $script:ActiveLogPath = $null
+    $fallbackPath = Resolve-ActiveLogPath
+    if ([string]::IsNullOrWhiteSpace($fallbackPath) -or $fallbackPath -eq $targetPath) { return }
+    try {
+        $json | Out-File -FilePath $fallbackPath -Append -Encoding UTF8
+        if (-not $script:LogPathFallbackWarned) {
+            Write-Host ("[WARN] 日志路径不可写，已切换到：{0}" -f $fallbackPath) -ForegroundColor Yellow
+            $script:LogPathFallbackWarned = $true
+        }
+    }
+    catch {}
 }
 function Log([string]$msg, [string]$Level = "INFO", [switch]$NoHost, [object]$Data) {
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"

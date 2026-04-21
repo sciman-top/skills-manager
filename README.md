@@ -165,6 +165,7 @@ English aliases：
 .\skills.ps1 审查目标 需求结构化 --profile reports\profile.json
 .\skills.ps1 审查目标 添加 my-repo ..\my-repo
 .\skills.ps1 审查目标 扫描 --target my-repo
+.\skills.ps1 审查目标 发现新技能 --query "repo governance and agent workflows"
 .\skills.ps1 审查目标 状态
 .\skills.ps1 审查目标 应用确认 --recommendations reports\skill-audit\<run-id>\recommendations.json
 .\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json
@@ -173,6 +174,7 @@ English aliases：
 .\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes --add-indexes "1,3" --remove-indexes "2"
 ```
 
+`发现新技能` 是不绑定目标仓的 profile-only 模式，会生成同样的审查包与 `recommendations.template.json`，但不生成 `repo-scan.json`；外层 AI 必须基于用户画像、已安装技能、`source-strategy.json` 和真实来源研究给出建议。
 默认 `应用` 只做 dry-run。只有同时传入 `--apply --yes` 才会真正执行你选中的新增和卸载、构建生效并运行 doctor。
 `应用确认` 提供单入口两阶段流程：先 dry-run，再要求输入确认口令 `APPLY <run-id>` 才会执行落盘。
 在 dry-run 模式下，脚本会以红色警示“未落盘”，并要求显式确认口令 `我知道未落盘`（非交互场景可用 `--dry-run-ack` 传入）。
@@ -180,8 +182,8 @@ English aliases：
 
 执行 `应用` 时，脚本会先展示两份独立的建议清单：
 
-- 新增建议：每项有序号、技能名、用户需求依据、目标仓依据
-- 卸载建议：每项有序号、技能名、已安装定位信息、用户需求依据、目标仓依据
+- 新增建议：每项有序号、技能名、用户需求依据、目标仓/场景依据
+- 卸载建议：每项有序号、技能名、已安装定位信息、用户需求依据、目标仓/场景依据
 
 你可以在交互中分别输入“新增序号”和“卸载序号”，也可以用 `--add-indexes` / `--remove-indexes` 非交互传入。两份清单独立编号，卸载选择不会改变新增清单的序号及命中关系。
 
@@ -196,6 +198,7 @@ English aliases：
 .\skills.ps1 audit-targets profile-structure --profile reports\profile.json
 .\skills.ps1 audit-targets add my-repo ..\my-repo
 .\skills.ps1 audit-targets scan --target my-repo
+.\skills.ps1 audit-targets discover-skills --query "repo governance and agent workflows"
 .\skills.ps1 audit-targets status
 .\skills.ps1 audit-targets apply-flow --recommendations reports\skill-audit\<run-id>\recommendations.json
 .\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json

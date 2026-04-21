@@ -998,6 +998,128 @@ function Should-SyncMappingToAgent($mapping) {
     return $true
 }
 
+function Get-InvalidMappings($cfg = $null) {
+    if ($null -eq $cfg) { $cfg = LoadCfg }
+    $invalid = New-Object System.Collections.Generic.List[object]
+    $mappings = @($cfg.mappings)
+    for ($idx = 0; $idx -lt $mappings.Count; $idx++) {
+        $m = $mappings[$idx]
+        if ($null -eq $m) { continue }
+        if (-not (Should-SyncMappingToAgent $m)) { continue }
+
+        $vendor = [string]$m.vendor
+        $from = [string]$m.from
+        $to = [string]$m.to
+        $src = $null
+        $reason = $null
+        try {
+            if (-not (Test-SafeRelativePath $from -AllowDot)) {
+                $reason = "非法 mapping.from"
+            }
+            elseif (-not (Test-SafeRelativePath $to)) {
+                $reason = "非法 mapping.to"
+            }
+            elseif ($vendor -eq "manual") {
+                $src = Resolve-ManualImportSkillPath $cfg $from -AllowLegacyFallback
+                if ([string]::IsNullOrWhiteSpace($src)) {
+                    $reason = "manual 导入不存在或无效"
+                }
+            }
+            else {
+                $base = Resolve-SourceBase $vendor $cfg
+                $src = Join-Path $base $from
+                if (-not (Is-PathInsideOrEqual $src $base)) {
+                    $reason = "mapping.from 越界"
+                }
+            }
+        }
+        catch {
+            $reason = $_.Exception.Message
+        }
+
+        if ([string]::IsNullOrWhiteSpace($reason)) {
+            if (-not (Test-Path -LiteralPath $src -PathType Container)) {
+                $reason = "源目录不存在"
+            }
+            elseif (-not (Test-IsSkillDir $src)) {
+                $reason = "缺少标记文件"
+            }
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($reason)) {
+            $invalid.Add([pscustomobject]@{
+                    index = $idx
+                    vendor = $vendor
+                    from = $from
+                    to = $to
+                    src = [string]$src
+                    reason = $reason
+                }) | Out-Null
+        }
+    }
+    return $invalid.ToArray()
+}
+
+function Parse-CleanupInvalidMappingsArgs([string[]]$tokens) {
+    $result = [ordered]@{
+        yes = $false
+        no_build = $false
+    }
+    foreach ($t in @($tokens)) {
+        if ([string]::IsNullOrWhiteSpace([string]$t)) { continue }
+        switch (([string]$t).Trim().ToLowerInvariant()) {
+            "--yes" { $result.yes = $true; continue }
+            "--no-build" { $result.no_build = $true; continue }
+            default { throw ("未知参数：{0}（支持 --yes, --no-build）" -f [string]$t) }
+        }
+    }
+    return [pscustomobject]$result
+}
+
+function 清理无效映射([string[]]$tokens = @()) {
+    $opts = Parse-CleanupInvalidMappingsArgs $tokens
+    $cfg = LoadCfg
+    $invalid = @(Get-InvalidMappings $cfg)
+    if ($invalid.Count -eq 0) {
+        Write-Host "未发现失效 mappings。"
+        return
+    }
+
+    $preview = @()
+    foreach ($item in $invalid) {
+        $preview += ("[{0}] {1} -> {2} ({3})" -f [string]$item.vendor, [string]$item.from, [string]$item.to, [string]$item.reason)
+    }
+    if (-not $opts.yes) {
+        if (-not (Confirm-WithSummary "将删除以下失效 mappings" $preview "确认删除并写回 skills.json？" "Y")) {
+            Write-Host "已取消清理。"
+            return
+        }
+    }
+
+    if (Skip-IfDryRun "清理无效映射") {
+        Write-Host ("DRYRUN：预计删除失效 mappings {0} 项。" -f $invalid.Count)
+        return
+    }
+
+    $dropIndexes = New-Object System.Collections.Generic.HashSet[int]
+    foreach ($item in $invalid) { $dropIndexes.Add([int]$item.index) | Out-Null }
+    $nextMappings = New-Object System.Collections.Generic.List[object]
+    $all = @($cfg.mappings)
+    for ($i = 0; $i -lt $all.Count; $i++) {
+        if ($dropIndexes.Contains($i)) { continue }
+        $nextMappings.Add($all[$i]) | Out-Null
+    }
+    $cfg.mappings = @($nextMappings)
+    SaveCfg $cfg
+    Clear-SkillsCache
+
+    Write-Host ("已清理失效 mappings：{0} 项。" -f $invalid.Count) -ForegroundColor Green
+    if (-not $opts.no_build) {
+        Write-Host "开始【构建生效】..." -ForegroundColor Cyan
+        构建生效
+    }
+}
+
 function Remove-VendorRootMappingOutputsFromAgent($cfg) {
     if ($null -eq $cfg) { return 0 }
     $removed = 0
@@ -1565,6 +1687,7 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
             Log ("清空 agent/ 失败，将在现有目录上继续覆盖构建：{0}" -f $_.Exception.Message)
         }
         $failures = New-Object System.Collections.Generic.List[string]
+        $invalidMappings = New-Object System.Collections.Generic.List[object]
         if ($null -ne $Txn -and $Txn.PSObject.Properties.Match("backup_error").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($Txn.backup_error)) {
             $failures.Add(("build-txn:agent-backup => {0}" -f $Txn.backup_error)) | Out-Null
         }
@@ -1594,7 +1717,15 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
                 Need (Is-PathInsideOrEqual $dst $AgentDir) ("mapping.to 越界：{0}" -f $m.to)
 
                 if (-not (Test-IsSkillDir $src)) {
-                    Write-Host ("❌ 跳过无效技能（缺少标记文件）：{0}" -f $src) -ForegroundColor Red
+                    $invalidReason = if (-not (Test-Path -LiteralPath $src -PathType Container)) { "源目录不存在" } else { "缺少标记文件" }
+                    Write-Host ("⚠️ 跳过无效技能（{0}）：{1}" -f $invalidReason, $src) -ForegroundColor Yellow
+                    $invalidMappings.Add([pscustomobject]@{
+                            vendor = [string]$m.vendor
+                            from = [string]$m.from
+                            to = [string]$m.to
+                            src = [string]$src
+                            reason = $invalidReason
+                        }) | Out-Null
                     continue
                 }
                 $cacheKey = ("mapping|{0}|{1}|{2}" -f $m.vendor, $m.from, $m.to)
@@ -1687,6 +1818,18 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
             Write-Host "   建议：先执行【解除关联】并关闭占用进程，再重试【构建生效】。" -ForegroundColor Red
             if ([string]::IsNullOrWhiteSpace($cleanAgentError)) { $cleanAgentError = "unknown error" }
             $failures.Add(("build-agent-reused-existing-dir => {0}" -f $cleanAgentError)) | Out-Null
+        }
+        if ($invalidMappings.Count -gt 0) {
+            Log ("检测到 {0} 条失效 mappings（源目录不存在或缺少标记文件），建议清理 skills.json。" -f $invalidMappings.Count) "WARN"
+            Write-Host ("⚠️ 检测到 {0} 条失效 mappings（未参与同步）。" -f $invalidMappings.Count) -ForegroundColor Yellow
+            $preview = @($invalidMappings | Select-Object -First 10)
+            foreach ($item in $preview) {
+                Write-Host ("   - [{0}] {1} -> {2} ({3})" -f [string]$item.vendor, [string]$item.from, [string]$item.to, [string]$item.reason) -ForegroundColor Yellow
+            }
+            if ($invalidMappings.Count -gt $preview.Count) {
+                Write-Host ("   ... 另有 {0} 条未显示" -f ($invalidMappings.Count - $preview.Count)) -ForegroundColor Yellow
+            }
+            Write-Host "   建议：删除上述 mappings 后再执行【构建生效】。" -ForegroundColor Yellow
         }
         $count = @((Get-ChildItem -LiteralPath $AgentDir -Directory -ErrorAction SilentlyContinue)).Count
         Log ("构建完成：agent/ (共 {0} 项技能)" -f $count)

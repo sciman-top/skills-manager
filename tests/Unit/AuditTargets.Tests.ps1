@@ -201,6 +201,9 @@ Describe "Audit Targets" {
 
             (Parse-AuditTargetsArgs @("list")).action | Should Be "list"
             (Parse-AuditTargetsArgs @("scan", "--target", "demo")).target | Should Be "demo"
+            $discover = Parse-AuditTargetsArgs @("discover-skills", "--query", "python testing")
+            $discover.action | Should Be "discover_skills"
+            $discover.query | Should Be "python testing"
 
             $apply = Parse-AuditTargetsArgs @("apply", "--recommendations", "r.json", "--apply", "--yes")
             $apply.action | Should Be "apply"
@@ -239,6 +242,7 @@ Describe "Audit Targets" {
             (Parse-AuditTargetsArgs @("删除", "demo")).action | Should Be "remove"
             (Parse-AuditTargetsArgs @("列表")).action | Should Be "list"
             (Parse-AuditTargetsArgs @("扫描")).action | Should Be "scan"
+            (Parse-AuditTargetsArgs @("发现新技能")).action | Should Be "discover_skills"
             (Parse-AuditTargetsArgs @("状态")).action | Should Be "status"
             (Parse-AuditTargetsArgs @("应用确认", "--recommendations", "r.json")).action | Should Be "apply_flow"
             (Parse-AuditTargetsArgs @("应用", "--recommendations", "r.json")).action | Should Be "apply"
@@ -447,6 +451,67 @@ Describe "Audit Targets" {
             }
         }
 
+        It "Generates a profile-only discovery bundle without repo scan files" {
+            $oldRoot = $script:Root
+            try {
+                $script:Root = Join-Path $TestDrive "ws-discover-skills"
+                New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+                Initialize-AuditTargetsConfig | Out-Null
+                $cfg = Load-AuditTargetsConfig
+                $cfg.user_profile.raw_text = "I maintain repo governance and agent automation workflows."
+                $cfg.user_profile.summary = "Repo governance and agent automation."
+                $cfg.user_profile.structured.primary_work_types = @("repo-governance")
+                $cfg.user_profile.structured.preferred_agents = @("codex")
+                $cfg.user_profile.structured.tech_stack = @("powershell")
+                $cfg.user_profile.structured.common_tasks = @("skill discovery")
+                $cfg.user_profile.structured.constraints = @("dry-run first")
+                $cfg.user_profile.structured.avoidances = @("duplicate skills")
+                $cfg.user_profile.structured.decision_preferences = @("source-backed recommendations")
+                Save-AuditTargetsConfig $cfg
+
+                Mock Get-InstalledSkillFacts {
+                    @([pscustomobject]@{
+                            name = "find-skills"
+                            source_kind = "manual"
+                            vendor = "manual"
+                            from = "find-skills"
+                            to = "find-skills"
+                            repo = "https://example.com/skills.git"
+                            ref = "main"
+                            skill_path = "."
+                            declared_name = "find-skills"
+                            description = "Find skills."
+                            trigger_summary = "Use when discovering skills."
+                            local_path = "imports\find-skills"
+                        })
+                }
+
+                $out = Join-Path $TestDrive "discover-run"
+                $result = Invoke-AuditSkillDiscovery -Query "powershell testing" -OutDir $out
+
+                $result.mode | Should Be "profile-only"
+                Test-Path (Join-Path $out "user-profile.json") | Should Be $true
+                Test-Path (Join-Path $out "installed-skills.json") | Should Be $true
+                Test-Path (Join-Path $out "source-strategy.json") | Should Be $true
+                Test-Path (Join-Path $out "recommendations.template.json") | Should Be $true
+                Test-Path (Join-Path $out "ai-brief.md") | Should Be $true
+                Test-Path (Join-Path $out "outer-ai-prompt.md") | Should Be $true
+                Test-Path (Join-Path $out "repo-scan.json") | Should Be $false
+                Test-Path (Join-Path $out "repo-scans.json") | Should Be $false
+
+                $template = Get-ContentUtf8 (Join-Path $out "recommendations.template.json") | ConvertFrom-Json
+                $template.recommendation_mode | Should Be "profile-only"
+                $template.decision_basis.target_scan_used | Should Be $false
+
+                $brief = Get-Content -LiteralPath (Join-Path $out "ai-brief.md") -Raw
+                $brief | Should Match "profile-only skill discovery"
+                $brief | Should Match "target_scan_used`` as boolean ``false``"
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
+        }
+
         It "Fails when a required audit bundle file is missing" {
             $presentPath = Join-Path $TestDrive "audit-present.md"
             Set-ContentUtf8 $presentPath "ok"
@@ -561,6 +626,7 @@ Describe "Audit Targets" {
             $auditBody | Should Match "12\) 查看 AI 提示词"
             $auditBody | Should Match "13\) 编辑 AI 提示词"
             $auditBody | Should Match "14\) 直接执行建议（高级）"
+            $auditBody | Should Match "15\) 发现新技能（不绑定目标仓）"
         }
 
         It "Documents audit help source with self-check and prompt-source guidance" {
@@ -569,6 +635,7 @@ Describe "Audit Targets" {
             $raw | Should Match "先写完并自检 .*recommendations\.json"
             $raw | Should Match "不要直接手改 run 目录产物"
             $raw | Should Match "沿用原序号"
+            $raw | Should Match "发现新技能.*profile-only"
             $auditBody | Should Not Match "17\) 审查目标（需求 / 目标仓 / 审查包 / 自检后 dry-run / 按原序号选择增删）"
             $auditBody | Should Match "4\) 生成审查包"
         }
@@ -626,6 +693,18 @@ Describe "Audit Targets" {
             $brief | Should Match "Stop before dry-run if any self-check item fails"
         }
 
+        It "Writes profile-only audit brief with explicit target-scan false guidance" {
+            $path = Join-Path $TestDrive "ai-brief-profile-only.md"
+
+            Write-AuditAiBrief $path @() "user-profile.json" "" "" "installed-skills.json" "recommendations.template.json" "profile-only" "powershell testing" "source-strategy.json"
+            $brief = Get-Content -LiteralPath $path -Raw
+
+            $brief | Should Match "profile-only skill discovery"
+            $brief | Should Match "Discovery query: powershell testing"
+            $brief | Should Match "target_scan_used`` as boolean ``false``"
+            $brief | Should Match "Source strategy JSON: source-strategy.json"
+        }
+
         It "Writes runtime outer AI prompt with blocker and summary format sections" {
             $path = Join-Path $TestDrive "outer-ai-prompt.md"
             $reportRoot = Join-Path $TestDrive "skill-audit-run"
@@ -640,13 +719,47 @@ Describe "Audit Targets" {
             $prompt | Should Match "sources`` 只能填写本轮真实查看过的来源"
         }
 
+        It "Writes profile-only runtime outer AI prompt without requiring repo scan" {
+            $path = Join-Path $TestDrive "outer-ai-prompt-profile-only.md"
+            $reportRoot = Join-Path $TestDrive "skill-discovery-run"
+
+            Write-AuditOuterAiPromptFile $path $reportRoot "ai-brief.md" "user-profile.json" "" "" "installed-skills.json" "recommendations.template.json" "profile-only" "powershell testing" "source-strategy.json"
+            $prompt = Get-Content -LiteralPath $path -Raw
+
+            $prompt | Should Match "模式：profile-only"
+            $prompt | Should Match "发现查询：powershell testing"
+            $prompt | Should Match "target_scan_used`` 为 ``false``"
+            $prompt | Should Match "不得编造目标仓事实"
+        }
+
         It "Builds recommendations template with placeholder examples" {
             $template = New-AuditRecommendationsTemplate "r1" "demo"
 
             $template.schema_version | Should Be 2
+            $template.recommendation_mode | Should Be "target-repo"
+            $template.decision_basis.target_scan_used | Should Be $true
             $template.new_skills[0].install.repo | Should Be "<owner/repo-or-local-path>"
             $template.removal_candidates[0].installed.vendor | Should Be "<installed-vendor>"
             $template.do_not_install[0].name | Should Be "<skill-not-recommended>"
+        }
+
+        It "Builds profile-only recommendations template with target_scan_used false" {
+            $template = New-AuditRecommendationsTemplate "r1" "profile-only" "profile-only" "powershell testing"
+
+            $template.recommendation_mode | Should Be "profile-only"
+            $template.discovery_query | Should Be "powershell testing"
+            $template.decision_basis.target_scan_used | Should Be $false
+            $template.new_skills[0].reason_target_repo | Should Match "profile-only"
+        }
+
+        It "Builds source strategy with default discovery sources" {
+            $strategy = New-AuditSourceStrategy "profile-only" "powershell testing"
+
+            $strategy.mode | Should Be "profile-only"
+            $strategy.query | Should Be "powershell testing"
+            @($strategy.sources | Where-Object { $_.id -eq "official-docs" }).Count | Should Be 1
+            @($strategy.sources | Where-Object { $_.id -eq "skills-sh" }).Count | Should Be 1
+            @($strategy.sources | Where-Object { $_.id -eq "find-skills" }).Count | Should Be 1
         }
 
         It "Rejects missing recommendations file" {
@@ -713,6 +826,31 @@ Describe "Audit Targets" {
             catch {
                 $thrown = $true
                 $_.Exception.Message | Should Match "decision_basis.user_profile_used"
+            }
+            $thrown | Should Be $true
+        }
+
+        It "Allows profile-only recommendations when target_scan_used is false" {
+            $path = Join-Path $TestDrive "recommendations-profile-only.json"
+            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r1","target":"profile-only","recommendation_mode":"profile-only","decision_basis":{"user_profile_used":true,"target_scan_used":false,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"installed inventory context","install":{"repo":"owner/repo","skill":"skills/a","mode":"manual"},"confidence":"high","sources":["https://example.com/a"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
+
+            $rec = Load-AuditRecommendations $path
+
+            $rec.recommendation_mode | Should Be "profile-only"
+            $rec.decision_basis.target_scan_used | Should Be $false
+        }
+
+        It "Rejects profile-only recommendations when target_scan_used is true" {
+            $path = Join-Path $TestDrive "recommendations-profile-only-invalid.json"
+            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r1","target":"profile-only","recommendation_mode":"profile-only","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
+
+            $thrown = $false
+            try {
+                Load-AuditRecommendations $path | Out-Null
+            }
+            catch {
+                $thrown = $true
+                $_.Exception.Message | Should Match "profile-only"
             }
             $thrown | Should Be $true
         }

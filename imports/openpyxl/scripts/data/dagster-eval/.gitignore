@@ -1,4 +1,0 @@
-output/
-.tmp_dagster_home_*/
-__pycache__/
-.pytest_cache/

@@ -197,14 +197,14 @@ function 技能库管理菜单 {
         Write-Host "1) 新增技能库"
         Write-Host "2) 删除技能库"
         Write-Host "3) 生成锁文件"
-        Write-Host "4) 打开配置"
+        Write-Host "4) 清理无效映射"
         Write-Host "0) 返回"
         $c = Read-HostSafe "请选择"
         switch ($c) {
             "1" { 新增技能库 }
             "2" { 删除技能库 }
             "3" { 锁定 }
-            "4" { 打开配置 }
+            "4" { 清理无效映射 }
             "0" { return }
             default { Write-Host "无效选择。" }
         }
@@ -245,7 +245,7 @@ Skills 管理器（中文菜单）
 
 菜单分组：
   - MCP 服务：新增、卸载、同步 MCP
-  - 技能库管理：新增/删除技能库、生成锁文件、打开配置
+  - 技能库管理：新增/删除技能库、生成锁文件、清理无效映射
   - 更多：一键工作流、自动更新设置、解除关联、清理备份
 
 主要功能说明：
@@ -258,13 +258,13 @@ Skills 管理器（中文菜单）
   - 更新上游：拉取 vendor/imports 上游内容；保留本地改动，然后重建并同步
   - 重建并同步：使用当前本地配置重建输出并同步到 targets
   - 锁定：生成 skills.lock.json，记录当前 vendor/import commit
+  - 清理无效映射：删除 mappings 中已失效项（源目录不存在或缺少标记文件）
   - 安装MCP：向 skills.json 登记 MCP 服务（stdio / sse / http），并自动同步
   - 卸载MCP：从 skills.json 移除 MCP 服务，并自动同步
   - 同步MCP：只同步 MCP 配置，不构建 skills
   - 一键工作流：按场景执行多步骤编排；支持 `--list`、`--no-prompt`、`--continue-on-error`
   - 目标仓审查：维护需求上下文、目标仓列表、审查包生成和建议应用
   - 自动更新设置：配置本机计划任务，每周五 20:00 自动执行“更新 + 同步MCP”
-  - 打开配置：打开 skills.json
   - 解除关联：移除 link 模式下创建的目录关联
   - 清理备份：删除仓库内 *.bak.* 文件和 .bak 目录（排除 vendor / agent / imports / .git）
 
@@ -300,7 +300,8 @@ Skills 管理器（中文菜单）
   .\skills.ps1 构建并生效
   .\skills.ps1 锁定
   .\skills.ps1 生成锁文件
-  .\skills.ps1 打开配置
+  .\skills.ps1 清理无效映射 [--yes] [--no-build]
+  .\skills.ps1 prune-invalid-mappings [--yes] [--no-build]
   .\skills.ps1 解除关联
   .\skills.ps1 清理备份
   .\skills.ps1 自动更新设置
@@ -313,6 +314,7 @@ Skills 管理器（中文菜单）
   .\skills.ps1 审查目标 需求查看
   .\skills.ps1 审查目标 需求结构化 --profile <file>
   .\skills.ps1 审查目标 扫描 [--target <name>] [--out <dir>]
+  .\skills.ps1 审查目标 发现新技能 [--query <text>] [--out <dir>]
   .\skills.ps1 审查目标 状态
   .\skills.ps1 审查目标 修改 <name> <path>
   .\skills.ps1 审查目标 删除 <name>
@@ -346,6 +348,7 @@ Skills 管理器（中文菜单）
 
 目标仓审查：
   - 用户基本需求是全局长期上下文；目标仓是项目级上下文。外层 AI 必须同时基于两者判断技能保留、卸载与新增。
+  - `发现新技能` 是不绑定目标仓的 profile-only 模式，复用同一套审查包、提示词、recommendations.json、dry-run/apply 流程。
   - 启动审查流程后，外层 AI 可以在本次流程内自主联网研究；联网不等于自动安装。
   - 设置用户基本需求后会自动进入结构化导入流程；回车使用默认路径 `reports\skill-audit\user-profile.structured.json`，不存在时会自动生成草稿文件。
   - 已内置“外层 AI 审查提示词”；生成审查包时会输出运行态 `outer-ai-prompt.md`，优先把它交给外层 AI，而不是只交 `ai-brief.md`。
@@ -380,6 +383,7 @@ function 审查目标菜单 {
         Write-Host "12) 查看 AI 提示词"
         Write-Host "13) 编辑 AI 提示词"
         Write-Host "14) 直接执行建议（高级）"
+        Write-Host "15) 发现新技能（不绑定目标仓）"
         Write-Host "0) 返回"
         $c = Read-HostSafe "请选择"
         switch ($c) {
@@ -503,6 +507,15 @@ function 审查目标菜单 {
                 $path = Read-HostSafe "recommendations 文件路径"
                 if (-not [string]::IsNullOrWhiteSpace($path)) {
                     Invoke-AuditTargetsCommand @("apply", "--recommendations", $path, "--apply", "--yes")
+                }
+            }
+            "15" {
+                $query = Read-HostSafe "发现查询（可留空）"
+                if ([string]::IsNullOrWhiteSpace($query)) {
+                    Invoke-AuditTargetsCommand @("discover-skills")
+                }
+                else {
+                    Invoke-AuditTargetsCommand @("discover-skills", "--query", $query)
                 }
             }
             "0" { return }

@@ -47,6 +47,7 @@ function Get-DirtyUpdateTargets($cfg) {
     foreach ($v in @($cfg.vendors)) {
         $path = VendorPath $v.name
         if (-not (Test-Path $path)) { continue }
+        if (-not (Test-IsGitRepoRoot $path)) { continue }
         Push-Location $path
         try {
             if (Has-GitChanges) {
@@ -66,6 +67,7 @@ function Get-DirtyManualImportTargets($cfg) {
         if ($i.mode -ne "manual") { continue }
         $cache = Join-Path $ImportDir $i.name
         if (-not (Test-Path $cache)) { continue }
+        if (-not (Test-IsGitRepoRoot $cache)) { continue }
         Push-Location $cache
         try {
             if (Has-GitChanges) {
@@ -75,6 +77,33 @@ function Get-DirtyManualImportTargets($cfg) {
         finally { Pop-Location }
     }
     return $items.ToArray()
+}
+function Test-IsGitRepoRoot([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    if (-not (Test-Path -LiteralPath $path -PathType Container)) { return $false }
+    Push-Location $path
+    try {
+        $top = Invoke-GitCapture @("rev-parse", "--show-toplevel")
+    }
+    finally { Pop-Location }
+    if ([string]::IsNullOrWhiteSpace($top)) { return $false }
+
+    try {
+        $resolvedPath = (Resolve-Path -LiteralPath $path -ErrorAction Stop).Path
+    }
+    catch {
+        $resolvedPath = $path
+    }
+    try {
+        $resolvedTop = (Resolve-Path -LiteralPath $top -ErrorAction Stop).Path
+    }
+    catch {
+        $resolvedTop = $top
+    }
+
+    $resolvedPath = $resolvedPath.TrimEnd('\', '/')
+    $resolvedTop = $resolvedTop.TrimEnd('\', '/')
+    return [string]::Equals($resolvedPath, $resolvedTop, [System.StringComparison]::OrdinalIgnoreCase)
 }
 function Confirm-UpdateForce($cfg, [ref]$SkipForceClean) {
     if ($null -eq $SkipForceClean.Value) { $SkipForceClean.Value = @{} }

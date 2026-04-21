@@ -90,6 +90,62 @@ Describe "Git lock recovery" {
             Assert-MockCalled Invoke-Git -Times 1 -ParameterFilter { $GitArgs[0] -eq "reset" -and $GitArgs[1] -eq "--hard" }
             Assert-MockCalled Invoke-Git -Times 1 -ParameterFilter { $GitArgs[0] -eq "clean" -and $GitArgs[1] -eq "-fd" }
         }
+
+        It "Retries git clean after repairing permission denied paths" {
+            $repo = Join-Path $TestDrive "repo-clean-retry"
+            $gitDir = Join-Path $repo ".git"
+            $staleDir = Join-Path $repo "stale"
+            New-Item -ItemType Directory -Path $gitDir -Force | Out-Null
+            New-Item -ItemType Directory -Path $staleDir -Force | Out-Null
+            Set-Content -Path (Join-Path $staleDir "tmp.txt") -Value "x"
+            $item = Get-Item -LiteralPath $staleDir -Force
+            $item.Attributes = ($item.Attributes -bor [System.IO.FileAttributes]::ReadOnly)
+
+            Mock Test-GitProcessRunning { $false }
+            $script:cleanCalls = 0
+            Mock Invoke-Git {
+                param($GitArgs)
+                if ($GitArgs[0] -eq "clean") {
+                    $script:cleanCalls++
+                    if ($script:cleanCalls -eq 1) {
+                        throw "git 失败：git clean -fd；详情：warning: failed to remove stale/: Permission denied"
+                    }
+                }
+            }
+
+            Push-Location $repo
+            try {
+                Git-HardResetClean $true
+            }
+            finally {
+                Pop-Location
+            }
+
+            $script:cleanCalls | Should Be 2
+            (Test-Path -LiteralPath $staleDir) | Should Be $false
+        }
+    }
+
+    Context "Repair-GitCleanPermissionDenied" {
+        It "Repairs only paths inside the repo" {
+            $repo = Join-Path $TestDrive "repo-clean-repair"
+            $inside = Join-Path $repo "inside"
+            New-Item -ItemType Directory -Path $inside -Force | Out-Null
+            Set-Content -Path (Join-Path $inside "tmp.txt") -Value "x"
+            $insideItem = Get-Item -LiteralPath $inside -Force
+            $insideItem.Attributes = ($insideItem.Attributes -bor [System.IO.FileAttributes]::ReadOnly)
+
+            $outside = Join-Path $TestDrive "outside"
+            New-Item -ItemType Directory -Path $outside -Force | Out-Null
+            Set-Content -Path (Join-Path $outside "keep.txt") -Value "keep"
+
+            $msg = "git 失败：git clean -fd；详情：warning: failed to remove inside/: Permission denied | warning: failed to remove ../outside/: Permission denied"
+            $repaired = Repair-GitCleanPermissionDenied $repo $msg
+
+            $repaired | Should Be $true
+            (Test-Path -LiteralPath $inside) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $outside "keep.txt")) | Should Be $true
+        }
     }
 
     Context "Repair-StaleGitLockAfterFailure" {

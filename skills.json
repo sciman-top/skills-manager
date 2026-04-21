@@ -89,11 +89,6 @@
       "vendor": "superpowers"
     },
     {
-      "from": "skills\\.curated\\imagegen",
-      "to": "skills-skills-.curated-imagegen",
-      "vendor": "skills"
-    },
-    {
       "from": "skills\\.curated\\openai-docs",
       "to": "skills-skills-.curated-openai-docs",
       "vendor": "skills"
@@ -636,7 +631,7 @@
     {
       "name": "openpyxl",
       "skill": ".claude\\skills\\data\\office\\openpyxl",
-      "sparse": false,
+      "sparse": true,
       "repo": "https://github.com/vamseeachanta/workspace-hub.git",
       "ref": "main",
       "mode": "manual"
@@ -684,7 +679,7 @@
     {
       "name": "python-pptx",
       "skill": ".claude\\skills\\data\\office\\python-pptx",
-      "sparse": false,
+      "sparse": true,
       "repo": "https://github.com/vamseeachanta/workspace-hub.git",
       "ref": "main",
       "mode": "manual"
@@ -692,7 +687,7 @@
     {
       "name": "python-docx",
       "skill": ".claude\\skills\\data\\office\\python-docx",
-      "sparse": false,
+      "sparse": true,
       "repo": "https://github.com/vamseeachanta/workspace-hub.git",
       "ref": "main",
       "mode": "manual"
@@ -772,7 +767,7 @@
     {
       "repo": "https://github.com/mattpocock/skills.git",
       "ref": "main",
-      "skill": "prd-to-issues",
+      "skill": "to-issues",
       "name": "prd-to-issues",
       "sparse": false,
       "mode": "manual"

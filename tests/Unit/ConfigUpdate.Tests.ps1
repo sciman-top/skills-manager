@@ -155,6 +155,53 @@ Describe "Config And Update Enhancements" {
     }
 
     Context "Fine-Grained update_force" {
+        It "Matches git dirty check only when candidate path is repo top-level" {
+            $candidate = Join-Path $TestDrive "repo-root-check"
+            New-Item -ItemType Directory -Path $candidate -Force | Out-Null
+            Mock Invoke-GitCapture {
+                param($GitArgs)
+                if ($GitArgs[0] -eq "rev-parse" -and $GitArgs[1] -eq "--show-toplevel") {
+                    return (Join-Path $candidate "parent")
+                }
+                return $null
+            }
+
+            $isRepoRoot = Test-IsGitRepoRoot $candidate
+            $isRepoRoot | Should Be $false
+        }
+
+        It "Skips non-git manual import caches in update_force dirty detection" {
+            $oldImportDir = $script:ImportDir
+            try {
+                $script:ImportDir = Join-Path $TestDrive "imports"
+                $cache = Join-Path $script:ImportDir "openpyxl"
+                New-Item -ItemType Directory -Path $cache -Force | Out-Null
+
+                $cfg = [pscustomobject]@{
+                    update_force = $true
+                    vendors = @()
+                    imports = @(
+                        [pscustomobject]@{
+                            name = "openpyxl"
+                            mode = "manual"
+                        }
+                    )
+                }
+                Mock Test-IsGitRepoRoot { $false } -ParameterFilter { $path -eq $cache }
+                Mock Has-GitChanges { throw "Has-GitChanges should not be called for non-git caches." }
+
+                $skip = @{}
+                $ok = Confirm-UpdateForce $cfg ([ref]$skip)
+
+                $ok | Should Be $true
+                $skip.Count | Should Be 0
+                Assert-MockCalled Has-GitChanges -Times 0 -Exactly
+            }
+            finally {
+                $script:ImportDir = $oldImportDir
+            }
+        }
+
         It "Records skip key when target-level force clean is denied" {
             $cfg = [pscustomobject]@{
                 update_force = $true
@@ -364,6 +411,83 @@ Describe "Config And Update Enhancements" {
             $script:ensureRepoArgs.forceClean | Should Be $false
             $script:ensureRepoArgs.confirmClean | Should Be $false
             $script:ensureRepoArgs.doFetch | Should Be $false
+        }
+
+        It "Falls back to sparse checkout when Windows invalid path blocks pull" {
+            $cfg = [pscustomobject]@{
+                imports = @(
+                    [pscustomobject]@{
+                        name = "openpyxl"
+                        mode = "manual"
+                        repo = "https://github.com/example/workspace-hub.git"
+                        ref = "main"
+                        skill = ".claude\skills\data\office\openpyxl"
+                        sparse = $false
+                    }
+                )
+            }
+
+            Mock Preflight {}
+            Mock Optimize-Imports {}
+            Mock Test-IsSkillDir { $true }
+            Mock SaveCfgSafe {}
+
+            $script:ensureRepoCalls = New-Object System.Collections.Generic.List[object]
+            Mock Ensure-Repo {
+                param($path, $repo, $ref, $sparsePath, $forceClean, $confirmClean, $doFetch)
+                $script:ensureRepoCalls.Add([pscustomobject]@{
+                        path = $path
+                        repo = $repo
+                        ref = $ref
+                        sparsePath = $sparsePath
+                        forceClean = $forceClean
+                        confirmClean = $confirmClean
+                        doFetch = $doFetch
+                    }) | Out-Null
+                if ($script:ensureRepoCalls.Count -eq 1) {
+                    throw "git 失败：git pull；详情：error: invalid path '**Status:**' | Updating aaa..bbb"
+                }
+            }
+
+            $failures = 更新Imports $cfg -SkipPreflight -SkipFetch
+
+            @($failures).Count | Should Be 0
+            $script:ensureRepoCalls.Count | Should Be 2
+            ([string]::IsNullOrWhiteSpace([string]$script:ensureRepoCalls[0].sparsePath)) | Should Be $true
+            $script:ensureRepoCalls[1].sparsePath | Should Be ".claude/skills/data/office/openpyxl"
+            $cfg.imports[0].sparse | Should Be $true
+            Assert-MockCalled SaveCfgSafe -Times 1 -Exactly
+        }
+
+        It "Falls back to git archive when sparse checkout still fails on invalid path repos" {
+            $cfg = [pscustomobject]@{
+                imports = @(
+                    [pscustomobject]@{
+                        name = "python-docx"
+                        mode = "manual"
+                        repo = "https://github.com/example/workspace-hub.git"
+                        ref = "main"
+                        skill = ".claude\skills\data\office\python-docx"
+                        sparse = $false
+                    }
+                )
+            }
+
+            Mock Preflight {}
+            Mock Optimize-Imports {}
+            Mock Test-IsSkillDir { $true }
+            Mock SaveCfgSafe {}
+            Mock Ensure-Repo {
+                throw "git 失败：git pull；详情：error: invalid path '**Status:**' | Updating aaa..bbb"
+            }
+            Mock Ensure-RepoFromGitArchive {}
+            Mock Ensure-RepoFromGitHubTreeSnapshot {}
+
+            $failures = 更新Imports $cfg -SkipPreflight -SkipFetch
+
+            @($failures).Count | Should Be 0
+            Assert-MockCalled Ensure-RepoFromGitArchive -Times 1 -Exactly
+            Assert-MockCalled Ensure-RepoFromGitHubTreeSnapshot -Times 0 -Exactly
         }
 
         It "Falls back to existing cached import when git index lock blocks update" {

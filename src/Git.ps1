@@ -501,6 +501,100 @@ function Get-GitOutputSummary($outputLines) {
     if ($lines.Count -eq 0) { return $null }
     return (($lines | Select-Object -Last 2) -join " | ")
 }
+function Get-GitCleanFailurePathsFromMessage([string]$message) {
+    if ([string]::IsNullOrWhiteSpace($message)) { return @() }
+    $paths = New-Object System.Collections.Generic.List[string]
+    foreach ($segment in @($message -split "\|")) {
+        $text = [string]$segment
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        $trimmed = $text.Trim()
+        $match = [regex]::Match($trimmed, "failed to remove(?: directory)?\s+'([^']+)'", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        if (-not $match.Success) {
+            $match = [regex]::Match($trimmed, "failed to remove(?: directory)?\s+([^:]+?)(?::|$)", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        }
+        if (-not $match.Success) { continue }
+        $pathText = $match.Groups[1].Value
+        if ([string]::IsNullOrWhiteSpace($pathText)) { continue }
+        $paths.Add($pathText.Trim()) | Out-Null
+    }
+    return @($paths | Select-Object -Unique)
+}
+function Resolve-GitCleanFailurePath([string]$repoPath, [string]$rawPath) {
+    if ([string]::IsNullOrWhiteSpace($repoPath) -or [string]::IsNullOrWhiteSpace($rawPath)) { return $null }
+    $candidate = $rawPath.Trim().Trim("'`"").Trim()
+    if ([string]::IsNullOrWhiteSpace($candidate)) { return $null }
+    $candidate = $candidate -replace "/", "\"
+    try {
+        $repoFull = [System.IO.Path]::GetFullPath($repoPath)
+    }
+    catch {
+        return $null
+    }
+
+    $fullPath = $null
+    try {
+        if ([System.IO.Path]::IsPathRooted($candidate)) {
+            $fullPath = [System.IO.Path]::GetFullPath($candidate)
+        }
+        else {
+            $fullPath = [System.IO.Path]::GetFullPath((Join-Path $repoFull $candidate))
+        }
+    }
+    catch {
+        return $null
+    }
+    if (-not (Is-PathInsideOrEqual $fullPath $repoFull)) { return $null }
+    return $fullPath
+}
+function Clear-ReadOnlyAttribute([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return }
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    try {
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReadOnly) -ne 0) {
+            $item.Attributes = ($item.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly))
+        }
+    }
+    catch {}
+}
+function Clear-ReadOnlyAttributesRecursively([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return }
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    Clear-ReadOnlyAttribute $path
+    try {
+        foreach ($child in @(Get-ChildItem -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue)) {
+            Clear-ReadOnlyAttribute $child.FullName
+        }
+    }
+    catch {}
+}
+function Repair-GitCleanPermissionDenied([string]$repoPath, [string]$errorMessage) {
+    if ([string]::IsNullOrWhiteSpace($errorMessage)) { return $false }
+    if ($errorMessage -notmatch "git clean\s+-fd") { return $false }
+    if ($errorMessage -notmatch "failed to remove|Permission denied|拒绝访问|Directory not empty") { return $false }
+
+    $rawPaths = @(Get-GitCleanFailurePathsFromMessage $errorMessage)
+    if ($rawPaths.Count -eq 0) { return $false }
+    $repaired = $false
+    foreach ($raw in $rawPaths) {
+        $fullPath = Resolve-GitCleanFailurePath $repoPath $raw
+        if ([string]::IsNullOrWhiteSpace($fullPath)) {
+            Log ("git clean 修复跳过（路径超出仓库边界或无效）：{0}" -f $raw) "WARN"
+            continue
+        }
+        if (-not (Test-Path -LiteralPath $fullPath)) { continue }
+        Clear-ReadOnlyAttributesRecursively $fullPath
+        $removed = Invoke-RemoveItemWithRetry $fullPath -Recurse -IgnoreFailure -SilentIgnore
+        if ($removed -or -not (Test-Path -LiteralPath $fullPath)) {
+            Log ("git clean 权限修复完成：{0}" -f $fullPath) "WARN"
+            $repaired = $true
+        }
+        else {
+            Log ("git clean 权限修复未完成：{0}" -f $fullPath) "WARN"
+        }
+    }
+    return $repaired
+}
 function Test-GitProcessRunning {
     try {
         $gitProcesses = @(Get-Process -Name git,git-remote-http,git-remote-https,git-lfs,ssh,sh -ErrorAction SilentlyContinue)
@@ -561,7 +655,19 @@ function Git-HardResetClean([bool]$forceClean) {
     Repair-StaleGitLockInRepo (Get-Location).Path | Out-Null
     Invoke-Git @("reset", "--hard")
     Repair-StaleGitLockInRepo (Get-Location).Path | Out-Null
-    Invoke-Git @("clean", "-fd")
+    $repoPath = (Get-Location).Path
+    $maxCleanAttempts = 12
+    for ($attempt = 1; $attempt -le $maxCleanAttempts; $attempt++) {
+        try {
+            Invoke-Git @("clean", "-fd")
+            return
+        }
+        catch {
+            if ($attempt -ge $maxCleanAttempts) { throw }
+            if (-not (Repair-GitCleanPermissionDenied $repoPath $_.Exception.Message)) { throw }
+            Log ("git clean 失败，已执行权限修复并重试（{0}/{1}）" -f $attempt, $maxCleanAttempts) "WARN"
+        }
+    }
 }
 function Repair-StaleGitLockAfterFailure([string]$repoPath, $outputLines) {
     if (-not (Test-GitIndexLockIssue $outputLines)) { return $false }
