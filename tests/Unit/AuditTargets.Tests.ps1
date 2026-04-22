@@ -264,8 +264,14 @@ Describe "Audit Targets" {
                 $runNew = Join-Path $auditRoot "r-new"
                 New-Item -ItemType Directory -Path $runOld -Force | Out-Null
                 New-Item -ItemType Directory -Path $runNew -Force | Out-Null
+                $live = Get-AuditLiveInstalledState
+                $promptVersion = Get-AuditPromptContractVersion
                 Set-ContentUtf8 (Join-Path $runOld "recommendations.json") '{}'
                 Set-ContentUtf8 (Join-Path $runNew "recommendations.json") '{}'
+                Set-ContentUtf8 (Join-Path $runOld "installed-skills.json") ('{"schema_version":1,"skills":[],"mcp_servers":[],"live_fingerprint":"' + [string]$live.fingerprint + '","live_mcp_fingerprint":"' + [string]$live.mcp_fingerprint + '"}')
+                Set-ContentUtf8 (Join-Path $runNew "installed-skills.json") ('{"schema_version":1,"skills":[],"mcp_servers":[],"live_fingerprint":"' + [string]$live.fingerprint + '","live_mcp_fingerprint":"' + [string]$live.mcp_fingerprint + '"}')
+                Set-ContentUtf8 (Join-Path $runOld "audit-meta.json") ('{"schema_version":1,"prompt_contract_version":"' + $promptVersion + '"}')
+                Set-ContentUtf8 (Join-Path $runNew "audit-meta.json") ('{"schema_version":1,"prompt_contract_version":"' + $promptVersion + '"}')
                 (Get-Item $runOld).LastWriteTimeUtc = [datetime]"2026-01-01T00:00:00Z"
                 (Get-Item $runNew).LastWriteTimeUtc = [datetime]"2026-01-02T00:00:00Z"
 
@@ -306,6 +312,60 @@ Describe "Audit Targets" {
 
                 $resolved = Resolve-AuditPathRunIdPlaceholder "reports/skill-audit/<run-id>/recommendations.json" "--recommendations" @("recommendations.json")
                 $resolved | Should Be "reports/skill-audit/r-fresh/recommendations.json"
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
+        }
+
+        It "Fails placeholder resolution when only stale runs are found" {
+            $oldRoot = $script:Root
+            try {
+                $script:Root = Join-Path $TestDrive "ws-audit-placeholder-only-stale"
+                $auditRoot = Join-Path $script:Root "reports\skill-audit"
+                $runStale = Join-Path $auditRoot "r-stale"
+                New-Item -ItemType Directory -Path $runStale -Force | Out-Null
+
+                $promptVersion = Get-AuditPromptContractVersion
+                Set-ContentUtf8 (Join-Path $runStale "recommendations.json") '{}'
+                Set-ContentUtf8 (Join-Path $runStale "installed-skills.json") '{"schema_version":1,"skills":[],"mcp_servers":[],"live_fingerprint":"deadbeef","live_mcp_fingerprint":"deadbeef"}'
+                Set-ContentUtf8 (Join-Path $runStale "audit-meta.json") ('{"schema_version":1,"prompt_contract_version":"' + $promptVersion + '"}')
+
+                $thrown = $false
+                try {
+                    Resolve-AuditPathRunIdPlaceholder "reports/skill-audit/<run-id>/recommendations.json" "--recommendations" @("recommendations.json") | Out-Null
+                }
+                catch {
+                    $thrown = $true
+                    $_.Exception.Message | Should Match "未找到可用 run"
+                }
+                $thrown | Should Be $true
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
+        }
+
+        It "Shows scan hint when placeholder cannot find required run files" {
+            $oldRoot = $script:Root
+            try {
+                $script:Root = Join-Path $TestDrive "ws-audit-placeholder-missing-required"
+                $auditRoot = Join-Path $script:Root "reports\skill-audit"
+                $run = Join-Path $auditRoot "r-missing-meta"
+                New-Item -ItemType Directory -Path $run -Force | Out-Null
+                Set-ContentUtf8 (Join-Path $run "recommendations.json") '{}'
+                Set-ContentUtf8 (Join-Path $run "installed-skills.json") '{"schema_version":1,"skills":[],"mcp_servers":[]}'
+
+                $thrown = $false
+                try {
+                    Resolve-AuditPathRunIdPlaceholder "reports/skill-audit/<run-id>/recommendations.json" "--recommendations" @("recommendations.json", "installed-skills.json", "audit-meta.json") | Out-Null
+                }
+                catch {
+                    $thrown = $true
+                    $_.Exception.Message | Should Match "先执行 .*审查目标 扫描"
+                    $_.Exception.Message | Should Match "r-missing-meta"
+                }
+                $thrown | Should Be $true
             }
             finally {
                 $script:Root = $oldRoot
@@ -486,6 +546,38 @@ Describe "Audit Targets" {
             }
         }
 
+        It "Auto-fills empty summary during profile precheck before scan" {
+            $oldRoot = $script:Root
+            try {
+                $script:Root = Join-Path $TestDrive "ws-profile-precheck-autofill-summary"
+                New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+                Initialize-AuditTargetsConfig | Out-Null
+                Set-AuditUserProfileRawText "I maintain repo governance workflows and need deterministic audit bundles."
+
+                $repo = Join-Path $script:Root "demo-repo"
+                New-Item -ItemType Directory -Path $repo -Force | Out-Null
+                Add-AuditTargetConfigEntry "demo" ".\demo-repo" | Out-Null
+
+                Mock Get-InstalledSkillFacts { @() }
+
+                Invoke-AuditTargetsScan -Target "demo" | Out-Null
+                $saved = Load-AuditTargetsConfig
+                $saved.user_profile.summary | Should Not Be ""
+                $saved.user_profile.structured_by | Should Be "outer-ai"
+                ([string]$saved.user_profile.last_structured_at).Length -gt 0 | Should Be $true
+
+                $draftPath = Get-AuditStructuredProfileDefaultPath
+                (Test-Path -LiteralPath $draftPath) | Should Be $true
+                $draft = Get-ContentUtf8 $draftPath | ConvertFrom-Json
+                $draft.summary | Should Not Be ""
+                $draft.structured_by | Should Be "outer-ai"
+                ([string]$draft.last_structured_at).Length -gt 0 | Should Be $true
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
+        }
+
         It "Fails scan when installed skill facts cannot be collected" {
             $oldRoot = $script:Root
             try {
@@ -652,6 +744,51 @@ Describe "Audit Targets" {
             (@($scan.detected.test_commands) -contains "npm test") | Should Be $true
             (@($scan.detected.agent_rule_files) -contains "AGENTS.md") | Should Be $true
         }
+
+        It "Extracts dotnet/python/ci command hints from repo scan inputs" {
+            $repo = Join-Path $TestDrive "target-repo-granular"
+            New-Item -ItemType Directory -Path $repo -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $repo "pyproject.toml") @"
+[tool.poetry]
+name = "demo"
+version = "0.1.0"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+"@
+            Set-ContentUtf8 (Join-Path $repo "Demo.sln") "Microsoft Visual Studio Solution File, Format Version 12.00"
+            Set-ContentUtf8 (Join-Path $repo "Demo.csproj") @"
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.0" />
+    <PackageReference Include="xunit" Version="2.6.0" />
+  </ItemGroup>
+</Project>
+"@
+            $workflowDir = Join-Path $repo ".github\workflows"
+            New-Item -ItemType Directory -Path $workflowDir -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $workflowDir "ci.yml") @"
+name: ci
+jobs:
+  build:
+    steps:
+      - run: dotnet build
+      - run: dotnet test
+"@
+
+            $scan = New-AuditRepoScan "demo" $repo "..\target-repo-granular"
+
+            (@($scan.detected.languages) -contains "dotnet") | Should Be $true
+            (@($scan.detected.languages) -contains "python") | Should Be $true
+            (@($scan.detected.package_managers) -contains "nuget") | Should Be $true
+            (@($scan.detected.package_managers) -contains "poetry") | Should Be $true
+            (@($scan.detected.frameworks) -contains "aspnetcore") | Should Be $true
+            (@($scan.detected.frameworks) -contains "efcore") | Should Be $true
+            (@($scan.detected.build_commands) -contains "dotnet build") | Should Be $true
+            (@($scan.detected.test_commands) -contains "dotnet test") | Should Be $true
+            (@($scan.detected.test_commands) -contains "pytest") | Should Be $true
+            (@($scan.detected.notable_files) | Where-Object { [string]$_ -match "ci\.yml$" }).Count -gt 0 | Should Be $true
+        }
     }
 
     Context "Installed skill facts" {
@@ -726,14 +863,14 @@ Describe "Audit Targets" {
             $prompt | Should Match "do_not_install"
             $prompt | Should Match "N/A"
             $prompt | Should Match "installed-skills.json"
-            $prompt | Should Match "不得产出重复建议"
+            $prompt | Should Match "name==server.name"
         }
 
         It "Keeps built-in prompt markdown inline code literal without control-character corruption" {
             $prompt = Get-AuditOuterAiPromptContent
             $prompt | Should Match '`reason_user_profile`'
             $prompt | Should Match '`reason_target_repo`'
-            $prompt | Should Match '`recommendations.json`'
+            $prompt | Should Match "reports/skill-audit/<run-id>/recommendations.json"
             ($prompt.IndexOf([char]11) -lt 0) | Should Be $true
             $hasBareCr = $false
             for ($i = 0; $i -lt $prompt.Length; $i++) {
@@ -841,6 +978,18 @@ Describe "Audit Targets" {
             @($strategy.sources | Where-Object { $_.id -eq "official-docs" }).Count | Should Be 1
             @($strategy.sources | Where-Object { $_.id -eq "skills-sh" }).Count | Should Be 1
             @($strategy.sources | Where-Object { $_.id -eq "find-skills" }).Count | Should Be 1
+            $strategy.evidence_policy.min_unique_sources_for_changes | Should Be 2
+            $strategy.evidence_policy.require_http_source_for_changes | Should Be $true
+        }
+
+        It "Adds default empty recommendation reason code when all categories are empty" {
+            $path = Join-Path $TestDrive "recommendations-empty-reasons.json"
+            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-empty","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+
+            $rec = Load-AuditRecommendations $path
+
+            @($rec.empty_recommendation_reasons).Count | Should Be 1
+            $rec.empty_recommendation_reasons[0] | Should Be "insufficient_reliable_evidence"
         }
 
         It "Rejects missing recommendations file" {
@@ -1029,6 +1178,35 @@ Describe "Audit Targets" {
             $report.changed_counts.add_planned | Should Be 1
             $report.changed_counts.add_installed | Should Be 0
             $report.dry_run_acknowledged | Should Be $true
+            Test-Path (Get-AuditDryRunSummaryPath $path) | Should Be $true
+        }
+
+        It "Blocks dry-run when source evidence policy is not satisfied" {
+            $oldRoot = $script:Root
+            try {
+                $root = Join-Path $TestDrive "ws-source-coverage-block"
+                New-Item -ItemType Directory -Path $root -Force | Out-Null
+                $script:Root = $root
+                $path = Join-Path $root "recommendations.json"
+                Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-source","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"t","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["local-only"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+                Set-ContentUtf8 (Join-Path $root "source-strategy.json") '{"schema_version":1,"mode":"target-repo","query":"","sources":[{"id":"official-docs"}],"evidence_policy":{"min_unique_sources_for_changes":2,"require_http_source_for_changes":true}}'
+
+                $thrown = $false
+                try {
+                    Invoke-AuditRecommendationsApply -RecommendationsPath $path -DryRunAck "我知道未落盘" | Out-Null
+                }
+                catch {
+                    $thrown = $true
+                    $_.Exception.Message | Should Match "insufficient_source_coverage"
+                }
+                $thrown | Should Be $true
+
+                $report = Get-ContentUtf8 (Get-AuditApplyReportPath $path) | ConvertFrom-Json
+                $report.error_code | Should Be "insufficient_source_coverage"
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
         }
 
         It "Preflight passes when snapshot and prompt contract are aligned" {
@@ -1082,8 +1260,14 @@ Describe "Audit Targets" {
                 $runNew = Join-Path $auditRoot "r-new"
                 New-Item -ItemType Directory -Path $runOld -Force | Out-Null
                 New-Item -ItemType Directory -Path $runNew -Force | Out-Null
+                $live = Get-AuditLiveInstalledState
+                $promptVersion = Get-AuditPromptContractVersion
                 Set-ContentUtf8 (Join-Path $runOld "recommendations.json") '{}'
                 Set-ContentUtf8 (Join-Path $runNew "recommendations.json") '{}'
+                Set-ContentUtf8 (Join-Path $runOld "installed-skills.json") ('{"schema_version":1,"skills":[],"mcp_servers":[],"live_fingerprint":"' + [string]$live.fingerprint + '","live_mcp_fingerprint":"' + [string]$live.mcp_fingerprint + '"}')
+                Set-ContentUtf8 (Join-Path $runNew "installed-skills.json") ('{"schema_version":1,"skills":[],"mcp_servers":[],"live_fingerprint":"' + [string]$live.fingerprint + '","live_mcp_fingerprint":"' + [string]$live.mcp_fingerprint + '"}')
+                Set-ContentUtf8 (Join-Path $runOld "audit-meta.json") ('{"schema_version":1,"prompt_contract_version":"' + $promptVersion + '"}')
+                Set-ContentUtf8 (Join-Path $runNew "audit-meta.json") ('{"schema_version":1,"prompt_contract_version":"' + $promptVersion + '"}')
                 (Get-Item $runOld).LastWriteTimeUtc = [datetime]"2026-01-01T00:00:00Z"
                 (Get-Item $runNew).LastWriteTimeUtc = [datetime]"2026-01-02T00:00:00Z"
 

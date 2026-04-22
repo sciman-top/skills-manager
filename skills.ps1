@@ -7780,78 +7780,43 @@ function Get-AuditOuterAiPromptOverridePath {
 
 function Get-DefaultAuditOuterAiPrompt {
     return @"
-# Outer AI Audit Prompt
+# Outer AI Audit Prompt (Short / Codex + Claude)
 
-你正在代理执行 skills-manager 的技能审查流程；可能是目标仓审查，也可能是 profile-only 的新技能发现。
+目标：代理完成审查流程；先产出并自检 recommendations.json，再执行 dry-run。
 
-## 任务目标
+1) run-id
+- 允许 ``<run-id>``，自动解析最近可用 run（必须含 recommendations.json / installed-skills.json / audit-meta.json）。
+- 若无可用 run：立即停止并报告：先执行 ``.\skills.ps1 审查目标 扫描``。
 
-1. 阅读本次审查包中的 ai-brief.md。
-2. 阅读 user-profile.json、installed-skills.json、source-strategy.json；若本轮绑定目标仓，再阅读 repo-scan.json / repo-scans.json。
-3. 严格按 recommendations.template.json 的 schema v2 产出完整 recommendations.json。
-4. 建议结果优先覆盖“新增/卸载技能建议 + 新增/卸载 MCP 建议”，并确保每项都包含：
-   - ``reason_user_profile``（简短，1 句话）
-   - ``reason_target_repo``（简短，1 句话）
-   - ``sources``（可追溯来源链接）
-5. 对研究过但当前不应安装的技能或 MCP，写入 ``do_not_install``；重叠信息仅写入 ``overlap_findings``，不要据此自动卸载。
-6. 在 recommendations.json 自检通过后再执行 dry-run。
-7. 读取 dry-run 结果并向用户汇总技能与 MCP 的可新增/可卸载项及其原始序号。
-8. 若任一建议类别为空（技能新增/技能卸载/MCP 新增/MCP 卸载），必须明确写出“无该类建议”并给 1 句简短原因。
-9. 在没有用户明确确认前，不执行真正的安装或卸载（含 MCP）。
+2) 画像预检查
+- 检查 audit-targets.json.user_profile。
+- 若 summary 为空或 structured 不完整：补全 ``reports/skill-audit/user-profile.structured.json``（schema 不变，summary 非空，structured_by="outer-ai"），然后执行：
+  ``.\skills.ps1 审查目标 需求结构化 --profile "reports\skill-audit\user-profile.structured.json"``
+- 导入后复查；失败最多重试 1 次，再失败立即停止。
 
-## 强制阶段门禁（不可跳步）
+3) 只读输入（必须真实读取）
+- outer-ai-prompt.md、ai-brief.md、user-profile.json、installed-skills.json（仅输入快照）、source-strategy.json、recommendations.template.json
+- repo-scan.json / repo-scans.json：存在才读；N/A/profile-only 不得臆造仓库事实
 
-阶段 1：读取输入
-- 必须先读 ai-brief.md + user-profile.json + installed-skills.json。
-- 在 repo-scan.json / repo-scans.json 中按实际存在文件读取；若路径写成 ``N/A``，表示该输入未提供，不得臆测缺失内容。
-- profile-only 模式不绑定目标仓，必须把 ``reason_target_repo`` 解释为“当前已安装技能 / profile-only 场景”依据，而不是仓库事实。
-- 任一必需本地文件缺失、为空或无法读取时，立即停止，并向用户报告阻断项；不要跳过后继续 dry-run。
+4) 产出 recommendations.json
+- 路径：``reports/skill-audit/<run-id>/recommendations.json``
+- ``schema_version=2``；不得保留 ``<...>``；``decision_basis.summary`` 非空
+- 每条新增/卸载（skills/MCP）必须有：``reason_user_profile``、``reason_target_repo``、``sources``（仅本轮真实来源）
+- MCP 新增写 ``mcp_new_servers`` 且 ``name==server.name``；MCP 卸载写 ``mcp_removal_candidates``
+- ``overlap_findings`` 仅报告；``do_not_install`` 仅记录当前不应安装项；证据不足留空
 
-阶段 2：写 recommendations.json
-- 仅输出机器可读 JSON，不夹带解释性正文。
-- 不要改变 recommendations.template.json 的 schema 与字段命名。
-- 模板中的 ``<...>`` 占位符必须全部替换或删除对应示例项，不得原样保留。
-- 目标仓审查模式：``decision_basis.user_profile_used``、``decision_basis.target_scan_used``、``decision_basis.source_strategy_used`` 必须保持布尔值 ``true``，且 ``decision_basis.summary`` 不能为空。
-- profile-only 模式：``recommendation_mode`` 必须为 ``profile-only``，``decision_basis.user_profile_used`` 与 ``decision_basis.source_strategy_used`` 必须为 ``true``，``decision_basis.target_scan_used`` 必须为 ``false``。
-- 技能新增建议的 ``install.mode`` 只能是 ``manual`` 或 ``vendor``，``confidence`` 只能是 ``low`` / ``medium`` / ``high``。
-- MCP 新增建议必须包含 ``server.name`` 与合法 ``transport``（``stdio``/``sse``/``http``）；``stdio`` 必须有 ``command``，``sse/http`` 必须有 ``url``。
-- 任一建议缺少 ``reason_user_profile`` 或 ``reason_target_repo``，视为未完成。
-- 证据不足时，宁可不推荐；不要“猜测式”新增或卸载。
+5) 自检后 dry-run
+- 自检：JSON/schema/双理由/sources/无占位符
+- dry-run：
+  ``.\skills.ps1 审查目标 应用 --recommendations "reports\skill-audit\<run-id>\recommendations.json" --dry-run-ack "我知道未落盘"``
+- 自检或 dry-run 失败即停止并报告阻断项
 
-阶段 3：执行前自检
-- recommendations.json 必须可解析为 JSON，且 ``schema_version`` 必须是 ``2``。
-- 每条技能/MCP 新增或卸载建议都必须包含双理由与至少 1 个真实 ``sources``。
-- ``sources`` 只能填写你在本轮真实查看过的来源；不要引用未打开、未读取或不可访问的来源。
-- 自检任一项失败，都必须先停下并汇报问题，不得进入 dry-run。
+6) 汇报格式（按 dry-run 原序号，不重排）
+- 新增建议 / 卸载建议 / MCP 新增建议 / MCP 卸载建议
+- 每项：序号、名称、reason_user_profile、reason_target_repo、sources
+- 空类必须写“无该类建议”，并给 1 句原因
 
-阶段 4：执行 dry-run
-- 顺序必须是：先写 recommendations.json -> 再自检 -> 再 dry-run -> 再输出带理由的序号清单。
-- dry-run 结果中的序号必须原样保留，不得重排或改号。
-- 向用户汇报时，每条建议都要保留原始序号，并同时展示两条简短理由。
-
-阶段 5：等待确认后 apply
-- 真正执行状态变更前，必须先经过 dry-run。
-- 未收到用户明确确认，不得执行 --apply --yes。
-- 如果用户只确认部分序号，必须沿用 dry-run 原序号做选择，不得自行映射或重排。
-
-## 质量与来源要求
-
-- 目标仓审查必须同时基于“用户基本需求”和“目标仓事实”做判断；profile-only 新技能发现必须同时基于“用户基本需求”“已安装技能清单”和“来源策略”做判断。
-- 目标仓审查在判断新增/卸载技能或 MCP 时，也必须参考 ``installed-skills.json`` 中的已安装技能/MCP 快照；不得把 live state 臆造成审查输入。
-- 优先参考官方文档、skills.sh、find-skills、GitHub 高质量项目、GitHub Trending。
-- 每条建议都要能回答两个问题：为什么适合用户长期工作流、为什么符合目标仓事实或 profile-only 场景。
-- 若来源相互冲突，选择更高可信来源并在 ``sources`` 中保留依据。
-- ``overlap_findings`` 仅作报告，不可直接视为卸载建议；确需卸载时，必须单独给出双理由。
-- ``do_not_install`` 用于记录“已研究但当前不建议安装”的技能或 MCP，避免重复研究。
-- 对同一技能安装项、同一技能卸载定位、同一 MCP 名称，不得产出重复建议。
-- 不得伪造仓库事实、来源链接、来源结论，或把模板示例伪装成真实结论。
-
-## 交付方式
-
-- 如果用户让你“代理执行审查流程”，你应先完成 ``recommendations.json``。
-- 然后执行 dry-run。
-- 最后按 dry-run 结果向用户列出技能与 MCP 的新增/卸载建议清单（逐项含原始序号 + 双理由），等待用户确认要执行的序号。
-- 若存在阻断项或证据不足，先汇报阻断项或“无该类建议”的原因，再等待用户决策。
+安全约束：未收到明确确认，不执行 ``--apply --yes``。
 "@
 }
 
@@ -8182,6 +8147,101 @@ function New-AuditStructuredProfileDraft([string]$rawText) {
     }
 }
 
+function Get-AuditFallbackSummaryFromRawText([string]$rawText) {
+    $normalized = [regex]::Replace([string]$rawText, "\s+", " ").Trim()
+    if ([string]::IsNullOrWhiteSpace($normalized)) { return "" }
+    if ($normalized.Length -le 120) { return $normalized }
+    return ($normalized.Substring(0, 120) + "...")
+}
+
+function Get-AuditStructuredProfileRequiredNonEmptyFields {
+    return @("primary_work_types", "tech_stack", "common_tasks", "decision_preferences")
+}
+
+function Test-AuditTimestampString([string]$value) {
+    if ([string]::IsNullOrWhiteSpace([string]$value)) { return $false }
+    $parsed = [DateTimeOffset]::MinValue
+    return [DateTimeOffset]::TryParse([string]$value, [ref]$parsed)
+}
+
+function Get-AuditStructuredFallbackValues([string]$field, [string]$rawText) {
+    $summary = Get-AuditFallbackSummaryFromRawText $rawText
+    $generic = if ([string]::IsNullOrWhiteSpace($summary)) { "general workflow" } else { $summary }
+    switch ($field) {
+        "primary_work_types" { return @("需求分析与交付") }
+        "tech_stack" {
+            if ([regex]::IsMatch($rawText, "(?i)\bwindows\b")) { return @("Windows") }
+            return @("Mixed stack")
+        }
+        "common_tasks" { return @($generic) }
+        "decision_preferences" { return @("evidence-first") }
+        default { return @() }
+    }
+}
+
+function Test-AuditStructuredProfileComplete($structuredInput) {
+    if (-not (Test-AuditObjectLike $structuredInput)) { return $false }
+    $normalized = Normalize-AuditStructuredProfile $structuredInput
+    foreach ($field in Get-AuditStructuredProfileFieldNames) {
+        if ($normalized.PSObject.Properties.Match($field).Count -eq 0) { return $false }
+        if (-not (Assert-IsArray $normalized.$field)) { return $false }
+    }
+    foreach ($required in Get-AuditStructuredProfileRequiredNonEmptyFields) {
+        if (@($normalized.$required).Count -eq 0) { return $false }
+    }
+    return $true
+}
+
+function New-AuditPrecheckStructuredProfile($cfg) {
+    $rawText = [string]$cfg.user_profile.raw_text
+    $summary = [string]$cfg.user_profile.summary
+    if ([string]::IsNullOrWhiteSpace($summary)) {
+        $summary = Get-AuditFallbackSummaryFromRawText $rawText
+    }
+    $structured = Normalize-AuditStructuredProfile $cfg.user_profile.structured
+    foreach ($field in Get-AuditStructuredProfileRequiredNonEmptyFields) {
+        if (@($structured.$field).Count -eq 0) {
+            $structured.$field = @(Get-AuditStructuredFallbackValues $field $rawText)
+        }
+    }
+    return [pscustomobject]@{
+        raw_text = $rawText
+        summary = $summary
+        structured = $structured
+        last_structured_at = (Get-Date).ToString("o")
+        structured_by = "outer-ai"
+    }
+}
+
+function Ensure-AuditUserProfilePrecheck {
+    $profilePath = Get-AuditStructuredProfileDefaultPath
+    $maxAttempts = 2
+
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        $cfg = Load-AuditTargetsConfig
+        Need (-not [string]::IsNullOrWhiteSpace([string]$cfg.user_profile.raw_text)) "缺少用户基本需求，请先运行：./skills.ps1 审查目标 需求设置"
+
+        $summaryMissing = [string]::IsNullOrWhiteSpace([string]$cfg.user_profile.summary)
+        $structuredIncomplete = -not (Test-AuditStructuredProfileComplete $cfg.user_profile.structured)
+        $timestampInvalid = -not (Test-AuditTimestampString ([string]$cfg.user_profile.last_structured_at))
+        if (-not $summaryMissing -and -not $structuredIncomplete -and -not $timestampInvalid) {
+            return $cfg
+        }
+
+        Write-AuditJsonFile $profilePath (New-AuditPrecheckStructuredProfile $cfg)
+        try {
+            Invoke-AuditStructuredProfileFlow $profilePath
+        }
+        catch {
+            if ($attempt -ge $maxAttempts) {
+                throw ("画像预检查失败：自动导入结构化需求失败（已重试 1 次）。请先执行：.\skills.ps1 审查目标 需求结构化 --profile `"{0}`"。错误：{1}" -f $profilePath, $_.Exception.Message)
+            }
+        }
+    }
+
+    throw ("画像预检查失败：summary/structured/last_structured_at 仍不完整（已重试 1 次）。请先执行：.\skills.ps1 审查目标 需求结构化 --profile `"{0}`"" -f $profilePath)
+}
+
 function Write-AuditStructuredProfileDraft([string]$profilePath, [string]$rawText) {
     if ([string]::IsNullOrWhiteSpace($profilePath)) {
         $profilePath = Get-AuditStructuredProfileDefaultPath
@@ -8245,6 +8305,9 @@ function Import-AuditUserProfileStructured([string]$profilePath) {
     else {
         $cfg.user_profile.last_structured_at = (Get-Date).ToString("o")
     }
+    if (-not (Test-AuditTimestampString ([string]$cfg.user_profile.last_structured_at))) {
+        $cfg.user_profile.last_structured_at = (Get-Date).ToString("o")
+    }
 
     Ensure-AuditUserProfile $cfg | Out-Null
     Need (-not [string]::IsNullOrWhiteSpace([string]$cfg.user_profile.raw_text)) "导入后用户基本需求为空，请在 profile.raw_text 填写非空文本或先执行“需求设置”"
@@ -8291,9 +8354,13 @@ function Assert-AuditUserProfileReady($cfg) {
         Need ($cfg.user_profile.structured.PSObject.Properties.Match($field).Count -gt 0) ("用户结构化需求缺少字段：{0}" -f $field)
         Need (Assert-IsArray $cfg.user_profile.structured.$field) ("用户结构化需求字段必须为数组：{0}" -f $field)
     }
+    foreach ($required in Get-AuditStructuredProfileRequiredNonEmptyFields) {
+        Need (@($cfg.user_profile.structured.$required).Count -gt 0) ("用户结构化需求字段不能为空：{0}" -f $required)
+    }
     if ([string]::IsNullOrWhiteSpace([string]$cfg.user_profile.summary)) {
         Write-Host "提示：用户结构化 summary 为空，建议先完善结构化需求后再生成审查包。" -ForegroundColor Yellow
     }
+    Need (Test-AuditTimestampString ([string]$cfg.user_profile.last_structured_at)) "用户结构化时间戳缺失或无效，请先运行：./skills.ps1 审查目标 需求结构化"
 }
 
 function Get-AuditUserProfileOutput($cfg) {
@@ -8312,7 +8379,7 @@ function Get-AuditRunId {
 }
 
 function Get-AuditPromptContractVersion {
-    return "audit-prompt-v20260422.1"
+    return "audit-prompt-v20260422.3"
 }
 
 function Get-AuditReportRoot([string]$runId) {
@@ -8422,7 +8489,7 @@ function Get-AuditLatestRunId([string[]]$RequiredFiles = @()) {
     }
     if ($freshCandidates.Count -gt 0) { return [string]$freshCandidates[0] }
     if ($unknownCandidates.Count -gt 0) { return [string]$unknownCandidates[0] }
-    if ($staleCandidates.Count -gt 0) { return [string]$staleCandidates[0] }
+    if ($staleCandidates.Count -gt 0) { return "" }
     return ""
 }
 
@@ -8435,35 +8502,60 @@ function Resolve-AuditRunIdInput([string]$runId, [string]$FlagName = "--run-id",
         if (-not [string]::IsNullOrWhiteSpace($resolved)) {
             return $resolved
         }
-        throw ("{0} 使用占位符但未找到可用 run-id。{1}" -f $FlagName, (Get-AuditRunIdHintText))
+        throw ("{0} 使用占位符但未找到可用 run-id。{1}" -f $FlagName, (Get-AuditRunIdHintText $RequiredFiles))
     }
-    throw ("{0} 包含未替换占位符：{1}`n{2}" -f $FlagName, $runId, (Get-AuditRunIdHintText))
+    throw ("{0} 包含未替换占位符：{1}`n{2}" -f $FlagName, $runId, (Get-AuditRunIdHintText $RequiredFiles))
 }
 
 function Resolve-AuditPathRunIdPlaceholder([string]$path, [string]$FlagName = "--recommendations", [string[]]$RequiredFiles = @()) {
     if ([string]::IsNullOrWhiteSpace($path)) { return $path }
     if (-not (Test-AuditPlaceholderToken $path)) { return $path }
     if (-not [regex]::IsMatch($path, "<\s*run[-_]?id\s*>", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
-        throw ("{0} 路径包含未替换占位符：{1}`n{2}" -f $FlagName, $path, (Get-AuditRunIdHintText))
+        throw ("{0} 路径包含未替换占位符：{1}`n{2}" -f $FlagName, $path, (Get-AuditRunIdHintText $RequiredFiles))
     }
 
     $resolvedRunId = Get-AuditLatestRunId -RequiredFiles $RequiredFiles
     if ([string]::IsNullOrWhiteSpace($resolvedRunId)) {
-        throw ("{0} 路径使用 <run-id> 占位符但未找到可用 run。{1}" -f $FlagName, (Get-AuditRunIdHintText))
+        throw ("{0} 路径使用 <run-id> 占位符但未找到可用 run。{1}" -f $FlagName, (Get-AuditRunIdHintText $RequiredFiles))
     }
     $resolvedPath = [regex]::Replace($path, "<\s*run[-_]?id\s*>", [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $resolvedRunId }, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
     if (Test-AuditPlaceholderToken $resolvedPath) {
-        throw ("{0} 路径仍包含未替换占位符：{1}`n{2}" -f $FlagName, $resolvedPath, (Get-AuditRunIdHintText))
+        throw ("{0} 路径仍包含未替换占位符：{1}`n{2}" -f $FlagName, $resolvedPath, (Get-AuditRunIdHintText $RequiredFiles))
     }
     return $resolvedPath
 }
 
-function Get-AuditRunIdHintText {
+function Get-AuditRunIdHintText([string[]]$RequiredFiles = @()) {
     $ids = @(Get-AuditKnownRunIds)
     if ($ids.Count -eq 0) {
-        return "可用 run-id：无（请先运行：.\skills.ps1 审查目标 扫描）"
+        return "可用 run-id：无（先执行 .\skills.ps1 审查目标 扫描）"
     }
-    return ("可用 run-id：{0}" -f ($ids -join ", "))
+    if (@($RequiredFiles).Count -eq 0) {
+        return ("可用 run-id：{0}" -f ($ids -join ", "))
+    }
+
+    $valid = New-Object System.Collections.Generic.List[string]
+    $invalid = New-Object System.Collections.Generic.List[string]
+    foreach ($id in $ids) {
+        $runRoot = Get-AuditReportRoot $id
+        $missing = New-Object System.Collections.Generic.List[string]
+        foreach ($relative in @($RequiredFiles)) {
+            if (-not (Test-AuditFile $runRoot ([string]$relative))) {
+                $missing.Add([string]$relative) | Out-Null
+            }
+        }
+        if ($missing.Count -eq 0) {
+            $valid.Add([string]$id) | Out-Null
+        }
+        else {
+            $invalid.Add(("{0}(缺少: {1})" -f $id, ($missing -join ","))) | Out-Null
+        }
+    }
+
+    if ($valid.Count -gt 0) {
+        return ("可用 run-id：{0}" -f ($valid -join ", "))
+    }
+    return ("可用 run-id：无（先执行 .\skills.ps1 审查目标 扫描）; 不可用 run：{0}" -f ($invalid -join "; "))
 }
 
 function Test-AuditFile([string]$root, [string]$relative) {
@@ -8494,6 +8586,139 @@ function Get-AuditPackageScriptNames($pkg) {
     if ($null -eq $pkg) { return @() }
     if (-not $pkg.PSObject.Properties.Match("scripts").Count -or $null -eq $pkg.scripts) { return @() }
     return @($pkg.scripts.PSObject.Properties | ForEach-Object { $_.Name })
+}
+
+function Get-AuditRepositoryRelativePath([string]$root, [string]$fullPath) {
+    if ([string]::IsNullOrWhiteSpace($root) -or [string]::IsNullOrWhiteSpace($fullPath)) { return $fullPath }
+    try {
+        $normalizedRoot = [System.IO.Path]::GetFullPath($root).TrimEnd('\', '/')
+        $normalizedPath = [System.IO.Path]::GetFullPath($fullPath)
+        if ($normalizedPath.StartsWith($normalizedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $normalizedPath.Substring($normalizedRoot.Length).TrimStart('\', '/').Replace('/', '\')
+        }
+    }
+    catch {
+    }
+    return $fullPath
+}
+
+function Add-AuditCommandsFromText([string]$content, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands) {
+    if ([string]::IsNullOrWhiteSpace($content)) { return }
+    if ([regex]::IsMatch($content, "(?im)\bdotnet\s+build\b")) { Add-AuditUniqueValue $buildCommands "dotnet build" }
+    if ([regex]::IsMatch($content, "(?im)\bdotnet\s+test\b")) { Add-AuditUniqueValue $testCommands "dotnet test" }
+    if ([regex]::IsMatch($content, "(?im)\bnpm\s+run\s+build\b")) { Add-AuditUniqueValue $buildCommands "npm run build" }
+    if ([regex]::IsMatch($content, "(?im)\bnpm\s+test\b")) { Add-AuditUniqueValue $testCommands "npm test" }
+    if ([regex]::IsMatch($content, "(?im)\bpnpm\s+build\b")) { Add-AuditUniqueValue $buildCommands "pnpm build" }
+    if ([regex]::IsMatch($content, "(?im)\bpnpm\s+test\b")) { Add-AuditUniqueValue $testCommands "pnpm test" }
+    if ([regex]::IsMatch($content, "(?im)\byarn\s+build\b")) { Add-AuditUniqueValue $buildCommands "yarn build" }
+    if ([regex]::IsMatch($content, "(?im)\byarn\s+test\b")) { Add-AuditUniqueValue $testCommands "yarn test" }
+    if ([regex]::IsMatch($content, "(?im)\buv\s+run\s+pytest\b")) { Add-AuditUniqueValue $testCommands "uv run pytest" }
+    if ([regex]::IsMatch($content, "(?im)\bpoetry\s+run\s+pytest\b")) { Add-AuditUniqueValue $testCommands "poetry run pytest" }
+    if ([regex]::IsMatch($content, "(?im)\bpytest\b")) { Add-AuditUniqueValue $testCommands "pytest" }
+}
+
+function Add-AuditCiWorkflowFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands, [System.Collections.Generic.List[string]]$notableFiles) {
+    $candidates = New-Object System.Collections.Generic.List[string]
+    foreach ($fileName in @("azure-pipelines.yml", ".gitlab-ci.yml")) {
+        $candidate = Join-Path $resolvedPath $fileName
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            $candidates.Add($candidate) | Out-Null
+        }
+    }
+    $githubWorkflowDir = Join-Path $resolvedPath ".github\workflows"
+    if (Test-Path -LiteralPath $githubWorkflowDir -PathType Container) {
+        $workflowFiles = @(
+            Get-ChildItem -LiteralPath $githubWorkflowDir -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Extension -in @(".yml", ".yaml") } |
+            Select-Object -First 20
+        )
+        foreach ($wf in $workflowFiles) {
+            $candidates.Add($wf.FullName) | Out-Null
+        }
+    }
+
+    foreach ($filePath in @($candidates)) {
+        Add-AuditUniqueValue $notableFiles (Get-AuditRepositoryRelativePath $resolvedPath $filePath)
+        try {
+            $content = Get-ContentUtf8 $filePath
+        }
+        catch {
+            continue
+        }
+        Add-AuditCommandsFromText $content $buildCommands $testCommands
+    }
+}
+
+function Add-AuditPyProjectFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$frameworks, [System.Collections.Generic.List[string]]$packageManagers, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands, [System.Collections.Generic.List[string]]$notableFiles) {
+    $path = Join-Path $resolvedPath "pyproject.toml"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return }
+    Add-AuditUniqueValue $notableFiles "pyproject.toml"
+    $content = ""
+    try {
+        $content = Get-ContentUtf8 $path
+    }
+    catch {
+        return
+    }
+    if ([regex]::IsMatch($content, "(?im)^\s*\[tool\.poetry\]")) {
+        Add-AuditUniqueValue $packageManagers "poetry"
+        Add-AuditUniqueValue $buildCommands "poetry build"
+    }
+    if ([regex]::IsMatch($content, "(?im)^\s*\[tool\.uv\]")) {
+        Add-AuditUniqueValue $packageManagers "uv"
+        Add-AuditUniqueValue $buildCommands "uv build"
+    }
+    if ([regex]::IsMatch($content, "(?im)^\s*\[tool\.hatch")) {
+        Add-AuditUniqueValue $packageManagers "hatch"
+        Add-AuditUniqueValue $buildCommands "hatch build"
+    }
+    if ([regex]::IsMatch($content, "(?im)^\s*\[tool\.pdm")) {
+        Add-AuditUniqueValue $packageManagers "pdm"
+        Add-AuditUniqueValue $buildCommands "pdm build"
+    }
+    if ([regex]::IsMatch($content, "(?i)\bfastapi\b")) { Add-AuditUniqueValue $frameworks "fastapi" }
+    if ([regex]::IsMatch($content, "(?i)\bdjango\b")) { Add-AuditUniqueValue $frameworks "django" }
+    if ([regex]::IsMatch($content, "(?i)\bflask\b")) { Add-AuditUniqueValue $frameworks "flask" }
+    if ([regex]::IsMatch($content, "(?i)\bpytest\b")) { Add-AuditUniqueValue $testCommands "pytest" }
+}
+
+function Add-AuditDotnetFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$frameworks, [System.Collections.Generic.List[string]]$packageManagers, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands, [System.Collections.Generic.List[string]]$notableFiles) {
+    $slnFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.sln" -File -ErrorAction SilentlyContinue | Select-Object -First 10)
+    $csprojFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.csproj" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 40)
+    if ($slnFiles.Count -eq 0 -and $csprojFiles.Count -eq 0) { return }
+    Add-AuditUniqueValue $packageManagers "nuget"
+    Add-AuditUniqueValue $buildCommands "dotnet build"
+    $hasTests = $false
+    foreach ($sln in @($slnFiles)) {
+        Add-AuditUniqueValue $notableFiles (Get-AuditRepositoryRelativePath $resolvedPath $sln.FullName)
+    }
+    foreach ($proj in @($csprojFiles)) {
+        Add-AuditUniqueValue $notableFiles (Get-AuditRepositoryRelativePath $resolvedPath $proj.FullName)
+        if ($proj.Name -match "(?i)test") { $hasTests = $true }
+        try {
+            $xml = [xml](Get-ContentUtf8 $proj.FullName)
+        }
+        catch {
+            continue
+        }
+        $projectNode = $xml.Project
+        if ($null -ne $projectNode -and $projectNode.Attributes["Sdk"]) {
+            $sdk = [string]$projectNode.Attributes["Sdk"].Value
+            if ($sdk -match "(?i)web") { Add-AuditUniqueValue $frameworks "aspnetcore" }
+        }
+        $packageRefs = @($xml.SelectNodes("//PackageReference"))
+        foreach ($ref in $packageRefs) {
+            $include = ""
+            if ($ref.Attributes["Include"]) { $include = [string]$ref.Attributes["Include"].Value }
+            if ([string]::IsNullOrWhiteSpace($include)) { continue }
+            if ($include -match "(?i)Microsoft\.AspNetCore") { Add-AuditUniqueValue $frameworks "aspnetcore" }
+            if ($include -match "(?i)EntityFrameworkCore") { Add-AuditUniqueValue $frameworks "efcore" }
+            if ($include -match "(?i)xunit|nunit|mstest|Microsoft\.NET\.Test\.Sdk") { $hasTests = $true }
+        }
+    }
+    if ($hasTests -or $slnFiles.Count -gt 0) {
+        Add-AuditUniqueValue $testCommands "dotnet test"
+    }
 }
 
 function Get-AuditGitInfo([string]$resolvedPath) {
@@ -8571,13 +8796,22 @@ function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$
             $scripts = Get-AuditPackageScriptNames $pkg
             if ($scripts -contains "build") { Add-AuditUniqueValue $buildCommands "npm run build" }
             if ($scripts -contains "test") { Add-AuditUniqueValue $testCommands "npm test" }
+            if ($scripts -contains "test:ci") { Add-AuditUniqueValue $testCommands "npm run test:ci" }
+            if ($scripts -contains "ci:test") { Add-AuditUniqueValue $testCommands "npm run ci:test" }
+            if ($scripts -contains "typecheck") { Add-AuditUniqueValue $buildCommands "npm run typecheck" }
+            if ($pkg.PSObject.Properties.Match("packageManager").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$pkg.packageManager)) {
+                $pm = ([string]$pkg.packageManager).Trim().ToLowerInvariant()
+                if ($pm.StartsWith("pnpm@")) { Add-AuditUniqueValue $packageManagers "pnpm" }
+                elseif ($pm.StartsWith("yarn@")) { Add-AuditUniqueValue $packageManagers "yarn" }
+                elseif ($pm.StartsWith("npm@")) { Add-AuditUniqueValue $packageManagers "npm" }
+            }
         }
 
         if (Test-AuditFile $resolvedPath "pnpm-lock.yaml") { Add-AuditUniqueValue $packageManagers "pnpm"; Add-AuditUniqueValue $notableFiles "pnpm-lock.yaml" }
         if (Test-AuditFile $resolvedPath "yarn.lock") { Add-AuditUniqueValue $packageManagers "yarn"; Add-AuditUniqueValue $notableFiles "yarn.lock" }
         if (Test-AuditFile $resolvedPath "package-lock.json") { Add-AuditUniqueValue $packageManagers "npm"; Add-AuditUniqueValue $notableFiles "package-lock.json" }
-        if (Test-AuditFile $resolvedPath "pyproject.toml") { Add-AuditUniqueValue $languages "python"; Add-AuditUniqueValue $notableFiles "pyproject.toml" }
-        if (Test-AuditFile $resolvedPath "requirements.txt") { Add-AuditUniqueValue $languages "python"; Add-AuditUniqueValue $notableFiles "requirements.txt" }
+        if (Test-AuditFile $resolvedPath "pyproject.toml") { Add-AuditUniqueValue $languages "python"; Add-AuditUniqueValue $notableFiles "pyproject.toml"; Add-AuditUniqueValue $packageManagers "pip" }
+        if (Test-AuditFile $resolvedPath "requirements.txt") { Add-AuditUniqueValue $languages "python"; Add-AuditUniqueValue $notableFiles "requirements.txt"; Add-AuditUniqueValue $packageManagers "pip" }
         if (Test-AuditFile $resolvedPath "uv.lock") { Add-AuditUniqueValue $packageManagers "uv"; Add-AuditUniqueValue $notableFiles "uv.lock" }
         if (Test-AuditFile $resolvedPath "go.mod") { Add-AuditUniqueValue $languages "go"; Add-AuditUniqueValue $notableFiles "go.mod" }
         if (Test-AuditFile $resolvedPath "Cargo.toml") { Add-AuditUniqueValue $languages "rust"; Add-AuditUniqueValue $notableFiles "Cargo.toml" }
@@ -8606,9 +8840,14 @@ function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$
                 Add-AuditUniqueValue $notableFiles $ruleFile
             }
         }
+        Add-AuditPyProjectFacts $resolvedPath $frameworks $packageManagers $buildCommands $testCommands $notableFiles
+        Add-AuditDotnetFacts $resolvedPath $frameworks $packageManagers $buildCommands $testCommands $notableFiles
+        Add-AuditCiWorkflowFacts $resolvedPath $buildCommands $testCommands $notableFiles
         $slnFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.sln" -File -ErrorAction SilentlyContinue)
-        $csprojFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.csproj" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 10)
-        if ($slnFiles.Count -gt 0 -or $csprojFiles.Count -gt 0) { Add-AuditUniqueValue $languages "dotnet" }
+        $csprojFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.csproj" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)
+        if ($slnFiles.Count -gt 0 -or $csprojFiles.Count -gt 0) {
+            Add-AuditUniqueValue $languages "dotnet"
+        }
     }
 
     return [pscustomobject]([ordered]@{
@@ -8972,6 +9211,10 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
             maintenance = "Prefer projects with recent activity, clear license, and usable documentation."
             operational_cost = "Prefer skills that are easy to install, verify, and roll back."
         }
+        evidence_policy = [ordered]@{
+            min_unique_sources_for_changes = 2
+            require_http_source_for_changes = $true
+        }
         required_evidence = @(
             "Every add/remove recommendation must cite sources inspected in this run.",
             "Do not fabricate repository facts, source links, or source conclusions.",
@@ -9005,7 +9248,12 @@ function Assert-AuditBundleFileContent([string]$path, [string]$label) {
         "user-profile.json" {
             Need (Test-AuditJsonProperty $data "raw_text") ("user-profile 缺少 raw_text：{0}" -f $path)
             Need (-not [string]::IsNullOrWhiteSpace([string]$data.raw_text)) ("user-profile.raw_text 不能为空：{0}" -f $path)
+            Need (Test-AuditJsonProperty $data "summary") ("user-profile 缺少 summary：{0}" -f $path)
+            Need (-not [string]::IsNullOrWhiteSpace([string]$data.summary)) ("user-profile.summary 不能为空：{0}" -f $path)
             Need (Test-AuditJsonProperty $data "structured") ("user-profile 缺少 structured：{0}" -f $path)
+            Need (Test-AuditStructuredProfileComplete $data.structured) ("user-profile.structured 不完整：{0}" -f $path)
+            Need (Test-AuditJsonProperty $data "last_structured_at") ("user-profile 缺少 last_structured_at：{0}" -f $path)
+            Need (Test-AuditTimestampString ([string]$data.last_structured_at)) ("user-profile.last_structured_at 无效：{0}" -f $path)
         }
         "installed-skills.json" {
             Need (Test-AuditJsonProperty $data "skills") ("installed-skills 缺少 skills：{0}" -f $path)
@@ -9022,6 +9270,10 @@ function Assert-AuditBundleFileContent([string]$path, [string]$label) {
             Need (Test-AuditJsonProperty $data "sources") ("source-strategy 缺少 sources：{0}" -f $path)
             Need (Assert-IsArray $data.sources) ("source-strategy.sources 必须为数组：{0}" -f $path)
             Need (@($data.sources).Count -gt 0) ("source-strategy.sources 不能为空：{0}" -f $path)
+            if (Test-AuditJsonProperty $data "evidence_policy" -and $null -ne $data.evidence_policy) {
+                Need (Test-AuditJsonProperty $data.evidence_policy "min_unique_sources_for_changes") ("source-strategy.evidence_policy 缺少 min_unique_sources_for_changes：{0}" -f $path)
+                Need ([int]$data.evidence_policy.min_unique_sources_for_changes -ge 1) ("source-strategy.evidence_policy.min_unique_sources_for_changes 必须 >= 1：{0}" -f $path)
+            }
         }
         "recommendations.template.json" {
             Need (Test-AuditJsonProperty $data "schema_version") ("recommendations.template 缺少 schema_version：{0}" -f $path)
@@ -9093,6 +9345,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
             source_strategy_used = $true
             summary = $basisSummary
         }
+        empty_recommendation_reasons = @("insufficient_reliable_evidence")
         new_skills = @(
             [ordered]@{
                 name = "<new-skill-name>"
@@ -9469,6 +9722,45 @@ function Ensure-AuditArrayProperty($obj, [string]$name) {
     }
 }
 
+function Normalize-AuditStringArray($value) {
+    if ($null -eq $value) { return @() }
+    $items = if (Assert-IsArray $value) { @($value) } else { @($value) }
+    $normalized = New-Object System.Collections.Generic.List[string]
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in $items) {
+        if ($null -eq $item) { continue }
+        $text = ([string]$item).Trim()
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        if ($seen.Add($text)) {
+            $normalized.Add($text) | Out-Null
+        }
+    }
+    return @($normalized)
+}
+
+function Get-AuditRecommendationChangeItemCount($rec) {
+    return @($rec.new_skills).Count + @($rec.removal_candidates).Count + @($rec.mcp_new_servers).Count + @($rec.mcp_removal_candidates).Count
+}
+
+function Get-AuditRecommendationSourceCoverage($rec) {
+    $allSources = New-Object System.Collections.Generic.List[string]
+    foreach ($collection in @($rec.new_skills, $rec.removal_candidates, $rec.mcp_new_servers, $rec.mcp_removal_candidates)) {
+        foreach ($item in @($collection)) {
+            foreach ($source in @(Normalize-AuditStringArray $item.sources)) {
+                $allSources.Add($source) | Out-Null
+            }
+        }
+    }
+    $uniqueSources = @(Normalize-AuditStringArray $allSources)
+    $httpSources = @($uniqueSources | Where-Object { [regex]::IsMatch([string]$_, "^(?i)https?://") })
+    return [pscustomobject]([ordered]@{
+        total_change_items = Get-AuditRecommendationChangeItemCount $rec
+        unique_sources = @($uniqueSources)
+        unique_source_count = @($uniqueSources).Count
+        http_source_count = @($httpSources).Count
+    })
+}
+
 function Normalize-AuditSources($item, [string]$kind) {
     Ensure-AuditArrayProperty $item "sources"
     $normalized = New-Object System.Collections.Generic.List[string]
@@ -9619,6 +9911,7 @@ function Load-AuditRecommendations([string]$path) {
     Ensure-AuditArrayProperty $rec "do_not_install"
     Ensure-AuditArrayProperty $rec "mcp_new_servers"
     Ensure-AuditArrayProperty $rec "mcp_removal_candidates"
+    Ensure-AuditArrayProperty $rec "empty_recommendation_reasons"
 
     $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($item in @($rec.new_skills)) {
@@ -9648,6 +9941,14 @@ function Load-AuditRecommendations([string]$path) {
         $key = [string]$item.installed.name
         Need ($seenMcpRemovals.Add($key)) ("重复 MCP 卸载建议：{0}" -f $key)
     }
+
+    $changeItemCount = Get-AuditRecommendationChangeItemCount $rec
+    $emptyReasonCodes = @(Normalize-AuditStringArray $rec.empty_recommendation_reasons)
+    if ($changeItemCount -eq 0 -and $emptyReasonCodes.Count -eq 0) {
+        $emptyReasonCodes = @("insufficient_reliable_evidence")
+    }
+    $rec.empty_recommendation_reasons = @($emptyReasonCodes)
+
     return $rec
 }
 
@@ -9749,6 +10050,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
         do_not_install = @($recommendations.do_not_install)
         mcp_items = @($mcpItems)
         mcp_removal_candidates = @($mcpRemovals)
+        empty_recommendation_reasons = @($recommendations.empty_recommendation_reasons)
     })
 }
 
@@ -9801,6 +10103,10 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
         }
     }
     Write-Host "提示：以下序号为原序号；后续 dry-run 汇报与 apply 选择必须沿用原序号。"
+    $totalChanges = @($plan.items).Count + @($plan.removal_candidates).Count + @($plan.mcp_items).Count + @($plan.mcp_removal_candidates).Count
+    if ($totalChanges -eq 0 -and $plan.PSObject.Properties.Match("empty_recommendation_reasons").Count -gt 0 -and @($plan.empty_recommendation_reasons).Count -gt 0) {
+        Write-Host ("空建议原因码: {0}" -f ((@($plan.empty_recommendation_reasons) | ForEach-Object { [string]$_ }) -join ", "))
+    }
     Write-Host ""
     Write-Host ("新增建议: {0} 项" -f @($plan.items).Count)
     if (@($plan.items).Count -eq 0) {
@@ -9974,13 +10280,50 @@ function Ensure-AuditNewManualImportsMapped($beforeCfg) {
     return $changed
 }
 
+function Write-AuditBundleEvidence([string]$mode, [string]$runId, [string]$reportRoot, [string[]]$targets, [string[]]$commands = @()) {
+    try {
+        $date = Get-Date -Format "yyyyMMdd"
+        $time = Get-Date -Format "HHmmss"
+        $dir = Join-Path $script:Root "docs\change-evidence"
+        EnsureDir $dir
+        $safeMode = if ([string]::IsNullOrWhiteSpace($mode)) { "scan" } else { ([regex]::Replace($mode.ToLowerInvariant(), "[^a-z0-9_-]", "-")) }
+        $safeRun = if ([string]::IsNullOrWhiteSpace($runId)) { "no-runid" } else { ([regex]::Replace($runId, "[^a-zA-Z0-9_-]", "-")) }
+        $path = Join-Path $dir ("{0}-audit-runtime-{1}-{2}-{3}.md" -f $date, $safeMode, $safeRun, $time)
+        $commandText = if (@($commands).Count -gt 0) { (@($commands) | ForEach-Object { "- `"$_`"" }) -join "`r`n" } else { "- 无" }
+        $targetText = if (@($targets).Count -gt 0) { (@($targets) | ForEach-Object { "- " + [string]$_ }) -join "`r`n" } else { "- 无" }
+        $content = @"
+# Audit Runtime Evidence
+
+- mode: $mode
+- run_id: $runId
+- report_root: $reportRoot
+- timestamp: $(Get-Date -Format "o")
+
+## Commands
+$commandText
+
+## Targets
+$targetText
+
+## Rollback
+- 删除本次生成目录：`"$reportRoot`"
+"@
+        Set-ContentUtf8 $path $content
+        return $path
+    }
+    catch {
+        Log ("写入审查包证据失败：{0}" -f $_.Exception.Message) "WARN"
+        return ""
+    }
+}
+
 function Invoke-AuditTargetsScan {
     param(
         [string]$Target,
         [string]$OutDir,
         [switch]$Force
     )
-    $cfg = Load-AuditTargetsConfig
+    $cfg = Ensure-AuditUserProfilePrecheck
     Assert-AuditUserProfileReady $cfg
     $targets = @($cfg.targets)
     if (-not [string]::IsNullOrWhiteSpace($Target)) {
@@ -10112,6 +10455,10 @@ function Invoke-AuditTargetsScan {
     Write-Host ("- audit-meta.json: {0}" -f $auditMetaPath)
     Write-Host ("- recommendations.template.json: {0}" -f $templatePath)
     Write-Host "下一步：把 outer-ai-prompt.md 交给 AI；AI 应先填写并自检 recommendations.json，再执行 dry-run，并按原序号列出技能与 MCP 的新增/卸载清单。" -ForegroundColor Yellow
+    $evidencePath = Write-AuditBundleEvidence "scan" $runId $reportRoot @($scans | ForEach-Object { [string]$_.target.name }) @(".\\skills.ps1 审查目标 扫描")
+    if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
+        Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
+    }
     return [pscustomobject]@{
         run_id = $runId
         path = $reportRoot
@@ -10125,7 +10472,7 @@ function Invoke-AuditSkillDiscovery {
         [string]$OutDir,
         [switch]$Force
     )
-    $cfg = Load-AuditTargetsConfig
+    $cfg = Ensure-AuditUserProfilePrecheck
     Assert-AuditUserProfileReady $cfg
 
     $runId = Get-AuditRunId
@@ -10216,6 +10563,10 @@ function Invoke-AuditSkillDiscovery {
     Write-Host ("- audit-meta.json: {0}" -f $auditMetaPath)
     Write-Host ("- recommendations.template.json: {0}" -f $templatePath)
     Write-Host "下一步：把 outer-ai-prompt.md 交给 AI；AI 应先填写并自检 recommendations.json，再执行 dry-run，并按原序号列出技能与 MCP 的新增/卸载清单。" -ForegroundColor Yellow
+    $evidencePath = Write-AuditBundleEvidence "discover-skills" $runId $reportRoot @("profile-only")
+    if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
+        Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
+    }
     return [pscustomobject]@{
         run_id = $runId
         path = $reportRoot
@@ -10234,6 +10585,207 @@ function Get-AuditPersistedChangeTotal($counts) {
         }
     }
     return $total
+}
+
+function Get-AuditDryRunSummaryPath([string]$recommendationsPath) {
+    $dir = Split-Path $recommendationsPath -Parent
+    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
+    return (Join-Path $dir "dry-run-summary.json")
+}
+
+function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
+    $add = @()
+    $index = 1
+    foreach ($item in @($plan.items)) {
+        $add += [pscustomobject]([ordered]@{
+            index = $index
+            name = [string]$item.name
+            reason_user_profile = [string]$item.reason_user_profile
+            reason_target_repo = [string]$item.reason_target_repo
+            sources = @($item.sources)
+            status = [string]$item.status
+        })
+        $index++
+    }
+    $remove = @()
+    $index = 1
+    foreach ($item in @($plan.removal_candidates)) {
+        $remove += [pscustomobject]([ordered]@{
+            index = $index
+            name = [string]$item.name
+            installed = [ordered]@{
+                vendor = [string]$item.vendor
+                from = [string]$item.from
+            }
+            reason_user_profile = [string]$item.reason_user_profile
+            reason_target_repo = [string]$item.reason_target_repo
+            sources = @($item.sources)
+            status = [string]$item.status
+        })
+        $index++
+    }
+    $mcpAdd = @()
+    $index = 1
+    foreach ($item in @($plan.mcp_items)) {
+        $mcpAdd += [pscustomobject]([ordered]@{
+            index = $index
+            name = [string]$item.name
+            reason_user_profile = [string]$item.reason_user_profile
+            reason_target_repo = [string]$item.reason_target_repo
+            sources = @($item.sources)
+            status = [string]$item.status
+        })
+        $index++
+    }
+    $mcpRemove = @()
+    $index = 1
+    foreach ($item in @($plan.mcp_removal_candidates)) {
+        $mcpRemove += [pscustomobject]([ordered]@{
+            index = $index
+            name = [string]$item.name
+            installed_name = [string]$item.installed_name
+            reason_user_profile = [string]$item.reason_user_profile
+            reason_target_repo = [string]$item.reason_target_repo
+            sources = @($item.sources)
+            status = [string]$item.status
+        })
+        $index++
+    }
+    return [pscustomobject]([ordered]@{
+        schema_version = 1
+        generated_at = (Get-Date).ToString("o")
+        recommendations_path = $recommendationsPath
+        run_id = [string]$plan.run_id
+        target = [string]$plan.target
+        decision_basis_summary = [string]$plan.decision_basis.summary
+        empty_recommendation_reasons = if ($plan.PSObject.Properties.Match("empty_recommendation_reasons").Count -gt 0) { @($plan.empty_recommendation_reasons) } else { @() }
+        counts = [ordered]@{
+            add = @($add).Count
+            remove = @($remove).Count
+            mcp_add = @($mcpAdd).Count
+            mcp_remove = @($mcpRemove).Count
+        }
+        add = @($add)
+        remove = @($remove)
+        mcp_add = @($mcpAdd)
+        mcp_remove = @($mcpRemove)
+    })
+}
+
+function Get-AuditSourceEvidencePolicy([string]$recommendationDir) {
+    $path = Join-Path $recommendationDir "source-strategy.json"
+    $policy = [ordered]@{
+        enabled = $false
+        source_strategy_path = $path
+        min_unique_sources_for_changes = 0
+        require_http_source_for_changes = $false
+    }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return [pscustomobject]$policy
+    }
+    try {
+        $raw = Get-ContentUtf8 $path
+        if ([string]::IsNullOrWhiteSpace($raw)) {
+            return [pscustomobject]$policy
+        }
+        $data = $raw | ConvertFrom-Json
+        if ($data.PSObject.Properties.Match("evidence_policy").Count -eq 0 -or $null -eq $data.evidence_policy) {
+            return [pscustomobject]$policy
+        }
+        $e = $data.evidence_policy
+        $min = 0
+        if ($e.PSObject.Properties.Match("min_unique_sources_for_changes").Count -gt 0) {
+            $min = [int]$e.min_unique_sources_for_changes
+        }
+        $needHttp = $false
+        if ($e.PSObject.Properties.Match("require_http_source_for_changes").Count -gt 0) {
+            $needHttp = [bool]$e.require_http_source_for_changes
+        }
+        $policy.enabled = ($min -gt 0 -or $needHttp)
+        $policy.min_unique_sources_for_changes = if ($min -lt 0) { 0 } else { $min }
+        $policy.require_http_source_for_changes = $needHttp
+        return [pscustomobject]$policy
+    }
+    catch {
+        return [pscustomobject]$policy
+    }
+}
+
+function Test-AuditRecommendationSourceCoveragePolicy($rec, $policy) {
+    $coverage = Get-AuditRecommendationSourceCoverage $rec
+    $issues = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $policy -or -not [bool]$policy.enabled) {
+        return [pscustomobject]([ordered]@{
+            pass = $true
+            issues = @()
+            coverage = $coverage
+        })
+    }
+    if ([int]$coverage.total_change_items -eq 0) {
+        return [pscustomobject]([ordered]@{
+            pass = $true
+            issues = @()
+            coverage = $coverage
+        })
+    }
+    $requiredUnique = [int]$policy.min_unique_sources_for_changes
+    if ($requiredUnique -gt 0 -and [int]$coverage.unique_source_count -lt $requiredUnique) {
+        $issues.Add(("insufficient_source_coverage：变更建议共 {0} 项，但 unique sources={1}，低于阈值 {2}。" -f [int]$coverage.total_change_items, [int]$coverage.unique_source_count, $requiredUnique)) | Out-Null
+    }
+    if ([bool]$policy.require_http_source_for_changes -and [int]$coverage.http_source_count -lt 1) {
+        $issues.Add("insufficient_source_coverage：变更建议缺少可验证的 http/https 来源。") | Out-Null
+    }
+    return [pscustomobject]([ordered]@{
+        pass = ($issues.Count -eq 0)
+        issues = @($issues)
+        coverage = $coverage
+    })
+}
+
+function Write-AuditRuntimeEvidence([string]$mode, [string]$recommendationsPath, $report, [string[]]$commands = @()) {
+    try {
+        $date = Get-Date -Format "yyyyMMdd"
+        $time = Get-Date -Format "HHmmss"
+        $dir = Join-Path $script:Root "docs\change-evidence"
+        EnsureDir $dir
+        $safeMode = if ([string]::IsNullOrWhiteSpace($mode)) { "unknown" } else { ([regex]::Replace($mode.ToLowerInvariant(), "[^a-z0-9_-]", "-")) }
+        $runId = if ($null -ne $report -and $report.PSObject.Properties.Match("run_id").Count -gt 0) { [string]$report.run_id } else { "" }
+        $safeRun = if ([string]::IsNullOrWhiteSpace($runId)) { "no-runid" } else { ([regex]::Replace($runId, "[^a-zA-Z0-9_-]", "-")) }
+        $path = Join-Path $dir ("{0}-audit-runtime-{1}-{2}-{3}.md" -f $date, $safeMode, $safeRun, $time)
+        $changedCountsJson = if ($null -ne $report -and $report.PSObject.Properties.Match("changed_counts").Count -gt 0) { ($report.changed_counts | ConvertTo-Json -Depth 10 -Compress) } else { "{}" }
+        $rollbackText = if ($null -ne $report -and $report.PSObject.Properties.Match("rollback").Count -gt 0 -and @($report.rollback).Count -gt 0) {
+            (@($report.rollback) | ForEach-Object { "- " + [string]$_ }) -join "`r`n"
+        }
+        else {
+            "- 无"
+        }
+        $commandText = if (@($commands).Count -gt 0) { (@($commands) | ForEach-Object { "- `"$_`"" }) -join "`r`n" } else { "- 无" }
+        $content = @"
+# Audit Runtime Evidence
+
+- mode: $mode
+- run_id: $runId
+- recommendations: $recommendationsPath
+- success: $([bool]$report.success)
+- persisted: $([bool]$report.persisted)
+- timestamp: $(Get-Date -Format "o")
+
+## Commands
+$commandText
+
+## Key Output
+- changed_counts: $changedCountsJson
+
+## Rollback
+$rollbackText
+"@
+        Set-ContentUtf8 $path $content
+        return $path
+    }
+    catch {
+        Log ("写入审查运行证据失败：{0}" -f $_.Exception.Message) "WARN"
+        return ""
+    }
 }
 
 function Apply-AuditMcpSelections($selectedAddItems, $selectedRemoveItems) {
@@ -10305,11 +10857,11 @@ function Apply-AuditMcpSelections($selectedAddItems, $selectedRemoveItems) {
 
 function Resolve-AuditRecommendationsPathForPreflight([string]$RecommendationsPath, [string]$RunId) {
     if (-not [string]::IsNullOrWhiteSpace($RecommendationsPath)) {
-        $resolvedInputPath = Resolve-AuditPathRunIdPlaceholder $RecommendationsPath "--recommendations" @("recommendations.json")
+        $resolvedInputPath = Resolve-AuditPathRunIdPlaceholder $RecommendationsPath "--recommendations" @("recommendations.json", "installed-skills.json", "audit-meta.json")
         return (Resolve-AuditTargetPath $resolvedInputPath)
     }
     Need (-not [string]::IsNullOrWhiteSpace($RunId)) "预检至少需要 --run-id 或 --recommendations 其一"
-    $resolvedRunId = Resolve-AuditRunIdInput $RunId "--run-id" @("recommendations.json")
+    $resolvedRunId = Resolve-AuditRunIdInput $RunId "--run-id" @("recommendations.json", "installed-skills.json", "audit-meta.json")
     return (Join-Path (Get-AuditReportRoot $resolvedRunId) "recommendations.json")
 }
 
@@ -10372,6 +10924,8 @@ function Invoke-AuditRecommendationsPreflight {
     $runPromptVersion = Get-AuditRunPromptContractVersion $recommendationDir
     $currentPromptVersion = Get-AuditPromptContractVersion
     $promptVersionMatched = (-not [string]::IsNullOrWhiteSpace($runPromptVersion) -and [string]$runPromptVersion -eq [string]$currentPromptVersion)
+    $sourcePolicy = Get-AuditSourceEvidencePolicy $recommendationDir
+    $sourceCoverageCheck = Test-AuditRecommendationSourceCoveragePolicy $rec $sourcePolicy
 
     $issues = New-Object System.Collections.Generic.List[string]
     if ($isSnapshotStale) {
@@ -10380,6 +10934,9 @@ function Invoke-AuditRecommendationsPreflight {
     if (-not $promptVersionMatched) {
         $runPromptDisplay = if ([string]::IsNullOrWhiteSpace($runPromptVersion)) { "missing" } else { [string]$runPromptVersion }
         $issues.Add(("prompt_contract_mismatch：run={0}，current={1}。请先重新运行审查目标 扫描生成新 run。" -f $runPromptDisplay, $currentPromptVersion)) | Out-Null
+    }
+    foreach ($issue in @($sourceCoverageCheck.issues)) {
+        $issues.Add([string]$issue) | Out-Null
     }
 
     $report = [ordered]@{
@@ -10393,6 +10950,8 @@ function Invoke-AuditRecommendationsPreflight {
             current = $currentPromptVersion
             matched = $promptVersionMatched
         }
+        source_evidence_policy = $sourcePolicy
+        source_coverage = $sourceCoverageCheck.coverage
         snapshot_state = $snapshotState
         live_state = $liveState
         issues = @($issues)
@@ -10432,6 +10991,38 @@ function Invoke-AuditRecommendationsApply {
     $rec = Load-AuditRecommendations $RecommendationsPath
     $recommendationDir = Split-Path -Parent $RecommendationsPath
     if ([string]::IsNullOrWhiteSpace($recommendationDir)) { $recommendationDir = "." }
+    $sourcePolicy = Get-AuditSourceEvidencePolicy $recommendationDir
+    $sourceCoverageCheck = Test-AuditRecommendationSourceCoveragePolicy $rec $sourcePolicy
+    if (-not [bool]$sourceCoverageCheck.pass) {
+        $sourceMessage = ($sourceCoverageCheck.issues -join " | ")
+        $sourceReport = [ordered]@{
+            schema_version = 2
+            run_id = [string]$rec.run_id
+            target = [string]$rec.target
+            mode = if ($Apply) { "apply" } else { "dry_run" }
+            success = $false
+            persisted = $false
+            error_code = "insufficient_source_coverage"
+            error_message = $sourceMessage
+            source_evidence_policy = $sourcePolicy
+            source_coverage = $sourceCoverageCheck.coverage
+            changed_counts = New-AuditChangedCounts @() @()
+            items = @()
+            removal_candidates = @()
+            mcp_items = @()
+            mcp_removal_candidates = @()
+            overlap_findings = @()
+            do_not_install = @()
+            rollback = @()
+        }
+        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$sourceReport)
+        $evidenceMode = if ($Apply) { "apply-blocked" } else { "dry-run-blocked" }
+        $evidencePath = Write-AuditRuntimeEvidence $evidenceMode $RecommendationsPath ([pscustomobject]$sourceReport) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`"")
+        if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
+            Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
+        }
+        throw $sourceMessage
+    }
     $snapshotPath = Join-Path $recommendationDir "installed-skills.json"
     $liveState = Get-AuditLiveInstalledState
     if (Test-Path -LiteralPath $snapshotPath -PathType Leaf) {
@@ -10597,6 +11188,11 @@ function Invoke-AuditRecommendationsApply {
         foreach ($item in @($plan.mcp_removal_candidates)) {
             Write-Host ("DRYRUN mcp-remove: {0}" -f [string]$item.installed_name)
         }
+        $dryRunSummaryPath = Get-AuditDryRunSummaryPath $RecommendationsPath
+        $dryRunSummary = New-AuditDryRunSummary $plan $RecommendationsPath
+        Write-AuditJsonFile $dryRunSummaryPath $dryRunSummary
+        $report["dry_run_summary_path"] = $dryRunSummaryPath
+        Write-Host ("dry-run 机器可读摘要：{0}" -f $dryRunSummaryPath) -ForegroundColor Cyan
         Write-Host "DRY-RUN 完成：未修改任何技能映射或 MCP 配置（未落盘）。" -ForegroundColor Red
         Write-Host ("如需真正执行，请运行：.\skills.ps1 审查目标 应用 --recommendations `"{0}`" --apply --yes" -f $RecommendationsPath) -ForegroundColor Red
         if ($RequireDryRunAck) {
@@ -10619,11 +11215,19 @@ function Invoke-AuditRecommendationsApply {
                 $report["dry_run_ack_received"] = [string]$ackInput
                 $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
                 Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+                $evidencePath = Write-AuditRuntimeEvidence "dry-run-canceled" $RecommendationsPath ([pscustomobject]$report) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`"")
+                if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
+                    Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
+                }
                 return [pscustomobject]$report
             }
             $report["dry_run_acknowledged"] = $true
         }
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+        $evidencePath = Write-AuditRuntimeEvidence "dry-run" $RecommendationsPath ([pscustomobject]$report) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`" --dry-run-ack `"$([string]$DryRunAck)`"")
+        if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
+            Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
+        }
         return [pscustomobject]$report
     }
 
@@ -10760,6 +11364,10 @@ function Invoke-AuditRecommendationsApply {
         $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
         $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+        $evidencePath = Write-AuditRuntimeEvidence "apply" $RecommendationsPath ([pscustomobject]$report) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`" --apply --yes")
+        if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
+            Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
+        }
         return [pscustomobject]$report
     }
     catch {
@@ -10771,6 +11379,10 @@ function Invoke-AuditRecommendationsApply {
         $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
         $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+        $evidencePath = Write-AuditRuntimeEvidence "apply-failed" $RecommendationsPath ([pscustomobject]$report) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`" --apply --yes")
+        if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
+            Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
+        }
         throw
     }
 }
@@ -10949,7 +11561,7 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             }
             "--run-id" {
                 Need ($i + 1 -lt $items.Count) "--run-id 缺少值"
-                $result.run_id = Resolve-AuditRunIdInput ([string]$items[++$i]) "--run-id"
+                $result.run_id = Resolve-AuditRunIdInput ([string]$items[++$i]) "--run-id" @("recommendations.json", "installed-skills.json", "audit-meta.json")
                 continue
             }
             "--profile" {
@@ -10972,7 +11584,7 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             }
             "--recommendations" {
                 Need ($i + 1 -lt $items.Count) "--recommendations 缺少值"
-                $result.recommendations = Resolve-AuditPathRunIdPlaceholder ([string]$items[++$i]) "--recommendations" @("recommendations.json")
+                $result.recommendations = Resolve-AuditPathRunIdPlaceholder ([string]$items[++$i]) "--recommendations" @("recommendations.json", "installed-skills.json", "audit-meta.json")
                 continue
             }
             "--dry-run-ack" {

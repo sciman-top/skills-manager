@@ -7,6 +7,45 @@ function Ensure-AuditArrayProperty($obj, [string]$name) {
     }
 }
 
+function Normalize-AuditStringArray($value) {
+    if ($null -eq $value) { return @() }
+    $items = if (Assert-IsArray $value) { @($value) } else { @($value) }
+    $normalized = New-Object System.Collections.Generic.List[string]
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in $items) {
+        if ($null -eq $item) { continue }
+        $text = ([string]$item).Trim()
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        if ($seen.Add($text)) {
+            $normalized.Add($text) | Out-Null
+        }
+    }
+    return @($normalized)
+}
+
+function Get-AuditRecommendationChangeItemCount($rec) {
+    return @($rec.new_skills).Count + @($rec.removal_candidates).Count + @($rec.mcp_new_servers).Count + @($rec.mcp_removal_candidates).Count
+}
+
+function Get-AuditRecommendationSourceCoverage($rec) {
+    $allSources = New-Object System.Collections.Generic.List[string]
+    foreach ($collection in @($rec.new_skills, $rec.removal_candidates, $rec.mcp_new_servers, $rec.mcp_removal_candidates)) {
+        foreach ($item in @($collection)) {
+            foreach ($source in @(Normalize-AuditStringArray $item.sources)) {
+                $allSources.Add($source) | Out-Null
+            }
+        }
+    }
+    $uniqueSources = @(Normalize-AuditStringArray $allSources)
+    $httpSources = @($uniqueSources | Where-Object { [regex]::IsMatch([string]$_, "^(?i)https?://") })
+    return [pscustomobject]([ordered]@{
+        total_change_items = Get-AuditRecommendationChangeItemCount $rec
+        unique_sources = @($uniqueSources)
+        unique_source_count = @($uniqueSources).Count
+        http_source_count = @($httpSources).Count
+    })
+}
+
 function Normalize-AuditSources($item, [string]$kind) {
     Ensure-AuditArrayProperty $item "sources"
     $normalized = New-Object System.Collections.Generic.List[string]
@@ -157,6 +196,7 @@ function Load-AuditRecommendations([string]$path) {
     Ensure-AuditArrayProperty $rec "do_not_install"
     Ensure-AuditArrayProperty $rec "mcp_new_servers"
     Ensure-AuditArrayProperty $rec "mcp_removal_candidates"
+    Ensure-AuditArrayProperty $rec "empty_recommendation_reasons"
 
     $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($item in @($rec.new_skills)) {
@@ -186,6 +226,14 @@ function Load-AuditRecommendations([string]$path) {
         $key = [string]$item.installed.name
         Need ($seenMcpRemovals.Add($key)) ("重复 MCP 卸载建议：{0}" -f $key)
     }
+
+    $changeItemCount = Get-AuditRecommendationChangeItemCount $rec
+    $emptyReasonCodes = @(Normalize-AuditStringArray $rec.empty_recommendation_reasons)
+    if ($changeItemCount -eq 0 -and $emptyReasonCodes.Count -eq 0) {
+        $emptyReasonCodes = @("insufficient_reliable_evidence")
+    }
+    $rec.empty_recommendation_reasons = @($emptyReasonCodes)
+
     return $rec
 }
 
@@ -287,6 +335,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
         do_not_install = @($recommendations.do_not_install)
         mcp_items = @($mcpItems)
         mcp_removal_candidates = @($mcpRemovals)
+        empty_recommendation_reasons = @($recommendations.empty_recommendation_reasons)
     })
 }
 
@@ -339,6 +388,10 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
         }
     }
     Write-Host "提示：以下序号为原序号；后续 dry-run 汇报与 apply 选择必须沿用原序号。"
+    $totalChanges = @($plan.items).Count + @($plan.removal_candidates).Count + @($plan.mcp_items).Count + @($plan.mcp_removal_candidates).Count
+    if ($totalChanges -eq 0 -and $plan.PSObject.Properties.Match("empty_recommendation_reasons").Count -gt 0 -and @($plan.empty_recommendation_reasons).Count -gt 0) {
+        Write-Host ("空建议原因码: {0}" -f ((@($plan.empty_recommendation_reasons) | ForEach-Object { [string]$_ }) -join ", "))
+    }
     Write-Host ""
     Write-Host ("新增建议: {0} 项" -f @($plan.items).Count)
     if (@($plan.items).Count -eq 0) {

@@ -45,6 +45,10 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
             maintenance = "Prefer projects with recent activity, clear license, and usable documentation."
             operational_cost = "Prefer skills that are easy to install, verify, and roll back."
         }
+        evidence_policy = [ordered]@{
+            min_unique_sources_for_changes = 2
+            require_http_source_for_changes = $true
+        }
         required_evidence = @(
             "Every add/remove recommendation must cite sources inspected in this run.",
             "Do not fabricate repository facts, source links, or source conclusions.",
@@ -78,7 +82,12 @@ function Assert-AuditBundleFileContent([string]$path, [string]$label) {
         "user-profile.json" {
             Need (Test-AuditJsonProperty $data "raw_text") ("user-profile 缺少 raw_text：{0}" -f $path)
             Need (-not [string]::IsNullOrWhiteSpace([string]$data.raw_text)) ("user-profile.raw_text 不能为空：{0}" -f $path)
+            Need (Test-AuditJsonProperty $data "summary") ("user-profile 缺少 summary：{0}" -f $path)
+            Need (-not [string]::IsNullOrWhiteSpace([string]$data.summary)) ("user-profile.summary 不能为空：{0}" -f $path)
             Need (Test-AuditJsonProperty $data "structured") ("user-profile 缺少 structured：{0}" -f $path)
+            Need (Test-AuditStructuredProfileComplete $data.structured) ("user-profile.structured 不完整：{0}" -f $path)
+            Need (Test-AuditJsonProperty $data "last_structured_at") ("user-profile 缺少 last_structured_at：{0}" -f $path)
+            Need (Test-AuditTimestampString ([string]$data.last_structured_at)) ("user-profile.last_structured_at 无效：{0}" -f $path)
         }
         "installed-skills.json" {
             Need (Test-AuditJsonProperty $data "skills") ("installed-skills 缺少 skills：{0}" -f $path)
@@ -95,6 +104,10 @@ function Assert-AuditBundleFileContent([string]$path, [string]$label) {
             Need (Test-AuditJsonProperty $data "sources") ("source-strategy 缺少 sources：{0}" -f $path)
             Need (Assert-IsArray $data.sources) ("source-strategy.sources 必须为数组：{0}" -f $path)
             Need (@($data.sources).Count -gt 0) ("source-strategy.sources 不能为空：{0}" -f $path)
+            if (Test-AuditJsonProperty $data "evidence_policy" -and $null -ne $data.evidence_policy) {
+                Need (Test-AuditJsonProperty $data.evidence_policy "min_unique_sources_for_changes") ("source-strategy.evidence_policy 缺少 min_unique_sources_for_changes：{0}" -f $path)
+                Need ([int]$data.evidence_policy.min_unique_sources_for_changes -ge 1) ("source-strategy.evidence_policy.min_unique_sources_for_changes 必须 >= 1：{0}" -f $path)
+            }
         }
         "recommendations.template.json" {
             Need (Test-AuditJsonProperty $data "schema_version") ("recommendations.template 缺少 schema_version：{0}" -f $path)
@@ -166,6 +179,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
             source_strategy_used = $true
             summary = $basisSummary
         }
+        empty_recommendation_reasons = @("insufficient_reliable_evidence")
         new_skills = @(
             [ordered]@{
                 name = "<new-skill-name>"

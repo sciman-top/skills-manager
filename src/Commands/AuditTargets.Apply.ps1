@@ -9,6 +9,207 @@ function Get-AuditPersistedChangeTotal($counts) {
     return $total
 }
 
+function Get-AuditDryRunSummaryPath([string]$recommendationsPath) {
+    $dir = Split-Path $recommendationsPath -Parent
+    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
+    return (Join-Path $dir "dry-run-summary.json")
+}
+
+function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
+    $add = @()
+    $index = 1
+    foreach ($item in @($plan.items)) {
+        $add += [pscustomobject]([ordered]@{
+            index = $index
+            name = [string]$item.name
+            reason_user_profile = [string]$item.reason_user_profile
+            reason_target_repo = [string]$item.reason_target_repo
+            sources = @($item.sources)
+            status = [string]$item.status
+        })
+        $index++
+    }
+    $remove = @()
+    $index = 1
+    foreach ($item in @($plan.removal_candidates)) {
+        $remove += [pscustomobject]([ordered]@{
+            index = $index
+            name = [string]$item.name
+            installed = [ordered]@{
+                vendor = [string]$item.vendor
+                from = [string]$item.from
+            }
+            reason_user_profile = [string]$item.reason_user_profile
+            reason_target_repo = [string]$item.reason_target_repo
+            sources = @($item.sources)
+            status = [string]$item.status
+        })
+        $index++
+    }
+    $mcpAdd = @()
+    $index = 1
+    foreach ($item in @($plan.mcp_items)) {
+        $mcpAdd += [pscustomobject]([ordered]@{
+            index = $index
+            name = [string]$item.name
+            reason_user_profile = [string]$item.reason_user_profile
+            reason_target_repo = [string]$item.reason_target_repo
+            sources = @($item.sources)
+            status = [string]$item.status
+        })
+        $index++
+    }
+    $mcpRemove = @()
+    $index = 1
+    foreach ($item in @($plan.mcp_removal_candidates)) {
+        $mcpRemove += [pscustomobject]([ordered]@{
+            index = $index
+            name = [string]$item.name
+            installed_name = [string]$item.installed_name
+            reason_user_profile = [string]$item.reason_user_profile
+            reason_target_repo = [string]$item.reason_target_repo
+            sources = @($item.sources)
+            status = [string]$item.status
+        })
+        $index++
+    }
+    return [pscustomobject]([ordered]@{
+        schema_version = 1
+        generated_at = (Get-Date).ToString("o")
+        recommendations_path = $recommendationsPath
+        run_id = [string]$plan.run_id
+        target = [string]$plan.target
+        decision_basis_summary = [string]$plan.decision_basis.summary
+        empty_recommendation_reasons = if ($plan.PSObject.Properties.Match("empty_recommendation_reasons").Count -gt 0) { @($plan.empty_recommendation_reasons) } else { @() }
+        counts = [ordered]@{
+            add = @($add).Count
+            remove = @($remove).Count
+            mcp_add = @($mcpAdd).Count
+            mcp_remove = @($mcpRemove).Count
+        }
+        add = @($add)
+        remove = @($remove)
+        mcp_add = @($mcpAdd)
+        mcp_remove = @($mcpRemove)
+    })
+}
+
+function Get-AuditSourceEvidencePolicy([string]$recommendationDir) {
+    $path = Join-Path $recommendationDir "source-strategy.json"
+    $policy = [ordered]@{
+        enabled = $false
+        source_strategy_path = $path
+        min_unique_sources_for_changes = 0
+        require_http_source_for_changes = $false
+    }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return [pscustomobject]$policy
+    }
+    try {
+        $raw = Get-ContentUtf8 $path
+        if ([string]::IsNullOrWhiteSpace($raw)) {
+            return [pscustomobject]$policy
+        }
+        $data = $raw | ConvertFrom-Json
+        if ($data.PSObject.Properties.Match("evidence_policy").Count -eq 0 -or $null -eq $data.evidence_policy) {
+            return [pscustomobject]$policy
+        }
+        $e = $data.evidence_policy
+        $min = 0
+        if ($e.PSObject.Properties.Match("min_unique_sources_for_changes").Count -gt 0) {
+            $min = [int]$e.min_unique_sources_for_changes
+        }
+        $needHttp = $false
+        if ($e.PSObject.Properties.Match("require_http_source_for_changes").Count -gt 0) {
+            $needHttp = [bool]$e.require_http_source_for_changes
+        }
+        $policy.enabled = ($min -gt 0 -or $needHttp)
+        $policy.min_unique_sources_for_changes = if ($min -lt 0) { 0 } else { $min }
+        $policy.require_http_source_for_changes = $needHttp
+        return [pscustomobject]$policy
+    }
+    catch {
+        return [pscustomobject]$policy
+    }
+}
+
+function Test-AuditRecommendationSourceCoveragePolicy($rec, $policy) {
+    $coverage = Get-AuditRecommendationSourceCoverage $rec
+    $issues = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $policy -or -not [bool]$policy.enabled) {
+        return [pscustomobject]([ordered]@{
+            pass = $true
+            issues = @()
+            coverage = $coverage
+        })
+    }
+    if ([int]$coverage.total_change_items -eq 0) {
+        return [pscustomobject]([ordered]@{
+            pass = $true
+            issues = @()
+            coverage = $coverage
+        })
+    }
+    $requiredUnique = [int]$policy.min_unique_sources_for_changes
+    if ($requiredUnique -gt 0 -and [int]$coverage.unique_source_count -lt $requiredUnique) {
+        $issues.Add(("insufficient_source_coverage：变更建议共 {0} 项，但 unique sources={1}，低于阈值 {2}。" -f [int]$coverage.total_change_items, [int]$coverage.unique_source_count, $requiredUnique)) | Out-Null
+    }
+    if ([bool]$policy.require_http_source_for_changes -and [int]$coverage.http_source_count -lt 1) {
+        $issues.Add("insufficient_source_coverage：变更建议缺少可验证的 http/https 来源。") | Out-Null
+    }
+    return [pscustomobject]([ordered]@{
+        pass = ($issues.Count -eq 0)
+        issues = @($issues)
+        coverage = $coverage
+    })
+}
+
+function Write-AuditRuntimeEvidence([string]$mode, [string]$recommendationsPath, $report, [string[]]$commands = @()) {
+    try {
+        $date = Get-Date -Format "yyyyMMdd"
+        $time = Get-Date -Format "HHmmss"
+        $dir = Join-Path $script:Root "docs\change-evidence"
+        EnsureDir $dir
+        $safeMode = if ([string]::IsNullOrWhiteSpace($mode)) { "unknown" } else { ([regex]::Replace($mode.ToLowerInvariant(), "[^a-z0-9_-]", "-")) }
+        $runId = if ($null -ne $report -and $report.PSObject.Properties.Match("run_id").Count -gt 0) { [string]$report.run_id } else { "" }
+        $safeRun = if ([string]::IsNullOrWhiteSpace($runId)) { "no-runid" } else { ([regex]::Replace($runId, "[^a-zA-Z0-9_-]", "-")) }
+        $path = Join-Path $dir ("{0}-audit-runtime-{1}-{2}-{3}.md" -f $date, $safeMode, $safeRun, $time)
+        $changedCountsJson = if ($null -ne $report -and $report.PSObject.Properties.Match("changed_counts").Count -gt 0) { ($report.changed_counts | ConvertTo-Json -Depth 10 -Compress) } else { "{}" }
+        $rollbackText = if ($null -ne $report -and $report.PSObject.Properties.Match("rollback").Count -gt 0 -and @($report.rollback).Count -gt 0) {
+            (@($report.rollback) | ForEach-Object { "- " + [string]$_ }) -join "`r`n"
+        }
+        else {
+            "- 无"
+        }
+        $commandText = if (@($commands).Count -gt 0) { (@($commands) | ForEach-Object { "- `"$_`"" }) -join "`r`n" } else { "- 无" }
+        $content = @"
+# Audit Runtime Evidence
+
+- mode: $mode
+- run_id: $runId
+- recommendations: $recommendationsPath
+- success: $([bool]$report.success)
+- persisted: $([bool]$report.persisted)
+- timestamp: $(Get-Date -Format "o")
+
+## Commands
+$commandText
+
+## Key Output
+- changed_counts: $changedCountsJson
+
+## Rollback
+$rollbackText
+"@
+        Set-ContentUtf8 $path $content
+        return $path
+    }
+    catch {
+        Log ("写入审查运行证据失败：{0}" -f $_.Exception.Message) "WARN"
+        return ""
+    }
+}
+
 function Apply-AuditMcpSelections($selectedAddItems, $selectedRemoveItems) {
     $selectedAddItems = @($selectedAddItems)
     $selectedRemoveItems = @($selectedRemoveItems)
@@ -78,11 +279,11 @@ function Apply-AuditMcpSelections($selectedAddItems, $selectedRemoveItems) {
 
 function Resolve-AuditRecommendationsPathForPreflight([string]$RecommendationsPath, [string]$RunId) {
     if (-not [string]::IsNullOrWhiteSpace($RecommendationsPath)) {
-        $resolvedInputPath = Resolve-AuditPathRunIdPlaceholder $RecommendationsPath "--recommendations" @("recommendations.json")
+        $resolvedInputPath = Resolve-AuditPathRunIdPlaceholder $RecommendationsPath "--recommendations" @("recommendations.json", "installed-skills.json", "audit-meta.json")
         return (Resolve-AuditTargetPath $resolvedInputPath)
     }
     Need (-not [string]::IsNullOrWhiteSpace($RunId)) "预检至少需要 --run-id 或 --recommendations 其一"
-    $resolvedRunId = Resolve-AuditRunIdInput $RunId "--run-id" @("recommendations.json")
+    $resolvedRunId = Resolve-AuditRunIdInput $RunId "--run-id" @("recommendations.json", "installed-skills.json", "audit-meta.json")
     return (Join-Path (Get-AuditReportRoot $resolvedRunId) "recommendations.json")
 }
 
@@ -145,6 +346,8 @@ function Invoke-AuditRecommendationsPreflight {
     $runPromptVersion = Get-AuditRunPromptContractVersion $recommendationDir
     $currentPromptVersion = Get-AuditPromptContractVersion
     $promptVersionMatched = (-not [string]::IsNullOrWhiteSpace($runPromptVersion) -and [string]$runPromptVersion -eq [string]$currentPromptVersion)
+    $sourcePolicy = Get-AuditSourceEvidencePolicy $recommendationDir
+    $sourceCoverageCheck = Test-AuditRecommendationSourceCoveragePolicy $rec $sourcePolicy
 
     $issues = New-Object System.Collections.Generic.List[string]
     if ($isSnapshotStale) {
@@ -153,6 +356,9 @@ function Invoke-AuditRecommendationsPreflight {
     if (-not $promptVersionMatched) {
         $runPromptDisplay = if ([string]::IsNullOrWhiteSpace($runPromptVersion)) { "missing" } else { [string]$runPromptVersion }
         $issues.Add(("prompt_contract_mismatch：run={0}，current={1}。请先重新运行审查目标 扫描生成新 run。" -f $runPromptDisplay, $currentPromptVersion)) | Out-Null
+    }
+    foreach ($issue in @($sourceCoverageCheck.issues)) {
+        $issues.Add([string]$issue) | Out-Null
     }
 
     $report = [ordered]@{
@@ -166,6 +372,8 @@ function Invoke-AuditRecommendationsPreflight {
             current = $currentPromptVersion
             matched = $promptVersionMatched
         }
+        source_evidence_policy = $sourcePolicy
+        source_coverage = $sourceCoverageCheck.coverage
         snapshot_state = $snapshotState
         live_state = $liveState
         issues = @($issues)
@@ -205,6 +413,38 @@ function Invoke-AuditRecommendationsApply {
     $rec = Load-AuditRecommendations $RecommendationsPath
     $recommendationDir = Split-Path -Parent $RecommendationsPath
     if ([string]::IsNullOrWhiteSpace($recommendationDir)) { $recommendationDir = "." }
+    $sourcePolicy = Get-AuditSourceEvidencePolicy $recommendationDir
+    $sourceCoverageCheck = Test-AuditRecommendationSourceCoveragePolicy $rec $sourcePolicy
+    if (-not [bool]$sourceCoverageCheck.pass) {
+        $sourceMessage = ($sourceCoverageCheck.issues -join " | ")
+        $sourceReport = [ordered]@{
+            schema_version = 2
+            run_id = [string]$rec.run_id
+            target = [string]$rec.target
+            mode = if ($Apply) { "apply" } else { "dry_run" }
+            success = $false
+            persisted = $false
+            error_code = "insufficient_source_coverage"
+            error_message = $sourceMessage
+            source_evidence_policy = $sourcePolicy
+            source_coverage = $sourceCoverageCheck.coverage
+            changed_counts = New-AuditChangedCounts @() @()
+            items = @()
+            removal_candidates = @()
+            mcp_items = @()
+            mcp_removal_candidates = @()
+            overlap_findings = @()
+            do_not_install = @()
+            rollback = @()
+        }
+        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$sourceReport)
+        $evidenceMode = if ($Apply) { "apply-blocked" } else { "dry-run-blocked" }
+        $evidencePath = Write-AuditRuntimeEvidence $evidenceMode $RecommendationsPath ([pscustomobject]$sourceReport) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`"")
+        if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
+            Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
+        }
+        throw $sourceMessage
+    }
     $snapshotPath = Join-Path $recommendationDir "installed-skills.json"
     $liveState = Get-AuditLiveInstalledState
     if (Test-Path -LiteralPath $snapshotPath -PathType Leaf) {
@@ -370,6 +610,11 @@ function Invoke-AuditRecommendationsApply {
         foreach ($item in @($plan.mcp_removal_candidates)) {
             Write-Host ("DRYRUN mcp-remove: {0}" -f [string]$item.installed_name)
         }
+        $dryRunSummaryPath = Get-AuditDryRunSummaryPath $RecommendationsPath
+        $dryRunSummary = New-AuditDryRunSummary $plan $RecommendationsPath
+        Write-AuditJsonFile $dryRunSummaryPath $dryRunSummary
+        $report["dry_run_summary_path"] = $dryRunSummaryPath
+        Write-Host ("dry-run 机器可读摘要：{0}" -f $dryRunSummaryPath) -ForegroundColor Cyan
         Write-Host "DRY-RUN 完成：未修改任何技能映射或 MCP 配置（未落盘）。" -ForegroundColor Red
         Write-Host ("如需真正执行，请运行：.\skills.ps1 审查目标 应用 --recommendations `"{0}`" --apply --yes" -f $RecommendationsPath) -ForegroundColor Red
         if ($RequireDryRunAck) {
@@ -392,11 +637,19 @@ function Invoke-AuditRecommendationsApply {
                 $report["dry_run_ack_received"] = [string]$ackInput
                 $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
                 Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+                $evidencePath = Write-AuditRuntimeEvidence "dry-run-canceled" $RecommendationsPath ([pscustomobject]$report) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`"")
+                if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
+                    Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
+                }
                 return [pscustomobject]$report
             }
             $report["dry_run_acknowledged"] = $true
         }
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+        $evidencePath = Write-AuditRuntimeEvidence "dry-run" $RecommendationsPath ([pscustomobject]$report) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`" --dry-run-ack `"$([string]$DryRunAck)`"")
+        if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
+            Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
+        }
         return [pscustomobject]$report
     }
 
@@ -533,6 +786,10 @@ function Invoke-AuditRecommendationsApply {
         $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
         $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+        $evidencePath = Write-AuditRuntimeEvidence "apply" $RecommendationsPath ([pscustomobject]$report) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`" --apply --yes")
+        if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
+            Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
+        }
         return [pscustomobject]$report
     }
     catch {
@@ -544,6 +801,10 @@ function Invoke-AuditRecommendationsApply {
         $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
         $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+        $evidencePath = Write-AuditRuntimeEvidence "apply-failed" $RecommendationsPath ([pscustomobject]$report) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`" --apply --yes")
+        if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
+            Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
+        }
         throw
     }
 }

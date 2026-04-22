@@ -1,10 +1,47 @@
+function Write-AuditBundleEvidence([string]$mode, [string]$runId, [string]$reportRoot, [string[]]$targets, [string[]]$commands = @()) {
+    try {
+        $date = Get-Date -Format "yyyyMMdd"
+        $time = Get-Date -Format "HHmmss"
+        $dir = Join-Path $script:Root "docs\change-evidence"
+        EnsureDir $dir
+        $safeMode = if ([string]::IsNullOrWhiteSpace($mode)) { "scan" } else { ([regex]::Replace($mode.ToLowerInvariant(), "[^a-z0-9_-]", "-")) }
+        $safeRun = if ([string]::IsNullOrWhiteSpace($runId)) { "no-runid" } else { ([regex]::Replace($runId, "[^a-zA-Z0-9_-]", "-")) }
+        $path = Join-Path $dir ("{0}-audit-runtime-{1}-{2}-{3}.md" -f $date, $safeMode, $safeRun, $time)
+        $commandText = if (@($commands).Count -gt 0) { (@($commands) | ForEach-Object { "- `"$_`"" }) -join "`r`n" } else { "- 无" }
+        $targetText = if (@($targets).Count -gt 0) { (@($targets) | ForEach-Object { "- " + [string]$_ }) -join "`r`n" } else { "- 无" }
+        $content = @"
+# Audit Runtime Evidence
+
+- mode: $mode
+- run_id: $runId
+- report_root: $reportRoot
+- timestamp: $(Get-Date -Format "o")
+
+## Commands
+$commandText
+
+## Targets
+$targetText
+
+## Rollback
+- 删除本次生成目录：`"$reportRoot`"
+"@
+        Set-ContentUtf8 $path $content
+        return $path
+    }
+    catch {
+        Log ("写入审查包证据失败：{0}" -f $_.Exception.Message) "WARN"
+        return ""
+    }
+}
+
 function Invoke-AuditTargetsScan {
     param(
         [string]$Target,
         [string]$OutDir,
         [switch]$Force
     )
-    $cfg = Load-AuditTargetsConfig
+    $cfg = Ensure-AuditUserProfilePrecheck
     Assert-AuditUserProfileReady $cfg
     $targets = @($cfg.targets)
     if (-not [string]::IsNullOrWhiteSpace($Target)) {
@@ -136,6 +173,10 @@ function Invoke-AuditTargetsScan {
     Write-Host ("- audit-meta.json: {0}" -f $auditMetaPath)
     Write-Host ("- recommendations.template.json: {0}" -f $templatePath)
     Write-Host "下一步：把 outer-ai-prompt.md 交给 AI；AI 应先填写并自检 recommendations.json，再执行 dry-run，并按原序号列出技能与 MCP 的新增/卸载清单。" -ForegroundColor Yellow
+    $evidencePath = Write-AuditBundleEvidence "scan" $runId $reportRoot @($scans | ForEach-Object { [string]$_.target.name }) @(".\\skills.ps1 审查目标 扫描")
+    if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
+        Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
+    }
     return [pscustomobject]@{
         run_id = $runId
         path = $reportRoot
@@ -149,7 +190,7 @@ function Invoke-AuditSkillDiscovery {
         [string]$OutDir,
         [switch]$Force
     )
-    $cfg = Load-AuditTargetsConfig
+    $cfg = Ensure-AuditUserProfilePrecheck
     Assert-AuditUserProfileReady $cfg
 
     $runId = Get-AuditRunId
@@ -240,6 +281,10 @@ function Invoke-AuditSkillDiscovery {
     Write-Host ("- audit-meta.json: {0}" -f $auditMetaPath)
     Write-Host ("- recommendations.template.json: {0}" -f $templatePath)
     Write-Host "下一步：把 outer-ai-prompt.md 交给 AI；AI 应先填写并自检 recommendations.json，再执行 dry-run，并按原序号列出技能与 MCP 的新增/卸载清单。" -ForegroundColor Yellow
+    $evidencePath = Write-AuditBundleEvidence "discover-skills" $runId $reportRoot @("profile-only")
+    if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
+        Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
+    }
     return [pscustomobject]@{
         run_id = $runId
         path = $reportRoot
