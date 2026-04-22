@@ -2276,6 +2276,17 @@ function Assert-IsArray($value) {
 }
 function Get-CfgObjectProperty($obj, [string]$name) {
     if ($null -eq $obj) { return $null }
+    if ($obj -is [System.Collections.IDictionary] -or
+        $obj -is [System.Collections.Specialized.OrderedDictionary] -or
+        $obj -is [System.Collections.Specialized.IOrderedDictionary]) {
+        if ($obj.Contains($name)) { return $obj[$name] }
+        foreach ($key in @($obj.Keys)) {
+            if ([string]::Equals([string]$key, $name, [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $obj[$key]
+            }
+        }
+        return $null
+    }
     if ($obj.PSObject.Properties.Match($name).Count -eq 0) { return $null }
     return $obj.$name
 }
@@ -2883,6 +2894,30 @@ function Get-LockPath {
     return (Join-Path $Root "skills.lock.json")
 }
 
+function Get-ImportLockSourceKind($import) {
+    if ($null -eq $import) { return "git" }
+    $kind = [string](Get-CfgObjectProperty $import "source_kind")
+    if (-not [string]::IsNullOrWhiteSpace($kind)) { return $kind.Trim().ToLowerInvariant() }
+    $mode = [string](Get-CfgObjectProperty $import "mode")
+    if ([string]::IsNullOrWhiteSpace($mode)) { $mode = "manual" }
+    $repo = [string](Get-CfgObjectProperty $import "repo")
+    if ($mode -eq "manual" -and (Test-LocalZipRepoInput $repo)) { return "local_zip" }
+    return "git"
+}
+
+function Get-ImportLockSourceHash([string]$repo, [string]$sourceKind) {
+    $kind = if ([string]::IsNullOrWhiteSpace($sourceKind)) { "git" } else { $sourceKind.Trim().ToLowerInvariant() }
+    if ($kind -ne "local_zip") { return $null }
+    Need (Test-LocalZipRepoInput $repo) ("锁定失败：本地 zip 源不存在或无效：{0}" -f $repo)
+    return (Get-FileContentHash $repo)
+}
+
+function Get-ImportLockWorkspaceFingerprint([string]$repoPath) {
+    Need (-not [string]::IsNullOrWhiteSpace($repoPath)) "repoPath 不能为空"
+    Need (Test-Path -LiteralPath $repoPath) ("锁定失败：缺少 import 缓存目录 {0}" -f $repoPath)
+    return (Get-DirectoryFingerprint $repoPath)
+}
+
 function Get-RepoHeadCommit([string]$repoPath) {
     Need (-not [string]::IsNullOrWhiteSpace($repoPath)) "repoPath 不能为空"
     Need (Test-Path -LiteralPath $repoPath) ("仓库目录不存在：{0}" -f $repoPath)
@@ -2931,15 +2966,24 @@ function New-LockData($cfg) {
         $mode = if ($i.PSObject.Properties.Match("mode").Count -gt 0) { [string]($i.mode) } else { "manual" }
         $repoPath = if ($mode -eq "vendor") { VendorPath ([string]($i.name)) } else { Join-Path $ImportDir ([string]($i.name)) }
         Need (Test-Path $repoPath) ("生成锁文件失败：缺少 import 缓存目录 {0}" -f $repoPath)
-        $imports += [ordered]@{
+        $sourceKind = Get-ImportLockSourceKind $i
+        $importEntry = [ordered]@{
             name = [string]($i.name)
             mode = $mode
             repo = [string]($i.repo)
             ref = if ([string]::IsNullOrWhiteSpace([string]($i.ref))) { "main" } else { [string]($i.ref) }
             skill = Normalize-SkillPath ([string]($i.skill))
             sparse = [bool]$i.sparse
-            commit = Get-RepoHeadCommit $repoPath
         }
+        if ($sourceKind -eq "local_zip") {
+            $importEntry.source_kind = $sourceKind
+            $importEntry.source_hash = Get-ImportLockSourceHash ([string]($i.repo)) $sourceKind
+            $importEntry.workspace_fingerprint = Get-ImportLockWorkspaceFingerprint $repoPath
+        }
+        else {
+            $importEntry.commit = Get-RepoHeadCommit $repoPath
+        }
+        $imports += $importEntry
     }
 
     return [ordered]@{
@@ -3038,6 +3082,20 @@ function Assert-LockMatchesWorkspace($cfg, $lock) {
     foreach ($i in @($lock.imports)) {
         $mode = if ([string]::IsNullOrWhiteSpace([string]($i.mode))) { "manual" } else { [string]($i.mode) }
         $path = if ($mode -eq "vendor") { VendorPath ([string]($i.name)) } else { Join-Path $ImportDir ([string]($i.name)) }
+        $sourceKind = Get-ImportLockSourceKind $i
+        if ($sourceKind -eq "local_zip") {
+            $expectedSourceHash = [string](Get-CfgObjectProperty $i "source_hash")
+            Need (-not [string]::IsNullOrWhiteSpace($expectedSourceHash)) ("锁文件缺少 local zip 源指纹：{0}/{1}" -f $mode, [string]($i.name))
+            $actualSourceHash = Get-ImportLockSourceHash ([string]($i.repo)) $sourceKind
+            Need ($actualSourceHash -eq $expectedSourceHash) ("import 源文件不匹配：{0}/{1}（lock={2}, actual={3}）" -f $mode, [string]($i.name), $expectedSourceHash, $actualSourceHash)
+
+            $expectedFingerprint = [string](Get-CfgObjectProperty $i "workspace_fingerprint")
+            Need (-not [string]::IsNullOrWhiteSpace($expectedFingerprint)) ("锁文件缺少 import 工作区指纹：{0}/{1}" -f $mode, [string]($i.name))
+            $actualFingerprint = Get-ImportLockWorkspaceFingerprint $path
+            Need ($actualFingerprint -eq $expectedFingerprint) ("import 内容不匹配：{0}/{1}（lock={2}, actual={3}）" -f $mode, [string]($i.name), $expectedFingerprint, $actualFingerprint)
+            continue
+        }
+
         $actual = Get-RepoHeadCommit $path
         Need ($actual -eq [string]($i.commit)) ("import 提交不匹配：{0}/{1}（lock={2}, actual={3}）" -f $mode, [string]($i.name), [string]($i.commit), [string]$actual)
     }
@@ -3083,10 +3141,29 @@ function Apply-LockToWorkspace($cfg, $lock) {
         $skillPath = Normalize-SkillPath ([string]($i.skill))
         $gitSkillPath = To-GitPath $skillPath
         $sparse = [bool]$i.sparse
+        $sourceKind = Get-ImportLockSourceKind $i
         if ($gitSkillPath -eq "." -and $sparse) { $sparse = $false }
         $sparsePath = if ($sparse) { $gitSkillPath } else { $null }
         $path = Join-Path $ImportDir $name
-        Ensure-Repo $path $repo $ref $sparsePath ([bool]$cfg.update_force) $false $true
+        $forceClean = [bool]$cfg.update_force
+
+        if ($sourceKind -eq "local_zip") {
+            $expectedSourceHash = [string](Get-CfgObjectProperty $i "source_hash")
+            Need (-not [string]::IsNullOrWhiteSpace($expectedSourceHash)) ("锁文件缺少 local zip 源指纹：manual/{0}" -f $name)
+            $actualSourceHash = Get-ImportLockSourceHash $repo $sourceKind
+            Need ($actualSourceHash -eq $expectedSourceHash) ("import 源文件不匹配：manual/{0}（lock={1}, actual={2}）" -f $name, $expectedSourceHash, $actualSourceHash)
+            $forceClean = $true
+        }
+
+        Ensure-Repo $path $repo $ref $sparsePath $forceClean $false $true
+        if ($sourceKind -eq "local_zip") {
+            $expectedFingerprint = [string](Get-CfgObjectProperty $i "workspace_fingerprint")
+            Need (-not [string]::IsNullOrWhiteSpace($expectedFingerprint)) ("锁文件缺少 import 工作区指纹：manual/{0}" -f $name)
+            $actualFingerprint = Get-ImportLockWorkspaceFingerprint $path
+            Need ($actualFingerprint -eq $expectedFingerprint) ("import 内容不匹配：manual/{0}（lock={1}, actual={2}）" -f $name, $expectedFingerprint, $actualFingerprint)
+            continue
+        }
+
         Push-Location $path
         try { Invoke-Git @("checkout", [string]($i.commit)) }
         finally { Pop-Location }
@@ -5736,7 +5813,7 @@ function Invoke-ParallelGitPrefetch($cfg, [int]$Parallelism = 1) {
         $p = Join-Path $ImportDir $i.name
         if (Test-Path $p) { $paths.Add($p) | Out-Null }
     }
-    $paths = @($paths | Select-Object -Unique)
+    $paths = @($paths | Select-Object -Unique | Where-Object { Test-IsGitRepoRoot ([string]$_) })
     if ($paths.Count -eq 0) { return }
 
     $running = @()
@@ -5797,11 +5874,15 @@ function Get-CurrentRepoCommit([string]$path) {
 }
 
 function Resolve-RemoteCommit([string]$repo, [string]$ref) {
+    if ([string]::IsNullOrWhiteSpace($repo)) { return $null }
+    if (Test-LocalZipRepoInput $repo) {
+        return ("zip:{0}" -f (Get-FileContentHash $repo))
+    }
     $targetRef = if ([string]::IsNullOrWhiteSpace($ref)) { "main" } else { $ref }
     $candidates = @(
         $targetRef,
         ("refs/heads/{0}" -f $targetRef),
-        ("refs/tags/{0}^{}" -f $targetRef),
+        ("refs/tags/{0}^{{}}" -f $targetRef),
         ("refs/tags/{0}" -f $targetRef)
     )
     foreach ($candidate in $candidates) {

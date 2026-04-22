@@ -1603,5 +1603,213 @@ url = "https://api.githubcopilot.com/mcp/"
                 $script:ImportDir = $oldImportDir
             }
         }
+
+        It "Writes lock metadata for local zip imports" {
+            $oldRoot = $script:Root
+            $oldCfgPath = $script:CfgPath
+            $oldVendorDir = $script:VendorDir
+            $oldImportDir = $script:ImportDir
+            try {
+                $script:Root = Join-Path $TestDrive "ws-lock-zip"
+                $script:CfgPath = Join-Path $script:Root "skills.json"
+                $script:VendorDir = Join-Path $script:Root "vendor"
+                $script:ImportDir = Join-Path $script:Root "imports"
+                New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+                New-Item -ItemType Directory -Path $script:VendorDir -Force | Out-Null
+                $cache = Join-Path $script:ImportDir "manual-demo"
+                New-Item -ItemType Directory -Path $cache -Force | Out-Null
+                Set-Content -Path (Join-Path $cache "SKILL.md") -Value "---`nname: manual-demo`ndescription: x`n---"
+                $zip = Join-Path $TestDrive "manual-demo.zip"
+                Set-Content -Path $zip -Value "zip-lock-data"
+
+                $cfg = [pscustomobject]@{
+                    vendors      = @()
+                    targets      = @()
+                    mappings     = @()
+                    imports      = @([pscustomobject]@{ name = "manual-demo"; mode = "manual"; repo = $zip; ref = "main"; skill = "."; sparse = $false })
+                    mcp_servers  = @()
+                    mcp_targets  = @()
+                    update_force = $false
+                    sync_mode    = "sync"
+                }
+
+                $lock = Save-LockData $cfg
+                [string]$lock.imports[0].source_kind | Should Be "local_zip"
+                [string]$lock.imports[0].source_hash | Should Not BeNullOrEmpty
+                [string]$lock.imports[0].workspace_fingerprint | Should Not BeNullOrEmpty
+                ($lock.imports[0].PSObject.Properties.Match("commit").Count -gt 0) | Should Be $false
+            }
+            finally {
+                $script:Root = $oldRoot
+                $script:CfgPath = $oldCfgPath
+                $script:VendorDir = $oldVendorDir
+                $script:ImportDir = $oldImportDir
+            }
+        }
+
+        It "Detects local zip source drift in locked workspace" {
+            $oldImportDir = $script:ImportDir
+            try {
+                $script:ImportDir = Join-Path $TestDrive "imports-lock-zip-drift"
+                $cache = Join-Path $script:ImportDir "manual-demo"
+                New-Item -ItemType Directory -Path $cache -Force | Out-Null
+                Set-Content -Path (Join-Path $cache "SKILL.md") -Value "---`nname: manual-demo`ndescription: x`n---"
+                $zip = Join-Path $TestDrive "manual-demo-drift.zip"
+                Set-Content -Path $zip -Value "zip-lock-data-v1"
+
+                $cfg = [pscustomobject]@{
+                    vendors = @()
+                    imports = @([pscustomobject]@{ name = "manual-demo"; mode = "manual"; repo = $zip; ref = "main"; skill = "."; sparse = $false })
+                }
+                $lock = [pscustomobject]@{
+                    version = 1
+                    vendors = @()
+                    imports = @([pscustomobject]@{
+                            name = "manual-demo"
+                            mode = "manual"
+                            repo = $zip
+                            ref = "main"
+                            skill = "."
+                            sparse = $false
+                            source_kind = "local_zip"
+                            source_hash = Get-FileContentHash $zip
+                            workspace_fingerprint = Get-DirectoryFingerprint $cache
+                        })
+                }
+
+                Set-Content -Path $zip -Value "zip-lock-data-v2"
+                $thrown = $false
+                try {
+                    Assert-LockMatchesWorkspace $cfg $lock
+                }
+                catch {
+                    $thrown = $true
+                    $_.Exception.Message | Should Match "源文件不匹配"
+                }
+                $thrown | Should Be $true
+            }
+            finally {
+                $script:ImportDir = $oldImportDir
+            }
+        }
+
+        It "Replays local zip imports end-to-end from rooted archives" {
+            $oldRoot = $script:Root
+            $oldCfgPath = $script:CfgPath
+            $oldVendorDir = $script:VendorDir
+            $oldImportDir = $script:ImportDir
+            try {
+                $workspaceRoot = Join-Path $TestDrive "ws-lock-zip-e2e"
+                $script:Root = $workspaceRoot
+                $script:CfgPath = Join-Path $workspaceRoot "skills.json"
+                $script:VendorDir = Join-Path $workspaceRoot "vendor"
+                $script:ImportDir = Join-Path $workspaceRoot "imports"
+                New-Item -ItemType Directory -Path $workspaceRoot -Force | Out-Null
+                New-Item -ItemType Directory -Path $script:VendorDir -Force | Out-Null
+                New-Item -ItemType Directory -Path $script:ImportDir -Force | Out-Null
+
+                $srcParent = Join-Path $TestDrive "zip-rooted"
+                $src = Join-Path $srcParent "manual-demo-src"
+                New-Item -ItemType Directory -Path $src -Force | Out-Null
+                Set-Content -Path (Join-Path $src "SKILL.md") -Value "---`nname: manual-demo`ndescription: rooted zip`n---"
+                Set-Content -Path (Join-Path $src "note.txt") -Value "rooted archive fixture"
+                $zip = Join-Path $TestDrive "manual-demo-rooted.zip"
+                Compress-Archive -Path $src -DestinationPath $zip -Force
+
+                $cfg = [pscustomobject]@{
+                    vendors      = @()
+                    targets      = @()
+                    mappings     = @()
+                    imports      = @([pscustomobject]@{ name = "manual-demo"; mode = "manual"; repo = $zip; ref = "main"; skill = "."; sparse = $false })
+                    mcp_servers  = @()
+                    mcp_targets  = @()
+                    update_force = $false
+                    sync_mode    = "sync"
+                }
+
+                $cache = Join-Path $script:ImportDir "manual-demo"
+                Ensure-Repo $cache $zip "main" $null $true $false $false
+                $expectedFingerprint = Get-DirectoryFingerprint $cache
+                $expectedSkill = Get-Content -Raw (Join-Path $cache "SKILL.md")
+                $lock = Save-LockData $cfg
+                Remove-Item -LiteralPath $cache -Recurse -Force
+
+                Mock Clear-SkillsCache {}
+
+                Apply-LockToWorkspace $cfg $lock
+
+                (Test-Path (Join-Path $cache "SKILL.md")) | Should Be $true
+                (Get-DirectoryFingerprint $cache) | Should Be $expectedFingerprint
+                (Get-Content -Raw (Join-Path $cache "SKILL.md")) | Should Be $expectedSkill
+                { Assert-LockMatchesWorkspace $cfg $lock } | Should Not Throw
+                Assert-MockCalled Clear-SkillsCache -Times 1 -Exactly
+            }
+            finally {
+                $script:Root = $oldRoot
+                $script:CfgPath = $oldCfgPath
+                $script:VendorDir = $oldVendorDir
+                $script:ImportDir = $oldImportDir
+            }
+        }
+
+        It "Replays local zip imports without git checkout" {
+            $oldImportDir = $script:ImportDir
+            try {
+                $script:ImportDir = Join-Path $TestDrive "imports-lock-zip-apply"
+                $cache = Join-Path $script:ImportDir "manual-demo"
+                New-Item -ItemType Directory -Path $cache -Force | Out-Null
+                Set-Content -Path (Join-Path $cache "SKILL.md") -Value "---`nname: manual-demo`ndescription: x`n---"
+                $zip = Join-Path $TestDrive "manual-demo-apply.zip"
+                Set-Content -Path $zip -Value "zip-lock-apply"
+
+                $cfg = [pscustomobject]@{
+                    vendors = @()
+                    imports = @([pscustomobject]@{ name = "manual-demo"; mode = "manual"; repo = $zip; ref = "main"; skill = "."; sparse = $false })
+                    update_force = $false
+                }
+                $lock = [pscustomobject]@{
+                    version = 1
+                    vendors = @()
+                    imports = @([pscustomobject]@{
+                            name = "manual-demo"
+                            mode = "manual"
+                            repo = $zip
+                            ref = "main"
+                            skill = "."
+                            sparse = $false
+                            source_kind = "local_zip"
+                            source_hash = Get-FileContentHash $zip
+                            workspace_fingerprint = Get-DirectoryFingerprint $cache
+                        })
+                }
+
+                $script:zipLockEnsureArgs = $null
+                Mock Ensure-Repo {
+                    param($path, $repo, $ref, $sparsePath, $forceClean, $confirmClean, $doFetch)
+                    $script:zipLockEnsureArgs = [pscustomobject]@{
+                        path = $path
+                        repo = $repo
+                        ref = $ref
+                        sparsePath = $sparsePath
+                        forceClean = $forceClean
+                        confirmClean = $confirmClean
+                        doFetch = $doFetch
+                    }
+                }
+                Mock Invoke-Git { throw "Invoke-Git should not be called for local zip lock replay." }
+                Mock Clear-SkillsCache {}
+
+                Apply-LockToWorkspace $cfg $lock
+
+                $script:zipLockEnsureArgs | Should Not BeNullOrEmpty
+                $script:zipLockEnsureArgs.forceClean | Should Be $true
+                Assert-MockCalled Ensure-Repo -Times 1 -Exactly
+                Assert-MockCalled Invoke-Git -Times 0 -Exactly
+                Assert-MockCalled Clear-SkillsCache
+            }
+            finally {
+                $script:ImportDir = $oldImportDir
+            }
+        }
     }
 }

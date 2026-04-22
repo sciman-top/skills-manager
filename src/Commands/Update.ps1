@@ -36,7 +36,7 @@ function Invoke-ParallelGitPrefetch($cfg, [int]$Parallelism = 1) {
         $p = Join-Path $ImportDir $i.name
         if (Test-Path $p) { $paths.Add($p) | Out-Null }
     }
-    $paths = @($paths | Select-Object -Unique)
+    $paths = @($paths | Select-Object -Unique | Where-Object { Test-IsGitRepoRoot ([string]$_) })
     if ($paths.Count -eq 0) { return }
 
     $running = @()
@@ -97,11 +97,15 @@ function Get-CurrentRepoCommit([string]$path) {
 }
 
 function Resolve-RemoteCommit([string]$repo, [string]$ref) {
+    if ([string]::IsNullOrWhiteSpace($repo)) { return $null }
+    if (Test-LocalZipRepoInput $repo) {
+        return ("zip:{0}" -f (Get-FileContentHash $repo))
+    }
     $targetRef = if ([string]::IsNullOrWhiteSpace($ref)) { "main" } else { $ref }
     $candidates = @(
         $targetRef,
         ("refs/heads/{0}" -f $targetRef),
-        ("refs/tags/{0}^{}" -f $targetRef),
+        ("refs/tags/{0}^{{}}" -f $targetRef),
         ("refs/tags/{0}" -f $targetRef)
     )
     foreach ($candidate in $candidates) {

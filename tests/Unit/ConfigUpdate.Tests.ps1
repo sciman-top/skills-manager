@@ -232,6 +232,35 @@ Describe "Config And Update Enhancements" {
             }
         }
 
+        It "Skips non-git caches during parallel prefetch" {
+            $oldImportDir = $script:ImportDir
+            try {
+                $script:ImportDir = Join-Path $TestDrive "imports-prefetch"
+                $cache = Join-Path $script:ImportDir "openpyxl"
+                New-Item -ItemType Directory -Path $cache -Force | Out-Null
+
+                $cfg = [pscustomobject]@{
+                    vendors = @()
+                    imports = @(
+                        [pscustomobject]@{
+                            name = "openpyxl"
+                            mode = "manual"
+                        }
+                    )
+                }
+
+                Mock Test-IsGitRepoRoot { $false } -ParameterFilter { $path -eq $cache }
+                Mock Start-Job { throw "Start-Job should not be called for non-git caches." }
+
+                Invoke-ParallelGitPrefetch $cfg 2
+
+                Assert-MockCalled Start-Job -Times 0 -Exactly
+            }
+            finally {
+                $script:ImportDir = $oldImportDir
+            }
+        }
+
         It "Records skip key when target-level force clean is denied" {
             $cfg = [pscustomobject]@{
                 update_force = $true
@@ -284,6 +313,31 @@ Describe "Config And Update Enhancements" {
     }
 
     Context "Update Plan/Upgrade" {
+        It "Builds dereferenced tag candidates without format errors" {
+            Mock Invoke-GitCapture { $null }
+
+            $resolved = $null
+            $thrown = $false
+            try {
+                $resolved = Resolve-RemoteCommit "https://github.com/example/demo.git" "v1"
+            }
+            catch {
+                $thrown = $true
+            }
+
+            $thrown | Should Be $false
+            $resolved | Should Be $null
+        }
+
+        It "Returns local zip hash for archive-based update sources" {
+            $zip = Join-Path $TestDrive "plan-demo.zip"
+            Set-Content -Path $zip -Value "zip-plan-data"
+
+            $resolved = Resolve-RemoteCommit $zip "main"
+
+            $resolved | Should Be ("zip:{0}" -f (Get-FileContentHash $zip))
+        }
+
         It "Runs plan mode without mutating workspace" {
             $oldPlan = $script:Plan
             $oldLocked = $script:Locked
