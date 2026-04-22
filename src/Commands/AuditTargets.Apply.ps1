@@ -76,6 +76,119 @@ function Apply-AuditMcpSelections($selectedAddItems, $selectedRemoveItems) {
     return [pscustomobject]@{ changed = $true }
 }
 
+function Resolve-AuditRecommendationsPathForPreflight([string]$RecommendationsPath, [string]$RunId) {
+    if (-not [string]::IsNullOrWhiteSpace($RecommendationsPath)) {
+        if (Test-AuditPlaceholderToken $RecommendationsPath) {
+            throw ("--recommendations 路径包含未替换占位符：{0}`n{1}" -f $RecommendationsPath, (Get-AuditRunIdHintText))
+        }
+        return (Resolve-AuditTargetPath $RecommendationsPath)
+    }
+    Need (-not [string]::IsNullOrWhiteSpace($RunId)) "预检至少需要 --run-id 或 --recommendations 其一"
+    if (Test-AuditPlaceholderToken $RunId) {
+        throw ("--run-id 包含未替换占位符：{0}`n{1}" -f $RunId, (Get-AuditRunIdHintText))
+    }
+    return (Join-Path (Get-AuditReportRoot $RunId) "recommendations.json")
+}
+
+function Get-AuditRunPromptContractVersion([string]$recommendationDir) {
+    $metaPath = Join-Path $recommendationDir "audit-meta.json"
+    if (Test-Path -LiteralPath $metaPath -PathType Leaf) {
+        try {
+            $metaRaw = Get-ContentUtf8 $metaPath
+            if (-not [string]::IsNullOrWhiteSpace($metaRaw)) {
+                $meta = $metaRaw | ConvertFrom-Json
+                if ($meta.PSObject.Properties.Match("prompt_contract_version").Count -gt 0) {
+                    $version = ([string]$meta.prompt_contract_version).Trim()
+                    if (-not [string]::IsNullOrWhiteSpace($version)) {
+                        return $version
+                    }
+                }
+            }
+        }
+        catch {
+            # Fallback to outer-ai-prompt.md parser
+        }
+    }
+    $promptPath = Join-Path $recommendationDir "outer-ai-prompt.md"
+    if (Test-Path -LiteralPath $promptPath -PathType Leaf) {
+        $promptRaw = Get-ContentUtf8 $promptPath
+        if (-not [string]::IsNullOrWhiteSpace($promptRaw)) {
+            $match = [regex]::Match($promptRaw, "(?m)^\s*Prompt-Contract-Version:\s*(?<version>\S+)\s*$")
+            if ($match.Success) {
+                return ([string]$match.Groups["version"].Value).Trim()
+            }
+        }
+    }
+    return ""
+}
+
+function Invoke-AuditRecommendationsPreflight {
+    param(
+        [string]$RecommendationsPath,
+        [string]$RunId
+    )
+    $resolvedRecommendations = Resolve-AuditRecommendationsPathForPreflight $RecommendationsPath $RunId
+    $rec = Load-AuditRecommendations $resolvedRecommendations
+    $recommendationDir = Split-Path -Parent $resolvedRecommendations
+    if ([string]::IsNullOrWhiteSpace($recommendationDir)) { $recommendationDir = "." }
+    $snapshotPath = Join-Path $recommendationDir "installed-skills.json"
+    $liveState = Get-AuditLiveInstalledState
+    if (Test-Path -LiteralPath $snapshotPath -PathType Leaf) {
+        $snapshotState = Get-AuditInstalledSnapshotState $snapshotPath
+    }
+    else {
+        $snapshotState = New-AuditInstalledSnapshotFallbackState $liveState $snapshotPath
+    }
+    $skillSnapshotStale = ([string]$snapshotState.fingerprint -ne [string]$liveState.fingerprint)
+    $mcpSnapshotStale = $false
+    if ($snapshotState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.mcp_fingerprint)) {
+        $mcpSnapshotStale = ([string]$snapshotState.mcp_fingerprint -ne [string]$liveState.mcp_fingerprint)
+    }
+    $isSnapshotStale = ($skillSnapshotStale -or $mcpSnapshotStale)
+
+    $runPromptVersion = Get-AuditRunPromptContractVersion $recommendationDir
+    $currentPromptVersion = Get-AuditPromptContractVersion
+    $promptVersionMatched = (-not [string]::IsNullOrWhiteSpace($runPromptVersion) -and [string]$runPromptVersion -eq [string]$currentPromptVersion)
+
+    $issues = New-Object System.Collections.Generic.List[string]
+    if ($isSnapshotStale) {
+        $issues.Add("stale_snapshot：审查快照与当前生效配置不一致，请先重新运行审查目标 扫描。") | Out-Null
+    }
+    if (-not $promptVersionMatched) {
+        $runPromptDisplay = if ([string]::IsNullOrWhiteSpace($runPromptVersion)) { "missing" } else { [string]$runPromptVersion }
+        $issues.Add(("prompt_contract_mismatch：run={0}，current={1}。请先重新运行审查目标 扫描生成新 run。" -f $runPromptDisplay, $currentPromptVersion)) | Out-Null
+    }
+
+    $report = [ordered]@{
+        schema_version = 1
+        run_id = [string]$rec.run_id
+        target = [string]$rec.target
+        success = ($issues.Count -eq 0)
+        recommendations_path = $resolvedRecommendations
+        prompt_contract = [ordered]@{
+            run = $runPromptVersion
+            current = $currentPromptVersion
+            matched = $promptVersionMatched
+        }
+        snapshot_state = $snapshotState
+        live_state = $liveState
+        issues = @($issues)
+    }
+    $reportPath = Join-Path $recommendationDir "preflight-report.json"
+    Write-AuditJsonFile $reportPath ([pscustomobject]$report)
+
+    Write-Host ("预检报告：{0}" -f $reportPath) -ForegroundColor Cyan
+    if ($issues.Count -eq 0) {
+        Write-Host "预检通过：快照与提示词契约均匹配，可继续研究与 dry-run。" -ForegroundColor Green
+        return [pscustomobject]$report
+    }
+
+    foreach ($issue in @($issues)) {
+        Write-Host ("- {0}" -f [string]$issue) -ForegroundColor Red
+    }
+    throw ("预检失败：{0}" -f ($issues -join " | "))
+}
+
 function Invoke-AuditRecommendationsApply {
     param(
         [string]$RecommendationsPath,

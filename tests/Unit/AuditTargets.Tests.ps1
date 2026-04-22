@@ -213,6 +213,10 @@ Describe "Audit Targets" {
 
             $status = Parse-AuditTargetsArgs @("status")
             $status.action | Should Be "status"
+
+            $preflight = Parse-AuditTargetsArgs @("preflight", "--run-id", "20260422-010101-001")
+            $preflight.action | Should Be "preflight"
+            $preflight.run_id | Should Be "20260422-010101-001"
         }
 
         It "Parses apply selection indexes for add and remove lists" {
@@ -246,6 +250,7 @@ Describe "Audit Targets" {
             (Parse-AuditTargetsArgs @("扫描")).action | Should Be "scan"
             (Parse-AuditTargetsArgs @("发现新技能")).action | Should Be "discover_skills"
             (Parse-AuditTargetsArgs @("状态")).action | Should Be "status"
+            (Parse-AuditTargetsArgs @("预检", "--run-id", "demo-run")).action | Should Be "preflight"
             (Parse-AuditTargetsArgs @("应用确认", "--recommendations", "r.json")).action | Should Be "apply_flow"
             (Parse-AuditTargetsArgs @("应用", "--recommendations", "r.json")).action | Should Be "apply"
         }
@@ -498,12 +503,17 @@ Describe "Audit Targets" {
                 Test-Path (Join-Path $out "recommendations.template.json") | Should Be $true
                 Test-Path (Join-Path $out "ai-brief.md") | Should Be $true
                 Test-Path (Join-Path $out "outer-ai-prompt.md") | Should Be $true
+                Test-Path (Join-Path $out "audit-meta.json") | Should Be $true
                 Test-Path (Join-Path $out "repo-scan.json") | Should Be $false
                 Test-Path (Join-Path $out "repo-scans.json") | Should Be $false
 
                 $template = Get-ContentUtf8 (Join-Path $out "recommendations.template.json") | ConvertFrom-Json
                 $template.recommendation_mode | Should Be "profile-only"
                 $template.decision_basis.target_scan_used | Should Be $false
+
+                $meta = Get-ContentUtf8 (Join-Path $out "audit-meta.json") | ConvertFrom-Json
+                $meta.mode | Should Be "profile-only"
+                $meta.prompt_contract_version | Should Be (Get-AuditPromptContractVersion)
 
                 $brief = Get-Content -LiteralPath (Join-Path $out "ai-brief.md") -Raw
                 $brief | Should Match "profile-only skill discovery"
@@ -658,6 +668,8 @@ Describe "Audit Targets" {
             $prompt | Should Match "dry-run"
             $prompt | Should Match "do_not_install"
             $prompt | Should Match "N/A"
+            $prompt | Should Match "installed-skills.json"
+            $prompt | Should Match "不得产出重复建议"
         }
 
         It "Keeps built-in prompt markdown inline code literal without control-character corruption" {
@@ -693,6 +705,10 @@ Describe "Audit Targets" {
             $brief | Should Match "Cite only sources you actually inspected during this run"
             $brief | Should Match "User-facing dry-run summary format"
             $brief | Should Match "Stop before dry-run if any self-check item fails"
+            $brief | Should Match "installed-skills.json as the audit snapshot"
+            $brief | Should Match "decision_basis.summary"
+            $brief | Should Match "name == server.name"
+            $brief | Should Match "No duplicate skill add/remove or MCP add/remove recommendations"
         }
 
         It "Writes profile-only audit brief with explicit target-scan false guidance" {
@@ -719,6 +735,10 @@ Describe "Audit Targets" {
             $prompt | Should Match "无新增建议"
             $prompt | Should Match "install.mode"
             $prompt | Should Match "sources`` 只能填写本轮真实查看过的来源"
+            $prompt | Should Match "ai-brief.md、user-profile.json、installed-skills.json"
+            $prompt | Should Match "decision_basis.summary`` 非空"
+            $prompt | Should Match "name`` 必须等于 ``server.name``"
+            $prompt | Should Match "不得保留重复的技能新增/卸载建议或重复的 MCP 新增/卸载建议"
         }
 
         It "Writes profile-only runtime outer AI prompt without requiring repo scan" {
@@ -952,6 +972,48 @@ Describe "Audit Targets" {
             $report.changed_counts.add_planned | Should Be 1
             $report.changed_counts.add_installed | Should Be 0
             $report.dry_run_acknowledged | Should Be $true
+        }
+
+        It "Preflight passes when snapshot and prompt contract are aligned" {
+            $runId = "r-preflight-ok"
+            $runDir = Join-Path $TestDrive $runId
+            New-Item -ItemType Directory -Path $runDir -Force | Out-Null
+
+            $recPath = Join-Path $runDir "recommendations.json"
+            Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-preflight-ok","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+
+            $live = Get-AuditLiveInstalledState
+            Set-ContentUtf8 (Join-Path $runDir "installed-skills.json") ('{"schema_version":1,"skills":[],"mcp_servers":[],"live_fingerprint":"' + [string]$live.fingerprint + '","live_mcp_fingerprint":"' + [string]$live.mcp_fingerprint + '"}')
+            Set-ContentUtf8 (Join-Path $runDir "audit-meta.json") ('{"schema_version":1,"run_id":"r-preflight-ok","mode":"target-repo","prompt_contract_version":"' + (Get-AuditPromptContractVersion) + '"}')
+            Set-ContentUtf8 (Join-Path $runDir "outer-ai-prompt.md") ("Prompt-Contract-Version: " + (Get-AuditPromptContractVersion))
+
+            $report = Invoke-AuditRecommendationsPreflight -RecommendationsPath $recPath
+            $report.success | Should Be $true
+            $report.prompt_contract.matched | Should Be $true
+            (Test-Path (Join-Path $runDir "preflight-report.json")) | Should Be $true
+        }
+
+        It "Preflight blocks stale snapshot before dry-run" {
+            $runId = "r-preflight-stale"
+            $runDir = Join-Path $TestDrive $runId
+            New-Item -ItemType Directory -Path $runDir -Force | Out-Null
+
+            $recPath = Join-Path $runDir "recommendations.json"
+            Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-preflight-stale","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+            Set-ContentUtf8 (Join-Path $runDir "installed-skills.json") '{"schema_version":1,"skills":[],"mcp_servers":[],"live_fingerprint":"deadbeef","live_mcp_fingerprint":"deadbeef"}'
+            Set-ContentUtf8 (Join-Path $runDir "audit-meta.json") ('{"schema_version":1,"run_id":"r-preflight-stale","mode":"target-repo","prompt_contract_version":"' + (Get-AuditPromptContractVersion) + '"}')
+            Set-ContentUtf8 (Join-Path $runDir "outer-ai-prompt.md") ("Prompt-Contract-Version: " + (Get-AuditPromptContractVersion))
+
+            $thrown = $false
+            try {
+                Invoke-AuditRecommendationsPreflight -RecommendationsPath $recPath | Out-Null
+            }
+            catch {
+                $thrown = $true
+                $_.Exception.Message | Should Match "stale_snapshot"
+            }
+            $thrown | Should Be $true
+            (Test-Path (Join-Path $runDir "preflight-report.json")) | Should Be $true
         }
     }
 }

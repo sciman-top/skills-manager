@@ -5,6 +5,7 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
         path = $null
         profile = $null
         target = $null
+        run_id = $null
         out = $null
         query = $null
         recommendations = $null
@@ -49,6 +50,8 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             "discover" { $result.action = "discover_skills"; $items = @($items | Select-Object -Skip 1) }
             "状态" { $result.action = "status"; $items = @($items | Select-Object -Skip 1) }
             "status" { $result.action = "status"; $items = @($items | Select-Object -Skip 1) }
+            "预检" { $result.action = "preflight"; $items = @($items | Select-Object -Skip 1) }
+            "preflight" { $result.action = "preflight"; $items = @($items | Select-Object -Skip 1) }
             "应用确认" { $result.action = "apply_flow"; $items = @($items | Select-Object -Skip 1) }
             "apply-flow" { $result.action = "apply_flow"; $items = @($items | Select-Object -Skip 1) }
             "应用" { $result.action = "apply"; $items = @($items | Select-Object -Skip 1) }
@@ -65,6 +68,14 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             "--target" {
                 Need ($i + 1 -lt $items.Count) "--target 缺少值"
                 $result.target = [string]$items[++$i]
+                continue
+            }
+            "--run-id" {
+                Need ($i + 1 -lt $items.Count) "--run-id 缺少值"
+                $result.run_id = [string]$items[++$i]
+                if (Test-AuditPlaceholderToken $result.run_id) {
+                    throw ("--run-id 包含未替换占位符：{0}`n{1}" -f $result.run_id, (Get-AuditRunIdHintText))
+                }
                 continue
             }
             "--profile" {
@@ -208,6 +219,7 @@ function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
         }
         "list" { Write-AuditTargetsList }
         "status" { Show-AuditLatestStatus }
+        "preflight" { Invoke-AuditRecommendationsPreflight -RecommendationsPath $opts.recommendations -RunId $opts.run_id | Out-Null }
         "scan" { Invoke-AuditTargetsScan -Target $opts.target -OutDir $opts.out -Force:$opts.force | Out-Null }
         "discover_skills" { Invoke-AuditSkillDiscovery -Query $opts.query -OutDir $opts.out -Force:$opts.force | Out-Null }
         "apply_flow" { Invoke-AuditRecommendationsTwoStageApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -McpAddSelection $opts.mcp_add_selection -McpRemoveSelection $opts.mcp_remove_selection -DryRunAck $opts.dry_run_ack -StaleAck $opts.stale_ack -AllowStaleSnapshot:$opts.allow_stale_snapshot | Out-Null }

@@ -96,6 +96,14 @@ function Invoke-AuditTargetsScan {
     Write-AuditAiBrief $briefPath $scans $userProfilePath $repoScanPath $repoScansPath $installedPath $templatePath "target-repo" "" $sourceStrategyPath
     $outerAiPromptPath = Join-Path $reportRoot "outer-ai-prompt.md"
     Write-AuditOuterAiPromptFile $outerAiPromptPath $reportRoot $briefPath $userProfilePath $repoScanPath $repoScansPath $installedPath $templatePath "target-repo" "" $sourceStrategyPath
+    $auditMetaPath = Join-Path $reportRoot "audit-meta.json"
+    Write-AuditJsonFile $auditMetaPath ([pscustomobject]@{
+            schema_version = 1
+            run_id = [string]$runId
+            mode = "target-repo"
+            prompt_contract_version = (Get-AuditPromptContractVersion)
+            generated_at = (Get-Date).ToString("o")
+        })
 
     $requiredFiles = New-Object System.Collections.Generic.List[object]
     $requiredFiles.Add([pscustomobject]@{ label = "user-profile.json"; path = $userProfilePath }) | Out-Null
@@ -110,6 +118,7 @@ function Invoke-AuditTargetsScan {
     $requiredFiles.Add([pscustomobject]@{ label = "recommendations.template.json"; path = $templatePath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "ai-brief.md"; path = $briefPath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "outer-ai-prompt.md"; path = $outerAiPromptPath }) | Out-Null
+    $requiredFiles.Add([pscustomobject]@{ label = "audit-meta.json"; path = $auditMetaPath }) | Out-Null
     Assert-AuditBundleRequiredFiles ($requiredFiles.ToArray())
     Write-Host ("审查包已生成：{0}" -f $reportRoot) -ForegroundColor Green
     Write-Host "关键产物：" -ForegroundColor Cyan
@@ -124,6 +133,7 @@ function Invoke-AuditTargetsScan {
     Write-Host ("- source-strategy.json: {0}" -f $sourceStrategyPath)
     Write-Host ("- ai-brief.md: {0}" -f $briefPath)
     Write-Host ("- outer-ai-prompt.md: {0}" -f $outerAiPromptPath)
+    Write-Host ("- audit-meta.json: {0}" -f $auditMetaPath)
     Write-Host ("- recommendations.template.json: {0}" -f $templatePath)
     Write-Host "下一步：把 outer-ai-prompt.md 交给 AI；AI 应先填写并自检 recommendations.json，再执行 dry-run，并按原序号列出技能与 MCP 的新增/卸载清单。" -ForegroundColor Yellow
     return [pscustomobject]@{
@@ -201,6 +211,14 @@ function Invoke-AuditSkillDiscovery {
     Write-AuditAiBrief $briefPath @() $userProfilePath "" "" $installedPath $templatePath "profile-only" $Query $sourceStrategyPath
     $outerAiPromptPath = Join-Path $reportRoot "outer-ai-prompt.md"
     Write-AuditOuterAiPromptFile $outerAiPromptPath $reportRoot $briefPath $userProfilePath "" "" $installedPath $templatePath "profile-only" $Query $sourceStrategyPath
+    $auditMetaPath = Join-Path $reportRoot "audit-meta.json"
+    Write-AuditJsonFile $auditMetaPath ([pscustomobject]@{
+            schema_version = 1
+            run_id = [string]$runId
+            mode = "profile-only"
+            prompt_contract_version = (Get-AuditPromptContractVersion)
+            generated_at = (Get-Date).ToString("o")
+        })
 
     $requiredFiles = New-Object System.Collections.Generic.List[object]
     $requiredFiles.Add([pscustomobject]@{ label = "user-profile.json"; path = $userProfilePath }) | Out-Null
@@ -209,6 +227,7 @@ function Invoke-AuditSkillDiscovery {
     $requiredFiles.Add([pscustomobject]@{ label = "recommendations.template.json"; path = $templatePath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "ai-brief.md"; path = $briefPath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "outer-ai-prompt.md"; path = $outerAiPromptPath }) | Out-Null
+    $requiredFiles.Add([pscustomobject]@{ label = "audit-meta.json"; path = $auditMetaPath }) | Out-Null
     Assert-AuditBundleRequiredFiles ($requiredFiles.ToArray())
 
     Write-Host ("新技能发现包已生成：{0}" -f $reportRoot) -ForegroundColor Green
@@ -218,6 +237,7 @@ function Invoke-AuditSkillDiscovery {
     Write-Host ("- source-strategy.json: {0}" -f $sourceStrategyPath)
     Write-Host ("- ai-brief.md: {0}" -f $briefPath)
     Write-Host ("- outer-ai-prompt.md: {0}" -f $outerAiPromptPath)
+    Write-Host ("- audit-meta.json: {0}" -f $auditMetaPath)
     Write-Host ("- recommendations.template.json: {0}" -f $templatePath)
     Write-Host "下一步：把 outer-ai-prompt.md 交给 AI；AI 应先填写并自检 recommendations.json，再执行 dry-run，并按原序号列出技能与 MCP 的新增/卸载清单。" -ForegroundColor Yellow
     return [pscustomobject]@{

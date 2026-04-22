@@ -69,11 +69,13 @@ function Get-DefaultAuditOuterAiPrompt {
 ## 质量与来源要求
 
 - 目标仓审查必须同时基于“用户基本需求”和“目标仓事实”做判断；profile-only 新技能发现必须同时基于“用户基本需求”“已安装技能清单”和“来源策略”做判断。
+- 目标仓审查在判断新增/卸载技能或 MCP 时，也必须参考 ``installed-skills.json`` 中的已安装技能/MCP 快照；不得把 live state 臆造成审查输入。
 - 优先参考官方文档、skills.sh、find-skills、GitHub 高质量项目、GitHub Trending。
 - 每条建议都要能回答两个问题：为什么适合用户长期工作流、为什么符合目标仓事实或 profile-only 场景。
 - 若来源相互冲突，选择更高可信来源并在 ``sources`` 中保留依据。
 - ``overlap_findings`` 仅作报告，不可直接视为卸载建议；确需卸载时，必须单独给出双理由。
 - ``do_not_install`` 用于记录“已研究但当前不建议安装”的技能或 MCP，避免重复研究。
+- 对同一技能安装项、同一技能卸载定位、同一 MCP 名称，不得产出重复建议。
 - 不得伪造仓库事实、来源链接、来源结论，或把模板示例伪装成真实结论。
 
 ## 交付方式
@@ -541,6 +543,10 @@ function Get-AuditRunId {
     return (Get-Date -Format "yyyyMMdd-HHmmss-fff")
 }
 
+function Get-AuditPromptContractVersion {
+    return "audit-prompt-v20260422.1"
+}
+
 function Get-AuditReportRoot([string]$runId) {
     return (Join-Path $script:Root (Join-Path "reports\skill-audit" $runId))
 }
@@ -788,12 +794,12 @@ Rules:
 - Skill removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and the exact installed ``vendor``/``from`` pair.
 - MCP installs must include ``reason_user_profile``, ``reason_target_repo``, sources, confidence, and a valid ``server`` payload.
 - MCP removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and ``installed.name``.
-- Skill `install.mode` must stay `manual` or `vendor`; `confidence` must stay `low`, `medium`, or `high`.
+- Skill ``install.mode`` must stay ``manual`` or ``vendor``; ``confidence`` must stay ``low``, ``medium``, or ``high``.
 - MCP ``server.transport`` must stay ``stdio``/``sse``/``http``; ``stdio`` requires ``command``; ``sse/http`` requires ``url``.
 - Each add/remove recommendation must keep both reasons concise and user-readable.
 - If either reason field is missing on any recommendation, treat the run as incomplete and stop before dry-run summary.
 - Overlap findings are report-only; do not recommend automatic uninstall.
-- Use `do_not_install` for researched options that should stay out of the repo right now.
+- Use ``do_not_install`` for researched options that should stay out of the repo right now.
 - Prefer high-reputation sources and avoid weak duplicate skills.
 - Cover the built-in default sources and record the actual sources you used.
 - Keep recommendations machine-readable JSON matching the template.
@@ -806,7 +812,7 @@ Rules:
 
 Pre-dry-run self-check:
 
-- recommendations.json parses as JSON and keeps `schema_version = 2`.
+- recommendations.json parses as JSON and keeps ``schema_version = 2``.
 - ``recommendation_mode`` is ``profile-only``.
 - ``decision_basis.user_profile_used`` and ``decision_basis.source_strategy_used`` are ``true``.
 - ``decision_basis.target_scan_used`` is ``false``.
@@ -825,11 +831,11 @@ Execution order:
 
 User-facing dry-run summary format:
 
-- add: `[index] <skill-name> | user: <reason_user_profile> | context: <reason_target_repo>`
-- remove: `[index] <skill-name> | user: <reason_user_profile> | context: <reason_target_repo>`
-- mcp-add: `[index] <mcp-name> | user: <reason_user_profile> | context: <reason_target_repo>`
-- mcp-remove: `[index] <mcp-name> | user: <reason_user_profile> | context: <reason_target_repo>`
-- empty category: `no add recommendations: <brief reason>` / `no removal recommendations: <brief reason>` / `no mcp-add recommendations: <brief reason>` / `no mcp-remove recommendations: <brief reason>`
+- add: ``[index] <skill-name> | user: <reason_user_profile> | context: <reason_target_repo>``
+- remove: ``[index] <skill-name> | user: <reason_user_profile> | context: <reason_target_repo>``
+- mcp-add: ``[index] <mcp-name> | user: <reason_user_profile> | context: <reason_target_repo>``
+- mcp-remove: ``[index] <mcp-name> | user: <reason_user_profile> | context: <reason_target_repo>``
+- empty category: ``no add recommendations: <brief reason>`` / ``no removal recommendations: <brief reason>`` / ``no mcp-add recommendations: <brief reason>`` / ``no mcp-remove recommendations: <brief reason>``
 
 User profile JSON: $userProfilePath
 Installed skills JSON: $installedSkillsPath
@@ -867,23 +873,23 @@ Scan inputs:
 
 Rules:
 
-- All decisions must be based on BOTH user-profile.json and target repo scan facts.
+- All decisions must be based on BOTH user-profile.json and target repo scan facts, and must use installed-skills.json as the audit snapshot for currently installed skills and MCP servers.
 - Use source-strategy.json to cover the built-in source set and explain source tradeoffs.
-- Treat any scan path shown as `N/A` as "not provided"; do not infer hidden content from it.
+- Treat any scan path shown as ``N/A`` as "not provided"; do not infer hidden content from it.
 - If any required local input is missing, unreadable, or empty, stop and report the blocker instead of guessing.
 - Network research is authorized within this audit workflow, but installation still requires --apply --yes.
 - Replace every template placeholder wrapped in `<...>` or delete the example entry entirely; do not leave placeholder values in the final file.
-- Keep `decision_basis.user_profile_used`, `decision_basis.target_scan_used`, and `decision_basis.source_strategy_used` as boolean `true`, and provide a non-empty `decision_basis.summary`.
+- Keep ``decision_basis.user_profile_used``, ``decision_basis.target_scan_used``, and ``decision_basis.source_strategy_used`` as boolean ``true``, and provide a non-empty ``decision_basis.summary``.
 - Skill installs require ``reason_user_profile``, ``reason_target_repo``, source links, confidence, repo, skill path, ref, and mode.
 - Skill removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and the exact installed ``vendor``/``from`` pair.
 - MCP installs must include ``reason_user_profile``, ``reason_target_repo``, sources, confidence, and a valid ``server`` payload.
 - MCP removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and ``installed.name``.
-- Skill `install.mode` must stay `manual` or `vendor`; `confidence` must stay `low`, `medium`, or `high`.
+- Skill ``install.mode`` must stay ``manual`` or ``vendor``; ``confidence`` must stay ``low``, ``medium``, or ``high``.
 - MCP ``server.transport`` must stay ``stdio``/``sse``/``http``; ``stdio`` requires ``command``; ``sse/http`` requires ``url``.
 - Each add/remove recommendation must keep both reasons concise and user-readable.
 - If either reason field is missing on any recommendation, treat the run as incomplete and stop before dry-run summary.
 - Overlap findings are report-only; do not recommend automatic uninstall.
-- Use `do_not_install` for researched options that should stay out of the repo right now.
+- Use ``do_not_install`` for researched options that should stay out of the repo right now.
 - Prefer high-reputation sources and avoid weak duplicate skills.
 - Cover the built-in default sources and record the actual sources you used.
 - Keep recommendations machine-readable JSON matching the template.
@@ -896,10 +902,13 @@ Rules:
 
 Pre-dry-run self-check:
 
-- recommendations.json parses as JSON and keeps `schema_version = 2`.
-- `decision_basis` keeps all required boolean flags at `true`.
+- recommendations.json parses as JSON and keeps ``schema_version = 2``.
+- ``decision_basis`` keeps all required boolean flags at ``true``.
+- ``decision_basis.summary`` is non-empty.
 - No remaining placeholder values wrapped in `<...>`.
 - Each skill/MCP add/remove item has both reasons plus at least one real source.
+- Each MCP add item keeps ``name == server.name``.
+- No duplicate skill add/remove or MCP add/remove recommendations remain in the final file.
 - Stop before dry-run if any self-check item fails.
 
 Execution order:
@@ -913,10 +922,10 @@ Execution order:
 
 User-facing dry-run summary format:
 
-- add: `[index] <skill-name> | user: <reason_user_profile> | repo: <reason_target_repo>`
-- remove: `[index] <skill-name> | user: <reason_user_profile> | repo: <reason_target_repo>`
-- mcp-add: `[index] <mcp-name> | user: <reason_user_profile> | repo: <reason_target_repo>`
-- mcp-remove: `[index] <mcp-name> | user: <reason_user_profile> | repo: <reason_target_repo>`
+- add: ``[index] <skill-name> | user: <reason_user_profile> | repo: <reason_target_repo>``
+- remove: ``[index] <skill-name> | user: <reason_user_profile> | repo: <reason_target_repo>``
+- mcp-add: ``[index] <mcp-name> | user: <reason_user_profile> | repo: <reason_target_repo>``
+- mcp-remove: ``[index] <mcp-name> | user: <reason_user_profile> | repo: <reason_target_repo>``
 - empty category: `no add recommendations: <brief reason>` / `no removal recommendations: <brief reason>` / `no mcp-add recommendations: <brief reason>` / `no mcp-remove recommendations: <brief reason>`
 
 User profile JSON: $userProfilePath
@@ -936,13 +945,13 @@ function Write-AuditOuterAiPromptFile([string]$path, [string]$reportRoot, [strin
         "1. 阅读 ai-brief.md、user-profile.json、installed-skills.json、source-strategy.json；repo-scan 输入为 N/A 时代表本轮不绑定目标仓。"
     }
     else {
-        "1. 阅读 ai-brief.md，并按存在文件读取 repo-scan.json / repo-scans.json，同时读取 source-strategy.json。"
+        "1. 阅读 ai-brief.md、user-profile.json、installed-skills.json，并按存在文件读取 repo-scan.json / repo-scans.json，同时读取 source-strategy.json。"
     }
     $basisCheckStep = if ($normalizedMode -eq "profile-only") {
-        "   - recommendations.json 与模板字段同构，``recommendation_mode = profile-only``，``decision_basis.user_profile_used`` / ``decision_basis.source_strategy_used`` 为 ``true``，``decision_basis.target_scan_used`` 为 ``false``"
+        "   - recommendations.json 与模板字段同构，``recommendation_mode = profile-only``，``decision_basis.user_profile_used`` / ``decision_basis.source_strategy_used`` 为 ``true``，``decision_basis.target_scan_used`` 为 ``false``，且 ``decision_basis.summary`` 非空"
     }
     else {
-        "   - recommendations.json 与模板字段同构，``decision_basis`` 三个布尔字段都为 ``true``"
+        "   - recommendations.json 与模板字段同构，``decision_basis`` 三个布尔字段都为 ``true``，且 ``decision_basis.summary`` 非空"
     }
     $modeBlocking = if ($normalizedMode -eq "profile-only") {
         '- 本轮是 profile-only；不得编造目标仓事实，``reason_target_repo`` 必须解释当前已安装技能 / profile-only 场景依据'
@@ -958,6 +967,7 @@ $(Get-AuditOuterAiPromptContent)
 ## Current Audit Run Files
 
 - 审查包目录：$reportRoot
+- Prompt-Contract-Version: $(Get-AuditPromptContractVersion)
 - 模式：$normalizedMode
 - 发现查询：$queryText
 - 任务说明：$briefPath
@@ -978,7 +988,8 @@ $basisCheckStep
    - 不保留模板占位符 ``<...>`` 或未替换的示例值
    - 每条技能/MCP 新增或卸载建议都包含 ``reason_user_profile`` + ``reason_target_repo`` + 至少 1 个真实 ``sources``
    - 技能新增建议的 ``install.mode`` 只能是 ``manual`` 或 ``vendor``，``confidence`` 只能是 ``low`` / ``medium`` / ``high``
-   - MCP 新增建议必须包含合法 ``server``（``transport``=``stdio``/``sse``/``http``；``stdio`` 要有 ``command``，``sse/http`` 要有 ``url``）
+   - MCP 新增建议必须包含合法 ``server``（``transport``=``stdio``/``sse``/``http``；``stdio`` 要有 ``command``，``sse/http`` 要有 ``url``），且 ``name`` 必须等于 ``server.name``
+   - 不得保留重复的技能新增/卸载建议或重复的 MCP 新增/卸载建议
 4. 执行 dry-run：
    .\skills.ps1 审查目标 应用 --recommendations "$([System.IO.Path]::Combine($reportRoot, 'recommendations.json'))" --dry-run-ack "我知道未落盘"
 5. 根据 dry-run 结果，向用户列出“技能新增/卸载建议 + MCP 新增/卸载建议”及序号
@@ -991,8 +1002,10 @@ $basisCheckStep
 - 技能与 MCP 的新增/卸载建议都必须保留双依据和来源，且每项理由要简短可读
 - 若任一建议缺少 ``reason_user_profile`` 或 ``reason_target_repo``，视为未完成，不得进入下一步
 - 若证据不足，允许不推荐；不得“猜测式”新增/卸载
+- 目标仓模式下，新增/卸载技能或 MCP 的判断必须同时参考用户画像、目标仓事实、已安装技能/MCP 快照、来源策略
 - ``overlap_findings`` 仅用于报告重叠，``do_not_install`` 用于记录“已研究但当前不应安装”的技能或 MCP
 - ``sources`` 只能填写本轮真实查看过的来源；不得伪造仓库事实或来源结论
+- MCP 新增建议里 ``name`` 与 ``server.name`` 必须一致；任一类别不得出现重复建议
 - 如果你继续执行 dry-run，请在总结里按 dry-run 原序号列出“技能新增/卸载建议 + MCP 新增/卸载建议”
 - 每条建议必须同时展示两条简短理由（用户需求 + 目标仓/场景）
 - 某一类为空时，必须显式写“无该类建议”并给 1 句简短原因
