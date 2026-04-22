@@ -254,6 +254,63 @@ Describe "Audit Targets" {
             (Parse-AuditTargetsArgs @("应用确认", "--recommendations", "r.json")).action | Should Be "apply_flow"
             (Parse-AuditTargetsArgs @("应用", "--recommendations", "r.json")).action | Should Be "apply"
         }
+
+        It "Auto-resolves <run-id> placeholder for --run-id and --recommendations" {
+            $oldRoot = $script:Root
+            try {
+                $script:Root = Join-Path $TestDrive "ws-audit-placeholder-parse"
+                $auditRoot = Join-Path $script:Root "reports\skill-audit"
+                $runOld = Join-Path $auditRoot "r-old"
+                $runNew = Join-Path $auditRoot "r-new"
+                New-Item -ItemType Directory -Path $runOld -Force | Out-Null
+                New-Item -ItemType Directory -Path $runNew -Force | Out-Null
+                Set-ContentUtf8 (Join-Path $runOld "recommendations.json") '{}'
+                Set-ContentUtf8 (Join-Path $runNew "recommendations.json") '{}'
+                (Get-Item $runOld).LastWriteTimeUtc = [datetime]"2026-01-01T00:00:00Z"
+                (Get-Item $runNew).LastWriteTimeUtc = [datetime]"2026-01-02T00:00:00Z"
+
+                $preflight = Parse-AuditTargetsArgs @("preflight", "--run-id", "<run-id>")
+                $preflight.run_id | Should Be "r-new"
+
+                $apply = Parse-AuditTargetsArgs @("apply", "--recommendations", "reports/skill-audit/<run-id>/recommendations.json")
+                $apply.recommendations | Should Be "reports/skill-audit/r-new/recommendations.json"
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
+        }
+
+        It "Prefers latest fresh run over newer stale run when resolving <run-id>" {
+            $oldRoot = $script:Root
+            try {
+                $script:Root = Join-Path $TestDrive "ws-audit-placeholder-fresh-first"
+                $auditRoot = Join-Path $script:Root "reports\skill-audit"
+                $runFresh = Join-Path $auditRoot "r-fresh"
+                $runStale = Join-Path $auditRoot "r-stale"
+                New-Item -ItemType Directory -Path $runFresh -Force | Out-Null
+                New-Item -ItemType Directory -Path $runStale -Force | Out-Null
+
+                $live = Get-AuditLiveInstalledState
+                $promptVersion = Get-AuditPromptContractVersion
+
+                Set-ContentUtf8 (Join-Path $runFresh "recommendations.json") '{}'
+                Set-ContentUtf8 (Join-Path $runFresh "installed-skills.json") ('{"schema_version":1,"skills":[],"mcp_servers":[],"live_fingerprint":"' + [string]$live.fingerprint + '","live_mcp_fingerprint":"' + [string]$live.mcp_fingerprint + '"}')
+                Set-ContentUtf8 (Join-Path $runFresh "audit-meta.json") ('{"schema_version":1,"prompt_contract_version":"' + $promptVersion + '"}')
+
+                Set-ContentUtf8 (Join-Path $runStale "recommendations.json") '{}'
+                Set-ContentUtf8 (Join-Path $runStale "installed-skills.json") '{"schema_version":1,"skills":[],"mcp_servers":[],"live_fingerprint":"deadbeef","live_mcp_fingerprint":"deadbeef"}'
+                Set-ContentUtf8 (Join-Path $runStale "audit-meta.json") ('{"schema_version":1,"prompt_contract_version":"' + $promptVersion + '"}')
+
+                (Get-Item $runFresh).LastWriteTimeUtc = [datetime]"2026-01-01T00:00:00Z"
+                (Get-Item $runStale).LastWriteTimeUtc = [datetime]"2026-01-02T00:00:00Z"
+
+                $resolved = Resolve-AuditPathRunIdPlaceholder "reports/skill-audit/<run-id>/recommendations.json" "--recommendations" @("recommendations.json")
+                $resolved | Should Be "reports/skill-audit/r-fresh/recommendations.json"
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
+        }
     }
 
     Context "Repository scan" {
@@ -1014,6 +1071,31 @@ Describe "Audit Targets" {
             }
             $thrown | Should Be $true
             (Test-Path (Join-Path $runDir "preflight-report.json")) | Should Be $true
+        }
+
+        It "Preflight resolves <run-id> placeholders to the latest run directory" {
+            $oldRoot = $script:Root
+            try {
+                $script:Root = Join-Path $TestDrive "ws-preflight-placeholder"
+                $auditRoot = Join-Path $script:Root "reports\skill-audit"
+                $runOld = Join-Path $auditRoot "r-old"
+                $runNew = Join-Path $auditRoot "r-new"
+                New-Item -ItemType Directory -Path $runOld -Force | Out-Null
+                New-Item -ItemType Directory -Path $runNew -Force | Out-Null
+                Set-ContentUtf8 (Join-Path $runOld "recommendations.json") '{}'
+                Set-ContentUtf8 (Join-Path $runNew "recommendations.json") '{}'
+                (Get-Item $runOld).LastWriteTimeUtc = [datetime]"2026-01-01T00:00:00Z"
+                (Get-Item $runNew).LastWriteTimeUtc = [datetime]"2026-01-02T00:00:00Z"
+
+                $resolvedByRunId = Resolve-AuditRecommendationsPathForPreflight "" "<run-id>"
+                $resolvedByPath = Resolve-AuditRecommendationsPathForPreflight "reports/skill-audit/<run-id>/recommendations.json" ""
+
+                $resolvedByRunId | Should Be (Join-Path $runNew "recommendations.json")
+                $resolvedByPath | Should Be (Join-Path $runNew "recommendations.json")
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
         }
     }
 }

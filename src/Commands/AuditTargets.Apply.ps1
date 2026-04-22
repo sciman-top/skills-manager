@@ -78,16 +78,12 @@ function Apply-AuditMcpSelections($selectedAddItems, $selectedRemoveItems) {
 
 function Resolve-AuditRecommendationsPathForPreflight([string]$RecommendationsPath, [string]$RunId) {
     if (-not [string]::IsNullOrWhiteSpace($RecommendationsPath)) {
-        if (Test-AuditPlaceholderToken $RecommendationsPath) {
-            throw ("--recommendations 路径包含未替换占位符：{0}`n{1}" -f $RecommendationsPath, (Get-AuditRunIdHintText))
-        }
-        return (Resolve-AuditTargetPath $RecommendationsPath)
+        $resolvedInputPath = Resolve-AuditPathRunIdPlaceholder $RecommendationsPath "--recommendations" @("recommendations.json")
+        return (Resolve-AuditTargetPath $resolvedInputPath)
     }
     Need (-not [string]::IsNullOrWhiteSpace($RunId)) "预检至少需要 --run-id 或 --recommendations 其一"
-    if (Test-AuditPlaceholderToken $RunId) {
-        throw ("--run-id 包含未替换占位符：{0}`n{1}" -f $RunId, (Get-AuditRunIdHintText))
-    }
-    return (Join-Path (Get-AuditReportRoot $RunId) "recommendations.json")
+    $resolvedRunId = Resolve-AuditRunIdInput $RunId "--run-id" @("recommendations.json")
+    return (Join-Path (Get-AuditReportRoot $resolvedRunId) "recommendations.json")
 }
 
 function Get-AuditRunPromptContractVersion([string]$recommendationDir) {

@@ -460,7 +460,7 @@ Skills 管理器（中文菜单）
   - 仅在你明确接受风险时可加 `--allow-stale-snapshot` 跳过该阻断（报告会标记 stale 风险）。
   - 使用 `--allow-stale-snapshot` 时会触发红色警告并要求二次确认口令；非交互环境请用 `--stale-ack "<token>"` 提前传入。
   - `--out` 若指向已存在且非空目录，默认阻断，防止覆盖旧审查包；如确需复用，显式追加 `--force`。
-  - 若路径里仍包含 `<run-id>` 这类占位符，命令会直接阻断并给出可用 run-id 提示。
+  - `--run-id` / `--recommendations` 里出现 `<run-id>` 时会自动解析为最近可用 run；若无可用 run 才阻断并给出提示。
   - `状态` 可查看最近一次 `apply-report.json` 的 `mode/success/persisted/changed_counts`。
   - 执行前会分别列出“技能新增/卸载”和“MCP 新增/卸载”四份带序号清单；dry-run 后向用户汇报时必须沿用原序号，并同时展示用户需求 / 目标仓两条简短依据。
   - `--add-indexes` / `--remove-indexes` 作用于技能清单；`--mcp-add-indexes` / `--mcp-remove-indexes` 作用于 MCP 清单；四份清单独立编号。

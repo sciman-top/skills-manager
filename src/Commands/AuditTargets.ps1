@@ -563,6 +563,133 @@ function Get-AuditKnownRunIds {
     return @($dirs | Select-Object -ExpandProperty Name | Sort-Object)
 }
 
+function Get-AuditLatestRunId([string[]]$RequiredFiles = @()) {
+    $auditRoot = Join-Path $script:Root "reports\skill-audit"
+    if (-not (Test-Path -LiteralPath $auditRoot -PathType Container)) { return "" }
+    $dirs = @(
+        Get-ChildItem -LiteralPath $auditRoot -Directory -ErrorAction SilentlyContinue |
+        Sort-Object -Property @{ Expression = { $_.LastWriteTimeUtc }; Descending = $true }, @{ Expression = { $_.Name }; Descending = $true }
+    )
+    $liveStateResolved = $false
+    $liveState = $null
+    $liveStateAvailable = $false
+    $currentPromptVersion = ""
+    $freshCandidates = New-Object System.Collections.Generic.List[string]
+    $unknownCandidates = New-Object System.Collections.Generic.List[string]
+    $staleCandidates = New-Object System.Collections.Generic.List[string]
+    foreach ($dir in $dirs) {
+        $ok = $true
+        foreach ($relative in @($RequiredFiles)) {
+            if (-not (Test-AuditFile $dir.FullName ([string]$relative))) {
+                $ok = $false
+                break
+            }
+        }
+        if (-not $ok) { continue }
+
+        $snapshotPath = Join-Path $dir.FullName "installed-skills.json"
+        $metaPath = Join-Path $dir.FullName "audit-meta.json"
+        $canCheckStale = (Test-Path -LiteralPath $snapshotPath -PathType Leaf) -and (Test-Path -LiteralPath $metaPath -PathType Leaf)
+        if (-not $canCheckStale) {
+            $unknownCandidates.Add([string]$dir.Name) | Out-Null
+            continue
+        }
+
+        if (-not $liveStateResolved) {
+            $liveStateResolved = $true
+            try {
+                $liveState = Get-AuditLiveInstalledState
+                $liveStateAvailable = $true
+                $currentPromptVersion = Get-AuditPromptContractVersion
+            }
+            catch {
+                $liveStateAvailable = $false
+            }
+        }
+        if (-not $liveStateAvailable) {
+            $unknownCandidates.Add([string]$dir.Name) | Out-Null
+            continue
+        }
+
+        $isStale = $false
+        try {
+            $snapshotState = Get-AuditInstalledSnapshotState $snapshotPath
+            $skillSnapshotStale = ([string]$snapshotState.fingerprint -ne [string]$liveState.fingerprint)
+            $mcpSnapshotStale = $false
+            if ($snapshotState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.mcp_fingerprint)) {
+                $mcpSnapshotStale = ([string]$snapshotState.mcp_fingerprint -ne [string]$liveState.mcp_fingerprint)
+            }
+            if ($skillSnapshotStale -or $mcpSnapshotStale) {
+                $isStale = $true
+            }
+        }
+        catch {
+            $unknownCandidates.Add([string]$dir.Name) | Out-Null
+            continue
+        }
+
+        try {
+            $metaRaw = Get-ContentUtf8 $metaPath
+            if (-not [string]::IsNullOrWhiteSpace($metaRaw)) {
+                $meta = $metaRaw | ConvertFrom-Json
+                if ($meta.PSObject.Properties.Match("prompt_contract_version").Count -gt 0) {
+                    $runPromptVersion = ([string]$meta.prompt_contract_version).Trim()
+                    if (-not [string]::IsNullOrWhiteSpace($runPromptVersion) -and [string]$runPromptVersion -ne [string]$currentPromptVersion) {
+                        $isStale = $true
+                    }
+                }
+            }
+        }
+        catch {
+            $unknownCandidates.Add([string]$dir.Name) | Out-Null
+            continue
+        }
+
+        if ($isStale) {
+            $staleCandidates.Add([string]$dir.Name) | Out-Null
+        }
+        else {
+            $freshCandidates.Add([string]$dir.Name) | Out-Null
+        }
+    }
+    if ($freshCandidates.Count -gt 0) { return [string]$freshCandidates[0] }
+    if ($unknownCandidates.Count -gt 0) { return [string]$unknownCandidates[0] }
+    if ($staleCandidates.Count -gt 0) { return [string]$staleCandidates[0] }
+    return ""
+}
+
+function Resolve-AuditRunIdInput([string]$runId, [string]$FlagName = "--run-id", [string[]]$RequiredFiles = @()) {
+    if ([string]::IsNullOrWhiteSpace($runId)) { return $runId }
+    $trimmed = [string]$runId
+    if (-not (Test-AuditPlaceholderToken $trimmed)) { return $trimmed }
+    if ([regex]::IsMatch($trimmed, "<\s*run[-_]?id\s*>", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
+        $resolved = Get-AuditLatestRunId -RequiredFiles $RequiredFiles
+        if (-not [string]::IsNullOrWhiteSpace($resolved)) {
+            return $resolved
+        }
+        throw ("{0} 使用占位符但未找到可用 run-id。{1}" -f $FlagName, (Get-AuditRunIdHintText))
+    }
+    throw ("{0} 包含未替换占位符：{1}`n{2}" -f $FlagName, $runId, (Get-AuditRunIdHintText))
+}
+
+function Resolve-AuditPathRunIdPlaceholder([string]$path, [string]$FlagName = "--recommendations", [string[]]$RequiredFiles = @()) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $path }
+    if (-not (Test-AuditPlaceholderToken $path)) { return $path }
+    if (-not [regex]::IsMatch($path, "<\s*run[-_]?id\s*>", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
+        throw ("{0} 路径包含未替换占位符：{1}`n{2}" -f $FlagName, $path, (Get-AuditRunIdHintText))
+    }
+
+    $resolvedRunId = Get-AuditLatestRunId -RequiredFiles $RequiredFiles
+    if ([string]::IsNullOrWhiteSpace($resolvedRunId)) {
+        throw ("{0} 路径使用 <run-id> 占位符但未找到可用 run。{1}" -f $FlagName, (Get-AuditRunIdHintText))
+    }
+    $resolvedPath = [regex]::Replace($path, "<\s*run[-_]?id\s*>", [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $resolvedRunId }, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if (Test-AuditPlaceholderToken $resolvedPath) {
+        throw ("{0} 路径仍包含未替换占位符：{1}`n{2}" -f $FlagName, $resolvedPath, (Get-AuditRunIdHintText))
+    }
+    return $resolvedPath
+}
+
 function Get-AuditRunIdHintText {
     $ids = @(Get-AuditKnownRunIds)
     if ($ids.Count -eq 0) {

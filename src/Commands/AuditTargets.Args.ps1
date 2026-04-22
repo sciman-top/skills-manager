@@ -72,10 +72,7 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             }
             "--run-id" {
                 Need ($i + 1 -lt $items.Count) "--run-id 缺少值"
-                $result.run_id = [string]$items[++$i]
-                if (Test-AuditPlaceholderToken $result.run_id) {
-                    throw ("--run-id 包含未替换占位符：{0}`n{1}" -f $result.run_id, (Get-AuditRunIdHintText))
-                }
+                $result.run_id = Resolve-AuditRunIdInput ([string]$items[++$i]) "--run-id"
                 continue
             }
             "--profile" {
@@ -98,10 +95,7 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             }
             "--recommendations" {
                 Need ($i + 1 -lt $items.Count) "--recommendations 缺少值"
-                $result.recommendations = [string]$items[++$i]
-                if (Test-AuditPlaceholderToken $result.recommendations) {
-                    throw ("--recommendations 路径包含未替换占位符：{0}`n{1}" -f $result.recommendations, (Get-AuditRunIdHintText))
-                }
+                $result.recommendations = Resolve-AuditPathRunIdPlaceholder ([string]$items[++$i]) "--recommendations" @("recommendations.json")
                 continue
             }
             "--dry-run-ack" {
