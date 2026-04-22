@@ -71,6 +71,52 @@ function Assert-AuditRemovalCandidate($item) {
     Need (-not [string]::IsNullOrWhiteSpace([string]$item.installed.from)) ("卸载建议缺少 installed.from：{0}" -f [string]$item.name)
 }
 
+function Assert-AuditMcpServerPayload($server, [string]$itemName) {
+    Need ($null -ne $server) ("MCP 新增建议缺少 server：{0}" -f $itemName)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$server.name)) ("MCP 新增建议缺少 server.name：{0}" -f $itemName)
+    $transport = if ($server.PSObject.Properties.Match("transport").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.transport)) {
+        ([string]$server.transport).Trim().ToLowerInvariant()
+    }
+    else {
+        "stdio"
+    }
+    Need ($transport -eq "stdio" -or $transport -eq "sse" -or $transport -eq "http") ("MCP transport 仅支持 stdio/sse/http：{0}" -f $transport)
+    $server.transport = $transport
+    if ($transport -eq "stdio") {
+        Need ($server.PSObject.Properties.Match("command").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.command)) ("MCP stdio 缺少 command：{0}" -f $itemName)
+        if ($server.PSObject.Properties.Match("args").Count -eq 0 -or $null -eq $server.args) {
+            $server | Add-Member -NotePropertyName args -NotePropertyValue @() -Force
+        }
+        elseif (-not (Assert-IsArray $server.args)) {
+            $server.args = @($server.args)
+        }
+    }
+    else {
+        Need ($server.PSObject.Properties.Match("url").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.url)) ("MCP {0} 缺少 url：{1}" -f $transport, $itemName)
+    }
+}
+
+function Assert-AuditMcpNewServer($item) {
+    Need ($null -ne $item) "MCP 新增建议不能为空"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.name)) "MCP 新增建议缺少 name"
+    Assert-AuditReasonPair $item "MCP 新增建议"
+    Need ($item.PSObject.Properties.Match("server").Count -gt 0) ("MCP 新增建议缺少 server：{0}" -f [string]$item.name)
+    Assert-AuditMcpServerPayload $item.server ([string]$item.name)
+    Need ([string]$item.server.name -eq [string]$item.name) ("MCP 新增建议 name 与 server.name 不一致：{0}" -f [string]$item.name)
+    $confidence = ([string]$item.confidence).ToLowerInvariant()
+    Need ($confidence -eq "low" -or $confidence -eq "medium" -or $confidence -eq "high") ("MCP confidence 仅支持 low/medium/high：{0}" -f [string]$item.confidence)
+    $item.confidence = $confidence
+    $item | Add-Member -NotePropertyName reason -NotePropertyValue ("用户需求：{0}；目标仓/场景：{1}" -f [string]$item.reason_user_profile, [string]$item.reason_target_repo) -Force
+}
+
+function Assert-AuditMcpRemovalCandidate($item) {
+    Need ($null -ne $item) "MCP 卸载建议不能为空"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.name)) "MCP 卸载建议缺少 name"
+    Assert-AuditReasonPair $item "MCP 卸载建议"
+    Need ($item.PSObject.Properties.Match("installed").Count -gt 0 -and $null -ne $item.installed) ("MCP 卸载建议缺少 installed：{0}" -f [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.installed.name)) ("MCP 卸载建议缺少 installed.name：{0}" -f [string]$item.name)
+}
+
 function Load-AuditRecommendations([string]$path) {
     Need (-not [string]::IsNullOrWhiteSpace($path)) "--recommendations 缺少值"
     Need (Test-Path -LiteralPath $path -PathType Leaf) ("recommendations 文件不存在：{0}" -f $path)
@@ -109,6 +155,8 @@ function Load-AuditRecommendations([string]$path) {
     Ensure-AuditArrayProperty $rec "overlap_findings"
     Ensure-AuditArrayProperty $rec "removal_candidates"
     Ensure-AuditArrayProperty $rec "do_not_install"
+    Ensure-AuditArrayProperty $rec "mcp_new_servers"
+    Ensure-AuditArrayProperty $rec "mcp_removal_candidates"
 
     $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($item in @($rec.new_skills)) {
@@ -124,12 +172,30 @@ function Load-AuditRecommendations([string]$path) {
         $key = "{0}|{1}" -f [string]$item.installed.vendor, [string]$item.installed.from
         Need ($seenRemovals.Add($key)) ("重复卸载建议：{0}" -f $key)
     }
+
+    $seenMcpAdds = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in @($rec.mcp_new_servers)) {
+        Assert-AuditMcpNewServer $item
+        $key = [string]$item.server.name
+        Need ($seenMcpAdds.Add($key)) ("重复 MCP 新增建议：{0}" -f $key)
+    }
+
+    $seenMcpRemovals = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in @($rec.mcp_removal_candidates)) {
+        Assert-AuditMcpRemovalCandidate $item
+        $key = [string]$item.installed.name
+        Need ($seenMcpRemovals.Add($key)) ("重复 MCP 卸载建议：{0}" -f $key)
+    }
     return $rec
 }
 
 function New-AuditInstallPlan($recommendations, $cfg = $null) {
     if ($null -eq $cfg) { $cfg = LoadCfg }
     $installedFacts = @(Get-InstalledSkillFacts $cfg)
+    $installedMcpServers = @()
+    if ($cfg.PSObject.Properties.Match("mcp_servers").Count -gt 0 -and $null -ne $cfg.mcp_servers) {
+        $installedMcpServers = @($cfg.mcp_servers)
+    }
     $items = @()
     foreach ($item in @($recommendations.new_skills)) {
         $install = $item.install
@@ -169,6 +235,47 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             status = $status
         })
     }
+    $mcpItems = @()
+    foreach ($item in @($recommendations.mcp_new_servers)) {
+        $server = $item.server
+        $existing = @($installedMcpServers | Where-Object { [string]$_.name -eq [string]$server.name })
+        $status = if ($existing.Count -eq 0) {
+            "planned"
+        }
+        elseif ($existing.Count -eq 1 -and (Test-McpServerEquivalent $existing[0] $server)) {
+            "already_present"
+        }
+        else {
+            "planned"
+        }
+        $mcpItems += [pscustomobject]([ordered]@{
+            name = [string]$item.name
+            reason = [string]$item.reason
+            reason_user_profile = [string]$item.reason_user_profile
+            reason_target_repo = [string]$item.reason_target_repo
+            confidence = [string]$item.confidence
+            sources = @($item.sources)
+            server = $server
+            status = $status
+        })
+    }
+
+    $mcpRemovals = @()
+    foreach ($item in @($recommendations.mcp_removal_candidates)) {
+        $match = @($installedMcpServers | Where-Object { [string]$_.name -eq [string]$item.installed.name })
+        $status = if ($match.Count -eq 1) { "planned" } elseif ($match.Count -eq 0) { "not_found" } else { "ambiguous" }
+        $matched = if ($match.Count -gt 0) { $match[0] } else { $null }
+        $mcpRemovals += [pscustomobject]([ordered]@{
+            name = [string]$item.name
+            installed_name = [string]$item.installed.name
+            reason = ("用户需求：{0}；目标仓/场景：{1}" -f [string]$item.reason_user_profile, [string]$item.reason_target_repo)
+            reason_user_profile = [string]$item.reason_user_profile
+            reason_target_repo = [string]$item.reason_target_repo
+            sources = @($item.sources)
+            matched_server = $matched
+            status = $status
+        })
+    }
     return [pscustomobject]([ordered]@{
         schema_version = 2
         run_id = [string]$recommendations.run_id
@@ -178,6 +285,8 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
         overlap_findings = @($recommendations.overlap_findings)
         removal_candidates = @($removals)
         do_not_install = @($recommendations.do_not_install)
+        mcp_items = @($mcpItems)
+        mcp_removal_candidates = @($mcpRemovals)
     })
 }
 
@@ -191,7 +300,7 @@ function Get-AuditItemsStatusCount($items, [string]$status) {
     return @($items | Where-Object { [string]$_.status -eq $status }).Count
 }
 
-function New-AuditChangedCounts($items, $removals) {
+function New-AuditChangedCounts($items, $removals, $mcpItems = @(), $mcpRemovals = @()) {
     return [pscustomobject]([ordered]@{
         add_total = @($items).Count
         add_planned = Get-AuditItemsStatusCount $items "planned"
@@ -202,6 +311,18 @@ function New-AuditChangedCounts($items, $removals) {
         remove_removed = Get-AuditItemsStatusCount $removals "removed"
         remove_not_found = Get-AuditItemsStatusCount $removals "not_found"
         remove_ambiguous = Get-AuditItemsStatusCount $removals "ambiguous"
+        mcp_add_total = @($mcpItems).Count
+        mcp_add_planned = Get-AuditItemsStatusCount $mcpItems "planned"
+        mcp_add_added = Get-AuditItemsStatusCount $mcpItems "added"
+        mcp_add_updated = Get-AuditItemsStatusCount $mcpItems "updated"
+        mcp_add_already_present = Get-AuditItemsStatusCount $mcpItems "already_present"
+        mcp_add_failed = Get-AuditItemsStatusCount $mcpItems "failed"
+        mcp_remove_total = @($mcpRemovals).Count
+        mcp_remove_planned = Get-AuditItemsStatusCount $mcpRemovals "planned"
+        mcp_remove_removed = Get-AuditItemsStatusCount $mcpRemovals "removed"
+        mcp_remove_not_found = Get-AuditItemsStatusCount $mcpRemovals "not_found"
+        mcp_remove_ambiguous = Get-AuditItemsStatusCount $mcpRemovals "ambiguous"
+        mcp_remove_failed = Get-AuditItemsStatusCount $mcpRemovals "failed"
     })
 }
 
@@ -211,6 +332,11 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
     Write-Host ("决策依据: {0}" -f [string]$plan.decision_basis.summary)
     if ($null -ne $snapshotState -and $null -ne $liveState) {
         Write-Host ("口径: live={0} (source_of_truth), snapshot={1} (audit_input)" -f [int]$liveState.skill_count, [int]$snapshotState.skill_count)
+        if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0 -or $snapshotState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) {
+            $liveMcpCount = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
+            $snapshotMcpCount = if ($snapshotState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$snapshotState.mcp_server_count } else { 0 }
+            Write-Host ("MCP 口径: live={0} (source_of_truth), snapshot={1} (audit_input)" -f $liveMcpCount, $snapshotMcpCount)
+        }
     }
     Write-Host "提示：以下序号为原序号；后续 dry-run 汇报与 apply 选择必须沿用原序号。"
     Write-Host ""
@@ -236,6 +362,35 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
         $index = 1
         foreach ($item in @($plan.removal_candidates)) {
             Write-Host ("{0}) {1} [{2}|{3}] status={4}" -f $index, [string]$item.name, [string]$item.vendor, [string]$item.from, [string]$item.status)
+            Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
+            Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
+            $index++
+        }
+    }
+    Write-Host ""
+    Write-Host ("MCP 新增建议: {0} 项" -f @($plan.mcp_items).Count)
+    if (@($plan.mcp_items).Count -eq 0) {
+        Write-Host "无 MCP 新增建议：当前输入证据未形成可执行 MCP 新增项。"
+    }
+    else {
+        $index = 1
+        foreach ($item in @($plan.mcp_items)) {
+            $transport = if ($item.server.PSObject.Properties.Match("transport").Count -gt 0) { [string]$item.server.transport } else { "stdio" }
+            Write-Host ("{0}) {1} transport={2} status={3}" -f $index, [string]$item.name, $transport, [string]$item.status)
+            Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
+            Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
+            $index++
+        }
+    }
+    Write-Host ""
+    Write-Host ("MCP 卸载建议: {0} 项" -f @($plan.mcp_removal_candidates).Count)
+    if (@($plan.mcp_removal_candidates).Count -eq 0) {
+        Write-Host "无 MCP 卸载建议：当前输入证据未形成可执行 MCP 卸载项。"
+    }
+    else {
+        $index = 1
+        foreach ($item in @($plan.mcp_removal_candidates)) {
+            Write-Host ("{0}) {1} [name={2}] status={3}" -f $index, [string]$item.name, [string]$item.installed_name, [string]$item.status)
             Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
             Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
             $index++

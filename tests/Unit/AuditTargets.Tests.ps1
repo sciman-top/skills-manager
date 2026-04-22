@@ -216,9 +216,11 @@ Describe "Audit Targets" {
         }
 
         It "Parses apply selection indexes for add and remove lists" {
-            $apply = Parse-AuditTargetsArgs @("apply", "--recommendations", "r.json", "--apply", "--yes", "--add-indexes", "1,3", "--remove-indexes", "2", "--dry-run-ack", "我知道未落盘")
+            $apply = Parse-AuditTargetsArgs @("apply", "--recommendations", "r.json", "--apply", "--yes", "--add-indexes", "1,3", "--remove-indexes", "2", "--mcp-add-indexes", "1", "--mcp-remove-indexes", "2", "--dry-run-ack", "我知道未落盘")
             $apply.add_selection | Should Be "1,3"
             $apply.remove_selection | Should Be "2"
+            $apply.mcp_add_selection | Should Be "1"
+            $apply.mcp_remove_selection | Should Be "2"
             $apply.dry_run_ack | Should Be "我知道未落盘"
         }
 
@@ -741,6 +743,8 @@ Describe "Audit Targets" {
             $template.new_skills[0].install.repo | Should Be "<owner/repo-or-local-path>"
             $template.removal_candidates[0].installed.vendor | Should Be "<installed-vendor>"
             $template.do_not_install[0].name | Should Be "<skill-not-recommended>"
+            $template.mcp_new_servers[0].server.transport | Should Be "stdio"
+            $template.mcp_removal_candidates[0].installed.name | Should Be "<installed-mcp-name>"
         }
 
         It "Builds profile-only recommendations template with target_scan_used false" {
@@ -888,6 +892,37 @@ Describe "Audit Targets" {
 
             @($plan.items).Count | Should Be 0
             @($plan.removal_candidates).Count | Should Be 1
+        }
+
+        It "Supports MCP add/remove recommendations in plan output" {
+            $path = Join-Path $TestDrive "recommendations-mcp.json"
+            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r1","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[{"name":"context7","reason_user_profile":"u","reason_target_repo":"t","confidence":"high","sources":["https://example.com/context7"],"server":{"name":"context7","transport":"stdio","command":"npx","args":["-y","@upstash/context7-mcp"]}}],"mcp_removal_candidates":[{"name":"legacy-fetch","reason_user_profile":"u2","reason_target_repo":"t2","sources":["https://example.com/legacy"],"installed":{"name":"legacy-fetch"}}]}'
+
+            $cfg = [pscustomobject]@{
+                vendors = @()
+                targets = @()
+                mappings = @()
+                imports = @()
+                mcp_servers = @(
+                    [pscustomobject]@{
+                        name = "legacy-fetch"
+                        transport = "stdio"
+                        command = "node"
+                        args = @("server.js")
+                    }
+                )
+                mcp_targets = @()
+                update_force = $false
+                sync_mode = "sync"
+            }
+
+            $rec = Load-AuditRecommendations $path
+            $plan = New-AuditInstallPlan $rec $cfg
+
+            @($plan.mcp_items).Count | Should Be 1
+            $plan.mcp_items[0].status | Should Be "planned"
+            @($plan.mcp_removal_candidates).Count | Should Be 1
+            $plan.mcp_removal_candidates[0].status | Should Be "planned"
         }
 
         It "Builds install plan without modifying config" {

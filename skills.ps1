@@ -7789,15 +7789,15 @@ function Get-DefaultAuditOuterAiPrompt {
 1. 阅读本次审查包中的 ai-brief.md。
 2. 阅读 user-profile.json、installed-skills.json、source-strategy.json；若本轮绑定目标仓，再阅读 repo-scan.json / repo-scans.json。
 3. 严格按 recommendations.template.json 的 schema v2 产出完整 recommendations.json。
-4. 建议结果优先覆盖“新增建议”与“卸载建议”，并确保每项都包含：
+4. 建议结果优先覆盖“新增/卸载技能建议 + 新增/卸载 MCP 建议”，并确保每项都包含：
    - ``reason_user_profile``（简短，1 句话）
    - ``reason_target_repo``（简短，1 句话）
    - ``sources``（可追溯来源链接）
-5. 对研究过但当前不应安装的技能，写入 ``do_not_install``；重叠信息仅写入 ``overlap_findings``，不要据此自动卸载。
+5. 对研究过但当前不应安装的技能或 MCP，写入 ``do_not_install``；重叠信息仅写入 ``overlap_findings``，不要据此自动卸载。
 6. 在 recommendations.json 自检通过后再执行 dry-run。
-7. 读取 dry-run 结果并向用户汇总可安装/可卸载项及其原始序号。
-8. 若“新增建议”或“卸载建议”为空，必须明确写出“无该类建议”并给 1 句简短原因。
-9. 在没有用户明确确认前，不执行真正的安装或卸载。
+7. 读取 dry-run 结果并向用户汇总技能与 MCP 的可新增/可卸载项及其原始序号。
+8. 若任一建议类别为空（技能新增/技能卸载/MCP 新增/MCP 卸载），必须明确写出“无该类建议”并给 1 句简短原因。
+9. 在没有用户明确确认前，不执行真正的安装或卸载（含 MCP）。
 
 ## 强制阶段门禁（不可跳步）
 
@@ -7813,13 +7813,14 @@ function Get-DefaultAuditOuterAiPrompt {
 - 模板中的 ``<...>`` 占位符必须全部替换或删除对应示例项，不得原样保留。
 - 目标仓审查模式：``decision_basis.user_profile_used``、``decision_basis.target_scan_used``、``decision_basis.source_strategy_used`` 必须保持布尔值 ``true``，且 ``decision_basis.summary`` 不能为空。
 - profile-only 模式：``recommendation_mode`` 必须为 ``profile-only``，``decision_basis.user_profile_used`` 与 ``decision_basis.source_strategy_used`` 必须为 ``true``，``decision_basis.target_scan_used`` 必须为 ``false``。
-- 新增建议的 ``install.mode`` 只能是 ``manual`` 或 ``vendor``，``confidence`` 只能是 ``low`` / ``medium`` / ``high``。
+- 技能新增建议的 ``install.mode`` 只能是 ``manual`` 或 ``vendor``，``confidence`` 只能是 ``low`` / ``medium`` / ``high``。
+- MCP 新增建议必须包含 ``server.name`` 与合法 ``transport``（``stdio``/``sse``/``http``）；``stdio`` 必须有 ``command``，``sse/http`` 必须有 ``url``。
 - 任一建议缺少 ``reason_user_profile`` 或 ``reason_target_repo``，视为未完成。
 - 证据不足时，宁可不推荐；不要“猜测式”新增或卸载。
 
 阶段 3：执行前自检
 - recommendations.json 必须可解析为 JSON，且 ``schema_version`` 必须是 ``2``。
-- 每条新增/卸载建议都必须包含双理由与至少 1 个真实 ``sources``。
+- 每条技能/MCP 新增或卸载建议都必须包含双理由与至少 1 个真实 ``sources``。
 - ``sources`` 只能填写你在本轮真实查看过的来源；不要引用未打开、未读取或不可访问的来源。
 - 自检任一项失败，都必须先停下并汇报问题，不得进入 dry-run。
 
@@ -7840,14 +7841,14 @@ function Get-DefaultAuditOuterAiPrompt {
 - 每条建议都要能回答两个问题：为什么适合用户长期工作流、为什么符合目标仓事实或 profile-only 场景。
 - 若来源相互冲突，选择更高可信来源并在 ``sources`` 中保留依据。
 - ``overlap_findings`` 仅作报告，不可直接视为卸载建议；确需卸载时，必须单独给出双理由。
-- ``do_not_install`` 用于记录“已研究但当前不建议安装”的技能，避免重复研究。
+- ``do_not_install`` 用于记录“已研究但当前不建议安装”的技能或 MCP，避免重复研究。
 - 不得伪造仓库事实、来源链接、来源结论，或把模板示例伪装成真实结论。
 
 ## 交付方式
 
 - 如果用户让你“代理执行审查流程”，你应先完成 ``recommendations.json``。
 - 然后执行 dry-run。
-- 最后按 dry-run 结果向用户列出新增/卸载建议清单（逐项含原始序号 + 双理由），等待用户确认要执行的序号。
+- 最后按 dry-run 结果向用户列出技能与 MCP 的新增/卸载建议清单（逐项含原始序号 + 双理由），等待用户确认要执行的序号。
 - 若存在阻断项或证据不足，先汇报阻断项或“无该类建议”的原因，再等待用户决策。
 "@
 }
@@ -8526,7 +8527,9 @@ Use the generated user profile JSON, installed-skills snapshot JSON, and source 
 
 - Which installed skills should be kept for the user's long-term workflow.
 - Which installed skills should be proposed for removal because they no longer fit.
+- Which installed MCP servers should be kept or removed.
 - Which missing skills are strongly justified without binding the decision to a target repository.
+- Which missing MCP servers are strongly justified without binding the decision to a target repository.
 
 External research is intentionally performed by the outer AI agent. Search official documentation, strong community projects, best practices, https://skills.sh/, GitHub Trending, and the find-skills workflow.
 
@@ -8549,9 +8552,12 @@ Rules:
 - Replace every template placeholder wrapped in `<...>` or delete the example entry entirely; do not leave placeholder values in the final file.
 - Keep ``recommendation_mode`` as ``profile-only``.
 - Keep ``decision_basis.user_profile_used`` and ``decision_basis.source_strategy_used`` as boolean ``true``; keep ``decision_basis.target_scan_used`` as boolean ``false``; provide a non-empty ``decision_basis.summary``.
-- New installs require ``reason_user_profile``, ``reason_target_repo``, source links, confidence, repo, skill path, ref, and mode.
-- Removal recommendations must include ``reason_user_profile``, ``reason_target_repo``, sources, and the exact installed ``vendor``/``from`` pair.
-- `install.mode` must stay `manual` or `vendor`; `confidence` must stay `low`, `medium`, or `high`.
+- Skill installs require ``reason_user_profile``, ``reason_target_repo``, source links, confidence, repo, skill path, ref, and mode.
+- Skill removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and the exact installed ``vendor``/``from`` pair.
+- MCP installs must include ``reason_user_profile``, ``reason_target_repo``, sources, confidence, and a valid ``server`` payload.
+- MCP removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and ``installed.name``.
+- Skill `install.mode` must stay `manual` or `vendor`; `confidence` must stay `low`, `medium`, or `high`.
+- MCP ``server.transport`` must stay ``stdio``/``sse``/``http``; ``stdio`` requires ``command``; ``sse/http`` requires ``url``.
 - Each add/remove recommendation must keep both reasons concise and user-readable.
 - If either reason field is missing on any recommendation, treat the run as incomplete and stop before dry-run summary.
 - Overlap findings are report-only; do not recommend automatic uninstall.
@@ -8562,8 +8568,8 @@ Rules:
 - The template already includes placeholder example items. Replace placeholder values or delete the example entries you do not need; do not invent a different schema.
 - Cite only sources you actually inspected during this run. Do not fabricate source links or source conclusions.
 - If evidence is insufficient, leave the category empty and explain briefly instead of forcing low-quality recommendations.
-- After dry-run, show numbered add/remove lists with one-line reasons per item (``reason_user_profile`` + ``reason_target_repo``).
-- If a list is empty, explicitly output "no add recommendations" or "no removal recommendations" with a brief reason.
+- After dry-run, show numbered skill add/remove and MCP add/remove lists with one-line reasons per item (``reason_user_profile`` + ``reason_target_repo``).
+- If a list is empty, explicitly output "no <category> recommendations" with a brief reason.
 - Keep dry-run numbering stable; do not renumber or reorder indexes in the user-facing summary.
 
 Pre-dry-run self-check:
@@ -8573,7 +8579,7 @@ Pre-dry-run self-check:
 - ``decision_basis.user_profile_used`` and ``decision_basis.source_strategy_used`` are ``true``.
 - ``decision_basis.target_scan_used`` is ``false``.
 - No remaining placeholder values wrapped in `<...>`.
-- Each add/remove item has both reasons plus at least one real source.
+- Each skill/MCP add/remove item has both reasons plus at least one real source.
 - Stop before dry-run if any self-check item fails.
 
 Execution order:
@@ -8589,7 +8595,9 @@ User-facing dry-run summary format:
 
 - add: `[index] <skill-name> | user: <reason_user_profile> | context: <reason_target_repo>`
 - remove: `[index] <skill-name> | user: <reason_user_profile> | context: <reason_target_repo>`
-- empty category: `no add recommendations: <brief reason>` / `no removal recommendations: <brief reason>`
+- mcp-add: `[index] <mcp-name> | user: <reason_user_profile> | context: <reason_target_repo>`
+- mcp-remove: `[index] <mcp-name> | user: <reason_user_profile> | context: <reason_target_repo>`
+- empty category: `no add recommendations: <brief reason>` / `no removal recommendations: <brief reason>` / `no mcp-add recommendations: <brief reason>` / `no mcp-remove recommendations: <brief reason>`
 
 User profile JSON: $userProfilePath
 Installed skills JSON: $installedSkillsPath
@@ -8609,7 +8617,10 @@ Use the generated user profile JSON, repo scan JSON, and installed-skills snapsh
 
 - Which installed skills should be kept for each target repository.
 - Which installed skills should be proposed for removal.
+- Which installed MCP servers should be kept for each target repository.
+- Which installed MCP servers should be proposed for removal.
 - Which missing skills are strongly justified for these targets.
+- Which missing MCP servers are strongly justified for these targets.
 
 External research is intentionally performed by the outer AI agent. Search official documentation, strong community projects, best practices, https://skills.sh/, GitHub Trending, and the find-skills workflow.
 
@@ -8631,9 +8642,12 @@ Rules:
 - Network research is authorized within this audit workflow, but installation still requires --apply --yes.
 - Replace every template placeholder wrapped in `<...>` or delete the example entry entirely; do not leave placeholder values in the final file.
 - Keep `decision_basis.user_profile_used`, `decision_basis.target_scan_used`, and `decision_basis.source_strategy_used` as boolean `true`, and provide a non-empty `decision_basis.summary`.
-- New installs require ``reason_user_profile``, ``reason_target_repo``, source links, confidence, repo, skill path, ref, and mode.
-- Removal recommendations must include ``reason_user_profile``, ``reason_target_repo``, sources, and the exact installed ``vendor``/``from`` pair.
-- `install.mode` must stay `manual` or `vendor`; `confidence` must stay `low`, `medium`, or `high`.
+- Skill installs require ``reason_user_profile``, ``reason_target_repo``, source links, confidence, repo, skill path, ref, and mode.
+- Skill removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and the exact installed ``vendor``/``from`` pair.
+- MCP installs must include ``reason_user_profile``, ``reason_target_repo``, sources, confidence, and a valid ``server`` payload.
+- MCP removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and ``installed.name``.
+- Skill `install.mode` must stay `manual` or `vendor`; `confidence` must stay `low`, `medium`, or `high`.
+- MCP ``server.transport`` must stay ``stdio``/``sse``/``http``; ``stdio`` requires ``command``; ``sse/http`` requires ``url``.
 - Each add/remove recommendation must keep both reasons concise and user-readable.
 - If either reason field is missing on any recommendation, treat the run as incomplete and stop before dry-run summary.
 - Overlap findings are report-only; do not recommend automatic uninstall.
@@ -8644,8 +8658,8 @@ Rules:
 - The template already includes placeholder example items. Replace placeholder values or delete the example entries you do not need; do not invent a different schema.
 - Cite only sources you actually inspected during this run. Do not fabricate repository facts, source links, or source conclusions.
 - If evidence is insufficient, leave the category empty and explain briefly instead of forcing low-quality recommendations.
-- After dry-run, show numbered add/remove lists with one-line reasons per item (``reason_user_profile`` + ``reason_target_repo``).
-- If a list is empty, explicitly output "no add recommendations" or "no removal recommendations" with a brief reason.
+- After dry-run, show numbered skill add/remove and MCP add/remove lists with one-line reasons per item (``reason_user_profile`` + ``reason_target_repo``).
+- If a list is empty, explicitly output "no <category> recommendations" with a brief reason.
 - Keep dry-run numbering stable; do not renumber or reorder indexes in the user-facing summary.
 
 Pre-dry-run self-check:
@@ -8653,7 +8667,7 @@ Pre-dry-run self-check:
 - recommendations.json parses as JSON and keeps `schema_version = 2`.
 - `decision_basis` keeps all required boolean flags at `true`.
 - No remaining placeholder values wrapped in `<...>`.
-- Each add/remove item has both reasons plus at least one real source.
+- Each skill/MCP add/remove item has both reasons plus at least one real source.
 - Stop before dry-run if any self-check item fails.
 
 Execution order:
@@ -8669,7 +8683,9 @@ User-facing dry-run summary format:
 
 - add: `[index] <skill-name> | user: <reason_user_profile> | repo: <reason_target_repo>`
 - remove: `[index] <skill-name> | user: <reason_user_profile> | repo: <reason_target_repo>`
-- empty category: `no add recommendations: <brief reason>` / `no removal recommendations: <brief reason>`
+- mcp-add: `[index] <mcp-name> | user: <reason_user_profile> | repo: <reason_target_repo>`
+- mcp-remove: `[index] <mcp-name> | user: <reason_user_profile> | repo: <reason_target_repo>`
+- empty category: `no add recommendations: <brief reason>` / `no removal recommendations: <brief reason>` / `no mcp-add recommendations: <brief reason>` / `no mcp-remove recommendations: <brief reason>`
 
 User profile JSON: $userProfilePath
 Installed skills JSON: $installedSkillsPath
@@ -8716,7 +8732,7 @@ $(Get-AuditOuterAiPromptContent)
 - 用户画像：$userProfilePath
 - 单目标扫描：$repoScanPath
 - 多目标扫描：$repoScansPath
-- 已安装技能：$installedSkillsPath
+- 已安装技能与 MCP：$installedSkillsPath
 - 来源策略：$SourceStrategyPath
 - 推荐模板：$templatePath
 
@@ -8728,23 +8744,24 @@ $inputReadStep
    - recommendations.json 可解析为 JSON，且 ``schema_version = 2``
 $basisCheckStep
    - 不保留模板占位符 ``<...>`` 或未替换的示例值
-   - 每条新增/卸载建议都包含 ``reason_user_profile`` + ``reason_target_repo`` + 至少 1 个真实 ``sources``
-   - 新增建议的 ``install.mode`` 只能是 ``manual`` 或 ``vendor``，``confidence`` 只能是 ``low`` / ``medium`` / ``high``
+   - 每条技能/MCP 新增或卸载建议都包含 ``reason_user_profile`` + ``reason_target_repo`` + 至少 1 个真实 ``sources``
+   - 技能新增建议的 ``install.mode`` 只能是 ``manual`` 或 ``vendor``，``confidence`` 只能是 ``low`` / ``medium`` / ``high``
+   - MCP 新增建议必须包含合法 ``server``（``transport``=``stdio``/``sse``/``http``；``stdio`` 要有 ``command``，``sse/http`` 要有 ``url``）
 4. 执行 dry-run：
    .\skills.ps1 审查目标 应用 --recommendations "$([System.IO.Path]::Combine($reportRoot, 'recommendations.json'))" --dry-run-ack "我知道未落盘"
-5. 根据 dry-run 结果，向用户列出“新增建议 / 卸载建议”及序号
+5. 根据 dry-run 结果，向用户列出“技能新增/卸载建议 + MCP 新增/卸载建议”及序号
 6. 等待用户确认后，再执行：
    .\skills.ps1 审查目标 应用 --recommendations "$([System.IO.Path]::Combine($reportRoot, 'recommendations.json'))" --apply --yes
 
 ## Output Contract
 
 - ``recommendations.json`` 必须与模板 schema 一致
-- 新增与卸载建议都必须保留双依据和来源，且每项理由要简短可读
+- 技能与 MCP 的新增/卸载建议都必须保留双依据和来源，且每项理由要简短可读
 - 若任一建议缺少 ``reason_user_profile`` 或 ``reason_target_repo``，视为未完成，不得进入下一步
 - 若证据不足，允许不推荐；不得“猜测式”新增/卸载
-- ``overlap_findings`` 仅用于报告重叠，``do_not_install`` 用于记录“已研究但当前不应安装”的技能
+- ``overlap_findings`` 仅用于报告重叠，``do_not_install`` 用于记录“已研究但当前不应安装”的技能或 MCP
 - ``sources`` 只能填写本轮真实查看过的来源；不得伪造仓库事实或来源结论
-- 如果你继续执行 dry-run，请在总结里按 dry-run 原序号列出“新增建议 / 卸载建议”
+- 如果你继续执行 dry-run，请在总结里按 dry-run 原序号列出“技能新增/卸载建议 + MCP 新增/卸载建议”
 - 每条建议必须同时展示两条简短理由（用户需求 + 目标仓/场景）
 - 某一类为空时，必须显式写“无该类建议”并给 1 句简短原因
 - 未经用户明确确认，不得执行 --apply --yes
@@ -8759,7 +8776,9 @@ $modeBlocking
 
 - 新增建议：``[序号] <skill-name> | 用户需求：<reason_user_profile> | 目标仓/场景：<reason_target_repo>``
 - 卸载建议：``[序号] <skill-name> | 用户需求：<reason_user_profile> | 目标仓/场景：<reason_target_repo>``
-- 空列表：``无新增建议：<简短原因>`` / ``无卸载建议：<简短原因>``
+- MCP 新增建议：``[序号] <mcp-name> | 用户需求：<reason_user_profile> | 目标仓/场景：<reason_target_repo>``
+- MCP 卸载建议：``[序号] <mcp-name> | 用户需求：<reason_user_profile> | 目标仓/场景：<reason_target_repo>``
+- 空列表：``无新增建议：<简短原因>`` / ``无卸载建议：<简短原因>`` / ``无 MCP 新增建议：<简短原因>`` / ``无 MCP 卸载建议：<简短原因>``
 "@
     Set-ContentUtf8 $path $content
 }
@@ -8851,6 +8870,9 @@ function Assert-AuditBundleFileContent([string]$path, [string]$label) {
         "installed-skills.json" {
             Need (Test-AuditJsonProperty $data "skills") ("installed-skills 缺少 skills：{0}" -f $path)
             Need (Assert-IsArray $data.skills) ("installed-skills.skills 必须为数组：{0}" -f $path)
+            if (Test-AuditJsonProperty $data "mcp_servers") {
+                Need (Assert-IsArray $data.mcp_servers) ("installed-skills.mcp_servers 必须为数组：{0}" -f $path)
+            }
             if (Test-AuditJsonProperty $data "snapshot_kind") {
                 Need ([string]$data.snapshot_kind -eq "audit_input") ("installed-skills.snapshot_kind 必须为 audit_input：{0}" -f $path)
             }
@@ -8978,6 +9000,34 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
                 note = "<why it should not be added now>"
             }
         )
+        mcp_new_servers = @(
+            [ordered]@{
+                name = "<mcp-server-name>"
+                reason_user_profile = "<why the user's long-term workflow benefits from this MCP server>"
+                reason_target_repo = $targetReasonInstall
+                confidence = "medium"
+                sources = @("<source-url-1>")
+                source_categories = @("official-docs")
+                server = [ordered]@{
+                    name = "<mcp-server-name>"
+                    transport = "stdio"
+                    command = "<command>"
+                    args = @("<arg1>")
+                }
+            }
+        )
+        mcp_removal_candidates = @(
+            [ordered]@{
+                name = "<installed-mcp-name>"
+                reason_user_profile = "<why the user profile no longer justifies this MCP server>"
+                reason_target_repo = $targetReasonRemoval
+                sources = @("<source-url-1>")
+                source_categories = @("official-docs")
+                installed = [ordered]@{
+                    name = "<installed-mcp-name>"
+                }
+            }
+        )
     })
 }
 
@@ -9075,6 +9125,76 @@ function Get-InstalledSkillFacts($cfg = $null) {
     return @($facts)
 }
 
+function Get-AuditMcpServerFacts($cfg = $null) {
+    if ($null -eq $cfg) { $cfg = LoadCfg }
+    $facts = @()
+    $servers = @()
+    if ($cfg.PSObject.Properties.Match("mcp_servers").Count -gt 0 -and $null -ne $cfg.mcp_servers) {
+        $servers = @($cfg.mcp_servers)
+    }
+    foreach ($s in $servers) {
+        if ($null -eq $s) { continue }
+        $name = [string]$s.name
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $transport = if ($s.PSObject.Properties.Match("transport").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$s.transport)) {
+            ([string]$s.transport).Trim().ToLowerInvariant()
+        }
+        else {
+            "stdio"
+        }
+        $row = [ordered]@{
+            name = $name
+            transport = $transport
+        }
+        if ($transport -eq "stdio") {
+            $row.command = if ($s.PSObject.Properties.Match("command").Count -gt 0) { [string]$s.command } else { "" }
+            $row.args = if ($s.PSObject.Properties.Match("args").Count -gt 0 -and $null -ne $s.args) { @($s.args) } else { @() }
+            $envKeys = @()
+            if ($s.PSObject.Properties.Match("env").Count -gt 0 -and $null -ne $s.env) {
+                if ($s.env -is [hashtable] -or $s.env -is [System.Collections.IDictionary]) {
+                    $envKeys = @($s.env.Keys | ForEach-Object { [string]$_ } | Sort-Object)
+                }
+                else {
+                    $envKeys = @($s.env.PSObject.Properties.Name | ForEach-Object { [string]$_ } | Sort-Object)
+                }
+            }
+            $row.env_keys = @($envKeys)
+        }
+        else {
+            $row.url = if ($s.PSObject.Properties.Match("url").Count -gt 0) { [string]$s.url } else { "" }
+            $headerKeys = @()
+            if ($s.PSObject.Properties.Match("headers").Count -gt 0 -and $null -ne $s.headers) {
+                if ($s.headers -is [hashtable] -or $s.headers -is [System.Collections.IDictionary]) {
+                    $headerKeys = @($s.headers.Keys | ForEach-Object { [string]$_ } | Sort-Object)
+                }
+                else {
+                    $headerKeys = @($s.headers.PSObject.Properties.Name | ForEach-Object { [string]$_ } | Sort-Object)
+                }
+            }
+            $row.header_keys = @($headerKeys)
+            $row.bearer_token_env_var = if ($s.PSObject.Properties.Match("bearer_token_env_var").Count -gt 0) { [string]$s.bearer_token_env_var } else { "" }
+        }
+        $facts += [pscustomobject]$row
+    }
+    return @($facts)
+}
+
+function Get-AuditFingerprintFromMcpServers($servers) {
+    $pairs = @()
+    foreach ($server in @($servers)) {
+        if ($null -eq $server) { continue }
+        $name = ""
+        if ($server.PSObject.Properties.Match("name").Count -gt 0) {
+            $name = ([string]$server.name).Trim()
+        }
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $sig = Get-McpServerSignature $server
+        if ([string]::IsNullOrWhiteSpace($sig)) { continue }
+        $pairs += ("{0}|{1}" -f $name, $sig)
+    }
+    return (Get-AuditFingerprintFromVendorFromPairs $pairs)
+}
+
 function Get-AuditFingerprintFromVendorFromPairs($pairs) {
     $normalized = New-Object System.Collections.Generic.List[string]
     foreach ($pair in @($pairs)) {
@@ -9113,11 +9233,17 @@ function Get-AuditFingerprintFromSkillFacts($facts) {
 function Get-AuditLiveInstalledState($cfg = $null) {
     if ($null -eq $cfg) { $cfg = LoadCfg }
     $facts = @(Get-InstalledSkillFacts $cfg)
+    $mcpServers = @()
+    if ($cfg.PSObject.Properties.Match("mcp_servers").Count -gt 0 -and $null -ne $cfg.mcp_servers) {
+        $mcpServers = @($cfg.mcp_servers)
+    }
     return [pscustomobject]([ordered]@{
         source_of_truth = "live_mappings"
         captured_at = (Get-Date).ToString("o")
         skill_count = @($facts).Count
         fingerprint = (Get-AuditFingerprintFromSkillFacts $facts)
+        mcp_server_count = @($mcpServers).Count
+        mcp_fingerprint = (Get-AuditFingerprintFromMcpServers $mcpServers)
     })
 }
 
@@ -9148,12 +9274,24 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
     Need (Test-AuditJsonProperty $data "skills") ("installed-skills 快照缺少 skills：{0}" -f $snapshotPath)
     Need (Assert-IsArray $data.skills) ("installed-skills.skills 必须为数组：{0}" -f $snapshotPath)
     $skills = @($data.skills)
+    $mcpServers = @()
+    if (Test-AuditJsonProperty $data "mcp_servers" -and $null -ne $data.mcp_servers) {
+        Need (Assert-IsArray $data.mcp_servers) ("installed-skills.mcp_servers 必须为数组：{0}" -f $snapshotPath)
+        $mcpServers = @($data.mcp_servers)
+    }
     $fingerprint = ""
     if (Test-AuditJsonProperty $data "live_fingerprint") {
         $fingerprint = ([string]$data.live_fingerprint).Trim().ToLowerInvariant()
     }
     if ([string]::IsNullOrWhiteSpace($fingerprint)) {
         $fingerprint = (Get-AuditFingerprintFromSkillFacts $skills)
+    }
+    $mcpFingerprint = ""
+    if (Test-AuditJsonProperty $data "live_mcp_fingerprint") {
+        $mcpFingerprint = ([string]$data.live_mcp_fingerprint).Trim().ToLowerInvariant()
+    }
+    if ([string]::IsNullOrWhiteSpace($mcpFingerprint) -and @($mcpServers).Count -gt 0) {
+        $mcpFingerprint = (Get-AuditFingerprintFromMcpServers $mcpServers)
     }
     $capturedAt = ""
     if (Test-AuditJsonProperty $data "captured_at") { $capturedAt = [string]$data.captured_at }
@@ -9165,6 +9303,8 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
         captured_at = $capturedAt
         skill_count = $skills.Count
         fingerprint = $fingerprint
+        mcp_server_count = @($mcpServers).Count
+        mcp_fingerprint = $mcpFingerprint
     })
 }
 
@@ -9175,6 +9315,8 @@ function New-AuditInstalledSnapshotFallbackState($liveState, [string]$snapshotPa
         captured_at = [string]$liveState.captured_at
         skill_count = [int]$liveState.skill_count
         fingerprint = [string]$liveState.fingerprint
+        mcp_server_count = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
+        mcp_fingerprint = if ($liveState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$liveState.mcp_fingerprint } else { "" }
     })
 }
 
@@ -9251,6 +9393,52 @@ function Assert-AuditRemovalCandidate($item) {
     Need (-not [string]::IsNullOrWhiteSpace([string]$item.installed.from)) ("卸载建议缺少 installed.from：{0}" -f [string]$item.name)
 }
 
+function Assert-AuditMcpServerPayload($server, [string]$itemName) {
+    Need ($null -ne $server) ("MCP 新增建议缺少 server：{0}" -f $itemName)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$server.name)) ("MCP 新增建议缺少 server.name：{0}" -f $itemName)
+    $transport = if ($server.PSObject.Properties.Match("transport").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.transport)) {
+        ([string]$server.transport).Trim().ToLowerInvariant()
+    }
+    else {
+        "stdio"
+    }
+    Need ($transport -eq "stdio" -or $transport -eq "sse" -or $transport -eq "http") ("MCP transport 仅支持 stdio/sse/http：{0}" -f $transport)
+    $server.transport = $transport
+    if ($transport -eq "stdio") {
+        Need ($server.PSObject.Properties.Match("command").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.command)) ("MCP stdio 缺少 command：{0}" -f $itemName)
+        if ($server.PSObject.Properties.Match("args").Count -eq 0 -or $null -eq $server.args) {
+            $server | Add-Member -NotePropertyName args -NotePropertyValue @() -Force
+        }
+        elseif (-not (Assert-IsArray $server.args)) {
+            $server.args = @($server.args)
+        }
+    }
+    else {
+        Need ($server.PSObject.Properties.Match("url").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.url)) ("MCP {0} 缺少 url：{1}" -f $transport, $itemName)
+    }
+}
+
+function Assert-AuditMcpNewServer($item) {
+    Need ($null -ne $item) "MCP 新增建议不能为空"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.name)) "MCP 新增建议缺少 name"
+    Assert-AuditReasonPair $item "MCP 新增建议"
+    Need ($item.PSObject.Properties.Match("server").Count -gt 0) ("MCP 新增建议缺少 server：{0}" -f [string]$item.name)
+    Assert-AuditMcpServerPayload $item.server ([string]$item.name)
+    Need ([string]$item.server.name -eq [string]$item.name) ("MCP 新增建议 name 与 server.name 不一致：{0}" -f [string]$item.name)
+    $confidence = ([string]$item.confidence).ToLowerInvariant()
+    Need ($confidence -eq "low" -or $confidence -eq "medium" -or $confidence -eq "high") ("MCP confidence 仅支持 low/medium/high：{0}" -f [string]$item.confidence)
+    $item.confidence = $confidence
+    $item | Add-Member -NotePropertyName reason -NotePropertyValue ("用户需求：{0}；目标仓/场景：{1}" -f [string]$item.reason_user_profile, [string]$item.reason_target_repo) -Force
+}
+
+function Assert-AuditMcpRemovalCandidate($item) {
+    Need ($null -ne $item) "MCP 卸载建议不能为空"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.name)) "MCP 卸载建议缺少 name"
+    Assert-AuditReasonPair $item "MCP 卸载建议"
+    Need ($item.PSObject.Properties.Match("installed").Count -gt 0 -and $null -ne $item.installed) ("MCP 卸载建议缺少 installed：{0}" -f [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.installed.name)) ("MCP 卸载建议缺少 installed.name：{0}" -f [string]$item.name)
+}
+
 function Load-AuditRecommendations([string]$path) {
     Need (-not [string]::IsNullOrWhiteSpace($path)) "--recommendations 缺少值"
     Need (Test-Path -LiteralPath $path -PathType Leaf) ("recommendations 文件不存在：{0}" -f $path)
@@ -9289,6 +9477,8 @@ function Load-AuditRecommendations([string]$path) {
     Ensure-AuditArrayProperty $rec "overlap_findings"
     Ensure-AuditArrayProperty $rec "removal_candidates"
     Ensure-AuditArrayProperty $rec "do_not_install"
+    Ensure-AuditArrayProperty $rec "mcp_new_servers"
+    Ensure-AuditArrayProperty $rec "mcp_removal_candidates"
 
     $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($item in @($rec.new_skills)) {
@@ -9304,12 +9494,30 @@ function Load-AuditRecommendations([string]$path) {
         $key = "{0}|{1}" -f [string]$item.installed.vendor, [string]$item.installed.from
         Need ($seenRemovals.Add($key)) ("重复卸载建议：{0}" -f $key)
     }
+
+    $seenMcpAdds = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in @($rec.mcp_new_servers)) {
+        Assert-AuditMcpNewServer $item
+        $key = [string]$item.server.name
+        Need ($seenMcpAdds.Add($key)) ("重复 MCP 新增建议：{0}" -f $key)
+    }
+
+    $seenMcpRemovals = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in @($rec.mcp_removal_candidates)) {
+        Assert-AuditMcpRemovalCandidate $item
+        $key = [string]$item.installed.name
+        Need ($seenMcpRemovals.Add($key)) ("重复 MCP 卸载建议：{0}" -f $key)
+    }
     return $rec
 }
 
 function New-AuditInstallPlan($recommendations, $cfg = $null) {
     if ($null -eq $cfg) { $cfg = LoadCfg }
     $installedFacts = @(Get-InstalledSkillFacts $cfg)
+    $installedMcpServers = @()
+    if ($cfg.PSObject.Properties.Match("mcp_servers").Count -gt 0 -and $null -ne $cfg.mcp_servers) {
+        $installedMcpServers = @($cfg.mcp_servers)
+    }
     $items = @()
     foreach ($item in @($recommendations.new_skills)) {
         $install = $item.install
@@ -9349,6 +9557,47 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             status = $status
         })
     }
+    $mcpItems = @()
+    foreach ($item in @($recommendations.mcp_new_servers)) {
+        $server = $item.server
+        $existing = @($installedMcpServers | Where-Object { [string]$_.name -eq [string]$server.name })
+        $status = if ($existing.Count -eq 0) {
+            "planned"
+        }
+        elseif ($existing.Count -eq 1 -and (Test-McpServerEquivalent $existing[0] $server)) {
+            "already_present"
+        }
+        else {
+            "planned"
+        }
+        $mcpItems += [pscustomobject]([ordered]@{
+            name = [string]$item.name
+            reason = [string]$item.reason
+            reason_user_profile = [string]$item.reason_user_profile
+            reason_target_repo = [string]$item.reason_target_repo
+            confidence = [string]$item.confidence
+            sources = @($item.sources)
+            server = $server
+            status = $status
+        })
+    }
+
+    $mcpRemovals = @()
+    foreach ($item in @($recommendations.mcp_removal_candidates)) {
+        $match = @($installedMcpServers | Where-Object { [string]$_.name -eq [string]$item.installed.name })
+        $status = if ($match.Count -eq 1) { "planned" } elseif ($match.Count -eq 0) { "not_found" } else { "ambiguous" }
+        $matched = if ($match.Count -gt 0) { $match[0] } else { $null }
+        $mcpRemovals += [pscustomobject]([ordered]@{
+            name = [string]$item.name
+            installed_name = [string]$item.installed.name
+            reason = ("用户需求：{0}；目标仓/场景：{1}" -f [string]$item.reason_user_profile, [string]$item.reason_target_repo)
+            reason_user_profile = [string]$item.reason_user_profile
+            reason_target_repo = [string]$item.reason_target_repo
+            sources = @($item.sources)
+            matched_server = $matched
+            status = $status
+        })
+    }
     return [pscustomobject]([ordered]@{
         schema_version = 2
         run_id = [string]$recommendations.run_id
@@ -9358,6 +9607,8 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
         overlap_findings = @($recommendations.overlap_findings)
         removal_candidates = @($removals)
         do_not_install = @($recommendations.do_not_install)
+        mcp_items = @($mcpItems)
+        mcp_removal_candidates = @($mcpRemovals)
     })
 }
 
@@ -9371,7 +9622,7 @@ function Get-AuditItemsStatusCount($items, [string]$status) {
     return @($items | Where-Object { [string]$_.status -eq $status }).Count
 }
 
-function New-AuditChangedCounts($items, $removals) {
+function New-AuditChangedCounts($items, $removals, $mcpItems = @(), $mcpRemovals = @()) {
     return [pscustomobject]([ordered]@{
         add_total = @($items).Count
         add_planned = Get-AuditItemsStatusCount $items "planned"
@@ -9382,6 +9633,18 @@ function New-AuditChangedCounts($items, $removals) {
         remove_removed = Get-AuditItemsStatusCount $removals "removed"
         remove_not_found = Get-AuditItemsStatusCount $removals "not_found"
         remove_ambiguous = Get-AuditItemsStatusCount $removals "ambiguous"
+        mcp_add_total = @($mcpItems).Count
+        mcp_add_planned = Get-AuditItemsStatusCount $mcpItems "planned"
+        mcp_add_added = Get-AuditItemsStatusCount $mcpItems "added"
+        mcp_add_updated = Get-AuditItemsStatusCount $mcpItems "updated"
+        mcp_add_already_present = Get-AuditItemsStatusCount $mcpItems "already_present"
+        mcp_add_failed = Get-AuditItemsStatusCount $mcpItems "failed"
+        mcp_remove_total = @($mcpRemovals).Count
+        mcp_remove_planned = Get-AuditItemsStatusCount $mcpRemovals "planned"
+        mcp_remove_removed = Get-AuditItemsStatusCount $mcpRemovals "removed"
+        mcp_remove_not_found = Get-AuditItemsStatusCount $mcpRemovals "not_found"
+        mcp_remove_ambiguous = Get-AuditItemsStatusCount $mcpRemovals "ambiguous"
+        mcp_remove_failed = Get-AuditItemsStatusCount $mcpRemovals "failed"
     })
 }
 
@@ -9391,6 +9654,11 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
     Write-Host ("决策依据: {0}" -f [string]$plan.decision_basis.summary)
     if ($null -ne $snapshotState -and $null -ne $liveState) {
         Write-Host ("口径: live={0} (source_of_truth), snapshot={1} (audit_input)" -f [int]$liveState.skill_count, [int]$snapshotState.skill_count)
+        if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0 -or $snapshotState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) {
+            $liveMcpCount = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
+            $snapshotMcpCount = if ($snapshotState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$snapshotState.mcp_server_count } else { 0 }
+            Write-Host ("MCP 口径: live={0} (source_of_truth), snapshot={1} (audit_input)" -f $liveMcpCount, $snapshotMcpCount)
+        }
     }
     Write-Host "提示：以下序号为原序号；后续 dry-run 汇报与 apply 选择必须沿用原序号。"
     Write-Host ""
@@ -9416,6 +9684,35 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
         $index = 1
         foreach ($item in @($plan.removal_candidates)) {
             Write-Host ("{0}) {1} [{2}|{3}] status={4}" -f $index, [string]$item.name, [string]$item.vendor, [string]$item.from, [string]$item.status)
+            Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
+            Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
+            $index++
+        }
+    }
+    Write-Host ""
+    Write-Host ("MCP 新增建议: {0} 项" -f @($plan.mcp_items).Count)
+    if (@($plan.mcp_items).Count -eq 0) {
+        Write-Host "无 MCP 新增建议：当前输入证据未形成可执行 MCP 新增项。"
+    }
+    else {
+        $index = 1
+        foreach ($item in @($plan.mcp_items)) {
+            $transport = if ($item.server.PSObject.Properties.Match("transport").Count -gt 0) { [string]$item.server.transport } else { "stdio" }
+            Write-Host ("{0}) {1} transport={2} status={3}" -f $index, [string]$item.name, $transport, [string]$item.status)
+            Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
+            Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
+            $index++
+        }
+    }
+    Write-Host ""
+    Write-Host ("MCP 卸载建议: {0} 项" -f @($plan.mcp_removal_candidates).Count)
+    if (@($plan.mcp_removal_candidates).Count -eq 0) {
+        Write-Host "无 MCP 卸载建议：当前输入证据未形成可执行 MCP 卸载项。"
+    }
+    else {
+        $index = 1
+        foreach ($item in @($plan.mcp_removal_candidates)) {
+            Write-Host ("{0}) {1} [name={2}] status={3}" -f $index, [string]$item.name, [string]$item.installed_name, [string]$item.status)
             Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
             Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
             $index++
@@ -9595,6 +9892,7 @@ function Invoke-AuditTargetsScan {
 
     $installedPath = Join-Path $reportRoot "installed-skills.json"
     $installedSkills = @()
+    $installedMcpServers = @()
     try {
         try {
             $liveCfg = LoadCfg
@@ -9604,6 +9902,7 @@ function Invoke-AuditTargetsScan {
             $liveCfg = New-AuditInstalledFactsFallbackCfg
         }
         $installedSkills = @(Get-InstalledSkillFacts $liveCfg)
+        $installedMcpServers = @(Get-AuditMcpServerFacts $liveCfg)
     }
     catch {
         throw ("生成 installed-skills.json 失败：{0}" -f $_.Exception.Message)
@@ -9616,7 +9915,10 @@ function Invoke-AuditTargetsScan {
             captured_at = (Get-Date).ToString("o")
             live_skill_count = [int]$liveState.skill_count
             live_fingerprint = [string]$liveState.fingerprint
+            live_mcp_server_count = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
+            live_mcp_fingerprint = if ($liveState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$liveState.mcp_fingerprint } else { "" }
             skills = @($installedSkills)
+            mcp_servers = @($installedMcpServers)
         })
 
     $sourceStrategyPath = Join-Path $reportRoot "source-strategy.json"
@@ -9659,7 +9961,7 @@ function Invoke-AuditTargetsScan {
     Write-Host ("- ai-brief.md: {0}" -f $briefPath)
     Write-Host ("- outer-ai-prompt.md: {0}" -f $outerAiPromptPath)
     Write-Host ("- recommendations.template.json: {0}" -f $templatePath)
-    Write-Host "下一步：把 outer-ai-prompt.md 交给 AI；AI 应先填写并自检 recommendations.json，再执行 dry-run，并按原序号列出新增/卸载清单。" -ForegroundColor Yellow
+    Write-Host "下一步：把 outer-ai-prompt.md 交给 AI；AI 应先填写并自检 recommendations.json，再执行 dry-run，并按原序号列出技能与 MCP 的新增/卸载清单。" -ForegroundColor Yellow
     return [pscustomobject]@{
         run_id = $runId
         path = $reportRoot
@@ -9696,6 +9998,7 @@ function Invoke-AuditSkillDiscovery {
 
     $installedPath = Join-Path $reportRoot "installed-skills.json"
     $installedSkills = @()
+    $installedMcpServers = @()
     try {
         try {
             $liveCfg = LoadCfg
@@ -9705,6 +10008,7 @@ function Invoke-AuditSkillDiscovery {
             $liveCfg = New-AuditInstalledFactsFallbackCfg
         }
         $installedSkills = @(Get-InstalledSkillFacts $liveCfg)
+        $installedMcpServers = @(Get-AuditMcpServerFacts $liveCfg)
     }
     catch {
         throw ("生成 installed-skills.json 失败：{0}" -f $_.Exception.Message)
@@ -9717,7 +10021,10 @@ function Invoke-AuditSkillDiscovery {
             captured_at = (Get-Date).ToString("o")
             live_skill_count = [int]$liveState.skill_count
             live_fingerprint = [string]$liveState.fingerprint
+            live_mcp_server_count = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
+            live_mcp_fingerprint = if ($liveState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$liveState.mcp_fingerprint } else { "" }
             skills = @($installedSkills)
+            mcp_servers = @($installedMcpServers)
         })
 
     $sourceStrategyPath = Join-Path $reportRoot "source-strategy.json"
@@ -9748,7 +10055,7 @@ function Invoke-AuditSkillDiscovery {
     Write-Host ("- ai-brief.md: {0}" -f $briefPath)
     Write-Host ("- outer-ai-prompt.md: {0}" -f $outerAiPromptPath)
     Write-Host ("- recommendations.template.json: {0}" -f $templatePath)
-    Write-Host "下一步：把 outer-ai-prompt.md 交给 AI；AI 应先填写并自检 recommendations.json，再执行 dry-run，并按原序号列出新增/卸载清单。" -ForegroundColor Yellow
+    Write-Host "下一步：把 outer-ai-prompt.md 交给 AI；AI 应先填写并自检 recommendations.json，再执行 dry-run，并按原序号列出技能与 MCP 的新增/卸载清单。" -ForegroundColor Yellow
     return [pscustomobject]@{
         run_id = $runId
         path = $reportRoot
@@ -9758,11 +10065,91 @@ function Invoke-AuditSkillDiscovery {
     }
 }
 
+function Get-AuditPersistedChangeTotal($counts) {
+    if ($null -eq $counts) { return 0 }
+    $total = 0
+    foreach ($field in @("add_installed", "remove_removed", "mcp_add_added", "mcp_add_updated", "mcp_remove_removed")) {
+        if ($counts.PSObject.Properties.Match($field).Count -gt 0) {
+            $total += [int]$counts.$field
+        }
+    }
+    return $total
+}
+
+function Apply-AuditMcpSelections($selectedAddItems, $selectedRemoveItems) {
+    $selectedAddItems = @($selectedAddItems)
+    $selectedRemoveItems = @($selectedRemoveItems)
+    if ($selectedAddItems.Count -eq 0 -and $selectedRemoveItems.Count -eq 0) {
+        return [pscustomobject]@{ changed = $false }
+    }
+
+    $cfg = LoadCfg
+    $cfgRaw = Get-Content $CfgPath -Raw
+    $servers = @(if ($cfg.PSObject.Properties.Match("mcp_servers").Count -gt 0 -and $null -ne $cfg.mcp_servers) { @($cfg.mcp_servers) } else { @() })
+    $changed = $false
+
+    foreach ($item in $selectedAddItems) {
+        $candidate = $item.server
+        $existing = @($servers | Where-Object { [string]$_.name -eq [string]$candidate.name })
+        if ($existing.Count -eq 1 -and (Test-McpServerEquivalent $existing[0] $candidate)) {
+            $item.status = "already_present"
+            continue
+        }
+        $replaced = $false
+        for ($i = 0; $i -lt $servers.Count; $i++) {
+            if ([string]$servers[$i].name -eq [string]$candidate.name) {
+                $servers[$i] = $candidate
+                $replaced = $true
+                $changed = $true
+                break
+            }
+        }
+        if ($replaced) {
+            $item.status = "updated"
+        }
+        else {
+            $servers += $candidate
+            $item.status = "added"
+            $changed = $true
+        }
+    }
+
+    foreach ($item in $selectedRemoveItems) {
+        $name = [string]$item.installed_name
+        $matches = @($servers | Where-Object { [string]$_.name -eq $name })
+        if ($matches.Count -eq 0) {
+            $item.status = "not_found"
+            continue
+        }
+        if ($matches.Count -gt 1) {
+            $item.status = "ambiguous"
+            continue
+        }
+        $servers = @($servers | Where-Object { [string]$_.name -ne $name })
+        $item.status = "removed"
+        $changed = $true
+    }
+
+    if (-not $changed) {
+        return [pscustomobject]@{ changed = $false }
+    }
+
+    if ($cfg.PSObject.Properties.Match("mcp_servers").Count -eq 0) {
+        $cfg | Add-Member -NotePropertyName mcp_servers -NotePropertyValue @() -Force
+    }
+    $cfg.mcp_servers = @($servers)
+    SaveCfgSafe $cfg $cfgRaw
+    同步MCP
+    return [pscustomobject]@{ changed = $true }
+}
+
 function Invoke-AuditRecommendationsApply {
     param(
         [string]$RecommendationsPath,
         [string]$AddSelection,
         [string]$RemoveSelection,
+        [string]$McpAddSelection,
+        [string]$McpRemoveSelection,
         [string]$DryRunAck,
         [string]$StaleAck,
         [switch]$AllowStaleSnapshot,
@@ -9785,7 +10172,12 @@ function Invoke-AuditRecommendationsApply {
         Log ("recommendations 同目录缺少 installed-skills.json，已回退为 live state 快照：{0}" -f $snapshotPath) "WARN"
         $snapshotState = New-AuditInstalledSnapshotFallbackState $liveState $snapshotPath
     }
-    $isSnapshotStale = ([string]$snapshotState.fingerprint -ne [string]$liveState.fingerprint)
+    $skillSnapshotStale = ([string]$snapshotState.fingerprint -ne [string]$liveState.fingerprint)
+    $mcpSnapshotStale = $false
+    if ($snapshotState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.mcp_fingerprint)) {
+        $mcpSnapshotStale = ([string]$snapshotState.mcp_fingerprint -ne [string]$liveState.mcp_fingerprint)
+    }
+    $isSnapshotStale = ($skillSnapshotStale -or $mcpSnapshotStale)
     if ($isSnapshotStale -and -not $AllowStaleSnapshot) {
         $staleMessage = "审查快照与当前生效配置不一致（stale_snapshot）。请先运行：.\skills.ps1 审查目标 扫描 重新生成 run 后再应用 recommendations。"
         $staleReport = [ordered]@{
@@ -9802,6 +10194,8 @@ function Invoke-AuditRecommendationsApply {
             changed_counts = New-AuditChangedCounts @() @()
             items = @()
             removal_candidates = @()
+            mcp_items = @()
+            mcp_removal_candidates = @()
             overlap_findings = @()
             do_not_install = @()
             rollback = @()
@@ -9814,6 +10208,11 @@ function Invoke-AuditRecommendationsApply {
         Write-Host ""
         Write-Host "WARNING: 当前正在使用过期审查快照（stale_snapshot）继续执行。" -ForegroundColor Red
         Write-Host ("WARNING: live={0}, snapshot={1}" -f [int]$liveState.skill_count, [int]$snapshotState.skill_count) -ForegroundColor Red
+        if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0 -or $snapshotState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) {
+            $liveMcp = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
+            $snapshotMcp = if ($snapshotState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$snapshotState.mcp_server_count } else { 0 }
+            Write-Host ("WARNING: mcp live={0}, snapshot={1}" -f $liveMcp, $snapshotMcp) -ForegroundColor Red
+        }
         $staleAckInput = ""
         if (-not [string]::IsNullOrWhiteSpace($StaleAck)) {
             $staleAckInput = [string]$StaleAck
@@ -9837,6 +10236,8 @@ function Invoke-AuditRecommendationsApply {
                 changed_counts = New-AuditChangedCounts @() @()
                 items = @()
                 removal_candidates = @()
+                mcp_items = @()
+                mcp_removal_candidates = @()
                 overlap_findings = @()
                 do_not_install = @()
                 rollback = @()
@@ -9864,6 +10265,8 @@ function Invoke-AuditRecommendationsApply {
                 changed_counts = New-AuditChangedCounts @() @()
                 items = @()
                 removal_candidates = @()
+                mcp_items = @()
+                mcp_removal_candidates = @()
                 overlap_findings = @()
                 do_not_install = @()
                 rollback = @()
@@ -9889,11 +10292,13 @@ function Invoke-AuditRecommendationsApply {
         allow_stale_snapshot = [bool]$AllowStaleSnapshot
         stale_snapshot_detected = [bool]$isSnapshotStale
         stale_acknowledged = if ($isSnapshotStale -and $AllowStaleSnapshot) { $true } else { $false }
-        changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates
+        changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
         snapshot_state = $snapshotState
         live_state = $liveState
         items = @($plan.items)
         removal_candidates = @($plan.removal_candidates)
+        mcp_items = @($plan.mcp_items)
+        mcp_removal_candidates = @($plan.mcp_removal_candidates)
         overlap_findings = @($plan.overlap_findings)
         do_not_install = @($plan.do_not_install)
         rollback = @()
@@ -9909,7 +10314,21 @@ function Invoke-AuditRecommendationsApply {
         foreach ($item in @($plan.removal_candidates)) {
             Write-Host ("DRYRUN remove: [{0}|{1}] {2}" -f [string]$item.vendor, [string]$item.from, [string]$item.name)
         }
-        Write-Host "DRY-RUN 完成：未修改任何技能映射（未落盘）。" -ForegroundColor Red
+        foreach ($item in @($plan.mcp_items)) {
+            $server = $item.server
+            $transport = if ($server.PSObject.Properties.Match("transport").Count -gt 0) { [string]$server.transport } else { "stdio" }
+            if ($transport -eq "stdio") {
+                $argsText = if ($server.PSObject.Properties.Match("args").Count -gt 0 -and $null -ne $server.args -and @($server.args).Count -gt 0) { " " + ((@($server.args) | ForEach-Object { [string]$_ }) -join " ") } else { "" }
+                Write-Host ("DRYRUN mcp-add: {0} --transport stdio --cmd {1}{2}" -f [string]$server.name, [string]$server.command, $argsText)
+            }
+            else {
+                Write-Host ("DRYRUN mcp-add: {0} --transport {1} --url {2}" -f [string]$server.name, $transport, [string]$server.url)
+            }
+        }
+        foreach ($item in @($plan.mcp_removal_candidates)) {
+            Write-Host ("DRYRUN mcp-remove: {0}" -f [string]$item.installed_name)
+        }
+        Write-Host "DRY-RUN 完成：未修改任何技能映射或 MCP 配置（未落盘）。" -ForegroundColor Red
         Write-Host ("如需真正执行，请运行：.\skills.ps1 审查目标 应用 --recommendations `"{0}`" --apply --yes" -f $RecommendationsPath) -ForegroundColor Red
         if ($RequireDryRunAck) {
             $ackToken = Get-AuditDryRunAckToken
@@ -9929,7 +10348,7 @@ function Invoke-AuditRecommendationsApply {
                 $report["dry_run_acknowledged"] = $false
                 $report["dry_run_ack_expected"] = $ackToken
                 $report["dry_run_ack_received"] = [string]$ackInput
-                $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates
+                $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
                 Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
                 return [pscustomobject]$report
             }
@@ -9943,7 +10362,7 @@ function Invoke-AuditRecommendationsApply {
     if ($selectedAdd.canceled) {
         $report.success = $false
         $report["canceled"] = $true
-        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates
+        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
         $report.persisted = $false
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
         return [pscustomobject]$report
@@ -9952,7 +10371,25 @@ function Invoke-AuditRecommendationsApply {
     if ($selectedRemove.canceled) {
         $report.success = $false
         $report["canceled"] = $true
-        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates
+        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
+        $report.persisted = $false
+        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+        return [pscustomobject]$report
+    }
+    $selectedMcpAdd = Resolve-AuditSelection $McpAddSelection @($plan.mcp_items | Where-Object { $_.status -eq "planned" }) "请输入要新增的 MCP 建议序号（空=跳过，0=取消）" "MCP 新增建议序号无效"
+    if ($selectedMcpAdd.canceled) {
+        $report.success = $false
+        $report["canceled"] = $true
+        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
+        $report.persisted = $false
+        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+        return [pscustomobject]$report
+    }
+    $selectedMcpRemove = Resolve-AuditSelection $McpRemoveSelection @($plan.mcp_removal_candidates | Where-Object { $_.status -eq "planned" }) "请输入要卸载的 MCP 建议序号（空=跳过，0=取消）" "MCP 卸载建议序号无效"
+    if ($selectedMcpRemove.canceled) {
+        $report.success = $false
+        $report["canceled"] = $true
+        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
         $report.persisted = $false
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
         return [pscustomobject]$report
@@ -9977,8 +10414,8 @@ function Invoke-AuditRecommendationsApply {
                 $item | Add-Member -NotePropertyName error -NotePropertyValue $_.Exception.Message -Force
                 $report.success = $false
                 $report.items = @($plan.items)
-                $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates
-                $report.persisted = (([int]$report.changed_counts.add_installed + [int]$report.changed_counts.remove_removed) -gt 0)
+                $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
+                $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
                 Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
                 throw
             }
@@ -9991,15 +10428,57 @@ function Invoke-AuditRecommendationsApply {
             }
         }
 
-        if (@($selectedAdd.items).Count -gt 0 -or @($selectedRemove.items).Count -gt 0) {
+        if (@($selectedMcpAdd.items).Count -gt 0 -or @($selectedMcpRemove.items).Count -gt 0) {
+            try {
+                Apply-AuditMcpSelections $selectedMcpAdd.items $selectedMcpRemove.items | Out-Null
+                foreach ($item in @($selectedMcpAdd.items)) {
+                    if ([string]$item.status -eq "added" -or [string]$item.status -eq "updated") {
+                        $report.rollback += ("Restore previous MCP config for '{0}' if rollback is required." -f [string]$item.name)
+                    }
+                }
+                foreach ($item in @($selectedMcpRemove.items)) {
+                    if ([string]$item.status -eq "removed") {
+                        $report.rollback += ("Re-add removed MCP server '{0}' if rollback is required." -f [string]$item.installed_name)
+                    }
+                }
+            }
+            catch {
+                foreach ($item in @($selectedMcpAdd.items)) {
+                    if ([string]$item.status -eq "planned") { $item.status = "failed" }
+                    $item | Add-Member -NotePropertyName error -NotePropertyValue $_.Exception.Message -Force
+                }
+                foreach ($item in @($selectedMcpRemove.items)) {
+                    if ([string]$item.status -eq "planned") { $item.status = "failed" }
+                    $item | Add-Member -NotePropertyName error -NotePropertyValue $_.Exception.Message -Force
+                }
+                $report.success = $false
+                $report.items = @($plan.items)
+                $report.removal_candidates = @($plan.removal_candidates)
+                $report.mcp_items = @($plan.mcp_items)
+                $report.mcp_removal_candidates = @($plan.mcp_removal_candidates)
+                $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
+                $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
+                Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+                throw
+            }
+        }
+
+        $hasSkillChanges = (@($selectedAdd.items).Count -gt 0 -or @($selectedRemove.items).Count -gt 0)
+        $hasMcpChanges = (@($selectedMcpAdd.items).Count -gt 0 -or @($selectedMcpRemove.items).Count -gt 0)
+
+        if ($hasSkillChanges) {
             构建生效
+        }
+        if ($hasSkillChanges -or $hasMcpChanges) {
             $doctorResult = Invoke-Doctor @("--strict", "--threshold-ms", "8000")
             if ($doctorResult -and $doctorResult.PSObject.Properties.Match("pass").Count -gt 0 -and -not [bool]$doctorResult.pass) {
                 $report.success = $false
                 $report.items = @($plan.items)
                 $report.removal_candidates = @($plan.removal_candidates)
-                $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates
-                $report.persisted = (([int]$report.changed_counts.add_installed + [int]$report.changed_counts.remove_removed) -gt 0)
+                $report.mcp_items = @($plan.mcp_items)
+                $report.mcp_removal_candidates = @($plan.mcp_removal_candidates)
+                $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
+                $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
                 Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
                 throw "doctor --strict failed after applying recommendations"
             }
@@ -10007,8 +10486,10 @@ function Invoke-AuditRecommendationsApply {
 
         $report.items = @($plan.items)
         $report.removal_candidates = @($plan.removal_candidates)
-        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates
-        $report.persisted = (([int]$report.changed_counts.add_installed + [int]$report.changed_counts.remove_removed) -gt 0)
+        $report.mcp_items = @($plan.mcp_items)
+        $report.mcp_removal_candidates = @($plan.mcp_removal_candidates)
+        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
+        $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
         return [pscustomobject]$report
     }
@@ -10016,8 +10497,10 @@ function Invoke-AuditRecommendationsApply {
         if ($report.success) { $report.success = $false }
         $report.items = @($plan.items)
         $report.removal_candidates = @($plan.removal_candidates)
-        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates
-        $report.persisted = (([int]$report.changed_counts.add_installed + [int]$report.changed_counts.remove_removed) -gt 0)
+        $report.mcp_items = @($plan.mcp_items)
+        $report.mcp_removal_candidates = @($plan.mcp_removal_candidates)
+        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
+        $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
         throw
     }
@@ -10042,18 +10525,22 @@ function Invoke-AuditRecommendationsTwoStageApply {
         [string]$RecommendationsPath,
         [string]$AddSelection,
         [string]$RemoveSelection,
+        [string]$McpAddSelection,
+        [string]$McpRemoveSelection,
         [string]$DryRunAck,
         [string]$StaleAck,
         [switch]$AllowStaleSnapshot
     )
-    $dryRunReport = Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -DryRunAck $DryRunAck -StaleAck $StaleAck -AllowStaleSnapshot:$AllowStaleSnapshot -RequireDryRunAck $true
+    $dryRunReport = Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -McpAddSelection $McpAddSelection -McpRemoveSelection $McpRemoveSelection -DryRunAck $DryRunAck -StaleAck $StaleAck -AllowStaleSnapshot:$AllowStaleSnapshot -RequireDryRunAck $true
     if ($dryRunReport.PSObject.Properties.Match("success").Count -gt 0 -and -not [bool]$dryRunReport.success) {
         Write-Host "应用确认结束：dry-run 未完成确认，未执行落盘。" -ForegroundColor Yellow
         return $dryRunReport
     }
     $plannedAdds = @($dryRunReport.items | Where-Object { [string]$_.status -eq "planned" }).Count
     $plannedRemoves = @($dryRunReport.removal_candidates | Where-Object { [string]$_.status -eq "planned" }).Count
-    if ($plannedAdds -eq 0 -and $plannedRemoves -eq 0) {
+    $plannedMcpAdds = @($dryRunReport.mcp_items | Where-Object { [string]$_.status -eq "planned" }).Count
+    $plannedMcpRemoves = @($dryRunReport.mcp_removal_candidates | Where-Object { [string]$_.status -eq "planned" }).Count
+    if ($plannedAdds -eq 0 -and $plannedRemoves -eq 0 -and $plannedMcpAdds -eq 0 -and $plannedMcpRemoves -eq 0) {
         Write-Host "应用确认结束：无可执行变更，保持当前状态。" -ForegroundColor Yellow
         return $dryRunReport
     }
@@ -10075,7 +10562,7 @@ function Invoke-AuditRecommendationsTwoStageApply {
             received_confirmation = [string]$confirmation
         })
     }
-    return (Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -StaleAck $StaleAck -AllowStaleSnapshot:$AllowStaleSnapshot -Apply -Yes)
+    return (Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -McpAddSelection $McpAddSelection -McpRemoveSelection $McpRemoveSelection -StaleAck $StaleAck -AllowStaleSnapshot:$AllowStaleSnapshot -Apply -Yes)
 }
 
 function Get-AuditLatestApplyReportPath {
@@ -10110,6 +10597,9 @@ function Show-AuditLatestStatus {
     Write-Host ("persisted: {0}" -f $persisted)
     if ($null -ne $counts) {
         Write-Host ("changes: add_installed={0}, remove_removed={1}, add_planned={2}, remove_planned={3}, remove_not_found={4}" -f [int]$counts.add_installed, [int]$counts.remove_removed, [int]$counts.add_planned, [int]$counts.remove_planned, [int]$counts.remove_not_found)
+        if ($counts.PSObject.Properties.Match("mcp_add_total").Count -gt 0) {
+            Write-Host ("mcp_changes: add_added={0}, add_updated={1}, add_planned={2}, remove_removed={3}, remove_planned={4}, remove_not_found={5}" -f [int]$counts.mcp_add_added, [int]$counts.mcp_add_updated, [int]$counts.mcp_add_planned, [int]$counts.mcp_remove_removed, [int]$counts.mcp_remove_planned, [int]$counts.mcp_remove_not_found)
+        }
     }
     if ([string]$report.mode -eq "dry_run" -and -not $persisted) {
         Write-Host "警告：最近一次仅为 dry-run，未落盘。" -ForegroundColor Red
@@ -10132,6 +10622,8 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
         force = $false
         add_selection = $null
         remove_selection = $null
+        mcp_add_selection = $null
+        mcp_remove_selection = $null
         apply = $false
         yes = $false
         tags = @()
@@ -10237,6 +10729,16 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
                 $result.remove_selection = [string]$items[++$i]
                 continue
             }
+            "--mcp-add-indexes" {
+                Need ($i + 1 -lt $items.Count) "--mcp-add-indexes 缺少值"
+                $result.mcp_add_selection = [string]$items[++$i]
+                continue
+            }
+            "--mcp-remove-indexes" {
+                Need ($i + 1 -lt $items.Count) "--mcp-remove-indexes 缺少值"
+                $result.mcp_remove_selection = [string]$items[++$i]
+                continue
+            }
             "--apply" {
                 $result.apply = $true
                 continue
@@ -10316,8 +10818,8 @@ function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
         "status" { Show-AuditLatestStatus }
         "scan" { Invoke-AuditTargetsScan -Target $opts.target -OutDir $opts.out -Force:$opts.force | Out-Null }
         "discover_skills" { Invoke-AuditSkillDiscovery -Query $opts.query -OutDir $opts.out -Force:$opts.force | Out-Null }
-        "apply_flow" { Invoke-AuditRecommendationsTwoStageApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -DryRunAck $opts.dry_run_ack -StaleAck $opts.stale_ack -AllowStaleSnapshot:$opts.allow_stale_snapshot | Out-Null }
-        "apply" { Invoke-AuditRecommendationsApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -DryRunAck $opts.dry_run_ack -StaleAck $opts.stale_ack -AllowStaleSnapshot:$opts.allow_stale_snapshot -RequireDryRunAck (-not $opts.apply) -Apply:$opts.apply -Yes:$opts.yes | Out-Null }
+        "apply_flow" { Invoke-AuditRecommendationsTwoStageApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -McpAddSelection $opts.mcp_add_selection -McpRemoveSelection $opts.mcp_remove_selection -DryRunAck $opts.dry_run_ack -StaleAck $opts.stale_ack -AllowStaleSnapshot:$opts.allow_stale_snapshot | Out-Null }
+        "apply" { Invoke-AuditRecommendationsApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -McpAddSelection $opts.mcp_add_selection -McpRemoveSelection $opts.mcp_remove_selection -DryRunAck $opts.dry_run_ack -StaleAck $opts.stale_ack -AllowStaleSnapshot:$opts.allow_stale_snapshot -RequireDryRunAck (-not $opts.apply) -Apply:$opts.apply -Yes:$opts.yes | Out-Null }
     }
 }
 
@@ -11101,7 +11603,7 @@ Skills 管理器（中文菜单）
   .\skills.ps1 审查目标 删除 <name>
   .\skills.ps1 审查目标 应用确认 --recommendations <file> [--allow-stale-snapshot] [--stale-ack "<token>"]
   .\skills.ps1 审查目标 应用 --recommendations <file> [--dry-run-ack "我知道未落盘"] [--allow-stale-snapshot] [--stale-ack "<token>"]
-  .\skills.ps1 审查目标 应用 --recommendations <file> --apply --yes [--add-indexes "1,3"] [--remove-indexes "2"] [--allow-stale-snapshot] [--stale-ack "<token>"]
+  .\skills.ps1 审查目标 应用 --recommendations <file> --apply --yes [--add-indexes "1,3"] [--remove-indexes "2"] [--mcp-add-indexes "1"] [--mcp-remove-indexes "2"] [--allow-stale-snapshot] [--stale-ack "<token>"]
   .\skills.ps1 doctor [--json] [--fix] [--dry-run-fix] [--strict] [--strict-perf] [--threshold-ms <ms>]
   通用参数：
   -DryRun：仅预演（跳过写入/删除/同步/拉取）
@@ -11143,8 +11645,8 @@ Skills 管理器（中文菜单）
   - `--out` 若指向已存在且非空目录，默认阻断，防止覆盖旧审查包；如确需复用，显式追加 `--force`。
   - 若路径里仍包含 `<run-id>` 这类占位符，命令会直接阻断并给出可用 run-id 提示。
   - `状态` 可查看最近一次 `apply-report.json` 的 `mode/success/persisted/changed_counts`。
-  - 执行前会分别列出“新增建议”和“卸载建议”两份带序号清单；dry-run 后向用户汇报时必须沿用原序号，并同时展示用户需求 / 目标仓两条简短依据。
-  - `--add-indexes` 和 `--remove-indexes` 分别作用于各自清单；两份清单独立编号，先选卸载不会改变新增清单的序号映射。
+  - 执行前会分别列出“技能新增/卸载”和“MCP 新增/卸载”四份带序号清单；dry-run 后向用户汇报时必须沿用原序号，并同时展示用户需求 / 目标仓两条简短依据。
+  - `--add-indexes` / `--remove-indexes` 作用于技能清单；`--mcp-add-indexes` / `--mcp-remove-indexes` 作用于 MCP 清单；四份清单独立编号。
 
 提示：如遇 PowerShell 脚本执行被拦，可在当前窗口临时放开：
   Set-ExecutionPolicy -Scope Process Bypass

@@ -171,7 +171,7 @@ English aliases：
 .\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json
 .\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json --dry-run-ack "我知道未落盘"
 .\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes
-.\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes --add-indexes "1,3" --remove-indexes "2"
+.\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes --add-indexes "1,3" --remove-indexes "2" --mcp-add-indexes "1" --mcp-remove-indexes "2"
 ```
 
 `发现新技能` 是不绑定目标仓的 profile-only 模式，会生成同样的审查包与 `recommendations.template.json`，但不生成 `repo-scan.json`；外层 AI 必须基于用户画像、已安装技能、`source-strategy.json` 和真实来源研究给出建议。
@@ -180,12 +180,14 @@ English aliases：
 在 dry-run 模式下，脚本会以红色警示“未落盘”，并要求显式确认口令 `我知道未落盘`（非交互场景可用 `--dry-run-ack` 传入）。
 `状态` 命令会读取最近一次 `apply-report.json`，展示 `mode / success / persisted / changed_counts`。
 
-执行 `应用` 时，脚本会先展示两份独立的建议清单：
+执行 `应用` 时，脚本会先展示四份独立的建议清单：
 
 - 新增建议：每项有序号、技能名、用户需求依据、目标仓/场景依据
 - 卸载建议：每项有序号、技能名、已安装定位信息、用户需求依据、目标仓/场景依据
+- MCP 新增建议：每项有序号、MCP 名称、用户需求依据、目标仓/场景依据
+- MCP 卸载建议：每项有序号、MCP 名称、用户需求依据、目标仓/场景依据
 
-你可以在交互中分别输入“新增序号”和“卸载序号”，也可以用 `--add-indexes` / `--remove-indexes` 非交互传入。两份清单独立编号，卸载选择不会改变新增清单的序号及命中关系。
+你可以在交互中分别输入技能/MCP 的新增与卸载序号，也可以用 `--add-indexes` / `--remove-indexes` / `--mcp-add-indexes` / `--mcp-remove-indexes` 非交互传入。四份清单独立编号，任一类别的选择不会改变其他清单的序号映射。
 
 如果外层 AI 具备工作区执行能力，最直接的交付方式是让它代理执行本次 run 目录中的 `outer-ai-prompt.md`；要求它先完成 `recommendations.json` 自检，再进入 dry-run。
 
@@ -204,7 +206,7 @@ English aliases：
 .\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json
 .\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json --dry-run-ack "我知道未落盘"
 .\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes
-.\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes --add-indexes "1,3" --remove-indexes "2"
+.\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes --add-indexes "1,3" --remove-indexes "2" --mcp-add-indexes "1" --mcp-remove-indexes "2"
 ```
 
 ## 仓库结构

@@ -34,8 +34,8 @@ Describe "Skill Audit E2E" {
             Set-AuditTestWorkspace $root
 
             $cfg = [pscustomobject]@{
-                vendors = @()
-                targets = @()
+                vendors = @([pscustomobject]@{ name = "placeholder"; repo = "https://example.com/placeholder.git"; ref = "main" })
+                targets = @([pscustomobject]@{ path = (Join-Path $root "out\skills") })
                 mappings = @()
                 imports = @()
                 mcp_servers = @()
@@ -176,6 +176,93 @@ Describe "Skill Audit E2E" {
             $report.removal_candidates[0].status | Should Be "removed"
             Assert-MockCalled 构建生效 -Times 1 -Exactly
             Assert-MockCalled Invoke-Doctor -Times 1 -Exactly
+        }
+
+        It "Applies selected MCP add/remove recommendations" {
+            $root = Join-Path $TestDrive "ws-skill-audit-apply-mcp"
+            New-Item -ItemType Directory -Path $root -Force | Out-Null
+            Set-AuditTestWorkspace $root
+
+            $cfg = [pscustomobject]@{
+                vendors = @([pscustomobject]@{ name = "placeholder"; repo = "https://example.com/placeholder.git"; ref = "main" })
+                targets = @([pscustomobject]@{ path = (Join-Path $root "out\skills") })
+                mappings = @()
+                imports = @()
+                mcp_servers = @(
+                    [pscustomobject]@{
+                        name = "legacy-fetch"
+                        transport = "stdio"
+                        command = "node"
+                        args = @("server.js")
+                    }
+                )
+                mcp_targets = @()
+                update_force = $false
+                sync_mode = "sync"
+            }
+            SaveCfg $cfg
+
+            $recommendationsPath = Join-Path $root "recommendations-mcp.json"
+            $recommendations = [pscustomobject]@{
+                schema_version = 2
+                run_id = "r-mcp"
+                target = "demo-target"
+                decision_basis = [pscustomobject]@{
+                    user_profile_used = $true
+                    target_scan_used = $true
+                    source_strategy_used = $true
+                    summary = "ok"
+                }
+                new_skills = @()
+                overlap_findings = @()
+                removal_candidates = @()
+                do_not_install = @()
+                mcp_new_servers = @(
+                    [pscustomobject]@{
+                        name = "context7"
+                        reason_user_profile = "User needs docs MCP."
+                        reason_target_repo = "Repo workflow needs quick docs lookup."
+                        confidence = "high"
+                        sources = @("local-fixture")
+                        server = [pscustomobject]@{
+                            name = "context7"
+                            transport = "stdio"
+                            command = "npx"
+                            args = @("-y", "@upstash/context7-mcp")
+                        }
+                    }
+                )
+                mcp_removal_candidates = @(
+                    [pscustomobject]@{
+                        name = "legacy-fetch"
+                        reason_user_profile = "User no longer needs this MCP."
+                        reason_target_repo = "Repo no longer uses this MCP path."
+                        sources = @("local-fixture")
+                        installed = [pscustomobject]@{
+                            name = "legacy-fetch"
+                        }
+                    }
+                )
+            }
+            Set-ContentUtf8 $recommendationsPath ($recommendations | ConvertTo-Json -Depth 20)
+
+            Mock 同步MCP {}
+            Mock 构建生效 {}
+            Mock Invoke-Doctor { [pscustomobject]@{ pass = $true } }
+
+            $report = Invoke-AuditRecommendationsApply -RecommendationsPath $recommendationsPath -Apply -Yes -McpAddSelection "1" -McpRemoveSelection "1"
+            $saved = LoadCfg
+
+            $report.success | Should Be $true
+            $report.persisted | Should Be $true
+            $report.changed_counts.add_installed | Should Be 0
+            $report.changed_counts.mcp_add_added | Should Be 1
+            $report.changed_counts.mcp_remove_removed | Should Be 1
+            @($saved.mcp_servers).Count | Should Be 1
+            $saved.mcp_servers[0].name | Should Be "context7"
+            Assert-MockCalled 同步MCP -Times 1 -Exactly -Scope It
+            Assert-MockCalled 构建生效 -Times 0 -Exactly -Scope It
+            Assert-MockCalled Invoke-Doctor -Times 1 -Exactly -Scope It
         }
     }
 }

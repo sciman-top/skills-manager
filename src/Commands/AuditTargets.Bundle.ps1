@@ -56,6 +56,7 @@ function Invoke-AuditTargetsScan {
 
     $installedPath = Join-Path $reportRoot "installed-skills.json"
     $installedSkills = @()
+    $installedMcpServers = @()
     try {
         try {
             $liveCfg = LoadCfg
@@ -65,6 +66,7 @@ function Invoke-AuditTargetsScan {
             $liveCfg = New-AuditInstalledFactsFallbackCfg
         }
         $installedSkills = @(Get-InstalledSkillFacts $liveCfg)
+        $installedMcpServers = @(Get-AuditMcpServerFacts $liveCfg)
     }
     catch {
         throw ("生成 installed-skills.json 失败：{0}" -f $_.Exception.Message)
@@ -77,7 +79,10 @@ function Invoke-AuditTargetsScan {
             captured_at = (Get-Date).ToString("o")
             live_skill_count = [int]$liveState.skill_count
             live_fingerprint = [string]$liveState.fingerprint
+            live_mcp_server_count = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
+            live_mcp_fingerprint = if ($liveState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$liveState.mcp_fingerprint } else { "" }
             skills = @($installedSkills)
+            mcp_servers = @($installedMcpServers)
         })
 
     $sourceStrategyPath = Join-Path $reportRoot "source-strategy.json"
@@ -120,7 +125,7 @@ function Invoke-AuditTargetsScan {
     Write-Host ("- ai-brief.md: {0}" -f $briefPath)
     Write-Host ("- outer-ai-prompt.md: {0}" -f $outerAiPromptPath)
     Write-Host ("- recommendations.template.json: {0}" -f $templatePath)
-    Write-Host "下一步：把 outer-ai-prompt.md 交给 AI；AI 应先填写并自检 recommendations.json，再执行 dry-run，并按原序号列出新增/卸载清单。" -ForegroundColor Yellow
+    Write-Host "下一步：把 outer-ai-prompt.md 交给 AI；AI 应先填写并自检 recommendations.json，再执行 dry-run，并按原序号列出技能与 MCP 的新增/卸载清单。" -ForegroundColor Yellow
     return [pscustomobject]@{
         run_id = $runId
         path = $reportRoot
@@ -157,6 +162,7 @@ function Invoke-AuditSkillDiscovery {
 
     $installedPath = Join-Path $reportRoot "installed-skills.json"
     $installedSkills = @()
+    $installedMcpServers = @()
     try {
         try {
             $liveCfg = LoadCfg
@@ -166,6 +172,7 @@ function Invoke-AuditSkillDiscovery {
             $liveCfg = New-AuditInstalledFactsFallbackCfg
         }
         $installedSkills = @(Get-InstalledSkillFacts $liveCfg)
+        $installedMcpServers = @(Get-AuditMcpServerFacts $liveCfg)
     }
     catch {
         throw ("生成 installed-skills.json 失败：{0}" -f $_.Exception.Message)
@@ -178,7 +185,10 @@ function Invoke-AuditSkillDiscovery {
             captured_at = (Get-Date).ToString("o")
             live_skill_count = [int]$liveState.skill_count
             live_fingerprint = [string]$liveState.fingerprint
+            live_mcp_server_count = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
+            live_mcp_fingerprint = if ($liveState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$liveState.mcp_fingerprint } else { "" }
             skills = @($installedSkills)
+            mcp_servers = @($installedMcpServers)
         })
 
     $sourceStrategyPath = Join-Path $reportRoot "source-strategy.json"
@@ -209,7 +219,7 @@ function Invoke-AuditSkillDiscovery {
     Write-Host ("- ai-brief.md: {0}" -f $briefPath)
     Write-Host ("- outer-ai-prompt.md: {0}" -f $outerAiPromptPath)
     Write-Host ("- recommendations.template.json: {0}" -f $templatePath)
-    Write-Host "下一步：把 outer-ai-prompt.md 交给 AI；AI 应先填写并自检 recommendations.json，再执行 dry-run，并按原序号列出新增/卸载清单。" -ForegroundColor Yellow
+    Write-Host "下一步：把 outer-ai-prompt.md 交给 AI；AI 应先填写并自检 recommendations.json，再执行 dry-run，并按原序号列出技能与 MCP 的新增/卸载清单。" -ForegroundColor Yellow
     return [pscustomobject]@{
         run_id = $runId
         path = $reportRoot

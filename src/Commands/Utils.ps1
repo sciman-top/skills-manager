@@ -417,7 +417,7 @@ Skills 管理器（中文菜单）
   .\skills.ps1 审查目标 删除 <name>
   .\skills.ps1 审查目标 应用确认 --recommendations <file> [--allow-stale-snapshot] [--stale-ack "<token>"]
   .\skills.ps1 审查目标 应用 --recommendations <file> [--dry-run-ack "我知道未落盘"] [--allow-stale-snapshot] [--stale-ack "<token>"]
-  .\skills.ps1 审查目标 应用 --recommendations <file> --apply --yes [--add-indexes "1,3"] [--remove-indexes "2"] [--allow-stale-snapshot] [--stale-ack "<token>"]
+  .\skills.ps1 审查目标 应用 --recommendations <file> --apply --yes [--add-indexes "1,3"] [--remove-indexes "2"] [--mcp-add-indexes "1"] [--mcp-remove-indexes "2"] [--allow-stale-snapshot] [--stale-ack "<token>"]
   .\skills.ps1 doctor [--json] [--fix] [--dry-run-fix] [--strict] [--strict-perf] [--threshold-ms <ms>]
   通用参数：
   -DryRun：仅预演（跳过写入/删除/同步/拉取）
@@ -459,8 +459,8 @@ Skills 管理器（中文菜单）
   - `--out` 若指向已存在且非空目录，默认阻断，防止覆盖旧审查包；如确需复用，显式追加 `--force`。
   - 若路径里仍包含 `<run-id>` 这类占位符，命令会直接阻断并给出可用 run-id 提示。
   - `状态` 可查看最近一次 `apply-report.json` 的 `mode/success/persisted/changed_counts`。
-  - 执行前会分别列出“新增建议”和“卸载建议”两份带序号清单；dry-run 后向用户汇报时必须沿用原序号，并同时展示用户需求 / 目标仓两条简短依据。
-  - `--add-indexes` 和 `--remove-indexes` 分别作用于各自清单；两份清单独立编号，先选卸载不会改变新增清单的序号映射。
+  - 执行前会分别列出“技能新增/卸载”和“MCP 新增/卸载”四份带序号清单；dry-run 后向用户汇报时必须沿用原序号，并同时展示用户需求 / 目标仓两条简短依据。
+  - `--add-indexes` / `--remove-indexes` 作用于技能清单；`--mcp-add-indexes` / `--mcp-remove-indexes` 作用于 MCP 清单；四份清单独立编号。
 
 提示：如遇 PowerShell 脚本执行被拦，可在当前窗口临时放开：
   Set-ExecutionPolicy -Scope Process Bypass

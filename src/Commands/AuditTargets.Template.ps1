@@ -83,6 +83,9 @@ function Assert-AuditBundleFileContent([string]$path, [string]$label) {
         "installed-skills.json" {
             Need (Test-AuditJsonProperty $data "skills") ("installed-skills 缺少 skills：{0}" -f $path)
             Need (Assert-IsArray $data.skills) ("installed-skills.skills 必须为数组：{0}" -f $path)
+            if (Test-AuditJsonProperty $data "mcp_servers") {
+                Need (Assert-IsArray $data.mcp_servers) ("installed-skills.mcp_servers 必须为数组：{0}" -f $path)
+            }
             if (Test-AuditJsonProperty $data "snapshot_kind") {
                 Need ([string]$data.snapshot_kind -eq "audit_input") ("installed-skills.snapshot_kind 必须为 audit_input：{0}" -f $path)
             }
@@ -208,6 +211,34 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
                 reason_target_repo = $targetReasonDoNotInstall
                 sources = @("<source-url-1>")
                 note = "<why it should not be added now>"
+            }
+        )
+        mcp_new_servers = @(
+            [ordered]@{
+                name = "<mcp-server-name>"
+                reason_user_profile = "<why the user's long-term workflow benefits from this MCP server>"
+                reason_target_repo = $targetReasonInstall
+                confidence = "medium"
+                sources = @("<source-url-1>")
+                source_categories = @("official-docs")
+                server = [ordered]@{
+                    name = "<mcp-server-name>"
+                    transport = "stdio"
+                    command = "<command>"
+                    args = @("<arg1>")
+                }
+            }
+        )
+        mcp_removal_candidates = @(
+            [ordered]@{
+                name = "<installed-mcp-name>"
+                reason_user_profile = "<why the user profile no longer justifies this MCP server>"
+                reason_target_repo = $targetReasonRemoval
+                sources = @("<source-url-1>")
+                source_categories = @("official-docs")
+                installed = [ordered]@{
+                    name = "<installed-mcp-name>"
+                }
             }
         )
     })

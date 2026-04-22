@@ -14,6 +14,8 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
         force = $false
         add_selection = $null
         remove_selection = $null
+        mcp_add_selection = $null
+        mcp_remove_selection = $null
         apply = $false
         yes = $false
         tags = @()
@@ -119,6 +121,16 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
                 $result.remove_selection = [string]$items[++$i]
                 continue
             }
+            "--mcp-add-indexes" {
+                Need ($i + 1 -lt $items.Count) "--mcp-add-indexes 缺少值"
+                $result.mcp_add_selection = [string]$items[++$i]
+                continue
+            }
+            "--mcp-remove-indexes" {
+                Need ($i + 1 -lt $items.Count) "--mcp-remove-indexes 缺少值"
+                $result.mcp_remove_selection = [string]$items[++$i]
+                continue
+            }
             "--apply" {
                 $result.apply = $true
                 continue
@@ -198,7 +210,7 @@ function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
         "status" { Show-AuditLatestStatus }
         "scan" { Invoke-AuditTargetsScan -Target $opts.target -OutDir $opts.out -Force:$opts.force | Out-Null }
         "discover_skills" { Invoke-AuditSkillDiscovery -Query $opts.query -OutDir $opts.out -Force:$opts.force | Out-Null }
-        "apply_flow" { Invoke-AuditRecommendationsTwoStageApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -DryRunAck $opts.dry_run_ack -StaleAck $opts.stale_ack -AllowStaleSnapshot:$opts.allow_stale_snapshot | Out-Null }
-        "apply" { Invoke-AuditRecommendationsApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -DryRunAck $opts.dry_run_ack -StaleAck $opts.stale_ack -AllowStaleSnapshot:$opts.allow_stale_snapshot -RequireDryRunAck (-not $opts.apply) -Apply:$opts.apply -Yes:$opts.yes | Out-Null }
+        "apply_flow" { Invoke-AuditRecommendationsTwoStageApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -McpAddSelection $opts.mcp_add_selection -McpRemoveSelection $opts.mcp_remove_selection -DryRunAck $opts.dry_run_ack -StaleAck $opts.stale_ack -AllowStaleSnapshot:$opts.allow_stale_snapshot | Out-Null }
+        "apply" { Invoke-AuditRecommendationsApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -McpAddSelection $opts.mcp_add_selection -McpRemoveSelection $opts.mcp_remove_selection -DryRunAck $opts.dry_run_ack -StaleAck $opts.stale_ack -AllowStaleSnapshot:$opts.allow_stale_snapshot -RequireDryRunAck (-not $opts.apply) -Apply:$opts.apply -Yes:$opts.yes | Out-Null }
     }
 }

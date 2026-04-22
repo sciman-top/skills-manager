@@ -1,8 +1,88 @@
+function Get-AuditPersistedChangeTotal($counts) {
+    if ($null -eq $counts) { return 0 }
+    $total = 0
+    foreach ($field in @("add_installed", "remove_removed", "mcp_add_added", "mcp_add_updated", "mcp_remove_removed")) {
+        if ($counts.PSObject.Properties.Match($field).Count -gt 0) {
+            $total += [int]$counts.$field
+        }
+    }
+    return $total
+}
+
+function Apply-AuditMcpSelections($selectedAddItems, $selectedRemoveItems) {
+    $selectedAddItems = @($selectedAddItems)
+    $selectedRemoveItems = @($selectedRemoveItems)
+    if ($selectedAddItems.Count -eq 0 -and $selectedRemoveItems.Count -eq 0) {
+        return [pscustomobject]@{ changed = $false }
+    }
+
+    $cfg = LoadCfg
+    $cfgRaw = Get-Content $CfgPath -Raw
+    $servers = @(if ($cfg.PSObject.Properties.Match("mcp_servers").Count -gt 0 -and $null -ne $cfg.mcp_servers) { @($cfg.mcp_servers) } else { @() })
+    $changed = $false
+
+    foreach ($item in $selectedAddItems) {
+        $candidate = $item.server
+        $existing = @($servers | Where-Object { [string]$_.name -eq [string]$candidate.name })
+        if ($existing.Count -eq 1 -and (Test-McpServerEquivalent $existing[0] $candidate)) {
+            $item.status = "already_present"
+            continue
+        }
+        $replaced = $false
+        for ($i = 0; $i -lt $servers.Count; $i++) {
+            if ([string]$servers[$i].name -eq [string]$candidate.name) {
+                $servers[$i] = $candidate
+                $replaced = $true
+                $changed = $true
+                break
+            }
+        }
+        if ($replaced) {
+            $item.status = "updated"
+        }
+        else {
+            $servers += $candidate
+            $item.status = "added"
+            $changed = $true
+        }
+    }
+
+    foreach ($item in $selectedRemoveItems) {
+        $name = [string]$item.installed_name
+        $matches = @($servers | Where-Object { [string]$_.name -eq $name })
+        if ($matches.Count -eq 0) {
+            $item.status = "not_found"
+            continue
+        }
+        if ($matches.Count -gt 1) {
+            $item.status = "ambiguous"
+            continue
+        }
+        $servers = @($servers | Where-Object { [string]$_.name -ne $name })
+        $item.status = "removed"
+        $changed = $true
+    }
+
+    if (-not $changed) {
+        return [pscustomobject]@{ changed = $false }
+    }
+
+    if ($cfg.PSObject.Properties.Match("mcp_servers").Count -eq 0) {
+        $cfg | Add-Member -NotePropertyName mcp_servers -NotePropertyValue @() -Force
+    }
+    $cfg.mcp_servers = @($servers)
+    SaveCfgSafe $cfg $cfgRaw
+    同步MCP
+    return [pscustomobject]@{ changed = $true }
+}
+
 function Invoke-AuditRecommendationsApply {
     param(
         [string]$RecommendationsPath,
         [string]$AddSelection,
         [string]$RemoveSelection,
+        [string]$McpAddSelection,
+        [string]$McpRemoveSelection,
         [string]$DryRunAck,
         [string]$StaleAck,
         [switch]$AllowStaleSnapshot,
@@ -25,7 +105,12 @@ function Invoke-AuditRecommendationsApply {
         Log ("recommendations 同目录缺少 installed-skills.json，已回退为 live state 快照：{0}" -f $snapshotPath) "WARN"
         $snapshotState = New-AuditInstalledSnapshotFallbackState $liveState $snapshotPath
     }
-    $isSnapshotStale = ([string]$snapshotState.fingerprint -ne [string]$liveState.fingerprint)
+    $skillSnapshotStale = ([string]$snapshotState.fingerprint -ne [string]$liveState.fingerprint)
+    $mcpSnapshotStale = $false
+    if ($snapshotState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.mcp_fingerprint)) {
+        $mcpSnapshotStale = ([string]$snapshotState.mcp_fingerprint -ne [string]$liveState.mcp_fingerprint)
+    }
+    $isSnapshotStale = ($skillSnapshotStale -or $mcpSnapshotStale)
     if ($isSnapshotStale -and -not $AllowStaleSnapshot) {
         $staleMessage = "审查快照与当前生效配置不一致（stale_snapshot）。请先运行：.\skills.ps1 审查目标 扫描 重新生成 run 后再应用 recommendations。"
         $staleReport = [ordered]@{
@@ -42,6 +127,8 @@ function Invoke-AuditRecommendationsApply {
             changed_counts = New-AuditChangedCounts @() @()
             items = @()
             removal_candidates = @()
+            mcp_items = @()
+            mcp_removal_candidates = @()
             overlap_findings = @()
             do_not_install = @()
             rollback = @()
@@ -54,6 +141,11 @@ function Invoke-AuditRecommendationsApply {
         Write-Host ""
         Write-Host "WARNING: 当前正在使用过期审查快照（stale_snapshot）继续执行。" -ForegroundColor Red
         Write-Host ("WARNING: live={0}, snapshot={1}" -f [int]$liveState.skill_count, [int]$snapshotState.skill_count) -ForegroundColor Red
+        if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0 -or $snapshotState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) {
+            $liveMcp = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
+            $snapshotMcp = if ($snapshotState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$snapshotState.mcp_server_count } else { 0 }
+            Write-Host ("WARNING: mcp live={0}, snapshot={1}" -f $liveMcp, $snapshotMcp) -ForegroundColor Red
+        }
         $staleAckInput = ""
         if (-not [string]::IsNullOrWhiteSpace($StaleAck)) {
             $staleAckInput = [string]$StaleAck
@@ -77,6 +169,8 @@ function Invoke-AuditRecommendationsApply {
                 changed_counts = New-AuditChangedCounts @() @()
                 items = @()
                 removal_candidates = @()
+                mcp_items = @()
+                mcp_removal_candidates = @()
                 overlap_findings = @()
                 do_not_install = @()
                 rollback = @()
@@ -104,6 +198,8 @@ function Invoke-AuditRecommendationsApply {
                 changed_counts = New-AuditChangedCounts @() @()
                 items = @()
                 removal_candidates = @()
+                mcp_items = @()
+                mcp_removal_candidates = @()
                 overlap_findings = @()
                 do_not_install = @()
                 rollback = @()
@@ -129,11 +225,13 @@ function Invoke-AuditRecommendationsApply {
         allow_stale_snapshot = [bool]$AllowStaleSnapshot
         stale_snapshot_detected = [bool]$isSnapshotStale
         stale_acknowledged = if ($isSnapshotStale -and $AllowStaleSnapshot) { $true } else { $false }
-        changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates
+        changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
         snapshot_state = $snapshotState
         live_state = $liveState
         items = @($plan.items)
         removal_candidates = @($plan.removal_candidates)
+        mcp_items = @($plan.mcp_items)
+        mcp_removal_candidates = @($plan.mcp_removal_candidates)
         overlap_findings = @($plan.overlap_findings)
         do_not_install = @($plan.do_not_install)
         rollback = @()
@@ -149,7 +247,21 @@ function Invoke-AuditRecommendationsApply {
         foreach ($item in @($plan.removal_candidates)) {
             Write-Host ("DRYRUN remove: [{0}|{1}] {2}" -f [string]$item.vendor, [string]$item.from, [string]$item.name)
         }
-        Write-Host "DRY-RUN 完成：未修改任何技能映射（未落盘）。" -ForegroundColor Red
+        foreach ($item in @($plan.mcp_items)) {
+            $server = $item.server
+            $transport = if ($server.PSObject.Properties.Match("transport").Count -gt 0) { [string]$server.transport } else { "stdio" }
+            if ($transport -eq "stdio") {
+                $argsText = if ($server.PSObject.Properties.Match("args").Count -gt 0 -and $null -ne $server.args -and @($server.args).Count -gt 0) { " " + ((@($server.args) | ForEach-Object { [string]$_ }) -join " ") } else { "" }
+                Write-Host ("DRYRUN mcp-add: {0} --transport stdio --cmd {1}{2}" -f [string]$server.name, [string]$server.command, $argsText)
+            }
+            else {
+                Write-Host ("DRYRUN mcp-add: {0} --transport {1} --url {2}" -f [string]$server.name, $transport, [string]$server.url)
+            }
+        }
+        foreach ($item in @($plan.mcp_removal_candidates)) {
+            Write-Host ("DRYRUN mcp-remove: {0}" -f [string]$item.installed_name)
+        }
+        Write-Host "DRY-RUN 完成：未修改任何技能映射或 MCP 配置（未落盘）。" -ForegroundColor Red
         Write-Host ("如需真正执行，请运行：.\skills.ps1 审查目标 应用 --recommendations `"{0}`" --apply --yes" -f $RecommendationsPath) -ForegroundColor Red
         if ($RequireDryRunAck) {
             $ackToken = Get-AuditDryRunAckToken
@@ -169,7 +281,7 @@ function Invoke-AuditRecommendationsApply {
                 $report["dry_run_acknowledged"] = $false
                 $report["dry_run_ack_expected"] = $ackToken
                 $report["dry_run_ack_received"] = [string]$ackInput
-                $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates
+                $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
                 Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
                 return [pscustomobject]$report
             }
@@ -183,7 +295,7 @@ function Invoke-AuditRecommendationsApply {
     if ($selectedAdd.canceled) {
         $report.success = $false
         $report["canceled"] = $true
-        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates
+        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
         $report.persisted = $false
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
         return [pscustomobject]$report
@@ -192,7 +304,25 @@ function Invoke-AuditRecommendationsApply {
     if ($selectedRemove.canceled) {
         $report.success = $false
         $report["canceled"] = $true
-        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates
+        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
+        $report.persisted = $false
+        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+        return [pscustomobject]$report
+    }
+    $selectedMcpAdd = Resolve-AuditSelection $McpAddSelection @($plan.mcp_items | Where-Object { $_.status -eq "planned" }) "请输入要新增的 MCP 建议序号（空=跳过，0=取消）" "MCP 新增建议序号无效"
+    if ($selectedMcpAdd.canceled) {
+        $report.success = $false
+        $report["canceled"] = $true
+        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
+        $report.persisted = $false
+        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+        return [pscustomobject]$report
+    }
+    $selectedMcpRemove = Resolve-AuditSelection $McpRemoveSelection @($plan.mcp_removal_candidates | Where-Object { $_.status -eq "planned" }) "请输入要卸载的 MCP 建议序号（空=跳过，0=取消）" "MCP 卸载建议序号无效"
+    if ($selectedMcpRemove.canceled) {
+        $report.success = $false
+        $report["canceled"] = $true
+        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
         $report.persisted = $false
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
         return [pscustomobject]$report
@@ -217,8 +347,8 @@ function Invoke-AuditRecommendationsApply {
                 $item | Add-Member -NotePropertyName error -NotePropertyValue $_.Exception.Message -Force
                 $report.success = $false
                 $report.items = @($plan.items)
-                $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates
-                $report.persisted = (([int]$report.changed_counts.add_installed + [int]$report.changed_counts.remove_removed) -gt 0)
+                $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
+                $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
                 Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
                 throw
             }
@@ -231,15 +361,57 @@ function Invoke-AuditRecommendationsApply {
             }
         }
 
-        if (@($selectedAdd.items).Count -gt 0 -or @($selectedRemove.items).Count -gt 0) {
+        if (@($selectedMcpAdd.items).Count -gt 0 -or @($selectedMcpRemove.items).Count -gt 0) {
+            try {
+                Apply-AuditMcpSelections $selectedMcpAdd.items $selectedMcpRemove.items | Out-Null
+                foreach ($item in @($selectedMcpAdd.items)) {
+                    if ([string]$item.status -eq "added" -or [string]$item.status -eq "updated") {
+                        $report.rollback += ("Restore previous MCP config for '{0}' if rollback is required." -f [string]$item.name)
+                    }
+                }
+                foreach ($item in @($selectedMcpRemove.items)) {
+                    if ([string]$item.status -eq "removed") {
+                        $report.rollback += ("Re-add removed MCP server '{0}' if rollback is required." -f [string]$item.installed_name)
+                    }
+                }
+            }
+            catch {
+                foreach ($item in @($selectedMcpAdd.items)) {
+                    if ([string]$item.status -eq "planned") { $item.status = "failed" }
+                    $item | Add-Member -NotePropertyName error -NotePropertyValue $_.Exception.Message -Force
+                }
+                foreach ($item in @($selectedMcpRemove.items)) {
+                    if ([string]$item.status -eq "planned") { $item.status = "failed" }
+                    $item | Add-Member -NotePropertyName error -NotePropertyValue $_.Exception.Message -Force
+                }
+                $report.success = $false
+                $report.items = @($plan.items)
+                $report.removal_candidates = @($plan.removal_candidates)
+                $report.mcp_items = @($plan.mcp_items)
+                $report.mcp_removal_candidates = @($plan.mcp_removal_candidates)
+                $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
+                $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
+                Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+                throw
+            }
+        }
+
+        $hasSkillChanges = (@($selectedAdd.items).Count -gt 0 -or @($selectedRemove.items).Count -gt 0)
+        $hasMcpChanges = (@($selectedMcpAdd.items).Count -gt 0 -or @($selectedMcpRemove.items).Count -gt 0)
+
+        if ($hasSkillChanges) {
             构建生效
+        }
+        if ($hasSkillChanges -or $hasMcpChanges) {
             $doctorResult = Invoke-Doctor @("--strict", "--threshold-ms", "8000")
             if ($doctorResult -and $doctorResult.PSObject.Properties.Match("pass").Count -gt 0 -and -not [bool]$doctorResult.pass) {
                 $report.success = $false
                 $report.items = @($plan.items)
                 $report.removal_candidates = @($plan.removal_candidates)
-                $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates
-                $report.persisted = (([int]$report.changed_counts.add_installed + [int]$report.changed_counts.remove_removed) -gt 0)
+                $report.mcp_items = @($plan.mcp_items)
+                $report.mcp_removal_candidates = @($plan.mcp_removal_candidates)
+                $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
+                $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
                 Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
                 throw "doctor --strict failed after applying recommendations"
             }
@@ -247,8 +419,10 @@ function Invoke-AuditRecommendationsApply {
 
         $report.items = @($plan.items)
         $report.removal_candidates = @($plan.removal_candidates)
-        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates
-        $report.persisted = (([int]$report.changed_counts.add_installed + [int]$report.changed_counts.remove_removed) -gt 0)
+        $report.mcp_items = @($plan.mcp_items)
+        $report.mcp_removal_candidates = @($plan.mcp_removal_candidates)
+        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
+        $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
         return [pscustomobject]$report
     }
@@ -256,8 +430,10 @@ function Invoke-AuditRecommendationsApply {
         if ($report.success) { $report.success = $false }
         $report.items = @($plan.items)
         $report.removal_candidates = @($plan.removal_candidates)
-        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates
-        $report.persisted = (([int]$report.changed_counts.add_installed + [int]$report.changed_counts.remove_removed) -gt 0)
+        $report.mcp_items = @($plan.mcp_items)
+        $report.mcp_removal_candidates = @($plan.mcp_removal_candidates)
+        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
+        $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
         throw
     }
@@ -282,18 +458,22 @@ function Invoke-AuditRecommendationsTwoStageApply {
         [string]$RecommendationsPath,
         [string]$AddSelection,
         [string]$RemoveSelection,
+        [string]$McpAddSelection,
+        [string]$McpRemoveSelection,
         [string]$DryRunAck,
         [string]$StaleAck,
         [switch]$AllowStaleSnapshot
     )
-    $dryRunReport = Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -DryRunAck $DryRunAck -StaleAck $StaleAck -AllowStaleSnapshot:$AllowStaleSnapshot -RequireDryRunAck $true
+    $dryRunReport = Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -McpAddSelection $McpAddSelection -McpRemoveSelection $McpRemoveSelection -DryRunAck $DryRunAck -StaleAck $StaleAck -AllowStaleSnapshot:$AllowStaleSnapshot -RequireDryRunAck $true
     if ($dryRunReport.PSObject.Properties.Match("success").Count -gt 0 -and -not [bool]$dryRunReport.success) {
         Write-Host "应用确认结束：dry-run 未完成确认，未执行落盘。" -ForegroundColor Yellow
         return $dryRunReport
     }
     $plannedAdds = @($dryRunReport.items | Where-Object { [string]$_.status -eq "planned" }).Count
     $plannedRemoves = @($dryRunReport.removal_candidates | Where-Object { [string]$_.status -eq "planned" }).Count
-    if ($plannedAdds -eq 0 -and $plannedRemoves -eq 0) {
+    $plannedMcpAdds = @($dryRunReport.mcp_items | Where-Object { [string]$_.status -eq "planned" }).Count
+    $plannedMcpRemoves = @($dryRunReport.mcp_removal_candidates | Where-Object { [string]$_.status -eq "planned" }).Count
+    if ($plannedAdds -eq 0 -and $plannedRemoves -eq 0 -and $plannedMcpAdds -eq 0 -and $plannedMcpRemoves -eq 0) {
         Write-Host "应用确认结束：无可执行变更，保持当前状态。" -ForegroundColor Yellow
         return $dryRunReport
     }
@@ -315,7 +495,7 @@ function Invoke-AuditRecommendationsTwoStageApply {
             received_confirmation = [string]$confirmation
         })
     }
-    return (Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -StaleAck $StaleAck -AllowStaleSnapshot:$AllowStaleSnapshot -Apply -Yes)
+    return (Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -McpAddSelection $McpAddSelection -McpRemoveSelection $McpRemoveSelection -StaleAck $StaleAck -AllowStaleSnapshot:$AllowStaleSnapshot -Apply -Yes)
 }
 
 function Get-AuditLatestApplyReportPath {
@@ -350,6 +530,9 @@ function Show-AuditLatestStatus {
     Write-Host ("persisted: {0}" -f $persisted)
     if ($null -ne $counts) {
         Write-Host ("changes: add_installed={0}, remove_removed={1}, add_planned={2}, remove_planned={3}, remove_not_found={4}" -f [int]$counts.add_installed, [int]$counts.remove_removed, [int]$counts.add_planned, [int]$counts.remove_planned, [int]$counts.remove_not_found)
+        if ($counts.PSObject.Properties.Match("mcp_add_total").Count -gt 0) {
+            Write-Host ("mcp_changes: add_added={0}, add_updated={1}, add_planned={2}, remove_removed={3}, remove_planned={4}, remove_not_found={5}" -f [int]$counts.mcp_add_added, [int]$counts.mcp_add_updated, [int]$counts.mcp_add_planned, [int]$counts.mcp_remove_removed, [int]$counts.mcp_remove_planned, [int]$counts.mcp_remove_not_found)
+        }
     }
     if ([string]$report.mode -eq "dry_run" -and -not $persisted) {
         Write-Host "警告：最近一次仅为 dry-run，未落盘。" -ForegroundColor Red

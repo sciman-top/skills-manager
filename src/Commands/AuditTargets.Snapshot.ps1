@@ -92,6 +92,76 @@ function Get-InstalledSkillFacts($cfg = $null) {
     return @($facts)
 }
 
+function Get-AuditMcpServerFacts($cfg = $null) {
+    if ($null -eq $cfg) { $cfg = LoadCfg }
+    $facts = @()
+    $servers = @()
+    if ($cfg.PSObject.Properties.Match("mcp_servers").Count -gt 0 -and $null -ne $cfg.mcp_servers) {
+        $servers = @($cfg.mcp_servers)
+    }
+    foreach ($s in $servers) {
+        if ($null -eq $s) { continue }
+        $name = [string]$s.name
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $transport = if ($s.PSObject.Properties.Match("transport").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$s.transport)) {
+            ([string]$s.transport).Trim().ToLowerInvariant()
+        }
+        else {
+            "stdio"
+        }
+        $row = [ordered]@{
+            name = $name
+            transport = $transport
+        }
+        if ($transport -eq "stdio") {
+            $row.command = if ($s.PSObject.Properties.Match("command").Count -gt 0) { [string]$s.command } else { "" }
+            $row.args = if ($s.PSObject.Properties.Match("args").Count -gt 0 -and $null -ne $s.args) { @($s.args) } else { @() }
+            $envKeys = @()
+            if ($s.PSObject.Properties.Match("env").Count -gt 0 -and $null -ne $s.env) {
+                if ($s.env -is [hashtable] -or $s.env -is [System.Collections.IDictionary]) {
+                    $envKeys = @($s.env.Keys | ForEach-Object { [string]$_ } | Sort-Object)
+                }
+                else {
+                    $envKeys = @($s.env.PSObject.Properties.Name | ForEach-Object { [string]$_ } | Sort-Object)
+                }
+            }
+            $row.env_keys = @($envKeys)
+        }
+        else {
+            $row.url = if ($s.PSObject.Properties.Match("url").Count -gt 0) { [string]$s.url } else { "" }
+            $headerKeys = @()
+            if ($s.PSObject.Properties.Match("headers").Count -gt 0 -and $null -ne $s.headers) {
+                if ($s.headers -is [hashtable] -or $s.headers -is [System.Collections.IDictionary]) {
+                    $headerKeys = @($s.headers.Keys | ForEach-Object { [string]$_ } | Sort-Object)
+                }
+                else {
+                    $headerKeys = @($s.headers.PSObject.Properties.Name | ForEach-Object { [string]$_ } | Sort-Object)
+                }
+            }
+            $row.header_keys = @($headerKeys)
+            $row.bearer_token_env_var = if ($s.PSObject.Properties.Match("bearer_token_env_var").Count -gt 0) { [string]$s.bearer_token_env_var } else { "" }
+        }
+        $facts += [pscustomobject]$row
+    }
+    return @($facts)
+}
+
+function Get-AuditFingerprintFromMcpServers($servers) {
+    $pairs = @()
+    foreach ($server in @($servers)) {
+        if ($null -eq $server) { continue }
+        $name = ""
+        if ($server.PSObject.Properties.Match("name").Count -gt 0) {
+            $name = ([string]$server.name).Trim()
+        }
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $sig = Get-McpServerSignature $server
+        if ([string]::IsNullOrWhiteSpace($sig)) { continue }
+        $pairs += ("{0}|{1}" -f $name, $sig)
+    }
+    return (Get-AuditFingerprintFromVendorFromPairs $pairs)
+}
+
 function Get-AuditFingerprintFromVendorFromPairs($pairs) {
     $normalized = New-Object System.Collections.Generic.List[string]
     foreach ($pair in @($pairs)) {
@@ -130,11 +200,17 @@ function Get-AuditFingerprintFromSkillFacts($facts) {
 function Get-AuditLiveInstalledState($cfg = $null) {
     if ($null -eq $cfg) { $cfg = LoadCfg }
     $facts = @(Get-InstalledSkillFacts $cfg)
+    $mcpServers = @()
+    if ($cfg.PSObject.Properties.Match("mcp_servers").Count -gt 0 -and $null -ne $cfg.mcp_servers) {
+        $mcpServers = @($cfg.mcp_servers)
+    }
     return [pscustomobject]([ordered]@{
         source_of_truth = "live_mappings"
         captured_at = (Get-Date).ToString("o")
         skill_count = @($facts).Count
         fingerprint = (Get-AuditFingerprintFromSkillFacts $facts)
+        mcp_server_count = @($mcpServers).Count
+        mcp_fingerprint = (Get-AuditFingerprintFromMcpServers $mcpServers)
     })
 }
 
@@ -165,12 +241,24 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
     Need (Test-AuditJsonProperty $data "skills") ("installed-skills 快照缺少 skills：{0}" -f $snapshotPath)
     Need (Assert-IsArray $data.skills) ("installed-skills.skills 必须为数组：{0}" -f $snapshotPath)
     $skills = @($data.skills)
+    $mcpServers = @()
+    if (Test-AuditJsonProperty $data "mcp_servers" -and $null -ne $data.mcp_servers) {
+        Need (Assert-IsArray $data.mcp_servers) ("installed-skills.mcp_servers 必须为数组：{0}" -f $snapshotPath)
+        $mcpServers = @($data.mcp_servers)
+    }
     $fingerprint = ""
     if (Test-AuditJsonProperty $data "live_fingerprint") {
         $fingerprint = ([string]$data.live_fingerprint).Trim().ToLowerInvariant()
     }
     if ([string]::IsNullOrWhiteSpace($fingerprint)) {
         $fingerprint = (Get-AuditFingerprintFromSkillFacts $skills)
+    }
+    $mcpFingerprint = ""
+    if (Test-AuditJsonProperty $data "live_mcp_fingerprint") {
+        $mcpFingerprint = ([string]$data.live_mcp_fingerprint).Trim().ToLowerInvariant()
+    }
+    if ([string]::IsNullOrWhiteSpace($mcpFingerprint) -and @($mcpServers).Count -gt 0) {
+        $mcpFingerprint = (Get-AuditFingerprintFromMcpServers $mcpServers)
     }
     $capturedAt = ""
     if (Test-AuditJsonProperty $data "captured_at") { $capturedAt = [string]$data.captured_at }
@@ -182,6 +270,8 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
         captured_at = $capturedAt
         skill_count = $skills.Count
         fingerprint = $fingerprint
+        mcp_server_count = @($mcpServers).Count
+        mcp_fingerprint = $mcpFingerprint
     })
 }
 
@@ -192,5 +282,7 @@ function New-AuditInstalledSnapshotFallbackState($liveState, [string]$snapshotPa
         captured_at = [string]$liveState.captured_at
         skill_count = [int]$liveState.skill_count
         fingerprint = [string]$liveState.fingerprint
+        mcp_server_count = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
+        mcp_fingerprint = if ($liveState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$liveState.mcp_fingerprint } else { "" }
     })
 }

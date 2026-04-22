@@ -170,7 +170,7 @@ Chinese commands:
 .\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json
 .\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json --dry-run-ack "我知道未落盘"
 .\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes
-.\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes --add-indexes "1,3" --remove-indexes "2"
+.\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes --add-indexes "1,3" --remove-indexes "2" --mcp-add-indexes "1" --mcp-remove-indexes "2"
 ```
 
 `应用` defaults to dry-run. Only `--apply --yes` executes the specific installs and removals you selected, then runs build/apply and doctor.
@@ -178,12 +178,14 @@ Chinese commands:
 In dry-run mode, the script prints a red non-persisted warning and requires explicit ack token `我知道未落盘` (for non-interactive runs, pass `--dry-run-ack`).
 `状态` reads the latest `apply-report.json` and shows `mode / success / persisted / changed_counts`.
 
-Before applying, the script prints two independent recommendation lists:
+Before applying, the script prints four independent recommendation lists:
 
 - add recommendations: each item has an index, skill name, user-profile reason, and target-repo reason
 - removal recommendations: each item has an index, skill name, installed locator, user-profile reason, and target-repo reason
+- MCP add recommendations: each item has an index, MCP name, user-profile reason, and target-repo reason
+- MCP removal recommendations: each item has an index, MCP name, user-profile reason, and target-repo reason
 
-You can choose items interactively by entering add indexes and remove indexes, or pass them non-interactively through `--add-indexes` and `--remove-indexes`. The two lists have independent numbering; choosing removals never changes the add-list index mapping.
+You can choose skill/MCP indexes interactively, or pass them non-interactively through `--add-indexes`, `--remove-indexes`, `--mcp-add-indexes`, and `--mcp-remove-indexes`. All four lists are independently numbered, and selections in one list never remap indexes in another list.
 
 If the outer AI has workspace execution capability, the most direct handoff is to ask it to execute the run-local `outer-ai-prompt.md`, with the expectation that it self-checks `recommendations.json` before dry-run.
 
@@ -201,7 +203,7 @@ Equivalent English aliases:
 .\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json
 .\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json --dry-run-ack "我知道未落盘"
 .\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes
-.\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes --add-indexes "1,3" --remove-indexes "2"
+.\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes --add-indexes "1,3" --remove-indexes "2" --mcp-add-indexes "1" --mcp-remove-indexes "2"
 ```
 
 ## Repository Layout
