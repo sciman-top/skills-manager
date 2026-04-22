@@ -33,6 +33,36 @@ Describe "Config And Update Enhancements" {
         }
     }
 
+    Context "Config contract validation" {
+        It "Collects contract errors without mutating config shape" {
+            $cfg = [pscustomobject]@{
+                vendors = @(
+                    [pscustomobject]@{ name = "vendor-a"; repo = "https://example.com/a.git" }
+                )
+                targets = @(
+                    [pscustomobject]@{ path = "~/.codex/skills" }
+                )
+                mappings = @(
+                    [pscustomobject]@{ vendor = "missing-vendor"; from = "..\escape"; to = "skill-x" }
+                )
+                imports = @()
+                mcp_servers = @(
+                    [pscustomobject]@{ name = "bad-server"; transport = "websocket" }
+                )
+                sync_mode = "invalid"
+            }
+
+            $errors = @(Get-CfgContractErrors $cfg)
+            $joined = $errors -join "`n"
+
+            $joined | Should Match "mapping.from 非法"
+            $joined | Should Match "mcp_server.transport 仅支持 stdio/sse/http：bad-server"
+            $joined | Should Match "sync_mode 仅支持 link 或 sync"
+            $joined | Should Match "mapping 引用了不存在的 vendor：missing-vendor"
+            $cfg.PSObject.Properties.Match("mcp_targets").Count | Should Be 0
+        }
+    }
+
     Context "Vendor import normalization" {
         It "Canonicalizes vendor import names by repo without restoring deleted mappings" {
             $cfg = [pscustomobject]@{

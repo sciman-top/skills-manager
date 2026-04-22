@@ -173,7 +173,7 @@ function Invoke-RemoveItemWithRetry(
     [switch]$IgnoreFailure,
     [switch]$SilentIgnore
 ) {
-    if (-not (Test-Path $path)) { return $true }
+    if (-not (Test-PathEntry $path)) { return $true }
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         try {
             Invoke-RemoveItem $path -Recurse:$Recurse
@@ -196,7 +196,7 @@ function Invoke-RemoveItemWithRetry(
 }
 function Invoke-MoveItem([string]$src, [string]$dst) {
     Log ("Move-Item {0} -> {1}" -f $src, $dst)
-    if (-not $DryRun) { Move-Item -Force $src $dst }
+    if (-not $DryRun) { Move-Item -LiteralPath $src -Destination $dst -Force }
 }
 function Invoke-StartProcess([string]$file, [string]$args) {
     Log ("Start-Process {0} {1}" -f $file, $args)
@@ -217,7 +217,10 @@ function Invoke-MklinkJunction([string]$linkPath, [string]$targetPath) {
 }
 function EnsureDir([string]$p) {
     if ($DryRun) { return }
-    if (-not (Test-Path $p)) { New-Item -ItemType Directory -Force -Path $p | Out-Null }
+    if ([string]::IsNullOrWhiteSpace($p)) { return }
+    if (-not (Test-Path -LiteralPath $p -PathType Container)) {
+        [System.IO.Directory]::CreateDirectory($p) | Out-Null
+    }
 }
 function Clear-FileWriteBlockAttributes([string]$path) {
     if ([string]::IsNullOrWhiteSpace($path)) { return }
@@ -640,7 +643,7 @@ function Backup-DirIfNeeded([string]$path) {
 }
 function Backup-OverrideDir([string]$overrideName) {
     $src = Join-Path $OverridesDir $overrideName
-    if (-not (Test-Path $src)) { return $null }
+    if (-not (Test-PathEntry $src)) { return $null }
     $bakRoot = Join-Path $OverridesDir ".bak"
     EnsureDir $bakRoot
     $stamp = Get-Date -Format "yyyyMMdd-HHmmss"

@@ -1,5 +1,5 @@
 function Get-PerfSummaryFromLogLines([string[]]$lines, [int]$RecentPerMetric = 3) {
-    $events = @()
+    $events = New-Object System.Collections.Generic.List[object]
     if ($null -eq $lines) { return @() }
     foreach ($line in $lines) {
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
@@ -15,30 +15,39 @@ function Get-PerfSummaryFromLogLines([string[]]$lines, [int]$RecentPerMetric = 3
         $duration = 0
         try { $duration = [int]$record.data.duration_ms } catch { continue }
         if ($duration -lt 0) { continue }
-        $events += [pscustomobject]@{
+        $events.Add([pscustomobject]@{
             metric = $metric
             duration_ms = $duration
             ts = [string]$record.ts
-        }
+        }) | Out-Null
     }
     if ($events.Count -eq 0) { return @() }
 
-    $summary = @()
+    $summary = New-Object System.Collections.Generic.List[object]
     $groups = $events | Group-Object metric
     foreach ($g in $groups) {
         $recent = $g.Group | Select-Object -Last $RecentPerMetric
         if ($recent.Count -eq 0) { continue }
         $avg = [math]::Round((($recent | Measure-Object -Property duration_ms -Average).Average), 0)
         $last = ($recent | Select-Object -Last 1)
-        $summary += [pscustomobject]@{
+        $summary.Add([pscustomobject]@{
             metric = $g.Name
             samples = @($recent).Count
             avg_ms = [int]$avg
             last_ms = [int]$last.duration_ms
             last_ts = [string]$last.ts
-        }
+        }) | Out-Null
     }
     return ($summary | Sort-Object metric)
+}
+
+function Get-DoctorGitVersion([switch]$NoHostLog) {
+    if ($DryRun -or $NoHostLog) {
+        $gitOut = & git version 2>$null
+        if ($LASTEXITCODE -ne 0 -or $null -eq $gitOut) { throw "git version failed" }
+        return (($gitOut | Select-Object -First 1).ToString().Trim())
+    }
+    return (Invoke-GitCapture @("version"))
 }
 
 function Parse-DoctorArgs([string[]]$tokens) {
@@ -307,14 +316,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
 
     # 2. Git Check
     try {
-        if ($DryRun) {
-            $gitOut = & git version 2>$null
-            if ($LASTEXITCODE -ne 0 -or $null -eq $gitOut) { throw "git version failed" }
-            $gitVer = ($gitOut | Select-Object -First 1).ToString().Trim()
-        }
-        else {
-            $gitVer = Invoke-GitCapture @("version")
-        }
+        $gitVer = Get-DoctorGitVersion -NoHostLog:$opts.json
         if ([string]::IsNullOrWhiteSpace($gitVer)) { throw "git version is empty" }
         $report.checks.git = [ordered]@{ ok = $true; value = $gitVer }
         if (-not $opts.json) { Write-Host "✅ Git: $gitVer" -ForegroundColor Green }
@@ -362,12 +364,29 @@ function Invoke-Doctor([string[]]$tokens = @()) {
             $cleanCfg = $rawCfg -replace "(?m)^\s*//.*", ""
             $cfg = $cleanCfg | ConvertFrom-Json
             if ($cfg) {
-                $cfgObj = $cfg
-                $report.checks.config = [ordered]@{ ok = $true; vendors = @($cfg.vendors).Count; mappings = @($cfg.mappings).Count }
-                if (-not $opts.json) {
-                    Write-Host "✅ skills.json: Valid JSON" -ForegroundColor Green
-                    Write-Host ("   - Vendors: {0}" -f $cfg.vendors.Count)
-                    Write-Host ("   - Mappings: {0}" -f $cfg.mappings.Count)
+                $contractErrors = @(Get-CfgContractErrors $cfg)
+                if ($contractErrors.Count -gt 0) {
+                    $report.checks.config = [ordered]@{
+                        ok = $false
+                        reason = ("contract_error: {0}" -f ($contractErrors -join " | "))
+                        errors = @($contractErrors)
+                    }
+                    if (-not $opts.json) {
+                        Write-Host "❌ skills.json: Contract Error" -ForegroundColor Red
+                        foreach ($err in $contractErrors) {
+                            Write-Host ("   - {0}" -f $err) -ForegroundColor Red
+                        }
+                    }
+                    $pass = $false
+                }
+                else {
+                    $cfgObj = $cfg
+                    $report.checks.config = [ordered]@{ ok = $true; vendors = @($cfg.vendors).Count; mappings = @($cfg.mappings).Count }
+                    if (-not $opts.json) {
+                        Write-Host "✅ skills.json: Valid JSON + contract" -ForegroundColor Green
+                        Write-Host ("   - Vendors: {0}" -f @($cfg.vendors).Count)
+                        Write-Host ("   - Mappings: {0}" -f @($cfg.mappings).Count)
+                    }
                 }
             }
             else {
@@ -499,6 +518,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     if (-not $report.checks.config.ok) {
         $reason = if ($report.checks.config.reason) { [string]$report.checks.config.reason } else { "config_invalid" }
         if ($reason -like "parse_error*") { $report.summary.errors += "config_parse_error" }
+        elseif ($reason -like "contract_error*") { $report.summary.errors += "config_contract_error" }
         else { $report.summary.warnings += "config_not_ready" }
     }
     if ($report.checks.long_paths.value -eq 0) { $report.summary.warnings += "long_paths_off" }

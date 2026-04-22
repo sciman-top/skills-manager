@@ -13,6 +13,14 @@ Describe "Build Cache and Transaction" {
             $h2 = Get-DirectoryFingerprint $dir
             $h1 | Should Not Be $h2
         }
+
+        It "Reads directories containing wildcard characters literally" {
+            $dir = Join-Path $TestDrive "skill[brackets]"
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $dir "SKILL.md") -Value "v1"
+
+            Get-DirectoryFingerprint $dir | Should Not Be "missing"
+        }
     }
 
     Context "Mirror-SkillWithCache" {

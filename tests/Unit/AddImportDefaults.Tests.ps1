@@ -19,6 +19,22 @@ Describe "Add Import Defaults" {
         $parsed.skills[0] | Should Be "."
     }
 
+    It "Builds an add/import execution plan without touching workspace state" {
+        $repoOnly = Get-AddImportPlanFromParsedArgs (Parse-AddArgs @("addyosmani/web-quality-skills"))
+        $repoOnly.repo | Should Be "https://github.com/addyosmani/web-quality-skills.git"
+        $repoOnly.ref | Should Be "main"
+        $repoOnly.refIsAuto | Should Be $true
+        $repoOnly.mode | Should Be "vendor"
+        $repoOnly.registerVendorOnly | Should Be $true
+
+        $explicitSkill = Get-AddImportPlanFromParsedArgs (Parse-AddArgs @("owner/repo", "--skill", ".", "--mode", "manual", "--ref", "dev"))
+        $explicitSkill.repo | Should Be "https://github.com/owner/repo.git"
+        $explicitSkill.ref | Should Be "dev"
+        $explicitSkill.refIsAuto | Should Be $false
+        $explicitSkill.mode | Should Be "manual"
+        $explicitSkill.registerVendorOnly | Should Be $false
+    }
+
     It "Registers repo-only add as vendor library without installing skills" {
         $oldCfgPath = $script:CfgPath
         $oldImportDir = $script:ImportDir

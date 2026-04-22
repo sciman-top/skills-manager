@@ -15,6 +15,10 @@ jobs:
         shell: powershell
         run: .\tests\check-generated-sync.ps1 -StrictNoGit
 
+      - name: Verify doctor JSON contract
+        shell: powershell
+        run: .\scripts\quality\check-doctor-json.ps1
+
       - name: Run tests
         shell: powershell
         run: .\tests\run.ps1

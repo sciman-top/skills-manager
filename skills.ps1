@@ -191,7 +191,7 @@ function Invoke-RemoveItemWithRetry(
     [switch]$IgnoreFailure,
     [switch]$SilentIgnore
 ) {
-    if (-not (Test-Path $path)) { return $true }
+    if (-not (Test-PathEntry $path)) { return $true }
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         try {
             Invoke-RemoveItem $path -Recurse:$Recurse
@@ -214,7 +214,7 @@ function Invoke-RemoveItemWithRetry(
 }
 function Invoke-MoveItem([string]$src, [string]$dst) {
     Log ("Move-Item {0} -> {1}" -f $src, $dst)
-    if (-not $DryRun) { Move-Item -Force $src $dst }
+    if (-not $DryRun) { Move-Item -LiteralPath $src -Destination $dst -Force }
 }
 function Invoke-StartProcess([string]$file, [string]$args) {
     Log ("Start-Process {0} {1}" -f $file, $args)
@@ -235,7 +235,10 @@ function Invoke-MklinkJunction([string]$linkPath, [string]$targetPath) {
 }
 function EnsureDir([string]$p) {
     if ($DryRun) { return }
-    if (-not (Test-Path $p)) { New-Item -ItemType Directory -Force -Path $p | Out-Null }
+    if ([string]::IsNullOrWhiteSpace($p)) { return }
+    if (-not (Test-Path -LiteralPath $p -PathType Container)) {
+        [System.IO.Directory]::CreateDirectory($p) | Out-Null
+    }
 }
 function Clear-FileWriteBlockAttributes([string]$path) {
     if ([string]::IsNullOrWhiteSpace($path)) { return }
@@ -658,7 +661,7 @@ function Backup-DirIfNeeded([string]$path) {
 }
 function Backup-OverrideDir([string]$overrideName) {
     $src = Join-Path $OverridesDir $overrideName
-    if (-not (Test-Path $src)) { return $null }
+    if (-not (Test-PathEntry $src)) { return $null }
     $bakRoot = Join-Path $OverridesDir ".bak"
     EnsureDir $bakRoot
     $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -2271,6 +2274,127 @@ function Normalize-ArrayField($cfg, [string]$name, [ref]$changed) {
 function Assert-IsArray($value) {
     return ($value -is [System.Collections.IList]) -and -not ($value -is [string])
 }
+function Get-CfgObjectProperty($obj, [string]$name) {
+    if ($null -eq $obj) { return $null }
+    if ($obj.PSObject.Properties.Match($name).Count -eq 0) { return $null }
+    return $obj.$name
+}
+function Get-CfgArrayField($cfg, [string]$name, [bool]$required, [System.Collections.Generic.List[string]]$errors) {
+    $value = Get-CfgObjectProperty $cfg $name
+    if ($null -eq $value) {
+        if ($required) { $errors.Add(("skills.json 缺少 {0}" -f $name)) | Out-Null }
+        return @()
+    }
+    if (Assert-IsArray $value) { return @($value) }
+    if ($value -is [hashtable] -or $value -is [pscustomobject]) { return @($value) }
+    $errors.Add(("skills.json 的 {0} 必须是数组" -f $name)) | Out-Null
+    return @()
+}
+function Get-CfgContractErrors($cfg) {
+    $errors = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $cfg) {
+        $errors.Add("skills.json 为空或无法解析为对象") | Out-Null
+        return @($errors.ToArray())
+    }
+
+    $vendors = Get-CfgArrayField $cfg "vendors" $true $errors
+    $targets = Get-CfgArrayField $cfg "targets" $true $errors
+    $mappings = Get-CfgArrayField $cfg "mappings" $false $errors
+    $imports = Get-CfgArrayField $cfg "imports" $false $errors
+    $mcpServers = Get-CfgArrayField $cfg "mcp_servers" $false $errors
+    $mcpTargets = Get-CfgArrayField $cfg "mcp_targets" $false $errors
+
+    foreach ($v in $vendors) {
+        $name = [string](Get-CfgObjectProperty $v "name")
+        $repo = [string](Get-CfgObjectProperty $v "repo")
+        if ([string]::IsNullOrWhiteSpace($name)) { $errors.Add("vendor 缺少 name") | Out-Null }
+        if ([string]::IsNullOrWhiteSpace($repo)) { $errors.Add(("vendor {0} 缺少 repo" -f $name)) | Out-Null }
+    }
+
+    foreach ($t in $targets) {
+        $path = [string](Get-CfgObjectProperty $t "path")
+        if ([string]::IsNullOrWhiteSpace($path)) { $errors.Add("target 缺少 path") | Out-Null }
+    }
+
+    foreach ($m in $mappings) {
+        $vendor = [string](Get-CfgObjectProperty $m "vendor")
+        $from = [string](Get-CfgObjectProperty $m "from")
+        $to = [string](Get-CfgObjectProperty $m "to")
+        if ([string]::IsNullOrWhiteSpace($vendor)) { $errors.Add("mapping 缺少 vendor") | Out-Null }
+        if ([string]::IsNullOrWhiteSpace($from)) { $errors.Add("mapping 缺少 from") | Out-Null }
+        if ([string]::IsNullOrWhiteSpace($to)) { $errors.Add("mapping 缺少 to") | Out-Null }
+        if (-not [string]::IsNullOrWhiteSpace($from) -and -not (Test-SafeRelativePath $from -AllowDot)) {
+            $errors.Add(("mapping.from 非法（仅允许相对路径，禁止 .. 与绝对路径）：{0}" -f $from)) | Out-Null
+        }
+        if (-not [string]::IsNullOrWhiteSpace($to) -and -not (Test-SafeRelativePath $to)) {
+            $errors.Add(("mapping.to 非法（仅允许相对路径，禁止 .. 与绝对路径）：{0}" -f $to)) | Out-Null
+        }
+    }
+
+    foreach ($i in $imports) {
+        $name = [string](Get-CfgObjectProperty $i "name")
+        $repo = [string](Get-CfgObjectProperty $i "repo")
+        $skill = Normalize-SkillPath ([string](Get-CfgObjectProperty $i "skill"))
+        $mode = [string](Get-CfgObjectProperty $i "mode")
+        if ([string]::IsNullOrWhiteSpace($name)) { $errors.Add("import 缺少 name") | Out-Null }
+        if ([string]::IsNullOrWhiteSpace($repo)) { $errors.Add("import 缺少 repo") | Out-Null }
+        if (-not (Test-SafeRelativePath $skill -AllowDot)) {
+            $errors.Add(("import.skill 非法（仅允许相对路径，禁止 .. 与绝对路径）：{0}" -f $skill)) | Out-Null
+        }
+        if (-not [string]::IsNullOrWhiteSpace($mode) -and $mode -ne "manual" -and $mode -ne "vendor") {
+            $errors.Add(("import mode 仅支持 manual 或 vendor：{0}" -f $name)) | Out-Null
+        }
+    }
+
+    foreach ($s in $mcpServers) {
+        $name = [string](Get-CfgObjectProperty $s "name")
+        $transport = [string](Get-CfgObjectProperty $s "transport")
+        if ([string]::IsNullOrWhiteSpace($transport)) { $transport = "stdio" }
+        if ([string]::IsNullOrWhiteSpace($name)) { $errors.Add("mcp_server 缺少 name") | Out-Null }
+        if ($transport -ne "stdio" -and $transport -ne "sse" -and $transport -ne "http") {
+            $errors.Add(("mcp_server.transport 仅支持 stdio/sse/http：{0}" -f $name)) | Out-Null
+            continue
+        }
+        if ($transport -eq "stdio") {
+            $command = [string](Get-CfgObjectProperty $s "command")
+            if ([string]::IsNullOrWhiteSpace($command)) { $errors.Add(("mcp_server(stdio) 缺少 command：{0}" -f $name)) | Out-Null }
+        }
+        else {
+            $url = [string](Get-CfgObjectProperty $s "url")
+            if ([string]::IsNullOrWhiteSpace($url)) { $errors.Add(("mcp_server({0}) 缺少 url：{1}" -f $transport, $name)) | Out-Null }
+        }
+    }
+
+    foreach ($mt in $mcpTargets) {
+        if ($mt -is [string]) {
+            if ([string]::IsNullOrWhiteSpace([string]$mt)) { $errors.Add("mcp_targets 不能包含空字符串") | Out-Null }
+            continue
+        }
+        $path = [string](Get-CfgObjectProperty $mt "path")
+        if ([string]::IsNullOrWhiteSpace($path)) { $errors.Add("mcp_targets 项缺少 path") | Out-Null }
+    }
+
+    $modeValue = [string](Get-CfgObjectProperty $cfg "sync_mode")
+    if ([string]::IsNullOrWhiteSpace($modeValue)) { $modeValue = "link" }
+    if ($modeValue -ne "link" -and $modeValue -ne "sync") {
+        $errors.Add("sync_mode 仅支持 link 或 sync") | Out-Null
+    }
+
+    $vendorNames = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($v in $vendors) {
+        $name = [string](Get-CfgObjectProperty $v "name")
+        if (-not [string]::IsNullOrWhiteSpace($name)) { $vendorNames.Add($name) | Out-Null }
+    }
+    $vendorNames.Add("manual") | Out-Null
+    foreach ($m in $mappings) {
+        $vendor = [string](Get-CfgObjectProperty $m "vendor")
+        if (-not [string]::IsNullOrWhiteSpace($vendor) -and -not $vendorNames.Contains($vendor)) {
+            $errors.Add(("mapping 引用了不存在的 vendor：{0}" -f $vendor)) | Out-Null
+        }
+    }
+
+    return @($errors.ToArray())
+}
 function Get-DuplicateValues([object[]]$items) {
     if ($null -eq $items) { return @() }
     return $items | Group-Object | Where-Object { $_.Count -gt 1 } | Select-Object -ExpandProperty Name
@@ -2279,9 +2403,9 @@ function Migrate-DirName([string]$baseDir, [string]$oldName, [string]$newName, [
     if ([string]::IsNullOrWhiteSpace($oldName) -or [string]::IsNullOrWhiteSpace($newName)) { return }
     if ($oldName -eq $newName) { return }
     $src = Join-Path $baseDir $oldName
-    if (-not (Test-Path $src)) { return }
+    if (-not (Test-Path -LiteralPath $src)) { return }
     $dst = Join-Path $baseDir $newName
-    if (Test-Path $dst) {
+    if (Test-Path -LiteralPath $dst) {
         Log ("{0} 目录迁移跳过：目标已存在 {1}" -f $label, $dst) "WARN"
         return
     }
@@ -2730,7 +2854,7 @@ function Assert-Cfg($cfg) {
 }
 function SaveCfg($cfg) {
     if (-not $DryRun) {
-        $oldRaw = if (Test-Path $CfgPath) { Get-Content $CfgPath -Raw } else { "" }
+        $oldRaw = if (Test-Path -LiteralPath $CfgPath) { Get-Content -LiteralPath $CfgPath -Raw } else { "" }
         Write-CfgChangeSummary $oldRaw $cfg
         $json = $cfg | ConvertTo-Json -Depth 50
         Set-ContentUtf8 $CfgPath $json
@@ -2740,8 +2864,8 @@ function SaveCfgSafe($cfg, [string]$rawBackup) {
     if ($DryRun) { return }
     try {
         $oldRaw = $rawBackup
-        if ([string]::IsNullOrWhiteSpace($oldRaw) -and (Test-Path $CfgPath)) {
-            $oldRaw = Get-Content $CfgPath -Raw
+        if ([string]::IsNullOrWhiteSpace($oldRaw) -and (Test-Path -LiteralPath $CfgPath)) {
+            $oldRaw = Get-Content -LiteralPath $CfgPath -Raw
         }
         Write-CfgChangeSummary $oldRaw $cfg
         $json = $cfg | ConvertTo-Json -Depth 50
@@ -2761,7 +2885,7 @@ function Get-LockPath {
 
 function Get-RepoHeadCommit([string]$repoPath) {
     Need (-not [string]::IsNullOrWhiteSpace($repoPath)) "repoPath 不能为空"
-    Need (Test-Path $repoPath) ("仓库目录不存在：{0}" -f $repoPath)
+    Need (Test-Path -LiteralPath $repoPath) ("仓库目录不存在：{0}" -f $repoPath)
     Push-Location $repoPath
     try {
         $head = Invoke-GitCapture @("rev-parse", "HEAD")
@@ -2978,7 +3102,7 @@ function 锁定 {
 }
 
 function Get-PerfSummaryFromLogLines([string[]]$lines, [int]$RecentPerMetric = 3) {
-    $events = @()
+    $events = New-Object System.Collections.Generic.List[object]
     if ($null -eq $lines) { return @() }
     foreach ($line in $lines) {
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
@@ -2994,30 +3118,39 @@ function Get-PerfSummaryFromLogLines([string[]]$lines, [int]$RecentPerMetric = 3
         $duration = 0
         try { $duration = [int]$record.data.duration_ms } catch { continue }
         if ($duration -lt 0) { continue }
-        $events += [pscustomobject]@{
+        $events.Add([pscustomobject]@{
             metric = $metric
             duration_ms = $duration
             ts = [string]$record.ts
-        }
+        }) | Out-Null
     }
     if ($events.Count -eq 0) { return @() }
 
-    $summary = @()
+    $summary = New-Object System.Collections.Generic.List[object]
     $groups = $events | Group-Object metric
     foreach ($g in $groups) {
         $recent = $g.Group | Select-Object -Last $RecentPerMetric
         if ($recent.Count -eq 0) { continue }
         $avg = [math]::Round((($recent | Measure-Object -Property duration_ms -Average).Average), 0)
         $last = ($recent | Select-Object -Last 1)
-        $summary += [pscustomobject]@{
+        $summary.Add([pscustomobject]@{
             metric = $g.Name
             samples = @($recent).Count
             avg_ms = [int]$avg
             last_ms = [int]$last.duration_ms
             last_ts = [string]$last.ts
-        }
+        }) | Out-Null
     }
     return ($summary | Sort-Object metric)
+}
+
+function Get-DoctorGitVersion([switch]$NoHostLog) {
+    if ($DryRun -or $NoHostLog) {
+        $gitOut = & git version 2>$null
+        if ($LASTEXITCODE -ne 0 -or $null -eq $gitOut) { throw "git version failed" }
+        return (($gitOut | Select-Object -First 1).ToString().Trim())
+    }
+    return (Invoke-GitCapture @("version"))
 }
 
 function Parse-DoctorArgs([string[]]$tokens) {
@@ -3286,14 +3419,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
 
     # 2. Git Check
     try {
-        if ($DryRun) {
-            $gitOut = & git version 2>$null
-            if ($LASTEXITCODE -ne 0 -or $null -eq $gitOut) { throw "git version failed" }
-            $gitVer = ($gitOut | Select-Object -First 1).ToString().Trim()
-        }
-        else {
-            $gitVer = Invoke-GitCapture @("version")
-        }
+        $gitVer = Get-DoctorGitVersion -NoHostLog:$opts.json
         if ([string]::IsNullOrWhiteSpace($gitVer)) { throw "git version is empty" }
         $report.checks.git = [ordered]@{ ok = $true; value = $gitVer }
         if (-not $opts.json) { Write-Host "✅ Git: $gitVer" -ForegroundColor Green }
@@ -3341,12 +3467,29 @@ function Invoke-Doctor([string[]]$tokens = @()) {
             $cleanCfg = $rawCfg -replace "(?m)^\s*//.*", ""
             $cfg = $cleanCfg | ConvertFrom-Json
             if ($cfg) {
-                $cfgObj = $cfg
-                $report.checks.config = [ordered]@{ ok = $true; vendors = @($cfg.vendors).Count; mappings = @($cfg.mappings).Count }
-                if (-not $opts.json) {
-                    Write-Host "✅ skills.json: Valid JSON" -ForegroundColor Green
-                    Write-Host ("   - Vendors: {0}" -f $cfg.vendors.Count)
-                    Write-Host ("   - Mappings: {0}" -f $cfg.mappings.Count)
+                $contractErrors = @(Get-CfgContractErrors $cfg)
+                if ($contractErrors.Count -gt 0) {
+                    $report.checks.config = [ordered]@{
+                        ok = $false
+                        reason = ("contract_error: {0}" -f ($contractErrors -join " | "))
+                        errors = @($contractErrors)
+                    }
+                    if (-not $opts.json) {
+                        Write-Host "❌ skills.json: Contract Error" -ForegroundColor Red
+                        foreach ($err in $contractErrors) {
+                            Write-Host ("   - {0}" -f $err) -ForegroundColor Red
+                        }
+                    }
+                    $pass = $false
+                }
+                else {
+                    $cfgObj = $cfg
+                    $report.checks.config = [ordered]@{ ok = $true; vendors = @($cfg.vendors).Count; mappings = @($cfg.mappings).Count }
+                    if (-not $opts.json) {
+                        Write-Host "✅ skills.json: Valid JSON + contract" -ForegroundColor Green
+                        Write-Host ("   - Vendors: {0}" -f @($cfg.vendors).Count)
+                        Write-Host ("   - Mappings: {0}" -f @($cfg.mappings).Count)
+                    }
                 }
             }
             else {
@@ -3478,6 +3621,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     if (-not $report.checks.config.ok) {
         $reason = if ($report.checks.config.reason) { [string]$report.checks.config.reason } else { "config_invalid" }
         if ($reason -like "parse_error*") { $report.summary.errors += "config_parse_error" }
+        elseif ($reason -like "contract_error*") { $report.summary.errors += "config_contract_error" }
         else { $report.summary.warnings += "config_not_ready" }
     }
     if ($report.checks.long_paths.value -eq 0) { $report.summary.warnings += "long_paths_off" }
@@ -3809,6 +3953,35 @@ function Get-DeclaredSkillNameFromDir([string]$skillDir) {
     return $null
 }
 
+function Get-AddImportPlanFromParsedArgs($parsed) {
+    Need ($null -ne $parsed) "parsed add args 不能为空"
+
+    $repo = Normalize-RepoUrl $parsed.repo
+    $ref = [string]$parsed.ref
+    $refIsAuto = $false
+    if ([string]::IsNullOrWhiteSpace($ref)) {
+        $ref = "main"
+        $refIsAuto = $true
+    }
+
+    $mode = [string]$parsed.mode
+    if ([string]::IsNullOrWhiteSpace($mode)) { $mode = "manual" }
+    $mode = $mode.ToLowerInvariant()
+    Need ($mode -eq "manual" -or $mode -eq "vendor") "mode 仅支持 manual 或 vendor"
+
+    $registerVendorOnly = (-not [bool]$parsed.skillSpecified -and -not [bool]$parsed.modeSpecified)
+    if ($registerVendorOnly) { $mode = "vendor" }
+
+    return [pscustomobject]@{
+        repo = $repo
+        ref = $ref
+        refIsAuto = $refIsAuto
+        mode = $mode
+        registerVendorOnly = $registerVendorOnly
+        sparse = [bool]$parsed.sparse
+    }
+}
+
 function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
     Preflight
     $cfgRaw = ""
@@ -3818,21 +3991,13 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
     $resolvedTokens = Resolve-AddTokensFromAnyFormat $tokens
     if ($resolvedTokens) { $tokens = $resolvedTokens }
     $parsed = Parse-AddArgs $tokens
-    $repo = Normalize-RepoUrl $parsed.repo
-    $ref = $parsed.ref
-    $refIsAuto = $false
-    if ([string]::IsNullOrWhiteSpace($ref)) {
-        $ref = "main"
-        $refIsAuto = $true
-    }
-    $mode = $parsed.mode
-    if ([string]::IsNullOrWhiteSpace($mode)) { $mode = "manual" }
-    $mode = $mode.ToLowerInvariant()
-    Need ($mode -eq "manual" -or $mode -eq "vendor") "mode 仅支持 manual 或 vendor"
-    $registerVendorOnly = (-not [bool]$parsed.skillSpecified -and -not [bool]$parsed.modeSpecified)
-    if ($registerVendorOnly) { $mode = "vendor" }
-
-    $sparse = [bool]$parsed.sparse
+    $plan = Get-AddImportPlanFromParsedArgs $parsed
+    $repo = $plan.repo
+    $ref = $plan.ref
+    $refIsAuto = [bool]$plan.refIsAuto
+    $mode = $plan.mode
+    $registerVendorOnly = [bool]$plan.registerVendorOnly
+    $sparse = [bool]$plan.sparse
 
     if ($DryRun) {
         if ($registerVendorOnly) {
@@ -4989,7 +5154,7 @@ function 发现 {
 }
 
 function 清空Agent目录 {
-    if (Test-Path $AgentDir) {
+    if (Test-PathEntry $AgentDir) {
         Invoke-RemoveItemWithRetry $AgentDir -Recurse | Out-Null
     }
     EnsureDir $AgentDir
@@ -5018,9 +5183,9 @@ function ConvertTo-Hashtable($obj) {
 
 function Load-BuildCache {
     $path = Get-BuildCachePath
-    if (-not (Test-Path $path)) { return @{} }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return @{} }
     try {
-        $raw = Get-Content $path -Raw
+        $raw = Get-Content -LiteralPath $path -Raw
         if ([string]::IsNullOrWhiteSpace($raw)) { return @{} }
         $obj = $raw | ConvertFrom-Json
         return (ConvertTo-Hashtable $obj)
@@ -5043,8 +5208,8 @@ function Save-BuildCache($cache) {
 }
 
 function Get-DirectoryFingerprint([string]$dir) {
-    if (-not (Test-Path $dir)) { return "missing" }
-    $files = Get-ChildItem $dir -Recurse -File -ErrorAction SilentlyContinue | Sort-Object FullName
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return "missing" }
+    $files = Get-ChildItem -LiteralPath $dir -Recurse -File -ErrorAction SilentlyContinue | Sort-Object FullName
     $parts = New-Object System.Collections.Generic.List[string]
     foreach ($f in $files) {
         $rel = $f.FullName.Substring($dir.Length).TrimStart("\")

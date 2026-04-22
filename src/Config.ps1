@@ -199,6 +199,127 @@ function Normalize-ArrayField($cfg, [string]$name, [ref]$changed) {
 function Assert-IsArray($value) {
     return ($value -is [System.Collections.IList]) -and -not ($value -is [string])
 }
+function Get-CfgObjectProperty($obj, [string]$name) {
+    if ($null -eq $obj) { return $null }
+    if ($obj.PSObject.Properties.Match($name).Count -eq 0) { return $null }
+    return $obj.$name
+}
+function Get-CfgArrayField($cfg, [string]$name, [bool]$required, [System.Collections.Generic.List[string]]$errors) {
+    $value = Get-CfgObjectProperty $cfg $name
+    if ($null -eq $value) {
+        if ($required) { $errors.Add(("skills.json 缺少 {0}" -f $name)) | Out-Null }
+        return @()
+    }
+    if (Assert-IsArray $value) { return @($value) }
+    if ($value -is [hashtable] -or $value -is [pscustomobject]) { return @($value) }
+    $errors.Add(("skills.json 的 {0} 必须是数组" -f $name)) | Out-Null
+    return @()
+}
+function Get-CfgContractErrors($cfg) {
+    $errors = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $cfg) {
+        $errors.Add("skills.json 为空或无法解析为对象") | Out-Null
+        return @($errors.ToArray())
+    }
+
+    $vendors = Get-CfgArrayField $cfg "vendors" $true $errors
+    $targets = Get-CfgArrayField $cfg "targets" $true $errors
+    $mappings = Get-CfgArrayField $cfg "mappings" $false $errors
+    $imports = Get-CfgArrayField $cfg "imports" $false $errors
+    $mcpServers = Get-CfgArrayField $cfg "mcp_servers" $false $errors
+    $mcpTargets = Get-CfgArrayField $cfg "mcp_targets" $false $errors
+
+    foreach ($v in $vendors) {
+        $name = [string](Get-CfgObjectProperty $v "name")
+        $repo = [string](Get-CfgObjectProperty $v "repo")
+        if ([string]::IsNullOrWhiteSpace($name)) { $errors.Add("vendor 缺少 name") | Out-Null }
+        if ([string]::IsNullOrWhiteSpace($repo)) { $errors.Add(("vendor {0} 缺少 repo" -f $name)) | Out-Null }
+    }
+
+    foreach ($t in $targets) {
+        $path = [string](Get-CfgObjectProperty $t "path")
+        if ([string]::IsNullOrWhiteSpace($path)) { $errors.Add("target 缺少 path") | Out-Null }
+    }
+
+    foreach ($m in $mappings) {
+        $vendor = [string](Get-CfgObjectProperty $m "vendor")
+        $from = [string](Get-CfgObjectProperty $m "from")
+        $to = [string](Get-CfgObjectProperty $m "to")
+        if ([string]::IsNullOrWhiteSpace($vendor)) { $errors.Add("mapping 缺少 vendor") | Out-Null }
+        if ([string]::IsNullOrWhiteSpace($from)) { $errors.Add("mapping 缺少 from") | Out-Null }
+        if ([string]::IsNullOrWhiteSpace($to)) { $errors.Add("mapping 缺少 to") | Out-Null }
+        if (-not [string]::IsNullOrWhiteSpace($from) -and -not (Test-SafeRelativePath $from -AllowDot)) {
+            $errors.Add(("mapping.from 非法（仅允许相对路径，禁止 .. 与绝对路径）：{0}" -f $from)) | Out-Null
+        }
+        if (-not [string]::IsNullOrWhiteSpace($to) -and -not (Test-SafeRelativePath $to)) {
+            $errors.Add(("mapping.to 非法（仅允许相对路径，禁止 .. 与绝对路径）：{0}" -f $to)) | Out-Null
+        }
+    }
+
+    foreach ($i in $imports) {
+        $name = [string](Get-CfgObjectProperty $i "name")
+        $repo = [string](Get-CfgObjectProperty $i "repo")
+        $skill = Normalize-SkillPath ([string](Get-CfgObjectProperty $i "skill"))
+        $mode = [string](Get-CfgObjectProperty $i "mode")
+        if ([string]::IsNullOrWhiteSpace($name)) { $errors.Add("import 缺少 name") | Out-Null }
+        if ([string]::IsNullOrWhiteSpace($repo)) { $errors.Add("import 缺少 repo") | Out-Null }
+        if (-not (Test-SafeRelativePath $skill -AllowDot)) {
+            $errors.Add(("import.skill 非法（仅允许相对路径，禁止 .. 与绝对路径）：{0}" -f $skill)) | Out-Null
+        }
+        if (-not [string]::IsNullOrWhiteSpace($mode) -and $mode -ne "manual" -and $mode -ne "vendor") {
+            $errors.Add(("import mode 仅支持 manual 或 vendor：{0}" -f $name)) | Out-Null
+        }
+    }
+
+    foreach ($s in $mcpServers) {
+        $name = [string](Get-CfgObjectProperty $s "name")
+        $transport = [string](Get-CfgObjectProperty $s "transport")
+        if ([string]::IsNullOrWhiteSpace($transport)) { $transport = "stdio" }
+        if ([string]::IsNullOrWhiteSpace($name)) { $errors.Add("mcp_server 缺少 name") | Out-Null }
+        if ($transport -ne "stdio" -and $transport -ne "sse" -and $transport -ne "http") {
+            $errors.Add(("mcp_server.transport 仅支持 stdio/sse/http：{0}" -f $name)) | Out-Null
+            continue
+        }
+        if ($transport -eq "stdio") {
+            $command = [string](Get-CfgObjectProperty $s "command")
+            if ([string]::IsNullOrWhiteSpace($command)) { $errors.Add(("mcp_server(stdio) 缺少 command：{0}" -f $name)) | Out-Null }
+        }
+        else {
+            $url = [string](Get-CfgObjectProperty $s "url")
+            if ([string]::IsNullOrWhiteSpace($url)) { $errors.Add(("mcp_server({0}) 缺少 url：{1}" -f $transport, $name)) | Out-Null }
+        }
+    }
+
+    foreach ($mt in $mcpTargets) {
+        if ($mt -is [string]) {
+            if ([string]::IsNullOrWhiteSpace([string]$mt)) { $errors.Add("mcp_targets 不能包含空字符串") | Out-Null }
+            continue
+        }
+        $path = [string](Get-CfgObjectProperty $mt "path")
+        if ([string]::IsNullOrWhiteSpace($path)) { $errors.Add("mcp_targets 项缺少 path") | Out-Null }
+    }
+
+    $modeValue = [string](Get-CfgObjectProperty $cfg "sync_mode")
+    if ([string]::IsNullOrWhiteSpace($modeValue)) { $modeValue = "link" }
+    if ($modeValue -ne "link" -and $modeValue -ne "sync") {
+        $errors.Add("sync_mode 仅支持 link 或 sync") | Out-Null
+    }
+
+    $vendorNames = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($v in $vendors) {
+        $name = [string](Get-CfgObjectProperty $v "name")
+        if (-not [string]::IsNullOrWhiteSpace($name)) { $vendorNames.Add($name) | Out-Null }
+    }
+    $vendorNames.Add("manual") | Out-Null
+    foreach ($m in $mappings) {
+        $vendor = [string](Get-CfgObjectProperty $m "vendor")
+        if (-not [string]::IsNullOrWhiteSpace($vendor) -and -not $vendorNames.Contains($vendor)) {
+            $errors.Add(("mapping 引用了不存在的 vendor：{0}" -f $vendor)) | Out-Null
+        }
+    }
+
+    return @($errors.ToArray())
+}
 function Get-DuplicateValues([object[]]$items) {
     if ($null -eq $items) { return @() }
     return $items | Group-Object | Where-Object { $_.Count -gt 1 } | Select-Object -ExpandProperty Name
@@ -207,9 +328,9 @@ function Migrate-DirName([string]$baseDir, [string]$oldName, [string]$newName, [
     if ([string]::IsNullOrWhiteSpace($oldName) -or [string]::IsNullOrWhiteSpace($newName)) { return }
     if ($oldName -eq $newName) { return }
     $src = Join-Path $baseDir $oldName
-    if (-not (Test-Path $src)) { return }
+    if (-not (Test-Path -LiteralPath $src)) { return }
     $dst = Join-Path $baseDir $newName
-    if (Test-Path $dst) {
+    if (Test-Path -LiteralPath $dst) {
         Log ("{0} 目录迁移跳过：目标已存在 {1}" -f $label, $dst) "WARN"
         return
     }
@@ -658,7 +779,7 @@ function Assert-Cfg($cfg) {
 }
 function SaveCfg($cfg) {
     if (-not $DryRun) {
-        $oldRaw = if (Test-Path $CfgPath) { Get-Content $CfgPath -Raw } else { "" }
+        $oldRaw = if (Test-Path -LiteralPath $CfgPath) { Get-Content -LiteralPath $CfgPath -Raw } else { "" }
         Write-CfgChangeSummary $oldRaw $cfg
         $json = $cfg | ConvertTo-Json -Depth 50
         Set-ContentUtf8 $CfgPath $json
@@ -668,8 +789,8 @@ function SaveCfgSafe($cfg, [string]$rawBackup) {
     if ($DryRun) { return }
     try {
         $oldRaw = $rawBackup
-        if ([string]::IsNullOrWhiteSpace($oldRaw) -and (Test-Path $CfgPath)) {
-            $oldRaw = Get-Content $CfgPath -Raw
+        if ([string]::IsNullOrWhiteSpace($oldRaw) -and (Test-Path -LiteralPath $CfgPath)) {
+            $oldRaw = Get-Content -LiteralPath $CfgPath -Raw
         }
         Write-CfgChangeSummary $oldRaw $cfg
         $json = $cfg | ConvertTo-Json -Depth 50
@@ -689,7 +810,7 @@ function Get-LockPath {
 
 function Get-RepoHeadCommit([string]$repoPath) {
     Need (-not [string]::IsNullOrWhiteSpace($repoPath)) "repoPath 不能为空"
-    Need (Test-Path $repoPath) ("仓库目录不存在：{0}" -f $repoPath)
+    Need (Test-Path -LiteralPath $repoPath) ("仓库目录不存在：{0}" -f $repoPath)
     Push-Location $repoPath
     try {
         $head = Invoke-GitCapture @("rev-parse", "HEAD")

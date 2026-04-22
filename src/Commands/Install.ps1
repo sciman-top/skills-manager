@@ -300,6 +300,35 @@ function Get-DeclaredSkillNameFromDir([string]$skillDir) {
     return $null
 }
 
+function Get-AddImportPlanFromParsedArgs($parsed) {
+    Need ($null -ne $parsed) "parsed add args 不能为空"
+
+    $repo = Normalize-RepoUrl $parsed.repo
+    $ref = [string]$parsed.ref
+    $refIsAuto = $false
+    if ([string]::IsNullOrWhiteSpace($ref)) {
+        $ref = "main"
+        $refIsAuto = $true
+    }
+
+    $mode = [string]$parsed.mode
+    if ([string]::IsNullOrWhiteSpace($mode)) { $mode = "manual" }
+    $mode = $mode.ToLowerInvariant()
+    Need ($mode -eq "manual" -or $mode -eq "vendor") "mode 仅支持 manual 或 vendor"
+
+    $registerVendorOnly = (-not [bool]$parsed.skillSpecified -and -not [bool]$parsed.modeSpecified)
+    if ($registerVendorOnly) { $mode = "vendor" }
+
+    return [pscustomobject]@{
+        repo = $repo
+        ref = $ref
+        refIsAuto = $refIsAuto
+        mode = $mode
+        registerVendorOnly = $registerVendorOnly
+        sparse = [bool]$parsed.sparse
+    }
+}
+
 function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
     Preflight
     $cfgRaw = ""
@@ -309,21 +338,13 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
     $resolvedTokens = Resolve-AddTokensFromAnyFormat $tokens
     if ($resolvedTokens) { $tokens = $resolvedTokens }
     $parsed = Parse-AddArgs $tokens
-    $repo = Normalize-RepoUrl $parsed.repo
-    $ref = $parsed.ref
-    $refIsAuto = $false
-    if ([string]::IsNullOrWhiteSpace($ref)) {
-        $ref = "main"
-        $refIsAuto = $true
-    }
-    $mode = $parsed.mode
-    if ([string]::IsNullOrWhiteSpace($mode)) { $mode = "manual" }
-    $mode = $mode.ToLowerInvariant()
-    Need ($mode -eq "manual" -or $mode -eq "vendor") "mode 仅支持 manual 或 vendor"
-    $registerVendorOnly = (-not [bool]$parsed.skillSpecified -and -not [bool]$parsed.modeSpecified)
-    if ($registerVendorOnly) { $mode = "vendor" }
-
-    $sparse = [bool]$parsed.sparse
+    $plan = Get-AddImportPlanFromParsedArgs $parsed
+    $repo = $plan.repo
+    $ref = $plan.ref
+    $refIsAuto = [bool]$plan.refIsAuto
+    $mode = $plan.mode
+    $registerVendorOnly = [bool]$plan.registerVendorOnly
+    $sparse = [bool]$plan.sparse
 
     if ($DryRun) {
         if ($registerVendorOnly) {
@@ -1480,7 +1501,7 @@ function 发现 {
 }
 
 function 清空Agent目录 {
-    if (Test-Path $AgentDir) {
+    if (Test-PathEntry $AgentDir) {
         Invoke-RemoveItemWithRetry $AgentDir -Recurse | Out-Null
     }
     EnsureDir $AgentDir
@@ -1509,9 +1530,9 @@ function ConvertTo-Hashtable($obj) {
 
 function Load-BuildCache {
     $path = Get-BuildCachePath
-    if (-not (Test-Path $path)) { return @{} }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return @{} }
     try {
-        $raw = Get-Content $path -Raw
+        $raw = Get-Content -LiteralPath $path -Raw
         if ([string]::IsNullOrWhiteSpace($raw)) { return @{} }
         $obj = $raw | ConvertFrom-Json
         return (ConvertTo-Hashtable $obj)
@@ -1534,8 +1555,8 @@ function Save-BuildCache($cache) {
 }
 
 function Get-DirectoryFingerprint([string]$dir) {
-    if (-not (Test-Path $dir)) { return "missing" }
-    $files = Get-ChildItem $dir -Recurse -File -ErrorAction SilentlyContinue | Sort-Object FullName
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return "missing" }
+    $files = Get-ChildItem -LiteralPath $dir -Recurse -File -ErrorAction SilentlyContinue | Sort-Object FullName
     $parts = New-Object System.Collections.Generic.List[string]
     foreach ($f in $files) {
         $rel = $f.FullName.Substring($dir.Length).TrimStart("\")

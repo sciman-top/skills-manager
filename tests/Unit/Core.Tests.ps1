@@ -43,6 +43,30 @@ Describe "Core Functions" {
         }
     }
 
+    Context "Literal path filesystem helpers" {
+        It "Moves paths containing wildcard characters literally" {
+            $src = Join-Path $TestDrive "skill[one]"
+            $dst = Join-Path $TestDrive "skill[one]-moved"
+            New-Item -ItemType Directory -Path $src -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $src "SKILL.md") -Value "x"
+
+            Invoke-MoveItem $src $dst
+
+            (Test-Path -LiteralPath $src) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $dst "SKILL.md")) | Should Be $true
+        }
+
+        It "Removes paths containing wildcard characters literally" {
+            $dir = Join-Path $TestDrive "remove[me]"
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $dir "SKILL.md") -Value "x"
+
+            Invoke-RemoveItemWithRetry $dir -Recurse | Should Be $true
+
+            (Test-Path -LiteralPath $dir) | Should Be $false
+        }
+    }
+
     Context "Split-Args" {
         It "Splits simple arguments" {
             $tokens = Split-Args "foo bar baz"
