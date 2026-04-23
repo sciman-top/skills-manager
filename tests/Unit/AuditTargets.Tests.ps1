@@ -338,6 +338,8 @@ Describe "Audit Targets" {
                 catch {
                     $thrown = $true
                     $_.Exception.Message | Should Match "未找到可用 run"
+                    $_.Exception.Message | Should Match "stale run-id"
+                    $_.Exception.Message | Should Match "先执行 .*审查目标 扫描"
                 }
                 $thrown | Should Be $true
             }

@@ -8647,9 +8647,26 @@ function Get-AuditKnownRunIds {
     return @($dirs | Select-Object -ExpandProperty Name | Sort-Object)
 }
 
-function Get-AuditLatestRunId([string[]]$RequiredFiles = @()) {
+function Get-AuditRunCandidateBuckets([string[]]$RequiredFiles = @()) {
     $auditRoot = Join-Path $script:Root "reports\skill-audit"
-    if (-not (Test-Path -LiteralPath $auditRoot -PathType Container)) { return "" }
+    $result = [ordered]@{
+        known = New-Object System.Collections.Generic.List[string]
+        fresh = New-Object System.Collections.Generic.List[string]
+        unknown = New-Object System.Collections.Generic.List[string]
+        stale = New-Object System.Collections.Generic.List[string]
+        missing_required = New-Object System.Collections.Generic.List[string]
+        missing_required_details = New-Object System.Collections.Generic.List[string]
+    }
+    if (-not (Test-Path -LiteralPath $auditRoot -PathType Container)) {
+        return [pscustomobject]@{
+            known = @()
+            fresh = @()
+            unknown = @()
+            stale = @()
+            missing_required = @()
+            missing_required_details = @()
+        }
+    }
     $dirs = @(
         Get-ChildItem -LiteralPath $auditRoot -Directory -ErrorAction SilentlyContinue |
         Sort-Object -Property @{ Expression = { $_.LastWriteTimeUtc }; Descending = $true }, @{ Expression = { $_.Name }; Descending = $true }
@@ -8658,24 +8675,27 @@ function Get-AuditLatestRunId([string[]]$RequiredFiles = @()) {
     $liveState = $null
     $liveStateAvailable = $false
     $currentPromptVersion = ""
-    $freshCandidates = New-Object System.Collections.Generic.List[string]
-    $unknownCandidates = New-Object System.Collections.Generic.List[string]
-    $staleCandidates = New-Object System.Collections.Generic.List[string]
     foreach ($dir in $dirs) {
+        $result.known.Add([string]$dir.Name) | Out-Null
         $ok = $true
+        $missing = New-Object System.Collections.Generic.List[string]
         foreach ($relative in @($RequiredFiles)) {
             if (-not (Test-AuditFile $dir.FullName ([string]$relative))) {
                 $ok = $false
-                break
+                $missing.Add([string]$relative) | Out-Null
             }
         }
-        if (-not $ok) { continue }
+        if (-not $ok) {
+            $result.missing_required.Add([string]$dir.Name) | Out-Null
+            $result.missing_required_details.Add(("{0}(缺少: {1})" -f [string]$dir.Name, (($missing.ToArray()) -join ","))) | Out-Null
+            continue
+        }
 
         $snapshotPath = Join-Path $dir.FullName "installed-skills.json"
         $metaPath = Join-Path $dir.FullName "audit-meta.json"
         $canCheckStale = (Test-Path -LiteralPath $snapshotPath -PathType Leaf) -and (Test-Path -LiteralPath $metaPath -PathType Leaf)
         if (-not $canCheckStale) {
-            $unknownCandidates.Add([string]$dir.Name) | Out-Null
+            $result.unknown.Add([string]$dir.Name) | Out-Null
             continue
         }
 
@@ -8691,7 +8711,7 @@ function Get-AuditLatestRunId([string[]]$RequiredFiles = @()) {
             }
         }
         if (-not $liveStateAvailable) {
-            $unknownCandidates.Add([string]$dir.Name) | Out-Null
+            $result.unknown.Add([string]$dir.Name) | Out-Null
             continue
         }
 
@@ -8708,7 +8728,7 @@ function Get-AuditLatestRunId([string[]]$RequiredFiles = @()) {
             }
         }
         catch {
-            $unknownCandidates.Add([string]$dir.Name) | Out-Null
+            $result.unknown.Add([string]$dir.Name) | Out-Null
             continue
         }
 
@@ -8725,20 +8745,32 @@ function Get-AuditLatestRunId([string[]]$RequiredFiles = @()) {
             }
         }
         catch {
-            $unknownCandidates.Add([string]$dir.Name) | Out-Null
+            $result.unknown.Add([string]$dir.Name) | Out-Null
             continue
         }
 
         if ($isStale) {
-            $staleCandidates.Add([string]$dir.Name) | Out-Null
+            $result.stale.Add([string]$dir.Name) | Out-Null
         }
         else {
-            $freshCandidates.Add([string]$dir.Name) | Out-Null
+            $result.fresh.Add([string]$dir.Name) | Out-Null
         }
     }
-    if ($freshCandidates.Count -gt 0) { return [string]$freshCandidates[0] }
-    if ($unknownCandidates.Count -gt 0) { return [string]$unknownCandidates[0] }
-    if ($staleCandidates.Count -gt 0) { return "" }
+
+    return [pscustomobject]@{
+        known = @($result.known.ToArray())
+        fresh = @($result.fresh.ToArray())
+        unknown = @($result.unknown.ToArray())
+        stale = @($result.stale.ToArray())
+        missing_required = @($result.missing_required.ToArray())
+        missing_required_details = @($result.missing_required_details.ToArray())
+    }
+}
+
+function Get-AuditLatestRunId([string[]]$RequiredFiles = @()) {
+    $buckets = Get-AuditRunCandidateBuckets -RequiredFiles $RequiredFiles
+    if (@($buckets.fresh).Count -gt 0) { return [string]$buckets.fresh[0] }
+    if (@($buckets.unknown).Count -gt 0) { return [string]$buckets.unknown[0] }
     return ""
 }
 
@@ -8775,36 +8807,31 @@ function Resolve-AuditPathRunIdPlaceholder([string]$path, [string]$FlagName = "-
 }
 
 function Get-AuditRunIdHintText([string[]]$RequiredFiles = @()) {
-    $ids = @(Get-AuditKnownRunIds)
-    if ($ids.Count -eq 0) {
+    $buckets = Get-AuditRunCandidateBuckets -RequiredFiles $RequiredFiles
+    $ids = @($buckets.known)
+    if (@($ids).Count -eq 0) {
         return "可用 run-id：无（先执行 .\skills.ps1 审查目标 扫描）"
     }
     if (@($RequiredFiles).Count -eq 0) {
         return ("可用 run-id：{0}" -f ($ids -join ", "))
     }
 
-    $valid = New-Object System.Collections.Generic.List[string]
-    $invalid = New-Object System.Collections.Generic.List[string]
-    foreach ($id in $ids) {
-        $runRoot = Get-AuditReportRoot $id
-        $missing = New-Object System.Collections.Generic.List[string]
-        foreach ($relative in @($RequiredFiles)) {
-            if (-not (Test-AuditFile $runRoot ([string]$relative))) {
-                $missing.Add([string]$relative) | Out-Null
-            }
-        }
-        if ($missing.Count -eq 0) {
-            $valid.Add([string]$id) | Out-Null
-        }
-        else {
-            $invalid.Add(("{0}(缺少: {1})" -f $id, ($missing -join ","))) | Out-Null
-        }
+    if (@($buckets.fresh).Count -gt 0) {
+        return ("可用 fresh run-id：{0}" -f ((@($buckets.fresh)) -join ", "))
     }
 
-    if ($valid.Count -gt 0) {
-        return ("可用 run-id：{0}" -f ($valid -join ", "))
+    $parts = New-Object System.Collections.Generic.List[string]
+    $parts.Add("可用 fresh run-id：无（先执行 .\skills.ps1 审查目标 扫描）") | Out-Null
+    if (@($buckets.stale).Count -gt 0) {
+        $parts.Add(("stale run-id：{0}" -f ((@($buckets.stale)) -join ", "))) | Out-Null
     }
-    return ("可用 run-id：无（先执行 .\skills.ps1 审查目标 扫描）; 不可用 run：{0}" -f ($invalid -join "; "))
+    if (@($buckets.unknown).Count -gt 0) {
+        $parts.Add(("未校验 freshness 的候选 run-id：{0}" -f ((@($buckets.unknown)) -join ", "))) | Out-Null
+    }
+    if (@($buckets.missing_required_details).Count -gt 0) {
+        $parts.Add(("缺少必要文件的 run-id：{0}" -f ((@($buckets.missing_required_details)) -join "; "))) | Out-Null
+    }
+    return (($parts.ToArray()) -join "; ")
 }
 
 function Test-AuditFile([string]$root, [string]$relative) {
