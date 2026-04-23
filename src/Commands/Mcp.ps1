@@ -328,6 +328,53 @@ function Convert-McpServersToGeminiConfigMap($servers) {
     return [pscustomobject]$map
 }
 
+function Get-CodexMcpStartupTimeoutSec($server) {
+    if ($null -eq $server) { return $null }
+    if ($server.PSObject.Properties.Match("startup_timeout_sec").Count -eq 0) { return $null }
+
+    $raw = $server.startup_timeout_sec
+    if ($null -eq $raw -or [string]::IsNullOrWhiteSpace([string]$raw)) { return $null }
+
+    $parsed = 0
+    if (-not [int]::TryParse([string]$raw, [ref]$parsed) -or $parsed -lt 1) {
+        Log ("mcp_server.startup_timeout_sec 无效，已忽略：{0}" -f [string]$server.name) "WARN"
+        return $null
+    }
+    return [int]$parsed
+}
+
+function Convert-McpServersToCodexConfigMap($servers) {
+    $map = [ordered]@{}
+    if ($null -eq $servers) { return [pscustomobject]$map }
+
+    foreach ($s in $servers) {
+        if ([string]::IsNullOrWhiteSpace([string]$s.name)) { continue }
+        $entry = [ordered]@{}
+        $transport = if ([string]::IsNullOrWhiteSpace([string]$s.transport)) { "stdio" } else { [string]$s.transport }
+        $entry.transport = $transport
+        if ($transport -eq "stdio") {
+            if (-not [string]::IsNullOrWhiteSpace([string]$s.command)) { $entry.command = [string]$s.command }
+            if ($s.PSObject.Properties.Match("args").Count -gt 0 -and $s.args -ne $null) { $entry.args = @($s.args) }
+            if ($s.PSObject.Properties.Match("env").Count -gt 0 -and $s.env -ne $null) { $entry.env = $s.env }
+        }
+        else {
+            if ($s.PSObject.Properties.Match("url").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$s.url)) { $entry.url = [string]$s.url }
+            if ($s.PSObject.Properties.Match("headers").Count -gt 0 -and $s.headers -ne $null) { $entry.headers = $s.headers }
+            if ($s.PSObject.Properties.Match("bearer_token_env_var").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$s.bearer_token_env_var)) {
+                $entry.bearer_token_env_var = [string]$s.bearer_token_env_var
+            }
+        }
+
+        $startupTimeoutSec = Get-CodexMcpStartupTimeoutSec $s
+        if ($null -ne $startupTimeoutSec) {
+            $entry.startup_timeout_sec = [int]$startupTimeoutSec
+        }
+
+        $map[[string]$s.name] = [pscustomobject]$entry
+    }
+    return [pscustomobject]$map
+}
+
 function Get-McpServerNameSet($servers) {
     $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     if ($null -eq $servers) { return $set }
@@ -1044,7 +1091,7 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
         $codexServers += $server
     }
 
-    $managedMap = Convert-McpServersToConfigMap $codexServers
+    $managedMap = Convert-McpServersToCodexConfigMap $codexServers
     $managedNames = @($managedMap.PSObject.Properties.Name | Sort-Object)
     $preserveExistingMcpSections = ($managedNames.Count -eq 0 -and $skippedGithubForMissingToken)
 

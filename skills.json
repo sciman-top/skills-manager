@@ -794,7 +794,8 @@
       "args": [
         "-y",
         "@upstash/context7-mcp"
-      ]
+      ],
+      "startup_timeout_sec": 120
     },
     {
       "name": "github",
@@ -807,7 +808,8 @@
     {
       "name": "microsoft-learn",
       "transport": "http",
-      "url": "https://learn.microsoft.com/api/mcp"
+      "url": "https://learn.microsoft.com/api/mcp",
+      "startup_timeout_sec": 120
     }
   ],
   "mcp_targets": []

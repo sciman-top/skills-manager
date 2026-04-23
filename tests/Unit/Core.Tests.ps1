@@ -1051,6 +1051,49 @@ sandbox = "elevated"
             }
         }
 
+        It "Writes startup_timeout_sec for codex mcp servers when configured" {
+            $oldToken = $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN
+            $oldGithubToken = $env:GITHUB_PERSONAL_ACCESS_TOKEN
+            Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+            Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+            try {
+                $servers = @(
+                    [pscustomobject]@{
+                        name                = "context7"
+                        transport           = "stdio"
+                        command             = "npx"
+                        args                = @("-y", "@upstash/context7-mcp")
+                        startup_timeout_sec = 120
+                    }
+                    [pscustomobject]@{
+                        name                = "microsoft-learn"
+                        transport           = "http"
+                        url                 = "https://learn.microsoft.com/api/mcp"
+                        startup_timeout_sec = "120"
+                    }
+                )
+
+                $toml = Build-CodexConfigToml "" $servers
+                $toml | Should Match "\[mcp_servers\.context7\]"
+                $toml | Should Match "\[mcp_servers\.microsoft-learn\]"
+                $toml | Should Match "startup_timeout_sec = 120"
+            }
+            finally {
+                if ($null -ne $oldToken) {
+                    $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = $oldToken
+                }
+                else {
+                    Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+                }
+                if ($null -ne $oldGithubToken) {
+                    $env:GITHUB_PERSONAL_ACCESS_TOKEN = $oldGithubToken
+                }
+                else {
+                    Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+                }
+            }
+        }
+
         It "Skips GitHub MCP when GitHub token is unavailable" {
             $oldToken = $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN
             $oldGithubToken = $env:GITHUB_PERSONAL_ACCESS_TOKEN
