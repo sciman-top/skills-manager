@@ -592,13 +592,30 @@ function Ensure-GhAuthForGithubMcp($servers) {
     Log ("GitHub MCP gh 认证预检通过：{0}" -f $username) "INFO"
 }
 
-function ConvertTo-CmdArg([string]$arg) {
-    if ($null -eq $arg) { return '""' }
-    $text = [string]$arg
-    if ($text -eq "") { return '""' }
-    if ($text -notmatch '[\s"&|<>^]') { return $text }
-    $escaped = $text.Replace('"', '\"')
-    return ('"{0}"' -f $escaped)
+function Resolve-ExternalCommandInvocation([string]$command, [string[]]$commandArgs = @()) {
+    Need (-not [string]::IsNullOrWhiteSpace($command)) "外部命令名不能为空"
+    $resolved = @(Get-Command $command -ErrorAction SilentlyContinue | Select-Object -First 1)
+    if ($resolved.Count -gt 0 -and $null -ne $resolved[0]) {
+        $resolvedPath = [string]$resolved[0].Path
+        if (-not [string]::IsNullOrWhiteSpace($resolvedPath)) {
+            $ext = [System.IO.Path]::GetExtension($resolvedPath).ToLowerInvariant()
+            if ($ext -eq ".ps1") {
+                return [pscustomobject]@{
+                    file = "powershell.exe"
+                    args = @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $resolvedPath) + @($commandArgs)
+                }
+            }
+            return [pscustomobject]@{
+                file = $resolvedPath
+                args = @($commandArgs)
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        file = $command
+        args = @($commandArgs)
+    }
 }
 
 function Invoke-ExternalCommandWithTimeout([string]$command, [string[]]$args = @(), [string]$workingDir = $null, [int]$timeoutSeconds = 30) {
@@ -608,16 +625,10 @@ function Invoke-ExternalCommandWithTimeout([string]$command, [string[]]$args = @
     $outFile = [System.IO.Path]::GetTempFileName()
     $errFile = [System.IO.Path]::GetTempFileName()
     try {
-        $cmdTokens = New-Object System.Collections.Generic.List[string]
-        $cmdTokens.Add((ConvertTo-CmdArg $command)) | Out-Null
-        foreach ($a in @($args)) {
-            $cmdTokens.Add((ConvertTo-CmdArg ([string]$a))) | Out-Null
-        }
-        $cmdLine = ($cmdTokens -join " ")
-        $startArgs = @("/d", "/s", "/c", $cmdLine)
-
         $effectiveWorkingDir = if ([string]::IsNullOrWhiteSpace($workingDir)) { $PWD.Path } else { $workingDir }
-        $proc = Start-Process -FilePath "cmd.exe" -ArgumentList $startArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $outFile -RedirectStandardError $errFile -WorkingDirectory $effectiveWorkingDir
+        $invocation = Resolve-ExternalCommandInvocation $command @($args)
+        $argList = @($invocation.args | ForEach-Object { [string]$_ })
+        $proc = Start-Process -FilePath ([string]$invocation.file) -ArgumentList $argList -PassThru -WindowStyle Hidden -RedirectStandardOutput $outFile -RedirectStandardError $errFile -WorkingDirectory $effectiveWorkingDir
         $exited = $proc.WaitForExit($timeoutSeconds * 1000)
         if (-not $exited) {
             try { $proc.Kill() } catch {}
@@ -640,7 +651,7 @@ function Invoke-ExternalCommandWithTimeout([string]$command, [string[]]$args = @
             timed_out = $false
             exit_code = [int]$proc.ExitCode
             output = @($combined)
-            error = ""
+            error = if ([string]::IsNullOrWhiteSpace($errText)) { "" } else { $errText.Trim() }
         }
     }
     catch {
@@ -657,12 +668,56 @@ function Invoke-ExternalCommandWithTimeout([string]$command, [string[]]$args = @
     }
 }
 
-function Invoke-ExternalCommandCapture([string]$command, [string[]]$args = @()) {
-    $result = Invoke-ExternalCommandWithTimeout $command @($args) $null 120
+function Resolve-TimeoutSecondsFromEnv([string]$envName, [int]$defaultSeconds, [int]$minSeconds = 1, [int]$maxSeconds = 600) {
+    $value = $defaultSeconds
+    if ([string]::IsNullOrWhiteSpace($envName)) { return $value }
+
+    $raw = [System.Environment]::GetEnvironmentVariable($envName)
+    $parsed = 0
+    if ([int]::TryParse([string]$raw, [ref]$parsed)) {
+        $value = $parsed
+    }
+
+    if ($value -lt $minSeconds) { $value = $minSeconds }
+    if ($value -gt $maxSeconds) { $value = $maxSeconds }
+    return $value
+}
+
+function Get-McpListVerifyTimeoutSeconds([string]$cli) {
+    $cliName = if ([string]::IsNullOrWhiteSpace($cli)) { "" } else { [string]$cli.Trim().ToLowerInvariant() }
+    $defaultSeconds = switch ($cliName) {
+        "gemini" { 18 }
+        "claude" { 45 }
+        "codex" { 45 }
+        default { 30 }
+    }
+
+    $globalTimeout = Resolve-TimeoutSecondsFromEnv "SKILLS_MCP_VERIFY_LIST_TIMEOUT_SECONDS" $defaultSeconds 1 600
+    $envSuffix = if ([string]::IsNullOrWhiteSpace($cliName)) { "DEFAULT" } else { $cliName.ToUpperInvariant() }
+    $perCliVar = "SKILLS_MCP_VERIFY_LIST_TIMEOUT_SECONDS_{0}" -f $envSuffix
+    return (Resolve-TimeoutSecondsFromEnv $perCliVar $globalTimeout 1 600)
+}
+
+function Should-VerifyGeminiCli() {
+    $raw = [System.Environment]::GetEnvironmentVariable("SKILLS_MCP_VERIFY_GEMINI_CLI")
+    if ([string]::IsNullOrWhiteSpace([string]$raw)) { return $false }
+    $v = [string]$raw
+    $v = $v.Trim().ToLowerInvariant()
+    return ($v -eq "1" -or $v -eq "true" -or $v -eq "yes" -or $v -eq "on")
+}
+
+function Get-NativeMcpCommandTimeoutSeconds() {
+    return (Resolve-TimeoutSecondsFromEnv "SKILLS_MCP_NATIVE_TIMEOUT_SECONDS" 30 1 600)
+}
+
+function Invoke-ExternalCommandCapture([string]$command, [string[]]$args = @(), [int]$timeoutSeconds = 120) {
+    $result = Invoke-ExternalCommandWithTimeout $command @($args) $null $timeoutSeconds
     return [pscustomobject]@{
         command = $command
         args = @($args)
         exit_code = [int]$result.exit_code
+        timed_out = [bool]$result.timed_out
+        error = [string]$result.error
         output = @($result.output)
     }
 }
@@ -754,7 +809,24 @@ function Mask-SensitiveMcpCommandText([string]$text) {
     return $masked
 }
 
+function Test-IsNonInteractiveMcpError([string]$text) {
+    if ([string]::IsNullOrWhiteSpace([string]$text)) { return $false }
+    $normalized = ([string]$text).Trim()
+    $hints = @(
+        "stdout is not a terminal",
+        "Input must be provided either through stdin",
+        "No input provided via stdin",
+        "when using --print"
+    )
+    foreach ($hint in $hints) {
+        if ($normalized -like ("*{0}*" -f $hint)) { return $true }
+    }
+    return $false
+}
+
 function Test-CliMcpServerReady([string]$cli, [string[]]$expectedServers) {
+    $cliName = if ([string]::IsNullOrWhiteSpace($cli)) { "" } else { [string]$cli.Trim().ToLowerInvariant() }
+    $isGemini = ($cliName -eq "gemini")
     if ($null -eq $expectedServers -or $expectedServers.Count -eq 0) {
         return [pscustomobject]@{
             cli = $cli
@@ -764,7 +836,25 @@ function Test-CliMcpServerReady([string]$cli, [string[]]$expectedServers) {
             raw = @()
         }
     }
+    if ($isGemini -and -not (Should-VerifyGeminiCli)) {
+        return [pscustomobject]@{
+            cli = $cli
+            ok = $true
+            reason = "gemini_cli_verification_skipped"
+            missing = @()
+            raw = @()
+        }
+    }
     if (-not (Get-Command $cli -ErrorAction SilentlyContinue)) {
+        if ($isGemini) {
+            return [pscustomobject]@{
+                cli = $cli
+                ok = $true
+                reason = "gemini_cli_not_found_fallback"
+                missing = @()
+                raw = @()
+            }
+        }
         return [pscustomobject]@{
             cli = $cli
             ok = $false
@@ -774,8 +864,27 @@ function Test-CliMcpServerReady([string]$cli, [string[]]$expectedServers) {
         }
     }
 
-    $result = Invoke-ExternalCommandCapture $cli @("mcp", "list")
+    $listTimeoutSeconds = Get-McpListVerifyTimeoutSeconds $cli
+    $result = Invoke-ExternalCommandCapture $cli @("mcp", "list") $listTimeoutSeconds
     $raw = @($result.output | ForEach-Object { Remove-AnsiEscapeSequences ([string]$_) })
+    if ($result.timed_out) {
+        if ($isGemini) {
+            return [pscustomobject]@{
+                cli = $cli
+                ok = $true
+                reason = ("gemini_cli_timeout_fallback_{0}s" -f $listTimeoutSeconds)
+                missing = @()
+                raw = $raw
+            }
+        }
+        return [pscustomobject]@{
+            cli = $cli
+            ok = $false
+            reason = ("timeout_after_{0}s" -f $listTimeoutSeconds)
+            missing = @($expectedServers)
+            raw = $raw
+        }
+    }
 
     $missing = New-Object System.Collections.Generic.List[string]
     $joined = ($raw -join "`n")
@@ -911,6 +1020,10 @@ function Invoke-NativeMcpSync($servers) {
         Log "未检测到 claude 命令，已跳过原生 MCP 同步（仅写入 .mcp.json）。" "WARN"
         return
     }
+    if ($script:SkipNativeMcpForSession) {
+        Log "已检测到原生 MCP CLI 非交互不可用，本轮跳过后续原生 MCP 同步。" "WARN"
+        return
+    }
     if ($null -eq $servers -or $servers.Count -eq 0) {
         Log "当前 mcp_servers 为空，跳过原生 MCP 注册。" "WARN"
         return
@@ -926,12 +1039,7 @@ function Invoke-NativeMcpSync($servers) {
                 Write-Host ("DRYRUN：将执行原生 MCP 同步 -> {0}" -f $safeCmdText)
                 continue
             }
-            $timeoutSeconds = 30
-            $timeoutEnv = $env:SKILLS_MCP_NATIVE_TIMEOUT_SECONDS
-            $timeoutParsed = 0
-            if ([int]::TryParse([string]$timeoutEnv, [ref]$timeoutParsed)) {
-                $timeoutSeconds = $timeoutParsed
-            }
+            $timeoutSeconds = Get-NativeMcpCommandTimeoutSeconds
             $native = Invoke-ExternalCommandWithTimeout "claude" @($args) $script:Root $timeoutSeconds
             if ($native.timed_out) {
                 Log ("原生 MCP 同步超时（已忽略）：{0}（scope={1}，timeout={2}s）" -f [string]$s.name, $scope, $timeoutSeconds) "WARN"
@@ -939,12 +1047,22 @@ function Invoke-NativeMcpSync($servers) {
             }
             if ($native.exit_code -ne 0) {
                 Log ("原生 MCP 同步失败（已忽略）：{0}（scope={1}，exit={2}）{3}" -f [string]$s.name, $scope, $native.exit_code, $native.error) "WARN"
+                if (Test-IsNonInteractiveMcpError ([string]$native.error)) {
+                    $script:SkipNativeMcpForSession = $true
+                    Log "检测到原生 MCP CLI 在非交互环境不可用，已停止本轮后续原生 MCP 同步。" "WARN"
+                    break
+                }
                 continue
             }
             Log ("已同步原生 MCP：{0}（scope={1}）" -f [string]$s.name, $scope)
         }
         catch {
             Log ("原生 MCP 同步失败（已忽略）：{0}（scope={1}） -> {2}" -f [string]$s.name, $scope, $_.Exception.Message) "WARN"
+            if (Test-IsNonInteractiveMcpError $_.Exception.Message) {
+                $script:SkipNativeMcpForSession = $true
+                Log "检测到原生 MCP CLI 在非交互环境不可用，已停止本轮后续原生 MCP 同步。" "WARN"
+                break
+            }
         }
     }
 }
@@ -958,6 +1076,10 @@ function Get-NativeMcpCleanupCommands([string]$name) {
 }
 
 function Invoke-NativeMcpCleanup([string]$name) {
+    if ($script:SkipNativeMcpForSession) {
+        Log ("已检测到原生 MCP CLI 非交互不可用，跳过清理：{0}" -f $name) "WARN"
+        return
+    }
     $ops = Get-NativeMcpCleanupCommands $name
     foreach ($op in $ops) {
         if (-not (Get-Command $op.command -ErrorAction SilentlyContinue)) { continue }
@@ -967,12 +1089,7 @@ function Invoke-NativeMcpCleanup([string]$name) {
             continue
         }
         try {
-            $timeoutSeconds = 30
-            $timeoutEnv = $env:SKILLS_MCP_NATIVE_TIMEOUT_SECONDS
-            $timeoutParsed = 0
-            if ([int]::TryParse([string]$timeoutEnv, [ref]$timeoutParsed)) {
-                $timeoutSeconds = $timeoutParsed
-            }
+            $timeoutSeconds = Get-NativeMcpCommandTimeoutSeconds
             $workingDir = if ($op.project) { $script:Root } else { $null }
             $native = Invoke-ExternalCommandWithTimeout ([string]$op.command) @($op.args) $workingDir $timeoutSeconds
             if ($native.timed_out) {
@@ -981,12 +1098,22 @@ function Invoke-NativeMcpCleanup([string]$name) {
             }
             if ($native.exit_code -ne 0) {
                 Log ("原生 MCP 清理失败（已忽略）：{0}（exit={1}）{2}" -f $cmdText, $native.exit_code, $native.error) "WARN"
+                if (Test-IsNonInteractiveMcpError ([string]$native.error)) {
+                    $script:SkipNativeMcpForSession = $true
+                    Log "检测到原生 MCP CLI 在非交互环境不可用，已停止本轮后续原生 MCP 清理。" "WARN"
+                    break
+                }
                 continue
             }
             Log ("已执行原生 MCP 清理：{0}" -f $cmdText)
         }
         catch {
             Log ("原生 MCP 清理失败（已忽略）：{0} -> {1}" -f $cmdText, $_.Exception.Message) "WARN"
+            if (Test-IsNonInteractiveMcpError $_.Exception.Message) {
+                $script:SkipNativeMcpForSession = $true
+                Log "检测到原生 MCP CLI 在非交互环境不可用，已停止本轮后续原生 MCP 清理。" "WARN"
+                break
+            }
         }
     }
 }
@@ -1512,6 +1639,7 @@ function 卸载MCP([string[]]$tokens = @()) {
 
 function 同步MCP {
     Invoke-WithMetric "sync_mcp" {
+        $script:SkipNativeMcpForSession = $false
         $cfg = LoadCfg
         $servers = @($cfg.mcp_servers)
         $pruneNames = @(Get-LegacyMcpServersToPrune)

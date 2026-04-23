@@ -435,6 +435,14 @@ Skills 管理器（中文菜单）
   - mcp_targets：可选 MCP 目标目录（未配置时从 targets 自动推断）
   - sync_mode：Windows 优先 link（junction），受限环境用 sync
 
+MCP/门禁环境变量：
+  - SKILLS_MCP_VERIFY_GEMINI_CLI=1|true|yes|on：启用 Gemini CLI 实机校验（默认关闭）
+  - SKILLS_MCP_VERIFY_LIST_TIMEOUT_SECONDS：统一设置 mcp list 校验超时（秒）
+  - SKILLS_MCP_VERIFY_LIST_TIMEOUT_SECONDS_<CLI>：按 CLI 覆盖校验超时（秒）
+  - SKILLS_MCP_NATIVE_TIMEOUT_SECONDS：原生 claude mcp add/remove 超时（秒）
+  - SKILLS_MCP_VERIFY_ATTEMPTS / SKILLS_MCP_VERIFY_INTERVAL_SECONDS：跨 CLI 校验重试次数/间隔（秒）
+  - SKILLS_SYNC_MCP_THRESHOLD_MS：doctor JSON 门禁里 sync_mcp 的阈值（毫秒）
+
 过滤语法（批量安装/卸载/发现命令）：
   - 多关键词：空格分隔，AND 过滤（如：docx pdf）
   - 正则：用 /.../ 包裹（如：/docx|pdf/）

@@ -15,8 +15,14 @@ jobs:
         shell: powershell
         run: .\tests\check-generated-sync.ps1 -StrictNoGit
 
+      - name: Verify dependency baseline contract
+        shell: powershell
+        run: python .\scripts\verify-dependency-baseline.py --target-repo-root . --require-target-repo-baseline
+
       - name: Verify doctor JSON contract
         shell: powershell
+        env:
+          SKILLS_SYNC_MCP_THRESHOLD_MS: 12000
         run: .\scripts\quality\check-doctor-json.ps1
 
       - name: Run tests

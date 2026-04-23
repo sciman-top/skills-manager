@@ -1251,6 +1251,151 @@ sandbox = "elevated"
         }
     }
 
+    Context "MCP verify timeout and fallback" {
+        It "Includes timed_out and error fields in external command capture" {
+            Mock Invoke-ExternalCommandWithTimeout {
+                [pscustomobject]@{
+                    timed_out = $true
+                    exit_code = 124
+                    output = @("line")
+                    error = "timeout_after_5s"
+                }
+            } -ParameterFilter {
+                $command -eq "gemini" -and $timeoutSeconds -eq 5
+            } -Scope It
+
+            $result = Invoke-ExternalCommandCapture "gemini" @("mcp", "list") 5
+            $result.timed_out | Should Be $true
+            $result.exit_code | Should Be 124
+            $result.error | Should Be "timeout_after_5s"
+            @($result.output).Count | Should Be 1
+        }
+
+        It "Clamps timeout value from env to the configured bounds" {
+            $name = "SKILLS_MCP_TIMEOUT_CLAMP_TEST"
+            $old = [System.Environment]::GetEnvironmentVariable($name)
+            try {
+                [System.Environment]::SetEnvironmentVariable($name, "0")
+                (Resolve-TimeoutSecondsFromEnv $name 30 1 600) | Should Be 1
+
+                [System.Environment]::SetEnvironmentVariable($name, "9999")
+                (Resolve-TimeoutSecondsFromEnv $name 30 1 600) | Should Be 600
+
+                [System.Environment]::SetEnvironmentVariable($name, "42")
+                (Resolve-TimeoutSecondsFromEnv $name 30 1 600) | Should Be 42
+            }
+            finally {
+                [System.Environment]::SetEnvironmentVariable($name, $old)
+            }
+        }
+
+        It "Detects non-interactive MCP error hints" {
+            (Test-IsNonInteractiveMcpError "Error: Input must be provided either through stdin") | Should Be $true
+            (Test-IsNonInteractiveMcpError "stdout is not a terminal") | Should Be $true
+            (Test-IsNonInteractiveMcpError "random failure text") | Should Be $false
+        }
+
+        It "Resolves PowerShell wrapper commands to powershell.exe invocation" {
+            Mock Get-Command {
+                [pscustomobject]@{
+                    Path = "C:\tools\demo.ps1"
+                }
+            } -ParameterFilter { $Name -eq "demo" } -Scope It
+
+            $invocation = Resolve-ExternalCommandInvocation "demo" @("mcp", "list")
+            $invocation.file | Should Be "powershell.exe"
+            $invocation.args[4] | Should Be "-File"
+            $invocation.args[5] | Should Be "C:\tools\demo.ps1"
+            $invocation.args[6] | Should Be "mcp"
+            $invocation.args[7] | Should Be "list"
+        }
+
+        It "Keeps native executable path when command is not a PowerShell wrapper" {
+            Mock Get-Command {
+                [pscustomobject]@{
+                    Path = "C:\tools\demo.exe"
+                }
+            } -ParameterFilter { $Name -eq "demoexe" } -Scope It
+
+            $invocation = Resolve-ExternalCommandInvocation "demoexe" @("arg1")
+            $invocation.file | Should Be "C:\tools\demo.exe"
+            @($invocation.args).Count | Should Be 1
+            $invocation.args[0] | Should Be "arg1"
+        }
+
+        It "Skips gemini CLI verification by default" {
+            $result = Test-CliMcpServerReady "gemini" @("context7")
+            $result.ok | Should Be $true
+            $result.reason | Should Be "gemini_cli_verification_skipped"
+            @($result.missing).Count | Should Be 0
+        }
+
+        It "Falls back to config-state success when gemini CLI is missing in forced verification mode" {
+            $old = [System.Environment]::GetEnvironmentVariable("SKILLS_MCP_VERIFY_GEMINI_CLI")
+            try {
+                [System.Environment]::SetEnvironmentVariable("SKILLS_MCP_VERIFY_GEMINI_CLI", "1")
+                Mock Get-Command { $null } -ParameterFilter { $Name -eq "gemini" } -Scope It
+
+                $result = Test-CliMcpServerReady "gemini" @("context7")
+                $result.ok | Should Be $true
+                $result.reason | Should Be "gemini_cli_not_found_fallback"
+                @($result.missing).Count | Should Be 0
+            }
+            finally {
+                [System.Environment]::SetEnvironmentVariable("SKILLS_MCP_VERIFY_GEMINI_CLI", $old)
+            }
+        }
+
+        It "Falls back to config-state success when gemini mcp list times out in forced verification mode" {
+            $old = [System.Environment]::GetEnvironmentVariable("SKILLS_MCP_VERIFY_GEMINI_CLI")
+            try {
+                [System.Environment]::SetEnvironmentVariable("SKILLS_MCP_VERIFY_GEMINI_CLI", "1")
+                Mock Get-Command { [pscustomobject]@{ Name = "gemini" } } -ParameterFilter { $Name -eq "gemini" } -Scope It
+                Mock Get-McpListVerifyTimeoutSeconds { 7 } -ParameterFilter { $cli -eq "gemini" } -Scope It
+                Mock Invoke-ExternalCommandCapture {
+                    [pscustomobject]@{
+                        command = "gemini"
+                        args = @("mcp", "list")
+                        exit_code = 124
+                        timed_out = $true
+                        error = "timeout_after_7s"
+                        output = @()
+                    }
+                } -ParameterFilter { $command -eq "gemini" } -Scope It
+
+                $result = Test-CliMcpServerReady "gemini" @("context7")
+                $result.ok | Should Be $true
+                $result.reason | Should Be "gemini_cli_timeout_fallback_7s"
+                @($result.missing).Count | Should Be 0
+            }
+            finally {
+                [System.Environment]::SetEnvironmentVariable("SKILLS_MCP_VERIFY_GEMINI_CLI", $old)
+            }
+        }
+
+        It "Keeps claude timeout as verification failure" {
+            Mock Get-Command { [pscustomobject]@{ Name = "claude" } } -ParameterFilter { $Name -eq "claude" } -Scope It
+            Mock Get-McpListVerifyTimeoutSeconds { 11 } -ParameterFilter { $cli -eq "claude" } -Scope It
+            Mock Invoke-ExternalCommandCapture {
+                [pscustomobject]@{
+                    command = "claude"
+                    args = @("mcp", "list")
+                    exit_code = 124
+                    timed_out = $true
+                    error = "timeout_after_11s"
+                    output = @()
+                }
+            } -ParameterFilter { $command -eq "claude" } -Scope It
+
+            $result = Test-CliMcpServerReady "claude" @("context7")
+            $result.ok | Should Be $false
+            $result.reason | Should Be "timeout_after_11s"
+            @($result.missing).Count | Should Be 1
+            $result.missing[0] | Should Be "context7"
+        }
+
+    }
+
     Context "Get-McpServerNamesFromJsonText" {
         It "Extracts mcpServers property names from JSON payload" {
             $json = '{"mcpServers":{"context7":{"type":"stdio"},"github":{"type":"http"}}}'

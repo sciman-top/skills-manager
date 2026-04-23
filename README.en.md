@@ -243,6 +243,22 @@ English aliases:
 
 `发现` and `构建生效` currently have no English aliases (N/A).
 
+Quality gate scripts (local/CI parity):
+
+```powershell
+./scripts/quality/run-local-quality-gates.ps1 -Profile quick
+./scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree
+```
+
+## MCP and Gate Environment Variables
+
+- `SKILLS_MCP_VERIFY_GEMINI_CLI=1|true|yes|on`: enable real Gemini CLI verification (disabled by default; default path uses config-state verification).
+- `SKILLS_MCP_VERIFY_LIST_TIMEOUT_SECONDS`: global timeout in seconds for `mcp list` verification.
+- `SKILLS_MCP_VERIFY_LIST_TIMEOUT_SECONDS_<CLI>`: per-CLI timeout override (for example `_CLAUDE`, `_CODEX`, `_GEMINI`).
+- `SKILLS_MCP_NATIVE_TIMEOUT_SECONDS`: timeout in seconds for native `claude mcp add/remove`.
+- `SKILLS_MCP_VERIFY_ATTEMPTS` and `SKILLS_MCP_VERIFY_INTERVAL_SECONDS`: retry count and retry interval (seconds) for cross-CLI MCP verification.
+- `SKILLS_SYNC_MCP_THRESHOLD_MS`: `sync_mcp` performance threshold in `check-doctor-json.ps1` (milliseconds, CI recommendation: `12000`).
+
 ## Repository Hygiene
 
 Do not commit local-only agent state, logs, caches, or temporary artifacts, including:

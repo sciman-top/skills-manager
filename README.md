@@ -245,6 +245,22 @@ English aliases：
 
 `发现`、`构建生效` 当前无英文别名（N/A）。
 
+质量门禁脚本（本地/CI 同款）：
+
+```powershell
+./scripts/quality/run-local-quality-gates.ps1 -Profile quick
+./scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree
+```
+
+## MCP 与门禁环境变量
+
+- `SKILLS_MCP_VERIFY_GEMINI_CLI=1|true|yes|on`：启用 Gemini CLI 实机校验（默认关闭，默认走配置态校验）。
+- `SKILLS_MCP_VERIFY_LIST_TIMEOUT_SECONDS`：统一设置 `mcp list` 校验超时（秒）。
+- `SKILLS_MCP_VERIFY_LIST_TIMEOUT_SECONDS_<CLI>`：按 CLI 覆盖超时（例如 `_CLAUDE` / `_CODEX` / `_GEMINI`）。
+- `SKILLS_MCP_NATIVE_TIMEOUT_SECONDS`：原生 `claude mcp add/remove` 超时（秒）。
+- `SKILLS_MCP_VERIFY_ATTEMPTS`、`SKILLS_MCP_VERIFY_INTERVAL_SECONDS`：跨 CLI MCP 校验的重试次数与重试间隔（秒）。
+- `SKILLS_SYNC_MCP_THRESHOLD_MS`：`check-doctor-json.ps1` 中 `sync_mcp` 性能阈值（毫秒，CI 建议 `12000`）。
+
 ## 仓库卫生
 
 不要提交本地 agent 状态、日志、缓存或临时产物，包括：
