@@ -62,6 +62,27 @@ function Normalize-AuditSources($item, [string]$kind) {
     Need (@($item.sources).Count -gt 0) ("{0} 至少需要一个非空 source：{1}" -f $kind, [string]$item.name)
 }
 
+function Normalize-AuditKeywordTrace($item) {
+    $defaultTrace = [pscustomobject]([ordered]@{
+            user_profile = @()
+            target_repo_or_context = @()
+            installed_state = @()
+        })
+    if ($item.PSObject.Properties.Match("keyword_trace").Count -eq 0 -or $null -eq $item.keyword_trace) {
+        $item | Add-Member -NotePropertyName keyword_trace -NotePropertyValue $defaultTrace -Force
+        return
+    }
+    Need (Test-AuditObjectLike $item.keyword_trace) ("keyword_trace 必须是对象：{0}" -f [string]$item.name)
+    foreach ($field in @("user_profile", "target_repo_or_context", "installed_state")) {
+        if ($item.keyword_trace.PSObject.Properties.Match($field).Count -eq 0 -or $null -eq $item.keyword_trace.$field) {
+            $item.keyword_trace | Add-Member -NotePropertyName $field -NotePropertyValue @() -Force
+        }
+        else {
+            $item.keyword_trace.$field = @(Normalize-AuditStringArray $item.keyword_trace.$field)
+        }
+    }
+}
+
 function Assert-AuditRequiredBooleanTrue($value, [string]$fieldName) {
     Need ($value -is [bool]) ("{0} 必须是布尔值 true" -f $fieldName)
     Need ([bool]$value) ("{0} 必须为 true" -f $fieldName)
@@ -71,6 +92,7 @@ function Assert-AuditReasonPair($item, [string]$name) {
     Need (-not [string]::IsNullOrWhiteSpace([string]$item.reason_user_profile)) ("{0} 缺少 reason_user_profile：{1}" -f $name, [string]$item.name)
     Need (-not [string]::IsNullOrWhiteSpace([string]$item.reason_target_repo)) ("{0} 缺少 reason_target_repo：{1}" -f $name, [string]$item.name)
     Normalize-AuditSources $item $name
+    Normalize-AuditKeywordTrace $item
 }
 
 function Assert-AuditRecommendationItem($item) {
@@ -261,6 +283,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             reason_target_repo = [string]$item.reason_target_repo
             confidence = [string]$item.confidence
             sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
             tokens = @($tokens)
             status = "planned"
         })
@@ -279,6 +302,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             reason_user_profile = [string]$item.reason_user_profile
             reason_target_repo = [string]$item.reason_target_repo
             sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
             matched_skill = $matched
             status = $status
         })
@@ -303,6 +327,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             reason_target_repo = [string]$item.reason_target_repo
             confidence = [string]$item.confidence
             sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
             server = $server
             status = $status
         })
@@ -320,6 +345,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             reason_user_profile = [string]$item.reason_user_profile
             reason_target_repo = [string]$item.reason_target_repo
             sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
             matched_server = $matched
             status = $status
         })

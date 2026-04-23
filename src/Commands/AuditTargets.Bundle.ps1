@@ -124,15 +124,17 @@ function Invoke-AuditTargetsScan {
 
     $sourceStrategyPath = Join-Path $reportRoot "source-strategy.json"
     Write-AuditJsonFile $sourceStrategyPath (New-AuditSourceStrategy "target-repo" "")
+    $decisionInsightsPath = Join-Path $reportRoot "decision-insights.json"
+    Write-AuditJsonFile $decisionInsightsPath (New-AuditDecisionInsights $cfg $scans $installedSkills $installedMcpServers "target-repo")
 
     $templatePath = Join-Path $reportRoot "recommendations.template.json"
     $templateTarget = if ($scans.Count -eq 1) { [string]$scans[0].target.name } else { "*" }
     Write-AuditJsonFile $templatePath (New-AuditRecommendationsTemplate $runId $templateTarget "target-repo")
 
     $briefPath = Join-Path $reportRoot "ai-brief.md"
-    Write-AuditAiBrief $briefPath $scans $userProfilePath $repoScanPath $repoScansPath $installedPath $templatePath "target-repo" "" $sourceStrategyPath
+    Write-AuditAiBrief $briefPath $scans $userProfilePath $repoScanPath $repoScansPath $installedPath $templatePath "target-repo" "" $sourceStrategyPath $decisionInsightsPath
     $outerAiPromptPath = Join-Path $reportRoot "outer-ai-prompt.md"
-    Write-AuditOuterAiPromptFile $outerAiPromptPath $reportRoot $briefPath $userProfilePath $repoScanPath $repoScansPath $installedPath $templatePath "target-repo" "" $sourceStrategyPath
+    Write-AuditOuterAiPromptFile $outerAiPromptPath $reportRoot $briefPath $userProfilePath $repoScanPath $repoScansPath $installedPath $templatePath "target-repo" "" $sourceStrategyPath $decisionInsightsPath
     $auditMetaPath = Join-Path $reportRoot "audit-meta.json"
     Write-AuditJsonFile $auditMetaPath ([pscustomobject]@{
             schema_version = 1
@@ -152,6 +154,7 @@ function Invoke-AuditTargetsScan {
     }
     $requiredFiles.Add([pscustomobject]@{ label = "installed-skills.json"; path = $installedPath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "source-strategy.json"; path = $sourceStrategyPath }) | Out-Null
+    $requiredFiles.Add([pscustomobject]@{ label = "decision-insights.json"; path = $decisionInsightsPath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "recommendations.template.json"; path = $templatePath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "ai-brief.md"; path = $briefPath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "outer-ai-prompt.md"; path = $outerAiPromptPath }) | Out-Null
@@ -181,6 +184,7 @@ function Invoke-AuditTargetsScan {
     }
     Write-Host ("- installed-skills.json: {0}" -f $installedPath)
     Write-Host ("- source-strategy.json: {0}" -f $sourceStrategyPath)
+    Write-Host ("- decision-insights.json: {0}" -f $decisionInsightsPath)
     Write-Host ("- ai-brief.md: {0}" -f $briefPath)
     Write-Host ("- outer-ai-prompt.md: {0}" -f $outerAiPromptPath)
     Write-Host ("- audit-meta.json: {0}" -f $auditMetaPath)
@@ -257,14 +261,16 @@ function Invoke-AuditSkillDiscovery {
 
     $sourceStrategyPath = Join-Path $reportRoot "source-strategy.json"
     Write-AuditJsonFile $sourceStrategyPath (New-AuditSourceStrategy "profile-only" $Query)
+    $decisionInsightsPath = Join-Path $reportRoot "decision-insights.json"
+    Write-AuditJsonFile $decisionInsightsPath (New-AuditDecisionInsights $cfg @() $installedSkills $installedMcpServers "profile-only")
 
     $templatePath = Join-Path $reportRoot "recommendations.template.json"
     Write-AuditJsonFile $templatePath (New-AuditRecommendationsTemplate $runId "profile-only" "profile-only" $Query)
 
     $briefPath = Join-Path $reportRoot "ai-brief.md"
-    Write-AuditAiBrief $briefPath @() $userProfilePath "" "" $installedPath $templatePath "profile-only" $Query $sourceStrategyPath
+    Write-AuditAiBrief $briefPath @() $userProfilePath "" "" $installedPath $templatePath "profile-only" $Query $sourceStrategyPath $decisionInsightsPath
     $outerAiPromptPath = Join-Path $reportRoot "outer-ai-prompt.md"
-    Write-AuditOuterAiPromptFile $outerAiPromptPath $reportRoot $briefPath $userProfilePath "" "" $installedPath $templatePath "profile-only" $Query $sourceStrategyPath
+    Write-AuditOuterAiPromptFile $outerAiPromptPath $reportRoot $briefPath $userProfilePath "" "" $installedPath $templatePath "profile-only" $Query $sourceStrategyPath $decisionInsightsPath
     $auditMetaPath = Join-Path $reportRoot "audit-meta.json"
     Write-AuditJsonFile $auditMetaPath ([pscustomobject]@{
             schema_version = 1
@@ -278,6 +284,7 @@ function Invoke-AuditSkillDiscovery {
     $requiredFiles.Add([pscustomobject]@{ label = "user-profile.json"; path = $userProfilePath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "installed-skills.json"; path = $installedPath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "source-strategy.json"; path = $sourceStrategyPath }) | Out-Null
+    $requiredFiles.Add([pscustomobject]@{ label = "decision-insights.json"; path = $decisionInsightsPath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "recommendations.template.json"; path = $templatePath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "ai-brief.md"; path = $briefPath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "outer-ai-prompt.md"; path = $outerAiPromptPath }) | Out-Null
@@ -304,6 +311,7 @@ function Invoke-AuditSkillDiscovery {
     Write-Host ("- user-profile.json: {0}" -f $userProfilePath)
     Write-Host ("- installed-skills.json: {0}" -f $installedPath)
     Write-Host ("- source-strategy.json: {0}" -f $sourceStrategyPath)
+    Write-Host ("- decision-insights.json: {0}" -f $decisionInsightsPath)
     Write-Host ("- ai-brief.md: {0}" -f $briefPath)
     Write-Host ("- outer-ai-prompt.md: {0}" -f $outerAiPromptPath)
     Write-Host ("- audit-meta.json: {0}" -f $auditMetaPath)

@@ -649,6 +649,7 @@ Describe "Audit Targets" {
                 Test-Path (Join-Path $out "user-profile.json") | Should Be $true
                 Test-Path (Join-Path $out "installed-skills.json") | Should Be $true
                 Test-Path (Join-Path $out "source-strategy.json") | Should Be $true
+                Test-Path (Join-Path $out "decision-insights.json") | Should Be $true
                 Test-Path (Join-Path $out "recommendations.template.json") | Should Be $true
                 Test-Path (Join-Path $out "ai-brief.md") | Should Be $true
                 Test-Path (Join-Path $out "outer-ai-prompt.md") | Should Be $true
@@ -789,6 +790,36 @@ jobs:
             (@($scan.detected.test_commands) -contains "pytest") | Should Be $true
             (@($scan.detected.notable_files) | Where-Object { [string]$_ -match "ci\.yml$" }).Count -gt 0 | Should Be $true
         }
+
+        It "Extracts java/ruby/php/container/monorepo signals from repo scan inputs" {
+            $repo = Join-Path $TestDrive "target-repo-polyglot"
+            New-Item -ItemType Directory -Path $repo -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $repo "pom.xml") "<project><artifactId>demo</artifactId><dependencies><dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency></dependencies></project>"
+            Set-ContentUtf8 (Join-Path $repo "Gemfile") "source 'https://rubygems.org'`ngem 'rails'"
+            Set-ContentUtf8 (Join-Path $repo "composer.json") '{"require":{"laravel/framework":"^11.0"}}'
+            Set-ContentUtf8 (Join-Path $repo "Dockerfile") "FROM alpine:3.20"
+            Set-ContentUtf8 (Join-Path $repo "pnpm-workspace.yaml") "packages:`n  - apps/*"
+            Set-ContentUtf8 (Join-Path $repo "Makefile") "build:`n`t@echo build`n`ntest:`n`t@echo test"
+
+            $scan = New-AuditRepoScan "demo" $repo "..\target-repo-polyglot"
+
+            (@($scan.detected.languages) -contains "java") | Should Be $true
+            (@($scan.detected.languages) -contains "ruby") | Should Be $true
+            (@($scan.detected.languages) -contains "php") | Should Be $true
+            (@($scan.detected.package_managers) -contains "maven") | Should Be $true
+            (@($scan.detected.package_managers) -contains "bundler") | Should Be $true
+            (@($scan.detected.package_managers) -contains "composer") | Should Be $true
+            (@($scan.detected.frameworks) -contains "spring-boot") | Should Be $true
+            (@($scan.detected.frameworks) -contains "rails") | Should Be $true
+            (@($scan.detected.frameworks) -contains "laravel") | Should Be $true
+            (@($scan.detected.frameworks) -contains "docker") | Should Be $true
+            (@($scan.detected.frameworks) -contains "monorepo") | Should Be $true
+            (@($scan.detected.build_commands) -contains "mvn -B -DskipTests package") | Should Be $true
+            (@($scan.detected.test_commands) -contains "bundle exec rspec") | Should Be $true
+            (@($scan.detected.test_commands) -contains "composer test") | Should Be $true
+            (@($scan.detected.build_commands) -contains "make build") | Should Be $true
+            (@($scan.detected.test_commands) -contains "make test") | Should Be $true
+        }
     }
 
     Context "Installed skill facts" {
@@ -903,18 +934,20 @@ jobs:
             $brief | Should Match "decision_basis.summary"
             $brief | Should Match "name == server.name"
             $brief | Should Match "No duplicate skill add/remove or MCP add/remove recommendations"
+            $brief | Should Match "Decision insights JSON: N/A"
         }
 
         It "Writes profile-only audit brief with explicit target-scan false guidance" {
             $path = Join-Path $TestDrive "ai-brief-profile-only.md"
 
-            Write-AuditAiBrief $path @() "user-profile.json" "" "" "installed-skills.json" "recommendations.template.json" "profile-only" "powershell testing" "source-strategy.json"
+            Write-AuditAiBrief $path @() "user-profile.json" "" "" "installed-skills.json" "recommendations.template.json" "profile-only" "powershell testing" "source-strategy.json" "decision-insights.json"
             $brief = Get-Content -LiteralPath $path -Raw
 
             $brief | Should Match "profile-only skill discovery"
             $brief | Should Match "Discovery query: powershell testing"
             $brief | Should Match "target_scan_used`` as boolean ``false``"
             $brief | Should Match "Source strategy JSON: source-strategy.json"
+            $brief | Should Match "Decision insights JSON: decision-insights.json"
         }
 
         It "Writes runtime outer AI prompt with blocker and summary format sections" {
@@ -933,19 +966,21 @@ jobs:
             $prompt | Should Match "decision_basis.summary`` 非空"
             $prompt | Should Match "name`` 必须等于 ``server.name``"
             $prompt | Should Match "不得保留重复的技能新增/卸载建议或重复的 MCP 新增/卸载建议"
+            $prompt | Should Match "决策洞察"
         }
 
         It "Writes profile-only runtime outer AI prompt without requiring repo scan" {
             $path = Join-Path $TestDrive "outer-ai-prompt-profile-only.md"
             $reportRoot = Join-Path $TestDrive "skill-discovery-run"
 
-            Write-AuditOuterAiPromptFile $path $reportRoot "ai-brief.md" "user-profile.json" "" "" "installed-skills.json" "recommendations.template.json" "profile-only" "powershell testing" "source-strategy.json"
+            Write-AuditOuterAiPromptFile $path $reportRoot "ai-brief.md" "user-profile.json" "" "" "installed-skills.json" "recommendations.template.json" "profile-only" "powershell testing" "source-strategy.json" "decision-insights.json"
             $prompt = Get-Content -LiteralPath $path -Raw
 
             $prompt | Should Match "模式：profile-only"
             $prompt | Should Match "发现查询：powershell testing"
             $prompt | Should Match "target_scan_used`` 为 ``false``"
             $prompt | Should Match "不得编造目标仓事实"
+            $prompt | Should Match "decision-insights.json"
         }
 
         It "Builds recommendations template with placeholder examples" {
@@ -980,6 +1015,39 @@ jobs:
             @($strategy.sources | Where-Object { $_.id -eq "find-skills" }).Count | Should Be 1
             $strategy.evidence_policy.min_unique_sources_for_changes | Should Be 2
             $strategy.evidence_policy.require_http_source_for_changes | Should Be $true
+            $strategy.decision_quality_policy.require_keyword_trace_for_changes | Should Be $true
+            $strategy.decision_quality_policy.min_user_profile_keywords_per_change | Should Be 1
+            $strategy.decision_quality_policy.min_target_repo_keywords_per_change | Should Be 1
+            $strategy.decision_quality_policy.min_installed_state_keywords_per_change | Should Be 1
+        }
+
+        It "Applies source-strategy override from overrides directory" {
+            $oldRoot = $script:Root
+            try {
+                $script:Root = Join-Path $TestDrive "ws-source-strategy-override"
+                New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+                New-Item -ItemType Directory -Path (Join-Path $script:Root "overrides") -Force | Out-Null
+                Set-ContentUtf8 (Join-Path $script:Root "overrides\audit-source-strategy.json") @'
+{
+  "all": {
+    "evidence_policy": {
+      "min_unique_sources_for_changes": 3
+    }
+  },
+  "profile-only": {
+    "decision_quality_policy": {
+      "min_target_repo_keywords_per_change": 0
+    }
+  }
+}
+'@
+                $strategy = New-AuditSourceStrategy "profile-only" "powershell testing"
+                $strategy.evidence_policy.min_unique_sources_for_changes | Should Be 3
+                $strategy.decision_quality_policy.min_target_repo_keywords_per_change | Should Be 0
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
         }
 
         It "Adds default empty recommendation reason code when all categories are empty" {
@@ -1203,6 +1271,35 @@ jobs:
 
                 $report = Get-ContentUtf8 (Get-AuditApplyReportPath $path) | ConvertFrom-Json
                 $report.error_code | Should Be "insufficient_source_coverage"
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
+        }
+
+        It "Blocks dry-run when decision-quality policy requires keyword_trace evidence" {
+            $oldRoot = $script:Root
+            try {
+                $root = Join-Path $TestDrive "ws-decision-quality-block"
+                New-Item -ItemType Directory -Path $root -Force | Out-Null
+                $script:Root = $root
+                $path = Join-Path $root "recommendations.json"
+                Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-quality","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"t","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["https://example.com/a"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+                Set-ContentUtf8 (Join-Path $root "source-strategy.json") '{"schema_version":1,"mode":"target-repo","query":"","sources":[{"id":"official-docs"}],"evidence_policy":{"min_unique_sources_for_changes":1,"require_http_source_for_changes":true},"decision_quality_policy":{"require_keyword_trace_for_changes":true,"require_keyword_trace_membership":true,"min_user_profile_keywords_per_change":1,"min_target_repo_keywords_per_change":1,"min_installed_state_keywords_per_change":1}}'
+                Set-ContentUtf8 (Join-Path $root "decision-insights.json") '{"schema_version":1,"mode":"target-repo","keywords":{"user_profile":["ppt"],"target_repo":["react"],"installed_state":["codex"],"profile_only_context":["ppt","codex"]}}'
+
+                $thrown = $false
+                try {
+                    Invoke-AuditRecommendationsApply -RecommendationsPath $path -DryRunAck "我知道未落盘" | Out-Null
+                }
+                catch {
+                    $thrown = $true
+                    $_.Exception.Message | Should Match "insufficient_decision_quality"
+                }
+                $thrown | Should Be $true
+
+                $report = Get-ContentUtf8 (Get-AuditApplyReportPath $path) | ConvertFrom-Json
+                $report.error_code | Should Be "insufficient_decision_quality"
             }
             finally {
                 $script:Root = $oldRoot

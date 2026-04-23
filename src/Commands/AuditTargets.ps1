@@ -27,13 +27,14 @@ function Get-DefaultAuditOuterAiPrompt {
 - 导入后复查；失败最多重试 1 次，再失败立即停止。
 
 3) 只读输入（必须真实读取）
-- outer-ai-prompt.md、ai-brief.md、user-profile.json、installed-skills.json（仅输入快照）、source-strategy.json、recommendations.template.json
+- outer-ai-prompt.md、ai-brief.md、user-profile.json、installed-skills.json（仅输入快照）、source-strategy.json、decision-insights.json、recommendations.template.json
 - repo-scan.json / repo-scans.json：存在才读；N/A/profile-only 不得臆造仓库事实
 
 4) 产出 recommendations.json
 - 路径：``reports/skill-audit/<run-id>/recommendations.json``
 - ``schema_version=2``；不得保留 ``<...>``；``decision_basis.summary`` 非空
 - 每条新增/卸载（skills/MCP）必须有：``reason_user_profile``、``reason_target_repo``、``sources``（仅本轮真实来源）
+- 每条新增/卸载（skills/MCP）建议应包含 ``keyword_trace.user_profile`` / ``keyword_trace.target_repo_or_context`` / ``keyword_trace.installed_state``（与 decision-insights 对齐）
 - MCP 新增写 ``mcp_new_servers`` 且 ``name==server.name``；MCP 卸载写 ``mcp_removal_candidates``
 - ``overlap_findings`` 仅报告；``do_not_install`` 仅记录当前不应安装项；证据不足留空
 
@@ -633,7 +634,7 @@ function Get-AuditRunId {
 }
 
 function Get-AuditPromptContractVersion {
-    return "audit-prompt-v20260422.3"
+    return "audit-prompt-v20260423.4"
 }
 
 function Get-AuditReportRoot([string]$runId) {
@@ -936,6 +937,191 @@ function Add-AuditPyProjectFacts([string]$resolvedPath, [System.Collections.Gene
     if ([regex]::IsMatch($content, "(?i)\bpytest\b")) { Add-AuditUniqueValue $testCommands "pytest" }
 }
 
+function Add-AuditMakefileFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands, [System.Collections.Generic.List[string]]$notableFiles) {
+    foreach ($name in @("Makefile", "makefile", "GNUmakefile")) {
+        $path = Join-Path $resolvedPath $name
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        Add-AuditUniqueValue $notableFiles $name
+        $content = ""
+        try {
+            $content = Get-ContentUtf8 $path
+        }
+        catch {
+            continue
+        }
+        if ([regex]::IsMatch($content, "(?im)^\s*build\s*:")) { Add-AuditUniqueValue $buildCommands "make build" }
+        if ([regex]::IsMatch($content, "(?im)^\s*(test|check)\s*:")) { Add-AuditUniqueValue $testCommands "make test" }
+        if ([regex]::IsMatch($content, "(?im)^\s*ci\s*:")) { Add-AuditUniqueValue $testCommands "make ci" }
+    }
+}
+
+function Add-AuditJavaFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$languages, [System.Collections.Generic.List[string]]$frameworks, [System.Collections.Generic.List[string]]$packageManagers, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands, [System.Collections.Generic.List[string]]$notableFiles) {
+    $pomPath = Join-Path $resolvedPath "pom.xml"
+    $gradleCandidates = @("build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts")
+    $hasPom = Test-Path -LiteralPath $pomPath -PathType Leaf
+    $hasGradle = $false
+    foreach ($gradleFile in @($gradleCandidates)) {
+        if (Test-Path -LiteralPath (Join-Path $resolvedPath $gradleFile) -PathType Leaf) {
+            $hasGradle = $true
+            Add-AuditUniqueValue $notableFiles $gradleFile
+        }
+    }
+    if (-not $hasPom -and -not $hasGradle) { return }
+
+    Add-AuditUniqueValue $languages "java"
+    if ($hasPom) {
+        Add-AuditUniqueValue $notableFiles "pom.xml"
+        Add-AuditUniqueValue $packageManagers "maven"
+        Add-AuditUniqueValue $buildCommands "mvn -B -DskipTests package"
+        Add-AuditUniqueValue $testCommands "mvn -B test"
+        try {
+            $pomRaw = Get-ContentUtf8 $pomPath
+            if ([regex]::IsMatch($pomRaw, "(?i)spring-boot")) { Add-AuditUniqueValue $frameworks "spring-boot" }
+            if ([regex]::IsMatch($pomRaw, "(?i)junit")) { Add-AuditUniqueValue $testCommands "mvn -B test" }
+        }
+        catch {
+        }
+    }
+    if ($hasGradle) {
+        Add-AuditUniqueValue $packageManagers "gradle"
+        Add-AuditUniqueValue $buildCommands "gradle build"
+        Add-AuditUniqueValue $testCommands "gradle test"
+        foreach ($gradleFile in @("build.gradle", "build.gradle.kts")) {
+            $gradlePath = Join-Path $resolvedPath $gradleFile
+            if (-not (Test-Path -LiteralPath $gradlePath -PathType Leaf)) { continue }
+            try {
+                $gradleRaw = Get-ContentUtf8 $gradlePath
+                if ([regex]::IsMatch($gradleRaw, "(?i)spring-boot")) { Add-AuditUniqueValue $frameworks "spring-boot" }
+            }
+            catch {
+            }
+        }
+    }
+    if (Test-Path -LiteralPath (Join-Path $resolvedPath "mvnw") -PathType Leaf) {
+        Add-AuditUniqueValue $notableFiles "mvnw"
+        Add-AuditUniqueValue $buildCommands "./mvnw -B -DskipTests package"
+        Add-AuditUniqueValue $testCommands "./mvnw -B test"
+    }
+    if (Test-Path -LiteralPath (Join-Path $resolvedPath "gradlew") -PathType Leaf) {
+        Add-AuditUniqueValue $notableFiles "gradlew"
+        Add-AuditUniqueValue $buildCommands "./gradlew build"
+        Add-AuditUniqueValue $testCommands "./gradlew test"
+    }
+}
+
+function Add-AuditRubyFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$languages, [System.Collections.Generic.List[string]]$frameworks, [System.Collections.Generic.List[string]]$packageManagers, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands, [System.Collections.Generic.List[string]]$notableFiles) {
+    $gemfilePath = Join-Path $resolvedPath "Gemfile"
+    $gemspecFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.gemspec" -File -ErrorAction SilentlyContinue | Select-Object -First 10)
+    $hasGemfile = Test-Path -LiteralPath $gemfilePath -PathType Leaf
+    if (-not $hasGemfile -and $gemspecFiles.Count -eq 0) { return }
+
+    Add-AuditUniqueValue $languages "ruby"
+    Add-AuditUniqueValue $packageManagers "bundler"
+    Add-AuditUniqueValue $buildCommands "bundle install"
+    Add-AuditUniqueValue $testCommands "bundle exec rspec"
+    if ($hasGemfile) {
+        Add-AuditUniqueValue $notableFiles "Gemfile"
+        try {
+            $gemRaw = Get-ContentUtf8 $gemfilePath
+            if ([regex]::IsMatch($gemRaw, "(?i)\brails\b")) { Add-AuditUniqueValue $frameworks "rails" }
+            if ([regex]::IsMatch($gemRaw, "(?i)\brspec\b")) { Add-AuditUniqueValue $testCommands "bundle exec rspec" }
+            if ([regex]::IsMatch($gemRaw, "(?i)\bminitest\b")) { Add-AuditUniqueValue $testCommands "bundle exec ruby -Itest" }
+        }
+        catch {
+        }
+    }
+    if (Test-Path -LiteralPath (Join-Path $resolvedPath "Gemfile.lock") -PathType Leaf) {
+        Add-AuditUniqueValue $notableFiles "Gemfile.lock"
+    }
+    if (Test-Path -LiteralPath (Join-Path $resolvedPath "Rakefile") -PathType Leaf) {
+        Add-AuditUniqueValue $notableFiles "Rakefile"
+        Add-AuditUniqueValue $buildCommands "bundle exec rake build"
+    }
+    foreach ($gemspec in @($gemspecFiles)) {
+        Add-AuditUniqueValue $notableFiles (Get-AuditRepositoryRelativePath $resolvedPath $gemspec.FullName)
+    }
+}
+
+function Add-AuditPhpFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$languages, [System.Collections.Generic.List[string]]$frameworks, [System.Collections.Generic.List[string]]$packageManagers, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands, [System.Collections.Generic.List[string]]$notableFiles) {
+    $composerPath = Join-Path $resolvedPath "composer.json"
+    if (-not (Test-Path -LiteralPath $composerPath -PathType Leaf)) { return }
+    Add-AuditUniqueValue $languages "php"
+    Add-AuditUniqueValue $packageManagers "composer"
+    Add-AuditUniqueValue $notableFiles "composer.json"
+    Add-AuditUniqueValue $buildCommands "composer install --no-interaction"
+    Add-AuditUniqueValue $testCommands "composer test"
+    try {
+        $composer = Get-ContentUtf8 $composerPath | ConvertFrom-Json
+        $deps = @()
+        $deps += Get-AuditPackagePropertyNames $composer "require"
+        $deps += Get-AuditPackagePropertyNames $composer "require-dev"
+        foreach ($dep in $deps) {
+            if ([string]$dep -match "(?i)^laravel/framework$") { Add-AuditUniqueValue $frameworks "laravel" }
+            if ([string]$dep -match "(?i)^symfony/") { Add-AuditUniqueValue $frameworks "symfony" }
+            if ([string]$dep -match "(?i)^phpunit/phpunit$") { Add-AuditUniqueValue $testCommands "vendor/bin/phpunit" }
+        }
+        $scripts = Get-AuditPackagePropertyNames $composer "scripts"
+        if ($scripts -contains "test") { Add-AuditUniqueValue $testCommands "composer test" }
+        if ($scripts -contains "build") { Add-AuditUniqueValue $buildCommands "composer build" }
+    }
+    catch {
+    }
+    foreach ($phpunit in @("phpunit.xml", "phpunit.xml.dist")) {
+        if (Test-Path -LiteralPath (Join-Path $resolvedPath $phpunit) -PathType Leaf) {
+            Add-AuditUniqueValue $notableFiles $phpunit
+            Add-AuditUniqueValue $testCommands "vendor/bin/phpunit"
+        }
+    }
+    if (Test-Path -LiteralPath (Join-Path $resolvedPath "composer.lock") -PathType Leaf) {
+        Add-AuditUniqueValue $notableFiles "composer.lock"
+    }
+}
+
+function Add-AuditContainerFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$frameworks, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$notableFiles) {
+    $hasContainer = $false
+    foreach ($dockerFile in @("Dockerfile", "docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")) {
+        $path = Join-Path $resolvedPath $dockerFile
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        Add-AuditUniqueValue $notableFiles $dockerFile
+        $hasContainer = $true
+    }
+    if (-not $hasContainer) { return }
+    Add-AuditUniqueValue $frameworks "docker"
+    Add-AuditUniqueValue $buildCommands "docker build ."
+    Add-AuditUniqueValue $buildCommands "docker compose up --build"
+}
+
+function Add-AuditMonorepoFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$frameworks, [System.Collections.Generic.List[string]]$packageManagers, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands, [System.Collections.Generic.List[string]]$notableFiles) {
+    if (Test-Path -LiteralPath (Join-Path $resolvedPath "pnpm-workspace.yaml") -PathType Leaf) {
+        Add-AuditUniqueValue $notableFiles "pnpm-workspace.yaml"
+        Add-AuditUniqueValue $frameworks "monorepo"
+        Add-AuditUniqueValue $packageManagers "pnpm"
+        Add-AuditUniqueValue $buildCommands "pnpm -r build"
+        Add-AuditUniqueValue $testCommands "pnpm -r test"
+    }
+    if (Test-Path -LiteralPath (Join-Path $resolvedPath "turbo.json") -PathType Leaf) {
+        Add-AuditUniqueValue $notableFiles "turbo.json"
+        Add-AuditUniqueValue $frameworks "turbo"
+        Add-AuditUniqueValue $frameworks "monorepo"
+        Add-AuditUniqueValue $buildCommands "npx turbo run build"
+        Add-AuditUniqueValue $testCommands "npx turbo run test"
+    }
+    if (Test-Path -LiteralPath (Join-Path $resolvedPath "nx.json") -PathType Leaf) {
+        Add-AuditUniqueValue $notableFiles "nx.json"
+        Add-AuditUniqueValue $frameworks "nx"
+        Add-AuditUniqueValue $frameworks "monorepo"
+        Add-AuditUniqueValue $buildCommands "npx nx run-many -t build"
+        Add-AuditUniqueValue $testCommands "npx nx run-many -t test"
+    }
+    if (Test-Path -LiteralPath (Join-Path $resolvedPath "lerna.json") -PathType Leaf) {
+        Add-AuditUniqueValue $notableFiles "lerna.json"
+        Add-AuditUniqueValue $frameworks "lerna"
+        Add-AuditUniqueValue $frameworks "monorepo"
+        Add-AuditUniqueValue $buildCommands "npx lerna run build"
+        Add-AuditUniqueValue $testCommands "npx lerna run test"
+    }
+}
+
 function Add-AuditDotnetFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$frameworks, [System.Collections.Generic.List[string]]$packageManagers, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands, [System.Collections.Generic.List[string]]$notableFiles) {
     $slnFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.sln" -File -ErrorAction SilentlyContinue | Select-Object -First 10)
     $csprojFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.csproj" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 40)
@@ -1094,7 +1280,13 @@ function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$
                 Add-AuditUniqueValue $notableFiles $ruleFile
             }
         }
+        Add-AuditMonorepoFacts $resolvedPath $frameworks $packageManagers $buildCommands $testCommands $notableFiles
+        Add-AuditContainerFacts $resolvedPath $frameworks $buildCommands $notableFiles
         Add-AuditPyProjectFacts $resolvedPath $frameworks $packageManagers $buildCommands $testCommands $notableFiles
+        Add-AuditJavaFacts $resolvedPath $languages $frameworks $packageManagers $buildCommands $testCommands $notableFiles
+        Add-AuditRubyFacts $resolvedPath $languages $frameworks $packageManagers $buildCommands $testCommands $notableFiles
+        Add-AuditPhpFacts $resolvedPath $languages $frameworks $packageManagers $buildCommands $testCommands $notableFiles
+        Add-AuditMakefileFacts $resolvedPath $buildCommands $testCommands $notableFiles
         Add-AuditDotnetFacts $resolvedPath $frameworks $packageManagers $buildCommands $testCommands $notableFiles
         Add-AuditCiWorkflowFacts $resolvedPath $buildCommands $testCommands $notableFiles
         $slnFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.sln" -File -ErrorAction SilentlyContinue)
@@ -1127,17 +1319,230 @@ function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$
     })
 }
 
+function Get-AuditKeywordsFromText([string]$text, [int]$Limit = 120) {
+    if ([string]::IsNullOrWhiteSpace($text)) { return @() }
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $ordered = New-Object System.Collections.Generic.List[string]
+    foreach ($match in [regex]::Matches($text, "(?i)\b[a-z][a-z0-9_-]{2,}\b")) {
+        $token = ([string]$match.Value).Trim().ToLowerInvariant()
+        if ([string]::IsNullOrWhiteSpace($token)) { continue }
+        if ($seen.Add($token)) {
+            $ordered.Add($token) | Out-Null
+            if ($ordered.Count -ge $Limit) { return @($ordered) }
+        }
+    }
+    foreach ($match in [regex]::Matches($text, "[\u4e00-\u9fff]{2,}")) {
+        $token = ([string]$match.Value).Trim()
+        if ([string]::IsNullOrWhiteSpace($token)) { continue }
+        if ($seen.Add($token)) {
+            $ordered.Add($token) | Out-Null
+            if ($ordered.Count -ge $Limit) { return @($ordered) }
+        }
+    }
+    return @($ordered)
+}
+
+function Merge-AuditKeywordSets([object[]]$Sets, [int]$Limit = 160) {
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $ordered = New-Object System.Collections.Generic.List[string]
+    foreach ($set in @($Sets)) {
+        foreach ($token in @(Convert-AuditStringArray $set)) {
+            if ($seen.Add($token)) {
+                $ordered.Add($token) | Out-Null
+                if ($ordered.Count -ge $Limit) { return @($ordered) }
+            }
+        }
+    }
+    return @($ordered)
+}
+
+function Get-AuditUserProfileKeywords($cfg) {
+    if ($null -eq $cfg -or $cfg.PSObject.Properties.Match("user_profile").Count -eq 0 -or $null -eq $cfg.user_profile) {
+        return @()
+    }
+    $profile = $cfg.user_profile
+    $sets = New-Object System.Collections.Generic.List[object]
+    $sets.Add((Get-AuditKeywordsFromText ([string]$profile.raw_text) 80)) | Out-Null
+    $sets.Add((Get-AuditKeywordsFromText ([string]$profile.summary) 80)) | Out-Null
+    if (Test-AuditObjectLike $profile.structured) {
+        foreach ($field in @("primary_work_types", "preferred_agents", "tech_stack", "common_tasks", "constraints", "avoidances", "decision_preferences")) {
+            $fieldValue = $null
+            if (Get-AuditObjectFieldValue $profile.structured $field ([ref]$fieldValue)) {
+                $sets.Add((Convert-AuditStringArray $fieldValue)) | Out-Null
+            }
+        }
+    }
+    return (Merge-AuditKeywordSets ($sets.ToArray()) 200)
+}
+
+function Get-AuditRepoScanKeywords($scan) {
+    if ($null -eq $scan) { return @() }
+    $sets = New-Object System.Collections.Generic.List[object]
+    if ($scan.PSObject.Properties.Match("target").Count -gt 0 -and $null -ne $scan.target) {
+        if ($scan.target.PSObject.Properties.Match("name").Count -gt 0) {
+            $sets.Add((Get-AuditKeywordsFromText ([string]$scan.target.name) 12)) | Out-Null
+        }
+    }
+    if ($scan.PSObject.Properties.Match("detected").Count -gt 0 -and $null -ne $scan.detected) {
+        foreach ($name in @("languages", "package_managers", "frameworks", "build_commands", "test_commands", "agent_rule_files", "notable_files")) {
+            if ($scan.detected.PSObject.Properties.Match($name).Count -gt 0) {
+                $sets.Add((Convert-AuditStringArray $scan.detected.$name)) | Out-Null
+            }
+        }
+    }
+    if ($scan.PSObject.Properties.Match("risks").Count -gt 0) {
+        $sets.Add((Convert-AuditStringArray $scan.risks)) | Out-Null
+    }
+    return (Merge-AuditKeywordSets ($sets.ToArray()) 180)
+}
+
+function Get-AuditInstalledStateKeywords($installedSkills, $installedMcpServers) {
+    $sets = New-Object System.Collections.Generic.List[object]
+    foreach ($item in @($installedSkills)) {
+        $sets.Add((Get-AuditKeywordsFromText ([string]$item.name) 20)) | Out-Null
+        $sets.Add((Get-AuditKeywordsFromText ([string]$item.description) 30)) | Out-Null
+        $sets.Add((Get-AuditKeywordsFromText ([string]$item.trigger_summary) 30)) | Out-Null
+        $sets.Add((Convert-AuditStringArray @([string]$item.vendor, [string]$item.source_kind))) | Out-Null
+    }
+    foreach ($server in @($installedMcpServers)) {
+        $sets.Add((Convert-AuditStringArray @([string]$server.name, [string]$server.transport))) | Out-Null
+    }
+    return (Merge-AuditKeywordSets ($sets.ToArray()) 240)
+}
+
+function Get-AuditKeywordHitDetails([string]$text, [string[]]$keywords, [int]$MaxHits = 6) {
+    $hits = New-Object System.Collections.Generic.List[string]
+    $source = if ([string]::IsNullOrWhiteSpace($text)) { "" } else { $text.ToLowerInvariant() }
+    foreach ($keyword in @(Convert-AuditStringArray $keywords)) {
+        $needle = [string]$keyword
+        if ([string]::IsNullOrWhiteSpace($needle)) { continue }
+        if ($source.Contains($needle.ToLowerInvariant())) {
+            $hits.Add($needle) | Out-Null
+            if ($hits.Count -ge $MaxHits) { break }
+        }
+    }
+    return @($hits)
+}
+
+function Get-AuditInstalledSkillFitSummary($installedSkills, [string[]]$userKeywords, [string[]]$repoKeywords) {
+    $rows = @()
+    foreach ($item in @($installedSkills)) {
+        $text = ("{0} {1} {2}" -f [string]$item.name, [string]$item.description, [string]$item.trigger_summary)
+        $userHits = Get-AuditKeywordHitDetails $text $userKeywords 8
+        $repoHits = Get-AuditKeywordHitDetails $text $repoKeywords 8
+        $rows += [pscustomobject]([ordered]@{
+                name = [string]$item.name
+                vendor = [string]$item.vendor
+                from = [string]$item.from
+                score = @($userHits).Count * 2 + @($repoHits).Count
+                user_hit_count = @($userHits).Count
+                repo_hit_count = @($repoHits).Count
+                user_hits = @($userHits)
+                repo_hits = @($repoHits)
+            })
+    }
+    return @($rows | Sort-Object -Property @{ Expression = { [int]$_.score }; Descending = $true }, @{ Expression = { [int]$_.user_hit_count }; Descending = $true }, @{ Expression = { [string]$_.name } })
+}
+
+function Get-AuditMissingPreferredAgents($cfg, $installedSkills) {
+    if ($null -eq $cfg -or $cfg.PSObject.Properties.Match("user_profile").Count -eq 0 -or $null -eq $cfg.user_profile) { return @() }
+    if (-not (Test-AuditObjectLike $cfg.user_profile.structured)) { return @() }
+    $preferred = @()
+    $raw = $null
+    if (Get-AuditObjectFieldValue $cfg.user_profile.structured "preferred_agents" ([ref]$raw)) {
+        $preferred = @(Convert-AuditStringArray $raw)
+    }
+    if ($preferred.Count -eq 0) { return @() }
+    $installedTokens = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @($installedSkills)) {
+        foreach ($token in @([string]$item.name, [string]$item.to, [string]$item.from, [string]$item.declared_name)) {
+            if ([string]::IsNullOrWhiteSpace($token)) { continue }
+            $installedTokens.Add($token.ToLowerInvariant()) | Out-Null
+        }
+    }
+    $missing = New-Object System.Collections.Generic.List[string]
+    foreach ($pref in @($preferred)) {
+        $needle = ([string]$pref).ToLowerInvariant()
+        if ([string]::IsNullOrWhiteSpace($needle)) { continue }
+        $matched = $false
+        foreach ($token in @($installedTokens)) {
+            if ($token.Contains($needle) -or $needle.Contains($token)) {
+                $matched = $true
+                break
+            }
+        }
+        if (-not $matched) {
+            $missing.Add([string]$pref) | Out-Null
+        }
+    }
+    return @($missing)
+}
+
+function New-AuditDecisionInsights($cfg, $scans, $installedSkills, $installedMcpServers, [string]$Mode = "target-repo") {
+    $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
+    $userKeywords = @(Get-AuditUserProfileKeywords $cfg)
+    $repoKeywordSets = @()
+    foreach ($scan in @($scans)) {
+        $targetName = if ($scan.PSObject.Properties.Match("target").Count -gt 0 -and $null -ne $scan.target -and $scan.target.PSObject.Properties.Match("name").Count -gt 0) { [string]$scan.target.name } else { "*" }
+        $repoKeywordSets += [pscustomobject]([ordered]@{
+                target = $targetName
+                keywords = @(Get-AuditRepoScanKeywords $scan)
+                risks = if ($scan.PSObject.Properties.Match("risks").Count -gt 0) { @(Convert-AuditStringArray $scan.risks) } else { @() }
+            })
+    }
+    $repoKeywords = @()
+    if (@($repoKeywordSets).Count -gt 0) {
+        $repoKeywords = @(Merge-AuditKeywordSets @($repoKeywordSets | ForEach-Object { $_.keywords }) 220)
+    }
+    $installedKeywords = @(Get-AuditInstalledStateKeywords $installedSkills $installedMcpServers)
+    $fitRows = @(Get-AuditInstalledSkillFitSummary $installedSkills $userKeywords $repoKeywords)
+    $topFit = @($fitRows | Select-Object -First 20)
+    $lowFit = @($fitRows | Where-Object { [int]$_.score -le 1 } | Select-Object -First 20)
+    $profileOnlyContext = @(Merge-AuditKeywordSets @($userKeywords, $installedKeywords) 180)
+    return [pscustomobject]([ordered]@{
+            schema_version = 1
+            generated_at = (Get-Date).ToString("o")
+            mode = $normalizedMode
+            summary = [ordered]@{
+                user_keyword_count = @($userKeywords).Count
+                repo_keyword_count = @($repoKeywords).Count
+                installed_state_keyword_count = @($installedKeywords).Count
+                installed_skill_count = @($installedSkills).Count
+                installed_mcp_server_count = @($installedMcpServers).Count
+            }
+            keywords = [ordered]@{
+                user_profile = @($userKeywords)
+                target_repo = @($repoKeywords)
+                installed_state = @($installedKeywords)
+                profile_only_context = @($profileOnlyContext)
+            }
+            targets = @($repoKeywordSets)
+            fit = [ordered]@{
+                top_installed_skill_matches = @($topFit)
+                low_fit_installed_skills = @($lowFit)
+                missing_preferred_agents = @(Get-AuditMissingPreferredAgents $cfg $installedSkills)
+            }
+            decision_checklist = @(
+                "Each add/remove recommendation should keep keyword_trace.user_profile with keywords from decision-insights.keywords.user_profile.",
+                "In target-repo mode, keyword_trace.target_repo_or_context should align with decision-insights.keywords.target_repo.",
+                "In profile-only mode, keyword_trace.target_repo_or_context should align with decision-insights.keywords.profile_only_context.",
+                "keyword_trace.installed_state should align with decision-insights.keywords.installed_state."
+            )
+        })
+}
+
 function Write-AuditJsonFile([string]$path, $data) {
     EnsureDir (Split-Path $path -Parent)
     Set-ContentUtf8 $path ($data | ConvertTo-Json -Depth 40)
 }
 
-function Write-AuditAiBrief([string]$path, $scanData, [string]$userProfilePath, [string]$repoScanPath, [string]$repoScansPath, [string]$installedSkillsPath, [string]$templatePath, [string]$Mode = "target-repo", [string]$Query = "", [string]$SourceStrategyPath = "") {
+function Write-AuditAiBrief([string]$path, $scanData, [string]$userProfilePath, [string]$repoScanPath, [string]$repoScansPath, [string]$installedSkillsPath, [string]$templatePath, [string]$Mode = "target-repo", [string]$Query = "", [string]$SourceStrategyPath = "", [string]$DecisionInsightsPath = "") {
     $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
     $targetNames = @($scanData | ForEach-Object { $_.target.name })
     if ([string]::IsNullOrWhiteSpace($repoScanPath)) { $repoScanPath = "N/A" }
     if ([string]::IsNullOrWhiteSpace($repoScansPath)) { $repoScansPath = "N/A" }
     if ([string]::IsNullOrWhiteSpace($SourceStrategyPath)) { $SourceStrategyPath = "N/A" }
+    if ([string]::IsNullOrWhiteSpace($DecisionInsightsPath)) { $DecisionInsightsPath = "N/A" }
 
     if ($normalizedMode -eq "profile-only") {
         $queryText = if ([string]::IsNullOrWhiteSpace($Query)) { "N/A" } else { $Query }
@@ -1167,11 +1572,13 @@ Scan inputs:
 - Single-target scan JSON: N/A
 - Multi-target scans JSON: N/A
 - Source strategy JSON: $SourceStrategyPath
+- Decision insights JSON: $DecisionInsightsPath
 
 Rules:
 
 - Profile-only mode has no target repo scan; do not fabricate repository facts.
 - All decisions must be based on user-profile.json, installed-skills.json (audit snapshot, not live source of truth), source-strategy.json, and real external research.
+- decision-insights.json provides machine-readable keyword anchors; every add/remove skill or MCP recommendation should keep ``keyword_trace.user_profile`` + ``keyword_trace.target_repo_or_context`` + ``keyword_trace.installed_state`` aligned to it.
 - Use ``reason_target_repo`` to explain the current installed-skill inventory / profile-only context; do not claim target repository evidence.
 - If any required local input is missing, unreadable, or empty, stop and report the blocker instead of guessing.
 - Network research is authorized within this audit workflow, but installation still requires --apply --yes.
@@ -1206,6 +1613,7 @@ Pre-dry-run self-check:
 - ``decision_basis.target_scan_used`` is ``false``.
 - No remaining placeholder values wrapped in `<...>`.
 - Each skill/MCP add/remove item has both reasons plus at least one real source.
+- Each skill/MCP add/remove item keeps non-empty ``keyword_trace`` arrays (user_profile / target_repo_or_context / installed_state).
 - Stop before dry-run if any self-check item fails.
 
 Execution order:
@@ -1228,6 +1636,7 @@ User-facing dry-run summary format:
 User profile JSON: $userProfilePath
 Installed skills JSON: $installedSkillsPath
 Source strategy JSON: $SourceStrategyPath
+Decision insights JSON: $DecisionInsightsPath
 "@
         Set-ContentUtf8 $path $content
         return
@@ -1258,11 +1667,13 @@ Scan inputs:
 - Single-target scan JSON: $repoScanPath
 - Multi-target scans JSON: $repoScansPath
 - Source strategy JSON: $SourceStrategyPath
+- Decision insights JSON: $DecisionInsightsPath
 
 Rules:
 
 - All decisions must be based on BOTH user-profile.json and target repo scan facts, and must use installed-skills.json as the audit snapshot for currently installed skills and MCP servers.
 - Use source-strategy.json to cover the built-in source set and explain source tradeoffs.
+- decision-insights.json provides machine-readable keyword anchors; every add/remove skill or MCP recommendation should keep ``keyword_trace.user_profile`` + ``keyword_trace.target_repo_or_context`` + ``keyword_trace.installed_state`` aligned to it.
 - Treat any scan path shown as ``N/A`` as "not provided"; do not infer hidden content from it.
 - If any required local input is missing, unreadable, or empty, stop and report the blocker instead of guessing.
 - Network research is authorized within this audit workflow, but installation still requires --apply --yes.
@@ -1295,6 +1706,7 @@ Pre-dry-run self-check:
 - ``decision_basis.summary`` is non-empty.
 - No remaining placeholder values wrapped in `<...>`.
 - Each skill/MCP add/remove item has both reasons plus at least one real source.
+- Each skill/MCP add/remove item keeps non-empty ``keyword_trace`` arrays (user_profile / target_repo_or_context / installed_state).
 - Each MCP add item keeps ``name == server.name``.
 - No duplicate skill add/remove or MCP add/remove recommendations remain in the final file.
 - Stop before dry-run if any self-check item fails.
@@ -1319,21 +1731,23 @@ User-facing dry-run summary format:
 User profile JSON: $userProfilePath
 Installed skills JSON: $installedSkillsPath
 Source strategy JSON: $SourceStrategyPath
+Decision insights JSON: $DecisionInsightsPath
 "@
     Set-ContentUtf8 $path $content
 }
 
-function Write-AuditOuterAiPromptFile([string]$path, [string]$reportRoot, [string]$briefPath, [string]$userProfilePath, [string]$repoScanPath, [string]$repoScansPath, [string]$installedSkillsPath, [string]$templatePath, [string]$Mode = "target-repo", [string]$Query = "", [string]$SourceStrategyPath = "") {
+function Write-AuditOuterAiPromptFile([string]$path, [string]$reportRoot, [string]$briefPath, [string]$userProfilePath, [string]$repoScanPath, [string]$repoScansPath, [string]$installedSkillsPath, [string]$templatePath, [string]$Mode = "target-repo", [string]$Query = "", [string]$SourceStrategyPath = "", [string]$DecisionInsightsPath = "") {
     $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
     if ([string]::IsNullOrWhiteSpace($repoScanPath)) { $repoScanPath = "N/A" }
     if ([string]::IsNullOrWhiteSpace($repoScansPath)) { $repoScansPath = "N/A" }
     if ([string]::IsNullOrWhiteSpace($SourceStrategyPath)) { $SourceStrategyPath = "N/A" }
+    if ([string]::IsNullOrWhiteSpace($DecisionInsightsPath)) { $DecisionInsightsPath = "N/A" }
     $queryText = if ([string]::IsNullOrWhiteSpace($Query)) { "N/A" } else { $Query }
     $inputReadStep = if ($normalizedMode -eq "profile-only") {
-        "1. 阅读 ai-brief.md、user-profile.json、installed-skills.json、source-strategy.json；repo-scan 输入为 N/A 时代表本轮不绑定目标仓。"
+        "1. 阅读 ai-brief.md、user-profile.json、installed-skills.json、source-strategy.json、decision-insights.json；repo-scan 输入为 N/A 时代表本轮不绑定目标仓。"
     }
     else {
-        "1. 阅读 ai-brief.md、user-profile.json、installed-skills.json，并按存在文件读取 repo-scan.json / repo-scans.json，同时读取 source-strategy.json。"
+        "1. 阅读 ai-brief.md、user-profile.json、installed-skills.json，并按存在文件读取 repo-scan.json / repo-scans.json，同时读取 source-strategy.json 与 decision-insights.json。"
     }
     $basisCheckStep = if ($normalizedMode -eq "profile-only") {
         "   - recommendations.json 与模板字段同构，``recommendation_mode = profile-only``，``decision_basis.user_profile_used`` / ``decision_basis.source_strategy_used`` 为 ``true``，``decision_basis.target_scan_used`` 为 ``false``，且 ``decision_basis.summary`` 非空"
@@ -1364,6 +1778,7 @@ $(Get-AuditOuterAiPromptContent)
 - 多目标扫描：$repoScansPath
 - 已安装技能与 MCP：$installedSkillsPath
 - 来源策略：$SourceStrategyPath
+- 决策洞察：$DecisionInsightsPath
 - 推荐模板：$templatePath
 
 ## Required Execution Sequence
@@ -1375,6 +1790,7 @@ $inputReadStep
 $basisCheckStep
    - 不保留模板占位符 ``<...>`` 或未替换的示例值
    - 每条技能/MCP 新增或卸载建议都包含 ``reason_user_profile`` + ``reason_target_repo`` + 至少 1 个真实 ``sources``
+   - 每条技能/MCP 新增或卸载建议都包含非空 ``keyword_trace.user_profile`` / ``keyword_trace.target_repo_or_context`` / ``keyword_trace.installed_state``
    - 技能新增建议的 ``install.mode`` 只能是 ``manual`` 或 ``vendor``，``confidence`` 只能是 ``low`` / ``medium`` / ``high``
    - MCP 新增建议必须包含合法 ``server``（``transport``=``stdio``/``sse``/``http``；``stdio`` 要有 ``command``，``sse/http`` 要有 ``url``），且 ``name`` 必须等于 ``server.name``
    - 不得保留重复的技能新增/卸载建议或重复的 MCP 新增/卸载建议
@@ -1388,6 +1804,7 @@ $basisCheckStep
 
 - ``recommendations.json`` 必须与模板 schema 一致
 - 技能与 MCP 的新增/卸载建议都必须保留双依据和来源，且每项理由要简短可读
+- 若 ``source-strategy.decision_quality_policy`` 开启，``keyword_trace`` 必须满足最小命中与关键词归属校验
 - 若任一建议缺少 ``reason_user_profile`` 或 ``reason_target_repo``，视为未完成，不得进入下一步
 - 若证据不足，允许不推荐；不得“猜测式”新增/卸载
 - 目标仓模式下，新增/卸载技能或 MCP 的判断必须同时参考用户画像、目标仓事实、已安装技能/MCP 快照、来源策略

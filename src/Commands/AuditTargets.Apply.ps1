@@ -25,6 +25,7 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
             reason_user_profile = [string]$item.reason_user_profile
             reason_target_repo = [string]$item.reason_target_repo
             sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
             status = [string]$item.status
         })
         $index++
@@ -42,6 +43,7 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
             reason_user_profile = [string]$item.reason_user_profile
             reason_target_repo = [string]$item.reason_target_repo
             sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
             status = [string]$item.status
         })
         $index++
@@ -55,6 +57,7 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
             reason_user_profile = [string]$item.reason_user_profile
             reason_target_repo = [string]$item.reason_target_repo
             sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
             status = [string]$item.status
         })
         $index++
@@ -69,6 +72,7 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
             reason_user_profile = [string]$item.reason_user_profile
             reason_target_repo = [string]$item.reason_target_repo
             sources = @($item.sources)
+            keyword_trace = $item.keyword_trace
             status = [string]$item.status
         })
         $index++
@@ -162,6 +166,221 @@ function Test-AuditRecommendationSourceCoveragePolicy($rec, $policy) {
         issues = @($issues)
         coverage = $coverage
     })
+}
+
+function Get-AuditDecisionQualityPolicy([string]$recommendationDir) {
+    $path = Join-Path $recommendationDir "source-strategy.json"
+    $policy = [ordered]@{
+        enabled = $false
+        source_strategy_path = $path
+        mode = "target-repo"
+        require_keyword_trace_for_changes = $false
+        require_keyword_trace_membership = $false
+        min_user_profile_keywords_per_change = 0
+        min_target_repo_keywords_per_change = 0
+        min_installed_state_keywords_per_change = 0
+    }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return [pscustomobject]$policy
+    }
+    try {
+        $raw = Get-ContentUtf8 $path
+        if ([string]::IsNullOrWhiteSpace($raw)) { return [pscustomobject]$policy }
+        $data = $raw | ConvertFrom-Json
+        if ($data.PSObject.Properties.Match("mode").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$data.mode)) {
+            $policy.mode = ([string]$data.mode).Trim().ToLowerInvariant()
+        }
+        if ($data.PSObject.Properties.Match("decision_quality_policy").Count -eq 0 -or $null -eq $data.decision_quality_policy) {
+            return [pscustomobject]$policy
+        }
+        $q = $data.decision_quality_policy
+        if ($q.PSObject.Properties.Match("require_keyword_trace_for_changes").Count -gt 0) {
+            $policy.require_keyword_trace_for_changes = [bool]$q.require_keyword_trace_for_changes
+        }
+        if ($q.PSObject.Properties.Match("require_keyword_trace_membership").Count -gt 0) {
+            $policy.require_keyword_trace_membership = [bool]$q.require_keyword_trace_membership
+        }
+        if ($q.PSObject.Properties.Match("min_user_profile_keywords_per_change").Count -gt 0) {
+            $policy.min_user_profile_keywords_per_change = [Math]::Max(0, [int]$q.min_user_profile_keywords_per_change)
+        }
+        if ($q.PSObject.Properties.Match("min_target_repo_keywords_per_change").Count -gt 0) {
+            $policy.min_target_repo_keywords_per_change = [Math]::Max(0, [int]$q.min_target_repo_keywords_per_change)
+        }
+        if ($q.PSObject.Properties.Match("min_installed_state_keywords_per_change").Count -gt 0) {
+            $policy.min_installed_state_keywords_per_change = [Math]::Max(0, [int]$q.min_installed_state_keywords_per_change)
+        }
+        $policy.enabled = (
+            [bool]$policy.require_keyword_trace_for_changes -or
+            [bool]$policy.require_keyword_trace_membership -or
+            [int]$policy.min_user_profile_keywords_per_change -gt 0 -or
+            [int]$policy.min_target_repo_keywords_per_change -gt 0 -or
+            [int]$policy.min_installed_state_keywords_per_change -gt 0
+        )
+        return [pscustomobject]$policy
+    }
+    catch {
+        return [pscustomobject]$policy
+    }
+}
+
+function Get-AuditDecisionInsights([string]$recommendationDir) {
+    $path = Join-Path $recommendationDir "decision-insights.json"
+    $result = [ordered]@{
+        exists = $false
+        path = $path
+        mode = "target-repo"
+        keywords = [ordered]@{
+            user_profile = @()
+            target_repo = @()
+            profile_only_context = @()
+            installed_state = @()
+        }
+    }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return [pscustomobject]$result
+    }
+    try {
+        $raw = Get-ContentUtf8 $path
+        if ([string]::IsNullOrWhiteSpace($raw)) { return [pscustomobject]$result }
+        $data = $raw | ConvertFrom-Json
+        $result.exists = $true
+        if ($data.PSObject.Properties.Match("mode").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$data.mode)) {
+            $result.mode = ([string]$data.mode).Trim().ToLowerInvariant()
+        }
+        if ($data.PSObject.Properties.Match("keywords").Count -gt 0 -and $null -ne $data.keywords) {
+            foreach ($field in @("user_profile", "target_repo", "profile_only_context", "installed_state")) {
+                if ($data.keywords.PSObject.Properties.Match($field).Count -gt 0) {
+                    $result.keywords[$field] = @(Normalize-AuditStringArray $data.keywords.$field)
+                }
+            }
+        }
+        return [pscustomobject]$result
+    }
+    catch {
+        return [pscustomobject]$result
+    }
+}
+
+function Test-AuditRecommendationDecisionQualityPolicy($rec, $policy, $decisionInsights) {
+    $coverage = [ordered]@{
+        total_change_items = Get-AuditRecommendationChangeItemCount $rec
+        items_with_complete_keyword_trace = 0
+        user_keyword_ref_count = 0
+        target_keyword_ref_count = 0
+        installed_keyword_ref_count = 0
+        unique_user_keywords = @()
+        unique_target_keywords = @()
+        unique_installed_keywords = @()
+    }
+    $issues = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $policy -or -not [bool]$policy.enabled) {
+        return [pscustomobject]([ordered]@{
+                pass = $true
+                issues = @()
+                coverage = [pscustomobject]$coverage
+            })
+    }
+    if ([int]$coverage.total_change_items -eq 0) {
+        return [pscustomobject]([ordered]@{
+                pass = $true
+                issues = @()
+                coverage = [pscustomobject]$coverage
+            })
+    }
+
+    $recommendationMode = "target-repo"
+    if ($rec.PSObject.Properties.Match("recommendation_mode").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$rec.recommendation_mode)) {
+        $recommendationMode = ([string]$rec.recommendation_mode).Trim().ToLowerInvariant()
+    }
+    $requiredUser = [int]$policy.min_user_profile_keywords_per_change
+    $requiredTarget = [int]$policy.min_target_repo_keywords_per_change
+    $requiredInstalled = [int]$policy.min_installed_state_keywords_per_change
+    if ([bool]$policy.require_keyword_trace_for_changes) {
+        if ($requiredUser -lt 1) { $requiredUser = 1 }
+        if ($requiredTarget -lt 1) { $requiredTarget = 1 }
+        if ($requiredInstalled -lt 1) { $requiredInstalled = 1 }
+    }
+
+    $userSet = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $targetSet = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $installedSet = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($token in @(Normalize-AuditStringArray $decisionInsights.keywords.user_profile)) { $null = $userSet.Add($token) }
+    $targetTokens = if ($recommendationMode -eq "profile-only") { @(Normalize-AuditStringArray $decisionInsights.keywords.profile_only_context) } else { @(Normalize-AuditStringArray $decisionInsights.keywords.target_repo) }
+    foreach ($token in @($targetTokens)) { $null = $targetSet.Add($token) }
+    foreach ($token in @(Normalize-AuditStringArray $decisionInsights.keywords.installed_state)) { $null = $installedSet.Add($token) }
+    if ([bool]$policy.require_keyword_trace_membership -and -not [bool]$decisionInsights.exists) {
+        $issues.Add("insufficient_decision_quality：decision-insights.json 缺失或不可读，无法校验 keyword_trace 归属。") | Out-Null
+    }
+
+    $uniqueUser = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $uniqueTarget = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $uniqueInstalled = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $collections = @(
+        @{ kind = "skill-add"; items = @($rec.new_skills) },
+        @{ kind = "skill-remove"; items = @($rec.removal_candidates) },
+        @{ kind = "mcp-add"; items = @($rec.mcp_new_servers) },
+        @{ kind = "mcp-remove"; items = @($rec.mcp_removal_candidates) }
+    )
+    foreach ($group in @($collections)) {
+        foreach ($item in @($group.items)) {
+            $trace = $null
+            if ($item.PSObject.Properties.Match("keyword_trace").Count -gt 0 -and $null -ne $item.keyword_trace -and (Test-AuditObjectLike $item.keyword_trace)) {
+                $trace = $item.keyword_trace
+            }
+            $userRefs = @()
+            $targetRefs = @()
+            $installedRefs = @()
+            if ($null -ne $trace) {
+                if ($trace.PSObject.Properties.Match("user_profile").Count -gt 0) { $userRefs = @(Normalize-AuditStringArray $trace.user_profile) }
+                if ($trace.PSObject.Properties.Match("target_repo_or_context").Count -gt 0) { $targetRefs = @(Normalize-AuditStringArray $trace.target_repo_or_context) }
+                if ($trace.PSObject.Properties.Match("installed_state").Count -gt 0) { $installedRefs = @(Normalize-AuditStringArray $trace.installed_state) }
+            }
+
+            if (@($userRefs).Count -gt 0 -and @($targetRefs).Count -gt 0 -and @($installedRefs).Count -gt 0) {
+                $coverage.items_with_complete_keyword_trace = [int]$coverage.items_with_complete_keyword_trace + 1
+            }
+            $coverage.user_keyword_ref_count = [int]$coverage.user_keyword_ref_count + @($userRefs).Count
+            $coverage.target_keyword_ref_count = [int]$coverage.target_keyword_ref_count + @($targetRefs).Count
+            $coverage.installed_keyword_ref_count = [int]$coverage.installed_keyword_ref_count + @($installedRefs).Count
+
+            foreach ($token in @($userRefs)) { $null = $uniqueUser.Add($token) }
+            foreach ($token in @($targetRefs)) { $null = $uniqueTarget.Add($token) }
+            foreach ($token in @($installedRefs)) { $null = $uniqueInstalled.Add($token) }
+
+            if ($requiredUser -gt 0 -and @($userRefs).Count -lt $requiredUser) {
+                $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.user_profile 数量为 {2}，低于阈值 {3}。" -f [string]$group.kind, [string]$item.name, @($userRefs).Count, $requiredUser)) | Out-Null
+            }
+            if ($requiredTarget -gt 0 -and @($targetRefs).Count -lt $requiredTarget) {
+                $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.target_repo_or_context 数量为 {2}，低于阈值 {3}。" -f [string]$group.kind, [string]$item.name, @($targetRefs).Count, $requiredTarget)) | Out-Null
+            }
+            if ($requiredInstalled -gt 0 -and @($installedRefs).Count -lt $requiredInstalled) {
+                $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.installed_state 数量为 {2}，低于阈值 {3}。" -f [string]$group.kind, [string]$item.name, @($installedRefs).Count, $requiredInstalled)) | Out-Null
+            }
+
+            if ([bool]$policy.require_keyword_trace_membership -and [bool]$decisionInsights.exists) {
+                $unknownUser = @($userRefs | Where-Object { -not $userSet.Contains([string]$_) })
+                if (@($unknownUser).Count -gt 0) {
+                    $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.user_profile 包含未知关键词：{2}" -f [string]$group.kind, [string]$item.name, (@($unknownUser | Select-Object -First 3) -join ", "))) | Out-Null
+                }
+                $unknownTarget = @($targetRefs | Where-Object { -not $targetSet.Contains([string]$_) })
+                if (@($unknownTarget).Count -gt 0) {
+                    $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.target_repo_or_context 包含未知关键词：{2}" -f [string]$group.kind, [string]$item.name, (@($unknownTarget | Select-Object -First 3) -join ", "))) | Out-Null
+                }
+                $unknownInstalled = @($installedRefs | Where-Object { -not $installedSet.Contains([string]$_) })
+                if (@($unknownInstalled).Count -gt 0) {
+                    $issues.Add(("insufficient_decision_quality：{0} `{1}` 的 keyword_trace.installed_state 包含未知关键词：{2}" -f [string]$group.kind, [string]$item.name, (@($unknownInstalled | Select-Object -First 3) -join ", "))) | Out-Null
+                }
+            }
+        }
+    }
+    $coverage.unique_user_keywords = @($uniqueUser | Sort-Object)
+    $coverage.unique_target_keywords = @($uniqueTarget | Sort-Object)
+    $coverage.unique_installed_keywords = @($uniqueInstalled | Sort-Object)
+    return [pscustomobject]([ordered]@{
+            pass = ($issues.Count -eq 0)
+            issues = @($issues)
+            coverage = [pscustomobject]$coverage
+        })
 }
 
 function Write-AuditRuntimeEvidence([string]$mode, [string]$recommendationsPath, $report, [string[]]$commands = @()) {
@@ -379,6 +598,9 @@ function Invoke-AuditRecommendationsPreflight {
     $promptVersionMatched = (-not [string]::IsNullOrWhiteSpace($runPromptVersion) -and [string]$runPromptVersion -eq [string]$currentPromptVersion)
     $sourcePolicy = Get-AuditSourceEvidencePolicy $recommendationDir
     $sourceCoverageCheck = Test-AuditRecommendationSourceCoveragePolicy $rec $sourcePolicy
+    $decisionQualityPolicy = Get-AuditDecisionQualityPolicy $recommendationDir
+    $decisionInsights = Get-AuditDecisionInsights $recommendationDir
+    $decisionQualityCheck = Test-AuditRecommendationDecisionQualityPolicy $rec $decisionQualityPolicy $decisionInsights
     $userProfileCheck = Test-AuditUserProfilePreflight $recommendationDir
 
     $issues = New-Object System.Collections.Generic.List[string]
@@ -390,6 +612,9 @@ function Invoke-AuditRecommendationsPreflight {
         $issues.Add(("prompt_contract_mismatch：run={0}，current={1}。请先重新运行审查目标 扫描生成新 run。" -f $runPromptDisplay, $currentPromptVersion)) | Out-Null
     }
     foreach ($issue in @($sourceCoverageCheck.issues)) {
+        $issues.Add([string]$issue) | Out-Null
+    }
+    foreach ($issue in @($decisionQualityCheck.issues)) {
         $issues.Add([string]$issue) | Out-Null
     }
     foreach ($issue in @($userProfileCheck.issues)) {
@@ -409,6 +634,9 @@ function Invoke-AuditRecommendationsPreflight {
         }
         source_evidence_policy = $sourcePolicy
         source_coverage = $sourceCoverageCheck.coverage
+        decision_quality_policy = $decisionQualityPolicy
+        decision_quality = $decisionQualityCheck.coverage
+        decision_insights = $decisionInsights
         user_profile_check = $userProfileCheck
         snapshot_state = $snapshotState
         live_state = $liveState
@@ -451,6 +679,9 @@ function Invoke-AuditRecommendationsApply {
     if ([string]::IsNullOrWhiteSpace($recommendationDir)) { $recommendationDir = "." }
     $sourcePolicy = Get-AuditSourceEvidencePolicy $recommendationDir
     $sourceCoverageCheck = Test-AuditRecommendationSourceCoveragePolicy $rec $sourcePolicy
+    $decisionQualityPolicy = Get-AuditDecisionQualityPolicy $recommendationDir
+    $decisionInsights = Get-AuditDecisionInsights $recommendationDir
+    $decisionQualityCheck = Test-AuditRecommendationDecisionQualityPolicy $rec $decisionQualityPolicy $decisionInsights
     if (-not [bool]$sourceCoverageCheck.pass) {
         $sourceMessage = ($sourceCoverageCheck.issues -join " | ")
         $sourceReport = [ordered]@{
@@ -464,6 +695,9 @@ function Invoke-AuditRecommendationsApply {
             error_message = $sourceMessage
             source_evidence_policy = $sourcePolicy
             source_coverage = $sourceCoverageCheck.coverage
+            decision_quality_policy = $decisionQualityPolicy
+            decision_quality = $decisionQualityCheck.coverage
+            decision_insights = $decisionInsights
             changed_counts = New-AuditChangedCounts @() @()
             items = @()
             removal_candidates = @()
@@ -480,6 +714,39 @@ function Invoke-AuditRecommendationsApply {
             Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
         }
         throw $sourceMessage
+    }
+    if (-not [bool]$decisionQualityCheck.pass) {
+        $qualityMessage = ($decisionQualityCheck.issues -join " | ")
+        $qualityReport = [ordered]@{
+            schema_version = 2
+            run_id = [string]$rec.run_id
+            target = [string]$rec.target
+            mode = if ($Apply) { "apply" } else { "dry_run" }
+            success = $false
+            persisted = $false
+            error_code = "insufficient_decision_quality"
+            error_message = $qualityMessage
+            source_evidence_policy = $sourcePolicy
+            source_coverage = $sourceCoverageCheck.coverage
+            decision_quality_policy = $decisionQualityPolicy
+            decision_quality = $decisionQualityCheck.coverage
+            decision_insights = $decisionInsights
+            changed_counts = New-AuditChangedCounts @() @()
+            items = @()
+            removal_candidates = @()
+            mcp_items = @()
+            mcp_removal_candidates = @()
+            overlap_findings = @()
+            do_not_install = @()
+            rollback = @()
+        }
+        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$qualityReport)
+        $evidenceMode = if ($Apply) { "apply-blocked" } else { "dry-run-blocked" }
+        $evidencePath = Write-AuditRuntimeEvidence $evidenceMode $RecommendationsPath ([pscustomobject]$qualityReport) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`"")
+        if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
+            Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
+        }
+        throw $qualityMessage
     }
     $snapshotPath = Join-Path $recommendationDir "installed-skills.json"
     $liveState = Get-AuditLiveInstalledState
@@ -507,6 +774,11 @@ function Invoke-AuditRecommendationsApply {
             persisted = $false
             error_code = "stale_snapshot"
             error_message = $staleMessage
+            source_evidence_policy = $sourcePolicy
+            source_coverage = $sourceCoverageCheck.coverage
+            decision_quality_policy = $decisionQualityPolicy
+            decision_quality = $decisionQualityCheck.coverage
+            decision_insights = $decisionInsights
             snapshot_state = $snapshotState
             live_state = $liveState
             changed_counts = New-AuditChangedCounts @() @()
@@ -549,6 +821,11 @@ function Invoke-AuditRecommendationsApply {
                 persisted = $false
                 error_code = "stale_snapshot_ack_required"
                 error_message = $hint
+                source_evidence_policy = $sourcePolicy
+                source_coverage = $sourceCoverageCheck.coverage
+                decision_quality_policy = $decisionQualityPolicy
+                decision_quality = $decisionQualityCheck.coverage
+                decision_insights = $decisionInsights
                 snapshot_state = $snapshotState
                 live_state = $liveState
                 changed_counts = New-AuditChangedCounts @() @()
@@ -578,6 +855,11 @@ function Invoke-AuditRecommendationsApply {
                 persisted = $false
                 error_code = "stale_snapshot_ack_mismatch"
                 error_message = "二次确认口令不匹配，已取消执行。"
+                source_evidence_policy = $sourcePolicy
+                source_coverage = $sourceCoverageCheck.coverage
+                decision_quality_policy = $decisionQualityPolicy
+                decision_quality = $decisionQualityCheck.coverage
+                decision_insights = $decisionInsights
                 snapshot_state = $snapshotState
                 live_state = $liveState
                 changed_counts = New-AuditChangedCounts @() @()
@@ -607,6 +889,11 @@ function Invoke-AuditRecommendationsApply {
         mode = if ($Apply) { "apply" } else { "dry_run" }
         success = $true
         persisted = $false
+        source_evidence_policy = $sourcePolicy
+        source_coverage = $sourceCoverageCheck.coverage
+        decision_quality_policy = $decisionQualityPolicy
+        decision_quality = $decisionQualityCheck.coverage
+        decision_insights = $decisionInsights
         allow_stale_snapshot = [bool]$AllowStaleSnapshot
         stale_snapshot_detected = [bool]$isSnapshotStale
         stale_acknowledged = if ($isSnapshotStale -and $AllowStaleSnapshot) { $true } else { $false }
