@@ -56,6 +56,10 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             "apply-flow" { $result.action = "apply_flow"; $items = @($items | Select-Object -Skip 1) }
             "应用" { $result.action = "apply"; $items = @($items | Select-Object -Skip 1) }
             "apply" { $result.action = "apply"; $items = @($items | Select-Object -Skip 1) }
+            "帮助" { $result.action = "help"; $items = @($items | Select-Object -Skip 1) }
+            "help" { $result.action = "help"; $items = @($items | Select-Object -Skip 1) }
+            "--help" { $result.action = "help"; $items = @($items | Select-Object -Skip 1) }
+            "-h" { $result.action = "help"; $items = @($items | Select-Object -Skip 1) }
             default { throw ("未知审查目标子命令：{0}" -f $items[0]) }
         }
     }
@@ -72,7 +76,7 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             }
             "--run-id" {
                 Need ($i + 1 -lt $items.Count) "--run-id 缺少值"
-                $result.run_id = Resolve-AuditRunIdInput ([string]$items[++$i]) "--run-id"
+                $result.run_id = Resolve-AuditRunIdInput ([string]$items[++$i]) "--run-id" @("recommendations.json", "installed-skills.json", "audit-meta.json")
                 continue
             }
             "--profile" {
@@ -95,7 +99,7 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             }
             "--recommendations" {
                 Need ($i + 1 -lt $items.Count) "--recommendations 缺少值"
-                $result.recommendations = Resolve-AuditPathRunIdPlaceholder ([string]$items[++$i]) "--recommendations" @("recommendations.json")
+                $result.recommendations = Resolve-AuditPathRunIdPlaceholder ([string]$items[++$i]) "--recommendations" @("recommendations.json", "installed-skills.json", "audit-meta.json")
                 continue
             }
             "--dry-run-ack" {
@@ -172,9 +176,30 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
     return [pscustomobject]$result
 }
 
+function Show-AuditTargetsCommandHelp {
+    Write-Host "审查目标 子命令：" -ForegroundColor Cyan
+    Write-Host "  .\skills.ps1 审查目标 帮助"
+    Write-Host "  .\skills.ps1 审查目标 初始化"
+    Write-Host "  .\skills.ps1 审查目标 需求设置"
+    Write-Host "  .\skills.ps1 审查目标 需求查看"
+    Write-Host "  .\skills.ps1 审查目标 需求结构化 [--profile <file>]"
+    Write-Host "  .\skills.ps1 审查目标 添加 <name> <path>"
+    Write-Host "  .\skills.ps1 审查目标 修改 <name> <path>"
+    Write-Host "  .\skills.ps1 审查目标 删除 <name>"
+    Write-Host "  .\skills.ps1 审查目标 列表"
+    Write-Host "  .\skills.ps1 审查目标 扫描 [--target <name>] [--out <dir>] [--force]"
+    Write-Host "  .\skills.ps1 审查目标 发现新技能 [--query <text>] [--out <dir>] [--force]"
+    Write-Host "  .\skills.ps1 审查目标 预检 --run-id <run-id>"
+    Write-Host "  .\skills.ps1 审查目标 预检 --recommendations <file>"
+    Write-Host "  .\skills.ps1 审查目标 应用确认 --recommendations <file>"
+    Write-Host "  .\skills.ps1 审查目标 应用 --recommendations <file> [--dry-run-ack ""我知道未落盘""]"
+    Write-Host "  .\skills.ps1 审查目标 状态"
+}
+
 function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
     $opts = Parse-AuditTargetsArgs $tokens
     switch ($opts.action) {
+        "help" { Show-AuditTargetsCommandHelp }
         "init" {
             if (Initialize-AuditTargetsConfig) {
                 Write-Host "已创建 audit-targets.json" -ForegroundColor Green

@@ -156,6 +156,19 @@ function Invoke-AuditTargetsScan {
     $requiredFiles.Add([pscustomobject]@{ label = "ai-brief.md"; path = $briefPath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "outer-ai-prompt.md"; path = $outerAiPromptPath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "audit-meta.json"; path = $auditMetaPath }) | Out-Null
+    if ($DryRun) {
+        Write-Host ("DRYRUN：将生成审查包：{0}" -f $reportRoot) -ForegroundColor Yellow
+        Write-Host "DRYRUN 关键产物预览：" -ForegroundColor Yellow
+        foreach ($item in @($requiredFiles.ToArray())) {
+            Write-Host ("- {0}: {1}" -f [string]$item.label, [string]$item.path)
+        }
+        return [pscustomobject]@{
+            run_id = $runId
+            path = $reportRoot
+            scans = @($scans)
+            dry_run = $true
+        }
+    }
     Assert-AuditBundleRequiredFiles ($requiredFiles.ToArray())
     Write-Host ("审查包已生成：{0}" -f $reportRoot) -ForegroundColor Green
     Write-Host "关键产物：" -ForegroundColor Cyan
@@ -269,6 +282,21 @@ function Invoke-AuditSkillDiscovery {
     $requiredFiles.Add([pscustomobject]@{ label = "ai-brief.md"; path = $briefPath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "outer-ai-prompt.md"; path = $outerAiPromptPath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "audit-meta.json"; path = $auditMetaPath }) | Out-Null
+    if ($DryRun) {
+        Write-Host ("DRYRUN：将生成新技能发现包：{0}" -f $reportRoot) -ForegroundColor Yellow
+        Write-Host "DRYRUN 关键产物预览：" -ForegroundColor Yellow
+        foreach ($item in @($requiredFiles.ToArray())) {
+            Write-Host ("- {0}: {1}" -f [string]$item.label, [string]$item.path)
+        }
+        return [pscustomobject]@{
+            run_id = $runId
+            path = $reportRoot
+            mode = "profile-only"
+            query = [string]$Query
+            scans = @()
+            dry_run = $true
+        }
+    }
     Assert-AuditBundleRequiredFiles ($requiredFiles.ToArray())
 
     Write-Host ("新技能发现包已生成：{0}" -f $reportRoot) -ForegroundColor Green

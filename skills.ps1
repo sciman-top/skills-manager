@@ -2923,7 +2923,22 @@ function Get-RepoHeadCommit([string]$repoPath) {
     Need (Test-Path -LiteralPath $repoPath) ("仓库目录不存在：{0}" -f $repoPath)
     Push-Location $repoPath
     try {
-        $head = Invoke-GitCapture @("rev-parse", "HEAD")
+        if ($DryRun) {
+            Log "DRYRUN(read) git rev-parse HEAD"
+            $rawHead = & git rev-parse HEAD 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                $head = $null
+            }
+            elseif ($null -eq $rawHead) {
+                $head = ""
+            }
+            else {
+                $head = ([string]($rawHead | Select-Object -First 1)).Trim()
+            }
+        }
+        else {
+            $head = Invoke-GitCapture @("rev-parse", "HEAD")
+        }
         Need (-not [string]::IsNullOrWhiteSpace($head)) ("无法读取仓库 HEAD：{0}" -f $repoPath)
         return $head
     }
@@ -6429,6 +6444,32 @@ function Parse-McpInstallArgs([string[]]$tokens) {
     return [pscustomobject]$result
 }
 
+function Extract-McpTrailingDryRunToken([string[]]$tokens) {
+    $list = @($tokens)
+    if ($list.Count -eq 0) {
+        return [pscustomobject]@{
+            tokens = @()
+            dry_run = $false
+        }
+    }
+    $last = [string]$list[$list.Count - 1]
+    $tail = $last.Trim().ToLowerInvariant()
+    if ($tail -eq "-dryrun" -or $tail -eq "--dryrun" -or $tail -eq "--dry-run") {
+        $trimmed = @()
+        if ($list.Count -gt 1) {
+            $trimmed = @($list[0..($list.Count - 2)])
+        }
+        return [pscustomobject]@{
+            tokens = $trimmed
+            dry_run = $true
+        }
+    }
+    return [pscustomobject]@{
+        tokens = $list
+        dry_run = $false
+    }
+}
+
 function New-McpServerObject($parsed) {
     $obj = [ordered]@{
         name = $parsed.name
@@ -6565,17 +6606,9 @@ function Build-GenericMcpPayload([string]$existingContent, $servers) {
         }
     }
 
-    $existingMap = $null
-    if ($base.Contains("mcpServers")) {
-        $existingMap = $base["mcpServers"]
-    }
-    elseif ($base.Contains("mcp_servers")) {
-        $existingMap = $base["mcp_servers"]
-    }
-
     $managedMap = Convert-McpServersToConfigMap $servers
-    $managedNameSet = Get-McpServerNameSet $servers
-    $base["mcpServers"] = Merge-McpConfigMaps $existingMap $managedMap $managedNameSet
+    # MCP 同步以 skills.json 为唯一真源，避免卸载后残留旧项。
+    $base["mcpServers"] = $managedMap
     if ($base.Contains("mcp_servers")) { $base.Remove("mcp_servers") }
     return [pscustomobject]$base
 }
@@ -6878,6 +6911,15 @@ function Remove-AnsiEscapeSequences([string]$text) {
     return ([regex]::Replace($text, '\x1B\[[0-9;?]*[ -/]*[@-~]', ''))
 }
 
+function Mask-SensitiveMcpCommandText([string]$text) {
+    if ([string]::IsNullOrWhiteSpace($text)) { return $text }
+    $masked = [string]$text
+    $masked = [regex]::Replace($masked, '(?i)(Authorization\s*[:=]\s*Bearer\s+)([^"\s]+)', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)\bgithub_pat_[A-Za-z0-9_]+\b', '<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)\bgh[pousr]_[A-Za-z0-9_]+\b', '<redacted>')
+    return $masked
+}
+
 function Test-CliMcpServerReady([string]$cli, [string[]]$expectedServers) {
     if ($null -eq $expectedServers -or $expectedServers.Count -eq 0) {
         return [pscustomobject]@{
@@ -7046,7 +7088,8 @@ function Invoke-NativeMcpSync($servers) {
             $args = Get-NativeMcpAddArgs $s $scope
             $cmdText = "claude {0}" -f (($args | ForEach-Object { [string]$_ }) -join " ")
             if ($DryRun) {
-                Write-Host ("DRYRUN：将执行原生 MCP 同步 -> {0}" -f $cmdText)
+                $safeCmdText = Mask-SensitiveMcpCommandText $cmdText
+                Write-Host ("DRYRUN：将执行原生 MCP 同步 -> {0}" -f $safeCmdText)
                 continue
             }
             $timeoutSeconds = 30
@@ -7130,16 +7173,9 @@ function Build-GeminiSettingsPayload([string]$existingContent, $servers) {
         }
     }
 
-    $existingMap = $null
-    if ($base.Contains("mcpServers")) {
-        $existingMap = $base["mcpServers"]
-    }
-    elseif ($base.Contains("mcp_servers")) {
-        $existingMap = $base["mcp_servers"]
-    }
     $managedMap = Convert-McpServersToGeminiConfigMap $servers
-    $managedNameSet = Get-McpServerNameSet $servers
-    $base["mcpServers"] = Merge-McpConfigMaps $existingMap $managedMap $managedNameSet
+    # Gemini 同步以 skills.json 为唯一真源，避免卸载后残留旧项。
+    $base["mcpServers"] = $managedMap
     if ($base.Contains("mcp_servers")) { $base.Remove("mcp_servers") }
     return [pscustomobject]$base
 }
@@ -7194,8 +7230,8 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
     if (-not [string]::IsNullOrWhiteSpace($existingToml)) {
         $lines = $existingToml -split "`r?`n"
     }
-    $managedNameSet = Get-McpServerNameSet $servers
     $codexServers = @()
+    $skippedGithubForMissingToken = $false
     $hasGithubToken = -not [string]::IsNullOrWhiteSpace($env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN) -or -not [string]::IsNullOrWhiteSpace($env:GITHUB_PERSONAL_ACCESS_TOKEN)
     if ([string]::IsNullOrWhiteSpace($env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN) -and -not [string]::IsNullOrWhiteSpace($env:GITHUB_PERSONAL_ACCESS_TOKEN)) {
         $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = [string]$env:GITHUB_PERSONAL_ACCESS_TOKEN
@@ -7205,6 +7241,7 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
         if ([string]::Equals([string]$server.name, "github", [System.StringComparison]::OrdinalIgnoreCase)) {
             if (-not $hasGithubToken) {
                 Log "Codex 检测到 GitHub MCP 但缺少 CODEX_GITHUB_PERSONAL_ACCESS_TOKEN（或 GITHUB_PERSONAL_ACCESS_TOKEN），已跳过同步以避免影响启动。" "WARN"
+                $skippedGithubForMissingToken = $true
                 continue
             }
             Log "Codex 检测到 GitHub MCP 且存在 Token，将写入 bearer_token_env_var=CODEX_GITHUB_PERSONAL_ACCESS_TOKEN。" "INFO"
@@ -7222,29 +7259,31 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
 
     $managedMap = Convert-McpServersToConfigMap $codexServers
     $managedNames = @($managedMap.PSObject.Properties.Name | Sort-Object)
+    $preserveExistingMcpSections = ($managedNames.Count -eq 0 -and $skippedGithubForMissingToken)
 
     $kept = New-Object System.Collections.Generic.List[string]
-    $skipManagedSection = $false
-    foreach ($line in $lines) {
-        if ($line -match '^\s*\[mcp_servers\.([^\]]+)\]\s*$') {
-            $name = [string]$matches[1]
-            if ($managedNameSet.Contains($name)) {
-                $skipManagedSection = $true
+    if ($preserveExistingMcpSections) {
+        foreach ($line in $lines) {
+            $kept.Add($line) | Out-Null
+        }
+    }
+    else {
+        $skipMcpSection = $false
+        foreach ($line in $lines) {
+            if ($line -match '^\s*\[mcp_servers\.[^\]]+\]\s*$') {
+                $skipMcpSection = $true
                 continue
             }
-            $skipManagedSection = $false
-            $kept.Add($line) | Out-Null
-            continue
-        }
 
-        if ($skipManagedSection -and $line -match '^\s*\[[^\]]+\]\s*$') {
-            $skipManagedSection = $false
-            $kept.Add($line) | Out-Null
-            continue
-        }
+            if ($skipMcpSection -and $line -match '^\s*\[[^\]]+\]\s*$') {
+                $skipMcpSection = $false
+                $kept.Add($line) | Out-Null
+                continue
+            }
 
-        if (-not $skipManagedSection) {
-            $kept.Add($line) | Out-Null
+            if (-not $skipMcpSection) {
+                $kept.Add($line) | Out-Null
+            }
         }
     }
 
@@ -7493,6 +7532,12 @@ function 安装MCP([string[]]$tokens = @()) {
     $cfgRaw = Get-Content $CfgPath -Raw
 
     $tokenList = @($tokens | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    $trailingDryRun = Extract-McpTrailingDryRunToken $tokenList
+    $tokenList = @($trailingDryRun.tokens)
+    if (-not $DryRun -and [bool]$trailingDryRun.dry_run) {
+        $script:DryRun = $true
+        Write-Host "检测到尾部 -DryRun 参数，已切换为预演模式。"
+    }
     if ($tokenList.Count -eq 1 -and $tokenList[0] -is [string] -and $tokenList[0].Contains(" ")) {
         $tokenList = Split-Args $tokenList[0]
     }
@@ -7587,6 +7632,12 @@ function 卸载MCP([string[]]$tokens = @()) {
 
     $name = $null
     $tokenList = @($tokens | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    $trailingDryRun = Extract-McpTrailingDryRunToken $tokenList
+    $tokenList = @($trailingDryRun.tokens)
+    if (-not $DryRun -and [bool]$trailingDryRun.dry_run) {
+        $script:DryRun = $true
+        Write-Host "检测到尾部 -DryRun 参数，已切换为预演模式。"
+    }
     if ($tokenList.Count -gt 0) {
         $name = Normalize-NameWithNotice ([string]$tokenList[0]) "MCP 服务名"
     }
@@ -8164,6 +8215,28 @@ function Test-AuditTimestampString([string]$value) {
     return [DateTimeOffset]::TryParse([string]$value, [ref]$parsed)
 }
 
+function Convert-AuditTimestampToIso($value, [switch]$FallbackNow) {
+    if ($value -is [DateTimeOffset]) {
+        return ([DateTimeOffset]$value).ToString("o")
+    }
+    if ($value -is [DateTime]) {
+        return ([DateTimeOffset]$value).ToString("o")
+    }
+    if ($null -ne $value) {
+        $text = [string]$value
+        if (-not [string]::IsNullOrWhiteSpace($text)) {
+            $parsed = [DateTimeOffset]::MinValue
+            if ([DateTimeOffset]::TryParse($text, [ref]$parsed)) {
+                return $parsed.ToString("o")
+            }
+        }
+    }
+    if ($FallbackNow) {
+        return (Get-Date).ToString("o")
+    }
+    return ""
+}
+
 function Get-AuditStructuredFallbackValues([string]$field, [string]$rawText) {
     $summary = Get-AuditFallbackSummaryFromRawText $rawText
     $generic = if ([string]::IsNullOrWhiteSpace($summary)) { "general workflow" } else { $summary }
@@ -8299,8 +8372,8 @@ function Import-AuditUserProfileStructured([string]$profilePath) {
     }
 
     $importedStructuredAt = $null
-    if (Get-AuditObjectFieldValue $imported "last_structured_at" ([ref]$importedStructuredAt) -and -not [string]::IsNullOrWhiteSpace([string]$importedStructuredAt)) {
-        $cfg.user_profile.last_structured_at = [string]$importedStructuredAt
+    if (Get-AuditObjectFieldValue $imported "last_structured_at" ([ref]$importedStructuredAt)) {
+        $cfg.user_profile.last_structured_at = Convert-AuditTimestampToIso $importedStructuredAt -FallbackNow
     }
     else {
         $cfg.user_profile.last_structured_at = (Get-Date).ToString("o")
@@ -8369,7 +8442,7 @@ function Get-AuditUserProfileOutput($cfg) {
         raw_text = [string]$cfg.user_profile.raw_text
         summary = [string]$cfg.user_profile.summary
         structured = $cfg.user_profile.structured
-        last_structured_at = [string]$cfg.user_profile.last_structured_at
+        last_structured_at = Convert-AuditTimestampToIso $cfg.user_profile.last_structured_at -FallbackNow
         structured_by = [string]$cfg.user_profile.structured_by
     }
 }
@@ -10438,6 +10511,19 @@ function Invoke-AuditTargetsScan {
     $requiredFiles.Add([pscustomobject]@{ label = "ai-brief.md"; path = $briefPath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "outer-ai-prompt.md"; path = $outerAiPromptPath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "audit-meta.json"; path = $auditMetaPath }) | Out-Null
+    if ($DryRun) {
+        Write-Host ("DRYRUN：将生成审查包：{0}" -f $reportRoot) -ForegroundColor Yellow
+        Write-Host "DRYRUN 关键产物预览：" -ForegroundColor Yellow
+        foreach ($item in @($requiredFiles.ToArray())) {
+            Write-Host ("- {0}: {1}" -f [string]$item.label, [string]$item.path)
+        }
+        return [pscustomobject]@{
+            run_id = $runId
+            path = $reportRoot
+            scans = @($scans)
+            dry_run = $true
+        }
+    }
     Assert-AuditBundleRequiredFiles ($requiredFiles.ToArray())
     Write-Host ("审查包已生成：{0}" -f $reportRoot) -ForegroundColor Green
     Write-Host "关键产物：" -ForegroundColor Cyan
@@ -10551,6 +10637,21 @@ function Invoke-AuditSkillDiscovery {
     $requiredFiles.Add([pscustomobject]@{ label = "ai-brief.md"; path = $briefPath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "outer-ai-prompt.md"; path = $outerAiPromptPath }) | Out-Null
     $requiredFiles.Add([pscustomobject]@{ label = "audit-meta.json"; path = $auditMetaPath }) | Out-Null
+    if ($DryRun) {
+        Write-Host ("DRYRUN：将生成新技能发现包：{0}" -f $reportRoot) -ForegroundColor Yellow
+        Write-Host "DRYRUN 关键产物预览：" -ForegroundColor Yellow
+        foreach ($item in @($requiredFiles.ToArray())) {
+            Write-Host ("- {0}: {1}" -f [string]$item.label, [string]$item.path)
+        }
+        return [pscustomobject]@{
+            run_id = $runId
+            path = $reportRoot
+            mode = "profile-only"
+            query = [string]$Query
+            scans = @()
+            dry_run = $true
+        }
+    }
     Assert-AuditBundleRequiredFiles ($requiredFiles.ToArray())
 
     Write-Host ("新技能发现包已生成：{0}" -f $reportRoot) -ForegroundColor Green
@@ -10897,6 +10998,37 @@ function Get-AuditRunPromptContractVersion([string]$recommendationDir) {
     return ""
 }
 
+function Test-AuditUserProfilePreflight([string]$recommendationDir) {
+    $path = Join-Path $recommendationDir "user-profile.json"
+    $issues = New-Object System.Collections.Generic.List[string]
+    $exists = Test-Path -LiteralPath $path -PathType Leaf
+    if (-not $exists) {
+        return [pscustomobject]@{
+            path = $path
+            exists = $false
+            ok = $true
+            skipped = $true
+            skipped_reason = "missing_optional_user_profile"
+            issues = @($issues)
+        }
+    }
+
+    try {
+        Assert-AuditBundleFileContent $path "user-profile.json"
+    }
+    catch {
+        $issues.Add([string]$_.Exception.Message) | Out-Null
+    }
+    return [pscustomobject]@{
+        path = $path
+        exists = $true
+        ok = ($issues.Count -eq 0)
+        skipped = $false
+        skipped_reason = ""
+        issues = @($issues)
+    }
+}
+
 function Invoke-AuditRecommendationsPreflight {
     param(
         [string]$RecommendationsPath,
@@ -10926,6 +11058,7 @@ function Invoke-AuditRecommendationsPreflight {
     $promptVersionMatched = (-not [string]::IsNullOrWhiteSpace($runPromptVersion) -and [string]$runPromptVersion -eq [string]$currentPromptVersion)
     $sourcePolicy = Get-AuditSourceEvidencePolicy $recommendationDir
     $sourceCoverageCheck = Test-AuditRecommendationSourceCoveragePolicy $rec $sourcePolicy
+    $userProfileCheck = Test-AuditUserProfilePreflight $recommendationDir
 
     $issues = New-Object System.Collections.Generic.List[string]
     if ($isSnapshotStale) {
@@ -10937,6 +11070,9 @@ function Invoke-AuditRecommendationsPreflight {
     }
     foreach ($issue in @($sourceCoverageCheck.issues)) {
         $issues.Add([string]$issue) | Out-Null
+    }
+    foreach ($issue in @($userProfileCheck.issues)) {
+        $issues.Add(("user_profile_invalid：{0}" -f [string]$issue)) | Out-Null
     }
 
     $report = [ordered]@{
@@ -10952,6 +11088,7 @@ function Invoke-AuditRecommendationsPreflight {
         }
         source_evidence_policy = $sourcePolicy
         source_coverage = $sourceCoverageCheck.coverage
+        user_profile_check = $userProfileCheck
         snapshot_state = $snapshotState
         live_state = $liveState
         issues = @($issues)
@@ -11545,6 +11682,10 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             "apply-flow" { $result.action = "apply_flow"; $items = @($items | Select-Object -Skip 1) }
             "应用" { $result.action = "apply"; $items = @($items | Select-Object -Skip 1) }
             "apply" { $result.action = "apply"; $items = @($items | Select-Object -Skip 1) }
+            "帮助" { $result.action = "help"; $items = @($items | Select-Object -Skip 1) }
+            "help" { $result.action = "help"; $items = @($items | Select-Object -Skip 1) }
+            "--help" { $result.action = "help"; $items = @($items | Select-Object -Skip 1) }
+            "-h" { $result.action = "help"; $items = @($items | Select-Object -Skip 1) }
             default { throw ("未知审查目标子命令：{0}" -f $items[0]) }
         }
     }
@@ -11661,9 +11802,30 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
     return [pscustomobject]$result
 }
 
+function Show-AuditTargetsCommandHelp {
+    Write-Host "审查目标 子命令：" -ForegroundColor Cyan
+    Write-Host "  .\skills.ps1 审查目标 帮助"
+    Write-Host "  .\skills.ps1 审查目标 初始化"
+    Write-Host "  .\skills.ps1 审查目标 需求设置"
+    Write-Host "  .\skills.ps1 审查目标 需求查看"
+    Write-Host "  .\skills.ps1 审查目标 需求结构化 [--profile <file>]"
+    Write-Host "  .\skills.ps1 审查目标 添加 <name> <path>"
+    Write-Host "  .\skills.ps1 审查目标 修改 <name> <path>"
+    Write-Host "  .\skills.ps1 审查目标 删除 <name>"
+    Write-Host "  .\skills.ps1 审查目标 列表"
+    Write-Host "  .\skills.ps1 审查目标 扫描 [--target <name>] [--out <dir>] [--force]"
+    Write-Host "  .\skills.ps1 审查目标 发现新技能 [--query <text>] [--out <dir>] [--force]"
+    Write-Host "  .\skills.ps1 审查目标 预检 --run-id <run-id>"
+    Write-Host "  .\skills.ps1 审查目标 预检 --recommendations <file>"
+    Write-Host "  .\skills.ps1 审查目标 应用确认 --recommendations <file>"
+    Write-Host "  .\skills.ps1 审查目标 应用 --recommendations <file> [--dry-run-ack ""我知道未落盘""]"
+    Write-Host "  .\skills.ps1 审查目标 状态"
+}
+
 function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
     $opts = Parse-AuditTargetsArgs $tokens
     switch ($opts.action) {
+        "help" { Show-AuditTargetsCommandHelp }
         "init" {
             if (Initialize-AuditTargetsConfig) {
                 Write-Host "已创建 audit-targets.json" -ForegroundColor Green
@@ -12083,6 +12245,7 @@ function 打开配置 {
 
 function 解除关联 {
     Preflight
+    if (Skip-IfDryRun "解除关联") { return }
     $cfg = LoadCfg
     foreach ($t in $cfg.targets) {
         $target = Resolve-TargetDir $t.path

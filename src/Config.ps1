@@ -848,7 +848,22 @@ function Get-RepoHeadCommit([string]$repoPath) {
     Need (Test-Path -LiteralPath $repoPath) ("仓库目录不存在：{0}" -f $repoPath)
     Push-Location $repoPath
     try {
-        $head = Invoke-GitCapture @("rev-parse", "HEAD")
+        if ($DryRun) {
+            Log "DRYRUN(read) git rev-parse HEAD"
+            $rawHead = & git rev-parse HEAD 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                $head = $null
+            }
+            elseif ($null -eq $rawHead) {
+                $head = ""
+            }
+            else {
+                $head = ([string]($rawHead | Select-Object -First 1)).Trim()
+            }
+        }
+        else {
+            $head = Invoke-GitCapture @("rev-parse", "HEAD")
+        }
         Need (-not [string]::IsNullOrWhiteSpace($head)) ("无法读取仓库 HEAD：{0}" -f $repoPath)
         return $head
     }

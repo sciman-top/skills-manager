@@ -1,377 +1,368 @@
 {
-    "version":  1,
-    "generated_at":  "2026-04-21T15:02:53.4274503Z",
-    "vendors":  [
-                    {
-                        "name":  "agent-skills",
-                        "repo":  "https://github.com/vercel-labs/agent-skills.git",
-                        "ref":  "main",
-                        "commit":  "ce3e64e468f8fa09a2d075d102771838061fdac0"
-                    },
-                    {
-                        "name":  "agent-skills-2",
-                        "repo":  "https://github.com/addyosmani/agent-skills.git",
-                        "ref":  "main",
-                        "commit":  "1f66d57a5e1b041b11e49a8cdca275aa472f0131"
-                    },
-                    {
-                        "name":  "anthropics-skills",
-                        "repo":  "https://github.com/anthropics/skills.git",
-                        "ref":  "main",
-                        "commit":  "b9e19e6f44773509fbdd7001d77ff41a49a486c1"
-                    },
-                    {
-                        "name":  "baoyu-skills",
-                        "repo":  "https://github.com/jimliu/baoyu-skills.git",
-                        "ref":  "main",
-                        "commit":  "d7f623158c0fa270cf41c6d1f6c78ab8aa6b9810"
-                    },
-                    {
-                        "name":  "marketingskills",
-                        "repo":  "https://github.com/coreyhaines31/marketingskills.git",
-                        "ref":  "main",
-                        "commit":  "9125d8216e38945bcca5e712287cec06e9e96523"
-                    },
-                    {
-                        "name":  "skills",
-                        "repo":  "https://github.com/openai/skills.git",
-                        "ref":  "main",
-                        "commit":  "e940b8a86138adf03972802b990a1dfc57fcbf09"
-                    },
-                    {
-                        "name":  "skills-2",
-                        "repo":  "https://github.com/remotion-dev/skills.git",
-                        "ref":  "main",
-                        "commit":  "41a3b0685bc648c5f66b3c81d67c61589875eefb"
-                    },
-                    {
-                        "name":  "superpowers",
-                        "repo":  "https://github.com/obra/superpowers.git",
-                        "ref":  "main",
-                        "commit":  "b55764852ac78870e65c6565fb585b6cd8b3c5c9"
-                    },
-                    {
-                        "name":  "web-quality-skills",
-                        "repo":  "https://github.com/addyosmani/web-quality-skills.git",
-                        "ref":  "main",
-                        "commit":  "fed9617111260e19f4f54b72a2874a3f3de8ff94"
-                    }
-                ],
-    "imports":  [
-                    {
-                        "name":  "agent-browser",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/vercel-labs/agent-browser.git",
-                        "ref":  "main",
-                        "skill":  "skills\\agent-browser",
-                        "sparse":  false,
-                        "commit":  "57405f93614fae46e5c955ce662b4785283e1301"
-                    },
-                    {
-                        "name":  "agent-skills-2",
-                        "mode":  "vendor",
-                        "repo":  "https://github.com/addyosmani/agent-skills.git",
-                        "ref":  "main",
-                        "skill":  "skills\\performance-optimization",
-                        "sparse":  false,
-                        "commit":  "1f66d57a5e1b041b11e49a8cdca275aa472f0131"
-                    },
-                    {
-                        "name":  "architecture-patterns",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/wshobson/agents.git",
-                        "ref":  "main",
-                        "skill":  "plugins\\backend-development\\skills\\architecture-patterns",
-                        "sparse":  false,
-                        "commit":  "27a7ed95755a5c3a2948694343a8e2cd7a7ef6fb"
-                    },
-                    {
-                        "name":  "baoyu-skills",
-                        "mode":  "vendor",
-                        "repo":  "https://github.com/jimliu/baoyu-skills.git",
-                        "ref":  "main",
-                        "skill":  "skills\\baoyu-article-illustrator",
-                        "sparse":  false,
-                        "commit":  "d7f623158c0fa270cf41c6d1f6c78ab8aa6b9810"
-                    },
-                    {
-                        "name":  "d3-viz",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/jarmen423/skills.git",
-                        "ref":  "main",
-                        "skill":  "myskills\\downloaded-skills\\d3-viz",
-                        "sparse":  false,
-                        "commit":  "c0afc120630d306c138f2e4d14eb764738e9d491"
-                    },
-                    {
-                        "name":  "data-visualization",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/anthropics/knowledge-work-plugins.git",
-                        "ref":  "main",
-                        "skill":  "data\\skills\\data-visualization",
-                        "sparse":  false,
-                        "commit":  "8fd1c52243c81d523b7fa7988cc1ac8d92669892"
-                    },
-                    {
-                        "name":  "debug-dotnet",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/snakeo/claude-debug-and-refactor-skills-plugin.git",
-                        "ref":  "master",
-                        "skill":  "plugins\\debug-and-refactor\\skills\\debug-dotnet",
-                        "sparse":  false,
-                        "commit":  "e2e79df88e7fad81f1c6c4eddfe8ddfaa1c0d4cd"
-                    },
-                    {
-                        "name":  "dotnet-backend-patterns",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/rmyndharis/antigravity-skills.git",
-                        "ref":  "main",
-                        "skill":  "skills\\dotnet-backend-patterns",
-                        "sparse":  false,
-                        "commit":  "a5dc5cf1a5f148e40374cef5d47e7c3b5575fdcf"
-                    },
-                    {
-                        "name":  "drawio-diagram-forge",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/aktsmm/agent-skills.git",
-                        "ref":  "master",
-                        "skill":  "drawio-diagram-forge",
-                        "sparse":  false,
-                        "commit":  "8ee4669906dc74b62aba9397d03da52ff435a9ed"
-                    },
-                    {
-                        "name":  "error-handling-patterns",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/wshobson/agents.git",
-                        "ref":  "main",
-                        "skill":  "plugins\\developer-essentials\\skills\\error-handling-patterns",
-                        "sparse":  false,
-                        "commit":  "27a7ed95755a5c3a2948694343a8e2cd7a7ef6fb"
-                    },
-                    {
-                        "name":  "find-skills",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/vercel-labs/skills.git",
-                        "ref":  "main",
-                        "skill":  "skills\\find-skills",
-                        "sparse":  false,
-                        "commit":  "bc21a37a12b90fcb5aec051c91baf5b227b704b1"
-                    },
-                    {
-                        "name":  "grill-me",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/mattpocock/skills.git",
-                        "ref":  "main",
-                        "skill":  "grill-me",
-                        "sparse":  false,
-                        "commit":  "8868f54212dfcf450b665d2e2a5bf521ada64c3e"
-                    },
-                    {
-                        "name":  "improve-codebase-architecture",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/mattpocock/skills.git",
-                        "ref":  "main",
-                        "skill":  "improve-codebase-architecture",
-                        "sparse":  false,
-                        "commit":  "8868f54212dfcf450b665d2e2a5bf521ada64c3e"
-                    },
-                    {
-                        "name":  "manimce-best-practices",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/adithya-s-k/manim_skill.git",
-                        "ref":  "main",
-                        "skill":  "skills\\manimce-best-practices",
-                        "sparse":  false,
-                        "commit":  "cef045011722d285692e3381d12d4d637da56e18"
-                    },
-                    {
-                        "name":  "manim-composer",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/adithya-s-k/manim_skill.git",
-                        "ref":  "main",
-                        "skill":  "skills\\manim-composer",
-                        "sparse":  false,
-                        "commit":  "cef045011722d285692e3381d12d4d637da56e18"
-                    },
-                    {
-                        "name":  "marketingskills",
-                        "mode":  "vendor",
-                        "repo":  "https://github.com/coreyhaines31/marketingskills.git",
-                        "ref":  "main",
-                        "skill":  "skills\\copywriting",
-                        "sparse":  false,
-                        "commit":  "9125d8216e38945bcca5e712287cec06e9e96523"
-                    },
-                    {
-                        "name":  "modern-python",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/trailofbits/skills.git",
-                        "ref":  "main",
-                        "skill":  "plugins\\modern-python\\skills\\modern-python",
-                        "sparse":  false,
-                        "commit":  "e8cc5baf9329ccb491bfa200e82eacbac83b1ead"
-                    },
-                    {
-                        "name":  "openpyxl",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/vamseeachanta/workspace-hub.git",
-                        "ref":  "main",
-                        "skill":  ".claude\\skills\\data\\office\\openpyxl",
-                        "sparse":  false,
-                        "commit":  "dff575ce58d26e5142af35fc40aa03d4bb98a8b2"
-                    },
-                    {
-                        "name":  "playwright-best-practices",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/currents-dev/playwright-best-practices-skill.git",
-                        "ref":  "main",
-                        "skill":  ".",
-                        "sparse":  false,
-                        "commit":  "ef329e7e65149918e1ff0eed2cf7d2e6e6f9eb5b"
-                    },
-                    {
-                        "name":  "powerpoint-automation",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/aktsmm/agent-skills.git",
-                        "ref":  "master",
-                        "skill":  "powerpoint-automation",
-                        "sparse":  false,
-                        "commit":  "8ee4669906dc74b62aba9397d03da52ff435a9ed"
-                    },
-                    {
-                        "name":  "prd-to-issues",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/mattpocock/skills.git",
-                        "ref":  "main",
-                        "skill":  "to-issues",
-                        "sparse":  false,
-                        "commit":  "8868f54212dfcf450b665d2e2a5bf521ada64c3e"
-                    },
-                    {
-                        "name":  "prd-to-plan",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/mattpocock/skills.git",
-                        "ref":  "main",
-                        "skill":  "to-issues",
-                        "sparse":  false,
-                        "commit":  "8868f54212dfcf450b665d2e2a5bf521ada64c3e"
-                    },
-                    {
-                        "name":  "prompt-engineering-patterns",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/wshobson/agents.git",
-                        "ref":  "main",
-                        "skill":  "plugins\\llm-application-dev\\skills\\prompt-engineering-patterns",
-                        "sparse":  false,
-                        "commit":  "27a7ed95755a5c3a2948694343a8e2cd7a7ef6fb"
-                    },
-                    {
-                        "name":  "python-design-patterns",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/wshobson/agents.git",
-                        "ref":  "main",
-                        "skill":  "plugins\\python-development\\skills\\python-design-patterns",
-                        "sparse":  false,
-                        "commit":  "27a7ed95755a5c3a2948694343a8e2cd7a7ef6fb"
-                    },
-                    {
-                        "name":  "python-docx",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/vamseeachanta/workspace-hub.git",
-                        "ref":  "main",
-                        "skill":  ".claude\\skills\\data\\office\\python-docx",
-                        "sparse":  false,
-                        "commit":  "dff575ce58d26e5142af35fc40aa03d4bb98a8b2"
-                    },
-                    {
-                        "name":  "python-performance-optimization",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/wshobson/agents.git",
-                        "ref":  "main",
-                        "skill":  "plugins\\python-development\\skills\\python-performance-optimization",
-                        "sparse":  false,
-                        "commit":  "27a7ed95755a5c3a2948694343a8e2cd7a7ef6fb"
-                    },
-                    {
-                        "name":  "python-pptx",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/vamseeachanta/workspace-hub.git",
-                        "ref":  "main",
-                        "skill":  ".claude\\skills\\data\\office\\python-pptx",
-                        "sparse":  false,
-                        "commit":  "dff575ce58d26e5142af35fc40aa03d4bb98a8b2"
-                    },
-                    {
-                        "name":  "python-testing-patterns",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/wshobson/agents.git",
-                        "ref":  "main",
-                        "skill":  "plugins\\python-development\\skills\\python-testing-patterns",
-                        "sparse":  false,
-                        "commit":  "27a7ed95755a5c3a2948694343a8e2cd7a7ef6fb"
-                    },
-                    {
-                        "name":  "storyboard-creation",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/inference-sh-6/skills.git",
-                        "ref":  "main",
-                        "skill":  "guides\\video\\storyboard-creation",
-                        "sparse":  false,
-                        "commit":  "ae94e92c4d2e186826283534b3b9e15179b67ecc"
-                    },
-                    {
-                        "name":  "superpowers",
-                        "mode":  "vendor",
-                        "repo":  "https://github.com/obra/superpowers.git",
-                        "ref":  "main",
-                        "skill":  "skills\\writing-skills",
-                        "sparse":  false,
-                        "commit":  "b55764852ac78870e65c6565fb585b6cd8b3c5c9"
-                    },
-                    {
-                        "name":  "tailwind-design-system",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/wshobson/agents.git",
-                        "ref":  "main",
-                        "skill":  "plugins\\frontend-mobile-development\\skills\\tailwind-design-system",
-                        "sparse":  false,
-                        "commit":  "27a7ed95755a5c3a2948694343a8e2cd7a7ef6fb"
-                    },
-                    {
-                        "name":  "ui-animation",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/mblode/agent-skills.git",
-                        "ref":  "main",
-                        "skill":  "skills\\ui-animation",
-                        "sparse":  false,
-                        "commit":  "a09416f3aab203ea6b80889535532a500b4bd85f"
-                    },
-                    {
-                        "name":  "ui-ux-pro-max",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git",
-                        "ref":  "main",
-                        "skill":  ".claude\\skills\\ui-ux-pro-max",
-                        "sparse":  false,
-                        "commit":  "b7e3af80f6e331f6fb456667b82b12cade7c9d35"
-                    },
-                    {
-                        "name":  "vite",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/antfu/skills.git",
-                        "ref":  "main",
-                        "skill":  "skills\\vite",
-                        "sparse":  false,
-                        "commit":  "c35a5588a5158b5b404a14fb10469b2b6dc1952b"
-                    },
-                    {
-                        "name":  "write-a-prd",
-                        "mode":  "manual",
-                        "repo":  "https://github.com/mattpocock/skills.git",
-                        "ref":  "main",
-                        "skill":  "to-prd",
-                        "sparse":  false,
-                        "commit":  "8868f54212dfcf450b665d2e2a5bf521ada64c3e"
-                    }
-                ]
+  "version": 1,
+  "generated_at": "2026-04-22T17:15:45.6435713Z",
+  "vendors": [
+    {
+      "name": "agent-skills",
+      "repo": "https://github.com/vercel-labs/agent-skills.git",
+      "ref": "main",
+      "commit": "ce3e64e468f8fa09a2d075d102771838061fdac0"
+    },
+    {
+      "name": "agent-skills-2",
+      "repo": "https://github.com/addyosmani/agent-skills.git",
+      "ref": "main",
+      "commit": "1f66d57a5e1b041b11e49a8cdca275aa472f0131"
+    },
+    {
+      "name": "anthropics-skills",
+      "repo": "https://github.com/anthropics/skills.git",
+      "ref": "main",
+      "commit": "b9e19e6f44773509fbdd7001d77ff41a49a486c1"
+    },
+    {
+      "name": "baoyu-skills",
+      "repo": "https://github.com/jimliu/baoyu-skills.git",
+      "ref": "main",
+      "commit": "d7f623158c0fa270cf41c6d1f6c78ab8aa6b9810"
+    },
+    {
+      "name": "marketingskills",
+      "repo": "https://github.com/coreyhaines31/marketingskills.git",
+      "ref": "main",
+      "commit": "9125d8216e38945bcca5e712287cec06e9e96523"
+    },
+    {
+      "name": "skills",
+      "repo": "https://github.com/openai/skills.git",
+      "ref": "main",
+      "commit": "e940b8a86138adf03972802b990a1dfc57fcbf09"
+    },
+    {
+      "name": "skills-2",
+      "repo": "https://github.com/remotion-dev/skills.git",
+      "ref": "main",
+      "commit": "41a3b0685bc648c5f66b3c81d67c61589875eefb"
+    },
+    {
+      "name": "superpowers",
+      "repo": "https://github.com/obra/superpowers.git",
+      "ref": "main",
+      "commit": "b55764852ac78870e65c6565fb585b6cd8b3c5c9"
+    },
+    {
+      "name": "web-quality-skills",
+      "repo": "https://github.com/addyosmani/web-quality-skills.git",
+      "ref": "main",
+      "commit": "fed9617111260e19f4f54b72a2874a3f3de8ff94"
+    }
+  ],
+  "imports": [
+    {
+      "name": "agent-browser",
+      "mode": "manual",
+      "repo": "https://github.com/vercel-labs/agent-browser.git",
+      "ref": "main",
+      "skill": "skills\\agent-browser",
+      "sparse": false,
+      "commit": "57405f93614fae46e5c955ce662b4785283e1301"
+    },
+    {
+      "name": "agent-skills-2",
+      "mode": "vendor",
+      "repo": "https://github.com/addyosmani/agent-skills.git",
+      "ref": "main",
+      "skill": "skills\\performance-optimization",
+      "sparse": false,
+      "commit": "1f66d57a5e1b041b11e49a8cdca275aa472f0131"
+    },
+    {
+      "name": "architecture-patterns",
+      "mode": "manual",
+      "repo": "https://github.com/wshobson/agents.git",
+      "ref": "main",
+      "skill": "plugins\\backend-development\\skills\\architecture-patterns",
+      "sparse": false,
+      "commit": "27a7ed95755a5c3a2948694343a8e2cd7a7ef6fb"
+    },
+    {
+      "name": "baoyu-skills",
+      "mode": "vendor",
+      "repo": "https://github.com/jimliu/baoyu-skills.git",
+      "ref": "main",
+      "skill": "skills\\baoyu-article-illustrator",
+      "sparse": false,
+      "commit": "d7f623158c0fa270cf41c6d1f6c78ab8aa6b9810"
+    },
+    {
+      "name": "d3-viz",
+      "mode": "manual",
+      "repo": "https://github.com/jarmen423/skills.git",
+      "ref": "main",
+      "skill": "myskills\\downloaded-skills\\d3-viz",
+      "sparse": false,
+      "commit": "c0afc120630d306c138f2e4d14eb764738e9d491"
+    },
+    {
+      "name": "data-visualization",
+      "mode": "manual",
+      "repo": "https://github.com/anthropics/knowledge-work-plugins.git",
+      "ref": "main",
+      "skill": "data\\skills\\data-visualization",
+      "sparse": false,
+      "commit": "8fd1c52243c81d523b7fa7988cc1ac8d92669892"
+    },
+    {
+      "name": "debug-dotnet",
+      "mode": "manual",
+      "repo": "https://github.com/snakeo/claude-debug-and-refactor-skills-plugin.git",
+      "ref": "master",
+      "skill": "plugins\\debug-and-refactor\\skills\\debug-dotnet",
+      "sparse": false,
+      "commit": "e2e79df88e7fad81f1c6c4eddfe8ddfaa1c0d4cd"
+    },
+    {
+      "name": "dotnet-backend-patterns",
+      "mode": "manual",
+      "repo": "https://github.com/rmyndharis/antigravity-skills.git",
+      "ref": "main",
+      "skill": "skills\\dotnet-backend-patterns",
+      "sparse": false,
+      "commit": "a5dc5cf1a5f148e40374cef5d47e7c3b5575fdcf"
+    },
+    {
+      "name": "drawio-diagram-forge",
+      "mode": "manual",
+      "repo": "https://github.com/aktsmm/agent-skills.git",
+      "ref": "master",
+      "skill": "drawio-diagram-forge",
+      "sparse": false,
+      "commit": "8ee4669906dc74b62aba9397d03da52ff435a9ed"
+    },
+    {
+      "name": "error-handling-patterns",
+      "mode": "manual",
+      "repo": "https://github.com/wshobson/agents.git",
+      "ref": "main",
+      "skill": "plugins\\developer-essentials\\skills\\error-handling-patterns",
+      "sparse": false,
+      "commit": "27a7ed95755a5c3a2948694343a8e2cd7a7ef6fb"
+    },
+    {
+      "name": "find-skills",
+      "mode": "manual",
+      "repo": "https://github.com/vercel-labs/skills.git",
+      "ref": "main",
+      "skill": "skills\\find-skills",
+      "sparse": false,
+      "commit": "bc21a37a12b90fcb5aec051c91baf5b227b704b1"
+    },
+    {
+      "name": "grill-me",
+      "mode": "manual",
+      "repo": "https://github.com/mattpocock/skills.git",
+      "ref": "main",
+      "skill": "grill-me",
+      "sparse": false,
+      "commit": "8868f54212dfcf450b665d2e2a5bf521ada64c3e"
+    },
+    {
+      "name": "improve-codebase-architecture",
+      "mode": "manual",
+      "repo": "https://github.com/mattpocock/skills.git",
+      "ref": "main",
+      "skill": "improve-codebase-architecture",
+      "sparse": false,
+      "commit": "8868f54212dfcf450b665d2e2a5bf521ada64c3e"
+    },
+    {
+      "name": "manim-composer",
+      "mode": "manual",
+      "repo": "https://github.com/adithya-s-k/manim_skill.git",
+      "ref": "main",
+      "skill": "skills\\manim-composer",
+      "sparse": false,
+      "commit": "cef045011722d285692e3381d12d4d637da56e18"
+    },
+    {
+      "name": "manimce-best-practices",
+      "mode": "manual",
+      "repo": "https://github.com/adithya-s-k/manim_skill.git",
+      "ref": "main",
+      "skill": "skills\\manimce-best-practices",
+      "sparse": false,
+      "commit": "cef045011722d285692e3381d12d4d637da56e18"
+    },
+    {
+      "name": "marketingskills",
+      "mode": "vendor",
+      "repo": "https://github.com/coreyhaines31/marketingskills.git",
+      "ref": "main",
+      "skill": "skills\\copywriting",
+      "sparse": false,
+      "commit": "9125d8216e38945bcca5e712287cec06e9e96523"
+    },
+    {
+      "name": "modern-python",
+      "mode": "manual",
+      "repo": "https://github.com/trailofbits/skills.git",
+      "ref": "main",
+      "skill": "plugins\\modern-python\\skills\\modern-python",
+      "sparse": false,
+      "commit": "e8cc5baf9329ccb491bfa200e82eacbac83b1ead"
+    },
+    {
+      "name": "openpyxl",
+      "mode": "manual",
+      "repo": "https://github.com/vamseeachanta/workspace-hub.git",
+      "ref": "main",
+      "skill": ".claude\\skills\\data\\office\\openpyxl",
+      "sparse": true,
+      "commit": "0829fc552687b481ff4d107967d9493ea1a1568b"
+    },
+    {
+      "name": "playwright-best-practices",
+      "mode": "manual",
+      "repo": "https://github.com/currents-dev/playwright-best-practices-skill.git",
+      "ref": "main",
+      "skill": ".",
+      "sparse": false,
+      "commit": "ef329e7e65149918e1ff0eed2cf7d2e6e6f9eb5b"
+    },
+    {
+      "name": "powerpoint-automation",
+      "mode": "manual",
+      "repo": "https://github.com/aktsmm/agent-skills.git",
+      "ref": "master",
+      "skill": "powerpoint-automation",
+      "sparse": false,
+      "commit": "8ee4669906dc74b62aba9397d03da52ff435a9ed"
+    },
+    {
+      "name": "prd-to-issues",
+      "mode": "manual",
+      "repo": "https://github.com/mattpocock/skills.git",
+      "ref": "main",
+      "skill": "to-issues",
+      "sparse": false,
+      "commit": "8868f54212dfcf450b665d2e2a5bf521ada64c3e"
+    },
+    {
+      "name": "prompt-engineering-patterns",
+      "mode": "manual",
+      "repo": "https://github.com/wshobson/agents.git",
+      "ref": "main",
+      "skill": "plugins\\llm-application-dev\\skills\\prompt-engineering-patterns",
+      "sparse": false,
+      "commit": "27a7ed95755a5c3a2948694343a8e2cd7a7ef6fb"
+    },
+    {
+      "name": "python-design-patterns",
+      "mode": "manual",
+      "repo": "https://github.com/wshobson/agents.git",
+      "ref": "main",
+      "skill": "plugins\\python-development\\skills\\python-design-patterns",
+      "sparse": false,
+      "commit": "27a7ed95755a5c3a2948694343a8e2cd7a7ef6fb"
+    },
+    {
+      "name": "python-docx",
+      "mode": "manual",
+      "repo": "https://github.com/vamseeachanta/workspace-hub.git",
+      "ref": "main",
+      "skill": ".claude\\skills\\data\\office\\python-docx",
+      "sparse": true,
+      "commit": "0829fc552687b481ff4d107967d9493ea1a1568b"
+    },
+    {
+      "name": "python-performance-optimization",
+      "mode": "manual",
+      "repo": "https://github.com/wshobson/agents.git",
+      "ref": "main",
+      "skill": "plugins\\python-development\\skills\\python-performance-optimization",
+      "sparse": false,
+      "commit": "27a7ed95755a5c3a2948694343a8e2cd7a7ef6fb"
+    },
+    {
+      "name": "python-pptx",
+      "mode": "manual",
+      "repo": "https://github.com/vamseeachanta/workspace-hub.git",
+      "ref": "main",
+      "skill": ".claude\\skills\\data\\office\\python-pptx",
+      "sparse": true,
+      "commit": "0829fc552687b481ff4d107967d9493ea1a1568b"
+    },
+    {
+      "name": "python-testing-patterns",
+      "mode": "manual",
+      "repo": "https://github.com/wshobson/agents.git",
+      "ref": "main",
+      "skill": "plugins\\python-development\\skills\\python-testing-patterns",
+      "sparse": false,
+      "commit": "27a7ed95755a5c3a2948694343a8e2cd7a7ef6fb"
+    },
+    {
+      "name": "storyboard-creation",
+      "mode": "manual",
+      "repo": "https://github.com/inference-sh-6/skills.git",
+      "ref": "main",
+      "skill": "guides\\video\\storyboard-creation",
+      "sparse": false,
+      "commit": "ae94e92c4d2e186826283534b3b9e15179b67ecc"
+    },
+    {
+      "name": "superpowers",
+      "mode": "vendor",
+      "repo": "https://github.com/obra/superpowers.git",
+      "ref": "main",
+      "skill": "skills\\writing-skills",
+      "sparse": false,
+      "commit": "b55764852ac78870e65c6565fb585b6cd8b3c5c9"
+    },
+    {
+      "name": "tailwind-design-system",
+      "mode": "manual",
+      "repo": "https://github.com/wshobson/agents.git",
+      "ref": "main",
+      "skill": "plugins\\frontend-mobile-development\\skills\\tailwind-design-system",
+      "sparse": false,
+      "commit": "27a7ed95755a5c3a2948694343a8e2cd7a7ef6fb"
+    },
+    {
+      "name": "ui-animation",
+      "mode": "manual",
+      "repo": "https://github.com/mblode/agent-skills.git",
+      "ref": "main",
+      "skill": "skills\\ui-animation",
+      "sparse": false,
+      "commit": "a09416f3aab203ea6b80889535532a500b4bd85f"
+    },
+    {
+      "name": "ui-ux-pro-max",
+      "mode": "manual",
+      "repo": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git",
+      "ref": "main",
+      "skill": ".claude\\skills\\ui-ux-pro-max",
+      "sparse": false,
+      "commit": "b7e3af80f6e331f6fb456667b82b12cade7c9d35"
+    },
+    {
+      "name": "vite",
+      "mode": "manual",
+      "repo": "https://github.com/antfu/skills.git",
+      "ref": "main",
+      "skill": "skills\\vite",
+      "sparse": false,
+      "commit": "c35a5588a5158b5b404a14fb10469b2b6dc1952b"
+    },
+    {
+      "name": "write-a-prd",
+      "mode": "manual",
+      "repo": "https://github.com/mattpocock/skills.git",
+      "ref": "main",
+      "skill": "to-prd",
+      "sparse": false,
+      "commit": "8868f54212dfcf450b665d2e2a5bf521ada64c3e"
+    }
+  ]
 }

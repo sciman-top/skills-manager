@@ -952,6 +952,23 @@ sandbox = "elevated"
             }
         }
 
+        It "Clears existing mcp_servers tables when desired server list is empty" {
+            $existing = @'
+model = "gpt-5.3-codex"
+
+[mcp_servers.old]
+command = "cmd"
+args = ["/c", "echo", "old"]
+
+[windows]
+sandbox = "elevated"
+'@
+            $toml = Build-CodexConfigToml $existing @()
+            $toml | Should Match "model = ""gpt-5.3-codex"""
+            $toml | Should Match "\[windows\]"
+            $toml | Should Not Match "\[mcp_servers\.old\]"
+        }
+
         It "Skips GitHub MCP when GitHub token is unavailable" {
             $oldToken = $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN
             $oldGithubToken = $env:GITHUB_PERSONAL_ACCESS_TOKEN

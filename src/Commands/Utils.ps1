@@ -10,6 +10,7 @@ function 打开配置 {
 
 function 解除关联 {
     Preflight
+    if (Skip-IfDryRun "解除关联") { return }
     $cfg = LoadCfg
     foreach ($t in $cfg.targets) {
         $target = Resolve-TargetDir $t.path

@@ -396,6 +396,28 @@ function Test-AuditTimestampString([string]$value) {
     return [DateTimeOffset]::TryParse([string]$value, [ref]$parsed)
 }
 
+function Convert-AuditTimestampToIso($value, [switch]$FallbackNow) {
+    if ($value -is [DateTimeOffset]) {
+        return ([DateTimeOffset]$value).ToString("o")
+    }
+    if ($value -is [DateTime]) {
+        return ([DateTimeOffset]$value).ToString("o")
+    }
+    if ($null -ne $value) {
+        $text = [string]$value
+        if (-not [string]::IsNullOrWhiteSpace($text)) {
+            $parsed = [DateTimeOffset]::MinValue
+            if ([DateTimeOffset]::TryParse($text, [ref]$parsed)) {
+                return $parsed.ToString("o")
+            }
+        }
+    }
+    if ($FallbackNow) {
+        return (Get-Date).ToString("o")
+    }
+    return ""
+}
+
 function Get-AuditStructuredFallbackValues([string]$field, [string]$rawText) {
     $summary = Get-AuditFallbackSummaryFromRawText $rawText
     $generic = if ([string]::IsNullOrWhiteSpace($summary)) { "general workflow" } else { $summary }
@@ -531,8 +553,8 @@ function Import-AuditUserProfileStructured([string]$profilePath) {
     }
 
     $importedStructuredAt = $null
-    if (Get-AuditObjectFieldValue $imported "last_structured_at" ([ref]$importedStructuredAt) -and -not [string]::IsNullOrWhiteSpace([string]$importedStructuredAt)) {
-        $cfg.user_profile.last_structured_at = [string]$importedStructuredAt
+    if (Get-AuditObjectFieldValue $imported "last_structured_at" ([ref]$importedStructuredAt)) {
+        $cfg.user_profile.last_structured_at = Convert-AuditTimestampToIso $importedStructuredAt -FallbackNow
     }
     else {
         $cfg.user_profile.last_structured_at = (Get-Date).ToString("o")
@@ -601,7 +623,7 @@ function Get-AuditUserProfileOutput($cfg) {
         raw_text = [string]$cfg.user_profile.raw_text
         summary = [string]$cfg.user_profile.summary
         structured = $cfg.user_profile.structured
-        last_structured_at = [string]$cfg.user_profile.last_structured_at
+        last_structured_at = Convert-AuditTimestampToIso $cfg.user_profile.last_structured_at -FallbackNow
         structured_by = [string]$cfg.user_profile.structured_by
     }
 }

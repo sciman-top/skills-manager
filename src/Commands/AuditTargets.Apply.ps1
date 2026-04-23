@@ -319,6 +319,37 @@ function Get-AuditRunPromptContractVersion([string]$recommendationDir) {
     return ""
 }
 
+function Test-AuditUserProfilePreflight([string]$recommendationDir) {
+    $path = Join-Path $recommendationDir "user-profile.json"
+    $issues = New-Object System.Collections.Generic.List[string]
+    $exists = Test-Path -LiteralPath $path -PathType Leaf
+    if (-not $exists) {
+        return [pscustomobject]@{
+            path = $path
+            exists = $false
+            ok = $true
+            skipped = $true
+            skipped_reason = "missing_optional_user_profile"
+            issues = @($issues)
+        }
+    }
+
+    try {
+        Assert-AuditBundleFileContent $path "user-profile.json"
+    }
+    catch {
+        $issues.Add([string]$_.Exception.Message) | Out-Null
+    }
+    return [pscustomobject]@{
+        path = $path
+        exists = $true
+        ok = ($issues.Count -eq 0)
+        skipped = $false
+        skipped_reason = ""
+        issues = @($issues)
+    }
+}
+
 function Invoke-AuditRecommendationsPreflight {
     param(
         [string]$RecommendationsPath,
@@ -348,6 +379,7 @@ function Invoke-AuditRecommendationsPreflight {
     $promptVersionMatched = (-not [string]::IsNullOrWhiteSpace($runPromptVersion) -and [string]$runPromptVersion -eq [string]$currentPromptVersion)
     $sourcePolicy = Get-AuditSourceEvidencePolicy $recommendationDir
     $sourceCoverageCheck = Test-AuditRecommendationSourceCoveragePolicy $rec $sourcePolicy
+    $userProfileCheck = Test-AuditUserProfilePreflight $recommendationDir
 
     $issues = New-Object System.Collections.Generic.List[string]
     if ($isSnapshotStale) {
@@ -359,6 +391,9 @@ function Invoke-AuditRecommendationsPreflight {
     }
     foreach ($issue in @($sourceCoverageCheck.issues)) {
         $issues.Add([string]$issue) | Out-Null
+    }
+    foreach ($issue in @($userProfileCheck.issues)) {
+        $issues.Add(("user_profile_invalid：{0}" -f [string]$issue)) | Out-Null
     }
 
     $report = [ordered]@{
@@ -374,6 +409,7 @@ function Invoke-AuditRecommendationsPreflight {
         }
         source_evidence_policy = $sourcePolicy
         source_coverage = $sourceCoverageCheck.coverage
+        user_profile_check = $userProfileCheck
         snapshot_state = $snapshotState
         live_state = $liveState
         issues = @($issues)

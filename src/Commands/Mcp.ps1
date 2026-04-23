@@ -231,6 +231,32 @@ function Parse-McpInstallArgs([string[]]$tokens) {
     return [pscustomobject]$result
 }
 
+function Extract-McpTrailingDryRunToken([string[]]$tokens) {
+    $list = @($tokens)
+    if ($list.Count -eq 0) {
+        return [pscustomobject]@{
+            tokens = @()
+            dry_run = $false
+        }
+    }
+    $last = [string]$list[$list.Count - 1]
+    $tail = $last.Trim().ToLowerInvariant()
+    if ($tail -eq "-dryrun" -or $tail -eq "--dryrun" -or $tail -eq "--dry-run") {
+        $trimmed = @()
+        if ($list.Count -gt 1) {
+            $trimmed = @($list[0..($list.Count - 2)])
+        }
+        return [pscustomobject]@{
+            tokens = $trimmed
+            dry_run = $true
+        }
+    }
+    return [pscustomobject]@{
+        tokens = $list
+        dry_run = $false
+    }
+}
+
 function New-McpServerObject($parsed) {
     $obj = [ordered]@{
         name = $parsed.name
@@ -367,17 +393,9 @@ function Build-GenericMcpPayload([string]$existingContent, $servers) {
         }
     }
 
-    $existingMap = $null
-    if ($base.Contains("mcpServers")) {
-        $existingMap = $base["mcpServers"]
-    }
-    elseif ($base.Contains("mcp_servers")) {
-        $existingMap = $base["mcp_servers"]
-    }
-
     $managedMap = Convert-McpServersToConfigMap $servers
-    $managedNameSet = Get-McpServerNameSet $servers
-    $base["mcpServers"] = Merge-McpConfigMaps $existingMap $managedMap $managedNameSet
+    # MCP 同步以 skills.json 为唯一真源，避免卸载后残留旧项。
+    $base["mcpServers"] = $managedMap
     if ($base.Contains("mcp_servers")) { $base.Remove("mcp_servers") }
     return [pscustomobject]$base
 }
@@ -680,6 +698,15 @@ function Remove-AnsiEscapeSequences([string]$text) {
     return ([regex]::Replace($text, '\x1B\[[0-9;?]*[ -/]*[@-~]', ''))
 }
 
+function Mask-SensitiveMcpCommandText([string]$text) {
+    if ([string]::IsNullOrWhiteSpace($text)) { return $text }
+    $masked = [string]$text
+    $masked = [regex]::Replace($masked, '(?i)(Authorization\s*[:=]\s*Bearer\s+)([^"\s]+)', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)\bgithub_pat_[A-Za-z0-9_]+\b', '<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)\bgh[pousr]_[A-Za-z0-9_]+\b', '<redacted>')
+    return $masked
+}
+
 function Test-CliMcpServerReady([string]$cli, [string[]]$expectedServers) {
     if ($null -eq $expectedServers -or $expectedServers.Count -eq 0) {
         return [pscustomobject]@{
@@ -848,7 +875,8 @@ function Invoke-NativeMcpSync($servers) {
             $args = Get-NativeMcpAddArgs $s $scope
             $cmdText = "claude {0}" -f (($args | ForEach-Object { [string]$_ }) -join " ")
             if ($DryRun) {
-                Write-Host ("DRYRUN：将执行原生 MCP 同步 -> {0}" -f $cmdText)
+                $safeCmdText = Mask-SensitiveMcpCommandText $cmdText
+                Write-Host ("DRYRUN：将执行原生 MCP 同步 -> {0}" -f $safeCmdText)
                 continue
             }
             $timeoutSeconds = 30
@@ -932,16 +960,9 @@ function Build-GeminiSettingsPayload([string]$existingContent, $servers) {
         }
     }
 
-    $existingMap = $null
-    if ($base.Contains("mcpServers")) {
-        $existingMap = $base["mcpServers"]
-    }
-    elseif ($base.Contains("mcp_servers")) {
-        $existingMap = $base["mcp_servers"]
-    }
     $managedMap = Convert-McpServersToGeminiConfigMap $servers
-    $managedNameSet = Get-McpServerNameSet $servers
-    $base["mcpServers"] = Merge-McpConfigMaps $existingMap $managedMap $managedNameSet
+    # Gemini 同步以 skills.json 为唯一真源，避免卸载后残留旧项。
+    $base["mcpServers"] = $managedMap
     if ($base.Contains("mcp_servers")) { $base.Remove("mcp_servers") }
     return [pscustomobject]$base
 }
@@ -996,8 +1017,8 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
     if (-not [string]::IsNullOrWhiteSpace($existingToml)) {
         $lines = $existingToml -split "`r?`n"
     }
-    $managedNameSet = Get-McpServerNameSet $servers
     $codexServers = @()
+    $skippedGithubForMissingToken = $false
     $hasGithubToken = -not [string]::IsNullOrWhiteSpace($env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN) -or -not [string]::IsNullOrWhiteSpace($env:GITHUB_PERSONAL_ACCESS_TOKEN)
     if ([string]::IsNullOrWhiteSpace($env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN) -and -not [string]::IsNullOrWhiteSpace($env:GITHUB_PERSONAL_ACCESS_TOKEN)) {
         $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = [string]$env:GITHUB_PERSONAL_ACCESS_TOKEN
@@ -1007,6 +1028,7 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
         if ([string]::Equals([string]$server.name, "github", [System.StringComparison]::OrdinalIgnoreCase)) {
             if (-not $hasGithubToken) {
                 Log "Codex 检测到 GitHub MCP 但缺少 CODEX_GITHUB_PERSONAL_ACCESS_TOKEN（或 GITHUB_PERSONAL_ACCESS_TOKEN），已跳过同步以避免影响启动。" "WARN"
+                $skippedGithubForMissingToken = $true
                 continue
             }
             Log "Codex 检测到 GitHub MCP 且存在 Token，将写入 bearer_token_env_var=CODEX_GITHUB_PERSONAL_ACCESS_TOKEN。" "INFO"
@@ -1024,29 +1046,31 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
 
     $managedMap = Convert-McpServersToConfigMap $codexServers
     $managedNames = @($managedMap.PSObject.Properties.Name | Sort-Object)
+    $preserveExistingMcpSections = ($managedNames.Count -eq 0 -and $skippedGithubForMissingToken)
 
     $kept = New-Object System.Collections.Generic.List[string]
-    $skipManagedSection = $false
-    foreach ($line in $lines) {
-        if ($line -match '^\s*\[mcp_servers\.([^\]]+)\]\s*$') {
-            $name = [string]$matches[1]
-            if ($managedNameSet.Contains($name)) {
-                $skipManagedSection = $true
+    if ($preserveExistingMcpSections) {
+        foreach ($line in $lines) {
+            $kept.Add($line) | Out-Null
+        }
+    }
+    else {
+        $skipMcpSection = $false
+        foreach ($line in $lines) {
+            if ($line -match '^\s*\[mcp_servers\.[^\]]+\]\s*$') {
+                $skipMcpSection = $true
                 continue
             }
-            $skipManagedSection = $false
-            $kept.Add($line) | Out-Null
-            continue
-        }
 
-        if ($skipManagedSection -and $line -match '^\s*\[[^\]]+\]\s*$') {
-            $skipManagedSection = $false
-            $kept.Add($line) | Out-Null
-            continue
-        }
+            if ($skipMcpSection -and $line -match '^\s*\[[^\]]+\]\s*$') {
+                $skipMcpSection = $false
+                $kept.Add($line) | Out-Null
+                continue
+            }
 
-        if (-not $skipManagedSection) {
-            $kept.Add($line) | Out-Null
+            if (-not $skipMcpSection) {
+                $kept.Add($line) | Out-Null
+            }
         }
     }
 
@@ -1295,6 +1319,12 @@ function 安装MCP([string[]]$tokens = @()) {
     $cfgRaw = Get-Content $CfgPath -Raw
 
     $tokenList = @($tokens | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    $trailingDryRun = Extract-McpTrailingDryRunToken $tokenList
+    $tokenList = @($trailingDryRun.tokens)
+    if (-not $DryRun -and [bool]$trailingDryRun.dry_run) {
+        $script:DryRun = $true
+        Write-Host "检测到尾部 -DryRun 参数，已切换为预演模式。"
+    }
     if ($tokenList.Count -eq 1 -and $tokenList[0] -is [string] -and $tokenList[0].Contains(" ")) {
         $tokenList = Split-Args $tokenList[0]
     }
@@ -1389,6 +1419,12 @@ function 卸载MCP([string[]]$tokens = @()) {
 
     $name = $null
     $tokenList = @($tokens | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    $trailingDryRun = Extract-McpTrailingDryRunToken $tokenList
+    $tokenList = @($trailingDryRun.tokens)
+    if (-not $DryRun -and [bool]$trailingDryRun.dry_run) {
+        $script:DryRun = $true
+        Write-Host "检测到尾部 -DryRun 参数，已切换为预演模式。"
+    }
     if ($tokenList.Count -gt 0) {
         $name = Normalize-NameWithNotice ([string]$tokenList[0]) "MCP 服务名"
     }

@@ -11,8 +11,14 @@
 - 代码：`Get-AuditLatestRunId` 增加候选分层选择。
   - 优先：可校验且非 stale（快照与 prompt contract 均匹配）的 run。
   - 次优：无法校验新鲜度的 run（unknown）。
-  - 最后：已判定 stale 的 run。
+  - 仅有 stale 候选时返回“无可用 run”，避免 `<run-id>` 自动命中过期 run。
+- 代码：`--run-id` / `--recommendations` 的 `<run-id>` 自动解析门槛收紧为同时要求：
+  - `recommendations.json`
+  - `installed-skills.json`
+  - `audit-meta.json`
+  这样可避免把不完整旧包当作“最近可用 run”。
 - 测试：新增单测 `Prefers latest fresh run over newer stale run when resolving <run-id>`。
+  - 新增单测 `Fails placeholder resolution when only stale runs are found`。
 
 ## 执行命令
 1. `./build.ps1`
