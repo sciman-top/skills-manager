@@ -1,4 +1,7 @@
 $ErrorActionPreference = "Stop"
+if (-not (Get-Module -ListAvailable -Name Pester)) {
+    Write-Error "Pester module is required to run the test suite. Install Pester or run non-Pester quality gates for this environment."
+}
 Import-Module Pester | Out-Null
 $pesterVersion = (Get-Module Pester | Select-Object -First 1 -ExpandProperty Version)
 Write-Host ("Pester Version: {0}" -f $pesterVersion)
