@@ -1970,6 +1970,9 @@ function 构建生效 {
             Complete-BuildTransaction $txn
         }
         Log "=== 构建生效流程完成 ==="
+        if (@($failures).Count -gt 0) {
+            throw ("构建生效失败（{0} 项）：{1}" -f @($failures).Count, [string]@($failures)[0])
+        }
     } @{ command = "构建生效" } -NoHost
 }
 

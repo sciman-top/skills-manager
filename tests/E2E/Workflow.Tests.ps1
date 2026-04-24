@@ -59,6 +59,51 @@ description: demo skill
             (Test-Path (Join-Path $script:AgentDir "demo-hello\SKILL.md")) | Should Be $true
             (Test-Path (Join-Path $root "out\skills\demo-hello\SKILL.md")) | Should Be $true
         }
+
+        It "Fails closed and rolls back when agent build reports failures" {
+            $root = Join-Path $TestDrive "ws-build-failure"
+            New-Item -ItemType Directory -Path $root -Force | Out-Null
+            Set-TestWorkspace $root
+
+            $cfg = [pscustomobject]@{
+                vendors = @()
+                targets = @([pscustomobject]@{ path = (Join-Path $root "out\skills") })
+                mappings = @()
+                imports = @()
+                mcp_servers = @()
+                mcp_targets = @()
+                update_force = $false
+                sync_mode = "sync"
+            }
+
+            Mock Preflight {}
+            Mock Invoke-PrebuildCheck {}
+            Mock LoadCfg { $cfg }
+            Mock Start-BuildTransaction { [pscustomobject]@{ path = (Join-Path $root ".txn\build-test"); has_backup_agent = $false } }
+            Mock Optimize-Imports {}
+            Mock Write-BuildSummary {}
+            Mock Start-DryRunMirrorCollect {}
+            Mock Stop-DryRunMirrorCollect {}
+            Mock Write-DryRunMirrorSummary {}
+            Mock 构建Agent { @("build-agent-reused-existing-dir => locked file") }
+            Mock 应用到ClaudeCodex { @() }
+            Mock Rollback-BuildTransaction {}
+            Mock Complete-BuildTransaction {}
+
+            $thrown = $false
+            try {
+                构建生效
+            }
+            catch {
+                $thrown = $true
+                $_.Exception.Message | Should Match "构建生效失败"
+            }
+
+            $thrown | Should Be $true
+            Assert-MockCalled Rollback-BuildTransaction -Times 1 -Exactly
+            Assert-MockCalled Complete-BuildTransaction -Times 0 -Exactly
+            Assert-MockCalled 应用到ClaudeCodex -Times 0 -Exactly
+        }
     }
 
     Context "更新流程" {
