@@ -74,6 +74,40 @@ Describe "Doctor CLI behavior" {
         }
     }
 
+    It "Falls back to runtime OS description when CIM is unavailable" {
+        $oldCfgPath = $script:CfgPath
+        try {
+            $script:CfgPath = Join-Path $TestDrive "skills.json"
+            $cfg = @{
+                vendors = @(
+                    @{ name = "vendor-a"; repo = "https://example.com/a.git"; ref = "main" }
+                )
+                targets = @(
+                    @{ path = "~/.codex/skills" }
+                )
+                mappings = @()
+                imports = @()
+                mcp_servers = @()
+                mcp_targets = @()
+                sync_mode = "link"
+                update_force = $true
+            } | ConvertTo-Json -Depth 20
+            Set-Content -Path $script:CfgPath -Value $cfg -Encoding UTF8
+
+            Mock Get-CimInstance { throw "CIM unavailable" }
+            Mock Test-NetConnection { $true }
+            Mock Invoke-GitCapture { "git version 2.50.0" }
+            Mock Get-ItemProperty { [pscustomobject]@{ LongPathsEnabled = 1 } }
+
+            $report = Invoke-Doctor @("--json")
+            $report.checks.os | Should Not Be "unknown"
+            [string]::IsNullOrWhiteSpace([string]$report.checks.os) | Should Be $false
+        }
+        finally {
+            $script:CfgPath = $oldCfgPath
+        }
+    }
+
     It "Fails config check for contract violations beyond JSON syntax" {
         $oldCfgPath = $script:CfgPath
         try {

@@ -1271,6 +1271,26 @@ sandbox = "elevated"
             @($result.output).Count | Should Be 1
         }
 
+        It "Passes arguments through timeout wrapper without colliding with automatic args" {
+            $result = Invoke-ExternalCommandWithTimeout -command "cmd" -args @("/c", "echo wrapper-args-ok") -workingDir $TestDrive -timeoutSeconds 5
+
+            $result.timed_out | Should Be $false
+            $result.exit_code | Should Be 0
+            (($result.output | ForEach-Object { [string]$_ }) -join "`n") | Should Match "wrapper-args-ok"
+        }
+
+        It "Preserves output captured before an external command timeout" {
+            $result = Invoke-ExternalCommandWithTimeout "cmd" @(
+                "/c",
+                "echo before-timeout && ping -n 4 127.0.0.1 >nul"
+            ) $TestDrive 1
+
+            $result.timed_out | Should Be $true
+            $result.exit_code | Should Be 124
+            (($result.output | ForEach-Object { [string]$_ }) -join "`n") | Should Match "before-timeout"
+            $result.error | Should Match "timeout_after_1s"
+        }
+
         It "Clamps timeout value from env to the configured bounds" {
             $name = "SKILLS_MCP_TIMEOUT_CLAMP_TEST"
             $old = [System.Environment]::GetEnvironmentVariable($name)

@@ -3245,6 +3245,27 @@ function Get-DoctorGitVersion([switch]$NoHostLog) {
     return (Invoke-GitCapture @("version"))
 }
 
+function Get-DoctorOsDescription {
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem
+        if ($os -and -not [string]::IsNullOrWhiteSpace([string]$os.Caption)) {
+            return ("{0} {1}" -f [string]$os.Caption, [string]$os.OSArchitecture).Trim()
+        }
+    }
+    catch {}
+
+    try {
+        $description = [System.Runtime.InteropServices.RuntimeInformation]::OSDescription
+        $architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+        if (-not [string]::IsNullOrWhiteSpace([string]$description)) {
+            return ("{0} {1}" -f [string]$description, [string]$architecture).Trim()
+        }
+    }
+    catch {}
+
+    return $null
+}
+
 function Parse-DoctorArgs([string[]]$tokens) {
     $opts = [ordered]@{
         json = $false
@@ -3500,9 +3521,10 @@ function Invoke-Doctor([string[]]$tokens = @()) {
 
     # 1. System Checks
     try {
-        $os = Get-CimInstance Win32_OperatingSystem
-        $report.checks.os = ("{0} {1}" -f $os.Caption, $os.OSArchitecture)
-        if (-not $opts.json) { Write-Host ("OS: {0} {1}" -f $os.Caption, $os.OSArchitecture) }
+        $osText = Get-DoctorOsDescription
+        if ([string]::IsNullOrWhiteSpace([string]$osText)) { throw "OS detection returned empty" }
+        $report.checks.os = $osText
+        if (-not $opts.json) { Write-Host ("OS: {0}" -f $osText) }
     }
     catch {
         $report.checks.os = "unknown"
@@ -6834,40 +6856,57 @@ function Resolve-ExternalCommandInvocation([string]$command, [string[]]$commandA
     }
 }
 
-function Invoke-ExternalCommandWithTimeout([string]$command, [string[]]$args = @(), [string]$workingDir = $null, [int]$timeoutSeconds = 30) {
+function Get-ExternalCommandCapturedOutput([string]$outFile, [string]$errFile) {
+    $outText = if (Test-Path -LiteralPath $outFile -PathType Leaf) { Get-Content -Raw -LiteralPath $outFile } else { "" }
+    $errText = if (Test-Path -LiteralPath $errFile -PathType Leaf) { Get-Content -Raw -LiteralPath $errFile } else { "" }
+    $combined = New-Object System.Collections.Generic.List[string]
+    foreach ($line in @((($outText + "`n" + $errText) -split "`r?`n"))) {
+        if ($null -ne $line -and $line -ne "") { $combined.Add([string]$line) | Out-Null }
+    }
+    return [pscustomobject]@{
+        output = @($combined)
+        error = if ([string]::IsNullOrWhiteSpace($errText)) { "" } else { $errText.Trim() }
+    }
+}
+
+function Invoke-ExternalCommandWithTimeout(
+    [string]$command,
+    [Alias("args")]
+    [string[]]$CommandArgs = @(),
+    [string]$workingDir = $null,
+    [int]$timeoutSeconds = 30
+) {
     Need (-not [string]::IsNullOrWhiteSpace($command)) "外部命令名不能为空"
     if ($timeoutSeconds -lt 1) { $timeoutSeconds = 1 }
 
     $outFile = [System.IO.Path]::GetTempFileName()
     $errFile = [System.IO.Path]::GetTempFileName()
+    $proc = $null
     try {
         $effectiveWorkingDir = if ([string]::IsNullOrWhiteSpace($workingDir)) { $PWD.Path } else { $workingDir }
-        $invocation = Resolve-ExternalCommandInvocation $command @($args)
+        $invocation = Resolve-ExternalCommandInvocation $command @($CommandArgs)
         $argList = @($invocation.args | ForEach-Object { [string]$_ })
         $proc = Start-Process -FilePath ([string]$invocation.file) -ArgumentList $argList -PassThru -WindowStyle Hidden -RedirectStandardOutput $outFile -RedirectStandardError $errFile -WorkingDirectory $effectiveWorkingDir
         $exited = $proc.WaitForExit($timeoutSeconds * 1000)
         if (-not $exited) {
-            try { $proc.Kill() } catch {}
+            try { $proc.Kill($true) } catch { try { $proc.Kill() } catch {} }
+            try { $proc.WaitForExit(2000) | Out-Null } catch {}
+            $captured = Get-ExternalCommandCapturedOutput $outFile $errFile
             return [pscustomobject]@{
                 timed_out = $true
                 exit_code = 124
-                output = @()
-                error = ("timeout_after_{0}s" -f $timeoutSeconds)
+                output = @($captured.output)
+                error = if ([string]::IsNullOrWhiteSpace([string]$captured.error)) { ("timeout_after_{0}s" -f $timeoutSeconds) } else { ("timeout_after_{0}s: {1}" -f $timeoutSeconds, [string]$captured.error) }
             }
         }
 
-        $outText = if (Test-Path $outFile) { Get-Content -Raw -Path $outFile } else { "" }
-        $errText = if (Test-Path $errFile) { Get-Content -Raw -Path $errFile } else { "" }
-        $combined = New-Object System.Collections.Generic.List[string]
-        foreach ($line in @((($outText + "`n" + $errText) -split "`r?`n"))) {
-            if ($null -ne $line -and $line -ne "") { $combined.Add([string]$line) | Out-Null }
-        }
+        $captured = Get-ExternalCommandCapturedOutput $outFile $errFile
 
         return [pscustomobject]@{
             timed_out = $false
             exit_code = [int]$proc.ExitCode
-            output = @($combined)
-            error = if ([string]::IsNullOrWhiteSpace($errText)) { "" } else { $errText.Trim() }
+            output = @($captured.output)
+            error = [string]$captured.error
         }
     }
     catch {
@@ -6879,6 +6918,7 @@ function Invoke-ExternalCommandWithTimeout([string]$command, [string[]]$args = @
         }
     }
     finally {
+        if ($null -ne $proc) { $proc.Dispose() }
         Remove-Item -LiteralPath $outFile -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $errFile -ErrorAction SilentlyContinue
     }
@@ -6926,11 +6966,16 @@ function Get-NativeMcpCommandTimeoutSeconds() {
     return (Resolve-TimeoutSecondsFromEnv "SKILLS_MCP_NATIVE_TIMEOUT_SECONDS" 30 1 600)
 }
 
-function Invoke-ExternalCommandCapture([string]$command, [string[]]$args = @(), [int]$timeoutSeconds = 120) {
-    $result = Invoke-ExternalCommandWithTimeout $command @($args) $null $timeoutSeconds
+function Invoke-ExternalCommandCapture(
+    [string]$command,
+    [Alias("args")]
+    [string[]]$CommandArgs = @(),
+    [int]$timeoutSeconds = 120
+) {
+    $result = Invoke-ExternalCommandWithTimeout $command @($CommandArgs) $null $timeoutSeconds
     return [pscustomobject]@{
         command = $command
-        args = @($args)
+        args = @($CommandArgs)
         exit_code = [int]$result.exit_code
         timed_out = [bool]$result.timed_out
         error = [string]$result.error

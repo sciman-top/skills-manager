@@ -50,6 +50,27 @@ function Get-DoctorGitVersion([switch]$NoHostLog) {
     return (Invoke-GitCapture @("version"))
 }
 
+function Get-DoctorOsDescription {
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem
+        if ($os -and -not [string]::IsNullOrWhiteSpace([string]$os.Caption)) {
+            return ("{0} {1}" -f [string]$os.Caption, [string]$os.OSArchitecture).Trim()
+        }
+    }
+    catch {}
+
+    try {
+        $description = [System.Runtime.InteropServices.RuntimeInformation]::OSDescription
+        $architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+        if (-not [string]::IsNullOrWhiteSpace([string]$description)) {
+            return ("{0} {1}" -f [string]$description, [string]$architecture).Trim()
+        }
+    }
+    catch {}
+
+    return $null
+}
+
 function Parse-DoctorArgs([string[]]$tokens) {
     $opts = [ordered]@{
         json = $false
@@ -305,9 +326,10 @@ function Invoke-Doctor([string[]]$tokens = @()) {
 
     # 1. System Checks
     try {
-        $os = Get-CimInstance Win32_OperatingSystem
-        $report.checks.os = ("{0} {1}" -f $os.Caption, $os.OSArchitecture)
-        if (-not $opts.json) { Write-Host ("OS: {0} {1}" -f $os.Caption, $os.OSArchitecture) }
+        $osText = Get-DoctorOsDescription
+        if ([string]::IsNullOrWhiteSpace([string]$osText)) { throw "OS detection returned empty" }
+        $report.checks.os = $osText
+        if (-not $opts.json) { Write-Host ("OS: {0}" -f $osText) }
     }
     catch {
         $report.checks.os = "unknown"
