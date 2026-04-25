@@ -425,6 +425,29 @@ function Get-FileContentHash([string]$path) {
     }
 }
 function Need($cond, [string]$msg) { if (-not $cond) { throw $msg } }
+function Resolve-PowerShellExecutable {
+    if (-not [string]::IsNullOrWhiteSpace($env:CODEX_ALLOW_WINDOWS_POWERSHELL)) {
+        $legacy = Get-Command powershell -ErrorAction SilentlyContinue
+        if ($legacy) { return [string]$legacy.Source }
+    }
+
+    $programFilesPwsh = if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
+        Join-Path $env:ProgramFiles "PowerShell\7\pwsh.exe"
+    } else {
+        $null
+    }
+    if (-not [string]::IsNullOrWhiteSpace($programFilesPwsh) -and (Test-Path -LiteralPath $programFilesPwsh)) {
+        return $programFilesPwsh
+    }
+
+    $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+    if ($pwsh) { return [string]$pwsh.Source }
+
+    $legacyFallback = Get-Command powershell -ErrorAction SilentlyContinue
+    if ($legacyFallback) { return [string]$legacyFallback.Source }
+
+    throw "未找到 PowerShell 可执行文件。请优先安装 PowerShell 7 (pwsh)。"
+}
 function Read-HostSafe([string]$prompt) {
     $value = Read-Host $prompt
     if ($null -eq $value) { return "" }
@@ -545,7 +568,7 @@ function Invoke-PrebuildCheck([switch]$Strict) {
     $args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $scriptPath)
     if ($Strict) { $args += "-Strict" }
     Log ("执行预检脚本：{0}" -f $scriptPath)
-    & powershell @args
+    & (Resolve-PowerShellExecutable) @args
     if ($LASTEXITCODE -ne 0) {
         throw ("预检失败（exit={0}）：请先修复后再执行构建/更新。" -f $LASTEXITCODE)
     }

@@ -30,7 +30,7 @@ Describe "Build script" {
             [System.IO.File]::WriteAllText($filePath, $content, $utf8NoBom)
         }
 
-        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $workspace "build.ps1") | Out-Null
+        & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $workspace "build.ps1") | Out-Null
 
         $actual = [System.IO.File]::ReadAllText((Join-Path $workspace "skills.ps1"))
         $expected = (($files | ForEach-Object { $contents[$_] + "`r`n" }) -join "")

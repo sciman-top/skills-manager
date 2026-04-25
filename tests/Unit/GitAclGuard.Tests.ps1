@@ -28,7 +28,7 @@ Describe "git-acl-guard script" {
         icacls $denyFile /deny "${principal}:(R)" | Out-Null
 
         try {
-            $output = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath -GitDir $gitDir -JsonReport $reportPath 2>&1)
+            $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -GitDir $gitDir -JsonReport $reportPath 2>&1)
             $exitCode = $LASTEXITCODE
             $exitCode | Should Be 3
 
@@ -60,7 +60,7 @@ Describe "git-acl-guard script" {
         icacls $denyFile /deny "${principal}:(R)" | Out-Null
 
         try {
-            $output = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath -GitDir $gitDir -LightFix -WhatIf -JsonReport $reportPath 2>&1)
+            $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -GitDir $gitDir -LightFix -WhatIf -JsonReport $reportPath 2>&1)
             $exitCode = $LASTEXITCODE
             $exitCode | Should Be 0
 

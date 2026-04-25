@@ -10,29 +10,29 @@ pool:
 steps:
 - checkout: self
 
-- powershell: |
-    powershell -File scripts/quality/check-repo-hygiene.ps1
+- pwsh: |
+    pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/check-repo-hygiene.ps1
   displayName: Check repository hygiene
 
-- powershell: |
+- pwsh: |
     if (Test-Path "scripts/quality/run-local-quality-gates.ps1") {
-      powershell -File scripts/quality/run-local-quality-gates.ps1 -Profile quick
+      pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile quick
     } else {
       Write-Host "No project quality script found, skip."
     }
   displayName: Run local quality gates
 
-- powershell: |
+- pwsh: |
     if (Test-Path "scripts/quality/run-supply-chain-checks.ps1") {
-      powershell -File scripts/quality/run-supply-chain-checks.ps1 -Profile quick
+      pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-supply-chain-checks.ps1 -Profile quick
     } else {
       Write-Host "No supply-chain script found, skip."
     }
   displayName: Run supply-chain checks
 
-- powershell: |
+- pwsh: |
     if (Test-Path "scripts/quality/check-waivers.ps1") {
-      powershell -File scripts/quality/check-waivers.ps1
+      pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/check-waivers.ps1
     } else {
       Write-Host "No waiver-check script found, skip."
     }

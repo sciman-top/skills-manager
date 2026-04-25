@@ -28,7 +28,7 @@ Describe "Generated sync script" {
             Pop-Location
         }
 
-        $output = @(& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $workspace "tests\check-generated-sync.ps1") -AllowDirtyWorktree 2>&1)
+        $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $workspace "tests\check-generated-sync.ps1") -AllowDirtyWorktree 2>&1)
         $text = ($output | Out-String)
 
         $text | Should Match "已在当前工作树中刷新生成产物"
@@ -62,7 +62,7 @@ Describe "Generated sync script" {
             Pop-Location
         }
 
-        $output = @(& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $workspace "tests\check-generated-sync.ps1") 2>&1)
+        $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $workspace "tests\check-generated-sync.ps1") 2>&1)
         $text = ($output | Out-String)
 
         $text | Should Match "检测到生成产物漂移"
@@ -90,7 +90,7 @@ Describe "Generated sync script" {
             Pop-Location
         }
 
-        $output = @(& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $workspace "tests\check-generated-sync.ps1") -StrictNoGit 2>&1)
+        $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $workspace "tests\check-generated-sync.ps1") -StrictNoGit 2>&1)
         $text = ($output | Out-String)
 
         $text | Should Match "生成产物一致性校验通过"

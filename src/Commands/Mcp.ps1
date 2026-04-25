@@ -601,7 +601,7 @@ function Resolve-ExternalCommandInvocation([string]$command, [string[]]$commandA
             $ext = [System.IO.Path]::GetExtension($resolvedPath).ToLowerInvariant()
             if ($ext -eq ".ps1") {
                 return [pscustomobject]@{
-                    file = "powershell.exe"
+                    file = Resolve-PowerShellExecutable
                     args = @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $resolvedPath) + @($commandArgs)
                 }
             }

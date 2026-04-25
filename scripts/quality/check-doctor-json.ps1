@@ -66,7 +66,7 @@ function Assert-SyncMcpThreshold($report, [int]$thresholdMs, [bool]$warnOnly) {
 
 Push-Location $root
 try {
-    $output = @(& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'skills.ps1') doctor --json 2>&1)
+    $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'skills.ps1') doctor --json 2>&1)
     $exitCode = $LASTEXITCODE
     $text = (($output | ForEach-Object { [string]$_ }) -join "`n").Trim()
 

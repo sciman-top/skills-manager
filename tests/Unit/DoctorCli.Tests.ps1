@@ -148,7 +148,7 @@ Describe "Doctor CLI behavior" {
 
     It "Emits parseable JSON from the CLI entry without leading log lines" {
         $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
-        $output = @(& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot "skills.ps1") doctor --json 2>&1)
+        $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot "skills.ps1") doctor --json 2>&1)
         $LASTEXITCODE | Should Be 0
 
         $text = (($output | ForEach-Object { [string]$_ }) -join "`n").Trim()

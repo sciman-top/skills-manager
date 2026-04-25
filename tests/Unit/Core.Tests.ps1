@@ -1315,7 +1315,7 @@ sandbox = "elevated"
             (Test-IsNonInteractiveMcpError "random failure text") | Should Be $false
         }
 
-        It "Resolves PowerShell wrapper commands to powershell.exe invocation" {
+        It "Resolves PowerShell wrapper commands to pwsh-first invocation" {
             Mock Get-Command {
                 [pscustomobject]@{
                     Path = "C:\tools\demo.ps1"
@@ -1323,7 +1323,7 @@ sandbox = "elevated"
             } -ParameterFilter { $Name -eq "demo" } -Scope It
 
             $invocation = Resolve-ExternalCommandInvocation "demo" @("mcp", "list")
-            $invocation.file | Should Be "powershell.exe"
+            Split-Path -Leaf $invocation.file | Should Match "^(pwsh|powershell)(\.exe)?$"
             $invocation.args[4] | Should Be "-File"
             $invocation.args[5] | Should Be "C:\tools\demo.ps1"
             $invocation.args[6] | Should Be "mcp"

@@ -204,7 +204,7 @@ function 启用自动更新([string]$Mode = "", [string]$At = "", [string]$DayOf
     Need (Test-Path $runnerPath) ("缺少自动更新脚本：{0}" -f $runnerPath)
     Need (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue) "当前环境不支持 ScheduledTasks 模块。"
     Need (Get-Command New-ScheduledTaskAction -ErrorAction SilentlyContinue) "当前环境不支持 ScheduledTasks 模块。"
-    Need (Get-Command powershell -ErrorAction SilentlyContinue) "未找到 powershell 可执行文件。"
+    $pwsh = Resolve-PowerShellExecutable
 
     $modeNormalized = Normalize-自动更新模式 $Mode
     $atNormalized = Normalize-自动更新时间 $At
@@ -212,7 +212,6 @@ function 启用自动更新([string]$Mode = "", [string]$At = "", [string]$DayOf
 
     if (Skip-IfDryRun "启用自动更新计划任务") { return }
 
-    $pwsh = (Get-Command powershell -ErrorAction Stop).Source
     $args = ('-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $runnerPath)
     $action = New-ScheduledTaskAction -Execute $pwsh -Argument $args -WorkingDirectory $Root
     $trigger = if ($modeNormalized -eq "daily") {

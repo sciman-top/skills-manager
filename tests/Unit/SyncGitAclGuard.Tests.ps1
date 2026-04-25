@@ -23,7 +23,7 @@ Describe "sync-git-acl-guard script" {
         New-Item -ItemType Directory -Path (Join-Path $repoB ".git") -Force | Out-Null
 
         $output = @(
-            & powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
+            & pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
                 -SourceScript $sourceScript `
                 -ScanRoot $workspace 2>&1
         )
@@ -50,7 +50,7 @@ Describe "sync-git-acl-guard script" {
         New-Item -ItemType Directory -Path (Join-Path $repo ".git") -Force | Out-Null
 
         $output = @(
-            & powershell -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
+            & pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
                 -SourceScript $sourceScript `
                 -ScanRoot $workspace `
                 -WhatIf 2>&1

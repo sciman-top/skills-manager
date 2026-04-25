@@ -12,19 +12,19 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Verify generated script sync
-        shell: powershell
+        shell: pwsh
         run: .\tests\check-generated-sync.ps1 -StrictNoGit
 
       - name: Verify dependency baseline contract
-        shell: powershell
+        shell: pwsh
         run: python .\scripts\verify-dependency-baseline.py --target-repo-root . --require-target-repo-baseline
 
       - name: Verify doctor JSON contract
-        shell: powershell
+        shell: pwsh
         env:
           SKILLS_SYNC_MCP_THRESHOLD_MS: 12000
         run: .\scripts\quality\check-doctor-json.ps1
 
       - name: Run tests
-        shell: powershell
+        shell: pwsh
         run: .\tests\run.ps1
