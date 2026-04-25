@@ -247,15 +247,15 @@ function Set-ContentUtf8([string]$path, [string]$content) {
     $delayMs = 200
     for ($attempt = 0; $attempt -lt $maxAttempts; $attempt++) {
         try {
-            [System.IO.File]::WriteAllBytes($tempPath, $bytes)
             if (Test-Path -LiteralPath $path -PathType Leaf) {
+                [System.IO.File]::WriteAllBytes($tempPath, $bytes)
                 [System.IO.File]::Replace($tempPath, $path, $backupPath, $true)
                 if (Test-Path -LiteralPath $backupPath -PathType Leaf) {
                     Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
                 }
             }
             else {
-                [System.IO.File]::Move($tempPath, $path)
+                [System.IO.File]::WriteAllBytes($path, $bytes)
             }
             Clear-FileWriteBlockAttributes $path
             return
@@ -276,7 +276,17 @@ function Set-ContentUtf8([string]$path, [string]$content) {
             }
             Clear-FileWriteBlockAttributes $path
 
-            if ($attempt -ge ($maxAttempts - 1)) { throw $baseException }
+            if ($attempt -ge ($maxAttempts - 1)) {
+                # Some restricted hosts allow file writes but deny atomic replace/move.
+                try {
+                    [System.IO.File]::WriteAllBytes($path, $bytes)
+                    Clear-FileWriteBlockAttributes $path
+                    return
+                }
+                catch {
+                    throw $baseException
+                }
+            }
             Start-Sleep -Milliseconds $delayMs
         }
     }

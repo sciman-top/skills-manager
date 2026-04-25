@@ -1589,7 +1589,7 @@ Use the generated user profile JSON, installed-skills snapshot JSON, and source 
 - Which missing skills are strongly justified without binding the decision to a target repository.
 - Which missing MCP servers are strongly justified without binding the decision to a target repository.
 
-External research is intentionally performed by the outer AI agent. Search official documentation, strong community projects, best practices, https://skills.sh/, GitHub Trending, and the find-skills workflow.
+External research is intentionally performed by the outer AI agent. Search official documentation, MCP provider documentation, security/permission notes, strong community projects, best practices, https://skills.sh/, GitHub Trending, and the find-skills workflow.
 
 Primary output file (must be valid JSON, no prose):
 
@@ -1612,9 +1612,10 @@ Rules:
 - Replace every template placeholder wrapped in `<...>` or delete the example entry entirely; do not leave placeholder values in the final file.
 - Keep ``recommendation_mode`` as ``profile-only``.
 - Keep ``decision_basis.user_profile_used`` and ``decision_basis.source_strategy_used`` as boolean ``true``; keep ``decision_basis.target_scan_used`` as boolean ``false``; provide a non-empty ``decision_basis.summary``.
+- Record ``source_observations`` for researched candidates; every selected skill/MCP add/remove recommendation must have a matching observation with real sources.
 - Skill installs require ``reason_user_profile``, ``reason_target_repo``, source links, confidence, repo, skill path, ref, and mode.
 - Skill removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and the exact installed ``vendor``/``from`` pair.
-- MCP installs must include ``reason_user_profile``, ``reason_target_repo``, sources, confidence, and a valid ``server`` payload.
+- MCP installs must include ``reason_user_profile``, ``reason_target_repo``, sources, confidence, a valid ``server`` payload, and provider/security evidence when available.
 - MCP removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and ``installed.name``.
 - Skill ``install.mode`` must stay ``manual`` or ``vendor``; ``confidence`` must stay ``low``, ``medium``, or ``high``.
 - MCP ``server.transport`` must stay ``stdio``/``sse``/``http``; ``stdio`` requires ``command``; ``sse/http`` requires ``url``.
@@ -1623,10 +1624,10 @@ Rules:
 - Overlap findings are report-only; do not recommend automatic uninstall.
 - Use ``do_not_install`` for researched options that should stay out of the repo right now.
 - Prefer high-reputation sources and avoid weak duplicate skills.
-- Cover the built-in default sources and record the actual sources you used.
+- Cover the built-in default sources and record the actual sources you used; GitHub Trending is discovery evidence only, never sufficient by itself.
 - Keep recommendations machine-readable JSON matching the template.
 - The template already includes placeholder example items. Replace placeholder values or delete the example entries you do not need; do not invent a different schema.
-- Cite only sources you actually inspected during this run. Do not fabricate source links or source conclusions.
+- Cite only sources you actually inspected during this run. Do not fabricate source links, source observations, or source conclusions.
 - If evidence is insufficient, leave the category empty and explain briefly instead of forcing low-quality recommendations.
 - After dry-run, show numbered skill add/remove and MCP add/remove lists with one-line reasons per item (``reason_user_profile`` + ``reason_target_repo``).
 - If a list is empty, explicitly output "no <category> recommendations" with a brief reason.
@@ -1684,7 +1685,7 @@ Use the generated user profile JSON, repo scan JSON, and installed-skills snapsh
 - Which missing skills are strongly justified for these targets.
 - Which missing MCP servers are strongly justified for these targets.
 
-External research is intentionally performed by the outer AI agent. Search official documentation, strong community projects, best practices, https://skills.sh/, GitHub Trending, and the find-skills workflow.
+External research is intentionally performed by the outer AI agent. Search official documentation, MCP provider documentation, security/permission notes, strong community projects, best practices, https://skills.sh/, GitHub Trending, and the find-skills workflow.
 
 Primary output file (must be valid JSON, no prose):
 
@@ -1706,9 +1707,10 @@ Rules:
 - Network research is authorized within this audit workflow, but installation still requires --apply --yes.
 - Replace every template placeholder wrapped in `<...>` or delete the example entry entirely; do not leave placeholder values in the final file.
 - Keep ``decision_basis.user_profile_used``, ``decision_basis.target_scan_used``, and ``decision_basis.source_strategy_used`` as boolean ``true``, and provide a non-empty ``decision_basis.summary``.
+- Record ``source_observations`` for researched candidates; every selected skill/MCP add/remove recommendation must have a matching observation with real sources.
 - Skill installs require ``reason_user_profile``, ``reason_target_repo``, source links, confidence, repo, skill path, ref, and mode.
 - Skill removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and the exact installed ``vendor``/``from`` pair.
-- MCP installs must include ``reason_user_profile``, ``reason_target_repo``, sources, confidence, and a valid ``server`` payload.
+- MCP installs must include ``reason_user_profile``, ``reason_target_repo``, sources, confidence, a valid ``server`` payload, and provider/security evidence when available.
 - MCP removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and ``installed.name``.
 - Skill ``install.mode`` must stay ``manual`` or ``vendor``; ``confidence`` must stay ``low``, ``medium``, or ``high``.
 - MCP ``server.transport`` must stay ``stdio``/``sse``/``http``; ``stdio`` requires ``command``; ``sse/http`` requires ``url``.
@@ -1717,10 +1719,10 @@ Rules:
 - Overlap findings are report-only; do not recommend automatic uninstall.
 - Use ``do_not_install`` for researched options that should stay out of the repo right now.
 - Prefer high-reputation sources and avoid weak duplicate skills.
-- Cover the built-in default sources and record the actual sources you used.
+- Cover the built-in default sources and record the actual sources you used; GitHub Trending is discovery evidence only, never sufficient by itself.
 - Keep recommendations machine-readable JSON matching the template.
 - The template already includes placeholder example items. Replace placeholder values or delete the example entries you do not need; do not invent a different schema.
-- Cite only sources you actually inspected during this run. Do not fabricate repository facts, source links, or source conclusions.
+- Cite only sources you actually inspected during this run. Do not fabricate repository facts, source links, source observations, or source conclusions.
 - If evidence is insufficient, leave the category empty and explain briefly instead of forcing low-quality recommendations.
 - After dry-run, show numbered skill add/remove and MCP add/remove lists with one-line reasons per item (``reason_user_profile`` + ``reason_target_repo``).
 - If a list is empty, explicitly output "no <category> recommendations" with a brief reason.
@@ -1817,6 +1819,7 @@ $inputReadStep
 $basisCheckStep
    - 不保留模板占位符 ``<...>`` 或未替换的示例值
    - 每条技能/MCP 新增或卸载建议都包含 ``reason_user_profile`` + ``reason_target_repo`` + 至少 1 个真实 ``sources``
+   - 每条技能/MCP 新增或卸载建议都有匹配的 ``source_observations`` 记录，且 observation 也包含真实 ``sources``
    - 每条技能/MCP 新增或卸载建议都包含非空 ``keyword_trace.user_profile`` / ``keyword_trace.target_repo_or_context`` / ``keyword_trace.installed_state``
    - 技能新增建议的 ``install.mode`` 只能是 ``manual`` 或 ``vendor``，``confidence`` 只能是 ``low`` / ``medium`` / ``high``
    - MCP 新增建议必须包含合法 ``server``（``transport``=``stdio``/``sse``/``http``；``stdio`` 要有 ``command``，``sse/http`` 要有 ``url``），且 ``name`` 必须等于 ``server.name``
@@ -1831,6 +1834,7 @@ $basisCheckStep
 
 - ``recommendations.json`` 必须与模板 schema 一致
 - 技能与 MCP 的新增/卸载建议都必须保留双依据和来源，且每项理由要简短可读
+- ``source_observations`` 必须记录本轮调研过的候选项；被选中的新增/卸载项必须能在其中找到对应 candidate_type/name/decision
 - 若 ``source-strategy.decision_quality_policy`` 开启，``keyword_trace`` 必须满足最小命中与关键词归属校验
 - 若任一建议缺少 ``reason_user_profile`` 或 ``reason_target_repo``，视为未完成，不得进入下一步
 - 若证据不足，允许不推荐；不得“猜测式”新增/卸载

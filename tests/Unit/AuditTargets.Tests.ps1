@@ -994,6 +994,8 @@ jobs:
             $template.new_skills[0].install.repo | Should Be "<owner/repo-or-local-path>"
             $template.removal_candidates[0].installed.vendor | Should Be "<installed-vendor>"
             $template.do_not_install[0].name | Should Be "<skill-not-recommended>"
+            $template.source_observations[0].candidate_type | Should Be "skill"
+            $template.source_observations[1].source_categories[0] | Should Be "mcp-provider-docs"
             $template.mcp_new_servers[0].server.transport | Should Be "stdio"
             $template.mcp_removal_candidates[0].installed.name | Should Be "<installed-mcp-name>"
         }
@@ -1013,10 +1015,13 @@ jobs:
             $strategy.mode | Should Be "profile-only"
             $strategy.query | Should Be "powershell testing"
             @($strategy.sources | Where-Object { $_.id -eq "official-docs" }).Count | Should Be 1
+            @($strategy.sources | Where-Object { $_.id -eq "mcp-provider-docs" }).Count | Should Be 1
             @($strategy.sources | Where-Object { $_.id -eq "skills-sh" }).Count | Should Be 1
+            @($strategy.sources | Where-Object { $_.id -eq "security-and-permission-notes" }).Count | Should Be 1
             @($strategy.sources | Where-Object { $_.id -eq "find-skills" }).Count | Should Be 1
             $strategy.evidence_policy.min_unique_sources_for_changes | Should Be 2
             $strategy.evidence_policy.require_http_source_for_changes | Should Be $true
+            $strategy.evidence_policy.require_source_observations_for_changes | Should Be $true
             $strategy.decision_quality_policy.require_keyword_trace_for_changes | Should Be $true
             $strategy.decision_quality_policy.min_user_profile_keywords_per_change | Should Be 1
             $strategy.decision_quality_policy.min_target_repo_keywords_per_change | Should Be 1
@@ -1138,6 +1143,18 @@ jobs:
 
             $rec.recommendation_mode | Should Be "profile-only"
             $rec.decision_basis.target_scan_used | Should Be $false
+        }
+
+        It "Normalizes source observations for audited candidates" {
+            $path = Join-Path $TestDrive "recommendations-source-observations.json"
+            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r1","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"source_observations":[{"candidate_type":"Skill","name":"a","decision":"install","rationale":"matches user and repo","sources":[" https://example.com/a ","https://example.com/a"],"source_categories":["official-docs","skills.sh"]}],"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
+
+            $rec = Load-AuditRecommendations $path
+
+            $rec.source_observations[0].candidate_type | Should Be "skill"
+            $rec.source_observations[0].decision | Should Be "add"
+            @($rec.source_observations[0].sources).Count | Should Be 1
+            $rec.source_observations[0].sources[0] | Should Be "https://example.com/a"
         }
 
         It "Rejects profile-only recommendations when target_scan_used is true" {
@@ -1273,6 +1290,35 @@ jobs:
 
                 $report = Get-ContentUtf8 (Get-AuditApplyReportPath $path) | ConvertFrom-Json
                 $report.error_code | Should Be "insufficient_source_coverage"
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
+        }
+
+        It "Blocks dry-run when source observation policy is not satisfied" {
+            $oldRoot = $script:Root
+            try {
+                $root = Join-Path $TestDrive "ws-source-observation-block"
+                New-Item -ItemType Directory -Path $root -Force | Out-Null
+                $script:Root = $root
+                $path = Join-Path $root "recommendations.json"
+                Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-source-observation","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"source_observations":[],"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"t","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["https://example.com/a"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+                Set-ContentUtf8 (Join-Path $root "source-strategy.json") '{"schema_version":1,"mode":"target-repo","query":"","sources":[{"id":"official-docs"}],"evidence_policy":{"min_unique_sources_for_changes":1,"require_http_source_for_changes":true,"require_source_observations_for_changes":true}}'
+
+                $thrown = $false
+                try {
+                    Invoke-AuditRecommendationsApply -RecommendationsPath $path -DryRunAck "我知道未落盘" | Out-Null
+                }
+                catch {
+                    $thrown = $true
+                    $_.Exception.Message | Should Match "source_observations"
+                }
+                $thrown | Should Be $true
+
+                $report = Get-ContentUtf8 (Get-AuditApplyReportPath $path) | ConvertFrom-Json
+                $report.error_code | Should Be "insufficient_source_coverage"
+                $report.source_coverage.items_with_source_observation | Should Be 0
             }
             finally {
                 $script:Root = $oldRoot

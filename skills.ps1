@@ -265,15 +265,15 @@ function Set-ContentUtf8([string]$path, [string]$content) {
     $delayMs = 200
     for ($attempt = 0; $attempt -lt $maxAttempts; $attempt++) {
         try {
-            [System.IO.File]::WriteAllBytes($tempPath, $bytes)
             if (Test-Path -LiteralPath $path -PathType Leaf) {
+                [System.IO.File]::WriteAllBytes($tempPath, $bytes)
                 [System.IO.File]::Replace($tempPath, $path, $backupPath, $true)
                 if (Test-Path -LiteralPath $backupPath -PathType Leaf) {
                     Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
                 }
             }
             else {
-                [System.IO.File]::Move($tempPath, $path)
+                [System.IO.File]::WriteAllBytes($path, $bytes)
             }
             Clear-FileWriteBlockAttributes $path
             return
@@ -294,7 +294,17 @@ function Set-ContentUtf8([string]$path, [string]$content) {
             }
             Clear-FileWriteBlockAttributes $path
 
-            if ($attempt -ge ($maxAttempts - 1)) { throw $baseException }
+            if ($attempt -ge ($maxAttempts - 1)) {
+                # Some restricted hosts allow file writes but deny atomic replace/move.
+                try {
+                    [System.IO.File]::WriteAllBytes($path, $bytes)
+                    Clear-FileWriteBlockAttributes $path
+                    return
+                }
+                catch {
+                    throw $baseException
+                }
+            }
             Start-Sleep -Milliseconds $delayMs
         }
     }
@@ -9631,7 +9641,7 @@ Use the generated user profile JSON, installed-skills snapshot JSON, and source 
 - Which missing skills are strongly justified without binding the decision to a target repository.
 - Which missing MCP servers are strongly justified without binding the decision to a target repository.
 
-External research is intentionally performed by the outer AI agent. Search official documentation, strong community projects, best practices, https://skills.sh/, GitHub Trending, and the find-skills workflow.
+External research is intentionally performed by the outer AI agent. Search official documentation, MCP provider documentation, security/permission notes, strong community projects, best practices, https://skills.sh/, GitHub Trending, and the find-skills workflow.
 
 Primary output file (must be valid JSON, no prose):
 
@@ -9654,9 +9664,10 @@ Rules:
 - Replace every template placeholder wrapped in `<...>` or delete the example entry entirely; do not leave placeholder values in the final file.
 - Keep ``recommendation_mode`` as ``profile-only``.
 - Keep ``decision_basis.user_profile_used`` and ``decision_basis.source_strategy_used`` as boolean ``true``; keep ``decision_basis.target_scan_used`` as boolean ``false``; provide a non-empty ``decision_basis.summary``.
+- Record ``source_observations`` for researched candidates; every selected skill/MCP add/remove recommendation must have a matching observation with real sources.
 - Skill installs require ``reason_user_profile``, ``reason_target_repo``, source links, confidence, repo, skill path, ref, and mode.
 - Skill removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and the exact installed ``vendor``/``from`` pair.
-- MCP installs must include ``reason_user_profile``, ``reason_target_repo``, sources, confidence, and a valid ``server`` payload.
+- MCP installs must include ``reason_user_profile``, ``reason_target_repo``, sources, confidence, a valid ``server`` payload, and provider/security evidence when available.
 - MCP removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and ``installed.name``.
 - Skill ``install.mode`` must stay ``manual`` or ``vendor``; ``confidence`` must stay ``low``, ``medium``, or ``high``.
 - MCP ``server.transport`` must stay ``stdio``/``sse``/``http``; ``stdio`` requires ``command``; ``sse/http`` requires ``url``.
@@ -9665,10 +9676,10 @@ Rules:
 - Overlap findings are report-only; do not recommend automatic uninstall.
 - Use ``do_not_install`` for researched options that should stay out of the repo right now.
 - Prefer high-reputation sources and avoid weak duplicate skills.
-- Cover the built-in default sources and record the actual sources you used.
+- Cover the built-in default sources and record the actual sources you used; GitHub Trending is discovery evidence only, never sufficient by itself.
 - Keep recommendations machine-readable JSON matching the template.
 - The template already includes placeholder example items. Replace placeholder values or delete the example entries you do not need; do not invent a different schema.
-- Cite only sources you actually inspected during this run. Do not fabricate source links or source conclusions.
+- Cite only sources you actually inspected during this run. Do not fabricate source links, source observations, or source conclusions.
 - If evidence is insufficient, leave the category empty and explain briefly instead of forcing low-quality recommendations.
 - After dry-run, show numbered skill add/remove and MCP add/remove lists with one-line reasons per item (``reason_user_profile`` + ``reason_target_repo``).
 - If a list is empty, explicitly output "no <category> recommendations" with a brief reason.
@@ -9726,7 +9737,7 @@ Use the generated user profile JSON, repo scan JSON, and installed-skills snapsh
 - Which missing skills are strongly justified for these targets.
 - Which missing MCP servers are strongly justified for these targets.
 
-External research is intentionally performed by the outer AI agent. Search official documentation, strong community projects, best practices, https://skills.sh/, GitHub Trending, and the find-skills workflow.
+External research is intentionally performed by the outer AI agent. Search official documentation, MCP provider documentation, security/permission notes, strong community projects, best practices, https://skills.sh/, GitHub Trending, and the find-skills workflow.
 
 Primary output file (must be valid JSON, no prose):
 
@@ -9748,9 +9759,10 @@ Rules:
 - Network research is authorized within this audit workflow, but installation still requires --apply --yes.
 - Replace every template placeholder wrapped in `<...>` or delete the example entry entirely; do not leave placeholder values in the final file.
 - Keep ``decision_basis.user_profile_used``, ``decision_basis.target_scan_used``, and ``decision_basis.source_strategy_used`` as boolean ``true``, and provide a non-empty ``decision_basis.summary``.
+- Record ``source_observations`` for researched candidates; every selected skill/MCP add/remove recommendation must have a matching observation with real sources.
 - Skill installs require ``reason_user_profile``, ``reason_target_repo``, source links, confidence, repo, skill path, ref, and mode.
 - Skill removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and the exact installed ``vendor``/``from`` pair.
-- MCP installs must include ``reason_user_profile``, ``reason_target_repo``, sources, confidence, and a valid ``server`` payload.
+- MCP installs must include ``reason_user_profile``, ``reason_target_repo``, sources, confidence, a valid ``server`` payload, and provider/security evidence when available.
 - MCP removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and ``installed.name``.
 - Skill ``install.mode`` must stay ``manual`` or ``vendor``; ``confidence`` must stay ``low``, ``medium``, or ``high``.
 - MCP ``server.transport`` must stay ``stdio``/``sse``/``http``; ``stdio`` requires ``command``; ``sse/http`` requires ``url``.
@@ -9759,10 +9771,10 @@ Rules:
 - Overlap findings are report-only; do not recommend automatic uninstall.
 - Use ``do_not_install`` for researched options that should stay out of the repo right now.
 - Prefer high-reputation sources and avoid weak duplicate skills.
-- Cover the built-in default sources and record the actual sources you used.
+- Cover the built-in default sources and record the actual sources you used; GitHub Trending is discovery evidence only, never sufficient by itself.
 - Keep recommendations machine-readable JSON matching the template.
 - The template already includes placeholder example items. Replace placeholder values or delete the example entries you do not need; do not invent a different schema.
-- Cite only sources you actually inspected during this run. Do not fabricate repository facts, source links, or source conclusions.
+- Cite only sources you actually inspected during this run. Do not fabricate repository facts, source links, source observations, or source conclusions.
 - If evidence is insufficient, leave the category empty and explain briefly instead of forcing low-quality recommendations.
 - After dry-run, show numbered skill add/remove and MCP add/remove lists with one-line reasons per item (``reason_user_profile`` + ``reason_target_repo``).
 - If a list is empty, explicitly output "no <category> recommendations" with a brief reason.
@@ -9859,6 +9871,7 @@ $inputReadStep
 $basisCheckStep
    - 不保留模板占位符 ``<...>`` 或未替换的示例值
    - 每条技能/MCP 新增或卸载建议都包含 ``reason_user_profile`` + ``reason_target_repo`` + 至少 1 个真实 ``sources``
+   - 每条技能/MCP 新增或卸载建议都有匹配的 ``source_observations`` 记录，且 observation 也包含真实 ``sources``
    - 每条技能/MCP 新增或卸载建议都包含非空 ``keyword_trace.user_profile`` / ``keyword_trace.target_repo_or_context`` / ``keyword_trace.installed_state``
    - 技能新增建议的 ``install.mode`` 只能是 ``manual`` 或 ``vendor``，``confidence`` 只能是 ``low`` / ``medium`` / ``high``
    - MCP 新增建议必须包含合法 ``server``（``transport``=``stdio``/``sse``/``http``；``stdio`` 要有 ``command``，``sse/http`` 要有 ``url``），且 ``name`` 必须等于 ``server.name``
@@ -9873,6 +9886,7 @@ $basisCheckStep
 
 - ``recommendations.json`` 必须与模板 schema 一致
 - 技能与 MCP 的新增/卸载建议都必须保留双依据和来源，且每项理由要简短可读
+- ``source_observations`` 必须记录本轮调研过的候选项；被选中的新增/卸载项必须能在其中找到对应 candidate_type/name/decision
 - 若 ``source-strategy.decision_quality_policy`` 开启，``keyword_trace`` 必须满足最小命中与关键词归属校验
 - 若任一建议缺少 ``reason_user_profile`` 或 ``reason_target_repo``，视为未完成，不得进入下一步
 - 若证据不足，允许不推荐；不得“猜测式”新增/卸载
@@ -10031,6 +10045,11 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
                     use_for = "Verify current APIs, platform rules, support status, and recommended implementation patterns."
                 },
                 [ordered]@{
+                    id = "mcp-provider-docs"
+                    name = "MCP provider documentation"
+                    use_for = "Verify MCP server availability, transport, auth model, required args, permissions, and support status before recommending install or removal."
+                },
+                [ordered]@{
                     id = "skills-sh"
                     name = "skills.sh"
                     use_for = "Discover skill-packaged implementations and compare skill metadata quality."
@@ -10052,6 +10071,11 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
                     use_for = "Compare proposed skills against mature workflow and operational guidance."
                 },
                 [ordered]@{
+                    id = "security-and-permission-notes"
+                    name = "Security and permission notes"
+                    use_for = "Check auth, token scope, data access, network exposure, and rollback concerns, especially for MCP servers."
+                },
+                [ordered]@{
                     id = "find-skills"
                     name = "Installed find-skills workflow"
                     use_for = "Use the local skill discovery workflow as an input source when available."
@@ -10067,6 +10091,7 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
             evidence_policy = [ordered]@{
                 min_unique_sources_for_changes = 2
                 require_http_source_for_changes = $true
+                require_source_observations_for_changes = $true
             }
             decision_quality_policy = [ordered]@{
                 require_keyword_trace_for_changes = $true
@@ -10078,7 +10103,9 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
             required_evidence = @(
                 "Every add/remove recommendation must cite sources inspected in this run.",
                 "Do not fabricate repository facts, source links, or source conclusions.",
+                "Record source_observations for researched candidates so selected, rejected, and removed items remain auditable.",
                 "Every change recommendation should include keyword_trace (user_profile / target_repo_or_context / installed_state) and keep these values aligned with decision-insights.json.",
+                "For MCP recommendations, prefer provider documentation and security/permission notes over popularity signals.",
                 "For profile-only mode, explain reason_target_repo as installed-skill inventory / profile-only context, not as a target repository claim."
             )
         })
@@ -10203,6 +10230,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         @(
             "Replace placeholder values wrapped in <> before using this file.",
             "Delete example entries that are not needed, but keep the schema shape unchanged.",
+            "Record source_observations for every researched candidate; selected add/remove candidates must have matching observations.",
             "For every add/remove skill or MCP recommendation, keep keyword_trace aligned with decision-insights.json.",
             "This is profile-only skill discovery: reason_target_repo means installed-skill inventory / profile-only context, not target repository facts."
         )
@@ -10211,6 +10239,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         @(
             "Replace placeholder values wrapped in <> before using this file.",
             "Delete example entries that are not needed, but keep the schema shape unchanged.",
+            "Record source_observations for every researched candidate; selected add/remove candidates must have matching observations.",
             "For every add/remove skill or MCP recommendation, keep keyword_trace aligned with decision-insights.json.",
             "All install/remove decisions must cite both user-profile and target-repo reasons."
         )
@@ -10239,6 +10268,24 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
             summary = $basisSummary
         }
         empty_recommendation_reasons = @("insufficient_reliable_evidence")
+        source_observations = @(
+            [ordered]@{
+                candidate_type = "skill"
+                name = "<candidate-name>"
+                decision = "add"
+                rationale = "<why this candidate was selected, rejected, kept, or removed>"
+                sources = @("<source-url-1>")
+                source_categories = @("official-docs", "skills.sh")
+            },
+            [ordered]@{
+                candidate_type = "mcp"
+                name = "<mcp-candidate-name>"
+                decision = "do_not_install"
+                rationale = "<why this MCP should not be installed now, including auth, permission, or maintenance concerns>"
+                sources = @("<source-url-1>")
+                source_categories = @("mcp-provider-docs", "security-and-permission-notes")
+            }
+        )
         new_skills = @(
             [ordered]@{
                 name = "<new-skill-name>"
@@ -10655,6 +10702,60 @@ function Get-AuditRecommendationChangeItemCount($rec) {
     return @($rec.new_skills).Count + @($rec.removal_candidates).Count + @($rec.mcp_new_servers).Count + @($rec.mcp_removal_candidates).Count
 }
 
+function Normalize-AuditSourceObservationDecision([string]$decision) {
+    $text = ([string]$decision).Trim().ToLowerInvariant()
+    switch ($text) {
+        "install" { return "add" }
+        "selected" { return "add" }
+        "uninstall" { return "remove" }
+        "removed" { return "remove" }
+        "skip" { return "do_not_install" }
+        "reject" { return "do_not_install" }
+        "rejected" { return "do_not_install" }
+        "duplicate" { return "overlap" }
+        default { return $text }
+    }
+}
+
+function Assert-AuditSourceObservation($item) {
+    Need ($null -ne $item) "source_observations 项不能为空"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.name)) "source_observations 缺少 name"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.candidate_type)) ("source_observations 缺少 candidate_type：{0}" -f [string]$item.name)
+    $candidateType = ([string]$item.candidate_type).Trim().ToLowerInvariant()
+    Need ($candidateType -eq "skill" -or $candidateType -eq "mcp") ("source_observations.candidate_type 仅支持 skill/mcp：{0}" -f $candidateType)
+    $item.candidate_type = $candidateType
+
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.decision)) ("source_observations 缺少 decision：{0}" -f [string]$item.name)
+    $decision = Normalize-AuditSourceObservationDecision ([string]$item.decision)
+    Need (@("add", "remove", "keep", "do_not_install", "overlap", "ignore") -contains $decision) ("source_observations.decision 不支持：{0}" -f [string]$item.decision)
+    $item.decision = $decision
+
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.rationale)) ("source_observations 缺少 rationale：{0}" -f [string]$item.name)
+    Normalize-AuditSources $item "source_observations"
+    if ($item.PSObject.Properties.Match("source_categories").Count -eq 0 -or $null -eq $item.source_categories) {
+        $item | Add-Member -NotePropertyName source_categories -NotePropertyValue @() -Force
+    }
+    else {
+        $item.source_categories = @(Normalize-AuditStringArray $item.source_categories)
+    }
+}
+
+function Test-AuditHasSourceObservationForChange($rec, [string]$candidateType, [string]$decision, [string]$name) {
+    $normalizedType = ([string]$candidateType).Trim().ToLowerInvariant()
+    $normalizedDecision = Normalize-AuditSourceObservationDecision $decision
+    $normalizedName = ([string]$name).Trim()
+    foreach ($observation in @($rec.source_observations)) {
+        if ($null -eq $observation) { continue }
+        $obsType = ([string]$observation.candidate_type).Trim().ToLowerInvariant()
+        $obsDecision = Normalize-AuditSourceObservationDecision ([string]$observation.decision)
+        $obsName = ([string]$observation.name).Trim()
+        if ($obsType -eq $normalizedType -and $obsDecision -eq $normalizedDecision -and $obsName -eq $normalizedName -and @($observation.sources).Count -gt 0) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Get-AuditRecommendationSourceCoverage($rec) {
     $allSources = New-Object System.Collections.Generic.List[string]
     foreach ($collection in @($rec.new_skills, $rec.removal_candidates, $rec.mcp_new_servers, $rec.mcp_removal_candidates)) {
@@ -10666,11 +10767,33 @@ function Get-AuditRecommendationSourceCoverage($rec) {
     }
     $uniqueSources = @(Normalize-AuditStringArray $allSources)
     $httpSources = @($uniqueSources | Where-Object { [regex]::IsMatch([string]$_, "^(?i)https?://") })
+    $missingObservation = New-Object System.Collections.Generic.List[string]
+    $itemsWithObservation = 0
+    $changeGroups = @(
+        @{ type = "skill"; decision = "add"; items = @($rec.new_skills) },
+        @{ type = "skill"; decision = "remove"; items = @($rec.removal_candidates) },
+        @{ type = "mcp"; decision = "add"; items = @($rec.mcp_new_servers) },
+        @{ type = "mcp"; decision = "remove"; items = @($rec.mcp_removal_candidates) }
+    )
+    foreach ($group in @($changeGroups)) {
+        foreach ($item in @($group.items)) {
+            $itemName = [string]$item.name
+            if (Test-AuditHasSourceObservationForChange $rec ([string]$group.type) ([string]$group.decision) $itemName) {
+                $itemsWithObservation++
+            }
+            else {
+                $missingObservation.Add(("{0}:{1}:{2}" -f [string]$group.type, [string]$group.decision, $itemName)) | Out-Null
+            }
+        }
+    }
     return [pscustomobject]([ordered]@{
         total_change_items = Get-AuditRecommendationChangeItemCount $rec
         unique_sources = @($uniqueSources)
         unique_source_count = @($uniqueSources).Count
         http_source_count = @($httpSources).Count
+        source_observation_count = @($rec.source_observations).Count
+        items_with_source_observation = $itemsWithObservation
+        change_items_missing_source_observation = @($missingObservation)
     })
 }
 
@@ -10847,6 +10970,11 @@ function Load-AuditRecommendations([string]$path) {
     Ensure-AuditArrayProperty $rec "mcp_new_servers"
     Ensure-AuditArrayProperty $rec "mcp_removal_candidates"
     Ensure-AuditArrayProperty $rec "empty_recommendation_reasons"
+    Ensure-AuditArrayProperty $rec "source_observations"
+
+    foreach ($item in @($rec.source_observations)) {
+        Assert-AuditSourceObservation $item
+    }
 
     $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($item in @($rec.new_skills)) {
@@ -10983,6 +11111,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
         run_id = [string]$recommendations.run_id
         target = [string]$recommendations.target
         decision_basis = $recommendations.decision_basis
+        source_observations = @($recommendations.source_observations)
         items = @($items)
         overlap_findings = @($recommendations.overlap_findings)
         removal_candidates = @($removals)
@@ -11638,6 +11767,7 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
         target = [string]$plan.target
         decision_basis_summary = [string]$plan.decision_basis.summary
         empty_recommendation_reasons = if ($plan.PSObject.Properties.Match("empty_recommendation_reasons").Count -gt 0) { @($plan.empty_recommendation_reasons) } else { @() }
+        source_observations = if ($plan.PSObject.Properties.Match("source_observations").Count -gt 0) { @($plan.source_observations) } else { @() }
         counts = [ordered]@{
             add = @($add).Count
             remove = @($remove).Count
@@ -11658,6 +11788,7 @@ function Get-AuditSourceEvidencePolicy([string]$recommendationDir) {
         source_strategy_path = $path
         min_unique_sources_for_changes = 0
         require_http_source_for_changes = $false
+        require_source_observations_for_changes = $false
     }
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         return [pscustomobject]$policy
@@ -11680,9 +11811,14 @@ function Get-AuditSourceEvidencePolicy([string]$recommendationDir) {
         if ($e.PSObject.Properties.Match("require_http_source_for_changes").Count -gt 0) {
             $needHttp = [bool]$e.require_http_source_for_changes
         }
-        $policy.enabled = ($min -gt 0 -or $needHttp)
+        $needObservations = $false
+        if ($e.PSObject.Properties.Match("require_source_observations_for_changes").Count -gt 0) {
+            $needObservations = [bool]$e.require_source_observations_for_changes
+        }
+        $policy.enabled = ($min -gt 0 -or $needHttp -or $needObservations)
         $policy.min_unique_sources_for_changes = if ($min -lt 0) { 0 } else { $min }
         $policy.require_http_source_for_changes = $needHttp
+        $policy.require_source_observations_for_changes = $needObservations
         return [pscustomobject]$policy
     }
     catch {
@@ -11713,6 +11849,10 @@ function Test-AuditRecommendationSourceCoveragePolicy($rec, $policy) {
     }
     if ([bool]$policy.require_http_source_for_changes -and [int]$coverage.http_source_count -lt 1) {
         $issues.Add("insufficient_source_coverage：变更建议缺少可验证的 http/https 来源。") | Out-Null
+    }
+    if ([bool]$policy.require_source_observations_for_changes -and [int]$coverage.items_with_source_observation -lt [int]$coverage.total_change_items) {
+        $missing = @($coverage.change_items_missing_source_observation | Select-Object -First 5) -join ", "
+        $issues.Add(("insufficient_source_coverage：变更建议需要对应 source_observations，已覆盖 {0}/{1}。缺失：{2}" -f [int]$coverage.items_with_source_observation, [int]$coverage.total_change_items, $missing)) | Out-Null
     }
     return [pscustomobject]([ordered]@{
         pass = ($issues.Count -eq 0)
@@ -12258,6 +12398,7 @@ function Invoke-AuditRecommendationsApply {
             mcp_removal_candidates = @()
             overlap_findings = @()
             do_not_install = @()
+            source_observations = @($rec.source_observations)
             rollback = @()
         }
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$sourceReport)
@@ -12291,6 +12432,7 @@ function Invoke-AuditRecommendationsApply {
             mcp_removal_candidates = @()
             overlap_findings = @()
             do_not_install = @()
+            source_observations = @($rec.source_observations)
             rollback = @()
         }
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$qualityReport)
@@ -12341,6 +12483,7 @@ function Invoke-AuditRecommendationsApply {
             mcp_removal_candidates = @()
             overlap_findings = @()
             do_not_install = @()
+            source_observations = @($rec.source_observations)
             rollback = @()
         }
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$staleReport)
@@ -12388,6 +12531,7 @@ function Invoke-AuditRecommendationsApply {
                 mcp_removal_candidates = @()
                 overlap_findings = @()
                 do_not_install = @()
+                source_observations = @($rec.source_observations)
                 rollback = @()
                 allow_stale_snapshot = $true
                 stale_snapshot_detected = $true
@@ -12422,6 +12566,7 @@ function Invoke-AuditRecommendationsApply {
                 mcp_removal_candidates = @()
                 overlap_findings = @()
                 do_not_install = @()
+                source_observations = @($rec.source_observations)
                 rollback = @()
                 allow_stale_snapshot = $true
                 stale_snapshot_detected = $true
@@ -12459,6 +12604,7 @@ function Invoke-AuditRecommendationsApply {
         mcp_removal_candidates = @($plan.mcp_removal_candidates)
         overlap_findings = @($plan.overlap_findings)
         do_not_install = @($plan.do_not_install)
+        source_observations = @($plan.source_observations)
         rollback = @()
     }
 

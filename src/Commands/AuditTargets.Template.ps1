@@ -125,6 +125,11 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
                     use_for = "Verify current APIs, platform rules, support status, and recommended implementation patterns."
                 },
                 [ordered]@{
+                    id = "mcp-provider-docs"
+                    name = "MCP provider documentation"
+                    use_for = "Verify MCP server availability, transport, auth model, required args, permissions, and support status before recommending install or removal."
+                },
+                [ordered]@{
                     id = "skills-sh"
                     name = "skills.sh"
                     use_for = "Discover skill-packaged implementations and compare skill metadata quality."
@@ -146,6 +151,11 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
                     use_for = "Compare proposed skills against mature workflow and operational guidance."
                 },
                 [ordered]@{
+                    id = "security-and-permission-notes"
+                    name = "Security and permission notes"
+                    use_for = "Check auth, token scope, data access, network exposure, and rollback concerns, especially for MCP servers."
+                },
+                [ordered]@{
                     id = "find-skills"
                     name = "Installed find-skills workflow"
                     use_for = "Use the local skill discovery workflow as an input source when available."
@@ -161,6 +171,7 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
             evidence_policy = [ordered]@{
                 min_unique_sources_for_changes = 2
                 require_http_source_for_changes = $true
+                require_source_observations_for_changes = $true
             }
             decision_quality_policy = [ordered]@{
                 require_keyword_trace_for_changes = $true
@@ -172,7 +183,9 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
             required_evidence = @(
                 "Every add/remove recommendation must cite sources inspected in this run.",
                 "Do not fabricate repository facts, source links, or source conclusions.",
+                "Record source_observations for researched candidates so selected, rejected, and removed items remain auditable.",
                 "Every change recommendation should include keyword_trace (user_profile / target_repo_or_context / installed_state) and keep these values aligned with decision-insights.json.",
+                "For MCP recommendations, prefer provider documentation and security/permission notes over popularity signals.",
                 "For profile-only mode, explain reason_target_repo as installed-skill inventory / profile-only context, not as a target repository claim."
             )
         })
@@ -297,6 +310,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         @(
             "Replace placeholder values wrapped in <> before using this file.",
             "Delete example entries that are not needed, but keep the schema shape unchanged.",
+            "Record source_observations for every researched candidate; selected add/remove candidates must have matching observations.",
             "For every add/remove skill or MCP recommendation, keep keyword_trace aligned with decision-insights.json.",
             "This is profile-only skill discovery: reason_target_repo means installed-skill inventory / profile-only context, not target repository facts."
         )
@@ -305,6 +319,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         @(
             "Replace placeholder values wrapped in <> before using this file.",
             "Delete example entries that are not needed, but keep the schema shape unchanged.",
+            "Record source_observations for every researched candidate; selected add/remove candidates must have matching observations.",
             "For every add/remove skill or MCP recommendation, keep keyword_trace aligned with decision-insights.json.",
             "All install/remove decisions must cite both user-profile and target-repo reasons."
         )
@@ -333,6 +348,24 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
             summary = $basisSummary
         }
         empty_recommendation_reasons = @("insufficient_reliable_evidence")
+        source_observations = @(
+            [ordered]@{
+                candidate_type = "skill"
+                name = "<candidate-name>"
+                decision = "add"
+                rationale = "<why this candidate was selected, rejected, kept, or removed>"
+                sources = @("<source-url-1>")
+                source_categories = @("official-docs", "skills.sh")
+            },
+            [ordered]@{
+                candidate_type = "mcp"
+                name = "<mcp-candidate-name>"
+                decision = "do_not_install"
+                rationale = "<why this MCP should not be installed now, including auth, permission, or maintenance concerns>"
+                sources = @("<source-url-1>")
+                source_categories = @("mcp-provider-docs", "security-and-permission-notes")
+            }
+        )
         new_skills = @(
             [ordered]@{
                 name = "<new-skill-name>"

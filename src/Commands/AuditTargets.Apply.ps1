@@ -85,6 +85,7 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
         target = [string]$plan.target
         decision_basis_summary = [string]$plan.decision_basis.summary
         empty_recommendation_reasons = if ($plan.PSObject.Properties.Match("empty_recommendation_reasons").Count -gt 0) { @($plan.empty_recommendation_reasons) } else { @() }
+        source_observations = if ($plan.PSObject.Properties.Match("source_observations").Count -gt 0) { @($plan.source_observations) } else { @() }
         counts = [ordered]@{
             add = @($add).Count
             remove = @($remove).Count
@@ -105,6 +106,7 @@ function Get-AuditSourceEvidencePolicy([string]$recommendationDir) {
         source_strategy_path = $path
         min_unique_sources_for_changes = 0
         require_http_source_for_changes = $false
+        require_source_observations_for_changes = $false
     }
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         return [pscustomobject]$policy
@@ -127,9 +129,14 @@ function Get-AuditSourceEvidencePolicy([string]$recommendationDir) {
         if ($e.PSObject.Properties.Match("require_http_source_for_changes").Count -gt 0) {
             $needHttp = [bool]$e.require_http_source_for_changes
         }
-        $policy.enabled = ($min -gt 0 -or $needHttp)
+        $needObservations = $false
+        if ($e.PSObject.Properties.Match("require_source_observations_for_changes").Count -gt 0) {
+            $needObservations = [bool]$e.require_source_observations_for_changes
+        }
+        $policy.enabled = ($min -gt 0 -or $needHttp -or $needObservations)
         $policy.min_unique_sources_for_changes = if ($min -lt 0) { 0 } else { $min }
         $policy.require_http_source_for_changes = $needHttp
+        $policy.require_source_observations_for_changes = $needObservations
         return [pscustomobject]$policy
     }
     catch {
@@ -160,6 +167,10 @@ function Test-AuditRecommendationSourceCoveragePolicy($rec, $policy) {
     }
     if ([bool]$policy.require_http_source_for_changes -and [int]$coverage.http_source_count -lt 1) {
         $issues.Add("insufficient_source_coverage：变更建议缺少可验证的 http/https 来源。") | Out-Null
+    }
+    if ([bool]$policy.require_source_observations_for_changes -and [int]$coverage.items_with_source_observation -lt [int]$coverage.total_change_items) {
+        $missing = @($coverage.change_items_missing_source_observation | Select-Object -First 5) -join ", "
+        $issues.Add(("insufficient_source_coverage：变更建议需要对应 source_observations，已覆盖 {0}/{1}。缺失：{2}" -f [int]$coverage.items_with_source_observation, [int]$coverage.total_change_items, $missing)) | Out-Null
     }
     return [pscustomobject]([ordered]@{
         pass = ($issues.Count -eq 0)
@@ -705,6 +716,7 @@ function Invoke-AuditRecommendationsApply {
             mcp_removal_candidates = @()
             overlap_findings = @()
             do_not_install = @()
+            source_observations = @($rec.source_observations)
             rollback = @()
         }
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$sourceReport)
@@ -738,6 +750,7 @@ function Invoke-AuditRecommendationsApply {
             mcp_removal_candidates = @()
             overlap_findings = @()
             do_not_install = @()
+            source_observations = @($rec.source_observations)
             rollback = @()
         }
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$qualityReport)
@@ -788,6 +801,7 @@ function Invoke-AuditRecommendationsApply {
             mcp_removal_candidates = @()
             overlap_findings = @()
             do_not_install = @()
+            source_observations = @($rec.source_observations)
             rollback = @()
         }
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$staleReport)
@@ -835,6 +849,7 @@ function Invoke-AuditRecommendationsApply {
                 mcp_removal_candidates = @()
                 overlap_findings = @()
                 do_not_install = @()
+                source_observations = @($rec.source_observations)
                 rollback = @()
                 allow_stale_snapshot = $true
                 stale_snapshot_detected = $true
@@ -869,6 +884,7 @@ function Invoke-AuditRecommendationsApply {
                 mcp_removal_candidates = @()
                 overlap_findings = @()
                 do_not_install = @()
+                source_observations = @($rec.source_observations)
                 rollback = @()
                 allow_stale_snapshot = $true
                 stale_snapshot_detected = $true
@@ -906,6 +922,7 @@ function Invoke-AuditRecommendationsApply {
         mcp_removal_candidates = @($plan.mcp_removal_candidates)
         overlap_findings = @($plan.overlap_findings)
         do_not_install = @($plan.do_not_install)
+        source_observations = @($plan.source_observations)
         rollback = @()
     }
 
