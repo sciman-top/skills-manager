@@ -492,6 +492,16 @@
       "from": "skills\\copywriting",
       "vendor": "marketingskills",
       "to": "marketingskills-skills-copywriting"
+    },
+    {
+      "vendor": "skills-2",
+      "to": "skills-2-skills-remotion",
+      "from": "skills\\remotion"
+    },
+    {
+      "vendor": "web-quality-skills",
+      "to": "web-quality-skills-skills-web-quality-audit",
+      "from": "skills\\web-quality-audit"
     }
   ],
   "imports": [
@@ -766,6 +776,22 @@
       "skill": "improve-codebase-architecture",
       "name": "improve-codebase-architecture",
       "ref": "main"
+    },
+    {
+      "skill": "skills\\remotion",
+      "repo": "https://github.com/remotion-dev/skills.git",
+      "sparse": false,
+      "ref": "main",
+      "mode": "vendor",
+      "name": "skills-2"
+    },
+    {
+      "skill": "skills\\web-quality-audit",
+      "repo": "https://github.com/addyosmani/web-quality-skills.git",
+      "sparse": false,
+      "ref": "main",
+      "mode": "vendor",
+      "name": "web-quality-skills"
     }
   ],
   "targets": [
@@ -810,6 +836,15 @@
       "transport": "http",
       "url": "https://learn.microsoft.com/api/mcp",
       "startup_timeout_sec": 120
+    },
+    {
+      "name": "playwright",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest",
+        "--isolated"
+      ]
     }
   ],
   "mcp_targets": []

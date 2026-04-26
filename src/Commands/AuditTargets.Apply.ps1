@@ -685,6 +685,12 @@ function Invoke-AuditRecommendationsApply {
     if ($Apply -and -not $Yes) {
         throw "执行安装必须同时传入 --apply --yes"
     }
+    if ($Apply -and $Yes) {
+        if ([string]::IsNullOrWhiteSpace($AddSelection)) { $AddSelection = "all" }
+        if ([string]::IsNullOrWhiteSpace($RemoveSelection)) { $RemoveSelection = "all" }
+        if ([string]::IsNullOrWhiteSpace($McpAddSelection)) { $McpAddSelection = "all" }
+        if ([string]::IsNullOrWhiteSpace($McpRemoveSelection)) { $McpRemoveSelection = "all" }
+    }
     $rec = Load-AuditRecommendations $RecommendationsPath
     $recommendationDir = Split-Path -Parent $RecommendationsPath
     if ([string]::IsNullOrWhiteSpace($recommendationDir)) { $recommendationDir = "." }

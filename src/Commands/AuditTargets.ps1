@@ -6,6 +6,10 @@ function Get-AuditStructuredProfileDefaultPath {
     return (Join-Path $script:Root "reports\skill-audit\user-profile.structured.json")
 }
 
+function Get-AuditUserProfileSnapshotPath {
+    return (Join-Path $script:Root "reports\skill-audit\user-profile.json")
+}
+
 function Get-AuditOuterAiPromptOverridePath {
     return (Join-Path $script:Root "overrides\audit-outer-ai-prompt.md")
 }
@@ -468,6 +472,10 @@ function New-AuditPrecheckStructuredProfile($cfg) {
     }
 }
 
+function Write-AuditUserProfileSnapshot($cfg) {
+    Write-AuditJsonFile (Get-AuditUserProfileSnapshotPath) (Get-AuditUserProfileOutput $cfg)
+}
+
 function Ensure-AuditUserProfilePrecheck {
     $profilePath = Get-AuditStructuredProfileDefaultPath
     $maxAttempts = 2
@@ -480,6 +488,7 @@ function Ensure-AuditUserProfilePrecheck {
         $structuredIncomplete = -not (Test-AuditStructuredProfileComplete $cfg.user_profile.structured)
         $timestampInvalid = -not (Test-AuditTimestampString ([string]$cfg.user_profile.last_structured_at))
         if (-not $summaryMissing -and -not $structuredIncomplete -and -not $timestampInvalid) {
+            Write-AuditUserProfileSnapshot $cfg
             return $cfg
         }
 
@@ -567,6 +576,7 @@ function Import-AuditUserProfileStructured([string]$profilePath) {
     Ensure-AuditUserProfile $cfg | Out-Null
     Need (-not [string]::IsNullOrWhiteSpace([string]$cfg.user_profile.raw_text)) "导入后用户基本需求为空，请在 profile.raw_text 填写非空文本或先执行“需求设置”"
     Save-AuditTargetsConfig $cfg
+    Write-AuditUserProfileSnapshot $cfg
 }
 
 function Invoke-AuditStructuredProfileFlow([string]$profilePath = "") {

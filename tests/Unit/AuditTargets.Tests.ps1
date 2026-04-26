@@ -416,6 +416,12 @@ Describe "Audit Targets" {
                 $saved.user_profile.summary | Should Be "repo-governance focus"
                 $saved.user_profile.structured.primary_work_types[0] | Should Be "repo-governance"
                 $saved.user_profile.structured_by | Should Be "outer-ai"
+
+                $snapshotPath = Join-Path $script:Root "reports\skill-audit\user-profile.json"
+                (Test-Path -LiteralPath $snapshotPath) | Should Be $true
+                $snapshot = Get-ContentUtf8 $snapshotPath | ConvertFrom-Json
+                $snapshot.summary | Should Be "repo-governance focus"
+                $snapshot.structured.primary_work_types[0] | Should Be "repo-governance"
             }
             finally {
                 $script:Root = $oldRoot
@@ -1266,6 +1272,37 @@ jobs:
             $report.changed_counts.add_installed | Should Be 0
             $report.dry_run_acknowledged | Should Be $true
             Test-Path (Get-AuditDryRunSummaryPath $path) | Should Be $true
+        }
+
+        It "Treats --apply --yes as all selections when indexes are omitted" {
+            $oldRoot = $script:Root
+            try {
+                $script:Root = Join-Path $TestDrive "ws-apply-yes-all"
+                New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+                Initialize-AuditTargetsConfig | Out-Null
+
+                $path = Join-Path $script:Root "recommendations-apply-yes.json"
+                Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-apply","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"t","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["local"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[{"name":"playwright","reason_user_profile":"u","reason_target_repo":"t","confidence":"medium","sources":["local"],"server":{"name":"playwright","transport":"stdio","command":"npx","args":["@playwright/mcp@latest"]}}],"mcp_removal_candidates":[]}'
+
+                Mock Add-ImportFromArgs { return $true }
+                Mock Ensure-AuditNewManualImportsMapped { return $true }
+                Mock Apply-AuditMcpSelections {
+                    foreach ($item in @($selectedAddItems)) { $item.status = "added" }
+                    return [pscustomobject]@{ changed = $true }
+                }
+                Mock 构建生效 { }
+                Mock Invoke-Doctor { return [pscustomobject]@{ pass = $true } }
+
+                $report = Invoke-AuditRecommendationsApply -RecommendationsPath $path -Apply -Yes
+
+                $report.success | Should Be $true
+                $report.persisted | Should Be $true
+                $report.changed_counts.add_installed | Should Be 1
+                $report.changed_counts.mcp_add_added | Should Be 1
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
         }
 
         It "Blocks dry-run when source evidence policy is not satisfied" {
