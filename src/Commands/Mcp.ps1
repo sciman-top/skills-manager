@@ -701,6 +701,22 @@ function Resolve-TimeoutSecondsFromEnv([string]$envName, [int]$defaultSeconds, [
     return $value
 }
 
+function Test-EnvFlagEnabled([string]$envName) {
+    if ([string]::IsNullOrWhiteSpace($envName)) { return $false }
+    $raw = [System.Environment]::GetEnvironmentVariable($envName)
+    if ([string]::IsNullOrWhiteSpace([string]$raw)) { return $false }
+    $v = ([string]$raw).Trim().ToLowerInvariant()
+    return ($v -eq "1" -or $v -eq "true" -or $v -eq "yes" -or $v -eq "on")
+}
+
+function Should-RunNativeMcpSync() {
+    return (Test-EnvFlagEnabled "SKILLS_MCP_NATIVE_SYNC")
+}
+
+function Should-VerifyLiveMcpCli() {
+    return (Test-EnvFlagEnabled "SKILLS_MCP_VERIFY_LIVE_CLI")
+}
+
 function Get-McpListVerifyTimeoutSeconds([string]$cli) {
     $cliName = if ([string]::IsNullOrWhiteSpace($cli)) { "" } else { [string]$cli.Trim().ToLowerInvariant() }
     $defaultSeconds = switch ($cliName) {
@@ -717,11 +733,7 @@ function Get-McpListVerifyTimeoutSeconds([string]$cli) {
 }
 
 function Should-VerifyGeminiCli() {
-    $raw = [System.Environment]::GetEnvironmentVariable("SKILLS_MCP_VERIFY_GEMINI_CLI")
-    if ([string]::IsNullOrWhiteSpace([string]$raw)) { return $false }
-    $v = [string]$raw
-    $v = $v.Trim().ToLowerInvariant()
-    return ($v -eq "1" -or $v -eq "true" -or $v -eq "yes" -or $v -eq "on")
+    return (Test-EnvFlagEnabled "SKILLS_MCP_VERIFY_GEMINI_CLI")
 }
 
 function Get-NativeMcpCommandTimeoutSeconds() {
@@ -1008,6 +1020,14 @@ function Verify-McpAcrossCliWithRetry($roots, [int]$maxAttempts = 6, [int]$inter
         return
     }
 
+    if (-not (Should-VerifyLiveMcpCli)) {
+        foreach ($target in $targets) {
+            Log ("MCP 配置态校验通过：{0} -> {1}" -f $target.cli, ((@($target.names)) -join ", "))
+        }
+        Log "跨 CLI MCP live 校验默认跳过；如需实机 mcp list 校验，设置 SKILLS_MCP_VERIFY_LIVE_CLI=1。" "INFO"
+        return
+    }
+
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         $failed = New-Object System.Collections.Generic.List[object]
         foreach ($target in $targets) {
@@ -1039,6 +1059,10 @@ function Verify-McpAcrossCliWithRetry($roots, [int]$maxAttempts = 6, [int]$inter
 }
 
 function Invoke-NativeMcpSync($servers) {
+    if (-not (Should-RunNativeMcpSync)) {
+        Log "原生 Claude MCP 注册默认跳过；已写入配置文件。如需执行 claude mcp add/remove，设置 SKILLS_MCP_NATIVE_SYNC=1。" "INFO"
+        return
+    }
     if (-not (Get-Command "claude" -ErrorAction SilentlyContinue)) {
         Log "未检测到 claude 命令，已跳过原生 MCP 同步（仅写入 .mcp.json）。" "WARN"
         return
@@ -1099,6 +1123,10 @@ function Get-NativeMcpCleanupCommands([string]$name) {
 }
 
 function Invoke-NativeMcpCleanup([string]$name) {
+    if (-not (Should-RunNativeMcpSync)) {
+        Log ("原生 Claude MCP 清理默认跳过：{0}。如需执行 claude mcp remove，设置 SKILLS_MCP_NATIVE_SYNC=1。" -f $name) "INFO"
+        return
+    }
     if ($script:SkipNativeMcpForSession) {
         Log ("已检测到原生 MCP CLI 非交互不可用，跳过清理：{0}" -f $name) "WARN"
         return

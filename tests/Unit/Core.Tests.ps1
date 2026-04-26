@@ -1393,6 +1393,27 @@ sandbox = "elevated"
             }
         }
 
+        It "Uses config-state verification by default without invoking live CLI list" {
+            $root = Join-Path $TestDrive "mcp-fast-verify"
+            $claudeRoot = Join-Path $root ".claude"
+            New-Item -ItemType Directory -Path $claudeRoot -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $claudeRoot ".mcp.json") '{"mcpServers":{"context7":{"transport":"stdio","command":"npx","args":["-y","@upstash/context7-mcp"]}}}'
+            Mock Invoke-ExternalCommandCapture { throw "live cli list should not be called by default" } -Scope It
+
+            Verify-McpAcrossCliWithRetry @($claudeRoot) 1 1
+
+            Assert-MockCalled Invoke-ExternalCommandCapture -Times 0 -Scope It
+        }
+
+        It "Skips native Claude MCP commands by default" {
+            Mock Invoke-ExternalCommandWithTimeout { throw "native command should not be called by default" } -Scope It
+
+            Invoke-NativeMcpCleanup "fetch"
+            Invoke-NativeMcpSync @([pscustomobject]@{ name = "context7"; transport = "stdio"; command = "npx"; args = @("-y", "@upstash/context7-mcp") })
+
+            Assert-MockCalled Invoke-ExternalCommandWithTimeout -Times 0 -Scope It
+        }
+
         It "Keeps claude timeout as verification failure" {
             Mock Get-Command { [pscustomobject]@{ Name = "claude" } } -ParameterFilter { $Name -eq "claude" } -Scope It
             Mock Get-McpListVerifyTimeoutSeconds { 11 } -ParameterFilter { $cli -eq "claude" } -Scope It

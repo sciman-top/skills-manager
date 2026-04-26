@@ -121,6 +121,16 @@ Describe "Doctor Enhancements" {
             $items[0] | Should Match "custom_metric"
         }
 
+        It "Does not flag values exactly equal to the threshold" {
+            $summary = @(
+                [pscustomobject]@{ metric = "custom_metric"; last_ms = 1000; avg_ms = 1000; samples = 3 }
+            )
+
+            $items = Get-PerfAnomalyItems $summary 1000
+
+            $items.Count | Should Be 0
+        }
+
         It "Uses metric-specific thresholds for build metrics" {
             $summary = @(
                 [pscustomobject]@{ metric = "build_agent"; last_ms = 6500; avg_ms = 6200; samples = 3 },

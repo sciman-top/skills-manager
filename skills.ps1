@@ -2323,6 +2323,18 @@ function Get-CfgObjectProperty($obj, [string]$name) {
     if ($obj.PSObject.Properties.Match($name).Count -eq 0) { return $null }
     return $obj.$name
 }
+function New-CfgVendorNameSet($vendors = @()) {
+    $set = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $set.Add("manual") | Out-Null
+    $set.Add("overrides") | Out-Null
+    foreach ($v in @($vendors)) {
+        if ($null -eq $v) { continue }
+        $name = if ($v -is [string]) { [string]$v } else { [string](Get-CfgObjectProperty $v "name") }
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $set.Add($name) | Out-Null
+    }
+    return $set
+}
 function Get-CfgArrayField($cfg, [string]$name, [bool]$required, [System.Collections.Generic.List[string]]$errors) {
     $value = Get-CfgObjectProperty $cfg $name
     if ($null -eq $value) {
@@ -2424,12 +2436,7 @@ function Get-CfgContractErrors($cfg) {
         $errors.Add("sync_mode 仅支持 link 或 sync") | Out-Null
     }
 
-    $vendorNames = New-Object System.Collections.Generic.HashSet[string]
-    foreach ($v in $vendors) {
-        $name = [string](Get-CfgObjectProperty $v "name")
-        if (-not [string]::IsNullOrWhiteSpace($name)) { $vendorNames.Add($name) | Out-Null }
-    }
-    $vendorNames.Add("manual") | Out-Null
+    $vendorNames = New-CfgVendorNameSet $vendors
     foreach ($m in $mappings) {
         $vendor = [string](Get-CfgObjectProperty $m "vendor")
         if (-not [string]::IsNullOrWhiteSpace($vendor) -and -not $vendorNames.Contains($vendor)) {
@@ -2642,9 +2649,7 @@ function Fix-Cfg($cfg, [ref]$changed, [ref]$dirMigrations) {
     }
     $cfg.mcp_targets = $dedupMcpTargets
 
-    $vendorNames = New-Object System.Collections.Generic.HashSet[string]
-    foreach ($v in $cfg.vendors) { $vendorNames.Add($v.name) | Out-Null }
-    $vendorNames.Add("manual") | Out-Null
+    $vendorNames = New-CfgVendorNameSet $cfg.vendors
 
     $dedupMappings = @()
     $seenMappings = New-Object System.Collections.Generic.HashSet[string]
@@ -2883,9 +2888,7 @@ function Assert-Cfg($cfg) {
         Log ("mappings 的 to 重复（可能覆盖）：{0}" -f ($dupTo -join ", ")) "WARN"
     }
 
-    $vendorNames = New-Object System.Collections.Generic.HashSet[string]
-    foreach ($v in $cfg.vendors) { $vendorNames.Add($v.name) | Out-Null }
-    $vendorNames.Add("manual") | Out-Null
+    $vendorNames = New-CfgVendorNameSet $cfg.vendors
     foreach ($m in $cfg.mappings) {
         Need ($vendorNames.Contains($m.vendor)) ("mapping 引用了不存在的 vendor：{0}" -f $m.vendor)
     }
@@ -3368,17 +3371,8 @@ function Apply-DoctorFixes($cfg, [switch]$Preview) {
 
     # low-risk fix #2: remove mappings referencing missing vendor
     if ($cfg.PSObject.Properties.Match("mappings").Count -gt 0 -and $cfg.mappings -ne $null) {
-        $vendorSet = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-        $vendorSet.Add("manual") | Out-Null
-        $vendorSet.Add("overrides") | Out-Null
-        if ($cfg.PSObject.Properties.Match("vendors").Count -gt 0 -and $cfg.vendors -ne $null) {
-            foreach ($v in @($cfg.vendors)) {
-                if ($null -eq $v) { continue }
-                $name = if ($v.PSObject.Properties.Match("name").Count -gt 0) { [string]$v.name } else { "" }
-                if ([string]::IsNullOrWhiteSpace($name)) { continue }
-                $vendorSet.Add($name) | Out-Null
-            }
-        }
+        $vendors = if ($cfg.PSObject.Properties.Match("vendors").Count -gt 0 -and $cfg.vendors -ne $null) { @($cfg.vendors) } else { @() }
+        $vendorSet = New-CfgVendorNameSet $vendors
 
         $newMappings = @()
         foreach ($m in @($cfg.mappings)) {
@@ -3455,7 +3449,7 @@ function Get-PerfAnomalyItems($summary, [int]$WarnThresholdMs = 5000, [int]$MinS
         if ($samples -lt $MinSamples) { continue }
         $metricThreshold = Get-PerfThresholdMs ([string]$p.metric) $WarnThresholdMs
         if ($null -eq $metricThreshold) { continue }
-        if ($last -ge $metricThreshold -or $avg -ge $metricThreshold) {
+        if ($last -gt $metricThreshold -or $avg -gt $metricThreshold) {
             $items += ("{0}: last={1}ms avg={2}ms threshold={3}ms" -f [string]$p.metric, $last, $avg, $metricThreshold)
         }
     }
@@ -3494,17 +3488,8 @@ function Get-DoctorConfigRisks($cfg) {
         $risks += ("检测到重复 mappings.to（可能互相覆盖）：{0}" -f ($dupTo -join ", "))
     }
 
-    $vendorSet = New-Object System.Collections.Generic.HashSet[string]
-    $vendorSet.Add("manual") | Out-Null
-    $vendorSet.Add("overrides") | Out-Null
-    if ($cfg.PSObject.Properties.Match("vendors").Count -gt 0 -and $cfg.vendors -ne $null) {
-        foreach ($v in $cfg.vendors) {
-            if ($null -eq $v) { continue }
-            $name = if ($v.PSObject.Properties.Match("name").Count -gt 0) { [string]$v.name } else { "" }
-            if ([string]::IsNullOrWhiteSpace($name)) { continue }
-            $vendorSet.Add($name) | Out-Null
-        }
-    }
+    $vendors = if ($cfg.PSObject.Properties.Match("vendors").Count -gt 0 -and $cfg.vendors -ne $null) { @($cfg.vendors) } else { @() }
+    $vendorSet = New-CfgVendorNameSet $vendors
     if ($cfg.PSObject.Properties.Match("mappings").Count -gt 0 -and $cfg.mappings -ne $null) {
         foreach ($m in $cfg.mappings) {
             if ($null -eq $m) { continue }
@@ -3735,7 +3720,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     # 8. Performance Summary
     try {
         if (Test-Path $LogPath) {
-            $lines = Get-Content $LogPath -ErrorAction SilentlyContinue
+            $lines = Get-Content $LogPath -Tail 5000 -ErrorAction SilentlyContinue
             $perf = Get-PerfSummaryFromLogLines $lines 3
             $report.performance.summary = @(Add-PerfThresholdMetadata $perf $opts.threshold_ms)
             if ($perf.Count -gt 0) {
@@ -6972,6 +6957,22 @@ function Resolve-TimeoutSecondsFromEnv([string]$envName, [int]$defaultSeconds, [
     return $value
 }
 
+function Test-EnvFlagEnabled([string]$envName) {
+    if ([string]::IsNullOrWhiteSpace($envName)) { return $false }
+    $raw = [System.Environment]::GetEnvironmentVariable($envName)
+    if ([string]::IsNullOrWhiteSpace([string]$raw)) { return $false }
+    $v = ([string]$raw).Trim().ToLowerInvariant()
+    return ($v -eq "1" -or $v -eq "true" -or $v -eq "yes" -or $v -eq "on")
+}
+
+function Should-RunNativeMcpSync() {
+    return (Test-EnvFlagEnabled "SKILLS_MCP_NATIVE_SYNC")
+}
+
+function Should-VerifyLiveMcpCli() {
+    return (Test-EnvFlagEnabled "SKILLS_MCP_VERIFY_LIVE_CLI")
+}
+
 function Get-McpListVerifyTimeoutSeconds([string]$cli) {
     $cliName = if ([string]::IsNullOrWhiteSpace($cli)) { "" } else { [string]$cli.Trim().ToLowerInvariant() }
     $defaultSeconds = switch ($cliName) {
@@ -6988,11 +6989,7 @@ function Get-McpListVerifyTimeoutSeconds([string]$cli) {
 }
 
 function Should-VerifyGeminiCli() {
-    $raw = [System.Environment]::GetEnvironmentVariable("SKILLS_MCP_VERIFY_GEMINI_CLI")
-    if ([string]::IsNullOrWhiteSpace([string]$raw)) { return $false }
-    $v = [string]$raw
-    $v = $v.Trim().ToLowerInvariant()
-    return ($v -eq "1" -or $v -eq "true" -or $v -eq "yes" -or $v -eq "on")
+    return (Test-EnvFlagEnabled "SKILLS_MCP_VERIFY_GEMINI_CLI")
 }
 
 function Get-NativeMcpCommandTimeoutSeconds() {
@@ -7279,6 +7276,14 @@ function Verify-McpAcrossCliWithRetry($roots, [int]$maxAttempts = 6, [int]$inter
         return
     }
 
+    if (-not (Should-VerifyLiveMcpCli)) {
+        foreach ($target in $targets) {
+            Log ("MCP 配置态校验通过：{0} -> {1}" -f $target.cli, ((@($target.names)) -join ", "))
+        }
+        Log "跨 CLI MCP live 校验默认跳过；如需实机 mcp list 校验，设置 SKILLS_MCP_VERIFY_LIVE_CLI=1。" "INFO"
+        return
+    }
+
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         $failed = New-Object System.Collections.Generic.List[object]
         foreach ($target in $targets) {
@@ -7310,6 +7315,10 @@ function Verify-McpAcrossCliWithRetry($roots, [int]$maxAttempts = 6, [int]$inter
 }
 
 function Invoke-NativeMcpSync($servers) {
+    if (-not (Should-RunNativeMcpSync)) {
+        Log "原生 Claude MCP 注册默认跳过；已写入配置文件。如需执行 claude mcp add/remove，设置 SKILLS_MCP_NATIVE_SYNC=1。" "INFO"
+        return
+    }
     if (-not (Get-Command "claude" -ErrorAction SilentlyContinue)) {
         Log "未检测到 claude 命令，已跳过原生 MCP 同步（仅写入 .mcp.json）。" "WARN"
         return
@@ -7370,6 +7379,10 @@ function Get-NativeMcpCleanupCommands([string]$name) {
 }
 
 function Invoke-NativeMcpCleanup([string]$name) {
+    if (-not (Should-RunNativeMcpSync)) {
+        Log ("原生 Claude MCP 清理默认跳过：{0}。如需执行 claude mcp remove，设置 SKILLS_MCP_NATIVE_SYNC=1。" -f $name) "INFO"
+        return
+    }
     if ($script:SkipNativeMcpForSession) {
         Log ("已检测到原生 MCP CLI 非交互不可用，跳过清理：{0}" -f $name) "WARN"
         return

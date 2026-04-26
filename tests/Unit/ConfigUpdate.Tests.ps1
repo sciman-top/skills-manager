@@ -61,6 +61,24 @@ Describe "Config And Update Enhancements" {
             $joined | Should Match "mapping 引用了不存在的 vendor：missing-vendor"
             $cfg.PSObject.Properties.Match("mcp_targets").Count | Should Be 0
         }
+
+        It "Treats overrides as a reserved mapping vendor in config contracts" {
+            $cfg = [pscustomobject]@{
+                vendors = @()
+                targets = @()
+                mappings = @(
+                    [pscustomobject]@{ vendor = "overrides"; from = "."; to = "custom-skill" }
+                )
+                imports = @()
+                mcp_servers = @()
+                mcp_targets = @()
+                sync_mode = "link"
+            }
+
+            $errors = @(Get-CfgContractErrors $cfg)
+            ($errors | Where-Object { $_ -like "*不存在的 vendor*" }).Count | Should Be 0
+            { Assert-Cfg $cfg } | Should Not Throw
+        }
     }
 
     Context "Vendor import normalization" {

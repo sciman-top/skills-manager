@@ -1,0 +1,5 @@
+{
+  "schema_version": "1.0",
+  "status": "skip",
+  "quick_test_reason": "Current target profile full test command is python --version, so no safer or faster test slice can be derived without first correcting the target gate profile."
+}

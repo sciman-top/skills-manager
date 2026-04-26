@@ -215,6 +215,18 @@ function Get-CfgObjectProperty($obj, [string]$name) {
     if ($obj.PSObject.Properties.Match($name).Count -eq 0) { return $null }
     return $obj.$name
 }
+function New-CfgVendorNameSet($vendors = @()) {
+    $set = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $set.Add("manual") | Out-Null
+    $set.Add("overrides") | Out-Null
+    foreach ($v in @($vendors)) {
+        if ($null -eq $v) { continue }
+        $name = if ($v -is [string]) { [string]$v } else { [string](Get-CfgObjectProperty $v "name") }
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $set.Add($name) | Out-Null
+    }
+    return $set
+}
 function Get-CfgArrayField($cfg, [string]$name, [bool]$required, [System.Collections.Generic.List[string]]$errors) {
     $value = Get-CfgObjectProperty $cfg $name
     if ($null -eq $value) {
@@ -316,12 +328,7 @@ function Get-CfgContractErrors($cfg) {
         $errors.Add("sync_mode 仅支持 link 或 sync") | Out-Null
     }
 
-    $vendorNames = New-Object System.Collections.Generic.HashSet[string]
-    foreach ($v in $vendors) {
-        $name = [string](Get-CfgObjectProperty $v "name")
-        if (-not [string]::IsNullOrWhiteSpace($name)) { $vendorNames.Add($name) | Out-Null }
-    }
-    $vendorNames.Add("manual") | Out-Null
+    $vendorNames = New-CfgVendorNameSet $vendors
     foreach ($m in $mappings) {
         $vendor = [string](Get-CfgObjectProperty $m "vendor")
         if (-not [string]::IsNullOrWhiteSpace($vendor) -and -not $vendorNames.Contains($vendor)) {
@@ -534,9 +541,7 @@ function Fix-Cfg($cfg, [ref]$changed, [ref]$dirMigrations) {
     }
     $cfg.mcp_targets = $dedupMcpTargets
 
-    $vendorNames = New-Object System.Collections.Generic.HashSet[string]
-    foreach ($v in $cfg.vendors) { $vendorNames.Add($v.name) | Out-Null }
-    $vendorNames.Add("manual") | Out-Null
+    $vendorNames = New-CfgVendorNameSet $cfg.vendors
 
     $dedupMappings = @()
     $seenMappings = New-Object System.Collections.Generic.HashSet[string]
@@ -775,9 +780,7 @@ function Assert-Cfg($cfg) {
         Log ("mappings 的 to 重复（可能覆盖）：{0}" -f ($dupTo -join ", ")) "WARN"
     }
 
-    $vendorNames = New-Object System.Collections.Generic.HashSet[string]
-    foreach ($v in $cfg.vendors) { $vendorNames.Add($v.name) | Out-Null }
-    $vendorNames.Add("manual") | Out-Null
+    $vendorNames = New-CfgVendorNameSet $cfg.vendors
     foreach ($m in $cfg.mappings) {
         Need ($vendorNames.Contains($m.vendor)) ("mapping 引用了不存在的 vendor：{0}" -f $m.vendor)
     }

@@ -140,17 +140,8 @@ function Apply-DoctorFixes($cfg, [switch]$Preview) {
 
     # low-risk fix #2: remove mappings referencing missing vendor
     if ($cfg.PSObject.Properties.Match("mappings").Count -gt 0 -and $cfg.mappings -ne $null) {
-        $vendorSet = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-        $vendorSet.Add("manual") | Out-Null
-        $vendorSet.Add("overrides") | Out-Null
-        if ($cfg.PSObject.Properties.Match("vendors").Count -gt 0 -and $cfg.vendors -ne $null) {
-            foreach ($v in @($cfg.vendors)) {
-                if ($null -eq $v) { continue }
-                $name = if ($v.PSObject.Properties.Match("name").Count -gt 0) { [string]$v.name } else { "" }
-                if ([string]::IsNullOrWhiteSpace($name)) { continue }
-                $vendorSet.Add($name) | Out-Null
-            }
-        }
+        $vendors = if ($cfg.PSObject.Properties.Match("vendors").Count -gt 0 -and $cfg.vendors -ne $null) { @($cfg.vendors) } else { @() }
+        $vendorSet = New-CfgVendorNameSet $vendors
 
         $newMappings = @()
         foreach ($m in @($cfg.mappings)) {
@@ -227,7 +218,7 @@ function Get-PerfAnomalyItems($summary, [int]$WarnThresholdMs = 5000, [int]$MinS
         if ($samples -lt $MinSamples) { continue }
         $metricThreshold = Get-PerfThresholdMs ([string]$p.metric) $WarnThresholdMs
         if ($null -eq $metricThreshold) { continue }
-        if ($last -ge $metricThreshold -or $avg -ge $metricThreshold) {
+        if ($last -gt $metricThreshold -or $avg -gt $metricThreshold) {
             $items += ("{0}: last={1}ms avg={2}ms threshold={3}ms" -f [string]$p.metric, $last, $avg, $metricThreshold)
         }
     }
@@ -266,17 +257,8 @@ function Get-DoctorConfigRisks($cfg) {
         $risks += ("检测到重复 mappings.to（可能互相覆盖）：{0}" -f ($dupTo -join ", "))
     }
 
-    $vendorSet = New-Object System.Collections.Generic.HashSet[string]
-    $vendorSet.Add("manual") | Out-Null
-    $vendorSet.Add("overrides") | Out-Null
-    if ($cfg.PSObject.Properties.Match("vendors").Count -gt 0 -and $cfg.vendors -ne $null) {
-        foreach ($v in $cfg.vendors) {
-            if ($null -eq $v) { continue }
-            $name = if ($v.PSObject.Properties.Match("name").Count -gt 0) { [string]$v.name } else { "" }
-            if ([string]::IsNullOrWhiteSpace($name)) { continue }
-            $vendorSet.Add($name) | Out-Null
-        }
-    }
+    $vendors = if ($cfg.PSObject.Properties.Match("vendors").Count -gt 0 -and $cfg.vendors -ne $null) { @($cfg.vendors) } else { @() }
+    $vendorSet = New-CfgVendorNameSet $vendors
     if ($cfg.PSObject.Properties.Match("mappings").Count -gt 0 -and $cfg.mappings -ne $null) {
         foreach ($m in $cfg.mappings) {
             if ($null -eq $m) { continue }
@@ -507,7 +489,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     # 8. Performance Summary
     try {
         if (Test-Path $LogPath) {
-            $lines = Get-Content $LogPath -ErrorAction SilentlyContinue
+            $lines = Get-Content $LogPath -Tail 5000 -ErrorAction SilentlyContinue
             $perf = Get-PerfSummaryFromLogLines $lines 3
             $report.performance.summary = @(Add-PerfThresholdMetadata $perf $opts.threshold_ms)
             if ($perf.Count -gt 0) {

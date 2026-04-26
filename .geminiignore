@@ -1,0 +1,12 @@
+# Generated and cached skill payloads
+agent/
+vendor/
+reports/skill-audit/
+
+# Local caches and logs
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.log
+.env
