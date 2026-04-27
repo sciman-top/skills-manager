@@ -1,6 +1,6 @@
 ﻿#requires -Version 5.1
 param(
-    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "锁定", "生成锁文件", "清理无效映射", "打开配置", "解除关联", "清理备份", "自动更新设置", "帮助", "doctor", "add", "npx", "安装MCP", "卸载MCP", "同步MCP", "mcp-install", "mcp-uninstall", "mcp-sync", "审查目标", "audit-targets", "一键", "workflow", "prune-invalid-mappings")]
+    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "锁定", "生成锁文件", "清理无效映射", "打开配置", "解除关联", "清理备份", "自动更新设置", "帮助", "help", "--help", "-h", "doctor", "add", "npx", "安装MCP", "卸载MCP", "同步MCP", "mcp-install", "mcp-uninstall", "mcp-sync", "审查目标", "audit-targets", "一键", "workflow", "prune-invalid-mappings")]
     [string]$Cmd = "menu",
     [string]$Filter = "",
     [switch]$DryRun,
@@ -3098,8 +3098,20 @@ function Assert-LockMatchesCfg($cfg, $lock) {
             ref = if ([string]::IsNullOrWhiteSpace([string]($v.ref))) { "main" } else { [string]($v.ref) }
         }
     }
-    $expVendorJson = ($vendorExpected | ConvertTo-Json -Depth 20 -Compress)
-    $actVendorJson = ($vendorActual | ConvertTo-Json -Depth 20 -Compress)
+    $expVendorJson = @($vendorExpected.Keys | Sort-Object | ForEach-Object {
+            [ordered]@{
+                name = [string]$_
+                repo = [string]$vendorExpected[$_].repo
+                ref = [string]$vendorExpected[$_].ref
+            }
+        }) | ConvertTo-Json -Depth 20 -Compress
+    $actVendorJson = @($vendorActual.Keys | Sort-Object | ForEach-Object {
+            [ordered]@{
+                name = [string]$_
+                repo = [string]$vendorActual[$_].repo
+                ref = [string]$vendorActual[$_].ref
+            }
+        }) | ConvertTo-Json -Depth 20 -Compress
     Need ($expVendorJson -eq $actVendorJson) "锁文件与当前 vendors 配置不一致，请重新执行 .\skills.ps1 锁定"
 
     $importExpected = @{}
@@ -3124,8 +3136,24 @@ function Assert-LockMatchesCfg($cfg, $lock) {
             sparse = [bool]$i.sparse
         }
     }
-    $expImportJson = ($importExpected | ConvertTo-Json -Depth 20 -Compress)
-    $actImportJson = ($importActual | ConvertTo-Json -Depth 20 -Compress)
+    $expImportJson = @($importExpected.Keys | Sort-Object | ForEach-Object {
+            [ordered]@{
+                key = [string]$_
+                repo = [string]$importExpected[$_].repo
+                ref = [string]$importExpected[$_].ref
+                skill = [string]$importExpected[$_].skill
+                sparse = [bool]$importExpected[$_].sparse
+            }
+        }) | ConvertTo-Json -Depth 20 -Compress
+    $actImportJson = @($importActual.Keys | Sort-Object | ForEach-Object {
+            [ordered]@{
+                key = [string]$_
+                repo = [string]$importActual[$_].repo
+                ref = [string]$importActual[$_].ref
+                skill = [string]$importActual[$_].skill
+                sparse = [bool]$importActual[$_].sparse
+            }
+        }) | ConvertTo-Json -Depth 20 -Compress
     Need ($expImportJson -eq $actImportJson) "锁文件与当前 imports 配置不一致，请重新执行 .\skills.ps1 锁定"
 }
 
@@ -3414,6 +3442,8 @@ function Get-PerfThresholdMs([string]$Metric, [int]$DefaultThresholdMs = 5000) {
         "update_vendor" { return 60000 }
         "update_imports" { return 180000 }
         "update_total" { return 240000 }
+        # One-click workflows may include target-repo audit scans; keep this stricter than update_total but above normal audit smoke time.
+        "workflow_run" { return 30000 }
         default { return $DefaultThresholdMs }
     }
 }
@@ -7885,7 +7915,15 @@ function 安装MCP([string[]]$tokens = @()) {
     $cfg.mcp_servers = $updated
     SaveCfgSafe $cfg $cfgRaw
 
-    if ($replaced) {
+    if ($DryRun) {
+        if ($replaced) {
+            Write-Host ("DRYRUN：将更新 MCP 服务：{0}" -f $server.name)
+        }
+        else {
+            Write-Host ("DRYRUN：将安装 MCP 服务：{0}" -f $server.name)
+        }
+    }
+    elseif ($replaced) {
         Write-Host ("已更新 MCP 服务：{0}" -f $server.name)
     }
     else {
@@ -7944,8 +7982,13 @@ function 卸载MCP([string[]]$tokens = @()) {
 
     $cfg.mcp_servers = $remaining
     SaveCfgSafe $cfg $cfgRaw
-    Write-Host ("已卸载 MCP 服务：{0}" -f $name)
-    Invoke-NativeMcpCleanup $name
+    if ($DryRun) {
+        Write-Host ("DRYRUN：将卸载 MCP 服务：{0}" -f $name)
+    }
+    else {
+        Write-Host ("已卸载 MCP 服务：{0}" -f $name)
+        Invoke-NativeMcpCleanup $name
+    }
     同步MCP
 }
 
@@ -13056,6 +13099,10 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             "删除" { $result.action = "remove"; $items = @($items | Select-Object -Skip 1) }
             "remove" { $result.action = "remove"; $items = @($items | Select-Object -Skip 1) }
             "列表" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
+            "列出" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
+            "目标列表" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
+            "target-list" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
+            "targets" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
             "list" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
             "扫描" { $result.action = "scan"; $items = @($items | Select-Object -Skip 1) }
             "scan" { $result.action = "scan"; $items = @($items | Select-Object -Skip 1) }
@@ -13201,6 +13248,7 @@ function Show-AuditTargetsCommandHelp {
     Write-Host "  .\skills.ps1 审查目标 修改 <name> <path>"
     Write-Host "  .\skills.ps1 审查目标 删除 <name>"
     Write-Host "  .\skills.ps1 审查目标 列表"
+    Write-Host "  .\skills.ps1 审查目标 目标列表"
     Write-Host "  .\skills.ps1 审查目标 扫描 [--target <name>] [--out <dir>] [--force]"
     Write-Host "  .\skills.ps1 审查目标 发现新技能 [--query <text>] [--out <dir>] [--force]"
     Write-Host "  .\skills.ps1 审查目标 预检 --run-id <run-id>"
@@ -14395,6 +14443,9 @@ if ($MyInvocation.InvocationName -ne '.') {
             "清理备份" { 清理备份 }
             "自动更新设置" { 自动更新设置 }
             "帮助" { 帮助 }
+            "help" { 帮助 }
+            "--help" { 帮助 }
+            "-h" { 帮助 }
             "doctor" {
                 $doctorTokens = @()
                 if (-not [string]::IsNullOrWhiteSpace($Filter)) { $doctorTokens += $Filter }

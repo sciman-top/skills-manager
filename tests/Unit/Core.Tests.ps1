@@ -1262,7 +1262,7 @@ sandbox = "elevated"
                 }
             } -ParameterFilter {
                 $command -eq "gemini" -and $timeoutSeconds -eq 5
-            } -Scope It
+            }
 
             $result = Invoke-ExternalCommandCapture "gemini" @("mcp", "list") 5
             $result.timed_out | Should Be $true
@@ -1320,7 +1320,7 @@ sandbox = "elevated"
                 [pscustomobject]@{
                     Path = "C:\tools\demo.ps1"
                 }
-            } -ParameterFilter { $Name -eq "demo" } -Scope It
+            } -ParameterFilter { $Name -eq "demo" }
 
             $invocation = Resolve-ExternalCommandInvocation "demo" @("mcp", "list")
             Split-Path -Leaf $invocation.file | Should Match "^(pwsh|powershell)(\.exe)?$"
@@ -1335,7 +1335,7 @@ sandbox = "elevated"
                 [pscustomobject]@{
                     Path = "C:\tools\demo.exe"
                 }
-            } -ParameterFilter { $Name -eq "demoexe" } -Scope It
+            } -ParameterFilter { $Name -eq "demoexe" }
 
             $invocation = Resolve-ExternalCommandInvocation "demoexe" @("arg1")
             $invocation.file | Should Be "C:\tools\demo.exe"
@@ -1354,7 +1354,7 @@ sandbox = "elevated"
             $old = [System.Environment]::GetEnvironmentVariable("SKILLS_MCP_VERIFY_GEMINI_CLI")
             try {
                 [System.Environment]::SetEnvironmentVariable("SKILLS_MCP_VERIFY_GEMINI_CLI", "1")
-                Mock Get-Command { $null } -ParameterFilter { $Name -eq "gemini" } -Scope It
+                Mock Get-Command { $null } -ParameterFilter { $Name -eq "gemini" }
 
                 $result = Test-CliMcpServerReady "gemini" @("context7")
                 $result.ok | Should Be $true
@@ -1370,8 +1370,8 @@ sandbox = "elevated"
             $old = [System.Environment]::GetEnvironmentVariable("SKILLS_MCP_VERIFY_GEMINI_CLI")
             try {
                 [System.Environment]::SetEnvironmentVariable("SKILLS_MCP_VERIFY_GEMINI_CLI", "1")
-                Mock Get-Command { [pscustomobject]@{ Name = "gemini" } } -ParameterFilter { $Name -eq "gemini" } -Scope It
-                Mock Get-McpListVerifyTimeoutSeconds { 7 } -ParameterFilter { $cli -eq "gemini" } -Scope It
+                Mock Get-Command { [pscustomobject]@{ Name = "gemini" } } -ParameterFilter { $Name -eq "gemini" }
+                Mock Get-McpListVerifyTimeoutSeconds { 7 } -ParameterFilter { $cli -eq "gemini" }
                 Mock Invoke-ExternalCommandCapture {
                     [pscustomobject]@{
                         command = "gemini"
@@ -1381,7 +1381,7 @@ sandbox = "elevated"
                         error = "timeout_after_7s"
                         output = @()
                     }
-                } -ParameterFilter { $command -eq "gemini" } -Scope It
+                } -ParameterFilter { $command -eq "gemini" }
 
                 $result = Test-CliMcpServerReady "gemini" @("context7")
                 $result.ok | Should Be $true
@@ -1398,7 +1398,7 @@ sandbox = "elevated"
             $claudeRoot = Join-Path $root ".claude"
             New-Item -ItemType Directory -Path $claudeRoot -Force | Out-Null
             Set-ContentUtf8 (Join-Path $claudeRoot ".mcp.json") '{"mcpServers":{"context7":{"transport":"stdio","command":"npx","args":["-y","@upstash/context7-mcp"]}}}'
-            Mock Invoke-ExternalCommandCapture { throw "live cli list should not be called by default" } -Scope It
+            Mock Invoke-ExternalCommandCapture { throw "live cli list should not be called by default" }
 
             Verify-McpAcrossCliWithRetry @($claudeRoot) 1 1
 
@@ -1406,7 +1406,7 @@ sandbox = "elevated"
         }
 
         It "Skips native Claude MCP commands by default" {
-            Mock Invoke-ExternalCommandWithTimeout { throw "native command should not be called by default" } -Scope It
+            Mock Invoke-ExternalCommandWithTimeout { throw "native command should not be called by default" }
 
             Invoke-NativeMcpCleanup "fetch"
             Invoke-NativeMcpSync @([pscustomobject]@{ name = "context7"; transport = "stdio"; command = "npx"; args = @("-y", "@upstash/context7-mcp") })
@@ -1415,8 +1415,8 @@ sandbox = "elevated"
         }
 
         It "Keeps claude timeout as verification failure" {
-            Mock Get-Command { [pscustomobject]@{ Name = "claude" } } -ParameterFilter { $Name -eq "claude" } -Scope It
-            Mock Get-McpListVerifyTimeoutSeconds { 11 } -ParameterFilter { $cli -eq "claude" } -Scope It
+            Mock Get-Command { [pscustomobject]@{ Name = "claude" } } -ParameterFilter { $Name -eq "claude" }
+            Mock Get-McpListVerifyTimeoutSeconds { 11 } -ParameterFilter { $cli -eq "claude" }
             Mock Invoke-ExternalCommandCapture {
                 [pscustomobject]@{
                     command = "claude"
@@ -1426,7 +1426,7 @@ sandbox = "elevated"
                     error = "timeout_after_11s"
                     output = @()
                 }
-            } -ParameterFilter { $command -eq "claude" } -Scope It
+            } -ParameterFilter { $command -eq "claude" }
 
             $result = Test-CliMcpServerReady "claude" @("context7")
             $result.ok | Should Be $false
@@ -1783,6 +1783,32 @@ url = "https://api.githubcopilot.com/mcp/"
             $thrown = $false
             try { Assert-LockMatchesCfg $cfg $lock } catch { $thrown = $true }
             $thrown | Should Be $true
+        }
+
+        It "Accepts matching lock data independent of hashtable JSON order" {
+            $cfg = [pscustomobject]@{
+                vendors = @(
+                    [pscustomobject]@{ name = "z"; repo = "https://example.com/z.git"; ref = "main" },
+                    [pscustomobject]@{ name = "a"; repo = "https://example.com/a.git"; ref = "dev" }
+                )
+                imports = @(
+                    [pscustomobject]@{ name = "manual-z"; mode = "manual"; repo = "https://example.com/z.git"; ref = "main"; skill = "skills/z"; sparse = $false },
+                    [pscustomobject]@{ name = "manual-a"; mode = "manual"; repo = "https://example.com/a.git"; ref = "dev"; skill = "skills/a"; sparse = $true }
+                )
+            }
+            $lock = [pscustomobject]@{
+                version = 1
+                vendors = @(
+                    [pscustomobject]@{ name = "a"; repo = "https://example.com/a.git"; ref = "dev"; commit = "1" },
+                    [pscustomobject]@{ name = "z"; repo = "https://example.com/z.git"; ref = "main"; commit = "2" }
+                )
+                imports = @(
+                    [pscustomobject]@{ name = "manual-a"; mode = "manual"; repo = "https://example.com/a.git"; ref = "dev"; skill = "skills\a"; sparse = $true; commit = "1" },
+                    [pscustomobject]@{ name = "manual-z"; mode = "manual"; repo = "https://example.com/z.git"; ref = "main"; skill = "skills\z"; sparse = $false; commit = "2" }
+                )
+            }
+
+            Assert-LockMatchesCfg $cfg $lock
         }
 
         It "Throws when lock commit differs from workspace commit" {

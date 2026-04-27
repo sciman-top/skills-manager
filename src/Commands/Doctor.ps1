@@ -178,6 +178,8 @@ function Get-PerfThresholdMs([string]$Metric, [int]$DefaultThresholdMs = 5000) {
         "update_vendor" { return 60000 }
         "update_imports" { return 180000 }
         "update_total" { return 240000 }
+        # One-click workflows may include target-repo audit scans; keep this stricter than update_total but above normal audit smoke time.
+        "workflow_run" { return 30000 }
         default { return $DefaultThresholdMs }
     }
 }

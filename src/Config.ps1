@@ -985,8 +985,20 @@ function Assert-LockMatchesCfg($cfg, $lock) {
             ref = if ([string]::IsNullOrWhiteSpace([string]($v.ref))) { "main" } else { [string]($v.ref) }
         }
     }
-    $expVendorJson = ($vendorExpected | ConvertTo-Json -Depth 20 -Compress)
-    $actVendorJson = ($vendorActual | ConvertTo-Json -Depth 20 -Compress)
+    $expVendorJson = @($vendorExpected.Keys | Sort-Object | ForEach-Object {
+            [ordered]@{
+                name = [string]$_
+                repo = [string]$vendorExpected[$_].repo
+                ref = [string]$vendorExpected[$_].ref
+            }
+        }) | ConvertTo-Json -Depth 20 -Compress
+    $actVendorJson = @($vendorActual.Keys | Sort-Object | ForEach-Object {
+            [ordered]@{
+                name = [string]$_
+                repo = [string]$vendorActual[$_].repo
+                ref = [string]$vendorActual[$_].ref
+            }
+        }) | ConvertTo-Json -Depth 20 -Compress
     Need ($expVendorJson -eq $actVendorJson) "锁文件与当前 vendors 配置不一致，请重新执行 .\skills.ps1 锁定"
 
     $importExpected = @{}
@@ -1011,8 +1023,24 @@ function Assert-LockMatchesCfg($cfg, $lock) {
             sparse = [bool]$i.sparse
         }
     }
-    $expImportJson = ($importExpected | ConvertTo-Json -Depth 20 -Compress)
-    $actImportJson = ($importActual | ConvertTo-Json -Depth 20 -Compress)
+    $expImportJson = @($importExpected.Keys | Sort-Object | ForEach-Object {
+            [ordered]@{
+                key = [string]$_
+                repo = [string]$importExpected[$_].repo
+                ref = [string]$importExpected[$_].ref
+                skill = [string]$importExpected[$_].skill
+                sparse = [bool]$importExpected[$_].sparse
+            }
+        }) | ConvertTo-Json -Depth 20 -Compress
+    $actImportJson = @($importActual.Keys | Sort-Object | ForEach-Object {
+            [ordered]@{
+                key = [string]$_
+                repo = [string]$importActual[$_].repo
+                ref = [string]$importActual[$_].ref
+                skill = [string]$importActual[$_].skill
+                sparse = [bool]$importActual[$_].sparse
+            }
+        }) | ConvertTo-Json -Depth 20 -Compress
     Need ($expImportJson -eq $actImportJson) "锁文件与当前 imports 配置不一致，请重新执行 .\skills.ps1 锁定"
 }
 

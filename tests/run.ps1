@@ -5,8 +5,8 @@ if (-not (Get-Module -ListAvailable -Name Pester)) {
 Import-Module Pester | Out-Null
 $pesterVersion = (Get-Module Pester | Select-Object -First 1 -ExpandProperty Version)
 Write-Host ("Pester Version: {0}" -f $pesterVersion)
-$unit = Invoke-Pester -Script "$PSScriptRoot\Unit"
-$e2e = Invoke-Pester -Script "$PSScriptRoot\E2E"
+$unit = Invoke-Pester -Script "$PSScriptRoot\Unit" -PassThru
+$e2e = Invoke-Pester -Script "$PSScriptRoot\E2E" -PassThru
 $failed = 0
 if ($unit -and $unit.FailedCount) { $failed += [int]$unit.FailedCount }
 if ($e2e -and $e2e.FailedCount) { $failed += [int]$e2e.FailedCount }

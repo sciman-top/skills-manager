@@ -42,6 +42,10 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             "删除" { $result.action = "remove"; $items = @($items | Select-Object -Skip 1) }
             "remove" { $result.action = "remove"; $items = @($items | Select-Object -Skip 1) }
             "列表" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
+            "列出" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
+            "目标列表" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
+            "target-list" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
+            "targets" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
             "list" { $result.action = "list"; $items = @($items | Select-Object -Skip 1) }
             "扫描" { $result.action = "scan"; $items = @($items | Select-Object -Skip 1) }
             "scan" { $result.action = "scan"; $items = @($items | Select-Object -Skip 1) }
@@ -187,6 +191,7 @@ function Show-AuditTargetsCommandHelp {
     Write-Host "  .\skills.ps1 审查目标 修改 <name> <path>"
     Write-Host "  .\skills.ps1 审查目标 删除 <name>"
     Write-Host "  .\skills.ps1 审查目标 列表"
+    Write-Host "  .\skills.ps1 审查目标 目标列表"
     Write-Host "  .\skills.ps1 审查目标 扫描 [--target <name>] [--out <dir>] [--force]"
     Write-Host "  .\skills.ps1 审查目标 发现新技能 [--query <text>] [--out <dir>] [--force]"
     Write-Host "  .\skills.ps1 审查目标 预检 --run-id <run-id>"

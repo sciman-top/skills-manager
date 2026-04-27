@@ -247,6 +247,8 @@ Describe "Audit Targets" {
             (Parse-AuditTargetsArgs @("修改", "demo", "..\demo-v2")).action | Should Be "update"
             (Parse-AuditTargetsArgs @("删除", "demo")).action | Should Be "remove"
             (Parse-AuditTargetsArgs @("列表")).action | Should Be "list"
+            (Parse-AuditTargetsArgs @("列出")).action | Should Be "list"
+            (Parse-AuditTargetsArgs @("目标列表")).action | Should Be "list"
             (Parse-AuditTargetsArgs @("扫描")).action | Should Be "scan"
             (Parse-AuditTargetsArgs @("发现新技能")).action | Should Be "discover_skills"
             (Parse-AuditTargetsArgs @("状态")).action | Should Be "status"

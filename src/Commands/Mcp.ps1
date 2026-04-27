@@ -1624,7 +1624,15 @@ function 安装MCP([string[]]$tokens = @()) {
     $cfg.mcp_servers = $updated
     SaveCfgSafe $cfg $cfgRaw
 
-    if ($replaced) {
+    if ($DryRun) {
+        if ($replaced) {
+            Write-Host ("DRYRUN：将更新 MCP 服务：{0}" -f $server.name)
+        }
+        else {
+            Write-Host ("DRYRUN：将安装 MCP 服务：{0}" -f $server.name)
+        }
+    }
+    elseif ($replaced) {
         Write-Host ("已更新 MCP 服务：{0}" -f $server.name)
     }
     else {
@@ -1683,8 +1691,13 @@ function 卸载MCP([string[]]$tokens = @()) {
 
     $cfg.mcp_servers = $remaining
     SaveCfgSafe $cfg $cfgRaw
-    Write-Host ("已卸载 MCP 服务：{0}" -f $name)
-    Invoke-NativeMcpCleanup $name
+    if ($DryRun) {
+        Write-Host ("DRYRUN：将卸载 MCP 服务：{0}" -f $name)
+    }
+    else {
+        Write-Host ("已卸载 MCP 服务：{0}" -f $name)
+        Invoke-NativeMcpCleanup $name
+    }
     同步MCP
 }
 

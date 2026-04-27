@@ -63,6 +63,9 @@ if ($MyInvocation.InvocationName -ne '.') {
             "清理备份" { 清理备份 }
             "自动更新设置" { 自动更新设置 }
             "帮助" { 帮助 }
+            "help" { 帮助 }
+            "--help" { 帮助 }
+            "-h" { 帮助 }
             "doctor" {
                 $doctorTokens = @()
                 if (-not [string]::IsNullOrWhiteSpace($Filter)) { $doctorTokens += $Filter }
