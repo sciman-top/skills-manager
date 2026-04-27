@@ -684,6 +684,46 @@ Describe "Audit Targets" {
             }
         }
 
+        It "Includes target repo facts in decision insight keywords" {
+            $cfg = [pscustomobject]@{
+                user_profile = [pscustomobject]@{
+                    raw_text = "PPT and classroom tools"
+                    summary = "classroom tools"
+                    structured = [pscustomobject]@{
+                        primary_work_types = @("teaching")
+                        preferred_agents = @("powerpoint-automation")
+                        tech_stack = @("dotnet")
+                        common_tasks = @("slides")
+                        constraints = @("windows")
+                        avoidances = @()
+                        decision_preferences = @()
+                    }
+                }
+            }
+            $scan = [pscustomobject]@{
+                target = [pscustomobject]@{ name = "classroomtoolkit" }
+                detected = [pscustomobject]@{
+                    languages = @("dotnet")
+                    package_managers = @("nuget")
+                    frameworks = @()
+                    build_commands = @("dotnet build")
+                    test_commands = @("dotnet test")
+                    agent_rule_files = @("AGENTS.md")
+                    notable_files = @("ClassroomToolkit.sln", ".github\workflows\ci.yml")
+                }
+                risks = @("git_dirty")
+            }
+
+            $insights = New-AuditDecisionInsights $cfg @($scan) @() @() "target-repo"
+
+            $insights.keywords.target_repo | Should Contain "classroomtoolkit"
+            $insights.keywords.target_repo | Should Contain "dotnet"
+            $insights.keywords.target_repo | Should Contain "nuget"
+            $insights.keywords.target_repo | Should Contain "dotnet build"
+            $insights.keywords.target_repo | Should Contain "ClassroomToolkit.sln"
+            $insights.keywords.target_repo | Should Contain "git_dirty"
+        }
+
         It "Fails when a required audit bundle file is missing" {
             $presentPath = Join-Path $TestDrive "audit-present.md"
             Set-ContentUtf8 $presentPath "ok"
@@ -1295,6 +1335,8 @@ jobs:
                 $report.changed_counts.add_installed | Should Be 0
                 $report.dry_run_acknowledged | Should Be $true
                 Test-Path -LiteralPath (Get-AuditDryRunSummaryPath $path) | Should Be $true
+                $summaryRaw = Get-ContentUtf8 (Get-AuditDryRunSummaryPath $path)
+                $summaryRaw | Should Match '"source_observations":\s*\[\]'
                 @(Get-ChildItem -LiteralPath (Join-Path $script:Root "docs\change-evidence") -Filter "*audit-runtime-dry-run-r-dry-*.md" -File).Count | Should Be 1
             }
             finally {
@@ -1461,6 +1503,33 @@ jobs:
             (Test-Path (Join-Path $runDir "preflight-report.json")) | Should Be $true
         }
 
+        It "Preflight by run-id passes bundle checks before recommendations exist" {
+            $oldRoot = $script:Root
+            try {
+                $script:Root = Join-Path $TestDrive "ws-preflight-bundle"
+                $runId = "r-preflight-bundle"
+                $runDir = Join-Path $script:Root (Join-Path "reports\skill-audit" $runId)
+                New-Item -ItemType Directory -Path $runDir -Force | Out-Null
+
+                $live = Get-AuditLiveInstalledState
+                Set-ContentUtf8 (Join-Path $runDir "installed-skills.json") ('{"schema_version":1,"skills":[],"mcp_servers":[],"live_fingerprint":"' + [string]$live.fingerprint + '","live_mcp_fingerprint":"' + [string]$live.mcp_fingerprint + '"}')
+                Set-ContentUtf8 (Join-Path $runDir "audit-meta.json") ('{"schema_version":1,"run_id":"' + $runId + '","mode":"target-repo","prompt_contract_version":"' + (Get-AuditPromptContractVersion) + '"}')
+                Set-ContentUtf8 (Join-Path $runDir "outer-ai-prompt.md") ("Prompt-Contract-Version: " + (Get-AuditPromptContractVersion))
+                Set-ContentUtf8 (Join-Path $runDir "recommendations.template.json") '{"schema_version":2,"run_id":"r-preflight-bundle","target":"*","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"template"}}'
+
+                $report = Invoke-AuditRecommendationsPreflight -RunId $runId
+
+                $report.success | Should Be $true
+                $report.preflight_mode | Should Be "bundle"
+                $report.recommendations_exists | Should Be $false
+                $report.run_id | Should Be $runId
+                (Test-Path -LiteralPath (Join-Path $runDir "preflight-report.json")) | Should Be $true
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
+        }
+
         It "Preflight resolves <run-id> placeholders to the latest run directory" {
             $oldRoot = $script:Root
             try {
@@ -1478,6 +1547,8 @@ jobs:
                 Set-ContentUtf8 (Join-Path $runNew "installed-skills.json") ('{"schema_version":1,"skills":[],"mcp_servers":[],"live_fingerprint":"' + [string]$live.fingerprint + '","live_mcp_fingerprint":"' + [string]$live.mcp_fingerprint + '"}')
                 Set-ContentUtf8 (Join-Path $runOld "audit-meta.json") ('{"schema_version":1,"prompt_contract_version":"' + $promptVersion + '"}')
                 Set-ContentUtf8 (Join-Path $runNew "audit-meta.json") ('{"schema_version":1,"prompt_contract_version":"' + $promptVersion + '"}')
+                Set-ContentUtf8 (Join-Path $runOld "recommendations.template.json") '{"schema_version":2,"run_id":"r-old","target":"*"}'
+                Set-ContentUtf8 (Join-Path $runNew "recommendations.template.json") '{"schema_version":2,"run_id":"r-new","target":"*"}'
                 (Get-Item $runOld).LastWriteTimeUtc = [datetime]"2026-01-01T00:00:00Z"
                 (Get-Item $runNew).LastWriteTimeUtc = [datetime]"2026-01-02T00:00:00Z"
 

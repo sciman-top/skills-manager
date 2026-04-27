@@ -15,6 +15,18 @@ function Get-AuditDryRunSummaryPath([string]$recommendationsPath) {
     return (Join-Path $dir "dry-run-summary.json")
 }
 
+function ConvertTo-AuditJsonArray($value) {
+    $items = New-Object System.Collections.Generic.List[object]
+    if ($null -ne $value) {
+        foreach ($item in @($value)) {
+            if ($null -ne $item) {
+                $items.Add($item) | Out-Null
+            }
+        }
+    }
+    return ,($items.ToArray())
+}
+
 function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
     $add = @()
     $index = 1
@@ -84,8 +96,8 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
         run_id = [string]$plan.run_id
         target = [string]$plan.target
         decision_basis_summary = [string]$plan.decision_basis.summary
-        empty_recommendation_reasons = if ($plan.PSObject.Properties.Match("empty_recommendation_reasons").Count -gt 0) { @($plan.empty_recommendation_reasons) } else { @() }
-        source_observations = if ($plan.PSObject.Properties.Match("source_observations").Count -gt 0) { @($plan.source_observations) } else { @() }
+        empty_recommendation_reasons = if ($plan.PSObject.Properties.Match("empty_recommendation_reasons").Count -gt 0) { ConvertTo-AuditJsonArray $plan.empty_recommendation_reasons } else { @() }
+        source_observations = if ($plan.PSObject.Properties.Match("source_observations").Count -gt 0) { ConvertTo-AuditJsonArray $plan.source_observations } else { @() }
         counts = [ordered]@{
             add = @($add).Count
             remove = @($remove).Count
@@ -513,7 +525,7 @@ function Resolve-AuditRecommendationsPathForPreflight([string]$RecommendationsPa
         return (Resolve-AuditTargetPath $resolvedInputPath)
     }
     Need (-not [string]::IsNullOrWhiteSpace($RunId)) "预检至少需要 --run-id 或 --recommendations 其一"
-    $resolvedRunId = Resolve-AuditRunIdInput $RunId "--run-id" @("recommendations.json", "installed-skills.json", "audit-meta.json")
+    $resolvedRunId = Resolve-AuditRunIdInput $RunId "--run-id" @("installed-skills.json", "audit-meta.json", "recommendations.template.json")
     return (Join-Path (Get-AuditReportRoot $resolvedRunId) "recommendations.json")
 }
 
@@ -580,15 +592,41 @@ function Test-AuditUserProfilePreflight([string]$recommendationDir) {
     }
 }
 
+function Get-AuditPreflightRunIdFromBundle([string]$recommendationDir, [string]$fallbackRunId) {
+    $metaPath = Join-Path $recommendationDir "audit-meta.json"
+    if (Test-Path -LiteralPath $metaPath -PathType Leaf) {
+        try {
+            $metaRaw = Get-ContentUtf8 $metaPath
+            if (-not [string]::IsNullOrWhiteSpace($metaRaw)) {
+                $meta = $metaRaw | ConvertFrom-Json
+                if ($meta.PSObject.Properties.Match("run_id").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$meta.run_id)) {
+                    return [string]$meta.run_id
+                }
+            }
+        }
+        catch {
+            # Keep preflight usable even when the report later records the exact parse issue.
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($fallbackRunId) -and [string]$fallbackRunId -ne "<run-id>") {
+        return [string]$fallbackRunId
+    }
+    return (Split-Path -Leaf $recommendationDir)
+}
+
 function Invoke-AuditRecommendationsPreflight {
     param(
         [string]$RecommendationsPath,
         [string]$RunId
     )
     $resolvedRecommendations = Resolve-AuditRecommendationsPathForPreflight $RecommendationsPath $RunId
-    $rec = Load-AuditRecommendations $resolvedRecommendations
     $recommendationDir = Split-Path -Parent $resolvedRecommendations
     if ([string]::IsNullOrWhiteSpace($recommendationDir)) { $recommendationDir = "." }
+    $recommendationsExists = Test-Path -LiteralPath $resolvedRecommendations -PathType Leaf
+    $rec = $null
+    if ($recommendationsExists) {
+        $rec = Load-AuditRecommendations $resolvedRecommendations
+    }
     $snapshotPath = Join-Path $recommendationDir "installed-skills.json"
     $liveState = Get-AuditLiveInstalledState
     if (Test-Path -LiteralPath $snapshotPath -PathType Leaf) {
@@ -608,10 +646,41 @@ function Invoke-AuditRecommendationsPreflight {
     $currentPromptVersion = Get-AuditPromptContractVersion
     $promptVersionMatched = (-not [string]::IsNullOrWhiteSpace($runPromptVersion) -and [string]$runPromptVersion -eq [string]$currentPromptVersion)
     $sourcePolicy = Get-AuditSourceEvidencePolicy $recommendationDir
-    $sourceCoverageCheck = Test-AuditRecommendationSourceCoveragePolicy $rec $sourcePolicy
     $decisionQualityPolicy = Get-AuditDecisionQualityPolicy $recommendationDir
     $decisionInsights = Get-AuditDecisionInsights $recommendationDir
-    $decisionQualityCheck = Test-AuditRecommendationDecisionQualityPolicy $rec $decisionQualityPolicy $decisionInsights
+    if ($recommendationsExists) {
+        $sourceCoverageCheck = Test-AuditRecommendationSourceCoveragePolicy $rec $sourcePolicy
+        $decisionQualityCheck = Test-AuditRecommendationDecisionQualityPolicy $rec $decisionQualityPolicy $decisionInsights
+    }
+    else {
+        $sourceCoverageCheck = [pscustomobject]@{
+            ok = $true
+            issues = @()
+            coverage = [ordered]@{
+                total_change_items = 0
+                unique_sources = @()
+                unique_source_count = 0
+                http_source_count = 0
+                source_observation_count = 0
+                items_with_source_observation = 0
+                change_items_missing_source_observation = @()
+            }
+        }
+        $decisionQualityCheck = [pscustomobject]@{
+            ok = $true
+            issues = @()
+            coverage = [ordered]@{
+                total_change_items = 0
+                items_with_complete_keyword_trace = 0
+                user_keyword_ref_count = 0
+                target_keyword_ref_count = 0
+                installed_keyword_ref_count = 0
+                unique_user_keywords = @()
+                unique_target_keywords = @()
+                unique_installed_keywords = @()
+            }
+        }
+    }
     $userProfileCheck = Test-AuditUserProfilePreflight $recommendationDir
 
     $issues = New-Object System.Collections.Generic.List[string]
@@ -634,10 +703,12 @@ function Invoke-AuditRecommendationsPreflight {
 
     $report = [ordered]@{
         schema_version = 1
-        run_id = [string]$rec.run_id
-        target = [string]$rec.target
+        preflight_mode = if ($recommendationsExists) { "recommendations" } else { "bundle" }
+        run_id = if ($recommendationsExists) { [string]$rec.run_id } else { Get-AuditPreflightRunIdFromBundle $recommendationDir $RunId }
+        target = if ($recommendationsExists) { [string]$rec.target } else { "" }
         success = ($issues.Count -eq 0)
         recommendations_path = $resolvedRecommendations
+        recommendations_exists = $recommendationsExists
         prompt_contract = [ordered]@{
             run = $runPromptVersion
             current = $currentPromptVersion
@@ -658,7 +729,12 @@ function Invoke-AuditRecommendationsPreflight {
 
     Write-Host ("预检报告：{0}" -f $reportPath) -ForegroundColor Cyan
     if ($issues.Count -eq 0) {
-        Write-Host "预检通过：快照与提示词契约均匹配，可继续研究与 dry-run。" -ForegroundColor Green
+        if ($recommendationsExists) {
+            Write-Host "预检通过：快照与提示词契约均匹配，可继续研究与 dry-run。" -ForegroundColor Green
+        }
+        else {
+            Write-Host "预检通过：审查包快照与提示词契约均匹配；recommendations.json 尚未生成，可继续生成建议。" -ForegroundColor Green
+        }
         return [pscustomobject]$report
     }
 

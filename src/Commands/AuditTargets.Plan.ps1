@@ -436,14 +436,14 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
         run_id = [string]$recommendations.run_id
         target = [string]$recommendations.target
         decision_basis = $recommendations.decision_basis
-        source_observations = @($recommendations.source_observations)
+        source_observations = ConvertTo-AuditJsonArray $recommendations.source_observations
         items = @($items)
         overlap_findings = @($recommendations.overlap_findings)
         removal_candidates = @($removals)
         do_not_install = @($recommendations.do_not_install)
         mcp_items = @($mcpItems)
         mcp_removal_candidates = @($mcpRemovals)
-        empty_recommendation_reasons = @($recommendations.empty_recommendation_reasons)
+        empty_recommendation_reasons = ConvertTo-AuditJsonArray $recommendations.empty_recommendation_reasons
     })
 }
 
