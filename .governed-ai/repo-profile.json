@@ -23,8 +23,8 @@
   },
   "build_commands": [
     {
+      "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1",
       "id": "build",
-      "command": "./build.ps1",
       "required": true
     }
   ],
@@ -38,8 +38,8 @@
   ],
   "contract_commands": [
     {
+      "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File skills.ps1 doctor --strict --threshold-ms 8000",
       "id": "contract",
-      "command": "./skills.ps1 doctor --strict --threshold-ms 8000",
       "required": true
     }
   ],
@@ -106,8 +106,8 @@
   "schema_version": "1.0",
   "test_commands": [
     {
+      "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File skills.ps1 发现",
       "id": "test",
-      "command": "./skills.ps1 发现",
       "required": true
     }
   ],
@@ -132,49 +132,53 @@
       "Use mixed Chinese/English when it improves traceability for public APIs, protocols, error codes, or filenames."
     ]
   },
-  "windows_process_environment_policy": {
+  "learning_assistance_policy": {
     "enabled": true,
-    "scope": "windows_process_entrypoints",
-    "required_variables": [
-      "ComSpec",
-      "SystemRoot",
-      "WINDIR",
-      "APPDATA",
-      "LOCALAPPDATA",
-      "PROGRAMDATA",
-      "ProgramFiles"
+    "observable_signals_only": true,
+    "require_evidence_refs": true,
+    "trigger_on_user_correction": true,
+    "trigger_signals": [
+      "intent_drift",
+      "goal_scope_mismatch",
+      "expected_actual_missing",
+      "symptom_root_cause_confusion",
+      "term_confusion",
+      "repeated_question_no_progress",
+      "repeated_failure",
+      "observation_gap",
+      "budget_pressure",
+      "verbosity_overrun"
     ],
-    "inherited_network_variables": [
-      "HTTP_PROXY",
-      "HTTPS_PROXY",
-      "ALL_PROXY",
-      "NO_PROXY",
-      "http_proxy",
-      "https_proxy",
-      "all_proxy",
-      "no_proxy"
+    "restatement_triggers": [
+      "task_start",
+      "before_write",
+      "after_user_correction",
+      "after_repeated_failure",
+      "before_delivery"
     ],
-    "safe_codex_policy_source": "Import only non-secret allowlisted variables from Codex shell_environment_policy.set, then User/Machine environment, into the current process before launching child tools.",
-    "preferred_powershell_executable": "pwsh",
-    "fallback_powershell_executable": "powershell",
-    "windows_powershell_escape_hatch_env": "CODEX_ALLOW_WINDOWS_POWERSHELL",
-    "required_practice": "Normalize Windows process environment and inherited proxy variables before running Python, Node, Codex, gh, or child PowerShell from repo entrypoints.",
-    "runtime_runbook": "docs/runbooks/windows-process-environment-recovery.md",
-    "coding_guidance": [
-      "When adding or editing a Windows PowerShell entrypoint that invokes Python, Node, Codex, or child PowerShell, initialize the Windows process environment before tool execution.",
-      "In CI, .cmd wrappers, and child PowerShell invocations, prefer pwsh / PowerShell 7 and fall back to Windows PowerShell 5.1 only when pwsh is unavailable or CODEX_ALLOW_WINDOWS_POWERSHELL=1 is explicitly set.",
-      "Do not hard-code powershell or powershell.exe for normal script execution; use a Resolve-PowerShellExecutable helper that checks pwsh first.",
-      "When Codex network probes fail with DNS errors such as os error 11003 but the configured local proxy endpoint is reachable, treat missing HTTP_PROXY/HTTPS_PROXY/NO_PROXY in the current parent process as process_environment_incomplete.",
-      "Do not assume a running PowerShell or Codex process hot-loads new config.toml shell_environment_policy values; normalize the current process or restart the parent shell.",
-      "Do not hard-code the exact .exe executable name in scripts or operator docs. Prefer codex, codex.cmd, or configurable --codex-bin / GOVERNED_RUNTIME_CODEX_BIN because Windows installs may expose only command shims.",
-      "Normalize PATH with Windows system directories and default Git/GitHub CLI install directories before assuming git or gh is not installed.",
-      "If raw Python asyncio or Node CSPRNG probes fail only inside Codex or a wrapper process, treat it as process_environment_incomplete before blaming project code.",
-      "Only run Winsock/IP reset after the same probes also fail in a fresh elevated PowerShell."
+    "bug_observation_checklist": [
+      "expected",
+      "actual",
+      "repro_steps",
+      "logs_or_screenshot"
     ],
-    "powershell_entrypoint_pattern": ". \"$PSScriptRoot\\Initialize-WindowsProcessEnvironment.ps1\"; Initialize-WindowsProcessEnvironment",
-    "verification_commands": [
-      "python -c \"import asyncio; print('asyncio ok')\"",
-      "node -e \"console.log('node ok')\""
+    "max_terms_per_response": 1,
+    "max_task_restatements_per_stage": 1,
+    "max_observation_items": 4,
+    "max_clarification_questions": 3,
+    "teaching_style": "definition_task_role_common_mistake",
+    "token_budget_policy": {
+      "default_explanation_budget": 180,
+      "default_clarification_budget": 120,
+      "compression_mode": "stage_summary"
+    },
+    "degrade_to_handoff_on_budget_pressure": true,
+    "guidance": [
+      "Treat user confusion as observable interaction signals only; do not infer psychology.",
+      "Restate the task only at high-value checkpoints such as task start, before writes, after user correction, after repeated failure, and before delivery.",
+      "Teach with at most one term per response by default: definition, role in the current task, and common mistake.",
+      "For bugs, prefer a short expected/actual/repro/logs checklist before long explanations.",
+      "When budget pressure or verbosity overrun appears, compress to stage summary or handoff refs instead of expanding the lesson."
     ]
   },
   "rule_file_coordination_policy": {
@@ -230,10 +234,55 @@
       "global_to_repo_mapping"
     ]
   },
+  "windows_process_environment_policy": {
+    "enabled": true,
+    "scope": "windows_process_entrypoints",
+    "required_variables": [
+      "ComSpec",
+      "SystemRoot",
+      "WINDIR",
+      "APPDATA",
+      "LOCALAPPDATA",
+      "PROGRAMDATA",
+      "ProgramFiles"
+    ],
+    "inherited_network_variables": [
+      "HTTP_PROXY",
+      "HTTPS_PROXY",
+      "ALL_PROXY",
+      "NO_PROXY",
+      "http_proxy",
+      "https_proxy",
+      "all_proxy",
+      "no_proxy"
+    ],
+    "safe_codex_policy_source": "Import only non-secret allowlisted variables from Codex shell_environment_policy.set, then User/Machine environment, into the current process before launching child tools.",
+    "preferred_powershell_executable": "pwsh",
+    "fallback_powershell_executable": "powershell",
+    "windows_powershell_escape_hatch_env": "CODEX_ALLOW_WINDOWS_POWERSHELL",
+    "required_practice": "Normalize Windows process environment and inherited proxy variables before running Python, Node, Codex, gh, or child PowerShell from repo entrypoints.",
+    "runtime_runbook": "docs/runbooks/windows-process-environment-recovery.md",
+    "coding_guidance": [
+      "When adding or editing a Windows PowerShell entrypoint that invokes Python, Node, Codex, or child PowerShell, initialize the Windows process environment before tool execution.",
+      "In CI, .cmd wrappers, and child PowerShell invocations, prefer pwsh / PowerShell 7 and fall back to Windows PowerShell 5.1 only when pwsh is unavailable or CODEX_ALLOW_WINDOWS_POWERSHELL=1 is explicitly set.",
+      "Do not hard-code powershell or powershell.exe for normal script execution; use a Resolve-PowerShellExecutable helper that checks pwsh first.",
+      "When Codex network probes fail with DNS errors such as os error 11003 but the configured local proxy endpoint is reachable, treat missing HTTP_PROXY/HTTPS_PROXY/NO_PROXY in the current parent process as process_environment_incomplete.",
+      "Do not assume a running PowerShell or Codex process hot-loads new config.toml shell_environment_policy values; normalize the current process or restart the parent shell.",
+      "Do not hard-code the exact .exe executable name in scripts or operator docs. Prefer codex, codex.cmd, or configurable --codex-bin / GOVERNED_RUNTIME_CODEX_BIN because Windows installs may expose only command shims.",
+      "Normalize PATH with Windows system directories and default Git/GitHub CLI install directories before assuming git or gh is not installed.",
+      "If raw Python asyncio or Node CSPRNG probes fail only inside Codex or a wrapper process, treat it as process_environment_incomplete before blaming project code.",
+      "Only run Winsock/IP reset after the same probes also fail in a fresh elevated PowerShell."
+    ],
+    "powershell_entrypoint_pattern": ". \"$PSScriptRoot\\Initialize-WindowsProcessEnvironment.ps1\"; Initialize-WindowsProcessEnvironment",
+    "verification_commands": [
+      "python -c \"import asyncio; print('asyncio ok')\"",
+      "node -e \"console.log('node ok')\""
+    ]
+  },
   "quick_gate_commands": [
     {
+      "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File skills.ps1 发现",
       "id": "test",
-      "command": "./skills.ps1 发现",
       "required": true,
       "timeout_seconds": 180,
       "satisfies_gate_ids": [
@@ -241,8 +290,8 @@
       ]
     },
     {
+      "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File skills.ps1 doctor --strict --threshold-ms 8000",
       "id": "contract",
-      "command": "./skills.ps1 doctor --strict --threshold-ms 8000",
       "required": true,
       "timeout_seconds": 180,
       "satisfies_gate_ids": [
@@ -252,8 +301,8 @@
   ],
   "full_gate_commands": [
     {
+      "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1",
       "id": "build",
-      "command": "./build.ps1",
       "required": true,
       "timeout_seconds": 600,
       "satisfies_gate_ids": [
@@ -261,8 +310,8 @@
       ]
     },
     {
+      "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File skills.ps1 发现",
       "id": "test",
-      "command": "./skills.ps1 发现",
       "required": true,
       "timeout_seconds": 600,
       "satisfies_gate_ids": [
@@ -270,8 +319,8 @@
       ]
     },
     {
+      "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File skills.ps1 doctor --strict --threshold-ms 8000",
       "id": "contract",
-      "command": "./skills.ps1 doctor --strict --threshold-ms 8000",
       "required": true,
       "timeout_seconds": 600,
       "satisfies_gate_ids": [
@@ -279,54 +328,5 @@
       ]
     }
   ],
-  "gate_timeout_seconds": 300,
-  "learning_assistance_policy": {
-    "enabled": true,
-    "observable_signals_only": true,
-    "require_evidence_refs": true,
-    "trigger_on_user_correction": true,
-    "trigger_signals": [
-      "intent_drift",
-      "goal_scope_mismatch",
-      "expected_actual_missing",
-      "symptom_root_cause_confusion",
-      "term_confusion",
-      "repeated_question_no_progress",
-      "repeated_failure",
-      "observation_gap",
-      "budget_pressure",
-      "verbosity_overrun"
-    ],
-    "restatement_triggers": [
-      "task_start",
-      "before_write",
-      "after_user_correction",
-      "after_repeated_failure",
-      "before_delivery"
-    ],
-    "bug_observation_checklist": [
-      "expected",
-      "actual",
-      "repro_steps",
-      "logs_or_screenshot"
-    ],
-    "max_terms_per_response": 1,
-    "max_task_restatements_per_stage": 1,
-    "max_observation_items": 4,
-    "max_clarification_questions": 3,
-    "teaching_style": "definition_task_role_common_mistake",
-    "token_budget_policy": {
-      "default_explanation_budget": 180,
-      "default_clarification_budget": 120,
-      "compression_mode": "stage_summary"
-    },
-    "degrade_to_handoff_on_budget_pressure": true,
-    "guidance": [
-      "Treat user confusion as observable interaction signals only; do not infer psychology.",
-      "Restate the task only at high-value checkpoints such as task start, before writes, after user correction, after repeated failure, and before delivery.",
-      "Teach with at most one term per response by default: definition, role in the current task, and common mistake.",
-      "For bugs, prefer a short expected/actual/repro/logs checklist before long explanations.",
-      "When budget pressure or verbosity overrun appears, compress to stage summary or handoff refs instead of expanding the lesson."
-    ]
-  }
+  "gate_timeout_seconds": 300
 }
