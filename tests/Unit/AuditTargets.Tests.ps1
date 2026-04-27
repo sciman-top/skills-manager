@@ -909,6 +909,9 @@ jobs:
             $prompt | Should Match "N/A"
             $prompt | Should Match "installed-skills.json"
             $prompt | Should Match "name==server.name"
+            $prompt | Should Match "预检"
+            $prompt | Should Match "source_observations"
+            $prompt | Should Match "不得把 dry-run 建议描述成已安装"
         }
 
         It "Keeps built-in prompt markdown inline code literal without control-character corruption" {
@@ -949,6 +952,8 @@ jobs:
             $brief | Should Match "name == server.name"
             $brief | Should Match "No duplicate skill add/remove or MCP add/remove recommendations"
             $brief | Should Match "Decision insights JSON: N/A"
+            $brief | Should Match "Only write ``recommendations.json``"
+            $brief | Should Match "Execute preflight"
         }
 
         It "Writes profile-only audit brief with explicit target-scan false guidance" {
@@ -962,6 +967,8 @@ jobs:
             $brief | Should Match "target_scan_used`` as boolean ``false``"
             $brief | Should Match "Source strategy JSON: source-strategy.json"
             $brief | Should Match "Decision insights JSON: decision-insights.json"
+            $brief | Should Match "Only write ``recommendations.json``"
+            $brief | Should Match "Execute preflight"
         }
 
         It "Writes runtime outer AI prompt with blocker and summary format sections" {
@@ -981,6 +988,8 @@ jobs:
             $prompt | Should Match "name`` 必须等于 ``server.name``"
             $prompt | Should Match "不得保留重复的技能新增/卸载建议或重复的 MCP 新增/卸载建议"
             $prompt | Should Match "决策洞察"
+            $prompt | Should Match "执行预检"
+            $prompt | Should Match "除 ``recommendations.json`` 外，不得修改本轮审查包输入文件"
         }
 
         It "Writes profile-only runtime outer AI prompt without requiring repo scan" {
@@ -995,6 +1004,8 @@ jobs:
             $prompt | Should Match "target_scan_used`` 为 ``false``"
             $prompt | Should Match "不得编造目标仓事实"
             $prompt | Should Match "decision-insights.json"
+            $prompt | Should Match "执行预检"
+            $prompt | Should Match "这些文件只能读，不能改"
         }
 
         It "Builds recommendations template with placeholder examples" {

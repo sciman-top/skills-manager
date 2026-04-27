@@ -18,13 +18,19 @@ function Get-DefaultAuditOuterAiPrompt {
     return @"
 # Outer AI Audit Prompt (Short / Codex + Claude)
 
-目标：代理完成审查流程；先产出并自检 recommendations.json，再执行 dry-run。
+目标：基于当前审查包生成可预检的 recommendations.json；预检通过后只执行 dry-run。未经明确确认，不得 apply。
+
+0) 写入边界
+- 只允许写/更新 ``reports/skill-audit/<run-id>/recommendations.json``；画像缺失时可写 ``reports/skill-audit/user-profile.structured.json``。
+- 不得修改 ``outer-ai-prompt.md``、``ai-brief.md``、``user-profile.json``、``installed-skills.json``、``source-strategy.json``、``decision-insights.json``、``recommendations.template.json``、``repo-scan.json`` / ``repo-scans.json``。
+- 不得把 dry-run 建议描述成已安装、已卸载或已落盘。
 
 1) run-id
-- 允许 ``<run-id>``，自动解析最近可用 run（必须含 recommendations.json / installed-skills.json / audit-meta.json）。
-- 若无可用 run：立即停止并报告：先执行 ``.\skills.ps1 审查目标 扫描``。
+- 如果当前提示词已列出审查包目录和文件路径，以该运行包为准。
+- ``<run-id>`` 只用于命令路径占位；写 recommendations 前必须已有扫描/发现运行包，执行预检或 dry-run 前必须已写出 recommendations.json。
+- 若无可用运行包：立即停止并报告：先执行 ``.\skills.ps1 审查目标 扫描`` 或 ``.\skills.ps1 审查目标 发现新技能``。
 
-2) 画像预检查
+2) 画像预检查（只在本轮输入显示画像不完整时执行）
 - 检查 audit-targets.json.user_profile。
 - 若 summary 为空或 structured 不完整：补全 ``reports/skill-audit/user-profile.structured.json``（schema 不变，summary 非空，structured_by="outer-ai"），然后执行：
   ``.\skills.ps1 审查目标 需求结构化 --profile "reports\skill-audit\user-profile.structured.json"``
@@ -32,28 +38,33 @@ function Get-DefaultAuditOuterAiPrompt {
 
 3) 只读输入（必须真实读取）
 - outer-ai-prompt.md、ai-brief.md、user-profile.json、installed-skills.json（仅输入快照）、source-strategy.json、decision-insights.json、recommendations.template.json
-- repo-scan.json / repo-scans.json：存在才读；N/A/profile-only 不得臆造仓库事实
+- repo-scan.json / repo-scans.json：存在才读；N/A/profile-only 不得臆造仓库事实。
+- source-strategy.json 中的 evidence_policy / decision_quality_policy 是硬约束；decision-insights.json 是 keyword_trace 的可选关键词来源。
 
 4) 产出 recommendations.json
 - 路径：``reports/skill-audit/<run-id>/recommendations.json``
 - ``schema_version=2``；不得保留 ``<...>``；``decision_basis.summary`` 非空
 - 每条新增/卸载（skills/MCP）必须有：``reason_user_profile``、``reason_target_repo``、``sources``（仅本轮真实来源）
+- 每条新增/卸载（skills/MCP）建议必须有匹配的 ``source_observations``；若策略要求，``sources`` 数量、http 来源和 observation 必须达标
 - 每条新增/卸载（skills/MCP）建议应包含 ``keyword_trace.user_profile`` / ``keyword_trace.target_repo_or_context`` / ``keyword_trace.installed_state``（与 decision-insights 对齐）
 - MCP 新增写 ``mcp_new_servers`` 且 ``name==server.name``；MCP 卸载写 ``mcp_removal_candidates``
 - ``overlap_findings`` 仅报告；``do_not_install`` 仅记录当前不应安装项；证据不足留空
 
-5) 自检后 dry-run
-- 自检：JSON/schema/双理由/sources/无占位符
+5) 自检、预检、dry-run
+- 自检：JSON/schema/双理由/sources/source_observations/keyword_trace/无占位符/无重复建议
+- 预检：
+  ``.\skills.ps1 审查目标 预检 --recommendations "reports\skill-audit\<run-id>\recommendations.json"``
+- 若预检失败（如 stale_snapshot、prompt_contract_mismatch、insufficient_source_coverage、insufficient_decision_quality、user_profile_invalid），停止并报告阻断项；不要绕过。
 - dry-run：
   ``.\skills.ps1 审查目标 应用 --recommendations "reports\skill-audit\<run-id>\recommendations.json" --dry-run-ack "我知道未落盘"``
-- 自检或 dry-run 失败即停止并报告阻断项
+- 自检、预检或 dry-run 失败即停止并报告阻断项
 
 6) 汇报格式（按 dry-run 原序号，不重排）
 - 新增建议 / 卸载建议 / MCP 新增建议 / MCP 卸载建议
 - 每项：序号、名称、reason_user_profile、reason_target_repo、sources
 - 空类必须写“无该类建议”，并给 1 句原因
 
-安全约束：未收到明确确认，不执行 ``--apply --yes``。
+安全约束：未收到明确确认，不执行 ``--apply --yes``；不得把建议写成已生效。
 "@
 }
 
@@ -644,7 +655,7 @@ function Get-AuditRunId {
 }
 
 function Get-AuditPromptContractVersion {
-    return "audit-prompt-v20260423.4"
+    return "audit-prompt-v20260427.1"
 }
 
 function Get-AuditReportRoot([string]$runId) {
@@ -1580,6 +1591,7 @@ function Write-AuditAiBrief([string]$path, $scanData, [string]$userProfilePath, 
     if ([string]::IsNullOrWhiteSpace($repoScansPath)) { $repoScansPath = "N/A" }
     if ([string]::IsNullOrWhiteSpace($SourceStrategyPath)) { $SourceStrategyPath = "N/A" }
     if ([string]::IsNullOrWhiteSpace($DecisionInsightsPath)) { $DecisionInsightsPath = "N/A" }
+    $recommendationsPath = Join-Path (Split-Path $path -Parent) "recommendations.json"
 
     if ($normalizedMode -eq "profile-only") {
         $queryText = if ([string]::IsNullOrWhiteSpace($Query)) { "N/A" } else { $Query }
@@ -1614,15 +1626,17 @@ Scan inputs:
 Rules:
 
 - Profile-only mode has no target repo scan; do not fabricate repository facts.
+- Only write ``recommendations.json`` in this run directory. Do not modify generated input files, snapshots, prompts, briefs, templates, source strategy, decision insights, or repo scan files.
 - All decisions must be based on user-profile.json, installed-skills.json (audit snapshot, not live source of truth), source-strategy.json, and real external research.
 - decision-insights.json provides machine-readable keyword anchors; every add/remove skill or MCP recommendation should keep ``keyword_trace.user_profile`` + ``keyword_trace.target_repo_or_context`` + ``keyword_trace.installed_state`` aligned to it.
+- Treat source-strategy.json ``evidence_policy`` and ``decision_quality_policy`` as hard constraints.
 - Use ``reason_target_repo`` to explain the current installed-skill inventory / profile-only context; do not claim target repository evidence.
 - If any required local input is missing, unreadable, or empty, stop and report the blocker instead of guessing.
 - Network research is authorized within this audit workflow, but installation still requires --apply --yes.
 - Replace every template placeholder wrapped in `<...>` or delete the example entry entirely; do not leave placeholder values in the final file.
 - Keep ``recommendation_mode`` as ``profile-only``.
 - Keep ``decision_basis.user_profile_used`` and ``decision_basis.source_strategy_used`` as boolean ``true``; keep ``decision_basis.target_scan_used`` as boolean ``false``; provide a non-empty ``decision_basis.summary``.
-- Record ``source_observations`` for researched candidates; every selected skill/MCP add/remove recommendation must have a matching observation with real sources.
+- Record ``source_observations`` for researched candidates; every selected skill/MCP add/remove recommendation must have a matching observation with real sources and matching candidate_type/name/decision.
 - Skill installs require ``reason_user_profile``, ``reason_target_repo``, source links, confidence, repo, skill path, ref, and mode.
 - Skill removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and the exact installed ``vendor``/``from`` pair.
 - MCP installs must include ``reason_user_profile``, ``reason_target_repo``, sources, confidence, a valid ``server`` payload, and provider/security evidence when available.
@@ -1651,17 +1665,20 @@ Pre-dry-run self-check:
 - ``decision_basis.target_scan_used`` is ``false``.
 - No remaining placeholder values wrapped in `<...>`.
 - Each skill/MCP add/remove item has both reasons plus at least one real source.
+- Each selected skill/MCP add/remove item has a matching ``source_observations`` entry with real sources.
 - Each skill/MCP add/remove item keeps non-empty ``keyword_trace`` arrays (user_profile / target_repo_or_context / installed_state).
+- No duplicate skill add/remove or MCP add/remove recommendations remain in the final file.
 - Stop before dry-run if any self-check item fails.
 
 Execution order:
 
 1) Read all local inputs
-2) Write ``recommendations.json`` from ``recommendations.template.json``
+2) Write ``recommendations.json`` from ``recommendations.template.json`` to ``$recommendationsPath``
 3) Run the self-check and stop if any item fails
-4) Execute dry-run
-5) Summarize dry-run with original indexes and one-line dual-reason entries
-6) Wait for explicit user confirmation before apply
+4) Execute preflight: ``.\skills.ps1 审查目标 预检 --recommendations "$recommendationsPath"``
+5) Execute dry-run
+6) Summarize dry-run with original indexes and one-line dual-reason entries
+7) Wait for explicit user confirmation before apply
 
 User-facing dry-run summary format:
 
@@ -1710,14 +1727,16 @@ Scan inputs:
 Rules:
 
 - All decisions must be based on BOTH user-profile.json and target repo scan facts, and must use installed-skills.json as the audit snapshot for currently installed skills and MCP servers.
+- Only write ``recommendations.json`` in this run directory. Do not modify generated input files, snapshots, prompts, briefs, templates, source strategy, decision insights, or repo scan files.
 - Use source-strategy.json to cover the built-in source set and explain source tradeoffs.
 - decision-insights.json provides machine-readable keyword anchors; every add/remove skill or MCP recommendation should keep ``keyword_trace.user_profile`` + ``keyword_trace.target_repo_or_context`` + ``keyword_trace.installed_state`` aligned to it.
+- Treat source-strategy.json ``evidence_policy`` and ``decision_quality_policy`` as hard constraints.
 - Treat any scan path shown as ``N/A`` as "not provided"; do not infer hidden content from it.
 - If any required local input is missing, unreadable, or empty, stop and report the blocker instead of guessing.
 - Network research is authorized within this audit workflow, but installation still requires --apply --yes.
 - Replace every template placeholder wrapped in `<...>` or delete the example entry entirely; do not leave placeholder values in the final file.
 - Keep ``decision_basis.user_profile_used``, ``decision_basis.target_scan_used``, and ``decision_basis.source_strategy_used`` as boolean ``true``, and provide a non-empty ``decision_basis.summary``.
-- Record ``source_observations`` for researched candidates; every selected skill/MCP add/remove recommendation must have a matching observation with real sources.
+- Record ``source_observations`` for researched candidates; every selected skill/MCP add/remove recommendation must have a matching observation with real sources and matching candidate_type/name/decision.
 - Skill installs require ``reason_user_profile``, ``reason_target_repo``, source links, confidence, repo, skill path, ref, and mode.
 - Skill removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and the exact installed ``vendor``/``from`` pair.
 - MCP installs must include ``reason_user_profile``, ``reason_target_repo``, sources, confidence, a valid ``server`` payload, and provider/security evidence when available.
@@ -1745,6 +1764,7 @@ Pre-dry-run self-check:
 - ``decision_basis.summary`` is non-empty.
 - No remaining placeholder values wrapped in `<...>`.
 - Each skill/MCP add/remove item has both reasons plus at least one real source.
+- Each selected skill/MCP add/remove item has a matching ``source_observations`` entry with real sources.
 - Each skill/MCP add/remove item keeps non-empty ``keyword_trace`` arrays (user_profile / target_repo_or_context / installed_state).
 - Each MCP add item keeps ``name == server.name``.
 - No duplicate skill add/remove or MCP add/remove recommendations remain in the final file.
@@ -1753,11 +1773,12 @@ Pre-dry-run self-check:
 Execution order:
 
 1) Read all local inputs
-2) Write ``recommendations.json`` from ``recommendations.template.json``
+2) Write ``recommendations.json`` from ``recommendations.template.json`` to ``$recommendationsPath``
 3) Run the self-check and stop if any item fails
-4) Execute dry-run
-5) Summarize dry-run with original indexes and one-line dual-reason entries
-6) Wait for explicit user confirmation before apply
+4) Execute preflight: ``.\skills.ps1 审查目标 预检 --recommendations "$recommendationsPath"``
+5) Execute dry-run
+6) Summarize dry-run with original indexes and one-line dual-reason entries
+7) Wait for explicit user confirmation before apply
 
 User-facing dry-run summary format:
 
@@ -1783,10 +1804,10 @@ function Write-AuditOuterAiPromptFile([string]$path, [string]$reportRoot, [strin
     if ([string]::IsNullOrWhiteSpace($DecisionInsightsPath)) { $DecisionInsightsPath = "N/A" }
     $queryText = if ([string]::IsNullOrWhiteSpace($Query)) { "N/A" } else { $Query }
     $inputReadStep = if ($normalizedMode -eq "profile-only") {
-        "1. 阅读 ai-brief.md、user-profile.json、installed-skills.json、source-strategy.json、decision-insights.json；repo-scan 输入为 N/A 时代表本轮不绑定目标仓。"
+        "1. 阅读 ai-brief.md、user-profile.json、installed-skills.json、source-strategy.json、decision-insights.json；repo-scan 输入为 N/A 时代表本轮不绑定目标仓；这些文件只能读，不能改。"
     }
     else {
-        "1. 阅读 ai-brief.md、user-profile.json、installed-skills.json，并按存在文件读取 repo-scan.json / repo-scans.json，同时读取 source-strategy.json 与 decision-insights.json。"
+        "1. 阅读 ai-brief.md、user-profile.json、installed-skills.json，并按存在文件读取 repo-scan.json / repo-scans.json，同时读取 source-strategy.json 与 decision-insights.json；这些文件只能读，不能改。"
     }
     $basisCheckStep = if ($normalizedMode -eq "profile-only") {
         "   - recommendations.json 与模板字段同构，``recommendation_mode = profile-only``，``decision_basis.user_profile_used`` / ``decision_basis.source_strategy_used`` 为 ``true``，``decision_basis.target_scan_used`` 为 ``false``，且 ``decision_basis.summary`` 非空"
@@ -1834,15 +1855,18 @@ $basisCheckStep
    - 技能新增建议的 ``install.mode`` 只能是 ``manual`` 或 ``vendor``，``confidence`` 只能是 ``low`` / ``medium`` / ``high``
    - MCP 新增建议必须包含合法 ``server``（``transport``=``stdio``/``sse``/``http``；``stdio`` 要有 ``command``，``sse/http`` 要有 ``url``），且 ``name`` 必须等于 ``server.name``
    - 不得保留重复的技能新增/卸载建议或重复的 MCP 新增/卸载建议
-4. 执行 dry-run：
+4. 执行预检；失败即停止，不得绕过：
+   .\skills.ps1 审查目标 预检 --recommendations "$([System.IO.Path]::Combine($reportRoot, 'recommendations.json'))"
+5. 执行 dry-run：
    .\skills.ps1 审查目标 应用 --recommendations "$([System.IO.Path]::Combine($reportRoot, 'recommendations.json'))" --dry-run-ack "我知道未落盘"
-5. 根据 dry-run 结果，向用户列出“技能新增/卸载建议 + MCP 新增/卸载建议”及序号
-6. 等待用户确认后，再执行：
+6. 根据 dry-run 结果，向用户列出“技能新增/卸载建议 + MCP 新增/卸载建议”及序号
+7. 等待用户确认后，再执行：
    .\skills.ps1 审查目标 应用 --recommendations "$([System.IO.Path]::Combine($reportRoot, 'recommendations.json'))" --apply --yes
 
 ## Output Contract
 
 - ``recommendations.json`` 必须与模板 schema 一致
+- 除 ``recommendations.json`` 外，不得修改本轮审查包输入文件、快照、提示词、brief、模板、来源策略、决策洞察或 repo scan
 - 技能与 MCP 的新增/卸载建议都必须保留双依据和来源，且每项理由要简短可读
 - ``source_observations`` 必须记录本轮调研过的候选项；被选中的新增/卸载项必须能在其中找到对应 candidate_type/name/decision
 - 若 ``source-strategy.decision_quality_policy`` 开启，``keyword_trace`` 必须满足最小命中与关键词归属校验
@@ -1861,7 +1885,7 @@ $basisCheckStep
 
 - 任一必需输入文件缺失、为空或不可读时，立即停止并汇报阻断项
 $modeBlocking
-- 若自检失败、仍有 ``<...>`` 占位符、或来源并非本轮真实查看结果，必须先修正再继续
+- 若自检或预检失败、仍有 ``<...>`` 占位符、或来源并非本轮真实查看结果，必须先修正再继续
 
 ## User Summary Format
 
