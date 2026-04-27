@@ -212,11 +212,11 @@ function Select-WorkflowProfileInteractively($catalog) {
         Write-Host ""
         Write-Host "=== 选择一键工作流场景 ==="
         Write-Host "1) 新手（浏览技能 -> 选择安装 -> 重建并同步 -> doctor --strict）"
-        Write-Host "2) 维护（更新上游 -> 重建并同步 -> 同步MCP -> doctor --strict）"
+        Write-Host "2) 维护（更新上游 -> 重建并同步 -> 同步 MCP -> doctor --strict）"
         Write-Host "3) 审查（查看需求 -> 目标仓列表 -> 生成审查包 -> 查看最近状态）"
-        Write-Host "4) 全流程（更新上游 -> 浏览技能 -> 重建并同步 -> 同步MCP -> doctor --strict）"
+        Write-Host "4) 全流程（更新上游 -> 浏览技能 -> 重建并同步 -> 同步 MCP -> doctor --strict）"
         Write-Host "0) 取消"
-        $choice = Read-HostSafe "请选择"
+        $choice = Read-MenuChoice "请选择（回车取消）"
         switch ($choice) {
             "1" { return "quickstart" }
             "2" { return "maintenance" }

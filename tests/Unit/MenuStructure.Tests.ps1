@@ -99,6 +99,8 @@ Describe "Menu structure" {
             "function MCP菜单"
             "function 技能库管理菜单"
             "function 更多菜单"
+            "function 目标仓管理菜单"
+            "function 审查高级菜单"
         ) | ForEach-Object {
             $raw | Should Match $_
             $generated | Should Match $_
@@ -106,9 +108,9 @@ Describe "Menu structure" {
 
         $mcpBody = Get-FunctionBody $raw "MCP菜单"
         Assert-MenuRouting $mcpBody (@{ "1" = "安装MCP"; "2" = "卸载MCP"; "3" = "同步MCP"; "0" = "return" }) @(
-            "1) 新增 MCP 服务"
-            "2) 卸载 MCP 服务"
-            "3) 同步 MCP 配置"
+            "1) 新增 MCP"
+            "2) 卸载 MCP"
+            "3) 同步配置"
             "0) 返回"
         )
 
@@ -123,7 +125,7 @@ Describe "Menu structure" {
             "1) 新增技能库"
             "2) 删除技能库"
             "3) 生成锁文件"
-            "4) 打开配置"
+            "4) 打开 skills.json"
             "0) 返回"
         )
 
@@ -136,11 +138,52 @@ Describe "Menu structure" {
             "0" = "return"
         }) @(
             "1) 一键工作流"
-            "2) 自动更新设置"
-            "3) 解除关联"
-            "4) 清理备份"
+            "2) 自动更新"
+            "3) 解除目标目录关联"
+            "4) 清理 .bak 备份"
             "0) 返回"
         )
+
+        $auditBody = Get-FunctionBody $raw "审查目标菜单"
+        @(
+            "流程：需求 -> 审查包 -> 预检 -> 应用"
+            "1) 查看需求"
+            "2) 编辑需求"
+            "3) 目标仓列表"
+            "4) 生成审查包"
+            "5) 预检建议"
+            "6) 应用建议（先 dry-run）"
+            "7) 查看最近状态"
+            "8) 发现新技能"
+            "9) 目标仓管理"
+            "10) 高级设置"
+            "0) 返回"
+        ) | ForEach-Object {
+            $auditBody | Should Match ([regex]::Escape($_))
+        }
+
+        $targetAdminBody = Get-FunctionBody $raw "目标仓管理菜单"
+        @(
+            "1) 查看目标仓列表"
+            "2) 新增目标仓"
+            "3) 修改目标仓"
+            "4) 删除目标仓"
+            "0) 返回"
+        ) | ForEach-Object {
+            $targetAdminBody | Should Match ([regex]::Escape($_))
+        }
+
+        $advancedAuditBody = Get-FunctionBody $raw "审查高级菜单"
+        @(
+            "1) 导入结构化需求"
+            "2) 初始化审查配置"
+            "3) 查看 AI 提示词"
+            "4) 编辑 AI 提示词"
+            "5) 直接执行建议（高级）"
+            "0) 返回"
+        ) | ForEach-Object {
+            $advancedAuditBody | Should Match ([regex]::Escape($_))
+        }
     }
 
     It "Groups help text around the expert-first menu labels" {
@@ -148,20 +191,17 @@ Describe "Menu structure" {
         $helpBody = Get-FunctionBody $raw "帮助"
 
         @(
-            "1) 浏览技能：查看当前已接入来源中的可用技能"
-            "2) 选择安装 / 粘贴命令导入：把技能加入白名单"
-            "3) 重建并同步：重建 agent/ 并同步到 targets"
-            "4) 更新上游：拉取上游后重建并同步"
-            "5) 目标仓审查：生成审查包并应用建议"
-            "菜单分组："
-            "MCP 服务：新增、卸载、同步 MCP"
-            "技能库管理：新增/删除技能库、生成锁文件、打开配置"
-            "更多：一键工作流、自动更新设置、解除关联、清理备份"
-            "浏览技能：列出当前已接入技能库中的可用技能；只查看，不改配置"
-            "选择安装：从当前来源中勾选技能，写入 mappings 白名单"
-            "粘贴命令导入：解析 add / npx 命令；支持批量导入并自动构建生效"
-            "重建并同步：使用当前本地配置重建输出并同步到 targets"
-            "目标仓审查：维护需求上下文、目标仓列表、审查包生成和建议应用"
+            "常用流程："
+            "接入来源：新增技能库，或用 add/npx 导入单个技能"
+            "安装技能：浏览技能 -> 选择安装/粘贴命令导入 -> 重建并同步"
+            "目标仓审查：查看需求 -> 生成审查包 -> 预检建议 -> 应用建议"
+            "菜单地图："
+            "MCP 服务：新增 MCP、卸载 MCP、同步配置"
+            "技能库管理：新增/删除技能库、生成锁文件、打开 skills.json"
+            "更多：一键工作流、自动更新、解除目标目录关联、清理 .bak 备份"
+            "浏览技能：只列出当前来源中的可用技能，不改配置"
+            '重建并同步：根据 `skills.json` 重建 `agent/` 并同步到 `targets`'
+            '只有 `--apply --yes` 才真正写入'
         ) | ForEach-Object {
             $helpBody | Should Match ([regex]::Escape($_))
         }
@@ -172,7 +212,7 @@ Describe "Menu structure" {
         $readmeEn = Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\..\README.en.md") -Raw
 
         @(
-            '交互菜单已按熟手高频动作重排'
+            '交互菜单按“高频动作直达 + 领域子菜单”组织'
             '浏览技能'
             '选择安装'
             '粘贴命令导入'
@@ -187,7 +227,7 @@ Describe "Menu structure" {
         }
 
         @(
-            'The interactive menu is organized around expert-first direct actions.'
+            'The interactive menu uses direct frequent actions plus domain submenus.'
             'Browse Skills'
             'Pick Install'
             'Paste Command Import'
@@ -197,6 +237,7 @@ Describe "Menu structure" {
             'MCP Services'
             'Skill Library Admin'
             'More'
+            'The `Target Repo Audit` submenu follows the workflow'
         ) | ForEach-Object {
             $readmeEn | Should Match ([regex]::Escape($_))
         }

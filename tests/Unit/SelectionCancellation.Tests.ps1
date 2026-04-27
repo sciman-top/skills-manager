@@ -1,6 +1,12 @@
 . $PSScriptRoot\..\..\skills.ps1
 
 Describe "Selection Cancellation" {
+    It "Treats blank menu input as 0 so non-interactive menus exit" {
+        Mock Read-HostSafe { "" }
+
+        Read-MenuChoice "请选择" | Should Be "0"
+    }
+
     It "Marks input 0 as canceled in Read-SelectionIndices" {
         Mock Read-HostSafe { "0" }
 

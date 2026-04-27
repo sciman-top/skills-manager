@@ -53,7 +53,7 @@ Describe "Workflow command" {
         It "Uses menu-aligned wording in the interactive workflow picker source" {
             $raw = Get-Content -LiteralPath (Join-Path $Root "src/Commands/Workflow.ps1") -Raw
             $raw | Should Match '1\) 新手（浏览技能 -> 选择安装 -> 重建并同步 -> doctor --strict）'
-            $raw | Should Match '2\) 维护（更新上游 -> 重建并同步 -> 同步MCP -> doctor --strict）'
+            $raw | Should Match '2\) 维护（更新上游 -> 重建并同步 -> 同步 MCP -> doctor --strict）'
         }
 
         It "Runs maintenance workflow in order under no-prompt mode" {

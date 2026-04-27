@@ -46,7 +46,7 @@ For first-time setup, start from the interactive menu:
 .\skills.ps1
 ```
 
-The interactive menu is organized around expert-first direct actions. The top level now prioritizes:
+The interactive menu uses direct frequent actions plus domain submenus. The top level prioritizes:
 
 - Browse Skills
 - Pick Install
@@ -58,6 +58,15 @@ The interactive menu is organized around expert-first direct actions. The top le
 - MCP Services
 - Skill Library Admin
 - More
+
+The `Target Repo Audit` submenu follows the workflow:
+
+1. View/edit requirements
+2. View target repositories
+3. Generate an audit bundle
+4. Preflight recommendations
+5. Apply recommendations, starting with dry-run
+6. View latest status
 
 Recommended flow:
 
@@ -80,9 +89,9 @@ Recommended flow:
 Workflow profiles:
 
 - `新手`: `浏览技能 -> 选择安装 -> 重建并同步 -> doctor --strict`
-- `维护`: `更新上游 -> 重建并同步 -> 同步MCP -> doctor --strict`
+- `维护`: `更新上游 -> 重建并同步 -> 同步 MCP -> doctor --strict`
 - `审查`: `查看需求 -> 目标仓列表 -> 生成审查包 -> 查看最近状态`
-- `all`: `更新上游 -> 浏览技能 -> 重建并同步 -> 同步MCP -> doctor --strict`
+- `all`: `更新上游 -> 浏览技能 -> 重建并同步 -> 同步 MCP -> doctor --strict`
 
 ## Common Commands
 

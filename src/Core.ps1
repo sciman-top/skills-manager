@@ -453,6 +453,11 @@ function Read-HostSafe([string]$prompt) {
     if ($null -eq $value) { return "" }
     return $value.Trim()
 }
+function Read-MenuChoice([string]$prompt = "请选择") {
+    $choice = Read-HostSafe $prompt
+    if ([string]::IsNullOrWhiteSpace($choice)) { return "0" }
+    return $choice
+}
 function Is-Yes([string]$answer) {
     if ([string]::IsNullOrWhiteSpace($answer)) { return $false }
     $v = $answer.Trim().ToLowerInvariant()

@@ -471,6 +471,11 @@ function Read-HostSafe([string]$prompt) {
     if ($null -eq $value) { return "" }
     return $value.Trim()
 }
+function Read-MenuChoice([string]$prompt = "请选择") {
+    $choice = Read-HostSafe $prompt
+    if ([string]::IsNullOrWhiteSpace($choice)) { return "0" }
+    return $choice
+}
 function Is-Yes([string]$answer) {
     if ([string]::IsNullOrWhiteSpace($answer)) { return $false }
     $v = $answer.Trim().ToLowerInvariant()
@@ -13445,11 +13450,11 @@ function Select-WorkflowProfileInteractively($catalog) {
         Write-Host ""
         Write-Host "=== 选择一键工作流场景 ==="
         Write-Host "1) 新手（浏览技能 -> 选择安装 -> 重建并同步 -> doctor --strict）"
-        Write-Host "2) 维护（更新上游 -> 重建并同步 -> 同步MCP -> doctor --strict）"
+        Write-Host "2) 维护（更新上游 -> 重建并同步 -> 同步 MCP -> doctor --strict）"
         Write-Host "3) 审查（查看需求 -> 目标仓列表 -> 生成审查包 -> 查看最近状态）"
-        Write-Host "4) 全流程（更新上游 -> 浏览技能 -> 重建并同步 -> 同步MCP -> doctor --strict）"
+        Write-Host "4) 全流程（更新上游 -> 浏览技能 -> 重建并同步 -> 同步 MCP -> doctor --strict）"
         Write-Host "0) 取消"
-        $choice = Read-HostSafe "请选择"
+        $choice = Read-MenuChoice "请选择（回车取消）"
         switch ($choice) {
             "1" { return "quickstart" }
             "2" { return "maintenance" }
@@ -13741,7 +13746,7 @@ function Format-自动更新计划说明([string]$mode, [string]$at, [string]$da
     return ("每周 {0} {1}" -f $dayOfWeek, $at)
 }
 function Get-自动更新任务描述([string]$mode, [string]$at, [string]$dayOfWeek) {
-    return ("skills-manager 自动执行 更新 + 同步MCP | mode={0};at={1};day={2}" -f $mode, $at, $dayOfWeek)
+    return ("skills-manager 自动执行 更新 + 同步 MCP | mode={0};at={1};day={2}" -f $mode, $at, $dayOfWeek)
 }
 function Parse-自动更新任务描述([string]$description) {
     $result = [ordered]@{
@@ -13836,13 +13841,13 @@ function 自动更新设置 {
     while ($true) {
         Write-Host ""
         Write-Host "=== 自动更新设置 ==="
-        Write-Host "目标：按计划自动执行【更新 + 同步MCP】"
+        Write-Host "目标：按计划自动执行【更新 + 同步 MCP】"
         查看自动更新状态
         Write-Host "1) 启用/更新计划（daily/weekly）"
         Write-Host "2) 禁用"
         Write-Host "3) 查看状态"
         Write-Host "0) 返回"
-        $c = Read-HostSafe "请选择"
+        $c = Read-MenuChoice "请选择（回车返回）"
         switch ($c) {
             "1" {
                 $modeInput = Read-HostSafe ("计划模式（daily/weekly，默认 {0}）" -f (Get-自动更新默认模式))
@@ -13866,11 +13871,11 @@ function MCP菜单 {
     while ($true) {
         Write-Host ""
         Write-Host "=== MCP 服务 ==="
-        Write-Host "1) 新增 MCP 服务"
-        Write-Host "2) 卸载 MCP 服务"
-        Write-Host "3) 同步 MCP 配置"
+        Write-Host "1) 新增 MCP"
+        Write-Host "2) 卸载 MCP"
+        Write-Host "3) 同步配置"
         Write-Host "0) 返回"
-        $c = Read-HostSafe "请选择"
+        $c = Read-MenuChoice "请选择（回车返回）"
         switch ($c) {
             "1" { 安装MCP }
             "2" { 卸载MCP }
@@ -13888,9 +13893,9 @@ function 技能库管理菜单 {
         Write-Host "1) 新增技能库"
         Write-Host "2) 删除技能库"
         Write-Host "3) 生成锁文件"
-        Write-Host "4) 打开配置"
+        Write-Host "4) 打开 skills.json"
         Write-Host "0) 返回"
-        $c = Read-HostSafe "请选择"
+        $c = Read-MenuChoice "请选择（回车返回）"
         switch ($c) {
             "1" { 新增技能库 }
             "2" { 删除技能库 }
@@ -13907,11 +13912,11 @@ function 更多菜单 {
         Write-Host ""
         Write-Host "=== 更多 ==="
         Write-Host "1) 一键工作流"
-        Write-Host "2) 自动更新设置"
-        Write-Host "3) 解除关联"
-        Write-Host "4) 清理备份"
+        Write-Host "2) 自动更新"
+        Write-Host "3) 解除目标目录关联"
+        Write-Host "4) 清理 .bak 备份"
         Write-Host "0) 返回"
-        $c = Read-HostSafe "请选择"
+        $c = Read-MenuChoice "请选择（回车返回）"
         switch ($c) {
             "1" { Invoke-Workflow @() }
             "2" { 自动更新设置 }
@@ -13924,98 +13929,93 @@ function 更多菜单 {
 }
 
 function 帮助 {
-    @"
+    @'
 Skills 管理器（中文菜单）
 
-推荐使用顺序：
-  1) 浏览技能：查看当前已接入来源中的可用技能
-  2) 选择安装 / 粘贴命令导入：把技能加入白名单
-  3) 重建并同步：重建 agent/ 并同步到 targets
-  4) 更新上游：拉取上游后重建并同步
-  5) 目标仓审查：生成审查包并应用建议
+常用流程：
+  1) 接入来源：新增技能库，或用 add/npx 导入单个技能
+  2) 安装技能：浏览技能 -> 选择安装/粘贴命令导入 -> 重建并同步
+  3) 日常维护：更新上游 -> 重建并同步 -> doctor --strict
+  4) 目标仓审查：查看需求 -> 生成审查包 -> 预检建议 -> 应用建议
 
-菜单分组：
-  - MCP 服务：新增、卸载、同步 MCP
-  - 技能库管理：新增/删除技能库、生成锁文件、打开配置
-  - 更多：一键工作流、自动更新设置、解除关联、清理备份
+菜单地图：
+  - 主菜单：浏览技能、选择安装、粘贴命令导入、卸载技能、重建并同步、更新上游
+  - 目标仓审查：需求、目标仓、审查包、预检、应用、状态
+  - MCP 服务：新增 MCP、卸载 MCP、同步配置
+  - 技能库管理：新增/删除技能库、生成锁文件、打开 skills.json
+  - 更多：一键工作流、自动更新、解除目标目录关联、清理 .bak 备份
 
 主要功能说明：
-  - 浏览技能：列出当前已接入技能库中的可用技能；只查看，不改配置
-  - 选择安装：从当前来源中勾选技能，写入 mappings 白名单
-  - 粘贴命令导入：解析 add / npx 命令；支持批量导入并自动构建生效
-  - 卸载：从 mappings 移除技能；必要时清理 imports、legacy manual 目录和 overrides 备份
-  - 新增技能库：向 vendors 写入仓库地址并初始化；留空则只初始化已配置 vendors
-  - 删除技能库：移除 vendors 仓库；可选择保留已安装技能并转为 manual
-  - 更新上游：拉取 vendor/imports 上游内容；保留本地改动，然后重建并同步
-  - 重建并同步：使用当前本地配置重建输出并同步到 targets
-  - 锁定：生成 skills.lock.json，记录当前 vendor/import commit
-  - 清理无效映射：删除 mappings 中已失效项（源目录不存在或缺少标记文件）
-  - 安装MCP：向 skills.json 登记 MCP 服务（stdio / sse / http），并自动同步
-  - 卸载MCP：从 skills.json 移除 MCP 服务，并自动同步
-  - 同步MCP：只同步 MCP 配置，不构建 skills
-  - 一键工作流：按场景执行多步骤编排；支持 `--list`、`--no-prompt`、`--continue-on-error`
-  - 目标仓审查：维护需求上下文、目标仓列表、审查包生成和建议应用
-  - 自动更新设置：配置本机计划任务，按 daily/weekly + HH:mm 自动执行“更新 + 同步MCP”
-  - 解除关联：移除 link 模式下创建的目录关联
-  - 清理备份：删除仓库内 *.bak.* 文件和 .bak 目录（排除 vendor / agent / imports / .git）
+  - 浏览技能：只列出当前来源中的可用技能，不改配置
+  - 选择安装：勾选技能并写入 `mappings`
+  - 粘贴命令导入：解析 `add` / `npx` 命令，导入后自动重建
+  - 卸载技能：从 `mappings` 移除，必要时清理导入目录和备份
+  - 重建并同步：根据 `skills.json` 重建 `agent/` 并同步到 `targets`
+  - 更新上游：拉取 `vendor/`、`imports/` 后重建并同步
+  - 目标仓审查：生成审查包，先 dry-run，再按确认口令落盘
+  - MCP 服务：维护 `skills.json` 中的 `mcp_servers` 并同步到目标 CLI
+  - 技能库管理：维护来源、锁文件和配置
+  - 一键工作流：按场景执行组合流程；支持 `--list`、`--no-prompt`、`--continue-on-error`
 
-说明：
-  - 手动更新会访问上游仓库；如果你只想让本地改动重新输出，请用“构建并生效”。
-  - 命令导入安装会先预检仓库可达性和技能路径，再执行导入。
-  - 命令导入安装会自动补全 owner/repo URL；若技能不唯一，会提示候选路径。
-  - 从技能库选择安装更适合浏览后再批量勾选；命令导入安装更适合直接粘贴已有命令。
+易混点：
+  - 只想让本地配置重新输出：用“重建并同步”（CLI：`构建生效`）
+  - 想拉取上游新内容：用“更新上游”（CLI：`更新`）
+  - 已知道安装命令：用“粘贴命令导入”；想先浏览再挑选：用“选择安装”
+  - `add`/`npx` 未指定 `--skill` 时只新增技能库，不会安装整库技能
+  - `应用` 默认只 dry-run；只有 `--apply --yes` 才真正写入
 
-命令行：
+常用命令：
   .\skills.ps1 发现
-  .\skills.ps1 发现技能
-  .\skills.ps1 命令导入安装
   .\skills.ps1 安装
-  .\skills.ps1 从技能库选择安装
+  .\skills.ps1 命令导入安装
   .\skills.ps1 卸载
-  .\skills.ps1 卸载技能
   .\skills.ps1 新增技能库
-  .\skills.ps1 删除技能库
   .\skills.ps1 add <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]
   .\skills.ps1 npx "skills add <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]"
-  .\skills.ps1 npx "add-skill <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]"
+  .\skills.ps1 构建生效
+  .\skills.ps1 更新 -Plan
+  .\skills.ps1 更新 -Upgrade
+  .\skills.ps1 锁定
+  .\skills.ps1 清理无效映射 [--yes] [--no-build]
+
+一键工作流：
   .\skills.ps1 一键 --list
   .\skills.ps1 一键 新手
   .\skills.ps1 一键 维护 --continue-on-error
   .\skills.ps1 一键 审查 --no-prompt
   .\skills.ps1 workflow all --no-prompt
-  .\skills.ps1 更新
-  .\skills.ps1 更新上游并重建
-  .\skills.ps1 更新 -Plan
-  .\skills.ps1 更新 -Upgrade
-  .\skills.ps1 构建生效
-  .\skills.ps1 构建并生效
-  .\skills.ps1 锁定
-  .\skills.ps1 生成锁文件
-  .\skills.ps1 清理无效映射 [--yes] [--no-build]
-  .\skills.ps1 prune-invalid-mappings [--yes] [--no-build]
-  .\skills.ps1 解除关联
-  .\skills.ps1 清理备份
-  .\skills.ps1 自动更新设置
+
+MCP：
   .\skills.ps1 安装MCP <name> -- <command> [args...]          （推荐）
   .\skills.ps1 安装MCP <name> --cmd <command> [--arg <arg>...] （兼容）
   .\skills.ps1 安装MCP <name> --transport http --url <url> [--bearer-token-env-var <ENV>] 
   .\skills.ps1 卸载MCP <name>
-  .\skills.ps1 同步MCP（可选：手动兜底）
+  .\skills.ps1 同步MCP
+
+目标仓审查：
   .\skills.ps1 审查目标 需求设置
   .\skills.ps1 审查目标 需求查看
   .\skills.ps1 审查目标 需求结构化 --profile <file>
-  .\skills.ps1 审查目标 扫描 [--target <name>] [--out <dir>] [--force]
-  .\skills.ps1 审查目标 发现新技能 [--query <text>] [--out <dir>] [--force]
-  .\skills.ps1 审查目标 状态
-  .\skills.ps1 审查目标 预检 --run-id <run-id>
-  .\skills.ps1 审查目标 预检 --recommendations <file>
+  .\skills.ps1 审查目标 列表
+  .\skills.ps1 审查目标 添加 <name> <path>
   .\skills.ps1 审查目标 修改 <name> <path>
   .\skills.ps1 审查目标 删除 <name>
+  .\skills.ps1 审查目标 扫描 [--target <name>] [--out <dir>] [--force]
+  .\skills.ps1 审查目标 发现新技能 [--query <text>] [--out <dir>] [--force]
+  .\skills.ps1 审查目标 预检 --run-id <run-id>
+  .\skills.ps1 审查目标 预检 --recommendations <file>
   .\skills.ps1 审查目标 应用确认 --recommendations <file> [--allow-stale-snapshot] [--stale-ack "<token>"]
   .\skills.ps1 审查目标 应用 --recommendations <file> [--dry-run-ack "我知道未落盘"] [--allow-stale-snapshot] [--stale-ack "<token>"]
   .\skills.ps1 审查目标 应用 --recommendations <file> --apply --yes [--add-indexes "1,3"] [--remove-indexes "2"] [--mcp-add-indexes "1"] [--mcp-remove-indexes "2"] [--allow-stale-snapshot] [--stale-ack "<token>"]
+  .\skills.ps1 审查目标 状态
+
+维护：
+  .\skills.ps1 解除关联
+  .\skills.ps1 清理备份
+  .\skills.ps1 自动更新设置
   .\skills.ps1 doctor [--json] [--fix] [--dry-run-fix] [--strict] [--strict-perf] [--threshold-ms <ms>]
-  通用参数：
+
+通用参数：
   -DryRun：仅预演（跳过写入/删除/同步/拉取）
   -Locked：严格锁定（需 skills.lock.json 且 commit 全匹配）
   -Plan：仅输出更新预览（不改动）
@@ -14041,7 +14041,6 @@ MCP/门禁环境变量：
   - 正则：用 /.../ 包裹（如：/docx|pdf/）
 
 本地技能：
-  - add/npx 未指定 --skill 时仅新增技能库（vendor），不会自动安装整库技能。
   - add/npx 显式指定 --skill 时默认落入 imports（mode=manual），可用 --mode vendor 改为 vendor 管理。
   - manual/ 仅用于旧数据兼容；自定义改动请放入 overrides/。
   - “命令导入安装”支持多行输入 add / npx skills add / npx add-skill。
@@ -14069,30 +14068,151 @@ MCP/门禁环境变量：
 
 提示：如遇 PowerShell 脚本执行被拦，可在当前窗口临时放开：
   Set-ExecutionPolicy -Scope Process Bypass
-"@ | Write-Host
+'@ | Write-Host
+}
+
+function Resolve-AuditMenuRecommendationsPath([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) {
+        return 'reports\skill-audit\<run-id>\recommendations.json'
+    }
+    return $path
+}
+
+function 目标仓管理菜单 {
+    while ($true) {
+        Write-Host ""
+        Write-Host "=== 目标仓管理 ==="
+        Write-Host "1) 查看目标仓列表"
+        Write-Host "2) 新增目标仓"
+        Write-Host "3) 修改目标仓"
+        Write-Host "4) 删除目标仓"
+        Write-Host "0) 返回"
+        $c = Read-MenuChoice "请选择（回车返回）"
+        switch ($c) {
+            "1" { Invoke-AuditTargetsCommand @("list") }
+            "2" {
+                $name = Read-HostSafe "目标仓名称"
+                $path = Read-HostSafe "目标仓路径"
+                if (-not [string]::IsNullOrWhiteSpace($name) -and -not [string]::IsNullOrWhiteSpace($path)) {
+                    Invoke-AuditTargetsCommand @("add", $name, $path)
+                }
+            }
+            "3" {
+                $cfg = Load-AuditTargetsConfig
+                $targets = @($cfg.targets)
+                if ($targets.Count -eq 0) {
+                    Write-Host "未登记目标仓。"
+                    continue
+                }
+                $selection = Select-Items $targets `
+                { param($idx, $item)
+                    $enabled = if ($item.PSObject.Properties.Match("enabled").Count -gt 0) { [bool]$item.enabled } else { $true }
+                    $enabledText = if ($enabled) { "enabled" } else { "disabled" }
+                    return ("{0,3}) [{1}] {2} -> {3}" -f $idx, $enabledText, [string]$item.name, [string]$item.path)
+                } `
+                    "请选择要修改的目标仓（输入 0 取消）" `
+                    "未解析到有效序号，已取消修改。"
+                if ($selection.canceled -or @($selection.items).Count -eq 0) {
+                    Write-Host "已取消修改目标仓。"
+                    continue
+                }
+                $name = [string]$selection.items[0].name
+                $path = Read-HostSafe "新的目标仓路径"
+                if (-not [string]::IsNullOrWhiteSpace($name) -and -not [string]::IsNullOrWhiteSpace($path)) {
+                    Invoke-AuditTargetsCommand @("update", $name, $path)
+                }
+            }
+            "4" {
+                $cfg = Load-AuditTargetsConfig
+                $targets = @($cfg.targets)
+                if ($targets.Count -eq 0) {
+                    Write-Host "未登记目标仓。"
+                    continue
+                }
+                $selection = Select-Items $targets `
+                { param($idx, $item)
+                    $enabled = if ($item.PSObject.Properties.Match("enabled").Count -gt 0) { [bool]$item.enabled } else { $true }
+                    $enabledText = if ($enabled) { "enabled" } else { "disabled" }
+                    return ("{0,3}) [{1}] {2} -> {3}" -f $idx, $enabledText, [string]$item.name, [string]$item.path)
+                } `
+                    "请选择要删除的目标仓（输入 0 取消）" `
+                    "未解析到有效序号，已取消删除。"
+                if ($selection.canceled -or @($selection.items).Count -eq 0) {
+                    Write-Host "已取消删除目标仓。"
+                    continue
+                }
+                $picked = $selection.items[0]
+                $preview = @(
+                    ("name: {0}" -f [string]$picked.name),
+                    ("path: {0}" -f [string]$picked.path)
+                ) -join "`n"
+                if (-not (Confirm-WithSummary "将删除以下目标仓" $preview "确认删除该目标仓？" "Y")) {
+                    Write-Host "已取消删除目标仓。"
+                    continue
+                }
+                $name = [string]$picked.name
+                if (-not [string]::IsNullOrWhiteSpace($name)) {
+                    Invoke-AuditTargetsCommand @("remove", $name)
+                }
+            }
+            "0" { return }
+            default { Write-Host "无效选择。" }
+        }
+    }
+}
+
+function 审查高级菜单 {
+    while ($true) {
+        Write-Host ""
+        Write-Host "=== 审查高级设置 ==="
+        Write-Host "1) 导入结构化需求"
+        Write-Host "2) 初始化审查配置"
+        Write-Host "3) 查看 AI 提示词"
+        Write-Host "4) 编辑 AI 提示词"
+        Write-Host "5) 直接执行建议（高级）"
+        Write-Host "0) 返回"
+        $c = Read-MenuChoice "请选择（回车返回）"
+        switch ($c) {
+            "1" {
+                $defaultPath = Get-AuditStructuredProfileDefaultPath
+                $profile = Read-HostSafe ("请输入结构化 profile 文件路径（回车使用默认：{0}）" -f $defaultPath)
+                if ([string]::IsNullOrWhiteSpace($profile)) {
+                    Invoke-AuditTargetsCommand @("profile-structure")
+                }
+                else {
+                    Invoke-AuditTargetsCommand @("profile-structure", "--profile", $profile)
+                }
+            }
+            "2" { Invoke-AuditTargetsCommand @("init") }
+            "3" { Show-AuditOuterAiPromptTemplate }
+            "4" { Edit-AuditOuterAiPromptTemplate }
+            "5" {
+                $path = Resolve-AuditMenuRecommendationsPath (Read-HostSafe "recommendations 文件路径（回车=最近 run）")
+                Invoke-AuditTargetsCommand @("apply", "--recommendations", $path, "--apply", "--yes")
+            }
+            "0" { return }
+            default { Write-Host "无效选择。" }
+        }
+    }
 }
 
 function 审查目标菜单 {
     while ($true) {
         Write-Host ""
         Write-Host "=== 目标仓审查 ==="
+        Write-Host "流程：需求 -> 审查包 -> 预检 -> 应用"
         Write-Host "1) 查看需求"
         Write-Host "2) 编辑需求"
         Write-Host "3) 目标仓列表"
         Write-Host "4) 生成审查包"
-        Write-Host "5) 应用建议（推荐）"
-        Write-Host "6) 查看最近状态"
-        Write-Host "7) 新增目标仓"
-        Write-Host "8) 修改目标仓"
-        Write-Host "9) 删除目标仓"
-        Write-Host "10) 导入结构化需求"
-        Write-Host "11) 初始化审查配置"
-        Write-Host "12) 查看 AI 提示词"
-        Write-Host "13) 编辑 AI 提示词"
-        Write-Host "14) 直接执行建议（高级）"
-        Write-Host "15) 发现新技能（不绑定目标仓）"
+        Write-Host "5) 预检建议"
+        Write-Host "6) 应用建议（先 dry-run）"
+        Write-Host "7) 查看最近状态"
+        Write-Host "8) 发现新技能"
+        Write-Host "9) 目标仓管理"
+        Write-Host "10) 高级设置"
         Write-Host "0) 返回"
-        $c = Read-HostSafe "请选择"
+        $c = Read-MenuChoice "请选择（回车返回）"
         switch ($c) {
             "1" { Invoke-AuditTargetsCommand @("profile-show") }
             "2" { Invoke-AuditTargetsCommand @("profile-set") }
@@ -14126,97 +14246,15 @@ function 审查目标菜单 {
                 }
             }
             "5" {
-                $path = Read-HostSafe "recommendations 文件路径"
-                if (-not [string]::IsNullOrWhiteSpace($path)) {
-                    Invoke-AuditTargetsCommand @("apply-flow", "--recommendations", $path)
-                }
+                $path = Resolve-AuditMenuRecommendationsPath (Read-HostSafe "recommendations 文件路径（回车=最近 run）")
+                Invoke-AuditTargetsCommand @("preflight", "--recommendations", $path)
             }
-            "6" { Invoke-AuditTargetsCommand @("status") }
-            "7" {
-                $name = Read-HostSafe "目标仓名称"
-                $path = Read-HostSafe "目标仓路径"
-                if (-not [string]::IsNullOrWhiteSpace($name) -and -not [string]::IsNullOrWhiteSpace($path)) {
-                    Invoke-AuditTargetsCommand @("add", $name, $path)
-                }
+            "6" {
+                $path = Resolve-AuditMenuRecommendationsPath (Read-HostSafe "recommendations 文件路径（回车=最近 run）")
+                Invoke-AuditTargetsCommand @("apply-flow", "--recommendations", $path)
             }
+            "7" { Invoke-AuditTargetsCommand @("status") }
             "8" {
-                $cfg = Load-AuditTargetsConfig
-                $targets = @($cfg.targets)
-                if ($targets.Count -eq 0) {
-                    Write-Host "未登记目标仓。"
-                    continue
-                }
-                $selection = Select-Items $targets `
-                { param($idx, $item)
-                    $enabled = if ($item.PSObject.Properties.Match("enabled").Count -gt 0) { [bool]$item.enabled } else { $true }
-                    $enabledText = if ($enabled) { "enabled" } else { "disabled" }
-                    return ("{0,3}) [{1}] {2} -> {3}" -f $idx, $enabledText, [string]$item.name, [string]$item.path)
-                } `
-                    "请选择要修改的目标仓（输入 0 取消）" `
-                    "未解析到有效序号，已取消修改。"
-                if ($selection.canceled -or @($selection.items).Count -eq 0) {
-                    Write-Host "已取消修改目标仓。"
-                    continue
-                }
-                $name = [string]$selection.items[0].name
-                $path = Read-HostSafe "新的目标仓路径"
-                if (-not [string]::IsNullOrWhiteSpace($name) -and -not [string]::IsNullOrWhiteSpace($path)) {
-                    Invoke-AuditTargetsCommand @("update", $name, $path)
-                }
-            }
-            "9" {
-                $cfg = Load-AuditTargetsConfig
-                $targets = @($cfg.targets)
-                if ($targets.Count -eq 0) {
-                    Write-Host "未登记目标仓。"
-                    continue
-                }
-                $selection = Select-Items $targets `
-                { param($idx, $item)
-                    $enabled = if ($item.PSObject.Properties.Match("enabled").Count -gt 0) { [bool]$item.enabled } else { $true }
-                    $enabledText = if ($enabled) { "enabled" } else { "disabled" }
-                    return ("{0,3}) [{1}] {2} -> {3}" -f $idx, $enabledText, [string]$item.name, [string]$item.path)
-                } `
-                    "请选择要删除的目标仓（输入 0 取消）" `
-                    "未解析到有效序号，已取消删除。"
-                if ($selection.canceled -or @($selection.items).Count -eq 0) {
-                    Write-Host "已取消删除目标仓。"
-                    continue
-                }
-                $picked = $selection.items[0]
-                $preview = @(
-                    ("name: {0}" -f [string]$picked.name),
-                    ("path: {0}" -f [string]$picked.path)
-                ) -join "`n"
-                if (-not (Confirm-WithSummary "将删除以下目标仓" $preview "确认删除该目标仓？" "Y")) {
-                    Write-Host "已取消删除目标仓。"
-                    continue
-                }
-                $name = [string]$picked.name
-                if (-not [string]::IsNullOrWhiteSpace($name)) {
-                    Invoke-AuditTargetsCommand @("remove", $name)
-                }
-            }
-            "10" {
-                $defaultPath = Get-AuditStructuredProfileDefaultPath
-                $profile = Read-HostSafe ("请输入结构化 profile 文件路径（回车使用默认：{0}）" -f $defaultPath)
-                if ([string]::IsNullOrWhiteSpace($profile)) {
-                    Invoke-AuditTargetsCommand @("profile-structure")
-                }
-                else {
-                    Invoke-AuditTargetsCommand @("profile-structure", "--profile", $profile)
-                }
-            }
-            "11" { Invoke-AuditTargetsCommand @("init") }
-            "12" { Show-AuditOuterAiPromptTemplate }
-            "13" { Edit-AuditOuterAiPromptTemplate }
-            "14" {
-                $path = Read-HostSafe "recommendations 文件路径"
-                if (-not [string]::IsNullOrWhiteSpace($path)) {
-                    Invoke-AuditTargetsCommand @("apply", "--recommendations", $path, "--apply", "--yes")
-                }
-            }
-            "15" {
                 $query = Read-HostSafe "发现查询（可留空）"
                 if ([string]::IsNullOrWhiteSpace($query)) {
                     Invoke-AuditTargetsCommand @("discover-skills")
@@ -14225,6 +14263,8 @@ function 审查目标菜单 {
                     Invoke-AuditTargetsCommand @("discover-skills", "--query", $query)
                 }
             }
+            "9" { 目标仓管理菜单 }
+            "10" { 审查高级菜单 }
             "0" { return }
             default { Write-Host "无效选择。" }
         }
@@ -14247,7 +14287,7 @@ function 菜单 {
         Write-Host "10) 更多"
         Write-Host "98) 帮助"
         Write-Host "0) 退出"
-        $c = Read-HostSafe "请选择"
+        $c = Read-MenuChoice "请选择（回车退出）"
         switch ($c) {
             "1" { 发现 }
             "2" { 安装 }

@@ -866,12 +866,18 @@ jobs:
         It "Documents audit prompt menu entries in help source" {
             $raw = Get-Content -LiteralPath (Join-Path $Root "src/Commands/Utils.ps1") -Raw
             $auditBody = Get-FunctionBody $raw "审查目标菜单"
+            $targetAdminBody = Get-FunctionBody $raw "目标仓管理菜单"
+            $advancedBody = Get-FunctionBody $raw "审查高级菜单"
             $auditBody | Should Match "=== 目标仓审查 ==="
-            $auditBody | Should Match "5\) 应用建议（推荐）"
-            $auditBody | Should Match "12\) 查看 AI 提示词"
-            $auditBody | Should Match "13\) 编辑 AI 提示词"
-            $auditBody | Should Match "14\) 直接执行建议（高级）"
-            $auditBody | Should Match "15\) 发现新技能（不绑定目标仓）"
+            $auditBody | Should Match "流程：需求 -> 审查包 -> 预检 -> 应用"
+            $auditBody | Should Match "5\) 预检建议"
+            $auditBody | Should Match "6\) 应用建议（先 dry-run）"
+            $auditBody | Should Match "8\) 发现新技能"
+            $auditBody | Should Match "9\) 目标仓管理"
+            $targetAdminBody | Should Match "4\) 删除目标仓"
+            $advancedBody | Should Match "3\) 查看 AI 提示词"
+            $advancedBody | Should Match "4\) 编辑 AI 提示词"
+            $advancedBody | Should Match "5\) 直接执行建议（高级）"
         }
 
         It "Documents audit help source with self-check and prompt-source guidance" {
