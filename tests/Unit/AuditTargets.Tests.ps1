@@ -1279,18 +1279,27 @@ jobs:
         }
 
         It "Records dry-run persisted state and requires acknowledgment token" {
-            $path = Join-Path $TestDrive "recommendations-dryrun-ack.json"
-            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-dry","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"t","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["local"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
+            $oldRoot = $script:Root
+            try {
+                $script:Root = Join-Path $TestDrive "ws-dryrun-ack"
+                New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+                $path = Join-Path $script:Root "recommendations-dryrun-ack.json"
+                Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-dry","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"t","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["local"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
 
-            $report = Invoke-AuditRecommendationsApply -RecommendationsPath $path -DryRunAck "我知道未落盘"
+                $report = Invoke-AuditRecommendationsApply -RecommendationsPath $path -DryRunAck "我知道未落盘"
 
-            $report.success | Should Be $true
-            $report.mode | Should Be "dry_run"
-            $report.persisted | Should Be $false
-            $report.changed_counts.add_planned | Should Be 1
-            $report.changed_counts.add_installed | Should Be 0
-            $report.dry_run_acknowledged | Should Be $true
-            Test-Path (Get-AuditDryRunSummaryPath $path) | Should Be $true
+                $report.success | Should Be $true
+                $report.mode | Should Be "dry_run"
+                $report.persisted | Should Be $false
+                $report.changed_counts.add_planned | Should Be 1
+                $report.changed_counts.add_installed | Should Be 0
+                $report.dry_run_acknowledged | Should Be $true
+                Test-Path -LiteralPath (Get-AuditDryRunSummaryPath $path) | Should Be $true
+                @(Get-ChildItem -LiteralPath (Join-Path $script:Root "docs\change-evidence") -Filter "*audit-runtime-dry-run-r-dry-*.md" -File).Count | Should Be 1
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
         }
 
         It "Treats --apply --yes as all selections when indexes are omitted" {

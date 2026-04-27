@@ -11,6 +11,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check repository hygiene
+        shell: pwsh
+        run: .\scripts\quality\check-repo-hygiene.ps1
+
       - name: Verify generated script sync
         shell: pwsh
         run: .\tests\check-generated-sync.ps1 -StrictNoGit

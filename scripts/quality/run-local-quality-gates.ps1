@@ -22,6 +22,7 @@ function Invoke-QualityGate([string]$Name, [scriptblock]$Action) {
 Push-Location $root
 try {
     Invoke-QualityGate 'build' { & .\build.ps1 }
+    Invoke-QualityGate 'repo-hygiene' { & .\scripts\quality\check-repo-hygiene.ps1 -ReportUntrackedRuntimeArtifacts }
     if ($AllowDirtyWorktree) {
         Invoke-QualityGate 'generated-sync' { & .\tests\check-generated-sync.ps1 -AllowDirtyWorktree }
     }
