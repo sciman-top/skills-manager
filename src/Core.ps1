@@ -693,9 +693,15 @@ function Backup-OverrideDir([string]$overrideName) {
 function New-Junction([string]$linkPath, [string]$targetPath) {
     EnsureDir $targetPath
     EnsureDir (Split-Path $linkPath -Parent)
+    $targetFullPath = [System.IO.Path]::GetFullPath($targetPath).TrimEnd("\")
 
     if (Test-PathEntry $linkPath) {
         if (Is-ReparsePoint $linkPath) {
+            $currentTargetPath = Get-ReparsePointTargetFullPath $linkPath
+            if (-not [string]::IsNullOrWhiteSpace($currentTargetPath) -and $currentTargetPath.Equals($targetFullPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+                Log ("Junction 已存在且目标一致，跳过重建：{0}" -f $linkPath)
+                return
+            }
             Invoke-RemoveItem $linkPath -Recurse
         }
         else {
@@ -705,6 +711,30 @@ function New-Junction([string]$linkPath, [string]$targetPath) {
 
     # mklink /J: 不需要管理员权限（Junction）
     Invoke-MklinkJunction $linkPath $targetPath
+}
+function Get-ReparsePointTargetFullPath([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    try {
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+    }
+    catch {
+        return $null
+    }
+    $targetProp = $item.PSObject.Properties["Target"]
+    if ($null -eq $targetProp) { return $null }
+    $targetValue = $targetProp.Value
+    if ($targetValue -is [array]) {
+        if ($targetValue.Count -le 0) { return $null }
+        $targetValue = $targetValue[0]
+    }
+    $targetRaw = [string]$targetValue
+    if ([string]::IsNullOrWhiteSpace($targetRaw)) { return $null }
+    try {
+        return [System.IO.Path]::GetFullPath($targetRaw).TrimEnd("\")
+    }
+    catch {
+        return $null
+    }
 }
 function Find-LatestBackup([string]$path) {
     $parent = Split-Path $path -Parent

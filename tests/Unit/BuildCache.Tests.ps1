@@ -130,6 +130,33 @@ description: Execute a phased implementation plan using subagents.
             $stats.mirrored | Should Be 0
             (Get-Content -Raw (Join-Path $dst "openclaw\skills\do\SKILL.md")) | Should Match "^---"
         }
+
+        It "Reuses computed fingerprint for repeated source directory in one build pass" {
+            $src = Join-Path $TestDrive "shared-src"
+            $dst1 = Join-Path $TestDrive "dst-a"
+            $dst2 = Join-Path $TestDrive "dst-b"
+            New-Item -ItemType Directory -Path $src -Force | Out-Null
+            New-Item -ItemType Directory -Path $dst1 -Force | Out-Null
+            New-Item -ItemType Directory -Path $dst2 -Force | Out-Null
+            Set-Content -Path (Join-Path $src "SKILL.md") -Value "same"
+
+            $oldCache = @{}
+            $newCache = @{}
+            $stats = [pscustomobject]@{ mirrored = 0; skipped = 0 }
+            $fpCache = @{}
+
+            Mock Get-DirectoryFingerprint { "fp-shared" }
+            Mock RoboMirror {}
+
+            Mirror-SkillWithCache $src $dst1 "mapping|v|a|1" $oldCache $newCache $stats $fpCache
+            Mirror-SkillWithCache $src $dst2 "mapping|v|a|2" $oldCache $newCache $stats $fpCache
+
+            Assert-MockCalled Get-DirectoryFingerprint -Times 1 -Exactly -Scope It
+            $newCache["mapping|v|a|1"] | Should Be "fp-shared"
+            $newCache["mapping|v|a|2"] | Should Be "fp-shared"
+            $stats.fp_cache_hit | Should Be 1
+            $stats.fp_cache_miss | Should Be 1
+        }
     }
 
     Context "Build Transaction" {
@@ -230,6 +257,23 @@ description: Create a detailed, phased implementation plan with documentation di
 
             (Test-SkillNameDuplicateContentAllowed $paths) | Should Be $false
             (Test-SkillNameSystemOverrideAllowed $paths) | Should Be $true
+        }
+    }
+
+    Context "Build post-scan shortcut" {
+        It "Skips post-scan when no new mirror happened and agent dir was not reused" {
+            $stats = [pscustomobject]@{ mirrored = 0; reused = $false }
+            (Should-SkipBuildPostScan $stats) | Should Be $true
+        }
+
+        It "Does not skip post-scan when mirrored content exists" {
+            $stats = [pscustomobject]@{ mirrored = 2; reused = $false }
+            (Should-SkipBuildPostScan $stats) | Should Be $false
+        }
+
+        It "Does not skip post-scan when build reused existing agent directory" {
+            $stats = [pscustomobject]@{ mirrored = 0; reused = $true }
+            (Should-SkipBuildPostScan $stats) | Should Be $false
         }
     }
 }

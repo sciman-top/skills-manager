@@ -711,9 +711,15 @@ function Backup-OverrideDir([string]$overrideName) {
 function New-Junction([string]$linkPath, [string]$targetPath) {
     EnsureDir $targetPath
     EnsureDir (Split-Path $linkPath -Parent)
+    $targetFullPath = [System.IO.Path]::GetFullPath($targetPath).TrimEnd("\")
 
     if (Test-PathEntry $linkPath) {
         if (Is-ReparsePoint $linkPath) {
+            $currentTargetPath = Get-ReparsePointTargetFullPath $linkPath
+            if (-not [string]::IsNullOrWhiteSpace($currentTargetPath) -and $currentTargetPath.Equals($targetFullPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+                Log ("Junction 已存在且目标一致，跳过重建：{0}" -f $linkPath)
+                return
+            }
             Invoke-RemoveItem $linkPath -Recurse
         }
         else {
@@ -723,6 +729,30 @@ function New-Junction([string]$linkPath, [string]$targetPath) {
 
     # mklink /J: 不需要管理员权限（Junction）
     Invoke-MklinkJunction $linkPath $targetPath
+}
+function Get-ReparsePointTargetFullPath([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    try {
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+    }
+    catch {
+        return $null
+    }
+    $targetProp = $item.PSObject.Properties["Target"]
+    if ($null -eq $targetProp) { return $null }
+    $targetValue = $targetProp.Value
+    if ($targetValue -is [array]) {
+        if ($targetValue.Count -le 0) { return $null }
+        $targetValue = $targetValue[0]
+    }
+    $targetRaw = [string]$targetValue
+    if ([string]::IsNullOrWhiteSpace($targetRaw)) { return $null }
+    try {
+        return [System.IO.Path]::GetFullPath($targetRaw).TrimEnd("\")
+    }
+    catch {
+        return $null
+    }
 }
 function Find-LatestBackup([string]$path) {
     $parent = Split-Path $path -Parent
@@ -5400,9 +5430,26 @@ function Mirror-SkillWithCache(
     [string]$cacheKey,
     [hashtable]$oldCache,
     [hashtable]$newCache,
-    $stats
+    $stats,
+    [hashtable]$fingerprintCache = $null
 ) {
-    $fp = Get-DirectoryFingerprint $src
+    if ($null -eq $fingerprintCache) { $fingerprintCache = @{} }
+    if ($null -ne $stats -and $stats.PSObject.Properties.Match("fp_cache_hit").Count -eq 0) {
+        $stats | Add-Member -NotePropertyName fp_cache_hit -NotePropertyValue 0
+    }
+    if ($null -ne $stats -and $stats.PSObject.Properties.Match("fp_cache_miss").Count -eq 0) {
+        $stats | Add-Member -NotePropertyName fp_cache_miss -NotePropertyValue 0
+    }
+    $srcKey = [System.IO.Path]::GetFullPath($src).ToLowerInvariant()
+    if ($fingerprintCache.ContainsKey($srcKey)) {
+        $fp = [string]$fingerprintCache[$srcKey]
+        if ($null -ne $stats) { $stats.fp_cache_hit++ }
+    }
+    else {
+        $fp = Get-DirectoryFingerprint $src
+        $fingerprintCache[$srcKey] = $fp
+        if ($null -ne $stats) { $stats.fp_cache_miss++ }
+    }
     $newCache[$cacheKey] = $fp
     $old = if ($oldCache.ContainsKey($cacheKey)) { [string]$oldCache[$cacheKey] } else { "" }
     if ((Test-Path $dst) -and $old -eq $fp) {
@@ -5462,6 +5509,28 @@ function Test-SkillNameSystemOverrideAllowed([string[]]$paths) {
         else { $hasNonSystemPath = $true }
     }
     return ($hasSystemPath -and $hasNonSystemPath)
+}
+function Should-SkipBuildPostScan($stats) {
+    if ($null -eq $stats) { return $false }
+    return (($stats.mirrored -eq 0) -and (-not [bool]$stats.reused))
+}
+function Get-ElapsedMs($sw) {
+    if ($null -eq $sw) { return 0 }
+    return [int][math]::Round([double]$sw.Elapsed.TotalMilliseconds, 0)
+}
+function Get-DuplicateMappingSourceGroups($cfg) {
+    $groups = @{}
+    if ($null -eq $cfg -or $null -eq $cfg.mappings) { return @() }
+    foreach ($m in @($cfg.mappings)) {
+        if ($null -eq $m) { continue }
+        if (-not (Should-SyncMappingToAgent $m)) { continue }
+        $key = ("{0}|{1}" -f [string]$m.vendor, [string]$m.from).ToLowerInvariant()
+        if (-not $groups.ContainsKey($key)) {
+            $groups[$key] = New-Object System.Collections.Generic.List[object]
+        }
+        $groups[$key].Add($m) | Out-Null
+    }
+    return @($groups.GetEnumerator() | Where-Object { $_.Value.Count -gt 1 })
 }
 
 function Start-BuildTransaction {
@@ -5535,8 +5604,9 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
         $stats = [pscustomobject]@{ mirrored = 0; skipped = 0; reused = $reusedExistingAgent }
         $oldCache = if ($DryRun) { @{} } else { Load-BuildCache }
         $newCache = @{}
+        $fingerprintCache = @{}
 
-        $count = 0
+        $swMapping = [System.Diagnostics.Stopwatch]::StartNew()
         foreach ($m in $cfg.mappings) {
             try {
                 if (-not (Should-SyncMappingToAgent $m)) {
@@ -5570,8 +5640,7 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
                     continue
                 }
                 $cacheKey = ("mapping|{0}|{1}|{2}" -f $m.vendor, $m.from, $m.to)
-                Mirror-SkillWithCache $src $dst $cacheKey $oldCache $newCache $stats
-                $count++
+                Mirror-SkillWithCache $src $dst $cacheKey $oldCache $newCache $stats $fingerprintCache
             }
             catch {
                 Write-Host ("❌ 处理技能失败 [{0}/{1}]: {2}" -f $m.vendor, $m.from, $_.Exception.Message) -ForegroundColor Red
@@ -5590,13 +5659,16 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
                 Log ("检测到 {0} 个 manual imports 未映射；按白名单策略不会进入 agent（可通过【安装】写入 mapping 后生效）。" -f $unmappedManual.Count) "WARN"
             }
         }
+        $swMapping.Stop()
+        $stats | Add-Member -NotePropertyName phase_ms_mapping -NotePropertyValue (Get-ElapsedMs $swMapping) -Force
 
         # overrides 覆盖层（可选）：同名目录将覆盖 agent 中对应技能
+        $swOverrides = [System.Diagnostics.Stopwatch]::StartNew()
         foreach ($d in (Get-OverridesDirs)) {
             try {
                 $dst = Join-Path $AgentDir $d.Name
                 $cacheKey = ("override|{0}" -f $d.Name)
-                Mirror-SkillWithCache $d.FullName $dst $cacheKey $oldCache $newCache $stats
+                Mirror-SkillWithCache $d.FullName $dst $cacheKey $oldCache $newCache $stats $fingerprintCache
                 Log ("应用覆盖层: {0}" -f $d.Name)
             }
             catch {
@@ -5604,55 +5676,75 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
                 $failures.Add(("override:{0} => {1}" -f $d.Name, $_.Exception.Message)) | Out-Null
             }
         }
+        $swOverrides.Stop()
+        $stats | Add-Member -NotePropertyName phase_ms_overrides -NotePropertyValue (Get-ElapsedMs $swOverrides) -Force
 
+        $swPostScan = [System.Diagnostics.Stopwatch]::StartNew()
         $removedVendorRoots = Remove-VendorRootMappingOutputsFromAgent $cfg
         if ($removedVendorRoots -gt 0) {
             Log ("已剔除 {0} 个 vendor 根映射目录（不参与同步）。" -f $removedVendorRoots)
         }
 
-        $normalizedSkillMd = Normalize-SkillMarkdownFiles $AgentDir
-        if ($normalizedSkillMd.normalized -gt 0) {
-            Log ("已归一化 SKILL.md 编码（移除 UTF-8 BOM）：{0} 项" -f $normalizedSkillMd.normalized)
+        if (Should-SkipBuildPostScan $stats) {
+            Log "增量构建无新复制内容，跳过 SKILL.md 归一化/清理与冲突扫描。"
         }
-        if ($normalizedSkillMd.failed -gt 0) {
-            foreach ($path in $normalizedSkillMd.failed_paths) {
-                $failures.Add(("build-skill-md-normalize:{0}" -f $path)) | Out-Null
+        else {
+            $normalizedSkillMd = Normalize-SkillMarkdownFiles $AgentDir
+            if ($normalizedSkillMd.normalized -gt 0) {
+                Log ("已归一化 SKILL.md 编码（移除 UTF-8 BOM）：{0} 项" -f $normalizedSkillMd.normalized)
             }
-        }
+            if ($normalizedSkillMd.failed -gt 0) {
+                foreach ($path in $normalizedSkillMd.failed_paths) {
+                    $failures.Add(("build-skill-md-normalize:{0}" -f $path)) | Out-Null
+                }
+            }
 
-        $invalidSkillCleanup = Remove-InvalidSkillMarkdownFiles $AgentDir
-        if ($invalidSkillCleanup.removed -gt 0) {
-            Log ("已清理无效 SKILL.md（缺少 YAML frontmatter）：{0} 项" -f $invalidSkillCleanup.removed) "WARN"
-        }
-        if ($invalidSkillCleanup.failed -gt 0) {
-            foreach ($path in $invalidSkillCleanup.failed_paths) {
-                $failures.Add(("build-invalid-skill-md-cleanup:{0}" -f $path)) | Out-Null
+            $invalidSkillCleanup = Remove-InvalidSkillMarkdownFiles $AgentDir
+            if ($invalidSkillCleanup.removed -gt 0) {
+                Log ("已清理无效 SKILL.md（缺少 YAML frontmatter）：{0} 项" -f $invalidSkillCleanup.removed) "WARN"
             }
-        }
+            if ($invalidSkillCleanup.failed -gt 0) {
+                foreach ($path in $invalidSkillCleanup.failed_paths) {
+                    $failures.Add(("build-invalid-skill-md-cleanup:{0}" -f $path)) | Out-Null
+                }
+            }
 
-        $nameToPaths = Get-SkillNameConflictBuckets $AgentDir
-        foreach ($name in $nameToPaths.Keys | Sort-Object) {
-            $paths = @($nameToPaths[$name])
-            if ($paths.Count -le 1) { continue }
-            if (Test-SkillNameDuplicateContentAllowed $paths) {
-                Log ("检测到同名同内容技能别名，已跳过冲突：{0}" -f $name)
-                continue
+            $nameToPaths = Get-SkillNameConflictBuckets $AgentDir
+            foreach ($name in $nameToPaths.Keys | Sort-Object) {
+                $paths = @($nameToPaths[$name])
+                if ($paths.Count -le 1) { continue }
+                if (Test-SkillNameDuplicateContentAllowed $paths) {
+                    Log ("检测到同名同内容技能别名，已跳过冲突：{0}" -f $name)
+                    continue
+                }
+                if (Test-SkillNameSystemOverrideAllowed $paths) {
+                    Log ("检测到系统技能与普通技能同名，已保留系统技能优先：{0}" -f $name)
+                    continue
+                }
+                Write-Host ("❌ 技能名冲突：{0}" -f $name) -ForegroundColor Red
+                foreach ($p in $paths) {
+                    Write-Host ("   - {0}" -f $p) -ForegroundColor Red
+                }
+                $failures.Add(("skill-name-conflict:{0} => {1}" -f $name, ($paths -join " | "))) | Out-Null
             }
-            if (Test-SkillNameSystemOverrideAllowed $paths) {
-                Log ("检测到系统技能与普通技能同名，已保留系统技能优先：{0}" -f $name)
-                continue
-            }
-            Write-Host ("❌ 技能名冲突：{0}" -f $name) -ForegroundColor Red
-            foreach ($p in $paths) {
-                Write-Host ("   - {0}" -f $p) -ForegroundColor Red
-            }
-            $failures.Add(("skill-name-conflict:{0} => {1}" -f $name, ($paths -join " | "))) | Out-Null
         }
+        $swPostScan.Stop()
+        $stats | Add-Member -NotePropertyName phase_ms_postscan -NotePropertyValue (Get-ElapsedMs $swPostScan) -Force
 
         if (-not $DryRun) { Save-BuildCache $newCache }
         if ($stats.skipped -gt 0) {
             Log ("增量构建：复用缓存 {0} 项，实际复制 {1} 项。" -f $stats.skipped, $stats.mirrored)
         }
+        if (($stats.fp_cache_hit -gt 0) -or ($stats.fp_cache_miss -gt 0)) {
+            $fpTotal = [double]($stats.fp_cache_hit + $stats.fp_cache_miss)
+            $hitRate = if ($fpTotal -le 0) { 0.0 } else { [math]::Round((100.0 * [double]$stats.fp_cache_hit / $fpTotal), 1) }
+            Log ("目录指纹缓存：hit={0}, miss={1}, hit_rate={2}%" -f $stats.fp_cache_hit, $stats.fp_cache_miss, $hitRate)
+        }
+        $dupGroups = @(Get-DuplicateMappingSourceGroups $cfg)
+        if ($dupGroups.Count -gt 0) {
+            Log ("检测到重复源目录映射组：{0}（建议合并配置以提升构建命中率）" -f $dupGroups.Count) "WARN"
+        }
+        Log ("构建阶段耗时：mapping={0}ms, overrides={1}ms, postscan={2}ms" -f $stats.phase_ms_mapping, $stats.phase_ms_overrides, $stats.phase_ms_postscan)
         if ($stats.reused) {
             Log "本次构建未能清空旧 agent/，已按目录增量覆盖；若仍有陈旧技能残留，可在释放相关文件占用后重试。"
             Write-Host "❌ 检测到在旧 agent/ 上增量覆盖构建，已升级为失败。" -ForegroundColor Red
