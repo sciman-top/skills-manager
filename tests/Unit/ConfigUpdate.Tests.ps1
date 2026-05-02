@@ -202,6 +202,43 @@ Describe "Config And Update Enhancements" {
         }
     }
 
+    Context "Update parallelism" {
+        It "Uses auto parallelism based on unique repo count when config does not set update_parallelism" {
+            $cfg = [pscustomobject]@{
+                vendors = @(
+                    [pscustomobject]@{ name = "v1"; repo = "https://github.com/example/a.git" }
+                )
+                imports = @(
+                    [pscustomobject]@{ name = "i1"; mode = "manual"; repo = "https://github.com/example/b.git" },
+                    [pscustomobject]@{ name = "i2"; mode = "manual"; repo = "https://github.com/example/b.git" }
+                )
+            }
+
+            Get-UpdateRepoCount $cfg | Should Be 2
+            Get-UpdateParallelism $cfg | Should Be 2
+        }
+
+        It "Falls back to 1 when update_parallelism is invalid" {
+            $cfg = [pscustomobject]@{
+                update_parallelism = -3
+                vendors = @()
+                imports = @()
+            }
+
+            Get-UpdateParallelism $cfg | Should Be 1
+        }
+
+        It "Keeps explicit update_parallelism when valid" {
+            $cfg = [pscustomobject]@{
+                update_parallelism = 4
+                vendors = @()
+                imports = @()
+            }
+
+            Get-UpdateParallelism $cfg | Should Be 4
+        }
+    }
+
     Context "Fine-Grained update_force" {
         It "Matches git dirty check only when candidate path is repo top-level" {
             $candidate = Join-Path $TestDrive "repo-root-check"
@@ -354,6 +391,50 @@ Describe "Config And Update Enhancements" {
             $resolved = Resolve-RemoteCommit $zip "main"
 
             $resolved | Should Be ("zip:{0}" -f (Get-FileContentHash $zip))
+        }
+
+        It "Caches repeated remote commit lookups for identical repo and ref" {
+            $cache = @{}
+            Mock Resolve-RemoteCommit { "abc123" }
+
+            $first = Resolve-RemoteCommitCached "https://github.com/example/demo.git" "main" $cache
+            $second = Resolve-RemoteCommitCached "https://github.com/example/demo.git" "main" $cache
+
+            $first | Should Be "abc123"
+            $second | Should Be "abc123"
+            Assert-MockCalled Resolve-RemoteCommit -Times 1 -Exactly
+        }
+
+        It "Reuses cached remote target across repeated imports from the same repo" {
+            $oldImportDir = $script:ImportDir
+            try {
+                $script:ImportDir = Join-Path $TestDrive "imports-plan-cache"
+                New-Item -ItemType Directory -Path $script:ImportDir -Force | Out-Null
+                foreach ($name in @("skill-a", "skill-b")) {
+                    $cachePath = Join-Path $script:ImportDir $name
+                    New-Item -ItemType Directory -Path (Join-Path $cachePath ".git") -Force | Out-Null
+                }
+
+                $cfg = [pscustomobject]@{
+                    vendors = @()
+                    imports = @(
+                        [pscustomobject]@{ name = "skill-a"; mode = "manual"; repo = "https://github.com/example/shared.git"; ref = "main"; skill = "skills\\a" },
+                        [pscustomobject]@{ name = "skill-b"; mode = "manual"; repo = "https://github.com/example/shared.git"; ref = "main"; skill = "skills\\b" }
+                    )
+                }
+
+                Mock Get-CurrentRepoCommit { "current-sha" }
+                Mock Resolve-RemoteCommit { "remote-sha" }
+
+                $items = @(Get-UpdatePlanItems $cfg)
+
+                $items.Count | Should Be 2
+                ($items | Where-Object { $_.target -eq "remote-sha" }).Count | Should Be 2
+                Assert-MockCalled Resolve-RemoteCommit -Times 1 -Exactly -Scope It
+            }
+            finally {
+                $script:ImportDir = $oldImportDir
+            }
         }
 
         It "Runs plan mode without mutating workspace" {

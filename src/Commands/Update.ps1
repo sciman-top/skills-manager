@@ -5,10 +5,38 @@ function Should-ForceCleanTarget($cfg, $SkipForceClean, [string]$kind, [string]$
     return (-not $SkipForceClean.ContainsKey($key))
 }
 
+function Get-UpdateRepoCount($cfg) {
+    if ($null -eq $cfg) { return 0 }
+    $keys = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($v in @($cfg.vendors)) {
+        if ($null -eq $v) { continue }
+        $repoKey = Get-RepoIdentityKey ([string]$v.repo)
+        if ([string]::IsNullOrWhiteSpace($repoKey)) { continue }
+        $keys.Add($repoKey) | Out-Null
+    }
+    foreach ($i in @($cfg.imports)) {
+        if ($null -eq $i -or $i.mode -ne "manual") { continue }
+        $repoKey = Get-RepoIdentityKey ([string]$i.repo)
+        if ([string]::IsNullOrWhiteSpace($repoKey)) { continue }
+        $keys.Add($repoKey) | Out-Null
+    }
+    return $keys.Count
+}
+
 function Get-UpdateParallelism($cfg) {
-    $n = 1
-    if ($null -ne $cfg -and $cfg.PSObject.Properties.Match("update_parallelism").Count -gt 0) {
+    $n = $null
+    $hasConfigured = ($null -ne $cfg -and $cfg.PSObject.Properties.Match("update_parallelism").Count -gt 0)
+    if ($hasConfigured) {
         try { $n = [int]$cfg.update_parallelism } catch { $n = 1 }
+    }
+    else {
+        $repoCount = Get-UpdateRepoCount $cfg
+        if ($repoCount -le 1) { return 1 }
+        $cpu = 2
+        try { $cpu = [Environment]::ProcessorCount } catch {}
+        if ($cpu -lt 2) { $cpu = 2 }
+        $n = [Math]::Min(8, $cpu)
+        if ($n -gt $repoCount) { $n = $repoCount }
     }
     if ($n -lt 1) { $n = 1 }
     return $n
@@ -118,12 +146,27 @@ function Resolve-RemoteCommit([string]$repo, [string]$ref) {
     return $null
 }
 
+function Resolve-RemoteCommitCached([string]$repo, [string]$ref, [hashtable]$cache = $null) {
+    if ($null -eq $cache) {
+        return (Resolve-RemoteCommit $repo $ref)
+    }
+    $targetRef = if ([string]::IsNullOrWhiteSpace($ref)) { "main" } else { [string]$ref }
+    $cacheKey = ("{0}|{1}" -f (Get-RepoIdentityKey $repo), $targetRef).ToLowerInvariant()
+    if ($cache.ContainsKey($cacheKey)) {
+        return $cache[$cacheKey]
+    }
+    $resolved = Resolve-RemoteCommit $repo $targetRef
+    $cache[$cacheKey] = $resolved
+    return $resolved
+}
+
 function Get-UpdatePlanItems($cfg) {
     $items = @()
+    $remoteCommitCache = @{}
     foreach ($v in @($cfg.vendors)) {
         $ref = if ([string]::IsNullOrWhiteSpace([string]$v.ref)) { "main" } else { [string]$v.ref }
         $current = Get-CurrentRepoCommit (VendorPath $v.name)
-        $remote = Resolve-RemoteCommit ([string]$v.repo) $ref
+        $remote = Resolve-RemoteCommitCached ([string]$v.repo) $ref $remoteCommitCache
         $items += [pscustomobject]@{
             type = "vendor"
             name = [string]$v.name
@@ -140,7 +183,7 @@ function Get-UpdatePlanItems($cfg) {
         $ref = if ([string]::IsNullOrWhiteSpace([string]$i.ref)) { "main" } else { [string]$i.ref }
         $path = Join-Path $ImportDir $name
         $current = Get-CurrentRepoCommit $path
-        $remote = Resolve-RemoteCommit ([string]$i.repo) $ref
+        $remote = Resolve-RemoteCommitCached ([string]$i.repo) $ref $remoteCommitCache
         $items += [pscustomobject]@{
             type = "import"
             name = $name
@@ -215,13 +258,8 @@ function 更新Vendor($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $n
                         try { Invoke-Git @("sparse-checkout", "disable") } catch {}
                     }
                     Invoke-Git @("checkout", $v.ref)
-                    $branch = Get-GitHeadBranch
-                    if ($branch -and (Has-GitUpstream)) {
-                        Invoke-Git @("pull")
-                    }
-                    else {
-                        Log ("跳过 git pull：{0} 处于 detached HEAD 或无 upstream。" -f $v.name)
-                    }
+                    # fetch already happened above (unless SkipFetch), so prefer local fast-forward.
+                    Update-CurrentBranchFromUpstream $false
                 }
                 finally {
                     Pop-Location
