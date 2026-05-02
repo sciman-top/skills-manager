@@ -21,6 +21,14 @@ function Ensure-ImportVendorMapping($cfg, [string]$vendorName, [string]$skillPat
         $cfg.mappings += @{ vendor = $vendorName; from = $from; to = $targetName }
     }
 }
+function Ensure-ManualImportMapping($cfg, [string]$importName, [string]$targetName) {
+    Need (-not [string]::IsNullOrWhiteSpace($importName)) "manual import name 不能为空"
+    Need (-not [string]::IsNullOrWhiteSpace($targetName)) "manual target name 不能为空"
+    $exists = $cfg.mappings | Where-Object { $_.vendor -eq "manual" -and $_.from -eq $importName } | Select-Object -First 1
+    if (-not $exists) {
+        $cfg.mappings += @{ vendor = "manual"; from = $importName; to = $targetName }
+    }
+}
 function Test-NeedsSparseProbeFallback([string]$msg) {
     if ([string]::IsNullOrWhiteSpace($msg)) { return $false }
     return ($msg -match "unable to checkout working tree|checkout failed|git restore --source=HEAD :/|invalid path|Filename too long|文件名.*太长|路径.*过长")
@@ -461,6 +469,7 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
 
                 $import = @{ name = $name; repo = $repo; ref = $ref; skill = $skillPath; mode = "manual"; sparse = $curSparse }
                 Upsert-Import $cfg $import
+                Ensure-ManualImportMapping $cfg $name $name
             }
         }
         else {

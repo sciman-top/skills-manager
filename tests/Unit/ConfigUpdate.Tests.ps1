@@ -592,6 +592,41 @@ Describe "Config And Update Enhancements" {
             Assert-MockCalled Ensure-RepoFromGitHubTreeSnapshot -Times 0 -Exactly
         }
 
+        It "Falls back to git archive when sparse repo update succeeds but target skill is still missing" {
+            $cfg = [pscustomobject]@{
+                imports = @(
+                    [pscustomobject]@{
+                        name = "openpyxl"
+                        mode = "manual"
+                        repo = "https://github.com/example/workspace-hub.git"
+                        ref = "main"
+                        skill = ".claude\skills\data\office\openpyxl"
+                        sparse = $true
+                    }
+                )
+            }
+
+            Mock Preflight {}
+            Mock Optimize-Imports {}
+            Mock SaveCfgSafe {}
+            Mock Ensure-Repo {}
+            Mock Resolve-SkillPath { param($base, $skillPath) return $skillPath }
+            Mock Ensure-RepoFromGitArchive {}
+            Mock Ensure-RepoFromGitHubTreeSnapshot {}
+
+            $script:testSkillDirChecks = 0
+            Mock Test-IsSkillDir {
+                $script:testSkillDirChecks++
+                return ($script:testSkillDirChecks -ge 2)
+            }
+
+            $failures = 更新Imports $cfg -SkipPreflight -SkipFetch
+
+            @($failures).Count | Should Be 0
+            Assert-MockCalled Ensure-RepoFromGitArchive -Times 1 -Exactly
+            Assert-MockCalled Ensure-RepoFromGitHubTreeSnapshot -Times 0 -Exactly
+        }
+
         It "Falls back to existing cached import when git index lock blocks update" {
             $oldImportDir = $script:ImportDir
             try {

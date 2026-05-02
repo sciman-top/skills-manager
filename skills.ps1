@@ -1097,7 +1097,7 @@ function Convert-GitHubTreeUrlToAddTokens([string]$value) {
     $trimmed = $value.Trim().Trim("'`"").TrimEnd(".", ",", "。", "，", ";", "；")
     if ($trimmed -notmatch "^https?://github\.com/([^/]+)/([^/]+)/tree/[^/]+/.+$") { return $null }
     $repo = "https://github.com/{0}/{1}.git" -f $Matches[1], $Matches[2]
-    return ,@($repo, "--skill", $skill)
+    return ,@($repo, "--skill", $skill, "--sparse")
 }
 function Get-InstallScriptMappings() {
     if ($null -ne $script:InstallScriptMappingsOverride) { return @($script:InstallScriptMappingsOverride) }
@@ -3871,6 +3871,14 @@ function Ensure-ImportVendorMapping($cfg, [string]$vendorName, [string]$skillPat
         $cfg.mappings += @{ vendor = $vendorName; from = $from; to = $targetName }
     }
 }
+function Ensure-ManualImportMapping($cfg, [string]$importName, [string]$targetName) {
+    Need (-not [string]::IsNullOrWhiteSpace($importName)) "manual import name 不能为空"
+    Need (-not [string]::IsNullOrWhiteSpace($targetName)) "manual target name 不能为空"
+    $exists = $cfg.mappings | Where-Object { $_.vendor -eq "manual" -and $_.from -eq $importName } | Select-Object -First 1
+    if (-not $exists) {
+        $cfg.mappings += @{ vendor = "manual"; from = $importName; to = $targetName }
+    }
+}
 function Test-NeedsSparseProbeFallback([string]$msg) {
     if ([string]::IsNullOrWhiteSpace($msg)) { return $false }
     return ($msg -match "unable to checkout working tree|checkout failed|git restore --source=HEAD :/|invalid path|Filename too long|文件名.*太长|路径.*过长")
@@ -4311,6 +4319,7 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
 
                 $import = @{ name = $name; repo = $repo; ref = $ref; skill = $skillPath; mode = "manual"; sparse = $curSparse }
                 Upsert-Import $cfg $import
+                Ensure-ManualImportMapping $cfg $name $name
             }
         }
         else {
@@ -6314,6 +6323,30 @@ function 更新Imports($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $
                         $skillPath = $resolvedSkillPath
                         $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
                         Log ("导入技能路径已自动修正：{0} -> {1} [{2}]" -f [string]$i.name, $skillPath, $repo) "WARN"
+                    }
+                }
+                if (-not (Test-IsSkillDir $src) -and $gitSkillPath -ne ".") {
+                    $missingSkillForceClean = $forceClean
+                    if (-not $missingSkillForceClean -and (Test-Path -LiteralPath $cache)) {
+                        $missingSkillForceClean = $true
+                        Log ("导入缓存缺少目标技能，回退归档时临时启用强制清理：{0} [{1}]" -f $name, $repo) "WARN"
+                    }
+                    try {
+                        Ensure-RepoFromGitArchive $cache $repo $ref $skillPath $missingSkillForceClean | Out-Null
+                        $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
+                        Log ("导入缓存缺少目标技能，已回退为 git archive：{0} [{1}] -> {2}" -f $name, $repo, $skillPath) "WARN"
+                    }
+                    catch {
+                        $archiveError = $_.Exception.Message
+                        try {
+                            Ensure-RepoFromGitHubTreeSnapshot $cache $repo $ref $skillPath $missingSkillForceClean | Out-Null
+                            $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
+                            Log ("导入缓存缺少目标技能，已回退为 GitHub tree 快照：{0} [{1}] -> {2}" -f $name, $repo, $skillPath) "WARN"
+                        }
+                        catch {
+                            $snapshotError = $_.Exception.Message
+                            throw ("导入缓存缺少目标技能，归档回退失败：archive={0} | snapshot={1}" -f $archiveError, $snapshotError)
+                        }
                     }
                 }
                 Need (Test-IsSkillDir $src) "未找到技能入口文件（SKILL.md/AGENTS.md/GEMINI.md/CLAUDE.md）：$src"

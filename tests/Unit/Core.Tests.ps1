@@ -494,6 +494,7 @@ Describe "Core Functions" {
             $tokens[0] | Should Be "https://github.com/openai/skills.git"
             $tokens[1] | Should Be "--skill"
             $tokens[2] | Should Be "skills/.experimental/create-plan"
+            $tokens[3] | Should Be "--sparse"
         }
 
         # ── Bare GitHub Tree URL ────────────────────────────────────────────
@@ -503,6 +504,7 @@ Describe "Core Functions" {
             $tokens[0] | Should Be "https://github.com/openai/skills.git"
             $tokens[1] | Should Be "--skill"
             $tokens[2] | Should Be "skills/create-plan"
+            $tokens[3] | Should Be "--sparse"
         }
 
         It "Returns null for plain owner/repo (fallthrough to existing logic)" {

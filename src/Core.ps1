@@ -1079,7 +1079,7 @@ function Convert-GitHubTreeUrlToAddTokens([string]$value) {
     $trimmed = $value.Trim().Trim("'`"").TrimEnd(".", ",", "。", "，", ";", "；")
     if ($trimmed -notmatch "^https?://github\.com/([^/]+)/([^/]+)/tree/[^/]+/.+$") { return $null }
     $repo = "https://github.com/{0}/{1}.git" -f $Matches[1], $Matches[2]
-    return ,@($repo, "--skill", $skill)
+    return ,@($repo, "--skill", $skill, "--sparse")
 }
 function Get-InstallScriptMappings() {
     if ($null -ne $script:InstallScriptMappingsOverride) { return @($script:InstallScriptMappingsOverride) }

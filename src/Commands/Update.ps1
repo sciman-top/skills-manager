@@ -354,6 +354,30 @@ function 更新Imports($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $
                         Log ("导入技能路径已自动修正：{0} -> {1} [{2}]" -f [string]$i.name, $skillPath, $repo) "WARN"
                     }
                 }
+                if (-not (Test-IsSkillDir $src) -and $gitSkillPath -ne ".") {
+                    $missingSkillForceClean = $forceClean
+                    if (-not $missingSkillForceClean -and (Test-Path -LiteralPath $cache)) {
+                        $missingSkillForceClean = $true
+                        Log ("导入缓存缺少目标技能，回退归档时临时启用强制清理：{0} [{1}]" -f $name, $repo) "WARN"
+                    }
+                    try {
+                        Ensure-RepoFromGitArchive $cache $repo $ref $skillPath $missingSkillForceClean | Out-Null
+                        $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
+                        Log ("导入缓存缺少目标技能，已回退为 git archive：{0} [{1}] -> {2}" -f $name, $repo, $skillPath) "WARN"
+                    }
+                    catch {
+                        $archiveError = $_.Exception.Message
+                        try {
+                            Ensure-RepoFromGitHubTreeSnapshot $cache $repo $ref $skillPath $missingSkillForceClean | Out-Null
+                            $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
+                            Log ("导入缓存缺少目标技能，已回退为 GitHub tree 快照：{0} [{1}] -> {2}" -f $name, $repo, $skillPath) "WARN"
+                        }
+                        catch {
+                            $snapshotError = $_.Exception.Message
+                            throw ("导入缓存缺少目标技能，归档回退失败：archive={0} | snapshot={1}" -f $archiveError, $snapshotError)
+                        }
+                    }
+                }
                 Need (Test-IsSkillDir $src) "未找到技能入口文件（SKILL.md/AGENTS.md/GEMINI.md/CLAUDE.md）：$src"
                 Write-Host ("已更新导入技能缓存：{0}" -f $name)
             }
