@@ -724,6 +724,47 @@ Describe "Audit Targets" {
             $insights.keywords.target_repo | Should Contain "git_dirty"
         }
 
+        It "Includes target repo facts in decision insight keywords when detected uses ordered dictionaries" {
+            $cfg = [pscustomobject]@{
+                user_profile = [pscustomobject]@{
+                    raw_text = "question graph"
+                    summary = "question graph"
+                    structured = [pscustomobject]@{
+                        primary_work_types = @("teaching")
+                        preferred_agents = @()
+                        tech_stack = @("dotnet", "python")
+                        common_tasks = @("document import")
+                        constraints = @("windows")
+                        avoidances = @()
+                        decision_preferences = @()
+                    }
+                }
+            }
+            $scan = [pscustomobject]@{
+                target = [ordered]@{ name = "k12-question-graph" }
+                detected = [ordered]@{
+                    languages = @("dotnet", "python")
+                    package_managers = @("nuget", "pip")
+                    frameworks = @("aspnetcore", "efcore")
+                    build_commands = @("dotnet build")
+                    test_commands = @("ui smoke")
+                    capabilities = @("document_import", "ocr_pipeline", "backup_recovery")
+                    agent_rule_files = @("AGENTS.md")
+                    notable_files = @("docs\07_Document_AI_ImportPipeline.md")
+                }
+                risks = @("design_package_only")
+            }
+
+            $insights = New-AuditDecisionInsights $cfg @($scan) @() @() "target-repo"
+
+            $insights.keywords.target_repo | Should Contain "k12-question-graph"
+            $insights.keywords.target_repo | Should Contain "dotnet"
+            $insights.keywords.target_repo | Should Contain "document_import"
+            $insights.keywords.target_repo | Should Contain "backup_recovery"
+            $insights.keywords.target_repo | Should Contain "docs\07_Document_AI_ImportPipeline.md"
+            $insights.keywords.target_repo | Should Contain "design_package_only"
+        }
+
         It "Fails when a required audit bundle file is missing" {
             $presentPath = Join-Path $TestDrive "audit-present.md"
             Set-ContentUtf8 $presentPath "ok"
@@ -839,6 +880,73 @@ jobs:
             (@($scan.detected.test_commands) -contains "dotnet test") | Should Be $true
             (@($scan.detected.test_commands) -contains "pytest") | Should Be $true
             (@($scan.detected.notable_files) | Where-Object { [string]$_ -match "ci\.yml$" }).Count -gt 0 | Should Be $true
+        }
+
+        It "Extracts documented stack facts from design-package repos before code exists" {
+            $repo = Join-Path $TestDrive "target-repo-design-docs"
+            New-Item -ItemType Directory -Path $repo -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $repo "docs") -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $repo "README.md") @"
+# Demo
+
+本仓当前是编码前设计包，尚未创建实际 ASP.NET Core、React、PostgreSQL migration 或 Python Worker 代码。
+"@
+            Set-ContentUtf8 (Join-Path $repo "docs\04_TechnologyStack.md") @"
+Frontend: React + TypeScript + Vite + Ant Design + TanStack Query + React Router
+Backend: ASP.NET Core / .NET 10 LTS
+ORM: EF Core 10 + Npgsql.EntityFrameworkCore.PostgreSQL 10.x
+Worker: Python Adapter process for Docling/PaddleOCR/OCR/AI tasks
+Frontend checks: npm run build, UI smoke
+Backend checks: dotnet test
+"@
+            Set-ContentUtf8 (Join-Path $repo "docs\03_Architecture.md") @"
+ASP.NET Core API
+BackgroundService
+PostgreSQL
+Document Worker: Docling / PaddleOCR
+"@
+            Set-ContentUtf8 (Join-Path $repo "docs\07_Document_AI_ImportPipeline.md") @"
+Import pipeline: Word/PDF/Image -> OpenXML / Docling / PaddleOCR / OCR -> question extraction -> review queue
+"@
+            Set-ContentUtf8 (Join-Path $repo "docs\12_PaperGeneration_ExportLayout.md") @"
+Paper generation uses a layout engine with Word export and PDF export.
+"@
+            Set-ContentUtf8 (Join-Path $repo "docs\13_AssessmentAnalytics.md") @"
+Assessment analytics supports Excel import, CTT and question stats analytics.
+"@
+            Set-ContentUtf8 (Join-Path $repo "docs\14_BackupRecoveryMigration.md") @"
+Backup / restore / migration / disaster recovery relies on manifest hash validation and WinPE recovery drills.
+"@
+
+            $scan = New-AuditRepoScan "demo" $repo "..\target-repo-design-docs"
+
+            (@($scan.detected.languages) -contains "javascript") | Should Be $true
+            (@($scan.detected.languages) -contains "dotnet") | Should Be $true
+            (@($scan.detected.languages) -contains "python") | Should Be $true
+            (@($scan.detected.frameworks) -contains "react") | Should Be $true
+            (@($scan.detected.frameworks) -contains "vite") | Should Be $true
+            (@($scan.detected.frameworks) -contains "aspnetcore") | Should Be $true
+            (@($scan.detected.frameworks) -contains "efcore") | Should Be $true
+            (@($scan.detected.package_managers) -contains "npm") | Should Be $true
+            (@($scan.detected.package_managers) -contains "nuget") | Should Be $true
+            (@($scan.detected.package_managers) -contains "pip") | Should Be $true
+            (@($scan.detected.build_commands) -contains "npm run build") | Should Be $true
+            (@($scan.detected.build_commands) -contains "dotnet build") | Should Be $true
+            (@($scan.detected.test_commands) -contains "dotnet test") | Should Be $true
+            (@($scan.detected.test_commands) -contains "ui smoke") | Should Be $true
+            (@($scan.detected.capabilities) -contains "document_import") | Should Be $true
+            (@($scan.detected.capabilities) -contains "ocr_pipeline") | Should Be $true
+            (@($scan.detected.capabilities) -contains "question_extraction") | Should Be $true
+            (@($scan.detected.capabilities) -contains "review_queue") | Should Be $true
+            (@($scan.detected.capabilities) -contains "paper_generation") | Should Be $true
+            (@($scan.detected.capabilities) -contains "document_export") | Should Be $true
+            (@($scan.detected.capabilities) -contains "assessment_analytics") | Should Be $true
+            (@($scan.detected.capabilities) -contains "spreadsheet_import") | Should Be $true
+            (@($scan.detected.capabilities) -contains "backup_recovery") | Should Be $true
+            (@($scan.detected.capabilities) -contains "migration_recovery") | Should Be $true
+            (@($scan.detected.notable_files) -contains "README.md") | Should Be $true
+            (@($scan.detected.notable_files) -contains "docs\04_TechnologyStack.md") | Should Be $true
+            (@($scan.risks) -contains "design_package_only") | Should Be $true
         }
 
         It "Extracts java/ruby/php/container/monorepo signals from repo scan inputs" {

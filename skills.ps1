@@ -9437,6 +9437,114 @@ function Add-AuditDotnetFacts([string]$resolvedPath, [System.Collections.Generic
     }
 }
 
+function Add-AuditDesignDocumentFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$languages, [System.Collections.Generic.List[string]]$frameworks, [System.Collections.Generic.List[string]]$packageManagers, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands, [System.Collections.Generic.List[string]]$capabilities, [System.Collections.Generic.List[string]]$notableFiles, [System.Collections.Generic.List[string]]$risks) {
+    $docCandidates = @(
+        "README.md",
+        "ALL_IN_ONE_EXECUTIVE_SPEC.md",
+        "docs\03_Architecture.md",
+        "docs\04_TechnologyStack.md",
+        "docs\07_Document_AI_ImportPipeline.md",
+        "docs\12_PaperGeneration_ExportLayout.md",
+        "docs\13_AssessmentAnalytics.md",
+        "docs\14_BackupRecoveryMigration.md",
+        "docs\18_TestStrategy.md"
+    )
+    $contents = New-Object System.Collections.Generic.List[string]
+    $designRepoDetected = $false
+    foreach ($relativePath in @($docCandidates)) {
+        $fullPath = Join-Path $resolvedPath $relativePath
+        if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) { continue }
+        Add-AuditUniqueValue $notableFiles $relativePath
+        try {
+            $text = Get-ContentUtf8 $fullPath
+            if (-not [string]::IsNullOrWhiteSpace($text)) {
+                $contents.Add($text) | Out-Null
+                if ($text -match "编码前设计包" -or $text -match "(?i)\bpre-implementation\b" -or $text -match "(?i)\bdesign package\b") {
+                    $designRepoDetected = $true
+                }
+            }
+        }
+        catch {
+            continue
+        }
+    }
+    if ($contents.Count -eq 0) { return }
+
+    $combined = ($contents -join "`n")
+    if ([string]::IsNullOrWhiteSpace($combined)) { return }
+
+    if ($designRepoDetected) {
+        Add-AuditUniqueValue $risks "design_package_only"
+    }
+
+    if ([regex]::IsMatch($combined, "(?i)react\s*\+\s*typescript|\breact\b")) {
+        Add-AuditUniqueValue $languages "javascript"
+        Add-AuditUniqueValue $frameworks "react"
+        Add-AuditUniqueValue $packageManagers "npm"
+    }
+    if ([regex]::IsMatch($combined, "(?i)\btypescript\b")) {
+        Add-AuditUniqueValue $languages "javascript"
+        Add-AuditUniqueValue $packageManagers "npm"
+    }
+    if ([regex]::IsMatch($combined, "(?i)\bvite\b")) {
+        Add-AuditUniqueValue $frameworks "vite"
+        Add-AuditUniqueValue $packageManagers "npm"
+        Add-AuditUniqueValue $buildCommands "npm run build"
+    }
+    if ([regex]::IsMatch($combined, "(?i)\basp\.?net\s*core\b")) {
+        Add-AuditUniqueValue $languages "dotnet"
+        Add-AuditUniqueValue $frameworks "aspnetcore"
+        Add-AuditUniqueValue $packageManagers "nuget"
+        Add-AuditUniqueValue $buildCommands "dotnet build"
+    }
+    if ([regex]::IsMatch($combined, "(?i)\bef\s*core\b|EntityFrameworkCore")) {
+        Add-AuditUniqueValue $languages "dotnet"
+        Add-AuditUniqueValue $frameworks "efcore"
+        Add-AuditUniqueValue $packageManagers "nuget"
+        Add-AuditUniqueValue $buildCommands "dotnet build"
+    }
+    if ([regex]::IsMatch($combined, "(?i)\bpython\b|\bdocling\b|\bpaddleocr\b|\bocr\b")) {
+        Add-AuditUniqueValue $languages "python"
+        Add-AuditUniqueValue $packageManagers "pip"
+    }
+    if ([regex]::IsMatch($combined, "(?i)\bplaywright\b")) {
+        Add-AuditUniqueValue $frameworks "playwright"
+        Add-AuditUniqueValue $testCommands "npx playwright test"
+    }
+    if ([regex]::IsMatch($combined, "(?i)\bnpm run build\b")) {
+        Add-AuditUniqueValue $buildCommands "npm run build"
+    }
+    if ([regex]::IsMatch($combined, "(?i)\bdotnet test\b")) {
+        Add-AuditUniqueValue $testCommands "dotnet test"
+    }
+    if ([regex]::IsMatch($combined, "(?i)\bui smoke\b")) {
+        Add-AuditUniqueValue $testCommands "ui smoke"
+    }
+
+    if ([regex]::IsMatch($combined, "(?i)\bdocling\b|\bpaddleocr\b|\bocr\b|\bdocument ai\b|\bimport pipeline\b|\bopenxml\b")) {
+        Add-AuditUniqueValue $capabilities "document_import"
+        Add-AuditUniqueValue $capabilities "ocr_pipeline"
+    }
+    if ([regex]::IsMatch($combined, "(?i)\bquestion extraction\b|\b题目抽取\b|\bstructured extraction\b")) {
+        Add-AuditUniqueValue $capabilities "question_extraction"
+    }
+    if ([regex]::IsMatch($combined, "(?i)\breview queue\b|\breview workflow\b|\b人工复核\b")) {
+        Add-AuditUniqueValue $capabilities "review_queue"
+    }
+    if ([regex]::IsMatch($combined, "(?i)\bpaper generation\b|\bexport layout\b|\blayout engine\b|\bword export\b|\bdocx export\b|\bpdf export\b|\b试卷生成\b")) {
+        Add-AuditUniqueValue $capabilities "paper_generation"
+        Add-AuditUniqueValue $capabilities "document_export"
+    }
+    if ([regex]::IsMatch($combined, "(?i)\bexcel import\b|\bassessment analytics\b|\bctt\b|\bquestion stats\b|\b试题统计\b|\banalytics\b")) {
+        Add-AuditUniqueValue $capabilities "assessment_analytics"
+        Add-AuditUniqueValue $capabilities "spreadsheet_import"
+    }
+    if ([regex]::IsMatch($combined, "(?i)\bbackup\b|\brestore\b|\bdisaster recovery\b|\b恢复\b|\b迁移\b|\bmanifest hash\b|\bwinpe\b")) {
+        Add-AuditUniqueValue $capabilities "backup_recovery"
+        Add-AuditUniqueValue $capabilities "migration_recovery"
+    }
+}
+
 function Get-AuditGitInfo([string]$resolvedPath) {
     $info = [ordered]@{
         is_repo = $false
@@ -9473,6 +9581,7 @@ function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$
     $frameworks = New-Object System.Collections.Generic.List[string]
     $buildCommands = New-Object System.Collections.Generic.List[string]
     $testCommands = New-Object System.Collections.Generic.List[string]
+    $capabilities = New-Object System.Collections.Generic.List[string]
     $agentRuleFiles = New-Object System.Collections.Generic.List[string]
     $notableFiles = New-Object System.Collections.Generic.List[string]
 
@@ -9564,6 +9673,7 @@ function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$
         Add-AuditPhpFacts $resolvedPath $languages $frameworks $packageManagers $buildCommands $testCommands $notableFiles
         Add-AuditMakefileFacts $resolvedPath $buildCommands $testCommands $notableFiles
         Add-AuditDotnetFacts $resolvedPath $frameworks $packageManagers $buildCommands $testCommands $notableFiles
+        Add-AuditDesignDocumentFacts $resolvedPath $languages $frameworks $packageManagers $buildCommands $testCommands $capabilities $notableFiles $risks
         Add-AuditCiWorkflowFacts $resolvedPath $buildCommands $testCommands $notableFiles
         $slnFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.sln" -File -ErrorAction SilentlyContinue)
         $csprojFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.csproj" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)
@@ -9588,6 +9698,7 @@ function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$
             frameworks = @($frameworks)
             build_commands = @($buildCommands)
             test_commands = @($testCommands)
+            capabilities = @($capabilities)
             agent_rule_files = @($agentRuleFiles)
             notable_files = @($notableFiles)
         }
@@ -9654,20 +9765,25 @@ function Get-AuditUserProfileKeywords($cfg) {
 function Get-AuditRepoScanKeywords($scan) {
     if ($null -eq $scan) { return @() }
     $sets = New-Object System.Collections.Generic.List[object]
-    if ($scan.PSObject.Properties.Match("target").Count -gt 0 -and $null -ne $scan.target) {
-        if ($scan.target.PSObject.Properties.Match("name").Count -gt 0) {
-            $sets.Add((Get-AuditKeywordsFromText ([string]$scan.target.name) 12)) | Out-Null
+    $targetValue = $null
+    if (Get-AuditObjectFieldValue $scan "target" ([ref]$targetValue) -and $null -ne $targetValue) {
+        $targetName = $null
+        if (Get-AuditObjectFieldValue $targetValue "name" ([ref]$targetName)) {
+            $sets.Add((Get-AuditKeywordsFromText ([string]$targetName) 12)) | Out-Null
         }
     }
-    if ($scan.PSObject.Properties.Match("detected").Count -gt 0 -and $null -ne $scan.detected) {
-        foreach ($name in @("languages", "package_managers", "frameworks", "build_commands", "test_commands", "agent_rule_files", "notable_files")) {
-            if ($scan.detected.PSObject.Properties.Match($name).Count -gt 0) {
-                $sets.Add((Convert-AuditStringArray $scan.detected.$name)) | Out-Null
+    $detectedValue = $null
+    if (Get-AuditObjectFieldValue $scan "detected" ([ref]$detectedValue) -and $null -ne $detectedValue) {
+        foreach ($name in @("languages", "package_managers", "frameworks", "build_commands", "test_commands", "capabilities", "agent_rule_files", "notable_files")) {
+            $fieldValue = $null
+            if (Get-AuditObjectFieldValue $detectedValue $name ([ref]$fieldValue)) {
+                $sets.Add((Convert-AuditStringArray $fieldValue)) | Out-Null
             }
         }
     }
-    if ($scan.PSObject.Properties.Match("risks").Count -gt 0) {
-        $sets.Add((Convert-AuditStringArray $scan.risks)) | Out-Null
+    $riskValue = $null
+    if (Get-AuditObjectFieldValue $scan "risks" ([ref]$riskValue)) {
+        $sets.Add((Convert-AuditStringArray $riskValue)) | Out-Null
     }
     return (Merge-AuditKeywordSets ($sets.ToArray()) 180)
 }
