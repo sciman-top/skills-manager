@@ -45,6 +45,7 @@ function Get-DefaultAuditOuterAiPrompt {
 - outer-ai-prompt.md、ai-brief.md、user-profile.json、installed-skills.json（仅输入快照）、source-strategy.json、decision-insights.json、recommendations.template.json
 - repo-scan.json / repo-scans.json：存在才读；N/A/profile-only 不得臆造仓库事实。
 - source-strategy.json 中的 evidence_policy / decision_quality_policy 是硬约束；decision-insights.json 是 keyword_trace 的可选关键词来源。
+- 不得复用旧 run 的 recommendations.json、旧提示词或聊天记忆作为本轮结论；旧内容只能作为待核线索，最终必须回到本轮输入和本轮来源。
 
 4) 产出 recommendations.json
 - 路径：``reports/skill-audit/<run-id>/recommendations.json``
@@ -52,6 +53,8 @@ function Get-DefaultAuditOuterAiPrompt {
 - 每条新增/卸载（skills/MCP）必须有：``reason_user_profile``、``reason_target_repo``、``sources``（仅本轮真实来源）
 - 每条新增/卸载（skills/MCP）建议必须有匹配的 ``source_observations``；若策略要求，``sources`` 数量、http 来源和 observation 必须达标
 - 每条新增/卸载（skills/MCP）建议应包含 ``keyword_trace.user_profile`` / ``keyword_trace.target_repo_or_context`` / ``keyword_trace.installed_state``（与 decision-insights 对齐）
+- 每条变更建议都要说明相对 installed-skills.json / mcp_servers 的非重复增量价值，或给出具体卸载理由；重复、泛化、证据弱则留空或放入 ``do_not_install``
+- MCP server/env 不得包含明文 token/password/key；需要凭据时只写环境变量名或占位说明，并用 sources / source_observations 说明依据
 - MCP 新增写 ``mcp_new_servers`` 且 ``name==server.name``；MCP 卸载写 ``mcp_removal_candidates``
 - ``overlap_findings`` 仅报告；``do_not_install`` 仅记录当前不应安装项；证据不足留空
 - 若四类新增/卸载建议均为空，可输出有效 no-op；no-op 不强制网络搜索，``source_observations=[]`` 合法，但必须在 ``decision_basis.summary`` 或 ``empty_recommendation_reasons`` 中说明本地覆盖依据。
@@ -69,6 +72,7 @@ function Get-DefaultAuditOuterAiPrompt {
 - 新增建议 / 卸载建议 / MCP 新增建议 / MCP 卸载建议
 - 每项：序号、名称、reason_user_profile、reason_target_repo、sources
 - 空类必须写“无该类建议”，并给 1 句原因
+- 最后明确状态：recommendations 已写出；预检通过/失败；dry-run 通过/失败；apply 未执行（除非用户已明确确认）
 
 安全约束：未收到明确确认，不执行 ``--apply --yes``；不得把建议写成已生效。
 "@
@@ -663,7 +667,7 @@ function Get-AuditRunId {
 }
 
 function Get-AuditPromptContractVersion {
-    return "audit-prompt-v20260502.1"
+    return "audit-prompt-v20260502.2"
 }
 
 function Get-AuditReportRoot([string]$runId) {
@@ -1762,10 +1766,13 @@ Rules:
 - Keep ``recommendation_mode`` as ``profile-only``.
 - Keep ``decision_basis.user_profile_used`` and ``decision_basis.source_strategy_used`` as boolean ``true``; keep ``decision_basis.target_scan_used`` as boolean ``false``; provide a non-empty ``decision_basis.summary``.
 - Record ``source_observations`` for researched candidates; every selected skill/MCP add/remove recommendation must have a matching observation with real sources and matching candidate_type/name/decision.
+- Every selected recommendation must provide a concrete incremental benefit over the installed snapshot, or a specific removal rationale; omit generic, duplicate, or weakly sourced items.
 - Skill installs require ``reason_user_profile``, ``reason_target_repo``, source links, confidence, repo, skill path, ref, and mode.
 - Skill removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and the exact installed ``vendor``/``from`` pair.
 - MCP installs must include ``reason_user_profile``, ``reason_target_repo``, sources, confidence, a valid ``server`` payload, and provider/security evidence when available.
 - MCP removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and ``installed.name``.
+- For removals, copy exact installed identifiers from installed-skills.json; do not normalize or guess vendor/from/name.
+- Never include plaintext tokens, passwords, API keys, or private credentials in MCP server payloads; use environment variable names/placeholders only when source-backed.
 - Skill ``install.mode`` must stay ``manual`` or ``vendor``; ``confidence`` must stay ``low``, ``medium``, or ``high``.
 - MCP ``server.transport`` must stay ``stdio``/``sse``/``http``; ``stdio`` requires ``command``; ``sse/http`` requires ``url``.
 - Each add/remove recommendation must keep both reasons concise and user-readable.
@@ -1780,6 +1787,7 @@ Rules:
 - If evidence is insufficient, leave the category empty and explain briefly instead of forcing low-quality recommendations.
 - If all add/remove categories are empty, a no-op recommendation is valid without network research; ``source_observations=[]`` is allowed when there are no selected add/remove items and the local coverage basis is explained.
 - After dry-run, show numbered skill add/remove and MCP add/remove lists with one-line reasons per item (``reason_user_profile`` + ``reason_target_repo``).
+- After dry-run, report commands run plus the explicit state: recommendations written, preflight passed/failed, dry-run passed/failed, apply not run unless explicitly confirmed.
 - If a list is empty, explicitly output "no <category> recommendations" with a brief reason.
 - Keep dry-run numbering stable; do not renumber or reorder indexes in the user-facing summary.
 
@@ -1793,6 +1801,8 @@ Pre-dry-run self-check:
 - Each skill/MCP add/remove item has both reasons plus at least one real source.
 - Each selected skill/MCP add/remove item has a matching ``source_observations`` entry with real sources.
 - Each skill/MCP add/remove item keeps non-empty ``keyword_trace`` arrays (user_profile / target_repo_or_context / installed_state).
+- Each selected recommendation has non-duplicative incremental value over installed-skills.json / mcp_servers, or a specific removal rationale.
+- No MCP server payload contains plaintext credentials.
 - No duplicate skill add/remove or MCP add/remove recommendations remain in the final file.
 - Stop before dry-run if any self-check item fails.
 
@@ -1864,10 +1874,13 @@ Rules:
 - Replace every template placeholder wrapped in `<...>` or delete the example entry entirely; do not leave placeholder values in the final file.
 - Keep ``decision_basis.user_profile_used``, ``decision_basis.target_scan_used``, and ``decision_basis.source_strategy_used`` as boolean ``true``, and provide a non-empty ``decision_basis.summary``.
 - Record ``source_observations`` for researched candidates; every selected skill/MCP add/remove recommendation must have a matching observation with real sources and matching candidate_type/name/decision.
+- Every selected recommendation must provide a concrete incremental benefit over the installed snapshot, or a specific removal rationale; omit generic, duplicate, or weakly sourced items.
 - Skill installs require ``reason_user_profile``, ``reason_target_repo``, source links, confidence, repo, skill path, ref, and mode.
 - Skill removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and the exact installed ``vendor``/``from`` pair.
 - MCP installs must include ``reason_user_profile``, ``reason_target_repo``, sources, confidence, a valid ``server`` payload, and provider/security evidence when available.
 - MCP removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and ``installed.name``.
+- For removals, copy exact installed identifiers from installed-skills.json; do not normalize or guess vendor/from/name.
+- Never include plaintext tokens, passwords, API keys, or private credentials in MCP server payloads; use environment variable names/placeholders only when source-backed.
 - Skill ``install.mode`` must stay ``manual`` or ``vendor``; ``confidence`` must stay ``low``, ``medium``, or ``high``.
 - MCP ``server.transport`` must stay ``stdio``/``sse``/``http``; ``stdio`` requires ``command``; ``sse/http`` requires ``url``.
 - Each add/remove recommendation must keep both reasons concise and user-readable.
@@ -1882,6 +1895,7 @@ Rules:
 - If evidence is insufficient, leave the category empty and explain briefly instead of forcing low-quality recommendations.
 - If all add/remove categories are empty, a no-op recommendation is valid without network research; ``source_observations=[]`` is allowed when there are no selected add/remove items and the local coverage basis is explained.
 - After dry-run, show numbered skill add/remove and MCP add/remove lists with one-line reasons per item (``reason_user_profile`` + ``reason_target_repo``).
+- After dry-run, report commands run plus the explicit state: recommendations written, preflight passed/failed, dry-run passed/failed, apply not run unless explicitly confirmed.
 - If a list is empty, explicitly output "no <category> recommendations" with a brief reason.
 - Keep dry-run numbering stable; do not renumber or reorder indexes in the user-facing summary.
 
@@ -1895,6 +1909,8 @@ Pre-dry-run self-check:
 - Each selected skill/MCP add/remove item has a matching ``source_observations`` entry with real sources.
 - Each skill/MCP add/remove item keeps non-empty ``keyword_trace`` arrays (user_profile / target_repo_or_context / installed_state).
 - Each MCP add item keeps ``name == server.name``.
+- Each selected recommendation has non-duplicative incremental value over installed-skills.json / mcp_servers, or a specific removal rationale.
+- No MCP server payload contains plaintext credentials.
 - No duplicate skill add/remove or MCP add/remove recommendations remain in the final file.
 - Stop before dry-run if any self-check item fails.
 
@@ -1982,6 +1998,8 @@ $basisCheckStep
    - 每条技能/MCP 新增或卸载建议都包含 ``reason_user_profile`` + ``reason_target_repo`` + 至少 1 个真实 ``sources``
    - 每条技能/MCP 新增或卸载建议都有匹配的 ``source_observations`` 记录，且 observation 也包含真实 ``sources``
    - 每条技能/MCP 新增或卸载建议都包含非空 ``keyword_trace.user_profile`` / ``keyword_trace.target_repo_or_context`` / ``keyword_trace.installed_state``
+   - 每条被选中的建议都能说明相对 installed-skills.json / mcp_servers 的非重复增量价值，或给出具体卸载理由
+   - MCP server payload 不得包含明文 token/password/key；需要凭据时只能写安全的环境变量名或占位说明
    - 技能新增建议的 ``install.mode`` 只能是 ``manual`` 或 ``vendor``，``confidence`` 只能是 ``low`` / ``medium`` / ``high``
    - MCP 新增建议必须包含合法 ``server``（``transport``=``stdio``/``sse``/``http``；``stdio`` 要有 ``command``，``sse/http`` 要有 ``url``），且 ``name`` 必须等于 ``server.name``
    - 不得保留重复的技能新增/卸载建议或重复的 MCP 新增/卸载建议
@@ -1999,17 +2017,20 @@ $basisCheckStep
 - 除 ``recommendations.json`` 外，不得修改本轮审查包输入文件、快照、提示词、brief、模板、来源策略、决策洞察或 repo scan
 - 预检、dry-run、apply 命令自动生成的 ``preflight-report.json``、``dry-run-summary.json``、``apply-report.json`` 和 ``docs/change-evidence/*.md`` 属于预期运行证据输出；外层 AI 不应手写或手改这些文件
 - 技能与 MCP 的新增/卸载建议都必须保留双依据和来源，且每项理由要简短可读
+- 每条变更建议必须能解释相对已安装技能/MCP 快照的非重复增量价值，或给出可验证的卸载理由
 - ``source_observations`` 必须记录本轮调研过的候选项；被选中的新增/卸载项必须能在其中找到对应 candidate_type/name/decision；若四类新增/卸载建议均为空，允许 ``source_observations=[]``，但必须说明 no-op 的本地覆盖依据
 - 若 ``source-strategy.decision_quality_policy`` 开启，``keyword_trace`` 必须满足最小命中与关键词归属校验
 - 若任一建议缺少 ``reason_user_profile`` 或 ``reason_target_repo``，视为未完成，不得进入下一步
 - 若证据不足，允许不推荐；不得“猜测式”新增/卸载
 - 目标仓模式下，新增/卸载技能或 MCP 的判断必须同时参考用户画像、目标仓事实、已安装技能/MCP 快照、来源策略
+- MCP server payload 不得写入明文凭据；需要凭据时只能使用安全的环境变量名或占位说明，并且必须有来源依据
 - ``overlap_findings`` 仅用于报告重叠，``do_not_install`` 用于记录“已研究但当前不应安装”的技能或 MCP
 - ``sources`` 只能填写本轮真实查看过的来源；不得伪造仓库事实或来源结论
 - MCP 新增建议里 ``name`` 与 ``server.name`` 必须一致；任一类别不得出现重复建议
 - 如果你继续执行 dry-run，请在总结里按 dry-run 原序号列出“技能新增/卸载建议 + MCP 新增/卸载建议”
 - 每条建议必须同时展示两条简短理由（用户需求 + 目标仓/场景）
 - 某一类为空时，必须显式写“无该类建议”并给 1 句简短原因
+- 最后明确执行状态：recommendations 已写出；preflight 通过/失败；dry-run 通过/失败；apply 未执行（除非用户已明确确认）
 - 未经用户明确确认，不得执行 --apply --yes
 
 ## Blocking Conditions

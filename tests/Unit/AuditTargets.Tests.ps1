@@ -1073,6 +1073,10 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $prompt | Should Match "user-profile\.json\.summary"
             $prompt | Should Match "审查包目录名"
             $prompt | Should Match "no-op 不强制网络搜索"
+            $prompt | Should Match "旧 run"
+            $prompt | Should Match "非重复增量价值"
+            $prompt | Should Match "明文 token/password/key"
+            $prompt | Should Match "apply 未执行"
         }
 
         It "Keeps built-in prompt markdown inline code literal without control-character corruption" {
@@ -1120,6 +1124,9 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $brief | Should Match "Execute preflight"
             $brief | Should Match "no-op recommendation is valid without network research"
             $brief | Should Match "source_observations=\[\]"
+            $brief | Should Match "concrete incremental benefit over the installed snapshot"
+            $brief | Should Match "Never include plaintext tokens"
+            $brief | Should Match "recommendations written, preflight passed/failed"
         }
 
         It "Writes profile-only audit brief with explicit target-scan false guidance" {
@@ -1139,6 +1146,9 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $brief | Should Match "docs/change-evidence/\*\.md"
             $brief | Should Match "Execute preflight"
             $brief | Should Match "no-op recommendation is valid without network research"
+            $brief | Should Match "concrete incremental benefit over the installed snapshot"
+            $brief | Should Match "Never include plaintext tokens"
+            $brief | Should Match "recommendations written, preflight passed/failed"
         }
 
         It "Writes runtime outer AI prompt with blocker and summary format sections" {
@@ -1166,6 +1176,9 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $prompt | Should Match "审查包目录名 run-id"
             $prompt | Should Match "source_observations=\[\]"
             $prompt | Should Match "no-op 的本地覆盖依据"
+            $prompt | Should Match "非重复增量价值"
+            $prompt | Should Match "不得包含明文 token/password/key"
+            $prompt | Should Match "preflight 通过/失败"
         }
 
         It "Writes profile-only runtime outer AI prompt without requiring repo scan" {
@@ -1184,6 +1197,9 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $prompt | Should Match "这些文件只能读，不能改"
             $prompt | Should Match "审查包目录名 run-id"
             $prompt | Should Match "no-op 的本地覆盖依据"
+            $prompt | Should Match "非重复增量价值"
+            $prompt | Should Match "不得包含明文 token/password/key"
+            $prompt | Should Match "preflight 通过/失败"
         }
 
         It "Builds recommendations template with placeholder examples" {
