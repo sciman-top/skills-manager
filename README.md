@@ -128,6 +128,20 @@ English aliases：
 
 本地迭代优先用 `link`。受限环境无法创建链接时用 `sync`。
 
+## MCP 托管边界
+
+`skills-manager` 通过 `skills.json` 的 `mcp_servers` 和 `.\skills.ps1 同步MCP` 托管 MCP 服务清单，并把结果写入：
+
+- 各目标根目录 `.mcp.json`
+- `~/.gemini/settings.json` 与 `~/.gemini/antigravity/settings.json` 的 MCP 段
+- `~/.trae/mcp.json` 与项目级 `.trae/mcp.json`
+- `~/.codex/config.toml` 中的 `[mcp_servers.*]` 段
+
+以下内容不属于 `skills-manager` 的 MCP 托管边界，修改它们应去各宿主自己的配置真源，而不是改 `skills.json`：
+
+- Codex：`windows.sandbox`、approval policy、model/reasoning/context 等非 MCP 字段
+- Claude / Gemini：auth、provider、model、context、sandbox、非 MCP 权限策略等宿主级设置
+
 ## overrides 命名
 
 `overrides/` 建议使用清晰前缀：

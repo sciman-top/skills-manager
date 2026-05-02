@@ -1094,6 +1094,23 @@ sandbox = "elevated"
             }
         }
 
+        It "Writes OpenAI developer docs MCP for codex when configured as http transport" {
+            $servers = @(
+                [pscustomobject]@{
+                    name                = "openaiDeveloperDocs"
+                    transport           = "http"
+                    url                 = "https://developers.openai.com/mcp"
+                    startup_timeout_sec = 120
+                }
+            )
+
+            $toml = Build-CodexConfigToml "" $servers
+            $toml | Should Match "\[mcp_servers\.openaiDeveloperDocs\]"
+            $toml | Should Match "transport = ""http"""
+            $toml | Should Match "url = ""https://developers.openai.com/mcp"""
+            $toml | Should Match "startup_timeout_sec = 120"
+        }
+
         It "Skips GitHub MCP when GitHub token is unavailable" {
             $oldToken = $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN
             $oldGithubToken = $env:GITHUB_PERSONAL_ACCESS_TOKEN

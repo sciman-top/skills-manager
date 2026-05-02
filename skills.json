@@ -747,7 +747,7 @@
     },
     {
       "name": "grill-me",
-      "skill": "grill-me",
+      "skill": "skills\\productivity\\grill-me",
       "sparse": false,
       "repo": "https://github.com/mattpocock/skills.git",
       "ref": "main",
@@ -757,14 +757,14 @@
       "sparse": false,
       "repo": "https://github.com/mattpocock/skills.git",
       "name": "write-a-prd",
-      "skill": "to-prd",
+      "skill": "skills\\engineering\\to-prd",
       "mode": "manual",
       "ref": "main"
     },
     {
       "repo": "https://github.com/mattpocock/skills.git",
       "ref": "main",
-      "skill": "to-issues",
+      "skill": "skills\\engineering\\to-issues",
       "name": "prd-to-issues",
       "sparse": false,
       "mode": "manual"
@@ -773,7 +773,7 @@
       "mode": "manual",
       "sparse": false,
       "repo": "https://github.com/mattpocock/skills.git",
-      "skill": "improve-codebase-architecture",
+      "skill": "skills\\engineering\\improve-codebase-architecture",
       "name": "improve-codebase-architecture",
       "ref": "main"
     },
@@ -835,6 +835,12 @@
       "name": "microsoft-learn",
       "transport": "http",
       "url": "https://learn.microsoft.com/api/mcp",
+      "startup_timeout_sec": 120
+    },
+    {
+      "name": "openaiDeveloperDocs",
+      "transport": "http",
+      "url": "https://developers.openai.com/mcp",
       "startup_timeout_sec": 120
     },
     {

@@ -128,6 +128,20 @@ Notes:
 
 Use `link` for local iteration. Use `sync` when links are restricted.
 
+## MCP Ownership Boundary
+
+`skills-manager` manages the MCP server inventory through `skills.json` `mcp_servers` and `.\skills.ps1 同步MCP`, then writes the resulting MCP payloads to:
+
+- root-level `.mcp.json` files for each target
+- the MCP sections inside `~/.gemini/settings.json` and `~/.gemini/antigravity/settings.json`
+- `~/.trae/mcp.json` and project-level `.trae/mcp.json`
+- the `[mcp_servers.*]` sections inside `~/.codex/config.toml`
+
+The following are outside the MCP ownership boundary of `skills-manager`; change them in each host's own source of truth instead of expecting `skills.json` to manage them:
+
+- Codex: `windows.sandbox`, approval policy, model/reasoning/context, and other non-MCP fields
+- Claude / Gemini: auth, provider, model, context, sandbox, and other host-level non-MCP permission settings
+
 ## overrides Naming
 
 Use clear prefixes under `overrides/`:

@@ -63,6 +63,8 @@
 - `skills.ps1`：统一命令调度（发现/安装/构建/更新/doctor/MCP）。
 - `build.ps1`：从 `src/*` 生成根目录 `skills.ps1`。
 - `skills.json`：`vendors/mappings/targets/sync_mode/mcp_servers` 的唯一配置源。
+- `skills.json` + `同步MCP` 只托管 MCP 服务清单与其落地产物：各目标根目录 `.mcp.json`、Gemini `settings.json` 中的 MCP 段、Trae `mcp.json`、以及 Codex `config.toml` 中 `[mcp_servers.*]` 段。
+- 非 MCP 的宿主级设置不属于本仓托管边界；如 Codex `windows.sandbox`、approval/model/context、Claude/Gemini 的 auth/provider/model/context/sandbox 等，必须在宿主配置或其各自受控真源中修改，不得误写进 `skills.json` 期待 `同步MCP` 接管。
 - `overrides/`、`imports/`：可维护输入层；`agent/`：分发产物层。
 - `src/Commands/AuditTargets.ps1`：目标仓审查链路与内置外层 AI 提示词源码，负责生成 `ai-brief.md`、`outer-ai-prompt.md` 和 `recommendations.template.json`。
 
