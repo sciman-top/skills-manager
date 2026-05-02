@@ -424,6 +424,10 @@ Describe "Audit Targets" {
                 $snapshot = Get-ContentUtf8 $snapshotPath | ConvertFrom-Json
                 $snapshot.summary | Should Be "repo-governance focus"
                 $snapshot.structured.primary_work_types[0] | Should Be "repo-governance"
+
+                $summaryPath = Join-Path $script:Root "reports\skill-audit\user-profile.json.summary"
+                (Test-Path -LiteralPath $summaryPath) | Should Be $true
+                (Get-ContentUtf8 $summaryPath) | Should Be "repo-governance focus"
             }
             finally {
                 $script:Root = $oldRoot
@@ -582,6 +586,10 @@ Describe "Audit Targets" {
                 $draft.summary | Should Not Be ""
                 $draft.structured_by | Should Be "outer-ai"
                 ([string]$draft.last_structured_at).Length -gt 0 | Should Be $true
+
+                $summaryPath = Join-Path $script:Root "reports\skill-audit\user-profile.json.summary"
+                (Test-Path -LiteralPath $summaryPath) | Should Be $true
+                (Get-ContentUtf8 $summaryPath) | Should Not Be ""
             }
             finally {
                 $script:Root = $oldRoot
@@ -1062,6 +1070,9 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $prompt | Should Match "预检"
             $prompt | Should Match "source_observations"
             $prompt | Should Match "不得把 dry-run 建议描述成已安装"
+            $prompt | Should Match "user-profile\.json\.summary"
+            $prompt | Should Match "审查包目录名"
+            $prompt | Should Match "no-op 不强制网络搜索"
         }
 
         It "Keeps built-in prompt markdown inline code literal without control-character corruption" {
@@ -1104,6 +1115,8 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $brief | Should Match "Decision insights JSON: N/A"
             $brief | Should Match "Only write ``recommendations.json``"
             $brief | Should Match "Execute preflight"
+            $brief | Should Match "no-op recommendation is valid without network research"
+            $brief | Should Match "source_observations=\[\]"
         }
 
         It "Writes profile-only audit brief with explicit target-scan false guidance" {
@@ -1119,6 +1132,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $brief | Should Match "Decision insights JSON: decision-insights.json"
             $brief | Should Match "Only write ``recommendations.json``"
             $brief | Should Match "Execute preflight"
+            $brief | Should Match "no-op recommendation is valid without network research"
         }
 
         It "Writes runtime outer AI prompt with blocker and summary format sections" {
@@ -1140,6 +1154,9 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $prompt | Should Match "决策洞察"
             $prompt | Should Match "执行预检"
             $prompt | Should Match "除 ``recommendations.json`` 外，不得修改本轮审查包输入文件"
+            $prompt | Should Match "审查包目录名 run-id"
+            $prompt | Should Match "source_observations=\[\]"
+            $prompt | Should Match "no-op 的本地覆盖依据"
         }
 
         It "Writes profile-only runtime outer AI prompt without requiring repo scan" {
@@ -1156,6 +1173,8 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $prompt | Should Match "decision-insights.json"
             $prompt | Should Match "执行预检"
             $prompt | Should Match "这些文件只能读，不能改"
+            $prompt | Should Match "审查包目录名 run-id"
+            $prompt | Should Match "no-op 的本地覆盖依据"
         }
 
         It "Builds recommendations template with placeholder examples" {

@@ -8238,6 +8238,10 @@ function Get-AuditUserProfileSnapshotPath {
     return (Join-Path $script:Root "reports\skill-audit\user-profile.json")
 }
 
+function Get-AuditUserProfileSummarySnapshotPath {
+    return (Join-Path $script:Root "reports\skill-audit\user-profile.json.summary")
+}
+
 function Get-AuditOuterAiPromptOverridePath {
     return (Join-Path $script:Root "overrides\audit-outer-ai-prompt.md")
 }
@@ -8256,10 +8260,11 @@ function Get-DefaultAuditOuterAiPrompt {
 1) run-id
 - 如果当前提示词已列出审查包目录和文件路径，以该运行包为准。
 - ``<run-id>`` 只用于命令路径占位；写 recommendations 前必须已有扫描/发现运行包，执行预检或 dry-run 前必须已写出 recommendations.json。
+- 路径中的 ``<run-id>`` 指审查包目录名；若 audit-meta.json 内部 run_id 不同，不要把两者混用，命令路径必须继续使用目录名。
 - 若无可用运行包：立即停止并报告：先执行 ``.\skills.ps1 审查目标 扫描`` 或 ``.\skills.ps1 审查目标 发现新技能``。
 
 2) 画像预检查（只在本轮输入显示画像不完整时执行）
-- 检查 audit-targets.json.user_profile。
+- 检查 ``reports/skill-audit/user-profile.json.summary`` 是否非空；或检查 ``reports/skill-audit/user-profile.structured.json`` 中 ``summary`` 非空且 ``structured`` 完整。
 - 若 summary 为空或 structured 不完整：补全 ``reports/skill-audit/user-profile.structured.json``（schema 不变，summary 非空，structured_by="outer-ai"），然后执行：
   ``.\skills.ps1 审查目标 需求结构化 --profile "reports\skill-audit\user-profile.structured.json"``
 - 导入后复查；失败最多重试 1 次，再失败立即停止。
@@ -8277,6 +8282,7 @@ function Get-DefaultAuditOuterAiPrompt {
 - 每条新增/卸载（skills/MCP）建议应包含 ``keyword_trace.user_profile`` / ``keyword_trace.target_repo_or_context`` / ``keyword_trace.installed_state``（与 decision-insights 对齐）
 - MCP 新增写 ``mcp_new_servers`` 且 ``name==server.name``；MCP 卸载写 ``mcp_removal_candidates``
 - ``overlap_findings`` 仅报告；``do_not_install`` 仅记录当前不应安装项；证据不足留空
+- 若四类新增/卸载建议均为空，可输出有效 no-op；no-op 不强制网络搜索，``source_observations=[]`` 合法，但必须在 ``decision_basis.summary`` 或 ``empty_recommendation_reasons`` 中说明本地覆盖依据。
 
 5) 自检、预检、dry-run
 - 自检：JSON/schema/双理由/sources/source_observations/keyword_trace/无占位符/无重复建议
@@ -8712,7 +8718,9 @@ function New-AuditPrecheckStructuredProfile($cfg) {
 }
 
 function Write-AuditUserProfileSnapshot($cfg) {
-    Write-AuditJsonFile (Get-AuditUserProfileSnapshotPath) (Get-AuditUserProfileOutput $cfg)
+    $profile = Get-AuditUserProfileOutput $cfg
+    Write-AuditJsonFile (Get-AuditUserProfileSnapshotPath) $profile
+    Set-ContentUtf8 (Get-AuditUserProfileSummarySnapshotPath) ([string]$profile.summary)
 }
 
 function Ensure-AuditUserProfilePrecheck {
@@ -9997,6 +10005,7 @@ Rules:
 - The template already includes placeholder example items. Replace placeholder values or delete the example entries you do not need; do not invent a different schema.
 - Cite only sources you actually inspected during this run. Do not fabricate source links, source observations, or source conclusions.
 - If evidence is insufficient, leave the category empty and explain briefly instead of forcing low-quality recommendations.
+- If all add/remove categories are empty, a no-op recommendation is valid without network research; ``source_observations=[]`` is allowed when there are no selected add/remove items and the local coverage basis is explained.
 - After dry-run, show numbered skill add/remove and MCP add/remove lists with one-line reasons per item (``reason_user_profile`` + ``reason_target_repo``).
 - If a list is empty, explicitly output "no <category> recommendations" with a brief reason.
 - Keep dry-run numbering stable; do not renumber or reorder indexes in the user-facing summary.
@@ -10097,6 +10106,7 @@ Rules:
 - The template already includes placeholder example items. Replace placeholder values or delete the example entries you do not need; do not invent a different schema.
 - Cite only sources you actually inspected during this run. Do not fabricate repository facts, source links, source observations, or source conclusions.
 - If evidence is insufficient, leave the category empty and explain briefly instead of forcing low-quality recommendations.
+- If all add/remove categories are empty, a no-op recommendation is valid without network research; ``source_observations=[]`` is allowed when there are no selected add/remove items and the local coverage basis is explained.
 - After dry-run, show numbered skill add/remove and MCP add/remove lists with one-line reasons per item (``reason_user_profile`` + ``reason_target_repo``).
 - If a list is empty, explicitly output "no <category> recommendations" with a brief reason.
 - Keep dry-run numbering stable; do not renumber or reorder indexes in the user-facing summary.
@@ -10173,6 +10183,8 @@ $(Get-AuditOuterAiPromptContent)
 ## Current Audit Run Files
 
 - 审查包目录：$reportRoot
+- 审查包目录名 run-id：$(Split-Path $reportRoot -Leaf)
+- audit-meta.json 内部 run_id 可作为元数据参考；命令路径和 ``<run-id>`` 占位符解析以审查包目录名为准
 - Prompt-Contract-Version: $(Get-AuditPromptContractVersion)
 - 模式：$normalizedMode
 - 发现查询：$queryText
@@ -10212,7 +10224,7 @@ $basisCheckStep
 - ``recommendations.json`` 必须与模板 schema 一致
 - 除 ``recommendations.json`` 外，不得修改本轮审查包输入文件、快照、提示词、brief、模板、来源策略、决策洞察或 repo scan
 - 技能与 MCP 的新增/卸载建议都必须保留双依据和来源，且每项理由要简短可读
-- ``source_observations`` 必须记录本轮调研过的候选项；被选中的新增/卸载项必须能在其中找到对应 candidate_type/name/decision
+- ``source_observations`` 必须记录本轮调研过的候选项；被选中的新增/卸载项必须能在其中找到对应 candidate_type/name/decision；若四类新增/卸载建议均为空，允许 ``source_observations=[]``，但必须说明 no-op 的本地覆盖依据
 - 若 ``source-strategy.decision_quality_policy`` 开启，``keyword_trace`` 必须满足最小命中与关键词归属校验
 - 若任一建议缺少 ``reason_user_profile`` 或 ``reason_target_repo``，视为未完成，不得进入下一步
 - 若证据不足，允许不推荐；不得“猜测式”新增/卸载
