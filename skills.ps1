@@ -8891,7 +8891,7 @@ function Get-AuditRunId {
 }
 
 function Get-AuditPromptContractVersion {
-    return "audit-prompt-v20260427.1"
+    return "audit-prompt-v20260502.1"
 }
 
 function Get-AuditReportRoot([string]$runId) {
@@ -9979,6 +9979,7 @@ Rules:
 
 - Profile-only mode has no target repo scan; do not fabricate repository facts.
 - Only write ``recommendations.json`` in this run directory. Do not modify generated input files, snapshots, prompts, briefs, templates, source strategy, decision insights, or repo scan files.
+- The audit commands may automatically write runtime evidence such as ``preflight-report.json``, ``dry-run-summary.json``, ``apply-report.json``, and ``docs/change-evidence/*.md``; treat those as expected command outputs, not files for the outer AI agent to hand-edit.
 - All decisions must be based on user-profile.json, installed-skills.json (audit snapshot, not live source of truth), source-strategy.json, and real external research.
 - decision-insights.json provides machine-readable keyword anchors; every add/remove skill or MCP recommendation should keep ``keyword_trace.user_profile`` + ``keyword_trace.target_repo_or_context`` + ``keyword_trace.installed_state`` aligned to it.
 - Treat source-strategy.json ``evidence_policy`` and ``decision_quality_policy`` as hard constraints.
@@ -10081,6 +10082,7 @@ Rules:
 
 - All decisions must be based on BOTH user-profile.json and target repo scan facts, and must use installed-skills.json as the audit snapshot for currently installed skills and MCP servers.
 - Only write ``recommendations.json`` in this run directory. Do not modify generated input files, snapshots, prompts, briefs, templates, source strategy, decision insights, or repo scan files.
+- The audit commands may automatically write runtime evidence such as ``preflight-report.json``, ``dry-run-summary.json``, ``apply-report.json``, and ``docs/change-evidence/*.md``; treat those as expected command outputs, not files for the outer AI agent to hand-edit.
 - Use source-strategy.json to cover the built-in source set and explain source tradeoffs.
 - decision-insights.json provides machine-readable keyword anchors; every add/remove skill or MCP recommendation should keep ``keyword_trace.user_profile`` + ``keyword_trace.target_repo_or_context`` + ``keyword_trace.installed_state`` aligned to it.
 - Treat source-strategy.json ``evidence_policy`` and ``decision_quality_policy`` as hard constraints.
@@ -10223,6 +10225,7 @@ $basisCheckStep
 
 - ``recommendations.json`` 必须与模板 schema 一致
 - 除 ``recommendations.json`` 外，不得修改本轮审查包输入文件、快照、提示词、brief、模板、来源策略、决策洞察或 repo scan
+- 预检、dry-run、apply 命令自动生成的 ``preflight-report.json``、``dry-run-summary.json``、``apply-report.json`` 和 ``docs/change-evidence/*.md`` 属于预期运行证据输出；外层 AI 不应手写或手改这些文件
 - 技能与 MCP 的新增/卸载建议都必须保留双依据和来源，且每项理由要简短可读
 - ``source_observations`` 必须记录本轮调研过的候选项；被选中的新增/卸载项必须能在其中找到对应 candidate_type/name/decision；若四类新增/卸载建议均为空，允许 ``source_observations=[]``，但必须说明 no-op 的本地覆盖依据
 - 若 ``source-strategy.decision_quality_policy`` 开启，``keyword_trace`` 必须满足最小命中与关键词归属校验
