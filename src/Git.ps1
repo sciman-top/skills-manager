@@ -449,6 +449,25 @@ function Has-GitUpstream {
     $up = Invoke-GitCapture @("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
     return -not [string]::IsNullOrWhiteSpace($up)
 }
+function Update-CurrentBranchFromUpstream([bool]$AllowNetworkFetch = $true) {
+    $branch = Get-GitHeadBranch
+    if (-not $branch -or -not (Has-GitUpstream)) {
+        Log "跳过 git pull：当前为 detached HEAD 或无 upstream。"
+        return
+    }
+    if ($AllowNetworkFetch) {
+        Invoke-Git @("pull")
+        return
+    }
+    try {
+        Invoke-Git @("merge", "--ff-only", "@{u}")
+        Log ("已基于本地 refs 快进分支：{0}" -f $branch)
+    }
+    catch {
+        Log ("本地快进失败，回退 git pull：{0}" -f $_.Exception.Message) "WARN"
+        Invoke-Git @("pull")
+    }
+}
 function Has-GitChanges {
     $out = Invoke-GitCapture @("status", "--porcelain")
     return -not [string]::IsNullOrWhiteSpace($out)
@@ -739,13 +758,9 @@ function Ensure-Repo([string]$path, [string]$repo, [string]$ref, [string]$sparse
                 Invoke-Git @("fetch", "--all", "--tags")
             }
             Invoke-Git @("checkout", $ref)
-            $branch = Get-GitHeadBranch
-            if ($branch -and (Has-GitUpstream)) {
-                Invoke-Git @("pull")
-            }
-            else {
-                Log "跳过 git pull：当前为 detached HEAD 或无 upstream。"
-            }
+            # We already fetched explicitly when needed; prefer local fast-forward first
+            # to avoid duplicate network round-trips per repo.
+            Update-CurrentBranchFromUpstream $false
         }
         finally { Pop-Location }
     }

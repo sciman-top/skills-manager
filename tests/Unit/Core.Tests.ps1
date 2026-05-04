@@ -172,6 +172,47 @@ Describe "Core Functions" {
         }
     }
 
+    Context "Update-CurrentBranchFromUpstream" {
+        It "Uses git pull when network fetch is allowed" {
+            Mock Get-GitHeadBranch { "main" }
+            Mock Has-GitUpstream { $true }
+            Mock Invoke-Git {}
+
+            Update-CurrentBranchFromUpstream $true
+
+            Assert-MockCalled Invoke-Git -Times 1 -Exactly -Scope It -ParameterFilter {
+                @($GitArgs)[0] -eq "pull"
+            }
+        }
+
+        It "Uses local ff-only merge when network fetch is disabled" {
+            Mock Get-GitHeadBranch { "main" }
+            Mock Has-GitUpstream { $true }
+            Mock Invoke-Git {}
+
+            Update-CurrentBranchFromUpstream $false
+
+            Assert-MockCalled Invoke-Git -Times 1 -Exactly -Scope It -ParameterFilter {
+                @($GitArgs)[0] -eq "merge" -and @($GitArgs)[1] -eq "--ff-only"
+            }
+        }
+
+        It "Falls back to git pull when ff-only merge fails" {
+            Mock Get-GitHeadBranch { "main" }
+            Mock Has-GitUpstream { $true }
+            $script:syncCalls = New-Object System.Collections.Generic.List[string]
+            Mock Invoke-Git {
+                param($GitArgs)
+                $script:syncCalls.Add([string]@($GitArgs)[0]) | Out-Null
+                if (@($GitArgs)[0] -eq "merge") { throw "ff-only failed" }
+            }
+
+            Update-CurrentBranchFromUpstream $false
+
+            ($script:syncCalls -join ",") | Should Be "merge,pull"
+        }
+    }
+
     Context "Zip Repo Input" {
         It "Recognizes existing local zip as repo input" {
             $zip = Join-Path $TestDrive "sample.zip"
@@ -494,6 +535,7 @@ Describe "Core Functions" {
             $tokens[0] | Should Be "https://github.com/openai/skills.git"
             $tokens[1] | Should Be "--skill"
             $tokens[2] | Should Be "skills/.experimental/create-plan"
+            $tokens[3] | Should Be "--sparse"
         }
 
         # ── Bare GitHub Tree URL ────────────────────────────────────────────
@@ -503,6 +545,7 @@ Describe "Core Functions" {
             $tokens[0] | Should Be "https://github.com/openai/skills.git"
             $tokens[1] | Should Be "--skill"
             $tokens[2] | Should Be "skills/create-plan"
+            $tokens[3] | Should Be "--sparse"
         }
 
         It "Returns null for plain owner/repo (fallthrough to existing logic)" {

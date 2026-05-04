@@ -21,6 +21,14 @@ function Ensure-ImportVendorMapping($cfg, [string]$vendorName, [string]$skillPat
         $cfg.mappings += @{ vendor = $vendorName; from = $from; to = $targetName }
     }
 }
+function Ensure-ManualImportMapping($cfg, [string]$importName, [string]$targetName) {
+    Need (-not [string]::IsNullOrWhiteSpace($importName)) "manual import name 不能为空"
+    Need (-not [string]::IsNullOrWhiteSpace($targetName)) "manual target name 不能为空"
+    $exists = $cfg.mappings | Where-Object { $_.vendor -eq "manual" -and $_.from -eq $importName } | Select-Object -First 1
+    if (-not $exists) {
+        $cfg.mappings += @{ vendor = "manual"; from = $importName; to = $targetName }
+    }
+}
 function Test-NeedsSparseProbeFallback([string]$msg) {
     if ([string]::IsNullOrWhiteSpace($msg)) { return $false }
     return ($msg -match "unable to checkout working tree|checkout failed|git restore --source=HEAD :/|invalid path|Filename too long|文件名.*太长|路径.*过长")
@@ -461,6 +469,7 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
 
                 $import = @{ name = $name; repo = $repo; ref = $ref; skill = $skillPath; mode = "manual"; sparse = $curSparse }
                 Upsert-Import $cfg $import
+                Ensure-ManualImportMapping $cfg $name $name
             }
         }
         else {
@@ -1590,6 +1599,18 @@ function Mirror-SkillWithCache(
     if ($null -ne $stats -and $stats.PSObject.Properties.Match("fp_cache_miss").Count -eq 0) {
         $stats | Add-Member -NotePropertyName fp_cache_miss -NotePropertyValue 0
     }
+    $dstExists = (Test-Path -LiteralPath $dst -PathType Container)
+    if (-not $dstExists) {
+        # The destination is guaranteed to be rebuilt in this pass, so fingerprint
+        # calculation cannot lead to a cache skip. Mirror directly to reduce build cost.
+        RoboMirror $src $dst
+        $expanded = Expand-RelativeSkillPlaceholders $dst
+        if ($expanded -gt 0) {
+            Log ("已展开相对路径 SKILL 占位文件：{0} 项 [{1}]" -f $expanded, $cacheKey)
+        }
+        $stats.mirrored++
+        return
+    }
     $srcKey = [System.IO.Path]::GetFullPath($src).ToLowerInvariant()
     if ($fingerprintCache.ContainsKey($srcKey)) {
         $fp = [string]$fingerprintCache[$srcKey]
@@ -1602,7 +1623,7 @@ function Mirror-SkillWithCache(
     }
     $newCache[$cacheKey] = $fp
     $old = if ($oldCache.ContainsKey($cacheKey)) { [string]$oldCache[$cacheKey] } else { "" }
-    if ((Test-Path $dst) -and $old -eq $fp) {
+    if ($dstExists -and $old -eq $fp) {
         $expanded = Expand-RelativeSkillPlaceholders $dst
         if ($expanded -gt 0) {
             Log ("命中构建缓存后补展开相对路径 SKILL 占位文件：{0} 项 [{1}]" -f $expanded, $cacheKey)
@@ -1612,7 +1633,7 @@ function Mirror-SkillWithCache(
         return
     }
     RoboMirror $src $dst
-    $expanded = Expand-RelativeSkillPlaceholders $dst
+     $expanded = Expand-RelativeSkillPlaceholders $dst
     if ($expanded -gt 0) {
         Log ("已展开相对路径 SKILL 占位文件：{0} 项 [{1}]" -f $expanded, $cacheKey)
     }
@@ -1755,6 +1776,9 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
         $oldCache = if ($DryRun) { @{} } else { Load-BuildCache }
         $newCache = @{}
         $fingerprintCache = @{}
+        $vendorBaseCache = @{}
+        $manualSourceCache = @{}
+        $skillDirValidityCache = @{}
 
         $swMapping = [System.Diagnostics.Stopwatch]::StartNew()
         foreach ($m in $cfg.mappings) {
@@ -1765,19 +1789,41 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
                 }
                 Need (Test-SafeRelativePath $m.from -AllowDot) ("非法 mapping.from：{0}" -f $m.from)
                 Need (Test-SafeRelativePath $m.to) ("非法 mapping.to：{0}" -f $m.to)
-                $base = Resolve-SourceBase $m.vendor $cfg
                 if ($m.vendor -eq "manual") {
-                    $src = Resolve-ManualImportSkillPath $cfg $m.from -AllowLegacyFallback
+                    if ($manualSourceCache.ContainsKey([string]$m.from)) {
+                        $src = [string]$manualSourceCache[[string]$m.from]
+                    }
+                    else {
+                        $resolvedManual = Resolve-ManualImportSkillPath $cfg $m.from -AllowLegacyFallback
+                        $manualSourceCache[[string]$m.from] = [string]$resolvedManual
+                        $src = [string]$resolvedManual
+                    }
                     Need (-not [string]::IsNullOrWhiteSpace($src)) ("manual 导入不存在或无效：{0}" -f $m.from)
                 }
                 else {
+                    if ($vendorBaseCache.ContainsKey([string]$m.vendor)) {
+                        $base = [string]$vendorBaseCache[[string]$m.vendor]
+                    }
+                    else {
+                        $resolvedBase = Resolve-SourceBase $m.vendor $cfg
+                        $vendorBaseCache[[string]$m.vendor] = [string]$resolvedBase
+                        $base = [string]$resolvedBase
+                    }
                     $src = Join-Path $base $m.from
                     Need (Is-PathInsideOrEqual $src $base) ("mapping.from 越界：{0}" -f $m.from)
                 }
                 $dst = Join-Path $AgentDir $m.to
                 Need (Is-PathInsideOrEqual $dst $AgentDir) ("mapping.to 越界：{0}" -f $m.to)
 
-                if (-not (Test-IsSkillDir $src)) {
+                $srcKey = [System.IO.Path]::GetFullPath($src).ToLowerInvariant()
+                if ($skillDirValidityCache.ContainsKey($srcKey)) {
+                    $isSkillDir = [bool]$skillDirValidityCache[$srcKey]
+                }
+                else {
+                    $isSkillDir = Test-IsSkillDir $src
+                    $skillDirValidityCache[$srcKey] = $isSkillDir
+                }
+                if (-not $isSkillDir) {
                     $invalidReason = if (-not (Test-Path -LiteralPath $src -PathType Container)) { "源目录不存在" } else { "缺少标记文件" }
                     Write-Host ("⚠️ 跳过无效技能（{0}）：{1}" -f $invalidReason, $src) -ForegroundColor Yellow
                     $invalidMappings.Add([pscustomobject]@{

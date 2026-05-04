@@ -1097,7 +1097,7 @@ function Convert-GitHubTreeUrlToAddTokens([string]$value) {
     $trimmed = $value.Trim().Trim("'`"").TrimEnd(".", ",", "。", "，", ";", "；")
     if ($trimmed -notmatch "^https?://github\.com/([^/]+)/([^/]+)/tree/[^/]+/.+$") { return $null }
     $repo = "https://github.com/{0}/{1}.git" -f $Matches[1], $Matches[2]
-    return ,@($repo, "--skill", $skill)
+    return ,@($repo, "--skill", $skill, "--sparse")
 }
 function Get-InstallScriptMappings() {
     if ($null -ne $script:InstallScriptMappingsOverride) { return @($script:InstallScriptMappingsOverride) }
@@ -1839,6 +1839,25 @@ function Has-GitUpstream {
     $up = Invoke-GitCapture @("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
     return -not [string]::IsNullOrWhiteSpace($up)
 }
+function Update-CurrentBranchFromUpstream([bool]$AllowNetworkFetch = $true) {
+    $branch = Get-GitHeadBranch
+    if (-not $branch -or -not (Has-GitUpstream)) {
+        Log "跳过 git pull：当前为 detached HEAD 或无 upstream。"
+        return
+    }
+    if ($AllowNetworkFetch) {
+        Invoke-Git @("pull")
+        return
+    }
+    try {
+        Invoke-Git @("merge", "--ff-only", "@{u}")
+        Log ("已基于本地 refs 快进分支：{0}" -f $branch)
+    }
+    catch {
+        Log ("本地快进失败，回退 git pull：{0}" -f $_.Exception.Message) "WARN"
+        Invoke-Git @("pull")
+    }
+}
 function Has-GitChanges {
     $out = Invoke-GitCapture @("status", "--porcelain")
     return -not [string]::IsNullOrWhiteSpace($out)
@@ -2129,13 +2148,9 @@ function Ensure-Repo([string]$path, [string]$repo, [string]$ref, [string]$sparse
                 Invoke-Git @("fetch", "--all", "--tags")
             }
             Invoke-Git @("checkout", $ref)
-            $branch = Get-GitHeadBranch
-            if ($branch -and (Has-GitUpstream)) {
-                Invoke-Git @("pull")
-            }
-            else {
-                Log "跳过 git pull：当前为 detached HEAD 或无 upstream。"
-            }
+            # We already fetched explicitly when needed; prefer local fast-forward first
+            # to avoid duplicate network round-trips per repo.
+            Update-CurrentBranchFromUpstream $false
         }
         finally { Pop-Location }
     }
@@ -3871,6 +3886,14 @@ function Ensure-ImportVendorMapping($cfg, [string]$vendorName, [string]$skillPat
         $cfg.mappings += @{ vendor = $vendorName; from = $from; to = $targetName }
     }
 }
+function Ensure-ManualImportMapping($cfg, [string]$importName, [string]$targetName) {
+    Need (-not [string]::IsNullOrWhiteSpace($importName)) "manual import name 不能为空"
+    Need (-not [string]::IsNullOrWhiteSpace($targetName)) "manual target name 不能为空"
+    $exists = $cfg.mappings | Where-Object { $_.vendor -eq "manual" -and $_.from -eq $importName } | Select-Object -First 1
+    if (-not $exists) {
+        $cfg.mappings += @{ vendor = "manual"; from = $importName; to = $targetName }
+    }
+}
 function Test-NeedsSparseProbeFallback([string]$msg) {
     if ([string]::IsNullOrWhiteSpace($msg)) { return $false }
     return ($msg -match "unable to checkout working tree|checkout failed|git restore --source=HEAD :/|invalid path|Filename too long|文件名.*太长|路径.*过长")
@@ -4311,6 +4334,7 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
 
                 $import = @{ name = $name; repo = $repo; ref = $ref; skill = $skillPath; mode = "manual"; sparse = $curSparse }
                 Upsert-Import $cfg $import
+                Ensure-ManualImportMapping $cfg $name $name
             }
         }
         else {
@@ -5440,6 +5464,18 @@ function Mirror-SkillWithCache(
     if ($null -ne $stats -and $stats.PSObject.Properties.Match("fp_cache_miss").Count -eq 0) {
         $stats | Add-Member -NotePropertyName fp_cache_miss -NotePropertyValue 0
     }
+    $dstExists = (Test-Path -LiteralPath $dst -PathType Container)
+    if (-not $dstExists) {
+        # The destination is guaranteed to be rebuilt in this pass, so fingerprint
+        # calculation cannot lead to a cache skip. Mirror directly to reduce build cost.
+        RoboMirror $src $dst
+        $expanded = Expand-RelativeSkillPlaceholders $dst
+        if ($expanded -gt 0) {
+            Log ("已展开相对路径 SKILL 占位文件：{0} 项 [{1}]" -f $expanded, $cacheKey)
+        }
+        $stats.mirrored++
+        return
+    }
     $srcKey = [System.IO.Path]::GetFullPath($src).ToLowerInvariant()
     if ($fingerprintCache.ContainsKey($srcKey)) {
         $fp = [string]$fingerprintCache[$srcKey]
@@ -5452,7 +5488,7 @@ function Mirror-SkillWithCache(
     }
     $newCache[$cacheKey] = $fp
     $old = if ($oldCache.ContainsKey($cacheKey)) { [string]$oldCache[$cacheKey] } else { "" }
-    if ((Test-Path $dst) -and $old -eq $fp) {
+    if ($dstExists -and $old -eq $fp) {
         $expanded = Expand-RelativeSkillPlaceholders $dst
         if ($expanded -gt 0) {
             Log ("命中构建缓存后补展开相对路径 SKILL 占位文件：{0} 项 [{1}]" -f $expanded, $cacheKey)
@@ -5462,7 +5498,7 @@ function Mirror-SkillWithCache(
         return
     }
     RoboMirror $src $dst
-    $expanded = Expand-RelativeSkillPlaceholders $dst
+     $expanded = Expand-RelativeSkillPlaceholders $dst
     if ($expanded -gt 0) {
         Log ("已展开相对路径 SKILL 占位文件：{0} 项 [{1}]" -f $expanded, $cacheKey)
     }
@@ -5605,6 +5641,9 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
         $oldCache = if ($DryRun) { @{} } else { Load-BuildCache }
         $newCache = @{}
         $fingerprintCache = @{}
+        $vendorBaseCache = @{}
+        $manualSourceCache = @{}
+        $skillDirValidityCache = @{}
 
         $swMapping = [System.Diagnostics.Stopwatch]::StartNew()
         foreach ($m in $cfg.mappings) {
@@ -5615,19 +5654,41 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
                 }
                 Need (Test-SafeRelativePath $m.from -AllowDot) ("非法 mapping.from：{0}" -f $m.from)
                 Need (Test-SafeRelativePath $m.to) ("非法 mapping.to：{0}" -f $m.to)
-                $base = Resolve-SourceBase $m.vendor $cfg
                 if ($m.vendor -eq "manual") {
-                    $src = Resolve-ManualImportSkillPath $cfg $m.from -AllowLegacyFallback
+                    if ($manualSourceCache.ContainsKey([string]$m.from)) {
+                        $src = [string]$manualSourceCache[[string]$m.from]
+                    }
+                    else {
+                        $resolvedManual = Resolve-ManualImportSkillPath $cfg $m.from -AllowLegacyFallback
+                        $manualSourceCache[[string]$m.from] = [string]$resolvedManual
+                        $src = [string]$resolvedManual
+                    }
                     Need (-not [string]::IsNullOrWhiteSpace($src)) ("manual 导入不存在或无效：{0}" -f $m.from)
                 }
                 else {
+                    if ($vendorBaseCache.ContainsKey([string]$m.vendor)) {
+                        $base = [string]$vendorBaseCache[[string]$m.vendor]
+                    }
+                    else {
+                        $resolvedBase = Resolve-SourceBase $m.vendor $cfg
+                        $vendorBaseCache[[string]$m.vendor] = [string]$resolvedBase
+                        $base = [string]$resolvedBase
+                    }
                     $src = Join-Path $base $m.from
                     Need (Is-PathInsideOrEqual $src $base) ("mapping.from 越界：{0}" -f $m.from)
                 }
                 $dst = Join-Path $AgentDir $m.to
                 Need (Is-PathInsideOrEqual $dst $AgentDir) ("mapping.to 越界：{0}" -f $m.to)
 
-                if (-not (Test-IsSkillDir $src)) {
+                $srcKey = [System.IO.Path]::GetFullPath($src).ToLowerInvariant()
+                if ($skillDirValidityCache.ContainsKey($srcKey)) {
+                    $isSkillDir = [bool]$skillDirValidityCache[$srcKey]
+                }
+                else {
+                    $isSkillDir = Test-IsSkillDir $src
+                    $skillDirValidityCache[$srcKey] = $isSkillDir
+                }
+                if (-not $isSkillDir) {
                     $invalidReason = if (-not (Test-Path -LiteralPath $src -PathType Container)) { "源目录不存在" } else { "缺少标记文件" }
                     Write-Host ("⚠️ 跳过无效技能（{0}）：{1}" -f $invalidReason, $src) -ForegroundColor Yellow
                     $invalidMappings.Add([pscustomobject]@{
@@ -5967,10 +6028,38 @@ function Should-ForceCleanTarget($cfg, $SkipForceClean, [string]$kind, [string]$
     return (-not $SkipForceClean.ContainsKey($key))
 }
 
+function Get-UpdateRepoCount($cfg) {
+    if ($null -eq $cfg) { return 0 }
+    $keys = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($v in @($cfg.vendors)) {
+        if ($null -eq $v) { continue }
+        $repoKey = Get-RepoIdentityKey ([string]$v.repo)
+        if ([string]::IsNullOrWhiteSpace($repoKey)) { continue }
+        $keys.Add($repoKey) | Out-Null
+    }
+    foreach ($i in @($cfg.imports)) {
+        if ($null -eq $i -or $i.mode -ne "manual") { continue }
+        $repoKey = Get-RepoIdentityKey ([string]$i.repo)
+        if ([string]::IsNullOrWhiteSpace($repoKey)) { continue }
+        $keys.Add($repoKey) | Out-Null
+    }
+    return $keys.Count
+}
+
 function Get-UpdateParallelism($cfg) {
-    $n = 1
-    if ($null -ne $cfg -and $cfg.PSObject.Properties.Match("update_parallelism").Count -gt 0) {
+    $n = $null
+    $hasConfigured = ($null -ne $cfg -and $cfg.PSObject.Properties.Match("update_parallelism").Count -gt 0)
+    if ($hasConfigured) {
         try { $n = [int]$cfg.update_parallelism } catch { $n = 1 }
+    }
+    else {
+        $repoCount = Get-UpdateRepoCount $cfg
+        if ($repoCount -le 1) { return 1 }
+        $cpu = 2
+        try { $cpu = [Environment]::ProcessorCount } catch {}
+        if ($cpu -lt 2) { $cpu = 2 }
+        $n = [Math]::Min(8, $cpu)
+        if ($n -gt $repoCount) { $n = $repoCount }
     }
     if ($n -lt 1) { $n = 1 }
     return $n
@@ -6080,12 +6169,27 @@ function Resolve-RemoteCommit([string]$repo, [string]$ref) {
     return $null
 }
 
+function Resolve-RemoteCommitCached([string]$repo, [string]$ref, [hashtable]$cache = $null) {
+    if ($null -eq $cache) {
+        return (Resolve-RemoteCommit $repo $ref)
+    }
+    $targetRef = if ([string]::IsNullOrWhiteSpace($ref)) { "main" } else { [string]$ref }
+    $cacheKey = ("{0}|{1}" -f (Get-RepoIdentityKey $repo), $targetRef).ToLowerInvariant()
+    if ($cache.ContainsKey($cacheKey)) {
+        return $cache[$cacheKey]
+    }
+    $resolved = Resolve-RemoteCommit $repo $targetRef
+    $cache[$cacheKey] = $resolved
+    return $resolved
+}
+
 function Get-UpdatePlanItems($cfg) {
     $items = @()
+    $remoteCommitCache = @{}
     foreach ($v in @($cfg.vendors)) {
         $ref = if ([string]::IsNullOrWhiteSpace([string]$v.ref)) { "main" } else { [string]$v.ref }
         $current = Get-CurrentRepoCommit (VendorPath $v.name)
-        $remote = Resolve-RemoteCommit ([string]$v.repo) $ref
+        $remote = Resolve-RemoteCommitCached ([string]$v.repo) $ref $remoteCommitCache
         $items += [pscustomobject]@{
             type = "vendor"
             name = [string]$v.name
@@ -6102,7 +6206,7 @@ function Get-UpdatePlanItems($cfg) {
         $ref = if ([string]::IsNullOrWhiteSpace([string]$i.ref)) { "main" } else { [string]$i.ref }
         $path = Join-Path $ImportDir $name
         $current = Get-CurrentRepoCommit $path
-        $remote = Resolve-RemoteCommit ([string]$i.repo) $ref
+        $remote = Resolve-RemoteCommitCached ([string]$i.repo) $ref $remoteCommitCache
         $items += [pscustomobject]@{
             type = "import"
             name = $name
@@ -6177,13 +6281,8 @@ function 更新Vendor($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $n
                         try { Invoke-Git @("sparse-checkout", "disable") } catch {}
                     }
                     Invoke-Git @("checkout", $v.ref)
-                    $branch = Get-GitHeadBranch
-                    if ($branch -and (Has-GitUpstream)) {
-                        Invoke-Git @("pull")
-                    }
-                    else {
-                        Log ("跳过 git pull：{0} 处于 detached HEAD 或无 upstream。" -f $v.name)
-                    }
+                    # fetch already happened above (unless SkipFetch), so prefer local fast-forward.
+                    Update-CurrentBranchFromUpstream $false
                 }
                 finally {
                     Pop-Location
@@ -6314,6 +6413,30 @@ function 更新Imports($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $
                         $skillPath = $resolvedSkillPath
                         $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
                         Log ("导入技能路径已自动修正：{0} -> {1} [{2}]" -f [string]$i.name, $skillPath, $repo) "WARN"
+                    }
+                }
+                if (-not (Test-IsSkillDir $src) -and $gitSkillPath -ne ".") {
+                    $missingSkillForceClean = $forceClean
+                    if (-not $missingSkillForceClean -and (Test-Path -LiteralPath $cache)) {
+                        $missingSkillForceClean = $true
+                        Log ("导入缓存缺少目标技能，回退归档时临时启用强制清理：{0} [{1}]" -f $name, $repo) "WARN"
+                    }
+                    try {
+                        Ensure-RepoFromGitArchive $cache $repo $ref $skillPath $missingSkillForceClean | Out-Null
+                        $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
+                        Log ("导入缓存缺少目标技能，已回退为 git archive：{0} [{1}] -> {2}" -f $name, $repo, $skillPath) "WARN"
+                    }
+                    catch {
+                        $archiveError = $_.Exception.Message
+                        try {
+                            Ensure-RepoFromGitHubTreeSnapshot $cache $repo $ref $skillPath $missingSkillForceClean | Out-Null
+                            $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
+                            Log ("导入缓存缺少目标技能，已回退为 GitHub tree 快照：{0} [{1}] -> {2}" -f $name, $repo, $skillPath) "WARN"
+                        }
+                        catch {
+                            $snapshotError = $_.Exception.Message
+                            throw ("导入缓存缺少目标技能，归档回退失败：archive={0} | snapshot={1}" -f $archiveError, $snapshotError)
+                        }
                     }
                 }
                 Need (Test-IsSkillDir $src) "未找到技能入口文件（SKILL.md/AGENTS.md/GEMINI.md/CLAUDE.md）：$src"

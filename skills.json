@@ -244,56 +244,6 @@
       "from": "skills\\performance-optimization"
     },
     {
-      "from": "skills\\using-superpowers",
-      "to": "superpowers-skills-using-superpowers",
-      "vendor": "superpowers"
-    },
-    {
-      "from": "skills\\brainstorming",
-      "to": "superpowers-skills-brainstorming",
-      "vendor": "superpowers"
-    },
-    {
-      "from": "skills\\executing-plans",
-      "to": "superpowers-skills-executing-plans",
-      "vendor": "superpowers"
-    },
-    {
-      "from": "skills\\writing-plans",
-      "to": "superpowers-skills-writing-plans",
-      "vendor": "superpowers"
-    },
-    {
-      "from": "skills\\requesting-code-review",
-      "vendor": "superpowers",
-      "to": "superpowers-skills-requesting-code-review"
-    },
-    {
-      "from": "skills\\receiving-code-review",
-      "vendor": "superpowers",
-      "to": "superpowers-skills-receiving-code-review"
-    },
-    {
-      "from": "skills\\using-git-worktrees",
-      "vendor": "superpowers",
-      "to": "superpowers-skills-using-git-worktrees"
-    },
-    {
-      "from": "skills\\finishing-a-development-branch",
-      "vendor": "superpowers",
-      "to": "superpowers-skills-finishing-a-development-branch"
-    },
-    {
-      "from": "skills\\subagent-driven-development",
-      "to": "superpowers-skills-subagent-driven-development",
-      "vendor": "superpowers"
-    },
-    {
-      "vendor": "superpowers",
-      "to": "superpowers-skills-dispatching-parallel-agents",
-      "from": "skills\\dispatching-parallel-agents"
-    },
-    {
       "to": "superpowers-skills-writing-skills",
       "from": "skills\\writing-skills",
       "vendor": "superpowers"
@@ -502,6 +452,36 @@
       "vendor": "web-quality-skills",
       "to": "web-quality-skills-skills-web-quality-audit",
       "from": "skills\\web-quality-audit"
+    },
+    {
+      "from": "skills\\react-best-practices",
+      "vendor": "agent-skills",
+      "to": "agent-skills-skills-react-best-practices"
+    },
+    {
+      "to": "supabase-postgres-best-practices",
+      "vendor": "manual",
+      "from": "supabase-postgres-best-practices"
+    },
+    {
+      "from": "ant-design",
+      "vendor": "manual",
+      "to": "ant-design"
+    },
+    {
+      "vendor": "manual",
+      "to": "markdown-converter",
+      "from": "markdown-converter"
+    },
+    {
+      "to": "guizang-ppt-skill",
+      "vendor": "manual",
+      "from": "guizang-ppt-skill"
+    },
+    {
+      "to": "ppt-master",
+      "from": "ppt-master",
+      "vendor": "manual"
     }
   ],
   "imports": [
@@ -792,6 +772,54 @@
       "ref": "main",
       "mode": "vendor",
       "name": "web-quality-skills"
+    },
+    {
+      "sparse": false,
+      "name": "agent-skills",
+      "mode": "vendor",
+      "skill": "skills\\react-best-practices",
+      "repo": "https://github.com/vercel-labs/agent-skills.git",
+      "ref": "main"
+    },
+    {
+      "ref": "main",
+      "name": "supabase-postgres-best-practices",
+      "skill": "skills\\supabase-postgres-best-practices",
+      "repo": "https://github.com/supabase/agent-skills.git",
+      "sparse": false,
+      "mode": "manual"
+    },
+    {
+      "ref": "main",
+      "name": "ant-design",
+      "sparse": false,
+      "skill": "skills\\ant-design",
+      "mode": "manual",
+      "repo": "https://github.com/ant-design/antd-skill.git"
+    },
+    {
+      "skill": "skills\\markdown-converter",
+      "name": "markdown-converter",
+      "repo": "https://github.com/intellectronica/agent-skills.git",
+      "ref": "main",
+      "mode": "manual",
+      "sparse": false
+    },
+    {
+      "mode": "manual",
+      "ref": "main",
+      "sparse": false,
+      "skill": ".",
+      "repo": "https://github.com/op7418/guizang-ppt-skill.git",
+      "name": "guizang-ppt-skill"
+    },
+    {
+      "ref": "main",
+      "repo": "https://github.com/hugohe3/ppt-master.git",
+      "mode": "manual",
+      "sparse": true,
+      "name": "ppt-master",
+      "skill": "skills\\ppt-master"
     }
   ],
   "targets": [

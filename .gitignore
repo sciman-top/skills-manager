@@ -32,6 +32,7 @@ acl-backup-git-*.txt
 
 # temporary import diagnostics
 /imports/_debug_*/
+/imports/_archive_*/
 /imports/_probe_*/
 /imports/_tree_*/
 /imports/*.zip

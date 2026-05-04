@@ -43,7 +43,7 @@ Describe "Build Cache and Transaction" {
 
             $stats.skipped | Should Be 1
             $stats.mirrored | Should Be 0
-            Assert-MockCalled RoboMirror -Times 0 -Exactly
+            Assert-MockCalled RoboMirror -Times 0 -Exactly -Scope It
         }
 
         It "Resolves relative-path SKILL placeholders after mirror" {
@@ -131,6 +131,28 @@ description: Execute a phased implementation plan using subagents.
             (Get-Content -Raw (Join-Path $dst "openclaw\skills\do\SKILL.md")) | Should Match "^---"
         }
 
+        It "Skips fingerprint calculation when destination is rebuilt from scratch" {
+            $src = Join-Path $TestDrive "src-fresh"
+            $dst = Join-Path $TestDrive "dst-fresh"
+            New-Item -ItemType Directory -Path $src -Force | Out-Null
+            Set-Content -Path (Join-Path $src "SKILL.md") -Value "fresh"
+
+            $oldCache = @{ "mapping|v|fresh|1" = "fp-old" }
+            $newCache = @{}
+            $stats = [pscustomobject]@{ mirrored = 0; skipped = 0 }
+
+            Mock Get-DirectoryFingerprint { throw "Fingerprint should not be called when destination is missing." }
+            Mock RoboMirror {}
+            Mock Expand-RelativeSkillPlaceholders { 0 }
+
+            Mirror-SkillWithCache $src $dst "mapping|v|fresh|1" $oldCache $newCache $stats
+
+            Assert-MockCalled Get-DirectoryFingerprint -Times 0 -Exactly -Scope It
+            Assert-MockCalled RoboMirror -Times 1 -Exactly -Scope It
+            $stats.mirrored | Should Be 1
+            $stats.skipped | Should Be 0
+        }
+
         It "Reuses computed fingerprint for repeated source directory in one build pass" {
             $src = Join-Path $TestDrive "shared-src"
             $dst1 = Join-Path $TestDrive "dst-a"
@@ -157,6 +179,7 @@ description: Execute a phased implementation plan using subagents.
             $stats.fp_cache_hit | Should Be 1
             $stats.fp_cache_miss | Should Be 1
         }
+
     }
 
     Context "Build Transaction" {
@@ -205,6 +228,63 @@ description: Execute a phased implementation plan using subagents.
             }
         }
 
+    }
+
+    Context "构建Agent mapping caches" {
+        It "Caches repeated manual and vendor source resolution within one mapping pass" {
+            $oldRoot = $script:Root
+            $oldAgent = $script:AgentDir
+            try {
+                $script:Root = Join-Path $TestDrive "repo"
+                $script:AgentDir = Join-Path $script:Root "agent"
+                New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+                New-Item -ItemType Directory -Path $script:AgentDir -Force | Out-Null
+
+                $cfg = [pscustomobject]@{
+                    vendors = @([pscustomobject]@{ name = "vendor-a" })
+                    mappings = @(
+                        [pscustomobject]@{ vendor = "manual"; from = "shared-manual"; to = "manual-copy-a" },
+                        [pscustomobject]@{ vendor = "manual"; from = "shared-manual"; to = "manual-copy-b" },
+                        [pscustomobject]@{ vendor = "vendor-a"; from = "shared-skill"; to = "vendor-copy-a" },
+                        [pscustomobject]@{ vendor = "vendor-a"; from = "shared-skill"; to = "vendor-copy-b" }
+                    )
+                    imports = @()
+                }
+
+                Mock Preflight {}
+                Mock 清空Agent目录 {}
+                Mock Load-BuildCache { @{} }
+                Mock Should-SyncMappingToAgent { $true }
+                Mock Test-SafeRelativePath { $true }
+                Mock Resolve-ManualImportSkillPath { Join-Path $TestDrive "manual-src" }
+                Mock Resolve-SourceBase { Join-Path $TestDrive "vendor-src" }
+                Mock Is-PathInsideOrEqual { $true }
+                Mock Test-IsSkillDir { $true }
+                Mock Mirror-SkillWithCache {}
+                Mock 收集ManualSkills { @() }
+                Mock Get-OverridesDirs { @() }
+                Mock Remove-VendorRootMappingOutputsFromAgent { 0 }
+                Mock Normalize-SkillMarkdownFiles { [pscustomobject]@{ normalized = 0; failed = 0; failed_paths = @() } }
+                Mock Remove-InvalidSkillMarkdownFiles { [pscustomobject]@{ removed = 0; failed = 0; failed_paths = @() } }
+                Mock Get-SkillNameConflictBuckets { @{} }
+                Mock Get-DuplicateMappingSourceGroups { @() }
+                Mock Save-BuildCache {}
+                Mock Complete-BuildTransaction {}
+                Mock Write-Host {}
+                Mock Log {}
+
+                构建Agent $cfg -SkipPreflight | Out-Null
+
+                Assert-MockCalled Resolve-ManualImportSkillPath -Times 1 -Exactly -Scope It
+                Assert-MockCalled Resolve-SourceBase -Times 1 -Exactly -Scope It
+                Assert-MockCalled Test-IsSkillDir -Times 2 -Exactly -Scope It
+                Assert-MockCalled Mirror-SkillWithCache -Times 4 -Exactly -Scope It
+            }
+            finally {
+                $script:Root = $oldRoot
+                $script:AgentDir = $oldAgent
+            }
+        }
     }
 
     Context "Skill name conflicts" {

@@ -7,12 +7,22 @@ if (-not (Test-Path $entry)) {
     throw ("缺少入口脚本：{0}" -f $entry)
 }
 
-& $entry 更新
-if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
+function Invoke-AutoUpdateStep([string]$commandName) {
+    $global:LASTEXITCODE = 0
+    try {
+        & $entry $commandName
+    }
+    catch {
+        Write-Error ("自动更新步骤失败 [{0}]：{1}" -f $commandName, $_.Exception.Message)
+        exit 1
+    }
+    if (-not $?) {
+        Write-Error ("自动更新步骤失败 [{0}]：命令未成功完成。" -f $commandName)
+        exit 1
+    }
+    $global:LASTEXITCODE = 0
 }
 
-& $entry 同步MCP
-if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
-}
+Invoke-AutoUpdateStep "更新"
+Invoke-AutoUpdateStep "同步MCP"
+exit 0

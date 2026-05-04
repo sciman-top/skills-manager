@@ -274,7 +274,11 @@ Describe "Add Import Defaults" {
                 Set-Content -Path (Join-Path $skillDir "SKILL.md") -Value "---`nname: remotion-best-practices`ndescription: x`n---"
             }
             Mock Test-IsSkillDir { $true }
-            Mock SaveCfgSafe {}
+            $script:savedCfg = $null
+            Mock SaveCfgSafe {
+                param($cfg, $cfgRaw)
+                $script:savedCfg = $cfg
+            }
             Mock Clear-SkillsCache {}
             Mock 构建生效 {}
 
@@ -289,6 +293,10 @@ Describe "Add Import Defaults" {
             @($script:importWrites).Count | Should Be 1
             $script:importWrites[0].name | Should Be "remotion-best-practices"
             $script:importWrites[0].skill | Should Be "skills\\remotion"
+            @($script:savedCfg.mappings).Count | Should Be 1
+            $script:savedCfg.mappings[0].vendor | Should Be "manual"
+            $script:savedCfg.mappings[0].from | Should Be "remotion-best-practices"
+            $script:savedCfg.mappings[0].to | Should Be "remotion-best-practices"
         }
         finally {
             $script:CfgPath = $oldCfgPath
