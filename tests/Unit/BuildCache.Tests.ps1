@@ -182,6 +182,105 @@ description: Execute a phased implementation plan using subagents.
 
     }
 
+    Context "Agent build skip cache" {
+        It "Builds a real state signature from current mapping sources" {
+            $src = Join-Path $TestDrive "vendor-src\skill-a"
+            New-Item -ItemType Directory -Path $src -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $src "SKILL.md") -Value "---`nname: skill-a`ndescription: fixture`n---" -Encoding UTF8
+
+            $cfg = [pscustomobject]@{
+                vendors = @([pscustomobject]@{ name = "vendor-a" })
+                mappings = @([pscustomobject]@{ vendor = "vendor-a"; from = "skill-a"; to = "skill-a" })
+                imports = @()
+            }
+
+            Mock Resolve-SourceBase { Join-Path $TestDrive "vendor-src" }
+            Mock Get-OverridesDirs { @() }
+
+            $state = Get-AgentBuildState $cfg
+
+            $state.can_skip | Should Be $true
+            [string]::IsNullOrWhiteSpace([string]$state.signature) | Should Be $false
+            @($state.outputs) | Should Contain "skill-a"
+        }
+
+        It "Accepts a matching build signature when expected outputs exist" {
+            $oldAgent = $script:AgentDir
+            try {
+                $script:AgentDir = Join-Path $TestDrive "agent-hit"
+                New-Item -ItemType Directory -Path (Join-Path $script:AgentDir "skill-a") -Force | Out-Null
+
+                Mock Load-BuildCache { @{
+                        "__agent_build_algorithm" = (Get-AgentBuildCacheAlgorithmVersion)
+                        "__agent_build_signature" = "sig-1"
+                    } }
+                Mock Get-AgentBuildState { [pscustomobject]@{ can_skip = $true; reason = "ok"; signature = "sig-1"; outputs = @("skill-a") } }
+
+                $hit = Test-AgentBuildCacheHit ([pscustomobject]@{})
+
+                $hit.hit | Should Be $true
+                $hit.reason | Should Be "cache-hit"
+            }
+            finally {
+                $script:AgentDir = $oldAgent
+            }
+        }
+
+        It "Rejects a matching build signature when an expected output is missing" {
+            $oldAgent = $script:AgentDir
+            try {
+                $script:AgentDir = Join-Path $TestDrive "agent-missing-output"
+                New-Item -ItemType Directory -Path $script:AgentDir -Force | Out-Null
+
+                Mock Load-BuildCache { @{
+                        "__agent_build_algorithm" = (Get-AgentBuildCacheAlgorithmVersion)
+                        "__agent_build_signature" = "sig-1"
+                    } }
+                Mock Get-AgentBuildState { [pscustomobject]@{ can_skip = $true; reason = "ok"; signature = "sig-1"; outputs = @("skill-a") } }
+
+                $hit = Test-AgentBuildCacheHit ([pscustomobject]@{})
+
+                $hit.hit | Should Be $false
+                $hit.reason | Should Match "output-missing"
+            }
+            finally {
+                $script:AgentDir = $oldAgent
+            }
+        }
+
+        It "Skips the build transaction when the agent build cache is valid" {
+            $cfg = [pscustomobject]@{
+                vendors = @()
+                mappings = @()
+                targets = @()
+                sync_mode = "link"
+            }
+
+            Mock Preflight {}
+            Mock Invoke-PrebuildCheck {}
+            Mock LoadCfg { $cfg }
+            Mock Optimize-Imports {}
+            Mock Get-CfgChangeSummaryLines { @() }
+            Mock Write-BuildSummary {}
+            Mock Test-AgentBuildCacheHit { [pscustomobject]@{ hit = $true; reason = "cache-hit"; state = [pscustomobject]@{ signature = "sig-1"; outputs = @("skill-a") } } }
+            Mock Start-BuildTransaction { throw "Start-BuildTransaction should not be called on cache hit." }
+            Mock 构建Agent { throw "构建Agent should not be called on cache hit." }
+            Mock 应用到ClaudeCodex { @() }
+            Mock Start-DryRunMirrorCollect {}
+            Mock Stop-DryRunMirrorCollect {}
+            Mock Write-DryRunMirrorSummary {}
+            Mock Complete-BuildTransaction {}
+            Mock Rollback-BuildTransaction {}
+            Mock Log {}
+
+            构建生效
+
+            Assert-MockCalled 应用到ClaudeCodex -Times 1 -Exactly -Scope It
+            Assert-MockCalled Start-BuildTransaction -Times 0 -Exactly -Scope It
+            Assert-MockCalled 构建Agent -Times 0 -Exactly -Scope It
+        }
+    }
+
     Context "Build Transaction" {
         It "Restores previous agent folder on rollback" {
             $oldRoot = $script:Root
@@ -268,6 +367,7 @@ description: Execute a phased implementation plan using subagents.
                 Mock Remove-InvalidSkillMarkdownFiles { [pscustomobject]@{ removed = 0; failed = 0; failed_paths = @() } }
                 Mock Get-SkillNameConflictBuckets { @{} }
                 Mock Get-DuplicateMappingSourceGroups { @() }
+                Mock Set-AgentBuildStateCache {}
                 Mock Save-BuildCache {}
                 Mock Complete-BuildTransaction {}
                 Mock Write-Host {}

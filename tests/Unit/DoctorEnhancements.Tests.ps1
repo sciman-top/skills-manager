@@ -134,6 +134,7 @@ Describe "Doctor Enhancements" {
         It "Uses metric-specific thresholds for build metrics" {
             $summary = @(
                 [pscustomobject]@{ metric = "build_agent"; last_ms = 6500; avg_ms = 6200; samples = 3 },
+                [pscustomobject]@{ metric = "build_agent_cache_check"; last_ms = 9000; avg_ms = 8500; samples = 3 },
                 [pscustomobject]@{ metric = "build_apply_total"; last_ms = 18000; avg_ms = 17500; samples = 3 }
             )
 

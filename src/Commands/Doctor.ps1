@@ -170,6 +170,7 @@ function Get-PerfThresholdMs([string]$Metric, [int]$DefaultThresholdMs = 5000) {
     switch ($metricKey) {
         "discover" { return 5000 }
         "build_agent" { return 8000 }
+        "build_agent_cache_check" { return 10000 }
         "apply_targets" { return 5000 }
         # Includes prebuild checks + full build/apply flow; realistic baseline in this repo is ~180s.
         "build_apply_total" { return 240000 }
