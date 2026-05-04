@@ -425,6 +425,36 @@ description: Execute a phased implementation plan using subagents.
         }
     }
 
+    Context "Invalid mapping discovery" {
+        It "Uses shared agent mapping resolution when checking invalid mappings" {
+            $manualSrc = Join-Path $TestDrive "manual-src"
+            $vendorBase = Join-Path $TestDrive "vendor-src"
+            $vendorSrc = Join-Path $vendorBase "shared-skill"
+            New-Item -ItemType Directory -Path $manualSrc -Force | Out-Null
+            New-Item -ItemType Directory -Path $vendorSrc -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $manualSrc "SKILL.md") -Value "---`nname: shared-manual`ndescription: fixture`n---"
+            Set-Content -LiteralPath (Join-Path $vendorSrc "SKILL.md") -Value "---`nname: shared-skill`ndescription: fixture`n---"
+
+            $cfg = [pscustomobject]@{
+                vendors = @([pscustomobject]@{ name = "vendor-a" })
+                mappings = @(
+                    [pscustomobject]@{ vendor = "manual"; from = "shared-manual"; to = "manual-copy-a" },
+                    [pscustomobject]@{ vendor = "manual"; from = "shared-manual"; to = "manual-copy-b" },
+                    [pscustomobject]@{ vendor = "vendor-a"; from = "shared-skill"; to = "vendor-copy-a" },
+                    [pscustomobject]@{ vendor = "vendor-a"; from = "shared-skill"; to = "vendor-copy-b" }
+                )
+                imports = @()
+            }
+
+            Mock Resolve-ManualImportSkillPath { $manualSrc }
+            Mock Resolve-SourceBase { $vendorBase }
+
+            @(Get-InvalidMappings $cfg).Count | Should Be 0
+            Assert-MockCalled Resolve-ManualImportSkillPath -Times 1 -Exactly -Scope It
+            Assert-MockCalled Resolve-SourceBase -Times 1 -Exactly -Scope It
+        }
+    }
+
     Context "Skill name conflicts" {
         It "Allows multiple duplicate skill names when files are byte-identical aliases" {
             $agent = Join-Path $TestDrive "agent"

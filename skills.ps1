@@ -4898,34 +4898,28 @@ function Get-InvalidMappings($cfg = $null) {
     if ($null -eq $cfg) { $cfg = LoadCfg }
     $invalid = New-Object System.Collections.Generic.List[object]
     $mappings = @($cfg.mappings)
+    $resolveContext = New-AgentMappingResolveContext
     for ($idx = 0; $idx -lt $mappings.Count; $idx++) {
         $m = $mappings[$idx]
         if ($null -eq $m) { continue }
-        if (-not (Should-SyncMappingToAgent $m)) { continue }
-
         $vendor = [string]$m.vendor
         $from = [string]$m.from
         $to = [string]$m.to
         $src = $null
         $reason = $null
         try {
-            if (-not (Test-SafeRelativePath $from -AllowDot)) {
-                $reason = "非法 mapping.from"
-            }
-            elseif (-not (Test-SafeRelativePath $to)) {
-                $reason = "非法 mapping.to"
-            }
-            elseif ($vendor -eq "manual") {
-                $src = Resolve-ManualImportSkillPath $cfg $from -AllowLegacyFallback
-                if ([string]::IsNullOrWhiteSpace($src)) {
-                    $reason = "manual 导入不存在或无效"
-                }
+            $resolved = Resolve-AgentMappingForAgent $cfg $m $resolveContext
+            if ($null -eq $resolved -or -not [bool]$resolved.sync) { continue }
+            $vendor = [string]$resolved.vendor
+            $from = [string]$resolved.from
+            $to = [string]$resolved.to
+            if (-not [bool]$resolved.source_valid) {
+                $reason = [string]$resolved.reason
             }
             else {
-                $base = Resolve-SourceBase $vendor $cfg
-                $src = Join-Path $base $from
-                if (-not (Is-PathInsideOrEqual $src $base)) {
-                    $reason = "mapping.from 越界"
+                $src = [string]$resolved.src_full
+                if (-not (Test-ResolvedAgentMappingSkillDir $resolved $resolveContext)) {
+                    $reason = Get-ResolvedAgentMappingInvalidReason $resolved
                 }
             }
         }
@@ -4933,14 +4927,10 @@ function Get-InvalidMappings($cfg = $null) {
             $reason = $_.Exception.Message
         }
 
-        if ([string]::IsNullOrWhiteSpace($reason)) {
-            if (-not (Test-Path -LiteralPath $src -PathType Container)) {
-                $reason = "源目录不存在"
-            }
-            elseif (-not (Test-IsSkillDir $src)) {
-                $reason = "缺少标记文件"
-            }
-        }
+        if ($reason -match "^非法 mapping\.from") { $reason = "非法 mapping.from" }
+        elseif ($reason -match "^非法 mapping\.to") { $reason = "非法 mapping.to" }
+        elseif ($reason -match "^manual 导入不存在或无效") { $reason = "manual 导入不存在或无效" }
+        elseif ($reason -match "^mapping\.from 越界") { $reason = "mapping.from 越界" }
 
         if (-not [string]::IsNullOrWhiteSpace($reason)) {
             $invalid.Add([pscustomobject]@{
