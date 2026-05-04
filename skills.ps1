@@ -5604,79 +5604,150 @@ function Get-StringSha256([string]$text) {
         $sha.Dispose()
     }
 }
+function New-AgentMappingResolveContext {
+    return @{
+        vendor_base = @{}
+        manual_source = @{}
+        skill_dir_validity = @{}
+    }
+}
+function Resolve-AgentMappingForAgent($cfg, $mapping, [hashtable]$context) {
+    if ($null -eq $mapping) { return $null }
+    if ($null -eq $context) { $context = New-AgentMappingResolveContext }
+
+    $vendor = [string]$mapping.vendor
+    $from = [string]$mapping.from
+    $to = [string]$mapping.to
+    if (-not (Should-SyncMappingToAgent $mapping)) {
+        return [pscustomobject]@{
+            sync = $false
+            vendor = $vendor
+            from = $from
+            to = $to
+        }
+    }
+
+    Need (Test-SafeRelativePath $from -AllowDot) ("非法 mapping.from：{0}" -f $from)
+    Need (Test-SafeRelativePath $to) ("非法 mapping.to：{0}" -f $to)
+
+    $src = $null
+    if ($vendor -eq "manual") {
+        $manualSourceCache = [hashtable]$context["manual_source"]
+        if ($manualSourceCache.ContainsKey($from)) {
+            $src = [string]$manualSourceCache[$from]
+        }
+        else {
+            $src = [string](Resolve-ManualImportSkillPath $cfg $from -AllowLegacyFallback)
+            $manualSourceCache[$from] = $src
+        }
+        if ([string]::IsNullOrWhiteSpace($src)) {
+            return [pscustomobject]@{
+                sync = $true
+                source_valid = $false
+                reason = ("manual 导入不存在或无效：{0}" -f $from)
+                vendor = $vendor
+                from = $from
+                to = $to
+            }
+        }
+    }
+    else {
+        $vendorBaseCache = [hashtable]$context["vendor_base"]
+        if ($vendorBaseCache.ContainsKey($vendor)) {
+            $base = [string]$vendorBaseCache[$vendor]
+        }
+        else {
+            $base = [string](Resolve-SourceBase $vendor $cfg)
+            $vendorBaseCache[$vendor] = $base
+        }
+        $src = Join-Path $base $from
+        Need (Is-PathInsideOrEqual $src $base) ("mapping.from 越界：{0}" -f $from)
+    }
+
+    $dst = Join-Path $AgentDir $to
+    Need (Is-PathInsideOrEqual $dst $AgentDir) ("mapping.to 越界：{0}" -f $to)
+
+    $srcFull = [System.IO.Path]::GetFullPath($src)
+    $outRel = Normalize-SkillPath $to
+    return [pscustomobject]@{
+        sync = $true
+        source_valid = $true
+        vendor = $vendor
+        from = $from
+        to = $to
+        out_rel = $outRel
+        src = [string]$src
+        src_full = $srcFull
+        src_key = $srcFull.ToLowerInvariant()
+        dst = $dst
+        cache_key = ("mapping|{0}|{1}|{2}" -f $vendor, $from, $to)
+    }
+}
+function Test-ResolvedAgentMappingSkillDir($resolved, [hashtable]$context) {
+    if ($null -eq $resolved -or -not [bool]$resolved.sync -or -not [bool]$resolved.source_valid) { return $false }
+    if ($null -eq $context) { $context = New-AgentMappingResolveContext }
+
+    $skillDirValidityCache = [hashtable]$context["skill_dir_validity"]
+    $srcKey = [string]$resolved.src_key
+    if ($skillDirValidityCache.ContainsKey($srcKey)) {
+        return [bool]$skillDirValidityCache[$srcKey]
+    }
+
+    $isSkillDir = Test-IsSkillDir ([string]$resolved.src_full)
+    $skillDirValidityCache[$srcKey] = $isSkillDir
+    return $isSkillDir
+}
+function Get-ResolvedAgentMappingInvalidReason($resolved) {
+    $src = if ($null -ne $resolved -and $resolved.PSObject.Properties.Match("src_full").Count -gt 0) { [string]$resolved.src_full } else { "" }
+    if (-not (Test-Path -LiteralPath $src -PathType Container)) { return "源目录不存在" }
+    return "缺少标记文件"
+}
 function Get-AgentBuildState($cfg) {
     $records = New-Object System.Collections.Generic.List[object]
     $outputs = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    $vendorBaseCache = @{}
-    $manualSourceCache = @{}
+    $resolveContext = New-AgentMappingResolveContext
     $fingerprintCache = @{}
     $index = 0
 
     foreach ($m in @($cfg.mappings)) {
-        if ($null -eq $m) { continue }
-        $vendor = [string]$m.vendor
-        $from = [string]$m.from
-        $to = [string]$m.to
-        if (-not (Should-SyncMappingToAgent $m)) {
+        $resolved = Resolve-AgentMappingForAgent $cfg $m $resolveContext
+        if ($null -eq $resolved) { continue }
+        if (-not [bool]$resolved.sync) {
             $records.Add([ordered]@{
                     index = $index
                     kind = "mapping"
                     sync = $false
-                    vendor = $vendor
-                    from = $from
-                    to = $to
+                    vendor = [string]$resolved.vendor
+                    from = [string]$resolved.from
+                    to = [string]$resolved.to
                 }) | Out-Null
             $index++
             continue
         }
 
-        Need (Test-SafeRelativePath $from -AllowDot) ("非法 mapping.from：{0}" -f $from)
-        Need (Test-SafeRelativePath $to) ("非法 mapping.to：{0}" -f $to)
-        if ($vendor -eq "manual") {
-            if ($manualSourceCache.ContainsKey($from)) {
-                $src = [string]$manualSourceCache[$from]
-            }
-            else {
-                $src = [string](Resolve-ManualImportSkillPath $cfg $from -AllowLegacyFallback)
-                $manualSourceCache[$from] = $src
-            }
-            if ([string]::IsNullOrWhiteSpace($src)) {
-                return [pscustomobject]@{ can_skip = $false; reason = ("manual 导入不存在或无效：{0}" -f $from); signature = $null; outputs = @() }
-            }
+        if (-not [bool]$resolved.source_valid) {
+            return [pscustomobject]@{ can_skip = $false; reason = [string]$resolved.reason; signature = $null; outputs = @() }
         }
-        else {
-            if ($vendorBaseCache.ContainsKey($vendor)) {
-                $base = [string]$vendorBaseCache[$vendor]
-            }
-            else {
-                $base = [string](Resolve-SourceBase $vendor $cfg)
-                $vendorBaseCache[$vendor] = $base
-            }
-            $src = Join-Path $base $from
-            Need (Is-PathInsideOrEqual $src $base) ("mapping.from 越界：{0}" -f $from)
+        if (-not (Test-ResolvedAgentMappingSkillDir $resolved $resolveContext)) {
+            $reason = Get-ResolvedAgentMappingInvalidReason $resolved
+            return [pscustomobject]@{ can_skip = $false; reason = ("{0}: {1}" -f $reason, [string]$resolved.src_full); signature = $null; outputs = @() }
         }
-
-        $srcFull = [System.IO.Path]::GetFullPath($src)
-        if (-not (Test-IsSkillDir $srcFull)) {
-            $reason = if (-not (Test-Path -LiteralPath $srcFull -PathType Container)) { "源目录不存在" } else { "缺少标记文件" }
-            return [pscustomobject]@{ can_skip = $false; reason = ("{0}: {1}" -f $reason, $srcFull); signature = $null; outputs = @() }
-        }
-        $srcKey = $srcFull.ToLowerInvariant()
+        $srcKey = [string]$resolved.src_key
         if ($fingerprintCache.ContainsKey($srcKey)) {
             $fp = [string]$fingerprintCache[$srcKey]
         }
         else {
-            $fp = Get-DirectoryFingerprint $srcFull
+            $fp = Get-DirectoryFingerprint ([string]$resolved.src_full)
             $fingerprintCache[$srcKey] = $fp
         }
-        $outRel = Normalize-SkillPath $to
+        $outRel = [string]$resolved.out_rel
         $outputs.Add($outRel) | Out-Null
         $records.Add([ordered]@{
                 index = $index
                 kind = "mapping"
                 sync = $true
-                vendor = $vendor
-                from = $from
+                vendor = [string]$resolved.vendor
+                from = [string]$resolved.from
                 to = $outRel
                 source = $srcKey
                 fingerprint = $fp
@@ -5867,67 +5938,32 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
         $oldCache = if ($DryRun) { @{} } else { Load-BuildCache }
         $newCache = @{}
         $fingerprintCache = @{}
-        $vendorBaseCache = @{}
-        $manualSourceCache = @{}
-        $skillDirValidityCache = @{}
+        $resolveContext = New-AgentMappingResolveContext
 
         $swMapping = [System.Diagnostics.Stopwatch]::StartNew()
         foreach ($m in $cfg.mappings) {
             try {
-                if (-not (Should-SyncMappingToAgent $m)) {
-                    Log ("跳过 vendor 根映射（不参与同步）：{0}/{1}" -f $m.vendor, $m.from)
+                $resolved = Resolve-AgentMappingForAgent $cfg $m $resolveContext
+                if ($null -eq $resolved) { continue }
+                if (-not [bool]$resolved.sync) {
+                    Log ("跳过 vendor 根映射（不参与同步）：{0}/{1}" -f [string]$resolved.vendor, [string]$resolved.from)
                     continue
                 }
-                Need (Test-SafeRelativePath $m.from -AllowDot) ("非法 mapping.from：{0}" -f $m.from)
-                Need (Test-SafeRelativePath $m.to) ("非法 mapping.to：{0}" -f $m.to)
-                if ($m.vendor -eq "manual") {
-                    if ($manualSourceCache.ContainsKey([string]$m.from)) {
-                        $src = [string]$manualSourceCache[[string]$m.from]
-                    }
-                    else {
-                        $resolvedManual = Resolve-ManualImportSkillPath $cfg $m.from -AllowLegacyFallback
-                        $manualSourceCache[[string]$m.from] = [string]$resolvedManual
-                        $src = [string]$resolvedManual
-                    }
-                    Need (-not [string]::IsNullOrWhiteSpace($src)) ("manual 导入不存在或无效：{0}" -f $m.from)
-                }
-                else {
-                    if ($vendorBaseCache.ContainsKey([string]$m.vendor)) {
-                        $base = [string]$vendorBaseCache[[string]$m.vendor]
-                    }
-                    else {
-                        $resolvedBase = Resolve-SourceBase $m.vendor $cfg
-                        $vendorBaseCache[[string]$m.vendor] = [string]$resolvedBase
-                        $base = [string]$resolvedBase
-                    }
-                    $src = Join-Path $base $m.from
-                    Need (Is-PathInsideOrEqual $src $base) ("mapping.from 越界：{0}" -f $m.from)
-                }
-                $dst = Join-Path $AgentDir $m.to
-                Need (Is-PathInsideOrEqual $dst $AgentDir) ("mapping.to 越界：{0}" -f $m.to)
 
-                $srcKey = [System.IO.Path]::GetFullPath($src).ToLowerInvariant()
-                if ($skillDirValidityCache.ContainsKey($srcKey)) {
-                    $isSkillDir = [bool]$skillDirValidityCache[$srcKey]
-                }
-                else {
-                    $isSkillDir = Test-IsSkillDir $src
-                    $skillDirValidityCache[$srcKey] = $isSkillDir
-                }
-                if (-not $isSkillDir) {
-                    $invalidReason = if (-not (Test-Path -LiteralPath $src -PathType Container)) { "源目录不存在" } else { "缺少标记文件" }
-                    Write-Host ("⚠️ 跳过无效技能（{0}）：{1}" -f $invalidReason, $src) -ForegroundColor Yellow
+                Need ([bool]$resolved.source_valid) ([string]$resolved.reason)
+                if (-not (Test-ResolvedAgentMappingSkillDir $resolved $resolveContext)) {
+                    $invalidReason = Get-ResolvedAgentMappingInvalidReason $resolved
+                    Write-Host ("⚠️ 跳过无效技能（{0}）：{1}" -f $invalidReason, [string]$resolved.src_full) -ForegroundColor Yellow
                     $invalidMappings.Add([pscustomobject]@{
-                            vendor = [string]$m.vendor
-                            from = [string]$m.from
-                            to = [string]$m.to
-                            src = [string]$src
+                            vendor = [string]$resolved.vendor
+                            from = [string]$resolved.from
+                            to = [string]$resolved.to
+                            src = [string]$resolved.src_full
                             reason = $invalidReason
                         }) | Out-Null
                     continue
                 }
-                $cacheKey = ("mapping|{0}|{1}|{2}" -f $m.vendor, $m.from, $m.to)
-                Mirror-SkillWithCache $src $dst $cacheKey $oldCache $newCache $stats $fingerprintCache
+                Mirror-SkillWithCache ([string]$resolved.src_full) ([string]$resolved.dst) ([string]$resolved.cache_key) $oldCache $newCache $stats $fingerprintCache
             }
             catch {
                 Write-Host ("❌ 处理技能失败 [{0}/{1}]: {2}" -f $m.vendor, $m.from, $_.Exception.Message) -ForegroundColor Red

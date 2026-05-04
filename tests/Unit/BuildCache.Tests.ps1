@@ -216,6 +216,32 @@ description: Execute a phased implementation plan using subagents.
             @($state.outputs) | Should Contain "skill-a"
         }
 
+        It "Reuses source resolution caches in a shared mapping resolver context" {
+            $cfg = [pscustomobject]@{
+                vendors = @([pscustomobject]@{ name = "vendor-a" })
+                mappings = @(
+                    [pscustomobject]@{ vendor = "manual"; from = "shared-manual"; to = "manual-copy-a" },
+                    [pscustomobject]@{ vendor = "manual"; from = "shared-manual"; to = "manual-copy-b" },
+                    [pscustomobject]@{ vendor = "vendor-a"; from = "shared-skill"; to = "vendor-copy-a" },
+                    [pscustomobject]@{ vendor = "vendor-a"; from = "shared-skill"; to = "vendor-copy-b" }
+                )
+                imports = @()
+            }
+
+            Mock Resolve-ManualImportSkillPath { Join-Path $TestDrive "manual-src" }
+            Mock Resolve-SourceBase { Join-Path $TestDrive "vendor-src" }
+
+            $context = New-AgentMappingResolveContext
+            foreach ($mapping in @($cfg.mappings)) {
+                $resolved = Resolve-AgentMappingForAgent $cfg $mapping $context
+                $resolved.sync | Should Be $true
+                $resolved.source_valid | Should Be $true
+            }
+
+            Assert-MockCalled Resolve-ManualImportSkillPath -Times 1 -Exactly -Scope It
+            Assert-MockCalled Resolve-SourceBase -Times 1 -Exactly -Scope It
+        }
+
         It "Accepts a matching build signature when expected outputs exist" {
             $oldAgent = $script:AgentDir
             try {
