@@ -117,11 +117,58 @@ function Invoke-ParallelGitPrefetch($cfg, [int]$Parallelism = 1) {
 function Get-CurrentRepoCommit([string]$path) {
     if ([string]::IsNullOrWhiteSpace($path)) { return $null }
     if (-not (Test-Path $path)) { return $null }
+    if (-not (Test-IsGitRepoRoot $path)) {
+        return (Get-ImportSourceMetadataCommit $path)
+    }
     Push-Location $path
     try {
         return (Invoke-GitCapture @("rev-parse", "HEAD"))
     }
     finally { Pop-Location }
+}
+
+function Get-ImportSourceMetadataPath([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    return (Join-Path $path ".skills-manager-source.json")
+}
+
+function Get-ImportSourceMetadataCommit([string]$path) {
+    $metadataPath = Get-ImportSourceMetadataPath $path
+    if ([string]::IsNullOrWhiteSpace($metadataPath)) { return $null }
+    if (-not (Test-Path -LiteralPath $metadataPath -PathType Leaf)) { return $null }
+    try {
+        $data = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+        $commit = [string]$data.commit
+        if ([string]::IsNullOrWhiteSpace($commit)) { return $null }
+        return $commit
+    }
+    catch {
+        return $null
+    }
+}
+
+function Write-ImportSourceMetadata([string]$path, [string]$repo, [string]$ref, [string]$commit, [string]$sourceKind) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return }
+    if (-not (Test-Path -LiteralPath $path -PathType Container)) { return }
+    if ([string]::IsNullOrWhiteSpace($commit)) { return }
+    $metadataPath = Get-ImportSourceMetadataPath $path
+    $payload = [ordered]@{
+        schema_version = 1
+        source_kind = if ([string]::IsNullOrWhiteSpace($sourceKind)) { "archive" } else { $sourceKind }
+        repo = $repo
+        ref = $ref
+        commit = $commit
+        updated_at = (Get-Date).ToString("o")
+    }
+    Set-ContentUtf8 $metadataPath ($payload | ConvertTo-Json -Depth 6)
+}
+
+function Remove-ImportSourceMetadata([string]$path) {
+    $metadataPath = Get-ImportSourceMetadataPath $path
+    if ([string]::IsNullOrWhiteSpace($metadataPath)) { return }
+    if (Test-Path -LiteralPath $metadataPath -PathType Leaf) {
+        Remove-Item -LiteralPath $metadataPath -Force
+    }
 }
 
 function Resolve-RemoteCommit([string]$repo, [string]$ref) {
@@ -130,12 +177,18 @@ function Resolve-RemoteCommit([string]$repo, [string]$ref) {
         return ("zip:{0}" -f (Get-FileContentHash $repo))
     }
     $targetRef = if ([string]::IsNullOrWhiteSpace($ref)) { "main" } else { $ref }
-    $candidates = @(
-        $targetRef,
-        ("refs/heads/{0}" -f $targetRef),
-        ("refs/tags/{0}^{{}}" -f $targetRef),
-        ("refs/tags/{0}" -f $targetRef)
-    )
+    if ($targetRef -match "^[0-9a-fA-F]{40}$") { return $targetRef }
+    if ($targetRef -eq "HEAD" -or $targetRef -match "^refs/") {
+        $candidates = @($targetRef)
+    }
+    else {
+        $candidates = @(
+            ("refs/heads/{0}" -f $targetRef),
+            ("refs/tags/{0}^{{}}" -f $targetRef),
+            ("refs/tags/{0}" -f $targetRef),
+            $targetRef
+        )
+    }
     foreach ($candidate in $candidates) {
         $line = Invoke-GitCapture @("ls-remote", $repo, $candidate)
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
@@ -417,6 +470,13 @@ function 更新Imports($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $
                     }
                 }
                 Need (Test-IsSkillDir $src) "未找到技能入口文件（SKILL.md/AGENTS.md/GEMINI.md/CLAUDE.md）：$src"
+                if (Test-IsGitRepoRoot $cache) {
+                    Remove-ImportSourceMetadata $cache
+                }
+                else {
+                    $sourceCommit = Resolve-RemoteCommit $repo $ref
+                    Write-ImportSourceMetadata $cache $repo $ref $sourceCommit "archive"
+                }
                 Write-Host ("已更新导入技能缓存：{0}" -f $name)
             }
             catch {

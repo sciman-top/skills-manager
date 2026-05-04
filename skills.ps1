@@ -6408,11 +6408,58 @@ function Invoke-ParallelGitPrefetch($cfg, [int]$Parallelism = 1) {
 function Get-CurrentRepoCommit([string]$path) {
     if ([string]::IsNullOrWhiteSpace($path)) { return $null }
     if (-not (Test-Path $path)) { return $null }
+    if (-not (Test-IsGitRepoRoot $path)) {
+        return (Get-ImportSourceMetadataCommit $path)
+    }
     Push-Location $path
     try {
         return (Invoke-GitCapture @("rev-parse", "HEAD"))
     }
     finally { Pop-Location }
+}
+
+function Get-ImportSourceMetadataPath([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    return (Join-Path $path ".skills-manager-source.json")
+}
+
+function Get-ImportSourceMetadataCommit([string]$path) {
+    $metadataPath = Get-ImportSourceMetadataPath $path
+    if ([string]::IsNullOrWhiteSpace($metadataPath)) { return $null }
+    if (-not (Test-Path -LiteralPath $metadataPath -PathType Leaf)) { return $null }
+    try {
+        $data = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+        $commit = [string]$data.commit
+        if ([string]::IsNullOrWhiteSpace($commit)) { return $null }
+        return $commit
+    }
+    catch {
+        return $null
+    }
+}
+
+function Write-ImportSourceMetadata([string]$path, [string]$repo, [string]$ref, [string]$commit, [string]$sourceKind) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return }
+    if (-not (Test-Path -LiteralPath $path -PathType Container)) { return }
+    if ([string]::IsNullOrWhiteSpace($commit)) { return }
+    $metadataPath = Get-ImportSourceMetadataPath $path
+    $payload = [ordered]@{
+        schema_version = 1
+        source_kind = if ([string]::IsNullOrWhiteSpace($sourceKind)) { "archive" } else { $sourceKind }
+        repo = $repo
+        ref = $ref
+        commit = $commit
+        updated_at = (Get-Date).ToString("o")
+    }
+    Set-ContentUtf8 $metadataPath ($payload | ConvertTo-Json -Depth 6)
+}
+
+function Remove-ImportSourceMetadata([string]$path) {
+    $metadataPath = Get-ImportSourceMetadataPath $path
+    if ([string]::IsNullOrWhiteSpace($metadataPath)) { return }
+    if (Test-Path -LiteralPath $metadataPath -PathType Leaf) {
+        Remove-Item -LiteralPath $metadataPath -Force
+    }
 }
 
 function Resolve-RemoteCommit([string]$repo, [string]$ref) {
@@ -6421,12 +6468,18 @@ function Resolve-RemoteCommit([string]$repo, [string]$ref) {
         return ("zip:{0}" -f (Get-FileContentHash $repo))
     }
     $targetRef = if ([string]::IsNullOrWhiteSpace($ref)) { "main" } else { $ref }
-    $candidates = @(
-        $targetRef,
-        ("refs/heads/{0}" -f $targetRef),
-        ("refs/tags/{0}^{{}}" -f $targetRef),
-        ("refs/tags/{0}" -f $targetRef)
-    )
+    if ($targetRef -match "^[0-9a-fA-F]{40}$") { return $targetRef }
+    if ($targetRef -eq "HEAD" -or $targetRef -match "^refs/") {
+        $candidates = @($targetRef)
+    }
+    else {
+        $candidates = @(
+            ("refs/heads/{0}" -f $targetRef),
+            ("refs/tags/{0}^{{}}" -f $targetRef),
+            ("refs/tags/{0}" -f $targetRef),
+            $targetRef
+        )
+    }
     foreach ($candidate in $candidates) {
         $line = Invoke-GitCapture @("ls-remote", $repo, $candidate)
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
@@ -6708,6 +6761,13 @@ function 更新Imports($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $
                     }
                 }
                 Need (Test-IsSkillDir $src) "未找到技能入口文件（SKILL.md/AGENTS.md/GEMINI.md/CLAUDE.md）：$src"
+                if (Test-IsGitRepoRoot $cache) {
+                    Remove-ImportSourceMetadata $cache
+                }
+                else {
+                    $sourceCommit = Resolve-RemoteCommit $repo $ref
+                    Write-ImportSourceMetadata $cache $repo $ref $sourceCommit "archive"
+                }
                 Write-Host ("已更新导入技能缓存：{0}" -f $name)
             }
             catch {
@@ -7392,9 +7452,7 @@ function Resolve-ExternalCommandInvocation([string]$command, [string[]]$commandA
     }
 }
 
-function Get-ExternalCommandCapturedOutput([string]$outFile, [string]$errFile) {
-    $outText = if (Test-Path -LiteralPath $outFile -PathType Leaf) { Get-Content -Raw -LiteralPath $outFile } else { "" }
-    $errText = if (Test-Path -LiteralPath $errFile -PathType Leaf) { Get-Content -Raw -LiteralPath $errFile } else { "" }
+function Convert-ExternalCommandTextToCapturedOutput([string]$outText, [string]$errText) {
     $combined = New-Object System.Collections.Generic.List[string]
     foreach ($line in @((($outText + "`n" + $errText) -split "`r?`n"))) {
         if ($null -ne $line -and $line -ne "") { $combined.Add([string]$line) | Out-Null }
@@ -7415,19 +7473,36 @@ function Invoke-ExternalCommandWithTimeout(
     Need (-not [string]::IsNullOrWhiteSpace($command)) "外部命令名不能为空"
     if ($timeoutSeconds -lt 1) { $timeoutSeconds = 1 }
 
-    $outFile = [System.IO.Path]::GetTempFileName()
-    $errFile = [System.IO.Path]::GetTempFileName()
     $proc = $null
+    $stdoutTask = $null
+    $stderrTask = $null
     try {
         $effectiveWorkingDir = if ([string]::IsNullOrWhiteSpace($workingDir)) { $PWD.Path } else { $workingDir }
         $invocation = Resolve-ExternalCommandInvocation $command @($CommandArgs)
         $argList = @($invocation.args | ForEach-Object { [string]$_ })
-        $proc = Start-Process -FilePath ([string]$invocation.file) -ArgumentList $argList -PassThru -WindowStyle Hidden -RedirectStandardOutput $outFile -RedirectStandardError $errFile -WorkingDirectory $effectiveWorkingDir
+        $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = [string]$invocation.file
+        $startInfo.WorkingDirectory = $effectiveWorkingDir
+        $startInfo.UseShellExecute = $false
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        $startInfo.CreateNoWindow = $true
+        foreach ($arg in $argList) {
+            [void]$startInfo.ArgumentList.Add([string]$arg)
+        }
+
+        $proc = [System.Diagnostics.Process]::new()
+        $proc.StartInfo = $startInfo
+        [void]$proc.Start()
+        $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+        $stderrTask = $proc.StandardError.ReadToEndAsync()
         $exited = $proc.WaitForExit($timeoutSeconds * 1000)
         if (-not $exited) {
             try { $proc.Kill($true) } catch { try { $proc.Kill() } catch {} }
             try { $proc.WaitForExit(2000) | Out-Null } catch {}
-            $captured = Get-ExternalCommandCapturedOutput $outFile $errFile
+            $outText = if ($null -ne $stdoutTask) { [string]$stdoutTask.GetAwaiter().GetResult() } else { "" }
+            $errText = if ($null -ne $stderrTask) { [string]$stderrTask.GetAwaiter().GetResult() } else { "" }
+            $captured = Convert-ExternalCommandTextToCapturedOutput $outText $errText
             return [pscustomobject]@{
                 timed_out = $true
                 exit_code = 124
@@ -7436,7 +7511,10 @@ function Invoke-ExternalCommandWithTimeout(
             }
         }
 
-        $captured = Get-ExternalCommandCapturedOutput $outFile $errFile
+        try { $proc.WaitForExit() | Out-Null } catch {}
+        $outText = if ($null -ne $stdoutTask) { [string]$stdoutTask.GetAwaiter().GetResult() } else { "" }
+        $errText = if ($null -ne $stderrTask) { [string]$stderrTask.GetAwaiter().GetResult() } else { "" }
+        $captured = Convert-ExternalCommandTextToCapturedOutput $outText $errText
 
         return [pscustomobject]@{
             timed_out = $false
@@ -7455,8 +7533,6 @@ function Invoke-ExternalCommandWithTimeout(
     }
     finally {
         if ($null -ne $proc) { $proc.Dispose() }
-        Remove-Item -LiteralPath $outFile -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $errFile -ErrorAction SilentlyContinue
     }
 }
 

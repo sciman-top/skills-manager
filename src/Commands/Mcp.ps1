@@ -618,9 +618,7 @@ function Resolve-ExternalCommandInvocation([string]$command, [string[]]$commandA
     }
 }
 
-function Get-ExternalCommandCapturedOutput([string]$outFile, [string]$errFile) {
-    $outText = if (Test-Path -LiteralPath $outFile -PathType Leaf) { Get-Content -Raw -LiteralPath $outFile } else { "" }
-    $errText = if (Test-Path -LiteralPath $errFile -PathType Leaf) { Get-Content -Raw -LiteralPath $errFile } else { "" }
+function Convert-ExternalCommandTextToCapturedOutput([string]$outText, [string]$errText) {
     $combined = New-Object System.Collections.Generic.List[string]
     foreach ($line in @((($outText + "`n" + $errText) -split "`r?`n"))) {
         if ($null -ne $line -and $line -ne "") { $combined.Add([string]$line) | Out-Null }
@@ -641,19 +639,36 @@ function Invoke-ExternalCommandWithTimeout(
     Need (-not [string]::IsNullOrWhiteSpace($command)) "外部命令名不能为空"
     if ($timeoutSeconds -lt 1) { $timeoutSeconds = 1 }
 
-    $outFile = [System.IO.Path]::GetTempFileName()
-    $errFile = [System.IO.Path]::GetTempFileName()
     $proc = $null
+    $stdoutTask = $null
+    $stderrTask = $null
     try {
         $effectiveWorkingDir = if ([string]::IsNullOrWhiteSpace($workingDir)) { $PWD.Path } else { $workingDir }
         $invocation = Resolve-ExternalCommandInvocation $command @($CommandArgs)
         $argList = @($invocation.args | ForEach-Object { [string]$_ })
-        $proc = Start-Process -FilePath ([string]$invocation.file) -ArgumentList $argList -PassThru -WindowStyle Hidden -RedirectStandardOutput $outFile -RedirectStandardError $errFile -WorkingDirectory $effectiveWorkingDir
+        $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = [string]$invocation.file
+        $startInfo.WorkingDirectory = $effectiveWorkingDir
+        $startInfo.UseShellExecute = $false
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        $startInfo.CreateNoWindow = $true
+        foreach ($arg in $argList) {
+            [void]$startInfo.ArgumentList.Add([string]$arg)
+        }
+
+        $proc = [System.Diagnostics.Process]::new()
+        $proc.StartInfo = $startInfo
+        [void]$proc.Start()
+        $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+        $stderrTask = $proc.StandardError.ReadToEndAsync()
         $exited = $proc.WaitForExit($timeoutSeconds * 1000)
         if (-not $exited) {
             try { $proc.Kill($true) } catch { try { $proc.Kill() } catch {} }
             try { $proc.WaitForExit(2000) | Out-Null } catch {}
-            $captured = Get-ExternalCommandCapturedOutput $outFile $errFile
+            $outText = if ($null -ne $stdoutTask) { [string]$stdoutTask.GetAwaiter().GetResult() } else { "" }
+            $errText = if ($null -ne $stderrTask) { [string]$stderrTask.GetAwaiter().GetResult() } else { "" }
+            $captured = Convert-ExternalCommandTextToCapturedOutput $outText $errText
             return [pscustomobject]@{
                 timed_out = $true
                 exit_code = 124
@@ -662,7 +677,10 @@ function Invoke-ExternalCommandWithTimeout(
             }
         }
 
-        $captured = Get-ExternalCommandCapturedOutput $outFile $errFile
+        try { $proc.WaitForExit() | Out-Null } catch {}
+        $outText = if ($null -ne $stdoutTask) { [string]$stdoutTask.GetAwaiter().GetResult() } else { "" }
+        $errText = if ($null -ne $stderrTask) { [string]$stderrTask.GetAwaiter().GetResult() } else { "" }
+        $captured = Convert-ExternalCommandTextToCapturedOutput $outText $errText
 
         return [pscustomobject]@{
             timed_out = $false
@@ -681,8 +699,6 @@ function Invoke-ExternalCommandWithTimeout(
     }
     finally {
         if ($null -ne $proc) { $proc.Dispose() }
-        Remove-Item -LiteralPath $outFile -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $errFile -ErrorAction SilentlyContinue
     }
 }
 

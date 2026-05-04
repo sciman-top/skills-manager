@@ -384,6 +384,24 @@ Describe "Config And Update Enhancements" {
             $resolved | Should Be $null
         }
 
+        It "Prefers exact branch refs over ambiguous ls-remote suffix matches" {
+            Mock Invoke-GitCapture {
+                param($GitArgs)
+                $candidate = [string]$GitArgs[-1]
+                if ($candidate -eq "refs/heads/main") {
+                    return "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb`trefs/heads/main"
+                }
+                if ($candidate -eq "main") {
+                    return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`trefs/heads/changeset-release/main`nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb`trefs/heads/main"
+                }
+                return $null
+            }
+
+            Resolve-RemoteCommit "https://github.com/example/ambiguous.git" "main" | Should Be "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            Assert-MockCalled Invoke-GitCapture -ParameterFilter { $GitArgs[-1] -eq "refs/heads/main" } -Times 1 -Exactly -Scope It
+            Assert-MockCalled Invoke-GitCapture -ParameterFilter { $GitArgs[-1] -eq "main" } -Times 0 -Exactly -Scope It
+        }
+
         It "Returns local zip hash for archive-based update sources" {
             $zip = Join-Path $TestDrive "plan-demo.zip"
             Set-Content -Path $zip -Value "zip-plan-data"
@@ -391,6 +409,27 @@ Describe "Config And Update Enhancements" {
             $resolved = Resolve-RemoteCommit $zip "main"
 
             $resolved | Should Be ("zip:{0}" -f (Get-FileContentHash $zip))
+        }
+
+        It "Does not read parent repository HEAD for non-git import caches" {
+            $cache = Join-Path $TestDrive "plain-import-cache"
+            New-Item -ItemType Directory -Path $cache -Force | Out-Null
+
+            Mock Test-IsGitRepoRoot { $false } -ParameterFilter { $path -eq $cache }
+            Mock Invoke-GitCapture { throw "Invoke-GitCapture should not be called for a non-git cache." }
+
+            Get-CurrentRepoCommit $cache | Should Be $null
+            Assert-MockCalled Invoke-GitCapture -Times 0 -Exactly -Scope It
+        }
+
+        It "Reads source metadata for non-git import caches" {
+            $cache = Join-Path $TestDrive "metadata-import-cache"
+            New-Item -ItemType Directory -Path $cache -Force | Out-Null
+            Write-ImportSourceMetadata $cache "https://github.com/example/workspace.git" "main" "abc123" "archive"
+
+            Mock Test-IsGitRepoRoot { $false } -ParameterFilter { $path -eq $cache }
+
+            Get-CurrentRepoCommit $cache | Should Be "abc123"
         }
 
         It "Caches repeated remote commit lookups for identical repo and ref" {

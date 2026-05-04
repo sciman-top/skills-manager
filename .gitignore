@@ -24,6 +24,7 @@ acl-backup-git-*.txt
 /.trae/
 /imports/**/.venv/
 /imports/**/nohup.out
+/imports/**/.skills-manager-source.json
 /AGENTS.md
 /CLAUDE.md
 /GEMINI.md

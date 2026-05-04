@@ -1339,6 +1339,34 @@ sandbox = "elevated"
             (($result.output | ForEach-Object { [string]$_ }) -join "`n") | Should Match "wrapper-args-ok"
         }
 
+        It "Preserves single arguments that contain spaces" {
+            $scriptPath = Join-Path $TestDrive "arg-check.ps1"
+            Set-ContentUtf8 $scriptPath @'
+param([string]$value)
+if ($value -eq "Authorization: Bearer unit-test-token") {
+    Write-Output "arg-space-ok"
+    exit 0
+}
+Write-Error ("bad-arg:{0}" -f $value)
+exit 3
+'@
+            $psExe = (Get-Process -Id $PID).Path
+
+            $result = Invoke-ExternalCommandWithTimeout $psExe @(
+                "-NoLogo",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                $scriptPath,
+                "Authorization: Bearer unit-test-token"
+            ) $TestDrive 5
+
+            $result.timed_out | Should Be $false
+            $result.exit_code | Should Be 0
+            (($result.output | ForEach-Object { [string]$_ }) -join "`n") | Should Match "arg-space-ok"
+        }
+
         It "Preserves output captured before an external command timeout" {
             $result = Invoke-ExternalCommandWithTimeout "cmd" @(
                 "/c",
