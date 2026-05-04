@@ -201,7 +201,9 @@ description: demo skill
 
             同步MCP
 
-            (Test-Path (Join-Path $root ".codex\.mcp.json")) | Should Be $true
+            $codexMcpPath = Join-Path $root ".codex\.mcp.json"
+            (Test-Path $codexMcpPath) | Should Be $true
+            (Get-Content -Raw -Path $codexMcpPath) | Should Match '"fetch"'
             (Test-Path (Join-Path $root ".codex\config.toml")) | Should Be $true
             (Test-Path (Join-Path $root ".trae\mcp.json")) | Should Be $true
         }

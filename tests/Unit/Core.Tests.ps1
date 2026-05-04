@@ -1309,6 +1309,21 @@ sandbox = "elevated"
             ($names -contains "fetch") | Should Be $true
             ($names -contains "filesystem") | Should Be $true
         }
+
+        It "Does not prune legacy names that are explicitly managed" {
+            $servers = @(
+                [pscustomobject]@{
+                    name = "filesystem"
+                    transport = "stdio"
+                    command = "npx"
+                    args = @("-y", "@modelcontextprotocol/server-filesystem", "D:\CODE\skills-manager")
+                }
+            )
+
+            $names = Get-McpServersToPrune $servers
+            ($names -contains "fetch") | Should Be $true
+            ($names -contains "filesystem") | Should Be $false
+        }
     }
 
     Context "MCP verify timeout and fallback" {
@@ -1500,6 +1515,48 @@ exit 3
             Invoke-NativeMcpSync @([pscustomobject]@{ name = "context7"; transport = "stdio"; command = "npx"; args = @("-y", "@upstash/context7-mcp") })
 
             Assert-MockCalled Invoke-ExternalCommandWithTimeout -Times 0 -Scope It
+        }
+
+        It "Replaces existing native Claude MCP servers during explicit native sync" {
+            $old = [System.Environment]::GetEnvironmentVariable("SKILLS_MCP_NATIVE_SYNC")
+            $script:nativeAddCount = 0
+            $script:nativeRemoveCount = 0
+            try {
+                [System.Environment]::SetEnvironmentVariable("SKILLS_MCP_NATIVE_SYNC", "1")
+                Mock Get-Command { [pscustomobject]@{ Name = "claude"; Path = "claude" } } -ParameterFilter { $Name -eq "claude" }
+                Mock Invoke-ExternalCommandWithTimeout {
+                    if ($CommandArgs[0] -eq "mcp" -and $CommandArgs[1] -eq "add") {
+                        $script:nativeAddCount++
+                        if ($script:nativeAddCount -eq 1) {
+                            return [pscustomobject]@{
+                                timed_out = $false
+                                exit_code = 1
+                                output = @()
+                                error = "MCP server postgres already exists in user config"
+                            }
+                        }
+                    }
+                    if ($CommandArgs[0] -eq "mcp" -and $CommandArgs[1] -eq "remove" -and $CommandArgs[2] -eq "postgres") {
+                        $script:nativeRemoveCount++
+                    }
+                    return [pscustomobject]@{
+                        timed_out = $false
+                        exit_code = 0
+                        output = @()
+                        error = ""
+                    }
+                } -ParameterFilter { $command -eq "claude" }
+
+                Invoke-NativeMcpSync @([pscustomobject]@{ name = "postgres"; transport = "stdio"; command = "pwsh"; args = @("-NoProfile") })
+
+                $script:nativeAddCount | Should Be 2
+                $script:nativeRemoveCount | Should Be 1
+            }
+            finally {
+                [System.Environment]::SetEnvironmentVariable("SKILLS_MCP_NATIVE_SYNC", $old)
+                Remove-Variable -Name nativeAddCount -Scope Script -ErrorAction SilentlyContinue
+                Remove-Variable -Name nativeRemoveCount -Scope Script -ErrorAction SilentlyContinue
+            }
         }
 
         It "Keeps claude timeout as verification failure" {

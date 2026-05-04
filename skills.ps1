@@ -7384,6 +7384,16 @@ function Get-LegacyMcpServersToPrune() {
     return @("fetch", "filesystem")
 }
 
+function Get-McpServersToPrune($servers) {
+    $names = New-Object System.Collections.Generic.List[string]
+    foreach ($name in @(Get-LegacyMcpServersToPrune)) {
+        if ([string]::IsNullOrWhiteSpace([string]$name)) { continue }
+        if (Has-McpServerByName $servers ([string]$name)) { continue }
+        $names.Add([string]$name) | Out-Null
+    }
+    return @($names.ToArray())
+}
+
 function Has-McpServerByName($servers, [string]$name) {
     if ([string]::IsNullOrWhiteSpace($name)) { return $false }
     foreach ($s in @($servers)) {
@@ -7709,6 +7719,15 @@ function Test-IsNonInteractiveMcpError([string]$text) {
     return $false
 }
 
+function Test-IsNativeMcpAlreadyExistsError([string]$text, [string]$name) {
+    if ([string]::IsNullOrWhiteSpace([string]$text) -or [string]::IsNullOrWhiteSpace([string]$name)) {
+        return $false
+    }
+    $normalized = ([string]$text).Trim()
+    $escapedName = [regex]::Escape([string]$name)
+    return ($normalized -match ("(?i)\bMCP server\s+{0}\s+already exists\b" -f $escapedName))
+}
+
 function Test-CliMcpServerReady([string]$cli, [string[]]$expectedServers) {
     $cliName = if ([string]::IsNullOrWhiteSpace($cli)) { "" } else { [string]$cli.Trim().ToLowerInvariant() }
     $isGemini = ($cliName -eq "gemini")
@@ -7943,6 +7962,21 @@ function Invoke-NativeMcpSync($servers) {
                 continue
             }
             if ($native.exit_code -ne 0) {
+                if (Test-IsNativeMcpAlreadyExistsError ([string]$native.error) ([string]$s.name)) {
+                    Log ("原生 MCP 已存在，尝试替换：{0}（scope={1}）" -f [string]$s.name, $scope) "WARN"
+                    $removeArgs = @("mcp", "remove", [string]$s.name, "--scope", $scope)
+                    $removed = Invoke-ExternalCommandWithTimeout "claude" @($removeArgs) $script:Root $timeoutSeconds
+                    if ($removed.timed_out -or $removed.exit_code -ne 0) {
+                        Log ("原生 MCP 替换前清理失败（已忽略）：{0}（scope={1}，exit={2}）{3}" -f [string]$s.name, $scope, $removed.exit_code, $removed.error) "WARN"
+                        continue
+                    }
+
+                    $native = Invoke-ExternalCommandWithTimeout "claude" @($args) $script:Root $timeoutSeconds
+                    if (-not $native.timed_out -and $native.exit_code -eq 0) {
+                        Log ("已替换原生 MCP：{0}（scope={1}）" -f [string]$s.name, $scope)
+                        continue
+                    }
+                }
                 Log ("原生 MCP 同步失败（已忽略）：{0}（scope={1}，exit={2}）{3}" -f [string]$s.name, $scope, $native.exit_code, $native.error) "WARN"
                 if (Test-IsNonInteractiveMcpError ([string]$native.error)) {
                     $script:SkipNativeMcpForSession = $true
@@ -8556,7 +8590,7 @@ function 同步MCP {
         $script:SkipNativeMcpForSession = $false
         $cfg = LoadCfg
         $servers = @($cfg.mcp_servers)
-        $pruneNames = @(Get-LegacyMcpServersToPrune)
+        $pruneNames = @(Get-McpServersToPrune $servers)
         if (-not $DryRun) {
             Ensure-GhAuthForGithubMcp $servers
         }

@@ -879,6 +879,27 @@
         "@playwright/mcp@latest",
         "--isolated"
       ]
+    },
+    {
+      "name": "filesystem",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "D:\\CODE\\skills-manager"
+      ]
+    },
+    {
+      "name": "postgres",
+      "transport": "stdio",
+      "command": "pwsh",
+      "args": [
+        "-NoLogo",
+        "-NoProfile",
+        "-Command",
+        "if ([string]::IsNullOrWhiteSpace($env:POSTGRES_CONNECTION_STRING)) { Write-Error \"POSTGRES_CONNECTION_STRING is required for postgres MCP.\"; exit 64 }; npx -y @modelcontextprotocol/server-postgres $env:POSTGRES_CONNECTION_STRING"
+      ]
     }
   ],
   "mcp_targets": []
