@@ -21,6 +21,18 @@ Describe "Build Cache and Transaction" {
 
             Get-DirectoryFingerprint $dir | Should Not Be "missing"
         }
+
+        It "Keeps a stable fingerprint for an unchanged nested tree" {
+            $dir = Join-Path $TestDrive "stable"
+            New-Item -ItemType Directory -Path (Join-Path $dir "nested") -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $dir "SKILL.md") -Value "v1"
+            Set-Content -LiteralPath (Join-Path $dir "nested\notes.txt") -Value "notes"
+
+            $h1 = Get-DirectoryFingerprint $dir
+            $h2 = Get-DirectoryFingerprint $dir
+
+            $h1 | Should Be $h2
+        }
     }
 
     Context "Mirror-SkillWithCache" {

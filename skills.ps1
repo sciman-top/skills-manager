@@ -5431,13 +5431,47 @@ function Save-BuildCache($cache) {
 
 function Get-DirectoryFingerprint([string]$dir) {
     if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return "missing" }
-    $files = Get-ChildItem -LiteralPath $dir -Recurse -File -ErrorAction SilentlyContinue | Sort-Object FullName
-    $parts = New-Object System.Collections.Generic.List[string]
-    foreach ($f in $files) {
-        $rel = $f.FullName.Substring($dir.Length).TrimStart("\")
-        $parts.Add(("{0}|{1}|{2}" -f $rel, [string]$f.Length, [string]$f.LastWriteTimeUtc.Ticks)) | Out-Null
+    $input = ""
+    if ($null -ne [type]::GetType("System.IO.EnumerationOptions", $false)) {
+        $baseDir = [System.IO.Path]::GetFullPath($dir)
+        $baseWithSeparator = $baseDir
+        if (-not ($baseWithSeparator.EndsWith("\") -or $baseWithSeparator.EndsWith("/"))) {
+            $baseWithSeparator += [System.IO.Path]::DirectorySeparatorChar
+        }
+
+        $options = [System.IO.EnumerationOptions]::new()
+        $options.RecurseSubdirectories = $true
+        $options.IgnoreInaccessible = $true
+        $options.AttributesToSkip = [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
+
+        $files = [System.IO.Directory]::GetFiles($baseDir, "*", $options)
+        [array]::Sort($files, [System.StringComparer]::OrdinalIgnoreCase)
+
+        $parts = [System.Text.StringBuilder]::new()
+        $first = $true
+        foreach ($file in $files) {
+            $info = [System.IO.FileInfo]::new($file)
+            $rel = if ($file.StartsWith($baseWithSeparator, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $file.Substring($baseWithSeparator.Length)
+            }
+            else {
+                $info.Name
+            }
+            if (-not $first) { [void]$parts.Append("`n") }
+            [void]$parts.AppendFormat("{0}|{1}|{2}", $rel, [string]$info.Length, [string]$info.LastWriteTimeUtc.Ticks)
+            $first = $false
+        }
+        $input = $parts.ToString()
     }
-    $input = $parts -join "`n"
+    else {
+        $files = Get-ChildItem -LiteralPath $dir -Recurse -File -ErrorAction SilentlyContinue | Sort-Object FullName
+        $parts = New-Object System.Collections.Generic.List[string]
+        foreach ($f in $files) {
+            $rel = $f.FullName.Substring($dir.Length).TrimStart("\")
+            $parts.Add(("{0}|{1}|{2}" -f $rel, [string]$f.Length, [string]$f.LastWriteTimeUtc.Ticks)) | Out-Null
+        }
+        $input = $parts -join "`n"
+    }
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {
         $bytes = [System.Text.Encoding]::UTF8.GetBytes($input)
@@ -5556,7 +5590,7 @@ function Get-ElapsedMs($sw) {
     return [int][math]::Round([double]$sw.Elapsed.TotalMilliseconds, 0)
 }
 function Get-AgentBuildCacheAlgorithmVersion {
-    return "agent-build-v20260504.1"
+    return "agent-build-v20260504.2"
 }
 function Get-StringSha256([string]$text) {
     if ($null -eq $text) { $text = "" }
