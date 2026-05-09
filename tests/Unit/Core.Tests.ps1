@@ -946,6 +946,42 @@ Describe "Core Functions" {
     }
 
     Context "Build-CodexConfigToml" {
+        It "Converts Postgres key-value connection strings to URL form" {
+            $url = Convert-PostgresKeyValueConnectionStringToUrl "Host=127.0.0.1;Port=55432;Database=postgres;Username=mcp_user;Password=p@ ss;"
+            $url | Should Be "postgresql://mcp_user:p%40%20ss@127.0.0.1:55432/postgres"
+        }
+
+        It "Normalizes Postgres MCP environment before sync writes config" {
+            $oldProcess = $env:POSTGRES_CONNECTION_STRING
+            $oldUser = [System.Environment]::GetEnvironmentVariable("POSTGRES_CONNECTION_STRING", "User")
+            try {
+                $env:POSTGRES_CONNECTION_STRING = "Host=127.0.0.1;Port=55432;Database=postgres;Username=mcp_user;Password=secret;"
+                [System.Environment]::SetEnvironmentVariable("POSTGRES_CONNECTION_STRING", $null, "User")
+                $servers = @(
+                    [pscustomobject]@{
+                        name      = "postgres"
+                        transport = "stdio"
+                        command   = "pwsh"
+                        args      = @("-NoLogo", "-NoProfile", "-Command", "npx -y @modelcontextprotocol/server-postgres `$env:POSTGRES_CONNECTION_STRING")
+                    }
+                )
+
+                Ensure-PostgresMcpEnvironment $servers
+
+                $env:POSTGRES_CONNECTION_STRING | Should Be "postgresql://mcp_user:secret@127.0.0.1:55432/postgres"
+                [System.Environment]::GetEnvironmentVariable("POSTGRES_CONNECTION_STRING", "User") | Should Be "postgresql://mcp_user:secret@127.0.0.1:55432/postgres"
+            }
+            finally {
+                if ($null -ne $oldProcess) {
+                    $env:POSTGRES_CONNECTION_STRING = $oldProcess
+                }
+                else {
+                    Remove-Item Env:\POSTGRES_CONNECTION_STRING -ErrorAction SilentlyContinue
+                }
+                [System.Environment]::SetEnvironmentVariable("POSTGRES_CONNECTION_STRING", $oldUser, "User")
+            }
+        }
+
         It "Replaces mcp_servers tables and preserves other codex config fields" {
             $oldToken = $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN
             $oldGithubToken = $env:GITHUB_PERSONAL_ACCESS_TOKEN

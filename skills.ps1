@@ -7412,6 +7412,93 @@ function Invoke-Gh([string[]]$GhArgs) {
     return @($output | ForEach-Object { [string]$_ })
 }
 
+function Get-EnvironmentVariableWithScope([string]$name, [string[]]$scopes = @("Process", "User", "Machine")) {
+    Need (-not [string]::IsNullOrWhiteSpace($name)) "环境变量名不能为空"
+    foreach ($scope in @($scopes)) {
+        $value = [System.Environment]::GetEnvironmentVariable($name, $scope)
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            return [pscustomobject]@{
+                name = $name
+                scope = [string]$scope
+                value = [string]$value
+            }
+        }
+    }
+    return $null
+}
+
+function Convert-PostgresKeyValueConnectionStringToUrl([string]$connectionString) {
+    if ([string]::IsNullOrWhiteSpace($connectionString)) { return $null }
+    if ($connectionString -match '^\s*postgres(ql)?://') { return $connectionString.Trim() }
+    if ($connectionString -notmatch '(?i)(^|;)Host\s*=') { return $null }
+
+    $map = @{}
+    foreach ($part in ($connectionString -split ';')) {
+        if ([string]::IsNullOrWhiteSpace($part)) { continue }
+        $pair = $part -split '=', 2
+        if ($pair.Count -ne 2) { continue }
+        $key = $pair[0].Trim().ToLowerInvariant()
+        if ([string]::IsNullOrWhiteSpace($key)) { continue }
+        $map[$key] = $pair[1].Trim()
+    }
+
+    $hostValue = $map["host"]
+    $portValue = $map["port"]
+    $databaseValue = $map["database"]
+    $userValue = $map["username"]
+    if ([string]::IsNullOrWhiteSpace($userValue)) { $userValue = $map["user id"] }
+    if ([string]::IsNullOrWhiteSpace($userValue)) { $userValue = $map["userid"] }
+    $passwordValue = $map["password"]
+
+    if ([string]::IsNullOrWhiteSpace($hostValue) -or
+        [string]::IsNullOrWhiteSpace($portValue) -or
+        [string]::IsNullOrWhiteSpace($databaseValue) -or
+        [string]::IsNullOrWhiteSpace($userValue) -or
+        [string]::IsNullOrWhiteSpace($passwordValue)) {
+        return $null
+    }
+
+    return ("postgresql://{0}:{1}@{2}:{3}/{4}" -f
+        [System.Uri]::EscapeDataString($userValue),
+        [System.Uri]::EscapeDataString($passwordValue),
+        $hostValue,
+        $portValue,
+        [System.Uri]::EscapeDataString($databaseValue))
+}
+
+function Test-McpServerUsesPostgresConnectionString($server) {
+    if ($null -eq $server) { return $false }
+    if ([string]::Equals([string]$server.name, "postgres", [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    $text = ""
+    if ($server.PSObject.Properties.Match("command").Count -gt 0) { $text += " " + [string]$server.command }
+    if ($server.PSObject.Properties.Match("args").Count -gt 0 -and $null -ne $server.args) { $text += " " + (@($server.args) -join " ") }
+    return ($text -match 'POSTGRES_CONNECTION_STRING' -or $text -match '@modelcontextprotocol/server-postgres')
+}
+
+function Ensure-PostgresMcpEnvironment($servers) {
+    $needsPostgres = $false
+    foreach ($server in @($servers)) {
+        if (Test-McpServerUsesPostgresConnectionString $server) {
+            $needsPostgres = $true
+            break
+        }
+    }
+    if (-not $needsPostgres) { return }
+
+    $resolved = Get-EnvironmentVariableWithScope "POSTGRES_CONNECTION_STRING"
+    Need ($null -ne $resolved) "检测到 postgres MCP，但缺少 POSTGRES_CONNECTION_STRING。请先设置用户级 postgresql:// 连接串。"
+
+    $raw = [string]$resolved.value
+    $normalized = Convert-PostgresKeyValueConnectionStringToUrl $raw
+    Need (-not [string]::IsNullOrWhiteSpace($normalized)) "检测到 postgres MCP，但 POSTGRES_CONNECTION_STRING 不是可用的 postgresql:// URL，也无法从 Host=...;Port=...;Database=...;Username=...;Password=... 形态转换。"
+
+    $env:POSTGRES_CONNECTION_STRING = $normalized
+    if ($raw -ne $normalized -or [string]$resolved.scope -ne "User") {
+        [System.Environment]::SetEnvironmentVariable("POSTGRES_CONNECTION_STRING", $normalized, "User")
+        Log ("Postgres MCP 连接串已归一化到 User scope：source_scope={0}, shape=postgres-url" -f [string]$resolved.scope) "INFO"
+    }
+}
+
 function Ensure-GhAuthForGithubMcp($servers) {
     if (-not (Has-McpServerByName $servers "github")) { return }
     if (-not (Get-Command "gh" -ErrorAction SilentlyContinue)) {
@@ -7433,6 +7520,11 @@ function Ensure-GhAuthForGithubMcp($servers) {
     # gh auth 路线：同步阶段临时注入 token，供各客户端配置写入与 native 注册使用。
     $env:GITHUB_PERSONAL_ACCESS_TOKEN = $token
     $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = $token
+    $existingCodexToken = [System.Environment]::GetEnvironmentVariable("CODEX_GITHUB_PERSONAL_ACCESS_TOKEN", "User")
+    if ([string]::IsNullOrWhiteSpace($existingCodexToken) -or $existingCodexToken -ne $token) {
+        [System.Environment]::SetEnvironmentVariable("CODEX_GITHUB_PERSONAL_ACCESS_TOKEN", $token, "User")
+        Log "GitHub MCP 已同步 gh token 到 User scope 的 CODEX_GITHUB_PERSONAL_ACCESS_TOKEN。" "INFO"
+    }
     Log ("GitHub MCP gh 认证预检通过：{0}" -f $username) "INFO"
 }
 
@@ -8592,6 +8684,7 @@ function 同步MCP {
         $servers = @($cfg.mcp_servers)
         $pruneNames = @(Get-McpServersToPrune $servers)
         if (-not $DryRun) {
+            Ensure-PostgresMcpEnvironment $servers
             Ensure-GhAuthForGithubMcp $servers
         }
 
