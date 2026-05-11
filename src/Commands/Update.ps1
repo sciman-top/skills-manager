@@ -49,10 +49,10 @@ function Test-WindowsInvalidPathIssue([string]$message) {
 }
 
 function Invoke-ParallelGitPrefetch($cfg, [int]$Parallelism = 1) {
-    if ($DryRun) { return }
-    if ($Parallelism -le 1) { return }
-    if (-not (Get-Command Start-Job -ErrorAction SilentlyContinue)) { return }
-    if ($null -eq $cfg) { return }
+    if ($DryRun) { return $false }
+    if ($Parallelism -le 1) { return $false }
+    if (-not (Get-Command Start-Job -ErrorAction SilentlyContinue)) { return $false }
+    if ($null -eq $cfg) { return $false }
 
     $paths = New-Object System.Collections.Generic.List[string]
     foreach ($v in @($cfg.vendors)) {
@@ -65,7 +65,7 @@ function Invoke-ParallelGitPrefetch($cfg, [int]$Parallelism = 1) {
         if (Test-Path $p) { $paths.Add($p) | Out-Null }
     }
     $paths = @($paths | Select-Object -Unique | Where-Object { Test-IsGitRepoRoot ([string]$_) })
-    if ($paths.Count -eq 0) { return }
+    if ($paths.Count -eq 0) { return $false }
 
     $running = @()
     $errors = New-Object System.Collections.Generic.List[string]
@@ -108,9 +108,11 @@ function Invoke-ParallelGitPrefetch($cfg, [int]$Parallelism = 1) {
     }
     if ($errors.Count -gt 0) {
         Log ("并行预取完成（部分失败 {0} 项，后续将按原流程继续）。" -f $errors.Count) "WARN"
+        return $false
     }
     else {
         Log ("并行预取完成：{0} 个仓库路径（并发={1}）。" -f $paths.Count, $Parallelism)
+        return $true
     }
 }
 
@@ -213,13 +215,56 @@ function Resolve-RemoteCommitCached([string]$repo, [string]$ref, [hashtable]$cac
     return $resolved
 }
 
-function Get-UpdatePlanItems($cfg) {
+function Resolve-LocalRemoteCommit([string]$path, [string]$ref) {
+    if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-IsGitRepoRoot $path)) { return $null }
+    $targetRef = if ([string]::IsNullOrWhiteSpace($ref)) { "main" } else { [string]$ref }
+    $candidates = @()
+    if ($targetRef -match "^[0-9a-fA-F]{40}$") { return $targetRef }
+    if ($targetRef -match "^refs/heads/(.+)$") {
+        $branch = $Matches[1]
+        $candidates += @("refs/remotes/origin/$branch", "origin/$branch")
+    }
+    elseif ($targetRef -match "^refs/tags/(.+)$") {
+        $tag = $Matches[1]
+        $candidates += @("refs/tags/$tag^{}", "refs/tags/$tag")
+    }
+    elseif ($targetRef -match "^refs/") {
+        $candidates += $targetRef
+    }
+    else {
+        $candidates += @("refs/remotes/origin/$targetRef", "origin/$targetRef", "refs/tags/$targetRef^{}", "refs/tags/$targetRef", $targetRef)
+    }
+
+    Push-Location $path
+    try {
+        foreach ($candidate in $candidates) {
+            try {
+                $value = Invoke-GitCapture @("rev-parse", "--verify", $candidate)
+                if ($value -match "^[0-9a-fA-F]{40}$") { return $value.Trim() }
+            }
+            catch {}
+        }
+    }
+    finally { Pop-Location }
+    return $null
+}
+
+function Resolve-UpdatePlanTargetCommit([string]$path, [string]$repo, [string]$ref, [hashtable]$remoteCommitCache, [bool]$PreferLocalRefs) {
+    if ($PreferLocalRefs) {
+        $localRemote = Resolve-LocalRemoteCommit $path $ref
+        if (-not [string]::IsNullOrWhiteSpace($localRemote)) { return $localRemote }
+    }
+    return (Resolve-RemoteCommitCached $repo $ref $remoteCommitCache)
+}
+
+function Get-UpdatePlanItems($cfg, [switch]$PreferLocalRefs) {
     $items = @()
     $remoteCommitCache = @{}
     foreach ($v in @($cfg.vendors)) {
         $ref = if ([string]::IsNullOrWhiteSpace([string]$v.ref)) { "main" } else { [string]$v.ref }
-        $current = Get-CurrentRepoCommit (VendorPath $v.name)
-        $remote = Resolve-RemoteCommitCached ([string]$v.repo) $ref $remoteCommitCache
+        $path = VendorPath $v.name
+        $current = Get-CurrentRepoCommit $path
+        $remote = Resolve-UpdatePlanTargetCommit $path ([string]$v.repo) $ref $remoteCommitCache ([bool]$PreferLocalRefs)
         $items += [pscustomobject]@{
             type = "vendor"
             name = [string]$v.name
@@ -236,7 +281,7 @@ function Get-UpdatePlanItems($cfg) {
         $ref = if ([string]::IsNullOrWhiteSpace([string]$i.ref)) { "main" } else { [string]$i.ref }
         $path = Join-Path $ImportDir $name
         $current = Get-CurrentRepoCommit $path
-        $remote = Resolve-RemoteCommitCached ([string]$i.repo) $ref $remoteCommitCache
+        $remote = Resolve-UpdatePlanTargetCommit $path ([string]$i.repo) $ref $remoteCommitCache ([bool]$PreferLocalRefs)
         $items += [pscustomobject]@{
             type = "import"
             name = $name
@@ -247,6 +292,51 @@ function Get-UpdatePlanItems($cfg) {
         }
     }
     return @($items)
+}
+
+function Test-UpdateCacheCleanForPlanItem($item, $cfg) {
+    if ($null -eq $item) { return $false }
+    if ([string]$item.current -eq "missing" -or [string]$item.target -eq "unknown") { return $false }
+    if ([bool]$item.changed) { return $false }
+
+    $path = $null
+    if ([string]$item.type -eq "vendor") {
+        $path = VendorPath ([string]$item.name)
+    }
+    elseif ([string]$item.type -eq "import") {
+        $path = Join-Path $ImportDir ([string]$item.name)
+    }
+    else {
+        return $false
+    }
+    if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Container)) { return $false }
+
+    if (Test-IsGitRepoRoot $path) {
+        Push-Location $path
+        try {
+            $status = Invoke-GitCapture @("status", "--porcelain")
+            return [string]::IsNullOrWhiteSpace($status)
+        }
+        finally { Pop-Location }
+    }
+
+    if ([string]$item.type -ne "import") { return $false }
+    $import = @($cfg.imports | Where-Object { [string]$_.name -eq [string]$item.name } | Select-Object -First 1)
+    if ($null -eq $import -or $import.Count -eq 0) { return $false }
+    $skillPath = Normalize-SkillPath ([string]$import[0].skill)
+    $src = if ($skillPath -eq ".") { $path } else { Join-Path $path $skillPath }
+    return (Test-IsSkillDir $src)
+}
+
+function Test-UpdateCanFastNoop($cfg, $items) {
+    $itemsArray = @($items)
+    if ($itemsArray.Count -eq 0) { return $false }
+    foreach ($item in $itemsArray) {
+        if (-not (Test-UpdateCacheCleanForPlanItem $item $cfg)) {
+            return $false
+        }
+    }
+    return $true
 }
 
 function Show-UpdatePlan($cfg) {
@@ -518,9 +608,17 @@ function 更新 {
         Preflight
         $parallelism = Get-UpdateParallelism $cfg
         $didPrefetch = $false
+        $prefetchOk = $false
         if ($parallelism -gt 1) {
-            Invoke-ParallelGitPrefetch $cfg $parallelism
+            $prefetchOk = [bool](Invoke-ParallelGitPrefetch $cfg $parallelism)
             $didPrefetch = $true
+        }
+        $planItems = @(Get-UpdatePlanItems $cfg -PreferLocalRefs:$prefetchOk)
+        if (Test-UpdateCanFastNoop $cfg $planItems) {
+            Log ("更新快路径：{0} 个缓存源均已是目标版本，跳过 fetch/reset，仅验证构建生效。" -f $planItems.Count)
+            构建生效
+            Write-Host "更新完成：所有技能源已是最新版本。"
+            return
         }
         $failures = @()
         $importFailures = 更新Imports $cfg -SkipPreflight -SkipForceClean $skipForceClean -SkipFetch:$didPrefetch

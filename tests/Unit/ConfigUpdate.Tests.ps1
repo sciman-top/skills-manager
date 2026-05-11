@@ -239,6 +239,64 @@ Describe "Config And Update Enhancements" {
         }
     }
 
+    Context "Update fast no-op" {
+        It "Allows fast no-op only when every planned source is clean and unchanged" {
+            $oldVendorDir = $script:VendorDir
+            $oldImportDir = $script:ImportDir
+            try {
+                $script:VendorDir = Join-Path $TestDrive "vendor-fast-noop"
+                $script:ImportDir = Join-Path $TestDrive "imports-fast-noop"
+                $vendorPath = Join-Path $script:VendorDir "demo-vendor"
+                $importPath = Join-Path $script:ImportDir "demo-import"
+                New-Item -ItemType Directory -Path $vendorPath -Force | Out-Null
+                New-Item -ItemType Directory -Path $importPath -Force | Out-Null
+                Set-Content -Path (Join-Path $importPath "SKILL.md") -Value "---`nname: demo-import`ndescription: x`n---"
+
+                $cfg = [pscustomobject]@{
+                    vendors = @([pscustomobject]@{ name = "demo-vendor"; repo = "https://example.com/vendor.git"; ref = "main" })
+                    imports = @([pscustomobject]@{ name = "demo-import"; mode = "manual"; repo = "https://example.com/import.git"; ref = "main"; skill = "." })
+                }
+                $items = @(
+                    [pscustomobject]@{ type = "vendor"; name = "demo-vendor"; current = "abc"; target = "abc"; changed = $false },
+                    [pscustomobject]@{ type = "import"; name = "demo-import"; current = "def"; target = "def"; changed = $false }
+                )
+
+                Mock Test-IsGitRepoRoot { $true } -ParameterFilter { $path -eq $vendorPath }
+                Mock Test-IsGitRepoRoot { $false } -ParameterFilter { $path -eq $importPath }
+                Mock Invoke-GitCapture { "" } -ParameterFilter { $GitArgs[0] -eq "status" }
+
+                (Test-UpdateCanFastNoop $cfg $items) | Should Be $true
+            }
+            finally {
+                $script:VendorDir = $oldVendorDir
+                $script:ImportDir = $oldImportDir
+            }
+        }
+
+        It "Rejects fast no-op when a git cache has local changes" {
+            $oldVendorDir = $script:VendorDir
+            try {
+                $script:VendorDir = Join-Path $TestDrive "vendor-fast-noop-dirty"
+                $vendorPath = Join-Path $script:VendorDir "demo-vendor"
+                New-Item -ItemType Directory -Path $vendorPath -Force | Out-Null
+
+                $cfg = [pscustomobject]@{
+                    vendors = @([pscustomobject]@{ name = "demo-vendor"; repo = "https://example.com/vendor.git"; ref = "main" })
+                    imports = @()
+                }
+                $items = @([pscustomobject]@{ type = "vendor"; name = "demo-vendor"; current = "abc"; target = "abc"; changed = $false })
+
+                Mock Test-IsGitRepoRoot { $true } -ParameterFilter { $path -eq $vendorPath }
+                Mock Invoke-GitCapture { " M SKILL.md" } -ParameterFilter { $GitArgs[0] -eq "status" }
+
+                (Test-UpdateCanFastNoop $cfg $items) | Should Be $false
+            }
+            finally {
+                $script:VendorDir = $oldVendorDir
+            }
+        }
+    }
+
     Context "Fine-Grained update_force" {
         It "Matches git dirty check only when candidate path is repo top-level" {
             $candidate = Join-Path $TestDrive "repo-root-check"
@@ -473,6 +531,40 @@ Describe "Config And Update Enhancements" {
             }
             finally {
                 $script:ImportDir = $oldImportDir
+            }
+        }
+
+        It "Uses local prefetched remote refs for plan targets when available" {
+            $oldVendorDir = $script:VendorDir
+            try {
+                $script:VendorDir = Join-Path $TestDrive "vendor-local-ref-plan"
+                $vendorPath = Join-Path $script:VendorDir "demo"
+                New-Item -ItemType Directory -Path $vendorPath -Force | Out-Null
+
+                $cfg = [pscustomobject]@{
+                    vendors = @([pscustomobject]@{ name = "demo"; repo = "https://github.com/example/demo.git"; ref = "main" })
+                    imports = @()
+                }
+
+                Mock Test-IsGitRepoRoot { $true } -ParameterFilter { $path -eq $vendorPath }
+                Mock Get-CurrentRepoCommit { "local-head" } -ParameterFilter { $path -eq $vendorPath }
+                Mock Invoke-GitCapture {
+                    param($GitArgs)
+                    if (($GitArgs -join " ") -match "refs/remotes/origin/main") {
+                        return "1111111111111111111111111111111111111111"
+                    }
+                    throw "unexpected git call: $($GitArgs -join ' ')"
+                }
+                Mock Resolve-RemoteCommit { throw "Resolve-RemoteCommit should not be called when local remote ref is present." }
+
+                $items = @(Get-UpdatePlanItems $cfg -PreferLocalRefs)
+
+                $items.Count | Should Be 1
+                $items[0].target | Should Be "1111111111111111111111111111111111111111"
+                Assert-MockCalled Resolve-RemoteCommit -Times 0 -Exactly -Scope It
+            }
+            finally {
+                $script:VendorDir = $oldVendorDir
             }
         }
 
