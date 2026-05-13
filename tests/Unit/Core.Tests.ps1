@@ -1133,9 +1133,11 @@ sandbox = "elevated"
         It "Writes startup_timeout_sec for codex mcp servers when configured" {
             $oldToken = $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN
             $oldGithubToken = $env:GITHUB_PERSONAL_ACCESS_TOKEN
+            $oldIncludeLeaky = $env:SKILLS_CODEX_INCLUDE_LEAKY_STDIO_MCP
             Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
             Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
             try {
+                $env:SKILLS_CODEX_INCLUDE_LEAKY_STDIO_MCP = "1"
                 $servers = @(
                     [pscustomobject]@{
                         name                = "context7"
@@ -1155,6 +1157,9 @@ sandbox = "elevated"
                 $toml = Build-CodexConfigToml "" $servers
                 $toml | Should Match "\[mcp_servers\.context7\]"
                 $toml | Should Match "\[mcp_servers\.microsoft-learn\]"
+                $toml | Should Match "command = ""node"""
+                $toml | Should Match "mcp-node-cache-wrapper\.mjs"
+                $toml | Should Match "@upstash/context7-mcp"
                 $toml | Should Match "startup_timeout_sec = 120"
             }
             finally {
@@ -1169,6 +1174,12 @@ sandbox = "elevated"
                 }
                 else {
                     Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+                }
+                if ($null -ne $oldIncludeLeaky) {
+                    $env:SKILLS_CODEX_INCLUDE_LEAKY_STDIO_MCP = $oldIncludeLeaky
+                }
+                else {
+                    Remove-Item Env:\SKILLS_CODEX_INCLUDE_LEAKY_STDIO_MCP -ErrorAction SilentlyContinue
                 }
             }
         }
@@ -1188,6 +1199,100 @@ sandbox = "elevated"
             $toml | Should Match "transport = ""http"""
             $toml | Should Match "url = ""https://developers.openai.com/mcp"""
             $toml | Should Match "startup_timeout_sec = 120"
+        }
+
+        It "Wraps Codex npx stdio MCP servers through the Node cache wrapper" {
+            $oldIncludeLeaky = $env:SKILLS_CODEX_INCLUDE_LEAKY_STDIO_MCP
+            $env:SKILLS_CODEX_INCLUDE_LEAKY_STDIO_MCP = "1"
+            $servers = @(
+                [pscustomobject]@{
+                    name      = "filesystem"
+                    transport = "stdio"
+                    command   = "npx"
+                    args      = @("-y", "@modelcontextprotocol/server-filesystem", "D:\CODE\skills-manager")
+                }
+                [pscustomobject]@{
+                    name      = "playwright"
+                    transport = "stdio"
+                    command   = "npx"
+                    args      = @("@playwright/mcp@latest", "--isolated")
+                }
+            )
+
+            try {
+                $toml = Build-CodexConfigToml "" $servers
+
+                $toml | Should Match "\[mcp_servers\.filesystem\]"
+                $toml | Should Match "\[mcp_servers\.playwright\]"
+                $toml | Should Match "command = ""node"""
+                $toml | Should Match "mcp-node-cache-wrapper\.mjs"
+                $toml | Should Match "@modelcontextprotocol/server-filesystem"
+                $toml | Should Match "@playwright/mcp"
+                $toml | Should Match "D:\\\\CODE\\\\skills-manager"
+                $toml | Should Match "--isolated"
+                $toml | Should Not Match "command = ""npx"""
+            }
+            finally {
+                if ($null -ne $oldIncludeLeaky) {
+                    $env:SKILLS_CODEX_INCLUDE_LEAKY_STDIO_MCP = $oldIncludeLeaky
+                }
+                else {
+                    Remove-Item Env:\SKILLS_CODEX_INCLUDE_LEAKY_STDIO_MCP -ErrorAction SilentlyContinue
+                }
+            }
+        }
+
+        It "Skips known Windows taskkill-stdout MCP servers for Codex by default" {
+            $oldIncludeLeaky = $env:SKILLS_CODEX_INCLUDE_LEAKY_STDIO_MCP
+            Remove-Item Env:\SKILLS_CODEX_INCLUDE_LEAKY_STDIO_MCP -ErrorAction SilentlyContinue
+            try {
+                $servers = @(
+                    [pscustomobject]@{
+                        name      = "context7"
+                        transport = "stdio"
+                        command   = "npx"
+                        args      = @("-y", "@upstash/context7-mcp")
+                    }
+                    [pscustomobject]@{
+                        name      = "postgres"
+                        transport = "stdio"
+                        command   = "pwsh"
+                        args      = @("-NoLogo", "-NoProfile", "-Command", "npx -y @modelcontextprotocol/server-postgres `$env:POSTGRES_CONNECTION_STRING")
+                    }
+                )
+
+                $toml = Build-CodexConfigToml "" $servers
+
+                $toml | Should Not Match "\[mcp_servers\.context7\]"
+                $toml | Should Match "\[mcp_servers\.postgres\]"
+            }
+            finally {
+                if ($null -ne $oldIncludeLeaky) {
+                    $env:SKILLS_CODEX_INCLUDE_LEAKY_STDIO_MCP = $oldIncludeLeaky
+                }
+                else {
+                    Remove-Item Env:\SKILLS_CODEX_INCLUDE_LEAKY_STDIO_MCP -ErrorAction SilentlyContinue
+                }
+            }
+        }
+
+        It "Wraps Codex postgres MCP through the cached Node env wrapper" {
+            $servers = @(
+                [pscustomobject]@{
+                    name      = "postgres"
+                    transport = "stdio"
+                    command   = "pwsh"
+                    args      = @("-NoLogo", "-NoProfile", "-Command", "npx -y @modelcontextprotocol/server-postgres `$env:POSTGRES_CONNECTION_STRING")
+                }
+            )
+
+            $toml = Build-CodexConfigToml "" $servers
+
+            $toml | Should Match "\[mcp_servers\.postgres\]"
+            $toml | Should Match "command = ""node"""
+            $toml | Should Match "mcp-postgres-env-wrapper\.mjs"
+            $toml | Should Not Match "@modelcontextprotocol/server-postgres"
+            $toml | Should Not Match "command = ""pwsh"""
         }
 
         It "Skips GitHub MCP when GitHub token is unavailable" {

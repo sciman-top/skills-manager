@@ -7275,19 +7275,132 @@ function Get-CodexMcpStartupTimeoutSec($server) {
     return [int]$parsed
 }
 
+function Get-CodexNpxPackageName([string]$spec) {
+    if ([string]::IsNullOrWhiteSpace($spec)) { return "" }
+    $text = $spec.Trim()
+    if ($text.StartsWith("@")) {
+        $versionAt = $text.IndexOf("@", 1)
+        if ($versionAt -gt 0) { return $text.Substring(0, $versionAt) }
+        return $text
+    }
+
+    $plainVersionAt = $text.IndexOf("@")
+    if ($plainVersionAt -gt 0) { return $text.Substring(0, $plainVersionAt) }
+    return $text
+}
+
+function Get-CodexNpxWrapperBinRel([string]$packageName) {
+    switch -Exact ($packageName) {
+        "@upstash/context7-mcp" { return "dist/index.js" }
+        "@modelcontextprotocol/server-filesystem" { return "dist/index.js" }
+        "@playwright/mcp" { return "cli.js" }
+        default { return "" }
+    }
+}
+
+function Convert-CodexNpxServerToCachedNodeWrapper($server) {
+    if ($null -eq $server) { return $null }
+    if (-not [string]::Equals([string]$server.command, "npx", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $null
+    }
+    $args = @()
+    if ($server.PSObject.Properties.Match("args").Count -gt 0 -and $server.args -ne $null) {
+        $args = @($server.args | ForEach-Object { [string]$_ })
+    }
+    $packageIndex = -1
+    for ($i = 0; $i -lt $args.Count; $i++) {
+        if (-not ([string]$args[$i]).StartsWith("-")) {
+            $packageIndex = $i
+            break
+        }
+    }
+    if ($packageIndex -lt 0) { return $null }
+
+    $packageName = Get-CodexNpxPackageName ([string]$args[$packageIndex])
+    $binRel = Get-CodexNpxWrapperBinRel $packageName
+    if ([string]::IsNullOrWhiteSpace($packageName) -or [string]::IsNullOrWhiteSpace($binRel)) {
+        return $null
+    }
+
+    $extraArgs = @()
+    if ($packageIndex + 1 -lt $args.Count) {
+        $extraArgs = @($args[($packageIndex + 1)..($args.Count - 1)])
+    }
+    $wrapperPath = Join-Path (Join-Path ([Environment]::GetFolderPath("UserProfile")) ".codex\scripts") "mcp-node-cache-wrapper.mjs"
+    $entry = [ordered]@{
+        transport = "stdio"
+        command = "node"
+        args = @($wrapperPath, $packageName, $binRel) + @($extraArgs)
+    }
+    if ($server.PSObject.Properties.Match("env").Count -gt 0 -and $server.env -ne $null) { $entry.env = $server.env }
+    return [pscustomobject]$entry
+}
+
+function Convert-CodexPostgresServerToCachedNodeWrapper($server) {
+    if ($null -eq $server) { return $null }
+    if (-not (Test-McpServerUsesPostgresConnectionString $server)) { return $null }
+
+    $wrapperPath = Join-Path (Join-Path ([Environment]::GetFolderPath("UserProfile")) ".codex\scripts") "mcp-postgres-env-wrapper.mjs"
+    $entry = [ordered]@{
+        transport = "stdio"
+        command = "node"
+        args = @($wrapperPath)
+    }
+    if ($server.PSObject.Properties.Match("env").Count -gt 0 -and $server.env -ne $null) { $entry.env = $server.env }
+    return [pscustomobject]$entry
+}
+
+function Test-CodexMcpKnownTaskkillStdoutLeak($server) {
+    if ($null -eq $server) { return $false }
+    if (-not [string]::Equals([string]$server.command, "npx", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $false
+    }
+    $args = @()
+    if ($server.PSObject.Properties.Match("args").Count -gt 0 -and $server.args -ne $null) {
+        $args = @($server.args | ForEach-Object { [string]$_ })
+    }
+    foreach ($arg in $args) {
+        if (([string]$arg).StartsWith("-")) { continue }
+        $packageName = Get-CodexNpxPackageName ([string]$arg)
+        return @(
+            "@upstash/context7-mcp",
+            "@modelcontextprotocol/server-filesystem",
+            "@playwright/mcp"
+        ) -contains $packageName
+    }
+    return $false
+}
+
+function Should-IncludeCodexMcpKnownTaskkillStdoutLeak {
+    $raw = [string]$env:SKILLS_CODEX_INCLUDE_LEAKY_STDIO_MCP
+    return @("1", "true", "yes", "on") -contains $raw.Trim().ToLowerInvariant()
+}
+
 function Convert-McpServersToCodexConfigMap($servers) {
     $map = [ordered]@{}
     if ($null -eq $servers) { return [pscustomobject]$map }
 
     foreach ($s in $servers) {
         if ([string]::IsNullOrWhiteSpace([string]$s.name)) { continue }
+        if ((Test-CodexMcpKnownTaskkillStdoutLeak $s) -and -not (Should-IncludeCodexMcpKnownTaskkillStdoutLeak)) {
+            continue
+        }
         $entry = [ordered]@{}
         $transport = if ([string]::IsNullOrWhiteSpace([string]$s.transport)) { "stdio" } else { [string]$s.transport }
         $entry.transport = $transport
         if ($transport -eq "stdio") {
-            if (-not [string]::IsNullOrWhiteSpace([string]$s.command)) { $entry.command = [string]$s.command }
-            if ($s.PSObject.Properties.Match("args").Count -gt 0 -and $s.args -ne $null) { $entry.args = @($s.args) }
-            if ($s.PSObject.Properties.Match("env").Count -gt 0 -and $s.env -ne $null) { $entry.env = $s.env }
+            $wrapped = Convert-CodexPostgresServerToCachedNodeWrapper $s
+            if ($null -eq $wrapped) {
+                $wrapped = Convert-CodexNpxServerToCachedNodeWrapper $s
+            }
+            if ($null -ne $wrapped) {
+                foreach ($prop in $wrapped.PSObject.Properties) { $entry[[string]$prop.Name] = $prop.Value }
+            }
+            else {
+                if (-not [string]::IsNullOrWhiteSpace([string]$s.command)) { $entry.command = [string]$s.command }
+                if ($s.PSObject.Properties.Match("args").Count -gt 0 -and $s.args -ne $null) { $entry.args = @($s.args) }
+                if ($s.PSObject.Properties.Match("env").Count -gt 0 -and $s.env -ne $null) { $entry.env = $s.env }
+            }
         }
         else {
             if ($s.PSObject.Properties.Match("url").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$s.url)) { $entry.url = [string]$s.url }
@@ -7305,6 +7418,98 @@ function Convert-McpServersToCodexConfigMap($servers) {
         $map[[string]$s.name] = [pscustomobject]$entry
     }
     return [pscustomobject]$map
+}
+
+function Get-CodexMcpNodeCacheWrapperContent {
+    return @'
+#!/usr/bin/env node
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+
+const [packageName, binRel, ...extraArgs] = process.argv.slice(2);
+if (!packageName || !binRel) {
+  console.error("usage: mcp-node-cache-wrapper.mjs <packageName> <binRel> [args...]");
+  process.exit(64);
+}
+
+const npmCache = process.env.npm_config_cache || join(process.env.LOCALAPPDATA || "", "npm-cache");
+const npxRoot = join(npmCache, "_npx");
+let entry = "";
+if (existsSync(npxRoot)) {
+  for (const item of readdirSync(npxRoot, { withFileTypes: true })) {
+    if (!item.isDirectory()) continue;
+    const candidate = join(npxRoot, item.name, "node_modules", ...packageName.split("/"), ...binRel.split("/"));
+    if (existsSync(candidate)) {
+      entry = candidate;
+      break;
+    }
+  }
+}
+
+if (!entry) {
+  console.error(`Cached ${packageName} package was not found. Run npx for this MCP once to populate the npm cache.`);
+  process.exit(69);
+}
+
+process.argv = [process.argv[0], entry, ...extraArgs];
+await import(pathToFileURL(entry).href);
+'@
+}
+
+function Get-CodexMcpPostgresEnvWrapperContent {
+    return @'
+#!/usr/bin/env node
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+
+const conn = process.env.POSTGRES_CONNECTION_STRING;
+if (!conn || !conn.trim()) {
+  console.error("POSTGRES_CONNECTION_STRING is required for postgres MCP.");
+  process.exit(64);
+}
+
+const npmCache = process.env.npm_config_cache || join(process.env.LOCALAPPDATA || "", "npm-cache");
+const npxRoot = join(npmCache, "_npx");
+let entry = "";
+if (existsSync(npxRoot)) {
+  for (const item of readdirSync(npxRoot, { withFileTypes: true })) {
+    if (!item.isDirectory()) continue;
+    const candidate = join(
+      npxRoot,
+      item.name,
+      "node_modules",
+      "@modelcontextprotocol",
+      "server-postgres",
+      "dist",
+      "index.js",
+    );
+    if (existsSync(candidate)) {
+      entry = candidate;
+      break;
+    }
+  }
+}
+
+if (!entry) {
+  console.error("Cached @modelcontextprotocol/server-postgres package was not found. Run npx for this MCP once to populate the npm cache.");
+  process.exit(69);
+}
+
+process.argv = [process.argv[0], entry, conn];
+await import(pathToFileURL(entry).href);
+'@
+}
+
+function Ensure-CodexMcpNodeCacheWrapper([string]$codexRoot) {
+    if ([string]::IsNullOrWhiteSpace($codexRoot)) { return }
+    $scriptsDir = Join-Path $codexRoot "scripts"
+    EnsureDir $scriptsDir
+    $wrapperPath = Join-Path $scriptsDir "mcp-node-cache-wrapper.mjs"
+    Set-ContentUtf8 $wrapperPath (Get-CodexMcpNodeCacheWrapperContent)
+    $postgresWrapperPath = Join-Path $scriptsDir "mcp-postgres-env-wrapper.mjs"
+    Set-ContentUtf8 $postgresWrapperPath (Get-CodexMcpPostgresEnvWrapperContent)
 }
 
 function Get-McpServerNameSet($servers) {
@@ -8856,6 +9061,7 @@ function 同步MCP {
             }
             else {
                 EnsureDir $codexRoot
+                Ensure-CodexMcpNodeCacheWrapper $codexRoot
                 Set-ContentUtf8 $cfgPath $toml
                 $written += $cfgPath
                 Log ("已同步 Codex MCP 配置：{0}" -f $cfgPath)
