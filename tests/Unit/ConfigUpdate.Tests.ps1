@@ -640,6 +640,130 @@ Describe "Config And Update Enhancements" {
                 $script:Upgrade = $oldUpgrade
             }
         }
+
+        It "Falls back to per-source fetch when parallel prefetch fails" {
+            $oldPlan = $script:Plan
+            $oldLocked = $script:Locked
+            $oldUpgrade = $script:Upgrade
+            try {
+                $script:Plan = $false
+                $script:Locked = $false
+                $script:Upgrade = $false
+
+                $cfg = [pscustomobject]@{
+                    vendors = @([pscustomobject]@{ name = "vendor-a"; repo = "https://example.com/a.git"; ref = "main" })
+                    targets = @()
+                    mappings = @()
+                    imports = @([pscustomobject]@{ name = "import-a"; mode = "manual"; repo = "https://example.com/b.git"; ref = "main"; skill = "." })
+                    mcp_servers = @()
+                    mcp_targets = @()
+                    update_force = $false
+                    sync_mode = "sync"
+                }
+
+                Mock LoadCfg { $cfg }
+                Mock Invoke-PrebuildCheck {}
+                Mock Confirm-UpdateForce { $true }
+                Mock Skip-IfDryRun { $false }
+                Mock Preflight {}
+                Mock Get-UpdateParallelism { 2 }
+                Mock Invoke-ParallelGitPrefetch { $false }
+                Mock Get-UpdatePlanItems { @([pscustomobject]@{ type = "vendor"; name = "vendor-a"; current = "old"; target = "new"; changed = $true }) }
+                Mock Test-UpdateCanFastNoop { $false }
+                $script:importSkipFetchValues = New-Object System.Collections.Generic.List[bool]
+                $script:vendorSkipFetchValues = New-Object System.Collections.Generic.List[bool]
+                Mock 更新Imports {
+                    param($cfg, [switch]$SkipPreflight, $SkipForceClean, [switch]$SkipFetch)
+                    $script:importSkipFetchValues.Add([bool]$SkipFetch) | Out-Null
+                    @()
+                }
+                Mock 更新Vendor {
+                    param($cfg, [switch]$SkipPreflight, $SkipForceClean, [switch]$SkipFetch)
+                    $script:vendorSkipFetchValues.Add([bool]$SkipFetch) | Out-Null
+                    @()
+                }
+                Mock 构建生效 {}
+                Mock Write-FailureSummary {}
+
+                更新
+
+                Assert-MockCalled 更新Imports -Times 1 -Exactly -Scope It
+                Assert-MockCalled 更新Vendor -Times 1 -Exactly -Scope It
+                $script:importSkipFetchValues.Count | Should Be 1
+                $script:vendorSkipFetchValues.Count | Should Be 1
+                $script:importSkipFetchValues[0] | Should Be $false
+                $script:vendorSkipFetchValues[0] | Should Be $false
+            }
+            finally {
+                $script:Plan = $oldPlan
+                $script:Locked = $oldLocked
+                $script:Upgrade = $oldUpgrade
+                Remove-Variable -Scope Script -Name importSkipFetchValues -ErrorAction SilentlyContinue
+                Remove-Variable -Scope Script -Name vendorSkipFetchValues -ErrorAction SilentlyContinue
+            }
+        }
+
+        It "Skips per-source fetch only after successful parallel prefetch" {
+            $oldPlan = $script:Plan
+            $oldLocked = $script:Locked
+            $oldUpgrade = $script:Upgrade
+            try {
+                $script:Plan = $false
+                $script:Locked = $false
+                $script:Upgrade = $false
+
+                $cfg = [pscustomobject]@{
+                    vendors = @([pscustomobject]@{ name = "vendor-a"; repo = "https://example.com/a.git"; ref = "main" })
+                    targets = @()
+                    mappings = @()
+                    imports = @([pscustomobject]@{ name = "import-a"; mode = "manual"; repo = "https://example.com/b.git"; ref = "main"; skill = "." })
+                    mcp_servers = @()
+                    mcp_targets = @()
+                    update_force = $false
+                    sync_mode = "sync"
+                }
+
+                Mock LoadCfg { $cfg }
+                Mock Invoke-PrebuildCheck {}
+                Mock Confirm-UpdateForce { $true }
+                Mock Skip-IfDryRun { $false }
+                Mock Preflight {}
+                Mock Get-UpdateParallelism { 2 }
+                Mock Invoke-ParallelGitPrefetch { $true }
+                Mock Get-UpdatePlanItems { @([pscustomobject]@{ type = "vendor"; name = "vendor-a"; current = "old"; target = "new"; changed = $true }) }
+                Mock Test-UpdateCanFastNoop { $false }
+                $script:importSkipFetchValues = New-Object System.Collections.Generic.List[bool]
+                $script:vendorSkipFetchValues = New-Object System.Collections.Generic.List[bool]
+                Mock 更新Imports {
+                    param($cfg, [switch]$SkipPreflight, $SkipForceClean, [switch]$SkipFetch)
+                    $script:importSkipFetchValues.Add([bool]$SkipFetch) | Out-Null
+                    @()
+                }
+                Mock 更新Vendor {
+                    param($cfg, [switch]$SkipPreflight, $SkipForceClean, [switch]$SkipFetch)
+                    $script:vendorSkipFetchValues.Add([bool]$SkipFetch) | Out-Null
+                    @()
+                }
+                Mock 构建生效 {}
+                Mock Write-FailureSummary {}
+
+                更新
+
+                Assert-MockCalled 更新Imports -Times 1 -Exactly -Scope It
+                Assert-MockCalled 更新Vendor -Times 1 -Exactly -Scope It
+                $script:importSkipFetchValues.Count | Should Be 1
+                $script:vendorSkipFetchValues.Count | Should Be 1
+                $script:importSkipFetchValues[0] | Should Be $true
+                $script:vendorSkipFetchValues[0] | Should Be $true
+            }
+            finally {
+                $script:Plan = $oldPlan
+                $script:Locked = $oldLocked
+                $script:Upgrade = $oldUpgrade
+                Remove-Variable -Scope Script -Name importSkipFetchValues -ErrorAction SilentlyContinue
+                Remove-Variable -Scope Script -Name vendorSkipFetchValues -ErrorAction SilentlyContinue
+            }
+        }
     }
 
     Context "Import path auto-repair" {

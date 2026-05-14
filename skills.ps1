@@ -6898,11 +6898,9 @@ function 更新 {
         if (Skip-IfDryRun "更新") { return }
         Preflight
         $parallelism = Get-UpdateParallelism $cfg
-        $didPrefetch = $false
         $prefetchOk = $false
         if ($parallelism -gt 1) {
             $prefetchOk = [bool](Invoke-ParallelGitPrefetch $cfg $parallelism)
-            $didPrefetch = $true
         }
         $planItems = @(Get-UpdatePlanItems $cfg -PreferLocalRefs:$prefetchOk)
         if (Test-UpdateCanFastNoop $cfg $planItems) {
@@ -6912,9 +6910,9 @@ function 更新 {
             return
         }
         $failures = @()
-        $importFailures = 更新Imports $cfg -SkipPreflight -SkipForceClean $skipForceClean -SkipFetch:$didPrefetch
+        $importFailures = 更新Imports $cfg -SkipPreflight -SkipForceClean $skipForceClean -SkipFetch:$prefetchOk
         if ($importFailures) { $failures += $importFailures }
-        $vendorFailures = 更新Vendor $cfg -SkipPreflight -SkipForceClean $skipForceClean -SkipFetch:$didPrefetch
+        $vendorFailures = 更新Vendor $cfg -SkipPreflight -SkipForceClean $skipForceClean -SkipFetch:$prefetchOk
         if ($vendorFailures) { $failures += $vendorFailures }
         构建生效
         if ($Upgrade -and $failures.Count -eq 0) {
