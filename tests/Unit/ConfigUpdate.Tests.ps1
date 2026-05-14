@@ -237,6 +237,23 @@ Describe "Config And Update Enhancements" {
 
             Get-UpdateParallelism $cfg | Should Be 4
         }
+
+        It "Clamps parallel prefetch timeout from environment" {
+            $oldTimeout = $env:SKILLS_UPDATE_PREFETCH_TIMEOUT_SECONDS
+            try {
+                $env:SKILLS_UPDATE_PREFETCH_TIMEOUT_SECONDS = "1"
+                Get-UpdatePrefetchTimeoutSeconds | Should Be 1
+
+                $env:SKILLS_UPDATE_PREFETCH_TIMEOUT_SECONDS = "9999"
+                Get-UpdatePrefetchTimeoutSeconds | Should Be 1800
+
+                $env:SKILLS_UPDATE_PREFETCH_TIMEOUT_SECONDS = "45"
+                Get-UpdatePrefetchTimeoutSeconds | Should Be 45
+            }
+            finally {
+                $env:SKILLS_UPDATE_PREFETCH_TIMEOUT_SECONDS = $oldTimeout
+            }
+        }
     }
 
     Context "Update fast no-op" {
@@ -371,6 +388,40 @@ Describe "Config And Update Enhancements" {
             }
             finally {
                 $script:ImportDir = $oldImportDir
+            }
+        }
+
+        It "Stops and cleans up timed-out parallel prefetch jobs" {
+            $oldVendorDir = $script:VendorDir
+            $oldTimeout = $env:SKILLS_UPDATE_PREFETCH_TIMEOUT_SECONDS
+            try {
+                $env:SKILLS_UPDATE_PREFETCH_TIMEOUT_SECONDS = "1"
+                $script:VendorDir = Join-Path $TestDrive "vendor-prefetch-timeout"
+                $vendorPath = Join-Path $script:VendorDir "demo"
+                New-Item -ItemType Directory -Path $vendorPath -Force | Out-Null
+
+                $cfg = [pscustomobject]@{
+                    vendors = @([pscustomobject]@{ name = "demo"; repo = "https://example.com/demo.git" })
+                    imports = @()
+                }
+                $job = [pscustomobject]@{ Id = 42; Name = "prefetch-demo" }
+
+                Mock Test-IsGitRepoRoot { $true } -ParameterFilter { $path -eq $vendorPath }
+                Mock Start-Job { $job }
+                Mock Wait-Job { $null }
+                Mock Stop-Job {}
+                Mock Remove-Job {}
+                Mock Receive-Job { throw "Receive-Job should not be called for timed-out jobs." }
+
+                Invoke-ParallelGitPrefetch $cfg 2 | Should Be $false
+
+                Assert-MockCalled Stop-Job -Times 1 -Exactly -Scope It
+                Assert-MockCalled Remove-Job -Times 1 -Exactly -Scope It
+                Assert-MockCalled Receive-Job -Times 0 -Exactly -Scope It
+            }
+            finally {
+                $script:VendorDir = $oldVendorDir
+                $env:SKILLS_UPDATE_PREFETCH_TIMEOUT_SECONDS = $oldTimeout
             }
         }
 
@@ -767,6 +818,10 @@ Describe "Config And Update Enhancements" {
     }
 
     Context "Import path auto-repair" {
+        BeforeEach {
+            Mock Resolve-RemoteCommit { "abc123" }
+        }
+
         It "Rewrites outdated manual import skill path to resolved candidate during update" {
             $oldImportDir = $script:ImportDir
             $oldCfgPath = $script:CfgPath
@@ -924,8 +979,39 @@ Describe "Config And Update Enhancements" {
             $failures = 更新Imports $cfg -SkipPreflight -SkipFetch
 
             @($failures).Count | Should Be 0
-            Assert-MockCalled Ensure-RepoFromGitArchive -Times 1 -Exactly
-            Assert-MockCalled Ensure-RepoFromGitHubTreeSnapshot -Times 0 -Exactly
+            Assert-MockCalled Ensure-RepoFromGitArchive -Times 1 -Exactly -Scope It
+            Assert-MockCalled Ensure-RepoFromGitHubTreeSnapshot -Times 0 -Exactly -Scope It
+        }
+
+        It "Falls back to GitHub tree snapshot when git archive fallback fails" {
+            $cfg = [pscustomobject]@{
+                imports = @(
+                    [pscustomobject]@{
+                        name = "python-docx"
+                        mode = "manual"
+                        repo = "https://github.com/example/workspace-hub.git"
+                        ref = "main"
+                        skill = ".claude\skills\data\office\python-docx"
+                        sparse = $false
+                    }
+                )
+            }
+
+            Mock Preflight {}
+            Mock Optimize-Imports {}
+            Mock Test-IsSkillDir { $true }
+            Mock SaveCfgSafe {}
+            Mock Ensure-Repo {
+                throw "git 失败：git pull；详情：error: invalid path '**Status:**' | Updating aaa..bbb"
+            }
+            Mock Ensure-RepoFromGitArchive { throw "archive unavailable" }
+            Mock Ensure-RepoFromGitHubTreeSnapshot {}
+
+            $failures = 更新Imports $cfg -SkipPreflight -SkipFetch
+
+            @($failures).Count | Should Be 0
+            Assert-MockCalled Ensure-RepoFromGitArchive -Times 1 -Exactly -Scope It
+            Assert-MockCalled Ensure-RepoFromGitHubTreeSnapshot -Times 1 -Exactly -Scope It
         }
 
         It "Falls back to git archive when sparse repo update succeeds but target skill is still missing" {
@@ -947,20 +1033,20 @@ Describe "Config And Update Enhancements" {
             Mock SaveCfgSafe {}
             Mock Ensure-Repo {}
             Mock Resolve-SkillPath { param($base, $skillPath) return $skillPath }
-            Mock Ensure-RepoFromGitArchive {}
+            $script:archiveFallbackUsed = $false
+            Mock Ensure-RepoFromGitArchive { $script:archiveFallbackUsed = $true }
             Mock Ensure-RepoFromGitHubTreeSnapshot {}
 
-            $script:testSkillDirChecks = 0
             Mock Test-IsSkillDir {
-                $script:testSkillDirChecks++
-                return ($script:testSkillDirChecks -ge 2)
+                return $script:archiveFallbackUsed
             }
 
             $failures = 更新Imports $cfg -SkipPreflight -SkipFetch
 
             @($failures).Count | Should Be 0
-            Assert-MockCalled Ensure-RepoFromGitArchive -Times 1 -Exactly
-            Assert-MockCalled Ensure-RepoFromGitHubTreeSnapshot -Times 0 -Exactly
+            Assert-MockCalled Ensure-RepoFromGitArchive -Times 1 -Exactly -Scope It
+            Assert-MockCalled Ensure-RepoFromGitHubTreeSnapshot -Times 0 -Exactly -Scope It
+            Remove-Variable -Scope Script -Name archiveFallbackUsed -ErrorAction SilentlyContinue
         }
 
         It "Falls back to existing cached import when git index lock blocks update" {
@@ -989,6 +1075,7 @@ Describe "Config And Update Enhancements" {
                 Mock Preflight {}
                 Mock Optimize-Imports {}
                 Mock Ensure-Repo { throw "git 失败：git reset --hard；详情：fatal: Could not write new index file." }
+                Mock Test-IsSkillDir { $true }
 
                 $failures = 更新Imports $cfg -SkipPreflight -SkipFetch
 

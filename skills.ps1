@@ -6339,6 +6339,51 @@ function Test-WindowsInvalidPathIssue([string]$message) {
     return ($message -match "git\s+(pull|checkout|reset)")
 }
 
+function Get-UpdatePrefetchTimeoutSeconds {
+    $defaultSeconds = 120
+    $raw = [Environment]::GetEnvironmentVariable("SKILLS_UPDATE_PREFETCH_TIMEOUT_SECONDS")
+    if ([string]::IsNullOrWhiteSpace($raw)) { return $defaultSeconds }
+    try {
+        $n = [int]$raw
+    }
+    catch {
+        return $defaultSeconds
+    }
+    if ($n -lt 1) { return 1 }
+    if ($n -gt 1800) { return 1800 }
+    return $n
+}
+
+function Invoke-ImportArchiveFallback(
+    [string]$cache,
+    [string]$repo,
+    [string]$ref,
+    [string]$skillPath,
+    [bool]$forceClean,
+    [string]$archiveSuccessMessage,
+    [string]$snapshotSuccessMessage,
+    [string]$failurePrefix,
+    [string]$failureDetailPrefix = ""
+) {
+    try {
+        Ensure-RepoFromGitArchive $cache $repo $ref $skillPath $forceClean | Out-Null
+        Log $archiveSuccessMessage "WARN"
+        return
+    }
+    catch {
+        $archiveError = $_.Exception.Message
+        try {
+            Ensure-RepoFromGitHubTreeSnapshot $cache $repo $ref $skillPath $forceClean | Out-Null
+            Log $snapshotSuccessMessage "WARN"
+            return
+        }
+        catch {
+            $snapshotError = $_.Exception.Message
+            throw ("{0}{1}archive={2} | snapshot={3}" -f $failurePrefix, $failureDetailPrefix, $archiveError, $snapshotError)
+        }
+    }
+}
+
 function Invoke-ParallelGitPrefetch($cfg, [int]$Parallelism = 1) {
     if ($DryRun) { return $false }
     if ($Parallelism -le 1) { return $false }
@@ -6360,12 +6405,21 @@ function Invoke-ParallelGitPrefetch($cfg, [int]$Parallelism = 1) {
 
     $running = @()
     $errors = New-Object System.Collections.Generic.List[string]
+    $timeoutSeconds = Get-UpdatePrefetchTimeoutSeconds
     foreach ($p in $paths) {
         while (@($running).Count -ge $Parallelism) {
-            $done = Wait-Job -Job $running -Any
-            if ($null -eq $done) { break }
-            $output = Receive-Job $done -ErrorAction SilentlyContinue
-            Remove-Job $done -Force -ErrorAction SilentlyContinue
+            $runningIds = @($running | ForEach-Object { [int]$_.Id })
+            $done = Wait-Job -Id $runningIds -Any -Timeout $timeoutSeconds
+            if ($null -eq $done) {
+                foreach ($stuck in @($running)) {
+                    Stop-Job -Id ([int]$stuck.Id) -ErrorAction SilentlyContinue
+                    Remove-Job -Id ([int]$stuck.Id) -Force -ErrorAction SilentlyContinue
+                }
+                $errors.Add(("prefetch timeout after {0}s" -f $timeoutSeconds)) | Out-Null
+                return $false
+            }
+            $output = Receive-Job -Id ([int]$done.Id) -ErrorAction SilentlyContinue
+            Remove-Job -Id ([int]$done.Id) -Force -ErrorAction SilentlyContinue
             $running = @($running | Where-Object { $_.Id -ne $done.Id })
             if ($output -and $output.ok -eq $false) { $errors.Add([string]$output.msg) | Out-Null }
         }
@@ -6392,9 +6446,15 @@ function Invoke-ParallelGitPrefetch($cfg, [int]$Parallelism = 1) {
         $running += $job
     }
     foreach ($j in @($running)) {
-        Wait-Job $j | Out-Null
-        $output = Receive-Job $j -ErrorAction SilentlyContinue
-        Remove-Job $j -Force -ErrorAction SilentlyContinue
+        $done = Wait-Job -Id ([int]$j.Id) -Timeout $timeoutSeconds
+        if ($null -eq $done) {
+            Stop-Job -Id ([int]$j.Id) -ErrorAction SilentlyContinue
+            Remove-Job -Id ([int]$j.Id) -Force -ErrorAction SilentlyContinue
+            $errors.Add(("prefetch timeout after {0}s: {1}" -f $timeoutSeconds, [string]$j.Name)) | Out-Null
+            continue
+        }
+        $output = Receive-Job -Id ([int]$j.Id) -ErrorAction SilentlyContinue
+        Remove-Job -Id ([int]$j.Id) -Force -ErrorAction SilentlyContinue
         if ($output -and $output.ok -eq $false) { $errors.Add([string]$output.msg) | Out-Null }
     }
     if ($errors.Count -gt 0) {
@@ -6777,24 +6837,13 @@ function 更新Imports($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $
                             }
                         }
                         if (-not $fallbackDone) {
-                            try {
-                                Ensure-RepoFromGitArchive $cache $repo $ref $skillPath $invalidPathForceClean | Out-Null
-                                Log ("导入更新已回退为 git archive：{0} [{1}] -> {2}" -f $name, $repo, $skillPath) "WARN"
-                                $fallbackDone = $true
-                            }
-                            catch {
-                                $archiveError = $_.Exception.Message
-                                try {
-                                    Ensure-RepoFromGitHubTreeSnapshot $cache $repo $ref $skillPath $invalidPathForceClean | Out-Null
-                                    Log ("导入更新已回退为 GitHub tree 快照：{0} [{1}] -> {2}" -f $name, $repo, $skillPath) "WARN"
-                                    $fallbackDone = $true
-                                }
-                                catch {
-                                    $snapshotError = $_.Exception.Message
-                                    $prefix = if ([string]::IsNullOrWhiteSpace($sparseFallbackError)) { "" } else { ("sparse={0} | " -f $sparseFallbackError) }
-                                    throw ("Windows 非法路径回退失败：{0}archive={1} | snapshot={2}" -f $prefix, $archiveError, $snapshotError)
-                                }
-                            }
+                            $prefix = if ([string]::IsNullOrWhiteSpace($sparseFallbackError)) { "" } else { ("sparse={0} | " -f $sparseFallbackError) }
+                            Invoke-ImportArchiveFallback $cache $repo $ref $skillPath $invalidPathForceClean `
+                                ("导入更新已回退为 git archive：{0} [{1}] -> {2}" -f $name, $repo, $skillPath) `
+                                ("导入更新已回退为 GitHub tree 快照：{0} [{1}] -> {2}" -f $name, $repo, $skillPath) `
+                                "Windows 非法路径回退失败：" `
+                                $prefix
+                            $fallbackDone = $true
                         }
                         if (-not $fallbackDone) { throw }
                     }
@@ -6832,23 +6881,11 @@ function 更新Imports($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $
                         $missingSkillForceClean = $true
                         Log ("导入缓存缺少目标技能，回退归档时临时启用强制清理：{0} [{1}]" -f $name, $repo) "WARN"
                     }
-                    try {
-                        Ensure-RepoFromGitArchive $cache $repo $ref $skillPath $missingSkillForceClean | Out-Null
-                        $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
-                        Log ("导入缓存缺少目标技能，已回退为 git archive：{0} [{1}] -> {2}" -f $name, $repo, $skillPath) "WARN"
-                    }
-                    catch {
-                        $archiveError = $_.Exception.Message
-                        try {
-                            Ensure-RepoFromGitHubTreeSnapshot $cache $repo $ref $skillPath $missingSkillForceClean | Out-Null
-                            $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
-                            Log ("导入缓存缺少目标技能，已回退为 GitHub tree 快照：{0} [{1}] -> {2}" -f $name, $repo, $skillPath) "WARN"
-                        }
-                        catch {
-                            $snapshotError = $_.Exception.Message
-                            throw ("导入缓存缺少目标技能，归档回退失败：archive={0} | snapshot={1}" -f $archiveError, $snapshotError)
-                        }
-                    }
+                    Invoke-ImportArchiveFallback $cache $repo $ref $skillPath $missingSkillForceClean `
+                        ("导入缓存缺少目标技能，已回退为 git archive：{0} [{1}] -> {2}" -f $name, $repo, $skillPath) `
+                        ("导入缓存缺少目标技能，已回退为 GitHub tree 快照：{0} [{1}] -> {2}" -f $name, $repo, $skillPath) `
+                        "导入缓存缺少目标技能，归档回退失败："
+                    $src = if ($skillPath -eq ".") { $cache } else { Join-Path $cache $skillPath }
                 }
                 Need (Test-IsSkillDir $src) "未找到技能入口文件（SKILL.md/AGENTS.md/GEMINI.md/CLAUDE.md）：$src"
                 if (Test-IsGitRepoRoot $cache) {
