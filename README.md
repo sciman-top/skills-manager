@@ -142,6 +142,12 @@ English aliases：
 - Codex：`windows.sandbox`、approval policy、model/reasoning/context 等非 MCP 字段
 - Claude / Gemini：auth、provider、model、context、sandbox、非 MCP 权限策略等宿主级设置
 
+`同步MCP` 在写入配置前会执行 MCP 启动环境预检：
+
+- `postgres` MCP：接受 `postgresql://...` URL；若检测到 Npgsql/ADO key-value 连接串，会先转换并写回 User scope 的 `POSTGRES_CONNECTION_STRING`。
+- `github` MCP：优先用 `gh auth token` 补齐 User scope 的 `CODEX_GITHUB_PERSONAL_ACCESS_TOKEN`，Codex 配置只写 `bearer_token_env_var`，不写入明文 token。
+- 本机 weekly task `skills-manager-weekly-update-friday-2000` 会运行 `scripts/weekly-auto-update.ps1`，顺序是 `更新 -> 同步MCP`；因此 MCP env 修复必须落在 `同步MCP` 真源链，而不是只改 live `~/.codex/config.toml`。
+
 ## overrides 命名
 
 `overrides/` 建议使用清晰前缀：
@@ -277,6 +283,8 @@ English aliases：
 
 ## MCP 与门禁环境变量
 
+- `POSTGRES_CONNECTION_STRING`：postgres MCP 的连接串；推荐 `postgresql://...`，key-value 形态会在 `同步MCP` 前归一化。
+- `CODEX_GITHUB_PERSONAL_ACCESS_TOKEN`：Codex GitHub MCP 使用的 User/Process scope token 变量；配置文件只引用变量名。
 - `SKILLS_MCP_VERIFY_GEMINI_CLI=1|true|yes|on`：启用 Gemini CLI 实机校验（默认关闭，默认走配置态校验）。
 - `SKILLS_MCP_VERIFY_LIST_TIMEOUT_SECONDS`：统一设置 `mcp list` 校验超时（秒）。
 - `SKILLS_MCP_VERIFY_LIST_TIMEOUT_SECONDS_<CLI>`：按 CLI 覆盖超时（例如 `_CLAUDE` / `_CODEX` / `_GEMINI`）。

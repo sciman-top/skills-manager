@@ -142,6 +142,12 @@ The following are outside the MCP ownership boundary of `skills-manager`; change
 - Codex: `windows.sandbox`, approval policy, model/reasoning/context, and other non-MCP fields
 - Claude / Gemini: auth, provider, model, context, sandbox, and other host-level non-MCP permission settings
 
+Before writing MCP config, `同步MCP` validates the MCP startup environment:
+
+- `postgres` MCP: expects a `postgresql://...` URL; when an Npgsql/ADO key-value connection string is detected, it is converted and written back to User-scope `POSTGRES_CONNECTION_STRING`.
+- `github` MCP: uses `gh auth token` to populate User-scope `CODEX_GITHUB_PERSONAL_ACCESS_TOKEN` when possible. Codex config writes only `bearer_token_env_var`, not a literal token.
+- The local weekly task `skills-manager-weekly-update-friday-2000` runs `scripts/weekly-auto-update.ps1` as `更新 -> 同步MCP`; durable MCP env fixes therefore belong in the `同步MCP` source chain, not only in live `~/.codex/config.toml`.
+
 ## overrides Naming
 
 Use clear prefixes under `overrides/`:
@@ -221,6 +227,7 @@ Equivalent English aliases:
 .\skills.ps1 audit-targets profile-structure --profile reports\profile.json
 .\skills.ps1 audit-targets add my-repo ..\my-repo
 .\skills.ps1 audit-targets scan --target my-repo
+.\skills.ps1 audit-targets discover-skills --query "repo governance and agent workflows"
 .\skills.ps1 audit-targets status
 .\skills.ps1 audit-targets apply-flow --recommendations reports\skill-audit\<run-id>\recommendations.json
 .\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json
@@ -275,6 +282,8 @@ Quality gate scripts (local/CI parity):
 
 ## MCP and Gate Environment Variables
 
+- `POSTGRES_CONNECTION_STRING`: connection string for postgres MCP; `postgresql://...` is preferred, and key-value strings are normalized before `同步MCP`.
+- `CODEX_GITHUB_PERSONAL_ACCESS_TOKEN`: User/Process-scope token variable used by Codex GitHub MCP; generated config references the variable name only.
 - `SKILLS_MCP_VERIFY_GEMINI_CLI=1|true|yes|on`: enable real Gemini CLI verification (disabled by default; default path uses config-state verification).
 - `SKILLS_MCP_VERIFY_LIST_TIMEOUT_SECONDS`: global timeout in seconds for `mcp list` verification.
 - `SKILLS_MCP_VERIFY_LIST_TIMEOUT_SECONDS_<CLI>`: per-CLI timeout override (for example `_CLAUDE`, `_CODEX`, `_GEMINI`).
