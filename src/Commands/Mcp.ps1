@@ -444,13 +444,24 @@ function Should-IncludeCodexMcpKnownTaskkillStdoutLeak {
     return @("1", "true", "yes", "on") -contains $raw.Trim().ToLowerInvariant()
 }
 
+function Should-SkipCodexMcpKnownTaskkillStdoutLeak($server) {
+    if (-not (Test-CodexMcpKnownTaskkillStdoutLeak $server)) { return $false }
+    if (Should-IncludeCodexMcpKnownTaskkillStdoutLeak) { return $false }
+
+    # These servers are written through mcp-node-cache-wrapper.mjs below. The
+    # wrapper launches the cached package entrypoint directly, so the historical
+    # Windows npx/taskkill stdout leak no longer applies to the Codex projection.
+    if ($null -ne (Convert-CodexNpxServerToCachedNodeWrapper $server)) { return $false }
+    return $true
+}
+
 function Convert-McpServersToCodexConfigMap($servers) {
     $map = [ordered]@{}
     if ($null -eq $servers) { return [pscustomobject]$map }
 
     foreach ($s in $servers) {
         if ([string]::IsNullOrWhiteSpace([string]$s.name)) { continue }
-        if ((Test-CodexMcpKnownTaskkillStdoutLeak $s) -and -not (Should-IncludeCodexMcpKnownTaskkillStdoutLeak)) {
+        if (Should-SkipCodexMcpKnownTaskkillStdoutLeak $s) {
             continue
         }
         $entry = [ordered]@{}

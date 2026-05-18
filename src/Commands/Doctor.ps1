@@ -228,6 +228,36 @@ function Get-PerfAnomalyItems($summary, [int]$WarnThresholdMs = 5000, [int]$MinS
     return ,@($items)
 }
 
+function Test-DoctorGitHubConnection {
+    try {
+        $tcpOk = Test-NetConnection "github.com" -Port 443 -InformationLevel Quiet
+        if ($tcpOk) {
+            return [pscustomobject]@{ ok = $true; method = "tcp"; detail = "" }
+        }
+    }
+    catch {}
+
+    if (Get-Command gh -ErrorAction SilentlyContinue) {
+        try {
+            $ghOutput = @(& gh api user --jq .login 2>$null)
+            if ($LASTEXITCODE -eq 0 -and $ghOutput.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$ghOutput[0])) {
+                return [pscustomobject]@{ ok = $true; method = "gh_api"; detail = [string]$ghOutput[0] }
+            }
+        }
+        catch {}
+    }
+
+    try {
+        $probe = Invoke-GitCapture @("ls-remote", "--exit-code", "https://github.com/github/gitignore.git", "HEAD")
+        if (-not [string]::IsNullOrWhiteSpace([string]$probe)) {
+            return [pscustomobject]@{ ok = $true; method = "git_ls_remote"; detail = "" }
+        }
+    }
+    catch {}
+
+    return [pscustomobject]@{ ok = $false; method = "none"; detail = "github.com tcp, gh api, and git ls-remote probes failed" }
+}
+
 function Get-DoctorConfigRisks($cfg) {
     $risks = @()
     if ($null -eq $cfg) { return @() }
@@ -471,22 +501,23 @@ function Invoke-Doctor([string[]]$tokens = @()) {
         }
     }
 
-    # 7. Network Check (Optional)
+    # 7. Network Check
     try {
-        $ping = Test-NetConnection "github.com" -Port 443 -InformationLevel Quiet
-        if ($ping) {
-            $report.checks.network = [ordered]@{ ok = $true }
-            if (-not $opts.json) { Write-Host "✅ GitHub Connection: OK" -ForegroundColor Green }
+        $githubConnection = Test-DoctorGitHubConnection
+        if ($githubConnection.ok) {
+            $report.checks.network = [ordered]@{ ok = $true; method = [string]$githubConnection.method }
+            if (-not $opts.json) { Write-Host ("✅ GitHub Connection: OK ({0})" -f [string]$githubConnection.method) -ForegroundColor Green }
         }
         else {
-            $report.checks.network = [ordered]@{ ok = $false }
-            if (-not $opts.json) { Write-Host "❌ GitHub Connection: Failed" -ForegroundColor Red }
+            $report.checks.network = [ordered]@{ ok = $false; method = [string]$githubConnection.method; reason = [string]$githubConnection.detail }
+            if (-not $opts.json) { Write-Host ("❌ GitHub Connection: Failed - {0}" -f [string]$githubConnection.detail) -ForegroundColor Red }
             $pass = $false
         }
     }
     catch {
-        $report.checks.network = [ordered]@{ ok = $false; skipped = $true }
-        if (-not $opts.json) { Write-Host "⚠️ Network Check: Skipped" -ForegroundColor Yellow }
+        $report.checks.network = [ordered]@{ ok = $false; reason = $_.Exception.Message }
+        if (-not $opts.json) { Write-Host ("❌ GitHub Connection: Failed - {0}" -f $_.Exception.Message) -ForegroundColor Red }
+        $pass = $false
     }
 
     # 8. Performance Summary
@@ -528,6 +559,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
         elseif ($reason -like "contract_error*") { $report.summary.errors += "config_contract_error" }
         else { $report.summary.warnings += "config_not_ready" }
     }
+    if ($report.checks.network -and -not $report.checks.network.ok) { $report.summary.errors += "network_unavailable" }
     if ($report.checks.long_paths.value -eq 0) { $report.summary.warnings += "long_paths_off" }
     if (@($report.risks).Count -gt 0) { $report.summary.warnings += "config_risks_present" }
     if (@($report.performance.anomalies).Count -gt 0) { $report.summary.warnings += "perf_anomalies_present" }

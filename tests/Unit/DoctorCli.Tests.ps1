@@ -146,6 +146,23 @@ Describe "Doctor CLI behavior" {
         }
     }
 
+    It "Treats GitHub as reachable when TCP probe fails but git ls-remote succeeds" {
+        Mock Test-NetConnection { $false }
+        Mock Get-Command {
+            param($Name)
+            if ($Name -eq "gh") { return $null }
+            Microsoft.PowerShell.Core\Get-Command @PSBoundParameters
+        }
+        Mock Invoke-GitCapture { "0123456789012345678901234567890123456789`tHEAD" } -ParameterFilter {
+            @($GitArgs)[0] -eq "ls-remote"
+        }
+
+        $result = Test-DoctorGitHubConnection
+
+        $result.ok | Should Be $true
+        $result.method | Should Be "git_ls_remote"
+    }
+
     It "Emits parseable JSON from the CLI entry without leading log lines" {
         $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
         $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot "skills.ps1") doctor --json 2>&1)

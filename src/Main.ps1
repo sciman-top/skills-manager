@@ -17,8 +17,8 @@ if ($MyInvocation.InvocationName -ne '.') {
             "npx" { Add-ImportFromArgs (Get-AddTokensFromNpx (Merge-FilterAndArgs $Filter $args)) }
             "安装" { 安装 }
             "从技能库选择安装" { 安装 }
-            "卸载" { 卸载 }
-            "卸载技能" { 卸载 }
+            "卸载" { 卸载 (Merge-FilterAndArgs $Filter $args) }
+            "卸载技能" { 卸载 (Merge-FilterAndArgs $Filter $args) }
             "选择" { 选择 }
             "构建生效" { 构建生效 }
             "构建并生效" { 构建生效 }

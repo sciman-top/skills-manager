@@ -326,6 +326,26 @@ Describe "Core Functions" {
             $parsed.skills[0] | Should Be "."
         }
 
+        It "Converts skills.sh repo@skill syntax before repo validation" {
+            $parsed = Parse-AddArgs @("geekjourneyx/md2wechat-lite@md2wechat-lite")
+            $parsed.repo | Should Be "geekjourneyx/md2wechat-lite"
+            $parsed.skillSpecified | Should Be $true
+            $parsed.skills.Count | Should Be 1
+            $parsed.skills[0] | Should Be "md2wechat-lite"
+        }
+
+        It "Rejects repo@skill when --skill is also provided" {
+            $thrown = $false
+            try {
+                Parse-AddArgs @("owner/repo@foo", "--skill", "bar") | Out-Null
+            }
+            catch {
+                $thrown = $true
+                $_.Exception.Message | Should Match "不能同时传 --skill"
+            }
+            $thrown | Should Be $true
+        }
+
         It "Rejects missing option value when next token is another flag" {
             $thrown = $false
             try {
@@ -400,6 +420,12 @@ Describe "Core Functions" {
             $tokens = Get-AddTokensFromNpx @("skills add owner/repo --skill foo")
             $tokens.Count | Should Be 3
             $tokens[0] | Should Be "owner/repo"
+        }
+
+        It "Preserves skills.sh repo@skill token for Parse-AddArgs" {
+            $tokens = Get-AddTokensFromNpx @("skills add geekjourneyx/md2wechat-lite@md2wechat-lite")
+            $tokens.Count | Should Be 1
+            $tokens[0] | Should Be "geekjourneyx/md2wechat-lite@md2wechat-lite"
         }
     }
 
@@ -655,6 +681,14 @@ Describe "Core Functions" {
             $parsed | Should Not Be $null
             $parsed.repo | Should Be "vercel-labs/agent-skills"
             $parsed.ref | Should Be "main"
+        }
+
+        It "Parses npx command line with repo@skill syntax" {
+            $parsed = Try-ParseAddLikeInput 'npx skills add geekjourneyx/md2wechat-lite@md2wechat-lite'
+            $parsed | Should Not Be $null
+            $parsed.repo | Should Be "geekjourneyx/md2wechat-lite"
+            $parsed.skills.Count | Should Be 1
+            $parsed.skills[0] | Should Be "md2wechat-lite"
         }
 
         It "Parses plugin install shorthand alias command" {
@@ -1242,7 +1276,7 @@ sandbox = "elevated"
             }
         }
 
-        It "Skips known Windows taskkill-stdout MCP servers for Codex by default" {
+        It "Includes known npx MCP servers for Codex through the cache wrapper by default" {
             $oldIncludeLeaky = $env:SKILLS_CODEX_INCLUDE_LEAKY_STDIO_MCP
             Remove-Item Env:\SKILLS_CODEX_INCLUDE_LEAKY_STDIO_MCP -ErrorAction SilentlyContinue
             try {
@@ -1263,7 +1297,9 @@ sandbox = "elevated"
 
                 $toml = Build-CodexConfigToml "" $servers
 
-                $toml | Should Not Match "\[mcp_servers\.context7\]"
+                $toml | Should Match "\[mcp_servers\.context7\]"
+                $toml | Should Match "mcp-node-cache-wrapper\.mjs"
+                $toml | Should Match "@upstash/context7-mcp"
                 $toml | Should Match "\[mcp_servers\.postgres\]"
             }
             finally {

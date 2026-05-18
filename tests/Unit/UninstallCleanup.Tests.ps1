@@ -64,7 +64,55 @@ Describe "Uninstall cleanup" {
 
         @($cfg.mappings).Count | Should Be 0
         @($cfg.imports).Count | Should Be 0
-        Assert-MockCalled 构建生效 -Times 1 -Exactly
+        Assert-MockCalled 构建生效 -Times 1 -Exactly -Scope It
+    }
+
+    It "Removes a skill non-interactively by leaf name" {
+        $cfg = [pscustomobject]@{
+            vendors = @(
+                [pscustomobject]@{ name = "manual"; repo = ""; ref = "main" }
+            )
+            mappings = @(
+                [pscustomobject]@{ vendor = "manual"; from = "ui-ux-pro-max"; to = "ui-ux-pro-max" }
+            )
+            imports = @(
+                [pscustomobject]@{
+                    name = "ui-ux-pro-max"
+                    mode = "manual"
+                    repo = "https://github.com/example/ui-ux-pro-max.git"
+                    ref = "main"
+                    skill = "."
+                    sparse = $false
+                }
+            )
+            targets = @()
+            mcp_servers = @()
+            mcp_targets = @()
+            update_force = $false
+            sync_mode = "link"
+        }
+
+        Mock Preflight {}
+        Mock LoadCfg { $cfg }
+        Mock 收集ManualSkills {
+            ,@([pscustomobject]@{ vendor = "manual"; from = "ui-ux-pro-max"; full = (Join-Path $TestDrive "imports\ui-ux-pro-max") })
+        }
+        Mock 收集OverridesSkills { @() }
+        Mock 收集Skills {
+            ,@([pscustomobject]@{ vendor = "manual"; from = "ui-ux-pro-max"; full = (Join-Path $TestDrive "imports\ui-ux-pro-max") })
+        }
+        Mock Filter-Skills { param($items, $filter) $items }
+        Mock Select-Items { throw "Select-Items should not be called for non-interactive uninstall" }
+        Mock Confirm-WithSummary { throw "Confirm-WithSummary should not be called with --yes" }
+        Mock SaveCfg {}
+        Mock Clear-SkillsCache {}
+        Mock 构建生效 {}
+
+        卸载 @("ui-ux-pro-max", "--yes")
+
+        @($cfg.mappings).Count | Should Be 0
+        @($cfg.imports).Count | Should Be 0
+        Assert-MockCalled 构建生效 -Times 1 -Exactly -Scope It
     }
 
     It "Get-InstalledSet excludes unmapped manual imports and keeps mapped/overrides only" {

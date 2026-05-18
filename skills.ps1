@@ -1303,15 +1303,18 @@ function Parse-AddArgs([string[]]$tokens) {
             if (-not $result.repo) { $result.repo = $t }
         }
     }
-    Need (-not [string]::IsNullOrWhiteSpace($result.repo)) "缺少 repo 参数。示例：add <repo> [--skill <name>]"
-    Need (Looks-LikeRepoInput $result.repo) ("输入并非有效的 GitHub 仓库格式：{0}" -f $result.repo)
     $repoSkill = Split-RepoSkillSuffix $result.repo
-    if ($repoSkill -and $result.skills.Count -eq 0) {
+    if ($repoSkill) {
+        if ($result.skills.Count -gt 0) {
+            throw ("repo@skill 写法不能同时传 --skill：repo={0} suffixSkill={1}" -f $repoSkill.repo, $repoSkill.skill)
+        }
         $result.repo = $repoSkill.repo
         $result.skills += $repoSkill.skill
         $result.skillSpecified = $true
         Write-Host ("检测到 repo@skill 写法，已自动转换为：repo={0} --skill {1}" -f $repoSkill.repo, $repoSkill.skill) -ForegroundColor Yellow
     }
+    Need (-not [string]::IsNullOrWhiteSpace($result.repo)) "缺少 repo 参数。示例：add <repo> [--skill <name>]"
+    Need (Looks-LikeRepoInput $result.repo) ("输入并非有效的 GitHub 仓库格式：{0}" -f $result.repo)
     if ($result.skills.Count -eq 0) { $result.skills += "." }
     foreach ($skill in $result.skills) {
         if ([string]::IsNullOrWhiteSpace([string]$skill)) { throw "参数值不能为空：--skill" }
@@ -1330,10 +1333,10 @@ function Get-AddTokensFromNpx([string[]]$tokens) {
     }
     if ($tokens.Count -ge 2 -and $tokens[0].ToLowerInvariant() -eq "skills" -and $tokens[1].ToLowerInvariant() -eq "add") {
         if ($tokens.Count -lt 3) { throw "缺少 repo 参数。示例：add <repo> [--skill <name>]" }
-        return $tokens[2..($tokens.Count - 1)]
+        return ,@($tokens[2..($tokens.Count - 1)])
     }
     if ($tokens[0].ToLowerInvariant() -eq "add-skill") {
-        if ($tokens.Count -ge 2) { return $tokens[1..($tokens.Count - 1)] }
+        if ($tokens.Count -ge 2) { return ,@($tokens[1..($tokens.Count - 1)]) }
         throw "缺少 repo 参数。示例：add <repo> [--skill <name>]"
     }
     throw "不支持的 npx 子命令。仅支持：skills add / add-skill"
@@ -1366,13 +1369,13 @@ function Get-AddTokensFromCommandLineTokens([string[]]$tokens) {
         $sub = $tokens[1].ToLowerInvariant()
         if ($sub -ne "add") { throw "不支持的 skills 子命令。仅支持：skills add" }
         if ($tokens.Count -lt 3) { throw "缺少 repo 参数。示例：add <repo> [--skill <name>]" }
-        return $tokens[2..($tokens.Count - 1)]
+        return ,@($tokens[2..($tokens.Count - 1)])
     }
     if ($headNorm -eq "add") {
         if ($tokens.Count -eq 1) { throw "缺少 repo 参数。示例：add <repo> [--skill <name>]" }
-        return $tokens[1..($tokens.Count - 1)]
+        return ,@($tokens[1..($tokens.Count - 1)])
     }
-    return $tokens
+    return ,@($tokens)
 }
 function Merge-FilterAndArgs([string]$filter, [string[]]$tokens) {
     $merged = New-Object System.Collections.Generic.List[string]
@@ -3537,6 +3540,36 @@ function Get-PerfAnomalyItems($summary, [int]$WarnThresholdMs = 5000, [int]$MinS
     return ,@($items)
 }
 
+function Test-DoctorGitHubConnection {
+    try {
+        $tcpOk = Test-NetConnection "github.com" -Port 443 -InformationLevel Quiet
+        if ($tcpOk) {
+            return [pscustomobject]@{ ok = $true; method = "tcp"; detail = "" }
+        }
+    }
+    catch {}
+
+    if (Get-Command gh -ErrorAction SilentlyContinue) {
+        try {
+            $ghOutput = @(& gh api user --jq .login 2>$null)
+            if ($LASTEXITCODE -eq 0 -and $ghOutput.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$ghOutput[0])) {
+                return [pscustomobject]@{ ok = $true; method = "gh_api"; detail = [string]$ghOutput[0] }
+            }
+        }
+        catch {}
+    }
+
+    try {
+        $probe = Invoke-GitCapture @("ls-remote", "--exit-code", "https://github.com/github/gitignore.git", "HEAD")
+        if (-not [string]::IsNullOrWhiteSpace([string]$probe)) {
+            return [pscustomobject]@{ ok = $true; method = "git_ls_remote"; detail = "" }
+        }
+    }
+    catch {}
+
+    return [pscustomobject]@{ ok = $false; method = "none"; detail = "github.com tcp, gh api, and git ls-remote probes failed" }
+}
+
 function Get-DoctorConfigRisks($cfg) {
     $risks = @()
     if ($null -eq $cfg) { return @() }
@@ -3780,22 +3813,23 @@ function Invoke-Doctor([string[]]$tokens = @()) {
         }
     }
 
-    # 7. Network Check (Optional)
+    # 7. Network Check
     try {
-        $ping = Test-NetConnection "github.com" -Port 443 -InformationLevel Quiet
-        if ($ping) {
-            $report.checks.network = [ordered]@{ ok = $true }
-            if (-not $opts.json) { Write-Host "✅ GitHub Connection: OK" -ForegroundColor Green }
+        $githubConnection = Test-DoctorGitHubConnection
+        if ($githubConnection.ok) {
+            $report.checks.network = [ordered]@{ ok = $true; method = [string]$githubConnection.method }
+            if (-not $opts.json) { Write-Host ("✅ GitHub Connection: OK ({0})" -f [string]$githubConnection.method) -ForegroundColor Green }
         }
         else {
-            $report.checks.network = [ordered]@{ ok = $false }
-            if (-not $opts.json) { Write-Host "❌ GitHub Connection: Failed" -ForegroundColor Red }
+            $report.checks.network = [ordered]@{ ok = $false; method = [string]$githubConnection.method; reason = [string]$githubConnection.detail }
+            if (-not $opts.json) { Write-Host ("❌ GitHub Connection: Failed - {0}" -f [string]$githubConnection.detail) -ForegroundColor Red }
             $pass = $false
         }
     }
     catch {
-        $report.checks.network = [ordered]@{ ok = $false; skipped = $true }
-        if (-not $opts.json) { Write-Host "⚠️ Network Check: Skipped" -ForegroundColor Yellow }
+        $report.checks.network = [ordered]@{ ok = $false; reason = $_.Exception.Message }
+        if (-not $opts.json) { Write-Host ("❌ GitHub Connection: Failed - {0}" -f $_.Exception.Message) -ForegroundColor Red }
+        $pass = $false
     }
 
     # 8. Performance Summary
@@ -3837,6 +3871,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
         elseif ($reason -like "contract_error*") { $report.summary.errors += "config_contract_error" }
         else { $report.summary.warnings += "config_not_ready" }
     }
+    if ($report.checks.network -and -not $report.checks.network.ok) { $report.summary.errors += "network_unavailable" }
     if ($report.checks.long_paths.value -eq 0) { $report.summary.warnings += "long_paths_off" }
     if (@($report.risks).Count -gt 0) { $report.summary.warnings += "config_risks_present" }
     if (@($report.performance.anomalies).Count -gt 0) { $report.summary.warnings += "perf_anomalies_present" }
@@ -4989,11 +5024,11 @@ function 清理无效映射([string[]]$tokens = @()) {
 
     $dropIndexes = New-Object System.Collections.Generic.HashSet[int]
     foreach ($item in $invalid) { $dropIndexes.Add([int]$item.index) | Out-Null }
-    $nextMappings = New-Object System.Collections.Generic.List[object]
+    $nextMappings = @()
     $all = @($cfg.mappings)
     for ($i = 0; $i -lt $all.Count; $i++) {
         if ($dropIndexes.Contains($i)) { continue }
-        $nextMappings.Add($all[$i]) | Out-Null
+        $nextMappings += $all[$i]
     }
     $cfg.mappings = @($nextMappings)
     SaveCfg $cfg
@@ -5081,6 +5116,94 @@ function Select-Items($items, [scriptblock]$formatter, [string]$prompt, [string]
     $selected = @()
     foreach ($n in $idx) { $selected += $items[$n - 1] }
     return [pscustomobject]@{ items = $selected; canceled = $false }
+}
+
+function Get-SkillSelectionMatchKeys($item) {
+    $keys = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $item) { return @() }
+
+    foreach ($value in @(
+            [string]$item.from,
+            (Split-Path ([string]$item.from) -Leaf),
+            ("{0}|{1}" -f [string]$item.vendor, [string]$item.from),
+            (Make-TargetName ([string]$item.vendor) ([string]$item.from))
+        )) {
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            $keys.Add($value.Trim().ToLowerInvariant()) | Out-Null
+        }
+    }
+
+    if ($item.PSObject.Properties.Match("to").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$item.to)) {
+        $keys.Add(([string]$item.to).Trim().ToLowerInvariant()) | Out-Null
+    }
+    if ($item.PSObject.Properties.Match("display_vendor").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$item.display_vendor)) {
+        $keys.Add(("{0}|{1}" -f [string]$item.display_vendor, [string]$item.from).Trim().ToLowerInvariant()) | Out-Null
+    }
+
+    return @($keys | Select-Object -Unique)
+}
+
+function Resolve-SkillSelectionFromTokens($items, [string[]]$selectionTokens, [string]$invalidMsg) {
+    $items = @($items)
+    $selectionTokens = @($selectionTokens | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    if ($selectionTokens.Count -eq 0) {
+        return [pscustomobject]@{ items = @(); canceled = $false }
+    }
+
+    $selected = @()
+    $selectedKeys = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $unmatched = New-Object System.Collections.Generic.List[string]
+    $ambiguous = New-Object System.Collections.Generic.List[string]
+
+    foreach ($token in $selectionTokens) {
+        $text = ([string]$token).Trim()
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        if ($text.ToLowerInvariant() -eq "0") {
+            return [pscustomobject]@{ items = @(); canceled = $true }
+        }
+
+        $indexSelection = Parse-IndexSelection $text $items.Count
+        if ($indexSelection.Count -gt 0 -or $text.ToLowerInvariant() -eq "all") {
+            foreach ($n in @($indexSelection)) {
+                $item = $items[$n - 1]
+                $key = "{0}|{1}" -f [string]$item.vendor, [string]$item.from
+                if ($selectedKeys.Add($key)) { $selected += $item }
+            }
+            continue
+        }
+
+        $needle = $text.ToLowerInvariant()
+        $matches = @($items | Where-Object {
+                $keys = @(Get-SkillSelectionMatchKeys $_)
+                $keys -contains $needle
+            })
+
+        if ($matches.Count -eq 0) {
+            $unmatched.Add($text) | Out-Null
+            continue
+        }
+        if ($matches.Count -gt 1) {
+            $ambiguous.Add($text) | Out-Null
+            continue
+        }
+
+        $match = $matches[0]
+        $matchKey = "{0}|{1}" -f [string]$match.vendor, [string]$match.from
+        if ($selectedKeys.Add($matchKey)) { $selected += $match }
+    }
+
+    if ($unmatched.Count -gt 0 -or $ambiguous.Count -gt 0) {
+        if (-not [string]::IsNullOrWhiteSpace($invalidMsg)) { Write-Host $invalidMsg }
+        if ($unmatched.Count -gt 0) {
+            Write-Host ("未找到技能：{0}" -f (@($unmatched) -join ", "))
+        }
+        if ($ambiguous.Count -gt 0) {
+            Write-Host ("技能选择不唯一，请使用 vendor|path 或序号：{0}" -f (@($ambiguous) -join ", "))
+        }
+        return [pscustomobject]@{ items = @(); canceled = $false }
+    }
+
+    return [pscustomobject]@{ items = @($selected); canceled = $false }
 }
 
 function Filter-Skills($items, [string]$filter) {
@@ -5220,12 +5343,36 @@ function 安装 {
     构建生效
 }
 
-function 卸载 {
+function 卸载([string[]]$tokens = @()) {
     Preflight
     $cfg = LoadCfg
     $manualItems = 收集ManualSkills $cfg
     $overrideItems = 收集OverridesSkills
-    $filter = Read-Host "可选：关键词过滤（空格=AND，或 /regex/）"
+    $tokenList = @($tokens | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    $assumeYes = $false
+    $selectionTokens = New-Object System.Collections.Generic.List[string]
+    $filter = ""
+    for ($i = 0; $i -lt $tokenList.Count; $i++) {
+        $t = [string]$tokenList[$i]
+        $lower = $t.Trim().ToLowerInvariant()
+        if ($lower -eq "--yes" -or $lower -eq "-y") {
+            $assumeYes = $true
+            continue
+        }
+        if ($lower -eq "--filter") {
+            Need ($i + 1 -lt $tokenList.Count) "--filter 缺少值"
+            $filter = [string]$tokenList[++$i]
+            continue
+        }
+        if ($lower.StartsWith("--filter=")) {
+            $filter = $t.Substring("--filter=".Length)
+            continue
+        }
+        $selectionTokens.Add($t) | Out-Null
+    }
+    if ($selectionTokens.Count -eq 0) {
+        $filter = Read-Host "可选：关键词过滤（空格=AND，或 /regex/）"
+    }
 
     # 卸载范围：已映射技能 + overrides
     $installedSet = Get-InstalledSet $cfg $manualItems $overrideItems
@@ -5245,15 +5392,21 @@ function 卸载 {
         return
     }
 
-    $selection = Select-Items $onlyInstalled `
-    { param($idx, $item)
+    $formatter = { param($idx, $item)
         $label = Get-DisplayVendor $item
         $leaf = Split-Path $item.from -Leaf
         if ($item.from -eq ".") { $leaf = $label }
         return ("{0,3}) [{1}] {2}" -f $idx, $label, $leaf)
-    } `
-        "请选择要卸载的技能（从白名单移除）" `
-        "未解析到有效序号（可能是分隔符或范围格式问题）。已取消操作。"
+    }
+    $selection = if ($selectionTokens.Count -gt 0) {
+        Resolve-SkillSelectionFromTokens $onlyInstalled @($selectionTokens) "未解析到有效技能选择。已取消操作。"
+    }
+    else {
+        Select-Items $onlyInstalled `
+            $formatter `
+            "请选择要卸载的技能（从白名单移除）" `
+            "未解析到有效序号（可能是分隔符或范围格式问题）。已取消操作。"
+    }
     if ($selection.canceled) {
         Write-Host "已取消卸载。"
         return
@@ -5266,7 +5419,7 @@ function 卸载 {
 
     # 区分处理：vendor 移除白名单；manual 删除 imports 条目（兼容清理 legacy manual 目录）；overrides 备份后删除
     $preview = Format-SkillPreview $selectedItems
-    if (-not (Confirm-WithSummary "将卸载以下技能" $preview "确认卸载所选技能？" "Y")) {
+    if (-not $assumeYes -and -not (Confirm-WithSummary "将卸载以下技能" $preview "确认卸载所选技能？" "Y")) {
         Write-Host "已取消卸载。"
         return
     }
@@ -5289,7 +5442,7 @@ function 卸载 {
                 Invoke-RemoveItem $legacyPath -Recurse
                 $deletedLegacyManualDirs++
             }
-            $cfg.mappings = $cfg.mappings | Where-Object { -not ("$($_.vendor)|$($_.from)" -eq "manual|$($item.from)") }
+            $cfg.mappings = @($cfg.mappings | Where-Object { -not ("$($_.vendor)|$($_.from)" -eq "manual|$($item.from)") })
         }
         elseif ($item.vendor -eq "overrides") {
             $bak = Backup-OverrideDir $item.from
@@ -7411,13 +7564,24 @@ function Should-IncludeCodexMcpKnownTaskkillStdoutLeak {
     return @("1", "true", "yes", "on") -contains $raw.Trim().ToLowerInvariant()
 }
 
+function Should-SkipCodexMcpKnownTaskkillStdoutLeak($server) {
+    if (-not (Test-CodexMcpKnownTaskkillStdoutLeak $server)) { return $false }
+    if (Should-IncludeCodexMcpKnownTaskkillStdoutLeak) { return $false }
+
+    # These servers are written through mcp-node-cache-wrapper.mjs below. The
+    # wrapper launches the cached package entrypoint directly, so the historical
+    # Windows npx/taskkill stdout leak no longer applies to the Codex projection.
+    if ($null -ne (Convert-CodexNpxServerToCachedNodeWrapper $server)) { return $false }
+    return $true
+}
+
 function Convert-McpServersToCodexConfigMap($servers) {
     $map = [ordered]@{}
     if ($null -eq $servers) { return [pscustomobject]$map }
 
     foreach ($s in $servers) {
         if ([string]::IsNullOrWhiteSpace([string]$s.name)) { continue }
-        if ((Test-CodexMcpKnownTaskkillStdoutLeak $s) -and -not (Should-IncludeCodexMcpKnownTaskkillStdoutLeak)) {
+        if (Should-SkipCodexMcpKnownTaskkillStdoutLeak $s) {
             continue
         }
         $entry = [ordered]@{}
@@ -15293,7 +15457,7 @@ Skills 管理器（中文菜单）
   .\skills.ps1 发现
   .\skills.ps1 安装
   .\skills.ps1 命令导入安装
-  .\skills.ps1 卸载
+  .\skills.ps1 卸载 [<skill-name>|<index>|all] [--yes] [--filter <keyword>]
   .\skills.ps1 新增技能库
   .\skills.ps1 add <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]
   .\skills.ps1 npx "skills add <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]"
@@ -15650,8 +15814,8 @@ if ($MyInvocation.InvocationName -ne '.') {
             "npx" { Add-ImportFromArgs (Get-AddTokensFromNpx (Merge-FilterAndArgs $Filter $args)) }
             "安装" { 安装 }
             "从技能库选择安装" { 安装 }
-            "卸载" { 卸载 }
-            "卸载技能" { 卸载 }
+            "卸载" { 卸载 (Merge-FilterAndArgs $Filter $args) }
+            "卸载技能" { 卸载 (Merge-FilterAndArgs $Filter $args) }
             "选择" { 选择 }
             "构建生效" { 构建生效 }
             "构建并生效" { 构建生效 }

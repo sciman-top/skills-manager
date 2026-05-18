@@ -1,0 +1,30 @@
+---
+name: custom-teacher-courseware-ppt
+description: Use when creating or revising PPT/PPTX courseware for junior middle school teaching, especially physics lessons, experiment explanations, exercise walkthroughs, lesson summaries, teacher handouts, or classroom-ready slide decks.
+---
+
+# Teacher Courseware PPT
+
+Use this skill for classroom-ready courseware, not marketing decks.
+
+## Workflow
+
+1. Identify the teaching scenario: new lesson, review lesson, experiment lesson, exercise analysis, unit summary, or open-class presentation.
+2. Produce a slide outline before generating files: title, learning goals, concept conflict, teacher demonstration, student activity, worked examples, misconceptions, summary, homework.
+3. Prefer dense but readable teacher utility over decorative pages. Use large diagrams, clear labels, and one main teaching action per slide.
+4. For junior physics, include the physical situation, idealized model, variable relationship, unit discipline, and common misconception.
+5. When creating PPTX, use the built-in Presentations plugin or `python-pptx`/`pptx` skills first; use web slides only when animation or interactive simulation is central.
+
+## Slide Patterns
+
+- Concept intro: everyday phenomenon -> question -> simplified model -> key term.
+- Experiment: apparatus -> procedure -> observation table -> conclusion -> error discussion.
+- Exercise walkthrough: knowns/unknowns -> diagram -> formula choice -> substitution -> unit check -> answer meaning.
+- Misconception repair: wrong intuition -> counterexample -> corrected rule -> quick check.
+- Review page: concept map + 3 representative questions.
+
+## Verification
+
+- Check that every page can be taught verbally in 1-3 minutes.
+- Verify formulas, units, and diagrams against the target textbook/standard.
+- Render or preview the deck before completion; ensure Chinese text does not overflow.

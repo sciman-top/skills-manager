@@ -99,6 +99,7 @@ English aliases：
 
 ```powershell
 .\skills.ps1 add <repo> --skill <name>
+.\skills.ps1 卸载 <skill-name-or-index> --yes
 .\skills.ps1 锁定
 .\skills.ps1 构建生效 -Locked
 .\skills.ps1 更新 -Plan
@@ -117,6 +118,7 @@ English aliases：
 
 - 未指定 `--skill` 时，`add` 只新增技能库，不会安装整库技能。
 - 指定 `--skill` 时，默认按 `manual` 导入到 `imports`；可用 `--mode vendor` 改为 vendor 管理。
+- `卸载` 不带参数时进入交互选择；传技能名、序号或 `all` 时可配合 `--yes` 非交互执行。
 - `更新` 会访问上游仓库；只想重新输出本地配置时用 `构建生效`。
 
 ## 同步模式

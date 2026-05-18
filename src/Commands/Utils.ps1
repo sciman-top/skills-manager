@@ -369,7 +369,7 @@ Skills 管理器（中文菜单）
   .\skills.ps1 发现
   .\skills.ps1 安装
   .\skills.ps1 命令导入安装
-  .\skills.ps1 卸载
+  .\skills.ps1 卸载 [<skill-name>|<index>|all] [--yes] [--filter <keyword>]
   .\skills.ps1 新增技能库
   .\skills.ps1 add <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]
   .\skills.ps1 npx "skills add <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]"

@@ -1123,11 +1123,11 @@ function 清理无效映射([string[]]$tokens = @()) {
 
     $dropIndexes = New-Object System.Collections.Generic.HashSet[int]
     foreach ($item in $invalid) { $dropIndexes.Add([int]$item.index) | Out-Null }
-    $nextMappings = New-Object System.Collections.Generic.List[object]
+    $nextMappings = @()
     $all = @($cfg.mappings)
     for ($i = 0; $i -lt $all.Count; $i++) {
         if ($dropIndexes.Contains($i)) { continue }
-        $nextMappings.Add($all[$i]) | Out-Null
+        $nextMappings += $all[$i]
     }
     $cfg.mappings = @($nextMappings)
     SaveCfg $cfg
@@ -1215,6 +1215,94 @@ function Select-Items($items, [scriptblock]$formatter, [string]$prompt, [string]
     $selected = @()
     foreach ($n in $idx) { $selected += $items[$n - 1] }
     return [pscustomobject]@{ items = $selected; canceled = $false }
+}
+
+function Get-SkillSelectionMatchKeys($item) {
+    $keys = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $item) { return @() }
+
+    foreach ($value in @(
+            [string]$item.from,
+            (Split-Path ([string]$item.from) -Leaf),
+            ("{0}|{1}" -f [string]$item.vendor, [string]$item.from),
+            (Make-TargetName ([string]$item.vendor) ([string]$item.from))
+        )) {
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            $keys.Add($value.Trim().ToLowerInvariant()) | Out-Null
+        }
+    }
+
+    if ($item.PSObject.Properties.Match("to").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$item.to)) {
+        $keys.Add(([string]$item.to).Trim().ToLowerInvariant()) | Out-Null
+    }
+    if ($item.PSObject.Properties.Match("display_vendor").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$item.display_vendor)) {
+        $keys.Add(("{0}|{1}" -f [string]$item.display_vendor, [string]$item.from).Trim().ToLowerInvariant()) | Out-Null
+    }
+
+    return @($keys | Select-Object -Unique)
+}
+
+function Resolve-SkillSelectionFromTokens($items, [string[]]$selectionTokens, [string]$invalidMsg) {
+    $items = @($items)
+    $selectionTokens = @($selectionTokens | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    if ($selectionTokens.Count -eq 0) {
+        return [pscustomobject]@{ items = @(); canceled = $false }
+    }
+
+    $selected = @()
+    $selectedKeys = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $unmatched = New-Object System.Collections.Generic.List[string]
+    $ambiguous = New-Object System.Collections.Generic.List[string]
+
+    foreach ($token in $selectionTokens) {
+        $text = ([string]$token).Trim()
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        if ($text.ToLowerInvariant() -eq "0") {
+            return [pscustomobject]@{ items = @(); canceled = $true }
+        }
+
+        $indexSelection = Parse-IndexSelection $text $items.Count
+        if ($indexSelection.Count -gt 0 -or $text.ToLowerInvariant() -eq "all") {
+            foreach ($n in @($indexSelection)) {
+                $item = $items[$n - 1]
+                $key = "{0}|{1}" -f [string]$item.vendor, [string]$item.from
+                if ($selectedKeys.Add($key)) { $selected += $item }
+            }
+            continue
+        }
+
+        $needle = $text.ToLowerInvariant()
+        $matches = @($items | Where-Object {
+                $keys = @(Get-SkillSelectionMatchKeys $_)
+                $keys -contains $needle
+            })
+
+        if ($matches.Count -eq 0) {
+            $unmatched.Add($text) | Out-Null
+            continue
+        }
+        if ($matches.Count -gt 1) {
+            $ambiguous.Add($text) | Out-Null
+            continue
+        }
+
+        $match = $matches[0]
+        $matchKey = "{0}|{1}" -f [string]$match.vendor, [string]$match.from
+        if ($selectedKeys.Add($matchKey)) { $selected += $match }
+    }
+
+    if ($unmatched.Count -gt 0 -or $ambiguous.Count -gt 0) {
+        if (-not [string]::IsNullOrWhiteSpace($invalidMsg)) { Write-Host $invalidMsg }
+        if ($unmatched.Count -gt 0) {
+            Write-Host ("未找到技能：{0}" -f (@($unmatched) -join ", "))
+        }
+        if ($ambiguous.Count -gt 0) {
+            Write-Host ("技能选择不唯一，请使用 vendor|path 或序号：{0}" -f (@($ambiguous) -join ", "))
+        }
+        return [pscustomobject]@{ items = @(); canceled = $false }
+    }
+
+    return [pscustomobject]@{ items = @($selected); canceled = $false }
 }
 
 function Filter-Skills($items, [string]$filter) {
@@ -1354,12 +1442,36 @@ function 安装 {
     构建生效
 }
 
-function 卸载 {
+function 卸载([string[]]$tokens = @()) {
     Preflight
     $cfg = LoadCfg
     $manualItems = 收集ManualSkills $cfg
     $overrideItems = 收集OverridesSkills
-    $filter = Read-Host "可选：关键词过滤（空格=AND，或 /regex/）"
+    $tokenList = @($tokens | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    $assumeYes = $false
+    $selectionTokens = New-Object System.Collections.Generic.List[string]
+    $filter = ""
+    for ($i = 0; $i -lt $tokenList.Count; $i++) {
+        $t = [string]$tokenList[$i]
+        $lower = $t.Trim().ToLowerInvariant()
+        if ($lower -eq "--yes" -or $lower -eq "-y") {
+            $assumeYes = $true
+            continue
+        }
+        if ($lower -eq "--filter") {
+            Need ($i + 1 -lt $tokenList.Count) "--filter 缺少值"
+            $filter = [string]$tokenList[++$i]
+            continue
+        }
+        if ($lower.StartsWith("--filter=")) {
+            $filter = $t.Substring("--filter=".Length)
+            continue
+        }
+        $selectionTokens.Add($t) | Out-Null
+    }
+    if ($selectionTokens.Count -eq 0) {
+        $filter = Read-Host "可选：关键词过滤（空格=AND，或 /regex/）"
+    }
 
     # 卸载范围：已映射技能 + overrides
     $installedSet = Get-InstalledSet $cfg $manualItems $overrideItems
@@ -1379,15 +1491,21 @@ function 卸载 {
         return
     }
 
-    $selection = Select-Items $onlyInstalled `
-    { param($idx, $item)
+    $formatter = { param($idx, $item)
         $label = Get-DisplayVendor $item
         $leaf = Split-Path $item.from -Leaf
         if ($item.from -eq ".") { $leaf = $label }
         return ("{0,3}) [{1}] {2}" -f $idx, $label, $leaf)
-    } `
-        "请选择要卸载的技能（从白名单移除）" `
-        "未解析到有效序号（可能是分隔符或范围格式问题）。已取消操作。"
+    }
+    $selection = if ($selectionTokens.Count -gt 0) {
+        Resolve-SkillSelectionFromTokens $onlyInstalled @($selectionTokens) "未解析到有效技能选择。已取消操作。"
+    }
+    else {
+        Select-Items $onlyInstalled `
+            $formatter `
+            "请选择要卸载的技能（从白名单移除）" `
+            "未解析到有效序号（可能是分隔符或范围格式问题）。已取消操作。"
+    }
     if ($selection.canceled) {
         Write-Host "已取消卸载。"
         return
@@ -1400,7 +1518,7 @@ function 卸载 {
 
     # 区分处理：vendor 移除白名单；manual 删除 imports 条目（兼容清理 legacy manual 目录）；overrides 备份后删除
     $preview = Format-SkillPreview $selectedItems
-    if (-not (Confirm-WithSummary "将卸载以下技能" $preview "确认卸载所选技能？" "Y")) {
+    if (-not $assumeYes -and -not (Confirm-WithSummary "将卸载以下技能" $preview "确认卸载所选技能？" "Y")) {
         Write-Host "已取消卸载。"
         return
     }
@@ -1423,7 +1541,7 @@ function 卸载 {
                 Invoke-RemoveItem $legacyPath -Recurse
                 $deletedLegacyManualDirs++
             }
-            $cfg.mappings = $cfg.mappings | Where-Object { -not ("$($_.vendor)|$($_.from)" -eq "manual|$($item.from)") }
+            $cfg.mappings = @($cfg.mappings | Where-Object { -not ("$($_.vendor)|$($_.from)" -eq "manual|$($item.from)") })
         }
         elseif ($item.vendor -eq "overrides") {
             $bak = Backup-OverrideDir $item.from
