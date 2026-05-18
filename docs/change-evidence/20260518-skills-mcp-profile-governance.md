@@ -45,3 +45,26 @@ expires_at=设置对应 User/Machine scope API key 后的下一次 MCP 审查
 追加修复=新增 `Should-SkipCodexMcpKnownTaskkillStdoutLeak`：若服务器可转换为 cached Node wrapper，则默认纳入 Codex 投影；只有无法包装且未显式设置 `SKILLS_CODEX_INCLUDE_LEAKY_STDIO_MCP=1` 时才跳过。对应单测从“默认跳过”更新为“默认通过 cache wrapper 纳入”。
 追加验证=不设置 `SKILLS_CODEX_INCLUDE_LEAKY_STDIO_MCP` 重新执行 `.\skills.ps1 同步MCP; codex mcp list`，Codex 显示 context7/filesystem/playwright/postgres 4 个 stdio MCP enabled，以及 github/microsoft-learn/openaiDeveloperDocs 3 个 HTTP MCP enabled；wrapper 启动探针显示 context7/filesystem/playwright/postgres 均能启动并等待 stdio 输入；Core.Tests.ps1 161 passed；DoctorCli.Tests.ps1 6 passed；.\skills.ps1 发现 92 项均 [*]；.\skills.ps1 doctor --strict --threshold-ms 8000 通过；.\skills.ps1 构建生效 outputs=92；check-generated-sync 通过；git diff --check 仅 CRLF warning。
 当前限制=当前已修复 configured/enabled/startup-waiting 层；本 Codex 会话的可调用 MCP tool namespace 仍由会话启动时注入，已启用的新增 stdio MCP 可能需要新会话/新进程才会作为工具命名空间暴露。
+
+## 2026-05-18 post-restart MCP verification addendum
+
+追加场景=用户手动重启 Codex App 后，再次检测 skills/MCP 是否正常运行。
+追加验证=.\skills.ps1 发现：92 项技能全部为 [*]；codex mcp list：context7/filesystem/playwright/postgres 4 个 stdio MCP enabled，github/microsoft-learn/openaiDeveloperDocs 3 个 HTTP MCP enabled；.\skills.ps1 doctor --strict --threshold-ms 8000：通过，GitHub Connection=OK (tcp)，仅 update_imports/update_total 历史性能告警且不影响 strict；当前会话真实 MCP 调用成功：context7.resolve_library_id、github.get_me(login=sciman-top)、microsoft_docs_search、openaiDeveloperDocs.search_openai_docs、filesystem.list_directory、playwright.browser_tabs。
+Postgres验证=当前会话仍未暴露 mcp__postgres__ 工具命名空间；使用 NDJSON stdio MCP 探针直接启动 C:\Users\sciman\.codex\scripts\mcp-postgres-env-wrapper.mjs 并发送 initialize，返回 protocolVersion=2024-11-05、serverInfo.name=example-servers/postgres、capabilities.resources/tools；同探针验证 filesystem 返回 secure-filesystem-server initialize 响应。
+结论=skills 正常；Codex live MCP 配置/启用正常；6 个 MCP 已完成当前会话 tool-call 级验证；postgres 已完成 configured/enabled/startup/protocol-initialize 验证，但当前 Codex 会话没有注入 postgres 工具命名空间，归类为 tool namespace exposure gap，不是 skills-manager 配置或 wrapper 启动失败。
+回滚动作=无需回滚；本节仅补充验证证据。若后续必须获得 postgres tool-call 级验证，应先确认 Codex 当前版本是否暴露 postgres MCP tools/list，再用新会话复测，避免直接改 auth/provider 或重启宿主进程。
+
+## 2026-05-18 k12 postgres MCP connection addendum
+
+追加线索=D:\CODE\k12-question-graph 使用本机 PostgreSQL，凭据来自环境变量；本机 Process/User scope 均存在 POSTGRES_CONNECTION_STRING，且形态为 postgresql:// URL，PGPASSWORD 也存在但未在验证输出中打印。
+追加验证=对 POSTGRES_CONNECTION_STRING 做脱敏解析：scheme=postgresql、host=127.0.0.1、port=5432、database=k12_question_graph、user=postgres、HasPassword=True；通过 C:\Users\sciman\.codex\scripts\mcp-postgres-env-wrapper.mjs 启动 postgres MCP，MCP tools/list 返回 query 工具；随后执行只读 tools/call query：select current_database() as database, current_user as username, version() like 'PostgreSQL%' as is_postgres，返回 database=k12_question_graph、username=postgres、is_postgres=true。
+结论=该数据库连接串有助于补齐 postgres MCP 的数据库连接层验证；现在 postgres MCP 已不仅是 configured/enabled/startup/protocol-initialize 正常，还已完成 query tool 的只读实际调用验证。剩余缺口仍是当前 Codex 会话没有注入 mcp__postgres__ 工具命名空间，这与数据库密码/连接串无关。
+回滚动作=无需回滚；本节仅记录脱敏连接验证。不得把 PGPASSWORD 或完整连接串写入证据文件。
+
+## 2026-05-18 postgres namespace exposure repair addendum
+
+追加问题=fresh codex exec 在修复前仅可见 context7/filesystem/github/microsoft-learn/openaiDeveloperDocs/playwright，不可见 mcp__postgres__query；进一步探针发现 Codex 启动 MCP 子进程时可能不继承 POSTGRES_CONNECTION_STRING 与 LOCALAPPDATA，导致 postgres wrapper 依赖继承环境时无法稳定进入工具注入。
+追加修复=更新 Get-CodexMcpPostgresEnvWrapperContent：Node wrapper 先读 process.env，再在 Windows 下通过 [Environment]::GetEnvironmentVariable 从 User/Machine scope 读取 POSTGRES_CONNECTION_STRING；LOCALAPPDATA 缺失时从 wrapper 路径反推用户目录并使用 AppData\Local\npm-cache；不把明文连接串写入 Codex config.toml。新增 Core.Tests.ps1 单测覆盖 User/Machine scope fallback 与无明文 URL。
+追加验证=.\build.ps1 通过；.\skills.ps1 发现 92 项均 [*]；Core.Tests.ps1 162 passed；.\skills.ps1 doctor --strict --threshold-ms 8000 通过，仅历史性能告警；.\skills.ps1 构建生效 outputs=92；.\skills.ps1 同步MCP 写入 9 个目标并通过 codex configured 校验；clean-env wrapper smoke 在仅保留 SystemRoot/ComSpec/PATH 的环境下启动 C:\Users\sciman\.codex\scripts\mcp-postgres-env-wrapper.mjs，initialize=true 且 tools/list 返回 query；fresh codex exec 可见 mcp__postgres__ 且确认存在 mcp__postgres__query；fresh codex exec --dangerously-bypass-approvals-and-sandbox 调用 postgres/query 执行 select current_database() 返回 k12_question_graph。
+当前限制=普通 non-interactive codex exec 中 postgres/query 被 Codex 审批/安全策略取消；这属于 host-level approval/sandbox 策略，不属于 skills.json MCP 托管边界。App/交互新会话应能看到 mcp__postgres__query；自动化若必须无确认调用，需要在宿主级策略中显式处理，不建议由 skills-manager 默认放宽。
+回滚动作=git checkout -- src/Commands/Mcp.ps1 tests/Unit/Core.Tests.ps1 skills.ps1 docs/change-evidence/20260518-skills-mcp-profile-governance.md; .\skills.ps1 同步MCP 恢复旧 wrapper。

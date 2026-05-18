@@ -1331,6 +1331,19 @@ sandbox = "elevated"
             $toml | Should Not Match "command = ""pwsh"""
         }
 
+        It "Generates a postgres wrapper that can read User scope environment variables" {
+            $content = Get-CodexMcpPostgresEnvWrapperContent
+
+            $content | Should Match "resolveEnvironmentVariable"
+            $content | Should Match "GetEnvironmentVariable"
+            $content | Should Match "POSTGRES_CONNECTION_STRING"
+            $content | Should Match '"User"'
+            $content | Should Match '"Machine"'
+            $content | Should Match "inferUserHomeFromWrapperPath"
+            $content | Should Match "AppData"
+            $content | Should Not Match "postgresql://"
+        }
+
         It "Skips GitHub MCP when GitHub token is unavailable" {
             $oldToken = $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN
             $oldGithubToken = $env:GITHUB_PERSONAL_ACCESS_TOKEN

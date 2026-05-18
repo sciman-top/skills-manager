@@ -540,16 +540,56 @@ function Get-CodexMcpPostgresEnvWrapperContent {
     return @'
 #!/usr/bin/env node
 import { existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { execFileSync } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const conn = process.env.POSTGRES_CONNECTION_STRING;
+function readWindowsEnvironmentVariable(name, scope) {
+  if (process.platform !== "win32") return "";
+  try {
+    return execFileSync(
+      "powershell.exe",
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `[Environment]::GetEnvironmentVariable('${name}', '${scope}')`,
+      ],
+      { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "ignore"] },
+    ).trim();
+  } catch {
+    return "";
+  }
+}
+
+function resolveEnvironmentVariable(name) {
+  const processValue = process.env[name];
+  if (processValue && processValue.trim()) return processValue.trim();
+  for (const scope of ["User", "Machine"]) {
+    const scopedValue = readWindowsEnvironmentVariable(name, scope);
+    if (scopedValue && scopedValue.trim()) return scopedValue.trim();
+  }
+  return "";
+}
+
+const conn = resolveEnvironmentVariable("POSTGRES_CONNECTION_STRING");
 if (!conn || !conn.trim()) {
   console.error("POSTGRES_CONNECTION_STRING is required for postgres MCP.");
   process.exit(64);
 }
 
-const npmCache = process.env.npm_config_cache || join(process.env.LOCALAPPDATA || "", "npm-cache");
+function inferUserHomeFromWrapperPath() {
+  try {
+    return dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+  } catch {
+    return "";
+  }
+}
+
+const inferredUserHome = inferUserHomeFromWrapperPath();
+const localAppData = resolveEnvironmentVariable("LOCALAPPDATA") || (inferredUserHome ? join(inferredUserHome, "AppData", "Local") : "");
+const npmCache = process.env.npm_config_cache || join(localAppData || "", "npm-cache");
 const npxRoot = join(npmCache, "_npx");
 let entry = "";
 if (existsSync(npxRoot)) {
