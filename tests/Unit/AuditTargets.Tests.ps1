@@ -991,9 +991,12 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
     Context "Installed skill facts" {
         It "Extracts declared name and description from installed manual skills" {
             $oldImportDir = $script:ImportDir
+            $oldOverridesDir = $script:OverridesDir
             try {
                 $script:ImportDir = Join-Path $TestDrive "imports"
+                $script:OverridesDir = Join-Path $TestDrive "empty-overrides"
                 New-Item -ItemType Directory -Path (Join-Path $script:ImportDir "demo-skill") -Force | Out-Null
+                New-Item -ItemType Directory -Path $script:OverridesDir -Force | Out-Null
                 Set-Content -Path (Join-Path $script:ImportDir "demo-skill\SKILL.md") -Value "---`nname: demo-skill`ndescription: Demo description.`n---`nBody trigger text."
                 $cfg = [pscustomobject]@{
                     vendors = @()
@@ -1010,6 +1013,32 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             }
             finally {
                 $script:ImportDir = $oldImportDir
+                $script:OverridesDir = $oldOverridesDir
+            }
+        }
+
+        It "Includes unmapped overrides because they are built into agent output" {
+            $oldOverridesDir = $script:OverridesDir
+            try {
+                $script:OverridesDir = Join-Path $TestDrive "overrides"
+                New-Item -ItemType Directory -Path (Join-Path $script:OverridesDir "custom-windows-wpf-teacher-app") -Force | Out-Null
+                Set-Content -Path (Join-Path $script:OverridesDir "custom-windows-wpf-teacher-app\SKILL.md") -Value "---`nname: custom-windows-wpf-teacher-app`ndescription: Windows desktop UI skill.`n---`nUse when testing desktop UI."
+                $cfg = [pscustomobject]@{
+                    vendors = @()
+                    imports = @()
+                    mappings = @()
+                }
+
+                $facts = Get-InstalledSkillFacts $cfg
+
+                @($facts).Count | Should Be 1
+                $facts[0].vendor | Should Be "overrides"
+                $facts[0].from | Should Be "custom-windows-wpf-teacher-app"
+                $facts[0].declared_name | Should Be "custom-windows-wpf-teacher-app"
+                $facts[0].description | Should Be "Windows desktop UI skill."
+            }
+            finally {
+                $script:OverridesDir = $oldOverridesDir
             }
         }
     }

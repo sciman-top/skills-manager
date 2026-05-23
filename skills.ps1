@@ -11930,12 +11930,14 @@ function Resolve-InstalledSkillLocalPath($cfg, $mapping) {
 function Get-InstalledSkillFacts($cfg = $null) {
     if ($null -eq $cfg) { $cfg = LoadCfg }
     $facts = @()
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($m in @($cfg.mappings)) {
         if ($null -eq $m) { continue }
         if (-not (Should-SyncMappingToAgent $m)) { continue }
         $vendor = [string]$m.vendor
         $from = [string]$m.from
         $to = [string]$m.to
+        if (-not $seen.Add(("{0}|{1}" -f $vendor, $from))) { continue }
         $localPath = Resolve-InstalledSkillLocalPath $cfg $m
         $skillFile = Join-Path $localPath "SKILL.md"
         $meta = Get-SkillMetadataFromFile $skillFile
@@ -11968,6 +11970,29 @@ function Get-InstalledSkillFacts($cfg = $null) {
             repo = $repo
             ref = $ref
             skill_path = $skillPath
+            declared_name = $meta.declared_name
+            description = $meta.description
+            trigger_summary = $meta.trigger_summary
+            local_path = $localPath
+        })
+    }
+    foreach ($override in @(收集OverridesSkills)) {
+        if ($null -eq $override) { continue }
+        $from = [string]$override.from
+        if ([string]::IsNullOrWhiteSpace($from)) { continue }
+        if (-not $seen.Add(("overrides|{0}" -f $from))) { continue }
+        $localPath = [string]$override.full
+        $skillFile = Join-Path $localPath "SKILL.md"
+        $meta = Get-SkillMetadataFromFile $skillFile
+        $facts += [pscustomobject]([ordered]@{
+            name = if ([string]::IsNullOrWhiteSpace($meta.declared_name)) { $from } else { $meta.declared_name }
+            source_kind = "overrides"
+            vendor = "overrides"
+            from = $from
+            to = $from
+            repo = ""
+            ref = ""
+            skill_path = $from
             declared_name = $meta.declared_name
             description = $meta.description
             trigger_summary = $meta.trigger_summary
