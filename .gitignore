@@ -4,6 +4,7 @@
 /reports/*.log
 /reports/
 /docs/runtime-*.txt
+/artifacts/
 
 # backups created when linking
 **/*.bak.*

@@ -128,6 +128,34 @@ Notes:
 
 Use `link` for local iteration. Use `sync` when links are restricted.
 
+## Release and New Machine Migration
+
+Prefer a reproducible portable package instead of copying the whole workspace:
+
+```powershell
+.\scripts\release\pack-portable.ps1 -Version vX.Y.Z
+```
+
+The package includes portable source and configuration such as `skills.ps1`, `skills.cmd`, `install.ps1`, `skills.json`, `skills.lock.json`, `src/`, `scripts/`, `tests/`, `overrides/`, and essential docs. It excludes `agent/`, `vendor/`, `imports/`, `reports/`, `.codex/`, `.claude/`, `.gemini/`, `.trae/`, logs, caches, and release artifacts.
+
+After extracting on a new machine, run:
+
+```powershell
+.\install.ps1 -Mode CurrentUser
+```
+
+By default, the installer runs `build.ps1`, then uses `.\skills.ps1 更新 -Locked` when `skills.lock.json` exists, and finishes with `doctor --strict --threshold-ms 8000`. To sync MCP config, configure machine-local tokens and database connection strings first, then run:
+
+```powershell
+.\install.ps1 -Mode CurrentUser -SyncMcp
+```
+
+For green/portable validation without writing user skills directories or MCP configuration:
+
+```powershell
+.\install.ps1 -Mode PortableOnly
+```
+
 ## MCP Ownership Boundary
 
 `skills-manager` manages the MCP server inventory through `skills.json` `mcp_servers` and `.\skills.ps1 同步MCP`, then writes the resulting MCP payloads to:

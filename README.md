@@ -130,6 +130,34 @@ English aliases：
 
 本地迭代优先用 `link`。受限环境无法创建链接时用 `sync`。
 
+## 发布与新机迁移
+
+推荐发布可重建的 portable 包，而不是复制整个工作目录：
+
+```powershell
+.\scripts\release\pack-portable.ps1 -Version vX.Y.Z
+```
+
+发布包只包含通用可迁移文件，例如 `skills.ps1`、`skills.cmd`、`install.ps1`、`skills.json`、`skills.lock.json`、`src/`、`scripts/`、`tests/`、`overrides/` 和必要文档；不会包含 `agent/`、`vendor/`、`imports/`、`reports/`、`.codex/`、`.claude/`、`.gemini/`、`.trae/`、日志、缓存或发布输出。
+
+新电脑解压后可执行：
+
+```powershell
+.\install.ps1 -Mode CurrentUser
+```
+
+默认会执行 `build.ps1`，若存在 `skills.lock.json` 则按锁文件运行 `.\skills.ps1 更新 -Locked`，最后运行 `doctor --strict --threshold-ms 8000`。需要同步 MCP 时，先在新电脑配置好 token、数据库连接串等本机环境，再执行：
+
+```powershell
+.\install.ps1 -Mode CurrentUser -SyncMcp
+```
+
+只想绿色校验、不写入用户 skills 目录或 MCP 配置时：
+
+```powershell
+.\install.ps1 -Mode PortableOnly
+```
+
 ## MCP 托管边界
 
 `skills-manager` 通过 `skills.json` 的 `mcp_servers` 和 `.\skills.ps1 同步MCP` 托管 MCP 服务清单，并把结果写入：
