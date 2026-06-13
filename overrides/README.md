@@ -1,15 +1,30 @@
 # overrides/
 
-Local override layer for skills. Put custom skills and local patches here instead of editing upstream caches.
+`overrides/` is the local customization layer for `skills-manager`. Use it for changes that should survive upstream updates without patching `vendor/` caches or generated `agent/` output directly.
 
-Naming convention:
+## What Belongs Here
+
+- fully custom skills
+- local patch variants of upstream skills
+- intentional same-name replacements of generated output
+- repo-local prompt overrides such as `audit-outer-ai-prompt.md`
+
+## Naming Convention
 
 - `custom-*`: fully custom skills
-- `patch-*`: patched variants based on upstream skills
-- `<skill-name>`: direct same-name override (replaces the built output with the same name)
+- `patch-*`: locally patched variants of upstream skills
+- `<skill-name>`: direct same-name replacement when override semantics must replace the generated output
 
-Notes:
+Prefer `custom-*` and `patch-*` for readability. Use same-name replacement only when you intentionally want the override to win over the generated artifact with the same target name.
 
-- Prefer `custom-*` / `patch-*` for readability and maintenance.
-- Use same-name override only when replacement semantics are required.
-- Keep source imports in `vendors/` or `imports/`; treat `overrides/` as the local customization layer.
+## Reserved / Common Override Points
+
+- `audit-outer-ai-prompt.md`
+  Overrides the default outer-AI audit prompt source used to generate runtime `reports/skill-audit/<run-id>/outer-ai-prompt.md`.
+
+## What Does Not Belong Here
+
+- edits to `vendor/` caches
+- manual fixes to generated `agent/` output
+- runtime audit artifacts under `reports/skill-audit/<run-id>/`
+- host-local CLI state such as `.codex/`, `.claude/`, `.gemini/`, `.trae/`

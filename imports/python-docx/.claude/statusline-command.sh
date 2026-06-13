@@ -5,6 +5,13 @@ set -euo pipefail
 
 input=$(cat)
 
+# Optional segment mode (#2893): emit only a sub-part of the statusline so a
+# wrapper can compose this with another statusline (e.g. the vendored GSD one,
+# which has no quota/reset display). Recognized:
+#   --usage-tail  -> AI-usage segment (C:|O:|G: with weekly-reset) + cost + ctx
+# Any other/empty value renders the full statusline unchanged.
+SEGMENT="${1:-}"
+
 # Extract fields (jq with null-safe defaults)
 model=$(echo "$input" | jq -r '.model.display_name // "Claude"')
 cwd=$(echo "$input" | jq -r '.workspace.current_dir // ""')
@@ -18,72 +25,241 @@ ws_root=$(cd "$cwd" 2>/dev/null && git rev-parse --show-superproject-working-tre
 # Git branch
 branch=$(cd "$ws_root" 2>/dev/null && git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "?")
 
-# Work queue counts (fast find, no recursion)
-wq="$ws_root/.claude/work-queue"
-if [[ -d "$wq/pending" ]]; then
-    p=$(find "$wq/pending" -maxdepth 1 -name "WRK-*.md" 2>/dev/null | wc -l | tr -d ' ')
-    w=$(find "$wq/working" -maxdepth 1 -name "WRK-*.md" 2>/dev/null | wc -l | tr -d ' ')
-    b=$(find "$wq/blocked" -maxdepth 1 -name "WRK-*.md" 2>/dev/null | wc -l | tr -d ' ')
-else
-    p=0; w=0; b=0
+# Git state markers — surface unpushed/uncommitted risk at a glance.
+# GIT_OPTIONAL_LOCKS=0 avoids the index-lock contention the ecosystem hits
+# in long sessions; -uno skips the untracked-file scan to keep this cheap on
+# the ~33K-file workspace-hub checkout.
+git_marker=""
+if [[ "$SEGMENT" != "--usage-tail" && "$branch" != "?" ]]; then
+    if [[ -n "$(GIT_OPTIONAL_LOCKS=0 git -C "$ws_root" status --porcelain -uno 2>/dev/null | head -1)" ]]; then
+        git_marker="\033[1;31m*\033[0m"   # bold red: dirty (tracked changes/staged)
+    fi
+    # ahead/behind vs upstream (rev-list is cheap — no working-tree scan)
+    # `|| true` guards: under set -euo pipefail a failing substitution
+    # (no upstream here; no digits in branch below) silently kills the
+    # script -> blank statusline (same class as review-gate SIGPIPE fix).
+    lr=$(GIT_OPTIONAL_LOCKS=0 git -C "$ws_root" rev-list --count --left-right '@{u}...HEAD' 2>/dev/null) || true
+    if [[ -n "$lr" ]]; then
+        behind=${lr%%[[:space:]]*}; ahead=${lr##*[[:space:]]}
+        (( ahead  > 0 )) && git_marker="${git_marker}\033[32m↑${ahead}\033[0m"   # green: unpushed
+        (( behind > 0 )) && git_marker="${git_marker}\033[31m↓${behind}\033[0m"  # red: behind remote
+    fi
 fi
 
-# Active WRK item (from per-machine state file)
-active_wrk=""
-active_wrk_file="$ws_root/.claude/state/active-wrk"
-if [[ -f "$active_wrk_file" ]]; then
-    active_id=$(head -1 "$active_wrk_file" | tr -d '[:space:]')
-    [[ -n "$active_id" ]] && active_wrk=" >${active_id}"
-fi
+# Issue badge — "GitHub issues only" ecosystem: derive the active issue from
+# the branch name (e.g. fix/2795-... -> #2795) instead of local WRK counters.
+issue_seg=""
+issue_num=$(echo "$branch" | grep -oE '[0-9]{3,5}' | head -1) || true
+[[ -n "$issue_num" ]] && issue_seg="\033[36m#${issue_num}\033[0m"
 
 # AI usage remaining percentages
 # C: uses Claude.ai 7-day subscription quota (from statusline JSON) as primary,
 # falls back to agent-quota file. O: and G: from agent-quota files.
-quota_primary="$ws_root/config/ai-tools/agent-quota-latest.json"
-quota_cache="${HOME}/.cache/agent-quota.json"
+# Env overrides keep the script testable with fixture quota files (#2992);
+# they fall back to the real locations in normal use.
+quota_primary="${STATUSLINE_QUOTA_PRIMARY:-$ws_root/config/ai-tools/agent-quota-latest.json}"
+quota_cache="${STATUSLINE_QUOTA_CACHE:-${HOME}/.cache/agent-quota.json}"
 
+# Parse an ISO-8601 timestamp to epoch seconds; emits nothing on failure.
+iso_epoch() {
+    python3 - "$1" 2>/dev/null <<'PY'
+import datetime
+import sys
+
+raw = sys.argv[1].strip()
+if raw.endswith("Z"):
+    raw = raw[:-1] + "+00:00"
+try:
+    dt = datetime.datetime.fromisoformat(raw)
+except ValueError:
+    if len(raw) > 5 and raw[-5] in "+-" and raw[-3] != ":":
+        raw = f"{raw[:-2]}:{raw[-2:]}"
+        dt = datetime.datetime.fromisoformat(raw)
+    else:
+        raise
+if dt.tzinfo is None:
+    dt = dt.replace(tzinfo=datetime.timezone.utc)
+print(int(dt.timestamp()))
+PY
+}
+
+# Quota-file freshness (#3034): the repo-tracked primary can be a days-old
+# git-propagated snapshot of another machine's refresh (observed 2026-06-10:
+# primary said codex 79% remaining while live was 29%). Each file's embedded
+# `timestamp` (written by query-quota.sh) is age-gated; values sourced from a
+# stale or undatable file render a `?` marker so the number is never silently
+# trusted. Threshold env is bounds-validated to (0, 168] hours so a local
+# override cannot silently disable the warning; anything else falls back to 6.
+quota_max_age_h=$(awk -v t="${STATUSLINE_QUOTA_MAX_AGE_HOURS:-6}" \
+    'BEGIN { if (t+0 != t || t+0 <= 0 || t+0 > 168) t = 6; printf "%s", t }')
+
+quota_file_state() {   # <file> -> fresh | stale | missing
+    local file="$1" ts epoch
+    [[ -f "$file" ]] || { echo missing; return; }
+    ts=$(jq -r '.timestamp // empty' "$file" 2>/dev/null)
+    [[ -n "$ts" ]] || { echo stale; return; }       # undatable = stale
+    epoch=$(iso_epoch "$ts") || epoch=""
+    [[ -n "$epoch" ]] || { echo stale; return; }
+    awk -v e="$epoch" -v n="$(date +%s)" -v m="$quota_max_age_h" \
+        'BEGIN { print ((n - e) / 3600 <= m) ? "fresh" : "stale" }'
+}
+
+primary_state=$(quota_file_state "$quota_primary")
+cache_state=$(quota_file_state "$quota_cache")
+
+# Emit "<pct> <fresh|stale>" (or "- none" when unknown) for a provider,
+# choosing the freshest file that has a value: fresh primary > fresh cache >
+# stale primary > stale cache. Preserves the historical field-per-file
+# convention (primary: week_pct, cache: pct_remaining).
 extract_pct() {
-    local provider="$1" val
+    local provider="$1" p_val="" c_val="" v
     if [[ -f "$quota_primary" ]]; then
-        val=$(jq -r --arg p "$provider" \
+        v=$(jq -r --arg p "$provider" \
             '.agents[] | select(.provider == $p) | .week_pct // empty' \
             "$quota_primary" 2>/dev/null)
-        if [[ -n "$val" && "$val" != "null" ]]; then
-            awk -v w="$val" 'BEGIN { printf "%d", 100 - w }'
+        [[ -n "$v" && "$v" != "null" ]] && \
+            p_val=$(awk -v w="$v" 'BEGIN { printf "%d", 100 - w }')
+    fi
+    if [[ -f "$quota_cache" ]]; then
+        v=$(jq -r --arg p "$provider" \
+            '.agents[] | select(.provider == $p) | .pct_remaining // empty' \
+            "$quota_cache" 2>/dev/null)
+        [[ -n "$v" && "$v" != "null" ]] && c_val="$v"
+    fi
+    if [[ -n "$p_val" && "$primary_state" == fresh ]]; then echo "$p_val fresh"
+    elif [[ -n "$c_val" && "$cache_state" == fresh ]]; then echo "$c_val fresh"
+    elif [[ -n "$p_val" ]]; then echo "$p_val stale"
+    elif [[ -n "$c_val" ]]; then echo "$c_val stale"
+    else echo "- none"
+    fi
+}
+
+# Convert an ISO-8601 timestamp into days-from-now, 1 decimal, floored at 0.
+# Emits nothing on a parse failure so a malformed timestamp can't blank the
+# whole statusline under `set -euo pipefail`.
+days_until_iso() {
+    local resets_at="$1" reset_epoch
+    reset_epoch=$(iso_epoch "$resets_at") || reset_epoch=""
+    [[ -n "$reset_epoch" ]] || return 0
+    awk -v r="$reset_epoch" -v n="$(date +%s)" \
+        'BEGIN { d=(r-n)/86400; if (d<0) d=0; printf "%.1f", d }'
+}
+
+# Days until a provider's weekly quota resets, to 1 decimal (e.g. "2.5") so
+# work can be planned around the refill (#2992). Prefers the absolute
+# `resets_at` timestamp — `hours_to_reset` is pre-rounded to whole hours and so
+# loses the decimal — and falls back to `hours_to_reset` only when no timestamp
+# is present. Emits nothing when neither field is available, so a provider with
+# `source: unavailable` (Claude today) never shows a fabricated countdown.
+# date-parse misses and empty substitutions are swallowed so a bad field can't
+# blank the whole statusline under `set -euo pipefail`.
+reset_days() {
+    local provider="$1" file resets_at="" hours="" source="" file_state=""
+    # Freshest file first (#3034) — same selection principle as extract_pct,
+    # so a fresh HOME cache supplies the countdown instead of a stale primary.
+    local -a file_order=("$quota_primary" "$quota_cache")
+    [[ "$primary_state" != fresh && "$cache_state" == fresh ]] && \
+        file_order=("$quota_cache" "$quota_primary")
+    for file in "${file_order[@]}"; do
+        [[ -f "$file" ]] || continue
+        source=$(jq -r --arg p "$provider" \
+            '.agents[] | select(.provider == $p) | .source // empty' "$file" 2>/dev/null)
+        resets_at=$(jq -r --arg p "$provider" \
+            '.agents[] | select(.provider == $p) | .resets_at // empty' "$file" 2>/dev/null)
+        hours=$(jq -r --arg p "$provider" \
+            '.agents[] | select(.provider == $p) | .hours_to_reset // empty' "$file" 2>/dev/null)
+        if [[ -n "$source" || -n "$resets_at" || ( -n "$hours" && "$hours" != "null" ) ]]; then
+            [[ "$file" == "$quota_primary" ]] && file_state="$primary_state" \
+                                              || file_state="$cache_state"
+            break
+        fi
+    done
+    case "$source" in
+        unavailable|estimated) return ;;
+    esac
+    if [[ -n "$resets_at" ]]; then
+        local days
+        days=$(days_until_iso "$resets_at") || days=""
+        if [[ -n "$days" ]]; then
+            printf '%s %s' "$days" "$file_state"
             return
         fi
     fi
-    if [[ -f "$quota_cache" ]]; then
-        jq -r --arg p "$provider" \
-            '.agents[] | select(.provider == $p) | .pct_remaining // empty' \
-            "$quota_cache" 2>/dev/null
+    if [[ -n "$hours" && "$hours" != "null" ]]; then
+        printf '%s %s' \
+            "$(awk -v h="$hours" 'BEGIN { printf "%.1f", h/24 }')" "$file_state"
     fi
+}
+
+# Render a "LABEL:NN%" segment colored by remaining headroom so a throttle is
+# glance-able for delegation: red <20%, yellow <40%, green otherwise, dim when
+# the figure is unknown. Emits literal \033 escapes for the final printf %b.
+color_pct() {
+    local label="$1" rem="$2" suffix="${3:-}"
+    if [[ -z "$rem" || "$rem" == "-" ]]; then
+        echo "\033[2m${label}:-%${suffix}\033[0m"   # dim: unknown/unavailable
+        return
+    fi
+    local color='\033[32m'                            # green: ample headroom
+    (( rem < 40 )) && color='\033[33m'                # yellow: getting tight
+    (( rem < 20 )) && color='\033[31m'                # red: near throttle
+    echo "${color}${label}:${rem}%${suffix}\033[0m"
 }
 
 # Claude: prefer 7-day subscription remaining from API (most accurate)
 week_used=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty')
+week_resets_at=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // empty')
+c_suffix=""
+c_mark=""
 if [[ -n "$week_used" ]]; then
-    c_display=$(awk -v u="$week_used" 'BEGIN { printf "%d", 100 - u }')"%"
+    c_rem=$(awk -v u="$week_used" 'BEGIN { printf "%d", 100 - u }')
 else
-    # Fallback to agent-quota file
-    c_pct=$(extract_pct "claude")
-    c_display="${c_pct:--}%"
+    # Fallback to agent-quota file (stale file -> ? marker on the percentage)
+    read -r c_rem c_state <<< "$(extract_pct "claude")"
+    [[ "$c_state" == stale ]] && c_mark="?"
     # Sonnet sub-bucket: show tighter limit with (S) indicator
-    if [[ -f "$quota_primary" ]]; then
+    if [[ -f "$quota_primary" && -n "$c_rem" && "$c_rem" != "-" ]]; then
         s_val=$(jq -r '.agents[] | select(.provider == "claude") | .sonnet_pct // empty' \
             "$quota_primary" 2>/dev/null)
-        if [[ -n "$s_val" && "$s_val" != "null" && -n "$c_pct" ]]; then
+        if [[ -n "$s_val" && "$s_val" != "null" ]]; then
             s_remaining=$(awk -v s="$s_val" 'BEGIN { printf "%d", 100 - s }')
-            if (( s_remaining < c_pct )); then
-                c_display="${s_remaining}%(S)"
+            if (( s_remaining < c_rem )); then
+                c_rem="$s_remaining"; c_suffix="(S)"
             fi
         fi
     fi
 fi
 
-o_pct=$(extract_pct "codex")
-g_pct=$(extract_pct "gemini")
-ai_usage="C:${c_display}|O:${o_pct:--}%|G:${g_pct:--}%"
+read -r o_pct o_state <<< "$(extract_pct "codex")"
+read -r g_pct g_state <<< "$(extract_pct "gemini")"
+o_mark=""; [[ "$o_state" == stale ]] && o_mark="?"
+g_mark=""; [[ "$g_state" == stale ]] && g_mark="?"
+
+# Append a "·N.Nd" weekly-reset countdown (days, 1 decimal) to the weekly-quota
+# providers so delegation can see how long until headroom refills (#2992).
+# Claude prefers the session JSON's rate_limits.seven_day.resets_at — the same
+# live source already trusted for the percentage — since the quota file's
+# claude entry is source:unavailable. Gemini is a daily limit, no reset suffix.
+# Both fields must come from the same session snapshot: a resets_at without a
+# used_percentage would pair a countdown with an unknown (or file-sourced) %.
+c_days=""
+c_days_mark=""
+[[ -n "$week_used" && -n "$week_resets_at" ]] && c_days=$(days_until_iso "$week_resets_at")
+if [[ -z "$c_days" ]]; then
+    # File-sourced countdown: marked independently of the (possibly live)
+    # percentage so a live percent never lends false freshness to stale
+    # reset telemetry (#3034).
+    read -r c_days c_days_state <<< "$(reset_days claude)"
+    [[ "${c_days_state:-}" == stale && -n "$c_days" ]] && c_days_mark="?"
+fi
+read -r o_days o_days_state <<< "$(reset_days codex)"
+o_days_mark=""; [[ "${o_days_state:-}" == stale && -n "${o_days:-}" ]] && o_days_mark="?"
+[[ -n "$c_days" ]] && c_suffix="${c_suffix}·${c_days}d${c_days_mark}"
+c_suffix="${c_mark}${c_suffix}"
+o_suffix="$o_mark"
+[[ -n "${o_days:-}" ]] && o_suffix="${o_mark}·${o_days}d${o_days_mark}"
+
+ai_usage="$(color_pct C "$c_rem" "$c_suffix")|$(color_pct O "$o_pct" "$o_suffix")|$(color_pct G "$g_pct" "$g_mark")"
 
 # Repo module name (basename of workspace root)
 repo_name=$(basename "$ws_root")
@@ -105,6 +281,15 @@ else
     ctx="\033[32m${ctx_int}%\033[0m"
 fi
 
+# Segment mode (#2893): emit just the usage tail (quota/reset + cost + context)
+# and stop. Composed by .claude/statusline-combined.sh onto the GSD statusline,
+# which otherwise shows no AI-usage or weekly-reset info. Emitted after the
+# fields exist but before the host/branch/path assembly the wrapper omits.
+if [[ "$SEGMENT" == "--usage-tail" ]]; then
+    printf "%b %b ctx:%b" "$ai_usage" "$cost_fmt" "$ctx"
+    exit 0
+fi
+
 # Hostname prefix for multi-machine clarity
 hostname_s=$(hostname -s 2>/dev/null || cat /etc/hostname 2>/dev/null | tr -d '[:space:]' || echo "?")
 
@@ -113,9 +298,9 @@ parts=()
 parts+=("\033[1;33m[${hostname_s}]\033[0m")
 parts+=("\033[1;35m${model}\033[0m")
 parts+=("\033[1;37m${repo_name}\033[0m")
-parts+=("\033[33m${branch}\033[0m")
-parts+=("\033[36mWRK:${p}p/${w}w/${b}b${active_wrk}\033[0m")
-parts+=("\033[35m${ai_usage}\033[0m")
+parts+=("\033[33m${branch}\033[0m${git_marker}")
+[[ -n "$issue_seg" ]] && parts+=("${issue_seg}")
+parts+=("${ai_usage}")
 parts+=("${cost_fmt}")
 parts+=("ctx:${ctx}")
 

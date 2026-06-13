@@ -47,6 +47,7 @@ lib/
 !scripts/coordination/routing/lib/
 !scripts/setup/lib/
 !scripts/review/lib/
+!scripts/ai/assessment/lib/
 !scripts/cron/lib/
 !scripts/improve/lib/
 !scripts/readiness/lib/
@@ -155,6 +156,7 @@ data/document-index/*.jsonl.backup-*
 !.claude/knowledge/
 # Status line - portable across machines
 !.claude/statusline-command.sh
+!.claude/statusline-combined.sh
 # Repo-level memory - shared institutional knowledge
 !.claude/memory/
 # Work queue - tracked for cross-machine/user portability
@@ -176,7 +178,7 @@ data/document-index/*.jsonl.backup-*
 !.claude/state/candidates/
 !.claude/state/corrections/
 !.claude/state/patterns/
-!.claude/state/harness-readiness-licensed-win-1.yaml
+!.claude/state/harness-readiness-ace-win-1.yaml
 !.claude/state/equality-*.yaml
 !.claude/state/reflect-history/
 !.claude/state/trends/
@@ -298,6 +300,10 @@ memory/
 !.claude/memory/
 !scripts/memory/
 !tests/memory/
+# Skill trees swallowed by bare-dir ignores above (digitalmodel/ L14, memory/ here);
+# negate after both rules so .claude/skills/{digitalmodel,memory}/ skills are tracked (#2925).
+!.claude/skills/digitalmodel/
+!.claude/skills/memory/
 *.memory.json
 *.session.json
 ai-memory/
@@ -542,3 +548,6 @@ wikis/**/raw/papers/*.pdf
 # Moved 2026-05-07 from /mnt/local-analysis/{llm-wiki,kaggle-rogii-2026}
 /llm-wiki/
 /kaggle-rogii-2026/
+
+# Local uv/virtualenv (machine-specific, do not track)
+.venv/

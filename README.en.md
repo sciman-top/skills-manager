@@ -2,81 +2,69 @@
 
 [中文](README.md) | English
 
-`skills-manager` is a Windows-first PowerShell tool for assembling AI agent skills from multiple sources into one controlled local workspace.
+`skills-manager` is a Windows-first PowerShell manager for collecting AI agent skills from multiple sources into one controlled workspace, generating stable output, and syncing it to local CLI targets such as Claude, Codex, Gemini, and Trae.
 
-Use it when you:
+Use it when you need to:
 
-- run multiple agents such as Claude, Codex, Gemini, or Trae
-- import skills from several repositories
-- want local patches in `overrides/` instead of editing upstream caches
-- want one generated output in `agent/`, then sync it to each CLI target
+- keep several agent skill directories in sync without manual copying
+- mix full-vendor repos, targeted imports, and local overrides in one flow
+- separate editable input layers from generated output layers
+- manage MCP inventory, target-repo audit bundles, portable packaging, and new-machine install from one entry point
 
-## Core Model
+## Current State and Boundaries
 
-- `skills.ps1`: single command entry point
-- `skills.json`: single configuration source
-- `agent/`: generated output and sync source
-- `vendors`: full upstream repositories
-- `imports`: targeted skill or subpath imports
-- `overrides`: local patches and custom skills
+- Single command entry point: `skills.ps1`
+- Single configuration source of truth: `skills.json`
+- Source modules live in `src/`; run `./build.ps1` to regenerate root `skills.ps1`
+- Default skills sync targets: `~/.claude/skills`, `~/.codex/skills`, `~/.gemini/skills`, `~/.gemini/antigravity/skills/`, `~/.trae/skills/`
+- MCP ownership source of truth: `skills.json` `mcp_servers`; rendered by `.\skills.ps1 同步MCP`
+- Non-MCP host settings are out of scope for this repo, such as Codex `windows.sandbox`, approval/model/context, and Claude/Gemini auth/provider/model/context/sandbox
+
+## Paths and Edit Policy
+
+| Path / key | Role | Edit policy |
+| --- | --- | --- |
+| `skills.json` | Single configuration source for `vendors / mappings / imports / targets / sync_mode / mcp_servers` | Edit directly |
+| `src/` | Source modules | Change here, then run `./build.ps1` |
+| `skills.ps1` | Generated entry script | Do not edit directly; regenerate from `build.ps1` |
+| `vendor/` | Upstream full-repo cache | Do not patch by hand; rebuild through `更新` or lock replay |
+| `imports/` | Materialized targeted imports | Treat as an input layer, not a generated patch sink |
+| `overrides/` | Local custom and patch layer | Put custom skills, local patches, and same-name replacements here |
+| `agent/` | Generated output and sync source | Do not edit directly; rebuild through `构建生效` |
+| `reports/skill-audit/<run-id>/ai-brief.md` | Audit runtime summary | Runtime artifact; do not hand-edit |
+| `reports/skill-audit/<run-id>/outer-ai-prompt.md` | Outer-AI execution prompt | Runtime artifact; change the default in `src/Commands/AuditTargets.ps1` or `overrides/audit-outer-ai-prompt.md` |
 
 ## Quick Start
 
-Chinese commands:
+For first-time use, start from the interactive menu:
 
 ```powershell
 .\skills.ps1
+```
+
+Minimal happy path:
+
+```powershell
 .\skills.ps1 发现
-.\skills.ps1 doctor --strict
+.\skills.ps1 安装
 .\skills.ps1 构建生效
+.\skills.ps1 doctor --strict --threshold-ms 8000
 ```
 
-English aliases:
-
-```powershell
-.\skills.ps1
-.\skills.ps1 doctor --strict
-```
-
-`发现` and `构建生效` currently have no English aliases (N/A).
-
-For first-time setup, start from the interactive menu:
-
-```powershell
-.\skills.ps1
-```
-
-The interactive menu uses direct frequent actions plus domain submenus. The top level prioritizes:
+The top-level menu is currently organized around high-frequency direct actions plus domain submenus:
 
 - Browse Skills
 - Pick Install
 - Paste Command Import
 - Remove Skills
-- Rebuild and Sync (CLI command remains `构建生效`)
-- Update Upstream (CLI command remains `更新`)
+- Rebuild and Sync
+- Update Upstream
 - Target Repo Audit
 - MCP Services
 - Skill Library Admin
 - More
 
-The `Target Repo Audit` submenu follows the workflow:
-
-1. View/edit requirements
-2. View target repositories
-3. Generate an audit bundle
-4. Preflight recommendations
-5. Apply recommendations, starting with dry-run
-6. View latest status
-
-Recommended flow:
-
-1. Add a skill repository, or import one skill with an `add` / `npx` command.
-2. Run `发现` to list available skills.
-3. Install the skills you need into `mappings`.
-4. Run `构建生效` to generate `agent/` and sync targets.
-5. Run `doctor --strict` to validate configuration and sync state.
-
-## One-Click Workflows (Recommended)
+## One-Click Workflows
 
 ```powershell
 .\skills.ps1 一键 --list
@@ -86,134 +74,82 @@ Recommended flow:
 .\skills.ps1 workflow all --no-prompt
 ```
 
-Workflow profiles:
+Built-in profiles:
 
-- `新手`: `浏览技能 -> 选择安装 -> 重建并同步 -> doctor --strict`
-- `维护`: `更新上游 -> 重建并同步 -> 同步 MCP -> doctor --strict`
-- `审查`: `查看需求 -> 目标仓列表 -> 生成审查包 -> 查看最近状态`
-- `all`: `更新上游 -> 浏览技能 -> 重建并同步 -> 同步 MCP -> doctor --strict`
+- `新手` / `quickstart` / `start` / `onboarding`
+  Browse Skills -> Pick Install -> Rebuild and Sync -> `doctor --strict --threshold-ms 8000`
+- `维护` / `maintenance` / `maintain`
+  Update Upstream -> Rebuild and Sync -> Sync MCP -> `doctor --strict --threshold-ms 8000`
+- `审查` / `audit`
+  View requirements -> Target repo list -> Generate audit bundle -> View latest status
+- `全流程` / `all` / `full`
+  Update Upstream -> Browse Skills -> Rebuild and Sync -> Sync MCP -> `doctor --strict --threshold-ms 8000`
+
+If no profile is given together with `--no-prompt`, the script defaults to `all`.
 
 ## Common Commands
 
-Chinese commands:
+### Discover, import, install, uninstall
 
 ```powershell
-.\skills.ps1 add <repo> --skill <name>
-.\skills.ps1 锁定
-.\skills.ps1 构建生效 -Locked
-.\skills.ps1 更新 -Plan
-.\skills.ps1 更新 -Upgrade
+.\skills.ps1 发现
+.\skills.ps1 安装
+.\skills.ps1 命令导入安装
+.\skills.ps1 add <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]
+.\skills.ps1 npx "skills add <repo> --skill <name>"
+.\skills.ps1 卸载 [<skill-name>|<index>|all] [--yes] [--filter <keyword>]
+.\skills.ps1 清理无效映射 [--yes] [--no-build]
 ```
-
-English aliases:
-
-```powershell
-.\skills.ps1 add <repo> --skill <name>
-```
-
-`锁定`, `构建生效`, and `更新` currently have no English aliases (N/A).
 
 Notes:
 
-- Without `--skill`, `add` only registers a vendor. It does not install every skill in that repository.
-- With `--skill`, imports default to `manual` mode under `imports`; use `--mode vendor` for vendor-managed installs.
-- `更新` fetches upstream repositories. Use `构建生效` when you only need to rebuild local configuration.
+- Without `--skill`, `add` only registers a skill library. It does not install every skill in that repository.
+- With `--skill`, imports default to `manual` mode under `imports/`; pass `--mode vendor` for vendor-managed installs.
+- `命令导入安装` accepts multiple pasted `add` / `npx skills add` / `npx add-skill` commands; line continuations ending in `\` are merged automatically.
+- `卸载` enters interactive selection when no argument is given; use a skill name, index, or `all` together with `--yes` for non-interactive runs.
+- English alias for `清理无效映射` is `prune-invalid-mappings`.
 
-## Sync Modes
-
-`skills.json` selects sync behavior through `sync_mode`:
-
-- `link`: recommended on Windows; uses junctions to point target directories at `agent/`
-- `sync`: mirrors `agent/` with `robocopy /MIR`
-
-Use `link` for local iteration. Use `sync` when links are restricted.
-
-## Release and New Machine Migration
-
-Prefer a reproducible portable package instead of copying the whole workspace:
+### Build, update, lock, maintenance
 
 ```powershell
-.\scripts\release\pack-portable.ps1 -Version vX.Y.Z
+.\skills.ps1 构建生效
+.\skills.ps1 更新 -Plan
+.\skills.ps1 更新 -Upgrade
+.\skills.ps1 锁定
+.\skills.ps1 新增技能库
+.\skills.ps1 删除技能库
+.\skills.ps1 自动更新设置
+.\skills.ps1 解除关联
+.\skills.ps1 清理备份
+.\skills.ps1 doctor [--json] [--fix] [--dry-run-fix] [--strict] [--strict-perf] [--threshold-ms <ms>]
 ```
 
-The package includes portable source and configuration such as `skills.ps1`, `skills.cmd`, `install.ps1`, `skills.json`, `skills.lock.json`, `src/`, `scripts/`, `tests/`, `overrides/`, and essential docs. It excludes `agent/`, `vendor/`, `imports/`, `reports/`, `.codex/`, `.claude/`, `.gemini/`, `.trae/`, logs, caches, and release artifacts.
+Notes:
 
-After extracting on a new machine, run:
+- Use `构建生效` when you only want to re-render current configuration into `agent/` and the target directories.
+- Use `更新` when you need fresh upstream content. `-Plan` previews only; `-Upgrade` refreshes `skills.lock.json` after update.
+- `锁定` creates or refreshes `skills.lock.json` for `更新 -Locked` and portable install replay.
+- `doctor --strict` exits non-zero on failure and is suitable for script gates.
+
+### MCP management
 
 ```powershell
-.\install.ps1 -Mode CurrentUser
+.\skills.ps1 安装MCP context7 -- npx -y @upstash/context7-mcp
+.\skills.ps1 安装MCP filesystem --cmd npx --arg -y --arg @modelcontextprotocol/server-filesystem --arg D:\CODE\skills-manager
+.\skills.ps1 安装MCP github --transport http --url https://api.githubcopilot.com/mcp/ --bearer-token-env-var GITHUB_PERSONAL_ACCESS_TOKEN
+.\skills.ps1 卸载MCP context7
+.\skills.ps1 同步MCP
 ```
 
-By default, the installer runs `build.ps1`, then uses `.\skills.ps1 更新 -Locked` when `skills.lock.json` exists, and finishes with `doctor --strict --threshold-ms 8000`. To sync MCP config, configure machine-local tokens and database connection strings first, then run:
+Notes:
 
-```powershell
-.\install.ps1 -Mode CurrentUser -SyncMcp
-```
+- `安装MCP` and `卸载MCP` update `skills.json` and then automatically run one `同步MCP`.
+- `同步MCP` renders MCP payloads into target-root `.mcp.json`, Gemini/Trae config, and Codex `[mcp_servers.*]` config blocks.
+- `postgres` MCP preflight requires `POSTGRES_CONNECTION_STRING` in `postgresql://...` form; Npgsql/ADO key-value strings are normalized and written back to User scope automatically.
+- `github` MCP prefers `gh auth token` and writes the result into User-scope `CODEX_GITHUB_PERSONAL_ACCESS_TOKEN`; Codex config stores only `bearer_token_env_var`, never a literal token.
+- The local weekly task `skills-manager-weekly-update-friday-2000` runs `更新 -> 同步MCP`, so durable MCP environment fixes must live in the source chain, not only in live `~/.codex/config.toml`.
 
-For green/portable validation without writing user skills directories or MCP configuration:
-
-```powershell
-.\install.ps1 -Mode PortableOnly
-```
-
-## MCP Ownership Boundary
-
-`skills-manager` manages the MCP server inventory through `skills.json` `mcp_servers` and `.\skills.ps1 同步MCP`, then writes the resulting MCP payloads to:
-
-- root-level `.mcp.json` files for each target
-- the MCP sections inside `~/.gemini/settings.json` and `~/.gemini/antigravity/settings.json`
-- `~/.trae/mcp.json` and project-level `.trae/mcp.json`
-- the `[mcp_servers.*]` sections inside `~/.codex/config.toml`
-
-The following are outside the MCP ownership boundary of `skills-manager`; change them in each host's own source of truth instead of expecting `skills.json` to manage them:
-
-- Codex: `windows.sandbox`, approval policy, model/reasoning/context, and other non-MCP fields
-- Claude / Gemini: auth, provider, model, context, sandbox, and other host-level non-MCP permission settings
-
-Before writing MCP config, `同步MCP` validates the MCP startup environment:
-
-- `postgres` MCP: expects a `postgresql://...` URL; when an Npgsql/ADO key-value connection string is detected, it is converted and written back to User-scope `POSTGRES_CONNECTION_STRING`.
-- `github` MCP: uses `gh auth token` to populate User-scope `CODEX_GITHUB_PERSONAL_ACCESS_TOKEN` when possible. Codex config writes only `bearer_token_env_var`, not a literal token.
-- The local weekly task `skills-manager-weekly-update-friday-2000` runs `scripts/weekly-auto-update.ps1` as `更新 -> 同步MCP`; durable MCP env fixes therefore belong in the `同步MCP` source chain, not only in live `~/.codex/config.toml`.
-
-## overrides Naming
-
-Use clear prefixes under `overrides/`:
-
-- `custom-*`: fully custom skills
-- `patch-*`: locally patched variants of upstream skills
-- `<skill-name>`: intentional same-name replacement of generated output
-
-Prefer `custom-*` and `patch-*`. Use same-name overrides only when replacement is intentional.
-
-## Target Repository Skill Audit
-
-Outer AI agents can ask the script to generate a target repository audit bundle, perform their own research using official docs, community best practices, `skills.sh`, GitHub Trending, or `find-skills`, and then hand recommendations back as JSON.
-
-After each `scan`, prefer handing the run-local `outer-ai-prompt.md` to the outer AI instead of only handing over `ai-brief.md`. That runtime prompt already defines the expected execution order:
-
-- read `ai-brief.md`
-- fill `recommendations.json` using the `recommendations.template.json` schema
-- run a self-check first: schema, placeholders, dual reasons, and real sources must all pass
-- run `apply-flow` after that (dry-run -> confirmation token -> apply)
-- present add/remove recommendation lists with the original dry-run indexes
-- or run `apply --apply --yes` directly when explicit execution is intended
-
-Formal audits must always use both context layers:
-
-- global user profile: long-lived work types, preferences, constraints, and common tasks
-- target repository: current project stack, rule files, build facts, and test facts
-
-Do not start a formal audit without a user profile. Once the audit workflow starts, the outer AI may research online within that workflow, but research does not imply automatic install or automatic removal.
-
-After `profile-set` saves the raw long-form input, the script automatically enters the structured-profile import flow:
-
-- press Enter: use the default path `reports\skill-audit\user-profile.structured.json`
-- provide a custom value: use your custom path and filename
-- if the target file does not exist: the script creates a structured-profile draft file for AI or manual completion
-- enter `0`: skip structured import for now
-
-Chinese commands:
+### Target repository audit
 
 ```powershell
 .\skills.ps1 审查目标 初始化
@@ -221,69 +157,107 @@ Chinese commands:
 .\skills.ps1 审查目标 需求查看
 .\skills.ps1 审查目标 需求结构化 --profile reports\profile.json
 .\skills.ps1 审查目标 添加 my-repo ..\my-repo
+.\skills.ps1 审查目标 修改 my-repo ..\my-repo
+.\skills.ps1 审查目标 删除 my-repo
+.\skills.ps1 审查目标 列表
+.\skills.ps1 审查目标 目标列表
 .\skills.ps1 审查目标 扫描 --target my-repo
-.\skills.ps1 审查目标 状态
+.\skills.ps1 审查目标 发现新技能 --query "repo governance and agent workflows"
+.\skills.ps1 审查目标 预检 --run-id <run-id>
 .\skills.ps1 审查目标 应用确认 --recommendations reports\skill-audit\<run-id>\recommendations.json
 .\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json
-.\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json --dry-run-ack "我知道未落盘"
-.\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes
 .\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes --add-indexes "1,3" --remove-indexes "2" --mcp-add-indexes "1" --mcp-remove-indexes "2"
+.\skills.ps1 审查目标 状态
 ```
 
-`应用` defaults to dry-run. Only `--apply --yes` executes the specific installs and removals you selected, then runs build/apply and doctor.
-`应用确认` is the single-entry two-stage flow: it runs dry-run first, then requires confirmation token `APPLY <run-id>` before any persisted changes.
-In dry-run mode, the script prints a red non-persisted warning and requires explicit ack token `我知道未落盘` (for non-interactive runs, pass `--dry-run-ack`).
-`状态` reads the latest `apply-report.json` and shows `mode / success / persisted / changed_counts`.
+Key rules:
 
-Before applying, the script prints four independent recommendation lists:
+- `发现新技能` is a profile-only mode: it generates the same audit bundle shape, but not `repo-scan.json`.
+- Formal audits must use both context layers: global user profile plus target-repo facts.
+- `应用` defaults to dry-run; only `--apply --yes` persists changes.
+- `应用确认` is the single-entry two-stage flow: dry-run first, then confirmation token `APPLY <run-id>`.
+- Dry-run requires explicit ack `我知道未落盘`; for non-interactive runs, pass `--dry-run-ack "我知道未落盘"`.
+- `应用` and `应用确认` validate whether sibling `installed-skills.json` is stale against live state; use `--allow-stale-snapshot` plus `--stale-ack "<token>"` only when you intentionally accept that risk.
+- `--out` blocks reuse of a non-empty existing directory unless you explicitly pass `--force`.
 
-- add recommendations: each item has an index, skill name, user-profile reason, and target-repo reason
-- removal recommendations: each item has an index, skill name, installed locator, user-profile reason, and target-repo reason
-- MCP add recommendations: each item has an index, MCP name, user-profile reason, and target-repo reason
-- MCP removal recommendations: each item has an index, MCP name, user-profile reason, and target-repo reason
+If the outer AI can execute in the workspace, hand it the run-local `outer-ai-prompt.md` first instead of only `ai-brief.md`.
 
-You can choose skill/MCP indexes interactively, or pass them non-interactively through `--add-indexes`, `--remove-indexes`, `--mcp-add-indexes`, and `--mcp-remove-indexes`. All four lists are independently numbered, and selections in one list never remap indexes in another list.
+## English Aliases
 
-If the outer AI has workspace execution capability, the most direct handoff is to ask it to execute the run-local `outer-ai-prompt.md`, with the expectation that it self-checks `recommendations.json` before dry-run.
+English aliases currently focus on scriptable surfaces:
 
-Equivalent English aliases:
+| Chinese entry | English alias |
+| --- | --- |
+| `帮助` | `help`, `--help`, `-h` |
+| `doctor` | `doctor` |
+| `审查目标` | `audit-targets` |
+| `一键` | `workflow` |
+| `安装MCP` | `mcp-install` |
+| `卸载MCP` | `mcp-uninstall` |
+| `同步MCP` | `mcp-sync` |
+| `清理无效映射` | `prune-invalid-mappings` |
+| `add` | `add` |
+| `npx` | `npx` |
+
+These high-frequency Chinese commands still have no English aliases: `发现`, `安装`, `构建生效`, `更新`, `锁定`, `新增技能库`, `删除技能库`, `自动更新设置`, `解除关联`, `清理备份`.
+
+## Sync Modes
+
+`skills.json` controls skills directory sync through `sync_mode`:
+
+- `link`: Windows default; creates junctions to `agent/`
+- `sync`: mirrors `agent/` with `robocopy /MIR`
+
+Prefer `link` for local iteration. Switch to `sync` only when links are restricted. If MCP targets must diverge from skills targets, add `mcp_targets` in `skills.json`.
+
+## Release and New-Machine Migration
+
+Prefer a reproducible portable package instead of copying the entire workspace:
 
 ```powershell
-.\skills.ps1 audit-targets init
-.\skills.ps1 audit-targets profile-set
-.\skills.ps1 audit-targets profile-show
-.\skills.ps1 audit-targets profile-structure --profile reports\profile.json
-.\skills.ps1 audit-targets add my-repo ..\my-repo
-.\skills.ps1 audit-targets scan --target my-repo
-.\skills.ps1 audit-targets discover-skills --query "repo governance and agent workflows"
-.\skills.ps1 audit-targets status
-.\skills.ps1 audit-targets apply-flow --recommendations reports\skill-audit\<run-id>\recommendations.json
-.\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json
-.\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json --dry-run-ack "我知道未落盘"
-.\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes
-.\skills.ps1 audit-targets apply --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes --add-indexes "1,3" --remove-indexes "2" --mcp-add-indexes "1" --mcp-remove-indexes "2"
+.\scripts\release\pack-portable.ps1 -Version vX.Y.Z
 ```
 
-## Repository Layout
+Common extra switches:
 
-```text
-repo/
-  skills.ps1        # main entry point, generated from src/
-  skills.json       # single configuration source
-  build.ps1         # rebuilds skills.ps1 from src/
-  src/              # source modules
-  tests/            # unit and end-to-end verification
-  overrides/        # local override layer
-  imports/          # targeted imported sources
-  vendor/           # upstream cache, generated locally
-  agent/            # generated output, generated locally
+```powershell
+.\scripts\release\pack-portable.ps1 -Version vX.Y.Z -AllowDirtyWorktree
+.\scripts\release\pack-portable.ps1 -Version vX.Y.Z -SkipVerification
 ```
+
+The portable package includes reproducible source and config such as `skills.ps1`, `skills.cmd`, `install.ps1`, `skills.json`, `skills.lock.json`, `src/`, `scripts/`, `tests/`, `overrides/`, and governance docs. It excludes `agent/`, `vendor/`, `imports/`, `reports/`, `.codex/`, `.claude/`, `.gemini/`, `.trae/`, logs, caches, release output, and audit runtime evidence.
+
+After extraction on a new machine:
+
+```powershell
+.\install.ps1 -Mode CurrentUser
+```
+
+Default behavior:
+
+1. Run `build.ps1`
+2. If `skills.lock.json` exists and `-SkipRebuildLocked` was not passed, run `.\skills.ps1 更新 -Locked`
+3. Otherwise run `.\skills.ps1 构建生效`
+4. If `-SyncMcp` is passed, run `.\skills.ps1 同步MCP`
+5. Finish with `.\skills.ps1 doctor --strict --threshold-ms 8000`
+
+Common modes:
+
+```powershell
+.\install.ps1 -Mode CurrentUser -SyncMcp
+.\install.ps1 -Mode PortableOnly
+.\install.ps1 -Mode CurrentUser -DoctorThresholdMs 12000
+```
+
+Notes:
+
+- `PortableOnly` does only `build + doctor`, does not write user skills directories, and ignores `-SyncMcp`.
+- `-SkipEnvironmentCheck` is for controlled fixtures; do not use it as the normal install path.
+- Before syncing MCP on a new machine, prepare machine-local tokens, database connection strings, and other host prerequisites.
 
 ## Local Gates
 
-Run these in order before submitting changes:
-
-Chinese commands:
+Project-level hard gate order:
 
 ```powershell
 ./build.ps1
@@ -292,49 +266,50 @@ Chinese commands:
 ./skills.ps1 构建生效
 ```
 
-English aliases:
-
-```powershell
-./build.ps1
-./skills.ps1 doctor --strict --threshold-ms 8000
-```
-
-`发现` and `构建生效` currently have no English aliases (N/A).
-
-Quality gate scripts (local/CI parity):
+The repo also provides local/CI parity quality gate scripts:
 
 ```powershell
 ./scripts/quality/run-local-quality-gates.ps1 -Profile quick
 ./scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree
 ```
 
+Meaning:
+
+- `quick`: `build -> repo-hygiene -> generated-sync -> dependency-baseline -> doctor-json-contract`
+- `full`: `quick + tests`
+
 ## MCP and Gate Environment Variables
 
-- `POSTGRES_CONNECTION_STRING`: connection string for postgres MCP; `postgresql://...` is preferred, and key-value strings are normalized before `同步MCP`.
-- `CODEX_GITHUB_PERSONAL_ACCESS_TOKEN`: User/Process-scope token variable used by Codex GitHub MCP; generated config references the variable name only.
-- `SKILLS_MCP_VERIFY_GEMINI_CLI=1|true|yes|on`: enable real Gemini CLI verification (disabled by default; default path uses config-state verification).
-- `SKILLS_MCP_VERIFY_LIST_TIMEOUT_SECONDS`: global timeout in seconds for `mcp list` verification.
-- `SKILLS_MCP_VERIFY_LIST_TIMEOUT_SECONDS_<CLI>`: per-CLI timeout override (for example `_CLAUDE`, `_CODEX`, `_GEMINI`).
-- `SKILLS_MCP_NATIVE_TIMEOUT_SECONDS`: timeout in seconds for native `claude mcp add/remove`.
-- `SKILLS_MCP_VERIFY_ATTEMPTS` and `SKILLS_MCP_VERIFY_INTERVAL_SECONDS`: retry count and retry interval (seconds) for cross-CLI MCP verification.
-- `SKILLS_SYNC_MCP_THRESHOLD_MS`: `sync_mcp` performance threshold in `check-doctor-json.ps1` (milliseconds, CI recommendation: `12000`).
+- `POSTGRES_CONNECTION_STRING`: postgres MCP connection string; `postgresql://...` is preferred
+- `CODEX_GITHUB_PERSONAL_ACCESS_TOKEN`: User/Process-scope token variable for Codex GitHub MCP
+- `SKILLS_MCP_VERIFY_GEMINI_CLI=1|true|yes|on`: enable real Gemini CLI verification (disabled by default)
+- `SKILLS_MCP_VERIFY_LIST_TIMEOUT_SECONDS`: global timeout in seconds for `mcp list` verification
+- `SKILLS_MCP_VERIFY_LIST_TIMEOUT_SECONDS_<CLI>`: per-CLI timeout override (for example `_CLAUDE`, `_CODEX`, `_GEMINI`)
+- `SKILLS_MCP_NATIVE_TIMEOUT_SECONDS`: timeout in seconds for native `claude mcp add/remove`
+- `SKILLS_MCP_VERIFY_ATTEMPTS` and `SKILLS_MCP_VERIFY_INTERVAL_SECONDS`: retry count and retry interval for cross-CLI MCP verification
+- `SKILLS_SYNC_MCP_THRESHOLD_MS`: `sync_mcp` performance threshold in `check-doctor-json.ps1`
 
 ## Repository Hygiene
 
-Do not commit local-only agent state, logs, caches, or temporary artifacts, including:
+Do not commit local agent state, logs, caches, or temporary artifacts, including:
 
-- `.claude/`, `.codex/`, `.gemini/`, `.trae/`
-- local rule files such as `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`
-- logs, backups, and temporary files
-- `_probe_*`, `_debug_*`, and `_tree_*` import snapshots
+- `.claude/`, `.codex/`, `.gemini/`, `.trae/`, `.txn/`
+- `agent/`, `artifacts/`, `reports/*.log`
+- `imports/_debug_*`, `imports/_probe_*`, `imports/_tree_*`, `imports/*.zip`
+- audit runtime evidence such as `docs/change-evidence/*-audit-runtime-*.md`
+- backups and temporary files such as `build.log*`, `acl-backup-git-*.txt`, `.tmp_*`
 
-Those files may exist locally, but they are outside the repository contract.
+Boundary note:
+
+- Root `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` are tracked project rule documents. They are not disposable local junk.
+- Do not commit host-local rule copies, temporary rule snapshots inside imported sources, or downstream tool-generated host-local config.
 
 ## Related Docs
 
 - [Contributing](CONTRIBUTING.md)
 - [Security Policy](SECURITY.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
+- [overrides README](overrides/README.md)
 
 ## License
 
