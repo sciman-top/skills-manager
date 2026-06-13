@@ -482,6 +482,26 @@
       "to": "md2wechat-lite",
       "vendor": "manual",
       "from": "md2wechat-lite"
+    },
+    {
+      "vendor": "manual",
+      "from": "design-taste-frontend",
+      "to": "design-taste-frontend"
+    },
+    {
+      "vendor": "marketingskills",
+      "from": "skills\\social",
+      "to": "marketingskills-skills-social"
+    },
+    {
+      "vendor": "manual",
+      "from": "slidev",
+      "to": "slidev"
+    },
+    {
+      "vendor": "manual",
+      "from": "windows-desktop-e2e",
+      "to": "windows-desktop-e2e"
     }
   ],
   "imports": [
@@ -711,7 +731,7 @@
     },
     {
       "repo": "https://github.com/coreyhaines31/marketingskills.git",
-      "skill": "skills\\copywriting",
+      "skill": "skills\\social",
       "sparse": false,
       "mode": "vendor",
       "ref": "main",
@@ -828,6 +848,30 @@
       "repo": "https://github.com/geekjourneyx/md2wechat-lite.git",
       "sparse": false,
       "skill": "skills\\md2wechat-lite"
+    },
+    {
+      "name": "design-taste-frontend",
+      "ref": "main",
+      "sparse": false,
+      "skill": "skills\\taste-skill",
+      "mode": "manual",
+      "repo": "https://github.com/Leonxlnx/taste-skill.git"
+    },
+    {
+      "name": "slidev",
+      "ref": "main",
+      "sparse": false,
+      "skill": "skills\\slidev",
+      "mode": "manual",
+      "repo": "https://github.com/slidevjs/slidev.git"
+    },
+    {
+      "name": "windows-desktop-e2e",
+      "ref": "main",
+      "sparse": true,
+      "skill": "skills\\windows-desktop-e2e",
+      "mode": "manual",
+      "repo": "https://github.com/affaan-m/everything-claude-code.git"
     }
   ],
   "targets": [
