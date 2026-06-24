@@ -633,6 +633,32 @@ function Remove-GitLockFile([string]$lockPath) {
     Invoke-RemoveItemWithRetry $lockPath -MaxAttempts 6 -DelayMs 200 | Out-Null
     return (-not (Test-Path -LiteralPath $lockPath -PathType Leaf))
 }
+function Resolve-GitAdminDir([string]$repoPath) {
+    if ([string]::IsNullOrWhiteSpace($repoPath)) { return $null }
+    $gitEntry = Join-Path $repoPath ".git"
+    if (Test-Path -LiteralPath $gitEntry -PathType Container) { return $gitEntry }
+    if (-not (Test-Path -LiteralPath $gitEntry -PathType Leaf)) { return $null }
+
+    $raw = Get-ContentUtf8 $gitEntry
+    if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+    $firstLine = (($raw -split "\r?\n" | Select-Object -First 1) -as [string])
+    if ([string]::IsNullOrWhiteSpace($firstLine)) { return $null }
+    $match = [regex]::Match($firstLine, '^\s*gitdir:\s*(.+?)\s*$')
+    if (-not $match.Success) { return $null }
+
+    $gitDirPath = $match.Groups[1].Value.Trim().Trim('"')
+    if ([string]::IsNullOrWhiteSpace($gitDirPath)) { return $null }
+    try {
+        if ([System.IO.Path]::IsPathRooted($gitDirPath)) {
+            return [System.IO.Path]::GetFullPath($gitDirPath)
+        }
+        $gitBase = Split-Path -Parent $gitEntry
+        return [System.IO.Path]::GetFullPath((Join-Path $gitBase $gitDirPath))
+    }
+    catch {
+        return $null
+    }
+}
 function Repair-StaleGitLockFromOutput($outputLines) {
     $lockPath = $null
     foreach ($line in @($outputLines)) {
@@ -650,7 +676,9 @@ function Repair-StaleGitLockFromOutput($outputLines) {
 }
 function Repair-StaleGitLockInRepo([string]$repoPath) {
     if ([string]::IsNullOrWhiteSpace($repoPath)) { return $false }
-    $lockPath = Join-Path $repoPath ".git\index.lock"
+    $gitAdminDir = Resolve-GitAdminDir $repoPath
+    if ([string]::IsNullOrWhiteSpace($gitAdminDir)) { return $false }
+    $lockPath = Join-Path $gitAdminDir "index.lock"
     if (-not (Test-Path -LiteralPath $lockPath -PathType Leaf)) { return $false }
     Log ("检测到仓库残留 Git 锁文件，已自动移除：{0}" -f $lockPath) "WARN"
     if (Remove-GitLockFile $lockPath) { return $true }

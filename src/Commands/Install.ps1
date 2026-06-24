@@ -2192,7 +2192,16 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
                     continue
                 }
 
-                Need ([bool]$resolved.source_valid) ([string]$resolved.reason)
+                if (-not [bool]$resolved.source_valid) {
+                    $invalidMappings.Add([pscustomobject]@{
+                            vendor = [string]$resolved.vendor
+                            from = [string]$resolved.from
+                            to = [string]$resolved.to
+                            src = ""
+                            reason = [string]$resolved.reason
+                        }) | Out-Null
+                    continue
+                }
                 if (-not (Test-ResolvedAgentMappingSkillDir $resolved $resolveContext)) {
                     $invalidReason = Get-ResolvedAgentMappingInvalidReason $resolved
                     Write-Host ("⚠️ 跳过无效技能（{0}）：{1}" -f $invalidReason, [string]$resolved.src_full) -ForegroundColor Yellow

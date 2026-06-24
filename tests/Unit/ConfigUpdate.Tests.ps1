@@ -1,6 +1,64 @@
 . $PSScriptRoot\..\..\skills.ps1
 
 Describe "Config And Update Enhancements" {
+    Context "UTF-8 config reads" {
+        It "Loads skills.json through Get-ContentUtf8 instead of legacy Get-Content -Raw" {
+            $oldCfgPath = $script:CfgPath
+            try {
+                $script:CfgPath = Join-Path $TestDrive "skills.json"
+                Set-ContentUtf8 $script:CfgPath @'
+{
+  "vendors": [{"name":"demo","repo":"https://example.com/demo.git"}],
+  "targets": [{"path":"~/.codex/skills"}],
+  "mappings": [],
+  "imports": [],
+  "mcp_servers": [],
+  "mcp_targets": [],
+  "sync_mode": "link",
+  "update_force": true,
+  "note": "中文配置"
+}
+'@
+                Mock Get-Content { throw "legacy raw read should not be used for skills.json" }
+
+                $cfg = LoadCfg
+
+                [string]$cfg.note | Should Be "中文配置"
+                [string]$cfg.vendors[0].name | Should Be "demo"
+            }
+            finally {
+                $script:CfgPath = $oldCfgPath
+            }
+        }
+
+        It "Loads lock files through Get-ContentUtf8 instead of legacy Get-Content -Raw" {
+            $oldRoot = $script:Root
+            try {
+                $script:Root = Join-Path $TestDrive "lock-root"
+                New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+                $lockPath = Join-Path $script:Root "skills.lock.json"
+                Set-ContentUtf8 $lockPath @'
+{
+  "version": 1,
+  "vendors": [],
+  "imports": [],
+  "note": "中文锁文件"
+}
+'@
+
+                Mock Get-Content { throw "legacy raw read should not be used for lock files" }
+
+                $lock = Load-LockData
+
+                [string]$lock.note | Should Be "中文锁文件"
+                [int]$lock.version | Should Be 1
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
+        }
+    }
+
     Context "Config Diff Summary" {
         It "Builds count diff lines for key arrays" {
             $oldRaw = @'

@@ -4,9 +4,46 @@ function Parse-KeyValueToken([string]$token, [string]$flagName) {
     Need ($pair.Count -eq 2) ("{0} 参数格式必须是 KEY=VALUE：{1}" -f $flagName, $token)
     $key = $pair[0].Trim()
     Need (-not [string]::IsNullOrWhiteSpace($key)) ("{0} 参数的 KEY 不能为空：{1}" -f $flagName, $token)
+    Need ($key -notmatch '[\r\n]') ("{0} 参数的 KEY 不能包含换行：{1}" -f $flagName, $token)
+    Need ($pair[1] -notmatch '[\r\n]') ("{0} 参数的 VALUE 不能包含换行：{1}" -f $flagName, $token)
     return [pscustomobject]@{
         key = $key
         value = $pair[1]
+    }
+}
+
+function Test-ValidEnvVarName([string]$name) {
+    if ([string]::IsNullOrWhiteSpace($name)) { return $false }
+    return ($name.Trim() -match '^[A-Za-z_][A-Za-z0-9_]*$')
+}
+
+function Assert-McpRemoteUrl([string]$url, [string]$name, [string]$transport) {
+    Need (-not [string]::IsNullOrWhiteSpace($url)) ("{0} MCP 缺少 url：{1}" -f $transport, $name)
+    $parsed = $null
+    if (-not [System.Uri]::TryCreate($url, [System.UriKind]::Absolute, [ref]$parsed)) {
+        throw ("{0} MCP URL 非法（需要绝对 http/https URL）：{1}" -f $transport, $name)
+    }
+    if ($parsed.Scheme -ne [System.Uri]::UriSchemeHttp -and $parsed.Scheme -ne [System.Uri]::UriSchemeHttps) {
+        throw ("{0} MCP URL 非法（仅支持 http/https）：{1}" -f $transport, $name)
+    }
+}
+
+function Assert-McpKeyValueMapSafe($data, [string]$label) {
+    if ($null -eq $data) { return }
+    $items = @()
+    if ($data -is [hashtable] -or $data -is [System.Collections.IDictionary]) {
+        $items = @($data.GetEnumerator())
+    }
+    elseif ($data -is [pscustomobject]) {
+        $items = @($data.PSObject.Properties | ForEach-Object {
+                [pscustomobject]@{ Key = [string]$_.Name; Value = $_.Value }
+            })
+    }
+    foreach ($item in $items) {
+        $key = [string]$item.Key
+        $value = if ($null -eq $item.Value) { "" } else { [string]$item.Value }
+        Need ($key -notmatch '[\r\n]') ("{0} key 不能包含换行：{1}" -f $label, $key)
+        Need ($value -notmatch '[\r\n]') ("{0} value 不能包含换行：{1}" -f $label, $key)
     }
 }
 
@@ -213,9 +250,11 @@ function Parse-McpInstallArgs([string[]]$tokens) {
         }
     }
     else {
-        Need (-not [string]::IsNullOrWhiteSpace($result.url)) "sse/http MCP 需要 --url"
+        Assert-McpRemoteUrl ([string]$result.url) ([string]$result.name) ([string]$result.transport)
+        Assert-McpKeyValueMapSafe $result.headers "--header"
         if (-not [string]::IsNullOrWhiteSpace([string]$result.bearer_token_env_var)) {
             $result.bearer_token_env_var = [string]$result.bearer_token_env_var.Trim()
+            Need (Test-ValidEnvVarName $result.bearer_token_env_var) ("bearer token 环境变量名非法：{0}" -f $result.bearer_token_env_var)
         }
     }
 
@@ -287,14 +326,18 @@ function Convert-McpServersToConfigMap($servers) {
         $transport = if ([string]::IsNullOrWhiteSpace([string]$s.transport)) { "stdio" } else { [string]$s.transport }
         $entry.transport = $transport
         if ($transport -eq "stdio") {
+            Assert-McpKeyValueMapSafe $s.env "env"
             if (-not [string]::IsNullOrWhiteSpace([string]$s.command)) { $entry.command = [string]$s.command }
             if ($s.PSObject.Properties.Match("args").Count -gt 0 -and $s.args -ne $null) { $entry.args = @($s.args) }
             if ($s.PSObject.Properties.Match("env").Count -gt 0 -and $s.env -ne $null) { $entry.env = $s.env }
         }
         else {
+            Assert-McpRemoteUrl ([string]$s.url) ([string]$s.name) $transport
+            Assert-McpKeyValueMapSafe $s.headers "header"
             if ($s.PSObject.Properties.Match("url").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$s.url)) { $entry.url = [string]$s.url }
             if ($s.PSObject.Properties.Match("headers").Count -gt 0 -and $s.headers -ne $null) { $entry.headers = $s.headers }
             if ($s.PSObject.Properties.Match("bearer_token_env_var").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$s.bearer_token_env_var)) {
+                Need (Test-ValidEnvVarName ([string]$s.bearer_token_env_var)) ("bearer token 环境变量名非法：{0}" -f [string]$s.bearer_token_env_var)
                 $entry.bearer_token_env_var = [string]$s.bearer_token_env_var
             }
         }
@@ -1170,7 +1213,7 @@ function Get-McpExpectedServersByCli($roots) {
         if ($leaf -eq ".claude") {
             $mcpPath = Join-Path $root ".mcp.json"
             if (Test-Path $mcpPath) {
-                $names = Get-McpServerNamesFromJsonText (Get-Content -Raw -Path $mcpPath)
+                $names = Get-McpServerNamesFromJsonText (Get-ContentUtf8 $mcpPath)
                 if ($names.Count -gt 0) { $expected.claude += $names }
             }
             continue
@@ -1178,7 +1221,7 @@ function Get-McpExpectedServersByCli($roots) {
         if ($leaf -eq ".gemini") {
             $settingsPath = Join-Path $root "settings.json"
             if (Test-Path $settingsPath) {
-                $names = Get-McpServerNamesFromJsonText (Get-Content -Raw -Path $settingsPath)
+                $names = Get-McpServerNamesFromJsonText (Get-ContentUtf8 $settingsPath)
                 if ($names.Count -gt 0) { $expected.gemini += $names }
             }
             continue
@@ -1186,7 +1229,7 @@ function Get-McpExpectedServersByCli($roots) {
         if ($leaf -eq ".codex") {
             $cfgPath = Join-Path $root "config.toml"
             if (Test-Path $cfgPath) {
-                $names = Get-CodexMcpServerNamesFromTomlText (Get-Content -Raw -Path $cfgPath)
+                $names = Get-CodexMcpServerNamesFromTomlText (Get-ContentUtf8 $cfgPath)
                 if ($names.Count -gt 0) { $expected.codex += $names }
             }
             continue

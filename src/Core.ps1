@@ -302,7 +302,7 @@ function Resolve-RelativeSkillPlaceholderTarget([string]$skillFile, [string]$roo
     if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { return $null }
     if (-not (Test-Path -LiteralPath $rootPath)) { return $null }
 
-    $raw = Get-Content -LiteralPath $skillFile -Raw -ErrorAction SilentlyContinue
+    $raw = Get-ContentUtf8 $skillFile
     if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
 
     $lines = @($raw -split "\r?\n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })

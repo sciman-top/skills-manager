@@ -109,6 +109,29 @@ description: Create a phased plan — especially before executing with do.
             $mirrored | Should Be $realSkill
         }
 
+        It "Reads placeholder SKILL files through Get-ContentUtf8 instead of legacy Get-Content -Raw" {
+            $root = Join-Path $TestDrive "placeholder-utf8"
+            $targetSkillDir = Join-Path $root "plugin\skills\plan"
+            $placeholderPath = Join-Path $root "openclaw\skills\plan\SKILL.md"
+            New-Item -ItemType Directory -Path $targetSkillDir -Force | Out-Null
+            New-Item -ItemType Directory -Path (Split-Path $placeholderPath -Parent) -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $targetSkillDir "SKILL.md") @"
+---
+name: plan
+description: 中文占位目标
+---
+"@
+            Set-ContentUtf8 $placeholderPath "../../../plugin/skills/plan/SKILL.md"
+
+            Mock Get-Content { throw "legacy raw read should not be used for placeholder skill files" } -ParameterFilter {
+                (($LiteralPath -eq $placeholderPath) -or ($Path -eq $placeholderPath))
+            }
+
+            $resolved = Resolve-RelativeSkillPlaceholderTarget $placeholderPath $root
+
+            $resolved | Should Be (Join-Path $targetSkillDir "SKILL.md")
+        }
+
         It "Resolves cached relative-path SKILL placeholders even when mirror is skipped" {
             $src = Join-Path $TestDrive "src-cache"
             $dst = Join-Path $TestDrive "dst-cache"
@@ -140,7 +163,7 @@ description: Execute a phased implementation plan using subagents.
 
             $stats.skipped | Should Be 1
             $stats.mirrored | Should Be 0
-            (Get-Content -Raw (Join-Path $dst "openclaw\skills\do\SKILL.md")) | Should Match "^---"
+            (Get-ContentUtf8 (Join-Path $dst "openclaw\skills\do\SKILL.md")) | Should Match "^---"
         }
 
         It "Skips fingerprint calculation when destination is rebuilt from scratch" {
@@ -452,6 +475,56 @@ description: Execute a phased implementation plan using subagents.
             @(Get-InvalidMappings $cfg).Count | Should Be 0
             Assert-MockCalled Resolve-ManualImportSkillPath -Times 1 -Exactly -Scope It
             Assert-MockCalled Resolve-SourceBase -Times 1 -Exactly -Scope It
+        }
+
+        It "Treats missing manual imports as invalid mappings instead of build failures" {
+            $oldRoot = $script:Root
+            $oldAgent = $script:AgentDir
+            try {
+                $script:Root = Join-Path $TestDrive "repo-invalid-manual"
+                $script:AgentDir = Join-Path $script:Root "agent"
+                New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+                New-Item -ItemType Directory -Path $script:AgentDir -Force | Out-Null
+
+                $cfg = [pscustomobject]@{
+                    vendors = @()
+                    mappings = @(
+                        [pscustomobject]@{ vendor = "manual"; from = "missing-manual"; to = "missing-manual" }
+                    )
+                    imports = @()
+                }
+
+                Mock Preflight {}
+                Mock 清空Agent目录 {}
+                Mock Load-BuildCache { @{} }
+                Mock Save-BuildCache {}
+                Mock Set-AgentBuildStateCache {}
+                Mock Should-SyncMappingToAgent { $true }
+                Mock Test-SafeRelativePath { $true }
+                Mock Resolve-ManualImportSkillPath { $null }
+                Mock Test-ResolvedAgentMappingSkillDir { throw "missing manual import should not reach skill-dir validation" }
+                Mock Mirror-SkillWithCache { throw "missing manual import should not be mirrored" }
+                Mock 收集ManualSkills { @() }
+                Mock Get-OverridesDirs { @() }
+                Mock Remove-VendorRootMappingOutputsFromAgent { 0 }
+                Mock Should-SkipBuildPostScan { $true }
+                Mock Get-DuplicateMappingSourceGroups { @() }
+                Mock Write-Host {}
+                Mock Log {}
+
+                $failures = @(构建Agent $cfg -SkipPreflight)
+
+                $failures.Count | Should Be 0
+                @(Get-InvalidMappings $cfg).Count | Should Be 1
+                @(Get-InvalidMappings $cfg)[0].reason | Should Be "manual 导入不存在或无效"
+                Assert-MockCalled Resolve-ManualImportSkillPath -Times 3 -Exactly -Scope It
+                Assert-MockCalled Mirror-SkillWithCache -Times 0 -Exactly -Scope It
+                Assert-MockCalled Test-ResolvedAgentMappingSkillDir -Times 0 -Exactly -Scope It
+            }
+            finally {
+                $script:Root = $oldRoot
+                $script:AgentDir = $oldAgent
+            }
         }
     }
 

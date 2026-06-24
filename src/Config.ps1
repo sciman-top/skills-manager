@@ -127,7 +127,7 @@ function Confirm-UpdateForce($cfg, [ref]$SkipForceClean) {
 
 function LoadCfg() {
     Need (Test-Path $CfgPath) "缺少配置文件：$CfgPath"
-    $raw = Get-Content $CfgPath -Raw
+    $raw = Get-ContentUtf8 $CfgPath
     # 保守注释支持：仅移除整行 // 注释，避免误伤字符串内容。
     $clean = $raw -replace "(?m)^\s*//.*", ""
     try {
@@ -793,7 +793,7 @@ function Assert-Cfg($cfg) {
 }
 function SaveCfg($cfg) {
     if (-not $DryRun) {
-        $oldRaw = if (Test-Path -LiteralPath $CfgPath) { Get-Content -LiteralPath $CfgPath -Raw } else { "" }
+        $oldRaw = if (Test-Path -LiteralPath $CfgPath) { Get-ContentUtf8 $CfgPath } else { "" }
         Write-CfgChangeSummary $oldRaw $cfg
         $json = $cfg | ConvertTo-Json -Depth 50
         Set-ContentUtf8 $CfgPath $json
@@ -804,7 +804,7 @@ function SaveCfgSafe($cfg, [string]$rawBackup) {
     try {
         $oldRaw = $rawBackup
         if ([string]::IsNullOrWhiteSpace($oldRaw) -and (Test-Path -LiteralPath $CfgPath)) {
-            $oldRaw = Get-Content -LiteralPath $CfgPath -Raw
+            $oldRaw = Get-ContentUtf8 $CfgPath
         }
         Write-CfgChangeSummary $oldRaw $cfg
         $json = $cfg | ConvertTo-Json -Depth 50
@@ -952,7 +952,7 @@ function Save-LockData($cfg = $null) {
 function Load-LockData {
     $path = Get-LockPath
     Need (Test-Path $path) ("缺少锁文件：{0}。请先执行 .\skills.ps1 锁定" -f $path)
-    $raw = Get-Content $path -Raw
+    $raw = Get-ContentUtf8 $path
     Need (-not [string]::IsNullOrWhiteSpace($raw)) ("锁文件为空：{0}" -f $path)
     try {
         $lock = $raw | ConvertFrom-Json

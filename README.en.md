@@ -51,14 +51,14 @@ Minimal happy path:
 .\skills.ps1 doctor --strict --threshold-ms 8000
 ```
 
-The top-level menu is currently organized around high-frequency direct actions plus domain submenus:
+The interactive menu uses direct frequent actions plus domain submenus.
 
 - Browse Skills
 - Pick Install
 - Paste Command Import
 - Remove Skills
-- Rebuild and Sync
-- Update Upstream
+- Rebuild and Sync (CLI command remains `构建生效`)
+- Update Upstream (CLI command remains `更新`)
 - Target Repo Audit
 - MCP Services
 - Skill Library Admin
@@ -86,6 +86,16 @@ Built-in profiles:
   Update Upstream -> Browse Skills -> Rebuild and Sync -> Sync MCP -> `doctor --strict --threshold-ms 8000`
 
 If no profile is given together with `--no-prompt`, the script defaults to `all`.
+
+The `Target Repo Audit` submenu follows the workflow:
+
+- View requirements
+- Edit requirements
+- Target repo list
+- Generate audit bundle
+- Preflight recommendations
+- Apply recommendations (dry-run first)
+- View latest status
 
 ## Common Commands
 

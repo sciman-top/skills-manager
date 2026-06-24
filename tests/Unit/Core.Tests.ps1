@@ -65,6 +65,20 @@ Describe "Core Functions" {
 
             (Test-Path -LiteralPath $dir) | Should Be $false
         }
+
+        It "Removes stale git index locks from worktree gitdir files" {
+            $repo = Join-Path $TestDrive "repo-worktree"
+            $gitAdmin = Join-Path $TestDrive "git-admin"
+            New-Item -ItemType Directory -Path $repo -Force | Out-Null
+            New-Item -ItemType Directory -Path $gitAdmin -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $repo ".git") ("gitdir: {0}" -f $gitAdmin)
+            Set-ContentUtf8 (Join-Path $gitAdmin "index.lock") "stale"
+
+            $removed = Repair-StaleGitLockInRepo $repo
+
+            $removed | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $gitAdmin "index.lock")) | Should Be $false
+        }
     }
 
     Context "Split-Args" {
@@ -912,6 +926,30 @@ Describe "Core Functions" {
             $parsed.transport | Should Be "http"
             $parsed.bearer_token_env_var | Should Be "GITHUB_PERSONAL_ACCESS_TOKEN"
         }
+
+        It "Rejects remote MCP URLs that are not absolute http or https URLs" {
+            $thrown = $false
+            try {
+                Parse-McpInstallArgs @("remote", "--transport", "http", "--url", "file://C:/temp/mcp") | Out-Null
+            }
+            catch {
+                $thrown = $true
+                $_.Exception.Message | Should Match "http/https"
+            }
+            $thrown | Should Be $true
+        }
+
+        It "Rejects bearer token env var names with invalid characters" {
+            $thrown = $false
+            try {
+                Parse-McpInstallArgs @("github", "--transport", "http", "--url", "https://api.githubcopilot.com/mcp/readonly", "--bearer-token-env-var", "BAD-TOKEN-NAME") | Out-Null
+            }
+            catch {
+                $thrown = $true
+                $_.Exception.Message | Should Match "环境变量名"
+            }
+            $thrown | Should Be $true
+        }
     }
 
     Context "Parse-McpStdioCommandLine" {
@@ -938,6 +976,29 @@ Describe "Core Functions" {
             $map.PSObject.Properties.Name.Count | Should Be 1
             $map.context7.command | Should Be "npx"
             $map.context7.args.Count | Should Be 2
+        }
+
+        It "Rejects remote MCP header values that contain newlines" {
+            $servers = @(
+                [pscustomobject]@{
+                    name      = "github"
+                    transport = "http"
+                    url       = "https://api.githubcopilot.com/mcp"
+                    headers   = [pscustomobject]@{
+                        Authorization = "Bearer ok`nX-Evil: injected"
+                    }
+                }
+            )
+
+            $thrown = $false
+            try {
+                Convert-McpServersToConfigMap $servers | Out-Null
+            }
+            catch {
+                $thrown = $true
+                $_.Exception.Message | Should Match "换行"
+            }
+            $thrown | Should Be $true
         }
     }
 
@@ -1796,6 +1857,28 @@ url = "https://api.githubcopilot.com/mcp/"
             @($names).Count | Should Be 2
             ($names -contains "context7") | Should Be $true
             ($names -contains "github") | Should Be $true
+        }
+    }
+
+    Context "Get-McpExpectedServersByCli" {
+        It "Reads projected MCP config files without legacy Get-Content -Raw" {
+            $root = Join-Path $TestDrive "mcp-expected"
+            $claudeRoot = Join-Path $root ".claude"
+            $codexRoot = Join-Path $root ".codex"
+            New-Item -ItemType Directory -Path $claudeRoot -Force | Out-Null
+            New-Item -ItemType Directory -Path $codexRoot -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $claudeRoot ".mcp.json") '{"mcpServers":{"context7":{"transport":"stdio"}}}'
+            Set-ContentUtf8 (Join-Path $codexRoot "config.toml") @'
+[mcp_servers.context7]
+command = "npx"
+'@
+
+            Mock Get-Content { throw "legacy raw read should not be used for projected mcp config reads" }
+
+            $expected = Get-McpExpectedServersByCli @($claudeRoot, $codexRoot)
+
+            ($expected.claude -contains "context7") | Should Be $true
+            ($expected.codex -contains "context7") | Should Be $true
         }
     }
 
