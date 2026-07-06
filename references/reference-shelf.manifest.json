@@ -63,42 +63,42 @@
     {
       "name": "vercel-agent-skills",
       "tier": "secondary",
-      "status": "not-cloned",
+      "status": "active",
       "upstream_url": "https://github.com/vercel-labs/agent-skills.git",
       "relative_path": "secondary/vercel-agent-skills"
     },
     {
       "name": "obra-superpowers",
       "tier": "secondary",
-      "status": "not-cloned",
+      "status": "active",
       "upstream_url": "https://github.com/obra/superpowers.git",
       "relative_path": "secondary/obra-superpowers"
     },
     {
       "name": "wshobson-agents",
       "tier": "secondary",
-      "status": "not-cloned",
+      "status": "active",
       "upstream_url": "https://github.com/wshobson/agents.git",
       "relative_path": "secondary/wshobson-agents"
     },
     {
       "name": "mattpocock-skills",
       "tier": "secondary",
-      "status": "not-cloned",
+      "status": "active",
       "upstream_url": "https://github.com/mattpocock/skills.git",
       "relative_path": "secondary/mattpocock-skills"
     },
     {
       "name": "trailofbits-skills",
       "tier": "secondary",
-      "status": "not-cloned",
+      "status": "active",
       "upstream_url": "https://github.com/trailofbits/skills.git",
       "relative_path": "secondary/trailofbits-skills"
     },
     {
       "name": "awesome-copilot",
       "tier": "secondary",
-      "status": "not-cloned",
+      "status": "active",
       "upstream_url": "https://github.com/github/awesome-copilot.git",
       "relative_path": "secondary/awesome-copilot"
     },

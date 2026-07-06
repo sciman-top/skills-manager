@@ -3,6 +3,7 @@ param(
     [string]$ManifestPath = (Join-Path (Split-Path $PSScriptRoot -Parent) "references\reference-shelf.manifest.json"),
     [string]$ReferencesRoot,
     [string[]]$RepoNames,
+    [string[]]$Tier,
     [string]$OutputDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) "references\updates"),
     [switch]$CloneMissing,
     [switch]$FetchOnly,
@@ -109,6 +110,43 @@ function Normalize-RepoNames {
     return @($normalized)
 }
 
+function Normalize-TierNames {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Names
+    )
+
+    $normalized = [System.Collections.Generic.List[string]]::new()
+    foreach ($name in $Names) {
+        if ([string]::IsNullOrWhiteSpace($name)) {
+            continue
+        }
+
+        foreach ($segment in ($name -split ",")) {
+            $candidate = $segment.Trim().ToLowerInvariant()
+            if ([string]::IsNullOrWhiteSpace($candidate)) {
+                continue
+            }
+
+            $resolved = switch ($candidate) {
+                "core" { "core-mainline"; break }
+                "core-mainline" { "core-mainline"; break }
+                "secondary" { "secondary"; break }
+                "conditional" { "conditional-not-cloned"; break }
+                "conditional-not-cloned" { "conditional-not-cloned"; break }
+                "all" { "all"; break }
+                default { $segment.Trim() }
+            }
+
+            if (-not $normalized.Contains($resolved)) {
+                $normalized.Add($resolved)
+            }
+        }
+    }
+
+    return @($normalized)
+}
+
 function Read-ReferenceManifest {
     param(
         [Parameter(Mandatory = $true)]
@@ -165,6 +203,10 @@ if (-not $manifest) {
     throw "Manifest 不存在或无法解析：$ManifestPath"
 }
 
+if ($RepoNames -and $RepoNames.Count -gt 0 -and $Tier -and $Tier.Count -gt 0) {
+    throw "RepoNames 与 Tier 不能同时指定；请选择具体仓列表或 tier 过滤之一。"
+}
+
 if (-not $ReferencesRoot) {
     if ($manifest.references_root) {
         $ReferencesRoot = [string]$manifest.references_root
@@ -174,7 +216,21 @@ if (-not $ReferencesRoot) {
     }
 }
 
-if (-not $RepoNames -or $RepoNames.Count -eq 0) {
+if ($Tier -and $Tier.Count -gt 0) {
+    $normalizedTiers = Normalize-TierNames -Names $Tier
+    $wantAllTiers = $normalizedTiers -contains "all"
+    $manifestRepos = @($manifest.repos | Where-Object {
+            if ($wantAllTiers) {
+                return $true
+            }
+            return $normalizedTiers -contains ([string]$_.tier)
+        })
+    if ($manifestRepos.Count -eq 0) {
+        throw ("Tier 过滤未命中任何 repo：{0}" -f ($normalizedTiers -join ", "))
+    }
+    $RepoNames = @($manifestRepos | ForEach-Object { [string]$_.name })
+}
+elseif (-not $RepoNames -or $RepoNames.Count -eq 0) {
     if ($manifest.default_refresh_set) {
         $RepoNames = @($manifest.default_refresh_set | ForEach-Object { [string]$_ })
     }
@@ -192,7 +248,23 @@ if (-not (Test-Path -LiteralPath $OutputDirectory)) {
 
 $RepoNames = Normalize-RepoNames -Names $RepoNames
 $manifestDefaultRepos = if ($manifest.default_refresh_set) { @($manifest.default_refresh_set | ForEach-Object { [string]$_ }) } else { @() }
-$repoNamesLabel = if ($manifestDefaultRepos.Count -gt 0 -and (@($RepoNames) -join ",") -eq ($manifestDefaultRepos -join ",")) { "core-default" } else { "custom" }
+$normalizedTierNames = if ($Tier -and $Tier.Count -gt 0) { Normalize-TierNames -Names $Tier } else { @() }
+$repoNamesLabel = if ($manifestDefaultRepos.Count -gt 0 -and (@($RepoNames) -join ",") -eq ($manifestDefaultRepos -join ",")) {
+    "core-default"
+}
+elseif ($normalizedTierNames.Count -gt 0) {
+    "tier-" + (($normalizedTierNames | ForEach-Object {
+                switch ($_) {
+                    "core-mainline" { "core"; break }
+                    "conditional-not-cloned" { "conditional"; break }
+                    default { $_ }
+                }
+            }) -join "+")
+}
+else {
+    "custom"
+}
+$shouldUpdateLatest = ($repoNamesLabel -eq "core-default")
 $manifestRepoIndex = Get-ManifestRepoIndex -Manifest $manifest
 
 $timestamp = New-UtcTimestamp
@@ -222,7 +294,7 @@ foreach ($repoName in $RepoNames) {
     }
 
     $repoPath = Resolve-ManifestRepoPath -ManifestRepo $manifestRepo -ReferencesRoot $ReferencesRoot
-    $tier = [string]$manifestRepo.tier
+    $repoTier = [string]$manifestRepo.tier
     $upstreamUrl = [string]$manifestRepo.upstream_url
     $branchHint = if ($manifestRepo.PSObject.Properties.Match("branch").Count -gt 0) { [string]$manifestRepo.branch } else { "" }
     $cloned = $false
@@ -231,7 +303,7 @@ foreach ($repoName in $RepoNames) {
         if (-not $CloneMissing) {
             $results.Add([pscustomobject]@{
                     repo = $repoName
-                    tier = $tier
+                    tier = $repoTier
                     upstream = $upstreamUrl
                     path = $repoPath
                     status = "missing"
@@ -250,7 +322,7 @@ foreach ($repoName in $RepoNames) {
         if ([string]::IsNullOrWhiteSpace($upstreamUrl)) {
             $results.Add([pscustomobject]@{
                     repo = $repoName
-                    tier = $tier
+                    tier = $repoTier
                     upstream = $upstreamUrl
                     path = $repoPath
                     status = "clone-blocked"
@@ -273,7 +345,7 @@ foreach ($repoName in $RepoNames) {
         catch {
             $results.Add([pscustomobject]@{
                     repo = $repoName
-                    tier = $tier
+                    tier = $repoTier
                     upstream = $upstreamUrl
                     path = $repoPath
                     status = "clone-failed"
@@ -298,7 +370,7 @@ foreach ($repoName in $RepoNames) {
     if ($isDirty -and $SkipDirtyRepos) {
         $results.Add([pscustomobject]@{
                 repo = $repoName
-                tier = $tier
+                tier = $repoTier
                 upstream = $upstreamUrl
                 path = $repoPath
                 status = if ($cloned) { "cloned-dirty" } else { "skipped-dirty" }
@@ -320,7 +392,7 @@ foreach ($repoName in $RepoNames) {
     catch {
         $results.Add([pscustomobject]@{
                 repo = $repoName
-                tier = $tier
+                tier = $repoTier
                 upstream = $upstreamUrl
                 path = $repoPath
                 status = "fetch-failed"
@@ -343,7 +415,7 @@ foreach ($repoName in $RepoNames) {
         if ([string]::IsNullOrWhiteSpace($branch)) {
             $results.Add([pscustomobject]@{
                     repo = $repoName
-                    tier = $tier
+                    tier = $repoTier
                     upstream = $upstreamUrl
                     path = $repoPath
                     status = "pull-skipped-no-branch"
@@ -404,7 +476,7 @@ foreach ($repoName in $RepoNames) {
     $finalStatus = if ($cloned -and $changed) { "cloned-updated" } elseif ($cloned) { "cloned" } elseif ($changed) { "updated" } else { $statusLabel }
     $results.Add([pscustomobject]@{
             repo = $repoName
-            tier = $tier
+            tier = $repoTier
             upstream = $upstreamUrl
             path = $repoPath
             status = $finalStatus
@@ -429,6 +501,10 @@ $lines.Add(('clone_missing：`' + ([bool]$CloneMissing).ToString().ToLowerInvari
 $lines.Add(('根目录：`' + $ReferencesRoot + '`'))
 $lines.Add(('manifest：`' + $ManifestPath + '`'))
 $lines.Add(('集合：`' + $repoNamesLabel + '`'))
+$lines.Add(('更新 latest：`' + $shouldUpdateLatest.ToString().ToLowerInvariant() + '`'))
+if ($normalizedTierNames.Count -gt 0) {
+    $lines.Add(('tier 过滤：`' + (($normalizedTierNames -join ", ") -replace "\\", "/") + '`'))
+}
 $lines.Add(('仓列表：`' + (($RepoNames -join ", ") -replace "\\", "/") + '`'))
 $lines.Add("")
 
@@ -479,11 +555,13 @@ while ($lines.Count -gt 0 -and [string]::IsNullOrWhiteSpace([string]$lines[$line
     (($lines -join "`n") + "`n"),
     [System.Text.UTF8Encoding]::new($false)
 )
-[System.IO.File]::WriteAllText(
-    $latestReportPath,
-    (($lines -join "`n") + "`n"),
-    [System.Text.UTF8Encoding]::new($false)
-)
+if ($shouldUpdateLatest) {
+    [System.IO.File]::WriteAllText(
+        $latestReportPath,
+        (($lines -join "`n") + "`n"),
+        [System.Text.UTF8Encoding]::new($false)
+    )
+}
 
 [pscustomobject]@{
     manifest_path = $ManifestPath
@@ -491,6 +569,8 @@ while ($lines.Count -gt 0 -and [string]::IsNullOrWhiteSpace([string]$lines[$line
     output_path = $reportPath
     latest_output_path = $latestReportPath
     repo_set = $repoNamesLabel
+    tier_filter = $normalizedTierNames
+    latest_updated = [bool]$shouldUpdateLatest
     repo_names = $RepoNames
     clone_missing = [bool]$CloneMissing
     fetch_only = [bool]$FetchOnly

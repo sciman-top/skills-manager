@@ -64,12 +64,14 @@ Default operational commands:
 ```powershell
 .\scripts\refresh-reference-repos.ps1 -FetchOnly -SkipDirtyRepos
 .\scripts\refresh-reference-repos.ps1 -CloneMissing -FetchOnly -SkipDirtyRepos
+.\scripts\refresh-reference-repos.ps1 -Tier secondary -CloneMissing -FetchOnly -SkipDirtyRepos
 ```
 
 Meaning:
 
 - first command: refresh the default `core` set without creating new clones
 - second command: bootstrap missing `core` repos, then fetch them
+- third command: bootstrap or refresh the `secondary` tier without disturbing the stable `core-default` latest report
 
 ## 5. Core tier
 
@@ -97,6 +99,11 @@ Related official docs that should be treated as first-party truth even without l
 ## 6. Secondary tier
 
 Keep these when repeated local use justifies persistent comparison material, but do not treat them as always-on core truth.
+
+Current local state on this machine as of `2026-07-06`:
+
+- the `secondary` tier has been cloned under `D:\CODE\external\skills-manager-references\secondary`
+- it is intentionally still outside the default refresh set
 
 | Repo / Source | Why it belongs in secondary | Refresh | Relation to `skills.json` |
 | --- | --- | --- | --- |

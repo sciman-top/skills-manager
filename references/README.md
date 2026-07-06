@@ -20,3 +20,22 @@
 - `conditional-not-cloned`：`workspace-hub`、`aktsmm-agent-skills`、`manim-skill`、`playwright-best-practices-skill`、`supabase-agent-skills`、`antd-skill`、`slidev`、`knowledge-work-plugins`、`remotion-skills`
 
 默认只刷新 `core`，不把所有 runtime source repo 都自动升级成长期镜像参考棚。
+
+当前本机物理落地状态：
+
+- `core-mainline`：已克隆并纳入默认刷新
+- `secondary`：已克隆，但不纳入默认刷新
+- `conditional-not-cloned`：仍只保留 manifest 记录，按需再拉取
+
+常用命令：
+
+```powershell
+.\scripts\refresh-reference-repos.ps1 -FetchOnly -SkipDirtyRepos
+.\scripts\refresh-reference-repos.ps1 -Tier secondary -CloneMissing -FetchOnly -SkipDirtyRepos
+.\scripts\refresh-reference-repos.ps1 -Tier conditional -FetchOnly -SkipDirtyRepos
+```
+
+规则：
+
+- 默认不带参数时，使用 manifest 的 `default_refresh_set`，也就是稳定的 `core-default`
+- 指定 `-Tier secondary` / `-Tier conditional` 时，会生成单独历史报告，但不会覆盖 `references/updates/reference-refresh-latest.md`
