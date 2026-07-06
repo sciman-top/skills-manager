@@ -2,72 +2,93 @@
   "version": 2,
   "path_base": "skills_manager_root",
   "user_profile": {
-    "raw_text": "制作PPT课件。制作初中教师日常使用的教学、办公软件，可能常在windows系统下。公众号、知乎文章的写作、素材、排版、配图、自动发布等。初中物理动画，可能包括web、SVG网页等。",
-    "summary": "面向初中教师场景，主要在 Windows 环境下进行 PPT 课件制作、教学办公工具开发、公众号/知乎内容生产与自动发布，以及基于 Web/SVG 的物理教学动画制作。",
+    "raw_text": "全面深度审查 D:\\CODE 中的多个项目，并结合已安装的 skills / MCP 做长期工作流治理。主要工作包括：制作 PPT / PPTX 课件；制作初中教师日常使用的教学、办公软件，常在 Windows 系统下；公众号、知乎文章的写作、素材搜集、排版、配图、自动发布与复用；初中物理动画与交互演示，可能包括 Web、SVG、网页与 Manim；以及以 hermes + codex + gpt-5 为主的组合编码与本地多代理编排（local-ai-dev-orchestrator 项目）。",
+    "summary": "面向初中教师场景与本地 AI 开发编排场景，主要在 Windows 环境下进行 PPT/PPTX/网页课件制作、教师桌面软件开发、公众号/知乎内容生产与自动发布、Web/SVG/Manim 物理动画制作，以及 hermes + codex + gpt-5 的本地多代理组合编码与治理。",
     "structured": {
       "primary_work_types": [
         "教学课件制作",
         "教育办公工具开发",
         "内容生产与分发",
-        "教学动画制作"
+        "教学动画制作",
+        "本地多代理编排与治理"
       ],
       "preferred_agents": [
         "powerpoint-automation",
+        "custom-teacher-courseware-ppt",
+        "custom-windows-wpf-teacher-app",
+        "custom-creator-publishing",
         "baoyu-post-to-wechat",
+        "custom-junior-physics-animation",
         "frontend-design",
-        "manim-composer"
+        "manim-composer",
+        "dispatching-parallel-agents",
+        "subagent-driven-development",
+        "using-git-worktrees"
       ],
       "tech_stack": [
         "Windows",
+        "WPF/.NET",
         "PowerPoint/PPTX",
         "Web (HTML/CSS/JavaScript)",
         "SVG",
+        "Manim",
         "微信公众号",
-        "知乎"
+        "知乎",
+        "Hermes",
+        "Codex",
+        "GPT-5",
+        "MCP"
       ],
       "common_tasks": [
         "制作和迭代初中教学 PPT 课件",
         "开发初中教师日常教学/办公软件",
         "撰写并排版公众号与知乎文章",
-        "准备配图与素材并自动发布内容",
-        "制作初中物理教学动画（Web/SVG）"
+        "准备素材、配图并自动发布内容",
+        "制作初中物理教学动画（Web/SVG/Manim）",
+        "跨多个 D:\\CODE 仓库做深度审查并调整 skills / MCP 组合",
+        "以 local-ai-dev-orchestrator 为主线推进 hermes + codex + gpt-5 组合编码"
       ],
       "constraints": [
         "主要在 Windows 系统下使用与运行",
         "产出需贴合初中教师日常教学和办公场景",
-        "写作、排版、配图、发布需要端到端衔接"
+        "写作、排版、配图、发布需要端到端衔接",
+        "跨仓分析尽量覆盖 D:\\CODE 主工作区而不是单仓",
+        "MCP 权限面要可控，优先本地、可回滚、可验证"
       ],
       "avoidances": [
         "与教学场景无关的复杂企业化流程",
-        "只给概念不提供可落地执行步骤"
+        "只给概念不提供可落地执行步骤",
+        "高权限桌面控制但缺少边界与回滚的自动化"
       ],
       "decision_preferences": [
         "优先选择可直接落地的自动化方案",
         "优先支持中文内容创作与发布链路",
-        "优先强调可视化呈现与课堂演示效果"
+        "优先强调可视化呈现与课堂演示效果",
+        "优先补齐多代理编排、隔离工作树和跨仓审查能力",
+        "功能重叠时保留分层清晰、边界明确、验证闭环更强的技能"
       ]
     },
-    "last_structured_at": "04/23/2026 00:47:57",
+    "last_structured_at": "07/06/2026 12:00:00",
     "structured_by": "outer-ai"
   },
   "targets": [
     {
       "name": "classroomtoolkit",
-      "path": "D:\\OneDrive\\CODE\\ClassroomToolkit",
+      "path": "D:\\CODE\\ClassroomToolkit",
       "enabled": true,
       "tags": [],
       "notes": ""
     },
     {
       "name": "governed-ai-coding-runtime",
-      "path": "D:\\OneDrive\\CODE\\governed-ai-coding-runtime",
+      "path": "D:\\CODE\\governed-ai-coding-runtime",
       "enabled": true,
       "tags": [],
       "notes": ""
     },
     {
       "name": "skills-manager",
-      "path": "D:\\OneDrive\\CODE\\skills-manager",
+      "path": "D:\\CODE\\skills-manager",
       "enabled": true,
       "tags": [],
       "notes": ""
@@ -75,6 +96,27 @@
     {
       "name": "k12-question-graph",
       "path": "D:\\CODE\\k12-question-graph",
+      "enabled": true,
+      "tags": [],
+      "notes": ""
+    },
+    {
+      "name": "local-ai-dev-orchestrator",
+      "path": "D:\\CODE\\local-ai-dev-orchestrator",
+      "enabled": true,
+      "tags": [],
+      "notes": ""
+    },
+    {
+      "name": "ai-content-delivery-studio",
+      "path": "D:\\CODE\\ai-content-delivery-studio",
+      "enabled": true,
+      "tags": [],
+      "notes": ""
+    },
+    {
+      "name": "physicist_chinese_poster_batch_tool",
+      "path": "D:\\CODE\\physicist_chinese_poster_batch_tool",
       "enabled": true,
       "tags": [],
       "notes": ""

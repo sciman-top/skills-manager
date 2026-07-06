@@ -502,13 +502,33 @@
       "vendor": "manual",
       "from": "windows-desktop-e2e",
       "to": "windows-desktop-e2e"
+    },
+    {
+      "vendor": "superpowers",
+      "to": "superpowers-skills-dispatching-parallel-agents",
+      "from": "skills\\dispatching-parallel-agents"
+    },
+    {
+      "vendor": "superpowers",
+      "to": "superpowers-skills-subagent-driven-development",
+      "from": "skills\\subagent-driven-development"
+    },
+    {
+      "vendor": "superpowers",
+      "to": "superpowers-skills-using-git-worktrees",
+      "from": "skills\\using-git-worktrees"
+    },
+    {
+      "vendor": "manual",
+      "to": "use-my-browser",
+      "from": "use-my-browser"
     }
   ],
   "imports": [
     {
       "mode": "vendor",
       "sparse": false,
-      "skill": "skills\\writing-skills",
+      "skill": "skills\\using-git-worktrees",
       "ref": "main",
       "repo": "https://github.com/obra/superpowers.git",
       "name": "superpowers"
@@ -872,6 +892,14 @@
       "skill": "skills\\windows-desktop-e2e",
       "mode": "manual",
       "repo": "https://github.com/affaan-m/everything-claude-code.git"
+    },
+    {
+      "mode": "manual",
+      "ref": "main",
+      "sparse": false,
+      "repo": "https://github.com/xixu-me/skills.git",
+      "name": "use-my-browser",
+      "skill": "skills\\use-my-browser"
     }
   ],
   "targets": [
@@ -880,15 +908,6 @@
     },
     {
       "path": "~/.codex/skills"
-    },
-    {
-      "path": "~/.gemini/skills"
-    },
-    {
-      "path": "~/.gemini/antigravity/skills/"
-    },
-    {
-      "path": "~/.trae/skills/"
     }
   ],
   "update_force": true,
@@ -939,7 +958,7 @@
       "args": [
         "-y",
         "@modelcontextprotocol/server-filesystem",
-        "D:\\CODE\\skills-manager"
+        "D:\\CODE"
       ]
     },
     {
@@ -951,6 +970,17 @@
         "-NoProfile",
         "-Command",
         "$conn = $env:POSTGRES_CONNECTION_STRING; if ([string]::IsNullOrWhiteSpace($conn)) { $conn = [Environment]::GetEnvironmentVariable(\"POSTGRES_CONNECTION_STRING\", \"User\") }; if ([string]::IsNullOrWhiteSpace($conn)) { $conn = [Environment]::GetEnvironmentVariable(\"POSTGRES_CONNECTION_STRING\", \"Machine\") }; if ([string]::IsNullOrWhiteSpace($conn)) { Write-Error \"POSTGRES_CONNECTION_STRING is required for postgres MCP.\"; exit 64 }; $env:POSTGRES_CONNECTION_STRING = $conn; npx -y @modelcontextprotocol/server-postgres $conn"
+      ]
+    },
+    {
+      "name": "codebase-memory-mcp",
+      "transport": "stdio",
+      "command": "pwsh",
+      "args": [
+        "-NoLogo",
+        "-NoProfile",
+        "-Command",
+        "$exe = Join-Path $env:LOCALAPPDATA 'Programs\\codebase-memory-mcp\\codebase-memory-mcp.exe'; if (-not (Test-Path -LiteralPath $exe)) { $cmd = Get-Command codebase-memory-mcp -ErrorAction SilentlyContinue; if ($cmd) { $exe = [string]$cmd.Source } else { Write-Error 'codebase-memory-mcp.exe not found. Run the official installer first.'; exit 64 } }; & $exe"
       ]
     }
   ],

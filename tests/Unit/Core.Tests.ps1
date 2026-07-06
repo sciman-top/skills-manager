@@ -1040,6 +1040,57 @@ Describe "Core Functions" {
         }
     }
 
+    Context "Ensure-GhAuthForGithubMcp" {
+        It "Persists gh token to both GitHub MCP user env vars" {
+            $oldProcessGithub = $env:GITHUB_PERSONAL_ACCESS_TOKEN
+            $oldProcessCodex = $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN
+            $oldUserGithub = [System.Environment]::GetEnvironmentVariable("GITHUB_PERSONAL_ACCESS_TOKEN", "User")
+            $oldUserCodex = [System.Environment]::GetEnvironmentVariable("CODEX_GITHUB_PERSONAL_ACCESS_TOKEN", "User")
+            try {
+                $env:GITHUB_PERSONAL_ACCESS_TOKEN = "stale-process-token"
+                Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+                [System.Environment]::SetEnvironmentVariable("GITHUB_PERSONAL_ACCESS_TOKEN", "stale-user-token", "User")
+                [System.Environment]::SetEnvironmentVariable("CODEX_GITHUB_PERSONAL_ACCESS_TOKEN", $null, "User")
+
+                Mock Get-Command { [pscustomobject]@{ Name = "gh"; Path = "C:\Program Files\GitHub CLI\gh.exe" } } -ParameterFilter { $Name -eq "gh" }
+                Mock Invoke-Gh {
+                    param([string[]]$GhArgs)
+                    if (@($GhArgs).Count -ge 2 -and $GhArgs[0] -eq "auth" -and $GhArgs[1] -eq "token") {
+                        return @("gho_unit_test_token")
+                    }
+                    if (@($GhArgs).Count -ge 2 -and $GhArgs[0] -eq "api" -and $GhArgs[1] -eq "user") {
+                        return @("sciman-top")
+                    }
+                    throw ("Unexpected gh args: {0}" -f (@($GhArgs) -join " "))
+                }
+
+                Ensure-GhAuthForGithubMcp @([pscustomobject]@{ name = "github" })
+
+                $env:GITHUB_PERSONAL_ACCESS_TOKEN | Should Be "gho_unit_test_token"
+                $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN | Should Be "gho_unit_test_token"
+                [System.Environment]::GetEnvironmentVariable("GITHUB_PERSONAL_ACCESS_TOKEN", "User") | Should Be "gho_unit_test_token"
+                [System.Environment]::GetEnvironmentVariable("CODEX_GITHUB_PERSONAL_ACCESS_TOKEN", "User") | Should Be "gho_unit_test_token"
+                Assert-MockCalled Invoke-Gh -Times 2 -Exactly
+            }
+            finally {
+                if ($null -ne $oldProcessGithub) {
+                    $env:GITHUB_PERSONAL_ACCESS_TOKEN = $oldProcessGithub
+                }
+                else {
+                    Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+                }
+                if ($null -ne $oldProcessCodex) {
+                    $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = $oldProcessCodex
+                }
+                else {
+                    Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+                }
+                [System.Environment]::SetEnvironmentVariable("GITHUB_PERSONAL_ACCESS_TOKEN", $oldUserGithub, "User")
+                [System.Environment]::SetEnvironmentVariable("CODEX_GITHUB_PERSONAL_ACCESS_TOKEN", $oldUserCodex, "User")
+            }
+        }
+    }
+
     Context "Build-CodexConfigToml" {
         It "Converts Postgres key-value connection strings to URL form" {
             $url = Convert-PostgresKeyValueConnectionStringToUrl "Host=127.0.0.1;Port=55432;Database=postgres;Username=mcp_user;Password=p@ ss;"
@@ -1304,7 +1355,7 @@ sandbox = "elevated"
                     name      = "filesystem"
                     transport = "stdio"
                     command   = "npx"
-                    args      = @("-y", "@modelcontextprotocol/server-filesystem", "D:\CODE\skills-manager")
+                    args      = @("-y", "@modelcontextprotocol/server-filesystem", "D:\CODE")
                 }
                 [pscustomobject]@{
                     name      = "playwright"
@@ -1323,7 +1374,7 @@ sandbox = "elevated"
                 $toml | Should Match "mcp-node-cache-wrapper\.mjs"
                 $toml | Should Match "@modelcontextprotocol/server-filesystem"
                 $toml | Should Match "@playwright/mcp"
-                $toml | Should Match "D:\\\\CODE\\\\skills-manager"
+                $toml | Should Match "D:\\\\CODE"
                 $toml | Should Match "--isolated"
                 $toml | Should Not Match "command = ""npx"""
             }
@@ -1390,6 +1441,30 @@ sandbox = "elevated"
             $toml | Should Match "mcp-postgres-env-wrapper\.mjs"
             $toml | Should Not Match "@modelcontextprotocol/server-postgres"
             $toml | Should Not Match "command = ""pwsh"""
+        }
+
+        It "Keeps generic pwsh stdio MCP servers unchanged for Codex" {
+            $servers = @(
+                [pscustomobject]@{
+                    name      = "codebase-memory-mcp"
+                    transport = "stdio"
+                    command   = "pwsh"
+                    args      = @(
+                        "-NoLogo",
+                        "-NoProfile",
+                        "-Command",
+                        "`$exe = Join-Path `$env:LOCALAPPDATA 'Programs\\codebase-memory-mcp\\codebase-memory-mcp.exe'; if (-not (Test-Path -LiteralPath `$exe)) { `$cmd = Get-Command codebase-memory-mcp -ErrorAction SilentlyContinue; if (`$cmd) { `$exe = [string]`$cmd.Source } else { Write-Error 'codebase-memory-mcp.exe not found. Run the official installer first.'; exit 64 } }; & `$exe"
+                    )
+                }
+            )
+
+            $toml = Build-CodexConfigToml "" $servers
+
+            $toml | Should Match "\[mcp_servers\.codebase-memory-mcp\]"
+            $toml | Should Match "command = ""pwsh"""
+            $toml | Should Match "codebase-memory-mcp.*codebase-memory-mcp\.exe"
+            $toml | Should Match "Get-Command codebase-memory-mcp"
+            $toml | Should Not Match "mcp-node-cache-wrapper\.mjs"
         }
 
         It "Generates a postgres wrapper that can read User scope environment variables" {
@@ -1567,7 +1642,7 @@ sandbox = "elevated"
                     name = "filesystem"
                     transport = "stdio"
                     command = "npx"
-                    args = @("-y", "@modelcontextprotocol/server-filesystem", "D:\CODE\skills-manager")
+                    args = @("-y", "@modelcontextprotocol/server-filesystem", "D:\CODE")
                 }
             )
 
@@ -1631,6 +1706,19 @@ exit 3
             $result.timed_out | Should Be $false
             $result.exit_code | Should Be 0
             (($result.output | ForEach-Object { [string]$_ }) -join "`n") | Should Match "arg-space-ok"
+        }
+
+        It "Applies environment overrides to child process execution" {
+            $result = Invoke-ExternalCommandWithTimeout "cmd" @(
+                "/c",
+                "echo %UNIT_TEST_MCP_ENV%"
+            ) $TestDrive 5 @{
+                UNIT_TEST_MCP_ENV = "env-override-ok"
+            }
+
+            $result.timed_out | Should Be $false
+            $result.exit_code | Should Be 0
+            (($result.output | ForEach-Object { [string]$_ }) -join "`n").Trim() | Should Be "env-override-ok"
         }
 
         It "Preserves output captured before an external command timeout" {
@@ -1744,6 +1832,56 @@ exit 3
             }
             finally {
                 [System.Environment]::SetEnvironmentVariable("SKILLS_MCP_VERIFY_GEMINI_CLI", $old)
+            }
+        }
+
+        It "Hydrates gemini GitHub token from user scope during live verification when process env is stale" {
+            $oldVerify = [System.Environment]::GetEnvironmentVariable("SKILLS_MCP_VERIFY_GEMINI_CLI")
+            $oldProcessGithub = $env:GITHUB_PERSONAL_ACCESS_TOKEN
+            $oldUserGithub = [System.Environment]::GetEnvironmentVariable("GITHUB_PERSONAL_ACCESS_TOKEN", "User")
+            $expectedWorkingDir = [Environment]::GetFolderPath("UserProfile")
+            try {
+                [System.Environment]::SetEnvironmentVariable("SKILLS_MCP_VERIFY_GEMINI_CLI", "1")
+                Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+                [System.Environment]::SetEnvironmentVariable("GITHUB_PERSONAL_ACCESS_TOKEN", "gho_user_scope_token", "User")
+                Mock Get-Command { [pscustomobject]@{ Name = "gemini" } } -ParameterFilter { $Name -eq "gemini" }
+                Mock Get-McpListVerifyTimeoutSeconds { 9 } -ParameterFilter { $cli -eq "gemini" }
+                Mock Invoke-ExternalCommandCapture {
+                    [pscustomobject]@{
+                        command = "gemini"
+                        args = @("mcp", "list")
+                        exit_code = 0
+                        timed_out = $false
+                        error = ""
+                        output = @("✓ github: https://api.githubcopilot.com/mcp/ (http) - Connected")
+                    }
+                } -ParameterFilter {
+                    $command -eq "gemini" -and
+                    $timeoutSeconds -eq 9 -and
+                    $EnvironmentOverrides -ne $null -and
+                    $EnvironmentOverrides["GITHUB_PERSONAL_ACCESS_TOKEN"] -eq "gho_user_scope_token" -and
+                    $workingDir -eq $expectedWorkingDir
+                }
+
+                $result = Test-CliMcpServerReady "gemini" @("github")
+                $result.ok | Should Be $true
+                $result.reason | Should Be "ok"
+                Assert-MockCalled Invoke-ExternalCommandCapture -Times 1 -Scope It -ParameterFilter {
+                    $command -eq "gemini" -and
+                    $EnvironmentOverrides -ne $null -and
+                    $EnvironmentOverrides["GITHUB_PERSONAL_ACCESS_TOKEN"] -eq "gho_user_scope_token" -and
+                    $workingDir -eq $expectedWorkingDir
+                }
+            }
+            finally {
+                [System.Environment]::SetEnvironmentVariable("SKILLS_MCP_VERIFY_GEMINI_CLI", $oldVerify)
+                if ([string]::IsNullOrWhiteSpace($oldProcessGithub)) {
+                    Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+                }
+                else {
+                    $env:GITHUB_PERSONAL_ACCESS_TOKEN = $oldProcessGithub
+                }
+                [System.Environment]::SetEnvironmentVariable("GITHUB_PERSONAL_ACCESS_TOKEN", $oldUserGithub, "User")
             }
         }
 

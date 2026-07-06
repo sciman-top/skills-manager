@@ -8142,6 +8142,11 @@ function Ensure-GhAuthForGithubMcp($servers) {
     # gh auth 路线：同步阶段临时注入 token，供各客户端配置写入与 native 注册使用。
     $env:GITHUB_PERSONAL_ACCESS_TOKEN = $token
     $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = $token
+    $existingGithubToken = [System.Environment]::GetEnvironmentVariable("GITHUB_PERSONAL_ACCESS_TOKEN", "User")
+    if ([string]::IsNullOrWhiteSpace($existingGithubToken) -or $existingGithubToken -ne $token) {
+        [System.Environment]::SetEnvironmentVariable("GITHUB_PERSONAL_ACCESS_TOKEN", $token, "User")
+        Log "GitHub MCP 已同步 gh token 到 User scope 的 GITHUB_PERSONAL_ACCESS_TOKEN。" "INFO"
+    }
     $existingCodexToken = [System.Environment]::GetEnvironmentVariable("CODEX_GITHUB_PERSONAL_ACCESS_TOKEN", "User")
     if ([string]::IsNullOrWhiteSpace($existingCodexToken) -or $existingCodexToken -ne $token) {
         [System.Environment]::SetEnvironmentVariable("CODEX_GITHUB_PERSONAL_ACCESS_TOKEN", $token, "User")
@@ -8192,7 +8197,8 @@ function Invoke-ExternalCommandWithTimeout(
     [Alias("args")]
     [string[]]$CommandArgs = @(),
     [string]$workingDir = $null,
-    [int]$timeoutSeconds = 30
+    [int]$timeoutSeconds = 30,
+    [hashtable]$EnvironmentOverrides = $null
 ) {
     Need (-not [string]::IsNullOrWhiteSpace($command)) "外部命令名不能为空"
     if ($timeoutSeconds -lt 1) { $timeoutSeconds = 1 }
@@ -8211,6 +8217,17 @@ function Invoke-ExternalCommandWithTimeout(
         $startInfo.RedirectStandardOutput = $true
         $startInfo.RedirectStandardError = $true
         $startInfo.CreateNoWindow = $true
+        if ($EnvironmentOverrides -ne $null) {
+            foreach ($entry in $EnvironmentOverrides.GetEnumerator()) {
+                $key = [string]$entry.Key
+                if ([string]::IsNullOrWhiteSpace($key)) { continue }
+                if ($null -eq $entry.Value) {
+                    [void]$startInfo.Environment.Remove($key)
+                    continue
+                }
+                $startInfo.Environment[$key] = [string]$entry.Value
+            }
+        }
         foreach ($arg in $argList) {
             [void]$startInfo.ArgumentList.Add([string]$arg)
         }
@@ -8318,9 +8335,11 @@ function Invoke-ExternalCommandCapture(
     [string]$command,
     [Alias("args")]
     [string[]]$CommandArgs = @(),
-    [int]$timeoutSeconds = 120
+    [int]$timeoutSeconds = 120,
+    [hashtable]$EnvironmentOverrides = $null,
+    [string]$workingDir = $null
 ) {
-    $result = Invoke-ExternalCommandWithTimeout $command @($CommandArgs) $null $timeoutSeconds
+    $result = Invoke-ExternalCommandWithTimeout $command @($CommandArgs) $workingDir $timeoutSeconds $EnvironmentOverrides
     return [pscustomobject]@{
         command = $command
         args = @($CommandArgs)
@@ -8328,6 +8347,47 @@ function Invoke-ExternalCommandCapture(
         timed_out = [bool]$result.timed_out
         error = [string]$result.error
         output = @($result.output)
+    }
+}
+
+function Get-McpCliProcessEnvOverrides([string]$cli) {
+    $cliName = if ([string]::IsNullOrWhiteSpace($cli)) { "" } else { [string]$cli.Trim().ToLowerInvariant() }
+    if ([string]::IsNullOrWhiteSpace($cliName)) { return $null }
+
+    $varsToHydrate = switch ($cliName) {
+        "gemini" { @("GITHUB_PERSONAL_ACCESS_TOKEN") }
+        "claude" { @("GITHUB_PERSONAL_ACCESS_TOKEN") }
+        "codex" { @("CODEX_GITHUB_PERSONAL_ACCESS_TOKEN") }
+        default { @() }
+    }
+    if ($varsToHydrate.Count -eq 0) { return $null }
+
+    $overrides = [ordered]@{}
+    foreach ($varName in $varsToHydrate) {
+        if ([string]::IsNullOrWhiteSpace($varName)) { continue }
+        $processValue = [System.Environment]::GetEnvironmentVariable($varName, "Process")
+        if (-not [string]::IsNullOrWhiteSpace([string]$processValue)) { continue }
+        $userValue = [System.Environment]::GetEnvironmentVariable($varName, "User")
+        if (-not [string]::IsNullOrWhiteSpace([string]$userValue)) {
+            $overrides[$varName] = [string]$userValue
+        }
+    }
+
+    if ($overrides.Count -eq 0) { return $null }
+    return $overrides
+}
+
+function Get-McpCliVerificationWorkingDir([string]$cli) {
+    $cliName = if ([string]::IsNullOrWhiteSpace($cli)) { "" } else { [string]$cli.Trim().ToLowerInvariant() }
+    switch ($cliName) {
+        "gemini" {
+            $userHome = [Environment]::GetFolderPath("UserProfile")
+            if (-not [string]::IsNullOrWhiteSpace([string]$userHome) -and (Test-Path -LiteralPath $userHome)) {
+                return [string]$userHome
+            }
+            return $null
+        }
+        default { return $null }
     }
 }
 
@@ -8483,7 +8543,9 @@ function Test-CliMcpServerReady([string]$cli, [string[]]$expectedServers) {
     }
 
     $listTimeoutSeconds = Get-McpListVerifyTimeoutSeconds $cli
-    $result = Invoke-ExternalCommandCapture $cli @("mcp", "list") $listTimeoutSeconds
+    $envOverrides = Get-McpCliProcessEnvOverrides $cliName
+    $listWorkingDir = Get-McpCliVerificationWorkingDir $cliName
+    $result = Invoke-ExternalCommandCapture -command $cli -args @("mcp", "list") -timeoutSeconds $listTimeoutSeconds -EnvironmentOverrides $envOverrides -workingDir $listWorkingDir
     $raw = @($result.output | ForEach-Object { Remove-AnsiEscapeSequences ([string]$_) })
     if ($result.timed_out) {
         if ($isGemini) {
@@ -8548,7 +8610,7 @@ function Test-CliMcpServerReady([string]$cli, [string[]]$expectedServers) {
     }
     foreach ($name in @($expectedServers)) {
         if ([string]::IsNullOrWhiteSpace([string]$name)) { continue }
-        $pattern = "^\s*{0}\b" -f [regex]::Escape([string]$name)
+        $pattern = "^\s*(?:[^\w\r\n]+\s*)?{0}\b" -f [regex]::Escape([string]$name)
         $line = @($raw | Where-Object { [regex]::IsMatch([string]$_, $pattern) } | Select-Object -First 1)
         if ($line.Count -eq 0) {
             $missing.Add([string]$name) | Out-Null
@@ -9405,20 +9467,22 @@ function 同步MCP {
             }
         }
 
-        $projectTraePath = Get-TraeProjectMcpConfigPath $script:Root
-        if ($DryRun) {
-            Write-Host ("DRYRUN：将写入项目级 Trae MCP 配置 -> {0}" -f $projectTraePath)
-            $written += $projectTraePath
-        }
-        else {
-            $projectTraeDir = Split-Path $projectTraePath -Parent
-            EnsureDir $projectTraeDir
-            $existing = if (Test-Path $projectTraePath) { Get-Content -Raw -Path $projectTraePath } else { "" }
-            $payloadObj = Build-GenericMcpPayload $existing $servers
-            $json = $payloadObj | ConvertTo-Json -Depth 100
-            Set-ContentUtf8 $projectTraePath $json
-            $written += $projectTraePath
-            Log ("已同步项目级 Trae MCP 配置：{0}" -f $projectTraePath)
+        if ($traeRoots.Count -gt 0) {
+            $projectTraePath = Get-TraeProjectMcpConfigPath $script:Root
+            if ($DryRun) {
+                Write-Host ("DRYRUN：将写入项目级 Trae MCP 配置 -> {0}" -f $projectTraePath)
+                $written += $projectTraePath
+            }
+            else {
+                $projectTraeDir = Split-Path $projectTraePath -Parent
+                EnsureDir $projectTraeDir
+                $existing = if (Test-Path $projectTraePath) { Get-Content -Raw -Path $projectTraePath } else { "" }
+                $payloadObj = Build-GenericMcpPayload $existing $servers
+                $json = $payloadObj | ConvertTo-Json -Depth 100
+                Set-ContentUtf8 $projectTraePath $json
+                $written += $projectTraePath
+                Log ("已同步项目级 Trae MCP 配置：{0}" -f $projectTraePath)
+            }
         }
 
         Write-Host ("已同步 MCP 服务配置到 {0} 个目标。" -f $written.Count)

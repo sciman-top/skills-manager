@@ -135,7 +135,7 @@
 
 ```powershell
 .\skills.ps1 安装MCP context7 -- npx -y @upstash/context7-mcp
-.\skills.ps1 安装MCP filesystem --cmd npx --arg -y --arg @modelcontextprotocol/server-filesystem --arg D:\CODE\skills-manager
+.\skills.ps1 安装MCP filesystem --cmd npx --arg -y --arg @modelcontextprotocol/server-filesystem --arg D:\CODE
 .\skills.ps1 安装MCP github --transport http --url https://api.githubcopilot.com/mcp/ --bearer-token-env-var GITHUB_PERSONAL_ACCESS_TOKEN
 .\skills.ps1 卸载MCP context7
 .\skills.ps1 同步MCP
