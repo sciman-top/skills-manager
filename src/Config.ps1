@@ -1104,13 +1104,7 @@ function Apply-LockToWorkspace($cfg, $lock) {
         Push-Location $path
         try {
             $sparsePaths = Get-VendorSparsePaths $cfg $name
-            if ($sparsePaths.Count -gt 0) {
-                Invoke-Git @("sparse-checkout", "init", "--cone")
-                Invoke-Git (@("sparse-checkout", "set") + $sparsePaths)
-            }
-            else {
-                try { Invoke-Git @("sparse-checkout", "disable") } catch {}
-            }
+            Set-GitSparseCheckout $sparsePaths
             Invoke-Git @("checkout", $commit)
         }
         finally { Pop-Location }

@@ -374,7 +374,7 @@ function Test-UpdateCacheCleanForPlanItem($item, $cfg) {
     if (Test-IsGitRepoRoot $path) {
         Push-Location $path
         try {
-            $status = Invoke-GitCapture @("status", "--porcelain")
+            $status = Invoke-GitCapture @("status", "--porcelain", "--ignored")
             return [string]::IsNullOrWhiteSpace($status)
         }
         finally { Pop-Location }
@@ -453,13 +453,7 @@ function 更新Vendor($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $n
                         if ($p -and $p -ne ".") { $sparsePaths += $p }
                     }
                     $sparsePaths = $sparsePaths | Select-Object -Unique
-                    if ($sparsePaths.Count -gt 0) {
-                        Invoke-Git @("sparse-checkout", "init", "--cone")
-                        Invoke-Git (@("sparse-checkout", "set") + $sparsePaths)
-                    }
-                    else {
-                        try { Invoke-Git @("sparse-checkout", "disable") } catch {}
-                    }
+                    Set-GitSparseCheckout $sparsePaths
                     Invoke-Git @("checkout", $v.ref)
                     # fetch already happened above (unless SkipFetch), so prefer local fast-forward.
                     Update-CurrentBranchFromUpstream $false

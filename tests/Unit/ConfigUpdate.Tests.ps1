@@ -370,6 +370,32 @@ Describe "Config And Update Enhancements" {
                 $script:VendorDir = $oldVendorDir
             }
         }
+
+        It "Rejects fast no-op when a git cache only has ignored residue" {
+            $oldVendorDir = $script:VendorDir
+            try {
+                $script:VendorDir = Join-Path $TestDrive "vendor-fast-noop-ignored"
+                $vendorPath = Join-Path $script:VendorDir "demo-vendor"
+                New-Item -ItemType Directory -Path $vendorPath -Force | Out-Null
+
+                $cfg = [pscustomobject]@{
+                    vendors = @([pscustomobject]@{ name = "demo-vendor"; repo = "https://example.com/vendor.git"; ref = "main" })
+                    imports = @()
+                }
+                $items = @([pscustomobject]@{ type = "vendor"; name = "demo-vendor"; current = "abc"; target = "abc"; changed = $false })
+
+                Mock Test-IsGitRepoRoot { $true } -ParameterFilter { $path -eq $vendorPath }
+                Mock Invoke-GitCapture { "!! old-output/" } -ParameterFilter { $GitArgs[0] -eq "status" -and $GitArgs -contains "--ignored" }
+
+                (Test-UpdateCanFastNoop $cfg $items) | Should Be $false
+                Assert-MockCalled Invoke-GitCapture -Times 1 -Exactly -Scope It -ParameterFilter {
+                    $GitArgs[0] -eq "status" -and $GitArgs -contains "--ignored"
+                }
+            }
+            finally {
+                $script:VendorDir = $oldVendorDir
+            }
+        }
     }
 
     Context "Fine-Grained update_force" {

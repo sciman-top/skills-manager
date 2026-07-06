@@ -610,32 +610,38 @@ function Clear-ReadOnlyAttributesRecursively([string]$path) {
     }
     catch {}
 }
-function Repair-GitCleanPermissionDenied([string]$repoPath, [string]$errorMessage) {
-    if ([string]::IsNullOrWhiteSpace($errorMessage)) { return $false }
-    if ($errorMessage -notmatch "git clean\s+-fd") { return $false }
-    if ($errorMessage -notmatch "failed to remove|Permission denied|拒绝访问|Directory not empty") { return $false }
+function Repair-GitFailedRemovePaths([string]$repoPath, [string[]]$rawPaths, [string]$contextLabel) {
+    if ([string]::IsNullOrWhiteSpace($repoPath)) { return $false }
+    if ($null -eq $rawPaths -or $rawPaths.Count -eq 0) { return $false }
+    if ([string]::IsNullOrWhiteSpace($contextLabel)) { $contextLabel = "git" }
 
-    $rawPaths = @(Get-GitCleanFailurePathsFromMessage $errorMessage)
-    if ($rawPaths.Count -eq 0) { return $false }
     $repaired = $false
-    foreach ($raw in $rawPaths) {
+    foreach ($raw in @($rawPaths)) {
         $fullPath = Resolve-GitCleanFailurePath $repoPath $raw
         if ([string]::IsNullOrWhiteSpace($fullPath)) {
-            Log ("git clean 修复跳过（路径超出仓库边界或无效）：{0}" -f $raw) "WARN"
+            Log ("{0} 修复跳过（路径超出仓库边界或无效）：{1}" -f $contextLabel, $raw) "WARN"
             continue
         }
         if (-not (Test-Path -LiteralPath $fullPath)) { continue }
         Clear-ReadOnlyAttributesRecursively $fullPath
         $removed = Invoke-RemoveItemWithRetry $fullPath -Recurse -IgnoreFailure -SilentIgnore
         if ($removed -or -not (Test-Path -LiteralPath $fullPath)) {
-            Log ("git clean 权限修复完成：{0}" -f $fullPath) "WARN"
+            Log ("{0} 权限修复完成：{1}" -f $contextLabel, $fullPath) "WARN"
             $repaired = $true
         }
         else {
-            Log ("git clean 权限修复未完成：{0}" -f $fullPath) "WARN"
+            Log ("{0} 权限修复未完成：{1}" -f $contextLabel, $fullPath) "WARN"
         }
     }
     return $repaired
+}
+function Repair-GitCleanPermissionDenied([string]$repoPath, [string]$errorMessage) {
+    if ([string]::IsNullOrWhiteSpace($errorMessage)) { return $false }
+    if ($errorMessage -notmatch "git clean\s+-f") { return $false }
+    if ($errorMessage -notmatch "failed to remove|Permission denied|拒绝访问|Directory not empty") { return $false }
+
+    $rawPaths = @(Get-GitCleanFailurePathsFromMessage $errorMessage)
+    return (Repair-GitFailedRemovePaths $repoPath $rawPaths "git clean")
 }
 function Test-GitProcessRunning {
     try {
@@ -757,7 +763,7 @@ function Git-HardResetClean([bool]$forceClean) {
     $maxCleanAttempts = 12
     for ($attempt = 1; $attempt -le $maxCleanAttempts; $attempt++) {
         try {
-            Invoke-Git @("clean", "-fd")
+            Invoke-Git @("clean", "-ffdx")
             return
         }
         catch {
@@ -766,6 +772,171 @@ function Git-HardResetClean([bool]$forceClean) {
             Log ("git clean 失败，已执行权限修复并重试（{0}/{1}）" -f $attempt, $maxCleanAttempts) "WARN"
         }
     }
+}
+function Normalize-GitSparsePath([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    $p = (To-GitPath $path).Trim().Trim("/")
+    if ([string]::IsNullOrWhiteSpace($p) -or $p -eq ".") { return $null }
+    return $p
+}
+function Get-NormalizedGitSparsePaths([string[]]$sparsePaths) {
+    $set = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($path in @($sparsePaths)) {
+        $p = Normalize-GitSparsePath $path
+        if ([string]::IsNullOrWhiteSpace($p)) { continue }
+        $set.Add($p) | Out-Null
+    }
+    return @($set)
+}
+function Test-GitPathCoveredBySparsePath([string]$gitPath, [string[]]$sparsePaths) {
+    if ([string]::IsNullOrWhiteSpace($gitPath)) { return $false }
+    $p = (To-GitPath $gitPath).Trim().Trim("/")
+    foreach ($sparsePath in @($sparsePaths)) {
+        if ($p.Equals($sparsePath, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+        if ($p.StartsWith(($sparsePath + "/"), [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
+}
+function Test-GitSparseCandidateContainsKeptPath([string]$candidate, [string[]]$sparsePaths) {
+    if ([string]::IsNullOrWhiteSpace($candidate)) { return $false }
+    foreach ($sparsePath in @($sparsePaths)) {
+        if ($sparsePath.Equals($candidate, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+        if ($sparsePath.StartsWith(($candidate + "/"), [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
+}
+function Get-GitSparsePruneCandidates([string[]]$trackedPaths, [string[]]$sparsePaths) {
+    $normalizedSparsePaths = @(Get-NormalizedGitSparsePaths $sparsePaths)
+    if ($normalizedSparsePaths.Count -eq 0) { return @() }
+
+    $candidates = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($trackedPath in @($trackedPaths)) {
+        $gitPath = Normalize-GitSparsePath $trackedPath
+        if ([string]::IsNullOrWhiteSpace($gitPath)) { continue }
+        if (Test-GitPathCoveredBySparsePath $gitPath $normalizedSparsePaths) { continue }
+
+        $parts = @($gitPath -split "/" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($parts.Count -eq 0) { continue }
+        $maxAncestorDepth = [Math]::Max(1, $parts.Count - 1)
+        for ($depth = 1; $depth -le $maxAncestorDepth; $depth++) {
+            $candidate = ($parts[0..($depth - 1)] -join "/")
+            if (Test-GitSparseCandidateContainsKeptPath $candidate $normalizedSparsePaths) { continue }
+            $candidates.Add($candidate) | Out-Null
+            break
+        }
+    }
+    return @($candidates | Sort-Object { $_.Length } -Descending)
+}
+function Remove-GitSparseCheckoutResiduals([string[]]$sparsePaths) {
+    $normalizedSparsePaths = @(Get-NormalizedGitSparsePaths $sparsePaths)
+    if ($normalizedSparsePaths.Count -eq 0) { return }
+
+    $repoPath = (Get-Location).Path
+    try {
+        $repoFull = [System.IO.Path]::GetFullPath($repoPath)
+    }
+    catch {
+        return
+    }
+    $trackedPaths = @(Invoke-GitCaptureLines @("ls-files"))
+    $candidates = @(Get-GitSparsePruneCandidates $trackedPaths $normalizedSparsePaths)
+    foreach ($candidate in $candidates) {
+        $candidatePath = $candidate -replace "/", "\"
+        $fullPath = $null
+        try {
+            $fullPath = [System.IO.Path]::GetFullPath((Join-Path $repoFull $candidatePath))
+        }
+        catch {
+            continue
+        }
+        if (-not (Is-PathInsideOrEqual $fullPath $repoFull) -or $fullPath.Equals($repoFull, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+        if (-not (Test-Path -LiteralPath $fullPath)) { continue }
+        Clear-ReadOnlyAttributesRecursively $fullPath
+        $removed = Invoke-RemoveItemWithRetry $fullPath -Recurse -IgnoreFailure -SilentIgnore
+        if ($removed -or -not (Test-Path -LiteralPath $fullPath)) {
+            Log ("sparse-checkout 预清理残留目录：{0}" -f $candidate) "INFO"
+        }
+        else {
+            Log ("sparse-checkout 残留目录预清理失败（已交由 git 后续处理）：{0}" -f $candidate) "WARN"
+        }
+    }
+}
+function Repair-GitSparseCheckoutRemoveWarnings([string]$repoPath, $outputLines) {
+    $warningLines = @()
+    foreach ($line in @($outputLines)) {
+        $text = Convert-GitOutputLineToText $line
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        if ($text -match "warning:\s+failed to remove directory") { $warningLines += $text }
+    }
+    if ($warningLines.Count -eq 0) { return $false }
+
+    $rawPaths = @(Get-GitCleanFailurePathsFromMessage ($warningLines -join " | "))
+    if ($rawPaths.Count -eq 0) { return $false }
+    return (Repair-GitFailedRemovePaths $repoPath $rawPaths "sparse-checkout")
+}
+function Invoke-GitSparseCheckoutCommand([string[]]$GitArgs) {
+    if ($DryRun) {
+        Log ("DRYRUN git {0}" -f ($GitArgs -join " "))
+        return
+    }
+    $cmdText = ("git {0}" -f ($GitArgs -join " "))
+    Log $cmdText
+    $canTuneNativeErrPref = ($PSVersionTable.PSVersion.Major -ge 7)
+    $prevNativeErrorPref = $null
+    $prevErrorActionPreference = $ErrorActionPreference
+    try {
+        if ($canTuneNativeErrPref) {
+            $prevNativeErrorPref = $PSNativeCommandUseErrorActionPreference
+            $PSNativeCommandUseErrorActionPreference = $false
+        }
+        $ErrorActionPreference = "Continue"
+        $output = & git @GitArgs 2>&1
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $prevErrorActionPreference
+        if ($canTuneNativeErrPref) {
+            $PSNativeCommandUseErrorActionPreference = $prevNativeErrorPref
+        }
+    }
+
+    $deferredRemoveWarnings = @()
+    foreach ($line in @($output)) {
+        $text = Convert-GitOutputLineToText $line
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        if ($text -match "warning:\s+failed to remove directory") {
+            $deferredRemoveWarnings += $text
+            continue
+        }
+        Write-Host $text
+    }
+
+    if ($exitCode -ne 0) {
+        foreach ($text in $deferredRemoveWarnings) { Write-Host $text }
+        $summary = Get-GitOutputSummary $output
+        if ([string]::IsNullOrWhiteSpace($summary)) {
+            throw ("git 失败：{0}" -f $cmdText)
+        }
+        throw ("git 失败：{0}；详情：{1}" -f $cmdText, $summary)
+    }
+
+    if ($deferredRemoveWarnings.Count -gt 0) {
+        $repoPath = (Get-Location).Path
+        if (-not (Repair-GitSparseCheckoutRemoveWarnings $repoPath $deferredRemoveWarnings)) {
+            foreach ($text in $deferredRemoveWarnings) { Write-Host $text }
+        }
+    }
+}
+function Set-GitSparseCheckout([string[]]$sparsePaths) {
+    $normalizedSparsePaths = @(Get-NormalizedGitSparsePaths $sparsePaths)
+    if ($normalizedSparsePaths.Count -eq 0) {
+        try { Invoke-Git @("sparse-checkout", "disable") } catch {}
+        return
+    }
+    Remove-GitSparseCheckoutResiduals $normalizedSparsePaths
+    Invoke-GitSparseCheckoutCommand @("sparse-checkout", "init", "--cone")
+    Remove-GitSparseCheckoutResiduals $normalizedSparsePaths
+    Invoke-GitSparseCheckoutCommand (@("sparse-checkout", "set") + $normalizedSparsePaths)
 }
 function Repair-StaleGitLockAfterFailure([string]$repoPath, $outputLines) {
     if (-not (Test-GitIndexLockIssue $outputLines)) { return $false }
@@ -786,8 +957,7 @@ function Ensure-Repo([string]$path, [string]$repo, [string]$ref, [string]$sparse
             Invoke-Git @("clone", "--filter=blob:none", "--no-checkout", $repo, $path)
             Push-Location $path
             try {
-                Invoke-Git @("sparse-checkout", "init", "--cone")
-                Invoke-Git @("sparse-checkout", "set", $sparsePath)
+                Set-GitSparseCheckout @($sparsePath)
                 Invoke-Git @("checkout", $ref)
             }
             finally { Pop-Location }
@@ -826,13 +996,7 @@ function Ensure-Repo([string]$path, [string]$repo, [string]$ref, [string]$sparse
                 if (-not (Confirm-CleanRepo $path)) { throw "已取消：存在本地改动，未执行清理。" }
             }
             Git-HardResetClean $forceClean
-            if (-not $sparsePath -or $sparsePath -eq ".") {
-                try { Invoke-Git @("sparse-checkout", "disable") } catch {}
-            }
-            if ($sparsePath -and $sparsePath -ne ".") {
-                Invoke-Git @("sparse-checkout", "init", "--cone")
-                Invoke-Git @("sparse-checkout", "set", $sparsePath)
-            }
+            Set-GitSparseCheckout @($sparsePath)
             if ($doFetch) {
                 Invoke-Git @("fetch", "--all", "--tags")
             }

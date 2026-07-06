@@ -91,7 +91,7 @@ Describe "Git lock recovery" {
 
             $script:calls[0] | Should Be "merge --abort"
             $script:calls[1] | Should Be "reset --hard"
-            $script:calls[2] | Should Be "clean -fd"
+            $script:calls[2] | Should Be "clean -ffdx"
         }
 
         It "Removes stale repo index.lock before git reset and clean" {
@@ -114,7 +114,7 @@ Describe "Git lock recovery" {
 
             (Test-Path $lockPath) | Should Be $false
             Assert-MockCalled Invoke-Git -Times 1 -ParameterFilter { $GitArgs[0] -eq "reset" -and $GitArgs[1] -eq "--hard" }
-            Assert-MockCalled Invoke-Git -Times 1 -ParameterFilter { $GitArgs[0] -eq "clean" -and $GitArgs[1] -eq "-fd" }
+            Assert-MockCalled Invoke-Git -Times 1 -ParameterFilter { $GitArgs[0] -eq "clean" -and $GitArgs[1] -eq "-ffdx" }
         }
 
         It "Retries git clean after repairing permission denied paths" {
@@ -134,7 +134,7 @@ Describe "Git lock recovery" {
                 if ($GitArgs[0] -eq "clean") {
                     $script:cleanCalls++
                     if ($script:cleanCalls -eq 1) {
-                        throw "git 失败：git clean -fd；详情：warning: failed to remove stale/: Permission denied"
+                        throw "git 失败：git clean -ffdx；详情：warning: failed to remove stale/: Permission denied"
                     }
                 }
             }
@@ -165,7 +165,7 @@ Describe "Git lock recovery" {
             New-Item -ItemType Directory -Path $outside -Force | Out-Null
             Set-Content -Path (Join-Path $outside "keep.txt") -Value "keep"
 
-            $msg = "git 失败：git clean -fd；详情：warning: failed to remove inside/: Permission denied | warning: failed to remove ../outside/: Permission denied"
+            $msg = "git 失败：git clean -ffdx；详情：warning: failed to remove inside/: Permission denied | warning: failed to remove ../outside/: Permission denied"
             $repaired = Repair-GitCleanPermissionDenied $repo $msg
 
             $repaired | Should Be $true
@@ -182,6 +182,72 @@ Describe "Git lock recovery" {
             )
 
             $summary | Should Be "warning: failed to remove path-a/: Permission denied | warning: failed to remove path-b/: Permission denied | warning: failed to remove path-c/: Permission denied"
+        }
+    }
+
+    Context "Sparse checkout residual cleanup" {
+        It "Prunes tracked paths outside the next sparse set without removing kept ancestors" {
+            $candidates = Get-GitSparsePruneCandidates @(
+                "skills/keep/SKILL.md"
+                "skills/old/scripts/helper.js"
+                "skills/parent/keep/SKILL.md"
+                "skills/parent/old/SKILL.md"
+                "src/tool.ps1"
+            ) @(
+                "skills/keep"
+                "skills/parent/keep"
+            )
+
+            $candidates | Should Contain "skills/old"
+            $candidates | Should Contain "skills/parent/old"
+            $candidates | Should Contain "src"
+            $candidates | Should Not Contain "skills"
+            $candidates | Should Not Contain "skills/parent"
+        }
+
+        It "Removes read-only directory shells outside the next sparse set" {
+            $repo = Join-Path $TestDrive "repo-sparse-residue"
+            $keepDir = Join-Path $repo "skills\keep"
+            $oldDir = Join-Path $repo "skills\old\scripts"
+            New-Item -ItemType Directory -Path $keepDir -Force | Out-Null
+            New-Item -ItemType Directory -Path $oldDir -Force | Out-Null
+            Set-Content -Path (Join-Path $keepDir "SKILL.md") -Value "keep"
+            $oldRoot = Join-Path $repo "skills\old"
+            $oldItem = Get-Item -LiteralPath $oldRoot -Force
+            $oldItem.Attributes = ($oldItem.Attributes -bor [System.IO.FileAttributes]::ReadOnly)
+
+            Mock Invoke-GitCaptureLines {
+                @(
+                    "skills/keep/SKILL.md"
+                    "skills/old/scripts/helper.js"
+                )
+            } -ParameterFilter { $GitArgs[0] -eq "ls-files" }
+
+            Push-Location $repo
+            try {
+                Remove-GitSparseCheckoutResiduals @("skills/keep")
+            }
+            finally {
+                Pop-Location
+            }
+
+            (Test-Path -LiteralPath $oldRoot) | Should Be $false
+            (Test-Path -LiteralPath $keepDir) | Should Be $true
+        }
+
+        It "Repairs sparse-checkout remove warnings returned with exit code zero" {
+            $repo = Join-Path $TestDrive "repo-sparse-warning"
+            $staleDir = Join-Path $repo "skills\old"
+            New-Item -ItemType Directory -Path $staleDir -Force | Out-Null
+            $staleItem = Get-Item -LiteralPath $staleDir -Force
+            $staleItem.Attributes = ($staleItem.Attributes -bor [System.IO.FileAttributes]::ReadOnly)
+
+            $repaired = Repair-GitSparseCheckoutRemoveWarnings $repo @(
+                "warning: failed to remove directory 'skills/old/'"
+            )
+
+            $repaired | Should Be $true
+            (Test-Path -LiteralPath $staleDir) | Should Be $false
         }
     }
 
