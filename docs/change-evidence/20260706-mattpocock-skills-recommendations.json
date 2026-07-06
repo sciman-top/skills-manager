@@ -1,0 +1,232 @@
+{
+  "subject": "mattpocock-skills-fit-and-dedupe",
+  "generated_at": "2026-07-06",
+  "workspace": "D:/CODE/skills-manager",
+  "overall_assessment": {
+    "fit_for_user": "high_for_engineering_workflows_partial_for_current_stack",
+    "best_practice_tier": "top_tier_community_reference_not_official_spec",
+    "recommended_strategy": "install_2_absorb_5_keep_existing"
+  },
+  "source_references": [
+    {
+      "label": "mattpocock skills repo",
+      "url": "https://github.com/mattpocock/skills"
+    },
+    {
+      "label": "mattpocock engineering skills",
+      "url": "https://github.com/mattpocock/skills/tree/main/skills/engineering"
+    },
+    {
+      "label": "github agent skills docs",
+      "url": "https://docs.github.com/en/copilot/concepts/agents/about-agent-skills"
+    },
+    {
+      "label": "vscode agent skills docs",
+      "url": "https://code.visualstudio.com/docs/agent-customization/agent-skills"
+    }
+  ],
+  "install": [
+    {
+      "skill": "research",
+      "repo": "mattpocock/skills",
+      "skill_path": "skills/engineering/research",
+      "priority": "high",
+      "fit": "strong",
+      "reason": "High fit for official-docs-first research, community project comparison, and best-practice synthesis.",
+      "local_overlap": "partial",
+      "install_command": "./skills.ps1 add mattpocock/skills --skill skills/engineering/research --ref main --mode manual --sparse"
+    },
+    {
+      "skill": "grill-with-docs",
+      "repo": "mattpocock/skills",
+      "skill_path": "skills/engineering/grill-with-docs",
+      "priority": "high",
+      "fit": "strong",
+      "reason": "Good documented sibling to grill-me; fits the user's preference for durable written outputs instead of chat-only clarification.",
+      "local_overlap": "partial",
+      "install_command": "./skills.ps1 add mattpocock/skills --skill skills/engineering/grill-with-docs --ref main --mode manual --sparse"
+    }
+  ],
+  "keep_existing": [
+    {
+      "skill": "grill-me",
+      "reason": "Keep as the fast stateless default. Add grill-with-docs as a documented companion, not a replacement."
+    },
+    {
+      "skill": "systematic-debugging",
+      "reason": "Already covers root-cause-first debugging well."
+    },
+    {
+      "skill": "test-driven-development",
+      "reason": "Already covers the TDD lane; no need for another parallel TDD skill."
+    },
+    {
+      "skill": "code-review-and-quality",
+      "reason": "Already covers review flow and quality gates."
+    },
+    {
+      "skill": "api-and-interface-design",
+      "reason": "Already covers design and interface-shaping concerns."
+    },
+    {
+      "skill": "architecture-patterns",
+      "reason": "Already covers architecture shaping and implementation patterns."
+    },
+    {
+      "skill": "improve-codebase-architecture",
+      "reason": "Already covers repo-wide architecture scanning and improvement guidance."
+    },
+    {
+      "skill": "write-a-prd",
+      "reason": "Already covers PRD generation."
+    },
+    {
+      "skill": "prd-to-issues",
+      "reason": "Already covers issue breakdown from plans and specs."
+    }
+  ],
+  "do_not_install": [
+    {
+      "skill": "diagnosing-bugs",
+      "reason": "Too much overlap with systematic-debugging and debugging-and-error-recovery."
+    },
+    {
+      "skill": "tdd",
+      "reason": "Too much overlap with test-driven-development."
+    },
+    {
+      "skill": "code-review",
+      "reason": "Too much overlap with code-review-and-quality."
+    },
+    {
+      "skill": "domain-modeling",
+      "reason": "Useful ideas, but local design skills already cover the lane well enough."
+    },
+    {
+      "skill": "codebase-design",
+      "reason": "Useful ideas, but local architecture skills already cover the lane well enough."
+    },
+    {
+      "skill": "improve-codebase-architecture",
+      "reason": "Local stack already has this capability."
+    },
+    {
+      "skill": "to-prd",
+      "reason": "Local stack already has write-a-prd."
+    },
+    {
+      "skill": "to-issues",
+      "reason": "Local stack already has prd-to-issues."
+    },
+    {
+      "skill": "triage",
+      "reason": "Good skill, but the user's current workflow is not issue-tracker-first and would pay extra process cost."
+    },
+    {
+      "skill": "setup-matt-pocock-skills",
+      "reason": "Too opinionated for the current multi-repo, Windows-first, skills-manager-driven setup."
+    },
+    {
+      "skill": "ask-matt",
+      "reason": "Low marginal value in a curated local stack where routing is already explicit."
+    }
+  ],
+  "method_only_adoptions": [
+    {
+      "source_skill": "diagnosing-bugs",
+      "adopt_into": [
+        "systematic-debugging",
+        "debugging-and-error-recovery"
+      ],
+      "adoption_note": "Borrow any concise reproduce-minimize-instrument-hypothesis-verify wording, but do not install a parallel bug triage skill."
+    },
+    {
+      "source_skill": "domain-modeling",
+      "adopt_into": [
+        "grill-me",
+        "api-and-interface-design",
+        "architecture-patterns"
+      ],
+      "adoption_note": "Borrow clearer terminology and entity-boundary prompts."
+    },
+    {
+      "source_skill": "codebase-design",
+      "adopt_into": [
+        "improve-codebase-architecture",
+        "architecture-patterns"
+      ],
+      "adoption_note": "Borrow deep-module, seam, and interface-shaping language."
+    },
+    {
+      "source_skill": "to-prd",
+      "adopt_into": [
+        "write-a-prd"
+      ],
+      "adoption_note": "Borrow any better PRD outline and acceptance-criteria shaping, but keep one primary PRD skill."
+    },
+    {
+      "source_skill": "to-issues",
+      "adopt_into": [
+        "prd-to-issues"
+      ],
+      "adoption_note": "Borrow any stronger vertical-slice or dependency-order heuristics."
+    }
+  ],
+  "optional_dedupe_candidates": [
+    {
+      "cluster": "ppt_courseware",
+      "primary": "custom-teacher-courseware-ppt",
+      "secondary": [
+        "powerpoint-automation",
+        "baoyu-slide-deck",
+        "guizang-ppt-skill",
+        "ppt-master"
+      ],
+      "recommendation": "mark_primary_and_secondary_only",
+      "uninstall_now": false,
+      "reason": "These still differ by output medium and workflow, so immediate removal would be premature."
+    },
+    {
+      "cluster": "docx_documents",
+      "primary": "python-docx",
+      "secondary": [
+        "docx",
+        "documents:documents"
+      ],
+      "recommendation": "mark_primary_and_secondary_only",
+      "uninstall_now": false,
+      "reason": "The overlap is real, but each variant still targets a slightly different execution surface."
+    },
+    {
+      "cluster": "spreadsheets",
+      "primary": "openpyxl",
+      "secondary": [
+        "Excel",
+        "spreadsheets",
+        "xlsx"
+      ],
+      "recommendation": "mark_primary_and_secondary_only",
+      "uninstall_now": false,
+      "reason": "Best to consolidate by preferred execution style first, then remove any proven-unused duplicates later."
+    },
+    {
+      "cluster": "browser_automation",
+      "primary": "playwright",
+      "secondary": [
+        "agent-browser",
+        "use-my-browser",
+        "chrome:control-chrome"
+      ],
+      "recommendation": "mark_primary_and_secondary_only",
+      "uninstall_now": false,
+      "reason": "Different browser contexts still matter: clean automation, existing session reuse, and visible browser control are not interchangeable."
+    }
+  ],
+  "uninstall_now": [],
+  "next_steps": [
+    "Install research and grill-with-docs only.",
+    "Do not uninstall any engineering skill solely because mattpocock/skills exists.",
+    "If dedupe is needed, define primary and secondary skills by cluster before removing anything.",
+    "If the two new skills work well in practice, then decide whether to refine grill-me and write-a-prd using method-only adoptions."
+  ]
+}

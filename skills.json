@@ -522,6 +522,16 @@
       "vendor": "manual",
       "to": "use-my-browser",
       "from": "use-my-browser"
+    },
+    {
+      "from": "research",
+      "to": "research",
+      "vendor": "manual"
+    },
+    {
+      "to": "grill-with-docs",
+      "from": "grill-with-docs",
+      "vendor": "manual"
     }
   ],
   "imports": [
@@ -900,6 +910,22 @@
       "repo": "https://github.com/xixu-me/skills.git",
       "name": "use-my-browser",
       "skill": "skills\\use-my-browser"
+    },
+    {
+      "name": "research",
+      "ref": "main",
+      "skill": "skills\\engineering\\research",
+      "repo": "https://github.com/mattpocock/skills.git",
+      "mode": "manual",
+      "sparse": true
+    },
+    {
+      "ref": "main",
+      "name": "grill-with-docs",
+      "repo": "https://github.com/mattpocock/skills.git",
+      "skill": "skills\\engineering\\grill-with-docs",
+      "mode": "manual",
+      "sparse": true
     }
   ],
   "targets": [
