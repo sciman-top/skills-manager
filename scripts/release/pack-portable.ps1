@@ -136,7 +136,10 @@ function Get-PortableFileSet([string]$RootPath) {
         ".governed-ai\quick-test-slice.prompt.md",
         ".governed-ai\quick-test-slice.recommendation.json",
         "docs\governed-runtime-batch-validation.md",
-        "docs\change-evidence\template.md"
+        "docs\change-evidence\template.md",
+        "references\README.md",
+        "references\reference-shelf.manifest.json",
+        "references\updates\README.md"
     )) {
         Add-PortableFile $files $RootPath $file
     }

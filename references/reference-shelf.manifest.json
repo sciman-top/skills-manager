@@ -1,0 +1,169 @@
+{
+  "schema_version": 1,
+  "references_root": "D:\\CODE\\external\\skills-manager-references",
+  "default_refresh_set": [
+    "codex",
+    "openai-skills",
+    "anthropics-skills",
+    "gemini-cli",
+    "modelcontextprotocol",
+    "servers",
+    "registry"
+  ],
+  "repos": [
+    {
+      "name": "codex",
+      "tier": "core-mainline",
+      "status": "active",
+      "upstream_url": "https://github.com/openai/codex.git",
+      "relative_path": "core/codex"
+    },
+    {
+      "name": "openai-skills",
+      "tier": "core-mainline",
+      "status": "active",
+      "upstream_url": "https://github.com/openai/skills.git",
+      "relative_path": "core/openai-skills"
+    },
+    {
+      "name": "anthropics-skills",
+      "tier": "core-mainline",
+      "status": "active",
+      "upstream_url": "https://github.com/anthropics/skills.git",
+      "relative_path": "core/anthropics-skills"
+    },
+    {
+      "name": "gemini-cli",
+      "tier": "core-mainline",
+      "status": "active",
+      "upstream_url": "https://github.com/google-gemini/gemini-cli.git",
+      "relative_path": "core/gemini-cli"
+    },
+    {
+      "name": "modelcontextprotocol",
+      "tier": "core-mainline",
+      "status": "active",
+      "upstream_url": "https://github.com/modelcontextprotocol/modelcontextprotocol.git",
+      "relative_path": "core/modelcontextprotocol"
+    },
+    {
+      "name": "servers",
+      "tier": "core-mainline",
+      "status": "active",
+      "upstream_url": "https://github.com/modelcontextprotocol/servers.git",
+      "relative_path": "core/servers"
+    },
+    {
+      "name": "registry",
+      "tier": "core-mainline",
+      "status": "active",
+      "upstream_url": "https://github.com/modelcontextprotocol/registry.git",
+      "relative_path": "core/registry"
+    },
+    {
+      "name": "vercel-agent-skills",
+      "tier": "secondary",
+      "status": "not-cloned",
+      "upstream_url": "https://github.com/vercel-labs/agent-skills.git",
+      "relative_path": "secondary/vercel-agent-skills"
+    },
+    {
+      "name": "obra-superpowers",
+      "tier": "secondary",
+      "status": "not-cloned",
+      "upstream_url": "https://github.com/obra/superpowers.git",
+      "relative_path": "secondary/obra-superpowers"
+    },
+    {
+      "name": "wshobson-agents",
+      "tier": "secondary",
+      "status": "not-cloned",
+      "upstream_url": "https://github.com/wshobson/agents.git",
+      "relative_path": "secondary/wshobson-agents"
+    },
+    {
+      "name": "mattpocock-skills",
+      "tier": "secondary",
+      "status": "not-cloned",
+      "upstream_url": "https://github.com/mattpocock/skills.git",
+      "relative_path": "secondary/mattpocock-skills"
+    },
+    {
+      "name": "trailofbits-skills",
+      "tier": "secondary",
+      "status": "not-cloned",
+      "upstream_url": "https://github.com/trailofbits/skills.git",
+      "relative_path": "secondary/trailofbits-skills"
+    },
+    {
+      "name": "awesome-copilot",
+      "tier": "secondary",
+      "status": "not-cloned",
+      "upstream_url": "https://github.com/github/awesome-copilot.git",
+      "relative_path": "secondary/awesome-copilot"
+    },
+    {
+      "name": "workspace-hub",
+      "tier": "conditional-not-cloned",
+      "status": "not-cloned",
+      "upstream_url": "https://github.com/vamseeachanta/workspace-hub.git",
+      "relative_path": "conditional/workspace-hub"
+    },
+    {
+      "name": "aktsmm-agent-skills",
+      "tier": "conditional-not-cloned",
+      "status": "not-cloned",
+      "upstream_url": "https://github.com/aktsmm/agent-skills.git",
+      "relative_path": "conditional/aktsmm-agent-skills"
+    },
+    {
+      "name": "manim-skill",
+      "tier": "conditional-not-cloned",
+      "status": "not-cloned",
+      "upstream_url": "https://github.com/adithya-s-k/manim_skill.git",
+      "relative_path": "conditional/manim-skill"
+    },
+    {
+      "name": "playwright-best-practices-skill",
+      "tier": "conditional-not-cloned",
+      "status": "not-cloned",
+      "upstream_url": "https://github.com/currents-dev/playwright-best-practices-skill.git",
+      "relative_path": "conditional/playwright-best-practices-skill"
+    },
+    {
+      "name": "supabase-agent-skills",
+      "tier": "conditional-not-cloned",
+      "status": "not-cloned",
+      "upstream_url": "https://github.com/supabase/agent-skills.git",
+      "relative_path": "conditional/supabase-agent-skills"
+    },
+    {
+      "name": "antd-skill",
+      "tier": "conditional-not-cloned",
+      "status": "not-cloned",
+      "upstream_url": "https://github.com/ant-design/antd-skill.git",
+      "relative_path": "conditional/antd-skill"
+    },
+    {
+      "name": "slidev",
+      "tier": "conditional-not-cloned",
+      "status": "not-cloned",
+      "upstream_url": "https://github.com/slidevjs/slidev.git",
+      "relative_path": "conditional/slidev"
+    },
+    {
+      "name": "knowledge-work-plugins",
+      "tier": "conditional-not-cloned",
+      "status": "not-cloned",
+      "upstream_url": "https://github.com/anthropics/knowledge-work-plugins.git",
+      "relative_path": "conditional/knowledge-work-plugins"
+    },
+    {
+      "name": "remotion-skills",
+      "tier": "conditional-not-cloned",
+      "status": "not-cloned",
+      "upstream_url": "https://github.com/remotion-dev/skills.git",
+      "relative_path": "conditional/remotion-skills"
+    }
+  ]
+}
