@@ -133,11 +133,8 @@ function Get-PortableFileSet([string]$RootPath) {
     foreach ($file in @(
         ".githooks\pre-commit",
         ".governed-ai\dependency-baseline.json",
-        ".governed-ai\light-pack.json",
         ".governed-ai\quick-test-slice.prompt.md",
         ".governed-ai\quick-test-slice.recommendation.json",
-        ".governed-ai\repo-profile.json",
-        ".governed-ai\verify-powershell-policy.py",
         "docs\governed-runtime-batch-validation.md",
         "docs\change-evidence\template.md"
     )) {
