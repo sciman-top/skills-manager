@@ -68,6 +68,32 @@ Describe "Git lock recovery" {
     }
 
     Context "Git-HardResetClean" {
+        It "Aborts in-progress merge before reset and clean" {
+            $repo = Join-Path $TestDrive "repo-merge-abort"
+            $gitDir = Join-Path $repo ".git"
+            New-Item -ItemType Directory -Path $gitDir -Force | Out-Null
+            Set-Content -Path (Join-Path $gitDir "MERGE_HEAD") -Value "merge"
+
+            Mock Test-GitProcessRunning { $false }
+            $script:calls = New-Object System.Collections.Generic.List[string]
+            Mock Invoke-Git {
+                param($GitArgs)
+                $script:calls.Add((@($GitArgs) -join " ")) | Out-Null
+            }
+
+            Push-Location $repo
+            try {
+                Git-HardResetClean $true
+            }
+            finally {
+                Pop-Location
+            }
+
+            $script:calls[0] | Should Be "merge --abort"
+            $script:calls[1] | Should Be "reset --hard"
+            $script:calls[2] | Should Be "clean -fd"
+        }
+
         It "Removes stale repo index.lock before git reset and clean" {
             $repo = Join-Path $TestDrive "repo3"
             $gitDir = Join-Path $repo ".git"
@@ -145,6 +171,17 @@ Describe "Git lock recovery" {
             $repaired | Should Be $true
             (Test-Path -LiteralPath $inside) | Should Be $false
             (Test-Path -LiteralPath (Join-Path $outside "keep.txt")) | Should Be $true
+        }
+
+        It "Summarizes all permission denied paths instead of only the last two lines" {
+            $summary = Get-GitOutputSummary @(
+                "warning: failed to remove path-a/: Permission denied"
+                "warning: failed to remove path-b/: Permission denied"
+                "warning: failed to remove path-c/: Permission denied"
+                "fatal: some clean paths could not be removed"
+            )
+
+            $summary | Should Be "warning: failed to remove path-a/: Permission denied | warning: failed to remove path-b/: Permission denied | warning: failed to remove path-c/: Permission denied"
         }
     }
 

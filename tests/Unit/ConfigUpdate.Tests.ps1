@@ -420,6 +420,39 @@ Describe "Config And Update Enhancements" {
             }
         }
 
+        It "Does not preserve merge-in-progress manual imports as local dirty changes" {
+            $oldImportDir = $script:ImportDir
+            try {
+                $script:ImportDir = Join-Path $TestDrive "imports-merge-state"
+                $cache = Join-Path $script:ImportDir "mcp-cli"
+                New-Item -ItemType Directory -Path $cache -Force | Out-Null
+
+                $cfg = [pscustomobject]@{
+                    update_force = $true
+                    vendors = @()
+                    imports = @(
+                        [pscustomobject]@{
+                            name = "mcp-cli"
+                            mode = "manual"
+                        }
+                    )
+                }
+                Mock Test-IsGitRepoRoot { $true } -ParameterFilter { $path -eq $cache }
+                Mock Test-InProgressGitOperation { $true } -ParameterFilter { $path -eq $cache }
+                Mock Has-GitChanges { throw "Has-GitChanges should not be called for merge-in-progress caches." }
+
+                $skip = @{}
+                $ok = Confirm-UpdateForce $cfg ([ref]$skip)
+
+                $ok | Should Be $true
+                $skip.Count | Should Be 0
+                Assert-MockCalled Has-GitChanges -Times 0 -Exactly
+            }
+            finally {
+                $script:ImportDir = $oldImportDir
+            }
+        }
+
         It "Skips non-git caches during parallel prefetch" {
             $oldImportDir = $script:ImportDir
             try {

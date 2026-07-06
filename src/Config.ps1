@@ -40,6 +40,17 @@ function Write-CfgChangeSummary([string]$oldRaw, $newCfg) {
     Write-Host "配置变更摘要："
     foreach ($l in $lines) { Write-Host ("- {0}" -f $l) }
 }
+function Test-InProgressGitOperation([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    $gitAdminDir = Resolve-GitAdminDir $path
+    if ([string]::IsNullOrWhiteSpace($gitAdminDir)) { return $false }
+    foreach ($marker in @("MERGE_HEAD", "rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD")) {
+        if (Test-Path -LiteralPath (Join-Path $gitAdminDir $marker)) {
+            return $true
+        }
+    }
+    return $false
+}
 function Get-DirtyUpdateTargets($cfg) {
     $items = New-Object System.Collections.Generic.List[object]
     if ($null -eq $cfg) { return @() }
@@ -48,6 +59,7 @@ function Get-DirtyUpdateTargets($cfg) {
         $path = VendorPath $v.name
         if (-not (Test-Path $path)) { continue }
         if (-not (Test-IsGitRepoRoot $path)) { continue }
+        if (Test-InProgressGitOperation $path) { continue }
         Push-Location $path
         try {
             if (Has-GitChanges) {
@@ -68,6 +80,7 @@ function Get-DirtyManualImportTargets($cfg) {
         $cache = Join-Path $ImportDir $i.name
         if (-not (Test-Path $cache)) { continue }
         if (-not (Test-IsGitRepoRoot $cache)) { continue }
+        if (Test-InProgressGitOperation $cache) { continue }
         Push-Location $cache
         try {
             if (Has-GitChanges) {

@@ -211,7 +211,7 @@ Describe "Core Functions" {
             }
         }
 
-        It "Falls back to git pull when ff-only merge fails" {
+        It "Resets hard to upstream when ff-only merge fails on cleaned caches" {
             Mock Get-GitHeadBranch { "main" }
             Mock Has-GitUpstream { $true }
             $script:syncCalls = New-Object System.Collections.Generic.List[string]
@@ -223,7 +223,24 @@ Describe "Core Functions" {
 
             Update-CurrentBranchFromUpstream $false
 
-            ($script:syncCalls -join ",") | Should Be "merge,pull"
+            ($script:syncCalls -join ",") | Should Be "merge,reset"
+        }
+
+        It "Resets hard to upstream when histories are unrelated" {
+            Mock Get-GitHeadBranch { "main" }
+            Mock Has-GitUpstream { $true }
+            $script:syncCalls = New-Object System.Collections.Generic.List[string]
+            Mock Invoke-Git {
+                param($GitArgs)
+                $script:syncCalls.Add([string]@($GitArgs)[0]) | Out-Null
+                if (@($GitArgs)[0] -eq "merge") {
+                    throw "git 失败：git merge --ff-only @{u}；详情：fatal: refusing to merge unrelated histories"
+                }
+            }
+
+            Update-CurrentBranchFromUpstream $false
+
+            ($script:syncCalls -join ",") | Should Be "merge,reset"
         }
     }
 

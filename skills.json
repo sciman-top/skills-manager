@@ -641,7 +641,7 @@
     },
     {
       "name": "d3-viz",
-      "skill": "myskills\\downloaded-skills\\design-frontend\\d3-viz",
+      "skill": "downloaded-skills\\design-frontend\\d3-viz",
       "sparse": true,
       "repo": "https://github.com/jarmen423/skills.git",
       "ref": "main",

@@ -449,6 +449,10 @@ function Has-GitUpstream {
     $up = Invoke-GitCapture @("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
     return -not [string]::IsNullOrWhiteSpace($up)
 }
+function Test-GitUnrelatedHistoriesIssue([string]$message) {
+    if ([string]::IsNullOrWhiteSpace($message)) { return $false }
+    return ($message -match "unrelated histories|拒绝合并无关的历史")
+}
 function Update-CurrentBranchFromUpstream([bool]$AllowNetworkFetch = $true) {
     $branch = Get-GitHeadBranch
     if (-not $branch -or -not (Has-GitUpstream)) {
@@ -456,7 +460,17 @@ function Update-CurrentBranchFromUpstream([bool]$AllowNetworkFetch = $true) {
         return
     }
     if ($AllowNetworkFetch) {
-        Invoke-Git @("pull")
+        try {
+            Invoke-Git @("pull")
+        }
+        catch {
+            if (Test-GitUnrelatedHistoriesIssue $_.Exception.Message) {
+                Log ("检测到本地历史与上游无共同祖先，已强制对齐：{0}" -f $branch) "WARN"
+                Invoke-Git @("reset", "--hard", "@{u}")
+                return
+            }
+            throw
+        }
         return
     }
     try {
@@ -464,8 +478,13 @@ function Update-CurrentBranchFromUpstream([bool]$AllowNetworkFetch = $true) {
         Log ("已基于本地 refs 快进分支：{0}" -f $branch)
     }
     catch {
-        Log ("本地快进失败，回退 git pull：{0}" -f $_.Exception.Message) "WARN"
-        Invoke-Git @("pull")
+        if (Test-GitUnrelatedHistoriesIssue $_.Exception.Message) {
+            Log ("检测到本地历史与上游无共同祖先，已强制对齐：{0}" -f $branch) "WARN"
+            Invoke-Git @("reset", "--hard", "@{u}")
+            return
+        }
+        Log ("本地快进失败，已强制对齐上游：{0}；原因：{1}" -f $branch, $_.Exception.Message) "WARN"
+        Invoke-Git @("reset", "--hard", "@{u}")
     }
 }
 function Has-GitChanges {
@@ -518,6 +537,10 @@ function Get-GitOutputSummary($outputLines) {
         $lines += $text
     }
     if ($lines.Count -eq 0) { return $null }
+    $permissionLines = @($lines | Where-Object { $_ -match "failed to remove|Permission denied|拒绝访问|Directory not empty" } | Select-Object -Unique)
+    if ($permissionLines.Count -gt 0) {
+        return ($permissionLines -join " | ")
+    }
     return (($lines | Select-Object -Last 2) -join " | ")
 }
 function Get-GitCleanFailurePathsFromMessage([string]$message) {
@@ -687,6 +710,33 @@ function Repair-StaleGitLockInRepo([string]$repoPath) {
     }
     throw ("检测到 Git 锁文件，但自动移除失败：{0}" -f $lockPath)
 }
+function Repair-InProgressGitOperation([string]$repoPath) {
+    if ([string]::IsNullOrWhiteSpace($repoPath)) { return $false }
+    $gitAdminDir = Resolve-GitAdminDir $repoPath
+    if ([string]::IsNullOrWhiteSpace($gitAdminDir)) { return $false }
+
+    $operations = @(
+        @{ marker = "rebase-merge"; args = @("rebase", "--abort"); label = "rebase" },
+        @{ marker = "rebase-apply"; args = @("rebase", "--abort"); label = "rebase" },
+        @{ marker = "MERGE_HEAD"; args = @("merge", "--abort"); label = "merge" },
+        @{ marker = "CHERRY_PICK_HEAD"; args = @("cherry-pick", "--abort"); label = "cherry-pick" },
+        @{ marker = "REVERT_HEAD"; args = @("revert", "--abort"); label = "revert" }
+    )
+    $repaired = $false
+    foreach ($op in $operations) {
+        $markerPath = Join-Path $gitAdminDir ([string]$op.marker)
+        if (-not (Test-Path -LiteralPath $markerPath)) { continue }
+        try {
+            Invoke-Git @($op.args)
+            Log ("检测到未完成 Git {0}，已自动中止。" -f ([string]$op.label)) "WARN"
+            $repaired = $true
+        }
+        catch {
+            throw ("检测到未完成 Git {0}，自动中止失败：{1}" -f ([string]$op.label), $_.Exception.Message)
+        }
+    }
+    return $repaired
+}
 function Confirm-CleanRepo([string]$path) {
     if (-not (Test-Path $path)) { return $true }
     Push-Location $path
@@ -699,10 +749,11 @@ function Confirm-CleanRepo([string]$path) {
 }
 function Git-HardResetClean([bool]$forceClean) {
     if (-not $forceClean) { return }
-    Repair-StaleGitLockInRepo (Get-Location).Path | Out-Null
-    Invoke-Git @("reset", "--hard")
-    Repair-StaleGitLockInRepo (Get-Location).Path | Out-Null
     $repoPath = (Get-Location).Path
+    Repair-StaleGitLockInRepo $repoPath | Out-Null
+    Repair-InProgressGitOperation $repoPath | Out-Null
+    Invoke-Git @("reset", "--hard")
+    Repair-StaleGitLockInRepo $repoPath | Out-Null
     $maxCleanAttempts = 12
     for ($attempt = 1; $attempt -le $maxCleanAttempts; $attempt++) {
         try {
