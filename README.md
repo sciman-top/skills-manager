@@ -163,6 +163,8 @@
 
 非主副本不会被删除或移动，而是写入 `~/.codex/config.toml` 的受管块，以 `[[skills.config]]` + `enabled = false` 精确停用。完整的来源、内容哈希、包哈希、选主结果和冲突记录写入 `reports/skill-projection/current.json`。配置发生变化时，原文件先备份到 `~/.codex/config-backups/config.toml.skills-projection.<timestamp>.bak`。
 
+`skill_projection.managed_link_excludes` 按受管目录名排除 Codex 的逐技能 Junction；被排除项仍保留在 `agent/`，也不影响 Claude 指向 `agent/` 的根 Junction。该字段适用于保留其他宿主所需技能、但避免其与 Codex `.system` 技能同名冲突的场景。
+
 `skill_projection.aliases` 记录旧名称到替代项的迁移，不把近似能力重新复制成默认技能；`profiles` 控制当前用途下启用的 canonical 技能，`.system` 技能始终保留。`budget_limit_chars` 对“启用技能名称与描述 + 插件预留”设置硬上限，超限会阻断投影。常用命令：
 
 ```powershell

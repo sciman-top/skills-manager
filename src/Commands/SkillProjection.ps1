@@ -90,8 +90,15 @@ function Sync-CodexManagedSkillLinks($projectionCfg) {
     Need (-not [string]::Equals($managedRoot, $userRoot, [System.StringComparison]::OrdinalIgnoreCase)) "受管技能源不能与用户投影根相同"
 
     EnsureDir $userRoot
+    $excluded = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if ($projectionCfg.PSObject.Properties.Match("managed_link_excludes").Count -gt 0 -and $null -ne $projectionCfg.managed_link_excludes) {
+        foreach ($name in @($projectionCfg.managed_link_excludes)) {
+            $excluded.Add(([string]$name).Trim()) | Out-Null
+        }
+    }
     $desired = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($dir in @(Get-ChildItem -LiteralPath $managedRoot -Directory -Force | Where-Object Name -ne ".system" | Sort-Object Name)) {
+        if ($excluded.Contains($dir.Name)) { continue }
         $linkPath = Join-Path $userRoot $dir.Name
         New-Junction $linkPath $dir.FullName
         $desired.Add($dir.Name) | Out-Null

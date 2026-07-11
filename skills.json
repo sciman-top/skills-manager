@@ -6,6 +6,9 @@
     "manifest_path": "reports/skill-projection/current.json",
     "managed_source_path": "agent",
     "user_skill_root": "~/.agents/skills",
+    "managed_link_excludes": [
+      "anthropics-skills-skills-skill-creator"
+    ],
     "active_profile": "default",
     "budget_limit_chars": 8000,
     "external_metadata_reserve_chars": 1700,
@@ -257,11 +260,6 @@
       "from": "skills\\verification-before-completion",
       "to": "superpowers-skills-verification-before-completion",
       "vendor": "superpowers"
-    },
-    {
-      "from": "skills\\.curated\\openai-docs",
-      "to": "skills-skills-.curated-openai-docs",
-      "vendor": "skills"
     },
     {
       "from": "skills\\.curated\\playwright",
@@ -747,6 +745,11 @@
       "from": "microsoft-code-reference",
       "vendor": "manual",
       "to": "microsoft-code-reference"
+    },
+    {
+      "to": "microsoft-docs",
+      "vendor": "manual",
+      "from": "microsoft-docs"
     }
   ],
   "imports": [
@@ -1157,6 +1160,14 @@
       "name": "microsoft-code-reference",
       "sparse": false,
       "ref": "caa3d670bf2814171dba4f7346ece5080964021e"
+    },
+    {
+      "mode": "manual",
+      "skill": "skills\\microsoft-docs",
+      "repo": "https://github.com/MicrosoftDocs/mcp.git",
+      "sparse": false,
+      "ref": "caa3d670bf2814171dba4f7346ece5080964021e",
+      "name": "microsoft-docs"
     }
   ],
   "targets": [

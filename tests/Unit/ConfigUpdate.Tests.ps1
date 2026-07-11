@@ -117,6 +117,41 @@ Describe "Config And Update Enhancements" {
             @(Get-CfgContractErrors $cfg).Count | Should Be 0
         }
 
+        It "Validates managed Codex link exclusions" {
+            $valid = @'
+{
+  "vendors": [],
+  "targets": [],
+  "mappings": [],
+  "imports": [],
+  "mcp_servers": [],
+  "mcp_targets": [],
+  "sync_mode": "link",
+  "skill_projection": {
+    "sources": [],
+    "aliases": [],
+    "managed_link_excludes": ["anthropics-skills-skills-skill-creator"]
+  }
+}
+'@ | ConvertFrom-Json
+            @(Get-CfgContractErrors $valid).Count | Should Be 0
+            { Assert-Cfg $valid } | Should Not Throw
+
+            $notArray = $valid.PSObject.Copy()
+            $notArray.skill_projection = $valid.skill_projection.PSObject.Copy()
+            $notArray.skill_projection.managed_link_excludes = "one-skill"
+            (@(Get-CfgContractErrors $notArray) -join "`n") | Should Match "managed_link_excludes 必须是数组"
+            { Assert-Cfg $notArray } | Should Throw
+
+            $invalidItems = $valid.PSObject.Copy()
+            $invalidItems.skill_projection = $valid.skill_projection.PSObject.Copy()
+            $invalidItems.skill_projection.managed_link_excludes = @(" ", "Skill-A", "skill-a")
+            $errors = @(Get-CfgContractErrors $invalidItems) -join "`n"
+            $errors | Should Match "managed_link_excludes 不能包含空字符串"
+            $errors | Should Match "managed_link_excludes 重复"
+            { Assert-Cfg $invalidItems } | Should Throw
+        }
+
         It "Collects contract errors without mutating config shape" {
             $cfg = [pscustomobject]@{
                 vendors = @(

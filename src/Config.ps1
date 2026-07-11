@@ -306,6 +306,27 @@ function Get-CfgContractErrors($cfg) {
                 if ([string]::IsNullOrWhiteSpace($sourcePath)) { $errors.Add(("skill_projection source 缺少 path：{0}" -f $sourceId)) | Out-Null }
             }
         }
+        $managedLinkExcludes = Get-CfgObjectProperty $skillProjection "managed_link_excludes"
+        if ($null -ne $managedLinkExcludes) {
+            if (-not (Assert-IsArray $managedLinkExcludes)) {
+                $errors.Add("skill_projection.managed_link_excludes 必须是数组") | Out-Null
+            }
+            else {
+                $normalizedExcludes = @()
+                foreach ($exclude in @($managedLinkExcludes)) {
+                    $name = [string]$exclude
+                    if ([string]::IsNullOrWhiteSpace($name)) {
+                        $errors.Add("skill_projection.managed_link_excludes 不能包含空字符串") | Out-Null
+                        continue
+                    }
+                    $normalizedExcludes += $name.Trim().ToLowerInvariant()
+                }
+                $duplicateExcludes = @(Get-DuplicateValues $normalizedExcludes)
+                if ($duplicateExcludes.Count -gt 0) {
+                    $errors.Add(("skill_projection.managed_link_excludes 重复：{0}" -f ($duplicateExcludes -join ", "))) | Out-Null
+                }
+            }
+        }
         $aliases = Get-CfgObjectProperty $skillProjection "aliases"
         if ($null -ne $aliases -and -not (Assert-IsArray $aliases)) {
             $errors.Add("skill_projection.aliases 必须是数组") | Out-Null
@@ -860,6 +881,14 @@ function Assert-Cfg($cfg) {
         }
         $dupProjectionSources = @(Get-DuplicateValues ($projection.sources | ForEach-Object { $_.id }))
         Need ($dupProjectionSources.Count -eq 0) ("skill_projection source id 重复：{0}" -f ($dupProjectionSources -join ", "))
+        if ($projection.PSObject.Properties.Match("managed_link_excludes").Count -gt 0 -and $null -ne $projection.managed_link_excludes) {
+            Need (Assert-IsArray $projection.managed_link_excludes) "skill_projection.managed_link_excludes 必须是数组"
+            foreach ($exclude in @($projection.managed_link_excludes)) {
+                Need (-not [string]::IsNullOrWhiteSpace([string]$exclude)) "skill_projection.managed_link_excludes 不能包含空字符串"
+            }
+            $dupManagedLinkExcludes = @(Get-DuplicateValues ($projection.managed_link_excludes | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() }))
+            Need ($dupManagedLinkExcludes.Count -eq 0) ("skill_projection.managed_link_excludes 重复：{0}" -f ($dupManagedLinkExcludes -join ", "))
+        }
         if ($projection.PSObject.Properties.Match("aliases").Count -gt 0 -and $null -ne $projection.aliases) {
             Need (Assert-IsArray $projection.aliases) "skill_projection.aliases 必须是数组"
             foreach ($alias in @($projection.aliases)) {

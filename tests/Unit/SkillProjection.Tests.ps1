@@ -33,6 +33,39 @@ Describe "Skill projection" {
                 $script:DryRun = $oldDryRun
             }
         }
+
+        It "Excludes exact managed directories from Codex links without removing the source" {
+            $oldDryRun = $script:DryRun
+            try {
+                $script:DryRun = $false
+                $managed = Join-Path $TestDrive "managed-link-excludes"
+                $userRoot = Join-Path $TestDrive "agents-skills-excludes"
+                $keepDir = New-ProjectionSkill $managed "keep" "keep"
+                $excludeDir = New-ProjectionSkill $managed "exclude" "exclude"
+                $initialCfg = [pscustomobject]@{
+                    managed_source_path = $managed
+                    user_skill_root = $userRoot
+                }
+                Sync-CodexManagedSkillLinks $initialCfg | Out-Null
+                $cfg = [pscustomobject]@{
+                    managed_source_path = $managed
+                    user_skill_root = $userRoot
+                    managed_link_excludes = @("exclude")
+                }
+
+                $result = Sync-CodexManagedSkillLinks $cfg
+
+                $result.managed_link_count | Should Be 1
+                $result.stale_link_count | Should Be 1
+                (Is-ReparsePoint (Join-Path $userRoot "keep")) | Should Be $true
+                (Test-Path -LiteralPath (Join-Path $userRoot "exclude")) | Should Be $false
+                (Test-Path -LiteralPath (Join-Path $excludeDir "SKILL.md") -PathType Leaf) | Should Be $true
+                (Test-Path -LiteralPath (Join-Path $keepDir "SKILL.md") -PathType Leaf) | Should Be $true
+            }
+            finally {
+                $script:DryRun = $oldDryRun
+            }
+        }
     }
 
     Context "New-SkillProjectionPlan" {
