@@ -8,6 +8,33 @@ function New-ProjectionSkill([string]$root, [string]$dir, [string]$name, [string
 }
 
 Describe "Skill projection" {
+    Context "Sync-CodexManagedSkillLinks" {
+        It "Projects managed skills into the standard user root and preserves .system" {
+            $oldDryRun = $script:DryRun
+            try {
+                $script:DryRun = $false
+                $managed = Join-Path $TestDrive "managed-links"
+                $userRoot = Join-Path $TestDrive "agents-skills"
+                New-ProjectionSkill $managed "demo" "demo" | Out-Null
+                New-ProjectionSkill (Join-Path $userRoot ".system") "system" "system" | Out-Null
+                $cfg = [pscustomobject]@{
+                    managed_source_path = $managed
+                    user_skill_root = $userRoot
+                }
+
+                $result = Sync-CodexManagedSkillLinks $cfg
+
+                $result.managed_link_count | Should Be 1
+                (Is-ReparsePoint (Join-Path $userRoot "demo")) | Should Be $true
+                (Get-ReparsePointTargetFullPath (Join-Path $userRoot "demo")) | Should Be ([System.IO.Path]::GetFullPath((Join-Path $managed "demo")))
+                (Test-Path -LiteralPath (Join-Path $userRoot ".system\system\SKILL.md") -PathType Leaf) | Should Be $true
+            }
+            finally {
+                $script:DryRun = $oldDryRun
+            }
+        }
+    }
+
     Context "New-SkillProjectionPlan" {
         It "Keeps the higher-priority path for same-content duplicates" {
             $managed = Join-Path $TestDrive "managed-same"

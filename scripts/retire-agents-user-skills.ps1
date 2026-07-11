@@ -3,6 +3,7 @@ param(
     [string]$SourceRoot = (Join-Path $HOME ".agents\skills"),
     [string]$ArchiveRoot = (Join-Path $HOME ".agents\retired"),
     [string]$ReportRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) "reports\skill-retirement"),
+    [string]$ManagedSourceRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) "agent"),
     [switch]$Apply
 )
 
@@ -29,6 +30,16 @@ function Get-StringSha256([string]$Value) {
     finally { $sha.Dispose() }
 }
 
+function Test-ManagedProjectionLink([System.IO.DirectoryInfo]$Directory, [string]$ManagedRoot) {
+    if (-not ($Directory.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { return $false }
+    $targetValue = $Directory.PSObject.Properties["Target"].Value
+    if ($targetValue -is [array]) { $targetValue = $targetValue[0] }
+    if ([string]::IsNullOrWhiteSpace([string]$targetValue)) { return $false }
+    $target = Get-FullPath ([string]$targetValue)
+    $prefix = (Get-FullPath $ManagedRoot) + [System.IO.Path]::DirectorySeparatorChar
+    return $target.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
 function Get-DirectoryInventory([System.IO.DirectoryInfo]$Directory, [string]$Destination) {
     $base = $Directory.FullName.TrimEnd("\", "/")
     $parts = [System.Collections.Generic.List[string]]::new()
@@ -53,6 +64,7 @@ $agentsRoot = Get-FullPath (Join-Path $HOME ".agents")
 $source = Assert-PathInside $SourceRoot $agentsRoot "SourceRoot"
 $archive = Assert-PathInside $ArchiveRoot $agentsRoot "ArchiveRoot"
 $reportBase = Get-FullPath $ReportRoot
+$managedSource = Get-FullPath $ManagedSourceRoot
 
 if (-not (Test-Path -LiteralPath $source -PathType Container)) {
     throw "技能根不存在：$source"
@@ -62,7 +74,9 @@ if (-not (Test-Path -LiteralPath $systemRoot -PathType Container)) {
     throw "缺少必须保留的系统技能目录：$systemRoot"
 }
 
-$candidates = @(Get-ChildItem -LiteralPath $source -Directory -Force | Where-Object Name -ne ".system" | Sort-Object Name)
+$allUserEntries = @(Get-ChildItem -LiteralPath $source -Directory -Force | Where-Object Name -ne ".system" | Sort-Object Name)
+$managedLinks = @($allUserEntries | Where-Object { Test-ManagedProjectionLink $_ $managedSource })
+$candidates = @($allUserEntries | Where-Object { -not (Test-ManagedProjectionLink $_ $managedSource) })
 $runId = Get-Date -Format "yyyyMMdd-HHmmss-fff"
 $archivePath = Join-Path $archive "skills-user-$runId"
 $reportPath = Join-Path (Join-Path $reportBase $runId) "manifest.json"
@@ -81,6 +95,7 @@ $manifest = [ordered]@{
     source_root = $source
     archive_root = $archivePath
     preserved_paths = @($systemRoot)
+    preserved_managed_link_count = $managedLinks.Count
     directory_count = $entries.Count
     file_count = [long](($entries | Measure-Object file_count -Sum).Sum)
     skill_md_count = [long](($entries | Measure-Object skill_md_count -Sum).Sum)

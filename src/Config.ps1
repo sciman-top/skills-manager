@@ -233,16 +233,23 @@ function Get-CfgObjectProperty($obj, [string]$name) {
     if ($obj -is [System.Collections.IDictionary] -or
         $obj -is [System.Collections.Specialized.OrderedDictionary] -or
         $obj -is [System.Collections.Specialized.IOrderedDictionary]) {
-        if ($obj.Contains($name)) { return $obj[$name] }
+        if ($obj.Contains($name)) {
+            $value = $obj[$name]
+            if (Assert-IsArray $value) { Write-Output -NoEnumerate $value } else { return $value }
+            return
+        }
         foreach ($key in @($obj.Keys)) {
             if ([string]::Equals([string]$key, $name, [System.StringComparison]::OrdinalIgnoreCase)) {
-                return $obj[$key]
+                $value = $obj[$key]
+                if (Assert-IsArray $value) { Write-Output -NoEnumerate $value } else { return $value }
+                return
             }
         }
         return $null
     }
     if ($obj.PSObject.Properties.Match($name).Count -eq 0) { return $null }
-    return $obj.$name
+    $value = $obj.$name
+    if (Assert-IsArray $value) { Write-Output -NoEnumerate $value } else { return $value }
 }
 function New-CfgVendorNameSet($vendors = @()) {
     $set = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)

@@ -80,6 +80,42 @@ function Get-SkillProjectionSourceEntries($source, [int]$sourceOrder) {
     return @($entries.ToArray())
 }
 
+function Sync-CodexManagedSkillLinks($projectionCfg) {
+    Need ($null -ne $projectionCfg) "skill_projection 配置为空"
+    Need ($projectionCfg.PSObject.Properties.Match("managed_source_path").Count -gt 0) "skill_projection 缺少 managed_source_path"
+    Need ($projectionCfg.PSObject.Properties.Match("user_skill_root").Count -gt 0) "skill_projection 缺少 user_skill_root"
+    $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
+    $userRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.user_skill_root)
+    Need (Test-Path -LiteralPath $managedRoot -PathType Container) ("受管技能源不存在：{0}" -f $managedRoot)
+    Need (-not [string]::Equals($managedRoot, $userRoot, [System.StringComparison]::OrdinalIgnoreCase)) "受管技能源不能与用户投影根相同"
+
+    EnsureDir $userRoot
+    $desired = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($dir in @(Get-ChildItem -LiteralPath $managedRoot -Directory -Force | Where-Object Name -ne ".system" | Sort-Object Name)) {
+        $linkPath = Join-Path $userRoot $dir.Name
+        New-Junction $linkPath $dir.FullName
+        $desired.Add($dir.Name) | Out-Null
+    }
+
+    $staleRemoved = 0
+    foreach ($entry in @(Get-ChildItem -LiteralPath $userRoot -Directory -Force -ErrorAction SilentlyContinue | Where-Object Name -ne ".system")) {
+        if ($desired.Contains($entry.Name) -or -not (Is-ReparsePoint $entry.FullName)) { continue }
+        $target = Get-ReparsePointTargetFullPath $entry.FullName
+        $managedPrefix = $managedRoot.TrimEnd("\") + "\"
+        if (-not [string]::IsNullOrWhiteSpace($target) -and $target.StartsWith($managedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            Invoke-RemoveItem $entry.FullName -Recurse
+            $staleRemoved++
+        }
+    }
+
+    return [pscustomobject]@{
+        managed_source_path = $managedRoot
+        user_skill_root = $userRoot
+        managed_link_count = $desired.Count
+        stale_link_count = $staleRemoved
+    }
+}
+
 function New-SkillProjectionPlan($projectionCfg) {
     Need ($null -ne $projectionCfg) "skill_projection 配置为空"
     $enabled = -not ($projectionCfg.PSObject.Properties.Match("enabled").Count -gt 0) -or [bool]$projectionCfg.enabled
@@ -345,6 +381,10 @@ function Backup-CodexSkillProjectionConfig([string]$configPath) {
 }
 
 function Sync-CodexSkillProjection($projectionCfg) {
+    $linkProjection = $null
+    if ($projectionCfg.PSObject.Properties.Match("managed_source_path").Count -gt 0 -or $projectionCfg.PSObject.Properties.Match("user_skill_root").Count -gt 0) {
+        $linkProjection = Sync-CodexManagedSkillLinks $projectionCfg
+    }
     $plan = New-SkillProjectionPlan $projectionCfg
     if ([bool]$plan.enabled) {
         Need ([bool]$plan.budget_pass) ("技能描述预算超限：estimated={0}, limit={1}, profile={2}" -f [int]$plan.estimated_metadata_chars, [int]$plan.budget_limit_chars, [string]$plan.active_profile)
@@ -402,6 +442,7 @@ function Sync-CodexSkillProjection($projectionCfg) {
         config_path = $configPath
         manifest_path = $manifestPath
         backup_path = if ($null -eq $backupPath) { "" } else { [string]$backupPath }
+        managed_link_projection = $linkProjection
         plan = $plan
     }
 }

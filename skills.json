@@ -4,6 +4,8 @@
     "enabled": true,
     "codex_config_path": "~/.codex/config.toml",
     "manifest_path": "reports/skill-projection/current.json",
+    "managed_source_path": "agent",
+    "user_skill_root": "~/.agents/skills",
     "active_profile": "default",
     "budget_limit_chars": 8000,
     "external_metadata_reserve_chars": 1700,
@@ -48,8 +50,6 @@
           "systematic-debugging",
           "test-driven-development",
           "verification-before-completion",
-          "receiving-code-review",
-          "requesting-code-review",
           "finishing-a-development-branch",
           "git-workflow-and-versioning",
           "code-review-and-quality",
@@ -161,17 +161,9 @@
     },
     "sources": [
       {
-        "id": "managed-projection",
-        "path": "agent",
-        "priority": 200,
-        "platforms": [
-          "codex"
-        ]
-      },
-      {
         "id": "agents-user",
         "path": "~/.agents/skills",
-        "priority": 100,
+        "priority": 200,
         "platforms": [
           "codex"
         ]
@@ -1170,9 +1162,6 @@
   "targets": [
     {
       "path": "~/.claude/skills"
-    },
-    {
-      "path": "~/.codex/skills"
     }
   ],
   "update_force": true,

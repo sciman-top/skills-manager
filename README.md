@@ -155,7 +155,7 @@
 
 ### Codex 技能去重投影
 
-`skills.json.skill_projection` 管理多个用户技能根的并集与 Codex 路径级开关。`构建生效` 会扫描配置中的 sources，以声明的技能名称分组，并按以下顺序选主：
+`skills.json.skill_projection` 管理用户技能根、受管逐技能 Junction 与 Codex 路径级开关。`构建生效` 先把 `managed_source_path` 下的技能逐目录投影到标准 `user_skill_root`，保留 `.system`，再扫描配置中的 sources，以声明的技能名称分组，并按以下顺序选主：
 
 1. `.system` 技能；
 2. source `priority`；
@@ -172,7 +172,7 @@
 
 `-DryRun` 只生成内存计划，不写配置或 manifest。Codex 在新任务加载技能配置；当前已运行任务不会热更新，因此投影后需用新任务复核可见技能列表，不应通过删除 `.agents/skills` 强制生效。
 
-`$HOME/.agents/skills` 是当前标准用户技能根，根目录及其 `.system` 子目录不能整体删除。历史用户副本应先退役到带哈希清单的归档：
+`$HOME/.agents/skills` 是当前标准用户技能根，根目录及其 `.system` 子目录不能整体删除。受管技能以 Junction 形式存在于该根，`$HOME/.codex/skills` 不再是受管 target；Codex 仍可能自动创建其中的 `.system` 兼容目录。历史普通目录应先退役到带哈希清单的归档，脚本会保留受管 Junction：
 
 ```powershell
 # 默认仅预演并生成 reports/skill-retirement/<run-id>/manifest.json
