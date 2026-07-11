@@ -212,21 +212,44 @@ function Normalize-ArrayField($cfg, [string]$name, [ref]$changed) {
 function Assert-IsArray($value) {
     return ($value -is [System.Collections.IList]) -and -not ($value -is [string])
 }
+function Test-CfgArrayProperty($obj, [string]$name) {
+    if ($null -eq $obj) { return $false }
+    if ($obj -is [System.Collections.IDictionary] -or
+        $obj -is [System.Collections.Specialized.OrderedDictionary] -or
+        $obj -is [System.Collections.Specialized.IOrderedDictionary]) {
+        foreach ($key in @($obj.Keys)) {
+            if ([string]::Equals([string]$key, $name, [System.StringComparison]::OrdinalIgnoreCase)) {
+                return (Assert-IsArray (, $obj[$key]))
+            }
+        }
+        return $false
+    }
+    $property = @($obj.PSObject.Properties | Where-Object { [string]::Equals($_.Name, $name, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1)
+    if ($property.Count -ne 1) { return $false }
+    return (Assert-IsArray (, $property[0].Value))
+}
 function Get-CfgObjectProperty($obj, [string]$name) {
     if ($null -eq $obj) { return $null }
     if ($obj -is [System.Collections.IDictionary] -or
         $obj -is [System.Collections.Specialized.OrderedDictionary] -or
         $obj -is [System.Collections.Specialized.IOrderedDictionary]) {
-        if ($obj.Contains($name)) { return $obj[$name] }
+        if ($obj.Contains($name)) {
+            $value = $obj[$name]
+            if (Assert-IsArray $value) { Write-Output -NoEnumerate $value } else { return $value }
+            return
+        }
         foreach ($key in @($obj.Keys)) {
             if ([string]::Equals([string]$key, $name, [System.StringComparison]::OrdinalIgnoreCase)) {
-                return $obj[$key]
+                $value = $obj[$key]
+                if (Assert-IsArray $value) { Write-Output -NoEnumerate $value } else { return $value }
+                return
             }
         }
         return $null
     }
     if ($obj.PSObject.Properties.Match($name).Count -eq 0) { return $null }
-    return $obj.$name
+    $value = $obj.$name
+    if (Assert-IsArray $value) { Write-Output -NoEnumerate $value } else { return $value }
 }
 function New-CfgVendorNameSet($vendors = @()) {
     $set = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
@@ -264,6 +287,57 @@ function Get-CfgContractErrors($cfg) {
     $imports = Get-CfgArrayField $cfg "imports" $false $errors
     $mcpServers = Get-CfgArrayField $cfg "mcp_servers" $false $errors
     $mcpTargets = Get-CfgArrayField $cfg "mcp_targets" $false $errors
+
+    $skillProjection = Get-CfgObjectProperty $cfg "skill_projection"
+    if ($null -ne $skillProjection) {
+        $projectionEnabled = Get-CfgObjectProperty $skillProjection "enabled"
+        if ($null -ne $projectionEnabled -and $projectionEnabled -isnot [bool]) {
+            $errors.Add("skill_projection.enabled 必须是布尔值") | Out-Null
+        }
+        $projectionSources = Get-CfgObjectProperty $skillProjection "sources"
+        if (-not (Assert-IsArray $projectionSources)) {
+            $errors.Add("skill_projection.sources 必须是数组") | Out-Null
+        }
+        else {
+            foreach ($source in @($projectionSources)) {
+                $sourceId = [string](Get-CfgObjectProperty $source "id")
+                $sourcePath = [string](Get-CfgObjectProperty $source "path")
+                if ([string]::IsNullOrWhiteSpace($sourceId)) { $errors.Add("skill_projection source 缺少 id") | Out-Null }
+                if ([string]::IsNullOrWhiteSpace($sourcePath)) { $errors.Add(("skill_projection source 缺少 path：{0}" -f $sourceId)) | Out-Null }
+            }
+        }
+        $aliases = Get-CfgObjectProperty $skillProjection "aliases"
+        if ($null -ne $aliases -and -not (Assert-IsArray $aliases)) {
+            $errors.Add("skill_projection.aliases 必须是数组") | Out-Null
+        }
+        foreach ($alias in @($aliases)) {
+            $aliasName = [string](Get-CfgObjectProperty $alias "name")
+            $replacement = [string](Get-CfgObjectProperty $alias "replacement")
+            if ([string]::IsNullOrWhiteSpace($aliasName)) { $errors.Add("skill_projection alias 缺少 name") | Out-Null }
+            if ([string]::IsNullOrWhiteSpace($replacement)) { $errors.Add(("skill_projection alias 缺少 replacement：{0}" -f $aliasName)) | Out-Null }
+        }
+        $profiles = Get-CfgObjectProperty $skillProjection "profiles"
+        if ($null -ne $profiles) {
+            $activeProfile = [string](Get-CfgObjectProperty $skillProjection "active_profile")
+            if ([string]::IsNullOrWhiteSpace($activeProfile)) { $errors.Add("skill_projection 配置 profiles 时必须声明 active_profile") | Out-Null }
+            foreach ($profileProperty in @($profiles.PSObject.Properties)) {
+                if (-not (Test-CfgArrayProperty $profileProperty.Value "enabled_names")) { $errors.Add(("skill_projection profile.enabled_names 必须是数组：{0}" -f $profileProperty.Name)) | Out-Null }
+            }
+        }
+    }
+
+    $mcpProfiles = Get-CfgObjectProperty $cfg "mcp_profiles"
+    if ($null -ne $mcpProfiles) {
+        $activeMcpProfile = [string](Get-CfgObjectProperty $mcpProfiles "active")
+        $profiles = Get-CfgObjectProperty $mcpProfiles "profiles"
+        if ([string]::IsNullOrWhiteSpace($activeMcpProfile)) { $errors.Add("mcp_profiles.active 不能为空") | Out-Null }
+        if ($null -eq $profiles) { $errors.Add("mcp_profiles 缺少 profiles") | Out-Null }
+        else {
+            foreach ($profileProperty in @($profiles.PSObject.Properties)) {
+                if (-not (Test-CfgArrayProperty $profileProperty.Value "enabled")) { $errors.Add(("MCP profile.enabled 必须是数组：{0}" -f $profileProperty.Name)) | Out-Null }
+            }
+        }
+    }
 
     foreach ($v in $vendors) {
         $name = [string](Get-CfgObjectProperty $v "name")
@@ -772,6 +846,52 @@ function Assert-Cfg($cfg) {
             continue
         }
         Need ($mt.PSObject.Properties.Match("path").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$mt.path)) "mcp_targets 项缺少 path"
+    }
+
+    if ($cfg.PSObject.Properties.Match("skill_projection").Count -gt 0 -and $null -ne $cfg.skill_projection) {
+        $projection = $cfg.skill_projection
+        if ($projection.PSObject.Properties.Match("enabled").Count -gt 0) {
+            Need ($projection.enabled -is [bool]) "skill_projection.enabled 必须是布尔值"
+        }
+        Need ($projection.PSObject.Properties.Match("sources").Count -gt 0 -and (Assert-IsArray $projection.sources)) "skill_projection.sources 必须是数组"
+        foreach ($source in @($projection.sources)) {
+            Need (-not [string]::IsNullOrWhiteSpace([string]$source.id)) "skill_projection source 缺少 id"
+            Need (-not [string]::IsNullOrWhiteSpace([string]$source.path)) ("skill_projection source 缺少 path：{0}" -f [string]$source.id)
+        }
+        $dupProjectionSources = @(Get-DuplicateValues ($projection.sources | ForEach-Object { $_.id }))
+        Need ($dupProjectionSources.Count -eq 0) ("skill_projection source id 重复：{0}" -f ($dupProjectionSources -join ", "))
+        if ($projection.PSObject.Properties.Match("aliases").Count -gt 0 -and $null -ne $projection.aliases) {
+            Need (Assert-IsArray $projection.aliases) "skill_projection.aliases 必须是数组"
+            foreach ($alias in @($projection.aliases)) {
+                Need (-not [string]::IsNullOrWhiteSpace([string]$alias.name)) "skill_projection alias 缺少 name"
+                Need (-not [string]::IsNullOrWhiteSpace([string]$alias.replacement)) ("skill_projection alias 缺少 replacement：{0}" -f [string]$alias.name)
+            }
+            $dupAliases = @(Get-DuplicateValues ($projection.aliases | ForEach-Object { ([string]$_.name).ToLowerInvariant() }))
+            Need ($dupAliases.Count -eq 0) ("skill_projection alias 重复：{0}" -f ($dupAliases -join ", "))
+        }
+        if ($projection.PSObject.Properties.Match("profiles").Count -gt 0 -and $null -ne $projection.profiles) {
+            Need (-not [string]::IsNullOrWhiteSpace([string]$projection.active_profile)) "skill_projection 配置 profiles 时必须声明 active_profile"
+            Need ($projection.profiles.PSObject.Properties.Match([string]$projection.active_profile).Count -gt 0) ("skill_projection active_profile 不存在：{0}" -f [string]$projection.active_profile)
+            foreach ($profileProperty in @($projection.profiles.PSObject.Properties)) {
+                Need (Test-CfgArrayProperty $profileProperty.Value "enabled_names") ("skill_projection profile.enabled_names 必须是数组：{0}" -f $profileProperty.Name)
+            }
+        }
+        if ($projection.PSObject.Properties.Match("budget_limit_chars").Count -gt 0) {
+            Need ([int]$projection.budget_limit_chars -gt 0) "skill_projection.budget_limit_chars 必须大于 0"
+        }
+        if ($projection.PSObject.Properties.Match("external_metadata_reserve_chars").Count -gt 0) {
+            Need ([int]$projection.external_metadata_reserve_chars -ge 0) "skill_projection.external_metadata_reserve_chars 不能小于 0"
+        }
+    }
+
+    if ($cfg.PSObject.Properties.Match("mcp_profiles").Count -gt 0 -and $null -ne $cfg.mcp_profiles) {
+        $mcpProfiles = $cfg.mcp_profiles
+        Need (-not [string]::IsNullOrWhiteSpace([string]$mcpProfiles.active)) "mcp_profiles.active 不能为空"
+        Need ($mcpProfiles.PSObject.Properties.Match("profiles").Count -gt 0 -and $null -ne $mcpProfiles.profiles) "mcp_profiles 缺少 profiles"
+        Need ($mcpProfiles.profiles.PSObject.Properties.Match([string]$mcpProfiles.active).Count -gt 0) ("mcp_profiles.active 不存在：{0}" -f [string]$mcpProfiles.active)
+        foreach ($profileProperty in @($mcpProfiles.profiles.PSObject.Properties)) {
+            Need (Test-CfgArrayProperty $profileProperty.Value "enabled") ("MCP profile.enabled 必须是数组：{0}" -f $profileProperty.Name)
+        }
     }
 
     $mode = $cfg.sync_mode

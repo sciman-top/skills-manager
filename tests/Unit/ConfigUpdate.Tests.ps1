@@ -92,6 +92,31 @@ Describe "Config And Update Enhancements" {
     }
 
     Context "Config contract validation" {
+        It "Preserves a single-item skill projection sources array" {
+            $cfg = @'
+{
+  "vendors": [],
+  "targets": [],
+  "mappings": [],
+  "imports": [],
+  "mcp_servers": [],
+  "mcp_targets": [],
+  "sync_mode": "link",
+  "skill_projection": {
+    "enabled": true,
+    "sources": [
+      { "id": "agents-user", "path": "~/.agents/skills" }
+    ],
+    "aliases": []
+  }
+}
+'@ | ConvertFrom-Json
+
+            $sources = Get-CfgObjectProperty $cfg.skill_projection "sources"
+            (Assert-IsArray $sources) | Should Be $true
+            @(Get-CfgContractErrors $cfg).Count | Should Be 0
+        }
+
         It "Collects contract errors without mutating config shape" {
             $cfg = [pscustomobject]@{
                 vendors = @(

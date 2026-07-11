@@ -1182,9 +1182,26 @@ function Add-AuditMonorepoFacts([string]$resolvedPath, [System.Collections.Gener
     }
 }
 
+function Test-AuditIgnoredRecursivePath([string]$resolvedPath, [string]$candidatePath) {
+    $relativePath = Get-AuditRepositoryRelativePath $resolvedPath $candidatePath
+    $segments = @($relativePath -split '[\\/]')
+    foreach ($segment in $segments) {
+        if ($segment -in @('.git', '.runtime', '.worktrees', 'node_modules')) { return $true }
+    }
+    return $false
+}
+
+function Get-AuditRecursiveFiles([string]$resolvedPath, [string]$filter, [int]$limit = 40) {
+    return @(
+        Get-ChildItem -LiteralPath $resolvedPath -Filter $filter -File -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { -not (Test-AuditIgnoredRecursivePath $resolvedPath $_.FullName) } |
+            Select-Object -First $limit
+    )
+}
+
 function Add-AuditDotnetFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$frameworks, [System.Collections.Generic.List[string]]$packageManagers, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands, [System.Collections.Generic.List[string]]$notableFiles) {
     $slnFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.sln" -File -ErrorAction SilentlyContinue | Select-Object -First 10)
-    $csprojFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.csproj" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 40)
+    $csprojFiles = @(Get-AuditRecursiveFiles $resolvedPath "*.csproj" 40)
     if ($slnFiles.Count -eq 0 -and $csprojFiles.Count -eq 0) { return }
     Add-AuditUniqueValue $packageManagers "nuget"
     Add-AuditUniqueValue $buildCommands "dotnet build"
@@ -1460,7 +1477,7 @@ function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$
         Add-AuditDesignDocumentFacts $resolvedPath $languages $frameworks $packageManagers $buildCommands $testCommands $capabilities $notableFiles $risks
         Add-AuditCiWorkflowFacts $resolvedPath $buildCommands $testCommands $notableFiles
         $slnFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.sln" -File -ErrorAction SilentlyContinue)
-        $csprojFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.csproj" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)
+        $csprojFiles = @(Get-AuditRecursiveFiles $resolvedPath "*.csproj" 1)
         if ($slnFiles.Count -gt 0 -or $csprojFiles.Count -gt 0) {
             Add-AuditUniqueValue $languages "dotnet"
         }

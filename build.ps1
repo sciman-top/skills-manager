@@ -19,6 +19,7 @@ $Files = @(
     "Commands/AuditTargets.Bundle.ps1",
     "Commands/AuditTargets.Apply.ps1",
     "Commands/AuditTargets.Args.ps1",
+    "Commands/SkillProjection.ps1",
     "Commands/Workflow.ps1",
     "Commands/Utils.ps1",
     "Main.ps1"

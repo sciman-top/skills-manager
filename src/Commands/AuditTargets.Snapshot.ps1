@@ -56,6 +56,7 @@ function Get-InstalledSkillFacts($cfg = $null) {
         $localPath = Resolve-InstalledSkillLocalPath $cfg $m
         $skillFile = Join-Path $localPath "SKILL.md"
         $meta = Get-SkillMetadataFromFile $skillFile
+        $contentHash = [string](Get-FileContentHash $skillFile)
 
         $repo = ""
         $ref = ""
@@ -88,6 +89,7 @@ function Get-InstalledSkillFacts($cfg = $null) {
             declared_name = $meta.declared_name
             description = $meta.description
             trigger_summary = $meta.trigger_summary
+            content_hash = $contentHash
             local_path = $localPath
         })
     }
@@ -99,6 +101,7 @@ function Get-InstalledSkillFacts($cfg = $null) {
         $localPath = [string]$override.full
         $skillFile = Join-Path $localPath "SKILL.md"
         $meta = Get-SkillMetadataFromFile $skillFile
+        $contentHash = [string](Get-FileContentHash $skillFile)
         $facts += [pscustomobject]([ordered]@{
             name = if ([string]::IsNullOrWhiteSpace($meta.declared_name)) { $from } else { $meta.declared_name }
             source_kind = "overrides"
@@ -111,6 +114,7 @@ function Get-InstalledSkillFacts($cfg = $null) {
             declared_name = $meta.declared_name
             description = $meta.description
             trigger_summary = $meta.trigger_summary
+            content_hash = $contentHash
             local_path = $localPath
         })
     }
@@ -120,10 +124,7 @@ function Get-InstalledSkillFacts($cfg = $null) {
 function Get-AuditMcpServerFacts($cfg = $null) {
     if ($null -eq $cfg) { $cfg = LoadCfg }
     $facts = @()
-    $servers = @()
-    if ($cfg.PSObject.Properties.Match("mcp_servers").Count -gt 0 -and $null -ne $cfg.mcp_servers) {
-        $servers = @($cfg.mcp_servers)
-    }
+    $servers = @(Resolve-McpProfileServers $cfg)
     foreach ($s in $servers) {
         if ($null -eq $s) { continue }
         $name = [string]$s.name
@@ -137,6 +138,20 @@ function Get-AuditMcpServerFacts($cfg = $null) {
         $row = [ordered]@{
             name = $name
             transport = $transport
+            enabled = $true
+        }
+        if ($s.PSObject.Properties.Match("enabled").Count -gt 0) {
+            Need ($s.enabled -is [bool]) ("mcp_server.enabled 必须是布尔值：{0}" -f $name)
+            $row.enabled = [bool]$s.enabled
+        }
+        if ($s.PSObject.Properties.Match("enabled_tools").Count -gt 0 -and $null -ne $s.enabled_tools) {
+            $enabledTools = @()
+            foreach ($rawTool in @($s.enabled_tools)) {
+                $tool = ([string]$rawTool).Trim()
+                Need (-not [string]::IsNullOrWhiteSpace($tool)) ("mcp_server.enabled_tools 不得包含空值：{0}" -f $name)
+                if ($enabledTools -notcontains $tool) { $enabledTools += $tool }
+            }
+            $row.enabled_tools = @($enabledTools | Sort-Object)
         }
         if ($transport -eq "stdio") {
             $row.command = if ($s.PSObject.Properties.Match("command").Count -gt 0) { [string]$s.command } else { "" }
@@ -187,15 +202,18 @@ function Get-AuditFingerprintFromMcpServers($servers) {
     return (Get-AuditFingerprintFromVendorFromPairs $pairs)
 }
 
-function Get-AuditFingerprintFromVendorFromPairs($pairs) {
-    $normalized = New-Object System.Collections.Generic.List[string]
+function Get-AuditFingerprintFromVendorFromPairs($pairs, [bool]$caseSensitive = $false) {
+    $comparer = if ($caseSensitive) { [System.StringComparer]::Ordinal } else { [System.StringComparer]::OrdinalIgnoreCase }
+    $normalized = New-Object System.Collections.Generic.HashSet[string]($comparer)
     foreach ($pair in @($pairs)) {
         if ($null -eq $pair) { continue }
         $text = ([string]$pair).Trim()
         if ([string]::IsNullOrWhiteSpace($text)) { continue }
-        $normalized.Add($text.ToLowerInvariant()) | Out-Null
+        if (-not $caseSensitive) { $text = $text.ToLowerInvariant() }
+        $normalized.Add($text) | Out-Null
     }
-    $ordered = @($normalized | Sort-Object -Unique)
+    [string[]]$ordered = @($normalized)
+    [System.Array]::Sort($ordered, [System.StringComparer]::Ordinal)
     $payload = ($ordered -join "`n")
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {
@@ -209,7 +227,19 @@ function Get-AuditFingerprintFromVendorFromPairs($pairs) {
 }
 
 function Get-AuditFingerprintFromSkillFacts($facts) {
-    $pairs = @()
+    $rows = @()
+    $fields = @(
+        "vendor",
+        "from",
+        "to",
+        "repo",
+        "ref",
+        "skill_path",
+        "declared_name",
+        "description",
+        "trigger_summary",
+        "content_hash"
+    )
     foreach ($item in @($facts)) {
         if ($null -eq $item) { continue }
         $vendor = ""
@@ -217,9 +247,18 @@ function Get-AuditFingerprintFromSkillFacts($facts) {
         if ($item.PSObject.Properties.Match("vendor").Count -gt 0) { $vendor = [string]$item.vendor }
         if ($item.PSObject.Properties.Match("from").Count -gt 0) { $from = [string]$item.from }
         if ([string]::IsNullOrWhiteSpace($vendor) -or [string]::IsNullOrWhiteSpace($from)) { continue }
-        $pairs += ("{0}|{1}" -f $vendor, $from)
+
+        $row = [ordered]@{}
+        foreach ($field in $fields) {
+            $value = ""
+            if ($item.PSObject.Properties.Match($field).Count -gt 0 -and $null -ne $item.$field) {
+                $value = [string]$item.$field
+            }
+            $row[$field] = $value
+        }
+        $rows += ($row | ConvertTo-Json -Compress)
     }
-    return (Get-AuditFingerprintFromVendorFromPairs $pairs)
+    return (Get-AuditFingerprintFromVendorFromPairs $rows $true)
 }
 
 function Get-AuditLiveInstalledState($cfg = $null) {

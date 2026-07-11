@@ -1,5 +1,175 @@
 {
   "sync_mode": "link",
+  "skill_projection": {
+    "enabled": true,
+    "codex_config_path": "~/.codex/config.toml",
+    "manifest_path": "reports/skill-projection/current.json",
+    "managed_source_path": "agent",
+    "user_skill_root": "~/.agents/skills",
+    "active_profile": "default",
+    "budget_limit_chars": 8000,
+    "external_metadata_reserve_chars": 1700,
+    "aliases": [
+      {
+        "name": "social-content",
+        "replacement": "social"
+      },
+      {
+        "name": "to-prd",
+        "replacement": "to-spec"
+      },
+      {
+        "name": "to-issues",
+        "replacement": "to-tickets"
+      }
+    ],
+    "profiles": {
+      "default": {
+        "enabled_names": [
+          "using-superpowers",
+          "brainstorming",
+          "research",
+          "planning-and-task-breakdown",
+          "systematic-debugging",
+          "verification-before-completion",
+          "git-workflow-and-versioning",
+          "code-review-and-quality",
+          "incremental-implementation",
+          "custom-windows-wpf-teacher-app",
+          "custom-teacher-courseware-ppt",
+          "custom-creator-publishing",
+          "custom-junior-physics-animation"
+        ]
+      },
+      "coding": {
+        "enabled_names": [
+          "using-superpowers",
+          "brainstorming",
+          "writing-plans",
+          "executing-plans",
+          "systematic-debugging",
+          "test-driven-development",
+          "verification-before-completion",
+          "finishing-a-development-branch",
+          "git-workflow-and-versioning",
+          "code-review-and-quality",
+          "incremental-implementation",
+          "spec-driven-development",
+          "architecture-patterns",
+          "api-and-interface-design",
+          "security-and-hardening",
+          "dispatching-parallel-agents",
+          "subagent-driven-development",
+          "using-git-worktrees"
+        ]
+      },
+      "dotnet": {
+        "enabled_names": [
+          "microsoft-code-reference",
+          "custom-windows-wpf-teacher-app",
+          "custom-powershell-windows-automation",
+          "dotnet-backend-patterns",
+          "debug:dotnet",
+          "security-and-hardening",
+          "windows-desktop-e2e",
+          "code-review-and-quality",
+          "systematic-debugging",
+          "test-driven-development",
+          "verification-before-completion",
+          "git-workflow-and-versioning",
+          "research"
+        ]
+      },
+      "ppt": {
+        "enabled_names": [
+          "custom-teacher-courseware-ppt",
+          "powerpoint-automation",
+          "baoyu-slide-deck",
+          "canvas-design",
+          "data-visualization",
+          "drawio-diagram-forge",
+          "custom-creator-publishing",
+          "research"
+        ]
+      },
+      "content": {
+        "enabled_names": [
+          "custom-creator-publishing",
+          "copy-editing",
+          "social",
+          "baoyu-article-illustrator",
+          "baoyu-cover-image",
+          "baoyu-infographic",
+          "baoyu-format-markdown",
+          "baoyu-post-to-wechat",
+          "baoyu-url-to-markdown",
+          "baoyu-compress-image",
+          "research"
+        ]
+      },
+      "physics": {
+        "enabled_names": [
+          "custom-junior-physics-animation",
+          "manim-composer",
+          "manimce-best-practices",
+          "d3-viz",
+          "data-visualization",
+          "ui-animation",
+          "storyboard-creation",
+          "remotion-best-practices",
+          "frontend-design",
+          "frontend-ui-engineering",
+          "vite",
+          "playwright",
+          "research"
+        ]
+      },
+      "design": {
+        "enabled_names": [
+          "ui-ux-pro-max",
+          "frontend-design",
+          "frontend-ui-engineering",
+          "design-taste-frontend",
+          "ant-design",
+          "tailwind-design-system",
+          "web-design-guidelines",
+          "web-quality-audit",
+          "ui-animation",
+          "canvas-design"
+        ]
+      },
+      "browser": {
+        "enabled_names": [
+          "playwright",
+          "playwright-best-practices",
+          "webapp-testing",
+          "screenshot",
+          "research"
+        ]
+      },
+      "database": {
+        "enabled_names": [
+          "supabase-postgres-best-practices",
+          "architecture-patterns",
+          "api-and-interface-design",
+          "error-handling-patterns",
+          "security-and-hardening",
+          "performance-optimization",
+          "research"
+        ]
+      }
+    },
+    "sources": [
+      {
+        "id": "agents-user",
+        "path": "~/.agents/skills",
+        "priority": 200,
+        "platforms": [
+          "codex"
+        ]
+      }
+    ]
+  },
   "vendors": [
     {
       "name": "anthropics-skills",
@@ -380,12 +550,12 @@
     },
     {
       "from": "write-a-prd",
-      "to": "write-a-prd",
+      "to": "to-spec",
       "vendor": "manual"
     },
     {
       "from": "prd-to-issues",
-      "to": "prd-to-issues",
+      "to": "to-tickets",
       "vendor": "manual"
     },
     {
@@ -519,6 +689,46 @@
       "from": "skills\\using-git-worktrees"
     },
     {
+      "vendor": "superpowers",
+      "to": "superpowers-skills-brainstorming",
+      "from": "skills\\brainstorming"
+    },
+    {
+      "vendor": "superpowers",
+      "to": "superpowers-skills-executing-plans",
+      "from": "skills\\executing-plans"
+    },
+    {
+      "vendor": "superpowers",
+      "to": "superpowers-skills-finishing-a-development-branch",
+      "from": "skills\\finishing-a-development-branch"
+    },
+    {
+      "vendor": "superpowers",
+      "to": "superpowers-skills-receiving-code-review",
+      "from": "skills\\receiving-code-review"
+    },
+    {
+      "vendor": "superpowers",
+      "to": "superpowers-skills-requesting-code-review",
+      "from": "skills\\requesting-code-review"
+    },
+    {
+      "vendor": "superpowers",
+      "to": "superpowers-skills-using-superpowers",
+      "from": "skills\\using-superpowers"
+    },
+    {
+      "vendor": "superpowers",
+      "to": "superpowers-skills-writing-plans",
+      "from": "skills\\writing-plans"
+    },
+    {
+      "vendor": "manual",
+      "to": "ui-ux-pro-max",
+      "from": "ui-ux-pro-max"
+    },
+    {
       "vendor": "manual",
       "to": "use-my-browser",
       "from": "use-my-browser"
@@ -532,6 +742,11 @@
       "to": "grill-with-docs",
       "from": "grill-with-docs",
       "vendor": "manual"
+    },
+    {
+      "from": "microsoft-code-reference",
+      "vendor": "manual",
+      "to": "microsoft-code-reference"
     }
   ],
   "imports": [
@@ -779,14 +994,14 @@
       "sparse": false,
       "repo": "https://github.com/mattpocock/skills.git",
       "name": "write-a-prd",
-      "skill": "skills\\engineering\\to-prd",
+      "skill": "skills\\engineering\\to-spec",
       "mode": "manual",
       "ref": "main"
     },
     {
       "repo": "https://github.com/mattpocock/skills.git",
       "ref": "main",
-      "skill": "skills\\engineering\\to-issues",
+      "skill": "skills\\engineering\\to-tickets",
       "name": "prd-to-issues",
       "sparse": false,
       "mode": "manual"
@@ -926,20 +1141,38 @@
       "skill": "skills\\engineering\\grill-with-docs",
       "mode": "manual",
       "sparse": true
+    },
+    {
+      "name": "ui-ux-pro-max",
+      "ref": "main",
+      "skill": ".claude\\skills\\ui-ux-pro-max",
+      "repo": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git",
+      "mode": "manual",
+      "sparse": false
+    },
+    {
+      "repo": "https://github.com/MicrosoftDocs/mcp.git",
+      "mode": "manual",
+      "skill": "skills\\microsoft-code-reference",
+      "name": "microsoft-code-reference",
+      "sparse": false,
+      "ref": "caa3d670bf2814171dba4f7346ece5080964021e"
     }
   ],
   "targets": [
     {
       "path": "~/.claude/skills"
-    },
-    {
-      "path": "~/.codex/skills"
     }
   ],
   "update_force": true,
   "mcp_servers": [
     {
       "name": "context7",
+      "enabled": false,
+      "enabled_tools": [
+        "resolve-library-id",
+        "query-docs"
+      ],
       "transport": "stdio",
       "command": "npx",
       "args": [
@@ -950,6 +1183,18 @@
     },
     {
       "name": "github",
+      "enabled": false,
+      "enabled_tools": [
+        "get_me",
+        "get_file_contents",
+        "search_code",
+        "list_commits",
+        "get_commit",
+        "pull_request_read",
+        "issue_read",
+        "search_issues",
+        "search_pull_requests"
+      ],
       "transport": "http",
       "url": "https://api.githubcopilot.com/mcp/",
       "headers": {
@@ -958,18 +1203,41 @@
     },
     {
       "name": "microsoft-learn",
+      "enabled": true,
+      "enabled_tools": [
+        "microsoft_docs_search",
+        "microsoft_docs_fetch",
+        "microsoft_code_sample_search"
+      ],
       "transport": "http",
       "url": "https://learn.microsoft.com/api/mcp",
       "startup_timeout_sec": 120
     },
     {
       "name": "openaiDeveloperDocs",
+      "enabled": true,
+      "enabled_tools": [
+        "search_openai_docs",
+        "fetch_openai_doc",
+        "list_openai_docs"
+      ],
       "transport": "http",
       "url": "https://developers.openai.com/mcp",
       "startup_timeout_sec": 120
     },
     {
       "name": "playwright",
+      "enabled": false,
+      "enabled_tools": [
+        "browser_navigate",
+        "browser_snapshot",
+        "browser_click",
+        "browser_fill_form",
+        "browser_type",
+        "browser_wait_for",
+        "browser_take_screenshot",
+        "browser_close"
+      ],
       "transport": "stdio",
       "command": "npx",
       "args": [
@@ -979,6 +1247,15 @@
     },
     {
       "name": "filesystem",
+      "enabled": false,
+      "enabled_tools": [
+        "read_text_file",
+        "read_multiple_files",
+        "list_directory",
+        "directory_tree",
+        "search_files",
+        "get_file_info"
+      ],
       "transport": "stdio",
       "command": "npx",
       "args": [
@@ -989,6 +1266,10 @@
     },
     {
       "name": "postgres",
+      "enabled": false,
+      "enabled_tools": [
+        "query"
+      ],
       "transport": "stdio",
       "command": "pwsh",
       "args": [
@@ -1000,6 +1281,7 @@
     },
     {
       "name": "codebase-memory-mcp",
+      "enabled": false,
       "transport": "stdio",
       "command": "pwsh",
       "args": [
@@ -1010,5 +1292,62 @@
       ]
     }
   ],
+  "mcp_profiles": {
+    "active": "default",
+    "profiles": {
+      "default": {
+        "enabled": [
+          "microsoft-learn",
+          "openaiDeveloperDocs"
+        ],
+        "enabled_tools": {
+          "microsoft-learn": [
+            "microsoft_docs_search",
+            "microsoft_docs_fetch",
+            "microsoft_code_sample_search"
+          ],
+          "openaiDeveloperDocs": [
+            "search_openai_docs",
+            "fetch_openai_doc"
+          ]
+        }
+      },
+      "coding": {
+        "enabled": [
+          "context7",
+          "openaiDeveloperDocs"
+        ]
+      },
+      "github": {
+        "enabled": [
+          "github"
+        ]
+      },
+      "codebase": {
+        "enabled": [
+          "codebase-memory-mcp"
+        ]
+      },
+      "dotnet": {
+        "enabled": [
+          "microsoft-learn",
+          "openaiDeveloperDocs"
+        ]
+      },
+      "browser": {
+        "enabled": [
+          "playwright"
+        ]
+      },
+      "database": {
+        "enabled": [
+          "postgres"
+        ]
+      },
+      "off": {
+        "enabled": []
+      }
+    }
+  },
   "mcp_targets": []
 }

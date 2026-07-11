@@ -890,6 +890,21 @@ jobs:
             (@($scan.detected.notable_files) | Where-Object { [string]$_ -match "ci\.yml$" }).Count -gt 0 | Should Be $true
         }
 
+        It "Excludes generated runtime and worktree projects from dotnet repo facts" {
+            $repo = Join-Path $TestDrive "target-repo-dotnet-exclusions"
+            New-Item -ItemType Directory -Path (Join-Path $repo "src\App") -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $repo ".runtime\tmp\Sample.Tests") -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $repo ".worktrees\feature\tests\Sample.Tests") -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $repo "src\App\App.csproj") '<Project Sdk="Microsoft.NET.Sdk" />'
+            Set-ContentUtf8 (Join-Path $repo ".runtime\tmp\Sample.Tests\Sample.Tests.csproj") '<Project Sdk="Microsoft.NET.Sdk" />'
+            Set-ContentUtf8 (Join-Path $repo ".worktrees\feature\tests\Sample.Tests\Sample.Tests.csproj") '<Project Sdk="Microsoft.NET.Sdk" />'
+
+            $scan = New-AuditRepoScan "demo" $repo "..\target-repo-dotnet-exclusions"
+
+            (@($scan.detected.notable_files) -contains "src\App\App.csproj") | Should Be $true
+            (@($scan.detected.notable_files) | Where-Object { [string]$_ -match '(^|\\)\.(runtime|worktrees)(\\|$)' }).Count | Should Be 0
+        }
+
         It "Extracts documented stack facts from design-package repos before code exists" {
             $repo = Join-Path $TestDrive "target-repo-design-docs"
             New-Item -ItemType Directory -Path $repo -Force | Out-Null
@@ -1010,6 +1025,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 $facts[0].declared_name | Should Be "demo-skill"
                 $facts[0].description | Should Be "Demo description."
                 $facts[0].source_kind | Should Be "manual"
+                $facts[0].content_hash | Should Be (Get-FileContentHash (Join-Path $script:ImportDir "demo-skill\SKILL.md"))
             }
             finally {
                 $script:ImportDir = $oldImportDir
@@ -1036,10 +1052,78 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 $facts[0].from | Should Be "custom-windows-wpf-teacher-app"
                 $facts[0].declared_name | Should Be "custom-windows-wpf-teacher-app"
                 $facts[0].description | Should Be "Windows desktop UI skill."
+                $facts[0].content_hash | Should Be (Get-FileContentHash (Join-Path $script:OverridesDir "custom-windows-wpf-teacher-app\SKILL.md"))
             }
             finally {
                 $script:OverridesDir = $oldOverridesDir
             }
+        }
+
+        It "Changes the installed fingerprint when projected skill semantics change" {
+            $base = [pscustomobject]@{
+                vendor          = "manual"
+                from            = "legacy-cache"
+                to              = "to-spec"
+                repo            = "https://example.com/skills.git"
+                ref             = "main"
+                skill_path      = "skills/engineering/to-spec"
+                declared_name   = "to-spec"
+                description     = "Create a spec."
+                trigger_summary = "Use when creating a spec."
+                content_hash    = "aaa"
+            }
+            $renamed = $base.PSObject.Copy()
+            $renamed.to = "to-tickets"
+            $contentChanged = $base.PSObject.Copy()
+            $contentChanged.content_hash = "bbb"
+
+            $baseFingerprint = Get-AuditFingerprintFromSkillFacts @($base)
+
+            (Get-AuditFingerprintFromSkillFacts @($renamed)) | Should Not Be $baseFingerprint
+            (Get-AuditFingerprintFromSkillFacts @($contentChanged)) | Should Not Be $baseFingerprint
+        }
+
+        It "Captures MCP activation fields in the installed audit snapshot" {
+            $cfg = [pscustomobject]@{
+                mcp_servers = @([pscustomobject]@{
+                        name          = "context7"
+                        transport     = "stdio"
+                        command       = "npx"
+                        args          = @("-y", "@upstash/context7-mcp")
+                        enabled       = $false
+                        enabled_tools = @("query-docs", "resolve-library-id")
+                    })
+            }
+
+            $facts = @(Get-AuditMcpServerFacts $cfg)
+
+            $facts.Count | Should Be 1
+            $facts[0].enabled | Should Be $false
+            @($facts[0].enabled_tools) | Should Be @("query-docs", "resolve-library-id")
+        }
+
+        It "Distinguishes an absent MCP tool allowlist from an explicit empty allowlist" {
+            $withoutAllowlist = @(Get-AuditMcpServerFacts ([pscustomobject]@{
+                        mcp_servers = @([pscustomobject]@{
+                                name      = "context7"
+                                transport = "stdio"
+                                command   = "npx"
+                                args      = @("-y", "@upstash/context7-mcp")
+                            })
+                    }))
+            $withEmptyAllowlist = @(Get-AuditMcpServerFacts ([pscustomobject]@{
+                        mcp_servers = @([pscustomobject]@{
+                                name          = "context7"
+                                transport     = "stdio"
+                                command       = "npx"
+                                args          = @("-y", "@upstash/context7-mcp")
+                                enabled_tools = @()
+                            })
+                    }))
+
+            $withoutAllowlist[0].PSObject.Properties.Match("enabled_tools").Count | Should Be 0
+            $withEmptyAllowlist[0].PSObject.Properties.Match("enabled_tools").Count | Should Be 1
+            @($withEmptyAllowlist[0].enabled_tools).Count | Should Be 0
         }
     }
 
