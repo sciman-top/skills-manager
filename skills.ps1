@@ -1,6 +1,6 @@
 ﻿#requires -Version 5.1
 param(
-    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "锁定", "生成锁文件", "清理无效映射", "打开配置", "解除关联", "清理备份", "自动更新设置", "帮助", "help", "--help", "-h", "doctor", "add", "npx", "安装MCP", "卸载MCP", "同步MCP", "mcp-install", "mcp-uninstall", "mcp-sync", "审查目标", "audit-targets", "一键", "workflow", "prune-invalid-mappings")]
+    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "锁定", "生成锁文件", "清理无效映射", "打开配置", "解除关联", "清理备份", "自动更新设置", "帮助", "help", "--help", "-h", "doctor", "add", "npx", "技能配置", "skill-profile", "安装MCP", "卸载MCP", "同步MCP", "MCP配置", "mcp-profile", "mcp-install", "mcp-uninstall", "mcp-sync", "审查目标", "audit-targets", "一键", "workflow", "prune-invalid-mappings")]
     [string]$Cmd = "menu",
     [string]$Filter = "",
     [switch]$DryRun,
@@ -2616,6 +2616,22 @@ function Normalize-ArrayField($cfg, [string]$name, [ref]$changed) {
 function Assert-IsArray($value) {
     return ($value -is [System.Collections.IList]) -and -not ($value -is [string])
 }
+function Test-CfgArrayProperty($obj, [string]$name) {
+    if ($null -eq $obj) { return $false }
+    if ($obj -is [System.Collections.IDictionary] -or
+        $obj -is [System.Collections.Specialized.OrderedDictionary] -or
+        $obj -is [System.Collections.Specialized.IOrderedDictionary]) {
+        foreach ($key in @($obj.Keys)) {
+            if ([string]::Equals([string]$key, $name, [System.StringComparison]::OrdinalIgnoreCase)) {
+                return (Assert-IsArray (, $obj[$key]))
+            }
+        }
+        return $false
+    }
+    $property = @($obj.PSObject.Properties | Where-Object { [string]::Equals($_.Name, $name, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1)
+    if ($property.Count -ne 1) { return $false }
+    return (Assert-IsArray (, $property[0].Value))
+}
 function Get-CfgObjectProperty($obj, [string]$name) {
     if ($null -eq $obj) { return $null }
     if ($obj -is [System.Collections.IDictionary] -or
@@ -2668,6 +2684,57 @@ function Get-CfgContractErrors($cfg) {
     $imports = Get-CfgArrayField $cfg "imports" $false $errors
     $mcpServers = Get-CfgArrayField $cfg "mcp_servers" $false $errors
     $mcpTargets = Get-CfgArrayField $cfg "mcp_targets" $false $errors
+
+    $skillProjection = Get-CfgObjectProperty $cfg "skill_projection"
+    if ($null -ne $skillProjection) {
+        $projectionEnabled = Get-CfgObjectProperty $skillProjection "enabled"
+        if ($null -ne $projectionEnabled -and $projectionEnabled -isnot [bool]) {
+            $errors.Add("skill_projection.enabled 必须是布尔值") | Out-Null
+        }
+        $projectionSources = Get-CfgObjectProperty $skillProjection "sources"
+        if (-not (Assert-IsArray $projectionSources)) {
+            $errors.Add("skill_projection.sources 必须是数组") | Out-Null
+        }
+        else {
+            foreach ($source in @($projectionSources)) {
+                $sourceId = [string](Get-CfgObjectProperty $source "id")
+                $sourcePath = [string](Get-CfgObjectProperty $source "path")
+                if ([string]::IsNullOrWhiteSpace($sourceId)) { $errors.Add("skill_projection source 缺少 id") | Out-Null }
+                if ([string]::IsNullOrWhiteSpace($sourcePath)) { $errors.Add(("skill_projection source 缺少 path：{0}" -f $sourceId)) | Out-Null }
+            }
+        }
+        $aliases = Get-CfgObjectProperty $skillProjection "aliases"
+        if ($null -ne $aliases -and -not (Assert-IsArray $aliases)) {
+            $errors.Add("skill_projection.aliases 必须是数组") | Out-Null
+        }
+        foreach ($alias in @($aliases)) {
+            $aliasName = [string](Get-CfgObjectProperty $alias "name")
+            $replacement = [string](Get-CfgObjectProperty $alias "replacement")
+            if ([string]::IsNullOrWhiteSpace($aliasName)) { $errors.Add("skill_projection alias 缺少 name") | Out-Null }
+            if ([string]::IsNullOrWhiteSpace($replacement)) { $errors.Add(("skill_projection alias 缺少 replacement：{0}" -f $aliasName)) | Out-Null }
+        }
+        $profiles = Get-CfgObjectProperty $skillProjection "profiles"
+        if ($null -ne $profiles) {
+            $activeProfile = [string](Get-CfgObjectProperty $skillProjection "active_profile")
+            if ([string]::IsNullOrWhiteSpace($activeProfile)) { $errors.Add("skill_projection 配置 profiles 时必须声明 active_profile") | Out-Null }
+            foreach ($profileProperty in @($profiles.PSObject.Properties)) {
+                if (-not (Test-CfgArrayProperty $profileProperty.Value "enabled_names")) { $errors.Add(("skill_projection profile.enabled_names 必须是数组：{0}" -f $profileProperty.Name)) | Out-Null }
+            }
+        }
+    }
+
+    $mcpProfiles = Get-CfgObjectProperty $cfg "mcp_profiles"
+    if ($null -ne $mcpProfiles) {
+        $activeMcpProfile = [string](Get-CfgObjectProperty $mcpProfiles "active")
+        $profiles = Get-CfgObjectProperty $mcpProfiles "profiles"
+        if ([string]::IsNullOrWhiteSpace($activeMcpProfile)) { $errors.Add("mcp_profiles.active 不能为空") | Out-Null }
+        if ($null -eq $profiles) { $errors.Add("mcp_profiles 缺少 profiles") | Out-Null }
+        else {
+            foreach ($profileProperty in @($profiles.PSObject.Properties)) {
+                if (-not (Test-CfgArrayProperty $profileProperty.Value "enabled")) { $errors.Add(("MCP profile.enabled 必须是数组：{0}" -f $profileProperty.Name)) | Out-Null }
+            }
+        }
+    }
 
     foreach ($v in $vendors) {
         $name = [string](Get-CfgObjectProperty $v "name")
@@ -3176,6 +3243,52 @@ function Assert-Cfg($cfg) {
             continue
         }
         Need ($mt.PSObject.Properties.Match("path").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$mt.path)) "mcp_targets 项缺少 path"
+    }
+
+    if ($cfg.PSObject.Properties.Match("skill_projection").Count -gt 0 -and $null -ne $cfg.skill_projection) {
+        $projection = $cfg.skill_projection
+        if ($projection.PSObject.Properties.Match("enabled").Count -gt 0) {
+            Need ($projection.enabled -is [bool]) "skill_projection.enabled 必须是布尔值"
+        }
+        Need ($projection.PSObject.Properties.Match("sources").Count -gt 0 -and (Assert-IsArray $projection.sources)) "skill_projection.sources 必须是数组"
+        foreach ($source in @($projection.sources)) {
+            Need (-not [string]::IsNullOrWhiteSpace([string]$source.id)) "skill_projection source 缺少 id"
+            Need (-not [string]::IsNullOrWhiteSpace([string]$source.path)) ("skill_projection source 缺少 path：{0}" -f [string]$source.id)
+        }
+        $dupProjectionSources = @(Get-DuplicateValues ($projection.sources | ForEach-Object { $_.id }))
+        Need ($dupProjectionSources.Count -eq 0) ("skill_projection source id 重复：{0}" -f ($dupProjectionSources -join ", "))
+        if ($projection.PSObject.Properties.Match("aliases").Count -gt 0 -and $null -ne $projection.aliases) {
+            Need (Assert-IsArray $projection.aliases) "skill_projection.aliases 必须是数组"
+            foreach ($alias in @($projection.aliases)) {
+                Need (-not [string]::IsNullOrWhiteSpace([string]$alias.name)) "skill_projection alias 缺少 name"
+                Need (-not [string]::IsNullOrWhiteSpace([string]$alias.replacement)) ("skill_projection alias 缺少 replacement：{0}" -f [string]$alias.name)
+            }
+            $dupAliases = @(Get-DuplicateValues ($projection.aliases | ForEach-Object { ([string]$_.name).ToLowerInvariant() }))
+            Need ($dupAliases.Count -eq 0) ("skill_projection alias 重复：{0}" -f ($dupAliases -join ", "))
+        }
+        if ($projection.PSObject.Properties.Match("profiles").Count -gt 0 -and $null -ne $projection.profiles) {
+            Need (-not [string]::IsNullOrWhiteSpace([string]$projection.active_profile)) "skill_projection 配置 profiles 时必须声明 active_profile"
+            Need ($projection.profiles.PSObject.Properties.Match([string]$projection.active_profile).Count -gt 0) ("skill_projection active_profile 不存在：{0}" -f [string]$projection.active_profile)
+            foreach ($profileProperty in @($projection.profiles.PSObject.Properties)) {
+                Need (Test-CfgArrayProperty $profileProperty.Value "enabled_names") ("skill_projection profile.enabled_names 必须是数组：{0}" -f $profileProperty.Name)
+            }
+        }
+        if ($projection.PSObject.Properties.Match("budget_limit_chars").Count -gt 0) {
+            Need ([int]$projection.budget_limit_chars -gt 0) "skill_projection.budget_limit_chars 必须大于 0"
+        }
+        if ($projection.PSObject.Properties.Match("external_metadata_reserve_chars").Count -gt 0) {
+            Need ([int]$projection.external_metadata_reserve_chars -ge 0) "skill_projection.external_metadata_reserve_chars 不能小于 0"
+        }
+    }
+
+    if ($cfg.PSObject.Properties.Match("mcp_profiles").Count -gt 0 -and $null -ne $cfg.mcp_profiles) {
+        $mcpProfiles = $cfg.mcp_profiles
+        Need (-not [string]::IsNullOrWhiteSpace([string]$mcpProfiles.active)) "mcp_profiles.active 不能为空"
+        Need ($mcpProfiles.PSObject.Properties.Match("profiles").Count -gt 0 -and $null -ne $mcpProfiles.profiles) "mcp_profiles 缺少 profiles"
+        Need ($mcpProfiles.profiles.PSObject.Properties.Match([string]$mcpProfiles.active).Count -gt 0) ("mcp_profiles.active 不存在：{0}" -f [string]$mcpProfiles.active)
+        foreach ($profileProperty in @($mcpProfiles.profiles.PSObject.Properties)) {
+            Need (Test-CfgArrayProperty $profileProperty.Value "enabled") ("MCP profile.enabled 必须是数组：{0}" -f $profileProperty.Name)
+        }
     }
 
     $mode = $cfg.sync_mode
@@ -6544,6 +6657,17 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight) {
                 $failures.Add(("target:{0} => {1}" -f $t.path, $_.Exception.Message)) | Out-Null
             }
         }
+        try {
+            $projectionResult = Sync-ConfiguredSkillProjection $cfg
+            if ($projectionResult -and -not [bool]$projectionResult.skipped) {
+                $plan = $projectionResult.plan
+                Log ("技能投影已生成：entries={0}, unique={1}, disabled={2}, conflicts={3}, persisted={4}" -f @($plan.skills).Count, @($plan.unique_names).Count, @($plan.disabled).Count, @($plan.conflicts).Count, [bool]$projectionResult.persisted)
+            }
+        }
+        catch {
+            Write-Host ("❌ 同步技能投影失败：{0}" -f $_.Exception.Message) -ForegroundColor Red
+            $failures.Add(("skill-projection => {0}" -f $_.Exception.Message)) | Out-Null
+        }
         return $failures.ToArray()
     } @{ command = "应用到ClaudeCodex" } -NoHost)
 }
@@ -7385,6 +7509,93 @@ function Parse-KeyValueToken([string]$token, [string]$flagName) {
     }
 }
 
+function Resolve-McpProfileServers($cfg) {
+    $baseServers = @($cfg.mcp_servers)
+    if ($cfg.PSObject.Properties.Match("mcp_profiles").Count -eq 0 -or $null -eq $cfg.mcp_profiles) {
+        return $baseServers
+    }
+
+    $profileCfg = $cfg.mcp_profiles
+    $active = ([string]$profileCfg.active).Trim()
+    Need (-not [string]::IsNullOrWhiteSpace($active)) "mcp_profiles.active 不能为空"
+    Need ($profileCfg.PSObject.Properties.Match("profiles").Count -gt 0 -and $null -ne $profileCfg.profiles) "mcp_profiles 缺少 profiles"
+    $profileProperty = @($profileCfg.profiles.PSObject.Properties | Where-Object { [string]::Equals($_.Name, $active, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1)
+    Need ($profileProperty.Count -eq 1) ("mcp_profiles.active 不存在：{0}" -f $active)
+    $profile = $profileProperty[0].Value
+    Need ($null -ne $profile -and $profile.PSObject.Properties.Match("enabled").Count -gt 0) ("MCP profile 缺少 enabled：{0}" -f $active)
+
+    $knownNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($server in $baseServers) { $knownNames.Add([string]$server.name) | Out-Null }
+    $enabledNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($rawName in @($profile.enabled)) {
+        $name = ([string]$rawName).Trim()
+        Need (-not [string]::IsNullOrWhiteSpace($name)) ("MCP profile enabled 不得包含空值：{0}" -f $active)
+        Need ($knownNames.Contains($name)) ("MCP profile 引用了不存在的服务：{0}/{1}" -f $active, $name)
+        $enabledNames.Add($name) | Out-Null
+    }
+
+    $toolOverrides = $null
+    if ($profile.PSObject.Properties.Match("enabled_tools").Count -gt 0 -and $null -ne $profile.enabled_tools) {
+        $toolOverrides = $profile.enabled_tools
+        foreach ($property in @($toolOverrides.PSObject.Properties)) {
+            Need ($knownNames.Contains([string]$property.Name)) ("MCP profile enabled_tools 引用了不存在的服务：{0}/{1}" -f $active, [string]$property.Name)
+        }
+    }
+
+    $projected = New-Object System.Collections.Generic.List[object]
+    foreach ($server in $baseServers) {
+        $copy = [ordered]@{}
+        foreach ($property in $server.PSObject.Properties) {
+            $copy[[string]$property.Name] = $property.Value
+        }
+        $name = [string]$server.name
+        $copy["enabled"] = $enabledNames.Contains($name)
+        if ($null -ne $toolOverrides) {
+            $toolProperty = @($toolOverrides.PSObject.Properties | Where-Object { [string]::Equals($_.Name, $name, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1)
+            if ($toolProperty.Count -eq 1) {
+                $tools = New-Object System.Collections.Generic.List[string]
+                foreach ($rawTool in @($toolProperty[0].Value)) {
+                    $tool = ([string]$rawTool).Trim()
+                    Need (-not [string]::IsNullOrWhiteSpace($tool)) ("MCP profile enabled_tools 不得包含空值：{0}/{1}" -f $active, $name)
+                    if (-not $tools.Contains($tool)) { $tools.Add($tool) | Out-Null }
+                }
+                $copy["enabled_tools"] = @($tools.ToArray())
+            }
+        }
+        $projected.Add([pscustomobject]$copy) | Out-Null
+    }
+    return @($projected.ToArray())
+}
+
+function Get-ActiveMcpServers($servers) {
+    return @($servers | Where-Object { $_.PSObject.Properties.Match("enabled").Count -eq 0 -or [bool]$_.enabled })
+}
+
+function Invoke-McpProfileCommand([string[]]$tokens) {
+    $cfg = LoadCfg
+    Need ($cfg.PSObject.Properties.Match("mcp_profiles").Count -gt 0 -and $null -ne $cfg.mcp_profiles) "未配置 mcp_profiles"
+    $profileCfg = $cfg.mcp_profiles
+    $action = if ($null -eq $tokens -or $tokens.Count -eq 0) { "列表" } else { ([string]$tokens[0]).Trim().ToLowerInvariant() }
+    if ($action -in @("列表", "list")) {
+        foreach ($property in @($profileCfg.profiles.PSObject.Properties | Sort-Object Name)) {
+            $marker = if ([string]::Equals($property.Name, [string]$profileCfg.active, [System.StringComparison]::OrdinalIgnoreCase)) { "*" } else { " " }
+            Write-Host ("{0} {1} ({2})" -f $marker, $property.Name, (@($property.Value.enabled) -join ", "))
+        }
+        return
+    }
+    Need ($action -in @("使用", "use")) ("MCP配置仅支持 列表/list 或 使用/use：{0}" -f $action)
+    Need ($tokens.Count -ge 2) "MCP配置 使用 缺少 profile 名称"
+    $name = ([string]$tokens[1]).Trim()
+    $profileProperty = @($profileCfg.profiles.PSObject.Properties | Where-Object { [string]::Equals($_.Name, $name, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1)
+    Need ($profileProperty.Count -eq 1) ("MCP profile 不存在：{0}" -f $name)
+    $profileCfg.active = [string]$profileProperty[0].Name
+    $servers = @(Resolve-McpProfileServers $cfg)
+    $raw = Get-ContentUtf8 $CfgPath
+    SaveCfgSafe $cfg $raw
+    Write-Host ("已使用 MCP profile：{0}；enabled={1}" -f $name, (@($servers | Where-Object enabled | ForEach-Object name) -join ", "))
+    同步MCP
+}
+
 function Test-ValidEnvVarName([string]$name) {
     if ([string]::IsNullOrWhiteSpace($name)) { return $false }
     return ($name.Trim() -match '^[A-Za-z_][A-Za-z0-9_]*$')
@@ -7905,6 +8116,21 @@ function Convert-McpServersToCodexConfigMap($servers) {
             }
         }
 
+        if ($s.PSObject.Properties.Match("enabled").Count -gt 0) {
+            Need ($s.enabled -is [bool]) ("mcp_server.enabled 必须是布尔值：{0}" -f [string]$s.name)
+            $entry.enabled = [bool]$s.enabled
+        }
+        if ($s.PSObject.Properties.Match("enabled_tools").Count -gt 0 -and $null -ne $s.enabled_tools) {
+            $tools = @()
+            foreach ($rawTool in @($s.enabled_tools)) {
+                $tool = ([string]$rawTool).Trim()
+                Need (-not [string]::IsNullOrWhiteSpace($tool)) ("mcp_server.enabled_tools 不得包含空值：{0}" -f [string]$s.name)
+                Need (-not ($tool.Contains("`r") -or $tool.Contains("`n"))) ("mcp_server.enabled_tools 不得包含换行：{0}" -f [string]$s.name)
+                if ($tools -notcontains $tool) { $tools += $tool }
+            }
+            $entry.enabled_tools = @($tools)
+        }
+
         $startupTimeoutSec = Get-CodexMcpStartupTimeoutSec $s
         if ($null -ne $startupTimeoutSec) {
             $entry.startup_timeout_sec = [int]$startupTimeoutSec
@@ -8316,10 +8542,16 @@ function Test-McpServerUsesPostgresConnectionString($server) {
 function Ensure-PostgresMcpEnvironment($servers) {
     $needsPostgres = $false
     foreach ($server in @($servers)) {
-        if (Test-McpServerUsesPostgresConnectionString $server) {
-            $needsPostgres = $true
-            break
+        if (-not (Test-McpServerUsesPostgresConnectionString $server)) { continue }
+
+        $hasEnabled = $server.PSObject.Properties.Match("enabled").Count -gt 0
+        if ($hasEnabled) {
+            Need ($server.enabled -is [bool]) ("mcp_server.enabled 必须是布尔值：{0}" -f [string]$server.name)
+            if (-not [bool]$server.enabled) { continue }
         }
+
+        $needsPostgres = $true
+        break
     }
     if (-not $needsPostgres) { return }
 
@@ -8338,7 +8570,23 @@ function Ensure-PostgresMcpEnvironment($servers) {
 }
 
 function Ensure-GhAuthForGithubMcp($servers) {
-    if (-not (Has-McpServerByName $servers "github")) { return }
+    $requiresAuthentication = $false
+    foreach ($server in @($servers)) {
+        if ($null -eq $server -or -not [string]::Equals([string]$server.name, "github", [System.StringComparison]::OrdinalIgnoreCase)) {
+            continue
+        }
+
+        $hasEnabled = $server.PSObject.Properties.Match("enabled").Count -gt 0
+        if ($hasEnabled) {
+            Need ($server.enabled -is [bool]) "mcp_server.enabled 必须是布尔值：github"
+            if (-not [bool]$server.enabled) { continue }
+        }
+
+        $requiresAuthentication = $true
+        break
+    }
+    if (-not $requiresAuthentication) { return }
+
     if (-not (Get-Command "gh" -ErrorAction SilentlyContinue)) {
         throw "检测到 github MCP，但未找到 gh 命令。请先安装并登录 GitHub CLI（gh auth login）。"
     }
@@ -8626,7 +8874,7 @@ function Get-CodexMcpServerNamesFromTomlText([string]$tomlText) {
     if ([string]::IsNullOrWhiteSpace($tomlText)) { return @() }
     $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($line in @(($tomlText -split "`r?`n"))) {
-        $m = [regex]::Match([string]$line, '^\s*\[mcp_servers\.([^\]\s]+)\]\s*$')
+        $m = [regex]::Match([string]$line, '^\s*\[mcp_servers\.([^\.\]\s]+)(?:\.[^\]]+)?\]\s*$')
         if ($m.Success) {
             $set.Add([string]$m.Groups[1].Value) | Out-Null
         }
@@ -9127,17 +9375,33 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
     foreach ($server in @($servers)) {
         if ($null -eq $server) { continue }
         if ([string]::Equals([string]$server.name, "github", [System.StringComparison]::OrdinalIgnoreCase)) {
-            if (-not $hasGithubToken) {
+            $hasEnabled = $server.PSObject.Properties.Match("enabled").Count -gt 0
+            if ($hasEnabled) {
+                Need ($server.enabled -is [bool]) "mcp_server.enabled 必须是布尔值：github"
+            }
+            $isExplicitlyDisabled = $hasEnabled -and -not [bool]$server.enabled
+            if (-not $hasGithubToken -and -not $isExplicitlyDisabled) {
                 Log "Codex 检测到 GitHub MCP 但缺少 CODEX_GITHUB_PERSONAL_ACCESS_TOKEN（或 GITHUB_PERSONAL_ACCESS_TOKEN），已跳过同步以避免影响启动。" "WARN"
                 $skippedGithubForMissingToken = $true
                 continue
             }
-            Log "Codex 检测到 GitHub MCP 且存在 Token，将写入 bearer_token_env_var=CODEX_GITHUB_PERSONAL_ACCESS_TOKEN。" "INFO"
+            if ($hasGithubToken) {
+                Log "Codex 检测到 GitHub MCP 且存在 Token，将写入 bearer_token_env_var=CODEX_GITHUB_PERSONAL_ACCESS_TOKEN。" "INFO"
+            }
+            else {
+                Log "Codex 检测到 GitHub MCP 已显式停用；缺少 Token 时仍保留停用配置。" "INFO"
+            }
             $normalizedGithub = [ordered]@{
                 name = [string]$server.name
                 transport = if ([string]::IsNullOrWhiteSpace([string]$server.transport)) { "http" } else { [string]$server.transport }
                 url = [string]$server.url
                 bearer_token_env_var = "CODEX_GITHUB_PERSONAL_ACCESS_TOKEN"
+            }
+            if ($hasEnabled) {
+                $normalizedGithub.enabled = [bool]$server.enabled
+            }
+            if ($server.PSObject.Properties.Match("enabled_tools").Count -gt 0 -and $null -ne $server.enabled_tools) {
+                $normalizedGithub.enabled_tools = @($server.enabled_tools)
             }
             $codexServers += [pscustomobject]$normalizedGithub
             continue
@@ -9157,9 +9421,15 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
     }
     else {
         $skipMcpSection = $false
+        $hostOwnedMcpNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        $hostOwnedMcpNames.Add("node_repl") | Out-Null
         foreach ($line in $lines) {
-            if ($line -match '^\s*\[mcp_servers\.[^\]]+\]\s*$') {
-                $skipMcpSection = $true
+            if ($line -match '^\s*\[mcp_servers\.([^\.\]]+)(?:\.[^\]]+)?\]\s*$') {
+                $serverName = [string]$Matches[1]
+                $skipMcpSection = -not $hostOwnedMcpNames.Contains($serverName)
+                if (-not $skipMcpSection) {
+                    $kept.Add($line) | Out-Null
+                }
                 continue
             }
 
@@ -9398,6 +9668,20 @@ function Get-McpServerSignature($server) {
             $sig.bearer_token_env_var = [string]$server.bearer_token_env_var
         }
     }
+    if ($server.PSObject.Properties.Match("enabled").Count -gt 0) {
+        Need ($server.enabled -is [bool]) "mcp_server.enabled 必须是布尔值"
+        $sig.enabled = [bool]$server.enabled
+    }
+    if ($server.PSObject.Properties.Match("enabled_tools").Count -gt 0 -and $null -ne $server.enabled_tools) {
+        $tools = @()
+        foreach ($rawTool in @($server.enabled_tools)) {
+            $tool = ([string]$rawTool).Trim()
+            Need (-not [string]::IsNullOrWhiteSpace($tool)) "mcp_server.enabled_tools 不得包含空值"
+            Need (-not ($tool.Contains("`r") -or $tool.Contains("`n"))) "mcp_server.enabled_tools 不得包含换行"
+            if ($tools -notcontains $tool) { $tools += $tool }
+        }
+        $sig.enabled_tools = @($tools | Sort-Object)
+    }
     return ($sig | ConvertTo-Json -Depth 30 -Compress)
 }
 
@@ -9581,11 +9865,13 @@ function 同步MCP {
     Invoke-WithMetric "sync_mcp" {
         $script:SkipNativeMcpForSession = $false
         $cfg = LoadCfg
-        $servers = @($cfg.mcp_servers)
+        $servers = @(Resolve-McpProfileServers $cfg)
+        $activeServers = @(Get-ActiveMcpServers $servers)
+        $profileDisabledNames = @($servers | Where-Object { $_.PSObject.Properties.Match("enabled").Count -gt 0 -and -not [bool]$_.enabled } | ForEach-Object { [string]$_.name })
         $pruneNames = @(Get-McpServersToPrune $servers)
         if (-not $DryRun) {
-            Ensure-PostgresMcpEnvironment $servers
-            Ensure-GhAuthForGithubMcp $servers
+            Ensure-PostgresMcpEnvironment $activeServers
+            Ensure-GhAuthForGithubMcp $activeServers
         }
 
         $roots = Resolve-McpTargetRootsFromCfg $cfg
@@ -9603,8 +9889,8 @@ function 同步MCP {
             }
             EnsureDir $targetRoot
             $existing = if (Test-Path $file) { Get-Content -Raw -Path $file } else { "" }
-            $payloadObj = Build-GenericMcpPayload $existing $servers
-            $payloadObj = Remove-McpServersFromPayload $payloadObj $pruneNames
+            $payloadObj = Build-GenericMcpPayload $existing $activeServers
+            $payloadObj = Remove-McpServersFromPayload $payloadObj @($pruneNames + $profileDisabledNames)
             $json = $payloadObj | ConvertTo-Json -Depth 100
             Set-ContentUtf8 $file $json
             $written += $file
@@ -9615,7 +9901,8 @@ function 同步MCP {
         foreach ($geminiRoot in $geminiRoots) {
             $settingsPath = Join-Path $geminiRoot "settings.json"
             $existing = if (Test-Path $settingsPath) { Get-Content -Raw -Path $settingsPath } else { "" }
-            $payloadObj = Build-GeminiSettingsPayload $existing $servers
+            $payloadObj = Build-GeminiSettingsPayload $existing $activeServers
+            $payloadObj = Remove-McpServersFromPayload $payloadObj $profileDisabledNames
             $content = $payloadObj | ConvertTo-Json -Depth 100
             if ($DryRun) {
                 Write-Host ("DRYRUN：将写入 Gemini 配置 -> {0}" -f $settingsPath)
@@ -9633,7 +9920,8 @@ function 同步MCP {
         foreach ($agRoot in $antigravityRoots) {
             $settingsPath = Join-Path $agRoot "settings.json"
             $existing = if (Test-Path $settingsPath) { Get-Content -Raw -Path $settingsPath } else { "" }
-            $payloadObj = Build-GeminiSettingsPayload $existing $servers
+            $payloadObj = Build-GeminiSettingsPayload $existing $activeServers
+            $payloadObj = Remove-McpServersFromPayload $payloadObj $profileDisabledNames
             $content = $payloadObj | ConvertTo-Json -Depth 100
             if ($DryRun) {
                 Write-Host ("DRYRUN：将写入 Gemini Antigravity 配置 -> {0}" -f $settingsPath)
@@ -9675,7 +9963,8 @@ function 同步MCP {
             else {
                 EnsureDir $traeRoot
                 $existing = if (Test-Path $traePath) { Get-Content -Raw -Path $traePath } else { "" }
-                $payloadObj = Build-GenericMcpPayload $existing $servers
+                $payloadObj = Build-GenericMcpPayload $existing $activeServers
+                $payloadObj = Remove-McpServersFromPayload $payloadObj $profileDisabledNames
                 $json = $payloadObj | ConvertTo-Json -Depth 100
                 Set-ContentUtf8 $traePath $json
                 $written += $traePath
@@ -9693,7 +9982,8 @@ function 同步MCP {
                 $projectTraeDir = Split-Path $projectTraePath -Parent
                 EnsureDir $projectTraeDir
                 $existing = if (Test-Path $projectTraePath) { Get-Content -Raw -Path $projectTraePath } else { "" }
-                $payloadObj = Build-GenericMcpPayload $existing $servers
+                $payloadObj = Build-GenericMcpPayload $existing $activeServers
+                $payloadObj = Remove-McpServersFromPayload $payloadObj $profileDisabledNames
                 $json = $payloadObj | ConvertTo-Json -Depth 100
                 Set-ContentUtf8 $projectTraePath $json
                 $written += $projectTraePath
@@ -9705,7 +9995,7 @@ function 同步MCP {
         foreach ($pruneName in $pruneNames) {
             Invoke-NativeMcpCleanup $pruneName
         }
-        Invoke-NativeMcpSync $servers
+        Invoke-NativeMcpSync $activeServers
         if (-not $DryRun) {
             $attemptsEnv = $env:SKILLS_MCP_VERIFY_ATTEMPTS
             $intervalEnv = $env:SKILLS_MCP_VERIFY_INTERVAL_SECONDS
@@ -10907,9 +11197,26 @@ function Add-AuditMonorepoFacts([string]$resolvedPath, [System.Collections.Gener
     }
 }
 
+function Test-AuditIgnoredRecursivePath([string]$resolvedPath, [string]$candidatePath) {
+    $relativePath = Get-AuditRepositoryRelativePath $resolvedPath $candidatePath
+    $segments = @($relativePath -split '[\\/]')
+    foreach ($segment in $segments) {
+        if ($segment -in @('.git', '.runtime', '.worktrees', 'node_modules')) { return $true }
+    }
+    return $false
+}
+
+function Get-AuditRecursiveFiles([string]$resolvedPath, [string]$filter, [int]$limit = 40) {
+    return @(
+        Get-ChildItem -LiteralPath $resolvedPath -Filter $filter -File -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { -not (Test-AuditIgnoredRecursivePath $resolvedPath $_.FullName) } |
+            Select-Object -First $limit
+    )
+}
+
 function Add-AuditDotnetFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$frameworks, [System.Collections.Generic.List[string]]$packageManagers, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands, [System.Collections.Generic.List[string]]$notableFiles) {
     $slnFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.sln" -File -ErrorAction SilentlyContinue | Select-Object -First 10)
-    $csprojFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.csproj" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 40)
+    $csprojFiles = @(Get-AuditRecursiveFiles $resolvedPath "*.csproj" 40)
     if ($slnFiles.Count -eq 0 -and $csprojFiles.Count -eq 0) { return }
     Add-AuditUniqueValue $packageManagers "nuget"
     Add-AuditUniqueValue $buildCommands "dotnet build"
@@ -11185,7 +11492,7 @@ function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$
         Add-AuditDesignDocumentFacts $resolvedPath $languages $frameworks $packageManagers $buildCommands $testCommands $capabilities $notableFiles $risks
         Add-AuditCiWorkflowFacts $resolvedPath $buildCommands $testCommands $notableFiles
         $slnFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.sln" -File -ErrorAction SilentlyContinue)
-        $csprojFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.csproj" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)
+        $csprojFiles = @(Get-AuditRecursiveFiles $resolvedPath "*.csproj" 1)
         if ($slnFiles.Count -gt 0 -or $csprojFiles.Count -gt 0) {
             Add-AuditUniqueValue $languages "dotnet"
         }
@@ -12301,6 +12608,7 @@ function Get-InstalledSkillFacts($cfg = $null) {
         $localPath = Resolve-InstalledSkillLocalPath $cfg $m
         $skillFile = Join-Path $localPath "SKILL.md"
         $meta = Get-SkillMetadataFromFile $skillFile
+        $contentHash = [string](Get-FileContentHash $skillFile)
 
         $repo = ""
         $ref = ""
@@ -12333,6 +12641,7 @@ function Get-InstalledSkillFacts($cfg = $null) {
             declared_name = $meta.declared_name
             description = $meta.description
             trigger_summary = $meta.trigger_summary
+            content_hash = $contentHash
             local_path = $localPath
         })
     }
@@ -12344,6 +12653,7 @@ function Get-InstalledSkillFacts($cfg = $null) {
         $localPath = [string]$override.full
         $skillFile = Join-Path $localPath "SKILL.md"
         $meta = Get-SkillMetadataFromFile $skillFile
+        $contentHash = [string](Get-FileContentHash $skillFile)
         $facts += [pscustomobject]([ordered]@{
             name = if ([string]::IsNullOrWhiteSpace($meta.declared_name)) { $from } else { $meta.declared_name }
             source_kind = "overrides"
@@ -12356,6 +12666,7 @@ function Get-InstalledSkillFacts($cfg = $null) {
             declared_name = $meta.declared_name
             description = $meta.description
             trigger_summary = $meta.trigger_summary
+            content_hash = $contentHash
             local_path = $localPath
         })
     }
@@ -12365,10 +12676,7 @@ function Get-InstalledSkillFacts($cfg = $null) {
 function Get-AuditMcpServerFacts($cfg = $null) {
     if ($null -eq $cfg) { $cfg = LoadCfg }
     $facts = @()
-    $servers = @()
-    if ($cfg.PSObject.Properties.Match("mcp_servers").Count -gt 0 -and $null -ne $cfg.mcp_servers) {
-        $servers = @($cfg.mcp_servers)
-    }
+    $servers = @(Resolve-McpProfileServers $cfg)
     foreach ($s in $servers) {
         if ($null -eq $s) { continue }
         $name = [string]$s.name
@@ -12382,6 +12690,20 @@ function Get-AuditMcpServerFacts($cfg = $null) {
         $row = [ordered]@{
             name = $name
             transport = $transport
+            enabled = $true
+        }
+        if ($s.PSObject.Properties.Match("enabled").Count -gt 0) {
+            Need ($s.enabled -is [bool]) ("mcp_server.enabled 必须是布尔值：{0}" -f $name)
+            $row.enabled = [bool]$s.enabled
+        }
+        if ($s.PSObject.Properties.Match("enabled_tools").Count -gt 0 -and $null -ne $s.enabled_tools) {
+            $enabledTools = @()
+            foreach ($rawTool in @($s.enabled_tools)) {
+                $tool = ([string]$rawTool).Trim()
+                Need (-not [string]::IsNullOrWhiteSpace($tool)) ("mcp_server.enabled_tools 不得包含空值：{0}" -f $name)
+                if ($enabledTools -notcontains $tool) { $enabledTools += $tool }
+            }
+            $row.enabled_tools = @($enabledTools | Sort-Object)
         }
         if ($transport -eq "stdio") {
             $row.command = if ($s.PSObject.Properties.Match("command").Count -gt 0) { [string]$s.command } else { "" }
@@ -12432,15 +12754,18 @@ function Get-AuditFingerprintFromMcpServers($servers) {
     return (Get-AuditFingerprintFromVendorFromPairs $pairs)
 }
 
-function Get-AuditFingerprintFromVendorFromPairs($pairs) {
-    $normalized = New-Object System.Collections.Generic.List[string]
+function Get-AuditFingerprintFromVendorFromPairs($pairs, [bool]$caseSensitive = $false) {
+    $comparer = if ($caseSensitive) { [System.StringComparer]::Ordinal } else { [System.StringComparer]::OrdinalIgnoreCase }
+    $normalized = New-Object System.Collections.Generic.HashSet[string]($comparer)
     foreach ($pair in @($pairs)) {
         if ($null -eq $pair) { continue }
         $text = ([string]$pair).Trim()
         if ([string]::IsNullOrWhiteSpace($text)) { continue }
-        $normalized.Add($text.ToLowerInvariant()) | Out-Null
+        if (-not $caseSensitive) { $text = $text.ToLowerInvariant() }
+        $normalized.Add($text) | Out-Null
     }
-    $ordered = @($normalized | Sort-Object -Unique)
+    [string[]]$ordered = @($normalized)
+    [System.Array]::Sort($ordered, [System.StringComparer]::Ordinal)
     $payload = ($ordered -join "`n")
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {
@@ -12454,7 +12779,19 @@ function Get-AuditFingerprintFromVendorFromPairs($pairs) {
 }
 
 function Get-AuditFingerprintFromSkillFacts($facts) {
-    $pairs = @()
+    $rows = @()
+    $fields = @(
+        "vendor",
+        "from",
+        "to",
+        "repo",
+        "ref",
+        "skill_path",
+        "declared_name",
+        "description",
+        "trigger_summary",
+        "content_hash"
+    )
     foreach ($item in @($facts)) {
         if ($null -eq $item) { continue }
         $vendor = ""
@@ -12462,9 +12799,18 @@ function Get-AuditFingerprintFromSkillFacts($facts) {
         if ($item.PSObject.Properties.Match("vendor").Count -gt 0) { $vendor = [string]$item.vendor }
         if ($item.PSObject.Properties.Match("from").Count -gt 0) { $from = [string]$item.from }
         if ([string]::IsNullOrWhiteSpace($vendor) -or [string]::IsNullOrWhiteSpace($from)) { continue }
-        $pairs += ("{0}|{1}" -f $vendor, $from)
+
+        $row = [ordered]@{}
+        foreach ($field in $fields) {
+            $value = ""
+            if ($item.PSObject.Properties.Match($field).Count -gt 0 -and $null -ne $item.$field) {
+                $value = [string]$item.$field
+            }
+            $row[$field] = $value
+        }
+        $rows += ($row | ConvertTo-Json -Compress)
     }
-    return (Get-AuditFingerprintFromVendorFromPairs $pairs)
+    return (Get-AuditFingerprintFromVendorFromPairs $rows $true)
 }
 
 function Get-AuditLiveInstalledState($cfg = $null) {
@@ -15150,6 +15496,448 @@ function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
     }
 }
 
+function Resolve-SkillProjectionPath([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    $resolved = $path.Trim()
+    if ($resolved.StartsWith("~")) {
+        $resolved = $resolved -replace "^~", [Environment]::GetFolderPath("UserProfile")
+    }
+    $resolved = $resolved.Replace("/", "\")
+    if (-not [System.IO.Path]::IsPathRooted($resolved)) {
+        $resolved = Join-Path $Root $resolved
+    }
+    return [System.IO.Path]::GetFullPath($resolved)
+}
+
+function Get-SkillProjectionFiles([string]$rootPath) {
+    $files = New-Object System.Collections.Generic.List[object]
+    if ([string]::IsNullOrWhiteSpace($rootPath) -or -not (Test-Path -LiteralPath $rootPath -PathType Container)) {
+        return @()
+    }
+
+    foreach ($dir in @(Get-ChildItem -LiteralPath $rootPath -Directory -Force -ErrorAction SilentlyContinue | Sort-Object Name)) {
+        if ($dir.Name -eq ".system") {
+            foreach ($systemDir in @(Get-ChildItem -LiteralPath $dir.FullName -Directory -Force -ErrorAction SilentlyContinue | Sort-Object Name)) {
+                $systemFile = Join-Path $systemDir.FullName "SKILL.md"
+                if (Test-Path -LiteralPath $systemFile -PathType Leaf) {
+                    $files.Add([pscustomobject]@{ file = $systemFile; dir = $systemDir.FullName; is_system = $true }) | Out-Null
+                }
+            }
+            continue
+        }
+
+        $skillFile = Join-Path $dir.FullName "SKILL.md"
+        if (Test-Path -LiteralPath $skillFile -PathType Leaf) {
+            $files.Add([pscustomobject]@{ file = $skillFile; dir = $dir.FullName; is_system = $false }) | Out-Null
+        }
+    }
+    return @($files.ToArray())
+}
+
+function Get-SkillPackageContentHash([string]$skillDir) {
+    if ([string]::IsNullOrWhiteSpace($skillDir) -or -not (Test-Path -LiteralPath $skillDir -PathType Container)) { return "missing" }
+    $base = [System.IO.Path]::GetFullPath($skillDir).TrimEnd("\", "/")
+    $parts = New-Object System.Collections.Generic.List[string]
+    foreach ($file in @(Get-ChildItem -LiteralPath $base -Recurse -File -Force -ErrorAction SilentlyContinue | Sort-Object FullName)) {
+        $relative = $file.FullName.Substring($base.Length).TrimStart("\", "/").Replace("\", "/")
+        $parts.Add(("{0}|{1}" -f $relative, (Get-FileContentHash $file.FullName))) | Out-Null
+    }
+    return (Get-StringSha256 ($parts.ToArray() -join "`n"))
+}
+
+function Get-SkillProjectionSourceEntries($source, [int]$sourceOrder) {
+    $id = [string]$source.id
+    $rootPath = Resolve-SkillProjectionPath ([string]$source.path)
+    $priority = if ($source.PSObject.Properties.Match("priority").Count -gt 0) { [int]$source.priority } else { 0 }
+    $platforms = if ($source.PSObject.Properties.Match("platforms").Count -gt 0 -and $null -ne $source.platforms) { @($source.platforms | ForEach-Object { [string]$_ }) } else { @("codex") }
+    $entries = New-Object System.Collections.Generic.List[object]
+
+    foreach ($item in @(Get-SkillProjectionFiles $rootPath)) {
+        $meta = Get-SkillMetadataFromFile ([string]$item.file)
+        $declaredName = ([string]$meta.declared_name).Trim()
+        if ([string]::IsNullOrWhiteSpace($declaredName)) {
+            $declaredName = Split-Path ([string]$item.dir) -Leaf
+        }
+        $effectivePriority = $priority
+        if ([bool]$item.is_system) { $effectivePriority += 100000 }
+        $entries.Add([pscustomobject]([ordered]@{
+                    name = $declaredName
+                    description = [string]$meta.description
+                    source_id = $id
+                    source_root = $rootPath
+                    source_order = $sourceOrder
+                    priority = $effectivePriority
+                    is_system = [bool]$item.is_system
+                    path = [System.IO.Path]::GetFullPath([string]$item.file)
+                    skill_dir = [System.IO.Path]::GetFullPath([string]$item.dir)
+                    content_hash = [string](Get-FileContentHash ([string]$item.file))
+                    package_hash = [string](Get-SkillPackageContentHash ([string]$item.dir))
+                    target_platforms = @($platforms)
+                })) | Out-Null
+    }
+    return @($entries.ToArray())
+}
+
+function New-SkillProjectionPlan($projectionCfg) {
+    Need ($null -ne $projectionCfg) "skill_projection 配置为空"
+    $enabled = -not ($projectionCfg.PSObject.Properties.Match("enabled").Count -gt 0) -or [bool]$projectionCfg.enabled
+    if (-not $enabled) {
+        return [pscustomobject]@{ schema_version = 2; enabled = $false; skills = @(); canonical = @(); active = @(); disabled = @(); conflicts = @(); unique_names = @(); active_names = @(); duplicate_name_groups = 0 }
+    }
+
+    Need ($projectionCfg.PSObject.Properties.Match("sources").Count -gt 0 -and $null -ne $projectionCfg.sources) "skill_projection 缺少 sources"
+    $all = New-Object System.Collections.Generic.List[object]
+    $sourceOrder = 0
+    foreach ($source in @($projectionCfg.sources)) {
+        Need ($null -ne $source) "skill_projection.sources 不能包含空值"
+        Need (-not [string]::IsNullOrWhiteSpace([string]$source.id)) "skill_projection source 缺少 id"
+        Need (-not [string]::IsNullOrWhiteSpace([string]$source.path)) ("skill_projection source 缺少 path：{0}" -f [string]$source.id)
+        foreach ($entry in @(Get-SkillProjectionSourceEntries $source $sourceOrder)) {
+            $all.Add($entry) | Out-Null
+        }
+        $sourceOrder++
+    }
+
+    $groups = @{}
+    foreach ($entry in @($all.ToArray())) {
+        $key = ([string]$entry.name).ToLowerInvariant()
+        if (-not $groups.ContainsKey($key)) { $groups[$key] = New-Object System.Collections.Generic.List[object] }
+        $groups[$key].Add($entry) | Out-Null
+    }
+
+    $canonical = New-Object System.Collections.Generic.List[object]
+    $disabled = New-Object System.Collections.Generic.List[object]
+    $conflicts = New-Object System.Collections.Generic.List[object]
+    $duplicateGroups = 0
+    foreach ($key in @($groups.Keys | Sort-Object)) {
+        $candidates = @($groups[$key].ToArray() | Sort-Object @{ Expression = "priority"; Descending = $true }, @{ Expression = "source_order"; Ascending = $true }, @{ Expression = "path"; Ascending = $true })
+        if ($candidates.Count -eq 0) { continue }
+        $winner = $candidates[0]
+        $canonical.Add($winner) | Out-Null
+        if ($candidates.Count -le 1) { continue }
+
+        $duplicateGroups++
+        $hashes = @($candidates | ForEach-Object { [string]$_.package_hash } | Sort-Object -Unique)
+        $isConflict = $hashes.Count -gt 1
+        if ($isConflict) {
+            $conflicts.Add([pscustomobject]([ordered]@{
+                        name = [string]$winner.name
+                        winner_path = [string]$winner.path
+                        winner_source_id = [string]$winner.source_id
+                        candidate_paths = @($candidates | ForEach-Object { [string]$_.path })
+                        package_hashes = @($hashes)
+                        resolution = "priority"
+                    })) | Out-Null
+        }
+        foreach ($loser in @($candidates | Select-Object -Skip 1)) {
+            $disabled.Add([pscustomobject]([ordered]@{
+                        name = [string]$loser.name
+                        path = [string]$loser.path
+                        source_id = [string]$loser.source_id
+                        source_root = [string]$loser.source_root
+                        content_hash = [string]$loser.content_hash
+                        package_hash = [string]$loser.package_hash
+                        target_platforms = @($loser.target_platforms)
+                        canonical_path = [string]$winner.path
+                        canonical_source_id = [string]$winner.source_id
+                        decision = if ($isConflict) { "conflict_priority_winner" } else { "duplicate_same_content" }
+                    })) | Out-Null
+        }
+    }
+
+    $canonicalByName = @{}
+    foreach ($entry in @($canonical.ToArray())) {
+        $canonicalByName[[string]$entry.name] = $entry
+    }
+
+    $aliases = @{}
+    if ($projectionCfg.PSObject.Properties.Match("aliases").Count -gt 0 -and $null -ne $projectionCfg.aliases) {
+        foreach ($alias in @($projectionCfg.aliases)) {
+            Need ($null -ne $alias) "skill_projection.aliases 不能包含空值"
+            $aliasName = ([string]$alias.name).Trim()
+            $replacement = ([string]$alias.replacement).Trim()
+            Need (-not [string]::IsNullOrWhiteSpace($aliasName)) "skill_projection alias 缺少 name"
+            Need (-not [string]::IsNullOrWhiteSpace($replacement)) ("skill_projection alias 缺少 replacement：{0}" -f $aliasName)
+            Need (-not [string]::Equals($aliasName, $replacement, [System.StringComparison]::OrdinalIgnoreCase)) ("skill_projection alias 不能指向自身：{0}" -f $aliasName)
+            Need (-not $aliases.ContainsKey($aliasName)) ("skill_projection alias 重复：{0}" -f $aliasName)
+            Need ($canonicalByName.ContainsKey($replacement)) ("skill_projection alias replacement 不存在：{0} -> {1}" -f $aliasName, $replacement)
+            $aliases[$aliasName] = $replacement
+        }
+    }
+
+    $budgetLimitChars = if ($projectionCfg.PSObject.Properties.Match("budget_limit_chars").Count -gt 0) { [int]$projectionCfg.budget_limit_chars } else { 8000 }
+    $externalReserveChars = if ($projectionCfg.PSObject.Properties.Match("external_metadata_reserve_chars").Count -gt 0) { [int]$projectionCfg.external_metadata_reserve_chars } else { 0 }
+    Need ($budgetLimitChars -gt 0) "skill_projection.budget_limit_chars 必须大于 0"
+    Need ($externalReserveChars -ge 0) "skill_projection.external_metadata_reserve_chars 不能小于 0"
+
+    $activeProfile = ""
+    $profileEnabledNames = $null
+    $profileBudgets = New-Object System.Collections.Generic.List[object]
+    if ($projectionCfg.PSObject.Properties.Match("profiles").Count -gt 0 -and $null -ne $projectionCfg.profiles) {
+        $activeProfile = ([string]$projectionCfg.active_profile).Trim()
+        Need (-not [string]::IsNullOrWhiteSpace($activeProfile)) "skill_projection 配置 profiles 时必须声明 active_profile"
+        $profileProperty = @($projectionCfg.profiles.PSObject.Properties | Where-Object { [string]::Equals($_.Name, $activeProfile, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1)
+        Need ($profileProperty.Count -eq 1) ("skill_projection active_profile 不存在：{0}" -f $activeProfile)
+        foreach ($property in @($projectionCfg.profiles.PSObject.Properties | Sort-Object Name)) {
+            $profileName = [string]$property.Name
+            $profile = $property.Value
+            Need ($null -ne $profile -and $profile.PSObject.Properties.Match("enabled_names").Count -gt 0) ("skill_projection profile 缺少 enabled_names：{0}" -f $profileName)
+            $enabledNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($rawName in @($profile.enabled_names)) {
+                $name = ([string]$rawName).Trim()
+                Need (-not [string]::IsNullOrWhiteSpace($name)) ("skill_projection profile enabled_names 不得包含空值：{0}" -f $profileName)
+                Need ($canonicalByName.ContainsKey($name)) ("skill_projection profile 引用了不存在的技能：{0}/{1}" -f $profileName, $name)
+                $enabledNames.Add($name) | Out-Null
+            }
+
+            $profileMetadataChars = 0
+            $profileActiveSkillCount = 0
+            foreach ($entry in @($canonical.ToArray())) {
+                $entryName = [string]$entry.name
+                if ($aliases.ContainsKey($entryName)) { continue }
+                if (-not [bool]$entry.is_system -and -not $enabledNames.Contains($entryName)) { continue }
+                $profileMetadataChars += $entryName.Length + ([string]$entry.description).Length
+                $profileActiveSkillCount++
+            }
+            $profileEstimatedChars = $profileMetadataChars + $externalReserveChars
+            $profileBudgets.Add([pscustomobject]([ordered]@{
+                        profile = $profileName
+                        enabled_name_count = $enabledNames.Count
+                        active_skill_count = $profileActiveSkillCount
+                        skill_metadata_chars = $profileMetadataChars
+                        external_metadata_reserve_chars = $externalReserveChars
+                        estimated_metadata_chars = $profileEstimatedChars
+                        budget_limit_chars = $budgetLimitChars
+                        budget_pass = ($profileEstimatedChars -le $budgetLimitChars)
+                    })) | Out-Null
+
+            if ([string]::Equals($profileName, $activeProfile, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $profileEnabledNames = $enabledNames
+            }
+        }
+    }
+
+    $active = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in @($canonical.ToArray() | Sort-Object name)) {
+        $name = [string]$entry.name
+        if ($aliases.ContainsKey($name)) {
+            $replacement = [string]$aliases[$name]
+            $replacementEntry = $canonicalByName[$replacement]
+            $disabled.Add([pscustomobject]([ordered]@{
+                        name = $name
+                        path = [string]$entry.path
+                        source_id = [string]$entry.source_id
+                        source_root = [string]$entry.source_root
+                        content_hash = [string]$entry.content_hash
+                        package_hash = [string]$entry.package_hash
+                        target_platforms = @($entry.target_platforms)
+                        canonical_path = [string]$replacementEntry.path
+                        canonical_source_id = [string]$replacementEntry.source_id
+                        replacement = $replacement
+                        decision = "alias_replaced"
+                    })) | Out-Null
+            continue
+        }
+        if ($null -ne $profileEnabledNames -and -not [bool]$entry.is_system -and -not $profileEnabledNames.Contains($name)) {
+            $disabled.Add([pscustomobject]([ordered]@{
+                        name = $name
+                        path = [string]$entry.path
+                        source_id = [string]$entry.source_id
+                        source_root = [string]$entry.source_root
+                        content_hash = [string]$entry.content_hash
+                        package_hash = [string]$entry.package_hash
+                        target_platforms = @($entry.target_platforms)
+                        canonical_path = [string]$entry.path
+                        canonical_source_id = [string]$entry.source_id
+                        active_profile = $activeProfile
+                        decision = "profile_excluded"
+                    })) | Out-Null
+            continue
+        }
+        $active.Add($entry) | Out-Null
+    }
+
+    $skillMetadataChars = 0
+    foreach ($entry in @($active.ToArray())) {
+        $skillMetadataChars += ([string]$entry.name).Length + ([string]$entry.description).Length
+    }
+    $estimatedMetadataChars = $skillMetadataChars + $externalReserveChars
+    $allProfilesBudgetPass = @($profileBudgets.ToArray() | Where-Object { -not [bool]$_.budget_pass }).Count -eq 0
+
+    return [pscustomobject]([ordered]@{
+        schema_version = 2
+        enabled = $true
+        conflict_policy = "system_then_priority_then_source_order"
+        active_profile = $activeProfile
+        skills = @($all.ToArray() | Sort-Object name, @{ Expression = "priority"; Descending = $true }, path)
+        canonical = @($canonical.ToArray() | Sort-Object name)
+        active = @($active.ToArray() | Sort-Object name)
+        disabled = @($disabled.ToArray() | Sort-Object name, path)
+        conflicts = @($conflicts.ToArray() | Sort-Object name)
+        unique_names = @($canonical.ToArray() | ForEach-Object { [string]$_.name } | Sort-Object)
+        active_names = @($active.ToArray() | ForEach-Object { [string]$_.name } | Sort-Object)
+        duplicate_name_groups = $duplicateGroups
+        skill_metadata_chars = $skillMetadataChars
+        external_metadata_reserve_chars = $externalReserveChars
+        estimated_metadata_chars = $estimatedMetadataChars
+        budget_limit_chars = $budgetLimitChars
+        budget_pass = ($estimatedMetadataChars -le $budgetLimitChars)
+        all_profiles_budget_pass = $allProfilesBudgetPass
+        profile_budgets = @($profileBudgets.ToArray())
+    })
+}
+
+function Build-CodexSkillsProjectionToml([string]$existingToml, $disabledEntries) {
+    $begin = "# BEGIN skills-manager:skills-projection"
+    $end = "# END skills-manager:skills-projection"
+    $lines = if ([string]::IsNullOrEmpty($existingToml)) { @() } else { @($existingToml -split "`r?`n") }
+    $kept = New-Object System.Collections.Generic.List[string]
+    $inside = $false
+    $foundBegin = $false
+    $foundEnd = $false
+    foreach ($line in $lines) {
+        if ($line.Trim() -eq $begin) {
+            Need (-not $inside) "Codex skills projection 受管块重复开始"
+            $inside = $true
+            $foundBegin = $true
+            continue
+        }
+        if ($line.Trim() -eq $end) {
+            Need ($inside) "Codex skills projection 受管块缺少开始标记"
+            $inside = $false
+            $foundEnd = $true
+            continue
+        }
+        if (-not $inside) { $kept.Add([string]$line) | Out-Null }
+    }
+    Need (-not $inside) "Codex skills projection 受管块缺少结束标记"
+    Need ($foundBegin -eq $foundEnd) "Codex skills projection 受管块标记不完整"
+
+    while ($kept.Count -gt 0 -and [string]::IsNullOrWhiteSpace($kept[$kept.Count - 1])) { $kept.RemoveAt($kept.Count - 1) }
+    $output = New-Object System.Collections.Generic.List[string]
+    $output.AddRange([string[]]$kept.ToArray())
+    $entries = @($disabledEntries | Sort-Object path -Unique)
+    if ($entries.Count -gt 0) {
+        if ($output.Count -gt 0) { $output.Add("") | Out-Null }
+        $output.Add($begin) | Out-Null
+        foreach ($entry in $entries) {
+            $output.Add("[[skills.config]]") | Out-Null
+            $output.Add(("path = {0}" -f (ConvertTo-TomlBasicValue ([string]$entry.path)))) | Out-Null
+            $output.Add("enabled = false") | Out-Null
+            $output.Add("") | Out-Null
+        }
+        if ($output.Count -gt 0 -and [string]::IsNullOrWhiteSpace($output[$output.Count - 1])) { $output.RemoveAt($output.Count - 1) }
+        $output.Add($end) | Out-Null
+    }
+    return (($output.ToArray() -join "`r`n").TrimEnd() + "`r`n")
+}
+
+function Backup-CodexSkillProjectionConfig([string]$configPath) {
+    if ($DryRun -or -not (Test-Path -LiteralPath $configPath -PathType Leaf)) { return $null }
+    $codexRoot = Split-Path $configPath -Parent
+    $backupRoot = Join-Path $codexRoot "config-backups"
+    EnsureDir $backupRoot
+    $backupPath = Join-Path $backupRoot ("config.toml.skills-projection.{0}.bak" -f (Get-Date -Format "yyyyMMdd-HHmmss-fff"))
+    Copy-Item -LiteralPath $configPath -Destination $backupPath -Force
+    return $backupPath
+}
+
+function Sync-CodexSkillProjection($projectionCfg) {
+    $plan = New-SkillProjectionPlan $projectionCfg
+    if ([bool]$plan.enabled) {
+        Need ([bool]$plan.budget_pass) ("技能描述预算超限：estimated={0}, limit={1}, profile={2}" -f [int]$plan.estimated_metadata_chars, [int]$plan.budget_limit_chars, [string]$plan.active_profile)
+        $oversizedProfiles = @($plan.profile_budgets | Where-Object { -not [bool]$_.budget_pass } | ForEach-Object { "{0}={1}/{2}" -f $_.profile, $_.estimated_metadata_chars, $_.budget_limit_chars })
+        Need ([bool]$plan.all_profiles_budget_pass) ("技能 profile 描述预算超限：{0}" -f ($oversizedProfiles -join ", "))
+    }
+
+    $configRaw = if ($projectionCfg.PSObject.Properties.Match("codex_config_path").Count -gt 0) { [string]$projectionCfg.codex_config_path } else { "~/.codex/config.toml" }
+    $manifestRaw = if ($projectionCfg.PSObject.Properties.Match("manifest_path").Count -gt 0) { [string]$projectionCfg.manifest_path } else { "reports/skill-projection/current.json" }
+    $configPath = Resolve-SkillProjectionPath $configRaw
+    $manifestPath = Resolve-SkillProjectionPath $manifestRaw
+    $existing = if (Test-Path -LiteralPath $configPath -PathType Leaf) { Get-ContentUtf8 $configPath } else { "" }
+    $desired = Build-CodexSkillsProjectionToml $existing @($plan.disabled)
+    $changed = -not [string]::Equals($existing, $desired, [System.StringComparison]::Ordinal)
+    $backupPath = $null
+
+    if (-not $DryRun) {
+        if ($changed) {
+            $backupPath = Backup-CodexSkillProjectionConfig $configPath
+            Set-ContentUtf8 $configPath $desired
+        }
+        $manifest = [ordered]@{
+            schema_version = 2
+            enabled = [bool]$plan.enabled
+            generated_at = (Get-Date).ToString("o")
+            conflict_policy = [string]$plan.conflict_policy
+            active_profile = [string]$plan.active_profile
+            source_count = @($projectionCfg.sources).Count
+            skill_entry_count = @($plan.skills).Count
+            unique_name_count = @($plan.unique_names).Count
+            active_name_count = @($plan.active_names).Count
+            duplicate_name_groups = [int]$plan.duplicate_name_groups
+            disabled_path_count = @($plan.disabled).Count
+            conflict_count = @($plan.conflicts).Count
+            skill_metadata_chars = [int]$plan.skill_metadata_chars
+            external_metadata_reserve_chars = [int]$plan.external_metadata_reserve_chars
+            estimated_metadata_chars = [int]$plan.estimated_metadata_chars
+            budget_limit_chars = [int]$plan.budget_limit_chars
+            budget_pass = [bool]$plan.budget_pass
+            all_profiles_budget_pass = [bool]$plan.all_profiles_budget_pass
+            profile_budgets = @($plan.profile_budgets)
+            skills = @($plan.skills)
+            canonical = @($plan.canonical)
+            active = @($plan.active)
+            disabled = @($plan.disabled)
+            conflicts = @($plan.conflicts)
+        }
+        Set-ContentUtf8 $manifestPath ($manifest | ConvertTo-Json -Depth 20)
+    }
+
+    return [pscustomobject]@{
+        success = $true
+        persisted = (-not $DryRun)
+        changed = $changed
+        config_path = $configPath
+        manifest_path = $manifestPath
+        backup_path = if ($null -eq $backupPath) { "" } else { [string]$backupPath }
+        plan = $plan
+    }
+}
+
+function Invoke-SkillProfileCommand([string[]]$tokens) {
+    $cfg = LoadCfg
+    Need ($cfg.PSObject.Properties.Match("skill_projection").Count -gt 0 -and $null -ne $cfg.skill_projection) "未配置 skill_projection"
+    $projection = $cfg.skill_projection
+    Need ($projection.PSObject.Properties.Match("profiles").Count -gt 0 -and $null -ne $projection.profiles) "未配置技能 profiles"
+    $action = if ($null -eq $tokens -or $tokens.Count -eq 0) { "列表" } else { ([string]$tokens[0]).Trim().ToLowerInvariant() }
+    if ($action -in @("列表", "list")) {
+        foreach ($property in @($projection.profiles.PSObject.Properties | Sort-Object Name)) {
+            $marker = if ([string]::Equals($property.Name, [string]$projection.active_profile, [System.StringComparison]::OrdinalIgnoreCase)) { "*" } else { " " }
+            Write-Host ("{0} {1} ({2} skills)" -f $marker, $property.Name, @($property.Value.enabled_names).Count)
+        }
+        return
+    }
+    Need ($action -in @("使用", "use")) ("技能配置仅支持 列表/list 或 使用/use：{0}" -f $action)
+    Need ($tokens.Count -ge 2) "技能配置 使用 缺少 profile 名称"
+    $name = ([string]$tokens[1]).Trim()
+    $profileProperty = @($projection.profiles.PSObject.Properties | Where-Object { [string]::Equals($_.Name, $name, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1)
+    Need ($profileProperty.Count -eq 1) ("技能 profile 不存在：{0}" -f $name)
+    $projection.active_profile = [string]$profileProperty[0].Name
+    $plan = New-SkillProjectionPlan $projection
+    Need ([bool]$plan.budget_pass) ("技能 profile 超出描述预算：{0} ({1}/{2})" -f $name, $plan.estimated_metadata_chars, $plan.budget_limit_chars)
+    $raw = Get-ContentUtf8 $CfgPath
+    SaveCfgSafe $cfg $raw
+    $result = Sync-CodexSkillProjection $projection
+    Write-Host ("已使用技能 profile：{0}；active={1}, metadata={2}/{3}, persisted={4}" -f $name, @($result.plan.active).Count, $result.plan.estimated_metadata_chars, $result.plan.budget_limit_chars, [bool]$result.persisted)
+}
+
+function Sync-ConfiguredSkillProjection($cfg) {
+    if ($null -eq $cfg -or $cfg.PSObject.Properties.Match("skill_projection").Count -eq 0 -or $null -eq $cfg.skill_projection) {
+        return [pscustomobject]@{ success = $true; persisted = $false; skipped = $true; plan = $null }
+    }
+    return (Sync-CodexSkillProjection $cfg.skill_projection)
+}
+
 function Get-WorkflowCatalog {
     $doctorStrictStep = [pscustomobject]@{
         id = "doctor_strict"
@@ -15905,6 +16693,12 @@ MCP：
   .\skills.ps1 安装MCP <name> --transport http --url <url> [--bearer-token-env-var <ENV>] 
   .\skills.ps1 卸载MCP <name>
   .\skills.ps1 同步MCP
+  .\skills.ps1 MCP配置 列表
+  .\skills.ps1 MCP配置 使用 default|coding|dotnet|browser|database|off
+
+技能投影：
+  .\skills.ps1 技能配置 列表
+  .\skills.ps1 技能配置 使用 default|coding|dotnet|ppt|content|physics|design|browser|database
 
 目标仓审查：
   .\skills.ps1 审查目标 需求设置
@@ -16250,6 +17044,8 @@ if ($MyInvocation.InvocationName -ne '.') {
             "生成锁文件" { 锁定 }
             "清理无效映射" { 清理无效映射 (Merge-FilterAndArgs $Filter $args) }
             "prune-invalid-mappings" { 清理无效映射 (Merge-FilterAndArgs $Filter $args) }
+            "技能配置" { Invoke-SkillProfileCommand (Merge-FilterAndArgs $Filter $args) }
+            "skill-profile" { Invoke-SkillProfileCommand (Merge-FilterAndArgs $Filter $args) }
             "安装MCP" {
                 $mcpTokens = @()
                 if (-not [string]::IsNullOrWhiteSpace($Filter)) { $mcpTokens += $Filter }
@@ -16276,6 +17072,8 @@ if ($MyInvocation.InvocationName -ne '.') {
                 卸载MCP $mcpTokens
             }
             "mcp-sync" { 同步MCP }
+            "MCP配置" { Invoke-McpProfileCommand (Merge-FilterAndArgs $Filter $args) }
+            "mcp-profile" { Invoke-McpProfileCommand (Merge-FilterAndArgs $Filter $args) }
             "审查目标" { Invoke-AuditTargetsCommand (Merge-FilterAndArgs $Filter $args) }
             "audit-targets" { Invoke-AuditTargetsCommand (Merge-FilterAndArgs $Filter $args) }
             "一键" { Invoke-Workflow (Merge-FilterAndArgs $Filter $args) }

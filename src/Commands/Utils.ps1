@@ -392,6 +392,12 @@ MCP：
   .\skills.ps1 安装MCP <name> --transport http --url <url> [--bearer-token-env-var <ENV>] 
   .\skills.ps1 卸载MCP <name>
   .\skills.ps1 同步MCP
+  .\skills.ps1 MCP配置 列表
+  .\skills.ps1 MCP配置 使用 default|coding|dotnet|browser|database|off
+
+技能投影：
+  .\skills.ps1 技能配置 列表
+  .\skills.ps1 技能配置 使用 default|coding|dotnet|ppt|content|physics|design|browser|database
 
 目标仓审查：
   .\skills.ps1 审查目标 需求设置

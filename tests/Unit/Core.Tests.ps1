@@ -1058,6 +1058,22 @@ Describe "Core Functions" {
     }
 
     Context "Ensure-GhAuthForGithubMcp" {
+        It "Skips GitHub authentication when the server is explicitly disabled" {
+            Mock Get-Command { throw "disabled GitHub must not probe gh" } -ParameterFilter { $Name -eq "gh" }
+
+            { Ensure-GhAuthForGithubMcp @([pscustomobject]@{ name = "github"; enabled = $false }) } | Should Not Throw
+
+            Assert-MockCalled Get-Command -Times 0 -Exactly -ParameterFilter { $Name -eq "gh" }
+        }
+
+        It "Rejects non-boolean enabled before probing GitHub authentication" {
+            Mock Get-Command { throw "invalid GitHub config must not probe gh" } -ParameterFilter { $Name -eq "gh" }
+
+            { Ensure-GhAuthForGithubMcp @([pscustomobject]@{ name = "github"; enabled = "false" }) } | Should Throw "mcp_server.enabled 必须是布尔值：github"
+
+            Assert-MockCalled Get-Command -Times 0 -Exactly -ParameterFilter { $Name -eq "gh" }
+        }
+
         It "Persists gh token to both GitHub MCP user env vars" {
             $oldProcessGithub = $env:GITHUB_PERSONAL_ACCESS_TOKEN
             $oldProcessCodex = $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN
@@ -1145,6 +1161,22 @@ Describe "Core Functions" {
             }
         }
 
+        It "Skips Postgres environment checks when the server is explicitly disabled" {
+            Mock Get-EnvironmentVariableWithScope { throw "disabled Postgres must not read credentials" } -ParameterFilter { $name -eq "POSTGRES_CONNECTION_STRING" }
+
+            { Ensure-PostgresMcpEnvironment @([pscustomobject]@{ name = "postgres"; enabled = $false }) } | Should Not Throw
+
+            Assert-MockCalled Get-EnvironmentVariableWithScope -Times 0 -Exactly -ParameterFilter { $name -eq "POSTGRES_CONNECTION_STRING" }
+        }
+
+        It "Rejects non-boolean Postgres enabled before reading credentials" {
+            Mock Get-EnvironmentVariableWithScope { throw "invalid Postgres config must not read credentials" } -ParameterFilter { $name -eq "POSTGRES_CONNECTION_STRING" }
+
+            { Ensure-PostgresMcpEnvironment @([pscustomobject]@{ name = "postgres"; enabled = "false" }) } | Should Throw "mcp_server.enabled 必须是布尔值：postgres"
+
+            Assert-MockCalled Get-EnvironmentVariableWithScope -Times 0 -Exactly -ParameterFilter { $name -eq "POSTGRES_CONNECTION_STRING" }
+        }
+
         It "Replaces mcp_servers tables and preserves other codex config fields" {
             $oldToken = $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN
             $oldGithubToken = $env:GITHUB_PERSONAL_ACCESS_TOKEN
@@ -1208,6 +1240,29 @@ sandbox = "elevated"
             $toml = Build-CodexConfigToml $existing @()
             $toml | Should Match "model = ""gpt-5.3-codex"""
             $toml | Should Match "\[windows\]"
+            $toml | Should Not Match "\[mcp_servers\.old\]"
+        }
+
+        It "Preserves host-owned node_repl and its child tables" {
+            $existing = @'
+model = "gpt-5.6-sol"
+
+[mcp_servers.node_repl]
+command = "C:\\runtime\\node_repl.exe"
+args = []
+
+[mcp_servers.node_repl.env]
+NODE_REPL_NODE_PATH = "C:\\runtime\\node.exe"
+
+[mcp_servers.old]
+command = "cmd"
+'@
+
+            $toml = Build-CodexConfigToml $existing @()
+
+            $toml | Should Match "\[mcp_servers\.node_repl\]"
+            $toml | Should Match "\[mcp_servers\.node_repl\.env\]"
+            $toml | Should Match "NODE_REPL_NODE_PATH"
             $toml | Should Not Match "\[mcp_servers\.old\]"
         }
 
@@ -1345,6 +1400,165 @@ sandbox = "elevated"
                     Remove-Item Env:\SKILLS_CODEX_INCLUDE_LEAKY_STDIO_MCP -ErrorAction SilentlyContinue
                 }
             }
+        }
+
+        It "Writes Codex MCP enabled state and enabled_tools when configured" {
+            $servers = @(
+                [pscustomobject]@{
+                    name          = "context7"
+                    transport     = "stdio"
+                    command       = "npx"
+                    args          = @("-y", "@upstash/context7-mcp")
+                    enabled       = $false
+                    enabled_tools = @("resolve-library-id", "query-docs")
+                }
+            )
+
+            $toml = Build-CodexConfigToml "" $servers
+
+            $toml | Should Match "enabled = false"
+            $toml | Should Match 'enabled_tools = \["resolve-library-id", "query-docs"\]'
+        }
+
+        It "Projects the active MCP profile over base server definitions" {
+            $cfg = [pscustomobject]@{
+                mcp_servers = @(
+                    [pscustomobject]@{ name = "context7"; transport = "stdio"; command = "npx"; enabled = $false }
+                    [pscustomobject]@{ name = "github"; transport = "http"; url = "https://api.githubcopilot.com/mcp/"; enabled = $false }
+                    [pscustomobject]@{ name = "postgres"; transport = "stdio"; command = "npx"; enabled = $false }
+                )
+                mcp_profiles = [pscustomobject]@{
+                    active = "coding"
+                    profiles = [pscustomobject]@{
+                        coding = [pscustomobject]@{
+                            enabled = @("context7", "github")
+                            enabled_tools = [pscustomobject]@{
+                                context7 = @("resolve-library-id", "query-docs")
+                                github = @("get_me", "get_file_contents")
+                            }
+                        }
+                    }
+                }
+            }
+
+            $servers = @(Resolve-McpProfileServers $cfg)
+
+            ($servers | Where-Object name -eq "context7").enabled | Should Be $true
+            @((($servers | Where-Object name -eq "context7").enabled_tools)) | Should Be @("resolve-library-id", "query-docs")
+            ($servers | Where-Object name -eq "github").enabled | Should Be $true
+            ($servers | Where-Object name -eq "postgres").enabled | Should Be $false
+        }
+
+        It "Returns only active profile servers for generic hosts" {
+            $servers = @(
+                [pscustomobject]@{ name = "docs"; enabled = $true }
+                [pscustomobject]@{ name = "database"; enabled = $false }
+                [pscustomobject]@{ name = "legacy-without-flag" }
+            )
+
+            @((Get-ActiveMcpServers $servers) | ForEach-Object name) | Should Be @("docs", "legacy-without-flag")
+        }
+
+        It "Preserves GitHub MCP activation fields when a token is available" {
+            $oldToken = $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN
+            try {
+                $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = "test-token"
+                $server = [pscustomobject]@{
+                    name          = "github"
+                    transport     = "http"
+                    url           = "https://api.githubcopilot.com/mcp/"
+                    enabled       = $false
+                    enabled_tools = @("get_file_contents")
+                }
+
+                $toml = Build-CodexConfigToml "" @($server)
+
+                $toml | Should Match "\[mcp_servers\.github\]"
+                $toml | Should Match "enabled = false"
+                $toml | Should Match 'enabled_tools = \["get_file_contents"\]'
+            }
+            finally {
+                if ($null -ne $oldToken) {
+                    $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = $oldToken
+                }
+                else {
+                    Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+                }
+            }
+        }
+
+        It "Keeps an explicitly disabled GitHub MCP when no token is available" {
+            $oldToken = $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN
+            $oldGithubToken = $env:GITHUB_PERSONAL_ACCESS_TOKEN
+            try {
+                Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+                Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+                $server = [pscustomobject]@{
+                    name      = "github"
+                    transport = "http"
+                    url       = "https://api.githubcopilot.com/mcp/"
+                    enabled   = $false
+                }
+
+                $toml = Build-CodexConfigToml "" @($server)
+
+                $toml | Should Match "\[mcp_servers\.github\]"
+                $toml | Should Match "enabled = false"
+            }
+            finally {
+                if ($null -ne $oldToken) {
+                    $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = $oldToken
+                }
+                else {
+                    Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+                }
+                if ($null -ne $oldGithubToken) {
+                    $env:GITHUB_PERSONAL_ACCESS_TOKEN = $oldGithubToken
+                }
+                else {
+                    Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
+                }
+            }
+        }
+
+        It "Includes Codex MCP activation fields in server equivalence" {
+            $disabled = [pscustomobject]@{
+                name          = "context7"
+                transport     = "stdio"
+                command       = "npx"
+                args          = @("-y", "@upstash/context7-mcp")
+                enabled       = $false
+                enabled_tools = @("query-docs")
+            }
+            $enabled = [pscustomobject]@{
+                name          = "context7"
+                transport     = "stdio"
+                command       = "npx"
+                args          = @("-y", "@upstash/context7-mcp")
+                enabled       = $true
+                enabled_tools = @("query-docs")
+            }
+
+            (Test-McpServerEquivalent $disabled $enabled) | Should Be $false
+        }
+
+        It "Treats Codex MCP enabled_tools as an order-independent set" {
+            $first = [pscustomobject]@{
+                name          = "context7"
+                transport     = "stdio"
+                command       = "npx"
+                args          = @("-y", "@upstash/context7-mcp")
+                enabled_tools = @("query-docs", "resolve-library-id")
+            }
+            $second = [pscustomobject]@{
+                name          = "context7"
+                transport     = "stdio"
+                command       = "npx"
+                args          = @("-y", "@upstash/context7-mcp")
+                enabled_tools = @("resolve-library-id", "query-docs", "query-docs")
+            }
+
+            (Test-McpServerEquivalent $first $second) | Should Be $true
         }
 
         It "Writes OpenAI developer docs MCP for codex when configured as http transport" {
@@ -2007,6 +2221,9 @@ args = ["-y", "@upstash/context7-mcp"]
 
 [mcp_servers.github]
 url = "https://api.githubcopilot.com/mcp/"
+
+[mcp_servers.github.env]
+TOKEN = "redacted"
 '@
             $names = Get-CodexMcpServerNamesFromTomlText $toml
             @($names).Count | Should Be 2

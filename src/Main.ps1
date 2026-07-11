@@ -28,6 +28,8 @@ if ($MyInvocation.InvocationName -ne '.') {
             "生成锁文件" { 锁定 }
             "清理无效映射" { 清理无效映射 (Merge-FilterAndArgs $Filter $args) }
             "prune-invalid-mappings" { 清理无效映射 (Merge-FilterAndArgs $Filter $args) }
+            "技能配置" { Invoke-SkillProfileCommand (Merge-FilterAndArgs $Filter $args) }
+            "skill-profile" { Invoke-SkillProfileCommand (Merge-FilterAndArgs $Filter $args) }
             "安装MCP" {
                 $mcpTokens = @()
                 if (-not [string]::IsNullOrWhiteSpace($Filter)) { $mcpTokens += $Filter }
@@ -54,6 +56,8 @@ if ($MyInvocation.InvocationName -ne '.') {
                 卸载MCP $mcpTokens
             }
             "mcp-sync" { 同步MCP }
+            "MCP配置" { Invoke-McpProfileCommand (Merge-FilterAndArgs $Filter $args) }
+            "mcp-profile" { Invoke-McpProfileCommand (Merge-FilterAndArgs $Filter $args) }
             "审查目标" { Invoke-AuditTargetsCommand (Merge-FilterAndArgs $Filter $args) }
             "audit-targets" { Invoke-AuditTargetsCommand (Merge-FilterAndArgs $Filter $args) }
             "一键" { Invoke-Workflow (Merge-FilterAndArgs $Filter $args) }

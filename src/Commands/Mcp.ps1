@@ -12,6 +12,93 @@ function Parse-KeyValueToken([string]$token, [string]$flagName) {
     }
 }
 
+function Resolve-McpProfileServers($cfg) {
+    $baseServers = @($cfg.mcp_servers)
+    if ($cfg.PSObject.Properties.Match("mcp_profiles").Count -eq 0 -or $null -eq $cfg.mcp_profiles) {
+        return $baseServers
+    }
+
+    $profileCfg = $cfg.mcp_profiles
+    $active = ([string]$profileCfg.active).Trim()
+    Need (-not [string]::IsNullOrWhiteSpace($active)) "mcp_profiles.active 不能为空"
+    Need ($profileCfg.PSObject.Properties.Match("profiles").Count -gt 0 -and $null -ne $profileCfg.profiles) "mcp_profiles 缺少 profiles"
+    $profileProperty = @($profileCfg.profiles.PSObject.Properties | Where-Object { [string]::Equals($_.Name, $active, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1)
+    Need ($profileProperty.Count -eq 1) ("mcp_profiles.active 不存在：{0}" -f $active)
+    $profile = $profileProperty[0].Value
+    Need ($null -ne $profile -and $profile.PSObject.Properties.Match("enabled").Count -gt 0) ("MCP profile 缺少 enabled：{0}" -f $active)
+
+    $knownNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($server in $baseServers) { $knownNames.Add([string]$server.name) | Out-Null }
+    $enabledNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($rawName in @($profile.enabled)) {
+        $name = ([string]$rawName).Trim()
+        Need (-not [string]::IsNullOrWhiteSpace($name)) ("MCP profile enabled 不得包含空值：{0}" -f $active)
+        Need ($knownNames.Contains($name)) ("MCP profile 引用了不存在的服务：{0}/{1}" -f $active, $name)
+        $enabledNames.Add($name) | Out-Null
+    }
+
+    $toolOverrides = $null
+    if ($profile.PSObject.Properties.Match("enabled_tools").Count -gt 0 -and $null -ne $profile.enabled_tools) {
+        $toolOverrides = $profile.enabled_tools
+        foreach ($property in @($toolOverrides.PSObject.Properties)) {
+            Need ($knownNames.Contains([string]$property.Name)) ("MCP profile enabled_tools 引用了不存在的服务：{0}/{1}" -f $active, [string]$property.Name)
+        }
+    }
+
+    $projected = New-Object System.Collections.Generic.List[object]
+    foreach ($server in $baseServers) {
+        $copy = [ordered]@{}
+        foreach ($property in $server.PSObject.Properties) {
+            $copy[[string]$property.Name] = $property.Value
+        }
+        $name = [string]$server.name
+        $copy["enabled"] = $enabledNames.Contains($name)
+        if ($null -ne $toolOverrides) {
+            $toolProperty = @($toolOverrides.PSObject.Properties | Where-Object { [string]::Equals($_.Name, $name, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1)
+            if ($toolProperty.Count -eq 1) {
+                $tools = New-Object System.Collections.Generic.List[string]
+                foreach ($rawTool in @($toolProperty[0].Value)) {
+                    $tool = ([string]$rawTool).Trim()
+                    Need (-not [string]::IsNullOrWhiteSpace($tool)) ("MCP profile enabled_tools 不得包含空值：{0}/{1}" -f $active, $name)
+                    if (-not $tools.Contains($tool)) { $tools.Add($tool) | Out-Null }
+                }
+                $copy["enabled_tools"] = @($tools.ToArray())
+            }
+        }
+        $projected.Add([pscustomobject]$copy) | Out-Null
+    }
+    return @($projected.ToArray())
+}
+
+function Get-ActiveMcpServers($servers) {
+    return @($servers | Where-Object { $_.PSObject.Properties.Match("enabled").Count -eq 0 -or [bool]$_.enabled })
+}
+
+function Invoke-McpProfileCommand([string[]]$tokens) {
+    $cfg = LoadCfg
+    Need ($cfg.PSObject.Properties.Match("mcp_profiles").Count -gt 0 -and $null -ne $cfg.mcp_profiles) "未配置 mcp_profiles"
+    $profileCfg = $cfg.mcp_profiles
+    $action = if ($null -eq $tokens -or $tokens.Count -eq 0) { "列表" } else { ([string]$tokens[0]).Trim().ToLowerInvariant() }
+    if ($action -in @("列表", "list")) {
+        foreach ($property in @($profileCfg.profiles.PSObject.Properties | Sort-Object Name)) {
+            $marker = if ([string]::Equals($property.Name, [string]$profileCfg.active, [System.StringComparison]::OrdinalIgnoreCase)) { "*" } else { " " }
+            Write-Host ("{0} {1} ({2})" -f $marker, $property.Name, (@($property.Value.enabled) -join ", "))
+        }
+        return
+    }
+    Need ($action -in @("使用", "use")) ("MCP配置仅支持 列表/list 或 使用/use：{0}" -f $action)
+    Need ($tokens.Count -ge 2) "MCP配置 使用 缺少 profile 名称"
+    $name = ([string]$tokens[1]).Trim()
+    $profileProperty = @($profileCfg.profiles.PSObject.Properties | Where-Object { [string]::Equals($_.Name, $name, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1)
+    Need ($profileProperty.Count -eq 1) ("MCP profile 不存在：{0}" -f $name)
+    $profileCfg.active = [string]$profileProperty[0].Name
+    $servers = @(Resolve-McpProfileServers $cfg)
+    $raw = Get-ContentUtf8 $CfgPath
+    SaveCfgSafe $cfg $raw
+    Write-Host ("已使用 MCP profile：{0}；enabled={1}" -f $name, (@($servers | Where-Object enabled | ForEach-Object name) -join ", "))
+    同步MCP
+}
+
 function Test-ValidEnvVarName([string]$name) {
     if ([string]::IsNullOrWhiteSpace($name)) { return $false }
     return ($name.Trim() -match '^[A-Za-z_][A-Za-z0-9_]*$')
@@ -532,6 +619,21 @@ function Convert-McpServersToCodexConfigMap($servers) {
             }
         }
 
+        if ($s.PSObject.Properties.Match("enabled").Count -gt 0) {
+            Need ($s.enabled -is [bool]) ("mcp_server.enabled 必须是布尔值：{0}" -f [string]$s.name)
+            $entry.enabled = [bool]$s.enabled
+        }
+        if ($s.PSObject.Properties.Match("enabled_tools").Count -gt 0 -and $null -ne $s.enabled_tools) {
+            $tools = @()
+            foreach ($rawTool in @($s.enabled_tools)) {
+                $tool = ([string]$rawTool).Trim()
+                Need (-not [string]::IsNullOrWhiteSpace($tool)) ("mcp_server.enabled_tools 不得包含空值：{0}" -f [string]$s.name)
+                Need (-not ($tool.Contains("`r") -or $tool.Contains("`n"))) ("mcp_server.enabled_tools 不得包含换行：{0}" -f [string]$s.name)
+                if ($tools -notcontains $tool) { $tools += $tool }
+            }
+            $entry.enabled_tools = @($tools)
+        }
+
         $startupTimeoutSec = Get-CodexMcpStartupTimeoutSec $s
         if ($null -ne $startupTimeoutSec) {
             $entry.startup_timeout_sec = [int]$startupTimeoutSec
@@ -943,10 +1045,16 @@ function Test-McpServerUsesPostgresConnectionString($server) {
 function Ensure-PostgresMcpEnvironment($servers) {
     $needsPostgres = $false
     foreach ($server in @($servers)) {
-        if (Test-McpServerUsesPostgresConnectionString $server) {
-            $needsPostgres = $true
-            break
+        if (-not (Test-McpServerUsesPostgresConnectionString $server)) { continue }
+
+        $hasEnabled = $server.PSObject.Properties.Match("enabled").Count -gt 0
+        if ($hasEnabled) {
+            Need ($server.enabled -is [bool]) ("mcp_server.enabled 必须是布尔值：{0}" -f [string]$server.name)
+            if (-not [bool]$server.enabled) { continue }
         }
+
+        $needsPostgres = $true
+        break
     }
     if (-not $needsPostgres) { return }
 
@@ -965,7 +1073,23 @@ function Ensure-PostgresMcpEnvironment($servers) {
 }
 
 function Ensure-GhAuthForGithubMcp($servers) {
-    if (-not (Has-McpServerByName $servers "github")) { return }
+    $requiresAuthentication = $false
+    foreach ($server in @($servers)) {
+        if ($null -eq $server -or -not [string]::Equals([string]$server.name, "github", [System.StringComparison]::OrdinalIgnoreCase)) {
+            continue
+        }
+
+        $hasEnabled = $server.PSObject.Properties.Match("enabled").Count -gt 0
+        if ($hasEnabled) {
+            Need ($server.enabled -is [bool]) "mcp_server.enabled 必须是布尔值：github"
+            if (-not [bool]$server.enabled) { continue }
+        }
+
+        $requiresAuthentication = $true
+        break
+    }
+    if (-not $requiresAuthentication) { return }
+
     if (-not (Get-Command "gh" -ErrorAction SilentlyContinue)) {
         throw "检测到 github MCP，但未找到 gh 命令。请先安装并登录 GitHub CLI（gh auth login）。"
     }
@@ -1253,7 +1377,7 @@ function Get-CodexMcpServerNamesFromTomlText([string]$tomlText) {
     if ([string]::IsNullOrWhiteSpace($tomlText)) { return @() }
     $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($line in @(($tomlText -split "`r?`n"))) {
-        $m = [regex]::Match([string]$line, '^\s*\[mcp_servers\.([^\]\s]+)\]\s*$')
+        $m = [regex]::Match([string]$line, '^\s*\[mcp_servers\.([^\.\]\s]+)(?:\.[^\]]+)?\]\s*$')
         if ($m.Success) {
             $set.Add([string]$m.Groups[1].Value) | Out-Null
         }
@@ -1754,17 +1878,33 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
     foreach ($server in @($servers)) {
         if ($null -eq $server) { continue }
         if ([string]::Equals([string]$server.name, "github", [System.StringComparison]::OrdinalIgnoreCase)) {
-            if (-not $hasGithubToken) {
+            $hasEnabled = $server.PSObject.Properties.Match("enabled").Count -gt 0
+            if ($hasEnabled) {
+                Need ($server.enabled -is [bool]) "mcp_server.enabled 必须是布尔值：github"
+            }
+            $isExplicitlyDisabled = $hasEnabled -and -not [bool]$server.enabled
+            if (-not $hasGithubToken -and -not $isExplicitlyDisabled) {
                 Log "Codex 检测到 GitHub MCP 但缺少 CODEX_GITHUB_PERSONAL_ACCESS_TOKEN（或 GITHUB_PERSONAL_ACCESS_TOKEN），已跳过同步以避免影响启动。" "WARN"
                 $skippedGithubForMissingToken = $true
                 continue
             }
-            Log "Codex 检测到 GitHub MCP 且存在 Token，将写入 bearer_token_env_var=CODEX_GITHUB_PERSONAL_ACCESS_TOKEN。" "INFO"
+            if ($hasGithubToken) {
+                Log "Codex 检测到 GitHub MCP 且存在 Token，将写入 bearer_token_env_var=CODEX_GITHUB_PERSONAL_ACCESS_TOKEN。" "INFO"
+            }
+            else {
+                Log "Codex 检测到 GitHub MCP 已显式停用；缺少 Token 时仍保留停用配置。" "INFO"
+            }
             $normalizedGithub = [ordered]@{
                 name = [string]$server.name
                 transport = if ([string]::IsNullOrWhiteSpace([string]$server.transport)) { "http" } else { [string]$server.transport }
                 url = [string]$server.url
                 bearer_token_env_var = "CODEX_GITHUB_PERSONAL_ACCESS_TOKEN"
+            }
+            if ($hasEnabled) {
+                $normalizedGithub.enabled = [bool]$server.enabled
+            }
+            if ($server.PSObject.Properties.Match("enabled_tools").Count -gt 0 -and $null -ne $server.enabled_tools) {
+                $normalizedGithub.enabled_tools = @($server.enabled_tools)
             }
             $codexServers += [pscustomobject]$normalizedGithub
             continue
@@ -1784,9 +1924,15 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
     }
     else {
         $skipMcpSection = $false
+        $hostOwnedMcpNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        $hostOwnedMcpNames.Add("node_repl") | Out-Null
         foreach ($line in $lines) {
-            if ($line -match '^\s*\[mcp_servers\.[^\]]+\]\s*$') {
-                $skipMcpSection = $true
+            if ($line -match '^\s*\[mcp_servers\.([^\.\]]+)(?:\.[^\]]+)?\]\s*$') {
+                $serverName = [string]$Matches[1]
+                $skipMcpSection = -not $hostOwnedMcpNames.Contains($serverName)
+                if (-not $skipMcpSection) {
+                    $kept.Add($line) | Out-Null
+                }
                 continue
             }
 
@@ -2025,6 +2171,20 @@ function Get-McpServerSignature($server) {
             $sig.bearer_token_env_var = [string]$server.bearer_token_env_var
         }
     }
+    if ($server.PSObject.Properties.Match("enabled").Count -gt 0) {
+        Need ($server.enabled -is [bool]) "mcp_server.enabled 必须是布尔值"
+        $sig.enabled = [bool]$server.enabled
+    }
+    if ($server.PSObject.Properties.Match("enabled_tools").Count -gt 0 -and $null -ne $server.enabled_tools) {
+        $tools = @()
+        foreach ($rawTool in @($server.enabled_tools)) {
+            $tool = ([string]$rawTool).Trim()
+            Need (-not [string]::IsNullOrWhiteSpace($tool)) "mcp_server.enabled_tools 不得包含空值"
+            Need (-not ($tool.Contains("`r") -or $tool.Contains("`n"))) "mcp_server.enabled_tools 不得包含换行"
+            if ($tools -notcontains $tool) { $tools += $tool }
+        }
+        $sig.enabled_tools = @($tools | Sort-Object)
+    }
     return ($sig | ConvertTo-Json -Depth 30 -Compress)
 }
 
@@ -2208,11 +2368,13 @@ function 同步MCP {
     Invoke-WithMetric "sync_mcp" {
         $script:SkipNativeMcpForSession = $false
         $cfg = LoadCfg
-        $servers = @($cfg.mcp_servers)
+        $servers = @(Resolve-McpProfileServers $cfg)
+        $activeServers = @(Get-ActiveMcpServers $servers)
+        $profileDisabledNames = @($servers | Where-Object { $_.PSObject.Properties.Match("enabled").Count -gt 0 -and -not [bool]$_.enabled } | ForEach-Object { [string]$_.name })
         $pruneNames = @(Get-McpServersToPrune $servers)
         if (-not $DryRun) {
-            Ensure-PostgresMcpEnvironment $servers
-            Ensure-GhAuthForGithubMcp $servers
+            Ensure-PostgresMcpEnvironment $activeServers
+            Ensure-GhAuthForGithubMcp $activeServers
         }
 
         $roots = Resolve-McpTargetRootsFromCfg $cfg
@@ -2230,8 +2392,8 @@ function 同步MCP {
             }
             EnsureDir $targetRoot
             $existing = if (Test-Path $file) { Get-Content -Raw -Path $file } else { "" }
-            $payloadObj = Build-GenericMcpPayload $existing $servers
-            $payloadObj = Remove-McpServersFromPayload $payloadObj $pruneNames
+            $payloadObj = Build-GenericMcpPayload $existing $activeServers
+            $payloadObj = Remove-McpServersFromPayload $payloadObj @($pruneNames + $profileDisabledNames)
             $json = $payloadObj | ConvertTo-Json -Depth 100
             Set-ContentUtf8 $file $json
             $written += $file
@@ -2242,7 +2404,8 @@ function 同步MCP {
         foreach ($geminiRoot in $geminiRoots) {
             $settingsPath = Join-Path $geminiRoot "settings.json"
             $existing = if (Test-Path $settingsPath) { Get-Content -Raw -Path $settingsPath } else { "" }
-            $payloadObj = Build-GeminiSettingsPayload $existing $servers
+            $payloadObj = Build-GeminiSettingsPayload $existing $activeServers
+            $payloadObj = Remove-McpServersFromPayload $payloadObj $profileDisabledNames
             $content = $payloadObj | ConvertTo-Json -Depth 100
             if ($DryRun) {
                 Write-Host ("DRYRUN：将写入 Gemini 配置 -> {0}" -f $settingsPath)
@@ -2260,7 +2423,8 @@ function 同步MCP {
         foreach ($agRoot in $antigravityRoots) {
             $settingsPath = Join-Path $agRoot "settings.json"
             $existing = if (Test-Path $settingsPath) { Get-Content -Raw -Path $settingsPath } else { "" }
-            $payloadObj = Build-GeminiSettingsPayload $existing $servers
+            $payloadObj = Build-GeminiSettingsPayload $existing $activeServers
+            $payloadObj = Remove-McpServersFromPayload $payloadObj $profileDisabledNames
             $content = $payloadObj | ConvertTo-Json -Depth 100
             if ($DryRun) {
                 Write-Host ("DRYRUN：将写入 Gemini Antigravity 配置 -> {0}" -f $settingsPath)
@@ -2302,7 +2466,8 @@ function 同步MCP {
             else {
                 EnsureDir $traeRoot
                 $existing = if (Test-Path $traePath) { Get-Content -Raw -Path $traePath } else { "" }
-                $payloadObj = Build-GenericMcpPayload $existing $servers
+                $payloadObj = Build-GenericMcpPayload $existing $activeServers
+                $payloadObj = Remove-McpServersFromPayload $payloadObj $profileDisabledNames
                 $json = $payloadObj | ConvertTo-Json -Depth 100
                 Set-ContentUtf8 $traePath $json
                 $written += $traePath
@@ -2320,7 +2485,8 @@ function 同步MCP {
                 $projectTraeDir = Split-Path $projectTraePath -Parent
                 EnsureDir $projectTraeDir
                 $existing = if (Test-Path $projectTraePath) { Get-Content -Raw -Path $projectTraePath } else { "" }
-                $payloadObj = Build-GenericMcpPayload $existing $servers
+                $payloadObj = Build-GenericMcpPayload $existing $activeServers
+                $payloadObj = Remove-McpServersFromPayload $payloadObj $profileDisabledNames
                 $json = $payloadObj | ConvertTo-Json -Depth 100
                 Set-ContentUtf8 $projectTraePath $json
                 $written += $projectTraePath
@@ -2332,7 +2498,7 @@ function 同步MCP {
         foreach ($pruneName in $pruneNames) {
             Invoke-NativeMcpCleanup $pruneName
         }
-        Invoke-NativeMcpSync $servers
+        Invoke-NativeMcpSync $activeServers
         if (-not $DryRun) {
             $attemptsEnv = $env:SKILLS_MCP_VERIFY_ATTEMPTS
             $intervalEnv = $env:SKILLS_MCP_VERIFY_INTERVAL_SECONDS

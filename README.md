@@ -139,15 +139,50 @@
 .\skills.ps1 安装MCP github --transport http --url https://api.githubcopilot.com/mcp/ --bearer-token-env-var GITHUB_PERSONAL_ACCESS_TOKEN
 .\skills.ps1 卸载MCP context7
 .\skills.ps1 同步MCP
+.\skills.ps1 MCP配置 列表
+.\skills.ps1 MCP配置 使用 coding
 ```
 
 说明：
 
 - `安装MCP` / `卸载MCP` 会更新 `skills.json`，随后自动执行一次 `同步MCP`。
 - `同步MCP` 会把 MCP 服务清单写入目标根目录 `.mcp.json`、Gemini/Trae 配置以及 Codex `config.toml` 的 `[mcp_servers.*]` 段。
+- `skills.json.mcp_profiles` 是用途 profile 真源；`MCP配置 使用 <name>` 会持久化 active profile 并同步。Codex 保留完整服务清单，通过 `enabled` / `enabled_tools` 启停和收窄工具面；Claude/Gemini/Trae 只接收当前 profile 启用的服务。
+- 默认 profile 仅启用 `microsoft-learn` 与 `openaiDeveloperDocs`；`coding`、`github`、`codebase`、`browser`、`database` 等 profile 按任务启用其他服务。切换不会卸载 MCP，`node_repl` 等宿主自有服务不会被同步器删除。
 - `postgres` MCP 预检要求 `POSTGRES_CONNECTION_STRING` 为 `postgresql://...`；若检测到 Npgsql/ADO 风格 key-value 连接串，会自动转换并写回 User scope。
 - `github` MCP 会优先尝试 `gh auth token`，并把结果写入 User scope 的 `CODEX_GITHUB_PERSONAL_ACCESS_TOKEN`；Codex 配置只写 `bearer_token_env_var`，不写明文 token。
 - 本机 weekly task `skills-manager-weekly-update-friday-2000` 的顺序是 `更新 -> 同步MCP`，所以 MCP 启动环境修复必须落在真源链上，不能只改 live `~/.codex/config.toml`。
+
+### Codex 技能去重投影
+
+`skills.json.skill_projection` 管理多个用户技能根的并集与 Codex 路径级开关。`构建生效` 会扫描配置中的 sources，以声明的技能名称分组，并按以下顺序选主：
+
+1. `.system` 技能；
+2. source `priority`；
+3. source 声明顺序与规范化路径。
+
+非主副本不会被删除或移动，而是写入 `~/.codex/config.toml` 的受管块，以 `[[skills.config]]` + `enabled = false` 精确停用。完整的来源、内容哈希、包哈希、选主结果和冲突记录写入 `reports/skill-projection/current.json`。配置发生变化时，原文件先备份到 `~/.codex/config-backups/config.toml.skills-projection.<timestamp>.bak`。
+
+`skill_projection.aliases` 记录旧名称到替代项的迁移，不把近似能力重新复制成默认技能；`profiles` 控制当前用途下启用的 canonical 技能，`.system` 技能始终保留。`budget_limit_chars` 对“启用技能名称与描述 + 插件预留”设置硬上限，超限会阻断投影。常用命令：
+
+```powershell
+.\skills.ps1 技能配置 列表
+.\skills.ps1 技能配置 使用 coding
+```
+
+`-DryRun` 只生成内存计划，不写配置或 manifest。Codex 在新任务加载技能配置；当前已运行任务不会热更新，因此投影后需用新任务复核可见技能列表，不应通过删除 `.agents/skills` 强制生效。
+
+`$HOME/.agents/skills` 是当前标准用户技能根，根目录及其 `.system` 子目录不能整体删除。历史用户副本应先退役到带哈希清单的归档：
+
+```powershell
+# 默认仅预演并生成 reports/skill-retirement/<run-id>/manifest.json
+pwsh -NoProfile -File .\scripts\retire-agents-user-skills.ps1
+
+# 核对目录数、文件数、字节数后再迁移；始终保留 .system
+pwsh -NoProfile -File .\scripts\retire-agents-user-skills.ps1 -Apply
+```
+
+退役归档不是立即删除项。至少用新任务验收普通编码、PPT/文档、Claude Junction 和 `.NET` + `microsoft-code-reference` 四条路径，并确认没有配置引用归档后，才可在保留一个回滚窗口后物理删除对应的 `~/.agents/retired/skills-user-<run-id>`。回滚时按 manifest 逐项把 `archive_path` 移回 `source_path`，发现同名目标时必须停止。
 
 ### 目标仓审查
 
@@ -195,6 +230,8 @@
 | `安装MCP` | `mcp-install` |
 | `卸载MCP` | `mcp-uninstall` |
 | `同步MCP` | `mcp-sync` |
+| `MCP配置` | `mcp-profile` |
+| `技能配置` | `skill-profile` |
 | `清理无效映射` | `prune-invalid-mappings` |
 | `add` | `add` |
 | `npx` | `npx` |

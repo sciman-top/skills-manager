@@ -2393,6 +2393,17 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight) {
                 $failures.Add(("target:{0} => {1}" -f $t.path, $_.Exception.Message)) | Out-Null
             }
         }
+        try {
+            $projectionResult = Sync-ConfiguredSkillProjection $cfg
+            if ($projectionResult -and -not [bool]$projectionResult.skipped) {
+                $plan = $projectionResult.plan
+                Log ("技能投影已生成：entries={0}, unique={1}, disabled={2}, conflicts={3}, persisted={4}" -f @($plan.skills).Count, @($plan.unique_names).Count, @($plan.disabled).Count, @($plan.conflicts).Count, [bool]$projectionResult.persisted)
+            }
+        }
+        catch {
+            Write-Host ("❌ 同步技能投影失败：{0}" -f $_.Exception.Message) -ForegroundColor Red
+            $failures.Add(("skill-projection => {0}" -f $_.Exception.Message)) | Out-Null
+        }
         return $failures.ToArray()
     } @{ command = "应用到ClaudeCodex" } -NoHost)
 }
