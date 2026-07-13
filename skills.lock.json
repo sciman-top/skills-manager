@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-07-13T14:04:10.0906794Z",
+  "generated_at": "2026-07-13T15:33:44.6965183Z",
   "vendors": [
     {
       "name": "agent-skills",
@@ -49,12 +49,6 @@
       "repo": "https://github.com/obra/superpowers.git",
       "ref": "main",
       "commit": "d884ae04edebef577e82ff7c4e143debd0bbec99"
-    },
-    {
-      "name": "web-quality-skills",
-      "repo": "https://github.com/addyosmani/web-quality-skills.git",
-      "ref": "main",
-      "commit": "95d6e255afe1596b557d7a8498517884438f5b3a"
     }
   ],
   "imports": [
@@ -111,6 +105,15 @@
       "skill": "skills\\baoyu-article-illustrator",
       "sparse": false,
       "commit": "6b7a2e417500561a5ecdd0b168332f4142584617"
+    },
+    {
+      "name": "codebase-design",
+      "mode": "manual",
+      "repo": "https://github.com/mattpocock/skills.git",
+      "ref": "391a2701dd948f94f56a39f7533f8eea9a859c87",
+      "skill": "skills\\engineering\\codebase-design",
+      "sparse": true,
+      "commit": "391a2701dd948f94f56a39f7533f8eea9a859c87"
     },
     {
       "name": "d3-viz",
@@ -311,15 +314,6 @@
       "commit": "cfe5d7b1619e47fb5b38b7e2561dad7e5f1e89af"
     },
     {
-      "name": "openpyxl",
-      "mode": "manual",
-      "repo": "https://github.com/vamseeachanta/workspace-hub.git",
-      "ref": "main",
-      "skill": ".claude\\skills\\data\\office\\openpyxl",
-      "sparse": true,
-      "commit": "e569c5163307a7f6779de502cd1b196ba6b2fa9e"
-    },
-    {
       "name": "playwright-best-practices",
       "mode": "manual",
       "repo": "https://github.com/currents-dev/playwright-best-practices-skill.git",
@@ -336,15 +330,6 @@
       "skill": "powerpoint-automation",
       "sparse": false,
       "commit": "830ae660f0d1b19cd8c7ba0f4119f0279889243e"
-    },
-    {
-      "name": "ppt-master",
-      "mode": "manual",
-      "repo": "https://github.com/hugohe3/ppt-master.git",
-      "ref": "main",
-      "skill": "skills\\ppt-master",
-      "sparse": true,
-      "commit": "be570e39c0168141013a17ec9b1aaa028cb0b32e"
     },
     {
       "name": "prd-to-issues",
@@ -365,24 +350,6 @@
       "commit": "2de74ac1c8f6669821dcef13153332c3168033c1"
     },
     {
-      "name": "python-design-patterns",
-      "mode": "manual",
-      "repo": "https://github.com/wshobson/agents.git",
-      "ref": "main",
-      "skill": "plugins\\python-development\\skills\\python-design-patterns",
-      "sparse": false,
-      "commit": "2de74ac1c8f6669821dcef13153332c3168033c1"
-    },
-    {
-      "name": "python-docx",
-      "mode": "manual",
-      "repo": "https://github.com/vamseeachanta/workspace-hub.git",
-      "ref": "main",
-      "skill": ".claude\\skills\\data\\office\\python-docx",
-      "sparse": true,
-      "commit": "e569c5163307a7f6779de502cd1b196ba6b2fa9e"
-    },
-    {
       "name": "python-performance-optimization",
       "mode": "manual",
       "repo": "https://github.com/wshobson/agents.git",
@@ -390,15 +357,6 @@
       "skill": "plugins\\python-development\\skills\\python-performance-optimization",
       "sparse": false,
       "commit": "2de74ac1c8f6669821dcef13153332c3168033c1"
-    },
-    {
-      "name": "python-pptx",
-      "mode": "manual",
-      "repo": "https://github.com/vamseeachanta/workspace-hub.git",
-      "ref": "main",
-      "skill": ".claude\\skills\\data\\office\\python-pptx",
-      "sparse": true,
-      "commit": "e569c5163307a7f6779de502cd1b196ba6b2fa9e"
     },
     {
       "name": "python-testing-patterns",
@@ -415,6 +373,15 @@
       "repo": "https://github.com/mattpocock/skills.git",
       "ref": "main",
       "skill": "skills\\engineering\\research",
+      "sparse": true,
+      "commit": "391a2701dd948f94f56a39f7533f8eea9a859c87"
+    },
+    {
+      "name": "setup-matt-pocock-skills",
+      "mode": "manual",
+      "repo": "https://github.com/mattpocock/skills.git",
+      "ref": "391a2701dd948f94f56a39f7533f8eea9a859c87",
+      "skill": "skills\\engineering\\setup-matt-pocock-skills",
       "sparse": true,
       "commit": "391a2701dd948f94f56a39f7533f8eea9a859c87"
     },
@@ -507,15 +474,6 @@
       "skill": "skills\\vite",
       "sparse": false,
       "commit": "a74f281a27dadc02397bc1a174b0f2c97531b6ae"
-    },
-    {
-      "name": "web-quality-skills",
-      "mode": "vendor",
-      "repo": "https://github.com/addyosmani/web-quality-skills.git",
-      "ref": "main",
-      "skill": "skills\\web-quality-audit",
-      "sparse": false,
-      "commit": "95d6e255afe1596b557d7a8498517884438f5b3a"
     },
     {
       "name": "windows-desktop-e2e",

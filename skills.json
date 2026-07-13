@@ -66,10 +66,29 @@
           "security-and-hardening",
           "dispatching-parallel-agents",
           "subagent-driven-development",
+          "requesting-code-review",
           "using-git-worktrees",
           "grill-with-docs",
           "grilling",
           "domain-modeling"
+        ]
+      },
+      "engineering": {
+        "enabled_names": [
+          "using-superpowers",
+          "brainstorming",
+          "research",
+          "planning-and-task-breakdown",
+          "verification-before-completion",
+          "git-workflow-and-versioning",
+          "grill-with-docs",
+          "grilling",
+          "domain-modeling",
+          "setup-matt-pocock-skills",
+          "to-spec",
+          "to-tickets",
+          "codebase-design",
+          "improve-codebase-architecture"
         ]
       },
       "dotnet": {
@@ -145,7 +164,6 @@
           "ant-design",
           "tailwind-design-system",
           "web-design-guidelines",
-          "web-quality-audit",
           "ui-animation",
           "canvas-design"
         ]
@@ -212,11 +230,6 @@
       "ref": "main",
       "name": "agent-skills-2",
       "repo": "https://github.com/addyosmani/agent-skills.git"
-    },
-    {
-      "repo": "https://github.com/addyosmani/web-quality-skills.git",
-      "ref": "main",
-      "name": "web-quality-skills"
     },
     {
       "repo": "https://github.com/remotion-dev/skills.git",
@@ -426,21 +439,6 @@
       "vendor": "superpowers"
     },
     {
-      "from": "openpyxl",
-      "to": "openpyxl",
-      "vendor": "manual"
-    },
-    {
-      "from": "python-docx",
-      "to": "python-docx",
-      "vendor": "manual"
-    },
-    {
-      "from": "python-pptx",
-      "to": "python-pptx",
-      "vendor": "manual"
-    },
-    {
       "from": "find-skills",
       "to": "find-skills",
       "vendor": "manual"
@@ -483,11 +481,6 @@
     {
       "from": "prompt-engineering-patterns",
       "to": "prompt-engineering-patterns",
-      "vendor": "manual"
-    },
-    {
-      "from": "python-design-patterns",
-      "to": "python-design-patterns",
       "vendor": "manual"
     },
     {
@@ -566,6 +559,16 @@
       "vendor": "manual"
     },
     {
+      "from": "codebase-design",
+      "to": "codebase-design",
+      "vendor": "manual"
+    },
+    {
+      "from": "setup-matt-pocock-skills",
+      "to": "setup-matt-pocock-skills",
+      "vendor": "manual"
+    },
+    {
       "from": "skills\\idea-refine",
       "to": "agent-skills-2-skills-idea-refine",
       "vendor": "agent-skills-2"
@@ -611,11 +614,6 @@
       "from": "skills\\remotion-best-practices"
     },
     {
-      "vendor": "web-quality-skills",
-      "to": "web-quality-skills-skills-web-quality-audit",
-      "from": "skills\\web-quality-audit"
-    },
-    {
       "from": "skills\\react-best-practices",
       "vendor": "agent-skills",
       "to": "agent-skills-skills-react-best-practices"
@@ -639,11 +637,6 @@
       "to": "guizang-ppt-skill",
       "vendor": "manual",
       "from": "guizang-ppt-skill"
-    },
-    {
-      "to": "ppt-master",
-      "from": "ppt-master",
-      "vendor": "manual"
     },
     {
       "to": "mcp-cli",
@@ -848,14 +841,6 @@
       "mode": "manual"
     },
     {
-      "name": "python-design-patterns",
-      "skill": "plugins\\python-development\\skills\\python-design-patterns",
-      "sparse": false,
-      "repo": "https://github.com/wshobson/agents.git",
-      "ref": "main",
-      "mode": "manual"
-    },
-    {
       "name": "dotnet-backend-patterns",
       "skill": "skills\\dotnet-backend-patterns",
       "sparse": false,
@@ -896,14 +881,6 @@
       "mode": "manual"
     },
     {
-      "name": "openpyxl",
-      "skill": ".claude\\skills\\data\\office\\openpyxl",
-      "sparse": true,
-      "repo": "https://github.com/vamseeachanta/workspace-hub.git",
-      "ref": "main",
-      "mode": "manual"
-    },
-    {
       "name": "powerpoint-automation",
       "skill": "powerpoint-automation",
       "sparse": false,
@@ -940,22 +917,6 @@
       "skill": "skills\\manim-composer",
       "sparse": false,
       "repo": "https://github.com/adithya-s-k/manim_skill.git",
-      "ref": "main",
-      "mode": "manual"
-    },
-    {
-      "name": "python-pptx",
-      "skill": ".claude\\skills\\data\\office\\python-pptx",
-      "sparse": true,
-      "repo": "https://github.com/vamseeachanta/workspace-hub.git",
-      "ref": "main",
-      "mode": "manual"
-    },
-    {
-      "name": "python-docx",
-      "skill": ".claude\\skills\\data\\office\\python-docx",
-      "sparse": true,
-      "repo": "https://github.com/vamseeachanta/workspace-hub.git",
       "ref": "main",
       "mode": "manual"
     },
@@ -1032,14 +993,6 @@
       "name": "skills-2"
     },
     {
-      "skill": "skills\\web-quality-audit",
-      "repo": "https://github.com/addyosmani/web-quality-skills.git",
-      "sparse": false,
-      "ref": "main",
-      "mode": "vendor",
-      "name": "web-quality-skills"
-    },
-    {
       "sparse": false,
       "name": "agent-skills",
       "mode": "vendor",
@@ -1078,14 +1031,6 @@
       "skill": ".",
       "repo": "https://github.com/op7418/guizang-ppt-skill.git",
       "name": "guizang-ppt-skill"
-    },
-    {
-      "ref": "main",
-      "repo": "https://github.com/hugohe3/ppt-master.git",
-      "mode": "manual",
-      "sparse": true,
-      "name": "ppt-master",
-      "skill": "skills\\ppt-master"
     },
     {
       "sparse": true,
@@ -1139,6 +1084,22 @@
       "name": "research",
       "ref": "main",
       "skill": "skills\\engineering\\research",
+      "repo": "https://github.com/mattpocock/skills.git",
+      "mode": "manual",
+      "sparse": true
+    },
+    {
+      "name": "codebase-design",
+      "ref": "391a2701dd948f94f56a39f7533f8eea9a859c87",
+      "skill": "skills\\engineering\\codebase-design",
+      "repo": "https://github.com/mattpocock/skills.git",
+      "mode": "manual",
+      "sparse": true
+    },
+    {
+      "name": "setup-matt-pocock-skills",
+      "ref": "391a2701dd948f94f56a39f7533f8eea9a859c87",
+      "skill": "skills\\engineering\\setup-matt-pocock-skills",
       "repo": "https://github.com/mattpocock/skills.git",
       "mode": "manual",
       "sparse": true

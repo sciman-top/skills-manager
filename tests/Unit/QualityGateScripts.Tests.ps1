@@ -9,6 +9,31 @@ Describe "Quality gate scripts" {
         $raw | Should Match "ReportUntrackedRuntimeArtifacts"
     }
 
+    It "Runs skill integrity after generated sync and before dependency baseline" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $scriptPath = Join-Path $root "scripts\quality\run-local-quality-gates.ps1"
+        $raw = Get-Content -LiteralPath $scriptPath -Raw
+
+        $generatedSyncIndex = $raw.IndexOf("generated-sync")
+        $skillIntegrityIndex = $raw.IndexOf("skill-integrity")
+        $dependencyBaselineIndex = $raw.IndexOf("dependency-baseline")
+
+        $generatedSyncIndex -ge 0 | Should Be $true
+        $skillIntegrityIndex -ge 0 | Should Be $true
+        $dependencyBaselineIndex -ge 0 | Should Be $true
+        $generatedSyncIndex -lt $skillIntegrityIndex | Should Be $true
+        $skillIntegrityIndex -lt $dependencyBaselineIndex | Should Be $true
+        $raw | Should Match "verify-skill-integrity\.ps1"
+    }
+
+    It "Documents the standalone skill integrity verifier in CLI help" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $helpSourcePath = Join-Path $root "src\Commands\Utils.ps1"
+        $raw = Get-Content -LiteralPath $helpSourcePath -Raw
+
+        $raw | Should Match "scripts\\verify-skill-integrity\.ps1"
+    }
+
     It "Runs repository hygiene in GitHub CI before other checks" {
         $root = Join-Path $PSScriptRoot "..\.."
         $workflowPath = Join-Path $root ".github\workflows\ci.yml"

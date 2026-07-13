@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "dependencies": [
+    {
+      "skill": "grill-with-docs",
+      "requires": [
+        "grilling",
+        "domain-modeling"
+      ]
+    },
+    {
+      "skill": "improve-codebase-architecture",
+      "requires": [
+        "codebase-design",
+        "grilling",
+        "domain-modeling"
+      ]
+    },
+    {
+      "skill": "to-spec",
+      "requires": [
+        "setup-matt-pocock-skills"
+      ]
+    },
+    {
+      "skill": "to-tickets",
+      "requires": [
+        "setup-matt-pocock-skills"
+      ]
+    },
+    {
+      "skill": "executing-plans",
+      "requires": [
+        "writing-plans",
+        "using-git-worktrees",
+        "finishing-a-development-branch"
+      ]
+    },
+    {
+      "skill": "writing-plans",
+      "requires": [
+        "executing-plans",
+        "subagent-driven-development"
+      ]
+    },
+    {
+      "skill": "subagent-driven-development",
+      "requires": [
+        "writing-plans",
+        "executing-plans",
+        "using-git-worktrees",
+        "test-driven-development",
+        "requesting-code-review",
+        "finishing-a-development-branch"
+      ]
+    }
+  ]
+}

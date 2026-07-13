@@ -397,7 +397,7 @@ MCP：
 
 技能投影：
   .\skills.ps1 技能配置 列表
-  .\skills.ps1 技能配置 使用 default|coding|dotnet|ppt|content|physics|design|browser|database
+  .\skills.ps1 技能配置 使用 default|coding|engineering|dotnet|ppt|content|physics|design|browser|database
 
 目标仓审查：
   .\skills.ps1 审查目标 需求设置
@@ -421,6 +421,7 @@ MCP：
   .\skills.ps1 清理备份
   .\skills.ps1 自动更新设置
   .\skills.ps1 doctor [--json] [--fix] [--dry-run-fix] [--strict] [--strict-perf] [--threshold-ms <ms>]
+  pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-skill-integrity.ps1 [-ReportPath <file>]
 
 通用参数：
   -DryRun：仅预演（跳过写入/删除/同步/拉取）
