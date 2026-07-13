@@ -172,6 +172,8 @@
 .\skills.ps1 技能配置 使用 coding
 ```
 
+设计访谈统一使用 `grill-with-docs`：在 CLI/IDE 中可显式输入 `$grill-with-docs`，在 Work/Codex 桌面端可从技能选择器指定，也可由模型根据描述隐式调用。该入口编排 `grilling` 与 `domain-modeling`；后两项作为依赖闭包保留，只有在直接进行决策树访谈或领域建模时才单独调用。`domain-modeling` 仅在领域术语、边界或关键决策实际变化时维护 `CONTEXT.md` 或 ADR，不要求每次访谈都创建文档。
+
 `-DryRun` 只生成内存计划，不写配置或 manifest。Codex 在新任务加载技能配置；当前已运行任务不会热更新，因此投影后需用新任务复核可见技能列表，不应通过删除 `.agents/skills` 强制生效。
 
 `$HOME/.agents/skills` 是当前标准用户技能根，根目录及其 `.system` 子目录不能整体删除。受管技能以 Junction 形式存在于该根，`$HOME/.codex/skills` 不再是受管 target；Codex 仍可能自动创建其中的 `.system` 兼容目录。历史普通目录应先退役到带哈希清单的归档，脚本会保留受管 Junction：

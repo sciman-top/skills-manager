@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-07-13T08:50:29.5328044Z",
+  "generated_at": "2026-07-13T14:04:10.0906794Z",
   "vendors": [
     {
       "name": "agent-skills",
@@ -149,6 +149,15 @@
       "commit": "b17742737e796305d829b3ad39eda3add0d79060"
     },
     {
+      "name": "domain-modeling",
+      "mode": "manual",
+      "repo": "https://github.com/mattpocock/skills.git",
+      "ref": "main",
+      "skill": "skills\\engineering\\domain-modeling",
+      "sparse": true,
+      "commit": "66898f60e8c744e269f8ce06c2b2b99ce7660d5f"
+    },
+    {
       "name": "dotnet-backend-patterns",
       "mode": "manual",
       "repo": "https://github.com/rmyndharis/antigravity-skills.git",
@@ -185,15 +194,6 @@
       "commit": "3176ae424e50bb7d3f20a7e085f31912b3f325d2"
     },
     {
-      "name": "grill-me",
-      "mode": "manual",
-      "repo": "https://github.com/mattpocock/skills.git",
-      "ref": "main",
-      "skill": "skills\\productivity\\grill-me",
-      "sparse": false,
-      "commit": "391a2701dd948f94f56a39f7533f8eea9a859c87"
-    },
-    {
       "name": "grill-with-docs",
       "mode": "manual",
       "repo": "https://github.com/mattpocock/skills.git",
@@ -201,6 +201,15 @@
       "skill": "skills\\engineering\\grill-with-docs",
       "sparse": true,
       "commit": "391a2701dd948f94f56a39f7533f8eea9a859c87"
+    },
+    {
+      "name": "grilling",
+      "mode": "manual",
+      "repo": "https://github.com/mattpocock/skills.git",
+      "ref": "main",
+      "skill": "skills\\productivity\\grilling",
+      "sparse": true,
+      "commit": "66898f60e8c744e269f8ce06c2b2b99ce7660d5f"
     },
     {
       "name": "guizang-ppt-skill",

@@ -38,6 +38,9 @@
           "git-workflow-and-versioning",
           "code-review-and-quality",
           "incremental-implementation",
+          "grill-with-docs",
+          "grilling",
+          "domain-modeling",
           "custom-windows-wpf-teacher-app",
           "custom-teacher-courseware-ppt",
           "custom-creator-publishing",
@@ -63,7 +66,10 @@
           "security-and-hardening",
           "dispatching-parallel-agents",
           "subagent-driven-development",
-          "using-git-worktrees"
+          "using-git-worktrees",
+          "grill-with-docs",
+          "grilling",
+          "domain-modeling"
         ]
       },
       "dotnet": {
@@ -80,7 +86,10 @@
           "test-driven-development",
           "verification-before-completion",
           "git-workflow-and-versioning",
-          "research"
+          "research",
+          "grill-with-docs",
+          "grilling",
+          "domain-modeling"
         ]
       },
       "ppt": {
@@ -542,11 +551,6 @@
       "vendor": "manual"
     },
     {
-      "from": "grill-me",
-      "to": "grill-me",
-      "vendor": "manual"
-    },
-    {
       "from": "write-a-prd",
       "to": "to-spec",
       "vendor": "manual"
@@ -750,6 +754,16 @@
       "to": "microsoft-docs",
       "vendor": "manual",
       "from": "microsoft-docs"
+    },
+    {
+      "to": "grilling",
+      "from": "grilling",
+      "vendor": "manual"
+    },
+    {
+      "from": "domain-modeling",
+      "vendor": "manual",
+      "to": "domain-modeling"
     }
   ],
   "imports": [
@@ -986,14 +1000,6 @@
       "name": "marketingskills"
     },
     {
-      "name": "grill-me",
-      "skill": "skills\\productivity\\grill-me",
-      "sparse": false,
-      "repo": "https://github.com/mattpocock/skills.git",
-      "ref": "main",
-      "mode": "manual"
-    },
-    {
       "sparse": false,
       "repo": "https://github.com/mattpocock/skills.git",
       "name": "write-a-prd",
@@ -1168,6 +1174,22 @@
       "sparse": false,
       "ref": "caa3d670bf2814171dba4f7346ece5080964021e",
       "name": "microsoft-docs"
+    },
+    {
+      "name": "grilling",
+      "repo": "https://github.com/mattpocock/skills.git",
+      "ref": "main",
+      "skill": "skills\\productivity\\grilling",
+      "sparse": true,
+      "mode": "manual"
+    },
+    {
+      "repo": "https://github.com/mattpocock/skills.git",
+      "mode": "manual",
+      "sparse": true,
+      "ref": "main",
+      "name": "domain-modeling",
+      "skill": "skills\\engineering\\domain-modeling"
     }
   ],
   "targets": [

@@ -314,6 +314,29 @@ description: Execute a phased implementation plan using subagents.
             }
         }
 
+        It "Rejects a matching build signature when a stale top-level output remains" {
+            $oldAgent = $script:AgentDir
+            try {
+                $script:AgentDir = Join-Path $TestDrive "agent-stale-output"
+                New-Item -ItemType Directory -Path (Join-Path $script:AgentDir "skill-a") -Force | Out-Null
+                New-Item -ItemType Directory -Path (Join-Path $script:AgentDir "stale-skill") -Force | Out-Null
+
+                Mock Load-BuildCache { @{
+                        "__agent_build_algorithm" = (Get-AgentBuildCacheAlgorithmVersion)
+                        "__agent_build_signature" = "sig-1"
+                    } }
+                Mock Get-AgentBuildState { [pscustomobject]@{ can_skip = $true; reason = "ok"; signature = "sig-1"; outputs = @("skill-a") } }
+
+                $hit = Test-AgentBuildCacheHit ([pscustomobject]@{})
+
+                $hit.hit | Should Be $false
+                $hit.reason | Should Be "unexpected-output:stale-skill"
+            }
+            finally {
+                $script:AgentDir = $oldAgent
+            }
+        }
+
         It "Skips the build transaction when the agent build cache is valid" {
             $cfg = [pscustomobject]@{
                 vendors = @()

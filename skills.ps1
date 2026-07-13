@@ -6390,6 +6390,19 @@ function Test-AgentBuildCacheHit($cfg) {
                 return [pscustomobject]@{ hit = $false; reason = ("output-missing:{0}" -f $rel); state = $state }
             }
         }
+        $expectedTopLevels = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($rel in @($state.outputs)) {
+            $normalized = Normalize-SkillPath ([string]$rel)
+            $topLevel = @($normalized -split "\\", 2)[0]
+            if (-not [string]::IsNullOrWhiteSpace($topLevel) -and $topLevel -ne ".") {
+                $expectedTopLevels.Add($topLevel) | Out-Null
+            }
+        }
+        foreach ($dir in @(Get-ChildItem -LiteralPath $AgentDir -Directory -Force | Sort-Object Name)) {
+            if (-not $expectedTopLevels.Contains([string]$dir.Name)) {
+                return [pscustomobject]@{ hit = $false; reason = ("unexpected-output:{0}" -f $dir.Name); state = $state }
+            }
+        }
         return [pscustomobject]@{ hit = $true; reason = "cache-hit"; state = $state }
     }
     catch {
