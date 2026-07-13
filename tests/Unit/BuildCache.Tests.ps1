@@ -218,6 +218,11 @@ description: Execute a phased implementation plan using subagents.
     }
 
     Context "Agent build skip cache" {
+        It "Uses distinct metric names for cache-hit and full Agent builds" {
+            (Get-AgentBuildMetricName $true) | Should Be "build_agent_cache_hit"
+            (Get-AgentBuildMetricName $false) | Should Be "build_agent_full"
+        }
+
         It "Builds a real state signature from current mapping sources" {
             $src = Join-Path $TestDrive "vendor-src\skill-a"
             New-Item -ItemType Directory -Path $src -Force | Out-Null

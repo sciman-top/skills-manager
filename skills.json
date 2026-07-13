@@ -604,7 +604,7 @@
     {
       "vendor": "skills-2",
       "to": "skills-2-skills-remotion",
-      "from": "skills\\remotion"
+      "from": "skills\\remotion-best-practices"
     },
     {
       "vendor": "web-quality-skills",
@@ -1018,7 +1018,7 @@
       "ref": "main"
     },
     {
-      "skill": "skills\\remotion",
+      "skill": "skills\\remotion-best-practices",
       "repo": "https://github.com/remotion-dev/skills.git",
       "sparse": false,
       "ref": "main",

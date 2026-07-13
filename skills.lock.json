@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-07-11T10:28:36.8075445Z",
+  "generated_at": "2026-07-13T08:50:29.5328044Z",
   "vendors": [
     {
       "name": "agent-skills",
@@ -12,7 +12,7 @@
       "name": "agent-skills-2",
       "repo": "https://github.com/addyosmani/agent-skills.git",
       "ref": "main",
-      "commit": "6bcfeb9dae52b11eaad23511acc165109746dbc3"
+      "commit": "98967c45a42b88d6b8fb3a88b7ff6273920763d6"
     },
     {
       "name": "anthropics-skills",
@@ -30,7 +30,7 @@
       "name": "marketingskills",
       "repo": "https://github.com/coreyhaines31/marketingskills.git",
       "ref": "main",
-      "commit": "f04556d923e076a29564559101e5ca33698422f5"
+      "commit": "0ba2a7fafc7b0827a261bd518e87cbda18e6675f"
     },
     {
       "name": "skills",
@@ -42,7 +42,7 @@
       "name": "skills-2",
       "repo": "https://github.com/remotion-dev/skills.git",
       "ref": "main",
-      "commit": "6726bf2d4bcce0359806749b3656b0c886d74aaa"
+      "commit": "8b1d51ade295b2d9bd22a8f07047d13c0740f275"
     },
     {
       "name": "superpowers",
@@ -83,7 +83,7 @@
       "ref": "main",
       "skill": "skills\\performance-optimization",
       "sparse": false,
-      "commit": "6bcfeb9dae52b11eaad23511acc165109746dbc3"
+      "commit": "98967c45a42b88d6b8fb3a88b7ff6273920763d6"
     },
     {
       "name": "ant-design",
@@ -101,7 +101,7 @@
       "ref": "main",
       "skill": "plugins\\backend-development\\skills\\architecture-patterns",
       "sparse": false,
-      "commit": "d7cf7dca8c4c7d0635e284f77204daa85552bfa4"
+      "commit": "2de74ac1c8f6669821dcef13153332c3168033c1"
     },
     {
       "name": "baoyu-skills",
@@ -119,7 +119,7 @@
       "ref": "main",
       "skill": "downloaded-skills\\design-frontend\\d3-viz",
       "sparse": true,
-      "commit": "f1d13a8461cbc0f5e02cc3db44eef0abe610f76d"
+      "commit": "ed8eae53a2ace5e8099e7327c84ec56b4e548b0a"
     },
     {
       "name": "data-visualization",
@@ -128,7 +128,7 @@
       "ref": "main",
       "skill": "data\\skills\\data-visualization",
       "sparse": false,
-      "commit": "29e07d0f1da4bba2fd443510cb34c835fe6f81e1"
+      "commit": "8cfb8a25dbc7de82390cedff932081e7662d78be"
     },
     {
       "name": "debug-dotnet",
@@ -164,7 +164,7 @@
       "ref": "master",
       "skill": "drawio-diagram-forge",
       "sparse": false,
-      "commit": "df3caef3d7d163f298f31f9bea994fb9a254c089"
+      "commit": "830ae660f0d1b19cd8c7ba0f4119f0279889243e"
     },
     {
       "name": "error-handling-patterns",
@@ -173,7 +173,7 @@
       "ref": "main",
       "skill": "plugins\\developer-essentials\\skills\\error-handling-patterns",
       "sparse": false,
-      "commit": "d7cf7dca8c4c7d0635e284f77204daa85552bfa4"
+      "commit": "2de74ac1c8f6669821dcef13153332c3168033c1"
     },
     {
       "name": "find-skills",
@@ -182,7 +182,7 @@
       "ref": "main",
       "skill": "skills\\find-skills",
       "sparse": true,
-      "commit": "4ce6d48ac44c8b637db87b2102fea3baca719df1"
+      "commit": "3176ae424e50bb7d3f20a7e085f31912b3f325d2"
     },
     {
       "name": "grill-me",
@@ -191,7 +191,7 @@
       "ref": "main",
       "skill": "skills\\productivity\\grill-me",
       "sparse": false,
-      "commit": "2ee14df19c2bbea2303e0a187e8619a5ddef8817"
+      "commit": "391a2701dd948f94f56a39f7533f8eea9a859c87"
     },
     {
       "name": "grill-with-docs",
@@ -200,7 +200,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\grill-with-docs",
       "sparse": true,
-      "commit": "2ee14df19c2bbea2303e0a187e8619a5ddef8817"
+      "commit": "391a2701dd948f94f56a39f7533f8eea9a859c87"
     },
     {
       "name": "guizang-ppt-skill",
@@ -218,7 +218,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\improve-codebase-architecture",
       "sparse": false,
-      "commit": "2ee14df19c2bbea2303e0a187e8619a5ddef8817"
+      "commit": "391a2701dd948f94f56a39f7533f8eea9a859c87"
     },
     {
       "name": "manim-composer",
@@ -254,7 +254,7 @@
       "ref": "main",
       "skill": "skills\\social",
       "sparse": false,
-      "commit": "f04556d923e076a29564559101e5ca33698422f5"
+      "commit": "0ba2a7fafc7b0827a261bd518e87cbda18e6675f"
     },
     {
       "name": "mcp-cli",
@@ -263,7 +263,7 @@
       "ref": "main",
       "skill": "skills\\mcp-cli",
       "sparse": true,
-      "commit": "30472ecf0fe34cc561df958c08501ecc5ca80ea4"
+      "commit": "0aaced533251f5b86c69dfbc5e55db74c4b4d1af"
     },
     {
       "name": "md2wechat-lite",
@@ -284,6 +284,15 @@
       "commit": "caa3d670bf2814171dba4f7346ece5080964021e"
     },
     {
+      "name": "microsoft-docs",
+      "mode": "manual",
+      "repo": "https://github.com/MicrosoftDocs/mcp.git",
+      "ref": "caa3d670bf2814171dba4f7346ece5080964021e",
+      "skill": "skills\\microsoft-docs",
+      "sparse": false,
+      "commit": "caa3d670bf2814171dba4f7346ece5080964021e"
+    },
+    {
       "name": "modern-python",
       "mode": "manual",
       "repo": "https://github.com/trailofbits/skills.git",
@@ -299,7 +308,7 @@
       "ref": "main",
       "skill": ".claude\\skills\\data\\office\\openpyxl",
       "sparse": true,
-      "commit": "b0fc7d8f25e36142259c14bc0ac132db41b17e77"
+      "commit": "e569c5163307a7f6779de502cd1b196ba6b2fa9e"
     },
     {
       "name": "playwright-best-practices",
@@ -317,7 +326,7 @@
       "ref": "master",
       "skill": "powerpoint-automation",
       "sparse": false,
-      "commit": "df3caef3d7d163f298f31f9bea994fb9a254c089"
+      "commit": "830ae660f0d1b19cd8c7ba0f4119f0279889243e"
     },
     {
       "name": "ppt-master",
@@ -326,7 +335,7 @@
       "ref": "main",
       "skill": "skills\\ppt-master",
       "sparse": true,
-      "commit": "3ba0fca6741adef2998ceca7e38989f822023f2d"
+      "commit": "be570e39c0168141013a17ec9b1aaa028cb0b32e"
     },
     {
       "name": "prd-to-issues",
@@ -335,7 +344,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\to-tickets",
       "sparse": false,
-      "commit": "2ee14df19c2bbea2303e0a187e8619a5ddef8817"
+      "commit": "391a2701dd948f94f56a39f7533f8eea9a859c87"
     },
     {
       "name": "prompt-engineering-patterns",
@@ -344,7 +353,7 @@
       "ref": "main",
       "skill": "plugins\\llm-application-dev\\skills\\prompt-engineering-patterns",
       "sparse": false,
-      "commit": "d7cf7dca8c4c7d0635e284f77204daa85552bfa4"
+      "commit": "2de74ac1c8f6669821dcef13153332c3168033c1"
     },
     {
       "name": "python-design-patterns",
@@ -353,7 +362,7 @@
       "ref": "main",
       "skill": "plugins\\python-development\\skills\\python-design-patterns",
       "sparse": false,
-      "commit": "d7cf7dca8c4c7d0635e284f77204daa85552bfa4"
+      "commit": "2de74ac1c8f6669821dcef13153332c3168033c1"
     },
     {
       "name": "python-docx",
@@ -362,7 +371,7 @@
       "ref": "main",
       "skill": ".claude\\skills\\data\\office\\python-docx",
       "sparse": true,
-      "commit": "b0fc7d8f25e36142259c14bc0ac132db41b17e77"
+      "commit": "e569c5163307a7f6779de502cd1b196ba6b2fa9e"
     },
     {
       "name": "python-performance-optimization",
@@ -371,7 +380,7 @@
       "ref": "main",
       "skill": "plugins\\python-development\\skills\\python-performance-optimization",
       "sparse": false,
-      "commit": "d7cf7dca8c4c7d0635e284f77204daa85552bfa4"
+      "commit": "2de74ac1c8f6669821dcef13153332c3168033c1"
     },
     {
       "name": "python-pptx",
@@ -380,7 +389,7 @@
       "ref": "main",
       "skill": ".claude\\skills\\data\\office\\python-pptx",
       "sparse": true,
-      "commit": "b0fc7d8f25e36142259c14bc0ac132db41b17e77"
+      "commit": "e569c5163307a7f6779de502cd1b196ba6b2fa9e"
     },
     {
       "name": "python-testing-patterns",
@@ -389,7 +398,7 @@
       "ref": "main",
       "skill": "plugins\\python-development\\skills\\python-testing-patterns",
       "sparse": false,
-      "commit": "d7cf7dca8c4c7d0635e284f77204daa85552bfa4"
+      "commit": "2de74ac1c8f6669821dcef13153332c3168033c1"
     },
     {
       "name": "research",
@@ -398,16 +407,16 @@
       "ref": "main",
       "skill": "skills\\engineering\\research",
       "sparse": true,
-      "commit": "2ee14df19c2bbea2303e0a187e8619a5ddef8817"
+      "commit": "391a2701dd948f94f56a39f7533f8eea9a859c87"
     },
     {
       "name": "skills-2",
       "mode": "vendor",
       "repo": "https://github.com/remotion-dev/skills.git",
       "ref": "main",
-      "skill": "skills\\remotion",
+      "skill": "skills\\remotion-best-practices",
       "sparse": false,
-      "commit": "6726bf2d4bcce0359806749b3656b0c886d74aaa"
+      "commit": "8b1d51ade295b2d9bd22a8f07047d13c0740f275"
     },
     {
       "name": "slidev",
@@ -416,7 +425,7 @@
       "ref": "main",
       "skill": "skills\\slidev",
       "sparse": false,
-      "commit": "905b44baee64507bd332162f6d49cf76cc8d6ee0"
+      "commit": "b9fcd511225a1a86170fef4d8660ea959e9efe1f"
     },
     {
       "name": "storyboard-creation",
@@ -425,7 +434,7 @@
       "ref": "main",
       "skill": "guides\\video\\storyboard-creation",
       "sparse": false,
-      "commit": "601a457f7ecf8e11da24ceb5dcef77980349bce1"
+      "commit": "fbe0aa4ac8f4be13cbcff551bbbc80554e8eb31f"
     },
     {
       "name": "supabase-postgres-best-practices",
@@ -434,7 +443,7 @@
       "ref": "main",
       "skill": "skills\\supabase-postgres-best-practices",
       "sparse": false,
-      "commit": "1356046015476711a769601079262b5635929427"
+      "commit": "1ad9aaeb49caafd9e95c0a91116f71890eebbc53"
     },
     {
       "name": "superpowers",
@@ -452,7 +461,7 @@
       "ref": "main",
       "skill": "plugins\\frontend-mobile-development\\skills\\tailwind-design-system",
       "sparse": false,
-      "commit": "d7cf7dca8c4c7d0635e284f77204daa85552bfa4"
+      "commit": "2de74ac1c8f6669821dcef13153332c3168033c1"
     },
     {
       "name": "ui-animation",
@@ -461,7 +470,7 @@
       "ref": "main",
       "skill": "skills\\ui-animation",
       "sparse": false,
-      "commit": "61b88ede01d551e5844bd8820cc0e984d0397c88"
+      "commit": "d7c7ae79009a2c6f103154b5c476d2b7b75e4fd7"
     },
     {
       "name": "ui-ux-pro-max",
@@ -470,7 +479,7 @@
       "ref": "main",
       "skill": ".claude\\skills\\ui-ux-pro-max",
       "sparse": false,
-      "commit": "b7e3af80f6e331f6fb456667b82b12cade7c9d35"
+      "commit": "3da52ff1cab1be91848072ec1be5f493d730fd5f"
     },
     {
       "name": "use-my-browser",
@@ -515,7 +524,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\to-spec",
       "sparse": false,
-      "commit": "2ee14df19c2bbea2303e0a187e8619a5ddef8817"
+      "commit": "391a2701dd948f94f56a39f7533f8eea9a859c87"
     }
   ]
 }

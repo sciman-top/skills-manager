@@ -240,6 +240,180 @@ Describe "Skill projection" {
         }
     }
 
+    Context "Package hash cache" {
+        It "Classifies managed cache hits as hot even when system skills still require full hashes" {
+            $hot = [pscustomobject]@{ cache_valid = $true; cache_hits = 110; cache_misses = 0; full_hash_count = 5 }
+            $miss = [pscustomobject]@{ cache_valid = $true; cache_hits = 109; cache_misses = 1; full_hash_count = 6 }
+            $invalid = [pscustomobject]@{ cache_valid = $false; cache_hits = 0; cache_misses = 0; full_hash_count = 115 }
+
+            (Test-SkillProjectionManagedCacheHotPath $hot) | Should Be $true
+            (Test-SkillProjectionManagedCacheHotPath $miss) | Should Be $false
+            (Test-SkillProjectionManagedCacheHotPath $invalid) | Should Be $false
+        }
+
+        It "Rejects malformed hashes when loading cache entries" {
+            $managedRoot = Join-Path $TestDrive "package-cache-malformed-managed"
+            $manifestPath = Join-Path $TestDrive "package-cache-malformed.json"
+            EnsureDir $managedRoot
+            Set-ContentUtf8 $manifestPath ([ordered]@{
+                    schema_version = 2
+                    package_hash_cache_schema = 1
+                    agent_build_signature = "sig-1"
+                    skills = @([ordered]@{
+                            skill_dir = (Join-Path $TestDrive "package-cache-malformed-user\demo")
+                            content_hash = ("a" * 64)
+                            package_hash = "not-a-sha256"
+                            package_fingerprint = ("b" * 64)
+                        })
+                } | ConvertTo-Json -Depth 10)
+            $cfg = [pscustomobject]@{ managed_source_path = $managedRoot }
+
+            $context = New-SkillProjectionPackageHashContext $cfg "sig-1" $manifestPath
+
+            $context.cache_valid | Should Be $true
+            $context.cache_entries.Count | Should Be 0
+        }
+
+        It "Reuses a package hash only for an unchanged managed Junction" {
+            $oldDryRun = $script:DryRun
+            try {
+                $script:DryRun = $false
+                $managedRoot = Join-Path $TestDrive "package-cache-managed"
+                $userRoot = Join-Path $TestDrive "package-cache-user"
+                $skillDir = New-ProjectionSkill $managedRoot "demo" "demo"
+                Set-ContentUtf8 (Join-Path $skillDir "asset.txt") "asset"
+                EnsureDir $userRoot
+                $linkDir = Join-Path $userRoot "demo"
+                New-Junction $linkDir $skillDir
+
+                $contentHash = Get-FileContentHash (Join-Path $linkDir "SKILL.md")
+                $packageHash = Get-SkillPackageContentHash $linkDir
+                $fingerprint = Get-DirectoryFingerprint $skillDir
+                $manifestPath = Join-Path $TestDrive "package-cache-hit.json"
+                Set-ContentUtf8 $manifestPath ([ordered]@{
+                        schema_version = 2
+                        package_hash_cache_schema = 1
+                        agent_build_signature = "sig-1"
+                        skills = @([ordered]@{
+                                skill_dir = $linkDir
+                                content_hash = $contentHash
+                                package_hash = $packageHash
+                                package_fingerprint = $fingerprint
+                            })
+                    } | ConvertTo-Json -Depth 10)
+                $cfg = [pscustomobject]@{
+                    managed_source_path = $managedRoot
+                    user_skill_root = $userRoot
+                }
+                $source = [pscustomobject]@{ id = "managed"; path = $userRoot; priority = 200; platforms = @("codex") }
+
+                $context = New-SkillProjectionPackageHashContext $cfg "sig-1" $manifestPath
+                Mock Get-SkillPackageContentHash { throw "full package hash should not run on a valid cache hit" }
+                $entries = @(Get-SkillProjectionSourceEntries $source 0 $context)
+
+                $entries.Count | Should Be 1
+                $entries[0].package_hash | Should Be $packageHash
+                $entries[0].package_fingerprint | Should Be $fingerprint
+                $context.cache_hits | Should Be 1
+                $context.cache_misses | Should Be 0
+                $context.full_hash_count | Should Be 0
+            }
+            finally {
+                $script:DryRun = $oldDryRun
+            }
+        }
+
+        It "Falls back to a full package hash when nested package metadata changes" {
+            $oldDryRun = $script:DryRun
+            try {
+                $script:DryRun = $false
+                $managedRoot = Join-Path $TestDrive "package-cache-stale-managed"
+                $userRoot = Join-Path $TestDrive "package-cache-stale-user"
+                $skillDir = New-ProjectionSkill $managedRoot "demo" "demo"
+                $assetPath = Join-Path $skillDir "asset.txt"
+                Set-ContentUtf8 $assetPath "before"
+                EnsureDir $userRoot
+                $linkDir = Join-Path $userRoot "demo"
+                New-Junction $linkDir $skillDir
+
+                $contentHash = Get-FileContentHash (Join-Path $linkDir "SKILL.md")
+                $fingerprint = Get-DirectoryFingerprint $skillDir
+                $manifestPath = Join-Path $TestDrive "package-cache-stale.json"
+                Set-ContentUtf8 $manifestPath ([ordered]@{
+                        schema_version = 2
+                        package_hash_cache_schema = 1
+                        agent_build_signature = "sig-1"
+                        skills = @([ordered]@{
+                                skill_dir = $linkDir
+                                content_hash = $contentHash
+                                package_hash = "stale-hash"
+                                package_fingerprint = $fingerprint
+                            })
+                    } | ConvertTo-Json -Depth 10)
+                Set-ContentUtf8 $assetPath "after-with-different-size"
+                $cfg = [pscustomobject]@{
+                    managed_source_path = $managedRoot
+                    user_skill_root = $userRoot
+                }
+                $source = [pscustomobject]@{ id = "managed"; path = $userRoot; priority = 200; platforms = @("codex") }
+
+                $context = New-SkillProjectionPackageHashContext $cfg "sig-1" $manifestPath
+                Mock Get-SkillPackageContentHash { "fresh-hash" }
+                $entries = @(Get-SkillProjectionSourceEntries $source 0 $context)
+
+                $entries[0].package_hash | Should Be "fresh-hash"
+                $context.cache_hits | Should Be 0
+                $context.cache_misses | Should Be 1
+                $context.full_hash_count | Should Be 1
+                Assert-MockCalled Get-SkillPackageContentHash -Times 1 -Exactly -Scope It
+            }
+            finally {
+                $script:DryRun = $oldDryRun
+            }
+        }
+
+        It "Falls back when the cached SKILL content hash does not match" {
+            $oldDryRun = $script:DryRun
+            try {
+                $script:DryRun = $false
+                $managedRoot = Join-Path $TestDrive "package-cache-content-managed"
+                $userRoot = Join-Path $TestDrive "package-cache-content-user"
+                $skillDir = New-ProjectionSkill $managedRoot "demo" "demo"
+                EnsureDir $userRoot
+                $linkDir = Join-Path $userRoot "demo"
+                New-Junction $linkDir $skillDir
+                $manifestPath = Join-Path $TestDrive "package-cache-content.json"
+                Set-ContentUtf8 $manifestPath ([ordered]@{
+                        schema_version = 2
+                        package_hash_cache_schema = 1
+                        agent_build_signature = "sig-1"
+                        skills = @([ordered]@{
+                                skill_dir = $linkDir
+                                content_hash = "wrong-content-hash"
+                                package_hash = "stale-hash"
+                                package_fingerprint = (Get-DirectoryFingerprint $skillDir)
+                            })
+                    } | ConvertTo-Json -Depth 10)
+                $cfg = [pscustomobject]@{
+                    managed_source_path = $managedRoot
+                    user_skill_root = $userRoot
+                }
+                $source = [pscustomobject]@{ id = "managed"; path = $userRoot; priority = 200; platforms = @("codex") }
+
+                $context = New-SkillProjectionPackageHashContext $cfg "sig-1" $manifestPath
+                Mock Get-SkillPackageContentHash { "fresh-content-hash" }
+                $entries = @(Get-SkillProjectionSourceEntries $source 0 $context)
+
+                $entries[0].package_hash | Should Be "fresh-content-hash"
+                $context.cache_misses | Should Be 1
+                Assert-MockCalled Get-SkillPackageContentHash -Times 1 -Exactly -Scope It
+            }
+            finally {
+                $script:DryRun = $oldDryRun
+            }
+        }
+    }
+
     Context "Build-CodexSkillsProjectionToml" {
         It "Replaces only the managed block and preserves user config" {
             $existing = @'
@@ -264,9 +438,79 @@ sandbox = "elevated"
             $toml | Should Match 'C:\\\\new\\\\SKILL\.md'
             ([regex]::Matches($toml, 'BEGIN skills-manager:skills-projection')).Count | Should Be 1
         }
+
+        It "Preserves foreign TOML tables moved inside the managed markers" {
+            $existing = @'
+model_provider = "codex_local_access"
+
+# BEGIN skills-manager:skills-projection
+[[skills.config]]
+path = "C:\\old\\SKILL.md"
+enabled = false
+
+[model_providers]
+
+[model_providers.codex_local_access]
+name = "Codex Local Access"
+base_url = "http://127.0.0.1:8045/v1"
+
+[features]
+unified_exec = true
+# END skills-manager:skills-projection
+'@
+            $disabled = @([pscustomobject]@{ path = "C:\new\SKILL.md" })
+
+            $toml = Build-CodexSkillsProjectionToml $existing $disabled
+
+            $toml | Should Not Match 'C:\\\\old'
+            $toml | Should Match '\[model_providers\.codex_local_access\]'
+            $toml | Should Match 'base_url = "http://127\.0\.0\.1:8045/v1"'
+            $toml | Should Match '\[features\]'
+            $toml | Should Match 'unified_exec = true'
+            ([regex]::Matches($toml, 'BEGIN skills-manager:skills-projection')).Count | Should Be 1
+            $toml.IndexOf('[features]') | Should BeLessThan $toml.IndexOf('# BEGIN skills-manager:skills-projection')
+        }
     }
 
     Context "Sync-CodexSkillProjection" {
+        It "Persists package cache metadata and reuses it on the next verified sync" {
+            $oldDryRun = $script:DryRun
+            try {
+                $script:DryRun = $false
+                $managedRoot = Join-Path $TestDrive "sync-cache-managed"
+                $userRoot = Join-Path $TestDrive "sync-cache-user"
+                New-ProjectionSkill $managedRoot "demo" "demo" | Out-Null
+                $configPath = Join-Path $TestDrive "sync-cache-codex\config.toml"
+                $manifestPath = Join-Path $TestDrive "sync-cache-reports\projection.json"
+                $projection = [pscustomobject]@{
+                    enabled = $true
+                    managed_source_path = $managedRoot
+                    user_skill_root = $userRoot
+                    codex_config_path = $configPath
+                    manifest_path = $manifestPath
+                    sources = @([pscustomobject]@{ id = "managed"; path = $userRoot; priority = 200; platforms = @("codex") })
+                }
+
+                $cold = Sync-CodexSkillProjection $projection "sig-1"
+                $coldManifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
+                $coldHash = [string]$cold.plan.skills[0].package_hash
+
+                $coldManifest.package_hash_cache_schema | Should Be 1
+                $coldManifest.agent_build_signature | Should Be "sig-1"
+                [string]::IsNullOrWhiteSpace([string]$coldManifest.skills[0].package_fingerprint) | Should Be $false
+
+                $hot = Sync-CodexSkillProjection $projection "sig-1"
+
+                $hot.plan.skills[0].package_hash | Should Be $coldHash
+                $hot.package_hash_cache.cache_hits | Should Be 1
+                $hot.package_hash_cache.cache_misses | Should Be 0
+                $hot.package_hash_cache.full_hash_count | Should Be 0
+            }
+            finally {
+                $script:DryRun = $oldDryRun
+            }
+        }
+
         It "Fails closed when an inactive profile exceeds the metadata budget" {
             $oldDryRun = $script:DryRun
             try {

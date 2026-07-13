@@ -1834,6 +1834,10 @@ function Get-ElapsedMs($sw) {
 function Get-AgentBuildCacheAlgorithmVersion {
     return "agent-build-v20260504.2"
 }
+function Get-AgentBuildMetricName([bool]$cacheHit) {
+    if ($cacheHit) { return "build_agent_cache_hit" }
+    return "build_agent_full"
+}
 function Get-StringSha256([string]$text) {
     if ($null -eq $text) { $text = "" }
     $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -2085,7 +2089,7 @@ function Test-AgentBuildCacheHit($cfg) {
     }
 }
 function Invoke-AgentBuildCacheHit($cacheHit) {
-    return (Invoke-WithMetric "build_agent" {
+    return (Invoke-WithMetric (Get-AgentBuildMetricName $true) {
         $state = $cacheHit.state
         $signature = [string]$state.signature
         $shortSignature = if ($signature.Length -gt 12) { $signature.Substring(0, 12) } else { $signature }
@@ -2156,7 +2160,7 @@ function Complete-BuildTransaction($txn) {
 }
 
 function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
-    return (Invoke-WithMetric "build_agent" {
+    return (Invoke-WithMetric (Get-AgentBuildMetricName $false) {
         if (-not $SkipPreflight) { Preflight }
         if ($null -eq $cfg) { $cfg = LoadCfg }
         Log "开始构建 Agent..."
@@ -2364,7 +2368,7 @@ function Resolve-TargetDir([string]$path) {
     return (Join-Path $Root $path)
 }
 
-function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight) {
+function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, [string]$VerifiedAgentBuildSignature = "") {
     return (Invoke-WithMetric "apply_targets" {
         if (-not $SkipPreflight) { Preflight }
         if ($null -eq $cfg) { $cfg = LoadCfg }
@@ -2372,29 +2376,31 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight) {
         if ([string]::IsNullOrWhiteSpace($mode)) { $mode = "link" }
         $failures = New-Object System.Collections.Generic.List[string]
 
-        foreach ($t in $cfg.targets) {
-            try {
-                $target = Resolve-TargetDir $t.path
-                if (-not $target) { continue }
-                Assert-SafeTargetDir $target
+        Invoke-WithMetric "apply_target_links" {
+            foreach ($t in $cfg.targets) {
+                try {
+                    $target = Resolve-TargetDir $t.path
+                    if (-not $target) { continue }
+                    Assert-SafeTargetDir $target
 
-                if ($mode -eq "sync") {
-                    EnsureDir $target
-                    RoboMirror $AgentDir $target
-                    Log ("已同步（拷贝）：{0}" -f $t.path)
+                    if ($mode -eq "sync") {
+                        EnsureDir $target
+                        RoboMirror $AgentDir $target
+                        Log ("已同步（拷贝）：{0}" -f $t.path)
+                    }
+                    else {
+                        New-Junction $target $AgentDir
+                        Log ("已关联（链接）：{0} -> agent/" -f $t.path)
+                    }
                 }
-                else {
-                    New-Junction $target $AgentDir
-                    Log ("已关联（链接）：{0} -> agent/" -f $t.path)
+                catch {
+                    Write-Host ("❌ 同步目标失败 [{0}]: {1}" -f $t.path, $_.Exception.Message) -ForegroundColor Red
+                    $failures.Add(("target:{0} => {1}" -f $t.path, $_.Exception.Message)) | Out-Null
                 }
             }
-            catch {
-                Write-Host ("❌ 同步目标失败 [{0}]: {1}" -f $t.path, $_.Exception.Message) -ForegroundColor Red
-                $failures.Add(("target:{0} => {1}" -f $t.path, $_.Exception.Message)) | Out-Null
-            }
-        }
+        } @{ command = "应用到ClaudeCodex"; target_count = @($cfg.targets).Count } -NoHost | Out-Null
         try {
-            $projectionResult = Sync-ConfiguredSkillProjection $cfg
+            $projectionResult = Sync-ConfiguredSkillProjection $cfg $VerifiedAgentBuildSignature
             if ($projectionResult -and -not [bool]$projectionResult.skipped) {
                 $plan = $projectionResult.plan
                 Log ("技能投影已生成：entries={0}, unique={1}, disabled={2}, conflicts={3}, persisted={4}" -f @($plan.skills).Count, @($plan.unique_names).Count, @($plan.disabled).Count, @($plan.conflicts).Count, [bool]$projectionResult.persisted)
@@ -2465,7 +2471,13 @@ function 构建生效 {
                 Write-Host "⚠️ 构建失败，未执行同步。请先修复上方错误后重试【构建生效】。" -ForegroundColor Yellow
             }
             else {
-                $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight
+                $verifiedAgentBuildSignature = if ($agentBuildCacheHit.hit) {
+                    [string]$agentBuildCacheHit.state.signature
+                }
+                else {
+                    [string](Load-BuildCache)["__agent_build_signature"]
+                }
+                $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight -VerifiedAgentBuildSignature $verifiedAgentBuildSignature
                 if ($syncFailures) { $failures += $syncFailures }
             }
             Write-FailureSummary "构建生效部分失败" $failures

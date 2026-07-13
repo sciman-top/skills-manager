@@ -47,7 +47,124 @@ function Get-SkillPackageContentHash([string]$skillDir) {
     return (Get-StringSha256 ($parts.ToArray() -join "`n"))
 }
 
-function Get-SkillProjectionSourceEntries($source, [int]$sourceOrder) {
+function Get-SkillProjectionPackageHashCacheSchemaVersion {
+    return 1
+}
+
+function Test-SkillProjectionSha256([string]$value) {
+    return (-not [string]::IsNullOrWhiteSpace($value) -and $value -match '^[0-9a-fA-F]{64}$')
+}
+
+function New-SkillProjectionPackageHashContext($projectionCfg, [string]$verifiedBuildSignature, [string]$manifestPath) {
+    $context = [pscustomobject]([ordered]@{
+        cache_schema = Get-SkillProjectionPackageHashCacheSchemaVersion
+        verified_build_signature = $verifiedBuildSignature
+        managed_root = ""
+        cache_valid = $false
+        cache_entries = @{}
+        cache_hits = 0
+        cache_misses = 0
+        full_hash_count = 0
+        fingerprint_ms = 0
+        full_hash_ms = 0
+    })
+    if ($null -eq $projectionCfg -or [string]::IsNullOrWhiteSpace($verifiedBuildSignature)) { return $context }
+    if ($projectionCfg.PSObject.Properties.Match("managed_source_path").Count -eq 0) { return $context }
+
+    $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
+    if ([string]::IsNullOrWhiteSpace($managedRoot) -or -not (Test-Path -LiteralPath $managedRoot -PathType Container)) { return $context }
+    $context.managed_root = $managedRoot
+    if ([string]::IsNullOrWhiteSpace($manifestPath) -or -not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return $context }
+
+    try {
+        $manifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
+        if ($null -eq $manifest) { return $context }
+        if ($manifest.PSObject.Properties.Match("package_hash_cache_schema").Count -eq 0 -or [int]$manifest.package_hash_cache_schema -ne $context.cache_schema) { return $context }
+        if ($manifest.PSObject.Properties.Match("agent_build_signature").Count -eq 0 -or [string]$manifest.agent_build_signature -ne $verifiedBuildSignature) { return $context }
+
+        $entries = @{}
+        foreach ($entry in @($manifest.skills)) {
+            if ($null -eq $entry) { continue }
+            $skillDir = [string]$entry.skill_dir
+            $packageHash = [string]$entry.package_hash
+            $packageFingerprint = [string]$entry.package_fingerprint
+            $contentHash = [string]$entry.content_hash
+            if ([string]::IsNullOrWhiteSpace($skillDir) -or [string]::IsNullOrWhiteSpace($packageHash) -or [string]::IsNullOrWhiteSpace($packageFingerprint) -or [string]::IsNullOrWhiteSpace($contentHash)) { continue }
+            if (-not (Test-SkillProjectionSha256 $packageHash) -or -not (Test-SkillProjectionSha256 $packageFingerprint) -or -not (Test-SkillProjectionSha256 $contentHash)) { continue }
+            $key = [System.IO.Path]::GetFullPath($skillDir).ToLowerInvariant()
+            $entries[$key] = [pscustomobject]@{
+                package_hash = $packageHash
+                package_fingerprint = $packageFingerprint
+                content_hash = $contentHash
+            }
+        }
+        $context.cache_entries = $entries
+        $context.cache_valid = $true
+    }
+    catch {
+        Log ("技能投影哈希缓存读取失败，已回退完整计算：{0}" -f $_.Exception.Message) "WARN"
+    }
+    return $context
+}
+
+function Get-SkillProjectionPackageHash([string]$skillDir, [string]$contentHash, $packageHashContext) {
+    $fullSkillDir = [System.IO.Path]::GetFullPath($skillDir)
+    $cacheKey = $fullSkillDir.ToLowerInvariant()
+    $managedTarget = ""
+    $packageFingerprint = ""
+    $isManaged = $false
+
+    if ($null -ne $packageHashContext -and -not [string]::IsNullOrWhiteSpace([string]$packageHashContext.managed_root) -and (Is-ReparsePoint $fullSkillDir)) {
+        $target = Get-ReparsePointTargetFullPath $fullSkillDir
+        if (-not [string]::IsNullOrWhiteSpace($target) -and (Is-PathInsideOrEqual $target ([string]$packageHashContext.managed_root))) {
+            $managedTarget = [System.IO.Path]::GetFullPath($target)
+            $isManaged = $true
+            $fingerprintTimer = [System.Diagnostics.Stopwatch]::StartNew()
+            try { $packageFingerprint = Get-DirectoryFingerprint $managedTarget }
+            finally {
+                $fingerprintTimer.Stop()
+                $packageHashContext.fingerprint_ms += [int]$fingerprintTimer.ElapsedMilliseconds
+            }
+        }
+    }
+
+    if ($isManaged -and [bool]$packageHashContext.cache_valid -and $packageHashContext.cache_entries.ContainsKey($cacheKey)) {
+        $cached = $packageHashContext.cache_entries[$cacheKey]
+        if ([string]$cached.package_fingerprint -eq $packageFingerprint -and [string]$cached.content_hash -eq $contentHash) {
+            $packageHashContext.cache_hits++
+            return [pscustomobject]@{
+                package_hash = [string]$cached.package_hash
+                package_fingerprint = $packageFingerprint
+                cache_hit = $true
+            }
+        }
+    }
+
+    if ($isManaged) { $packageHashContext.cache_misses++ }
+    $hashTimer = [System.Diagnostics.Stopwatch]::StartNew()
+    try { $packageHash = Get-SkillPackageContentHash $fullSkillDir }
+    finally {
+        $hashTimer.Stop()
+        if ($null -ne $packageHashContext) {
+            $packageHashContext.full_hash_count++
+            $packageHashContext.full_hash_ms += [int]$hashTimer.ElapsedMilliseconds
+        }
+    }
+    return [pscustomobject]@{
+        package_hash = [string]$packageHash
+        package_fingerprint = $packageFingerprint
+        cache_hit = $false
+    }
+}
+
+function Test-SkillProjectionManagedCacheHotPath($packageHashContext) {
+    if ($null -eq $packageHashContext) { return $false }
+    return ([bool]$packageHashContext.cache_valid -and
+        [int]$packageHashContext.cache_hits -gt 0 -and
+        [int]$packageHashContext.cache_misses -eq 0)
+}
+
+function Get-SkillProjectionSourceEntries($source, [int]$sourceOrder, $packageHashContext = $null) {
     $id = [string]$source.id
     $rootPath = Resolve-SkillProjectionPath ([string]$source.path)
     $priority = if ($source.PSObject.Properties.Match("priority").Count -gt 0) { [int]$source.priority } else { 0 }
@@ -62,6 +179,8 @@ function Get-SkillProjectionSourceEntries($source, [int]$sourceOrder) {
         }
         $effectivePriority = $priority
         if ([bool]$item.is_system) { $effectivePriority += 100000 }
+        $contentHash = [string](Get-FileContentHash ([string]$item.file))
+        $packageHashResult = Get-SkillProjectionPackageHash ([string]$item.dir) $contentHash $packageHashContext
         $entries.Add([pscustomobject]([ordered]@{
                     name = $declaredName
                     description = [string]$meta.description
@@ -72,8 +191,9 @@ function Get-SkillProjectionSourceEntries($source, [int]$sourceOrder) {
                     is_system = [bool]$item.is_system
                     path = [System.IO.Path]::GetFullPath([string]$item.file)
                     skill_dir = [System.IO.Path]::GetFullPath([string]$item.dir)
-                    content_hash = [string](Get-FileContentHash ([string]$item.file))
-                    package_hash = [string](Get-SkillPackageContentHash ([string]$item.dir))
+                    content_hash = $contentHash
+                    package_hash = [string]$packageHashResult.package_hash
+                    package_fingerprint = [string]$packageHashResult.package_fingerprint
                     target_platforms = @($platforms)
                 })) | Out-Null
     }
@@ -100,7 +220,7 @@ function Sync-CodexManagedSkillLinks($projectionCfg) {
     foreach ($dir in @(Get-ChildItem -LiteralPath $managedRoot -Directory -Force | Where-Object Name -ne ".system" | Sort-Object Name)) {
         if ($excluded.Contains($dir.Name)) { continue }
         $linkPath = Join-Path $userRoot $dir.Name
-        New-Junction $linkPath $dir.FullName
+        New-Junction $linkPath $dir.FullName -QuietIfUnchanged
         $desired.Add($dir.Name) | Out-Null
     }
 
@@ -123,7 +243,7 @@ function Sync-CodexManagedSkillLinks($projectionCfg) {
     }
 }
 
-function New-SkillProjectionPlan($projectionCfg) {
+function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
     Need ($null -ne $projectionCfg) "skill_projection 配置为空"
     $enabled = -not ($projectionCfg.PSObject.Properties.Match("enabled").Count -gt 0) -or [bool]$projectionCfg.enabled
     if (-not $enabled) {
@@ -137,7 +257,7 @@ function New-SkillProjectionPlan($projectionCfg) {
         Need ($null -ne $source) "skill_projection.sources 不能包含空值"
         Need (-not [string]::IsNullOrWhiteSpace([string]$source.id)) "skill_projection source 缺少 id"
         Need (-not [string]::IsNullOrWhiteSpace([string]$source.path)) ("skill_projection source 缺少 path：{0}" -f [string]$source.id)
-        foreach ($entry in @(Get-SkillProjectionSourceEntries $source $sourceOrder)) {
+        foreach ($entry in @(Get-SkillProjectionSourceEntries $source $sourceOrder $packageHashContext)) {
             $all.Add($entry) | Out-Null
         }
         $sourceOrder++
@@ -338,22 +458,38 @@ function Build-CodexSkillsProjectionToml([string]$existingToml, $disabledEntries
     $lines = if ([string]::IsNullOrEmpty($existingToml)) { @() } else { @($existingToml -split "`r?`n") }
     $kept = New-Object System.Collections.Generic.List[string]
     $inside = $false
+    $insideManagedTable = $false
     $foundBegin = $false
     $foundEnd = $false
     foreach ($line in $lines) {
         if ($line.Trim() -eq $begin) {
             Need (-not $inside) "Codex skills projection 受管块重复开始"
             $inside = $true
+            $insideManagedTable = $false
             $foundBegin = $true
             continue
         }
         if ($line.Trim() -eq $end) {
             Need ($inside) "Codex skills projection 受管块缺少开始标记"
             $inside = $false
+            $insideManagedTable = $false
             $foundEnd = $true
             continue
         }
-        if (-not $inside) { $kept.Add([string]$line) | Out-Null }
+        if (-not $inside) {
+            $kept.Add([string]$line) | Out-Null
+            continue
+        }
+
+        $trimmed = $line.Trim()
+        if ($trimmed -match '^\[\[\s*skills\s*\.\s*config\s*\]\](?:\s*#.*)?$') {
+            $insideManagedTable = $true
+            continue
+        }
+        if ($trimmed -match '^\[\[?.+\]\]?(?:\s*#.*)?$') {
+            $insideManagedTable = $false
+        }
+        if (-not $insideManagedTable) { $kept.Add([string]$line) | Out-Null }
     }
     Need (-not $inside) "Codex skills projection 受管块缺少结束标记"
     Need ($foundBegin -eq $foundEnd) "Codex skills projection 受管块标记不完整"
@@ -387,59 +523,85 @@ function Backup-CodexSkillProjectionConfig([string]$configPath) {
     return $backupPath
 }
 
-function Sync-CodexSkillProjection($projectionCfg) {
+function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignature = "") {
+    $configRaw = if ($projectionCfg.PSObject.Properties.Match("codex_config_path").Count -gt 0) { [string]$projectionCfg.codex_config_path } else { "~/.codex/config.toml" }
+    $manifestRaw = if ($projectionCfg.PSObject.Properties.Match("manifest_path").Count -gt 0) { [string]$projectionCfg.manifest_path } else { "reports/skill-projection/current.json" }
+    $configPath = Resolve-SkillProjectionPath $configRaw
+    $manifestPath = Resolve-SkillProjectionPath $manifestRaw
     $linkProjection = $null
     if ($projectionCfg.PSObject.Properties.Match("managed_source_path").Count -gt 0 -or $projectionCfg.PSObject.Properties.Match("user_skill_root").Count -gt 0) {
-        $linkProjection = Sync-CodexManagedSkillLinks $projectionCfg
+        $linkProjection = Invoke-WithMetric "projection_link_reconcile" { Sync-CodexManagedSkillLinks $projectionCfg } @{ command = "技能投影" } -NoHost
     }
-    $plan = New-SkillProjectionPlan $projectionCfg
+    $packageHashContext = New-SkillProjectionPackageHashContext $projectionCfg $verifiedBuildSignature $manifestPath
+    $planTimer = [System.Diagnostics.Stopwatch]::StartNew()
+    try { $plan = New-SkillProjectionPlan $projectionCfg $packageHashContext }
+    finally { $planTimer.Stop() }
+    $managedCacheHotPath = Test-SkillProjectionManagedCacheHotPath $packageHashContext
+    $hashMetric = if ($managedCacheHotPath) { "projection_package_hash_cache_hit" } else { "projection_package_hash_full" }
+    Log ("性能埋点：{0}" -f $hashMetric) "INFO" -NoHost -Data ([ordered]@{
+            metric = $hashMetric
+            duration_ms = [int]($packageHashContext.fingerprint_ms + $packageHashContext.full_hash_ms)
+            success = $true
+            cache_hits = [int]$packageHashContext.cache_hits
+            cache_misses = [int]$packageHashContext.cache_misses
+            full_hash_count = [int]$packageHashContext.full_hash_count
+        })
+    $planMetric = if ($managedCacheHotPath) { "projection_plan_cached" } else { "projection_plan_full" }
+    Log ("性能埋点：{0}" -f $planMetric) "INFO" -NoHost -Data ([ordered]@{
+            metric = $planMetric
+            duration_ms = [int]$planTimer.ElapsedMilliseconds
+            success = $true
+        })
     if ([bool]$plan.enabled) {
         Need ([bool]$plan.budget_pass) ("技能描述预算超限：estimated={0}, limit={1}, profile={2}" -f [int]$plan.estimated_metadata_chars, [int]$plan.budget_limit_chars, [string]$plan.active_profile)
         $oversizedProfiles = @($plan.profile_budgets | Where-Object { -not [bool]$_.budget_pass } | ForEach-Object { "{0}={1}/{2}" -f $_.profile, $_.estimated_metadata_chars, $_.budget_limit_chars })
         Need ([bool]$plan.all_profiles_budget_pass) ("技能 profile 描述预算超限：{0}" -f ($oversizedProfiles -join ", "))
     }
 
-    $configRaw = if ($projectionCfg.PSObject.Properties.Match("codex_config_path").Count -gt 0) { [string]$projectionCfg.codex_config_path } else { "~/.codex/config.toml" }
-    $manifestRaw = if ($projectionCfg.PSObject.Properties.Match("manifest_path").Count -gt 0) { [string]$projectionCfg.manifest_path } else { "reports/skill-projection/current.json" }
-    $configPath = Resolve-SkillProjectionPath $configRaw
-    $manifestPath = Resolve-SkillProjectionPath $manifestRaw
     $existing = if (Test-Path -LiteralPath $configPath -PathType Leaf) { Get-ContentUtf8 $configPath } else { "" }
-    $desired = Build-CodexSkillsProjectionToml $existing @($plan.disabled)
+    $desired = Invoke-WithMetric "projection_render" { Build-CodexSkillsProjectionToml $existing @($plan.disabled) } @{ command = "技能投影" } -NoHost
     $changed = -not [string]::Equals($existing, $desired, [System.StringComparison]::Ordinal)
     $backupPath = $null
 
     if (-not $DryRun) {
-        if ($changed) {
-            $backupPath = Backup-CodexSkillProjectionConfig $configPath
-            Set-ContentUtf8 $configPath $desired
-        }
-        $manifest = [ordered]@{
-            schema_version = 2
-            enabled = [bool]$plan.enabled
-            generated_at = (Get-Date).ToString("o")
-            conflict_policy = [string]$plan.conflict_policy
-            active_profile = [string]$plan.active_profile
-            source_count = @($projectionCfg.sources).Count
-            skill_entry_count = @($plan.skills).Count
-            unique_name_count = @($plan.unique_names).Count
-            active_name_count = @($plan.active_names).Count
-            duplicate_name_groups = [int]$plan.duplicate_name_groups
-            disabled_path_count = @($plan.disabled).Count
-            conflict_count = @($plan.conflicts).Count
-            skill_metadata_chars = [int]$plan.skill_metadata_chars
-            external_metadata_reserve_chars = [int]$plan.external_metadata_reserve_chars
-            estimated_metadata_chars = [int]$plan.estimated_metadata_chars
-            budget_limit_chars = [int]$plan.budget_limit_chars
-            budget_pass = [bool]$plan.budget_pass
-            all_profiles_budget_pass = [bool]$plan.all_profiles_budget_pass
-            profile_budgets = @($plan.profile_budgets)
-            skills = @($plan.skills)
-            canonical = @($plan.canonical)
-            active = @($plan.active)
-            disabled = @($plan.disabled)
-            conflicts = @($plan.conflicts)
-        }
-        Set-ContentUtf8 $manifestPath ($manifest | ConvertTo-Json -Depth 20)
+        $writeResult = Invoke-WithMetric "projection_write" {
+            $writtenBackupPath = $null
+            if ($changed) {
+                $writtenBackupPath = Backup-CodexSkillProjectionConfig $configPath
+                Set-ContentUtf8 $configPath $desired
+            }
+            $manifest = [ordered]@{
+                schema_version = 2
+                package_hash_cache_schema = Get-SkillProjectionPackageHashCacheSchemaVersion
+                agent_build_signature = $verifiedBuildSignature
+                enabled = [bool]$plan.enabled
+                generated_at = (Get-Date).ToString("o")
+                conflict_policy = [string]$plan.conflict_policy
+                active_profile = [string]$plan.active_profile
+                source_count = @($projectionCfg.sources).Count
+                skill_entry_count = @($plan.skills).Count
+                unique_name_count = @($plan.unique_names).Count
+                active_name_count = @($plan.active_names).Count
+                duplicate_name_groups = [int]$plan.duplicate_name_groups
+                disabled_path_count = @($plan.disabled).Count
+                conflict_count = @($plan.conflicts).Count
+                skill_metadata_chars = [int]$plan.skill_metadata_chars
+                external_metadata_reserve_chars = [int]$plan.external_metadata_reserve_chars
+                estimated_metadata_chars = [int]$plan.estimated_metadata_chars
+                budget_limit_chars = [int]$plan.budget_limit_chars
+                budget_pass = [bool]$plan.budget_pass
+                all_profiles_budget_pass = [bool]$plan.all_profiles_budget_pass
+                profile_budgets = @($plan.profile_budgets)
+                skills = @($plan.skills)
+                canonical = @($plan.canonical)
+                active = @($plan.active)
+                disabled = @($plan.disabled)
+                conflicts = @($plan.conflicts)
+            }
+            Set-ContentUtf8 $manifestPath ($manifest | ConvertTo-Json -Depth 20)
+            return [pscustomobject]@{ backup_path = if ($null -eq $writtenBackupPath) { "" } else { [string]$writtenBackupPath } }
+        } @{ command = "技能投影"; changed = $changed } -NoHost
+        $backupPath = [string]$writeResult.backup_path
     }
 
     return [pscustomobject]@{
@@ -450,6 +612,14 @@ function Sync-CodexSkillProjection($projectionCfg) {
         manifest_path = $manifestPath
         backup_path = if ($null -eq $backupPath) { "" } else { [string]$backupPath }
         managed_link_projection = $linkProjection
+        package_hash_cache = [pscustomobject]@{
+            cache_valid = [bool]$packageHashContext.cache_valid
+            cache_hits = [int]$packageHashContext.cache_hits
+            cache_misses = [int]$packageHashContext.cache_misses
+            full_hash_count = [int]$packageHashContext.full_hash_count
+            fingerprint_ms = [int]$packageHashContext.fingerprint_ms
+            full_hash_ms = [int]$packageHashContext.full_hash_ms
+        }
         plan = $plan
     }
 }
@@ -481,9 +651,9 @@ function Invoke-SkillProfileCommand([string[]]$tokens) {
     Write-Host ("已使用技能 profile：{0}；active={1}, metadata={2}/{3}, persisted={4}" -f $name, @($result.plan.active).Count, $result.plan.estimated_metadata_chars, $result.plan.budget_limit_chars, [bool]$result.persisted)
 }
 
-function Sync-ConfiguredSkillProjection($cfg) {
+function Sync-ConfiguredSkillProjection($cfg, [string]$verifiedBuildSignature = "") {
     if ($null -eq $cfg -or $cfg.PSObject.Properties.Match("skill_projection").Count -eq 0 -or $null -eq $cfg.skill_projection) {
         return [pscustomobject]@{ success = $true; persisted = $false; skipped = $true; plan = $null }
     }
-    return (Sync-CodexSkillProjection $cfg.skill_projection)
+    return (Sync-CodexSkillProjection $cfg.skill_projection $verifiedBuildSignature)
 }

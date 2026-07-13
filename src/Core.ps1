@@ -690,7 +690,7 @@ function Backup-OverrideDir([string]$overrideName) {
     Invoke-MoveItem $src $bakPath
     return $bakPath
 }
-function New-Junction([string]$linkPath, [string]$targetPath) {
+function New-Junction([string]$linkPath, [string]$targetPath, [switch]$QuietIfUnchanged) {
     EnsureDir $targetPath
     EnsureDir (Split-Path $linkPath -Parent)
     $targetFullPath = [System.IO.Path]::GetFullPath($targetPath).TrimEnd("\")
@@ -699,7 +699,9 @@ function New-Junction([string]$linkPath, [string]$targetPath) {
         if (Is-ReparsePoint $linkPath) {
             $currentTargetPath = Get-ReparsePointTargetFullPath $linkPath
             if (-not [string]::IsNullOrWhiteSpace($currentTargetPath) -and $currentTargetPath.Equals($targetFullPath, [System.StringComparison]::OrdinalIgnoreCase)) {
-                Log ("Junction 已存在且目标一致，跳过重建：{0}" -f $linkPath)
+                if (-not $QuietIfUnchanged) {
+                    Log ("Junction 已存在且目标一致，跳过重建：{0}" -f $linkPath)
+                }
                 return
             }
             Invoke-RemoveItem $linkPath -Recurse
