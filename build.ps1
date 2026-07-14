@@ -15,6 +15,7 @@ $Files = @(
     "Commands/AuditTargets.ps1",
     "Commands/AuditTargets.Template.ps1",
     "Commands/AuditTargets.Snapshot.ps1",
+    "Commands/AuditTargets.TargetState.ps1",
     "Commands/AuditTargets.Plan.ps1",
     "Commands/AuditTargets.Bundle.ps1",
     "Commands/AuditTargets.Apply.ps1",

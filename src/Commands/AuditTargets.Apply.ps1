@@ -100,6 +100,9 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
     return [pscustomobject]([ordered]@{
         schema_version = 1
         generated_at = (Get-Date).ToString("o")
+        mode = "dry_run"
+        success = $true
+        persisted = $false
         recommendations_path = $recommendationsPath
         run_id = [string]$plan.run_id
         target = [string]$plan.target
@@ -632,8 +635,10 @@ function Invoke-AuditRecommendationsPreflight {
     if ([string]::IsNullOrWhiteSpace($recommendationDir)) { $recommendationDir = "." }
     $recommendationsExists = Test-Path -LiteralPath $resolvedRecommendations -PathType Leaf
     $rec = $null
+    $recommendationValidationIssue = ""
     if ($recommendationsExists) {
-        $rec = Load-AuditRecommendations $resolvedRecommendations
+        try { $rec = Load-AuditRecommendations $resolvedRecommendations }
+        catch { $recommendationValidationIssue = "invalid_recommendations：{0}" -f [string]$_.Exception.Message }
     }
     $snapshotPath = Join-Path $recommendationDir "installed-skills.json"
     $liveState = Get-AuditLiveInstalledState
@@ -652,7 +657,7 @@ function Invoke-AuditRecommendationsPreflight {
     $sourcePolicy = Get-AuditSourceEvidencePolicy $recommendationDir
     $decisionQualityPolicy = Get-AuditDecisionQualityPolicy $recommendationDir
     $decisionInsights = Get-AuditDecisionInsights $recommendationDir
-    if ($recommendationsExists) {
+    if ($null -ne $rec) {
         $sourceCoverageCheck = Test-AuditRecommendationSourceCoveragePolicy $rec $sourcePolicy
         $decisionQualityCheck = Test-AuditRecommendationDecisionQualityPolicy $rec $decisionQualityPolicy $decisionInsights
     }
@@ -686,8 +691,18 @@ function Invoke-AuditRecommendationsPreflight {
         }
     }
     $userProfileCheck = Test-AuditUserProfilePreflight $recommendationDir
+    $targetSnapshotState = Get-AuditTargetRepoSnapshotState $recommendationDir
+    $targetLiveState = Get-AuditTargetRepoLiveState $targetSnapshotState
+    $targetStaleness = Get-AuditTargetRepoStaleness $targetSnapshotState $targetLiveState
 
     $issues = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) {
+        $issues.Add($recommendationValidationIssue) | Out-Null
+    }
+    if ([bool]$targetStaleness.is_stale) {
+        $targetNames = (@($targetStaleness.drifted_targets) | ForEach-Object { [string]$_.name }) -join ", "
+        $issues.Add(("target_repo_drift：目标仓扫描快照与当前 HEAD/工作树不一致：{0}。请重新运行审查目标 扫描。" -f $targetNames)) | Out-Null
+    }
     if ($isSnapshotStale) {
         $issues.Add("stale_snapshot：审查快照与当前生效配置不一致，请先重新运行审查目标 扫描。") | Out-Null
     }
@@ -704,13 +719,16 @@ function Invoke-AuditRecommendationsPreflight {
     foreach ($issue in @($userProfileCheck.issues)) {
         $issues.Add(("user_profile_invalid：{0}" -f [string]$issue)) | Out-Null
     }
+    $sourceCoveragePassed = if ($sourceCoverageCheck.PSObject.Properties.Match("pass").Count -gt 0) { [bool]$sourceCoverageCheck.pass } else { [bool]$sourceCoverageCheck.ok }
+    $decisionQualityPassed = if ($decisionQualityCheck.PSObject.Properties.Match("pass").Count -gt 0) { [bool]$decisionQualityCheck.pass } else { [bool]$decisionQualityCheck.ok }
 
     $report = [ordered]@{
         schema_version = 1
         preflight_mode = if ($recommendationsExists) { "recommendations" } else { "bundle" }
-        run_id = if ($recommendationsExists) { [string]$rec.run_id } else { Get-AuditPreflightRunIdFromBundle $recommendationDir $RunId }
-        target = if ($recommendationsExists) { [string]$rec.target } else { "" }
+        run_id = if ($null -ne $rec) { [string]$rec.run_id } else { Get-AuditPreflightRunIdFromBundle $recommendationDir $RunId }
+        target = if ($null -ne $rec) { [string]$rec.target } else { "" }
         success = ($issues.Count -eq 0)
+        error_code = if (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) { "invalid_recommendations" } elseif ([bool]$targetStaleness.is_stale) { "target_repo_drift" } elseif ($isSnapshotStale) { "stale_snapshot" } elseif (-not $promptVersionMatched) { "prompt_contract_mismatch" } elseif (-not $sourceCoveragePassed) { "insufficient_source_coverage" } elseif (-not $decisionQualityPassed) { "insufficient_decision_quality" } elseif (-not [bool]$userProfileCheck.ok) { "user_profile_invalid" } else { "" }
         recommendations_path = $resolvedRecommendations
         recommendations_exists = $recommendationsExists
         prompt_contract = [ordered]@{
@@ -727,6 +745,9 @@ function Invoke-AuditRecommendationsPreflight {
         snapshot_state = $snapshotState
         live_state = $liveState
         snapshot_staleness = $snapshotStaleness
+        target_snapshot_state = $targetSnapshotState
+        target_live_state = $targetLiveState
+        target_staleness = $targetStaleness
         issues = @($issues)
     }
     $reportPath = Join-Path $recommendationDir "preflight-report.json"
@@ -1037,11 +1058,6 @@ function Invoke-AuditRecommendationsApply {
         foreach ($item in @($plan.mcp_removal_candidates)) {
             Write-Host ("DRYRUN mcp-remove: {0}" -f [string]$item.installed_name)
         }
-        $dryRunSummaryPath = Get-AuditDryRunSummaryPath $RecommendationsPath
-        $dryRunSummary = New-AuditDryRunSummary $plan $RecommendationsPath
-        Write-AuditJsonFile $dryRunSummaryPath $dryRunSummary
-        $report["dry_run_summary_path"] = $dryRunSummaryPath
-        Write-Host ("dry-run 机器可读摘要：{0}" -f $dryRunSummaryPath) -ForegroundColor Cyan
         Write-Host "DRY-RUN 完成：未修改任何技能映射或 MCP 配置（未落盘）。" -ForegroundColor Red
         Write-Host ("如需真正执行，请运行：.\skills.ps1 审查目标 应用 --recommendations `"{0}`" --apply --yes" -f $RecommendationsPath) -ForegroundColor Red
         if ($RequireDryRunAck) {
@@ -1072,6 +1088,11 @@ function Invoke-AuditRecommendationsApply {
             }
             $report["dry_run_acknowledged"] = $true
         }
+        $dryRunSummaryPath = Get-AuditDryRunSummaryPath $RecommendationsPath
+        $dryRunSummary = New-AuditDryRunSummary $plan $RecommendationsPath
+        Write-AuditJsonFile $dryRunSummaryPath $dryRunSummary
+        $report["dry_run_summary_path"] = $dryRunSummaryPath
+        Write-Host ("dry-run 机器可读摘要：{0}" -f $dryRunSummaryPath) -ForegroundColor Cyan
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
         $evidencePath = Write-AuditRuntimeEvidence "dry-run" $RecommendationsPath ([pscustomobject]$report) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`" --dry-run-ack `"$([string]$DryRunAck)`"")
         if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {

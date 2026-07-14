@@ -11059,6 +11059,46 @@ function Add-AuditCommandsFromText([string]$content, [System.Collections.Generic
     if ([regex]::IsMatch($content, "(?im)\bpytest\b")) { Add-AuditUniqueValue $testCommands "pytest" }
 }
 
+function Add-AuditPowerShellFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$languages, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands, [System.Collections.Generic.List[string]]$notableFiles) {
+    $buildPath = Join-Path $resolvedPath "build.ps1"
+    if (Test-Path -LiteralPath $buildPath -PathType Leaf) {
+        Add-AuditUniqueValue $languages "powershell"
+        Add-AuditUniqueValue $buildCommands "pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1"
+        Add-AuditUniqueValue $notableFiles "build.ps1"
+    }
+    $testPath = Join-Path $resolvedPath "tests\run.ps1"
+    if (Test-Path -LiteralPath $testPath -PathType Leaf) {
+        Add-AuditUniqueValue $languages "powershell"
+        Add-AuditUniqueValue $testCommands "pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run.ps1"
+        Add-AuditUniqueValue $notableFiles "tests\run.ps1"
+    }
+    if (@(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.ps1" -File -ErrorAction SilentlyContinue).Count -gt 0) {
+        Add-AuditUniqueValue $languages "powershell"
+    }
+}
+
+function Add-AuditDocumentedCommandFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$languages, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands, [System.Collections.Generic.List[string]]$notableFiles) {
+    foreach ($relativePath in @("README.md", "AGENTS.md", "CLAUDE.md", "GEMINI.md")) {
+        $path = Join-Path $resolvedPath $relativePath
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        try { $content = Get-ContentUtf8 $path }
+        catch { continue }
+        foreach ($match in [regex]::Matches($content, '`(?<command>(?:pwsh|powershell|python|uv|poetry|pytest|dotnet|npm|pnpm|yarn)\b[^`\r\n]{1,500})`', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
+            $command = ([string]$match.Groups["command"].Value).Trim()
+            if ([string]::IsNullOrWhiteSpace($command)) { continue }
+            if ($command -match "(?i)^(?:pwsh|powershell)(?:\.exe)?\b") { Add-AuditUniqueValue $languages "powershell" }
+            if ($command -match "(?i)^(?:python|uv|poetry|pytest)\b") { Add-AuditUniqueValue $languages "python" }
+            if ($command -match "(?i)(?:\bbuild(?:\.ps1)?\b|\bpy_compile\b|\bdotnet\s+build\b|\b(?:npm|pnpm|yarn)\s+(?:run\s+)?build\b)") {
+                Add-AuditUniqueValue $buildCommands $command
+            }
+            if ($command -match "(?i)(?:tests?[\\/]run\.ps1\b|\bpytest\b|\bunittest\b|\bdotnet\s+test\b|\b(?:npm|pnpm|yarn)\s+(?:run\s+)?test\b)") {
+                Add-AuditUniqueValue $testCommands $command
+            }
+        }
+        Add-AuditUniqueValue $notableFiles $relativePath
+    }
+}
+
 function Add-AuditCiWorkflowFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands, [System.Collections.Generic.List[string]]$notableFiles) {
     $candidates = New-Object System.Collections.Generic.List[string]
     foreach ($fileName in @("azure-pipelines.yml", ".gitlab-ci.yml")) {
@@ -11473,12 +11513,55 @@ function Add-AuditDesignDocumentFacts([string]$resolvedPath, [System.Collections
     }
 }
 
+function Get-AuditGitChangedPaths {
+    $paths = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+    $pathGroups = @(
+        @(& git -c core.quotepath=false diff --cached --name-only --no-ext-diff 2>$null),
+        @(& git -c core.quotepath=false diff --name-only --no-ext-diff 2>$null),
+        @(& git -c core.quotepath=false ls-files --others --exclude-standard 2>$null)
+    )
+    foreach ($group in $pathGroups) {
+        foreach ($path in @($group)) {
+            $text = [string]$path
+            if (-not [string]::IsNullOrWhiteSpace($text)) { $paths.Add($text) | Out-Null }
+        }
+    }
+    return @($paths)
+}
+
+function Get-AuditGitPathStatePairs($paths) {
+    $pairs = @()
+    $repoRoot = [string](Get-Location).Path
+    foreach ($path in @($paths)) {
+        $fullPath = Join-Path $repoRoot ([string]$path)
+        $indexState = @(& git -c core.quotepath=false ls-files --stage -- $path 2>$null)
+        $indexFingerprint = Get-AuditFingerprintFromVendorFromPairs $indexState $true
+        $worktreeState = "missing"
+        if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
+            $worktreeState = "file:" + [string](Get-FileContentHash $fullPath)
+        }
+        elseif (Test-Path -LiteralPath $fullPath -PathType Container) {
+            $nestedHead = (& git -C $fullPath rev-parse HEAD 2>$null)
+            $nestedStatus = @(& git -C $fullPath status --porcelain 2>$null)
+            $nestedPairs = @("head|" + ([string]$nestedHead).Trim())
+            $nestedPairs += @($nestedStatus | ForEach-Object { "status|" + [string]$_ })
+            $worktreeState = "directory:" + (Get-AuditFingerprintFromVendorFromPairs $nestedPairs $true)
+        }
+        $pairs += ("path|{0}|index|{1}|worktree|{2}" -f [string]$path, $indexFingerprint, $worktreeState)
+    }
+    return @($pairs)
+}
+
 function Get-AuditGitInfo([string]$resolvedPath) {
     $info = [ordered]@{
         is_repo = $false
         branch = ""
         commit = ""
         dirty = $false
+        status_count = 0
+        status_fingerprint = ""
+        automatic_evidence_count = 0
+        automatic_evidence_fingerprint = ""
     }
     if (-not (Test-Path -LiteralPath $resolvedPath -PathType Container)) { return [pscustomobject]$info }
 
@@ -11492,7 +11575,25 @@ function Get-AuditGitInfo([string]$resolvedPath) {
             $commit = (& git rev-parse HEAD 2>$null)
             if ($LASTEXITCODE -eq 0) { $info.commit = ([string]$commit).Trim() }
             $status = @(& git status --porcelain 2>$null)
-            if ($LASTEXITCODE -eq 0) { $info.dirty = ($status.Count -gt 0) }
+            if ($LASTEXITCODE -eq 0) {
+                $statusLines = @($status | ForEach-Object { [string]$_ })
+                $automaticEvidencePattern = '(?i)^.{2}\s+"?docs[\\/]change-evidence[\\/]\d{8}-audit-runtime-[^"\\/\r\n]+\.md"?$'
+                $automaticEvidencePathPattern = '(?i)^docs[\\/]change-evidence[\\/]\d{8}-audit-runtime-[^"\\/\r\n]+\.md$'
+                $automaticEvidenceLines = @($statusLines | Where-Object { $_ -match $automaticEvidencePattern })
+                $productStatusLines = @($statusLines | Where-Object { $_ -notmatch $automaticEvidencePattern })
+                $changedPaths = @(Get-AuditGitChangedPaths)
+                $automaticEvidencePaths = @($changedPaths | Where-Object { $_ -match $automaticEvidencePathPattern })
+                $productPaths = @($changedPaths | Where-Object { $_ -notmatch $automaticEvidencePathPattern })
+                $productStatePairs = @($productStatusLines | ForEach-Object { "status|" + [string]$_ })
+                $productStatePairs += @(Get-AuditGitPathStatePairs $productPaths)
+                $automaticEvidencePairs = @($automaticEvidenceLines | ForEach-Object { "status|" + [string]$_ })
+                $automaticEvidencePairs += @(Get-AuditGitPathStatePairs $automaticEvidencePaths)
+                $info.dirty = ($productStatusLines.Count -gt 0)
+                $info.status_count = $productStatusLines.Count
+                $info.status_fingerprint = Get-AuditFingerprintFromVendorFromPairs $productStatePairs $true
+                $info.automatic_evidence_count = $automaticEvidenceLines.Count
+                $info.automatic_evidence_fingerprint = Get-AuditFingerprintFromVendorFromPairs $automaticEvidencePairs $true
+            }
         }
     }
     finally {
@@ -11601,6 +11702,8 @@ function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$
         Add-AuditPhpFacts $resolvedPath $languages $frameworks $packageManagers $buildCommands $testCommands $notableFiles
         Add-AuditMakefileFacts $resolvedPath $buildCommands $testCommands $notableFiles
         Add-AuditDotnetFacts $resolvedPath $frameworks $packageManagers $buildCommands $testCommands $notableFiles
+        Add-AuditPowerShellFacts $resolvedPath $languages $buildCommands $testCommands $notableFiles
+        Add-AuditDocumentedCommandFacts $resolvedPath $languages $buildCommands $testCommands $notableFiles
         Add-AuditDesignDocumentFacts $resolvedPath $languages $frameworks $packageManagers $buildCommands $testCommands $capabilities $notableFiles $risks
         Add-AuditCiWorkflowFacts $resolvedPath $buildCommands $testCommands $notableFiles
         $slnFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.sln" -File -ErrorAction SilentlyContinue)
@@ -11803,7 +11906,9 @@ function New-AuditDecisionInsights($cfg, $scans, $installedSkills, $installedMcp
     $userKeywords = @(Get-AuditUserProfileKeywords $cfg)
     $repoKeywordSets = @()
     foreach ($scan in @($scans)) {
-        $targetName = if ($scan.PSObject.Properties.Match("target").Count -gt 0 -and $null -ne $scan.target -and $scan.target.PSObject.Properties.Match("name").Count -gt 0) { [string]$scan.target.name } else { "*" }
+        $targetValue = Get-CfgObjectProperty $scan "target"
+        $targetNameValue = Get-CfgObjectProperty $targetValue "name"
+        $targetName = if ([string]::IsNullOrWhiteSpace([string]$targetNameValue)) { "*" } else { [string]$targetNameValue }
         $repoKeywordSets += [pscustomobject]([ordered]@{
                 target = $targetName
                 keywords = @(Get-AuditRepoScanKeywords $scan)
@@ -13125,6 +13230,156 @@ function Get-AuditInstalledSnapshotStaleness($snapshotState, $liveState) {
         })
 }
 
+function Get-AuditTargetRepoScans([string]$recommendationDir) {
+    if ([string]::IsNullOrWhiteSpace($recommendationDir)) { $recommendationDir = "." }
+    $singlePath = Join-Path $recommendationDir "repo-scan.json"
+    if (Test-Path -LiteralPath $singlePath -PathType Leaf) {
+        try { return @((Get-ContentUtf8 $singlePath | ConvertFrom-Json)) }
+        catch { throw ("repo-scan JSON 解析失败：{0}" -f $_.Exception.Message) }
+    }
+
+    $multiPath = Join-Path $recommendationDir "repo-scans.json"
+    if (-not (Test-Path -LiteralPath $multiPath -PathType Leaf)) { return @() }
+    try { $bundle = Get-ContentUtf8 $multiPath | ConvertFrom-Json }
+    catch { throw ("repo-scans JSON 解析失败：{0}" -f $_.Exception.Message) }
+    $scans = Get-CfgObjectProperty $bundle "scans"
+    if ($null -eq $scans) { return @() }
+    return @($scans)
+}
+
+function Get-AuditTargetRepoStateFingerprint($targets) {
+    $pairs = @()
+    foreach ($target in @($targets)) {
+        if ($null -eq $target) { continue }
+        $pairs += ("{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}" -f
+            [string]$target.name,
+            [string]$target.resolved_path,
+            ([bool]$target.exists).ToString().ToLowerInvariant(),
+            ([bool]$target.is_repo).ToString().ToLowerInvariant(),
+            [string]$target.branch,
+            [string]$target.commit,
+            ([bool]$target.dirty).ToString().ToLowerInvariant(),
+            [string]$target.status_count,
+            [string]$target.status_fingerprint)
+    }
+    return (Get-AuditFingerprintFromVendorFromPairs $pairs $true)
+}
+
+function Get-AuditTargetRepoSnapshotState([string]$recommendationDir) {
+    $targets = @()
+    foreach ($scan in @(Get-AuditTargetRepoScans $recommendationDir)) {
+        $targetData = Get-CfgObjectProperty $scan "target"
+        $gitData = Get-CfgObjectProperty $scan "git"
+        $name = [string](Get-CfgObjectProperty $targetData "name")
+        $resolvedPath = [string](Get-CfgObjectProperty $targetData "resolved_path")
+        if ([string]::IsNullOrWhiteSpace($resolvedPath)) {
+            $inputPath = [string](Get-CfgObjectProperty $targetData "path")
+            if (-not [string]::IsNullOrWhiteSpace($inputPath)) { $resolvedPath = Resolve-AuditTargetPath $inputPath }
+        }
+        $statusFingerprint = [string](Get-CfgObjectProperty $gitData "status_fingerprint")
+        $statusCountValue = Get-CfgObjectProperty $gitData "status_count"
+        $targets += [pscustomobject]([ordered]@{
+                name = $name
+                resolved_path = $resolvedPath
+                exists = [bool](Get-CfgObjectProperty $targetData "exists")
+                is_repo = [bool](Get-CfgObjectProperty $gitData "is_repo")
+                branch = [string](Get-CfgObjectProperty $gitData "branch")
+                commit = [string](Get-CfgObjectProperty $gitData "commit")
+                dirty = [bool](Get-CfgObjectProperty $gitData "dirty")
+                status_count = if ($null -eq $statusCountValue) { -1 } else { [int]$statusCountValue }
+                status_fingerprint = $statusFingerprint
+                worktree_fingerprint_available = (-not [string]::IsNullOrWhiteSpace($statusFingerprint))
+                automatic_evidence_count = [int](Get-CfgObjectProperty $gitData "automatic_evidence_count")
+                automatic_evidence_fingerprint = [string](Get-CfgObjectProperty $gitData "automatic_evidence_fingerprint")
+            })
+    }
+    return [pscustomobject]([ordered]@{
+            captured_from = "repo_scan"
+            target_count = @($targets).Count
+            fingerprint = Get-AuditTargetRepoStateFingerprint $targets
+            targets = @($targets)
+        })
+}
+
+function Get-AuditTargetRepoLiveState($snapshotState) {
+    $targets = @()
+    foreach ($snapshotTarget in @($snapshotState.targets)) {
+        $resolvedPath = [string]$snapshotTarget.resolved_path
+        $exists = Test-Path -LiteralPath $resolvedPath -PathType Container
+        $git = Get-AuditGitInfo $resolvedPath
+        $targets += [pscustomobject]([ordered]@{
+                name = [string]$snapshotTarget.name
+                resolved_path = $resolvedPath
+                exists = [bool]$exists
+                is_repo = [bool]$git.is_repo
+                branch = [string]$git.branch
+                commit = [string]$git.commit
+                dirty = [bool]$git.dirty
+                status_count = [int]$git.status_count
+                status_fingerprint = [string]$git.status_fingerprint
+                worktree_fingerprint_available = $true
+                automatic_evidence_count = [int]$git.automatic_evidence_count
+                automatic_evidence_fingerprint = [string]$git.automatic_evidence_fingerprint
+            })
+    }
+    return [pscustomobject]([ordered]@{
+            captured_at = (Get-Date).ToString("o")
+            target_count = @($targets).Count
+            fingerprint = Get-AuditTargetRepoStateFingerprint $targets
+            targets = @($targets)
+        })
+}
+
+function Get-AuditTargetRepoStaleness($snapshotState, $liveState) {
+    $drifted = @()
+    $liveByName = @{}
+    foreach ($target in @($liveState.targets)) { $liveByName[[string]$target.name] = $target }
+    foreach ($snapshotTarget in @($snapshotState.targets)) {
+        $name = [string]$snapshotTarget.name
+        $changes = New-Object System.Collections.Generic.List[string]
+        $liveTarget = $liveByName[$name]
+        if ($null -eq $liveTarget) {
+            $changes.Add("missing") | Out-Null
+        }
+        else {
+            if ([bool]$snapshotTarget.exists -ne [bool]$liveTarget.exists) { $changes.Add("exists") | Out-Null }
+            if ([bool]$snapshotTarget.is_repo -ne [bool]$liveTarget.is_repo) { $changes.Add("is_repo") | Out-Null }
+            if ([string]$snapshotTarget.branch -ne [string]$liveTarget.branch) { $changes.Add("branch") | Out-Null }
+            if ([string]$snapshotTarget.commit -ne [string]$liveTarget.commit) { $changes.Add("head") | Out-Null }
+            if ([bool]$snapshotTarget.dirty -ne [bool]$liveTarget.dirty) { $changes.Add("dirty") | Out-Null }
+            if ([bool]$snapshotTarget.worktree_fingerprint_available -and
+                [string]$snapshotTarget.status_fingerprint -ne [string]$liveTarget.status_fingerprint) {
+                $changes.Add("worktree") | Out-Null
+            }
+        }
+        if ($changes.Count -gt 0) {
+            $drifted += [pscustomobject]([ordered]@{
+                    name = $name
+                    changes = @($changes)
+                    snapshot = $snapshotTarget
+                    live = $liveTarget
+                })
+        }
+    }
+    foreach ($liveTarget in @($liveState.targets)) {
+        if (@($snapshotState.targets | Where-Object { [string]$_.name -eq [string]$liveTarget.name }).Count -eq 0) {
+            $drifted += [pscustomobject]([ordered]@{
+                    name = [string]$liveTarget.name
+                    changes = @("unexpected")
+                    snapshot = $null
+                    live = $liveTarget
+                })
+        }
+    }
+    return [pscustomobject]([ordered]@{
+            is_stale = (@($drifted).Count -gt 0)
+            matched = (@($drifted).Count -eq 0)
+            snapshot_fingerprint = [string]$snapshotState.fingerprint
+            live_fingerprint = [string]$liveState.fingerprint
+            drifted_targets = @($drifted)
+        })
+}
+
 function Ensure-AuditArrayProperty($obj, [string]$name) {
     if (-not $obj.PSObject.Properties.Match($name).Count -or $null -eq $obj.$name) {
         $obj | Add-Member -NotePropertyName $name -NotePropertyValue @() -Force
@@ -14296,6 +14551,9 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
     return [pscustomobject]([ordered]@{
         schema_version = 1
         generated_at = (Get-Date).ToString("o")
+        mode = "dry_run"
+        success = $true
+        persisted = $false
         recommendations_path = $recommendationsPath
         run_id = [string]$plan.run_id
         target = [string]$plan.target
@@ -14828,8 +15086,10 @@ function Invoke-AuditRecommendationsPreflight {
     if ([string]::IsNullOrWhiteSpace($recommendationDir)) { $recommendationDir = "." }
     $recommendationsExists = Test-Path -LiteralPath $resolvedRecommendations -PathType Leaf
     $rec = $null
+    $recommendationValidationIssue = ""
     if ($recommendationsExists) {
-        $rec = Load-AuditRecommendations $resolvedRecommendations
+        try { $rec = Load-AuditRecommendations $resolvedRecommendations }
+        catch { $recommendationValidationIssue = "invalid_recommendations：{0}" -f [string]$_.Exception.Message }
     }
     $snapshotPath = Join-Path $recommendationDir "installed-skills.json"
     $liveState = Get-AuditLiveInstalledState
@@ -14848,7 +15108,7 @@ function Invoke-AuditRecommendationsPreflight {
     $sourcePolicy = Get-AuditSourceEvidencePolicy $recommendationDir
     $decisionQualityPolicy = Get-AuditDecisionQualityPolicy $recommendationDir
     $decisionInsights = Get-AuditDecisionInsights $recommendationDir
-    if ($recommendationsExists) {
+    if ($null -ne $rec) {
         $sourceCoverageCheck = Test-AuditRecommendationSourceCoveragePolicy $rec $sourcePolicy
         $decisionQualityCheck = Test-AuditRecommendationDecisionQualityPolicy $rec $decisionQualityPolicy $decisionInsights
     }
@@ -14882,8 +15142,18 @@ function Invoke-AuditRecommendationsPreflight {
         }
     }
     $userProfileCheck = Test-AuditUserProfilePreflight $recommendationDir
+    $targetSnapshotState = Get-AuditTargetRepoSnapshotState $recommendationDir
+    $targetLiveState = Get-AuditTargetRepoLiveState $targetSnapshotState
+    $targetStaleness = Get-AuditTargetRepoStaleness $targetSnapshotState $targetLiveState
 
     $issues = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) {
+        $issues.Add($recommendationValidationIssue) | Out-Null
+    }
+    if ([bool]$targetStaleness.is_stale) {
+        $targetNames = (@($targetStaleness.drifted_targets) | ForEach-Object { [string]$_.name }) -join ", "
+        $issues.Add(("target_repo_drift：目标仓扫描快照与当前 HEAD/工作树不一致：{0}。请重新运行审查目标 扫描。" -f $targetNames)) | Out-Null
+    }
     if ($isSnapshotStale) {
         $issues.Add("stale_snapshot：审查快照与当前生效配置不一致，请先重新运行审查目标 扫描。") | Out-Null
     }
@@ -14900,13 +15170,16 @@ function Invoke-AuditRecommendationsPreflight {
     foreach ($issue in @($userProfileCheck.issues)) {
         $issues.Add(("user_profile_invalid：{0}" -f [string]$issue)) | Out-Null
     }
+    $sourceCoveragePassed = if ($sourceCoverageCheck.PSObject.Properties.Match("pass").Count -gt 0) { [bool]$sourceCoverageCheck.pass } else { [bool]$sourceCoverageCheck.ok }
+    $decisionQualityPassed = if ($decisionQualityCheck.PSObject.Properties.Match("pass").Count -gt 0) { [bool]$decisionQualityCheck.pass } else { [bool]$decisionQualityCheck.ok }
 
     $report = [ordered]@{
         schema_version = 1
         preflight_mode = if ($recommendationsExists) { "recommendations" } else { "bundle" }
-        run_id = if ($recommendationsExists) { [string]$rec.run_id } else { Get-AuditPreflightRunIdFromBundle $recommendationDir $RunId }
-        target = if ($recommendationsExists) { [string]$rec.target } else { "" }
+        run_id = if ($null -ne $rec) { [string]$rec.run_id } else { Get-AuditPreflightRunIdFromBundle $recommendationDir $RunId }
+        target = if ($null -ne $rec) { [string]$rec.target } else { "" }
         success = ($issues.Count -eq 0)
+        error_code = if (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) { "invalid_recommendations" } elseif ([bool]$targetStaleness.is_stale) { "target_repo_drift" } elseif ($isSnapshotStale) { "stale_snapshot" } elseif (-not $promptVersionMatched) { "prompt_contract_mismatch" } elseif (-not $sourceCoveragePassed) { "insufficient_source_coverage" } elseif (-not $decisionQualityPassed) { "insufficient_decision_quality" } elseif (-not [bool]$userProfileCheck.ok) { "user_profile_invalid" } else { "" }
         recommendations_path = $resolvedRecommendations
         recommendations_exists = $recommendationsExists
         prompt_contract = [ordered]@{
@@ -14923,6 +15196,9 @@ function Invoke-AuditRecommendationsPreflight {
         snapshot_state = $snapshotState
         live_state = $liveState
         snapshot_staleness = $snapshotStaleness
+        target_snapshot_state = $targetSnapshotState
+        target_live_state = $targetLiveState
+        target_staleness = $targetStaleness
         issues = @($issues)
     }
     $reportPath = Join-Path $recommendationDir "preflight-report.json"
@@ -15233,11 +15509,6 @@ function Invoke-AuditRecommendationsApply {
         foreach ($item in @($plan.mcp_removal_candidates)) {
             Write-Host ("DRYRUN mcp-remove: {0}" -f [string]$item.installed_name)
         }
-        $dryRunSummaryPath = Get-AuditDryRunSummaryPath $RecommendationsPath
-        $dryRunSummary = New-AuditDryRunSummary $plan $RecommendationsPath
-        Write-AuditJsonFile $dryRunSummaryPath $dryRunSummary
-        $report["dry_run_summary_path"] = $dryRunSummaryPath
-        Write-Host ("dry-run 机器可读摘要：{0}" -f $dryRunSummaryPath) -ForegroundColor Cyan
         Write-Host "DRY-RUN 完成：未修改任何技能映射或 MCP 配置（未落盘）。" -ForegroundColor Red
         Write-Host ("如需真正执行，请运行：.\skills.ps1 审查目标 应用 --recommendations `"{0}`" --apply --yes" -f $RecommendationsPath) -ForegroundColor Red
         if ($RequireDryRunAck) {
@@ -15268,6 +15539,11 @@ function Invoke-AuditRecommendationsApply {
             }
             $report["dry_run_acknowledged"] = $true
         }
+        $dryRunSummaryPath = Get-AuditDryRunSummaryPath $RecommendationsPath
+        $dryRunSummary = New-AuditDryRunSummary $plan $RecommendationsPath
+        Write-AuditJsonFile $dryRunSummaryPath $dryRunSummary
+        $report["dry_run_summary_path"] = $dryRunSummaryPath
+        Write-Host ("dry-run 机器可读摘要：{0}" -f $dryRunSummaryPath) -ForegroundColor Cyan
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
         $evidencePath = Write-AuditRuntimeEvidence "dry-run" $RecommendationsPath ([pscustomobject]$report) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`" --dry-run-ack `"$([string]$DryRunAck)`"")
         if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
@@ -15569,9 +15845,16 @@ function Get-AuditWorkflowInputState([string]$recommendationsPath) {
         })
         $pairs += ("{0}|{1}|{2}" -f [string]$input.name, ([bool]$exists).ToString().ToLowerInvariant(), $hash)
     }
+    $fileFingerprint = Get-AuditFingerprintFromVendorFromPairs $pairs $true
+    $targetSnapshot = Get-AuditTargetRepoSnapshotState $dir
+    $targetLive = Get-AuditTargetRepoLiveState $targetSnapshot
+    $targetFingerprint = [string]$targetLive.fingerprint
     return [pscustomobject]([ordered]@{
-        fingerprint = Get-AuditFingerprintFromVendorFromPairs $pairs $true
+        fingerprint = Get-AuditFingerprintFromVendorFromPairs @(("files|{0}" -f $fileFingerprint), ("targets|{0}" -f $targetFingerprint)) $true
+        file_fingerprint = $fileFingerprint
+        target_repo_fingerprint = $targetFingerprint
         files = @($files)
+        target_repos = $targetLive
     })
 }
 
@@ -15615,10 +15898,10 @@ function New-AuditWorkflowCategories($dryRunReport, $recommendations) {
     $mcpAddItems = @(ConvertTo-AuditWorkflowCategoryItems $dryRunReport.mcp_items)
     $mcpRemoveItems = @(ConvertTo-AuditWorkflowCategoryItems $dryRunReport.mcp_removal_candidates)
     return @(
-        [pscustomobject]([ordered]@{ order = 1; key = "add"; label = "新增技能"; empty_reason = Get-AuditWorkflowEmptyReason $recommendations "new_skills_empty" $addItems.Count; items = $addItems }),
-        [pscustomobject]([ordered]@{ order = 2; key = "remove"; label = "卸载技能"; empty_reason = Get-AuditWorkflowEmptyReason $recommendations "removal_candidates_empty" $removeItems.Count; items = $removeItems }),
-        [pscustomobject]([ordered]@{ order = 3; key = "mcp_add"; label = "MCP 新增"; empty_reason = Get-AuditWorkflowEmptyReason $recommendations "mcp_new_servers_empty" $mcpAddItems.Count; items = $mcpAddItems }),
-        [pscustomobject]([ordered]@{ order = 4; key = "mcp_remove"; label = "MCP 卸载"; empty_reason = Get-AuditWorkflowEmptyReason $recommendations "mcp_removal_candidates_empty" $mcpRemoveItems.Count; items = $mcpRemoveItems })
+        [pscustomobject]([ordered]@{ order = 1; key = "add"; label = "新增技能"; empty_reason = Get-AuditWorkflowEmptyReason $recommendations "new_skills" $addItems.Count; items = $addItems }),
+        [pscustomobject]([ordered]@{ order = 2; key = "remove"; label = "卸载技能"; empty_reason = Get-AuditWorkflowEmptyReason $recommendations "removal_candidates" $removeItems.Count; items = $removeItems }),
+        [pscustomobject]([ordered]@{ order = 3; key = "mcp_add"; label = "MCP 新增"; empty_reason = Get-AuditWorkflowEmptyReason $recommendations "mcp_new_servers" $mcpAddItems.Count; items = $mcpAddItems }),
+        [pscustomobject]([ordered]@{ order = 4; key = "mcp_remove"; label = "MCP 卸载"; empty_reason = Get-AuditWorkflowEmptyReason $recommendations "mcp_removal_candidates" $mcpRemoveItems.Count; items = $mcpRemoveItems })
     )
 }
 
@@ -15634,6 +15917,7 @@ function Get-AuditWorkflowErrorCode([string]$stage, [string]$message) {
             "live_state_changed",
             "dry_run_not_confirmed",
             "unexpected_persistence"
+            "target_repo_drift"
         )) {
         if ($message -match [regex]::Escape($code)) { return $code }
     }
@@ -15647,7 +15931,7 @@ function Get-AuditWorkflowNextCommand([string]$errorCode, [string]$recommendatio
     if ($errorCode -eq "recommendations_missing") {
         return ("先按同目录 outer-ai-prompt.md 生成 recommendations.json，再运行：.\skills.ps1 审查目标 校验预演 --recommendations `"{0}`" --dry-run-ack `"{1}`"" -f $recommendationsPath, (Get-AuditDryRunAckToken))
     }
-    if ($errorCode -eq "stale_snapshot" -or $errorCode -eq "prompt_contract_mismatch" -or $errorCode -eq "live_state_changed") {
+    if ($errorCode -eq "stale_snapshot" -or $errorCode -eq "prompt_contract_mismatch" -or $errorCode -eq "live_state_changed" -or $errorCode -eq "target_repo_drift") {
         return ".\skills.ps1 审查目标 扫描"
     }
     return ("修复报告中的阻断项后重试：.\skills.ps1 审查目标 校验预演 --recommendations `"{0}`" --dry-run-ack `"{1}`"" -f $recommendationsPath, (Get-AuditDryRunAckToken))
@@ -15689,7 +15973,10 @@ function Invoke-AuditRecommendationsValidateDryRun {
             after_preflight = $null
             after_dry_run = $null
             preflight_matched = $false
+            preflight_files_matched = $false
+            preflight_target_repos_matched = $false
             live_state_matched = $false
+            target_repos_matched = $false
             matched = $false
         })
         reports = [pscustomobject]([ordered]@{
@@ -15725,7 +16012,12 @@ function Invoke-AuditRecommendationsValidateDryRun {
 
         $currentStage = "input_stability"
         $report.input_stability.after_preflight = Get-AuditWorkflowInputState $resolvedRecommendations
-        $report.input_stability.preflight_matched = ([string]$report.input_stability.before.fingerprint -eq [string]$report.input_stability.after_preflight.fingerprint)
+        $report.input_stability.preflight_files_matched = ([string]$report.input_stability.before.file_fingerprint -eq [string]$report.input_stability.after_preflight.file_fingerprint)
+        $report.input_stability.preflight_target_repos_matched = ([string]$report.input_stability.before.target_repo_fingerprint -eq [string]$report.input_stability.after_preflight.target_repo_fingerprint)
+        $report.input_stability.preflight_matched = ([bool]$report.input_stability.preflight_files_matched -and [bool]$report.input_stability.preflight_target_repos_matched)
+        if (-not [bool]$report.input_stability.preflight_target_repos_matched) {
+            throw "target_repo_drift：preflight 前后目标仓 HEAD 或工作树状态发生变化，已停止 dry-run。"
+        }
         if (-not [bool]$report.input_stability.preflight_matched) {
             throw "workflow_input_changed：preflight 前后审查输入发生变化，已停止 dry-run。"
         }
@@ -15742,10 +16034,15 @@ function Invoke-AuditRecommendationsValidateDryRun {
 
         $currentStage = "input_stability"
         $report.input_stability.after_dry_run = Get-AuditWorkflowInputState $resolvedRecommendations
-        $filesMatched = ([string]$report.input_stability.before.fingerprint -eq [string]$report.input_stability.after_dry_run.fingerprint)
+        $filesMatched = ([string]$report.input_stability.before.file_fingerprint -eq [string]$report.input_stability.after_dry_run.file_fingerprint)
+        $targetReposMatched = ([string]$report.input_stability.before.target_repo_fingerprint -eq [string]$report.input_stability.after_dry_run.target_repo_fingerprint)
         $liveStaleness = Get-AuditInstalledSnapshotStaleness $preflightReport.live_state $dryRunReport.live_state
         $report.input_stability.live_state_matched = (-not [bool]$liveStaleness.is_stale)
-        $report.input_stability.matched = ($filesMatched -and [bool]$report.input_stability.live_state_matched)
+        $report.input_stability.target_repos_matched = $targetReposMatched
+        $report.input_stability.matched = ($filesMatched -and $targetReposMatched -and [bool]$report.input_stability.live_state_matched)
+        if (-not $targetReposMatched) {
+            throw "target_repo_drift：preflight 到 dry-run 结束期间目标仓 HEAD 或工作树状态发生变化。"
+        }
         if (-not $filesMatched) {
             throw "workflow_input_changed：preflight 到 dry-run 结束期间审查输入发生变化。"
         }

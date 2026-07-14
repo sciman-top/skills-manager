@@ -928,6 +928,46 @@ function Add-AuditCommandsFromText([string]$content, [System.Collections.Generic
     if ([regex]::IsMatch($content, "(?im)\bpytest\b")) { Add-AuditUniqueValue $testCommands "pytest" }
 }
 
+function Add-AuditPowerShellFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$languages, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands, [System.Collections.Generic.List[string]]$notableFiles) {
+    $buildPath = Join-Path $resolvedPath "build.ps1"
+    if (Test-Path -LiteralPath $buildPath -PathType Leaf) {
+        Add-AuditUniqueValue $languages "powershell"
+        Add-AuditUniqueValue $buildCommands "pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1"
+        Add-AuditUniqueValue $notableFiles "build.ps1"
+    }
+    $testPath = Join-Path $resolvedPath "tests\run.ps1"
+    if (Test-Path -LiteralPath $testPath -PathType Leaf) {
+        Add-AuditUniqueValue $languages "powershell"
+        Add-AuditUniqueValue $testCommands "pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run.ps1"
+        Add-AuditUniqueValue $notableFiles "tests\run.ps1"
+    }
+    if (@(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.ps1" -File -ErrorAction SilentlyContinue).Count -gt 0) {
+        Add-AuditUniqueValue $languages "powershell"
+    }
+}
+
+function Add-AuditDocumentedCommandFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$languages, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands, [System.Collections.Generic.List[string]]$notableFiles) {
+    foreach ($relativePath in @("README.md", "AGENTS.md", "CLAUDE.md", "GEMINI.md")) {
+        $path = Join-Path $resolvedPath $relativePath
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        try { $content = Get-ContentUtf8 $path }
+        catch { continue }
+        foreach ($match in [regex]::Matches($content, '`(?<command>(?:pwsh|powershell|python|uv|poetry|pytest|dotnet|npm|pnpm|yarn)\b[^`\r\n]{1,500})`', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
+            $command = ([string]$match.Groups["command"].Value).Trim()
+            if ([string]::IsNullOrWhiteSpace($command)) { continue }
+            if ($command -match "(?i)^(?:pwsh|powershell)(?:\.exe)?\b") { Add-AuditUniqueValue $languages "powershell" }
+            if ($command -match "(?i)^(?:python|uv|poetry|pytest)\b") { Add-AuditUniqueValue $languages "python" }
+            if ($command -match "(?i)(?:\bbuild(?:\.ps1)?\b|\bpy_compile\b|\bdotnet\s+build\b|\b(?:npm|pnpm|yarn)\s+(?:run\s+)?build\b)") {
+                Add-AuditUniqueValue $buildCommands $command
+            }
+            if ($command -match "(?i)(?:tests?[\\/]run\.ps1\b|\bpytest\b|\bunittest\b|\bdotnet\s+test\b|\b(?:npm|pnpm|yarn)\s+(?:run\s+)?test\b)") {
+                Add-AuditUniqueValue $testCommands $command
+            }
+        }
+        Add-AuditUniqueValue $notableFiles $relativePath
+    }
+}
+
 function Add-AuditCiWorkflowFacts([string]$resolvedPath, [System.Collections.Generic.List[string]]$buildCommands, [System.Collections.Generic.List[string]]$testCommands, [System.Collections.Generic.List[string]]$notableFiles) {
     $candidates = New-Object System.Collections.Generic.List[string]
     foreach ($fileName in @("azure-pipelines.yml", ".gitlab-ci.yml")) {
@@ -1342,12 +1382,55 @@ function Add-AuditDesignDocumentFacts([string]$resolvedPath, [System.Collections
     }
 }
 
+function Get-AuditGitChangedPaths {
+    $paths = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::Ordinal)
+    $pathGroups = @(
+        @(& git -c core.quotepath=false diff --cached --name-only --no-ext-diff 2>$null),
+        @(& git -c core.quotepath=false diff --name-only --no-ext-diff 2>$null),
+        @(& git -c core.quotepath=false ls-files --others --exclude-standard 2>$null)
+    )
+    foreach ($group in $pathGroups) {
+        foreach ($path in @($group)) {
+            $text = [string]$path
+            if (-not [string]::IsNullOrWhiteSpace($text)) { $paths.Add($text) | Out-Null }
+        }
+    }
+    return @($paths)
+}
+
+function Get-AuditGitPathStatePairs($paths) {
+    $pairs = @()
+    $repoRoot = [string](Get-Location).Path
+    foreach ($path in @($paths)) {
+        $fullPath = Join-Path $repoRoot ([string]$path)
+        $indexState = @(& git -c core.quotepath=false ls-files --stage -- $path 2>$null)
+        $indexFingerprint = Get-AuditFingerprintFromVendorFromPairs $indexState $true
+        $worktreeState = "missing"
+        if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
+            $worktreeState = "file:" + [string](Get-FileContentHash $fullPath)
+        }
+        elseif (Test-Path -LiteralPath $fullPath -PathType Container) {
+            $nestedHead = (& git -C $fullPath rev-parse HEAD 2>$null)
+            $nestedStatus = @(& git -C $fullPath status --porcelain 2>$null)
+            $nestedPairs = @("head|" + ([string]$nestedHead).Trim())
+            $nestedPairs += @($nestedStatus | ForEach-Object { "status|" + [string]$_ })
+            $worktreeState = "directory:" + (Get-AuditFingerprintFromVendorFromPairs $nestedPairs $true)
+        }
+        $pairs += ("path|{0}|index|{1}|worktree|{2}" -f [string]$path, $indexFingerprint, $worktreeState)
+    }
+    return @($pairs)
+}
+
 function Get-AuditGitInfo([string]$resolvedPath) {
     $info = [ordered]@{
         is_repo = $false
         branch = ""
         commit = ""
         dirty = $false
+        status_count = 0
+        status_fingerprint = ""
+        automatic_evidence_count = 0
+        automatic_evidence_fingerprint = ""
     }
     if (-not (Test-Path -LiteralPath $resolvedPath -PathType Container)) { return [pscustomobject]$info }
 
@@ -1361,7 +1444,25 @@ function Get-AuditGitInfo([string]$resolvedPath) {
             $commit = (& git rev-parse HEAD 2>$null)
             if ($LASTEXITCODE -eq 0) { $info.commit = ([string]$commit).Trim() }
             $status = @(& git status --porcelain 2>$null)
-            if ($LASTEXITCODE -eq 0) { $info.dirty = ($status.Count -gt 0) }
+            if ($LASTEXITCODE -eq 0) {
+                $statusLines = @($status | ForEach-Object { [string]$_ })
+                $automaticEvidencePattern = '(?i)^.{2}\s+"?docs[\\/]change-evidence[\\/]\d{8}-audit-runtime-[^"\\/\r\n]+\.md"?$'
+                $automaticEvidencePathPattern = '(?i)^docs[\\/]change-evidence[\\/]\d{8}-audit-runtime-[^"\\/\r\n]+\.md$'
+                $automaticEvidenceLines = @($statusLines | Where-Object { $_ -match $automaticEvidencePattern })
+                $productStatusLines = @($statusLines | Where-Object { $_ -notmatch $automaticEvidencePattern })
+                $changedPaths = @(Get-AuditGitChangedPaths)
+                $automaticEvidencePaths = @($changedPaths | Where-Object { $_ -match $automaticEvidencePathPattern })
+                $productPaths = @($changedPaths | Where-Object { $_ -notmatch $automaticEvidencePathPattern })
+                $productStatePairs = @($productStatusLines | ForEach-Object { "status|" + [string]$_ })
+                $productStatePairs += @(Get-AuditGitPathStatePairs $productPaths)
+                $automaticEvidencePairs = @($automaticEvidenceLines | ForEach-Object { "status|" + [string]$_ })
+                $automaticEvidencePairs += @(Get-AuditGitPathStatePairs $automaticEvidencePaths)
+                $info.dirty = ($productStatusLines.Count -gt 0)
+                $info.status_count = $productStatusLines.Count
+                $info.status_fingerprint = Get-AuditFingerprintFromVendorFromPairs $productStatePairs $true
+                $info.automatic_evidence_count = $automaticEvidenceLines.Count
+                $info.automatic_evidence_fingerprint = Get-AuditFingerprintFromVendorFromPairs $automaticEvidencePairs $true
+            }
         }
     }
     finally {
@@ -1470,6 +1571,8 @@ function New-AuditRepoScan([string]$targetName, [string]$resolvedPath, [string]$
         Add-AuditPhpFacts $resolvedPath $languages $frameworks $packageManagers $buildCommands $testCommands $notableFiles
         Add-AuditMakefileFacts $resolvedPath $buildCommands $testCommands $notableFiles
         Add-AuditDotnetFacts $resolvedPath $frameworks $packageManagers $buildCommands $testCommands $notableFiles
+        Add-AuditPowerShellFacts $resolvedPath $languages $buildCommands $testCommands $notableFiles
+        Add-AuditDocumentedCommandFacts $resolvedPath $languages $buildCommands $testCommands $notableFiles
         Add-AuditDesignDocumentFacts $resolvedPath $languages $frameworks $packageManagers $buildCommands $testCommands $capabilities $notableFiles $risks
         Add-AuditCiWorkflowFacts $resolvedPath $buildCommands $testCommands $notableFiles
         $slnFiles = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.sln" -File -ErrorAction SilentlyContinue)
@@ -1672,7 +1775,9 @@ function New-AuditDecisionInsights($cfg, $scans, $installedSkills, $installedMcp
     $userKeywords = @(Get-AuditUserProfileKeywords $cfg)
     $repoKeywordSets = @()
     foreach ($scan in @($scans)) {
-        $targetName = if ($scan.PSObject.Properties.Match("target").Count -gt 0 -and $null -ne $scan.target -and $scan.target.PSObject.Properties.Match("name").Count -gt 0) { [string]$scan.target.name } else { "*" }
+        $targetValue = Get-CfgObjectProperty $scan "target"
+        $targetNameValue = Get-CfgObjectProperty $targetValue "name"
+        $targetName = if ([string]::IsNullOrWhiteSpace([string]$targetNameValue)) { "*" } else { [string]$targetNameValue }
         $repoKeywordSets += [pscustomobject]([ordered]@{
                 target = $targetName
                 keywords = @(Get-AuditRepoScanKeywords $scan)
