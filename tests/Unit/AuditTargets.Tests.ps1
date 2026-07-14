@@ -1011,6 +1011,23 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
     }
 
     Context "Installed skill facts" {
+        It "Expands YAML block scalar descriptions without regressing inline metadata" {
+            $literalPath = Join-Path $TestDrive "literal-skill.md"
+            $foldedPath = Join-Path $TestDrive "folded-skill.md"
+            $inlinePath = Join-Path $TestDrive "inline-skill.md"
+            Set-ContentUtf8 $literalPath "---`nname: literal-skill`ndescription: |`n  Trigger when a literal block is needed.`n`n  Preserve the paragraph boundary.`n---`nBody."
+            Set-ContentUtf8 $foldedPath "---`nname: folded-skill`ndescription: >-`n  Use when a folded`n  description spans lines.`n---`nBody."
+            Set-ContentUtf8 $inlinePath "---`nname: inline-skill`ndescription: Inline description.`n---`nBody."
+
+            $literal = Get-SkillMetadataFromFile $literalPath
+            $folded = Get-SkillMetadataFromFile $foldedPath
+            $inline = Get-SkillMetadataFromFile $inlinePath
+
+            $literal.description | Should Be "Trigger when a literal block is needed.`n`nPreserve the paragraph boundary."
+            $folded.description | Should Be "Use when a folded description spans lines."
+            $inline.description | Should Be "Inline description."
+        }
+
         It "Extracts declared name and description from installed manual skills" {
             $oldImportDir = $script:ImportDir
             $oldOverridesDir = $script:OverridesDir
