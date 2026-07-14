@@ -119,7 +119,7 @@ function Get-PortableFileSet([string]$RootPath) {
         Add-PortableFile $files $RootPath $file
     }
 
-    foreach ($dir in @(".github", "src", "tests", "overrides", "scripts\quality", "scripts\release", "docs\governance", "docs\plans", "docs\runbooks", "docs\superpowers")) {
+    foreach ($dir in @(".github", "config", "src", "tests", "overrides", "scripts\quality", "scripts\release", "docs\governance", "docs\plans", "docs\runbooks", "docs\superpowers")) {
         Add-PortableDirectory $files $RootPath $dir
     }
 

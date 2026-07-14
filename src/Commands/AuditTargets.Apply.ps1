@@ -31,8 +31,10 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
     $add = @()
     $index = 1
     foreach ($item in @($plan.items)) {
+        $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
         $add += [pscustomobject]([ordered]@{
-            index = $index
+            index = $itemIndex
+            original_index = $itemIndex
             name = [string]$item.name
             reason_user_profile = [string]$item.reason_user_profile
             reason_target_repo = [string]$item.reason_target_repo
@@ -45,8 +47,10 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
     $remove = @()
     $index = 1
     foreach ($item in @($plan.removal_candidates)) {
+        $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
         $remove += [pscustomobject]([ordered]@{
-            index = $index
+            index = $itemIndex
+            original_index = $itemIndex
             name = [string]$item.name
             installed = [ordered]@{
                 vendor = [string]$item.vendor
@@ -63,8 +67,10 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
     $mcpAdd = @()
     $index = 1
     foreach ($item in @($plan.mcp_items)) {
+        $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
         $mcpAdd += [pscustomobject]([ordered]@{
-            index = $index
+            index = $itemIndex
+            original_index = $itemIndex
             name = [string]$item.name
             reason_user_profile = [string]$item.reason_user_profile
             reason_target_repo = [string]$item.reason_target_repo
@@ -77,8 +83,10 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
     $mcpRemove = @()
     $index = 1
     foreach ($item in @($plan.mcp_removal_candidates)) {
+        $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
         $mcpRemove += [pscustomobject]([ordered]@{
-            index = $index
+            index = $itemIndex
+            original_index = $itemIndex
             name = [string]$item.name
             installed_name = [string]$item.installed_name
             reason_user_profile = [string]$item.reason_user_profile
@@ -635,12 +643,8 @@ function Invoke-AuditRecommendationsPreflight {
     else {
         $snapshotState = New-AuditInstalledSnapshotFallbackState $liveState $snapshotPath
     }
-    $skillSnapshotStale = ([string]$snapshotState.fingerprint -ne [string]$liveState.fingerprint)
-    $mcpSnapshotStale = $false
-    if ($snapshotState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.mcp_fingerprint)) {
-        $mcpSnapshotStale = ([string]$snapshotState.mcp_fingerprint -ne [string]$liveState.mcp_fingerprint)
-    }
-    $isSnapshotStale = ($skillSnapshotStale -or $mcpSnapshotStale)
+    $snapshotStaleness = Get-AuditInstalledSnapshotStaleness $snapshotState $liveState
+    $isSnapshotStale = [bool]$snapshotStaleness.is_stale
 
     $runPromptVersion = Get-AuditRunPromptContractVersion $recommendationDir
     $currentPromptVersion = Get-AuditPromptContractVersion
@@ -722,6 +726,7 @@ function Invoke-AuditRecommendationsPreflight {
         user_profile_check = $userProfileCheck
         snapshot_state = $snapshotState
         live_state = $liveState
+        snapshot_staleness = $snapshotStaleness
         issues = @($issues)
     }
     $reportPath = Join-Path $recommendationDir "preflight-report.json"
@@ -852,12 +857,8 @@ function Invoke-AuditRecommendationsApply {
         Log ("recommendations 同目录缺少 installed-skills.json，已回退为 live state 快照：{0}" -f $snapshotPath) "WARN"
         $snapshotState = New-AuditInstalledSnapshotFallbackState $liveState $snapshotPath
     }
-    $skillSnapshotStale = ([string]$snapshotState.fingerprint -ne [string]$liveState.fingerprint)
-    $mcpSnapshotStale = $false
-    if ($snapshotState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.mcp_fingerprint)) {
-        $mcpSnapshotStale = ([string]$snapshotState.mcp_fingerprint -ne [string]$liveState.mcp_fingerprint)
-    }
-    $isSnapshotStale = ($skillSnapshotStale -or $mcpSnapshotStale)
+    $snapshotStaleness = Get-AuditInstalledSnapshotStaleness $snapshotState $liveState
+    $isSnapshotStale = [bool]$snapshotStaleness.is_stale
     if ($isSnapshotStale -and -not $AllowStaleSnapshot) {
         $staleMessage = "审查快照与当前生效配置不一致（stale_snapshot）。请先运行：.\skills.ps1 审查目标 扫描 重新生成 run 后再应用 recommendations。"
         $staleReport = [ordered]@{
@@ -876,6 +877,7 @@ function Invoke-AuditRecommendationsApply {
             decision_insights = $decisionInsights
             snapshot_state = $snapshotState
             live_state = $liveState
+            snapshot_staleness = $snapshotStaleness
             changed_counts = New-AuditChangedCounts @() @()
             items = @()
             removal_candidates = @()
@@ -924,6 +926,7 @@ function Invoke-AuditRecommendationsApply {
                 decision_insights = $decisionInsights
                 snapshot_state = $snapshotState
                 live_state = $liveState
+                snapshot_staleness = $snapshotStaleness
                 changed_counts = New-AuditChangedCounts @() @()
                 items = @()
                 removal_candidates = @()
@@ -959,6 +962,7 @@ function Invoke-AuditRecommendationsApply {
                 decision_insights = $decisionInsights
                 snapshot_state = $snapshotState
                 live_state = $liveState
+                snapshot_staleness = $snapshotStaleness
                 changed_counts = New-AuditChangedCounts @() @()
                 items = @()
                 removal_candidates = @()
@@ -998,6 +1002,7 @@ function Invoke-AuditRecommendationsApply {
         changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
         snapshot_state = $snapshotState
         live_state = $liveState
+        snapshot_staleness = $snapshotStaleness
         items = @($plan.items)
         removal_candidates = @($plan.removal_candidates)
         mcp_items = @($plan.mcp_items)
@@ -1256,7 +1261,12 @@ function Invoke-AuditRecommendationsTwoStageApply {
         [string]$StaleAck,
         [switch]$AllowStaleSnapshot
     )
-    $dryRunReport = Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -McpAddSelection $McpAddSelection -McpRemoveSelection $McpRemoveSelection -DryRunAck $DryRunAck -StaleAck $StaleAck -AllowStaleSnapshot:$AllowStaleSnapshot -RequireDryRunAck $true
+    if ($AllowStaleSnapshot) {
+        $dryRunReport = Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -McpAddSelection $McpAddSelection -McpRemoveSelection $McpRemoveSelection -DryRunAck $DryRunAck -StaleAck $StaleAck -AllowStaleSnapshot -RequireDryRunAck $true
+    }
+    else {
+        $dryRunReport = Invoke-AuditRecommendationsValidateDryRun -RecommendationsPath $RecommendationsPath -DryRunAck $DryRunAck
+    }
     if ($dryRunReport.PSObject.Properties.Match("success").Count -gt 0 -and -not [bool]$dryRunReport.success) {
         Write-Host "应用确认结束：dry-run 未完成确认，未执行落盘。" -ForegroundColor Yellow
         return $dryRunReport

@@ -40,6 +40,7 @@ exit 0
         New-TestFile (Join-Path $workspace "skills.lock.json") "{}"
         New-TestFile (Join-Path $workspace "install.ps1")
         New-TestFile (Join-Path $workspace "src\Core.ps1")
+        New-TestFile (Join-Path $workspace "config\skill-routing-policy.json") "{}"
         New-TestFile (Join-Path $workspace "scripts\quality\check-doctor-json.ps1")
         New-TestFile (Join-Path $workspace "tests\run.ps1")
         New-TestFile (Join-Path $workspace "overrides\custom-demo\SKILL.md")
@@ -66,6 +67,7 @@ exit 0
         Test-Path -LiteralPath (Join-Path $expanded "skills.ps1") | Should Be $true
         Test-Path -LiteralPath (Join-Path $expanded "install.ps1") | Should Be $true
         Test-Path -LiteralPath (Join-Path $expanded "src\Core.ps1") | Should Be $true
+        Test-Path -LiteralPath (Join-Path $expanded "config\skill-routing-policy.json") | Should Be $true
         Test-Path -LiteralPath (Join-Path $expanded "scripts\release\pack-portable.ps1") | Should Be $true
         Test-Path -LiteralPath (Join-Path $expanded "docs\change-evidence\template.md") | Should Be $true
 

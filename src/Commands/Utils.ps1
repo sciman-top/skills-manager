@@ -422,6 +422,7 @@ MCP：
   .\skills.ps1 自动更新设置
   .\skills.ps1 doctor [--json] [--fix] [--dry-run-fix] [--strict] [--strict-perf] [--threshold-ms <ms>]
   pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-skill-integrity.ps1 [-ReportPath <file>]
+  pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-skill-routing.ps1 [-ReportPath <file>] [-Json]
 
 通用参数：
   -DryRun：仅预演（跳过写入/删除/同步/拉取）
@@ -465,7 +466,7 @@ MCP/门禁环境变量：
   - `应用确认` 是单入口两阶段流程：先 dry-run，再要求输入确认口令 `APPLY <run-id>` 才执行落盘。
   - `应用` 默认只做 dry-run，且需显式确认口令 `我知道未落盘`；只有 `--apply --yes` 才会真正执行选中的新增/卸载。
   - 建议先执行 `预检`：会提前检查 `stale_snapshot` 与提示词契约版本，避免“先研究后阻断”。
-  - `应用`/`应用确认` 会校验同目录 `installed-skills.json` 快照与当前 live mappings 指纹；若快照过期（stale_snapshot）会阻断并要求先重新 `审查目标 扫描`。
+  - `应用`/`应用确认` 会校验同目录 `installed-skills.json` 快照与当前 live mappings、MCP、system/plugin 外部能力指纹；旧快照没有外部能力字段时保持兼容，新快照漂移会触发 stale_snapshot。
   - 仅在你明确接受风险时可加 `--allow-stale-snapshot` 跳过该阻断（报告会标记 stale 风险）。
   - 使用 `--allow-stale-snapshot` 时会触发红色警告并要求二次确认口令；非交互环境请用 `--stale-ack "<token>"` 提前传入。
   - `--out` 若指向已存在且非空目录，默认阻断，防止覆盖旧审查包；如确需复用，显式追加 `--force`。

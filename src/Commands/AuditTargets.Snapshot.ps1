@@ -100,6 +100,7 @@ function Get-InstalledSkillFacts($cfg = $null) {
         if (-not $seen.Add(("overrides|{0}" -f $from))) { continue }
         $localPath = [string]$override.full
         $skillFile = Join-Path $localPath "SKILL.md"
+        if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { continue }
         $meta = Get-SkillMetadataFromFile $skillFile
         $contentHash = [string](Get-FileContentHash $skillFile)
         $facts += [pscustomobject]([ordered]@{
@@ -119,6 +120,49 @@ function Get-InstalledSkillFacts($cfg = $null) {
         })
     }
     return @($facts)
+}
+
+function Get-AuditExternalSkillFacts($cfg = $null) {
+    if ($null -eq $cfg) { $cfg = LoadCfg }
+    if ($cfg.PSObject.Properties.Match('skill_projection').Count -eq 0 -or $null -eq $cfg.skill_projection) { return @() }
+    $facts = New-Object System.Collections.Generic.List[object]
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $projection = $cfg.skill_projection
+    $userSkillRootRaw = if ($projection.PSObject.Properties.Match('user_skill_root').Count -gt 0) { [string]$projection.user_skill_root } else { '~/.agents/skills' }
+    $userSkillRoot = Resolve-SkillProjectionPath $userSkillRootRaw
+    foreach ($item in @(Get-SkillProjectionFiles $userSkillRoot | Where-Object is_system)) {
+        $skillFile = [string]$item.file
+        $meta = Get-SkillMetadataFromFile $skillFile
+        $name = [string]$meta.declared_name
+        if ([string]::IsNullOrWhiteSpace($name) -or -not $seen.Add(('system::{0}' -f $name))) { continue }
+        $facts.Add([pscustomobject]([ordered]@{
+                    source_kind = 'system'
+                    name = $name
+                    qualified_name = $name
+                    description = [string]$meta.description
+                    trigger_summary = [string]$meta.trigger_summary
+                    content_hash = [string](Get-FileContentHash $skillFile)
+                    local_path = Split-Path -Parent $skillFile
+                    plugin_id = ''
+                })) | Out-Null
+    }
+
+    $inventory = Get-CodexExternalSkillInventory $projection
+    foreach ($item in @($inventory.skills)) {
+        $qualifiedName = [string]$item.qualified_name
+        if ([string]::IsNullOrWhiteSpace($qualifiedName) -or -not $seen.Add(('plugin::{0}' -f $qualifiedName))) { continue }
+        $facts.Add([pscustomobject]([ordered]@{
+                    source_kind = 'plugin'
+                    name = [string]$item.name
+                    qualified_name = $qualifiedName
+                    description = [string]$item.description
+                    trigger_summary = [string]$item.description
+                    content_hash = [string](Get-FileContentHash ([string]$item.path))
+                    local_path = Split-Path -Parent ([string]$item.path)
+                    plugin_id = [string]$item.plugin_id
+                })) | Out-Null
+    }
+    return @($facts.ToArray() | Sort-Object source_kind, qualified_name)
 }
 
 function Get-AuditMcpServerFacts($cfg = $null) {
@@ -261,9 +305,28 @@ function Get-AuditFingerprintFromSkillFacts($facts) {
     return (Get-AuditFingerprintFromVendorFromPairs $rows $true)
 }
 
+function Get-AuditFingerprintFromExternalSkillFacts($facts) {
+    $rows = @()
+    foreach ($item in @($facts)) {
+        if ($null -eq $item) { continue }
+        $row = [ordered]@{
+            source_kind = [string]$item.source_kind
+            name = [string]$item.name
+            qualified_name = [string]$item.qualified_name
+            description = [string]$item.description
+            trigger_summary = [string]$item.trigger_summary
+            content_hash = [string]$item.content_hash
+            plugin_id = [string]$item.plugin_id
+        }
+        $rows += ($row | ConvertTo-Json -Compress)
+    }
+    return (Get-AuditFingerprintFromVendorFromPairs $rows $true)
+}
+
 function Get-AuditLiveInstalledState($cfg = $null) {
     if ($null -eq $cfg) { $cfg = LoadCfg }
     $facts = @(Get-InstalledSkillFacts $cfg)
+    $externalFacts = @(Get-AuditExternalSkillFacts $cfg)
     $mcpServers = @()
     if ($cfg.PSObject.Properties.Match("mcp_servers").Count -gt 0 -and $null -ne $cfg.mcp_servers) {
         $mcpServers = @($cfg.mcp_servers)
@@ -273,6 +336,8 @@ function Get-AuditLiveInstalledState($cfg = $null) {
         captured_at = (Get-Date).ToString("o")
         skill_count = @($facts).Count
         fingerprint = (Get-AuditFingerprintFromSkillFacts $facts)
+        external_skill_count = @($externalFacts).Count
+        external_skill_fingerprint = (Get-AuditFingerprintFromExternalSkillFacts $externalFacts)
         mcp_server_count = @($mcpServers).Count
         mcp_fingerprint = (Get-AuditFingerprintFromMcpServers $mcpServers)
     })
@@ -305,6 +370,11 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
     Need (Test-AuditJsonProperty $data "skills") ("installed-skills 快照缺少 skills：{0}" -f $snapshotPath)
     Need (Assert-IsArray $data.skills) ("installed-skills.skills 必须为数组：{0}" -f $snapshotPath)
     $skills = @($data.skills)
+    $externalSkills = @()
+    if (Test-AuditJsonProperty $data 'external_skills' -and $null -ne $data.external_skills) {
+        Need (Assert-IsArray $data.external_skills) ("installed-skills.external_skills 必须为数组：{0}" -f $snapshotPath)
+        $externalSkills = @($data.external_skills)
+    }
     $mcpServers = @()
     if (Test-AuditJsonProperty $data "mcp_servers" -and $null -ne $data.mcp_servers) {
         Need (Assert-IsArray $data.mcp_servers) ("installed-skills.mcp_servers 必须为数组：{0}" -f $snapshotPath)
@@ -316,6 +386,13 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
     }
     if ([string]::IsNullOrWhiteSpace($fingerprint)) {
         $fingerprint = (Get-AuditFingerprintFromSkillFacts $skills)
+    }
+    $externalSkillFingerprint = ''
+    if (Test-AuditJsonProperty $data 'live_external_skill_fingerprint') {
+        $externalSkillFingerprint = ([string]$data.live_external_skill_fingerprint).Trim().ToLowerInvariant()
+    }
+    if ([string]::IsNullOrWhiteSpace($externalSkillFingerprint) -and $externalSkills.Count -gt 0) {
+        $externalSkillFingerprint = Get-AuditFingerprintFromExternalSkillFacts $externalSkills
     }
     $mcpFingerprint = ""
     if (Test-AuditJsonProperty $data "live_mcp_fingerprint") {
@@ -334,6 +411,8 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
         captured_at = $capturedAt
         skill_count = $skills.Count
         fingerprint = $fingerprint
+        external_skill_count = $externalSkills.Count
+        external_skill_fingerprint = $externalSkillFingerprint
         mcp_server_count = @($mcpServers).Count
         mcp_fingerprint = $mcpFingerprint
     })
@@ -346,7 +425,27 @@ function New-AuditInstalledSnapshotFallbackState($liveState, [string]$snapshotPa
         captured_at = [string]$liveState.captured_at
         skill_count = [int]$liveState.skill_count
         fingerprint = [string]$liveState.fingerprint
+        external_skill_count = if ($liveState.PSObject.Properties.Match('external_skill_count').Count -gt 0) { [int]$liveState.external_skill_count } else { 0 }
+        external_skill_fingerprint = if ($liveState.PSObject.Properties.Match('external_skill_fingerprint').Count -gt 0) { [string]$liveState.external_skill_fingerprint } else { '' }
         mcp_server_count = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
         mcp_fingerprint = if ($liveState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$liveState.mcp_fingerprint } else { "" }
     })
+}
+
+function Get-AuditInstalledSnapshotStaleness($snapshotState, $liveState) {
+    $skillStale = ([string]$snapshotState.fingerprint -ne [string]$liveState.fingerprint)
+    $mcpStale = $false
+    if ($snapshotState.PSObject.Properties.Match('mcp_fingerprint').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.mcp_fingerprint)) {
+        $mcpStale = ([string]$snapshotState.mcp_fingerprint -ne [string]$liveState.mcp_fingerprint)
+    }
+    $externalSkillStale = $false
+    if ($snapshotState.PSObject.Properties.Match('external_skill_fingerprint').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.external_skill_fingerprint)) {
+        $externalSkillStale = ([string]$snapshotState.external_skill_fingerprint -ne [string]$liveState.external_skill_fingerprint)
+    }
+    return [pscustomobject]([ordered]@{
+            is_stale = ($skillStale -or $mcpStale -or $externalSkillStale)
+            skill_stale = $skillStale
+            mcp_stale = $mcpStale
+            external_skill_stale = $externalSkillStale
+        })
 }

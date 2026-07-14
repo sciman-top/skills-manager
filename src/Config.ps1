@@ -212,6 +212,18 @@ function Normalize-ArrayField($cfg, [string]$name, [ref]$changed) {
 function Assert-IsArray($value) {
     return ($value -is [System.Collections.IList]) -and -not ($value -is [string])
 }
+function Test-CfgObjectProperty($obj, [string]$name) {
+    if ($null -eq $obj) { return $false }
+    if ($obj -is [System.Collections.IDictionary] -or
+        $obj -is [System.Collections.Specialized.OrderedDictionary] -or
+        $obj -is [System.Collections.Specialized.IOrderedDictionary]) {
+        foreach ($key in @($obj.Keys)) {
+            if ([string]::Equals([string]$key, $name, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+        }
+        return $false
+    }
+    return ($obj.PSObject.Properties.Match($name).Count -gt 0)
+}
 function Test-CfgArrayProperty($obj, [string]$name) {
     if ($null -eq $obj) { return $false }
     if ($obj -is [System.Collections.IDictionary] -or
@@ -294,6 +306,26 @@ function Get-CfgContractErrors($cfg) {
         if ($null -ne $projectionEnabled -and $projectionEnabled -isnot [bool]) {
             $errors.Add("skill_projection.enabled 必须是布尔值") | Out-Null
         }
+        $routingPolicyPath = [string](Get-CfgObjectProperty $skillProjection "routing_policy_path")
+        if ((Test-CfgObjectProperty $skillProjection "routing_policy_path") -and [string]::IsNullOrWhiteSpace($routingPolicyPath)) {
+            $errors.Add("skill_projection.routing_policy_path 不能为空") | Out-Null
+        }
+        $externalInventory = Get-CfgObjectProperty $skillProjection "external_skill_inventory"
+        if ($null -ne $externalInventory) {
+            if ($externalInventory -isnot [pscustomobject] -and $externalInventory -isnot [System.Collections.IDictionary]) {
+                $errors.Add("skill_projection.external_skill_inventory 必须是对象") | Out-Null
+            }
+            else {
+                $externalInventoryEnabled = Get-CfgObjectProperty $externalInventory "enabled"
+                if ($null -ne $externalInventoryEnabled -and $externalInventoryEnabled -isnot [bool]) {
+                    $errors.Add("skill_projection.external_skill_inventory.enabled 必须是布尔值") | Out-Null
+                }
+                $pluginCachePath = [string](Get-CfgObjectProperty $externalInventory "plugin_cache_path")
+                if ((Test-CfgObjectProperty $externalInventory "plugin_cache_path") -and [string]::IsNullOrWhiteSpace($pluginCachePath)) {
+                    $errors.Add("skill_projection.external_skill_inventory.plugin_cache_path 不能为空") | Out-Null
+                }
+            }
+        }
         $projectionSources = Get-CfgObjectProperty $skillProjection "sources"
         if (-not (Assert-IsArray $projectionSources)) {
             $errors.Add("skill_projection.sources 必须是数组") | Out-Null
@@ -331,11 +363,13 @@ function Get-CfgContractErrors($cfg) {
         if ($null -ne $aliases -and -not (Assert-IsArray $aliases)) {
             $errors.Add("skill_projection.aliases 必须是数组") | Out-Null
         }
-        foreach ($alias in @($aliases)) {
-            $aliasName = [string](Get-CfgObjectProperty $alias "name")
-            $replacement = [string](Get-CfgObjectProperty $alias "replacement")
-            if ([string]::IsNullOrWhiteSpace($aliasName)) { $errors.Add("skill_projection alias 缺少 name") | Out-Null }
-            if ([string]::IsNullOrWhiteSpace($replacement)) { $errors.Add(("skill_projection alias 缺少 replacement：{0}" -f $aliasName)) | Out-Null }
+        if ($null -ne $aliases) {
+            foreach ($alias in @($aliases)) {
+                $aliasName = [string](Get-CfgObjectProperty $alias "name")
+                $replacement = [string](Get-CfgObjectProperty $alias "replacement")
+                if ([string]::IsNullOrWhiteSpace($aliasName)) { $errors.Add("skill_projection alias 缺少 name") | Out-Null }
+                if ([string]::IsNullOrWhiteSpace($replacement)) { $errors.Add(("skill_projection alias 缺少 replacement：{0}" -f $aliasName)) | Out-Null }
+            }
         }
         $profiles = Get-CfgObjectProperty $skillProjection "profiles"
         if ($null -ne $profiles) {
@@ -873,6 +907,19 @@ function Assert-Cfg($cfg) {
         $projection = $cfg.skill_projection
         if ($projection.PSObject.Properties.Match("enabled").Count -gt 0) {
             Need ($projection.enabled -is [bool]) "skill_projection.enabled 必须是布尔值"
+        }
+        if ($projection.PSObject.Properties.Match("routing_policy_path").Count -gt 0) {
+            Need (-not [string]::IsNullOrWhiteSpace([string]$projection.routing_policy_path)) "skill_projection.routing_policy_path 不能为空"
+        }
+        if ($projection.PSObject.Properties.Match("external_skill_inventory").Count -gt 0 -and $null -ne $projection.external_skill_inventory) {
+            $externalInventory = $projection.external_skill_inventory
+            Need ($externalInventory -is [pscustomobject] -or $externalInventory -is [System.Collections.IDictionary]) "skill_projection.external_skill_inventory 必须是对象"
+            if (Test-CfgObjectProperty $externalInventory "enabled") {
+                Need ((Get-CfgObjectProperty $externalInventory "enabled") -is [bool]) "skill_projection.external_skill_inventory.enabled 必须是布尔值"
+            }
+            if (Test-CfgObjectProperty $externalInventory "plugin_cache_path") {
+                Need (-not [string]::IsNullOrWhiteSpace([string](Get-CfgObjectProperty $externalInventory "plugin_cache_path"))) "skill_projection.external_skill_inventory.plugin_cache_path 不能为空"
+            }
         }
         Need ($projection.PSObject.Properties.Match("sources").Count -gt 0 -and (Assert-IsArray $projection.sources)) "skill_projection.sources 必须是数组"
         foreach ($source in @($projection.sources)) {

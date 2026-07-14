@@ -247,7 +247,7 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
     Need ($null -ne $projectionCfg) "skill_projection 配置为空"
     $enabled = -not ($projectionCfg.PSObject.Properties.Match("enabled").Count -gt 0) -or [bool]$projectionCfg.enabled
     if (-not $enabled) {
-        return [pscustomobject]@{ schema_version = 2; enabled = $false; skills = @(); canonical = @(); active = @(); disabled = @(); conflicts = @(); unique_names = @(); active_names = @(); duplicate_name_groups = 0 }
+        return [pscustomobject]@{ schema_version = 2; enabled = $false; skills = @(); canonical = @(); active = @(); disabled = @(); conflicts = @(); unique_names = @(); active_names = @(); duplicate_name_groups = 0; external_skills = @(); external_inventory_warnings = @(); routing_report = (Get-EmptySkillRoutingReport) }
     }
 
     Need ($projectionCfg.PSObject.Properties.Match("sources").Count -gt 0 -and $null -ne $projectionCfg.sources) "skill_projection 缺少 sources"
@@ -334,6 +334,9 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
     $externalReserveChars = if ($projectionCfg.PSObject.Properties.Match("external_metadata_reserve_chars").Count -gt 0) { [int]$projectionCfg.external_metadata_reserve_chars } else { 0 }
     Need ($budgetLimitChars -gt 0) "skill_projection.budget_limit_chars 必须大于 0"
     Need ($externalReserveChars -ge 0) "skill_projection.external_metadata_reserve_chars 不能小于 0"
+    $externalInventory = Get-CodexExternalSkillInventory $projectionCfg
+    $externalSkillMetadataChars = [int]$externalInventory.metadata_chars
+    $effectiveExternalMetadataChars = [Math]::Max($externalReserveChars, $externalSkillMetadataChars)
 
     $activeProfile = ""
     $profileEnabledNames = $null
@@ -364,13 +367,16 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
                 $profileMetadataChars += $entryName.Length + ([string]$entry.description).Length
                 $profileActiveSkillCount++
             }
-            $profileEstimatedChars = $profileMetadataChars + $externalReserveChars
+            $profileEstimatedChars = $profileMetadataChars + $effectiveExternalMetadataChars
             $profileBudgets.Add([pscustomobject]([ordered]@{
                         profile = $profileName
                         enabled_name_count = $enabledNames.Count
                         active_skill_count = $profileActiveSkillCount
                         skill_metadata_chars = $profileMetadataChars
                         external_metadata_reserve_chars = $externalReserveChars
+                        external_skill_count = [int]$externalInventory.skill_count
+                        external_skill_metadata_chars = $externalSkillMetadataChars
+                        effective_external_metadata_chars = $effectiveExternalMetadataChars
                         estimated_metadata_chars = $profileEstimatedChars
                         budget_limit_chars = $budgetLimitChars
                         budget_pass = ($profileEstimatedChars -le $budgetLimitChars)
@@ -426,8 +432,9 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
     foreach ($entry in @($active.ToArray())) {
         $skillMetadataChars += ([string]$entry.name).Length + ([string]$entry.description).Length
     }
-    $estimatedMetadataChars = $skillMetadataChars + $externalReserveChars
+    $estimatedMetadataChars = $skillMetadataChars + $effectiveExternalMetadataChars
     $allProfilesBudgetPass = @($profileBudgets.ToArray() | Where-Object { -not [bool]$_.budget_pass }).Count -eq 0
+    $routingReport = New-SkillRoutingReport $projectionCfg @($canonical.ToArray()) @($active.ToArray()) @($externalInventory.skills)
 
     return [pscustomobject]([ordered]@{
         schema_version = 2
@@ -444,11 +451,17 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
         duplicate_name_groups = $duplicateGroups
         skill_metadata_chars = $skillMetadataChars
         external_metadata_reserve_chars = $externalReserveChars
+        external_skill_count = [int]$externalInventory.skill_count
+        external_skill_metadata_chars = $externalSkillMetadataChars
+        effective_external_metadata_chars = $effectiveExternalMetadataChars
         estimated_metadata_chars = $estimatedMetadataChars
         budget_limit_chars = $budgetLimitChars
         budget_pass = ($estimatedMetadataChars -le $budgetLimitChars)
         all_profiles_budget_pass = $allProfilesBudgetPass
         profile_budgets = @($profileBudgets.ToArray())
+        external_skills = @($externalInventory.skills)
+        external_inventory_warnings = @($externalInventory.warnings)
+        routing_report = $routingReport
     })
 }
 
@@ -556,6 +569,7 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
         Need ([bool]$plan.budget_pass) ("技能描述预算超限：estimated={0}, limit={1}, profile={2}" -f [int]$plan.estimated_metadata_chars, [int]$plan.budget_limit_chars, [string]$plan.active_profile)
         $oversizedProfiles = @($plan.profile_budgets | Where-Object { -not [bool]$_.budget_pass } | ForEach-Object { "{0}={1}/{2}" -f $_.profile, $_.estimated_metadata_chars, $_.budget_limit_chars })
         Need ([bool]$plan.all_profiles_budget_pass) ("技能 profile 描述预算超限：{0}" -f ($oversizedProfiles -join ", "))
+        Need (-not [bool]$plan.routing_report.blocking) "技能路由策略存在 enforce 模式阻断项"
     }
 
     $existing = if (Test-Path -LiteralPath $configPath -PathType Leaf) { Get-ContentUtf8 $configPath } else { "" }
@@ -587,11 +601,17 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
                 conflict_count = @($plan.conflicts).Count
                 skill_metadata_chars = [int]$plan.skill_metadata_chars
                 external_metadata_reserve_chars = [int]$plan.external_metadata_reserve_chars
+                external_skill_count = [int]$plan.external_skill_count
+                external_skill_metadata_chars = [int]$plan.external_skill_metadata_chars
+                effective_external_metadata_chars = [int]$plan.effective_external_metadata_chars
                 estimated_metadata_chars = [int]$plan.estimated_metadata_chars
                 budget_limit_chars = [int]$plan.budget_limit_chars
                 budget_pass = [bool]$plan.budget_pass
                 all_profiles_budget_pass = [bool]$plan.all_profiles_budget_pass
                 profile_budgets = @($plan.profile_budgets)
+                external_skills = @($plan.external_skills)
+                external_inventory_warnings = @($plan.external_inventory_warnings)
+                routing_report = $plan.routing_report
                 skills = @($plan.skills)
                 canonical = @($plan.canonical)
                 active = @($plan.active)

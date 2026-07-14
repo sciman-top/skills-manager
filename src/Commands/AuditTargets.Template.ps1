@@ -240,6 +240,9 @@ function Assert-AuditBundleFileContent([string]$path, [string]$label) {
         "installed-skills.json" {
             Need (Test-AuditJsonProperty $data "skills") ("installed-skills 缺少 skills：{0}" -f $path)
             Need (Assert-IsArray $data.skills) ("installed-skills.skills 必须为数组：{0}" -f $path)
+            if (Test-AuditJsonProperty $data "external_skills") {
+                Need (Assert-IsArray $data.external_skills) ("installed-skills.external_skills 必须为数组：{0}" -f $path)
+            }
             if (Test-AuditJsonProperty $data "mcp_servers") {
                 Need (Assert-IsArray $data.mcp_servers) ("installed-skills.mcp_servers 必须为数组：{0}" -f $path)
             }
@@ -394,6 +397,14 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
                 reason_target_repo = $targetReasonInstall
                 sources = @("<source-url-1>")
                 note = "<report-only observation; no automatic uninstall>"
+                routing = [ordered]@{
+                    router = "<domain-router-skill>"
+                    selection_policy = "<how to choose executors without invoking every overlapping skill>"
+                    members = @(
+                        [ordered]@{ name = "<skill-name>"; role = "router" }
+                        [ordered]@{ name = "<executor-or-validator>"; role = "executor" }
+                    )
+                }
             }
         )
         removal_candidates = @(

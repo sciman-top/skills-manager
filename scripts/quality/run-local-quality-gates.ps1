@@ -30,6 +30,7 @@ try {
         Invoke-QualityGate 'generated-sync' { & .\tests\check-generated-sync.ps1 -StrictNoGit }
     }
     Invoke-QualityGate 'skill-integrity' { & .\scripts\verify-skill-integrity.ps1 }
+    Invoke-QualityGate 'skill-routing' { & .\scripts\verify-skill-routing.ps1 -ReportPath .\reports\skill-routing\current.json }
     Invoke-QualityGate 'dependency-baseline' { & python .\scripts\verify-dependency-baseline.py --target-repo-root . --require-target-repo-baseline }
     Invoke-QualityGate 'doctor-json-contract' { & .\scripts\quality\check-doctor-json.ps1 }
 

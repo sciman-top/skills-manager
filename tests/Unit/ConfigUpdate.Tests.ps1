@@ -117,6 +117,47 @@ Describe "Config And Update Enhancements" {
             @(Get-CfgContractErrors $cfg).Count | Should Be 0
         }
 
+        It "Validates routing policy and external inventory settings" {
+            $valid = @'
+{
+  "vendors": [], "targets": [], "mappings": [], "imports": [],
+  "mcp_servers": [], "mcp_targets": [], "sync_mode": "link",
+  "skill_projection": {
+    "sources": [],
+    "routing_policy_path": "config/skill-routing-policy.json",
+    "external_skill_inventory": { "enabled": true, "plugin_cache_path": "~/.codex/plugins/cache" }
+  }
+}
+'@ | ConvertFrom-Json
+            @(Get-CfgContractErrors $valid).Count | Should Be 0
+            { Assert-Cfg $valid } | Should Not Throw
+
+            $invalid = @'
+{
+  "vendors": [], "targets": [], "mappings": [], "imports": [],
+  "mcp_servers": [], "mcp_targets": [], "sync_mode": "link",
+  "skill_projection": {
+    "sources": [],
+    "routing_policy_path": " ",
+    "external_skill_inventory": { "enabled": "true", "plugin_cache_path": " " }
+  }
+}
+'@ | ConvertFrom-Json
+            $errors = @(Get-CfgContractErrors $invalid) -join "`n"
+            $errors | Should Match "routing_policy_path 不能为空"
+            $errors | Should Match "external_skill_inventory.enabled 必须是布尔值"
+            $errors | Should Match "external_skill_inventory.plugin_cache_path 不能为空"
+            { Assert-Cfg $invalid } | Should Throw
+
+            $invalidHashtable = $valid.PSObject.Copy()
+            $invalidHashtable.skill_projection = $valid.skill_projection.PSObject.Copy()
+            $invalidHashtable.skill_projection.external_skill_inventory = @{ enabled = "true"; plugin_cache_path = " " }
+            $hashtableErrors = @(Get-CfgContractErrors $invalidHashtable) -join "`n"
+            $hashtableErrors | Should Match "external_skill_inventory.enabled 必须是布尔值"
+            $hashtableErrors | Should Match "external_skill_inventory.plugin_cache_path 不能为空"
+            { Assert-Cfg $invalidHashtable } | Should Throw
+        }
+
         It "Validates managed Codex link exclusions" {
             $valid = @'
 {

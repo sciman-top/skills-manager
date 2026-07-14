@@ -171,6 +171,36 @@ function Assert-AuditReasonPair($item, [string]$name) {
     Normalize-AuditKeywordTrace $item
 }
 
+function Assert-AuditOverlapFinding($item) {
+    Need ($null -ne $item) "重叠发现不能为空"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.name)) "重叠发现缺少 name"
+    Assert-AuditReasonPair $item "重叠发现"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.note)) ("重叠发现缺少 note：{0}" -f [string]$item.name)
+    if ($item.PSObject.Properties.Match("routing").Count -eq 0 -or $null -eq $item.routing) { return }
+
+    Need (Test-AuditObjectLike $item.routing) ("重叠发现 routing 必须是对象：{0}" -f [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.routing.router)) ("重叠发现 routing 缺少 router：{0}" -f [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.routing.selection_policy)) ("重叠发现 routing 缺少 selection_policy：{0}" -f [string]$item.name)
+    Need ($item.routing.PSObject.Properties.Match("members").Count -gt 0 -and (Assert-IsArray $item.routing.members)) ("重叠发现 routing.members 必须是数组：{0}" -f [string]$item.name)
+    Need (@($item.routing.members).Count -ge 2) ("重叠发现 routing.members 至少需要两个成员：{0}" -f [string]$item.name)
+    $allowedRoles = @("router", "executor", "validator", "operator", "workflow", "reference")
+    $seenMembers = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $memberRoles = @{}
+    foreach ($member in @($item.routing.members)) {
+        Need ($null -ne $member) ("重叠发现 routing.member 不能为空：{0}" -f [string]$item.name)
+        $memberName = ([string]$member.name).Trim()
+        $role = ([string]$member.role).Trim().ToLowerInvariant()
+        Need (-not [string]::IsNullOrWhiteSpace($memberName)) ("重叠发现 routing.member 缺少 name：{0}" -f [string]$item.name)
+        Need ($allowedRoles -contains $role) ("重叠发现 routing.member role 不支持：{0}/{1}" -f [string]$item.name, $role)
+        Need ($seenMembers.Add($memberName)) ("重叠发现 routing.member 重复：{0}/{1}" -f [string]$item.name, $memberName)
+        $member.role = $role
+        $memberRoles[$memberName] = $role
+    }
+    $router = ([string]$item.routing.router).Trim()
+    Need ($seenMembers.Contains($router)) ("重叠发现 routing.router 必须出现在 members：{0}/{1}" -f [string]$item.name, $router)
+    Need ([string]$memberRoles[$router] -eq "router") ("重叠发现 routing.router 对应成员必须使用 role=router：{0}/{1}" -f [string]$item.name, $router)
+}
+
 function Assert-AuditRecommendationItem($item) {
     Need ($null -ne $item) "推荐项不能为空"
     Need (-not [string]::IsNullOrWhiteSpace([string]$item.name)) "推荐项缺少 name"
@@ -301,6 +331,12 @@ function Load-AuditRecommendations([string]$path) {
         Assert-AuditSourceObservation $item
     }
 
+    $seenOverlapFindings = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in @($rec.overlap_findings)) {
+        Assert-AuditOverlapFinding $item
+        Need ($seenOverlapFindings.Add(([string]$item.name).Trim())) ("重复重叠发现：{0}" -f [string]$item.name)
+    }
+
     $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($item in @($rec.new_skills)) {
         Assert-AuditRecommendationItem $item
@@ -348,7 +384,9 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
         $installedMcpServers = @($cfg.mcp_servers)
     }
     $items = @()
+    $originalIndex = 0
     foreach ($item in @($recommendations.new_skills)) {
+        $originalIndex++
         $install = $item.install
         $tokens = @([string]$install.repo, "--skill", [string]$install.skill)
         if ($install.PSObject.Properties.Match("ref").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$install.ref)) {
@@ -358,6 +396,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             $tokens += @("--mode", [string]$install.mode)
         }
         $items += [pscustomobject]([ordered]@{
+            original_index = $originalIndex
             name = [string]$item.name
             reason = [string]$item.reason
             reason_user_profile = [string]$item.reason_user_profile
@@ -371,11 +410,14 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
     }
 
     $removals = @()
+    $originalIndex = 0
     foreach ($item in @($recommendations.removal_candidates)) {
+        $originalIndex++
         $match = @($installedFacts | Where-Object { $_.vendor -eq [string]$item.installed.vendor -and $_.from -eq [string]$item.installed.from })
         $status = if ($match.Count -eq 1) { "planned" } elseif ($match.Count -eq 0) { "not_found" } else { "ambiguous" }
         $matched = if ($match.Count -gt 0) { $match[0] } else { $null }
         $removals += [pscustomobject]([ordered]@{
+            original_index = $originalIndex
             name = [string]$item.name
             vendor = [string]$item.installed.vendor
             from = [string]$item.installed.from
@@ -389,7 +431,9 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
         })
     }
     $mcpItems = @()
+    $originalIndex = 0
     foreach ($item in @($recommendations.mcp_new_servers)) {
+        $originalIndex++
         $server = $item.server
         $existing = @($installedMcpServers | Where-Object { [string]$_.name -eq [string]$server.name })
         $status = if ($existing.Count -eq 0) {
@@ -402,6 +446,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             "planned"
         }
         $mcpItems += [pscustomobject]([ordered]@{
+            original_index = $originalIndex
             name = [string]$item.name
             reason = [string]$item.reason
             reason_user_profile = [string]$item.reason_user_profile
@@ -415,11 +460,14 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
     }
 
     $mcpRemovals = @()
+    $originalIndex = 0
     foreach ($item in @($recommendations.mcp_removal_candidates)) {
+        $originalIndex++
         $match = @($installedMcpServers | Where-Object { [string]$_.name -eq [string]$item.installed.name })
         $status = if ($match.Count -eq 1) { "planned" } elseif ($match.Count -eq 0) { "not_found" } else { "ambiguous" }
         $matched = if ($match.Count -gt 0) { $match[0] } else { $null }
         $mcpRemovals += [pscustomobject]([ordered]@{
+            original_index = $originalIndex
             name = [string]$item.name
             installed_name = [string]$item.installed.name
             reason = ("用户需求：{0}；目标仓/场景：{1}" -f [string]$item.reason_user_profile, [string]$item.reason_target_repo)
@@ -508,7 +556,8 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
     else {
         $index = 1
         foreach ($item in @($plan.items)) {
-            Write-Host ("{0}) {1}" -f $index, [string]$item.name)
+            $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
+            Write-Host ("{0}) {1}" -f $itemIndex, [string]$item.name)
             Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
             Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
             $index++
@@ -522,7 +571,8 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
     else {
         $index = 1
         foreach ($item in @($plan.removal_candidates)) {
-            Write-Host ("{0}) {1} [{2}|{3}] status={4}" -f $index, [string]$item.name, [string]$item.vendor, [string]$item.from, [string]$item.status)
+            $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
+            Write-Host ("{0}) {1} [{2}|{3}] status={4}" -f $itemIndex, [string]$item.name, [string]$item.vendor, [string]$item.from, [string]$item.status)
             Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
             Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
             $index++
@@ -536,8 +586,9 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
     else {
         $index = 1
         foreach ($item in @($plan.mcp_items)) {
+            $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
             $transport = if ($item.server.PSObject.Properties.Match("transport").Count -gt 0) { [string]$item.server.transport } else { "stdio" }
-            Write-Host ("{0}) {1} transport={2} status={3}" -f $index, [string]$item.name, $transport, [string]$item.status)
+            Write-Host ("{0}) {1} transport={2} status={3}" -f $itemIndex, [string]$item.name, $transport, [string]$item.status)
             Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
             Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
             $index++
@@ -551,7 +602,8 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
     else {
         $index = 1
         foreach ($item in @($plan.mcp_removal_candidates)) {
-            Write-Host ("{0}) {1} [name={2}] status={3}" -f $index, [string]$item.name, [string]$item.installed_name, [string]$item.status)
+            $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
+            Write-Host ("{0}) {1} [name={2}] status={3}" -f $itemIndex, [string]$item.name, [string]$item.installed_name, [string]$item.status)
             Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
             Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
             $index++

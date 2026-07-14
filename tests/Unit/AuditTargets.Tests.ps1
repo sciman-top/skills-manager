@@ -217,6 +217,11 @@ Describe "Audit Targets" {
             $preflight = Parse-AuditTargetsArgs @("preflight", "--run-id", "20260422-010101-001")
             $preflight.action | Should Be "preflight"
             $preflight.run_id | Should Be "20260422-010101-001"
+
+            $validateDryRun = Parse-AuditTargetsArgs @("validate-dry-run", "--recommendations", "r.json", "--dry-run-ack", "我知道未落盘")
+            $validateDryRun.action | Should Be "validate_dry_run"
+            $validateDryRun.recommendations | Should Be "r.json"
+            $validateDryRun.dry_run_ack | Should Be "我知道未落盘"
         }
 
         It "Parses apply selection indexes for add and remove lists" {
@@ -253,6 +258,8 @@ Describe "Audit Targets" {
             (Parse-AuditTargetsArgs @("发现新技能")).action | Should Be "discover_skills"
             (Parse-AuditTargetsArgs @("状态")).action | Should Be "status"
             (Parse-AuditTargetsArgs @("预检", "--run-id", "demo-run")).action | Should Be "preflight"
+            (Parse-AuditTargetsArgs @("校验预演", "--recommendations", "r.json")).action | Should Be "validate_dry_run"
+            (Parse-AuditTargetsArgs @("预演", "--recommendations", "r.json")).action | Should Be "validate_dry_run"
             (Parse-AuditTargetsArgs @("应用确认", "--recommendations", "r.json")).action | Should Be "apply_flow"
             (Parse-AuditTargetsArgs @("应用", "--recommendations", "r.json")).action | Should Be "apply"
         }
@@ -1059,6 +1066,28 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             }
         }
 
+        It "Excludes resource-only override directories from installed skill facts" {
+            $oldOverridesDir = $script:OverridesDir
+            try {
+                $script:OverridesDir = Join-Path $TestDrive "overrides-resource-only"
+                $resourceDir = Join-Path $script:OverridesDir "requesting-code-review"
+                New-Item -ItemType Directory -Path $resourceDir -Force | Out-Null
+                Set-Content -Path (Join-Path $resourceDir "code-reviewer.md") -Value "resource bridge"
+                $cfg = [pscustomobject]@{
+                    vendors = @()
+                    imports = @()
+                    mappings = @()
+                }
+
+                $facts = Get-InstalledSkillFacts $cfg
+
+                @($facts).Count | Should Be 0
+            }
+            finally {
+                $script:OverridesDir = $oldOverridesDir
+            }
+        }
+
         It "Changes the installed fingerprint when projected skill semantics change" {
             $base = [pscustomobject]@{
                 vendor          = "manual"
@@ -1124,6 +1153,46 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $withoutAllowlist[0].PSObject.Properties.Match("enabled_tools").Count | Should Be 0
             $withEmptyAllowlist[0].PSObject.Properties.Match("enabled_tools").Count | Should Be 1
             @($withEmptyAllowlist[0].enabled_tools).Count | Should Be 0
+        }
+
+        It "Captures system and enabled plugin skills as read-only external facts" {
+            $userRoot = Join-Path $TestDrive "external-user-skills"
+            $systemDir = Join-Path $userRoot ".system\system-demo"
+            $pluginCache = Join-Path $TestDrive "external-plugin-cache"
+            $pluginDir = Join-Path $pluginCache "market\demo\1.0.0\skills\plugin-demo"
+            $codexConfig = Join-Path $TestDrive "external-config.toml"
+            New-Item -ItemType Directory -Path $systemDir, $pluginDir -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $systemDir "SKILL.md") "---`nname: system-demo`ndescription: System demo.`n---`n"
+            Set-ContentUtf8 (Join-Path $pluginDir "SKILL.md") "---`nname: plugin-demo`ndescription: Plugin demo.`n---`n"
+            Set-ContentUtf8 $codexConfig "[plugins.`"demo@market`"]`nenabled = true`n"
+            $cfg = [pscustomobject]@{
+                vendors = @()
+                imports = @()
+                mappings = @()
+                mcp_servers = @()
+                skill_projection = [pscustomobject]@{
+                    user_skill_root = $userRoot
+                    codex_config_path = $codexConfig
+                    external_skill_inventory = [pscustomobject]@{ enabled = $true; plugin_cache_path = $pluginCache }
+                }
+            }
+
+            $facts = @(Get-AuditExternalSkillFacts $cfg)
+
+            $facts.Count | Should Be 2
+            @($facts | ForEach-Object source_kind | Sort-Object) -join "," | Should Be "plugin,system"
+            ($facts | Where-Object source_kind -eq "plugin").qualified_name | Should Be "demo@market::plugin-demo"
+        }
+
+        It "Checks external capability drift only when the snapshot carries its fingerprint" {
+            $live = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external-current" }
+            $current = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external-current" }
+            $stale = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external-old" }
+            $legacy = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp" }
+
+            (Get-AuditInstalledSnapshotStaleness $current $live).is_stale | Should Be $false
+            (Get-AuditInstalledSnapshotStaleness $stale $live).external_skill_stale | Should Be $true
+            (Get-AuditInstalledSnapshotStaleness $legacy $live).is_stale | Should Be $false
         }
     }
 
@@ -1397,6 +1466,30 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $rec.empty_recommendation_reasons[0] | Should Be "insufficient_reliable_evidence"
         }
 
+        It "Validates and normalizes structured overlap routing" {
+            $path = Join-Path $TestDrive "recommendations-overlap-routing.json"
+            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-overlap","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[{"name":"ppt stack","reason_user_profile":"courseware","reason_target_repo":"pptx output","sources":["https://example.com/ppt"],"note":"router plus executor","routing":{"router":"teacher-ppt","selection_policy":"router first","members":[{"name":"teacher-ppt","role":"ROUTER"},{"name":"presentations","role":"executor"}]}}],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+
+            $rec = Load-AuditRecommendations $path
+
+            $rec.overlap_findings[0].routing.members[0].role | Should Be "router"
+            @($rec.overlap_findings[0].sources).Count | Should Be 1
+        }
+
+        It "Rejects structured overlap routing when the declared router is not a router member" {
+            $path = Join-Path $TestDrive "recommendations-overlap-invalid-router.json"
+            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-overlap-invalid-router","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[{"name":"ppt stack","reason_user_profile":"courseware","reason_target_repo":"pptx output","sources":["https://example.com/ppt"],"note":"router plus executor","routing":{"router":"presentations","selection_policy":"router first","members":[{"name":"teacher-ppt","role":"router"},{"name":"presentations","role":"executor"}]}}],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+
+            { Load-AuditRecommendations $path } | Should Throw
+        }
+
+        It "Rejects overlap findings without a report note" {
+            $path = Join-Path $TestDrive "recommendations-overlap-no-note.json"
+            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-overlap-invalid","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[{"name":"ppt stack","reason_user_profile":"courseware","reason_target_repo":"pptx output","sources":["https://example.com/ppt"]}],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+
+            { Load-AuditRecommendations $path } | Should Throw
+        }
+
         It "Rejects missing recommendations file" {
             $thrown = $false
             try {
@@ -1607,6 +1700,63 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             finally {
                 $script:Root = $oldRoot
             }
+        }
+
+        It "Preserves explicit original indexes in the machine-readable dry-run summary" {
+            $plan = [pscustomobject]([ordered]@{
+                run_id = "r-original-index"
+                target = "demo"
+                decision_basis = [pscustomobject]@{ summary = "index contract" }
+                empty_recommendation_reasons = @()
+                source_observations = @()
+                items = @([pscustomobject]@{
+                    original_index = 4
+                    name = "skill-four"
+                    reason_user_profile = "u"
+                    reason_target_repo = "t"
+                    sources = @("local")
+                    keyword_trace = $null
+                    status = "planned"
+                })
+                removal_candidates = @([pscustomobject]@{
+                    original_index = 3
+                    name = "remove-three"
+                    vendor = "manual"
+                    from = "remove-three"
+                    reason_user_profile = "u"
+                    reason_target_repo = "t"
+                    sources = @("local")
+                    keyword_trace = $null
+                    status = "planned"
+                })
+                mcp_items = @([pscustomobject]@{
+                    original_index = 2
+                    name = "mcp-two"
+                    reason_user_profile = "u"
+                    reason_target_repo = "t"
+                    sources = @("local")
+                    keyword_trace = $null
+                    status = "planned"
+                })
+                mcp_removal_candidates = @([pscustomobject]@{
+                    original_index = 5
+                    name = "mcp-remove-five"
+                    installed_name = "mcp-remove-five"
+                    reason_user_profile = "u"
+                    reason_target_repo = "t"
+                    sources = @("local")
+                    keyword_trace = $null
+                    status = "planned"
+                })
+            })
+
+            $summary = New-AuditDryRunSummary $plan "recommendations.json"
+
+            $summary.add[0].index | Should Be 4
+            $summary.add[0].original_index | Should Be 4
+            $summary.remove[0].index | Should Be 3
+            $summary.mcp_add[0].index | Should Be 2
+            $summary.mcp_remove[0].index | Should Be 5
         }
 
         It "Treats --apply --yes as all selections when indexes are omitted" {
@@ -1826,6 +1976,143 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             finally {
                 $script:Root = $oldRoot
             }
+        }
+
+        It "Runs validated dry-run in order and writes one fail-closed workflow report" {
+            $runDir = Join-Path $TestDrive "r-validate-dry-run"
+            New-Item -ItemType Directory -Path $runDir -Force | Out-Null
+            $recPath = Join-Path $runDir "recommendations.json"
+            Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-validate-dry-run","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+
+            Mock Invoke-AuditRecommendationsPreflight {
+                return [pscustomobject]@{
+                    success = $true
+                    run_id = "r-validate-dry-run"
+                    live_state = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external" }
+                }
+            }
+            Mock Invoke-AuditRecommendationsApply {
+                return [pscustomobject]@{
+                    success = $true
+                    persisted = $false
+                    run_id = "r-validate-dry-run"
+                    target = "demo"
+                    changed_counts = New-AuditChangedCounts @() @()
+                    snapshot_state = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external" }
+                    live_state = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external" }
+                    items = @()
+                    removal_candidates = @()
+                    mcp_items = @()
+                    mcp_removal_candidates = @()
+                    dry_run_summary_path = (Join-Path $runDir "dry-run-summary.json")
+                }
+            }
+
+            $result = Invoke-AuditRecommendationsValidateDryRun -RecommendationsPath $recPath -DryRunAck "我知道未落盘"
+            $saved = Get-ContentUtf8 (Get-AuditWorkflowReportPath $recPath) | ConvertFrom-Json
+
+            $result.success | Should Be $true
+            $result.persisted | Should Be $false
+            $saved.input_stability.matched | Should Be $true
+            $saved.stages.recommendations_validation.status | Should Be "passed"
+            $saved.stages.preflight.status | Should Be "passed"
+            $saved.stages.dry_run.status | Should Be "passed"
+            @($saved.categories).Count | Should Be 4
+            $saved.categories[0].key | Should Be "add"
+            $saved.categories[1].key | Should Be "remove"
+            $saved.categories[2].key | Should Be "mcp_add"
+            $saved.categories[3].key | Should Be "mcp_remove"
+            $saved.categories[0].empty_reason | Should Not BeNullOrEmpty
+            $saved.categories[1].empty_reason | Should Not BeNullOrEmpty
+            $saved.categories[2].empty_reason | Should Not BeNullOrEmpty
+            $saved.categories[3].empty_reason | Should Not BeNullOrEmpty
+            Assert-MockCalled Invoke-AuditRecommendationsPreflight -Times 1 -Exactly -Scope It
+            Assert-MockCalled Invoke-AuditRecommendationsApply -Times 1 -Exactly -Scope It
+        }
+
+        It "Stops validated dry-run when preflight fails and records the failing stage" {
+            $runDir = Join-Path $TestDrive "r-validate-preflight-failed"
+            New-Item -ItemType Directory -Path $runDir -Force | Out-Null
+            $recPath = Join-Path $runDir "recommendations.json"
+            Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-validate-preflight-failed","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+
+            Mock Invoke-AuditRecommendationsPreflight { throw "预检失败：prompt_contract_mismatch" }
+            Mock Invoke-AuditRecommendationsApply { throw "dry-run must not execute" }
+
+            $thrown = $false
+            try {
+                Invoke-AuditRecommendationsValidateDryRun -RecommendationsPath $recPath -DryRunAck "我知道未落盘" | Out-Null
+            }
+            catch {
+                $thrown = $true
+                $_.Exception.Message | Should Match "prompt_contract_mismatch"
+            }
+
+            $saved = Get-ContentUtf8 (Get-AuditWorkflowReportPath $recPath) | ConvertFrom-Json
+            $thrown | Should Be $true
+            $saved.success | Should Be $false
+            $saved.persisted | Should Be $false
+            $saved.error_code | Should Be "prompt_contract_mismatch"
+            $saved.failed_stage | Should Be "preflight"
+            $saved.stages.dry_run.status | Should Be "not_run"
+            Assert-MockCalled Invoke-AuditRecommendationsApply -Times 0 -Exactly -Scope It
+        }
+
+        It "Reports recommendations missing without pretending the command can generate AI decisions" {
+            $runDir = Join-Path $TestDrive "r-recommendations-missing"
+            New-Item -ItemType Directory -Path $runDir -Force | Out-Null
+            $recPath = Join-Path $runDir "recommendations.json"
+
+            $thrown = $false
+            try {
+                Invoke-AuditRecommendationsValidateDryRun -RecommendationsPath $recPath -DryRunAck "我知道未落盘" | Out-Null
+            }
+            catch {
+                $thrown = $true
+                $_.Exception.Message | Should Match "recommendations_missing"
+            }
+
+            $saved = Get-ContentUtf8 (Get-AuditWorkflowReportPath $recPath) | ConvertFrom-Json
+            $thrown | Should Be $true
+            $saved.error_code | Should Be "recommendations_missing"
+            $saved.failed_stage | Should Be "recommendations_validation"
+            $saved.next_command | Should Match "outer-ai-prompt.md"
+            $saved.stages.preflight.status | Should Be "not_run"
+            $saved.stages.dry_run.status | Should Be "not_run"
+        }
+
+        It "Stops before dry-run when a preflight input changes" {
+            $runDir = Join-Path $TestDrive "r-workflow-input-changed"
+            New-Item -ItemType Directory -Path $runDir -Force | Out-Null
+            $recPath = Join-Path $runDir "recommendations.json"
+            Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-workflow-input-changed","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+
+            Mock Invoke-AuditRecommendationsPreflight {
+                Set-ContentUtf8 (Join-Path $runDir "source-strategy.json") '{"changed":true}'
+                return [pscustomobject]@{
+                    success = $true
+                    run_id = "r-workflow-input-changed"
+                    live_state = [pscustomobject]@{ fingerprint = "skills"; mcp_fingerprint = "mcp"; external_skill_fingerprint = "external" }
+                }
+            }
+            Mock Invoke-AuditRecommendationsApply { throw "dry-run must not execute" }
+
+            $thrown = $false
+            try {
+                Invoke-AuditRecommendationsValidateDryRun -RecommendationsPath $recPath -DryRunAck "我知道未落盘" | Out-Null
+            }
+            catch {
+                $thrown = $true
+                $_.Exception.Message | Should Match "workflow_input_changed"
+            }
+
+            $saved = Get-ContentUtf8 (Get-AuditWorkflowReportPath $recPath) | ConvertFrom-Json
+            $thrown | Should Be $true
+            $saved.error_code | Should Be "workflow_input_changed"
+            $saved.failed_stage | Should Be "input_stability"
+            $saved.input_stability.preflight_matched | Should Be $false
+            $saved.stages.dry_run.status | Should Be "not_run"
+            Assert-MockCalled Invoke-AuditRecommendationsApply -Times 0 -Exactly -Scope It
         }
     }
 }

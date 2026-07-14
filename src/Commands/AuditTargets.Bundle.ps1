@@ -93,6 +93,7 @@ function Invoke-AuditTargetsScan {
 
     $installedPath = Join-Path $reportRoot "installed-skills.json"
     $installedSkills = @()
+    $externalSkills = @()
     $installedMcpServers = @()
     try {
         try {
@@ -103,6 +104,7 @@ function Invoke-AuditTargetsScan {
             $liveCfg = New-AuditInstalledFactsFallbackCfg
         }
         $installedSkills = @(Get-InstalledSkillFacts $liveCfg)
+        $externalSkills = @(Get-AuditExternalSkillFacts $liveCfg)
         $installedMcpServers = @(Get-AuditMcpServerFacts $liveCfg)
     }
     catch {
@@ -116,16 +118,19 @@ function Invoke-AuditTargetsScan {
             captured_at = (Get-Date).ToString("o")
             live_skill_count = [int]$liveState.skill_count
             live_fingerprint = [string]$liveState.fingerprint
+            live_external_skill_count = if ($liveState.PSObject.Properties.Match('external_skill_count').Count -gt 0) { [int]$liveState.external_skill_count } else { 0 }
+            live_external_skill_fingerprint = if ($liveState.PSObject.Properties.Match('external_skill_fingerprint').Count -gt 0) { [string]$liveState.external_skill_fingerprint } else { '' }
             live_mcp_server_count = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
             live_mcp_fingerprint = if ($liveState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$liveState.mcp_fingerprint } else { "" }
             skills = @($installedSkills)
+            external_skills = @($externalSkills)
             mcp_servers = @($installedMcpServers)
         })
 
     $sourceStrategyPath = Join-Path $reportRoot "source-strategy.json"
     Write-AuditJsonFile $sourceStrategyPath (New-AuditSourceStrategy "target-repo" "")
     $decisionInsightsPath = Join-Path $reportRoot "decision-insights.json"
-    Write-AuditJsonFile $decisionInsightsPath (New-AuditDecisionInsights $cfg $scans $installedSkills $installedMcpServers "target-repo")
+    Write-AuditJsonFile $decisionInsightsPath (New-AuditDecisionInsights $cfg $scans @($installedSkills + $externalSkills) $installedMcpServers "target-repo")
 
     $templatePath = Join-Path $reportRoot "recommendations.template.json"
     $templateTarget = if ($scans.Count -eq 1) { [string]$scans[0].target.name } else { "*" }
@@ -230,6 +235,7 @@ function Invoke-AuditSkillDiscovery {
 
     $installedPath = Join-Path $reportRoot "installed-skills.json"
     $installedSkills = @()
+    $externalSkills = @()
     $installedMcpServers = @()
     try {
         try {
@@ -240,6 +246,7 @@ function Invoke-AuditSkillDiscovery {
             $liveCfg = New-AuditInstalledFactsFallbackCfg
         }
         $installedSkills = @(Get-InstalledSkillFacts $liveCfg)
+        $externalSkills = @(Get-AuditExternalSkillFacts $liveCfg)
         $installedMcpServers = @(Get-AuditMcpServerFacts $liveCfg)
     }
     catch {
@@ -253,16 +260,19 @@ function Invoke-AuditSkillDiscovery {
             captured_at = (Get-Date).ToString("o")
             live_skill_count = [int]$liveState.skill_count
             live_fingerprint = [string]$liveState.fingerprint
+            live_external_skill_count = if ($liveState.PSObject.Properties.Match('external_skill_count').Count -gt 0) { [int]$liveState.external_skill_count } else { 0 }
+            live_external_skill_fingerprint = if ($liveState.PSObject.Properties.Match('external_skill_fingerprint').Count -gt 0) { [string]$liveState.external_skill_fingerprint } else { '' }
             live_mcp_server_count = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
             live_mcp_fingerprint = if ($liveState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$liveState.mcp_fingerprint } else { "" }
             skills = @($installedSkills)
+            external_skills = @($externalSkills)
             mcp_servers = @($installedMcpServers)
         })
 
     $sourceStrategyPath = Join-Path $reportRoot "source-strategy.json"
     Write-AuditJsonFile $sourceStrategyPath (New-AuditSourceStrategy "profile-only" $Query)
     $decisionInsightsPath = Join-Path $reportRoot "decision-insights.json"
-    Write-AuditJsonFile $decisionInsightsPath (New-AuditDecisionInsights $cfg @() $installedSkills $installedMcpServers "profile-only")
+    Write-AuditJsonFile $decisionInsightsPath (New-AuditDecisionInsights $cfg @() @($installedSkills + $externalSkills) $installedMcpServers "profile-only")
 
     $templatePath = Join-Path $reportRoot "recommendations.template.json"
     Write-AuditJsonFile $templatePath (New-AuditRecommendationsTemplate $runId "profile-only" "profile-only" $Query)

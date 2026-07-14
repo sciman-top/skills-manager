@@ -1,0 +1,157 @@
+{
+  "schema_version": 1,
+  "mode": "observe",
+  "trigger_rules": [
+    {
+      "id": "mandatory-activation",
+      "severity": "warning",
+      "scan_scope": "description",
+      "pattern": "\\bMUST\\b|before ANY response|ABSOLUTELY MUST|do not have a choice",
+      "resolution": "Apply higher-priority user and repository instructions first, then invoke only the narrowest matching skill."
+    },
+    {
+      "id": "forced-human-gate",
+      "severity": "warning",
+      "scan_scope": "full",
+      "pattern": "get (?:user|human) approval|human has reviewed and approved|wait for the user|wait for.*response",
+      "resolution": "Treat an already approved design or an explicit autonomous-execution request as satisfying the gate when higher-priority instructions allow it."
+    },
+    {
+      "id": "forced-persistence",
+      "severity": "warning",
+      "scan_scope": "full",
+      "pattern": "each successful increment gets its own commit|no uncommitted changes remain|write design doc.*commit|commit the design document",
+      "resolution": "Never commit, push, publish, or persist external state without task authorization; keep verification independent from persistence."
+    },
+    {
+      "id": "forced-delegation",
+      "severity": "warning",
+      "scan_scope": "full",
+      "pattern": "spin up a.*background agent|must.*subagent|dispatch.*parallel agents",
+      "resolution": "Delegate only when the task or repository contract authorizes agents and the work has an independent bounded seam."
+    }
+  ],
+  "groups": [
+    {
+      "id": "development-flow",
+      "purpose": "Select one workflow stage at a time and keep approval, persistence, and delegation subordinate to the active task contract.",
+      "router": "using-superpowers",
+      "selection_policy": "route by current stage; do not cascade every workflow skill",
+      "members": [
+        { "name": "using-superpowers", "role": "router", "activation": "conversation entry and skill discovery" },
+        { "name": "brainstorming", "role": "workflow", "activation": "requirements or design remain unresolved" },
+        { "name": "planning-and-task-breakdown", "role": "workflow", "activation": "an approved design still needs an implementation plan" },
+        { "name": "systematic-debugging", "role": "workflow", "activation": "a bug, failed test, or unexpected behavior needs diagnosis" },
+        { "name": "incremental-implementation", "role": "workflow", "activation": "an authorized multi-file implementation is in progress" },
+        { "name": "git-workflow-and-versioning", "role": "workflow", "activation": "version-control organization or an authorized commit/release is required" },
+        { "name": "code-review-and-quality", "role": "validator", "activation": "a change is ready for review or merge assessment" },
+        { "name": "verification-before-completion", "role": "validator", "activation": "before any completion or passing claim" },
+        { "name": "research", "role": "reference", "activation": "current primary-source evidence is required" }
+      ]
+    },
+    {
+      "id": "teacher-courseware-ppt",
+      "purpose": "Use the teaching-domain router first, then select a file, live PowerPoint, bitmap, diagram, or research executor by delivery medium.",
+      "router": "custom-teacher-courseware-ppt",
+      "selection_policy": "router first; one primary deck executor; validators may compose",
+      "members": [
+        { "name": "custom-teacher-courseware-ppt", "role": "router", "activation": "junior-middle-school classroom courseware" },
+        { "name": "powerpoint-automation", "role": "operator", "activation": "live Windows PowerPoint or COM automation" },
+        { "name": "baoyu-slide-deck", "role": "executor", "activation": "bitmap-oriented slide deck generation" },
+        { "name": "canvas-design", "role": "executor", "activation": "single-page visual composition" },
+        { "name": "data-visualization", "role": "executor", "activation": "data-driven charts and visual explanation" },
+        { "name": "drawio-diagram-forge", "role": "executor", "activation": "editable diagrams" }
+      ],
+      "external_members": [
+        { "qualified_name": "presentations@openai-primary-runtime::Presentations", "role": "executor", "activation": "create or edit PPTX and slide files", "optional": true }
+      ]
+    },
+    {
+      "id": "creator-publishing",
+      "purpose": "Keep Chinese long-form content orchestration separate from writing, illustration, formatting, and authenticated publication executors.",
+      "router": "custom-creator-publishing",
+      "selection_policy": "canonical Markdown first; add executors only for requested production stages",
+      "members": [
+        { "name": "custom-creator-publishing", "role": "router", "activation": "WeChat, Zhihu, blog, or teaching-newsletter workflow" },
+        { "name": "copy-editing", "role": "executor", "activation": "editing and prose refinement" },
+        { "name": "social", "role": "executor", "activation": "social distribution copy" },
+        { "name": "baoyu-article-illustrator", "role": "executor", "activation": "article illustration planning and generation" },
+        { "name": "baoyu-cover-image", "role": "executor", "activation": "cover image generation" },
+        { "name": "baoyu-infographic", "role": "executor", "activation": "information-dense infographic" },
+        { "name": "baoyu-format-markdown", "role": "executor", "activation": "Markdown formatting" },
+        { "name": "baoyu-post-to-wechat", "role": "operator", "activation": "authorized WeChat draft or publication operation" },
+        { "name": "baoyu-url-to-markdown", "role": "executor", "activation": "source-page conversion" },
+        { "name": "baoyu-compress-image", "role": "executor", "activation": "publication asset compression" },
+        { "name": "imagegen", "role": "executor", "activation": "new raster imagery is requested" }
+      ],
+      "external_members": [
+        { "qualified_name": "chrome@openai-bundled::control-chrome", "role": "operator", "activation": "publication requires the user's authenticated Chrome state", "optional": true }
+      ]
+    },
+    {
+      "id": "junior-physics-animation",
+      "purpose": "Use the physics-domain router to choose Web/SVG, D3, Manim, Remotion, or PPT animation according to classroom delivery needs.",
+      "router": "custom-junior-physics-animation",
+      "selection_policy": "one primary medium; add verification skills for that medium",
+      "members": [
+        { "name": "custom-junior-physics-animation", "role": "router", "activation": "junior-middle-school physics motion or interaction" },
+        { "name": "manim-composer", "role": "executor", "activation": "formula, geometry, or vector video" },
+        { "name": "manimce-best-practices", "role": "validator", "activation": "Manim implementation or review" },
+        { "name": "d3-viz", "role": "executor", "activation": "graphs, coordinates, and variable relationships" },
+        { "name": "data-visualization", "role": "executor", "activation": "data explanation" },
+        { "name": "ui-animation", "role": "executor", "activation": "Web UI motion" },
+        { "name": "storyboard-creation", "role": "workflow", "activation": "multi-scene animation planning" },
+        { "name": "remotion-best-practices", "role": "validator", "activation": "React video composition" },
+        { "name": "frontend-design", "role": "executor", "activation": "classroom Web interface design" },
+        { "name": "frontend-ui-engineering", "role": "executor", "activation": "production Web UI implementation" },
+        { "name": "vite", "role": "reference", "activation": "Vite project implementation" },
+        { "name": "playwright", "role": "validator", "activation": "isolated Web animation verification" }
+      ]
+    },
+    {
+      "id": "windows-teacher-app",
+      "purpose": "Separate Windows teacher-product constraints from .NET references, native UI validation, and real desktop operation.",
+      "router": "custom-windows-wpf-teacher-app",
+      "selection_policy": "domain router first; references before implementation; automation only for explicit observation or operation",
+      "members": [
+        { "name": "custom-windows-wpf-teacher-app", "role": "router", "activation": "Windows-first teacher desktop software" },
+        { "name": "microsoft-code-reference", "role": "reference", "activation": "official Microsoft API or sample lookup" },
+        { "name": "windows-desktop-e2e", "role": "validator", "activation": "native Windows desktop end-to-end validation" }
+      ],
+      "external_members": [
+        { "qualified_name": "computer-use@openai-bundled::computer-use", "role": "operator", "activation": "authorized operation of a visible Windows application", "optional": true }
+      ]
+    },
+    {
+      "id": "browser-automation",
+      "purpose": "Choose ordinary Web reading, isolated browser validation, authenticated Chrome control, or desktop control by state and permission boundary.",
+      "router": "",
+      "selection_policy": "prefer the lowest-permission capability that preserves required browser state",
+      "members": [
+        { "name": "playwright", "role": "validator", "activation": "isolated Web testing and screenshots" },
+        { "name": "playwright-best-practices", "role": "reference", "activation": "Playwright test implementation guidance" },
+        { "name": "webapp-testing", "role": "validator", "activation": "general Web application quality workflow" },
+        { "name": "screenshot", "role": "executor", "activation": "page or region screenshot capture" },
+        { "name": "agent-browser", "role": "operator", "activation": "ordinary browser automation without user-session requirements" }
+      ],
+      "external_members": [
+        { "qualified_name": "chrome@openai-bundled::control-chrome", "role": "operator", "activation": "existing cookies, tabs, extensions, or authenticated state are required", "optional": true },
+        { "qualified_name": "computer-use@openai-bundled::computer-use", "role": "operator", "activation": "a browser flow cannot be completed through browser-native automation", "optional": true }
+      ]
+    }
+  ],
+  "conflicts": [
+    {
+      "id": "design-and-plan-gates-coactive",
+      "severity": "warning",
+      "members": ["brainstorming", "planning-and-task-breakdown"],
+      "resolution": "Use brainstorming only while design is unresolved; after approval, use planning only when a written implementation breakdown is still needed."
+    },
+    {
+      "id": "implicit-commit-pressure",
+      "severity": "warning",
+      "members": ["git-workflow-and-versioning", "incremental-implementation"],
+      "resolution": "Use git for inspection and rollback boundaries, but commit or push only when the task explicitly authorizes persistence."
+    }
+  ]
+}

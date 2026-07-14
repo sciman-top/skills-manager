@@ -1,0 +1,254 @@
+function Get-AuditWorkflowReportPath([string]$recommendationsPath) {
+    $dir = Split-Path $recommendationsPath -Parent
+    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
+    return (Join-Path $dir "workflow-report.json")
+}
+
+function Get-AuditWorkflowInputState([string]$recommendationsPath) {
+    $dir = Split-Path $recommendationsPath -Parent
+    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
+    $inputs = @(
+        [pscustomobject]@{ name = "recommendations.json"; path = $recommendationsPath },
+        [pscustomobject]@{ name = "installed-skills.json"; path = (Join-Path $dir "installed-skills.json") },
+        [pscustomobject]@{ name = "audit-meta.json"; path = (Join-Path $dir "audit-meta.json") },
+        [pscustomobject]@{ name = "outer-ai-prompt.md"; path = (Join-Path $dir "outer-ai-prompt.md") },
+        [pscustomobject]@{ name = "user-profile.json"; path = (Join-Path $dir "user-profile.json") },
+        [pscustomobject]@{ name = "source-strategy.json"; path = (Join-Path $dir "source-strategy.json") },
+        [pscustomobject]@{ name = "decision-insights.json"; path = (Join-Path $dir "decision-insights.json") },
+        [pscustomobject]@{ name = "repo-scan.json"; path = (Join-Path $dir "repo-scan.json") },
+        [pscustomobject]@{ name = "repo-scans.json"; path = (Join-Path $dir "repo-scans.json") }
+    )
+    $files = @()
+    $pairs = @()
+    foreach ($input in $inputs) {
+        $exists = Test-Path -LiteralPath $input.path -PathType Leaf
+        $hash = if ($exists) { [string](Get-FileContentHash $input.path) } else { "" }
+        $files += [pscustomobject]([ordered]@{
+            name = [string]$input.name
+            exists = [bool]$exists
+            sha256 = $hash
+        })
+        $pairs += ("{0}|{1}|{2}" -f [string]$input.name, ([bool]$exists).ToString().ToLowerInvariant(), $hash)
+    }
+    return [pscustomobject]([ordered]@{
+        fingerprint = Get-AuditFingerprintFromVendorFromPairs $pairs $true
+        files = @($files)
+    })
+}
+
+function ConvertTo-AuditWorkflowCategoryItems($items) {
+    $result = @()
+    $fallbackIndex = 1
+    foreach ($item in @($items)) {
+        $originalIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $fallbackIndex }
+        $result += [pscustomobject]([ordered]@{
+            original_index = $originalIndex
+            name = [string]$item.name
+            reason_user_profile = [string]$item.reason_user_profile
+            reason_target_repo = [string]$item.reason_target_repo
+            sources = @($item.sources)
+            status = [string]$item.status
+        })
+        $fallbackIndex++
+    }
+    return @($result)
+}
+
+function Get-AuditWorkflowEmptyReason($recommendations, [string]$prefix, [int]$itemCount) {
+    if ($itemCount -gt 0) { return "" }
+    foreach ($reason in @($recommendations.empty_recommendation_reasons)) {
+        $text = [string]$reason
+        if ($text.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $separator = $text.IndexOf(":")
+            if ($separator -lt 0) { $separator = $text.IndexOf("：") }
+            if ($separator -ge 0 -and $separator + 1 -lt $text.Length) {
+                return $text.Substring($separator + 1).Trim()
+            }
+            return $text.Trim()
+        }
+    }
+    return [string]$recommendations.decision_basis.summary
+}
+
+function New-AuditWorkflowCategories($dryRunReport, $recommendations) {
+    $addItems = @(ConvertTo-AuditWorkflowCategoryItems $dryRunReport.items)
+    $removeItems = @(ConvertTo-AuditWorkflowCategoryItems $dryRunReport.removal_candidates)
+    $mcpAddItems = @(ConvertTo-AuditWorkflowCategoryItems $dryRunReport.mcp_items)
+    $mcpRemoveItems = @(ConvertTo-AuditWorkflowCategoryItems $dryRunReport.mcp_removal_candidates)
+    return @(
+        [pscustomobject]([ordered]@{ order = 1; key = "add"; label = "新增技能"; empty_reason = Get-AuditWorkflowEmptyReason $recommendations "new_skills_empty" $addItems.Count; items = $addItems }),
+        [pscustomobject]([ordered]@{ order = 2; key = "remove"; label = "卸载技能"; empty_reason = Get-AuditWorkflowEmptyReason $recommendations "removal_candidates_empty" $removeItems.Count; items = $removeItems }),
+        [pscustomobject]([ordered]@{ order = 3; key = "mcp_add"; label = "MCP 新增"; empty_reason = Get-AuditWorkflowEmptyReason $recommendations "mcp_new_servers_empty" $mcpAddItems.Count; items = $mcpAddItems }),
+        [pscustomobject]([ordered]@{ order = 4; key = "mcp_remove"; label = "MCP 卸载"; empty_reason = Get-AuditWorkflowEmptyReason $recommendations "mcp_removal_candidates_empty" $mcpRemoveItems.Count; items = $mcpRemoveItems })
+    )
+}
+
+function Get-AuditWorkflowErrorCode([string]$stage, [string]$message) {
+    foreach ($code in @(
+            "recommendations_missing",
+            "prompt_contract_mismatch",
+            "stale_snapshot",
+            "insufficient_source_coverage",
+            "insufficient_decision_quality",
+            "user_profile_invalid",
+            "workflow_input_changed",
+            "live_state_changed",
+            "dry_run_not_confirmed",
+            "unexpected_persistence"
+        )) {
+        if ($message -match [regex]::Escape($code)) { return $code }
+    }
+    if ($stage -eq "recommendations_validation") { return "invalid_recommendations" }
+    if ($stage -eq "preflight") { return "preflight_failed" }
+    if ($stage -eq "input_stability") { return "workflow_input_changed" }
+    return "dry_run_failed"
+}
+
+function Get-AuditWorkflowNextCommand([string]$errorCode, [string]$recommendationsPath) {
+    if ($errorCode -eq "recommendations_missing") {
+        return ("先按同目录 outer-ai-prompt.md 生成 recommendations.json，再运行：.\skills.ps1 审查目标 校验预演 --recommendations `"{0}`" --dry-run-ack `"{1}`"" -f $recommendationsPath, (Get-AuditDryRunAckToken))
+    }
+    if ($errorCode -eq "stale_snapshot" -or $errorCode -eq "prompt_contract_mismatch" -or $errorCode -eq "live_state_changed") {
+        return ".\skills.ps1 审查目标 扫描"
+    }
+    return ("修复报告中的阻断项后重试：.\skills.ps1 审查目标 校验预演 --recommendations `"{0}`" --dry-run-ack `"{1}`"" -f $recommendationsPath, (Get-AuditDryRunAckToken))
+}
+
+function Invoke-AuditRecommendationsValidateDryRun {
+    param(
+        [string]$RecommendationsPath,
+        [string]$RunId,
+        [string]$DryRunAck
+    )
+    $resolvedRecommendations = Resolve-AuditRecommendationsPathForPreflight $RecommendationsPath $RunId
+    $workflowPath = Get-AuditWorkflowReportPath $resolvedRecommendations
+    $recommendationDir = Split-Path -Parent $resolvedRecommendations
+    if ([string]::IsNullOrWhiteSpace($recommendationDir)) { $recommendationDir = "." }
+    $stages = [pscustomobject]([ordered]@{
+        recommendations_validation = [pscustomobject]@{ status = "not_run" }
+        preflight = [pscustomobject]@{ status = "not_run" }
+        dry_run = [pscustomobject]@{ status = "not_run" }
+        input_stability = [pscustomobject]@{ status = "not_run" }
+    })
+    $report = [ordered]@{
+        schema_version = 1
+        workflow = "recommendations_validate_dry_run"
+        generated_at = (Get-Date).ToString("o")
+        run_id = ""
+        target = ""
+        success = $false
+        persisted = $false
+        failed_stage = ""
+        error_code = ""
+        error_message = ""
+        next_command = ""
+        recommendations_path = $resolvedRecommendations
+        recommendations_sha256 = ""
+        stages = $stages
+        input_stability = [pscustomobject]([ordered]@{
+            before = $null
+            after_preflight = $null
+            after_dry_run = $null
+            preflight_matched = $false
+            live_state_matched = $false
+            matched = $false
+        })
+        reports = [pscustomobject]([ordered]@{
+            preflight = (Join-Path $recommendationDir "preflight-report.json")
+            dry_run_summary = (Get-AuditDryRunSummaryPath $resolvedRecommendations)
+            apply = (Get-AuditApplyReportPath $resolvedRecommendations)
+            workflow = $workflowPath
+        })
+        changed_counts = New-AuditChangedCounts @() @()
+        categories = @()
+        items = @()
+        removal_candidates = @()
+        mcp_items = @()
+        mcp_removal_candidates = @()
+    }
+    $currentStage = "recommendations_validation"
+    try {
+        if (-not (Test-Path -LiteralPath $resolvedRecommendations -PathType Leaf)) {
+            throw ("recommendations_missing：recommendations.json 不存在：{0}" -f $resolvedRecommendations)
+        }
+
+        $report.input_stability.before = Get-AuditWorkflowInputState $resolvedRecommendations
+        $report.recommendations_sha256 = [string](Get-FileContentHash $resolvedRecommendations)
+        $rec = Load-AuditRecommendations $resolvedRecommendations
+        $report.run_id = [string]$rec.run_id
+        $report.target = [string]$rec.target
+        $report.stages.recommendations_validation.status = "passed"
+
+        $currentStage = "preflight"
+        $preflightReport = Invoke-AuditRecommendationsPreflight -RecommendationsPath $resolvedRecommendations
+        Need ([bool]$preflightReport.success) "preflight_failed：预检报告未通过"
+        $report.stages.preflight.status = "passed"
+
+        $currentStage = "input_stability"
+        $report.input_stability.after_preflight = Get-AuditWorkflowInputState $resolvedRecommendations
+        $report.input_stability.preflight_matched = ([string]$report.input_stability.before.fingerprint -eq [string]$report.input_stability.after_preflight.fingerprint)
+        if (-not [bool]$report.input_stability.preflight_matched) {
+            throw "workflow_input_changed：preflight 前后审查输入发生变化，已停止 dry-run。"
+        }
+
+        $currentStage = "dry_run"
+        $dryRunReport = Invoke-AuditRecommendationsApply -RecommendationsPath $resolvedRecommendations -DryRunAck $DryRunAck -RequireDryRunAck $true
+        if (-not [bool]$dryRunReport.success) {
+            throw "dry_run_not_confirmed：dry-run 未完成或确认口令不匹配。"
+        }
+        if ([bool]$dryRunReport.persisted) {
+            throw "unexpected_persistence：校验预演不允许写入技能或 MCP 配置。"
+        }
+        $report.stages.dry_run.status = "passed"
+
+        $currentStage = "input_stability"
+        $report.input_stability.after_dry_run = Get-AuditWorkflowInputState $resolvedRecommendations
+        $filesMatched = ([string]$report.input_stability.before.fingerprint -eq [string]$report.input_stability.after_dry_run.fingerprint)
+        $liveStaleness = Get-AuditInstalledSnapshotStaleness $preflightReport.live_state $dryRunReport.live_state
+        $report.input_stability.live_state_matched = (-not [bool]$liveStaleness.is_stale)
+        $report.input_stability.matched = ($filesMatched -and [bool]$report.input_stability.live_state_matched)
+        if (-not $filesMatched) {
+            throw "workflow_input_changed：preflight 到 dry-run 结束期间审查输入发生变化。"
+        }
+        if (-not [bool]$report.input_stability.live_state_matched) {
+            throw "live_state_changed：preflight 到 dry-run 期间受管技能、外部能力或 MCP 状态发生变化。"
+        }
+        $report.stages.input_stability.status = "passed"
+
+        $report.success = $true
+        $report.persisted = $false
+        $report.failed_stage = ""
+        $report.error_code = ""
+        $report.error_message = ""
+        $report.next_command = ""
+        $report.changed_counts = $dryRunReport.changed_counts
+        $report.categories = @(New-AuditWorkflowCategories $dryRunReport $rec)
+        $report.items = @($dryRunReport.items)
+        $report.removal_candidates = @($dryRunReport.removal_candidates)
+        $report.mcp_items = @($dryRunReport.mcp_items)
+        $report.mcp_removal_candidates = @($dryRunReport.mcp_removal_candidates)
+        Write-AuditJsonFile $workflowPath ([pscustomobject]$report)
+        Write-Host ("校验预演报告：{0}" -f $workflowPath) -ForegroundColor Cyan
+        Write-Host "校验预演通过：preflight 与 dry-run 已按序完成，persisted=false。" -ForegroundColor Green
+        return [pscustomobject]$report
+    }
+    catch {
+        $message = [string]$_.Exception.Message
+        $errorCode = Get-AuditWorkflowErrorCode $currentStage $message
+        $report.success = $false
+        $report.persisted = $false
+        $report.failed_stage = $currentStage
+        $report.error_code = $errorCode
+        $report.error_message = $message
+        $report.next_command = Get-AuditWorkflowNextCommand $errorCode $resolvedRecommendations
+        if ($currentStage -eq "recommendations_validation") { $report.stages.recommendations_validation.status = "failed" }
+        elseif ($currentStage -eq "preflight") { $report.stages.preflight.status = "failed" }
+        elseif ($currentStage -eq "dry_run") { $report.stages.dry_run.status = "failed" }
+        else { $report.stages.input_stability.status = "failed" }
+        if (Test-Path -LiteralPath $recommendationDir -PathType Container) {
+            Write-AuditJsonFile $workflowPath ([pscustomobject]$report)
+            Write-Host ("校验预演报告：{0}" -f $workflowPath) -ForegroundColor Cyan
+        }
+        throw
+    }
+}

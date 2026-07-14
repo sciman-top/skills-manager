@@ -9,21 +9,25 @@ Describe "Quality gate scripts" {
         $raw | Should Match "ReportUntrackedRuntimeArtifacts"
     }
 
-    It "Runs skill integrity after generated sync and before dependency baseline" {
+    It "Runs skill integrity and routing after generated sync and before dependency baseline" {
         $root = Join-Path $PSScriptRoot "..\.."
         $scriptPath = Join-Path $root "scripts\quality\run-local-quality-gates.ps1"
         $raw = Get-Content -LiteralPath $scriptPath -Raw
 
         $generatedSyncIndex = $raw.IndexOf("generated-sync")
         $skillIntegrityIndex = $raw.IndexOf("skill-integrity")
+        $skillRoutingIndex = $raw.IndexOf("skill-routing")
         $dependencyBaselineIndex = $raw.IndexOf("dependency-baseline")
 
         $generatedSyncIndex -ge 0 | Should Be $true
         $skillIntegrityIndex -ge 0 | Should Be $true
+        $skillRoutingIndex -ge 0 | Should Be $true
         $dependencyBaselineIndex -ge 0 | Should Be $true
         $generatedSyncIndex -lt $skillIntegrityIndex | Should Be $true
-        $skillIntegrityIndex -lt $dependencyBaselineIndex | Should Be $true
+        $skillIntegrityIndex -lt $skillRoutingIndex | Should Be $true
+        $skillRoutingIndex -lt $dependencyBaselineIndex | Should Be $true
         $raw | Should Match "verify-skill-integrity\.ps1"
+        $raw | Should Match "verify-skill-routing\.ps1"
     }
 
     It "Documents the standalone skill integrity verifier in CLI help" {
@@ -32,6 +36,7 @@ Describe "Quality gate scripts" {
         $raw = Get-Content -LiteralPath $helpSourcePath -Raw
 
         $raw | Should Match "scripts\\verify-skill-integrity\.ps1"
+        $raw | Should Match "scripts\\verify-skill-routing\.ps1"
     }
 
     It "Runs repository hygiene in GitHub CI before other checks" {

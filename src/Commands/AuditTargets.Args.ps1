@@ -56,6 +56,10 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             "status" { $result.action = "status"; $items = @($items | Select-Object -Skip 1) }
             "预检" { $result.action = "preflight"; $items = @($items | Select-Object -Skip 1) }
             "preflight" { $result.action = "preflight"; $items = @($items | Select-Object -Skip 1) }
+            "校验预演" { $result.action = "validate_dry_run"; $items = @($items | Select-Object -Skip 1) }
+            "预演" { $result.action = "validate_dry_run"; $items = @($items | Select-Object -Skip 1) }
+            "validate-dry-run" { $result.action = "validate_dry_run"; $items = @($items | Select-Object -Skip 1) }
+            "dry-run" { $result.action = "validate_dry_run"; $items = @($items | Select-Object -Skip 1) }
             "应用确认" { $result.action = "apply_flow"; $items = @($items | Select-Object -Skip 1) }
             "apply-flow" { $result.action = "apply_flow"; $items = @($items | Select-Object -Skip 1) }
             "应用" { $result.action = "apply"; $items = @($items | Select-Object -Skip 1) }
@@ -196,6 +200,7 @@ function Show-AuditTargetsCommandHelp {
     Write-Host "  .\skills.ps1 审查目标 发现新技能 [--query <text>] [--out <dir>] [--force]"
     Write-Host "  .\skills.ps1 审查目标 预检 --run-id <run-id>"
     Write-Host "  .\skills.ps1 审查目标 预检 --recommendations <file>"
+    Write-Host "  .\skills.ps1 审查目标 校验预演 --recommendations <file> --dry-run-ack ""我知道未落盘"""
     Write-Host "  .\skills.ps1 审查目标 应用确认 --recommendations <file>"
     Write-Host "  .\skills.ps1 审查目标 应用 --recommendations <file> [--dry-run-ack ""我知道未落盘""]"
     Write-Host "  .\skills.ps1 审查目标 状态"
@@ -244,9 +249,17 @@ function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
         "list" { Write-AuditTargetsList }
         "status" { Show-AuditLatestStatus }
         "preflight" { Invoke-AuditRecommendationsPreflight -RecommendationsPath $opts.recommendations -RunId $opts.run_id | Out-Null }
+        "validate_dry_run" { Invoke-AuditRecommendationsValidateDryRun -RecommendationsPath $opts.recommendations -RunId $opts.run_id -DryRunAck $opts.dry_run_ack | Out-Null }
         "scan" { Invoke-AuditTargetsScan -Target $opts.target -OutDir $opts.out -Force:$opts.force | Out-Null }
         "discover_skills" { Invoke-AuditSkillDiscovery -Query $opts.query -OutDir $opts.out -Force:$opts.force | Out-Null }
         "apply_flow" { Invoke-AuditRecommendationsTwoStageApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -McpAddSelection $opts.mcp_add_selection -McpRemoveSelection $opts.mcp_remove_selection -DryRunAck $opts.dry_run_ack -StaleAck $opts.stale_ack -AllowStaleSnapshot:$opts.allow_stale_snapshot | Out-Null }
-        "apply" { Invoke-AuditRecommendationsApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -McpAddSelection $opts.mcp_add_selection -McpRemoveSelection $opts.mcp_remove_selection -DryRunAck $opts.dry_run_ack -StaleAck $opts.stale_ack -AllowStaleSnapshot:$opts.allow_stale_snapshot -RequireDryRunAck (-not $opts.apply) -Apply:$opts.apply -Yes:$opts.yes | Out-Null }
+        "apply" {
+            if (-not $opts.apply -and -not $opts.allow_stale_snapshot) {
+                Invoke-AuditRecommendationsValidateDryRun -RecommendationsPath $opts.recommendations -RunId $opts.run_id -DryRunAck $opts.dry_run_ack | Out-Null
+            }
+            else {
+                Invoke-AuditRecommendationsApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -McpAddSelection $opts.mcp_add_selection -McpRemoveSelection $opts.mcp_remove_selection -DryRunAck $opts.dry_run_ack -StaleAck $opts.stale_ack -AllowStaleSnapshot:$opts.allow_stale_snapshot -RequireDryRunAck (-not $opts.apply) -Apply:$opts.apply -Yes:$opts.yes | Out-Null
+            }
+        }
     }
 }

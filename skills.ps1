@@ -2618,6 +2618,18 @@ function Normalize-ArrayField($cfg, [string]$name, [ref]$changed) {
 function Assert-IsArray($value) {
     return ($value -is [System.Collections.IList]) -and -not ($value -is [string])
 }
+function Test-CfgObjectProperty($obj, [string]$name) {
+    if ($null -eq $obj) { return $false }
+    if ($obj -is [System.Collections.IDictionary] -or
+        $obj -is [System.Collections.Specialized.OrderedDictionary] -or
+        $obj -is [System.Collections.Specialized.IOrderedDictionary]) {
+        foreach ($key in @($obj.Keys)) {
+            if ([string]::Equals([string]$key, $name, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+        }
+        return $false
+    }
+    return ($obj.PSObject.Properties.Match($name).Count -gt 0)
+}
 function Test-CfgArrayProperty($obj, [string]$name) {
     if ($null -eq $obj) { return $false }
     if ($obj -is [System.Collections.IDictionary] -or
@@ -2700,6 +2712,26 @@ function Get-CfgContractErrors($cfg) {
         if ($null -ne $projectionEnabled -and $projectionEnabled -isnot [bool]) {
             $errors.Add("skill_projection.enabled 必须是布尔值") | Out-Null
         }
+        $routingPolicyPath = [string](Get-CfgObjectProperty $skillProjection "routing_policy_path")
+        if ((Test-CfgObjectProperty $skillProjection "routing_policy_path") -and [string]::IsNullOrWhiteSpace($routingPolicyPath)) {
+            $errors.Add("skill_projection.routing_policy_path 不能为空") | Out-Null
+        }
+        $externalInventory = Get-CfgObjectProperty $skillProjection "external_skill_inventory"
+        if ($null -ne $externalInventory) {
+            if ($externalInventory -isnot [pscustomobject] -and $externalInventory -isnot [System.Collections.IDictionary]) {
+                $errors.Add("skill_projection.external_skill_inventory 必须是对象") | Out-Null
+            }
+            else {
+                $externalInventoryEnabled = Get-CfgObjectProperty $externalInventory "enabled"
+                if ($null -ne $externalInventoryEnabled -and $externalInventoryEnabled -isnot [bool]) {
+                    $errors.Add("skill_projection.external_skill_inventory.enabled 必须是布尔值") | Out-Null
+                }
+                $pluginCachePath = [string](Get-CfgObjectProperty $externalInventory "plugin_cache_path")
+                if ((Test-CfgObjectProperty $externalInventory "plugin_cache_path") -and [string]::IsNullOrWhiteSpace($pluginCachePath)) {
+                    $errors.Add("skill_projection.external_skill_inventory.plugin_cache_path 不能为空") | Out-Null
+                }
+            }
+        }
         $projectionSources = Get-CfgObjectProperty $skillProjection "sources"
         if (-not (Assert-IsArray $projectionSources)) {
             $errors.Add("skill_projection.sources 必须是数组") | Out-Null
@@ -2737,11 +2769,13 @@ function Get-CfgContractErrors($cfg) {
         if ($null -ne $aliases -and -not (Assert-IsArray $aliases)) {
             $errors.Add("skill_projection.aliases 必须是数组") | Out-Null
         }
-        foreach ($alias in @($aliases)) {
-            $aliasName = [string](Get-CfgObjectProperty $alias "name")
-            $replacement = [string](Get-CfgObjectProperty $alias "replacement")
-            if ([string]::IsNullOrWhiteSpace($aliasName)) { $errors.Add("skill_projection alias 缺少 name") | Out-Null }
-            if ([string]::IsNullOrWhiteSpace($replacement)) { $errors.Add(("skill_projection alias 缺少 replacement：{0}" -f $aliasName)) | Out-Null }
+        if ($null -ne $aliases) {
+            foreach ($alias in @($aliases)) {
+                $aliasName = [string](Get-CfgObjectProperty $alias "name")
+                $replacement = [string](Get-CfgObjectProperty $alias "replacement")
+                if ([string]::IsNullOrWhiteSpace($aliasName)) { $errors.Add("skill_projection alias 缺少 name") | Out-Null }
+                if ([string]::IsNullOrWhiteSpace($replacement)) { $errors.Add(("skill_projection alias 缺少 replacement：{0}" -f $aliasName)) | Out-Null }
+            }
         }
         $profiles = Get-CfgObjectProperty $skillProjection "profiles"
         if ($null -ne $profiles) {
@@ -3279,6 +3313,19 @@ function Assert-Cfg($cfg) {
         $projection = $cfg.skill_projection
         if ($projection.PSObject.Properties.Match("enabled").Count -gt 0) {
             Need ($projection.enabled -is [bool]) "skill_projection.enabled 必须是布尔值"
+        }
+        if ($projection.PSObject.Properties.Match("routing_policy_path").Count -gt 0) {
+            Need (-not [string]::IsNullOrWhiteSpace([string]$projection.routing_policy_path)) "skill_projection.routing_policy_path 不能为空"
+        }
+        if ($projection.PSObject.Properties.Match("external_skill_inventory").Count -gt 0 -and $null -ne $projection.external_skill_inventory) {
+            $externalInventory = $projection.external_skill_inventory
+            Need ($externalInventory -is [pscustomobject] -or $externalInventory -is [System.Collections.IDictionary]) "skill_projection.external_skill_inventory 必须是对象"
+            if (Test-CfgObjectProperty $externalInventory "enabled") {
+                Need ((Get-CfgObjectProperty $externalInventory "enabled") -is [bool]) "skill_projection.external_skill_inventory.enabled 必须是布尔值"
+            }
+            if (Test-CfgObjectProperty $externalInventory "plugin_cache_path") {
+                Need (-not [string]::IsNullOrWhiteSpace([string](Get-CfgObjectProperty $externalInventory "plugin_cache_path"))) "skill_projection.external_skill_inventory.plugin_cache_path 不能为空"
+            }
         }
         Need ($projection.PSObject.Properties.Match("sources").Count -gt 0 -and (Assert-IsArray $projection.sources)) "skill_projection.sources 必须是数组"
         foreach ($source in @($projection.sources)) {
@@ -10126,7 +10173,7 @@ function Get-DefaultAuditOuterAiPrompt {
 - 导入后复查；失败最多重试 1 次，再失败立即停止。
 
 3) 只读输入（必须真实读取）
-- outer-ai-prompt.md、ai-brief.md、user-profile.json、installed-skills.json（仅输入快照）、source-strategy.json、decision-insights.json、recommendations.template.json
+- outer-ai-prompt.md、ai-brief.md、user-profile.json、installed-skills.json（仅输入快照；skills 为受管技能，external_skills 为只读 system/plugin 能力）、source-strategy.json、decision-insights.json、recommendations.template.json
 - repo-scan.json / repo-scans.json：存在才读；N/A/profile-only 不得臆造仓库事实。
 - source-strategy.json 中的 evidence_policy / decision_quality_policy 是硬约束；decision-insights.json 是 keyword_trace 的可选关键词来源。
 - 不得复用旧 run 的 recommendations.json、旧提示词或聊天记忆作为本轮结论；旧内容只能作为待核线索，最终必须回到本轮输入和本轮来源。
@@ -10140,7 +10187,7 @@ function Get-DefaultAuditOuterAiPrompt {
 - 每条变更建议都要说明相对 installed-skills.json / mcp_servers 的非重复增量价值，或给出具体卸载理由；重复、泛化、证据弱则留空或放入 ``do_not_install``
 - MCP server/env 不得包含明文 token/password/key；需要凭据时只写环境变量名或占位说明，并用 sources / source_observations 说明依据
 - MCP 新增写 ``mcp_new_servers`` 且 ``name==server.name``；MCP 卸载写 ``mcp_removal_candidates``
-- ``overlap_findings`` 仅报告；``do_not_install`` 仅记录当前不应安装项；证据不足留空
+- ``overlap_findings`` 仅报告，并用 ``routing.router / selection_policy / members(name,role)`` 说明择优调用；``external_skills`` 不得写成可自动卸载项；``do_not_install`` 仅记录当前不应安装项；证据不足留空
 - 若四类新增/卸载建议均为空，可输出有效 no-op；no-op 不强制网络搜索，``source_observations=[]`` 合法，但必须在 ``decision_basis.summary`` 或 ``empty_recommendation_reasons`` 中说明本地覆盖依据。
 
 5) 自检、预检、dry-run
@@ -10751,7 +10798,7 @@ function Get-AuditRunId {
 }
 
 function Get-AuditPromptContractVersion {
-    return "audit-prompt-v20260502.2"
+    return "audit-prompt-v20260714.1"
 }
 
 function Get-AuditReportRoot([string]$runId) {
@@ -10841,12 +10888,8 @@ function Get-AuditRunCandidateBuckets([string[]]$RequiredFiles = @()) {
         $isStale = $false
         try {
             $snapshotState = Get-AuditInstalledSnapshotState $snapshotPath
-            $skillSnapshotStale = ([string]$snapshotState.fingerprint -ne [string]$liveState.fingerprint)
-            $mcpSnapshotStale = $false
-            if ($snapshotState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.mcp_fingerprint)) {
-                $mcpSnapshotStale = ([string]$snapshotState.mcp_fingerprint -ne [string]$liveState.mcp_fingerprint)
-            }
-            if ($skillSnapshotStale -or $mcpSnapshotStale) {
+            $snapshotStaleness = Get-AuditInstalledSnapshotStaleness $snapshotState $liveState
+            if ([bool]$snapshotStaleness.is_stale) {
                 $isStale = $true
             }
         }
@@ -11857,7 +11900,7 @@ Rules:
 - Profile-only mode has no target repo scan; do not fabricate repository facts.
 - Only write ``recommendations.json`` in this run directory. Do not modify generated input files, snapshots, prompts, briefs, templates, source strategy, decision insights, or repo scan files.
 - The audit commands may automatically write runtime evidence such as ``preflight-report.json``, ``dry-run-summary.json``, ``apply-report.json``, and ``docs/change-evidence/*.md``; treat those as expected command outputs, not files for the outer AI agent to hand-edit.
-- All decisions must be based on user-profile.json, installed-skills.json (audit snapshot, not live source of truth), source-strategy.json, and real external research.
+- All decisions must be based on user-profile.json, installed-skills.json (audit snapshot, not live source of truth), source-strategy.json, and real external research. Treat ``skills`` as managed install/removal candidates and ``external_skills`` as read-only system/plugin capability context.
 - decision-insights.json provides machine-readable keyword anchors; every add/remove skill or MCP recommendation should keep ``keyword_trace.user_profile`` + ``keyword_trace.target_repo_or_context`` + ``keyword_trace.installed_state`` aligned to it.
 - Treat source-strategy.json ``evidence_policy`` and ``decision_quality_policy`` as hard constraints.
 - Use ``reason_target_repo`` to explain the current installed-skill inventory / profile-only context; do not claim target repository evidence.
@@ -11878,7 +11921,7 @@ Rules:
 - MCP ``server.transport`` must stay ``stdio``/``sse``/``http``; ``stdio`` requires ``command``; ``sse/http`` requires ``url``.
 - Each add/remove recommendation must keep both reasons concise and user-readable.
 - If either reason field is missing on any recommendation, treat the run as incomplete and stop before dry-run summary.
-- Overlap findings are report-only; do not recommend automatic uninstall.
+- Overlap findings are report-only; include structured router/member roles when overlap exists, and do not recommend automatic uninstall of external system/plugin skills.
 - Use ``do_not_install`` for researched options that should stay out of the repo right now.
 - Prefer high-reputation sources and avoid weak duplicate skills.
 - Cover the built-in default sources and record the actual sources you used; GitHub Trending is discovery evidence only, never sufficient by itself.
@@ -11963,7 +12006,7 @@ Scan inputs:
 
 Rules:
 
-- All decisions must be based on BOTH user-profile.json and target repo scan facts, and must use installed-skills.json as the audit snapshot for currently installed skills and MCP servers.
+- All decisions must be based on BOTH user-profile.json and target repo scan facts, and must use installed-skills.json as the audit snapshot for currently installed skills and MCP servers. Treat ``skills`` as managed install/removal candidates and ``external_skills`` as read-only system/plugin capability context.
 - Only write ``recommendations.json`` in this run directory. Do not modify generated input files, snapshots, prompts, briefs, templates, source strategy, decision insights, or repo scan files.
 - The audit commands may automatically write runtime evidence such as ``preflight-report.json``, ``dry-run-summary.json``, ``apply-report.json``, and ``docs/change-evidence/*.md``; treat those as expected command outputs, not files for the outer AI agent to hand-edit.
 - Use source-strategy.json to cover the built-in source set and explain source tradeoffs.
@@ -11986,7 +12029,7 @@ Rules:
 - MCP ``server.transport`` must stay ``stdio``/``sse``/``http``; ``stdio`` requires ``command``; ``sse/http`` requires ``url``.
 - Each add/remove recommendation must keep both reasons concise and user-readable.
 - If either reason field is missing on any recommendation, treat the run as incomplete and stop before dry-run summary.
-- Overlap findings are report-only; do not recommend automatic uninstall.
+- Overlap findings are report-only; include structured router/member roles when overlap exists, and do not recommend automatic uninstall of external system/plugin skills.
 - Use ``do_not_install`` for researched options that should stay out of the repo right now.
 - Prefer high-reputation sources and avoid weak duplicate skills.
 - Cover the built-in default sources and record the actual sources you used; GitHub Trending is discovery evidence only, never sufficient by itself.
@@ -12395,6 +12438,9 @@ function Assert-AuditBundleFileContent([string]$path, [string]$label) {
         "installed-skills.json" {
             Need (Test-AuditJsonProperty $data "skills") ("installed-skills 缺少 skills：{0}" -f $path)
             Need (Assert-IsArray $data.skills) ("installed-skills.skills 必须为数组：{0}" -f $path)
+            if (Test-AuditJsonProperty $data "external_skills") {
+                Need (Assert-IsArray $data.external_skills) ("installed-skills.external_skills 必须为数组：{0}" -f $path)
+            }
             if (Test-AuditJsonProperty $data "mcp_servers") {
                 Need (Assert-IsArray $data.mcp_servers) ("installed-skills.mcp_servers 必须为数组：{0}" -f $path)
             }
@@ -12549,6 +12595,14 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
                 reason_target_repo = $targetReasonInstall
                 sources = @("<source-url-1>")
                 note = "<report-only observation; no automatic uninstall>"
+                routing = [ordered]@{
+                    router = "<domain-router-skill>"
+                    selection_policy = "<how to choose executors without invoking every overlapping skill>"
+                    members = @(
+                        [ordered]@{ name = "<skill-name>"; role = "router" }
+                        [ordered]@{ name = "<executor-or-validator>"; role = "executor" }
+                    )
+                }
             }
         )
         removal_candidates = @(
@@ -12721,6 +12775,7 @@ function Get-InstalledSkillFacts($cfg = $null) {
         if (-not $seen.Add(("overrides|{0}" -f $from))) { continue }
         $localPath = [string]$override.full
         $skillFile = Join-Path $localPath "SKILL.md"
+        if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { continue }
         $meta = Get-SkillMetadataFromFile $skillFile
         $contentHash = [string](Get-FileContentHash $skillFile)
         $facts += [pscustomobject]([ordered]@{
@@ -12740,6 +12795,49 @@ function Get-InstalledSkillFacts($cfg = $null) {
         })
     }
     return @($facts)
+}
+
+function Get-AuditExternalSkillFacts($cfg = $null) {
+    if ($null -eq $cfg) { $cfg = LoadCfg }
+    if ($cfg.PSObject.Properties.Match('skill_projection').Count -eq 0 -or $null -eq $cfg.skill_projection) { return @() }
+    $facts = New-Object System.Collections.Generic.List[object]
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $projection = $cfg.skill_projection
+    $userSkillRootRaw = if ($projection.PSObject.Properties.Match('user_skill_root').Count -gt 0) { [string]$projection.user_skill_root } else { '~/.agents/skills' }
+    $userSkillRoot = Resolve-SkillProjectionPath $userSkillRootRaw
+    foreach ($item in @(Get-SkillProjectionFiles $userSkillRoot | Where-Object is_system)) {
+        $skillFile = [string]$item.file
+        $meta = Get-SkillMetadataFromFile $skillFile
+        $name = [string]$meta.declared_name
+        if ([string]::IsNullOrWhiteSpace($name) -or -not $seen.Add(('system::{0}' -f $name))) { continue }
+        $facts.Add([pscustomobject]([ordered]@{
+                    source_kind = 'system'
+                    name = $name
+                    qualified_name = $name
+                    description = [string]$meta.description
+                    trigger_summary = [string]$meta.trigger_summary
+                    content_hash = [string](Get-FileContentHash $skillFile)
+                    local_path = Split-Path -Parent $skillFile
+                    plugin_id = ''
+                })) | Out-Null
+    }
+
+    $inventory = Get-CodexExternalSkillInventory $projection
+    foreach ($item in @($inventory.skills)) {
+        $qualifiedName = [string]$item.qualified_name
+        if ([string]::IsNullOrWhiteSpace($qualifiedName) -or -not $seen.Add(('plugin::{0}' -f $qualifiedName))) { continue }
+        $facts.Add([pscustomobject]([ordered]@{
+                    source_kind = 'plugin'
+                    name = [string]$item.name
+                    qualified_name = $qualifiedName
+                    description = [string]$item.description
+                    trigger_summary = [string]$item.description
+                    content_hash = [string](Get-FileContentHash ([string]$item.path))
+                    local_path = Split-Path -Parent ([string]$item.path)
+                    plugin_id = [string]$item.plugin_id
+                })) | Out-Null
+    }
+    return @($facts.ToArray() | Sort-Object source_kind, qualified_name)
 }
 
 function Get-AuditMcpServerFacts($cfg = $null) {
@@ -12882,9 +12980,28 @@ function Get-AuditFingerprintFromSkillFacts($facts) {
     return (Get-AuditFingerprintFromVendorFromPairs $rows $true)
 }
 
+function Get-AuditFingerprintFromExternalSkillFacts($facts) {
+    $rows = @()
+    foreach ($item in @($facts)) {
+        if ($null -eq $item) { continue }
+        $row = [ordered]@{
+            source_kind = [string]$item.source_kind
+            name = [string]$item.name
+            qualified_name = [string]$item.qualified_name
+            description = [string]$item.description
+            trigger_summary = [string]$item.trigger_summary
+            content_hash = [string]$item.content_hash
+            plugin_id = [string]$item.plugin_id
+        }
+        $rows += ($row | ConvertTo-Json -Compress)
+    }
+    return (Get-AuditFingerprintFromVendorFromPairs $rows $true)
+}
+
 function Get-AuditLiveInstalledState($cfg = $null) {
     if ($null -eq $cfg) { $cfg = LoadCfg }
     $facts = @(Get-InstalledSkillFacts $cfg)
+    $externalFacts = @(Get-AuditExternalSkillFacts $cfg)
     $mcpServers = @()
     if ($cfg.PSObject.Properties.Match("mcp_servers").Count -gt 0 -and $null -ne $cfg.mcp_servers) {
         $mcpServers = @($cfg.mcp_servers)
@@ -12894,6 +13011,8 @@ function Get-AuditLiveInstalledState($cfg = $null) {
         captured_at = (Get-Date).ToString("o")
         skill_count = @($facts).Count
         fingerprint = (Get-AuditFingerprintFromSkillFacts $facts)
+        external_skill_count = @($externalFacts).Count
+        external_skill_fingerprint = (Get-AuditFingerprintFromExternalSkillFacts $externalFacts)
         mcp_server_count = @($mcpServers).Count
         mcp_fingerprint = (Get-AuditFingerprintFromMcpServers $mcpServers)
     })
@@ -12926,6 +13045,11 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
     Need (Test-AuditJsonProperty $data "skills") ("installed-skills 快照缺少 skills：{0}" -f $snapshotPath)
     Need (Assert-IsArray $data.skills) ("installed-skills.skills 必须为数组：{0}" -f $snapshotPath)
     $skills = @($data.skills)
+    $externalSkills = @()
+    if (Test-AuditJsonProperty $data 'external_skills' -and $null -ne $data.external_skills) {
+        Need (Assert-IsArray $data.external_skills) ("installed-skills.external_skills 必须为数组：{0}" -f $snapshotPath)
+        $externalSkills = @($data.external_skills)
+    }
     $mcpServers = @()
     if (Test-AuditJsonProperty $data "mcp_servers" -and $null -ne $data.mcp_servers) {
         Need (Assert-IsArray $data.mcp_servers) ("installed-skills.mcp_servers 必须为数组：{0}" -f $snapshotPath)
@@ -12937,6 +13061,13 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
     }
     if ([string]::IsNullOrWhiteSpace($fingerprint)) {
         $fingerprint = (Get-AuditFingerprintFromSkillFacts $skills)
+    }
+    $externalSkillFingerprint = ''
+    if (Test-AuditJsonProperty $data 'live_external_skill_fingerprint') {
+        $externalSkillFingerprint = ([string]$data.live_external_skill_fingerprint).Trim().ToLowerInvariant()
+    }
+    if ([string]::IsNullOrWhiteSpace($externalSkillFingerprint) -and $externalSkills.Count -gt 0) {
+        $externalSkillFingerprint = Get-AuditFingerprintFromExternalSkillFacts $externalSkills
     }
     $mcpFingerprint = ""
     if (Test-AuditJsonProperty $data "live_mcp_fingerprint") {
@@ -12955,6 +13086,8 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
         captured_at = $capturedAt
         skill_count = $skills.Count
         fingerprint = $fingerprint
+        external_skill_count = $externalSkills.Count
+        external_skill_fingerprint = $externalSkillFingerprint
         mcp_server_count = @($mcpServers).Count
         mcp_fingerprint = $mcpFingerprint
     })
@@ -12967,9 +13100,29 @@ function New-AuditInstalledSnapshotFallbackState($liveState, [string]$snapshotPa
         captured_at = [string]$liveState.captured_at
         skill_count = [int]$liveState.skill_count
         fingerprint = [string]$liveState.fingerprint
+        external_skill_count = if ($liveState.PSObject.Properties.Match('external_skill_count').Count -gt 0) { [int]$liveState.external_skill_count } else { 0 }
+        external_skill_fingerprint = if ($liveState.PSObject.Properties.Match('external_skill_fingerprint').Count -gt 0) { [string]$liveState.external_skill_fingerprint } else { '' }
         mcp_server_count = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
         mcp_fingerprint = if ($liveState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$liveState.mcp_fingerprint } else { "" }
     })
+}
+
+function Get-AuditInstalledSnapshotStaleness($snapshotState, $liveState) {
+    $skillStale = ([string]$snapshotState.fingerprint -ne [string]$liveState.fingerprint)
+    $mcpStale = $false
+    if ($snapshotState.PSObject.Properties.Match('mcp_fingerprint').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.mcp_fingerprint)) {
+        $mcpStale = ([string]$snapshotState.mcp_fingerprint -ne [string]$liveState.mcp_fingerprint)
+    }
+    $externalSkillStale = $false
+    if ($snapshotState.PSObject.Properties.Match('external_skill_fingerprint').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.external_skill_fingerprint)) {
+        $externalSkillStale = ([string]$snapshotState.external_skill_fingerprint -ne [string]$liveState.external_skill_fingerprint)
+    }
+    return [pscustomobject]([ordered]@{
+            is_stale = ($skillStale -or $mcpStale -or $externalSkillStale)
+            skill_stale = $skillStale
+            mcp_stale = $mcpStale
+            external_skill_stale = $externalSkillStale
+        })
 }
 
 function Ensure-AuditArrayProperty($obj, [string]$name) {
@@ -13145,6 +13298,36 @@ function Assert-AuditReasonPair($item, [string]$name) {
     Normalize-AuditKeywordTrace $item
 }
 
+function Assert-AuditOverlapFinding($item) {
+    Need ($null -ne $item) "重叠发现不能为空"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.name)) "重叠发现缺少 name"
+    Assert-AuditReasonPair $item "重叠发现"
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.note)) ("重叠发现缺少 note：{0}" -f [string]$item.name)
+    if ($item.PSObject.Properties.Match("routing").Count -eq 0 -or $null -eq $item.routing) { return }
+
+    Need (Test-AuditObjectLike $item.routing) ("重叠发现 routing 必须是对象：{0}" -f [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.routing.router)) ("重叠发现 routing 缺少 router：{0}" -f [string]$item.name)
+    Need (-not [string]::IsNullOrWhiteSpace([string]$item.routing.selection_policy)) ("重叠发现 routing 缺少 selection_policy：{0}" -f [string]$item.name)
+    Need ($item.routing.PSObject.Properties.Match("members").Count -gt 0 -and (Assert-IsArray $item.routing.members)) ("重叠发现 routing.members 必须是数组：{0}" -f [string]$item.name)
+    Need (@($item.routing.members).Count -ge 2) ("重叠发现 routing.members 至少需要两个成员：{0}" -f [string]$item.name)
+    $allowedRoles = @("router", "executor", "validator", "operator", "workflow", "reference")
+    $seenMembers = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $memberRoles = @{}
+    foreach ($member in @($item.routing.members)) {
+        Need ($null -ne $member) ("重叠发现 routing.member 不能为空：{0}" -f [string]$item.name)
+        $memberName = ([string]$member.name).Trim()
+        $role = ([string]$member.role).Trim().ToLowerInvariant()
+        Need (-not [string]::IsNullOrWhiteSpace($memberName)) ("重叠发现 routing.member 缺少 name：{0}" -f [string]$item.name)
+        Need ($allowedRoles -contains $role) ("重叠发现 routing.member role 不支持：{0}/{1}" -f [string]$item.name, $role)
+        Need ($seenMembers.Add($memberName)) ("重叠发现 routing.member 重复：{0}/{1}" -f [string]$item.name, $memberName)
+        $member.role = $role
+        $memberRoles[$memberName] = $role
+    }
+    $router = ([string]$item.routing.router).Trim()
+    Need ($seenMembers.Contains($router)) ("重叠发现 routing.router 必须出现在 members：{0}/{1}" -f [string]$item.name, $router)
+    Need ([string]$memberRoles[$router] -eq "router") ("重叠发现 routing.router 对应成员必须使用 role=router：{0}/{1}" -f [string]$item.name, $router)
+}
+
 function Assert-AuditRecommendationItem($item) {
     Need ($null -ne $item) "推荐项不能为空"
     Need (-not [string]::IsNullOrWhiteSpace([string]$item.name)) "推荐项缺少 name"
@@ -13275,6 +13458,12 @@ function Load-AuditRecommendations([string]$path) {
         Assert-AuditSourceObservation $item
     }
 
+    $seenOverlapFindings = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in @($rec.overlap_findings)) {
+        Assert-AuditOverlapFinding $item
+        Need ($seenOverlapFindings.Add(([string]$item.name).Trim())) ("重复重叠发现：{0}" -f [string]$item.name)
+    }
+
     $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($item in @($rec.new_skills)) {
         Assert-AuditRecommendationItem $item
@@ -13322,7 +13511,9 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
         $installedMcpServers = @($cfg.mcp_servers)
     }
     $items = @()
+    $originalIndex = 0
     foreach ($item in @($recommendations.new_skills)) {
+        $originalIndex++
         $install = $item.install
         $tokens = @([string]$install.repo, "--skill", [string]$install.skill)
         if ($install.PSObject.Properties.Match("ref").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$install.ref)) {
@@ -13332,6 +13523,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             $tokens += @("--mode", [string]$install.mode)
         }
         $items += [pscustomobject]([ordered]@{
+            original_index = $originalIndex
             name = [string]$item.name
             reason = [string]$item.reason
             reason_user_profile = [string]$item.reason_user_profile
@@ -13345,11 +13537,14 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
     }
 
     $removals = @()
+    $originalIndex = 0
     foreach ($item in @($recommendations.removal_candidates)) {
+        $originalIndex++
         $match = @($installedFacts | Where-Object { $_.vendor -eq [string]$item.installed.vendor -and $_.from -eq [string]$item.installed.from })
         $status = if ($match.Count -eq 1) { "planned" } elseif ($match.Count -eq 0) { "not_found" } else { "ambiguous" }
         $matched = if ($match.Count -gt 0) { $match[0] } else { $null }
         $removals += [pscustomobject]([ordered]@{
+            original_index = $originalIndex
             name = [string]$item.name
             vendor = [string]$item.installed.vendor
             from = [string]$item.installed.from
@@ -13363,7 +13558,9 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
         })
     }
     $mcpItems = @()
+    $originalIndex = 0
     foreach ($item in @($recommendations.mcp_new_servers)) {
+        $originalIndex++
         $server = $item.server
         $existing = @($installedMcpServers | Where-Object { [string]$_.name -eq [string]$server.name })
         $status = if ($existing.Count -eq 0) {
@@ -13376,6 +13573,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             "planned"
         }
         $mcpItems += [pscustomobject]([ordered]@{
+            original_index = $originalIndex
             name = [string]$item.name
             reason = [string]$item.reason
             reason_user_profile = [string]$item.reason_user_profile
@@ -13389,11 +13587,14 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
     }
 
     $mcpRemovals = @()
+    $originalIndex = 0
     foreach ($item in @($recommendations.mcp_removal_candidates)) {
+        $originalIndex++
         $match = @($installedMcpServers | Where-Object { [string]$_.name -eq [string]$item.installed.name })
         $status = if ($match.Count -eq 1) { "planned" } elseif ($match.Count -eq 0) { "not_found" } else { "ambiguous" }
         $matched = if ($match.Count -gt 0) { $match[0] } else { $null }
         $mcpRemovals += [pscustomobject]([ordered]@{
+            original_index = $originalIndex
             name = [string]$item.name
             installed_name = [string]$item.installed.name
             reason = ("用户需求：{0}；目标仓/场景：{1}" -f [string]$item.reason_user_profile, [string]$item.reason_target_repo)
@@ -13482,7 +13683,8 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
     else {
         $index = 1
         foreach ($item in @($plan.items)) {
-            Write-Host ("{0}) {1}" -f $index, [string]$item.name)
+            $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
+            Write-Host ("{0}) {1}" -f $itemIndex, [string]$item.name)
             Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
             Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
             $index++
@@ -13496,7 +13698,8 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
     else {
         $index = 1
         foreach ($item in @($plan.removal_candidates)) {
-            Write-Host ("{0}) {1} [{2}|{3}] status={4}" -f $index, [string]$item.name, [string]$item.vendor, [string]$item.from, [string]$item.status)
+            $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
+            Write-Host ("{0}) {1} [{2}|{3}] status={4}" -f $itemIndex, [string]$item.name, [string]$item.vendor, [string]$item.from, [string]$item.status)
             Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
             Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
             $index++
@@ -13510,8 +13713,9 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
     else {
         $index = 1
         foreach ($item in @($plan.mcp_items)) {
+            $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
             $transport = if ($item.server.PSObject.Properties.Match("transport").Count -gt 0) { [string]$item.server.transport } else { "stdio" }
-            Write-Host ("{0}) {1} transport={2} status={3}" -f $index, [string]$item.name, $transport, [string]$item.status)
+            Write-Host ("{0}) {1} transport={2} status={3}" -f $itemIndex, [string]$item.name, $transport, [string]$item.status)
             Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
             Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
             $index++
@@ -13525,7 +13729,8 @@ function Write-AuditRecommendationSummary($plan, $snapshotState = $null, $liveSt
     else {
         $index = 1
         foreach ($item in @($plan.mcp_removal_candidates)) {
-            Write-Host ("{0}) {1} [name={2}] status={3}" -f $index, [string]$item.name, [string]$item.installed_name, [string]$item.status)
+            $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
+            Write-Host ("{0}) {1} [name={2}] status={3}" -f $itemIndex, [string]$item.name, [string]$item.installed_name, [string]$item.status)
             Write-Host ("   用户需求: {0}" -f [string]$item.reason_user_profile)
             Write-Host ("   目标仓/场景: {0}" -f [string]$item.reason_target_repo)
             $index++
@@ -13742,6 +13947,7 @@ function Invoke-AuditTargetsScan {
 
     $installedPath = Join-Path $reportRoot "installed-skills.json"
     $installedSkills = @()
+    $externalSkills = @()
     $installedMcpServers = @()
     try {
         try {
@@ -13752,6 +13958,7 @@ function Invoke-AuditTargetsScan {
             $liveCfg = New-AuditInstalledFactsFallbackCfg
         }
         $installedSkills = @(Get-InstalledSkillFacts $liveCfg)
+        $externalSkills = @(Get-AuditExternalSkillFacts $liveCfg)
         $installedMcpServers = @(Get-AuditMcpServerFacts $liveCfg)
     }
     catch {
@@ -13765,16 +13972,19 @@ function Invoke-AuditTargetsScan {
             captured_at = (Get-Date).ToString("o")
             live_skill_count = [int]$liveState.skill_count
             live_fingerprint = [string]$liveState.fingerprint
+            live_external_skill_count = if ($liveState.PSObject.Properties.Match('external_skill_count').Count -gt 0) { [int]$liveState.external_skill_count } else { 0 }
+            live_external_skill_fingerprint = if ($liveState.PSObject.Properties.Match('external_skill_fingerprint').Count -gt 0) { [string]$liveState.external_skill_fingerprint } else { '' }
             live_mcp_server_count = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
             live_mcp_fingerprint = if ($liveState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$liveState.mcp_fingerprint } else { "" }
             skills = @($installedSkills)
+            external_skills = @($externalSkills)
             mcp_servers = @($installedMcpServers)
         })
 
     $sourceStrategyPath = Join-Path $reportRoot "source-strategy.json"
     Write-AuditJsonFile $sourceStrategyPath (New-AuditSourceStrategy "target-repo" "")
     $decisionInsightsPath = Join-Path $reportRoot "decision-insights.json"
-    Write-AuditJsonFile $decisionInsightsPath (New-AuditDecisionInsights $cfg $scans $installedSkills $installedMcpServers "target-repo")
+    Write-AuditJsonFile $decisionInsightsPath (New-AuditDecisionInsights $cfg $scans @($installedSkills + $externalSkills) $installedMcpServers "target-repo")
 
     $templatePath = Join-Path $reportRoot "recommendations.template.json"
     $templateTarget = if ($scans.Count -eq 1) { [string]$scans[0].target.name } else { "*" }
@@ -13879,6 +14089,7 @@ function Invoke-AuditSkillDiscovery {
 
     $installedPath = Join-Path $reportRoot "installed-skills.json"
     $installedSkills = @()
+    $externalSkills = @()
     $installedMcpServers = @()
     try {
         try {
@@ -13889,6 +14100,7 @@ function Invoke-AuditSkillDiscovery {
             $liveCfg = New-AuditInstalledFactsFallbackCfg
         }
         $installedSkills = @(Get-InstalledSkillFacts $liveCfg)
+        $externalSkills = @(Get-AuditExternalSkillFacts $liveCfg)
         $installedMcpServers = @(Get-AuditMcpServerFacts $liveCfg)
     }
     catch {
@@ -13902,16 +14114,19 @@ function Invoke-AuditSkillDiscovery {
             captured_at = (Get-Date).ToString("o")
             live_skill_count = [int]$liveState.skill_count
             live_fingerprint = [string]$liveState.fingerprint
+            live_external_skill_count = if ($liveState.PSObject.Properties.Match('external_skill_count').Count -gt 0) { [int]$liveState.external_skill_count } else { 0 }
+            live_external_skill_fingerprint = if ($liveState.PSObject.Properties.Match('external_skill_fingerprint').Count -gt 0) { [string]$liveState.external_skill_fingerprint } else { '' }
             live_mcp_server_count = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
             live_mcp_fingerprint = if ($liveState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$liveState.mcp_fingerprint } else { "" }
             skills = @($installedSkills)
+            external_skills = @($externalSkills)
             mcp_servers = @($installedMcpServers)
         })
 
     $sourceStrategyPath = Join-Path $reportRoot "source-strategy.json"
     Write-AuditJsonFile $sourceStrategyPath (New-AuditSourceStrategy "profile-only" $Query)
     $decisionInsightsPath = Join-Path $reportRoot "decision-insights.json"
-    Write-AuditJsonFile $decisionInsightsPath (New-AuditDecisionInsights $cfg @() $installedSkills $installedMcpServers "profile-only")
+    Write-AuditJsonFile $decisionInsightsPath (New-AuditDecisionInsights $cfg @() @($installedSkills + $externalSkills) $installedMcpServers "profile-only")
 
     $templatePath = Join-Path $reportRoot "recommendations.template.json"
     Write-AuditJsonFile $templatePath (New-AuditRecommendationsTemplate $runId "profile-only" "profile-only" $Query)
@@ -14012,8 +14227,10 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
     $add = @()
     $index = 1
     foreach ($item in @($plan.items)) {
+        $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
         $add += [pscustomobject]([ordered]@{
-            index = $index
+            index = $itemIndex
+            original_index = $itemIndex
             name = [string]$item.name
             reason_user_profile = [string]$item.reason_user_profile
             reason_target_repo = [string]$item.reason_target_repo
@@ -14026,8 +14243,10 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
     $remove = @()
     $index = 1
     foreach ($item in @($plan.removal_candidates)) {
+        $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
         $remove += [pscustomobject]([ordered]@{
-            index = $index
+            index = $itemIndex
+            original_index = $itemIndex
             name = [string]$item.name
             installed = [ordered]@{
                 vendor = [string]$item.vendor
@@ -14044,8 +14263,10 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
     $mcpAdd = @()
     $index = 1
     foreach ($item in @($plan.mcp_items)) {
+        $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
         $mcpAdd += [pscustomobject]([ordered]@{
-            index = $index
+            index = $itemIndex
+            original_index = $itemIndex
             name = [string]$item.name
             reason_user_profile = [string]$item.reason_user_profile
             reason_target_repo = [string]$item.reason_target_repo
@@ -14058,8 +14279,10 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
     $mcpRemove = @()
     $index = 1
     foreach ($item in @($plan.mcp_removal_candidates)) {
+        $itemIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $index }
         $mcpRemove += [pscustomobject]([ordered]@{
-            index = $index
+            index = $itemIndex
+            original_index = $itemIndex
             name = [string]$item.name
             installed_name = [string]$item.installed_name
             reason_user_profile = [string]$item.reason_user_profile
@@ -14616,12 +14839,8 @@ function Invoke-AuditRecommendationsPreflight {
     else {
         $snapshotState = New-AuditInstalledSnapshotFallbackState $liveState $snapshotPath
     }
-    $skillSnapshotStale = ([string]$snapshotState.fingerprint -ne [string]$liveState.fingerprint)
-    $mcpSnapshotStale = $false
-    if ($snapshotState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.mcp_fingerprint)) {
-        $mcpSnapshotStale = ([string]$snapshotState.mcp_fingerprint -ne [string]$liveState.mcp_fingerprint)
-    }
-    $isSnapshotStale = ($skillSnapshotStale -or $mcpSnapshotStale)
+    $snapshotStaleness = Get-AuditInstalledSnapshotStaleness $snapshotState $liveState
+    $isSnapshotStale = [bool]$snapshotStaleness.is_stale
 
     $runPromptVersion = Get-AuditRunPromptContractVersion $recommendationDir
     $currentPromptVersion = Get-AuditPromptContractVersion
@@ -14703,6 +14922,7 @@ function Invoke-AuditRecommendationsPreflight {
         user_profile_check = $userProfileCheck
         snapshot_state = $snapshotState
         live_state = $liveState
+        snapshot_staleness = $snapshotStaleness
         issues = @($issues)
     }
     $reportPath = Join-Path $recommendationDir "preflight-report.json"
@@ -14833,12 +15053,8 @@ function Invoke-AuditRecommendationsApply {
         Log ("recommendations 同目录缺少 installed-skills.json，已回退为 live state 快照：{0}" -f $snapshotPath) "WARN"
         $snapshotState = New-AuditInstalledSnapshotFallbackState $liveState $snapshotPath
     }
-    $skillSnapshotStale = ([string]$snapshotState.fingerprint -ne [string]$liveState.fingerprint)
-    $mcpSnapshotStale = $false
-    if ($snapshotState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.mcp_fingerprint)) {
-        $mcpSnapshotStale = ([string]$snapshotState.mcp_fingerprint -ne [string]$liveState.mcp_fingerprint)
-    }
-    $isSnapshotStale = ($skillSnapshotStale -or $mcpSnapshotStale)
+    $snapshotStaleness = Get-AuditInstalledSnapshotStaleness $snapshotState $liveState
+    $isSnapshotStale = [bool]$snapshotStaleness.is_stale
     if ($isSnapshotStale -and -not $AllowStaleSnapshot) {
         $staleMessage = "审查快照与当前生效配置不一致（stale_snapshot）。请先运行：.\skills.ps1 审查目标 扫描 重新生成 run 后再应用 recommendations。"
         $staleReport = [ordered]@{
@@ -14857,6 +15073,7 @@ function Invoke-AuditRecommendationsApply {
             decision_insights = $decisionInsights
             snapshot_state = $snapshotState
             live_state = $liveState
+            snapshot_staleness = $snapshotStaleness
             changed_counts = New-AuditChangedCounts @() @()
             items = @()
             removal_candidates = @()
@@ -14905,6 +15122,7 @@ function Invoke-AuditRecommendationsApply {
                 decision_insights = $decisionInsights
                 snapshot_state = $snapshotState
                 live_state = $liveState
+                snapshot_staleness = $snapshotStaleness
                 changed_counts = New-AuditChangedCounts @() @()
                 items = @()
                 removal_candidates = @()
@@ -14940,6 +15158,7 @@ function Invoke-AuditRecommendationsApply {
                 decision_insights = $decisionInsights
                 snapshot_state = $snapshotState
                 live_state = $liveState
+                snapshot_staleness = $snapshotStaleness
                 changed_counts = New-AuditChangedCounts @() @()
                 items = @()
                 removal_candidates = @()
@@ -14979,6 +15198,7 @@ function Invoke-AuditRecommendationsApply {
         changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
         snapshot_state = $snapshotState
         live_state = $liveState
+        snapshot_staleness = $snapshotStaleness
         items = @($plan.items)
         removal_candidates = @($plan.removal_candidates)
         mcp_items = @($plan.mcp_items)
@@ -15237,7 +15457,12 @@ function Invoke-AuditRecommendationsTwoStageApply {
         [string]$StaleAck,
         [switch]$AllowStaleSnapshot
     )
-    $dryRunReport = Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -McpAddSelection $McpAddSelection -McpRemoveSelection $McpRemoveSelection -DryRunAck $DryRunAck -StaleAck $StaleAck -AllowStaleSnapshot:$AllowStaleSnapshot -RequireDryRunAck $true
+    if ($AllowStaleSnapshot) {
+        $dryRunReport = Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -McpAddSelection $McpAddSelection -McpRemoveSelection $McpRemoveSelection -DryRunAck $DryRunAck -StaleAck $StaleAck -AllowStaleSnapshot -RequireDryRunAck $true
+    }
+    else {
+        $dryRunReport = Invoke-AuditRecommendationsValidateDryRun -RecommendationsPath $RecommendationsPath -DryRunAck $DryRunAck
+    }
     if ($dryRunReport.PSObject.Properties.Match("success").Count -gt 0 -and -not [bool]$dryRunReport.success) {
         Write-Host "应用确认结束：dry-run 未完成确认，未执行落盘。" -ForegroundColor Yellow
         return $dryRunReport
@@ -15312,6 +15537,261 @@ function Show-AuditLatestStatus {
     }
 }
 
+function Get-AuditWorkflowReportPath([string]$recommendationsPath) {
+    $dir = Split-Path $recommendationsPath -Parent
+    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
+    return (Join-Path $dir "workflow-report.json")
+}
+
+function Get-AuditWorkflowInputState([string]$recommendationsPath) {
+    $dir = Split-Path $recommendationsPath -Parent
+    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
+    $inputs = @(
+        [pscustomobject]@{ name = "recommendations.json"; path = $recommendationsPath },
+        [pscustomobject]@{ name = "installed-skills.json"; path = (Join-Path $dir "installed-skills.json") },
+        [pscustomobject]@{ name = "audit-meta.json"; path = (Join-Path $dir "audit-meta.json") },
+        [pscustomobject]@{ name = "outer-ai-prompt.md"; path = (Join-Path $dir "outer-ai-prompt.md") },
+        [pscustomobject]@{ name = "user-profile.json"; path = (Join-Path $dir "user-profile.json") },
+        [pscustomobject]@{ name = "source-strategy.json"; path = (Join-Path $dir "source-strategy.json") },
+        [pscustomobject]@{ name = "decision-insights.json"; path = (Join-Path $dir "decision-insights.json") },
+        [pscustomobject]@{ name = "repo-scan.json"; path = (Join-Path $dir "repo-scan.json") },
+        [pscustomobject]@{ name = "repo-scans.json"; path = (Join-Path $dir "repo-scans.json") }
+    )
+    $files = @()
+    $pairs = @()
+    foreach ($input in $inputs) {
+        $exists = Test-Path -LiteralPath $input.path -PathType Leaf
+        $hash = if ($exists) { [string](Get-FileContentHash $input.path) } else { "" }
+        $files += [pscustomobject]([ordered]@{
+            name = [string]$input.name
+            exists = [bool]$exists
+            sha256 = $hash
+        })
+        $pairs += ("{0}|{1}|{2}" -f [string]$input.name, ([bool]$exists).ToString().ToLowerInvariant(), $hash)
+    }
+    return [pscustomobject]([ordered]@{
+        fingerprint = Get-AuditFingerprintFromVendorFromPairs $pairs $true
+        files = @($files)
+    })
+}
+
+function ConvertTo-AuditWorkflowCategoryItems($items) {
+    $result = @()
+    $fallbackIndex = 1
+    foreach ($item in @($items)) {
+        $originalIndex = if ($item.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$item.original_index } else { $fallbackIndex }
+        $result += [pscustomobject]([ordered]@{
+            original_index = $originalIndex
+            name = [string]$item.name
+            reason_user_profile = [string]$item.reason_user_profile
+            reason_target_repo = [string]$item.reason_target_repo
+            sources = @($item.sources)
+            status = [string]$item.status
+        })
+        $fallbackIndex++
+    }
+    return @($result)
+}
+
+function Get-AuditWorkflowEmptyReason($recommendations, [string]$prefix, [int]$itemCount) {
+    if ($itemCount -gt 0) { return "" }
+    foreach ($reason in @($recommendations.empty_recommendation_reasons)) {
+        $text = [string]$reason
+        if ($text.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $separator = $text.IndexOf(":")
+            if ($separator -lt 0) { $separator = $text.IndexOf("：") }
+            if ($separator -ge 0 -and $separator + 1 -lt $text.Length) {
+                return $text.Substring($separator + 1).Trim()
+            }
+            return $text.Trim()
+        }
+    }
+    return [string]$recommendations.decision_basis.summary
+}
+
+function New-AuditWorkflowCategories($dryRunReport, $recommendations) {
+    $addItems = @(ConvertTo-AuditWorkflowCategoryItems $dryRunReport.items)
+    $removeItems = @(ConvertTo-AuditWorkflowCategoryItems $dryRunReport.removal_candidates)
+    $mcpAddItems = @(ConvertTo-AuditWorkflowCategoryItems $dryRunReport.mcp_items)
+    $mcpRemoveItems = @(ConvertTo-AuditWorkflowCategoryItems $dryRunReport.mcp_removal_candidates)
+    return @(
+        [pscustomobject]([ordered]@{ order = 1; key = "add"; label = "新增技能"; empty_reason = Get-AuditWorkflowEmptyReason $recommendations "new_skills_empty" $addItems.Count; items = $addItems }),
+        [pscustomobject]([ordered]@{ order = 2; key = "remove"; label = "卸载技能"; empty_reason = Get-AuditWorkflowEmptyReason $recommendations "removal_candidates_empty" $removeItems.Count; items = $removeItems }),
+        [pscustomobject]([ordered]@{ order = 3; key = "mcp_add"; label = "MCP 新增"; empty_reason = Get-AuditWorkflowEmptyReason $recommendations "mcp_new_servers_empty" $mcpAddItems.Count; items = $mcpAddItems }),
+        [pscustomobject]([ordered]@{ order = 4; key = "mcp_remove"; label = "MCP 卸载"; empty_reason = Get-AuditWorkflowEmptyReason $recommendations "mcp_removal_candidates_empty" $mcpRemoveItems.Count; items = $mcpRemoveItems })
+    )
+}
+
+function Get-AuditWorkflowErrorCode([string]$stage, [string]$message) {
+    foreach ($code in @(
+            "recommendations_missing",
+            "prompt_contract_mismatch",
+            "stale_snapshot",
+            "insufficient_source_coverage",
+            "insufficient_decision_quality",
+            "user_profile_invalid",
+            "workflow_input_changed",
+            "live_state_changed",
+            "dry_run_not_confirmed",
+            "unexpected_persistence"
+        )) {
+        if ($message -match [regex]::Escape($code)) { return $code }
+    }
+    if ($stage -eq "recommendations_validation") { return "invalid_recommendations" }
+    if ($stage -eq "preflight") { return "preflight_failed" }
+    if ($stage -eq "input_stability") { return "workflow_input_changed" }
+    return "dry_run_failed"
+}
+
+function Get-AuditWorkflowNextCommand([string]$errorCode, [string]$recommendationsPath) {
+    if ($errorCode -eq "recommendations_missing") {
+        return ("先按同目录 outer-ai-prompt.md 生成 recommendations.json，再运行：.\skills.ps1 审查目标 校验预演 --recommendations `"{0}`" --dry-run-ack `"{1}`"" -f $recommendationsPath, (Get-AuditDryRunAckToken))
+    }
+    if ($errorCode -eq "stale_snapshot" -or $errorCode -eq "prompt_contract_mismatch" -or $errorCode -eq "live_state_changed") {
+        return ".\skills.ps1 审查目标 扫描"
+    }
+    return ("修复报告中的阻断项后重试：.\skills.ps1 审查目标 校验预演 --recommendations `"{0}`" --dry-run-ack `"{1}`"" -f $recommendationsPath, (Get-AuditDryRunAckToken))
+}
+
+function Invoke-AuditRecommendationsValidateDryRun {
+    param(
+        [string]$RecommendationsPath,
+        [string]$RunId,
+        [string]$DryRunAck
+    )
+    $resolvedRecommendations = Resolve-AuditRecommendationsPathForPreflight $RecommendationsPath $RunId
+    $workflowPath = Get-AuditWorkflowReportPath $resolvedRecommendations
+    $recommendationDir = Split-Path -Parent $resolvedRecommendations
+    if ([string]::IsNullOrWhiteSpace($recommendationDir)) { $recommendationDir = "." }
+    $stages = [pscustomobject]([ordered]@{
+        recommendations_validation = [pscustomobject]@{ status = "not_run" }
+        preflight = [pscustomobject]@{ status = "not_run" }
+        dry_run = [pscustomobject]@{ status = "not_run" }
+        input_stability = [pscustomobject]@{ status = "not_run" }
+    })
+    $report = [ordered]@{
+        schema_version = 1
+        workflow = "recommendations_validate_dry_run"
+        generated_at = (Get-Date).ToString("o")
+        run_id = ""
+        target = ""
+        success = $false
+        persisted = $false
+        failed_stage = ""
+        error_code = ""
+        error_message = ""
+        next_command = ""
+        recommendations_path = $resolvedRecommendations
+        recommendations_sha256 = ""
+        stages = $stages
+        input_stability = [pscustomobject]([ordered]@{
+            before = $null
+            after_preflight = $null
+            after_dry_run = $null
+            preflight_matched = $false
+            live_state_matched = $false
+            matched = $false
+        })
+        reports = [pscustomobject]([ordered]@{
+            preflight = (Join-Path $recommendationDir "preflight-report.json")
+            dry_run_summary = (Get-AuditDryRunSummaryPath $resolvedRecommendations)
+            apply = (Get-AuditApplyReportPath $resolvedRecommendations)
+            workflow = $workflowPath
+        })
+        changed_counts = New-AuditChangedCounts @() @()
+        categories = @()
+        items = @()
+        removal_candidates = @()
+        mcp_items = @()
+        mcp_removal_candidates = @()
+    }
+    $currentStage = "recommendations_validation"
+    try {
+        if (-not (Test-Path -LiteralPath $resolvedRecommendations -PathType Leaf)) {
+            throw ("recommendations_missing：recommendations.json 不存在：{0}" -f $resolvedRecommendations)
+        }
+
+        $report.input_stability.before = Get-AuditWorkflowInputState $resolvedRecommendations
+        $report.recommendations_sha256 = [string](Get-FileContentHash $resolvedRecommendations)
+        $rec = Load-AuditRecommendations $resolvedRecommendations
+        $report.run_id = [string]$rec.run_id
+        $report.target = [string]$rec.target
+        $report.stages.recommendations_validation.status = "passed"
+
+        $currentStage = "preflight"
+        $preflightReport = Invoke-AuditRecommendationsPreflight -RecommendationsPath $resolvedRecommendations
+        Need ([bool]$preflightReport.success) "preflight_failed：预检报告未通过"
+        $report.stages.preflight.status = "passed"
+
+        $currentStage = "input_stability"
+        $report.input_stability.after_preflight = Get-AuditWorkflowInputState $resolvedRecommendations
+        $report.input_stability.preflight_matched = ([string]$report.input_stability.before.fingerprint -eq [string]$report.input_stability.after_preflight.fingerprint)
+        if (-not [bool]$report.input_stability.preflight_matched) {
+            throw "workflow_input_changed：preflight 前后审查输入发生变化，已停止 dry-run。"
+        }
+
+        $currentStage = "dry_run"
+        $dryRunReport = Invoke-AuditRecommendationsApply -RecommendationsPath $resolvedRecommendations -DryRunAck $DryRunAck -RequireDryRunAck $true
+        if (-not [bool]$dryRunReport.success) {
+            throw "dry_run_not_confirmed：dry-run 未完成或确认口令不匹配。"
+        }
+        if ([bool]$dryRunReport.persisted) {
+            throw "unexpected_persistence：校验预演不允许写入技能或 MCP 配置。"
+        }
+        $report.stages.dry_run.status = "passed"
+
+        $currentStage = "input_stability"
+        $report.input_stability.after_dry_run = Get-AuditWorkflowInputState $resolvedRecommendations
+        $filesMatched = ([string]$report.input_stability.before.fingerprint -eq [string]$report.input_stability.after_dry_run.fingerprint)
+        $liveStaleness = Get-AuditInstalledSnapshotStaleness $preflightReport.live_state $dryRunReport.live_state
+        $report.input_stability.live_state_matched = (-not [bool]$liveStaleness.is_stale)
+        $report.input_stability.matched = ($filesMatched -and [bool]$report.input_stability.live_state_matched)
+        if (-not $filesMatched) {
+            throw "workflow_input_changed：preflight 到 dry-run 结束期间审查输入发生变化。"
+        }
+        if (-not [bool]$report.input_stability.live_state_matched) {
+            throw "live_state_changed：preflight 到 dry-run 期间受管技能、外部能力或 MCP 状态发生变化。"
+        }
+        $report.stages.input_stability.status = "passed"
+
+        $report.success = $true
+        $report.persisted = $false
+        $report.failed_stage = ""
+        $report.error_code = ""
+        $report.error_message = ""
+        $report.next_command = ""
+        $report.changed_counts = $dryRunReport.changed_counts
+        $report.categories = @(New-AuditWorkflowCategories $dryRunReport $rec)
+        $report.items = @($dryRunReport.items)
+        $report.removal_candidates = @($dryRunReport.removal_candidates)
+        $report.mcp_items = @($dryRunReport.mcp_items)
+        $report.mcp_removal_candidates = @($dryRunReport.mcp_removal_candidates)
+        Write-AuditJsonFile $workflowPath ([pscustomobject]$report)
+        Write-Host ("校验预演报告：{0}" -f $workflowPath) -ForegroundColor Cyan
+        Write-Host "校验预演通过：preflight 与 dry-run 已按序完成，persisted=false。" -ForegroundColor Green
+        return [pscustomobject]$report
+    }
+    catch {
+        $message = [string]$_.Exception.Message
+        $errorCode = Get-AuditWorkflowErrorCode $currentStage $message
+        $report.success = $false
+        $report.persisted = $false
+        $report.failed_stage = $currentStage
+        $report.error_code = $errorCode
+        $report.error_message = $message
+        $report.next_command = Get-AuditWorkflowNextCommand $errorCode $resolvedRecommendations
+        if ($currentStage -eq "recommendations_validation") { $report.stages.recommendations_validation.status = "failed" }
+        elseif ($currentStage -eq "preflight") { $report.stages.preflight.status = "failed" }
+        elseif ($currentStage -eq "dry_run") { $report.stages.dry_run.status = "failed" }
+        else { $report.stages.input_stability.status = "failed" }
+        if (Test-Path -LiteralPath $recommendationDir -PathType Container) {
+            Write-AuditJsonFile $workflowPath ([pscustomobject]$report)
+            Write-Host ("校验预演报告：{0}" -f $workflowPath) -ForegroundColor Cyan
+        }
+        throw
+    }
+}
+
 function Parse-AuditTargetsArgs([string[]]$tokens) {
     $result = [ordered]@{
         action = "list"
@@ -15370,6 +15850,10 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             "status" { $result.action = "status"; $items = @($items | Select-Object -Skip 1) }
             "预检" { $result.action = "preflight"; $items = @($items | Select-Object -Skip 1) }
             "preflight" { $result.action = "preflight"; $items = @($items | Select-Object -Skip 1) }
+            "校验预演" { $result.action = "validate_dry_run"; $items = @($items | Select-Object -Skip 1) }
+            "预演" { $result.action = "validate_dry_run"; $items = @($items | Select-Object -Skip 1) }
+            "validate-dry-run" { $result.action = "validate_dry_run"; $items = @($items | Select-Object -Skip 1) }
+            "dry-run" { $result.action = "validate_dry_run"; $items = @($items | Select-Object -Skip 1) }
             "应用确认" { $result.action = "apply_flow"; $items = @($items | Select-Object -Skip 1) }
             "apply-flow" { $result.action = "apply_flow"; $items = @($items | Select-Object -Skip 1) }
             "应用" { $result.action = "apply"; $items = @($items | Select-Object -Skip 1) }
@@ -15510,6 +15994,7 @@ function Show-AuditTargetsCommandHelp {
     Write-Host "  .\skills.ps1 审查目标 发现新技能 [--query <text>] [--out <dir>] [--force]"
     Write-Host "  .\skills.ps1 审查目标 预检 --run-id <run-id>"
     Write-Host "  .\skills.ps1 审查目标 预检 --recommendations <file>"
+    Write-Host "  .\skills.ps1 审查目标 校验预演 --recommendations <file> --dry-run-ack ""我知道未落盘"""
     Write-Host "  .\skills.ps1 审查目标 应用确认 --recommendations <file>"
     Write-Host "  .\skills.ps1 审查目标 应用 --recommendations <file> [--dry-run-ack ""我知道未落盘""]"
     Write-Host "  .\skills.ps1 审查目标 状态"
@@ -15558,11 +16043,369 @@ function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
         "list" { Write-AuditTargetsList }
         "status" { Show-AuditLatestStatus }
         "preflight" { Invoke-AuditRecommendationsPreflight -RecommendationsPath $opts.recommendations -RunId $opts.run_id | Out-Null }
+        "validate_dry_run" { Invoke-AuditRecommendationsValidateDryRun -RecommendationsPath $opts.recommendations -RunId $opts.run_id -DryRunAck $opts.dry_run_ack | Out-Null }
         "scan" { Invoke-AuditTargetsScan -Target $opts.target -OutDir $opts.out -Force:$opts.force | Out-Null }
         "discover_skills" { Invoke-AuditSkillDiscovery -Query $opts.query -OutDir $opts.out -Force:$opts.force | Out-Null }
         "apply_flow" { Invoke-AuditRecommendationsTwoStageApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -McpAddSelection $opts.mcp_add_selection -McpRemoveSelection $opts.mcp_remove_selection -DryRunAck $opts.dry_run_ack -StaleAck $opts.stale_ack -AllowStaleSnapshot:$opts.allow_stale_snapshot | Out-Null }
-        "apply" { Invoke-AuditRecommendationsApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -McpAddSelection $opts.mcp_add_selection -McpRemoveSelection $opts.mcp_remove_selection -DryRunAck $opts.dry_run_ack -StaleAck $opts.stale_ack -AllowStaleSnapshot:$opts.allow_stale_snapshot -RequireDryRunAck (-not $opts.apply) -Apply:$opts.apply -Yes:$opts.yes | Out-Null }
+        "apply" {
+            if (-not $opts.apply -and -not $opts.allow_stale_snapshot) {
+                Invoke-AuditRecommendationsValidateDryRun -RecommendationsPath $opts.recommendations -RunId $opts.run_id -DryRunAck $opts.dry_run_ack | Out-Null
+            }
+            else {
+                Invoke-AuditRecommendationsApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -McpAddSelection $opts.mcp_add_selection -McpRemoveSelection $opts.mcp_remove_selection -DryRunAck $opts.dry_run_ack -StaleAck $opts.stale_ack -AllowStaleSnapshot:$opts.allow_stale_snapshot -RequireDryRunAck (-not $opts.apply) -Apply:$opts.apply -Yes:$opts.yes | Out-Null
+            }
+        }
     }
+}
+
+function Get-EmptySkillRoutingReport {
+    return [pscustomobject]([ordered]@{
+            schema_version = 1
+            enabled = $false
+            mode = "observe"
+            policy_path = ""
+            group_count = 0
+            active_group_count = 0
+            finding_count = 0
+            blocking = $false
+            groups = @()
+            findings = @()
+        })
+}
+
+function Get-CodexEnabledPluginIds([string]$configPath) {
+    if ([string]::IsNullOrWhiteSpace($configPath) -or -not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+        return @()
+    }
+
+    $content = Get-ContentUtf8 $configPath
+    $pattern = '(?ms)^\s*\[plugins\.(?:"(?<quoted>[^"]+)"|(?<bare>[^\]\r\n]+))\]\s*\r?\n(?<body>.*?)(?=^\s*\[|\z)'
+    $ids = New-Object System.Collections.Generic.List[string]
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $tableRegex = [regex]::new($pattern, [System.Text.RegularExpressions.RegexOptions]::None, [TimeSpan]::FromSeconds(1))
+    $enabledRegex = [regex]::new('^\s*enabled\s*=\s*true\s*(?:#.*)?$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::Multiline, [TimeSpan]::FromSeconds(1))
+    foreach ($match in $tableRegex.Matches($content)) {
+        $body = [string]$match.Groups['body'].Value
+        if (-not $enabledRegex.IsMatch($body)) { continue }
+        $id = if ($match.Groups['quoted'].Success) { [string]$match.Groups['quoted'].Value } else { [string]$match.Groups['bare'].Value }
+        $id = $id.Trim()
+        if (-not [string]::IsNullOrWhiteSpace($id) -and $seen.Add($id)) {
+            $ids.Add($id) | Out-Null
+        }
+    }
+    return @($ids.ToArray() | Sort-Object)
+}
+
+function Add-SkillExternalInventoryWarning($warnings, [string]$code, [string]$subject, [string]$message) {
+    $warnings.Add([pscustomobject]([ordered]@{
+                code = $code
+                subject = $subject
+                message = $message
+            })) | Out-Null
+}
+
+function Get-CodexExternalSkillInventory($projectionCfg) {
+    $result = [ordered]@{
+        enabled = $false
+        config_path = ""
+        plugin_cache_path = ""
+        cache_selection = "newest_usable_version_by_mtime"
+        enabled_plugin_ids = @()
+        plugin_count = 0
+        skill_count = 0
+        metadata_chars = 0
+        skills = @()
+        warnings = @()
+    }
+    if ($null -eq $projectionCfg) {
+        return [pscustomobject]$result
+    }
+    $inventoryCfg = Get-CfgObjectProperty $projectionCfg 'external_skill_inventory'
+    if ($null -eq $inventoryCfg) { return [pscustomobject]$result }
+    $enabledRaw = Get-CfgObjectProperty $inventoryCfg 'enabled'
+    $enabled = ($null -eq $enabledRaw) -or [bool]$enabledRaw
+    $result.enabled = $enabled
+    if (-not $enabled) { return [pscustomobject]$result }
+
+    $configRawValue = Get-CfgObjectProperty $projectionCfg 'codex_config_path'
+    $cacheRawValue = Get-CfgObjectProperty $inventoryCfg 'plugin_cache_path'
+    $configRaw = if ([string]::IsNullOrWhiteSpace([string]$configRawValue)) { '~/.codex/config.toml' } else { [string]$configRawValue }
+    $cacheRaw = if ([string]::IsNullOrWhiteSpace([string]$cacheRawValue)) { '~/.codex/plugins/cache' } else { [string]$cacheRawValue }
+    $configPath = Resolve-SkillProjectionPath $configRaw
+    $cachePath = Resolve-SkillProjectionPath $cacheRaw
+    $result.config_path = $configPath
+    $result.plugin_cache_path = $cachePath
+    $warnings = New-Object System.Collections.Generic.List[object]
+    $skills = New-Object System.Collections.Generic.List[object]
+
+    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+        Add-SkillExternalInventoryWarning $warnings 'codex_config_missing' $configPath 'Codex config is unavailable; external plugin skills were not inventoried.'
+        $result.warnings = @($warnings.ToArray())
+        return [pscustomobject]$result
+    }
+
+    $pluginIds = @(Get-CodexEnabledPluginIds $configPath)
+    $result.enabled_plugin_ids = @($pluginIds)
+    if (-not (Test-Path -LiteralPath $cachePath -PathType Container)) {
+        Add-SkillExternalInventoryWarning $warnings 'plugin_cache_missing' $cachePath 'Codex plugin cache is unavailable; enabled plugins could not be resolved to skill metadata.'
+        $result.plugin_count = $pluginIds.Count
+        $result.warnings = @($warnings.ToArray())
+        return [pscustomobject]$result
+    }
+
+    foreach ($pluginId in $pluginIds) {
+        $separator = $pluginId.LastIndexOf('@')
+        if ($separator -le 0 -or $separator -ge ($pluginId.Length - 1)) {
+            Add-SkillExternalInventoryWarning $warnings 'invalid_plugin_id' $pluginId 'Expected enabled plugin id in name@marketplace form.'
+            continue
+        }
+        $pluginName = $pluginId.Substring(0, $separator)
+        $marketplace = $pluginId.Substring($separator + 1)
+        $safeSegmentPattern = '^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9_-])?$'
+        if ($pluginName -notmatch $safeSegmentPattern -or $marketplace -notmatch $safeSegmentPattern) {
+            Add-SkillExternalInventoryWarning $warnings 'unsafe_plugin_id' $pluginId 'Plugin id contains a path segment and was not resolved against the cache.'
+            continue
+        }
+        $pluginRoot = Join-Path (Join-Path $cachePath $marketplace) $pluginName
+        if (-not (Test-Path -LiteralPath $pluginRoot -PathType Container)) {
+            Add-SkillExternalInventoryWarning $warnings 'enabled_plugin_cache_missing' $pluginId ("No cache directory was found at {0}." -f $pluginRoot)
+            continue
+        }
+
+        $selectedVersion = $null
+        $selectedSkillFiles = @()
+        foreach ($versionDir in @(Get-ChildItem -LiteralPath $pluginRoot -Directory -ErrorAction SilentlyContinue | Sort-Object @{ Expression = 'LastWriteTimeUtc'; Descending = $true }, @{ Expression = 'Name'; Descending = $true })) {
+            $skillsRoot = Join-Path $versionDir.FullName 'skills'
+            if (-not (Test-Path -LiteralPath $skillsRoot -PathType Container)) { continue }
+            $candidateFiles = @(Get-ChildItem -LiteralPath $skillsRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                    $skillFile = Join-Path $_.FullName 'SKILL.md'
+                    if (Test-Path -LiteralPath $skillFile -PathType Leaf) { Get-Item -LiteralPath $skillFile }
+                })
+            if ($candidateFiles.Count -eq 0) { continue }
+            $selectedVersion = $versionDir
+            $selectedSkillFiles = @($candidateFiles)
+            break
+        }
+        if ($null -eq $selectedVersion) {
+            Add-SkillExternalInventoryWarning $warnings 'enabled_plugin_skills_missing' $pluginId 'The newest usable plugin cache has no direct skills/*/SKILL.md entries.'
+            continue
+        }
+
+        foreach ($skillFile in @($selectedSkillFiles | Sort-Object FullName)) {
+            $meta = Get-SkillMetadataFromFile $skillFile.FullName
+            $name = if ([string]::IsNullOrWhiteSpace([string]$meta.declared_name)) { $skillFile.Directory.Name } else { [string]$meta.declared_name }
+            $description = [string]$meta.description
+            $skills.Add([pscustomobject]([ordered]@{
+                        plugin_id = $pluginId
+                        plugin_name = $pluginName
+                        marketplace = $marketplace
+                        cache_version = [string]$selectedVersion.Name
+                        name = $name
+                        qualified_name = ("{0}::{1}" -f $pluginId, $name)
+                        description = $description
+                        path = $skillFile.FullName
+                    })) | Out-Null
+        }
+    }
+
+    $metadataChars = 0
+    foreach ($skill in @($skills.ToArray())) {
+        $metadataChars += ([string]$skill.name).Length + ([string]$skill.description).Length
+    }
+    $result.plugin_count = $pluginIds.Count
+    $result.skill_count = $skills.Count
+    $result.metadata_chars = $metadataChars
+    $result.skills = @($skills.ToArray() | Sort-Object plugin_id, name)
+    $result.warnings = @($warnings.ToArray())
+    return [pscustomobject]$result
+}
+
+function Get-SkillRoutingPolicy([string]$path) {
+    Need (-not [string]::IsNullOrWhiteSpace($path)) 'skill routing policy path is empty'
+    Need (Test-Path -LiteralPath $path -PathType Leaf) ("skill routing policy does not exist: {0}" -f $path)
+    try {
+        $policy = Get-ContentUtf8 $path | ConvertFrom-Json
+    }
+    catch {
+        throw ("skill routing policy JSON parse failed: {0}" -f $_.Exception.Message)
+    }
+    Need ([int]$policy.schema_version -eq 1) 'skill routing policy only supports schema_version=1'
+    $mode = ([string]$policy.mode).Trim().ToLowerInvariant()
+    Need ($mode -eq 'observe' -or $mode -eq 'enforce') ("skill routing policy mode only supports observe/enforce: {0}" -f $mode)
+    $policy.mode = $mode
+    foreach ($field in @('trigger_rules', 'groups', 'conflicts')) {
+        Need ($policy.PSObject.Properties.Match($field).Count -gt 0 -and (Assert-IsArray $policy.$field)) ("skill routing policy {0} must be an array" -f $field)
+    }
+    return $policy
+}
+
+function Get-SkillRoutingEntryPath($entry) {
+    if ($null -eq $entry) { return '' }
+    if ($entry.PSObject.Properties.Match('path').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$entry.path)) {
+        return [string]$entry.path
+    }
+    if ($entry.PSObject.Properties.Match('local_path').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$entry.local_path)) {
+        return (Join-Path ([string]$entry.local_path) 'SKILL.md')
+    }
+    return ''
+}
+
+function Add-SkillRoutingFinding($findings, [string]$code, [string]$severity, [string]$subject, [string]$message, [string]$resolution = '') {
+    $findings.Add([pscustomobject]([ordered]@{
+                code = $code
+                severity = $severity
+                subject = $subject
+                message = $message
+                resolution = $resolution
+            })) | Out-Null
+}
+
+function New-SkillRoutingReport($projectionCfg, $canonicalSkills, $activeSkills, $externalSkills) {
+    $routingPolicyPath = if ($null -eq $projectionCfg) { '' } else { [string](Get-CfgObjectProperty $projectionCfg 'routing_policy_path') }
+    if ([string]::IsNullOrWhiteSpace($routingPolicyPath)) {
+        return Get-EmptySkillRoutingReport
+    }
+    $policyPath = Resolve-SkillProjectionPath $routingPolicyPath
+    $policy = Get-SkillRoutingPolicy $policyPath
+    $canonical = @($canonicalSkills)
+    $active = @($activeSkills)
+    $external = @($externalSkills)
+    $canonicalNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $activeNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $externalNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in $canonical) { $canonicalNames.Add(([string]$entry.name).Trim()) | Out-Null }
+    foreach ($entry in $active) { $activeNames.Add(([string]$entry.name).Trim()) | Out-Null }
+    foreach ($entry in $external) {
+        $externalNames.Add(([string]$entry.qualified_name).Trim()) | Out-Null
+        $externalNames.Add(([string]$entry.name).Trim()) | Out-Null
+    }
+
+    $findings = New-Object System.Collections.Generic.List[object]
+    $groupReports = New-Object System.Collections.Generic.List[object]
+    $groupIds = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $coveredLocalNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $allowedRoles = @('router', 'executor', 'validator', 'operator', 'workflow', 'reference')
+    foreach ($group in @($policy.groups)) {
+        Need ($null -ne $group) 'skill routing group cannot be null'
+        $groupId = ([string]$group.id).Trim()
+        Need (-not [string]::IsNullOrWhiteSpace($groupId)) 'skill routing group is missing id'
+        Need ($groupIds.Add($groupId)) ("duplicate skill routing group id: {0}" -f $groupId)
+        Need (-not [string]::IsNullOrWhiteSpace([string]$group.purpose)) ("skill routing group is missing purpose: {0}" -f $groupId)
+        Need ($group.PSObject.Properties.Match('members').Count -gt 0 -and (Assert-IsArray $group.members)) ("skill routing group members must be an array: {0}" -f $groupId)
+
+        $memberNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+        $memberRoles = @{}
+        $activeMembers = New-Object System.Collections.Generic.List[string]
+        foreach ($member in @($group.members)) {
+            $name = ([string]$member.name).Trim()
+            $role = ([string]$member.role).Trim().ToLowerInvariant()
+            Need (-not [string]::IsNullOrWhiteSpace($name)) ("skill routing group member is missing name: {0}" -f $groupId)
+            Need ($allowedRoles -contains $role) ("unsupported skill routing role {0}: {1}/{2}" -f $role, $groupId, $name)
+            Need (-not [string]::IsNullOrWhiteSpace([string]$member.activation)) ("skill routing member is missing activation: {0}/{1}" -f $groupId, $name)
+            Need ($memberNames.Add($name)) ("duplicate skill routing member: {0}/{1}" -f $groupId, $name)
+            Need ($canonicalNames.Contains($name)) ("skill routing member is not installed: {0}/{1}" -f $groupId, $name)
+            $memberRoles[$name] = $role
+            $coveredLocalNames.Add($name) | Out-Null
+            if ($activeNames.Contains($name)) { $activeMembers.Add($name) | Out-Null }
+        }
+        $router = ([string]$group.router).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($router)) {
+            Need ($memberNames.Contains($router)) ("skill routing group router must also be a member: {0}/{1}" -f $groupId, $router)
+            Need ([string]$memberRoles[$router] -eq 'router') ("skill routing group router member must use role=router: {0}/{1}" -f $groupId, $router)
+        }
+
+        $activeExternal = New-Object System.Collections.Generic.List[string]
+        if ($group.PSObject.Properties.Match('external_members').Count -gt 0 -and $null -ne $group.external_members) {
+            Need (Assert-IsArray $group.external_members) ("skill routing group external_members must be an array: {0}" -f $groupId)
+            foreach ($member in @($group.external_members)) {
+                $qualifiedName = ([string]$member.qualified_name).Trim()
+                $role = ([string]$member.role).Trim().ToLowerInvariant()
+                Need (-not [string]::IsNullOrWhiteSpace($qualifiedName)) ("external skill routing member is missing qualified_name: {0}" -f $groupId)
+                Need ($allowedRoles -contains $role) ("unsupported external skill routing role {0}: {1}/{2}" -f $role, $groupId, $qualifiedName)
+                Need (-not [string]::IsNullOrWhiteSpace([string]$member.activation)) ("external skill routing member is missing activation: {0}/{1}" -f $groupId, $qualifiedName)
+                if ($externalNames.Contains($qualifiedName)) {
+                    $activeExternal.Add($qualifiedName) | Out-Null
+                }
+                elseif (-not ($member.PSObject.Properties.Match('optional').Count -gt 0 -and [bool]$member.optional)) {
+                    Add-SkillRoutingFinding $findings 'external_member_unavailable' 'warning' $qualifiedName ("Required external member for routing group '{0}' is unavailable." -f $groupId) 'Enable or install the declared plugin, or mark the member optional.'
+                }
+            }
+        }
+
+        $groupReports.Add([pscustomobject]([ordered]@{
+                    id = $groupId
+                    purpose = [string]$group.purpose
+                    router = $router
+                    router_active = (-not [string]::IsNullOrWhiteSpace($router) -and $activeNames.Contains($router))
+                    active = ($activeMembers.Count -gt 0 -or $activeExternal.Count -gt 0)
+                    active_local_members = @($activeMembers.ToArray())
+                    active_external_members = @($activeExternal.ToArray())
+                    selection_policy = [string]$group.selection_policy
+                })) | Out-Null
+    }
+
+    $triggerRuleIds = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($rule in @($policy.trigger_rules)) {
+        $ruleId = ([string]$rule.id).Trim()
+        $severity = ([string]$rule.severity).Trim().ToLowerInvariant()
+        Need (-not [string]::IsNullOrWhiteSpace($ruleId)) 'skill routing trigger rule is missing id'
+        Need ($triggerRuleIds.Add($ruleId)) ("duplicate skill routing trigger rule id: {0}" -f $ruleId)
+        Need ($severity -eq 'info' -or $severity -eq 'warning' -or $severity -eq 'error') ("unsupported trigger rule severity: {0}/{1}" -f $ruleId, $severity)
+        Need (-not [string]::IsNullOrWhiteSpace([string]$rule.pattern)) ("skill routing trigger rule is missing pattern: {0}" -f $ruleId)
+        try { $regex = [regex]::new([string]$rule.pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase, [TimeSpan]::FromSeconds(1)) }
+        catch { throw ("invalid skill routing trigger regex {0}: {1}" -f $ruleId, $_.Exception.Message) }
+        $scope = ([string]$rule.scan_scope).Trim().ToLowerInvariant()
+        if ([string]::IsNullOrWhiteSpace($scope)) { $scope = 'description' }
+        Need ($scope -eq 'description' -or $scope -eq 'full') ("trigger rule scan_scope only supports description/full: {0}" -f $ruleId)
+        foreach ($entry in $active) {
+            $text = [string]$entry.description
+            if ($scope -eq 'full') {
+                $entryPath = Get-SkillRoutingEntryPath $entry
+                if (-not [string]::IsNullOrWhiteSpace($entryPath) -and (Test-Path -LiteralPath $entryPath -PathType Leaf)) {
+                    $text = Get-ContentUtf8 $entryPath
+                }
+            }
+            if (-not $regex.IsMatch($text)) { continue }
+            $name = [string]$entry.name
+            Add-SkillRoutingFinding $findings 'strong_trigger_signal' $severity $name ("Active skill matches trigger rule '{0}'." -f $ruleId) ([string]$rule.resolution)
+            if (-not $coveredLocalNames.Contains($name)) {
+                Add-SkillRoutingFinding $findings 'unrouted_strong_trigger' 'warning' $name 'An active skill with a strong trigger is not covered by any routing group.' 'Add it to a routing group or narrow its trigger text.'
+            }
+        }
+    }
+
+    $conflictIds = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($conflict in @($policy.conflicts)) {
+        $conflictId = ([string]$conflict.id).Trim()
+        $severity = ([string]$conflict.severity).Trim().ToLowerInvariant()
+        Need (-not [string]::IsNullOrWhiteSpace($conflictId)) 'skill routing conflict is missing id'
+        Need ($conflictIds.Add($conflictId)) ("duplicate skill routing conflict id: {0}" -f $conflictId)
+        Need ($conflict.PSObject.Properties.Match('members').Count -gt 0 -and (Assert-IsArray $conflict.members)) ("skill routing conflict members must be an array: {0}" -f $conflictId)
+        Need ($severity -eq 'warning' -or $severity -eq 'error') ("skill routing conflict severity only supports warning/error: {0}" -f $conflictId)
+        Need (-not [string]::IsNullOrWhiteSpace([string]$conflict.resolution)) ("skill routing conflict is missing resolution: {0}" -f $conflictId)
+        $members = @($conflict.members | ForEach-Object { ([string]$_).Trim() })
+        Need ($members.Count -ge 2) ("skill routing conflict requires at least two members: {0}" -f $conflictId)
+        foreach ($name in $members) { Need ($canonicalNames.Contains($name)) ("skill routing conflict member is not installed: {0}/{1}" -f $conflictId, $name) }
+        $coactive = @($members | Where-Object { $activeNames.Contains($_) })
+        if ($coactive.Count -eq $members.Count) {
+            Add-SkillRoutingFinding $findings 'coactive_contract_conflict' $severity $conflictId ("Potentially conflicting skills are active together: {0}." -f ($members -join ', ')) ([string]$conflict.resolution)
+        }
+    }
+
+    $findingItems = @($findings.ToArray())
+    $blocking = $policy.mode -eq 'enforce' -and @($findingItems | Where-Object severity -eq 'error').Count -gt 0
+    return [pscustomobject]([ordered]@{
+            schema_version = 1
+            enabled = $true
+            mode = [string]$policy.mode
+            policy_path = $policyPath
+            group_count = $groupReports.Count
+            active_group_count = @($groupReports.ToArray() | Where-Object active).Count
+            finding_count = $findingItems.Count
+            blocking = $blocking
+            groups = @($groupReports.ToArray())
+            findings = @($findingItems | Sort-Object severity, code, subject)
+        })
 }
 
 function Resolve-SkillProjectionPath([string]$path) {
@@ -15814,7 +16657,7 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
     Need ($null -ne $projectionCfg) "skill_projection 配置为空"
     $enabled = -not ($projectionCfg.PSObject.Properties.Match("enabled").Count -gt 0) -or [bool]$projectionCfg.enabled
     if (-not $enabled) {
-        return [pscustomobject]@{ schema_version = 2; enabled = $false; skills = @(); canonical = @(); active = @(); disabled = @(); conflicts = @(); unique_names = @(); active_names = @(); duplicate_name_groups = 0 }
+        return [pscustomobject]@{ schema_version = 2; enabled = $false; skills = @(); canonical = @(); active = @(); disabled = @(); conflicts = @(); unique_names = @(); active_names = @(); duplicate_name_groups = 0; external_skills = @(); external_inventory_warnings = @(); routing_report = (Get-EmptySkillRoutingReport) }
     }
 
     Need ($projectionCfg.PSObject.Properties.Match("sources").Count -gt 0 -and $null -ne $projectionCfg.sources) "skill_projection 缺少 sources"
@@ -15901,6 +16744,9 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
     $externalReserveChars = if ($projectionCfg.PSObject.Properties.Match("external_metadata_reserve_chars").Count -gt 0) { [int]$projectionCfg.external_metadata_reserve_chars } else { 0 }
     Need ($budgetLimitChars -gt 0) "skill_projection.budget_limit_chars 必须大于 0"
     Need ($externalReserveChars -ge 0) "skill_projection.external_metadata_reserve_chars 不能小于 0"
+    $externalInventory = Get-CodexExternalSkillInventory $projectionCfg
+    $externalSkillMetadataChars = [int]$externalInventory.metadata_chars
+    $effectiveExternalMetadataChars = [Math]::Max($externalReserveChars, $externalSkillMetadataChars)
 
     $activeProfile = ""
     $profileEnabledNames = $null
@@ -15931,13 +16777,16 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
                 $profileMetadataChars += $entryName.Length + ([string]$entry.description).Length
                 $profileActiveSkillCount++
             }
-            $profileEstimatedChars = $profileMetadataChars + $externalReserveChars
+            $profileEstimatedChars = $profileMetadataChars + $effectiveExternalMetadataChars
             $profileBudgets.Add([pscustomobject]([ordered]@{
                         profile = $profileName
                         enabled_name_count = $enabledNames.Count
                         active_skill_count = $profileActiveSkillCount
                         skill_metadata_chars = $profileMetadataChars
                         external_metadata_reserve_chars = $externalReserveChars
+                        external_skill_count = [int]$externalInventory.skill_count
+                        external_skill_metadata_chars = $externalSkillMetadataChars
+                        effective_external_metadata_chars = $effectiveExternalMetadataChars
                         estimated_metadata_chars = $profileEstimatedChars
                         budget_limit_chars = $budgetLimitChars
                         budget_pass = ($profileEstimatedChars -le $budgetLimitChars)
@@ -15993,8 +16842,9 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
     foreach ($entry in @($active.ToArray())) {
         $skillMetadataChars += ([string]$entry.name).Length + ([string]$entry.description).Length
     }
-    $estimatedMetadataChars = $skillMetadataChars + $externalReserveChars
+    $estimatedMetadataChars = $skillMetadataChars + $effectiveExternalMetadataChars
     $allProfilesBudgetPass = @($profileBudgets.ToArray() | Where-Object { -not [bool]$_.budget_pass }).Count -eq 0
+    $routingReport = New-SkillRoutingReport $projectionCfg @($canonical.ToArray()) @($active.ToArray()) @($externalInventory.skills)
 
     return [pscustomobject]([ordered]@{
         schema_version = 2
@@ -16011,11 +16861,17 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
         duplicate_name_groups = $duplicateGroups
         skill_metadata_chars = $skillMetadataChars
         external_metadata_reserve_chars = $externalReserveChars
+        external_skill_count = [int]$externalInventory.skill_count
+        external_skill_metadata_chars = $externalSkillMetadataChars
+        effective_external_metadata_chars = $effectiveExternalMetadataChars
         estimated_metadata_chars = $estimatedMetadataChars
         budget_limit_chars = $budgetLimitChars
         budget_pass = ($estimatedMetadataChars -le $budgetLimitChars)
         all_profiles_budget_pass = $allProfilesBudgetPass
         profile_budgets = @($profileBudgets.ToArray())
+        external_skills = @($externalInventory.skills)
+        external_inventory_warnings = @($externalInventory.warnings)
+        routing_report = $routingReport
     })
 }
 
@@ -16123,6 +16979,7 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
         Need ([bool]$plan.budget_pass) ("技能描述预算超限：estimated={0}, limit={1}, profile={2}" -f [int]$plan.estimated_metadata_chars, [int]$plan.budget_limit_chars, [string]$plan.active_profile)
         $oversizedProfiles = @($plan.profile_budgets | Where-Object { -not [bool]$_.budget_pass } | ForEach-Object { "{0}={1}/{2}" -f $_.profile, $_.estimated_metadata_chars, $_.budget_limit_chars })
         Need ([bool]$plan.all_profiles_budget_pass) ("技能 profile 描述预算超限：{0}" -f ($oversizedProfiles -join ", "))
+        Need (-not [bool]$plan.routing_report.blocking) "技能路由策略存在 enforce 模式阻断项"
     }
 
     $existing = if (Test-Path -LiteralPath $configPath -PathType Leaf) { Get-ContentUtf8 $configPath } else { "" }
@@ -16154,11 +17011,17 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
                 conflict_count = @($plan.conflicts).Count
                 skill_metadata_chars = [int]$plan.skill_metadata_chars
                 external_metadata_reserve_chars = [int]$plan.external_metadata_reserve_chars
+                external_skill_count = [int]$plan.external_skill_count
+                external_skill_metadata_chars = [int]$plan.external_skill_metadata_chars
+                effective_external_metadata_chars = [int]$plan.effective_external_metadata_chars
                 estimated_metadata_chars = [int]$plan.estimated_metadata_chars
                 budget_limit_chars = [int]$plan.budget_limit_chars
                 budget_pass = [bool]$plan.budget_pass
                 all_profiles_budget_pass = [bool]$plan.all_profiles_budget_pass
                 profile_budgets = @($plan.profile_budgets)
+                external_skills = @($plan.external_skills)
+                external_inventory_warnings = @($plan.external_inventory_warnings)
+                routing_report = $plan.routing_report
                 skills = @($plan.skills)
                 canonical = @($plan.canonical)
                 active = @($plan.active)
@@ -17010,6 +17873,7 @@ MCP：
   .\skills.ps1 自动更新设置
   .\skills.ps1 doctor [--json] [--fix] [--dry-run-fix] [--strict] [--strict-perf] [--threshold-ms <ms>]
   pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-skill-integrity.ps1 [-ReportPath <file>]
+  pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-skill-routing.ps1 [-ReportPath <file>] [-Json]
 
 通用参数：
   -DryRun：仅预演（跳过写入/删除/同步/拉取）
@@ -17053,7 +17917,7 @@ MCP/门禁环境变量：
   - `应用确认` 是单入口两阶段流程：先 dry-run，再要求输入确认口令 `APPLY <run-id>` 才执行落盘。
   - `应用` 默认只做 dry-run，且需显式确认口令 `我知道未落盘`；只有 `--apply --yes` 才会真正执行选中的新增/卸载。
   - 建议先执行 `预检`：会提前检查 `stale_snapshot` 与提示词契约版本，避免“先研究后阻断”。
-  - `应用`/`应用确认` 会校验同目录 `installed-skills.json` 快照与当前 live mappings 指纹；若快照过期（stale_snapshot）会阻断并要求先重新 `审查目标 扫描`。
+  - `应用`/`应用确认` 会校验同目录 `installed-skills.json` 快照与当前 live mappings、MCP、system/plugin 外部能力指纹；旧快照没有外部能力字段时保持兼容，新快照漂移会触发 stale_snapshot。
   - 仅在你明确接受风险时可加 `--allow-stale-snapshot` 跳过该阻断（报告会标记 stale 风险）。
   - 使用 `--allow-stale-snapshot` 时会触发红色警告并要求二次确认口令；非交互环境请用 `--stale-ack "<token>"` 提前传入。
   - `--out` 若指向已存在且非空目录，默认阻断，防止覆盖旧审查包；如确需复用，显式追加 `--force`。

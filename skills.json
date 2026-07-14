@@ -12,6 +12,11 @@
     "active_profile": "default",
     "budget_limit_chars": 8000,
     "external_metadata_reserve_chars": 1700,
+    "routing_policy_path": "config/skill-routing-policy.json",
+    "external_skill_inventory": {
+      "enabled": true,
+      "plugin_cache_path": "~/.codex/plugins/cache"
+    },
     "aliases": [
       {
         "name": "social-content",

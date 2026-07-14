@@ -42,7 +42,7 @@ function Get-DefaultAuditOuterAiPrompt {
 - 导入后复查；失败最多重试 1 次，再失败立即停止。
 
 3) 只读输入（必须真实读取）
-- outer-ai-prompt.md、ai-brief.md、user-profile.json、installed-skills.json（仅输入快照）、source-strategy.json、decision-insights.json、recommendations.template.json
+- outer-ai-prompt.md、ai-brief.md、user-profile.json、installed-skills.json（仅输入快照；skills 为受管技能，external_skills 为只读 system/plugin 能力）、source-strategy.json、decision-insights.json、recommendations.template.json
 - repo-scan.json / repo-scans.json：存在才读；N/A/profile-only 不得臆造仓库事实。
 - source-strategy.json 中的 evidence_policy / decision_quality_policy 是硬约束；decision-insights.json 是 keyword_trace 的可选关键词来源。
 - 不得复用旧 run 的 recommendations.json、旧提示词或聊天记忆作为本轮结论；旧内容只能作为待核线索，最终必须回到本轮输入和本轮来源。
@@ -56,7 +56,7 @@ function Get-DefaultAuditOuterAiPrompt {
 - 每条变更建议都要说明相对 installed-skills.json / mcp_servers 的非重复增量价值，或给出具体卸载理由；重复、泛化、证据弱则留空或放入 ``do_not_install``
 - MCP server/env 不得包含明文 token/password/key；需要凭据时只写环境变量名或占位说明，并用 sources / source_observations 说明依据
 - MCP 新增写 ``mcp_new_servers`` 且 ``name==server.name``；MCP 卸载写 ``mcp_removal_candidates``
-- ``overlap_findings`` 仅报告；``do_not_install`` 仅记录当前不应安装项；证据不足留空
+- ``overlap_findings`` 仅报告，并用 ``routing.router / selection_policy / members(name,role)`` 说明择优调用；``external_skills`` 不得写成可自动卸载项；``do_not_install`` 仅记录当前不应安装项；证据不足留空
 - 若四类新增/卸载建议均为空，可输出有效 no-op；no-op 不强制网络搜索，``source_observations=[]`` 合法，但必须在 ``decision_basis.summary`` 或 ``empty_recommendation_reasons`` 中说明本地覆盖依据。
 
 5) 自检、预检、dry-run
@@ -667,7 +667,7 @@ function Get-AuditRunId {
 }
 
 function Get-AuditPromptContractVersion {
-    return "audit-prompt-v20260502.2"
+    return "audit-prompt-v20260714.1"
 }
 
 function Get-AuditReportRoot([string]$runId) {
@@ -757,12 +757,8 @@ function Get-AuditRunCandidateBuckets([string[]]$RequiredFiles = @()) {
         $isStale = $false
         try {
             $snapshotState = Get-AuditInstalledSnapshotState $snapshotPath
-            $skillSnapshotStale = ([string]$snapshotState.fingerprint -ne [string]$liveState.fingerprint)
-            $mcpSnapshotStale = $false
-            if ($snapshotState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.mcp_fingerprint)) {
-                $mcpSnapshotStale = ([string]$snapshotState.mcp_fingerprint -ne [string]$liveState.mcp_fingerprint)
-            }
-            if ($skillSnapshotStale -or $mcpSnapshotStale) {
+            $snapshotStaleness = Get-AuditInstalledSnapshotStaleness $snapshotState $liveState
+            if ([bool]$snapshotStaleness.is_stale) {
                 $isStale = $true
             }
         }
@@ -1773,7 +1769,7 @@ Rules:
 - Profile-only mode has no target repo scan; do not fabricate repository facts.
 - Only write ``recommendations.json`` in this run directory. Do not modify generated input files, snapshots, prompts, briefs, templates, source strategy, decision insights, or repo scan files.
 - The audit commands may automatically write runtime evidence such as ``preflight-report.json``, ``dry-run-summary.json``, ``apply-report.json``, and ``docs/change-evidence/*.md``; treat those as expected command outputs, not files for the outer AI agent to hand-edit.
-- All decisions must be based on user-profile.json, installed-skills.json (audit snapshot, not live source of truth), source-strategy.json, and real external research.
+- All decisions must be based on user-profile.json, installed-skills.json (audit snapshot, not live source of truth), source-strategy.json, and real external research. Treat ``skills`` as managed install/removal candidates and ``external_skills`` as read-only system/plugin capability context.
 - decision-insights.json provides machine-readable keyword anchors; every add/remove skill or MCP recommendation should keep ``keyword_trace.user_profile`` + ``keyword_trace.target_repo_or_context`` + ``keyword_trace.installed_state`` aligned to it.
 - Treat source-strategy.json ``evidence_policy`` and ``decision_quality_policy`` as hard constraints.
 - Use ``reason_target_repo`` to explain the current installed-skill inventory / profile-only context; do not claim target repository evidence.
@@ -1794,7 +1790,7 @@ Rules:
 - MCP ``server.transport`` must stay ``stdio``/``sse``/``http``; ``stdio`` requires ``command``; ``sse/http`` requires ``url``.
 - Each add/remove recommendation must keep both reasons concise and user-readable.
 - If either reason field is missing on any recommendation, treat the run as incomplete and stop before dry-run summary.
-- Overlap findings are report-only; do not recommend automatic uninstall.
+- Overlap findings are report-only; include structured router/member roles when overlap exists, and do not recommend automatic uninstall of external system/plugin skills.
 - Use ``do_not_install`` for researched options that should stay out of the repo right now.
 - Prefer high-reputation sources and avoid weak duplicate skills.
 - Cover the built-in default sources and record the actual sources you used; GitHub Trending is discovery evidence only, never sufficient by itself.
@@ -1879,7 +1875,7 @@ Scan inputs:
 
 Rules:
 
-- All decisions must be based on BOTH user-profile.json and target repo scan facts, and must use installed-skills.json as the audit snapshot for currently installed skills and MCP servers.
+- All decisions must be based on BOTH user-profile.json and target repo scan facts, and must use installed-skills.json as the audit snapshot for currently installed skills and MCP servers. Treat ``skills`` as managed install/removal candidates and ``external_skills`` as read-only system/plugin capability context.
 - Only write ``recommendations.json`` in this run directory. Do not modify generated input files, snapshots, prompts, briefs, templates, source strategy, decision insights, or repo scan files.
 - The audit commands may automatically write runtime evidence such as ``preflight-report.json``, ``dry-run-summary.json``, ``apply-report.json``, and ``docs/change-evidence/*.md``; treat those as expected command outputs, not files for the outer AI agent to hand-edit.
 - Use source-strategy.json to cover the built-in source set and explain source tradeoffs.
@@ -1902,7 +1898,7 @@ Rules:
 - MCP ``server.transport`` must stay ``stdio``/``sse``/``http``; ``stdio`` requires ``command``; ``sse/http`` requires ``url``.
 - Each add/remove recommendation must keep both reasons concise and user-readable.
 - If either reason field is missing on any recommendation, treat the run as incomplete and stop before dry-run summary.
-- Overlap findings are report-only; do not recommend automatic uninstall.
+- Overlap findings are report-only; include structured router/member roles when overlap exists, and do not recommend automatic uninstall of external system/plugin skills.
 - Use ``do_not_install`` for researched options that should stay out of the repo right now.
 - Prefer high-reputation sources and avoid weak duplicate skills.
 - Cover the built-in default sources and record the actual sources you used; GitHub Trending is discovery evidence only, never sufficient by itself.
