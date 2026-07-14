@@ -3,7 +3,7 @@
 - verified_at: `2026-07-15T00:30:00+08:00`
 - scope: `AGENTS.md` global review marker only; existing audit-target work and runtime evidence remain user-owned and separate.
 - pre_existing_dirty: `docs/change-evidence/20260714-audit-runtime-scan-20260714-235154-812-235330.md` was present before this task and is not part of rollback or commit.
-- protected_unrelated_dirty: `tests/Unit/AuditTargets.Tests.ps1` is outside this task write-set and is not staged, reverted, or committed.
+- protected_unrelated_dirty: `skills.ps1`, `src/Commands/AuditTargets.Snapshot.ps1`, and `tests/Unit/AuditTargets.Tests.ps1` are outside this task write-set and are not staged, reverted, or committed.
 - compatibility: project contract remains `2.0`; `CLAUDE.md` remains the one-line `@AGENTS.md` wrapper.
 
 ## Ordered gates
