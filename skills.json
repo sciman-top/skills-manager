@@ -1264,21 +1264,6 @@
       ]
     },
     {
-      "name": "postgres",
-      "enabled": false,
-      "enabled_tools": [
-        "query"
-      ],
-      "transport": "stdio",
-      "command": "pwsh",
-      "args": [
-        "-NoLogo",
-        "-NoProfile",
-        "-Command",
-        "$conn = $env:POSTGRES_CONNECTION_STRING; if ([string]::IsNullOrWhiteSpace($conn)) { $conn = [Environment]::GetEnvironmentVariable(\"POSTGRES_CONNECTION_STRING\", \"User\") }; if ([string]::IsNullOrWhiteSpace($conn)) { $conn = [Environment]::GetEnvironmentVariable(\"POSTGRES_CONNECTION_STRING\", \"Machine\") }; if ([string]::IsNullOrWhiteSpace($conn)) { Write-Error \"POSTGRES_CONNECTION_STRING is required for postgres MCP.\"; exit 64 }; $env:POSTGRES_CONNECTION_STRING = $conn; npx -y @modelcontextprotocol/server-postgres $conn"
-      ]
-    },
-    {
       "name": "codebase-memory-mcp",
       "enabled": false,
       "transport": "stdio",
