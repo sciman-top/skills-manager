@@ -5,7 +5,7 @@
 - `issue_id`: `ci-doctor-sync-mcp-missing-sample-20260715`
 - 当前落点：GitHub Actions `CI / Verify doctor JSON contract` 在 clean runner 上连续失败，错误为 `doctor --json report misses sync_mcp metric in performance.summary.`
 - 目标归宿：继续验证 `doctor --json` 结构，并只在存在真实 `sync_mcp` 样本时评价性能；clean CI 的无样本状态保持可见但不冒充性能失败。
-- write-set：`.github/workflows/ci.yml`、`tests/run.ps1`、`README.md`、`README.en.md` 与本文件。
+- write-set：`.github/workflows/ci.yml`、`src/Commands/Install.ps1`、生成的 `skills.ps1`、`tests/run.ps1`、`tests/Unit/SkillIntegrityScript.Tests.ps1`、`README.md`、`README.en.md` 与本文件。
 - 排除：不修改 `skills.json`、MCP server、auth/provider、用户配置、生成脚本或既有 governance PR #2。
 
 ## 根因与修复
@@ -14,6 +14,7 @@
 - workflow 却设置 `SKILLS_SYNC_MCP_THRESHOLD_MS=12000` 并以严格模式运行，导致无样本被当作回归。远端 `main=ae8a860` 与 governance PR head `4addb13` 均能稳定复现。
 - CI 改用仓内既有 `-WarnOnly`：doctor JSON 结构仍为硬失败；缺样本或真实样本超阈值会形成 warning/observation。
 - doctor 阻断移除后，clean runner 暴露出第二层继承型失败：GitHub 预装 Pester `5.7.1`，而仓内 466 个测试使用 Pester 4 语法。workflow 精确安装 `4.10.1`，测试入口也精确导入并校验该版本。
+- Pester 固定后又暴露两个 clean-checkout 不变量：隐藏目录技能枚举在 runner 上因 `Get-ChildItem -File -Force` 组合漏项；Windows PowerShell 兼容测试错误依赖 gitignored 的本机 `agent/`。前者改为显式过滤非目录项，后者改用已有完整 fixture 与显式路径。
 - 未选择在 CI 运行非 dry-run `同步MCP`，因为该命令会向 runner 用户目录投影 MCP 配置；未选择伪造性能记录，因为那不能证明真实耗时。
 
 ## 兼容性、风险与回滚
@@ -29,9 +30,11 @@
 - green：同一 clean baseline 改用 `-WarnOnly`，exit `0`，缺样本以 warning 保持可见。
 - remote red：PR #3 首轮 push/PR checks 的 doctor 步骤已通过，但 `Run tests` 在 Pester `5.7.1` 下分别以 454 Unit + 12 E2E 失败，exit `1`；失败均为版本不兼容症状而非业务断言回归。
 - Pester pin green：`pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run.ps1` 明确输出 `Pester Version: 4.10.1`，Unit 与 12 个 E2E 全部通过，exit `0`。
+- remote red 2：PR #3 第二轮 checks 明确加载 Pester `4.10.1`，452/454 Unit 与 12/12 E2E 通过；仅隐藏目录枚举和默认 `agent/` 依赖两个 clean-checkout 不变量失败，exit `1`。
+- clean-checkout green：确认隔离工作树不存在 `agent/` 后，focused 11/11 与完整 Unit/E2E 均通过，exit `0`；证明测试不再依赖本机 gitignored 生成物。
 - build：`pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1`，exit `0`。
 - test：`pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run.ps1`，exit `0`；Unit 与 E2E 均通过。
 - contract/invariant：`./skills.ps1 doctor --strict --threshold-ms 8000` 与 `python scripts/verify-dependency-baseline.py --target-repo-root . --require-target-repo-baseline`，均 exit `0`。
-- hotspot/full：Pester pin 后重新执行 `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree`，exit `0`；关键输出为 `Pester Version: 4.10.1` 与 `Local quality gates passed (full).`。
+- hotspot/full：clean-checkout 修复后重新执行 `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree`，exit `0`；关键输出为 `skill integrity verified: 108 skills`、`Pester Version: 4.10.1` 与 `Local quality gates passed (full).`。完整 skill-integrity 使用只读复制的 109 目录父工作树运行态快照，验证后从隔离工作树删除。
 - 五轴审查：correctness、readability、architecture、security、performance 均无 Critical/Required 问题；唯一残余项是普通 CI 只观察性能，已在上节显式记录。
 - 发布后补录：PR URL、frozen head SHA、checks、merge SHA、fresh `origin/main` 与默认分支复测。

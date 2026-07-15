@@ -190,14 +190,20 @@ dependencies:
         @($result.Report.errors).Count | Should Be 0
     }
 
-    It "runs with default paths under Windows PowerShell 5.1" {
+    It "runs with explicit fixture paths under Windows PowerShell 5.1" {
         $windowsPowerShell = Get-Command powershell.exe -ErrorAction SilentlyContinue
         if ($null -eq $windowsPowerShell) {
             Write-Host "Windows PowerShell not found, skipping compatibility smoke test."
             return
         }
 
-        $output = @(& $windowsPowerShell.Source -NoProfile -ExecutionPolicy Bypass -File $scriptPath -Json 2>&1)
+        $fixture = New-IntegrityFixture "windows-powershell-compat" ""
+        $output = @(& $windowsPowerShell.Source -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
+                -AgentRoot $fixture.AgentRoot `
+                -ConfigPath $fixture.ConfigPath `
+                -DependencyContractPath $fixture.ContractPath `
+                -ReportPath $fixture.ReportPath `
+                -Json 2>&1)
         $exitCode = $LASTEXITCODE
 
         $exitCode | Should Be 0
