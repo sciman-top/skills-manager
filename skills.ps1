@@ -5153,8 +5153,8 @@ function Get-SkillsUnder([string]$base, [string]$vendorName) {
     $items = @()
     if (Test-Path $base) {
         # Search for all supported markers
-        $found = Get-ChildItem $base -Recurse -File -Force -ErrorAction SilentlyContinue | 
-        Where-Object { $_.Name -match "^(SKILL|AGENTS|GEMINI|CLAUDE)\.md$" }
+        $found = Get-ChildItem -LiteralPath $base -Recurse -Force -ErrorAction SilentlyContinue |
+        Where-Object { -not $_.PSIsContainer -and $_.Name -match "^(SKILL|AGENTS|GEMINI|CLAUDE)\.md$" }
       
         $seenDirs = New-Object System.Collections.Generic.HashSet[string]
         foreach ($f in $found) {

@@ -1,8 +1,12 @@
 $ErrorActionPreference = "Stop"
-if (-not (Get-Module -ListAvailable -Name Pester)) {
-    Write-Error "Pester module is required to run the test suite. Install Pester or run non-Pester quality gates for this environment."
+$requiredPesterVersion = [version]"4.10.1"
+$requiredPester = Get-Module -ListAvailable -Name Pester |
+    Where-Object { $_.Version -eq $requiredPesterVersion } |
+    Select-Object -First 1
+if (-not $requiredPester) {
+    Write-Error "Pester 4.10.1 is required to run the test suite. Install it with: Install-Module Pester -RequiredVersion 4.10.1 -Scope CurrentUser"
 }
-Import-Module Pester | Out-Null
+Import-Module Pester -RequiredVersion $requiredPesterVersion -Force | Out-Null
 $pesterVersion = (Get-Module Pester | Select-Object -First 1 -ExpandProperty Version)
 Write-Host ("Pester Version: {0}" -f $pesterVersion)
 $unit = Invoke-Pester -Script "$PSScriptRoot\Unit" -PassThru
