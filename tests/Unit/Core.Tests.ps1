@@ -1619,6 +1619,58 @@ command = "cmd"
             }
         }
 
+        It "Preserves an exact scoped package selector in the Codex cache wrapper" {
+            $server = [pscustomobject]@{
+                name      = "context7"
+                transport = "stdio"
+                command   = "npx"
+                args      = @("-y", "@upstash/context7-mcp@3.2.3")
+            }
+
+            $wrapped = Convert-CodexNpxServerToCachedNodeWrapper $server
+
+            $wrapped | Should Not BeNullOrEmpty
+            $wrapped.args[1] | Should Be "@upstash/context7-mcp@3.2.3"
+            $wrapped.args[2] | Should Be "dist/index.js"
+        }
+
+        It "Fails closed until the exact npm package version exists in the cache" {
+            $oldNpmCache = $env:npm_config_cache
+            $cacheRoot = Join-Path $TestDrive "npm-cache"
+            $wrapperPath = Join-Path $TestDrive "mcp-node-cache-wrapper.mjs"
+            $wrongPackageRoot = Join-Path $cacheRoot "_npx\wrong\node_modules\@upstash\context7-mcp"
+            $rightPackageRoot = Join-Path $cacheRoot "_npx\right\node_modules\@upstash\context7-mcp"
+            try {
+                $env:npm_config_cache = $cacheRoot
+                New-Item -ItemType Directory -Path (Join-Path $wrongPackageRoot "dist") -Force | Out-Null
+                Set-ContentUtf8 (Join-Path $wrongPackageRoot "package.json") '{"name":"@upstash/context7-mcp","version":"3.2.2","type":"module"}'
+                Set-ContentUtf8 (Join-Path $wrongPackageRoot "dist\index.js") 'process.stdout.write("wrong");'
+                Set-ContentUtf8 $wrapperPath (Get-CodexMcpNodeCacheWrapperContent)
+
+                $missingOutput = & node $wrapperPath "@upstash/context7-mcp@3.2.3" "dist/index.js" 2>&1
+
+                $LASTEXITCODE | Should Be 69
+                (@($missingOutput) -join "`n") | Should Match "Cached @upstash/context7-mcp@3.2.3 package was not found"
+
+                New-Item -ItemType Directory -Path (Join-Path $rightPackageRoot "dist") -Force | Out-Null
+                Set-ContentUtf8 (Join-Path $rightPackageRoot "package.json") '{"name":"@upstash/context7-mcp","version":"3.2.3","type":"module"}'
+                Set-ContentUtf8 (Join-Path $rightPackageRoot "dist\index.js") 'process.stdout.write("right");'
+
+                $matchedOutput = & node $wrapperPath "@upstash/context7-mcp@3.2.3" "dist/index.js" 2>&1
+
+                $LASTEXITCODE | Should Be 0
+                (@($matchedOutput) -join "`n") | Should Be "right"
+            }
+            finally {
+                if ($null -ne $oldNpmCache) {
+                    $env:npm_config_cache = $oldNpmCache
+                }
+                else {
+                    Remove-Item Env:\npm_config_cache -ErrorAction SilentlyContinue
+                }
+            }
+        }
+
         It "Includes known npx MCP servers for Codex through the cache wrapper by default" {
             $oldIncludeLeaky = $env:SKILLS_CODEX_INCLUDE_LEAKY_STDIO_MCP
             Remove-Item Env:\SKILLS_CODEX_INCLUDE_LEAKY_STDIO_MCP -ErrorAction SilentlyContinue

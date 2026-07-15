@@ -557,7 +557,8 @@ function Convert-CodexNpxServerToCachedNodeWrapper($server) {
     }
     if ($packageIndex -lt 0) { return $null }
 
-    $packageName = Get-CodexNpxPackageName ([string]$args[$packageIndex])
+    $packageSpec = ([string]$args[$packageIndex]).Trim()
+    $packageName = Get-CodexNpxPackageName $packageSpec
     $binRel = Get-CodexNpxWrapperBinRel $packageName
     if ([string]::IsNullOrWhiteSpace($packageName) -or [string]::IsNullOrWhiteSpace($binRel)) {
         return $null
@@ -571,7 +572,7 @@ function Convert-CodexNpxServerToCachedNodeWrapper($server) {
     $entry = [ordered]@{
         transport = "stdio"
         command = "node"
-        args = @($wrapperPath, $packageName, $binRel) + @($extraArgs)
+        args = @($wrapperPath, $packageSpec, $binRel) + @($extraArgs)
     }
     if ($server.PSObject.Properties.Match("env").Count -gt 0 -and $server.env -ne $null) { $entry.env = $server.env }
     return [pscustomobject]$entry
@@ -690,13 +691,28 @@ function Convert-McpServersToCodexConfigMap($servers) {
 function Get-CodexMcpNodeCacheWrapperContent {
     return @'
 #!/usr/bin/env node
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [packageName, binRel, ...extraArgs] = process.argv.slice(2);
-if (!packageName || !binRel) {
-  console.error("usage: mcp-node-cache-wrapper.mjs <packageName> <binRel> [args...]");
+const [packageSpec, binRel, ...extraArgs] = process.argv.slice(2);
+if (!packageSpec || !binRel) {
+  console.error("usage: mcp-node-cache-wrapper.mjs <packageSpec> <binRel> [args...]");
+  process.exit(64);
+}
+
+function parsePackageSpec(spec) {
+  const versionAt = spec.startsWith("@") ? spec.indexOf("@", 1) : spec.indexOf("@");
+  if (versionAt <= 0) return { packageName: spec, packageVersion: "" };
+  return {
+    packageName: spec.slice(0, versionAt),
+    packageVersion: spec.slice(versionAt + 1),
+  };
+}
+
+const { packageName, packageVersion } = parsePackageSpec(packageSpec.trim());
+if (!packageName || (packageSpec.includes("@", 1) && !packageVersion)) {
+  console.error(`Invalid npm package selector: ${packageSpec}`);
   process.exit(64);
 }
 
@@ -706,16 +722,24 @@ let entry = "";
 if (existsSync(npxRoot)) {
   for (const item of readdirSync(npxRoot, { withFileTypes: true })) {
     if (!item.isDirectory()) continue;
-    const candidate = join(npxRoot, item.name, "node_modules", ...packageName.split("/"), ...binRel.split("/"));
-    if (existsSync(candidate)) {
-      entry = candidate;
-      break;
+    const packageRoot = join(npxRoot, item.name, "node_modules", ...packageName.split("/"));
+    const candidate = join(packageRoot, ...binRel.split("/"));
+    if (!existsSync(candidate)) continue;
+    if (packageVersion) {
+      try {
+        const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
+        if (manifest.version !== packageVersion) continue;
+      } catch {
+        continue;
+      }
     }
+    entry = candidate;
+    break;
   }
 }
 
 if (!entry) {
-  console.error(`Cached ${packageName} package was not found. Run npx for this MCP once to populate the npm cache.`);
+  console.error(`Cached ${packageSpec} package was not found. Run npx for this MCP once to populate the npm cache.`);
   process.exit(69);
 }
 

@@ -1176,7 +1176,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@upstash/context7-mcp"
+        "@upstash/context7-mcp@3.2.3"
       ],
       "startup_timeout_sec": 120
     },
@@ -1240,7 +1240,7 @@
       "transport": "stdio",
       "command": "npx",
       "args": [
-        "@playwright/mcp@latest",
+        "@playwright/mcp@0.0.78",
         "--isolated"
       ]
     },
@@ -1259,7 +1259,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-filesystem",
+        "@modelcontextprotocol/server-filesystem@2026.7.10",
         "D:\\CODE"
       ]
     },

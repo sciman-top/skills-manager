@@ -134,8 +134,8 @@
 ### MCP 管理
 
 ```powershell
-.\skills.ps1 安装MCP context7 -- npx -y @upstash/context7-mcp
-.\skills.ps1 安装MCP filesystem --cmd npx --arg -y --arg @modelcontextprotocol/server-filesystem --arg D:\CODE
+.\skills.ps1 安装MCP context7 -- npx -y @upstash/context7-mcp@3.2.3
+.\skills.ps1 安装MCP filesystem --cmd npx --arg -y --arg @modelcontextprotocol/server-filesystem@2026.7.10 --arg D:\CODE
 .\skills.ps1 安装MCP github --transport http --url https://api.githubcopilot.com/mcp/ --bearer-token-env-var GITHUB_PERSONAL_ACCESS_TOKEN
 .\skills.ps1 卸载MCP context7
 .\skills.ps1 同步MCP
@@ -147,6 +147,7 @@
 
 - `安装MCP` / `卸载MCP` 会更新 `skills.json`，随后自动执行一次 `同步MCP`。
 - `同步MCP` 会把 MCP 服务清单写入目标根目录 `.mcp.json`、Gemini/Trae 配置以及 Codex `config.toml` 的 `[mcp_servers.*]` 段。
+- `同步MCP` 当前没有 help 或 dry-run 分支；执行该子命令会立即按 active profile 写入受管目标，附加 `--help` 也不会改为只读帮助。
 - `skills.json.mcp_profiles` 是用途 profile 真源；`MCP配置 使用 <name>` 会持久化 active profile 并同步。Codex 保留完整服务清单，通过 `enabled` / `enabled_tools` 启停和收窄工具面；Claude/Gemini/Trae 只接收当前 profile 启用的服务。
 - 默认 profile 仅启用 `microsoft-learn` 与 `openaiDeveloperDocs`；`coding`、`github`、`codebase`、`browser`、`database` 等 profile 按任务启用其他服务。切换不会卸载 MCP，`node_repl` 等宿主自有服务不会被同步器删除。
 - `postgres` MCP 预检要求 `POSTGRES_CONNECTION_STRING` 为 `postgresql://...`；若检测到 Npgsql/ADO 风格 key-value 连接串，会自动转换并写回 User scope。
