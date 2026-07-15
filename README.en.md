@@ -298,6 +298,7 @@ Meaning:
 - `SKILLS_MCP_NATIVE_TIMEOUT_SECONDS`: timeout in seconds for native `claude mcp add/remove`
 - `SKILLS_MCP_VERIFY_ATTEMPTS` and `SKILLS_MCP_VERIFY_INTERVAL_SECONDS`: retry count and retry interval for cross-CLI MCP verification
 - `SKILLS_SYNC_MCP_THRESHOLD_MS`: `sync_mcp` performance threshold in `check-doctor-json.ps1`; clean CI has no historical sample, so it records an observation with `-WarnOnly`, while only a dedicated performance gate with a real sample may block
+- The test suite uses Pester `4.10.1` syntax; CI installs that exact version, and `tests/run.ps1` fails closed when it is unavailable
 
 ## Repository Hygiene
 

@@ -329,6 +329,7 @@ portable 包包含可迁移源码与配置，例如 `skills.ps1`、`skills.cmd`�
 - `SKILLS_MCP_NATIVE_TIMEOUT_SECONDS`：原生 `claude mcp add/remove` 超时（秒）
 - `SKILLS_MCP_VERIFY_ATTEMPTS`、`SKILLS_MCP_VERIFY_INTERVAL_SECONDS`：跨 CLI MCP 校验重试次数与重试间隔（秒）
 - `SKILLS_SYNC_MCP_THRESHOLD_MS`：`check-doctor-json.ps1` 中 `sync_mcp` 性能阈值（毫秒）；clean CI 没有历史样本，因此用 `-WarnOnly` 记录 observation，只有具备真实样本的专用性能门禁才能作阻断
+- 测试套件使用 Pester `4.10.1` 语法；CI 精确安装该版本，`tests/run.ps1` 会在版本缺失时 fail-closed
 
 ## 仓库卫生
 

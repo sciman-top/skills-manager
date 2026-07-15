@@ -29,6 +29,10 @@ jobs:
           SKILLS_SYNC_MCP_THRESHOLD_MS: 12000
         run: .\scripts\quality\check-doctor-json.ps1 -WarnOnly
 
+      - name: Install pinned Pester test runtime
+        shell: pwsh
+        run: Install-Module Pester -RequiredVersion 4.10.1 -Scope CurrentUser -Force -SkipPublisherCheck
+
       - name: Run tests
         shell: pwsh
         run: .\tests\run.ps1
