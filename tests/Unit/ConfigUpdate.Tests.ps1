@@ -221,6 +221,38 @@ Describe "Config And Update Enhancements" {
             $cfg.PSObject.Properties.Match("mcp_targets").Count | Should Be 0
         }
 
+        It "Rejects MCP profiles that reference missing servers" {
+            $cfg = [pscustomobject]@{
+                vendors = @()
+                targets = @()
+                mappings = @()
+                imports = @()
+                mcp_servers = @(
+                    [pscustomobject]@{ name = "context7"; transport = "stdio"; command = "npx" }
+                )
+                mcp_targets = @()
+                mcp_profiles = [pscustomobject]@{
+                    active = "default"
+                    profiles = [pscustomobject]@{
+                        default = [pscustomobject]@{
+                            enabled = @("missing-server")
+                            enabled_tools = [pscustomobject]@{
+                                "also-missing" = @("query")
+                            }
+                        }
+                        empty = $null
+                    }
+                }
+                sync_mode = "link"
+            }
+
+            $errors = @(Get-CfgContractErrors $cfg) -join "`n"
+            $errors | Should Match "MCP profile 引用了不存在的服务：default/missing-server"
+            $errors | Should Match "MCP profile enabled_tools 引用了不存在的服务：default/also-missing"
+            $errors | Should Match "MCP profile.enabled 必须是数组：empty"
+            { Assert-Cfg $cfg } | Should Throw
+        }
+
         It "Treats overrides as a reserved mapping vendor in config contracts" {
             $cfg = [pscustomobject]@{
                 vendors = @()

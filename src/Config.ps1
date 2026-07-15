@@ -275,6 +275,15 @@ function New-CfgVendorNameSet($vendors = @()) {
     }
     return $set
 }
+function New-CfgMcpServerNameSet($servers = @()) {
+    $set = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($server in @($servers)) {
+        if ($null -eq $server) { continue }
+        $name = if ($server -is [string]) { [string]$server } else { [string](Get-CfgObjectProperty $server "name") }
+        if (-not [string]::IsNullOrWhiteSpace($name)) { $set.Add($name.Trim()) | Out-Null }
+    }
+    return $set
+}
 function Get-CfgArrayField($cfg, [string]$name, [bool]$required, [System.Collections.Generic.List[string]]$errors) {
     $value = Get-CfgObjectProperty $cfg $name
     if ($null -eq $value) {
@@ -383,13 +392,31 @@ function Get-CfgContractErrors($cfg) {
 
     $mcpProfiles = Get-CfgObjectProperty $cfg "mcp_profiles"
     if ($null -ne $mcpProfiles) {
+        $mcpServerNames = New-CfgMcpServerNameSet $mcpServers
         $activeMcpProfile = [string](Get-CfgObjectProperty $mcpProfiles "active")
         $profiles = Get-CfgObjectProperty $mcpProfiles "profiles"
         if ([string]::IsNullOrWhiteSpace($activeMcpProfile)) { $errors.Add("mcp_profiles.active 不能为空") | Out-Null }
         if ($null -eq $profiles) { $errors.Add("mcp_profiles 缺少 profiles") | Out-Null }
         else {
             foreach ($profileProperty in @($profiles.PSObject.Properties)) {
-                if (-not (Test-CfgArrayProperty $profileProperty.Value "enabled")) { $errors.Add(("MCP profile.enabled 必须是数组：{0}" -f $profileProperty.Name)) | Out-Null }
+                $profileName = [string]$profileProperty.Name
+                $profile = $profileProperty.Value
+                if (-not (Test-CfgArrayProperty $profile "enabled")) {
+                    $errors.Add(("MCP profile.enabled 必须是数组：{0}" -f $profileName)) | Out-Null
+                }
+                else {
+                    foreach ($rawName in @($profile.enabled)) {
+                        $name = ([string]$rawName).Trim()
+                        if (-not $mcpServerNames.Contains($name)) { $errors.Add(("MCP profile 引用了不存在的服务：{0}/{1}" -f $profileName, $name)) | Out-Null }
+                    }
+                }
+                if ($null -ne $profile -and $profile.PSObject.Properties.Match("enabled_tools").Count -gt 0 -and $null -ne $profile.enabled_tools) {
+                    foreach ($toolProperty in @($profile.enabled_tools.PSObject.Properties)) {
+                        if (-not $mcpServerNames.Contains([string]$toolProperty.Name)) {
+                            $errors.Add(("MCP profile enabled_tools 引用了不存在的服务：{0}/{1}" -f $profileName, [string]$toolProperty.Name)) | Out-Null
+                        }
+                    }
+                }
             }
         }
     }
@@ -962,11 +989,23 @@ function Assert-Cfg($cfg) {
 
     if ($cfg.PSObject.Properties.Match("mcp_profiles").Count -gt 0 -and $null -ne $cfg.mcp_profiles) {
         $mcpProfiles = $cfg.mcp_profiles
+        $mcpServerNames = New-CfgMcpServerNameSet $cfg.mcp_servers
         Need (-not [string]::IsNullOrWhiteSpace([string]$mcpProfiles.active)) "mcp_profiles.active 不能为空"
         Need ($mcpProfiles.PSObject.Properties.Match("profiles").Count -gt 0 -and $null -ne $mcpProfiles.profiles) "mcp_profiles 缺少 profiles"
         Need ($mcpProfiles.profiles.PSObject.Properties.Match([string]$mcpProfiles.active).Count -gt 0) ("mcp_profiles.active 不存在：{0}" -f [string]$mcpProfiles.active)
         foreach ($profileProperty in @($mcpProfiles.profiles.PSObject.Properties)) {
-            Need (Test-CfgArrayProperty $profileProperty.Value "enabled") ("MCP profile.enabled 必须是数组：{0}" -f $profileProperty.Name)
+            $profileName = [string]$profileProperty.Name
+            $profile = $profileProperty.Value
+            Need (Test-CfgArrayProperty $profile "enabled") ("MCP profile.enabled 必须是数组：{0}" -f $profileName)
+            foreach ($rawName in @($profile.enabled)) {
+                $name = ([string]$rawName).Trim()
+                Need ($mcpServerNames.Contains($name)) ("MCP profile 引用了不存在的服务：{0}/{1}" -f $profileName, $name)
+            }
+            if ($profile.PSObject.Properties.Match("enabled_tools").Count -gt 0 -and $null -ne $profile.enabled_tools) {
+                foreach ($toolProperty in @($profile.enabled_tools.PSObject.Properties)) {
+                    Need ($mcpServerNames.Contains([string]$toolProperty.Name)) ("MCP profile enabled_tools 引用了不存在的服务：{0}/{1}" -f $profileName, [string]$toolProperty.Name)
+                }
+            }
         }
     }
 

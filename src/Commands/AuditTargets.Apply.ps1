@@ -474,6 +474,7 @@ function Apply-AuditMcpSelections($selectedAddItems, $selectedRemoveItems) {
     $cfgRaw = Get-Content $CfgPath -Raw
     $servers = @(if ($cfg.PSObject.Properties.Match("mcp_servers").Count -gt 0 -and $null -ne $cfg.mcp_servers) { @($cfg.mcp_servers) } else { @() })
     $changed = $false
+    $removedNames = New-Object System.Collections.Generic.List[string]
 
     foreach ($item in $selectedAddItems) {
         $candidate = $item.server
@@ -513,6 +514,7 @@ function Apply-AuditMcpSelections($selectedAddItems, $selectedRemoveItems) {
             continue
         }
         $servers = @($servers | Where-Object { [string]$_.name -ne $name })
+        $removedNames.Add($name) | Out-Null
         $item.status = "removed"
         $changed = $true
     }
@@ -525,6 +527,7 @@ function Apply-AuditMcpSelections($selectedAddItems, $selectedRemoveItems) {
         $cfg | Add-Member -NotePropertyName mcp_servers -NotePropertyValue @() -Force
     }
     $cfg.mcp_servers = @($servers)
+    Remove-McpProfileServerReferences $cfg @($removedNames.ToArray()) | Out-Null
     SaveCfgSafe $cfg $cfgRaw
     同步MCP
     return [pscustomobject]@{ changed = $true }

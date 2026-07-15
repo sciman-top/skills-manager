@@ -196,6 +196,17 @@ Describe "Skill Audit E2E" {
                         args = @("server.js")
                     }
                 )
+                mcp_profiles = [pscustomobject]@{
+                    active = "default"
+                    profiles = [pscustomobject]@{
+                        default = [pscustomobject]@{
+                            enabled = @("legacy-fetch")
+                            enabled_tools = [pscustomobject]@{
+                                "legacy-fetch" = @("fetch")
+                            }
+                        }
+                    }
+                }
                 mcp_targets = @()
                 update_force = $false
                 sync_mode = "sync"
@@ -260,6 +271,8 @@ Describe "Skill Audit E2E" {
             $report.changed_counts.mcp_remove_removed | Should Be 1
             @($saved.mcp_servers).Count | Should Be 1
             $saved.mcp_servers[0].name | Should Be "context7"
+            @($saved.mcp_profiles.profiles.default.enabled).Count | Should Be 0
+            $saved.mcp_profiles.profiles.default.enabled_tools.PSObject.Properties.Match("legacy-fetch").Count | Should Be 0
             Assert-MockCalled 同步MCP -Times 1 -Exactly -Scope It
             Assert-MockCalled 构建生效 -Times 0 -Exactly -Scope It
             Assert-MockCalled Invoke-Doctor -Times 1 -Exactly -Scope It

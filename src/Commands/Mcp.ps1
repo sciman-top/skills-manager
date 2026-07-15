@@ -70,6 +70,49 @@ function Resolve-McpProfileServers($cfg) {
     return @($projected.ToArray())
 }
 
+function Remove-McpProfileServerReferences($cfg, [string[]]$serverNames) {
+    if ($null -eq $cfg -or $cfg.PSObject.Properties.Match("mcp_profiles").Count -eq 0 -or $null -eq $cfg.mcp_profiles) {
+        return $false
+    }
+    if ($cfg.mcp_profiles.PSObject.Properties.Match("profiles").Count -eq 0 -or $null -eq $cfg.mcp_profiles.profiles) {
+        return $false
+    }
+
+    $names = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($rawName in @($serverNames)) {
+        $name = ([string]$rawName).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($name)) { $names.Add($name) | Out-Null }
+    }
+    if ($names.Count -eq 0) { return $false }
+
+    $changed = $false
+    foreach ($profileProperty in @($cfg.mcp_profiles.profiles.PSObject.Properties)) {
+        $profile = $profileProperty.Value
+        if ($null -eq $profile) { continue }
+
+        if ($profile.PSObject.Properties.Match("enabled").Count -gt 0) {
+            $remaining = New-Object System.Collections.Generic.List[object]
+            foreach ($rawName in @($profile.enabled)) {
+                if ($names.Contains(([string]$rawName).Trim())) {
+                    $changed = $true
+                    continue
+                }
+                $remaining.Add($rawName) | Out-Null
+            }
+            $profile.enabled = @($remaining.ToArray())
+        }
+
+        if ($profile.PSObject.Properties.Match("enabled_tools").Count -gt 0 -and $null -ne $profile.enabled_tools) {
+            foreach ($toolProperty in @($profile.enabled_tools.PSObject.Properties)) {
+                if (-not $names.Contains([string]$toolProperty.Name)) { continue }
+                $profile.enabled_tools.PSObject.Properties.Remove([string]$toolProperty.Name)
+                $changed = $true
+            }
+        }
+    }
+    return $changed
+}
+
 function Get-ActiveMcpServers($servers) {
     return @($servers | Where-Object { $_.PSObject.Properties.Match("enabled").Count -eq 0 -or [bool]$_.enabled })
 }
@@ -2353,6 +2396,7 @@ function 卸载MCP([string[]]$tokens = @()) {
     Need $removed ("未找到 MCP 服务：{0}" -f $name)
 
     $cfg.mcp_servers = $remaining
+    Remove-McpProfileServerReferences $cfg @($name) | Out-Null
     SaveCfgSafe $cfg $cfgRaw
     if ($DryRun) {
         Write-Host ("DRYRUN：将卸载 MCP 服务：{0}" -f $name)

@@ -1324,9 +1324,7 @@
         ]
       },
       "database": {
-        "enabled": [
-          "postgres"
-        ]
+        "enabled": []
       },
       "off": {
         "enabled": []
