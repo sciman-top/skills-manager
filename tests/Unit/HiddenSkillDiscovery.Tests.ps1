@@ -49,4 +49,29 @@ description: demo
             }
         }
     }
+
+    It "Normalizes aliased base paths before calculating relative skill paths" {
+        $root = Join-Path $env:TEMP ("skills-manager-base-alias-test-" + [Guid]::NewGuid().ToString("N"))
+        $aliasParent = Join-Path $root "alias-parent"
+        $actualBase = Join-Path $root "skill-root"
+        $skillDir = Join-Path $actualBase ".curated\demo-skill"
+        $skillFile = Join-Path $skillDir "SKILL.md"
+
+        try {
+            New-Item -ItemType Directory -Path $aliasParent -Force | Out-Null
+            New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
+            Set-Content -LiteralPath $skillFile -Value "---`nname: demo-skill`ndescription: demo`n---" -Encoding UTF8
+
+            $aliasedBase = Join-Path $aliasParent "..\skill-root"
+            $script:SkillListCache = @{}
+            $items = @(Get-SkillsUnder $aliasedBase "skills")
+
+            @($items | Where-Object { $_.from -eq ".curated\demo-skill" }).Count | Should Be 1
+        }
+        finally {
+            if (Test-Path -LiteralPath $root) {
+                Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
 }
