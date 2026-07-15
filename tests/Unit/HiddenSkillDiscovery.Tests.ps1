@@ -20,8 +20,21 @@ description: demo
             $curatedItem.Attributes = ($curatedItem.Attributes -bor [System.IO.FileAttributes]::Hidden)
 
             $script:SkillListCache = @{}
-            $items = Get-SkillsUnder $root "skills"
-            ($items | Where-Object { $_.from -eq ".curated\demo-skill" }).Count | Should Be 1
+            $rawMarkers = @(Get-ChildItem -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue |
+                Where-Object { -not $_.PSIsContainer -and $_.Name -match "^(SKILL|AGENTS|GEMINI|CLAUDE)\.md$" })
+            $items = @(Get-SkillsUnder $root "skills")
+            $matchingItems = @($items | Where-Object { $_.from -eq ".curated\demo-skill" })
+            if ($matchingItems.Count -ne 1) {
+                $rawSummary = @($rawMarkers | ForEach-Object { $_.FullName }) -join "; "
+                $itemSummary = @($items | ForEach-Object { "from=$($_.from); full=$($_.full)" }) -join "; "
+                Write-Host ("Hidden discovery diagnostics: attributes={0}; raw=[{1}]; items=[{2}]" -f
+                    (Get-Item -LiteralPath $curated -Force).Attributes,
+                    $rawSummary,
+                    $itemSummary)
+            }
+
+            (((Get-Item -LiteralPath $curated -Force).Attributes -band [System.IO.FileAttributes]::Hidden) -ne 0) | Should Be $true
+            $matchingItems.Count | Should Be 1
         }
         finally {
             if (Test-Path -LiteralPath $root) {
