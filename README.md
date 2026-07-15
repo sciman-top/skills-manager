@@ -328,7 +328,7 @@ portable 包包含可迁移源码与配置，例如 `skills.ps1`、`skills.cmd`�
 - `SKILLS_MCP_VERIFY_LIST_TIMEOUT_SECONDS_<CLI>`：按 CLI 覆盖超时（例如 `_CLAUDE` / `_CODEX` / `_GEMINI`）
 - `SKILLS_MCP_NATIVE_TIMEOUT_SECONDS`：原生 `claude mcp add/remove` 超时（秒）
 - `SKILLS_MCP_VERIFY_ATTEMPTS`、`SKILLS_MCP_VERIFY_INTERVAL_SECONDS`：跨 CLI MCP 校验重试次数与重试间隔（秒）
-- `SKILLS_SYNC_MCP_THRESHOLD_MS`：`check-doctor-json.ps1` 中 `sync_mcp` 性能阈值（毫秒）
+- `SKILLS_SYNC_MCP_THRESHOLD_MS`：`check-doctor-json.ps1` 中 `sync_mcp` 性能阈值（毫秒）；clean CI 没有历史样本，因此用 `-WarnOnly` 记录 observation，只有具备真实样本的专用性能门禁才能作阻断
 
 ## 仓库卫生
 
