@@ -752,14 +752,17 @@ function 删除技能库 {
 function Get-SkillsUnder([string]$base, [string]$vendorName) {
     if (-not (Get-Variable -Name SkillListCache -Scope Script -ErrorAction SilentlyContinue)) { $script:SkillListCache = @{} }
     if ($null -eq $script:SkillListCache) { $script:SkillListCache = @{} }
-    $key = "{0}|{1}" -f $vendorName, $base
+    $baseItem = Get-Item -LiteralPath $base -Force -ErrorAction SilentlyContinue
+    $resolvedBase = if ($baseItem -and $baseItem.PSIsContainer) { $baseItem.FullName } else { $null }
+    $cacheBase = if ($resolvedBase) { $resolvedBase } else { $base }
+    $key = "{0}|{1}" -f $vendorName, $cacheBase
     if ($script:SkillListCache.ContainsKey($key)) {
         return $script:SkillListCache[$key]
     }
     $items = @()
-    if (Test-Path $base) {
+    if ($resolvedBase) {
         # Search for all supported markers
-        $found = Get-ChildItem -LiteralPath $base -Recurse -Force -ErrorAction SilentlyContinue |
+        $found = Get-ChildItem -LiteralPath $resolvedBase -Recurse -Force -ErrorAction SilentlyContinue |
         Where-Object { -not $_.PSIsContainer -and $_.Name -match "^(SKILL|AGENTS|GEMINI|CLAUDE)\.md$" }
       
         $seenDirs = New-Object System.Collections.Generic.HashSet[string]
@@ -767,7 +770,7 @@ function Get-SkillsUnder([string]$base, [string]$vendorName) {
             $dir = $f.Directory.FullName
             if (-not $seenDirs.Add($dir)) { continue }
       
-            $rel = $dir.Substring($base.Length).TrimStart("\\")
+            $rel = $dir.Substring($resolvedBase.Length).TrimStart("\\")
             if ([string]::IsNullOrWhiteSpace($rel)) { $rel = "." }
             $items += [pscustomobject]@{ vendor = $vendorName; from = $rel; full = $dir }
         }
