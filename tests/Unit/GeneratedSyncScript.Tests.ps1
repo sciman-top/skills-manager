@@ -1,6 +1,16 @@
 $ErrorActionPreference = "Stop"
 
 Describe "Generated sync script" {
+    It "Uses a content diff instead of porcelain metadata for change detection" {
+        $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+        $scriptPath = Join-Path $repoRoot "tests\check-generated-sync.ps1"
+        $raw = Get-Content -LiteralPath $scriptPath -Raw
+
+        $raw | Should Match 'git diff --quiet HEAD -- skills\.ps1'
+        $raw | Should Match '\$diffExitCode -notin @\(0, 1\)'
+        $raw | Should Not Match 'git status --porcelain -- skills\.ps1'
+    }
+
     It "Allows local dirty worktree when explicitly requested and build refreshes generated file" {
         $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
         $workspace = Join-Path $TestDrive "generated-sync-dev-mode"

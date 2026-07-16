@@ -38,11 +38,12 @@ try {
     if (Test-Path -LiteralPath ".\skills.ps1" -PathType Leaf) {
         $afterHash = (Get-FileHash -Algorithm SHA256 -LiteralPath ".\skills.ps1").Hash
     }
-    $status = git status --porcelain -- skills.ps1 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw ("执行 git status 失败：{0}" -f ($status | Out-String))
+    & git diff --quiet HEAD -- skills.ps1
+    $diffExitCode = $LASTEXITCODE
+    if ($diffExitCode -notin @(0, 1)) {
+        throw "执行 git diff 失败（exit=$diffExitCode）。"
     }
-    if (-not [string]::IsNullOrWhiteSpace($status)) {
+    if ($diffExitCode -eq 1) {
         if ($AllowDirtyWorktree) {
             if ($beforeHash -ne $afterHash) {
                 Write-Host "已在当前工作树中刷新生成产物；skills.ps1 相对 HEAD 仍有未提交变更（开发态已放行）。"
