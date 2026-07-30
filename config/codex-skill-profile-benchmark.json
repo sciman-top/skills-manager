@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "profiles": ["coding", "coding-strict"],
+  "cases": [
+    {
+      "id": "simple-explanation",
+      "request": "Explain what the existing ParseConfig function does. Do not change code.",
+      "expectations": {
+        "coding": { "required": [], "forbidden": ["using-superpowers", "brainstorming"] },
+        "coding-strict": { "required": ["using-superpowers"], "forbidden": ["brainstorming"] }
+      }
+    },
+    {
+      "id": "unexpected-test-failure",
+      "request": "A previously passing unit test now fails intermittently. Diagnose the root cause before proposing a fix.",
+      "expectations": {
+        "coding": { "required": ["systematic-debugging"], "forbidden": ["using-superpowers"] },
+        "coding-strict": { "required": ["using-superpowers", "systematic-debugging"], "forbidden": [] }
+      }
+    },
+    {
+      "id": "explicit-tdd",
+      "request": "Implement a small parser using strict red-green-refactor TDD.",
+      "expectations": {
+        "coding": { "required": [], "forbidden": ["test-driven-development"] },
+        "coding-strict": { "required": ["using-superpowers", "test-driven-development"], "forbidden": [] }
+      }
+    },
+    {
+      "id": "code-review",
+      "request": "Review the current diff for correctness, regressions, and missing tests.",
+      "expectations": {
+        "coding": { "required": ["code-review-and-quality"], "forbidden": ["using-superpowers"] },
+        "coding-strict": { "required": ["using-superpowers", "code-review-and-quality"], "forbidden": [] }
+      }
+    },
+    {
+      "id": "api-design",
+      "request": "Design a backward-compatible pagination contract for an existing REST endpoint.",
+      "expectations": {
+        "coding": { "required": ["api-and-interface-design"], "forbidden": ["using-superpowers"] },
+        "coding-strict": { "required": ["using-superpowers", "api-and-interface-design"], "forbidden": [] }
+      }
+    },
+    {
+      "id": "security-review",
+      "request": "Assess this authentication change for security risks and unsafe defaults.",
+      "expectations": {
+        "coding": { "required": ["security-and-hardening"], "forbidden": ["using-superpowers"] },
+        "coding-strict": { "required": ["using-superpowers", "security-and-hardening"], "forbidden": [] }
+      }
+    },
+    {
+      "id": "completion-verification",
+      "request": "The implementation appears complete. Verify the evidence before reporting success.",
+      "expectations": {
+        "coding": { "required": ["verification-before-completion"], "forbidden": ["using-superpowers"] },
+        "coding-strict": { "required": ["using-superpowers", "verification-before-completion"], "forbidden": [] }
+      }
+    },
+    {
+      "id": "parallel-agents",
+      "request": "Explicitly delegate three independent read-only review dimensions to parallel subagents.",
+      "expectations": {
+        "coding": { "required": [], "forbidden": ["dispatching-parallel-agents"] },
+        "coding-strict": { "required": ["using-superpowers", "dispatching-parallel-agents"], "forbidden": [] }
+      }
+    },
+    {
+      "id": "git-worktree",
+      "request": "Create an isolated git worktree before implementing this risky migration.",
+      "expectations": {
+        "coding": { "required": [], "forbidden": ["using-git-worktrees"] },
+        "coding-strict": { "required": ["using-superpowers", "using-git-worktrees"], "forbidden": [] }
+      }
+    },
+    {
+      "id": "ambiguous-feature",
+      "request": "Build a new team dashboard, but the user roles and success criteria are not yet defined.",
+      "expectations": {
+        "coding": { "required": [], "forbidden": ["brainstorming"] },
+        "coding-strict": { "required": ["using-superpowers", "brainstorming"], "forbidden": [] }
+      }
+    },
+    {
+      "id": "official-docs-research",
+      "request": "Check the latest official framework documentation before answering this API compatibility question.",
+      "expectations": {
+        "coding": { "required": [], "forbidden": ["research"] },
+        "coding-strict": { "required": ["using-superpowers"], "forbidden": ["research"] }
+      }
+    },
+    {
+      "id": "release-operation",
+      "request": "Prepare an authorized release commit and tag after all gates pass.",
+      "expectations": {
+        "coding": { "required": [], "forbidden": ["git-workflow-and-versioning"] },
+        "coding-strict": { "required": ["using-superpowers", "git-workflow-and-versioning"], "forbidden": [] }
+      }
+    }
+  ]
+}

@@ -2790,8 +2790,14 @@ function Get-CfgContractErrors($cfg) {
         if ($null -ne $profiles) {
             $activeProfile = [string](Get-CfgObjectProperty $skillProjection "active_profile")
             if ([string]::IsNullOrWhiteSpace($activeProfile)) { $errors.Add("skill_projection 配置 profiles 时必须声明 active_profile") | Out-Null }
+            $globalBudgetLimit = if (Test-CfgObjectProperty $skillProjection "budget_limit_chars") { [int](Get-CfgObjectProperty $skillProjection "budget_limit_chars") } else { 8000 }
             foreach ($profileProperty in @($profiles.PSObject.Properties)) {
                 if (-not (Test-CfgArrayProperty $profileProperty.Value "enabled_names")) { $errors.Add(("skill_projection profile.enabled_names 必须是数组：{0}" -f $profileProperty.Name)) | Out-Null }
+                if (Test-CfgObjectProperty $profileProperty.Value "budget_limit_chars") {
+                    $profileBudgetLimit = [int](Get-CfgObjectProperty $profileProperty.Value "budget_limit_chars")
+                    if ($profileBudgetLimit -le 0) { $errors.Add(("skill_projection profile.budget_limit_chars 必须大于 0：{0}" -f $profileProperty.Name)) | Out-Null }
+                    elseif ($profileBudgetLimit -gt $globalBudgetLimit) { $errors.Add(("skill_projection profile.budget_limit_chars 不能超过全局上限：{0}" -f $profileProperty.Name)) | Out-Null }
+                }
             }
         }
     }
@@ -3383,6 +3389,12 @@ function Assert-Cfg($cfg) {
             Need ($projection.profiles.PSObject.Properties.Match([string]$projection.active_profile).Count -gt 0) ("skill_projection active_profile 不存在：{0}" -f [string]$projection.active_profile)
             foreach ($profileProperty in @($projection.profiles.PSObject.Properties)) {
                 Need (Test-CfgArrayProperty $profileProperty.Value "enabled_names") ("skill_projection profile.enabled_names 必须是数组：{0}" -f $profileProperty.Name)
+                if ($profileProperty.Value.PSObject.Properties.Match("budget_limit_chars").Count -gt 0) {
+                    $profileBudgetLimit = [int]$profileProperty.Value.budget_limit_chars
+                    $globalBudgetLimit = if ($projection.PSObject.Properties.Match("budget_limit_chars").Count -gt 0) { [int]$projection.budget_limit_chars } else { 8000 }
+                    Need ($profileBudgetLimit -gt 0) ("skill_projection profile.budget_limit_chars 必须大于 0：{0}" -f $profileProperty.Name)
+                    Need ($profileBudgetLimit -le $globalBudgetLimit) ("skill_projection profile.budget_limit_chars 不能超过全局上限：{0}" -f $profileProperty.Name)
+                }
             }
         }
         if ($projection.PSObject.Properties.Match("budget_limit_chars").Count -gt 0) {
@@ -17104,7 +17116,7 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
     Need ($null -ne $projectionCfg) "skill_projection 配置为空"
     $enabled = -not ($projectionCfg.PSObject.Properties.Match("enabled").Count -gt 0) -or [bool]$projectionCfg.enabled
     if (-not $enabled) {
-        return [pscustomobject]@{ schema_version = 2; enabled = $false; skills = @(); canonical = @(); active = @(); disabled = @(); conflicts = @(); unique_names = @(); active_names = @(); duplicate_name_groups = 0; external_skills = @(); external_inventory_warnings = @(); routing_report = (Get-EmptySkillRoutingReport) }
+        return [pscustomobject]@{ schema_version = 2; enabled = $false; skills = @(); canonical = @(); active = @(); disabled = @(); conflicts = @(); unique_names = @(); active_names = @(); duplicate_name_groups = 0; profile_routed_name_count = 0; unrouted_name_count = 0; profile_routed_names = @(); unrouted_names = @(); external_skills = @(); external_inventory_warnings = @(); routing_report = (Get-EmptySkillRoutingReport) }
     }
 
     Need ($projectionCfg.PSObject.Properties.Match("sources").Count -gt 0 -and $null -ne $projectionCfg.sources) "skill_projection 缺少 sources"
@@ -17196,9 +17208,13 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
     $effectiveExternalMetadataChars = [Math]::Max($externalReserveChars, $externalSkillMetadataChars)
 
     $activeProfile = ""
+    $activeEffectiveBudgetLimitChars = $budgetLimitChars
     $profileEnabledNames = $null
     $profileBudgets = New-Object System.Collections.Generic.List[object]
+    $profileNamesBySkill = @{}
+    $profileRoutingEnabled = $false
     if ($projectionCfg.PSObject.Properties.Match("profiles").Count -gt 0 -and $null -ne $projectionCfg.profiles) {
+        $profileRoutingEnabled = $true
         $activeProfile = ([string]$projectionCfg.active_profile).Trim()
         Need (-not [string]::IsNullOrWhiteSpace($activeProfile)) "skill_projection 配置 profiles 时必须声明 active_profile"
         $profileProperty = @($projectionCfg.profiles.PSObject.Properties | Where-Object { [string]::Equals($_.Name, $activeProfile, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1)
@@ -17207,12 +17223,19 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
             $profileName = [string]$property.Name
             $profile = $property.Value
             Need ($null -ne $profile -and $profile.PSObject.Properties.Match("enabled_names").Count -gt 0) ("skill_projection profile 缺少 enabled_names：{0}" -f $profileName)
+            $profileBudgetLimitChars = if ($profile.PSObject.Properties.Match("budget_limit_chars").Count -gt 0) { [int]$profile.budget_limit_chars } else { $budgetLimitChars }
+            Need ($profileBudgetLimitChars -gt 0) ("skill_projection profile.budget_limit_chars 必须大于 0：{0}" -f $profileName)
+            Need ($profileBudgetLimitChars -le $budgetLimitChars) ("skill_projection profile.budget_limit_chars 不能超过全局上限：{0}" -f $profileName)
             $enabledNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
             foreach ($rawName in @($profile.enabled_names)) {
                 $name = ([string]$rawName).Trim()
                 Need (-not [string]::IsNullOrWhiteSpace($name)) ("skill_projection profile enabled_names 不得包含空值：{0}" -f $profileName)
                 Need ($canonicalByName.ContainsKey($name)) ("skill_projection profile 引用了不存在的技能：{0}/{1}" -f $profileName, $name)
                 $enabledNames.Add($name) | Out-Null
+                if (-not $profileNamesBySkill.ContainsKey($name)) {
+                    $profileNamesBySkill[$name] = New-Object System.Collections.Generic.List[string]
+                }
+                $profileNamesBySkill[$name].Add($profileName) | Out-Null
             }
 
             $profileMetadataChars = 0
@@ -17235,12 +17258,28 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
                         external_skill_metadata_chars = $externalSkillMetadataChars
                         effective_external_metadata_chars = $effectiveExternalMetadataChars
                         estimated_metadata_chars = $profileEstimatedChars
-                        budget_limit_chars = $budgetLimitChars
-                        budget_pass = ($profileEstimatedChars -le $budgetLimitChars)
+                        budget_limit_chars = $profileBudgetLimitChars
+                        budget_pass = ($profileEstimatedChars -le $profileBudgetLimitChars)
                     })) | Out-Null
 
             if ([string]::Equals($profileName, $activeProfile, [System.StringComparison]::OrdinalIgnoreCase)) {
                 $profileEnabledNames = $enabledNames
+                $activeEffectiveBudgetLimitChars = $profileBudgetLimitChars
+            }
+        }
+    }
+
+    $profileRoutedNames = New-Object System.Collections.Generic.List[string]
+    $unroutedNames = New-Object System.Collections.Generic.List[string]
+    if ($profileRoutingEnabled) {
+        foreach ($entry in @($canonical.ToArray())) {
+            $entryName = [string]$entry.name
+            if ([bool]$entry.is_system -or $aliases.ContainsKey($entryName)) { continue }
+            if ($profileNamesBySkill.ContainsKey($entryName)) {
+                $profileRoutedNames.Add($entryName) | Out-Null
+            }
+            else {
+                $unroutedNames.Add($entryName) | Out-Null
             }
         }
     }
@@ -17267,6 +17306,10 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
             continue
         }
         if ($null -ne $profileEnabledNames -and -not [bool]$entry.is_system -and -not $profileEnabledNames.Contains($name)) {
+            $availableProfiles = if ($profileNamesBySkill.ContainsKey($name)) {
+                @($profileNamesBySkill[$name].ToArray() | Sort-Object)
+            }
+            else { @() }
             $disabled.Add([pscustomobject]([ordered]@{
                         name = $name
                         path = [string]$entry.path
@@ -17278,6 +17321,8 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
                         canonical_path = [string]$entry.path
                         canonical_source_id = [string]$entry.source_id
                         active_profile = $activeProfile
+                        profile_reachability = if ($availableProfiles.Count -gt 0) { "routed_elsewhere" } else { "unrouted" }
+                        available_profiles = @($availableProfiles)
                         decision = "profile_excluded"
                     })) | Out-Null
             continue
@@ -17306,6 +17351,10 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
         unique_names = @($canonical.ToArray() | ForEach-Object { [string]$_.name } | Sort-Object)
         active_names = @($active.ToArray() | ForEach-Object { [string]$_.name } | Sort-Object)
         duplicate_name_groups = $duplicateGroups
+        profile_routed_name_count = $profileRoutedNames.Count
+        unrouted_name_count = $unroutedNames.Count
+        profile_routed_names = @($profileRoutedNames.ToArray() | Sort-Object)
+        unrouted_names = @($unroutedNames.ToArray() | Sort-Object)
         skill_metadata_chars = $skillMetadataChars
         external_metadata_reserve_chars = $externalReserveChars
         external_skill_count = [int]$externalInventory.skill_count
@@ -17313,7 +17362,8 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
         effective_external_metadata_chars = $effectiveExternalMetadataChars
         estimated_metadata_chars = $estimatedMetadataChars
         budget_limit_chars = $budgetLimitChars
-        budget_pass = ($estimatedMetadataChars -le $budgetLimitChars)
+        effective_budget_limit_chars = $activeEffectiveBudgetLimitChars
+        budget_pass = ($estimatedMetadataChars -le $activeEffectiveBudgetLimitChars)
         all_profiles_budget_pass = $allProfilesBudgetPass
         profile_budgets = @($profileBudgets.ToArray())
         external_skills = @($externalInventory.skills)
@@ -17423,7 +17473,7 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
             success = $true
         })
     if ([bool]$plan.enabled) {
-        Need ([bool]$plan.budget_pass) ("技能描述预算超限：estimated={0}, limit={1}, profile={2}" -f [int]$plan.estimated_metadata_chars, [int]$plan.budget_limit_chars, [string]$plan.active_profile)
+        Need ([bool]$plan.budget_pass) ("技能描述预算超限：estimated={0}, limit={1}, profile={2}" -f [int]$plan.estimated_metadata_chars, [int]$plan.effective_budget_limit_chars, [string]$plan.active_profile)
         $oversizedProfiles = @($plan.profile_budgets | Where-Object { -not [bool]$_.budget_pass } | ForEach-Object { "{0}={1}/{2}" -f $_.profile, $_.estimated_metadata_chars, $_.budget_limit_chars })
         Need ([bool]$plan.all_profiles_budget_pass) ("技能 profile 描述预算超限：{0}" -f ($oversizedProfiles -join ", "))
         Need (-not [bool]$plan.routing_report.blocking) "技能路由策略存在 enforce 模式阻断项"
@@ -17454,6 +17504,10 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
                 unique_name_count = @($plan.unique_names).Count
                 active_name_count = @($plan.active_names).Count
                 duplicate_name_groups = [int]$plan.duplicate_name_groups
+                profile_routed_name_count = [int]$plan.profile_routed_name_count
+                unrouted_name_count = [int]$plan.unrouted_name_count
+                profile_routed_names = @($plan.profile_routed_names)
+                unrouted_names = @($plan.unrouted_names)
                 disabled_path_count = @($plan.disabled).Count
                 conflict_count = @($plan.conflicts).Count
                 skill_metadata_chars = [int]$plan.skill_metadata_chars
@@ -17463,6 +17517,7 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
                 effective_external_metadata_chars = [int]$plan.effective_external_metadata_chars
                 estimated_metadata_chars = [int]$plan.estimated_metadata_chars
                 budget_limit_chars = [int]$plan.budget_limit_chars
+                effective_budget_limit_chars = [int]$plan.effective_budget_limit_chars
                 budget_pass = [bool]$plan.budget_pass
                 all_profiles_budget_pass = [bool]$plan.all_profiles_budget_pass
                 profile_budgets = @($plan.profile_budgets)
@@ -17521,11 +17576,11 @@ function Invoke-SkillProfileCommand([string[]]$tokens) {
     Need ($profileProperty.Count -eq 1) ("技能 profile 不存在：{0}" -f $name)
     $projection.active_profile = [string]$profileProperty[0].Name
     $plan = New-SkillProjectionPlan $projection
-    Need ([bool]$plan.budget_pass) ("技能 profile 超出描述预算：{0} ({1}/{2})" -f $name, $plan.estimated_metadata_chars, $plan.budget_limit_chars)
+    Need ([bool]$plan.budget_pass) ("技能 profile 超出描述预算：{0} ({1}/{2})" -f $name, $plan.estimated_metadata_chars, $plan.effective_budget_limit_chars)
     $raw = Get-ContentUtf8 $CfgPath
     SaveCfgSafe $cfg $raw
     $result = Sync-CodexSkillProjection $projection
-    Write-Host ("已使用技能 profile：{0}；active={1}, metadata={2}/{3}, persisted={4}" -f $name, @($result.plan.active).Count, $result.plan.estimated_metadata_chars, $result.plan.budget_limit_chars, [bool]$result.persisted)
+    Write-Host ("已使用技能 profile：{0}；active={1}, metadata={2}/{3}, persisted={4}" -f $name, @($result.plan.active).Count, $result.plan.estimated_metadata_chars, $result.plan.effective_budget_limit_chars, [bool]$result.persisted)
 }
 
 function Sync-ConfiguredSkillProjection($cfg, [string]$verifiedBuildSignature = "") {
@@ -18295,7 +18350,7 @@ MCP：
 
 技能投影：
   .\skills.ps1 技能配置 列表
-  .\skills.ps1 技能配置 使用 default|coding|engineering|dotnet|ppt|content|physics|design|browser|database
+  .\skills.ps1 技能配置 使用 default|coding|coding-strict|engineering|python|mcp|review|dotnet|ppt|content|marketing|physics|video|design|browser|database
 
 目标仓审查：
   .\skills.ps1 审查目标 需求设置

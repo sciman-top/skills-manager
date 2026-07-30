@@ -34,16 +34,15 @@
   "groups": [
     {
       "id": "development-flow",
-      "purpose": "Select one workflow stage at a time and keep approval, persistence, and delegation subordinate to the active task contract.",
-      "router": "using-superpowers",
-      "selection_policy": "route by current stage; do not cascade every workflow skill",
+      "purpose": "Use GPT-5.6 and Codex native planning, goal tracking, review, and agent controls for routine work; select a narrow profile before a new task when specialized workflow metadata is required.",
+      "router": "",
+      "selection_policy": "select the task profile before starting a new Codex task; within a running task use native Plan/Goal/Review first and invoke only visible matching skills; never imply hot-loading or bootstrap a mandatory workflow",
       "members": [
-        { "name": "using-superpowers", "role": "router", "activation": "conversation entry and skill discovery" },
-        { "name": "brainstorming", "role": "workflow", "activation": "requirements or design remain unresolved" },
-        { "name": "planning-and-task-breakdown", "role": "workflow", "activation": "an approved design still needs an implementation plan" },
+        { "name": "brainstorming", "role": "workflow", "activation": "the user explicitly requests exploratory design or product intent remains materially ambiguous" },
+        { "name": "planning-and-task-breakdown", "role": "workflow", "activation": "a complex task needs a durable implementation breakdown beyond native Plan mode" },
         { "name": "systematic-debugging", "role": "workflow", "activation": "a bug, failed test, or unexpected behavior needs diagnosis" },
-        { "name": "incremental-implementation", "role": "workflow", "activation": "an authorized multi-file implementation is in progress" },
-        { "name": "git-workflow-and-versioning", "role": "workflow", "activation": "version-control organization or an authorized commit/release is required" },
+        { "name": "incremental-implementation", "role": "workflow", "activation": "the user explicitly requests incremental delivery for a large multi-file implementation" },
+        { "name": "git-workflow-and-versioning", "role": "workflow", "activation": "an authorized commit, branch, merge, release, or conflict-resolution operation is required" },
         { "name": "code-review-and-quality", "role": "validator", "activation": "a change is ready for review or merge assessment" },
         { "name": "verification-before-completion", "role": "validator", "activation": "before any completion or passing claim" },
         { "name": "research", "role": "reference", "activation": "current primary-source evidence is required" }
@@ -131,8 +130,7 @@
         { "name": "playwright", "role": "validator", "activation": "isolated Web testing and screenshots" },
         { "name": "playwright-best-practices", "role": "reference", "activation": "Playwright test implementation guidance" },
         { "name": "webapp-testing", "role": "validator", "activation": "general Web application quality workflow" },
-        { "name": "screenshot", "role": "executor", "activation": "page or region screenshot capture" },
-        { "name": "agent-browser", "role": "operator", "activation": "ordinary browser automation without user-session requirements" }
+        { "name": "screenshot", "role": "executor", "activation": "page or region screenshot capture" }
       ],
       "external_members": [
         { "qualified_name": "chrome@openai-bundled::control-chrome", "role": "operator", "activation": "existing cookies, tabs, extensions, or authenticated state are required", "optional": true },

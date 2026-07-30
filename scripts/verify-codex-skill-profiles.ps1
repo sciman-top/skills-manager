@@ -8,6 +8,7 @@ $repoRoot = Split-Path $PSScriptRoot -Parent
 $configPath = Join-Path $repoRoot "skills.json"
 $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
 $originalProfile = [string]$config.skill_projection.active_profile
+$testedProfiles = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
 function Set-SkillProfile([string]$Name) {
     & pwsh -NoProfile -ExecutionPolicy Bypass -File $SkillsScript "技能配置" "使用" $Name
@@ -30,6 +31,7 @@ function Test-SkillProfile([string]$Profile, [string[]]$Expected, [string[]]$Abs
     foreach ($name in $Absent) {
         if ($promptText -match [regex]::Escape("- ${name}:")) { throw "$Profile unexpectedly includes $name" }
     }
+    $testedProfiles.Add($Profile) | Out-Null
     return [pscustomobject]@{
         profile = $Profile
         expected_count = $Expected.Count
@@ -40,12 +42,44 @@ function Test-SkillProfile([string]$Profile, [string[]]$Expected, [string[]]$Abs
 
 try {
     Test-SkillProfile "coding" @(
-        "using-superpowers",
         "systematic-debugging",
+        "verification-before-completion",
+        "code-review-and-quality"
+    ) @(
+        "using-superpowers",
+        "research",
+        "brainstorming",
         "dispatching-parallel-agents",
         "subagent-driven-development",
         "using-git-worktrees"
     )
+    Test-SkillProfile "coding-strict" @(
+        "using-superpowers",
+        "test-driven-development",
+        "dispatching-parallel-agents",
+        "subagent-driven-development",
+        "using-git-worktrees"
+    )
+    Test-SkillProfile "engineering" @(
+        "research",
+        "domain-modeling",
+        "codebase-design"
+    ) @("using-superpowers")
+    Test-SkillProfile "python" @(
+        "modern-python",
+        "python-testing-patterns",
+        "security-and-hardening"
+    ) @("using-superpowers")
+    Test-SkillProfile "mcp" @(
+        "mcp-builder",
+        "mcp-cli",
+        "api-and-interface-design"
+    ) @("using-superpowers")
+    Test-SkillProfile "review" @(
+        "code-review-and-quality",
+        "receiving-code-review",
+        "code-simplification"
+    ) @("using-superpowers")
     Test-SkillProfile "ppt" @(
         "custom-teacher-courseware-ppt",
         "powerpoint-automation",
@@ -58,6 +92,41 @@ try {
         "dotnet-backend-patterns",
         "debug:dotnet"
     ) @("dispatching-parallel-agents")
+    Test-SkillProfile "content" @(
+        "custom-creator-publishing",
+        "copy-editing",
+        "baoyu-format-markdown"
+    ) @("using-superpowers")
+    Test-SkillProfile "marketing" @(
+        "content-strategy",
+        "copywriting",
+        "copy-editing"
+    ) @("using-superpowers")
+    Test-SkillProfile "physics" @(
+        "custom-junior-physics-animation",
+        "manim-composer",
+        "playwright"
+    ) @("using-superpowers")
+    Test-SkillProfile "video" @(
+        "storyboard-creation",
+        "remotion-best-practices",
+        "manimce-best-practices"
+    ) @("using-superpowers")
+    Test-SkillProfile "design" @(
+        "ui-ux-pro-max",
+        "frontend-design",
+        "web-design-guidelines"
+    ) @("using-superpowers")
+    Test-SkillProfile "browser" @(
+        "playwright",
+        "playwright-best-practices",
+        "webapp-testing"
+    ) @("using-superpowers")
+    Test-SkillProfile "database" @(
+        "supabase-postgres-best-practices",
+        "api-and-interface-design",
+        "security-and-hardening"
+    ) @("using-superpowers")
     Test-SkillProfile "default" @(
         "custom-windows-wpf-teacher-app",
         "custom-teacher-courseware-ppt",
@@ -65,7 +134,17 @@ try {
         "custom-junior-physics-animation",
         "chrome:control-chrome",
         "computer-use:computer-use"
-    ) @("dispatching-parallel-agents")
+    ) @(
+        "using-superpowers",
+        "research",
+        "brainstorming",
+        "planning-and-task-breakdown",
+        "dispatching-parallel-agents"
+    )
+
+    $configuredProfiles = @($config.skill_projection.profiles.PSObject.Properties.Name | Sort-Object)
+    $missingProbes = @($configuredProfiles | Where-Object { -not $testedProfiles.Contains($_) })
+    if ($missingProbes.Count -gt 0) { throw "profiles missing fresh prompt probes: $($missingProbes -join ', ')" }
 }
 finally {
     Set-SkillProfile $originalProfile

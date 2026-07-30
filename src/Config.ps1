@@ -384,8 +384,14 @@ function Get-CfgContractErrors($cfg) {
         if ($null -ne $profiles) {
             $activeProfile = [string](Get-CfgObjectProperty $skillProjection "active_profile")
             if ([string]::IsNullOrWhiteSpace($activeProfile)) { $errors.Add("skill_projection 配置 profiles 时必须声明 active_profile") | Out-Null }
+            $globalBudgetLimit = if (Test-CfgObjectProperty $skillProjection "budget_limit_chars") { [int](Get-CfgObjectProperty $skillProjection "budget_limit_chars") } else { 8000 }
             foreach ($profileProperty in @($profiles.PSObject.Properties)) {
                 if (-not (Test-CfgArrayProperty $profileProperty.Value "enabled_names")) { $errors.Add(("skill_projection profile.enabled_names 必须是数组：{0}" -f $profileProperty.Name)) | Out-Null }
+                if (Test-CfgObjectProperty $profileProperty.Value "budget_limit_chars") {
+                    $profileBudgetLimit = [int](Get-CfgObjectProperty $profileProperty.Value "budget_limit_chars")
+                    if ($profileBudgetLimit -le 0) { $errors.Add(("skill_projection profile.budget_limit_chars 必须大于 0：{0}" -f $profileProperty.Name)) | Out-Null }
+                    elseif ($profileBudgetLimit -gt $globalBudgetLimit) { $errors.Add(("skill_projection profile.budget_limit_chars 不能超过全局上限：{0}" -f $profileProperty.Name)) | Out-Null }
+                }
             }
         }
     }
@@ -977,6 +983,12 @@ function Assert-Cfg($cfg) {
             Need ($projection.profiles.PSObject.Properties.Match([string]$projection.active_profile).Count -gt 0) ("skill_projection active_profile 不存在：{0}" -f [string]$projection.active_profile)
             foreach ($profileProperty in @($projection.profiles.PSObject.Properties)) {
                 Need (Test-CfgArrayProperty $profileProperty.Value "enabled_names") ("skill_projection profile.enabled_names 必须是数组：{0}" -f $profileProperty.Name)
+                if ($profileProperty.Value.PSObject.Properties.Match("budget_limit_chars").Count -gt 0) {
+                    $profileBudgetLimit = [int]$profileProperty.Value.budget_limit_chars
+                    $globalBudgetLimit = if ($projection.PSObject.Properties.Match("budget_limit_chars").Count -gt 0) { [int]$projection.budget_limit_chars } else { 8000 }
+                    Need ($profileBudgetLimit -gt 0) ("skill_projection profile.budget_limit_chars 必须大于 0：{0}" -f $profileProperty.Name)
+                    Need ($profileBudgetLimit -le $globalBudgetLimit) ("skill_projection profile.budget_limit_chars 不能超过全局上限：{0}" -f $profileProperty.Name)
+                }
             }
         }
         if ($projection.PSObject.Properties.Match("budget_limit_chars").Count -gt 0) {

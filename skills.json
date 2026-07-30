@@ -10,8 +10,8 @@
       "anthropics-skills-skills-skill-creator"
     ],
     "active_profile": "default",
-    "budget_limit_chars": 8000,
-    "external_metadata_reserve_chars": 1700,
+    "budget_limit_chars": 10000,
+    "external_metadata_reserve_chars": 3500,
     "routing_policy_path": "config/skill-routing-policy.json",
     "external_skill_inventory": {
       "enabled": true,
@@ -33,19 +33,10 @@
     ],
     "profiles": {
       "default": {
+        "budget_limit_chars": 7500,
         "enabled_names": [
-          "using-superpowers",
-          "brainstorming",
-          "research",
-          "planning-and-task-breakdown",
           "systematic-debugging",
           "verification-before-completion",
-          "git-workflow-and-versioning",
-          "code-review-and-quality",
-          "incremental-implementation",
-          "grill-with-docs",
-          "grilling",
-          "domain-modeling",
           "custom-windows-wpf-teacher-app",
           "custom-teacher-courseware-ppt",
           "custom-creator-publishing",
@@ -53,6 +44,16 @@
         ]
       },
       "coding": {
+        "budget_limit_chars": 7500,
+        "enabled_names": [
+          "systematic-debugging",
+          "verification-before-completion",
+          "code-review-and-quality",
+          "api-and-interface-design",
+          "security-and-hardening"
+        ]
+      },
+      "coding-strict": {
         "enabled_names": [
           "using-superpowers",
           "brainstorming",
@@ -65,7 +66,6 @@
           "git-workflow-and-versioning",
           "code-review-and-quality",
           "incremental-implementation",
-          "spec-driven-development",
           "architecture-patterns",
           "api-and-interface-design",
           "security-and-hardening",
@@ -73,19 +73,12 @@
           "subagent-driven-development",
           "requesting-code-review",
           "using-git-worktrees",
-          "grill-with-docs",
-          "grilling",
           "domain-modeling"
         ]
       },
       "engineering": {
         "enabled_names": [
-          "using-superpowers",
-          "brainstorming",
           "research",
-          "planning-and-task-breakdown",
-          "verification-before-completion",
-          "git-workflow-and-versioning",
           "grill-with-docs",
           "grilling",
           "domain-modeling",
@@ -94,6 +87,37 @@
           "to-tickets",
           "codebase-design",
           "improve-codebase-architecture"
+        ]
+      },
+      "python": {
+        "enabled_names": [
+          "systematic-debugging",
+          "verification-before-completion",
+          "code-review-and-quality",
+          "modern-python",
+          "python-testing-patterns",
+          "python-performance-optimization",
+          "security-and-hardening"
+        ]
+      },
+      "mcp": {
+        "enabled_names": [
+          "research",
+          "mcp-builder",
+          "mcp-cli",
+          "api-and-interface-design",
+          "security-and-hardening",
+          "verification-before-completion"
+        ]
+      },
+      "review": {
+        "enabled_names": [
+          "code-review-and-quality",
+          "receiving-code-review",
+          "code-simplification",
+          "verification-before-completion",
+          "security-and-hardening",
+          "deprecation-and-migration"
         ]
       },
       "dotnet": {
@@ -107,13 +131,8 @@
           "windows-desktop-e2e",
           "code-review-and-quality",
           "systematic-debugging",
-          "test-driven-development",
           "verification-before-completion",
-          "git-workflow-and-versioning",
-          "research",
-          "grill-with-docs",
-          "grilling",
-          "domain-modeling"
+          "research"
         ]
       },
       "ppt": {
@@ -139,6 +158,17 @@
           "baoyu-format-markdown",
           "baoyu-post-to-wechat",
           "baoyu-url-to-markdown",
+          "research"
+        ]
+      },
+      "marketing": {
+        "enabled_names": [
+          "custom-creator-publishing",
+          "content-strategy",
+          "copywriting",
+          "copy-editing",
+          "social",
+          "baoyu-format-markdown",
           "baoyu-compress-image",
           "research"
         ]
@@ -151,12 +181,22 @@
           "d3-viz",
           "data-visualization",
           "ui-animation",
-          "storyboard-creation",
           "remotion-best-practices",
-          "frontend-design",
           "frontend-ui-engineering",
           "vite",
           "playwright",
+          "research"
+        ]
+      },
+      "video": {
+        "enabled_names": [
+          "custom-junior-physics-animation",
+          "storyboard-creation",
+          "remotion-best-practices",
+          "ui-animation",
+          "data-visualization",
+          "manim-composer",
+          "manimce-best-practices",
           "research"
         ]
       },
@@ -437,11 +477,6 @@
       "to": "agent-skills-2-skills-performance-optimization",
       "vendor": "agent-skills-2",
       "from": "skills\\performance-optimization"
-    },
-    {
-      "to": "superpowers-skills-writing-skills",
-      "from": "skills\\writing-skills",
-      "vendor": "superpowers"
     },
     {
       "from": "find-skills",
@@ -951,7 +986,7 @@
     },
     {
       "name": "playwright-best-practices",
-      "skill": ".",
+      "skill": "playwright-best-practices",
       "sparse": false,
       "repo": "https://github.com/currents-dev/playwright-best-practices-skill.git",
       "ref": "main",

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["selected_skills", "would_create_plan", "would_delegate", "would_use_worktree", "reason"],
+  "properties": {
+    "selected_skills": { "type": "array", "items": { "type": "string" } },
+    "would_create_plan": { "type": "boolean" },
+    "would_delegate": { "type": "boolean" },
+    "would_use_worktree": { "type": "boolean" },
+    "reason": { "type": "string" }
+  }
+}

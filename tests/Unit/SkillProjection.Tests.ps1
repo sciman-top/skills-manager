@@ -8,6 +8,48 @@ function New-ProjectionSkill([string]$root, [string]$dir, [string]$name, [string
 }
 
 Describe "Skill projection" {
+    Context "Repository GPT-5.6 profile policy" {
+        It "Keeps routine profiles free from the mandatory Superpowers bootstrap" {
+            $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
+            $config = Get-ContentUtf8 (Join-Path $repoRoot "skills.json") | ConvertFrom-Json
+            $routineProfiles = @("default", "coding", "engineering", "python", "mcp", "review", "dotnet")
+
+            foreach ($profileName in $routineProfiles) {
+                $enabledNames = @($config.skill_projection.profiles.$profileName.enabled_names)
+                ($enabledNames -contains "using-superpowers") | Should Be $false
+            }
+
+            $defaultNames = @($config.skill_projection.profiles.default.enabled_names)
+            $config.skill_projection.profiles.default.budget_limit_chars | Should Be 7500
+            $defaultNames.Count | Should Be 6
+            foreach ($workflowName in @("research", "brainstorming", "planning-and-task-breakdown", "git-workflow-and-versioning", "incremental-implementation")) {
+                ($defaultNames -contains $workflowName) | Should Be $false
+            }
+
+            $codingNames = @($config.skill_projection.profiles.coding.enabled_names)
+            $config.skill_projection.profiles.coding.budget_limit_chars | Should Be 7500
+            $codingNames.Count | Should Be 5
+            foreach ($workflowName in @("brainstorming", "writing-plans", "executing-plans", "test-driven-development", "finishing-a-development-branch", "dispatching-parallel-agents", "subagent-driven-development", "requesting-code-review", "using-git-worktrees")) {
+                ($codingNames -contains $workflowName) | Should Be $false
+            }
+        }
+
+        It "Keeps the legacy rigorous workflow opt-in and removes the mandatory router" {
+            $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
+            $config = Get-ContentUtf8 (Join-Path $repoRoot "skills.json") | ConvertFrom-Json
+            $strictNames = @($config.skill_projection.profiles."coding-strict".enabled_names)
+            foreach ($workflowName in @("using-superpowers", "test-driven-development", "dispatching-parallel-agents", "subagent-driven-development", "using-git-worktrees")) {
+                ($strictNames -contains $workflowName) | Should Be $true
+            }
+
+            $routingPolicy = Get-ContentUtf8 (Join-Path $repoRoot "config\skill-routing-policy.json") | ConvertFrom-Json
+            $developmentFlow = @($routingPolicy.groups | Where-Object id -eq "development-flow")[0]
+            $developmentFlow.router | Should Be ""
+            $developmentFlow.selection_policy | Should Match "native"
+            (@($developmentFlow.members | Where-Object name -eq "using-superpowers").Count) | Should Be 0
+        }
+    }
+
     Context "Sync-CodexManagedSkillLinks" {
         It "Projects managed skills into the standard user root and preserves .system" {
             $oldDryRun = $script:DryRun
@@ -197,6 +239,38 @@ Describe "Skill projection" {
             $plan.active_profile | Should Be "default"
         }
 
+        It "Distinguishes skills routed through another profile from unrouted skills" {
+            $root = Join-Path $TestDrive "profile-reachability"
+            New-ProjectionSkill $root "active" "active" | Out-Null
+            New-ProjectionSkill $root "elsewhere" "elsewhere" | Out-Null
+            New-ProjectionSkill $root "orphan" "orphan" | Out-Null
+            New-ProjectionSkill (Join-Path $root ".system") "system" "system" | Out-Null
+            $cfg = [pscustomobject]@{
+                enabled = $true
+                active_profile = "default"
+                profiles = [pscustomobject]@{
+                    default = [pscustomobject]@{ enabled_names = @("active") }
+                    coding = [pscustomobject]@{ enabled_names = @("active", "elsewhere") }
+                }
+                sources = @([pscustomobject]@{ id = "managed"; path = $root; priority = 200; platforms = @("codex") })
+            }
+
+            $plan = New-SkillProjectionPlan $cfg
+
+            $elsewhere = @($plan.disabled | Where-Object name -eq "elsewhere")[0]
+            $elsewhere.decision | Should Be "profile_excluded"
+            $elsewhere.profile_reachability | Should Be "routed_elsewhere"
+            @($elsewhere.available_profiles) | Should Be @("coding")
+            $orphan = @($plan.disabled | Where-Object name -eq "orphan")[0]
+            $orphan.decision | Should Be "profile_excluded"
+            $orphan.profile_reachability | Should Be "unrouted"
+            @($orphan.available_profiles).Count | Should Be 0
+            @($plan.profile_routed_names) | Should Be @("active", "elsewhere")
+            @($plan.unrouted_names) | Should Be @("orphan")
+            $plan.profile_routed_name_count | Should Be 2
+            $plan.unrouted_name_count | Should Be 1
+        }
+
         It "Includes the external reserve in the metadata budget verdict" {
             $root = Join-Path $TestDrive "budget"
             New-ProjectionSkill $root "large" "large" ("x" * 90) | Out-Null
@@ -237,6 +311,46 @@ Describe "Skill projection" {
             ($plan.profile_budgets | Where-Object profile -eq "oversized").budget_pass | Should Be $false
             $plan.all_profiles_budget_pass | Should Be $false
             $plan.budget_pass | Should Be $true
+        }
+
+        It "Enforces a lower per-profile budget without weakening the global ceiling" {
+            $root = Join-Path $TestDrive "profile-specific-budget"
+            New-ProjectionSkill $root "large" "large" ("x" * 96) | Out-Null
+            $cfg = [pscustomobject]@{
+                enabled = $true
+                active_profile = "default"
+                budget_limit_chars = 200
+                external_metadata_reserve_chars = 0
+                profiles = [pscustomobject]@{
+                    default = [pscustomobject]@{ enabled_names = @("large"); budget_limit_chars = 100 }
+                }
+                sources = @([pscustomobject]@{ id = "managed"; path = $root; priority = 200; platforms = @("codex") })
+            }
+
+            $plan = New-SkillProjectionPlan $cfg
+            $profileBudget = @($plan.profile_budgets)[0]
+
+            $plan.budget_limit_chars | Should Be 200
+            $plan.effective_budget_limit_chars | Should Be 100
+            $plan.budget_pass | Should Be $false
+            $profileBudget.budget_limit_chars | Should Be 100
+            $profileBudget.budget_pass | Should Be $false
+        }
+
+        It "Rejects a per-profile budget above the global ceiling" {
+            $root = Join-Path $TestDrive "profile-budget-above-global"
+            New-ProjectionSkill $root "small" "small" "small" | Out-Null
+            $cfg = [pscustomobject]@{
+                enabled = $true
+                active_profile = "default"
+                budget_limit_chars = 100
+                profiles = [pscustomobject]@{
+                    default = [pscustomobject]@{ enabled_names = @("small"); budget_limit_chars = 101 }
+                }
+                sources = @([pscustomobject]@{ id = "managed"; path = $root; priority = 200; platforms = @("codex") })
+            }
+
+            { New-SkillProjectionPlan $cfg } | Should Throw
         }
     }
 
@@ -473,6 +587,41 @@ unified_exec = true
     }
 
     Context "Sync-CodexSkillProjection" {
+        It "Persists profile reachability summary in the manifest" {
+            $oldDryRun = $script:DryRun
+            try {
+                $script:DryRun = $false
+                $root = Join-Path $TestDrive "sync-profile-reachability"
+                New-ProjectionSkill $root "active" "active" | Out-Null
+                New-ProjectionSkill $root "elsewhere" "elsewhere" | Out-Null
+                New-ProjectionSkill $root "orphan" "orphan" | Out-Null
+                $configPath = Join-Path $TestDrive "sync-profile-reachability-codex\config.toml"
+                $manifestPath = Join-Path $TestDrive "sync-profile-reachability-reports\projection.json"
+                $projection = [pscustomobject]@{
+                    enabled = $true
+                    active_profile = "default"
+                    profiles = [pscustomobject]@{
+                        default = [pscustomobject]@{ enabled_names = @("active") }
+                        coding = [pscustomobject]@{ enabled_names = @("active", "elsewhere") }
+                    }
+                    codex_config_path = $configPath
+                    manifest_path = $manifestPath
+                    sources = @([pscustomobject]@{ id = "managed"; path = $root; priority = 200; platforms = @("codex") })
+                }
+
+                Sync-CodexSkillProjection $projection | Out-Null
+                $manifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
+
+                $manifest.profile_routed_name_count | Should Be 2
+                $manifest.unrouted_name_count | Should Be 1
+                @($manifest.profile_routed_names) | Should Be @("active", "elsewhere")
+                @($manifest.unrouted_names) | Should Be @("orphan")
+            }
+            finally {
+                $script:DryRun = $oldDryRun
+            }
+        }
+
         It "Persists package cache metadata and reuses it on the next verified sync" {
             $oldDryRun = $script:DryRun
             try {

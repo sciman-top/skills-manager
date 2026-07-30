@@ -166,12 +166,27 @@
 
 `skill_projection.managed_link_excludes` 按受管目录名排除 Codex 的逐技能 Junction；被排除项仍保留在 `agent/`，也不影响 Claude 指向 `agent/` 的根 Junction。该字段适用于保留其他宿主所需技能、但避免其与 Codex `.system` 技能同名冲突的场景。
 
-`skill_projection.aliases` 记录旧名称到替代项的迁移，不把近似能力重新复制成默认技能；`profiles` 控制当前用途下启用的 canonical 技能，`.system` 技能始终保留。`budget_limit_chars` 对“启用技能名称与描述 + 插件预留”设置硬上限，超限会阻断投影。常用命令：
+`skill_projection.aliases` 记录旧名称到替代项的迁移，不把近似能力重新复制成默认技能；`profiles` 控制当前用途下启用的 canonical 技能，`.system` 技能始终保留。顶层 `budget_limit_chars` 对“启用技能名称与描述 + 插件预留”设置 10000 字符 hard ceiling；profile 可用更低的同名字段收紧自身上限，当前 `default` 与 `coding` 均为 7500。`external_metadata_reserve_chars` 至少为 system/plugin Skill 预留 3500 字符，实时外部元数据更大时以实时值为准。任一 profile 超限都会阻断投影。
+
+投影 manifest 为当前 profile 排除项保留 `decision = profile_excluded`，并通过 `profile_reachability` 与 `available_profiles` 区分“可从其他 profile 使用”和“未被任何 profile 路由”。`python`、`mcp`、`review`、`marketing` 与 `video` 用于承接高价值低频技能，避免把整个安装库存塞入 `default`。常用命令：
+
+GPT-5.6 日常路径优先使用 Codex 原生 Plan、Goal、Review 和 agent 控制。`default` 只保留领域入口、故障诊断与完成验证，`coding` 只保留按问题触发的调试、验证、评审、API 与安全能力；两者都不常驻 `using-superpowers`、通用 research、强制 brainstorming、细粒度计划、TDD、worktree 或 subagent 编排。需要完整 Superpowers 方法论时，在启动新任务前显式切换 `coding-strict`；当前任务不会热加载新 profile，vendor 与技能文件也不会因日常精简而删除。
 
 ```powershell
 .\skills.ps1 技能配置 列表
 .\skills.ps1 技能配置 使用 coding
+.\skills.ps1 技能配置 使用 coding-strict
+.\skills.ps1 技能配置 使用 python
 ```
+
+用无模型模式校验 GPT-5.6 profile A/B 语料，或显式执行 12 场景 × 2 profile 的只读 benchmark：
+
+```powershell
+.\scripts\benchmark-codex-skill-profiles.ps1
+.\scripts\benchmark-codex-skill-profiles.ps1 -Execute
+```
+
+benchmark 使用 ephemeral、read-only Codex 任务，记录 skill 选择、计划/代理/worktree 倾向、耗时和 token；产物写入忽略的 `artifacts/skill-profile-benchmark/`。它验证路由开销，不替代真实代码修改、测试质量和回归率评测。
 
 设计访谈统一使用 `grill-with-docs`：在 CLI/IDE 中可显式输入 `$grill-with-docs`，在 Work/Codex 桌面端可从技能选择器指定，也可由模型根据描述隐式调用。该入口编排 `grilling` 与 `domain-modeling`；后两项作为依赖闭包保留，只有在直接进行决策树访谈或领域建模时才单独调用。`domain-modeling` 仅在领域术语、边界或关键决策实际变化时维护 `CONTEXT.md` 或 ADR，不要求每次访谈都创建文档。
 
