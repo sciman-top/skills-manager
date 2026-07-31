@@ -135,8 +135,6 @@
 
 ```powershell
 .\skills.ps1 安装MCP context7 -- npx -y @upstash/context7-mcp@3.2.3
-.\skills.ps1 安装MCP filesystem --cmd npx --arg -y --arg @modelcontextprotocol/server-filesystem@2026.7.10 --arg D:\CODE
-.\skills.ps1 安装MCP github --transport http --url https://api.githubcopilot.com/mcp/ --bearer-token-env-var GITHUB_PERSONAL_ACCESS_TOKEN
 .\skills.ps1 卸载MCP context7
 .\skills.ps1 同步MCP
 .\skills.ps1 MCP配置 列表
@@ -149,9 +147,8 @@
 - `同步MCP` 会把 MCP 服务清单写入目标根目录 `.mcp.json`、Gemini/Trae 配置以及 Codex `config.toml` 的 `[mcp_servers.*]` 段。
 - `同步MCP` 当前没有 help 或 dry-run 分支；执行该子命令会立即按 active profile 写入受管目标，附加 `--help` 也不会改为只读帮助。
 - `skills.json.mcp_profiles` 是用途 profile 真源；`MCP配置 使用 <name>` 会持久化 active profile 并同步。Codex 保留完整服务清单，通过 `enabled` / `enabled_tools` 启停和收窄工具面；Claude/Gemini/Trae 只接收当前 profile 启用的服务。
-- 默认 profile 仅启用 `microsoft-learn` 与 `openaiDeveloperDocs`；`coding`、`github`、`codebase`、`browser`、`database` 等 profile 按任务启用其他服务。切换不会卸载 MCP，`node_repl` 等宿主自有服务不会被同步器删除。
+- 默认 profile 仅启用 `microsoft-learn` 与 `openaiDeveloperDocs`；`coding`、`codebase`、`browser`、`database` 等 profile 按任务启用其他服务。切换不会卸载 MCP，`node_repl` 等宿主自有服务不会被同步器删除。GitHub 语义操作优先使用宿主 GitHub app/`gh`，本地文件读写使用 Codex 原生工具，因此不再托管重复的 `github` 与 `filesystem` MCP。
 - `postgres` MCP 预检要求 `POSTGRES_CONNECTION_STRING` 为 `postgresql://...`；若检测到 Npgsql/ADO 风格 key-value 连接串，会自动转换并写回 User scope。
-- `github` MCP 会优先尝试 `gh auth token`，并把结果写入 User scope 的 `CODEX_GITHUB_PERSONAL_ACCESS_TOKEN`；Codex 配置只写 `bearer_token_env_var`，不写明文 token。
 - 本机 weekly task `skills-manager-weekly-update-friday-2000` 的顺序是 `更新 -> 同步MCP`，所以 MCP 启动环境修复必须落在真源链上，不能只改 live `~/.codex/config.toml`。
 
 ### Codex 技能去重投影
@@ -171,6 +168,8 @@
 投影 manifest 为当前 profile 排除项保留 `decision = profile_excluded`，并通过 `profile_reachability` 与 `available_profiles` 区分“可从其他 profile 使用”和“未被任何 profile 路由”。`python`、`mcp`、`review`、`marketing` 与 `video` 用于承接高价值低频技能，避免把整个安装库存塞入 `default`。常用命令：
 
 GPT-5.6 日常路径优先使用 Codex 原生 Plan、Goal、Review 和 agent 控制。`default` 只保留领域入口、故障诊断与完成验证，`coding` 只保留按问题触发的调试、验证、评审、API 与安全能力；两者都不常驻 `using-superpowers`、通用 research、强制 brainstorming、细粒度计划、TDD、worktree 或 subagent 编排。需要完整 Superpowers 方法论时，在启动新任务前显式切换 `coding-strict`；当前任务不会热加载新 profile，vendor 与技能文件也不会因日常精简而删除。
+
+PPT 路由保持职责单一：`custom-teacher-courseware-ppt` 决定课堂课件结构，Presentations 创建或编辑 PPTX，`powerpoint-automation` 只操作 live PowerPoint/COM，`custom-powerpoint-accessibility` 在内容稳定后验证标题、替代文本、阅读顺序、表格、链接、字幕、对比度与动画。可访问性验证不能由截图单独判定；无法检查阅读顺序或辅助技术行为时必须标记为 `not_verified`。
 
 ```powershell
 .\skills.ps1 技能配置 列表
@@ -338,7 +337,6 @@ portable 包包含可迁移源码与配置，例如 `skills.ps1`、`skills.cmd`�
 ## MCP 与门禁环境变量
 
 - `POSTGRES_CONNECTION_STRING`：postgres MCP 的连接串；推荐 `postgresql://...`
-- `CODEX_GITHUB_PERSONAL_ACCESS_TOKEN`：Codex GitHub MCP 使用的 User/Process scope token 变量
 - `SKILLS_MCP_VERIFY_GEMINI_CLI=1|true|yes|on`：启用 Gemini CLI 实机校验（默认关闭）
 - `SKILLS_MCP_VERIFY_LIST_TIMEOUT_SECONDS`：统一设置 `mcp list` 校验超时（秒）
 - `SKILLS_MCP_VERIFY_LIST_TIMEOUT_SECONDS_<CLI>`：按 CLI 覆盖超时（例如 `_CLAUDE` / `_CODEX` / `_GEMINI`）

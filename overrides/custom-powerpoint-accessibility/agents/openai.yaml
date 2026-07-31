@@ -1,0 +1,4 @@
+interface:
+  display_name: "PowerPoint Accessibility"
+  short_description: "Audit classroom PowerPoint accessibility"
+  default_prompt: "Use $custom-powerpoint-accessibility to audit this classroom presentation for accessibility."

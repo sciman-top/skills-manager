@@ -55,6 +55,7 @@
       "selection_policy": "router first; one primary deck executor; validators may compose",
       "members": [
         { "name": "custom-teacher-courseware-ppt", "role": "router", "activation": "junior-middle-school classroom courseware" },
+        { "name": "custom-powerpoint-accessibility", "role": "validator", "activation": "PowerPoint accessibility audit or final accessibility validation" },
         { "name": "powerpoint-automation", "role": "operator", "activation": "live Windows PowerPoint or COM automation" },
         { "name": "baoyu-slide-deck", "role": "executor", "activation": "bitmap-oriented slide deck generation" },
         { "name": "canvas-design", "role": "executor", "activation": "single-page visual composition" },

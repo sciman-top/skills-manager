@@ -63,6 +63,7 @@ try {
     Test-SkillProfile "engineering" @(
         "research",
         "domain-modeling",
+        "setup-matt-pocock-skills",
         "codebase-design"
     ) @("using-superpowers")
     Test-SkillProfile "python" @(
@@ -82,6 +83,7 @@ try {
     ) @("using-superpowers")
     Test-SkillProfile "ppt" @(
         "custom-teacher-courseware-ppt",
+        "custom-powerpoint-accessibility",
         "powerpoint-automation",
         "presentations:Presentations",
         "documents:documents"
@@ -113,8 +115,8 @@ try {
         "manimce-best-practices"
     ) @("using-superpowers")
     Test-SkillProfile "design" @(
-        "ui-ux-pro-max",
         "frontend-design",
+        "frontend-ui-engineering",
         "web-design-guidelines"
     ) @("using-superpowers")
     Test-SkillProfile "browser" @(

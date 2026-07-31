@@ -138,6 +138,7 @@
       "ppt": {
         "enabled_names": [
           "custom-teacher-courseware-ppt",
+          "custom-powerpoint-accessibility",
           "powerpoint-automation",
           "baoyu-slide-deck",
           "canvas-design",
@@ -202,10 +203,8 @@
       },
       "design": {
         "enabled_names": [
-          "ui-ux-pro-max",
           "frontend-design",
           "frontend-ui-engineering",
-          "design-taste-frontend",
           "ant-design",
           "tailwind-design-system",
           "web-design-guidelines",
@@ -674,24 +673,9 @@
       "from": "markdown-converter"
     },
     {
-      "to": "guizang-ppt-skill",
-      "vendor": "manual",
-      "from": "guizang-ppt-skill"
-    },
-    {
       "to": "mcp-cli",
       "from": "mcp-cli",
       "vendor": "manual"
-    },
-    {
-      "to": "md2wechat-lite",
-      "vendor": "manual",
-      "from": "md2wechat-lite"
-    },
-    {
-      "vendor": "manual",
-      "from": "design-taste-frontend",
-      "to": "design-taste-frontend"
     },
     {
       "vendor": "marketingskills",
@@ -757,16 +741,6 @@
       "vendor": "superpowers",
       "to": "superpowers-skills-writing-plans",
       "from": "skills\\writing-plans"
-    },
-    {
-      "vendor": "manual",
-      "to": "ui-ux-pro-max",
-      "from": "ui-ux-pro-max"
-    },
-    {
-      "vendor": "manual",
-      "to": "use-my-browser",
-      "from": "use-my-browser"
     },
     {
       "from": "research",
@@ -1065,36 +1039,12 @@
       "sparse": false
     },
     {
-      "mode": "manual",
-      "ref": "main",
-      "sparse": false,
-      "skill": ".",
-      "repo": "https://github.com/op7418/guizang-ppt-skill.git",
-      "name": "guizang-ppt-skill"
-    },
-    {
       "sparse": true,
       "repo": "https://github.com/github/awesome-copilot.git",
       "mode": "manual",
       "name": "mcp-cli",
       "ref": "main",
       "skill": "skills\\mcp-cli"
-    },
-    {
-      "ref": "main",
-      "mode": "manual",
-      "name": "md2wechat-lite",
-      "repo": "https://github.com/geekjourneyx/md2wechat-lite.git",
-      "sparse": false,
-      "skill": "skills\\md2wechat-lite"
-    },
-    {
-      "name": "design-taste-frontend",
-      "ref": "main",
-      "sparse": false,
-      "skill": "skills\\taste-skill",
-      "mode": "manual",
-      "repo": "https://github.com/Leonxlnx/taste-skill.git"
     },
     {
       "name": "slidev",
@@ -1111,14 +1061,6 @@
       "skill": "skills\\windows-desktop-e2e",
       "mode": "manual",
       "repo": "https://github.com/affaan-m/everything-claude-code.git"
-    },
-    {
-      "mode": "manual",
-      "ref": "main",
-      "sparse": false,
-      "repo": "https://github.com/xixu-me/skills.git",
-      "name": "use-my-browser",
-      "skill": "skills\\use-my-browser"
     },
     {
       "name": "research",
@@ -1151,14 +1093,6 @@
       "skill": "skills\\engineering\\grill-with-docs",
       "mode": "manual",
       "sparse": true
-    },
-    {
-      "name": "ui-ux-pro-max",
-      "ref": "main",
-      "skill": ".claude\\skills\\ui-ux-pro-max",
-      "repo": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git",
-      "mode": "manual",
-      "sparse": false
     },
     {
       "repo": "https://github.com/MicrosoftDocs/mcp.git",
@@ -1216,26 +1150,6 @@
       "startup_timeout_sec": 120
     },
     {
-      "name": "github",
-      "enabled": false,
-      "enabled_tools": [
-        "get_me",
-        "get_file_contents",
-        "search_code",
-        "list_commits",
-        "get_commit",
-        "pull_request_read",
-        "issue_read",
-        "search_issues",
-        "search_pull_requests"
-      ],
-      "transport": "http",
-      "url": "https://api.githubcopilot.com/mcp/",
-      "headers": {
-        "Authorization": "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"
-      }
-    },
-    {
       "name": "microsoft-learn",
       "enabled": true,
       "enabled_tools": [
@@ -1280,25 +1194,6 @@
       ]
     },
     {
-      "name": "filesystem",
-      "enabled": false,
-      "enabled_tools": [
-        "read_text_file",
-        "read_multiple_files",
-        "list_directory",
-        "directory_tree",
-        "search_files",
-        "get_file_info"
-      ],
-      "transport": "stdio",
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-filesystem@2026.7.10",
-        "D:\\CODE"
-      ]
-    },
-    {
       "name": "codebase-memory-mcp",
       "enabled": false,
       "transport": "stdio",
@@ -1335,11 +1230,6 @@
         "enabled": [
           "context7",
           "openaiDeveloperDocs"
-        ]
-      },
-      "github": {
-        "enabled": [
-          "github"
         ]
       },
       "codebase": {
