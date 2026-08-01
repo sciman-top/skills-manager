@@ -1,0 +1,6 @@
+interface:
+  display_name: "Draft Spec"
+  short_description: "Draft a spec without publishing"
+  default_prompt: "Use $draft-spec to turn the current discussion into a review-ready Markdown specification without publishing it."
+policy:
+  allow_implicit_invocation: true

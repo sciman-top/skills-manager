@@ -11,6 +11,11 @@ Describe "Skill profile benchmark" {
         @($plan.profiles) | Should Be @("coding", "coding-strict")
         @($plan.cases).Count | Should Be 12
         $plan.planned_calls | Should Be 24
+
+        $corpus = Get-Content -LiteralPath (Join-Path $repoRoot "config\codex-skill-profile-benchmark.json") -Raw | ConvertFrom-Json
+        $strictExpectations = @($corpus.cases | ForEach-Object { $_.expectations.'coding-strict' })
+        @($strictExpectations | ForEach-Object { $_.required } | Where-Object { $_ -eq "using-superpowers" }).Count | Should Be 0
+        @($strictExpectations | ForEach-Object { $_.forbidden } | Where-Object { $_ -eq "using-superpowers" }).Count | Should Be 12
     }
 
     It "Accepts comma-separated case filters from an external PowerShell process" {

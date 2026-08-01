@@ -58,6 +58,27 @@ Describe "Build Cache and Transaction" {
             Assert-MockCalled RoboMirror -Times 0 -Exactly -Scope It
         }
 
+        It "Forces an override mirror when a clean build recreated the target" {
+            $src = Join-Path $TestDrive "override-src"
+            $dst = Join-Path $TestDrive "override-dst"
+            New-Item -ItemType Directory -Path $src, $dst -Force | Out-Null
+            Set-Content -Path (Join-Path $src "SKILL.md") -Value "override"
+            Set-Content -Path (Join-Path $dst "SKILL.md") -Value "mapped"
+
+            $key = "override|same-name"
+            $fp = Get-DirectoryFingerprint $src
+            $oldCache = @{ $key = $fp }
+            $newCache = @{}
+            $stats = [pscustomobject]@{ mirrored = 0; skipped = 0 }
+
+            Mock RoboMirror {}
+            Mirror-SkillWithCache $src $dst $key $oldCache $newCache $stats -ForceMirror
+
+            $stats.skipped | Should Be 0
+            $stats.mirrored | Should Be 1
+            Assert-MockCalled RoboMirror -Times 1 -Exactly -Scope It
+        }
+
         It "Resolves relative-path SKILL placeholders after mirror" {
             $src = Join-Path $TestDrive "src"
             $dst = Join-Path $TestDrive "dst"

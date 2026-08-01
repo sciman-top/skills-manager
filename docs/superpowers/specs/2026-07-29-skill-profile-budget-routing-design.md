@@ -29,7 +29,7 @@ high-value skill is reachable through at least one task profile.
 
 - `default`: GPT-5.6 日常入口，仅保留领域 router、故障诊断与完成验证；通用 research 通过明确任务 profile 按需加载。
 - `coding`: GPT-5.6 精简编码，仅保留按问题触发的 debugging、verification、review、API 与 security 能力。
-- `coding-strict`: 显式兼容档，保留原 Superpowers brainstorm/plan/TDD/worktree/subagent/review/finish 全链路。
+- `coding-strict`: 高证据编码档，只在 `coding` 上增加 TDD、领域建模和显式 `grill-with-docs`；不复刻 Superpowers 的 brainstorm/plan/worktree/subagent/review/finish 全链路。
 - `python`: Python project setup, testing, performance, security, and review.
 - `mcp`: MCP server design and CLI interaction with research and API guards.
 - `review`: receiving feedback, simplifying code, migration review, and
@@ -46,9 +46,9 @@ high-value skill is reachable through at least one task profile.
   default orchestration layer. Select a specialized profile before starting a
   new task when its metadata is required; a running task does not hot-load a
   newly selected profile.
-- TDD, forced worktree creation, automatic subagent dispatch, and mandatory
-  code-review stages remain available through `coding-strict` rather than
-  slowing every coding task.
+- TDD remains available through `coding-strict`; worktree creation, agent
+  delegation, planning, and review orchestration stay under native Codex task
+  judgment and explicit user direction rather than becoming profile defaults.
 - This is a routing change only. It does not delete the Superpowers vendor,
   mappings, generated skill packages, or their dependency-closure contract.
 
@@ -74,10 +74,14 @@ external inventory.
   correctness or regression rates; those require isolated implementation
   fixtures and repeated runs before changing the default policy again.
 
-The 2026-07-30 run `20260730-224108-517` passed all 24 expectations. Compared
-with `coding`, `coding-strict` used 3.1% more input tokens, 90.2% more output
-tokens, and 44.1% more elapsed time. This supports lean-by-default while
-retaining strict as an explicit compatibility path.
+The 2026-07-30 run `20260730-224108-517` is historical evidence for the former
+19-skill compatibility profile and is not a baseline for the current strict
+profile. The updated 2026-08-01 run
+`20260801-120514-809` passed all 24 expectations after strict was reduced to
+the evidence-focused set. `coding` used 281284 input and 2446 output tokens in
+150675 ms; `coding-strict` used 283604 input and 2058 output tokens in 135664
+ms. Both profiles used one delegation and one worktree. The result supports
+lean-by-default while retaining a small explicit evidence profile.
 
 ## Reference Basis
 
@@ -87,9 +91,9 @@ retaining strict as an explicit compatibility path.
 - `mindfold-ai/Trellis@c143c260678f5803d4f321a7a5d5099af6acfeb3`: retain as
   a reference for cross-platform repo specs/tasks/journals; do not install
   because this repository already owns equivalent truth surfaces.
-- `obra/superpowers@44c9b2d6e889982ac18c27d05a19fefe335194e1`: retain the
-  vendor and strict opt-in, but reject its mandatory conversation bootstrap for
-  routine GPT-5.6 work.
+- `obra/superpowers@44c9b2d6e889982ac18c27d05a19fefe335194e1`: retain narrow
+  validation skills, but reject its mandatory bootstrap and full workflow
+  chain from every profile, including `coding-strict`.
 - `vercel-labs/agent-skills@7c180d9044c9ae2b442b567aad4e42a28dd5ed62`,
   `mattpocock/skills@2ab958093e83e0ec752e6c1c5932da465bf23e0c`, and
   `trailofbits/skills@ca08fc8a91f64d80b00d48597907c579d0a85c6f`: adopt the
@@ -99,9 +103,9 @@ retaining strict as an explicit compatibility path.
 ## Compatibility And Rollback
 
 - The active profile remains `default`.
-- Existing profile names and members remain valid.
-- `coding` becomes the lean GPT-5.6 path; callers that require the former full
-  workflow can select `coding-strict`.
+- Existing profile names remain valid. `coding` is the lean GPT-5.6 path and
+  `coding-strict` is the evidence-focused path; callers that need a specific
+  workflow must invoke the relevant narrow skill explicitly.
 - The projection manifest change is additive and keeps schema version 2.
 - Rollback removes the five profiles and additive reachability fields, restores
   the two configured budget values, rebuilds `skills.ps1`, and reapplies the

@@ -167,7 +167,7 @@
 
 投影 manifest 为当前 profile 排除项保留 `decision = profile_excluded`，并通过 `profile_reachability` 与 `available_profiles` 区分“可从其他 profile 使用”和“未被任何 profile 路由”。`python`、`mcp`、`review`、`marketing` 与 `video` 用于承接高价值低频技能，避免把整个安装库存塞入 `default`。常用命令：
 
-GPT-5.6 日常路径优先使用 Codex 原生 Plan、Goal、Review 和 agent 控制。`default` 只保留领域入口、故障诊断与完成验证，`coding` 只保留按问题触发的调试、验证、评审、API 与安全能力；两者都不常驻 `using-superpowers`、通用 research、强制 brainstorming、细粒度计划、TDD、worktree 或 subagent 编排。需要完整 Superpowers 方法论时，在启动新任务前显式切换 `coding-strict`；当前任务不会热加载新 profile，vendor 与技能文件也不会因日常精简而删除。
+GPT-5.6 日常路径优先使用 Codex 原生 Plan、Goal、Review 和 agent 控制。`default` 只保留领域入口、故障诊断与完成验证，`coding` 只保留按问题触发的调试、验证、评审、API 与安全能力；两者都不常驻 `using-superpowers`、通用 research、强制 brainstorming、细粒度计划、TDD、worktree 或 subagent 编排。`coding-strict` 是高证据编码档：额外提供 TDD、领域建模和可按设计质询语义隐式触发的 `grill-with-docs`，但同样不加载总入口、强制计划、自动代理或强制 worktree。当前任务不会热加载新 profile，vendor 与技能文件也不会因日常精简而删除。
 
 PPT 路由保持职责单一：`custom-teacher-courseware-ppt` 决定课堂课件结构，Presentations 创建或编辑 PPTX，`powerpoint-automation` 只操作 live PowerPoint/COM，`custom-powerpoint-accessibility` 在内容稳定后验证标题、替代文本、阅读顺序、表格、链接、字幕、对比度与动画。可访问性验证不能由截图单独判定；无法检查阅读顺序或辅助技术行为时必须标记为 `not_verified`。
 
@@ -187,7 +187,9 @@ PPT 路由保持职责单一：`custom-teacher-courseware-ppt` 决定课堂课�
 
 benchmark 使用 ephemeral、read-only Codex 任务，记录 skill 选择、计划/代理/worktree 倾向、耗时和 token；产物写入忽略的 `artifacts/skill-profile-benchmark/`。它验证路由开销，不替代真实代码修改、测试质量和回归率评测。
 
-设计访谈统一使用 `grill-with-docs`：在 CLI/IDE 中可显式输入 `$grill-with-docs`，在 Work/Codex 桌面端可从技能选择器指定，也可由模型根据描述隐式调用。该入口编排 `grilling` 与 `domain-modeling`；后两项作为依赖闭包保留，只有在直接进行决策树访谈或领域建模时才单独调用。`domain-modeling` 仅在领域术语、边界或关键决策实际变化时维护 `CONTEXT.md` 或 ADR，不要求每次访谈都创建文档。
+设计访谈统一使用 `grill-with-docs`：在 CLI/IDE 中可显式输入 `$grill-with-docs`，在 Work/Codex 桌面端可从技能选择器指定，也可由模型仅在“grill/设计质询/把方案磨清楚”等明确语义下隐式调用。它不会因为普通实现或重构请求自动启动；完成访谈后只有用户确认的持久决策才写入 `CONTEXT.md`、词汇表或 ADR。`grilling` 与 `domain-modeling` 作为依赖闭包保留，只有在直接进行决策树访谈或领域建模时才单独调用。
+
+工程 profile 另外提供 `draft-spec` 与 `draft-tickets`：两者可隐式触发，但只在回复中生成待审阅 Markdown，不写仓库文件、不调用 tracker，也不建立外部阻塞关系。`to-spec`、`to-tickets`、`setup-matt-pocock-skills` 和 `improve-codebase-architecture` 继续保持显式调用，因为它们会发布、修改仓库配置或执行高成本架构扫描。
 
 `-DryRun` 只生成内存计划，不写配置或 manifest。Codex 在新任务加载技能配置；当前已运行任务不会热更新，因此投影后需用新任务复核可见技能列表，不应通过删除 `.agents/skills` 强制生效。
 

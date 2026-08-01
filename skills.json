@@ -55,25 +55,15 @@
       },
       "coding-strict": {
         "enabled_names": [
-          "using-superpowers",
-          "brainstorming",
-          "writing-plans",
-          "executing-plans",
           "systematic-debugging",
           "test-driven-development",
           "verification-before-completion",
-          "finishing-a-development-branch",
-          "git-workflow-and-versioning",
           "code-review-and-quality",
-          "incremental-implementation",
-          "architecture-patterns",
           "api-and-interface-design",
           "security-and-hardening",
-          "dispatching-parallel-agents",
-          "subagent-driven-development",
-          "requesting-code-review",
-          "using-git-worktrees",
-          "domain-modeling"
+          "domain-modeling",
+          "grill-with-docs",
+          "grilling"
         ]
       },
       "engineering": {
@@ -82,6 +72,8 @@
           "grill-with-docs",
           "grilling",
           "domain-modeling",
+          "draft-spec",
+          "draft-tickets",
           "setup-matt-pocock-skills",
           "to-spec",
           "to-tickets",

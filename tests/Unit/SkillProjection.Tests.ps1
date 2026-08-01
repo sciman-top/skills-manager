@@ -34,12 +34,15 @@ Describe "Skill projection" {
             }
         }
 
-        It "Keeps the legacy rigorous workflow opt-in and removes the mandatory router" {
+        It "Keeps the strict profile evidence-focused and removes the mandatory router" {
             $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
             $config = Get-ContentUtf8 (Join-Path $repoRoot "skills.json") | ConvertFrom-Json
             $strictNames = @($config.skill_projection.profiles."coding-strict".enabled_names)
-            foreach ($workflowName in @("using-superpowers", "test-driven-development", "dispatching-parallel-agents", "subagent-driven-development", "using-git-worktrees")) {
+            foreach ($workflowName in @("systematic-debugging", "test-driven-development", "verification-before-completion", "code-review-and-quality", "domain-modeling", "grill-with-docs", "grilling")) {
                 ($strictNames -contains $workflowName) | Should Be $true
+            }
+            foreach ($workflowName in @("using-superpowers", "brainstorming", "writing-plans", "executing-plans", "dispatching-parallel-agents", "subagent-driven-development", "using-git-worktrees")) {
+                ($strictNames -contains $workflowName) | Should Be $false
             }
 
             $routingPolicy = Get-ContentUtf8 (Join-Path $repoRoot "config\skill-routing-policy.json") | ConvertFrom-Json
@@ -47,6 +50,43 @@ Describe "Skill projection" {
             $developmentFlow.router | Should Be ""
             $developmentFlow.selection_policy | Should Match "native"
             (@($developmentFlow.members | Where-Object name -eq "using-superpowers").Count) | Should Be 0
+        }
+
+        It "Separates implicit drafts from explicit side-effecting engineering skills" {
+            $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
+            $config = Get-ContentUtf8 (Join-Path $repoRoot "skills.json") | ConvertFrom-Json
+            $engineeringNames = @($config.skill_projection.profiles.engineering.enabled_names)
+            foreach ($draftName in @("draft-spec", "draft-tickets")) {
+                ($engineeringNames -contains $draftName) | Should Be $true
+            }
+
+            $policy = Get-ContentUtf8 (Join-Path $repoRoot "config\skill-routing-policy.json") | ConvertFrom-Json
+            $engineeringFlow = @($policy.groups | Where-Object id -eq "engineering-design-and-delivery")[0]
+            @($engineeringFlow.members | Where-Object name -eq "draft-spec").Count | Should Be 1
+            @($engineeringFlow.members | Where-Object name -eq "draft-tickets").Count | Should Be 1
+            $engineeringFlow.selection_policy | Should Match "draft-spec"
+            $engineeringFlow.selection_policy | Should Match "explicit"
+
+            $grillSkill = Get-ContentUtf8 (Join-Path $repoRoot "overrides\grill-with-docs\SKILL.md")
+            $grillSkill | Should Not Match "disable-model-invocation:\s*true"
+            $grillPolicy = Get-ContentUtf8 (Join-Path $repoRoot "overrides\grill-with-docs\agents\openai.yaml")
+            $grillPolicy | Should Match "allow_implicit_invocation:\s*true"
+
+            foreach ($explicitName in @("improve-codebase-architecture", "to-spec", "to-tickets")) {
+                $source = Get-ChildItem -LiteralPath (Join-Path $repoRoot "imports") -Recurse -Filter "SKILL.md" -File |
+                    Where-Object { (Get-ContentUtf8 $_.FullName) -match ("(?m)^name:\s*" + [regex]::Escape($explicitName) + "\s*$") } |
+                    Select-Object -First 1
+                ($null -ne $source) | Should Be $true
+                (Get-ContentUtf8 $source.FullName) | Should Match "disable-model-invocation:\s*true"
+                $agentMetadata = Join-Path $source.Directory.FullName "agents\openai.yaml"
+                (Test-Path -LiteralPath $agentMetadata -PathType Leaf) | Should Be $true
+                (Get-ContentUtf8 $agentMetadata) | Should Match "allow_implicit_invocation:\s*false"
+            }
+
+            $setupSkill = Get-ContentUtf8 (Join-Path $repoRoot "overrides\setup-matt-pocock-skills\SKILL.md")
+            $setupSkill | Should Match "disable-model-invocation:\s*true"
+            $setupPolicy = Get-ContentUtf8 (Join-Path $repoRoot "overrides\setup-matt-pocock-skills\agents\openai.yaml")
+            $setupPolicy | Should Match "allow_implicit_invocation:\s*false"
         }
     }
 

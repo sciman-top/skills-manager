@@ -34,14 +34,14 @@
   "groups": [
     {
       "id": "development-flow",
-      "purpose": "Use GPT-5.6 and Codex native planning, goal tracking, review, and agent controls for routine work; select a narrow profile before a new task when specialized workflow metadata is required.",
+      "purpose": "Use GPT-5.6 and Codex native planning, goal tracking, review, and agent controls for routine work; profiles expose narrow task capabilities but never replace native task orchestration.",
       "router": "",
-      "selection_policy": "select the task profile before starting a new Codex task; within a running task use native Plan/Goal/Review first and invoke only visible matching skills; never imply hot-loading or bootstrap a mandatory workflow",
+      "selection_policy": "select the task profile before starting a new Codex task; within a running task use native Plan/Goal/Review first and invoke only visible matching skills; never imply hot-loading, mandatory workflows, or automatic delegation",
       "members": [
         { "name": "brainstorming", "role": "workflow", "activation": "the user explicitly requests exploratory design or product intent remains materially ambiguous" },
-        { "name": "planning-and-task-breakdown", "role": "workflow", "activation": "a complex task needs a durable implementation breakdown beyond native Plan mode" },
+        { "name": "planning-and-task-breakdown", "role": "workflow", "activation": "the user explicitly needs a durable implementation breakdown beyond native Plan mode" },
         { "name": "systematic-debugging", "role": "workflow", "activation": "a bug, failed test, or unexpected behavior needs diagnosis" },
-        { "name": "incremental-implementation", "role": "workflow", "activation": "the user explicitly requests incremental delivery for a large multi-file implementation" },
+        { "name": "incremental-implementation", "role": "workflow", "activation": "the user explicitly requests incremental delivery with independently verifiable milestones" },
         { "name": "git-workflow-and-versioning", "role": "workflow", "activation": "an authorized commit, branch, merge, release, or conflict-resolution operation is required" },
         { "name": "code-review-and-quality", "role": "validator", "activation": "a change is ready for review or merge assessment" },
         { "name": "verification-before-completion", "role": "validator", "activation": "before any completion or passing claim" },
@@ -64,6 +64,25 @@
       ],
       "external_members": [
         { "qualified_name": "presentations@openai-primary-runtime::Presentations", "role": "executor", "activation": "create or edit PPTX and slide files", "optional": true }
+      ]
+    },
+    {
+      "id": "engineering-design-and-delivery",
+      "purpose": "Separate low-side-effect design drafts from design interviews, architecture scans, repository setup, and tracker publication.",
+      "router": "",
+      "selection_policy": "Prefer draft-spec or draft-tickets for review-only output; allow grill-with-docs to start a focused design interview when the request clearly asks for grilling; keep setup, architecture scanning, and tracker publication explicit.",
+      "members": [
+        { "name": "research", "role": "reference", "activation": "current primary-source evidence is required for the engineering decision" },
+        { "name": "domain-modeling", "role": "workflow", "activation": "durable domain terms, boundaries, or decisions need clarification" },
+        { "name": "grilling", "role": "workflow", "activation": "a focused design interview is explicitly requested" },
+        { "name": "grill-with-docs", "role": "workflow", "activation": "the user asks to grill a design or sharpen an ADR/glossary decision" },
+        { "name": "draft-spec", "role": "executor", "activation": "the user asks for a review-only spec or PRD draft" },
+        { "name": "draft-tickets", "role": "executor", "activation": "the user asks for a review-only ticket or vertical-slice breakdown" },
+        { "name": "setup-matt-pocock-skills", "role": "operator", "activation": "the repository engineering-skill configuration must be initialized or changed explicitly" },
+        { "name": "codebase-design", "role": "reference", "activation": "architecture vocabulary is needed for an engineering design" },
+        { "name": "improve-codebase-architecture", "role": "workflow", "activation": "the user explicitly requests a codebase architecture scan and visual report" },
+        { "name": "to-spec", "role": "operator", "activation": "the user explicitly approves publishing a spec to the configured tracker" },
+        { "name": "to-tickets", "role": "operator", "activation": "the user explicitly approves publishing tickets and blocking relationships" }
       ]
     },
     {

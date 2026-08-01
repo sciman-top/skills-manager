@@ -1,0 +1,6 @@
+interface:
+  display_name: "Grill with Docs"
+  short_description: "Sharpen a design before documenting it"
+  default_prompt: "Use $grill-with-docs to challenge this design one decision at a time and record only durable conclusions."
+policy:
+  allow_implicit_invocation: true

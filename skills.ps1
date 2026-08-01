@@ -6141,7 +6141,8 @@ function Mirror-SkillWithCache(
     [hashtable]$oldCache,
     [hashtable]$newCache,
     $stats,
-    [hashtable]$fingerprintCache = $null
+    [hashtable]$fingerprintCache = $null,
+    [switch]$ForceMirror
 ) {
     if ($null -eq $fingerprintCache) { $fingerprintCache = @{} }
     if ($null -ne $stats -and $stats.PSObject.Properties.Match("fp_cache_hit").Count -eq 0) {
@@ -6174,7 +6175,7 @@ function Mirror-SkillWithCache(
     }
     $newCache[$cacheKey] = $fp
     $old = if ($oldCache.ContainsKey($cacheKey)) { [string]$oldCache[$cacheKey] } else { "" }
-    if ($dstExists -and $old -eq $fp) {
+    if ($dstExists -and -not $ForceMirror -and $old -eq $fp) {
         $expanded = Expand-RelativeSkillPlaceholders $dst
         if ($expanded -gt 0) {
             Log ("命中构建缓存后补展开相对路径 SKILL 占位文件：{0} 项 [{1}]" -f $expanded, $cacheKey)
@@ -6668,7 +6669,10 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
             try {
                 $dst = Join-Path $AgentDir $d.Name
                 $cacheKey = ("override|{0}" -f $d.Name)
-                Mirror-SkillWithCache $d.FullName $dst $cacheKey $oldCache $newCache $stats $fingerprintCache
+                # A clean agent build recreates mapping destinations before this
+                # phase. Never let a stale override cache entry skip the
+                # replacement that must win over that freshly mirrored output.
+                Mirror-SkillWithCache $d.FullName $dst $cacheKey $oldCache $newCache $stats $fingerprintCache -ForceMirror
                 Log ("应用覆盖层: {0}" -f $d.Name)
             }
             catch {

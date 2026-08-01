@@ -1,0 +1,6 @@
+interface:
+  display_name: "Draft Tickets"
+  short_description: "Draft tickets without creating issues"
+  default_prompt: "Use $draft-tickets to break the current plan into review-ready tracer-bullet tickets without publishing them."
+policy:
+  allow_implicit_invocation: true
