@@ -3,7 +3,7 @@
   "references_root": "D:\\CODE\\external\\skills-manager-references",
   "default_refresh_set": [
     "codex",
-    "openai-skills",
+    "openai-plugins",
     "anthropics-skills",
     "gemini-cli",
     "modelcontextprotocol",
@@ -19,9 +19,21 @@
       "relative_path": "core/codex"
     },
     {
-      "name": "openai-skills",
+      "name": "openai-plugins",
       "tier": "core-mainline",
       "status": "active",
+      "source_disposition": "current-official",
+      "license_policy": "per-plugin",
+      "upstream_url": "https://github.com/openai/plugins.git",
+      "relative_path": "core/openai-plugins"
+    },
+    {
+      "name": "openai-skills",
+      "tier": "historical-compatibility",
+      "status": "deprecated",
+      "source_disposition": "historical-runtime-compatibility",
+      "replacement": "openai-plugins",
+      "deprecation_evidence": "README.md@49f948faa9258a0c61caceaf225e179651397431",
       "upstream_url": "https://github.com/openai/skills.git",
       "relative_path": "core/openai-skills"
     },

@@ -1,0 +1,243 @@
+# skills-manager vNext 产品需求文档
+
+**program_id**: `skills-manager-vnext`
+**status**: accepted-direction
+**implementation_status**: phase-0-foundation-in-progress
+**最后更新**: 2026-08-01
+
+## 1. 产品结论
+
+`skills-manager vNext` 是一个 Windows-first、local-first 的 AI 能力策展器与规则顾问。它帮助用户为 ChatGPT Work、Codex 和其他本地 AI 工具选择、组合、投影和验证合适的 skills、plugins、MCP 与规则文件，同时保持宿主原生能力、目标仓自治和真实验收边界。
+
+它不是 AI coding runtime，不执行或接管 agent loop，不提供模型路由、账号、认证、权限、会话、云任务、插件商店或中央跨仓治理服务。
+
+## 2. 背景与问题
+
+当前仓库已经解决了多来源 skill 安装、构建、投影、MCP profile、目标仓审查和证据等问题，但继续扩展时出现五类系统性风险：
+
+1. 官方产品已经提供 skills、plugins、MCP、hooks、`AGENTS.md` 和原生配置，重复实现会产生重叠与漂移。
+2. skills、MCP、plugins 和规则文件的生命周期不同，塞进同一巨型配置或通用对象会造成错误抽象。
+3. 当前 PowerShell 源码包含大量函数和多个超大命令文件，继续横向加功能会提高回归和维护成本。
+4. 规则优化容易退化为中央同步、批量覆盖和“repo-side pass 等于宿主已接受”的旧问题。
+5. AI 执行需要清晰的 requirement ID、write set、依赖、验证和回滚，普通路线图不足以支持可靠编码。
+
+## 3. 目标用户
+
+### 3.1 Primary persona: 多宿主本地 AI 高级用户
+
+- 在 Windows 上同时使用 Codex App/CLI/IDE、ChatGPT Work、Claude、Gemini 或其他 agent 工具。
+- 维护多个目标仓和大量 skills/MCP 来源。
+- 需要清楚知道“安装了什么、为什么启用、投影到哪里、是否加载、如何回滚”。
+
+### 3.2 Secondary persona: 团队/仓库维护者
+
+- 需要精简、可执行的项目 `AGENTS.md` 和相邻规则文件。
+- 希望从真实 build/test/CI/script 中校验规则，而不是依赖中心模板覆盖。
+- 需要可审阅的建议、diff 和 repo-side evidence。
+
+### 3.3 AI coding agent
+
+- 需要机器可读任务、稳定 requirement ID、明确模块边界和 fail-closed 完成条件。
+- 不能把设计态、候选态、repo-side gate 或 synthetic evidence 写成 live acceptance。
+
+## 4. Jobs To Be Done
+
+| JTBD ID | 用户目标 | 成功信号 |
+| --- | --- | --- |
+| `JTBD-001` | 找到适合当前任务的既有官方/社区能力 | 推荐包含来源、版本、许可证、宿主兼容和替代判断 |
+| `JTBD-002` | 控制默认上下文和工具面 | profile 选择可解释、可预算、可预演、可回滚 |
+| `JTBD-003` | 诊断规则文件为什么效果差 | 输出加载链、重复/冲突、事实漂移和精简建议 |
+| `JTBD-004` | 安全地应用本地配置/规则改动 | plan/diff 先行，写入显式确认，备份和 receipt 完整 |
+| `JTBD-005` | 判断改动是否真的生效 | repo verification、host load、live acceptance 分层报告 |
+| `JTBD-006` | 让 AI 连续执行工程任务 | 每个任务都有依赖、write set、测试、回滚和 done_when |
+
+## 5. 产品原则
+
+### `PP-001 Official-first`
+
+官方应用、插件目录、原生 CLI/config/help/schema 能解决的问题，优先复用或调用；本项目只补发现、比较、组合、投影和证据。
+
+### `PP-002 Local-first`
+
+默认单机、单用户、文件和 Git 为真源。没有证据前不引入服务端、数据库、账号系统或遥测。
+
+### `PP-003 Advisory-first`
+
+扫描、诊断和建议默认只读。写入必须通过结构化 plan 和显式 apply。
+
+### `PP-004 Target-owned rules`
+
+项目规则由目标仓维护。本项目可以分析和生成 patch，不能维护中央目标仓清单或自动覆盖多个仓库。
+
+规则协同采用三层责任模型：跨仓稳定语义属于 `common`，宿主加载/诊断/权限差异属于 `platform_delta`，仓库事实、命令、边界、证据和回滚属于 `project_action`。三层共同覆盖一个执行约束、且没有重复或冲突，才可判定为“全局 + 项目 1+1>2”；文件长得相似或通过静态模板检查不构成该结论。
+
+### `PP-005 Separate domains`
+
+Capability、RuleDocument、Profile、OperationPlan 和 Receipt 使用独立模型，只共享必要的操作 envelope。
+
+### `PP-006 Evidence before status`
+
+所有状态必须说明证据层级；未知或未执行的 native/live 验证必须明确为 `not_verified`。
+
+### `PP-007 Maximum reasonable slice`
+
+优先边界清楚、可验证、可回滚的最大合理切片；不机械拆成微任务，也不跨越多个高风险写入面。
+
+## 6. 功能需求
+
+### 6.1 Capability catalog
+
+- `FR-CAT-001`：统一列出已知 skill、plugin、MCP descriptor 和 rule document，但保留各自类型字段，不做最低公分母扁平化。
+- `FR-CAT-002`：每个外部能力记录 source URL/path、revision/version、checksum、license、trust tier、lifecycle status 和 discovered_at。
+- `FR-CAT-003`：区分 runtime truth、reference shelf、official directory、host-installed inventory 和 discovery-only candidate。
+- `FR-CAT-004`：同名/近似能力必须输出 canonical、duplicate、alternative 或 conflict 决策和依据，不直接按名称删除。
+- `FR-CAT-005`：官方已存在等价插件/系统技能时默认推荐复用，只有明确缺口才进入自维护候选。
+
+### 6.2 Profiles and desired state
+
+- `FR-PRO-001`：profile 能选择 skills、plugins 和 MCP 工具面，并记录用途、预算和启停原因。
+- `FR-PRO-002`：profile 不能保存 auth、token、provider、model、sandbox 或会话状态。
+- `FR-PRO-003`：任何 projection 必须先生成目标、before/after hash、操作、风险和预期验证。
+- `FR-PRO-004`：未在本次 plan 中声明的文件、配置段和宿主能力不得被修改。
+- `FR-PRO-005`：当前任务不热加载时必须提示 fresh session/native probe，不能通过删除宿主系统目录强制生效。
+
+### 6.3 Rule advisor
+
+- `FR-RUL-001`：发现 global、repo、nested 和短期 override 规则文件，并按宿主输出可能的加载链和 precedence。
+- `FR-RUL-002`：检测体量预算、重复、层级错位、宿主专属内容泄漏、陈旧命令、无依据断言、wrapper/BOM 和冲突。
+- `FR-RUL-003`：用当前 repo build/test/CI/script/README 校验规则中的命令和路径；无法证明时输出 bounded uncertainty。
+- `FR-RUL-004`：建议遵循“prompt/thread -> AGENTS -> skill -> plugin -> MCP -> hook/CI”的最小 surface 选择。
+- `FR-RUL-005`：规则 plan 必须包含依据、目标 path、diff、风险、验证、回滚和 scope owner。
+- `FR-RUL-006`：Phase 1 只读；规则写入在 Phase 2 才允许，并要求精确路径和显式确认。
+- `FR-RUL-007`：不得批量生成同质化项目规则，不得恢复中央 target registry、跨仓同步器或统一规则 CI。
+- `FR-RUL-008`：为每条规则分类 `common | platform_delta | project_action | deterministic_enforcement | task_local`；发现层级错位时优先移动或下沉，不在多个文件复制修补。
+- `FR-RUL-009`：输出 `Global Rule -> Repo Action` 覆盖关系，区分 `covered | gap | conflict | duplicated | not_applicable`；`not_applicable` 必须有理由和恢复条件，不能用来隐藏缺口。
+- `FR-RUL-010`：Codex/Claude 的共同语义应可比较，平台差异必须独立取证；不得假定文件 import、wrapper、fallback 或 override 在不同宿主具有相同语义。
+- `FR-RUL-011`：渐进披露建议同时考虑常驻上下文成本与可发现性。行数/字节阈值、固定 heading 和 wrapper shape 是可配置 profile 或 finding，不是跨宿主硬编码真理。
+- `FR-RUL-012`：规则审查输出采用 `adopt | adapt | reject | defer` disposition，记录来源/revision、依据、产品落点、验证方式和 truth boundary。
+
+### 6.4 Plugin awareness
+
+- `FR-PLG-001`：从官方目录/宿主原生入口读取或接收 plugin inventory，不复制官方公共目录。
+- `FR-PLG-002`：区分 plugin bundle、bundled skill、MCP server、connector、hook 和 optional UI。
+- `FR-PLG-003`：安装、启停和授权优先委托宿主原生能力；本项目记录 intent 和 result，不保存 OAuth/token。
+- `FR-PLG-004`：个人 plugin lint/export 只在已有自维护 workflow 需要分发时启用；不因“可能有用”自动打包。
+
+### 6.5 MCP governance
+
+- `FR-MCP-001`：保留当前 MCP server/profile/target 真源和向后兼容。
+- `FR-MCP-002`：MCP 同步必须提供与真实写入等价的结构化 plan/diff，而不只是日志型 dry-run。
+- `FR-MCP-003`：凭据只能以引用或环境要求出现；receipt、日志和进程参数必须 redaction-first。
+- `FR-MCP-004`：优先使用宿主 connector/plugin 或 native MCP CLI；只有不存在原生入口时才使用受管配置段。
+- `FR-MCP-005`：服务可启动、工具可列出、真实工具调用和业务验收是不同验证层级。
+
+### 6.6 Operation plan and receipt
+
+- `FR-OPS-001`：所有写操作共享 versioned `OperationPlan` envelope。
+- `FR-OPS-002`：plan 至少包含 operation_id、domain、target、before_hash、desired_hash、actions、risk、preconditions、verification 和 rollback。
+- `FR-OPS-003`：apply 必须验证 plan freshness、路径范围和 before_hash，任一不匹配 fail-closed。
+- `FR-OPS-004`：apply 生成 versioned `Receipt`，记录 attempted/applied/skipped/failed actions、backup、exit code 和 verification state。
+- `FR-OPS-005`：跨多个文件的写入应使用 staging/atomic replace 或可恢复事务目录；失败只回滚本次切片。
+- `FR-OPS-006`：dry-run、applied、repo_verified、host_loaded 和 live_accepted 使用不同状态，不允许自动晋级。
+
+### 6.7 AI-executable planning
+
+- `FR-AIE-001`：当前实现 Phase 必须提供机器可读 task manifest。
+- `FR-AIE-002`：每个任务必须声明 ID、状态、风险、依赖、requirement IDs、write set、步骤、测试、验证、回滚和 done_when。
+- `FR-AIE-003`：任务依赖必须无环，done 任务的依赖也必须 done。
+- `FR-AIE-004`：任务不得把 `agent/`、`vendor/` 或运行态 report 作为源码 write set。
+- `FR-AIE-005`：planning verifier 必须检查 PRD requirement、架构决策、路线 Phase、spec、plan 和 todo 的交叉引用。
+
+### 6.8 Evidence and reporting
+
+- `FR-EVD-001`：报告必须包含 source revision、命令、exit code、关键输出、风险、N/A、回滚和工作树边界。
+- `FR-EVD-002`：外部参考必须记录采纳、适配或拒绝决定，不继承其仓库指令。
+- `FR-EVD-003`：candidate、pending_review、synthetic、repo_verified 和 live_accepted 必须保持语义隔离。
+- `FR-EVD-004`：敏感路径和凭据不得写入可提交 evidence；host-local receipt 默认保留在忽略目录。
+
+## 7. 非功能需求
+
+- `NFR-COMP-001`：现有 `skills.json`、lock、CLI aliases、generated `skills.ps1` 和 MCP/skill projection 行为保持兼容。
+- `NFR-MNT-001`：新增业务逻辑进入明确 bounded context；不再向超大 command 文件无界追加。
+- `NFR-MNT-002`：开发源码模块化，发行仍允许单文件 bundle。
+- `NFR-PORT-001`：PowerShell 7 是首选开发/CI runtime；Windows PowerShell 5.1 保留有时限的兼容 smoke，不阻止新代码使用可适配的 PS7 能力。
+- `NFR-SAF-001`：只读命令不能调用 provider、写宿主配置或改变 active profile。
+- `NFR-SAF-002`：所有外部写入必须显式授权；高风险写入必须先有可执行回滚。
+- `NFR-SEC-001`：不持久化 API key/OAuth/token；日志、plan 和 receipt 使用 redaction-first。
+- `NFR-PERF-001`：inventory/doctor 使用有界扫描、缓存和明确超时；性能退化不能通过跳过完整性校验解决。
+- `NFR-OBS-001`：关键阶段输出稳定的 machine-readable status 和 phase timing。
+- `NFR-TST-001`：新增 contract 有 unit、fixture/golden 和至少一个真实 native probe 路径；不可用时按 N/A 记录恢复条件。
+- `NFR-TRU-001`：任何“完成/生效/验收”声明必须绑定 verification level 和 evidence path。
+
+## 8. 产品级验收
+
+vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Phase 独立验收，完整产品至少满足：
+
+1. 用户能获得统一但不扁平化的 capability inventory。
+2. 默认 profile 不因扩展 plugin/rule 能力而超出现有上下文预算。
+3. rules advisor 能在不写目标仓的前提下给出可复核 findings 和 patch plan。
+4. MCP、skill projection 和 rule apply 使用一致的 plan/freshness/receipt 语义。
+5. 任一 apply 中断后能恢复本次切片，不覆盖无关用户修改。
+6. 官方插件或系统技能已覆盖的能力不会被重复安装为默认自维护副本。
+7. fresh native probe 与 repo-side gate 分开呈现；未执行 live workflow 时保持 `not_verified`。
+8. AI 能按 task manifest 执行当前 Phase，不需要从多份文档猜测 write set、依赖或完成条件。
+
+## 9. 成功指标
+
+成功指标先 observe，不为了指标构建遥测服务：
+
+| Metric ID | 指标 | 初始目标 |
+| --- | --- | --- |
+| `MET-001` | 默认 profile 元数据预算超限次数 | 0 |
+| `MET-002` | apply 前存在 machine-readable plan 的写入比例 | 100%（进入新协议的领域） |
+| `MET-003` | receipt 可执行回滚覆盖率 | 100%（进入新协议的领域） |
+| `MET-004` | 规则建议中的失效命令误报率 | 通过 fixture + 人工抽样建立 baseline 后再定阈值 |
+| `MET-005` | 官方已有等价能力却新增自维护副本 | 0 个未经 waiver 的新增 |
+| `MET-006` | repo_verified 被误报为 live_accepted | 0 |
+| `MET-007` | task manifest 与 plan/todo 漂移 | planning verifier 中 0 finding |
+
+## 10. 发布和兼容边界
+
+- Phase 0 不增加用户可见新领域能力，只建立 schema、模块 seam、operation contract 和规划门禁。
+- Phase 1 只增加 read-only inventory/rules advisor，不新增规则写入。
+- Phase 2 才引入显式 apply；必须保留现有命令兼容和 feature flag/observe 窗口。
+- Phase 3 才评估 personal plugin lint/export，不创建公共 marketplace。
+- GUI、daemon、远端协作、数据库和 domain core 重写均为 conditional，不进入当前承诺。
+
+## 11. 官方与社区依据
+
+### 官方采纳
+
+- [OpenAI Codex Best practices](https://learn.chatgpt.com/guides/best-practices)：采用短而准确的 `AGENTS.md`、按真实摩擦演进规则、按需启用 MCP、把稳定重复工作沉淀为 skill。
+- [OpenAI AGENTS.md](https://learn.chatgpt.com/docs/agent-configuration/agents-md)：采用 global/repo/nested 加载层级和项目事实归属，不假定 hosted surface 与本机文件自动同步。
+- [OpenAI Rules](https://learn.chatgpt.com/docs/agent-configuration/rules)：`.rules` 用于 sandbox 外命令决策且仍属 experimental；自然语言 `AGENTS.md` 不承担可重复权限 enforcement。
+- [OpenAI Plugins](https://learn.chatgpt.com/docs/plugins) 与 [Plugin architecture](https://developers.openai.com/plugins/concepts/plugins)：采用“先发现/安装现有 plugin”和最小 plugin shape，区分 skill、MCP/connector、hook 与 optional UI。
+- [OpenAI Skills](https://developers.openai.com/plugins/concepts/skills)：采用 progressive disclosure，以及 workflow instructions 与 live data/action 的清晰边界。
+- [OpenAI MCP](https://learn.chatgpt.com/docs/extend/mcp) 与 [Hooks](https://learn.chatgpt.com/docs/hooks)：MCP 用于外部动态数据/动作；只有确定性 lifecycle enforcement 才进入 hook/script/CI。
+- [MCP specification](https://modelcontextprotocol.io/specification/latest) 与 [MCP Registry](https://registry.modelcontextprotocol.io/)：采用 schema、versioning、validation 和来源/所有权边界。
+
+### 社区采纳或适配
+
+- [wshobson/agents](https://github.com/wshobson/agents)：采纳细粒度 plugin、单一源到宿主原生产物、结构校验；拒绝把大规模多代理/模型分层直接移入本项目。
+- [obra/superpowers](https://github.com/obra/superpowers)：采纳 evidence-before-claims、可组合 workflow 和行为测试；拒绝默认强制全部流程和 always-on bootstrap。
+- [mattpocock/skills](https://github.com/mattpocock/skills)：采纳小、可组合、可编辑副本与订阅式 plugin 的区别；拒绝由 workflow 接管完整工程过程。
+- `D:\CODE-other\governed-ai-coding-runtime`：采纳规则最小化、`common/platform_delta/project_action` 层级职责、共同语义与平台差异分离、native probe 和 wrapper 启发；把固定结构/体量预算适配为 profile；拒绝恢复已退役的中央 registry/sync/audit runtime。精确 revision、逐项 disposition 和证据见 [规则治理参考采纳矩阵](rule-governance-adoption-matrix.md)。
+
+## 12. 决策与待确认
+
+本 PRD 已采用以下默认决策，不阻塞 Phase 0：
+
+- `DEC-PROD-001`：产品定位为 local capability curator + rule advisor。
+- `DEC-PROD-002`：规则永久默认 advisory-first；显式 apply 是唯一写入入口。
+- `DEC-PROD-003`：PowerShell 模块化单体继续作为主技术方向。
+- `DEC-PROD-004`：不立即改仓库名；只有规则/plugin 两条新主路径经过真实使用验收后再评估品牌更名。
+- `DEC-PROD-005`：未来 Phase 在进入实施前各自生成详细 task manifest，避免提前维护大量猜测任务。
+- `DEC-PROD-006`：Rules Advisor 使用责任覆盖模型，不建立通用规则 AST、重型 policy engine 或强制统一模板。
+
+以下选择有意延迟到有真实代码/宿主证据的任务，不允许 AI 在更早任务中猜定：
+
+- `VAL-P0-003`：schema dialect、validator 实现和 observe/enforce 切换，以当前 `skills.json` 变体和本机可用 runtime 为依据，不为验证器额外引入常驻服务。
+- `VAL-P0-005`：首个 Infrastructure seam 必须由至少两个真实 caller 和 characterization tests 选出，不按目标目录图预建空模块。
+- `VAL-P0-006`：MCP plan 的最终 CLI spelling 先读取当前 parser/alias tests；行为合同先于命令拼写。
+- `VAL-P0-007`：host matrix 的 affirmative capability 必须由当前官方文档、help/schema 或 native probe 支持；未知值保持 unknown/platform_na。
+- `VAL-P1-MET`：semantic finding precision 和性能阈值要先用代表仓建立 baseline，再决定 gate 阈值。

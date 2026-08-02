@@ -295,6 +295,83 @@ function Get-CfgArrayField($cfg, [string]$name, [bool]$required, [System.Collect
     $errors.Add(("skills.json 的 {0} 必须是数组" -f $name)) | Out-Null
     return @()
 }
+$script:SkillsConfigSchemaVersion = 1
+function Test-CfgIntegerValue($value) {
+    return ($value -is [byte] -or $value -is [sbyte] -or
+        $value -is [int16] -or $value -is [uint16] -or
+        $value -is [int32] -or $value -is [uint32] -or
+        $value -is [int64] -or $value -is [uint64])
+}
+function Get-CfgSchemaVersionInfo($cfg) {
+    $errors = New-Object System.Collections.Generic.List[string]
+    $observations = New-Object System.Collections.Generic.List[object]
+    $declared = $false
+    $version = $script:SkillsConfigSchemaVersion
+
+    if ($null -ne $cfg -and (Test-CfgObjectProperty $cfg "schema_version")) {
+        $declared = $true
+        $rawVersion = Get-CfgObjectProperty $cfg "schema_version"
+        if (-not (Test-CfgIntegerValue $rawVersion)) {
+            $errors.Add("schema_version 必须是整数") | Out-Null
+            $version = $null
+        }
+        else {
+            $version = [int64]$rawVersion
+            if ($version -ne $script:SkillsConfigSchemaVersion) {
+                $errors.Add(("不支持的 schema_version；当前仅支持 {0}" -f $script:SkillsConfigSchemaVersion)) | Out-Null
+            }
+        }
+    }
+    else {
+        $observations.Add([pscustomobject]@{
+            code = "legacy_schema_version_missing"
+            path = "$.schema_version"
+            message = "Missing schema_version is read as legacy v1; add schema_version only through an explicit migration."
+        }) | Out-Null
+    }
+
+    return [pscustomobject]@{
+        current_version = $script:SkillsConfigSchemaVersion
+        effective_version = $version
+        declared = $declared
+        source = if ($declared) { "declared" } else { "legacy_default" }
+        errors = @($errors.ToArray())
+        observations = @($observations.ToArray())
+    }
+}
+function Get-CfgVersionedContractReport($cfg) {
+    $versionInfo = Get-CfgSchemaVersionInfo $cfg
+    $errors = New-Object System.Collections.Generic.List[string]
+    foreach ($errorText in @($versionInfo.errors)) { $errors.Add([string]$errorText) | Out-Null }
+
+    if ($versionInfo.declared -and $versionInfo.errors.Count -eq 0) {
+        foreach ($fieldName in @("vendors", "targets", "mappings", "imports", "mcp_servers", "mcp_targets")) {
+            if ((Test-CfgObjectProperty $cfg $fieldName) -and -not (Assert-IsArray (Get-CfgObjectProperty $cfg $fieldName))) {
+                $errors.Add(("schema v1 要求 {0} 为数组" -f $fieldName)) | Out-Null
+            }
+        }
+        if ((Test-CfgObjectProperty $cfg "update_force") -and (Get-CfgObjectProperty $cfg "update_force") -isnot [bool]) {
+            $errors.Add("schema v1 要求 update_force 为布尔值") | Out-Null
+        }
+        if ((Test-CfgObjectProperty $cfg "sync_mode") -and (Get-CfgObjectProperty $cfg "sync_mode") -isnot [string]) {
+            $errors.Add("schema v1 要求 sync_mode 为字符串") | Out-Null
+        }
+        foreach ($fieldName in @("skill_projection", "mcp_profiles")) {
+            $fieldValue = Get-CfgObjectProperty $cfg $fieldName
+            if ($null -ne $fieldValue -and $fieldValue -isnot [pscustomobject] -and $fieldValue -isnot [System.Collections.IDictionary]) {
+                $errors.Add(("schema v1 要求 {0} 为对象" -f $fieldName)) | Out-Null
+            }
+        }
+    }
+
+    foreach ($errorText in @(Get-CfgContractErrors $cfg)) { $errors.Add([string]$errorText) | Out-Null }
+    return [pscustomobject]@{
+        schema = $versionInfo
+        valid = ($errors.Count -eq 0)
+        errors = @($errors.ToArray())
+        observations = @($versionInfo.observations)
+    }
+}
 function Get-CfgContractErrors($cfg) {
     $errors = New-Object System.Collections.Generic.List[string]
     if ($null -eq $cfg) {
@@ -1056,7 +1133,7 @@ function SaveCfg($cfg) {
         $oldRaw = if (Test-Path -LiteralPath $CfgPath) { Get-ContentUtf8 $CfgPath } else { "" }
         Write-CfgChangeSummary $oldRaw $cfg
         $json = $cfg | ConvertTo-Json -Depth 50
-        Set-ContentUtf8 $CfgPath $json
+        Write-Utf8FileAtomic -Path $CfgPath -Content $json
     }
 }
 function SaveCfgSafe($cfg, [string]$rawBackup) {

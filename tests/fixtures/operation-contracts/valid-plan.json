@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "operation_id": "op-fixture-001",
+  "domain": "mcp",
+  "mode": "dry_run",
+  "created_at": "2026-08-01T08:00:00Z",
+  "source_revision": "abc123",
+  "targets": [{
+    "target_ref": "codex:user-mcp",
+    "path": "C:\\Users\\fixture\\.codex\\config.toml",
+    "before_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "desired_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "owner": "codex-mcp-adapter"
+  }],
+  "actions": [{
+    "action_id": "act-0123456789abcdef",
+    "type": "update",
+    "target_ref": "codex:user-mcp",
+    "summary": "Update managed MCP block",
+    "risk": "medium"
+  }],
+  "preconditions": [],
+  "verification": [],
+  "rollback": []
+}

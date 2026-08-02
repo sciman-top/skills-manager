@@ -2432,154 +2432,150 @@ function 卸载MCP([string[]]$tokens = @()) {
     同步MCP
 }
 
+function Load-McpPlanConfigReadOnly {
+    Need (Test-Path -LiteralPath $CfgPath -PathType Leaf) "缺少配置文件：$CfgPath"
+    $raw = Get-ContentUtf8 $CfgPath
+    $clean = $raw -replace '(?m)^\s*//.*', ''
+    try { $cfg = $clean | ConvertFrom-Json }
+    catch { throw ("skills.json 解析失败：{0}" -f $_.Exception.Message) }
+    $contract = Get-CfgVersionedContractReport $cfg
+    Need (@($contract.errors).Count -eq 0) "skills.json 未通过只读合同校验，plan 不会自动修复配置。"
+    $cfg = Normalize-Cfg $cfg
+    Assert-Cfg $cfg
+    return [pscustomobject]@{ cfg = $cfg; raw = $raw }
+}
+
+function Parse-McpSyncPlanOptions([string[]]$Tokens = @()) {
+    $json = $false
+    $outPath = ''
+    $plan = $false
+    for ($i = 0; $i -lt @($Tokens).Count; $i++) {
+        $token = ([string]$Tokens[$i]).Trim()
+        switch -Regex ($token) {
+            '^(?i)--plan$' { $plan = $true; continue }
+            '^(?i)--json$' { $json = $true; continue }
+            '^(?i)--out=(.+)$' { $outPath = [string]$Matches[1]; continue }
+            '^(?i)--out$' {
+                Need (($i + 1) -lt @($Tokens).Count) '--out 需要路径值。'
+                $i++
+                $outPath = [string]$Tokens[$i]
+                Need (-not [string]::IsNullOrWhiteSpace($outPath)) '--out 需要非空路径值。'
+                continue
+            }
+            '^$' { continue }
+            default { throw ('未知 MCP plan 参数：{0}' -f $token) }
+        }
+    }
+    return [pscustomobject]@{ plan = $plan; json = $json; out_path = $outPath }
+}
+
+function Get-McpExistingStates([object[]]$Specs) {
+    $states = @{}
+    foreach ($spec in @($Specs)) {
+        $path = [string]$spec.path
+        $exists = Test-Path -LiteralPath $path -PathType Leaf
+        $states[(Normalize-OperationPathKey $path)] = [pscustomobject]@{
+            exists = $exists
+            content = if ($exists) { Get-Content -LiteralPath $path -Raw -Encoding UTF8 } else { '' }
+        }
+    }
+    return $states
+}
+
+function Get-McpSyncPlanningContext([switch]$ReadOnlyConfig) {
+    $loaded = if ($ReadOnlyConfig) { Load-McpPlanConfigReadOnly } else { [pscustomobject]@{ cfg = (LoadCfg); raw = (Get-ContentUtf8 $CfgPath) } }
+    $cfg = $loaded.cfg
+    $servers = @(Resolve-McpProfileServers $cfg)
+    $activeServers = @(Get-ActiveMcpServers $servers)
+    $profileDisabledNames = @($servers | Where-Object { $_.PSObject.Properties.Match('enabled').Count -gt 0 -and -not [bool]$_.enabled } | ForEach-Object { [string]$_.name })
+    $pruneNames = @(Get-McpServersToPrune $servers)
+    $roots = @(Resolve-McpTargetRootsFromCfg $cfg)
+    Need ($roots.Count -gt 0) "未找到可同步的 MCP 目标目录（请检查 targets/mcp_targets 配置）。"
+    $candidatePaths = @(Get-McpTargetCandidatePaths $cfg)
+    $specs = @(Get-McpSyncManagedTargetSpecs -Roots $roots -CandidatePaths $candidatePaths -RepoRoot $script:Root)
+    $existingStates = Get-McpExistingStates $specs
+    $desiredState = @(New-McpSyncDesiredState -Specs $specs -Servers $servers -ActiveServers $activeServers -ProfileDisabledNames $profileDisabledNames -PruneNames $pruneNames -ExistingStates $existingStates)
+    return [pscustomobject]@{
+        cfg = $cfg
+        config_raw = [string]$loaded.raw
+        config_revision = Get-OperationSha256 ([string]$loaded.raw)
+        servers = $servers
+        active_servers = $activeServers
+        profile_disabled_names = $profileDisabledNames
+        prune_names = $pruneNames
+        roots = $roots
+        desired_state = $desiredState
+    }
+}
+
+function Invoke-McpSyncPlan([switch]$Json, [string]$OutPath = '') {
+    $context = Get-McpSyncPlanningContext -ReadOnlyConfig
+    $createdAt = (Get-Item -LiteralPath $CfgPath).LastWriteTimeUtc.ToString('o')
+    $result = New-McpSyncOperationPlanResult -DesiredState $context.desired_state -CreatedAt $createdAt -SourceRevision $context.config_revision
+    $validation = Test-OperationPlanContract $result.operation_plan
+    Need ([bool]$validation.pass) ("MCP plan contract validation failed: {0}" -f (@($validation.findings.code) -join ', '))
+    $serialized = $result | ConvertTo-Json -Depth 50
+
+    if (-not [string]::IsNullOrWhiteSpace($OutPath)) {
+        $resolvedOut = Resolve-TargetDir $OutPath
+        $parent = Split-Path $resolvedOut -Parent
+        if (-not [string]::IsNullOrWhiteSpace($parent)) { EnsureDir $parent }
+        Set-ContentUtf8 $resolvedOut $serialized
+    }
+    if ($Json) {
+        Write-Output $serialized
+        return
+    }
+    Write-Host ("MCP plan：targets={0}, changed={1}, unchanged={2}, native=0" -f $result.summary.managed_target_count, $result.summary.changed_target_count, $result.summary.unchanged_target_count)
+    foreach ($action in @($result.operation_plan.actions)) {
+        $target = @($result.operation_plan.targets | Where-Object target_ref -eq $action.target_ref | Select-Object -First 1)
+        Write-Host ("- {0}: {1}" -f $action.type, [string]$target[0].path)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($OutPath)) { Write-Host ("Plan JSON：{0}" -f (Resolve-TargetDir $OutPath)) }
+}
+
+function Write-McpDesiredTarget($target) {
+    $path = [string]$target.path
+    $parent = Split-Path $path -Parent
+    if (-not [string]::IsNullOrWhiteSpace($parent)) { EnsureDir $parent }
+    if ([string]$target.kind -eq 'codex_toml') { Ensure-CodexMcpNodeCacheWrapper ([string]$target.root) }
+    Set-ContentUtf8 $path ([string]$target.desired_content)
+    switch ([string]$target.kind) {
+        'gemini_settings' { Log ("已同步 Gemini MCP 配置：{0}" -f $path) }
+        'gemini_antigravity_settings' { Log ("已同步 Gemini Antigravity MCP 配置：{0}" -f $path) }
+        'codex_toml' { Log ("已同步 Codex MCP 配置：{0}" -f $path) }
+        'trae_json' { Log ("已同步 Trae MCP 配置：{0}" -f $path) }
+        'trae_project_json' { Log ("已同步项目级 Trae MCP 配置：{0}" -f $path) }
+        default { Log ("已同步 MCP 配置：{0}" -f $path) }
+    }
+}
+
 function 同步MCP {
     Invoke-WithMetric "sync_mcp" {
         $script:SkipNativeMcpForSession = $false
-        $cfg = LoadCfg
-        $servers = @(Resolve-McpProfileServers $cfg)
-        $activeServers = @(Get-ActiveMcpServers $servers)
-        $profileDisabledNames = @($servers | Where-Object { $_.PSObject.Properties.Match("enabled").Count -gt 0 -and -not [bool]$_.enabled } | ForEach-Object { [string]$_.name })
-        $pruneNames = @(Get-McpServersToPrune $servers)
+        $context = Get-McpSyncPlanningContext
         if (-not $DryRun) {
-            Ensure-PostgresMcpEnvironment $activeServers
-            Ensure-GhAuthForGithubMcp $activeServers
+            Ensure-PostgresMcpEnvironment $context.active_servers
+            Ensure-GhAuthForGithubMcp $context.active_servers
         }
 
-        $roots = Resolve-McpTargetRootsFromCfg $cfg
-        Need ($roots.Count -gt 0) "未找到可同步的 MCP 目标目录（请检查 targets/mcp_targets 配置）。"
-        $candidatePaths = Get-McpTargetCandidatePaths $cfg
-
-        $written = @()
-        foreach ($targetRoot in $roots) {
-            $file = Join-Path $targetRoot ".mcp.json"
-            $targetRootLeaf = (Split-Path ([string]$targetRoot) -Leaf)
-            if ($DryRun) {
-                Write-Host ("DRYRUN：将写入 MCP 配置 -> {0}" -f $file)
-                $written += $file
-                continue
-            }
-            EnsureDir $targetRoot
-            $existing = if (Test-Path $file) { Get-Content -Raw -Path $file } else { "" }
-            $payloadObj = Build-GenericMcpPayload $existing $activeServers
-            $payloadObj = Remove-McpServersFromPayload $payloadObj @($pruneNames + $profileDisabledNames)
-            $json = $payloadObj | ConvertTo-Json -Depth 100
-            Set-ContentUtf8 $file $json
-            $written += $file
-            Log ("已同步 MCP 配置：{0}" -f $file)
+        foreach ($target in @($context.desired_state)) {
+            if ($DryRun) { Write-Host ("DRYRUN：将写入 MCP 配置 -> {0}" -f [string]$target.path) }
+            else { Write-McpDesiredTarget $target }
         }
 
-        $geminiRoots = @($roots | Where-Object { (Split-Path ([string]$_) -Leaf).Equals(".gemini", [System.StringComparison]::OrdinalIgnoreCase) })
-        foreach ($geminiRoot in $geminiRoots) {
-            $settingsPath = Join-Path $geminiRoot "settings.json"
-            $existing = if (Test-Path $settingsPath) { Get-Content -Raw -Path $settingsPath } else { "" }
-            $payloadObj = Build-GeminiSettingsPayload $existing $activeServers
-            $payloadObj = Remove-McpServersFromPayload $payloadObj $profileDisabledNames
-            $content = $payloadObj | ConvertTo-Json -Depth 100
-            if ($DryRun) {
-                Write-Host ("DRYRUN：将写入 Gemini 配置 -> {0}" -f $settingsPath)
-                $written += $settingsPath
-            }
-            else {
-                EnsureDir $geminiRoot
-                Set-ContentUtf8 $settingsPath $content
-                $written += $settingsPath
-                Log ("已同步 Gemini MCP 配置：{0}" -f $settingsPath)
-            }
-        }
-
-        $antigravityRoots = Resolve-GeminiAntigravityRootsFromCandidates $candidatePaths
-        foreach ($agRoot in $antigravityRoots) {
-            $settingsPath = Join-Path $agRoot "settings.json"
-            $existing = if (Test-Path $settingsPath) { Get-Content -Raw -Path $settingsPath } else { "" }
-            $payloadObj = Build-GeminiSettingsPayload $existing $activeServers
-            $payloadObj = Remove-McpServersFromPayload $payloadObj $profileDisabledNames
-            $content = $payloadObj | ConvertTo-Json -Depth 100
-            if ($DryRun) {
-                Write-Host ("DRYRUN：将写入 Gemini Antigravity 配置 -> {0}" -f $settingsPath)
-                $written += $settingsPath
-            }
-            else {
-                EnsureDir $agRoot
-                Set-ContentUtf8 $settingsPath $content
-                $written += $settingsPath
-                Log ("已同步 Gemini Antigravity MCP 配置：{0}" -f $settingsPath)
-            }
-        }
-
-        $codexRoots = @($roots | Where-Object { (Split-Path ([string]$_) -Leaf).Equals(".codex", [System.StringComparison]::OrdinalIgnoreCase) })
-        foreach ($codexRoot in $codexRoots) {
-            $cfgPath = Join-Path $codexRoot "config.toml"
-            $existing = if (Test-Path $cfgPath) { Get-Content -Raw -Path $cfgPath } else { "" }
-            $toml = Build-CodexConfigToml $existing $servers
-            if ($DryRun) {
-                Write-Host ("DRYRUN：将写入 Codex MCP 配置 -> {0}" -f $cfgPath)
-                $written += $cfgPath
-            }
-            else {
-                EnsureDir $codexRoot
-                Ensure-CodexMcpNodeCacheWrapper $codexRoot
-                Set-ContentUtf8 $cfgPath $toml
-                $written += $cfgPath
-                Log ("已同步 Codex MCP 配置：{0}" -f $cfgPath)
-            }
-        }
-
-        $traeRoots = @($roots | Where-Object { (Split-Path ([string]$_) -Leaf).Equals(".trae", [System.StringComparison]::OrdinalIgnoreCase) })
-        foreach ($traeRoot in $traeRoots) {
-            $traePath = Join-Path $traeRoot "mcp.json"
-            if ($DryRun) {
-                Write-Host ("DRYRUN：将写入 Trae MCP 配置 -> {0}" -f $traePath)
-                $written += $traePath
-            }
-            else {
-                EnsureDir $traeRoot
-                $existing = if (Test-Path $traePath) { Get-Content -Raw -Path $traePath } else { "" }
-                $payloadObj = Build-GenericMcpPayload $existing $activeServers
-                $payloadObj = Remove-McpServersFromPayload $payloadObj $profileDisabledNames
-                $json = $payloadObj | ConvertTo-Json -Depth 100
-                Set-ContentUtf8 $traePath $json
-                $written += $traePath
-                Log ("已同步 Trae MCP 配置：{0}" -f $traePath)
-            }
-        }
-
-        if ($traeRoots.Count -gt 0) {
-            $projectTraePath = Get-TraeProjectMcpConfigPath $script:Root
-            if ($DryRun) {
-                Write-Host ("DRYRUN：将写入项目级 Trae MCP 配置 -> {0}" -f $projectTraePath)
-                $written += $projectTraePath
-            }
-            else {
-                $projectTraeDir = Split-Path $projectTraePath -Parent
-                EnsureDir $projectTraeDir
-                $existing = if (Test-Path $projectTraePath) { Get-Content -Raw -Path $projectTraePath } else { "" }
-                $payloadObj = Build-GenericMcpPayload $existing $activeServers
-                $payloadObj = Remove-McpServersFromPayload $payloadObj $profileDisabledNames
-                $json = $payloadObj | ConvertTo-Json -Depth 100
-                Set-ContentUtf8 $projectTraePath $json
-                $written += $projectTraePath
-                Log ("已同步项目级 Trae MCP 配置：{0}" -f $projectTraePath)
-            }
-        }
-
-        Write-Host ("已同步 MCP 服务配置到 {0} 个目标。" -f $written.Count)
-        foreach ($pruneName in $pruneNames) {
-            Invoke-NativeMcpCleanup $pruneName
-        }
-        Invoke-NativeMcpSync $activeServers
+        Write-Host ("已同步 MCP 服务配置到 {0} 个目标。" -f @($context.desired_state).Count)
+        foreach ($pruneName in @($context.prune_names)) { Invoke-NativeMcpCleanup $pruneName }
+        Invoke-NativeMcpSync $context.active_servers
         if (-not $DryRun) {
-            $attemptsEnv = $env:SKILLS_MCP_VERIFY_ATTEMPTS
-            $intervalEnv = $env:SKILLS_MCP_VERIFY_INTERVAL_SECONDS
             $attemptsParsed = 0
             $intervalParsed = 0
-            $attempts = if ([int]::TryParse([string]$attemptsEnv, [ref]$attemptsParsed)) { $attemptsParsed } else { 6 }
-            $intervalSeconds = if ([int]::TryParse([string]$intervalEnv, [ref]$intervalParsed)) { $intervalParsed } else { 3 }
+            $attempts = if ([int]::TryParse([string]$env:SKILLS_MCP_VERIFY_ATTEMPTS, [ref]$attemptsParsed)) { $attemptsParsed } else { 6 }
+            $intervalSeconds = if ([int]::TryParse([string]$env:SKILLS_MCP_VERIFY_INTERVAL_SECONDS, [ref]$intervalParsed)) { $intervalParsed } else { 3 }
             if ($attempts -lt 1) { $attempts = 1 }
             if ($intervalSeconds -lt 1) { $intervalSeconds = 1 }
-            Verify-McpAcrossCliWithRetry $roots $attempts $intervalSeconds
+            Verify-McpAcrossCliWithRetry $context.roots $attempts $intervalSeconds
         }
-        if ($servers.Count -eq 0) {
-            Write-Host "提示：当前 mcp_servers 为空，已将各目标写为空配置。"
-        }
+        if (@($context.servers).Count -eq 0) { Write-Host "提示：当前 mcp_servers 为空，已将各目标写为空配置。" }
     } @{ command = "同步MCP" } -NoHost
 }

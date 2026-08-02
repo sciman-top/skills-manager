@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skills-manager.local/schemas/rule-patch-plan-v1.json",
+  "type": "object",
+  "required": ["schema_version", "patch_id", "operation_id", "mode", "target", "source", "diff", "desired_text", "risk", "preconditions", "verification", "rollback", "apply"],
+  "properties": {
+    "schema_version": {"const": 1}, "patch_id": {"pattern": "^patch-[a-f0-9]{16}$"}, "operation_id": {"type": "string"}, "mode": {"const": "plan"},
+    "target": {"type": "object", "required": ["target_ref", "path", "authorized_root", "before_hash", "desired_hash", "owner"]},
+    "source": {"type": "object", "required": ["finding_ids", "evidence_refs", "desired_source"], "properties": {"finding_ids": {"type": "array"}, "evidence_refs": {"type": "array"}, "desired_source": {"enum": ["explicit_user_input", "reviewed_file"]}}},
+    "diff": {"type": "object", "required": ["format", "content", "has_changes"]}, "desired_text": {"type": "string"}, "risk": {"enum": ["low", "medium", "high"]},
+    "preconditions": {"type": "array"}, "verification": {"type": "array"}, "rollback": {"type": "array"},
+    "apply": {"type": "object", "required": ["required_token", "fixture_only"], "properties": {"required_token": {"type": "string"}, "fixture_only": {"const": true}}}
+  }
+}

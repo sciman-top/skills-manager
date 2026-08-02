@@ -1,63 +1,45 @@
-# Implementation Plan: Skill Projection Performance
+# Implementation Plan: skills-manager vNext Phase 2
 
-## Overview
+**program_id**: `skills-manager-vnext`
+**current_phase**: `P2`
+**task_truth**: `tasks/skills-manager-vnext-phase2.tasks.json`
+**status**: complete
 
-Add fail-safe package-hash reuse for managed Agent skills, split misleading build metrics, and expose projection phase timings while preserving manifest hashes and all existing fallback behavior.
+## 1. Goal
 
-## Architecture Decisions
+实现 fixture-only transactional explicit apply：plan -> diff -> freshness/root/token guard -> atomic apply -> receipt -> exact rollback；真实 global/project/host 写入保持禁用。
 
-- Reuse hashes only under the four-part validity contract: verified build signature, managed Junction target, package fingerprint, and `SKILL.md` content hash.
-- Store additive cache metadata in the ignored projection manifest; do not introduce a second persistent cache file.
-- Keep full hashing as the universal fallback and for all external/system skills.
-- Preserve historical Doctor metrics while emitting distinct new build modes.
+## 2. Execution contract
 
-## Task List
+- 当前 task 只以 P2 manifest 为真源；P0/P1 作为历史 manifest/evidence 保留。
+- 每个 slice 按 `build -> targeted test -> contract/invariant -> full` 收口。
+- planner 必须 zero-write；executor 仅允许 TestDrive/fixture root，真实仓 apply fail-closed。
+- semantic recommendation 不得生成 desired content 或授权 apply。
+- fault injection 只通过测试参数，不提供 production bypass。
 
-### Phase 1: Contracts
+## 3. Ordered work
 
-- [x] Add failing projection cache validity and hash-equivalence tests.
-- [x] Add failing Doctor/build metric separation tests.
+| Order | Task | Slice | Exit checkpoint |
+| ---: | --- | --- | --- |
+| 1 | `SMV-P2-001` | planning truth | P2=7 tasks, historical routing, write boundary |
+| 2 | `SMV-P2-002` | RulePatchPlan | deterministic plan/diff/schema/sensitive guard |
+| 3 | `SMV-P2-003` | apply guards | root/reparse/freshness/token/fixture-only |
+| 4 | `SMV-P2-004` | executor | atomic replace/receipt/exact rollback |
+| 5 | `SMV-P2-005` | fault recovery | stage/replace/receipt/concurrency/cleanup |
+| 6 | `SMV-P2-006` | CLI + MCP adapter | fixture-only JSON CLI, MCP parity |
+| 7 | `SMV-P2-007` | acceptance | fixture matrix, real hash guard, full gate |
 
-### Checkpoint: Contracts
+## 4. Verification order
 
-- [x] Targeted tests fail for the intended missing behavior.
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-vnext-planning.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File skills.ps1 doctor --strict --threshold-ms 8000
+python scripts/verify-dependency-baseline.py --target-repo-root . --require-target-repo-baseline
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree
+```
 
-### Phase 2: Package Hash Reuse
+## 5. Phase completion rule
 
-- [x] Load eligible cache context from the previous manifest.
-- [x] Resolve managed Junction ownership and apply fail-safe cache lookup.
-- [x] Persist additive cache metadata after successful projection.
-- [x] Emit package hash and projection phase metrics.
-
-### Checkpoint: Projection
-
-- [x] Build succeeds and SkillProjection tests pass.
-- [x] Cached and uncached package hashes are identical.
-
-### Phase 3: Metric Semantics
-
-- [x] Emit `build_agent_cache_hit` and `build_agent_full` separately.
-- [x] Add thresholds and Doctor test coverage for the new metrics.
-
-### Checkpoint: Metrics
-
-- [x] BuildCache and DoctorPerf tests pass.
-
-### Phase 4: Live Verification
-
-- [x] Run cold and hot `构建生效` samples.
-- [x] Verify manifest, Codex provider tables, and bare `codex mcp list`.
-- [x] Run the complete project gate and update change evidence.
-
-## Risks and Mitigations
-
-| Risk | Impact | Mitigation |
-|---|---|---|
-| Stale package hash | High | Require all validity checks; full hash on any mismatch. |
-| Cache schema drift | Medium | Version cache metadata and treat unknown versions as misses. |
-| Manifest contract change | Medium | Add fields only; preserve schema and existing hashes. |
-| Dirty worktree overlap | High | Touch only listed source/tests/generated/evidence files and preserve all import gitlinks. |
-
-## Open Questions
-
-None. The user approved autonomous execution of the recommended design.
+7 个 P2 task 已全部 done，fault/concurrency/sensitive fixtures、真实规则/config hash guard 和 full gate 已通过。当前最高仅 `repo_verified`；不得自动进入 P3，不得把 fixture apply 写成 host/live acceptance。

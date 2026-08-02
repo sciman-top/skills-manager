@@ -1,0 +1,25 @@
+{
+  "schema_version": 2,
+  "operation_id": "op-invalid",
+  "domain": "database",
+  "mode": "execute",
+  "created_at": "not-a-time",
+  "source_revision": null,
+  "targets": [{
+    "target_ref": "unknown",
+    "path": "C:\\outside\\target.txt",
+    "before_hash": "not-a-hash",
+    "desired_hash": "also-not-a-hash",
+    "owner": "adapter"
+  }],
+  "actions": [{
+    "action_id": "bad-id",
+    "type": "write-everything",
+    "target_ref": "missing",
+    "summary": "Authorization: Bearer fixture-secret",
+    "risk": "critical"
+  }],
+  "preconditions": {},
+  "verification": [],
+  "rollback": []
+}

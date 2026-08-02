@@ -80,7 +80,7 @@ Keep these as the default, high-signal, long-lived reference set. They define pl
 | Repo / Source | Why it belongs in core | Refresh | Relation to `skills.json` |
 | --- | --- | --- | --- |
 | `openai/codex` | Codex runtime, `AGENTS.md`, skills, config, and workflow semantics | Weekly or before Codex workflow/governance changes | Not a current runtime source repo; add as reference shelf |
-| `openai/skills` | First-party OpenAI skill examples already used by runtime mappings | Weekly or before skill audit policy changes | Keep in `skills.json`; also belongs in reference shelf |
+| `openai/plugins` | Current first-party plugin, skill, MCP and packaging examples | Weekly or before plugin/skill governance changes | Current official reference; do not copy its public directory into runtime truth |
 | `anthropics/skills` | First-party Claude skill structure and strong cross-tool examples | Weekly or before skill packaging changes | Keep in `skills.json`; also belongs in reference shelf |
 | `google-gemini/gemini-cli` | Official Gemini CLI rule-loading and `GEMINI.md` semantics | Weekly or before Gemini wrapper changes | Not a current runtime source repo; add as reference shelf |
 | `modelcontextprotocol/modelcontextprotocol` | MCP spec source of truth | Weekly or before MCP governance changes | Not a current runtime source repo; add as reference shelf |
@@ -89,12 +89,17 @@ Keep these as the default, high-signal, long-lived reference set. They define pl
 
 Related official docs that should be treated as first-party truth even without local clone:
 
-- [OpenAI AGENTS.md Guide](https://developers.openai.com/codex/guides/agents-md)
-- [OpenAI Codex Skills](https://developers.openai.com/codex/skills)
+- [OpenAI AGENTS.md Guide](https://learn.chatgpt.com/docs/agent-configuration/agents-md)
+- [OpenAI Plugins](https://learn.chatgpt.com/docs/plugins)
+- [OpenAI Plugin architecture](https://developers.openai.com/plugins/concepts/plugins)
 - [Anthropic Claude Code Skills](https://docs.anthropic.com/en/docs/claude-code/skills)
 - [Gemini CLI GEMINI.md](https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/gemini-md.md)
 - [Model Context Protocol Specification](https://modelcontextprotocol.io/specification/2025-11-25)
 - [Agent Skills Best Practices](https://agentskills.io/skill-creators/best-practices)
+
+### 5.1 Historical compatibility
+
+`openai/skills` is deprecated upstream in favor of `openai/plugins`. Keep its existing clone and any still-used `skills.json` mapping intact until a separate runtime migration proves replacements. It is not in `default_refresh_set`, must be refreshed explicitly with `-Tier historical`, and must not be recommended as the current official source.
 
 ## 6. Secondary tier
 
@@ -167,12 +172,14 @@ These sources are valuable for search and candidate generation, but they should 
 If a dedicated shelf is created or refreshed, add these first:
 
 1. `openai/codex`
-2. `google-gemini/gemini-cli`
-3. `modelcontextprotocol/modelcontextprotocol`
-4. `modelcontextprotocol/registry`
-5. `openai/skills` if it is not already represented outside runtime cache
+2. `openai/plugins`
+3. `google-gemini/gemini-cli`
+4. `modelcontextprotocol/modelcontextprotocol`
+5. `modelcontextprotocol/registry`
 6. `anthropics/skills` if it is not already represented outside runtime cache
 7. `modelcontextprotocol/servers` if it is not already represented outside runtime cache
+
+`openai/skills` remains historical compatibility evidence only; do not bootstrap it as a current source.
 
 ### 9.2 Keep, but do not widen by default
 

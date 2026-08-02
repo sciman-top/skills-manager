@@ -134,6 +134,8 @@ function Normalize-TierNames {
                 "secondary" { "secondary"; break }
                 "conditional" { "conditional-not-cloned"; break }
                 "conditional-not-cloned" { "conditional-not-cloned"; break }
+                "historical" { "historical-compatibility"; break }
+                "historical-compatibility" { "historical-compatibility"; break }
                 "all" { "all"; break }
                 default { $segment.Trim() }
             }
@@ -266,6 +268,18 @@ else {
 }
 $shouldUpdateLatest = ($repoNamesLabel -eq "core-default")
 $manifestRepoIndex = Get-ManifestRepoIndex -Manifest $manifest
+
+if ($shouldUpdateLatest) {
+    foreach ($repoName in $RepoNames) {
+        if (-not $manifestRepoIndex.ContainsKey($repoName)) {
+            throw "default_refresh_set references unknown repo: $repoName"
+        }
+        $defaultEntry = $manifestRepoIndex[$repoName]
+        if ([string]$defaultEntry.status -ne "active") {
+            throw "default_refresh_set can contain only active repos: $repoName status=$($defaultEntry.status)"
+        }
+    }
+}
 
 $timestamp = New-UtcTimestamp
 $reportPath = Join-Path $OutputDirectory ("reference-refresh-{0}.md" -f $timestamp)

@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "codex": {"global_candidates": ["AGENTS.override.md", "AGENTS.md"], "project_candidates": ["AGENTS.override.md", "AGENTS.md"], "default_max_combined_bytes": 32768, "precedence_evidence": "official_manual"},
+    "claude": {"global_candidates": ["CLAUDE.md"], "project_candidates": ["CLAUDE.md"], "default_max_combined_bytes": null, "precedence_evidence": "unknown_without_host_probe"}
+  }
+}

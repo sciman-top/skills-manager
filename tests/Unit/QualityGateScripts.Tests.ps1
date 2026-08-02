@@ -30,6 +30,58 @@ Describe "Quality gate scripts" {
         $raw | Should Match "verify-skill-routing\.ps1"
     }
 
+    It "Runs the vNext planning contract after dependency baseline and before doctor contract" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $scriptPath = Join-Path $root "scripts\quality\run-local-quality-gates.ps1"
+        $raw = Get-Content -LiteralPath $scriptPath -Raw
+
+        $dependencyBaselineIndex = $raw.IndexOf("dependency-baseline")
+        $planningContractIndex = $raw.IndexOf("planning-contract")
+        $doctorContractIndex = $raw.IndexOf("doctor-json-contract")
+
+        $dependencyBaselineIndex -ge 0 | Should Be $true
+        $planningContractIndex -ge 0 | Should Be $true
+        $doctorContractIndex -ge 0 | Should Be $true
+        $dependencyBaselineIndex -lt $planningContractIndex | Should Be $true
+        $planningContractIndex -lt $doctorContractIndex | Should Be $true
+        $raw | Should Match "verify-vnext-planning\.ps1"
+    }
+
+    It "Runs the skills config contract after dependency baseline and before planning" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $scriptPath = Join-Path $root "scripts\quality\run-local-quality-gates.ps1"
+        $raw = Get-Content -LiteralPath $scriptPath -Raw
+
+        $dependencyBaselineIndex = $raw.IndexOf("dependency-baseline")
+        $configContractIndex = $raw.IndexOf("skills-config-contract")
+        $planningContractIndex = $raw.IndexOf("planning-contract")
+
+        $dependencyBaselineIndex -ge 0 | Should Be $true
+        $configContractIndex -ge 0 | Should Be $true
+        $planningContractIndex -ge 0 | Should Be $true
+        $dependencyBaselineIndex -lt $configContractIndex | Should Be $true
+        $configContractIndex -lt $planningContractIndex | Should Be $true
+        $raw | Should Match "verify-skills-config\.ps1"
+        $raw | Should Match "-Mode enforce"
+    }
+
+    It "Runs the host capability contract after config and before planning" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $scriptPath = Join-Path $root "scripts\quality\run-local-quality-gates.ps1"
+        $raw = Get-Content -LiteralPath $scriptPath -Raw
+
+        $configContractIndex = $raw.IndexOf("skills-config-contract")
+        $hostContractIndex = $raw.IndexOf("host-capability-contract")
+        $planningContractIndex = $raw.IndexOf("planning-contract")
+
+        $configContractIndex -ge 0 | Should Be $true
+        $hostContractIndex -ge 0 | Should Be $true
+        $planningContractIndex -ge 0 | Should Be $true
+        $configContractIndex -lt $hostContractIndex | Should Be $true
+        $hostContractIndex -lt $planningContractIndex | Should Be $true
+        $raw | Should Match "verify-host-capability-matrix\.ps1"
+    }
+
     It "Documents the standalone skill integrity verifier in CLI help" {
         $root = Join-Path $PSScriptRoot "..\.."
         $helpSourcePath = Join-Path $root "src\Commands\Utils.ps1"

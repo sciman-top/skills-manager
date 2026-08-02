@@ -2927,3 +2927,48 @@ command = "npx"
         }
     }
 }
+
+Describe "Reference shelf governance" {
+    $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
+    $manifestPath = Join-Path $repoRoot "references\reference-shelf.manifest.json"
+    $refreshScript = Join-Path $repoRoot "scripts\refresh-reference-repos.ps1"
+
+    It "Uses openai plugins as current official source and keeps openai skills historical" {
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        $plugins = @($manifest.repos | Where-Object name -eq "openai-plugins")
+        $skills = @($manifest.repos | Where-Object name -eq "openai-skills")
+
+        $plugins.Count | Should Be 1
+        $plugins[0].tier | Should Be "core-mainline"
+        $plugins[0].status | Should Be "active"
+        $plugins[0].source_disposition | Should Be "current-official"
+        $plugins[0].upstream_url | Should Be "https://github.com/openai/plugins.git"
+        $plugins[0].relative_path | Should Be "core/openai-plugins"
+
+        $skills.Count | Should Be 1
+        $skills[0].tier | Should Be "historical-compatibility"
+        $skills[0].status | Should Be "deprecated"
+        $skills[0].replacement | Should Be "openai-plugins"
+        @($manifest.default_refresh_set) -contains "openai-plugins" | Should Be $true
+        @($manifest.default_refresh_set) -contains "openai-skills" | Should Be $false
+    }
+
+    It "Routes the default set to plugins and protects the stable latest report from historical runs" {
+        $referencesRoot = Join-Path $TestDrive "reference-shelf"
+        $outputDirectory = Join-Path $TestDrive "updates"
+
+        $defaultResult = & $refreshScript -ManifestPath $manifestPath -ReferencesRoot $referencesRoot -OutputDirectory $outputDirectory -FetchOnly
+        $defaultResult.repo_set | Should Be "core-default"
+        $defaultResult.latest_updated | Should Be $true
+        @($defaultResult.repo_names) -contains "openai-plugins" | Should Be $true
+        @($defaultResult.repo_names) -contains "openai-skills" | Should Be $false
+
+        $latestPath = Join-Path $outputDirectory "reference-refresh-latest.md"
+        $before = [System.IO.File]::ReadAllText($latestPath)
+        $historicalResult = & $refreshScript -ManifestPath $manifestPath -ReferencesRoot $referencesRoot -OutputDirectory $outputDirectory -Tier historical -FetchOnly
+        $historicalResult.repo_set | Should Be "tier-historical-compatibility"
+        $historicalResult.latest_updated | Should Be $false
+        @($historicalResult.repo_names) | Should Be @("openai-skills")
+        [System.IO.File]::ReadAllText($latestPath) | Should Be $before
+    }
+}

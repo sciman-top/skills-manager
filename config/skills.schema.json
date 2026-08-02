@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skills-manager.local/schema/skills.v1.json",
+  "title": "skills-manager configuration",
+  "description": "Versioned structural contract for skills.json. Runtime semantic invariants remain authoritative in src/Config.ps1.",
+  "type": "object",
+  "required": ["vendors", "targets"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "sync_mode": { "type": "string", "enum": ["link", "sync"], "default": "link" },
+    "update_force": { "type": "boolean", "default": true },
+    "vendors": { "type": "array", "items": { "$ref": "#/$defs/vendor" } },
+    "targets": { "type": "array", "items": { "$ref": "#/$defs/target" } },
+    "mappings": { "type": "array", "items": { "$ref": "#/$defs/mapping" }, "default": [] },
+    "imports": { "type": "array", "items": { "$ref": "#/$defs/import" }, "default": [] },
+    "mcp_servers": { "type": "array", "items": { "$ref": "#/$defs/mcpServer" }, "default": [] },
+    "mcp_targets": {
+      "type": "array",
+      "items": { "oneOf": [{ "type": "string", "minLength": 1 }, { "$ref": "#/$defs/target" }] },
+      "default": []
+    },
+    "mcp_profiles": { "$ref": "#/$defs/mcpProfiles" },
+    "skill_projection": { "$ref": "#/$defs/skillProjection" }
+  },
+  "$defs": {
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "stringArray": { "type": "array", "items": { "type": "string" } },
+    "vendor": {
+      "type": "object",
+      "required": ["name", "repo"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "repo": { "$ref": "#/$defs/nonEmptyString" },
+        "ref": { "type": "string" }
+      }
+    },
+    "target": {
+      "type": "object",
+      "required": ["path"],
+      "additionalProperties": true,
+      "properties": { "path": { "$ref": "#/$defs/nonEmptyString" } }
+    },
+    "mapping": {
+      "type": "object",
+      "required": ["vendor", "from", "to"],
+      "additionalProperties": true,
+      "properties": {
+        "vendor": { "$ref": "#/$defs/nonEmptyString" },
+        "from": { "$ref": "#/$defs/nonEmptyString" },
+        "to": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "import": {
+      "type": "object",
+      "required": ["name", "repo"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "repo": { "$ref": "#/$defs/nonEmptyString" },
+        "ref": { "type": "string" },
+        "skill": { "type": "string", "default": "." },
+        "mode": { "type": "string", "enum": ["manual", "vendor"] },
+        "sparse": { "type": "boolean" }
+      }
+    },
+    "mcpServer": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "enabled": { "type": "boolean" },
+        "transport": { "type": "string", "enum": ["stdio", "sse", "http"], "default": "stdio" },
+        "command": { "type": "string" },
+        "args": { "$ref": "#/$defs/stringArray" },
+        "url": { "type": "string" },
+        "env": { "type": "object", "additionalProperties": { "type": "string" } },
+        "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+        "bearer_token_env_var": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+        "enabled_tools": { "$ref": "#/$defs/stringArray" },
+        "startup_timeout_sec": { "type": "integer", "minimum": 1 }
+      },
+      "allOf": [{
+        "if": { "properties": { "transport": { "enum": ["sse", "http"] } }, "required": ["transport"] },
+        "then": { "required": ["url"] },
+        "else": { "required": ["command"] }
+      }]
+    },
+    "mcpProfiles": {
+      "type": "object",
+      "required": ["active", "profiles"],
+      "additionalProperties": true,
+      "properties": {
+        "active": { "$ref": "#/$defs/nonEmptyString" },
+        "profiles": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["enabled"],
+            "additionalProperties": true,
+            "properties": {
+              "enabled": { "$ref": "#/$defs/stringArray" },
+              "enabled_tools": { "type": "object", "additionalProperties": { "$ref": "#/$defs/stringArray" } }
+            }
+          }
+        }
+      }
+    },
+    "skillProjection": {
+      "type": "object",
+      "required": ["sources"],
+      "additionalProperties": true,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "codex_config_path": { "type": "string" },
+        "manifest_path": { "type": "string" },
+        "managed_source_path": { "type": "string" },
+        "user_skill_root": { "type": "string" },
+        "routing_policy_path": { "type": "string", "minLength": 1 },
+        "managed_link_excludes": { "$ref": "#/$defs/stringArray" },
+        "active_profile": { "type": "string" },
+        "budget_limit_chars": { "type": "integer", "minimum": 1 },
+        "external_metadata_reserve_chars": { "type": "integer", "minimum": 0 },
+        "external_skill_inventory": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "plugin_cache_path": { "type": "string", "minLength": 1 }
+          }
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "path"],
+            "additionalProperties": true,
+            "properties": {
+              "id": { "$ref": "#/$defs/nonEmptyString" },
+              "path": { "$ref": "#/$defs/nonEmptyString" },
+              "priority": { "type": "integer" },
+              "platforms": { "$ref": "#/$defs/stringArray" }
+            }
+          }
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "replacement"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "$ref": "#/$defs/nonEmptyString" },
+              "replacement": { "$ref": "#/$defs/nonEmptyString" }
+            }
+          }
+        },
+        "profiles": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["enabled_names"],
+            "additionalProperties": true,
+            "properties": {
+              "enabled_names": { "$ref": "#/$defs/stringArray" },
+              "budget_limit_chars": { "type": "integer", "minimum": 1 }
+            }
+          }
+        }
+      }
+    }
+  },
+  "x-compatibility-policy": {
+    "missing_schema_version": "legacy-v1-observation",
+    "unknown_properties": "preserved-for-backward-compatibility"
+  },
+  "x-secret-policy": {
+    "schema_examples_must_not_contain_values": true,
+    "validator_output": "code-path-message-only",
+    "host_auth_provider_model_context_sandbox_rules_plugins": "out-of-scope"
+  }
+}

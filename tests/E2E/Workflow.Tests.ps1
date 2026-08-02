@@ -1,4 +1,5 @@
-. $PSScriptRoot\..\..\skills.ps1
+$repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
+. (Join-Path $repoRoot 'skills.ps1')
 
 function Set-TestWorkspace([string]$root) {
     $script:Root = $root
@@ -174,6 +175,45 @@ description: demo skill
     }
 
     Context "MCP 同步" {
+        It "Uses the same planned target paths for apply without planning writes" {
+            $root = Join-Path $TestDrive "ws-mcp-plan-parity"
+            New-Item -ItemType Directory -Path $root -Force | Out-Null
+            Set-TestWorkspace $root
+
+            Mock LoadCfg {
+                [pscustomobject]@{
+                    vendors = @()
+                    targets = @(
+                        [pscustomobject]@{ path = (Join-Path $root ".codex\skills") },
+                        [pscustomobject]@{ path = (Join-Path $root ".trae\skills") }
+                    )
+                    mappings = @()
+                    imports = @()
+                    mcp_servers = @(
+                        [pscustomobject]@{
+                            name = "fetch"
+                            transport = "stdio"
+                            command = "python"
+                            args = @("-m", "mcp_server_fetch")
+                        }
+                    )
+                    mcp_targets = @()
+                    update_force = $false
+                    sync_mode = "sync"
+                }
+            }
+
+            $context = Get-McpSyncPlanningContext
+            $plan = New-McpSyncOperationPlanResult -DesiredState $context.desired_state -CreatedAt '2026-08-01T08:00:00Z' -SourceRevision ('f' * 64)
+            $plannedPaths = @($plan.operation_plan.targets.path | Sort-Object)
+            foreach ($path in $plannedPaths) { (Test-Path -LiteralPath $path) | Should Be $false }
+
+            同步MCP
+
+            foreach ($path in $plannedPaths) { (Test-Path -LiteralPath $path -PathType Leaf) | Should Be $true }
+            (@($context.desired_state.path | Sort-Object) -join ',') | Should Be ($plannedPaths -join ',')
+        }
+
         It "Writes mcp files for codex and project trae when trae target exists" {
             $root = Join-Path $TestDrive "ws-mcp"
             New-Item -ItemType Directory -Path $root -Force | Out-Null
@@ -240,6 +280,63 @@ description: demo skill
 
             (Test-Path (Join-Path $root ".codex\config.toml")) | Should Be $true
             (Test-Path (Join-Path $root ".trae\mcp.json")) | Should Be $false
+        }
+    }
+
+    Context "Phase 1 read-only CLI" {
+        It "emits one capability inventory JSON envelope" {
+            $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') capability-inventory --json 2>&1)
+            $parsed = ($output -join "`n") | ConvertFrom-Json
+
+            @($output).Count | Should Be 1
+            $parsed.command | Should Be 'capability-inventory'
+            $parsed.data.writes | Should Be 0
+        }
+
+        It "emits one rule audit JSON envelope without mutation" {
+            $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') rule-audit --repo $repoRoot --host codex --json 2>&1)
+            $exitCode = $LASTEXITCODE
+            $parsed = ($output -join "`n") | ConvertFrom-Json
+
+            $exitCode | Should Be 0
+            @($output).Count | Should Be 1
+            $parsed.command | Should Be 'rule-audit'
+            $parsed.writes | Should Be 0
+            $parsed.provider_calls | Should Be 0
+            $parsed.native_mutations | Should Be 0
+        }
+    }
+
+    Context "Phase 2 fixture-only rule patch CLI" {
+        It "plans and applies through the generated entry point with one JSON envelope" {
+            $root = Join-Path $TestDrive 'rule-cli-success'; New-Item -ItemType Directory -Path $root -Force | Out-Null
+            [IO.File]::WriteAllText((Join-Path $root '.skills-manager-fixture'), 'fixture')
+            $target = Join-Path $root 'AGENTS.md'; $desired = Join-Path $root 'desired.md'; $plan = Join-Path $root 'plan.json'
+            [IO.File]::WriteAllText($target, 'before'); [IO.File]::WriteAllText($desired, 'after')
+
+            $planOutput = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') rule-plan --target $target --desired-file $desired --fixture-root $root --json --out $plan 2>&1)
+            $planExit = $LASTEXITCODE; $planJson = ($planOutput -join "`n") | ConvertFrom-Json
+            $applyOutput = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') rule-apply --plan $plan --fixture-root $root --token APPLY_RULE_PATCH --json 2>&1)
+            $applyExit = $LASTEXITCODE; $applyJson = ($applyOutput -join "`n") | ConvertFrom-Json
+
+            $planExit | Should Be 0; @($planOutput).Count | Should Be 1; $planJson.command | Should Be 'rule-plan'
+            $applyExit | Should Be 0; @($applyOutput).Count | Should Be 1; $applyJson.command | Should Be 'rule-apply'
+            $applyJson.result.receipt.verification.host_loaded | Should Be 'not_run'
+            [IO.File]::ReadAllText($target) | Should Be 'after'
+        }
+
+        It "returns exit 2 and preserves the target when apply is blocked" {
+            $root = Join-Path $TestDrive 'rule-cli-blocked'; New-Item -ItemType Directory -Path $root -Force | Out-Null
+            [IO.File]::WriteAllText((Join-Path $root '.skills-manager-fixture'), 'fixture')
+            $target = Join-Path $root 'AGENTS.md'; $desired = Join-Path $root 'desired.md'; $plan = Join-Path $root 'plan.json'
+            [IO.File]::WriteAllText($target, 'before'); [IO.File]::WriteAllText($desired, 'after')
+            $null = & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') rule-plan --target $target --desired-file $desired --fixture-root $root --json --out $plan
+
+            $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') rule-apply --plan $plan --fixture-root $root --token WRONG --json 2>&1)
+            $exitCode = $LASTEXITCODE; $parsed = ($output -join "`n") | ConvertFrom-Json
+
+            $exitCode | Should Be 2; @($output).Count | Should Be 1; $parsed.result.status | Should Be 'blocked'
+            [IO.File]::ReadAllText($target) | Should Be 'before'
         }
     }
 

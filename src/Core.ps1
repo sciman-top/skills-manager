@@ -222,74 +222,9 @@ function EnsureDir([string]$p) {
         [System.IO.Directory]::CreateDirectory($p) | Out-Null
     }
 }
-function Clear-FileWriteBlockAttributes([string]$path) {
-    if ([string]::IsNullOrWhiteSpace($path)) { return }
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return }
-    try {
-        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
-        $resetAttrs = [System.IO.FileAttributes]::ReadOnly -bor [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
-        if (($item.Attributes -band $resetAttrs) -ne 0) {
-            $item.Attributes = ($item.Attributes -band (-bnot $resetAttrs))
-        }
-    }
-    catch {}
-}
 function Set-ContentUtf8([string]$path, [string]$content) {
     if ($DryRun) { return }
-    $parent = Split-Path $path -Parent
-    if (-not [string]::IsNullOrWhiteSpace($parent)) { EnsureDir $parent }
-    Clear-FileWriteBlockAttributes $path
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    $bytes = $utf8NoBom.GetBytes($content)
-    $tempPath = "{0}.tmp-{1}" -f $path, ([System.Guid]::NewGuid().ToString("N"))
-    $backupPath = "{0}.bak-{1}" -f $path, ([System.Guid]::NewGuid().ToString("N"))
-    $maxAttempts = 4
-    $delayMs = 200
-    for ($attempt = 0; $attempt -lt $maxAttempts; $attempt++) {
-        try {
-            if (Test-Path -LiteralPath $path -PathType Leaf) {
-                [System.IO.File]::WriteAllBytes($tempPath, $bytes)
-                [System.IO.File]::Replace($tempPath, $path, $backupPath, $true)
-                if (Test-Path -LiteralPath $backupPath -PathType Leaf) {
-                    Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
-                }
-            }
-            else {
-                [System.IO.File]::WriteAllBytes($path, $bytes)
-            }
-            Clear-FileWriteBlockAttributes $path
-            return
-        }
-        catch {
-            $baseException = $_.Exception
-            if ($baseException -is [System.Management.Automation.MethodInvocationException] -and $baseException.InnerException) {
-                $baseException = $baseException.InnerException
-            }
-            $isRetryable = ($baseException -is [System.UnauthorizedAccessException]) -or ($baseException -is [System.IO.IOException])
-            if (-not $isRetryable) { throw }
-
-            if (Test-Path -LiteralPath $tempPath -PathType Leaf) {
-                try { Remove-Item -LiteralPath $tempPath -Force -ErrorAction Stop } catch {}
-            }
-            if (Test-Path -LiteralPath $backupPath -PathType Leaf) {
-                try { Remove-Item -LiteralPath $backupPath -Force -ErrorAction Stop } catch {}
-            }
-            Clear-FileWriteBlockAttributes $path
-
-            if ($attempt -ge ($maxAttempts - 1)) {
-                # Some restricted hosts allow file writes but deny atomic replace/move.
-                try {
-                    [System.IO.File]::WriteAllBytes($path, $bytes)
-                    Clear-FileWriteBlockAttributes $path
-                    return
-                }
-                catch {
-                    throw $baseException
-                }
-            }
-            Start-Sleep -Milliseconds $delayMs
-        }
-    }
+    Write-Utf8FileAtomic -Path $path -Content $content
 }
 function Get-ContentUtf8([string]$path) {
     if ([string]::IsNullOrWhiteSpace($path)) { return $null }

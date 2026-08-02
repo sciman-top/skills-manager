@@ -11,6 +11,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify PowerShell 7 primary runtime
+        shell: pwsh
+        run: |
+          if ($PSVersionTable.PSVersion.Major -lt 7) { throw "PowerShell 7+ is required for authoritative gates." }
+          $PSVersionTable.PSVersion.ToString()
+
       - name: Check repository hygiene
         shell: pwsh
         run: .\scripts\quality\check-repo-hygiene.ps1
@@ -36,3 +42,14 @@ jobs:
       - name: Run tests
         shell: pwsh
         run: .\tests\run.ps1
+
+      - name: Windows PowerShell 5.1 bounded compatibility smoke
+        shell: powershell
+        run: |
+          if ($PSVersionTable.PSVersion.Major -ne 5) { throw "Expected Windows PowerShell 5.1 compatibility runtime." }
+          [void][scriptblock]::Create((Get-Content -Raw .\skills.ps1))
+          . .\src\Domain\OperationPlan.ps1
+          . .\src\Domain\Receipt.ps1
+          $plan = New-OperationPlan -OperationId ci-compat -Domain runtime -Mode dry_run -CreatedAt 2026-08-01T08:00:00Z
+          $receipt = New-OperationReceipt -OperationId ci-compat -Status dry_run -StartedAt 2026-08-01T08:00:00Z -CompletedAt 2026-08-01T08:00:01Z
+          if ($plan.schema_version -ne 1 -or $receipt.schema_version -ne 1) { throw "Compatibility object smoke failed." }

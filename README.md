@@ -20,11 +20,50 @@
 - MCP 托管真源：`skills.json` 的 `mcp_servers`；落地产物由 `.\skills.ps1 同步MCP` 生成
 - 非 MCP 宿主设置不在本仓托管边界内，例如 Codex `windows.sandbox`、approval/model/context，Claude/Gemini 的 auth/provider/model/context/sandbox
 
+## 产品方向（vNext）
+
+本项目将按已落盘的 vNext 规划，演进为 Windows-first、local-first 的 AI capability curator 与 rule advisor：继续管理 skills/MCP，并增加官方 plugin awareness、统一但不扁平化的 capability inventory、全局/项目规则只读诊断，以及经过 plan/diff/显式 apply/receipt 保护的受管写入。
+
+它不会成为 agent runtime、插件商店、provider/model/auth/session 管理器、中央目标仓 registry 或跨仓规则同步服务。规则能力默认 advisory-first，宿主加载和 live acceptance 必须由各自 native/真实工作流证据证明。
+
+- [产品文档索引](docs/product/README.md)
+- [vNext PRD](docs/product/skills-manager-vnext-prd.md)
+- [vNext 架构](docs/product/skills-manager-vnext-architecture.md)
+- [vNext 路线图](docs/product/skills-manager-vnext-roadmap.md)
+- [规则治理参考采纳矩阵](docs/product/rule-governance-adoption-matrix.md)
+- [当前 Phase 2 任务 manifest](tasks/skills-manager-vnext-phase2.tasks.json)
+- [Phase 1 历史任务 manifest](tasks/skills-manager-vnext-phase1.tasks.json)
+- [Phase 0 历史任务 manifest](tasks/skills-manager-vnext-phase0.tasks.json)
+
+vNext Phase 0、Phase 1 与 Phase 2 均已完成 repo-side 验收（P0/P1 各 9/9，P2 7/7）。Phase 2 的 transactional explicit-apply 仍严格 fixture-only；不允许修改真实规则、host/profile，调用 provider 或执行 native mutation。fresh-session load、`host_loaded` 和 `live_accepted` 均未执行；不会自动进入 P3。
+
+运行时以 PowerShell 7 (`pwsh`) 为开发、CI 和完整门禁主路径；Windows PowerShell 5.1 仅保留安装 fallback、generated script parse 和 plain-object/selected fixture smoke。完整边界与移除条件见 [`docs/runbooks/powershell-runtime-compatibility.md`](docs/runbooks/powershell-runtime-compatibility.md)。
+
+Phase 1 的只读入口（未指定 `--out` 时不写文件）：
+
+```powershell
+.\skills.ps1 capability-inventory --json
+.\skills.ps1 rule-audit --repo . --host codex --json
+```
+
+`--out <report.json>` 只允许显式写一个报告文件，`rule-audit` 不允许覆盖发现到的规则文件。deterministic blocker 返回 exit 2；semantic recommendation 不阻断。
+
+P2 的事务入口仍为 fixture-only；root 必须包含 `.skills-manager-fixture`：
+
+```powershell
+.\skills.ps1 rule-plan --target <fixture-rule> --desired-file <reviewed-file> --fixture-root <fixture-root> --json --out <fixture-plan.json>
+.\skills.ps1 rule-apply --plan <fixture-plan.json> --fixture-root <fixture-root> --token APPLY_RULE_PATCH --json
+```
+
+这些命令不授权真实仓、全局规则或 host 配置写入。
+
 ## 路径与编辑策略
 
 | 路径 / 键 | 作用 | 编辑策略 |
 | --- | --- | --- |
-| `skills.json` | 单一配置真源，托管 `vendors / mappings / imports / targets / sync_mode / mcp_servers` | 直接修改 |
+| `skills.json` | 单一配置真源，托管 `vendors / mappings / imports / targets / sync_mode / mcp_servers` | 直接修改；用 `scripts/verify-skills-config.ps1 -Mode enforce` 做只读校验 |
+| `config/skills.schema.json` | `skills.json` v1 结构、兼容与敏感信息输出策略 | 版本化维护；缺少 `schema_version` 按 legacy v1 observation 读取 |
+| `config/host-capability-matrix.json` | 宿主 surface、所有权、activation 与最高自动验证层级的只读合同 | 用 `scripts/verify-host-capability-matrix.ps1` 校验；不得写成 live inventory |
 | `src/` | 源模块 | 在这里改逻辑，再运行 `./build.ps1` |
 | `skills.ps1` | 生成后的入口脚本 | 不手改；由 `build.ps1` 生成 |
 | `vendor/` | 上游整库缓存 | 不手改；通过 `更新` 或锁文件重建 |
@@ -137,6 +176,8 @@
 .\skills.ps1 安装MCP context7 -- npx -y @upstash/context7-mcp@3.2.3
 .\skills.ps1 卸载MCP context7
 .\skills.ps1 同步MCP
+.\skills.ps1 mcp-sync --plan --json
+.\skills.ps1 mcp-sync --plan --json --out .\reports\mcp-plan.json
 .\skills.ps1 MCP配置 列表
 .\skills.ps1 MCP配置 使用 coding
 ```
@@ -145,7 +186,8 @@
 
 - `安装MCP` / `卸载MCP` 会更新 `skills.json`，随后自动执行一次 `同步MCP`。
 - `同步MCP` 会把 MCP 服务清单写入目标根目录 `.mcp.json`、Gemini/Trae 配置以及 Codex `config.toml` 的 `[mcp_servers.*]` 段。
-- `同步MCP` 当前没有 help 或 dry-run 分支；执行该子命令会立即按 active profile 写入受管目标，附加 `--help` 也不会改为只读帮助。
+- `mcp-sync --plan --json` 复用 apply 的 desired-state calculation，输出确定性、脱敏的 `OperationPlan v1`；plan 不写 MCP 目标、不调用 native add/remove，也不修改 active profile。只有显式 `--out` 会写指定的 plan 文件。
+- 未传 `--plan` 的 `同步MCP` / `mcp-sync` 保持原有 apply 行为；旧 `-DryRun` 人类可读预演语义也保持兼容。
 - `skills.json.mcp_profiles` 是用途 profile 真源；`MCP配置 使用 <name>` 会持久化 active profile 并同步。Codex 保留完整服务清单，通过 `enabled` / `enabled_tools` 启停和收窄工具面；Claude/Gemini/Trae 只接收当前 profile 启用的服务。
 - 默认 profile 仅启用 `microsoft-learn` 与 `openaiDeveloperDocs`；`coding`、`codebase`、`browser`、`database` 等 profile 按任务启用其他服务。切换不会卸载 MCP，`node_repl` 等宿主自有服务不会被同步器删除。GitHub 语义操作优先使用宿主 GitHub app/`gh`，本地文件读写使用 Codex 原生工具，因此不再托管重复的 `github` 与 `filesystem` MCP。
 - `postgres` MCP 预检要求 `POSTGRES_CONNECTION_STRING` 为 `postgresql://...`；若检测到 Npgsql/ADO 风格 key-value 连接串，会自动转换并写回 User scope。
@@ -333,8 +375,17 @@ portable 包包含可迁移源码与配置，例如 `skills.ps1`、`skills.cmd`�
 
 含义：
 
-- `quick`：`build -> repo-hygiene -> generated-sync -> dependency-baseline -> doctor-json-contract`
+- `quick`：`build -> repo-hygiene -> generated-sync -> skill-integrity -> skill-routing -> dependency-baseline -> skills-config-contract -> planning-contract -> doctor-json-contract`
 - `full`：`quick + tests`
+
+规划合同也可单独执行：
+
+```powershell
+./scripts/verify-vnext-planning.ps1
+./scripts/verify-vnext-planning.ps1 -Json
+```
+
+该 verifier 从 `tasks/plan.md` 的 `current_phase` 选择当前 spec/manifest，也可用 `-SpecPath`/`-ManifestPath` 验证历史 Phase。它只证明规划文件的机器一致性，不证明产品代码、宿主加载或 live acceptance。
 
 ## MCP 与门禁环境变量
 
@@ -364,6 +415,7 @@ portable 包包含可迁移源码与配置，例如 `skills.ps1`、`skills.cmd`�
 
 ## 相关文档
 
+- [Product direction and planning contract](docs/product/README.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security Policy](SECURITY.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)

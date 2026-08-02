@@ -20,11 +20,50 @@ Use it when you need to:
 - MCP ownership source of truth: `skills.json` `mcp_servers`; rendered by `.\skills.ps1 同步MCP`
 - Non-MCP host settings are out of scope for this repo, such as Codex `windows.sandbox`, approval/model/context, and Claude/Gemini auth/provider/model/context/sandbox
 
+## Product Direction (vNext)
+
+The repository now has an executable planning contract for evolving into a Windows-first, local-first AI capability curator and rule advisor. It will continue to manage skills and MCP while adding official plugin awareness, a typed capability inventory, read-only global/project rule diagnostics, and managed writes protected by plan, diff, explicit apply, receipt, and rollback semantics.
+
+It will not become an agent runtime, plugin marketplace, provider/model/auth/session manager, central target-repository registry, or cross-repository rule synchronizer. Rule capabilities remain advisory-first, and host loading or live acceptance require separate native or real-workflow evidence.
+
+- [Product documentation index](docs/product/README.md)
+- [vNext PRD](docs/product/skills-manager-vnext-prd.md)
+- [vNext architecture](docs/product/skills-manager-vnext-architecture.md)
+- [vNext roadmap](docs/product/skills-manager-vnext-roadmap.md)
+- [Rule-governance adoption matrix](docs/product/rule-governance-adoption-matrix.md)
+- [Current Phase 2 task manifest](tasks/skills-manager-vnext-phase2.tasks.json)
+- [Historical Phase 1 task manifest](tasks/skills-manager-vnext-phase1.tasks.json)
+- [Historical Phase 0 task manifest](tasks/skills-manager-vnext-phase0.tasks.json)
+
+vNext Phases 0, 1, and 2 have passed repository-side acceptance (P0/P1: 9/9 each; P2: 7/7). Phase 2 transactional explicit apply remains strictly fixture-only; real rule writes, host/profile changes, provider calls, and native mutations remain forbidden. Fresh-session loading, `host_loaded`, and `live_accepted` have not run, and the project does not automatically enter P3.
+
+PowerShell 7 (`pwsh`) is the primary development, CI, and full-gate runtime. Windows PowerShell 5.1 is limited to the installer fallback, generated-script parse, and plain-object/selected-fixture smoke. See [`docs/runbooks/powershell-runtime-compatibility.md`](docs/runbooks/powershell-runtime-compatibility.md) for boundaries and removal gates.
+
+Phase 1 read-only entry points (no file writes without `--out`):
+
+```powershell
+.\skills.ps1 capability-inventory --json
+.\skills.ps1 rule-audit --repo . --host codex --json
+```
+
+`--out <report.json>` writes exactly one explicit report and `rule-audit` refuses to overwrite a discovered rule file. Deterministic blockers return exit 2; semantic recommendations never block.
+
+P2 transaction entry points remain fixture-only and require a `.skills-manager-fixture` marker in the root:
+
+```powershell
+.\skills.ps1 rule-plan --target <fixture-rule> --desired-file <reviewed-file> --fixture-root <fixture-root> --json --out <fixture-plan.json>
+.\skills.ps1 rule-apply --plan <fixture-plan.json> --fixture-root <fixture-root> --token APPLY_RULE_PATCH --json
+```
+
+These commands do not authorize writes to real repositories, global rules, or host configuration.
+
 ## Paths and Edit Policy
 
 | Path / key | Role | Edit policy |
 | --- | --- | --- |
-| `skills.json` | Single configuration source for `vendors / mappings / imports / targets / sync_mode / mcp_servers` | Edit directly |
+| `skills.json` | Single configuration source for `vendors / mappings / imports / targets / sync_mode / mcp_servers` | Edit directly; validate read-only with `scripts/verify-skills-config.ps1 -Mode enforce` |
+| `config/skills.schema.json` | v1 structure, compatibility, and sensitive-output policy for `skills.json` | Maintain as a versioned contract; missing `schema_version` is read as a legacy v1 observation |
+| `config/host-capability-matrix.json` | Read-only contract for host surfaces, ownership, activation, and maximum automated verification | Validate with `scripts/verify-host-capability-matrix.ps1`; never present it as live inventory |
 | `src/` | Source modules | Change here, then run `./build.ps1` |
 | `skills.ps1` | Generated entry script | Do not edit directly; regenerate from `build.ps1` |
 | `vendor/` | Upstream full-repo cache | Do not patch by hand; rebuild through `更新` or lock replay |
@@ -149,12 +188,16 @@ Notes:
 .\skills.ps1 安装MCP github --transport http --url https://api.githubcopilot.com/mcp/ --bearer-token-env-var GITHUB_PERSONAL_ACCESS_TOKEN
 .\skills.ps1 卸载MCP context7
 .\skills.ps1 同步MCP
+.\skills.ps1 mcp-sync --plan --json
+.\skills.ps1 mcp-sync --plan --json --out .\reports\mcp-plan.json
 ```
 
 Notes:
 
 - `安装MCP` and `卸载MCP` update `skills.json` and then automatically run one `同步MCP`.
 - `同步MCP` renders MCP payloads into target-root `.mcp.json`, Gemini/Trae config, and Codex `[mcp_servers.*]` config blocks.
+- `mcp-sync --plan --json` reuses apply's desired-state calculation and emits a deterministic, redacted `OperationPlan v1`. Plan mode does not write managed MCP targets, invoke native add/remove, or change the active profile. Only an explicit `--out` writes the requested plan file.
+- Without `--plan`, `同步MCP` / `mcp-sync` retain the existing apply behavior; legacy human-readable `-DryRun` behavior remains compatible.
 - `postgres` MCP preflight requires `POSTGRES_CONNECTION_STRING` in `postgresql://...` form; Npgsql/ADO key-value strings are normalized and written back to User scope automatically.
 - `github` MCP prefers `gh auth token` and writes the result into User-scope `CODEX_GITHUB_PERSONAL_ACCESS_TOKEN`; Codex config stores only `bearer_token_env_var`, never a literal token.
 - The local weekly task `skills-manager-weekly-update-friday-2000` runs `更新 -> 同步MCP`, so durable MCP environment fixes must live in the source chain, not only in live `~/.codex/config.toml`.
@@ -285,8 +328,17 @@ The repo also provides local/CI parity quality gate scripts:
 
 Meaning:
 
-- `quick`: `build -> repo-hygiene -> generated-sync -> dependency-baseline -> doctor-json-contract`
+- `quick`: `build -> repo-hygiene -> generated-sync -> skill-integrity -> skill-routing -> dependency-baseline -> skills-config-contract -> planning-contract -> doctor-json-contract`
 - `full`: `quick + tests`
+
+Run the planning contract independently with:
+
+```powershell
+./scripts/verify-vnext-planning.ps1
+./scripts/verify-vnext-planning.ps1 -Json
+```
+
+The verifier selects the current spec/manifest from `current_phase` in `tasks/plan.md`; `-SpecPath` and `-ManifestPath` can validate historical phases. It proves only planning-file consistency, not product code, host loading, or live acceptance.
 
 ## MCP and Gate Environment Variables
 
@@ -317,6 +369,7 @@ Boundary note:
 
 ## Related Docs
 
+- [Product direction and planning contract](docs/product/README.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security Policy](SECURITY.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)

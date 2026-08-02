@@ -1,0 +1,3 @@
+# Fixture Rule
+
+Mode: before

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skills-manager.local/schema/operation-receipt.v1.json",
+  "title": "skills-manager OperationReceipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "operation_id", "status", "started_at", "completed_at", "actions", "backups", "verification", "rollback"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "operation_id": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["dry_run", "applied", "partial", "failed", "rolled_back"] },
+    "started_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" },
+    "actions": { "type": "array" },
+    "backups": { "type": "array" },
+    "verification": { "$ref": "#/$defs/verification" },
+    "rollback": { "type": "array" }
+  },
+  "$defs": {
+    "state": { "type": "string", "enum": ["pass", "fail", "not_run", "not_applicable"] },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["static_validated", "repo_gates_passed", "host_loaded", "live_accepted"],
+      "properties": {
+        "static_validated": { "$ref": "#/$defs/state" },
+        "repo_gates_passed": { "$ref": "#/$defs/state" },
+        "host_loaded": { "$ref": "#/$defs/state" },
+        "live_accepted": { "$ref": "#/$defs/state" }
+      }
+    }
+  },
+  "x-truth-policy": "Updating one verification level never promotes or clears another level."
+}

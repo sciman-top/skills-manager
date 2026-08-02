@@ -42,7 +42,11 @@ if ($MyInvocation.InvocationName -ne '.') {
                 $mcpTokens += @($args)
                 卸载MCP $mcpTokens
             }
-            "同步MCP" { 同步MCP }
+            "同步MCP" {
+                $mcpOptions = Parse-McpSyncPlanOptions (Merge-FilterAndArgs $Filter $args)
+                if ($Plan -or [bool]$mcpOptions.plan) { Invoke-McpSyncPlan -Json:([bool]$mcpOptions.json) -OutPath ([string]$mcpOptions.out_path) }
+                else { 同步MCP }
+            }
             "mcp-install" {
                 $mcpTokens = @()
                 if (-not [string]::IsNullOrWhiteSpace($Filter)) { $mcpTokens += $Filter }
@@ -55,11 +59,23 @@ if ($MyInvocation.InvocationName -ne '.') {
                 $mcpTokens += @($args)
                 卸载MCP $mcpTokens
             }
-            "mcp-sync" { 同步MCP }
+            "mcp-sync" {
+                $mcpOptions = Parse-McpSyncPlanOptions (Merge-FilterAndArgs $Filter $args)
+                if ($Plan -or [bool]$mcpOptions.plan) { Invoke-McpSyncPlan -Json:([bool]$mcpOptions.json) -OutPath ([string]$mcpOptions.out_path) }
+                else { 同步MCP }
+            }
             "MCP配置" { Invoke-McpProfileCommand (Merge-FilterAndArgs $Filter $args) }
             "mcp-profile" { Invoke-McpProfileCommand (Merge-FilterAndArgs $Filter $args) }
             "审查目标" { Invoke-AuditTargetsCommand (Merge-FilterAndArgs $Filter $args) }
             "audit-targets" { Invoke-AuditTargetsCommand (Merge-FilterAndArgs $Filter $args) }
+            "能力清单" { $result = Invoke-CapabilityInventoryCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
+            "capability-inventory" { $result = Invoke-CapabilityInventoryCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
+            "规则审查" { $result = Invoke-RuleAuditCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
+            "rule-audit" { $result = Invoke-RuleAuditCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
+            "规则计划" { $result=Invoke-RulePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            "rule-plan" { $result=Invoke-RulePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            "规则应用" { $tokens=Merge-FilterAndArgs $Filter $args;if($Plan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            "rule-apply" { $tokens=Merge-FilterAndArgs $Filter $args;if($Plan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "一键" { Invoke-Workflow (Merge-FilterAndArgs $Filter $args) }
             "workflow" { Invoke-Workflow (Merge-FilterAndArgs $Filter $args) }
             "打开配置" { 打开配置 }

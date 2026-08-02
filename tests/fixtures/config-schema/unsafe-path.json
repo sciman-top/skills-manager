@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "sync_mode": "link",
+  "vendors": [{ "name": "demo", "repo": "https://example.invalid/demo.git" }],
+  "targets": [],
+  "mappings": [{ "vendor": "demo", "from": "../escape", "to": "demo" }]
+}

@@ -5,8 +5,9 @@
 
 ## 1. 当前落点与目标归宿
 - 当前落点：`skills.ps1` 是统一入口，`skills.json` 是 vendor、mapping、target、sync 与 MCP 的单一配置源。
-- 目标归宿：稳定管理可维护输入、锁定来源、生成分发与 MCP 投影，使生成物可重建、可审计、可回滚。
-- 下一最小里程碑：保留当前 audit/MCP 与第三方 import 工作树事实，完成一个有界切片并通过 full local quality gate。
+- 目标归宿：演进为 local-first AI capability curator 与 rule advisor；复用官方 skills/plugins/MCP/规则 surface，不替代宿主 runtime、auth、权限、会话或插件目录。
+- 当前规划真源：`docs/product/`、当前 Phase spec、`tasks/skills-manager-vnext-phase2.tasks.json`；P0/P1 历史由独立 manifest/closeout evidence 保留，设计态能力不得写成已实现。
+- 当前 Phase 收口：P2 7/7 repo_verified；不自动进入 P3。真实规则、host 与目标仓写入仍未授权，后续工作必须由新的明确任务启动。
 
 ## A. 仓库事实与模块边界
 - `build.ps1` 从 `src/*` 生成根 `skills.ps1`；`agent/` 与 `vendor/` 是生成或缓存目录，`agent/` 禁止手改。
@@ -14,6 +15,7 @@
 - `skills.json` + `同步MCP` 只托管 MCP server 清单和目标配置段；model、auth、provider、context、sandbox 不在本仓边界。
 - `skills.json.skill_projection` 托管技能根并集、选主和路径级开关；原技能目录不属于自动删除边界，manifest 在 `reports/skill-projection/current.json`。
 - `src/Commands/AuditTargets.ps1` 是目标审查与外层 AI prompt 真源；`reports/skill-audit/<run-id>/` 是运行产物，禁止手改。
+- `docs/product/` 定义 PRD/架构/路线图，task manifest 定义当前 Phase 的 AI 可执行任务；`scripts/verify-vnext-planning.ps1` 只验证规划一致性，不证明产品或宿主验收。
 
 ## B. 执行与风险边界
 - 生成链先改 `src/`、配置或 override，再构建验证；禁止直接修补 `agent/` 或运行态 report。
@@ -30,7 +32,7 @@
 - fixed order：`build -> test -> contract/invariant -> hotspot`。
 - build：`pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1`
 - test：`pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run.ps1`
-- contract/invariant：`pwsh -NoProfile -ExecutionPolicy Bypass -File skills.ps1 doctor --strict --threshold-ms 8000`，并运行 `python scripts/verify-dependency-baseline.py --target-repo-root . --require-target-repo-baseline`。
+- contract/invariant：`pwsh -NoProfile -ExecutionPolicy Bypass -File skills.ps1 doctor --strict --threshold-ms 8000`、`python scripts/verify-dependency-baseline.py --target-repo-root . --require-target-repo-baseline`、`pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-host-capability-matrix.ps1`、`pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-vnext-planning.ps1`。
 - hotspot/full：`pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full`；quick profile 不替代 full。
 - 脏工作树可显式加 `-AllowDirtyWorktree` 并列明既有改动；该开关不允许忽略本任务生成漂移。
 - build、generated-sync、dependency、doctor 或 Pester 任一失败即阻断；不得手改生成物绕过。
@@ -42,4 +44,4 @@
 - `R6`：build -> Pester -> doctor/dependency -> full quality gate；quick 不替代 full。
 - `R7`：保持 `skills.json`、lock、生成物、MCP 目标与 audit prompt contract 兼容。
 - `R8`：证据明确本任务、既有工作树边界与回滚。
-- `E4/E5/E6`：doctor/full gate 承接健康；vendor/skill/MCP 记录供应链；config/lock/profile/audit 输出结构变化必须有迁移、兼容和回滚。
+- `E4/E5/E6`：doctor/full/planning gate 承接健康；vendor/skill/plugin/MCP 记录供应链；config/lock/profile/plan/receipt/audit 输出结构变化必须有迁移、兼容和回滚。
