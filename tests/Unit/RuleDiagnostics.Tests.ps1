@@ -43,4 +43,17 @@ Describe 'Deterministic rule diagnostics' {
         @($result.findings | Where-Object code -eq prose_only_enforcement).Count | Should Be 1
         $result.blocking_count | Should Be 1
     }
+
+    It 'applies separate global and project budgets in one discovery chain' {
+        $globalPath = Join-Path $TestDrive 'global-budget.md'; $projectPath = Join-Path $TestDrive 'project-budget.md'
+        Set-Content $globalPath ((('g' * 20) + "`n") * 2) -Encoding UTF8
+        Set-Content $projectPath ((('p' * 20) + "`n") * 2) -Encoding UTF8
+        $discovery = [pscustomobject]@{ documents = @((New-TestDocument $globalPath global), (New-TestDocument $projectPath repo)) }
+        $profile = [pscustomobject]@{ max_bytes = 1000; max_lines = 100; global_max_bytes = 1000; global_max_lines = 10; project_max_bytes = 10; project_max_lines = 1; blocking_codes = @() }
+
+        $result = Invoke-RuleDiagnostics $discovery $profile
+
+        @($result.findings | Where-Object path -eq $globalPath).Count | Should Be 0
+        @($result.findings | Where-Object path -eq $projectPath).Count | Should Be 2
+    }
 }

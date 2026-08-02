@@ -21,7 +21,7 @@ function Parse-RuleAuditOptions([object[]]$Tokens) {
 function Invoke-RuleAuditCommand([object[]]$Tokens = @()) {
     $options = Parse-RuleAuditOptions $Tokens
     $discovery = Get-RuleDiscovery -RepoRoot $options.repo -CurrentDirectory $options.current_directory -HostName $options.host -UserRuleRoot $options.user_root
-    $profile = [pscustomobject]@{ max_bytes = $(if ($options.host -eq 'codex') { 10240 } else { 16384 }); max_lines = $(if ($options.host -eq 'codex') { 80 } else { 130 }); blocking_codes = @('file_missing') }
+    $profile = [pscustomobject]@{ max_bytes = 10240; max_lines = 80; global_max_bytes = 16384; global_max_lines = 130; project_max_bytes = 10240; project_max_lines = 80; blocking_codes = @('file_missing') }
     $diagnostics = Invoke-RuleDiagnostics $discovery $profile
     $constraints = @(Get-RuleAuditResponsibilityConstraints -Documents $diagnostics.documents)
     $advisor = Invoke-RuleAdvisor -Documents $diagnostics.documents -Constraints $constraints

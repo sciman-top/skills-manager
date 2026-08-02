@@ -201,8 +201,9 @@ function New-RuleEstateTargetAudit {
     param($Target, [string]$CodexUserRoot, [string]$ClaudeUserRoot, $GlobalAlignment, [string]$CodexGlobalText, [string]$ClaudeGlobalText)
     $codexDiscovery = Get-RuleDiscovery -RepoRoot $Target.path -CurrentDirectory $Target.path -HostName codex -UserRuleRoot $CodexUserRoot
     $claudeDiscovery = Get-RuleDiscovery -RepoRoot $Target.path -CurrentDirectory $Target.path -HostName claude -UserRuleRoot $ClaudeUserRoot
-    $codexDiagnostics = Invoke-RuleDiagnostics $codexDiscovery ([pscustomobject]@{ max_bytes = 10240; max_lines = 80; blocking_codes = @('file_missing') })
-    $claudeDiagnostics = Invoke-RuleDiagnostics $claudeDiscovery ([pscustomobject]@{ max_bytes = 16384; max_lines = 130; blocking_codes = @('file_missing') })
+    $scopeProfile = [pscustomobject]@{ max_bytes = 10240; max_lines = 80; global_max_bytes = 16384; global_max_lines = 130; project_max_bytes = 10240; project_max_lines = 80; blocking_codes = @('file_missing') }
+    $codexDiagnostics = Invoke-RuleDiagnostics $codexDiscovery $scopeProfile
+    $claudeDiagnostics = Invoke-RuleDiagnostics $claudeDiscovery $scopeProfile
     $coverage = Get-RuleEstateCoverage $Target.agents_path $GlobalAlignment $CodexGlobalText $ClaudeGlobalText
     $projectText = if ([System.IO.File]::Exists([string]$Target.agents_path)) { [System.IO.File]::ReadAllText([string]$Target.agents_path) } else { '' }
     $globalRelease = Get-RuleEstateRelease $CodexGlobalText global

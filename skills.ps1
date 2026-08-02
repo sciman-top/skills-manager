@@ -2511,11 +2511,18 @@ function Invoke-RuleDiagnostics {
     if ($maxLines -le 0) { $maxLines = 80 }
     $blockingCodes = @((Get-OperationObjectProperty $Profile 'blocking_codes') | ForEach-Object { [string]$_ })
     $wrapperFirstLine = [string](Get-OperationObjectProperty $Profile 'wrapper_first_line')
+    $globalMaxBytes = [int](Get-OperationObjectProperty $Profile 'global_max_bytes')
+    $globalMaxLines = [int](Get-OperationObjectProperty $Profile 'global_max_lines')
+    $projectMaxBytes = [int](Get-OperationObjectProperty $Profile 'project_max_bytes')
+    $projectMaxLines = [int](Get-OperationObjectProperty $Profile 'project_max_lines')
     $results = New-Object System.Collections.Generic.List[object]
     $allFindings = New-Object System.Collections.Generic.List[object]
     $hashIndex = @{}
     foreach ($document in @((Get-OperationObjectProperty $Discovery 'documents'))) {
         $path = [string]$document.path
+        $documentScope = [string]$document.scope
+        $documentMaxBytes = if ($documentScope -eq 'global' -and $globalMaxBytes -gt 0) { $globalMaxBytes } elseif ($documentScope -ne 'global' -and $projectMaxBytes -gt 0) { $projectMaxBytes } else { $maxBytes }
+        $documentMaxLines = if ($documentScope -eq 'global' -and $globalMaxLines -gt 0) { $globalMaxLines } elseif ($documentScope -ne 'global' -and $projectMaxLines -gt 0) { $projectMaxLines } else { $maxLines }
         $findings = New-Object System.Collections.Generic.List[object]
         if (-not [System.IO.File]::Exists($path)) {
             $findings.Add((New-RuleFinding -Kind deterministic -Code file_missing -Severity error -Path $path -Message 'Discovered rule file no longer exists.' -Blocking:($blockingCodes -contains 'file_missing'))) | Out-Null
@@ -2524,8 +2531,8 @@ function Invoke-RuleDiagnostics {
             $bytes = [System.IO.File]::ReadAllBytes($path)
             $text = [System.IO.File]::ReadAllText($path)
             $lines = @($text -split "`r?`n")
-            if ($bytes.Length -gt $maxBytes) { $findings.Add((New-RuleFinding -Kind deterministic -Code byte_budget_exceeded -Severity warning -Path $path -Message ('Rule file uses {0} bytes; profile budget is {1}.' -f $bytes.Length, $maxBytes) -Disposition adapt -Blocking:($blockingCodes -contains 'byte_budget_exceeded'))) | Out-Null }
-            if ($lines.Count -gt $maxLines) { $findings.Add((New-RuleFinding -Kind deterministic -Code line_budget_exceeded -Severity warning -Path $path -Message ('Rule file uses {0} lines; profile budget is {1}.' -f $lines.Count, $maxLines) -Disposition adapt -Blocking:($blockingCodes -contains 'line_budget_exceeded'))) | Out-Null }
+            if ($bytes.Length -gt $documentMaxBytes) { $findings.Add((New-RuleFinding -Kind deterministic -Code byte_budget_exceeded -Severity warning -Path $path -Message ('Rule file uses {0} bytes; profile budget is {1}.' -f $bytes.Length, $documentMaxBytes) -Disposition adapt -Blocking:($blockingCodes -contains 'byte_budget_exceeded'))) | Out-Null }
+            if ($lines.Count -gt $documentMaxLines) { $findings.Add((New-RuleFinding -Kind deterministic -Code line_budget_exceeded -Severity warning -Path $path -Message ('Rule file uses {0} lines; profile budget is {1}.' -f $lines.Count, $documentMaxLines) -Disposition adapt -Blocking:($blockingCodes -contains 'line_budget_exceeded'))) | Out-Null }
             if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) { $findings.Add((New-RuleFinding -Kind deterministic -Code utf8_bom_present -Severity info -Path $path -Message 'UTF-8 BOM is present.' -Disposition defer -Blocking:($blockingCodes -contains 'utf8_bom_present'))) | Out-Null }
             if (-not [string]::IsNullOrWhiteSpace($wrapperFirstLine) -and $lines.Count -gt 0 -and $lines[0] -ne $wrapperFirstLine) { $findings.Add((New-RuleFinding -Kind deterministic -Code wrapper_first_line_mismatch -Severity error -Path $path -Line 1 -Message ('First physical line must be: {0}' -f $wrapperFirstLine) -Disposition adapt -Blocking:($blockingCodes -contains 'wrapper_first_line_mismatch'))) | Out-Null }
             if ([string]$document.scope -eq 'global' -and $text -match '(?i)[A-Z]:\\(?:CODE|src|repo)\\') { $findings.Add((New-RuleFinding -Kind deterministic -Code global_repo_private_path -Severity warning -Path $path -Message 'Global rule contains a repository-private absolute path.' -Disposition adapt -Blocking:($blockingCodes -contains 'global_repo_private_path'))) | Out-Null }
@@ -2901,8 +2908,9 @@ function New-RuleEstateTargetAudit {
     param($Target, [string]$CodexUserRoot, [string]$ClaudeUserRoot, $GlobalAlignment, [string]$CodexGlobalText, [string]$ClaudeGlobalText)
     $codexDiscovery = Get-RuleDiscovery -RepoRoot $Target.path -CurrentDirectory $Target.path -HostName codex -UserRuleRoot $CodexUserRoot
     $claudeDiscovery = Get-RuleDiscovery -RepoRoot $Target.path -CurrentDirectory $Target.path -HostName claude -UserRuleRoot $ClaudeUserRoot
-    $codexDiagnostics = Invoke-RuleDiagnostics $codexDiscovery ([pscustomobject]@{ max_bytes = 10240; max_lines = 80; blocking_codes = @('file_missing') })
-    $claudeDiagnostics = Invoke-RuleDiagnostics $claudeDiscovery ([pscustomobject]@{ max_bytes = 16384; max_lines = 130; blocking_codes = @('file_missing') })
+    $scopeProfile = [pscustomobject]@{ max_bytes = 10240; max_lines = 80; global_max_bytes = 16384; global_max_lines = 130; project_max_bytes = 10240; project_max_lines = 80; blocking_codes = @('file_missing') }
+    $codexDiagnostics = Invoke-RuleDiagnostics $codexDiscovery $scopeProfile
+    $claudeDiagnostics = Invoke-RuleDiagnostics $claudeDiscovery $scopeProfile
     $coverage = Get-RuleEstateCoverage $Target.agents_path $GlobalAlignment $CodexGlobalText $ClaudeGlobalText
     $projectText = if ([System.IO.File]::Exists([string]$Target.agents_path)) { [System.IO.File]::ReadAllText([string]$Target.agents_path) } else { '' }
     $globalRelease = Get-RuleEstateRelease $CodexGlobalText global
@@ -12345,7 +12353,7 @@ function Parse-RuleAuditOptions([object[]]$Tokens) {
 function Invoke-RuleAuditCommand([object[]]$Tokens = @()) {
     $options = Parse-RuleAuditOptions $Tokens
     $discovery = Get-RuleDiscovery -RepoRoot $options.repo -CurrentDirectory $options.current_directory -HostName $options.host -UserRuleRoot $options.user_root
-    $profile = [pscustomobject]@{ max_bytes = $(if ($options.host -eq 'codex') { 10240 } else { 16384 }); max_lines = $(if ($options.host -eq 'codex') { 80 } else { 130 }); blocking_codes = @('file_missing') }
+    $profile = [pscustomobject]@{ max_bytes = 10240; max_lines = 80; global_max_bytes = 16384; global_max_lines = 130; project_max_bytes = 10240; project_max_lines = 80; blocking_codes = @('file_missing') }
     $diagnostics = Invoke-RuleDiagnostics $discovery $profile
     $constraints = @(Get-RuleAuditResponsibilityConstraints -Documents $diagnostics.documents)
     $advisor = Invoke-RuleAdvisor -Documents $diagnostics.documents -Constraints $constraints
