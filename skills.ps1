@@ -1,6 +1,6 @@
 ﻿#requires -Version 5.1
 param(
-    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "锁定", "生成锁文件", "清理无效映射", "打开配置", "解除关联", "清理备份", "自动更新设置", "帮助", "help", "--help", "-h", "doctor", "add", "npx", "技能配置", "skill-profile", "安装MCP", "卸载MCP", "同步MCP", "MCP配置", "mcp-profile", "mcp-install", "mcp-uninstall", "mcp-sync", "审查目标", "audit-targets", "能力清单", "capability-inventory", "规则审查", "rule-audit", "规则计划", "rule-plan", "规则应用", "rule-apply", "一键", "workflow", "prune-invalid-mappings")]
+    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "锁定", "生成锁文件", "清理无效映射", "打开配置", "解除关联", "清理备份", "自动更新设置", "帮助", "help", "--help", "-h", "doctor", "add", "npx", "技能配置", "skill-profile", "安装MCP", "卸载MCP", "同步MCP", "MCP配置", "mcp-profile", "mcp-install", "mcp-uninstall", "mcp-sync", "审查目标", "audit-targets", "能力清单", "capability-inventory", "plugin-inventory", "plugin-lint", "plugin-export", "plugin-eval", "规则审查", "rule-audit", "规则全域审查", "rule-estate-audit", "规则计划", "rule-plan", "规则应用", "rule-apply", "一键", "workflow", "prune-invalid-mappings")]
     [string]$Cmd = "menu",
     [string]$Filter = "",
     [switch]$DryRun,
@@ -1784,6 +1784,176 @@ function Test-CapabilityDescriptorContract($Descriptor) {
     return New-OperationValidationResult $findings.ToArray()
 }
 
+function New-PluginContractFinding([string]$Code, [string]$Path, [string]$Message) {
+    return New-OperationFinding $Code 'error' $Path $Message
+}
+
+function Test-PluginPathWithin([string]$Path, [string]$Boundary) {
+    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Boundary)) { return $false }
+    $full = [System.IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+    $root = [System.IO.Path]::GetFullPath($Boundary).TrimEnd('\', '/')
+    return $full.Equals($root, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $full.StartsWith(($root + [System.IO.Path]::DirectorySeparatorChar), [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-PluginRelativeComponentPath([string]$Path) {
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not $Path.StartsWith('./', [System.StringComparison]::Ordinal)) { return $false }
+    $normalized = $Path.Replace('\', '/').Substring(2)
+    if ([string]::IsNullOrWhiteSpace($normalized) -or [System.IO.Path]::IsPathRooted($normalized)) { return $false }
+    return (@($normalized.Split('/') | Where-Object { $_ -eq '..' }).Count -eq 0)
+}
+
+function Test-PluginReparsePoint([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    $item = Get-Item -LiteralPath $Path -Force
+    return (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
+}
+
+function Test-PluginTreeContainsReparsePoint([string]$Root) {
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) { return $false }
+    $pending = New-Object 'System.Collections.Generic.Stack[string]'
+    $pending.Push([System.IO.Path]::GetFullPath($Root))
+    while ($pending.Count -gt 0) {
+        $current = $pending.Pop()
+        foreach ($item in @(Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop)) {
+            if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $true }
+            if ($item.PSIsContainer) { $pending.Push($item.FullName) }
+        }
+    }
+    return $false
+}
+
+function Test-PluginExistingAncestorReparsePoint([string]$Path, [string]$Boundary) {
+    $root = [System.IO.Path]::GetFullPath($Boundary).TrimEnd('\', '/')
+    $current = [System.IO.Path]::GetFullPath($Path)
+    if (-not (Test-Path -LiteralPath $current)) { $current = Split-Path $current -Parent }
+    while (-not [string]::IsNullOrWhiteSpace($current) -and (Test-PluginPathWithin $current $root)) {
+        if ((Test-Path -LiteralPath $current) -and (Test-PluginReparsePoint $current)) { return $true }
+        if ($current.TrimEnd('\', '/').Equals($root, [System.StringComparison]::OrdinalIgnoreCase)) { break }
+        $parent = Split-Path $current -Parent
+        if ([string]::Equals($parent, $current, [System.StringComparison]::OrdinalIgnoreCase)) { break }
+        $current = $parent
+    }
+    return $false
+}
+
+function Get-PluginSensitivePropertyFindings($Value, [string]$Path = '$') {
+    $findings = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Value) { return @() }
+    if ($Value -is [System.Collections.IDictionary]) {
+        foreach ($key in @($Value.Keys)) {
+            $name = [string]$key
+            $childPath = '{0}.{1}' -f $Path, $name
+            if ($name -match '(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|bearer)') {
+                $findings.Add((New-PluginContractFinding 'sensitive_property_forbidden' $childPath 'Plugin metadata must reference credentials, not contain sensitive properties.')) | Out-Null
+            }
+            foreach ($finding in @(Get-PluginSensitivePropertyFindings $Value[$key] $childPath)) { $findings.Add($finding) | Out-Null }
+        }
+    }
+    elseif ($Value -is [pscustomobject]) {
+        foreach ($property in @($Value.PSObject.Properties)) {
+            $name = [string]$property.Name
+            $childPath = '{0}.{1}' -f $Path, $name
+            if ($name -match '(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|bearer)') {
+                $findings.Add((New-PluginContractFinding 'sensitive_property_forbidden' $childPath 'Plugin metadata must reference credentials, not contain sensitive properties.')) | Out-Null
+            }
+            foreach ($finding in @(Get-PluginSensitivePropertyFindings $property.Value $childPath)) { $findings.Add($finding) | Out-Null }
+        }
+    }
+    elseif ($Value -is [System.Collections.IEnumerable] -and -not ($Value -is [string])) {
+        $index = 0
+        foreach ($item in $Value) {
+            foreach ($finding in @(Get-PluginSensitivePropertyFindings $item ('{0}[{1}]' -f $Path, $index))) { $findings.Add($finding) | Out-Null }
+            $index++
+        }
+    }
+    return $findings.ToArray()
+}
+
+function Get-PluginShape($Manifest) {
+    $hasSkills = -not [string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Manifest 'skills'))
+    $hasMcp = -not [string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Manifest 'mcpServers'))
+    $hasApp = -not [string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Manifest 'apps'))
+    if ($hasSkills -and ($hasMcp -or $hasApp)) { return $(if ($hasApp) { 'skill_mcp_ui' } else { 'skill_mcp' }) }
+    if ($hasSkills) { return 'skills_only' }
+    if ($hasMcp -or $hasApp) { return $(if ($hasApp) { 'mcp_ui' } else { 'mcp_only' }) }
+    return 'invalid'
+}
+
+function Test-PluginManifestContract {
+    param($Manifest, [string]$PluginRoot, [bool]$RequireDistributionMetadata = $true)
+
+    $findings = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Manifest) {
+        $findings.Add((New-PluginContractFinding 'manifest_missing' '$' 'Plugin manifest is required.')) | Out-Null
+        return [pscustomobject][ordered]@{ pass = $false; shape = 'invalid'; findings = $findings.ToArray(); provider_calls = 0; native_mutations = 0; writes = 0 }
+    }
+    $name = [string](Get-OperationObjectProperty $Manifest 'name')
+    $version = [string](Get-OperationObjectProperty $Manifest 'version')
+    $description = [string](Get-OperationObjectProperty $Manifest 'description')
+    if ($name -notmatch '^[a-z0-9]+(?:-[a-z0-9]+)*$') { $findings.Add((New-PluginContractFinding 'plugin_name_invalid' '$.name' 'Plugin name must use stable kebab-case.')) | Out-Null }
+    if ($version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$') { $findings.Add((New-PluginContractFinding 'plugin_version_invalid' '$.version' 'Plugin version must be SemVer.')) | Out-Null }
+    if ([string]::IsNullOrWhiteSpace($description) -or $description.Length -gt 1024) { $findings.Add((New-PluginContractFinding 'plugin_description_invalid' '$.description' 'Plugin description is required and must be at most 1024 characters.')) | Out-Null }
+
+    if ($RequireDistributionMetadata) {
+        $repository = [string](Get-OperationObjectProperty $Manifest 'repository')
+        $license = [string](Get-OperationObjectProperty $Manifest 'license')
+        $parsedUri = $null
+        if (-not [System.Uri]::TryCreate($repository, [System.UriKind]::Absolute, [ref]$parsedUri) -or $parsedUri.Scheme -notin @('https', 'http')) {
+            $findings.Add((New-PluginContractFinding 'plugin_repository_invalid' '$.repository' 'Distribution metadata requires an absolute HTTP(S) repository source.')) | Out-Null
+        }
+        if ($license -notmatch '^[A-Za-z0-9][A-Za-z0-9.+-]*(?:\s+(?:AND|OR)\s+[A-Za-z0-9][A-Za-z0-9.+-]*)*$') {
+            $findings.Add((New-PluginContractFinding 'plugin_license_invalid' '$.license' 'Distribution metadata requires an SPDX-like or LicenseRef license expression.')) | Out-Null
+        }
+    }
+
+    $shape = Get-PluginShape $Manifest
+    if ($shape -eq 'invalid') { $findings.Add((New-PluginContractFinding 'plugin_components_missing' '$' 'Plugin must declare skills, apps, or mcpServers.')) | Out-Null }
+    foreach ($field in @('skills', 'apps', 'mcpServers', 'hooks')) {
+        $value = [string](Get-OperationObjectProperty $Manifest $field)
+        if ([string]::IsNullOrWhiteSpace($value)) { continue }
+        if (-not (Test-PluginRelativeComponentPath $value)) {
+            $findings.Add((New-PluginContractFinding 'plugin_component_path_invalid' ('$.{0}' -f $field) 'Component paths must start with ./ and remain relative without parent traversal.')) | Out-Null
+            continue
+        }
+        if (-not [string]::IsNullOrWhiteSpace($PluginRoot)) {
+            $candidate = [System.IO.Path]::GetFullPath((Join-Path $PluginRoot $value.Substring(2)))
+            if (-not (Test-PluginPathWithin $candidate $PluginRoot)) {
+                $findings.Add((New-PluginContractFinding 'plugin_component_outside_root' ('$.{0}' -f $field) 'Component path escapes the plugin root.')) | Out-Null
+            }
+            elseif (-not (Test-Path -LiteralPath $candidate)) {
+                $findings.Add((New-PluginContractFinding 'plugin_component_missing' ('$.{0}' -f $field) 'Declared component path does not exist.')) | Out-Null
+            }
+            elseif (Test-PluginReparsePoint $candidate) {
+                $findings.Add((New-PluginContractFinding 'plugin_component_reparse_forbidden' ('$.{0}' -f $field) 'Reparse-point components are not supported.')) | Out-Null
+            }
+            elseif ($field -eq 'skills') {
+                if (-not (Test-Path -LiteralPath $candidate -PathType Container)) {
+                    $findings.Add((New-PluginContractFinding 'plugin_skills_not_directory' '$.skills' 'skills must resolve to a directory.')) | Out-Null
+                }
+                else {
+                    if (Test-PluginTreeContainsReparsePoint $candidate) { $findings.Add((New-PluginContractFinding 'plugin_tree_reparse_forbidden' '$.skills' 'Reparse points are not supported anywhere in the skills tree.')) | Out-Null }
+                    $skillDirs = @(Get-ChildItem -LiteralPath $candidate -Directory -Force -ErrorAction SilentlyContinue)
+                    if ($skillDirs.Count -eq 0) { $findings.Add((New-PluginContractFinding 'plugin_skills_empty' '$.skills' 'skills directory must contain at least one direct skill directory.')) | Out-Null }
+                    foreach ($skillDir in $skillDirs) {
+                        if (Test-PluginReparsePoint $skillDir.FullName) { $findings.Add((New-PluginContractFinding 'plugin_skill_reparse_forbidden' '$.skills' ('Skill directory is a reparse point: {0}' -f $skillDir.Name))) | Out-Null; continue }
+                        if (-not (Test-Path -LiteralPath (Join-Path $skillDir.FullName 'SKILL.md') -PathType Leaf)) { $findings.Add((New-PluginContractFinding 'plugin_skill_manifest_missing' '$.skills' ('Skill {0} is missing SKILL.md.' -f $skillDir.Name))) | Out-Null }
+                    }
+                }
+            }
+        }
+    }
+    foreach ($finding in @(Get-PluginSensitivePropertyFindings $Manifest)) { $findings.Add($finding) | Out-Null }
+    return [pscustomobject][ordered]@{
+        pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0)
+        shape = $shape
+        findings = $findings.ToArray()
+        provider_calls = 0
+        native_mutations = 0
+        writes = 0
+    }
+}
+
 function New-RuleFinding {
     param(
         [Parameter(Mandatory = $true)][ValidateSet('deterministic', 'semantic')][string]$Kind,
@@ -1903,21 +2073,24 @@ function New-RulePatchPlan {
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$DesiredText,
         [Parameter(Mandatory = $true)][ValidateSet('explicit_user_input', 'reviewed_file', 'semantic_recommendation')][string]$DesiredSource,
         [string[]]$FindingIds = @(), [string[]]$EvidenceRefs = @(), [ValidateSet('low', 'medium', 'high')][string]$Risk = 'medium',
-        [string]$Owner = 'rule_patch_executor', [string]$RequiredToken = 'APPLY_RULE_PATCH', [int]$MaxDiffChars = 131072
+        [ValidateSet('fixture', 'repository')][string]$AuthorizationScope = 'fixture',
+        [ValidateSet('update', 'create')][string]$TargetOperation = 'update',
+        [string]$Owner = 'rule_patch_executor', [string]$RequiredToken = '', [int]$MaxDiffChars = 131072
     )
     $path = [System.IO.Path]::GetFullPath($TargetPath); $root = [System.IO.Path]::GetFullPath($AuthorizedRoot)
+    if ([string]::IsNullOrWhiteSpace($RequiredToken)) { $RequiredToken = if ($AuthorizationScope -eq 'fixture') { 'APPLY_RULE_PATCH' } else { 'APPLY_RULE_REPO_PATCH' } }
     $beforeHash = Get-RulePatchTextHash $CurrentText; $desiredHash = Get-RulePatchTextHash $DesiredText
     $diff = New-RulePatchUnifiedDiff $CurrentText $DesiredText ([System.IO.Path]::GetFileName($path)) $MaxDiffChars
     $identity = '{0}|{1}|{2}|{3}' -f $path.ToLowerInvariant(), $beforeHash, $desiredHash, $DesiredSource
     $patchId = 'patch-{0}' -f (Get-OperationSha256 $identity).Substring(0, 16)
     return [pscustomobject][ordered]@{
         schema_version = 1; patch_id = $patchId; operation_id = ('rule-{0}' -f $patchId.Substring(6)); mode = 'plan'
-        target = [pscustomobject][ordered]@{ target_ref = 'rule-target'; path = $path; authorized_root = $root; before_hash = $beforeHash; desired_hash = $desiredHash; owner = $Owner }
+        target = [pscustomobject][ordered]@{ target_ref = 'rule-target'; path = $path; authorized_root = $root; operation = $TargetOperation; before_hash = $beforeHash; desired_hash = $desiredHash; owner = $Owner }
         source = [pscustomobject][ordered]@{ finding_ids = @($FindingIds | Sort-Object -Unique); evidence_refs = @($EvidenceRefs | Sort-Object -Unique); desired_source = $DesiredSource }
         diff = $diff; desired_text = $DesiredText; risk = $Risk
-        preconditions = @('valid_plan', 'fresh_before_hash', 'authorized_fixture_root', 'explicit_apply_token')
+        preconditions = @('valid_plan', 'fresh_before_hash', ('authorized_{0}_root' -f $AuthorizationScope), 'explicit_apply_token')
         verification = @('desired_hash_matches', 'receipt_contract_valid'); rollback = @('restore_before_bytes')
-        apply = [pscustomobject][ordered]@{ required_token = $RequiredToken; fixture_only = $true }
+        apply = [pscustomobject][ordered]@{ required_token = $RequiredToken; boundary_scope = $AuthorizationScope; fixture_only = ($AuthorizationScope -eq 'fixture') }
     }
 }
 
@@ -1928,11 +2101,16 @@ function Test-RulePatchPlanContract($Plan) {
     foreach ($field in @('patch_id', 'operation_id', 'mode', 'risk')) { if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Plan $field))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Required field is missing.')) | Out-Null } }
     if ([string](Get-OperationObjectProperty $Plan 'patch_id') -notmatch '^patch-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'patch_id_invalid' 'error' '$.patch_id' 'Patch ID is invalid.')) | Out-Null }
     $target = Get-OperationObjectProperty $Plan 'target'
-    foreach ($field in @('path', 'authorized_root', 'before_hash', 'desired_hash', 'owner')) { if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $target $field))) { $findings.Add((New-OperationFinding 'target_field_missing' 'error' ('$.target.{0}' -f $field) 'Target field is required.')) | Out-Null } }
+    foreach ($field in @('path', 'authorized_root', 'operation', 'before_hash', 'desired_hash', 'owner')) { if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $target $field))) { $findings.Add((New-OperationFinding 'target_field_missing' 'error' ('$.target.{0}' -f $field) 'Target field is required.')) | Out-Null } }
+    if ([string](Get-OperationObjectProperty $target 'operation') -notin @('update', 'create')) { $findings.Add((New-OperationFinding 'target_operation_invalid' 'error' '$.target.operation' 'Target operation must be update or create.')) | Out-Null }
     foreach ($field in @('before_hash', 'desired_hash')) { if ([string](Get-OperationObjectProperty $target $field) -notmatch '^[a-f0-9]{64}$') { $findings.Add((New-OperationFinding 'hash_invalid' 'error' ('$.target.{0}' -f $field) 'Hash must be SHA-256.')) | Out-Null } }
     $source = Get-OperationObjectProperty $Plan 'source'; $desiredSource = [string](Get-OperationObjectProperty $source 'desired_source')
     if ($desiredSource -notin @('explicit_user_input', 'reviewed_file')) { $findings.Add((New-OperationFinding 'desired_source_not_authorized' 'error' '$.source.desired_source' 'Desired content must be explicit or reviewed, never a semantic recommendation.')) | Out-Null }
-    if (-not [bool](Get-OperationObjectProperty (Get-OperationObjectProperty $Plan 'apply') 'fixture_only')) { $findings.Add((New-OperationFinding 'fixture_only_required' 'error' '$.apply.fixture_only' 'P2 apply must remain fixture-only.')) | Out-Null }
+    $apply = Get-OperationObjectProperty $Plan 'apply'; $scope = [string](Get-OperationObjectProperty $apply 'boundary_scope')
+    if ($scope -notin @('fixture', 'repository')) { $findings.Add((New-OperationFinding 'boundary_scope_invalid' 'error' '$.apply.boundary_scope' 'Boundary scope must be fixture or repository.')) | Out-Null }
+    if ([bool](Get-OperationObjectProperty $apply 'fixture_only') -ne ($scope -eq 'fixture')) { $findings.Add((New-OperationFinding 'fixture_scope_mismatch' 'error' '$.apply.fixture_only' 'fixture_only must match boundary_scope.')) | Out-Null }
+    $requiredToken = [string](Get-OperationObjectProperty $apply 'required_token')
+    if (($scope -eq 'fixture' -and $requiredToken -ne 'APPLY_RULE_PATCH') -or ($scope -eq 'repository' -and $requiredToken -ne 'APPLY_RULE_REPO_PATCH')) { $findings.Add((New-OperationFinding 'required_token_invalid' 'error' '$.apply.required_token' 'Required token must match the authorization scope.')) | Out-Null }
     $serialized = $Plan | ConvertTo-Json -Depth 30 -Compress
     if (Test-OperationSerializedSensitiveValue $serialized) { $findings.Add((New-OperationFinding 'sensitive_content_present' 'error' '$' 'Patch plan contains sensitive content.')) | Out-Null }
     return New-OperationValidationResult $findings.ToArray()
@@ -1972,22 +2150,276 @@ function New-CapabilityInventory {
 function ConvertTo-CapabilityDescriptorsFromSkillsConfig {
     param($Config, [string]$SourcePath = 'skills.json', [string]$SourceRevision = 'working-tree')
     $items = New-Object System.Collections.Generic.List[object]
-    $source = [pscustomobject]@{ type = 'repo_config'; path_or_url = $SourcePath; revision = $SourceRevision; checksum = $null; license = $null; trust_tier = 'runtime' }
-    $vendors = Get-OperationObjectProperty $Config 'vendors'
-    if ($vendors -is [System.Collections.IDictionary] -or $vendors -is [pscustomobject]) {
-        $properties = if ($vendors -is [System.Collections.IDictionary]) { @($vendors.Keys | ForEach-Object { [pscustomobject]@{ Name = [string]$_; Value = $vendors[$_] } }) } else { @($vendors.PSObject.Properties) }
-        foreach ($property in $properties) {
-            $items.Add((New-CapabilityDescriptor -Kind skill -Name ([string]$property.Name) -TruthOrigin runtime -Source $source -Lifecycle active -Components @([pscustomobject]@{ kind = 'vendor'; config = $property.Value }) -VerificationState static_validated)) | Out-Null
+
+    $domains = @(
+        [pscustomobject]@{ field = 'vendors'; kind = 'skill'; component = 'vendor'; name_fields = @('name') },
+        [pscustomobject]@{ field = 'imports'; kind = 'skill'; component = 'import'; name_fields = @('name', 'skill') },
+        [pscustomobject]@{ field = 'mappings'; kind = 'skill'; component = 'mapping'; name_fields = @('to', 'from') },
+        [pscustomobject]@{ field = 'mcp_servers'; kind = 'mcp'; component = 'mcp_server'; name_fields = @('name') }
+    )
+
+    foreach ($domain in $domains) {
+        $value = Get-OperationObjectProperty $Config $domain.field
+        $entries = New-Object System.Collections.Generic.List[object]
+        if ($value -is [System.Collections.IDictionary]) {
+            foreach ($key in @($value.Keys)) { $entries.Add([pscustomobject]@{ name = [string]$key; value = $value[$key] }) | Out-Null }
         }
-    }
-    $servers = Get-OperationObjectProperty $Config 'mcp_servers'
-    if ($servers -is [System.Collections.IDictionary] -or $servers -is [pscustomobject]) {
-        $properties = if ($servers -is [System.Collections.IDictionary]) { @($servers.Keys | ForEach-Object { [pscustomobject]@{ Name = [string]$_; Value = $servers[$_] } }) } else { @($servers.PSObject.Properties) }
-        foreach ($property in $properties) {
-            $items.Add((New-CapabilityDescriptor -Kind mcp -Name ([string]$property.Name) -TruthOrigin runtime -Source $source -Lifecycle active -Components @([pscustomobject]@{ kind = 'mcp_server'; config = Protect-OperationSensitiveValue $property.Value 'config' }) -VerificationState static_validated)) | Out-Null
+        elseif ($value -is [array] -or $value -is [System.Collections.IList]) {
+            $index = 0
+            foreach ($entry in @($value)) {
+                $name = $null
+                foreach ($field in @($domain.name_fields)) {
+                    $candidate = [string](Get-OperationObjectProperty $entry $field)
+                    if (-not [string]::IsNullOrWhiteSpace($candidate)) { $name = $candidate; break }
+                }
+                if ([string]::IsNullOrWhiteSpace($name)) { $name = '{0}-{1}' -f $domain.component, $index }
+                if ($domain.field -eq 'imports') {
+                    $skillPath = [string](Get-OperationObjectProperty $entry 'skill')
+                    if (-not [string]::IsNullOrWhiteSpace($skillPath)) { $name = '{0}/{1}' -f $name, $skillPath.Replace('\', '/') }
+                }
+                $entries.Add([pscustomobject]@{ name = $name; value = $entry }) | Out-Null
+                $index++
+            }
+        }
+        elseif ($value -is [pscustomobject]) {
+            $explicitName = $null
+            foreach ($field in @($domain.name_fields)) {
+                $candidate = [string](Get-OperationObjectProperty $value $field)
+                if (-not [string]::IsNullOrWhiteSpace($candidate)) { $explicitName = $candidate; break }
+            }
+            if (-not [string]::IsNullOrWhiteSpace($explicitName)) {
+                $entries.Add([pscustomobject]@{ name = $explicitName; value = $value }) | Out-Null
+            }
+            else {
+                foreach ($property in @($value.PSObject.Properties)) { $entries.Add([pscustomobject]@{ name = [string]$property.Name; value = $property.Value }) | Out-Null }
+            }
+        }
+
+        foreach ($entry in @($entries.ToArray())) {
+            $source = [pscustomobject]@{ type = 'repo_config'; path_or_url = ('{0}#{1}' -f $SourcePath, $domain.field); revision = $SourceRevision; checksum = $null; license = $null; trust_tier = 'runtime' }
+            $component = [pscustomobject]@{ kind = $domain.component; config = Protect-OperationSensitiveValue $entry.value 'config' }
+            $items.Add((New-CapabilityDescriptor -Kind $domain.kind -Name $entry.name -TruthOrigin runtime -Source $source -Lifecycle active -Components @($component) -VerificationState static_validated)) | Out-Null
         }
     }
     return $items.ToArray()
+}
+
+function ConvertFrom-CodexPluginInventorySnapshot {
+    param($Snapshot, [ValidateSet('official', 'personal', 'workspace')][string]$Scope)
+
+    $descriptors = New-Object System.Collections.Generic.List[object]
+    $findings = New-Object System.Collections.Generic.List[object]
+    foreach ($state in @('installed', 'available')) {
+        $items = Get-OperationObjectProperty $Snapshot $state
+        if (-not (Test-OperationArray $items)) {
+            $findings.Add((New-OperationFinding 'plugin_snapshot_array_missing' 'error' ('$.{0}' -f $state) ('Snapshot scope {0} must contain an array.' -f $Scope))) | Out-Null
+            continue
+        }
+        foreach ($item in @($items)) {
+            $pluginId = [string](Get-OperationObjectProperty $item 'pluginId')
+            $name = [string](Get-OperationObjectProperty $item 'name')
+            $marketplace = [string](Get-OperationObjectProperty $item 'marketplaceName')
+            $version = [string](Get-OperationObjectProperty $item 'version')
+            if ([string]::IsNullOrWhiteSpace($pluginId) -or [string]::IsNullOrWhiteSpace($name) -or [string]::IsNullOrWhiteSpace($marketplace)) {
+                $findings.Add((New-OperationFinding 'plugin_snapshot_item_invalid' 'error' ('$.{0}' -f $state) 'pluginId, name, and marketplaceName are required.')) | Out-Null
+                continue
+            }
+            $source = [pscustomobject]@{
+                type = 'codex_plugin_snapshot'
+                path_or_url = 'codex-plugin://{0}/{1}' -f $Scope, $pluginId
+                revision = $(if ([string]::IsNullOrWhiteSpace($version)) { $null } else { $version })
+                checksum = $null
+                license = $null
+                trust_tier = $Scope
+            }
+            $origin = if ($Scope -eq 'official') { 'official' } elseif ([bool](Get-OperationObjectProperty $item 'installed')) { 'host_installed' } else { 'candidate' }
+            $components = @([pscustomobject][ordered]@{
+                kind = 'plugin_bundle'
+                distribution_scope = $Scope
+                inventory_state = $state
+                marketplace = $marketplace
+                installed = [bool](Get-OperationObjectProperty $item 'installed')
+                enabled = [bool](Get-OperationObjectProperty $item 'enabled')
+                install_policy = [string](Get-OperationObjectProperty $item 'installPolicy')
+                auth_policy = [string](Get-OperationObjectProperty $item 'authPolicy')
+            })
+            $descriptors.Add((New-CapabilityDescriptor -Kind plugin -Name $name -TruthOrigin $origin -Source $source -Lifecycle active -HostCompatibility @('codex') -Components $components -VerificationState static_validated)) | Out-Null
+        }
+    }
+    return [pscustomobject][ordered]@{ scope = $Scope; descriptors = $descriptors.ToArray(); findings = $findings.ToArray() }
+}
+
+function New-PluginInventoryFromSnapshots {
+    param($Official, $Personal = $null, $Workspace = $null)
+
+    $descriptors = New-Object System.Collections.Generic.List[object]
+    $findings = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in @(
+        [pscustomobject]@{ scope = 'official'; value = $Official },
+        [pscustomobject]@{ scope = 'personal'; value = $Personal },
+        [pscustomobject]@{ scope = 'workspace'; value = $Workspace }
+    )) {
+        if ($null -eq $entry.value) { continue }
+        $result = ConvertFrom-CodexPluginInventorySnapshot $entry.value $entry.scope
+        foreach ($item in @($result.descriptors)) { $descriptors.Add($item) | Out-Null }
+        foreach ($finding in @($result.findings)) { $findings.Add($finding) | Out-Null }
+    }
+    $inventory = New-CapabilityInventory $descriptors.ToArray()
+    foreach ($finding in @($findings.ToArray())) { $inventory.findings += $finding }
+    return [pscustomobject][ordered]@{
+        schema_version = 1
+        read_only = $true
+        pass = (@($inventory.findings | Where-Object severity -eq 'error').Count -eq 0)
+        descriptors = @($inventory.descriptors)
+        decisions = @($inventory.decisions)
+        findings = @($inventory.findings)
+        provider_calls = 0
+        native_mutations = 0
+        writes = 0
+        profile_changed = $false
+    }
+}
+
+function Get-PluginFileInventory([string]$Root) {
+    $items = New-Object System.Collections.Generic.List[object]
+    foreach ($file in @(Get-ChildItem -LiteralPath $Root -File -Recurse -Force | Sort-Object FullName)) {
+        $relative = $file.FullName.Substring(([System.IO.Path]::GetFullPath($Root).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar).Length).Replace('\', '/')
+        $items.Add([pscustomobject][ordered]@{ relative_path = $relative; length = [int64]$file.Length; sha256 = (Get-FileContentHash $file.FullName) }) | Out-Null
+    }
+    return $items.ToArray()
+}
+
+function Test-PluginCandidateContract($Candidate, [string]$FixtureRoot) {
+    $findings = New-Object System.Collections.Generic.List[object]
+    if ([int](Get-OperationObjectProperty $Candidate 'schema_version') -ne 1) { $findings.Add((New-PluginContractFinding 'candidate_schema_invalid' '$.schema_version' 'Candidate schema_version must be 1.')) | Out-Null }
+    foreach ($field in @('name', 'version', 'description', 'repository', 'license')) {
+        if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Candidate $field))) { $findings.Add((New-PluginContractFinding 'candidate_field_missing' ('$.{0}' -f $field) 'Candidate field is required.')) | Out-Null }
+    }
+    foreach ($field in @('audiences', 'source_skills', 'evidence_refs')) {
+        if (-not (Test-OperationArray (Get-OperationObjectProperty $Candidate $field)) -or @((Get-OperationObjectProperty $Candidate $field)).Count -eq 0) { $findings.Add((New-PluginContractFinding 'candidate_array_invalid' ('$.{0}' -f $field) 'Candidate array must be non-empty.')) | Out-Null }
+    }
+    if ([string](Get-OperationObjectProperty $Candidate 'distribution_need') -ne 'repeated') { $findings.Add((New-PluginContractFinding 'candidate_distribution_need_unproven' '$.distribution_need' 'Exporter requires repeated distribution evidence.')) | Out-Null }
+    if ([string](Get-OperationObjectProperty $Candidate 'official_equivalent') -ne 'absent_after_review') { $findings.Add((New-PluginContractFinding 'candidate_official_equivalent_unresolved' '$.official_equivalent' 'Official equivalent review must be explicitly absent.')) | Out-Null }
+    $manifest = [pscustomobject][ordered]@{
+        name = [string](Get-OperationObjectProperty $Candidate 'name')
+        version = [string](Get-OperationObjectProperty $Candidate 'version')
+        description = [string](Get-OperationObjectProperty $Candidate 'description')
+        repository = [string](Get-OperationObjectProperty $Candidate 'repository')
+        license = [string](Get-OperationObjectProperty $Candidate 'license')
+        skills = './skills/'
+    }
+    $manifestValidation = Test-PluginManifestContract $manifest '' $true
+    foreach ($finding in @($manifestValidation.findings | Where-Object code -notin @('plugin_component_missing'))) { $findings.Add($finding) | Out-Null }
+    $sources = New-Object System.Collections.Generic.List[object]
+    foreach ($relative in @((Get-OperationObjectProperty $Candidate 'source_skills'))) {
+        $text = [string]$relative
+        if (-not (Test-PluginRelativeComponentPath $text)) { $findings.Add((New-PluginContractFinding 'candidate_source_path_invalid' '$.source_skills' ('Invalid source path: {0}' -f $text))) | Out-Null; continue }
+        $full = [System.IO.Path]::GetFullPath((Join-Path $FixtureRoot $text.Substring(2)))
+        if (-not (Test-PluginPathWithin $full $FixtureRoot) -or -not (Test-Path -LiteralPath $full -PathType Container)) { $findings.Add((New-PluginContractFinding 'candidate_source_missing' '$.source_skills' ('Source skill is missing or outside fixture: {0}' -f $text))) | Out-Null; continue }
+        if (Test-PluginReparsePoint $full) { $findings.Add((New-PluginContractFinding 'candidate_source_reparse_forbidden' '$.source_skills' ('Source skill is a reparse point: {0}' -f $text))) | Out-Null; continue }
+        if (Test-PluginExistingAncestorReparsePoint $full $FixtureRoot) { $findings.Add((New-PluginContractFinding 'candidate_source_ancestor_reparse_forbidden' '$.source_skills' ('Source skill crosses a reparse point: {0}' -f $text))) | Out-Null; continue }
+        if (Test-PluginTreeContainsReparsePoint $full) { $findings.Add((New-PluginContractFinding 'candidate_source_tree_reparse_forbidden' '$.source_skills' ('Source skill contains a reparse point: {0}' -f $text))) | Out-Null; continue }
+        if (-not (Test-Path -LiteralPath (Join-Path $full 'SKILL.md') -PathType Leaf)) { $findings.Add((New-PluginContractFinding 'candidate_skill_manifest_missing' '$.source_skills' ('Source skill lacks SKILL.md: {0}' -f $text))) | Out-Null; continue }
+        $sources.Add([pscustomobject]@{ relative = $text; full_path = $full; name = (Split-Path $full -Leaf) }) | Out-Null
+    }
+    if ($sources.Count -gt 8) { $findings.Add((New-PluginContractFinding 'candidate_skill_limit_exceeded' '$.source_skills' 'At most 8 skills may be exported.')) | Out-Null }
+    return [pscustomobject][ordered]@{ pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); findings = $findings.ToArray(); manifest = $manifest; sources = $sources.ToArray() }
+}
+
+function Test-PluginSkillBehaviorFixture([string]$PluginRoot) {
+    $findings = New-Object System.Collections.Generic.List[object]
+    $skillsRoot = Join-Path $PluginRoot 'skills'
+    foreach ($skillDir in @(Get-ChildItem -LiteralPath $skillsRoot -Directory -Force -ErrorAction SilentlyContinue)) {
+        $path = Join-Path $skillDir.FullName 'SKILL.md'
+        if (-not (Test-YamlFrontmatterSkillFile $path)) { $findings.Add((New-PluginContractFinding 'skill_frontmatter_invalid' ('skills/{0}/SKILL.md' -f $skillDir.Name) 'Skill must start with YAML frontmatter.')) | Out-Null; continue }
+        $text = Get-ContentUtf8 $path
+        if ($text -notmatch '(?m)^name:\s*\S+' -or $text -notmatch '(?m)^description:\s*\S+') { $findings.Add((New-PluginContractFinding 'skill_metadata_incomplete' ('skills/{0}/SKILL.md' -f $skillDir.Name) 'Skill frontmatter must declare name and description.')) | Out-Null }
+    }
+    return [pscustomobject][ordered]@{ pass = ($findings.Count -eq 0); state = $(if ($findings.Count -eq 0) { 'pass' } else { 'fail' }); findings = $findings.ToArray() }
+}
+
+function New-PluginEvaluationReport([string]$PluginRoot, $ModelSnapshot = $null) {
+    $manifestPath = Join-Path $PluginRoot '.codex-plugin\plugin.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'Plugin manifest does not exist.' }
+    $manifest = [System.IO.File]::ReadAllText($manifestPath) | ConvertFrom-Json
+    $static = Test-PluginManifestContract $manifest $PluginRoot $true
+    $behavior = if ($static.pass -and (Get-PluginShape $manifest) -eq 'skills_only') { Test-PluginSkillBehaviorFixture $PluginRoot } else { [pscustomobject]@{ pass = $false; state = 'blocked'; findings = @() } }
+    $modelState = if ($null -eq $ModelSnapshot) { 'not_run' } else { [string](Get-OperationObjectProperty $ModelSnapshot 'state') }
+    if ($modelState -notin @('pass', 'fail', 'not_run')) { $modelState = 'invalid_snapshot' }
+    return [pscustomobject][ordered]@{
+        schema_version = 1
+        pass = ([bool]$static.pass -and [bool]$behavior.pass)
+        truth_boundary = 'repo_fixture_evaluation'
+        layers = [pscustomobject][ordered]@{
+            static = [pscustomobject]@{ state = $(if ($static.pass) { 'pass' } else { 'fail' }); blocking = $true; findings = @($static.findings) }
+            behavior_fixture = [pscustomobject]@{ state = $behavior.state; blocking = $true; findings = @($behavior.findings) }
+            model_snapshot = [pscustomobject]@{ state = $modelState; blocking = $false }
+            host_load = [pscustomobject]@{ state = 'not_run'; blocking = $false }
+            live_workflow = [pscustomobject]@{ state = 'not_run'; blocking = $false }
+        }
+        provider_calls = 0
+        native_mutations = 0
+        writes = 0
+    }
+}
+
+function Export-PluginFixture {
+    param($Candidate, [string]$FixtureRoot, [string]$OutPath, [string]$Token)
+
+    $root = [System.IO.Path]::GetFullPath($FixtureRoot)
+    $out = [System.IO.Path]::GetFullPath($OutPath)
+    $findings = New-Object System.Collections.Generic.List[object]
+    if (-not (Test-Path -LiteralPath $root -PathType Container) -or -not (Test-Path -LiteralPath (Join-Path $root '.skills-manager-fixture') -PathType Leaf)) { $findings.Add((New-PluginContractFinding 'fixture_marker_missing' '$.fixture_root' 'Fixture root must exist and contain .skills-manager-fixture.')) | Out-Null }
+    if ($Token -ne 'EXPORT_PLUGIN_FIXTURE') { $findings.Add((New-PluginContractFinding 'export_token_invalid' '$.token' 'Exact token EXPORT_PLUGIN_FIXTURE is required.')) | Out-Null }
+    if (-not (Test-PluginPathWithin $out $root) -or $out.Equals($root, [System.StringComparison]::OrdinalIgnoreCase)) { $findings.Add((New-PluginContractFinding 'export_output_outside_fixture' '$.out' 'Output must be a new child path inside the fixture root.')) | Out-Null }
+    if (Test-Path -LiteralPath $out) { $findings.Add((New-PluginContractFinding 'export_output_exists' '$.out' 'Exporter never overwrites an existing output.')) | Out-Null }
+    if (Test-PluginReparsePoint $root) { $findings.Add((New-PluginContractFinding 'fixture_root_reparse_forbidden' '$.fixture_root' 'Reparse fixture roots are not supported.')) | Out-Null }
+    if ((Test-PluginPathWithin $out $root) -and (Test-PluginExistingAncestorReparsePoint $out $root)) { $findings.Add((New-PluginContractFinding 'export_path_reparse_forbidden' '$.out' 'Output must not cross an existing reparse-point ancestor.')) | Out-Null }
+    $candidateValidation = Test-PluginCandidateContract $Candidate $root
+    foreach ($finding in @($candidateValidation.findings)) { $findings.Add($finding) | Out-Null }
+
+    $sourceFiles = New-Object System.Collections.Generic.List[object]
+    foreach ($source in @($candidateValidation.sources)) {
+        foreach ($item in @(Get-PluginFileInventory $source.full_path)) {
+            $sourceFiles.Add([pscustomobject]@{ skill_name = $source.name; source_path = $source.full_path; relative_path = $item.relative_path; length = $item.length; sha256 = $item.sha256 }) | Out-Null
+        }
+    }
+    if ($sourceFiles.Count -gt 256) { $findings.Add((New-PluginContractFinding 'export_file_limit_exceeded' '$.source_skills' 'Export is limited to 256 files.')) | Out-Null }
+    $totalBytes = [int64](($sourceFiles.ToArray() | Measure-Object length -Sum).Sum)
+    if ($totalBytes -gt 2097152) { $findings.Add((New-PluginContractFinding 'export_byte_limit_exceeded' '$.source_skills' 'Export is limited to 2 MiB.')) | Out-Null }
+    if ($findings.Count -gt 0) { return [pscustomobject][ordered]@{ schema_version = 1; pass = $false; status = 'blocked'; findings = $findings.ToArray(); writes = 0; provider_calls = 0; native_mutations = 0 } }
+
+    $parent = Split-Path $out -Parent
+    $stage = Join-Path $parent ('.{0}.staging-{1}' -f (Split-Path $out -Leaf), [guid]::NewGuid().ToString('N'))
+    try {
+        [System.IO.Directory]::CreateDirectory((Join-Path $stage '.codex-plugin')) | Out-Null
+        [System.IO.Directory]::CreateDirectory((Join-Path $stage 'skills')) | Out-Null
+        $manifestJson = $candidateValidation.manifest | ConvertTo-Json -Depth 20
+        Write-Utf8FileAtomic -Path (Join-Path $stage '.codex-plugin\plugin.json') -Content $manifestJson
+        foreach ($sourceFile in @($sourceFiles.ToArray())) {
+            $destination = Join-Path (Join-Path (Join-Path $stage 'skills') $sourceFile.skill_name) $sourceFile.relative_path
+            [System.IO.Directory]::CreateDirectory((Split-Path $destination -Parent)) | Out-Null
+            [System.IO.File]::Copy((Join-Path $sourceFile.source_path $sourceFile.relative_path), $destination, $false)
+        }
+        $lint = Test-PluginManifestContract $candidateValidation.manifest $stage $true
+        if (-not $lint.pass) { throw ('Exported manifest failed lint: {0}' -f (@($lint.findings.code) -join ',')) }
+        foreach ($sourceFile in @($sourceFiles.ToArray())) {
+            $destination = Join-Path (Join-Path (Join-Path $stage 'skills') $sourceFile.skill_name) $sourceFile.relative_path
+            if ((Get-FileContentHash $destination) -ne $sourceFile.sha256) { throw ('Round-trip hash mismatch: {0}' -f $sourceFile.relative_path) }
+        }
+        [System.IO.Directory]::Move($stage, $out)
+        $evaluation = New-PluginEvaluationReport $out
+        return [pscustomobject][ordered]@{
+            schema_version = 1; pass = [bool]$evaluation.pass; status = 'exported'; output_path = $out
+            skill_count = @($candidateValidation.sources).Count; file_count = $sourceFiles.Count; byte_count = $totalBytes
+            verification = [pscustomobject][ordered]@{ static_validated = 'pass'; repo_gates_passed = 'not_run'; host_loaded = 'not_run'; live_accepted = 'not_run' }
+            evaluation = $evaluation; findings = @(); writes = 1; provider_calls = 0; native_mutations = 0
+        }
+    }
+    catch {
+        if (Test-Path -LiteralPath $stage -PathType Container) { [System.IO.Directory]::Delete($stage, $true) }
+        return [pscustomobject][ordered]@{ schema_version = 1; pass = $false; status = 'failed'; findings = @((New-PluginContractFinding 'plugin_export_failed' '$.out' $_.Exception.Message)); writes = 0; provider_calls = 0; native_mutations = 0 }
+    }
 }
 
 function Get-RuleFileSha256([string]$Path) {
@@ -2185,11 +2617,355 @@ function Test-RuleRepoReferences {
         }
         elseif ($kind -eq 'command') {
             if (@($TruthIndex.commands | Where-Object { [string]::Equals($_.Trim(), $value.Trim(), [System.StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) { $state = 'verified'; $evidence = @([pscustomobject]@{ type = $TruthIndex.source; command = $value }) }
-            else { $state = 'not_observed'; $evidence = @([pscustomobject]@{ type = $TruthIndex.source; command = $value }) }
+            else {
+                $entrypoint = $null
+                $fileMatch = [regex]::Match($value, '(?i)(?:^|\s)-File\s+(?:"([^"]+)"|([^\s]+))')
+                $scriptMatch = [regex]::Match($value, '^(?i)(?:python|py|node)\s+(?:"([^"]+)"|([^\s]+))')
+                if ($fileMatch.Success) { $entrypoint = $(if ($fileMatch.Groups[1].Success) { $fileMatch.Groups[1].Value } else { $fileMatch.Groups[2].Value }) }
+                elseif ($scriptMatch.Success) { $entrypoint = $(if ($scriptMatch.Groups[1].Success) { $scriptMatch.Groups[1].Value } else { $scriptMatch.Groups[2].Value }) }
+                if (-not [string]::IsNullOrWhiteSpace($entrypoint)) {
+                    $candidate = if ([System.IO.Path]::IsPathRooted($entrypoint)) { [System.IO.Path]::GetFullPath($entrypoint) } else { [System.IO.Path]::GetFullPath((Join-Path $root $entrypoint)) }
+                    if ((Test-RuleDiscoveryPathWithin $candidate $root) -and [System.IO.File]::Exists($candidate)) {
+                        $state = 'verified'; $evidence = @([pscustomobject]@{ type = 'filesystem_entrypoint'; path = $candidate; command = $value })
+                    }
+                    else { $state = 'not_observed'; $evidence = @([pscustomobject]@{ type = $TruthIndex.source; command = $value }) }
+                }
+                else { $state = 'not_observed'; $evidence = @([pscustomobject]@{ type = $TruthIndex.source; command = $value }) }
+            }
         }
         $results.Add([pscustomobject][ordered]@{ kind = $kind; value = $value; state = $state; evidence = $evidence; executed = $false }) | Out-Null
     }
     return [pscustomobject][ordered]@{ schema_version = 1; references = @($results.ToArray()); commands_executed = 0; writes = 0; recommendations_used_as_evidence = 0 }
+}
+
+function Get-RuleAuditResponsibilityConstraints {
+    param([object[]]$Documents = @())
+    $constraints = [ordered]@{}
+    foreach ($document in @($Documents)) {
+        $path = [string](Get-OperationObjectProperty $document 'path')
+        if (-not [System.IO.File]::Exists($path)) { continue }
+        $inMapping = $false
+        $lines = [System.IO.File]::ReadAllLines($path)
+        for ($index = 0; $index -lt $lines.Count; $index++) {
+            $line = $lines[$index]
+            if ($line -match '^#{1,6}\s+(.+?)\s*$') {
+                $heading = [string]$Matches[1]
+                $inMapping = ($heading -match '(?i)Global\s+Rule\s*[-=]+>\s*Repo\s+Action|Repo\s+Action|规则.+项目')
+                continue
+            }
+            if (-not $inMapping -or $line -notmatch '^\s*-\s+(?:`(?<id>[^`]+)`|(?<id>[^:：]+?))\s*[:：]\s*(?<action>.+?)\s*$') { continue }
+            $id = ([string]$Matches['id']).Trim()
+            $action = ([string]$Matches['action']).Trim()
+            if ([string]::IsNullOrWhiteSpace($id) -or [string]::IsNullOrWhiteSpace($action)) { continue }
+            if (-not $constraints.Contains($id)) {
+                $constraints[$id] = [pscustomobject][ordered]@{
+                    constraint_id = $id; common_intent = $action; platform_deltas = @(); project_actions = @($action)
+                    enforcement_refs = @(); evidence = @([pscustomobject]@{ type = 'rule_mapping'; path = $path; line = $index + 1 })
+                    need_kind = 'project_guidance'
+                }
+            }
+            else {
+                $constraints[$id].project_actions = @($constraints[$id].project_actions) + @($action)
+                $constraints[$id].evidence = @($constraints[$id].evidence) + @([pscustomobject]@{ type = 'rule_mapping'; path = $path; line = $index + 1 })
+            }
+        }
+    }
+    return @($constraints.Values)
+}
+
+function Get-RuleAuditReferences {
+    param([object[]]$Documents = @())
+    $references = [ordered]@{}
+    foreach ($document in @($Documents)) {
+        $path = [string](Get-OperationObjectProperty $document 'path')
+        if (-not [System.IO.File]::Exists($path)) { continue }
+        $text = [System.IO.File]::ReadAllText($path)
+        foreach ($match in @([regex]::Matches($text, '`([^`\r\n]+)`'))) {
+            $value = ([string]$match.Groups[1].Value).Trim()
+            $kind = $null
+            if ($value -match '^(?i)(pwsh|powershell|python|py|node|npm|npx|dotnet|git)\s+') { $kind = 'command' }
+            else {
+                $rooted = [System.IO.Path]::IsPathRooted($value)
+                $boundedToken = ($value -notmatch '\s' -and $value -notmatch '[*?<>|]')
+                $pathShape = ($value -match '^[.][\\/]' -or $value -match '[\\/]$' -or $value -match '(?i)\.(ps1|py|json|ya?ml|md|toml|xml|csproj|sln)$')
+                if ($rooted -or ($boundedToken -and $pathShape)) { $kind = 'path' }
+            }
+            if ($null -eq $kind) { continue }
+            $key = '{0}|{1}' -f $kind, $value.ToLowerInvariant()
+            if (-not $references.Contains($key)) { $references[$key] = [pscustomobject]@{ kind = $kind; value = $value; source_type = 'rule' } }
+        }
+    }
+    return @($references.Values)
+}
+
+function Get-RuleEstateNormalizedPath([string]$Path, [string]$BasePath = '') {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
+    $expanded = [Environment]::ExpandEnvironmentVariables($Path.Trim())
+    if ($expanded -eq '~' -or $expanded.StartsWith('~\') -or $expanded.StartsWith('~/')) {
+        $home = [Environment]::GetFolderPath('UserProfile')
+        $expanded = if ($expanded.Length -eq 1) { $home } else { Join-Path $home $expanded.Substring(2) }
+    }
+    if (-not [System.IO.Path]::IsPathRooted($expanded)) {
+        if ([string]::IsNullOrWhiteSpace($BasePath)) { throw 'Relative paths require an explicit base path.' }
+        $expanded = Join-Path $BasePath $expanded
+    }
+    return [System.IO.Path]::GetFullPath($expanded).TrimEnd('\', '/')
+}
+
+function Get-RuleEstateTargets {
+    param(
+        [Parameter(Mandatory = $true)][string]$WorkspaceRoot,
+        [string[]]$ExcludeNames = @('external', '文档'),
+        [object[]]$RegistryTargets = @(),
+        [int]$MaxTargets = 64
+    )
+    $root = Get-RuleEstateNormalizedPath $WorkspaceRoot
+    if (-not [System.IO.Directory]::Exists($root)) { throw ('Workspace root does not exist: {0}' -f $root) }
+    if ($MaxTargets -lt 1 -or $MaxTargets -gt 512) { throw 'MaxTargets must be between 1 and 512.' }
+    $excluded = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in @($ExcludeNames)) { if (-not [string]::IsNullOrWhiteSpace($name)) { $excluded.Add($name.Trim()) | Out-Null } }
+    $targets = New-Object System.Collections.Generic.List[object]
+    foreach ($directory in @([System.IO.Directory]::GetDirectories($root) | Sort-Object)) {
+        $name = [System.IO.Path]::GetFileName($directory)
+        if ($excluded.Contains($name)) { continue }
+        $gitMarker = Join-Path $directory '.git'
+        if (-not [System.IO.Directory]::Exists($gitMarker) -and -not [System.IO.File]::Exists($gitMarker)) { continue }
+        $targets.Add([pscustomobject][ordered]@{
+            name = $name
+            path = [System.IO.Path]::GetFullPath($directory).TrimEnd('\', '/')
+            git_marker = $gitMarker
+            agents_path = Join-Path $directory 'AGENTS.md'
+            agents_exists = [System.IO.File]::Exists((Join-Path $directory 'AGENTS.md'))
+            claude_path = Join-Path $directory 'CLAUDE.md'
+            claude_exists = [System.IO.File]::Exists((Join-Path $directory 'CLAUDE.md'))
+        }) | Out-Null
+    }
+    if ($targets.Count -gt $MaxTargets) { throw ('Discovered target count exceeds the bounded limit: {0} > {1}.' -f $targets.Count, $MaxTargets) }
+
+    $discovered = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($target in $targets) { $discovered.Add([string]$target.path) | Out-Null }
+    $registered = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in @($RegistryTargets)) {
+        $enabled = if ($null -ne $entry -and $entry.PSObject.Properties.Match('enabled').Count -gt 0) { [bool]$entry.enabled } else { $true }
+        if (-not $enabled) { continue }
+        $path = Get-RuleEstateNormalizedPath ([string]$entry.path) $root
+        if (-not [string]::IsNullOrWhiteSpace($path)) { $registered.Add($path) | Out-Null }
+    }
+    $registrySupplied = (@($RegistryTargets).Count -gt 0)
+    $unregistered = if ($registrySupplied) { @($targets | Where-Object { -not $registered.Contains([string]$_.path) } | ForEach-Object { [string]$_.path }) } else { @() }
+    $missing = if ($registrySupplied) { @($registered | Where-Object { -not $discovered.Contains([string]$_) } | Sort-Object) } else { @() }
+    return [pscustomobject][ordered]@{
+        schema_version = 1
+        workspace_root = $root
+        exclusion_names = @($excluded | Sort-Object)
+        targets = @($targets.ToArray())
+        target_count = $targets.Count
+        registry = [pscustomobject][ordered]@{
+            supplied = $registrySupplied
+            registered_count = $registered.Count
+            unregistered_paths = @($unregistered)
+            missing_paths = @($missing)
+            in_sync = ($unregistered.Count -eq 0 -and $missing.Count -eq 0)
+        }
+        writes = 0
+    }
+}
+
+function Get-RuleEstateMarkdownSection([string]$Text, [string]$SectionName) {
+    if ([string]::IsNullOrWhiteSpace($Text)) { return '' }
+    $pattern = '(?ms)^##\s+' + [regex]::Escape($SectionName) + '(?:\.|\b).*?(?=^##\s+|\z)'
+    $match = [regex]::Match($Text, $pattern)
+    if (-not $match.Success) { return '' }
+    return ($match.Value -replace "`r`n", "`n").Trim()
+}
+
+function Get-RuleEstateGlobalDocument([string]$UserRoot, [ValidateSet('codex', 'claude')][string]$HostName) {
+    if ([string]::IsNullOrWhiteSpace($UserRoot)) { return $null }
+    $root = Get-RuleEstateNormalizedPath $UserRoot
+    $names = if ($HostName -eq 'codex') { @('AGENTS.override.md', 'AGENTS.md') } else { @('CLAUDE.md') }
+    foreach ($name in $names) {
+        $path = Join-Path $root $name
+        if ([System.IO.File]::Exists($path)) {
+            $text = [System.IO.File]::ReadAllText($path)
+            return [pscustomobject][ordered]@{ host = $HostName; path = $path; text = $text; hash = Get-RulePatchTextHash $text }
+        }
+    }
+    return $null
+}
+
+function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUserRoot) {
+    $codex = Get-RuleEstateGlobalDocument $CodexUserRoot codex
+    $claude = Get-RuleEstateGlobalDocument $ClaudeUserRoot claude
+    $sections = New-Object System.Collections.Generic.List[object]
+    $findings = New-Object System.Collections.Generic.List[object]
+    foreach ($name in @('A', 'C', 'D')) {
+        $codexText = if ($null -eq $codex) { '' } else { Get-RuleEstateMarkdownSection ([string]$codex.text) $name }
+        $claudeText = if ($null -eq $claude) { '' } else { Get-RuleEstateMarkdownSection ([string]$claude.text) $name }
+        $aligned = -not [string]::IsNullOrWhiteSpace($codexText) -and $codexText -ceq $claudeText
+        $sections.Add([pscustomobject][ordered]@{
+            section = $name
+            aligned = $aligned
+            codex_hash = if ([string]::IsNullOrWhiteSpace($codexText)) { '' } else { Get-RulePatchTextHash $codexText }
+            claude_hash = if ([string]::IsNullOrWhiteSpace($claudeText)) { '' } else { Get-RulePatchTextHash $claudeText }
+        }) | Out-Null
+        if (-not $aligned) { $findings.Add([pscustomobject][ordered]@{ code = 'global_common_section_drift'; severity = 'warning'; section = $name; disposition = 'adapt'; message = ('Codex and Claude global common section {0} is absent or different.' -f $name) }) | Out-Null }
+    }
+    $codexDelta = if ($null -eq $codex) { '' } else { Get-RuleEstateMarkdownSection ([string]$codex.text) 'B' }
+    $claudeDelta = if ($null -eq $claude) { '' } else { Get-RuleEstateMarkdownSection ([string]$claude.text) 'B' }
+    if ([string]::IsNullOrWhiteSpace($codexDelta)) { $findings.Add([pscustomobject]@{ code = 'codex_platform_delta_missing'; severity = 'warning'; section = 'B'; disposition = 'adapt'; message = 'Codex global platform delta section B is missing.' }) | Out-Null }
+    if ([string]::IsNullOrWhiteSpace($claudeDelta)) { $findings.Add([pscustomobject]@{ code = 'claude_platform_delta_missing'; severity = 'warning'; section = 'B'; disposition = 'adapt'; message = 'Claude global platform delta section B is missing.' }) | Out-Null }
+    return [pscustomobject][ordered]@{
+        codex_path = if ($null -eq $codex) { '' } else { [string]$codex.path }
+        claude_path = if ($null -eq $claude) { '' } else { [string]$claude.path }
+        common_sections = @($sections.ToArray())
+        common_aligned = (@($sections | Where-Object { -not $_.aligned }).Count -eq 0)
+        codex_delta_present = -not [string]::IsNullOrWhiteSpace($codexDelta)
+        claude_delta_present = -not [string]::IsNullOrWhiteSpace($claudeDelta)
+        findings = @($findings.ToArray())
+    }
+}
+
+function Expand-RuleEstateConstraintId([string]$ConstraintId) {
+    $value = $ConstraintId.Trim()
+    if ($value -match '^(?<prefix>[A-Za-z]+)(?<start>\d+)\s*-\s*(?:[A-Za-z]+)?(?<end>\d+)$') {
+        $result = New-Object System.Collections.Generic.List[string]
+        $start = [int]$Matches['start']; $end = [int]$Matches['end']; $prefix = [string]$Matches['prefix']
+        if ($end -ge $start -and ($end - $start) -le 32) { for ($i = $start; $i -le $end; $i++) { $result.Add(('{0}{1}' -f $prefix.ToUpperInvariant(), $i)) | Out-Null }; return @($result.ToArray()) }
+    }
+    $parts = @($value -split '/' | ForEach-Object { $_.Trim().ToUpperInvariant() } | Where-Object { $_ -match '^[A-Z]+\d+$' })
+    if ($parts.Count -gt 0) { return $parts }
+    return @($value.ToUpperInvariant())
+}
+
+function Get-RuleEstateProjectActions([string]$AgentsPath) {
+    if (-not [System.IO.File]::Exists($AgentsPath)) { return @() }
+    $document = New-ObservedRuleDocument $AgentsPath codex repo 0 project_action
+    $raw = @(Get-RuleAuditResponsibilityConstraints -Documents @($document))
+    $actions = New-Object System.Collections.Generic.List[object]
+    foreach ($item in $raw) {
+        foreach ($id in @(Expand-RuleEstateConstraintId ([string]$item.constraint_id))) {
+            $actions.Add([pscustomobject][ordered]@{ constraint_id = $id; action = [string]$item.common_intent; evidence = @($item.evidence) }) | Out-Null
+        }
+    }
+    return @($actions.ToArray())
+}
+
+function Get-RuleEstateExpectedConstraintIds([string]$CodexGlobalText, [string]$ClaudeGlobalText, [object[]]$ProjectActions) {
+    $ids = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($action in @($ProjectActions)) { $ids.Add([string]$action.constraint_id) | Out-Null }
+    $contractText = (Get-RuleEstateMarkdownSection $CodexGlobalText 'C') + "`n" + (Get-RuleEstateMarkdownSection $ClaudeGlobalText 'C')
+    foreach ($match in @([regex]::Matches($contractText, '(?i)\b(?:R\d+(?:\s*-\s*R?\d+)?|E\d+(?:/E\d+)+)\b'))) {
+        foreach ($id in @(Expand-RuleEstateConstraintId ([string]$match.Value))) { $ids.Add($id) | Out-Null }
+    }
+    return @($ids | Sort-Object)
+}
+
+function Get-RuleEstateRelease([string]$Text, [ValidateSet('global', 'project')][string]$Scope) {
+    if ([string]::IsNullOrWhiteSpace($Text)) { return '' }
+    $patterns = if ($Scope -eq 'global') {
+        @('(?im)^\*\*版本\*\*\s*:\s*(?<version>\d+\.\d+)\s*$', '(?i)GlobalUser/(?:AGENTS|CLAUDE)\.md\s+v(?<version>\d+\.\d+)')
+    }
+    else {
+        @('(?im)^\*\*全局规则复核\*\*\s*:\s*(?<version>\d+\.\d+)\s*$', '(?i)GlobalUser/(?:AGENTS|CLAUDE)\.md\s+v(?<version>\d+\.\d+)')
+    }
+    foreach ($pattern in $patterns) { $match = [regex]::Match($Text, $pattern); if ($match.Success) { return [string]$match.Groups['version'].Value } }
+    return ''
+}
+
+function Get-RuleEstateCoverage {
+    param([string]$AgentsPath, $GlobalAlignment, [string]$CodexGlobalText, [string]$ClaudeGlobalText)
+    $actions = @(Get-RuleEstateProjectActions $AgentsPath)
+    $constraints = New-Object System.Collections.Generic.List[object]
+    foreach ($id in @(Get-RuleEstateExpectedConstraintIds $CodexGlobalText $ClaudeGlobalText $actions)) {
+        $matches = @($actions | Where-Object { [string]$_.constraint_id -eq $id })
+        $codexHas = $CodexGlobalText -match ('(?i)(?<![A-Z0-9])' + [regex]::Escape($id) + '(?![A-Z0-9])')
+        $claudeHas = $ClaudeGlobalText -match ('(?i)(?<![A-Z0-9])' + [regex]::Escape($id) + '(?![A-Z0-9])')
+        $platformDeltas = New-Object System.Collections.Generic.List[string]
+        if ($GlobalAlignment.codex_delta_present) { $platformDeltas.Add([string]$GlobalAlignment.codex_path) | Out-Null }
+        if ($GlobalAlignment.claude_delta_present) { $platformDeltas.Add([string]$GlobalAlignment.claude_path) | Out-Null }
+        $constraints.Add([pscustomobject][ordered]@{
+            constraint_id = $id
+            common_intent = if ($codexHas -and $claudeHas) { 'declared_by_both_global_rules' } else { '' }
+            platform_deltas = @($platformDeltas.ToArray())
+            project_actions = @($matches | ForEach-Object { [string]$_.action })
+            enforcement_refs = @()
+            evidence = @($matches | ForEach-Object { $_.evidence } | ForEach-Object { $_ })
+            recovery_condition = if ($matches.Count -eq 0) { 'Add an evidence-backed repository action or an explicit N/A with recovery condition.' } else { '' }
+            need_kind = 'project_guidance'
+        }) | Out-Null
+    }
+    return Invoke-RuleAdvisor -Constraints @($constraints.ToArray())
+}
+
+function New-RuleEstateTargetAudit {
+    param($Target, [string]$CodexUserRoot, [string]$ClaudeUserRoot, $GlobalAlignment, [string]$CodexGlobalText, [string]$ClaudeGlobalText)
+    $codexDiscovery = Get-RuleDiscovery -RepoRoot $Target.path -CurrentDirectory $Target.path -HostName codex -UserRuleRoot $CodexUserRoot
+    $claudeDiscovery = Get-RuleDiscovery -RepoRoot $Target.path -CurrentDirectory $Target.path -HostName claude -UserRuleRoot $ClaudeUserRoot
+    $codexDiagnostics = Invoke-RuleDiagnostics $codexDiscovery ([pscustomobject]@{ max_bytes = 10240; max_lines = 80; blocking_codes = @('file_missing') })
+    $claudeDiagnostics = Invoke-RuleDiagnostics $claudeDiscovery ([pscustomobject]@{ max_bytes = 16384; max_lines = 130; blocking_codes = @('file_missing') })
+    $coverage = Get-RuleEstateCoverage $Target.agents_path $GlobalAlignment $CodexGlobalText $ClaudeGlobalText
+    $projectText = if ([System.IO.File]::Exists([string]$Target.agents_path)) { [System.IO.File]::ReadAllText([string]$Target.agents_path) } else { '' }
+    $globalRelease = Get-RuleEstateRelease $CodexGlobalText global
+    $projectRelease = Get-RuleEstateRelease $projectText project
+    $findings = New-Object System.Collections.Generic.List[object]
+    foreach ($finding in @($codexDiagnostics.findings) + @($claudeDiagnostics.findings)) {
+        $findingPath = [string](Get-OperationObjectProperty $finding 'path')
+        if (-not [string]::IsNullOrWhiteSpace($findingPath) -and (Test-RuleDiscoveryPathWithin $findingPath $Target.path)) { $findings.Add($finding) | Out-Null }
+    }
+    if (-not [bool]$Target.agents_exists) { $findings.Add([pscustomobject]@{ code = 'project_agents_missing'; severity = 'error'; path = $Target.agents_path; disposition = 'adapt'; message = 'Target repository has no AGENTS.md project contract.' }) | Out-Null }
+    if (-not [bool]$Target.claude_exists) { $findings.Add([pscustomobject]@{ code = 'project_claude_wrapper_missing'; severity = 'warning'; path = $Target.claude_path; disposition = 'adapt'; message = 'Target repository has no CLAUDE.md adapter or Claude-specific project rule.' }) | Out-Null }
+    if (-not [string]::IsNullOrWhiteSpace($globalRelease) -and $projectRelease -ne $globalRelease) { $findings.Add([pscustomobject]@{ code = 'project_global_release_mismatch'; severity = 'warning'; path = $Target.agents_path; disposition = 'adapt'; expected = $globalRelease; observed = $projectRelease; message = ('Project global-rule review is {0}; current global release is {1}.' -f $(if ([string]::IsNullOrWhiteSpace($projectRelease)) { 'undeclared' } else { $projectRelease }), $globalRelease) }) | Out-Null }
+    foreach ($item in @($coverage.coverage | Where-Object { $_.coverage -ne 'covered' })) { $findings.Add([pscustomobject]@{ code = 'global_repo_action_gap'; severity = 'warning'; path = $Target.agents_path; constraint_id = $item.constraint_id; disposition = 'adapt'; message = ('Constraint {0} coverage is {1}.' -f $item.constraint_id, $item.coverage) }) | Out-Null }
+    $patchCandidates = @()
+    if ([bool]$Target.agents_exists -and -not [bool]$Target.claude_exists) {
+        $desired = "@AGENTS.md`n"
+        $patchCandidates = @([pscustomobject][ordered]@{
+            finding_code = 'project_claude_wrapper_missing'; operation = 'create'; target_path = $Target.claude_path
+            desired_text = $desired; desired_hash = Get-RulePatchTextHash $desired; risk = 'low'; review_required = $true
+            verification = @('UTF-8 without BOM', 'first physical line equals @AGENTS.md', 'Claude native load remains separate')
+        })
+    }
+    return [pscustomobject][ordered]@{
+        name = $Target.name; path = $Target.path
+        codex = [pscustomobject][ordered]@{ documents = @($codexDiscovery.documents); findings = @($codexDiagnostics.findings); load_verification = 'not_run' }
+        claude = [pscustomobject][ordered]@{ documents = @($claudeDiscovery.documents); findings = @($claudeDiagnostics.findings); load_verification = 'not_run' }
+        responsibility = $coverage
+        release = [pscustomobject][ordered]@{ global = $globalRelease; project_review = $projectRelease; aligned = (-not [string]::IsNullOrWhiteSpace($globalRelease) -and $projectRelease -eq $globalRelease) }
+        findings = @($findings.ToArray())
+        patch_candidates = @($patchCandidates)
+        writes = 0; provider_calls = 0; native_mutations = 0
+    }
+}
+
+function Invoke-RuleEstateAudit {
+    param([string]$WorkspaceRoot, [string[]]$ExcludeNames, [object[]]$RegistryTargets, [string]$CodexUserRoot, [string]$ClaudeUserRoot, [int]$MaxTargets = 64)
+    $inventory = Get-RuleEstateTargets -WorkspaceRoot $WorkspaceRoot -ExcludeNames $ExcludeNames -RegistryTargets $RegistryTargets -MaxTargets $MaxTargets
+    $alignment = Get-RuleEstateGlobalAlignment $CodexUserRoot $ClaudeUserRoot
+    $codexGlobal = Get-RuleEstateGlobalDocument $CodexUserRoot codex
+    $claudeGlobal = Get-RuleEstateGlobalDocument $ClaudeUserRoot claude
+    $codexText = if ($null -eq $codexGlobal) { '' } else { [string]$codexGlobal.text }
+    $claudeText = if ($null -eq $claudeGlobal) { '' } else { [string]$claudeGlobal.text }
+    $audits = New-Object System.Collections.Generic.List[object]
+    foreach ($target in @($inventory.targets)) { $audits.Add((New-RuleEstateTargetAudit $target $CodexUserRoot $ClaudeUserRoot $alignment $codexText $claudeText)) | Out-Null }
+    $findings = @($alignment.findings) + @($audits | ForEach-Object { $_.findings })
+    if (-not $inventory.registry.in_sync) { $findings += [pscustomobject]@{ code = 'target_registry_drift'; severity = 'warning'; path = $inventory.workspace_root; disposition = 'adapt'; message = 'Configured audit targets differ from the discovered workspace Git roots.' } }
+    return [pscustomobject][ordered]@{
+        schema_version = 1; truth_boundary = 'workspace_static_audit'; generated_at = [datetimeoffset]::UtcNow.ToString('o')
+        inventory = $inventory; global_alignment = $alignment; targets = @($audits.ToArray())
+        summary = [pscustomobject][ordered]@{
+            target_count = $inventory.target_count; finding_count = @($findings).Count
+            patch_candidate_count = @($audits | ForEach-Object { $_.patch_candidates }).Count
+            covered_count = @($audits | ForEach-Object { $_.responsibility.coverage } | Where-Object coverage -eq 'covered').Count
+            gap_count = @($audits | ForEach-Object { $_.responsibility.coverage } | Where-Object coverage -ne 'covered').Count
+        }
+        findings = @($findings); patch_candidates = @($audits | ForEach-Object { $_.patch_candidates })
+        reference_basis = @(
+            [pscustomobject]@{ authority = 'official'; source = 'https://learn.chatgpt.com/docs/agent-configuration/agents-md'; disposition = 'adopt'; use = 'Codex global/project/nested discovery and precedence' },
+            [pscustomobject]@{ authority = 'official'; source = 'https://learn.chatgpt.com/docs/agent-configuration/rules'; disposition = 'adopt'; use = 'Separate prose guidance from deterministic command policy' },
+            [pscustomobject]@{ authority = 'local_reference'; source = 'D:\CODE-other\governed-ai-coding-runtime'; disposition = 'adapt'; use = 'common/platform_delta/project_action responsibility model; runtime remains retired' }
+        )
+        writes = 0; provider_calls = 0; native_mutations = 0; host_loaded = 'not_run'; live_accepted = 'not_run'
+    }
 }
 
 function New-RulePatchGuardFinding([string]$Code, [string]$Path, [string]$Message) {
@@ -2213,28 +2989,39 @@ function Test-RulePatchReparsePath([string]$Path, [string]$BoundaryRoot) {
 }
 
 function Test-RulePatchApplyGuard {
-    param([Parameter(Mandatory = $true)]$Plan, [Parameter(Mandatory = $true)][string]$FixtureRoot, [Parameter(Mandatory = $true)][string]$Token)
+    param([Parameter(Mandatory = $true)]$Plan, [Parameter(Mandatory = $true)][string]$BoundaryRoot, [Parameter(Mandatory = $true)][string]$Token)
     $findings = New-Object System.Collections.Generic.List[object]
     $contract = Test-RulePatchPlanContract $Plan
     foreach ($finding in @($contract.findings)) { $findings.Add($finding) | Out-Null }
-    $fixture = [System.IO.Path]::GetFullPath($FixtureRoot).TrimEnd('\', '/')
+    $boundary = [System.IO.Path]::GetFullPath($BoundaryRoot).TrimEnd('\', '/')
     $target = Get-OperationObjectProperty $Plan 'target'; $path = [System.IO.Path]::GetFullPath([string](Get-OperationObjectProperty $target 'path'))
     $authorized = [System.IO.Path]::GetFullPath([string](Get-OperationObjectProperty $target 'authorized_root')).TrimEnd('\', '/')
-    $root = [System.IO.Path]::GetPathRoot($fixture).TrimEnd('\', '/')
-    if ($fixture.Equals($root, [System.StringComparison]::OrdinalIgnoreCase)) { $findings.Add((New-RulePatchGuardFinding 'fixture_root_is_drive_root' '$.target.authorized_root' 'Drive roots are never valid fixture roots.')) | Out-Null }
-    if (-not [System.IO.File]::Exists((Join-Path $fixture '.skills-manager-fixture'))) { $findings.Add((New-RulePatchGuardFinding 'fixture_marker_missing' '$.target.authorized_root' 'Fixture executor requires a .skills-manager-fixture marker.')) | Out-Null }
-    if (-not (Test-RuleDiscoveryPathWithin $authorized $fixture) -or -not (Test-RuleDiscoveryPathWithin $path $authorized)) { $findings.Add((New-RulePatchGuardFinding 'target_out_of_fixture_root' '$.target.path' 'Target and authorized root must remain inside the explicit fixture root.')) | Out-Null }
-    if (Test-RulePatchReparsePath $path $fixture) { $findings.Add((New-RulePatchGuardFinding 'reparse_path_forbidden' '$.target.path' 'Reparse points are not accepted by the fixture executor.')) | Out-Null }
+    $scope = [string](Get-OperationObjectProperty (Get-OperationObjectProperty $Plan 'apply') 'boundary_scope')
+    $root = [System.IO.Path]::GetPathRoot($boundary).TrimEnd('\', '/')
+    if ($boundary.Equals($root, [System.StringComparison]::OrdinalIgnoreCase)) { $findings.Add((New-RulePatchGuardFinding $(if ($scope -eq 'fixture') { 'fixture_root_is_drive_root' } else { 'authorized_root_is_drive_root' }) '$.target.authorized_root' 'Drive roots are never valid authorization roots.')) | Out-Null }
+    if ($scope -eq 'fixture') {
+        if (-not [System.IO.File]::Exists((Join-Path $boundary '.skills-manager-fixture'))) { $findings.Add((New-RulePatchGuardFinding 'fixture_marker_missing' '$.target.authorized_root' 'Fixture executor requires a .skills-manager-fixture marker.')) | Out-Null }
+    }
+    elseif ($scope -eq 'repository') {
+        if (-not [System.IO.Directory]::Exists((Join-Path $boundary '.git')) -and -not [System.IO.File]::Exists((Join-Path $boundary '.git'))) { $findings.Add((New-RulePatchGuardFinding 'repository_marker_missing' '$.target.authorized_root' 'Repository executor requires a .git marker.')) | Out-Null }
+        if (-not $authorized.Equals($boundary, [System.StringComparison]::OrdinalIgnoreCase)) { $findings.Add((New-RulePatchGuardFinding 'repository_root_mismatch' '$.target.authorized_root' 'Plan and CLI repository roots must match exactly.')) | Out-Null }
+        if ([System.IO.Path]::GetFileName($path) -notin @('AGENTS.md', 'AGENTS.override.md', 'CLAUDE.md')) { $findings.Add((New-RulePatchGuardFinding 'repository_target_name_forbidden' '$.target.path' 'Repository apply only accepts known rule filenames.')) | Out-Null }
+    }
+    if (-not (Test-RuleDiscoveryPathWithin $authorized $boundary) -or -not (Test-RuleDiscoveryPathWithin $path $authorized)) { $findings.Add((New-RulePatchGuardFinding $(if ($scope -eq 'fixture') { 'target_out_of_fixture_root' } else { 'target_out_of_authorized_root' }) '$.target.path' 'Target and authorized root must remain inside the explicit boundary.')) | Out-Null }
+    if (Test-RulePatchReparsePath $path $boundary) { $findings.Add((New-RulePatchGuardFinding 'reparse_path_forbidden' '$.target.path' 'Reparse points are not accepted by the rule executor.')) | Out-Null }
     $requiredToken = [string](Get-OperationObjectProperty (Get-OperationObjectProperty $Plan 'apply') 'required_token')
     if ([string]::IsNullOrWhiteSpace($requiredToken) -or $Token -cne $requiredToken) { $findings.Add((New-RulePatchGuardFinding 'apply_token_invalid' '$.apply.required_token' 'Explicit apply token does not match.')) | Out-Null }
-    if (-not [System.IO.File]::Exists($path)) { $findings.Add((New-RulePatchGuardFinding 'target_missing' '$.target.path' 'Fixture target must already exist.')) | Out-Null }
-    else {
+    $operation = [string](Get-OperationObjectProperty $target 'operation')
+    if ($operation -eq 'create' -and [System.IO.File]::Exists($path)) { $findings.Add((New-RulePatchGuardFinding 'create_target_exists' '$.target.path' 'Create target already exists.')) | Out-Null }
+    elseif ($operation -eq 'create' -and (Get-RulePatchTextHash '') -ne [string](Get-OperationObjectProperty $target 'before_hash')) { $findings.Add((New-RulePatchGuardFinding 'create_before_hash_invalid' '$.target.before_hash' 'Create plans must use the empty-text before hash.')) | Out-Null }
+    elseif ($operation -eq 'update' -and -not [System.IO.File]::Exists($path)) { $findings.Add((New-RulePatchGuardFinding 'target_missing' '$.target.path' 'Update target must already exist.')) | Out-Null }
+    elseif ($operation -eq 'update') {
         $current = [System.IO.File]::ReadAllText($path); $currentHash = Get-RulePatchTextHash $current
         if ($currentHash -ne [string](Get-OperationObjectProperty $target 'before_hash')) { $findings.Add((New-RulePatchGuardFinding 'target_hash_stale' '$.target.before_hash' 'Target content changed after planning.')) | Out-Null }
     }
     $desiredText = [string](Get-OperationObjectProperty $Plan 'desired_text')
     if ((Get-RulePatchTextHash $desiredText) -ne [string](Get-OperationObjectProperty $target 'desired_hash')) { $findings.Add((New-RulePatchGuardFinding 'desired_hash_mismatch' '$.target.desired_hash' 'Desired text does not match its declared hash.')) | Out-Null }
-    return [pscustomobject][ordered]@{ pass = ($findings.Count -eq 0); findings = @($findings.ToArray()); target_path = $path; fixture_root = $fixture; writes = 0 }
+    return [pscustomobject][ordered]@{ pass = ($findings.Count -eq 0); findings = @($findings.ToArray()); target_path = $path; boundary_root = $boundary; writes = 0 }
 }
 
 function Remove-RulePatchTransactionFile([string]$Path) {
@@ -2244,18 +3031,19 @@ function Remove-RulePatchTransactionFile([string]$Path) {
 function Invoke-RulePatchApply {
     param(
         [Parameter(Mandatory = $true)]$Plan,
-        [Parameter(Mandatory = $true)][string]$FixtureRoot,
+        [Parameter(Mandatory = $true)][string]$BoundaryRoot,
         [Parameter(Mandatory = $true)][string]$Token,
         [ValidateSet('none', 'before_stage', 'after_stage', 'before_replace', 'after_replace', 'before_receipt', 'after_replace_rollback_failure')][string]$TestFaultPoint = 'none'
     )
-    $guard = Test-RulePatchApplyGuard $Plan $FixtureRoot $Token
+    $guard = Test-RulePatchApplyGuard $Plan $BoundaryRoot $Token
     if (-not $guard.pass) { return [pscustomobject][ordered]@{ pass = $false; status = 'blocked'; findings = @($guard.findings); receipt = $null; writes = 0; rollback = 'not_required' } }
     $targetPath = [string]$guard.target_path
     $targetDir = [System.IO.Path]::GetDirectoryName($targetPath)
     $suffix = [string](Get-OperationObjectProperty $Plan 'patch_id')
     $stagePath = Join-Path $targetDir ('.{0}.stage' -f $suffix)
     $backupPath = Join-Path $targetDir ('.{0}.backup' -f $suffix)
-    $beforeBytes = [System.IO.File]::ReadAllBytes($targetPath)
+    $operation = [string](Get-OperationObjectProperty (Get-OperationObjectProperty $Plan 'target') 'operation')
+    $beforeBytes = if ($operation -eq 'update') { [System.IO.File]::ReadAllBytes($targetPath) } else { [byte[]]@() }
     $started = [datetimeoffset]::UtcNow.ToString('o')
     $replaced = $false; $rollbackState = 'not_required'; $failure = $null
     try {
@@ -2263,17 +3051,21 @@ function Invoke-RulePatchApply {
         $desiredBytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes([string](Get-OperationObjectProperty $Plan 'desired_text'))
         [System.IO.File]::WriteAllBytes($stagePath, $desiredBytes)
         if ($TestFaultPoint -eq 'after_stage') { throw 'test_fault:after_stage' }
-        $freshText = [System.IO.File]::ReadAllText($targetPath)
-        if ((Get-RulePatchTextHash $freshText) -ne [string](Get-OperationObjectProperty (Get-OperationObjectProperty $Plan 'target') 'before_hash')) { throw 'target_hash_stale_before_replace' }
+        if ($operation -eq 'update') {
+            $freshText = [System.IO.File]::ReadAllText($targetPath)
+            if ((Get-RulePatchTextHash $freshText) -ne [string](Get-OperationObjectProperty (Get-OperationObjectProperty $Plan 'target') 'before_hash')) { throw 'target_hash_stale_before_replace' }
+        }
+        elseif ([System.IO.File]::Exists($targetPath)) { throw 'create_target_appeared_before_replace' }
         if ($TestFaultPoint -eq 'before_replace') { throw 'test_fault:before_replace' }
-        [System.IO.File]::Replace($stagePath, $targetPath, $backupPath, $true)
+        if ($operation -eq 'update') { [System.IO.File]::Replace($stagePath, $targetPath, $backupPath, $true) }
+        else { [System.IO.File]::Move($stagePath, $targetPath) }
         $replaced = $true
         if ($TestFaultPoint -in @('after_replace', 'after_replace_rollback_failure')) { throw ('test_fault:{0}' -f $TestFaultPoint) }
         $appliedHash = Get-RulePatchTextHash ([System.IO.File]::ReadAllText($targetPath))
         if ($appliedHash -ne [string](Get-OperationObjectProperty (Get-OperationObjectProperty $Plan 'target') 'desired_hash')) { throw 'desired_hash_not_applied' }
         if ($TestFaultPoint -eq 'before_receipt') { throw 'test_fault:before_receipt' }
         Remove-RulePatchTransactionFile $backupPath
-        $receipt = New-OperationReceipt -OperationId ([string](Get-OperationObjectProperty $Plan 'operation_id')) -Status applied -StartedAt $started -CompletedAt ([datetimeoffset]::UtcNow.ToString('o')) -Actions @([pscustomobject]@{ action_id = [string](Get-OperationObjectProperty $Plan 'patch_id'); status = 'applied'; target_ref = 'rule-target' }) -Verification ([pscustomobject]@{ static_validated = 'pass'; repo_gates_passed = 'not_run'; host_loaded = 'not_run'; live_accepted = 'not_run' }) -Rollback @('restore_before_bytes')
+        $receipt = New-OperationReceipt -OperationId ([string](Get-OperationObjectProperty $Plan 'operation_id')) -Status applied -StartedAt $started -CompletedAt ([datetimeoffset]::UtcNow.ToString('o')) -Actions @([pscustomobject]@{ action_id = [string](Get-OperationObjectProperty $Plan 'patch_id'); status = 'applied'; target_ref = 'rule-target' }) -Verification ([pscustomobject]@{ static_validated = 'pass'; repo_gates_passed = 'not_run'; host_loaded = 'not_run'; live_accepted = 'not_run' }) -Rollback @($(if ($operation -eq 'create') { 'delete_created_file' } else { 'restore_before_bytes' }))
         return [pscustomobject][ordered]@{ pass = $true; status = 'applied'; findings = @(); receipt = $receipt; writes = 1; rollback = 'not_required' }
     }
     catch {
@@ -2281,7 +3073,11 @@ function Invoke-RulePatchApply {
         if ($replaced) {
             if ($TestFaultPoint -eq 'after_replace_rollback_failure') { $rollbackState = 'rollback_failed' }
             else {
-                try { Write-BytesAtomic -Path $targetPath -Bytes $beforeBytes; $rollbackState = 'restored' }
+                try {
+                    if ($operation -eq 'create') { [System.IO.File]::Delete($targetPath) }
+                    else { Write-BytesAtomic -Path $targetPath -Bytes $beforeBytes }
+                    $rollbackState = 'restored'
+                }
                 catch { $rollbackState = 'rollback_failed'; $failure = '{0}; rollback: {1}' -f $failure, $_.Exception.Message }
             }
         }
@@ -11475,6 +12271,57 @@ function Invoke-CapabilityInventoryCommand([object[]]$Tokens = @()) {
     return [pscustomobject]@{ exit_code = $(if ($envelope.pass) { 0 } else { 1 }); output = $(if ($options.json) { $json } else { 'Capability inventory: descriptors={0}, findings={1}' -f @($inventory.descriptors).Count, @($inventory.findings).Count }); json = [bool]$options.json; envelope = $envelope }
 }
 
+function Parse-PluginCliOptions([object[]]$Tokens, [string[]]$ValueOptions) {
+    $result = [ordered]@{ json = $false }
+    for ($i = 0; $i -lt @($Tokens).Count; $i++) {
+        $token = [string]$Tokens[$i]
+        if ($token -eq '--json') { $result.json = $true; continue }
+        if ($ValueOptions -contains $token) {
+            if ($i + 1 -ge @($Tokens).Count) { throw ('{0} requires a value.' -f $token) }
+            $i++; $result[$token.TrimStart('-').Replace('-', '_')] = [string]$Tokens[$i]; continue
+        }
+        throw ('Unknown plugin option: {0}' -f $token)
+    }
+    return [pscustomobject]$result
+}
+function New-PluginCommandResult([string]$Command, $Data, [bool]$Json) {
+    $pass = [bool](Get-OperationObjectProperty $Data 'pass')
+    $envelope = [pscustomobject][ordered]@{ schema_version = 1; command = $Command; pass = $pass; truth_boundary = 'repo_or_fixture_only'; data = $Data }
+    $text = if ($Json) { $envelope | ConvertTo-Json -Depth 40 -Compress } else { '{0}: pass={1}' -f $Command, $pass }
+    return [pscustomobject]@{ exit_code = $(if ($pass) { 0 } else { 2 }); output = $text; json = $Json; envelope = $envelope }
+}
+
+function Invoke-PluginInventoryCommand([object[]]$Tokens = @()) {
+    $options = Parse-PluginCliOptions $Tokens @('--official', '--personal', '--workspace')
+    if ([string]::IsNullOrWhiteSpace([string]$options.official)) { throw '--official snapshot is required.' }
+    $official = [System.IO.File]::ReadAllText([System.IO.Path]::GetFullPath($options.official)) | ConvertFrom-Json
+    $personal = if ([string]::IsNullOrWhiteSpace([string]$options.personal)) { $null } else { [System.IO.File]::ReadAllText([System.IO.Path]::GetFullPath($options.personal)) | ConvertFrom-Json }
+    $workspace = if ([string]::IsNullOrWhiteSpace([string]$options.workspace)) { $null } else { [System.IO.File]::ReadAllText([System.IO.Path]::GetFullPath($options.workspace)) | ConvertFrom-Json }
+    return New-PluginCommandResult 'plugin-inventory' (New-PluginInventoryFromSnapshots $official $personal $workspace) ([bool]$options.json)
+}
+
+function Invoke-PluginLintCommand([object[]]$Tokens = @()) {
+    $options = Parse-PluginCliOptions $Tokens @('--path')
+    $root = [System.IO.Path]::GetFullPath([string]$options.path)
+    $manifestPath = Join-Path $root '.codex-plugin\plugin.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'Plugin manifest does not exist.' }
+    $manifest = [System.IO.File]::ReadAllText($manifestPath) | ConvertFrom-Json
+    return New-PluginCommandResult 'plugin-lint' (Test-PluginManifestContract $manifest $root $true) ([bool]$options.json)
+}
+
+function Invoke-PluginExportCommand([object[]]$Tokens = @()) {
+    $options = Parse-PluginCliOptions $Tokens @('--candidate', '--fixture-root', '--out', '--token')
+    $candidate = [System.IO.File]::ReadAllText([System.IO.Path]::GetFullPath([string]$options.candidate)) | ConvertFrom-Json
+    $data = Export-PluginFixture $candidate ([string]$options.fixture_root) ([string]$options.out) ([string]$options.token)
+    return New-PluginCommandResult 'plugin-export' $data ([bool]$options.json)
+}
+
+function Invoke-PluginEvalCommand([object[]]$Tokens = @()) {
+    $options = Parse-PluginCliOptions $Tokens @('--path', '--model-snapshot')
+    $model = if ([string]::IsNullOrWhiteSpace([string]$options.model_snapshot)) { $null } else { [System.IO.File]::ReadAllText([System.IO.Path]::GetFullPath($options.model_snapshot)) | ConvertFrom-Json }
+    return New-PluginCommandResult 'plugin-eval' (New-PluginEvaluationReport ([System.IO.Path]::GetFullPath([string]$options.path)) $model) ([bool]$options.json)
+}
+
 function Parse-RuleAuditOptions([object[]]$Tokens) {
     $result = [ordered]@{ repo = $null; current_directory = $null; user_root = $null; host = 'codex'; json = $false; out_path = $null }
     for ($i = 0; $i -lt @($Tokens).Count; $i++) {
@@ -11500,15 +12347,17 @@ function Invoke-RuleAuditCommand([object[]]$Tokens = @()) {
     $discovery = Get-RuleDiscovery -RepoRoot $options.repo -CurrentDirectory $options.current_directory -HostName $options.host -UserRuleRoot $options.user_root
     $profile = [pscustomobject]@{ max_bytes = $(if ($options.host -eq 'codex') { 10240 } else { 16384 }); max_lines = $(if ($options.host -eq 'codex') { 80 } else { 130 }); blocking_codes = @('file_missing') }
     $diagnostics = Invoke-RuleDiagnostics $discovery $profile
-    $advisor = Invoke-RuleAdvisor -Documents $diagnostics.documents
+    $constraints = @(Get-RuleAuditResponsibilityConstraints -Documents $diagnostics.documents)
+    $advisor = Invoke-RuleAdvisor -Documents $diagnostics.documents -Constraints $constraints
     $repoScan = New-AuditRepoScan 'rule-audit' ([System.IO.Path]::GetFullPath($options.repo)) $options.repo
     $truth = New-RuleRepoTruthIndex -RepoRoot $options.repo -RepoScan $repoScan
+    $referenceChecks = Test-RuleRepoReferences -TruthIndex $truth -References @(Get-RuleAuditReferences -Documents $diagnostics.documents)
     $blockingCount = [int]$diagnostics.blocking_count
     $reportRequested = -not [string]::IsNullOrWhiteSpace([string]$options.out_path)
     $envelope = [pscustomobject][ordered]@{
         schema_version = 1; command = 'rule-audit'; pass = ($blockingCount -eq 0); exit_code = $(if ($blockingCount -gt 0) { 2 } else { 0 })
         truth_boundary = 'repo_static_audit'; discovery = $discovery; diagnostics = $diagnostics; advisor = $advisor
-        repo_truth = $truth; provider_calls = 0; native_mutations = 0; profile_changed = $false; writes = $(if ($reportRequested) { 1 } else { 0 })
+        repo_truth = $truth; repo_reference_checks = $referenceChecks; provider_calls = 0; native_mutations = 0; profile_changed = $false; writes = $(if ($reportRequested) { 1 } else { 0 })
     }
     $json = $envelope | ConvertTo-Json -Depth 40 -Compress
     if (-not [string]::IsNullOrWhiteSpace([string]$options.out_path)) {
@@ -11519,16 +12368,72 @@ function Invoke-RuleAuditCommand([object[]]$Tokens = @()) {
     return [pscustomobject]@{ exit_code = [int]$envelope.exit_code; output = $(if ($options.json) { $json } else { 'Rule audit: documents={0}, deterministic={1}, semantic={2}, blockers={3}' -f @($discovery.documents).Count, @($diagnostics.findings).Count, @($advisor.findings).Count, $blockingCount }); json = [bool]$options.json; envelope = $envelope }
 }
 
+function Parse-RuleEstateAuditOptions([object[]]$Tokens) {
+    $userHome = [Environment]::GetFolderPath('UserProfile')
+    $result = [ordered]@{
+        workspace_root = $null; exclude_names = @('external', '文档'); registry_path = $null
+        codex_user_root = (Join-Path $userHome '.codex'); claude_user_root = (Join-Path $userHome '.claude')
+        max_targets = 64; out_path = $null; json = $false
+    }
+    for ($i = 0; $i -lt @($Tokens).Count; $i++) {
+        $token = [string]$Tokens[$i]
+        if ($token -eq '--json') { $result.json = $true; continue }
+        if ($token -notin @('--workspace-root', '--exclude', '--registry', '--codex-user-root', '--claude-user-root', '--max-targets', '--out')) { throw ('Unknown rule-estate-audit option: {0}' -f $token) }
+        if ($i + 1 -ge @($Tokens).Count) { throw ('{0} requires a value.' -f $token) }
+        $i++; $value = [string]$Tokens[$i]
+        switch ($token) {
+            '--workspace-root' { $result.workspace_root = $value }
+            '--exclude' { $result.exclude_names += $value }
+            '--registry' { $result.registry_path = $value }
+            '--codex-user-root' { $result.codex_user_root = $value }
+            '--claude-user-root' { $result.claude_user_root = $value }
+            '--max-targets' { $result.max_targets = [int]$value }
+            '--out' { $result.out_path = $value }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$result.workspace_root)) { throw '--workspace-root is required.' }
+    return [pscustomobject]$result
+}
+
+function Invoke-RuleEstateAuditCommand([object[]]$Tokens = @()) {
+    $options = Parse-RuleEstateAuditOptions $Tokens
+    $registryTargets = @()
+    if (-not [string]::IsNullOrWhiteSpace([string]$options.registry_path)) {
+        $registryPath = [System.IO.Path]::GetFullPath([string]$options.registry_path)
+        if (-not [System.IO.File]::Exists($registryPath)) { throw ('Registry file does not exist: {0}' -f $registryPath) }
+        $registry = [System.IO.File]::ReadAllText($registryPath) | ConvertFrom-Json
+        $registryTargets = @($registry.targets)
+    }
+    $report = Invoke-RuleEstateAudit -WorkspaceRoot $options.workspace_root -ExcludeNames $options.exclude_names -RegistryTargets $registryTargets -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -MaxTargets $options.max_targets
+    $reportRequested = -not [string]::IsNullOrWhiteSpace([string]$options.out_path)
+    $envelope = [pscustomobject][ordered]@{
+        schema_version = 1; command = 'rule-estate-audit'; pass = $true; exit_code = 0; truth_boundary = $report.truth_boundary
+        report = $report; writes = $(if ($reportRequested) { 1 } else { 0 }); provider_calls = 0; native_mutations = 0
+    }
+    $json = $envelope | ConvertTo-Json -Depth 60 -Compress
+    if ($reportRequested) {
+        $outPath = [System.IO.Path]::GetFullPath([string]$options.out_path)
+        foreach ($target in @($report.inventory.targets)) {
+            if ($outPath.Equals([System.IO.Path]::GetFullPath([string]$target.agents_path), [System.StringComparison]::OrdinalIgnoreCase) -or $outPath.Equals([System.IO.Path]::GetFullPath([string]$target.claude_path), [System.StringComparison]::OrdinalIgnoreCase)) { throw '--out cannot overwrite a target rule file.' }
+        }
+        Write-Utf8FileAtomic -Path $outPath -Content $json
+    }
+    $output = if ($options.json) { $json } else { 'Rule estate audit: targets={0}, findings={1}, gaps={2}, patch_candidates={3}' -f $report.summary.target_count, $report.summary.finding_count, $report.summary.gap_count, $report.summary.patch_candidate_count }
+    return [pscustomobject]@{ exit_code = 0; output = $output; json = [bool]$options.json; envelope = $envelope }
+}
+
 function Parse-RulePatchCliOptions([object[]]$Tokens, [ValidateSet('plan', 'apply')][string]$Mode) {
-    $result = [ordered]@{ target=$null; desired_file=$null; fixture_root=$null; plan_path=$null; token=$null; out_path=$null; json=$false }
+    $result = [ordered]@{ target=$null; desired_file=$null; fixture_root=$null; repo_root=$null; allow_create=$false; plan_path=$null; token=$null; out_path=$null; json=$false }
     for($i=0;$i -lt @($Tokens).Count;$i++) {
         $token=[string]$Tokens[$i]
         if($token -eq '--json') { $result.json=$true; continue }
-        if($token -notin @('--target','--desired-file','--fixture-root','--plan','--token','--out')) { throw ('Unknown rule-{0} option: {1}' -f $Mode,$token) }
+        if($token -eq '--allow-create') { $result.allow_create=$true; continue }
+        if($token -notin @('--target','--desired-file','--fixture-root','--repo-root','--plan','--token','--out')) { throw ('Unknown rule-{0} option: {1}' -f $Mode,$token) }
         if($i+1 -ge @($Tokens).Count) { throw ('{0} requires a value.' -f $token) };$i++;$value=[string]$Tokens[$i]
-        switch($token) { '--target'{$result.target=$value};'--desired-file'{$result.desired_file=$value};'--fixture-root'{$result.fixture_root=$value};'--plan'{$result.plan_path=$value};'--token'{$result.token=$value};'--out'{$result.out_path=$value} }
+        switch($token) { '--target'{$result.target=$value};'--desired-file'{$result.desired_file=$value};'--fixture-root'{$result.fixture_root=$value};'--repo-root'{$result.repo_root=$value};'--plan'{$result.plan_path=$value};'--token'{$result.token=$value};'--out'{$result.out_path=$value} }
     }
-    if([string]::IsNullOrWhiteSpace($result.fixture_root)) { throw '--fixture-root is required.' }
+    $hasFixture = -not [string]::IsNullOrWhiteSpace($result.fixture_root); $hasRepo = -not [string]::IsNullOrWhiteSpace($result.repo_root)
+    if($hasFixture -eq $hasRepo) { throw 'Specify exactly one of --fixture-root or --repo-root.' }
     if($Mode -eq 'plan' -and ([string]::IsNullOrWhiteSpace($result.target) -or [string]::IsNullOrWhiteSpace($result.desired_file))) { throw 'rule-plan requires --target and --desired-file.' }
     if($Mode -eq 'apply' -and ([string]::IsNullOrWhiteSpace($result.plan_path) -or [string]::IsNullOrWhiteSpace($result.token))) { throw 'rule-apply requires --plan and --token.' }
     return [pscustomobject]$result
@@ -11537,6 +12442,12 @@ function Parse-RulePatchCliOptions([object[]]$Tokens, [ValidateSet('plan', 'appl
 function Assert-RulePatchFixtureRoot([string]$FixtureRoot) {
     $root=[IO.Path]::GetFullPath($FixtureRoot)
     if(-not [IO.Directory]::Exists($root) -or -not [IO.File]::Exists((Join-Path $root '.skills-manager-fixture'))) { throw 'Fixture root must exist and contain .skills-manager-fixture.' }
+    return $root
+}
+
+function Assert-RulePatchRepoRoot([string]$RepoRoot) {
+    $root=[IO.Path]::GetFullPath($RepoRoot)
+    if(-not [IO.Directory]::Exists($root) -or (-not [IO.Directory]::Exists((Join-Path $root '.git')) -and -not [IO.File]::Exists((Join-Path $root '.git')))) { throw 'Repository root must exist and contain a .git marker.' }
     return $root
 }
 
@@ -11553,27 +12464,37 @@ function Resolve-RulePatchOutputPath([string]$OutPath, [string]$FixtureRoot, [st
 }
 
 function Invoke-RulePlanCommand([object[]]$Tokens=@()) {
-    $options=Parse-RulePatchCliOptions $Tokens plan;$fixture=Assert-RulePatchFixtureRoot $options.fixture_root
+    $options=Parse-RulePatchCliOptions $Tokens plan
+    $scope=if(-not [string]::IsNullOrWhiteSpace($options.repo_root)){'repository'}else{'fixture'}
+    $boundary=if($scope -eq 'repository'){Assert-RulePatchRepoRoot $options.repo_root}else{Assert-RulePatchFixtureRoot $options.fixture_root}
     $target=[IO.Path]::GetFullPath($options.target);$desiredFile=[IO.Path]::GetFullPath($options.desired_file)
-    if(-not (Test-RuleDiscoveryPathWithin $target $fixture) -or -not (Test-RuleDiscoveryPathWithin $desiredFile $fixture)) { throw 'Target and desired file must remain inside fixture root.' }
-    $outPath=Resolve-RulePatchOutputPath $options.out_path $fixture @($target,$desiredFile)
-    $plan=New-RulePatchPlan -TargetPath $target -AuthorizedRoot $fixture -CurrentText ([IO.File]::ReadAllText($target)) -DesiredText ([IO.File]::ReadAllText($desiredFile)) -DesiredSource reviewed_file
+    if(-not (Test-RuleDiscoveryPathWithin $target $boundary) -or -not (Test-RuleDiscoveryPathWithin $desiredFile $boundary)) { throw 'Target and desired file must remain inside the authorized root.' }
+    if(-not [IO.File]::Exists($desiredFile)){throw 'Desired file does not exist.'}
+    $operation=if($options.allow_create){'create'}else{'update'}
+    if($operation -eq 'create' -and [IO.File]::Exists($target)){throw '--allow-create requires an absent target.'}
+    if($operation -eq 'update' -and -not [IO.File]::Exists($target)){throw 'Update target does not exist; use --allow-create for a reviewed new rule file.'}
+    $outPath=Resolve-RulePatchOutputPath $options.out_path $boundary @($target,$desiredFile)
+    $currentText=if($operation -eq 'create'){''}else{[IO.File]::ReadAllText($target)}
+    $plan=New-RulePatchPlan -TargetPath $target -AuthorizedRoot $boundary -CurrentText $currentText -DesiredText ([IO.File]::ReadAllText($desiredFile)) -DesiredSource reviewed_file -AuthorizationScope $scope -TargetOperation $operation
     $validation=Test-RulePatchPlanContract $plan;$exit=if($validation.pass){0}else{2}
-    $envelope=[pscustomobject][ordered]@{schema_version=1;command='rule-plan';pass=$validation.pass;exit_code=$exit;truth_boundary='fixture_only';plan=$plan;findings=@($validation.findings);target_writes=0;host_writes=0;provider_calls=0;native_mutations=0}
+    $envelope=[pscustomobject][ordered]@{schema_version=1;command='rule-plan';pass=$validation.pass;exit_code=$exit;truth_boundary=$(if($scope -eq 'fixture'){'fixture_only'}else{'single_repository'});plan=$plan;findings=@($validation.findings);target_writes=0;host_writes=0;provider_calls=0;native_mutations=0}
     $json=$envelope|ConvertTo-Json -Depth 40 -Compress
     if($null -ne $outPath){Write-Utf8FileAtomic -Path $outPath -Content $json}
     return [pscustomobject]@{exit_code=$exit;json=[bool]$options.json;output=$(if($options.json){$json}else{'Rule plan: pass={0}, changes={1}' -f $envelope.pass,$plan.diff.has_changes});envelope=$envelope}
 }
 
 function Invoke-RuleApplyCommand([object[]]$Tokens=@()) {
-    $options=Parse-RulePatchCliOptions $Tokens apply;$fixture=Assert-RulePatchFixtureRoot $options.fixture_root
-    $planPath=[IO.Path]::GetFullPath($options.plan_path);if(-not (Test-RuleDiscoveryPathWithin $planPath $fixture)){throw 'Plan file must remain inside fixture root.'}
+    $options=Parse-RulePatchCliOptions $Tokens apply
+    $scope=if(-not [string]::IsNullOrWhiteSpace($options.repo_root)){'repository'}else{'fixture'}
+    $boundary=if($scope -eq 'repository'){Assert-RulePatchRepoRoot $options.repo_root}else{Assert-RulePatchFixtureRoot $options.fixture_root}
+    $planPath=[IO.Path]::GetFullPath($options.plan_path);if(-not (Test-RuleDiscoveryPathWithin $planPath $boundary)){throw 'Plan file must remain inside the authorized root.'}
     $planDocument=[IO.File]::ReadAllText($planPath)|ConvertFrom-Json
     $plan=if([string](Get-OperationObjectProperty $planDocument 'command') -eq 'rule-plan'){Get-OperationObjectProperty $planDocument 'plan'}else{$planDocument}
     $targetPath=[string](Get-OperationObjectProperty (Get-OperationObjectProperty $plan 'target') 'path')
-    $outPath=Resolve-RulePatchOutputPath $options.out_path $fixture @($planPath,$targetPath)
-    $result=Invoke-RulePatchApply $plan $fixture $options.token;$exit=if($result.pass){0}else{2}
-    $envelope=[pscustomobject][ordered]@{schema_version=1;command='rule-apply';pass=$result.pass;exit_code=$exit;truth_boundary='fixture_only';result=$result;host_writes=0;provider_calls=0;native_mutations=0}
+    $planScope=[string](Get-OperationObjectProperty (Get-OperationObjectProperty $plan 'apply') 'boundary_scope');if($planScope -ne $scope){throw 'CLI authorization root type does not match the plan.'}
+    $outPath=Resolve-RulePatchOutputPath $options.out_path $boundary @($planPath,$targetPath)
+    $result=Invoke-RulePatchApply $plan $boundary $options.token;$exit=if($result.pass){0}else{2}
+    $envelope=[pscustomobject][ordered]@{schema_version=1;command='rule-apply';pass=$result.pass;exit_code=$exit;truth_boundary=$(if($scope -eq 'fixture'){'fixture_only'}else{'single_repository'});result=$result;host_writes=0;provider_calls=0;native_mutations=0}
     $json=$envelope|ConvertTo-Json -Depth 40 -Compress
     if($null -ne $outPath){Write-Utf8FileAtomic -Path $outPath -Content $json}
     return [pscustomobject]@{exit_code=$exit;json=[bool]$options.json;output=$(if($options.json){$json}else{'Rule apply: status={0}' -f $result.status});envelope=$envelope}
@@ -19676,6 +20597,18 @@ MCP：
   .\skills.ps1 MCP配置 列表
   .\skills.ps1 MCP配置 使用 default|coding|dotnet|browser|database|off
 
+Plugin（P3 repo/fixture-only）：
+  .\skills.ps1 plugin-inventory --official <snapshot.json> [--personal <snapshot.json>] [--workspace <snapshot.json>] --json
+  .\skills.ps1 plugin-lint --path <plugin-root> --json
+  .\skills.ps1 plugin-export --candidate <candidate.json> --fixture-root <root> --out <new-folder> --token EXPORT_PLUGIN_FIXTURE --json
+  .\skills.ps1 plugin-eval --path <plugin-root> --json
+  不执行 plugin install、marketplace mutation、provider call 或 host/profile 写入。
+
+规则治理（只读）：
+  .\skills.ps1 rule-audit --repo <repo-root> [--user-root <path>] [--host codex|claude] --json
+  .\skills.ps1 rule-estate-audit --workspace-root D:\CODE --registry audit-targets.json [--out <report.json>] --json
+  全域审查自动发现工作区直属 Git 仓；默认排除 external 与文档，只写显式 --out 报告。
+
 技能投影：
   .\skills.ps1 技能配置 列表
   .\skills.ps1 技能配置 使用 default|coding|coding-strict|engineering|python|mcp|review|dotnet|ppt|content|marketing|physics|video|design|browser|database
@@ -20068,8 +21001,14 @@ if ($MyInvocation.InvocationName -ne '.') {
             "audit-targets" { Invoke-AuditTargetsCommand (Merge-FilterAndArgs $Filter $args) }
             "能力清单" { $result = Invoke-CapabilityInventoryCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
             "capability-inventory" { $result = Invoke-CapabilityInventoryCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
+            "plugin-inventory" { $result = Invoke-PluginInventoryCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
+            "plugin-lint" { $result = Invoke-PluginLintCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
+            "plugin-export" { $result = Invoke-PluginExportCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
+            "plugin-eval" { $result = Invoke-PluginEvalCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
             "规则审查" { $result = Invoke-RuleAuditCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
             "rule-audit" { $result = Invoke-RuleAuditCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
+            "规则全域审查" { $result = Invoke-RuleEstateAuditCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
+            "rule-estate-audit" { $result = Invoke-RuleEstateAuditCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
             "规则计划" { $result=Invoke-RulePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "rule-plan" { $result=Invoke-RulePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "规则应用" { $tokens=Merge-FilterAndArgs $Filter $args;if($Plan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }

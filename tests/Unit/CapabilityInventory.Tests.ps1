@@ -38,6 +38,22 @@ Describe 'Read-only capability inventory' {
         ($descriptors | ConvertTo-Json -Depth 20 -Compress) | Should Not Match 'secret-arg'
     }
 
+    It 'converts the real array-shaped config domains into runtime descriptors' {
+        $config = [pscustomobject]@{
+            vendors = @([pscustomobject]@{ name = 'demo-vendor'; repo = 'owner/vendor' })
+            imports = @([pscustomobject]@{ name = 'demo-import'; skill = 'skills/demo'; repo = 'owner/import' })
+            mappings = @([pscustomobject]@{ vendor = 'demo-vendor'; from = 'skills/demo'; to = 'demo-skill' })
+            mcp_servers = @([pscustomobject]@{ name = 'docs'; command = 'npx'; args = @('secret-arg') })
+        }
+
+        $descriptors = @(ConvertTo-CapabilityDescriptorsFromSkillsConfig $config)
+
+        $descriptors.Count | Should Be 4
+        @($descriptors | Where-Object truth_origin -eq runtime).Count | Should Be 4
+        (@($descriptors.components.kind | Sort-Object) -join ',') | Should Be 'import,mapping,mcp_server,vendor'
+        ($descriptors | ConvertTo-Json -Depth 20 -Compress) | Should Not Match 'secret-arg'
+    }
+
     It 'returns structured validation findings and zero side-effect counters' {
         $inventory = New-CapabilityInventory @([pscustomobject]@{ schema_version = 1; id = 'bad' })
 

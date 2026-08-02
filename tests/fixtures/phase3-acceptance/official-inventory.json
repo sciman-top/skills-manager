@@ -1,0 +1,15 @@
+{
+  "installed": [],
+  "available": [
+    {
+      "pluginId": "presentations@openai-primary-runtime",
+      "name": "presentations",
+      "marketplaceName": "openai-primary-runtime",
+      "version": "26.801.11242",
+      "installed": false,
+      "enabled": false,
+      "installPolicy": "AVAILABLE",
+      "authPolicy": "ON_USE"
+    }
+  ]
+}

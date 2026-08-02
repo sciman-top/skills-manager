@@ -31,11 +31,12 @@
 - [vNext 架构](docs/product/skills-manager-vnext-architecture.md)
 - [vNext 路线图](docs/product/skills-manager-vnext-roadmap.md)
 - [规则治理参考采纳矩阵](docs/product/rule-governance-adoption-matrix.md)
-- [当前 Phase 2 任务 manifest](tasks/skills-manager-vnext-phase2.tasks.json)
+- [当前 Phase 3 任务 manifest](tasks/skills-manager-vnext-phase3.tasks.json)
+- [Phase 2 历史任务 manifest](tasks/skills-manager-vnext-phase2.tasks.json)
 - [Phase 1 历史任务 manifest](tasks/skills-manager-vnext-phase1.tasks.json)
 - [Phase 0 历史任务 manifest](tasks/skills-manager-vnext-phase0.tasks.json)
 
-vNext Phase 0、Phase 1 与 Phase 2 均已完成 repo-side 验收（P0/P1 各 9/9，P2 7/7）。Phase 2 的 transactional explicit-apply 仍严格 fixture-only；不允许修改真实规则、host/profile，调用 provider 或执行 native mutation。fresh-session load、`host_loaded` 和 `live_accepted` 均未执行；不会自动进入 P3。
+vNext Phase 0、Phase 1、Phase 2 与 Phase 3 均已完成 repo-side 验收（P0/P1 各 9/9，P2/P3 各 7/7）。P3 提供只读 inventory adapter、personal manifest lint、一个 fixture-only Codex skills-only exporter 和分层 evaluation。P4 entry decision 为 `not_started/deferred`，未创建 P4 manifest。plugin install、marketplace mutation、host/profile 修改、provider call 与 native mutation 仍禁止；Codex fresh-process 规则加载已在 9 个目标仓验证，Claude 无 provider-free prompt renderer，`live_accepted` 仍为 `not_run`。
 
 运行时以 PowerShell 7 (`pwsh`) 为开发、CI 和完整门禁主路径；Windows PowerShell 5.1 仅保留安装 fallback、generated script parse 和 plain-object/selected fixture smoke。完整边界与移除条件见 [`docs/runbooks/powershell-runtime-compatibility.md`](docs/runbooks/powershell-runtime-compatibility.md)。
 
@@ -44,18 +45,32 @@ Phase 1 的只读入口（未指定 `--out` 时不写文件）：
 ```powershell
 .\skills.ps1 capability-inventory --json
 .\skills.ps1 rule-audit --repo . --host codex --json
+.\skills.ps1 rule-estate-audit --workspace-root D:\CODE --registry .\audit-targets.json --json
 ```
 
-`--out <report.json>` 只允许显式写一个报告文件，`rule-audit` 不允许覆盖发现到的规则文件。deterministic blocker 返回 exit 2；semantic recommendation 不阻断。
+`rule-estate-audit` 默认排除 `external` 与 `文档`，自动发现工作区直属 Git 仓，报告目标清单漂移、Codex/Claude common/delta 对齐、规则版本和 `Global Rule -> Repo Action` 覆盖。`--out <report.json>` 只允许显式写一个报告文件，且不允许覆盖发现到的规则文件。
 
-P2 的事务入口仍为 fixture-only；root 必须包含 `.skills-manager-fixture`：
+P2 事务入口支持 fixture 与单仓两种显式授权域：
 
 ```powershell
 .\skills.ps1 rule-plan --target <fixture-rule> --desired-file <reviewed-file> --fixture-root <fixture-root> --json --out <fixture-plan.json>
 .\skills.ps1 rule-apply --plan <fixture-plan.json> --fixture-root <fixture-root> --token APPLY_RULE_PATCH --json
+.\skills.ps1 rule-plan --target <repo-rule> --desired-file <reviewed-file> --repo-root <git-root> [--allow-create] --json --out <repo-plan.json>
+.\skills.ps1 rule-apply --plan <repo-plan.json> --repo-root <git-root> --token APPLY_RULE_REPO_PATCH --json
 ```
 
-这些命令不授权真实仓、全局规则或 host 配置写入。
+仓库模式只允许精确 Git 根内的 `AGENTS.md`、`AGENTS.override.md` 或 `CLAUDE.md`，并执行 hash freshness、reparse、原子写入和回滚守卫；它不授权全局用户目录、host 配置或无审阅的跨仓批量覆盖。
+
+P3 plugin-aware 命令中，inventory/lint/eval 为只读；export 仍严格 fixture-only：
+
+```powershell
+.\skills.ps1 plugin-inventory --official <snapshot.json> [--personal <snapshot.json>] [--workspace <snapshot.json>] --json
+.\skills.ps1 plugin-lint --path <plugin-root> --json
+.\skills.ps1 plugin-export --candidate <candidate.json> --fixture-root <fixture-root> --out <new-folder> --token EXPORT_PLUGIN_FIXTURE --json
+.\skills.ps1 plugin-eval --path <plugin-root> --json
+```
+
+本阶段只支持已验证的 Codex skills-only package。命令不会安装/启停 plugin、修改 marketplace/host profile、调用 provider，model snapshot 也不作为 deterministic blocker。
 
 ## 路径与编辑策略
 

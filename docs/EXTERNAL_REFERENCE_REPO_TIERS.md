@@ -22,14 +22,14 @@ This document defines how `skills-manager` should manage long-lived external ref
   - `references/updates/README.md`
   - `scripts/refresh-reference-repos.ps1`
 
-### 2.2 Current snapshot (2026-07-06)
+### 2.2 Current snapshot (2026-08-02)
 
 The current runtime source surface is intentionally broader than the recommended persistent reference shelf:
 
-- `9` vendor repos in `skills.json`
-- `46` import entries
-- `33` unique import repos
-- `28` import repos currently contribute only `1` skill each
+- `8` vendor repos in `skills.json`
+- `44` import entries
+- `28` unique import repos
+- `23` import repos currently contribute only `1` skill each
 
 Implication:
 
@@ -83,8 +83,8 @@ Keep these as the default, high-signal, long-lived reference set. They define pl
 | `openai/plugins` | Current first-party plugin, skill, MCP and packaging examples | Weekly or before plugin/skill governance changes | Current official reference; do not copy its public directory into runtime truth |
 | `anthropics/skills` | First-party Claude skill structure and strong cross-tool examples | Weekly or before skill packaging changes | Keep in `skills.json`; also belongs in reference shelf |
 | `google-gemini/gemini-cli` | Official Gemini CLI rule-loading and `GEMINI.md` semantics | Weekly or before Gemini wrapper changes | Not a current runtime source repo; add as reference shelf |
+| `agentskills/agentskills` | Vendor-neutral Agent Skills specification and authoring contract | Weekly or before cross-host skill schema/routing changes | Reference-only standard source; do not make it runtime truth |
 | `modelcontextprotocol/modelcontextprotocol` | MCP spec source of truth | Weekly or before MCP governance changes | Not a current runtime source repo; add as reference shelf |
-| `modelcontextprotocol/servers` | Official MCP server examples and packaging patterns | Weekly or before MCP add/remove decisions | Not a current runtime source repo; add as reference shelf |
 | `modelcontextprotocol/registry` | Official server discovery/catalog truth when checking MCP availability | Weekly or before MCP recommendation changes | Not a current runtime source repo; add as reference shelf |
 
 Related official docs that should be treated as first-party truth even without local clone:
@@ -112,6 +112,7 @@ Current local state on this machine as of `2026-07-06`:
 
 | Repo / Source | Why it belongs in secondary | Refresh | Relation to `skills.json` |
 | --- | --- | --- | --- |
+| `modelcontextprotocol/servers` | Official examples are useful for implementation checks but do not define the MCP protocol or catalog truth | Monthly or before server packaging changes | Reference-only examples; keep outside default refresh |
 | `vercel-labs/agent-skills` | Reused high-quality engineering skills; already part of runtime truth | Monthly or before frontend/React guidance changes | Keep in `skills.json`; secondary shelf candidate |
 | `obra/superpowers` | Reused workflow/meta-skills; already part of runtime truth | Monthly or before process/governance changes | Keep in `skills.json`; secondary shelf candidate |
 | `wshobson/agents` | Highest current multi-skill import density outside primary vendors | Monthly or before Python/backend workflow changes | Keep current imports; secondary shelf candidate |
@@ -167,19 +168,19 @@ These sources are valuable for search and candidate generation, but they should 
 
 ## 9. What should change now
 
-### 9.1 Add to the long-lived reference shelf first
+### 9.1 Keep in the long-lived core shelf
 
-If a dedicated shelf is created or refreshed, add these first:
+The current core shelf is intentionally limited to:
 
 1. `openai/codex`
 2. `openai/plugins`
 3. `google-gemini/gemini-cli`
-4. `modelcontextprotocol/modelcontextprotocol`
-5. `modelcontextprotocol/registry`
-6. `anthropics/skills` if it is not already represented outside runtime cache
-7. `modelcontextprotocol/servers` if it is not already represented outside runtime cache
+4. `agentskills/agentskills`
+5. `modelcontextprotocol/modelcontextprotocol`
+6. `modelcontextprotocol/registry`
+7. `anthropics/skills`
 
-`openai/skills` remains historical compatibility evidence only; do not bootstrap it as a current source.
+`modelcontextprotocol/servers` remains available in `secondary` for implementation examples, but it does not define protocol or registry truth. `openai/skills` remains historical compatibility evidence only; do not bootstrap it as a current source.
 
 ### 9.2 Keep, but do not widen by default
 

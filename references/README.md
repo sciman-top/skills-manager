@@ -15,9 +15,9 @@
 
 当前默认分层口径：
 
-- `core-mainline`：`codex`、`openai-plugins`、`anthropics-skills`、`gemini-cli`、`modelcontextprotocol`、`servers`、`registry`
+- `core-mainline`：`codex`、`openai-plugins`、`anthropics-skills`、`gemini-cli`、`agentskills`、`modelcontextprotocol`、`registry`
 - `historical-compatibility`：`openai-skills`；只用于现有 runtime mapping 和迁移取证，不进入默认刷新或新安装推荐
-- `secondary`：`vercel-agent-skills`、`obra-superpowers`、`wshobson-agents`、`mattpocock-skills`、`trailofbits-skills`、`awesome-copilot`
+- `secondary`：`servers`、`vercel-agent-skills`、`obra-superpowers`、`wshobson-agents`、`mattpocock-skills`、`trailofbits-skills`、`awesome-copilot`
 - `conditional-not-cloned`：`workspace-hub`、`aktsmm-agent-skills`、`manim-skill`、`playwright-best-practices-skill`、`supabase-agent-skills`、`antd-skill`、`slidev`、`knowledge-work-plugins`、`remotion-skills`
 
 默认只刷新 `core`，不把所有 runtime source repo 都自动升级成长期镜像参考棚。

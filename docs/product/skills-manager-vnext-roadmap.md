@@ -10,9 +10,9 @@
 | --- | --- | --- | --- |
 | `P0` | Foundation and contracts | `complete` | 9/9 tasks repo_verified；host_loaded/live_accepted 未执行 |
 | `P1` | Read-only inventory and rule advisor | `complete` | 9/9 tasks repo_verified；host_loaded/live_accepted 未执行 |
-| `P2` | Transactional explicit apply | `complete` | 7/7 repo_verified；fixture-only，真实规则/host apply 仍禁用 |
-| `P3` | Plugin-aware distribution and evaluation | `designed` | 未实现，不建设公共商店 |
-| `P4` | Conditional scale surfaces | `conditional` | 无已承诺任务 |
+| `P2` | Transactional explicit apply | `complete` | 7/7 repo_verified；单 Git 仓规则 create/update pilot 通过，host/global-user apply 仍禁用 |
+| `P3` | Plugin-aware distribution and evaluation | `complete` | 7/7 tasks repo_verified；fixture-first，host/live 未执行 |
+| `P4` | Conditional scale surfaces | `conditional` | entry decision=`not_started/deferred`；未创建 manifest |
 
 状态只可在相应 exit gate 有当前证据后更新。Phase 文档完成不等于 Phase 实现完成。
 
@@ -145,6 +145,7 @@ P4 requires independent product evidence and does not follow automatically.
 - 2026-08-02：九个 P1 task 全部完成；三个固定 fixture 和三个授权只读仓完成 precision/performance/hash 验收。
 - `capability-inventory` 与 `rule-audit` 提供单行 JSON envelope；默认 zero-write，显式 `--out` 只写一个报告且不能覆盖规则文件。
 - deterministic fixture 的已声明正例 4/4 命中、simple fixture 0 false positive；semantic advisor 只在显式 responsibility fixture 取证，尚不外推为通用自然语言精度。
+- 2026-08-02 maintenance repair：inventory 已按真实数组配置识别 vendors/imports/mappings/MCP；Rule Advisor CLI 已接通显式责任映射和 repo reference checks，并以真实配置/CLI 语义测试防止 fixture-only 假绿。
 - 当前最高状态仅 `repo_verified`；fresh-session load、`host_loaded`、`live_accepted` 均为 `not_run`。
 
 ## 5. P2 Transactional explicit apply
@@ -176,6 +177,7 @@ P4 requires independent product evidence and does not follow automatically.
 - fault injection 后只回滚本 operation 的已应用 action。
 - receipt 明确四级 verification，不自动晋级。
 - fixture target 完成 apply/rollback/fault matrix；真实 Codex/项目规则路径只做 hash guard，不把 fixture 写成 host/live acceptance。
+- 2026-08-02 follow-through：真实 Git 仓完成 `AGENTS.md` update 与 `CLAUDE.md` create；精确 token、hash、atomic write、rollback 和 37 项聚焦测试通过，宿主加载仍为 `not_run`。
 
 ## 6. P3 Plugin-aware distribution and evaluation
 
@@ -196,6 +198,14 @@ P4 requires independent product evidence and does not follow automatically.
 - 至少两个自维护 workflow 有重复分发需求，且官方目录不存在等价项。
 - 当前官方 plugin manifest/schema/CLI 已通过 docs/help/fixture 固定。
 - P2 receipt 能覆盖 native plugin install intent/result；OAuth 仍由宿主所有。
+
+### 6.3.1 Current entry evidence (2026-08-02)
+
+- 四个自维护 domain workflow 已在多个 profile 重复路由并投影到标准用户技能根；teaching workflow 是明确 personal/workspace 分发对象。
+- 当前 official/curated inventory 与 pinned `openai/plugins@11c74d6b...` 未发现等价的初中课堂课件 + 物理动画 bundle；Presentations/Remotion 作为互补执行器保留 official-first。
+- current Codex manual 与 `codex-cli 0.145.0` help 已固定 manifest、local/repo/workspace 分层和只读 list JSON shape。
+- P2 contract/receipt vocabulary 可记录 plugin intent/result，但本任务未授权 install；OAuth/runtime 继续由宿主所有。
+- 因此 P3 repo implementation 可进入；host install/load/live acceptance 不在本次 entry authorization 内。
 
 ### 6.4 Exit gate
 

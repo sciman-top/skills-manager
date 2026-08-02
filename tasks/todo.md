@@ -1,18 +1,20 @@
-# skills-manager vNext Phase 2 Checklist
+# skills-manager vNext Phase 3 Checklist
 
-**task truth**: `tasks/skills-manager-vnext-phase2.tasks.json`
+**task truth**: `tasks/skills-manager-vnext-phase3.tasks.json`
 **说明**: 本文件只显示状态；依赖、write set、测试、验证与回滚以 manifest 为准。
 
-- [x] `SMV-P2-001` 建立 P2 spec、task truth 与 current-phase planning fixtures。
-- [x] `SMV-P2-002` 实现 RulePatchPlan/diff/schema/sensitive contract。
-- [x] `SMV-P2-003` 实现 freshness/root/reparse/token/fixture guards。
-- [x] `SMV-P2-004` 实现 fixture-only atomic executor/receipt/rollback。
-- [x] `SMV-P2-005` 完成 fault/concurrency/cleanup 恢复验证。
-- [x] `SMV-P2-006` 接入 fixture-only CLI 与 MCP receipt adapter。
-- [x] `SMV-P2-007` 完成代表 fixture、真实 hash guard 和 P2 closeout。
+- [x] `SMV-P3-001` 建立 P3 entry evidence、spec、task truth 与 verifier routing。
+- [x] `SMV-P3-002` 实现 official/personal/workspace plugin inventory snapshot adapter。
+- [x] `SMV-P3-003` 实现 manifest shape 与 source/version/license lint。
+- [x] `SMV-P3-004` 实现 fixture-only Codex skills-only bounded exporter。
+- [x] `SMV-P3-005` 实现 static/behavior/model-snapshot 分层 eval。
+- [x] `SMV-P3-006` 接入 CLI 并完成 Phase 3 acceptance/compatibility。
+- [x] `SMV-P3-007` 完成 full closeout 与 P4 entry gate 裁决。
 
 ## Current boundary
 
-- P0/P1：均已 repo_verified，历史真源保留。
-- P2：7/7 repo_verified；真实 global/project/host 写入未授权，executor 仍仅允许 fixture root。
-- P3：designed-only，不自动进入。
+- P0/P1：均 9/9 `repo_verified`；历史真源保留。
+- P2：7/7 `repo_verified`；单 Git 仓 reviewed rule apply 已完成真实 pilot，host/global-user apply 仍禁用。
+- P1/P2 follow-through：`rule-estate-audit` 已覆盖动态目标、registry drift、common/delta、release 与责任映射；9 仓复审为 99 covered、0 gap。
+- P3：7/7 `repo_verified`；plugin install、host load 与 live workflow 均未执行。
+- P4：`conditional` 且 entry decision 为 `not_started/deferred`；未创建 P4 manifest。

@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "program_id": "skills-manager-vnext",
+  "phase": "P4",
+  "evaluated_at": "2026-08-02T17:02:26+08:00",
+  "decision": "not_started",
+  "status": "deferred",
+  "all_required_met": false,
+  "p4_manifest_path": null,
+  "gates": [
+    {
+      "id": "independent_product_evidence",
+      "required": true,
+      "state": "not_met",
+      "evidence": ["docs/change-evidence/20260802-vnext-phase3-acceptance.md"],
+      "reason": "Only repo and fixture evidence exists; host load and live workflow acceptance are not_run.",
+      "recovery_condition": "Record an independent real workflow or user acceptance artifact for a named P4 surface."
+    },
+    {
+      "id": "repeated_adoption",
+      "required": true,
+      "state": "not_met",
+      "evidence": ["docs/change-evidence/20260802-vnext-phase3-plugin-export.md"],
+      "reason": "The new P3 CLI/exporter has one repository acceptance run and no repeated cross-session adoption evidence.",
+      "recovery_condition": "Show repeated use across at least two independent real workflows or consumers with dated evidence."
+    },
+    {
+      "id": "explicit_scale_surface_and_audience",
+      "required": true,
+      "state": "not_met",
+      "evidence": ["docs/product/skills-manager-vnext-roadmap.md"],
+      "reason": "No GUI daemon database team control or public marketplace candidate has a named user and validated distribution need.",
+      "recovery_condition": "Select one P4 candidate with a named audience, problem evidence, non-goals and acceptance criteria."
+    },
+    {
+      "id": "safety_and_operating_boundary",
+      "required": true,
+      "state": "met",
+      "evidence": ["docs/change-evidence/20260802-vnext-phase3-plugin-lint.md", "docs/change-evidence/20260802-vnext-phase3-plugin-export.md"],
+      "reason": "Current repo implementation is fixture-first, bounded, zero-provider and keeps host/live truth separate.",
+      "recovery_condition": "Re-evaluate if a future P4 surface introduces persistence, multi-user state or external mutation."
+    }
+  ]
+}

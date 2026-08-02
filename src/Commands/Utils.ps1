@@ -395,6 +395,18 @@ MCP：
   .\skills.ps1 MCP配置 列表
   .\skills.ps1 MCP配置 使用 default|coding|dotnet|browser|database|off
 
+Plugin（P3 repo/fixture-only）：
+  .\skills.ps1 plugin-inventory --official <snapshot.json> [--personal <snapshot.json>] [--workspace <snapshot.json>] --json
+  .\skills.ps1 plugin-lint --path <plugin-root> --json
+  .\skills.ps1 plugin-export --candidate <candidate.json> --fixture-root <root> --out <new-folder> --token EXPORT_PLUGIN_FIXTURE --json
+  .\skills.ps1 plugin-eval --path <plugin-root> --json
+  不执行 plugin install、marketplace mutation、provider call 或 host/profile 写入。
+
+规则治理（只读）：
+  .\skills.ps1 rule-audit --repo <repo-root> [--user-root <path>] [--host codex|claude] --json
+  .\skills.ps1 rule-estate-audit --workspace-root D:\CODE --registry audit-targets.json [--out <report.json>] --json
+  全域审查自动发现工作区直属 Git 仓；默认排除 external 与文档，只写显式 --out 报告。
+
 技能投影：
   .\skills.ps1 技能配置 列表
   .\skills.ps1 技能配置 使用 default|coding|coding-strict|engineering|python|mcp|review|dotnet|ppt|content|marketing|physics|video|design|browser|database

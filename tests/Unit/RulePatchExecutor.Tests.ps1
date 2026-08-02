@@ -49,4 +49,28 @@ Describe 'Fixture-only rule patch executor' {
     It 'cleans transaction files on success and rollback' {
         foreach($fault in @('none','after_stage','after_replace')) { $f=New-ExecutorFixture ('cleanup-'+$fault); $null=Invoke-RulePatchApply $f.plan $f.root APPLY_RULE_PATCH -TestFaultPoint $fault; @(Get-ChildItem $f.root -Force | Where-Object Name -match '^\.patch-.*\.(stage|backup)$').Count | Should Be 0 }
     }
+
+    It 'creates one reviewed repository rule and rolls creation back on failure' {
+        $root = Join-Path $TestDrive 'repo-create'; New-Item -ItemType Directory -Path (Join-Path $root '.git') -Force | Out-Null
+        $path = Join-Path $root 'CLAUDE.md'
+        $plan = New-RulePatchPlan -TargetPath $path -AuthorizedRoot $root -CurrentText '' -DesiredText "@AGENTS.md`n" -DesiredSource reviewed_file -AuthorizationScope repository -TargetOperation create
+
+        $blocked = Invoke-RulePatchApply $plan $root wrong
+        $blocked.status | Should Be 'blocked'; Test-Path -LiteralPath $path | Should Be $false
+        $rolledBack = Invoke-RulePatchApply $plan $root APPLY_RULE_REPO_PATCH -TestFaultPoint after_replace
+        $rolledBack.status | Should Be 'rolled_back'; Test-Path -LiteralPath $path | Should Be $false
+        $applied = Invoke-RulePatchApply $plan $root APPLY_RULE_REPO_PATCH
+        $applied.status | Should Be 'applied'; [IO.File]::ReadAllText($path) | Should Be "@AGENTS.md`n"
+    }
+
+    It 'rejects unknown repository rule filenames' {
+        $root = Join-Path $TestDrive 'repo-name'; New-Item -ItemType Directory -Path (Join-Path $root '.git') -Force | Out-Null
+        $path = Join-Path $root 'README.md'; [IO.File]::WriteAllText($path, 'before')
+        $plan = New-RulePatchPlan -TargetPath $path -AuthorizedRoot $root -CurrentText before -DesiredText after -DesiredSource reviewed_file -AuthorizationScope repository
+
+        $result = Invoke-RulePatchApply $plan $root APPLY_RULE_REPO_PATCH
+        $result.status | Should Be 'blocked'
+        @($result.findings.code) | Should Contain 'repository_target_name_forbidden'
+        [IO.File]::ReadAllText($path) | Should Be 'before'
+    }
 }

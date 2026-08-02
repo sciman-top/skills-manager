@@ -32,19 +32,55 @@ function New-CapabilityInventory {
 function ConvertTo-CapabilityDescriptorsFromSkillsConfig {
     param($Config, [string]$SourcePath = 'skills.json', [string]$SourceRevision = 'working-tree')
     $items = New-Object System.Collections.Generic.List[object]
-    $source = [pscustomobject]@{ type = 'repo_config'; path_or_url = $SourcePath; revision = $SourceRevision; checksum = $null; license = $null; trust_tier = 'runtime' }
-    $vendors = Get-OperationObjectProperty $Config 'vendors'
-    if ($vendors -is [System.Collections.IDictionary] -or $vendors -is [pscustomobject]) {
-        $properties = if ($vendors -is [System.Collections.IDictionary]) { @($vendors.Keys | ForEach-Object { [pscustomobject]@{ Name = [string]$_; Value = $vendors[$_] } }) } else { @($vendors.PSObject.Properties) }
-        foreach ($property in $properties) {
-            $items.Add((New-CapabilityDescriptor -Kind skill -Name ([string]$property.Name) -TruthOrigin runtime -Source $source -Lifecycle active -Components @([pscustomobject]@{ kind = 'vendor'; config = $property.Value }) -VerificationState static_validated)) | Out-Null
+
+    $domains = @(
+        [pscustomobject]@{ field = 'vendors'; kind = 'skill'; component = 'vendor'; name_fields = @('name') },
+        [pscustomobject]@{ field = 'imports'; kind = 'skill'; component = 'import'; name_fields = @('name', 'skill') },
+        [pscustomobject]@{ field = 'mappings'; kind = 'skill'; component = 'mapping'; name_fields = @('to', 'from') },
+        [pscustomobject]@{ field = 'mcp_servers'; kind = 'mcp'; component = 'mcp_server'; name_fields = @('name') }
+    )
+
+    foreach ($domain in $domains) {
+        $value = Get-OperationObjectProperty $Config $domain.field
+        $entries = New-Object System.Collections.Generic.List[object]
+        if ($value -is [System.Collections.IDictionary]) {
+            foreach ($key in @($value.Keys)) { $entries.Add([pscustomobject]@{ name = [string]$key; value = $value[$key] }) | Out-Null }
         }
-    }
-    $servers = Get-OperationObjectProperty $Config 'mcp_servers'
-    if ($servers -is [System.Collections.IDictionary] -or $servers -is [pscustomobject]) {
-        $properties = if ($servers -is [System.Collections.IDictionary]) { @($servers.Keys | ForEach-Object { [pscustomobject]@{ Name = [string]$_; Value = $servers[$_] } }) } else { @($servers.PSObject.Properties) }
-        foreach ($property in $properties) {
-            $items.Add((New-CapabilityDescriptor -Kind mcp -Name ([string]$property.Name) -TruthOrigin runtime -Source $source -Lifecycle active -Components @([pscustomobject]@{ kind = 'mcp_server'; config = Protect-OperationSensitiveValue $property.Value 'config' }) -VerificationState static_validated)) | Out-Null
+        elseif ($value -is [array] -or $value -is [System.Collections.IList]) {
+            $index = 0
+            foreach ($entry in @($value)) {
+                $name = $null
+                foreach ($field in @($domain.name_fields)) {
+                    $candidate = [string](Get-OperationObjectProperty $entry $field)
+                    if (-not [string]::IsNullOrWhiteSpace($candidate)) { $name = $candidate; break }
+                }
+                if ([string]::IsNullOrWhiteSpace($name)) { $name = '{0}-{1}' -f $domain.component, $index }
+                if ($domain.field -eq 'imports') {
+                    $skillPath = [string](Get-OperationObjectProperty $entry 'skill')
+                    if (-not [string]::IsNullOrWhiteSpace($skillPath)) { $name = '{0}/{1}' -f $name, $skillPath.Replace('\', '/') }
+                }
+                $entries.Add([pscustomobject]@{ name = $name; value = $entry }) | Out-Null
+                $index++
+            }
+        }
+        elseif ($value -is [pscustomobject]) {
+            $explicitName = $null
+            foreach ($field in @($domain.name_fields)) {
+                $candidate = [string](Get-OperationObjectProperty $value $field)
+                if (-not [string]::IsNullOrWhiteSpace($candidate)) { $explicitName = $candidate; break }
+            }
+            if (-not [string]::IsNullOrWhiteSpace($explicitName)) {
+                $entries.Add([pscustomobject]@{ name = $explicitName; value = $value }) | Out-Null
+            }
+            else {
+                foreach ($property in @($value.PSObject.Properties)) { $entries.Add([pscustomobject]@{ name = [string]$property.Name; value = $property.Value }) | Out-Null }
+            }
+        }
+
+        foreach ($entry in @($entries.ToArray())) {
+            $source = [pscustomobject]@{ type = 'repo_config'; path_or_url = ('{0}#{1}' -f $SourcePath, $domain.field); revision = $SourceRevision; checksum = $null; license = $null; trust_tier = 'runtime' }
+            $component = [pscustomobject]@{ kind = $domain.component; config = Protect-OperationSensitiveValue $entry.value 'config' }
+            $items.Add((New-CapabilityDescriptor -Kind $domain.kind -Name $entry.name -TruthOrigin runtime -Source $source -Lifecycle active -Components @($component) -VerificationState static_validated)) | Out-Null
         }
     }
     return $items.ToArray()

@@ -24,21 +24,24 @@ function New-RulePatchPlan {
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$DesiredText,
         [Parameter(Mandatory = $true)][ValidateSet('explicit_user_input', 'reviewed_file', 'semantic_recommendation')][string]$DesiredSource,
         [string[]]$FindingIds = @(), [string[]]$EvidenceRefs = @(), [ValidateSet('low', 'medium', 'high')][string]$Risk = 'medium',
-        [string]$Owner = 'rule_patch_executor', [string]$RequiredToken = 'APPLY_RULE_PATCH', [int]$MaxDiffChars = 131072
+        [ValidateSet('fixture', 'repository')][string]$AuthorizationScope = 'fixture',
+        [ValidateSet('update', 'create')][string]$TargetOperation = 'update',
+        [string]$Owner = 'rule_patch_executor', [string]$RequiredToken = '', [int]$MaxDiffChars = 131072
     )
     $path = [System.IO.Path]::GetFullPath($TargetPath); $root = [System.IO.Path]::GetFullPath($AuthorizedRoot)
+    if ([string]::IsNullOrWhiteSpace($RequiredToken)) { $RequiredToken = if ($AuthorizationScope -eq 'fixture') { 'APPLY_RULE_PATCH' } else { 'APPLY_RULE_REPO_PATCH' } }
     $beforeHash = Get-RulePatchTextHash $CurrentText; $desiredHash = Get-RulePatchTextHash $DesiredText
     $diff = New-RulePatchUnifiedDiff $CurrentText $DesiredText ([System.IO.Path]::GetFileName($path)) $MaxDiffChars
     $identity = '{0}|{1}|{2}|{3}' -f $path.ToLowerInvariant(), $beforeHash, $desiredHash, $DesiredSource
     $patchId = 'patch-{0}' -f (Get-OperationSha256 $identity).Substring(0, 16)
     return [pscustomobject][ordered]@{
         schema_version = 1; patch_id = $patchId; operation_id = ('rule-{0}' -f $patchId.Substring(6)); mode = 'plan'
-        target = [pscustomobject][ordered]@{ target_ref = 'rule-target'; path = $path; authorized_root = $root; before_hash = $beforeHash; desired_hash = $desiredHash; owner = $Owner }
+        target = [pscustomobject][ordered]@{ target_ref = 'rule-target'; path = $path; authorized_root = $root; operation = $TargetOperation; before_hash = $beforeHash; desired_hash = $desiredHash; owner = $Owner }
         source = [pscustomobject][ordered]@{ finding_ids = @($FindingIds | Sort-Object -Unique); evidence_refs = @($EvidenceRefs | Sort-Object -Unique); desired_source = $DesiredSource }
         diff = $diff; desired_text = $DesiredText; risk = $Risk
-        preconditions = @('valid_plan', 'fresh_before_hash', 'authorized_fixture_root', 'explicit_apply_token')
+        preconditions = @('valid_plan', 'fresh_before_hash', ('authorized_{0}_root' -f $AuthorizationScope), 'explicit_apply_token')
         verification = @('desired_hash_matches', 'receipt_contract_valid'); rollback = @('restore_before_bytes')
-        apply = [pscustomobject][ordered]@{ required_token = $RequiredToken; fixture_only = $true }
+        apply = [pscustomobject][ordered]@{ required_token = $RequiredToken; boundary_scope = $AuthorizationScope; fixture_only = ($AuthorizationScope -eq 'fixture') }
     }
 }
 
@@ -49,11 +52,16 @@ function Test-RulePatchPlanContract($Plan) {
     foreach ($field in @('patch_id', 'operation_id', 'mode', 'risk')) { if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Plan $field))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Required field is missing.')) | Out-Null } }
     if ([string](Get-OperationObjectProperty $Plan 'patch_id') -notmatch '^patch-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'patch_id_invalid' 'error' '$.patch_id' 'Patch ID is invalid.')) | Out-Null }
     $target = Get-OperationObjectProperty $Plan 'target'
-    foreach ($field in @('path', 'authorized_root', 'before_hash', 'desired_hash', 'owner')) { if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $target $field))) { $findings.Add((New-OperationFinding 'target_field_missing' 'error' ('$.target.{0}' -f $field) 'Target field is required.')) | Out-Null } }
+    foreach ($field in @('path', 'authorized_root', 'operation', 'before_hash', 'desired_hash', 'owner')) { if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $target $field))) { $findings.Add((New-OperationFinding 'target_field_missing' 'error' ('$.target.{0}' -f $field) 'Target field is required.')) | Out-Null } }
+    if ([string](Get-OperationObjectProperty $target 'operation') -notin @('update', 'create')) { $findings.Add((New-OperationFinding 'target_operation_invalid' 'error' '$.target.operation' 'Target operation must be update or create.')) | Out-Null }
     foreach ($field in @('before_hash', 'desired_hash')) { if ([string](Get-OperationObjectProperty $target $field) -notmatch '^[a-f0-9]{64}$') { $findings.Add((New-OperationFinding 'hash_invalid' 'error' ('$.target.{0}' -f $field) 'Hash must be SHA-256.')) | Out-Null } }
     $source = Get-OperationObjectProperty $Plan 'source'; $desiredSource = [string](Get-OperationObjectProperty $source 'desired_source')
     if ($desiredSource -notin @('explicit_user_input', 'reviewed_file')) { $findings.Add((New-OperationFinding 'desired_source_not_authorized' 'error' '$.source.desired_source' 'Desired content must be explicit or reviewed, never a semantic recommendation.')) | Out-Null }
-    if (-not [bool](Get-OperationObjectProperty (Get-OperationObjectProperty $Plan 'apply') 'fixture_only')) { $findings.Add((New-OperationFinding 'fixture_only_required' 'error' '$.apply.fixture_only' 'P2 apply must remain fixture-only.')) | Out-Null }
+    $apply = Get-OperationObjectProperty $Plan 'apply'; $scope = [string](Get-OperationObjectProperty $apply 'boundary_scope')
+    if ($scope -notin @('fixture', 'repository')) { $findings.Add((New-OperationFinding 'boundary_scope_invalid' 'error' '$.apply.boundary_scope' 'Boundary scope must be fixture or repository.')) | Out-Null }
+    if ([bool](Get-OperationObjectProperty $apply 'fixture_only') -ne ($scope -eq 'fixture')) { $findings.Add((New-OperationFinding 'fixture_scope_mismatch' 'error' '$.apply.fixture_only' 'fixture_only must match boundary_scope.')) | Out-Null }
+    $requiredToken = [string](Get-OperationObjectProperty $apply 'required_token')
+    if (($scope -eq 'fixture' -and $requiredToken -ne 'APPLY_RULE_PATCH') -or ($scope -eq 'repository' -and $requiredToken -ne 'APPLY_RULE_REPO_PATCH')) { $findings.Add((New-OperationFinding 'required_token_invalid' 'error' '$.apply.required_token' 'Required token must match the authorization scope.')) | Out-Null }
     $serialized = $Plan | ConvertTo-Json -Depth 30 -Compress
     if (Test-OperationSerializedSensitiveValue $serialized) { $findings.Add((New-OperationFinding 'sensitive_content_present' 'error' '$' 'Patch plan contains sensitive content.')) | Out-Null }
     return New-OperationValidationResult $findings.ToArray()

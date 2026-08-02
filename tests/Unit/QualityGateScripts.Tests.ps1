@@ -91,18 +91,18 @@ Describe "Quality gate scripts" {
         $raw | Should Match "scripts\\verify-skill-routing\.ps1"
     }
 
-    It "Runs repository hygiene in GitHub CI before other checks" {
+    It "Uses the repo-owned full quality gate in GitHub CI" {
         $root = Join-Path $PSScriptRoot "..\.."
         $workflowPath = Join-Path $root ".github\workflows\ci.yml"
         $raw = Get-Content -LiteralPath $workflowPath -Raw
 
-        $hygieneIndex = $raw.IndexOf("Check repository hygiene")
-        $generatedSyncIndex = $raw.IndexOf("Verify generated script sync")
+        $pesterIndex = $raw.IndexOf("Install pinned Pester test runtime")
+        $fullGateIndex = $raw.IndexOf("run-local-quality-gates.ps1 -Profile full")
 
-        $hygieneIndex -ge 0 | Should Be $true
-        $generatedSyncIndex -ge 0 | Should Be $true
-        $hygieneIndex -lt $generatedSyncIndex | Should Be $true
-        $raw | Should Match "check-repo-hygiene\.ps1"
+        $pesterIndex -ge 0 | Should Be $true
+        $fullGateIndex -ge 0 | Should Be $true
+        $pesterIndex -lt $fullGateIndex | Should Be $true
+        $raw | Should Not Match "No supply-chain script found, skip"
     }
 
     It "Reports untracked runtime artifacts without failing by default" {

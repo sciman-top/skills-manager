@@ -91,4 +91,17 @@ Describe 'Fixture-only rule patch CLI' {
         { Invoke-RulePlanCommand @('--target',(Join-Path $repoRoot 'AGENTS.md'),'--desired-file',(Join-Path $repoRoot 'README.md'),'--fixture-root',$repoRoot,'--json') } | Should Throw
         (Get-FileHash -LiteralPath (Join-Path $repoRoot 'AGENTS.md') -Algorithm SHA256).Hash | Should Be $before
     }
+
+    It 'plans and applies one reviewed repository rule creation' {
+        $root = Join-Path $TestDrive 'repo-cli'; New-Item -ItemType Directory -Path (Join-Path $root '.git') -Force | Out-Null
+        $review = Join-Path $root 'reviewed-CLAUDE.md'; [IO.File]::WriteAllText($review, "@AGENTS.md`n")
+        $target = Join-Path $root 'CLAUDE.md'; $planPath = Join-Path $root 'plan.json'
+
+        $planned = Invoke-RulePlanCommand @('--target',$target,'--desired-file',$review,'--repo-root',$root,'--allow-create','--out',$planPath,'--json')
+        $planned.exit_code | Should Be 0
+        ($planned.output | ConvertFrom-Json).truth_boundary | Should Be 'single_repository'
+        $applied = Invoke-RuleApplyCommand @('--plan',$planPath,'--repo-root',$root,'--token','APPLY_RULE_REPO_PATCH','--json')
+        $applied.exit_code | Should Be 0
+        [IO.File]::ReadAllText($target) | Should Be "@AGENTS.md`n"
+    }
 }

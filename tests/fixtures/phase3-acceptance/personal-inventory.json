@@ -1,0 +1,15 @@
+{
+  "installed": [],
+  "available": [
+    {
+      "pluginId": "teacher-workflows@personal",
+      "name": "teacher-workflows",
+      "marketplaceName": "personal",
+      "version": "0.1.0",
+      "installed": false,
+      "enabled": false,
+      "installPolicy": "AVAILABLE",
+      "authPolicy": "ON_USE"
+    }
+  ]
+}

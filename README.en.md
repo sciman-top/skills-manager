@@ -31,11 +31,12 @@ It will not become an agent runtime, plugin marketplace, provider/model/auth/ses
 - [vNext architecture](docs/product/skills-manager-vnext-architecture.md)
 - [vNext roadmap](docs/product/skills-manager-vnext-roadmap.md)
 - [Rule-governance adoption matrix](docs/product/rule-governance-adoption-matrix.md)
-- [Current Phase 2 task manifest](tasks/skills-manager-vnext-phase2.tasks.json)
+- [Current Phase 3 task manifest](tasks/skills-manager-vnext-phase3.tasks.json)
+- [Historical Phase 2 task manifest](tasks/skills-manager-vnext-phase2.tasks.json)
 - [Historical Phase 1 task manifest](tasks/skills-manager-vnext-phase1.tasks.json)
 - [Historical Phase 0 task manifest](tasks/skills-manager-vnext-phase0.tasks.json)
 
-vNext Phases 0, 1, and 2 have passed repository-side acceptance (P0/P1: 9/9 each; P2: 7/7). Phase 2 transactional explicit apply remains strictly fixture-only; real rule writes, host/profile changes, provider calls, and native mutations remain forbidden. Fresh-session loading, `host_loaded`, and `live_accepted` have not run, and the project does not automatically enter P3.
+vNext Phases 0, 1, 2, and 3 have passed repository-side acceptance (P0/P1: 9/9 each; P2/P3: 7/7 each). P3 provides a read-only inventory adapter, personal manifest lint, one fixture-only Codex skills-only exporter, and layered evaluation. The P4 entry decision is `not_started/deferred`, and no P4 manifest exists. Plugin install, marketplace mutation, host/profile changes, provider calls, and native mutations remain forbidden; Codex fresh-process rule loading is verified across all 9 targets, Claude has no provider-free prompt renderer, and `live_accepted` remains `not_run`.
 
 PowerShell 7 (`pwsh`) is the primary development, CI, and full-gate runtime. Windows PowerShell 5.1 is limited to the installer fallback, generated-script parse, and plain-object/selected-fixture smoke. See [`docs/runbooks/powershell-runtime-compatibility.md`](docs/runbooks/powershell-runtime-compatibility.md) for boundaries and removal gates.
 
@@ -44,18 +45,32 @@ Phase 1 read-only entry points (no file writes without `--out`):
 ```powershell
 .\skills.ps1 capability-inventory --json
 .\skills.ps1 rule-audit --repo . --host codex --json
+.\skills.ps1 rule-estate-audit --workspace-root D:\CODE --registry .\audit-targets.json --json
 ```
 
-`--out <report.json>` writes exactly one explicit report and `rule-audit` refuses to overwrite a discovered rule file. Deterministic blockers return exit 2; semantic recommendations never block.
+`rule-estate-audit` excludes `external` and `文档` by default, discovers direct Git roots, and reports target-list drift, Codex/Claude common/delta alignment, rule releases, and `Global Rule -> Repo Action` coverage. `--out <report.json>` writes exactly one explicit report and cannot overwrite a discovered rule file.
 
-P2 transaction entry points remain fixture-only and require a `.skills-manager-fixture` marker in the root:
+P2 transaction entry points support explicit fixture and single-repository boundaries:
 
 ```powershell
 .\skills.ps1 rule-plan --target <fixture-rule> --desired-file <reviewed-file> --fixture-root <fixture-root> --json --out <fixture-plan.json>
 .\skills.ps1 rule-apply --plan <fixture-plan.json> --fixture-root <fixture-root> --token APPLY_RULE_PATCH --json
+.\skills.ps1 rule-plan --target <repo-rule> --desired-file <reviewed-file> --repo-root <git-root> [--allow-create] --json --out <repo-plan.json>
+.\skills.ps1 rule-apply --plan <repo-plan.json> --repo-root <git-root> --token APPLY_RULE_REPO_PATCH --json
 ```
 
-These commands do not authorize writes to real repositories, global rules, or host configuration.
+Repository mode only accepts `AGENTS.md`, `AGENTS.override.md`, or `CLAUDE.md` inside the exact Git root and enforces freshness hashes, reparse guards, atomic writes, and rollback. It does not authorize user-global rules, host configuration, or unreviewed bulk cross-repository writes.
+
+For P3 plugin-aware commands, inventory/lint/eval are read-only and export remains strictly fixture-only:
+
+```powershell
+.\skills.ps1 plugin-inventory --official <snapshot.json> [--personal <snapshot.json>] [--workspace <snapshot.json>] --json
+.\skills.ps1 plugin-lint --path <plugin-root> --json
+.\skills.ps1 plugin-export --candidate <candidate.json> --fixture-root <fixture-root> --out <new-folder> --token EXPORT_PLUGIN_FIXTURE --json
+.\skills.ps1 plugin-eval --path <plugin-root> --json
+```
+
+This Phase only supports the verified Codex skills-only package. These commands do not install or enable plugins, mutate marketplaces or host profiles, call providers, or use a model snapshot as a deterministic blocker.
 
 ## Paths and Edit Policy
 

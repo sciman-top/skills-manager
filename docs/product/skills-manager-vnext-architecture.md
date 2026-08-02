@@ -82,7 +82,7 @@ CapabilityDescriptor
 
 职责：发现规则、建立加载候选链、静态诊断、repo truth 核对、建议 surface、生成 patch plan。
 
-不负责：中央规则库、跨仓同步、权限 enforcement、Phase 1 中的任何写入。
+不负责：中央规则库、无审阅的跨仓同步、权限 enforcement、Phase 1 中的任何写入。工作区自动发现只生成当前 inventory/drift，不成为目标仓权威真源。
 
 核心类型：
 
@@ -130,6 +130,14 @@ RuleResponsibility
 职责：为所有受管写入提供一致的 plan、freshness、apply、receipt 和 rollback envelope。
 
 不负责：理解每个领域的业务决策。领域模块负责产生 actions 和领域 verification，planner 负责通用安全边界。
+
+### 3.7 `PluginDistribution`
+
+职责：消费调用方提供的 official/personal/workspace plugin 快照；验证 `.codex-plugin/plugin.json`、component path 和供应链字段；在 marked fixture 内导出一个 Codex skills-only package；输出分层 eval。
+
+不负责：plugin install/remove/enable、marketplace mutation、OAuth/token、connector/MCP runtime、public submission、在线 model eval 或 host/session 管理。
+
+首个实现只支持一个稳定外部协议和一个写入边界：`codex-plugin skills_only` + `.skills-manager-fixture`。其他 exporter 必须重新满足 docs/help/fixture 与重复分发证据。
 
 ## 4. 目标源码结构
 
@@ -250,6 +258,7 @@ Apply 前必须逐目标检查：
 ## 6. 写入与事务
 
 - Repo 内文件：写临时文件、解析验证、atomic replace、保留 before hash。
+- 规则 repo apply：CLI 根必须与 plan 中 Git 根完全一致，只接受 `AGENTS.md`、`AGENTS.override.md`、`CLAUDE.md`；create/update 使用不同 freshness 前置条件和 `APPLY_RULE_REPO_PATCH` token。
 - Host-local 文件：限制在 adapter 声明的受管块/路径，写前备份到 host-local ignored backup root。
 - Native CLI：记录经过脱敏的 argv、exit code 和关键输出；优先原生命令而非手写完整宿主配置解析。
 - 多目标 operation：先完成全部 preflight，再按 action 顺序写；出现失败后仅回滚本 operation 已应用 action。
@@ -384,6 +393,8 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 
 理由：规则优化包含语义判断，自动跨仓写入的误伤和真值漂移风险高。
 
+2026-08-02 follow-through：`rule-estate-audit` 将动态 Git 目标、registry drift、global common/platform delta、规则 release 和责任覆盖汇总为 zero-write report；单仓事务 apply 已完成一个真实仓 create/update pilot，但 host/global-user write 与批量 apply 仍不开放。
+
 ### `ADR-SMV-008 Responsibility coverage over universal template`
 
 决定：以 `common + platform_delta + project_action` 的责任覆盖和证据判断协同效果；固定 `1/A/B/C/D`、体量预算和 wrapper 只作为可配置 profile。
@@ -395,6 +406,12 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 决定：只为当前实施 Phase 维护详细 JSON task manifest，后续 Phase 在 entry gate 通过后再展开。
 
 理由：给 AI 足够执行细节，同时避免维护数十个尚未验证的猜测任务。
+
+### `ADR-SMV-009 Fixture-first bounded plugin distribution`
+
+决定：plugin awareness 优先消费宿主 JSON 快照；只为已证明的自维护 workflow 提供 Codex skills-only fixture exporter。static/behavior 是 deterministic gate，model snapshot 非阻断，host install/load/live acceptance 独立记录。
+
+理由：官方已拥有 scaffold、marketplace、安装和 runtime；本项目只补本地策展、校验、受限导出和证据，避免扩张为第二套 plugin control plane。
 
 ## 11. 安全与供应链
 
@@ -435,6 +452,10 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 - 因目录“更干净”一次性重写全部 PowerShell 模块。
 
 新抽象必须至少满足一项：消除两个真实调用点的重复、形成可测试安全边界、匹配稳定外部协议，或降低已量化热点复杂度。
+
+AI 编码开始前使用六项范围检查，不建设新的治理子系统：真实问题和用户是否明确、官方/既有 surface 是否可复用、最小直接方案是什么、预计新增哪些长期维护面、最低充分测试是什么、什么条件触发停止或重新评审。任一项无答案时保持 design/deferred。
+
+验证采用升级制：日常迭代只跑受影响测试；共享 config/write/generated seam 使用 quick contract；phase、commit 或 release closeout 才跑一次 full。低层已充分证明的风险不重复堆 unit/fixture/E2E；同一切片共用 evidence，文件未变化不重复跑 full。若实际 write set、抽象数量或测试层级明显超过计划，停止编码并重新做复用/删除/延后判断。
 
 ## 15. 验证矩阵
 

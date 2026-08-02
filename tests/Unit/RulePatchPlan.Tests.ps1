@@ -41,4 +41,15 @@ Describe 'RulePatchPlan v1 contract' {
         $output = @(& powershell.exe -NoProfile -Command ". '$op'; . '$patch'; (New-RulePatchPlan -TargetPath 'C:\fixture\a.md' -AuthorizedRoot 'C:\fixture' -CurrentText a -DesiredText b -DesiredSource reviewed_file).schema_version" 2>&1)
         $LASTEXITCODE | Should Be 0; ($output -join '').Trim() | Should Be '1'
     }
+
+    It 'creates an explicit single-repository create plan' {
+        $root = Join-Path $TestDrive 'repo'; $path = Join-Path $root 'CLAUDE.md'
+        $plan = New-RulePatchPlan -TargetPath $path -AuthorizedRoot $root -CurrentText '' -DesiredText "@AGENTS.md`n" -DesiredSource reviewed_file -AuthorizationScope repository -TargetOperation create
+
+        (Test-RulePatchPlanContract $plan).pass | Should Be $true
+        $plan.target.operation | Should Be 'create'
+        $plan.apply.boundary_scope | Should Be 'repository'
+        $plan.apply.fixture_only | Should Be $false
+        $plan.apply.required_token | Should Be 'APPLY_RULE_REPO_PATCH'
+    }
 }

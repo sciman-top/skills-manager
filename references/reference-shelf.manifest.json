@@ -6,8 +6,8 @@
     "openai-plugins",
     "anthropics-skills",
     "gemini-cli",
+    "agentskills",
     "modelcontextprotocol",
-    "servers",
     "registry"
   ],
   "repos": [
@@ -52,6 +52,14 @@
       "relative_path": "core/gemini-cli"
     },
     {
+      "name": "agentskills",
+      "tier": "core-mainline",
+      "status": "active",
+      "source_disposition": "vendor-neutral-standard",
+      "upstream_url": "https://github.com/agentskills/agentskills.git",
+      "relative_path": "core/agentskills"
+    },
+    {
       "name": "modelcontextprotocol",
       "tier": "core-mainline",
       "status": "active",
@@ -60,10 +68,11 @@
     },
     {
       "name": "servers",
-      "tier": "core-mainline",
+      "tier": "secondary",
       "status": "active",
+      "source_disposition": "official-examples-on-demand",
       "upstream_url": "https://github.com/modelcontextprotocol/servers.git",
-      "relative_path": "core/servers"
+      "relative_path": "secondary/servers"
     },
     {
       "name": "registry",

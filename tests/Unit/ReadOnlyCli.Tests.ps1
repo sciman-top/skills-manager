@@ -30,6 +30,7 @@ Describe 'Read-only capability and rule CLI' {
         $parsed.command | Should Be 'capability-inventory'
         $parsed.data.writes | Should Be 0
         $parsed.data.provider_calls | Should Be 0
+        @($parsed.data.descriptors | Where-Object truth_origin -eq runtime).Count | Should BeGreaterThan 0
         (Get-FileHash -LiteralPath $script:CfgPath -Algorithm SHA256).Hash | Should Be $before
     }
 
@@ -54,6 +55,27 @@ Describe 'Read-only capability and rule CLI' {
         $parsed.provider_calls | Should Be 0
         $parsed.native_mutations | Should Be 0
         (Get-FileHash -LiteralPath (Join-Path $repo 'AGENTS.md') -Algorithm SHA256).Hash | Should Be $before
+    }
+
+    It 'connects explicit responsibility mappings to repository reference checks' {
+        $repo = Join-Path $TestDrive 'rule-truth'
+        New-Item -ItemType Directory -Path (Join-Path $repo 'scripts') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $repo 'scripts\verify.ps1') -Value 'exit 0' -Encoding UTF8
+        @'
+# Fixture rules
+
+## D. Global Rule -> Repo Action
+
+- `R6`: run `pwsh -File tests/run.ps1`; verifier path is `scripts/verify.ps1`.
+'@ | Set-Content -LiteralPath (Join-Path $repo 'AGENTS.md') -Encoding UTF8
+
+        $result = Invoke-RuleAuditCommand @('--repo', $repo, '--host', 'codex', '--json')
+        $parsed = $result.output | ConvertFrom-Json
+
+        @($parsed.advisor.coverage).Count | Should Be 1
+        $parsed.advisor.coverage[0].constraint_id | Should Be 'R6'
+        @($parsed.repo_reference_checks.references | Where-Object state -eq verified).Count | Should Be 2
+        $parsed.repo_reference_checks.commands_executed | Should Be 0
     }
 
     It 'refuses to overwrite a discovered rule through report out' {

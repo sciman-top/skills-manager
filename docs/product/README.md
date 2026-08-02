@@ -2,7 +2,7 @@
 
 **program_id**: `skills-manager-vnext`
 **文档状态**: active
-**最后更新**: 2026-08-01
+**最后更新**: 2026-08-02
 
 ## 1. 目的
 
@@ -24,9 +24,9 @@
 | [架构](skills-manager-vnext-architecture.md) | bounded context、模块依赖、数据契约、ADR、技术栈 | 路线状态和任务勾选 |
 | [路线图](skills-manager-vnext-roadmap.md) | Phase、依赖、入口/退出门禁、状态边界 | 逐文件实现细节 |
 | [规则治理参考采纳矩阵](rule-governance-adoption-matrix.md) | 官方/参考仓模式的 adopt/adapt/reject/defer 与验证边界 | 当前宿主安装或跨仓写入状态 |
-| [Phase 0 Spec](../superpowers/specs/2026-08-01-capability-manager-vnext-phase-0-design.md) | 下一阶段的行为契约、兼容、测试和代码 seam | 后续 Phase 的猜测式实现 |
-| [实施计划](../../tasks/plan.md) | Phase 0 执行顺序、检查点、失败分流 | 产品背景全文 |
-| [任务 manifest](../../tasks/skills-manager-vnext-phase0.tasks.json) | AI 可解析的任务、依赖、write set、验证、回滚、完成条件 | 长篇设计解释 |
+| [Phase 3 Spec](../superpowers/specs/2026-08-02-capability-manager-vnext-phase-3-design.md) | 当前阶段的行为契约、兼容、测试和代码 seam | 后续 Phase 的猜测式实现 |
+| [实施计划](../../tasks/plan.md) | Phase 3 执行顺序、检查点、失败分流 | 产品背景全文 |
+| [任务 manifest](../../tasks/skills-manager-vnext-phase3.tasks.json) | AI 可解析的任务、依赖、write set、验证、回滚、完成条件 | 长篇设计解释 |
 | [任务清单](../../tasks/todo.md) | 人类可扫描的当前任务状态 | manifest 中的结构化细节副本 |
 | [planning verifier](../../scripts/verify-vnext-planning.ps1) | 机械校验上述资产的一致性 | 判断产品价值或宿主 live acceptance |
 
@@ -57,16 +57,18 @@
 
 ## 5. 当前基线
 
-截至 2026-08-01：
+截至 2026-08-02：
 
 - `skills.ps1`、`skills.json`、skill projection、MCP profile/sync、目标仓审查、doctor、reference shelf 和质量门禁已经存在。
 - 本目录、Phase 0 spec、Phase 0 task manifest 和 planning verifier 属于本轮新增的 `planning_contract`。
 - OperationPlan/Receipt v1 的 pure constructors、validators、freshness、truth-state 和 redaction 已达到 `repo_verified`；尚未迁移任何现有 write/apply path。
 - UTF-8 atomic file writer 已提取到 Infrastructure，`SaveCfg` 是首个直接 caller，其他 caller 继续通过 legacy wrapper 保持兼容。
 - host capability/truth-state matrix 已达到 `repo_verified`：5 个宿主、7 条 evidence，validator 禁止无证据 affirmative claim、unknown 写入和自动 `live_accepted`；它不扫描本机安装状态。
-- 统一 capability inventory、rules advisor、OperationPlan consumer、plugin awareness 和规则显式 Apply 尚未实现。
+- P0/P1/P2 已分别 9/9、9/9、7/7 `repo_verified`；2026-08-02 follow-through 增加 `rule-estate-audit` 与单 Git 仓规则 create/update，仍禁止全局用户目录和批量跨仓自动覆盖。
+- P3 已完成 7/7 `repo_verified`：只读 inventory、manifest lint、fixture-only exporter 和分层 eval 均有仓库证据；plugin install/host load/live acceptance 未执行。
+- P4 entry decision 为 `not_started/deferred`：独立产品证据、重复采用与明确 scale surface/audience 未满足，未创建 P4 manifest。
 - `governed-ai-coding-runtime` 只作为静态规则模型参考；不得恢复其已退役的目标仓 registry、同步器或中央 verifier。
-- “全局 + 项目 1+1>2”已定义为 `common + platform_delta + project_action` 的责任覆盖合同；Rules Advisor 本身仍未实现。
+- “全局 + 项目 1+1>2”已定义为 `common + platform_delta + project_action` 的责任覆盖合同；read-only Rule Advisor 已接通显式责任映射和 repo path/command 静态核验，通用自然语言语义精度仍不作外推。
 
 ## 6. 维护规则
 

@@ -1,0 +1,15 @@
+{
+  "installed": [
+    {
+      "pluginId": "teacher-workflows@workspace",
+      "name": "teacher-workflows",
+      "marketplaceName": "workspace-teaching",
+      "version": "0.1.0",
+      "installed": true,
+      "enabled": true,
+      "installPolicy": "AVAILABLE",
+      "authPolicy": "ON_USE"
+    }
+  ],
+  "available": []
+}

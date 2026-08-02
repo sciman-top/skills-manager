@@ -37,4 +37,28 @@ Describe 'Rule audit repository truth integration' {
         $result.references[0].evidence[0].reason | Should Be 'recommendation_not_evidence'
         $result.recommendations_used_as_evidence | Should Be 0
     }
+
+    It 'verifies a command entrypoint without executing an unobserved command' {
+        $root = Join-Path $TestDrive 'entrypoint'; New-Item -ItemType Directory -Path (Join-Path $root 'scripts') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $root 'scripts\verify.ps1') -Value 'exit 0' -Encoding UTF8
+        $truth = New-RuleRepoTruthIndex -RepoRoot $root
+
+        $result = Test-RuleRepoReferences $truth @([pscustomobject]@{ kind = 'command'; value = 'pwsh -NoProfile -File scripts/verify.ps1'; source_type = 'rule' })
+
+        $result.references[0].state | Should Be 'verified'
+        $result.references[0].executed | Should Be $false
+        $result.commands_executed | Should Be 0
+    }
+
+    It 'does not classify slash-delimited labels or wildcard examples as paths' {
+        $root = Join-Path $TestDrive 'tokens'; New-Item -ItemType Directory -Path (Join-Path $root 'scripts') -Force | Out-Null
+        $rule = Join-Path $root 'AGENTS.md'
+        Set-Content -LiteralPath $rule -Value 'Use `E4/E5/E6`, `not_started/deferred`, `src/*`, and `scripts/verify.ps1`.' -Encoding UTF8
+        $document = [pscustomobject]@{ path = $rule }
+
+        $references = @(Get-RuleAuditReferences -Documents @($document))
+
+        $references.Count | Should Be 1
+        $references[0].value | Should Be 'scripts/verify.ps1'
+    }
 }

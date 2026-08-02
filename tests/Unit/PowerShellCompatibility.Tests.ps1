@@ -53,7 +53,8 @@ Describe 'PowerShell runtime compatibility contract' {
         $entry = (Join-Path $repoRoot 'skills.ps1').Replace("'", "''")
         $operation = (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1').Replace("'", "''")
         $receipt = (Join-Path $repoRoot 'src\Domain\Receipt.ps1').Replace("'", "''")
-        $scriptText = "[void][scriptblock]::Create((Get-Content -Raw '$entry')); . '$operation'; . '$receipt'; `$p=New-OperationPlan -OperationId compat -Domain runtime -Mode dry_run -CreatedAt 2026-08-01T08:00:00Z; `$r=New-OperationReceipt -OperationId compat -Status dry_run -StartedAt 2026-08-01T08:00:00Z -CompletedAt 2026-08-01T08:00:01Z; [pscustomobject]@{version=`$PSVersionTable.PSVersion.ToString();plan=`$p.schema_version;receipt=`$r.schema_version}|ConvertTo-Json -Compress"
+        $plugin = (Join-Path $repoRoot 'src\Domain\PluginManifest.ps1').Replace("'", "''")
+        $scriptText = "[void][scriptblock]::Create((Get-Content -Raw '$entry')); . '$operation'; . '$receipt'; . '$plugin'; `$p=New-OperationPlan -OperationId compat -Domain runtime -Mode dry_run -CreatedAt 2026-08-01T08:00:00Z; `$r=New-OperationReceipt -OperationId compat -Status dry_run -StartedAt 2026-08-01T08:00:00Z -CompletedAt 2026-08-01T08:00:01Z; `$m=Test-PluginManifestContract ([pscustomobject]@{name='compat';version='1.0.0';description='compat';repository='https://example.invalid/compat';license='MIT';skills='./skills/'}) '' `$true; [pscustomobject]@{version=`$PSVersionTable.PSVersion.ToString();plan=`$p.schema_version;receipt=`$r.schema_version;plugin=`$m.shape}|ConvertTo-Json -Compress"
 
         $output = @(& $legacy.Source -NoProfile -ExecutionPolicy Bypass -Command $scriptText 2>&1)
         $exitCode = $LASTEXITCODE
@@ -63,5 +64,6 @@ Describe 'PowerShell runtime compatibility contract' {
         $result.version | Should Match '^5\.1\.'
         $result.plan | Should Be 1
         $result.receipt | Should Be 1
+        $result.plugin | Should Be 'skills_only'
     }
 }

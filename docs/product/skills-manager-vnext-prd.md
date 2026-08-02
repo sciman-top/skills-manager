@@ -2,8 +2,8 @@
 
 **program_id**: `skills-manager-vnext`
 **status**: accepted-direction
-**implementation_status**: phase-0-foundation-in-progress
-**最后更新**: 2026-08-01
+**implementation_status**: phase-3-plugin-distribution-repo-verified
+**最后更新**: 2026-08-02
 
 ## 1. 产品结论
 
@@ -67,7 +67,7 @@
 
 ### `PP-004 Target-owned rules`
 
-项目规则由目标仓维护。本项目可以分析和生成 patch，不能维护中央目标仓清单或自动覆盖多个仓库。
+项目规则由目标仓维护。本项目可以从显式工作区动态发现 Git 目标、分析并生成 patch，也可在单仓精确路径、reviewed desired file、hash 和显式 token 约束下 apply；不能把缓存清单变成权威中央 registry，也不能自动覆盖多个仓库。
 
 规则协同采用三层责任模型：跨仓稳定语义属于 `common`，宿主加载/诊断/权限差异属于 `platform_delta`，仓库事实、命令、边界、证据和回滚属于 `project_action`。三层共同覆盖一个执行约束、且没有重复或冲突，才可判定为“全局 + 项目 1+1>2”；文件长得相似或通过静态模板检查不构成该结论。
 
@@ -108,13 +108,14 @@ Capability、RuleDocument、Profile、OperationPlan 和 Receipt 使用独立模�
 - `FR-RUL-003`：用当前 repo build/test/CI/script/README 校验规则中的命令和路径；无法证明时输出 bounded uncertainty。
 - `FR-RUL-004`：建议遵循“prompt/thread -> AGENTS -> skill -> plugin -> MCP -> hook/CI”的最小 surface 选择。
 - `FR-RUL-005`：规则 plan 必须包含依据、目标 path、diff、风险、验证、回滚和 scope owner。
-- `FR-RUL-006`：Phase 1 只读；规则写入在 Phase 2 才允许，并要求精确路径和显式确认。
+- `FR-RUL-006`：Phase 1 只读；规则写入在 Phase 2 才允许，并要求精确 Git 根、已知规则文件名、reviewed desired file、before hash、显式 token、receipt 和回滚。
 - `FR-RUL-007`：不得批量生成同质化项目规则，不得恢复中央 target registry、跨仓同步器或统一规则 CI。
 - `FR-RUL-008`：为每条规则分类 `common | platform_delta | project_action | deterministic_enforcement | task_local`；发现层级错位时优先移动或下沉，不在多个文件复制修补。
 - `FR-RUL-009`：输出 `Global Rule -> Repo Action` 覆盖关系，区分 `covered | gap | conflict | duplicated | not_applicable`；`not_applicable` 必须有理由和恢复条件，不能用来隐藏缺口。
 - `FR-RUL-010`：Codex/Claude 的共同语义应可比较，平台差异必须独立取证；不得假定文件 import、wrapper、fallback 或 override 在不同宿主具有相同语义。
 - `FR-RUL-011`：渐进披露建议同时考虑常驻上下文成本与可发现性。行数/字节阈值、固定 heading 和 wrapper shape 是可配置 profile 或 finding，不是跨宿主硬编码真理。
 - `FR-RUL-012`：规则审查输出采用 `adopt | adapt | reject | defer` disposition，记录来源/revision、依据、产品落点、验证方式和 truth boundary。
+- `FR-RUL-013`：workspace estate audit 从当前直属 Git 根派生目标集合，应用显式排除项并报告 registry drift；历史清单不得覆盖磁盘真值。
 
 ### 6.4 Plugin awareness
 
@@ -122,6 +123,8 @@ Capability、RuleDocument、Profile、OperationPlan 和 Receipt 使用独立模�
 - `FR-PLG-002`：区分 plugin bundle、bundled skill、MCP server、connector、hook 和 optional UI。
 - `FR-PLG-003`：安装、启停和授权优先委托宿主原生能力；本项目记录 intent 和 result，不保存 OAuth/token。
 - `FR-PLG-004`：个人 plugin lint/export 只在已有自维护 workflow 需要分发时启用；不因“可能有用”自动打包。
+- `FR-PLG-005`：distribution lint 必须检查 manifest shape、source/repository、SemVer、license、component path、skill structure 和敏感字段；缺失供应链事实时 fail-closed。
+- `FR-PLG-006`：plugin evaluation 分为 deterministic static、behavior fixture、optional model snapshot、host load 和 live workflow；model score 不得作为唯一 gate。
 
 ### 6.5 MCP governance
 
@@ -166,7 +169,8 @@ Capability、RuleDocument、Profile、OperationPlan 和 Receipt 使用独立模�
 - `NFR-SEC-001`：不持久化 API key/OAuth/token；日志、plan 和 receipt 使用 redaction-first。
 - `NFR-PERF-001`：inventory/doctor 使用有界扫描、缓存和明确超时；性能退化不能通过跳过完整性校验解决。
 - `NFR-OBS-001`：关键阶段输出稳定的 machine-readable status 和 phase timing。
-- `NFR-TST-001`：新增 contract 有 unit、fixture/golden 和至少一个真实 native probe 路径；不可用时按 N/A 记录恢复条件。
+- `NFR-TST-001`：测试按风险选择最低充分层级；优先真实输入形状和关键失败模式，不要求每个改动机械同时新增 unit、fixture/golden、E2E 和 native probe。更高层不可用时按 N/A 记录恢复条件。
+- `NFR-GOV-001`：编码前记录问题证据、官方/既有复用结论、最小方案、write set 与停止条件；full gate 和独立 evidence 仅在共享边界、closeout 或 release 需要时增加。
 - `NFR-TRU-001`：任何“完成/生效/验收”声明必须绑定 verification level 和 evidence path。
 
 ## 8. 产品级验收

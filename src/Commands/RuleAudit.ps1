@@ -23,15 +23,17 @@ function Invoke-RuleAuditCommand([object[]]$Tokens = @()) {
     $discovery = Get-RuleDiscovery -RepoRoot $options.repo -CurrentDirectory $options.current_directory -HostName $options.host -UserRuleRoot $options.user_root
     $profile = [pscustomobject]@{ max_bytes = $(if ($options.host -eq 'codex') { 10240 } else { 16384 }); max_lines = $(if ($options.host -eq 'codex') { 80 } else { 130 }); blocking_codes = @('file_missing') }
     $diagnostics = Invoke-RuleDiagnostics $discovery $profile
-    $advisor = Invoke-RuleAdvisor -Documents $diagnostics.documents
+    $constraints = @(Get-RuleAuditResponsibilityConstraints -Documents $diagnostics.documents)
+    $advisor = Invoke-RuleAdvisor -Documents $diagnostics.documents -Constraints $constraints
     $repoScan = New-AuditRepoScan 'rule-audit' ([System.IO.Path]::GetFullPath($options.repo)) $options.repo
     $truth = New-RuleRepoTruthIndex -RepoRoot $options.repo -RepoScan $repoScan
+    $referenceChecks = Test-RuleRepoReferences -TruthIndex $truth -References @(Get-RuleAuditReferences -Documents $diagnostics.documents)
     $blockingCount = [int]$diagnostics.blocking_count
     $reportRequested = -not [string]::IsNullOrWhiteSpace([string]$options.out_path)
     $envelope = [pscustomobject][ordered]@{
         schema_version = 1; command = 'rule-audit'; pass = ($blockingCount -eq 0); exit_code = $(if ($blockingCount -gt 0) { 2 } else { 0 })
         truth_boundary = 'repo_static_audit'; discovery = $discovery; diagnostics = $diagnostics; advisor = $advisor
-        repo_truth = $truth; provider_calls = 0; native_mutations = 0; profile_changed = $false; writes = $(if ($reportRequested) { 1 } else { 0 })
+        repo_truth = $truth; repo_reference_checks = $referenceChecks; provider_calls = 0; native_mutations = 0; profile_changed = $false; writes = $(if ($reportRequested) { 1 } else { 0 })
     }
     $json = $envelope | ConvertTo-Json -Depth 40 -Compress
     if (-not [string]::IsNullOrWhiteSpace([string]$options.out_path)) {
