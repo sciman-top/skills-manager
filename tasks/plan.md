@@ -9,7 +9,7 @@
 
 实现只读 plugin inventory、manifest/supply-chain lint、单一 fixture-only Codex skills-only exporter 与分层 eval；安装、认证、marketplace mutation、provider 和 host write 保持禁用。
 
-Post-closeout follow-through：增加 `rule-estate-audit`，从工作区直属 Git 根生成 Codex/Claude 联合规则审计；允许 reviewed 单仓规则 create/update，继续禁止全局用户目录和批量跨仓覆盖。
+Post-closeout follow-through：增加 `rule-estate-audit`，从工作区直属 Git 根生成 Codex/Claude 联合规则审计；在显式 reviewed change-set、全量预检和 apply token 下，支持全局用户规则与多个直属目标仓的 plan/apply/resume/per-target rollback。2026-08-02 已执行用户授权的 11 文件 rollout 与 Codex 9/9 fresh-process load probe；Claude load 为 `platform_na`，live acceptance 仍是独立动作。
 
 ## 2. Execution contract
 
@@ -18,6 +18,7 @@ Post-closeout follow-through：增加 `rule-estate-audit`，从工作区直属 G
 - inventory/lint/eval 默认 zero-write；exporter 必须 fixture marker + exact root + explicit token。
 - 只支持有当前官方 docs/help/fixture 的 Codex skills-only plugin shape。
 - P4 只由独立 evidence gate 决定，不因 P3 代码完成自动启动。
+- Rule Estate 写路径只管理精确的 `AGENTS.md` / `CLAUDE.md`，默认排除 `external`、`文档`；不管理 provider/auth/model/sandbox、plugin/native host，也不自动 commit/push 目标仓。
 
 ## 3. Ordered work
 
@@ -46,4 +47,4 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-
 
 ## 5. Phase completion rule
 
-七个 P3 task 全部 done，fixture inventory/lint/export/eval、P4 decision verifier 与 full gate 通过。最高仅 `repo_verified`；plugin install、host load 和 live workflow 均未执行。
+七个 P3 task 全部 done，fixture inventory/lint/export/eval、P4 decision verifier 与 full gate 通过。P3 plugin 能力最高仅 `repo_verified`；未执行 plugin install/load 或 live workflow。独立的 Rule Estate follow-through 已达到 Codex `host_loaded=9/9`，不得外推为 P3 plugin 或 `live_accepted`。

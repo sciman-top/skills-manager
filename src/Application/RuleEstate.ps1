@@ -177,9 +177,10 @@ function Get-RuleEstateCoverage {
     $actions = @(Get-RuleEstateProjectActions $AgentsPath)
     $constraints = New-Object System.Collections.Generic.List[object]
     foreach ($id in @(Get-RuleEstateExpectedConstraintIds $CodexGlobalText $ClaudeGlobalText $actions)) {
-        $matches = @($actions | Where-Object { [string]$_.constraint_id -eq $id })
-        $codexHas = $CodexGlobalText -match ('(?i)(?<![A-Z0-9])' + [regex]::Escape($id) + '(?![A-Z0-9])')
-        $claudeHas = $ClaudeGlobalText -match ('(?i)(?<![A-Z0-9])' + [regex]::Escape($id) + '(?![A-Z0-9])')
+        $actionMatches = @($actions | Where-Object { [string]$_.constraint_id -eq $id })
+        $constraintPattern = '(?i)(?<![A-Z0-9])' + [regex]::Escape($id) + '(?![A-Z0-9])'
+        $codexHas = [regex]::IsMatch($CodexGlobalText, $constraintPattern)
+        $claudeHas = [regex]::IsMatch($ClaudeGlobalText, $constraintPattern)
         $platformDeltas = New-Object System.Collections.Generic.List[string]
         if ($GlobalAlignment.codex_delta_present) { $platformDeltas.Add([string]$GlobalAlignment.codex_path) | Out-Null }
         if ($GlobalAlignment.claude_delta_present) { $platformDeltas.Add([string]$GlobalAlignment.claude_path) | Out-Null }
@@ -187,10 +188,10 @@ function Get-RuleEstateCoverage {
             constraint_id = $id
             common_intent = if ($codexHas -and $claudeHas) { 'declared_by_both_global_rules' } else { '' }
             platform_deltas = @($platformDeltas.ToArray())
-            project_actions = @($matches | ForEach-Object { [string]$_.action })
+            project_actions = @($actionMatches | ForEach-Object { [string]$_.action })
             enforcement_refs = @()
-            evidence = @($matches | ForEach-Object { $_.evidence } | ForEach-Object { $_ })
-            recovery_condition = if ($matches.Count -eq 0) { 'Add an evidence-backed repository action or an explicit N/A with recovery condition.' } else { '' }
+            evidence = @($actionMatches | ForEach-Object { $_.evidence } | ForEach-Object { $_ })
+            recovery_condition = if ($actionMatches.Count -eq 0) { 'Add an evidence-backed repository action or an explicit N/A with recovery condition.' } else { '' }
             need_kind = 'project_guidance'
         }) | Out-Null
     }

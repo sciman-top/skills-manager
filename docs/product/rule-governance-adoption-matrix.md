@@ -2,7 +2,7 @@
 
 **scope**: `skills-manager vNext` Rules Advisor planning
 **reference_revision**: `D:\CODE-other\governed-ai-coding-runtime@bbf5aba4b221ecf5ac0279ad41c9c51c104b4191`
-**status**: planning_contract
+**status**: adopted_with_rule_estate_followthrough
 **最后更新**: 2026-08-01
 
 ## 1. 结论
@@ -23,8 +23,9 @@
 | 固定 `1/A/B/C/D` 结构 | `adapt` | 可选 profile | 对当前用户规则有效，但不是宿主官方通用要求 | profile opt-in，不作为默认 universal blocker |
 | 全局 130 lines/16 KiB、项目 80 lines/10 KiB | `adapt` | 可配置 budget finding | 可作保守默认；Codex 官方限制是合并项目链预算且可配置，不是这些固定数字 | host/profile budget source |
 | Claude `@AGENTS.md` 薄 wrapper | `adapt` | Claude profile candidate | 能减少双份维护，但 import/上下文语义必须由当前官方资料或 native probe 证明 | BOM/import/static + Claude-native evidence |
-| 中央 target registry / 同步器 / drift repair | `reject` | 明确非目标 | 目标仓自治，恢复旧控制面会扩大误写面和维护成本 | verifier 禁止规划 write set 指向中央目标清单 |
-| 跨仓统一规则 CI 和自动覆盖 | `reject` | 无产品落点 | repo-side 静态通过不等于宿主加载，语义误报不应自动写入 | P1 write-zero；P2 单目标显式 token |
+| 权威中央 target registry / 模板覆盖 / 后台 drift repair | `reject` | 明确非目标 | 目标仓自治，恢复旧控制面会扩大误写面和维护成本 | 动态磁盘发现；缓存 registry 只报告 drift |
+| reviewed rule-estate orchestration | `adapt` | `FR-RUL-014..019`、`rule-estate-plan/apply/rollback` | 用户核心需求需要全局和多目标仓治理，但不需要中央真源或跨仓事务 | exact allowlist、target-set/target-file hash/lock preflight、dirty observation、per-target receipt |
+| 跨仓统一规则 CI 和无审阅自动覆盖 | `reject` | 无产品落点 | repo-side 静态通过不等于宿主加载，语义误报不应自动写入 | AI self-review 拒绝；显式 review/token；host/live 分层 |
 | 通用规则 AST / 重型 policy engine / daemon / DB / Web UI | `reject` | `ADR-SMV-005/008` | 当前没有规模、性能或协作证据 | 架构触发条件 review |
 | Claude 全加载 precedence 与 hosted 行为 | `defer` | host-specific evidence backlog | 本轮本机 help 只证明部分能力，不能外推完整语义 | 刷新 Anthropic 官方文档并做可用 native probe |
 
@@ -44,4 +45,4 @@
 
 - OpenAI Codex 语义来自 2026-08-01 当前 manual：global/repo/nested discovery、root-to-cwd merge、默认 32 KiB 合并项目指令预算、fresh run/session 重建，以及 experimental `.rules` 的命令决策边界。
 - Claude 本轮只把本机 `claude 2.1.206 --help` 明示的 `CLAUDE.md` auto-discovery/skills/bare 边界作为 capability evidence；未完成的 precedence、import 和 hosted 结论保持 defer。
-- 参考仓工作树在读取时干净，revision 如页首；它已退役为静态档案，本项目不执行其脚本、不继承其指令、不写入其文件。
+- 参考仓工作树在读取时干净，revision 如页首；它已退役为静态档案。本项目采纳其 v9.60 common/delta/action、渐进披露和反过度设计思想，但不继承其“本仓不做跨仓管理”的退役产品边界，也不执行其脚本或写入其文件。

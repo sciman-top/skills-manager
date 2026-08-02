@@ -95,6 +95,10 @@ verify drift
         $report.summary.covered_count | Should BeGreaterThan 0
         $report.summary.patch_candidate_count | Should Be 1
         $report.patch_candidates[0].target_path | Should Match 'repo-b\\CLAUDE\.md$'
+        foreach ($covered in @($report.targets[0].responsibility.coverage | Where-Object coverage -eq 'covered')) {
+            @($covered.project_actions | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count | Should BeGreaterThan 0
+            @($covered.evidence | Where-Object { $null -ne $_ }).Count | Should BeGreaterThan 0
+        }
         $report.writes | Should Be 0
         $report.provider_calls | Should Be 0
         $report.host_loaded | Should Be 'not_run'

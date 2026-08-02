@@ -61,4 +61,20 @@ Describe 'Rule audit repository truth integration' {
         $references.Count | Should Be 1
         $references[0].value | Should Be 'scripts/verify.ps1'
     }
+
+    It 'parses multiple semicolon-delimited rule mappings from one bullet' {
+        $root = Join-Path $TestDrive 'multi-mapping'; New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $rule = Join-Path $root 'AGENTS.md'
+        @'
+## D. Global Rule -> Repo Action
+
+- `E4`: health gates; `E5`: supply-chain review; `E6`: migration and rollback.
+'@ | Set-Content -LiteralPath $rule -Encoding UTF8
+        $document = [pscustomobject]@{ path = $rule }
+
+        $constraints = @(Get-RuleAuditResponsibilityConstraints -Documents @($document))
+
+        @($constraints.constraint_id | Sort-Object) -join ',' | Should Be 'E4,E5,E6'
+        @($constraints | Where-Object constraint_id -eq 'E5')[0].common_intent | Should Be 'supply-chain review'
+    }
 }

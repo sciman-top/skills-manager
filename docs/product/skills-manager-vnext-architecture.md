@@ -82,7 +82,7 @@ CapabilityDescriptor
 
 职责：发现规则、建立加载候选链、静态诊断、repo truth 核对、建议 surface、生成 patch plan。
 
-不负责：中央规则库、无审阅的跨仓同步、权限 enforcement、Phase 1 中的任何写入。工作区自动发现只生成当前 inventory/drift，不成为目标仓权威真源。
+不负责：中央规则库、无审阅的跨仓同步、权限 enforcement、Phase 1 中的任何写入。工作区自动发现生成当前 inventory/drift 和 target-set hash，不成为目标仓权威真源；Phase 2 follow-through 只消费 reviewed change-set。
 
 核心类型：
 
@@ -103,6 +103,20 @@ RuleDocument
 ```
 
 `RuleDocument` 不继承 `CapabilityDescriptor`。两者只通过 planner 的 `target_ref` 被操作。
+
+规则全域写入采用轻量 saga，而不是跨仓分布式事务：
+
+```text
+reviewed change-set
+  -> dynamic target-set snapshot
+  -> preflight all (allowlist/target hash/target-set/lock)
+  -> atomic apply one target
+  -> persist action receipt
+  -> next target or fail-fast
+  -> resume from receipt / rollback one action
+```
+
+全局和项目目标都使用精确文件名 allowlist。目标仓文件仍是真源；控制仓只保存 review、plan、receipt、backup 和 evidence。仓内无关 dirty paths 在 plan/receipt 中观察并保留，只有目标规则文件 freshness 参与阻断。先前成功的目标不会因后续失败自动回滚，避免模拟跨 Git 仓的 all-or-rollback。
 
 规则协同的最小分析单位不是某个固定 heading，而是 `RuleResponsibility`：
 
@@ -393,7 +407,7 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 
 理由：规则优化包含语义判断，自动跨仓写入的误伤和真值漂移风险高。
 
-2026-08-02 follow-through：`rule-estate-audit` 将动态 Git 目标、registry drift、global common/platform delta、规则 release 和责任覆盖汇总为 zero-write report；单仓事务 apply 已完成一个真实仓 create/update pilot，但 host/global-user write 与批量 apply 仍不开放。
+2026-08-02 follow-through：`rule-estate-audit` 将动态 Git 目标、registry drift、global common/platform delta、规则 release 和责任覆盖汇总为 zero-write report；`rule-estate-plan/apply/rollback` 通过 fixture/E2E 与一次用户显式授权的真实 11 文件 rollout，证明 reviewed global/project multi-target plan、全量预检、逐目标 receipt、fail-fast、resume 与单目标 rollback。Codex fresh-process load 为 9/9；Claude load 为 `platform_na`；`live_accepted` 仍未执行。
 
 ### `ADR-SMV-008 Responsibility coverage over universal template`
 

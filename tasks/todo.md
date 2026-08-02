@@ -14,7 +14,8 @@
 ## Current boundary
 
 - P0/P1：均 9/9 `repo_verified`；历史真源保留。
-- P2：7/7 `repo_verified`；单 Git 仓 reviewed rule apply 已完成真实 pilot，host/global-user apply 仍禁用。
-- P1/P2 follow-through：`rule-estate-audit` 已覆盖动态目标、registry drift、common/delta、release 与责任映射；9 仓复审为 99 covered、0 gap。
-- P3：7/7 `repo_verified`；plugin install、host load 与 live workflow 均未执行。
+- P2：7/7 `repo_verified`；单 Git 仓 reviewed rule apply 已完成历史 pilot。
+- P1/P2 follow-through：`rule-estate-audit` 已覆盖动态目标、registry drift、common/delta、release 与责任映射；补齐同一 bullet 多标签解析后，9 仓真实复审为 99 covered、0 gap、0 finding。
+- Rule Estate reviewed multi-target：已基于用户显式授权执行 2 个全局规则与 9 个项目规则的 reviewed rollout，receipt 为 11/11 applied 且 desired hash 全匹配；Codex fresh-process 为 9/9 `host_loaded`，Claude 为 `platform_na`，`live_accepted=not_run`。
+- P3：7/7 `repo_verified`；plugin install、plugin host load 与 live workflow 均未执行；Rule Estate 的 Codex 规则加载验证不外推为 plugin 或业务验收。
 - P4：`conditional` 且 entry decision 为 `not_started/deferred`；未创建 P4 manifest。

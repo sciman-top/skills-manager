@@ -340,6 +340,37 @@ description: demo skill
         }
     }
 
+    Context "Rule estate reviewed multi-target CLI" {
+        It "plans applies and rolls back through the generated entry point" {
+            $workspace = Join-Path $TestDrive 'estate-cli-workspace'; $repo = Join-Path $workspace 'repo-a'; $reviewRoot = Join-Path $workspace 'review'
+            $codex = Join-Path $TestDrive 'estate-cli-codex'; $claude = Join-Path $TestDrive 'estate-cli-claude'
+            foreach ($path in @($repo,$reviewRoot,$codex,$claude)) { New-Item -ItemType Directory -Path $path -Force | Out-Null }
+            git -C $repo init --quiet; git -C $repo config user.email fixture@example.invalid; git -C $repo config user.name fixture
+            [IO.File]::WriteAllText((Join-Path $repo 'AGENTS.md'), '# repo before'); git -C $repo add AGENTS.md; git -C $repo commit -m init --quiet
+            [IO.File]::WriteAllText((Join-Path $codex 'AGENTS.md'), '# global before'); [IO.File]::WriteAllText((Join-Path $claude 'CLAUDE.md'), '# claude')
+            [IO.File]::WriteAllText((Join-Path $reviewRoot 'repo.md'), '# repo after'); [IO.File]::WriteAllText((Join-Path $reviewRoot 'global.md'), '# global after')
+            $review = [pscustomobject]@{ schema_version=1; review_status='reviewed'; reviewed_by='fixture-owner'; reviewed_by_type='human'; authorization_source='user_supplied'; changes=@(
+                [pscustomobject]@{target_scope='repository';repository='repo-a';target_file='AGENTS.md';desired_file='repo.md';allow_create=$false;risk='medium';evidence_refs=@('e2e')},
+                [pscustomobject]@{target_scope='global_codex';target_file='AGENTS.md';desired_file='global.md';allow_create=$false;risk='high';evidence_refs=@('e2e')}
+            ) }
+            $reviewPath=Join-Path $reviewRoot 'review.json';$review|ConvertTo-Json -Depth 20|Set-Content -LiteralPath $reviewPath -Encoding UTF8
+            $planPath=Join-Path $workspace 'plan.json';$receiptPath=Join-Path $workspace 'receipt.json'
+            $rootArgs=@('--workspace-root',$workspace,'--codex-user-root',$codex,'--claude-user-root',$claude)
+
+            $planOutput=@(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') rule-estate-plan --review $reviewPath @rootArgs --out $planPath --json 2>&1);$planExit=$LASTEXITCODE;$planJson=($planOutput -join "`n")|ConvertFrom-Json
+            $applyOutput=@(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') rule-estate-apply --plan $planPath @rootArgs --token APPLY_RULE_ESTATE_PATCH --out $receiptPath --json 2>&1);$applyExit=$LASTEXITCODE;$applyJson=($applyOutput -join "`n")|ConvertFrom-Json
+            $repoAction=@($applyJson.result.receipt.actions|Where-Object target_scope -eq 'repository')[0]
+            $rollbackOutput=@(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') rule-estate-rollback --receipt $receiptPath --action-id $repoAction.action_id @rootArgs --token ROLLBACK_RULE_ESTATE_PATCH --json 2>&1);$rollbackExit=$LASTEXITCODE;$rollbackJson=($rollbackOutput -join "`n")|ConvertFrom-Json
+
+            $planExit|Should Be 0;@($planOutput).Count|Should Be 1;$planJson.command|Should Be 'rule-estate-plan'
+            $applyExit|Should Be 0;@($applyOutput).Count|Should Be 1;$applyJson.command|Should Be 'rule-estate-apply';$applyJson.result.writes|Should Be 2
+            $rollbackExit|Should Be 0;@($rollbackOutput).Count|Should Be 1;$rollbackJson.command|Should Be 'rule-estate-rollback'
+            [IO.File]::ReadAllText((Join-Path $repo 'AGENTS.md'))|Should Be '# repo before'
+            [IO.File]::ReadAllText((Join-Path $codex 'AGENTS.md'))|Should Be '# global after'
+            $applyJson.truth_boundary|Should Be 'filesystem_applied_not_host_loaded'
+        }
+    }
+
     Context "异常场景" {
         It "Fails loading config when vendors field is missing" {
             $root = Join-Path $TestDrive "ws-invalid-config"

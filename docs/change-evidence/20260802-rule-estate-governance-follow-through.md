@@ -2,9 +2,9 @@
 
 ## Goal and boundary
 
-- Goal: derive all direct Git repositories under `D:\CODE` except `external` and `文档`, audit Codex/Claude global plus project rules as one estate, and allow reviewed single-repository rule patches.
-- Non-goals: central authoritative registry, unreviewed bulk synchronization, user-global rule mutation, host configuration mutation, provider calls, or native host acceptance claims.
-- Existing dirty worktrees were preserved. The only target-repository files changed by this slice were `physicist_chinese_poster_batch_tool/AGENTS.md` and `CLAUDE.md`.
+- Goal: derive all direct Git repositories under `D:\CODE` except `external` and `文档`, audit Codex/Claude global plus project rules as one estate, and execute only a human-reviewed, hash-guarded rule change-set.
+- Non-goals: central authoritative registry, unreviewed synchronization, provider/auth/model/sandbox mutation, plugin/native host mutation, auto commit/push, or live acceptance claims.
+- Existing dirty worktrees were preserved. The authorized rollout changed exactly 2 global user rule files and 9 project `AGENTS.md` files; unrelated target-repository paths were only recorded in the plan/receipt.
 
 ## Sources and decisions
 
@@ -17,10 +17,11 @@
 ## Changes
 
 - Added `rule-estate-audit` with bounded direct-Git discovery, exclusions, registry drift, common-section alignment, platform delta presence, rule release drift, responsibility coverage, and reviewed patch candidates.
-- Extended rule plans from fixture-only to `fixture|repository` boundary scopes. Repository mode requires an exact Git root, known rule filename, reviewed desired file, before hash, `APPLY_RULE_REPO_PATCH`, atomic write, receipt, and rollback.
+- Extended rule plans from fixture-only/single-repository scope to reviewed global/project multi-target change-sets with dynamic target snapshots, exact roots and filenames, before hashes, explicit apply token, atomic writes, durable receipt, resume and per-target rollback.
 - Reconciled `audit-targets.json`: removed absent `local-ai-dev-orchestrator` and added current `physicist_chinese_poster_batch_tool`.
 - Updated the physicist poster repository to project contract 2.0/global review 9.60, current pytest/validator gates, and a one-line `CLAUDE.md` adapter.
 - Replaced that repository's stale implicit final-delivery validator default with the explicit current `outputs/final-delivery/images` and supporting manifest paths.
+- Fixed responsibility parsing so one mapping bullet can carry separate semicolon-delimited labels such as `E4`, `E5`, and `E6`; the regression test first reproduced the 97/99 false gap and then passed after the parser fix.
 
 ## Evidence
 
@@ -28,13 +29,17 @@
 - Target repository gates: all Python scripts compiled; pytest 62 passed; `validate_project: OK`; final-delivery validation reported 0 errors and 0 warnings.
 - Full quality gate passed with the contract-approved `-AllowDirtyWorktree` switch; generated sync rebuilt `skills.ps1` and confirmed it matched current `src/`. The strict clean-tree form correctly blocked because this development slice is not committed relative to `HEAD`.
 - Final estate audit: 9 targets, 99 covered responsibility mappings, 0 gaps, 0 findings, 0 patch candidates, global common sections aligned, registry in sync.
+- Correction chain (same-day): repairing a PowerShell `$Matches` collision first exposed 97/99 coverage; root-cause analysis then showed the remaining E5/E6 gaps were parser false negatives for multiple labels in one bullet. After the multi-label parser fix, the current generated-entry audit is again 99/99 with non-empty actions/evidence and 0 findings.
 - Codex 0.145.0 fresh-process load probe: `codex debug prompt-input` verified the complete on-disk global and project `AGENTS.md` texts in model-visible input for all 9 targets; 9 passed, 0 failed, provider calls 0.
+- Authorized rollout receipt: `reports/rule-estate/20260802-reapproved/estate-receipt.json`; status `applied`, 11/11 actions applied, all current target hashes equal their reviewed desired hashes, provider/native mutations 0.
+- Final verification after the parser/source changes: `tests/run.ps1` exit 0 in 184.3 seconds; doctor, dependency baseline, host capability, planning and P4 entry contracts all exit 0; full quality gate with `-AllowDirtyWorktree` exit 0 in 184.2 seconds and reported `Local quality gates passed (full)`.
 - Report: `reports/rule-estate/current.json` (runtime report, ignored from Git).
 
 ## Truth boundary and rollback
 
-- `repo_verified`: yes for the stated code/tests and target rule pilot.
+- `filesystem_applied`: 11/11 reviewed actions, exact desired hashes verified.
+- `repo_verified`: yes for focused parser/estate tests, the 99/99 generated-entry audit, the full test runner and the full local quality gate.
 - `host_loaded.codex`: `verified_9_of_9` by fresh-process model-visible prompt rendering.
 - `host_loaded.claude`: `platform_na`; `reason=Claude Code 2.1.206 exposes no provider-free prompt renderer`, `alternative_verification=global common/delta static audit + one-line no-BOM project wrappers`, `evidence_link=this document and reports/rule-estate/current.json`, `expires_at=next Claude CLI upgrade`, `recovery_condition=a provider-free local prompt inspection command becomes available or provider execution is explicitly authorized`.
 - `live_accepted`: `not_run`.
-- Rollback this slice by restoring the before-hash content of the two target rule files, reverting the `audit-targets.json` entry, and reverting the listed source/docs/tests. Do not touch unrelated target output or courseware changes.
+- Roll back a deployed rule only with `rule-estate-rollback`, the exact receipt action id and `ROLLBACK_RULE_ESTATE_PATCH`; roll back control-repo source/docs/tests as a separate slice and rebuild `skills.ps1`. Do not touch unrelated target output, audit, PDF or courseware changes.

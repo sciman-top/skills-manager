@@ -1,13 +1,13 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
-**全局规则复核**: 9.60
+**全局规则复核**: 9.61
 **最后更新**: 2026-08-02
 
 ## 1. 当前落点与目标归宿
 - 当前落点：`skills.ps1` 是统一入口，`skills.json` 是 vendor、mapping、target、sync 与 MCP 的单一配置源。
 - 目标归宿：演进为 local-first AI capability curator 与 rule advisor；复用官方 skills/plugins/MCP/规则 surface，不替代宿主 runtime、auth、权限、会话或插件目录。
 - 当前规划真源：`docs/product/`、当前 P3 spec、`tasks/skills-manager-vnext-phase3.tasks.json`；P0/P1/P2 历史由独立 manifest/closeout evidence 保留，设计态能力不得写成已实现。
-- 当前 Phase 收口：P3 7/7 `repo_verified`；实现只读 inventory、lint、fixture-only exporter 与分层 eval。P1/P2 follow-through 已增加工作区规则全域审查和单 Git 仓显式规则 apply；plugin install、host/global-user mutation、provider 和批量跨仓覆盖仍未授权。P4 entry decision 为 `not_started/deferred`，未创建 P4 manifest。
+- 当前 Phase 收口：P3 7/7 `repo_verified`。P1/P2 follow-through 已实现工作区规则全域审查，以及 reviewed global/project multi-target plan、全量预检、逐目标 apply、receipt resume 和单目标 rollback；真实规则变更仍须用户提供 reviewed change-set 与显式 token。plugin install、provider/auth/model/sandbox、native host mutation 与无审阅批量覆盖仍不在边界。P4 entry decision 为 `not_started/deferred`，未创建 P4 manifest。
 
 ## A. 仓库事实与模块边界
 - `build.ps1` 从 `src/*` 生成根 `skills.ps1`；`agent/` 与 `vendor/` 是生成或缓存目录，`agent/` 禁止手改。
@@ -15,6 +15,7 @@
 - `skills.json` + `同步MCP` 只托管 MCP server 清单和目标配置段；model、auth、provider、context、sandbox 不在本仓边界。
 - `skills.json.skill_projection` 托管技能根并集、选主和路径级开关；原技能目录不属于自动删除边界，manifest 在 `reports/skill-projection/current.json`。
 - `src/Commands/AuditTargets.ps1` 是目标审查与外层 AI prompt 真源；`reports/skill-audit/<run-id>/` 是运行产物，禁止手改。
+- `src/Application/RuleEstate.ps1` 负责动态发现和只读审查；`RuleEstateMutation.ps1` 只消费人工或登记策略审阅的 change-set，并以 fail-fast、逐目标 receipt 模型写入，不实现跨仓 all-or-rollback。
 - `docs/product/` 定义 PRD/架构/路线图，task manifest 定义当前 Phase 的 AI 可执行任务；`scripts/verify-vnext-planning.ps1` 只验证规划一致性，不证明产品或宿主验收。
 
 ## B. 执行与风险边界

@@ -33,14 +33,17 @@
     ],
     "profiles": {
       "default": {
-        "budget_limit_chars": 7500,
+        "budget_limit_chars": 8000,
         "enabled_names": [
           "systematic-debugging",
           "verification-before-completion",
           "custom-windows-wpf-teacher-app",
           "custom-teacher-courseware-ppt",
           "custom-creator-publishing",
-          "custom-junior-physics-animation"
+          "custom-junior-physics-animation",
+          "domain-modeling",
+          "grill-with-docs",
+          "grilling"
         ]
       },
       "coding": {

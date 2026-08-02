@@ -7,7 +7,7 @@
 
 ## 1. 产品结论
 
-`skills-manager vNext` 是一个 Windows-first、local-first 的 AI 能力策展器与规则顾问。它帮助用户为 ChatGPT Work、Codex 和其他本地 AI 工具选择、组合、投影和验证合适的 skills、plugins、MCP 与规则文件，同时保持宿主原生能力、目标仓自治和真实验收边界。
+`skills-manager vNext` 是一个 Windows-first、local-first 的 AI 能力策展器与规则全域管理器。它帮助用户为 ChatGPT Work/Codex 与 Claude 选择、组合、投影和验证合适的 skills、plugins、MCP 与规则文件，并管理 `D:\CODE` 直属目标仓（默认排除 `external`、`文档`）及两宿主的全局用户规则，同时保持宿主原生能力、目标仓自治和真实验收边界。
 
 它不是 AI coding runtime，不执行或接管 agent loop，不提供模型路由、账号、认证、权限、会话、云任务、插件商店或中央跨仓治理服务。
 
@@ -67,7 +67,7 @@
 
 ### `PP-004 Target-owned rules`
 
-项目规则由目标仓维护。本项目可以从显式工作区动态发现 Git 目标、分析并生成 patch，也可在单仓精确路径、reviewed desired file、hash 和显式 token 约束下 apply；不能把缓存清单变成权威中央 registry，也不能自动覆盖多个仓库。
+项目规则由目标仓维护。本项目从显式工作区动态发现 Git 目标，结合全局当前规则、目标仓规则与仓内 build/test/CI/script/README 事实生成仓库专属建议；经人工或登记策略审阅后，可以形成包含全局规则和多个目标仓的 change-set，并在精确 allowlist、目标文件 hash、目标集合、锁与显式 token 约束下逐目标 apply。仓内无关 dirty paths 只作 observation 并保留；缓存清单和控制仓模板都不能成为权威中央 registry，也不能进行无审阅同质化覆盖。
 
 规则协同采用三层责任模型：跨仓稳定语义属于 `common`，宿主加载/诊断/权限差异属于 `platform_delta`，仓库事实、命令、边界、证据和回滚属于 `project_action`。三层共同覆盖一个执行约束、且没有重复或冲突，才可判定为“全局 + 项目 1+1>2”；文件长得相似或通过静态模板检查不构成该结论。
 
@@ -109,13 +109,19 @@ Capability、RuleDocument、Profile、OperationPlan 和 Receipt 使用独立模�
 - `FR-RUL-004`：建议遵循“prompt/thread -> AGENTS -> skill -> plugin -> MCP -> hook/CI”的最小 surface 选择。
 - `FR-RUL-005`：规则 plan 必须包含依据、目标 path、diff、风险、验证、回滚和 scope owner。
 - `FR-RUL-006`：Phase 1 只读；规则写入在 Phase 2 才允许，并要求精确 Git 根、已知规则文件名、reviewed desired file、before hash、显式 token、receipt 和回滚。
-- `FR-RUL-007`：不得批量生成同质化项目规则，不得恢复中央 target registry、跨仓同步器或统一规则 CI。
+- `FR-RUL-007`：不得批量生成同质化项目规则，不得恢复权威中央 target registry 或统一规则 CI；允许消费 reviewed multi-target change-set，但每个 desired rule 必须由该仓当前事实独立推导。
 - `FR-RUL-008`：为每条规则分类 `common | platform_delta | project_action | deterministic_enforcement | task_local`；发现层级错位时优先移动或下沉，不在多个文件复制修补。
 - `FR-RUL-009`：输出 `Global Rule -> Repo Action` 覆盖关系，区分 `covered | gap | conflict | duplicated | not_applicable`；`not_applicable` 必须有理由和恢复条件，不能用来隐藏缺口。
 - `FR-RUL-010`：Codex/Claude 的共同语义应可比较，平台差异必须独立取证；不得假定文件 import、wrapper、fallback 或 override 在不同宿主具有相同语义。
 - `FR-RUL-011`：渐进披露建议同时考虑常驻上下文成本与可发现性。行数/字节阈值、固定 heading 和 wrapper shape 是可配置 profile 或 finding，不是跨宿主硬编码真理。
 - `FR-RUL-012`：规则审查输出采用 `adopt | adapt | reject | defer` disposition，记录来源/revision、依据、产品落点、验证方式和 truth boundary。
 - `FR-RUL-013`：workspace estate audit 从当前直属 Git 根派生目标集合，应用显式排除项并报告 registry drift；历史清单不得覆盖磁盘真值。
+- `FR-RUL-014`：全局用户规则只允许精确写入 Codex `AGENTS.md` 与 Claude `CLAUDE.md`；项目规则只允许目标 Git 根的 `AGENTS.md`/`CLAUDE.md`，不得借规则流程修改 provider、auth、model、sandbox、plugin/native host 配置。
+- `FR-RUL-015`：estate plan 必须保存动态目标集合 hash、review provenance、逐目标 before/desired hash、风险、依据和 truth boundary；`reviewed_by_type=ai` 不构成 apply authority。
+- `FR-RUL-016`：estate apply 执行 `preflight-all -> apply-one-by-one -> per-target receipt -> fail-fast`；不得实现跨仓 all-or-rollback，已完成目标保留可独立回滚证据。
+- `FR-RUL-017`：目标集合漂移、目标规则 hash 陈旧、越界文件、并发锁或 resume receipt 不匹配时 fail-closed；无关 dirty paths 必须记录但不得阻断、覆盖、暂存或纳入回滚。
+- `FR-RUL-018`：支持从 receipt resume 和按 action 单目标 rollback；默认不自动 commit/push 任何目标仓，也不常驻后台同步。
+- `FR-RUL-019`：规则变更后的证据严格区分 `filesystem_applied | repo_verified | host_loaded | live_accepted`；fresh session/native probe 与真实用户 workflow 未执行时不得晋级。
 
 ### 6.4 Plugin awareness
 

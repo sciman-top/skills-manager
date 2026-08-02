@@ -1,0 +1,4 @@
+interface:
+  display_name: "Capability Router"
+  short_description: "Route tasks to the narrowest installed skill"
+  default_prompt: "Use $capability-router to select and load the best installed skill for this task."

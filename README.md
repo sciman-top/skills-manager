@@ -50,7 +50,17 @@ Phase 1 的只读入口（未指定 `--out` 时不写文件）：
 
 `rule-estate-audit` 默认排除 `external` 与 `文档`，自动发现工作区直属 Git 仓，报告目标清单漂移、Codex/Claude common/delta 对齐、规则版本和 `Global Rule -> Repo Action` 覆盖。`--out <report.json>` 只允许显式写一个报告文件，且不允许覆盖发现到的规则文件。
 
-P2 事务入口支持 fixture 与单仓两种显式授权域：
+经人工或登记策略审阅的全局/项目规则 change-set 可进入受控多目标流程：
+
+```powershell
+.\skills.ps1 rule-estate-plan --review <reviewed-change-set.json> --workspace-root D:\CODE --out <estate-plan.json> --json
+.\skills.ps1 rule-estate-apply --plan <estate-plan.json> --workspace-root D:\CODE --token APPLY_RULE_ESTATE_PATCH --out <estate-receipt.json> --json
+.\skills.ps1 rule-estate-rollback --receipt <estate-receipt.json> --action-id <action-id> --workspace-root D:\CODE --token ROLLBACK_RULE_ESTATE_PATCH --json
+```
+
+该流程先全量预检，再逐目标原子写入并持久化 receipt；失败立即停止，已完成目标不自动回滚，可从 receipt resume 或单独 rollback。默认拒绝 AI 自声明 reviewed、目标规则 stale hash、目标集合漂移、锁冲突和越界文件；仓内无关 dirty paths 只记录并原样保留，不修改 provider/auth/model/sandbox/plugin/native host 配置，也不自动 commit/push。
+
+P2 事务入口支持 fixture、单仓和 reviewed rule-estate 三种显式授权域：
 
 ```powershell
 .\skills.ps1 rule-plan --target <fixture-rule> --desired-file <reviewed-file> --fixture-root <fixture-root> --json --out <fixture-plan.json>
@@ -59,7 +69,7 @@ P2 事务入口支持 fixture 与单仓两种显式授权域：
 .\skills.ps1 rule-apply --plan <repo-plan.json> --repo-root <git-root> --token APPLY_RULE_REPO_PATCH --json
 ```
 
-仓库模式只允许精确 Git 根内的 `AGENTS.md`、`AGENTS.override.md` 或 `CLAUDE.md`，并执行 hash freshness、reparse、原子写入和回滚守卫；它不授权全局用户目录、host 配置或无审阅的跨仓批量覆盖。
+单仓模式只允许精确 Git 根内的 `AGENTS.md`、`AGENTS.override.md` 或 `CLAUDE.md`，并执行 hash freshness、reparse、原子写入和回滚守卫；全域模式另以 reviewed change-set 和更严格的根文件 allowlist 管理全局用户规则及多个目标仓。
 
 P3 plugin-aware 命令中，inventory/lint/eval 为只读；export 仍严格 fixture-only：
 
@@ -220,11 +230,11 @@ P3 plugin-aware 命令中，inventory/lint/eval 为只读；export 仍严格 fix
 
 `skill_projection.managed_link_excludes` 按受管目录名排除 Codex 的逐技能 Junction；被排除项仍保留在 `agent/`，也不影响 Claude 指向 `agent/` 的根 Junction。该字段适用于保留其他宿主所需技能、但避免其与 Codex `.system` 技能同名冲突的场景。
 
-`skill_projection.aliases` 记录旧名称到替代项的迁移，不把近似能力重新复制成默认技能；`profiles` 控制当前用途下启用的 canonical 技能，`.system` 技能始终保留。顶层 `budget_limit_chars` 对“启用技能名称与描述 + 插件预留”设置 10000 字符 hard ceiling；profile 可用更低的同名字段收紧自身上限，当前 `default` 与 `coding` 均为 7500。`external_metadata_reserve_chars` 至少为 system/plugin Skill 预留 3500 字符，实时外部元数据更大时以实时值为准。任一 profile 超限都会阻断投影。
+`skill_projection.aliases` 记录旧名称到替代项的迁移，不把近似能力重新复制成默认技能；`profiles` 控制当前用途下启用的 canonical 技能，`.system` 技能始终保留。顶层 `budget_limit_chars` 对“启用技能名称与描述 + 插件预留”设置 10000 字符 hard ceiling；profile 可用更低的同名字段收紧自身上限，当前 `default` 为 8000、`coding` 为 7500。`external_metadata_reserve_chars` 至少为 system/plugin Skill 预留 3500 字符，实时外部元数据更大时以实时值为准。任一 profile 超限都会阻断投影。
 
 投影 manifest 为当前 profile 排除项保留 `decision = profile_excluded`，并通过 `profile_reachability` 与 `available_profiles` 区分“可从其他 profile 使用”和“未被任何 profile 路由”。`python`、`mcp`、`review`、`marketing` 与 `video` 用于承接高价值低频技能，避免把整个安装库存塞入 `default`。常用命令：
 
-GPT-5.6 日常路径优先使用 Codex 原生 Plan、Goal、Review 和 agent 控制。`default` 只保留领域入口、故障诊断与完成验证，`coding` 只保留按问题触发的调试、验证、评审、API 与安全能力；两者都不常驻 `using-superpowers`、通用 research、强制 brainstorming、细粒度计划、TDD、worktree 或 subagent 编排。`coding-strict` 是高证据编码档：额外提供 TDD、领域建模和可按设计质询语义隐式触发的 `grill-with-docs`，但同样不加载总入口、强制计划、自动代理或强制 worktree。当前任务不会热加载新 profile，vendor 与技能文件也不会因日常精简而删除。
+GPT-5.6 日常路径优先使用 Codex 原生 Plan、Goal、Review 和 agent 控制。`default` 保留领域入口、故障诊断、完成验证，以及可显式或按明确设计质询语义触发的 `grill-with-docs` 依赖闭包；`coding` 只保留按问题触发的调试、验证、评审、API 与安全能力。两者都不常驻 `using-superpowers`、通用 research、强制 brainstorming、细粒度计划、TDD、worktree 或 subagent 编排。`coding-strict` 是高证据编码档：在 `coding` 上额外提供 TDD、领域建模和 `grill-with-docs`，但同样不加载总入口、强制计划、自动代理或强制 worktree。当前任务不会热加载 profile 变更，vendor 与技能文件也不会因日常精简而删除。
 
 PPT 路由保持职责单一：`custom-teacher-courseware-ppt` 决定课堂课件结构，Presentations 创建或编辑 PPTX，`powerpoint-automation` 只操作 live PowerPoint/COM，`custom-powerpoint-accessibility` 在内容稳定后验证标题、替代文本、阅读顺序、表格、链接、字幕、对比度与动画。可访问性验证不能由截图单独判定；无法检查阅读顺序或辅助技术行为时必须标记为 `not_verified`。
 

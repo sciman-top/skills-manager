@@ -6,7 +6,7 @@
 
 ## 1. 目的
 
-本目录定义 `skills-manager` 从“skills/MCP 管理脚本”演进为“本地 AI 能力策展器与规则顾问”的产品方向。这里描述的是产品目标、架构和后续实施契约，不把设计态能力写成当前已实现能力。
+本目录定义 `skills-manager` 从“skills/MCP 管理脚本”演进为“本地 AI 能力策展器与规则全域管理器”的产品方向。这里描述的是产品目标、架构和后续实施契约，不把设计态能力写成当前已实现能力。
 
 产品终态保持以下边界：
 
@@ -24,6 +24,7 @@
 | [架构](skills-manager-vnext-architecture.md) | bounded context、模块依赖、数据契约、ADR、技术栈 | 路线状态和任务勾选 |
 | [路线图](skills-manager-vnext-roadmap.md) | Phase、依赖、入口/退出门禁、状态边界 | 逐文件实现细节 |
 | [规则治理参考采纳矩阵](rule-governance-adoption-matrix.md) | 官方/参考仓模式的 adopt/adapt/reject/defer 与验证边界 | 当前宿主安装或跨仓写入状态 |
+| [规则全域 reviewed change-set](rule-estate-reviewed-change-set.md) | 全局/多目标仓 plan、apply、resume、rollback 输入契约 | AI 自行批准或宿主加载证明 |
 | [Phase 3 Spec](../superpowers/specs/2026-08-02-capability-manager-vnext-phase-3-design.md) | 当前阶段的行为契约、兼容、测试和代码 seam | 后续 Phase 的猜测式实现 |
 | [实施计划](../../tasks/plan.md) | Phase 3 执行顺序、检查点、失败分流 | 产品背景全文 |
 | [任务 manifest](../../tasks/skills-manager-vnext-phase3.tasks.json) | AI 可解析的任务、依赖、write set、验证、回滚、完成条件 | 长篇设计解释 |
@@ -61,10 +62,10 @@
 
 - `skills.ps1`、`skills.json`、skill projection、MCP profile/sync、目标仓审查、doctor、reference shelf 和质量门禁已经存在。
 - 本目录、Phase 0 spec、Phase 0 task manifest 和 planning verifier 属于本轮新增的 `planning_contract`。
-- OperationPlan/Receipt v1 的 pure constructors、validators、freshness、truth-state 和 redaction 已达到 `repo_verified`；尚未迁移任何现有 write/apply path。
+- OperationPlan/Receipt v1 的 pure constructors、validators、freshness、truth-state 和 redaction已达到 `repo_verified`；通用 legacy write path 未整体迁移，Rule Estate 已采用专用 reviewed plan/receipt/resume/rollback 合同。
 - UTF-8 atomic file writer 已提取到 Infrastructure，`SaveCfg` 是首个直接 caller，其他 caller 继续通过 legacy wrapper 保持兼容。
 - host capability/truth-state matrix 已达到 `repo_verified`：5 个宿主、7 条 evidence，validator 禁止无证据 affirmative claim、unknown 写入和自动 `live_accepted`；它不扫描本机安装状态。
-- P0/P1/P2 已分别 9/9、9/9、7/7 `repo_verified`；2026-08-02 follow-through 增加 `rule-estate-audit` 与单 Git 仓规则 create/update，仍禁止全局用户目录和批量跨仓自动覆盖。
+- P0/P1/P2 已分别 9/9、9/9、7/7 `repo_verified`；2026-08-02 follow-through 增加 `rule-estate-audit`、单仓 patch，以及 reviewed global/project multi-target plan/apply/receipt/resume/rollback。真实 apply 仍需独立 review/token，且不等于 `host_loaded` 或 `live_accepted`。
 - P3 已完成 7/7 `repo_verified`：只读 inventory、manifest lint、fixture-only exporter 和分层 eval 均有仓库证据；plugin install/host load/live acceptance 未执行。
 - P4 entry decision 为 `not_started/deferred`：独立产品证据、重复采用与明确 scale surface/audience 未满足，未创建 P4 manifest。
 - `governed-ai-coding-runtime` 只作为静态规则模型参考；不得恢复其已退役的目标仓 registry、同步器或中央 verifier。

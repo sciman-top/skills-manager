@@ -162,6 +162,9 @@ try {
         "custom-teacher-courseware-ppt",
         "custom-creator-publishing",
         "custom-junior-physics-animation",
+        "domain-modeling",
+        "grill-with-docs",
+        "grilling",
         "chrome:control-chrome",
         "computer-use:computer-use"
     ) @(

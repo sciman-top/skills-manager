@@ -50,7 +50,17 @@ Phase 1 read-only entry points (no file writes without `--out`):
 
 `rule-estate-audit` excludes `external` and `文档` by default, discovers direct Git roots, and reports target-list drift, Codex/Claude common/delta alignment, rule releases, and `Global Rule -> Repo Action` coverage. `--out <report.json>` writes exactly one explicit report and cannot overwrite a discovered rule file.
 
-P2 transaction entry points support explicit fixture and single-repository boundaries:
+Reviewed global/project rule change-sets use the controlled multi-target flow:
+
+```powershell
+.\skills.ps1 rule-estate-plan --review <reviewed-change-set.json> --workspace-root D:\CODE --out <estate-plan.json> --json
+.\skills.ps1 rule-estate-apply --plan <estate-plan.json> --workspace-root D:\CODE --token APPLY_RULE_ESTATE_PATCH --out <estate-receipt.json> --json
+.\skills.ps1 rule-estate-rollback --receipt <estate-receipt.json> --action-id <action-id> --workspace-root D:\CODE --token ROLLBACK_RULE_ESTATE_PATCH --json
+```
+
+The executor preflights every target, then writes one target at a time with a durable receipt. It fails fast, supports receipt-based resume and per-target rollback, rejects AI self-review, stale target-rule hashes, target-set drift, locks, and out-of-scope files. Unrelated dirty paths are recorded and preserved; target repositories are never auto-committed or pushed.
+
+P2 transaction entry points support explicit fixture, single-repository, and reviewed rule-estate boundaries:
 
 ```powershell
 .\skills.ps1 rule-plan --target <fixture-rule> --desired-file <reviewed-file> --fixture-root <fixture-root> --json --out <fixture-plan.json>

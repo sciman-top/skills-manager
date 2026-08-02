@@ -402,10 +402,14 @@ Plugin（P3 repo/fixture-only）：
   .\skills.ps1 plugin-eval --path <plugin-root> --json
   不执行 plugin install、marketplace mutation、provider call 或 host/profile 写入。
 
-规则治理（只读）：
+规则治理：
   .\skills.ps1 rule-audit --repo <repo-root> [--user-root <path>] [--host codex|claude] --json
   .\skills.ps1 rule-estate-audit --workspace-root D:\CODE --registry audit-targets.json [--out <report.json>] --json
   全域审查自动发现工作区直属 Git 仓；默认排除 external 与文档，只写显式 --out 报告。
+  .\skills.ps1 rule-estate-plan --review <reviewed-change-set.json> --workspace-root D:\CODE --out <plan.json> --json
+  .\skills.ps1 rule-estate-apply --plan <plan.json> --workspace-root D:\CODE --token APPLY_RULE_ESTATE_PATCH --out <receipt.json> --json
+  .\skills.ps1 rule-estate-rollback --receipt <receipt.json> --action-id <id> --workspace-root D:\CODE --token ROLLBACK_RULE_ESTATE_PATCH --json
+  全域写入只接受 reviewed change-set，执行全量预检、逐目标 receipt、fail-fast、resume 和单目标 rollback；不自动 commit/push。
 
 技能投影：
   .\skills.ps1 技能配置 列表

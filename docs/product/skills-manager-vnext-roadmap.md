@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | `P0` | Foundation and contracts | `complete` | 9/9 tasks repo_verified；host_loaded/live_accepted 未执行 |
 | `P1` | Read-only inventory and rule advisor | `complete` | 9/9 tasks repo_verified；host_loaded/live_accepted 未执行 |
-| `P2` | Transactional explicit apply | `complete` | 7/7 repo_verified；单 Git 仓规则 create/update pilot 通过，host/global-user apply 仍禁用 |
+| `P2` | Transactional explicit apply | `complete` | 7/7 repo_verified；follow-through 增加 reviewed global/project multi-target saga，真实 apply 仍需独立 review/token |
 | `P3` | Plugin-aware distribution and evaluation | `complete` | 7/7 tasks repo_verified；fixture-first，host/live 未执行 |
 | `P4` | Conditional scale surfaces | `conditional` | entry decision=`not_started/deferred`；未创建 manifest |
 
@@ -152,14 +152,14 @@ P4 requires independent product evidence and does not follow automatically.
 
 ### 5.1 目标
 
-在 P1 findings 可靠后，为 MCP、skill projection 和单目标规则 patch 提供一致 plan/freshness/apply/receipt/rollback。
+在 P1 findings 可靠后，为 MCP、skill projection、单目标规则 patch 和 reviewed rule estate change-set 提供一致 plan/freshness/apply/receipt/rollback。
 
 ### 5.2 Feature slices
 
 - `P2-S1`：OperationPlan enforce 和 stale/freshness gate。
 - `P2-S2`：atomic write、backup 和精确 rollback。
 - `P2-S3`：rules plan 输出 diff，不自动 apply。
-- `P2-S4`：rules apply 仅允许单 repo、精确路径、显式 token。
+- `P2-S4`：rules apply 先支持单 repo 精确路径；follow-through 扩展为 global/project multi-target 的全量预检、逐目标写入与独立 receipt。
 - `P2-S5`：MCP sync 迁移到相同 receipt 语义。
 - `P2-S6`：native probe adapter 和 verification level projection。
 - `P2-S7`：中断/失败/并发漂移恢复测试。
@@ -178,6 +178,8 @@ P4 requires independent product evidence and does not follow automatically.
 - receipt 明确四级 verification，不自动晋级。
 - fixture target 完成 apply/rollback/fault matrix；真实 Codex/项目规则路径只做 hash guard，不把 fixture 写成 host/live acceptance。
 - 2026-08-02 follow-through：真实 Git 仓完成 `AGENTS.md` update 与 `CLAUDE.md` create；精确 token、hash、atomic write、rollback 和 37 项聚焦测试通过，宿主加载仍为 `not_run`。
+- 2026-08-02 rule-estate follow-through：fixture 已覆盖 AI self-review 拒绝、global/project exact allowlist、target-set drift、unrelated-dirty observation、target-file stale hash、lock、fail-fast、resume 与 per-target rollback；执行模型不是跨仓 all-or-rollback。
+- 2026-08-02 authorized rollout：动态发现 9 个直属 Git 仓并排除 `external`、`文档`；2 个全局规则与 9 个项目规则 receipt 为 11/11 applied，审计为 99/99 covered、0 finding，Codex fresh-process load 为 9/9。Claude 为 `platform_na`，`live_accepted=not_run`，P4 继续 `not_started/deferred`。
 
 ## 6. P3 Plugin-aware distribution and evaluation
 

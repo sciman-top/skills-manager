@@ -61,20 +61,30 @@ function Get-RuleAuditResponsibilityConstraints {
                 $inMapping = ($heading -match '(?i)Global\s+Rule\s*[-=]+>\s*Repo\s+Action|Repo\s+Action|规则.+项目')
                 continue
             }
-            if (-not $inMapping -or $line -notmatch '^\s*-\s+(?:`(?<id>[^`]+)`|(?<id>[^:：]+?))\s*[:：]\s*(?<action>.+?)\s*$') { continue }
-            $id = ([string]$Matches['id']).Trim()
-            $action = ([string]$Matches['action']).Trim()
-            if ([string]::IsNullOrWhiteSpace($id) -or [string]::IsNullOrWhiteSpace($action)) { continue }
-            if (-not $constraints.Contains($id)) {
-                $constraints[$id] = [pscustomobject][ordered]@{
-                    constraint_id = $id; common_intent = $action; platform_deltas = @(); project_actions = @($action)
-                    enforcement_refs = @(); evidence = @([pscustomobject]@{ type = 'rule_mapping'; path = $path; line = $index + 1 })
-                    need_kind = 'project_guidance'
-                }
+            if (-not $inMapping -or $line -notmatch '^\s*-\s+') { continue }
+            $segments = New-Object System.Collections.Generic.List[object]
+            $inlineMappings = [regex]::Matches($line, '(?:^\s*-\s*|[;；]\s*)`(?<id>[^`]+)`\s*[:：]\s*(?<action>.*?)(?=(?:[;；]\s*`[^`]+`\s*[:：])|$)')
+            foreach ($mapping in @($inlineMappings)) {
+                $segments.Add([pscustomobject]@{ id = [string]$mapping.Groups['id'].Value; action = [string]$mapping.Groups['action'].Value }) | Out-Null
             }
-            else {
-                $constraints[$id].project_actions = @($constraints[$id].project_actions) + @($action)
-                $constraints[$id].evidence = @($constraints[$id].evidence) + @([pscustomobject]@{ type = 'rule_mapping'; path = $path; line = $index + 1 })
+            if ($segments.Count -eq 0 -and $line -match '^\s*-\s+(?<id>[^:：]+?)\s*[:：]\s*(?<action>.+?)\s*$') {
+                $segments.Add([pscustomobject]@{ id = [string]$Matches['id']; action = [string]$Matches['action'] }) | Out-Null
+            }
+            foreach ($segment in @($segments.ToArray())) {
+                $id = ([string]$segment.id).Trim()
+                $action = ([string]$segment.action).Trim()
+                if ([string]::IsNullOrWhiteSpace($id) -or [string]::IsNullOrWhiteSpace($action)) { continue }
+                if (-not $constraints.Contains($id)) {
+                    $constraints[$id] = [pscustomobject][ordered]@{
+                        constraint_id = $id; common_intent = $action; platform_deltas = @(); project_actions = @($action)
+                        enforcement_refs = @(); evidence = @([pscustomobject]@{ type = 'rule_mapping'; path = $path; line = $index + 1 })
+                        need_kind = 'project_guidance'
+                    }
+                }
+                else {
+                    $constraints[$id].project_actions = @($constraints[$id].project_actions) + @($action)
+                    $constraints[$id].evidence = @($constraints[$id].evidence) + @([pscustomobject]@{ type = 'rule_mapping'; path = $path; line = $index + 1 })
+                }
             }
         }
     }
