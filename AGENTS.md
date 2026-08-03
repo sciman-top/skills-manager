@@ -1,7 +1,7 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
-**全局规则复核**: 9.61
-**最后更新**: 2026-08-02
+**全局规则复核**: 9.62
+**最后更新**: 2026-08-03
 
 ## 1. 当前落点与目标归宿
 - 当前落点：`skills.ps1` 是统一入口，`skills.json` 是 vendor、mapping、target、sync 与 MCP 的单一配置源。
@@ -44,6 +44,7 @@
 - live 补充探针：仅当 release/host health 验收需要真实网络时，在 full 之后单独运行一次 `pwsh -NoProfile -ExecutionPolicy Bypass -File skills.ps1 doctor --strict --threshold-ms 8000`；它不替代 full，也不触发宿主写入。
 - 脏工作树可显式加 `-AllowDirtyWorktree` 并列明既有改动；该开关不允许忽略本任务生成漂移。
 - build、generated-sync、dependency、doctor 或 Pester 任一失败即阻断；不得手改生成物绕过。
+- Git closeout：full 通过后提交本任务；如 agent 自建临时分支/worktree，则并回 `main`、推送 `origin/main`，再仅清理已合并且干净的本任务分支/worktree；冲突、未知改动/远端漂移、保护策略或门禁失败即阻断。
 - reviewed 逻辑切片证据放 `docs/change-evidence/`，每个切片默认一份；runtime receipt 放 ignored `reports/`。历史 runtime receipts 只读归档在 `docs/archive/change-evidence/`，不得重新进入活跃账本。
 - 回滚只撤销本次文件和宿主受管块；不得覆盖无关 `imports/**`、audit/MCP 源码或用户改动。
 
@@ -51,5 +52,5 @@
 - `R1-R5`：先定 source/config/override 归宿，小步构建；无证据不扩展生成面或宿主设置边界。
 - `R6`：保持 build -> test -> contract -> hotspot 顺序，但按风险选择最低充分层级；full 只在 closeout/release 执行。
 - `R7`：保持 `skills.json`、lock、生成物、MCP 目标与 audit prompt contract 兼容。
-- `R8`：证据明确本任务、既有工作树边界与回滚。
+- `R8`：证据明确本任务、既有工作树边界与回滚；Git 收口按 C 章验证提交、基线、远端与清理状态。
 - `E4/E5/E6`：doctor/full/planning gate 承接健康；vendor/skill/plugin/MCP 记录供应链；config/lock/profile/plan/receipt/audit 输出结构变化必须有迁移、兼容和回滚。
