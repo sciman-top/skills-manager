@@ -1046,6 +1046,14 @@ function Assert-Cfg($cfg) {
             $dupManagedLinkExcludes = @(Get-DuplicateValues ($projection.managed_link_excludes | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() }))
             Need ($dupManagedLinkExcludes.Count -eq 0) ("skill_projection.managed_link_excludes 重复：{0}" -f ($dupManagedLinkExcludes -join ", "))
         }
+        if ($projection.PSObject.Properties.Match("resident_names").Count -gt 0 -and $null -ne $projection.resident_names) {
+            Need (Assert-IsArray $projection.resident_names) "skill_projection.resident_names 必须是数组"
+            foreach ($residentName in @($projection.resident_names)) {
+                Need (-not [string]::IsNullOrWhiteSpace([string]$residentName)) "skill_projection.resident_names 不能包含空字符串"
+            }
+            $dupResidentNames = @(Get-DuplicateValues ($projection.resident_names | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() }))
+            Need ($dupResidentNames.Count -eq 0) ("skill_projection.resident_names 重复：{0}" -f ($dupResidentNames -join ", "))
+        }
         if ($projection.PSObject.Properties.Match("aliases").Count -gt 0 -and $null -ne $projection.aliases) {
             Need (Assert-IsArray $projection.aliases) "skill_projection.aliases 必须是数组"
             foreach ($alias in @($projection.aliases)) {

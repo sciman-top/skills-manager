@@ -15,6 +15,15 @@ Describe "Doctor Enhancements" {
             $opts.dry_run_fix | Should Be $true
         }
 
+        It "Allows offline contract only for non-mutating JSON checks" {
+            $opts = Parse-DoctorArgs @("--json", "--offline-contract")
+            $opts.offline_contract | Should Be $true
+
+            { Parse-DoctorArgs @("--offline-contract") | Out-Null } | Should Throw
+            { Parse-DoctorArgs @("--json", "--offline-contract", "--strict") | Out-Null } | Should Throw
+            { Parse-DoctorArgs @("--json", "--offline-contract", "--fix") | Out-Null } | Should Throw
+        }
+
         It "Rejects unknown option" {
             $thrown = $false
             try {

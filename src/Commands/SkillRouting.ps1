@@ -160,6 +160,43 @@ function Get-CodexExternalSkillInventory($projectionCfg) {
     return [pscustomobject]$result
 }
 
+function Get-SkillRoutingLocalInventory($cfg) {
+    $items = New-Object System.Collections.Generic.List[object]
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($mapping in @($cfg.mappings)) {
+        if ($null -eq $mapping -or -not (Should-SyncMappingToAgent $mapping)) { continue }
+        $vendor = [string]$mapping.vendor
+        $from = [string]$mapping.from
+        if (-not $seen.Add(("{0}|{1}" -f $vendor, $from))) { continue }
+        $localPath = Resolve-InstalledSkillLocalPath $cfg $mapping
+        $skillFile = Join-Path $localPath 'SKILL.md'
+        $meta = Get-SkillMetadataFromFile $skillFile
+        $name = if ([string]::IsNullOrWhiteSpace([string]$meta.declared_name)) { [string]$mapping.to } else { [string]$meta.declared_name }
+        $items.Add([pscustomobject]([ordered]@{
+                    name = $name
+                    description = [string]$meta.description
+                    path = $skillFile
+                    is_system = $false
+                })) | Out-Null
+    }
+    foreach ($override in @(收集OverridesSkills)) {
+        if ($null -eq $override) { continue }
+        $from = [string]$override.from
+        if ([string]::IsNullOrWhiteSpace($from) -or -not $seen.Add(("overrides|{0}" -f $from))) { continue }
+        $skillFile = Join-Path ([string]$override.full) 'SKILL.md'
+        if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { continue }
+        $meta = Get-SkillMetadataFromFile $skillFile
+        $name = if ([string]::IsNullOrWhiteSpace([string]$meta.declared_name)) { $from } else { [string]$meta.declared_name }
+        $items.Add([pscustomobject]([ordered]@{
+                    name = $name
+                    description = [string]$meta.description
+                    path = $skillFile
+                    is_system = $false
+                })) | Out-Null
+    }
+    return @($items.ToArray())
+}
+
 function Get-SkillRoutingPolicy([string]$path) {
     Need (-not [string]::IsNullOrWhiteSpace($path)) 'skill routing policy path is empty'
     Need (Test-Path -LiteralPath $path -PathType Leaf) ("skill routing policy does not exist: {0}" -f $path)
@@ -169,7 +206,7 @@ function Get-SkillRoutingPolicy([string]$path) {
     catch {
         throw ("skill routing policy JSON parse failed: {0}" -f $_.Exception.Message)
     }
-    Need ([int]$policy.schema_version -eq 1) 'skill routing policy only supports schema_version=1'
+    Need ([int]$policy.schema_version -in @(1, 2)) 'skill routing policy only supports schema_version=1 or 2'
     $mode = ([string]$policy.mode).Trim().ToLowerInvariant()
     Need ($mode -eq 'observe' -or $mode -eq 'enforce') ("skill routing policy mode only supports observe/enforce: {0}" -f $mode)
     $policy.mode = $mode

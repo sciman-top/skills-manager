@@ -1,4 +1,86 @@
 Describe "Quality gate scripts" {
+    It "Keeps full-gate execution in build, test, then contract order with timings" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $scriptPath = Join-Path $root "scripts\quality\run-local-quality-gates.ps1"
+        $raw = Get-Content -LiteralPath $scriptPath -Raw
+
+        $buildIndex = $raw.IndexOf("Invoke-QualityGate 'build'")
+        $testsIndex = $raw.IndexOf("Invoke-QualityGate 'tests'")
+        $firstContractIndex = $raw.IndexOf("Invoke-QualityGate 'repo-hygiene'")
+        $buildIndex -ge 0 | Should Be $true
+        $testsIndex -gt $buildIndex | Should Be $true
+        $firstContractIndex -gt $testsIndex | Should Be $true
+        $raw | Should Match 'gate_elapsed_ms'
+        $raw | Should Match 'total_elapsed_ms'
+    }
+
+    It "keeps full-suite output failure-focused and reports stage timings" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $runner = Get-Content -LiteralPath (Join-Path $root 'tests\run.ps1') -Raw
+
+        $runner | Should Match '-Show Failed,Summary'
+        $runner | Should Match 'unit_elapsed_ms'
+        $runner | Should Match 'e2e_elapsed_ms'
+        $runner | Should Match 'test_suite_elapsed_ms'
+    }
+
+    It "forbids tests from reading or writing User-scope environment variables" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $testSources = Get-ChildItem -LiteralPath (Join-Path $root 'tests') -Recurse -Filter '*.ps1' |
+            ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }
+        ($testSources -join "`n") | Should Not Match 'Environment\]::(?:Get|Set)EnvironmentVariable\([^\r\n]*["'']User["'']'
+    }
+
+    It "keeps fixture-heavy verifiers composable while retaining CLI exit behavior" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $contracts = @(
+            @{ Script = 'scripts\verify-vnext-planning.ps1'; Test = 'tests\Unit\ProductPlanning.Tests.ps1' },
+            @{ Script = 'scripts\verify-skill-integrity.ps1'; Test = 'tests\Unit\SkillIntegrityScript.Tests.ps1' },
+            @{ Script = 'scripts\verify-skills-config.ps1'; Test = 'tests\Unit\ConfigSchema.Tests.ps1' }
+        )
+
+        foreach ($contract in $contracts) {
+            $scriptText = Get-Content -LiteralPath (Join-Path $root $contract.Script) -Raw
+            $testText = Get-Content -LiteralPath (Join-Path $root $contract.Test) -Raw
+            $scriptText | Should Match '\[switch\]\$NoExit'
+            $scriptText | Should Match 'if \(\$NoExit\)'
+            $scriptText | Should Match 'exit \$exitCode'
+            $testText | Should Match '-File'
+            $testText | Should Match '-NoExit'
+        }
+    }
+
+    It "uses deterministic offline Doctor JSON mode without weakening strict health checks" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $contractText = Get-Content -LiteralPath (Join-Path $root 'scripts\quality\check-doctor-json.ps1') -Raw
+        $doctorText = Get-Content -LiteralPath (Join-Path $root 'src\Commands\Doctor.ps1') -Raw
+
+        $contractText | Should Match '--offline-contract'
+        $contractText | Should Match 'Invoke-Doctor'
+        $contractText | Should Not Match '& pwsh'
+        $doctorText | Should Match '--offline-contract 不能与 --strict 组合'
+        $doctorText | Should Match 'Test-DoctorGitHubConnection'
+    }
+
+    It "keeps audit runtime receipts out of curated change evidence" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $bundleText = Get-Content -LiteralPath (Join-Path $root 'src\Commands\AuditTargets.Bundle.ps1') -Raw
+        $applyText = Get-Content -LiteralPath (Join-Path $root 'src\Commands\AuditTargets.Apply.ps1') -Raw
+
+        $bundleText | Should Match 'runtime-evidence-'
+        $applyText | Should Match 'runtime-evidence-'
+        $bundleText | Should Not Match 'Join-Path \$script:Root "docs\\change-evidence"'
+        $applyText | Should Not Match 'Join-Path \$script:Root "docs\\change-evidence"'
+    }
+
+    It "keeps the routing gate on its lightweight inventory instead of audit hashes" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $routingVerifier = Get-Content -LiteralPath (Join-Path $root 'scripts\verify-skill-routing.ps1') -Raw
+
+        $routingVerifier | Should Match 'Get-SkillRoutingLocalInventory'
+        $routingVerifier | Should Not Match 'Get-InstalledSkillFacts'
+    }
+
     It "Runs repository hygiene in the reusable local quality gate" {
         $root = Join-Path $PSScriptRoot "..\.."
         $scriptPath = Join-Path $root "scripts\quality\run-local-quality-gates.ps1"

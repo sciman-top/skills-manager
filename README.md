@@ -31,12 +31,14 @@
 - [vNext 架构](docs/product/skills-manager-vnext-architecture.md)
 - [vNext 路线图](docs/product/skills-manager-vnext-roadmap.md)
 - [规则治理参考采纳矩阵](docs/product/rule-governance-adoption-matrix.md)
-- [当前 Phase 3 任务 manifest](tasks/skills-manager-vnext-phase3.tasks.json)
+- [当前 Phase 5 任务 manifest](tasks/skills-manager-vnext-phase5.tasks.json)
+- [历史 Phase 4 任务 manifest](tasks/skills-manager-vnext-phase4.tasks.json)
+- [历史 Phase 3 任务 manifest](tasks/skills-manager-vnext-phase3.tasks.json)
 - [Phase 2 历史任务 manifest](tasks/skills-manager-vnext-phase2.tasks.json)
 - [Phase 1 历史任务 manifest](tasks/skills-manager-vnext-phase1.tasks.json)
 - [Phase 0 历史任务 manifest](tasks/skills-manager-vnext-phase0.tasks.json)
 
-vNext Phase 0、Phase 1、Phase 2 与 Phase 3 均已完成 repo-side 验收（P0/P1 各 9/9，P2/P3 各 7/7）。P3 提供只读 inventory adapter、personal manifest lint、一个 fixture-only Codex skills-only exporter 和分层 evaluation。P4 entry decision 为 `not_started/deferred`，未创建 P4 manifest。plugin install、marketplace mutation、host/profile 修改、provider call 与 native mutation 仍禁止；Codex fresh-process 规则加载已在 9 个目标仓验证，Claude 无 provider-free prompt renderer，`live_accepted` 仍为 `not_run`。
+vNext P0-P5 已完成 repo-side 验收（P0/P1 各 9/9，P2/P3 各 7/7，P4 6/6，P5 5/5）。P5 将 selector 演进为 Adaptive Capability Fabric：schema v3 先理解 task type/domain/goal/operations，再组合最小 capability DAG、复用兼容 session capability、输出 `apply=false` profile preheat，并消费 Codex App Server 当前只读 skill/app/MCP snapshot。plugin/MCP 安装、OAuth、host/profile/session 写入、重启与 `live_accepted` 仍不在边界。
 
 运行时以 PowerShell 7 (`pwsh`) 为开发、CI 和完整门禁主路径；Windows PowerShell 5.1 仅保留安装 fallback、generated script parse 和 plain-object/selected fixture smoke。完整边界与移除条件见 [`docs/runbooks/powershell-runtime-compatibility.md`](docs/runbooks/powershell-runtime-compatibility.md)。
 
@@ -230,7 +232,7 @@ P3 plugin-aware 命令中，inventory/lint/eval 为只读；export 仍严格 fix
 
 `skill_projection.managed_link_excludes` 按受管目录名排除 Codex 的逐技能 Junction；被排除项仍保留在 `agent/`，也不影响 Claude 指向 `agent/` 的根 Junction。该字段适用于保留其他宿主所需技能、但避免其与 Codex `.system` 技能同名冲突的场景。
 
-`skill_projection.aliases` 记录旧名称到替代项的迁移，不把近似能力重新复制成默认技能；`profiles` 控制当前用途下启用的 canonical 技能，`.system` 技能始终保留。顶层 `budget_limit_chars` 对“启用技能名称与描述 + 插件预留”设置 10000 字符 hard ceiling；profile 可用更低的同名字段收紧自身上限，当前 `default` 为 8000、`coding` 为 7500。`external_metadata_reserve_chars` 至少为 system/plugin Skill 预留 3500 字符，实时外部元数据更大时以实时值为准。任一 profile 超限都会阻断投影。
+`skill_projection.aliases` 记录旧名称到替代项的迁移，不把近似能力重新复制成默认技能；`profiles` 控制当前用途下启用的 canonical 技能，`.system` 技能始终保留。顶层 `budget_limit_chars` 对“启用技能名称与描述 + 插件预留”设置 8000 字符 hard ceiling；profile 可用更低的同名字段收紧自身上限，当前 `default` 为 8000、`coding` 为 7500。`external_metadata_reserve_chars` 至少为 system/plugin Skill 预留 3500 字符，实时外部元数据更大时以实时值为准。任一 profile 超限都会阻断投影。
 
 投影 manifest 为当前 profile 排除项保留 `decision = profile_excluded`，并通过 `profile_reachability` 与 `available_profiles` 区分“可从其他 profile 使用”和“未被任何 profile 路由”。`python`、`mcp`、`review`、`marketing` 与 `video` 用于承接高价值低频技能，避免把整个安装库存塞入 `default`。常用命令：
 
@@ -245,6 +247,14 @@ PPT 路由保持职责单一：`custom-teacher-courseware-ppt` 决定课堂课�
 .\skills.ps1 技能配置 使用 python
 ```
 
+所有 profile 共享轻量常驻 `capability-router`。当当前任务没有明显匹配的可见技能、任务中途切换领域，或合适技能被当前 profile 排除时，router 只检索技能 metadata，并在当前任务中读取最多 3 个命中的 `SKILL.md`；它不修改 `active_profile`、不写 `~/.codex/config.toml`、不重启 Codex，也不创建新任务。profile 因而只是显式预热包和兼容回退，不再是技能可达性的唯一入口。
+
+P4 schema v2 把选择扩展到 MCP 与 caller-provided plugin/app/connector/native-tool runtime snapshot。selector 先处理 explicit name、required/excluded intent 和 negative trigger，再 ranking/abstain；已可用 `read_only`/`external_read` 能力可自动使用，未启用 MCP、operator skill、write/destructive/open-world/unknown 能力只输出 activation/approval plan。`scripts/verify-capability-routing.ps1` 用 direct、indirect、negative、ambiguous、cross-domain、cross-kind 与 side-effect corpus 做确定性回归；它不把 repo corpus 外推为所有自然语言精度。
+
+P5 schema v3 在兼容上述字段的基础上增加 `task_model`、`capability_graph`、`host_snapshot`、`session_plan` 和 `preheat_recommendation`。`scripts/get-codex-app-server-capability-snapshot.ps1` 只调用稳定只读 App Server RPC；陈旧、不可访问、不可调用和认证缺失事实 fail-closed，单来源故障报告 `partial`。session/profile 输出只是 `apply=false` 的计划或预热建议，不会静默切换宿主状态。
+
+技能初始列表预算的全局硬上限为 `8000` 字符。`resident_names ∪ active_profile.enabled_names` 必须整体通过预算门禁；低频研究、发布、专用执行器优先冷加载，不在多个 profile 中重复常驻。
+
 用无模型模式校验 GPT-5.6 profile A/B 语料，或显式执行 12 场景 × 2 profile 的只读 benchmark：
 
 ```powershell
@@ -258,7 +268,7 @@ benchmark 使用 ephemeral、read-only Codex 任务，记录 skill 选择、计�
 
 工程 profile 另外提供 `draft-spec` 与 `draft-tickets`：两者可隐式触发，但只在回复中生成待审阅 Markdown，不写仓库文件、不调用 tracker，也不建立外部阻塞关系。`to-spec`、`to-tickets`、`setup-matt-pocock-skills` 和 `improve-codebase-architecture` 继续保持显式调用，因为它们会发布、修改仓库配置或执行高成本架构扫描。
 
-`-DryRun` 只生成内存计划，不写配置或 manifest。Codex 在新任务加载技能配置；当前已运行任务不会热更新，因此投影后需用新任务复核可见技能列表，不应通过删除 `.agents/skills` 强制生效。
+`-DryRun` 只生成内存计划，不写配置或 manifest。Codex 在新任务加载初始技能列表；当前已运行任务不会热更新该列表。常驻 router 可以在当前任务读取磁盘上的冷技能，实现能力层无缝切换，但不能把 profile 变更伪装成热加载。投影后仍应以 fresh process/task 复核初始列表，不应通过删除 `.agents/skills` 强制生效。
 
 `$HOME/.agents/skills` 是当前标准用户技能根，根目录及其 `.system` 子目录不能整体删除。受管技能以 Junction 形式存在于该根，`$HOME/.codex/skills` 不再是受管 target；Codex 仍可能自动创建其中的 `.system` 兼容目录。历史普通目录应先退役到带哈希清单的归档，脚本会保留受管 Junction：
 
@@ -430,7 +440,7 @@ portable 包包含可迁移源码与配置，例如 `skills.ps1`、`skills.cmd`�
 - `.claude/`、`.codex/`、`.gemini/`、`.trae/`、`.txn/`
 - `agent/`、`artifacts/`、`reports/*.log`
 - `imports/_debug_*`、`imports/_probe_*`、`imports/_tree_*`、`imports/*.zip`
-- 审查运行态证据，例如 `docs/change-evidence/*-audit-runtime-*.md`
+- 审查运行态证据位于已忽略的 `reports/skill-audit/<run-id>/runtime-evidence-*.md`；旧版曾生成的 `docs/change-evidence/*-audit-runtime-*.md` 也不应继续新增或提交
 - 备份与临时文件，例如 `build.log*`、`acl-backup-git-*.txt`、`.tmp_*`
 
 边界说明：

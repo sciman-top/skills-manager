@@ -3,7 +3,8 @@ param(
     [string]$Mode = "observe",
     [string]$ConfigPath,
     [string]$SchemaPath,
-    [string]$ReportPath
+    [string]$ReportPath,
+    [switch]$NoExit
 )
 
 $ErrorActionPreference = "Stop"
@@ -96,5 +97,6 @@ if (-not [string]::IsNullOrWhiteSpace($ReportPath)) {
     [System.IO.File]::WriteAllText($ReportPath, $json, (New-Object System.Text.UTF8Encoding($false)))
 }
 Write-Output $json
-if (-not $valid -and $Mode -eq "enforce") { exit 1 }
-exit 0
+$exitCode = if (-not $valid -and $Mode -eq "enforce") { 1 } else { 0 }
+if ($NoExit) { $global:LASTEXITCODE = $exitCode; return }
+exit $exitCode

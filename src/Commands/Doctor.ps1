@@ -78,6 +78,7 @@ function Parse-DoctorArgs([string[]]$tokens) {
         dry_run_fix = $false
         strict = $false
         strict_perf = $false
+        offline_contract = $false
         threshold_ms = 5000
     }
     if ($null -eq $tokens) { return [pscustomobject]$opts }
@@ -93,6 +94,7 @@ function Parse-DoctorArgs([string[]]$tokens) {
             "--dry-run-fix" { $opts.dry_run_fix = $true; continue }
             "--strict" { $opts.strict = $true; continue }
             "--strict-perf" { $opts.strict_perf = $true; continue }
+            "--offline-contract" { $opts.offline_contract = $true; continue }
             "--threshold-ms" {
                 Need ($i + 1 -lt $tokens.Count) "参数缺少值：--threshold-ms"
                 $raw = [string]$tokens[++$i]
@@ -104,6 +106,12 @@ function Parse-DoctorArgs([string[]]$tokens) {
             }
             default { throw ("未知 doctor 参数：{0}" -f $t) }
         }
+    }
+    if ($opts.offline_contract) {
+        Need $opts.json "--offline-contract 仅用于 doctor --json 结构契约"
+        Need (-not $opts.strict) "--offline-contract 不能与 --strict 组合"
+        Need (-not $opts.strict_perf) "--offline-contract 不能与 --strict-perf 组合"
+        Need (-not $opts.fix -and -not $opts.dry_run_fix) "--offline-contract 不能与配置修复参数组合"
     }
     return [pscustomobject]$opts
 }
@@ -325,6 +333,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
         pass = $true
         strict = [bool]$opts.strict
         strict_perf = [bool]$opts.strict_perf
+        offline_contract = [bool]$opts.offline_contract
         checks = [ordered]@{}
         risks = @()
         performance = [ordered]@{
@@ -507,23 +516,29 @@ function Invoke-Doctor([string[]]$tokens = @()) {
         }
     }
 
-    # 7. Network Check
-    try {
-        $githubConnection = Test-DoctorGitHubConnection
-        if ($githubConnection.ok) {
-            $report.checks.network = [ordered]@{ ok = $true; method = [string]$githubConnection.method }
-            if (-not $opts.json) { Write-Host ("✅ GitHub Connection: OK ({0})" -f [string]$githubConnection.method) -ForegroundColor Green }
+    # 7. Network Check. JSON structure contracts are deterministic and must not
+    # pay for or depend on a live GitHub probe; strict health checks always probe.
+    if ($opts.offline_contract) {
+        $report.checks.network = [ordered]@{ ok = $true; skipped = $true; reason = "offline_contract" }
+    }
+    else {
+        try {
+            $githubConnection = Test-DoctorGitHubConnection
+            if ($githubConnection.ok) {
+                $report.checks.network = [ordered]@{ ok = $true; method = [string]$githubConnection.method }
+                if (-not $opts.json) { Write-Host ("✅ GitHub Connection: OK ({0})" -f [string]$githubConnection.method) -ForegroundColor Green }
+            }
+            else {
+                $report.checks.network = [ordered]@{ ok = $false; method = [string]$githubConnection.method; reason = [string]$githubConnection.detail }
+                if (-not $opts.json) { Write-Host ("❌ GitHub Connection: Failed - {0}" -f [string]$githubConnection.detail) -ForegroundColor Red }
+                $pass = $false
+            }
         }
-        else {
-            $report.checks.network = [ordered]@{ ok = $false; method = [string]$githubConnection.method; reason = [string]$githubConnection.detail }
-            if (-not $opts.json) { Write-Host ("❌ GitHub Connection: Failed - {0}" -f [string]$githubConnection.detail) -ForegroundColor Red }
+        catch {
+            $report.checks.network = [ordered]@{ ok = $false; reason = $_.Exception.Message }
+            if (-not $opts.json) { Write-Host ("❌ GitHub Connection: Failed - {0}" -f $_.Exception.Message) -ForegroundColor Red }
             $pass = $false
         }
-    }
-    catch {
-        $report.checks.network = [ordered]@{ ok = $false; reason = $_.Exception.Message }
-        if (-not $opts.json) { Write-Host ("❌ GitHub Connection: Failed - {0}" -f $_.Exception.Message) -ForegroundColor Red }
-        $pass = $false
     }
 
     # 8. Performance Summary

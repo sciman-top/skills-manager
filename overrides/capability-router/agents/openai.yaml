@@ -1,4 +1,4 @@
 interface:
   display_name: "Capability Router"
-  short_description: "Route tasks to the narrowest installed skill"
-  default_prompt: "Use $capability-router to select and load the best installed skill for this task."
+  short_description: "Understand, compose, and safely route capabilities"
+  default_prompt: "Use $capability-router to retrieve safe candidates, semantically reject false matches using the full request, reuse or compose the smallest sufficient capabilities, and emit a no-write activation and preheat plan."

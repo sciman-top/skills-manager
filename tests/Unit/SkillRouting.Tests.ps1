@@ -8,9 +8,9 @@ function New-RoutingSkillEntry([string]$root, [string]$name, [string]$descriptio
     return [pscustomobject]@{ name = $name; description = $description; path = $path; is_system = $false }
 }
 
-function New-RoutingPolicyFile([string]$path, $groups, $rules = @(), $conflicts = @()) {
+function New-RoutingPolicyFile([string]$path, $groups, $rules = @(), $conflicts = @(), [int]$schemaVersion = 1) {
     $policy = [ordered]@{
-        schema_version = 1
+        schema_version = $schemaVersion
         mode = 'observe'
         trigger_rules = @($rules)
         groups = @($groups)
@@ -20,6 +20,34 @@ function New-RoutingPolicyFile([string]$path, $groups, $rules = @(), $conflicts 
 }
 
 Describe 'Skill routing governance' {
+    It 'Builds routing inventory without audit-only content hashes' {
+        $root = Join-Path $TestDrive 'lightweight-inventory'
+        New-RoutingSkillEntry $root 'fixture-skill' 'Fixture description.' | Out-Null
+        $cfg = [pscustomobject]@{
+            mappings = @([pscustomobject]@{ vendor = 'fixture'; from = 'fixture-skill'; to = 'fallback-name' })
+        }
+        Mock Should-SyncMappingToAgent { $true }
+        Mock Resolve-InstalledSkillLocalPath { Join-Path $root 'fixture-skill' }
+        Mock 收集OverridesSkills { @() }
+
+        $inventory = @(Get-SkillRoutingLocalInventory $cfg)
+
+        $inventory.Count | Should Be 1
+        $inventory[0].name | Should Be 'fixture-skill'
+        $inventory[0].description | Should Be 'Fixture description.'
+        $inventory[0].PSObject.Properties.Match('content_hash').Count | Should Be 0
+    }
+
+    It 'Accepts routing policy schema v2 and rejects unknown future versions' {
+        $v2 = Join-Path $TestDrive 'policy-v2.json'
+        New-RoutingPolicyFile $v2 @() @() @() 2
+        (Get-SkillRoutingPolicy $v2).schema_version | Should Be 2
+
+        $future = Join-Path $TestDrive 'policy-v3.json'
+        New-RoutingPolicyFile $future @() @() @() 3
+        { Get-SkillRoutingPolicy $future } | Should Throw
+    }
+
     It 'Reads only enabled plugin ids from Codex TOML' {
         $config = Join-Path $TestDrive 'config.toml'
         Set-ContentUtf8 $config @'

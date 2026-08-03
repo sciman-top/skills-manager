@@ -2,11 +2,13 @@ function Write-AuditBundleEvidence([string]$mode, [string]$runId, [string]$repor
     try {
         $date = Get-Date -Format "yyyyMMdd"
         $time = Get-Date -Format "HHmmss"
-        $dir = Join-Path $script:Root "docs\change-evidence"
+        # Runtime receipts belong to the ignored audit bundle, not the curated
+        # repository change-evidence ledger.
+        $dir = $reportRoot
         EnsureDir $dir
         $safeMode = if ([string]::IsNullOrWhiteSpace($mode)) { "scan" } else { ([regex]::Replace($mode.ToLowerInvariant(), "[^a-z0-9_-]", "-")) }
         $safeRun = if ([string]::IsNullOrWhiteSpace($runId)) { "no-runid" } else { ([regex]::Replace($runId, "[^a-zA-Z0-9_-]", "-")) }
-        $path = Join-Path $dir ("{0}-audit-runtime-{1}-{2}-{3}.md" -f $date, $safeMode, $safeRun, $time)
+        $path = Join-Path $dir ("runtime-evidence-{0}-{1}-{2}-{3}.md" -f $date, $safeMode, $safeRun, $time)
         $commandText = if (@($commands).Count -gt 0) { (@($commands) | ForEach-Object { "- `"$_`"" }) -join "`r`n" } else { "- 无" }
         $targetText = if (@($targets).Count -gt 0) { (@($targets) | ForEach-Object { "- " + [string]$_ }) -join "`r`n" } else { "- 无" }
         $content = @"

@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "program_id": "skills-manager-vnext",
+  "current_phase": "P5",
+  "phase_sequence": ["P0", "P1", "P2", "P3", "P4", "P5"],
+  "allowed_statuses": ["pending", "in_progress", "blocked", "deferred", "done"],
+  "tasks": [
+    {
+      "id": "SMV-P5-001", "phase": "P5", "title": "建立 P5 Adaptive Capability Fabric 真源", "status": "done", "risk": "low", "depends_on": [],
+      "requirement_ids": ["FR-SEL-008", "FR-AIE-001"], "architecture_decision_ids": ["ADR-SMV-007", "ADR-SMV-011"],
+      "goal": "把 P4 元任务误路由和官方宿主边界固化为 P5 spec、manifest、plan 与 todo。",
+      "preconditions": ["P4 6/6 repo_verified", "真实元架构误路由可复现"],
+      "write_set": ["docs/superpowers/specs/2026-08-03-capability-manager-vnext-phase-5-design.md", "tasks/skills-manager-vnext-phase5.tasks.json", "tasks/plan.md", "tasks/todo.md", "docs/change-evidence/20260803-vnext-phase5-adaptive-capability-fabric.md"],
+      "implementation_steps": ["记录问题证据", "核对官方稳定接口", "定义任务与安全边界"],
+      "tests": ["planning current P5", "historical P0-P4 remain valid"],
+      "verification": ["scripts/verify-vnext-planning.ps1"],
+      "rollback": ["恢复 P4 current truth"],
+      "done_when": ["P5 manifest 可解析", "边界不接管宿主 runtime"],
+      "out_of_scope": ["provider router", "host mutation"]
+    },
+    {
+      "id": "SMV-P5-002", "phase": "P5", "title": "实现 task model 与 capability DAG", "status": "done", "risk": "medium", "depends_on": ["SMV-P5-001"],
+      "requirement_ids": ["FR-SEL-008", "FR-SEL-009"], "architecture_decision_ids": ["ADR-SMV-010", "ADR-SMV-011"],
+      "goal": "用结构化任务理解、语义约束和最小 DAG 替代纯关键词全局决策。",
+      "preconditions": ["P4 v2 compatibility fields stable", "元任务失败用例已建立"],
+      "write_set": ["overrides/capability-router/scripts/route-capability.ps1", "tests/Unit/CapabilityRouter.Tests.ps1", "config/capability-routing-golden.json", "scripts/verify-capability-routing.ps1", "docs/change-evidence/20260803-vnext-phase5-adaptive-capability-fabric.md"],
+      "implementation_steps": ["构建 task model", "增加 task-type mismatch guard", "生成 ordered DAG", "保留 v2 fields"],
+      "tests": ["meta architecture classification", "implementation DAG", "forbidden builders"],
+      "verification": ["Invoke-Pester tests/Unit/CapabilityRouter.Tests.ps1", "scripts/verify-capability-routing.ps1"],
+      "rollback": ["恢复 schema v2 router"],
+      "done_when": ["元任务 red-green", "schema v3 and v2 compatibility coexist"],
+      "out_of_scope": ["online LLM reranker", "embedding index"]
+    },
+    {
+      "id": "SMV-P5-003", "phase": "P5", "title": "实现 session 稳定性与 live host snapshot", "status": "done", "risk": "medium", "depends_on": ["SMV-P5-002"],
+      "requirement_ids": ["FR-SEL-010", "FR-SEL-011"], "architecture_decision_ids": ["ADR-SMV-004", "ADR-SMV-011"],
+      "goal": "复用兼容会话能力，输出 recommendation-only preheat，并从稳定 App Server RPC 生成只读快照。",
+      "preconditions": ["codex app-server 0.145.0 methods confirmed", "selector remains zero-write"],
+      "write_set": ["overrides/capability-router/scripts/route-capability.ps1", "scripts/get-codex-app-server-capability-snapshot.ps1", "tests/Unit/CapabilityRouter.Tests.ps1", "docs/change-evidence/20260803-vnext-phase5-adaptive-capability-fabric.md"],
+      "implementation_steps": ["增加 snapshot freshness", "增加 session reuse", "增加 preheat recommendation", "实现 read-only RPC adapter"],
+      "tests": ["stale snapshot fail-closed", "session reuse", "live partial snapshot"],
+      "verification": ["CapabilityRouter.Tests.ps1", "live codex app-server snapshot"],
+      "rollback": ["移除 P5 snapshot/session fields without changing host"],
+      "done_when": ["live snapshot contains multiple kinds", "writes_performed=false", "preheat apply=false"],
+      "out_of_scope": ["thread mutation", "plugin install", "OAuth"]
+    },
+    {
+      "id": "SMV-P5-004", "phase": "P5", "title": "同步 skill、corpus 与产品文档", "status": "done", "risk": "medium", "depends_on": ["SMV-P5-003"],
+      "requirement_ids": ["FR-SEL-008", "NFR-COMP-001"], "architecture_decision_ids": ["ADR-SMV-011"],
+      "goal": "让 resident skill、UI metadata、golden、PRD、架构、路线图和中英文入口一致描述 P5。",
+      "preconditions": ["schema v3 tests green", "official boundary recorded"],
+      "write_set": ["overrides/capability-router/SKILL.md", "overrides/capability-router/agents/openai.yaml", "docs/product/**", "README.md", "README.en.md", "AGENTS.md", "scripts/verify-vnext-planning.ps1", "tests/Unit/ProductPlanning.Tests.ps1", "tests/Unit/CapabilityRoutingVerifier.Tests.ps1", "docs/change-evidence/20260803-vnext-phase5-adaptive-capability-fabric.md"],
+      "implementation_steps": ["update skill metadata", "update planning verifier", "sync product truth", "validate skill"],
+      "tests": ["quick_validate", "planning verifier", "golden verifier"],
+      "verification": ["quick_validate.py", "scripts/verify-vnext-planning.ps1"],
+      "rollback": ["restore P4 docs while retaining verified code as unadvertised"],
+      "done_when": ["all current truth points to P5", "historical P0-P4 validate"],
+      "out_of_scope": ["marketplace publication", "host restart"]
+    },
+    {
+      "id": "SMV-P5-005", "phase": "P5", "title": "P5 ordered acceptance closeout", "status": "done", "risk": "medium", "depends_on": ["SMV-P5-004"],
+      "requirement_ids": ["FR-EVD-003", "NFR-TRU-001"], "architecture_decision_ids": ["ADR-SMV-007", "ADR-SMV-011"],
+      "goal": "运行 build/test/contracts/live read-only/full 并按真实证据收口。",
+      "preconditions": ["P5-004 done", "worktree boundary recorded"],
+      "write_set": ["tasks/skills-manager-vnext-phase5.tasks.json", "tasks/plan.md", "tasks/todo.md", "AGENTS.md", "docs/product/skills-manager-vnext-roadmap.md", "docs/change-evidence/20260803-vnext-phase5-adaptive-capability-fabric.md"],
+      "implementation_steps": ["run ordered gates", "run fresh replay", "run live snapshot", "record truth boundary"],
+      "tests": ["full Unit/E2E (invoked exactly once by the full quality gate)", "doctor/planning/routing", "full quality"],
+      "verification": ["scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree"],
+      "rollback": ["keep P5 in_progress and preserve passed evidence"],
+      "done_when": ["5/5 done", "all ordered gates pass", "host/live boundary explicit"],
+      "out_of_scope": ["commit/push", "business live acceptance"]
+    }
+  ]
+}

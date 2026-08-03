@@ -20,14 +20,7 @@ try {
     }
 
     $canonical = New-Object System.Collections.Generic.List[object]
-    foreach ($fact in @(Get-InstalledSkillFacts $cfg)) {
-        $canonical.Add([pscustomobject]([ordered]@{
-                    name = [string]$fact.name
-                    description = [string]$fact.description
-                    path = Join-Path ([string]$fact.local_path) 'SKILL.md'
-                    is_system = $false
-                })) | Out-Null
-    }
+    foreach ($fact in @(Get-SkillRoutingLocalInventory $cfg)) { $canonical.Add($fact) | Out-Null }
 
     $userSkillRootRaw = if ($cfg.skill_projection.PSObject.Properties.Match('user_skill_root').Count -gt 0) { [string]$cfg.skill_projection.user_skill_root } else { '~/.agents/skills' }
     $userSkillRoot = Resolve-SkillProjectionPath $userSkillRootRaw

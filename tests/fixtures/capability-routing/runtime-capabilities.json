@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "capabilities": [
+    { "kind": "plugin", "name": "gmail", "description": "Read and summarize connected Gmail mailbox data.", "activation": "mailbox search or summary is requested", "availability": "available", "side_effect": "external_read" },
+    { "kind": "plugin", "name": "stripe", "description": "Read or change connected Stripe billing data.", "activation": "billing lookup, refund, or payment action is requested", "availability": "available", "side_effect": "controlled_write" },
+    { "kind": "native_tool", "name": "shell", "description": "Run a local shell command in the current workspace.", "activation": "repository inspection or local command execution is required", "availability": "available", "side_effect": "controlled_write" }
+  ]
+}

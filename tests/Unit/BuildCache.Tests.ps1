@@ -300,6 +300,7 @@ description: Execute a phased implementation plan using subagents.
                 Mock Load-BuildCache { @{
                         "__agent_build_algorithm" = (Get-AgentBuildCacheAlgorithmVersion)
                         "__agent_build_signature" = "sig-1"
+                        "__agent_build_output_fingerprint" = (Get-DirectoryFingerprint $script:AgentDir)
                     } }
                 Mock Get-AgentBuildState { [pscustomobject]@{ can_skip = $true; reason = "ok"; signature = "sig-1"; outputs = @("skill-a") } }
 
@@ -322,6 +323,7 @@ description: Execute a phased implementation plan using subagents.
                 Mock Load-BuildCache { @{
                         "__agent_build_algorithm" = (Get-AgentBuildCacheAlgorithmVersion)
                         "__agent_build_signature" = "sig-1"
+                        "__agent_build_output_fingerprint" = (Get-DirectoryFingerprint $script:AgentDir)
                     } }
                 Mock Get-AgentBuildState { [pscustomobject]@{ can_skip = $true; reason = "ok"; signature = "sig-1"; outputs = @("skill-a") } }
 
@@ -345,6 +347,7 @@ description: Execute a phased implementation plan using subagents.
                 Mock Load-BuildCache { @{
                         "__agent_build_algorithm" = (Get-AgentBuildCacheAlgorithmVersion)
                         "__agent_build_signature" = "sig-1"
+                        "__agent_build_output_fingerprint" = (Get-DirectoryFingerprint $script:AgentDir)
                     } }
                 Mock Get-AgentBuildState { [pscustomobject]@{ can_skip = $true; reason = "ok"; signature = "sig-1"; outputs = @("skill-a") } }
 
@@ -352,6 +355,31 @@ description: Execute a phased implementation plan using subagents.
 
                 $hit.hit | Should Be $false
                 $hit.reason | Should Be "unexpected-output:stale-skill"
+            }
+            finally {
+                $script:AgentDir = $oldAgent
+            }
+        }
+
+        It "Rejects a poisoned cache when the agent output fingerprint differs" {
+            $oldAgent = $script:AgentDir
+            try {
+                $script:AgentDir = Join-Path $TestDrive "agent-poisoned-cache"
+                New-Item -ItemType Directory -Path (Join-Path $script:AgentDir "skill-a") -Force | Out-Null
+                Set-Content -LiteralPath (Join-Path $script:AgentDir "skill-a\SKILL.md") -Value "stale output"
+
+                Mock Load-BuildCache { @{
+                        "__agent_build_algorithm" = (Get-AgentBuildCacheAlgorithmVersion)
+                        "__agent_build_signature" = "sig-1"
+                        "__agent_build_output_fingerprint" = "fingerprint-from-new-output"
+                    } }
+                Mock Get-AgentBuildState { [pscustomobject]@{ can_skip = $true; reason = "ok"; signature = "sig-1"; outputs = @("skill-a") } }
+                Mock Get-DirectoryFingerprint { "fingerprint-from-stale-output" }
+
+                $hit = Test-AgentBuildCacheHit ([pscustomobject]@{})
+
+                $hit.hit | Should Be $false
+                $hit.reason | Should Be "output-fingerprint-mismatch"
             }
             finally {
                 $script:AgentDir = $oldAgent
@@ -389,6 +417,7 @@ description: Execute a phased implementation plan using subagents.
             Assert-MockCalled Start-BuildTransaction -Times 0 -Exactly -Scope It
             Assert-MockCalled 构建Agent -Times 0 -Exactly -Scope It
         }
+
     }
 
     Context "Build Transaction" {
@@ -409,6 +438,33 @@ description: Execute a phased implementation plan using subagents.
                 Rollback-BuildTransaction $txn
                 (Test-Path (Join-Path $script:AgentDir "old.txt")) | Should Be $true
                 (Test-Path (Join-Path $script:AgentDir "new.txt")) | Should Be $false
+            }
+            finally {
+                $script:Root = $oldRoot
+                $script:AgentDir = $oldAgent
+            }
+        }
+
+        It "Restores previous build cache together with the agent folder" {
+            $oldRoot = $script:Root
+            $oldAgent = $script:AgentDir
+            try {
+                $script:Root = Join-Path $TestDrive "repo-cache-rollback"
+                $script:AgentDir = Join-Path $script:Root "agent"
+                New-Item -ItemType Directory -Path $script:AgentDir -Force | Out-Null
+                Set-Content -LiteralPath (Join-Path $script:AgentDir "old.txt") -Value "old"
+                Set-Content -LiteralPath (Join-Path $script:Root ".build-cache.json") -Value '{"__agent_build_signature":"old-signature"}'
+
+                $txn = Start-BuildTransaction
+                New-Item -ItemType Directory -Path $script:AgentDir -Force | Out-Null
+                Set-Content -LiteralPath (Join-Path $script:AgentDir "new.txt") -Value "new"
+                Set-Content -LiteralPath (Join-Path $script:Root ".build-cache.json") -Value '{"__agent_build_signature":"new-signature"}'
+
+                Rollback-BuildTransaction $txn
+
+                (Get-Content -LiteralPath (Join-Path $script:Root ".build-cache.json") -Raw | ConvertFrom-Json).__agent_build_signature | Should Be "old-signature"
+                (Test-Path -LiteralPath (Join-Path $script:AgentDir "old.txt")) | Should Be $true
+                (Test-Path -LiteralPath (Join-Path $script:AgentDir "new.txt")) | Should Be $false
             }
             finally {
                 $script:Root = $oldRoot
@@ -575,6 +631,8 @@ description: Execute a phased implementation plan using subagents.
                 $script:AgentDir = $oldAgent
             }
         }
+
+
     }
 
     Context "Skill name conflicts" {

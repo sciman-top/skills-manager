@@ -165,7 +165,7 @@ Describe "Doctor CLI behavior" {
 
     It "Emits parseable JSON from the CLI entry without leading log lines" {
         $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
-        $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot "skills.ps1") doctor --json 2>&1)
+        $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot "skills.ps1") doctor --json --offline-contract 2>&1)
         $LASTEXITCODE | Should Be 0
 
         $text = (($output | ForEach-Object { [string]$_ }) -join "`n").Trim()
@@ -181,5 +181,8 @@ Describe "Doctor CLI behavior" {
         $thrown | Should Be $false
         $parsed.checks.git.ok | Should Be $true
         $parsed.checks.config.ok | Should Be $true
+        $parsed.offline_contract | Should Be $true
+        $parsed.checks.network.skipped | Should Be $true
+        $parsed.checks.network.reason | Should Be "offline_contract"
     }
 }

@@ -436,7 +436,7 @@ Plugin（P3 repo/fixture-only）：
   .\skills.ps1 解除关联
   .\skills.ps1 清理备份
   .\skills.ps1 自动更新设置
-  .\skills.ps1 doctor [--json] [--fix] [--dry-run-fix] [--strict] [--strict-perf] [--threshold-ms <ms>]
+  .\skills.ps1 doctor [--json] [--offline-contract] [--fix] [--dry-run-fix] [--strict] [--strict-perf] [--threshold-ms <ms>]
   pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-skill-integrity.ps1 [-ReportPath <file>]
   pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-skill-routing.ps1 [-ReportPath <file>] [-Json]
 

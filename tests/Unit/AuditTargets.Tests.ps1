@@ -35,6 +35,21 @@ function Get-FunctionBody {
 }
 
 Describe "Audit Targets" {
+    BeforeEach {
+        Mock Get-AuditLiveInstalledState {
+            [pscustomobject]([ordered]@{
+                source_of_truth = 'test_fixture'
+                captured_at = '2026-08-03T00:00:00Z'
+                skill_count = 0
+                fingerprint = 'unit-empty-skills'
+                external_skill_count = 0
+                external_skill_fingerprint = 'unit-empty-external-skills'
+                mcp_server_count = 0
+                mcp_fingerprint = 'unit-empty-mcp'
+            })
+        }
+    }
+
     Context "Target config" {
         It "Creates default audit target config without overwriting existing file" {
             $oldRoot = $script:Root
@@ -1319,7 +1334,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $brief | Should Match "Only write ``recommendations.json``"
             $brief | Should Match "expected command outputs"
             $brief | Should Match "preflight-report.json"
-            $brief | Should Match "docs/change-evidence/\*\.md"
+            $brief | Should Match "runtime-evidence-\*\.md"
             $brief | Should Match "Execute preflight"
             $brief | Should Match "no-op recommendation is valid without network research"
             $brief | Should Match "source_observations=\[\]"
@@ -1342,7 +1357,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $brief | Should Match "Only write ``recommendations.json``"
             $brief | Should Match "expected command outputs"
             $brief | Should Match "preflight-report.json"
-            $brief | Should Match "docs/change-evidence/\*\.md"
+            $brief | Should Match "runtime-evidence-\*\.md"
             $brief | Should Match "Execute preflight"
             $brief | Should Match "no-op recommendation is valid without network research"
             $brief | Should Match "concrete incremental benefit over the installed snapshot"
@@ -1371,7 +1386,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $prompt | Should Match "除 ``recommendations.json`` 外，不得修改本轮审查包输入文件"
             $prompt | Should Match "预期运行证据输出"
             $prompt | Should Match "preflight-report.json"
-            $prompt | Should Match "docs/change-evidence/\*\.md"
+            $prompt | Should Match "runtime-evidence-\*\.md"
             $prompt | Should Match "审查包目录名 run-id"
             $prompt | Should Match "source_observations=\[\]"
             $prompt | Should Match "no-op 的本地覆盖依据"
@@ -1712,7 +1727,8 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 Test-Path -LiteralPath (Get-AuditDryRunSummaryPath $path) | Should Be $true
                 $summaryRaw = Get-ContentUtf8 (Get-AuditDryRunSummaryPath $path)
                 $summaryRaw | Should Match '"source_observations":\s*\[\]'
-                @(Get-ChildItem -LiteralPath (Join-Path $script:Root "docs\change-evidence") -Filter "*audit-runtime-dry-run-r-dry-*.md" -File).Count | Should Be 1
+                @(Get-ChildItem -LiteralPath $script:Root -Filter "runtime-evidence-*-dry-run-r-dry-*.md" -File).Count | Should Be 1
+                Test-Path -LiteralPath (Join-Path $script:Root "docs\change-evidence") | Should Be $false
             }
             finally {
                 $script:Root = $oldRoot

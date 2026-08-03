@@ -3,15 +3,20 @@ Describe 'skills.json versioned schema contract' {
     $scriptPath = Join-Path $repoRoot 'scripts\verify-skills-config.ps1'
     $fixtureRoot = Join-Path $repoRoot 'tests\fixtures\config-schema'
 
-    function Invoke-ConfigVerifier([string]$ConfigPath, [string]$Mode = 'enforce') {
-        $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -ConfigPath $ConfigPath -Mode $Mode 2>&1)
+    function Invoke-ConfigVerifier([string]$ConfigPath, [string]$Mode = 'enforce', [switch]$External) {
+        $output = if ($External) {
+            @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -ConfigPath $ConfigPath -Mode $Mode 2>&1)
+        }
+        else {
+            @(& $scriptPath -ConfigPath $ConfigPath -Mode $Mode -NoExit 2>&1)
+        }
         return [pscustomobject]@{ exit_code = $LASTEXITCODE; result = (($output -join "`n") | ConvertFrom-Json) }
     }
 
     It 'accepts the current repository config without modifying it' {
         $configPath = Join-Path $repoRoot 'skills.json'
         $before = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
-        $run = Invoke-ConfigVerifier $configPath
+        $run = Invoke-ConfigVerifier $configPath -External
         $after = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
 
         $run.exit_code | Should Be 0

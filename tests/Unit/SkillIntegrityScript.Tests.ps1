@@ -40,12 +40,12 @@ $body
     }
 
     function Invoke-IntegrityFixture($fixture) {
-        $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
+        $output = @(& $scriptPath `
                 -AgentRoot $fixture.AgentRoot `
                 -ConfigPath $fixture.ConfigPath `
                 -DependencyContractPath $fixture.ContractPath `
                 -ReportPath $fixture.ReportPath `
-                -Json 2>&1)
+                -Json -NoExit 2>&1)
         return [pscustomobject]@{
             ExitCode = $LASTEXITCODE
             Output = ($output -join "`n")

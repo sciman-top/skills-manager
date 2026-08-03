@@ -9,8 +9,17 @@ if (-not $requiredPester) {
 Import-Module Pester -RequiredVersion $requiredPesterVersion -Force | Out-Null
 $pesterVersion = (Get-Module Pester | Select-Object -First 1 -ExpandProperty Version)
 Write-Host ("Pester Version: {0}" -f $pesterVersion)
-$unit = Invoke-Pester -Script "$PSScriptRoot\Unit" -PassThru
-$e2e = Invoke-Pester -Script "$PSScriptRoot\E2E" -PassThru
+$suiteTimer = [Diagnostics.Stopwatch]::StartNew()
+$stageTimer = [Diagnostics.Stopwatch]::StartNew()
+$unit = Invoke-Pester -Script "$PSScriptRoot\Unit" -PassThru -Show Failed,Summary
+$stageTimer.Stop()
+Write-Host ("unit_elapsed_ms={0}" -f $stageTimer.ElapsedMilliseconds)
+$stageTimer.Restart()
+$e2e = Invoke-Pester -Script "$PSScriptRoot\E2E" -PassThru -Show Failed,Summary
+$stageTimer.Stop()
+Write-Host ("e2e_elapsed_ms={0}" -f $stageTimer.ElapsedMilliseconds)
+$suiteTimer.Stop()
+Write-Host ("test_suite_elapsed_ms={0}" -f $suiteTimer.ElapsedMilliseconds)
 $failed = 0
 if ($unit -and $unit.FailedCount) { $failed += [int]$unit.FailedCount }
 if ($e2e -and $e2e.FailedCount) { $failed += [int]$e2e.FailedCount }

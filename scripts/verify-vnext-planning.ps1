@@ -3,7 +3,8 @@ param(
     [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent),
     [string]$ManifestPath,
     [string]$SpecPath,
-    [switch]$Json
+    [switch]$Json,
+    [switch]$NoExit
 )
 
 $ErrorActionPreference = 'Stop'
@@ -127,7 +128,7 @@ $requiredMarkers = [ordered]@{
     index = @('## 2. 文档职责', '## 4. 状态词汇', 'planning verifier')
     prd = @('## 6. 功能需求', '## 7. 非功能需求', '## 8. 产品级验收', 'implementation_status', 'common | platform_delta | project_action')
     architecture = @('## 3. Bounded contexts', '## 5. OperationPlan contract', '## 10. 技术栈决策', '## 14. 反过度设计守卫', 'RuleResponsibility')
-    roadmap = @('## 3. P0 Foundation and contracts', '## 4. P1 Read-only inventory and rule advisor', '## 7. P4 Conditional scale surfaces')
+    roadmap = @('## 3. P0 Foundation and contracts', '## 4. P1 Read-only inventory and rule advisor', '## 7. P4 Unified capability selection and activation planning', '## 8. P5 Adaptive Capability Fabric')
     spec = @('## 3. Phase boundary', '## 10. Task design', '## 12. Ordered verification', '## 14. Done definition')
 }
 
@@ -284,6 +285,13 @@ if ($null -ne $manifest) {
         }
 
         if ([string]$task.status -eq 'done') {
+            $verificationText = @($task.verification | ForEach-Object { [string]$_ }) -join "`n"
+            $hasStandaloneSuite = $verificationText -match '(?i)(^|[\\/\s])tests/run\.ps1(?:\s|$)'
+            $hasFullGate = $verificationText -match '(?i)run-local-quality-gates\.ps1[^\r\n]*-Profile\s+full'
+            if (-not $explicitHistoricalMode -and $hasStandaloneSuite -and $hasFullGate) {
+                Add-PlanningFinding ([ref]$findings) 'redundant_full_test_invocation' $taskPath `
+                    'Verification must not invoke tests/run.ps1 separately when the full quality gate already invokes the full suite.'
+            }
             $exactEvidencePaths = @($task.write_set | ForEach-Object { [string]$_ } | Where-Object {
                 $normalized = $_.Replace('\', '/')
                 $normalized.StartsWith('docs/change-evidence/', [System.StringComparison]::OrdinalIgnoreCase) -and
@@ -352,5 +360,6 @@ else {
     }
 }
 
-if (-not $result.pass) { exit 2 }
-exit 0
+$exitCode = if ($result.pass) { 0 } else { 2 }
+if ($NoExit) { $global:LASTEXITCODE = $exitCode; return }
+exit $exitCode

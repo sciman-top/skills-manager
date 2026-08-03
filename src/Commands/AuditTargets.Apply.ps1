@@ -421,12 +421,17 @@ function Write-AuditRuntimeEvidence([string]$mode, [string]$recommendationsPath,
     try {
         $date = Get-Date -Format "yyyyMMdd"
         $time = Get-Date -Format "HHmmss"
-        $dir = Join-Path $script:Root "docs\change-evidence"
+        # Keep machine-run receipts beside recommendations and apply reports.
+        # docs/change-evidence is reserved for reviewed logical-slice evidence.
+        $dir = Split-Path -Parent $recommendationsPath
+        if ([string]::IsNullOrWhiteSpace([string]$dir)) {
+            $dir = Get-AuditReportRoot $runId
+        }
         EnsureDir $dir
         $safeMode = if ([string]::IsNullOrWhiteSpace($mode)) { "unknown" } else { ([regex]::Replace($mode.ToLowerInvariant(), "[^a-z0-9_-]", "-")) }
         $runId = if ($null -ne $report -and $report.PSObject.Properties.Match("run_id").Count -gt 0) { [string]$report.run_id } else { "" }
         $safeRun = if ([string]::IsNullOrWhiteSpace($runId)) { "no-runid" } else { ([regex]::Replace($runId, "[^a-zA-Z0-9_-]", "-")) }
-        $path = Join-Path $dir ("{0}-audit-runtime-{1}-{2}-{3}.md" -f $date, $safeMode, $safeRun, $time)
+        $path = Join-Path $dir ("runtime-evidence-{0}-{1}-{2}-{3}.md" -f $date, $safeMode, $safeRun, $time)
         $changedCountsJson = if ($null -ne $report -and $report.PSObject.Properties.Match("changed_counts").Count -gt 0) { ($report.changed_counts | ConvertTo-Json -Depth 10 -Compress) } else { "{}" }
         $rollbackText = if ($null -ne $report -and $report.PSObject.Properties.Match("rollback").Count -gt 0 -and @($report.rollback).Count -gt 0) {
             (@($report.rollback) | ForEach-Object { "- " + [string]$_ }) -join "`r`n"

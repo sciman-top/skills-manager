@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "mode": "observe",
   "trigger_rules": [
     {
@@ -31,7 +31,23 @@
       "resolution": "Delegate only when the task or repository contract authorizes agents and the work has an independent bounded seam."
     }
   ],
+  "capabilities": [
+    { "kind": "mcp", "name": "context7", "description": "Retrieve current third-party library documentation and code examples.", "activation": "current framework or package documentation is required", "negative_activation": "the repository source or official product documentation already answers the question", "side_effect": "external_read" },
+    { "kind": "mcp", "name": "microsoft-learn", "description": "Search and fetch current Microsoft Learn documentation and code samples.", "activation": "current Microsoft, .NET, Windows, Azure, or PowerShell documentation is required", "negative_activation": "the task is fully answered by repository source", "side_effect": "external_read" },
+    { "kind": "mcp", "name": "openaiDeveloperDocs", "description": "Search and fetch current official OpenAI and Codex developer documentation.", "activation": "current OpenAI, ChatGPT, Codex, API, skill, plugin, or MCP documentation is required", "negative_activation": "the task is unrelated to OpenAI products", "side_effect": "external_read" },
+    { "kind": "mcp", "name": "playwright", "description": "Automate and inspect a live browser for web testing.", "activation": "browser automation, visible page inspection, or local web testing is required", "negative_activation": "static source inspection is sufficient", "side_effect": "external_read" },
+    { "kind": "mcp", "name": "codebase-memory-mcp", "description": "Retrieve indexed codebase context and cross-file relationships.", "activation": "indexed codebase retrieval is required for a large repository", "negative_activation": "direct repository search is sufficient", "side_effect": "read_only" }
+  ],
   "groups": [
+    {
+      "id": "capability-selection",
+      "purpose": "Route the current task to the narrowest installed local skill without changing Codex profile, process, or conversation state.",
+      "router": "capability-router",
+      "selection_policy": "prefer a visible matching skill; otherwise select at most three cold skills from metadata; abstain on weak matches; never mutate profile state",
+      "members": [
+        { "name": "capability-router", "role": "router", "activation": "task start, domain change, missing visible capability, or automatic skill selection" }
+      ]
+    },
     {
       "id": "development-flow",
       "purpose": "Use GPT-5.6 and Codex native planning, goal tracking, review, and agent controls for routine work; profiles expose narrow task capabilities but never replace native task orchestration.",
@@ -74,15 +90,15 @@
       "members": [
         { "name": "research", "role": "reference", "activation": "current primary-source evidence is required for the engineering decision" },
         { "name": "domain-modeling", "role": "workflow", "activation": "durable domain terms, boundaries, or decisions need clarification" },
-        { "name": "grilling", "role": "workflow", "activation": "a focused design interview is explicitly requested" },
-        { "name": "grill-with-docs", "role": "workflow", "activation": "the user asks to grill a design or sharpen an ADR/glossary decision" },
-        { "name": "draft-spec", "role": "executor", "activation": "the user asks for a review-only spec or PRD draft" },
-        { "name": "draft-tickets", "role": "executor", "activation": "the user asks for a review-only ticket or vertical-slice breakdown" },
-        { "name": "setup-matt-pocock-skills", "role": "operator", "activation": "the repository engineering-skill configuration must be initialized or changed explicitly" },
+        { "name": "grilling", "role": "workflow", "activation": "a focused design interview is explicitly requested", "required_intents": ["grill"], "excluded_intents": ["implement"] },
+        { "name": "grill-with-docs", "role": "workflow", "activation": "the user asks to grill a design or sharpen an ADR/glossary decision", "required_intents": ["grill"], "excluded_intents": ["implement"] },
+        { "name": "draft-spec", "role": "executor", "activation": "the user asks for a review-only spec or PRD draft", "required_intents": ["draft"], "excluded_intents": ["implement"] },
+        { "name": "draft-tickets", "role": "executor", "activation": "the user asks for a review-only ticket or vertical-slice breakdown", "required_intents": ["draft"], "excluded_intents": ["implement"] },
+        { "name": "setup-matt-pocock-skills", "role": "operator", "activation": "the repository engineering-skill configuration must be initialized or changed explicitly", "required_intents": ["setup"] },
         { "name": "codebase-design", "role": "reference", "activation": "architecture vocabulary is needed for an engineering design" },
-        { "name": "improve-codebase-architecture", "role": "workflow", "activation": "the user explicitly requests a codebase architecture scan and visual report" },
-        { "name": "to-spec", "role": "operator", "activation": "the user explicitly approves publishing a spec to the configured tracker" },
-        { "name": "to-tickets", "role": "operator", "activation": "the user explicitly approves publishing tickets and blocking relationships" }
+        { "name": "improve-codebase-architecture", "role": "workflow", "activation": "the user explicitly requests a codebase architecture scan and visual report", "required_intents": ["scan"] },
+        { "name": "to-spec", "role": "operator", "activation": "the user explicitly approves publishing a spec to the configured tracker", "required_intents": ["publish"], "excluded_intents": ["implement"] },
+        { "name": "to-tickets", "role": "operator", "activation": "the user explicitly approves publishing tickets and blocking relationships", "required_intents": ["publish"], "excluded_intents": ["implement"] }
       ]
     },
     {

@@ -21,7 +21,8 @@ Describe "Skill projection" {
 
             $defaultNames = @($config.skill_projection.profiles.default.enabled_names)
             $config.skill_projection.profiles.default.budget_limit_chars | Should Be 8000
-            $defaultNames.Count | Should Be 9
+            $defaultNames.Count | Should Be 2
+            @($config.skill_projection.resident_names) | Should Be @("capability-router")
             foreach ($workflowName in @("research", "brainstorming", "planning-and-task-breakdown", "git-workflow-and-versioning", "incremental-implementation")) {
                 ($defaultNames -contains $workflowName) | Should Be $false
             }
@@ -151,6 +152,40 @@ Describe "Skill projection" {
     }
 
     Context "New-SkillProjectionPlan" {
+        It "Unions resident skills into every profile without repeating them in profile config" {
+            $root = Join-Path $TestDrive "resident-profile"
+            New-ProjectionSkill $root "router" "router" | Out-Null
+            New-ProjectionSkill $root "worker" "worker" | Out-Null
+            $cfg = [pscustomobject]@{
+                enabled = $true
+                active_profile = "default"
+                resident_names = @("router")
+                profiles = [pscustomobject]@{
+                    default = [pscustomobject]@{ enabled_names = @("worker") }
+                    narrow = [pscustomobject]@{ enabled_names = @() }
+                }
+                sources = @([pscustomobject]@{ id = "fixture"; path = $root; priority = 1; platforms = @("codex") })
+            }
+
+            $plan = New-SkillProjectionPlan $cfg
+
+            @($plan.active_names | Sort-Object) -join "," | Should Be "router,worker"
+            @($plan.resident_names) | Should Be @("router")
+            ($plan.profile_budgets | Where-Object profile -eq "narrow").active_skill_count | Should Be 1
+        }
+
+        It "Rejects unknown resident skills" {
+            $root = Join-Path $TestDrive "unknown-resident"
+            New-ProjectionSkill $root "worker" "worker" | Out-Null
+            $cfg = [pscustomobject]@{
+                enabled = $true
+                resident_names = @("missing")
+                sources = @([pscustomobject]@{ id = "fixture"; path = $root; priority = 1; platforms = @("codex") })
+            }
+
+            { New-SkillProjectionPlan $cfg } | Should Throw
+        }
+
         It "Keeps the higher-priority path for same-content duplicates" {
             $managed = Join-Path $TestDrive "managed-same"
             $legacy = Join-Path $TestDrive "legacy-same"

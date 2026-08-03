@@ -1077,13 +1077,15 @@ Describe "Core Functions" {
         It "Persists gh token to both GitHub MCP user env vars" {
             $oldProcessGithub = $env:GITHUB_PERSONAL_ACCESS_TOKEN
             $oldProcessCodex = $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN
-            $oldUserGithub = [System.Environment]::GetEnvironmentVariable("GITHUB_PERSONAL_ACCESS_TOKEN", "User")
-            $oldUserCodex = [System.Environment]::GetEnvironmentVariable("CODEX_GITHUB_PERSONAL_ACCESS_TOKEN", "User")
+            $script:testUserEnvironment = @{
+                GITHUB_PERSONAL_ACCESS_TOKEN = "stale-user-token"
+                CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = $null
+            }
             try {
                 $env:GITHUB_PERSONAL_ACCESS_TOKEN = "stale-process-token"
                 Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
-                [System.Environment]::SetEnvironmentVariable("GITHUB_PERSONAL_ACCESS_TOKEN", "stale-user-token", "User")
-                [System.Environment]::SetEnvironmentVariable("CODEX_GITHUB_PERSONAL_ACCESS_TOKEN", $null, "User")
+                Mock Get-McpUserEnvironmentVariable { return $script:testUserEnvironment[$name] }
+                Mock Set-McpUserEnvironmentVariable { $script:testUserEnvironment[$name] = $value }
 
                 Mock Get-Command { [pscustomobject]@{ Name = "gh"; Path = "C:\Program Files\GitHub CLI\gh.exe" } } -ParameterFilter { $Name -eq "gh" }
                 Mock Invoke-Gh {
@@ -1101,9 +1103,10 @@ Describe "Core Functions" {
 
                 $env:GITHUB_PERSONAL_ACCESS_TOKEN | Should Be "gho_unit_test_token"
                 $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN | Should Be "gho_unit_test_token"
-                [System.Environment]::GetEnvironmentVariable("GITHUB_PERSONAL_ACCESS_TOKEN", "User") | Should Be "gho_unit_test_token"
-                [System.Environment]::GetEnvironmentVariable("CODEX_GITHUB_PERSONAL_ACCESS_TOKEN", "User") | Should Be "gho_unit_test_token"
+                $script:testUserEnvironment.GITHUB_PERSONAL_ACCESS_TOKEN | Should Be "gho_unit_test_token"
+                $script:testUserEnvironment.CODEX_GITHUB_PERSONAL_ACCESS_TOKEN | Should Be "gho_unit_test_token"
                 Assert-MockCalled Invoke-Gh -Times 2 -Exactly
+                Assert-MockCalled Set-McpUserEnvironmentVariable -Times 2 -Exactly
             }
             finally {
                 if ($null -ne $oldProcessGithub) {
@@ -1118,8 +1121,7 @@ Describe "Core Functions" {
                 else {
                     Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
                 }
-                [System.Environment]::SetEnvironmentVariable("GITHUB_PERSONAL_ACCESS_TOKEN", $oldUserGithub, "User")
-                [System.Environment]::SetEnvironmentVariable("CODEX_GITHUB_PERSONAL_ACCESS_TOKEN", $oldUserCodex, "User")
+                Remove-Variable -Name testUserEnvironment -Scope Script -ErrorAction SilentlyContinue
             }
         }
     }
@@ -1132,10 +1134,10 @@ Describe "Core Functions" {
 
         It "Normalizes Postgres MCP environment before sync writes config" {
             $oldProcess = $env:POSTGRES_CONNECTION_STRING
-            $oldUser = [System.Environment]::GetEnvironmentVariable("POSTGRES_CONNECTION_STRING", "User")
+            $script:persistedPostgresValue = $null
             try {
                 $env:POSTGRES_CONNECTION_STRING = "Host=127.0.0.1;Port=55432;Database=postgres;Username=mcp_user;Password=secret;"
-                [System.Environment]::SetEnvironmentVariable("POSTGRES_CONNECTION_STRING", $null, "User")
+                Mock Set-McpUserEnvironmentVariable { $script:persistedPostgresValue = $value }
                 $servers = @(
                     [pscustomobject]@{
                         name      = "postgres"
@@ -1148,7 +1150,8 @@ Describe "Core Functions" {
                 Ensure-PostgresMcpEnvironment $servers
 
                 $env:POSTGRES_CONNECTION_STRING | Should Be "postgresql://mcp_user:secret@127.0.0.1:55432/postgres"
-                [System.Environment]::GetEnvironmentVariable("POSTGRES_CONNECTION_STRING", "User") | Should Be "postgresql://mcp_user:secret@127.0.0.1:55432/postgres"
+                $script:persistedPostgresValue | Should Be "postgresql://mcp_user:secret@127.0.0.1:55432/postgres"
+                Assert-MockCalled Set-McpUserEnvironmentVariable -Times 1 -Exactly
             }
             finally {
                 if ($null -ne $oldProcess) {
@@ -1157,7 +1160,7 @@ Describe "Core Functions" {
                 else {
                     Remove-Item Env:\POSTGRES_CONNECTION_STRING -ErrorAction SilentlyContinue
                 }
-                [System.Environment]::SetEnvironmentVariable("POSTGRES_CONNECTION_STRING", $oldUser, "User")
+                Remove-Variable -Name persistedPostgresValue -Scope Script -ErrorAction SilentlyContinue
             }
         }
 
@@ -2121,12 +2124,11 @@ exit 3
         It "Hydrates gemini GitHub token from user scope during live verification when process env is stale" {
             $oldVerify = [System.Environment]::GetEnvironmentVariable("SKILLS_MCP_VERIFY_GEMINI_CLI")
             $oldProcessGithub = $env:GITHUB_PERSONAL_ACCESS_TOKEN
-            $oldUserGithub = [System.Environment]::GetEnvironmentVariable("GITHUB_PERSONAL_ACCESS_TOKEN", "User")
             $expectedWorkingDir = [Environment]::GetFolderPath("UserProfile")
             try {
                 [System.Environment]::SetEnvironmentVariable("SKILLS_MCP_VERIFY_GEMINI_CLI", "1")
                 Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
-                [System.Environment]::SetEnvironmentVariable("GITHUB_PERSONAL_ACCESS_TOKEN", "gho_user_scope_token", "User")
+                Mock Get-McpUserEnvironmentVariable { "gho_user_scope_token" } -ParameterFilter { $name -eq "GITHUB_PERSONAL_ACCESS_TOKEN" }
                 Mock Get-Command { [pscustomobject]@{ Name = "gemini" } } -ParameterFilter { $Name -eq "gemini" }
                 Mock Get-McpListVerifyTimeoutSeconds { 9 } -ParameterFilter { $cli -eq "gemini" }
                 Mock Invoke-ExternalCommandCapture {
@@ -2164,7 +2166,6 @@ exit 3
                 else {
                     $env:GITHUB_PERSONAL_ACCESS_TOKEN = $oldProcessGithub
                 }
-                [System.Environment]::SetEnvironmentVariable("GITHUB_PERSONAL_ACCESS_TOKEN", $oldUserGithub, "User")
             }
         }
 

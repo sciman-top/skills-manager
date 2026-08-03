@@ -139,8 +139,23 @@ Capability、RuleDocument、Profile、OperationPlan 和 Receipt 使用独立模�
 - `FR-MCP-003`：凭据只能以引用或环境要求出现；receipt、日志和进程参数必须 redaction-first。
 - `FR-MCP-004`：优先使用宿主 connector/plugin 或 native MCP CLI；只有不存在原生入口时才使用受管配置段。
 - `FR-MCP-005`：服务可启动、工具可列出、真实工具调用和业务验收是不同验证层级。
+- `FR-MCP-006`：任务内选择必须区分 `available | needs_activation | unknown`；未启用、未连接或未认证的 MCP 只能生成 activation plan，不得静默切换 profile、写配置或启动服务。
 
-### 6.6 Operation plan and receipt
+### 6.6 Unified capability selection
+
+- `FR-SEL-001`：以统一 selector 选择 skill、MCP、plugin/app/connector 和 native tool，但保留每种能力的 path、availability、auth、side-effect 与宿主字段。
+- `FR-SEL-002`：显式能力名优先；非显式匹配必须先应用 required/excluded intent 和 negative trigger，再进入 metadata ranking。
+- `FR-SEL-003`：弱证据必须 abstain；profile 只作为预热包和 active preference，不再决定能力是否可达。
+- `FR-SEL-004`：active/cold read-only skill 输出 `use_active_skill | load_skill`；operator skill 输出 `load_skill_with_approval`；读取必须受 declared root containment 保护。
+- `FR-SEL-005`：已可用 read-only/external-read 能力可自动使用；write/destructive/open-world/unknown 或 needs_activation 必须输出 approval/activation plan。
+- `FR-SEL-006`：建立 direct、indirect、negative、ambiguous、cross-domain 和 cross-kind golden corpus，机械验证 expected/forbidden selection、abstain 和 side-effect violations。
+- `FR-SEL-007`：selector 全程只读，不切 profile、不创建任务、不重启宿主、不调用 provider，也不保存或推断 OAuth/token/session 状态。
+- `FR-SEL-008`：selector 必须先生成结构化 task type、domain、goal、operations、requested kinds、risk 和 confidence；architecture/meta task 不得仅凭能力名关键词选择 builder/operator。
+- `FR-SEL-009`：多阶段任务输出最小有序 capability DAG；只创建当前任务有证据需要的阶段，不机械填满 workflow。
+- `FR-SEL-010`：caller-provided session snapshot 只用于 compatible reuse/load/release planning；profile 只输出 `apply=false` preheat recommendation。
+- `FR-SEL-011`：Codex host snapshot 优先来自稳定只读 App Server RPC；包含 source/captured_at/freshness/availability/callable/access/auth evidence，陈旧事实 fail-closed，单来源失败可 truthful partial。
+
+### 6.7 Operation plan and receipt
 
 - `FR-OPS-001`：所有写操作共享 versioned `OperationPlan` envelope。
 - `FR-OPS-002`：plan 至少包含 operation_id、domain、target、before_hash、desired_hash、actions、risk、preconditions、verification 和 rollback。
@@ -149,7 +164,7 @@ Capability、RuleDocument、Profile、OperationPlan 和 Receipt 使用独立模�
 - `FR-OPS-005`：跨多个文件的写入应使用 staging/atomic replace 或可恢复事务目录；失败只回滚本次切片。
 - `FR-OPS-006`：dry-run、applied、repo_verified、host_loaded 和 live_accepted 使用不同状态，不允许自动晋级。
 
-### 6.7 AI-executable planning
+### 6.8 AI-executable planning
 
 - `FR-AIE-001`：当前实现 Phase 必须提供机器可读 task manifest。
 - `FR-AIE-002`：每个任务必须声明 ID、状态、风险、依赖、requirement IDs、write set、步骤、测试、验证、回滚和 done_when。
@@ -157,7 +172,7 @@ Capability、RuleDocument、Profile、OperationPlan 和 Receipt 使用独立模�
 - `FR-AIE-004`：任务不得把 `agent/`、`vendor/` 或运行态 report 作为源码 write set。
 - `FR-AIE-005`：planning verifier 必须检查 PRD requirement、架构决策、路线 Phase、spec、plan 和 todo 的交叉引用。
 
-### 6.8 Evidence and reporting
+### 6.9 Evidence and reporting
 
 - `FR-EVD-001`：报告必须包含 source revision、命令、exit code、关键输出、风险、N/A、回滚和工作树边界。
 - `FR-EVD-002`：外部参考必须记录采纳、适配或拒绝决定，不继承其仓库指令。
@@ -212,6 +227,8 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - Phase 1 只增加 read-only inventory/rules advisor，不新增规则写入。
 - Phase 2 才引入显式 apply；必须保留现有命令兼容和 feature flag/observe 窗口。
 - Phase 3 才评估 personal plugin lint/export，不创建公共 marketplace。
+- Phase 4 只增加统一 capability selection 和 activation planning；宿主仍拥有 MCP/plugin/tool runtime、认证、权限、approval 和 session。
+- Phase 5 增加 task understanding、capability DAG、session reuse planning 和只读 host snapshot；仍不接管执行、安装、认证、审批、profile 或 session mutation。
 - GUI、daemon、远端协作、数据库和 domain core 重写均为 conditional，不进入当前承诺。
 
 ## 11. 官方与社区依据

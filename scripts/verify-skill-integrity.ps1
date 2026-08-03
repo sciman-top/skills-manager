@@ -4,7 +4,8 @@ param(
     [string]$ConfigPath,
     [string]$DependencyContractPath,
     [string]$ReportPath,
-    [switch]$Json
+    [switch]$Json,
+    [switch]$NoExit
 )
 
 $ErrorActionPreference = "Stop"
@@ -326,5 +327,6 @@ else {
     }
 }
 
-if (-not $report.ok) { exit 1 }
-exit 0
+$exitCode = if ($report.ok) { 0 } else { 1 }
+if ($NoExit) { $global:LASTEXITCODE = $exitCode; return }
+exit $exitCode

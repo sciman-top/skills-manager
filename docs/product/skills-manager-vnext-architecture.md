@@ -153,6 +153,30 @@ RuleResponsibility
 
 首个实现只支持一个稳定外部协议和一个写入边界：`codex-plugin skills_only` + `.skills-manager-fixture`。其他 exporter 必须重新满足 docs/help/fixture 与重复分发证据。
 
+### 3.8 `CapabilitySelection`
+
+职责：从 capability metadata、active profile 和 caller-provided runtime snapshot 识别 task intent，先执行 required/excluded intent policy，再做有界 ranking/abstain，并输出统一 `ActivationPlan`。
+
+不负责：profile mutation、MCP/plugin install 或 enable、OAuth、provider/model/session routing、宿主 restart、工具执行和 live acceptance。
+
+```text
+CapabilitySelectionInput
+  query
+  capability_descriptors
+  active_skill_names
+  active_mcp_names
+  runtime_snapshot?
+
+CapabilitySelectionResult
+  intents
+  selected[]
+  excluded[]
+  activation_plan[]
+  writes_performed = false
+```
+
+`ActivationPlan` 的 action 至少区分 `use_active_skill | load_skill | load_skill_with_approval | use_available_mcp | use_available_capability | request_approval | request_mcp_activation | request_activation`。只有 read-only skill，或已 available 且 `read_only | external_read` 的非 skill capability 可以 `auto_allowed=true`。
+
 ## 4. 目标源码结构
 
 结构按渐进迁移建立，不要求 Phase 0 一次移动全部旧函数：
@@ -427,6 +451,18 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 
 理由：官方已拥有 scaffold、marketplace、安装和 runtime；本项目只补本地策展、校验、受限导出和证据，避免扩张为第二套 plugin control plane。
 
+### `ADR-SMV-010 Unified selection, host-owned activation`
+
+决定：统一 skill/MCP/plugin/app/native-tool 的 selection result 和 activation-plan vocabulary，但不统一或接管各自 runtime。使用显式名称、negative/required intent、metadata ranking 和 abstain；只有量化 corpus 证明不足时才评估语义 reranker。
+
+理由：解决两个以上真实误路由，同时复用 Codex progressive loading、MCP approvals、plugin/runtime snapshot 和宿主认证边界；避免为“无感”引入 provider、daemon、数据库或隐藏副作用。
+
+### `ADR-SMV-011 Adaptive decision plane, native execution plane`
+
+决定：以 schema v3 的 task model、hybrid retrieval/policy adjudication、最小 capability DAG、session reuse plan 和 recommendation-only profile preheat 形成统一决策平面；确定性脚本负责候选、安全与新鲜度，当前宿主 AI 用完整请求做语义判决且只能收窄或 abstain。skills、MCP、apps/connectors、plugins 和 native tools 继续由各宿主原生执行。当前 Codex 实时事实只消费稳定只读 App Server RPC；`plugin/list/install` under-development surface、dynamic tools、写 config、OAuth 和 thread mutation 不作为终态必需依赖。
+
+理由：P4 已证明可达性和副作用边界，但真实元架构请求仍发生纯关键词误选。新增结构化理解和宿主快照能修复已证实风险，同时保持 local-first、single-process、无服务/数据库和跨宿主可迁移性。
+
 ## 11. 安全与供应链
 
 - 外部内容是不可信输入，不执行其仓库指令或脚本，除非单独评估并授权。
@@ -457,7 +493,7 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 
 以下任一提案默认拒绝，除非有重复真实问题、明确用户和验收证据：
 
-- 通用 agent runtime、planner、memory、model router 或 provider gateway。
+- 通用 agent runtime、planner、memory、model router 或 provider gateway；只读 capability selector 与 activation plan 不属于这些 runtime。
 - 中央目标仓 registry、跨仓自动同步或统一规则服务。
 - 为每个宿主复制完整插件商店、OAuth 或 connector 管理。
 - 只为展示 inventory 而建设数据库、搜索集群、Web/WPF UI。

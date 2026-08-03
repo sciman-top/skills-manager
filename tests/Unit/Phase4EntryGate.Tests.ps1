@@ -8,19 +8,19 @@ Describe 'Conditional P4 entry gate' {
         return [pscustomobject]@{ exit_code = $LASTEXITCODE; data = (($output -join "`n") | ConvertFrom-Json) }
     }
 
-    It 'accepts the current machine-verifiable deferred decision' {
+    It 'accepts the current machine-verifiable started decision' {
         $result = Invoke-P4Verifier $repoRoot $decisionSource
         $result.exit_code | Should Be 0
         $result.data.pass | Should Be $true
-        $result.data.decision | Should Be 'not_started'
-        $result.data.status | Should Be 'deferred'
-        $result.data.all_required_met | Should Be $false
+        $result.data.decision | Should Be 'started'
+        $result.data.status | Should Be 'in_progress'
+        $result.data.all_required_met | Should Be $true
     }
 
     It 'fails closed when P4 is marked started with unmet gates' {
         $path = Join-Path $TestDrive 'started.json'
         $decision = Get-Content -Raw $decisionSource | ConvertFrom-Json
-        $decision.decision = 'started'; $decision.status = 'in_progress'; $decision.p4_manifest_path = 'tasks/skills-manager-vnext-phase4.tasks.json'
+        $decision.gates[0].state = 'not_met'; $decision.all_required_met = $false
         $decision | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
         $result = Invoke-P4Verifier $TestDrive $path
         $result.exit_code | Should Be 2
@@ -30,7 +30,7 @@ Describe 'Conditional P4 entry gate' {
     It 'fails closed when the aggregate flag contradicts gate states' {
         $path = Join-Path $TestDrive 'aggregate.json'
         $decision = Get-Content -Raw $decisionSource | ConvertFrom-Json
-        $decision.all_required_met = $true
+        $decision.all_required_met = $false
         $decision | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
         $result = Invoke-P4Verifier $TestDrive $path
         $result.exit_code | Should Be 2

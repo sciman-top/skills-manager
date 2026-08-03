@@ -66,13 +66,12 @@ function Assert-SyncMcpThreshold($report, [int]$thresholdMs, [bool]$warnOnly) {
 
 Push-Location $root
 try {
-    $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'skills.ps1') doctor --json 2>&1)
-    $exitCode = $LASTEXITCODE
-    $text = (($output | ForEach-Object { [string]$_ }) -join "`n").Trim()
-
-    if ($exitCode -ne 0) {
-        throw ("doctor --json exited with {0}: {1}" -f $exitCode, $text)
-    }
+    # The CLI serialization path has a dedicated smoke test. Reuse Doctor in
+    # this gate process so every quick/full gate does not spawn and parse a
+    # second 20k-line generated PowerShell entrypoint.
+    . (Join-Path $root 'skills.ps1')
+    $doctorReport = Invoke-Doctor @('--json', '--offline-contract') 6>$null
+    $text = ($doctorReport | ConvertTo-Json -Depth 30).Trim()
     if ([string]::IsNullOrWhiteSpace($text)) {
         throw 'doctor --json returned empty output.'
     }
@@ -87,6 +86,9 @@ try {
     if ($null -eq $report.checks) { throw 'doctor --json report misses checks.' }
     if ($null -eq $report.checks.git -or $report.checks.git.ok -ne $true) { throw 'doctor --json report has failing or missing git check.' }
     if ($null -eq $report.checks.config -or $report.checks.config.ok -ne $true) { throw 'doctor --json report has failing or missing config check.' }
+    if ($report.offline_contract -ne $true -or $report.checks.network.skipped -ne $true -or $report.checks.network.reason -ne 'offline_contract') {
+        throw 'doctor --json offline contract did not report the network check as skipped.'
+    }
     if ($null -eq $report.summary) { throw 'doctor --json report misses summary.' }
 
     $effectiveSyncThreshold = Resolve-SyncMcpThresholdMs $SyncMcpThresholdMs

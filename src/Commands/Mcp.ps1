@@ -1046,10 +1046,20 @@ function Invoke-Gh([string[]]$GhArgs) {
     return @($output | ForEach-Object { [string]$_ })
 }
 
+function Get-McpUserEnvironmentVariable([string]$name) {
+    Need (-not [string]::IsNullOrWhiteSpace($name)) "环境变量名不能为空"
+    return [System.Environment]::GetEnvironmentVariable($name, "User")
+}
+
+function Set-McpUserEnvironmentVariable([string]$name, [AllowNull()][string]$value) {
+    Need (-not [string]::IsNullOrWhiteSpace($name)) "环境变量名不能为空"
+    [System.Environment]::SetEnvironmentVariable($name, $value, "User")
+}
+
 function Get-EnvironmentVariableWithScope([string]$name, [string[]]$scopes = @("Process", "User", "Machine")) {
     Need (-not [string]::IsNullOrWhiteSpace($name)) "环境变量名不能为空"
     foreach ($scope in @($scopes)) {
-        $value = [System.Environment]::GetEnvironmentVariable($name, $scope)
+        $value = if ([string]$scope -eq "User") { Get-McpUserEnvironmentVariable $name } else { [System.Environment]::GetEnvironmentVariable($name, $scope) }
         if (-not [string]::IsNullOrWhiteSpace($value)) {
             return [pscustomobject]@{
                 name = $name
@@ -1134,7 +1144,7 @@ function Ensure-PostgresMcpEnvironment($servers) {
 
     $env:POSTGRES_CONNECTION_STRING = $normalized
     if ($raw -ne $normalized -or [string]$resolved.scope -ne "User") {
-        [System.Environment]::SetEnvironmentVariable("POSTGRES_CONNECTION_STRING", $normalized, "User")
+        Set-McpUserEnvironmentVariable "POSTGRES_CONNECTION_STRING" $normalized
         Log ("Postgres MCP 连接串已归一化到 User scope：source_scope={0}, shape=postgres-url" -f [string]$resolved.scope) "INFO"
     }
 }
@@ -1176,14 +1186,14 @@ function Ensure-GhAuthForGithubMcp($servers) {
     # gh auth 路线：同步阶段临时注入 token，供各客户端配置写入与 native 注册使用。
     $env:GITHUB_PERSONAL_ACCESS_TOKEN = $token
     $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = $token
-    $existingGithubToken = [System.Environment]::GetEnvironmentVariable("GITHUB_PERSONAL_ACCESS_TOKEN", "User")
+    $existingGithubToken = Get-McpUserEnvironmentVariable "GITHUB_PERSONAL_ACCESS_TOKEN"
     if ([string]::IsNullOrWhiteSpace($existingGithubToken) -or $existingGithubToken -ne $token) {
-        [System.Environment]::SetEnvironmentVariable("GITHUB_PERSONAL_ACCESS_TOKEN", $token, "User")
+        Set-McpUserEnvironmentVariable "GITHUB_PERSONAL_ACCESS_TOKEN" $token
         Log "GitHub MCP 已同步 gh token 到 User scope 的 GITHUB_PERSONAL_ACCESS_TOKEN。" "INFO"
     }
-    $existingCodexToken = [System.Environment]::GetEnvironmentVariable("CODEX_GITHUB_PERSONAL_ACCESS_TOKEN", "User")
+    $existingCodexToken = Get-McpUserEnvironmentVariable "CODEX_GITHUB_PERSONAL_ACCESS_TOKEN"
     if ([string]::IsNullOrWhiteSpace($existingCodexToken) -or $existingCodexToken -ne $token) {
-        [System.Environment]::SetEnvironmentVariable("CODEX_GITHUB_PERSONAL_ACCESS_TOKEN", $token, "User")
+        Set-McpUserEnvironmentVariable "CODEX_GITHUB_PERSONAL_ACCESS_TOKEN" $token
         Log "GitHub MCP 已同步 gh token 到 User scope 的 CODEX_GITHUB_PERSONAL_ACCESS_TOKEN。" "INFO"
     }
     Log ("GitHub MCP gh 认证预检通过：{0}" -f $username) "INFO"
@@ -1401,7 +1411,7 @@ function Get-McpCliProcessEnvOverrides([string]$cli) {
         if ([string]::IsNullOrWhiteSpace($varName)) { continue }
         $processValue = [System.Environment]::GetEnvironmentVariable($varName, "Process")
         if (-not [string]::IsNullOrWhiteSpace([string]$processValue)) { continue }
-        $userValue = [System.Environment]::GetEnvironmentVariable($varName, "User")
+        $userValue = Get-McpUserEnvironmentVariable $varName
         if (-not [string]::IsNullOrWhiteSpace([string]$userValue)) {
             $overrides[$varName] = [string]$userValue
         }

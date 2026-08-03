@@ -344,6 +344,15 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
     $profileBudgets = New-Object System.Collections.Generic.List[object]
     $profileNamesBySkill = @{}
     $profileRoutingEnabled = $false
+    $residentNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if ($projectionCfg.PSObject.Properties.Match("resident_names").Count -gt 0 -and $null -ne $projectionCfg.resident_names) {
+        foreach ($rawName in @($projectionCfg.resident_names)) {
+            $name = ([string]$rawName).Trim()
+            Need (-not [string]::IsNullOrWhiteSpace($name)) "skill_projection.resident_names 不得包含空值"
+            Need ($canonicalByName.ContainsKey($name)) ("skill_projection resident_names 引用了不存在的技能：{0}" -f $name)
+            $residentNames.Add($name) | Out-Null
+        }
+    }
     if ($projectionCfg.PSObject.Properties.Match("profiles").Count -gt 0 -and $null -ne $projectionCfg.profiles) {
         $profileRoutingEnabled = $true
         $activeProfile = ([string]$projectionCfg.active_profile).Trim()
@@ -368,6 +377,7 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
                 }
                 $profileNamesBySkill[$name].Add($profileName) | Out-Null
             }
+            foreach ($residentName in @($residentNames)) { $enabledNames.Add($residentName) | Out-Null }
 
             $profileMetadataChars = 0
             $profileActiveSkillCount = 0
@@ -406,7 +416,7 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
         foreach ($entry in @($canonical.ToArray())) {
             $entryName = [string]$entry.name
             if ([bool]$entry.is_system -or $aliases.ContainsKey($entryName)) { continue }
-            if ($profileNamesBySkill.ContainsKey($entryName)) {
+            if ($residentNames.Contains($entryName) -or $profileNamesBySkill.ContainsKey($entryName)) {
                 $profileRoutedNames.Add($entryName) | Out-Null
             }
             else {
@@ -474,6 +484,7 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
         enabled = $true
         conflict_policy = "system_then_priority_then_source_order"
         active_profile = $activeProfile
+        resident_names = @($residentNames | Sort-Object)
         skills = @($all.ToArray() | Sort-Object name, @{ Expression = "priority"; Descending = $true }, path)
         canonical = @($canonical.ToArray() | Sort-Object name)
         active = @($active.ToArray() | Sort-Object name)
@@ -630,6 +641,7 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
                 generated_at = (Get-Date).ToString("o")
                 conflict_policy = [string]$plan.conflict_policy
                 active_profile = [string]$plan.active_profile
+                resident_names = @($plan.resident_names)
                 source_count = @($projectionCfg.sources).Count
                 skill_entry_count = @($plan.skills).Count
                 unique_name_count = @($plan.unique_names).Count

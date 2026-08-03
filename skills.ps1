@@ -5413,6 +5413,14 @@ function Assert-Cfg($cfg) {
             $dupManagedLinkExcludes = @(Get-DuplicateValues ($projection.managed_link_excludes | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() }))
             Need ($dupManagedLinkExcludes.Count -eq 0) ("skill_projection.managed_link_excludes 重复：{0}" -f ($dupManagedLinkExcludes -join ", "))
         }
+        if ($projection.PSObject.Properties.Match("resident_names").Count -gt 0 -and $null -ne $projection.resident_names) {
+            Need (Assert-IsArray $projection.resident_names) "skill_projection.resident_names 必须是数组"
+            foreach ($residentName in @($projection.resident_names)) {
+                Need (-not [string]::IsNullOrWhiteSpace([string]$residentName)) "skill_projection.resident_names 不能包含空字符串"
+            }
+            $dupResidentNames = @(Get-DuplicateValues ($projection.resident_names | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() }))
+            Need ($dupResidentNames.Count -eq 0) ("skill_projection.resident_names 重复：{0}" -f ($dupResidentNames -join ", "))
+        }
         if ($projection.PSObject.Properties.Match("aliases").Count -gt 0 -and $null -ne $projection.aliases) {
             Need (Assert-IsArray $projection.aliases) "skill_projection.aliases 必须是数组"
             foreach ($alias in @($projection.aliases)) {
@@ -5927,6 +5935,7 @@ function Parse-DoctorArgs([string[]]$tokens) {
         dry_run_fix = $false
         strict = $false
         strict_perf = $false
+        offline_contract = $false
         threshold_ms = 5000
     }
     if ($null -eq $tokens) { return [pscustomobject]$opts }
@@ -5942,6 +5951,7 @@ function Parse-DoctorArgs([string[]]$tokens) {
             "--dry-run-fix" { $opts.dry_run_fix = $true; continue }
             "--strict" { $opts.strict = $true; continue }
             "--strict-perf" { $opts.strict_perf = $true; continue }
+            "--offline-contract" { $opts.offline_contract = $true; continue }
             "--threshold-ms" {
                 Need ($i + 1 -lt $tokens.Count) "参数缺少值：--threshold-ms"
                 $raw = [string]$tokens[++$i]
@@ -5953,6 +5963,12 @@ function Parse-DoctorArgs([string[]]$tokens) {
             }
             default { throw ("未知 doctor 参数：{0}" -f $t) }
         }
+    }
+    if ($opts.offline_contract) {
+        Need $opts.json "--offline-contract 仅用于 doctor --json 结构契约"
+        Need (-not $opts.strict) "--offline-contract 不能与 --strict 组合"
+        Need (-not $opts.strict_perf) "--offline-contract 不能与 --strict-perf 组合"
+        Need (-not $opts.fix -and -not $opts.dry_run_fix) "--offline-contract 不能与配置修复参数组合"
     }
     return [pscustomobject]$opts
 }
@@ -6174,6 +6190,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
         pass = $true
         strict = [bool]$opts.strict
         strict_perf = [bool]$opts.strict_perf
+        offline_contract = [bool]$opts.offline_contract
         checks = [ordered]@{}
         risks = @()
         performance = [ordered]@{
@@ -6356,23 +6373,29 @@ function Invoke-Doctor([string[]]$tokens = @()) {
         }
     }
 
-    # 7. Network Check
-    try {
-        $githubConnection = Test-DoctorGitHubConnection
-        if ($githubConnection.ok) {
-            $report.checks.network = [ordered]@{ ok = $true; method = [string]$githubConnection.method }
-            if (-not $opts.json) { Write-Host ("✅ GitHub Connection: OK ({0})" -f [string]$githubConnection.method) -ForegroundColor Green }
+    # 7. Network Check. JSON structure contracts are deterministic and must not
+    # pay for or depend on a live GitHub probe; strict health checks always probe.
+    if ($opts.offline_contract) {
+        $report.checks.network = [ordered]@{ ok = $true; skipped = $true; reason = "offline_contract" }
+    }
+    else {
+        try {
+            $githubConnection = Test-DoctorGitHubConnection
+            if ($githubConnection.ok) {
+                $report.checks.network = [ordered]@{ ok = $true; method = [string]$githubConnection.method }
+                if (-not $opts.json) { Write-Host ("✅ GitHub Connection: OK ({0})" -f [string]$githubConnection.method) -ForegroundColor Green }
+            }
+            else {
+                $report.checks.network = [ordered]@{ ok = $false; method = [string]$githubConnection.method; reason = [string]$githubConnection.detail }
+                if (-not $opts.json) { Write-Host ("❌ GitHub Connection: Failed - {0}" -f [string]$githubConnection.detail) -ForegroundColor Red }
+                $pass = $false
+            }
         }
-        else {
-            $report.checks.network = [ordered]@{ ok = $false; method = [string]$githubConnection.method; reason = [string]$githubConnection.detail }
-            if (-not $opts.json) { Write-Host ("❌ GitHub Connection: Failed - {0}" -f [string]$githubConnection.detail) -ForegroundColor Red }
+        catch {
+            $report.checks.network = [ordered]@{ ok = $false; reason = $_.Exception.Message }
+            if (-not $opts.json) { Write-Host ("❌ GitHub Connection: Failed - {0}" -f $_.Exception.Message) -ForegroundColor Red }
             $pass = $false
         }
-    }
-    catch {
-        $report.checks.network = [ordered]@{ ok = $false; reason = $_.Exception.Message }
-        if (-not $opts.json) { Write-Host ("❌ GitHub Connection: Failed - {0}" -f $_.Exception.Message) -ForegroundColor Red }
-        $pass = $false
     }
 
     # 8. Performance Summary
@@ -8280,7 +8303,7 @@ function Get-ElapsedMs($sw) {
     return [int][math]::Round([double]$sw.Elapsed.TotalMilliseconds, 0)
 }
 function Get-AgentBuildCacheAlgorithmVersion {
-    return "agent-build-v20260504.2"
+    return "agent-build-v20260803.3"
 }
 function Get-AgentBuildMetricName([bool]$cacheHit) {
     if ($cacheHit) { return "build_agent_cache_hit" }
@@ -8494,6 +8517,7 @@ function Set-AgentBuildStateCache($cache, $cfg) {
         $cache["__agent_build_algorithm"] = (Get-AgentBuildCacheAlgorithmVersion)
         $cache["__agent_build_signature"] = [string]$state.signature
         $cache["__agent_build_output_count"] = @($state.outputs).Count
+        $cache["__agent_build_output_fingerprint"] = Get-DirectoryFingerprint $AgentDir
         $cache["__agent_build_saved_at"] = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
         return $state
     }
@@ -8510,6 +8534,7 @@ function Test-AgentBuildCacheHit($cfg) {
     $cache = Load-BuildCache
     $algorithm = [string]$cache["__agent_build_algorithm"]
     $signature = [string]$cache["__agent_build_signature"]
+    $outputFingerprint = [string]$cache["__agent_build_output_fingerprint"]
     if ($algorithm -ne (Get-AgentBuildCacheAlgorithmVersion)) {
         return [pscustomobject]@{ hit = $false; reason = "algorithm-mismatch"; state = $null }
     }
@@ -8542,6 +8567,12 @@ function Test-AgentBuildCacheHit($cfg) {
             if (-not $expectedTopLevels.Contains([string]$dir.Name)) {
                 return [pscustomobject]@{ hit = $false; reason = ("unexpected-output:{0}" -f $dir.Name); state = $state }
             }
+        }
+        if ([string]::IsNullOrWhiteSpace($outputFingerprint)) {
+            return [pscustomobject]@{ hit = $false; reason = "output-fingerprint-missing"; state = $state }
+        }
+        if ((Get-DirectoryFingerprint $AgentDir) -ne $outputFingerprint) {
+            return [pscustomobject]@{ hit = $false; reason = "output-fingerprint-mismatch"; state = $state }
         }
         return [pscustomobject]@{ hit = $true; reason = "cache-hit"; state = $state }
     }
@@ -8578,15 +8609,33 @@ function Start-BuildTransaction {
     $txnId = [Guid]::NewGuid().ToString("N").Substring(0, 10)
     $path = Join-Path $txnRoot ("build-{0}" -f $txnId)
     $backupAgent = Join-Path $path "agent.backup"
+    $buildCachePath = Get-BuildCachePath
+    $backupBuildCache = Join-Path $path "build-cache.backup.json"
     $state = [ordered]@{
         path = $path
         backup_agent = $backupAgent
         has_backup_agent = $false
+        build_cache_path = $buildCachePath
+        backup_build_cache = $backupBuildCache
+        had_build_cache = $false
+        has_backup_build_cache = $false
+        build_cache_backup_error = $null
         backup_error = $null
     }
     if ($DryRun) { return [pscustomobject]$state }
     EnsureDir $txnRoot
     EnsureDir $path
+    if (Test-Path -LiteralPath $buildCachePath -PathType Leaf) {
+        $state.had_build_cache = $true
+        try {
+            Copy-Item -LiteralPath $buildCachePath -Destination $backupBuildCache -Force
+            $state.has_backup_build_cache = $true
+        }
+        catch {
+            $state.build_cache_backup_error = $_.Exception.Message
+            Log ("构建缓存无法备份；若事务回滚，将删除缓存并强制下次重建：{0}" -f $_.Exception.Message) "WARN"
+        }
+    }
     if (Test-Path $AgentDir) {
         try {
             Invoke-MoveItem $AgentDir $backupAgent
@@ -8608,6 +8657,14 @@ function Rollback-BuildTransaction($txn) {
         if ($txn.has_backup_agent -and (Test-Path $txn.backup_agent)) {
             Invoke-MoveItem $txn.backup_agent $AgentDir
             Write-Host "已回滚 agent/ 到构建前状态。" -ForegroundColor Yellow
+        }
+        if ($txn.had_build_cache -and $txn.has_backup_build_cache -and (Test-Path -LiteralPath $txn.backup_build_cache -PathType Leaf)) {
+            Copy-Item -LiteralPath $txn.backup_build_cache -Destination $txn.build_cache_path -Force
+            Write-Host "已回滚构建缓存到构建前状态。" -ForegroundColor Yellow
+        }
+        elseif (Test-Path -LiteralPath $txn.build_cache_path -PathType Leaf) {
+            Invoke-RemoveItemWithRetry $txn.build_cache_path -IgnoreFailure -SilentIgnore | Out-Null
+            Write-Host "已清除本次构建缓存，下一次将强制重建。" -ForegroundColor Yellow
         }
     }
     finally {
@@ -10755,10 +10812,20 @@ function Invoke-Gh([string[]]$GhArgs) {
     return @($output | ForEach-Object { [string]$_ })
 }
 
+function Get-McpUserEnvironmentVariable([string]$name) {
+    Need (-not [string]::IsNullOrWhiteSpace($name)) "环境变量名不能为空"
+    return [System.Environment]::GetEnvironmentVariable($name, "User")
+}
+
+function Set-McpUserEnvironmentVariable([string]$name, [AllowNull()][string]$value) {
+    Need (-not [string]::IsNullOrWhiteSpace($name)) "环境变量名不能为空"
+    [System.Environment]::SetEnvironmentVariable($name, $value, "User")
+}
+
 function Get-EnvironmentVariableWithScope([string]$name, [string[]]$scopes = @("Process", "User", "Machine")) {
     Need (-not [string]::IsNullOrWhiteSpace($name)) "环境变量名不能为空"
     foreach ($scope in @($scopes)) {
-        $value = [System.Environment]::GetEnvironmentVariable($name, $scope)
+        $value = if ([string]$scope -eq "User") { Get-McpUserEnvironmentVariable $name } else { [System.Environment]::GetEnvironmentVariable($name, $scope) }
         if (-not [string]::IsNullOrWhiteSpace($value)) {
             return [pscustomobject]@{
                 name = $name
@@ -10843,7 +10910,7 @@ function Ensure-PostgresMcpEnvironment($servers) {
 
     $env:POSTGRES_CONNECTION_STRING = $normalized
     if ($raw -ne $normalized -or [string]$resolved.scope -ne "User") {
-        [System.Environment]::SetEnvironmentVariable("POSTGRES_CONNECTION_STRING", $normalized, "User")
+        Set-McpUserEnvironmentVariable "POSTGRES_CONNECTION_STRING" $normalized
         Log ("Postgres MCP 连接串已归一化到 User scope：source_scope={0}, shape=postgres-url" -f [string]$resolved.scope) "INFO"
     }
 }
@@ -10885,14 +10952,14 @@ function Ensure-GhAuthForGithubMcp($servers) {
     # gh auth 路线：同步阶段临时注入 token，供各客户端配置写入与 native 注册使用。
     $env:GITHUB_PERSONAL_ACCESS_TOKEN = $token
     $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = $token
-    $existingGithubToken = [System.Environment]::GetEnvironmentVariable("GITHUB_PERSONAL_ACCESS_TOKEN", "User")
+    $existingGithubToken = Get-McpUserEnvironmentVariable "GITHUB_PERSONAL_ACCESS_TOKEN"
     if ([string]::IsNullOrWhiteSpace($existingGithubToken) -or $existingGithubToken -ne $token) {
-        [System.Environment]::SetEnvironmentVariable("GITHUB_PERSONAL_ACCESS_TOKEN", $token, "User")
+        Set-McpUserEnvironmentVariable "GITHUB_PERSONAL_ACCESS_TOKEN" $token
         Log "GitHub MCP 已同步 gh token 到 User scope 的 GITHUB_PERSONAL_ACCESS_TOKEN。" "INFO"
     }
-    $existingCodexToken = [System.Environment]::GetEnvironmentVariable("CODEX_GITHUB_PERSONAL_ACCESS_TOKEN", "User")
+    $existingCodexToken = Get-McpUserEnvironmentVariable "CODEX_GITHUB_PERSONAL_ACCESS_TOKEN"
     if ([string]::IsNullOrWhiteSpace($existingCodexToken) -or $existingCodexToken -ne $token) {
-        [System.Environment]::SetEnvironmentVariable("CODEX_GITHUB_PERSONAL_ACCESS_TOKEN", $token, "User")
+        Set-McpUserEnvironmentVariable "CODEX_GITHUB_PERSONAL_ACCESS_TOKEN" $token
         Log "GitHub MCP 已同步 gh token 到 User scope 的 CODEX_GITHUB_PERSONAL_ACCESS_TOKEN。" "INFO"
     }
     Log ("GitHub MCP gh 认证预检通过：{0}" -f $username) "INFO"
@@ -11110,7 +11177,7 @@ function Get-McpCliProcessEnvOverrides([string]$cli) {
         if ([string]::IsNullOrWhiteSpace($varName)) { continue }
         $processValue = [System.Environment]::GetEnvironmentVariable($varName, "Process")
         if (-not [string]::IsNullOrWhiteSpace([string]$processValue)) { continue }
-        $userValue = [System.Environment]::GetEnvironmentVariable($varName, "User")
+        $userValue = Get-McpUserEnvironmentVariable $varName
         if (-not [string]::IsNullOrWhiteSpace([string]$userValue)) {
             $overrides[$varName] = [string]$userValue
         }
@@ -14689,7 +14756,7 @@ Rules:
 
 - Profile-only mode has no target repo scan; do not fabricate repository facts.
 - Only write ``recommendations.json`` in this run directory. Do not modify generated input files, snapshots, prompts, briefs, templates, source strategy, decision insights, or repo scan files.
-- The audit commands may automatically write runtime evidence such as ``preflight-report.json``, ``dry-run-summary.json``, ``apply-report.json``, and ``docs/change-evidence/*.md``; treat those as expected command outputs, not files for the outer AI agent to hand-edit.
+- The audit commands may automatically write runtime evidence such as ``preflight-report.json``, ``dry-run-summary.json``, ``apply-report.json``, and ``runtime-evidence-*.md`` in this run directory; treat those as expected command outputs, not files for the outer AI agent to hand-edit.
 - All decisions must be based on user-profile.json, installed-skills.json (audit snapshot, not live source of truth), source-strategy.json, and real external research. Treat ``skills`` as managed install/removal candidates and ``external_skills`` as read-only system/plugin capability context.
 - decision-insights.json provides machine-readable keyword anchors; every add/remove skill or MCP recommendation should keep ``keyword_trace.user_profile`` + ``keyword_trace.target_repo_or_context`` + ``keyword_trace.installed_state`` aligned to it.
 - Treat source-strategy.json ``evidence_policy`` and ``decision_quality_policy`` as hard constraints.
@@ -14798,7 +14865,7 @@ Rules:
 
 - All decisions must be based on BOTH user-profile.json and target repo scan facts, and must use installed-skills.json as the audit snapshot for currently installed skills and MCP servers. Treat ``skills`` as managed install/removal candidates and ``external_skills`` as read-only system/plugin capability context.
 - Only write ``recommendations.json`` in this run directory. Do not modify generated input files, snapshots, prompts, briefs, templates, source strategy, decision insights, or repo scan files.
-- The audit commands may automatically write runtime evidence such as ``preflight-report.json``, ``dry-run-summary.json``, ``apply-report.json``, and ``docs/change-evidence/*.md``; treat those as expected command outputs, not files for the outer AI agent to hand-edit.
+- The audit commands may automatically write runtime evidence such as ``preflight-report.json``, ``dry-run-summary.json``, ``apply-report.json``, and ``runtime-evidence-*.md`` in this run directory; treat those as expected command outputs, not files for the outer AI agent to hand-edit.
 - Use source-strategy.json to cover the built-in source set and explain source tradeoffs.
 - decision-insights.json provides machine-readable keyword anchors; every add/remove skill or MCP recommendation should keep ``keyword_trace.user_profile`` + ``keyword_trace.target_repo_or_context`` + ``keyword_trace.installed_state`` aligned to it.
 - Treat source-strategy.json ``evidence_policy`` and ``decision_quality_policy`` as hard constraints.
@@ -14949,7 +15016,7 @@ $basisCheckStep
 
 - ``recommendations.json`` 必须与模板 schema 一致
 - 除 ``recommendations.json`` 外，不得修改本轮审查包输入文件、快照、提示词、brief、模板、来源策略、决策洞察或 repo scan
-- 预检、dry-run、apply 命令自动生成的 ``preflight-report.json``、``dry-run-summary.json``、``apply-report.json`` 和 ``docs/change-evidence/*.md`` 属于预期运行证据输出；外层 AI 不应手写或手改这些文件
+- 预检、dry-run、apply 命令在本轮审查包目录自动生成的 ``preflight-report.json``、``dry-run-summary.json``、``apply-report.json`` 和 ``runtime-evidence-*.md`` 属于预期运行证据输出；外层 AI 不应手写或手改这些文件
 - 技能与 MCP 的新增/卸载建议都必须保留双依据和来源，且每项理由要简短可读
 - 每条变更建议必须能解释相对已安装技能/MCP 快照的非重复增量价值，或给出可验证的卸载理由
 - ``source_observations`` 必须记录本轮调研过的候选项；被选中的新增/卸载项必须能在其中找到对应 candidate_type/name/decision；若四类新增/卸载建议均为空，允许 ``source_observations=[]``，但必须说明 no-op 的本地覆盖依据
@@ -16833,11 +16900,13 @@ function Write-AuditBundleEvidence([string]$mode, [string]$runId, [string]$repor
     try {
         $date = Get-Date -Format "yyyyMMdd"
         $time = Get-Date -Format "HHmmss"
-        $dir = Join-Path $script:Root "docs\change-evidence"
+        # Runtime receipts belong to the ignored audit bundle, not the curated
+        # repository change-evidence ledger.
+        $dir = $reportRoot
         EnsureDir $dir
         $safeMode = if ([string]::IsNullOrWhiteSpace($mode)) { "scan" } else { ([regex]::Replace($mode.ToLowerInvariant(), "[^a-z0-9_-]", "-")) }
         $safeRun = if ([string]::IsNullOrWhiteSpace($runId)) { "no-runid" } else { ([regex]::Replace($runId, "[^a-zA-Z0-9_-]", "-")) }
-        $path = Join-Path $dir ("{0}-audit-runtime-{1}-{2}-{3}.md" -f $date, $safeMode, $safeRun, $time)
+        $path = Join-Path $dir ("runtime-evidence-{0}-{1}-{2}-{3}.md" -f $date, $safeMode, $safeRun, $time)
         $commandText = if (@($commands).Count -gt 0) { (@($commands) | ForEach-Object { "- `"$_`"" }) -join "`r`n" } else { "- 无" }
         $targetText = if (@($targets).Count -gt 0) { (@($targets) | ForEach-Object { "- " + [string]$_ }) -join "`r`n" } else { "- 无" }
         $content = @"
@@ -17594,12 +17663,17 @@ function Write-AuditRuntimeEvidence([string]$mode, [string]$recommendationsPath,
     try {
         $date = Get-Date -Format "yyyyMMdd"
         $time = Get-Date -Format "HHmmss"
-        $dir = Join-Path $script:Root "docs\change-evidence"
+        # Keep machine-run receipts beside recommendations and apply reports.
+        # docs/change-evidence is reserved for reviewed logical-slice evidence.
+        $dir = Split-Path -Parent $recommendationsPath
+        if ([string]::IsNullOrWhiteSpace([string]$dir)) {
+            $dir = Get-AuditReportRoot $runId
+        }
         EnsureDir $dir
         $safeMode = if ([string]::IsNullOrWhiteSpace($mode)) { "unknown" } else { ([regex]::Replace($mode.ToLowerInvariant(), "[^a-z0-9_-]", "-")) }
         $runId = if ($null -ne $report -and $report.PSObject.Properties.Match("run_id").Count -gt 0) { [string]$report.run_id } else { "" }
         $safeRun = if ([string]::IsNullOrWhiteSpace($runId)) { "no-runid" } else { ([regex]::Replace($runId, "[^a-zA-Z0-9_-]", "-")) }
-        $path = Join-Path $dir ("{0}-audit-runtime-{1}-{2}-{3}.md" -f $date, $safeMode, $safeRun, $time)
+        $path = Join-Path $dir ("runtime-evidence-{0}-{1}-{2}-{3}.md" -f $date, $safeMode, $safeRun, $time)
         $changedCountsJson = if ($null -ne $report -and $report.PSObject.Properties.Match("changed_counts").Count -gt 0) { ($report.changed_counts | ConvertTo-Json -Depth 10 -Compress) } else { "{}" }
         $rollbackText = if ($null -ne $report -and $report.PSObject.Properties.Match("rollback").Count -gt 0 -and @($report.rollback).Count -gt 0) {
             (@($report.rollback) | ForEach-Object { "- " + [string]$_ }) -join "`r`n"
@@ -19242,6 +19316,43 @@ function Get-CodexExternalSkillInventory($projectionCfg) {
     return [pscustomobject]$result
 }
 
+function Get-SkillRoutingLocalInventory($cfg) {
+    $items = New-Object System.Collections.Generic.List[object]
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($mapping in @($cfg.mappings)) {
+        if ($null -eq $mapping -or -not (Should-SyncMappingToAgent $mapping)) { continue }
+        $vendor = [string]$mapping.vendor
+        $from = [string]$mapping.from
+        if (-not $seen.Add(("{0}|{1}" -f $vendor, $from))) { continue }
+        $localPath = Resolve-InstalledSkillLocalPath $cfg $mapping
+        $skillFile = Join-Path $localPath 'SKILL.md'
+        $meta = Get-SkillMetadataFromFile $skillFile
+        $name = if ([string]::IsNullOrWhiteSpace([string]$meta.declared_name)) { [string]$mapping.to } else { [string]$meta.declared_name }
+        $items.Add([pscustomobject]([ordered]@{
+                    name = $name
+                    description = [string]$meta.description
+                    path = $skillFile
+                    is_system = $false
+                })) | Out-Null
+    }
+    foreach ($override in @(收集OverridesSkills)) {
+        if ($null -eq $override) { continue }
+        $from = [string]$override.from
+        if ([string]::IsNullOrWhiteSpace($from) -or -not $seen.Add(("overrides|{0}" -f $from))) { continue }
+        $skillFile = Join-Path ([string]$override.full) 'SKILL.md'
+        if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { continue }
+        $meta = Get-SkillMetadataFromFile $skillFile
+        $name = if ([string]::IsNullOrWhiteSpace([string]$meta.declared_name)) { $from } else { [string]$meta.declared_name }
+        $items.Add([pscustomobject]([ordered]@{
+                    name = $name
+                    description = [string]$meta.description
+                    path = $skillFile
+                    is_system = $false
+                })) | Out-Null
+    }
+    return @($items.ToArray())
+}
+
 function Get-SkillRoutingPolicy([string]$path) {
     Need (-not [string]::IsNullOrWhiteSpace($path)) 'skill routing policy path is empty'
     Need (Test-Path -LiteralPath $path -PathType Leaf) ("skill routing policy does not exist: {0}" -f $path)
@@ -19251,7 +19362,7 @@ function Get-SkillRoutingPolicy([string]$path) {
     catch {
         throw ("skill routing policy JSON parse failed: {0}" -f $_.Exception.Message)
     }
-    Need ([int]$policy.schema_version -eq 1) 'skill routing policy only supports schema_version=1'
+    Need ([int]$policy.schema_version -in @(1, 2)) 'skill routing policy only supports schema_version=1 or 2'
     $mode = ([string]$policy.mode).Trim().ToLowerInvariant()
     Need ($mode -eq 'observe' -or $mode -eq 'enforce') ("skill routing policy mode only supports observe/enforce: {0}" -f $mode)
     $policy.mode = $mode
@@ -19776,6 +19887,15 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
     $profileBudgets = New-Object System.Collections.Generic.List[object]
     $profileNamesBySkill = @{}
     $profileRoutingEnabled = $false
+    $residentNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if ($projectionCfg.PSObject.Properties.Match("resident_names").Count -gt 0 -and $null -ne $projectionCfg.resident_names) {
+        foreach ($rawName in @($projectionCfg.resident_names)) {
+            $name = ([string]$rawName).Trim()
+            Need (-not [string]::IsNullOrWhiteSpace($name)) "skill_projection.resident_names 不得包含空值"
+            Need ($canonicalByName.ContainsKey($name)) ("skill_projection resident_names 引用了不存在的技能：{0}" -f $name)
+            $residentNames.Add($name) | Out-Null
+        }
+    }
     if ($projectionCfg.PSObject.Properties.Match("profiles").Count -gt 0 -and $null -ne $projectionCfg.profiles) {
         $profileRoutingEnabled = $true
         $activeProfile = ([string]$projectionCfg.active_profile).Trim()
@@ -19800,6 +19920,7 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
                 }
                 $profileNamesBySkill[$name].Add($profileName) | Out-Null
             }
+            foreach ($residentName in @($residentNames)) { $enabledNames.Add($residentName) | Out-Null }
 
             $profileMetadataChars = 0
             $profileActiveSkillCount = 0
@@ -19838,7 +19959,7 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
         foreach ($entry in @($canonical.ToArray())) {
             $entryName = [string]$entry.name
             if ([bool]$entry.is_system -or $aliases.ContainsKey($entryName)) { continue }
-            if ($profileNamesBySkill.ContainsKey($entryName)) {
+            if ($residentNames.Contains($entryName) -or $profileNamesBySkill.ContainsKey($entryName)) {
                 $profileRoutedNames.Add($entryName) | Out-Null
             }
             else {
@@ -19906,6 +20027,7 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
         enabled = $true
         conflict_policy = "system_then_priority_then_source_order"
         active_profile = $activeProfile
+        resident_names = @($residentNames | Sort-Object)
         skills = @($all.ToArray() | Sort-Object name, @{ Expression = "priority"; Descending = $true }, path)
         canonical = @($canonical.ToArray() | Sort-Object name)
         active = @($active.ToArray() | Sort-Object name)
@@ -20062,6 +20184,7 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
                 generated_at = (Get-Date).ToString("o")
                 conflict_policy = [string]$plan.conflict_policy
                 active_profile = [string]$plan.active_profile
+                resident_names = @($plan.resident_names)
                 source_count = @($projectionCfg.sources).Count
                 skill_entry_count = @($plan.skills).Count
                 unique_name_count = @($plan.unique_names).Count
@@ -20952,7 +21075,7 @@ Plugin（P3 repo/fixture-only）：
   .\skills.ps1 解除关联
   .\skills.ps1 清理备份
   .\skills.ps1 自动更新设置
-  .\skills.ps1 doctor [--json] [--fix] [--dry-run-fix] [--strict] [--strict-perf] [--threshold-ms <ms>]
+  .\skills.ps1 doctor [--json] [--offline-contract] [--fix] [--dry-run-fix] [--strict] [--strict-perf] [--threshold-ms <ms>]
   pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-skill-integrity.ps1 [-ReportPath <file>]
   pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-skill-routing.ps1 [-ReportPath <file>] [-Json]
 
