@@ -22,7 +22,7 @@ Describe "Skill projection" {
             $defaultNames = @($config.skill_projection.profiles.default.enabled_names)
             $config.skill_projection.profiles.default.budget_limit_chars | Should Be 8000
             $defaultNames.Count | Should Be 2
-            @($config.skill_projection.resident_names) | Should Be @("capability-router")
+            @($config.skill_projection.resident_names) | Should Be @("capability-router", "watch-interrupted-task")
             foreach ($workflowName in @("research", "brainstorming", "planning-and-task-breakdown", "git-workflow-and-versioning", "incremental-implementation")) {
                 ($defaultNames -contains $workflowName) | Should Be $false
             }

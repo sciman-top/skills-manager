@@ -247,7 +247,7 @@ PPT 路由保持职责单一：`custom-teacher-courseware-ppt` 决定课堂课�
 .\skills.ps1 技能配置 使用 python
 ```
 
-所有 profile 共享轻量常驻 `capability-router`。当当前任务没有明显匹配的可见技能、任务中途切换领域，或合适技能被当前 profile 排除时，router 只检索技能 metadata，并在当前任务中读取最多 3 个命中的 `SKILL.md`；它不修改 `active_profile`、不写 `~/.codex/config.toml`、不重启 Codex，也不创建新任务。profile 因而只是显式预热包和兼容回退，不再是技能可达性的唯一入口。
+所有 profile 共享轻量常驻 `capability-router` 与 `watch-interrupted-task`。前者在当前任务没有明显匹配的可见技能、任务中途切换领域，或合适技能被当前 profile 排除时，只检索技能 metadata，并在当前任务中读取最多 3 个命中的 `SKILL.md`；后者只在明确的守夜/心跳口令下管理 Desktop 原生 heartbeat，并保持 fail-closed 恢复边界。两者都不静默切换 `active_profile`、provider、auth 或宿主进程。profile 因而只是显式预热包和兼容回退，不再是技能可达性的唯一入口。
 
 P4 schema v2 把选择扩展到 MCP 与 caller-provided plugin/app/connector/native-tool runtime snapshot。selector 先处理 explicit name、required/excluded intent 和 negative trigger，再 ranking/abstain；已可用 `read_only`/`external_read` 能力可自动使用，未启用 MCP、operator skill、write/destructive/open-world/unknown 能力只输出 activation/approval plan。`scripts/verify-capability-routing.ps1` 用 direct、indirect、negative、ambiguous、cross-domain、cross-kind 与 side-effect corpus 做确定性回归；它不把 repo corpus 外推为所有自然语言精度。
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "任务连续性守夜"
+  short_description: "按需守护网关中断任务并安全恢复 ChatGPT Desktop 原生心跳自动化"
+  default_prompt: "Use $watch-interrupted-task to safely watch and resume interrupted Codex tasks."

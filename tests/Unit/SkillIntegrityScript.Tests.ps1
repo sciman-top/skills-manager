@@ -36,6 +36,7 @@ $body
             ConfigPath = $configPath
             ContractPath = $contractPath
             ReportPath = (Join-Path $root "report.json")
+            CodexSkillRoot = (Join-Path $root "codex-skills")
         }
     }
 
@@ -44,6 +45,7 @@ $body
                 -AgentRoot $fixture.AgentRoot `
                 -ConfigPath $fixture.ConfigPath `
                 -DependencyContractPath $fixture.ContractPath `
+                -CodexSkillRoot $fixture.CodexSkillRoot `
                 -ReportPath $fixture.ReportPath `
                 -Json -NoExit 2>&1)
         return [pscustomobject]@{
@@ -171,6 +173,23 @@ dependencies:
         @($result.Report.errors | Where-Object code -eq "missing_required_mcp").Count | Should Be 1
     }
 
+    It "fails when a custom skill bypasses the governed source and lives directly under the Codex skill root" {
+        $fixture = New-IntegrityFixture "misplaced-codex-user-skill" ""
+        $misplacedRoot = Join-Path $fixture.CodexSkillRoot "misplaced"
+        New-Item -ItemType Directory -Path $misplacedRoot -Force | Out-Null
+        @'
+---
+name: misplaced
+description: fixture
+---
+'@ | Set-Content -Path (Join-Path $misplacedRoot "SKILL.md") -Encoding UTF8
+
+        $result = Invoke-IntegrityFixture $fixture
+
+        $result.ExitCode | Should Be 1
+        @($result.Report.errors | Where-Object code -eq "misplaced_codex_user_skill").Count | Should Be 1
+    }
+
     It "passes for valid resources and a complete profile closure" {
         $fixture = New-IntegrityFixture "valid" "Read [guide](references/guide.md)." @(
             @{ skill = "demo"; requires = @("required-skill") }
@@ -202,6 +221,7 @@ dependencies:
                 -AgentRoot $fixture.AgentRoot `
                 -ConfigPath $fixture.ConfigPath `
                 -DependencyContractPath $fixture.ContractPath `
+                -CodexSkillRoot $fixture.CodexSkillRoot `
                 -ReportPath $fixture.ReportPath `
                 -Json 2>&1)
         $exitCode = $LASTEXITCODE

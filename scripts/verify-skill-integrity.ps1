@@ -3,6 +3,7 @@ param(
     [string]$AgentRoot,
     [string]$ConfigPath,
     [string]$DependencyContractPath,
+    [string]$CodexSkillRoot,
     [string]$ReportPath,
     [switch]$Json,
     [switch]$NoExit
@@ -19,6 +20,7 @@ $repoRoot = Split-Path $resolvedScriptRoot -Parent
 if ([string]::IsNullOrWhiteSpace($AgentRoot)) { $AgentRoot = Join-Path $repoRoot "agent" }
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) { $ConfigPath = Join-Path $repoRoot "skills.json" }
 if ([string]::IsNullOrWhiteSpace($DependencyContractPath)) { $DependencyContractPath = Join-Path $repoRoot "config\skill-dependency-closure.json" }
+if ([string]::IsNullOrWhiteSpace($CodexSkillRoot)) { $CodexSkillRoot = Join-Path ([Environment]::GetFolderPath("UserProfile")) ".codex\skills" }
 
 function Get-SkillFrontmatterValue([string]$content, [string]$key) {
     $frontmatterMatch = [regex]::Match(
@@ -221,6 +223,17 @@ foreach ($group in $duplicateGroups) {
     Add-IntegrityFinding $errors "duplicate_skill_name" $group.Name ("skill name resolves to {0} packages" -f $group.Count)
 }
 
+$misplacedCodexUserSkillCount = 0
+if (Test-Path -LiteralPath $CodexSkillRoot -PathType Container) {
+    foreach ($directory in (Get-ChildItem -LiteralPath $CodexSkillRoot -Directory -Force | Sort-Object Name)) {
+        if ([string]::Equals($directory.Name, ".system", [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+        $skillFile = Join-Path $directory.FullName "SKILL.md"
+        if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { continue }
+        $misplacedCodexUserSkillCount++
+        Add-IntegrityFinding $errors "misplaced_codex_user_skill" $directory.Name "custom skill bypasses the governed overrides -> agent -> user_skill_root projection" $skillFile
+    }
+}
+
 $skillNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
 foreach ($skill in $skills) { $skillNames.Add([string]$skill.name) | Out-Null }
 
@@ -300,6 +313,7 @@ $report = [pscustomobject][ordered]@{
         dependency_entries = $dependencyCount
         openai_manifests = $openAiManifestCount
         openai_tool_dependencies = $openAiToolDependencyCount
+        misplaced_codex_user_skills = $misplacedCodexUserSkillCount
     }
     errors = $errorItems
     warnings = $warningItems

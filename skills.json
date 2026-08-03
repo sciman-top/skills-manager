@@ -14,7 +14,8 @@
     "external_metadata_reserve_chars": 3500,
     "routing_policy_path": "config/skill-routing-policy.json",
     "resident_names": [
-      "capability-router"
+      "capability-router",
+      "watch-interrupted-task"
     ],
     "external_skill_inventory": {
       "enabled": true,
