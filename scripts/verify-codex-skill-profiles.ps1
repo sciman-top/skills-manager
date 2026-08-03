@@ -59,6 +59,7 @@ try {
     Test-SkillProfile "coding" @(
         "systematic-debugging",
         "verification-before-completion",
+        "incremental-implementation",
         "code-review-and-quality"
     ) @(
         "using-superpowers",
@@ -85,15 +86,24 @@ try {
     ) @("grill-with-docs", "grilling")
     Test-SkillProfile "engineering" @(
         "domain-modeling",
-        "grill-with-docs",
+        "codebase-design",
+        "idea-refine",
+        "spec-driven-development",
+        "planning-and-task-breakdown",
+        "research",
         "draft-spec"
-    ) @("using-superpowers") @(
+    ) @(
+        "using-superpowers",
         "grill-with-docs",
-        "draft-spec",
-        "draft-tickets",
-        "setup-matt-pocock-skills",
         "to-spec",
-        "to-tickets",
+        "to-tickets"
+    ) @(
+        "codebase-design",
+        "idea-refine",
+        "spec-driven-development",
+        "planning-and-task-breakdown",
+        "research",
+        "draft-spec",
         "improve-codebase-architecture"
     )
     Test-SkillProfile "python" @(
@@ -157,6 +167,7 @@ try {
     Test-SkillProfile "database" @(
         "supabase-postgres-best-practices",
         "api-and-interface-design",
+        "performance-optimization",
         "security-and-hardening"
     ) @("using-superpowers")
     Test-SkillProfile "default" @(

@@ -38,7 +38,7 @@
 - [Phase 1 历史任务 manifest](tasks/skills-manager-vnext-phase1.tasks.json)
 - [Phase 0 历史任务 manifest](tasks/skills-manager-vnext-phase0.tasks.json)
 
-vNext P0-P5 已完成 repo-side 验收（P0/P1 各 9/9，P2/P3 各 7/7，P4 6/6，P5 5/5）。P5 将 selector 演进为 Adaptive Capability Fabric：schema v3 先理解 task type/domain/goal/operations，再组合最小 capability DAG、复用兼容 session capability、输出 `apply=false` profile preheat，并消费 Codex App Server 当前只读 skill/app/MCP snapshot。plugin/MCP 安装、OAuth、host/profile/session 写入、重启与 `live_accepted` 仍不在边界。
+vNext P0-P5 已完成 repo-side 验收（P0/P1 各 9/9，P2/P3 各 7/7，P4 6/6，P5 5/5）；这是历史仓库契约真值，不等于自然语言路由实效。P5-local maintenance correction 已把语义选择权交回宿主 AI，只保留 profile-scoped discovery、只读 App Server snapshot、session reuse 建议和确定性的 containment/freshness/availability/side-effect/approval/activation policy。plugin/MCP 安装、OAuth、host/profile/session 写入、重启与 `live_accepted` 仍不在边界。
 
 运行时以 PowerShell 7 (`pwsh`) 为开发、CI 和完整门禁主路径；Windows PowerShell 5.1 仅保留安装 fallback、generated script parse 和 plain-object/selected fixture smoke。完整边界与移除条件见 [`docs/runbooks/powershell-runtime-compatibility.md`](docs/runbooks/powershell-runtime-compatibility.md)。
 
@@ -236,7 +236,7 @@ P3 plugin-aware 命令中，inventory/lint/eval 为只读；export 仍严格 fix
 
 投影 manifest 为当前 profile 排除项保留 `decision = profile_excluded`，并通过 `profile_reachability` 与 `available_profiles` 区分“可从其他 profile 使用”和“未被任何 profile 路由”。`python`、`mcp`、`review`、`marketing` 与 `video` 用于承接高价值低频技能，避免把整个安装库存塞入 `default`。常用命令：
 
-GPT-5.6 日常路径优先使用 Codex 原生 Plan、Goal、Review 和 agent 控制。`default` 保留领域入口、故障诊断、完成验证，以及可显式或按明确设计质询语义触发的 `grill-with-docs` 依赖闭包；`coding` 只保留按问题触发的调试、验证、评审、API 与安全能力。两者都不常驻 `using-superpowers`、通用 research、强制 brainstorming、细粒度计划、TDD、worktree 或 subagent 编排。`coding-strict` 是高证据编码档：在 `coding` 上额外提供 TDD、领域建模和 `grill-with-docs`，但同样不加载总入口、强制计划、自动代理或强制 worktree。当前任务不会热加载 profile 变更，vendor 与技能文件也不会因日常精简而删除。
+GPT-5.6 日常路径优先使用 Codex 原生 Plan、Goal、Review、skill 语义匹配和 agent 控制。`default` 只保留故障诊断与完成验证；`coding` 增加增量实现、评审、API 与安全能力；`engineering` 面向产品澄清、spec、计划、领域/模块设计和官方研究。`coding-strict` 才额外提供 TDD 与强约束工作流。profile 是任务边界的预热候选包，当前任务不会热加载 profile 变更，vendor 与技能文件也不会因日常精简而删除。
 
 PPT 路由保持职责单一：`custom-teacher-courseware-ppt` 决定课堂课件结构，Presentations 创建或编辑 PPTX，`powerpoint-automation` 只操作 live PowerPoint/COM，`custom-powerpoint-accessibility` 在内容稳定后验证标题、替代文本、阅读顺序、表格、链接、字幕、对比度与动画。可访问性验证不能由截图单独判定；无法检查阅读顺序或辅助技术行为时必须标记为 `not_verified`。
 
@@ -247,11 +247,11 @@ PPT 路由保持职责单一：`custom-teacher-courseware-ppt` 决定课堂课�
 .\skills.ps1 技能配置 使用 python
 ```
 
-所有 profile 共享轻量常驻 `capability-router` 与 `watch-interrupted-task`。前者在当前任务没有明显匹配的可见技能、任务中途切换领域，或合适技能被当前 profile 排除时，只检索技能 metadata，并在当前任务中读取最多 3 个命中的 `SKILL.md`；后者只在明确的守夜/心跳口令下管理 Desktop 原生 heartbeat，并保持 fail-closed 恢复边界。两者都不静默切换 `active_profile`、provider、auth 或宿主进程。profile 因而只是显式预热包和兼容回退，不再是技能可达性的唯一入口。
+所有 profile 共享轻量常驻 `capability-router` 与 `watch-interrupted-task`。`capability-router` 现为兼容名称：宿主 AI 先根据完整请求、对话和 skill description 原生选择；只有没有可见匹配、用户询问可用能力或需要跨 profile 冷发现时，才调用它按 profile 返回候选。脚本不再用正则/词频理解任务，也不再给出语义置信度；宿主选定最多 3 个候选后，脚本只验证路径、freshness、availability、side effect 与 activation。`watch-interrupted-task` 仍只响应明确守夜/心跳口令。两者都不静默切换 `active_profile`、provider、auth 或宿主进程。
 
-P4 schema v2 把选择扩展到 MCP 与 caller-provided plugin/app/connector/native-tool runtime snapshot。selector 先处理 explicit name、required/excluded intent 和 negative trigger，再 ranking/abstain；已可用 `read_only`/`external_read` 能力可自动使用，未启用 MCP、operator skill、write/destructive/open-world/unknown 能力只输出 activation/approval plan。`scripts/verify-capability-routing.ps1` 用 direct、indirect、negative、ambiguous、cross-domain、cross-kind 与 side-effect corpus 做确定性回归；它不把 repo corpus 外推为所有自然语言精度。
+P4/P5 的 lexical selector、task model 和 ranking 是历史 repo_verified 实现；真实中文场景回放证明它们不能代表路由实效，已在 maintenance correction 中退役为 `decision_owner=host_ai`、`semantic_routing_performed=false` 的 discovery/policy contract。`scripts/verify-capability-routing.ps1` 使用 direct、indirect、negative、多阶段、架构、调试、评审、跨领域和 side-effect 自然语言 corpus，分别验证候选可达性、宿主标注选择后的 policy 与零自动语义选择；它仍不把 repo corpus 外推为 live acceptance。
 
-P5 schema v3 在兼容上述字段的基础上增加 `task_model`、`capability_graph`、`host_snapshot`、`session_plan` 和 `preheat_recommendation`。`scripts/get-codex-app-server-capability-snapshot.ps1` 只调用稳定只读 App Server RPC；陈旧、不可访问、不可调用和认证缺失事实 fail-closed，单来源故障报告 `partial`。session/profile 输出只是 `apply=false` 的计划或预热建议，不会静默切换宿主状态。
+`scripts/get-codex-app-server-capability-snapshot.ps1` 只调用稳定只读 App Server RPC；陈旧、不可访问、不可调用和认证缺失事实 fail-closed，单来源故障报告 `partial`。session/profile 输出只是 `apply=false` 的计划或预热建议，不会静默切换宿主状态。
 
 技能初始列表预算的全局硬上限为 `8000` 字符。`resident_names ∪ active_profile.enabled_names` 必须整体通过预算门禁；低频研究、发布、专用执行器优先冷加载，不在多个 profile 中重复常驻。
 
@@ -266,7 +266,7 @@ benchmark 使用 ephemeral、read-only Codex 任务，记录 skill 选择、计�
 
 设计访谈统一使用 `grill-with-docs`：在 CLI/IDE 中可显式输入 `$grill-with-docs`，在 Work/Codex 桌面端可从技能选择器指定，也可由模型仅在“grill/设计质询/把方案磨清楚”等明确语义下隐式调用。它不会因为普通实现或重构请求自动启动；完成访谈后只有用户确认的持久决策才写入 `CONTEXT.md`、词汇表或 ADR。`grilling` 与 `domain-modeling` 作为依赖闭包保留，只有在直接进行决策树访谈或领域建模时才单独调用。
 
-工程 profile 另外提供 `draft-spec` 与 `draft-tickets`：两者可隐式触发，但只在回复中生成待审阅 Markdown，不写仓库文件、不调用 tracker，也不建立外部阻塞关系。`to-spec`、`to-tickets`、`setup-matt-pocock-skills` 和 `improve-codebase-architecture` 继续保持显式调用，因为它们会发布、修改仓库配置或执行高成本架构扫描。
+工程 profile 常驻 `draft-spec`，并用 `planning-and-task-breakdown` 承担可审阅的任务拆分；`draft-tickets` 仍保留为显式冷调用能力，避免与通用计划能力重复占用 metadata 预算。这些 draft/planning 能力不调用 tracker，也不建立外部阻塞关系。`to-spec`、`to-tickets`、`setup-matt-pocock-skills` 和 `improve-codebase-architecture` 继续保持显式调用，因为它们会发布、修改仓库配置或执行高成本架构扫描。
 
 `-DryRun` 只生成内存计划，不写配置或 manifest。Codex 在新任务加载初始技能列表；当前已运行任务不会热更新该列表。常驻 router 可以在当前任务读取磁盘上的冷技能，实现能力层无缝切换，但不能把 profile 变更伪装成热加载。投影后仍应以 fresh process/task 复核初始列表，不应通过删除 `.agents/skills` 强制生效。
 

@@ -1,6 +1,6 @@
 ---
 name: custom-windows-wpf-teacher-app
-description: Use when designing, reviewing, implementing, observing, or operating Windows-first desktop software, especially WPF/.NET teacher tools with touch, pen, PDF/image/PPT presentation, dual-screen, startup, recovery, local data workflows, screenshots, and UI Automation probes.
+description: Use when designing or implementing a Windows-first WPF/.NET teacher or classroom application where touch, pen, presentation files, dual-screen, recovery, local data, screenshots, or UI Automation are product requirements. Do not use for generic WPF/.NET errors, dependency injection, build failures, or backend debugging; use a dedicated .NET/debugging skill instead.
 ---
 
 # Windows WPF Teacher App

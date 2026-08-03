@@ -1,13 +1,13 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
 **全局规则复核**: 9.62
-**最后更新**: 2026-08-03
+**最后更新**: 2026-08-04
 
 ## 1. 当前落点与目标归宿
 - 当前落点：`skills.ps1` 是统一入口，`skills.json` 是 vendor、mapping、target、sync 与 MCP 的单一配置源。
 - 目标归宿：演进为 local-first AI capability curator 与 rule advisor；复用官方 skills/plugins/MCP/规则 surface，不替代宿主 runtime、auth、权限、会话或插件目录。
-- 当前规划真源：`docs/product/`、当前 P5 spec、`tasks/skills-manager-vnext-phase5.tasks.json`；非 Phase 的 Lean Delivery 维护设计由 `docs/superpowers/specs/2026-08-03-lean-ai-delivery-maintenance-design.md` 与 `tasks/skills-manager-vnext-maintenance-design.tasks.json` 承接，不构成 P6 admission 或 live acceptance；P0-P4 历史由独立 manifest/closeout evidence 保留，设计态能力不得写成已实现。
-- 当前 Phase：P5 5/5 `repo_verified`；task model、capability DAG、session/preheat plan、Codex App Server read-only snapshot、16-profile fresh probe 与 full gate 已通过。P4 6/6 历史真源继续保留；plugin/MCP install、OAuth、provider/auth/model/sandbox/session mutation、native host mutation 与 live acceptance 仍不在边界。
+- 当前规划真源：`docs/product/`、当前 P5 spec、`tasks/skills-manager-vnext-phase5.tasks.json`；非 Phase 的 Lean Delivery 维护设计由 `docs/superpowers/specs/2026-08-03-lean-ai-delivery-maintenance-design.md` 与 `tasks/skills-manager-vnext-maintenance-design.tasks.json` 承接；当前 P5-local 路由纠正由 `docs/superpowers/specs/2026-08-04-native-first-capability-discovery-correction.md` 与 `tasks/skills-manager-vnext-capability-routing-correction.tasks.json` 承接。两者都不构成 P6 admission 或 live acceptance；P0-P4 历史由独立 manifest/closeout evidence 保留。
+- 当前 Phase：P5 5/5 `repo_verified` 历史真值保留；P5-local maintenance correction 已以 4/4 `repo_verified` 将 lexical task model/ranking 退役为 host-AI-owned semantics + profile discovery/deterministic policy。host replay 仍为 `host_evaluation_partial`，live acceptance 未执行。P4 6/6 历史真源继续保留；plugin/MCP install、OAuth、provider/auth/model/sandbox/session mutation、native host mutation 与 live acceptance 仍不在边界。
 - P5 后进入 maintenance hold；未满足路线图的独立真实失败、消费者证据、债务闭合和用户授权条件，不创建 P6 manifest、不扩 schema major 或治理层。
 
 ## A. 仓库事实与模块边界

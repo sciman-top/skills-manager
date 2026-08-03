@@ -29,7 +29,14 @@ Describe "Skill projection" {
 
             $codingNames = @($config.skill_projection.profiles.coding.enabled_names)
             $config.skill_projection.profiles.coding.budget_limit_chars | Should Be 7500
-            $codingNames.Count | Should Be 5
+            $codingNames | Should Be @(
+                "systematic-debugging",
+                "verification-before-completion",
+                "incremental-implementation",
+                "code-review-and-quality",
+                "api-and-interface-design",
+                "security-and-hardening"
+            )
             foreach ($workflowName in @("brainstorming", "writing-plans", "executing-plans", "test-driven-development", "finishing-a-development-branch", "dispatching-parallel-agents", "subagent-driven-development", "requesting-code-review", "using-git-worktrees")) {
                 ($codingNames -contains $workflowName) | Should Be $false
             }
@@ -53,13 +60,20 @@ Describe "Skill projection" {
             (@($developmentFlow.members | Where-Object name -eq "using-superpowers").Count) | Should Be 0
         }
 
-        It "Separates implicit drafts from explicit side-effecting engineering skills" {
+        It "Separates visible engineering planning from explicit side-effecting skills" {
             $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
             $config = Get-ContentUtf8 (Join-Path $repoRoot "skills.json") | ConvertFrom-Json
             $engineeringNames = @($config.skill_projection.profiles.engineering.enabled_names)
-            foreach ($draftName in @("draft-spec", "draft-tickets")) {
-                ($engineeringNames -contains $draftName) | Should Be $true
-            }
+            $engineeringNames | Should Be @(
+                "codebase-design",
+                "idea-refine",
+                "spec-driven-development",
+                "planning-and-task-breakdown",
+                "research",
+                "domain-modeling",
+                "draft-spec"
+            )
+            ($engineeringNames -contains "draft-tickets") | Should Be $false
 
             $policy = Get-ContentUtf8 (Join-Path $repoRoot "config\skill-routing-policy.json") | ConvertFrom-Json
             $engineeringFlow = @($policy.groups | Where-Object id -eq "engineering-design-and-delivery")[0]

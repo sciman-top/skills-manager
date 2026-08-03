@@ -48,6 +48,7 @@
         "enabled_names": [
           "systematic-debugging",
           "verification-before-completion",
+          "incremental-implementation",
           "code-review-and-quality",
           "api-and-interface-design",
           "security-and-hardening"
@@ -68,14 +69,13 @@
       },
       "engineering": {
         "enabled_names": [
-          "grill-with-docs",
-          "grilling",
+          "codebase-design",
+          "idea-refine",
+          "spec-driven-development",
+          "planning-and-task-breakdown",
+          "research",
           "domain-modeling",
-          "draft-spec",
-          "draft-tickets",
-          "setup-matt-pocock-skills",
-          "to-spec",
-          "to-tickets"
+          "draft-spec"
         ]
       },
       "python": {
@@ -182,8 +182,8 @@
       "database": {
         "enabled_names": [
           "supabase-postgres-best-practices",
-          "architecture-patterns",
           "api-and-interface-design",
+          "performance-optimization",
           "security-and-hardening"
         ]
       }

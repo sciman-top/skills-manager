@@ -6,21 +6,26 @@ function Set-RouterTestSkill([string]$Root, [string]$Folder, [string]$Name, [str
     return [pscustomobject]@{ name = $Name; description = $Description; path = $path; source_root = $Root; is_system = $false }
 }
 
-Describe 'Capability router meta-skill' {
+Describe 'Native-first capability discovery and policy' {
     BeforeEach {
         $scriptPath = Join-Path $PSScriptRoot '..\..\overrides\capability-router\scripts\route-capability.ps1'
         $skillRoot = Join-Path $TestDrive 'skills'
         New-Item -ItemType Directory -Path $skillRoot -Force | Out-Null
         $debug = Set-RouterTestSkill $skillRoot 'debug-dotnet' 'debug:dotnet' 'Debug .NET, ASP.NET Core, and WPF runtime failures.'
+        $systematic = Set-RouterTestSkill $skillRoot 'systematic' 'systematic-debugging' 'Use for bugs, test failures, and unexpected behavior before proposing fixes.'
+        $architecture = Set-RouterTestSkill $skillRoot 'architecture' 'codebase-design' 'Design deep module boundaries and stable interfaces.'
         $physics = Set-RouterTestSkill $skillRoot 'physics' 'custom-junior-physics-animation' 'Build junior middle school physics animations and simulations.'
         $grill = Set-RouterTestSkill $skillRoot 'grill' 'grill-with-docs' 'Grill a design through an interview about assumptions and tradeoffs.'
-        $draft = Set-RouterTestSkill $skillRoot 'draft' 'draft-spec' 'Draft a review-only PRD or specification; do not use for implementation or refactoring.'
+        $tdd = Set-RouterTestSkill $skillRoot 'tdd' 'test-driven-development' 'Use test-first implementation for behavior changes.'
+        $publisher = Set-RouterTestSkill $skillRoot 'publisher' 'to-spec' 'Publish an approved specification to a tracker.'
+
         $manifestPath = Join-Path $TestDrive 'manifest.json'
         [ordered]@{
             schema_version = 2
             active_profile = 'default'
-            active = @($physics)
-            canonical = @($debug, $physics, $grill, $draft)
+            resident_names = @('capability-router')
+            active = @($systematic)
+            canonical = @($debug, $systematic, $architecture, $physics, $grill, $tdd, $publisher)
         } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
         $policyPath = Join-Path $TestDrive 'routing-policy.json'
@@ -30,22 +35,33 @@ Describe 'Capability router meta-skill' {
             groups = @(
                 [ordered]@{
                     id = 'engineering-design-and-delivery'
-                    purpose = 'Separate implementation from review-only drafts and design interviews.'
-                    selection_policy = 'Draft and grill workflows require explicit matching intent.'
+                    purpose = 'Expose engineering workflows for host semantic adjudication.'
+                    selection_policy = 'The host model selects; deterministic policy only validates the selected capability.'
                     members = @(
-                        [ordered]@{ name = 'grill-with-docs'; role = 'workflow'; activation = 'focused design interview explicitly requested'; negative_activation = 'ordinary implementation, refactoring, or autonomous execution' },
-                        [ordered]@{ name = 'draft-spec'; role = 'workflow'; activation = 'review-only PRD or specification draft'; negative_activation = 'implementation, refactoring, repository writes, or autonomous execution' }
+                        [ordered]@{ name = 'grill-with-docs'; role = 'workflow'; activation = 'focused design interview explicitly requested'; negative_activation = 'ordinary implementation' },
+                        [ordered]@{ name = 'codebase-design'; role = 'reference'; activation = 'module boundary or architecture design'; negative_activation = '' },
+                        [ordered]@{ name = 'to-spec'; role = 'operator'; activation = 'publish an approved specification'; negative_activation = 'drafting or review only' }
                     )
                 }
             )
             capabilities = @(
-                [ordered]@{ kind = 'mcp'; name = 'openaiDeveloperDocs'; description = 'Search and fetch current official OpenAI developer documentation.'; activation = 'current OpenAI or Codex documentation is required'; negative_activation = ''; side_effect = 'read_only' },
+                [ordered]@{ kind = 'mcp'; name = 'openaiDeveloperDocs'; description = 'Search and fetch current official OpenAI developer documentation.'; activation = 'current OpenAI or Codex documentation is required'; negative_activation = ''; side_effect = 'external_read' },
                 [ordered]@{ kind = 'mcp'; name = 'playwright'; description = 'Automate and inspect a browser for web testing.'; activation = 'browser automation or live web testing is required'; negative_activation = ''; side_effect = 'external_read' }
             )
         } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $policyPath -Encoding UTF8
 
         $configPath = Join-Path $TestDrive 'skills.json'
         [ordered]@{
+            skill_projection = [ordered]@{
+                active_profile = 'default'
+                profiles = [ordered]@{
+                    default = [ordered]@{ enabled_names = @('systematic-debugging') }
+                    engineering = [ordered]@{ enabled_names = @('codebase-design', 'grill-with-docs', 'to-spec') }
+                    dotnet = [ordered]@{ enabled_names = @('debug:dotnet', 'systematic-debugging') }
+                    physics = [ordered]@{ enabled_names = @('custom-junior-physics-animation') }
+                    strict = [ordered]@{ enabled_names = @('test-driven-development', 'systematic-debugging') }
+                }
+            }
             mcp_servers = @(
                 [ordered]@{ name = 'openaiDeveloperDocs'; transport = 'http'; url = 'https://developers.openai.com/mcp' },
                 [ordered]@{ name = 'playwright'; transport = 'stdio'; command = 'npx'; args = @('@playwright/mcp') }
@@ -57,69 +73,95 @@ Describe 'Capability router meta-skill' {
         } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $configPath -Encoding UTF8
     }
 
-    It 'Routes an explicit cold skill without changing profile state' {
-        $before = (Get-FileHash -LiteralPath $manifestPath).Hash
-        $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -Query '请用 grill-with-docs 质询这个设计方案' -ManifestPath $manifestPath -PolicyPath $policyPath -ConfigPath $configPath | ConvertFrom-Json
-
-        $result.abstained | Should Be $false
-        $result.selected[0].name | Should Be 'grill-with-docs'
-        $result.selection_mode | Should Be 'cold_load'
-        $result.current_profile | Should Be 'default'
-        $result.writes_performed | Should Be $false
-        (Get-FileHash -LiteralPath $manifestPath).Hash | Should Be $before
+    function Invoke-TestRouter([string]$Query, [hashtable]$Extra = @{}) {
+        $args = @{ Query = $Query; ManifestPath = $manifestPath; PolicyPath = $policyPath; ConfigPath = $configPath }
+        foreach ($key in $Extra.Keys) { $args[$key] = $Extra[$key] }
+        return & $scriptPath @args | ConvertFrom-Json
     }
 
-    It 'Rejects review-only and interview skills for an implementation request' {
-        $result = & $scriptPath -Query '更新 PRD 和 spec，然后彻底重构并自动自主连续实现' -ManifestPath $manifestPath -PolicyPath $policyPath -ConfigPath $configPath | ConvertFrom-Json
+    It 'Makes the host AI the only semantic decision owner' {
+        $result = Invoke-TestRouter '分析当前仓库架构是否模块化，但不要修改文件' @{ ProfileHint = @('engineering') }
 
-        @($result.selected.name) | Should Not Contain 'grill-with-docs'
-        @($result.selected.name) | Should Not Contain 'draft-spec'
-        @($result.excluded | Where-Object { $_.name -in @('grill-with-docs', 'draft-spec') -and $_.reason -eq 'negative_intent' }).Count | Should Be 2
-    }
-
-    It 'Selects an available MCP and emits an automatic read-only activation plan' {
-        $result = & $scriptPath -Query '查询 OpenAI 官方开发文档中关于 Codex skills 的说明' -ManifestPath $manifestPath -PolicyPath $policyPath -ConfigPath $configPath | ConvertFrom-Json
-
-        $selected = @($result.selected | Where-Object { $_.kind -eq 'mcp' -and $_.name -eq 'openaiDeveloperDocs' })
-        $selected.Count | Should Be 1
-        $selected[0].availability | Should Be 'available'
-        $plan = @($result.activation_plan | Where-Object { $_.kind -eq 'mcp' -and $_.name -eq 'openaiDeveloperDocs' })[0]
-        $plan.action | Should Be 'use_available_mcp'
-        $plan.auto_allowed | Should Be $true
-    }
-
-    It 'Plans but does not silently activate a disabled MCP' {
-        $result = & $scriptPath -Query '用 Playwright 自动化浏览器测试这个网页' -ManifestPath $manifestPath -PolicyPath $policyPath -ConfigPath $configPath | ConvertFrom-Json
-
-        $selected = @($result.selected | Where-Object { $_.kind -eq 'mcp' -and $_.name -eq 'playwright' })
-        $selected.Count | Should Be 1
-        $selected[0].availability | Should Be 'needs_activation'
-        $plan = @($result.activation_plan | Where-Object { $_.kind -eq 'mcp' -and $_.name -eq 'playwright' })[0]
-        $plan.action | Should Be 'request_mcp_activation'
-        $plan.auto_allowed | Should Be $false
-        $result.writes_performed | Should Be $false
-    }
-
-    It 'Routes Chinese domain language and prefers the domain router' {
-        $result = & $scriptPath -Query '制作一个初中物理动画仿真' -ManifestPath $manifestPath | ConvertFrom-Json
-
-        $result.abstained | Should Be $false
-        @($result.selected.name) | Should Contain 'custom-junior-physics-animation'
-    }
-
-    It 'Routes a cold dotnet debugging skill' {
-        $result = & $scriptPath -Query '诊断 WPF .NET 启动失败' -ManifestPath $manifestPath | ConvertFrom-Json
-
-        $result.abstained | Should Be $false
-        $result.selected[0].name | Should Be 'debug:dotnet'
-        $result.selection_mode | Should Be 'cold_load'
-    }
-
-    It 'Abstains when metadata has no meaningful match' {
-        $result = & $scriptPath -Query '你好，请继续' -ManifestPath $manifestPath | ConvertFrom-Json
-
-        $result.abstained | Should Be $true
+        $result.schema_version | Should Be 3
+        $result.decision_owner | Should Be 'host_ai'
+        $result.semantic_routing_performed | Should Be $false
+        $result.task_model.task_type | Should Be 'host_adjudicated'
+        $result.task_model.confidence | Should Be $null
         @($result.selected).Count | Should Be 0
+        $result.requires_host_adjudication | Should Be $true
+        @($result.retrieval.candidates.name) | Should Contain 'codebase-design'
+    }
+
+    It 'Returns the same profile candidate pool for equivalent Chinese and English requests' {
+        $zh = Invoke-TestRouter '设计清晰的模块边界和稳定接口' @{ ProfileHint = @('engineering') }
+        $en = Invoke-TestRouter 'Design clear module boundaries and stable interfaces' @{ ProfileHint = @('engineering') }
+
+        @($zh.retrieval.candidates.name | Sort-Object) | Should Be @($en.retrieval.candidates.name | Sort-Object)
+        @($zh.selected).Count | Should Be 0
+        @($en.selected).Count | Should Be 0
+    }
+
+    It 'Applies deterministic policy only after the host supplies a capability' {
+        $result = Invoke-TestRouter '设计清晰的模块边界和稳定接口' @{ ProfileHint = @('engineering'); Candidate = @('skill|codebase-design') }
+
+        @($result.selected.name) | Should Be @('codebase-design')
+        $result.selection_mode | Should Be 'host_selected'
+        $result.activation_plan[0].action | Should Be 'load_skill'
+        $result.activation_plan[0].auto_allowed | Should Be $true
+    }
+
+    It 'Preserves official explicit invocation without lexical semantic ranking' {
+        $result = Invoke-TestRouter '请用 $grill-with-docs 质询这个设计方案'
+
+        @($result.selected.name) | Should Be @('grill-with-docs')
+        $result.selection_mode | Should Be 'explicit'
+        $result.activation_plan[0].action | Should Be 'load_skill'
+    }
+
+    It 'Does not treat an unsigiled capability name inside a negation as an explicit selection' {
+        $result = Invoke-TestRouter '这个 Python CLI 崩溃了，请定位根因；不要使用 debug:dotnet' @{ ProfileHint = @('python') }
+
+        @($result.selected).Count | Should Be 0
+        @($result.retrieval.candidates.name) | Should Not Contain 'debug:dotnet'
+        $result.requires_host_adjudication | Should Be $true
+    }
+
+    It 'Does not infer dotnet from a generic debugging request' {
+        $result = Invoke-TestRouter '这个项目启动不了，请查明根因并修好' @{ ProfileHint = @('default') }
+
+        @($result.retrieval.candidates.name) | Should Contain 'systematic-debugging'
+        @($result.retrieval.candidates.name) | Should Not Contain 'debug:dotnet'
+        @($result.selected).Count | Should Be 0
+    }
+
+    It 'Filters host-declared negative constraints before policy selection' {
+        $result = Invoke-TestRouter '不要用 test-driven-development，只解释失败原因' @{
+            ProfileHint = @('strict')
+            Candidate = @('skill|test-driven-development', 'skill|systematic-debugging')
+            ExcludeCapability = @('skill|test-driven-development')
+        }
+
+        @($result.selected.name) | Should Be @('systematic-debugging')
+        @($result.retrieval.candidates.name) | Should Not Contain 'test-driven-development'
+        @($result.excluded | Where-Object { $_.name -eq 'test-driven-development' -and $_.reason -eq 'host_excluded' }).Count | Should BeGreaterThan 0
+    }
+
+    It 'Keeps operator skills behind approval' {
+        $result = Invoke-TestRouter '把批准的 spec 发布到 tracker' @{ ProfileHint = @('engineering'); Candidate = @('skill|to-spec') }
+
+        $result.activation_plan[0].action | Should Be 'load_skill_with_approval'
+        $result.activation_plan[0].auto_allowed | Should Be $false
+        $result.activation_plan[0].side_effect | Should Be 'controlled_write'
+    }
+
+    It 'Keeps MCP availability and activation deterministic' {
+        $available = Invoke-TestRouter '查 OpenAI 官方文档' @{ Candidate = @('mcp|openaiDeveloperDocs') }
+        $disabled = Invoke-TestRouter '用 Playwright 检查网页' @{ Candidate = @('mcp|playwright') }
+
+        $available.activation_plan[0].action | Should Be 'use_available_mcp'
+        $available.activation_plan[0].auto_allowed | Should Be $true
+        $disabled.activation_plan[0].action | Should Be 'request_mcp_activation'
+        $disabled.activation_plan[0].auto_allowed | Should Be $false
     }
 
     It 'Rejects manifest paths outside their declared source root' {
@@ -130,50 +172,10 @@ Describe 'Capability router meta-skill' {
         [ordered]@{ schema_version = 2; active_profile = 'default'; active = @(); canonical = @([ordered]@{ name = $escaped.name; path = $escaped.path; source_root = $skillRoot }) } |
             ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $malicious -Encoding UTF8
 
-        $result = & $scriptPath -Query 'escaped unique capability' -ManifestPath $malicious | ConvertFrom-Json
+        $result = & $scriptPath -Query 'escaped unique capability' -ManifestPath $malicious -Candidate @('skill|escaped-skill') | ConvertFrom-Json
 
-        $result.abstained | Should Be $true
-        $result.candidate_count | Should Be 0
-    }
-
-    It 'Understands capability architecture assessment without selecting unrelated builders' {
-        $result = & $scriptPath -Query '评估当前统一 capability selector、skills、MCP、plugin、app、connector、native tools 自动无感切换架构是否存在更优工程终态' -ManifestPath $manifestPath -PolicyPath $policyPath -ConfigPath $configPath | ConvertFrom-Json
-
-        $result.schema_version | Should Be 3
-        $result.task_model.task_type | Should Be 'architecture_assessment'
-        $result.task_model.domain | Should Be 'capability_orchestration'
-        $result.task_model.goal | Should Be 'evaluate_global_optimum'
-        @($result.task_model.operations) | Should Contain 'inspect'
-        @($result.task_model.operations) | Should Contain 'compare'
-        @($result.selected.name) | Should Not Contain 'custom-windows-wpf-teacher-app'
-        @($result.selected.name) | Should Not Contain 'mcp-builder'
-        @($result.selected.name) | Should Not Contain 'mcp-cli'
-        $result.writes_performed | Should Be $false
-    }
-
-    It 'Builds a minimal capability DAG for implementation work' {
-        $result = & $scriptPath -Query '调研现有实现，修复路由缺陷并运行测试验证' -ManifestPath $manifestPath -PolicyPath $policyPath -ConfigPath $configPath | ConvertFrom-Json
-
-        @($result.capability_graph.stages.id) | Should Contain 'inspect'
-        @($result.capability_graph.stages.id) | Should Contain 'implement'
-        @($result.capability_graph.stages.id) | Should Contain 'verify'
-        @($result.capability_graph.edges | Where-Object { $_.from -eq 'inspect' -and $_.to -eq 'implement' }).Count | Should Be 1
-        @($result.capability_graph.edges | Where-Object { $_.from -eq 'implement' -and $_.to -eq 'verify' }).Count | Should Be 1
-    }
-
-    It 'Reuses matching session capabilities and emits recommendation-only preheat' {
-        $sessionPath = Join-Path $TestDrive 'session.json'
-        [ordered]@{
-            schema_version = 1
-            task_domain = 'software_engineering'
-            loaded = @([ordered]@{ kind = 'skill'; name = 'debug:dotnet' })
-        } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $sessionPath -Encoding UTF8
-
-        $result = & $scriptPath -Query '继续诊断 WPF .NET 启动失败' -ManifestPath $manifestPath -SessionSnapshotPath $sessionPath | ConvertFrom-Json
-
-        @($result.session_plan.reuse.name) | Should Contain 'debug:dotnet'
-        $result.preheat_recommendation.apply | Should Be $false
-        $result.preheat_recommendation.profile | Should Be 'dotnet'
+        @($result.selected).Count | Should Be 0
+        $result.capability_count | Should Be 0
     }
 
     It 'Fails closed on a stale host snapshot' {
@@ -185,10 +187,23 @@ Describe 'Capability router meta-skill' {
             capabilities = @([ordered]@{ kind = 'app'; name = 'gmail'; description = 'Read Gmail'; availability = 'available'; side_effect = 'external_read' })
         } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $snapshotPath -Encoding UTF8
 
-        $result = & $scriptPath -Query '用 gmail 总结未读邮件' -ManifestPath $manifestPath -HostSnapshotPath $snapshotPath -MaxSnapshotAgeMinutes 30 | ConvertFrom-Json
+        $result = Invoke-TestRouter '用 gmail 总结未读邮件' @{ HostSnapshotPath = $snapshotPath; MaxSnapshotAgeMinutes = 30; Candidate = @('app|gmail') }
 
         $result.host_snapshot.status | Should Be 'stale'
         @($result.selected.name) | Should Not Contain 'gmail'
         @($result.excluded | Where-Object { $_.name -eq 'gmail' -and $_.reason -eq 'stale_snapshot' }).Count | Should Be 1
+    }
+
+    It 'Reuses an already loaded host-selected capability without inventing a task domain' {
+        $sessionPath = Join-Path $TestDrive 'session.json'
+        [ordered]@{ schema_version = 1; task_domain = 'legacy-value'; loaded = @([ordered]@{ kind = 'skill'; name = 'debug:dotnet' }) } |
+            ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $sessionPath -Encoding UTF8
+
+        $result = Invoke-TestRouter '继续诊断 WPF .NET 启动失败' @{ ProfileHint = @('dotnet'); Candidate = @('skill|debug:dotnet'); SessionSnapshotPath = $sessionPath }
+
+        @($result.session_plan.reuse.name) | Should Contain 'debug:dotnet'
+        $result.preheat_recommendation.profile | Should Be 'dotnet'
+        $result.preheat_recommendation.apply | Should Be $false
+        $result.writes_performed | Should Be $false
     }
 }

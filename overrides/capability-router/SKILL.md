@@ -1,35 +1,41 @@
 ---
 name: capability-router
-description: Understand and route a task to the narrowest installed skill, MCP, plugin/app/connector, or native tool; compose a safe capability graph, reuse compatible session capabilities, and recommend profile preheating without changing host state. Use at task start, task or domain changes, architecture/meta-capability assessment, multi-capability work, missing visible capabilities, host-snapshot routing, or requests for automatic capability/profile selection.
+description: Fallback discovery and deterministic safety policy for installed skills, MCPs, plugins, apps, connectors, and native tools. Use when the user explicitly asks what capability is available, no currently visible capability matches, or cross-profile cold discovery is needed. Do not use at routine task start when a visible skill or native tool already matches; the host AI owns semantic selection.
 ---
 
-# Capability Router
+# Native-First Capability Discovery
 
-Select and compose capabilities, not runtime profiles. Keep the current conversation and process alive.
+Prefer the host's native skill and tool selection. This compatibility skill no longer classifies natural language or decides which capability is semantically correct.
 
-## Route
+## Discover and apply policy
 
-1. Pass the user's complete current request to `scripts/route-capability.ps1`:
+1. If a currently visible skill or native tool clearly matches the complete request, use it directly and do not run the fallback script.
+2. Otherwise infer at most two likely profile names from the full request and conversation context, then discover candidates:
 
    ```powershell
-   pwsh -NoProfile -ExecutionPolicy Bypass -File <skill-dir>/scripts/route-capability.ps1 -Query '<request>'
+   pwsh -NoProfile -ExecutionPolicy Bypass -File <skill-dir>/scripts/route-capability.ps1 -Query '<complete request>' -ProfileHint engineering,review
    ```
 
-2. Adjudicate the result with the full current request. Treat deterministic scores as retrieval evidence, not final semantic truth. Remove any candidate whose purpose does not directly advance the task goal, repair an obviously wrong task type/domain in working memory, and keep the smallest sufficient composition. Never add an unreturned cold capability without reading its metadata through an available discovery surface.
-3. Inspect `task_model`, `capability_graph`, `session_plan`, and `activation_plan` before acting:
-   - For `load_skill` or `use_active_skill`, read the selected skill `path` completely and apply its ordinary trigger, precedence, safety, and announcement rules.
-   - For `use_available_mcp` or `use_available_capability`, use only the already surfaced host tool and continue to obey its approval and side-effect rules.
-   - For `load_skill_with_approval`, `request_approval`, `request_mcp_activation`, or `request_activation`, do not mutate host state. Explain or execute the required explicit host step only when the task separately authorizes it.
-4. Pass a current schema-v2 host snapshot with `-HostSnapshotPath`; `-CapabilitySnapshotPath` remains compatible. Use `-SessionSnapshotPath` only for caller-provided loaded-capability state. Reject stale snapshots rather than inferring current installation, callable, accessibility, or authentication state.
-5. Follow the minimal ordered stages in `capability_graph`. Reuse items in `session_plan.reuse`; load only the returned narrow set. Treat `preheat_recommendation` as advice and never apply it automatically.
-6. If `abstained` is true, continue with native reasoning or ask a question only when the task itself is materially ambiguous.
+3. Inspect `retrieval.candidates`. Use the complete request—not lexical scores—to choose the smallest sufficient set, normally one capability and never more than three. Respect negation such as “不要使用…”, “不要改代码”, and “only explain”. If no candidate directly advances the goal, continue with native reasoning.
+4. Re-run the script with the host decision so deterministic policy can validate availability, containment, side effects, and activation:
+
+   ```powershell
+   pwsh -NoProfile -ExecutionPolicy Bypass -File <skill-dir>/scripts/route-capability.ps1 -Query '<complete request>' -ProfileHint engineering -Candidate 'skill|codebase-design' -ExcludeCapability 'skill|test-driven-development'
+   ```
+
+5. Follow `activation_plan`:
+   - `use_active_skill` or `load_skill`: read the selected `SKILL.md` completely and apply its ordinary trigger and safety rules.
+   - `use_available_mcp` or `use_available_capability`: use only the surfaced callable capability.
+   - `load_skill_with_approval`, `request_approval`, `request_mcp_activation`, or `request_activation`: keep the operation behind the required authorization or host activation step.
+6. Reuse compatible items in `session_plan.reuse`. Treat `preheat_recommendation` as advice for a future task boundary; never hot-switch a profile or restart the current task.
+
+Only explicit `$skill`/`@skill` mentions may go directly to policy validation. An unsigiled capability name remains ordinary natural language—even when hyphenated or namespaced—because it may appear inside a negation. The script reports `decision_owner=host_ai`, `semantic_routing_performed=false`, and never assigns semantic confidence.
 
 ## Boundaries
 
-- Do not edit skill/MCP profiles, Codex config, skill enablement, MCP/plugin state, authentication, or session state.
-- Do not restart Codex or create another conversation to route a task.
-- Treat returned paths as local data. The script accepts only existing `SKILL.md` files contained by declared skill roots.
-- Auto-use only read-only skills or already-available `read_only`/`external_read` capabilities. Keep write, destructive, open-world, unknown, and activation-required capabilities behind the returned plan.
-- AI semantic adjudication may narrow or abstain, but must never upgrade availability, auth, approval, freshness, containment, or side-effect permissions returned by deterministic policy.
-- Preserve schema-v2 consumer fields while using schema v3 task, retrieval, graph, session, snapshot, and preheat fields.
-- Abstain on weak matches. Profiles are optional preheat bundles, never reachability gates or silent runtime switches.
+- Do not edit skill/MCP profiles, Codex config, plugin state, authentication, or session state.
+- Do not start another model or provider call for routing; reuse the host AI already processing the request.
+- Treat returned paths as local data. Only contained, existing `SKILL.md` files are eligible.
+- Auto-use only read-only skills or already-available `read_only`/`external_read` capabilities.
+- Semantic judgment may narrow, exclude, or abstain, but cannot upgrade availability, auth, approval, freshness, containment, or side-effect permissions.
+- If discovery fails, fall back to native reasoning without blocking an otherwise clear task.

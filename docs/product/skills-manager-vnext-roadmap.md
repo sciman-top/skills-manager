@@ -15,6 +15,7 @@
 | `P4` | Unified capability selection and activation planning | `complete` | 6/6 tasks `repo_verified`；16-profile fresh prompt probe 已通过，host runtime activation/live acceptance 未执行 |
 | `P5` | Adaptive Capability Fabric | `complete` | 5/5 `repo_verified`；live read-only App Server snapshot 与 full gate 已通过，business live acceptance 未执行 |
 | `maintenance_design` | Lean AI Software Delivery | `M0 repo_verified` | 规划包 4/4 tasks repo_verified；M1-M3 conditional，10-task pilot 未执行 |
+| `capability_routing_correction` | Native-first discovery/policy | `repo_verified` | P5-local regression correction 4/4；不改写 P5 历史状态，不授权 P6；host replay partial，live acceptance not run |
 
 状态只可在相应 exit gate 有当前证据后更新。Phase 文档完成不等于 Phase 实现完成。
 
@@ -26,7 +27,7 @@ P0 contracts and seams
      -> P2 safe write protocol
         -> P3 packaging/evaluation
 
-P4 started from repeated real routing failures and unified selection. P5 starts from a current meta-task false positive and adds task understanding, composition and read-only host truth without taking over runtime execution.
+P4 started from repeated real routing failures and unified selection. P5 historically added task understanding, composition and read-only host truth without taking over runtime execution. 2026-08-04 maintenance evidence showed that lexical task understanding/ranking duplicated and underperformed host-native semantics; `ADR-SMV-017` therefore retains P5 discovery/safety seams while retiring script-owned semantic selection.
 ```
 
 禁止绕过：
@@ -296,6 +297,8 @@ P5 5/5 task、schema compatibility、golden、fresh query、live read-only multi
 
 2026-08-03 closeout：上述 exit gate 已满足。16 profiles 全部 fresh-pass 并恢复 default；live snapshot 返回 123 skills、6 installed/callable apps、8 MCPs。`app/list` 的外部未安装 app catalog 因 403 标记 `runtime_complete_catalog_partial`，不影响当前 runtime inventory，也不升级为 authenticated app action 或 `live_accepted`。
 
+2026-08-04 correction boundary：P5 的 5/5 `repo_verified` 是历史实现/门禁事实，不是 lexical router 的长期产品背书。用户长期真实反馈与多条可复现自然语言反例显示辅助层低于 native/profile baseline，因此在 maintenance hold 内进行直接 P5-local defect correction；不新增 schema major，不创建 P6，也不把修正后的 deterministic corpus 写成 host/live 验收。
+
 ## 9. Maintenance hold and P6 admission
 
 `P6_ADMISSION_STATUS: hold`
@@ -325,10 +328,12 @@ M0 maintenance design package
 | --- | --- | --- | --- | --- |
 | `M0` | `repo_verified` | 综合 PRD/架构/路线图、maintenance spec/manifest、plan/todo、companion verifier、测试与一份 reviewed evidence | 4/4 planning tasks done；新旧 verifier 和 full gate 通过 | 新工作流业务有效、pilot 已运行、host loaded、live accepted |
 | `M1` | `conditional` | 选取 10 个覆盖 Discovery/Main-chain/Stabilize/Refactor/Release/Operate 的真实任务，记录无 lens baseline 与 advisory treatment | 用户授权；任务/数据安全边界明确；每项只做 observe，不设完成硬阈值 | 普遍效果、因果结论、自动 promotion |
-| `M2` | `conditional` | 只修正 pilot 证明的 P5 metadata、golden、触发策略或直接缺陷 | 至少两个任务复现同一缺口；现有字段无法表达且有真实消费者时才评估小字段 | schema major、新 runtime、daemon/database |
+| `M2` | `repo_verified` | 以用户真实反馈和重复回放修正 P5 metadata、profile、golden、触发策略与直接缺陷；退役 lexical semantic router，保留 discovery/policy kernel | focused corpus、16-profile fresh probe、只读 host replay、planning/full gate 与共享 evidence 已收口 | M1 pilot 已运行、schema major、新 runtime、daemon/database、普遍 live acceptance |
 | `M3` | `conditional` | 比较净收益并决定 `retain | revise | retire`；仅把满足既有 admission 的证据提交 P6 review | 指标与失败样本经过人工 review；无净收益流程已删除或降级 | 自动 admitted、自动创建 P6 manifest |
 
-M1 pilot 的最小样本覆盖：模糊需求澄清、从零主链、既有缺陷、行为保持重构、前后端/数据 seam、测试策略、发布准备、运维事件、能力/skill 选择和一次不应启动复杂流程的简单任务。样本在执行时另行登记；本路线图不把候选任务伪装为当前承诺。
+M1 pilot 的最小样本覆盖：模糊需求澄清、从零主链、既有缺陷、行为保持重构、前后端/数据 seam、测试策略、发布准备、运维事件、能力/skill 选择和一次不应启动复杂流程的简单任务。样本在执行时另行登记；本路线图不把候选任务伪装为当前承诺。M1 是评估 Lean Delivery advisory 净收益的 pilot，不是修复已复现 P5 产品缺陷的前置门禁；本次 M2 correction 不得反向写成 M1 已执行。
+
+M2 correction 的目标流为：`visible skill/native tool -> host-native semantic match -> direct use`；只有无可见匹配或显式能力发现时才进入 `profile candidate discovery -> host adjudication -> deterministic policy -> native activation`。低风险已可用能力可无感使用，安装、认证、profile/config mutation、写入和破坏性动作继续保持可见授权。若 host replay 未显示净改善，优先进一步删除 router 行为，而不是继续加词法规则。
 
 observe-only 指标为 TTFV、返工切片、非预期人工打断、非产品 artifact、focused/full gate 耗时和 repo_verified→live_accepted 转化。`M1` 前不设数值阈值；指标不作为单项 completion gate，LLM 评分不作为唯一证据。对每项任务同时记录任务复杂度、既有测试健康和人工授权差异，避免把环境差异误判为流程收益。
 

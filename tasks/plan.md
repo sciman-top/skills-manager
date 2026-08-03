@@ -7,6 +7,9 @@
 **next_phase_admission**: hold
 **active_maintenance_track**: maintenance_design
 **maintenance_task_truth**: `tasks/skills-manager-vnext-maintenance-design.tasks.json`
+**active_correction_track**: capability_routing_correction
+**correction_task_truth**: `tasks/skills-manager-vnext-capability-routing-correction.tasks.json`
+**correction_status**: repo_verified
 
 ## 1. Goal
 
@@ -60,3 +63,18 @@ Goal：把 skills-manager 面向高效 AI 软件交付的总体方案落为 advi
 Failure routing：文档/manifest 漂移先修当前真源；同一 verifier 缺陷连续失败两次后重审检查设计；未知工作树改动、P5 回归、P6 manifest、runtime write set 或 full gate 失败立即阻断收口。10-task observe-only pilot 只有另行授权后才进入 M1，不属于本计划的执行项。
 
 Verification：迭代运行 focused planning tests 与两个 verifier；文件稳定后由 `scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree` 统一运行一次完整套件，随后执行 `git diff --check` 和 Git boundary 检查。不在 full gate 前后另行重复完整 suite。
+
+## 8. Native-first capability routing correction
+
+Goal：将 P4/P5 的 lexical semantic router 退役为兼容 discovery/policy kernel，由宿主 AI 依据完整请求、对话和 skill metadata 做唯一语义判断；在低风险能力上保持无感使用，在安装、认证、写入和激活上保持可见边界。
+
+| Order | Task | Slice | Exit checkpoint |
+| ---: | --- | --- | --- |
+| 1 | `SMV-CR-001` | root cause + architecture | 真实反例可复现；官方/社区 disposition 与 ADR-SMV-017 完整；P5/P6 历史边界不变 |
+| 2 | `SMV-CR-002` | discovery/policy + profiles + corpus | 零脚本 semantic auto-selection；否定提及不触发；focused tests/corpus/profile budgets 通过 |
+| 3 | `SMV-CR-003` | product/planning truth | PRD/架构/路线图/spec/manifest/plan/todo/AGENTS 一致；M1 未执行，P6 hold |
+| 4 | `SMV-CR-004` | fresh host + closeout | build、16-profile probe、只读 host replay、planning/full gate；恢复 default；一份 evidence；commit/push |
+
+Failure routing：误选先修 skill metadata/profile 或删除 router 行为，不增加词法规则；同类反例两次回到 ownership 设计；stale/unknown/needs_activation fail-closed；host invocation 不可观测时标记 partial；未知工作树、profile 未恢复、P5 planning 回归、P6 manifest、host mutation 或 full gate 失败立即阻断。
+
+Verification：按 correction spec 的 build -> focused tests -> routing/config/integrity contracts -> 16-profile fresh probe -> bounded host replay -> planning contracts -> one full gate 顺序执行。27-case corpus 只证明 repo discovery/policy；host replay 与 business `live_accepted` 单独分层。

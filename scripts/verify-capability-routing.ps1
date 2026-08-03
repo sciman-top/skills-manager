@@ -19,75 +19,149 @@ $routerFile = Resolve-RepoFile $RouterPath
 $manifestFile = Resolve-RepoFile 'reports/skill-projection/current.json'
 $policyFile = Resolve-RepoFile 'config/skill-routing-policy.json'
 $configFile = Resolve-RepoFile 'skills.json'
-foreach ($file in @($corpusFile, $routerFile, $manifestFile, $policyFile, $configFile)) { if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw ('Required routing file is missing: {0}' -f $file) } }
+foreach ($file in @($corpusFile, $routerFile, $manifestFile, $policyFile, $configFile)) {
+    if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw ('Required routing file is missing: {0}' -f $file) }
+}
 $corpus = Get-Content -LiteralPath $corpusFile -Raw -Encoding UTF8 | ConvertFrom-Json
-if ([int]$corpus.schema_version -ne 1 -or @($corpus.cases).Count -eq 0) { throw 'Routing corpus must use schema_version=1 and contain cases.' }
+if ([int]$corpus.schema_version -ne 2 -or [string]$corpus.decision_owner -ne 'host_ai' -or @($corpus.cases).Count -eq 0) {
+    throw 'Routing corpus must use schema_version=2, decision_owner=host_ai, and contain cases.'
+}
 
 $findings = [Collections.Generic.List[object]]::new()
 $passedCases = 0
+$candidateRecallPassed = 0
+$policyPassed = 0
+$negativeConstraintViolations = 0
+$semanticAutoSelections = 0
+
 function Add-Finding([string]$CaseId, [string]$Code, [string]$Message) {
     $findings.Add([pscustomobject]@{ case_id = $CaseId; code = $Code; message = $Message }) | Out-Null
 }
 
-foreach ($case in @($corpus.cases)) {
-    $caseId = [string]$case.id
-    if ([string]::IsNullOrWhiteSpace($caseId) -or [string]::IsNullOrWhiteSpace([string]$case.query)) { Add-Finding $caseId 'case_invalid' 'Case id and query are required.'; continue }
+function Get-CapabilityRef($Item) {
+    return ('{0}|{1}' -f ([string]$Item.kind).ToLowerInvariant(), [string]$Item.name)
+}
+
+function Invoke-RouterCase($Case, [string[]]$Candidate = @()) {
     $routerArgs = @{
-        Query = [string]$case.query
+        Query = [string]$Case.query
         ManifestPath = $manifestFile
         PolicyPath = $policyFile
         ConfigPath = $configFile
+        ProfileHint = @($Case.profile_hints | ForEach-Object { [string]$_ })
+        Candidate = @($Candidate)
+        ExcludeCapability = @($Case.host_exclude | ForEach-Object { Get-CapabilityRef $_ })
     }
-    if (-not [string]::IsNullOrWhiteSpace([string]$case.snapshot_path)) { $routerArgs.CapabilitySnapshotPath = Resolve-RepoFile ([string]$case.snapshot_path) }
-    # The router is a pure read-only script. Invoke it in-process so a golden
-    # corpus does not pay for a fresh PowerShell startup for every case.
+    if (-not [string]::IsNullOrWhiteSpace([string]$Case.snapshot_path)) {
+        $routerArgs.HostSnapshotPath = Resolve-RepoFile ([string]$Case.snapshot_path)
+    }
     $global:LASTEXITCODE = 0
     $raw = @(& $routerFile @routerArgs 2>&1)
-    if ($LASTEXITCODE -ne 0) { Add-Finding $caseId 'router_failed' ($raw -join "`n"); continue }
-    try { $result = ($raw -join "`n") | ConvertFrom-Json }
-    catch { Add-Finding $caseId 'router_output_invalid' $_.Exception.Message; continue }
+    if ($LASTEXITCODE -ne 0) { return [pscustomobject]@{ error = ($raw -join "`n"); data = $null } }
+    try { return [pscustomobject]@{ error = ''; data = (($raw -join "`n") | ConvertFrom-Json) } }
+    catch { return [pscustomobject]@{ error = $_.Exception.Message; data = $null } }
+}
+
+foreach ($case in @($corpus.cases)) {
+    $caseId = [string]$case.id
+    if ([string]::IsNullOrWhiteSpace($caseId) -or [string]::IsNullOrWhiteSpace([string]$case.query)) {
+        Add-Finding $caseId 'case_invalid' 'Case id and query are required.'
+        continue
+    }
     $before = $findings.Count
-    if ([int]$result.schema_version -ne 3) { Add-Finding $caseId 'schema_mismatch' 'Router must emit schema_version=3.' }
-    if ($null -ne $case.expected_task) {
-        foreach ($field in @('task_type', 'domain', 'goal')) {
-            $expectedValue = [string]$case.expected_task.$field
-            if (-not [string]::IsNullOrWhiteSpace($expectedValue) -and [string]$result.task_model.$field -ne $expectedValue) {
-                Add-Finding $caseId 'task_model_mismatch' ('Expected {0}={1}, actual={2}.' -f $field, $expectedValue, [string]$result.task_model.$field)
+    $discoveryCall = Invoke-RouterCase $case
+    if (-not [string]::IsNullOrWhiteSpace($discoveryCall.error)) {
+        Add-Finding $caseId 'router_failed' $discoveryCall.error
+        continue
+    }
+    $discovery = $discoveryCall.data
+    if ([int]$discovery.schema_version -ne 3) { Add-Finding $caseId 'schema_mismatch' 'Router must emit schema_version=3.' }
+    if ([string]$discovery.decision_owner -ne 'host_ai' -or [bool]$discovery.semantic_routing_performed) {
+        Add-Finding $caseId 'semantic_owner_mismatch' 'Host AI must own semantic selection and the script must report semantic_routing_performed=false.'
+    }
+    if ([bool]$discovery.writes_performed) { Add-Finding $caseId 'unexpected_write' 'Router reported a write.' }
+
+    $discoveredRefs = @($discovery.retrieval.candidates | ForEach-Object { Get-CapabilityRef $_ })
+    $expectedRefs = @($case.expected_candidates | ForEach-Object { Get-CapabilityRef $_ })
+    $recallOk = $expectedRefs.Count -eq 0 -or @($expectedRefs | Where-Object { $_ -in $discoveredRefs }).Count -gt 0
+    if (-not $recallOk) {
+        Add-Finding $caseId 'candidate_recall_miss' ('Expected at least one candidate from [{0}], actual [{1}].' -f ($expectedRefs -join ', '), ($discoveredRefs -join ', '))
+    }
+    else { $candidateRecallPassed++ }
+
+    foreach ($forbidden in @($case.forbidden_candidates)) {
+        $ref = Get-CapabilityRef $forbidden
+        if ($ref -in $discoveredRefs) {
+            Add-Finding $caseId 'forbidden_candidate' ('Discovery exposed forbidden candidate {0}.' -f $ref)
+        }
+    }
+    foreach ($excluded in @($case.host_exclude)) {
+        $ref = Get-CapabilityRef $excluded
+        if ($ref -in $discoveredRefs) {
+            $negativeConstraintViolations++
+            Add-Finding $caseId 'negative_constraint_violation' ('Host-excluded capability remained discoverable: {0}.' -f $ref)
+        }
+    }
+
+    $queryLower = ([string]$case.query).ToLowerInvariant()
+    $explicitExpected = @($case.host_selected).Count -gt 0 -and @($case.host_selected | Where-Object {
+        $nameLower = ([string]$_.name).ToLowerInvariant()
+        $queryLower.Contains(('$' + $nameLower)) -or $queryLower.Contains(('@' + $nameLower))
+    }).Count -gt 0
+    if (-not $explicitExpected -and @($discovery.selected).Count -gt 0) {
+        $semanticAutoSelections += @($discovery.selected).Count
+        Add-Finding $caseId 'semantic_auto_selection' 'Discovery selected a capability before host adjudication.'
+    }
+
+    $selectionRefs = @($case.host_selected | ForEach-Object { Get-CapabilityRef $_ })
+    if ($selectionRefs.Count -gt 0) {
+        $policyCall = Invoke-RouterCase $case $selectionRefs
+        if (-not [string]::IsNullOrWhiteSpace($policyCall.error)) {
+            Add-Finding $caseId 'policy_router_failed' $policyCall.error
+        }
+        else {
+            $policy = $policyCall.data
+            $policyBefore = $findings.Count
+            foreach ($expected in @($case.host_selected)) {
+                $selected = @($policy.selected | Where-Object { [string]$_.kind -eq [string]$expected.kind -and [string]$_.name -eq [string]$expected.name })
+                if ($selected.Count -ne 1) {
+                    Add-Finding $caseId 'host_selection_missing' ('Missing host-selected {0}.' -f (Get-CapabilityRef $expected))
+                    continue
+                }
+                $plan = @($policy.activation_plan | Where-Object { [string]$_.kind -eq [string]$expected.kind -and [string]$_.name -eq [string]$expected.name -and [string]$_.action -eq [string]$expected.action })
+                if ($plan.Count -ne 1) { Add-Finding $caseId 'expected_action_missing' ('Missing action {0} for {1}.' -f [string]$expected.action, (Get-CapabilityRef $expected)) }
             }
+            foreach ($plan in @($policy.activation_plan)) {
+                if ([bool]$plan.auto_allowed -and [string]$plan.side_effect -notin @('read_only', 'external_read')) {
+                    Add-Finding $caseId 'side_effect_violation' ('Auto-allowed {0}/{1} with side_effect={2}.' -f [string]$plan.kind, [string]$plan.name, [string]$plan.side_effect)
+                }
+            }
+            if ($findings.Count -eq $policyBefore) { $policyPassed++ }
         }
     }
-    if ([bool]$result.writes_performed) { Add-Finding $caseId 'unexpected_write' 'Router reported a write.' }
-    if ([bool]$case.expect_abstain -ne [bool]$result.abstained) { Add-Finding $caseId 'abstain_mismatch' ('Expected abstain={0}, actual={1}.' -f [bool]$case.expect_abstain, [bool]$result.abstained) }
-    foreach ($expected in @($case.expected)) {
-        $selected = @($result.selected | Where-Object { [string]$_.kind -eq [string]$expected.kind -and [string]$_.name -eq [string]$expected.name })
-        if ($selected.Count -ne 1) { Add-Finding $caseId 'expected_selection_missing' ('Missing {0}/{1}.' -f [string]$expected.kind, [string]$expected.name); continue }
-        if (-not [string]::IsNullOrWhiteSpace([string]$expected.action)) {
-            $plan = @($result.activation_plan | Where-Object { [string]$_.kind -eq [string]$expected.kind -and [string]$_.name -eq [string]$expected.name -and [string]$_.action -eq [string]$expected.action })
-            if ($plan.Count -ne 1) { Add-Finding $caseId 'expected_action_missing' ('Missing action {0} for {1}/{2}.' -f [string]$expected.action, [string]$expected.kind, [string]$expected.name) }
-        }
-    }
-    foreach ($forbidden in @($case.forbidden)) {
-        if (@($result.selected | Where-Object { [string]$_.kind -eq [string]$forbidden.kind -and [string]$_.name -eq [string]$forbidden.name }).Count -gt 0) { Add-Finding $caseId 'forbidden_selection' ('Selected forbidden {0}/{1}.' -f [string]$forbidden.kind, [string]$forbidden.name) }
-    }
-    foreach ($plan in @($result.activation_plan)) {
-        if ([bool]$plan.auto_allowed -and [string]$plan.side_effect -notin @('read_only', 'external_read')) { Add-Finding $caseId 'side_effect_violation' ('Auto-allowed {0}/{1} with side_effect={2}.' -f [string]$plan.kind, [string]$plan.name, [string]$plan.side_effect) }
-    }
+    else { $policyPassed++ }
+
     if ($findings.Count -eq $before) { $passedCases++ }
 }
 
 $resultEnvelope = [ordered]@{
-    schema_version = 1
+    schema_version = 2
     command = 'verify-capability-routing'
+    decision_owner = 'host_ai'
     pass = ($findings.Count -eq 0)
     case_count = @($corpus.cases).Count
     passed_case_count = $passedCases
     failed_case_count = @($corpus.cases).Count - $passedCases
+    candidate_recall_passed_count = $candidateRecallPassed
+    policy_passed_count = $policyPassed
+    semantic_auto_selection_count = $semanticAutoSelections
+    negative_constraint_violation_count = $negativeConstraintViolations
     finding_count = $findings.Count
     side_effect_violation_count = @($findings | Where-Object code -eq 'side_effect_violation').Count
     writes_performed = $false
     findings = @($findings.ToArray())
 }
 if ($Json) { $resultEnvelope | ConvertTo-Json -Depth 10 }
-elseif ($resultEnvelope.pass) { Write-Host ('Capability routing verified: cases={0}, findings=0' -f $resultEnvelope.case_count) -ForegroundColor Green }
+elseif ($resultEnvelope.pass) { Write-Host ('Native-first capability contract verified: cases={0}, findings=0' -f $resultEnvelope.case_count) -ForegroundColor Green }
 else { foreach ($finding in $findings) { Write-Host ('[{0}] {1}: {2}' -f $finding.code, $finding.case_id, $finding.message) -ForegroundColor Red } }
 if (-not $resultEnvelope.pass) { exit 2 }

@@ -30,3 +30,12 @@
 - [x] `SMV-MD-004` 同步根契约、共享 evidence、运行有序门禁并限定 truth closeout。
 
 M0 仅为 maintenance design planning package `repo_verified`；M1-M3 仍为 `conditional`。10-task pilot、runtime/host mutation、P6 admission 和 business `live_accepted` 均未执行。
+
+## Capability routing correction checklist
+
+- [x] `SMV-CR-001` 复现真实误路由，核对官方/社区依据并确定 native-first 架构。
+- [x] `SMV-CR-002` 实现 discovery/policy kernel、profile 调整、自然语言 corpus 和 focused tests。
+- [x] `SMV-CR-003` 同步 PRD、架构、路线图、spec、manifest、plan、todo 与根契约。
+- [x] `SMV-CR-004` 完成 build、16-profile probe、只读 host replay、planning/full gate、evidence 与 Git 收口。
+
+该 checklist 已按 P5-local defect correction 完成 4/4 `repo_verified`，不改写 P5 5/5 历史状态。M1 10-task pilot 未执行，P6 继续 hold；deterministic corpus 与 profile 可见性不等于 host-native 普遍正确或 business `live_accepted`。

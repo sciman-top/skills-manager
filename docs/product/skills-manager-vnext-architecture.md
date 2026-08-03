@@ -155,27 +155,45 @@ RuleResponsibility
 
 ### 3.8 `CapabilitySelection`
 
-职责：从 capability metadata、active profile 和 caller-provided runtime snapshot 识别 task intent，先执行 required/excluded intent policy，再做有界 ranking/abstain，并输出统一 `ActivationPlan`。
+职责：把宿主原生 skill/tool 语义匹配放在第一层；只在用户显式查询能力、当前可见能力无匹配或需要跨 profile 冷发现时，按 caller-provided profile hint 返回有界候选，再对宿主明确选中的 capability 执行路径 containment、freshness、availability、side-effect、approval 和 activation policy。
 
-不负责：profile mutation、MCP/plugin install 或 enable、OAuth、provider/model/session routing、宿主 restart、工具执行和 live acceptance。
+不负责：自然语言分类、task/domain/confidence 推断、lexical ranking、二次模型调用、profile mutation、MCP/plugin install 或 enable、OAuth、provider/model/session routing、宿主 restart、工具执行和 live acceptance。
 
 ```text
-CapabilitySelectionInput
-  query
-  capability_descriptors
-  active_skill_names
-  active_mcp_names
-  runtime_snapshot?
+visible skill/native tool
+  -> host AI native semantic match
+  -> use directly
 
-CapabilitySelectionResult
-  intents
+no visible match / explicit capability discovery
+  -> profile-scoped candidate discovery
+  -> host AI adjudication with full request/context/negation
+  -> deterministic capability policy
+  -> native load/use or visible approval/activation step
+
+CapabilityDiscoveryInput
+  query
+  profile_hints[]?
+  host_selected_candidates[]?
+  host_exclusions[]?
+  projection_manifest
+  host_snapshot?
+  session_snapshot?
+
+CapabilityDiscoveryPolicyResult
+  decision_owner = host_ai
+  semantic_routing_performed = false
+  candidates[]
   selected[]
   excluded[]
   activation_plan[]
+  task_type/domain = host_adjudicated
+  confidence = null
   writes_performed = false
 ```
 
-`ActivationPlan` 的 action 至少区分 `use_active_skill | load_skill | load_skill_with_approval | use_available_mcp | use_available_capability | request_approval | request_mcp_activation | request_activation`。只有 read-only skill，或已 available 且 `read_only | external_read` 的非 skill capability 可以 `auto_allowed=true`。
+`query` 只作为审计上下文返回，不参与词法语义评分。普通文本中的 capability 名称也不构成选择授权，因为它可能位于否定句；只有 `$skill`/`@skill` 语法或宿主显式传入的 candidate 才能进入 policy。`ActivationPlan` 的 action 至少区分 `use_active_skill | load_skill | load_skill_with_approval | use_available_mcp | use_available_capability | request_approval | request_mcp_activation | request_activation`。只有 read-only skill，或已 available 且 `read_only | external_read` 的非 skill capability 可以 `auto_allowed=true`。
+
+“无感切换”限定为同一任务内使用已可见、已可用且低副作用的能力；不等于静默修改 profile、安装 plugin/MCP、认证、写配置或执行外部写操作。profile 只在新任务边界作为预热候选包；当前任务发现不到合适能力时回退宿主原生推理，不阻塞主链。
 
 ### 3.9 `LeanDeliveryAdvisory`
 
@@ -553,15 +571,15 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 
 ### `ADR-SMV-010 Unified selection, host-owned activation`
 
-决定：统一 skill/MCP/plugin/app/native-tool 的 selection result 和 activation-plan vocabulary，但不统一或接管各自 runtime。使用显式名称、negative/required intent、metadata ranking 和 abstain；只有量化 corpus 证明不足时才评估语义 reranker。
+历史决定：P4 统一 skill/MCP/plugin/app/native-tool 的 selection result 和 activation-plan vocabulary，但不统一或接管各自 runtime；当时采用 explicit name、negative/required intent、metadata ranking 和 abstain。
 
-理由：解决两个以上真实误路由，同时复用 Codex progressive loading、MCP approvals、plugin/runtime snapshot 和宿主认证边界；避免为“无感”引入 provider、daemon、数据库或隐藏副作用。
+维护结论：activation-plan vocabulary、availability、side-effect 和宿主认证边界继续保留；脚本内 lexical intent/ranking 已被 `ADR-SMV-017` 取代。P4 的历史 repo_verified 证据不被改写，但不能继续外推为自然语言路由实效。
 
 ### `ADR-SMV-011 Adaptive decision plane, native execution plane`
 
-决定：以 schema v3 的 task model、hybrid retrieval/policy adjudication、最小 capability DAG、session reuse plan 和 recommendation-only profile preheat 形成统一决策平面；确定性脚本负责候选、安全与新鲜度，当前宿主 AI 用完整请求做语义判决且只能收窄或 abstain。skills、MCP、apps/connectors、plugins 和 native tools 继续由各宿主原生执行。当前 Codex 实时事实只消费稳定只读 App Server RPC；`plugin/list/install` under-development surface、dynamic tools、写 config、OAuth 和 thread mutation 不作为终态必需依赖。
+历史决定：P5 以 schema v3 task model、hybrid retrieval/policy adjudication、capability DAG、session reuse plan、recommendation-only profile preheat 和只读 App Server snapshot 扩展 P4；skills、MCP、apps/connectors、plugins 和 native tools 仍由各宿主原生执行。
 
-理由：P4 已证明可达性和副作用边界，但真实元架构请求仍发生纯关键词误选。新增结构化理解和宿主快照能修复已证实风险，同时保持 local-first、single-process、无服务/数据库和跨宿主可迁移性。
+维护结论：只读 host snapshot、session reuse、profile `apply=false` recommendation、统一 policy 字段和历史 schema compatibility 继续保留；脚本生成 task type/domain/confidence、hybrid semantic ranking 和自动 capability DAG 选择已被 `ADR-SMV-017` 取代。当前 DAG 只表达 `discover -> host_adjudication -> policy -> activate` 的责任顺序。
 
 ### `ADR-SMV-012 Lean Delivery is an advisory lens`
 
@@ -592,6 +610,14 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 决定：TTFV、返工、人工打断、非产品 artifact、门禁耗时与 live 转化只记录在 pilot worksheet/evidence；不建设 telemetry service，不设未经 baseline 的硬阈值，不让 LLM score 单独阻断。
 
 理由：指标用于判断流程是否产生净收益。先为指标建设系统会重演治理膨胀，并可能激励虚假完成或跳过必要验证。
+
+### `ADR-SMV-017 Native-first semantic selection and deterministic policy kernel`
+
+决定：`decision_owner=host_ai`。当前可见 skill/native tool 由已在处理完整请求的宿主 AI 原生匹配并直接使用；只有显式能力查询、无可见匹配或跨 profile 冷发现时才调用兼容 router。router 按最多两个 profile hint 返回候选，宿主结合完整对话和否定语义选出最小集合，再由确定性 policy kernel 验证 containment、freshness、availability、side effect、approval、activation 与 session reuse。router 必须报告 `semantic_routing_performed=false`、`task_type/domain=host_adjudicated`、`confidence=null`，不得调用第二个模型或静默切换 profile。
+
+理由：真实使用反馈和重复自然语言回放已经证明，固定正则/词表既重复宿主已有语义能力，又丢失上下文和否定语义，辅助层反而低于仅使用 profile 的基线。该设计复用官方 `name + description -> model implicit/explicit invocation`，将本项目独有价值压缩到可确定、可测试的 discovery 与安全策略；它减少额外 token、延迟和双重决策，同时保留写操作、认证和激活的可见门禁。
+
+在当前约束下这是 Pareto-optimal，而不是宣称永恒或全局绝对最优：相对于继续堆词法规则，它提高语义质量并降低维护成本；相对于额外 provider/embedding/router service，它不增加模型调用、daemon、数据库、凭据或故障点；相对于只保留一个超大 profile，它守住元数据预算和渐进披露；相对于全手工选择，它允许低风险已可用能力无感使用。若未来官方提供可查询、可约束且带稳定 trace 的跨 profile 原生 discovery，本兼容 router 应继续缩减或退役；若真实 replay 不能降低误调用、漏调用、纠正次数或 TTFV，也应仅保留 policy kernel。
 
 ## 11. 安全与供应链
 
@@ -628,7 +654,7 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 
 以下任一提案默认拒绝，除非有重复真实问题、明确用户和验收证据：
 
-- 通用 agent runtime、planner、memory、model router 或 provider gateway；只读 capability selector 与 activation plan 不属于这些 runtime。
+- 通用 agent runtime、planner、memory、model router 或 provider gateway；只读 capability discovery/policy kernel 与 activation plan 不属于这些 runtime。
 - 中央目标仓 registry、跨仓自动同步或统一规则服务。
 - 为每个宿主复制完整插件商店、OAuth 或 connector 管理。
 - 只为展示 inventory 而建设数据库、搜索集群、Web/WPF UI。

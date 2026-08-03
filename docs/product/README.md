@@ -2,7 +2,7 @@
 
 **program_id**: `skills-manager-vnext`
 **文档状态**: active
-**最后更新**: 2026-08-03
+**最后更新**: 2026-08-04
 
 ## 1. 目的
 
@@ -27,12 +27,15 @@
 | [规则全域 reviewed change-set](rule-estate-reviewed-change-set.md) | 全局/多目标仓 plan、apply、resume、rollback 输入契约 | AI 自行批准或宿主加载证明 |
 | [Phase 5 Spec](../superpowers/specs/2026-08-03-capability-manager-vnext-phase-5-design.md) | 当前 adaptive decision plane、host snapshot、兼容和测试契约 | 宿主 runtime 或认证实现 |
 | [Lean Delivery maintenance spec](../superpowers/specs/2026-08-03-lean-ai-delivery-maintenance-design.md) | P5 后精益 AI 软件交付 advisory、pilot 和退役边界 | 新 Phase、agent runtime 或业务效果声明 |
+| [Native-first routing correction spec](../superpowers/specs/2026-08-04-native-first-capability-discovery-correction.md) | P5-local capability routing 回归纠正、宿主语义所有权和真实场景验收 | P6、新 router service 或普遍 live acceptance |
 | [实施计划](../../tasks/plan.md) | Phase 5 执行顺序、检查点、失败分流 | 产品背景全文 |
 | [任务 manifest](../../tasks/skills-manager-vnext-phase5.tasks.json) | AI 可解析的任务、依赖、write set、验证、回滚、完成条件 | 长篇设计解释 |
 | [Maintenance manifest](../../tasks/skills-manager-vnext-maintenance-design.tasks.json) | 非 Phase 的 M0 规划任务与 write-set 真值 | M1 pilot 任务或 P6 admission |
+| [Routing correction manifest](../../tasks/skills-manager-vnext-capability-routing-correction.tasks.json) | P5-local 缺陷纠正的任务、write set、验证与回滚真值 | 历史 Phase 状态改写或 P6 admission |
 | [任务清单](../../tasks/todo.md) | 人类可扫描的当前任务状态 | manifest 中的结构化细节副本 |
 | [planning verifier](../../scripts/verify-vnext-planning.ps1) | 机械校验上述资产的一致性 | 判断产品价值或宿主 live acceptance |
 | [maintenance verifier](../../scripts/verify-lean-ai-delivery-planning.ps1) | 在 P5 contract 通过后校验 maintenance design 一致性和边界 | 运行 pilot、修改 runtime 或评估业务收益 |
+| [capability routing verifier](../../scripts/verify-capability-routing.ps1) | 用 labelled 自然语言 corpus 验证 candidate recall、host-labelled policy、否定约束和零脚本语义自动选择 | 证明宿主模型普遍正确或业务 live acceptance |
 | [历史 evidence archive](../archive/change-evidence/README.md) | 保存已退出活跃账本的旧 runtime receipts | 当前 closeout 证明或运行态输出目录 |
 
 ## 3. 事实优先级
@@ -64,7 +67,7 @@
 
 ## 5. 当前基线
 
-截至 2026-08-02：
+截至 2026-08-04：
 
 - `skills.ps1`、`skills.json`、skill projection、MCP profile/sync、目标仓审查、doctor、reference shelf 和质量门禁已经存在。
 - 本目录、Phase 0 spec、Phase 0 task manifest 和 planning verifier 属于本轮新增的 `planning_contract`。
@@ -75,6 +78,7 @@
 - P3 已完成 7/7 `repo_verified`：只读 inventory、manifest lint、fixture-only exporter 和分层 eval 均有仓库证据；plugin install/host load/live acceptance 未执行。
 - P4 已完成 6/6 `repo_verified`：unified selection + activation planning、真实投影和 16-profile fresh prompt probe 已通过；不接管宿主 runtime，未执行 plugin/MCP activation、OAuth 或 live acceptance。
 - P5 已完成 5/5 `repo_verified`：task model、capability DAG、session/preheat plan、Codex App Server read-only snapshot 和 full closeout 已通过；authenticated business action 与 `live_accepted` 未执行。
+- P5-local routing correction 已完成 4/4 `repo_verified`：以真实用户反馈和自然语言反例退役 lexical task model/ranking；历史 P5 状态保留，当前实现只把宿主选中的 candidate 送入确定性 policy。宿主回放仍为 `host_evaluation_partial`，业务验收未执行。
 - `maintenance_design` 的 M0 规划包已完成 4/4 `repo_verified`：总体方案、spec、manifest、companion verifier、测试和 reviewed evidence 已落盘；M1-M3 仍为 `conditional`，10-task observe-only pilot、host/runtime 变化与业务效果验证均未执行。
 - `governed-ai-coding-runtime` 只作为静态规则模型参考；不得恢复其已退役的目标仓 registry、同步器或中央 verifier。
 - “全局 + 项目 1+1>2”已定义为 `common + platform_delta + project_action` 的责任覆盖合同；read-only Rule Advisor 已接通显式责任映射和 repo path/command 静态核验，通用自然语言语义精度仍不作外推。

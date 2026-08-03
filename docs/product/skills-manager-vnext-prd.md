@@ -161,17 +161,18 @@ Discovery 先确定用户、问题、成功信号和非目标；实现先跑通�
 
 ### 6.6 Unified capability selection
 
-- `FR-SEL-001`：以统一 selector 选择 skill、MCP、plugin/app/connector 和 native tool，但保留每种能力的 path、availability、auth、side-effect 与宿主字段。
-- `FR-SEL-002`：显式能力名优先；非显式匹配必须先应用 required/excluded intent 和 negative trigger，再进入 metadata ranking。
-- `FR-SEL-003`：弱证据必须 abstain；profile 只作为预热包和 active preference，不再决定能力是否可达。
+- `FR-SEL-001`：以统一 descriptor/policy contract 表达 skill、MCP、plugin/app/connector 和 native tool，但保留每种能力的 path、availability、auth、side-effect 与宿主字段；统一 policy 不等于统一 runtime 或语义路由器。
+- `FR-SEL-002`：宿主 AI 使用完整请求、对话上下文和可见 metadata 做唯一语义判断；确定性脚本只接受 `$skill`/`@skill` 形式的 explicit capability 或宿主标注的 candidate/exclusion，不再用正则、词频或固定同义词表决定相关性。普通文本中的能力名可能位于否定句，不构成选择授权。
+- `FR-SEL-003`：profile 是任务边界的有界预热包；没有可见匹配时，fallback discovery 按宿主给出的最多两个 profile hint 返回候选，不静默切 profile，也不把 profile 当权限边界。
 - `FR-SEL-004`：active/cold read-only skill 输出 `use_active_skill | load_skill`；operator skill 输出 `load_skill_with_approval`；读取必须受 declared root containment 保护。
 - `FR-SEL-005`：已可用 read-only/external-read 能力可自动使用；write/destructive/open-world/unknown 或 needs_activation 必须输出 approval/activation plan。
-- `FR-SEL-006`：建立 direct、indirect、negative、ambiguous、cross-domain 和 cross-kind golden corpus，机械验证 expected/forbidden selection、abstain 和 side-effect violations。
-- `FR-SEL-007`：selector 全程只读，不切 profile、不创建任务、不重启宿主、不调用 provider，也不保存或推断 OAuth/token/session 状态。
-- `FR-SEL-008`：selector 必须先生成结构化 task type、domain、goal、operations、requested kinds、risk 和 confidence；architecture/meta task 不得仅凭能力名关键词选择 builder/operator。
-- `FR-SEL-009`：多阶段任务输出最小有序 capability DAG；只创建当前任务有证据需要的阶段，不机械填满 workflow。
+- `FR-SEL-006`：建立 direct、indirect、negative、ambiguous、多阶段、architecture/stack、cross-domain、cross-kind 和 side-effect 自然语言 corpus；分别验证 profile candidate recall、宿主标注选择后的 policy、零 semantic auto-selection 和零 negative/side-effect violation。
+- `FR-SEL-007`：discovery/policy 全程只读，不切 profile、不创建任务、不重启宿主、不额外调用 provider，也不保存或推断 OAuth/token/session 状态。
+- `FR-SEL-008`：脚本必须报告 `decision_owner=host_ai`、`semantic_routing_performed=false`、`task_type/domain=host_adjudicated` 和 `confidence=null`；不得伪造未由宿主提供的意图、风险置信度或工程阶段。
+- `FR-SEL-009`：capability graph 只表达 `discover -> host_adjudication -> policy -> activate` 的责任顺序；产品交付阶段与多步执行计划继续由宿主 Agent/Plan/Goal 拥有。
 - `FR-SEL-010`：caller-provided session snapshot 只用于 compatible reuse/load/release planning；profile 只输出 `apply=false` preheat recommendation。
 - `FR-SEL-011`：Codex host snapshot 优先来自稳定只读 App Server RPC；包含 source/captured_at/freshness/availability/callable/access/auth evidence，陈旧事实 fail-closed，单来源失败可 truthful partial。
+- `FR-SEL-012`：任何辅助发现层不得降低 host-native/profile baseline；若真实 replay/canary 不能减少误调用、漏调用、用户纠正或 TTFV，则语义路由功能必须继续降级或删除，仅保留 policy kernel。
 
 ### 6.7 Operation plan and receipt
 
@@ -241,6 +242,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 9. AI 软件交付任务能先给出 Product Baseline、当前 delivery mode、单一主链和 Slice Contract，并在 checkpoint 前保持 write set 与停止条件稳定。
 10. 同类失败两次、方向证据变化、授权越界或 live/生产动作出现时会停止并重新规划或询问；普通低风险实现不会因固定角色审批而中断。
 11. 交付效果只以真实 pilot 观察；规划包、synthetic replay 或 repo verifier 不能被表述为真实业务收益。
+12. capability 辅助层必须在“只使用宿主原生匹配 + 当前 profile”基线之上证明净收益；deterministic corpus、profile 可见性和少量 host replay 分别报告，不互相冒充。
 
 ## 9. 成功指标
 
@@ -260,6 +262,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 | `MET-010` | 需要用户介入的非预期人工打断次数 | observe-only；区分必要风险确认与流程噪声 |
 | `MET-011` | 非产品 artifact 数量与维护成本 | observe-only；无消费者或无验证价值的候选进入删除评审 |
 | `MET-012` | `repo_verified` 向明确 `live_accepted` 的转化 | observe-only；未运行真实工作流时保持 not_run |
+| `MET-013` | capability routing precision/recall、误调用、漏调用与用户纠正 | labelled corpus + 只读 host replay 分层记录；未建立跨任务 baseline 前不设硬阈值 |
 
 ## 10. 发布和兼容边界
 
@@ -269,6 +272,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - Phase 3 才评估 personal plugin lint/export，不创建公共 marketplace。
 - Phase 4 只增加统一 capability selection 和 activation planning；宿主仍拥有 MCP/plugin/tool runtime、认证、权限、approval 和 session。
 - Phase 5 增加 task understanding、capability DAG、session reuse planning 和只读 host snapshot；仍不接管执行、安装、认证、审批、profile 或 session mutation。
+- P5 maintenance correction 以真实用户反馈和重复自然语言回放退役 lexical task understanding/ranking；该修正不改写 P5 历史任务状态，不构成 P6，也不宣称 host-native 路由已经 live accepted。
 - P5 后的 `maintenance_design` 只建立 Lean Delivery advisory 规划契约和条件性 pilot 设计；它不是新 Phase，不改变 P5/P6 状态，也不证明新的 AI 工作流已产生业务效果。
 - GUI、daemon、远端协作、数据库和 domain core 重写均为 conditional，不进入当前承诺。
 
