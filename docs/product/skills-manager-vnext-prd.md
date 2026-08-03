@@ -9,17 +9,24 @@
 
 `skills-manager vNext` 是一个 Windows-first、local-first 的 AI 能力策展器与规则全域管理器。它帮助用户为 ChatGPT Work/Codex 与 Claude 选择、组合、投影和验证合适的 skills、plugins、MCP 与规则文件，并管理 `D:\CODE` 直属目标仓（默认排除 `external`、`文档`）及两宿主的全局用户规则，同时保持宿主原生能力、目标仓自治和真实验收边界。
 
+面向高效 AI 软件交付时，它额外提供一层精益、按阶段启用的 advisory lens：把产品目标、主链、当前切片、停止条件、最低充分验证和完成等级说清楚，再由 ChatGPT/Codex/Claude 等宿主原生 Agent 执行。它引导和约束 AI 编码，但不复制模型的推理、编码、会话、多代理或长期运行能力。
+
 它不是 AI coding runtime，不执行或接管 agent loop，不提供模型路由、账号、认证、权限、会话、云任务、插件商店或中央跨仓治理服务。
 
 ## 2. 背景与问题
 
-当前仓库已经解决了多来源 skill 安装、构建、投影、MCP profile、目标仓审查和证据等问题，但继续扩展时出现五类系统性风险：
+当前仓库已经解决了多来源 skill 安装、构建、投影、MCP profile、目标仓审查和证据等问题，但继续扩展时出现以下系统性风险：
 
 1. 官方产品已经提供 skills、plugins、MCP、hooks、`AGENTS.md` 和原生配置，重复实现会产生重叠与漂移。
 2. skills、MCP、plugins 和规则文件的生命周期不同，塞进同一巨型配置或通用对象会造成错误抽象。
 3. 当前 PowerShell 源码包含大量函数和多个超大命令文件，继续横向加功能会提高回归和维护成本。
 4. 规则优化容易退化为中央同步、批量覆盖和“repo-side pass 等于宿主已接受”的旧问题。
 5. AI 执行需要清晰的 requirement ID、write set、依赖、验证和回滚，普通路线图不足以支持可靠编码。
+6. AI 容易在首次用户价值出现前预建框架、抽象、治理层、测试矩阵和非产品 artifact，主链却没有跑通。
+7. 产品经理、架构师、开发、测试和运维被机械实例化为固定 Agent 并反复交接，增加上下文损耗、冲突和 token 成本，却没有增加责任覆盖。
+8. 澄清不足会让错误方向持续执行；澄清过多又会把可自动推进的低风险工作切碎为人工审批流水线。
+9. 门禁没有按风险升级，日常切片重复运行完整套件或为同一风险堆叠多层测试，反馈周期和维护成本持续膨胀。
+10. 将一次成功或未经回放的总结直接升级为 skill、规则或长期记忆，会把偶然做法、项目局部事实和错误经验扩散到后续任务。
 
 ## 3. 目标用户
 
@@ -50,6 +57,9 @@
 | `JTBD-004` | 安全地应用本地配置/规则改动 | plan/diff 先行，写入显式确认，备份和 receipt 完整 |
 | `JTBD-005` | 判断改动是否真的生效 | repo verification、host load、live acceptance 分层报告 |
 | `JTBD-006` | 让 AI 连续执行工程任务 | 每个任务都有依赖、write set、测试、回滚和 done_when |
+| `JTBD-007` | 尽快获得首个可验证用户价值 | 先跑通最短端到端主链，TTFV 可观察且非产品 artifact 受控 |
+| `JTBD-008` | 在有界授权内让 AI 连续执行 | 低风险切片自动推进；方向变化、授权越界或连续失败时才打断用户 |
+| `JTBD-009` | 为软件生命周期当前阶段选择最小能力组合 | 只启用当前阶段必需的 lens、skill、tool 和 verifier，不机械展开完整团队/流程 |
 
 ## 5. 产品原则
 
@@ -82,6 +92,14 @@ Capability、RuleDocument、Profile、OperationPlan 和 Receipt 使用独立模�
 ### `PP-007 Maximum reasonable slice`
 
 优先边界清楚、可验证、可回滚的最大合理切片；不机械拆成微任务，也不跨越多个高风险写入面。
+
+### `PP-008 Main-chain first`
+
+Discovery 先确定用户、问题、成功信号和非目标；实现先跑通一条最短可演示主链，再按真实失败稳定化和重构。没有主链证据前，不为未来扩展预建平台层。
+
+### `PP-009 Adaptive governance`
+
+治理、角色 lens、测试层级和能力组合随生命周期模式与风险升级。一个风险只使用最低充分证明；未产生净收益的流程、字段、skill 和指标应降级或退役。
 
 ## 6. 功能需求
 
@@ -180,6 +198,15 @@ Capability、RuleDocument、Profile、OperationPlan 和 Receipt 使用独立模�
 - `FR-EVD-004`：敏感路径和凭据不得写入可提交 evidence；host-local receipt 默认保留在忽略目录。
 - `FR-EVD-005`：活跃 `docs/change-evidence/` 只保存 reviewed 逻辑切片；历史 runtime receipts 进入只读 archive，未来 runtime receipts 留在 ignored `reports/`。
 
+### 6.10 Lean AI software delivery advisory
+
+- `FR-LDL-001`：为复杂产品任务建立轻量 Product Baseline 逻辑契约，至少覆盖目标用户、问题、期望结果、成功信号、范围、非目标、关键约束、风险、验收等级与未决问题；优先复用现有 PRD、plan 和 task 字段，不新增第二套 runtime 大对象。
+- `FR-LDL-002`：按当前工作状态选择 `Discovery | Main-chain | Stabilize | Refactor | Release | Operate` delivery mode；每次只激活完成当前 checkpoint 所需的最小能力组合，并允许在证据变化时回退到前一模式。
+- `FR-LDL-003`：进入实现前最多提出三项会改变方案或验收的高价值澄清；其余可逆细节采用显式假设继续。相同 `issue_id` 连续失败两次后停止局部补丁，回到 baseline/slice 重新规划，方向变化或风险越界时询问用户。
+- `FR-LDL-004`：产品、项目、业务、UX、架构、前端、后端、移动、测试、安全、发布和运维只作为按需责任 lens；主 Agent 对端到端结果负责，不默认实例化固定角色团队或制造角色接力文档。
+- `FR-LDL-005`：为 maintenance pilot 轻量记录 TTFV、返工、人工打断、非产品 artifact、门禁耗时和 live acceptance 转化；指标仅 observe，不建立遥测服务，不以语义评分或未经 baseline 的阈值阻断交付。
+- `FR-LDL-006`：重复工作先成为 `skill_candidate`，经代表任务 replay、失败样本修订、shadow、有限 canary 和 reviewed promotion 后才进入稳定 skill；持续记录触发精度、净收益、适用边界和退役条件，宿主原生能力覆盖或模型进步消除缺口时应合并、降级或 retire。
+
 ## 7. 非功能需求
 
 - `NFR-COMP-001`：现有 `skills.json`、lock、CLI aliases、generated `skills.ps1` 和 MCP/skill projection 行为保持兼容。
@@ -195,6 +222,9 @@ Capability、RuleDocument、Profile、OperationPlan 和 Receipt 使用独立模�
 - `NFR-GOV-001`：编码前记录问题证据、官方/既有复用结论、最小方案、write set 与停止条件；full gate 和独立 evidence 仅在共享边界、closeout 或 release 需要时增加。
 - `NFR-GOV-002`：P5 后默认 maintenance hold；没有跨域真实失败、已消费 P5 输出、现有 seam 无法修复和用户明确授权，不创建 P6 manifest 或 schema major。
 - `NFR-TRU-001`：任何“完成/生效/验收”声明必须绑定 verification level 和 evidence path。
+- `NFR-LDL-001`：maintenance design/pilot 不增加 schema major、daemon、数据库、长期任务引擎、固定角色 runtime 或任何宿主写入行为。
+- `NFR-LDL-002`：LLM 判断、语义评分和自我总结只能作为建议或候选信号，不得成为唯一硬门禁、权限判定或 skill promotion 依据。
+- `NFR-LDL-003`：主链优先于完备架构，测试采用最低充分层级；`designed | planning_contract | implemented | repo_verified | host_loaded | live_accepted` 不得越级。
 
 ## 8. 产品级验收
 
@@ -208,6 +238,9 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 6. 官方插件或系统技能已覆盖的能力不会被重复安装为默认自维护副本。
 7. fresh native probe 与 repo-side gate 分开呈现；未执行 live workflow 时保持 `not_verified`。
 8. AI 能按 task manifest 执行当前 Phase，不需要从多份文档猜测 write set、依赖或完成条件。
+9. AI 软件交付任务能先给出 Product Baseline、当前 delivery mode、单一主链和 Slice Contract，并在 checkpoint 前保持 write set 与停止条件稳定。
+10. 同类失败两次、方向证据变化、授权越界或 live/生产动作出现时会停止并重新规划或询问；普通低风险实现不会因固定角色审批而中断。
+11. 交付效果只以真实 pilot 观察；规划包、synthetic replay 或 repo verifier 不能被表述为真实业务收益。
 
 ## 9. 成功指标
 
@@ -222,6 +255,11 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 | `MET-005` | 官方已有等价能力却新增自维护副本 | 0 个未经 waiver 的新增 |
 | `MET-006` | repo_verified 被误报为 live_accepted | 0 |
 | `MET-007` | task manifest 与 plan/todo 漂移 | planning verifier 中 0 finding |
+| `MET-008` | TTFV（任务开始到首个可演示、可验证主链） | observe-only；10-task pilot 后建立 baseline |
+| `MET-009` | 因需求/方向误解造成的返工切片数 | observe-only；按任务记录原因，不预设硬阈值 |
+| `MET-010` | 需要用户介入的非预期人工打断次数 | observe-only；区分必要风险确认与流程噪声 |
+| `MET-011` | 非产品 artifact 数量与维护成本 | observe-only；无消费者或无验证价值的候选进入删除评审 |
+| `MET-012` | `repo_verified` 向明确 `live_accepted` 的转化 | observe-only；未运行真实工作流时保持 not_run |
 
 ## 10. 发布和兼容边界
 
@@ -231,6 +269,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - Phase 3 才评估 personal plugin lint/export，不创建公共 marketplace。
 - Phase 4 只增加统一 capability selection 和 activation planning；宿主仍拥有 MCP/plugin/tool runtime、认证、权限、approval 和 session。
 - Phase 5 增加 task understanding、capability DAG、session reuse planning 和只读 host snapshot；仍不接管执行、安装、认证、审批、profile 或 session mutation。
+- P5 后的 `maintenance_design` 只建立 Lean Delivery advisory 规划契约和条件性 pilot 设计；它不是新 Phase，不改变 P5/P6 状态，也不证明新的 AI 工作流已产生业务效果。
 - GUI、daemon、远端协作、数据库和 domain core 重写均为 conditional，不进入当前承诺。
 
 ## 11. 官方与社区依据
@@ -243,6 +282,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - [OpenAI Plugins](https://learn.chatgpt.com/docs/plugins) 与 [Plugin architecture](https://developers.openai.com/plugins/concepts/plugins)：采用“先发现/安装现有 plugin”和最小 plugin shape，区分 skill、MCP/connector、hook 与 optional UI。
 - [OpenAI Skills](https://developers.openai.com/plugins/concepts/skills)：采用 progressive disclosure，以及 workflow instructions 与 live data/action 的清晰边界。
 - [OpenAI MCP](https://learn.chatgpt.com/docs/extend/mcp) 与 [Hooks](https://learn.chatgpt.com/docs/hooks)：MCP 用于外部动态数据/动作；只有确定性 lifecycle enforcement 才进入 hook/script/CI。
+- [OpenAI Codex execution plans](https://developers.openai.com/cookbook/articles/codex_exec_plans)：适配长任务的目标、进度、决策和验证追踪，不把计划本身当作交付结果。
 - [MCP specification](https://modelcontextprotocol.io/specification/latest) 与 [MCP Registry](https://registry.modelcontextprotocol.io/)：采用 schema、versioning、validation 和来源/所有权边界。
 
 ### 社区采纳或适配
@@ -250,6 +290,10 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - [wshobson/agents](https://github.com/wshobson/agents)：采纳细粒度 plugin、单一源到宿主原生产物、结构校验；拒绝把大规模多代理/模型分层直接移入本项目。
 - [obra/superpowers](https://github.com/obra/superpowers)：采纳 evidence-before-claims、可组合 workflow 和行为测试；拒绝默认强制全部流程和 always-on bootstrap。
 - [mattpocock/skills](https://github.com/mattpocock/skills)：采纳小、可组合、可编辑副本与订阅式 plugin 的区别；拒绝由 workflow 接管完整工程过程。
+- [github/spec-kit](https://github.com/github/spec-kit)：适配从 constitution/spec/plan/tasks 到实现的可追踪结构；拒绝强制 TDD、固定文件数和所有任务人工审批等与本仓风险分级不符的流程。
+- [OpenHands](https://github.com/All-Hands-AI/OpenHands) 与 [LangGraph](https://github.com/langchain-ai/langgraph)：仅作为 agent runtime、状态图和可恢复执行的对照；当前 defer，不把 runtime/control plane 移入 skills-manager。
+- [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)：仅在外置个人 Agent/长期任务需要独立验证后评估组合；不得作为本仓的默认执行内核或真值源。
+- [Obsidian](https://obsidian.md/)：可作为用户拥有的产品知识库和长期笔记界面；本仓只消费明确导出的文档/链接，不把 vault、插件或双链索引变为必需 runtime。
 - `D:\CODE-other\governed-ai-coding-runtime`：采纳规则最小化、`common/platform_delta/project_action` 层级职责、共同语义与平台差异分离、native probe 和 wrapper 启发；把固定结构/体量预算适配为 profile；拒绝恢复已退役的中央 registry/sync/audit runtime。精确 revision、逐项 disposition 和证据见 [规则治理参考采纳矩阵](rule-governance-adoption-matrix.md)。
 
 ## 12. 决策与待确认
@@ -262,6 +306,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - `DEC-PROD-004`：不立即改仓库名；只有规则/plugin 两条新主路径经过真实使用验收后再评估品牌更名。
 - `DEC-PROD-005`：未来 Phase 在进入实施前各自生成详细 task manifest，避免提前维护大量猜测任务。
 - `DEC-PROD-006`：Rules Advisor 使用责任覆盖模型，不建立通用规则 AST、重型 policy engine 或强制统一模板。
+- `DEC-PROD-007`：Lean AI Software Delivery 是 P5 后的 advisory maintenance track；先通过 10 个真实任务 observe-only pilot 证明净收益，再决定保留、修订、退役或是否形成新的 P6 admission 输入。
 
 以下选择有意延迟到有真实代码/宿主证据的任务，不允许 AI 在更早任务中猜定：
 

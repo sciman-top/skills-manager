@@ -26,10 +26,13 @@
 | [规则治理参考采纳矩阵](rule-governance-adoption-matrix.md) | 官方/参考仓模式的 adopt/adapt/reject/defer 与验证边界 | 当前宿主安装或跨仓写入状态 |
 | [规则全域 reviewed change-set](rule-estate-reviewed-change-set.md) | 全局/多目标仓 plan、apply、resume、rollback 输入契约 | AI 自行批准或宿主加载证明 |
 | [Phase 5 Spec](../superpowers/specs/2026-08-03-capability-manager-vnext-phase-5-design.md) | 当前 adaptive decision plane、host snapshot、兼容和测试契约 | 宿主 runtime 或认证实现 |
+| [Lean Delivery maintenance spec](../superpowers/specs/2026-08-03-lean-ai-delivery-maintenance-design.md) | P5 后精益 AI 软件交付 advisory、pilot 和退役边界 | 新 Phase、agent runtime 或业务效果声明 |
 | [实施计划](../../tasks/plan.md) | Phase 5 执行顺序、检查点、失败分流 | 产品背景全文 |
 | [任务 manifest](../../tasks/skills-manager-vnext-phase5.tasks.json) | AI 可解析的任务、依赖、write set、验证、回滚、完成条件 | 长篇设计解释 |
+| [Maintenance manifest](../../tasks/skills-manager-vnext-maintenance-design.tasks.json) | 非 Phase 的 M0 规划任务与 write-set 真值 | M1 pilot 任务或 P6 admission |
 | [任务清单](../../tasks/todo.md) | 人类可扫描的当前任务状态 | manifest 中的结构化细节副本 |
 | [planning verifier](../../scripts/verify-vnext-planning.ps1) | 机械校验上述资产的一致性 | 判断产品价值或宿主 live acceptance |
+| [maintenance verifier](../../scripts/verify-lean-ai-delivery-planning.ps1) | 在 P5 contract 通过后校验 maintenance design 一致性和边界 | 运行 pilot、修改 runtime 或评估业务收益 |
 | [历史 evidence archive](../archive/change-evidence/README.md) | 保存已退出活跃账本的旧 runtime receipts | 当前 closeout 证明或运行态输出目录 |
 
 ## 3. 事实优先级
@@ -72,6 +75,7 @@
 - P3 已完成 7/7 `repo_verified`：只读 inventory、manifest lint、fixture-only exporter 和分层 eval 均有仓库证据；plugin install/host load/live acceptance 未执行。
 - P4 已完成 6/6 `repo_verified`：unified selection + activation planning、真实投影和 16-profile fresh prompt probe 已通过；不接管宿主 runtime，未执行 plugin/MCP activation、OAuth 或 live acceptance。
 - P5 已完成 5/5 `repo_verified`：task model、capability DAG、session/preheat plan、Codex App Server read-only snapshot 和 full closeout 已通过；authenticated business action 与 `live_accepted` 未执行。
+- `maintenance_design` 的 M0 规划包已完成 4/4 `repo_verified`：总体方案、spec、manifest、companion verifier、测试和 reviewed evidence 已落盘；M1-M3 仍为 `conditional`，10-task observe-only pilot、host/runtime 变化与业务效果验证均未执行。
 - `governed-ai-coding-runtime` 只作为静态规则模型参考；不得恢复其已退役的目标仓 registry、同步器或中央 verifier。
 - “全局 + 项目 1+1>2”已定义为 `common + platform_delta + project_action` 的责任覆盖合同；read-only Rule Advisor 已接通显式责任映射和 repo path/command 静态核验，通用自然语言语义精度仍不作外推。
 
@@ -82,4 +86,5 @@
 - 改 Phase 状态先提供退出门禁证据，再改路线图和 task status。
 - task manifest 是任务 ID、依赖、write set 和完成条件真源；todo 只保留相同 ID 的简表。
 - 运行 `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-vnext-planning.ps1` 校验文档和任务一致性。
+- maintenance track 先运行 vNext verifier，再运行 `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-lean-ai-delivery-planning.ps1`；它不替代 full gate，也不创建 P6 manifest。
 - 规划 verifier 通过只证明规划资产内部一致，不证明产品代码、宿主加载或真实使用效果。

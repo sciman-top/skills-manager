@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "program_id": "skills-manager-vnext",
+  "track": "maintenance_design",
+  "base_phase": "P5",
+  "p6_admission_status": "hold",
+  "allowed_statuses": ["pending", "in_progress", "blocked", "deferred", "done"],
+  "allowed_risks": ["low", "medium", "high"],
+  "tasks": [
+    {
+      "id": "SMV-MD-001",
+      "title": "同步 Lean AI Software Delivery 产品真源",
+      "status": "done",
+      "risk": "low",
+      "depends_on": [],
+      "requirement_ids": ["JTBD-007", "JTBD-008", "JTBD-009", "FR-LDL-001", "FR-LDL-002", "FR-LDL-004", "FR-LDL-005", "FR-LDL-006"],
+      "architecture_decision_ids": ["ADR-SMV-012", "ADR-SMV-013", "ADR-SMV-015", "ADR-SMV-016"],
+      "goal": "把面向高效 AI 软件交付的定位、反过度设计问题、生命周期模式、工具组合、指标与退役边界合并到既有唯一产品真源。",
+      "preconditions": ["P5 5/5 repo_verified", "P6 admission status is hold", "worktree baseline recorded"],
+      "write_set": [
+        "docs/product/skills-manager-vnext-prd.md",
+        "docs/product/skills-manager-vnext-architecture.md",
+        "docs/product/skills-manager-vnext-roadmap.md",
+        "docs/product/README.md",
+        "docs/change-evidence/20260803-lean-ai-delivery-maintenance-design.md"
+      ],
+      "implementation_steps": ["补充问题、JTBD、FR/NFR 与指标", "定义 advisory 架构、责任 lens 和 ADR", "增加 M0-M3 条件性路线", "同步产品索引与 truth boundary"],
+      "tests": ["FR/NFR/ADR identifier uniqueness", "P5/P6/pilot/runtime truth static review", "documentation link checks"],
+      "verification": ["git diff --check", "scripts/verify-lean-ai-delivery-planning.ps1 -Json"],
+      "rollback": ["只撤销四个产品文档的 maintenance 增量和共享 evidence 对应记录"],
+      "done_when": ["既有产品文档仍为唯一产品真源", "P5/P6 状态未改变", "设计态能力未被描述为 runtime/live 实现"],
+      "out_of_scope": ["new product name", "P6 phase", "runtime implementation", "real pilot"]
+    },
+    {
+      "id": "SMV-MD-002",
+      "title": "落盘 maintenance spec、实施计划与 checklist",
+      "status": "done",
+      "risk": "low",
+      "depends_on": ["SMV-MD-001"],
+      "requirement_ids": ["FR-LDL-001", "FR-LDL-002", "FR-LDL-003", "FR-LDL-006", "NFR-LDL-001"],
+      "architecture_decision_ids": ["ADR-SMV-013", "ADR-SMV-014", "ADR-SMV-015"],
+      "goal": "建立 PRD 到架构、spec、plan、task、verifier 的非 Phase 可执行追踪，同时保留 P5 current-phase truth。",
+      "preconditions": ["product source identifiers stabilized", "maintenance track is not a Phase", "M1 pilot remains conditional"],
+      "write_set": [
+        "docs/superpowers/specs/2026-08-03-lean-ai-delivery-maintenance-design.md",
+        "tasks/skills-manager-vnext-maintenance-design.tasks.json",
+        "tasks/plan.md",
+        "tasks/todo.md",
+        "docs/change-evidence/20260803-lean-ai-delivery-maintenance-design.md"
+      ],
+      "implementation_steps": ["按固定二十章定义 spec", "建立四任务 manifest 与依赖", "为 plan 增加 ordered work/checkpoint", "为 todo 增加一次性状态镜像"],
+      "tests": ["manifest JSON parse", "task dependency manual review", "spec/plan/todo exact coverage"],
+      "verification": ["ConvertFrom-Json maintenance manifest", "scripts/verify-lean-ai-delivery-planning.ps1 -Json"],
+      "rollback": ["删除 maintenance spec/manifest 并撤销 plan/todo 独立章节，不修改 P5 资产"],
+      "done_when": ["四个任务字段完整且无环", "plan/todo 各引用每个 maintenance task 一次", "pilot 未进入当前 manifest"],
+      "out_of_scope": ["second PRD", "second roadmap", "P6 manifest", "pilot execution tasks"]
+    },
+    {
+      "id": "SMV-MD-003",
+      "title": "实现 maintenance planning verifier 与单元测试",
+      "status": "done",
+      "risk": "medium",
+      "depends_on": ["SMV-MD-002"],
+      "requirement_ids": ["FR-AIE-005", "FR-LDL-005", "NFR-LDL-001", "NFR-LDL-002", "NFR-LDL-003"],
+      "architecture_decision_ids": ["ADR-SMV-013", "ADR-SMV-014", "ADR-SMV-016"],
+      "goal": "以只读 companion verifier fail-close maintenance planning 漂移，并通过最小文件 fixtures 证明关键负向边界。",
+      "preconditions": ["existing P5 verifier remains authoritative", "maintenance file set stabilized", "Pester 4.10.1 available or N/A recorded"],
+      "write_set": [
+        "scripts/verify-lean-ai-delivery-planning.ps1",
+        "tests/Unit/LeanAiDeliveryPlanning.Tests.ps1",
+        "docs/change-evidence/20260803-lean-ai-delivery-maintenance-design.md"
+      ],
+      "implementation_steps": ["先调用 P5 planning verifier", "实现 manifest/cross-reference/write-set/truth checks", "实现 stable JSON and exit contract", "增加 current and negative fixtures"],
+      "tests": ["current repository pass", "missing/schema/dependency/reference/coverage/write-set/evidence/truth negative cases", "JSON and exit stability"],
+      "verification": ["Invoke-Pester ProductPlanning.Tests.ps1,LeanAiDeliveryPlanning.Tests.ps1", "scripts/verify-vnext-planning.ps1 -Json", "scripts/verify-lean-ai-delivery-planning.ps1 -Json"],
+      "rollback": ["删除 companion verifier/tests；原 P5 verifier 继续独立有效"],
+      "done_when": ["current repo has zero maintenance findings", "all planned negative cases emit deterministic finding codes", "verifier performs no writes/network/host access"],
+      "out_of_scope": ["refactor existing P5 verifier", "semantic LLM scoring", "runtime enforcement"]
+    },
+    {
+      "id": "SMV-MD-004",
+      "title": "同步根契约、共享 evidence 并完成有序收口",
+      "status": "done",
+      "risk": "medium",
+      "depends_on": ["SMV-MD-003"],
+      "requirement_ids": ["FR-EVD-003", "FR-LDL-005", "NFR-LDL-003", "NFR-TRU-001"],
+      "architecture_decision_ids": ["ADR-SMV-012", "ADR-SMV-013", "ADR-SMV-016"],
+      "goal": "把非 Phase 维护真源登记到根契约，以一份逻辑切片 evidence 和唯一 full gate 收口，并保持 P5/P6/pilot/live 边界。",
+      "preconditions": ["all planning assets and focused tests complete", "no unknown worktree changes", "P6 manifest absent"],
+      "write_set": [
+        "AGENTS.md",
+        "docs/product/skills-manager-vnext-roadmap.md",
+        "tasks/skills-manager-vnext-maintenance-design.tasks.json",
+        "tasks/todo.md",
+        "docs/change-evidence/20260803-lean-ai-delivery-maintenance-design.md"
+      ],
+      "implementation_steps": ["登记 maintenance truth without copying full design", "记录 source/write-set/disposition/truth boundary", "运行 ordered build/focused/contracts/full", "同步 done 状态并复核 Git boundary"],
+      "tests": ["focused planning tests", "P0-P5 historical planning contract", "full local quality gate once"],
+      "verification": ["scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree", "git diff --check", "git status --short --branch"],
+      "rollback": ["只撤销本 track 文件和增量；P5 manifest/spec/evidence、runtime/config/host 状态保持不变"],
+      "done_when": ["four maintenance tasks done with shared evidence", "new and old planning verifiers pass", "maintenance design planning package is repo_verified only"],
+      "out_of_scope": ["business live acceptance", "host mutation", "P6 admission", "real pilot"]
+    }
+  ]
+}

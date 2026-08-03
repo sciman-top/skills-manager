@@ -1,0 +1,197 @@
+# Lean AI Software Delivery maintenance design
+
+**program_id**: `skills-manager-vnext`
+**track**: `maintenance_design`
+**base_phase**: `P5`
+**status**: `repo_verified`
+**P6_ADMISSION_STATUS: hold**
+**PILOT_STATUS: pilot_not_executed**
+**RUNTIME_IMPLEMENTATION_STATUS: no_runtime_implementation**
+**LIVE_ACCEPTANCE_STATUS: not_run**
+**METRICS_MODE: observe_only**
+**METRICS_COMPLETION_GATE: false**
+**日期**: 2026-08-03
+
+## 1. Problem and evidence
+
+AI 编码的主要浪费不再只是模型不会写代码，而是交付控制面失真：需求与定位未澄清便开始实现；先搭框架、治理、角色和测试矩阵，首条用户价值链却未跑通；多个“角色”机械交接但无人对端到端结果负责；同一风险被多层门禁重复证明；局部失败持续打补丁而不重新检查方向；一次成功或自我总结被直接写成长期 skill，污染后续工作流。
+
+本仓已有事实同时给出约束和复用面：P5 已提供结构化 task model、最小 capability DAG、session/preheat recommendation 和只读 host snapshot；现有 PRD/task/plan/evidence 已能表达 goal、write set、verification、rollback 和 truth level；full gate 已是唯一 closeout 编排入口。因此当前问题可以先通过 advisory contract、文档追踪和 deterministic verifier 处理，没有证据需要第二套 agent runtime。
+
+本设计响应的用户证据是：需要从模糊产品想法连续推进到设计、实现和验证，同时避免过度设计、方向漂移、角色接力、门禁膨胀与 token 空耗。M0 只证明这些要求被准确落盘并可机械校验；真实效果必须由后续 pilot 观察。
+
+## 2. Goal and target user
+
+目标是让单个高级用户把 ChatGPT/Codex/Claude 等宿主 Agent 与 skills-manager 组合为更高效的软件交付工作流：用户提供初始目标与必要决策，主 Agent 负责讨论、规划、实施、修复和证据闭环，skills-manager 帮助选择最小能力组合并守住范围、停止条件和完成等级。
+
+Primary user 是 Windows-first、维护多个本地仓库、希望显著减少人工盯守但不接受虚假完成的个人开发者。Secondary user 是需要一致任务契约、可审查证据和低维护成本的仓库维护者。AI Agent 是合同消费者，不是本产品托管的 worker。
+
+## 3. Product constitution
+
+1. 用户价值主链优先：先有可演示结果，再稳定化和重构。
+2. 官方/宿主原生优先：复用模型推理、Codex/Claude 执行、plugins、skills、MCP、hooks 和权限系统。
+3. 本地与目标仓真值优先：repo 文件、当前命令和 native probe 高于中央模板与模型记忆。
+4. 最小能力组合：只加载当前模式需要的 lens/skill/tool，不串联完整流程目录。
+5. 有界自主：可逆、授权内、write-set 内连续执行；方向、风险、权限或生产边界变化才询问。
+6. 根因与两次失败重规划：同一问题第二次失败后停止补丁循环。
+7. 最低充分验证：一个风险由最低能证明它的层级覆盖；full suite 只由 closeout gate 统一运行。
+8. 证据决定状态：规划、实现、repo、host 与 live 状态严格分层。
+9. 学习必须可回放、可否定、可退役：未经 reviewed promotion 的总结不能成为稳定规则。
+10. 可删除性优先：模型/宿主能力增强或 pilot 无净收益时，主动删除、合并或降级本项目功能。
+
+## 4. In scope / out of scope
+
+In scope：
+
+- 把面向高效 AI 软件交付的总体定位、问题、需求、原则、模式和指标并入既有产品真源。
+- 定义 Product Baseline、Slice Contract、checkpoint、bounded autonomy、责任 lens 和 skill lifecycle 的逻辑合同。
+- 定义 M0-M3 maintenance 路线和 10-task observe-only pilot 的准入/退出方法。
+- 提供 machine-readable maintenance manifest、companion verifier、负向测试和一份 reviewed evidence。
+
+Out of scope：
+
+- 新 agent runtime、planner service、长期任务引擎、daemon、数据库、模型/provider router 或固定角色团队。
+- 修改 `src/`、`overrides/`、`skills.json`、profile、schema major、host auth/config/session、plugins/MCP 状态。
+- 安装或运行 Hermes、Obsidian 插件、Spec Kit、OpenHands、LangGraph 或其他社区 runtime。
+- 运行真实 10-task pilot、生产部署、付费模型调用、跨仓 apply 或业务 `live_accepted` 验收。
+- 把 spec-driven development 的强制 TDD、每任务文件数限制或全流程人工审批移入本仓契约。
+
+## 5. Lifecycle modes
+
+| Mode | 核心问题 | 最小输出 | Checkpoint |
+| --- | --- | --- | --- |
+| `Discovery` | 为谁解决什么，何为成功？ | baseline、最多三项关键问题、假设与非目标 | 方案选择所需信息充分 |
+| `Main-chain` | 最短用户价值链怎样跑通？ | 端到端薄切片、真实输入、可观察结果 | 主路径最低充分验证通过 |
+| `Stabilize` | 已观察失败的根因是什么？ | 根因修复、必要边界测试 | 同一失败不可复现且无关键回归 |
+| `Refactor` | 哪个重复/热点已有证据？ | 行为保持的最小结构改进 | contract 保持且热点改善 |
+| `Release` | 如何安全交付和回滚？ | 唯一 closeout gate、发布/回滚证据 | 目标等级验证完成 |
+| `Operate` | 如何观察、分流、恢复和学习？ | 事件证据、owner、恢复与反馈 | 事件闭合或形成新 Discovery 输入 |
+
+模式可回退，不是瀑布。主链回归就回到 Main-chain；用户价值或验收变化就回到 Discovery。简单、边界清楚的修复无需补齐所有模式文档。
+
+## 6. Product Baseline
+
+复杂或方向敏感任务开始前，以现有 PRD/spec/task 字段建立一页内逻辑 baseline：
+
+- `target_user`：谁使用，谁拥有最终接受权。
+- `problem_and_evidence`：当前可复核痛点、样本或失败，不以假想扩展代替。
+- `desired_outcome`：用户可观察的变化，不写内部组件数量。
+- `success_signals`：首个主链 checkpoint 与目标 verification level。
+- `scope / non_goals`：本切片做什么和明确不做什么。
+- `constraints`：兼容、安全、资源、时间、权限和外部依赖。
+- `assumptions / open_questions`：可逆假设与最多三项真正改变方案的问题。
+- `truth_boundary`：最高允许声明到 designed、implemented、repo_verified、host_loaded 或 live_accepted 的哪一级。
+
+baseline 放在当前任务 spec/plan 中；不创建第二个数据库、全局 registry 或长期 memory。事实变化时显式更新并说明影响的 slice，而不是在实现中静默漂移。
+
+## 7. Slice Contract and checkpoint
+
+每个实施切片复用 task manifest 字段：ID、goal、depends_on、preconditions、exact write_set、implementation_steps、tests、verification、rollback、done_when 和 out_of_scope。plan 只添加顺序与 exit checkpoint，todo 只提供同 ID 状态。
+
+checkpoint 回答四个问题：用户可见/可验证增量是否出现；write set 是否仍在授权边界；最低充分验证是否通过；下一步是继续、稳定化、重构、发布还是回到 Discovery。切片没有用户增量或风险证据时，不以新增 schema、wrapper、fixture、evidence 或抽象数量代替进展。
+
+## 8. Bounded autonomy loop
+
+主 Agent 按以下循环持续执行：读取当前 repo/user truth；选择当前 mode 与最大合理切片；在授权和 write set 内实施；运行 affected verification；对照 checkpoint；通过则记录证据并继续；首次可恢复失败先做根因诊断与一次修复；同一 `issue_id` 第二次失败则停止局部补丁并重规划。
+
+必须询问或停止的情况：产品方向/目标用户/验收发生实质变化；write set、权限或风险等级越界；需要凭据、付费、生产、不可逆或外部协作动作；多个可行方案会导致不同产品结果且无法由仓库事实裁决。其余可逆细节以显式假设推进。
+
+自主循环不以固定 Agent 数、固定轮数、token 消耗或所有 lens 都被调用为完成条件。完成只由 slice checkpoint 与相应证据决定。
+
+## 9. Role responsibility lenses
+
+主 Agent 保持单一端到端 owner，并按当前 mode 启用责任 lens：product/business 负责用户价值与范围；project/delivery 负责关键路径与依赖；UX/accessibility 负责旅程和状态；architecture/data 负责 seam、兼容、迁移与回滚；frontend/backend/mobile 只在对应产品面存在时负责实现；quality/security 负责真实失败、权限与供应链；release/operations 负责环境、观测与恢复。
+
+lens 是问题清单，不是常驻角色、审批者或独立状态机。只在探索、测试或审查可以独立且 write set 不重叠时才使用多 Agent；共享 seam 采用单 writer，分支/worktree 隔离并由主 Agent 集成和收口。
+
+## 10. Capability routing behavior
+
+路由顺序为：识别 task type/domain/operations/risk；确定 lifecycle mode；应用用户显式要求和 required/excluded intent；优先复用当前已加载且只读的能力；只为当前 checkpoint 建最小 ordered DAG；弱证据 abstain；任何写/安装/认证/生产能力都只生成 approval/activation plan。
+
+默认 surface 映射：一次性约束进 prompt/thread；稳定仓库事实进 `AGENTS.md`；重复且验证稳定的单一工作流进 skill；需要可安装组合时进 plugin；动态外部数据/动作进 MCP/connector；确定性生命周期拦截进 hook/script/CI；计划和证据继续留在 Markdown/JSON/Git。不得因为能力可用就全部预热或级联调用。
+
+## 11. Anti-overdesign stop conditions
+
+出现任一信号立即回到 checkpoint：主链未通却新增三个以上非产品 artifact；计划外长期维护面出现；一个风险被两层以上重复门禁覆盖；新抽象没有两个真实调用点、稳定外部协议、安全 seam 或量化热点；实现无法用一句话说明用户增量；focused feedback 被重复 full gate 取代；文档、角色或测试数量增长但失败证据没有减少。
+
+默认处置优先级是删除 > 复用 > 直接实现 > 延后 > 新抽象。必要止血补丁要记录回收条件；重构只在主链已通且行为 characterization 可证明时进行。门禁失败必须修复根因，但不得借失败扩张到无关治理。
+
+## 12. Skill learning/promotion/retirement
+
+经验先保留为 task-local note。只有同一 workflow 在至少两个代表任务重复、包含一个失败/反例、输入输出可定义时成为 `skill_candidate`。候选依次经过 replay（历史样本）、shadow（不改变真实执行）、canary（有限真实任务）、人工 reviewed promotion；每步记录相对无 skill baseline 的 TTFV、返工、打断、误触发和 artifact 成本。
+
+promotion 后仍需 owner、适用/禁止场景、版本、失败分流和退役条件。模型/宿主原生能力覆盖、触发精度下降、长期无消费者、维护成本高于收益或流程产生方向性误导时，选择 revise/merge/retire。find-skills 得到的第三方 skill 先作为不可信候选，核对来源/revision/license，再按相同 lifecycle 适配；不直接在全局生效。
+
+## 13. Tool-combination boundaries
+
+- ChatGPT/Codex/Claude：推理、沟通、编码、工具使用与会话主体；skills-manager 不复制其原生能力。
+- skills-manager：本地能力 inventory/selection、规则 advisor、规划一致性、显式投影合同和 evidence；不做 agent control plane。
+- Obsidian：可选的用户知识库、研究笔记和 ADR/PRD 草稿界面；只通过明确 Markdown 导出/链接交接，不要求 vault/plugin/index。
+- Hermes：可选的外置个人 Agent 或长任务实验；需要独立安全、连续性和效果验证，不共享 auth/session，不成为当前真源。
+- Spec Kit/Superpowers：采纳 requirement→architecture→spec→plan→task→verifier 追踪、可组合 workflow 和 evidence-before-claims；适配为风险分级，拒绝一刀切 TDD、五文件限制、always-on 流程和逐步人工批准。
+- OpenHands/LangGraph：作为完整 agent runtime/state graph 对照并 defer；只有产品明确转向外置 runtime 且 P6 admission 成立时另做 ADR/PoC。
+
+组合协议优先普通 Markdown、JSON、Git、路径和显式 receipt。任何工具都可被替换或退役，不允许形成隐式双写、共享私有状态或要求另一个工具先在线。
+
+## 14. Outcome metrics and pilot design
+
+M1 需要 10 个真实任务，覆盖模糊需求、从零主链、缺陷修复、重构、跨 seam 实现、测试策略、发布、运维、能力选择和简单任务负样本。每项记录 task complexity、baseline workflow、advisory workflow、TTFV、返工切片、非预期人工打断、非产品 artifact、focused/full gate 时间、最终 truth level 和用户接受结果。
+
+pilot 先 observe，不随机宣称因果，不设未经 baseline 的硬阈值，不因指标跳过安全/兼容门禁。M3 以净收益评审：保留真正减少主链时间/返工且维护成本可接受的最小部分；修订触发或文案漂移；删除无收益或被模型/宿主覆盖的流程。当前 M0 未执行任何 pilot，因此不能声称指标改善。
+
+## 15. Security and supply-chain boundaries
+
+外部网页、README、issue、prompt、skill、日志、MCP 结果和源码都是待核输入，不能改变本 spec、用户授权、write set、verification level 或 apply token。参考项记录 upstream、revision、license/checksum 和 adopt/adapt/defer/reject；本轮不下载、安装或执行新的上游工具。
+
+凭据、OAuth、provider/model、生产数据、付费调用和 host configuration 属于外部授权面，不进入 Product Baseline 的可自动写字段。evidence redaction-first；Obsidian/Hermes/其他 memory 只能通过用户明确选择的导出进入上下文。生产写入、部署、删除、公开发布和外部消息必须遵守宿主 approval 与项目 rollback。
+
+## 16. Failure routing
+
+| Failure | Route | Evidence |
+| --- | --- | --- |
+| 需求/验收不清且会改变产品结果 | 回到 Discovery，最多三问 | baseline decision log |
+| 首次实现失败 | systematic root-cause diagnosis + 一次有界修复 | issue_id/attempt 1 |
+| 同一问题第二次失败 | 停止补丁，重建 slice 或 baseline，必要时询问 | issue_id/attempt 2 + replan |
+| write set/依赖/授权变化 | fail-closed，更新 plan 后再执行 | diff + authority boundary |
+| verifier/contract 失败 | 修复 planning drift，不推进状态 | finding code + rerun |
+| full gate 失败 | 阻断 commit/push，不降低门禁或手改生成物 | stage output + root cause |
+| pilot 无净收益 | revise/retire，不把流程晋级为 skill/P6 | reviewed metric worksheet |
+| host/live 未执行 | 保持 not_run/not_verified | truth boundary |
+
+## 17. Verification order
+
+`VERIFICATION_DECLARATION_START`
+
+1. `pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1`
+2. 运行 `ProductPlanning.Tests.ps1` 与 `LeanAiDeliveryPlanning.Tests.ps1` 的 focused Pester tests。
+3. `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-vnext-planning.ps1 -Json`
+4. `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-lean-ai-delivery-planning.ps1 -Json`
+5. `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree`
+6. `git diff --check` 与 `git status --short --branch`
+
+`VERIFICATION_DECLARATION_END`
+
+full quality gate 只运行一次并拥有完整 suite；focused tests 用于本切片反馈，不在 closeout 前后重复声明独立完整 suite。verifier 均为 local/read-only，不访问网络、host auth/config 或 provider。
+
+## 18. Task mapping
+
+| Task | Requirements | ADRs | Deliverable |
+| --- | --- | --- | --- |
+| `SMV-MD-001` | FR-LDL-001/002/004/005/006 | ADR-SMV-012/013/015/016 | 同步 PRD、架构、路线图和产品索引 |
+| `SMV-MD-002` | FR-LDL-001/002/003/006 | ADR-SMV-013/014/015 | 落盘本 spec、manifest、plan 和 checklist |
+| `SMV-MD-003` | FR-AIE-005、NFR-LDL-001/002 | ADR-SMV-013/014/016 | companion verifier 与最小 fixtures 测试 |
+| `SMV-MD-004` | FR-EVD-003、NFR-LDL-003 | ADR-SMV-012/013/016 | 根契约、共享 evidence、有序门禁和 truth closeout |
+
+manifest 是依赖、write set、步骤、验证、回滚和 done_when 的机器真源。本表只提供 requirement/ADR 可追踪入口；M1 pilot 不进入本 manifest。
+
+## 19. Rollback
+
+回滚范围只包含 maintenance design 的四处产品真源增量、当前 spec/manifest、plan/todo maintenance 章节、companion verifier/tests、AGENTS 一行和共享 evidence。不得修改或回滚 P0-P5 manifest/spec/evidence、`src/`、`overrides/`、`agent/`、`vendor/`、`skills.json`、reports 或宿主状态。
+
+若 verifier 设计本身错误，先保持 track 为未验证并修复或删除 companion 资产；P5 仍由原 verifier 和历史真源独立成立。若后续 pilot 无净收益，删除/降级 advisory 候选和 pilot metadata，不删除已验证的 P5 capability selection/runtime-independent contracts。
+
+## 20. Done definition
+
+M0 完成仅当：现有 PRD/架构/路线图仍为唯一产品真源；maintenance spec/manifest/plan/todo 完整；四项 planning tasks done 且共享一份 exact reviewed evidence；新旧 verifier、focused tests 和唯一 full gate 通过；P5 保持 5/5 `repo_verified`；P6 保持 hold 且不存在 P6 manifest；pilot/live/runtime 状态保持本文件头部声明。
+
+允许的完成表述是“maintenance design planning package repo_verified”。禁止表述为新的 AI 工作流已实现运行时能力、10-task pilot 已执行、业务效果已证明、host 已变更、P6 已准入或产品已 `live_accepted`。

@@ -6,7 +6,7 @@
 
 ## 1. 状态总览
 
-| Phase | 名称 | 状态 | 当前真值 |
+| Phase / track | 名称 | 状态 | 当前真值 |
 | --- | --- | --- | --- |
 | `P0` | Foundation and contracts | `complete` | 9/9 tasks repo_verified；host_loaded/live_accepted 未执行 |
 | `P1` | Read-only inventory and rule advisor | `complete` | 9/9 tasks repo_verified；host_loaded/live_accepted 未执行 |
@@ -14,6 +14,7 @@
 | `P3` | Plugin-aware distribution and evaluation | `complete` | 7/7 tasks repo_verified；fixture-first，host/live 未执行 |
 | `P4` | Unified capability selection and activation planning | `complete` | 6/6 tasks `repo_verified`；16-profile fresh prompt probe 已通过，host runtime activation/live acceptance 未执行 |
 | `P5` | Adaptive Capability Fabric | `complete` | 5/5 `repo_verified`；live read-only App Server snapshot 与 full gate 已通过，business live acceptance 未执行 |
+| `maintenance_design` | Lean AI Software Delivery | `M0 repo_verified` | 规划包 4/4 tasks repo_verified；M1-M3 conditional，10-task pilot 未执行 |
 
 状态只可在相应 exit gate 有当前证据后更新。Phase 文档完成不等于 Phase 实现完成。
 
@@ -309,6 +310,30 @@ P5 完成后进入维护期，不按 Phase 编号惯性扩张。只有同时满�
 
 未满足上述条件时，只允许修缺陷、扩真实 corpus、删除无用字段、改善性能与文档；禁止新增 schema major、daemon/database/provider router、host mutation 或新的治理层。
 
+### 9.1 Lean AI Software Delivery maintenance track
+
+该 track 面向 skills-manager 辅助 ChatGPT/Codex/Claude 高效完成软件交付的总体方案，但只增加 advisory 规划与可验证契约。它与 P5 并行，不是 P6，不改变 Phase sequence，不授权 host/runtime 行为。
+
+```text
+M0 maintenance design package
+  -> M1 10-task observe-only pilot
+     -> M2 P5-local metadata/golden/defect correction
+        -> M3 retain / revise / retire / P6 admission review
+```
+
+| Milestone | 状态 | 内容 | 退出条件 | 明确不证明 |
+| --- | --- | --- | --- | --- |
+| `M0` | `repo_verified` | 综合 PRD/架构/路线图、maintenance spec/manifest、plan/todo、companion verifier、测试与一份 reviewed evidence | 4/4 planning tasks done；新旧 verifier 和 full gate 通过 | 新工作流业务有效、pilot 已运行、host loaded、live accepted |
+| `M1` | `conditional` | 选取 10 个覆盖 Discovery/Main-chain/Stabilize/Refactor/Release/Operate 的真实任务，记录无 lens baseline 与 advisory treatment | 用户授权；任务/数据安全边界明确；每项只做 observe，不设完成硬阈值 | 普遍效果、因果结论、自动 promotion |
+| `M2` | `conditional` | 只修正 pilot 证明的 P5 metadata、golden、触发策略或直接缺陷 | 至少两个任务复现同一缺口；现有字段无法表达且有真实消费者时才评估小字段 | schema major、新 runtime、daemon/database |
+| `M3` | `conditional` | 比较净收益并决定 `retain | revise | retire`；仅把满足既有 admission 的证据提交 P6 review | 指标与失败样本经过人工 review；无净收益流程已删除或降级 | 自动 admitted、自动创建 P6 manifest |
+
+M1 pilot 的最小样本覆盖：模糊需求澄清、从零主链、既有缺陷、行为保持重构、前后端/数据 seam、测试策略、发布准备、运维事件、能力/skill 选择和一次不应启动复杂流程的简单任务。样本在执行时另行登记；本路线图不把候选任务伪装为当前承诺。
+
+observe-only 指标为 TTFV、返工切片、非预期人工打断、非产品 artifact、focused/full gate 耗时和 repo_verified→live_accepted 转化。`M1` 前不设数值阈值；指标不作为单项 completion gate，LLM 评分不作为唯一证据。对每项任务同时记录任务复杂度、既有测试健康和人工授权差异，避免把环境差异误判为流程收益。
+
+M3 判定优先删除性维护：pilot 没有缩短 TTFV、没有减少返工/打断，或新增 artifact/上下文/维护成本抵消收益时，删除候选模板、规则或 skill；只有稳定重复且经 replay/shadow/canary 的做法才 reviewed promotion。宿主模型或官方能力已原生覆盖时，相关功能进入 adapt/retire，而不是为了保留项目范围继续包装。
+
 ## 10. 风险登记
 
 | Risk ID | 风险 | Phase | 守卫 |
@@ -321,6 +346,9 @@ P5 完成后进入维护期，不按 Phase 编号惯性扩张。只有同时满�
 | `RISK-006` | 大规模重构破坏现有 CLI | P0 | one seam per slice + wrapper + golden tests |
 | `RISK-007` | repo pass 被写成 live accepted | 全部 | verification level enum + evidence review |
 | `RISK-008` | 任务清单过早细化后腐化 | P1+ | 只为 current Phase 建 manifest |
+| `RISK-009` | Lean advisory 膨胀成第二套 agent runtime | maintenance | ADR-SMV-012/013 + runtime write-set denylist |
+| `RISK-010` | observe 指标变成流程 KPI 或虚假完成激励 | maintenance | ADR-SMV-016 + 无 baseline 不设 gate |
+| `RISK-011` | 自学习把偶然成功/错误经验扩散为 skill | maintenance | replay -> shadow -> canary -> reviewed promotion -> retire |
 
 ## 11. 路线维护
 

@@ -5,6 +5,8 @@
 **task_truth**: `tasks/skills-manager-vnext-phase5.tasks.json`
 **status**: repo_verified
 **next_phase_admission**: hold
+**active_maintenance_track**: maintenance_design
+**maintenance_task_truth**: `tasks/skills-manager-vnext-maintenance-design.tasks.json`
 
 ## 1. Goal
 
@@ -43,3 +45,18 @@ Phase 5 已按本规则完成 5/5；当前宿主只读 snapshot 为 `host_loaded
 - 当前只维护 P5 seam、真实消费者和已测热点，不创建 P6 manifest，不预扩 schema 或治理层。
 - P6 仅在路线图 admission 条件全部满足并获得用户明确授权后进入规划；未满足时继续直接修复 P5。
 - 运行时 receipt 留在 ignored `reports/`，历史 receipt 归档；`docs/change-evidence/` 只保留 reviewed logical-slice evidence。
+
+## 7. Lean AI Software Delivery maintenance design
+
+Goal：把 skills-manager 面向高效 AI 软件交付的总体方案落为 advisory planning contract，解决主链缺失、过度设计、角色接力、门禁膨胀、方向漂移和未经验证的“自学习”，同时不实现新的 runtime 或启动 P6。
+
+| Order | Task | Slice | Exit checkpoint |
+| ---: | --- | --- | --- |
+| 1 | `SMV-MD-001` | product truth | FR/NFR/ADR 唯一；P5/P6 状态不变；无 runtime/pilot 已实现表述 |
+| 2 | `SMV-MD-002` | spec + task contract | 四任务依赖、exact write set、rollback/done_when 完整；M1 不进入 manifest |
+| 3 | `SMV-MD-003` | companion verifier | current pass；负向 fixture fail-closed；只读且无 network/host access |
+| 4 | `SMV-MD-004` | truth closeout | 一份共享 evidence；新旧 verifier 通过；唯一 full gate 通过；只声明 M0 repo_verified |
+
+Failure routing：文档/manifest 漂移先修当前真源；同一 verifier 缺陷连续失败两次后重审检查设计；未知工作树改动、P5 回归、P6 manifest、runtime write set 或 full gate 失败立即阻断收口。10-task observe-only pilot 只有另行授权后才进入 M1，不属于本计划的执行项。
+
+Verification：迭代运行 focused planning tests 与两个 verifier；文件稳定后由 `scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree` 统一运行一次完整套件，随后执行 `git diff --check` 和 Git boundary 检查。不在 full gate 前后另行重复完整 suite。

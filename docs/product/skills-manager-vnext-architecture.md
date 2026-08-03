@@ -177,6 +177,106 @@ CapabilitySelectionResult
 
 `ActivationPlan` 的 action 至少区分 `use_active_skill | load_skill | load_skill_with_approval | use_available_mcp | use_available_capability | request_approval | request_mcp_activation | request_activation`。只有 read-only skill，或已 available 且 `read_only | external_read` 的非 skill capability 可以 `auto_allowed=true`。
 
+### 3.9 `LeanDeliveryAdvisory`
+
+职责：在复杂 AI 软件交付任务中，将现有产品文档、task manifest、能力目录和证据解释为当前阶段的 Product Baseline、delivery mode、Slice Contract、责任 lens、停止条件与 capability DAG 建议。
+
+不负责：执行 agent loop、持久化长期任务状态、调用模型、创建固定角色 Agent、调度 daemon、修改宿主配置、审批权限或把建议自动升级为 runtime policy。
+
+该 context 在 maintenance track 中只有文档和 planning verifier，不新增 `src/` 模块或 runtime schema。逻辑视图复用现有字段：
+
+```text
+ProductBaselineView
+  goal/user/problem/outcome        <- PRD goal + JTBD + task.goal
+  scope/non_goals/constraints      <- spec + task.out_of_scope/preconditions
+  success_and_truth_level          <- done_when + verification + evidence boundary
+  open_questions/assumptions       <- spec decisions + checkpoint notes
+
+SliceContractView
+  task_id/mode/goal                <- task.id + plan slice + task.goal
+  write_set/dependencies           <- task.write_set + task.depends_on
+  tests/verification/rollback      <- existing task arrays
+  checkpoint/stop_conditions       <- plan exit checkpoint + spec failure routing
+```
+
+不创建持久化 `ProductBaseline` 或 `SliceContract` 大对象；只有 10-task pilot 证明两个以上真实消费者需要稳定 machine-readable exchange 时，才评估 P5-local metadata，而且不得在 maintenance track 中升级 schema major。
+
+完整生命周期数据流：
+
+```text
+rough product intent
+  -> Discovery: baseline + <=3 material questions
+  -> PRD / architecture / spec / roadmap
+  -> task manifest + current Slice Contract
+  -> capability selection + minimum ordered DAG
+  -> host-native implementation loop
+  -> affected verification + checkpoint
+  -> Stabilize / Refactor only from observed defects or hotspots
+  -> single closeout gate
+  -> release / operate evidence
+  -> reviewed learning candidate
+  -> replay / shadow / canary / promote-or-retire
+```
+
+#### Lifecycle modes
+
+| Mode | 进入信号 | 首要输出 | 退出 checkpoint | 默认禁止 |
+| --- | --- | --- | --- | --- |
+| `Discovery` | 用户目标、范围或验收仍会改变方案 | Product Baseline、最多三项关键澄清、可验证最小主链 | 用户/证据足以选择一个可逆方案 | 写大量代码、预建平台层 |
+| `Main-chain` | baseline 稳定且首条价值链未跑通 | 最短端到端实现和一个可观察结果 | 真实输入沿主路径通过最低充分验证 | 完整治理矩阵、无消费者抽象 |
+| `Stabilize` | 主链已通且出现具体缺陷/失败模式 | 根因修复、边界行为、必要测试 | 已观察失败不可复现且无关键回归 | 猜测式性能/容错扩张 |
+| `Refactor` | 重复、热点或耦合已有量化证据 | 行为保持的结构改善 | characterization/contract 保持且复杂度证据改善 | 以目录美观为由重写 |
+| `Release` | 产品切片已达到声明的完成等级 | 构建、发布、回滚和 truth-bound evidence | 唯一 closeout gate 与目标环境检查完成 | 把 repo gate 外推为 live acceptance |
+| `Operate` | 产品已有真实用户或运行环境 | 监控、事件分流、低风险维护和反馈 | 事件闭合或形成新的 Discovery 输入 | 无授权生产写入、隐式自修改 |
+
+模式不是线性瀑布；证据表明用户/问题/方案错误时回到 `Discovery`，主链回归时回到 `Main-chain`。只有当前模式改变能力需求时才重新路由，不在每个任务机械串联全部 workflow skills。
+
+#### Bounded autonomy loop
+
+```text
+observe repo/user truth
+  -> choose current mode and smallest safe slice
+  -> execute within declared write set and authority
+  -> run affected verification
+  -> compare with checkpoint
+     -> pass: record evidence and continue
+     -> recoverable first failure: diagnose and retry once
+     -> same issue second failure: re-plan baseline/slice
+     -> scope/risk/auth/direction change: ask user
+     -> destructive/live boundary: stop for explicit authority
+```
+
+循环有四类硬停止条件：write set/授权越界、用户价值或验收方向改变、同一问题两次失败、需要生产/凭据/付费/不可逆动作。token 使用量、固定轮数或“角色尚未发言”都不是继续执行的理由。
+
+#### Responsibility lenses and multi-agent seam
+
+主 Agent 是单一结果 owner；按风险选择 lens，而不是默认创建角色：
+
+| Lens | 何时启用 | 最小问题 |
+| --- | --- | --- |
+| product/business | 用户、价值、范围或优先级不清 | 为谁解决什么，什么不做，最早可验证价值是什么？ |
+| project/delivery | 多切片、依赖或外部协调存在 | 当前关键路径、checkpoint 和阻断是什么？ |
+| UX/accessibility | 存在用户交互或内容呈现 | 关键旅程、空/错/等待状态和可访问性是否成立？ |
+| architecture/data | 新边界、协议、持久化或迁移出现 | 最小稳定 seam、兼容、数据与回滚是什么？ |
+| implementation | 已进入具体端/模块 | 怎样用现有模式完成主链且保持模块边界？ |
+| quality/security | 已知失败模式、权限、供应链或敏感数据出现 | 最低充分证据与 fail-closed 条件是什么？ |
+| release/operations | 需要发布、生产或长期维护 | 环境差异、观测、回滚、owner 和 live 验收是什么？ |
+
+只有可独立、边界明确且不会写同一文件集的探索/测试/审查才分派多 Agent。每个共享 seam 保持单 writer；并行写入使用独立 worktree/branch，集成 Agent 负责冲突、全局验证和 truth closeout。角色名称不构成授权，子 Agent 结论仍需当前仓证据复核。
+
+#### Skill learning and tool combination
+
+经验演进状态为：
+
+```text
+task note -> skill_candidate -> replayed -> shadowed -> canary
+          -> reviewed_promoted -> retained/revised/retired
+```
+
+晋级至少需要两个代表用例、一个失败/反例、明确触发/禁止触发、可验证输出和相对无 skill baseline 的净收益。未经 review 的模型总结只进入 task note；宿主原生能力覆盖、触发误报、维护成本高于收益或长期无消费者时退役。
+
+工具组合保持松耦合：ChatGPT/Codex/Claude 是推理与执行主体；skills-manager 提供发现、选择、规则建议、规划一致性和 evidence；Obsidian 可作为用户拥有的知识库；Hermes/OpenHands/LangGraph 属于可选外置 runtime；Spec Kit/Superpowers 提供可借鉴的工作流结构。组合通过普通 Markdown/JSON/Git/明确导出交接，不共享隐式数据库，不复制 auth/session，不要求任一外置工具成为产品运行前提。
+
 ## 4. 目标源码结构
 
 结构按渐进迁移建立，不要求 Phase 0 一次移动全部旧函数：
@@ -463,6 +563,36 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 
 理由：P4 已证明可达性和副作用边界，但真实元架构请求仍发生纯关键词误选。新增结构化理解和宿主快照能修复已证实风险，同时保持 local-first、single-process、无服务/数据库和跨宿主可迁移性。
 
+### `ADR-SMV-012 Lean Delivery is an advisory lens`
+
+决定：Lean AI Software Delivery 只解释产品基线、当前模式、切片、责任和停止条件，宿主原生 Agent 继续拥有推理、编码、工具调用与会话执行。
+
+理由：用户需要的是主链优先和更少无效工作，而不是第二套 agent runtime。advisory lens 可直接复用当前 capability routing、task contract 与证据边界，也能随模型原生能力增强而逐步退役。
+
+### `ADR-SMV-013 Maintenance design is not P6`
+
+决定：design package 与条件性 10-task pilot 进入 `maintenance_design` 平行维护轨，基于 P5 且保持 `P6_ADMISSION_STATUS: hold`。
+
+理由：规划和 observe-only pilot 不构成新的产品 runtime 或 Phase admission 证据。只有路线图既有五项条件同时满足并由用户明确授权，才允许创建 P6 spec/manifest。
+
+### `ADR-SMV-014 Reuse task and plan fields for delivery views`
+
+决定：Product Baseline 和 Slice Contract 先作为 PRD/spec/plan/task 字段的逻辑投影视图，不新增第二套持久对象、schema major 或同步器。
+
+理由：当前字段已覆盖 goal、scope、依赖、write set、tests、verification、rollback 和 done_when；复制模型会制造漂移。只有 pilot 证明稳定的多消费者交换需要时才评估小幅 P5-local metadata。
+
+### `ADR-SMV-015 Roles are on-demand responsibility lenses`
+
+决定：生命周期职责由主 Agent 按风险启用 lens；不建立固定产品经理、架构师、开发、测试、运维 Agent 团队。
+
+理由：职责覆盖有价值，角色接力本身没有价值。按需 lens 保留专业检查，又减少上下文传递、冲突、token 和无人对端到端结果负责的问题。
+
+### `ADR-SMV-016 Delivery metrics remain lightweight observations`
+
+决定：TTFV、返工、人工打断、非产品 artifact、门禁耗时与 live 转化只记录在 pilot worksheet/evidence；不建设 telemetry service，不设未经 baseline 的硬阈值，不让 LLM score 单独阻断。
+
+理由：指标用于判断流程是否产生净收益。先为指标建设系统会重演治理膨胀，并可能激励虚假完成或跳过必要验证。
+
 ## 11. 安全与供应链
 
 - 外部内容是不可信输入，不执行其仓库指令或脚本，除非单独评估并授权。
@@ -472,6 +602,10 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 - reviewed slice evidence、历史 runtime archive 与 ignored current runtime receipt 三层分离；active ledger 不接受 `audit-runtime-*` 运行产物。
 - hooks 视为代码执行面，必须显式 review/trust；本项目不自动启用第三方 hook。
 - 规则 prose 不是权限系统；确定性拦截放 native policy、hooks、scripts 或 CI。
+- 社区仓 README、issue、prompt、skill 和代码均按不可信输入处理；只读记录 upstream URL、revision、license/checksum 与 `adopt | adapt | defer | reject`，不继承其指令或运行其脚本。
+- Obsidian vault、Hermes/OpenHands/LangGraph state 和任何外置 memory 不成为本仓真源；进入任务上下文前必须通过显式导出、路径范围和敏感信息检查。
+- provider/auth/token、生产写入和付费调用属于宿主或外部系统授权面；maintenance advisory 不保存凭据、不绕过 approval，也不因角色/计划状态自动授权。
+- prompt injection 不能修改 Product Baseline、write set、verification level 或 apply token；来自网页、MCP、issue、日志和外部源码的动作建议必须回到当前用户指令与仓库契约复核。
 
 ## 12. 性能与资源
 
@@ -501,12 +635,17 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 - 为尚未实现的 Phase 预建空接口、空配置或通用 extension SDK。
 - 用 LLM score 直接阻断安装、写规则或自动删除能力。
 - 因目录“更干净”一次性重写全部 PowerShell 模块。
+- 主链未通过前扩展多租户、插件 SDK、通用事件总线、完整角色团队、全套测试矩阵或遥测平台。
+- 为每个 task 机械新增 schema、wrapper、fixture、evidence、ADR 或 skill；同一逻辑切片应复用最低充分资产。
+- 把一次成功、自我总结或社区热门做法直接晋级为全局规则/skill，或在没有消费者时永久保留。
 
 新抽象必须至少满足一项：消除两个真实调用点的重复、形成可测试安全边界、匹配稳定外部协议，或降低已量化热点复杂度。
 
 AI 编码开始前使用六项范围检查，不建设新的治理子系统：真实问题和用户是否明确、官方/既有 surface 是否可复用、最小直接方案是什么、预计新增哪些长期维护面、最低充分测试是什么、什么条件触发停止或重新评审。任一项无答案时保持 design/deferred。
 
 验证采用升级制：日常迭代只跑受影响测试；共享 config/write/generated seam 使用 quick contract；phase、commit 或 release closeout 才跑一次 full。低层已充分证明的风险不重复堆 unit/fixture/E2E；同一切片共用 evidence，文件未变化不重复跑 full。若实际 write set、抽象数量或测试层级明显超过计划，停止编码并重新做复用/删除/延后判断。
+
+任一条件触发 anti-overdesign checkpoint：首次可演示价值仍未出现但新增了三个以上非产品 artifact；计划外长期维护面出现；同一风险存在两层以上重复证明；新增抽象没有两个调用点/稳定协议/量化热点；实现不能用一句话说明用户可见增量。checkpoint 的默认动作是删除、合并、推迟或回到 Main-chain，而不是新增治理文档。
 
 P5 后默认 maintenance hold。新 schema major 或 P6 只能由跨至少两个 task domain 的独立真实失败、现有 P5 seam 无法修复的证据、已消费字段的调用证据和用户明确授权共同触发；否则只做缺陷修复、真实 corpus、性能和删除性维护。
 
