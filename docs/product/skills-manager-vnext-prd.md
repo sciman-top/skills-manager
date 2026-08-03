@@ -2,8 +2,8 @@
 
 **program_id**: `skills-manager-vnext`
 **status**: accepted-direction
-**implementation_status**: phase-3-plugin-distribution-repo-verified
-**最后更新**: 2026-08-02
+**implementation_status**: phase-5-adaptive-capability-fabric-repo-verified-maintenance-hold
+**最后更新**: 2026-08-03
 
 ## 1. 产品结论
 
@@ -178,6 +178,7 @@ Capability、RuleDocument、Profile、OperationPlan 和 Receipt 使用独立模�
 - `FR-EVD-002`：外部参考必须记录采纳、适配或拒绝决定，不继承其仓库指令。
 - `FR-EVD-003`：candidate、pending_review、synthetic、repo_verified 和 live_accepted 必须保持语义隔离。
 - `FR-EVD-004`：敏感路径和凭据不得写入可提交 evidence；host-local receipt 默认保留在忽略目录。
+- `FR-EVD-005`：活跃 `docs/change-evidence/` 只保存 reviewed 逻辑切片；历史 runtime receipts 进入只读 archive，未来 runtime receipts 留在 ignored `reports/`。
 
 ## 7. 非功能需求
 
@@ -192,6 +193,7 @@ Capability、RuleDocument、Profile、OperationPlan 和 Receipt 使用独立模�
 - `NFR-OBS-001`：关键阶段输出稳定的 machine-readable status 和 phase timing。
 - `NFR-TST-001`：测试按风险选择最低充分层级；优先真实输入形状和关键失败模式，不要求每个改动机械同时新增 unit、fixture/golden、E2E 和 native probe。更高层不可用时按 N/A 记录恢复条件。
 - `NFR-GOV-001`：编码前记录问题证据、官方/既有复用结论、最小方案、write set 与停止条件；full gate 和独立 evidence 仅在共享边界、closeout 或 release 需要时增加。
+- `NFR-GOV-002`：P5 后默认 maintenance hold；没有跨域真实失败、已消费 P5 输出、现有 seam 无法修复和用户明确授权，不创建 P6 manifest 或 schema major。
 - `NFR-TRU-001`：任何“完成/生效/验收”声明必须绑定 verification level 和 evidence path。
 
 ## 8. 产品级验收

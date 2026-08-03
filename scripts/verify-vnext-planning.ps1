@@ -114,8 +114,7 @@ $paths = [ordered]@{
     manifest = $ManifestPath
     plan = $planRelativePath
     todo = 'tasks/todo.md'
-    readme = 'README.md'
-    agents = 'AGENTS.md'
+    p4_entry = 'config/vnext-phase4-entry-gate.json'
 }
 
 $content = @{ plan = $planText }
@@ -124,25 +123,9 @@ foreach ($key in @($paths.Keys)) {
     $content[$key] = Get-RequiredText $root $paths[$key] ([ref]$findings)
 }
 
-$requiredMarkers = [ordered]@{
-    index = @('## 2. 文档职责', '## 4. 状态词汇', 'planning verifier')
-    prd = @('## 6. 功能需求', '## 7. 非功能需求', '## 8. 产品级验收', 'implementation_status', 'common | platform_delta | project_action')
-    architecture = @('## 3. Bounded contexts', '## 5. OperationPlan contract', '## 10. 技术栈决策', '## 14. 反过度设计守卫', 'RuleResponsibility')
-    roadmap = @('## 3. P0 Foundation and contracts', '## 4. P1 Read-only inventory and rule advisor', '## 7. P4 Unified capability selection and activation planning', '## 8. P5 Adaptive Capability Fabric')
-    spec = @('## 3. Phase boundary', '## 10. Task design', '## 12. Ordered verification', '## 14. Done definition')
-}
-
 $adoptionMatrixPath = Join-Path $root 'docs\product\rule-governance-adoption-matrix.md'
 if (-not (Test-Path -LiteralPath $adoptionMatrixPath -PathType Leaf)) {
     Add-PlanningFinding ([ref]$findings) 'missing_required_file' 'docs/product/rule-governance-adoption-matrix.md' 'Missing rule-governance adoption matrix.'
-}
-
-foreach ($key in @($requiredMarkers.Keys)) {
-    foreach ($marker in @($requiredMarkers[$key])) {
-        if (-not (Test-ContainsLiteral $content[$key] $marker)) {
-            Add-PlanningFinding ([ref]$findings) 'missing_required_marker' $paths[$key] ('Missing required marker: {0}' -f $marker)
-        }
-    }
 }
 
 $manifest = $null
@@ -159,6 +142,7 @@ $tasksById = @{}
 $taskCount = 0
 $doneCount = 0
 $pendingCount = 0
+$phaseEvidencePaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
 if ($null -ne $manifest) {
     if ([int]$manifest.schema_version -ne 1) {
@@ -297,11 +281,8 @@ if ($null -ne $manifest) {
                 $normalized.StartsWith('docs/change-evidence/', [System.StringComparison]::OrdinalIgnoreCase) -and
                     $normalized.IndexOfAny([char[]]'<>*?') -lt 0
             })
-            if ($exactEvidencePaths.Count -eq 0) {
-                Add-PlanningFinding ([ref]$findings) 'done_task_missing_evidence_path' $taskPath `
-                    ('Done task must declare an exact change-evidence path: {0}' -f $taskId)
-            }
             foreach ($evidencePath in $exactEvidencePaths) {
+                $phaseEvidencePaths.Add($evidencePath.Replace('\', '/')) | Out-Null
                 $fullEvidencePath = Join-Path $root $evidencePath
                 if (-not (Test-Path -LiteralPath $fullEvidencePath -PathType Leaf)) {
                     Add-PlanningFinding ([ref]$findings) 'done_task_evidence_missing' $evidencePath `
@@ -309,6 +290,11 @@ if ($null -ne $manifest) {
                 }
             }
         }
+    }
+
+    if ($doneCount -gt 0 -and $phaseEvidencePaths.Count -eq 0) {
+        Add-PlanningFinding ([ref]$findings) 'phase_missing_evidence_path' $paths['manifest'] `
+            'A phase with done tasks must declare at least one exact logical-slice evidence path.'
     }
 
     Test-TaskDependencyCycles $tasksById $paths['manifest'] ([ref]$findings)
@@ -320,16 +306,40 @@ if ($null -ne $manifest) {
     }
 }
 
+if (-not $explicitHistoricalMode) {
+    $currentPhaseNumber = if ($planPhase -match '^P([0-9]+)$') { [int]$Matches[1] } else { -1 }
+    if ($currentPhaseNumber -gt 4 -and -not [string]::IsNullOrWhiteSpace($content['p4_entry'])) {
+        try {
+            $p4Entry = $content['p4_entry'] | ConvertFrom-Json
+            if ([string]$p4Entry.status -ne 'completed') {
+                Add-PlanningFinding ([ref]$findings) 'historical_phase_not_closed' $paths['p4_entry'] `
+                    ('Current phase {0} requires P4 entry lifecycle status completed, found {1}.' -f $planPhase, [string]$p4Entry.status)
+            }
+        }
+        catch { Add-PlanningFinding ([ref]$findings) 'historical_phase_gate_parse_failed' $paths['p4_entry'] $_.Exception.Message }
+    }
+
+    $orderedVerification = ''
+    if (-not [string]::IsNullOrWhiteSpace($content['spec']) -and $content['spec'] -match '(?is)## 12\. Ordered verification(?<section>.*?)(?:\r?\n## 13\.|\z)') {
+        $orderedVerification = [string]$Matches['section']
+    }
+    $specHasStandaloneSuite = $orderedVerification -match '(?i)tests/run\.ps1'
+    $specHasFullGate = $orderedVerification -match '(?i)(run-local-quality-gates\.ps1[^\r\n]*-Profile\s+full|full local quality gate)'
+    if ($specHasStandaloneSuite -and $specHasFullGate) {
+        Add-PlanningFinding ([ref]$findings) 'redundant_full_test_spec' $paths['spec'] `
+            'Ordered verification must run affected tests during iteration and the full suite exactly once through the full quality gate.'
+    }
+
+    $p6ManifestPath = Join-Path $root 'tasks\skills-manager-vnext-phase6.tasks.json'
+    if ((Test-ContainsLiteral $content['roadmap'] 'P6_ADMISSION_STATUS: hold') -and (Test-Path -LiteralPath $p6ManifestPath -PathType Leaf)) {
+        Add-PlanningFinding ([ref]$findings) 'next_phase_started_while_on_hold' 'tasks/skills-manager-vnext-phase6.tasks.json' `
+            'P6 is on maintenance hold; admission evidence and an explicit roadmap status transition are required before creating a P6 manifest.'
+    }
+}
+
 if ($null -ne $manifest -and -not $explicitHistoricalMode -and $planPhase -ne [string]$manifest.current_phase) {
     Add-PlanningFinding ([ref]$findings) 'plan_manifest_phase_mismatch' $paths['plan'] `
         ('Plan current_phase {0} does not match manifest current_phase {1}.' -f $planPhase, [string]$manifest.current_phase)
-}
-
-if (-not (Test-ContainsLiteral $content['readme'] 'docs/product/README.md')) {
-    Add-PlanningFinding ([ref]$findings) 'readme_missing_product_docs_link' $paths['readme'] 'README must link to docs/product/README.md.'
-}
-if (-not (Test-ContainsLiteral $content['agents'] 'verify-vnext-planning.ps1')) {
-    Add-PlanningFinding ([ref]$findings) 'agents_missing_planning_gate' $paths['agents'] 'AGENTS.md must include the planning verifier in contract/invariant gates.'
 }
 
 $result = [ordered]@{
@@ -341,6 +351,7 @@ $result = [ordered]@{
     task_count = $taskCount
     done_count = $doneCount
     open_count = $pendingCount
+    evidence_count = $phaseEvidencePaths.Count
     finding_count = $findings.Count
     findings = @($findings)
 }

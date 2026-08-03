@@ -14,7 +14,45 @@ Describe "Quality gate scripts" {
         $raw | Should Match 'total_elapsed_ms'
     }
 
-    It "keeps full-suite output failure-focused and reports stage timings" {
+    It "keeps closeout on one full-gate entry plus the explicit live Doctor probe" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $agents = Get-Content -LiteralPath (Join-Path $root 'AGENTS.md') -Raw
+        $gateSection = [regex]::Match($agents, '(?s)## C\. 门禁、证据与回滚(?<body>.*?)(?:\r?\n## D\.|\z)').Groups['body'].Value
+
+        $gateSection | Should Match 'run-local-quality-gates\.ps1 -Profile full'
+        $gateSection | Should Match 'doctor --strict --threshold-ms 8000'
+        $gateSection | Should Not Match 'tests/run\.ps1'
+        $gateSection | Should Not Match 'verify-dependency-baseline\.py'
+        $gateSection | Should Not Match 'verify-host-capability-matrix\.ps1'
+        $gateSection | Should Not Match 'verify-vnext-planning\.ps1'
+    }
+
+    It "removes confirmed definition-only compatibility leftovers" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $sources = @(
+            'src\Commands\AuditTargets.ps1',
+            'src\Commands\Install.ps1',
+            'src\Commands\Mcp.ps1'
+        ) | ForEach-Object { Get-Content -LiteralPath (Join-Path $root $_) -Raw }
+        $joined = $sources -join "`n"
+
+        $joined | Should Not Match '(?m)^function Get-AuditKnownRunIds\b'
+        $joined | Should Not Match '(?m)^function 单技能安装\b'
+        $joined | Should Not Match '(?m)^function Get-McpServerNameSet\b'
+        $joined | Should Not Match '(?m)^function Merge-McpConfigMaps\b'
+    }
+
+    It "separates dry-run presentation and apply selection from the audit apply coordinator" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $source = Get-Content -LiteralPath (Join-Path $root 'src\Commands\AuditTargets.Apply.ps1') -Raw
+
+        $source | Should Match '(?m)^function Complete-AuditRecommendationsDryRun\b'
+        $source | Should Match '(?m)^function Resolve-AuditApplySelections\b'
+        $source | Should Match 'Complete-AuditRecommendationsDryRun\s+-Plan'
+        $source | Should Match 'Resolve-AuditApplySelections\s+-Plan'
+    }
+
+    It "keeps full-suite output failure-focused and reports actionable timing profiles" {
         $root = Join-Path $PSScriptRoot "..\.."
         $runner = Get-Content -LiteralPath (Join-Path $root 'tests\run.ps1') -Raw
 
@@ -22,6 +60,9 @@ Describe "Quality gate scripts" {
         $runner | Should Match 'unit_elapsed_ms'
         $runner | Should Match 'e2e_elapsed_ms'
         $runner | Should Match 'test_suite_elapsed_ms'
+        $runner | Should Match 'slow_test_file'
+        $runner | Should Match 'slow_test_case'
+        $runner | Should Match 'reports.test-timings.current.json'
     }
 
     It "forbids tests from reading or writing User-scope environment variables" {
@@ -66,11 +107,15 @@ Describe "Quality gate scripts" {
         $root = Join-Path $PSScriptRoot "..\.."
         $bundleText = Get-Content -LiteralPath (Join-Path $root 'src\Commands\AuditTargets.Bundle.ps1') -Raw
         $applyText = Get-Content -LiteralPath (Join-Path $root 'src\Commands\AuditTargets.Apply.ps1') -Raw
+        $hygieneText = Get-Content -LiteralPath (Join-Path $root 'scripts\quality\check-repo-hygiene.ps1') -Raw
 
         $bundleText | Should Match 'runtime-evidence-'
         $applyText | Should Match 'runtime-evidence-'
         $bundleText | Should Not Match 'Join-Path \$script:Root "docs\\change-evidence"'
         $applyText | Should Not Match 'Join-Path \$script:Root "docs\\change-evidence"'
+        $hygieneText | Should Match '\^docs/change-evidence/\\d\{8\}-audit-runtime-'
+        @(Get-ChildItem -LiteralPath (Join-Path $root 'docs\change-evidence') -File -Filter '*-audit-runtime-*.md').Count | Should Be 0
+        Test-Path -LiteralPath (Join-Path $root 'docs\archive\change-evidence\README.md') | Should Be $true
     }
 
     It "keeps the routing gate on its lightweight inventory instead of audit hashes" {
@@ -247,6 +292,40 @@ Describe "Quality gate scripts" {
 
             $null = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -FailOnUntrackedRuntimeArtifacts 2>&1)
             $LASTEXITCODE | Should Be 1
+        }
+        finally {
+            Pop-Location
+        }
+    }
+
+    It "Evaluates tracked hygiene violations against worktree deletions without requiring staging" {
+        if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-Host "git not found, skipping repository hygiene worktree deletion test."
+            return
+        }
+
+        $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
+        $scriptPath = Join-Path $root "scripts\quality\check-repo-hygiene.ps1"
+        $repo = Join-Path $TestDrive "repo-hygiene-worktree-deletion"
+        New-Item -ItemType Directory -Path (Join-Path $repo "docs\change-evidence") -Force | Out-Null
+        Push-Location $repo
+        try {
+            git init | Out-Null
+            git config user.email "test@example.invalid" | Out-Null
+            git config user.name "Test User" | Out-Null
+            $receipt = Join-Path $repo "docs\change-evidence\20260427-audit-runtime-dry-run-r-dry-123456.md"
+            Set-Content -LiteralPath $receipt -Value "runtime evidence" -Encoding UTF8
+            git add . | Out-Null
+            git commit -m "fixture with legacy receipt" | Out-Null
+
+            $null = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+            $LASTEXITCODE | Should Be 1
+
+            Remove-Item -LiteralPath $receipt
+            $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+            $LASTEXITCODE | Should Be 0
+            (($output -join "`n") | Should Match "Repository hygiene check passed")
+            @(git diff --cached --name-only).Count | Should Be 0
         }
         finally {
             Pop-Location

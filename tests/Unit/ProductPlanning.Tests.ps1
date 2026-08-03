@@ -15,7 +15,7 @@ Describe 'vNext product planning contract' {
         'tasks\skills-manager-vnext-phase0.tasks.json', 'tasks\skills-manager-vnext-phase1.tasks.json',
         'tasks\skills-manager-vnext-phase2.tasks.json', 'tasks\skills-manager-vnext-phase3.tasks.json',
         'tasks\skills-manager-vnext-phase4.tasks.json', $currentManifestRelative,
-        'tasks\plan.md', 'tasks\todo.md', 'README.md', 'AGENTS.md'
+        'tasks\plan.md', 'tasks\todo.md', 'README.md', 'AGENTS.md', 'config\vnext-phase4-entry-gate.json'
     )
 
     function Invoke-PlanningVerifier([string]$Root, [string]$ManifestPath = '', [string]$SpecPath = '', [switch]$External) {
@@ -82,6 +82,33 @@ Describe 'vNext product planning contract' {
         @($parsed.findings | Where-Object code -eq redundant_full_test_invocation).Count | Should Be 1
     }
 
+    It 'rejects a current spec that schedules the full suite before the full gate' {
+        $fixtureRoot = New-PlanningFixture 'redundant-spec-suite'
+        $specPath = Join-Path $fixtureRoot $currentSpecRelative
+        $spec = Get-Content -LiteralPath $specPath -Raw
+        $spec = $spec.Replace('2. affected Pester tests', '2. affected Pester tests, then `tests/run.ps1`')
+        Set-Content -LiteralPath $specPath -Value $spec -Encoding UTF8
+        $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
+        @($parsed.findings | Where-Object code -eq redundant_full_test_spec).Count | Should Be 1
+    }
+
+    It 'rejects a historical phase gate left open after the current phase advanced' {
+        $fixtureRoot = New-PlanningFixture 'historical-phase-open'
+        $gatePath = Join-Path $fixtureRoot 'config\vnext-phase4-entry-gate.json'
+        $gate = Get-Content -LiteralPath $gatePath -Raw | ConvertFrom-Json
+        $gate.status = 'in_progress'
+        $gate | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $gatePath -Encoding UTF8
+        $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
+        @($parsed.findings | Where-Object code -eq historical_phase_not_closed).Count | Should Be 1
+    }
+
+    It 'blocks a P6 manifest while the roadmap admission status is hold' {
+        $fixtureRoot = New-PlanningFixture 'p6-hold'
+        Set-Content -LiteralPath (Join-Path $fixtureRoot 'tasks\skills-manager-vnext-phase6.tasks.json') -Value '{"schema_version":1}' -Encoding UTF8
+        $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
+        @($parsed.findings | Where-Object code -eq next_phase_started_while_on_hold).Count | Should Be 1
+    }
+
     It 'fails closed on unknown dependencies' {
         $fixtureRoot = New-PlanningFixture 'unknown-dependency'; $path = Join-Path $fixtureRoot $currentManifestRelative
         $manifest = Get-Content $path -Raw | ConvertFrom-Json; $manifest.tasks[1].depends_on = @('SMV-P2-999'); $manifest | ConvertTo-Json -Depth 100 | Set-Content $path -Encoding UTF8
@@ -109,6 +136,29 @@ Describe 'vNext product planning contract' {
         Remove-Item -LiteralPath (Join-Path $fixtureRoot $evidencePath) -Force
         $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
         @($parsed.findings | Where-Object code -eq done_task_evidence_missing).Count | Should BeGreaterThan 0
+    }
+
+    It 'allows done tasks to share one phase-level logical-slice evidence file' {
+        $fixtureRoot = New-PlanningFixture 'shared-phase-evidence'; $path = Join-Path $fixtureRoot $currentManifestRelative
+        $manifest = Get-Content $path -Raw | ConvertFrom-Json
+        $manifest.tasks[0].write_set = @($manifest.tasks[0].write_set | Where-Object { $_ -notlike 'docs/change-evidence/*' })
+        $manifest | ConvertTo-Json -Depth 100 | Set-Content $path -Encoding UTF8
+
+        $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
+        $parsed.pass | Should Be $true
+        @($parsed.findings | Where-Object code -eq done_task_missing_evidence_path).Count | Should Be 0
+    }
+
+    It 'does not self-lock README links or its own AGENTS registration' {
+        $fixtureRoot = New-PlanningFixture 'planning-self-lock'
+        $readmePath = Join-Path $fixtureRoot 'README.md'
+        $agentsPath = Join-Path $fixtureRoot 'AGENTS.md'
+        Set-Content -LiteralPath $readmePath -Value ((Get-Content $readmePath -Raw).Replace('docs/product/README.md', 'docs/product/index.md')) -Encoding UTF8
+        Set-Content -LiteralPath $agentsPath -Value ((Get-Content $agentsPath -Raw).Replace('verify-vnext-planning.ps1', 'planning-contract.ps1')) -Encoding UTF8
+
+        $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
+        $parsed.pass | Should Be $true
+        @($parsed.findings | Where-Object code -in @('readme_missing_product_docs_link', 'agents_missing_planning_gate')).Count | Should Be 0
     }
 
     It 'fails closed when plan and current manifest phases differ' {

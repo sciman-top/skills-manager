@@ -68,11 +68,11 @@ Parser/schema failures block routing. Individual host source errors yield `parti
 ## 12. Ordered verification
 
 1. `build.ps1`
-2. affected Pester tests, then `tests/run.ps1`
+2. affected Pester tests during iteration; do not invoke the full suite separately at closeout
 3. `quick_validate.py overrides/capability-router`
 4. routing/planning/doctor/dependency/host contracts
 5. fresh router replay and App Server read-only snapshot probe
-6. full local quality gate once for closeout
+6. full local quality gate once for closeout; it is the single full Unit/E2E invocation
 
 ## 13. Rollback
 

@@ -778,6 +778,87 @@ function Invoke-AuditRecommendationsPreflight {
     throw ("预检失败：{0}" -f ($issues -join " | "))
 }
 
+function Complete-AuditRecommendationsDryRun {
+    param(
+        $Plan,
+        [System.Collections.IDictionary]$Report,
+        [string]$RecommendationsPath,
+        [string]$DryRunAck,
+        [bool]$RequireDryRunAck
+    )
+
+    Write-Host "dry-run 预览（沿用原序号）："
+    foreach ($item in @($Plan.items)) { Write-Host ("DRYRUN install: {0}" -f ($item.tokens -join " ")) }
+    foreach ($item in @($Plan.removal_candidates)) { Write-Host ("DRYRUN remove: [{0}|{1}] {2}" -f [string]$item.vendor, [string]$item.from, [string]$item.name) }
+    foreach ($item in @($Plan.mcp_items)) {
+        $server = $item.server
+        $transport = if ($server.PSObject.Properties.Match("transport").Count -gt 0) { [string]$server.transport } else { "stdio" }
+        if ($transport -eq "stdio") {
+            $argsText = if ($server.PSObject.Properties.Match("args").Count -gt 0 -and $null -ne $server.args -and @($server.args).Count -gt 0) { " " + ((@($server.args) | ForEach-Object { [string]$_ }) -join " ") } else { "" }
+            Write-Host ("DRYRUN mcp-add: {0} --transport stdio --cmd {1}{2}" -f [string]$server.name, [string]$server.command, $argsText)
+        }
+        else { Write-Host ("DRYRUN mcp-add: {0} --transport {1} --url {2}" -f [string]$server.name, $transport, [string]$server.url) }
+    }
+    foreach ($item in @($Plan.mcp_removal_candidates)) { Write-Host ("DRYRUN mcp-remove: {0}" -f [string]$item.installed_name) }
+    Write-Host "DRY-RUN 完成：未修改任何技能映射或 MCP 配置（未落盘）。" -ForegroundColor Red
+    Write-Host ("如需真正执行，请运行：.\skills.ps1 审查目标 应用 --recommendations `"{0}`" --apply --yes" -f $RecommendationsPath) -ForegroundColor Red
+    if ($RequireDryRunAck) {
+        $ackToken = Get-AuditDryRunAckToken
+        $ackInput = ""
+        if (-not [string]::IsNullOrWhiteSpace($DryRunAck)) { $ackInput = [string]$DryRunAck }
+        elseif (-not [Console]::IsInputRedirected) { $ackInput = Read-HostSafe ("请输入确认口令 `"{0}`" 表示你已知晓 dry-run 未落盘（回车取消）" -f $ackToken) }
+        else { Write-Host ("当前为非交互环境。请追加参数：--dry-run-ack `"{0}`"" -f $ackToken) -ForegroundColor Red }
+        if ([string]::IsNullOrWhiteSpace($ackInput) -or $ackInput.Trim() -ne $ackToken) {
+            $Report.success = $false
+            $Report["canceled"] = $true
+            $Report["dry_run_acknowledged"] = $false
+            $Report["dry_run_ack_expected"] = $ackToken
+            $Report["dry_run_ack_received"] = [string]$ackInput
+            $Report.changed_counts = New-AuditChangedCounts $Plan.items $Plan.removal_candidates $Plan.mcp_items $Plan.mcp_removal_candidates
+            Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$Report)
+            $evidencePath = Write-AuditRuntimeEvidence "dry-run-canceled" $RecommendationsPath ([pscustomobject]$Report) @(".\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`"")
+            if (-not [string]::IsNullOrWhiteSpace($evidencePath)) { Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan }
+            return [pscustomobject]$Report
+        }
+        $Report["dry_run_acknowledged"] = $true
+    }
+    $dryRunSummaryPath = Get-AuditDryRunSummaryPath $RecommendationsPath
+    $dryRunSummary = New-AuditDryRunSummary $Plan $RecommendationsPath
+    Write-AuditJsonFile $dryRunSummaryPath $dryRunSummary
+    $Report["dry_run_summary_path"] = $dryRunSummaryPath
+    Write-Host ("dry-run 机器可读摘要：{0}" -f $dryRunSummaryPath) -ForegroundColor Cyan
+    Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$Report)
+    $evidencePath = Write-AuditRuntimeEvidence "dry-run" $RecommendationsPath ([pscustomobject]$Report) @(".\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`" --dry-run-ack `"$([string]$DryRunAck)`"")
+    if (-not [string]::IsNullOrWhiteSpace($evidencePath)) { Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan }
+    return [pscustomobject]$Report
+}
+
+function Resolve-AuditApplySelections {
+    param(
+        $Plan,
+        [string]$AddSelection,
+        [string]$RemoveSelection,
+        [string]$McpAddSelection,
+        [string]$McpRemoveSelection
+    )
+
+    $selectedAdd = Resolve-AuditSelection $AddSelection $Plan.items "请输入要安装的新增建议序号（空=跳过，0=取消）" "新增建议序号无效"
+    if ($selectedAdd.canceled) { return [pscustomobject]@{ canceled = $true } }
+    $selectedRemove = Resolve-AuditSelection $RemoveSelection @($Plan.removal_candidates | Where-Object { $_.status -eq "planned" }) "请输入要卸载的建议序号（空=跳过，0=取消）" "卸载建议序号无效"
+    if ($selectedRemove.canceled) { return [pscustomobject]@{ canceled = $true } }
+    $selectedMcpAdd = Resolve-AuditSelection $McpAddSelection @($Plan.mcp_items | Where-Object { $_.status -eq "planned" }) "请输入要新增的 MCP 建议序号（空=跳过，0=取消）" "MCP 新增建议序号无效"
+    if ($selectedMcpAdd.canceled) { return [pscustomobject]@{ canceled = $true } }
+    $selectedMcpRemove = Resolve-AuditSelection $McpRemoveSelection @($Plan.mcp_removal_candidates | Where-Object { $_.status -eq "planned" }) "请输入要卸载的 MCP 建议序号（空=跳过，0=取消）" "MCP 卸载建议序号无效"
+    if ($selectedMcpRemove.canceled) { return [pscustomobject]@{ canceled = $true } }
+    return [pscustomobject]@{
+        canceled = $false
+        add = $selectedAdd
+        remove = $selectedRemove
+        mcp_add = $selectedMcpAdd
+        mcp_remove = $selectedMcpRemove
+    }
+}
+
 function Invoke-AuditRecommendationsApply {
     param(
         [string]$RecommendationsPath,
@@ -1045,72 +1126,11 @@ function Invoke-AuditRecommendationsApply {
     Write-AuditRecommendationSummary $plan $snapshotState $liveState
 
     if (-not $Apply) {
-        Write-Host "dry-run 预览（沿用原序号）："
-        foreach ($item in @($plan.items)) {
-            Write-Host ("DRYRUN install: {0}" -f ($item.tokens -join " "))
-        }
-        foreach ($item in @($plan.removal_candidates)) {
-            Write-Host ("DRYRUN remove: [{0}|{1}] {2}" -f [string]$item.vendor, [string]$item.from, [string]$item.name)
-        }
-        foreach ($item in @($plan.mcp_items)) {
-            $server = $item.server
-            $transport = if ($server.PSObject.Properties.Match("transport").Count -gt 0) { [string]$server.transport } else { "stdio" }
-            if ($transport -eq "stdio") {
-                $argsText = if ($server.PSObject.Properties.Match("args").Count -gt 0 -and $null -ne $server.args -and @($server.args).Count -gt 0) { " " + ((@($server.args) | ForEach-Object { [string]$_ }) -join " ") } else { "" }
-                Write-Host ("DRYRUN mcp-add: {0} --transport stdio --cmd {1}{2}" -f [string]$server.name, [string]$server.command, $argsText)
-            }
-            else {
-                Write-Host ("DRYRUN mcp-add: {0} --transport {1} --url {2}" -f [string]$server.name, $transport, [string]$server.url)
-            }
-        }
-        foreach ($item in @($plan.mcp_removal_candidates)) {
-            Write-Host ("DRYRUN mcp-remove: {0}" -f [string]$item.installed_name)
-        }
-        Write-Host "DRY-RUN 完成：未修改任何技能映射或 MCP 配置（未落盘）。" -ForegroundColor Red
-        Write-Host ("如需真正执行，请运行：.\skills.ps1 审查目标 应用 --recommendations `"{0}`" --apply --yes" -f $RecommendationsPath) -ForegroundColor Red
-        if ($RequireDryRunAck) {
-            $ackToken = Get-AuditDryRunAckToken
-            $ackInput = ""
-            if (-not [string]::IsNullOrWhiteSpace($DryRunAck)) {
-                $ackInput = [string]$DryRunAck
-            }
-            elseif (-not [Console]::IsInputRedirected) {
-                $ackInput = Read-HostSafe ("请输入确认口令 `"{0}`" 表示你已知晓 dry-run 未落盘（回车取消）" -f $ackToken)
-            }
-            else {
-                Write-Host ("当前为非交互环境。请追加参数：--dry-run-ack `"{0}`"" -f $ackToken) -ForegroundColor Red
-            }
-            if ([string]::IsNullOrWhiteSpace($ackInput) -or $ackInput.Trim() -ne $ackToken) {
-                $report.success = $false
-                $report["canceled"] = $true
-                $report["dry_run_acknowledged"] = $false
-                $report["dry_run_ack_expected"] = $ackToken
-                $report["dry_run_ack_received"] = [string]$ackInput
-                $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
-                Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
-                $evidencePath = Write-AuditRuntimeEvidence "dry-run-canceled" $RecommendationsPath ([pscustomobject]$report) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`"")
-                if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
-                    Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
-                }
-                return [pscustomobject]$report
-            }
-            $report["dry_run_acknowledged"] = $true
-        }
-        $dryRunSummaryPath = Get-AuditDryRunSummaryPath $RecommendationsPath
-        $dryRunSummary = New-AuditDryRunSummary $plan $RecommendationsPath
-        Write-AuditJsonFile $dryRunSummaryPath $dryRunSummary
-        $report["dry_run_summary_path"] = $dryRunSummaryPath
-        Write-Host ("dry-run 机器可读摘要：{0}" -f $dryRunSummaryPath) -ForegroundColor Cyan
-        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
-        $evidencePath = Write-AuditRuntimeEvidence "dry-run" $RecommendationsPath ([pscustomobject]$report) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`" --dry-run-ack `"$([string]$DryRunAck)`"")
-        if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
-            Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
-        }
-        return [pscustomobject]$report
+        return (Complete-AuditRecommendationsDryRun -Plan $plan -Report $report -RecommendationsPath $RecommendationsPath -DryRunAck $DryRunAck -RequireDryRunAck $RequireDryRunAck)
     }
 
-    $selectedAdd = Resolve-AuditSelection $AddSelection $plan.items "请输入要安装的新增建议序号（空=跳过，0=取消）" "新增建议序号无效"
-    if ($selectedAdd.canceled) {
+    $selections = Resolve-AuditApplySelections -Plan $plan -AddSelection $AddSelection -RemoveSelection $RemoveSelection -McpAddSelection $McpAddSelection -McpRemoveSelection $McpRemoveSelection
+    if ($selections.canceled) {
         $report.success = $false
         $report["canceled"] = $true
         $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
@@ -1118,33 +1138,10 @@ function Invoke-AuditRecommendationsApply {
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
         return [pscustomobject]$report
     }
-    $selectedRemove = Resolve-AuditSelection $RemoveSelection @($plan.removal_candidates | Where-Object { $_.status -eq "planned" }) "请输入要卸载的建议序号（空=跳过，0=取消）" "卸载建议序号无效"
-    if ($selectedRemove.canceled) {
-        $report.success = $false
-        $report["canceled"] = $true
-        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
-        $report.persisted = $false
-        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
-        return [pscustomobject]$report
-    }
-    $selectedMcpAdd = Resolve-AuditSelection $McpAddSelection @($plan.mcp_items | Where-Object { $_.status -eq "planned" }) "请输入要新增的 MCP 建议序号（空=跳过，0=取消）" "MCP 新增建议序号无效"
-    if ($selectedMcpAdd.canceled) {
-        $report.success = $false
-        $report["canceled"] = $true
-        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
-        $report.persisted = $false
-        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
-        return [pscustomobject]$report
-    }
-    $selectedMcpRemove = Resolve-AuditSelection $McpRemoveSelection @($plan.mcp_removal_candidates | Where-Object { $_.status -eq "planned" }) "请输入要卸载的 MCP 建议序号（空=跳过，0=取消）" "MCP 卸载建议序号无效"
-    if ($selectedMcpRemove.canceled) {
-        $report.success = $false
-        $report["canceled"] = $true
-        $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
-        $report.persisted = $false
-        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
-        return [pscustomobject]$report
-    }
+    $selectedAdd = $selections.add
+    $selectedRemove = $selections.remove
+    $selectedMcpAdd = $selections.mcp_add
+    $selectedMcpRemove = $selections.mcp_remove
 
     try {
         foreach ($item in @($selectedAdd.items)) {

@@ -388,7 +388,7 @@ Do not commit local agent state, logs, caches, or temporary artifacts, including
 - `.claude/`, `.codex/`, `.gemini/`, `.trae/`, `.txn/`
 - `agent/`, `artifacts/`, `reports/*.log`
 - `imports/_debug_*`, `imports/_probe_*`, `imports/_tree_*`, `imports/*.zip`
-- audit runtime evidence under ignored `reports/skill-audit/<run-id>/runtime-evidence-*.md`; legacy `docs/change-evidence/*-audit-runtime-*.md` files must not be newly generated or committed
+- audit runtime evidence under ignored `reports/skill-audit/<run-id>/runtime-evidence-*.md`; 115 legacy receipts are preserved under [`docs/archive/change-evidence/`](docs/archive/change-evidence/README.md) and must not return to active `docs/change-evidence/`
 - backups and temporary files such as `build.log*`, `acl-backup-git-*.txt`, `.tmp_*`
 
 Boundary note:

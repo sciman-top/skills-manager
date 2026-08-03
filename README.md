@@ -440,7 +440,7 @@ portable 包包含可迁移源码与配置，例如 `skills.ps1`、`skills.cmd`�
 - `.claude/`、`.codex/`、`.gemini/`、`.trae/`、`.txn/`
 - `agent/`、`artifacts/`、`reports/*.log`
 - `imports/_debug_*`、`imports/_probe_*`、`imports/_tree_*`、`imports/*.zip`
-- 审查运行态证据位于已忽略的 `reports/skill-audit/<run-id>/runtime-evidence-*.md`；旧版曾生成的 `docs/change-evidence/*-audit-runtime-*.md` 也不应继续新增或提交
+- 审查运行态证据位于已忽略的 `reports/skill-audit/<run-id>/runtime-evidence-*.md`；115 份旧 runtime receipts 已原样移入 [`docs/archive/change-evidence/`](docs/archive/change-evidence/README.md)，不得重新放入活跃 `docs/change-evidence/`
 - 备份与临时文件，例如 `build.log*`、`acl-backup-git-*.txt`、`.tmp_*`
 
 边界说明：

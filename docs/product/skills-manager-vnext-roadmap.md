@@ -295,7 +295,21 @@ P5 5/5 task、schema compatibility、golden、fresh query、live read-only multi
 
 2026-08-03 closeout：上述 exit gate 已满足。16 profiles 全部 fresh-pass 并恢复 default；live snapshot 返回 123 skills、6 installed/callable apps、8 MCPs。`app/list` 的外部未安装 app catalog 因 403 标记 `runtime_complete_catalog_partial`，不影响当前 runtime inventory，也不升级为 authenticated app action 或 `live_accepted`。
 
-## 9. 风险登记
+## 9. Maintenance hold and P6 admission
+
+`P6_ADMISSION_STATUS: hold`
+
+P5 完成后进入维护期，不按 Phase 编号惯性扩张。只有同时满足以下条件，才可把状态改为 `admitted` 并创建 P6 spec/manifest：
+
+- 至少 3 个相互独立的真实任务失败，覆盖至少 2 个 task domain，并有可复现输入与误差分类。
+- 证据证明失败不能通过 P5 metadata、policy、golden corpus 或直接缺陷修复解决。
+- `session_plan`、`preheat_recommendation` 等 P5 输出已有真实消费者证据；不得为未消费字段继续扩 schema。
+- 当前 phase truth、历史 entry lifecycle、full-suite 单次执行、evidence ledger 和 test timing debt 均已闭合。
+- 用户明确授权新的产品目标；新 Phase 仍须给出非目标、write set、退出条件和 live boundary。
+
+未满足上述条件时，只允许修缺陷、扩真实 corpus、删除无用字段、改善性能与文档；禁止新增 schema major、daemon/database/provider router、host mutation 或新的治理层。
+
+## 10. 风险登记
 
 | Risk ID | 风险 | Phase | 守卫 |
 | --- | --- | --- | --- |
@@ -308,7 +322,7 @@ P5 5/5 task、schema compatibility、golden、fresh query、live read-only multi
 | `RISK-007` | repo pass 被写成 live accepted | 全部 | verification level enum + evidence review |
 | `RISK-008` | 任务清单过早细化后腐化 | P1+ | 只为 current Phase 建 manifest |
 
-## 10. 路线维护
+## 11. 路线维护
 
 - Phase 进入实施前：刷新官方语义、reference revisions、当前代码 seam 和 baseline gate。
 - Phase 进入实施时：创建该 Phase 的 detailed spec 和 task manifest；更新 `current_phase`。

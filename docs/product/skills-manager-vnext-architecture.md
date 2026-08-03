@@ -3,7 +3,7 @@
 **program_id**: `skills-manager-vnext`
 **architecture_version**: 1
 **status**: accepted-direction
-**最后更新**: 2026-08-01
+**最后更新**: 2026-08-03
 
 ## 1. 架构结论
 
@@ -469,6 +469,7 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 - 记录 source revision/checksum/license；floating `latest` 只能用于 discovery，不能直接进入 locked apply。
 - MCP/plugin capability 必须声明 external data/action 和 auth boundary。
 - plan/receipt/evidence 统一 redaction；测试包含 token、URL userinfo、connection string 和 env value fixtures。
+- reviewed slice evidence、历史 runtime archive 与 ignored current runtime receipt 三层分离；active ledger 不接受 `audit-runtime-*` 运行产物。
 - hooks 视为代码执行面，必须显式 review/trust；本项目不自动启用第三方 hook。
 - 规则 prose 不是权限系统；确定性拦截放 native policy、hooks、scripts 或 CI。
 
@@ -506,6 +507,8 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 AI 编码开始前使用六项范围检查，不建设新的治理子系统：真实问题和用户是否明确、官方/既有 surface 是否可复用、最小直接方案是什么、预计新增哪些长期维护面、最低充分测试是什么、什么条件触发停止或重新评审。任一项无答案时保持 design/deferred。
 
 验证采用升级制：日常迭代只跑受影响测试；共享 config/write/generated seam 使用 quick contract；phase、commit 或 release closeout 才跑一次 full。低层已充分证明的风险不重复堆 unit/fixture/E2E；同一切片共用 evidence，文件未变化不重复跑 full。若实际 write set、抽象数量或测试层级明显超过计划，停止编码并重新做复用/删除/延后判断。
+
+P5 后默认 maintenance hold。新 schema major 或 P6 只能由跨至少两个 task domain 的独立真实失败、现有 P5 seam 无法修复的证据、已消费字段的调用证据和用户明确授权共同触发；否则只做缺陷修复、真实 corpus、性能和删除性维护。
 
 ## 15. 验证矩阵
 

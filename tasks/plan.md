@@ -4,6 +4,7 @@
 **current_phase**: `P5`
 **task_truth**: `tasks/skills-manager-vnext-phase5.tasks.json`
 **status**: repo_verified
+**next_phase_admission**: hold
 
 ## 1. Goal
 
@@ -35,3 +36,10 @@ Use Phase 5 spec `## 12. Ordered verification`; full runs once after current fil
 Five tasks done, current golden/fresh/live read-only probes and full gate pass, zero writes/side-effect violations. Repo, host and live acceptance remain separate.
 
 Phase 5 已按本规则完成 5/5；当前宿主只读 snapshot 为 `host_loaded` 级证据，认证业务动作与 `live_accepted` 未执行。
+
+## 6. Maintenance hold
+
+- P4 lifecycle 已显式闭合；跨阶段 planning contract 会阻断历史 phase 未完成却推进当前 phase。
+- 当前只维护 P5 seam、真实消费者和已测热点，不创建 P6 manifest，不预扩 schema 或治理层。
+- P6 仅在路线图 admission 条件全部满足并获得用户明确授权后进入规划；未满足时继续直接修复 P5。
+- 运行时 receipt 留在 ignored `reports/`，历史 receipt 归档；`docs/change-evidence/` 只保留 reviewed logical-slice evidence。

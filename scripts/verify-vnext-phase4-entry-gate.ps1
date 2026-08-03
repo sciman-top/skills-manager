@@ -27,9 +27,13 @@ if ($null -ne $decision) {
     if ([int]$decision.schema_version -ne 1) { Add-P4Finding 'p4_schema_invalid' '$.schema_version' 'schema_version must be 1.' }
     if ([string]$decision.program_id -ne 'skills-manager-vnext' -or [string]$decision.phase -ne 'P4') { Add-P4Finding 'p4_identity_invalid' '$' 'program_id and phase must identify skills-manager-vnext P4.' }
     if ([string]$decision.decision -notin @('not_started', 'started')) { Add-P4Finding 'p4_decision_invalid' '$.decision' 'decision must be not_started or started.' }
-    if ([string]$decision.status -notin @('deferred', 'in_progress')) { Add-P4Finding 'p4_status_invalid' '$.status' 'status must be deferred or in_progress.' }
+    if ([string]$decision.status -notin @('deferred', 'in_progress', 'completed')) { Add-P4Finding 'p4_status_invalid' '$.status' 'status must be deferred, in_progress, or completed.' }
     $evaluatedAt = [datetimeoffset]::MinValue
     if (-not [datetimeoffset]::TryParse([string]$decision.evaluated_at, [ref]$evaluatedAt)) { Add-P4Finding 'p4_evaluated_at_invalid' '$.evaluated_at' 'evaluated_at must be a parseable timestamp.' }
+    if ([string]$decision.status -eq 'completed') {
+        $completedAt = [datetimeoffset]::MinValue
+        if (-not [datetimeoffset]::TryParse([string]$decision.completed_at, [ref]$completedAt)) { Add-P4Finding 'p4_completed_at_invalid' '$.completed_at' 'completed status requires a parseable completed_at timestamp.' }
+    }
 
     $requiredGateIds = @('independent_product_evidence', 'repeated_adoption', 'explicit_scale_surface_and_audience', 'safety_and_operating_boundary')
     $gates = @($decision.gates)
@@ -52,11 +56,21 @@ if ($null -ne $decision) {
 
     $defaultP4Manifest = Join-Path $root 'tasks\skills-manager-vnext-phase4.tasks.json'
     if ([string]$decision.decision -eq 'started') {
-        if (-not $allMet -or [string]$decision.status -ne 'in_progress') { Add-P4Finding 'p4_started_without_entry' '$.decision' 'P4 can start only when every required gate is met and status is in_progress.' }
+        if (-not $allMet -or [string]$decision.status -notin @('in_progress', 'completed')) { Add-P4Finding 'p4_started_without_entry' '$.decision' 'P4 can start or complete only when every required gate is met.' }
         if ([string]::IsNullOrWhiteSpace([string]$decision.p4_manifest_path)) { Add-P4Finding 'p4_started_manifest_missing' '$.p4_manifest_path' 'Started P4 requires an explicit manifest path.' }
         else {
             $manifestFull = if ([System.IO.Path]::IsPathRooted([string]$decision.p4_manifest_path)) { [System.IO.Path]::GetFullPath([string]$decision.p4_manifest_path) } else { [System.IO.Path]::GetFullPath((Join-Path $root ([string]$decision.p4_manifest_path))) }
             if (-not $manifestFull.Equals($defaultP4Manifest, [System.StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $manifestFull -PathType Leaf)) { Add-P4Finding 'p4_started_manifest_invalid' '$.p4_manifest_path' 'Started P4 requires the repository Phase 4 task manifest.' }
+            elseif ([string]$decision.status -eq 'completed') {
+                try {
+                    $p4Manifest = [System.IO.File]::ReadAllText($manifestFull) | ConvertFrom-Json
+                    $openTasks = @($p4Manifest.tasks | Where-Object { [string]$_.status -ne 'done' })
+                    if (@($p4Manifest.tasks).Count -eq 0 -or $openTasks.Count -gt 0) {
+                        Add-P4Finding 'p4_completed_with_open_tasks' '$.status' 'Completed P4 requires a non-empty manifest with every task done.'
+                    }
+                }
+                catch { Add-P4Finding 'p4_manifest_parse_failed' '$.p4_manifest_path' $_.Exception.Message }
+            }
         }
     }
     else {

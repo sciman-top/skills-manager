@@ -12,7 +12,21 @@ function Get-TrackedFiles {
         throw "git ls-files failed. Ensure the repository is available and Git is installed."
     }
 
-    return $output | Where-Object { $_ -and $_.Trim() }
+    $worktreeDeleted = git diff --name-only --diff-filter=D -- 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        throw "git diff --diff-filter=D failed. Ensure the repository worktree is available."
+    }
+
+    $deletedSet = @{}
+    foreach ($path in @($worktreeDeleted)) {
+        if ($path -and $path.Trim()) {
+            $deletedSet[$path.Trim()] = $true
+        }
+    }
+
+    return $output | Where-Object {
+        $_ -and $_.Trim() -and -not $deletedSet.ContainsKey($_.Trim())
+    }
 }
 
 function Get-UntrackedFiles {
@@ -46,6 +60,7 @@ $trackedArtifactPatterns = @(
     '^\.gitmessage\.txt$',
     '^\.tmp_',
     '^reports/.*\.log$',
+    '^docs/change-evidence/\d{8}-audit-runtime-.*\.md$',
     '^docs/governance/merge-report\.md$',
     '^scripts/governance(?:/|$)',
     '^imports/_debug_[^/]+(?:/|$)',

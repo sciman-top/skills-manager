@@ -679,13 +679,6 @@ function Test-AuditPlaceholderToken([string]$text) {
     return ([regex]::IsMatch($text, "<[^>]+>"))
 }
 
-function Get-AuditKnownRunIds {
-    $auditRoot = Join-Path $script:Root "reports\skill-audit"
-    if (-not (Test-Path -LiteralPath $auditRoot -PathType Container)) { return @() }
-    $dirs = @(Get-ChildItem -LiteralPath $auditRoot -Directory -ErrorAction SilentlyContinue)
-    return @($dirs | Select-Object -ExpandProperty Name | Sort-Object)
-}
-
 function Get-AuditRunCandidateBuckets([string[]]$RequiredFiles = @()) {
     $auditRoot = Join-Path $script:Root "reports\skill-audit"
     $result = [ordered]@{

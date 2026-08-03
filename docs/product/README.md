@@ -30,6 +30,7 @@
 | [任务 manifest](../../tasks/skills-manager-vnext-phase5.tasks.json) | AI 可解析的任务、依赖、write set、验证、回滚、完成条件 | 长篇设计解释 |
 | [任务清单](../../tasks/todo.md) | 人类可扫描的当前任务状态 | manifest 中的结构化细节副本 |
 | [planning verifier](../../scripts/verify-vnext-planning.ps1) | 机械校验上述资产的一致性 | 判断产品价值或宿主 live acceptance |
+| [历史 evidence archive](../archive/change-evidence/README.md) | 保存已退出活跃账本的旧 runtime receipts | 当前 closeout 证明或运行态输出目录 |
 
 ## 3. 事实优先级
 
@@ -38,8 +39,10 @@
 1. 当前代码、命令输出和宿主 native probe。
 2. 根 `AGENTS.md`、本目录 PRD/架构、当前 Phase spec。
 3. 任务 manifest、实施计划、todo。
-4. README、历史计划、change evidence。
+4. README、当前 reviewed change evidence。
 5. 外部参考仓和社区资料。
+
+历史 runtime receipts 只用于追溯，位于 `docs/archive/change-evidence/`，不参与当前完成态或 planning evidence 判定。
 
 官方文档决定宿主加载、技能、插件、MCP、hooks 和配置语义；当前 session 的可调用能力可证明当前环境事实。社区项目只提供结构、测试和打包启发。
 

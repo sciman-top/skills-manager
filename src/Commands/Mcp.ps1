@@ -843,17 +843,6 @@ function Ensure-CodexMcpNodeCacheWrapper([string]$codexRoot) {
     Set-ContentUtf8 $postgresWrapperPath (Get-CodexMcpPostgresEnvWrapperContent)
 }
 
-function Get-McpServerNameSet($servers) {
-    $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    if ($null -eq $servers) { return $set }
-    foreach ($s in $servers) {
-        $name = [string]$s.name
-        if ([string]::IsNullOrWhiteSpace($name)) { continue }
-        $set.Add($name) | Out-Null
-    }
-    return $set
-}
-
 function Convert-McpMapToOrderedMap($mapLike) {
     $map = [ordered]@{}
     if ($null -eq $mapLike) { return $map }
@@ -875,21 +864,6 @@ function Convert-McpMapToOrderedMap($mapLike) {
         }
     }
     return $map
-}
-
-function Merge-McpConfigMaps($existingMapLike, $managedMapLike, $managedNameSet) {
-    $merged = [ordered]@{}
-    $existing = Convert-McpMapToOrderedMap $existingMapLike
-    foreach ($name in $existing.Keys) {
-        if ($managedNameSet.Contains([string]$name)) { continue }
-        $merged[[string]$name] = $existing[$name]
-    }
-
-    $managed = Convert-McpMapToOrderedMap $managedMapLike
-    foreach ($name in $managed.Keys) {
-        $merged[[string]$name] = $managed[$name]
-    }
-    return [pscustomobject]$merged
 }
 
 function Build-GenericMcpPayload([string]$existingContent, $servers) {

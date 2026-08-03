@@ -8,6 +8,7 @@
 - 目标归宿：演进为 local-first AI capability curator 与 rule advisor；复用官方 skills/plugins/MCP/规则 surface，不替代宿主 runtime、auth、权限、会话或插件目录。
 - 当前规划真源：`docs/product/`、当前 P5 spec、`tasks/skills-manager-vnext-phase5.tasks.json`；P0-P4 历史由独立 manifest/closeout evidence 保留，设计态能力不得写成已实现。
 - 当前 Phase：P5 5/5 `repo_verified`；task model、capability DAG、session/preheat plan、Codex App Server read-only snapshot、16-profile fresh probe 与 full gate 已通过。P4 6/6 历史真源继续保留；plugin/MCP install、OAuth、provider/auth/model/sandbox/session mutation、native host mutation 与 live acceptance 仍不在边界。
+- P5 后进入 maintenance hold；未满足路线图的独立真实失败、消费者证据、债务闭合和用户授权条件，不创建 P6 manifest、不扩 schema major 或治理层。
 
 ## A. 仓库事实与模块边界
 - `build.ps1` 从 `src/*` 生成根 `skills.ps1`；`agent/` 与 `vendor/` 是生成或缓存目录，`agent/` 禁止手改。
@@ -38,13 +39,12 @@
 
 ## C. 门禁、证据与回滚
 - fixed order：`build -> test -> contract/invariant -> hotspot`。
-- build：`pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1`
-- test：迭代期运行受影响 Pester 文件；共享边界或 closeout 才运行 `pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run.ps1`。
-- contract/invariant：`pwsh -NoProfile -ExecutionPolicy Bypass -File skills.ps1 doctor --strict --threshold-ms 8000`、`python scripts/verify-dependency-baseline.py --target-repo-root . --require-target-repo-baseline`、`pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-host-capability-matrix.ps1`、`pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-vnext-planning.ps1`、`pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-vnext-phase4-entry-gate.ps1`。
-- hotspot/full：`pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full` 仅用于 closeout/release；日常 targeted/quick 不伪装 full。
+- 迭代：先运行 `pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1`，再运行受影响 Pester 与相关 contract；共享写入/config/generated seam 才升级 quick。
+- closeout/full：`pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full` 是唯一 build、完整测试和 repo contract 编排入口；不得在前后重复运行其内置步骤。
+- live 补充探针：仅当 release/host health 验收需要真实网络时，在 full 之后单独运行一次 `pwsh -NoProfile -ExecutionPolicy Bypass -File skills.ps1 doctor --strict --threshold-ms 8000`；它不替代 full，也不触发宿主写入。
 - 脏工作树可显式加 `-AllowDirtyWorktree` 并列明既有改动；该开关不允许忽略本任务生成漂移。
 - build、generated-sync、dependency、doctor 或 Pester 任一失败即阻断；不得手改生成物绕过。
-- 证据放 `docs/change-evidence/`，每个逻辑切片默认一份，记录风险、命令、exit code、生成/锁定状态、既有脏改动和回滚。
+- reviewed 逻辑切片证据放 `docs/change-evidence/`，每个切片默认一份；runtime receipt 放 ignored `reports/`。历史 runtime receipts 只读归档在 `docs/archive/change-evidence/`，不得重新进入活跃账本。
 - 回滚只撤销本次文件和宿主受管块；不得覆盖无关 `imports/**`、audit/MCP 源码或用户改动。
 
 ## D. Global Rule -> Repo Action

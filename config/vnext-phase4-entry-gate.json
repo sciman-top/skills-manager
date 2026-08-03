@@ -2,9 +2,10 @@
   "schema_version": 1,
   "program_id": "skills-manager-vnext",
   "phase": "P4",
-  "evaluated_at": "2026-08-02T17:02:26+08:00",
+  "evaluated_at": "2026-08-03T00:00:00+08:00",
+  "completed_at": "2026-08-03T00:00:00+08:00",
   "decision": "started",
-  "status": "in_progress",
+  "status": "completed",
   "all_required_met": true,
   "p4_manifest_path": "tasks/skills-manager-vnext-phase4.tasks.json",
   "gates": [
