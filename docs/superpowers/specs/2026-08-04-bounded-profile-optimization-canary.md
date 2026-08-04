@@ -10,7 +10,7 @@
 
 **implementation_scope**: `repo_side_bounded_transaction`
 
-**host_replay_status**: `not_run_for_this_track`
+**host_replay_status**: `host_evaluation_partial_pass`
 
 **live_acceptance**: `not_run`
 
