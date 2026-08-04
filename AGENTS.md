@@ -6,9 +6,9 @@
 ## 1. 当前落点与目标归宿
 - 当前落点：`skills.ps1` 是统一入口，`skills.json` 是 vendor、mapping、target、sync 与 MCP 的单一配置源。
 - 目标归宿：演进为 local-first AI capability curator 与 rule advisor；复用官方 skills/plugins/MCP/规则 surface，不替代宿主 runtime、auth、权限、会话或插件目录。
-- 当前规划真源：`docs/product/`、当前 P5 spec、`tasks/skills-manager-vnext-phase5.tasks.json`；非 Phase 的 Lean Delivery 维护设计由 `docs/superpowers/specs/2026-08-03-lean-ai-delivery-maintenance-design.md` 与对应 manifest 承接；P5-local native-first 路由纠正和当前 profile reconciliation advisor 分别由 `docs/superpowers/specs/2026-08-04-native-first-capability-discovery-correction.md`、`docs/superpowers/specs/2026-08-04-skill-profile-reconciliation-maintenance-design.md` 及各自 task manifest 承接。它们都不构成 P6 admission 或 live acceptance；P0-P4 历史由独立 manifest/closeout evidence 保留。
+- 当前规划真源：`docs/product/`、当前 P5 spec、`tasks/skills-manager-vnext-phase5.tasks.json`；非 Phase 的 Lean Delivery 维护设计由对应 maintenance spec/manifest 承接；P5-local native-first routing、profile reconciliation advisor 与 bounded profile optimization canary 分别由 `docs/superpowers/specs/2026-08-04-native-first-capability-discovery-correction.md`、`docs/superpowers/specs/2026-08-04-skill-profile-reconciliation-maintenance-design.md`、`docs/superpowers/specs/2026-08-04-bounded-profile-optimization-canary.md` 及各自 manifest 承接。它们都不构成 P6 admission 或 live acceptance。
 - 当前 Phase：P5 5/5 `repo_verified` 历史真值保留；P5-local maintenance correction 已以 4/4 `repo_verified` 将 lexical task model/ranking 退役为 host-AI-owned semantics + profile discovery/deterministic policy。host replay 仍为 `host_evaluation_partial`，live acceptance 未执行。P4 6/6 历史真源继续保留；plugin/MCP install、OAuth、provider/auth/model/sandbox/session mutation、native host mutation 与 live acceptance 仍不在边界。
-- 当前 profile maintenance：reconciliation advisor 已完成 4/4 `repo_verified`，实现 host-owned proposal + deterministic plan-only validator；禁止 lexical 自动归类、silent apply、`active_profile` 切换和宿主写入，真实维护收益与 live acceptance 未执行。
+- 当前 profile maintenance：advisor 4/4 与 bounded optimization 3/3 均已 `repo_verified`；canary 只消费 host-owned proposal，以显式 token 修改非活动 profile，并要求 receipt/fresh replay/失败回滚。代表回放为 `host_evaluation_partial_pass`；禁止 lexical 自动归类、永久 `active_profile` 切换和无审计宿主写入，普遍维护收益与 live acceptance 未验证。
 - P5 后进入 maintenance hold；未满足路线图的独立真实失败、消费者证据、债务闭合和用户授权条件，不创建 P6 manifest、不扩 schema major 或治理层。
 
 ## A. 仓库事实与模块边界
@@ -18,6 +18,7 @@
 - `skills.json.skill_projection` 托管技能根并集、选主和路径级开关；原技能目录不属于自动删除边界，manifest 在 `reports/skill-projection/current.json`。
 - `src/Commands/AuditTargets.ps1` 是目标审查与外层 AI prompt 真源；`reports/skill-audit/<run-id>/` 是运行产物，禁止手改。
 - `src/Application/RuleEstate.ps1` 负责动态发现和只读审查；`RuleEstateMutation.ps1` 只消费人工或登记策略审阅的 change-set，并以 fail-fast、逐目标 receipt 模型写入，不实现跨仓 all-or-rollback。
+- `src/Application/SkillProfileReconciliation.ps1` 只消费宿主语义 proposal，负责非活动 profile 的有界 canary、receipt、fresh replay acceptance 和 drift-safe rollback；不调用模型、不决定语义、不永久切换 active profile。
 - `docs/product/` 定义 PRD/架构/路线图，task manifest 定义当前 Phase 的 AI 可执行任务；`scripts/verify-vnext-planning.ps1` 只验证规划一致性，不证明产品或宿主验收。
 
 ## B. 执行与风险边界
@@ -32,6 +33,7 @@
 - 开发迭代只运行受影响测试和相关 contract；共享写入/config/generated seam 才升级 quick；full 只在 phase/commit/release closeout 跑一次，文件变化后才重跑。
 - 测试覆盖真实输入形状和关键失败模式，不机械叠加 unit/fixture/E2E 全组合；一个风险由最低充分层级证明。
 - 同一逻辑切片默认共用一份 change evidence；禁止按 task 机械增 evidence、schema、fixture、wrapper 或空模块。
+- 新增/删除 skill 或修改 description 后，宿主 AI 先消费 advisor `host_handoff` 并允许 no-op；只有非活动 profile proposal 通过 deterministic preview、fresh replay 和回滚保护时才自动 apply。当前任务不得热切换 active profile。
 
 ### B.2 参考依据与外置源码
 - 路由真源为 `references/reference-shelf.manifest.json` 与 `docs/EXTERNAL_REFERENCE_REPO_TIERS.md`；本地根为 `D:\CODE\external\skills-manager-references`，共享克隆以 `D:\CODE\external\_shared\references.manifest.json` 为准。

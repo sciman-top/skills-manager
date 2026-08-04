@@ -5,6 +5,8 @@
 **maintenance_task_truth**: `tasks/skills-manager-vnext-maintenance-design.tasks.json`
 **active_profile_maintenance_track**: `profile_reconciliation_advisor`
 **profile_maintenance_task_truth**: `tasks/skills-manager-vnext-profile-reconciliation.tasks.json`
+**active_profile_optimization_track**: `profile_optimization_canary`
+**profile_optimization_task_truth**: `tasks/skills-manager-vnext-profile-optimization.tasks.json`
 
 - [x] `SMV-P5-001` 建立 P5 Adaptive Capability Fabric 规划真源。
 - [x] `SMV-P5-002` 实现 task model、schema v3 与 capability DAG。
@@ -50,3 +52,11 @@ M0 仅为 maintenance design planning package `repo_verified`；M1-M3 仍为 `co
 - [x] `SMV-PR-004` 完成有序门禁、共享 evidence、限定真值和 Git 收口。
 
 本 track 已完成 4/4 `repo_verified`，但不自动修改 profile、不切换 `active_profile`，也不保证宿主 proposal 的普遍语义正确；P5/P6/M1 truth 保持不变。
+
+## Bounded profile optimization checklist
+
+- [x] `SMV-PO-001` 确定 host semantics、deterministic canary、fresh-task 和 active profile 边界。
+- [x] `SMV-PO-002` 实现 host handoff、bounded apply、atomic receipt、replay acceptance、rollback 和 focused tests。
+- [x] `SMV-PO-003` 完成自然语言 host replay、产品同步、共享 evidence、唯一 full gate 与 Git 收口。
+
+本 track 已完成 3/3 `repo_verified`，真实代表 prompt replay 为 `host_evaluation_partial_pass`；P5 仍为 5/5，P6 继续 hold，M1 pilot 与 business `live_accepted` 未执行。不得将该局部结果外推为普遍语义正确。

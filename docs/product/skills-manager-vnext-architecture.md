@@ -205,10 +205,15 @@ skill add/remove/metadata change
   -> host_ai proposal (base_config_sha256 + add/remove + reason)
   -> freshness / existence / protected-kind / no-op / budget / policy checks
   -> exact dry-run change-set (apply_allowed=false, writes_performed=false)
-  -> reviewed apply only through a future explicitly authorized seam
+  -> bounded non-active-profile canary (explicit token)
+  -> atomic backup + receipt
+  -> fresh ephemeral host replay
+  -> accept partial evidence or automatic rollback
 ```
 
 诊断直接复用 `New-SkillProjectionPlan` 的 canonical、reachability 和 budget 计算，不建立词法分类器、embedding、provider call、daemon 或第二个 profile schema。system skill、resident skill 和 alias 迁移项不允许由 proposal 放入或移出 profile；`active_profile` 在 current/proposed view 中必须完全一致。跨三个及以上 profile 的 membership 只作为 overlap observation，不能在缺少语义证据时自动删除。
+
+`Application/SkillProfileReconciliation.ps1` 是 proposal 后唯一的 profile mutation seam。它不负责语义归类，只实现最多 5 skill/10 action、默认 256 字符预算余量、非活动 profile 限制、hash freshness、single-writer、atomic backup/write、receipt、fresh replay acceptance 和 stale-safe rollback。执行型 benchmark 可临时投影被测 profile，但报告必须证明恢复原 profile；当前 Codex JSONL 无独立 skill-body invocation event，因此 replay 保持 `host_evaluation_partial`。
 
 ### 3.9 `LeanDeliveryAdvisory`
 
@@ -641,6 +646,14 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 理由：新增/删除 skill 后确实需要维护 profile，但自动关键词归类会重新引入已退役的 lexical router；静默 apply 或 active profile 切换又会制造当前任务不可热加载、预算漂移和宿主副作用。宿主已有完整语义上下文，仓库已有稳定 canonical/budget/policy 计算，二者以窄 proposal 契约组合能获得自动建议与确定性安全，同时保留 reviewed apply 的授权边界。
 
 退役条件：若官方宿主未来原生管理跨 profile metadata 预算、变更计划和可审阅 apply，本 advisor 应缩减为兼容检查或删除；若 proposal replay 不能降低 profile stale/unrouted 的人工维护成本，也不继续增加自动化层。
+
+### `ADR-SMV-019 Bounded profile canary with fresh-task replay`
+
+决定：在 ADR-SMV-018 的 plan-only advisor 后增加 `host proposal -> deterministic bounded canary -> fresh ephemeral replay -> accept/rollback`。apply 仅允许非活动 profile、最多 5 skill/10 action、默认至少 256 字符 metadata headroom，必须显式 token、config hash、原子 backup/receipt；replay 对每个 added skill 同时要求 positive/negative case，并确认 original/restored profile。失败默认自动回滚，hash 漂移时停止而非覆盖。
+
+理由：宿主 AI 更擅长完整上下文语义，但不适合替代 freshness、预算、冲突、权限与原子状态；完全静默写 profile 会降低可重复性并可能改变当前任务可见能力。非活动 canary 将用户打断降到最低，又保留审计、恢复和新任务真实验证。官方支持 skill invalidation/force reload，但没有 skills-manager `active_profile` 或当前 turn hot switch，因此 promotion 边界必须是 fresh task。
+
+退役条件：官方若提供稳定的原生 profile/capability set、事务、trace 和 rollback，本 seam 应适配或删除；真实维护数据若不能降低 stale、纠正次数或 TTFV，则回退 plan-only advisor。
 
 ## 11. 安全与供应链
 

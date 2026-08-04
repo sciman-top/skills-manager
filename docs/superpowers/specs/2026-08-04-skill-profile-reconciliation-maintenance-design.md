@@ -12,6 +12,8 @@
 
 **live_acceptance**: `not_run`
 
+> Historical boundary: this track remains the repo-verified zero-write advisor. The separately versioned `profile_optimization_canary` track consumes its validated proposal and adds an explicitly tokened non-active-profile canary; this document's plan-only evidence is not rewritten as apply evidence.
+
 ## 1. Problem and evidence
 
 native-first routing correction 已把自然语言语义所有权归还宿主 AI，但 skill 新增、删除或 description 变化后，`skills.json.skill_projection.profiles.*.enabled_names` 仍需维护。当前 projection 能 fail-closed 检查失效引用和预算，也能报告 `unrouted`，但没有统一入口把这些事实组织成可审阅的 maintenance plan。人工直接编辑容易漏掉 stale、预算、alias/resident/system 边界；按 skill 名称自动归类又会恢复已经证明效果不佳的 lexical router。

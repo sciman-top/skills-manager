@@ -13,6 +13,9 @@
 **active_profile_maintenance_track**: profile_reconciliation_advisor
 **profile_maintenance_task_truth**: `tasks/skills-manager-vnext-profile-reconciliation.tasks.json`
 **profile_maintenance_status**: repo_verified
+**active_profile_optimization_track**: profile_optimization_canary
+**profile_optimization_task_truth**: `tasks/skills-manager-vnext-profile-optimization.tasks.json`
+**profile_optimization_status**: repo_verified
 
 ## 1. Goal
 
@@ -96,3 +99,19 @@ Goal：在 skill 新增、删除或 metadata 变化后，由宿主 AI 提出语�
 Failure routing：stale hash 重新生成 proposal；unknown/protected/no-op/conflict 修 proposal；预算超限减少 membership 而不提高 8,000 ceiling；同一 finding 两次回到 profile purpose。任何 `skills.json`/host mutation、P6 manifest、active profile 漂移、unknown worktree 或 full gate failure 阻断收口。
 
 Verification：`build -> SkillProfileReconciliation.Tests.ps1 -> current advisor JSON -> routing/config/integrity/planning contracts -> one full gate -> Git boundary`。本 track 不执行 reviewed apply、M1 pilot 或 business live acceptance。
+
+## 10. Bounded profile optimization canary
+
+Goal：在 plan-only advisor 后，由当前宿主 AI 生成最小语义 proposal，再以非活动 profile canary、fresh-task replay、receipt 和失败回滚实现低打扰闭环；不恢复 lexical router，不把 `active_profile` 伪装成 Codex 原生热切换。
+
+| Order | Task | Slice | Exit checkpoint |
+| ---: | --- | --- | --- |
+| 1 | `SMV-PO-001` | root cause + contract | FR-SEL-015/016、NFR-SAF-004、ADR-SMV-019 和官方 native boundary 完整；P5/P6 不变 |
+| 2 | `SMV-PO-002` | handoff + transaction + replay | 最多 5 skill/10 action；active profile target fail-closed；atomic receipt/rollback；focused tests green |
+| 3 | `SMV-PO-003` | host replay + closeout | 代表自然语言 fresh replay、恢复 default、产品/任务/evidence、唯一 full gate、Git parity |
+
+Failure routing：stale/unknown/no-op/conflict 修 proposal；active target 改为新任务边界的非活动 canary；replay coverage/expectation 失败自动回滚；rollback target 漂移停止写入。同类语义失败两次回到 skill description/profile purpose，不增加 lexical 规则。
+
+Verification：`build -> advisor/transaction/benchmark focused tests -> current advisor + benchmark plan -> profile/config/routing/planning contracts -> bounded real host replay -> one full gate -> default/P6/Git boundary`。host replay 只声明 partial，M1/P6/live acceptance 不在本 track。
+
+Closeout：3/3 tasks `repo_verified`；72/72 affected tests、27/27 routing corpus、16/16 fresh profile visibility 和唯一 full gate 通过，`doc-coauthoring -> content` 的 6/6 replay 为 `host_evaluation_partial_pass`。当前/恢复 profile 均为 `default`；P6 hold、M1 pilot 与 business `live_accepted` 保持未执行。

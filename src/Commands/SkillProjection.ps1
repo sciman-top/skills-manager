@@ -898,6 +898,15 @@ function New-SkillProfileReconciliationPlan($projectionCfg, [string]$configSha25
                 profile_budgets = @($proposedPlan.profile_budgets)
                 all_profiles_budget_pass = [bool]$proposedPlan.all_profiles_budget_pass
             }) }
+    $hostHandoff = [pscustomobject]([ordered]@{
+            required = ($null -eq $proposal)
+            semantic_owner = "host_ai"
+            next_action = if ($null -eq $proposal) { "inspect_full_skill_descriptions_and_create_minimum_proposal" } elseif (@($findings | Where-Object blocking).Count -eq 0) { "proposal_validated" } else { "revise_proposal_from_findings" }
+            base_config_sha256 = $configSha256.ToLowerInvariant()
+            profile_names = @($profileByName.Keys | Sort-Object)
+            candidate_names = if ($null -eq $currentSummary) { @() } else { @($currentSummary.unrouted_names) }
+            constraints = @("no_lexical_router", "non_active_profile_canary_only", "fresh_task_replay_required", "receipt_and_rollback_required")
+        })
     return [pscustomobject]([ordered]@{
             schema_version = 1
             command = "plan-skill-profile-reconciliation"
@@ -912,6 +921,7 @@ function New-SkillProfileReconciliationPlan($projectionCfg, [string]$configSha25
             actions = @($actions.ToArray())
             proposed = $proposedSummary
             overlaps = @($overlaps.ToArray())
+            host_handoff = $hostHandoff
             finding_count = $findings.Count
             findings = @($findings.ToArray())
         })

@@ -175,6 +175,8 @@ Discovery 先确定用户、问题、成功信号和非目标；实现先跑通�
 - `FR-SEL-012`：任何辅助发现层不得降低 host-native/profile baseline；若真实 replay/canary 不能减少误调用、漏调用、用户纠正或 TTFV，则语义路由功能必须继续降级或删除，仅保留 policy kernel。
 - `FR-SEL-013`：skill 新增、删除或 metadata 变化后，profile reconciliation advisor 必须报告未路由技能、失效 profile/resident 引用、全部 profile metadata 预算和明显多 profile 重叠；诊断不得按名称关键词自动决定归属。
 - `FR-SEL-014`：profile 语义归属只能由宿主 AI 以 `decision_owner=host_ai` 的显式 proposal 提供；确定性 planner 校验 `skills.json` freshness、canonical skill/profile 存在性、protected skill、add/remove 冲突、no-op、理由、动作上限、预算和 routing policy，并只输出 `apply_allowed=false`、`writes_performed=false` 的精确 change-set。
+- `FR-SEL-015`：宿主 proposal 经 plan-only 校验后，可在常驻授权下进入非活动 profile 的 bounded canary；每次最多改变 5 个 skill、10 个 membership action，默认至少保留 256 字符 metadata headroom，禁止改变当前 active profile 或其 membership，并以 config hash、单 writer、原子 backup/write、receipt 和 drift-safe rollback 保护状态。
+- `FR-SEL-016`：canary promotion 必须使用 fresh ephemeral host task replay，覆盖每个新增 skill 的 positive/negative prompt 和每个 changed profile 的至少四类代表场景；profile 未恢复、模型输出/期望失败或覆盖不足时自动回滚。模型 replay 只能标记 `host_evaluation_partial`，不得作为唯一门禁或晋级为 live acceptance。
 
 ### 6.7 Operation plan and receipt
 
@@ -219,6 +221,7 @@ Discovery 先确定用户、问题、成功信号和非目标；实现先跑通�
 - `NFR-SAF-001`：只读命令不能调用 provider、写宿主配置或改变 active profile。
 - `NFR-SAF-002`：所有外部写入必须显式授权；高风险写入必须先有可执行回滚。
 - `NFR-SAF-003`：profile reconciliation 的诊断和 proposal 校验必须 network-free、provider-free、zero-write，且不得修改 `active_profile`、安装/删除 skill 或写宿主配置；未来 apply 路径必须另行设计、审阅和授权。
+- `NFR-SAF-004`：profile canary apply 只能消费显式宿主 proposal 与 apply token，runtime receipt/backup 留在 ignored `reports/`；不得直接调用 provider、修改 skill/plugin/MCP 安装、永久切换 active profile，或在 hash 漂移后覆盖用户修改。
 - `NFR-SEC-001`：不持久化 API key/OAuth/token；日志、plan 和 receipt 使用 redaction-first。
 - `NFR-PERF-001`：inventory/doctor 使用有界扫描、缓存和明确超时；性能退化不能通过跳过完整性校验解决。
 - `NFR-OBS-001`：关键阶段输出稳定的 machine-readable status 和 phase timing。
@@ -247,6 +250,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 11. 交付效果只以真实 pilot 观察；规划包、synthetic replay 或 repo verifier 不能被表述为真实业务收益。
 12. capability 辅助层必须在“只使用宿主原生匹配 + 当前 profile”基线之上证明净收益；deterministic corpus、profile 可见性和少量 host replay 分别报告，不互相冒充。
 13. skill inventory 变化后可获得确定性的 profile drift 诊断；宿主 proposal stale、引用未知对象、触碰 protected skill、产生 no-op/冲突或超预算时 fail-closed，且诊断全过程不改变配置和 active profile。
+14. 经授权的 profile 优化只对非活动 profile 执行有界 canary；fresh-task replay 必须证明正负代表场景并恢复原 active profile，失败时按 receipt 自动回滚，整个链路保持 host semantics 与 deterministic state policy 分离。
 
 ## 9. 成功指标
 
@@ -268,6 +272,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 | `MET-012` | `repo_verified` 向明确 `live_accepted` 的转化 | observe-only；未运行真实工作流时保持 not_run |
 | `MET-013` | capability routing precision/recall、误调用、漏调用与用户纠正 | labelled corpus + 只读 host replay 分层记录；未建立跨任务 baseline 前不设硬阈值 |
 | `MET-014` | profile reconciliation proposal 的 stale/no-op/budget/policy 拒绝与 reviewed apply 转化 | observe-only；当前只实现 plan，不建立自动 apply 指标门禁 |
+| `MET-015` | profile canary replay 通过、回滚、用户纠正与 active profile 恢复 | observe-only；deterministic contract 与 host replay 分层，未建立跨任务净收益前不设语义硬阈值 |
 
 ## 10. 发布和兼容边界
 
@@ -279,6 +284,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - Phase 5 增加 task understanding、capability DAG、session reuse planning 和只读 host snapshot；仍不接管执行、安装、认证、审批、profile 或 session mutation。
 - P5 maintenance correction 以真实用户反馈和重复自然语言回放退役 lexical task understanding/ranking；该修正不改写 P5 历史任务状态，不构成 P6，也不宣称 host-native 路由已经 live accepted。
 - P5-local profile reconciliation advisor 只诊断 profile drift 并校验宿主语义 proposal；它不自动优化 `skills.json`、不热切换 profile、不实现 apply，也不构成 P6 或 live acceptance。
+- P5-local profile optimization canary 在 advisor 之后增加显式 token、非活动 profile 的 bounded apply、runtime receipt、fresh-task replay 和失败回滚；它不自行调用宿主 AI、不永久切换 active profile，也不构成 P6 或 live acceptance。
 - P5 后的 `maintenance_design` 只建立 Lean Delivery advisory 规划契约和条件性 pilot 设计；它不是新 Phase，不改变 P5/P6 状态，也不证明新的 AI 工作流已产生业务效果。
 - GUI、daemon、远端协作、数据库和 domain core 重写均为 conditional，不进入当前承诺。
 

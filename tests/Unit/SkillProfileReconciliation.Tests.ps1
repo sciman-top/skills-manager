@@ -55,6 +55,10 @@ Describe "Skill profile reconciliation advisor" {
         $result.semantic_routing_performed | Should Be $false
         $result.writes_performed | Should Be $false
         $result.apply_allowed | Should Be $false
+        $result.host_handoff.required | Should Be $true
+        $result.host_handoff.semantic_owner | Should Be "host_ai"
+        $result.host_handoff.next_action | Should Be "inspect_full_skill_descriptions_and_create_minimum_proposal"
+        @($result.host_handoff.constraints) | Should Contain "fresh_task_replay_required"
         @($result.current.unrouted_names | Sort-Object) -join "," | Should Be "large,orphan"
         @($result.overlaps | Where-Object skill -eq "active").Count | Should Be 1
         @($result.actions).Count | Should Be 0

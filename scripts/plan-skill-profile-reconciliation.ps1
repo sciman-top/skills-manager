@@ -14,8 +14,13 @@ $configPath = Join-Path $root "skills.json"
 try {
     if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) { throw "skills.ps1 is missing: $entry" }
     if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { throw "skills.json is missing: $configPath" }
-    . $entry
-    $cfg = LoadCfg
+    Push-Location $root
+    try {
+        . $entry
+    }
+    finally { Pop-Location }
+    $cfg = Get-ContentUtf8 $configPath | ConvertFrom-Json
+    if ($null -eq $cfg -or $cfg.PSObject.Properties.Match("skill_projection").Count -eq 0) { throw "skills.json does not define skill_projection." }
     if ($cfg.PSObject.Properties.Match("skill_projection").Count -eq 0 -or $null -eq $cfg.skill_projection) { throw "skills.json does not define skill_projection." }
     $proposal = if ([string]::IsNullOrWhiteSpace($ProposalPath)) { $null } else { Read-SkillProfileReconciliationProposal $ProposalPath }
     $result = New-SkillProfileReconciliationPlan $cfg.skill_projection (Get-FileContentHash $configPath) $proposal

@@ -22,6 +22,7 @@ $Files = @(
     "Application/RuleAudit.ps1",
     "Application/RuleEstate.ps1",
     "Application/RuleEstateMutation.ps1",
+    "Application/SkillProfileReconciliation.ps1",
     "Application/RulePatchGuard.ps1",
     "Application/RulePatchExecutor.ps1",
     "Git.ps1",

@@ -249,7 +249,17 @@ PPT 路由保持职责单一：`custom-teacher-courseware-ppt` 决定课堂课�
 .\skills.ps1 技能配置 使用 python
 ```
 
-`调和/reconcile` 是 profile 维护的只读 advisor。无 proposal 时报告 `unrouted`、失效引用、全部 metadata 预算和跨多个 profile 的重叠观察；传入 proposal 时只接受 `schema_version=1`、`decision_owner=host_ai` 和当前 `skills.json` 的 `base_config_sha256`，再校验 skill/profile、protected skill、add/remove、no-op、理由、预算与 routing policy。输出固定 `apply_allowed=false`、`writes_performed=false`，不会修改 `skills.json`、`active_profile` 或宿主配置。也可调用 `scripts/plan-skill-profile-reconciliation.ps1 -Json`；当前没有自动 apply。
+`调和/reconcile` 是 profile 维护的只读 advisor。无 proposal 时报告 `unrouted`、失效引用、全部 metadata 预算和跨多个 profile 的重叠观察，同时输出 `host_handoff`；传入 proposal 时只接受 `schema_version=1`、`decision_owner=host_ai` 和当前 `skills.json` 的 `base_config_sha256`，再校验 skill/profile、protected skill、add/remove、no-op、理由、预算与 routing policy。advisor 本身始终 `apply_allowed=false`、`writes_performed=false`。
+
+宿主已生成最小 proposal 后，可用独立事务 manager 做 apply preview，或在常驻授权下对非活动 profile 运行 canary：
+
+```powershell
+.scripts\manage-skill-profile-reconciliation.ps1 -Mode Plan -ProposalPath .\proposal.json -Json
+.scripts\manage-skill-profile-reconciliation.ps1 -Mode Apply -ProposalPath .\proposal.json -Token APPLY_PROFILE_RECONCILIATION_CANARY -Json
+.scripts\manage-skill-profile-reconciliation.ps1 -Mode Accept -ReceiptPath <receipt> -ReplayReportPath <report> -CorpusPath <corpus> -Token ACCEPT_PROFILE_RECONCILIATION_CANARY -RollbackOnFailure -Json
+```
+
+canary 最多修改 5 个 skill/10 个 membership action，默认至少保留 256 字符 metadata headroom，并禁止触碰当前 active profile；配置写入有原子 backup/receipt。接受必须来自 fresh ephemeral host replay，覆盖 changed skill 的正负 prompt 并证明 profile 已恢复；失败时按 hash 自动回滚。日常只重放 changed profile/skill 的 4–6 个场景，全量 corpus 只用于结构变化或 closeout。脚本不调用第二个模型、不安装/删除 skill，也不提供当前任务 profile 热切换。运行态 receipt/backup 位于忽略的 `reports/skill-profile-reconciliation/`。
 
 所有 profile 共享轻量常驻 `capability-router` 与 `watch-interrupted-task`。`capability-router` 现为兼容名称：宿主 AI 先根据完整请求、对话和 skill description 原生选择；只有没有可见匹配、用户询问可用能力或需要跨 profile 冷发现时，才调用它按 profile 返回候选。脚本不再用正则/词频理解任务，也不再给出语义置信度；宿主选定最多 3 个候选后，脚本只验证路径、freshness、availability、side effect 与 activation。`watch-interrupted-task` 仍只响应明确守夜/心跳口令。两者都不静默切换 `active_profile`、provider、auth 或宿主进程。
 
@@ -266,7 +276,7 @@ P4/P5 的 lexical selector、task model 和 ranking 是历史 repo_verified 实�
 .\scripts\benchmark-codex-skill-profiles.ps1 -Execute
 ```
 
-benchmark 使用 ephemeral、read-only Codex 任务，记录 skill 选择、计划/代理/worktree 倾向、耗时和 token；产物写入忽略的 `artifacts/skill-profile-benchmark/`。它验证路由开销，不替代真实代码修改、测试质量和回归率评测。
+benchmark 使用 ephemeral、read-only Codex 任务，记录 skill 选择、计划/代理/worktree 倾向、耗时和 token，并核对 `original_profile`/`restored_profile`；产物写入忽略的 `artifacts/skill-profile-benchmark/`。它是 `host_evaluation_partial`，用于 canary 代表 prompt 验证和路由开销观察，不替代真实 skill-body trace、代码质量或 live acceptance。
 
 设计访谈统一使用 `grill-with-docs`：在 CLI/IDE 中可显式输入 `$grill-with-docs`，在 Work/Codex 桌面端可从技能选择器指定，也可由模型仅在“grill/设计质询/把方案磨清楚”等明确语义下隐式调用。它不会因为普通实现或重构请求自动启动；完成访谈后只有用户确认的持久决策才写入 `CONTEXT.md`、词汇表或 ADR。`grilling` 与 `domain-modeling` 作为依赖闭包保留，只有在直接进行决策树访谈或领域建模时才单独调用。
 

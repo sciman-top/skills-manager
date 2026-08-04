@@ -131,9 +131,10 @@
       },
       "content": {
         "enabled_names": [
-          "custom-creator-publishing",
+          "baoyu-format-markdown",
           "copy-editing",
-          "baoyu-format-markdown"
+          "custom-creator-publishing",
+          "doc-coauthoring"
         ]
       },
       "marketing": {

@@ -52,7 +52,7 @@ if (@($selectedCaseIds | Sort-Object -Unique).Count -ne $selectedCaseIds.Count) 
 
 $plannedCalls = $selectedProfiles.Count * $cases.Count * $Repeat
 if (-not $Execute) {
-    $plan = [ordered]@{ valid = $true; execute = $false; profiles = $selectedProfiles; cases = $selectedCaseIds; repeat = $Repeat; planned_calls = $plannedCalls }
+    $plan = [ordered]@{ valid = $true; execute = $false; execution_boundary = "fresh_ephemeral_task"; profiles = $selectedProfiles; cases = $selectedCaseIds; repeat = $Repeat; planned_calls = $plannedCalls }
     if ($Json) { $plan | ConvertTo-Json -Depth 5 } else { Write-Host ("benchmark corpus valid: profiles={0}, cases={1}, repeat={2}, planned_calls={3}" -f $selectedProfiles.Count, $cases.Count, $Repeat, $plannedCalls) }
     exit 0
 }
@@ -108,6 +108,12 @@ finally {
     Set-BenchmarkProfile $originalProfile
 }
 
+$restoredConfig = Get-Content -LiteralPath (Join-Path $repoRoot "skills.json") -Raw | ConvertFrom-Json
+$restoredProfile = [string]$restoredConfig.skill_projection.active_profile
+if (-not [string]::Equals($restoredProfile, $originalProfile, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "benchmark did not restore the original profile: expected=$originalProfile actual=$restoredProfile"
+}
+
 $summary = @($selectedProfiles | ForEach-Object {
     $profile = $_
     $items = @($results.ToArray() | Where-Object profile -eq $profile)
@@ -119,7 +125,7 @@ $summary = @($selectedProfiles | ForEach-Object {
     }
 })
 $resultItems = @($results.ToArray())
-$report = [ordered]@{ schema_version = 1; run_id = $runId; model = $Model; repeat = $Repeat; original_profile = $originalProfile; summary = $summary; results = $resultItems }
+$report = [ordered]@{ schema_version = 1; run_id = $runId; model = $Model; execution_boundary = "fresh_ephemeral_task"; repeat = $Repeat; original_profile = $originalProfile; restored_profile = $restoredProfile; summary = $summary; results = $resultItems }
 $reportPath = Join-Path $runRoot "report.json"
 $report | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $reportPath -Encoding utf8
 if ($Json) { $report | ConvertTo-Json -Depth 10 } else { Write-Host ("benchmark complete: {0}" -f $reportPath); $summary | Format-Table }
