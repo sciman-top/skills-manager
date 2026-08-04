@@ -10,6 +10,9 @@
 **active_correction_track**: capability_routing_correction
 **correction_task_truth**: `tasks/skills-manager-vnext-capability-routing-correction.tasks.json`
 **correction_status**: repo_verified
+**active_profile_maintenance_track**: profile_reconciliation_advisor
+**profile_maintenance_task_truth**: `tasks/skills-manager-vnext-profile-reconciliation.tasks.json`
+**profile_maintenance_status**: repo_verified
 
 ## 1. Goal
 
@@ -78,3 +81,18 @@ Goal：将 P4/P5 的 lexical semantic router 退役为兼容 discovery/policy ke
 Failure routing：误选先修 skill metadata/profile 或删除 router 行为，不增加词法规则；同类反例两次回到 ownership 设计；stale/unknown/needs_activation fail-closed；host invocation 不可观测时标记 partial；未知工作树、profile 未恢复、P5 planning 回归、P6 manifest、host mutation 或 full gate 失败立即阻断。
 
 Verification：按 correction spec 的 build -> focused tests -> routing/config/integrity contracts -> 16-profile fresh probe -> bounded host replay -> planning contracts -> one full gate 顺序执行。27-case corpus 只证明 repo discovery/policy；host replay 与 business `live_accepted` 单独分层。
+
+## 9. Profile reconciliation advisor
+
+Goal：在 skill 新增、删除或 metadata 变化后，由宿主 AI 提出语义归属，仓库确定性发现 profile drift、校验 freshness/对象/预算/policy，并只输出 zero-write dry-run change-set。
+
+| Order | Task | Slice | Exit checkpoint |
+| ---: | --- | --- | --- |
+| 1 | `SMV-PR-001` | ownership + contract | ADR-SMV-018、proposal/output/failure/retirement 边界完整；不恢复 lexical router |
+| 2 | `SMV-PR-002` | planner + CLI/script + tests | current diagnostic pass；fresh proposal exact actions；negative findings fail-closed；zero-write |
+| 3 | `SMV-PR-003` | product/planning truth | PRD/architecture/roadmap/spec/manifest/plan/todo/README/AGENTS 一致；P5/P6/M1 不变 |
+| 4 | `SMV-PR-004` | ordered closeout | affected contracts + one full gate；default profile；一份 evidence；commit/push |
+
+Failure routing：stale hash 重新生成 proposal；unknown/protected/no-op/conflict 修 proposal；预算超限减少 membership 而不提高 8,000 ceiling；同一 finding 两次回到 profile purpose。任何 `skills.json`/host mutation、P6 manifest、active profile 漂移、unknown worktree 或 full gate failure 阻断收口。
+
+Verification：`build -> SkillProfileReconciliation.Tests.ps1 -> current advisor JSON -> routing/config/integrity/planning contracts -> one full gate -> Git boundary`。本 track 不执行 reviewed apply、M1 pilot 或 business live acceptance。

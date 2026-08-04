@@ -44,6 +44,8 @@ PowerShell 7 (`pwsh`) is the primary development, CI, and full-gate runtime. Win
 
 The resident `capability-router` is now a compatibility fallback, not a lexical semantic router. Codex/ChatGPT first match visible skill metadata natively; when no visible capability fits, the fallback returns profile-scoped candidates. The host supplies its semantic choice back to deterministic policy, which alone decides containment, availability, reuse, activation, and approval. The script reports `decision_owner=host_ai`, never assigns semantic confidence, and performs no host mutation. Run `scripts/verify-capability-routing.ps1` for the labelled natural-language discovery/policy corpus and `scripts/get-codex-app-server-capability-snapshot.ps1` for a live read-only Codex snapshot.
 
+Skill profile maintenance uses the same ownership split. `skills.ps1 skill-profile reconcile [proposal.json]` and `scripts/plan-skill-profile-reconciliation.ps1 -Json` report unrouted/stale/budget/overlap facts and validate an explicit `decision_owner=host_ai` proposal against the current `skills.json` hash. They only emit a dry-run change-set with `apply_allowed=false` and `writes_performed=false`; they do not classify skills lexically, change `active_profile`, edit configuration, or install/remove skills.
+
 Phase 1 read-only entry points (no file writes without `--out`):
 
 ```powershell

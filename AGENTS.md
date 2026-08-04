@@ -6,8 +6,9 @@
 ## 1. 当前落点与目标归宿
 - 当前落点：`skills.ps1` 是统一入口，`skills.json` 是 vendor、mapping、target、sync 与 MCP 的单一配置源。
 - 目标归宿：演进为 local-first AI capability curator 与 rule advisor；复用官方 skills/plugins/MCP/规则 surface，不替代宿主 runtime、auth、权限、会话或插件目录。
-- 当前规划真源：`docs/product/`、当前 P5 spec、`tasks/skills-manager-vnext-phase5.tasks.json`；非 Phase 的 Lean Delivery 维护设计由 `docs/superpowers/specs/2026-08-03-lean-ai-delivery-maintenance-design.md` 与 `tasks/skills-manager-vnext-maintenance-design.tasks.json` 承接；当前 P5-local 路由纠正由 `docs/superpowers/specs/2026-08-04-native-first-capability-discovery-correction.md` 与 `tasks/skills-manager-vnext-capability-routing-correction.tasks.json` 承接。两者都不构成 P6 admission 或 live acceptance；P0-P4 历史由独立 manifest/closeout evidence 保留。
+- 当前规划真源：`docs/product/`、当前 P5 spec、`tasks/skills-manager-vnext-phase5.tasks.json`；非 Phase 的 Lean Delivery 维护设计由 `docs/superpowers/specs/2026-08-03-lean-ai-delivery-maintenance-design.md` 与对应 manifest 承接；P5-local native-first 路由纠正和当前 profile reconciliation advisor 分别由 `docs/superpowers/specs/2026-08-04-native-first-capability-discovery-correction.md`、`docs/superpowers/specs/2026-08-04-skill-profile-reconciliation-maintenance-design.md` 及各自 task manifest 承接。它们都不构成 P6 admission 或 live acceptance；P0-P4 历史由独立 manifest/closeout evidence 保留。
 - 当前 Phase：P5 5/5 `repo_verified` 历史真值保留；P5-local maintenance correction 已以 4/4 `repo_verified` 将 lexical task model/ranking 退役为 host-AI-owned semantics + profile discovery/deterministic policy。host replay 仍为 `host_evaluation_partial`，live acceptance 未执行。P4 6/6 历史真源继续保留；plugin/MCP install、OAuth、provider/auth/model/sandbox/session mutation、native host mutation 与 live acceptance 仍不在边界。
+- 当前 profile maintenance：reconciliation advisor 已完成 4/4 `repo_verified`，实现 host-owned proposal + deterministic plan-only validator；禁止 lexical 自动归类、silent apply、`active_profile` 切换和宿主写入，真实维护收益与 live acceptance 未执行。
 - P5 后进入 maintenance hold；未满足路线图的独立真实失败、消费者证据、债务闭合和用户授权条件，不创建 P6 manifest、不扩 schema major 或治理层。
 
 ## A. 仓库事实与模块边界

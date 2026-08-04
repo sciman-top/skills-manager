@@ -15,6 +15,7 @@
 | `P4` | Unified capability selection and activation planning | `complete` | 6/6 tasks `repo_verified`；16-profile fresh prompt probe 已通过，host runtime activation/live acceptance 未执行 |
 | `P5` | Adaptive Capability Fabric | `complete` | 5/5 `repo_verified`；live read-only App Server snapshot 与 full gate 已通过，business live acceptance 未执行 |
 | `maintenance_design` | Lean AI Software Delivery | `M0 repo_verified` | 规划包 4/4 tasks repo_verified；M1-M3 conditional，10-task pilot 未执行 |
+| `profile_reconciliation_advisor` | Skill profile drift reconciliation | `repo_verified` | P5-local plan-only advisor 4/4；宿主负责语义 proposal，确定性 planner 零写入校验；apply/live 未执行，不构成 P6 |
 | `capability_routing_correction` | Native-first discovery/policy | `repo_verified` | P5-local regression correction 4/4；不改写 P5 历史状态，不授权 P6；host replay partial，live acceptance not run |
 
 状态只可在相应 exit gate 有当前证据后更新。Phase 文档完成不等于 Phase 实现完成。

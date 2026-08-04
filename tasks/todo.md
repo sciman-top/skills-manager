@@ -3,6 +3,8 @@
 **task truth**: `tasks/skills-manager-vnext-phase5.tasks.json`
 **active_maintenance_track**: `maintenance_design`
 **maintenance_task_truth**: `tasks/skills-manager-vnext-maintenance-design.tasks.json`
+**active_profile_maintenance_track**: `profile_reconciliation_advisor`
+**profile_maintenance_task_truth**: `tasks/skills-manager-vnext-profile-reconciliation.tasks.json`
 
 - [x] `SMV-P5-001` 建立 P5 Adaptive Capability Fabric 规划真源。
 - [x] `SMV-P5-002` 实现 task model、schema v3 与 capability DAG。
@@ -39,3 +41,12 @@ M0 仅为 maintenance design planning package `repo_verified`；M1-M3 仍为 `co
 - [x] `SMV-CR-004` 完成 build、16-profile probe、只读 host replay、planning/full gate、evidence 与 Git 收口。
 
 该 checklist 已按 P5-local defect correction 完成 4/4 `repo_verified`，不改写 P5 5/5 历史状态。M1 10-task pilot 未执行，P6 继续 hold；deterministic corpus 与 profile 可见性不等于 host-native 普遍正确或 business `live_accepted`。
+
+## Profile reconciliation advisor checklist
+
+- [x] `SMV-PR-001` 确定 host-owned semantics、deterministic validation 和 plan-only 边界。
+- [x] `SMV-PR-002` 实现 current diagnostics、proposal change-set、CLI/script 与 focused tests。
+- [x] `SMV-PR-003` 同步产品、路线图、索引、manifest、plan/todo 与根契约。
+- [x] `SMV-PR-004` 完成有序门禁、共享 evidence、限定真值和 Git 收口。
+
+本 track 已完成 4/4 `repo_verified`，但不自动修改 profile、不切换 `active_profile`，也不保证宿主 proposal 的普遍语义正确；P5/P6/M1 truth 保持不变。

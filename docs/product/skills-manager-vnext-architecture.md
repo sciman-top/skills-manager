@@ -195,6 +195,21 @@ CapabilityDiscoveryPolicyResult
 
 “无感切换”限定为同一任务内使用已可见、已可用且低副作用的能力；不等于静默修改 profile、安装 plugin/MCP、认证、写配置或执行外部写操作。profile 只在新任务边界作为预热候选包；当前任务发现不到合适能力时回退宿主原生推理，不阻塞主链。
 
+#### Profile reconciliation advisor
+
+skill inventory 变化后的 profile 维护继续遵守相同的 ownership 分层：宿主 AI 读取完整 skill description、profile 目的和用户上下文后提出语义归属；仓库只计算和校验可确定事实。
+
+```text
+skill add/remove/metadata change
+  -> canonical inventory + current profile diagnostics
+  -> host_ai proposal (base_config_sha256 + add/remove + reason)
+  -> freshness / existence / protected-kind / no-op / budget / policy checks
+  -> exact dry-run change-set (apply_allowed=false, writes_performed=false)
+  -> reviewed apply only through a future explicitly authorized seam
+```
+
+诊断直接复用 `New-SkillProjectionPlan` 的 canonical、reachability 和 budget 计算，不建立词法分类器、embedding、provider call、daemon 或第二个 profile schema。system skill、resident skill 和 alias 迁移项不允许由 proposal 放入或移出 profile；`active_profile` 在 current/proposed view 中必须完全一致。跨三个及以上 profile 的 membership 只作为 overlap observation，不能在缺少语义证据时自动删除。
+
 ### 3.9 `LeanDeliveryAdvisory`
 
 职责：在复杂 AI 软件交付任务中，将现有产品文档、task manifest、能力目录和证据解释为当前阶段的 Product Baseline、delivery mode、Slice Contract、责任 lens、停止条件与 capability DAG 建议。
@@ -618,6 +633,14 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 理由：真实使用反馈和重复自然语言回放已经证明，固定正则/词表既重复宿主已有语义能力，又丢失上下文和否定语义，辅助层反而低于仅使用 profile 的基线。该设计复用官方 `name + description -> model implicit/explicit invocation`，将本项目独有价值压缩到可确定、可测试的 discovery 与安全策略；它减少额外 token、延迟和双重决策，同时保留写操作、认证和激活的可见门禁。
 
 在当前约束下这是 Pareto-optimal，而不是宣称永恒或全局绝对最优：相对于继续堆词法规则，它提高语义质量并降低维护成本；相对于额外 provider/embedding/router service，它不增加模型调用、daemon、数据库、凭据或故障点；相对于只保留一个超大 profile，它守住元数据预算和渐进披露；相对于全手工选择，它允许低风险已可用能力无感使用。若未来官方提供可查询、可约束且带稳定 trace 的跨 profile 原生 discovery，本兼容 router 应继续缩减或退役；若真实 replay 不能降低误调用、漏调用、纠正次数或 TTFV，也应仅保留 policy kernel。
+
+### `ADR-SMV-018 Host-proposed deterministic profile reconciliation`
+
+决定：profile reconciliation 采用 `host_ai proposal -> deterministic validation -> plan-only change-set`。planner 只接受带当前 `skills.json` SHA-256 的 schema v1 proposal，拒绝 stale/unknown/protected/conflicting/no-op/unjustified/over-budget/policy-blocking 变更，并固定 `semantic_routing_performed=false`、`apply_allowed=false`、`writes_performed=false`。
+
+理由：新增/删除 skill 后确实需要维护 profile，但自动关键词归类会重新引入已退役的 lexical router；静默 apply 或 active profile 切换又会制造当前任务不可热加载、预算漂移和宿主副作用。宿主已有完整语义上下文，仓库已有稳定 canonical/budget/policy 计算，二者以窄 proposal 契约组合能获得自动建议与确定性安全，同时保留 reviewed apply 的授权边界。
+
+退役条件：若官方宿主未来原生管理跨 profile metadata 预算、变更计划和可审阅 apply，本 advisor 应缩减为兼容检查或删除；若 proposal replay 不能降低 profile stale/unrouted 的人工维护成本，也不继续增加自动化层。
 
 ## 11. 安全与供应链
 

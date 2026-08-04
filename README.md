@@ -242,10 +242,14 @@ PPT 路由保持职责单一：`custom-teacher-courseware-ppt` 决定课堂课�
 
 ```powershell
 .\skills.ps1 技能配置 列表
+.\skills.ps1 技能配置 调和
+.\skills.ps1 技能配置 调和 .\proposal.json
 .\skills.ps1 技能配置 使用 coding
 .\skills.ps1 技能配置 使用 coding-strict
 .\skills.ps1 技能配置 使用 python
 ```
+
+`调和/reconcile` 是 profile 维护的只读 advisor。无 proposal 时报告 `unrouted`、失效引用、全部 metadata 预算和跨多个 profile 的重叠观察；传入 proposal 时只接受 `schema_version=1`、`decision_owner=host_ai` 和当前 `skills.json` 的 `base_config_sha256`，再校验 skill/profile、protected skill、add/remove、no-op、理由、预算与 routing policy。输出固定 `apply_allowed=false`、`writes_performed=false`，不会修改 `skills.json`、`active_profile` 或宿主配置。也可调用 `scripts/plan-skill-profile-reconciliation.ps1 -Json`；当前没有自动 apply。
 
 所有 profile 共享轻量常驻 `capability-router` 与 `watch-interrupted-task`。`capability-router` 现为兼容名称：宿主 AI 先根据完整请求、对话和 skill description 原生选择；只有没有可见匹配、用户询问可用能力或需要跨 profile 冷发现时，才调用它按 profile 返回候选。脚本不再用正则/词频理解任务，也不再给出语义置信度；宿主选定最多 3 个候选后，脚本只验证路径、freshness、availability、side effect 与 activation。`watch-interrupted-task` 仍只响应明确守夜/心跳口令。两者都不静默切换 `active_profile`、provider、auth 或宿主进程。
 
