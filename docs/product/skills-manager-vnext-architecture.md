@@ -3,7 +3,7 @@
 **program_id**: `skills-manager-vnext`
 **architecture_version**: 1
 **status**: accepted-direction
-**最后更新**: 2026-08-03
+**最后更新**: 2026-08-04
 
 ## 1. 架构结论
 
@@ -301,6 +301,10 @@ observe repo/user truth
 | release/operations | 需要发布、生产或长期维护 | 环境差异、观测、回滚、owner 和 live 验收是什么？ |
 
 只有可独立、边界明确且不会写同一文件集的探索/测试/审查才分派多 Agent。每个共享 seam 保持单 writer；并行写入使用独立 worktree/branch，集成 Agent 负责冲突、全局验证和 truth closeout。角色名称不构成授权，子 Agent 结论仍需当前仓证据复核。
+
+#### User intent surfaces
+
+本项目只保留四类稳定用户意图，不要求重写现有 CLI：`Discover` 发现官方/社区/本地能力与仓库事实；`Advise` 生成最小组合、规则/规划建议与退役判断；`Transact` 仅在既有显式 token、freshness、backup/receipt/rollback seam 内执行受管投影或 change-set；`Verify` 分层证明 repo、host 与 live 状态。Lean Delivery 只消费 `Discover + Advise + Verify`，不会借 advisory 自动取得 `Transact` 权限。Goal、subagents、scheduled tasks、memory、App Server/SDK 继续由宿主所有；其原生能力覆盖本项目 seam 时触发适配或删除。
 
 #### Skill learning and tool combination
 
@@ -630,6 +634,8 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 决定：TTFV、返工、人工打断、非产品 artifact、门禁耗时与 live 转化只记录在 pilot worksheet/evidence；不建设 telemetry service，不设未经 baseline 的硬阈值，不让 LLM score 单独阻断。
 
 理由：指标用于判断流程是否产生净收益。先为指标建设系统会重演治理膨胀，并可能激励虚假完成或跳过必要验证。
+
+M1 baseline 优先使用近期可比 native-only 历史任务或交替匹配任务，不把同一任务机械执行两遍。不可比任务的观察保持 descriptive-only；synthetic、候选和 pilot bootstrap 自身不得计数。该限制牺牲实验室式随机因果声明，以换取真实交付低干扰和证据诚实性。
 
 ### `ADR-SMV-017 Native-first semantic selection and deterministic policy kernel`
 

@@ -3,13 +3,15 @@
 **program_id**: `skills-manager-vnext`
 **status**: accepted-direction
 **implementation_status**: phase-5-adaptive-capability-fabric-repo-verified-maintenance-hold
-**最后更新**: 2026-08-03
+**最后更新**: 2026-08-04
 
 ## 1. 产品结论
 
 `skills-manager vNext` 是一个 Windows-first、local-first 的 AI 能力策展器与规则全域管理器。它帮助用户为 ChatGPT Work/Codex 与 Claude 选择、组合、投影和验证合适的 skills、plugins、MCP 与规则文件，并管理 `D:\CODE` 直属目标仓（默认排除 `external`、`文档`）及两宿主的全局用户规则，同时保持宿主原生能力、目标仓自治和真实验收边界。
 
 面向高效 AI 软件交付时，它额外提供一层精益、按阶段启用的 advisory lens：把产品目标、主链、当前切片、停止条件、最低充分验证和完成等级说清楚，再由 ChatGPT/Codex/Claude 等宿主原生 Agent 执行。它引导和约束 AI 编码，但不复制模型的推理、编码、会话、多代理或长期运行能力。
+
+North Star：在不复制宿主原生推理、编码和运行能力的前提下，持续提高每单位用户注意力、token 与长期维护成本所产生的可验证用户价值；任何辅助功能都必须证明相对 native baseline 的净收益，并始终可绕过、可回滚、可替换、可删除。
 
 它不是 AI coding runtime，不执行或接管 agent loop，不提供模型路由、账号、认证、权限、会话、云任务、插件商店或中央跨仓治理服务。
 
@@ -216,6 +218,7 @@ Discovery 先确定用户、问题、成功信号和非目标；实现先跑通�
 - `FR-LDL-006`：重复工作先成为 `skill_candidate`，经代表任务 replay、失败样本修订、shadow、有限 canary 和 reviewed promotion 后才进入稳定 skill；持续记录触发精度、净收益、适用边界和退役条件，宿主原生能力覆盖或模型进步消除缺口时应合并、降级或 retire。
 
 ## 7. 非功能需求
+- `FR-LDL-007`：M1 pilot 只登记达到证据停止点的真实任务；synthetic、候选和当前 pilot/规划维护自身不得计入 10 个样本。优先使用近期可比 native-only 历史任务或交替匹配任务作 baseline；无可比项时只做描述性报告，不要求重复执行同一任务，也不宣称因果收益。
 
 - `NFR-COMP-001`：现有 `skills.json`、lock、CLI aliases、generated `skills.ps1` 和 MCP/skill projection 行为保持兼容。
 - `NFR-MNT-001`：新增业务逻辑进入明确 bounded context；不再向超大 command 文件无界追加。
@@ -289,7 +292,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - P5 maintenance correction 以真实用户反馈和重复自然语言回放退役 lexical task understanding/ranking；该修正不改写 P5 历史任务状态，不构成 P6，也不宣称 host-native 路由已经 live accepted。
 - P5-local profile reconciliation advisor 只诊断 profile drift 并校验宿主语义 proposal；它不自动优化 `skills.json`、不热切换 profile、不实现 apply，也不构成 P6 或 live acceptance。
 - P5-local profile optimization canary 在 advisor 之后增加显式 token、非活动 profile 的 bounded apply、runtime receipt、fresh-task replay 和失败回滚；它不自行调用宿主 AI、不永久切换 active profile，也不构成 P6 或 live acceptance。
-- P5 后的 `maintenance_design` 只建立 Lean Delivery advisory 规划契约和条件性 pilot 设计；它不是新 Phase，不改变 P5/P6 状态，也不证明新的 AI 工作流已产生业务效果。
+- P5 后的 `maintenance_design` 已建立 Lean Delivery advisory 规划契约，并由独立 registry 启动 M1 `collecting (0/10)`；它不是新 Phase，不改变 P5/P6 状态，也不证明 pilot 已执行、完成或产生业务效果。
 - GUI、daemon、远端协作、数据库和 domain core 重写均为 conditional，不进入当前承诺。
 
 ## 11. 官方与社区依据
@@ -308,6 +311,11 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 ### 社区采纳或适配
 
 - [wshobson/agents](https://github.com/wshobson/agents)：采纳细粒度 plugin、单一源到宿主原生产物、结构校验；拒绝把大规模多代理/模型分层直接移入本项目。
+- [OpenAI Long-running work](https://learn.chatgpt.com/docs/long-running-work)：`/plan`、`/goal` 与持久目标由宿主承接；本项目只提供可验证的目标/切片输入，不另建 goal runtime。
+- [OpenAI Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents)：独立探索、测试和分诊可由宿主有界并行；共享 write set 保持单 writer，本项目不托管固定角色团队。
+- [OpenAI Memories](https://learn.chatgpt.com/docs/customization/memories)：local memories 是可选回忆层，稳定规则仍进入 `AGENTS.md`/仓库文档；本项目不复制记忆库。
+- [OpenAI Codex App Server](https://learn.chatgpt.com/docs/app-server) 与 [Codex SDK](https://learn.chatgpt.com/docs/codex-sdk)：深度客户端集成和编程式线程控制已有原生入口；只有未来独立产品需求与 P6 admission 同时成立时才评估集成，不在本仓复制。
+- [OpenAI Scheduled tasks](https://learn.chatgpt.com/docs/automations)：稳定重复流程可由宿主 scheduled tasks + skill 承接；先人工跑通并验证，再自动化。本仓不建 daemon/scheduler。
 - [obra/superpowers](https://github.com/obra/superpowers)：采纳 evidence-before-claims、可组合 workflow 和行为测试；拒绝默认强制全部流程和 always-on bootstrap。
 - [mattpocock/skills](https://github.com/mattpocock/skills)：采纳小、可组合、可编辑副本与订阅式 plugin 的区别；拒绝由 workflow 接管完整工程过程。
 - [github/spec-kit](https://github.com/github/spec-kit)：适配从 constitution/spec/plan/tasks 到实现的可追踪结构；拒绝强制 TDD、固定文件数和所有任务人工审批等与本仓风险分级不符的流程。
@@ -332,6 +340,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 
 - `VAL-P0-003`：schema dialect、validator 实现和 observe/enforce 切换，以当前 `skills.json` 变体和本机可用 runtime 为依据，不为验证器额外引入常驻服务。
 - `VAL-P0-005`：首个 Infrastructure seam 必须由至少两个真实 caller 和 characterization tests 选出，不按目标目录图预建空模块。
+- `DEC-PROD-008`：Goal、subagents、scheduled tasks、local memories、App Server/SDK 属于宿主 native baseline 和本项目退役触发器；只有本仓独有的 capability/rule discovery、advice、bounded transaction 与 verification seam 可在证据支持下保留。
 - `VAL-P0-006`：MCP plan 的最终 CLI spelling 先读取当前 parser/alias tests；行为合同先于命令拼写。
 - `VAL-P0-007`：host matrix 的 affirmative capability 必须由当前官方文档、help/schema 或 native probe 支持；未知值保持 unknown/platform_na。
 - `VAL-P1-MET`：semantic finding precision 和性能阈值要先用代表仓建立 baseline，再决定 gate 阈值。

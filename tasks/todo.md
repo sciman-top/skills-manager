@@ -3,6 +3,7 @@
 **task truth**: `tasks/skills-manager-vnext-phase5.tasks.json`
 **active_maintenance_track**: `maintenance_design`
 **maintenance_task_truth**: `tasks/skills-manager-vnext-maintenance-design.tasks.json`
+**maintenance_pilot_truth**: `tasks/skills-manager-vnext-lean-delivery-pilot.json`
 **active_profile_maintenance_track**: `profile_reconciliation_advisor`
 **profile_maintenance_task_truth**: `tasks/skills-manager-vnext-profile-reconciliation.tasks.json`
 **active_profile_optimization_track**: `profile_optimization_canary`
@@ -34,8 +35,10 @@
 - [x] `SMV-MD-002` 落盘 maintenance spec、manifest、实施计划和 checklist。
 - [x] `SMV-MD-003` 实现 companion planning verifier 和负向单元测试。
 - [x] `SMV-MD-004` 同步根契约、共享 evidence、运行有序门禁并限定 truth closeout。
+- [x] M0.1 补齐 North Star、native baseline、双证据流、删除评审与 pilot 计数合同。
+- [ ] M1 收集并 review 10 个真实 observe-only 样本（当前 0/10）。
 
-M0 仅为 maintenance design planning package `repo_verified`；M1-M3 仍为 `conditional`。10-task pilot、runtime/host mutation、P6 admission 和 business `live_accepted` 均未执行。
+M0 maintenance design planning package 保持 `repo_verified`；M1 已获授权并进入 `collecting (0/10)`，但没有任何真实样本、pilot 完成或业务收益声明。M3 仍为 `conditional`；runtime/host mutation、P6 admission 和 business `live_accepted` 均未执行。
 
 ## Capability routing correction checklist
 
@@ -44,7 +47,7 @@ M0 仅为 maintenance design planning package `repo_verified`；M1-M3 仍为 `co
 - [x] `SMV-CR-003` 同步 PRD、架构、路线图、spec、manifest、plan、todo 与根契约。
 - [x] `SMV-CR-004` 完成 build、16-profile probe、只读 host replay、planning/full gate、evidence 与 Git 收口。
 
-该 checklist 已按 P5-local defect correction 完成 4/4 `repo_verified`，不改写 P5 5/5 历史状态。M1 10-task pilot 未执行，P6 继续 hold；deterministic corpus 与 profile 可见性不等于 host-native 普遍正确或 business `live_accepted`。
+该 checklist 已按 P5-local defect correction 完成 4/4 `repo_verified`，不改写 P5 5/5 历史状态。该 track 收口时 M1 未执行；当前独立 registry 为 collecting 0/10，P6 继续 hold。deterministic corpus 与 profile 可见性不等于 host-native 普遍正确或 business `live_accepted`。
 
 ## Hierarchical capability discovery redesign checklist
 
@@ -53,7 +56,7 @@ M0 仅为 maintenance design planning package `repo_verified`；M1-M3 仍为 `co
 - [x] `SMV-HD-003` 完成 32-case selection 与 8-case cold-load fresh host acceptance。
 - [x] `SMV-HD-004` 同步产品/规划/evidence，运行有序门禁并完成 Git 收口。
 
-本 track 完成 4/4 `repo_verified`；selection 32/32、cold-load 8/8 只属于 `host_evaluation_partial`。active profile 恢复 `default`；P5 5/5、P6 hold、M1 和 business `live_accepted` 均不变。cold-load input token 未下降，不宣称成本优化。
+本 track 完成 4/4 `repo_verified`；selection 32/32、cold-load 8/8 只属于 `host_evaluation_partial`。active profile 恢复 `default`；P5 5/5、P6 hold 与 business `live_accepted` 不变；M1 当前独立 collecting 0/10。cold-load input token 未下降，不宣称成本优化。
 
 ## Profile reconciliation advisor checklist
 
@@ -62,7 +65,7 @@ M0 仅为 maintenance design planning package `repo_verified`；M1-M3 仍为 `co
 - [x] `SMV-PR-003` 同步产品、路线图、索引、manifest、plan/todo 与根契约。
 - [x] `SMV-PR-004` 完成有序门禁、共享 evidence、限定真值和 Git 收口。
 
-本 track 已完成 4/4 `repo_verified`，但不自动修改 profile、不切换 `active_profile`，也不保证宿主 proposal 的普遍语义正确；P5/P6/M1 truth 保持不变。
+本 track 已完成 4/4 `repo_verified`，但不自动修改 profile、不切换 `active_profile`，也不保证宿主 proposal 的普遍语义正确；P5/P6 truth 保持不变，M1 当前独立 collecting 0/10。
 
 ## Bounded profile optimization checklist
 
@@ -70,4 +73,4 @@ M0 仅为 maintenance design planning package `repo_verified`；M1-M3 仍为 `co
 - [x] `SMV-PO-002` 实现 host handoff、bounded apply、atomic receipt、replay acceptance、rollback 和 focused tests。
 - [x] `SMV-PO-003` 完成自然语言 host replay、产品同步、共享 evidence、唯一 full gate 与 Git 收口。
 
-本 track 已完成 3/3 `repo_verified`，真实代表 prompt replay 为 `host_evaluation_partial_pass`；P5 仍为 5/5，P6 继续 hold，M1 pilot 与 business `live_accepted` 未执行。不得将该局部结果外推为普遍语义正确。
+本 track 已完成 3/3 `repo_verified`，真实代表 prompt replay 为 `host_evaluation_partial_pass`；P5 仍为 5/5，P6 继续 hold，M1 当前独立 collecting 0/10，business `live_accepted` 未执行。不得将该局部结果外推为普遍语义正确。

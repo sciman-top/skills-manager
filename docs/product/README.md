@@ -34,6 +34,7 @@
 | [实施计划](../../tasks/plan.md) | Phase 5 执行顺序、检查点、失败分流 | 产品背景全文 |
 | [任务 manifest](../../tasks/skills-manager-vnext-phase5.tasks.json) | AI 可解析的任务、依赖、write set、验证、回滚、完成条件 | 长篇设计解释 |
 | [Maintenance manifest](../../tasks/skills-manager-vnext-maintenance-design.tasks.json) | 非 Phase 的 M0 规划任务与 write-set 真值 | M1 pilot 任务或 P6 admission |
+| [M1 pilot registry](../../tasks/skills-manager-vnext-lean-delivery-pilot.json) | 10 个真实任务的 observe-only 样本、计数和 truth boundary | agent runtime、自动指标门禁或 P6 admission |
 | [Routing correction manifest](../../tasks/skills-manager-vnext-capability-routing-correction.tasks.json) | P5-local 缺陷纠正的任务、write set、验证与回滚真值 | 历史 Phase 状态改写或 P6 admission |
 | [Discovery redesign manifest](../../tasks/skills-manager-vnext-capability-discovery-redesign.tasks.json) | hierarchical cold discovery、host acceptance 和收口任务真值 | P6 admission、host mutation 或业务验收 |
 | [Profile reconciliation manifest](../../tasks/skills-manager-vnext-profile-reconciliation.tasks.json) | P5-local profile advisor 的实现、测试、规划和收口真值 | 自动 apply、P6 admission 或 host mutation |
@@ -90,7 +91,7 @@
 - P5-local hierarchical discovery redesign 已完成 4/4 `repo_verified`：旧 default-profile cold baseline 仅 4/8 主动触发；重构后 32-case selection 为 32/32、8-case cold-load chain 为 8/8。profile 现作为有 purpose 的 domain/index partition；上述结果仍仅为 `host_evaluation_partial`，且没有证明 token 成本改善或业务验收。
 - P5-local profile reconciliation advisor 已完成 4/4 `repo_verified`：可报告 stale/unrouted/budget/overlap 并校验 host-owned proposal，输出 exact zero-write change-set；不自动更新 profile、不切换 active profile，reviewed apply 和真实维护收益尚未验收。
 - P5-local profile optimization canary 已完成 3/3 `repo_verified`：proposal 后只允许非活动 profile 的有界事务，并以 fresh-task replay/receipt/rollback 收口；`doc-coauthoring -> content` 的 6/6 代表回放仅为 `host_evaluation_partial_pass`，不等于普遍语义正确或业务验收。
-- `maintenance_design` 的 M0 规划包已完成 4/4 `repo_verified`：总体方案、spec、manifest、companion verifier、测试和 reviewed evidence 已落盘；M1-M3 仍为 `conditional`，10-task observe-only pilot、host/runtime 变化与业务效果验证均未执行。
+- `maintenance_design` 的 M0 规划包已完成 4/4 `repo_verified`；M0.1 已补齐 North Star、native baseline、双证据流、删除评审和 pilot 计数合同。M1 已获授权并进入 `collecting (0/10)`，只表示真实样本登记已启动；pilot 执行/完成、host/runtime 变化、业务效果和 live acceptance 均未发生，M3 仍为 `conditional`。
 - `governed-ai-coding-runtime` 只作为静态规则模型参考；不得恢复其已退役的目标仓 registry、同步器或中央 verifier。
 - “全局 + 项目 1+1>2”已定义为 `common + platform_delta + project_action` 的责任覆盖合同；read-only Rule Advisor 已接通显式责任映射和 repo path/command 静态核验，通用自然语言语义精度仍不作外推。
 

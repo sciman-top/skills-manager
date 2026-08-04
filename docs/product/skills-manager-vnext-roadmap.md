@@ -14,7 +14,7 @@
 | `P3` | Plugin-aware distribution and evaluation | `complete` | 7/7 tasks repo_verified；fixture-first，host/live 未执行 |
 | `P4` | Unified capability selection and activation planning | `complete` | 6/6 tasks `repo_verified`；16-profile fresh prompt probe 已通过，host runtime activation/live acceptance 未执行 |
 | `P5` | Adaptive Capability Fabric | `complete` | 5/5 `repo_verified`；live read-only App Server snapshot 与 full gate 已通过，business live acceptance 未执行 |
-| `maintenance_design` | Lean AI Software Delivery | `M0 repo_verified` | 规划包 4/4 tasks repo_verified；M1-M3 conditional，10-task pilot 未执行 |
+| `maintenance_design` | Lean AI Software Delivery | `M0 repo_verified / M1 collecting 0/10` | M0 规划包 4/4 repo_verified；M1 仅启动真实样本收集，M3 conditional |
 | `profile_reconciliation_advisor` | Skill profile drift reconciliation | `repo_verified` | P5-local plan-only advisor 4/4；宿主负责语义 proposal，确定性 planner 零写入校验；apply/live 未执行，不构成 P6 |
 | `profile_optimization_canary` | Bounded profile apply and replay | `repo_verified` | P5-local 3/3；非活动 profile canary、receipt/replay/rollback 已验证；6/6 host replay 为 partial，live acceptance not run |
 | `capability_routing_correction` | Native-first discovery/policy | `repo_verified` | P5-local regression correction 4/4；不改写 P5 历史状态，不授权 P6；host replay partial，live acceptance not run |
@@ -323,24 +323,27 @@ P5 完成后进入维护期，不按 Phase 编号惯性扩张。只有同时满�
 ```text
 M0 maintenance design package
   -> M1 10-task observe-only pilot
-     -> M2 P5-local metadata/golden/defect correction
-        -> M3 retain / revise / retire / P6 admission review
+     -> M3 retain / revise / retire / P6 admission review
+
+P5 real defects
+  -> M2 P5-local metadata/golden/defect correction
+     -> M3 retain / revise / retire / P6 admission review
 ```
 
 | Milestone | 状态 | 内容 | 退出条件 | 明确不证明 |
 | --- | --- | --- | --- | --- |
 | `M0` | `repo_verified` | 综合 PRD/架构/路线图、maintenance spec/manifest、plan/todo、companion verifier、测试与一份 reviewed evidence | 4/4 planning tasks done；新旧 verifier 和 full gate 通过 | 新工作流业务有效、pilot 已运行、host loaded、live accepted |
-| `M1` | `conditional` | 选取 10 个覆盖 Discovery/Main-chain/Stabilize/Refactor/Release/Operate 的真实任务，记录无 lens baseline 与 advisory treatment | 用户授权；任务/数据安全边界明确；每项只做 observe，不设完成硬阈值 | 普遍效果、因果结论、自动 promotion |
+| `M1` | `collecting (0/10)` | 选取 10 个覆盖 Discovery/Main-chain/Stabilize/Refactor/Release/Operate 的真实任务，记录 native baseline 与 advisory treatment | 已获用户授权；registry/verifier 已启动；每项只做 observe，不设完成硬阈值 | pilot 已执行/完成、普遍效果、因果结论、自动 promotion |
 | `M2` | `repo_verified` | 以用户真实反馈和重复回放修正 P5 metadata、profile、golden、触发策略与直接缺陷；退役 lexical semantic router，保留 discovery/policy kernel | focused corpus、16-profile fresh probe、只读 host replay、planning/full gate 与共享 evidence 已收口 | M1 pilot 已运行、schema major、新 runtime、daemon/database、普遍 live acceptance |
 | `M3` | `conditional` | 比较净收益并决定 `retain | revise | retire`；仅把满足既有 admission 的证据提交 P6 review | 指标与失败样本经过人工 review；无净收益流程已删除或降级 | 自动 admitted、自动创建 P6 manifest |
 
-M1 pilot 的最小样本覆盖：模糊需求澄清、从零主链、既有缺陷、行为保持重构、前后端/数据 seam、测试策略、发布准备、运维事件、能力/skill 选择和一次不应启动复杂流程的简单任务。样本在执行时另行登记；本路线图不把候选任务伪装为当前承诺。M1 是评估 Lean Delivery advisory 净收益的 pilot，不是修复已复现 P5 产品缺陷的前置门禁；本次 M2 correction 不得反向写成 M1 已执行。
+M1 pilot 的最小样本覆盖：模糊需求澄清、从零主链、既有缺陷、行为保持重构、前后端/数据 seam、测试策略、发布准备、运维事件、能力/skill 选择和一次不应启动复杂流程的简单任务。`tasks/skills-manager-vnext-lean-delivery-pilot.json` 是轻量登记真源；只在真实任务达到证据停止点后追加，synthetic、候选和本次 M0.1/bootstrap 自身不计数。优先比较近期可比 native-only 历史任务或交替匹配任务，不可比时只作描述性观察，不要求同一任务执行两遍，不宣称因果。M1 是评估 Lean Delivery advisory 净收益的 pilot，不是修复已复现 P5 产品缺陷的前置门禁；已完成 M2 correction 不得反向写成 M1 已执行。
 
 M2 correction 的最终目标流为：`visible skill/native tool -> host-native semantic match -> direct use`；只有无可见匹配或显式能力发现时才进入 `domain purpose catalog -> host domain choice -> candidate discovery -> host adjudication -> deterministic policy -> native activation`。旧 profile-first baseline 的 automatic trigger 仅 4/8，hierarchical redesign 后 selection 32/32、cold-load chain 8/8；这些都是 `host_evaluation_partial`，不等于普遍无感或 live acceptance。低风险已可用能力可无感使用，安装、认证、profile/config mutation、写入和破坏性动作继续保持可见授权。若真实任务未显示净改善，优先进一步删除 router 行为，而不是继续加词法规则。
 
-observe-only 指标为 TTFV、返工切片、非预期人工打断、非产品 artifact、focused/full gate 耗时和 repo_verified→live_accepted 转化。`M1` 前不设数值阈值；指标不作为单项 completion gate，LLM 评分不作为唯一证据。对每项任务同时记录任务复杂度、既有测试健康和人工授权差异，避免把环境差异误判为流程收益。
+observe-only 指标为 TTFV、返工切片、非预期人工打断、非产品 artifact、focused/full gate 耗时和 repo_verified→live_accepted 转化。pilot review 前不设数值阈值；指标不作为单项 completion gate，LLM 评分不作为唯一证据。对每项任务同时记录任务复杂度、既有测试健康和人工授权差异，避免把环境差异误判为流程收益。
 
-M3 判定优先删除性维护：pilot 没有缩短 TTFV、没有减少返工/打断，或新增 artifact/上下文/维护成本抵消收益时，删除候选模板、规则或 skill；只有稳定重复且经 replay/shadow/canary 的做法才 reviewed promotion。宿主模型或官方能力已原生覆盖时，相关功能进入 adapt/retire，而不是为了保留项目范围继续包装。
+M3 判定优先删除性维护：pilot 没有缩短 TTFV、没有减少返工/打断，或新增 artifact/上下文/维护成本抵消收益时，删除候选模板、规则或 skill；只有稳定重复且经 replay/shadow/canary 的做法才 reviewed promotion。首轮候选复用现有文档字段评审，不建第二个 lifecycle registry：`session_plan`、`preheat_recommendation`、hierarchical router/catalog、plugin fixture export、Rule Estate multi-target apply、maintenance companion verifier，以及规划/evidence 资产自身。每项记录 `unique_value / native_equivalent / real_consumers / maintenance_cost / retirement_trigger / latest_evidence`。宿主模型或官方能力已原生覆盖时，相关功能进入 adapt/retire，而不是为了保留项目范围继续包装。
 
 ## 10. 风险登记
 

@@ -4,8 +4,8 @@
 
 - Goal: correct the maintenance contract without creating a new runtime, then start the authorized ten-task pilot as an honest observe-only collection.
 - Source: `docs/superpowers/specs/2026-08-03-lean-ai-delivery-maintenance-design.md`.
-- Write set: the maintenance spec, `tasks/skills-manager-vnext-lean-delivery-pilot.json`, the existing Lean planning verifier, its focused Pester tests, and this evidence file.
-- Shared-checkout boundary: product truth files, `AGENTS.md`, `tasks/plan.md`, `tasks/todo.md`, generated files, `src/`, overrides, imports, and unrelated tests belong to other work and are not staged or rolled back by this slice.
+- Write set: the maintenance spec, pilot registry, existing Lean planning verifier/tests, PRD/architecture/roadmap/product index, `AGENTS.md`, plan/todo, and this evidence file.
+- Shared-checkout boundary: product truth files already contain unrelated follow-up edits. This slice stages only the Lean M0.1/M1 hunks; generated files, `src/`, overrides, imports, unrelated evidence, and unrelated tests remain unstaged and outside rollback.
 
 ## Decisions
 
@@ -16,6 +16,7 @@
 - Baseline method: prefer matched historical native-only work or alternating matched tasks. Unmatched work is descriptive-only; the same task is not duplicated merely to manufacture a comparison.
 - Evidence flow: M1 evaluates the advisory lens independently of P5-local M2 defect correction. Both feed a later retain/revise/retire review; neither admits P6.
 - Deletion review: reuse existing documentation fields for candidate value, native equivalent, consumers, cost, trigger, and evidence. No second registry is created.
+- Product projection: PRD, architecture, roadmap, product index, root contract, plan, and checklist now expose the same `collecting (0/10)` boundary and link the registry without rewriting historical P5/M0 truth.
 
 ## Truth boundary
 
@@ -33,7 +34,9 @@
 - `verify-vnext-planning.ps1 -Json`: exit 0; P5 5/5 done, 0 open, 0 findings.
 - `verify-lean-ai-delivery-planning.ps1 -Json`: exit 0; M0 4/4 done, M1 collecting 0/10, P6 hold, 0 findings.
 - one full quality gate with `-AllowDirtyWorktree`: exit 0 in 193.478 s; Unit 766/766, E2E 18/18, skill integrity 107, routing findings 0, P5 planning 5/5, and all configured stages passed.
+- product-truth projection verification: focused planning tests 33/33; P5 verifier 5/5 with 0 findings; Lean verifier M0 4/4 and M1 collecting 0/10 with 0 findings; exact-hunk staged review passed for eight paths with unrelated same-file hunks left unstaged.
+- full-gate rerun: `gate_na`; reason is a docs-only projection after the verified implementation commit; alternative verification is focused product/Lean planning tests plus both verifiers and `git diff --cached --check`; prior evidence is the full gate above; expires at this docs-only commit; recovery condition is any code, script, schema, generated, or runtime behavior change.
 
 ## Rollback
 
-Revert only the four implementation/contract files and this evidence file from the eventual commit. Do not reset, restore, stage, or otherwise modify peer-owned dirty paths.
+Revert the implementation commit and/or the later product-projection commit by exact commit. Do not reset, restore, stage, or otherwise modify unrelated dirty paths.

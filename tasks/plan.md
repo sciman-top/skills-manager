@@ -7,6 +7,8 @@
 **next_phase_admission**: hold
 **active_maintenance_track**: maintenance_design
 **maintenance_task_truth**: `tasks/skills-manager-vnext-maintenance-design.tasks.json`
+**maintenance_pilot_truth**: `tasks/skills-manager-vnext-lean-delivery-pilot.json`
+**maintenance_pilot_status**: collecting (0/10)
 **active_correction_track**: capability_routing_correction
 **correction_task_truth**: `tasks/skills-manager-vnext-capability-routing-correction.tasks.json`
 **correction_status**: repo_verified
@@ -69,7 +71,9 @@ Goal：把 skills-manager 面向高效 AI 软件交付的总体方案落为 advi
 | 3 | `SMV-MD-003` | companion verifier | current pass；负向 fixture fail-closed；只读且无 network/host access |
 | 4 | `SMV-MD-004` | truth closeout | 一份共享 evidence；新旧 verifier 通过；唯一 full gate 通过；只声明 M0 repo_verified |
 
-Failure routing：文档/manifest 漂移先修当前真源；同一 verifier 缺陷连续失败两次后重审检查设计；未知工作树改动、P5 回归、P6 manifest、runtime write set 或 full gate 失败立即阻断收口。10-task observe-only pilot 只有另行授权后才进入 M1，不属于本计划的执行项。
+M0.1/M1 bootstrap：North Star、native baseline、双证据流、删除候选和真实样本计数合同已落盘；M1 已获授权并进入 `collecting (0/10)`。后续只在真实任务达到证据停止点时追加 registry，不生成回溯性 synthetic 样本，也不把收集启动写成 pilot 已执行或业务收益。
+
+Failure routing：文档/manifest/registry 漂移先修当前真源；同一 verifier 缺陷连续失败两次后重审检查设计；未知工作树改动、P5 回归、P6 manifest、runtime write set 或 full gate 失败立即阻断收口。M1 达到 10 个真实样本并完成人工 review 前保持 collecting/observe-only。
 
 Verification：迭代运行 focused planning tests 与两个 verifier；文件稳定后由 `scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree` 统一运行一次完整套件，随后执行 `git diff --check` 和 Git boundary 检查。不在 full gate 前后另行重复完整 suite。
 
@@ -132,4 +136,4 @@ Failure routing：stale/unknown/no-op/conflict 修 proposal；active target 改�
 
 Verification：`build -> advisor/transaction/benchmark focused tests -> current advisor + benchmark plan -> profile/config/routing/planning contracts -> bounded real host replay -> one full gate -> default/P6/Git boundary`。host replay 只声明 partial，M1/P6/live acceptance 不在本 track。
 
-Closeout：3/3 tasks `repo_verified`；72/72 affected tests、27/27 routing corpus、16/16 fresh profile visibility 和唯一 full gate 通过，`doc-coauthoring -> content` 的 6/6 replay 为 `host_evaluation_partial_pass`。当前/恢复 profile 均为 `default`；P6 hold、M1 pilot 与 business `live_accepted` 保持未执行。
+Closeout：3/3 tasks `repo_verified`；72/72 affected tests、27/27 routing corpus、16/16 fresh profile visibility 和唯一 full gate 通过，`doc-coauthoring -> content` 的 6/6 replay 为 `host_evaluation_partial_pass`。当前/恢复 profile 均为 `default`；该 track 收口时 M1 未执行，当前独立 registry 已进入 collecting 0/10；P6 hold 与 business `live_accepted` 不变。
