@@ -1,4 +1,4 @@
 interface:
   display_name: "任务连续性守夜"
-  short_description: "静默恢复中断任务，以硬钩子阻断跨任务消息注入"
-  default_prompt: "Use $watch-interrupted-task to silently resume interrupted Codex tasks with hard cross-thread send protection."
+  short_description: "静默恢复中断任务，并以可验收守卫隔离跨任务消息"
+  default_prompt: "Use $watch-interrupted-task to monitor and safely resume interrupted Codex tasks with verified cross-thread guardrails."

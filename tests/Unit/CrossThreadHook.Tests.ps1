@@ -2,18 +2,22 @@ $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $hookPath = Join-Path $repoRoot 'scripts\hooks\block-cross-thread-send.ps1'
 
 function Invoke-CrossThreadHook {
-    param([Parameter(Mandatory = $true)][string]$ToolName)
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$ToolName,
+        [object]$ToolInput = ([ordered]@{
+            threadId = 'target-test'
+            prompt = 'coordination message'
+        }),
+        [string]$SessionId = 'source-test'
+    )
 
     $payload = [ordered]@{
-        session_id = 'session-test'
+        session_id = $SessionId
         turn_id = 'turn-test'
         hook_event_name = 'PreToolUse'
         tool_name = $ToolName
         tool_use_id = 'tool-test'
-        tool_input = [ordered]@{
-            threadId = 'target-test'
-            prompt = 'coordination message'
-        }
+        tool_input = $ToolInput
     } | ConvertTo-Json -Depth 5 -Compress
 
     $output = $payload | & pwsh -NoProfile -ExecutionPolicy Bypass -File $hookPath
@@ -45,6 +49,76 @@ Describe 'Cross-thread PreToolUse guard' {
             $result.ExitCode | Should Be 0
             $result.Output | Should BeNullOrEmpty
         }
+    }
+
+    It 'blocks a handoff that carries a follow-up prompt' {
+        $result = Invoke-CrossThreadHook -ToolName 'codex_app__handoff_thread' -ToolInput ([ordered]@{
+            threadId = 'target-test'
+            followUpPrompt = 'take over this task'
+        })
+        ($result.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+    }
+
+    It 'allows only a hash-valid revision-2 watch prompt for cross-target automation updates' {
+        $generator = Join-Path $repoRoot 'overrides\watch-interrupted-task\scripts\New-WatchHeartbeatPrompt.ps1'
+        $canonicalPrompt = & $generator -TargetThreadId 'target-test'
+        $valid = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{
+            mode = 'create'
+            targetThreadId = 'target-test'
+            prompt = $canonicalPrompt
+        })
+        $valid.Output | Should BeNullOrEmpty
+
+        foreach ($prompt in @(
+            'arbitrary cross-task prompt',
+            ($canonicalPrompt -replace 'policy_revision=2', 'policy_revision=1'),
+            ($canonicalPrompt -replace 'prompt_sha256=[0-9a-f]{64}', ('prompt_sha256=' + ('0' * 64)))
+        )) {
+            $invalid = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{
+                mode = 'create'
+                targetThreadId = 'target-test'
+                prompt = $prompt
+            })
+            ($invalid.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+        }
+    }
+
+    It 'blocks explicit app-server send bypasses without blocking source inspection' {
+        $blocked = Invoke-CrossThreadHook -ToolName 'Bash' -ToolInput ([ordered]@{
+            command = 'codex app-server request thread/send --thread target-test'
+        })
+        ($blocked.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+
+        $inspection = Invoke-CrossThreadHook -ToolName 'Bash' -ToolInput ([ordered]@{
+            command = 'rg -n send_message_to_thread tests'
+        })
+        $inspection.Output | Should BeNullOrEmpty
+
+        $literalInspection = Invoke-CrossThreadHook -ToolName 'Bash' -ToolInput ([ordered]@{
+            command = "rg -n 'codex app-server request thread/send' C:\Users\sciman\.codex"
+        })
+        $literalInspection.Output | Should BeNullOrEmpty
+    }
+
+    It 'fails closed when a valid payload omits tool_name' {
+        $payload = [ordered]@{
+            session_id = 'source-test'
+            hook_event_name = 'PreToolUse'
+            tool_input = [ordered]@{}
+        } | ConvertTo-Json -Depth 5 -Compress
+        $null = $payload | & pwsh -NoProfile -ExecutionPolicy Bypass -File $hookPath 2>$null
+        $LASTEXITCODE | Should Be 2
+    }
+
+    It 'fails closed when the installed script differs from the trusted command hash' {
+        $payload = [ordered]@{
+            session_id = 'source-test'
+            hook_event_name = 'PreToolUse'
+            tool_name = 'codex_app__list_threads'
+            tool_input = [ordered]@{}
+        } | ConvertTo-Json -Depth 5 -Compress
+        $null = $payload | & pwsh -NoProfile -ExecutionPolicy Bypass -File $hookPath -ExpectedScriptSha256 ('0' * 64) 2>$null
+        $LASTEXITCODE | Should Be 2
     }
 
     It 'fails closed when hook input is malformed' {
