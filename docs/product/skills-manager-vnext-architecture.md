@@ -633,7 +633,7 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 
 ### `ADR-SMV-017 Native-first semantic selection and deterministic policy kernel`
 
-决定：`decision_owner=host_ai`。当前可见 skill/native tool 由已在处理完整请求的宿主 AI 原生匹配并直接使用；只有显式能力查询、无可见匹配或跨 profile 冷发现时才调用兼容 router。router 按最多两个 profile hint 返回候选，宿主结合完整对话和否定语义选出最小集合，再由确定性 policy kernel 验证 containment、freshness、availability、side effect、approval、activation 与 session reuse。router 必须报告 `semantic_routing_performed=false`、`task_type/domain=host_adjudicated`、`confidence=null`，不得调用第二个模型或静默切换 profile。
+决定：`decision_owner=host_ai`。当前可见 skill/native tool 由已在处理完整请求的宿主 AI 原生匹配并直接使用；只有显式能力查询、无可见匹配或跨 profile 冷发现时才调用兼容 router。确定性 policy kernel 验证 containment、freshness、availability、side effect、approval、activation 与 session reuse。router 必须报告 `semantic_routing_performed=false`、`task_type/domain=host_adjudicated`、`confidence=null`，不得调用第二个模型或静默切换 profile。其“宿主先猜 profile hint”的发现入口已被 `ADR-SMV-020` 取代；语义所有权和安全内核继续有效。
 
 理由：真实使用反馈和重复自然语言回放已经证明，固定正则/词表既重复宿主已有语义能力，又丢失上下文和否定语义，辅助层反而低于仅使用 profile 的基线。该设计复用官方 `name + description -> model implicit/explicit invocation`，将本项目独有价值压缩到可确定、可测试的 discovery 与安全策略；它减少额外 token、延迟和双重决策，同时保留写操作、认证和激活的可见门禁。
 
@@ -654,6 +654,16 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 理由：宿主 AI 更擅长完整上下文语义，但不适合替代 freshness、预算、冲突、权限与原子状态；完全静默写 profile 会降低可重复性并可能改变当前任务可见能力。非活动 canary 将用户打断降到最低，又保留审计、恢复和新任务真实验证。官方支持 skill invalidation/force reload，但没有 skills-manager `active_profile` 或当前 turn hot switch，因此 promotion 边界必须是 fresh task。
 
 退役条件：官方若提供稳定的原生 profile/capability set、事务、trace 和 rollback，本 seam 应适配或删除；真实维护数据若不能降低 stale、纠正次数或 TTFV，则回退 plan-only advisor。
+
+### `ADR-SMV-020 Hierarchical domain discovery before candidate adjudication`
+
+决定：cold discovery 采用 `visible native match -> direct use`，否则由 resident router 返回轻量 `discovery_domains(name,purpose)`；宿主基于完整请求选择最多两个 domain，再取得 `candidates(name,description,path,domains)` 并做语义裁决，最后进入 ADR-SMV-017 的 deterministic policy。profile 降级为 domain/index partition、projection/budget/preheat 兼容面；`DomainHint` 是主入口，`ProfileHint` 只保留兼容。脚本不做 lexical ranking，不修改 active profile。
+
+理由：上一版 profile-first contract 存在信息循环：宿主在调用 router 前看不到 cold skill 描述，却必须先判断是否存在值得发现的 cold skill并猜 profile。真实 default cold baseline 只有 4/8 主动触发，而显式进入 discovery 后 raw chain 8/8，证明故障在入口发现，不在候选后 policy。层级 catalog 用极小 metadata 解除循环，同时保留单一语义所有者和可测试安全内核。
+
+验收边界：重构后 32-case selection 为 32/32，8-case cold-load chain 为 8/8；这是 fresh ephemeral `host_evaluation_partial`。cold-load 平均 input token 从约 161,765 升至 164,346，平均耗时从约 56.3 秒降至 53.8 秒，因此只证明触发/选择改善，不宣称 token 成本改善、普遍无感或业务 `live_accepted`。
+
+退役条件：官方宿主提供稳定跨域 native discovery/trace 后删除 catalog seam；代表性真实任务不能持续减少漏触发、误触发或用户纠正时，进一步缩减为 policy-only，而不是增加词法规则或第二模型。
 
 ## 11. 安全与供应链
 

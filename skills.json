@@ -37,6 +37,7 @@
     ],
     "profiles": {
       "default": {
+        "purpose": "General debugging and evidence-based completion checks; simple native tasks need no skill.",
         "budget_limit_chars": 8000,
         "enabled_names": [
           "systematic-debugging",
@@ -44,6 +45,7 @@
         ]
       },
       "coding": {
+        "purpose": "Routine implementation, API design, code review, and security hardening.",
         "budget_limit_chars": 7500,
         "enabled_names": [
           "systematic-debugging",
@@ -55,6 +57,7 @@
         ]
       },
       "coding-strict": {
+        "purpose": "High-rigor specification, TDD, domain, review, and verification workflows.",
         "enabled_names": [
           "systematic-debugging",
           "test-driven-development",
@@ -68,6 +71,7 @@
         ]
       },
       "engineering": {
+        "purpose": "Product discovery, architecture and domain design, specifications, research, and task planning.",
         "enabled_names": [
           "codebase-design",
           "idea-refine",
@@ -79,6 +83,7 @@
         ]
       },
       "python": {
+        "purpose": "Modern Python tooling, pytest strategy, performance work, review, and security.",
         "enabled_names": [
           "systematic-debugging",
           "verification-before-completion",
@@ -90,6 +95,7 @@
         ]
       },
       "mcp": {
+        "purpose": "MCP server design, MCP CLI interaction, API boundaries, research, and security.",
         "enabled_names": [
           "research",
           "mcp-builder",
@@ -100,6 +106,7 @@
         ]
       },
       "review": {
+        "purpose": "Code review, simplification, review-feedback handling, deprecation, and migration.",
         "enabled_names": [
           "code-review-and-quality",
           "receiving-code-review",
@@ -110,6 +117,7 @@
         ]
       },
       "dotnet": {
+        "purpose": ".NET backend architecture, Microsoft API references, WPF products, and runtime diagnosis.",
         "enabled_names": [
           "microsoft-code-reference",
           "custom-windows-wpf-teacher-app",
@@ -120,6 +128,7 @@
         ]
       },
       "ppt": {
+        "purpose": "PowerPoint creation, automation, accessibility, classroom courseware, and editable diagrams.",
         "enabled_names": [
           "custom-teacher-courseware-ppt",
           "custom-powerpoint-accessibility",
@@ -130,6 +139,7 @@
         ]
       },
       "content": {
+        "purpose": "Document coauthoring, Chinese publishing workflows, copy editing, and Markdown formatting.",
         "enabled_names": [
           "baoyu-format-markdown",
           "copy-editing",
@@ -138,6 +148,7 @@
         ]
       },
       "marketing": {
+        "purpose": "Content strategy, persuasive copywriting, and editing existing marketing copy.",
         "enabled_names": [
           "content-strategy",
           "copywriting",
@@ -145,6 +156,7 @@
         ]
       },
       "physics": {
+        "purpose": "Interactive junior physics explanations, classroom simulations, and animation delivery.",
         "enabled_names": [
           "custom-junior-physics-animation",
           "manim-composer",
@@ -154,6 +166,7 @@
         ]
       },
       "video": {
+        "purpose": "Storyboards and programmatic video or mathematical animation workflows.",
         "enabled_names": [
           "storyboard-creation",
           "remotion-best-practices",
@@ -162,6 +175,7 @@
         ]
       },
       "design": {
+        "purpose": "Production frontend UI, visual direction, design systems, interface review, and motion.",
         "enabled_names": [
           "frontend-design",
           "frontend-ui-engineering",
@@ -172,6 +186,7 @@
         ]
       },
       "browser": {
+        "purpose": "Browser automation, local web testing, screenshots, Playwright guidance, and web research.",
         "enabled_names": [
           "playwright",
           "playwright-best-practices",
@@ -181,6 +196,7 @@
         ]
       },
       "database": {
+        "purpose": "Postgres schema, migration, RLS, query performance, API boundaries, and data security.",
         "enabled_names": [
           "supabase-postgres-best-practices",
           "api-and-interface-design",

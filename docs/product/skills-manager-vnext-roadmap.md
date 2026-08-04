@@ -18,6 +18,7 @@
 | `profile_reconciliation_advisor` | Skill profile drift reconciliation | `repo_verified` | P5-local plan-only advisor 4/4；宿主负责语义 proposal，确定性 planner 零写入校验；apply/live 未执行，不构成 P6 |
 | `profile_optimization_canary` | Bounded profile apply and replay | `repo_verified` | P5-local 3/3；非活动 profile canary、receipt/replay/rollback 已验证；6/6 host replay 为 partial，live acceptance not run |
 | `capability_routing_correction` | Native-first discovery/policy | `repo_verified` | P5-local regression correction 4/4；不改写 P5 历史状态，不授权 P6；host replay partial，live acceptance not run |
+| `capability_discovery_redesign` | Hierarchical cold discovery | `repo_verified` | P5-local 4/4；selection 32/32、cold-load 8/8 均为 host_evaluation_partial；P6/live 不变 |
 
 状态只可在相应 exit gate 有当前证据后更新。Phase 文档完成不等于 Phase 实现完成。
 
@@ -335,7 +336,7 @@ M0 maintenance design package
 
 M1 pilot 的最小样本覆盖：模糊需求澄清、从零主链、既有缺陷、行为保持重构、前后端/数据 seam、测试策略、发布准备、运维事件、能力/skill 选择和一次不应启动复杂流程的简单任务。样本在执行时另行登记；本路线图不把候选任务伪装为当前承诺。M1 是评估 Lean Delivery advisory 净收益的 pilot，不是修复已复现 P5 产品缺陷的前置门禁；本次 M2 correction 不得反向写成 M1 已执行。
 
-M2 correction 的目标流为：`visible skill/native tool -> host-native semantic match -> direct use`；只有无可见匹配或显式能力发现时才进入 `profile candidate discovery -> host adjudication -> deterministic policy -> native activation`。低风险已可用能力可无感使用，安装、认证、profile/config mutation、写入和破坏性动作继续保持可见授权。若 host replay 未显示净改善，优先进一步删除 router 行为，而不是继续加词法规则。
+M2 correction 的最终目标流为：`visible skill/native tool -> host-native semantic match -> direct use`；只有无可见匹配或显式能力发现时才进入 `domain purpose catalog -> host domain choice -> candidate discovery -> host adjudication -> deterministic policy -> native activation`。旧 profile-first baseline 的 automatic trigger 仅 4/8，hierarchical redesign 后 selection 32/32、cold-load chain 8/8；这些都是 `host_evaluation_partial`，不等于普遍无感或 live acceptance。低风险已可用能力可无感使用，安装、认证、profile/config mutation、写入和破坏性动作继续保持可见授权。若真实任务未显示净改善，优先进一步删除 router 行为，而不是继续加词法规则。
 
 observe-only 指标为 TTFV、返工切片、非预期人工打断、非产品 artifact、focused/full gate 耗时和 repo_verified→live_accepted 转化。`M1` 前不设数值阈值；指标不作为单项 completion gate，LLM 评分不作为唯一证据。对每项任务同时记录任务复杂度、既有测试健康和人工授权差异，避免把环境差异误判为流程收益。
 
@@ -356,6 +357,7 @@ M3 判定优先删除性维护：pilot 没有缩短 TTFV、没有减少返工/�
 | `RISK-009` | Lean advisory 膨胀成第二套 agent runtime | maintenance | ADR-SMV-012/013 + runtime write-set denylist |
 | `RISK-010` | observe 指标变成流程 KPI 或虚假完成激励 | maintenance | ADR-SMV-016 + 无 baseline 不设 gate |
 | `RISK-011` | 自学习把偶然成功/错误经验扩散为 skill | maintenance | replay -> shadow -> canary -> reviewed promotion -> retire |
+| `RISK-012` | cold discovery 入口要求宿主先知道不可见能力 | maintenance | ADR-SMV-020 domain purpose catalog + trigger/negative corpus + retire condition |
 
 ## 11. 路线维护
 

@@ -163,10 +163,10 @@ Discovery 先确定用户、问题、成功信号和非目标；实现先跑通�
 
 - `FR-SEL-001`：以统一 descriptor/policy contract 表达 skill、MCP、plugin/app/connector 和 native tool，但保留每种能力的 path、availability、auth、side-effect 与宿主字段；统一 policy 不等于统一 runtime 或语义路由器。
 - `FR-SEL-002`：宿主 AI 使用完整请求、对话上下文和可见 metadata 做唯一语义判断；确定性脚本只接受 `$skill`/`@skill` 形式的 explicit capability 或宿主标注的 candidate/exclusion，不再用正则、词频或固定同义词表决定相关性。普通文本中的能力名可能位于否定句，不构成选择授权。
-- `FR-SEL-003`：profile 是任务边界的有界预热包；没有可见匹配时，fallback discovery 按宿主给出的最多两个 profile hint 返回候选，不静默切 profile，也不把 profile 当权限边界。
+- `FR-SEL-003`：profile 是任务边界的有界预热包和 capability domain/index partition；没有可见匹配时，fallback discovery 先返回可理解的 domain `name + purpose`，宿主选择最多两个 domain 后再取候选，不静默切 profile，也不把 profile 当权限边界。
 - `FR-SEL-004`：active/cold read-only skill 输出 `use_active_skill | load_skill`；operator skill 输出 `load_skill_with_approval`；读取必须受 declared root containment 保护。
 - `FR-SEL-005`：已可用 read-only/external-read 能力可自动使用；write/destructive/open-world/unknown 或 needs_activation 必须输出 approval/activation plan。
-- `FR-SEL-006`：建立 direct、indirect、negative、ambiguous、多阶段、architecture/stack、cross-domain、cross-kind 和 side-effect 自然语言 corpus；分别验证 profile candidate recall、宿主标注选择后的 policy、零 semantic auto-selection 和零 negative/side-effect violation。
+- `FR-SEL-006`：建立 direct、indirect、negative、ambiguous、多阶段、architecture/stack、cross-domain、cross-kind、native/no-skill 和 side-effect 中英文自然语言 corpus；分别验证 resident trigger、domain/candidate discovery、宿主选择、policy、完整 SKILL.md 冷加载、零 semantic auto-selection 和零 negative/side-effect violation。
 - `FR-SEL-007`：discovery/policy 全程只读，不切 profile、不创建任务、不重启宿主、不额外调用 provider，也不保存或推断 OAuth/token/session 状态。
 - `FR-SEL-008`：脚本必须报告 `decision_owner=host_ai`、`semantic_routing_performed=false`、`task_type/domain=host_adjudicated` 和 `confidence=null`；不得伪造未由宿主提供的意图、风险置信度或工程阶段。
 - `FR-SEL-009`：capability graph 只表达 `discover -> host_adjudication -> policy -> activate` 的责任顺序；产品交付阶段与多步执行计划继续由宿主 Agent/Plan/Goal 拥有。
@@ -177,6 +177,9 @@ Discovery 先确定用户、问题、成功信号和非目标；实现先跑通�
 - `FR-SEL-014`：profile 语义归属只能由宿主 AI 以 `decision_owner=host_ai` 的显式 proposal 提供；确定性 planner 校验 `skills.json` freshness、canonical skill/profile 存在性、protected skill、add/remove 冲突、no-op、理由、动作上限、预算和 routing policy，并只输出 `apply_allowed=false`、`writes_performed=false` 的精确 change-set。
 - `FR-SEL-015`：宿主 proposal 经 plan-only 校验后，可在常驻授权下进入非活动 profile 的 bounded canary；每次最多改变 5 个 skill、10 个 membership action，默认至少保留 256 字符 metadata headroom，禁止改变当前 active profile 或其 membership，并以 config hash、单 writer、原子 backup/write、receipt 和 drift-safe rollback 保护状态。
 - `FR-SEL-016`：canary promotion 必须使用 fresh ephemeral host task replay，覆盖每个新增 skill 的 positive/negative prompt 和每个 changed profile 的至少四类代表场景；profile 未恢复、模型输出/期望失败或覆盖不足时自动回滚。模型 replay 只能标记 `host_evaluation_partial`，不得作为唯一门禁或晋级为 live acceptance。
+- `FR-SEL-017`：cold discovery 必须使用 `hierarchical_domains_v1`：首次只暴露 domain `name + purpose`，宿主基于完整请求选择最多两个 domain，第二次才返回 `name + description + path + domains` 候选；不得要求宿主在看见 catalog 前猜不透明 profile 名。
+- `FR-SEL-018`：`DomainHint` 支持数组或逗号分隔输入并最多保留两个有效值；`ProfileHint` 仅作为向后兼容别名。candidate 必须带 domain provenance，domain hint 不改变 `active_profile`。
+- `FR-SEL-019`：代表性宿主验收必须分开记录 selection trigger 与 cold-load chain，并观测 router script、router/target `SKILL.md` 全文读取、deterministic policy、profile restore、duration 和 tokens；结果最高为 `host_evaluation_partial`，不得外推为普遍语义正确或业务效果。
 
 ### 6.7 Operation plan and receipt
 
@@ -222,6 +225,7 @@ Discovery 先确定用户、问题、成功信号和非目标；实现先跑通�
 - `NFR-SAF-002`：所有外部写入必须显式授权；高风险写入必须先有可执行回滚。
 - `NFR-SAF-003`：profile reconciliation 的诊断和 proposal 校验必须 network-free、provider-free、zero-write，且不得修改 `active_profile`、安装/删除 skill 或写宿主配置；未来 apply 路径必须另行设计、审阅和授权。
 - `NFR-SAF-004`：profile canary apply 只能消费显式宿主 proposal 与 apply token，runtime receipt/backup 留在 ignored `reports/`；不得直接调用 provider、修改 skill/plugin/MCP 安装、永久切换 active profile，或在 hash 漂移后覆盖用户修改。
+- `NFR-SAF-005`：hierarchical discovery 只读、network-free、provider-free、zero-write；domain/purpose 和宿主语义选择不能覆盖 containment、freshness、availability、side-effect、approval 或 activation。
 - `NFR-SEC-001`：不持久化 API key/OAuth/token；日志、plan 和 receipt 使用 redaction-first。
 - `NFR-PERF-001`：inventory/doctor 使用有界扫描、缓存和明确超时；性能退化不能通过跳过完整性校验解决。
 - `NFR-OBS-001`：关键阶段输出稳定的 machine-readable status 和 phase timing。

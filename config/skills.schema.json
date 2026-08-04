@@ -165,6 +165,7 @@
             "required": ["enabled_names"],
             "additionalProperties": true,
             "properties": {
+              "purpose": { "$ref": "#/$defs/nonEmptyString" },
               "enabled_names": { "$ref": "#/$defs/stringArray" },
               "budget_limit_chars": { "type": "integer", "minimum": 1 }
             }

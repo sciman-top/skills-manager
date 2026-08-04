@@ -38,7 +38,7 @@
 - [Phase 1 历史任务 manifest](tasks/skills-manager-vnext-phase1.tasks.json)
 - [Phase 0 历史任务 manifest](tasks/skills-manager-vnext-phase0.tasks.json)
 
-vNext P0-P5 已完成 repo-side 验收（P0/P1 各 9/9，P2/P3 各 7/7，P4 6/6，P5 5/5）；这是历史仓库契约真值，不等于自然语言路由实效。P5-local maintenance correction 已把语义选择权交回宿主 AI，只保留 profile-scoped discovery、只读 App Server snapshot、session reuse 建议和确定性的 containment/freshness/availability/side-effect/approval/activation policy。plugin/MCP 安装、OAuth、host/profile/session 写入、重启与 `live_accepted` 仍不在边界。
+vNext P0-P5 已完成 repo-side 验收（P0/P1 各 9/9，P2/P3 各 7/7，P4 6/6，P5 5/5）；这是历史仓库契约真值，不等于自然语言路由实效。P5-local maintenance 已把语义选择权交回宿主 AI，并把 profile-first cold discovery 重构为 `domain purpose catalog -> host domain/candidate adjudication -> deterministic policy`；只读 App Server snapshot、session reuse 建议和 containment/freshness/availability/side-effect/approval/activation policy 继续保留。plugin/MCP 安装、OAuth、host/profile/session 写入、重启与 `live_accepted` 仍不在边界。
 
 运行时以 PowerShell 7 (`pwsh`) 为开发、CI 和完整门禁主路径；Windows PowerShell 5.1 仅保留安装 fallback、generated script parse 和 plain-object/selected fixture smoke。完整边界与移除条件见 [`docs/runbooks/powershell-runtime-compatibility.md`](docs/runbooks/powershell-runtime-compatibility.md)。
 
@@ -261,7 +261,7 @@ PPT 路由保持职责单一：`custom-teacher-courseware-ppt` 决定课堂课�
 
 canary 最多修改 5 个 skill/10 个 membership action，默认至少保留 256 字符 metadata headroom，并禁止触碰当前 active profile；配置写入有原子 backup/receipt。接受必须来自 fresh ephemeral host replay，覆盖 changed skill 的正负 prompt 并证明 profile 已恢复；失败时按 hash 自动回滚。日常只重放 changed profile/skill 的 4–6 个场景，全量 corpus 只用于结构变化或 closeout。脚本不调用第二个模型、不安装/删除 skill，也不提供当前任务 profile 热切换。运行态 receipt/backup 位于忽略的 `reports/skill-profile-reconciliation/`。
 
-所有 profile 共享轻量常驻 `capability-router` 与 `watch-interrupted-task`。`capability-router` 现为兼容名称：宿主 AI 先根据完整请求、对话和 skill description 原生选择；只有没有可见匹配、用户询问可用能力或需要跨 profile 冷发现时，才调用它按 profile 返回候选。脚本不再用正则/词频理解任务，也不再给出语义置信度；宿主选定最多 3 个候选后，脚本只验证路径、freshness、availability、side effect 与 activation。`watch-interrupted-task` 仍只响应明确守夜/心跳口令。两者都不静默切换 `active_profile`、provider、auth 或宿主进程。
+所有 profile 共享轻量常驻 `capability-router` 与 `watch-interrupted-task`。`capability-router` 现为兼容名称：宿主 AI 先根据完整请求、对话和可见 skill description 原生选择；只有没有可见匹配、用户询问可用能力或需要跨 profile 冷发现时，才先读取 domain `name + purpose`，选择最多两个 domain 后再取得候选。脚本不再用正则/词频理解任务，也不再给出语义置信度；宿主选定最多 3 个候选后，脚本只验证路径、freshness、availability、side effect 与 activation。profile 是 domain/index partition 和任务边界预热包，不会在当前 turn 静默切换。`watch-interrupted-task` 仍只响应明确守夜/心跳口令。
 
 P4/P5 的 lexical selector、task model 和 ranking 是历史 repo_verified 实现；真实中文场景回放证明它们不能代表路由实效，已在 maintenance correction 中退役为 `decision_owner=host_ai`、`semantic_routing_performed=false` 的 discovery/policy contract。`scripts/verify-capability-routing.ps1` 使用 direct、indirect、negative、多阶段、架构、调试、评审、跨领域和 side-effect 自然语言 corpus，分别验证候选可达性、宿主标注选择后的 policy 与零自动语义选择；它仍不把 repo corpus 外推为 live acceptance。
 

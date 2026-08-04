@@ -55,11 +55,11 @@ Describe 'Native-first capability discovery and policy' {
             skill_projection = [ordered]@{
                 active_profile = 'default'
                 profiles = [ordered]@{
-                    default = [ordered]@{ enabled_names = @('systematic-debugging') }
-                    engineering = [ordered]@{ enabled_names = @('codebase-design', 'grill-with-docs', 'to-spec') }
-                    dotnet = [ordered]@{ enabled_names = @('debug:dotnet', 'systematic-debugging') }
-                    physics = [ordered]@{ enabled_names = @('custom-junior-physics-animation') }
-                    strict = [ordered]@{ enabled_names = @('test-driven-development', 'systematic-debugging') }
+                    default = [ordered]@{ purpose = 'General debugging and completion verification.'; enabled_names = @('systematic-debugging') }
+                    engineering = [ordered]@{ purpose = 'Architecture, product specification, and delivery planning.'; enabled_names = @('codebase-design', 'grill-with-docs', 'to-spec') }
+                    dotnet = [ordered]@{ purpose = '.NET implementation and diagnosis.'; enabled_names = @('debug:dotnet', 'systematic-debugging') }
+                    physics = [ordered]@{ purpose = 'Interactive physics teaching experiences.'; enabled_names = @('custom-junior-physics-animation') }
+                    strict = [ordered]@{ purpose = 'Strict engineering workflows.'; enabled_names = @('test-driven-development', 'systematic-debugging') }
                 }
             }
             mcp_servers = @(
@@ -87,6 +87,8 @@ Describe 'Native-first capability discovery and policy' {
         $result.semantic_routing_performed | Should Be $false
         $result.task_model.task_type | Should Be 'host_adjudicated'
         $result.task_model.confidence | Should Be $null
+        $result.retrieval.strategy | Should Be 'hierarchical_domain_discovery'
+        @($result.discovery_domains | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.purpose) }).Count | Should Be 0
         @($result.selected).Count | Should Be 0
         $result.requires_host_adjudication | Should Be $true
         @($result.retrieval.candidates.name) | Should Contain 'codebase-design'
@@ -99,6 +101,31 @@ Describe 'Native-first capability discovery and policy' {
         @($zh.retrieval.candidates.name | Sort-Object) | Should Be @($en.retrieval.candidates.name | Sort-Object)
         @($zh.selected).Count | Should Be 0
         @($en.selected).Count | Should Be 0
+    }
+
+    It 'Normalizes comma-separated profile hints from an external PowerShell process' {
+        $raw = & pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
+            -Query '设计软件工程终态和交互界面' `
+            -ManifestPath $manifestPath -PolicyPath $policyPath -ConfigPath $configPath `
+            -ProfileHint 'engineering,physics'
+
+        $LASTEXITCODE | Should Be 0
+        $result = ($raw -join "`n") | ConvertFrom-Json
+        @($result.retrieval.profile_hints) | Should Be @('engineering', 'physics')
+        @($result.retrieval.candidates.name) | Should Contain 'codebase-design'
+        @($result.retrieval.candidates.name) | Should Contain 'custom-junior-physics-animation'
+        @($result.excluded | Where-Object { $_.kind -eq 'profile' -and $_.reason -eq 'unknown_profile' }).Count | Should Be 0
+    }
+
+    It 'Uses host-selected discovery domains without requiring an active profile switch' {
+        $result = Invoke-TestRouter '设计物理教学软件的模块接口' @{ DomainHint = @('engineering,physics') }
+
+        @($result.retrieval.domain_hints) | Should Be @('engineering', 'physics')
+        @($result.retrieval.candidates.name) | Should Contain 'codebase-design'
+        @($result.retrieval.candidates.name) | Should Contain 'custom-junior-physics-animation'
+        @($result.retrieval.candidates | Where-Object name -eq 'codebase-design')[0].domains | Should Contain 'engineering'
+        $result.current_profile | Should Be 'default'
+        $result.writes_performed | Should Be $false
     }
 
     It 'Applies deterministic policy only after the host supplies a capability' {

@@ -1,5 +1,7 @@
 # Native-first Capability Discovery P5-local Correction
 
+> 2026-08-04 maintenance note：本 spec 的 host-owned semantics 与 deterministic policy 继续有效；其中“宿主先猜 profile hint”的 profile-first discovery 已由 [Hierarchical Capability Discovery Redesign](2026-08-04-hierarchical-capability-discovery-redesign.md) 和 `ADR-SMV-020` 取代。历史 4/4 correction 真值不改写。
+
 **program_id**: `skills-manager-vnext`
 **track**: `capability_routing_correction`
 **base_phase**: `P5`
@@ -71,7 +73,8 @@ visible skill/native tool
   -> use directly
 
 explicit capability discovery or no visible match
-  -> caller supplies <=2 profile hints
+  -> router exposes discovery domains with purpose
+  -> host chooses <=2 domains
   -> router returns bounded candidates only
   -> host AI selects <=3 or abstains, preserving negation
   -> caller supplies Candidate / ExcludeCapability
@@ -86,14 +89,14 @@ explicit capability discovery or no visible match
 输入：
 
 - `Query`：完整请求，只作返回和 trace。
-- `ProfileHint[]`：宿主从完整上下文推断的最多两个候选 profile。
+- `DomainHint[]`：宿主从 purpose catalog 选择的最多两个 domain；`ProfileHint[]` 仅为向后兼容别名。
 - `Candidate[]` / `ExcludeCapability[]`：宿主语义裁决结果。
 - projection manifest/config、可选 host snapshot、可选 session snapshot。
 - `MaxCandidates`：有界候选数。
 
 输出：
 
-- `retrieval.strategy=profile_native_discovery` 与 `retrieval.candidates[]`。
+- `discovery_architecture=hierarchical_domains_v1`、`discovery_domains[]`、`retrieval.strategy=hierarchical_domain_discovery` 与 `retrieval.candidates[].domains[]`。
 - `selected[]` 仅来自 sigiled explicit request 或 `Candidate[]`。
 - `excluded[]` 保留 unknown profile/capability、host exclusion、stale snapshot 等原因。
 - `activation_plan[]`、`session_plan`、`preheat_recommendation.apply=false`。

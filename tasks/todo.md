@@ -7,6 +7,8 @@
 **profile_maintenance_task_truth**: `tasks/skills-manager-vnext-profile-reconciliation.tasks.json`
 **active_profile_optimization_track**: `profile_optimization_canary`
 **profile_optimization_task_truth**: `tasks/skills-manager-vnext-profile-optimization.tasks.json`
+**active_discovery_redesign_track**: `capability_discovery_redesign`
+**discovery_redesign_task_truth**: `tasks/skills-manager-vnext-capability-discovery-redesign.tasks.json`
 
 - [x] `SMV-P5-001` 建立 P5 Adaptive Capability Fabric 规划真源。
 - [x] `SMV-P5-002` 实现 task model、schema v3 与 capability DAG。
@@ -43,6 +45,15 @@ M0 仅为 maintenance design planning package `repo_verified`；M1-M3 仍为 `co
 - [x] `SMV-CR-004` 完成 build、16-profile probe、只读 host replay、planning/full gate、evidence 与 Git 收口。
 
 该 checklist 已按 P5-local defect correction 完成 4/4 `repo_verified`，不改写 P5 5/5 历史状态。M1 10-task pilot 未执行，P6 继续 hold；deterministic corpus 与 profile 可见性不等于 host-native 普遍正确或 business `live_accepted`。
+
+## Hierarchical capability discovery redesign checklist
+
+- [x] `SMV-HD-001` 建立 default cold baseline、强制 treatment 和层级发现架构。
+- [x] `SMV-HD-002` 实现 domain purpose catalog、DomainHint、candidate provenance 和兼容 policy。
+- [x] `SMV-HD-003` 完成 32-case selection 与 8-case cold-load fresh host acceptance。
+- [x] `SMV-HD-004` 同步产品/规划/evidence，运行有序门禁并完成 Git 收口。
+
+本 track 完成 4/4 `repo_verified`；selection 32/32、cold-load 8/8 只属于 `host_evaluation_partial`。active profile 恢复 `default`；P5 5/5、P6 hold、M1 和 business `live_accepted` 均不变。cold-load input token 未下降，不宣称成本优化。
 
 ## Profile reconciliation advisor checklist
 

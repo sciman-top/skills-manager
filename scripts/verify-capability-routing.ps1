@@ -48,7 +48,7 @@ function Invoke-RouterCase($Case, [string[]]$Candidate = @()) {
         ManifestPath = $manifestFile
         PolicyPath = $policyFile
         ConfigPath = $configFile
-        ProfileHint = @($Case.profile_hints | ForEach-Object { [string]$_ })
+        DomainHint = @($Case.profile_hints | ForEach-Object { [string]$_ })
         Candidate = @($Candidate)
         ExcludeCapability = @($Case.host_exclude | ForEach-Object { Get-CapabilityRef $_ })
     }
@@ -78,6 +78,12 @@ foreach ($case in @($corpus.cases)) {
     if ([int]$discovery.schema_version -ne 3) { Add-Finding $caseId 'schema_mismatch' 'Router must emit schema_version=3.' }
     if ([string]$discovery.decision_owner -ne 'host_ai' -or [bool]$discovery.semantic_routing_performed) {
         Add-Finding $caseId 'semantic_owner_mismatch' 'Host AI must own semantic selection and the script must report semantic_routing_performed=false.'
+    }
+    if ([string]$discovery.discovery_architecture -ne 'hierarchical_domains_v1' -or [string]$discovery.retrieval.strategy -ne 'hierarchical_domain_discovery') {
+        Add-Finding $caseId 'discovery_architecture_mismatch' 'Router must expose hierarchical_domains_v1 and hierarchical_domain_discovery.'
+    }
+    if (@($discovery.discovery_domains).Count -eq 0 -or @($discovery.discovery_domains | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.purpose) }).Count -gt 0) {
+        Add-Finding $caseId 'discovery_domain_invalid' 'Every discovery domain must have a non-empty purpose.'
     }
     if ([bool]$discovery.writes_performed) { Add-Finding $caseId 'unexpected_write' 'Router reported a write.' }
 

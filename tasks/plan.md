@@ -10,6 +10,9 @@
 **active_correction_track**: capability_routing_correction
 **correction_task_truth**: `tasks/skills-manager-vnext-capability-routing-correction.tasks.json`
 **correction_status**: repo_verified
+**active_discovery_redesign_track**: capability_discovery_redesign
+**discovery_redesign_task_truth**: `tasks/skills-manager-vnext-capability-discovery-redesign.tasks.json`
+**discovery_redesign_status**: repo_verified
 **active_profile_maintenance_track**: profile_reconciliation_advisor
 **profile_maintenance_task_truth**: `tasks/skills-manager-vnext-profile-reconciliation.tasks.json`
 **profile_maintenance_status**: repo_verified
@@ -85,7 +88,22 @@ Failure routing：误选先修 skill metadata/profile 或删除 router 行为，
 
 Verification：按 correction spec 的 build -> focused tests -> routing/config/integrity contracts -> 16-profile fresh probe -> bounded host replay -> planning contracts -> one full gate 顺序执行。27-case corpus 只证明 repo discovery/policy；host replay 与 business `live_accepted` 单独分层。
 
-## 9. Profile reconciliation advisor
+## 9. Hierarchical capability discovery redesign
+
+Goal：消除 profile-first cold discovery 的触发循环；由 resident metadata 触发专业 cold 请求，先展示 domain purpose，再由宿主语义选择 domain/candidate，最后进入确定性 policy 和完整 `SKILL.md` 冷加载。
+
+| Order | Task | Slice | Exit checkpoint |
+| ---: | --- | --- | --- |
+| 1 | `SMV-HD-001` | baseline + architecture | default cold trigger 4/8 与强制 chain 8/8 分层；ADR-SMV-020；不恢复 lexical router |
+| 2 | `SMV-HD-002` | domain discovery + compatibility | purpose/DomainHint/candidate domains；ProfileHint 兼容；focused router/verifier green |
+| 3 | `SMV-HD-003` | fresh host acceptance | 32 selection + 8 cold-load；router/target raw read、policy、profile restore、tokens/duration |
+| 4 | `SMV-HD-004` | product truth + closeout | PRD/architecture/roadmap/spec/manifest/README/evidence；one full gate；Git parity |
+
+Failure routing：漏触发先修 resident description 并保护 native/no-skill negatives；domain/candidate 误选修 purpose/skill metadata；同类失败两次回到架构，不加 lexical ranking。profile 未恢复、P6 manifest、host mutation、未知工作树或 full gate failure 阻断收口。
+
+Verification：`build -> affected Pester -> routing/config/integrity/planning contracts -> fresh host corpus -> one full gate -> default/P5/P6/Git boundary`。32/32 和 8/8 只声明 `host_evaluation_partial`；cold-load token 未下降，不写成成本优化或 business `live_accepted`。
+
+## 10. Profile reconciliation advisor
 
 Goal：在 skill 新增、删除或 metadata 变化后，由宿主 AI 提出语义归属，仓库确定性发现 profile drift、校验 freshness/对象/预算/policy，并只输出 zero-write dry-run change-set。
 
@@ -100,7 +118,7 @@ Failure routing：stale hash 重新生成 proposal；unknown/protected/no-op/con
 
 Verification：`build -> SkillProfileReconciliation.Tests.ps1 -> current advisor JSON -> routing/config/integrity/planning contracts -> one full gate -> Git boundary`。本 track 不执行 reviewed apply、M1 pilot 或 business live acceptance。
 
-## 10. Bounded profile optimization canary
+## 11. Bounded profile optimization canary
 
 Goal：在 plan-only advisor 后，由当前宿主 AI 生成最小语义 proposal，再以非活动 profile canary、fresh-task replay、receipt 和失败回滚实现低打扰闭环；不恢复 lexical router，不把 `active_profile` 伪装成 Codex 原生热切换。
 

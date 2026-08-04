@@ -9,6 +9,7 @@ param(
     [string]$SessionSnapshotPath = '',
     [ValidateRange(1, 10080)][int]$MaxSnapshotAgeMinutes = 60,
     [string[]]$SkillRoot = @(),
+    [string[]]$DomainHint = @(),
     [string[]]$ProfileHint = @(),
     [Alias('SelectedCapability')][string[]]$Candidate = @(),
     [string[]]$ExcludeCapability = @(),
@@ -74,6 +75,20 @@ function Get-StringArray($Value) {
     foreach ($item in @($Value)) {
         $text = ([string]$item).Trim()
         if (-not [string]::IsNullOrWhiteSpace($text) -and -not $result.Contains($text)) { $result.Add($text) | Out-Null }
+    }
+    return @($result.ToArray())
+}
+
+function Get-ProfileHintArray($Value) {
+    $result = [Collections.Generic.List[string]]::new()
+    foreach ($item in @($Value)) {
+        foreach ($part in @(([string]$item) -split ',')) {
+            $text = $part.Trim()
+            if (-not [string]::IsNullOrWhiteSpace($text) -and -not $result.Contains($text)) {
+                $result.Add($text) | Out-Null
+                if ($result.Count -eq 2) { return @($result.ToArray()) }
+            }
+        }
     }
     return @($result.ToArray())
 }
@@ -218,14 +233,20 @@ if ($null -ne $config -and $config.PSObject.Properties.Match('skill_projection')
         $set = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         foreach ($name in $names) { $set.Add($name) | Out-Null }
         $profiles[$property.Name] = $set
-        $profileCatalog.Add([pscustomobject]@{ name = $property.Name; enabled_name_count = $set.Count; active = ($property.Name -eq $currentProfile) }) | Out-Null
+        $purpose = if ($property.Value.PSObject.Properties.Match('purpose').Count -gt 0) { [string]$property.Value.purpose } else { '' }
+        if ([string]::IsNullOrWhiteSpace($purpose)) { $purpose = ("Capabilities grouped under the '{0}' compatibility domain." -f $property.Name) }
+        $profileCatalog.Add([pscustomobject]@{ name = $property.Name; purpose = $purpose; enabled_name_count = $set.Count; active = ($property.Name -eq $currentProfile) }) | Out-Null
     }
 }
 
 $validHints = [Collections.Generic.List[string]]::new()
-foreach ($hint in @(Get-StringArray $ProfileHint)) {
+$requestedDomainHints = @(Get-ProfileHintArray @($DomainHint + $ProfileHint))
+foreach ($hint in $requestedDomainHints) {
     if ($profiles.ContainsKey($hint)) { $validHints.Add($hint) | Out-Null }
-    else { $excludedResults.Add([pscustomobject]@{ kind = 'profile'; name = $hint; reason = 'unknown_profile' }) | Out-Null }
+    else {
+        $legacyOnly = @($DomainHint).Count -eq 0 -and @($ProfileHint).Count -gt 0
+        $excludedResults.Add([pscustomobject]@{ kind = if ($legacyOnly) { 'profile' } else { 'domain' }; name = $hint; reason = if ($legacyOnly) { 'unknown_profile' } else { 'unknown_domain' } }) | Out-Null
+    }
 }
 if ($validHints.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($currentProfile) -and $profiles.ContainsKey($currentProfile)) { $validHints.Add($currentProfile) | Out-Null }
 
@@ -247,9 +268,11 @@ function Convert-ToPublicEntry($Entry) {
     $key = Get-Key ([string]$Entry.kind) ([string]$Entry.name)
     $route = if ($routing.ContainsKey($key)) { $routing[$key] } else { $null }
     $sideEffect = if ($null -ne $route -and [string]$route.role -eq 'operator') { 'controlled_write' } else { [string]$Entry.side_effect }
+    $domains = if ([string]$Entry.kind -eq 'skill') { @($profiles.Keys | Where-Object { $profiles[$_].Contains([string]$Entry.name) } | Sort-Object) } else { @() }
     return [pscustomobject]@{
         kind = [string]$Entry.kind; name = [string]$Entry.name; description = [string]$Entry.description
         path = [string]$Entry.path; active = [bool]$Entry.active; availability = [string]$Entry.availability
+        domains = @($domains)
         side_effect = $sideEffect; role = if ($null -eq $route) { '' } else { [string]$route.role }
         group = if ($null -eq $route) { '' } else { [string]$route.group }
         activation = if ($null -eq $route) { '' } else { [string]$route.activation }
@@ -386,13 +409,15 @@ $taskModel = [ordered]@{
 $capabilityRefs = @($selected | ForEach-Object { Get-Key $_.kind $_.name })
 $capabilityGraph = [ordered]@{
     stages = @(
-        [ordered]@{ id = 'discover'; capability_refs = @($discovery | ForEach-Object { Get-Key $_.kind $_.name }) },
+        [ordered]@{ id = 'discover_domains'; capability_refs = @() },
+        [ordered]@{ id = 'discover_candidates'; capability_refs = @($discovery | ForEach-Object { Get-Key $_.kind $_.name }) },
         [ordered]@{ id = 'host_adjudication'; capability_refs = @() },
         [ordered]@{ id = 'policy'; capability_refs = $capabilityRefs },
         [ordered]@{ id = 'activate'; capability_refs = $capabilityRefs }
     )
     edges = @(
-        [ordered]@{ from = 'discover'; to = 'host_adjudication' },
+        [ordered]@{ from = 'discover_domains'; to = 'discover_candidates' },
+        [ordered]@{ from = 'discover_candidates'; to = 'host_adjudication' },
         [ordered]@{ from = 'host_adjudication'; to = 'policy' },
         [ordered]@{ from = 'policy'; to = 'activate' }
     )
@@ -411,10 +436,13 @@ $capabilityGraph = [ordered]@{
     config_path = $configFile
     current_profile = $currentProfile
     current_mcp_profile = $currentMcpProfile
+    discovery_architecture = 'hierarchical_domains_v1'
+    discovery_domains = @($profileCatalog | Sort-Object name)
     profile_catalog = @($profileCatalog | Sort-Object name)
     host_snapshot = [ordered]@{ status = $snapshotStatus; source = $snapshotSource; captured_at = $snapshotCapturedAt; path = $snapshotFile }
     retrieval = [ordered]@{
-        strategy = 'profile_native_discovery'
+        strategy = 'hierarchical_domain_discovery'
+        domain_hints = @($validHints)
         profile_hints = @($validHints)
         candidate_count = $discovery.Count
         candidates = @($discovery)
