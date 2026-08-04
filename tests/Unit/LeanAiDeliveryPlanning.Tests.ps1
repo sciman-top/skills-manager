@@ -5,28 +5,13 @@ Describe 'Lean AI delivery maintenance planning contract' {
     $pilotRegistryRelative = 'tasks\skills-manager-vnext-lean-delivery-pilot.json'
     $maintenanceSpecRelative = 'docs\superpowers\specs\2026-08-03-lean-ai-delivery-maintenance-design.md'
     $maintenanceEvidenceRelative = 'docs\change-evidence\20260803-lean-ai-delivery-maintenance-design.md'
-    $baseRequiredFiles = @(
+    $fixtureRequiredFiles = @(
         'docs\product\README.md',
         'docs\product\skills-manager-vnext-prd.md',
         'docs\product\skills-manager-vnext-architecture.md',
         'docs\product\skills-manager-vnext-roadmap.md',
-        'docs\product\rule-governance-adoption-matrix.md',
-        'docs\superpowers\specs\2026-08-01-capability-manager-vnext-phase-0-design.md',
-        'docs\superpowers\specs\2026-08-02-capability-manager-vnext-phase-1-design.md',
-        'docs\superpowers\specs\2026-08-02-capability-manager-vnext-phase-2-design.md',
-        'docs\superpowers\specs\2026-08-02-capability-manager-vnext-phase-3-design.md',
-        'docs\superpowers\specs\2026-08-02-capability-manager-vnext-phase-4-design.md',
-        'docs\superpowers\specs\2026-08-03-capability-manager-vnext-phase-5-design.md',
-        'tasks\skills-manager-vnext-phase0.tasks.json',
-        'tasks\skills-manager-vnext-phase1.tasks.json',
-        'tasks\skills-manager-vnext-phase2.tasks.json',
-        'tasks\skills-manager-vnext-phase3.tasks.json',
-        'tasks\skills-manager-vnext-phase4.tasks.json',
-        'tasks\skills-manager-vnext-phase5.tasks.json',
         'tasks\plan.md',
         'tasks\todo.md',
-        'config\vnext-phase4-entry-gate.json',
-        'scripts\verify-vnext-planning.ps1',
         'AGENTS.md'
     )
     $maintenanceRequiredFiles = @(
@@ -80,23 +65,43 @@ Describe 'Lean AI delivery maintenance planning contract' {
         }
     }
 
+    function Set-BasePlanningVerifierStub([string]$FixtureRoot, [switch]$Fail) {
+        $path = Join-Path $FixtureRoot 'scripts\verify-vnext-planning.ps1'
+        New-Item -ItemType Directory -Path (Split-Path $path -Parent) -Force | Out-Null
+        $source = if ($Fail) {
+@'
+[CmdletBinding()]
+param([string]$RepoRoot, [switch]$Json, [switch]$NoExit)
+$result = [ordered]@{ pass = $false; finding_count = 1 }
+if ($Json) { $result | ConvertTo-Json }
+if ($NoExit) { $global:LASTEXITCODE = 2; return }
+exit 2
+'@
+        }
+        else {
+@'
+[CmdletBinding()]
+param([string]$RepoRoot, [switch]$Json, [switch]$NoExit)
+$result = [ordered]@{ pass = $true; finding_count = 0 }
+if ($Json) { $result | ConvertTo-Json }
+if ($NoExit) { $global:LASTEXITCODE = 0; return }
+exit 0
+'@
+        }
+        Set-Content -LiteralPath $path -Value $source -Encoding UTF8
+    }
+
     function New-LeanPlanningFixture([string]$Name) {
         $fixtureRoot = Join-Path $TestDrive $Name
         New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null
 
-        $historicalEvidence = @(0, 1, 2, 3, 4, 5) | ForEach-Object {
-            $manifest = Get-Content -LiteralPath (Join-Path $repoRoot ('tasks\skills-manager-vnext-phase{0}.tasks.json' -f $_)) -Raw | ConvertFrom-Json
-            @($manifest.tasks | Where-Object status -eq 'done' | ForEach-Object write_set | Where-Object {
-                $_ -like 'docs/change-evidence/*' -and $_ -notmatch '[*?<>]'
-            })
-        }
-
-        foreach ($relativePath in @($baseRequiredFiles) + @($maintenanceRequiredFiles) + @($historicalEvidence) | Sort-Object -Unique) {
+        foreach ($relativePath in @($fixtureRequiredFiles) + @($maintenanceRequiredFiles) | Sort-Object -Unique) {
             $source = Join-Path $repoRoot $relativePath
             $destination = Join-Path $fixtureRoot $relativePath
             New-Item -ItemType Directory -Path (Split-Path $destination -Parent) -Force | Out-Null
             Copy-Item -LiteralPath $source -Destination $destination -Force
         }
+        Set-BasePlanningVerifierStub $fixtureRoot
         return $fixtureRoot
     }
 
@@ -104,6 +109,11 @@ Describe 'Lean AI delivery maintenance planning contract' {
         $result = Invoke-LeanPlanningVerifier $repoRoot -External
         $parsed = $result.output | ConvertFrom-Json
         $result.exit_code | Should Be 0
+        $parsed.schema_version | Should Be 1
+        $parsed.program_id | Should Be 'skills-manager-vnext'
+        $parsed.track | Should Be 'maintenance_design'
+        $parsed.base_phase | Should Be 'P5'
+        $parsed.p6_admission_status | Should Be 'hold'
         $parsed.pass | Should Be $true
         $parsed.finding_count | Should Be 0
         $parsed.task_count | Should Be 4
@@ -348,26 +358,8 @@ Describe 'Lean AI delivery maintenance planning contract' {
 
     It 'propagates a failure from the existing P5 planning verifier' {
         $fixtureRoot = New-LeanPlanningFixture 'base-p5-failure'
-        Remove-Item -LiteralPath (Join-Path $fixtureRoot 'config\vnext-phase4-entry-gate.json') -Force
+        Set-BasePlanningVerifierStub $fixtureRoot -Fail
         $parsed = (Invoke-LeanPlanningVerifier $fixtureRoot).output | ConvertFrom-Json
         @($parsed.findings | Where-Object code -eq 'base_p5_planning_failed').Count | Should Be 1
-    }
-
-    It 'keeps JSON fields counts and process exit code stable' {
-        $result = Invoke-LeanPlanningVerifier $repoRoot -External
-        $parsed = $result.output | ConvertFrom-Json
-        $result.exit_code | Should Be 0
-        $parsed.schema_version | Should Be 1
-        $parsed.program_id | Should Be 'skills-manager-vnext'
-        $parsed.track | Should Be 'maintenance_design'
-        $parsed.base_phase | Should Be 'P5'
-        $parsed.p6_admission_status | Should Be 'hold'
-        $parsed.task_count | Should Be 4
-        $parsed.done_count | Should Be 4
-        $parsed.open_count | Should Be 0
-        $parsed.pilot_status | Should Be 'collecting'
-        $parsed.pilot_sample_target | Should Be 10
-        $parsed.pilot_sample_count | Should Be 0
-        $parsed.counted_pilot_sample_count | Should Be 0
     }
 }
