@@ -33,6 +33,7 @@ $candidateRecallPassed = 0
 $policyPassed = 0
 $negativeConstraintViolations = 0
 $semanticAutoSelections = 0
+$routerMetadataCache = @{}
 
 function Add-Finding([string]$CaseId, [string]$Code, [string]$Message) {
     $findings.Add([pscustomobject]@{ case_id = $CaseId; code = $Code; message = $Message }) | Out-Null
@@ -51,6 +52,7 @@ function Invoke-RouterCase($Case, [string[]]$Candidate = @()) {
         DomainHint = @($Case.profile_hints | ForEach-Object { [string]$_ })
         Candidate = @($Candidate)
         ExcludeCapability = @($Case.host_exclude | ForEach-Object { Get-CapabilityRef $_ })
+        MetadataCache = $routerMetadataCache
     }
     if (-not [string]::IsNullOrWhiteSpace([string]$Case.snapshot_path)) {
         $routerArgs.HostSnapshotPath = Resolve-RepoFile ([string]$Case.snapshot_path)

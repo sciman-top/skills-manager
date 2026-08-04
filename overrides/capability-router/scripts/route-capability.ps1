@@ -13,7 +13,8 @@ param(
     [string[]]$ProfileHint = @(),
     [Alias('SelectedCapability')][string[]]$Candidate = @(),
     [string[]]$ExcludeCapability = @(),
-    [ValidateRange(1, 100)][int]$MaxCandidates = 24
+    [ValidateRange(1, 100)][int]$MaxCandidates = 24,
+    [hashtable]$MetadataCache = $null
 )
 
 $ErrorActionPreference = 'Stop'
@@ -51,19 +52,34 @@ function Test-Contained([string]$Path, [string]$Root) {
 
 function Read-SkillMetadata([string]$Path, [string]$Root, [bool]$Active) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf) -or -not (Test-Contained $Path $Root)) { return $null }
-    $text = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
-    $frontmatter = [regex]::Match($text, '(?s)\A---\s*\r?\n(?<yaml>.*?)\r?\n---')
-    if (-not $frontmatter.Success) { return $null }
-    $yaml = $frontmatter.Groups['yaml'].Value
-    $nameMatch = [regex]::Match($yaml, '(?m)^name:\s*["'']?(?<value>[^\r\n"'']+)')
-    $descriptionMatch = [regex]::Match($yaml, '(?m)^description:\s*["'']?(?<value>[^\r\n]+)')
-    if (-not $nameMatch.Success -or -not $descriptionMatch.Success) { return $null }
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $fullRoot = [IO.Path]::GetFullPath($Root)
+    $file = Get-Item -LiteralPath $fullPath
+    $cacheKey = '{0}|{1}|{2}|{3}' -f $fullPath, $fullRoot, $file.Length, $file.LastWriteTimeUtc.Ticks
+    $metadata = if ($null -ne $MetadataCache -and $MetadataCache.ContainsKey($cacheKey)) {
+        $MetadataCache[$cacheKey]
+    }
+    else {
+        $text = Get-Content -LiteralPath $fullPath -Raw -Encoding UTF8
+        $frontmatter = [regex]::Match($text, '(?s)\A---\s*\r?\n(?<yaml>.*?)\r?\n---')
+        if (-not $frontmatter.Success) { return $null }
+        $yaml = $frontmatter.Groups['yaml'].Value
+        $nameMatch = [regex]::Match($yaml, '(?m)^name:\s*["'']?(?<value>[^\r\n"'']+)')
+        $descriptionMatch = [regex]::Match($yaml, '(?m)^description:\s*["'']?(?<value>[^\r\n]+)')
+        if (-not $nameMatch.Success -or -not $descriptionMatch.Success) { return $null }
+        $parsed = [pscustomobject]@{
+            name = $nameMatch.Groups['value'].Value.Trim()
+            description = $descriptionMatch.Groups['value'].Value.Trim().Trim('"', "'")
+        }
+        if ($null -ne $MetadataCache) { $MetadataCache[$cacheKey] = $parsed }
+        $parsed
+    }
     return [pscustomobject]@{
         kind = 'skill'
-        name = $nameMatch.Groups['value'].Value.Trim()
-        description = $descriptionMatch.Groups['value'].Value.Trim().Trim('"', "'")
-        path = [IO.Path]::GetFullPath($Path)
-        source_root = [IO.Path]::GetFullPath($Root)
+        name = [string]$metadata.name
+        description = [string]$metadata.description
+        path = $fullPath
+        source_root = $fullRoot
         active = $Active
         availability = if ($Active) { 'available' } else { 'cold_load' }
         side_effect = 'read_only'

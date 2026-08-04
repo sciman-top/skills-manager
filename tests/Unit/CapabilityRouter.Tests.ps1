@@ -104,6 +104,19 @@ Describe 'Native-first capability discovery and policy' {
         @($en.selected).Count | Should Be 0
     }
 
+    It 'Reuses in-process metadata reads and invalidates changed skill files' {
+        $cache = @{}
+        $first = Invoke-TestRouter '诊断 WPF 启动失败' @{ Candidate = @('skill|debug:dotnet'); MetadataCache = $cache }
+        $first.selected[0].description | Should Be 'Debug .NET, ASP.NET Core, and WPF runtime failures.'
+        $cache.Count | Should BeGreaterThan 0
+
+        Set-Content -LiteralPath $debug.path -Encoding UTF8 -Value "---`nname: debug:dotnet`ndescription: Changed debug metadata with a different length.`n---`n`n# debug:dotnet"
+        $second = Invoke-TestRouter '再次诊断 WPF 启动失败' @{ Candidate = @('skill|debug:dotnet'); MetadataCache = $cache }
+
+        $second.selected[0].description | Should Be 'Changed debug metadata with a different length.'
+        $cache.Count | Should BeGreaterThan 1
+    }
+
     It 'Normalizes comma-separated profile hints from an external PowerShell process' {
         $raw = & pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
             -Query '设计软件工程终态和交互界面' `
