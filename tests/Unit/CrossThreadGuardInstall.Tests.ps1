@@ -26,6 +26,15 @@ Describe 'Cross-thread guard installer and doctor' {
         } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $script:codexHome 'hooks.json')
     }
 
+    It 'keeps the trusted hook bytes stable across checkouts' {
+        $attributesPath = Join-Path $repoRoot '.gitattributes'
+        Test-Path -LiteralPath $attributesPath | Should Be $true
+        (Get-Content -Raw -LiteralPath $attributesPath) | Should Match '(?m)^scripts/hooks/block-cross-thread-send\.ps1 text eol=lf$'
+
+        $sourceBytes = [System.IO.File]::ReadAllBytes($sourceHook)
+        @($sourceBytes | Where-Object { $_ -eq 13 }).Count | Should Be 0
+    }
+
     It 'installs to a stable host path, preserves other hooks, and never edits config.toml' {
         $receipt = & $installer -CodexHome $script:codexHome -SourceHookPath $sourceHook
         $receipt.status | Should Be 'installed_untrusted'

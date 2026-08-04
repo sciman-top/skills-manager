@@ -1,3 +1,4 @@
+# Keep LF bytes stable because Codex hook trust hashes the installed definition.
 [CmdletBinding()]
 param(
     [ValidatePattern('^[0-9A-Fa-f]{64}$')]
