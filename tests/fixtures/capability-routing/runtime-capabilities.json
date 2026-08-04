@@ -1,6 +1,8 @@
 {
   "schema_version": 1,
   "capabilities": [
+    { "kind": "skill", "name": "debug:dotnet", "description": "Host-visible .NET debugger.", "availability": "disabled", "side_effect": "read_only" },
+    { "kind": "mcp", "name": "openaiDeveloperDocs", "description": "Host MCP status for official OpenAI documentation.", "availability": "needs_auth", "side_effect": "external_read" },
     { "kind": "plugin", "name": "gmail", "description": "Read and summarize connected Gmail mailbox data.", "activation": "mailbox search or summary is requested", "availability": "available", "side_effect": "external_read" },
     { "kind": "plugin", "name": "stripe", "description": "Read or change connected Stripe billing data.", "activation": "billing lookup, refund, or payment action is requested", "availability": "available", "side_effect": "controlled_write" },
     { "kind": "native_tool", "name": "shell", "description": "Run a local shell command in the current workspace.", "activation": "repository inspection or local command execution is required", "availability": "available", "side_effect": "controlled_write" }

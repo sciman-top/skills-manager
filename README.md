@@ -251,6 +251,8 @@ PPT 路由保持职责单一：`custom-teacher-courseware-ppt` 决定课堂课�
 
 `调和/reconcile` 是 profile 维护的只读 advisor。无 proposal 时报告 `unrouted`、失效引用、全部 metadata 预算和跨多个 profile 的重叠观察，同时输出 `host_handoff`；传入 proposal 时只接受 `schema_version=1`、`decision_owner=host_ai` 和当前 `skills.json` 的 `base_config_sha256`，再校验 skill/profile、protected skill、add/remove、no-op、理由、预算与 routing policy。advisor 本身始终 `apply_allowed=false`、`writes_performed=false`。
 
+技能投影会比较 canonical skill 的 name/path/description；真实增删或 metadata 变化时，在 ignored `reports/skill-profile-reconciliation/pending.json` 写入 `reconciliation_needed`，并提示当前宿主运行上述只读 advisor。profile-only/no-op 不产生新信号，signal 不会自行修改 profile。host evaluation 报告会分开 cumulative cached/uncached input 与 tool rounds；日常只跑 1–2 个 focused cold case，全量 8-case corpus 仅用于结构变化或 closeout。cold discovery 对未知 domain fail-closed、显式报告候选截断，并让 current host snapshot 覆盖静态 skill/MCP availability；disabled、needs-auth 或 not-callable 能力不会自动 load/use。
+
 宿主已生成最小 proposal 后，可用独立事务 manager 做 apply preview，或在常驻授权下对非活动 profile 运行 canary：
 
 ```powershell

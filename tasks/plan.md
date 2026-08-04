@@ -107,6 +107,10 @@ Failure routing：漏触发先修 resident description 并保护 native/no-skill
 
 Verification：`build -> affected Pester -> routing/config/integrity/planning contracts -> fresh host corpus -> one full gate -> default/P5/P6/Git boundary`。32/32 和 8/8 只声明 `host_evaluation_partial`；cold-load token 未下降，不写成成本优化或 business `live_accepted`。
 
+Post-closeout follow-up：canonical inventory 增删/description/path 变化现在由 projection seam 写 ignored reconciliation signal；profile-only/no-op 不触发，宿主据 signal 进入既有 advisor/canary，而不是脚本静默改 profile。evaluator 已拆分 cached/uncached/tool rounds；两个 1-case A/B 否决了负收益的 combined shell-round 方案，保留 separate 正确性链与 focused replay 成本策略。本段不新增 track task count。
+
+Natural-limit hardening：未知 domain 零候选、显式 skill 仍可 policy validate；candidate truncation 可见；current snapshot 覆盖静态 skill/MCP availability。验证使用 30-case deterministic corpus、相关 Pester 与本地 production-config replay，不新增 task/track，不把 JSON bytes 缩减写成 provider token 或 live acceptance。
+
 ## 10. Profile reconciliation advisor
 
 Goal：在 skill 新增、删除或 metadata 变化后，由宿主 AI 提出语义归属，仓库确定性发现 profile drift、校验 freshness/对象/预算/policy，并只输出 zero-write dry-run change-set。

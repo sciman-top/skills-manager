@@ -58,6 +58,7 @@ Describe 'Native-first capability discovery and policy' {
                     default = [ordered]@{ purpose = 'General debugging and completion verification.'; enabled_names = @('systematic-debugging') }
                     engineering = [ordered]@{ purpose = 'Architecture, product specification, and delivery planning.'; enabled_names = @('codebase-design', 'grill-with-docs', 'to-spec') }
                     dotnet = [ordered]@{ purpose = '.NET implementation and diagnosis.'; enabled_names = @('debug:dotnet', 'systematic-debugging') }
+                    python = [ordered]@{ purpose = 'Python implementation and diagnosis.'; enabled_names = @('systematic-debugging') }
                     physics = [ordered]@{ purpose = 'Interactive physics teaching experiences.'; enabled_names = @('custom-junior-physics-animation') }
                     strict = [ordered]@{ purpose = 'Strict engineering workflows.'; enabled_names = @('test-driven-development', 'systematic-debugging') }
                 }
@@ -219,6 +220,60 @@ Describe 'Native-first capability discovery and policy' {
         $result.host_snapshot.status | Should Be 'stale'
         @($result.selected.name) | Should Not Contain 'gmail'
         @($result.excluded | Where-Object { $_.name -eq 'gmail' -and $_.reason -eq 'stale_snapshot' }).Count | Should Be 1
+    }
+
+    It 'Fails closed when every explicitly requested discovery domain is unknown' {
+        $result = Invoke-TestRouter '设计模块接口' @{ DomainHint = @('missing-domain') }
+
+        @($result.retrieval.domain_hints).Count | Should Be 0
+        @($result.retrieval.candidates).Count | Should Be 0
+        @($result.excluded | Where-Object { $_.name -eq 'missing-domain' -and $_.reason -eq 'unknown_domain' }).Count | Should Be 1
+        $result.selection_mode | Should Be 'abstain'
+        $result.abstained | Should Be $true
+    }
+
+    It 'Still validates an explicit skill when an unrelated discovery domain is unknown' {
+        $result = Invoke-TestRouter '请使用 $codebase-design 设计模块接口' @{ DomainHint = @('missing-domain') }
+
+        @($result.selected.name) | Should Be @('codebase-design')
+        $result.selection_mode | Should Be 'explicit'
+        $result.activation_plan[0].action | Should Be 'load_skill'
+        @($result.excluded | Where-Object { $_.name -eq 'missing-domain' -and $_.reason -eq 'unknown_domain' }).Count | Should Be 1
+    }
+
+    It 'Reports deterministic candidate truncation so the host can refine the domain' {
+        $result = Invoke-TestRouter '设计模块接口' @{ DomainHint = @('engineering'); MaxCandidates = 2 }
+
+        $result.retrieval.candidate_count | Should Be 2
+        $result.retrieval.available_candidate_count | Should BeGreaterThan 2
+        $result.retrieval.truncated | Should Be $true
+    }
+
+    It 'Uses a current host snapshot to override static skill and MCP availability' {
+        $snapshotPath = Join-Path $TestDrive 'current-snapshot.json'
+        [ordered]@{
+            schema_version = 2
+            captured_at = [DateTimeOffset]::UtcNow.ToString('o')
+            source = 'codex-app-server'
+            capabilities = @(
+                [ordered]@{ kind = 'skill'; name = 'debug:dotnet'; description = 'Host-visible .NET debugger.'; availability = 'disabled'; side_effect = 'read_only' },
+                [ordered]@{ kind = 'skill'; name = 'plugin-only-skill'; description = 'Host plugin skill.'; availability = 'available'; side_effect = 'read_only' },
+                [ordered]@{ kind = 'mcp'; name = 'openaiDeveloperDocs'; description = 'Host MCP status.'; availability = 'needs_auth'; side_effect = 'external_read' }
+            )
+        } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $snapshotPath -Encoding UTF8
+
+        $result = Invoke-TestRouter '诊断 .NET 并核对官方文档' @{
+            DomainHint = @('dotnet')
+            HostSnapshotPath = $snapshotPath
+            Candidate = @('skill|debug:dotnet', 'skill|plugin-only-skill', 'mcp|openaiDeveloperDocs')
+        }
+
+        $debugCandidate = @($result.retrieval.candidates | Where-Object { $_.kind -eq 'skill' -and $_.name -eq 'debug:dotnet' })[0]
+        $debugCandidate.description | Should Be 'Host-visible .NET debugger.'
+        $debugCandidate.availability | Should Be 'disabled'
+        @($result.activation_plan | Where-Object name -eq 'debug:dotnet')[0].action | Should Be 'request_activation'
+        @($result.activation_plan | Where-Object name -eq 'plugin-only-skill')[0].action | Should Be 'use_active_skill'
+        @($result.activation_plan | Where-Object name -eq 'openaiDeveloperDocs')[0].action | Should Be 'request_mcp_activation'
     }
 
     It 'Reuses an already loaded host-selected capability without inventing a task domain' {

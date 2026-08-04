@@ -676,6 +676,59 @@ unified_exec = true
     }
 
     Context "Sync-CodexSkillProjection" {
+        It "Signals canonical inventory changes but ignores profile-only and no-op syncs" {
+            $oldDryRun = $script:DryRun
+            try {
+                $script:DryRun = $false
+                $source = Join-Path $TestDrive "reconciliation-source"
+                New-ProjectionSkill $source "alpha" "alpha" "first" | Out-Null
+                $configPath = Join-Path $TestDrive "reconciliation-codex\config.toml"
+                $manifestPath = Join-Path $TestDrive "reconciliation-reports\projection.json"
+                $signalPath = Join-Path $TestDrive "reconciliation-reports\pending.json"
+                $projection = [pscustomobject]@{
+                    enabled = $true
+                    active_profile = "default"
+                    profiles = [pscustomobject]@{
+                        default = [pscustomobject]@{ enabled_names = @("alpha") }
+                        coding = [pscustomobject]@{ enabled_names = @("alpha") }
+                    }
+                    codex_config_path = $configPath
+                    manifest_path = $manifestPath
+                    reconciliation_signal_path = $signalPath
+                    sources = @([pscustomobject]@{ id = "managed"; path = $source; priority = 200; platforms = @("codex") })
+                }
+
+                $initial = Sync-CodexSkillProjection $projection
+                $initial.reconciliation.status | Should Be "reconciliation_needed"
+                $initial.reconciliation.added_names | Should Be @("alpha")
+                (Test-Path -LiteralPath $signalPath -PathType Leaf) | Should Be $true
+
+                Remove-Item -LiteralPath $signalPath -Force
+                $noOp = Sync-CodexSkillProjection $projection
+                $noOp.reconciliation.status | Should Be "not_needed"
+                (Test-Path -LiteralPath $signalPath) | Should Be $false
+
+                $projection.active_profile = "coding"
+                $profileOnly = Sync-CodexSkillProjection $projection
+                $profileOnly.reconciliation.status | Should Be "not_needed"
+                (Test-Path -LiteralPath $signalPath) | Should Be $false
+
+                New-ProjectionSkill $source "alpha" "alpha" "updated" | Out-Null
+                New-ProjectionSkill $source "beta" "beta" "second" | Out-Null
+                $metadataAndAdd = Sync-CodexSkillProjection $projection
+                $metadataAndAdd.reconciliation.status | Should Be "reconciliation_needed"
+                $metadataAndAdd.reconciliation.added_names | Should Be @("beta")
+                $metadataAndAdd.reconciliation.metadata_changed_names | Should Be @("alpha")
+
+                Remove-Item -LiteralPath (Join-Path $source "beta") -Recurse -Force
+                $removed = Sync-CodexSkillProjection $projection
+                $removed.reconciliation.removed_names | Should Be @("beta")
+            }
+            finally {
+                $script:DryRun = $oldDryRun
+            }
+        }
+
         It "Persists profile reachability summary in the manifest" {
             $oldDryRun = $script:DryRun
             try {

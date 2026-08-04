@@ -17,17 +17,19 @@ Prefer the host's native skill and tool selection. This compatibility skill no l
    $catalog.discovery_domains | Select-Object name,purpose
    ```
 
-3. Discover inside those domains, then inspect `retrieval.candidates`:
+3. Discover inside those domains and project only the retrieval result plus deterministic exclusions:
 
    ```powershell
-   pwsh -NoProfile -ExecutionPolicy Bypass -File <skill-dir>/scripts/route-capability.ps1 -Query '<complete request>' -DomainHint 'engineering,review'
+   $result = pwsh -NoProfile -ExecutionPolicy Bypass -File <skill-dir>/scripts/route-capability.ps1 -Query '<complete request>' -DomainHint 'engineering,review' | ConvertFrom-Json
+   [pscustomobject]@{ retrieval = $result.retrieval; excluded = $result.excluded } | ConvertTo-Json -Depth 8
    ```
 
-   Use the complete request—not lexical scores—to choose the smallest sufficient set, normally one capability and never more than three. Respect negation such as “不要使用…”, “不要改代码”, and “only explain”. If no candidate directly advances the goal, continue with native reasoning.
+   Use the complete request—not lexical scores—to choose the smallest sufficient set, normally one capability and never more than three. Respect negation such as “不要使用…”, “不要改代码”, and “only explain”. If `retrieval.truncated=true`, refine to one valid domain instead of guessing from the partial list. If every requested domain is unknown or no candidate directly advances the goal, continue with native reasoning.
 4. Re-run the script with the host decision so deterministic policy can validate availability, containment, side effects, and activation:
 
    ```powershell
-   pwsh -NoProfile -ExecutionPolicy Bypass -File <skill-dir>/scripts/route-capability.ps1 -Query '<complete request>' -DomainHint engineering -Candidate 'skill|codebase-design' -ExcludeCapability 'skill|test-driven-development'
+   $result = pwsh -NoProfile -ExecutionPolicy Bypass -File <skill-dir>/scripts/route-capability.ps1 -Query '<complete request>' -DomainHint engineering -Candidate 'skill|codebase-design' -ExcludeCapability 'skill|test-driven-development' | ConvertFrom-Json
+   $result | Select-Object selection_mode,selected,activation_plan,excluded,session_plan,preheat_recommendation,writes_performed | ConvertTo-Json -Depth 8
    ```
 
 5. Follow `activation_plan`:

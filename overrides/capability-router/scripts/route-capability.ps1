@@ -186,6 +186,9 @@ if ($null -ne $policy) {
     }
 }
 
+$entryByKey = @{}
+foreach ($entry in $entries) { $entryByKey[(Get-Key ([string]$entry.kind) ([string]$entry.name))] = $entry }
+
 $snapshotStatus = 'not_provided'
 $snapshotSource = ''
 $snapshotCapturedAt = $null
@@ -202,21 +205,30 @@ if ($snapshotFile) {
     foreach ($capability in $snapshotItems) {
         $kind = ([string]$capability.kind).Trim().ToLowerInvariant()
         $name = ([string]$capability.name).Trim()
-        if ($kind -notin @('plugin', 'app', 'connector', 'native_tool', 'tool') -or [string]::IsNullOrWhiteSpace($name)) { continue }
+        if ($kind -notin @('skill', 'mcp', 'plugin', 'app', 'connector', 'native_tool', 'tool') -or [string]::IsNullOrWhiteSpace($name)) { continue }
         if ($snapshotStatus -eq 'stale') {
             $excludedResults.Add([pscustomobject]@{ kind = $kind; name = $name; reason = 'stale_snapshot' }) | Out-Null
             continue
         }
         $key = Get-Key $kind $name
-        if (-not $seen.Add($key)) { continue }
         $availability = if ([string]::IsNullOrWhiteSpace([string]$capability.availability)) { 'unknown' } else { [string]$capability.availability }
         if ($capability.PSObject.Properties.Match('callable').Count -gt 0 -and -not [bool]$capability.callable) { $availability = 'not_callable' }
         if ($capability.PSObject.Properties.Match('accessible').Count -gt 0 -and -not [bool]$capability.accessible) { $availability = 'inaccessible' }
-        $entries.Add([pscustomobject]@{
+        if ($entryByKey.ContainsKey($key)) {
+            $existing = $entryByKey[$key]
+            if (-not [string]::IsNullOrWhiteSpace([string]$capability.description)) { $existing.description = [string]$capability.description }
+            $existing.availability = $availability
+            $existing.active = ($availability -eq 'available')
+            continue
+        }
+        $entry = [pscustomobject]@{
             kind = $kind; name = $name; description = [string]$capability.description; path = ''; source_root = ''
             active = ($availability -eq 'available'); availability = $availability
             side_effect = if ([string]::IsNullOrWhiteSpace([string]$capability.side_effect)) { 'unknown' } else { [string]$capability.side_effect }
-        })
+        }
+        $entries.Add($entry)
+        $seen.Add($key) | Out-Null
+        $entryByKey[$key] = $entry
         $routing[$key] = [pscustomobject]@{
             activation = [string]$capability.activation; negative_activation = [string]$capability.negative_activation
             role = 'external'; group = 'runtime-snapshot'; context = 'Caller-provided current runtime capability snapshot.'
@@ -241,6 +253,7 @@ if ($null -ne $config -and $config.PSObject.Properties.Match('skill_projection')
 
 $validHints = [Collections.Generic.List[string]]::new()
 $requestedDomainHints = @(Get-ProfileHintArray @($DomainHint + $ProfileHint))
+$hasRequestedDomainHints = $requestedDomainHints.Count -gt 0
 foreach ($hint in $requestedDomainHints) {
     if ($profiles.ContainsKey($hint)) { $validHints.Add($hint) | Out-Null }
     else {
@@ -248,7 +261,8 @@ foreach ($hint in $requestedDomainHints) {
         $excludedResults.Add([pscustomobject]@{ kind = if ($legacyOnly) { 'profile' } else { 'domain' }; name = $hint; reason = if ($legacyOnly) { 'unknown_profile' } else { 'unknown_domain' } }) | Out-Null
     }
 }
-if ($validHints.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($currentProfile) -and $profiles.ContainsKey($currentProfile)) { $validHints.Add($currentProfile) | Out-Null }
+if (-not $hasRequestedDomainHints -and $validHints.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($currentProfile) -and $profiles.ContainsKey($currentProfile)) { $validHints.Add($currentProfile) | Out-Null }
+$domainResolutionFailed = $hasRequestedDomainHints -and $validHints.Count -eq 0
 
 $hostExcluded = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 foreach ($text in @($ExcludeCapability)) {
@@ -307,6 +321,7 @@ foreach ($entry in $entries) {
 $discovery = [Collections.Generic.List[object]]::new()
 $discoverySeen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 foreach ($entry in $entries) {
+    if ($domainResolutionFailed) { continue }
     $key = Get-Key $entry.kind $entry.name
     if ($hostExcluded.Contains($key)) { continue }
     $include = $false
@@ -337,7 +352,9 @@ foreach ($ref in @($requestedRefs)) {
         if (-not $hostExcluded.Contains($key) -and $discoverySeen.Add($key)) { $discovery.Add((Convert-ToPublicEntry $entry)) | Out-Null }
     }
 }
+$availableCandidateCount = $discovery.Count
 $discovery = @($discovery | Sort-Object @{ Expression = 'active'; Descending = $true }, kind, name | Select-Object -First $MaxCandidates)
+$candidateTruncated = $availableCandidateCount -gt $discovery.Count
 
 $selected = [Collections.Generic.List[object]]::new()
 $selectedSeen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -359,9 +376,16 @@ $activationPlan = foreach ($item in $selected) {
     $autoAllowed = $false
     $policyDecision = 'activation_required'
     if ($item.kind -eq 'skill' -and $item.side_effect -eq 'read_only') {
-        $action = if ($item.active) { 'use_active_skill' } else { 'load_skill' }
-        $autoAllowed = $true
-        $policyDecision = 'allow'
+        if ($item.availability -eq 'available') {
+            $action = 'use_active_skill'
+            $autoAllowed = $true
+            $policyDecision = 'allow'
+        }
+        elseif ($item.availability -eq 'cold_load' -and -not [string]::IsNullOrWhiteSpace([string]$item.path)) {
+            $action = 'load_skill'
+            $autoAllowed = $true
+            $policyDecision = 'allow'
+        }
     }
     elseif ($item.kind -eq 'skill') {
         $action = 'load_skill_with_approval'
@@ -445,6 +469,8 @@ $capabilityGraph = [ordered]@{
         domain_hints = @($validHints)
         profile_hints = @($validHints)
         candidate_count = $discovery.Count
+        available_candidate_count = $availableCandidateCount
+        truncated = $candidateTruncated
         candidates = @($discovery)
         top_candidates = @()
     }

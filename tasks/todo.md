@@ -58,6 +58,10 @@ M0 maintenance design planning package 保持 `repo_verified`；M1 已获授权�
 
 本 track 完成 4/4 `repo_verified`；selection 32/32、cold-load 8/8 只属于 `host_evaluation_partial`。active profile 恢复 `default`；P5 5/5、P6 hold 与 business `live_accepted` 不变；M1 当前独立 collecting 0/10。cold-load input token 未下降，不宣称成本优化。
 
+Post-closeout follow-up：canonical inventory delta signal 与 cached/uncached/tool-round 指标已实现；profile-only/no-op 不触发。两个真实 A/B 已否决 combined command 优化并恢复 separate 链，只保留按需 cold discovery、1–2 case focused replay 和全量 corpus 仅用于结构变化/closeout；不新增 task，也不宣称普遍 token 降低。
+
+Natural-limit hardening 已完成：unknown-domain fail-closed、truncation signal、current skill/MCP snapshot override、host-facing compact projection；deterministic corpus 30/30。剩余宿主语义波动、固定上下文与 invocation trace 缺口保持外部边界。
+
 ## Profile reconciliation advisor checklist
 
 - [x] `SMV-PR-001` 确定 host-owned semantics、deterministic validation 和 plan-only 边界。

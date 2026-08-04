@@ -47,6 +47,29 @@ function Get-CommandTexts($Events) {
     return @($Events | Where-Object { $_.PSObject.Properties.Match('item').Count -gt 0 -and $_.item.type -eq 'command_execution' } | ForEach-Object { [string]$_.item.command } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
 }
 
+function Get-HostUsageMetrics($Events) {
+    $usageEvent = $Events | Where-Object type -eq 'turn.completed' | Select-Object -Last 1
+    $inputTokens = [int]$usageEvent.usage.input_tokens
+    $cachedInputTokens = [int]$usageEvent.usage.cached_input_tokens
+    return [pscustomobject][ordered]@{
+        input_tokens = $inputTokens
+        cached_input_tokens = $cachedInputTokens
+        uncached_input_tokens = [Math]::Max(0, ($inputTokens - $cachedInputTokens))
+        cached_input_ratio = if ($inputTokens -gt 0) { [Math]::Round(($cachedInputTokens / $inputTokens), 4) } else { 0.0 }
+        output_tokens = [int]$usageEvent.usage.output_tokens
+    }
+}
+
+function Get-HostCommandMetrics($Events) {
+    $completed = @($Events | Where-Object { $_.type -eq 'item.completed' -and $_.item.type -eq 'command_execution' })
+    $commands = @($completed | ForEach-Object { [string]$_.item.command })
+    return [pscustomobject][ordered]@{
+        command_count = $commands.Count
+        router_call_count = @($commands | Where-Object { $_ -match 'route-capability\.ps1' }).Count
+        tool_round_count = @($completed | ForEach-Object { [string]$_.item.id } | Sort-Object -Unique).Count
+    }
+}
+
 function Test-RawSkillRead([string[]]$Commands, [string]$SkillPath) {
     if ([string]::IsNullOrWhiteSpace($SkillPath)) { return $false }
     $normalizedPath = [IO.Path]::GetFullPath($SkillPath).ToLowerInvariant()
@@ -83,7 +106,8 @@ $($Case.request)
     $exitCode = $LASTEXITCODE
     $timer.Stop()
     $events = @($raw | ForEach-Object { try { $_ | ConvertFrom-Json } catch { $null } } | Where-Object { $null -ne $_ })
-    $usageEvent = $events | Where-Object type -eq 'turn.completed' | Select-Object -Last 1
+    $usage = Get-HostUsageMetrics $events
+    $commandMetrics = Get-HostCommandMetrics $events
     $messageEvent = $events | Where-Object { $_.type -eq 'item.completed' -and $_.item.type -eq 'agent_message' } | Select-Object -Last 1
     $parsed = $null
     try { $parsed = ([string]$messageEvent.item.text) | ConvertFrom-Json } catch { }
@@ -111,9 +135,14 @@ $($Case.request)
         exit_code = $exitCode
         parse_ok = ($null -ne $parsed)
         duration_ms = $timer.ElapsedMilliseconds
-        input_tokens = [int]$usageEvent.usage.input_tokens
-        cached_input_tokens = [int]$usageEvent.usage.cached_input_tokens
-        output_tokens = [int]$usageEvent.usage.output_tokens
+        input_tokens = [int]$usage.input_tokens
+        cached_input_tokens = [int]$usage.cached_input_tokens
+        uncached_input_tokens = [int]$usage.uncached_input_tokens
+        cached_input_ratio = [double]$usage.cached_input_ratio
+        output_tokens = [int]$usage.output_tokens
+        command_count = [int]$commandMetrics.command_count
+        router_call_count = [int]$commandMetrics.router_call_count
+        tool_round_count = [int]$commandMetrics.tool_round_count
         selected_skills = @($selected)
         missing_required = @($expectation.missing)
         selected_forbidden = @($expectation.unexpected)
@@ -220,7 +249,12 @@ $summary = @($items | Group-Object mode | ForEach-Object {
         chain_passed = @($modeItems | Where-Object chain_pass).Count
         input_tokens = ($modeItems | Measure-Object input_tokens -Sum).Sum
         cached_input_tokens = ($modeItems | Measure-Object cached_input_tokens -Sum).Sum
+        uncached_input_tokens = ($modeItems | Measure-Object uncached_input_tokens -Sum).Sum
+        cached_input_ratio = if (($modeItems | Measure-Object input_tokens -Sum).Sum -gt 0) { [Math]::Round((($modeItems | Measure-Object cached_input_tokens -Sum).Sum / ($modeItems | Measure-Object input_tokens -Sum).Sum), 4) } else { 0.0 }
         output_tokens = ($modeItems | Measure-Object output_tokens -Sum).Sum
+        command_count = ($modeItems | Measure-Object command_count -Sum).Sum
+        router_call_count = ($modeItems | Measure-Object router_call_count -Sum).Sum
+        tool_round_count = ($modeItems | Measure-Object tool_round_count -Sum).Sum
         duration_ms = ($modeItems | Measure-Object duration_ms -Sum).Sum
     }
 })

@@ -229,6 +229,33 @@
       "profile_hints": ["database"],
       "expected_candidates": [{"kind": "skill", "name": "performance-optimization"}],
       "host_selected": [{"kind": "skill", "name": "performance-optimization", "action": "load_skill"}]
+    },
+    {
+      "id": "unknown-domain-fail-closed",
+      "category": "negative",
+      "query": "在 missing-domain 中查找一个能力；如果该领域不存在就停止，不要退回默认技能",
+      "profile_hints": ["missing-domain"],
+      "expected_candidates": [],
+      "host_selected": [],
+      "forbidden_candidates": [{"kind": "skill", "name": "systematic-debugging"}, {"kind": "mcp", "name": "openaiDeveloperDocs"}]
+    },
+    {
+      "id": "runtime-disabled-skill",
+      "category": "runtime_truth",
+      "query": "诊断 WPF .NET 启动失败，但必须服从宿主当前技能启用状态",
+      "profile_hints": ["dotnet"],
+      "snapshot_path": "tests/fixtures/capability-routing/runtime-capabilities.json",
+      "expected_candidates": [{"kind": "skill", "name": "debug:dotnet"}],
+      "host_selected": [{"kind": "skill", "name": "debug:dotnet", "action": "request_activation"}]
+    },
+    {
+      "id": "runtime-mcp-needs-auth",
+      "category": "runtime_truth",
+      "query": "查 OpenAI 官方 Codex 文档，但不要绕过宿主的 MCP 认证状态",
+      "profile_hints": ["default"],
+      "snapshot_path": "tests/fixtures/capability-routing/runtime-capabilities.json",
+      "expected_candidates": [{"kind": "mcp", "name": "openaiDeveloperDocs"}],
+      "host_selected": [{"kind": "mcp", "name": "openaiDeveloperDocs", "action": "request_mcp_activation"}]
     }
   ]
 }

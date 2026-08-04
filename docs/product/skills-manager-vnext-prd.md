@@ -182,6 +182,11 @@ Discovery 先确定用户、问题、成功信号和非目标；实现先跑通�
 - `FR-SEL-017`：cold discovery 必须使用 `hierarchical_domains_v1`：首次只暴露 domain `name + purpose`，宿主基于完整请求选择最多两个 domain，第二次才返回 `name + description + path + domains` 候选；不得要求宿主在看见 catalog 前猜不透明 profile 名。
 - `FR-SEL-018`：`DomainHint` 支持数组或逗号分隔输入并最多保留两个有效值；`ProfileHint` 仅作为向后兼容别名。candidate 必须带 domain provenance，domain hint 不改变 `active_profile`。
 - `FR-SEL-019`：代表性宿主验收必须分开记录 selection trigger 与 cold-load chain，并观测 router script、router/target `SKILL.md` 全文读取、deterministic policy、profile restore、duration 和 tokens；结果最高为 `host_evaluation_partial`，不得外推为普遍语义正确或业务效果。
+- `FR-SEL-020`：canonical skill inventory 的 name/path/description 新增、删除或变化必须在投影 seam 生成 ignored `reconciliation_needed` signal，包含 before/after fingerprint、精确 delta、当前 config hash、profile/unrouted 摘要和 advisor command；profile-only/no-op sync 不生成新信号，信号不得直接写 profile。
+- `FR-SEL-021`：host evaluation 必须将累计 input 拆分为 cached/uncached，并记录 cache ratio、command/router/tool-round count。focused 维护默认只运行 1–2 个代表 cold case；8-case full cold corpus 仅用于结构变化或 closeout，不把累计 cached input 当作真实新增上下文。
+- `FR-SEL-022`：调用方显式提供 domain/profile hint 且全部未知时必须 fail-closed，不得静默回退 `active_profile`；显式 `$skill`/`@skill` 仍可绕过 discovery 并进入确定性 policy。
+- `FR-SEL-023`：candidate pool 超过 `MaxCandidates` 时必须同时报告显示数、截断前总数和 `truncated=true`，宿主应缩小到一个有效 domain 后重试，不得从不完整候选中猜测。
+- `FR-SEL-024`：current host snapshot 中的 skill/MCP description、availability、callability/accessibility 必须覆盖静态 manifest/config 对应字段；`disabled`、`needs_auth`、`not_callable` 或 `inaccessible` 不得被升级为自动 load/use。
 
 ### 6.7 Operation plan and receipt
 
@@ -216,9 +221,9 @@ Discovery 先确定用户、问题、成功信号和非目标；实现先跑通�
 - `FR-LDL-004`：产品、项目、业务、UX、架构、前端、后端、移动、测试、安全、发布和运维只作为按需责任 lens；主 Agent 对端到端结果负责，不默认实例化固定角色团队或制造角色接力文档。
 - `FR-LDL-005`：为 maintenance pilot 轻量记录 TTFV、返工、人工打断、非产品 artifact、门禁耗时和 live acceptance 转化；指标仅 observe，不建立遥测服务，不以语义评分或未经 baseline 的阈值阻断交付。
 - `FR-LDL-006`：重复工作先成为 `skill_candidate`，经代表任务 replay、失败样本修订、shadow、有限 canary 和 reviewed promotion 后才进入稳定 skill；持续记录触发精度、净收益、适用边界和退役条件，宿主原生能力覆盖或模型进步消除缺口时应合并、降级或 retire。
+- `FR-LDL-007`：M1 pilot 只登记达到证据停止点的真实任务；synthetic、候选和当前 pilot/规划维护自身不得计入 10 个样本。优先使用近期可比 native-only 历史任务或交替匹配任务作 baseline；无可比项时只做描述性报告，不要求重复执行同一任务，也不宣称因果收益。
 
 ## 7. 非功能需求
-- `FR-LDL-007`：M1 pilot 只登记达到证据停止点的真实任务；synthetic、候选和当前 pilot/规划维护自身不得计入 10 个样本。优先使用近期可比 native-only 历史任务或交替匹配任务作 baseline；无可比项时只做描述性报告，不要求重复执行同一任务，也不宣称因果收益。
 
 - `NFR-COMP-001`：现有 `skills.json`、lock、CLI aliases、generated `skills.ps1` 和 MCP/skill projection 行为保持兼容。
 - `NFR-MNT-001`：新增业务逻辑进入明确 bounded context；不再向超大 command 文件无界追加。
@@ -229,6 +234,7 @@ Discovery 先确定用户、问题、成功信号和非目标；实现先跑通�
 - `NFR-SAF-003`：profile reconciliation 的诊断和 proposal 校验必须 network-free、provider-free、zero-write，且不得修改 `active_profile`、安装/删除 skill 或写宿主配置；未来 apply 路径必须另行设计、审阅和授权。
 - `NFR-SAF-004`：profile canary apply 只能消费显式宿主 proposal 与 apply token，runtime receipt/backup 留在 ignored `reports/`；不得直接调用 provider、修改 skill/plugin/MCP 安装、永久切换 active profile，或在 hash 漂移后覆盖用户修改。
 - `NFR-SAF-005`：hierarchical discovery 只读、network-free、provider-free、zero-write；domain/purpose 和宿主语义选择不能覆盖 containment、freshness、availability、side-effect、approval 或 activation。
+- `NFR-SAF-006`：reconciliation signal 属于 advisory handoff；写入失败只记录 warning，不得阻断已验证的 skill projection，也不得触发第二模型、active profile 热切换或无 token apply。
 - `NFR-SEC-001`：不持久化 API key/OAuth/token；日志、plan 和 receipt 使用 redaction-first。
 - `NFR-PERF-001`：inventory/doctor 使用有界扫描、缓存和明确超时；性能退化不能通过跳过完整性校验解决。
 - `NFR-OBS-001`：关键阶段输出稳定的 machine-readable status 和 phase timing。
@@ -280,6 +286,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 | `MET-013` | capability routing precision/recall、误调用、漏调用与用户纠正 | labelled corpus + 只读 host replay 分层记录；未建立跨任务 baseline 前不设硬阈值 |
 | `MET-014` | profile reconciliation proposal 的 stale/no-op/budget/policy 拒绝与 reviewed apply 转化 | observe-only；当前只实现 plan，不建立自动 apply 指标门禁 |
 | `MET-015` | profile canary replay 通过、回滚、用户纠正与 active profile 恢复 | observe-only；deterministic contract 与 host replay 分层，未建立跨任务净收益前不设语义硬阈值 |
+| `MET-016` | cold discovery 的 uncached input、cached ratio、tool rounds 与 latency | observe-only；按同 prompt A/B；任何减少回合但增加 uncached/延迟或降低完整读取可靠性的方案必须回退 |
 
 ## 10. 发布和兼容边界
 
@@ -292,6 +299,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - P5 maintenance correction 以真实用户反馈和重复自然语言回放退役 lexical task understanding/ranking；该修正不改写 P5 历史任务状态，不构成 P6，也不宣称 host-native 路由已经 live accepted。
 - P5-local profile reconciliation advisor 只诊断 profile drift 并校验宿主语义 proposal；它不自动优化 `skills.json`、不热切换 profile、不实现 apply，也不构成 P6 或 live acceptance。
 - P5-local profile optimization canary 在 advisor 之后增加显式 token、非活动 profile 的 bounded apply、runtime receipt、fresh-task replay 和失败回滚；它不自行调用宿主 AI、不永久切换 active profile，也不构成 P6 或 live acceptance。
+- P5-local follow-up 已把 canonical inventory delta 接到 projection 主链的 advisory signal；宿主在同一任务边界可据此启动 reconciliation，但 profile proposal/apply 仍遵守 ADR-SMV-018/019，不等于静默写配置。
 - P5 后的 `maintenance_design` 已建立 Lean Delivery advisory 规划契约，并由独立 registry 启动 M1 `collecting (0/10)`；它不是新 Phase，不改变 P5/P6 状态，也不证明 pilot 已执行、完成或产生业务效果。
 - GUI、daemon、远端协作、数据库和 domain core 重写均为 conditional，不进入当前承诺。
 
@@ -306,16 +314,16 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - [OpenAI Skills](https://developers.openai.com/plugins/concepts/skills)：采用 progressive disclosure，以及 workflow instructions 与 live data/action 的清晰边界。
 - [OpenAI MCP](https://learn.chatgpt.com/docs/extend/mcp) 与 [Hooks](https://learn.chatgpt.com/docs/hooks)：MCP 用于外部动态数据/动作；只有确定性 lifecycle enforcement 才进入 hook/script/CI。
 - [OpenAI Codex execution plans](https://developers.openai.com/cookbook/articles/codex_exec_plans)：适配长任务的目标、进度、决策和验证追踪，不把计划本身当作交付结果。
-- [MCP specification](https://modelcontextprotocol.io/specification/latest) 与 [MCP Registry](https://registry.modelcontextprotocol.io/)：采用 schema、versioning、validation 和来源/所有权边界。
-
-### 社区采纳或适配
-
-- [wshobson/agents](https://github.com/wshobson/agents)：采纳细粒度 plugin、单一源到宿主原生产物、结构校验；拒绝把大规模多代理/模型分层直接移入本项目。
 - [OpenAI Long-running work](https://learn.chatgpt.com/docs/long-running-work)：`/plan`、`/goal` 与持久目标由宿主承接；本项目只提供可验证的目标/切片输入，不另建 goal runtime。
 - [OpenAI Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents)：独立探索、测试和分诊可由宿主有界并行；共享 write set 保持单 writer，本项目不托管固定角色团队。
 - [OpenAI Memories](https://learn.chatgpt.com/docs/customization/memories)：local memories 是可选回忆层，稳定规则仍进入 `AGENTS.md`/仓库文档；本项目不复制记忆库。
 - [OpenAI Codex App Server](https://learn.chatgpt.com/docs/app-server) 与 [Codex SDK](https://learn.chatgpt.com/docs/codex-sdk)：深度客户端集成和编程式线程控制已有原生入口；只有未来独立产品需求与 P6 admission 同时成立时才评估集成，不在本仓复制。
 - [OpenAI Scheduled tasks](https://learn.chatgpt.com/docs/automations)：稳定重复流程可由宿主 scheduled tasks + skill 承接；先人工跑通并验证，再自动化。本仓不建 daemon/scheduler。
+- [MCP specification](https://modelcontextprotocol.io/specification/latest) 与 [MCP Registry](https://registry.modelcontextprotocol.io/)：采用 schema、versioning、validation 和来源/所有权边界。
+
+### 社区采纳或适配
+
+- [wshobson/agents](https://github.com/wshobson/agents)：采纳细粒度 plugin、单一源到宿主原生产物、结构校验；拒绝把大规模多代理/模型分层直接移入本项目。
 - [obra/superpowers](https://github.com/obra/superpowers)：采纳 evidence-before-claims、可组合 workflow 和行为测试；拒绝默认强制全部流程和 always-on bootstrap。
 - [mattpocock/skills](https://github.com/mattpocock/skills)：采纳小、可组合、可编辑副本与订阅式 plugin 的区别；拒绝由 workflow 接管完整工程过程。
 - [github/spec-kit](https://github.com/github/spec-kit)：适配从 constitution/spec/plan/tasks 到实现的可追踪结构；拒绝强制 TDD、固定文件数和所有任务人工审批等与本仓风险分级不符的流程。
@@ -335,12 +343,12 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - `DEC-PROD-005`：未来 Phase 在进入实施前各自生成详细 task manifest，避免提前维护大量猜测任务。
 - `DEC-PROD-006`：Rules Advisor 使用责任覆盖模型，不建立通用规则 AST、重型 policy engine 或强制统一模板。
 - `DEC-PROD-007`：Lean AI Software Delivery 是 P5 后的 advisory maintenance track；先通过 10 个真实任务 observe-only pilot 证明净收益，再决定保留、修订、退役或是否形成新的 P6 admission 输入。
+- `DEC-PROD-008`：Goal、subagents、scheduled tasks、local memories、App Server/SDK 属于宿主 native baseline 和本项目退役触发器；只有本仓独有的 capability/rule discovery、advice、bounded transaction 与 verification seam 可在证据支持下保留。
 
 以下选择有意延迟到有真实代码/宿主证据的任务，不允许 AI 在更早任务中猜定：
 
 - `VAL-P0-003`：schema dialect、validator 实现和 observe/enforce 切换，以当前 `skills.json` 变体和本机可用 runtime 为依据，不为验证器额外引入常驻服务。
 - `VAL-P0-005`：首个 Infrastructure seam 必须由至少两个真实 caller 和 characterization tests 选出，不按目标目录图预建空模块。
-- `DEC-PROD-008`：Goal、subagents、scheduled tasks、local memories、App Server/SDK 属于宿主 native baseline 和本项目退役触发器；只有本仓独有的 capability/rule discovery、advice、bounded transaction 与 verification seam 可在证据支持下保留。
 - `VAL-P0-006`：MCP plan 的最终 CLI spelling 先读取当前 parser/alias tests；行为合同先于命令拼写。
 - `VAL-P0-007`：host matrix 的 affirmative capability 必须由当前官方文档、help/schema 或 native probe 支持；未知值保持 unknown/platform_na。
 - `VAL-P1-MET`：semantic finding precision 和性能阈值要先用代表仓建立 baseline，再决定 gate 阈值。

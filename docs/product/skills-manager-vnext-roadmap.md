@@ -341,6 +341,10 @@ M1 pilot 的最小样本覆盖：模糊需求澄清、从零主链、既有缺�
 
 M2 correction 的最终目标流为：`visible skill/native tool -> host-native semantic match -> direct use`；只有无可见匹配或显式能力发现时才进入 `domain purpose catalog -> host domain choice -> candidate discovery -> host adjudication -> deterministic policy -> native activation`。旧 profile-first baseline 的 automatic trigger 仅 4/8，hierarchical redesign 后 selection 32/32、cold-load chain 8/8；这些都是 `host_evaluation_partial`，不等于普遍无感或 live acceptance。低风险已可用能力可无感使用，安装、认证、profile/config mutation、写入和破坏性动作继续保持可见授权。若真实任务未显示净改善，优先进一步删除 router 行为，而不是继续加词法规则。
 
+2026-08-04 follow-up：canonical skill name/path/description delta 已在 projection seam 生成 ignored reconciliation signal，profile-only/no-op 不触发；宿主可在产生变化的同一任务边界接续 advisor，但 proposal/canary/apply 边界不变。cold-load 成本已拆分 cached/uncached/tool rounds；两个真实 A/B 证明强行合并工具回合会增加延迟并降低稳定性，故已回退，只保留成本观测和 focused replay 策略。
+
+同日 natural-limit hardening：未知 domain 不再回退 default；候选截断可见并要求 refine；current host snapshot 可覆盖静态 skill/MCP availability，disabled/needs-auth 进入 activation/auth boundary。确定性自然语言 corpus 从 27 扩到 30 并全部通过；host-facing JSON 投影显著缩小，但宿主语义波动、固定上下文重放和缺少完整 invocation trace 仍是外部边界，不授权新 runtime 或静默 profile mutation。
+
 observe-only 指标为 TTFV、返工切片、非预期人工打断、非产品 artifact、focused/full gate 耗时和 repo_verified→live_accepted 转化。pilot review 前不设数值阈值；指标不作为单项 completion gate，LLM 评分不作为唯一证据。对每项任务同时记录任务复杂度、既有测试健康和人工授权差异，避免把环境差异误判为流程收益。
 
 M3 判定优先删除性维护：pilot 没有缩短 TTFV、没有减少返工/打断，或新增 artifact/上下文/维护成本抵消收益时，删除候选模板、规则或 skill；只有稳定重复且经 replay/shadow/canary 的做法才 reviewed promotion。首轮候选复用现有文档字段评审，不建第二个 lifecycle registry：`session_plan`、`preheat_recommendation`、hierarchical router/catalog、plugin fixture export、Rule Estate multi-target apply、maintenance companion verifier，以及规划/evidence 资产自身。每项记录 `unique_value / native_equivalent / real_consumers / maintenance_cost / retirement_trigger / latest_evidence`。宿主模型或官方能力已原生覆盖时，相关功能进入 adapt/retire，而不是为了保留项目范围继续包装。
@@ -361,6 +365,8 @@ M3 判定优先删除性维护：pilot 没有缩短 TTFV、没有减少返工/�
 | `RISK-010` | observe 指标变成流程 KPI 或虚假完成激励 | maintenance | ADR-SMV-016 + 无 baseline 不设 gate |
 | `RISK-011` | 自学习把偶然成功/错误经验扩散为 skill | maintenance | replay -> shadow -> canary -> reviewed promotion -> retire |
 | `RISK-012` | cold discovery 入口要求宿主先知道不可见能力 | maintenance | ADR-SMV-020 domain purpose catalog + trigger/negative corpus + retire condition |
+| `RISK-013` | 为降低累计 cached token 合并工具回合，反而增加 uncached、延迟或链失败 | maintenance | ADR-SMV-021 + cached/uncached 分层 + 1–2 case A/B + 负收益立即回退 |
+| `RISK-014` | 未知 domain、候选截断或 stale static truth 导致错误能力选择 | maintenance | ADR-SMV-022 + fail-closed hint + truncation signal + current snapshot override |
 
 ## 11. 路线维护
 

@@ -9252,6 +9252,9 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, [string]$Ver
             if ($projectionResult -and -not [bool]$projectionResult.skipped) {
                 $plan = $projectionResult.plan
                 Log ("技能投影已生成：entries={0}, unique={1}, disabled={2}, conflicts={3}, persisted={4}" -f @($plan.skills).Count, @($plan.unique_names).Count, @($plan.disabled).Count, @($plan.conflicts).Count, [bool]$projectionResult.persisted)
+                if ([bool]$projectionResult.reconciliation.signal_updated) {
+                    Log ("技能清单已变化，宿主 AI 应在任务边界执行 profile reconciliation：{0}" -f [string]$projectionResult.reconciliation.signal_path) "WARN"
+                }
             }
         }
         catch {
@@ -19994,6 +19997,80 @@ function Test-SkillProjectionManagedCacheHotPath($packageHashContext) {
         [int]$packageHashContext.cache_misses -eq 0)
 }
 
+function Get-SkillCanonicalInventorySnapshot($entries) {
+    $items = @($entries | ForEach-Object {
+            [ordered]@{
+                name = [string]$_.name
+                path = [string]$_.path
+                description = [string]$_.description
+            }
+        } | Sort-Object name, path)
+    $json = $items | ConvertTo-Json -Depth 5 -Compress
+    return [pscustomobject]@{
+        fingerprint = Get-StringSha256 ([string]$json)
+        items = $items
+    }
+}
+
+function Resolve-SkillProfileReconciliationSignalPath($projectionCfg, [string]$manifestPath) {
+    if ($projectionCfg.PSObject.Properties.Match("reconciliation_signal_path").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$projectionCfg.reconciliation_signal_path)) {
+        return (Resolve-SkillProjectionPath ([string]$projectionCfg.reconciliation_signal_path))
+    }
+    $manifestDir = Split-Path $manifestPath -Parent
+    if ([string]::Equals((Split-Path $manifestDir -Leaf), "skill-projection", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return (Join-Path (Split-Path $manifestDir -Parent) "skill-profile-reconciliation\pending.json")
+    }
+    return (Join-Path $manifestDir "skill-profile-reconciliation-pending.json")
+}
+
+function New-SkillProfileReconciliationSignal($projectionCfg, [string]$manifestPath, $currentPlan) {
+    $previousCanonical = @()
+    if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
+        try {
+            $previousManifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
+            $previousCanonical = @($previousManifest.canonical)
+        }
+        catch {
+            $previousCanonical = @()
+        }
+    }
+    $before = Get-SkillCanonicalInventorySnapshot $previousCanonical
+    $after = Get-SkillCanonicalInventorySnapshot @($currentPlan.canonical)
+    $beforeByName = @{}
+    $afterByName = @{}
+    foreach ($entry in @($before.items)) { $beforeByName[[string]$entry.name] = $entry }
+    foreach ($entry in @($after.items)) { $afterByName[[string]$entry.name] = $entry }
+    $added = @($afterByName.Keys | Where-Object { -not $beforeByName.ContainsKey($_) } | Sort-Object)
+    $removed = @($beforeByName.Keys | Where-Object { -not $afterByName.ContainsKey($_) } | Sort-Object)
+    $metadataChanged = @($afterByName.Keys | Where-Object {
+            $beforeByName.ContainsKey($_) -and
+            (-not [string]::Equals([string]$beforeByName[$_].path, [string]$afterByName[$_].path, [System.StringComparison]::OrdinalIgnoreCase) -or
+                -not [string]::Equals([string]$beforeByName[$_].description, [string]$afterByName[$_].description, [System.StringComparison]::Ordinal))
+        } | Sort-Object)
+    $signalPath = Resolve-SkillProfileReconciliationSignalPath $projectionCfg $manifestPath
+    $changed = ($added.Count + $removed.Count + $metadataChanged.Count) -gt 0
+    $skillsConfigPath = Join-Path $Root "skills.json"
+    return [pscustomobject]([ordered]@{
+            schema_version = 1
+            status = if ($changed) { "reconciliation_needed" } else { "not_needed" }
+            reason = if ($changed) { "canonical_inventory_changed" } else { "canonical_inventory_unchanged" }
+            added_names = $added
+            removed_names = $removed
+            metadata_changed_names = $metadataChanged
+            before_fingerprint = [string]$before.fingerprint
+            after_fingerprint = [string]$after.fingerprint
+            config_sha256 = if (Test-Path -LiteralPath $skillsConfigPath -PathType Leaf) { Get-FileContentHash $skillsConfigPath } else { "" }
+            next_action = if ($changed) { "host_ai_profile_reconciliation" } else { "none" }
+            advisor_command = if ($changed) { "skills.ps1 技能配置 调和" } else { "" }
+            active_profile = [string]$currentPlan.active_profile
+            profile_names = @($currentPlan.profile_budgets | ForEach-Object { [string]$_.profile } | Sort-Object -Unique)
+            unrouted_names = @($currentPlan.unrouted_names)
+            writes_profile_config = $false
+            signal_path = $signalPath
+            signal_updated = $false
+        })
+}
+
 function Get-SkillProjectionSourceEntries($source, [int]$sourceOrder, $packageHashContext = $null) {
     $id = [string]$source.id
     $rootPath = Resolve-SkillProjectionPath ([string]$source.path)
@@ -20428,6 +20505,7 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
     $planTimer = [System.Diagnostics.Stopwatch]::StartNew()
     try { $plan = New-SkillProjectionPlan $projectionCfg $packageHashContext }
     finally { $planTimer.Stop() }
+    $reconciliation = New-SkillProfileReconciliationSignal $projectionCfg $manifestPath $plan
     $managedCacheHotPath = Test-SkillProjectionManagedCacheHotPath $packageHashContext
     $hashMetric = if ($managedCacheHotPath) { "projection_package_hash_cache_hit" } else { "projection_package_hash_full" }
     Log ("性能埋点：{0}" -f $hashMetric) "INFO" -NoHost -Data ([ordered]@{
@@ -20504,6 +20582,15 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
                 conflicts = @($plan.conflicts)
             }
             Set-ContentUtf8 $manifestPath ($manifest | ConvertTo-Json -Depth 20)
+            if ([string]$reconciliation.status -eq "reconciliation_needed") {
+                try {
+                    Set-ContentUtf8 ([string]$reconciliation.signal_path) ($reconciliation | ConvertTo-Json -Depth 8)
+                    $reconciliation.signal_updated = $true
+                }
+                catch {
+                    Log ("profile reconciliation signal 写入失败，不阻断技能投影：{0}" -f $_.Exception.Message) "WARN"
+                }
+            }
             return [pscustomobject]@{ backup_path = if ($null -eq $writtenBackupPath) { "" } else { [string]$writtenBackupPath } }
         } @{ command = "技能投影"; changed = $changed } -NoHost
         $backupPath = [string]$writeResult.backup_path
@@ -20517,6 +20604,7 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
         manifest_path = $manifestPath
         backup_path = if ($null -eq $backupPath) { "" } else { [string]$backupPath }
         managed_link_projection = $linkProjection
+        reconciliation = $reconciliation
         package_hash_cache = [pscustomobject]@{
             cache_valid = [bool]$packageHashContext.cache_valid
             cache_hits = [int]$packageHashContext.cache_hits
@@ -20798,6 +20886,9 @@ function Invoke-SkillProfileCommand([string[]]$tokens) {
     SaveCfgSafe $cfg $raw
     $result = Sync-CodexSkillProjection $projection
     Write-Host ("已使用技能 profile：{0}；active={1}, metadata={2}/{3}, persisted={4}" -f $name, @($result.plan.active).Count, $result.plan.estimated_metadata_chars, $result.plan.effective_budget_limit_chars, [bool]$result.persisted)
+    if ([bool]$result.reconciliation.signal_updated) {
+        Write-Host ("检测到 canonical skill inventory 变化；profile reconciliation signal：{0}" -f [string]$result.reconciliation.signal_path) -ForegroundColor Yellow
+    }
 }
 
 function Sync-ConfiguredSkillProjection($cfg, [string]$verifiedBuildSignature = "") {

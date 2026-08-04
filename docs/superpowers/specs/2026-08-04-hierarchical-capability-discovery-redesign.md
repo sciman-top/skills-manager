@@ -140,3 +140,17 @@ Post-redesign：selection 32/32，8 个 cold baseline 全部主动触发；cold-
 - PRD/架构/路线图/spec/manifest/plan/todo/README/AGENTS 一致。
 - full gate、diff 和 Git parity 通过。
 - 完成声明限定为 `P5-local hierarchical capability discovery redesign repo_verified + host_evaluation_partial`；P6 仍 hold，不声明普遍无感、业务效果或 `live_accepted`。
+
+## 21. Post-closeout inventory, token-cost and natural-limit follow-up
+
+本 follow-up 不新增 Phase/track/task count，不改写 4/4 历史完成状态。它只修复两个已证实的 maintenance 缺口：
+
+1. projection 在覆盖旧 manifest 前比较 canonical `name/path/description` fingerprint；增删/metadata 变化写 `reports/skill-profile-reconciliation/pending.json`，返回 exact delta、config hash、profile/unrouted 摘要和 `skills.ps1 技能配置 调和` handoff。profile-only/no-op 不写新信号，信号不直接修改 profile，写失败不阻断 projection。
+2. host evaluator 记录 `uncached_input_tokens`、`cached_input_ratio`、`command_count`、`router_call_count`、`tool_round_count`。日常 focused replay 只选 1–2 case，全量 8 cold cases 留给结构变化/closeout。
+3. 显式 domain/profile hints 全部未知时返回零候选和 `unknown_domain`，不再静默回退 default；显式 `$skill`/`@skill` 仍直接进入 deterministic policy。
+4. bounded candidates 同时返回 `candidate_count`、`available_candidate_count` 和 `truncated`；截断时宿主缩小到一个 domain 重试。
+5. current host snapshot 的 skill/MCP metadata 与 availability 覆盖静态描述/启用推断；disabled/needs-auth/not-callable/inaccessible 不允许自动 load/use。host-facing 命令只投影当前步骤需要的字段。
+
+两个真实同 prompt A/B 尝试把完整读取/catalog/discovery/policy/read 合并为更少 shell round。虽然累计 input 下降约 13%–16%，但 uncached 未下降、延迟上升且合并命令发生重试；因此 combined 实现已删除，稳定 separate 链保持不变。该负结果证明当前主要自然成本来自 fresh task 固定上下文与多回合 cached replay；不得用跳过宿主语义、确定性 policy 或完整 SKILL.md 读取换取表面 token 降低。
+
+follow-up 的完成边界仍是 `repo_verified + bounded host_evaluation_partial`：它证明 delta signal、成本拆分、两例 A/B 和确定性 natural-limit hardening，不证明宿主在任意未来任务都会消费 signal、自动批准 profile proposal、普遍降低 token、稳定作出相同语义选择或达到业务 `live_accepted`。

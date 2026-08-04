@@ -671,6 +671,24 @@ M1 baseline 优先使用近期可比 native-only 历史任务或交替匹配任�
 
 退役条件：官方宿主提供稳定跨域 native discovery/trace 后删除 catalog seam；代表性真实任务不能持续减少漏触发、误触发或用户纠正时，进一步缩减为 policy-only，而不是增加词法规则或第二模型。
 
+### `ADR-SMV-021 Inventory-delta signal and cost-aware cold discovery`
+
+决定：`Sync-CodexSkillProjection` 在覆盖旧 manifest 前比较 canonical `name + path + description` fingerprint。只有真实 delta 才写 ignored `reports/skill-profile-reconciliation/pending.json`，并向当前宿主返回 `reconciliation_needed + exact delta + config hash + advisor command`；profile-only/no-op 不产生新信号。signal 只启动 ADR-SMV-018 的宿主语义 handoff，不直接 proposal/apply，不切 active profile；signal 写失败不阻断技能投影主链。
+
+host evaluation 同时记录 cumulative input、cached/uncached input、cache ratio、command/router/tool-round count 和 latency。2026-08-04 两个同 prompt A/B 中，合并工具回合尝试把 5 回合降为 4、累计 input 下降约 13%–16%，但 uncached input 无改善或上升、延迟分别约 +5% 与 +51%，并因合并命令重试降低链稳定性，因此 reject 该实现并恢复 separate 分层调用。保留完整 router/target `SKILL.md` 读取、宿主语义裁决和确定性 policy；日常通过按需触发与 focused replay 控制成本，不删除正确性步骤。
+
+理由：inventory delta 是确定性事实，适合脚本发现；profile 归属是语义判断，继续交给已在场宿主。token 成本的主要可观察部分是多回合累计 cached context，盲目合并命令只移动成本并增加失败/延迟。该决定获得自动 handoff 与可测成本，同时避免 daemon、第二模型、静默配置写入和脆弱 shell orchestration。
+
+退役条件：官方 `skills/changed`/profile 管理能提供等价 delta、事务和 host handoff 时删除本 signal；宿主原生跨域发现消除 cold router 后删除相应 evaluator chain。指标无净收益时继续缩减验收频率/兼容层，而不是引入额外 reranker。
+
+### `ADR-SMV-022 Truth-preserving cold discovery hardening`
+
+决定：继续保持一个 `route-capability.ps1` 深模块和既有 schema v3 interface，不增加 router service 或第二套状态。显式未知 domain 零候选并返回 `unknown_domain`；候选上限同时公开 `available_candidate_count + truncated`；current caller-provided host snapshot 对同名 skill/MCP 做字段级 runtime truth override，同时保留静态 skill path/containment 和 policy side-effect。宿主-facing 指令只投影 retrieval/exclusion 或 policy/activation 结果，避免把重复 catalog、完整内部图和无关字段送回模型。
+
+理由：这三个缺口都会造成错误静默降级、候选丢失或把 disabled/needs-auth 误写成可自动使用，属于确定性正确性问题而不是语义 ranking。修复集中在现有 seam，caller 无需学习新 schema major；本地同 prompt 输出投影将 discovery JSON 从 21,470 bytes 降至 9,133 bytes、policy JSON 从 22,933 bytes 降至 1,284 bytes，但只声明返回体积下降，不外推为端到端 token 等比例下降。
+
+仍不可消除：宿主模型语义选择具有概率性、fresh task 固定上下文会重放、当前宿主没有稳定 skill-body invocation trace，且 profile/config 写入不能安全地无授权热切换。这些边界只能通过 representative replay、current snapshot、明确 truth ladder 和 retire trigger 缓解，不能由本仓伪装成确定性或 live acceptance。
+
 ## 11. 安全与供应链
 
 - 外部内容是不可信输入，不执行其仓库指令或脚本，除非单独评估并授权。

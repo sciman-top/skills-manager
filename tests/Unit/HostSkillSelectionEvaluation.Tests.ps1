@@ -63,6 +63,31 @@ Describe 'Host skill selection effectiveness evaluation' {
         @($browserCase.expected.required_any[0]) | Should Contain 'webapp-testing'
     }
 
+    It 'Separates uncached input and command round metrics from cumulative cached usage' {
+        $tokens = $null
+        $errors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
+        foreach ($functionName in @('Get-HostUsageMetrics', 'Get-HostCommandMetrics')) {
+            $functionAst = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
+            ($null -ne $functionAst) | Should Be $true
+            . ([scriptblock]::Create($functionAst.Extent.Text))
+        }
+
+        $events = @(
+            [pscustomobject]@{ type = 'item.completed'; item = [pscustomobject]@{ id = '1'; type = 'command_execution'; command = 'route-capability.ps1 -Query q' } },
+            [pscustomobject]@{ type = 'item.completed'; item = [pscustomobject]@{ id = '2'; type = 'command_execution'; command = 'Get-Content -Raw SKILL.md' } },
+            [pscustomobject]@{ type = 'turn.completed'; usage = [pscustomobject]@{ input_tokens = 1000; cached_input_tokens = 800; output_tokens = 50 } }
+        )
+
+        $usage = Get-HostUsageMetrics $events
+        $commands = Get-HostCommandMetrics $events
+        $usage.uncached_input_tokens | Should Be 200
+        $usage.cached_input_ratio | Should Be 0.8
+        $commands.command_count | Should Be 2
+        $commands.router_call_count | Should Be 1
+        $commands.tool_round_count | Should Be 2
+    }
+
     It 'Rejects unsafe case identifiers before execution' {
         $raw = & pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -CaseId '../escape' -Json 2>&1
 
