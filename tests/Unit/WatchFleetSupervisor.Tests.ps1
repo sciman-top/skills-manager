@@ -19,6 +19,8 @@ Describe 'watch-interrupted-task fleet supervisor contract' {
         $script:prompt | Should Match 'exactly one target heartbeat'
         $script:prompt | Should Match 'New-WatchHeartbeatPrompt.ps1'
         $script:prompt | Should Match 'delete completed orphan heartbeats'
+        $script:prompt | Should Match 'installed target contract.*entire assistant output must be exactly DONT_NOTIFY'
+        $script:prompt | Should Match 'do not mutate target automations until the newer generator is projected'
     }
 
     It 'also protects its host task because Desktop permits one heartbeat per task' {
@@ -34,5 +36,10 @@ Describe 'watch-interrupted-task fleet supervisor contract' {
         $script:prompt | Should Match 'Never hand off, wake, create, fork, rename'
         $script:prompt | Should Match 'soft_guard_only'
         $script:prompt | Should Match 'observe only'
+    }
+
+    It 'does not publish routine reconciliation chatter' {
+        $script:prompt | Should Match 'do not emit commentary, status, progress, or a summary'
+        $script:prompt | Should Match 'entire assistant output must be exactly DONT_NOTIFY'
     }
 }

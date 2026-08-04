@@ -132,6 +132,13 @@ Describe "watch-interrupted-task contract" {
         $complete.mutation_owner | Should Be 'fleet_supervisor'
     }
 
+    It "keeps repeated observe-only heartbeats silent" {
+        $script:prompt | Should Match "do not emit commentary, status, progress, or a summary"
+        $script:prompt | Should Match "entire assistant output must be exactly DONT_NOTIFY"
+        $script:prompt | Should Match "already-requested human action is not a new boundary"
+        $script:skill | Should Match "DONT_NOTIFY.*does not hide the scheduled input card or run transcript"
+    }
+
     It "never counts heartbeat turns as active peers" {
         $script:prompt | Should Match "heartbeat turns never count as peer activity"
     }

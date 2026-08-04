@@ -47,6 +47,11 @@ Describe 'Cross-thread guard installer and doctor' {
         $result = & $doctor -CodexHome $script:codexHome -SourceHookPath $sourceHook
         $result.configuration_ready | Should Be $true
         $result.simulation_passed | Should Be $true
+        $result.simulation_cases.direct_send_tool | Should Be $true
+        $result.simulation_cases.multiline_shell_send | Should Be $true
+        $result.simulation_cases.nested_shell_send | Should Be $true
+        $result.simulation_cases.read_only_subexpression_send | Should Be $true
+        $result.simulation_cases.reader_exec_option_send | Should Be $true
         $result.trust_status | Should Be 'unverified_requires_slash_hooks'
         $result.live_path_status | Should Be 'unverified_requires_fresh_session_probe'
         $result.specialized_path_boundary | Should Be 'guardrail_only'

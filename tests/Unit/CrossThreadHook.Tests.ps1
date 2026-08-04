@@ -100,6 +100,37 @@ Describe 'Cross-thread PreToolUse guard' {
         $literalInspection.Output | Should BeNullOrEmpty
     }
 
+    It 'blocks multiline and nested-shell app-server send bypasses' {
+        foreach ($command in @(
+            "Write-Output harmless`ncodex app-server request thread/send --thread target-test",
+            'cmd /c codex app-server request thread/send --thread target-test',
+            'pwsh -Command "codex app-server request thread/send --thread target-test"',
+            "rg -n 'thread/send' docs`ncodex app-server request thread/send --thread target-test"
+        )) {
+            $result = Invoke-CrossThreadHook -ToolName 'shell_command' -ToolInput ([ordered]@{
+                command = $command
+            })
+            $result.ExitCode | Should Be 0
+            ($result.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+        }
+    }
+
+    It 'blocks execution-capable options and subexpressions behind read-only command prefixes' {
+        foreach ($command in @(
+            'rg --pre "codex app-server request thread/send --thread target-test" thread/send docs',
+            'git grep -O "codex app-server request thread/send --thread target-test" thread/send',
+            'rg "$(codex app-server request thread/send --thread target-test)" docs',
+            'Select-String -InputObject $(codex app-server request thread/send --thread target-test) -Pattern x',
+            'Get-Content (codex app-server request thread/send --thread target-test)'
+        )) {
+            $result = Invoke-CrossThreadHook -ToolName 'shell_command' -ToolInput ([ordered]@{
+                command = $command
+            })
+            $result.ExitCode | Should Be 0
+            ($result.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+        }
+    }
+
     It 'fails closed when a valid payload omits tool_name' {
         $payload = [ordered]@{
             session_id = 'source-test'

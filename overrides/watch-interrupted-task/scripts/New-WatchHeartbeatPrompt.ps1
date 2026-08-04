@@ -14,7 +14,9 @@ Use $watch-interrupted-task for this target thread. This prompt is monitor autho
 
 Ignore heartbeat turns and classify the latest non-heartbeat business state before acting. Heartbeat turns never count as peer activity. First classify running, natural_pause, needs_input, complete, non_transient_failure, unknown, stale_policy_running, and soft_guard_only. Do not inspect peers unless positive evidence already establishes resume_eligible or continuation_gap.
 
-Keep the heartbeat ACTIVE for running, natural_pause, needs_input, non_transient_failure, unknown, stale_policy_running, soft_guard_only, and peer_busy. These states are observe_only: do not execute task work and do not pause the automation. Report a user-action boundary at most once when the host supports deduplicated notification. If complete and verified, take no automation mutation and expose completion truth for the fleet supervisor to clean up.
+Keep the heartbeat ACTIVE for running, natural_pause, needs_input, non_transient_failure, unknown, stale_policy_running, soft_guard_only, and peer_busy. These states are observe_only: do not execute task work and do not pause the automation. If complete and verified, take no automation mutation and leave cleanup to the fleet supervisor.
+
+For every observe_only result, do not emit commentary, status, progress, or a summary. If a user-action boundary is both newly discovered and the host can prove deduplicated notification, one concise final notification is allowed. Otherwise the entire assistant output must be exactly DONT_NOTIFY, with no commentary or additional text. An already-requested human action is not a new boundary; return exactly DONT_NOTIFY while it remains pending.
 
 The fleet supervisor is the sole automation writer. Never update, pause, resume, or delete automation metadata from this target heartbeat. A direct user command to pause, resume, or close watch is handled by the current user-facing task, outside this heartbeat tick.
 

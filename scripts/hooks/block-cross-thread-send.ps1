@@ -60,6 +60,36 @@ function Get-Sha256Lower {
     }
 }
 
+function Test-ReadOnlyInspectionSegment {
+    param([Parameter(Mandatory = $true)][string]$Segment)
+
+    $isRipgrep = $Segment -match '(?i)^(?:&\s*)?rg(?:\.exe)?\b'
+    $isGrep = $Segment -match '(?i)^(?:&\s*)?grep(?:\.exe)?\b'
+    $isPowerShellReader = $Segment -match '(?i)^(?:&\s*)?(?:Select-String|Get-Content)\b'
+    $isGitGrep = $Segment -match '(?i)^(?:&\s*)?git(?:\.exe)?\s+grep\b'
+    if (-not ($isRipgrep -or $isGrep -or $isPowerShellReader -or $isGitGrep)) {
+        return $false
+    }
+
+    # A read-only command name does not make its arguments read-only. Shell
+    # subexpressions can execute a nested sender before the reader starts.
+    if ($Segment -match '(?s)(\$\s*\(|@\s*\(|<\s*\(|>\s*\(|`)' -or
+        $Segment -match '(?i)\(\s*(?:&\s*)?(?:(?:cmd|pwsh|powershell|codex|curl|wscat|websocket)(?:\.exe)?|Invoke-Expression|iex|Start-Process|Invoke-RestMethod|Invoke-WebRequest)\b') {
+        return $false
+    }
+
+    # These otherwise read-oriented tools expose options that launch an
+    # arbitrary external command or pager.
+    if ($isRipgrep -and $Segment -match '(?i)(?:^|\s)--pre(?:=|\s|$)') {
+        return $false
+    }
+    if ($isGitGrep -and $Segment -match '(?i)(?:^|\s)(?:-O(?:\S*)?|--open-files-in-pager(?:=\S*)?)(?:\s|$)') {
+        return $false
+    }
+
+    return $true
+}
+
 function Test-CanonicalWatchPrompt {
     param(
         [Parameter(Mandatory = $true)][string]$Prompt,
@@ -132,18 +162,16 @@ elseif ($toolName -match '(?i)(^|__|\.)automation_update$') {
 }
 elseif ($toolName -match '(?i)^(Bash|shell_command|exec_command)$') {
     $command = [string](Get-InputProperty -InputObject $toolInput -Names @('command', 'cmd'))
-    $containsSendPath = $command -match '(?i)(send_message_to_thread|sendMessageToThread|thread[\/.:-]send)'
-    $containsExecutablePath = $false
-    foreach ($segment in @($command -split '[;&|]')) {
+    foreach ($segment in @($command -split '[\r\n;&|]+')) {
         $trimmedSegment = $segment.Trim()
-        if ($trimmedSegment -match '(?i)^(?:&\s*)?(?:"?[^"\s]*\\)?codex(?:\.exe)?"?\s+app-server\b' -or
-            $trimmedSegment -match '(?i)^(?:&\s*)?(?:curl(?:\.exe)?|Invoke-RestMethod|Invoke-WebRequest|wscat|websocket)\b') {
-            $containsExecutablePath = $true
+        if ($trimmedSegment -notmatch '(?i)(send_message_to_thread|sendMessageToThread|thread[\/.:-]send)') {
+            continue
+        }
+
+        if (-not (Test-ReadOnlyInspectionSegment -Segment $trimmedSegment)) {
+            $denyReason = 'Shell or app-server cross-task send bypasses are disabled.'
             break
         }
-    }
-    if ($containsSendPath -and $containsExecutablePath) {
-        $denyReason = 'Shell or app-server cross-task send bypasses are disabled.'
     }
 }
 

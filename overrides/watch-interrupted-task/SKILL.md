@@ -164,6 +164,7 @@ Treat `all` as a standing fleet reconciliation request for eligible tasks visibl
 - Do not change provider, auth, model, sandbox, plugin, MCP, or Desktop process state while managing heartbeats.
 - Use the minimum access necessary and preserve unrelated automations.
 - Report current facts and limitations; never claim coverage for threads the app did not expose.
+- `DONT_NOTIFY` suppresses routine run notifications and output chatter; it does not hide the scheduled input card or run transcript that Desktop retains in the target task. The native thread-heartbeat surface currently has no transcript-hiding control. Do not promise an invisible task history while per-task heartbeat recovery remains enabled.
 
 ## Generate durable prompts
 
