@@ -21,6 +21,14 @@ Describe 'watch-interrupted-task fleet supervisor contract' {
         $script:prompt | Should Match 'delete completed orphan heartbeats'
     }
 
+    It 'also protects its host task because Desktop permits one heartbeat per task' {
+        $script:prompt | Should Match 'at most one heartbeat automation'
+        $script:prompt | Should Match 'dual-role'
+        $script:prompt | Should Match 'Never create a separate target heartbeat for the supervisor thread'
+        $script:prompt | Should Match 'classify the supervisor thread.*latest non-heartbeat business turn'
+        $script:prompt | Should Match 'supervisor automation counts as that task''s one heartbeat'
+    }
+
     It 'never injects a peer message and observes only while the guard is soft' {
         $script:prompt | Should Match 'Never call send_message_to_thread'
         $script:prompt | Should Match 'Never hand off, wake, create, fork, rename'

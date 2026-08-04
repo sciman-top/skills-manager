@@ -85,6 +85,20 @@ Describe "watch-interrupted-task contract" {
         $script:skill | Should Match "arm every eligible thread"
     }
 
+    It "uses the fleet supervisor as its host task heartbeat instead of double-attaching" {
+        $script:skill | Should Match "at most one heartbeat automation"
+        $script:skill | Should Match "dual-role"
+        $script:skill | Should Match "must not receive a separate target heartbeat"
+        $script:skill | Should Match "supervisor automation counts as that task's one heartbeat"
+    }
+
+    It "re-reads actual status when a create receipt omits it" {
+        $script:skill | Should Match "create receipt.*omits the actual status"
+        $script:skill | Should Match "re-read the host-managed metadata"
+        $script:skill | Should Match 'full-field update to `PAUSED`'
+        $script:skill | Should Match "verify the second receipt"
+    }
+
     It "permits parallel recovery for isolated worktrees and evidenced read-only tasks" {
         $script:skill | Should Match "isolated worktrees"
         $script:skill | Should Match "read-only"
