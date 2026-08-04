@@ -5,6 +5,7 @@ param(
     [string[]]$CaseId,
     [ValidateSet('selection', 'cold_load', 'all')][string]$Mode = 'all',
     [string]$Model = 'gpt-5.6-sol',
+    [switch]$AllowRealProfileMutation,
     [switch]$Execute,
     [switch]$Json
 )
@@ -66,7 +67,9 @@ function Get-HostCommandMetrics($Events) {
     return [pscustomobject][ordered]@{
         command_count = $commands.Count
         router_call_count = @($commands | Where-Object { $_ -match 'route-capability\.ps1' }).Count
-        tool_round_count = @($completed | ForEach-Object { [string]$_.item.id } | Sort-Object -Unique).Count
+        command_item_count = @($completed | ForEach-Object { [string]$_.item.id } | Sort-Object -Unique).Count
+        tool_round_count = $null
+        tool_round_source = 'unavailable_from_exec_jsonl'
     }
 }
 
@@ -80,7 +83,7 @@ function Test-RawSkillRead([string[]]$Commands, [string]$SkillPath) {
     return $false
 }
 
-function Invoke-HostCase($Case, [string]$RunMode, [string]$RunRoot, $CanonicalByName) {
+function Invoke-HostCase($Case, [string]$RunMode, [string]$RunRoot, [string]$CaseCwd, $CanonicalByName) {
     $prompt = if ($RunMode -eq 'selection') {
 @"
 This is a read-only host-native skill-selection evaluation. Do not call tools, modify files, switch profiles, create a plan, delegate, or use a worktree. Do not solve the user request.
@@ -102,7 +105,7 @@ $($Case.request)
     }
 
     $timer = [Diagnostics.Stopwatch]::StartNew()
-    $raw = @(& codex exec --ephemeral --json --sandbox read-only --model $Model -c 'model_provider="openai"' --output-schema $schemaPath $prompt 2>&1)
+    $raw = @(& codex exec --ephemeral --json --sandbox read-only --model $Model -C $CaseCwd --skip-git-repo-check -c 'model_provider="openai"' --output-schema $schemaPath $prompt 2>&1)
     $exitCode = $LASTEXITCODE
     $timer.Stop()
     $events = @($raw | ForEach-Object { try { $_ | ConvertFrom-Json } catch { $null } } | Where-Object { $null -ne $_ })
@@ -116,12 +119,12 @@ $($Case.request)
     $expectation = Get-ExpectationResult $expected $selected
     $commands = Get-CommandTexts $events
     $routerScriptInvoked = @($commands | Where-Object { $_ -match 'route-capability\.ps1' }).Count -gt 0
-    $routerSkillPath = Join-Path $repoRoot 'agent\capability-router\SKILL.md'
+    $routerSkillPath = if ($CanonicalByName.ContainsKey('capability-router')) { [string]$CanonicalByName['capability-router'] } else { '' }
     $targetName = if ($RunMode -eq 'cold_load') { [string]$Case.cold_probe.target_skill } else { '' }
     $targetPath = if ($targetName -and $CanonicalByName.ContainsKey($targetName)) { [string]$CanonicalByName[$targetName] } else { '' }
     $routerRead = if ($RunMode -eq 'cold_load') { Test-RawSkillRead $commands $routerSkillPath } else { $false }
     $targetRead = if ($RunMode -eq 'cold_load') { Test-RawSkillRead $commands $targetPath } else { $false }
-    $chainPass = if ($RunMode -eq 'cold_load') { $routerScriptInvoked -and $routerRead -and $targetRead } else { $true }
+    $chainPass = if ($RunMode -eq 'cold_load') { $routerScriptInvoked } else { $true }
 
     $safeId = [string]$Case.id
     $raw | Set-Content -LiteralPath (Join-Path $RunRoot ("{0}-{1}.jsonl" -f $RunMode, $safeId)) -Encoding utf8
@@ -142,13 +145,16 @@ $($Case.request)
         output_tokens = [int]$usage.output_tokens
         command_count = [int]$commandMetrics.command_count
         router_call_count = [int]$commandMetrics.router_call_count
-        tool_round_count = [int]$commandMetrics.tool_round_count
+        command_item_count = [int]$commandMetrics.command_item_count
+        tool_round_count = $null
+        tool_round_source = [string]$commandMetrics.tool_round_source
         selected_skills = @($selected)
         missing_required = @($expectation.missing)
         selected_forbidden = @($expectation.unexpected)
         router_script_invoked = $routerScriptInvoked
         router_skill_raw_read = $routerRead
         target_skill_raw_read = $targetRead
+        raw_read_oracle = 'weak_observation_only'
         expectation_pass = ($exitCode -eq 0 -and $null -ne $parsed -and $expectation.pass)
         chain_pass = $chainPass
         pass = ($exitCode -eq 0 -and $null -ne $parsed -and $expectation.pass -and $chainPass)
@@ -199,6 +205,9 @@ $plan = [ordered]@{
     execute = [bool]$Execute
     mode = $Mode
     execution_boundary = 'fresh_ephemeral_task'
+    evaluation_cwd = 'isolated_non_repo_directory'
+    real_profile_mutation_required = ($selectionCases.Count -gt 0)
+    real_profile_mutation_authorized = [bool]$AllowRealProfileMutation
     semantic_owner = 'host_ai'
     selection_case_count = $selectionCases.Count
     cold_load_case_count = $coldCases.Count
@@ -208,6 +217,9 @@ $plan = [ordered]@{
 if (-not $Execute) {
     if ($Json) { $plan | ConvertTo-Json -Depth 5 } else { Write-Host ("evaluation corpus valid: selection={0}, cold_load={1}, planned_calls={2}" -f $selectionCases.Count, $coldCases.Count, $plannedCalls) }
     exit 0
+}
+if ($selectionCases.Count -gt 0 -and -not $AllowRealProfileMutation) {
+    throw 'selection execution changes the real active profile; rerun with -AllowRealProfileMutation or use -Mode cold_load'
 }
 
 $projection = Get-Content -LiteralPath $projectionPath -Raw | ConvertFrom-Json
@@ -220,19 +232,20 @@ foreach ($case in $coldCases) {
 $runId = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
 $runRoot = Join-Path $OutputRoot $runId
 New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
+$evaluationCwd = Join-Path $runRoot 'unrelated-workspace'
+New-Item -ItemType Directory -Path $evaluationCwd -Force | Out-Null
 $results = [Collections.Generic.List[object]]::new()
 try {
     foreach ($group in @($selectionCases | Group-Object profile)) {
         Set-EvaluationProfile ([string]$group.Name)
-        foreach ($case in @($group.Group)) { $results.Add((Invoke-HostCase $case 'selection' $runRoot $canonicalByName)) | Out-Null }
+        foreach ($case in @($group.Group)) { $results.Add((Invoke-HostCase $case 'selection' $runRoot $evaluationCwd $canonicalByName)) | Out-Null }
     }
     if ($coldCases.Count -gt 0) {
-        Set-EvaluationProfile 'default'
-        foreach ($case in $coldCases) { $results.Add((Invoke-HostCase $case 'cold_load' $runRoot $canonicalByName)) | Out-Null }
+        foreach ($case in $coldCases) { $results.Add((Invoke-HostCase $case 'cold_load' $runRoot $evaluationCwd $canonicalByName)) | Out-Null }
     }
 }
 finally {
-    Set-EvaluationProfile $originalProfile
+    if ($selectionCases.Count -gt 0) { Set-EvaluationProfile $originalProfile }
 }
 
 $restored = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
@@ -254,7 +267,9 @@ $summary = @($items | Group-Object mode | ForEach-Object {
         output_tokens = ($modeItems | Measure-Object output_tokens -Sum).Sum
         command_count = ($modeItems | Measure-Object command_count -Sum).Sum
         router_call_count = ($modeItems | Measure-Object router_call_count -Sum).Sum
-        tool_round_count = ($modeItems | Measure-Object tool_round_count -Sum).Sum
+        command_item_count = ($modeItems | Measure-Object command_item_count -Sum).Sum
+        tool_round_count = $null
+        tool_round_source = 'unavailable_from_exec_jsonl'
         duration_ms = ($modeItems | Measure-Object duration_ms -Sum).Sum
     }
 })
@@ -264,6 +279,8 @@ $report = [ordered]@{
     run_id = $runId
     model = $Model
     execution_boundary = 'fresh_ephemeral_task'
+    evaluation_cwd = $evaluationCwd
+    real_profile_mutation = ($selectionCases.Count -gt 0)
     truth_level = 'host_evaluation_partial'
     original_profile = $originalProfile
     restored_profile = $restoredProfile

@@ -1,6 +1,25 @@
 . $PSScriptRoot\..\..\skills.ps1
 
 Describe "Uninstall cleanup" {
+    It "ignores empty override directories" {
+        $oldOverridesDir = $script:OverridesDir
+        try {
+            $script:OverridesDir = Join-Path $TestDrive "overrides"
+            $empty = Join-Path $script:OverridesDir "empty"
+            $populated = Join-Path $script:OverridesDir "populated"
+            New-Item -ItemType Directory -Path $empty, $populated -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $populated "SKILL.md") -Value "fixture"
+
+            $names = @(Get-OverridesDirs | ForEach-Object Name)
+
+            $names | Should Contain "populated"
+            $names | Should Not Contain "empty"
+        }
+        finally {
+            $script:OverridesDir = $oldOverridesDir
+        }
+    }
+
     It "Removes matching vendor import when uninstalling a vendor skill" {
         $cfg = [pscustomobject]@{
             vendors = @(

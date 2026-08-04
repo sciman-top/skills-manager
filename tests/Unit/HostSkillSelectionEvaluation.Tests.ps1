@@ -14,6 +14,9 @@ Describe 'Host skill selection effectiveness evaluation' {
         $plan.selection_case_count | Should Be 32
         $plan.cold_load_case_count | Should Be 8
         $plan.planned_calls | Should Be 40
+        $plan.evaluation_cwd | Should Be 'isolated_non_repo_directory'
+        $plan.real_profile_mutation_required | Should Be $true
+        $plan.real_profile_mutation_authorized | Should Be $false
 
         $corpus = Get-Content -LiteralPath (Join-Path $repoRoot 'config\host-skill-selection-evaluation.json') -Raw | ConvertFrom-Json
         @($corpus.cases.category | Sort-Object -Unique).Count | Should Be 8
@@ -40,6 +43,7 @@ Describe 'Host skill selection effectiveness evaluation' {
         $plan.selection_case_count | Should Be 0
         $plan.cold_load_case_count | Should Be 8
         $plan.planned_calls | Should Be 8
+        $plan.real_profile_mutation_required | Should Be $false
     }
 
     It 'Accepts one semantically equivalent skill from a required-any group' {
@@ -85,7 +89,9 @@ Describe 'Host skill selection effectiveness evaluation' {
         $usage.cached_input_ratio | Should Be 0.8
         $commands.command_count | Should Be 2
         $commands.router_call_count | Should Be 1
-        $commands.tool_round_count | Should Be 2
+        $commands.command_item_count | Should Be 2
+        $commands.tool_round_count | Should BeNullOrEmpty
+        $commands.tool_round_source | Should Be 'unavailable_from_exec_jsonl'
     }
 
     It 'Rejects unsafe case identifiers before execution' {

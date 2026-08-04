@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true, Position = 0)][string]$Query,
+    [string]$CatalogPath = '',
     [string]$ManifestPath = '',
     [string]$PolicyPath = '',
     [string]$ConfigPath = '',
@@ -27,11 +28,20 @@ function Resolve-ExistingFile([string]$Path) {
     return ''
 }
 
+function Find-Catalog {
+    $explicit = Resolve-ExistingFile $CatalogPath
+    if ($explicit) { return $explicit }
+    $fromEnv = Resolve-ExistingFile $env:SKILLS_MANAGER_CAPABILITY_CATALOG
+    if ($fromEnv) { return $fromEnv }
+    return (Resolve-ExistingFile (Join-Path (Split-Path $PSScriptRoot -Parent) 'catalog.json'))
+}
+
 function Find-Manifest {
     $explicit = Resolve-ExistingFile $ManifestPath
     if ($explicit) { return $explicit }
     $fromEnv = Resolve-ExistingFile $env:SKILLS_MANAGER_PROJECTION_MANIFEST
     if ($fromEnv) { return $fromEnv }
+    if ($catalogFile) { return '' }
     foreach ($start in @($PSScriptRoot, (Get-Location).Path)) {
         $cursor = [IO.DirectoryInfo]::new([IO.Path]::GetFullPath($start))
         while ($null -ne $cursor) {
@@ -82,7 +92,8 @@ function Read-SkillMetadata([string]$Path, [string]$Root, [bool]$Active) {
         source_root = $fullRoot
         active = $Active
         availability = if ($Active) { 'available' } else { 'cold_load' }
-        side_effect = 'read_only'
+        load_side_effect = 'read_only'
+        side_effect = 'unknown'
     }
 }
 
@@ -121,6 +132,10 @@ function Get-CapabilityReference([string]$Text) {
 
 function Get-Key([string]$Kind, [string]$Name) { return ('{0}|{1}' -f $Kind.ToLowerInvariant(), $Name.ToLowerInvariant()) }
 
+$catalogFile = Find-Catalog
+$catalog = if ($catalogFile) { Get-Content -LiteralPath $catalogFile -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
+if ($null -ne $catalog -and [int]$catalog.schema_version -ne 1) { throw "unsupported capability catalog schema_version: $($catalog.schema_version)" }
+$catalogSkillRoot = if ($catalogFile) { [IO.Path]::GetFullPath((Split-Path (Split-Path $catalogFile -Parent) -Parent)) } else { '' }
 $manifestFile = Find-Manifest
 $manifest = if ($manifestFile) { Get-Content -LiteralPath $manifestFile -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $repoRoot = ''
@@ -137,24 +152,53 @@ $policy = if ($policyFile) { Get-Content -LiteralPath $policyFile -Raw -Encoding
 $config = if ($configFile) { Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 
 $routing = @{}
+function Add-RoutingRule([string]$Kind, [string]$Name, $Rule) {
+    if ([string]::IsNullOrWhiteSpace($Name) -or $null -eq $Rule) { return }
+    $key = Get-Key $Kind $Name
+    if (-not $routing.ContainsKey($key)) { $routing[$key] = [Collections.Generic.List[object]]::new() }
+    $routing[$key].Add([pscustomobject]@{
+            activation = [string]$Rule.activation
+            negative_activation = [string]$Rule.negative_activation
+            role = [string]$Rule.role
+            group = [string]$Rule.group
+            context = [string]$Rule.context
+        }) | Out-Null
+}
 if ($null -ne $policy) {
     foreach ($group in @($policy.groups)) {
         foreach ($member in @($group.members)) {
-            $routing[(Get-Key 'skill' ([string]$member.name))] = [pscustomobject]@{
+            Add-RoutingRule 'skill' ([string]$member.name) ([pscustomobject]@{
                 activation = [string]$member.activation
                 negative_activation = [string]$member.negative_activation
                 role = [string]$member.role
                 group = [string]$group.id
                 context = ('{0} {1}' -f [string]$group.purpose, [string]$group.selection_policy).Trim()
-            }
+            })
         }
+    }
+}
+if ($null -ne $catalog) {
+    foreach ($skill in @($catalog.skills)) {
+        foreach ($rule in @($skill.routing_rules)) { Add-RoutingRule 'skill' ([string]$skill.name) $rule }
     }
 }
 
 $entries = [Collections.Generic.List[object]]::new()
 $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $activeNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-if ($null -ne $manifest) {
+if ($null -ne $catalog) {
+    foreach ($item in @($catalog.skills)) {
+        $relativePath = [string]$item.relative_path
+        if ([string]::IsNullOrWhiteSpace($relativePath) -or [IO.Path]::IsPathRooted($relativePath)) { continue }
+        $skillPath = [IO.Path]::GetFullPath((Join-Path (Split-Path $catalogFile -Parent) $relativePath))
+        $entry = Read-SkillMetadata $skillPath $catalogSkillRoot $false
+        if ($null -eq $entry -or -not [string]::Equals([string]$entry.name, [string]$item.name, [StringComparison]::OrdinalIgnoreCase)) { continue }
+        if (-not [string]::IsNullOrWhiteSpace([string]$item.description)) { $entry.description = [string]$item.description }
+        $entry | Add-Member -NotePropertyName load_side_effect -NotePropertyValue $(if ([string]::IsNullOrWhiteSpace([string]$item.load_side_effect)) { 'read_only' } else { [string]$item.load_side_effect }) -Force
+        if ($entry.name -ne 'capability-router' -and $seen.Add((Get-Key 'skill' $entry.name))) { $entries.Add($entry) }
+    }
+}
+elseif ($null -ne $manifest) {
     foreach ($name in @($manifest.active | ForEach-Object name)) { $activeNames.Add([string]$name) | Out-Null }
     foreach ($item in @($manifest.canonical)) {
         $entry = Read-SkillMetadata ([string]$item.path) ([string]$item.source_root) ($activeNames.Contains([string]$item.name))
@@ -182,8 +226,8 @@ if ($null -ne $config -and $config.PSObject.Properties.Match('mcp_profiles').Cou
     if ($profileProperty.Count -eq 1) { foreach ($name in @($profileProperty[0].Value.enabled)) { $mcpEnabled.Add([string]$name) | Out-Null } }
 }
 
-if ($null -ne $policy) {
-    foreach ($capability in @($policy.capabilities)) {
+$declaredCapabilities = if ($null -ne $catalog) { @($catalog.capabilities) } elseif ($null -ne $policy) { @($policy.capabilities) } else { @() }
+foreach ($capability in $declaredCapabilities) {
         $kind = ([string]$capability.kind).Trim().ToLowerInvariant()
         $name = ([string]$capability.name).Trim()
         if ([string]::IsNullOrWhiteSpace($kind) -or [string]::IsNullOrWhiteSpace($name)) { continue }
@@ -195,11 +239,10 @@ if ($null -ne $policy) {
             active = $available; availability = if ($available) { 'available' } else { 'needs_activation' }
             side_effect = if ([string]::IsNullOrWhiteSpace([string]$capability.side_effect)) { 'unknown' } else { [string]$capability.side_effect }
         })
-        $routing[$key] = [pscustomobject]@{
+        Add-RoutingRule $kind $name ([pscustomobject]@{
             activation = [string]$capability.activation; negative_activation = [string]$capability.negative_activation
             role = 'capability'; group = 'unified-capabilities'; context = 'Declared host capability; the host model decides relevance.'
-        }
-    }
+        })
 }
 
 $entryByKey = @{}
@@ -233,6 +276,7 @@ if ($snapshotFile) {
         if ($entryByKey.ContainsKey($key)) {
             $existing = $entryByKey[$key]
             if (-not [string]::IsNullOrWhiteSpace([string]$capability.description)) { $existing.description = [string]$capability.description }
+            if (-not [string]::IsNullOrWhiteSpace([string]$capability.side_effect)) { $existing.side_effect = [string]$capability.side_effect }
             $existing.availability = $availability
             $existing.active = ($availability -eq 'available')
             continue
@@ -245,17 +289,25 @@ if ($snapshotFile) {
         $entries.Add($entry)
         $seen.Add($key) | Out-Null
         $entryByKey[$key] = $entry
-        $routing[$key] = [pscustomobject]@{
+        Add-RoutingRule $kind $name ([pscustomobject]@{
             activation = [string]$capability.activation; negative_activation = [string]$capability.negative_activation
             role = 'external'; group = 'runtime-snapshot'; context = 'Caller-provided current runtime capability snapshot.'
-        }
+        })
     }
 }
 
 $profiles = @{}
 $profileCatalog = [Collections.Generic.List[object]]::new()
 $currentProfile = if ($null -ne $manifest) { [string]$manifest.active_profile } elseif ($null -ne $config) { [string]$config.skill_projection.active_profile } else { '' }
-if ($null -ne $config -and $config.PSObject.Properties.Match('skill_projection').Count -gt 0 -and $null -ne $config.skill_projection.profiles) {
+if ($null -ne $catalog) {
+    foreach ($domain in @($catalog.domains)) {
+        $set = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($name in @(Get-StringArray $domain.skill_names)) { $set.Add($name) | Out-Null }
+        $profiles[[string]$domain.name] = $set
+        $profileCatalog.Add([pscustomobject]@{ name = [string]$domain.name; purpose = [string]$domain.purpose; enabled_name_count = $set.Count; active = $false }) | Out-Null
+    }
+}
+elseif ($null -ne $config -and $config.PSObject.Properties.Match('skill_projection').Count -gt 0 -and $null -ne $config.skill_projection.profiles) {
     foreach ($property in @($config.skill_projection.profiles.PSObject.Properties)) {
         $names = @(Get-StringArray $property.Value.enabled_names)
         $set = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -296,17 +348,23 @@ foreach ($key in $hostExcluded) {
 
 function Convert-ToPublicEntry($Entry) {
     $key = Get-Key ([string]$Entry.kind) ([string]$Entry.name)
-    $route = if ($routing.ContainsKey($key)) { $routing[$key] } else { $null }
-    $sideEffect = if ($null -ne $route -and [string]$route.role -eq 'operator') { 'controlled_write' } else { [string]$Entry.side_effect }
+    $rules = if ($routing.ContainsKey($key)) { @($routing[$key].ToArray()) } else { @() }
+    $operatorRule = @($rules | Where-Object role -eq 'operator' | Select-Object -First 1)
+    $primaryRule = @($rules | Sort-Object group, role | Select-Object -First 1)
+    $role = if ($operatorRule.Count -gt 0) { 'operator' } elseif ($primaryRule.Count -gt 0) { [string]$primaryRule[0].role } else { '' }
+    $sideEffect = if ($role -eq 'operator') { 'controlled_write' } else { [string]$Entry.side_effect }
+    $loadSideEffect = if ($Entry.PSObject.Properties.Match('load_side_effect').Count -gt 0) { [string]$Entry.load_side_effect } else { 'read_only' }
     $domains = if ([string]$Entry.kind -eq 'skill') { @($profiles.Keys | Where-Object { $profiles[$_].Contains([string]$Entry.name) } | Sort-Object) } else { @() }
     return [pscustomobject]@{
         kind = [string]$Entry.kind; name = [string]$Entry.name; description = [string]$Entry.description
         path = [string]$Entry.path; active = [bool]$Entry.active; availability = [string]$Entry.availability
         domains = @($domains)
-        side_effect = $sideEffect; role = if ($null -eq $route) { '' } else { [string]$route.role }
-        group = if ($null -eq $route) { '' } else { [string]$route.group }
-        activation = if ($null -eq $route) { '' } else { [string]$route.activation }
-        negative_activation = if ($null -eq $route) { '' } else { [string]$route.negative_activation }
+        load_side_effect = $loadSideEffect; side_effect = $sideEffect; role = $role
+        groups = @($rules.group | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique)
+        routing_rules = @($rules)
+        group = if ($primaryRule.Count -eq 1) { [string]$primaryRule[0].group } else { '' }
+        activation = if ($primaryRule.Count -eq 1) { [string]$primaryRule[0].activation } else { '' }
+        negative_activation = if ($primaryRule.Count -eq 1) { [string]$primaryRule[0].negative_activation } else { '' }
     }
 }
 
@@ -391,17 +449,22 @@ $activationPlan = foreach ($item in $selected) {
     $action = 'request_activation'
     $autoAllowed = $false
     $policyDecision = 'activation_required'
-    if ($item.kind -eq 'skill' -and $item.side_effect -eq 'read_only') {
+    $loadAllowed = $false
+    $executionPolicy = 'host_action_policy_required'
+    if ($item.kind -eq 'skill' -and $item.load_side_effect -eq 'read_only') {
         if ($item.availability -eq 'available') {
             $action = 'use_active_skill'
             $autoAllowed = $true
-            $policyDecision = 'allow'
+            $loadAllowed = $true
+            $policyDecision = 'allow_instruction_load'
         }
         elseif ($item.availability -eq 'cold_load' -and -not [string]::IsNullOrWhiteSpace([string]$item.path)) {
             $action = 'load_skill'
             $autoAllowed = $true
-            $policyDecision = 'allow'
+            $loadAllowed = $true
+            $policyDecision = 'allow_instruction_load'
         }
+        if ($item.side_effect -eq 'controlled_write') { $executionPolicy = 'approval_required' }
     }
     elseif ($item.kind -eq 'skill') {
         $action = 'load_skill_with_approval'
@@ -415,11 +478,14 @@ $activationPlan = foreach ($item in $selected) {
     elseif ($item.availability -eq 'available') {
         $action = 'request_approval'
         $policyDecision = 'approval_required'
+        $executionPolicy = 'approval_required'
     }
     elseif ($item.kind -eq 'mcp') { $action = 'request_mcp_activation' }
     [pscustomobject]@{
         kind = $item.kind; name = $item.name; action = $action; auto_allowed = $autoAllowed
-        policy_decision = $policyDecision; side_effect = $item.side_effect; path = $item.path
+        load_allowed = $loadAllowed; load_side_effect = $item.load_side_effect
+        execution_policy = $executionPolicy; policy_decision = $policyDecision
+        workflow_side_effect = $item.side_effect; side_effect = $item.side_effect; path = $item.path
     }
 }
 
@@ -472,6 +538,7 @@ $capabilityGraph = [ordered]@{
     task_model = $taskModel
     intents = @()
     manifest_path = $manifestFile
+    catalog_path = $catalogFile
     policy_path = $policyFile
     config_path = $configFile
     current_profile = $currentProfile

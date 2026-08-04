@@ -212,7 +212,7 @@
       "query": "使用 $to-spec 把批准的 spec 发布到 tracker",
       "profile_hints": ["engineering"],
       "expected_candidates": [{"kind": "skill", "name": "to-spec"}],
-      "host_selected": [{"kind": "skill", "name": "to-spec", "action": "load_skill_with_approval"}]
+      "host_selected": [{"kind": "skill", "name": "to-spec", "action": "load_skill"}]
     },
     {
       "id": "architecture-domain-language",

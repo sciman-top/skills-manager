@@ -108,8 +108,8 @@ explicit capability discovery or no visible match
 
 - skill path 必须存在且位于 manifest 声明的 source root 内。
 - stale host snapshot fail-closed；不可访问、不可调用、未认证和需要激活不能升级成 available。
-- active read-only skill 可 `use_active_skill`，cold read-only skill 可 `load_skill`。
-- operator/write skill 必须 `load_skill_with_approval`。
+- active/cold skill 的 `SKILL.md` 装载是独立的只读动作，分别使用 `use_active_skill` / `load_skill`；`load_allowed` 不授权执行其正文中的工具或写入步骤。
+- operator/write skill 可只读装载，但必须返回 `workflow_side_effect=controlled_write` 与 `execution_policy=approval_required`，实际执行继续经过用户授权、宿主权限和具体工具策略。
 - available read-only/external-read MCP/plugin/app/native capability 可使用；写/破坏/open-world/unknown 必须 approval 或 activation。
 - session snapshot 只允许复用已加载能力，不授权新能力。
 - semantic adjudication 只能收窄、排除或 abstain，不能升级上述确定性事实。

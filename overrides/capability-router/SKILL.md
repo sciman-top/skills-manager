@@ -33,9 +33,9 @@ Prefer the host's native skill and tool selection. This compatibility skill no l
    ```
 
 5. Follow `activation_plan`:
-   - `use_active_skill` or `load_skill`: read the selected `SKILL.md` completely and apply its ordinary trigger and safety rules.
+   - `use_active_skill` or `load_skill`: `load_allowed` authorizes only reading the selected `SKILL.md`; then apply its ordinary trigger and safety rules. It never pre-authorizes repository writes, external actions, publication, or configuration changes.
    - `use_available_mcp` or `use_available_capability`: use only the surfaced callable capability.
-   - `load_skill_with_approval`, `request_approval`, `request_mcp_activation`, or `request_activation`: keep the operation behind the required authorization or host activation step.
+   - `execution_policy=approval_required`, `request_approval`, `request_mcp_activation`, or `request_activation`: keep the actual operation behind the required authorization or host activation step.
 6. Reuse compatible items in `session_plan.reuse`. Domain hints are read-only index partitions, not active-profile changes. Treat `preheat_recommendation` as advice for a future task boundary; never hot-switch a profile or restart the current task.
 
 Only explicit `$skill`/`@skill` mentions may go directly to policy validation. An unsigiled capability name remains ordinary natural language—even when hyphenated or namespaced—because it may appear inside a negation. The script reports `decision_owner=host_ai`, `semantic_routing_performed=false`, and never assigns semantic confidence.
@@ -45,6 +45,6 @@ Only explicit `$skill`/`@skill` mentions may go directly to policy validation. A
 - Do not edit skill/MCP profiles, Codex config, plugin state, authentication, or session state.
 - Do not start another model or provider call for routing; reuse the host AI already processing the request.
 - Treat returned paths as local data. Only contained, existing `SKILL.md` files are eligible.
-- Auto-use only read-only skills or already-available `read_only`/`external_read` capabilities.
+- Auto-load only skill instructions whose `load_side_effect` is `read_only`. Evaluate every action described by the loaded skill separately; only already-available `read_only`/`external_read` capabilities may execute automatically.
 - Semantic judgment may narrow, exclude, or abstain, but cannot upgrade availability, auth, approval, freshness, containment, or side-effect permissions.
 - If discovery fails, fall back to native reasoning without blocking an otherwise clear task.

@@ -889,7 +889,7 @@ function Get-OverridesDirs {
         return @()
     }
     return Get-ChildItem $OverridesDir -Directory -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -ne ".bak" }
+    Where-Object { $_.Name -ne ".bak" -and $null -ne (Get-ChildItem -LiteralPath $_.FullName -File -Recurse -Force -ErrorAction SilentlyContinue | Select-Object -First 1) }
 }
 
 function 收集OverridesSkills {

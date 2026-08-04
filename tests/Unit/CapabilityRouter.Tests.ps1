@@ -190,9 +190,11 @@ Describe 'Native-first capability discovery and policy' {
     It 'Keeps operator skills behind approval' {
         $result = Invoke-TestRouter '把批准的 spec 发布到 tracker' @{ ProfileHint = @('engineering'); Candidate = @('skill|to-spec') }
 
-        $result.activation_plan[0].action | Should Be 'load_skill_with_approval'
-        $result.activation_plan[0].auto_allowed | Should Be $false
-        $result.activation_plan[0].side_effect | Should Be 'controlled_write'
+        $result.activation_plan[0].action | Should Be 'load_skill'
+        $result.activation_plan[0].load_allowed | Should Be $true
+        $result.activation_plan[0].load_side_effect | Should Be 'read_only'
+        $result.activation_plan[0].workflow_side_effect | Should Be 'controlled_write'
+        $result.activation_plan[0].execution_policy | Should Be 'approval_required'
     }
 
     It 'Keeps MCP availability and activation deterministic' {

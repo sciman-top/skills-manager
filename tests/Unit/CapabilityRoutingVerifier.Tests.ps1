@@ -7,6 +7,8 @@ Describe 'Native-first capability routing verifier' {
         $source = Get-Content -LiteralPath $scriptPath -Raw
         $source | Should Not Match '& pwsh @args'
         $source | Should Match '& \$routerFile @routerArgs'
+        $source | Should Not Match 'reports/skill-projection/current\.json'
+        $source | Should Not Match 'agent/capability-router'
     }
 
     function Invoke-RoutingVerifier([string]$Corpus) {

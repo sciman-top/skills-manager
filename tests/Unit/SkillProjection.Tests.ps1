@@ -165,6 +165,56 @@ Describe "Skill projection" {
         }
     }
 
+    Context "Capability-router catalog projection" {
+        It "builds a portable cold-discovery catalog without changing profile budgets" {
+            $oldDryRun = $script:DryRun
+            try {
+                $script:DryRun = $false
+                $managed = Join-Path $TestDrive "catalog-managed"
+                New-ProjectionSkill $managed "capability-router" "capability-router" "Portable cold discovery." | Out-Null
+                New-ProjectionSkill $managed "codebase-design" "codebase-design" "Design module boundaries." | Out-Null
+                New-ProjectionSkill $managed "unrouted-tool" "unrouted-tool" "Perform an uncommon cold workflow." | Out-Null
+                $policyPath = Join-Path $TestDrive "catalog-policy.json"
+                [ordered]@{
+                    groups = @(
+                        [ordered]@{ id = "engineering"; purpose = "Engineering"; selection_policy = "host decides"; members = @([ordered]@{ name = "codebase-design"; role = "reference"; activation = "architecture design"; negative_activation = "" }) },
+                        [ordered]@{ id = "review"; purpose = "Review"; selection_policy = "host decides"; members = @([ordered]@{ name = "codebase-design"; role = "workflow"; activation = "architecture review"; negative_activation = "" }) }
+                    )
+                    capabilities = @()
+                } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $policyPath -Encoding UTF8
+                $cfg = [pscustomobject]@{
+                    managed_source_path = $managed
+                    routing_policy_path = $policyPath
+                    profiles = [pscustomobject]@{
+                        engineering = [pscustomobject]@{ purpose = "Architecture and planning."; enabled_names = @("codebase-design") }
+                    }
+                    discovery_catalog = [pscustomobject]@{
+                        fallback_domain = "other"
+                        fallback_purpose = "Other installed cold skills."
+                        domain_memberships = [pscustomobject]@{ engineering = @("unrouted-tool") }
+                    }
+                }
+
+                $first = Sync-CapabilityRouterCatalog $cfg
+                $second = Sync-CapabilityRouterCatalog $cfg
+                $catalog = Get-ContentUtf8 $first.path | ConvertFrom-Json
+
+                $first.changed | Should Be $true
+                $second.changed | Should Be $false
+                $catalog.schema_version | Should Be 1
+                @($catalog.domains | Where-Object name -eq "engineering")[0].skill_names | Should Contain "unrouted-tool"
+                $design = @($catalog.skills | Where-Object name -eq "codebase-design")[0]
+                @($design.routing_rules).Count | Should Be 2
+                $design.relative_path | Should Be "..\codebase-design\SKILL.md"
+                $design.load_side_effect | Should Be "read_only"
+                ([IO.Path]::IsPathRooted([string]$design.relative_path)) | Should Be $false
+            }
+            finally {
+                $script:DryRun = $oldDryRun
+            }
+        }
+    }
+
     Context "New-SkillProjectionPlan" {
         It "Unions resident skills into every profile without repeating them in profile config" {
             $root = Join-Path $TestDrive "resident-profile"

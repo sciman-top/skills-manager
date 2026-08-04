@@ -187,6 +187,7 @@ Discovery 先确定用户、问题、成功信号和非目标；实现先跑通�
 - `FR-SEL-022`：调用方显式提供 domain/profile hint 且全部未知时必须 fail-closed，不得静默回退 `active_profile`；显式 `$skill`/`@skill` 仍可绕过 discovery 并进入确定性 policy。
 - `FR-SEL-023`：candidate pool 超过 `MaxCandidates` 时必须同时报告显示数、截断前总数和 `truncated=true`，宿主应缩小到一个有效 domain 后重试，不得从不完整候选中猜测。
 - `FR-SEL-024`：current host snapshot 中的 skill/MCP description、availability、callability/accessibility 必须覆盖静态 manifest/config 对应字段；`disabled`、`needs_auth`、`not_callable` 或 `inaccessible` 不得被升级为自动 load/use。
+- `FR-SEL-025`：构建/投影必须在 `capability-router` 包内生成自包含 cold-discovery catalog，覆盖 canonical cold skill 的规范化 name/description、相对路径、domain membership 与 routing rules。普通目标仓不得依赖 `skills-manager` manifest/config/policy 才能发现 domain/candidate；profile 只保留预热/预算职责，catalog metadata 是 portable discovery 真源。
 
 ### 6.7 Operation plan and receipt
 

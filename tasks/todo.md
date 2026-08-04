@@ -62,6 +62,8 @@ Post-closeout follow-up：canonical inventory delta signal 与 cached/uncached/t
 
 Natural-limit hardening 已完成：unknown-domain fail-closed、truncation signal、current skill/MCP snapshot override、host-facing compact projection；deterministic corpus 30/30。剩余宿主语义波动、固定上下文与 invocation trace 缺口保持外部边界。
 
+Portable-catalog correction 已实现为既有 follow-up：完整 canonical cold inventory 随 router 包投影，跨仓 discovery 不再要求本仓 manifest/config/policy 或 profile 预热；专用 cross-repo test 覆盖 repo 外 CWD，corpus verifier 不依赖 ignored deployment state。该项不增加 track/task count，M1/P6/live truth 不变。
+
 ## Profile reconciliation advisor checklist
 
 - [x] `SMV-PR-001` 确定 host-owned semantics、deterministic validation 和 plan-only 边界。

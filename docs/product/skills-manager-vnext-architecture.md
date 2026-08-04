@@ -689,6 +689,14 @@ host evaluation 同时记录 cumulative input、cached/uncached input、cache ra
 
 仍不可消除：宿主模型语义选择具有概率性、fresh task 固定上下文会重放、当前宿主没有稳定 skill-body invocation trace，且 profile/config 写入不能安全地无授权热切换。这些边界只能通过 representative replay、current snapshot、明确 truth ladder 和 retire trigger 缓解，不能由本仓伪装成确定性或 live acceptance。
 
+### `ADR-SMV-023 Portable catalog decouples cold discovery from profiles and repository state`
+
+决定：`SkillProjection` 从 canonical inventory、`discovery_catalog` domain membership 和 routing policy 生成 `agent/capability-router/catalog.json`，并随 router 包一起投影到用户 skill root。catalog 只保存规范化 metadata、相对 `SKILL.md` 路径、domain 与 routing rules；router 从任意工作目录优先读取相邻 catalog，使用路径 containment 与 skill name 复核文件，并以 catalog 的规范化 description 作为 cold-discovery metadata 真源。显式 manifest/config/policy 仍保留兼容入口，但普通跨仓发现不再依赖它们。
+
+理由：profile 同时承担预热预算与 cold index 会使普通目标仓在没有 `skills-manager` report/config 时得到 0 domain/0 candidate，也让未进入 resident profile 的 canonical skill永久不可发现。portable catalog 将“宿主初始可见面”和“按需冷发现全集”拆开：新增/删除 skill 由既有 build/projection 幂等刷新 catalog，不扩大初始 metadata 预算，不静默修改 active profile，也不引入 daemon、数据库、第二模型或 schema major。
+
+验收与退役：生成包必须从用户主目录、无关 Git 仓及其嵌套目录暴露非空 domain/candidate，且 `manifest_path/config_path/policy_path` 为空、`writes_performed=false`；专用 cross-repo regression test 在 repo 外 CWD 重放该形状，corpus verifier 保持 tracked-input hermetic。官方宿主若提供完整、可验证的跨 profile cold inventory 与 policy trace，则删除 portable catalog seam。
+
 ## 11. 安全与供应链
 
 - 外部内容是不可信输入，不执行其仓库指令或脚本，除非单独评估并授权。

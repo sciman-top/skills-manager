@@ -16,16 +16,60 @@ function Resolve-RepoFile([string]$Path) {
 
 $corpusFile = if ([IO.Path]::IsPathRooted($CorpusPath)) { [IO.Path]::GetFullPath($CorpusPath) } else { Resolve-RepoFile $CorpusPath }
 $routerFile = Resolve-RepoFile $RouterPath
-$manifestFile = Resolve-RepoFile 'reports/skill-projection/current.json'
 $policyFile = Resolve-RepoFile 'config/skill-routing-policy.json'
 $configFile = Resolve-RepoFile 'skills.json'
-foreach ($file in @($corpusFile, $routerFile, $manifestFile, $policyFile, $configFile)) {
+foreach ($file in @($corpusFile, $routerFile, $policyFile, $configFile)) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw ('Required routing file is missing: {0}' -f $file) }
 }
 $corpus = Get-Content -LiteralPath $corpusFile -Raw -Encoding UTF8 | ConvertFrom-Json
 if ([int]$corpus.schema_version -ne 2 -or [string]$corpus.decision_owner -ne 'host_ai' -or @($corpus.cases).Count -eq 0) {
     throw 'Routing corpus must use schema_version=2, decision_owner=host_ai, and contain cases.'
 }
+$config = Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json
+$fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('skills-manager-routing-contract-{0}' -f [Guid]::NewGuid().ToString('N'))
+$manifestFile = Join-Path $fixtureRoot 'manifest.json'
+
+function New-RoutingContractManifest {
+    New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null
+    $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($case in @($corpus.cases)) {
+        foreach ($field in @('expected_candidates', 'forbidden_candidates', 'host_exclude')) {
+            if ($case.PSObject.Properties.Match($field).Count -eq 0) { continue }
+            foreach ($item in @($case.$field)) {
+                if ([string]$item.kind -eq 'skill' -and -not [string]::IsNullOrWhiteSpace([string]$item.name)) {
+                    $names.Add([string]$item.name) | Out-Null
+                }
+            }
+        }
+    }
+
+    $entries = [Collections.Generic.List[object]]::new()
+    $index = 0
+    foreach ($name in @($names | Sort-Object)) {
+        $index++
+        $skillDirectory = Join-Path $fixtureRoot ('skill-{0:d3}' -f $index)
+        New-Item -ItemType Directory -Path $skillDirectory -Force | Out-Null
+        $skillPath = Join-Path $skillDirectory 'SKILL.md'
+        $skillBody = "---`nname: '$name'`ndescription: Routing contract fixture for $name.`n---`n`n# $name"
+        Set-Content -LiteralPath $skillPath -Value $skillBody -Encoding UTF8
+        $entries.Add([pscustomobject]@{ name = $name; path = $skillPath; source_root = $fixtureRoot }) | Out-Null
+    }
+
+    $activeProfile = [string]$config.skill_projection.active_profile
+    $activeNames = @()
+    $activeProperty = @($config.skill_projection.profiles.PSObject.Properties | Where-Object Name -eq $activeProfile | Select-Object -First 1)
+    if ($activeProperty.Count -eq 1) { $activeNames = @($activeProperty[0].Value.enabled_names) }
+    $active = @($entries | Where-Object { [string]$_.name -in $activeNames })
+    [ordered]@{
+        schema_version = 2
+        active_profile = $activeProfile
+        resident_names = @($config.skill_projection.resident_names)
+        active = $active
+        canonical = @($entries.ToArray())
+    } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestFile -Encoding UTF8
+}
+
+New-RoutingContractManifest
 
 $findings = [Collections.Generic.List[object]]::new()
 $passedCases = 0
@@ -64,6 +108,7 @@ function Invoke-RouterCase($Case, [string[]]$Candidate = @()) {
     catch { return [pscustomobject]@{ error = $_.Exception.Message; data = $null } }
 }
 
+try {
 foreach ($case in @($corpus.cases)) {
     $caseId = [string]$case.id
     if ([string]::IsNullOrWhiteSpace($caseId) -or [string]::IsNullOrWhiteSpace([string]$case.query)) {
@@ -140,8 +185,11 @@ foreach ($case in @($corpus.cases)) {
                 if ($plan.Count -ne 1) { Add-Finding $caseId 'expected_action_missing' ('Missing action {0} for {1}.' -f [string]$expected.action, (Get-CapabilityRef $expected)) }
             }
             foreach ($plan in @($policy.activation_plan)) {
-                if ([bool]$plan.auto_allowed -and [string]$plan.side_effect -notin @('read_only', 'external_read')) {
-                    Add-Finding $caseId 'side_effect_violation' ('Auto-allowed {0}/{1} with side_effect={2}.' -f [string]$plan.kind, [string]$plan.name, [string]$plan.side_effect)
+                if ([bool]$plan.load_allowed -and [string]$plan.load_side_effect -ne 'read_only') {
+                    Add-Finding $caseId 'side_effect_violation' ('Auto-loaded {0}/{1} with load_side_effect={2}.' -f [string]$plan.kind, [string]$plan.name, [string]$plan.load_side_effect)
+                }
+                if ([string]$plan.workflow_side_effect -eq 'controlled_write' -and [string]$plan.execution_policy -ne 'approval_required') {
+                    Add-Finding $caseId 'side_effect_violation' ('Write-capable workflow {0}/{1} lacks execution approval.' -f [string]$plan.kind, [string]$plan.name)
                 }
             }
             if ($findings.Count -eq $policyBefore) { $policyPassed++ }
@@ -150,6 +198,10 @@ foreach ($case in @($corpus.cases)) {
     else { $policyPassed++ }
 
     if ($findings.Count -eq $before) { $passedCases++ }
+}
+}
+finally {
+    if (Test-Path -LiteralPath $fixtureRoot) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 $resultEnvelope = [ordered]@{

@@ -35,6 +35,81 @@
         "replacement": "to-tickets"
       }
     ],
+    "discovery_catalog": {
+      "fallback_domain": "other",
+      "fallback_purpose": "Installed cold skills not assigned to a narrower domain; inspect only when no specific domain covers the request.",
+      "domain_memberships": {
+        "browser": [
+          "agent-browser"
+        ],
+        "engineering": [
+          "architecture-patterns",
+          "brainstorming",
+          "context-engineering",
+          "documentation-and-adrs",
+          "draft-tickets",
+          "improve-codebase-architecture",
+          "prompt-engineering-patterns",
+          "setup-matt-pocock-skills",
+          "to-spec",
+          "to-tickets",
+          "writing-plans"
+        ],
+        "content": [
+          "baoyu-article-illustrator",
+          "baoyu-compress-image",
+          "baoyu-cover-image",
+          "baoyu-infographic",
+          "baoyu-post-to-wechat",
+          "baoyu-url-to-markdown",
+          "docx",
+          "markdown-converter",
+          "pdf",
+          "social",
+          "xlsx"
+        ],
+        "coding": [
+          "custom-powershell-windows-automation",
+          "debugging-and-error-recovery",
+          "error-handling-patterns",
+          "executing-plans",
+          "finishing-a-development-branch",
+          "git-workflow-and-versioning",
+          "security-best-practices",
+          "shipping-and-launch",
+          "using-git-worktrees",
+          "vite"
+        ],
+        "coding-strict": [
+          "dispatching-parallel-agents",
+          "subagent-driven-development",
+          "using-superpowers"
+        ],
+        "default": [
+          "find-skills"
+        ],
+        "design": [
+          "d3-viz",
+          "data-visualization",
+          "vercel-react-best-practices",
+          "web-artifacts-builder"
+        ],
+        "dotnet": [
+          "microsoft-docs",
+          "windows-desktop-e2e"
+        ],
+        "ppt": [
+          "pptx",
+          "slidev"
+        ],
+        "review": [
+          "requesting-code-review"
+        ],
+        "video": [
+          "transcribe"
+        ]
+      }
+    },
     "profiles": {
       "default": {
         "purpose": "General debugging and evidence-based completion checks; simple native tasks need no skill.",

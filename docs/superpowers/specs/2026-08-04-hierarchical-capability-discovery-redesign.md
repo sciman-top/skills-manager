@@ -28,7 +28,7 @@
 
 ## 4. In scope / out of scope
 
-In scope：resident trigger description、domain purpose catalog、`DomainHint`、兼容 `ProfileHint`、候选 domain provenance、32-case selection corpus、8-case cold-load chain、focused verifier/tests、产品与任务真值。
+In scope：resident trigger description、domain purpose catalog、portable router-adjacent catalog、`DomainHint`、兼容 `ProfileHint`、候选 domain provenance、32-case selection corpus、8-case cold-load chain、focused verifier/tests、产品与任务真值。
 
 Out of scope：第二模型/embedding reranker、daemon/database、静默 profile 写入或热切换、skill/plugin/MCP 安装、auth/provider/model/session mutation、生产写入、P6 和 business `live_accepted`。
 
@@ -73,6 +73,8 @@ caller -> read full selected SKILL.md and continue task
 - 无 hint 首次调用只需要消费 `discovery_domains.name,purpose`。
 - `DomainHint` 接受逗号分隔或数组，规范化后最多两个；`ProfileHint` 仅作向后兼容别名。
 - profile `purpose` 是 domain catalog 的用户可理解说明；profile 仍兼容 projection/budget/preheat。
+- build/projection 将 canonical cold skill、domain membership 与 routing rules 生成到 router 相邻 `catalog.json`；普通目标仓从任意 CWD 读取该 portable catalog，不依赖 `skills-manager` report/config/policy，也不要求 skill 先进入 resident profile。
+- catalog 的规范化 description 是 cold discovery metadata 真源；router 仍复核相对路径 containment、文件存在与 skill name，避免 YAML block scalar 被简化 parser 降级为 `>-`。
 - candidate 返回所属 `domains[]`，不产生 lexical score/confidence。
 - 输出固定 `discovery_architecture=hierarchical_domains_v1`、`retrieval.strategy=hierarchical_domain_discovery`、`decision_owner=host_ai`、`semantic_routing_performed=false`。
 
@@ -139,17 +141,19 @@ Post-redesign：selection 32/32，8 个 cold baseline 全部主动触发；cold-
 - active profile 恢复 `default`，无 host/runtime/auth/plugin/session mutation。
 - PRD/架构/路线图/spec/manifest/plan/todo/README/AGENTS 一致。
 - full gate、diff 和 Git parity 通过。
+- portable router 从用户主目录、无关 Git 仓及嵌套目录返回非空 domain/candidate，且不解析本仓 manifest/config/policy、不写入文件。
 - 完成声明限定为 `P5-local hierarchical capability discovery redesign repo_verified + host_evaluation_partial`；P6 仍 hold，不声明普遍无感、业务效果或 `live_accepted`。
 
 ## 21. Post-closeout inventory, token-cost and natural-limit follow-up
 
-本 follow-up 不新增 Phase/track/task count，不改写 4/4 历史完成状态。它只修复两个已证实的 maintenance 缺口：
+本 follow-up 不新增 Phase/track/task count，不改写 4/4 历史完成状态。它修复已证实的 maintenance 缺口：
 
 1. projection 在覆盖旧 manifest 前比较 canonical `name/path/description` fingerprint；增删/metadata 变化写 `reports/skill-profile-reconciliation/pending.json`，返回 exact delta、config hash、profile/unrouted 摘要和 `skills.ps1 技能配置 调和` handoff。profile-only/no-op 不写新信号，信号不直接修改 profile，写失败不阻断 projection。
 2. host evaluator 记录 `uncached_input_tokens`、`cached_input_ratio`、`command_count`、`router_call_count`、`tool_round_count`。日常 focused replay 只选 1–2 case，全量 8 cold cases 留给结构变化/closeout。
 3. 显式 domain/profile hints 全部未知时返回零候选和 `unknown_domain`，不再静默回退 default；显式 `$skill`/`@skill` 仍直接进入 deterministic policy。
 4. bounded candidates 同时返回 `candidate_count`、`available_candidate_count` 和 `truncated`；截断时宿主缩小到一个 domain 重试。
 5. current host snapshot 的 skill/MCP metadata 与 availability 覆盖静态描述/启用推断；disabled/needs-auth/not-callable/inaccessible 不允许自动 load/use。host-facing 命令只投影当前步骤需要的字段。
+6. profile 预热与 cold index 解耦：projection 生成包含全部 canonical cold skill 的 router-adjacent portable catalog；跨仓运行不再依赖向上发现本仓 manifest/config/policy。专用 cross-repo regression test 在 repo 外 CWD 复核 catalog 路径、domain/candidate、`codebase-design` 可达、zero-write 和 repo-state-free contract；corpus verifier 仅消费 tracked input。
 
 两个真实同 prompt A/B 尝试把完整读取/catalog/discovery/policy/read 合并为更少 shell round。虽然累计 input 下降约 13%–16%，但 uncached 未下降、延迟上升且合并命令发生重试；因此 combined 实现已删除，稳定 separate 链保持不变。该负结果证明当前主要自然成本来自 fresh task 固定上下文与多回合 cached replay；不得用跳过宿主语义、确定性 policy 或完整 SKILL.md 读取换取表面 token 降低。
 

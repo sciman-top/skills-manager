@@ -111,6 +111,8 @@ Post-closeout follow-up：canonical inventory 增删/description/path 变化现�
 
 Natural-limit hardening：未知 domain 零候选、显式 skill 仍可 policy validate；candidate truncation 可见；current snapshot 覆盖静态 skill/MCP availability。验证使用 30-case deterministic corpus、相关 Pester 与本地 production-config replay，不新增 task/track，不把 JSON bytes 缩减写成 provider token 或 live acceptance。
 
+Portable-catalog correction：projection 生成 router 相邻 catalog 并覆盖全部 canonical cold skill；专用 cross-repo test 从 repo 外 CWD 验证无 manifest/config/policy 耦合、非空 domain/candidate 与 zero-write，corpus verifier 保持 hermetic。该 correction 不新增 task/track，不自动修改 profile，不改变 32/32、8/8、M1/P6/live truth。
+
 ## 10. Profile reconciliation advisor
 
 Goal：在 skill 新增、删除或 metadata 变化后，由宿主 AI 提出语义归属，仓库确定性发现 profile drift、校验 freshness/对象/预算/policy，并只输出 zero-write dry-run change-set。

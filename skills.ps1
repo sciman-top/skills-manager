@@ -7683,7 +7683,7 @@ function Get-OverridesDirs {
         return @()
     }
     return Get-ChildItem $OverridesDir -Directory -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -ne ".bak" }
+    Where-Object { $_.Name -ne ".bak" -and $null -ne (Get-ChildItem -LiteralPath $_.FullName -File -Recurse -Force -ErrorAction SilentlyContinue | Select-Object -First 1) }
 }
 
 function 收集OverridesSkills {
@@ -20107,6 +20107,143 @@ function Get-SkillProjectionSourceEntries($source, [int]$sourceOrder, $packageHa
     return @($entries.ToArray())
 }
 
+function Add-CapabilityCatalogMembership([hashtable]$Membership, [string]$SkillName, [string]$DomainName) {
+    if ([string]::IsNullOrWhiteSpace($SkillName) -or [string]::IsNullOrWhiteSpace($DomainName)) { return }
+    if (-not $Membership.ContainsKey($SkillName)) {
+        $Membership[$SkillName] = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    }
+    $Membership[$SkillName].Add($DomainName) | Out-Null
+}
+
+function New-CapabilityRouterCatalogDocument($projectionCfg) {
+    Need ($null -ne $projectionCfg) 'skill_projection 配置为空'
+    Need ($projectionCfg.PSObject.Properties.Match('managed_source_path').Count -gt 0) 'skill_projection 缺少 managed_source_path'
+    $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
+    Need (Test-Path -LiteralPath $managedRoot -PathType Container) ("受管技能源不存在：{0}" -f $managedRoot)
+
+    $routerDir = Join-Path $managedRoot 'capability-router'
+    Need (Test-Path -LiteralPath (Join-Path $routerDir 'SKILL.md') -PathType Leaf) '受管技能源缺少 capability-router'
+
+    $policy = $null
+    if ($projectionCfg.PSObject.Properties.Match('routing_policy_path').Count -gt 0) {
+        $policyPath = Resolve-SkillProjectionPath ([string]$projectionCfg.routing_policy_path)
+        if (Test-Path -LiteralPath $policyPath -PathType Leaf) { $policy = Get-ContentUtf8 $policyPath | ConvertFrom-Json }
+    }
+
+    $domainPurpose = [ordered]@{}
+    $membership = @{}
+    if ($projectionCfg.PSObject.Properties.Match('profiles').Count -gt 0 -and $null -ne $projectionCfg.profiles) {
+        foreach ($property in @($projectionCfg.profiles.PSObject.Properties | Sort-Object Name)) {
+            $domainName = [string]$property.Name
+            $purpose = if ($property.Value.PSObject.Properties.Match('purpose').Count -gt 0) { [string]$property.Value.purpose } else { '' }
+            $domainPurpose[$domainName] = $purpose
+            foreach ($skillName in @($property.Value.enabled_names)) { Add-CapabilityCatalogMembership $membership ([string]$skillName) $domainName }
+        }
+    }
+
+    $fallbackDomain = 'other'
+    $fallbackPurpose = 'Installed cold skills not assigned to a narrower domain; inspect only when no specific domain covers the request.'
+    if ($projectionCfg.PSObject.Properties.Match('discovery_catalog').Count -gt 0 -and $null -ne $projectionCfg.discovery_catalog) {
+        $discoveryCfg = $projectionCfg.discovery_catalog
+        if ($discoveryCfg.PSObject.Properties.Match('fallback_domain').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$discoveryCfg.fallback_domain)) { $fallbackDomain = [string]$discoveryCfg.fallback_domain }
+        if ($discoveryCfg.PSObject.Properties.Match('fallback_purpose').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$discoveryCfg.fallback_purpose)) { $fallbackPurpose = [string]$discoveryCfg.fallback_purpose }
+        if ($discoveryCfg.PSObject.Properties.Match('domain_memberships').Count -gt 0 -and $null -ne $discoveryCfg.domain_memberships) {
+            foreach ($property in @($discoveryCfg.domain_memberships.PSObject.Properties | Sort-Object Name)) {
+                $domainName = [string]$property.Name
+                if (-not $domainPurpose.Contains($domainName)) { $domainPurpose[$domainName] = ("Additional cold-discovery capabilities for the '{0}' domain." -f $domainName) }
+                foreach ($skillName in @($property.Value)) { Add-CapabilityCatalogMembership $membership ([string]$skillName) $domainName }
+            }
+        }
+    }
+
+    $rulesByName = @{}
+    if ($null -ne $policy) {
+        foreach ($group in @($policy.groups)) {
+            foreach ($member in @($group.members)) {
+                $name = [string]$member.name
+                if ([string]::IsNullOrWhiteSpace($name)) { continue }
+                if (-not $rulesByName.ContainsKey($name)) { $rulesByName[$name] = New-Object System.Collections.Generic.List[object] }
+                $rulesByName[$name].Add([ordered]@{
+                        group = [string]$group.id
+                        role = [string]$member.role
+                        activation = [string]$member.activation
+                        negative_activation = [string]$member.negative_activation
+                        context = ('{0} {1}' -f [string]$group.purpose, [string]$group.selection_policy).Trim()
+                    }) | Out-Null
+            }
+        }
+    }
+
+    $skills = New-Object System.Collections.Generic.List[object]
+    $actualNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in @(Get-SkillProjectionFiles $managedRoot)) {
+        $meta = Get-SkillMetadataFromFile ([string]$item.file)
+        $name = ([string]$meta.declared_name).Trim()
+        if ([string]::IsNullOrWhiteSpace($name)) { $name = Split-Path ([string]$item.dir) -Leaf }
+        if ([string]::Equals($name, 'capability-router', [System.StringComparison]::OrdinalIgnoreCase) -or -not $actualNames.Add($name)) { continue }
+        if (-not $membership.ContainsKey($name) -or $membership[$name].Count -eq 0) {
+            Add-CapabilityCatalogMembership $membership $name $fallbackDomain
+        }
+        $relativeWithinManaged = ([string]$item.file).Substring($managedRoot.TrimEnd('\', '/').Length).TrimStart('\', '/')
+        $relativeFromRouter = ('..\{0}' -f $relativeWithinManaged)
+        $rules = if ($rulesByName.ContainsKey($name)) { @($rulesByName[$name].ToArray() | Sort-Object group, role) } else { @() }
+        $skills.Add([ordered]@{
+                name = $name
+                description = [string]$meta.description
+                relative_path = $relativeFromRouter
+                domains = @($membership[$name] | Sort-Object)
+                load_side_effect = 'read_only'
+                routing_rules = @($rules)
+            }) | Out-Null
+    }
+
+    $domainRows = New-Object System.Collections.Generic.List[object]
+    foreach ($domainName in @($domainPurpose.Keys | Sort-Object)) {
+        $names = @($skills | Where-Object { @($_.domains) -contains $domainName } | ForEach-Object { [string]$_.name } | Sort-Object -Unique)
+        if ($names.Count -eq 0) { continue }
+        $domainRows.Add([ordered]@{ name = $domainName; purpose = [string]$domainPurpose[$domainName]; skill_names = $names }) | Out-Null
+    }
+    if (@($skills | Where-Object { @($_.domains) -contains $fallbackDomain }).Count -gt 0 -and -not $domainPurpose.Contains($fallbackDomain)) {
+        $fallbackNames = @($skills | Where-Object { @($_.domains) -contains $fallbackDomain } | ForEach-Object { [string]$_.name } | Sort-Object -Unique)
+        $domainRows.Add([ordered]@{ name = $fallbackDomain; purpose = $fallbackPurpose; skill_names = $fallbackNames }) | Out-Null
+    }
+
+    $capabilities = if ($null -ne $policy) { @($policy.capabilities | Sort-Object kind, name) } else { @() }
+    return [ordered]@{
+        schema_version = 1
+        decision_owner = 'host_ai'
+        semantic_routing_performed = $false
+        domains = @($domainRows.ToArray() | Sort-Object name)
+        skills = @($skills.ToArray() | Sort-Object name)
+        capabilities = $capabilities
+    }
+}
+
+function Sync-CapabilityRouterCatalog($projectionCfg) {
+    if ($null -eq $projectionCfg -or $projectionCfg.PSObject.Properties.Match('managed_source_path').Count -eq 0) {
+        return [pscustomobject]@{ enabled = $false; reason = 'not_configured'; changed = $false; persisted = $false; path = ''; skill_count = 0; domain_count = 0 }
+    }
+    $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
+    $catalogPath = Join-Path $managedRoot 'capability-router\catalog.json'
+    if (-not (Test-Path -LiteralPath (Join-Path $managedRoot 'capability-router\SKILL.md') -PathType Leaf)) {
+        return [pscustomobject]@{ enabled = $false; reason = 'router_missing'; changed = $false; persisted = $false; path = $catalogPath; skill_count = 0; domain_count = 0 }
+    }
+    $catalog = New-CapabilityRouterCatalogDocument $projectionCfg
+    $desired = $catalog | ConvertTo-Json -Depth 20
+    $existing = if (Test-Path -LiteralPath $catalogPath -PathType Leaf) { Get-ContentUtf8 $catalogPath } else { '' }
+    $changed = -not [string]::Equals($existing.TrimEnd("`r", "`n"), $desired.TrimEnd("`r", "`n"), [System.StringComparison]::Ordinal)
+    if ($changed -and -not $DryRun) { Set-ContentUtf8 $catalogPath $desired }
+    return [pscustomobject]@{
+        enabled = $true
+        reason = 'ok'
+        changed = $changed
+        persisted = (-not $DryRun)
+        path = $catalogPath
+        skill_count = @($catalog.skills).Count
+        domain_count = @($catalog.domains).Count
+    }
+}
+
 function Sync-CodexManagedSkillLinks($projectionCfg) {
     Need ($null -ne $projectionCfg) "skill_projection 配置为空"
     Need ($projectionCfg.PSObject.Properties.Match("managed_source_path").Count -gt 0) "skill_projection 缺少 managed_source_path"
@@ -20497,6 +20634,7 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
     $manifestRaw = if ($projectionCfg.PSObject.Properties.Match("manifest_path").Count -gt 0) { [string]$projectionCfg.manifest_path } else { "reports/skill-projection/current.json" }
     $configPath = Resolve-SkillProjectionPath $configRaw
     $manifestPath = Resolve-SkillProjectionPath $manifestRaw
+    $catalogProjection = Invoke-WithMetric 'projection_capability_catalog' { Sync-CapabilityRouterCatalog $projectionCfg } @{ command = '技能投影' } -NoHost
     $linkProjection = $null
     if ($projectionCfg.PSObject.Properties.Match("managed_source_path").Count -gt 0 -or $projectionCfg.PSObject.Properties.Match("user_skill_root").Count -gt 0) {
         $linkProjection = Invoke-WithMetric "projection_link_reconcile" { Sync-CodexManagedSkillLinks $projectionCfg } @{ command = "技能投影" } -NoHost
@@ -20604,6 +20742,7 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
         manifest_path = $manifestPath
         backup_path = if ($null -eq $backupPath) { "" } else { [string]$backupPath }
         managed_link_projection = $linkProjection
+        capability_catalog_projection = $catalogProjection
         reconciliation = $reconciliation
         package_hash_cache = [pscustomobject]@{
             cache_valid = [bool]$packageHashContext.cache_valid
