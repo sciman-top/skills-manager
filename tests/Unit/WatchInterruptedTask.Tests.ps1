@@ -61,6 +61,19 @@ Describe "watch-interrupted-task contract" {
         $script:skill | Should Match "separate thread-management workflow, not heartbeat authority"
     }
 
+    It "does not mistake prompt projection for hard isolation of stale turns" {
+        $script:skill | Should Match "does not hot-load later AGENTS, skill, projection, or heartbeat-prompt changes"
+        $script:skill | Should Match "stale_policy_running"
+        $script:skill | Should Match "keep heartbeats paused until every stale write-capable turn has completed"
+        $script:skill | Should Match "fresh-session hook probe"
+    }
+
+    It "requires a hard send-message guard before silent fleet acceptance" {
+        $script:skill | Should Match 'user-level `PreToolUse` hook'
+        $script:skill | Should Match 'denies every `send_message_to_thread` spelling'
+        $script:skill | Should Match "soft_guard_only"
+    }
+
     It "keeps every shared-checkout heartbeat armed and deterministically serializes writers" {
         $script:skill | Should Match "peer_busy"
         $script:skill | Should Match "keep the heartbeat ACTIVE"
