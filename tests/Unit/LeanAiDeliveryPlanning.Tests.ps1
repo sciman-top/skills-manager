@@ -2,6 +2,7 @@ Describe 'Lean AI delivery maintenance planning contract' {
     $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
     $scriptPath = Join-Path $repoRoot 'scripts\verify-lean-ai-delivery-planning.ps1'
     $maintenanceManifestRelative = 'tasks\skills-manager-vnext-maintenance-design.tasks.json'
+    $pilotRegistryRelative = 'tasks\skills-manager-vnext-lean-delivery-pilot.json'
     $maintenanceSpecRelative = 'docs\superpowers\specs\2026-08-03-lean-ai-delivery-maintenance-design.md'
     $maintenanceEvidenceRelative = 'docs\change-evidence\20260803-lean-ai-delivery-maintenance-design.md'
     $baseRequiredFiles = @(
@@ -31,6 +32,7 @@ Describe 'Lean AI delivery maintenance planning contract' {
     $maintenanceRequiredFiles = @(
         $maintenanceSpecRelative,
         $maintenanceManifestRelative,
+        $pilotRegistryRelative,
         $maintenanceEvidenceRelative
     )
 
@@ -47,6 +49,35 @@ Describe 'Lean AI delivery maintenance planning contract' {
 
     function Save-LeanManifest([string]$FixtureRoot, $Manifest) {
         $Manifest | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath (Join-Path $FixtureRoot $maintenanceManifestRelative) -Encoding UTF8
+    }
+
+    function Save-LeanPilotRegistry([string]$FixtureRoot, $Registry) {
+        $Registry | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath (Join-Path $FixtureRoot $pilotRegistryRelative) -Encoding UTF8
+    }
+
+    function New-LeanPilotSample([int]$Number, [string]$Category) {
+        return [pscustomobject]@{
+            id = ('SMV-M1-{0:d3}' -f $Number)
+            category = $Category
+            task_reference = ('task://real/{0:d3}' -f $Number)
+            source_type = 'real_task'
+            synthetic = $false
+            self_referential = $false
+            status = 'observed'
+            comparison_mode = 'descriptive_only'
+            evidence_refs = @('git:0123456789abcdef')
+            final_truth_level = 'repo_verified'
+            user_acceptance_status = 'not_requested'
+            observed_at = '2026-08-04T00:00:00Z'
+            metrics = [pscustomobject]@{
+                time_to_first_value_minutes = $null
+                rework_slices = 0
+                unexpected_human_interruptions = 0
+                non_product_artifacts = 0
+                focused_gate_seconds = $null
+                full_gate_seconds = $null
+            }
+        }
     }
 
     function New-LeanPlanningFixture([string]$Name) {
@@ -78,12 +109,17 @@ Describe 'Lean AI delivery maintenance planning contract' {
         $parsed.task_count | Should Be 4
         $parsed.done_count | Should Be 4
         $parsed.open_count | Should Be 0
+        $parsed.pilot_status | Should Be 'collecting'
+        $parsed.pilot_sample_target | Should Be 10
+        $parsed.pilot_sample_count | Should Be 0
+        $parsed.counted_pilot_sample_count | Should Be 0
     }
 
     It 'fails closed when the maintenance spec manifest or evidence is missing' {
         foreach ($case in @(
             @{ name = 'missing-spec'; path = $maintenanceSpecRelative },
             @{ name = 'missing-manifest'; path = $maintenanceManifestRelative },
+            @{ name = 'missing-pilot-registry'; path = $pilotRegistryRelative },
             @{ name = 'missing-evidence'; path = $maintenanceEvidenceRelative }
         )) {
             $fixtureRoot = New-LeanPlanningFixture $case.name
@@ -92,6 +128,82 @@ Describe 'Lean AI delivery maintenance planning contract' {
             $parsed.pass | Should Be $false
             @($parsed.findings | Where-Object code -eq 'missing_required_file').Count | Should BeGreaterThan 0
         }
+    }
+
+    It 'rejects pilot registry parse schema identity and status drift' {
+        $parseRoot = New-LeanPlanningFixture 'pilot-parse'
+        Set-Content -LiteralPath (Join-Path $parseRoot $pilotRegistryRelative) -Value '{not-json' -Encoding UTF8
+        @(((Invoke-LeanPlanningVerifier $parseRoot).output | ConvertFrom-Json).findings | Where-Object code -eq 'pilot_registry_parse_failed').Count | Should Be 1
+
+        foreach ($case in @(
+            @{ name = 'pilot-schema'; property = 'schema_version'; value = 2; code = 'unsupported_pilot_registry_schema' },
+            @{ name = 'pilot-track'; property = 'track'; value = 'agent_runtime'; code = 'unexpected_pilot_registry_identity' },
+            @{ name = 'pilot-status'; property = 'pilot_status'; value = 'completed'; code = 'unsupported_pilot_status' }
+        )) {
+            $fixtureRoot = New-LeanPlanningFixture $case.name
+            $registry = Get-Content -LiteralPath (Join-Path $fixtureRoot $pilotRegistryRelative) -Raw | ConvertFrom-Json
+            $registry.($case.property) = $case.value
+            Save-LeanPilotRegistry $fixtureRoot $registry
+            $parsed = (Invoke-LeanPlanningVerifier $fixtureRoot).output | ConvertFrom-Json
+            @($parsed.findings | Where-Object code -eq $case.code).Count | Should Be 1
+        }
+    }
+
+    It 'rejects fake duplicate invalid and excess pilot samples' {
+        $fixtureRoot = New-LeanPlanningFixture 'pilot-invalid-samples'
+        $registry = Get-Content -LiteralPath (Join-Path $fixtureRoot $pilotRegistryRelative) -Raw | ConvertFrom-Json
+        $categories = @($registry.required_categories)
+        $samples = @(1..11 | ForEach-Object { New-LeanPilotSample $_ $categories[($_ - 1) % $categories.Count] })
+        $samples[1].id = $samples[0].id
+        $samples[2].category = 'invented_category'
+        $samples[3].synthetic = $true
+        $samples[4].self_referential = $true
+        $registry.samples = $samples
+        Save-LeanPilotRegistry $fixtureRoot $registry
+
+        $parsed = (Invoke-LeanPlanningVerifier $fixtureRoot).output | ConvertFrom-Json
+        @($parsed.findings | Where-Object code -eq 'duplicate_pilot_sample_id').Count | Should Be 1
+        @($parsed.findings | Where-Object code -eq 'unknown_pilot_sample_category').Count | Should Be 1
+        @($parsed.findings | Where-Object code -eq 'non_real_pilot_sample').Count | Should Be 2
+        @($parsed.findings | Where-Object code -eq 'pilot_sample_limit_exceeded').Count | Should Be 1
+    }
+
+    It 'fails closed when review-ready pilot count or category coverage is incomplete' {
+        $countRoot = New-LeanPlanningFixture 'pilot-review-count'
+        $registry = Get-Content -LiteralPath (Join-Path $countRoot $pilotRegistryRelative) -Raw | ConvertFrom-Json
+        $registry.pilot_status = 'review_ready'
+        $registry.samples = @(1..9 | ForEach-Object { New-LeanPilotSample $_ $registry.required_categories[$_ - 1] })
+        Save-LeanPilotRegistry $countRoot $registry
+        $specPath = Join-Path $countRoot $maintenanceSpecRelative
+        Set-Content -LiteralPath $specPath -Value ((Get-Content -LiteralPath $specPath -Raw).Replace('PILOT_STATUS: collecting', 'PILOT_STATUS: review_ready')) -Encoding UTF8
+        $countFindings = @(((Invoke-LeanPlanningVerifier $countRoot).output | ConvertFrom-Json).findings)
+        @($countFindings | Where-Object code -eq 'pilot_review_sample_count_incomplete').Count | Should Be 1
+
+        $coverageRoot = New-LeanPlanningFixture 'pilot-review-coverage'
+        $registry = Get-Content -LiteralPath (Join-Path $coverageRoot $pilotRegistryRelative) -Raw | ConvertFrom-Json
+        $registry.pilot_status = 'review_ready'
+        $registry.samples = @(1..10 | ForEach-Object { New-LeanPilotSample $_ 'ambiguous_requirement' })
+        Save-LeanPilotRegistry $coverageRoot $registry
+        $specPath = Join-Path $coverageRoot $maintenanceSpecRelative
+        Set-Content -LiteralPath $specPath -Value ((Get-Content -LiteralPath $specPath -Raw).Replace('PILOT_STATUS: collecting', 'PILOT_STATUS: review_ready')) -Encoding UTF8
+        $coverageFindings = @(((Invoke-LeanPlanningVerifier $coverageRoot).output | ConvertFrom-Json).findings)
+        @($coverageFindings | Where-Object code -eq 'pilot_review_category_coverage_incomplete').Count | Should Be 1
+    }
+
+    It 'keeps pilot metrics P6 runtime and live claims fail closed' {
+        $fixtureRoot = New-LeanPlanningFixture 'pilot-truth-boundaries'
+        $registry = Get-Content -LiteralPath (Join-Path $fixtureRoot $pilotRegistryRelative) -Raw | ConvertFrom-Json
+        $registry.metrics_mode = 'completion_gate'
+        $registry.metrics_completion_gate = $true
+        $registry.p6_admission_status = 'admitted'
+        $registry.runtime_implementation_status = 'runtime_implemented'
+        $registry.live_acceptance_status = 'live_accepted'
+        Save-LeanPilotRegistry $fixtureRoot $registry
+        $findings = @(((Invoke-LeanPlanningVerifier $fixtureRoot).output | ConvertFrom-Json).findings)
+        @($findings | Where-Object code -eq 'pilot_metrics_became_gate').Count | Should Be 1
+        @($findings | Where-Object code -eq 'pilot_p6_admission_not_hold').Count | Should Be 1
+        @($findings | Where-Object code -eq 'pilot_runtime_implementation_claimed').Count | Should Be 1
+        @($findings | Where-Object code -eq 'pilot_live_acceptance_claimed').Count | Should Be 1
     }
 
     It 'rejects manifest parse schema track and base-phase drift' {
@@ -198,15 +310,15 @@ Describe 'Lean AI delivery maintenance planning contract' {
         @($parsed.findings | Where-Object code -eq 'p6_manifest_created_while_on_hold').Count | Should Be 1
     }
 
-    It 'rejects claims that the pilot ran or maintenance reached live acceptance' {
+    It 'rejects spec pilot status drift or maintenance live acceptance claims' {
         $fixtureRoot = New-LeanPlanningFixture 'pilot-live-claims'
         $specPath = Join-Path $fixtureRoot $maintenanceSpecRelative
         $spec = (Get-Content -LiteralPath $specPath -Raw).
-            Replace('PILOT_STATUS: pilot_not_executed', 'PILOT_STATUS: pilot_executed').
+            Replace('PILOT_STATUS: collecting', 'PILOT_STATUS: reviewed').
             Replace('LIVE_ACCEPTANCE_STATUS: not_run', 'LIVE_ACCEPTANCE_STATUS: live_accepted')
         Set-Content -LiteralPath $specPath -Value $spec -Encoding UTF8
         $findings = @(((Invoke-LeanPlanningVerifier $fixtureRoot).output | ConvertFrom-Json).findings)
-        @($findings | Where-Object code -eq 'pilot_status_not_unexecuted').Count | Should Be 1
+        @($findings | Where-Object code -eq 'pilot_status_mismatch').Count | Should Be 1
         @($findings | Where-Object code -eq 'live_acceptance_claimed').Count | Should Be 1
     }
 
@@ -253,5 +365,9 @@ Describe 'Lean AI delivery maintenance planning contract' {
         $parsed.task_count | Should Be 4
         $parsed.done_count | Should Be 4
         $parsed.open_count | Should Be 0
+        $parsed.pilot_status | Should Be 'collecting'
+        $parsed.pilot_sample_target | Should Be 10
+        $parsed.pilot_sample_count | Should Be 0
+        $parsed.counted_pilot_sample_count | Should Be 0
     }
 }

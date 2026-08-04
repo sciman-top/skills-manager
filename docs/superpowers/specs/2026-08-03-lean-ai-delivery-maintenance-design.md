@@ -5,12 +5,12 @@
 **base_phase**: `P5`
 **status**: `repo_verified`
 **P6_ADMISSION_STATUS: hold**
-**PILOT_STATUS: pilot_not_executed**
+**PILOT_STATUS: collecting**
 **RUNTIME_IMPLEMENTATION_STATUS: no_runtime_implementation**
 **LIVE_ACCEPTANCE_STATUS: not_run**
 **METRICS_MODE: observe_only**
 **METRICS_COMPLETION_GATE: false**
-**日期**: 2026-08-03
+**日期**: 2026-08-04
 
 ## 1. Problem and evidence
 
@@ -27,6 +27,8 @@ AI 编码的主要浪费不再只是模型不会写代码，而是交付控制�
 Primary user 是 Windows-first、维护多个本地仓库、希望显著减少人工盯守但不接受虚假完成的个人开发者。Secondary user 是需要一致任务契约、可审查证据和低维护成本的仓库维护者。AI Agent 是合同消费者，不是本产品托管的 worker。
 
 ## 3. Product constitution
+
+North Star：在不复制宿主原生推理、编码和运行能力的前提下，持续提高每单位用户注意力、token 与长期维护成本所产生的可验证用户价值；任何辅助功能都必须证明相对 native baseline 的净收益，并始终可绕过、可回滚、可替换、可删除。
 
 1. 用户价值主链优先：先有可演示结果，再稳定化和重构。
 2. 官方/宿主原生优先：复用模型推理、Codex/Claude 执行、plugins、skills、MCP、hooks 和权限系统。
@@ -45,7 +47,7 @@ In scope：
 
 - 把面向高效 AI 软件交付的总体定位、问题、需求、原则、模式和指标并入既有产品真源。
 - 定义 Product Baseline、Slice Contract、checkpoint、bounded autonomy、责任 lens 和 skill lifecycle 的逻辑合同。
-- 定义 M0-M3 maintenance 路线和 10-task observe-only pilot 的准入/退出方法。
+- 定义 M0-M3 maintenance 路线和 10-task observe-only pilot 的准入/退出方法，并以轻量 registry 启动真实样本收集。
 - 提供 machine-readable maintenance manifest、companion verifier、负向测试和一份 reviewed evidence。
 
 Out of scope：
@@ -53,7 +55,7 @@ Out of scope：
 - 新 agent runtime、planner service、长期任务引擎、daemon、数据库、模型/provider router 或固定角色团队。
 - 修改 `src/`、`overrides/`、`skills.json`、profile、schema major、host auth/config/session、plugins/MCP 状态。
 - 安装或运行 Hermes、Obsidian 插件、Spec Kit、OpenHands、LangGraph 或其他社区 runtime。
-- 运行真实 10-task pilot、生产部署、付费模型调用、跨仓 apply 或业务 `live_accepted` 验收。
+- 伪造、回填或在当前切片内宣称完成真实 10-task pilot；生产部署、付费模型调用、跨仓 apply 或业务 `live_accepted` 验收。
 - 把 spec-driven development 的强制 TDD、每任务文件数限制或全流程人工审批移入本仓契约。
 
 ## 5. Lifecycle modes
@@ -125,6 +127,7 @@ promotion 后仍需 owner、适用/禁止场景、版本、失败分流和退役
 ## 13. Tool-combination boundaries
 
 - ChatGPT/Codex/Claude：推理、沟通、编码、工具使用与会话主体；skills-manager 不复制其原生能力。
+- Codex Goal、subagents、scheduled tasks、local memories、App Server/SDK：分别承接长任务目标、有界并行、稳定重复自动化、可选回忆和深度/编程式集成；它们是 native baseline 与退役触发器，不是本仓待实现模块。
 - skills-manager：本地能力 inventory/selection、规则 advisor、规划一致性、显式投影合同和 evidence；不做 agent control plane。
 - Obsidian：可选的用户知识库、研究笔记和 ADR/PRD 草稿界面；只通过明确 Markdown 导出/链接交接，不要求 vault/plugin/index。
 - Hermes：可选的外置个人 Agent 或长任务实验；需要独立安全、连续性和效果验证，不共享 auth/session，不成为当前真源。
@@ -133,11 +136,15 @@ promotion 后仍需 owner、适用/禁止场景、版本、失败分流和退役
 
 组合协议优先普通 Markdown、JSON、Git、路径和显式 receipt。任何工具都可被替换或退役，不允许形成隐式双写、共享私有状态或要求另一个工具先在线。
 
+面向用户只保留四类稳定意图：`Discover` 发现能力与仓库事实；`Advise` 生成最小组合、规划/规则建议和退役判断；`Transact` 仅通过既有显式 token、freshness、backup/receipt/rollback seam 执行受管写入；`Verify` 分层证明 repo、host 与 live 状态。Lean Delivery 只消费 `Discover + Advise + Verify`，不会借 advisory 自动取得 `Transact` 权限。
+
 ## 14. Outcome metrics and pilot design
 
-M1 需要 10 个真实任务，覆盖模糊需求、从零主链、缺陷修复、重构、跨 seam 实现、测试策略、发布、运维、能力选择和简单任务负样本。每项记录 task complexity、baseline workflow、advisory workflow、TTFV、返工切片、非预期人工打断、非产品 artifact、focused/full gate 时间、最终 truth level 和用户接受结果。
+M1 需要 10 个真实任务，覆盖模糊需求、从零主链、缺陷修复、重构、跨 seam 实现、测试策略、发布、运维、能力选择和简单任务负样本。`tasks/skills-manager-vnext-lean-delivery-pilot.json` 只在任务达到证据停止点后追加样本；synthetic、候选和 M0.1/registry/bootstrap 自身不得计数。每项记录 task complexity、baseline workflow、advisory workflow、TTFV、返工切片、非预期人工打断、非产品 artifact、focused/full gate 时间、最终 truth level 和用户接受结果。
 
-pilot 先 observe，不随机宣称因果，不设未经 baseline 的硬阈值，不因指标跳过安全/兼容门禁。M3 以净收益评审：保留真正减少主链时间/返工且维护成本可接受的最小部分；修订触发或文案漂移；删除无收益或被模型/宿主覆盖的流程。当前 M0 未执行任何 pilot，因此不能声称指标改善。
+pilot 先 observe，不随机宣称因果，不设未经 baseline 的硬阈值，不因指标跳过安全/兼容门禁。baseline 优先使用近期可比 native-only 历史任务或交替匹配任务；不可比时保持 `descriptive_only`，不要求把同一任务机械执行两遍。M3 以净收益评审：保留真正减少主链时间/返工且维护成本可接受的最小部分；修订触发或文案漂移；删除无收益或被模型/宿主覆盖的流程。当前状态是 authorized/collecting 0/10，只证明收集合同已启动，不能声称 pilot 已执行或指标改善。
+
+M0/M2 不再被误写为串行前置关系；证据流是 `M0 -> M1 pilot -> M3` 与 `P5 real defects -> M2 correction -> M3`。M3 首轮复用现有文档字段评审，不新建 lifecycle registry；候选至少包括 `session_plan`、`preheat_recommendation`、hierarchical router/catalog、plugin fixture export、Rule Estate multi-target apply、maintenance companion verifier，以及规划/evidence 资产自身。每项只记录 `unique_value / native_equivalent / real_consumers / maintenance_cost / retirement_trigger / latest_evidence`。
 
 ## 15. Security and supply-chain boundaries
 
@@ -165,7 +172,7 @@ pilot 先 observe，不随机宣称因果，不设未经 baseline 的硬阈值�
 1. `pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1`
 2. 运行 `ProductPlanning.Tests.ps1` 与 `LeanAiDeliveryPlanning.Tests.ps1` 的 focused Pester tests。
 3. `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-vnext-planning.ps1 -Json`
-4. `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-lean-ai-delivery-planning.ps1 -Json`
+4. `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-lean-ai-delivery-planning.ps1 -Json`（同时校验 M1 registry/status/counting/truth boundary）
 5. `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree`
 6. `git diff --check` 与 `git status --short --branch`
 
@@ -182,16 +189,16 @@ full quality gate 只运行一次并拥有完整 suite；focused tests 用于本
 | `SMV-MD-003` | FR-AIE-005、NFR-LDL-001/002 | ADR-SMV-013/014/016 | companion verifier 与最小 fixtures 测试 |
 | `SMV-MD-004` | FR-EVD-003、NFR-LDL-003 | ADR-SMV-012/013/016 | 根契约、共享 evidence、有序门禁和 truth closeout |
 
-manifest 是依赖、write set、步骤、验证、回滚和 done_when 的机器真源。本表只提供 requirement/ADR 可追踪入口；M1 pilot 不进入本 manifest。
+manifest 是 M0 依赖、write set、步骤、验证、回滚和 done_when 的机器真源。本表只提供 requirement/ADR 可追踪入口；M1 不改写历史 4/4 manifest，而由独立轻量 registry 登记真实样本。
 
 ## 19. Rollback
 
-回滚范围只包含 maintenance design 的四处产品真源增量、当前 spec/manifest、plan/todo maintenance 章节、companion verifier/tests、AGENTS 一行和共享 evidence。不得修改或回滚 P0-P5 manifest/spec/evidence、`src/`、`overrides/`、`agent/`、`vendor/`、`skills.json`、reports 或宿主状态。
+回滚范围只包含 maintenance design 的四处产品真源增量、当前 spec/manifest、M1 registry、plan/todo maintenance 章节、companion verifier/tests、AGENTS 一行和共享 evidence。不得修改或回滚 P0-P5 manifest/spec/evidence、`src/`、`overrides/`、`agent/`、`vendor/`、`skills.json`、reports 或宿主状态。
 
 若 verifier 设计本身错误，先保持 track 为未验证并修复或删除 companion 资产；P5 仍由原 verifier 和历史真源独立成立。若后续 pilot 无净收益，删除/降级 advisory 候选和 pilot metadata，不删除已验证的 P5 capability selection/runtime-independent contracts。
 
 ## 20. Done definition
 
-M0 完成仅当：现有 PRD/架构/路线图仍为唯一产品真源；maintenance spec/manifest/plan/todo 完整；四项 planning tasks done 且共享一份 exact reviewed evidence；新旧 verifier、focused tests 和唯一 full gate 通过；P5 保持 5/5 `repo_verified`；P6 保持 hold 且不存在 P6 manifest；pilot/live/runtime 状态保持本文件头部声明。
+M0 历史完成真值保持不变。M0.1/M1 bootstrap 完成仅当：现有 PRD/架构/路线图仍为唯一产品真源；maintenance spec/manifest/plan/todo 与 M1 registry 完整；四项 M0 planning tasks 仍为 done；新旧 verifier、focused tests 和唯一 full gate 通过；P5 保持 5/5 `repo_verified`；P6 保持 hold 且不存在 P6 manifest；pilot 为 collecting 0/10，live/runtime 状态保持本文件头部声明。
 
-允许的完成表述是“maintenance design planning package repo_verified”。禁止表述为新的 AI 工作流已实现运行时能力、10-task pilot 已执行、业务效果已证明、host 已变更、P6 已准入或产品已 `live_accepted`。
+允许的完成表述是“maintenance design M0.1 与 M1 collecting contract repo_verified”。禁止表述为新的 AI 工作流已实现运行时能力、10-task pilot 已执行/完成、业务效果已证明、host 已变更、P6 已准入或产品已 `live_accepted`。

@@ -36,6 +36,10 @@ function Get-LeanLiteralCount([string]$Text, [string]$Literal) {
     return [regex]::Matches($Text, [regex]::Escape($Literal)).Count
 }
 
+function Test-LeanObjectProperty($Object, [string]$Name) {
+    return ($null -ne $Object -and $null -ne $Object.PSObject.Properties[$Name])
+}
+
 function Test-LeanTaskDependencyCycles($TasksById, [string]$ManifestPath, [ref]$FindingList) {
     $state = @{}
 
@@ -87,6 +91,7 @@ $paths = [ordered]@{
     roadmap = 'docs/product/skills-manager-vnext-roadmap.md'
     spec = 'docs/superpowers/specs/2026-08-03-lean-ai-delivery-maintenance-design.md'
     manifest = 'tasks/skills-manager-vnext-maintenance-design.tasks.json'
+    pilot = 'tasks/skills-manager-vnext-lean-delivery-pilot.json'
     plan = 'tasks/plan.md'
     todo = 'tasks/todo.md'
     agents = 'AGENTS.md'
@@ -134,6 +139,12 @@ $doneCount = 0
 $openCount = 0
 $tasksById = @{}
 $doneEvidenceSets = @()
+$pilotRegistry = $null
+$pilotStatus = 'unknown'
+$pilotSampleTarget = 0
+$pilotSampleCount = 0
+$countedPilotSamples = @()
+$pilotCategoriesCovered = @()
 
 if ($null -ne $manifest) {
     if ([int]$manifest.schema_version -ne 1) {
@@ -302,11 +313,203 @@ if ($null -ne $manifest) {
     }
 }
 
+if (-not [string]::IsNullOrWhiteSpace($content['pilot'])) {
+    try {
+        $pilotRegistry = $content['pilot'] | ConvertFrom-Json
+    }
+    catch {
+        Add-LeanPlanningFinding ([ref]$findings) 'pilot_registry_parse_failed' $paths['pilot'] $_.Exception.Message
+    }
+}
+
+if ($null -ne $pilotRegistry) {
+    $pilotStatus = [string]$pilotRegistry.pilot_status
+    $pilotSampleTarget = [int]$pilotRegistry.sample_target
+    $pilotSamples = @($pilotRegistry.samples)
+    $pilotSampleCount = $pilotSamples.Count
+    $expectedPilotCategories = @(
+        'ambiguous_requirement',
+        'greenfield_main_chain',
+        'existing_defect',
+        'behavior_preserving_refactor',
+        'cross_seam_implementation',
+        'test_strategy',
+        'release_readiness',
+        'operations_incident',
+        'capability_selection',
+        'simple_task_negative_control'
+    )
+    $allowedPilotStatuses = @('pilot_not_executed', 'collecting', 'review_ready', 'reviewed')
+    $allowedSampleStatuses = @('observed', 'reviewed')
+    $allowedComparisonModes = @('matched_historical_native_only', 'alternating_matched_task', 'descriptive_only')
+    $allowedTruthLevels = @('not_verified', 'designed', 'implemented', 'repo_verified', 'host_loaded', 'live_accepted')
+    $allowedAcceptanceStatuses = @('pending', 'not_requested', 'accepted', 'partial', 'rejected')
+    $requiredSampleFields = @(
+        'id', 'category', 'task_reference', 'source_type', 'synthetic', 'self_referential',
+        'status', 'comparison_mode', 'evidence_refs', 'final_truth_level', 'user_acceptance_status',
+        'observed_at', 'metrics'
+    )
+    $requiredMetricFields = @(
+        'time_to_first_value_minutes', 'rework_slices', 'unexpected_human_interruptions',
+        'non_product_artifacts', 'focused_gate_seconds', 'full_gate_seconds'
+    )
+
+    if ([int]$pilotRegistry.schema_version -ne 1) {
+        Add-LeanPlanningFinding ([ref]$findings) 'unsupported_pilot_registry_schema' $paths['pilot'] 'schema_version must be 1.'
+    }
+    if ([string]$pilotRegistry.program_id -ne 'skills-manager-vnext' -or [string]$pilotRegistry.track -ne 'lean_delivery_pilot' -or
+        [string]$pilotRegistry.base_phase -ne 'P5') {
+        Add-LeanPlanningFinding ([ref]$findings) 'unexpected_pilot_registry_identity' $paths['pilot'] `
+            'Pilot registry identity must remain skills-manager-vnext/lean_delivery_pilot/P5.'
+    }
+    if ($allowedPilotStatuses -notcontains $pilotStatus) {
+        Add-LeanPlanningFinding ([ref]$findings) 'unsupported_pilot_status' $paths['pilot'] ('Unsupported pilot status: {0}' -f $pilotStatus)
+    }
+    if ($pilotSampleTarget -ne 10) {
+        Add-LeanPlanningFinding ([ref]$findings) 'unexpected_pilot_sample_target' $paths['pilot'] 'sample_target must remain 10.'
+    }
+    if ([string]$pilotRegistry.metrics_mode -ne 'observe_only' -or [bool]$pilotRegistry.metrics_completion_gate) {
+        Add-LeanPlanningFinding ([ref]$findings) 'pilot_metrics_became_gate' $paths['pilot'] `
+            'Pilot metrics must remain observe_only and metrics_completion_gate must remain false.'
+    }
+    if ([string]$pilotRegistry.p6_admission_status -ne 'hold') {
+        Add-LeanPlanningFinding ([ref]$findings) 'pilot_p6_admission_not_hold' $paths['pilot'] 'Pilot registry must keep P6 admission on hold.'
+    }
+    if ([string]$pilotRegistry.runtime_implementation_status -ne 'no_runtime_implementation') {
+        Add-LeanPlanningFinding ([ref]$findings) 'pilot_runtime_implementation_claimed' $paths['pilot'] `
+            'Pilot registry must not claim a runtime implementation.'
+    }
+    if ([string]$pilotRegistry.live_acceptance_status -ne 'not_run') {
+        Add-LeanPlanningFinding ([ref]$findings) 'pilot_live_acceptance_claimed' $paths['pilot'] `
+            'Pilot registry must keep live acceptance at not_run.'
+    }
+
+    $declaredCategories = @($pilotRegistry.required_categories | ForEach-Object { [string]$_ })
+    $missingCategories = @($expectedPilotCategories | Where-Object { $declaredCategories -notcontains $_ })
+    $extraCategories = @($declaredCategories | Where-Object { $expectedPilotCategories -notcontains $_ })
+    if ($declaredCategories.Count -ne $expectedPilotCategories.Count -or $missingCategories.Count -gt 0 -or $extraCategories.Count -gt 0) {
+        Add-LeanPlanningFinding ([ref]$findings) 'pilot_category_contract_drift' $paths['pilot'] `
+            'required_categories must contain the exact ten real-task categories.'
+    }
+
+    $countingPolicy = $pilotRegistry.counting_policy
+    if (-not [bool]$countingPolicy.real_tasks_only -or [bool]$countingPolicy.synthetic_samples_count -or
+        [bool]$countingPolicy.self_referential_tasks_count) {
+        Add-LeanPlanningFinding ([ref]$findings) 'pilot_counting_policy_weakened' $paths['pilot'] `
+            'Only real, non-synthetic, non-self-referential tasks may count toward the pilot.'
+    }
+    $baselinePolicy = $pilotRegistry.baseline_policy
+    if ([string]$baselinePolicy.unmatched_mode -ne 'descriptive_only' -or [bool]$baselinePolicy.duplicate_execution_required -or
+        [bool]$baselinePolicy.causal_claims_allowed) {
+        Add-LeanPlanningFinding ([ref]$findings) 'pilot_baseline_policy_weakened' $paths['pilot'] `
+            'Unmatched tasks must remain descriptive-only without duplicate execution or causal claims.'
+    }
+
+    $sampleIds = @{}
+    foreach ($sample in $pilotSamples) {
+        $sampleId = [string]$sample.id
+        $samplePath = ('{0}#{1}' -f $paths['pilot'], $sampleId)
+        if ([string]::IsNullOrWhiteSpace($sampleId) -or $sampleId -notmatch '^SMV-M1-[0-9]{3}$') {
+            Add-LeanPlanningFinding ([ref]$findings) 'invalid_pilot_sample_id' $samplePath ('Invalid pilot sample id: {0}' -f $sampleId)
+        }
+        elseif ($sampleIds.ContainsKey($sampleId)) {
+            Add-LeanPlanningFinding ([ref]$findings) 'duplicate_pilot_sample_id' $samplePath ('Duplicate pilot sample id: {0}' -f $sampleId)
+        }
+        else {
+            $sampleIds[$sampleId] = $true
+        }
+
+        foreach ($field in $requiredSampleFields) {
+            if (-not (Test-LeanObjectProperty $sample $field)) {
+                Add-LeanPlanningFinding ([ref]$findings) 'missing_pilot_sample_field' $samplePath `
+                    ('Pilot sample field is required: {0}' -f $field)
+            }
+        }
+        foreach ($field in @('task_reference', 'status', 'comparison_mode', 'final_truth_level', 'user_acceptance_status', 'observed_at')) {
+            if ([string]::IsNullOrWhiteSpace([string]$sample.$field)) {
+                Add-LeanPlanningFinding ([ref]$findings) 'empty_pilot_sample_field' $samplePath `
+                    ('Pilot sample field must be non-empty: {0}' -f $field)
+            }
+        }
+        if (@($sample.evidence_refs).Count -eq 0) {
+            Add-LeanPlanningFinding ([ref]$findings) 'missing_pilot_sample_evidence' $samplePath `
+                'Pilot samples require at least one evidence reference.'
+        }
+        if ($expectedPilotCategories -notcontains [string]$sample.category) {
+            Add-LeanPlanningFinding ([ref]$findings) 'unknown_pilot_sample_category' $samplePath `
+                ('Unknown pilot category: {0}' -f [string]$sample.category)
+        }
+        if ($allowedSampleStatuses -notcontains [string]$sample.status) {
+            Add-LeanPlanningFinding ([ref]$findings) 'unknown_pilot_sample_status' $samplePath ('Unknown sample status: {0}' -f [string]$sample.status)
+        }
+        if ($allowedComparisonModes -notcontains [string]$sample.comparison_mode) {
+            Add-LeanPlanningFinding ([ref]$findings) 'unknown_pilot_comparison_mode' $samplePath `
+                ('Unknown comparison mode: {0}' -f [string]$sample.comparison_mode)
+        }
+        if ($allowedTruthLevels -notcontains [string]$sample.final_truth_level) {
+            Add-LeanPlanningFinding ([ref]$findings) 'unknown_pilot_truth_level' $samplePath `
+                ('Unknown truth level: {0}' -f [string]$sample.final_truth_level)
+        }
+        if ($allowedAcceptanceStatuses -notcontains [string]$sample.user_acceptance_status) {
+            Add-LeanPlanningFinding ([ref]$findings) 'unknown_pilot_acceptance_status' $samplePath `
+                ('Unknown user acceptance status: {0}' -f [string]$sample.user_acceptance_status)
+        }
+        foreach ($metricField in $requiredMetricFields) {
+            if (-not (Test-LeanObjectProperty $sample.metrics $metricField)) {
+                Add-LeanPlanningFinding ([ref]$findings) 'missing_pilot_metric_field' $samplePath `
+                    ('Pilot metric field is required: {0}' -f $metricField)
+            }
+        }
+
+        $isRealCountableSample = ([string]$sample.source_type -eq 'real_task' -and -not [bool]$sample.synthetic -and
+            -not [bool]$sample.self_referential)
+        if (-not $isRealCountableSample) {
+            Add-LeanPlanningFinding ([ref]$findings) 'non_real_pilot_sample' $samplePath `
+                'Synthetic or self-referential observations cannot be registered as pilot samples.'
+        }
+        else {
+            $countedPilotSamples += $sample
+        }
+    }
+
+    $pilotCategoriesCovered = @($countedPilotSamples | ForEach-Object { [string]$_.category } | Where-Object {
+        $expectedPilotCategories -contains $_
+    } | Sort-Object -Unique)
+    if ($pilotSampleCount -gt $pilotSampleTarget) {
+        Add-LeanPlanningFinding ([ref]$findings) 'pilot_sample_limit_exceeded' $paths['pilot'] `
+            ('Pilot contains {0} samples, above target {1}.' -f $pilotSampleCount, $pilotSampleTarget)
+    }
+    if ($pilotStatus -eq 'pilot_not_executed' -and $pilotSampleCount -ne 0) {
+        Add-LeanPlanningFinding ([ref]$findings) 'unexecuted_pilot_has_samples' $paths['pilot'] `
+            'pilot_not_executed cannot contain samples.'
+    }
+    if ($pilotStatus -in @('review_ready', 'reviewed')) {
+        if ($countedPilotSamples.Count -ne $pilotSampleTarget) {
+            Add-LeanPlanningFinding ([ref]$findings) 'pilot_review_sample_count_incomplete' $paths['pilot'] `
+                ('{0} requires exactly {1} countable real samples.' -f $pilotStatus, $pilotSampleTarget)
+        }
+        $missingCoverage = @($expectedPilotCategories | Where-Object { $pilotCategoriesCovered -notcontains $_ })
+        if ($missingCoverage.Count -gt 0) {
+            Add-LeanPlanningFinding ([ref]$findings) 'pilot_review_category_coverage_incomplete' $paths['pilot'] `
+                ('Pilot review is missing categories: {0}' -f ($missingCoverage -join ', '))
+        }
+    }
+    if ($pilotStatus -eq 'reviewed' -and @($pilotSamples | Where-Object { [string]$_.status -ne 'reviewed' }).Count -gt 0) {
+        Add-LeanPlanningFinding ([ref]$findings) 'reviewed_pilot_has_unreviewed_samples' $paths['pilot'] `
+            'A reviewed pilot requires every sample status to be reviewed.'
+    }
+}
+
 if (-not (Test-LeanContainsLiteral $content['spec'] 'P6_ADMISSION_STATUS: hold')) {
     Add-LeanPlanningFinding ([ref]$findings) 'spec_p6_hold_missing' $paths['spec'] 'Spec must keep P6_ADMISSION_STATUS: hold.'
 }
-if (-not (Test-LeanContainsLiteral $content['spec'] 'PILOT_STATUS: pilot_not_executed')) {
-    Add-LeanPlanningFinding ([ref]$findings) 'pilot_status_not_unexecuted' $paths['spec'] 'Spec must explicitly declare pilot_not_executed.'
+$specPilotStatus = ''
+if (-not [string]::IsNullOrWhiteSpace($content['spec']) -and $content['spec'] -match 'PILOT_STATUS:\s*([a-z_]+)') {
+    $specPilotStatus = [string]$Matches[1]
+}
+if ([string]::IsNullOrWhiteSpace($specPilotStatus) -or $specPilotStatus -ne $pilotStatus) {
+    Add-LeanPlanningFinding ([ref]$findings) 'pilot_status_mismatch' $paths['spec'] `
+        ('Spec PILOT_STATUS must match registry status: spec={0}, registry={1}.' -f $specPilotStatus, $pilotStatus)
 }
 if (-not (Test-LeanContainsLiteral $content['spec'] 'RUNTIME_IMPLEMENTATION_STATUS: no_runtime_implementation')) {
     Add-LeanPlanningFinding ([ref]$findings) 'runtime_implementation_claimed' $paths['spec'] 'Spec must explicitly declare no_runtime_implementation.'
@@ -347,6 +550,11 @@ $result = [ordered]@{
     track = 'maintenance_design'
     base_phase = 'P5'
     p6_admission_status = 'hold'
+    pilot_status = $pilotStatus
+    pilot_sample_target = $pilotSampleTarget
+    pilot_sample_count = $pilotSampleCount
+    counted_pilot_sample_count = $countedPilotSamples.Count
+    pilot_categories_covered = @($pilotCategoriesCovered)
     pass = ($findings.Count -eq 0)
     task_count = $taskCount
     done_count = $doneCount

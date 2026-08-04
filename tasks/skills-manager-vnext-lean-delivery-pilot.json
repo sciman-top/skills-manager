@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "program_id": "skills-manager-vnext",
+  "track": "lean_delivery_pilot",
+  "base_phase": "P5",
+  "pilot_status": "collecting",
+  "sample_target": 10,
+  "metrics_mode": "observe_only",
+  "metrics_completion_gate": false,
+  "p6_admission_status": "hold",
+  "runtime_implementation_status": "no_runtime_implementation",
+  "live_acceptance_status": "not_run",
+  "required_categories": [
+    "ambiguous_requirement",
+    "greenfield_main_chain",
+    "existing_defect",
+    "behavior_preserving_refactor",
+    "cross_seam_implementation",
+    "test_strategy",
+    "release_readiness",
+    "operations_incident",
+    "capability_selection",
+    "simple_task_negative_control"
+  ],
+  "counting_policy": {
+    "real_tasks_only": true,
+    "synthetic_samples_count": false,
+    "self_referential_tasks_count": false
+  },
+  "baseline_policy": {
+    "preferred_comparisons": [
+      "matched_historical_native_only",
+      "alternating_matched_task"
+    ],
+    "unmatched_mode": "descriptive_only",
+    "duplicate_execution_required": false,
+    "causal_claims_allowed": false
+  },
+  "collection_notes": [
+    "The M0.1 correction and this registry bootstrap are self-referential maintenance work and do not count toward the ten real-task samples.",
+    "Samples are appended only after a real task reaches an evidence-backed stopping point; candidate or retrospective synthetic rows are forbidden.",
+    "collecting does not mean the pilot has executed or demonstrated benefit."
+  ],
+  "samples": []
+}
