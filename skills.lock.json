@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-07-31T05:02:18.3944341Z",
+  "generated_at": "2026-08-04T17:48:25.0867788Z",
   "vendors": [
     {
       "name": "agent-skills",
@@ -42,7 +42,7 @@
       "name": "skills-2",
       "repo": "https://github.com/remotion-dev/skills.git",
       "ref": "main",
-      "commit": "b3e242a87fe94b902e3a9da343ae89b7ac5279b3"
+      "commit": "4951f6aca2a236f2f2a2bff4734566963fe12707"
     },
     {
       "name": "superpowers",
@@ -59,7 +59,7 @@
       "ref": "main",
       "skill": "skills\\agent-browser",
       "sparse": false,
-      "commit": "723b452577aea81c6d18eb9a00efe8065df3e611"
+      "commit": "da1237e2543de87119cfd48cb48284402bd4dc40"
     },
     {
       "name": "agent-skills",
@@ -185,7 +185,7 @@
       "ref": "main",
       "skill": "skills\\find-skills",
       "sparse": true,
-      "commit": "2479c76c44c7caf3b55155c0929f16503c06ef6f"
+      "commit": "1164afa5f0e21ebd01e6fc11249759353f494ad1"
     },
     {
       "name": "grill-with-docs",
@@ -257,7 +257,7 @@
       "ref": "main",
       "skill": "skills\\mcp-cli",
       "sparse": true,
-      "commit": "aa3fa2f22aab3434f0f00700569dd576f7c5d1ef"
+      "commit": "336af71f1b7d2e6e15a8a986ba79ca031a40549b"
     },
     {
       "name": "microsoft-code-reference",
@@ -365,7 +365,7 @@
       "ref": "main",
       "skill": "skills\\remotion-best-practices",
       "sparse": false,
-      "commit": "b3e242a87fe94b902e3a9da343ae89b7ac5279b3"
+      "commit": "4951f6aca2a236f2f2a2bff4734566963fe12707"
     },
     {
       "name": "slidev",
@@ -374,7 +374,7 @@
       "ref": "main",
       "skill": "skills\\slidev",
       "sparse": false,
-      "commit": "36063a1e3ea3afe3df333c3707ef204fc2346c7f"
+      "commit": "f970a444338b6c45f5d181a44c493fc3e7a57450"
     },
     {
       "name": "storyboard-creation",

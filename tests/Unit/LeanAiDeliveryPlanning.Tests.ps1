@@ -5,6 +5,7 @@ Describe 'Lean AI delivery maintenance planning contract' {
     $pilotRegistryRelative = 'tasks\skills-manager-vnext-lean-delivery-pilot.json'
     $maintenanceSpecRelative = 'docs\superpowers\specs\2026-08-03-lean-ai-delivery-maintenance-design.md'
     $maintenanceEvidenceRelative = 'docs\change-evidence\20260803-lean-ai-delivery-maintenance-design.md'
+    $engineeredWorkflowEvidenceRelative = 'docs\change-evidence\20260805-engineered-agent-workflow-maintenance-design.md'
     $fixtureRequiredFiles = @(
         'docs\product\README.md',
         'docs\product\skills-manager-vnext-prd.md',
@@ -18,7 +19,8 @@ Describe 'Lean AI delivery maintenance planning contract' {
         $maintenanceSpecRelative,
         $maintenanceManifestRelative,
         $pilotRegistryRelative,
-        $maintenanceEvidenceRelative
+        $maintenanceEvidenceRelative,
+        $engineeredWorkflowEvidenceRelative
     )
 
     function Invoke-LeanPlanningVerifier([string]$Root, [switch]$External) {
@@ -61,6 +63,13 @@ Describe 'Lean AI delivery maintenance planning contract' {
                 non_product_artifacts = 0
                 focused_gate_seconds = $null
                 full_gate_seconds = $null
+            }
+            observations = [pscustomobject]@{
+                coordination_mode = 'single_agent'
+                shared_write_set_policy = 'not_applicable'
+                tool_dispositions = @()
+                context_adapter = 'repo_native'
+                skill_lifecycle_action = 'none'
             }
         }
     }
@@ -116,13 +125,15 @@ exit 0
         $parsed.p6_admission_status | Should Be 'hold'
         $parsed.pass | Should Be $true
         $parsed.finding_count | Should Be 0
-        $parsed.task_count | Should Be 4
-        $parsed.done_count | Should Be 4
+        $parsed.task_count | Should Be 8
+        $parsed.done_count | Should Be 8
         $parsed.open_count | Should Be 0
+        @($parsed.evidence_groups).Count | Should Be 2
         $parsed.pilot_status | Should Be 'collecting'
         $parsed.pilot_sample_target | Should Be 10
         $parsed.pilot_sample_count | Should Be 0
         $parsed.counted_pilot_sample_count | Should Be 0
+        @($parsed.pilot_observation_dimensions).Count | Should Be 5
     }
 
     It 'fails closed when the maintenance spec manifest or evidence is missing' {
@@ -250,6 +261,22 @@ exit 0
         @(((Invoke-LeanPlanningVerifier $invalidRoot).output | ConvertFrom-Json).findings | Where-Object code -eq 'invalid_task_id').Count | Should Be 1
     }
 
+    It 'requires the exact M0 and M0.2 task set and stable evidence groups' {
+        $missingTaskRoot = New-LeanPlanningFixture 'missing-m0-2-task'
+        $manifest = Get-Content -LiteralPath (Join-Path $missingTaskRoot $maintenanceManifestRelative) -Raw | ConvertFrom-Json
+        $manifest.tasks = @($manifest.tasks | Where-Object { $_.id -ne 'SMV-MD-008' })
+        Save-LeanManifest $missingTaskRoot $manifest
+        $missingTaskFindings = @(((Invoke-LeanPlanningVerifier $missingTaskRoot).output | ConvertFrom-Json).findings)
+        @($missingTaskFindings | Where-Object code -eq 'missing_required_maintenance_task').Count | Should Be 1
+
+        $evidenceGroupRoot = New-LeanPlanningFixture 'invalid-evidence-group'
+        $manifest = Get-Content -LiteralPath (Join-Path $evidenceGroupRoot $maintenanceManifestRelative) -Raw | ConvertFrom-Json
+        $manifest.tasks[4].evidence_group = 'Invalid Group'
+        Save-LeanManifest $evidenceGroupRoot $manifest
+        $evidenceGroupFindings = @(((Invoke-LeanPlanningVerifier $evidenceGroupRoot).output | ConvertFrom-Json).findings)
+        @($evidenceGroupFindings | Where-Object code -eq 'invalid_task_evidence_group').Count | Should Be 1
+    }
+
     It 'rejects unknown self and cyclic dependencies' {
         foreach ($case in @(
             @{ name = 'unknown-dependency'; dependency = @('SMV-MD-999'); code = 'unknown_task_dependency' },
@@ -311,6 +338,58 @@ exit 0
         Remove-Item -LiteralPath (Join-Path $fixtureRoot $maintenanceEvidenceRelative) -Force
         $parsed = (Invoke-LeanPlanningVerifier $fixtureRoot).output | ConvertFrom-Json
         @($parsed.findings | Where-Object code -eq 'done_task_evidence_missing').Count | Should Be 1
+    }
+
+    It 'requires the M0.2 evidence file independently from historical M0 evidence' {
+        $fixtureRoot = New-LeanPlanningFixture 'm0-2-evidence-missing'
+        Remove-Item -LiteralPath (Join-Path $fixtureRoot $engineeredWorkflowEvidenceRelative) -Force
+        $parsed = (Invoke-LeanPlanningVerifier $fixtureRoot).output | ConvertFrom-Json
+        @($parsed.findings | Where-Object code -eq 'done_task_evidence_missing').Count | Should Be 1
+    }
+
+    It 'fails closed when engineered-workflow policy literals drift' {
+        $fixtureRoot = New-LeanPlanningFixture 'm0-2-policy-drift'
+        $specPath = Join-Path $fixtureRoot $maintenanceSpecRelative
+        $spec = (Get-Content -LiteralPath $specPath -Raw).
+            Replace('CONTROL_PLANE_STATUS: not_introduced', 'CONTROL_PLANE_STATUS: introduced').
+            Replace('GIT_CAS_SEMANTICS: ref_freshness_not_file_queue', 'GIT_CAS_SEMANTICS: file_queue')
+        Set-Content -LiteralPath $specPath -Value $spec -Encoding UTF8
+        $architecturePath = Join-Path $fixtureRoot 'docs\product\skills-manager-vnext-architecture.md'
+        $architecture = (Get-Content -LiteralPath $architecturePath -Raw).Replace(
+            'Git CAS is not a file lock or task queue',
+            'Git CAS queues file writers'
+        )
+        Set-Content -LiteralPath $architecturePath -Value $architecture -Encoding UTF8
+        $findings = @(((Invoke-LeanPlanningVerifier $fixtureRoot).output | ConvertFrom-Json).findings)
+        @($findings | Where-Object code -eq 'control_plane_status_missing').Count | Should Be 1
+        @($findings | Where-Object code -eq 'git_cas_semantics_missing').Count | Should Be 1
+        @($findings | Where-Object code -eq 'git_cas_negative_boundary_missing').Count | Should Be 1
+    }
+
+    It 'validates pilot observation dimensions and values' {
+        $dimensionRoot = New-LeanPlanningFixture 'pilot-observation-dimensions'
+        $registry = Get-Content -LiteralPath (Join-Path $dimensionRoot $pilotRegistryRelative) -Raw | ConvertFrom-Json
+        $registry.observation_dimensions = @($registry.observation_dimensions | Where-Object { $_ -ne 'context_adapter' })
+        Save-LeanPilotRegistry $dimensionRoot $registry
+        $dimensionFindings = @(((Invoke-LeanPlanningVerifier $dimensionRoot).output | ConvertFrom-Json).findings)
+        @($dimensionFindings | Where-Object code -eq 'pilot_observation_dimensions_drift').Count | Should Be 1
+
+        $valueRoot = New-LeanPlanningFixture 'pilot-observation-values'
+        $registry = Get-Content -LiteralPath (Join-Path $valueRoot $pilotRegistryRelative) -Raw | ConvertFrom-Json
+        $sample = New-LeanPilotSample 1 $registry.required_categories[0]
+        $sample.observations.coordination_mode = 'unbounded_swarm'
+        $sample.observations.shared_write_set_policy = 'last_writer_wins'
+        $sample.observations.tool_dispositions = @('install_everything')
+        $sample.observations.context_adapter = 'authoritative_graph'
+        $sample.observations.skill_lifecycle_action = 'auto_promote'
+        $registry.samples = @($sample)
+        Save-LeanPilotRegistry $valueRoot $registry
+        $valueFindings = @(((Invoke-LeanPlanningVerifier $valueRoot).output | ConvertFrom-Json).findings)
+        @($valueFindings | Where-Object code -eq 'unknown_pilot_coordination_mode').Count | Should Be 1
+        @($valueFindings | Where-Object code -eq 'unknown_pilot_shared_write_policy').Count | Should Be 1
+        @($valueFindings | Where-Object code -eq 'unknown_pilot_tool_disposition').Count | Should Be 1
+        @($valueFindings | Where-Object code -eq 'unknown_pilot_context_adapter').Count | Should Be 1
+        @($valueFindings | Where-Object code -eq 'unknown_pilot_skill_lifecycle_action').Count | Should Be 1
     }
 
     It 'blocks a P6 manifest while admission is on hold' {

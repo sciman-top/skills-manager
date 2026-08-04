@@ -3,7 +3,7 @@
 **program_id**: `skills-manager-vnext`
 **status**: accepted-direction
 **implementation_status**: phase-5-adaptive-capability-fabric-repo-verified-maintenance-hold
-**最后更新**: 2026-08-04
+**最后更新**: 2026-08-05
 
 ## 1. 产品结论
 
@@ -29,6 +29,10 @@ North Star：在不复制宿主原生推理、编码和运行能力的前提下�
 8. 澄清不足会让错误方向持续执行；澄清过多又会把可自动推进的低风险工作切碎为人工审批流水线。
 9. 门禁没有按风险升级，日常切片重复运行完整套件或为同一风险堆叠多层测试，反馈周期和维护成本持续膨胀。
 10. 将一次成功或未经回放的总结直接升级为 skill、规则或长期记忆，会把偶然做法、项目局部事实和错误经验扩散到后续任务。
+11. “多 Agent”常被误写成固定角色团队或任意并行写入；缺少结果 owner、write-set admission、单 writer、集成顺序和失败回收时，并行只会放大冲突与虚假完成。
+12. “lease”与“Git CAS”容易被误解为文件级互斥锁和自动排队。Git 只能条件更新 ref、检测内容或分支漂移；同一路径的写入协调仍必须由宿主 coordinator 和单 writer 规则承担。
+13. 社区 workflow、知识库和代码图工具常以能力数量或热度进入默认栈，却没有 problem evidence、native equivalent、语言覆盖、数据/权限边界、索引 freshness、净收益和退役触发。
+14. “skills 会被强模型淘汰”与“不断堆 skills”都过于绝对；真正需要管理的是可复用工作流的边际价值、触发精度、上下文成本和宿主原生替代能力。
 
 ## 3. 目标用户
 
@@ -62,6 +66,8 @@ North Star：在不复制宿主原生推理、编码和运行能力的前提下�
 | `JTBD-007` | 尽快获得首个可验证用户价值 | 先跑通最短端到端主链，TTFV 可观察且非产品 artifact 受控 |
 | `JTBD-008` | 在有界授权内让 AI 连续执行 | 低风险切片自动推进；方向变化、授权越界或连续失败时才打断用户 |
 | `JTBD-009` | 为软件生命周期当前阶段选择最小能力组合 | 只启用当前阶段必需的 lens、skill、tool 和 verifier，不机械展开完整团队/流程 |
+| `JTBD-010` | 让多个 AI 安全讨论或并行处理同一目标 | 只读评议与写入执行分层；每个切片有结果 owner、base revision、互斥 write set、集成顺序和失败回收 |
+| `JTBD-011` | 判断社区 workflow、知识库或代码图是否值得接入 | 每个候选都有 `adopt | adapt | defer | reject`、native baseline、真实消费者、风险、验证和 retirement trigger |
 
 ## 5. 产品原则
 
@@ -102,6 +108,14 @@ Discovery 先确定用户、问题、成功信号和非目标；实现先跑通�
 ### `PP-009 Adaptive governance`
 
 治理、角色 lens、测试层级和能力组合随生命周期模式与风险升级。一个风险只使用最低充分证明；未产生净收益的流程、字段、skill 和指标应降级或退役。
+
+### `PP-010 Git truth spine, host-owned coordination`
+
+Git 保存版本、分支、candidate commit 和集成结果；宿主原生 coordinator 保存当前任务的分解、分派、等待和合并责任。本项目只提供可验证的 planning/write-set/freshness 合同，不建立第二套 scheduler、lease service 或 agent control plane。
+
+### `PP-011 Sparse capabilities, evidence-gated adapters`
+
+默认工具栈保持稀疏：宿主原生推理与 Git/仓库门禁是主干，skill 只承接稳定重复 workflow，MCP/connector 只承接实时外部数据或动作，知识库/代码图只在 repo-native 搜索和文档不足的真实样本中作为可替换 adapter。没有净收益证据的能力不进入默认面。
 
 ## 6. 功能需求
 
@@ -224,6 +238,21 @@ Discovery 先确定用户、问题、成功信号和非目标；实现先跑通�
 - `FR-LDL-006`：重复工作先成为 `skill_candidate`，经代表任务 replay、失败样本修订、shadow、有限 canary 和 reviewed promotion 后才进入稳定 skill；持续记录触发精度、净收益、适用边界和退役条件，宿主原生能力覆盖或模型进步消除缺口时应合并、降级或 retire。
 - `FR-LDL-007`：M1 pilot 只登记达到证据停止点的真实任务；synthetic、候选和当前 pilot/规划维护自身不得计入 10 个样本。优先使用近期可比 native-only 历史任务或交替匹配任务作 baseline；无可比项时只做描述性报告，不要求重复执行同一任务，也不宣称因果收益。
 
+### 6.11 Engineered agent workflow and tool adoption
+
+- `FR-EWF-001`：宿主原生主 Agent/coordinator 是唯一结果 owner，负责目标分解、任务 admission、分派、等待、集成和最终 truth closeout；skills-manager 不调度 worker、不维护运行队列、不接管会话或权限。
+- `FR-EWF-002`：每个可执行切片必须声明 `task_id / result_owner / mode / base_revision / depends_on / exact_write_set / authority / verification / rollback / stop_conditions`；优先复用 task manifest、plan、Git branch/worktree 和 evidence，不新增第二套 lifecycle registry。
+- `FR-EWF-003`：两到三个 Agent 可在设计阶段并行给出只读、独立、带假设和 trade-off 的候选方案；只有 coordinator 的综合决定进入 spec/task，讨论结论本身没有写入、apply、发布或 live authority。
+- `FR-EWF-004`：并行写入只允许 write set 互斥、输入/base revision 固定且可独立验证的切片；共享文件、共享生成 seam、迁移顺序或同一外部状态必须单 writer 或串行，不能用“稍后解决冲突”代替 admission。
+- `FR-EWF-005`：lease 是 coordinator 对 `owner + write_set + base_revision + expiry/recovery` 的有界 admission claim，不是文件锁或成功承诺；过期、撤销或 reassignment 前必须确认旧 writer 已停止，候选 worktree/commit 保留为可审查输入。
+- `FR-EWF-006`：Git CAS 仅指 ref/expected-old-object 的条件更新，文件 freshness 使用内容 hash；它们用于检测 stale writer，不提供文件级排队、互斥、公平性或“谁先提交谁自动胜出”。共享路径仍由单 writer 和显式集成决策控制。
+- `FR-EWF-007`：集成按依赖拓扑逐个消费 candidate commit/patch；每次先验证 base/freshness 与声明 write set，再处理冲突和 affected gate；最终由 integration owner 运行唯一 closeout gate，子 Agent 的局部 pass 不能升级整体状态。
+- `FR-EWF-008`：工具候选必须记录 `source/revision/license/trust / problem_evidence / native_equivalent / real_consumers / disposition / integration_mode / data_auth_write_boundary / evaluation / maintenance_cost / retirement_trigger / truth_level`；缺任一安全或真值字段时保持 `defer`。
+- `FR-EWF-009`：`AGENTS.md` 承接稳定仓库约定，skill 承接重复 workflow，plugin 承接可安装组合，MCP/connector 承接实时外部数据/动作，hook/script/CI 承接机械 enforcement，Git/worktree 承接版本与写入隔离；不得用一个 surface 替代所有层。
+- `FR-EWF-010`：知识库/代码图/理解工具只有在至少两个独立真实任务证明 repo-native `rg`、符号/测试/文档与宿主上下文不足，且语言覆盖、隐私、索引 freshness、资源、供应链和卸载/重建路径均可验证时，才进入 read-only canary；它们不成为源码、任务或验收真源。
+- `FR-EWF-011`：skill 优化只借鉴 `real sample -> replay -> shadow -> bounded canary -> reviewed promotion -> retain/revise/retire`；不得把领域研究系统的自动蒸馏、provider/embedding/solver 依赖直接解释为通用 workflow 自动升级能力。
+- `FR-EWF-012`：M1 pilot 在既有 10 个真实样本中同时观察 coordination mode、shared-write policy、tool disposition、external context adapter 和 skill lifecycle action；本 maintenance 切片自身不计数，也不为观察字段建设 daemon 或 telemetry。
+
 ## 7. 非功能需求
 
 - `NFR-COMP-001`：现有 `skills.json`、lock、CLI aliases、generated `skills.ps1` 和 MCP/skill projection 行为保持兼容。
@@ -246,6 +275,10 @@ Discovery 先确定用户、问题、成功信号和非目标；实现先跑通�
 - `NFR-LDL-001`：maintenance design/pilot 不增加 schema major、daemon、数据库、长期任务引擎、固定角色 runtime 或任何宿主写入行为。
 - `NFR-LDL-002`：LLM 判断、语义评分和自我总结只能作为建议或候选信号，不得成为唯一硬门禁、权限判定或 skill promotion 依据。
 - `NFR-LDL-003`：主链优先于完备架构，测试采用最低充分层级；`designed | planning_contract | implemented | repo_verified | host_loaded | live_accepted` 不得越级。
+- `NFR-EWF-001`：M0.2 只增加文档、task/registry 字段、verifier 与 tests；禁止新增 scheduler、lease daemon、数据库、provider router、worker runtime、profile/host mutation 或 schema major。
+- `NFR-EWF-002`：共享 write set 的默认策略必须是 `single_writer`；任何 parallel-write exception 都必须有可复核的路径互斥证明和 integration owner，不能由模型置信度或 Git merge 成功替代。
+- `NFR-EWF-003`：外部 context adapter 默认只读、最小 root、redaction-first、可重建且可移除；索引或图谱过期、语言不支持、权限不明或证据来源缺失时 fail-closed，并回退 repo-native 工具。
+- `NFR-EWF-004`：tool/skill promotion 的语义判断可由宿主 AI 提议，但 availability、freshness、权限、预算、供应链、测试和 truth-level advancement 必须由确定性证据或人工 review 约束。
 
 ## 8. 产品级验收
 
@@ -265,6 +298,10 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 12. capability 辅助层必须在“只使用宿主原生匹配 + 当前 profile”基线之上证明净收益；deterministic corpus、profile 可见性和少量 host replay 分别报告，不互相冒充。
 13. skill inventory 变化后可获得确定性的 profile drift 诊断；宿主 proposal stale、引用未知对象、触碰 protected skill、产生 no-op/冲突或超预算时 fail-closed，且诊断全过程不改变配置和 active profile。
 14. 经授权的 profile 优化只对非活动 profile 执行有界 canary；fresh-task replay 必须证明正负代表场景并恢复原 active profile，失败时按 receipt 自动回滚，整个链路保持 host semantics 与 deterministic state policy 分离。
+15. 多 Agent 设计评议可并行，但所有写入任务都能追到一个 result owner、固定 base revision、互斥或单 writer write set、集成顺序和最终 closeout owner。
+16. verifier 能阻断“Git CAS 等于文件排队/抢占胜出”、共享路径无 owner 并行写入、社区 control plane 偷渡、无证据工具接入和 P6/live truth 越级。
+17. 任一外部知识库或代码图 adapter 在接入前都有两个独立真实失败样本、语言/隐私/freshness/资源/供应链/卸载证据；条件不满足时保持 defer，repo-native 工具仍可完成主链。
+18. skill/tool 的保留以真实 replay/pilot 净收益为依据；强模型或宿主原生能力覆盖后能通过已记录 retirement trigger 降级或删除，不以资产数量作为成功指标。
 
 ## 9. 成功指标
 
@@ -288,6 +325,9 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 | `MET-014` | profile reconciliation proposal 的 stale/no-op/budget/policy 拒绝与 reviewed apply 转化 | observe-only；当前只实现 plan，不建立自动 apply 指标门禁 |
 | `MET-015` | profile canary replay 通过、回滚、用户纠正与 active profile 恢复 | observe-only；deterministic contract 与 host replay 分层，未建立跨任务净收益前不设语义硬阈值 |
 | `MET-016` | cold discovery 的 uncached input、cached ratio、tool rounds 与 latency | observe-only；按同 prompt A/B；任何减少回合但增加 uncached/延迟或降低完整读取可靠性的方案必须回退 |
+| `MET-017` | 多 Agent 写入冲突、stale candidate、shared-write reassignment 与集成返工 | observe-only；按真实任务记录，未建立 baseline 前不设并行度或冲突率 KPI |
+| `MET-018` | 工具候选的 adopt/adapt/defer/reject 分布、真实消费者、维护成本与退役转化 | observe-only；热度、star 或一次演示不构成 adoption success |
+| `MET-019` | 外部 context adapter 相对 repo-native baseline 的检索命中、纠正、延迟、资源和 freshness 失败 | 仅在触发 read-only canary 后记录；无两个独立失败样本时不运行 |
 
 ## 10. 发布和兼容边界
 
@@ -302,6 +342,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - P5-local profile optimization canary 在 advisor 之后增加显式 token、非活动 profile 的 bounded apply、runtime receipt、fresh-task replay 和失败回滚；它不自行调用宿主 AI、不永久切换 active profile，也不构成 P6 或 live acceptance。
 - P5-local follow-up 已把 canonical inventory delta 接到 projection 主链的 advisory signal；宿主在同一任务边界可据此启动 reconciliation，但 profile proposal/apply 仍遵守 ADR-SMV-018/019，不等于静默写配置。
 - P5 后的 `maintenance_design` 已建立 Lean Delivery advisory 规划契约，并由独立 registry 启动 M1 `collecting (0/10)`；它不是新 Phase，不改变 P5/P6 状态，也不证明 pilot 已执行、完成或产生业务效果。
+- `maintenance_design` M0.2 只补强 host-owned coordination、single-writer write-set admission、Git freshness/CAS 语义、tool disposition 和 context-adapter admission；不引入 coordinator/lease runtime，也不安装 Trellis、AGOS、GBrain、CodeGraphContext、Understand Anything 或 OptSkills。
 - GUI、daemon、远端协作、数据库和 domain core 重写均为 conditional，不进入当前承诺。
 
 ## 11. 官方与社区依据
@@ -320,6 +361,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - [OpenAI Memories](https://learn.chatgpt.com/docs/customization/memories)：local memories 是可选回忆层，稳定规则仍进入 `AGENTS.md`/仓库文档；本项目不复制记忆库。
 - [OpenAI Codex App Server](https://learn.chatgpt.com/docs/app-server) 与 [Codex SDK](https://learn.chatgpt.com/docs/codex-sdk)：深度客户端集成和编程式线程控制已有原生入口；只有未来独立产品需求与 P6 admission 同时成立时才评估集成，不在本仓复制。
 - [OpenAI Scheduled tasks](https://learn.chatgpt.com/docs/automations)：稳定重复流程可由宿主 scheduled tasks + skill 承接；先人工跑通并验证，再自动化。本仓不建 daemon/scheduler。
+- [Git `update-ref`](https://git-scm.com/docs/git-update-ref) 与 [`git push --force-with-lease`](https://git-scm.com/docs/git-push)：采用 expected-old ref 作为 stale-write guard；明确它们不提供文件级锁、排队、公平性或自动冲突裁决。
 - [MCP specification](https://modelcontextprotocol.io/specification/latest) 与 [MCP Registry](https://registry.modelcontextprotocol.io/)：采用 schema、versioning、validation 和来源/所有权边界。
 
 ### 社区采纳或适配
@@ -329,6 +371,12 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - [mattpocock/skills](https://github.com/mattpocock/skills)：采纳小、可组合、可编辑副本与订阅式 plugin 的区别；拒绝由 workflow 接管完整工程过程。
 - [github/spec-kit](https://github.com/github/spec-kit)：适配从 constitution/spec/plan/tasks 到实现的可追踪结构；拒绝强制 TDD、固定文件数和所有任务人工审批等与本仓风险分级不符的流程。
 - [OpenHands](https://github.com/All-Hands-AI/OpenHands) 与 [LangGraph](https://github.com/langchain-ai/langgraph)：仅作为 agent runtime、状态图和可恢复执行的对照；当前 defer，不把 runtime/control plane 移入 skills-manager。
+- [mindfold-ai/Trellis `v0.7.0-beta.1`](https://github.com/mindfold-ai/Trellis/tree/v0.7.0-beta.1)：适配 repo 内 spec/task/journal、分阶段验证和可移交上下文；其自动 skill/subagent 四阶段控制面与 AGPL-3.0 分发边界和本仓原生能力重叠，因此不安装、不作为默认 runtime。
+- [zsr131550/agos `0.1.0` Alpha](https://github.com/zsr131550/agos)：适配 `write_scope`、candidate patch、ledger/receipt 和 merge gate 的协议思想；上游明确声明全程 AI 制作且无人审核，当前 reject 其 runtime/dashboard/hook 接管，只保留待核参考。
+- [fujiwaranoM0kou/OptSkills](https://github.com/fujiwaranoM0kou/OptSkills)：只借鉴 trajectory clustering、deterministic serialized library write、独立 eval 与 checkpoint；它面向数学优化且依赖 provider、embedding、Python 3.12/Gurobi 等，不是通用 skills/workflow 自动升级器。
+- [garrytan/gbrain](https://github.com/garrytan/gbrain)：作为完整知识库、图谱、daemon/MCP 与权限系统参考；当前 repo 文档/搜索没有两个独立失败样本，且其数据库、长期 ingestion、密钥和大量工具面过重，保持 defer。
+- [CodeGraphContext](https://github.com/CodeGraphContext/CodeGraphContext) 与 [Egonex-AI/Understand-Anything](https://github.com/Egonex-AI/Understand-Anything)：只借鉴 read-only code graph、影响分析、增量索引和可视化；前者当前 23 种语言不含 PowerShell，后者首轮多 Agent/LLM 分析与持久图谱成本高，均不进入本仓默认栈。
+- “souljourney lightweight workflows”未能唯一定位到可核验的公开工程仓库；在 source/revision/license 可确定前保持 `defer`，不把口述名称写成已采用来源。
 - [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)：仅在外置个人 Agent/长期任务需要独立验证后评估组合；不得作为本仓的默认执行内核或真值源。
 - [Obsidian](https://obsidian.md/)：可作为用户拥有的产品知识库和长期笔记界面；本仓只消费明确导出的文档/链接，不把 vault、插件或双链索引变为必需 runtime。
 - `D:\CODE-other\governed-ai-coding-runtime`：采纳规则最小化、`common/platform_delta/project_action` 层级职责、共同语义与平台差异分离、native probe 和 wrapper 启发；把固定结构/体量预算适配为 profile；拒绝恢复已退役的中央 registry/sync/audit runtime。精确 revision、逐项 disposition 和证据见 [规则治理参考采纳矩阵](rule-governance-adoption-matrix.md)。
@@ -345,6 +393,8 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - `DEC-PROD-006`：Rules Advisor 使用责任覆盖模型，不建立通用规则 AST、重型 policy engine 或强制统一模板。
 - `DEC-PROD-007`：Lean AI Software Delivery 是 P5 后的 advisory maintenance track；先通过 10 个真实任务 observe-only pilot 证明净收益，再决定保留、修订、退役或是否形成新的 P6 admission 输入。
 - `DEC-PROD-008`：Goal、subagents、scheduled tasks、local memories、App Server/SDK 属于宿主 native baseline 和本项目退役触发器；只有本仓独有的 capability/rule discovery、advice、bounded transaction 与 verification seam 可在证据支持下保留。
+- `DEC-PROD-009`：工程化多 Agent 采用“host-owned coordinator + read-only design panel + disjoint-worktree execution + single-writer shared seam + sequential integration”；Git 是真值主干和 stale guard，不是文件任务队列。
+- `DEC-PROD-010`：社区 workflow、知识库、代码图和自动 skill 学习均先进入证据化 disposition；当前候选只采纳协议启发，不安装运行时，M1 真实任务证据决定后续 retain/adapt/retire。
 
 以下选择有意延迟到有真实代码/宿主证据的任务，不允许 AI 在更早任务中猜定：
 

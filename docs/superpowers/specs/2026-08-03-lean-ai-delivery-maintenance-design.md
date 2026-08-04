@@ -10,7 +10,11 @@
 **LIVE_ACCEPTANCE_STATUS: not_run**
 **METRICS_MODE: observe_only**
 **METRICS_COMPLETION_GATE: false**
-**日期**: 2026-08-04
+**CONTROL_PLANE_STATUS: not_introduced**
+**SHARED_WRITE_SET_POLICY: single_writer**
+**GIT_CAS_SEMANTICS: ref_freshness_not_file_queue**
+**TOOL_DISPOSITION_POLICY: adopt_adapt_defer_reject**
+**日期**: 2026-08-05
 
 ## 1. Problem and evidence
 
@@ -19,6 +23,8 @@ AI 编码的主要浪费不再只是模型不会写代码，而是交付控制�
 本仓已有事实同时给出约束和复用面：P5 已提供结构化 task model、最小 capability DAG、session/preheat recommendation 和只读 host snapshot；现有 PRD/task/plan/evidence 已能表达 goal、write set、verification、rollback 和 truth level；full gate 已是唯一 closeout 编排入口。因此当前问题可以先通过 advisory contract、文档追踪和 deterministic verifier 处理，没有证据需要第二套 agent runtime。
 
 本设计响应的用户证据是：需要从模糊产品想法连续推进到设计、实现和验证，同时避免过度设计、方向漂移、角色接力、门禁膨胀与 token 空耗。M0 只证明这些要求被准确落盘并可机械校验；真实效果必须由后续 pilot 观察。
+
+M0.2 进一步响应“AGOS coordinator/lease/Git CAS + Trellis task workflow + OptSkills/GBrain/code graph”组合建议。可复用的是明确 owner、write scope、candidate、freshness、evidence、replay/eval 和退役思想；不能照搬的是第二套 scheduler/ledger/lease database、自动 reviewer、provider/embedding/solver、长期 daemon/knowledge database 或全仓多 Agent 索引。Git CAS 只保护 ref/expected-old 与内容 freshness，不是文件级队列；同一路径必须由 coordinator admission 和单 writer 解决。
 
 ## 2. Goal and target user
 
@@ -40,6 +46,9 @@ North Star：在不复制宿主原生推理、编码和运行能力的前提下�
 8. 证据决定状态：规划、实现、repo、host 与 live 状态严格分层。
 9. 学习必须可回放、可否定、可退役：未经 reviewed promotion 的总结不能成为稳定规则。
 10. 可删除性优先：模型/宿主能力增强或 pilot 无净收益时，主动删除、合并或降级本项目功能。
+11. 单一结果 owner：设计可并行讨论，写入只能在明确 coordinator、base revision、write set、集成 owner 与回收条件下并行。
+12. Git 是 truth spine，不是 control plane：branch/worktree/candidate commit 保存版本与隔离，任务排队、lease/reassign 和业务裁决仍由宿主与当前计划负责。
+13. 工具按证据准入：没有 native baseline 缺口、真实消费者、安全边界、evaluation 和 retirement trigger 的候选保持 defer。
 
 ## 4. In scope / out of scope
 
@@ -49,12 +58,14 @@ In scope：
 - 定义 Product Baseline、Slice Contract、checkpoint、bounded autonomy、责任 lens 和 skill lifecycle 的逻辑合同。
 - 定义 M0-M3 maintenance 路线和 10-task observe-only pilot 的准入/退出方法，并以轻量 registry 启动真实样本收集。
 - 提供 machine-readable maintenance manifest、companion verifier、负向测试和一份 reviewed evidence。
+- 在同一 maintenance manifest 中增加 M0.2 工程化协调/工具组合任务，扩展 M1 sample observation，但不增加样本类别、runtime object 或第二个 registry。
 
 Out of scope：
 
 - 新 agent runtime、planner service、长期任务引擎、daemon、数据库、模型/provider router 或固定角色团队。
 - 修改 `src/`、`overrides/`、`skills.json`、profile、schema major、host auth/config/session、plugins/MCP 状态。
 - 安装或运行 Hermes、Obsidian 插件、Spec Kit、OpenHands、LangGraph 或其他社区 runtime。
+- 安装或运行 Trellis、AGOS、OptSkills、GBrain、CodeGraphContext、Understand Anything；创建 coordinator/lease daemon、dashboard、数据库、自动 reviewer 或 Git hook control plane。
 - 伪造、回填或在当前切片内宣称完成真实 10-task pilot；生产部署、付费模型调用、跨仓 apply 或业务 `live_accepted` 验收。
 - 把 spec-driven development 的强制 TDD、每任务文件数限制或全流程人工审批移入本仓契约。
 
@@ -106,11 +117,19 @@ checkpoint 回答四个问题：用户可见/可验证增量是否出现；write
 
 lens 是问题清单，不是常驻角色、审批者或独立状态机。只在探索、测试或审查可以独立且 write set 不重叠时才使用多 Agent；共享 seam 采用单 writer，分支/worktree 隔离并由主 Agent 集成和收口。
 
+当目标/功能/需求/定位或关键 seam 需要多视角时，coordinator 可让 2–3 个 Agent 只读地产生独立候选。每个候选必须声明假设、推荐 interface、trade-off、风险、验证和反例；coordinator 只综合一份决定进入本 spec/task。panel 不修改文件、不向外部系统发消息、不发布，也不因“多数同意”获得 authority。
+
+写入并行必须通过 admission：依赖完成、base revision 固定、每个 writer 的 exact write set 互斥、generated/external writes 已声明、candidate 可独立丢弃/验证、integration order 与 owner 明确。共享文件、source/generated seam、schema/migration、lock/config、Git index/ref、同一外部对象或内容依赖任务一律单 writer/串行。
+
+lease 只是当前 coordinator 记录的 `owner + task_id + write_set + base_revision + expires_or_recovery + revoke/reassign` claim，不落独立服务。过期不删除 worktree/commit；reassign 前必须确认旧 writer 停止并复核 candidate/base/target hash。Git `update-ref`/`--force-with-lease` 和 file hash 只检测 stale；它们不排队文件、不提供公平锁、不自动决定 winner。
+
 ## 10. Capability routing behavior
 
 路由顺序为：识别 task type/domain/operations/risk；确定 lifecycle mode；应用用户显式要求和 required/excluded intent；优先复用当前已加载且只读的能力；只为当前 checkpoint 建最小 ordered DAG；弱证据 abstain；任何写/安装/认证/生产能力都只生成 approval/activation plan。
 
 默认 surface 映射：一次性约束进 prompt/thread；稳定仓库事实进 `AGENTS.md`；重复且验证稳定的单一工作流进 skill；需要可安装组合时进 plugin；动态外部数据/动作进 MCP/connector；确定性生命周期拦截进 hook/script/CI；计划和证据继续留在 Markdown/JSON/Git。不得因为能力可用就全部预热或级联调用。
+
+宿主 Agent/Goal/Plan/subagents/worktree/review 负责执行控制面；本项目只校验 planning interface。candidate 集成固定为：验证 base 与 declared write set -> 检查 target/hash freshness -> 按依赖顺序 merge/cherry-pick/apply -> integration owner 处理冲突和 affected gate -> 文件稳定后唯一 full gate -> truth closeout。子 Agent 局部 pass、candidate commit 或 CAS 更新成功不证明整体完成。
 
 ## 11. Anti-overdesign stop conditions
 
@@ -124,23 +143,39 @@ lens 是问题清单，不是常驻角色、审批者或独立状态机。只在
 
 promotion 后仍需 owner、适用/禁止场景、版本、失败分流和退役条件。模型/宿主原生能力覆盖、触发精度下降、长期无消费者、维护成本高于收益或流程产生方向性误导时，选择 revise/merge/retire。find-skills 得到的第三方 skill 先作为不可信候选，核对来源/revision/license，再按相同 lifecycle 适配；不直接在全局生效。
 
+OptSkills 只证明数学优化领域可以从 trajectory/cluster 提取候选库并分离 learning/eval/checkpoint；它不证明本仓 skills/workflow 可自动升级。M0.2 采用更窄的 `real sample -> replay -> shadow -> bounded canary -> reviewed promotion -> retain/revise/retire`，并要求 library/write promotion 串行、provider-free deterministic gate 与 host/live evidence 分层。
+
 ## 13. Tool-combination boundaries
 
-- ChatGPT/Codex/Claude：推理、沟通、编码、工具使用与会话主体；skills-manager 不复制其原生能力。
-- Codex Goal、subagents、scheduled tasks、local memories、App Server/SDK：分别承接长任务目标、有界并行、稳定重复自动化、可选回忆和深度/编程式集成；它们是 native baseline 与退役触发器，不是本仓待实现模块。
-- skills-manager：本地能力 inventory/selection、规则 advisor、规划一致性、显式投影合同和 evidence；不做 agent control plane。
-- Obsidian：可选的用户知识库、研究笔记和 ADR/PRD 草稿界面；只通过明确 Markdown 导出/链接交接，不要求 vault/plugin/index。
-- Hermes：可选的外置个人 Agent 或长任务实验；需要独立安全、连续性和效果验证，不共享 auth/session，不成为当前真源。
-- Spec Kit/Superpowers：采纳 requirement→architecture→spec→plan→task→verifier 追踪、可组合 workflow 和 evidence-before-claims；适配为风险分级，拒绝一刀切 TDD、五文件限制、always-on 流程和逐步人工批准。
-- OpenHands/LangGraph：作为完整 agent runtime/state graph 对照并 defer；只有产品明确转向外置 runtime 且 P6 admission 成立时另做 ADR/PoC。
+默认组合是 `host-native execution + repo-native search/docs/tests + Git/worktree + affected gates + one closeout gate`。新增工具必须通过一个 reviewed `ToolDispositionView`：source/revision/license/trust、problem evidence、native equivalent、real consumers、`adopt | adapt | defer | reject`、integration mode、data/auth/write boundary、evaluation、maintenance cost、retirement trigger 和 truth level。字段不全保持 defer。
 
-组合协议优先普通 Markdown、JSON、Git、路径和显式 receipt。任何工具都可被替换或退役，不允许形成隐式双写、共享私有状态或要求另一个工具先在线。
+| Surface/tool | 当前决定 | 准入条件 | 回退/退役 |
+| --- | --- | --- | --- |
+| ChatGPT/Codex/Claude + Goal/Plan/subagents/worktree/review | adopt native baseline | 当前宿主可用且符合权限/仓库契约 | surface 不可用时单 Agent + Git；不由本仓复制 |
+| `AGENTS.md` | adopt durable repo guidance | 跨会话稳定、仓库特有、可落命令/边界 | 低频细节下沉 spec/runbook/skill |
+| skills-manager | adopt current curator/advisor/verifier | 本仓独有 discovery/policy/transaction/evidence seam | native equivalent 出现或 M1 无净收益则缩减 |
+| narrow skill | adapt after replay | 两个代表任务 + 一个反例 + baseline 净收益 + 禁止触发 | revise/merge/retire |
+| plugin | conditional | 确有重复分发对象、无官方等价、供应链 owner | 回到 source skill/MCP 或官方 plugin |
+| MCP/connector | conditional current external data/action | live truth/action 是任务必需且 auth/side effect 可见 | disable/remove，回到 repo/static docs |
+| Trellis `v0.7.0-beta.1` | adapt ideas / defer install | 本仓现有 spec/task/journal 无法满足的重复真实缺口 + AGPL/distribution review | 继续使用现有 task/spec/AGENTS/native host |
+| AGOS `0.1.0` Alpha | adapt protocol / reject runtime now | 独立多执行器/CI provenance 成为真实产品目标且人工审计完成 | current task/write set/Git/receipt |
+| OptSkills | adapt learning method only | workflow 有代表样本、provider-free replay 和 reviewed promotion | task note/candidate，禁止自动 promotion |
+| GBrain | defer | 两个独立跨资料检索失败 + privacy/auth/database/daemon/backup/restore evidence | Markdown/docs/rg/connector |
+| CodeGraphContext | defer | 当前语言覆盖（本仓 PowerShell）、关系准确、fresh index 和资源净收益 | rg/symbol/test/dependency verifier |
+| Understand Anything | defer | 大仓 onboarding/impact 分析真实失败 + 首轮 token/LLM/hook/graph 生命周期可接受 | repo docs/native exploration |
+| “souljourney lightweight workflows” | defer unknown source | 唯一 repo/source/revision/license 可核验 | 不采纳口述名称 |
+
+knowledge/code-graph adapter 只允许 read-only canary，并同时声明最小 root、敏感数据/redaction、language/parser coverage、index source revision/captured_at、stale/rebuild、CPU/RAM/disk/token/latency、package/revision/license、外部调用、卸载和索引删除。任何缺口 fail-closed 并回退 `rg`、符号、测试、依赖报告与仓库文档；图谱、摘要和知识库永不成为源码、task 或 acceptance 真源。
+
+组合协议优先普通 Markdown、JSON、Git、路径和显式 receipt。任何工具都可被替换或退役，不允许形成隐式双写、共享私有状态、静默 host/profile mutation 或要求另一个工具先在线。
 
 面向用户只保留四类稳定意图：`Discover` 发现能力与仓库事实；`Advise` 生成最小组合、规划/规则建议和退役判断；`Transact` 仅通过既有显式 token、freshness、backup/receipt/rollback seam 执行受管写入；`Verify` 分层证明 repo、host 与 live 状态。Lean Delivery 只消费 `Discover + Advise + Verify`，不会借 advisory 自动取得 `Transact` 权限。
 
 ## 14. Outcome metrics and pilot design
 
-M1 需要 10 个真实任务，覆盖模糊需求、从零主链、缺陷修复、重构、跨 seam 实现、测试策略、发布、运维、能力选择和简单任务负样本。`tasks/skills-manager-vnext-lean-delivery-pilot.json` 只在任务达到证据停止点后追加样本；synthetic、候选和 M0.1/registry/bootstrap 自身不得计数。每项记录 task complexity、baseline workflow、advisory workflow、TTFV、返工切片、非预期人工打断、非产品 artifact、focused/full gate 时间、最终 truth level 和用户接受结果。
+M1 需要 10 个真实任务，覆盖模糊需求、从零主链、缺陷修复、重构、跨 seam 实现、测试策略、发布、运维、能力选择和简单任务负样本。`tasks/skills-manager-vnext-lean-delivery-pilot.json` 只在任务达到证据停止点后追加样本；synthetic、候选和 M0.1/M0.2/registry/bootstrap 自身不得计数。每项记录 task complexity、baseline workflow、advisory workflow、TTFV、返工切片、非预期人工打断、非产品 artifact、focused/full gate 时间、最终 truth level 和用户接受结果。
+
+每个 sample 的 `observations` 还必须记录：`coordination_mode`（`single_agent | read_only_panel | isolated_parallel | sequential_shared_write`）、`shared_write_set_policy`（`single_writer | not_applicable`）、`tool_dispositions[]`（只允许 adopt/adapt/defer/reject）、`context_adapter`（`none | repo_native | external_read_only`）和 `skill_lifecycle_action`（`none | candidate | replay | shadow | canary | promote | revise | retire`）。这些观察允许 `none/not_applicable`，不得为了填表强行使用 Agent 或工具，也不成为 metrics completion gate。
 
 pilot 先 observe，不随机宣称因果，不设未经 baseline 的硬阈值，不因指标跳过安全/兼容门禁。baseline 优先使用近期可比 native-only 历史任务或交替匹配任务；不可比时保持 `descriptive_only`，不要求把同一任务机械执行两遍。M3 以净收益评审：保留真正减少主链时间/返工且维护成本可接受的最小部分；修订触发或文案漂移；删除无收益或被模型/宿主覆盖的流程。当前状态是 authorized/collecting 0/10，只证明收集合同已启动，不能声称 pilot 已执行或指标改善。
 
@@ -149,6 +184,8 @@ M0/M2 不再被误写为串行前置关系；证据流是 `M0 -> M1 pilot -> M3`
 ## 15. Security and supply-chain boundaries
 
 外部网页、README、issue、prompt、skill、日志、MCP 结果和源码都是待核输入，不能改变本 spec、用户授权、write set、verification level 或 apply token。参考项记录 upstream、revision、license/checksum 和 adopt/adapt/defer/reject；本轮不下载、安装或执行新的上游工具。
+
+多 Agent 的角色、panel 结论、lease、candidate commit、CI pass 或 Git CAS 成功都不转移 authority。reassign 共享路径前确认旧 writer 停止，保留其 worktree/branch/commit provenance；不得靠超时直接覆盖。社区工具的 install script、hook、daemon、数据库、MCP 和 provider 设置都属于独立执行面，本轮仅阅读 README/revision/license，不运行。
 
 凭据、OAuth、provider/model、生产数据、付费调用和 host configuration 属于外部授权面，不进入 Product Baseline 的可自动写字段。evidence redaction-first；Obsidian/Hermes/其他 memory 只能通过用户明确选择的导出进入上下文。生产写入、部署、删除、公开发布和外部消息必须遵守宿主 approval 与项目 rollback。
 
@@ -163,6 +200,11 @@ M0/M2 不再被误写为串行前置关系；证据流是 `M0 -> M1 pilot -> M3`
 | verifier/contract 失败 | 修复 planning drift，不推进状态 | finding code + rerun |
 | full gate 失败 | 阻断 commit/push，不降低门禁或手改生成物 | stage output + root cause |
 | pilot 无净收益 | revise/retire，不把流程晋级为 skill/P6 | reviewed metric worksheet |
+| write-set overlap / owner missing | 拒绝并行，改为单 writer 或重切互斥 slice | admission record + exact paths |
+| lease expired / writer status unknown | 停止 reassign，确认旧 writer 并保存 candidate | task/worktree/branch/hash evidence |
+| target/base/hash drift | 拒绝 candidate integration，rebase/replan 后重新验证 | expected/current revision + diff |
+| Git CAS 被描述为文件锁/队列 | planning verifier fail-closed，修正文档/任务 | `ref_freshness_not_file_queue` contract |
+| context adapter admission 不完整 | 保持 defer，回退 repo-native 工具 | language/privacy/freshness/resource/supply-chain matrix |
 | host/live 未执行 | 保持 not_run/not_verified | truth boundary |
 
 ## 17. Verification order
@@ -188,17 +230,21 @@ full quality gate 只运行一次并拥有完整 suite；focused tests 用于本
 | `SMV-MD-002` | FR-LDL-001/002/003/006 | ADR-SMV-013/014/015 | 落盘本 spec、manifest、plan 和 checklist |
 | `SMV-MD-003` | FR-AIE-005、NFR-LDL-001/002 | ADR-SMV-013/014/016 | companion verifier 与最小 fixtures 测试 |
 | `SMV-MD-004` | FR-EVD-003、NFR-LDL-003 | ADR-SMV-012/013/016 | 根契约、共享 evidence、有序门禁和 truth closeout |
+| `SMV-MD-005` | FR-EWF-001/003/004/005/006/007 | ADR-SMV-024 | coordinator、只读 panel、lease/write-set admission 与 Git CAS truth |
+| `SMV-MD-006` | FR-EWF-008/009/010/011/012 | ADR-SMV-025 | tool disposition、context adapter、skill lifecycle 与 M1 observation contract |
+| `SMV-MD-007` | FR-AIE-005、NFR-EWF-001/002/003/004 | ADR-SMV-024/025 | companion verifier 的 evidence-group、M0.2 和负向边界测试 |
+| `SMV-MD-008` | FR-EVD-003、NFR-TRU-001、NFR-EWF-001 | ADR-SMV-013/024/025 | 产品索引/根契约、M0.2 evidence、唯一 full gate 与 truth closeout |
 
-manifest 是 M0 依赖、write set、步骤、验证、回滚和 done_when 的机器真源。本表只提供 requirement/ADR 可追踪入口；M1 不改写历史 4/4 manifest，而由独立轻量 registry 登记真实样本。
+manifest 是 M0/M0.2 依赖、write set、步骤、验证、回滚、evidence group 和 done_when 的机器真源。本表只提供 requirement/ADR 可追踪入口；M1 不进入 maintenance task DAG，而由独立轻量 registry 登记真实样本。
 
 ## 19. Rollback
 
-回滚范围只包含 maintenance design 的四处产品真源增量、当前 spec/manifest、M1 registry、plan/todo maintenance 章节、companion verifier/tests、AGENTS 一行和共享 evidence。不得修改或回滚 P0-P5 manifest/spec/evidence、`src/`、`overrides/`、`agent/`、`vendor/`、`skills.json`、reports 或宿主状态。
+回滚范围只包含 maintenance design 的产品真源增量、当前 spec/manifest、M1 registry observation 增量、plan/todo maintenance 章节、companion verifier/tests、产品索引/AGENTS 状态行和本逻辑切片 evidence。M0 与 M0.2 使用独立 evidence group，回滚 M0.2 不改写 M0 历史证据。不得修改或回滚 P0-P5 manifest/spec/evidence、`src/`、`overrides/`、`agent/`、`vendor/`、`skills.json`、reports 或宿主状态。
 
 若 verifier 设计本身错误，先保持 track 为未验证并修复或删除 companion 资产；P5 仍由原 verifier 和历史真源独立成立。若后续 pilot 无净收益，删除/降级 advisory 候选和 pilot metadata，不删除已验证的 P5 capability selection/runtime-independent contracts。
 
 ## 20. Done definition
 
-M0 历史完成真值保持不变。M0.1/M1 bootstrap 完成仅当：现有 PRD/架构/路线图仍为唯一产品真源；maintenance spec/manifest/plan/todo 与 M1 registry 完整；四项 M0 planning tasks 仍为 done；新旧 verifier、focused tests 和唯一 full gate 通过；P5 保持 5/5 `repo_verified`；P6 保持 hold 且不存在 P6 manifest；pilot 为 collecting 0/10，live/runtime 状态保持本文件头部声明。
+M0 历史完成真值保持不变。M0.2 完成仅当：现有 PRD/架构/路线图仍为唯一产品真源；maintenance spec/manifest/plan/todo 与 M1 registry 完整；M0 四项与 M0.2 四项 planning tasks 均为 done；evidence group 各自可追；错误 Git CAS、shared-write overlap、control-plane/runtime、adapter admission 与 truth boundary 的负向 tests fail-closed；新旧 verifier、focused tests 和唯一 full gate 通过；P5 保持 5/5 `repo_verified`；P6 保持 hold 且不存在 P6 manifest；pilot 为 collecting 0/10，live/runtime 状态保持本文件头部声明。
 
-允许的完成表述是“maintenance design M0.1 与 M1 collecting contract repo_verified”。禁止表述为新的 AI 工作流已实现运行时能力、10-task pilot 已执行/完成、业务效果已证明、host 已变更、P6 已准入或产品已 `live_accepted`。
+允许的完成表述是“maintenance design M0/M0.2 与 M1 collecting contract repo_verified”。禁止表述为 coordinator/lease runtime、Trellis/AGOS/GBrain/code graph 已安装，多 Agent/工具组合收益已证明，10-task pilot 已执行/完成、host 已变更、P6 已准入或产品已 `live_accepted`。

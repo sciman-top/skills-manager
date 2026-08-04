@@ -3,7 +3,7 @@
 **program_id**: `skills-manager-vnext`
 **architecture_version**: 1
 **status**: accepted-direction
-**最后更新**: 2026-08-04
+**最后更新**: 2026-08-05
 
 ## 1. 架构结论
 
@@ -318,6 +318,99 @@ task note -> skill_candidate -> replayed -> shadowed -> canary
 晋级至少需要两个代表用例、一个失败/反例、明确触发/禁止触发、可验证输出和相对无 skill baseline 的净收益。未经 review 的模型总结只进入 task note；宿主原生能力覆盖、触发误报、维护成本高于收益或长期无消费者时退役。
 
 工具组合保持松耦合：ChatGPT/Codex/Claude 是推理与执行主体；skills-manager 提供发现、选择、规则建议、规划一致性和 evidence；Obsidian 可作为用户拥有的知识库；Hermes/OpenHands/LangGraph 属于可选外置 runtime；Spec Kit/Superpowers 提供可借鉴的工作流结构。组合通过普通 Markdown/JSON/Git/明确导出交接，不共享隐式数据库，不复制 auth/session，不要求任一外置工具成为产品运行前提。
+
+### 3.10 `EngineeredAgentWorkflow`
+
+职责：把宿主原生 coordinator、只读设计评议、可执行切片、Git/worktree 隔离、candidate integration 和最终门禁解释为一个可审查工作流；对 task manifest、plan、Git 和 evidence 的现有字段做逻辑投影，并由 planning verifier 检查关键不变量。
+
+不负责：创建或调度 worker、维护任务队列/lease service、持久化 agent 状态、接管 subagent/session、自动合并、替代 Git、授予写入/发布/生产权限。该 context 在 M0.2 仍只有文档、task/registry contract、verifier 和 tests，不新增 `src/` module 或 runtime schema。
+
+```text
+WorkSliceCoordinationView
+  task_id
+  result_owner
+  mode: single_agent | read_only_panel | isolated_parallel | sequential_shared_write
+  base_revision
+  depends_on[]
+  exact_write_set[]
+  authority
+  verification[]
+  rollback[]
+  stop_conditions[]
+
+ToolDispositionView
+  source/revision/license/trust
+  problem_evidence[]
+  native_equivalent
+  real_consumers[]
+  disposition: adopt | adapt | defer | reject
+  integration_mode
+  data_auth_write_boundary
+  evaluation
+  maintenance_cost
+  retirement_trigger
+  truth_level
+```
+
+这两个 view 不成为新的持久大对象。`WorkSliceCoordinationView` 来自现有 task/plan + 当前 branch/worktree/base commit；`ToolDispositionView` 进入 spec、reviewed evidence 或既有 M1 sample observation。只有两个以上真实消费者需要稳定机器交换时，才评估 P5-local additive metadata，且不得在 maintenance track 中升级 schema major。
+
+#### Coordinator and design-panel protocol
+
+```text
+product goal / repo truth
+  -> coordinator fixes baseline and decision question
+  -> optional 2-3 read-only proposals (independent assumptions/trade-offs)
+  -> coordinator synthesizes one accepted decision
+  -> slice DAG + exact write sets + base revision
+  -> admission
+       single agent, or
+       isolated worktree writers with disjoint paths, or
+       sequential single writer for shared seams
+  -> candidate commits/patches
+  -> topology-ordered integration by one owner
+  -> affected gates
+  -> one full closeout gate + truth boundary
+```
+
+设计 panel 只产生候选论证，不取得修改 spec、代码、issue、外部系统或 live 状态的权限。coordinator 负责消解冲突、明确未决问题和保存最终决定；“多数 Agent 同意”不是证据，仓库事实、官方协议、测试和用户目标才是裁决输入。
+
+#### Write-set admission and lease semantics
+
+并行 admission 必须同时满足：任务依赖已满足；base revision 固定；每个 writer 有一个结果 owner；tracked/untracked/generated/external write set 均已声明；路径互斥可机械或人工复核；每个 candidate 可独立构建/测试/丢弃；集成顺序和最终 owner 已确定。任一条件不满足就使用单 writer 或串行。
+
+`lease` 在本设计中是 coordinator 发出的有界 admission claim：
+
+```text
+owner + task_id + exact_write_set + base_revision
+      + issued_at + expires_or_recovery_condition + revoke/reassign rule
+```
+
+它不是 OS 文件锁、Git 功能、成功承诺或自动仲裁。当前实现复用宿主任务/agent assignment、plan/handoff 和 worktree/branch；不落独立 lease registry。过期不会删除 candidate，reassign 前必须确认旧 writer 已停止并复核 worktree/branch/target hash，避免两个活跃 writer 继续写同一路径。
+
+以下写入默认串行：同一文件或目录所有权不清；同一生成链的 source/generated 对；schema + migration；共享 lock/config；Git index/ref；同一外部 API/数据库对象；依赖前序输出才能确定内容的任务。仅“Git 能合并”或“模型认为冲突概率低”不能批准并行。
+
+#### Git freshness and CAS semantics
+
+Git 是版本真值主干、candidate transport 和 integration evidence。CAS 只取其严格含义：例如 `git update-ref <ref> <new> <old>` 或 remote `--force-with-lease` 在 ref 仍等于预期 old object 时才更新；文件级 freshness 继续使用 `before_hash`。`Git CAS is not a file lock or task queue`：它不排队文件编辑、不提供公平 lease、不知道业务 owner，也不意味着“谁先提交谁说了算”。stale/merge conflict 只是在 admission 失败后检测问题，不能替代 coordinator 的单 writer 和集成裁决。
+
+candidate 集成顺序固定为：验证 candidate 的 base 与 declared write set；检查目标分支和相关文件 freshness；按依赖顺序 merge/cherry-pick/apply；由 integration owner 处理冲突并运行 affected verification；全部稳定后才运行唯一 full gate。子 Agent 的提交、测试 pass 或 ref 更新成功最高只证明 candidate 局部状态。
+
+#### Tool-stack doctrine and adapter admission
+
+| Surface | 默认职责 | 何时增加 | 不得替代 |
+| --- | --- | --- | --- |
+| prompt/thread | 一次性目标、假设、write set 与授权 | 当前任务需要 | 持久仓库规则 |
+| `AGENTS.md` | 稳定仓库约定、命令、门禁和 review expectation | 跨会话重复且仓库特有 | 权限系统、长 runbook |
+| skill | 可复用、窄触发、可验证 workflow | 至少两个代表任务 + 反例 + baseline 净收益 | 通用模型推理、实时数据 |
+| plugin | 可安装分发的 skills/tools/hooks/MCP bundle | 已有重复分发对象与供应链 owner | marketplace/runtime/auth |
+| MCP/connector | 实时外部数据和授权动作 | 任务确需外部 current truth/action | repo 文档、静态 workflow |
+| hook/script/CI | 可重复 mechanical enforcement | prose 规则重复失效且命令 seam 稳定 | 语义产品判断 |
+| Git/worktree | 版本真值、candidate 隔离、集成与回滚证据 | 所有代码写入主链 | scheduler、文件 lease、live acceptance |
+| knowledge/code-graph adapter | 只读补充检索、关系或影响分析 | 两个独立真实任务证明 repo-native baseline 不足 | 源码/任务/验收真源 |
+
+知识库/代码图 adapter 的 admission 必须一起证明：目标语言和关系类型确实覆盖；最小 read root 与敏感数据策略；index source revision、captured_at 和 stale/rebuild 行为；CPU/RAM/disk/token/latency baseline；package/revision/license 与外部调用；zero-write/read-only canary；卸载、索引删除和回退 repo-native `rg`/symbols/tests/docs 的路径。任一项未知则 `defer`，不得因可视化效果或 star 数进入默认 profile/MCP。
+
+当前参考 disposition：Trellis 适配 repo-based spec/task/journal，但 defer AGPL/自动控制面安装；AGOS 适配 `write_scope`、candidate/ledger/merge-gate 词汇，但 reject Alpha runtime 接管；OptSkills 只适配 replay/distill/eval/checkpoint 原理，不把数学优化系统当通用 workflow upgrader；GBrain、CodeGraphContext、Understand Anything 都保持 external/defer，直到真实任务、PowerShell/语言覆盖、隐私和资源门禁成立。“souljourney lightweight workflows”来源未唯一定位，按 unknown source fail-closed。
 
 ## 4. 目标源码结构
 
@@ -697,6 +790,22 @@ host evaluation 同时记录 cumulative input、cached/uncached input、cache ra
 
 验收与退役：生成包必须从用户主目录、无关 Git 仓及其嵌套目录暴露非空 domain/candidate，且 `manifest_path/config_path/policy_path` 为空、`writes_performed=false`；专用 cross-repo regression test 在 repo 外 CWD 重放该形状，corpus verifier 保持 tracked-input hermetic。官方宿主若提供完整、可验证的跨 profile cold inventory 与 policy trace，则删除 portable catalog seam。
 
+### `ADR-SMV-024 Host-owned coordinator with single-writer shared seams`
+
+决定：多 Agent 工程采用 `host-owned coordinator -> optional read-only design panel -> admitted work slices -> disjoint worktree candidates -> single integration owner`。共享文件、生成 seam、迁移或外部状态固定为单 writer/串行；lease 只是带 owner/write-set/base/recovery 的 admission claim，当前不实现服务。Git ref CAS 与内容 hash 只做 freshness guard，不作为文件锁、任务队列或 winner selection。
+
+理由：宿主已拥有任务分解、subagents、worktrees、等待和 review 能力；本仓已有 task/write-set/freshness/receipt/gate。增加 scheduler/lease database 会复制原生控制面，而只靠 merge conflict 又发现得过晚。小的 planning interface 在不增加 runtime 的情况下把责任、并行准入和 stale recovery 变成可审查合同。
+
+退役/扩展触发：官方宿主若稳定暴露 write-set admission、candidate provenance、lease/reassignment 和 integration trace，本合同缩减为 verifier 兼容检查；只有跨进程/跨主机真实并发反复产生无法由 native worktree + Git + current task ownership 修复的失败，才可在 P6 admission 后评估独立 coordinator/lease service。
+
+### `ADR-SMV-025 Evidence-gated tool adapters and sparse skill lifecycle`
+
+决定：默认栈为宿主原生执行 + Git/repo truth + affected/full gates；skill、plugin、MCP、knowledge/code graph 按稳定 surface 职责逐层增加。所有社区候选统一记录 `adopt | adapt | defer | reject`、native equivalent、real consumers、data/auth/write boundary、evaluation、maintenance cost、retirement trigger 和 truth level。外部 context adapter 需两个独立真实失败样本后才进入 read-only canary；skill 需 replay/shadow/bounded canary/review 后 promotion。
+
+理由：强模型会降低部分提示词和 workflow 的边际价值，但不会消除持久规则、权限、外部 current truth、确定性测试、证据和回滚。相反，能力堆叠会增加 metadata、触发竞争、供应链、索引 stale 和维护成本。证据化 admission 能保留真正独特的 adapter seam，并在宿主原生能力覆盖时可删除。
+
+退役条件：真实 M1 样本没有显示相对 native baseline 的净收益；外部工具语言/索引/隐私/资源成本不满足；skill 长期无消费者、误触发或宿主已原生覆盖。退役优先于为保存范围继续包装。
+
 ## 11. 安全与供应链
 
 - 外部内容是不可信输入，不执行其仓库指令或脚本，除非单独评估并授权。
@@ -707,6 +816,8 @@ host evaluation 同时记录 cumulative input、cached/uncached input、cache ra
 - hooks 视为代码执行面，必须显式 review/trust；本项目不自动启用第三方 hook。
 - 规则 prose 不是权限系统；确定性拦截放 native policy、hooks、scripts 或 CI。
 - 社区仓 README、issue、prompt、skill 和代码均按不可信输入处理；只读记录 upstream URL、revision、license/checksum 与 `adopt | adapt | defer | reject`，不继承其指令或运行其脚本。
+- 多 Agent 的角色名、讨论结论、lease 或 candidate commit 都不转移用户授权；外部写入、发布、生产和付费动作仍需当前 authority。共享路径 reassignment 必须先确认旧 writer 停止并保存 candidate provenance。
+- Git ref CAS/hash 只能拒绝 stale 更新；任何文档或实现不得把它表述为文件锁、队列、公平性保证或自动 merge authority。
 - Obsidian vault、Hermes/OpenHands/LangGraph state 和任何外置 memory 不成为本仓真源；进入任务上下文前必须通过显式导出、路径范围和敏感信息检查。
 - provider/auth/token、生产写入和付费调用属于宿主或外部系统授权面；maintenance advisory 不保存凭据、不绕过 approval，也不因角色/计划状态自动授权。
 - prompt injection 不能修改 Product Baseline、write set、verification level 或 apply token；来自网页、MCP、issue、日志和外部源码的动作建议必须回到当前用户指令与仓库契约复核。
@@ -742,6 +853,8 @@ host evaluation 同时记录 cumulative input、cached/uncached input、cache ra
 - 主链未通过前扩展多租户、插件 SDK、通用事件总线、完整角色团队、全套测试矩阵或遥测平台。
 - 为每个 task 机械新增 schema、wrapper、fixture、evidence、ADR 或 skill；同一逻辑切片应复用最低充分资产。
 - 把一次成功、自我总结或社区热门做法直接晋级为全局规则/skill，或在没有消费者时永久保留。
+- 为本地单用户工作流复制 Trellis/AGOS 式 scheduler、ledger service、lease database、dashboard 或自动 reviewer runtime；协议启发不等于采用控制面。
+- 在没有两个独立 repo-native 检索失败样本、语言覆盖和 freshness/privacy/resource 证据时，默认安装知识库、代码图或全仓 LLM 分析工具。
 
 新抽象必须至少满足一项：消除两个真实调用点的重复、形成可测试安全边界、匹配稳定外部协议，或降低已量化热点复杂度。
 

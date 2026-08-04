@@ -70,8 +70,16 @@ Goal：把 skills-manager 面向高效 AI 软件交付的总体方案落为 advi
 | 2 | `SMV-MD-002` | spec + task contract | 四任务依赖、exact write set、rollback/done_when 完整；M1 不进入 manifest |
 | 3 | `SMV-MD-003` | companion verifier | current pass；负向 fixture fail-closed；只读且无 network/host access |
 | 4 | `SMV-MD-004` | truth closeout | 一份共享 evidence；新旧 verifier 通过；唯一 full gate 通过；只声明 M0 repo_verified |
+| 5 | `SMV-MD-005` | coordination + Git truth | host-owned coordinator；read-only panel；shared seam single writer；CAS 只做 freshness |
+| 6 | `SMV-MD-006` | sparse tool stack + pilot observations | disposition/context-adapter/skill lifecycle 完整；M1 仍 collecting 0/10 |
+| 7 | `SMV-MD-007` | M0.2 verifier | evidence-group、policy literal、sample observation 与负向边界 fail-closed |
+| 8 | `SMV-MD-008` | M0.2 closeout | 独立 evidence；产品索引/根契约同步；唯一 full gate；不声明 runtime/live |
 
-M0.1/M1 bootstrap：North Star、native baseline、双证据流、删除候选和真实样本计数合同已落盘；M1 已获授权并进入 `collecting (0/10)`。后续只在真实任务达到证据停止点时追加 registry，不生成回溯性 synthetic 样本，也不把收集启动写成 pilot 已执行或业务收益。
+M0.1/M0.2/M1 bootstrap：North Star、native baseline、双证据流、删除候选、host-owned coordinator、single-writer write-set admission、Git CAS truth、工具 disposition 和真实样本观察合同已落盘；M1 已获授权并进入 `collecting (0/10)`。后续只在真实任务达到证据停止点时追加 registry，不生成回溯性 synthetic 样本，也不把收集启动写成 pilot 已执行或业务收益。
+
+M0.2 execution contract：2–3 个 Agent 只可并行输出 read-only 设计候选，由一个 coordinator 综合决定；实现并行要求固定 base、依赖完成、exact write set 互斥、candidate 可独立验证和 integration owner 明确。共享文件、生成 seam、schema/migration、lock/config、Git index/ref 和同一外部状态使用单 writer/串行。lease 是 owner/write-set/base/recovery claim；Git CAS/hash 只检测 stale，不是文件锁、队列或 winner selector。本 track 不实现 scheduler/daemon/database，不安装 Trellis/AGOS/GBrain/code graph。
+
+Tool admission：默认 `host-native + repo-native + Git + gates`；只有重复 workflow 进入 skill，分发需要进入 plugin，current external data/action 进入 MCP/connector，两个独立 repo-native 检索失败且语言/privacy/freshness/resource/supply-chain/rollback 完整时才评估 read-only context adapter。所有候选必须有 adopt/adapt/defer/reject、native equivalent、consumer、evaluation、maintenance cost 和 retirement trigger。
 
 Failure routing：文档/manifest/registry 漂移先修当前真源；同一 verifier 缺陷连续失败两次后重审检查设计；未知工作树改动、P5 回归、P6 manifest、runtime write set 或 full gate 失败立即阻断收口。M1 达到 10 个真实样本并完成人工 review 前保持 collecting/observe-only。
 

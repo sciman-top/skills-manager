@@ -2,7 +2,7 @@
 
 **program_id**: `skills-manager-vnext`
 **文档状态**: active
-**最后更新**: 2026-08-04
+**最后更新**: 2026-08-05
 
 ## 1. 目的
 
@@ -26,15 +26,15 @@
 | [规则治理参考采纳矩阵](rule-governance-adoption-matrix.md) | 官方/参考仓模式的 adopt/adapt/reject/defer 与验证边界 | 当前宿主安装或跨仓写入状态 |
 | [规则全域 reviewed change-set](rule-estate-reviewed-change-set.md) | 全局/多目标仓 plan、apply、resume、rollback 输入契约 | AI 自行批准或宿主加载证明 |
 | [Phase 5 Spec](../superpowers/specs/2026-08-03-capability-manager-vnext-phase-5-design.md) | 当前 adaptive decision plane、host snapshot、兼容和测试契约 | 宿主 runtime 或认证实现 |
-| [Lean Delivery maintenance spec](../superpowers/specs/2026-08-03-lean-ai-delivery-maintenance-design.md) | P5 后精益 AI 软件交付 advisory、pilot 和退役边界 | 新 Phase、agent runtime 或业务效果声明 |
+| [Lean Delivery maintenance spec](../superpowers/specs/2026-08-03-lean-ai-delivery-maintenance-design.md) | P5 后精益 AI 软件交付 advisory、host-owned coordination、tool admission、pilot 和退役边界 | 新 Phase、agent/lease runtime、社区工具安装或业务效果声明 |
 | [Native-first routing correction spec](../superpowers/specs/2026-08-04-native-first-capability-discovery-correction.md) | P5-local capability routing 回归纠正、宿主语义所有权和真实场景验收 | P6、新 router service 或普遍 live acceptance |
 | [Hierarchical discovery redesign spec](../superpowers/specs/2026-08-04-hierarchical-capability-discovery-redesign.md) | P5-local cold discovery、domain catalog、32+8 host 验收、inventory signal、成本拆分与 runtime truth hardening | profile 热切换、第二模型 router、P6 或普遍 live acceptance |
 | [Profile reconciliation advisor spec](../superpowers/specs/2026-08-04-skill-profile-reconciliation-maintenance-design.md) | skill inventory 变化后的 profile drift 诊断、宿主 proposal 与确定性 plan-only 校验 | 自动语义 router、静默 apply/profile 切换或 P6 |
 | [Profile optimization canary spec](../superpowers/specs/2026-08-04-bounded-profile-optimization-canary.md) | 宿主 proposal 后的非活动 profile canary、fresh replay、receipt 和失败回滚 | provider 路由、永久 active profile 切换、P6 或 live acceptance |
 | [实施计划](../../tasks/plan.md) | Phase 5 执行顺序、检查点、失败分流 | 产品背景全文 |
 | [任务 manifest](../../tasks/skills-manager-vnext-phase5.tasks.json) | AI 可解析的任务、依赖、write set、验证、回滚、完成条件 | 长篇设计解释 |
-| [Maintenance manifest](../../tasks/skills-manager-vnext-maintenance-design.tasks.json) | 非 Phase 的 M0 规划任务与 write-set 真值 | M1 pilot 任务或 P6 admission |
-| [M1 pilot registry](../../tasks/skills-manager-vnext-lean-delivery-pilot.json) | 10 个真实任务的 observe-only 样本、计数和 truth boundary | agent runtime、自动指标门禁或 P6 admission |
+| [Maintenance manifest](../../tasks/skills-manager-vnext-maintenance-design.tasks.json) | 非 Phase 的 M0/M0.2 规划任务、evidence group 与 write-set 真值 | M1 pilot 任务或 P6 admission |
+| [M1 pilot registry](../../tasks/skills-manager-vnext-lean-delivery-pilot.json) | 10 个真实任务的 observe-only 样本、计数、coordination/tool observations 和 truth boundary | agent runtime、自动指标门禁或 P6 admission |
 | [Routing correction manifest](../../tasks/skills-manager-vnext-capability-routing-correction.tasks.json) | P5-local 缺陷纠正的任务、write set、验证与回滚真值 | 历史 Phase 状态改写或 P6 admission |
 | [Discovery redesign manifest](../../tasks/skills-manager-vnext-capability-discovery-redesign.tasks.json) | hierarchical cold discovery、host acceptance 和收口任务真值 | P6 admission、host mutation 或业务验收 |
 | [Profile reconciliation manifest](../../tasks/skills-manager-vnext-profile-reconciliation.tasks.json) | P5-local profile advisor 的实现、测试、规划和收口真值 | 自动 apply、P6 admission 或 host mutation |
@@ -76,7 +76,7 @@
 
 ## 5. 当前基线
 
-截至 2026-08-04：
+截至 2026-08-05：
 
 - `skills.ps1`、`skills.json`、skill projection、MCP profile/sync、目标仓审查、doctor、reference shelf 和质量门禁已经存在。
 - 本目录、Phase 0 spec、Phase 0 task manifest 和 planning verifier 属于本轮新增的 `planning_contract`。
@@ -91,7 +91,7 @@
 - P5-local hierarchical discovery redesign 已完成 4/4 `repo_verified`：旧 default-profile cold baseline 仅 4/8 主动触发；重构后 32-case selection 为 32/32、8-case cold-load chain 为 8/8。follow-up 增加 canonical inventory delta signal 与 cached/uncached/tool-round 指标；两个真实 A/B 已否决负收益的 combined command 方案。结果仍仅为 `host_evaluation_partial`，没有证明普遍 token 成本改善或业务验收。
 - P5-local profile reconciliation advisor 已完成 4/4 `repo_verified`：可报告 stale/unrouted/budget/overlap 并校验 host-owned proposal，输出 exact zero-write change-set；不自动更新 profile、不切换 active profile，reviewed apply 和真实维护收益尚未验收。
 - P5-local profile optimization canary 已完成 3/3 `repo_verified`：proposal 后只允许非活动 profile 的有界事务，并以 fresh-task replay/receipt/rollback 收口；`doc-coauthoring -> content` 的 6/6 代表回放仅为 `host_evaluation_partial_pass`，不等于普遍语义正确或业务验收。
-- `maintenance_design` 的 M0 规划包已完成 4/4 `repo_verified`；M0.1 已补齐 North Star、native baseline、双证据流、删除评审和 pilot 计数合同。M1 已获授权并进入 `collecting (0/10)`，只表示真实样本登记已启动；pilot 执行/完成、host/runtime 变化、业务效果和 live acceptance 均未发生，M3 仍为 `conditional`。
+- `maintenance_design` 的 M0/M0.2 规划包已完成 8/8 `repo_verified`；M0.1 补齐 North Star/native baseline/计数合同，M0.2 补齐 host-owned coordinator、single-writer write-set admission、Git CAS freshness、tool disposition、context-adapter admission 和 sample observations。M1 已获授权并进入 `collecting (0/10)`，只表示真实样本登记已启动；coordinator/lease runtime、社区工具安装、pilot 执行/完成、host/runtime 变化、业务效果和 live acceptance 均未发生，M3 仍为 `conditional`。
 - `governed-ai-coding-runtime` 只作为静态规则模型参考；不得恢复其已退役的目标仓 registry、同步器或中央 verifier。
 - “全局 + 项目 1+1>2”已定义为 `common + platform_delta + project_action` 的责任覆盖合同；read-only Rule Advisor 已接通显式责任映射和 repo path/command 静态核验，通用自然语言语义精度仍不作外推。
 

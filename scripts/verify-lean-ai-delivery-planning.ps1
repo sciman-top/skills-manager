@@ -138,7 +138,7 @@ $taskCount = 0
 $doneCount = 0
 $openCount = 0
 $tasksById = @{}
-$doneEvidenceSets = @()
+$doneEvidenceSetsByGroup = @{}
 $pilotRegistry = $null
 $pilotStatus = 'unknown'
 $pilotSampleTarget = 0
@@ -195,11 +195,16 @@ if ($null -ne $manifest) {
 
         $status = [string]$task.status
         $risk = [string]$task.risk
+        $evidenceGroup = [string]$task.evidence_group
         if ($allowedStatuses -notcontains $status) {
             Add-LeanPlanningFinding ([ref]$findings) 'unknown_task_status' $taskPath ('Unknown status: {0}' -f $status)
         }
         if ($allowedRisks -notcontains $risk) {
             Add-LeanPlanningFinding ([ref]$findings) 'unknown_task_risk' $taskPath ('Unknown risk: {0}' -f $risk)
+        }
+        if ([string]::IsNullOrWhiteSpace($evidenceGroup) -or $evidenceGroup -notmatch '^[a-z0-9][a-z0-9_-]*$') {
+            Add-LeanPlanningFinding ([ref]$findings) 'invalid_task_evidence_group' $taskPath `
+                ('Task evidence_group is required and must be a stable lowercase identifier: {0}' -f $evidenceGroup)
         }
         if ($status -eq 'done') { $doneCount++ } else { $openCount++ }
         if ([string]::IsNullOrWhiteSpace([string]$task.title) -or [string]::IsNullOrWhiteSpace([string]$task.goal)) {
@@ -230,7 +235,12 @@ if ($null -ne $manifest) {
                 Add-LeanPlanningFinding ([ref]$findings) 'done_task_missing_evidence_path' $taskPath `
                     'Every done maintenance task must declare an exact reviewed evidence path.'
             }
-            $doneEvidenceSets += ,$exactEvidencePaths
+            if (-not [string]::IsNullOrWhiteSpace($evidenceGroup)) {
+                if (-not $doneEvidenceSetsByGroup.ContainsKey($evidenceGroup)) {
+                    $doneEvidenceSetsByGroup[$evidenceGroup] = @()
+                }
+                $doneEvidenceSetsByGroup[$evidenceGroup] += ,$exactEvidencePaths
+            }
 
             $verificationText = @($task.verification | ForEach-Object { [string]$_ }) -join "`n"
             $hasStandaloneSuite = $verificationText -match '(?i)(^|[\\/\s])tests/run\.ps1(?:\s|$)'
@@ -239,6 +249,13 @@ if ($null -ne $manifest) {
                 Add-LeanPlanningFinding ([ref]$findings) 'redundant_full_test_invocation' $taskPath `
                     'Do not invoke the standalone full suite when the full quality gate already owns it.'
             }
+        }
+    }
+
+    foreach ($expectedTaskId in @(1..8 | ForEach-Object { 'SMV-MD-{0:d3}' -f $_ })) {
+        if (-not $tasksById.ContainsKey($expectedTaskId)) {
+            Add-LeanPlanningFinding ([ref]$findings) 'missing_required_maintenance_task' $paths['manifest'] `
+                ('Required M0/M0.2 maintenance task is missing: {0}' -f $expectedTaskId)
         }
     }
 
@@ -293,20 +310,23 @@ if ($null -ne $manifest) {
 
     Test-LeanTaskDependencyCycles $tasksById $paths['manifest'] ([ref]$findings)
 
-    if ($doneEvidenceSets.Count -gt 0) {
-        $sharedEvidence = @($doneEvidenceSets[0])
-        foreach ($evidenceSet in @($doneEvidenceSets | Select-Object -Skip 1)) {
-            $sharedEvidence = @($sharedEvidence | Where-Object { $evidenceSet -contains $_ })
-        }
-        if ($sharedEvidence.Count -eq 0) {
-            Add-LeanPlanningFinding ([ref]$findings) 'done_tasks_missing_shared_evidence' $paths['manifest'] `
-                'All done maintenance tasks must share at least one exact reviewed evidence file.'
-        }
-        else {
-            foreach ($evidencePath in $sharedEvidence) {
-                if (-not (Test-Path -LiteralPath (Join-Path $root $evidencePath) -PathType Leaf)) {
-                    Add-LeanPlanningFinding ([ref]$findings) 'done_task_evidence_missing' $evidencePath `
-                        'The shared reviewed evidence file for done maintenance tasks is missing.'
+    foreach ($evidenceGroup in @($doneEvidenceSetsByGroup.Keys | Sort-Object)) {
+        $groupEvidenceSets = @($doneEvidenceSetsByGroup[$evidenceGroup])
+        if ($groupEvidenceSets.Count -gt 0) {
+            $sharedEvidence = @($groupEvidenceSets[0])
+            foreach ($evidenceSet in @($groupEvidenceSets | Select-Object -Skip 1)) {
+                $sharedEvidence = @($sharedEvidence | Where-Object { $evidenceSet -contains $_ })
+            }
+            if ($sharedEvidence.Count -eq 0) {
+                Add-LeanPlanningFinding ([ref]$findings) 'done_tasks_missing_shared_evidence' $paths['manifest'] `
+                    ('Done maintenance tasks in evidence_group {0} must share at least one exact reviewed evidence file.' -f $evidenceGroup)
+            }
+            else {
+                foreach ($evidencePath in $sharedEvidence) {
+                    if (-not (Test-Path -LiteralPath (Join-Path $root $evidencePath) -PathType Leaf)) {
+                        Add-LeanPlanningFinding ([ref]$findings) 'done_task_evidence_missing' $evidencePath `
+                            ('The shared reviewed evidence file for evidence_group {0} is missing.' -f $evidenceGroup)
+                    }
                 }
             }
         }
@@ -339,15 +359,27 @@ if ($null -ne $pilotRegistry) {
         'capability_selection',
         'simple_task_negative_control'
     )
+    $expectedObservationDimensions = @(
+        'coordination_mode',
+        'shared_write_set_policy',
+        'tool_dispositions',
+        'context_adapter',
+        'skill_lifecycle_action'
+    )
     $allowedPilotStatuses = @('pilot_not_executed', 'collecting', 'review_ready', 'reviewed')
     $allowedSampleStatuses = @('observed', 'reviewed')
     $allowedComparisonModes = @('matched_historical_native_only', 'alternating_matched_task', 'descriptive_only')
     $allowedTruthLevels = @('not_verified', 'designed', 'implemented', 'repo_verified', 'host_loaded', 'live_accepted')
     $allowedAcceptanceStatuses = @('pending', 'not_requested', 'accepted', 'partial', 'rejected')
+    $allowedCoordinationModes = @('single_agent', 'read_only_panel', 'isolated_parallel', 'sequential_shared_write')
+    $allowedSharedWritePolicies = @('single_writer', 'not_applicable')
+    $allowedToolDispositions = @('adopt', 'adapt', 'defer', 'reject')
+    $allowedContextAdapters = @('none', 'repo_native', 'external_read_only')
+    $allowedSkillLifecycleActions = @('none', 'candidate', 'replay', 'shadow', 'canary', 'promote', 'revise', 'retire')
     $requiredSampleFields = @(
         'id', 'category', 'task_reference', 'source_type', 'synthetic', 'self_referential',
         'status', 'comparison_mode', 'evidence_refs', 'final_truth_level', 'user_acceptance_status',
-        'observed_at', 'metrics'
+        'observed_at', 'metrics', 'observations'
     )
     $requiredMetricFields = @(
         'time_to_first_value_minutes', 'rework_slices', 'unexpected_human_interruptions',
@@ -390,6 +422,15 @@ if ($null -ne $pilotRegistry) {
     if ($declaredCategories.Count -ne $expectedPilotCategories.Count -or $missingCategories.Count -gt 0 -or $extraCategories.Count -gt 0) {
         Add-LeanPlanningFinding ([ref]$findings) 'pilot_category_contract_drift' $paths['pilot'] `
             'required_categories must contain the exact ten real-task categories.'
+    }
+
+    $declaredObservationDimensions = @($pilotRegistry.observation_dimensions | ForEach-Object { [string]$_ })
+    $missingObservationDimensions = @($expectedObservationDimensions | Where-Object { $declaredObservationDimensions -notcontains $_ })
+    $extraObservationDimensions = @($declaredObservationDimensions | Where-Object { $expectedObservationDimensions -notcontains $_ })
+    if ($declaredObservationDimensions.Count -ne $expectedObservationDimensions.Count -or
+        $missingObservationDimensions.Count -gt 0 -or $extraObservationDimensions.Count -gt 0) {
+        Add-LeanPlanningFinding ([ref]$findings) 'pilot_observation_dimensions_drift' $paths['pilot'] `
+            'observation_dimensions must contain the exact M0.2 coordination/tool observation fields.'
     }
 
     $countingPolicy = $pilotRegistry.counting_policy
@@ -461,6 +502,37 @@ if ($null -ne $pilotRegistry) {
             }
         }
 
+        foreach ($observationField in $expectedObservationDimensions) {
+            if (-not (Test-LeanObjectProperty $sample.observations $observationField)) {
+                Add-LeanPlanningFinding ([ref]$findings) 'missing_pilot_observation_field' $samplePath `
+                    ('Pilot observation field is required: {0}' -f $observationField)
+            }
+        }
+        if ($null -ne $sample.observations) {
+            if ($allowedCoordinationModes -notcontains [string]$sample.observations.coordination_mode) {
+                Add-LeanPlanningFinding ([ref]$findings) 'unknown_pilot_coordination_mode' $samplePath `
+                    ('Unknown coordination_mode: {0}' -f [string]$sample.observations.coordination_mode)
+            }
+            if ($allowedSharedWritePolicies -notcontains [string]$sample.observations.shared_write_set_policy) {
+                Add-LeanPlanningFinding ([ref]$findings) 'unknown_pilot_shared_write_policy' $samplePath `
+                    ('Unknown shared_write_set_policy: {0}' -f [string]$sample.observations.shared_write_set_policy)
+            }
+            foreach ($toolDisposition in @($sample.observations.tool_dispositions | ForEach-Object { [string]$_ })) {
+                if ($allowedToolDispositions -notcontains $toolDisposition) {
+                    Add-LeanPlanningFinding ([ref]$findings) 'unknown_pilot_tool_disposition' $samplePath `
+                        ('Unknown tool disposition: {0}' -f $toolDisposition)
+                }
+            }
+            if ($allowedContextAdapters -notcontains [string]$sample.observations.context_adapter) {
+                Add-LeanPlanningFinding ([ref]$findings) 'unknown_pilot_context_adapter' $samplePath `
+                    ('Unknown context_adapter: {0}' -f [string]$sample.observations.context_adapter)
+            }
+            if ($allowedSkillLifecycleActions -notcontains [string]$sample.observations.skill_lifecycle_action) {
+                Add-LeanPlanningFinding ([ref]$findings) 'unknown_pilot_skill_lifecycle_action' $samplePath `
+                    ('Unknown skill_lifecycle_action: {0}' -f [string]$sample.observations.skill_lifecycle_action)
+            }
+        }
+
         $isRealCountableSample = ([string]$sample.source_type -eq 'real_task' -and -not [bool]$sample.synthetic -and
             -not [bool]$sample.self_referential)
         if (-not $isRealCountableSample) {
@@ -522,6 +594,21 @@ if (-not (Test-LeanContainsLiteral $content['spec'] 'METRICS_MODE: observe_only'
     Add-LeanPlanningFinding ([ref]$findings) 'observe_only_metrics_became_gate' $paths['spec'] `
         'Delivery metrics must remain observe_only and must not become a completion gate.'
 }
+foreach ($policyContract in @(
+    @{ key = 'spec'; literal = 'CONTROL_PLANE_STATUS: not_introduced'; code = 'control_plane_status_missing'; message = 'M0.2 must explicitly keep coordinator/lease control-plane runtime not introduced.' },
+    @{ key = 'spec'; literal = 'SHARED_WRITE_SET_POLICY: single_writer'; code = 'shared_write_policy_missing'; message = 'M0.2 must keep shared write sets on the single_writer policy.' },
+    @{ key = 'spec'; literal = 'GIT_CAS_SEMANTICS: ref_freshness_not_file_queue'; code = 'git_cas_semantics_missing'; message = 'M0.2 must define Git CAS as ref freshness rather than a file queue.' },
+    @{ key = 'spec'; literal = 'TOOL_DISPOSITION_POLICY: adopt_adapt_defer_reject'; code = 'tool_disposition_policy_missing'; message = 'M0.2 must preserve the four-state tool disposition contract.' },
+    @{ key = 'prd'; literal = 'FR-EWF-012'; code = 'engineered_workflow_requirement_missing'; message = 'PRD must contain the M1 coordination/tool observation requirement.' },
+    @{ key = 'architecture'; literal = 'ADR-SMV-024'; code = 'coordination_architecture_decision_missing'; message = 'Architecture must contain the host-owned coordinator/single-writer ADR.' },
+    @{ key = 'architecture'; literal = 'ADR-SMV-025'; code = 'tool_admission_architecture_decision_missing'; message = 'Architecture must contain the evidence-gated tool-adapter ADR.' },
+    @{ key = 'architecture'; literal = 'Git CAS is not a file lock or task queue'; code = 'git_cas_negative_boundary_missing'; message = 'Architecture must explicitly reject file-lock/task-queue Git CAS semantics.' },
+    @{ key = 'roadmap'; literal = '| `M0.2` | `repo_verified` |'; code = 'm0_2_roadmap_status_missing'; message = 'Roadmap must register the bounded M0.2 clarification as repo_verified planning truth.' }
+)) {
+    if (-not (Test-LeanContainsLiteral $content[$policyContract.key] $policyContract.literal)) {
+        Add-LeanPlanningFinding ([ref]$findings) $policyContract.code $paths[$policyContract.key] $policyContract.message
+    }
+}
 if (-not (Test-LeanContainsLiteral $content['roadmap'] 'P6_ADMISSION_STATUS: hold')) {
     Add-LeanPlanningFinding ([ref]$findings) 'roadmap_p6_hold_missing' $paths['roadmap'] 'Roadmap must keep P6_ADMISSION_STATUS: hold.'
 }
@@ -555,10 +642,12 @@ $result = [ordered]@{
     pilot_sample_count = $pilotSampleCount
     counted_pilot_sample_count = $countedPilotSamples.Count
     pilot_categories_covered = @($pilotCategoriesCovered)
+    pilot_observation_dimensions = if ($null -ne $pilotRegistry) { @($pilotRegistry.observation_dimensions) } else { @() }
     pass = ($findings.Count -eq 0)
     task_count = $taskCount
     done_count = $doneCount
     open_count = $openCount
+    evidence_groups = @($doneEvidenceSetsByGroup.Keys | Sort-Object)
     finding_count = $findings.Count
     findings = @($findings)
 }

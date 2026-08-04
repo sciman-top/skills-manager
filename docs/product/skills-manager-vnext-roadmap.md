@@ -2,7 +2,7 @@
 
 **program_id**: `skills-manager-vnext`
 **roadmap_version**: 1
-**最后更新**: 2026-08-04
+**最后更新**: 2026-08-05
 
 ## 1. 状态总览
 
@@ -14,7 +14,7 @@
 | `P3` | Plugin-aware distribution and evaluation | `complete` | 7/7 tasks repo_verified；fixture-first，host/live 未执行 |
 | `P4` | Unified capability selection and activation planning | `complete` | 6/6 tasks `repo_verified`；16-profile fresh prompt probe 已通过，host runtime activation/live acceptance 未执行 |
 | `P5` | Adaptive Capability Fabric | `complete` | 5/5 `repo_verified`；live read-only App Server snapshot 与 full gate 已通过，business live acceptance 未执行 |
-| `maintenance_design` | Lean AI Software Delivery | `M0 repo_verified / M1 collecting 0/10` | M0 规划包 4/4 repo_verified；M1 仅启动真实样本收集，M3 conditional |
+| `maintenance_design` | Lean AI Software Delivery | `M0/M0.2 repo_verified / M1 collecting 0/10` | M0 基线 4/4 + M0.2 工程化协调/工具组合 4/4 repo_verified；M1 仅启动真实样本收集，M3 conditional |
 | `profile_reconciliation_advisor` | Skill profile drift reconciliation | `repo_verified` | P5-local plan-only advisor 4/4；宿主负责语义 proposal，确定性 planner 零写入校验；apply/live 未执行，不构成 P6 |
 | `profile_optimization_canary` | Bounded profile apply and replay | `repo_verified` | P5-local 3/3；非活动 profile canary、receipt/replay/rollback 已验证；6/6 host replay 为 partial，live acceptance not run |
 | `capability_routing_correction` | Native-first discovery/policy | `repo_verified` | P5-local regression correction 4/4；不改写 P5 历史状态，不授权 P6；host replay partial，live acceptance not run |
@@ -322,8 +322,9 @@ P5 完成后进入维护期，不按 Phase 编号惯性扩张。只有同时满�
 
 ```text
 M0 maintenance design package
+  -> M0.2 engineered coordination and tool-admission clarification
   -> M1 10-task observe-only pilot
-     -> M3 retain / revise / retire / P6 admission review
+      -> M3 retain / revise / retire / P6 admission review
 
 P5 real defects
   -> M2 P5-local metadata/golden/defect correction
@@ -333,11 +334,18 @@ P5 real defects
 | Milestone | 状态 | 内容 | 退出条件 | 明确不证明 |
 | --- | --- | --- | --- | --- |
 | `M0` | `repo_verified` | 综合 PRD/架构/路线图、maintenance spec/manifest、plan/todo、companion verifier、测试与一份 reviewed evidence | 4/4 planning tasks done；新旧 verifier 和 full gate 通过 | 新工作流业务有效、pilot 已运行、host loaded、live accepted |
+| `M0.2` | `repo_verified` | 在同一 maintenance 真源内补强 host-owned coordinator、只读设计 panel、single-writer write-set admission、Git freshness/CAS、tool disposition、context-adapter admission 与 M1 observation contract | 4 个增量任务 done；错误 CAS/共享写入/控制面膨胀/无证据 adapter 的负向 verifier 通过；唯一 full gate 通过 | coordinator/lease runtime 已实现、社区工具已安装、并行收益、M1 样本或业务 live acceptance |
 | `M1` | `collecting (0/10)` | 选取 10 个覆盖 Discovery/Main-chain/Stabilize/Refactor/Release/Operate 的真实任务，记录 native baseline 与 advisory treatment | 已获用户授权；registry/verifier 已启动；每项只做 observe，不设完成硬阈值 | pilot 已执行/完成、普遍效果、因果结论、自动 promotion |
 | `M2` | `repo_verified` | 以用户真实反馈和重复回放修正 P5 metadata、profile、golden、触发策略与直接缺陷；退役 lexical semantic router，保留 discovery/policy kernel | focused corpus、16-profile fresh probe、只读 host replay、planning/full gate 与共享 evidence 已收口 | M1 pilot 已运行、schema major、新 runtime、daemon/database、普遍 live acceptance |
 | `M3` | `conditional` | 比较净收益并决定 `retain | revise | retire`；仅把满足既有 admission 的证据提交 P6 review | 指标与失败样本经过人工 review；无净收益流程已删除或降级 | 自动 admitted、自动创建 P6 manifest |
 
-M1 pilot 的最小样本覆盖：模糊需求澄清、从零主链、既有缺陷、行为保持重构、前后端/数据 seam、测试策略、发布准备、运维事件、能力/skill 选择和一次不应启动复杂流程的简单任务。`tasks/skills-manager-vnext-lean-delivery-pilot.json` 是轻量登记真源；只在真实任务达到证据停止点后追加，synthetic、候选和本次 M0.1/bootstrap 自身不计数。优先比较近期可比 native-only 历史任务或交替匹配任务，不可比时只作描述性观察，不要求同一任务执行两遍，不宣称因果。M1 是评估 Lean Delivery advisory 净收益的 pilot，不是修复已复现 P5 产品缺陷的前置门禁；已完成 M2 correction 不得反向写成 M1 已执行。
+M1 pilot 的最小样本覆盖：模糊需求澄清、从零主链、既有缺陷、行为保持重构、前后端/数据 seam、测试策略、发布准备、运维事件、能力/skill 选择和一次不应启动复杂流程的简单任务。`tasks/skills-manager-vnext-lean-delivery-pilot.json` 是轻量登记真源；只在真实任务达到证据停止点后追加，synthetic、候选和本次 M0.1/M0.2/bootstrap 自身不计数。优先比较近期可比 native-only 历史任务或交替匹配任务，不可比时只作描述性观察，不要求同一任务执行两遍，不宣称因果。M1 是评估 Lean Delivery advisory 净收益的 pilot，不是修复已复现 P5 产品缺陷的前置门禁；已完成 M2 correction 不得反向写成 M1 已执行。
+
+M0.2 不增加新的 pilot 样本类别或第二个 registry，而是在每个未来样本的 `observations` 中记录：`coordination_mode`、`shared_write_set_policy`、`tool_dispositions`、`context_adapter` 和 `skill_lifecycle_action`。这些字段只解释“用了什么工程方式及其成本”，不成为 completion gate。简单任务应能记录 `single_agent / not_applicable / none`；不得为了填满字段强行使用 subagent、skill 或外部工具。
+
+M0.2 的执行协议如下：2–3 个 Agent 只在设计问题可独立时形成 read-only panel；写入只在 base revision 固定、依赖已满足、write set 互斥、candidate 可独立验证且 integration owner 明确时并行。共享文件、生成 seam、迁移、lock/config、Git ref/index 和同一外部状态一律单 writer/串行。lease 是 owner/write-set/base/recovery 的 coordinator claim；Git CAS/hash 只拒绝 stale 更新，不排队文件、不自动选 winner。当前实现完全复用宿主 task/subagent/worktree 与 Git，不建立 scheduler、daemon、database 或新 schema major。
+
+工具采用顺序固定为：repo-native `rg`/symbols/tests/docs 与宿主原生能力 -> 窄 skill -> plugin distribution -> current external data/action 的 MCP/connector -> 有真实检索缺口的只读 knowledge/code-graph adapter。每个候选以 `adopt | adapt | defer | reject` 记录 source/revision/license、native equivalent、real consumers、data/auth/write boundary、evaluation、maintenance cost、retirement trigger 和 truth level。Trellis/AGOS 只适配 planning/write-scope/candidate/evidence 思想；OptSkills 只适配 replay/distill/eval；GBrain、CodeGraphContext、Understand Anything 继续 defer；来源不明的 souljourney workflow 保持 unknown/defer。
 
 M2 correction 的最终目标流为：`visible skill/native tool -> host-native semantic match -> direct use`；只有无可见匹配或显式能力发现时才进入 `domain purpose catalog -> host domain choice -> candidate discovery -> host adjudication -> deterministic policy -> native activation`。旧 profile-first baseline 的 automatic trigger 仅 4/8，hierarchical redesign 后 selection 32/32、cold-load chain 8/8；这些都是 `host_evaluation_partial`，不等于普遍无感或 live acceptance。低风险已可用能力可无感使用，安装、认证、profile/config mutation、写入和破坏性动作继续保持可见授权。若真实任务未显示净改善，优先进一步删除 router 行为，而不是继续加词法规则。
 
@@ -369,6 +377,10 @@ M3 判定优先删除性维护：pilot 没有缩短 TTFV、没有减少返工/�
 | `RISK-012` | cold discovery 入口要求宿主先知道不可见能力 | maintenance | ADR-SMV-020 domain purpose catalog + trigger/negative corpus + retire condition |
 | `RISK-013` | 为降低累计 cached token 合并工具回合，反而增加 uncached、延迟或链失败 | maintenance | ADR-SMV-021 + cached/uncached 分层 + 1–2 case A/B + 负收益立即回退 |
 | `RISK-014` | 未知 domain、候选截断或 stale static truth 导致错误能力选择 | maintenance | ADR-SMV-022 + fail-closed hint + truncation signal + current snapshot override |
+| `RISK-015` | 把 Git CAS/merge conflict 当文件锁或任务队列，导致两个 Agent 写同一路径 | maintenance | ADR-SMV-024 + single-writer shared seam + base/hash freshness + sequential integration |
+| `RISK-016` | 固定角色/控制面复制宿主 coordinator，增加状态、token 和无人负责的交接 | maintenance | read-only design panel + one result owner + no runtime/daemon/schema major verifier |
+| `RISK-017` | 社区知识库/代码图/skill 自动升级器无真实缺口就进入默认栈 | maintenance | ADR-SMV-025 + two-real-task admission + disposition/retirement contract + repo-native fallback |
+| `RISK-018` | lease 过期/reassign 后旧 writer 仍在运行并产生双写 | maintenance | explicit revoke/recovery + old-writer stop proof + candidate provenance preserved |
 
 ## 11. 路线维护
 

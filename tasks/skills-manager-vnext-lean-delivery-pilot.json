@@ -22,6 +22,13 @@
     "capability_selection",
     "simple_task_negative_control"
   ],
+  "observation_dimensions": [
+    "coordination_mode",
+    "shared_write_set_policy",
+    "tool_dispositions",
+    "context_adapter",
+    "skill_lifecycle_action"
+  ],
   "counting_policy": {
     "real_tasks_only": true,
     "synthetic_samples_count": false,
@@ -37,8 +44,9 @@
     "causal_claims_allowed": false
   },
   "collection_notes": [
-    "The M0.1 correction and this registry bootstrap are self-referential maintenance work and do not count toward the ten real-task samples.",
+    "The M0.1 correction, M0.2 engineered-workflow clarification, and this registry bootstrap are self-referential maintenance work and do not count toward the ten real-task samples.",
     "Samples are appended only after a real task reaches an evidence-backed stopping point; candidate or retrospective synthetic rows are forbidden.",
+    "Each future sample records coordination_mode, shared_write_set_policy, tool_dispositions, context_adapter, and skill_lifecycle_action; none/not_applicable values are valid and must not trigger unnecessary agents or tools.",
     "collecting does not mean the pilot has executed or demonstrated benefit."
   ],
   "samples": []
