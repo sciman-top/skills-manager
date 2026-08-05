@@ -244,8 +244,8 @@
       "depends_on": ["SMV-MD-009"],
       "requirement_ids": ["PP-012", "NFR-EWF-006", "NFR-TEC-001", "NFR-PORT-001", "NFR-COMP-001"],
       "architecture_decision_ids": ["ADR-SMV-001", "ADR-SMV-002", "ADR-SMV-027"],
-      "goal": "承认 AI 生成 PowerShell 的语法/动态类型/quoting/encoding/native-process/5.1-7 风险，以 protocol-first、C#/.NET typed core + PowerShell thin shell 的 strangler 路线替代永久脚本单体，同时禁止直接重写。",
-      "preconditions": ["current PS7 build and full-gate path remains authoritative", "Windows PowerShell 5.1 remains bounded smoke only", "current repository has one runtime source of truth", "no .NET project or production migration is authorized in this slice"],
+      "goal": "承认 AI 生成 PowerShell 的语法/动态类型/quoting/encoding/native-process 风险，以 protocol-first、C#/.NET typed core + PowerShell 7 thin shell 的 strangler 路线替代永久脚本单体，同时禁止直接重写。5.1/7 差异风险由独立 PS7-only runtime migration track 收敛，不在本 M0.3 任务内偷偷形成第二运行真源。",
+      "preconditions": ["current PS7 build and full-gate path remains authoritative", "current shell support policy is ps7_only and historical 5.1 evidence remains preserved", "current repository has one runtime source of truth", "no typed-core production migration is authorized in this slice"],
       "write_set": [
         "docs/product/skills-manager-vnext-prd.md",
         "docs/product/skills-manager-vnext-architecture.md",
@@ -259,11 +259,11 @@
         "docs/change-evidence/20260805-model-policy-and-typed-core-maintenance-design.md"
       ],
       "implementation_steps": ["区分当前运行真值与长期目标架构", "比较 C#/.NET、TypeScript/Node、Python、Rust 与继续 PowerShell", "定义 shell/protocol/typed-core/host-adapter 职责", "定义 TC0 baseline、TC1 shadow PoC、TC2 one-seam migration、TC3 retain/revise/retire", "定义 corpus parity、SDK pin、分发、兼容、回滚和删除门禁"],
-      "tests": ["PowerShell 7 primary and 5.1 bounded smoke remain explicit", "typed core is not claimed implemented", "full rewrite and dual source of truth are rejected", "PoC requires one read-only seam, two callers, corpus parity and rollback"],
+      "tests": ["PS7-only current runtime policy and preserved historical 5.1 facts remain explicit", "typed core is not claimed implemented", "full rewrite and dual source of truth are rejected", "PoC requires one read-only seam, two callers, corpus parity and rollback"],
       "verification": ["PowerShellCompatibility.Tests.ps1", "scripts/verify-lean-ai-delivery-planning.ps1 -Json", "git diff --check"],
       "rollback": ["撤销 M0.3 技术栈决策/runbook 增量，恢复 ADR-SMV-001 当前运行决策；不创建或删除任何 runtime project"],
       "done_when": ["C#/.NET typed core is the single recommended conditional PoC", "PowerShell remains current runtime and future thin shell", "TC0-TC3 gates are AI executable", "no source/runtime/generated/host file is changed"],
-      "out_of_scope": ["full rewrite", "dotnet project creation", "production seam migration", "Node/Python/Rust core", "daemon/database", "dropping PS5.1 compatibility", "P6 admission", "live acceptance"]
+      "out_of_scope": ["full rewrite", "dotnet project creation", "production seam migration", "Node/Python/Rust core", "daemon/database", "PS7 runtime migration implementation (owned by powershell7_runtime_migration)", "P6 admission", "live acceptance"]
     },
     {
       "id": "SMV-MD-011",

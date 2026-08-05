@@ -15,7 +15,7 @@
 
 ## 1. 目标与产品增量
 
-本切片把 M0.3 的条件性技术路线推进到一个可删除的真实 PoC：用 C#/.NET 对 `OperationPlan/Receipt v1` 做只读合同验证，与当前 PowerShell validator shadow 对比。它回答“typed core 是否能在不破坏 CLI/生成 bundle/PS5.1 smoke 的前提下降低动态类型和 parser 风险”，不把 PoC 接入生产命令，也不证明 PowerShell 已可替换。
+本切片把 M0.3 的条件性技术路线推进到一个可删除的真实 PoC：用 C#/.NET 对 `OperationPlan/Receipt v1` 做只读合同验证，与当前 PowerShell validator shadow 对比。它回答“typed core 是否能在不破坏 CLI/生成 bundle/当时受支持的 runtime gate 前提下降低动态类型和 parser 风险”，不把 PoC 接入生产命令，也不证明 PowerShell 已可替换。后续 `powershell7_runtime_migration` 已把当前 runtime gate 收敛为 PS7-only；TC1 的历史验证结果保持有效，但不恢复 5.1 当前支持。
 
 用户增量是一条可复核的迁移证据链：固定 seam/caller/corpus -> 固定协议 -> 编译期检查 -> PowerShell/C# parity -> 发布体积/启动测量 -> TC2 retain/defer 决策。当前结论只准入保留 shadow PoC；TC2 仍需独立 reviewed admission。
 
@@ -126,7 +126,7 @@ TC2 在以下全部成立前保持 `not_started`：
 
 - 至少新增一个非 fixture 的真实 consumer replay，证明 shadow finding parity；
 - reviewed 决定哪一侧成为 seam 的单一实现真源，并给出 PowerShell thin adapter；
-- bundle/install/旧 CLI alias/PS7/full/PS5.1 smoke 的兼容与回滚命令完整；
+- bundle/install/旧 CLI alias/PS7-only full/CLI/package 的兼容与回滚命令完整；
 - 分发策略明确处理 framework-dependent runtime presence 与 self-contained 73–80 MB 成本；
 - AI 修改一次通过率或返工、测试时间、启动/调用成本至少有一个可比基线显示净收益；
 - 无双写、双配置、daemon、provider/host/session mutation 或 P6 越级。

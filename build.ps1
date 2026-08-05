@@ -1,3 +1,4 @@
+#requires -Version 7.0
 $ErrorActionPreference = "Stop"
 $Root = $PSScriptRoot
 $Src = Join-Path $Root "src"
@@ -62,7 +63,8 @@ foreach ($f in $Files) {
     $Content += "`r`n"
 }
 
-# Write UTF-8 with BOM for Windows PowerShell 5.1 compatibility.
+# Keep a deterministic UTF-8 BOM for Windows distribution. This is an encoding
+# choice for predictable file detection, not a Windows PowerShell 5.1 contract.
 # Use bytes explicitly to avoid host/runtime encoding differences.
 $utf8NoBom = [System.Text.Encoding]::UTF8
 $bom = (New-Object System.Text.UTF8Encoding($true)).GetPreamble()

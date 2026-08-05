@@ -40,9 +40,9 @@
 
 vNext P0-P5 已完成 repo-side 验收（P0/P1 各 9/9，P2/P3 各 7/7，P4 6/6，P5 5/5）；这是历史仓库契约真值，不等于自然语言路由实效。P5-local maintenance 已把语义选择权交回宿主 AI，并把 profile-first cold discovery 重构为 `domain purpose catalog -> host domain/candidate adjudication -> deterministic policy`；只读 App Server snapshot、session reuse 建议和 containment/freshness/availability/side-effect/approval/activation policy 继续保留。plugin/MCP 安装、OAuth、host/profile/session 写入、重启与 `live_accepted` 仍不在边界。
 
-运行时以 PowerShell 7 (`pwsh`) 为开发、CI 和完整门禁主路径；Windows PowerShell 5.1 仅保留安装 fallback、generated script parse 和 plain-object/selected fixture smoke。完整边界与移除条件见 [`docs/runbooks/powershell-runtime-compatibility.md`](docs/runbooks/powershell-runtime-compatibility.md)。
+本项目仅支持 PowerShell 7 (`pwsh`)；PowerShell 7.6 LTS 是推荐基线。Windows PowerShell 5.1 不再提供安装 fallback、CI 或 smoke 支持，缺少 `pwsh` 时入口 fail-closed。迁移、编码与回滚边界见 [`docs/runbooks/powershell-runtime-compatibility.md`](docs/runbooks/powershell-runtime-compatibility.md)。
 
-PowerShell 仍是当前唯一运行真源，但不再是所有未来领域逻辑的默认永久归宿。针对 AI 生成脚本常见的 parser/quoting/动态类型/encoding/native-process/5.1-7 兼容返工，目标架构采用 `versioned protocol -> 条件性 C#/.NET typed core -> PowerShell thin shell`。当前 TC0/TC1 已对 `OperationPlan/Receipt v1` 建立 package-free C#/.NET `shadow_only` PoC，并在固定 corpus 上实现 PowerShell/C# parity；它没有接入 CLI/生成 bundle，TC2 生产迁移仍为 `not_started`，禁止直接全仓重写或形成双真源。
+PowerShell 仍是当前唯一运行真源，但不再是所有未来领域逻辑的默认永久归宿。针对 AI 生成脚本常见的 parser/quoting/动态类型/encoding/native-process 返工，目标架构采用 `versioned protocol -> 条件性 C#/.NET typed core -> PowerShell thin shell`。当前 TC0/TC1 已对 `OperationPlan/Receipt v1` 建立 package-free C#/.NET `shadow_only` PoC，并在固定 corpus 上实现 PowerShell/C# parity；它没有接入 CLI/生成 bundle，TC2 生产迁移仍为 `not_started`，禁止直接全仓重写或形成双真源。
 
 长链路任务的模型与子 Agent 编排继续由宿主 AI 负责；本仓只提供可审查的 TaskGraph、Radar snapshot、三档模型软锚点、串并行 admission 和 failure escalation 建议。`Sol xhigh / Sol medium / Luna max` 是可覆盖默认值，不是已实现的动态路由；本仓不修改 active session、custom-agent、provider/auth 或 host config。
 
@@ -385,7 +385,7 @@ portable 包包含可迁移源码与配置，例如 `skills.ps1`、`skills.cmd`�
 新电脑解压后：
 
 ```powershell
-.\install.ps1 -Mode CurrentUser
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Mode CurrentUser
 ```
 
 默认行为：
@@ -399,14 +399,15 @@ portable 包包含可迁移源码与配置，例如 `skills.ps1`、`skills.cmd`�
 常用模式：
 
 ```powershell
-.\install.ps1 -Mode CurrentUser -SyncMcp
-.\install.ps1 -Mode PortableOnly
-.\install.ps1 -Mode CurrentUser -DoctorThresholdMs 12000
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Mode CurrentUser -SyncMcp
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Mode PortableOnly
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Mode CurrentUser -DoctorThresholdMs 12000
 ```
 
 说明：
 
 - `PortableOnly` 只做 `build + doctor`，不会写用户 skills 目录，也会忽略 `-SyncMcp`。
+- 安装器和 `skills.cmd` 只解析 `pwsh`；Windows PowerShell 5.1 不受支持，也没有隐藏 fallback。
 - `-SkipEnvironmentCheck` 适合受控测试夹具，不建议日常安装使用。
 - 若要在新电脑上同步 MCP，先准备本机 token、数据库连接串等宿主环境，再执行 `-SyncMcp`。
 

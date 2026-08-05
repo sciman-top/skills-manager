@@ -1,4 +1,4 @@
-﻿#requires -Version 5.1
+﻿#requires -Version 7.0
 param(
     [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "锁定", "生成锁文件", "清理无效映射", "打开配置", "解除关联", "清理备份", "自动更新设置", "帮助", "help", "--help", "-h", "doctor", "add", "npx", "技能配置", "skill-profile", "安装MCP", "卸载MCP", "同步MCP", "MCP配置", "mcp-profile", "mcp-install", "mcp-uninstall", "mcp-sync", "审查目标", "audit-targets", "能力清单", "capability-inventory", "plugin-inventory", "plugin-lint", "plugin-export", "plugin-eval", "规则审查", "rule-audit", "规则全域审查", "rule-estate-audit", "规则全域计划", "rule-estate-plan", "规则全域应用", "rule-estate-apply", "规则全域回滚", "rule-estate-rollback", "规则计划", "rule-plan", "规则应用", "rule-apply", "一键", "workflow", "prune-invalid-mappings")]
     [string]$Cmd = "menu",
@@ -453,11 +453,6 @@ function Get-FileContentHash([string]$path) {
 }
 function Need($cond, [string]$msg) { if (-not $cond) { throw $msg } }
 function Resolve-PowerShellExecutable {
-    if (-not [string]::IsNullOrWhiteSpace($env:CODEX_ALLOW_WINDOWS_POWERSHELL)) {
-        $legacy = Get-Command powershell -ErrorAction SilentlyContinue
-        if ($legacy) { return [string]$legacy.Source }
-    }
-
     $programFilesPwsh = if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
         Join-Path $env:ProgramFiles "PowerShell\7\pwsh.exe"
     } else {
@@ -470,10 +465,7 @@ function Resolve-PowerShellExecutable {
     $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
     if ($pwsh) { return [string]$pwsh.Source }
 
-    $legacyFallback = Get-Command powershell -ErrorAction SilentlyContinue
-    if ($legacyFallback) { return [string]$legacyFallback.Source }
-
-    throw "未找到 PowerShell 可执行文件。请优先安装 PowerShell 7 (pwsh)。"
+    throw "未找到 PowerShell 7 (pwsh)。本项目不支持 Windows PowerShell 5.1，请先安装 PowerShell 7。"
 }
 function Read-HostSafe([string]$prompt) {
     $value = Read-Host $prompt
@@ -10852,7 +10844,7 @@ function readWindowsEnvironmentVariable(name, scope) {
   if (process.platform !== "win32") return "";
   try {
     return execFileSync(
-      "powershell.exe",
+      "pwsh.exe",
       [
         "-NoLogo",
         "-NoProfile",

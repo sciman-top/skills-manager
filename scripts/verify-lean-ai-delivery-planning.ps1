@@ -609,7 +609,7 @@ foreach ($policyContract in @(
     @{ key = 'spec'; literal = 'M0_3_TYPED_CORE_STATUS: poc_not_started'; code = 'm0_3_typed_core_status_missing'; message = 'M0.3 historical closeout must remain poc_not_started.' },
     @{ key = 'spec'; literal = 'TYPED_CORE_STATUS: tc1_shadow_repo_verified'; code = 'typed_core_status_missing'; message = 'Current adjacent follow-up must record the repo-verified TC1 shadow state.' },
     @{ key = 'spec'; literal = 'TYPED_CORE_PRODUCTION_STATUS: not_started'; code = 'typed_core_production_status_missing'; message = 'Typed-core production migration must remain not_started.' },
-    @{ key = 'spec'; literal = 'POWERSHELL_COMPATIBILITY_STATUS: ps7_primary_ps51_bounded_smoke'; code = 'powershell_compatibility_status_missing'; message = 'M0.3 must preserve PS7 primary and bounded PS5.1 compatibility truth.' },
+    @{ key = 'spec'; literal = 'POWERSHELL_COMPATIBILITY_STATUS: ps7_only'; code = 'powershell_compatibility_status_missing'; message = 'Current maintenance truth must preserve the PS7-only runtime policy.' },
     @{ key = 'prd'; literal = 'FR-EWF-017'; code = 'model_escalation_requirement_missing'; message = 'PRD must define bounded model escalation and failure routing.' },
     @{ key = 'prd'; literal = 'NFR-TEC-001'; code = 'typed_core_requirement_missing'; message = 'PRD must contain the conditional typed-core technology requirement.' },
     @{ key = 'architecture'; literal = 'ADR-SMV-026'; code = 'model_policy_architecture_decision_missing'; message = 'Architecture must contain the host-owned task/model policy ADR.' },
@@ -654,7 +654,7 @@ $result = [ordered]@{
     m0_3_typed_core_status = 'poc_not_started'
     typed_core_status = 'tc1_shadow_repo_verified'
     typed_core_production_status = 'not_started'
-    powershell_compatibility_status = 'ps7_primary_ps51_bounded_smoke'
+    powershell_compatibility_status = 'ps7_only'
     pilot_status = $pilotStatus
     pilot_sample_target = $pilotSampleTarget
     pilot_sample_count = $pilotSampleCount

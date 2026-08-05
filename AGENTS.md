@@ -1,15 +1,15 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
-**全局规则复核**: 9.66
+**全局规则复核**: 9.67
 **最后更新**: 2026-08-05
 
 ## 1. 当前落点与目标归宿
 - 当前落点：`skills.ps1` 是统一入口，`skills.json` 是 vendor、mapping、target、sync 与 MCP 的单一配置源。
 - 目标归宿：演进为 local-first AI capability curator 与 rule advisor；复用官方 skills/plugins/MCP/规则 surface，不替代宿主 runtime、auth、权限、会话或插件目录。
-- 当前规划真源：`docs/product/`、当前 P5 spec、`tasks/skills-manager-vnext-phase5.tasks.json`；非 Phase 的 Lean Delivery maintenance 与 typed-core shadow PoC 分别由 `docs/superpowers/specs/2026-08-03-lean-ai-delivery-maintenance-design.md`、`docs/superpowers/specs/2026-08-05-typed-core-operation-contract-shadow-poc.md` 及对应 manifest 承接；P5-local native-first routing、hierarchical cold discovery、profile reconciliation advisor 与 bounded profile optimization canary 分别由 `docs/superpowers/specs/2026-08-04-native-first-capability-discovery-correction.md`、`docs/superpowers/specs/2026-08-04-hierarchical-capability-discovery-redesign.md`、`docs/superpowers/specs/2026-08-04-skill-profile-reconciliation-maintenance-design.md`、`docs/superpowers/specs/2026-08-04-bounded-profile-optimization-canary.md` 及各自 manifest 承接。它们都不构成 P6 admission 或 live acceptance。
+- 当前规划真源：`docs/product/`、当前 P5 spec、`tasks/skills-manager-vnext-phase5.tasks.json`；非 Phase 的 Lean Delivery maintenance、typed-core shadow PoC 与 PS7-only runtime migration 分别由 `docs/superpowers/specs/2026-08-03-lean-ai-delivery-maintenance-design.md`、`docs/superpowers/specs/2026-08-05-typed-core-operation-contract-shadow-poc.md`、`docs/superpowers/specs/2026-08-05-powershell-7-only-runtime-migration.md` 及对应 manifest 承接；P5-local native-first routing、hierarchical cold discovery、profile reconciliation advisor 与 bounded profile optimization canary 分别由 `docs/superpowers/specs/2026-08-04-native-first-capability-discovery-correction.md`、`docs/superpowers/specs/2026-08-04-hierarchical-capability-discovery-redesign.md`、`docs/superpowers/specs/2026-08-04-skill-profile-reconciliation-maintenance-design.md`、`docs/superpowers/specs/2026-08-04-bounded-profile-optimization-canary.md` 及各自 manifest 承接。它们都不构成 P6 admission 或 live acceptance。
 - 当前 Phase：P5 5/5 `repo_verified` 历史真值保留；P5-local maintenance 已退役 lexical task model/ranking，并把 profile-first cold discovery 重构为 `portable catalog/domain purpose -> host adjudication -> deterministic policy`；canonical inventory delta 只生成 ignored handoff，unknown/truncated/runtime-truth hardening 的 deterministic corpus 为 30/30。32-case selection 32/32、8-case cold-load 8/8 仍为 `host_evaluation_partial`，不证明普遍正确、token 优化或 live acceptance。P4 6/6 历史真源继续保留；plugin/MCP install、OAuth、provider/auth/model/sandbox/session mutation、native host mutation 与 live acceptance 仍不在边界。
 - 当前 profile maintenance：advisor 4/4 与 bounded optimization 3/3 均已 `repo_verified`；canary 只消费 host-owned proposal，以显式 token 修改非活动 profile，并要求 receipt/fresh replay/失败回滚。代表回放为 `host_evaluation_partial_pass`；禁止 lexical 自动归类、永久 `active_profile` 切换和无审计宿主写入，普遍维护收益与 live acceptance 未验证。
-- 当前 Lean Delivery maintenance：M0/M0.2/M0.3 11/11 `repo_verified`；后续 TC0 seam baseline 与 TC1 `shadow_only` PoC 3/3 `repo_verified`，只对 `OperationPlan/Receipt v1` 做 package-free C#/.NET corpus parity 和发布观测。PowerShell 仍为唯一运行真源，生产集成/TC2 `not_started`；不实现 coordinator/lease/model-router runtime，不抓取 Radar，不修改 custom-agent/host config。M1 由 `tasks/skills-manager-vnext-lean-delivery-pilot.json` 保持 `collecting (0/10)`；不证明 pilot 已执行/完成、模型策略或迁移净收益、PowerShell 已替换、runtime/host mutation 或 live acceptance。
+- 当前 Lean Delivery maintenance：M0/M0.2/M0.3 11/11 `repo_verified`；后续 TC0 seam baseline 与 TC1 `shadow_only` PoC 3/3 `repo_verified`，只对 `OperationPlan/Receipt v1` 做 package-free C#/.NET corpus parity 和发布观测。PowerShell 7 仍为唯一运行真源，当前 shell runtime policy 已收敛为 `ps7_only`；生产集成/TC2 `not_started`。不实现 coordinator/lease/model-router runtime，不抓取 Radar，不修改 custom-agent/host config。M1 由 `tasks/skills-manager-vnext-lean-delivery-pilot.json` 保持 `collecting (0/10)`；不证明 pilot 已执行/完成、模型策略或 typed-core 迁移净收益、runtime/host mutation 或 live acceptance。
 - P5 后进入 maintenance hold；未满足路线图的独立真实失败、消费者证据、债务闭合和用户授权条件，不创建 P6 manifest、不扩 schema major 或治理层。
 
 ## A. 仓库事实与模块边界
@@ -21,6 +21,7 @@
 - `src/Application/RuleEstate.ps1` 负责动态发现和只读审查；`RuleEstateMutation.ps1` 只消费人工或登记策略审阅的 change-set，并以 fail-fast、逐目标 receipt 模型写入，不实现跨仓 all-or-rollback。
 - `src/Application/SkillProfileReconciliation.ps1` 只消费宿主语义 proposal，负责非活动 profile 的有界 canary、receipt、fresh replay acceptance 和 drift-safe rollback；不调用模型、不决定语义、不永久切换 active profile。
 - `typed-core/SkillsManager.TypedCore/` 是 `OperationPlan/Receipt v1` 的 TC1 `shadow_only` PoC；只由 `scripts/verify-typed-core-shadow.ps1` 和测试调用，禁止从 `src/**/*.ps1`、`build.ps1` 或生成 bundle 接入生产路径。`global.json` 固定 PoC SDK；TC2 前不得形成双写或双真源。
+- 当前 runtime contract 是 PS7-only：`src/Version.ps1`、`build.ps1`、`install.ps1`、`skills.cmd`、CI、tests 和受管子进程只允许 `pwsh`；禁止恢复 `powershell.exe`/`CODEX_ALLOW_WINDOWS_POWERSHELL` fallback。历史 spec/manifest 中的 5.1 记录保留为当时事实，不构成当前支持面。
 - `docs/product/` 定义 PRD/架构/路线图，task manifest 定义当前 Phase 的 AI 可执行任务；`scripts/verify-vnext-planning.ps1` 只验证规划一致性，不证明产品或宿主验收。
 
 ## B. 执行与风险边界

@@ -1,3 +1,4 @@
+#requires -Version 7.0
 [CmdletBinding()]
 param(
     [ValidateSet("CurrentUser", "PortableOnly")]
@@ -23,12 +24,16 @@ function Resolve-PowerShellExecutable {
     if ($pwsh) {
         return $pwsh.Source
     }
-    $powershell = Get-Command powershell.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($powershell) {
-        return $powershell.Source
-    }
-    throw "未找到 PowerShell 可执行文件。请优先安装 PowerShell 7 (pwsh)。"
+    throw "未找到 PowerShell 7 (pwsh)。本项目不支持 Windows PowerShell 5.1，请先安装 PowerShell 7。"
 }
+
+function Assert-PowerShell7 {
+    if ($PSVersionTable.PSEdition -ne 'Core' -or $PSVersionTable.PSVersion.Major -lt 7) {
+        throw "本项目仅支持 PowerShell 7+ (pwsh)，当前运行时为 $($PSVersionTable.PSVersion) / $($PSVersionTable.PSEdition)。"
+    }
+}
+
+Assert-PowerShell7
 
 function Assert-Environment([string]$RootPath, [bool]$NeedsGit) {
     if (-not (Test-Path -LiteralPath (Join-Path $RootPath "skills.ps1") -PathType Leaf)) {

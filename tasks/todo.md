@@ -6,6 +6,8 @@
 **maintenance_pilot_truth**: `tasks/skills-manager-vnext-lean-delivery-pilot.json`
 **active_typed_core_track**: `typed_core_shadow_poc`
 **typed_core_task_truth**: `tasks/skills-manager-vnext-typed-core-pilot.tasks.json`
+**powershell_runtime_track**: `powershell7_runtime_migration`
+**powershell_runtime_task_truth**: `tasks/skills-manager-vnext-powershell7-migration.tasks.json`
 **active_profile_maintenance_track**: `profile_reconciliation_advisor`
 **profile_maintenance_task_truth**: `tasks/skills-manager-vnext-profile-reconciliation.tasks.json`
 **active_profile_optimization_track**: `profile_optimization_canary`
@@ -47,7 +49,17 @@
 - [x] M0.1 补齐 North Star、native baseline、双证据流、删除评审与 pilot 计数合同。
 - [ ] M1 收集并 review 10 个真实 observe-only 样本（当前 0/10）。
 
-M0/M0.2/M0.3 maintenance design planning package 为 11/11 `repo_verified`；M1 已获授权并保持 `collecting (0/10)`，但没有任何真实样本、并行/工具/模型策略收益、pilot 完成或业务收益声明。coordinator/lease/model-router runtime、Radar live refresh、custom-agent/host config mutation和社区工具安装均未发生；typed-core TC0/TC1 只完成 shadow PoC，PowerShell 未替换。M3/TC3 conditional、TC2/P6 admission/业务 `live_accepted` 均未执行。
+M0/M0.2/M0.3 maintenance design planning package 为 11/11 `repo_verified`；M1 已获授权并保持 `collecting (0/10)`，但没有任何真实样本、并行/工具/模型策略收益、pilot 完成或业务收益声明。coordinator/lease/model-router runtime、Radar live refresh、custom-agent/host config mutation和社区工具安装均未发生；typed-core TC0/TC1 只完成 shadow PoC，PowerShell 领域实现未替换。当前 shell 支持面已独立收敛为 PS7-only；M3/TC3 conditional、TC2/P6 admission/业务 `live_accepted` 均未执行。
+
+## PowerShell 7 runtime migration checklist
+
+- [x] `SMV-PS7-001` 冻结当前消费者、官方生命周期、PS7-only 决策与历史事实边界。
+- [x] `SMV-PS7-002` 将 source、generated bundle、installer、CMD wrapper 和受管 subprocess 收敛为 `pwsh` fail-closed。
+- [x] `SMV-PS7-003` 删除 5.1 CI/smoke，迁移 focused tests 与通用 PowerShell automation 指导。
+- [x] `SMV-PS7-004` 同步 PRD、架构、路线图、runbook、release、plan/todo 与回滚合同。
+- [x] `SMV-PS7-005` 以 runtime-policy verifier、focused tests、generated-sync 和 full gate 完成 `repo_verified` 收口。
+
+本 track 只改变当前 shell runtime support：最低 PowerShell 7.0、推荐 7.6 LTS、缺少 `pwsh` 时 fail-closed。它不改写历史 Phase manifest，不证明所有下游消费者已迁移，不启动 TC2/P6，也不把 Windows PowerShell 5.1 描述为已被微软停止支持。
 
 ## Typed-core Operation Contract checklist
 

@@ -154,12 +154,12 @@ Describe 'OperationPlan and Receipt v1 contracts' {
         $source | Should Not Match '(?i)\$env:'
     }
 
-    It 'parses and constructs plain objects in the bounded Windows PowerShell 5.1 compatibility smoke' {
+    It 'parses and constructs plain objects in the PowerShell 7 runtime' {
         $operationPath = (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1').Replace("'", "''")
         $receiptPath = (Join-Path $repoRoot 'src\Domain\Receipt.ps1').Replace("'", "''")
         $scriptText = ". '$operationPath'; . '$receiptPath'; `$p = New-OperationPlan -OperationId op-smoke -Domain mcp -Mode dry_run -CreatedAt 2026-08-01T08:00:00Z; `$r = New-OperationReceipt -OperationId op-smoke -Status dry_run -StartedAt 2026-08-01T08:00:00Z -CompletedAt 2026-08-01T08:00:01Z; [pscustomobject]@{ plan = `$p.schema_version; receipt = `$r.schema_version } | ConvertTo-Json -Compress"
 
-        $output = @(& powershell.exe -NoProfile -Command $scriptText 2>&1)
+        $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -Command $scriptText 2>&1)
         $exitCode = $LASTEXITCODE
         $result = ($output -join "`n") | ConvertFrom-Json
 

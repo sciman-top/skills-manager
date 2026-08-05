@@ -119,7 +119,7 @@ Git 保存版本、分支、candidate commit 和集成结果；宿主原生 coor
 
 ### `PP-012 Typed-core migration without shell rupture`
 
-PowerShell 是当前 Windows-first 的兼容入口和适配层，不再被视为长期承载所有领域语义的唯一实现。新领域逻辑优先通过稳定 JSON/protocol contract、纯函数和可测试 typed core 评估；迁移必须保持旧 CLI、生成 bundle、安装 fallback 和受界定的 5.1 smoke 可回滚。没有两个真实 caller、characterization baseline 和迁移收益证据，不创建第二实现或开始重写。
+PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和适配层，不再被视为长期承载所有领域语义的唯一实现。新领域逻辑优先通过稳定 JSON/protocol contract、纯函数和可测试 typed core 评估；迁移必须保持旧 CLI aliases、生成 bundle、PS7 安装/执行路径和回滚可用。Windows PowerShell 5.1 不再是受支持 runtime，缺少 `pwsh` 时 fail-closed；没有两个真实 caller、characterization baseline 和迁移收益证据，不创建第二实现或开始 typed-core 生产重写。
 
 当前 TC0/TC1 只对 `OperationPlan/Receipt v1` 完成 package-free C#/.NET `shadow_only` PoC：固定 corpus 与 PowerShell validator parity，生产 CLI/bundle 未接入，TC2 仍需独立 reviewed admission。
 
@@ -273,7 +273,7 @@ PowerShell 是当前 Windows-first 的兼容入口和适配层，不再被视为
 - `NFR-COMP-001`：现有 `skills.json`、lock、CLI aliases、generated `skills.ps1` 和 MCP/skill projection 行为保持兼容。
 - `NFR-MNT-001`：新增业务逻辑进入明确 bounded context；不再向超大 command 文件无界追加。
 - `NFR-MNT-002`：开发源码模块化，发行仍允许单文件 bundle。
-- `NFR-PORT-001`：PowerShell 7 是首选开发/CI runtime；Windows PowerShell 5.1 保留有时限的兼容 smoke，不阻止新代码使用可适配的 PS7 能力。
+- `NFR-PORT-001`：PowerShell 7 是唯一受支持的开发、CI、安装和运行 runtime；当前最低版本为 7.0，推荐 PowerShell 7.6 LTS。入口、子进程和 CI 必须只解析 `pwsh`，缺失时 fail-closed，不提供 Windows PowerShell 5.1 fallback/smoke。
 - `NFR-SAF-001`：只读命令不能调用 provider、写宿主配置或改变 active profile。
 - `NFR-SAF-002`：所有外部写入必须显式授权；高风险写入必须先有可执行回滚。
 - `NFR-SAF-003`：profile reconciliation 的诊断和 proposal 校验必须 network-free、provider-free、zero-write，且不得修改 `active_profile`、安装/删除 skill 或写宿主配置；未来 apply 路径必须另行设计、审阅和授权。
@@ -295,7 +295,7 @@ PowerShell 是当前 Windows-first 的兼容入口和适配层，不再被视为
 - `NFR-EWF-003`：外部 context adapter 默认只读、最小 root、redaction-first、可重建且可移除；索引或图谱过期、语言不支持、权限不明或证据来源缺失时 fail-closed，并回退 repo-native 工具。
 - `NFR-EWF-004`：tool/skill promotion 的语义判断可由宿主 AI 提议，但 availability、freshness、权限、预算、供应链、测试和 truth-level advancement 必须由确定性证据或人工 review 约束。
 - `NFR-EWF-005`：模型策略是多目标 Pareto 建议，必须同时观察正确性/用户结果、费用、wall-clock、token/context、重试和集成成本及不可逆风险；不得把动态 Radar 分数压成不可解释的固定总分或单项硬门禁。
-- `NFR-EWF-006`：PowerShell 5.1 只保留 bootstrap、生成脚本 parse、plain-object/selected-fixture smoke；PS7 是开发/CI/full gate 主路径。新 typed core 候选必须以 versioned protocol、single source of truth、双运行时回退和可删除 PoC 证明，不得在无门禁的情况下形成双写或双真源。
+- `NFR-EWF-006`：PS7-only runtime policy 必须覆盖 source、generated bundle、installer、`skills.cmd`、CI、tests、subprocess wrapper、runbook 和 release contract；历史 Phase/证据中的 5.1 记录只保留为历史事实，不能恢复为当前支持承诺。新 typed core 候选仍须以 versioned protocol、single source of truth、PS7 回滚路径和可删除 PoC 证明，不得在无门禁的情况下形成双写或双真源。
 - `NFR-TEC-001`：替代技术栈评估优先比较 C#/.NET、TypeScript/Node、Python 和 Rust 的 Windows/native CLI 适配、类型/并发、分发、供应链、维护与回滚成本；当前推荐 C#/.NET typed core + PowerShell thin shell 作为条件性目标架构，只实施可删除 shadow PoC，不实施全仓重写。
 - `NFR-TEC-002`：TC1 必须 pin 受支持 LTS SDK、零第三方 `PackageReference`、4/4 corpus parity、结构化协议负例、零生产引用和可删除回滚；framework-dependent/self-contained/single-file 的体积/启动数据只作描述性观察。TC2 前 PowerShell runtime 必须保持 authoritative，生产集成为 `not_started`。
 
@@ -385,7 +385,8 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - [OpenAI Scheduled tasks](https://learn.chatgpt.com/docs/automations)：稳定重复流程可由宿主 scheduled tasks + skill 承接；先人工跑通并验证，再自动化。本仓不建 daemon/scheduler。
 - [Git `update-ref`](https://git-scm.com/docs/git-update-ref) 与 [`git push --force-with-lease`](https://git-scm.com/docs/git-push)：采用 expected-old ref 作为 stale-write guard；明确它们不提供文件级锁、排队、公平性或自动冲突裁决。
 - [MCP specification](https://modelcontextprotocol.io/specification/latest) 与 [MCP Registry](https://registry.modelcontextprotocol.io/)：采用 schema、versioning、validation 和来源/所有权边界。
-- [PowerShell differences from Windows PowerShell](https://learn.microsoft.com/powershell/scripting/whats-new/differences-from-windows-powershell)：采用 PS7 主路径和 5.1 有界兼容窗口，不把两套 runtime 描述成同等全功能支持。
+- [PowerShell support lifecycle](https://learn.microsoft.com/powershell/scripting/install/powershell-support-lifecycle?view=powershell-7.6)：推荐当前 LTS，并以官方生命周期安排升级复核。
+- [Migrating from Windows PowerShell 5.1 to PowerShell 7](https://learn.microsoft.com/powershell/scripting/whats-new/migrating-from-windows-powershell-51-to-powershell-7?view=powershell-7.6)：采用 side-by-side 安装与显式 `pwsh` 迁移指导；项目选择不再支持 5.1，不声称微软已终止其 Windows 支持渠道。
 - [.NET application publishing](https://learn.microsoft.com/dotnet/core/deploying/) 与 [single-file deployment](https://learn.microsoft.com/dotnet/core/deploying/single-file/overview)：typed-core PoC 比较 framework-dependent/self-contained/single-file 的体积、启动、平台和更新成本，发布形态由实测而非偏好决定。
 
 ### 社区采纳或适配
@@ -420,7 +421,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - `DEC-PROD-009`：工程化多 Agent 采用“host-owned coordinator + read-only design panel + disjoint-worktree execution + single-writer shared seam + sequential integration”；Git 是真值主干和 stale guard，不是文件任务队列。
 - `DEC-PROD-010`：社区 workflow、知识库、代码图和自动 skill 学习均先进入证据化 disposition；当前候选只采纳协议启发，不安装运行时，M1 真实任务证据决定后续 retain/adapt/retire。
 - `DEC-PROD-011`：宿主 AI 是任务语义、DAG、串并行和模型档位的 accountable coordinator；skills-manager 只提供建议、合同和确定性安全阻断，Codex native runtime 执行 spawn/wait/integration。
-- `DEC-PROD-012`：PowerShell 兼容性风险通过边界收缩和 typed-core PoC 处理，而不是直接全仓重写；PoC 在真实收益不足、兼容成本过高或无消费者时必须删除。
+- `DEC-PROD-012`：当前 shell runtime 强制收敛为 PS7-only，以删除 5.1/7 双运行时解析、quoting、encoding 和测试分支；这是支持面迁移，不是 typed-core 生产迁移。复杂领域语义仍通过边界收缩和 typed-core PoC 评估，不直接全仓重写；PoC 在真实收益不足、兼容成本过高或无消费者时必须删除。
 
 以下选择有意延迟到有真实代码/宿主证据的任务，不允许 AI 在更早任务中猜定：
 

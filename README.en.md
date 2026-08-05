@@ -40,9 +40,9 @@ It will not become an agent runtime, plugin marketplace, provider/model/auth/ses
 
 vNext P0-P5 have passed repository-side acceptance (P0/P1: 9/9 each; P2/P3: 7/7 each; P4: 6/6; P5: 5/5). That historical status proves repository contracts, not natural-language routing quality. P5-local maintenance now makes the host AI the semantic decision owner and replaces profile-first cold discovery with `domain purpose catalog -> host domain/candidate adjudication -> deterministic policy`. Profiles remain bounded preheat/index partitions. Plugin/MCP installation, OAuth, silent host/profile/session writes, restart, and live acceptance remain out of scope.
 
-PowerShell 7 (`pwsh`) is the primary development, CI, and full-gate runtime. Windows PowerShell 5.1 is limited to the installer fallback, generated-script parse, and plain-object/selected-fixture smoke. See [`docs/runbooks/powershell-runtime-compatibility.md`](docs/runbooks/powershell-runtime-compatibility.md) for boundaries and removal gates.
+PowerShell 7 (`pwsh`) is the only supported runtime; PowerShell 7.6 LTS is the recommended baseline. Windows PowerShell 5.1 has no installer fallback, CI job, or smoke-support path, and entry points fail closed when `pwsh` is missing. See [`docs/runbooks/powershell-runtime-compatibility.md`](docs/runbooks/powershell-runtime-compatibility.md) for migration, encoding, and rollback boundaries.
 
-PowerShell remains the only current runtime truth, but it is no longer the permanent default home for every future domain rule. To reduce parser, quoting, dynamic-type, encoding, native-process, and 5.1/7 rework in AI-authored scripts, the target architecture is `versioned protocol -> conditional C#/.NET typed core -> PowerShell thin shell`. TC0/TC1 now provide a package-free C#/.NET `shadow_only` PoC for `OperationPlan/Receipt v1` with fixed-corpus PowerShell/C# parity. It is not wired into the CLI or generated bundle, TC2 production migration remains `not_started`, and a full rewrite or dual source of truth is forbidden.
+PowerShell remains the only current runtime truth, but it is no longer the permanent default home for every future domain rule. To reduce parser, quoting, dynamic-type, encoding, and native-process rework in AI-authored scripts, the target architecture is `versioned protocol -> conditional C#/.NET typed core -> PowerShell thin shell`. TC0/TC1 now provide a package-free C#/.NET `shadow_only` PoC for `OperationPlan/Receipt v1` with fixed-corpus PowerShell/C# parity. It is not wired into the CLI or generated bundle, TC2 production migration remains `not_started`, and a full rewrite or dual source of truth is forbidden.
 
 The host AI continues to own long-chain task decomposition, subagent orchestration, and model/effort selection. This repository only advises with a reviewable TaskGraph, Radar snapshot, three soft model tiers, serial/parallel admission, and failure escalation. `Sol xhigh / Sol medium / Luna max` are overrideable defaults, not an implemented runtime router; this repository does not mutate the active session, custom agents, provider/auth, or host config.
 
@@ -320,7 +320,7 @@ The portable package includes reproducible source and config such as `skills.ps1
 After extraction on a new machine:
 
 ```powershell
-.\install.ps1 -Mode CurrentUser
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Mode CurrentUser
 ```
 
 Default behavior:
@@ -334,14 +334,15 @@ Default behavior:
 Common modes:
 
 ```powershell
-.\install.ps1 -Mode CurrentUser -SyncMcp
-.\install.ps1 -Mode PortableOnly
-.\install.ps1 -Mode CurrentUser -DoctorThresholdMs 12000
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Mode CurrentUser -SyncMcp
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Mode PortableOnly
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Mode CurrentUser -DoctorThresholdMs 12000
 ```
 
 Notes:
 
 - `PortableOnly` does only `build + doctor`, does not write user skills directories, and ignores `-SyncMcp`.
+- The installer and `skills.cmd` resolve only `pwsh`; Windows PowerShell 5.1 is unsupported and has no hidden fallback.
 - `-SkipEnvironmentCheck` is for controlled fixtures; do not use it as the normal install path.
 - Before syncing MCP on a new machine, prepare machine-local tokens, database connection strings, and other host prerequisites.
 

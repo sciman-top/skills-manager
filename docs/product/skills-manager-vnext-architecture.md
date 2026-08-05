@@ -39,7 +39,7 @@ Official directories / Git / local inputs / host inventory
 - Pester 承担 unit/E2E，Python verifier 承担 dependency baseline，PowerShell scripts 承担生成同步、完整性、路由和 doctor contract。
 - `reports/skill-projection/current.json`、audit bundles 和 change evidence 已提供部分 manifest/evidence 模式。
 
-当前问题既包含 bounded context、应用层和 IO seam 不够明确，也包含 PowerShell 动态类型、解析/引用规则、5.1/7 差异、编码/进程调用和 AI 生成脚本容易产生的语法脆弱性。现有兼容测试已证明当前 bundle 可解析和基本合同可运行，但只覆盖有界 smoke；它不能证明 PowerShell 是长期领域核心的最优载体。先收紧 seam 和 protocol，再用可删除 PoC 判断是否把纯领域逻辑迁到 typed core，禁止直接全仓重写。
+当前问题既包含 bounded context、应用层和 IO seam 不够明确，也包含 PowerShell 动态类型、解析/引用规则、编码/进程调用和 AI 生成脚本容易产生的语法脆弱性。历史 5.1/7 双运行时窗口还放大了 quoting、encoding 和测试矩阵成本；当前已将受支持 runtime 收敛到 PS7-only。该收敛不能证明 PowerShell 是长期领域核心的最优载体；先收紧 seam 和 protocol，再用可删除 PoC 判断是否把纯领域逻辑迁到 typed core，禁止直接全仓重写。
 
 ## 3. Bounded contexts
 
@@ -453,7 +453,7 @@ Radar 数据通过独立、显式 refresh 形成不可变 snapshot：记录 sour
 
 | 层 | 保留/目标职责 | 禁止 |
 | --- | --- | --- |
-| PowerShell shell | `install.ps1` fallback、旧 CLI aliases/中文命令、Junction/host-native command adapter、bundle 兼容和错误呈现 | 新增长期复杂 policy/DAG/schema 语义、跨模块共享可变状态 |
+| PowerShell 7 shell | `install.ps1` PS7 preflight、旧 CLI aliases/中文命令、Junction/host-native command adapter、bundle 兼容和错误呈现 | `powershell.exe` fallback、新增长期复杂 policy/DAG/schema 语义、跨模块共享可变状态 |
 | versioned protocol | stdin/stdout UTF-8 JSON、schema/version、stable finding/exit code、redaction/freshness/receipt | 传递 token、未版本化对象、隐式环境状态 |
 | C#/.NET typed core candidate | descriptor/plan/receipt validation、hash/path normalization、DAG/admission/model-policy evaluation、纯转换与 deterministic rules | host auth/session/provider、daemon/database、直接外部写入、第二套配置真源 |
 | host adapters | 由 PowerShell 或 typed CLI 调用 native host/Git/filesystem，并保留现有 authority/rollback | 绕过 plan、freshness、receipt 或 native approval |
@@ -507,7 +507,7 @@ typed-core/
 - 新文件先由 `build.ps1` 按依赖顺序加入 bundle。
 - 旧 public/CLI function 保留薄 wrapper；每个切片只迁移一个有测试覆盖的 seam。
 - 不为了目录对称创建空模块。
-- 不引入 PowerShell class hierarchy；优先使用 plain object + validator function，保持 PS 5.1 兼容窗口。
+- 不引入 PowerShell class hierarchy；优先使用 plain object + validator function，维持窄 seam、确定性 JSON 合同和 typed-core 可迁移性；无需再为 PS 5.1 语法降级。
 - 领域函数尽量 pure：输入对象，返回对象；IO、Write-Host、exit 和环境变量读取留在 adapter/command 层。
 
 ## 5. OperationPlan contract
@@ -652,7 +652,7 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 
 若暂时忽略本仓迁移成本，一个更接近全局最优的长期参考形态是：protocol-first 的稳定 domain contracts、可替换的 source/host adapters、无宿主状态的 planning engine、显式事务/证据协议、跨平台 typed core，以及按真实规模选择的 CLI/TUI/API 和可选本地索引。它是 north star，不是当前 backlog；database、daemon、remote control、extension SDK 等只有触发条件成立后才进入实现。
 
-当前约束下的适配性最优把已验证事实纳入目标函数：Windows-first、现有 PowerShell/Pester 投资、单文件便携分发、当前用户规模、CLI/Junction/Git 密集工作和兼容成本，同时正视 AI 生成 PowerShell 的解析、动态类型、quoting、encoding、native-process 和 5.1/7 差异成本。当前运行真值仍是 PowerShell；目标架构优先收敛 protocol seam，并以 C#/.NET typed-core PoC 作为唯一推荐的替代评估，不直接重写。
+当前约束下的适配性最优把已验证事实纳入目标函数：Windows-first、现有 PowerShell/Pester 投资、单文件便携分发、当前用户规模、CLI/Junction/Git 密集工作和兼容成本，同时正视 AI 生成 PowerShell 的解析、动态类型、quoting、encoding 和 native-process 成本。已通过 PS7-only 删除双运行时差异成本；当前运行真值仍是 PowerShell 7。目标架构优先收敛 protocol seam，并以 C#/.NET typed-core PoC 作为唯一推荐的替代评估，不直接重写。
 
 | 维度 | 全局最优参考 | 当前适配性最优 |
 | --- | --- | --- |
@@ -679,7 +679,7 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 
 ### 10.2 运行与工程工具
 
-- Runtime：PowerShell 7 主路径；Windows PowerShell 5.1 仅保留有界 bootstrap/smoke 兼容窗口。
+- Runtime：PowerShell 7-only；最低 7.0、推荐 7.6 LTS。`src`、generated bundle、installer、CMD wrapper、CI、tests 和 subprocess 只允许 `pwsh`，缺失时 fail-closed。
 - Source/build：`src/*.ps1` 模块化源码 + `build.ps1` 确定性 bundle + 根 `skills.ps1` 便携入口。
 - Typed-core candidate：当前宿主已发现 .NET SDK `8.0.423` 与 `10.0.302`；PoC 实施时选择当前受支持 LTS、以 `global.json`/lock 明确 pin，并先保持 network-free、read-only、无 host mutation。该本机探针只是可行性证据，不是仓库依赖或实现完成。
 - Contracts：UTF-8 JSON、显式 `schema_version`、plain object validator 和稳定 finding/exit contract；具体 schema validator 在 `SMV-P0-003` 以当前依赖事实选定。
@@ -695,11 +695,13 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 
 重评触发：非 Windows 成为核心使用量、需要常驻 API/并发服务、类型/性能缺陷无法通过 seam 修复，或 AI 生成 PowerShell 的解析/兼容/返工成本已有重复真实证据。最后一项已满足 planning/PoC 准入，但未满足生产迁移准入。
 
-### `ADR-SMV-002 PowerShell 7 primary, 5.1 compatibility window`
+### `ADR-SMV-002 PowerShell 7-only runtime`
 
-决定：开发/CI 以 PowerShell 7 为主；5.1 保留 bootstrap 和显式 smoke。
+决定：开发、CI、安装、CLI wrapper、生成 bundle 和受管子进程只支持 PowerShell 7；最低 7.0、推荐 7.6 LTS。删除 Windows PowerShell 5.1 fallback、兼容 smoke 和现行支持声明，缺少 `pwsh` 时 fail-closed。
 
-理由：避免 legacy runtime 永久限制结构化错误处理、跨平台和依赖能力，同时保持现有 Windows 用户迁移路径。
+理由：项目已经以 PS7 完成 build/test/full gate，5.1 只提供重复维护成本而不再提供独特产品价值。单一 runtime 能直接减少 AI 生成脚本在 parser、quoting、encoding、native process 和错误传播上的分叉。此决定是项目支持策略，不是“微软已停止支持 Windows PowerShell 5.1”的事实声明。
+
+迁移/回滚：消费者 side-by-side 安装 PowerShell 7 并把调用改为 `pwsh -NoProfile ...`；发布前由 runtime-policy verifier 证明零活跃 fallback。回滚只撤销本迁移切片并恢复最后已验证版本，不允许在当前代码中临时重新启用 `powershell.exe`。
 
 ### `ADR-SMV-026 Host-owned task and model policy`
 

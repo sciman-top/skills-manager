@@ -34,11 +34,11 @@ Describe 'RulePatchPlan v1 contract' {
         { New-RulePatchPlan -TargetPath (Join-Path $TestDrive 'a.md') -AuthorizedRoot $TestDrive -CurrentText ('a' * 20) -DesiredText ('b' * 20) -DesiredSource reviewed_file -MaxDiffChars 10 } | Should Throw
     }
 
-    It 'keeps planner free of file IO and parses in Windows PowerShell 5.1' {
+    It 'keeps planner free of file IO and parses in PowerShell 7' {
         $source = Get-Content (Join-Path $repoRoot 'src\Domain\RulePatchPlan.ps1') -Raw
         $source | Should Not Match '(?im)^\s*(Get-Content|Set-Content|Remove-Item|Copy-Item|Move-Item|Write-Host|Invoke-WebRequest)\b'
         $op = (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1').Replace("'", "''"); $patch = (Join-Path $repoRoot 'src\Domain\RulePatchPlan.ps1').Replace("'", "''")
-        $output = @(& powershell.exe -NoProfile -Command ". '$op'; . '$patch'; (New-RulePatchPlan -TargetPath 'C:\fixture\a.md' -AuthorizedRoot 'C:\fixture' -CurrentText a -DesiredText b -DesiredSource reviewed_file).schema_version" 2>&1)
+        $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -Command ". '$op'; . '$patch'; (New-RulePatchPlan -TargetPath 'C:\fixture\a.md' -AuthorizedRoot 'C:\fixture' -CurrentText a -DesiredText b -DesiredSource reviewed_file).schema_version" 2>&1)
         $LASTEXITCODE | Should Be 0; ($output -join '').Trim() | Should Be '1'
     }
 

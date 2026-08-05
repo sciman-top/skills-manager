@@ -16,6 +16,7 @@
 | `P5` | Adaptive Capability Fabric | `complete` | 5/5 `repo_verified`；live read-only App Server snapshot 与 full gate 已通过，business live acceptance 未执行 |
 | `maintenance_design` | Lean AI Software Delivery | `M0/M0.2/M0.3 repo_verified / M1 collecting 0/10` | M0 基线 4/4 + M0.2 工程化协调/工具组合 4/4 + M0.3 模型策略/typed-core 决策 3/3 repo_verified；M1 仅启动真实样本收集，M3 conditional；`TC0-TC3 conditional` 是 M0.3 closeout 历史，当前 TC0/TC1 由独立 track 承接 |
 | `typed_core_shadow_poc` | Operation contract typed core | `TC0/TC1 repo_verified` | `OperationPlan/Receipt v1` package-free C#/.NET shadow 3/3；4/4 corpus + 4/4 protocol negatives；PowerShell authoritative，TC2/生产集成 not_started |
+| `powershell7_runtime_migration` | PowerShell runtime support contraction | `repo_verified` | 当前生产入口、生成链、CI、tests、subprocess、文档与发布合同收敛到 `ps7_only`；历史 5.1 事实保留；不启动 TC2/P6 |
 | `profile_reconciliation_advisor` | Skill profile drift reconciliation | `repo_verified` | P5-local plan-only advisor 4/4；宿主负责语义 proposal，确定性 planner 零写入校验；apply/live 未执行，不构成 P6 |
 | `profile_optimization_canary` | Bounded profile apply and replay | `repo_verified` | P5-local 3/3；非活动 profile canary、receipt/replay/rollback 已验证；6/6 host replay 为 partial，live acceptance not run |
 | `capability_routing_correction` | Native-first discovery/policy | `repo_verified` | P5-local regression correction 4/4；不改写 P5 历史状态，不授权 P6；host replay partial，live acceptance not run |
@@ -358,7 +359,7 @@ PowerShell 技术路线采用 strangler migration，不直接重写：
 | --- | --- | --- | --- |
 | `TC0` | `repo_verified` | 选择 `operation_contract_validation_v1` read-only pure seam，冻结 4 个 corpus hash/JSON/finding/exit baseline，记录 MCP planning/MCP command/RulePatch receipt 三个 caller | seam、caller、baseline、rollback、.NET 10.0.302 pin 完整；生产代码无写入 |
 | `TC1` | `repo_verified / shadow_only` | package-free C#/.NET validator 以 stdin/stdout protocol v1 shadow 运行，不改旧 CLI/bundle | 4/4 corpus + 4/4 request negative；三种分发观测；零生产引用；PowerShell authoritative |
-| `TC2` | `not_started` | 只在 TC1 后续真实 consumer/分发/返工净收益 reviewed accept 后把该 seam 切为单一 typed implementation，PowerShell 变薄 adapter | 旧 alias/installer/bundle/PS7 full/5.1 smoke 兼容；rollback 可执行；无双真源 |
+| `TC2` | `not_started` | 只在 TC1 后续真实 consumer/分发/返工净收益 reviewed accept 后把该 seam 切为单一 typed implementation，PowerShell 变薄 adapter | 旧 alias/installer/bundle/PS7-only full/CLI/package gate 通过；rollback 可执行；无双真源 |
 | `TC3` | `conditional` | 依据两个以上已迁移 seam 的净收益决定继续、暂停或删除 typed core | reviewed retain/revise/retire；不得因目录愿景批量迁移 |
 
 工具采用顺序固定为：repo-native `rg`/symbols/tests/docs 与宿主原生能力 -> 窄 skill -> plugin distribution -> current external data/action 的 MCP/connector -> 有真实检索缺口的只读 knowledge/code-graph adapter。每个候选以 `adopt | adapt | defer | reject` 记录 source/revision/license、native equivalent、real consumers、data/auth/write boundary、evaluation、maintenance cost、retirement trigger 和 truth level。Trellis/AGOS 只适配 planning/write-scope/candidate/evidence 思想；OptSkills 只适配 replay/distill/eval；GBrain、CodeGraphContext、Understand Anything 继续 defer；来源不明的 souljourney workflow 保持 unknown/defer。
@@ -399,7 +400,7 @@ M3 判定优先删除性维护：pilot 没有缩短 TTFV、没有减少返工/�
 | `RISK-018` | lease 过期/reassign 后旧 writer 仍在运行并产生双写 | maintenance | explicit revoke/recovery + old-writer stop proof + candidate provenance preserved |
 | `RISK-019` | Radar 排名/价格/耗时每日变化，被硬编码后产生错误模型路由 | maintenance | ADR-SMV-026 + expiring snapshot + host override + local outcome priority |
 | `RISK-020` | 子任务模型能力不足时无限重试、无 failure packet 升档或把权限问题误判成模型问题 | maintenance | one corrected retry + issue_id/replan + bounded escalation + fail-closed auth/tool boundary |
-| `RISK-021` | PowerShell 动态语义、quoting/encoding/native process 和 5.1/7 差异持续增加 AI 返工 | maintenance | ADR-SMV-027 + PS7 primary + bounded 5.1 smoke + typed-core PoC |
+| `RISK-021` | PowerShell 动态语义、quoting/encoding/native process 持续增加 AI 返工，或 5.1 fallback 被意外恢复 | maintenance | ADR-SMV-002/027 + PS7-only policy verifier + typed-core PoC；历史 5.1 记录与当前支持面分离 |
 | `RISK-022` | typed-core PoC 变成全仓重写或长期 PowerShell/C# 双真源 | maintenance | one read-only seam + corpus parity + single implementation owner + delete/rollback gate |
 
 ## 11. 路线维护

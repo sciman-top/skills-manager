@@ -19,7 +19,7 @@
 **M0_3_TYPED_CORE_STATUS: poc_not_started**
 **TYPED_CORE_STATUS: tc1_shadow_repo_verified**
 **TYPED_CORE_PRODUCTION_STATUS: not_started**
-**POWERSHELL_COMPATIBILITY_STATUS: ps7_primary_ps51_bounded_smoke**
+**POWERSHELL_COMPATIBILITY_STATUS: ps7_only**
 **日期**: 2026-08-05
 
 ## 1. Problem and evidence
@@ -220,7 +220,7 @@ Radar refresh 与 task execution 分离；snapshot 必须显式产生、记录�
 
 ### 13.2 PowerShell and typed-core migration contract
 
-当前事实：PS7 build 和 generated bundle 通过，PS5.1 parse/plain-object smoke 通过；这些证据只证明当前有界兼容合同，不证明 PowerShell 对 AI 长期维护最优。PowerShell 动态类型、parser/quoting、encoding、native process、错误传播与 5.1/7 差异确实增加 AI 修改的返工面，因此技术方向从“永久 PowerShell core”柔化为“当前 PowerShell runtime + protocol-first + 条件性 C#/.NET typed core”。
+当前事实：PS7 build、generated bundle 和 full gate 是权威运行证据；后续独立 `powershell7_runtime_migration` 已删除 5.1 fallback/smoke，并把当前支持状态推进为 `ps7_only`。历史 PS5.1 smoke 只证明旧兼容合同当时成立，不再构成现行支持。PowerShell 动态类型、parser/quoting、encoding、native process 与错误传播仍会增加 AI 修改返工，因此技术方向保持“当前 PowerShell 7 runtime + protocol-first + 条件性 C#/.NET typed core”。
 
 候选比较结论：C#/.NET 在 Windows/native CLI、编译期类型、结构化并发、测试、framework-dependent/self-contained/single-file 分发上最匹配，推荐作为唯一 PoC；TypeScript/Node 增加 Node/npm/打包面，Python 增加解释器/venv/Windows path/encoding 面，Rust 的迁移/维护成本在当前规模过高，均保持 defer。PowerShell 仍保留 installer、旧 CLI aliases、Junction/host adapter、bundle 和错误呈现；typed candidate 只承接纯 domain/policy/validation。
 
@@ -263,7 +263,7 @@ M0/M2 不再被误写为串行前置关系；证据流是 `M0 -> M1 pilot -> M3`
 | Radar snapshot 过期/来源或样本不可核验 | 忽略 snapshot，回退官方/native default；不改 host config | captured_at/expires_at/raw_hash + host availability |
 | 子任务首次失败 | 诊断 task/context/tool/capacity 根因，只允许一次 corrected retry | issue_id + FailurePacket + attempt 1 |
 | 同一 issue 第二次失败或两次升档 | 停止并行，re-scope/clarify；承重任务由 supervisor 串行接管 | attempt/escalation history + new TaskGraph |
-| PowerShell 语法/兼容回归 | 先缩小 seam、修当前运行真源并通过 PS7/full + 5.1 bounded smoke；不得借机全仓重写 | parser/error + compatibility tests |
+| PowerShell 语法/运行回归 | 先缩小 seam、修当前运行真源并通过 PS7-only focused/full/runtime-policy gate；不得恢复 5.1 fallback 或借机启动 typed-core 全仓重写 | parser/error + PS7 runtime-policy tests |
 | typed-core parity/分发/回滚不达标 | 删除 PoC，继续 PowerShell 单一真源；不得保留双实现 | corpus diff + delete/rollback receipt |
 | host/live 未执行 | 保持 not_run/not_verified | truth boundary |
 

@@ -1,53 +1,73 @@
-# PowerShell runtime compatibility contract
+# PowerShell runtime contract
 
-**Contract version**: 1
-**Effective date**: 2026-08-01
+**Contract version**: 2
+**Status**: `PS7_ONLY_STATUS: repo_verified`
+**Effective date**: 2026-08-05
 **Owner**: skills-manager maintainers
 
-## Support levels
+## Support boundary
 
-| Level | Runtime | Required coverage | Blocking meaning |
-| --- | --- | --- | --- |
-| Primary | PowerShell 7 (`pwsh`) | build, generated sync, full Pester, contracts, doctor, dependency and full quality gates | Release/repository changes are blocked on failure |
-| Bootstrap fallback | Windows PowerShell 5.1 (`powershell.exe`) | `install.ps1` may select it only when `pwsh` is unavailable | Keeps existing Windows bootstrap usable; does not make 5.1 the development runtime |
-| Compatibility smoke | Windows PowerShell 5.1 | parse generated `skills.ps1`; construct plain OperationPlan/Receipt objects; exercise atomic UTF-8 helper and selected fixture scripts | Blocks known syntax/basic-contract regressions when 5.1 is available; does not promise every workflow or provider path |
+`skills-manager` is a Windows-first project whose supported runtime is PowerShell 7 (`pwsh`) only.
+Windows PowerShell 5.1 is not supported by this project.
 
-Current host evidence on 2026-08-01: PowerShell `7.6.3` primary and Windows PowerShell `5.1.26100.8972` compatibility runtime.
+| Runtime | Project status | Required evidence |
+| --- | --- | --- |
+| PowerShell 7.0+ (`pwsh`, PowerShell 7.6 LTS recommended) | Supported | build, generated sync, full Pester/E2E, contracts, doctor, dependency and full quality gates |
+| Windows PowerShell 5.1 (`powershell.exe`) | Not supported | no CI job, no installer fallback, no compatibility smoke, and no supported execution path |
+
+This is a project support decision, not a claim that Microsoft has stopped supporting Windows PowerShell 5.1. Microsoft documents 5.1 as a Windows support channel, while PowerShell 7 follows the .NET support lifecycle. The project chooses one supported runtime to reduce parser, quoting, encoding, process-invocation, and AI-generated-script variability.
+
+The current validated release family is PowerShell 7.6 LTS. Patch versions are not hard-coded in the repository; operators should use the latest supported patch for their platform. The official lifecycle currently lists PowerShell 7.6 LTS through 14-Nov-2028 and PowerShell 7.4 LTS through 10-Nov-2026.
+
+## Migration guide
+
+1. Install PowerShell 7 from [Microsoft's PowerShell installation guide](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows) or `winget install --id Microsoft.PowerShell --source winget`.
+2. Open a new terminal and verify `pwsh --version` reports PowerShell 7 or later.
+3. Run the repository entry point explicitly with `pwsh`:
+
+   ```powershell
+   pwsh -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Mode CurrentUser
+   ```
+
+4. For portable use, run `skills.cmd`; it resolves only `pwsh.exe` and fails with an actionable installation message when PowerShell 7 is absent.
+5. If a downstream automation invokes `powershell.exe`, change it to `pwsh -NoProfile -ExecutionPolicy Bypass -File ...`. Do not restore a legacy fallback or set `CODEX_ALLOW_WINDOWS_POWERSHELL`.
+
+The official migration guidance remains useful for users who need to move other scripts from 5.1 to 7; this repository does not promise that every external script is automatically portable.
 
 ## Engineering rules
 
-- New source must pass the PowerShell 7 full path. PS5.1 compatibility must not permanently constrain primary-path improvements that can be isolated behind a small adapter or fallback.
-- A PS7-only API is allowed only when the caller has an explicit runtime guard, a tested 5.1 fallback, or a clear fail-closed message for a primary-only operation.
-- `src/Version.ps1` keeps `#requires -Version 5.1` during this compatibility window. Generated `skills.ps1` preserves the current UTF-8 BOM release encoding and remains parseable by both runtimes; runtime-managed data writers keep their separately tested atomic UTF-8 contract.
-- CI uses `pwsh` for authoritative gates. Windows PowerShell runs only the bounded smoke and must not be described as full support.
-- Missing `powershell.exe` is `platform_na` outside Windows: record the missing executable, use PS7 parse/contract tests as alternative evidence, and recover when a Windows runner is available.
+- `src/Version.ps1`, `build.ps1`, and `install.ps1` require PowerShell 7.0 or later.
+- `src/Core.ps1` and generated `skills.ps1` resolve only `pwsh`; missing PowerShell 7 fails closed with a clear message.
+- The MCP environment wrapper uses `pwsh.exe` on Windows. Generic discovery of `powershell` commands in target-repository audit text is observation of external input, not a supported project runtime.
+- CI and Azure Pipelines use `pwsh` only. There is no Windows PowerShell job or bounded 5.1 smoke.
+- The generated bundle keeps a deterministic UTF-8 BOM for Windows file detection. This is a release-encoding choice, not a 5.1 compatibility promise.
+- Pester fixtures and contract tests execute under PowerShell 7; tests must not silently skip because `powershell.exe` is absent.
+- PowerShell remains the current CLI/host adapter truth. The typed-core PoC remains shadow-only and does not expand this runtime decision into a production rewrite.
 
-## Typed-core migration boundary
+## Rollback and support handling
 
-The compatibility contract does not imply that PowerShell must remain the permanent implementation language for every domain rule. Current evidence proves the PS7 build/full path and a bounded 5.1 smoke; it does not remove recurring AI-edit risks around parser/quoting, dynamic types, encoding, native-process invocation, error propagation, and 5.1/7 differences.
+The migration is reversible at the repository/release level, not by keeping a hidden 5.1 execution path:
 
-The conditional target is a versioned UTF-8 JSON protocol with a C#/.NET typed core and a thin PowerShell compatibility shell. PowerShell keeps installer fallback, existing aliases/Chinese commands, Junction and host/native adapters, bundle compatibility, and user-facing error translation. A typed candidate may initially own only read-only pure validation/policy logic; it must not own provider/auth/session, daemon/database, or undeclared external writes.
+1. If a PS7 release regression is found, stop rollout and revert the migration commit or publish the last known-good release.
+2. Restore PowerShell 7 on the operator machine; do not run this repository under `powershell.exe` as a workaround.
+3. Fix the PS7 path, rerun the ordered gates, and publish a new release with a dated evidence record.
+4. Reconsider 5.1 only through a new user-authorized product decision with measured consumer evidence; it must not reappear as an ad-hoc fallback.
 
-Before creating a PoC, the task must identify one pure read-only seam, at least two real callers, a frozen characterization corpus, stable JSON/finding/exit contracts, a current supported .NET LTS pin proposal, distribution modes to measure, and exact deletion/rollback steps. Shadow output must match the current PowerShell source of truth. Production migration is admitted one seam at a time only after reviewed parity and net-benefit evidence; a failed PoC is deleted, and long-lived dual implementations or dual configuration truth are forbidden.
+## Verification
 
-## Compatibility removal gate
-
-Do not remove the 5.1 fallback, raise `#requires`, or use incompatible syntax across the generated bundle until all conditions are met:
-
-1. At least one versioned usage observation shows no required 5.1-only installation path, or an approved migration identifies affected users and machines.
-2. Release notes announce the change and provide an upgrade path to supported PowerShell 7.
-3. `install.ps1`, CI, README, portable packaging, scheduled-task behavior and generated-script encoding are migrated in one reviewed change.
-4. A release candidate passes the PS7 full gate and migration tests; rollback is documented.
-5. The task/ADR explicitly records owner, decision date, evidence links and the first release that drops compatibility.
-
-Until then, 5.1 is a bounded compatibility window, not a deprecated path that may silently rot and not a second full test matrix.
-
-## Local verification
+The canonical order remains `build -> test -> contract/invariant -> hotspot`:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1
-pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "[void][scriptblock]::Create((Get-Content -Raw .\skills.ps1)); 'parse-ok'"
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tests\run.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\skills.ps1 doctor --strict --threshold-ms 8000
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full
 ```
 
-Repository verification proves only `repo_verified`. It does not prove a new shell session loaded changed files or that a live MCP/skill workflow was accepted.
+Repository verification proves `repo_verified`. It does not prove that a new shell session loaded changed files or that a live MCP/skill workflow was accepted.
+
+## Official references
+
+- [PowerShell Support Lifecycle](https://learn.microsoft.com/powershell/scripting/install/powershell-support-lifecycle?view=powershell-7.6) — Microsoft support policy and release dates.
+- [Migrating from Windows PowerShell 5.1 to PowerShell 7](https://learn.microsoft.com/powershell/scripting/whats-new/migrating-from-windows-powershell-51-to-powershell-7?view=powershell-7.6) — side-by-side migration guidance.
+- [What is Windows PowerShell?](https://learn.microsoft.com/powershell/scripting/what-is-windows-powershell?view=powershell-7.6) — distinction between Windows PowerShell 5.1 and PowerShell 7.

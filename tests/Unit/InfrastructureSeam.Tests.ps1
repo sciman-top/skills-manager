@@ -55,12 +55,12 @@ Describe 'UTF-8 atomic file infrastructure seam' {
         $coreSource | Should Match '(?s)function Set-ContentUtf8.*?Write-Utf8FileAtomic'
     }
 
-    It 'parses and writes a no-BOM file in bounded Windows PowerShell 5.1 smoke' {
+    It 'parses and writes a no-BOM file in the PowerShell 7 runtime' {
         $sourcePath = (Join-Path $repoRoot 'src\Infrastructure\AtomicFile.ps1').Replace("'", "''")
         $targetPath = (Join-Path $TestDrive 'ps51.txt').Replace("'", "''")
         $scriptText = ". '$sourcePath'; Write-Utf8FileAtomic -Path '$targetPath' -Content 'ps51'; [BitConverter]::ToString([IO.File]::ReadAllBytes('$targetPath'))"
 
-        $output = @(& powershell.exe -NoProfile -Command $scriptText 2>&1)
+        $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -Command $scriptText 2>&1)
         $exitCode = $LASTEXITCODE
 
         $exitCode | Should Be 0

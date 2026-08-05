@@ -209,15 +209,10 @@ description: fixture
         @($result.Report.errors).Count | Should Be 0
     }
 
-    It "runs with explicit fixture paths under Windows PowerShell 5.1" {
-        $windowsPowerShell = Get-Command powershell.exe -ErrorAction SilentlyContinue
-        if ($null -eq $windowsPowerShell) {
-            Write-Host "Windows PowerShell not found, skipping compatibility smoke test."
-            return
-        }
-
-        $fixture = New-IntegrityFixture "windows-powershell-compat" ""
-        $output = @(& $windowsPowerShell.Source -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
+    It "runs with explicit fixture paths under PowerShell 7" {
+        $pwsh = Get-Command pwsh -ErrorAction Stop | Select-Object -First 1
+        $fixture = New-IntegrityFixture "powershell-7" ""
+        $output = @(& $pwsh.Source -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
                 -AgentRoot $fixture.AgentRoot `
                 -ConfigPath $fixture.ConfigPath `
                 -DependencyContractPath $fixture.ContractPath `

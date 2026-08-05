@@ -5,4 +5,4 @@ quality:
   stage: quality
   tags: []
   script:
-    - pwsh -NoProfile -Command "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile quick"
+    - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile quick

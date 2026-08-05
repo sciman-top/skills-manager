@@ -28,11 +28,12 @@
 3. <verification>
 
 ## Compatibility
-- <runtime / OS / dependency note>
-- <migration boundary>
+- Runtime: PowerShell 7 (`pwsh`) only; minimum 7.0, current LTS recommended. Windows PowerShell 5.1 is unsupported.
+- Migration: replace `powershell.exe` invocations with `pwsh -NoProfile -ExecutionPolicy Bypass`; entry points fail closed when `pwsh` is missing.
+- Boundary: this shell-runtime policy does not imply typed-core production integration or downstream live acceptance.
 
 ## Rollback
-- <rollback command or path>
+- Restore the last verified release and PowerShell 7 runtime; do not re-enable a hidden Windows PowerShell 5.1 fallback.
 
 ## Full Changelog
 - <compare link>

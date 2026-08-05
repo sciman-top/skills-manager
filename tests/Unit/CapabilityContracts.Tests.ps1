@@ -60,11 +60,11 @@ Describe 'Phase 1 capability and rule contracts' {
         ($text -join "`n") | Should Not Match '(?i)\$env:'
     }
 
-    It 'parses and constructs the plain objects under bounded Windows PowerShell 5.1 smoke' {
+    It 'parses and constructs the plain objects under the PowerShell 7 runtime' {
         $paths = @('OperationPlan.ps1', 'CapabilityDescriptor.ps1', 'RuleDocument.ps1', 'RuleResponsibility.ps1') | ForEach-Object { (Join-Path $repoRoot ('src\Domain\{0}' -f $_)).Replace("'", "''") }
         $scriptText = ($paths | ForEach-Object { ". '$_'" }) -join '; '
         $scriptText += "; `$s=[pscustomobject]@{type='git';path_or_url='x'}; `$d=New-CapabilityDescriptor -Kind skill -Name x -TruthOrigin candidate -Source `$s; `$d.schema_version | ConvertTo-Json -Compress"
-        $output = @(& powershell.exe -NoProfile -Command $scriptText 2>&1)
+        $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -Command $scriptText 2>&1)
 
         $LASTEXITCODE | Should Be 0
         ($output -join "`n" | ConvertFrom-Json) | Should Be 1

@@ -760,7 +760,7 @@ function readWindowsEnvironmentVariable(name, scope) {
   if (process.platform !== "win32") return "";
   try {
     return execFileSync(
-      "powershell.exe",
+      "pwsh.exe",
       [
         "-NoLogo",
         "-NoProfile",
