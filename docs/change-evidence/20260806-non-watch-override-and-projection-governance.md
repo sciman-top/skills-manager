@@ -64,12 +64,16 @@ Passed evidence:
 
 The first full gate did not pass and is not recorded as success. It completed 875/876 Unit and 18/18 E2E cases, then stopped on the concurrently modified `agent workflow advisory` verifier (`stale_radar_fallback_missing`). That source/test set is outside this slice and was neither repaired nor reverted here.
 
-After its owner repaired that verifier, a second combined-worktree full gate returned exit 0 on 2026-08-06: 886/886 Unit and 18/18 E2E cases passed; generated sync, repository hygiene, 107-skill integrity, 29-repository/7-default/3-patch reference governance, and the 8-target/32-case non-watch activation corpus also passed. The gate reported `suite_elapsed_ms=245930` and `total_elapsed_ms=253286`. This is strong integration evidence but not yet the commit-bound closeout receipt: the concurrently owned watch slice changed files during the gate window. Final commit/push remains blocked until both concurrent write sets stabilize and one fresh full gate runs without overlapping writes.
+After its owner repaired that verifier, a second combined-worktree full gate returned exit 0 on 2026-08-06: 886/886 Unit and 18/18 E2E cases passed; generated sync, repository hygiene, 107-skill integrity, 29-repository/7-default/3-patch reference governance, and the 8-target/32-case non-watch activation corpus also passed. The gate reported `suite_elapsed_ms=245930` and `total_elapsed_ms=253286`. It remains diagnostic-only because the concurrently owned watch slice changed files during its execution window.
+
+The final stable-snapshot full gate then returned exit 0 with 886/886 Unit and 18/18 E2E cases, `suite_elapsed_ms=246861`, generated sync, 107-skill integrity, reference governance 29/7/3, the 32-case activation corpus, and all routing/dependency/config/host/planning/PS7/Agent/doctor contracts passing. SHA-256 snapshots of all 67 dirty/untracked paths were identical before and after the run, excluding only the expected deterministic `skills.ps1` regeneration, so no concurrent source drift overlapped this final gate. The verified source/generated integration was committed and pushed as `e80b5a6aba796bb377fbde8aea8e5b784367fa77`.
+
+This post-gate evidence correction is receipt-only documentation (`gate_na`): alternative verification is `git diff --check`, exact diff review, and Git/remote parity; any executable, contract, fixture, or generated-file change would require rerunning the full gate.
 
 ## Truth boundary and rollback
 
-- No real host projection, active-profile switch, plugin/MCP install, auth/provider change, restart, or live acceptance was performed.
-- Root `build.ps1` verification and the combined-worktree full gate were run, but no host-projecting `构建生效` or full `agent/` rebuild was run. Because a concurrent writer changed files during that full-gate window, it is not final closeout evidence. `overrides/` remains the source of truth; host promotion must occur later from a clean committed revision.
+- This non-watch slice performed no real skill/config host projection, active-profile switch, plugin/MCP install, auth/provider change, restart, or live acceptance.
+- Root `build.ps1` verification and the final stable-snapshot full gate were run, but no host-projecting `构建生效` or full `agent/` rebuild was run. `overrides/` remains the source of truth; host promotion must occur later from a clean committed revision.
 - The activation corpus proves coverage and consistency, not universal trigger precision or actual skill-body execution.
 - The reference refresh fetched remote refs only; behind local checkouts were not pulled or reset.
 - Roll back only the files listed by this evidence. Do not reset concurrent interruption-recovery, hook, agent-workflow, generated, or test changes owned by another task.
