@@ -235,6 +235,79 @@ watch-interrupted-task:fleet:v1 supervisor_thread_id=supervisor-test
         }
     }
 
+    It 'blocks cross-task send paths nested inside the code-mode exec tool' {
+        foreach ($source in @(
+            @'
+const result = await tools.shell_command({
+  command: "codex app-server request thread/send --thread target-test --prompt blocked"
+});
+text(result);
+'@,
+            @'
+const result = await tools.codex_app__send_message_to_thread({
+  threadId: "target-test",
+  prompt: "blocked"
+});
+text(result);
+'@
+        )) {
+            $result = Invoke-CrossThreadHook -ToolName 'exec' -ToolInput $source
+            $result.ExitCode | Should Be 0
+            ($result.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+        }
+    }
+
+    It 'blocks code-mode target mutations and the native automation sentinel while preserving view' {
+        $targetTranscript = New-WatchTurnTranscript -Text @'
+<heartbeat>
+  <automation_id>watch-interrupted-task-v1-target-thread-id-target-test</automation_id>
+  <instructions>
+watch-interrupted-task:v1 target_thread_id=target-test
+  </instructions>
+</heartbeat>
+'@
+        foreach ($source in @(
+            'const result = await tools.codex_app__automation_update({ mode: "delete", id: "watch-interrupted-task-v1-target-thread-id-target-test" }); text(result);',
+            'const result = await tools.codex_app__automation_update({ mode: "delete", id: "watch-interrupted-task-v1-live-probe-code-mode" }); text(result);'
+        )) {
+            $result = Invoke-CrossThreadHook -ToolName 'exec' -ToolInput $source -SessionId 'target-test' -TranscriptPath $targetTranscript
+            ($result.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+        }
+
+        $view = Invoke-CrossThreadHook -ToolName 'exec' -ToolInput 'const result = await tools.codex_app__automation_update({ mode: "view", id: "watch-interrupted-task-v1-target-thread-id-target-test" }); text(result);' -SessionId 'target-test' -TranscriptPath $targetTranscript
+        $view.Output | Should BeNullOrEmpty
+    }
+
+    It 'allows only another canonical watch target for code-mode fleet mutations' {
+        $generator = Join-Path $repoRoot 'overrides\watch-interrupted-task\scripts\New-WatchHeartbeatPrompt.ps1'
+        $canonicalPrompt = & $generator -TargetThreadId 'target-test'
+        $encodedPrompt = $canonicalPrompt | ConvertTo-Json -Compress
+        $fleetTranscript = New-WatchTurnTranscript -Text @'
+<heartbeat>
+  <automation_id>watch-interrupted-task-v1-target-thread-id-supervisor-test</automation_id>
+  <instructions>
+watch-interrupted-task:fleet:v1 supervisor_thread_id=supervisor-test
+  </instructions>
+</heartbeat>
+'@
+
+        $allowedDelete = Invoke-CrossThreadHook -ToolName 'exec' -ToolInput 'const result = await tools.codex_app__automation_update({ mode: "delete", id: "watch-interrupted-task-v1-target-thread-id-target-test" }); text(result);' -SessionId 'supervisor-test' -TranscriptPath $fleetTranscript
+        $allowedDelete.Output | Should BeNullOrEmpty
+
+        $allowedUpdateSource = 'const result = await tools.codex_app__automation_update({ mode: "update", targetThreadId: "target-test", prompt: ' + $encodedPrompt + ' }); text(result);'
+        $allowedUpdate = Invoke-CrossThreadHook -ToolName 'exec' -ToolInput $allowedUpdateSource -SessionId 'supervisor-test' -TranscriptPath $fleetTranscript
+        $allowedUpdate.Output | Should BeNullOrEmpty
+
+        foreach ($source in @(
+            'const result = await tools.codex_app__automation_update({ mode: "delete", id: "watch-interrupted-task-v1-target-thread-id-supervisor-test" }); text(result);',
+            'const result = await tools.codex_app__automation_update({ mode: "delete", id: "ordinary-automation" }); text(result);',
+            'const result = await tools.codex_app__automation_update({ mode: "update", targetThreadId: "target-test", prompt: "arbitrary" }); text(result);'
+        )) {
+            $blocked = Invoke-CrossThreadHook -ToolName 'exec' -ToolInput $source -SessionId 'supervisor-test' -TranscriptPath $fleetTranscript
+            ($blocked.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+        }
+    }
+
     It 'fails closed when a valid payload omits tool_name' {
         $payload = [ordered]@{
             session_id = 'source-test'

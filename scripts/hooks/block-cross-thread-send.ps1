@@ -38,6 +38,9 @@ function Get-InputProperty {
     }
 
     foreach ($name in $Names) {
+        if ($InputObject -is [System.Collections.IDictionary] -and $InputObject.Contains($name)) {
+            return $InputObject[$name]
+        }
         $property = $InputObject.PSObject.Properties[$name]
         if ($null -ne $property) {
             return $property.Value
@@ -45,6 +48,135 @@ function Get-InputProperty {
     }
 
     return $null
+}
+
+function Get-ToolInputText {
+    param([AllowNull()][object]$InputObject)
+
+    if ($null -eq $InputObject) {
+        return ''
+    }
+    if ($InputObject -is [string]) {
+        return [string]$InputObject
+    }
+
+    $source = Get-InputProperty -InputObject $InputObject -Names @('code', 'source', 'input', 'command', 'cmd')
+    if ($source -is [string]) {
+        return [string]$source
+    }
+
+    try {
+        return ($InputObject | ConvertTo-Json -Depth 50 -Compress)
+    }
+    catch {
+        return ''
+    }
+}
+
+function Get-JavaScriptCodeSkeleton {
+    param([Parameter(Mandatory = $true)][string]$Source)
+
+    $builder = [System.Text.StringBuilder]::new($Source.Length)
+    $state = 'code'
+    $quote = [char]0
+    $escaped = $false
+    for ($index = 0; $index -lt $Source.Length; $index++) {
+        $character = $Source[$index]
+        $next = if ($index + 1 -lt $Source.Length) { $Source[$index + 1] } else { [char]0 }
+
+        if ($state -ceq 'code') {
+            if ($character -eq "'" -or $character -eq '"' -or [int]$character -eq 96) {
+                $state = 'string'
+                $quote = $character
+                $escaped = $false
+                [void]$builder.Append(' ')
+            }
+            elseif ($character -eq '/' -and $next -eq '/') {
+                $state = 'line_comment'
+                [void]$builder.Append('  ')
+                $index++
+            }
+            elseif ($character -eq '/' -and $next -eq '*') {
+                $state = 'block_comment'
+                [void]$builder.Append('  ')
+                $index++
+            }
+            else {
+                [void]$builder.Append($character)
+            }
+            continue
+        }
+
+        if ($state -ceq 'string') {
+            [void]$builder.Append($(if ($character -eq "`n" -or $character -eq "`r") { $character } else { ' ' }))
+            if ($escaped) {
+                $escaped = $false
+            }
+            elseif ($character -eq '\') {
+                $escaped = $true
+            }
+            elseif ($character -eq $quote) {
+                $state = 'code'
+            }
+            continue
+        }
+
+        if ($state -ceq 'line_comment') {
+            if ($character -eq "`n" -or $character -eq "`r") {
+                $state = 'code'
+                [void]$builder.Append($character)
+            }
+            else {
+                [void]$builder.Append(' ')
+            }
+            continue
+        }
+
+        [void]$builder.Append($(if ($character -eq "`n" -or $character -eq "`r") { $character } else { ' ' }))
+        if ($character -eq '*' -and $next -eq '/') {
+            [void]$builder.Append(' ')
+            $index++
+            $state = 'code'
+        }
+    }
+
+    return $builder.ToString()
+}
+
+function Test-CodeModeToolCall {
+    param(
+        [Parameter(Mandatory = $true)][string]$CodeSkeleton,
+        [Parameter(Mandatory = $true)][string]$ToolNamePattern
+    )
+
+    return $CodeSkeleton -match ('(?i)(?:^|[^A-Za-z0-9_$])tools\s*\.\s*(?:' + $ToolNamePattern + ')\s*\(')
+}
+
+function Get-JavaScriptPropertyString {
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    $escapedName = [regex]::Escape($Name)
+    $pattern = '(?is)(?:\b' + $escapedName + '\b|["'']' + $escapedName + '["''])\s*:\s*(?<literal>"(?:\\.|[^"\\])*"|''(?:\\.|[^''\\])*'')'
+    $match = [regex]::Match($Source, $pattern)
+    if (-not $match.Success) {
+        return $null
+    }
+
+    $literal = $match.Groups['literal'].Value
+    try {
+        if ($literal.StartsWith('"')) {
+            return [string]($literal | ConvertFrom-Json)
+        }
+
+        $body = $literal.Substring(1, $literal.Length - 2)
+        return [regex]::Unescape(($body -replace "\\'", "'"))
+    }
+    catch {
+        return $null
+    }
 }
 
 function Get-Sha256Lower {
@@ -243,6 +375,68 @@ elseif ($toolName -match '(?i)(^|__|\.)handoff_thread$') {
     $followUpPrompt = [string](Get-InputProperty -InputObject $toolInput -Names @('followUpPrompt', 'follow_up_prompt', 'prompt'))
     if (-not [string]::IsNullOrWhiteSpace($followUpPrompt)) {
         $denyReason = 'Cross-task handoff prompts are disabled. The user must communicate directly in the target task.'
+    }
+}
+elseif ($toolName -match '(?i)(^|__|\.)exec$') {
+    $source = Get-ToolInputText -InputObject $toolInput
+    $codeSkeleton = Get-JavaScriptCodeSkeleton -Source $source
+    $hasNestedSendTool = Test-CodeModeToolCall -CodeSkeleton $codeSkeleton -ToolNamePattern '(?:[A-Za-z0-9_]+__)?send_message_to_thread'
+    $hasNestedShellTool = Test-CodeModeToolCall -CodeSkeleton $codeSkeleton -ToolNamePattern '(?:shell_command|exec_command)'
+    $hasNestedAutomationTool = Test-CodeModeToolCall -CodeSkeleton $codeSkeleton -ToolNamePattern '(?:[A-Za-z0-9_]+__)?automation_update'
+
+    if ($hasNestedSendTool) {
+        $denyReason = 'Cross-task message injection nested in code mode is disabled.'
+    }
+    elseif ($hasNestedShellTool -and $source -match '(?i)(send_message_to_thread|sendMessageToThread|thread[\/.:-]send)') {
+        $denyReason = 'Shell or app-server cross-task send bypasses nested in code mode are disabled.'
+    }
+    elseif ($hasNestedAutomationTool) {
+        $mode = [string](Get-JavaScriptPropertyString -Source $source -Name 'mode')
+        $automationId = [string](Get-JavaScriptPropertyString -Source $source -Name 'id')
+        $prompt = [string](Get-JavaScriptPropertyString -Source $source -Name 'prompt')
+        $targetThreadId = [string](Get-JavaScriptPropertyString -Source $source -Name 'targetThreadId')
+        if ([string]::IsNullOrWhiteSpace($targetThreadId)) {
+            $targetThreadId = [string](Get-JavaScriptPropertyString -Source $source -Name 'target_thread_id')
+        }
+
+        $sessionId = [string]$payload.session_id
+        $isWatchPrompt = $prompt -match '(?m)^watch-interrupted-task(?::fleet)?:v1 '
+        $watchTargetThreadId = [string](Get-WatchAutomationTargetId -ToolInput ([ordered]@{
+            id = $automationId
+            targetThreadId = $targetThreadId
+            prompt = $prompt
+        }))
+        $isWatchMutation = -not [string]::IsNullOrWhiteSpace($watchTargetThreadId) -or $isWatchPrompt -or
+            $automationId -match '^watch-interrupted-task-v1-live-probe-'
+
+        if ($automationId -match '^watch-interrupted-task-v1-live-probe-[A-Za-z0-9._:-]+$') {
+            $denyReason = 'Watch automation live-probe sentinel was denied before the code-mode native automation call executed.'
+        }
+        else {
+            $turnRole = Get-WatchTurnRole -Payload $payload
+            if ($turnRole -ceq 'target_heartbeat' -and $mode -cne 'view') {
+                $denyReason = 'Target heartbeats cannot mutate automation metadata through code mode; the fleet supervisor is the sole heartbeat writer.'
+            }
+            elseif ($turnRole -ceq 'fleet_heartbeat' -and $mode -cne 'view') {
+                if (-not $isWatchMutation) {
+                    $denyReason = 'The fleet supervisor heartbeat may mutate only canonical watch-interrupted-task automations through code mode.'
+                }
+                elseif ([string]::IsNullOrWhiteSpace($watchTargetThreadId) -or $watchTargetThreadId -ceq $sessionId) {
+                    $denyReason = 'The fleet supervisor heartbeat cannot mutate its own dual-role automation through code mode.'
+                }
+                elseif ($mode -cne 'delete' -and -not (Test-CanonicalWatchPrompt -Prompt $prompt -ExpectedTargetThreadId $watchTargetThreadId)) {
+                    $denyReason = 'Fleet code-mode target writes must carry the hash-valid watch-interrupted-task policy_revision=2 envelope as a literal prompt.'
+                }
+            }
+            elseif ($turnRole -ceq 'unknown' -and $mode -cne 'view' -and $isWatchMutation) {
+                $denyReason = 'Code-mode watch automation mutation origin could not be classified from the current turn; blocking fail-closed.'
+            }
+        }
+
+        if ([string]::IsNullOrWhiteSpace($denyReason) -and $mode -cne 'view' -and $isWatchPrompt -and
+            -not (Test-CanonicalWatchPrompt -Prompt $prompt -ExpectedTargetThreadId $watchTargetThreadId)) {
+            $denyReason = 'Code-mode watch automation prompts must use the hash-valid watch-interrupted-task policy_revision=2 envelope.'
+        }
     }
 }
 elseif ($toolName -match '(?i)(^|__|\.)automation_update$') {

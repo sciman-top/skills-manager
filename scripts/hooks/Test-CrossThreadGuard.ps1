@@ -56,11 +56,14 @@ $simulationCases = [ordered]@{
     direct_send_tool = $false
     multiline_shell_send = $false
     nested_shell_send = $false
+    code_mode_shell_send = $false
     read_only_subexpression_send = $false
     reader_exec_option_send = $false
     target_self_delete = $false
+    code_mode_target_self_delete = $false
     fleet_self_delete = $false
     automation_live_probe_sentinel = $false
+    code_mode_automation_live_probe_sentinel = $false
     direct_user_lifecycle_allowed = $false
 }
 if ($hostExists) {
@@ -89,6 +92,10 @@ if ($hostExists) {
                 command = 'cmd /c codex app-server request thread/send --thread doctor-target --prompt blocked'
             }
         }
+        code_mode_shell_send = [ordered]@{
+            tool_name = 'exec'
+            tool_input = 'const result = await tools.shell_command({ command: "codex app-server request thread/send --thread doctor-target --prompt blocked" }); text(result);'
+        }
         read_only_subexpression_send = [ordered]@{
             tool_name = 'shell_command'
             tool_input = [ordered]@{
@@ -108,6 +115,13 @@ if ($hostExists) {
             tool_input = [ordered]@{ mode = 'delete'; id = 'watch-interrupted-task-v1-target-thread-id-doctor-source' }
             expect = 'deny'
         }
+        code_mode_target_self_delete = [ordered]@{
+            session_id = 'doctor-source'
+            transcript_path = $targetTranscript
+            tool_name = 'exec'
+            tool_input = 'const result = await tools.codex_app__automation_update({ mode: "delete", id: "watch-interrupted-task-v1-target-thread-id-doctor-source" }); text(result);'
+            expect = 'deny'
+        }
         fleet_self_delete = [ordered]@{
             session_id = 'doctor-fleet'
             transcript_path = $fleetTranscript
@@ -120,6 +134,13 @@ if ($hostExists) {
             transcript_path = $targetTranscript
             tool_name = 'codex_app__automation_update'
             tool_input = [ordered]@{ mode = 'delete'; id = 'watch-interrupted-task-v1-live-probe-doctor' }
+            expect = 'deny'
+        }
+        code_mode_automation_live_probe_sentinel = [ordered]@{
+            session_id = 'doctor-source'
+            transcript_path = $targetTranscript
+            tool_name = 'exec'
+            tool_input = 'const result = await tools.codex_app__automation_update({ mode: "delete", id: "watch-interrupted-task-v1-live-probe-code-mode-doctor" }); text(result);'
             expect = 'deny'
         }
         direct_user_lifecycle_allowed = [ordered]@{
