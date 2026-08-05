@@ -7,7 +7,7 @@
 
 ## 1. 架构结论
 
-当前实现继续采用“PowerShell 7 模块化单体 + build-time 单文件 bundle + 文件型 versioned contracts + host adapters”；长期目标边界调整为“versioned protocol + 可选 C#/.NET typed core + PowerShell thin compatibility shell”。typed core 尚未实现，现有 PowerShell 仍是唯一运行真源。
+当前实现继续采用“PowerShell 7 模块化单体 + build-time 单文件 bundle + 文件型 versioned contracts + host adapters”；长期目标边界调整为“versioned protocol + 可选 C#/.NET typed core + PowerShell thin compatibility shell”。TC0/TC1 已为 `OperationPlan/Receipt v1` 建立 `shadow_only` typed-core PoC，但未接入 CLI/bundle；现有 PowerShell 仍是唯一运行真源。
 
 本项目位于宿主和能力来源之间，负责本地 inventory、选择、plan、显式 apply 和 evidence；宿主继续负责 agent execution、auth、permission、session、plugin/connector runtime 和 native loading。
 
@@ -447,7 +447,7 @@ Radar 数据通过独立、显式 refresh 形成不可变 snapshot：记录 sour
 
 ### 3.12 `TypedCoreBoundary`
 
-职责：为减少 AI 生成 PowerShell 的语法/类型/兼容风险，定义“PowerShell thin shell + optional C#/.NET typed core”的可逆迁移边界。`PowerShell remains a compatibility shell, not the domain-policy source of truth` 是目标态约束；在 PoC 通过前，当前仓库仍由 PowerShell 实现且只有一个运行真源。
+职责：为减少 AI 生成 PowerShell 的语法/类型/兼容风险，定义“PowerShell thin shell + optional C#/.NET typed core”的可逆迁移边界。`PowerShell remains a compatibility shell, not the domain-policy source of truth` 是目标态约束；TC1 shadow parity 通过后仍由 PowerShell 实现且只有一个运行真源，直到 TC2 明确选择单一实现 owner。
 
 目标职责划分：
 
@@ -459,6 +459,8 @@ Radar 数据通过独立、显式 refresh 形成不可变 snapshot：记录 sour
 | host adapters | 由 PowerShell 或 typed CLI 调用 native host/Git/filesystem，并保留现有 authority/rollback | 绕过 plan、freshness、receipt 或 native approval |
 
 PoC 只允许选择一个 read-only、两个以上真实 caller、已有 characterization tests 的 seam；固定输入 corpus 同时喂给现有 PowerShell 与 typed candidate，逐字段比较 JSON、finding code、exit code 和性能。接受需要零行为漂移或 reviewed additive difference、Windows x64 分发可复现、framework-dependent 与 self-contained 体积/启动数据、无新增常驻服务、旧入口可回退、单一实现真源迁移方案和删除 PoC 的命令。PoC 未达标即删除，不形成长期双实现。
+
+当前 TC1 选择 `operation_contract_validation_v1`：PowerShell 的 `Test-OperationPlanContract`/`Test-OperationReceiptContract` 是 runtime truth，C# 只接受 protocol v1 stdin 并输出 pass/findings/exit。MCP planning、MCP command 和 RulePatch receipt 是三个真实 caller；4/4 fixture 与 4/4 invalid-request parity 已验证。framework-dependent 为 78,078 bytes；self-contained 与 single-file 分别约 80.4 MB 与 73.6 MB，因此分发净收益尚不足以准入 TC2。
 
 ## 4. 目标源码结构
 
@@ -483,6 +485,11 @@ src/
     Hosts/
       CodexHost.ps1
       ClaudeHost.ps1
+
+typed-core/
+  SkillsManager.TypedCore/   # TC1 shadow-only; not in build bundle
+    Program.cs
+    OperationContractValidator.cs
       GeminiHost.ps1
       TraeHost.ps1
   Infrastructure/
@@ -707,6 +714,12 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 理由：C#/.NET 与 Windows、native CLI、single-file/self-contained 分发和现有 .NET SDK 最匹配，能用编译器、nullable/类型、结构化并发和成熟测试降低 AI 生成脚本的语法/运行时缺陷；相比 Node/Python/Rust，它在本仓的 runtime 增量、Windows 适配和迁移风险上处于更合适的 Pareto 点。直接重写会丢失现有 CLI/Pester/兼容证据，因此明确拒绝。
 
 PoC acceptance：同一 corpus 的结构化输出/exit/finding parity；至少两个真实 caller；AI 修改的一次通过率、返工、测试时间和启动/分发成本有 baseline；旧 wrapper 与 rollback 通过；无双写/双配置/daemon/provider/host mutation。任一项失败则删除 PoC 并继续收紧 PowerShell seam。
+
+### `ADR-SMV-028 Operation contract validation as the first shadow seam`
+
+决定：TC0 选择 `OperationPlan/Receipt v1` validation 作为第一个 typed-core seam；TC1 用 .NET 10 LTS + `System.Text.Json` 的 package-free console 通过 versioned stdin/stdout JSON shadow 运行。生产 PowerShell、CLI 和 bundle 不引用 candidate；TC2 前 PowerShell 保持 authoritative。
+
+理由：该 seam 是纯 in-process module，已有三个真实 caller、四个固定 fixture 和稳定 finding/exit contract，能以小接口隐藏足够验证复杂度。它比迁移 host adapter、能力路由或写入事务风险更低。4/4 corpus 与 4/4 protocol negative 已通过，但 self-contained 73–80 MB，故只接受 shadow PoC，不接受默认分发或生产迁移。
 
 ### `ADR-SMV-003 Separate domain models`
 

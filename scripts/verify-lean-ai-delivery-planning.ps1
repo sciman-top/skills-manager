@@ -606,7 +606,9 @@ foreach ($policyContract in @(
     @{ key = 'roadmap'; literal = '| `M0.2` | `repo_verified` |'; code = 'm0_2_roadmap_status_missing'; message = 'Roadmap must register the bounded M0.2 clarification as repo_verified planning truth.' },
     @{ key = 'spec'; literal = 'MODEL_POLICY_STATUS: host_advisory_only'; code = 'model_policy_status_missing'; message = 'M0.3 must keep model policy host-owned and advisory-only.' },
     @{ key = 'spec'; literal = 'RADAR_SNAPSHOT_POLICY: advisory_expiring_snapshot'; code = 'radar_snapshot_policy_missing'; message = 'M0.3 must keep Radar data explicit, advisory, and expiring.' },
-    @{ key = 'spec'; literal = 'TYPED_CORE_STATUS: poc_not_started'; code = 'typed_core_status_missing'; message = 'M0.3 must not claim that a typed-core PoC or migration has started.' },
+    @{ key = 'spec'; literal = 'M0_3_TYPED_CORE_STATUS: poc_not_started'; code = 'm0_3_typed_core_status_missing'; message = 'M0.3 historical closeout must remain poc_not_started.' },
+    @{ key = 'spec'; literal = 'TYPED_CORE_STATUS: tc1_shadow_repo_verified'; code = 'typed_core_status_missing'; message = 'Current adjacent follow-up must record the repo-verified TC1 shadow state.' },
+    @{ key = 'spec'; literal = 'TYPED_CORE_PRODUCTION_STATUS: not_started'; code = 'typed_core_production_status_missing'; message = 'Typed-core production migration must remain not_started.' },
     @{ key = 'spec'; literal = 'POWERSHELL_COMPATIBILITY_STATUS: ps7_primary_ps51_bounded_smoke'; code = 'powershell_compatibility_status_missing'; message = 'M0.3 must preserve PS7 primary and bounded PS5.1 compatibility truth.' },
     @{ key = 'prd'; literal = 'FR-EWF-017'; code = 'model_escalation_requirement_missing'; message = 'PRD must define bounded model escalation and failure routing.' },
     @{ key = 'prd'; literal = 'NFR-TEC-001'; code = 'typed_core_requirement_missing'; message = 'PRD must contain the conditional typed-core technology requirement.' },
@@ -649,7 +651,9 @@ $result = [ordered]@{
     p6_admission_status = 'hold'
     model_policy_status = 'host_advisory_only'
     radar_snapshot_policy = 'advisory_expiring_snapshot'
-    typed_core_status = 'poc_not_started'
+    m0_3_typed_core_status = 'poc_not_started'
+    typed_core_status = 'tc1_shadow_repo_verified'
+    typed_core_production_status = 'not_started'
     powershell_compatibility_status = 'ps7_primary_ps51_bounded_smoke'
     pilot_status = $pilotStatus
     pilot_sample_target = $pilotSampleTarget

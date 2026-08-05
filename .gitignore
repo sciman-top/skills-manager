@@ -5,6 +5,8 @@
 /reports/
 /docs/runtime-*.txt
 /artifacts/
+/typed-core/**/bin/
+/typed-core/**/obj/
 
 # backups created when linking
 **/*.bak.*

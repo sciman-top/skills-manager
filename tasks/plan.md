@@ -9,6 +9,9 @@
 **maintenance_task_truth**: `tasks/skills-manager-vnext-maintenance-design.tasks.json`
 **maintenance_pilot_truth**: `tasks/skills-manager-vnext-lean-delivery-pilot.json`
 **maintenance_pilot_status**: collecting (0/10)
+**active_typed_core_track**: typed_core_shadow_poc
+**typed_core_task_truth**: `tasks/skills-manager-vnext-typed-core-pilot.tasks.json`
+**typed_core_status**: TC0/TC1 repo_verified; shadow_only; TC2 not_started
 **active_correction_track**: capability_routing_correction
 **correction_task_truth**: `tasks/skills-manager-vnext-capability-routing-correction.tasks.json`
 **correction_status**: repo_verified
@@ -86,11 +89,21 @@ Tool admission：默认 `host-native + repo-native + Git + gates`；只有重复
 
 M0.3 model policy：用户拥有目标、价值排序、不可逆风险和外部授权；宿主 AI 负责 TaskGraph、串并行、模型/effort、spawn/wait/steer、升级、集成和最终综合；skills-manager 只提供 Radar/cost/risk proposal 与 deterministic admission。默认 `Sol xhigh / Sol medium / Luna max` 是可覆盖软锚点。一次 corrected retry 后仍失败则补证据/re-scope；仅模型能力不足才逐级升级；同一 issue 两次失败或两次升档由 supervisor 串行接管。shared seam、final integration 和 full gate 始终串行。
 
-M0.3 technology path：当前 PS7/生成 bundle 继续是唯一运行真源，5.1 只做 bounded smoke。候选目标是 C#/.NET typed core + PowerShell thin shell，不是全仓重写。下一可执行里程碑 `TC0` 只选择一个 read-only pure seam、两个真实 caller 与固定 corpus，形成 SDK pin/protocol/parity/rollback proposal；`TC1` PoC、`TC2` 单 seam 迁移和 `TC3` retain/revise/retire 都保持 conditional/not_started，需独立授权和证据。
+M0.3 technology path：PS7/生成 bundle 继续是唯一运行真源，5.1 只做 bounded smoke。独立 `typed_core_shadow_poc` 已完成 TC0/TC1：选择 `operation_contract_validation_v1`、三个真实 caller、四个固定 fixture、.NET 10.0.302 protocol v1，并实现 package-free C# shadow parity/发布观测。生产 `src`/CLI/bundle 未引用 candidate；TC2 单 seam 迁移保持 `not_started`，TC3 retain/revise/retire 保持 conditional。
 
 Failure routing：文档/manifest/registry 漂移先修当前真源；同一 verifier 缺陷连续失败两次后重审检查设计；Radar stale 回退 native default；子任务失败按 FailurePacket 判断 task/context/tool/capacity，不把权限问题伪装成模型问题；typed-core parity/分发/rollback 不达标则删除 PoC。未知工作树改动、P5 回归、P6 manifest、runtime write set、host/model mutation 或 full gate 失败立即阻断收口。M1 达到 10 个真实样本并完成人工 review 前保持 collecting/observe-only。
 
-Verification：迭代运行 focused planning tests 与两个 verifier；文件稳定后由 `scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree` 统一运行一次完整套件，随后执行 `git diff --check` 和 Git boundary 检查。不在 full gate 前后另行重复完整 suite。
+Verification：迭代运行 focused planning tests、Lean verifier、typed-core planning verifier 与 shadow parity；文件稳定后由 `scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree` 统一运行一次完整套件，随后执行 `git diff --check` 和 Git boundary 检查。不在 full gate 前后另行重复完整 suite。
+
+## 7.1 Typed-core Operation Contract TC0/TC1
+
+| Order | Task | Slice | Exit checkpoint |
+| ---: | --- | --- | --- |
+| 1 | `SMV-TC-001` | TC0 seam admission | read-only pure seam、三个 caller、四个 corpus hash、protocol/SDK/rollback 完整 |
+| 2 | `SMV-TC-002` | TC1 shadow implementation | package-free .NET 10 build；4/4 parity；4/4 request negatives；零生产引用 |
+| 3 | `SMV-TC-003` | publish/verifier/closeout | 三模式描述性测量；产品/根真值；新旧 verifier；唯一 full gate；TC2 not_started |
+
+Failure routing：parity/finding/exit 漂移先修 candidate，不能修改 PowerShell truth 迎合 PoC；协议或 consumer 不稳定则删除 PoC；`PROCESSOR_ARCHITECTURE` 缺失只在 verifier 子进程归一化，不写机器环境。任何生产 `src`/bundle 引用、PackageReference、双真源、P6/host/live 越级或 full gate 失败立即阻断。
 
 ## 8. Native-first capability routing correction
 

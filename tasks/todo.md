@@ -4,6 +4,8 @@
 **active_maintenance_track**: `maintenance_design`
 **maintenance_task_truth**: `tasks/skills-manager-vnext-maintenance-design.tasks.json`
 **maintenance_pilot_truth**: `tasks/skills-manager-vnext-lean-delivery-pilot.json`
+**active_typed_core_track**: `typed_core_shadow_poc`
+**typed_core_task_truth**: `tasks/skills-manager-vnext-typed-core-pilot.tasks.json`
 **active_profile_maintenance_track**: `profile_reconciliation_advisor`
 **profile_maintenance_task_truth**: `tasks/skills-manager-vnext-profile-reconciliation.tasks.json`
 **active_profile_optimization_track**: `profile_optimization_canary`
@@ -45,7 +47,15 @@
 - [x] M0.1 补齐 North Star、native baseline、双证据流、删除评审与 pilot 计数合同。
 - [ ] M1 收集并 review 10 个真实 observe-only 样本（当前 0/10）。
 
-M0/M0.2/M0.3 maintenance design planning package 为 11/11 `repo_verified`；M1 已获授权并进入 `collecting (0/10)`，但没有任何真实样本、并行/工具/模型策略收益、pilot 完成或业务收益声明。coordinator/lease/model-router runtime、Radar live refresh、custom-agent/host config mutation、typed-core PoC/PowerShell 替换与社区工具安装均未发生。M3 与 TC0-TC3 仍为 `conditional/not_started`；P6 admission 和 business `live_accepted` 均未执行。
+M0/M0.2/M0.3 maintenance design planning package 为 11/11 `repo_verified`；M1 已获授权并保持 `collecting (0/10)`，但没有任何真实样本、并行/工具/模型策略收益、pilot 完成或业务收益声明。coordinator/lease/model-router runtime、Radar live refresh、custom-agent/host config mutation和社区工具安装均未发生；typed-core TC0/TC1 只完成 shadow PoC，PowerShell 未替换。M3/TC3 conditional、TC2/P6 admission/业务 `live_accepted` 均未执行。
+
+## Typed-core Operation Contract checklist
+
+- [x] `SMV-TC-001` 冻结 `OperationPlan/Receipt v1` read-only seam、三个 caller、四个 corpus hash、protocol/SDK/rollback。
+- [x] `SMV-TC-002` 实现 package-free .NET 10 shadow validator，完成 4/4 corpus parity 和 4/4 request negatives，保持零生产引用。
+- [x] `SMV-TC-003` 完成三种发布观测、planning verifier/tests、产品/根状态、evidence 与唯一 full gate 收口。
+
+TC0/TC1 为 3/3 `repo_verified`、`shadow_only`；PowerShell runtime `authoritative`，TC2/生产集成 `not_started`，M1 仍为 0/10，P6 hold，live acceptance not_run。self-contained 体积约 73–80 MB，只是描述性成本证据，不构成默认分发决策。
 
 ## Capability routing correction checklist
 

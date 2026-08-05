@@ -133,7 +133,9 @@ exit 0
         @($parsed.evidence_groups).Count | Should Be 3
         $parsed.model_policy_status | Should Be 'host_advisory_only'
         $parsed.radar_snapshot_policy | Should Be 'advisory_expiring_snapshot'
-        $parsed.typed_core_status | Should Be 'poc_not_started'
+        $parsed.m0_3_typed_core_status | Should Be 'poc_not_started'
+        $parsed.typed_core_status | Should Be 'tc1_shadow_repo_verified'
+        $parsed.typed_core_production_status | Should Be 'not_started'
         $parsed.powershell_compatibility_status | Should Be 'ps7_primary_ps51_bounded_smoke'
         $parsed.pilot_status | Should Be 'collecting'
         $parsed.pilot_sample_target | Should Be 10
@@ -385,7 +387,9 @@ exit 0
         $spec = (Get-Content -LiteralPath $specPath -Raw).
             Replace('MODEL_POLICY_STATUS: host_advisory_only', 'MODEL_POLICY_STATUS: runtime_router').
             Replace('RADAR_SNAPSHOT_POLICY: advisory_expiring_snapshot', 'RADAR_SNAPSHOT_POLICY: permanent_hard_gate').
-            Replace('TYPED_CORE_STATUS: poc_not_started', 'TYPED_CORE_STATUS: production_migrated').
+            Replace('M0_3_TYPED_CORE_STATUS: poc_not_started', 'M0_3_TYPED_CORE_STATUS: production_migrated').
+            Replace('TYPED_CORE_STATUS: tc1_shadow_repo_verified', 'TYPED_CORE_STATUS: production_migrated').
+            Replace('TYPED_CORE_PRODUCTION_STATUS: not_started', 'TYPED_CORE_PRODUCTION_STATUS: complete').
             Replace('POWERSHELL_COMPATIBILITY_STATUS: ps7_primary_ps51_bounded_smoke', 'POWERSHELL_COMPATIBILITY_STATUS: unsupported')
         Set-Content -LiteralPath $specPath -Value $spec -Encoding UTF8
 
@@ -399,7 +403,9 @@ exit 0
         $findings = @(((Invoke-LeanPlanningVerifier $fixtureRoot).output | ConvertFrom-Json).findings)
         @($findings | Where-Object code -eq 'model_policy_status_missing').Count | Should Be 1
         @($findings | Where-Object code -eq 'radar_snapshot_policy_missing').Count | Should Be 1
+        @($findings | Where-Object code -eq 'm0_3_typed_core_status_missing').Count | Should Be 1
         @($findings | Where-Object code -eq 'typed_core_status_missing').Count | Should Be 1
+        @($findings | Where-Object code -eq 'typed_core_production_status_missing').Count | Should Be 1
         @($findings | Where-Object code -eq 'powershell_compatibility_status_missing').Count | Should Be 1
         @($findings | Where-Object code -eq 'model_policy_architecture_decision_missing').Count | Should Be 1
         @($findings | Where-Object code -eq 'typed_core_architecture_decision_missing').Count | Should Be 1

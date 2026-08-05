@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "program_id": "skills-manager-vnext",
+  "track": "typed_core_shadow_poc",
+  "base_phase": "P5",
+  "track_status": "repo_verified",
+  "tc0_status": "repo_verified",
+  "tc1_status": "repo_verified",
+  "tc2_status": "not_started",
+  "tc3_status": "conditional",
+  "powershell_runtime_status": "authoritative",
+  "typed_core_mode": "shadow_only",
+  "production_integration_status": "not_started",
+  "p6_admission_status": "hold",
+  "live_acceptance_status": "not_run",
+  "protocol_version": 1,
+  "seam": "operation_contract_validation_v1",
+  "allowed_statuses": ["pending", "in_progress", "blocked", "deferred", "done"],
+  "tasks": [
+    {
+      "id": "SMV-TC-001",
+      "title": "冻结 OperationPlan/Receipt TC0 seam 与迁移准入",
+      "status": "done",
+      "risk": "medium",
+      "evidence_group": "typed_core_operation_contract_tc0_tc1",
+      "depends_on": [],
+      "requirement_ids": ["PP-012", "FR-TEC-001", "NFR-EWF-006", "NFR-TEC-001", "NFR-TEC-002"],
+      "architecture_decision_ids": ["ADR-SMV-027", "ADR-SMV-028"],
+      "goal": "选择一个 read-only pure seam，证明至少两个真实 caller、固定 characterization corpus、窄接口、无 I/O/host/provider 副作用和可删除回滚。",
+      "preconditions": [
+        "P5 and M0.3 remain repo_verified",
+        "user explicitly authorized the adjacent typed-core slice",
+        "P6 admission remains hold",
+        "PowerShell runtime remains authoritative"
+      ],
+      "write_set": [
+        "docs/superpowers/specs/2026-08-05-typed-core-operation-contract-shadow-poc.md",
+        "tasks/skills-manager-vnext-typed-core-pilot.tasks.json",
+        "docs/change-evidence/20260805-typed-core-operation-contract-shadow-poc.md"
+      ],
+      "implementation_steps": [
+        "classify candidate dependencies and apply the deletion test",
+        "record MCP planning, MCP command and RulePatch receipt callers",
+        "freeze four fixture hashes and PowerShell pass/finding baseline",
+        "define protocol, SDK pin, rollback and TC2 stop conditions"
+      ],
+      "tests": [
+        "OperationContracts.Tests.ps1 keeps the seam pure and corpus stable",
+        "TC0 spec records at least two production callers",
+        "P6/runtime/live boundaries remain unchanged"
+      ],
+      "verification": [
+        "tests/Unit/OperationContracts.Tests.ps1",
+        "scripts/verify-typed-core-pilot-planning.ps1 -Json",
+        "git diff --check"
+      ],
+      "rollback": [
+        "remove only the TC0/TC1 spec, manifest and evidence if admission is invalid"
+      ],
+      "done_when": [
+        "one read-only pure seam is named",
+        "three real callers and four fixture hashes are recorded",
+        "protocol and rollback are explicit",
+        "no production runtime path changes"
+      ],
+      "out_of_scope": ["production migration", "runtime router", "host config", "provider/auth/session mutation", "P6 admission", "live acceptance"]
+    },
+    {
+      "id": "SMV-TC-002",
+      "title": "实现 package-free C#/.NET TC1 shadow validator",
+      "status": "done",
+      "risk": "medium",
+      "evidence_group": "typed_core_operation_contract_tc0_tc1",
+      "depends_on": ["SMV-TC-001"],
+      "requirement_ids": ["PP-012", "FR-TEC-001", "NFR-COMP-001", "NFR-PORT-001", "NFR-TEC-002"],
+      "architecture_decision_ids": ["ADR-SMV-002", "ADR-SMV-027", "ADR-SMV-028"],
+      "goal": "以 .NET 10 LTS、System.Text.Json 和 versioned stdin/stdout JSON 实现可删除 shadow validator，与 PowerShell 对固定 corpus 逐 finding/exit 对比。",
+      "preconditions": [
+        "SMV-TC-001 is done",
+        "global SDK 10.0.302 is locally available",
+        "no production source or generated bundle integration is allowed"
+      ],
+      "write_set": [
+        ".gitignore",
+        "global.json",
+        "typed-core/SkillsManager.TypedCore/SkillsManager.TypedCore.csproj",
+        "typed-core/SkillsManager.TypedCore/Program.cs",
+        "typed-core/SkillsManager.TypedCore/OperationContractValidator.cs",
+        "scripts/verify-typed-core-shadow.ps1",
+        "tests/Unit/TypedCoreShadow.Tests.ps1",
+        "docs/change-evidence/20260805-typed-core-operation-contract-shadow-poc.md"
+      ],
+      "implementation_steps": [
+        "pin .NET 10.0.302 latestPatch without prerelease",
+        "implement protocol exits 0/2/64/70 and redacted internal failure",
+        "implement plan/receipt v1 validators without PackageReference",
+        "compare 4 fixture pass/findings/exits and 4 request negatives",
+        "keep stderr empty and production PowerShell source unreferenced"
+      ],
+      "tests": [
+        "C# Release build has zero warning/error",
+        "4/4 corpus parity",
+        "4/4 protocol negative cases",
+        "typed core remains absent from src/**/*.ps1 and build bundle"
+      ],
+      "verification": [
+        "dotnet build typed-core/SkillsManager.TypedCore/SkillsManager.TypedCore.csproj -c Release",
+        "tests/Unit/TypedCoreShadow.Tests.ps1",
+        "scripts/verify-typed-core-shadow.ps1"
+      ],
+      "rollback": [
+        "delete typed-core, shadow verifier/test and global.json; PowerShell runtime behavior is unchanged"
+      ],
+      "done_when": [
+        "package-free typed core compiles",
+        "corpus and protocol negatives pass",
+        "PowerShell remains authoritative",
+        "TC2 remains not_started"
+      ],
+      "out_of_scope": ["PowerShell constructor migration", "CLI dispatch", "generated bundle integration", "production writes", "daemon", "database"]
+    },
+    {
+      "id": "SMV-TC-003",
+      "title": "测量分发、增强 verifier 并完成 TC1 truth closeout",
+      "status": "done",
+      "risk": "medium",
+      "evidence_group": "typed_core_operation_contract_tc0_tc1",
+      "depends_on": ["SMV-TC-002"],
+      "requirement_ids": ["FR-TEC-001", "FR-AIE-005", "FR-EVD-003", "NFR-TRU-001", "NFR-TEC-002"],
+      "architecture_decision_ids": ["ADR-SMV-013", "ADR-SMV-027", "ADR-SMV-028"],
+      "goal": "记录 framework-dependent/self-contained/single-file 大小和启动数据，增加 fail-closed planning verifier/tests，同步产品真值并运行唯一 full gate。",
+      "preconditions": [
+        "SMV-TC-002 parity is green",
+        "publish artifacts are created only under a temporary directory",
+        "current worktree contains only declared changes"
+      ],
+      "write_set": [
+        "AGENTS.md",
+        "README.md",
+        "README.en.md",
+        "docs/product/README.md",
+        "docs/product/skills-manager-vnext-prd.md",
+        "docs/product/skills-manager-vnext-architecture.md",
+        "docs/product/skills-manager-vnext-roadmap.md",
+        "docs/superpowers/specs/2026-08-03-lean-ai-delivery-maintenance-design.md",
+        "docs/superpowers/specs/2026-08-05-typed-core-operation-contract-shadow-poc.md",
+        "tasks/plan.md",
+        "tasks/todo.md",
+        "tasks/skills-manager-vnext-typed-core-pilot.tasks.json",
+        "scripts/verify-lean-ai-delivery-planning.ps1",
+        "scripts/verify-typed-core-pilot-planning.ps1",
+        "tests/Unit/LeanAiDeliveryPlanning.Tests.ps1",
+        "tests/Unit/TypedCoreShadow.Tests.ps1",
+        "docs/change-evidence/20260805-typed-core-operation-contract-shadow-poc.md"
+      ],
+      "implementation_steps": [
+        "publish three Windows x64 modes to a temporary directory and delete artifacts",
+        "record bytes and three-run startup observations without causal claims",
+        "fail closed on runtime integration, PackageReference, status and evidence drift",
+        "sync TC0/TC1/TC2 status while preserving M1 0/10 and P6 hold",
+        "run affected gates and the unique full closeout gate"
+      ],
+      "tests": [
+        "planning verifier current pass and negative drift fail closed",
+        "publish observation contains all three modes",
+        "M1 remains collecting 0/10",
+        "full gate passes once"
+      ],
+      "verification": [
+        "scripts/verify-typed-core-pilot-planning.ps1 -Json",
+        "scripts/verify-lean-ai-delivery-planning.ps1 -Json",
+        "scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree",
+        "git diff --check",
+        "git status --short --branch"
+      ],
+      "rollback": [
+        "revert only the TC0/TC1 track files and status sync; do not alter M0/M0.2/M0.3, M1, P0-P5 or host state"
+      ],
+      "done_when": [
+        "three publish modes have descriptive observations",
+        "three TC tasks are done and share one evidence file",
+        "new and existing planning verifiers pass",
+        "unique full gate passes",
+        "TC2 is not_started and PowerShell remains authoritative"
+      ],
+      "out_of_scope": ["production integration", "default self-contained distribution", "M1 sample", "P6 admission", "host_loaded", "live acceptance"]
+    }
+  ]
+}

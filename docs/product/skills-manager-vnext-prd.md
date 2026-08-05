@@ -121,6 +121,8 @@ Git 保存版本、分支、candidate commit 和集成结果；宿主原生 coor
 
 PowerShell 是当前 Windows-first 的兼容入口和适配层，不再被视为长期承载所有领域语义的唯一实现。新领域逻辑优先通过稳定 JSON/protocol contract、纯函数和可测试 typed core 评估；迁移必须保持旧 CLI、生成 bundle、安装 fallback 和受界定的 5.1 smoke 可回滚。没有两个真实 caller、characterization baseline 和迁移收益证据，不创建第二实现或开始重写。
 
+当前 TC0/TC1 只对 `OperationPlan/Receipt v1` 完成 package-free C#/.NET `shadow_only` PoC：固定 corpus 与 PowerShell validator parity，生产 CLI/bundle 未接入，TC2 仍需独立 reviewed admission。
+
 ## 6. 功能需求
 
 ### 6.1 Capability catalog
@@ -262,6 +264,10 @@ PowerShell 是当前 Windows-first 的兼容入口和适配层，不再被视为
 - `FR-EWF-016`：Radar snapshot 必须记录 `source / captured_at / model / reasoning_effort / score / estimated_cost / estimated_duration / sample_count / confidence / raw_hash / expires_at`；过期、缺样本或来源不可核验时回退官方/native 默认，Radar 只影响建议，不证明质量或 live acceptance。
 - `FR-EWF-017`：并行/串行与模型升级必须使用显式状态机：依赖、base、write set、集成 owner、验证和外部写入全部满足才允许并行；一次根因修复失败后只重试一次，同一 `issue_id` 第二次失败必须 re-scope/re-plan；能力不足才按 `Luna max -> Sol medium -> Sol xhigh` 升级，权限/凭据/用户决策缺失则 fail-closed。
 
+### 6.12 Typed-core shadow migration
+
+- `FR-TEC-001`：typed-core PoC 只能选择一个 read-only pure seam，至少两个真实 caller 和固定 characterization corpus；协议必须是 versioned stdin/stdout UTF-8 JSON，并固定 finding/exit/redaction contract。TC1 只 shadow 比较，不能改变旧 CLI 输出、生成 bundle 或生产 side effect。
+
 ## 7. 非功能需求
 
 - `NFR-COMP-001`：现有 `skills.json`、lock、CLI aliases、generated `skills.ps1` 和 MCP/skill projection 行为保持兼容。
@@ -290,7 +296,8 @@ PowerShell 是当前 Windows-first 的兼容入口和适配层，不再被视为
 - `NFR-EWF-004`：tool/skill promotion 的语义判断可由宿主 AI 提议，但 availability、freshness、权限、预算、供应链、测试和 truth-level advancement 必须由确定性证据或人工 review 约束。
 - `NFR-EWF-005`：模型策略是多目标 Pareto 建议，必须同时观察正确性/用户结果、费用、wall-clock、token/context、重试和集成成本及不可逆风险；不得把动态 Radar 分数压成不可解释的固定总分或单项硬门禁。
 - `NFR-EWF-006`：PowerShell 5.1 只保留 bootstrap、生成脚本 parse、plain-object/selected-fixture smoke；PS7 是开发/CI/full gate 主路径。新 typed core 候选必须以 versioned protocol、single source of truth、双运行时回退和可删除 PoC 证明，不得在无门禁的情况下形成双写或双真源。
-- `NFR-TEC-001`：替代技术栈评估优先比较 C#/.NET、TypeScript/Node、Python 和 Rust 的 Windows/native CLI 适配、类型/并发、分发、供应链、维护与回滚成本；当前推荐 C#/.NET typed core + PowerShell thin shell 作为条件性目标架构，暂不实施重写。
+- `NFR-TEC-001`：替代技术栈评估优先比较 C#/.NET、TypeScript/Node、Python 和 Rust 的 Windows/native CLI 适配、类型/并发、分发、供应链、维护与回滚成本；当前推荐 C#/.NET typed core + PowerShell thin shell 作为条件性目标架构，只实施可删除 shadow PoC，不实施全仓重写。
+- `NFR-TEC-002`：TC1 必须 pin 受支持 LTS SDK、零第三方 `PackageReference`、4/4 corpus parity、结构化协议负例、零生产引用和可删除回滚；framework-dependent/self-contained/single-file 的体积/启动数据只作描述性观察。TC2 前 PowerShell runtime 必须保持 authoritative，生产集成为 `not_started`。
 
 ## 8. 产品级验收
 
@@ -308,6 +315,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 10. 同类失败两次、方向证据变化、授权越界或 live/生产动作出现时会停止并重新规划或询问；普通低风险实现不会因固定角色审批而中断。
 11. 交付效果只以真实 pilot 观察；规划包、synthetic replay 或 repo verifier 不能被表述为真实业务收益。
 12. capability 辅助层必须在“只使用宿主原生匹配 + 当前 profile”基线之上证明净收益；deterministic corpus、profile 可见性和少量 host replay 分别报告，不互相冒充。
+13. typed-core TC1 的完成只能证明固定 `OperationPlan/Receipt v1` corpus 的 shadow parity；未执行 TC2 时不得宣称 CLI/生产迁移、PowerShell 替换或默认分发已接受。
 13. skill inventory 变化后可获得确定性的 profile drift 诊断；宿主 proposal stale、引用未知对象、触碰 protected skill、产生 no-op/冲突或超预算时 fail-closed，且诊断全过程不改变配置和 active profile。
 14. 经授权的 profile 优化只对非活动 profile 执行有界 canary；fresh-task replay 必须证明正负代表场景并恢复原 active profile，失败时按 receipt 自动回滚，整个链路保持 host semantics 与 deterministic state policy 分离。
 15. 多 Agent 设计评议可并行，但所有写入任务都能追到一个 result owner、固定 base revision、互斥或单 writer write set、集成顺序和最终 closeout owner。

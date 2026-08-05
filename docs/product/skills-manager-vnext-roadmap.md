@@ -14,7 +14,8 @@
 | `P3` | Plugin-aware distribution and evaluation | `complete` | 7/7 tasks repo_verified；fixture-first，host/live 未执行 |
 | `P4` | Unified capability selection and activation planning | `complete` | 6/6 tasks `repo_verified`；16-profile fresh prompt probe 已通过，host runtime activation/live acceptance 未执行 |
 | `P5` | Adaptive Capability Fabric | `complete` | 5/5 `repo_verified`；live read-only App Server snapshot 与 full gate 已通过，business live acceptance 未执行 |
-| `maintenance_design` | Lean AI Software Delivery | `M0/M0.2/M0.3 repo_verified / M1 collecting 0/10` | M0 基线 4/4 + M0.2 工程化协调/工具组合 4/4 + M0.3 模型策略/typed-core 决策 3/3 repo_verified；M1 仅启动真实样本收集，M3/TC0-TC3 conditional |
+| `maintenance_design` | Lean AI Software Delivery | `M0/M0.2/M0.3 repo_verified / M1 collecting 0/10` | M0 基线 4/4 + M0.2 工程化协调/工具组合 4/4 + M0.3 模型策略/typed-core 决策 3/3 repo_verified；M1 仅启动真实样本收集，M3 conditional；`TC0-TC3 conditional` 是 M0.3 closeout 历史，当前 TC0/TC1 由独立 track 承接 |
+| `typed_core_shadow_poc` | Operation contract typed core | `TC0/TC1 repo_verified` | `OperationPlan/Receipt v1` package-free C#/.NET shadow 3/3；4/4 corpus + 4/4 protocol negatives；PowerShell authoritative，TC2/生产集成 not_started |
 | `profile_reconciliation_advisor` | Skill profile drift reconciliation | `repo_verified` | P5-local plan-only advisor 4/4；宿主负责语义 proposal，确定性 planner 零写入校验；apply/live 未执行，不构成 P6 |
 | `profile_optimization_canary` | Bounded profile apply and replay | `repo_verified` | P5-local 3/3；非活动 profile canary、receipt/replay/rollback 已验证；6/6 host replay 为 partial，live acceptance not run |
 | `capability_routing_correction` | Native-first discovery/policy | `repo_verified` | P5-local regression correction 4/4；不改写 P5 历史状态，不授权 P6；host replay partial，live acceptance not run |
@@ -338,7 +339,7 @@ P5 real defects
 | --- | --- | --- | --- | --- |
 | `M0` | `repo_verified` | 综合 PRD/架构/路线图、maintenance spec/manifest、plan/todo、companion verifier、测试与一份 reviewed evidence | 4/4 planning tasks done；新旧 verifier 和 full gate 通过 | 新工作流业务有效、pilot 已运行、host loaded、live accepted |
 | `M0.2` | `repo_verified` | 在同一 maintenance 真源内补强 host-owned coordinator、只读设计 panel、single-writer write-set admission、Git freshness/CAS、tool disposition、context-adapter admission 与 M1 observation contract | 4 个增量任务 done；错误 CAS/共享写入/控制面膨胀/无证据 adapter 的负向 verifier 通过；唯一 full gate 通过 | coordinator/lease runtime 已实现、社区工具已安装、并行收益、M1 样本或业务 live acceptance |
-| `M0.3` | `repo_verified` | 落盘 host-owned TaskGraph/model policy、Radar snapshot、三档软锚点、failure escalation，以及 C#/.NET typed core + PowerShell thin shell 的条件性目标架构 | 3 个增量 planning tasks done；模型策略/typed-core/P6 边界负向 verifier 通过；唯一 full gate 通过 | 动态模型路由已实现、Radar 效果已证明、typed core/PoC 已实现、PowerShell 已替换、host/live acceptance |
+| `M0.3` | `repo_verified` | 落盘 host-owned TaskGraph/model policy、Radar snapshot、三档软锚点、failure escalation，以及 C#/.NET typed core + PowerShell thin shell 的条件性目标架构 | 3 个增量 planning tasks done；模型策略/typed-core/P6 边界负向 verifier 通过；唯一 full gate 通过 | M0.3 本身未实现动态模型路由、Radar 效果、typed core/PoC 或 PowerShell 替换；当前 TC0/TC1 见独立 track；host/live acceptance 未执行 |
 | `M1` | `collecting (0/10)` | 选取 10 个覆盖 Discovery/Main-chain/Stabilize/Refactor/Release/Operate 的真实任务，记录 native baseline 与 advisory treatment | 已获用户授权；registry/verifier 已启动；每项只做 observe，不设完成硬阈值 | pilot 已执行/完成、普遍效果、因果结论、自动 promotion |
 | `M2` | `repo_verified` | 以用户真实反馈和重复回放修正 P5 metadata、profile、golden、触发策略与直接缺陷；退役 lexical semantic router，保留 discovery/policy kernel | focused corpus、16-profile fresh probe、只读 host replay、planning/full gate 与共享 evidence 已收口 | M1 pilot 已运行、schema major、新 runtime、daemon/database、普遍 live acceptance |
 | `M3` | `conditional` | 比较净收益并决定 `retain | revise | retire`；仅把满足既有 admission 的证据提交 P6 review | 指标与失败样本经过人工 review；无净收益流程已删除或降级 | 自动 admitted、自动创建 P6 manifest |
@@ -355,9 +356,9 @@ PowerShell 技术路线采用 strangler migration，不直接重写：
 
 | Step | 状态 | AI 可执行切片 | Exit gate |
 | --- | --- | --- | --- |
-| `TC0` | `conditional / not_started` | 选择一个 read-only pure seam，冻结输入 corpus/JSON/finding/exit baseline，记录两个真实 caller | seam、caller、baseline、rollback、SDK pin proposal 完整；无代码写入 |
-| `TC1` | `conditional` | 建立可删除的 C#/.NET typed-core PoC，以 stdin/stdout versioned JSON shadow 运行，不改旧 CLI 结果 | PowerShell/typed parity、零外部写入、启动/体积/测试/AI 返工数据齐全 |
-| `TC2` | `conditional` | 只在 TC1 reviewed accept 后把该 seam 切为单一 typed implementation，PowerShell 变薄 wrapper | 旧 alias/installer/bundle/PS7 full/5.1 smoke 兼容；rollback 可执行；无双真源 |
+| `TC0` | `repo_verified` | 选择 `operation_contract_validation_v1` read-only pure seam，冻结 4 个 corpus hash/JSON/finding/exit baseline，记录 MCP planning/MCP command/RulePatch receipt 三个 caller | seam、caller、baseline、rollback、.NET 10.0.302 pin 完整；生产代码无写入 |
+| `TC1` | `repo_verified / shadow_only` | package-free C#/.NET validator 以 stdin/stdout protocol v1 shadow 运行，不改旧 CLI/bundle | 4/4 corpus + 4/4 request negative；三种分发观测；零生产引用；PowerShell authoritative |
+| `TC2` | `not_started` | 只在 TC1 后续真实 consumer/分发/返工净收益 reviewed accept 后把该 seam 切为单一 typed implementation，PowerShell 变薄 adapter | 旧 alias/installer/bundle/PS7 full/5.1 smoke 兼容；rollback 可执行；无双真源 |
 | `TC3` | `conditional` | 依据两个以上已迁移 seam 的净收益决定继续、暂停或删除 typed core | reviewed retain/revise/retire；不得因目录愿景批量迁移 |
 
 工具采用顺序固定为：repo-native `rg`/symbols/tests/docs 与宿主原生能力 -> 窄 skill -> plugin distribution -> current external data/action 的 MCP/connector -> 有真实检索缺口的只读 knowledge/code-graph adapter。每个候选以 `adopt | adapt | defer | reject` 记录 source/revision/license、native equivalent、real consumers、data/auth/write boundary、evaluation、maintenance cost、retirement trigger 和 truth level。Trellis/AGOS 只适配 planning/write-scope/candidate/evidence 思想；OptSkills 只适配 replay/distill/eval；GBrain、CodeGraphContext、Understand Anything 继续 defer；来源不明的 souljourney workflow 保持 unknown/defer。
