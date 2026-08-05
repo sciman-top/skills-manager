@@ -137,6 +137,20 @@ These sources are useful, but they should not be part of the default persistent 
 | `anthropics/knowledge-work-plugins` | `data-visualization` | Refresh only when knowledge-work/plugin pattern review is active |
 | `remotion-dev/skills` | `remotion-best-practices` | Keep runtime source; refresh only when Remotion/video work is active |
 
+### 7.1 Reviewed candidates from the 2026-08-05 discovery pass
+
+These repositories were checked through GitHub's public metadata and selected files. They are recorded in the manifest as `conditional-not-cloned`; no repository was cloned or installed as a result of popularity alone.
+
+| Repo / revision | License | What was useful | Decision |
+| --- | --- | --- | --- |
+| `anthropics/k12-teacher-skills@7c03c83d` | Apache-2.0 | Subject-specific references, prerequisite detection, exit-ticket guidance, differentiation, and single-source document consistency | Compare only when courseware work is active; do not import its Word/Knowledge Graph pipeline |
+| `Community-Access/accessibility-agents@161c60c7` | MIT | Presentation title/language, section navigation, and speaker-notes/transcript considerations | Compare only when PPTX accessibility review is active; keep the local validator fail-closed |
+| `iOfficeAI/OfficeCLI@459b1a47` | Apache-2.0 | Broad Office artifact workflow inventory | Reference-only; it is not a Codex integration or runtime dependency |
+| `emilkowalski/skills@de33dbed` | MIT | Animation frequency/purpose/reduced-motion decision rules | Compare only for visual teaching work; current physics skill already covers the core gate |
+| `tirth8205/code-review-graph@1a010dee` | MIT | Graph-assisted review concepts | Defer until a real graph-tool consumer exists; do not copy into the ordinary review skill |
+
+The `vercel-labs/skills` CLI remains discovery tooling rather than a skill source in this repository. `skills.sh`, GitHub Trending, and `find-skills` search results are discovery-only signals. A candidate still needs a fixed revision, license check, local consumer, and focused validation before promotion.
+
 Current singleton or narrow-source imports that should default to conditional, not persistent mirroring:
 
 - `affaan-m/everything-claude-code` -> `windows-desktop-e2e`

@@ -185,6 +185,61 @@
       "status": "not-cloned",
       "upstream_url": "https://github.com/remotion-dev/skills.git",
       "relative_path": "conditional/remotion-skills"
+    },
+    {
+      "name": "anthropics-k12-teacher-skills",
+      "tier": "conditional-not-cloned",
+      "status": "not-cloned",
+      "source_disposition": "reviewed-discovery-candidate",
+      "license": "Apache-2.0",
+      "review_revision": "7c03c83db8223b050b6569ffbe14cd94e229396e",
+      "review_decision": "reference-only; extract lesson-planning guardrails when courseware work is active",
+      "upstream_url": "https://github.com/anthropics/k12-teacher-skills.git",
+      "relative_path": "conditional/anthropics-k12-teacher-skills"
+    },
+    {
+      "name": "community-accessibility-agents",
+      "tier": "conditional-not-cloned",
+      "status": "not-cloned",
+      "source_disposition": "reviewed-discovery-candidate",
+      "license": "MIT",
+      "review_revision": "161c60c7493ad657f371ad8f91253d33c3b12044",
+      "review_decision": "reference-only; compare presentation accessibility checks when PPTX review is active",
+      "upstream_url": "https://github.com/Community-Access/accessibility-agents.git",
+      "relative_path": "conditional/community-accessibility-agents"
+    },
+    {
+      "name": "iofficeai-officecli",
+      "tier": "conditional-not-cloned",
+      "status": "not-cloned",
+      "source_disposition": "reviewed-discovery-candidate",
+      "license": "Apache-2.0",
+      "review_revision": "459b1a473faf33f2f52e697ac6d265a3f67b176a",
+      "review_decision": "reference-only; inspect Office workflow ideas on demand, never imply Codex integration",
+      "upstream_url": "https://github.com/iOfficeAI/OfficeCLI.git",
+      "relative_path": "conditional/iofficeai-officecli"
+    },
+    {
+      "name": "emilkowalski-skills",
+      "tier": "conditional-not-cloned",
+      "status": "not-cloned",
+      "source_disposition": "reviewed-discovery-candidate",
+      "license": "MIT",
+      "review_revision": "de33dbed000212b54400a33767d1e4d03654db2a",
+      "review_decision": "reference-only; compare animation-purpose and reduced-motion guidance when visual teaching work is active",
+      "upstream_url": "https://github.com/emilkowalski/skills.git",
+      "relative_path": "conditional/emilkowalski-skills"
+    },
+    {
+      "name": "tirth8205-code-review-graph",
+      "tier": "conditional-not-cloned",
+      "status": "not-cloned",
+      "source_disposition": "reviewed-discovery-candidate",
+      "license": "MIT",
+      "review_revision": "1a010deed6c283d4aa1e7e949e78fe3a7bcdfbb3",
+      "review_decision": "defer; graph-tool-dependent review is not a drop-in replacement for the current read-only review patch",
+      "upstream_url": "https://github.com/tirth8205/code-review-graph.git",
+      "relative_path": "conditional/tirth8205-code-review-graph"
     }
   ]
 }

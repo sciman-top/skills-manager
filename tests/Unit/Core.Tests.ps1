@@ -2972,4 +2972,28 @@ Describe "Reference shelf governance" {
         @($historicalResult.repo_names) | Should Be @("openai-skills")
         [System.IO.File]::ReadAllText($latestPath) | Should Be $before
     }
+
+    It "Keeps reviewed discovery candidates conditional, licensed, and revision-pinned" {
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        $expected = @(
+            "anthropics-k12-teacher-skills",
+            "community-accessibility-agents",
+            "iofficeai-officecli",
+            "emilkowalski-skills",
+            "tirth8205-code-review-graph"
+        )
+        $candidates = @($manifest.repos | Where-Object name -in $expected)
+
+        $candidates.Count | Should Be $expected.Count
+        foreach ($candidate in $candidates) {
+            $candidate.tier | Should Be "conditional-not-cloned"
+            $candidate.status | Should Be "not-cloned"
+            $candidate.source_disposition | Should Be "reviewed-discovery-candidate"
+            [string]$candidate.license | Should Not BeNullOrEmpty
+            [string]$candidate.review_decision | Should Not BeNullOrEmpty
+            [string]$candidate.review_revision | Should Match '^[0-9a-f]{40}$'
+            [string]$candidate.relative_path | Should Match '^conditional/'
+            @($manifest.default_refresh_set) -contains $candidate.name | Should Be $false
+        }
+    }
 }

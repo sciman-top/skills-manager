@@ -42,6 +42,20 @@ The discovery seam is `Get-OverridesDirs`; `Resolve-OverrideDir` supplies stable
 
 These inputs are versioned repository source, not runtime-generated skills. The generated surface is `agent/`; the host projection is `$HOME/.agents/skills`. Some source was likely created or revised with AI assistance in earlier repository work, but Git history—not a runtime generator—owns it.
 
+## External benchmark review (2026-08-05)
+
+The review used current Codex skill guidance plus fixed-revision, read-only checks of public repositories discovered through `skills.sh`/`find-skills` and GitHub Trending. Install counts and stars were treated as discovery signals only. The reviewed candidates are registered as `conditional-not-cloned` in `references/reference-shelf.manifest.json`.
+
+| Candidate | Evidence and license | Adoption decision |
+|---|---|---|
+| `anthropics/k12-teacher-skills@7c03c83d` | K-12 planning skill and science reference; Apache-2.0 | Extract prerequisite, exit-ticket, differentiation, and source-consistency guardrails into the local PPT skill; do not import the renderer/Knowledge Graph pipeline. |
+| `Community-Access/accessibility-agents@161c60c7` | PowerPoint accessibility skill; MIT | Add metadata, section navigation, and notes/transcript fallback checks; preserve local `not_verified` boundaries. |
+| `iOfficeAI/OfficeCLI@459b1a47` | Office workflow inventory; Apache-2.0 | Keep as conditional comparison only; no host integration or runtime install. |
+| `emilkowalski/skills@de33dbed` | Animation-purpose and reduced-motion guidance; MIT | No direct import; the existing junior-physics animation skill already has an equivalent teaching-benefit gate. |
+| `tirth8205/code-review-graph@1a010dee` | Graph-assisted review workflow; MIT | Defer because it requires graph-specific tools and is not a drop-in review instruction set. |
+
+Repositories without a clearly declared license were not copied; examples rejected for reuse in this pass include `charon-fan/agent-playbook` and `jcurbelo/skills`. No external candidate is allowed to override `skills.json`, generated output, host projection, or the repository's fail-closed evidence rules.
+
 ## Verification
 
 - `build.ps1`: passed.
@@ -61,6 +75,13 @@ These inputs are versioned repository source, not runtime-generated skills. The 
 - Scope: host-side skill authoring validator only; it is not a repository runtime dependency and no requirements/lock file changed.
 - Encoding: invoke the validator with `python -X utf8` on Windows because its unqualified `Path.read_text()` otherwise inherits GBK and rejects valid UTF-8 skill text.
 - Rollback: `python -m pip uninstall PyYAML`; this does not affect generated skills or repository runtime behavior.
+
+### Benchmark-driven maintenance delta
+
+- `custom-powerpoint-accessibility`: added title/language metadata, long-deck section names, and speaker-notes/transcript fallback checks, while explicitly separating artifact evidence from player or assistive-technology behavior.
+- `custom-teacher-courseware-ppt`: added prerequisite/target/exit-ticket alignment, one concrete scaffold plus extension guidance, and an explicit no-invented-alignment rule when the textbook or standard is absent.
+- No skill was deleted, no vendor/import was changed, and no runtime or host dependency was added.
+- Current validation: system `quick_validate.py` 13/13; Core 189/189; override/audit/projection contracts 130/130; skill integrity 107.
 
 ## Rollback
 

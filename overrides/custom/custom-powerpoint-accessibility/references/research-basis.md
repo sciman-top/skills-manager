@@ -9,6 +9,6 @@ Use current first-party Microsoft guidance as authority. Community material is a
 
 ## Community Comparison
 
-- `Community-Access/accessibility-agents`, revision `0872b4a7763145fc0e5847d8357fb446a857c683`: https://github.com/Community-Access/accessibility-agents/tree/0872b4a7763145fc0e5847d8357fb446a857c683
+- `Community-Access/accessibility-agents`, revision `161c60c7493ad657f371ad8f91253d33c3b12044`, `codex-skills/powerpoint-accessibility/SKILL.md`: https://github.com/Community-Access/accessibility-agents/blob/161c60c7493ad657f371ad8f91253d33c3b12044/codex-skills/powerpoint-accessibility/SKILL.md
 
-The community repository informed the choice to keep accessibility review as a focused validator. Its full plugin and agent surface is not imported because this repository already has document, presentation, browser, and Windows execution capabilities.
+The community repository informed the choice to keep accessibility review as a focused validator and highlighted presentation title/language, long-deck section names, and speaker notes as a transcript fallback. Its full plugin, XML rule set, and agent surface are not imported because this repository already has document, presentation, browser, and Windows execution capabilities, and artifact inspection must not be overstated as assistive-technology verification.
