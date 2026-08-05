@@ -1,0 +1,6 @@
+interface:
+  display_name: "Teacher Courseware PPT"
+  short_description: "Design classroom-ready teaching courseware"
+  default_prompt: "Use $custom-teacher-courseware-ppt to design this classroom-ready slide deck with an aligned lesson arc, misconceptions, differentiation, and exit check."
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Creator Publishing"
+  short_description: "Shape Chinese long-form publishing workflows"
+  default_prompt: "Use $custom-creator-publishing to turn this material into a source-backed, platform-ready Chinese long-form draft without publishing it."
+policy:
+  allow_implicit_invocation: true

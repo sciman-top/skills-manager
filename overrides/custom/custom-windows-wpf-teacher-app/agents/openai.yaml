@@ -1,0 +1,6 @@
+interface:
+  display_name: "Windows WPF Teacher App"
+  short_description: "Engineer Windows-first classroom applications"
+  default_prompt: "Use $custom-windows-wpf-teacher-app to design or implement this Windows-first teacher application around classroom, touch, projector, recovery, and local-data requirements."
+policy:
+  allow_implicit_invocation: true

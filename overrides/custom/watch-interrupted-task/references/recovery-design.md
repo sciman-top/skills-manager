@@ -11,6 +11,7 @@ Read this reference for Goal supervision, retries, shared-checkout arbitration, 
 5. Treat checkpoints as proved state, not prose milestones. Each checkpoint records the last verified outcome, pending first-unproved step, affected write domain, and receipt key.
 6. Treat completion as a verification decision. Re-run the required acceptance evidence before marking the Goal complete.
 7. Mark blocked only when the same blocker appears in three consecutive Goal turns, is genuinely impassable without user/external change, and no meaningful in-scope progress remains.
+8. Separate Goal completion from heartbeat cleanup. `goal_satisfied + GoalStatus=active` requests `mark_complete` and keeps the heartbeat active. Cleanup is eligible only on a later tick with `GoalStatus=none|complete`, no active turn, fresh positive evidence, checkpoint/receipt identity, and `external_effect_state=none|safe`.
 
 ## Recovery evidence and idempotency
 
@@ -71,5 +72,19 @@ The fleet supervisor manages only canonical target heartbeat metadata:
 - migrate an older matching watch prompt to the trusted target body digest;
 - preserve existing cadence/notification settings;
 - delete only after verified acceptance, terminal Goal state when applicable, no active turn, and a matching cleanup receipt.
+
+The fleet heartbeat cannot establish direct user authority to delete an automation, so fleet-side delete is fail-closed. A direct user lifecycle command must perform deletion after the terminal receipt is visible. Lifecycle keywords inside negation, questions, quoted text, documentation, or code are not authorization; current-task commands cannot target a different session unless the user explicitly names its target id.
+
+## Fleet shutdown after every monitored task stops
+
+This power action is opt-in and separate from ordinary fleet watch. The direct user must create or update the supervisor with the canonical shutdown-armed fleet prompt. A scheduled tick, target task, stale lifecycle command, or self-consistent caller-authored prompt cannot arm it.
+
+The target task owns stop truth. Goal presence does not change fleet aggregation: a Goal task follows its Goal Contract and emits a stopped receipt only after its host AI stops; a non-Goal task emits one after its own stop decision. Do not encode a finite allowlist of stop causes. Any stable `stop_reason` qualifies when fresh evidence says `task_stopped=true`, `recovery_pending=false`, there is no active business turn or `next_retry_at`, external-effect state is safe/none, and checkpoint plus receipt are present. Known recovery and uncertain boundaries override a contradictory stopped flag and never qualify: `running`, `resume_eligible`, `continuation_gap`, `recoverable_task_failure`, `strategy_drift`, `verification_failed`, `peer_busy`, `stale_policy_running`, `unknown`, `soft_guard_only`, unverified `goal_satisfied`, and transient provider/transport failures including 408/429/502/503/504.
+
+Use `Get-WatchFleetShutdownDisposition.ps1` to canonicalize the non-empty monitored set and compute `snapshot_key` plus `shutdown_receipt_key`. The exact same snapshot must be observed on two consecutive ticks. Immediately re-list and re-read the monitored set before execution; any drift cancels the tick. Schedule only `shutdown.exe /s /t 120 /c "watch-interrupted-task: all monitored tasks stopped"`, never `/f`, and surface `shutdown /a` in the notification. Exit code 0 is the scheduling receipt. Reuse that receipt forever for the same snapshot; failure or unknown effect stops without blind replay.
+
+## Hook and code-mode boundary
+
+The cross-thread guard is defense in depth. Native typed tool calls are evaluated against their structured contract. Free-form code-mode cannot be safely reduced to a complete sequence of trusted mutations, so any script containing cross-thread send, handoff, automation mutation, or aliased/dynamic tool dispatch is denied as a whole; placing a read-only call first does not make a later mutation safe. Installation and static simulation establish only `static_configuration_ready`; a changed non-managed hook remains `installed_untrusted/soft_guard_only` until the user reviews and trusts its exact hash with `/hooks` in a fresh session.
 
 Before mutation, compare fresh host identity, target id, policy revision, trusted body digest, and existing status. Skip conflicts. The supervisor never performs business work in another task and never mutates its own dual-role automation from a scheduled tick.

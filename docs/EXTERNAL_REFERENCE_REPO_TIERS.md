@@ -69,9 +69,11 @@ Default operational commands:
 
 Meaning:
 
-- first command: refresh the default `core` set without creating new clones
+- first command: fetch the default `core-default` set without creating new clones; it updates remote refs but does not advance a behind checkout
 - second command: bootstrap missing `core` repos, then fetch them
 - third command: bootstrap or refresh the `secondary` tier without disturbing the stable `core-default` latest report
+
+For each successful fetch, the report distinguishes the fetched upstream revision from the local checkout. `remote refs current=true` means the fetch completed; only `working tree matches upstream=true` means the checkout itself is current. `consumable revision` is the full local `HEAD` that audits may safely cite. Omit `-FetchOnly` only when intentionally advancing a clean checkout with `pull --ff-only`.
 
 ## 5. Core tier
 
@@ -113,7 +115,7 @@ Current local state on this machine as of `2026-07-06`:
 | Repo / Source | Why it belongs in secondary | Refresh | Relation to `skills.json` |
 | --- | --- | --- | --- |
 | `modelcontextprotocol/servers` | Official examples are useful for implementation checks but do not define the MCP protocol or catalog truth | Monthly or before server packaging changes | Reference-only examples; keep outside default refresh |
-| `vercel-labs/agent-skills` | Reused high-quality engineering skills; already part of runtime truth | Monthly or before frontend/React guidance changes | Keep in `skills.json`; secondary shelf candidate |
+| `vercel-labs/agent-skills` | Engineering skills with repeated local runtime reuse; already part of runtime truth | Monthly or before frontend/React guidance changes | Keep in `skills.json`; secondary shelf candidate |
 | `obra/superpowers` | Reused workflow/meta-skills; already part of runtime truth | Monthly or before process/governance changes | Keep in `skills.json`; secondary shelf candidate |
 | `wshobson/agents` | Highest current multi-skill import density outside primary vendors | Monthly or before Python/backend workflow changes | Keep current imports; secondary shelf candidate |
 | `mattpocock/skills` | Repeated planning/productivity imports with clear reuse value | Monthly or before planning workflow changes | Keep current imports; secondary shelf candidate |

@@ -63,13 +63,13 @@ M0/M0.2/M0.3 maintenance design planning package 为 11/11 `repo_verified`；M1 
 
 ## Agent workflow advisory runtime checklist
 
-- [x] `SMV-AWA-001` 冻结 user/host/repo/native runtime 分责、TaskGraph/Radar/FailurePacket v1 和 P6/host/live 边界。
-- [x] `SMV-AWA-002` 实现 pure TaskGraph、RadarSnapshot 与 FailurePacket validators，覆盖 DAG/Radar/redaction 负例。
-- [x] `SMV-AWA-003` 实现 deterministic waves、parallel admission、三档 soft anchor、Luna max 用户 override 和 bounded escalation/fail-closed。
+- [x] `SMV-AWA-001` 冻结 user/host/repo/native runtime 分责、TaskGraph/FailurePacket v1、RadarSnapshot v2 和 P6/host/live 边界。
+- [x] `SMV-AWA-002` 实现 canonical write path、completion receipt、Radar upstream freshness/non-empty/observation-only 与 FailurePacket correction validators。
+- [x] `SMV-AWA-003` 实现 one-group barrier waves、parallel admission、三档 host proposal/local outcome validation 和 bounded escalation/readmission。
 - [x] `SMV-AWA-004` 接入 PS7 `agent-plan/agent-validate`，真实 bundle envelope 固定 provider/native/write counters 0。
 - [x] `SMV-AWA-005` 建立 verifier/negative tests、产品/根/README/evidence 同步并以唯一 full gate 收口。
 
-该 adjacent track 为 5/5 `repo_verified / repo_advisory_only`：只证明仓库合同与 CLI。独立 host receipt 的早期观察包含 Sol xhigh/Sol medium/Terra high 子代理、fresh CLI host load、手工与首个 scheduled Radar snapshot；当前三档配置已投影，但 Luna 真实 spawn 未执行，仍仅为 `host_evaluation_partial_pass`。它不证明任意项目会自动委派、未来 scheduled run 永久可靠、模型策略有普遍净收益或业务 `live_accepted`。宿主 AI 继续负责语义 TaskGraph、并发拉起、模型/effort 和结果综合；M1 仍为 `collecting (0/10)`，P6 hold。
+该 adjacent track 为 5/5 `repo_verified / repo_advisory_only`：只证明仓库合同与 CLI。当前宿主状态为 `host_evaluation_partial`：Luna max 已通过 `codex exec --ephemeral --sandbox read-only` 的真实 provider/model 探针，但 collaboration spawn surface 尚不可用；Sol spawn 本轮遇到 429，历史 v1 Radar run 不满足 v2 revalidation，且未用 Terra 恢复第四档。它不证明任意项目必然自动委派、未来 scheduled run 永久可靠、模型策略有普遍净收益或业务 `live_accepted`。
 
 ## Typed-core Operation Contract checklist
 

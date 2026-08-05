@@ -422,28 +422,35 @@ candidate 集成顺序固定为：验证 candidate 的 base 与 declared write s
 TaskGraph
   task_id / goal / inputs[] / outputs[]
   depends_on[] / risk / ambiguity / parallelizable
-  exact_write_set[] / external_state[]
+  exact_write_set[] / coordination_keys[] / external_state[]
   verification[] / result_owner / integration_order / stop_condition
+  completion_receipt: task_id / base_revision / status=verified / verification_receipt
 
-ModelPolicy
-  radar_snapshot_id / captured_at / expires_at
+HostModelProposal
+  task_id / requested_tier / rationale / user_override
+  selection_semantics=host_proposal_validation_only
+  comparable local outcome: pair / base / gate / rework / cost / duration / sampled_at
+
+RadarSnapshot v2
+  radar_snapshot_id / captured_at / source_updated_at / expires_at
   model / reasoning_effort / host_availability
   score / estimated_cost / estimated_duration / sample_count / confidence
-  fallback / escalation_trigger / user_override
+  raw_hash / entries[]; policy_overrides forbidden
 
 FailurePacket
-  base_revision / task_id / attempted_model / attempted_effort
+  issue_id / base_revision / task_id / attempted_model / attempted_effort
+  attempt_count / escalation_count / correction_summary
   commands[] / failures[] / verified_facts[] / unresolved_questions[]
   artifacts[] / exact_write_set[] / next_recommendation
 ```
 
 默认模型档位是可覆盖的三个软锚点：`Sol xhigh = gpt-5.6-sol + xhigh` 用于承重需求澄清、架构/重构、跨服务生产 RCA、高价值高风险审查和最终裁决；`Sol medium = gpt-5.6-sol + medium` 用于一般实现、日常排障、中等复杂度审查和集成准备；用户偏好的 `Luna max = gpt-5.6-luna + max` 是 routine/default 档，用于边界清楚、重复度高、可独立验证的 CRUD/SQL/单测/文档/机械变换。model ID 不是永久白名单；名称不存在、宿主不可用或 Radar 过期时，回退宿主当前官方/default model，并记录实际值与 override reason，而不是猜测等价模型或修改配置。Terra Radar 条目只能作为外部观察，不能恢复为项目 tier。
 
-并行 admission 必须同时满足依赖完成、base revision 固定、write set 互斥或完全只读、外部写入已声明、candidate 可独立验证/丢弃、integration owner/order 明确。共享 file/config/lock/source-generated seam、schema/migration/backfill、Git index/ref、同一外部对象和内容依赖任务默认串行；最终集成、完整门禁和 truth closeout 始终串行。
+并行 admission 必须同时满足依赖完成且有同 revision 的 verified receipt、receipt 与 completed list 完全对应、base revision 固定、Windows-safe canonical repo-relative write set 互斥或完全只读、外部写入已声明、candidate 可独立验证/丢弃、integration owner/order 明确。路径比较统一分隔符/大小写并阻断相等、ancestor/descendant 与 ADS/invalid path；high-risk/high-ambiguity、共享 seam、schema/migration、Git index/ref、同一外部对象和内容依赖任务默认串行。
 
-升级状态机固定为：初始 route -> 根因诊断后一次 corrected retry -> 若任务定义/上下文不足则补证据或重切片 -> 仅在模型能力不足时 `Luna max -> Sol medium -> Sol xhigh` -> 同一 `issue_id` 第二次失败后 clarify/re-plan -> 两次升级或承重风险由 supervisor 串行接管。缺工具、权限、凭据、生产授权或用户产品决定时 fail-closed，不能通过换模型绕过；未知或已移除 tier 也必须回 supervisor。每次换档必须携带 `FailurePacket`；禁止同 prompt 无限重试或在运行中的 agent 内无审计热切换。
+升级状态机固定为：初始 route -> 根因诊断后一次带 correction evidence 的 corrected retry -> task/context/tool 第二次失败由 supervisor 串行接管 -> 仅 capacity 可 `Luna max -> Sol medium -> Sol xhigh` -> 两次升级后 takeover。corrected retry/tool reassignment 返回 `parallel_allowed=false`，重新通过 admission 才能并发。缺工具、权限、凭据、生产授权或用户产品决定时 fail-closed。
 
-Radar 数据通过独立、显式 refresh 形成不可变 snapshot：记录 source、captured_at、model、reasoning_effort、score、estimated cost/duration、sample count、confidence、raw hash 和 expires_at。snapshot 只影响建议；本地同类任务的 gate、返工、耗时、实际费用和人工纠正优先于公开榜单。决策保持 Pareto 多目标，不把智力、费用、时间和风险压成永久单分数。
+Radar 数据通过独立、显式 refresh 形成不可变 v2 snapshot：记录 source、captured_at、source_updated_at、model、reasoning_effort、score、estimated cost/duration、sample count、confidence、raw hash 和 expires_at，entries 非空且不得携带 policy override。source age 超过 36 小时即 fail-closed。snapshot 只影响宿主 proposal 的证据验证；本地结果只有 pair/base/freshness/gate/rework/cost/duration 完整时才优先。决策保持 Pareto 多目标，不把智力、费用、时间和风险压成永久单分数。
 
 ### 3.12 `TypedCoreBoundary`
 
@@ -728,9 +735,9 @@ PoC acceptance：同一 corpus 的结构化输出/exit/finding parity；至少�
 
 ### `ADR-SMV-029 Runtime-independent agent workflow advisory contracts`
 
-决定：在不改变 ADR-SMV-026 ownership 的前提下，把 M0.3 文档态合同实现为三个窄 seam：`Domain/AgentWorkflow.ps1` 校验 TaskGraph/RadarSnapshot/FailurePacket v1；`Application/ModelAndAgentPolicy.ps1` 生成拓扑 wave、并行 admission、三档 soft-anchor proposal 和 bounded escalation；`Commands/AgentWorkflow.ps1` 只读取仓内 JSON 并输出 `repo_advisory_only` envelope。`agent-plan/agent-validate` 的 effect counters 固定为 0，实际 spawn/wait/steer/worktree/model application 继续由 Codex native runtime 执行。
+决定：在不改变 ADR-SMV-026 ownership 的前提下，把 M0.3 文档态合同实现为三个窄 seam：`Domain/AgentWorkflow.ps1` 校验 TaskGraph/FailurePacket v1 与 RadarSnapshot v2；`Application/ModelAndAgentPolicy.ps1` 生成 one-group barrier waves、带 completion receipt 的并行 admission、三档 host proposal validation 和 bounded escalation；`Commands/AgentWorkflow.ps1` 只读取仓内 JSON 并输出 `repo_advisory_only` envelope。`agent-plan/agent-validate` 的 effect counters 固定为 0，实际 spawn/wait/steer/worktree/model application 继续由 Codex native runtime 执行。
 
-理由：仅文档无法机械阻止循环依赖、shared write set、stale Radar、无 FailurePacket 升档或完成真值越级；引入 scheduler/provider runtime 又会复制宿主能力。小型 plain-object contract 能复用既有 OperationPlan finding/redaction helper、PS7 bundle 和 full gate，并为未来 typed-core seam 保持稳定 JSON 边界。
+理由：仅文档无法机械阻止循环依赖、伪造 completed task、路径父子重叠、serial/high-risk 混 wave、stale upstream Radar、空 local outcome 屏蔽失败、无 FailurePacket 升档或 corrected retry 自动并发；引入 scheduler/provider runtime 又会复制宿主能力。小型 plain-object contract 能复用既有 OperationPlan finding/redaction helper、PS7 bundle 和 full gate，并为未来 typed-core seam 保持稳定 JSON 边界。
 
 退役/扩展：Codex 原生若公开等价的可验证 TaskGraph/admission/model proposal/failure trace，本 seam 缩减为 compatibility verifier 或删除；真实 M1 replay 无相对 native-only 净收益时同样删除。Radar live fetch、跨进程 coordinator、provider routing 或 host config mutation 不在本 ADR 内，只有 P6 admission 和用户新授权后才可评估。
 

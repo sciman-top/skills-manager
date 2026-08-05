@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "reviewed_at": "2026-08-06",
+  "patches": [
+    {
+      "name": "agent-skills-2-skills-code-review-and-quality",
+      "upstream_repo": "https://github.com/addyosmani/agent-skills.git",
+      "upstream_path": "skills/code-review-and-quality",
+      "base_revision": "7829ffd90d973b6325f5f12f1b1226dcace74443",
+      "reviewed_revision": "7829ffd90d973b6325f5f12f1b1226dcace74443",
+      "license": "MIT",
+      "local_delta_reason": "Replace the broader upstream package with a review-only, evidence-first workflow and Codex invocation metadata."
+    },
+    {
+      "name": "grill-with-docs",
+      "upstream_repo": "https://github.com/mattpocock/skills.git",
+      "upstream_path": "skills/engineering/grill-with-docs",
+      "base_revision": "2ab958093e83e0ec752e6c1c5932da465bf23e0c",
+      "reviewed_revision": "c553e932f0606df0d52ee207b41a24d57a2beafb",
+      "license": "MIT",
+      "local_delta_reason": "Narrow implicit activation to explicit design grilling and preserve local domain-document and Codex invocation boundaries."
+    },
+    {
+      "name": "setup-matt-pocock-skills",
+      "upstream_repo": "https://github.com/mattpocock/skills.git",
+      "upstream_path": "skills/engineering/setup-matt-pocock-skills",
+      "base_revision": "391a2701dd948f94f56a39f7533f8eea9a859c87",
+      "reviewed_revision": "c553e932f0606df0d52ee207b41a24d57a2beafb",
+      "license": "MIT",
+      "local_delta_reason": "Rebase current tracker/spec terminology while preserving the repository's shared AGENTS.md and CLAUDE.md wrapper compatibility rules plus explicit-only Codex metadata."
+    }
+  ]
+}

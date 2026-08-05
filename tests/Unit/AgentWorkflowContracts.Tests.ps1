@@ -66,8 +66,12 @@ Describe 'Agent workflow advisory contracts' {
         Assert-AgentWorkflowFunction 'Test-AgentParallelAdmission'
         $fixture = Get-AgentWorkflowFixture 'valid-request.json'
 
-        $parallel = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover')
-        $integration = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('integrate') -CompletedTaskIds @('implement', 'document')
+        $parallel = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $fixture.completion_receipts
+        $integrationReceipts = @(
+            [pscustomobject]@{ task_id = 'implement'; base_revision = '84cb53aa'; status = 'verified'; verification_receipt = 'receipt:implement' },
+            [pscustomobject]@{ task_id = 'document'; base_revision = '84cb53aa'; status = 'verified'; verification_receipt = 'receipt:document' }
+        )
+        $integration = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('integrate') -CompletedTaskIds @('implement', 'document') -CompletedTaskReceipts $integrationReceipts
 
         $parallel.pass | Should Be $true
         $parallel.mode | Should Be 'isolated_parallel'
@@ -87,17 +91,90 @@ Describe 'Agent workflow advisory contracts' {
         }
     }
 
+    It 'requires verified completion receipts and rejects selected or unknown completed tasks' {
+        $fixture = Get-AgentWorkflowFixture 'valid-request.json'
+        $missingReceipt = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover')
+        @($missingReceipt.findings | Where-Object code -eq 'completion_receipt_missing').Count | Should Be 1
+
+        $unknownReceipt = @([pscustomobject]@{ task_id = 'ghost'; base_revision = '84cb53aa'; status = 'verified'; verification_receipt = 'receipt:ghost' })
+        $unknown = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('implement', 'document') -CompletedTaskIds @('ghost') -CompletedTaskReceipts $unknownReceipt
+        @($unknown.findings | Where-Object code -eq 'completed_task_unknown').Count | Should Be 1
+
+        $unclaimedReceipts = @($fixture.completion_receipts) + [pscustomobject]@{ task_id = 'document'; base_revision = '84cb53aa'; status = 'verified'; verification_receipt = 'receipt:document' }
+        $unclaimed = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $unclaimedReceipts
+        @($unclaimed.findings | Where-Object code -eq 'completion_receipt_unclaimed').Count | Should Be 1
+
+        $overlapGraph = $fixture.task_graph | ConvertTo-Json -Depth 50 | ConvertFrom-Json
+        $overlapGraph.tasks[0].parallelizable = $true
+        $overlapGraph.tasks[0].exact_write_set = @('src/discovery.ps1')
+        $overlap = Test-AgentParallelAdmission -TaskGraph $overlapGraph -TaskIds @('discover', 'implement') -CompletedTaskIds @('discover') -CompletedTaskReceipts $fixture.completion_receipts
+        @($overlap.findings | Where-Object code -eq 'selected_task_already_completed').Count | Should Be 1
+    }
+
+    It 'canonicalizes repository paths and blocks parent child and high-risk parallel work' {
+        $fixture = Get-AgentWorkflowFixture 'valid-request.json'
+        $graph = $fixture.task_graph | ConvertTo-Json -Depth 50 | ConvertFrom-Json
+        $graph.tasks[1].exact_write_set = @('src/Feature')
+        $graph.tasks[2].exact_write_set = @('src/Feature/a.ps1')
+        $graph.tasks[1].coordination_keys = @()
+        $graph.tasks[2].coordination_keys = @()
+
+        $conflict = Test-AgentParallelAdmission -TaskGraph $graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $fixture.completion_receipts
+        @($conflict.findings | Where-Object code -eq 'write_set_conflict').Count | Should Be 1
+
+        $graph.tasks[2].exact_write_set = @('docs/feature.md')
+        $graph.tasks[1].risk = 'high'
+        $risk = Test-AgentParallelAdmission -TaskGraph $graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $fixture.completion_receipts
+        @($risk.findings | Where-Object code -eq 'high_risk_parallel_forbidden').Count | Should Be 1
+
+        $graph.tasks[1].risk = 'medium'
+        $graph.tasks[1].exact_write_set = @('src/./Feature.ps1')
+        @((Test-AgentTaskGraphContract $graph).findings | Where-Object code -eq 'write_set_path_invalid').Count | Should Be 1
+
+        $graph.tasks[1].exact_write_set = @('src/Feature.ps1:alternate-stream')
+        @((Test-AgentTaskGraphContract $graph).findings | Where-Object code -eq 'write_set_path_invalid').Count | Should Be 1
+    }
+
+    It 'uses one executable group per wave and makes serial tasks an explicit barrier' {
+        $fixture = Get-AgentWorkflowFixture 'valid-request.json'
+        $graph = $fixture.task_graph | ConvertTo-Json -Depth 50 | ConvertFrom-Json
+        $graph.tasks[0].exact_write_set = @('shared/file.ps1')
+        $graph.tasks[1].depends_on = @()
+        $graph.tasks[1].exact_write_set = @('shared/file.ps1')
+        $graph.tasks[1].coordination_keys = @()
+        $graph.tasks[2].depends_on = @()
+        $graph.tasks[2].coordination_keys = @()
+
+        $plan = New-AgentExecutionPlan -TaskGraph $graph
+        @($plan.waves[0].groups).Count | Should Be 1
+        $plan.waves[0].groups[0].mode | Should Be 'sequential'
+        (@($plan.waves[0].groups[0].task_ids) -join ',') | Should Be 'discover'
+    }
+
     It 'validates an immutable fresh Radar snapshot and rejects stale advisory data' {
         Assert-AgentWorkflowFunction 'New-RadarSnapshot'
         Assert-AgentWorkflowFunction 'Test-RadarSnapshotContract'
         $valid = Get-AgentWorkflowFixture 'valid-request.json'
         $stale = Get-AgentWorkflowFixture 'invalid-request.json'
-        $snapshot = New-RadarSnapshot -SnapshotId $valid.radar_snapshot.snapshot_id -Source $valid.radar_snapshot.source -CapturedAt $valid.radar_snapshot.captured_at -ExpiresAt $valid.radar_snapshot.expires_at -RawHash $valid.radar_snapshot.raw_hash -Entries $valid.radar_snapshot.entries
+        $snapshot = New-RadarSnapshot -SnapshotId $valid.radar_snapshot.snapshot_id -Source $valid.radar_snapshot.source -CapturedAt $valid.radar_snapshot.captured_at -SourceUpdatedAt $valid.radar_snapshot.source_updated_at -ExpiresAt $valid.radar_snapshot.expires_at -RawHash $valid.radar_snapshot.raw_hash -Entries $valid.radar_snapshot.entries
 
         (Test-RadarSnapshotContract -Snapshot $snapshot -Now $valid.now).pass | Should Be $true
         $staleResult = Test-RadarSnapshotContract -Snapshot $stale.radar_snapshot -Now $stale.now
         $staleResult.pass | Should Be $false
         @($staleResult.findings | Where-Object code -eq 'radar_snapshot_stale').Count | Should Be 1
+    }
+
+    It 'fails closed for stale source data empty observations and decision fields in Radar' {
+        $snapshot = [pscustomobject]@{
+            schema_version = 2; snapshot_id = 'hostile-radar'; source = 'https://codexradar.com/data/intelligence-efficiency.json'
+            captured_at = '2026-08-05T00:00:00Z'; source_updated_at = '2026-07-01T00:00:00Z'; expires_at = '2026-08-10T00:00:00Z'
+            raw_hash = ('a' * 64); entries = @(); policy_overrides = @([pscustomobject]@{ model_family = 'gpt-5.6-terra' })
+        }
+        $result = Test-RadarSnapshotContract -Snapshot $snapshot -Now '2026-08-06T00:00:00Z'
+        $result.pass | Should Be $false
+        foreach ($code in @('radar_source_stale', 'radar_entries_empty', 'radar_decision_field_forbidden')) {
+            @($result.findings | Where-Object code -eq $code).Count | Should Be 1
+        }
     }
 
     It 'keeps model routing host-owned and gives the user override priority across three soft anchors' {
@@ -140,6 +217,36 @@ Describe 'Agent workflow advisory contracts' {
         $result.advisory_only | Should Be $true
     }
 
+    It 'does not let malformed local outcomes hide Radar or missing pair failures' {
+        $fixture = Get-AgentWorkflowFixture 'valid-request.json'
+        $fixture.radar_snapshot.entries = @($fixture.radar_snapshot.entries | Where-Object model_family -ne 'gpt-5.6-luna')
+        $result = New-ModelPolicyProposal -TaskId 'implement' -RequestedTier 'luna_max' -Rationale 'Host proposal.' -RadarSnapshot $fixture.radar_snapshot -HostAvailablePairs @() -LocalOutcomes @([pscustomobject]@{}) -Now $fixture.now
+        $result.selected_tier | Should Be 'host_default'
+        $result.fallback_reason | Should Match 'local_outcome_invalid|radar_pair_missing'
+        $result.selection_semantics | Should Be 'host_proposal_validation_only'
+
+        $validOutcome = $fixture.model_proposals[0].local_outcomes[0]
+        $invalidTime = New-ModelPolicyProposal -TaskId 'implement' -RequestedTier 'luna_max' -Rationale 'Host proposal.' -RadarSnapshot $fixture.radar_snapshot -HostAvailablePairs @() -LocalOutcomes @($validOutcome) -Now 'not-a-time'
+        $invalidTime.selected_tier | Should Be 'host_default'
+        $invalidTime.fallback_reason | Should Match 'local_outcome_invalid'
+        @($invalidTime.evidence_sources.local.rejected_findings | Where-Object code -eq 'local_outcome_evaluation_time_invalid').Count | Should Be 1
+    }
+
+    It 'accepts a serial-only request and validates every model proposal against the TaskGraph' {
+        $fixture = Get-AgentWorkflowFixture 'valid-request.json'
+        $fixture.requested_parallel_task_ids = @()
+        (Test-AgentWorkflowRequest $fixture).pass | Should Be $true
+
+        $fixture.model_proposals += ($fixture.model_proposals[0] | ConvertTo-Json -Depth 20 | ConvertFrom-Json)
+        $fixture.model_proposals[0].task_id = 'missing-task'
+        $fixture.model_proposals[0].rationale = ''
+        $fixture.model_proposals[1].task_id = 'missing-task'
+        $invalid = Test-AgentWorkflowRequest $fixture
+        foreach ($code in @('model_proposal_task_unknown', 'model_proposal_duplicate', 'model_proposal_rationale_required')) {
+            @($invalid.findings | Where-Object code -eq $code).Count | Should BeGreaterThan 0
+        }
+    }
+
     It 'requires a FailurePacket before a model tier can change' {
         Assert-AgentWorkflowFunction 'New-AgentFailurePacket'
         Assert-AgentWorkflowFunction 'Test-AgentFailurePacketContract'
@@ -157,7 +264,11 @@ Describe 'Agent workflow advisory contracts' {
         (Get-AgentEscalationDecision -FailurePacket $base).action | Should Be 'corrected_retry'
         $base.failure_kind = 'context'
         (Get-AgentEscalationDecision -FailurePacket $base).action | Should Be 'rescope_task_graph'
-        $base.failure_kind = 'capacity'; $base.attempt_count = 2
+        $base.attempt_count = 2
+        (Get-AgentEscalationDecision -FailurePacket $base).action | Should Be 'supervisor_takeover'
+        $base.failure_kind = 'tool'
+        (Get-AgentEscalationDecision -FailurePacket $base).action | Should Be 'supervisor_takeover'
+        $base.failure_kind = 'capacity'
         $lunaEscalation = Get-AgentEscalationDecision -FailurePacket $base
         $lunaEscalation.action | Should Be 'replan_and_escalate'
         $lunaEscalation.next_tier | Should Be 'sol_medium'
@@ -169,6 +280,20 @@ Describe 'Agent workflow advisory contracts' {
         (Get-AgentEscalationDecision -FailurePacket $base).action | Should Be 'fail_closed'
         $base.failure_kind = 'capacity'; $base.attempt_count = 4; $base.escalation_count = 2; $base.attempted_tier = 'sol_xhigh'
         (Get-AgentEscalationDecision -FailurePacket $base).action | Should Be 'supervisor_takeover'
+    }
+
+    It 'rejects contradictory escalation counts and uncorrected retries' {
+        $packet = New-AgentFailurePacket -IssueId 'issue-bad' -TaskId 'implement' -BaseRevision '84cb53aa' -FailureKind capacity -AttemptCount 1 -EscalationCount 2 -AttemptedTier luna_max -Failures @('incomplete')
+        $invalid = Test-AgentFailurePacketContract $packet
+        @($invalid.findings | Where-Object code -eq 'escalation_count_inconsistent').Count | Should Be 1
+        @($invalid.findings | Where-Object code -eq 'correction_evidence_required').Count | Should Be 1
+        (Get-AgentEscalationDecision $packet).action | Should Be 'supervisor_review'
+
+        $corrected = New-AgentFailurePacket -IssueId 'issue-good' -TaskId 'implement' -BaseRevision '84cb53aa' -FailureKind capacity -AttemptCount 1 -EscalationCount 0 -AttemptedTier luna_max -Commands @('focused test') -Failures @('incomplete') -VerifiedFacts @('context complete') -CorrectionSummary 'Corrected the missing context.'
+        $decision = Get-AgentEscalationDecision $corrected
+        $decision.action | Should Be 'corrected_retry'
+        $decision.parallel_allowed | Should Be $false
+        $decision.requires_parallel_readmission | Should Be $true
     }
 
     It 'returns zero-write provider-free validate and plan envelopes' {

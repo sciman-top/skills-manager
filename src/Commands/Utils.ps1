@@ -364,6 +364,7 @@ Skills 管理器（中文菜单）
   - 已知道安装命令：用“粘贴命令导入”；想先浏览再挑选：用“选择安装”
   - `add`/`npx` 未指定 `--skill` 时只新增技能库，不会安装整库技能
   - `应用` 默认只 dry-run；只有 `--apply --yes` 才真正写入
+  - `构建生效` 写入仓库外宿主目录前要求 clean Git commit；仅在明确接受风险时使用 `-AllowUnverifiedHostProjection`，receipt 会标记为 unverified override
 
 常用命令：
   .\skills.ps1 发现
@@ -374,6 +375,7 @@ Skills 管理器（中文菜单）
   .\skills.ps1 add <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]
   .\skills.ps1 npx "skills add <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]"
   .\skills.ps1 构建生效
+  .\skills.ps1 构建生效 -AllowUnverifiedHostProjection
   .\skills.ps1 更新 -Plan
   .\skills.ps1 更新 -Upgrade
   .\skills.ps1 锁定

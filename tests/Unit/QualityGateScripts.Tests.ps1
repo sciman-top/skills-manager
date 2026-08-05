@@ -136,24 +136,32 @@ Describe "Quality gate scripts" {
         $raw | Should Match "ReportUntrackedRuntimeArtifacts"
     }
 
-    It "Runs skill integrity and routing after generated sync and before dependency baseline" {
+    It "Runs override governance between skill integrity and routing before dependency baseline" {
         $root = Join-Path $PSScriptRoot "..\.."
         $scriptPath = Join-Path $root "scripts\quality\run-local-quality-gates.ps1"
         $raw = Get-Content -LiteralPath $scriptPath -Raw
 
         $generatedSyncIndex = $raw.IndexOf("generated-sync")
         $skillIntegrityIndex = $raw.IndexOf("skill-integrity")
+        $referenceGovernanceIndex = $raw.IndexOf("reference-governance")
+        $overrideActivationIndex = $raw.IndexOf("override-activation-corpus")
         $skillRoutingIndex = $raw.IndexOf("skill-routing")
         $dependencyBaselineIndex = $raw.IndexOf("dependency-baseline")
 
         $generatedSyncIndex -ge 0 | Should Be $true
         $skillIntegrityIndex -ge 0 | Should Be $true
+        $referenceGovernanceIndex -ge 0 | Should Be $true
+        $overrideActivationIndex -ge 0 | Should Be $true
         $skillRoutingIndex -ge 0 | Should Be $true
         $dependencyBaselineIndex -ge 0 | Should Be $true
         $generatedSyncIndex -lt $skillIntegrityIndex | Should Be $true
-        $skillIntegrityIndex -lt $skillRoutingIndex | Should Be $true
+        $skillIntegrityIndex -lt $referenceGovernanceIndex | Should Be $true
+        $referenceGovernanceIndex -lt $overrideActivationIndex | Should Be $true
+        $overrideActivationIndex -lt $skillRoutingIndex | Should Be $true
         $skillRoutingIndex -lt $dependencyBaselineIndex | Should Be $true
         $raw | Should Match "verify-skill-integrity\.ps1"
+        $raw | Should Match "verify-reference-governance\.ps1"
+        $raw | Should Match "verify-override-skill-activation\.ps1"
         $raw | Should Match "verify-skill-routing\.ps1"
     }
 

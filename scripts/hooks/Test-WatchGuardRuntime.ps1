@@ -134,6 +134,7 @@ $command = if ($null -ne $hook) { [string]$hook.command } else { '' }
 $expectedHash = if ($command -match '(?i)-ExpectedScriptSha256\s+["'']?([0-9a-f]{64})') { $Matches[1].ToLowerInvariant() } else { $null }
 $targetPromptHash = if ($command -match '(?i)-ExpectedTargetPromptSha256\s+["'']?([0-9a-f]{64})') { $Matches[1].ToLowerInvariant() } else { $null }
 $fleetPromptHash = if ($command -match '(?i)-ExpectedFleetPromptSha256\s+["'']?([0-9a-f]{64})') { $Matches[1].ToLowerInvariant() } else { $null }
+$fleetShutdownPromptHash = if ($command -match '(?i)-ExpectedFleetShutdownPromptSha256\s+["'']?([0-9a-f]{64})') { $Matches[1].ToLowerInvariant() } else { $null }
 
 $sourceHookMatches = @()
 try {
@@ -166,7 +167,7 @@ $runtimeShapeMatches = $null -ne $hook -and [string]$hook.eventName -ceq 'preToo
     [string]$hook.handlerType -ceq 'command' -and [string]$hook.matcher -ceq '*'
 $shapeMatches = $runtimeShapeMatches -and $sourceShapeMatches
 $definitionMatches = $hostExists -and -not [string]::IsNullOrWhiteSpace($expectedHash) -and $expectedHash -ceq $hostHash -and
-    $targetPromptHash -match '^[0-9a-f]{64}$' -and $fleetPromptHash -match '^[0-9a-f]{64}$' -and $shapeMatches
+    $targetPromptHash -match '^[0-9a-f]{64}$' -and $fleetPromptHash -match '^[0-9a-f]{64}$' -and $fleetShutdownPromptHash -match '^[0-9a-f]{64}$' -and $shapeMatches
 $configurationReady = $hookMatches.Count -eq 1 -and $enabled -and $trustStatus -ceq 'trusted' -and $definitionMatches -and
     -not [string]::IsNullOrWhiteSpace($currentHash)
 
@@ -183,6 +184,7 @@ $configurationReady = $hookMatches.Count -eq 1 -and $enabled -and $trustStatus -
     expected_script_sha256 = $expectedHash
     target_prompt_sha256 = $targetPromptHash
     fleet_prompt_sha256 = $fleetPromptHash
+    fleet_shutdown_prompt_sha256 = $fleetShutdownPromptHash
     runtime_shape_matches = $runtimeShapeMatches
     source_shape_matches = $sourceShapeMatches
     shape_matches = $shapeMatches

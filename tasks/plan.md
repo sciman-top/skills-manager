@@ -16,7 +16,7 @@
 **powershell_runtime_status**: ps7_only; repo_verified
 **agent_workflow_advisory_track**: agent_workflow_advisory_runtime
 **agent_workflow_advisory_truth**: `tasks/skills-manager-vnext-agent-workflow-advisory.tasks.json`
-**agent_workflow_advisory_status**: 5/5 repo_verified; repo_advisory_only; host_evaluation_partial_pass; live not_run
+**agent_workflow_advisory_status**: 5/5 repo_verified; repo_advisory_only; host_evaluation_partial; Radar v2 revalidation pending; live not_run
 **active_correction_track**: capability_routing_correction
 **correction_task_truth**: `tasks/skills-manager-vnext-capability-routing-correction.tasks.json`
 **correction_status**: repo_verified
@@ -107,12 +107,12 @@ Goal：把 M0.3 的 TaskGraph/model policy 规划推进为 runtime-independent�
 | Order | Task | Slice | Exit checkpoint |
 | ---: | --- | --- | --- |
 | 1 | `SMV-AWA-001` | product/spec boundary | 官方依据、user/host/repo/native runtime 分责、P6/host/live marker 完整 |
-| 2 | `SMV-AWA-002` | domain contracts | TaskGraph/Radar/FailurePacket v1；cycle/expiry/redaction 负例；pure layer |
-| 3 | `SMV-AWA-003` | application policy | deterministic waves；disjoint admission；三档 soft anchor；user override；bounded escalation |
+| 2 | `SMV-AWA-002` | domain contracts | TaskGraph/FailurePacket v1 + RadarSnapshot v2；canonical path/source freshness/redaction 负例；pure layer |
+| 3 | `SMV-AWA-003` | application policy | completion receipt；one-group barrier waves；disjoint admission；三档 host proposal validation；bounded escalation |
 | 4 | `SMV-AWA-004` | PS7 CLI | `agent-plan/agent-validate` 接入 bundle；repo-contained JSON；effect counters 0 |
 | 5 | `SMV-AWA-005` | verifier/closeout | focused + advisory verifier + full gate；evidence/docs/root sync；truth boundary 不越级 |
 
-Execution：宿主先固定 Product Baseline/base revision，再生成 TaskGraph；`agent-validate` 通过后用 `agent-plan` 取得 wave。只读或 exact write set 互斥、依赖已完成、owner/verification/stop condition 齐全的 task 才可由宿主在隔离 worktree 拉起并发；shared file/generated/schema/config/Git/external state/final integration/full gate 串行。模型优先级为 user override → local outcomes → host availability → fresh Radar → host default；FailurePacket 先根因、一次 corrected retry、re-scope，再仅对 capacity 按三档有界升档。权限、凭据、生产授权、未知 tier 和用户决策 fail-closed。
+Execution：宿主先固定 Product Baseline/base revision，再生成 TaskGraph；`agent-validate` 通过后用 `agent-plan` 取得 wave。每 wave 只有一个可执行 group；只读或 canonical exact write set 互斥、依赖有同 revision verified receipt、owner/verification/stop condition 齐全的 task 才可由宿主在隔离 worktree 拉起并发；serial/high-risk/high-ambiguity/shared/generated/schema/config/Git/external/final gate 串行。模型由宿主提案，本仓按 user override → local outcomes → host availability → fresh Radar → host default 校验证据；corrected retry 默认串行，重新 admission 后才可并发。
 
 Verification：`AgentWorkflowContracts.Tests.ps1`、build、真 bundle 的两条 CLI、`verify-agent-workflow-advisory.ps1 -Json`，最后唯一 full gate。5/5 `repo_verified` 不能推出 native scheduler/model call、Radar refresh、host load、M1 sample 或 live accepted；独立 host receipt 只能声明观察到的 partial scope。
 

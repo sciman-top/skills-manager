@@ -1,0 +1,6 @@
+interface:
+  display_name: "Code Review and Quality"
+  short_description: "Review code for concrete risks and gaps"
+  default_prompt: "Use $code-review-and-quality to review the smallest relevant change set and report evidence-backed findings by severity before any summary."
+policy:
+  allow_implicit_invocation: true

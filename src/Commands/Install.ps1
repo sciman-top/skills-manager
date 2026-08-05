@@ -2459,7 +2459,7 @@ function Resolve-TargetDir([string]$path) {
     return (Join-Path $Root $path)
 }
 
-function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, [string]$VerifiedAgentBuildSignature = "") {
+function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, [string]$VerifiedAgentBuildSignature = "", $PromotionContext = $null) {
     return (Invoke-WithMetric "apply_targets" {
         if (-not $SkipPreflight) { Preflight }
         if ($null -eq $cfg) { $cfg = LoadCfg }
@@ -2491,7 +2491,7 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, [string]$Ver
             }
         } @{ command = "应用到ClaudeCodex"; target_count = @($cfg.targets).Count } -NoHost | Out-Null
         try {
-            $projectionResult = Sync-ConfiguredSkillProjection $cfg $VerifiedAgentBuildSignature
+            $projectionResult = Sync-ConfiguredSkillProjection $cfg $VerifiedAgentBuildSignature $PromotionContext
             if ($projectionResult -and -not [bool]$projectionResult.skipped) {
                 $plan = $projectionResult.plan
                 Log ("技能投影已生成：entries={0}, unique={1}, disabled={2}, conflicts={3}, persisted={4}" -f @($plan.skills).Count, @($plan.unique_names).Count, @($plan.disabled).Count, @($plan.conflicts).Count, [bool]$projectionResult.persisted)
@@ -2522,7 +2522,7 @@ function Write-FailureSummary([string]$title, [string[]]$failures, [string]$deta
     }
 }
 
-function 构建生效 {
+function 构建生效([switch]$AllowUnverifiedProjection = $AllowUnverifiedHostProjection) {
     Invoke-WithMetric "build_apply_total" {
         Preflight
         Invoke-PrebuildCheck
@@ -2532,6 +2532,7 @@ function 构建生效 {
         }
         $txn = $null
         $needRollback = $false
+        $promotionBlocked = $false
 
         # Optimization/Migration check
         $cfgRawBeforeOptimize = if (Test-Path $CfgPath) { Get-Content $CfgPath -Raw } else { "" }
@@ -2571,11 +2572,23 @@ function 构建生效 {
                 else {
                     [string](Load-BuildCache)["__agent_build_signature"]
                 }
-                $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight -VerifiedAgentBuildSignature $verifiedAgentBuildSignature
-                if ($syncFailures) { $failures += $syncFailures }
+                $promotionContext = $null
+                try {
+                    $promotionContext = Get-HostProjectionPromotionContext $cfg -AllowUnverified:$AllowUnverifiedProjection
+                }
+                catch {
+                    $promotionBlocked = $true
+                    $failures += ("host-projection-promotion => {0}" -f $_.Exception.Message)
+                    Log ("宿主投影晋级已阻断：{0}" -f $_.Exception.Message) "ERROR"
+                    Write-Host "⚠️ agent/ staging 已保留，但未写入任何仓库外宿主目标。提交并验证当前 revision 后可重新执行构建生效。" -ForegroundColor Yellow
+                }
+                if (@($failures).Count -eq 0) {
+                    $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight -VerifiedAgentBuildSignature $verifiedAgentBuildSignature -PromotionContext $promotionContext
+                    if ($syncFailures) { $failures += $syncFailures }
+                }
             }
             Write-FailureSummary "构建生效部分失败" $failures
-            if ($failures.Count -gt 0) { $needRollback = $true }
+            if ($failures.Count -gt 0 -and -not $promotionBlocked) { $needRollback = $true }
             Write-DryRunMirrorSummary "DRYRUN Robocopy 预览（构建生效）"
         }
         finally {

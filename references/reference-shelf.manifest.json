@@ -193,6 +193,9 @@
       "source_disposition": "reviewed-discovery-candidate",
       "license": "Apache-2.0",
       "review_revision": "7c03c83db8223b050b6569ffbe14cd94e229396e",
+      "reviewed_at": "2026-08-05",
+      "review_evidence": "docs/change-evidence/20260805-override-classification-and-skill-maintenance.md",
+      "activation_trigger": "courseware work is active",
       "review_decision": "reference-only; extract lesson-planning guardrails when courseware work is active",
       "upstream_url": "https://github.com/anthropics/k12-teacher-skills.git",
       "relative_path": "conditional/anthropics-k12-teacher-skills"
@@ -204,6 +207,9 @@
       "source_disposition": "reviewed-discovery-candidate",
       "license": "MIT",
       "review_revision": "161c60c7493ad657f371ad8f91253d33c3b12044",
+      "reviewed_at": "2026-08-05",
+      "review_evidence": "docs/change-evidence/20260805-override-classification-and-skill-maintenance.md",
+      "activation_trigger": "PPTX accessibility review is active",
       "review_decision": "reference-only; compare presentation accessibility checks when PPTX review is active",
       "upstream_url": "https://github.com/Community-Access/accessibility-agents.git",
       "relative_path": "conditional/community-accessibility-agents"
@@ -215,6 +221,9 @@
       "source_disposition": "reviewed-discovery-candidate",
       "license": "Apache-2.0",
       "review_revision": "459b1a473faf33f2f52e697ac6d265a3f67b176a",
+      "reviewed_at": "2026-08-05",
+      "review_evidence": "docs/change-evidence/20260805-override-classification-and-skill-maintenance.md",
+      "activation_trigger": "Office artifact workflow comparison is explicitly requested",
       "review_decision": "reference-only; inspect Office workflow ideas on demand, never imply Codex integration",
       "upstream_url": "https://github.com/iOfficeAI/OfficeCLI.git",
       "relative_path": "conditional/iofficeai-officecli"
@@ -226,6 +235,9 @@
       "source_disposition": "reviewed-discovery-candidate",
       "license": "MIT",
       "review_revision": "de33dbed000212b54400a33767d1e4d03654db2a",
+      "reviewed_at": "2026-08-05",
+      "review_evidence": "docs/change-evidence/20260805-override-classification-and-skill-maintenance.md",
+      "activation_trigger": "visual teaching work needs motion-policy comparison",
       "review_decision": "reference-only; compare animation-purpose and reduced-motion guidance when visual teaching work is active",
       "upstream_url": "https://github.com/emilkowalski/skills.git",
       "relative_path": "conditional/emilkowalski-skills"
@@ -237,6 +249,9 @@
       "source_disposition": "reviewed-discovery-candidate",
       "license": "MIT",
       "review_revision": "1a010deed6c283d4aa1e7e949e78fe3a7bcdfbb3",
+      "reviewed_at": "2026-08-05",
+      "review_evidence": "docs/change-evidence/20260805-override-classification-and-skill-maintenance.md",
+      "activation_trigger": "a graph-tool consumer is approved",
       "review_decision": "defer; graph-tool-dependent review is not a drop-in replacement for the current read-only review patch",
       "upstream_url": "https://github.com/tirth8205/code-review-graph.git",
       "relative_path": "conditional/tirth8205-code-review-graph"

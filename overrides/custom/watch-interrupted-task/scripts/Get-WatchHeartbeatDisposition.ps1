@@ -35,6 +35,7 @@ param(
     [string]$ExternalEffectState = 'unknown',
 
     [switch]$AcceptanceVerified,
+    [switch]$NoActiveTurn,
     [ValidateRange(0, 1000)][int]$ConsecutiveSameBlockCount = 0,
     [switch]$SameBlockingConditionConfirmed,
     [switch]$NoMeaningfulProgressPossible,
@@ -106,13 +107,21 @@ elseif ($State -in @('resume_eligible', 'continuation_gap', 'recoverable_task_fa
     }
 }
 elseif ($State -ceq 'goal_satisfied') {
-    if ($AcceptanceVerified) {
+    if ($GoalStatus -in @('paused', 'blocked')) {
+        $result.reason_code = 'goal_not_terminal'
+    }
+    elseif ($AcceptanceVerified) {
         $result.task_action = 'stop_after_verification'
         $result.goal_action = if ($GoalStatus -ceq 'active') { 'mark_complete' } else { 'none' }
-        $result.automation_action = 'request_supervisor_cleanup'
         $result.mutation_owner = 'target_thread'
-        $result.requires_receipt = $true
-        $result.reason_code = 'acceptance_verified'
+        if ($GoalStatus -in @('none', 'complete') -and $NoActiveTurn -and (Test-RecoveryEvidence)) {
+            $result.automation_action = 'request_supervisor_cleanup'
+            $result.requires_receipt = $true
+            $result.reason_code = 'acceptance_verified_cleanup_ready'
+        }
+        else {
+            $result.reason_code = if ($GoalStatus -ceq 'active') { 'acceptance_verified_goal_completion_pending_cleanup' } else { 'cleanup_evidence_required' }
+        }
     }
     else {
         $result.task_action = 'verify_goal_acceptance'
@@ -135,8 +144,14 @@ elseif ($State -in @('non_transient_failure', 'unknown', 'soft_guard_only')) {
     $result.reason_code = $State
 }
 elseif ($State -ceq 'complete') {
-    $result.automation_action = 'request_supervisor_cleanup'
-    $result.reason_code = 'already_complete'
+    if ($GoalStatus -in @('none', 'complete') -and $AcceptanceVerified -and $NoActiveTurn -and (Test-RecoveryEvidence)) {
+        $result.automation_action = 'request_supervisor_cleanup'
+        $result.requires_receipt = $true
+        $result.reason_code = 'already_complete_cleanup_ready'
+    }
+    else {
+        $result.reason_code = 'cleanup_evidence_required'
+    }
 }
 elseif ($State -ceq 'peer_busy') {
     $result.reason_code = 'peer_busy_retry_later'

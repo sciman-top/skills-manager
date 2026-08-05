@@ -44,6 +44,8 @@ try {
         Invoke-QualityGate 'generated-sync' { & .\tests\check-generated-sync.ps1 -StrictNoGit }
     }
     Invoke-QualityGate 'skill-integrity' { & .\scripts\verify-skill-integrity.ps1 }
+    Invoke-QualityGate 'reference-governance' { & .\scripts\verify-reference-governance.ps1 }
+    Invoke-QualityGate 'override-activation-corpus' { & .\scripts\verify-override-skill-activation.ps1 }
     Invoke-QualityGate 'skill-routing' { & .\scripts\verify-skill-routing.ps1 -ReportPath .\reports\skill-routing\current.json }
     Invoke-QualityGate 'dependency-baseline' { & python .\scripts\verify-dependency-baseline.py --target-repo-root . --require-target-repo-baseline }
     Invoke-QualityGate 'skills-config-contract' { & .\scripts\verify-skills-config.ps1 -Mode enforce }

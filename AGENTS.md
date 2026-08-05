@@ -1,15 +1,15 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
-**全局规则复核**: 9.68
-**最后更新**: 2026-08-05
+**全局规则复核**: 9.69
+**最后更新**: 2026-08-06
 
 ## 1. 当前落点与目标归宿
 - 当前落点：`skills.ps1` 是统一入口，`skills.json` 是 vendor、mapping、target、sync 与 MCP 的单一配置源。
 - 目标归宿：演进为 local-first AI capability curator 与 rule advisor；复用官方 skills/plugins/MCP/规则 surface，不替代宿主 runtime、auth、权限、会话或插件目录。
-- 当前规划真源：`docs/product/`、当前 P5 spec、`tasks/skills-manager-vnext-phase5.tasks.json`；非 Phase 的 Lean Delivery、agent workflow advisory runtime、typed-core shadow PoC 与 PS7-only migration 由 `docs/superpowers/specs/2026-08-03-lean-ai-delivery-maintenance-design.md`、`2026-08-05-agent-workflow-advisory-runtime.md`、`2026-08-05-typed-core-operation-contract-shadow-poc.md`、`2026-08-05-powershell-7-only-runtime-migration.md` 及对应 manifest 承接；P5-local routing/discovery/profile tracks 由各自 2026-08-04 spec/manifest 承接。它们都不构成 P6 admission 或 live acceptance。
-- 当前 Phase：P5 5/5 `repo_verified` 历史真值保留；P5-local maintenance 已退役 lexical task model/ranking，并把 profile-first cold discovery 重构为 `portable catalog/domain purpose -> host adjudication -> deterministic policy`；canonical inventory delta 只生成 ignored handoff，unknown/truncated/runtime-truth hardening 的 deterministic corpus 为 30/30。32-case selection 32/32、8-case cold-load 8/8 仍为 `host_evaluation_partial`，不证明普遍正确、token 优化或 live acceptance。P4 6/6 历史真源继续保留；plugin/MCP install、OAuth、provider/auth/model/sandbox/session mutation、native host mutation 与 live acceptance 仍不在边界。
-- 当前 profile maintenance：advisor 4/4 与 bounded optimization 3/3 均已 `repo_verified`；canary 只消费 host-owned proposal，以显式 token 修改非活动 profile，并要求 receipt/fresh replay/失败回滚。代表回放为 `host_evaluation_partial_pass`；禁止 lexical 自动归类、永久 `active_profile` 切换和无审计宿主写入，普遍维护收益与 live acceptance 未验证。
-- 当前 Lean Delivery maintenance：M0/M0.2/M0.3 11/11 历史 planning truth 保留；adjacent agent workflow advisory 5/5 `repo_verified/repo_advisory_only`，已实现 TaskGraph/Radar/FailurePacket、wave/admission/三档 model/escalation 与 zero-write CLI，本仓仍不 spawn/call provider/fetch Radar/改 host。当前软锚点为 Sol xhigh/Sol medium/Luna max，Luna max 是用户默认；独立 host evaluation 的 Terra-high 子代理与首个 21-entry Radar run 仅为历史 receipt，仍不证明 Luna 真实 spawn、普遍收益或 business live。TC0/TC1 shadow PoC 3/3，PS7-only runtime 已收敛，TC2 `not_started`；M1 仍 `collecting (0/10)`，P6 hold/live not_run。
+- 规划真源为 `docs/product/`、当前 Phase spec/manifest；Lean Delivery、agent workflow advisory、typed-core shadow、PS7-only 与 P5-local tracks 由 `docs/superpowers/specs/` 下对应 dated spec 及 `tasks/` manifest 承接。它们都不构成 P6 admission 或 live acceptance。
+- 当前 Phase：P5 5/5 与 P4 6/6 的 `repo_verified` 历史真值保留；P5-local 已退役 lexical task model/ranking，cold discovery 采用 `portable catalog/domain purpose -> host adjudication -> deterministic policy`。selection/cold-load 回放仍为 `host_evaluation_partial`；plugin/MCP install、OAuth、provider/auth/model/sandbox/session/native host mutation 与 live acceptance 不在边界。
+- profile advisor 4/4 与 bounded canary 3/3 已 `repo_verified`；只消费 host-owned proposal、显式 token 和非活动 profile，要求 receipt/fresh replay/失败回滚，禁止永久切换 `active_profile` 或无审计宿主写入。
+- Lean Delivery M0/M0.2/M0.3 11/11 历史 planning truth 保留；agent workflow advisory 5/5 为 `repo_verified/repo_advisory_only`，本仓不 spawn、调用 provider、联网刷新 Radar 或改 host。三档为 Sol xhigh/Sol medium/Luna max；宿主 spawn/Radar/model receipt 单独验收。TC0/TC1 shadow 3/3、PS7-only 已收敛、TC2 `not_started`；M1 `collecting (0/10)`，P6 hold/live not_run。
 - P5 后进入 maintenance hold；未满足路线图的独立真实失败、消费者证据、债务闭合和用户授权条件，不创建 P6 manifest、不扩 schema major 或治理层。
 
 ## A. 仓库事实与模块边界

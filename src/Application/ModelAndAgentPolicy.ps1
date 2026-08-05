@@ -23,13 +23,30 @@ function Add-AgentAccessConflictFindings($Findings, [object[]]$Items, [string]$C
 }
 
 function Test-AgentParallelAdmission {
-    param($TaskGraph, [string[]]$TaskIds = @(), [string[]]$CompletedTaskIds = @())
+    param($TaskGraph, [string[]]$TaskIds = @(), [string[]]$CompletedTaskIds = @(), [object[]]$CompletedTaskReceipts = @())
     $findings = New-Object System.Collections.Generic.List[object]
     $graphValidation = Test-AgentTaskGraphContract $TaskGraph
     foreach ($finding in @($graphValidation.findings)) { $findings.Add($finding) | Out-Null }
     $taskIndex = Get-AgentTaskIndex $TaskGraph
     $completed = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::OrdinalIgnoreCase)
-    foreach ($taskId in @($CompletedTaskIds)) { $completed.Add([string]$taskId) | Out-Null }
+    foreach ($taskId in @($CompletedTaskIds)) {
+        $completedId = ([string]$taskId).Trim()
+        if (-not $completed.Add($completedId)) { $findings.Add((New-OperationFinding 'completed_task_duplicate' 'error' '$.completed_task_ids' 'Completed task ID is duplicated.')) | Out-Null }
+        if (-not $taskIndex.ContainsKey($completedId.ToLowerInvariant())) { $findings.Add((New-OperationFinding 'completed_task_unknown' 'error' '$.completed_task_ids' 'Completed task is not declared in this TaskGraph.')) | Out-Null }
+    }
+    $receiptIndex = @{}
+    foreach ($receipt in @($CompletedTaskReceipts)) {
+        $receiptTaskId = ([string](Get-OperationObjectProperty $receipt 'task_id')).Trim()
+        $receiptKey = $receiptTaskId.ToLowerInvariant()
+        if ([string]::IsNullOrWhiteSpace($receiptTaskId) -or -not $taskIndex.ContainsKey($receiptKey)) { $findings.Add((New-OperationFinding 'completion_receipt_task_invalid' 'error' '$.completion_receipts' 'Completion receipt task_id must belong to the TaskGraph.')) | Out-Null; continue }
+        if ($receiptIndex.ContainsKey($receiptKey)) { $findings.Add((New-OperationFinding 'completion_receipt_duplicate' 'error' '$.completion_receipts' 'Completion receipt is duplicated.')) | Out-Null; continue }
+        $receiptIndex[$receiptKey] = $receipt
+        if ([string](Get-OperationObjectProperty $receipt 'base_revision') -cne [string](Get-OperationObjectProperty $TaskGraph 'base_revision')) { $findings.Add((New-OperationFinding 'completion_receipt_revision_mismatch' 'error' '$.completion_receipts' 'Completion receipt base_revision does not match the TaskGraph.')) | Out-Null }
+        if ([string](Get-OperationObjectProperty $receipt 'status') -cne 'verified') { $findings.Add((New-OperationFinding 'completion_receipt_unverified' 'error' '$.completion_receipts' 'Completion receipt status must be verified.')) | Out-Null }
+        if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $receipt 'verification_receipt'))) { $findings.Add((New-OperationFinding 'completion_receipt_evidence_missing' 'error' '$.completion_receipts' 'Completion receipt requires verification evidence.')) | Out-Null }
+    }
+    foreach ($completedId in @($completed)) { if (-not $receiptIndex.ContainsKey($completedId.ToLowerInvariant())) { $findings.Add((New-OperationFinding 'completion_receipt_missing' 'error' '$.completion_receipts' ('Verified completion receipt is missing for task: {0}' -f $completedId))) | Out-Null } }
+    foreach ($receiptTaskId in @($receiptIndex.Keys)) { if (-not $completed.Contains($receiptTaskId)) { $findings.Add((New-OperationFinding 'completion_receipt_unclaimed' 'error' '$.completion_receipts' ('Completion receipt is not declared in completed_task_ids: {0}' -f $receiptTaskId))) | Out-Null } }
     $selected = New-Object System.Collections.Generic.List[object]
     $seen = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::OrdinalIgnoreCase)
     foreach ($taskId in @($TaskIds)) {
@@ -37,21 +54,31 @@ function Test-AgentParallelAdmission {
         $key = ([string]$taskId).ToLowerInvariant()
         if (-not $taskIndex.ContainsKey($key)) { $findings.Add((New-OperationFinding 'parallel_task_unknown' 'error' '$.requested_parallel_task_ids' 'Parallel task is not declared.')) | Out-Null; continue }
         $task = $taskIndex[$key]; $selected.Add($task) | Out-Null
+        if ($completed.Contains([string]$taskId)) { $findings.Add((New-OperationFinding 'selected_task_already_completed' 'error' '$.requested_parallel_task_ids' 'A task cannot be selected and completed in the same admission request.')) | Out-Null }
         if (-not [bool](Get-OperationObjectProperty $task 'parallelizable')) { $findings.Add((New-OperationFinding 'task_not_parallelizable' 'error' ('$.tasks[{0}]' -f $taskId) 'Task is explicitly serial.')) | Out-Null }
+        if ([string](Get-OperationObjectProperty $task 'risk') -eq 'high') { $findings.Add((New-OperationFinding 'high_risk_parallel_forbidden' 'error' ('$.tasks[{0}].risk' -f $taskId) 'High-risk work requires supervisor-owned serial execution.')) | Out-Null }
+        if ([string](Get-OperationObjectProperty $task 'ambiguity') -eq 'high') { $findings.Add((New-OperationFinding 'high_ambiguity_parallel_forbidden' 'error' ('$.tasks[{0}].ambiguity' -f $taskId) 'Highly ambiguous work requires clarification before parallel execution.')) | Out-Null }
         foreach ($dependency in @((Get-OperationObjectProperty $task 'depends_on'))) { if (-not $completed.Contains([string]$dependency)) { $findings.Add((New-OperationFinding 'dependency_not_completed' 'error' ('$.tasks[{0}].depends_on' -f $taskId) 'Dependency is not completed.')) | Out-Null } }
         if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $task 'result_owner'))) { $findings.Add((New-OperationFinding 'result_owner_required' 'error' ('$.tasks[{0}].result_owner' -f $taskId) 'Parallel tasks require a result owner.')) | Out-Null }
         if (@((Get-OperationObjectProperty $task 'verification')).Count -eq 0) { $findings.Add((New-OperationFinding 'verification_required' 'error' ('$.tasks[{0}].verification' -f $taskId) 'Parallel tasks require independent verification.')) | Out-Null }
     }
-    if ($selected.Count -lt 2) { $findings.Add((New-OperationFinding 'parallel_batch_too_small' 'error' '$.requested_parallel_task_ids' 'Parallel admission requires at least two tasks.')) | Out-Null }
-    $writeOwners = @{}
+    if ($selected.Count -eq 1) { $findings.Add((New-OperationFinding 'parallel_batch_too_small' 'error' '$.requested_parallel_task_ids' 'Parallel admission requires at least two tasks.')) | Out-Null }
+    $writeDeclarations = New-Object System.Collections.Generic.List[object]
     foreach ($task in @($selected.ToArray())) {
         foreach ($writePath in @((Get-OperationObjectProperty $task 'exact_write_set'))) {
-            $normalized = ([string]$writePath).Replace('\', '/').Trim().ToLowerInvariant()
-            if (-not $writeOwners.ContainsKey($normalized)) { $writeOwners[$normalized] = New-Object System.Collections.Generic.List[string] }
-            $writeOwners[$normalized].Add([string](Get-OperationObjectProperty $task 'task_id')) | Out-Null
+            $normalized = Get-AgentCanonicalWritePath ([string]$writePath)
+            if ($null -ne $normalized) { $writeDeclarations.Add([pscustomobject]@{ task_id = [string](Get-OperationObjectProperty $task 'task_id'); path = $normalized }) | Out-Null }
         }
     }
-    foreach ($writePath in @($writeOwners.Keys)) { if ($writeOwners[$writePath].Count -gt 1) { $findings.Add((New-OperationFinding 'write_set_conflict' 'error' '$.tasks.exact_write_set' ('Parallel tasks share an exact write path: {0}' -f $writePath))) | Out-Null } }
+    for ($i = 0; $i -lt $writeDeclarations.Count; $i++) {
+        for ($j = $i + 1; $j -lt $writeDeclarations.Count; $j++) {
+            $left = $writeDeclarations[$i]; $right = $writeDeclarations[$j]
+            if ($left.task_id -eq $right.task_id) { continue }
+            if ($left.path -eq $right.path -or $left.path.StartsWith($right.path + '/', [StringComparison]::OrdinalIgnoreCase) -or $right.path.StartsWith($left.path + '/', [StringComparison]::OrdinalIgnoreCase)) {
+                $findings.Add((New-OperationFinding 'write_set_conflict' 'error' '$.tasks.exact_write_set' ('Parallel write paths overlap: {0} <> {1}' -f $left.path, $right.path))) | Out-Null
+            }
+        }
+    }
     $coordination = New-Object System.Collections.Generic.List[object]
     $external = New-Object System.Collections.Generic.List[object]
     foreach ($task in @($selected.ToArray())) {
@@ -61,7 +88,7 @@ function Test-AgentParallelAdmission {
     Add-AgentAccessConflictFindings $findings $coordination.ToArray() 'coordination_key_conflict' '$.tasks.coordination_keys' 'Parallel tasks share an exclusive coordination seam'
     Add-AgentAccessConflictFindings $findings $external.ToArray() 'external_state_conflict' '$.tasks.external_state' 'Parallel tasks conflict on external state'
     $result = New-OperationValidationResult $findings.ToArray()
-    $result | Add-Member -NotePropertyName mode -NotePropertyValue $(if ($result.pass) { 'isolated_parallel' } else { 'sequential_required' })
+    $result | Add-Member -NotePropertyName mode -NotePropertyValue $(if ($result.pass -and $selected.Count -eq 0) { 'not_requested' } elseif ($result.pass) { 'isolated_parallel' } else { 'sequential_required' })
     $result | Add-Member -NotePropertyName task_ids -NotePropertyValue @($selected.ToArray() | ForEach-Object { [string](Get-OperationObjectProperty $_ 'task_id') })
     return $result
 }
@@ -80,21 +107,21 @@ function New-AgentExecutionPlan {
         $ready = @($remaining | Where-Object { $task = $taskIndex[$_]; @((Get-OperationObjectProperty $task 'depends_on') | Where-Object { -not $completed.Contains([string]$_) }).Count -eq 0 } | ForEach-Object { $taskIndex[$_] } | Sort-Object { [int](Get-OperationObjectProperty $_ 'integration_order') }, { [string](Get-OperationObjectProperty $_ 'task_id') })
         if ($ready.Count -eq 0) { break }
         $waveNumber++
-        $groups = New-Object System.Collections.Generic.List[object]
-        $parallelGroups = New-Object System.Collections.Generic.List[object]
-        foreach ($task in @($ready)) {
-            $taskId = [string](Get-OperationObjectProperty $task 'task_id')
-            if (-not [bool](Get-OperationObjectProperty $task 'parallelizable')) { $groups.Add([pscustomobject][ordered]@{ mode = 'sequential'; task_ids = @($taskId) }) | Out-Null; continue }
-            $placed = $false
-            foreach ($group in @($parallelGroups.ToArray())) {
-                $candidateIds = @($group.task_ids) + $taskId
-                if ((Test-AgentParallelAdmission -TaskGraph $TaskGraph -TaskIds $candidateIds -CompletedTaskIds @($completed)).pass) { $group.task_ids = $candidateIds; $placed = $true; break }
+        $mustRunSerial = @($ready | Where-Object { -not [bool](Get-OperationObjectProperty $_ 'parallelizable') -or [string](Get-OperationObjectProperty $_ 'risk') -eq 'high' -or [string](Get-OperationObjectProperty $_ 'ambiguity') -eq 'high' } | Select-Object -First 1)
+        $selectedTasks = New-Object System.Collections.Generic.List[object]
+        if ($mustRunSerial.Count -gt 0) { $selectedTasks.Add($mustRunSerial[0]) | Out-Null }
+        else {
+            $receipts = @($completed | ForEach-Object { [pscustomobject]@{ task_id = $_; base_revision = [string](Get-OperationObjectProperty $TaskGraph 'base_revision'); status = 'verified'; verification_receipt = 'planned-prior-wave' } })
+            foreach ($task in @($ready)) {
+                if ($selectedTasks.Count -eq 0) { $selectedTasks.Add($task) | Out-Null; continue }
+                $candidateIds = @($selectedTasks.ToArray() | ForEach-Object { [string](Get-OperationObjectProperty $_ 'task_id') }) + [string](Get-OperationObjectProperty $task 'task_id')
+                if ((Test-AgentParallelAdmission -TaskGraph $TaskGraph -TaskIds $candidateIds -CompletedTaskIds @($completed) -CompletedTaskReceipts $receipts).pass) { $selectedTasks.Add($task) | Out-Null }
             }
-            if (-not $placed) { $parallelGroups.Add([pscustomobject][ordered]@{ mode = 'single_agent'; task_ids = @($taskId) }) | Out-Null }
         }
-        foreach ($group in @($parallelGroups.ToArray())) { if (@($group.task_ids).Count -gt 1) { $group.mode = 'isolated_parallel' }; $groups.Add($group) | Out-Null }
-        $waves.Add([pscustomobject][ordered]@{ wave = $waveNumber; groups = @($groups.ToArray()) }) | Out-Null
-        foreach ($task in @($ready)) { $taskId = [string](Get-OperationObjectProperty $task 'task_id'); $remaining.Remove($taskId) | Out-Null; $completed.Add($taskId) | Out-Null }
+        $selectedIds = @($selectedTasks.ToArray() | ForEach-Object { [string](Get-OperationObjectProperty $_ 'task_id') })
+        $mode = if ($selectedIds.Count -gt 1) { 'isolated_parallel' } else { 'sequential' }
+        $waves.Add([pscustomobject][ordered]@{ wave = $waveNumber; groups = @([pscustomobject][ordered]@{ mode = $mode; task_ids = $selectedIds }) }) | Out-Null
+        foreach ($taskId in @($selectedIds)) { $remaining.Remove($taskId.ToLowerInvariant()) | Out-Null; $completed.Add($taskId) | Out-Null }
     }
     return [pscustomobject][ordered]@{ schema_version = 1; pass = ($remaining.Count -eq 0); decision_owner = 'host_ai'; executor = 'host_native_runtime'; waves = @($waves.ToArray()); findings = @(); provider_calls = 0; native_mutations = 0; writes = 0 }
 }
@@ -106,6 +133,27 @@ function Get-AgentModelTierAnchor([string]$Tier) {
         'luna_max' { return [pscustomobject]@{ tier = 'luna_max'; label = 'Luna max'; model_family = 'gpt-5.6-luna'; reasoning_effort = 'max' } }
         default { return $null }
     }
+}
+
+function Test-AgentLocalOutcomeContract {
+    param($Outcome, $Anchor, [string]$Now)
+    $findings = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Outcome) { return New-OperationValidationResult @((New-OperationFinding 'local_outcome_missing' 'error' '$.local_outcomes' 'Local outcome is required.')) }
+    foreach ($field in @('task_class', 'model_family', 'reasoning_effort', 'base_revision', 'sampled_at')) {
+        if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Outcome $field))) { $findings.Add((New-OperationFinding 'local_outcome_field_missing' 'error' ('$.local_outcomes.{0}' -f $field) 'Comparable local outcome field is required.')) | Out-Null }
+    }
+    if ($null -ne $Anchor -and ([string](Get-OperationObjectProperty $Outcome 'model_family') -cne $Anchor.model_family -or [string](Get-OperationObjectProperty $Outcome 'reasoning_effort') -cne $Anchor.reasoning_effort)) { $findings.Add((New-OperationFinding 'local_outcome_pair_mismatch' 'error' '$.local_outcomes' 'Local outcome must describe the proposed model and reasoning pair.')) | Out-Null }
+    if ((Get-OperationObjectProperty $Outcome 'gate_passed') -isnot [bool]) { $findings.Add((New-OperationFinding 'local_outcome_gate_invalid' 'error' '$.local_outcomes.gate_passed' 'gate_passed must be a boolean.')) | Out-Null }
+    $rework = 0
+    if (-not [int]::TryParse([string](Get-OperationObjectProperty $Outcome 'rework_count'), [ref]$rework) -or $rework -lt 0) { $findings.Add((New-OperationFinding 'local_outcome_rework_invalid' 'error' '$.local_outcomes.rework_count' 'rework_count must be a non-negative integer.')) | Out-Null }
+    foreach ($field in @('actual_cost', 'actual_duration_seconds')) { $number = 0.0; if (-not [double]::TryParse([string](Get-OperationObjectProperty $Outcome $field), [ref]$number) -or $number -lt 0) { $findings.Add((New-OperationFinding 'local_outcome_metric_invalid' 'error' ('$.local_outcomes.{0}' -f $field) 'Local outcome metric must be non-negative.')) | Out-Null } }
+    $sampled = [datetimeoffset]::MinValue; $nowValue = [datetimeoffset]::MinValue
+    $sampledValid = [datetimeoffset]::TryParse([string](Get-OperationObjectProperty $Outcome 'sampled_at'), [ref]$sampled)
+    $nowValid = [datetimeoffset]::TryParse($Now, [ref]$nowValue)
+    if (-not $nowValid) { $findings.Add((New-OperationFinding 'local_outcome_evaluation_time_invalid' 'error' '$.now' 'Local outcome freshness requires a valid ISO-8601 evaluation time.')) | Out-Null }
+    if (-not $sampledValid) { $findings.Add((New-OperationFinding 'local_outcome_sampled_at_invalid' 'error' '$.local_outcomes.sampled_at' 'sampled_at must be ISO-8601.')) | Out-Null }
+    elseif ($nowValid -and ($sampled -gt $nowValue.AddMinutes(5) -or $sampled -lt $nowValue.AddDays(-90))) { $findings.Add((New-OperationFinding 'local_outcome_stale' 'error' '$.local_outcomes.sampled_at' 'Local outcome must be within the 90-day comparison window.')) | Out-Null }
+    return New-OperationValidationResult $findings.ToArray()
 }
 
 function New-ModelPolicyProposal {
@@ -123,23 +171,36 @@ function New-ModelPolicyProposal {
     $anchor = Get-AgentModelTierAnchor $effectiveTier
     $fallbackReasons = New-Object System.Collections.Generic.List[string]
     $radarValidation = Test-RadarSnapshotContract -Snapshot $RadarSnapshot -Now $Now
-    $hasLocal = @($LocalOutcomes).Count -gt 0
+    $validLocalOutcomes = New-Object System.Collections.Generic.List[object]
+    $localFindings = New-Object System.Collections.Generic.List[object]
+    foreach ($outcome in @($LocalOutcomes)) {
+        $validation = Test-AgentLocalOutcomeContract -Outcome $outcome -Anchor $anchor -Now $Now
+        if ($validation.pass) { $validLocalOutcomes.Add($outcome) | Out-Null } else { foreach ($finding in @($validation.findings)) { $localFindings.Add($finding) | Out-Null } }
+    }
+    $hasLocal = $validLocalOutcomes.Count -gt 0
     if ($null -eq $anchor) { $fallbackReasons.Add('tier_unknown') | Out-Null }
-    if (-not $radarValidation.pass -and -not $hasLocal) { foreach ($code in @($radarValidation.findings.code | Sort-Object -Unique)) { $fallbackReasons.Add([string]$code) | Out-Null } }
+    if ([string]::IsNullOrWhiteSpace($Rationale)) { $fallbackReasons.Add('rationale_missing') | Out-Null }
+    if (@($LocalOutcomes).Count -gt 0 -and -not $hasLocal) { $fallbackReasons.Add('local_outcome_invalid') | Out-Null }
+    $hostConfirmed = $false
     if ($null -ne $anchor) {
         $pair = '{0}|{1}' -f $anchor.model_family, $anchor.reasoning_effort
+        $hostConfirmed = $pair -in @($HostAvailablePairs)
         if (@($HostAvailablePairs).Count -gt 0 -and $pair -notin @($HostAvailablePairs)) { $fallbackReasons.Add('host_pair_unavailable') | Out-Null }
     }
-    $fallback = $fallbackReasons.Count -gt 0
+    if (-not $radarValidation.pass -and -not $hasLocal -and -not $hostConfirmed) { foreach ($code in @($radarValidation.findings.code | Sort-Object -Unique)) { $fallbackReasons.Add([string]$code) | Out-Null } }
     $radarEntry = $null
-    if (-not $fallback -and $null -ne $anchor -and $radarValidation.pass) { $radarEntry = @((Get-OperationObjectProperty $RadarSnapshot 'entries') | Where-Object { [string](Get-OperationObjectProperty $_ 'model_family') -eq $anchor.model_family -and [string](Get-OperationObjectProperty $_ 'reasoning_effort') -eq $anchor.reasoning_effort } | Select-Object -First 1) }
+    if ($null -ne $anchor -and $radarValidation.pass) { $radarEntry = @((Get-OperationObjectProperty $RadarSnapshot 'entries') | Where-Object { [string](Get-OperationObjectProperty $_ 'model_family') -eq $anchor.model_family -and [string](Get-OperationObjectProperty $_ 'reasoning_effort') -eq $anchor.reasoning_effort } | Select-Object -First 1) }
     if ($radarEntry -is [array]) { $radarEntry = if ($radarEntry.Count -gt 0) { $radarEntry[0] } else { $null } }
+    if ($null -ne $anchor -and $radarValidation.pass -and $null -eq $radarEntry -and -not $hasLocal -and -not $hostConfirmed) { $fallbackReasons.Add('radar_pair_missing') | Out-Null }
+    $fallback = $fallbackReasons.Count -gt 0
     return [pscustomobject][ordered]@{
         schema_version = 1; task_id = $TaskId; decision_owner = 'host_ai'; advisory_only = $true
         requested_tier = $RequestedTier; selected_tier = $(if ($fallback) { 'host_default' } else { $anchor.tier })
         model_family = $(if ($fallback) { $null } else { $anchor.model_family }); reasoning_effort = $(if ($fallback) { $null } else { $anchor.reasoning_effort })
         rationale = $Rationale; user_override = (-not [string]::IsNullOrWhiteSpace($UserOverrideTier)); fallback_reason = $(if ($fallback) { @($fallbackReasons) -join ',' } else { $null })
-        evidence_priority = 'user_override_then_local_outcomes_then_host_availability_then_radar_then_host_default'; local_outcomes = @(Copy-AgentWorkflowValue $LocalOutcomes); radar_snapshot_id = Get-OperationObjectProperty $RadarSnapshot 'snapshot_id'; radar_entry = Copy-AgentWorkflowValue $radarEntry
+        evidence_priority = 'user_override_then_local_outcomes_then_host_availability_then_radar_then_host_default'; selection_semantics = 'host_proposal_validation_only'
+        local_outcomes = @(Copy-AgentWorkflowValue $validLocalOutcomes.ToArray()); radar_snapshot_id = Get-OperationObjectProperty $RadarSnapshot 'snapshot_id'; radar_entry = Copy-AgentWorkflowValue $radarEntry
+        evidence_sources = [pscustomobject][ordered]@{ local = [pscustomobject]@{ valid = $hasLocal; supplied = @($LocalOutcomes).Count; accepted = $validLocalOutcomes.Count; rejected_findings = @($localFindings.ToArray()) }; radar = [pscustomobject]@{ valid = $radarValidation.pass; used = (-not $fallback -and $null -ne $radarEntry); findings = @($radarValidation.findings) }; host_availability = [pscustomobject]@{ declared = @($HostAvailablePairs).Count -gt 0; pair_confirmed = $hostConfirmed } }
         provider_calls = 0; native_mutations = 0; writes = 0
     }
 }
@@ -147,19 +208,19 @@ function New-ModelPolicyProposal {
 function Get-AgentEscalationDecision {
     param([Parameter(Mandatory = $true)]$FailurePacket)
     $validation = Test-AgentFailurePacketContract $FailurePacket
-    if (-not $validation.pass) { return [pscustomobject][ordered]@{ action = 'supervisor_review'; next_tier = $null; parallel_allowed = $false; requires_new_task_graph = $false; findings = @($validation.findings) } }
+    if (-not $validation.pass) { return [pscustomobject][ordered]@{ action = 'supervisor_review'; next_tier = $null; parallel_allowed = $false; requires_parallel_readmission = $false; requires_new_task_graph = $false; findings = @($validation.findings) } }
     $kind = [string](Get-OperationObjectProperty $FailurePacket 'failure_kind')
     $attempt = [int](Get-OperationObjectProperty $FailurePacket 'attempt_count')
     $escalations = [int](Get-OperationObjectProperty $FailurePacket 'escalation_count')
     $tier = [string](Get-OperationObjectProperty $FailurePacket 'attempted_tier')
     $action = 'supervisor_review'; $nextTier = $null; $requiresGraph = $false
     if ($kind -in @('permission', 'credential', 'production_authorization', 'user_decision')) { $action = 'fail_closed' }
-    elseif ($kind -in @('task', 'context')) { $action = 'rescope_task_graph'; $requiresGraph = $true }
-    elseif ($kind -eq 'tool') { $action = 'repair_tool_or_reassign' }
+    elseif ($kind -in @('task', 'context')) { $action = $(if ($attempt -ge 2) { 'supervisor_takeover' } else { 'rescope_task_graph' }); $requiresGraph = $true }
+    elseif ($kind -eq 'tool') { $action = $(if ($attempt -ge 2) { 'supervisor_takeover' } else { 'repair_tool_or_reassign' }); $requiresGraph = ($attempt -ge 2) }
     elseif ($kind -eq 'capacity') {
         if ($tier -notin @('luna_max', 'sol_medium', 'sol_xhigh')) { $action = 'supervisor_review' }
+        elseif ($escalations -ge 2 -or ($tier -eq 'sol_xhigh' -and $attempt -gt 1)) { $action = 'supervisor_takeover'; $requiresGraph = $true }
         elseif ($attempt -le 1) { $action = 'corrected_retry' }
-        elseif ($escalations -ge 2 -or $tier -eq 'sol_xhigh') { $action = 'supervisor_takeover'; $requiresGraph = $true }
         else {
             $action = 'replan_and_escalate'; $requiresGraph = $true
             $nextTier = switch ($tier) {
@@ -168,7 +229,7 @@ function Get-AgentEscalationDecision {
             }
         }
     }
-    return [pscustomobject][ordered]@{ action = $action; next_tier = $nextTier; parallel_allowed = ($action -in @('corrected_retry', 'repair_tool_or_reassign')); requires_new_task_graph = $requiresGraph; issue_id = [string](Get-OperationObjectProperty $FailurePacket 'issue_id'); findings = @() }
+    return [pscustomobject][ordered]@{ action = $action; next_tier = $nextTier; parallel_allowed = $false; requires_parallel_readmission = ($action -in @('corrected_retry', 'repair_tool_or_reassign')); requires_new_task_graph = $requiresGraph; issue_id = [string](Get-OperationObjectProperty $FailurePacket 'issue_id'); findings = @() }
 }
 
 function Test-AgentWorkflowRequest($Request) {
@@ -177,8 +238,19 @@ function Test-AgentWorkflowRequest($Request) {
     foreach ($result in @(
             (Test-AgentTaskGraphContract (Get-OperationObjectProperty $Request 'task_graph')),
             (Test-RadarSnapshotContract -Snapshot (Get-OperationObjectProperty $Request 'radar_snapshot') -Now ([string](Get-OperationObjectProperty $Request 'now'))),
-            (Test-AgentParallelAdmission -TaskGraph (Get-OperationObjectProperty $Request 'task_graph') -TaskIds @((Get-OperationObjectProperty $Request 'requested_parallel_task_ids')) -CompletedTaskIds @((Get-OperationObjectProperty $Request 'completed_task_ids')))
+            (Test-AgentParallelAdmission -TaskGraph (Get-OperationObjectProperty $Request 'task_graph') -TaskIds @((Get-OperationObjectProperty $Request 'requested_parallel_task_ids')) -CompletedTaskIds @((Get-OperationObjectProperty $Request 'completed_task_ids')) -CompletedTaskReceipts @((Get-OperationObjectProperty $Request 'completion_receipts')))
         )) { foreach ($finding in @($result.findings)) { $findings.Add($finding) | Out-Null } }
+    $taskIndex = Get-AgentTaskIndex (Get-OperationObjectProperty $Request 'task_graph')
+    $proposalSeen = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::OrdinalIgnoreCase)
+    foreach ($proposal in @((Get-OperationObjectProperty $Request 'model_proposals'))) {
+        $taskId = ([string](Get-OperationObjectProperty $proposal 'task_id')).Trim()
+        if (-not $taskIndex.ContainsKey($taskId.ToLowerInvariant())) { $findings.Add((New-OperationFinding 'model_proposal_task_unknown' 'error' '$.model_proposals.task_id' 'Model proposal task_id must belong to the TaskGraph.')) | Out-Null }
+        if (-not $proposalSeen.Add($taskId)) { $findings.Add((New-OperationFinding 'model_proposal_duplicate' 'error' '$.model_proposals.task_id' 'Only one model proposal is allowed per task.')) | Out-Null }
+        $rationale = [string](Get-OperationObjectProperty $proposal 'rationale')
+        if ([string]::IsNullOrWhiteSpace($rationale)) { $findings.Add((New-OperationFinding 'model_proposal_rationale_required' 'error' '$.model_proposals.rationale' 'Model proposal rationale is required.')) | Out-Null; continue }
+        $evaluated = New-ModelPolicyProposal -TaskId $taskId -RequestedTier ([string](Get-OperationObjectProperty $proposal 'requested_tier')) -Rationale $rationale -RadarSnapshot (Get-OperationObjectProperty $Request 'radar_snapshot') -HostAvailablePairs @((Get-OperationObjectProperty $proposal 'host_available_pairs')) -LocalOutcomes @((Get-OperationObjectProperty $proposal 'local_outcomes')) -Now ([string](Get-OperationObjectProperty $Request 'now')) -UserOverrideTier ([string](Get-OperationObjectProperty $proposal 'user_override_tier'))
+        if ($evaluated.selected_tier -eq 'host_default') { $findings.Add((New-OperationFinding 'model_proposal_unusable' 'error' '$.model_proposals' ('Model proposal failed closed: {0}' -f $evaluated.fallback_reason))) | Out-Null }
+    }
     $failurePacket = Get-OperationObjectProperty $Request 'failure_packet'
     if ($null -ne $failurePacket) { foreach ($finding in @((Test-AgentFailurePacketContract $failurePacket).findings)) { $findings.Add($finding) | Out-Null } }
     return New-OperationValidationResult $findings.ToArray()
@@ -194,7 +266,7 @@ function New-AgentWorkflowAdvisoryPlan($Request) {
     return [pscustomobject][ordered]@{
         schema_version = 1; pass = $requestValidation.pass; decision_owner = 'host_ai'; executor = 'host_native_runtime'; advisory_only = $true
         execution_plan = New-AgentExecutionPlan -TaskGraph $graph
-        current_parallel_admission = Test-AgentParallelAdmission -TaskGraph $graph -TaskIds @((Get-OperationObjectProperty $Request 'requested_parallel_task_ids')) -CompletedTaskIds @((Get-OperationObjectProperty $Request 'completed_task_ids'))
+        current_parallel_admission = Test-AgentParallelAdmission -TaskGraph $graph -TaskIds @((Get-OperationObjectProperty $Request 'requested_parallel_task_ids')) -CompletedTaskIds @((Get-OperationObjectProperty $Request 'completed_task_ids')) -CompletedTaskReceipts @((Get-OperationObjectProperty $Request 'completion_receipts'))
         model_proposals = @($proposals.ToArray()); findings = @($requestValidation.findings); provider_calls = 0; native_mutations = 0; writes = 0
     }
 }

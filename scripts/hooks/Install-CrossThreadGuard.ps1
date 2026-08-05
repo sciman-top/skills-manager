@@ -23,10 +23,13 @@ $hooksPath = Join-Path $resolvedCodexHome 'hooks.json'
 # Validate every source and the existing document before touching host scripts.
 $targetPromptData = ((& $resolvedTargetGenerator -TargetThreadId 'canonical-digest-probe' -AsJson) | ConvertFrom-Json -ErrorAction Stop)
 $fleetPromptData = ((& $resolvedFleetGenerator -SupervisorThreadId 'canonical-digest-probe' -AsJson) | ConvertFrom-Json -ErrorAction Stop)
+$fleetShutdownPromptData = ((& $resolvedFleetGenerator -SupervisorThreadId 'canonical-digest-probe' -ShutdownWhenAllStopped -AsJson) | ConvertFrom-Json -ErrorAction Stop)
 $targetPromptHash = [string]$targetPromptData.prompt_sha256
 $fleetPromptHash = [string]$fleetPromptData.prompt_sha256
-if ($targetPromptData.policy_revision -ne 3 -or $fleetPromptData.policy_revision -ne 3 -or
-    $targetPromptHash -notmatch '^[0-9a-f]{64}$' -or $fleetPromptHash -notmatch '^[0-9a-f]{64}$') {
+$fleetShutdownPromptHash = [string]$fleetShutdownPromptData.prompt_sha256
+if ($targetPromptData.policy_revision -ne 3 -or $fleetPromptData.policy_revision -ne 3 -or $fleetShutdownPromptData.policy_revision -ne 3 -or
+    $targetPromptHash -notmatch '^[0-9a-f]{64}$' -or $fleetPromptHash -notmatch '^[0-9a-f]{64}$' -or $fleetShutdownPromptHash -notmatch '^[0-9a-f]{64}$' -or
+    $fleetShutdownPromptHash -ceq $fleetPromptHash) {
     throw 'Revision-3 canonical watch prompt provenance could not be derived.'
 }
 
@@ -65,7 +68,7 @@ $retained = @(
 )
 
 $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedSource).Hash.ToLowerInvariant()
-$command = 'pwsh -NoProfile -ExecutionPolicy Bypass -File "{0}" -ExpectedScriptSha256 "{1}" -ExpectedTargetPromptSha256 "{2}" -ExpectedFleetPromptSha256 "{3}"' -f $hostHook, $sourceHash, $targetPromptHash, $fleetPromptHash
+$command = 'pwsh -NoProfile -ExecutionPolicy Bypass -File "{0}" -ExpectedScriptSha256 "{1}" -ExpectedTargetPromptSha256 "{2}" -ExpectedFleetPromptSha256 "{3}" -ExpectedFleetShutdownPromptSha256 "{4}"' -f $hostHook, $sourceHash, $targetPromptHash, $fleetPromptHash, $fleetShutdownPromptHash
 $guardGroup = [pscustomobject]@{
     matcher = '*'
     hooks = @([pscustomobject]@{
@@ -100,13 +103,25 @@ try {
     Move-Item -LiteralPath $stagedHooksJson -Destination $hooksPath -Force
 }
 catch {
-    if ($hostHookExisted) { [System.IO.File]::WriteAllBytes($hostHook, $originalHostHookBytes) }
-    elseif (Test-Path -LiteralPath $hostHook) { Remove-Item -LiteralPath $hostHook -Force }
-    if ($hostDoctorExisted) { [System.IO.File]::WriteAllBytes($hostRuntimeDoctor, $originalHostDoctorBytes) }
-    elseif (Test-Path -LiteralPath $hostRuntimeDoctor) { Remove-Item -LiteralPath $hostRuntimeDoctor -Force }
-    if ($hooksExisted) { [System.IO.File]::WriteAllBytes($hooksPath, $originalHooksBytes) }
-    elseif (Test-Path -LiteralPath $hooksPath) { Remove-Item -LiteralPath $hooksPath -Force }
-    throw
+    $installError = $_
+    $rollbackErrors = New-Object System.Collections.Generic.List[string]
+    try {
+        if ($hostHookExisted) { [System.IO.File]::WriteAllBytes($hostHook, $originalHostHookBytes) }
+        elseif (Test-Path -LiteralPath $hostHook) { Remove-Item -LiteralPath $hostHook -Force }
+    }
+    catch { $rollbackErrors.Add(('host_hook: {0}' -f $_.Exception.Message)) | Out-Null }
+    try {
+        if ($hostDoctorExisted) { [System.IO.File]::WriteAllBytes($hostRuntimeDoctor, $originalHostDoctorBytes) }
+        elseif (Test-Path -LiteralPath $hostRuntimeDoctor) { Remove-Item -LiteralPath $hostRuntimeDoctor -Force }
+    }
+    catch { $rollbackErrors.Add(('runtime_doctor: {0}' -f $_.Exception.Message)) | Out-Null }
+    try {
+        if ($hooksExisted) { [System.IO.File]::WriteAllBytes($hooksPath, $originalHooksBytes) }
+        elseif (Test-Path -LiteralPath $hooksPath) { Remove-Item -LiteralPath $hooksPath -Force }
+    }
+    catch { $rollbackErrors.Add(('hooks_json: {0}' -f $_.Exception.Message)) | Out-Null }
+    if ($rollbackErrors.Count -gt 0) { throw ('Cross-thread guard installation failed ({0}); rollback was partial: {1}' -f $installError.Exception.Message, ($rollbackErrors -join '; ')) }
+    throw $installError
 }
 finally {
     Remove-Item -LiteralPath $stagedHook, $stagedDoctor, $stagedHooksJson -Force -ErrorAction SilentlyContinue
@@ -123,5 +138,6 @@ finally {
     runtime_doctor_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $hostRuntimeDoctor).Hash.ToLowerInvariant()
     target_prompt_sha256 = $targetPromptHash
     fleet_prompt_sha256 = $fleetPromptHash
+    fleet_shutdown_prompt_sha256 = $fleetShutdownPromptHash
     trust_next_step = 'Open /hooks in a fresh Codex session and trust the exact current definition hash.'
 }

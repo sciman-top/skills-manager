@@ -258,12 +258,12 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 - `FR-EWF-010`：知识库/代码图/理解工具只有在至少两个独立真实任务证明 repo-native `rg`、符号/测试/文档与宿主上下文不足，且语言覆盖、隐私、索引 freshness、资源、供应链和卸载/重建路径均可验证时，才进入 read-only canary；它们不成为源码、任务或验收真源。
 - `FR-EWF-011`：skill 优化只借鉴 `real sample -> replay -> shadow -> bounded canary -> reviewed promotion -> retain/revise/retire`；不得把领域研究系统的自动蒸馏、provider/embedding/solver 依赖直接解释为通用 workflow 自动升级能力。
 - `FR-EWF-012`：M1 pilot 在既有 10 个真实样本中同时观察 coordination mode、shared-write policy、tool disposition、external context adapter 和 skill lifecycle action；本 maintenance 切片自身不计数，也不为观察字段建设 daemon 或 telemetry。
-- `FR-EWF-013`：每个长链路任务可由宿主生成 machine-readable `TaskGraph`，至少声明 `task_id / goal / inputs / outputs / depends_on / risk / ambiguity / parallelizable / write_set / external_state / verification / result_owner / integration_order / stop_condition`；本仓只校验合同，不执行 DAG。
-- `FR-EWF-014`：模型策略必须由宿主 AI 依据用户意图和完整上下文主导；本仓只提供 capability/model 候选、Radar snapshot、成本/时延/风险观察、fallback/escalation 建议和确定性 admission findings。
+- `FR-EWF-013`：每个长链路任务可由宿主生成 machine-readable `TaskGraph`，至少声明 `task_id / goal / inputs / outputs / depends_on / risk / ambiguity / parallelizable / exact_write_set / coordination_keys / external_state / verification / result_owner / integration_order / stop_condition`；已完成依赖还必须有同 `base_revision` 的 `status=verified` completion receipt 和 verification evidence，额外/unclaimed receipt 也 fail-closed。本仓只校验合同，不执行 DAG。
+- `FR-EWF-014`：模型策略必须由宿主 AI 依据用户意图和完整上下文主导；本仓 `New-ModelPolicyProposal` 只执行 `host_proposal_validation_only`，校验宿主提出的 task/tier/rationale、host availability、可比本地结果和 Radar evidence，不实现语义 selector 或静默换模。
 - `FR-EWF-015`：三档默认软锚点为 `Sol xhigh`（需求澄清、架构、生产 RCA、高风险审查和最终裁决）、`Sol medium`（一般实现、日常排障、中等审查和集成准备）和用户偏好的 `Luna max` 默认档（边界清楚的 CRUD/SQL/单测/文档、机械变换和高吞吐窄任务）；锚点可被宿主覆盖，不得硬编码为静默路由规则，Radar 不得自动增加第四档或覆盖 Luna-max 用户 override。
-- `FR-EWF-016`：Radar snapshot 必须记录 `source / captured_at / model / reasoning_effort / score / estimated_cost / estimated_duration / sample_count / confidence / raw_hash / expires_at`；过期、缺样本或来源不可核验时回退官方/native 默认，Radar 只影响建议，不证明质量或 live acceptance。
-- `FR-EWF-017`：并行/串行与模型升级必须使用显式状态机：依赖、base、write set、集成 owner、验证和外部写入全部满足才允许并行；一次根因修复失败后只重试一次，同一 `issue_id` 第二次失败必须 re-scope/re-plan；能力不足才按 `Luna max -> Sol medium -> Sol xhigh` 升级，权限/凭据/用户决策缺失则 fail-closed。
-- `FR-EWF-018`：仓库必须提供 runtime-independent 的 `TaskGraph/RadarSnapshot/FailurePacket v1` plain-object validator、deterministic dependency wave、并行 admission、model proposal 与 escalation decision；它们只返回建议和 findings，不创建 agent thread、不调用 provider、不修改 host/native state。
+- `FR-EWF-016`：`RadarSnapshot v2` 必须记录 `source / captured_at / source_updated_at / model / reasoning_effort / score / estimated_cost / estimated_duration / sample_count / confidence / raw_hash / expires_at`，entries 至少一项且禁止 `policy_overrides` 等决策字段；source age 超过 36 小时、过期、缺样本或来源不可核验时 fail-closed。只有 pair 一致、90 天内且带 gate/rework/cost/duration/base 的 local outcome 才可优先；空或 invalid outcome 不能屏蔽 stale Radar。
+- `FR-EWF-017`：并行/串行与模型升级必须使用显式状态机：依赖 completion receipt、base、Windows-safe canonical write set、集成 owner、验证和外部写入全部满足才允许并行；high-risk/high-ambiguity 与 serial task 建立 barrier。corrected retry 默认串行，重新通过 parallel admission 才可并发；task/context/tool 同一 issue 第二次失败由 supervisor 接管，只有 capacity 可按 `Luna max -> Sol medium -> Sol xhigh` 升级，权限/凭据/用户决策缺失则 fail-closed。
+- `FR-EWF-018`：仓库必须提供 runtime-independent 的 `TaskGraph/FailurePacket v1` 与 `RadarSnapshot v2` plain-object validator、one-group-per-wave dependency plan、并行 admission、host proposal validator 与 escalation decision；它们只返回建议和 findings，不创建 agent thread、不调用 provider、不修改 host/native state。
 - `FR-EWF-019`：生成 bundle 必须提供 `agent-validate` 与 `agent-plan` 两个 repo-contained JSON 命令；稳定 envelope 固定 `truth_boundary=repo_advisory_only / decision_owner=host_ai / executor=host_native_runtime / provider_calls=0 / native_mutations=0 / writes=0`，失败时以 machine-readable findings 和非零 exit fail-closed。
 - `FR-EWF-020`：advisory implementation 必须保持层次边界：domain/application 是无文件、时钟、环境、网络和 terminal 副作用的 pure layer；command adapter 只读取仓内显式输入并呈现结果；Radar refresh、spawn/wait/steer、worktree 创建和模型/effort 应用继续由宿主显式执行。
 
@@ -300,7 +300,7 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 - `NFR-EWF-005`：模型策略是多目标 Pareto 建议，必须同时观察正确性/用户结果、费用、wall-clock、token/context、重试和集成成本及不可逆风险；不得把动态 Radar 分数压成不可解释的固定总分或单项硬门禁。
 - `NFR-EWF-006`：PS7-only runtime policy 必须覆盖 source、generated bundle、installer、`skills.cmd`、CI、tests、subprocess wrapper、runbook 和 release contract；历史 Phase/证据中的 5.1 记录只保留为历史事实，不能恢复为当前支持承诺。新 typed core 候选仍须以 versioned protocol、single source of truth、PS7 回滚路径和可删除 PoC 证明，不得在无门禁的情况下形成双写或双真源。
 - `NFR-EWF-007`：`agent_workflow_advisory_runtime` 只允许 schema v1 compatible 的 minor admission；P6、仓库 scheduler/daemon/database/provider gateway、仓库 Radar fetch、custom-agent/config/profile/session mutation 和业务 live acceptance 必须保持显式未实现/未运行。宿主 Scheduled automation、全局委派规则和默认子代理配置属于独立 host acceptance，不改变本仓 runtime 边界。
-- `NFR-EWF-008`：Agent workflow verifier 必须进入 full quality gate，机械检查五项 task、三档 soft anchor、CLI/build 接线、FailurePacket 和 stale-Radar fallback、zero-side-effect envelope 与 `repo_verified != host_loaded != live_accepted` 边界。
+- `NFR-EWF-008`：Agent workflow verifier 必须进入 full quality gate，机械检查五项 task、严格三档 soft anchor、completion receipt/canonical path/barrier wave、proposal/local outcome、FailurePacket parallel readmission、RadarSnapshot v2 与 forbidden decision fields、zero-side-effect envelope 和 `repo_verified != host_loaded != live_accepted` 边界。
 - `NFR-TEC-001`：替代技术栈评估优先比较 C#/.NET、TypeScript/Node、Python 和 Rust 的 Windows/native CLI 适配、类型/并发、分发、供应链、维护与回滚成本；当前推荐 C#/.NET typed core + PowerShell thin shell 作为条件性目标架构，只实施可删除 shadow PoC，不实施全仓重写。
 - `NFR-TEC-002`：TC1 必须 pin 受支持 LTS SDK、零第三方 `PackageReference`、4/4 corpus parity、结构化协议负例、零生产引用和可删除回滚；framework-dependent/self-contained/single-file 的体积/启动数据只作描述性观察。TC2 前 PowerShell runtime 必须保持 authoritative，生产集成为 `not_started`。
 
@@ -327,9 +327,9 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 16. verifier 能阻断“Git CAS 等于文件排队/抢占胜出”、共享路径无 owner 并行写入、社区 control plane 偷渡、无证据工具接入和 P6/live truth 越级。
 17. 任一外部知识库或代码图 adapter 在接入前都有两个独立真实失败样本、语言/隐私/freshness/资源/供应链/卸载证据；条件不满足时保持 defer，repo-native 工具仍可完成主链。
 18. skill/tool 的保留以真实 replay/pilot 净收益为依据；强模型或宿主原生能力覆盖后能通过已记录 retirement trigger 降级或删除，不以资产数量作为成功指标。
-19. `agent-plan` 能对有效 TaskGraph 稳定输出 `discover -> implement+document -> integrate` 波次，对共享路径、coordination key、外部写入、依赖、owner 或 verification 缺失 fail-closed，且不实际拉起并发。
-20. 三档模型只在宿主显式 proposal 后作为软锚点出现；用户 override 优先，过期 Radar、宿主模型不可用或未知 tier 回退 host default，已移除的 Terra tier 必须 fail-closed，权限/凭据/生产授权/用户决策不允许通过升档绕过。
-21. Agent workflow advisory 的 repo verifier、focused tests 和 full gate 通过只能声明 `repo_verified/repo_advisory_only`；host load、真实 subagent 并发、模型效果、Radar refresh 与业务 live acceptance 仍需独立证据。
+19. `agent-plan` 能对有效 TaskGraph 稳定输出 `discover -> implement+document -> integrate` barrier waves，每 wave 仅一个可执行 group；空 parallel request 返回 `not_requested`，高风险/高歧义、缺 completion receipt、路径相等或父子重叠、共享 coordination/external state、owner/verification 缺失均 fail-closed，且不实际拉起并发。
+20. 三档模型只在宿主显式 proposal 后作为软锚点出现；用户 override 优先，只有有效 local outcome、host availability 或 fresh Radar 可支撑 proposal。未知/已移除的 Terra tier fail-closed；corrected retry 不自动恢复并行；权限、凭据、生产授权或用户决策不允许通过升档绕过。
+21. Agent workflow advisory 的 repo verifier、focused tests 和 full gate 通过只能声明 `repo_verified/repo_advisory_only`；host load、真实 subagent 并发、模型效果、Radar refresh 与业务 live acceptance 仍需独立 receipt。历史 v1 Radar run 不得满足当前 v2 host revalidation。
 
 ## 9. 成功指标
 

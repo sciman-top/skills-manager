@@ -42,7 +42,7 @@ function Reject-Pattern([string]$Text, [string]$Pattern, [string]$Path, [string]
 $paths = [ordered]@{
     manifest = 'tasks/skills-manager-vnext-agent-workflow-advisory.tasks.json'
     spec = 'docs/superpowers/specs/2026-08-05-agent-workflow-advisory-runtime.md'
-    evidence = 'docs/change-evidence/20260805-agent-workflow-advisory-runtime.md'
+    evidence = 'docs/change-evidence/20260806-agent-workflow-and-watch-safety-hardening.md'
     prd = 'docs/product/skills-manager-vnext-prd.md'
     architecture = 'docs/product/skills-manager-vnext-architecture.md'
     roadmap = 'docs/product/skills-manager-vnext-roadmap.md'
@@ -90,9 +90,9 @@ if ($null -ne $manifest) {
             @{ property='provider_call_status'; value='none'; code='provider_call_boundary_invalid' },
             @{ property='native_mutation_status'; value='none'; code='native_mutation_boundary_invalid' },
             @{ property='radar_fetch_status'; value='not_implemented'; code='radar_fetch_boundary_invalid' },
-            @{ property='host_loaded_status'; value='host_evaluation_partial_pass'; code='host_loaded_boundary_invalid' },
-            @{ property='host_orchestration_status'; value='native_spawn_observed'; code='host_orchestration_boundary_invalid' },
-            @{ property='host_radar_refresh_status'; value='scheduled_run_pass'; code='host_radar_boundary_invalid' },
+            @{ property='host_loaded_status'; value='host_evaluation_partial'; code='host_loaded_boundary_invalid' },
+            @{ property='host_orchestration_status'; value='native_spawn_partial'; code='host_orchestration_boundary_invalid' },
+            @{ property='host_radar_refresh_status'; value='pending_revalidation'; code='host_radar_boundary_invalid' },
             @{ property='live_acceptance_status'; value='not_run'; code='live_acceptance_boundary_invalid' }
         )) {
         if ([string]$manifest.($boundary.property) -ne $boundary.value) {
@@ -139,15 +139,37 @@ if ($null -ne $manifest) {
     foreach ($tier in $tiers) {
         if ([string]$tier.tier -notin @($expectedTiers.Keys)) { Add-Finding 'model_tier_anchor_invalid' $paths.manifest ("Unknown model tier: {0}" -f [string]$tier.tier) }
     }
+
+    $hostRadarReceipt = $manifest.host_radar_receipt
+    if ($null -eq $hostRadarReceipt) {
+        Add-Finding 'host_radar_receipt_missing' $paths.manifest 'Pending Radar v2 revalidation requires an explicit host receipt placeholder.'
+    }
+    else {
+        if ([string]$hostRadarReceipt.status -ne 'pending_revalidation' -or [string]$hostRadarReceipt.automation_revision -ne 'radar-snapshot-v2-20260806') {
+            Add-Finding 'host_radar_receipt_invalid' $paths.manifest 'Pending host Radar receipt must identify the v2 automation revision.'
+        }
+        foreach ($field in @('executed_model', 'executed_effort', 'run_at', 'snapshot_id')) {
+            if ($null -eq $hostRadarReceipt.PSObject.Properties[$field]) { Add-Finding 'host_radar_receipt_field_missing' $paths.manifest ("Host Radar receipt field is missing: {0}" -f $field) }
+            elseif ($null -ne $hostRadarReceipt.$field) { Add-Finding 'host_radar_receipt_unverified_value' $paths.manifest ("Pending host Radar receipt must not invent a value for: {0}" -f $field) }
+        }
+    }
+
+    $hostModelProbe = $manifest.host_model_probe_receipt
+    if ($null -eq $hostModelProbe -or [string]$hostModelProbe.status -ne 'cli_model_probe_pass' -or
+        [string]$hostModelProbe.surface -ne 'codex_exec_ephemeral' -or [string]$hostModelProbe.executed_model -ne 'gpt-5.6-luna' -or
+        [string]$hostModelProbe.executed_effort -ne 'max' -or [string]$hostModelProbe.sandbox -ne 'read-only' -or
+        [string]::IsNullOrWhiteSpace([string]$hostModelProbe.provider) -or [string]::IsNullOrWhiteSpace([string]$hostModelProbe.run_at)) {
+        Add-Finding 'host_model_probe_receipt_invalid' $paths.manifest 'Host model receipt must preserve the bounded Luna max read-only CLI probe truth.'
+    }
 }
 
 foreach ($required in @(
         @{ key='spec'; literal='**IMPLEMENTATION_STATUS**: `repo_advisory_only`'; code='implementation_boundary_missing' },
         @{ key='spec'; literal='**RUNTIME_SCHEDULER_STATUS**: `not_introduced`'; code='runtime_boundary_missing' },
         @{ key='spec'; literal='**RADAR_FETCH_STATUS**: `not_implemented`'; code='radar_boundary_missing' },
-        @{ key='spec'; literal='**HOST_LOADED_STATUS**: `host_evaluation_partial_pass`'; code='host_boundary_missing' },
-        @{ key='spec'; literal='**HOST_ORCHESTRATION_STATUS**: `native_spawn_observed`'; code='host_boundary_missing' },
-        @{ key='spec'; literal='**HOST_RADAR_REFRESH_STATUS**: `scheduled_run_pass`'; code='host_boundary_missing' },
+        @{ key='spec'; literal='**HOST_LOADED_STATUS**: `host_evaluation_partial`'; code='host_boundary_missing' },
+        @{ key='spec'; literal='**HOST_ORCHESTRATION_STATUS**: `native_spawn_partial`'; code='host_boundary_missing' },
+        @{ key='spec'; literal='**HOST_RADAR_REFRESH_STATUS**: `pending_revalidation`'; code='host_boundary_missing' },
         @{ key='spec'; literal='**LIVE_ACCEPTANCE_STATUS**: `not_run`'; code='live_boundary_missing' },
         @{ key='prd'; literal='FR-EWF-018'; code='product_requirement_missing' },
         @{ key='architecture'; literal='ADR-SMV-029'; code='architecture_decision_missing' },
@@ -158,23 +180,38 @@ foreach ($required in @(
         @{ key='agents'; literal='agent workflow advisory'; code='root_contract_missing' },
         @{ key='readme'; literal='agent-plan'; code='readme_command_missing' },
         @{ key='readmeEn'; literal='agent-plan'; code='readme_command_missing' },
-        @{ key='evidence'; literal='Maximum claim: `repo_verified / repo_advisory_only`'; code='evidence_boundary_missing' },
+        @{ key='evidence'; literal='Maximum claim: `repo_verified / repo_advisory_only`; host state remains `host_evaluation_partial`.'; code='evidence_boundary_missing' },
         @{ key='quality'; literal="Invoke-QualityGate 'agent-workflow-advisory' { & .\scripts\verify-agent-workflow-advisory.ps1 }"; code='full_gate_integration_missing' }
     )) { Require-Literal $content[$required.key] $required.literal $paths[$required.key] $required.code }
 
 foreach ($required in @(
         @{ key='domain'; literal='function New-AgentTaskGraph'; code='domain_contract_missing' },
         @{ key='domain'; literal='function Test-AgentTaskGraphContract'; code='domain_contract_missing' },
+        @{ key='domain'; literal='function Get-AgentCanonicalWritePath'; code='canonical_write_path_missing' },
+        @{ key='domain'; literal='\x00-\x1F<>:"|'; code='windows_safe_write_path_missing' },
         @{ key='domain'; literal='function New-RadarSnapshot'; code='domain_contract_missing' },
         @{ key='domain'; literal='function Test-RadarSnapshotContract'; code='domain_contract_missing' },
+        @{ key='domain'; literal='source_updated_at'; code='radar_v2_contract_missing' },
+        @{ key='domain'; literal='radar_decision_field_forbidden'; code='radar_observation_boundary_missing' },
+        @{ key='domain'; literal='correction_evidence_required'; code='failure_packet_correction_missing' },
         @{ key='domain'; literal='function New-AgentFailurePacket'; code='domain_contract_missing' },
         @{ key='domain'; literal='function Test-AgentFailurePacketContract'; code='domain_contract_missing' },
         @{ key='application'; literal='function Test-AgentParallelAdmission'; code='application_contract_missing' },
+        @{ key='application'; literal='CompletedTaskReceipts'; code='completion_receipt_gate_missing' },
+        @{ key='application'; literal='completion_receipt_unclaimed'; code='completion_receipt_gate_missing' },
+        @{ key='application'; literal='high_risk_parallel_forbidden'; code='parallel_risk_gate_missing' },
+        @{ key='application'; literal='high_ambiguity_parallel_forbidden'; code='parallel_ambiguity_gate_missing' },
+        @{ key='application'; literal="'not_requested'"; code='serial_only_mode_missing' },
         @{ key='application'; literal='function New-AgentExecutionPlan'; code='application_contract_missing' },
+        @{ key='application'; literal='groups = @('; code='single_group_wave_missing' },
         @{ key='application'; literal='function New-ModelPolicyProposal'; code='application_contract_missing' },
+        @{ key='application'; literal='function Test-AgentLocalOutcomeContract'; code='local_outcome_contract_missing' },
+        @{ key='application'; literal='local_outcome_evaluation_time_invalid'; code='local_outcome_contract_missing' },
+        @{ key='application'; literal="selection_semantics = 'host_proposal_validation_only'"; code='proposal_semantics_missing' },
         @{ key='application'; literal='function Get-AgentEscalationDecision'; code='application_contract_missing' },
         @{ key='application'; literal='Test-AgentFailurePacketContract $FailurePacket'; code='failure_packet_gate_missing' },
-        @{ key='application'; literal='if (-not $radarValidation.pass -and -not $hasLocal)'; code='stale_radar_fallback_missing' },
+        @{ key='application'; literal='if (-not $radarValidation.pass -and -not $hasLocal -and -not $hostConfirmed)'; code='stale_radar_fallback_missing' },
+        @{ key='application'; literal='requires_parallel_readmission'; code='parallel_readmission_missing' },
         @{ key='command'; literal='function Invoke-AgentPlanCommand'; code='cli_command_wiring_missing' },
         @{ key='command'; literal='function Invoke-AgentValidateCommand'; code='cli_command_wiring_missing' },
         @{ key='command'; literal="decision_owner = 'host_ai'"; code='host_decision_owner_missing' },
@@ -190,6 +227,10 @@ foreach ($required in @(
         @{ key='validFixture'; literal='"graph_id": "graph-demo-001"'; code='fixture_contract_missing' },
         @{ key='invalidFixture'; literal='"graph_id": "graph-invalid-001"'; code='fixture_contract_missing' }
     )) { Require-Literal $content[$required.key] $required.literal $paths[$required.key] $required.code }
+
+$planningText = $content.spec + "`n" + $content.prd + "`n" + $content.architecture + "`n" + $content.roadmap + "`n" + $content.manifest
+Reject-Pattern $planningText '(?i)four soft tiers' 'agent workflow planning truth' 'four_tier_wording_detected' 'Agent workflow planning must describe exactly three active soft tiers.'
+Reject-Pattern $content.manifest '(?i)terra[_ -]?(high|medium|max|xhigh)' $paths.manifest 'removed_model_tier_detected' 'Terra must not re-enter the active model tier manifest.'
 
 $pureLayers = $content.domain + "`n" + $content.application
 Reject-Pattern $pureLayers '(?im)^\s*(Get-Content|Set-Content|Add-Content|Remove-Item|Copy-Item|Move-Item|Test-Path|Resolve-Path|Get-Date|Write-Host|Write-Output|Start-Process|Invoke-WebRequest|Invoke-RestMethod|exit)\b' 'src/Domain/AgentWorkflow.ps1;src/Application/ModelAndAgentPolicy.ps1' 'pure_layer_side_effect_detected' 'Domain/application advisory code must remain free of IO, clock, network, terminal and process effects.'

@@ -45,14 +45,14 @@ vNext P0-P5 已完成 repo-side 验收（P0/P1 各 9/9，P2/P3 各 7/7，P4 6/6�
 
 PowerShell 仍是当前唯一运行真源，但不再是所有未来领域逻辑的默认永久归宿。针对 AI 生成脚本常见的 parser/quoting/动态类型/encoding/native-process 返工，目标架构采用 `versioned protocol -> 条件性 C#/.NET typed core -> PowerShell thin shell`。当前 TC0/TC1 已对 `OperationPlan/Receipt v1` 建立 package-free C#/.NET `shadow_only` PoC，并在固定 corpus 上实现 PowerShell/C# parity；它没有接入 CLI/生成 bundle，TC2 生产迁移仍为 `not_started`，禁止直接全仓重写或形成双真源。
 
-长链路任务的模型与子 Agent 编排继续由宿主 AI 负责；本仓已实现可审查、runtime-independent 的 TaskGraph、Radar snapshot、三档模型软锚点、串并行 admission 和 failure escalation 建议。`Sol xhigh / Sol medium / Luna max` 是可覆盖软锚点，Luna max 是当前用户默认；它们不是仓库动态路由。本仓不拉起 subagent、不调用 provider、不抓取 Radar，也不修改 active session、custom-agent、provider/auth 或 host config；宿主侧配置与 Radar Scheduled automation 由独立 host acceptance 管理，既有 Terra-high 运行记录只保留为历史证据。仓库侧验证与计划入口：
+长链路任务的模型与子 Agent 编排继续由宿主 AI 负责；本仓已实现可审查、runtime-independent 的 TaskGraph/FailurePacket v1、RadarSnapshot v2、completion receipt、barrier wave、三档宿主 proposal 校验和 failure escalation 建议。`Sol xhigh / Sol medium / Luna max` 是可覆盖软锚点，Luna max 是当前用户默认；它们不是仓库动态路由。本仓不拉起 subagent、不调用 provider、不抓取 Radar，也不修改 active session、custom-agent、provider/auth 或 host config。仓库侧验证与计划入口：
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\skills.ps1 agent-validate --input .\tests\fixtures\agent-workflow\valid-request.json --json
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\skills.ps1 agent-plan --input .\tests\fixtures\agent-workflow\valid-request.json --json
 ```
 
-输出固定 `decision_owner=host_ai`、`executor=host_native_runtime` 和 `provider_calls/native_mutations/writes=0`。实际并发由宿主按 plan 使用原生 subagent/worktree 拉起；共享文件、生成 seam、schema/migration、Git/external state 与最终 full gate 始终串行。当前最大真值是本仓 `repo_verified/repo_advisory_only` 加独立 `host_evaluation_partial_pass`，不是普遍自动委派、模型收益或业务 `live_accepted`。
+输出固定 `decision_owner=host_ai`、`executor=host_native_runtime` 和 `provider_calls/native_mutations/writes=0`。实际并发由宿主按当前 wave/group 使用原生 subagent/worktree 拉起，并以 verified completion receipt 解锁下一 wave；serial/high-risk/high-ambiguity、共享 seam、schema/migration、Git/external state 与最终 full gate 始终串行。当前最大真值是本仓 `repo_verified/repo_advisory_only` 加独立 `host_evaluation_partial`；Luna max 的 read-only CLI/provider probe 已通过，但 collaboration spawn 尚不可用，历史 Radar v1 receipt 也不满足 v2 revalidation。
 
 Phase 1 的只读入口（未指定 `--out` 时不写文件）：
 
@@ -207,6 +207,7 @@ P3 plugin-aware 命令中，inventory/lint/eval 为只读；export 仍严格 fix
 说明：
 
 - 只想把当前配置重新输出到 `agent/` 和目标目录时，用 `构建生效`。
+- `构建生效` 在写入仓库外的宿主技能/config 目录前要求当前技能源是 clean Git commit，并在 projection manifest 记录 source revision、dirty 状态和 promotion mode。`-AllowUnverifiedHostProjection` 只用于明确接受风险的例外，manifest 会如实标记 `unverified_override`，不会伪装成已通过 full gate。
 - 需要拉取上游新内容时，用 `更新`；`-Plan` 只看预览，`-Upgrade` 会更新后刷新 `skills.lock.json`。
 - `锁定` 会生成或刷新 `skills.lock.json`，给后续 `更新 -Locked` 和 portable 安装重放使用。
 - `doctor --strict` 在校验不通过时会返回非零退出码，适合作为脚本门禁。

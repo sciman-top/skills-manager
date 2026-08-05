@@ -3,7 +3,8 @@ $hookPath = Join-Path $repoRoot 'scripts\hooks\block-cross-thread-send.ps1'
 $targetGenerator = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchHeartbeatPrompt.ps1'
 $fleetGenerator = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchFleetSupervisorPrompt.ps1'
 $script:targetPromptDigest = ((& $targetGenerator -TargetThreadId 'digest-probe' -AsJson) | ConvertFrom-Json).prompt_sha256
-$script:fleetPromptDigest = ((& $fleetGenerator -SupervisorThreadId 'digest-probe' -AsJson) | ConvertFrom-Json).prompt_sha256
+    $script:fleetPromptDigest = ((& $fleetGenerator -SupervisorThreadId 'digest-probe' -AsJson) | ConvertFrom-Json).prompt_sha256
+    $script:fleetShutdownPromptDigest = ((& $fleetGenerator -SupervisorThreadId 'digest-probe' -ShutdownWhenAllStopped -AsJson) | ConvertFrom-Json).prompt_sha256
 
 function Invoke-CrossThreadHook {
     param(
@@ -27,9 +28,10 @@ function Invoke-CrossThreadHook {
         tool_input = $ToolInput
     } | ConvertTo-Json -Depth 5 -Compress
 
-    $output = $payload | & pwsh -NoProfile -ExecutionPolicy Bypass -File $hookPath `
-        -ExpectedTargetPromptSha256 $script:targetPromptDigest `
-        -ExpectedFleetPromptSha256 $script:fleetPromptDigest
+        $output = $payload | & pwsh -NoProfile -ExecutionPolicy Bypass -File $hookPath `
+            -ExpectedTargetPromptSha256 $script:targetPromptDigest `
+            -ExpectedFleetPromptSha256 $script:fleetPromptDigest `
+            -ExpectedFleetShutdownPromptSha256 $script:fleetShutdownPromptDigest
     [pscustomobject]@{
         ExitCode = $LASTEXITCODE
         Output = @($output) -join "`n"
@@ -38,13 +40,13 @@ function Invoke-CrossThreadHook {
 
 function New-CanonicalWatchTranscript {
     param(
-        [Parameter(Mandatory = $true)][ValidateSet('target', 'fleet')][string]$Role,
+        [Parameter(Mandatory = $true)][ValidateSet('target', 'fleet', 'fleet_shutdown')][string]$Role,
         [Parameter(Mandatory = $true)][string]$SessionId,
         [string]$TurnId = 'turn-test'
     )
 
-    if ($Role -ceq 'fleet') {
-        $prompt = & $fleetGenerator -SupervisorThreadId $SessionId
+    if ($Role -in @('fleet', 'fleet_shutdown')) {
+        $prompt = if ($Role -ceq 'fleet_shutdown') { & $fleetGenerator -SupervisorThreadId $SessionId -ShutdownWhenAllStopped } else { & $fleetGenerator -SupervisorThreadId $SessionId }
         $automationId = "watch-interrupted-task-v1-target-thread-id-$SessionId"
     }
     else {
@@ -116,12 +118,15 @@ Describe 'Cross-thread PreToolUse guard' {
         }
     }
 
-    It 'blocks a handoff that carries a follow-up prompt' {
-        $result = Invoke-CrossThreadHook -ToolName 'codex_app__handoff_thread' -ToolInput ([ordered]@{
-            threadId = 'target-test'
-            followUpPrompt = 'take over this task'
-        })
-        ($result.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+    It 'blocks every cross-task handoff even when no follow-up prompt is supplied' {
+        foreach ($toolInput in @(
+            [ordered]@{ threadId = 'target-test'; followUpPrompt = 'take over this task' },
+            [ordered]@{ threadId = 'target-test'; followUpPrompt = '' },
+            [ordered]@{ threadId = 'target-test' }
+        )) {
+            $result = Invoke-CrossThreadHook -ToolName 'codex_app__handoff_thread' -ToolInput $toolInput
+            ($result.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+        }
     }
 
     It 'allows only the trusted canonical revision-3 watch body for cross-target automation updates' {
@@ -171,15 +176,11 @@ Describe 'Cross-thread PreToolUse guard' {
         $canonicalPrompt = & $targetGenerator -TargetThreadId 'target-test'
         $fleetTranscript = New-CanonicalWatchTranscript -Role fleet -SessionId 'supervisor-test'
 
-        foreach ($toolInput in @(
-            [ordered]@{ mode = 'delete'; id = 'watch-interrupted-task-v1-target-thread-id-target-test' },
-            [ordered]@{ mode = 'create'; targetThreadId = 'target-test'; prompt = $canonicalPrompt }
-        )) {
-            $allowed = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput $toolInput -SessionId 'supervisor-test' -TranscriptPath $fleetTranscript
-            $allowed.Output | Should BeNullOrEmpty
-        }
+        $allowed = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode = 'create'; targetThreadId = 'target-test'; prompt = $canonicalPrompt }) -SessionId 'supervisor-test' -TranscriptPath $fleetTranscript
+        $allowed.Output | Should BeNullOrEmpty
 
         foreach ($toolInput in @(
+            [ordered]@{ mode = 'delete'; id = 'watch-interrupted-task-v1-target-thread-id-target-test' },
             [ordered]@{ mode = 'delete'; id = 'watch-interrupted-task-v1-target-thread-id-supervisor-test' },
             [ordered]@{ mode = 'delete'; id = 'ordinary-automation' }
         )) {
@@ -195,6 +196,27 @@ Describe 'Cross-thread PreToolUse guard' {
             id = 'watch-interrupted-task-v1-target-thread-id-target-test'
         }) -SessionId 'target-test' -TranscriptPath $ordinaryTranscript
         $result.Output | Should BeNullOrEmpty
+
+        foreach ($case in @(
+            @{ Text = '暂停当前任务守夜。'; Status = 'PAUSED' },
+            @{ Text = '恢复当前任务守夜。'; Status = 'ACTIVE' }
+        )) {
+            $transcript = New-WatchTurnTranscript -Text $case.Text
+            $update = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode = 'update'; id = 'watch-interrupted-task-v1-target-thread-id-target-test'; status = $case.Status }) -SessionId 'target-test' -TranscriptPath $transcript
+            $update.Output | Should BeNullOrEmpty
+        }
+    }
+
+    It 'does not mistake negation questions quotations or unbound targets for lifecycle authorization' {
+        foreach ($text in @('不要关闭当前任务守夜。', '为什么会出现“关闭守夜”？', '文档中写着关闭守夜。')) {
+            $transcript = New-WatchTurnTranscript -Text $text
+            $result = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode = 'delete'; id = 'watch-interrupted-task-v1-target-thread-id-target-test' }) -SessionId 'target-test' -TranscriptPath $transcript
+            ($result.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+        }
+
+        $currentOnly = New-WatchTurnTranscript -Text '关闭当前任务守夜。'
+        $otherTarget = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode = 'delete'; id = 'watch-interrupted-task-v1-target-thread-id-other-test' }) -SessionId 'target-test' -TranscriptPath $currentOnly
+        ($otherTarget.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
     }
 
     It 'blocks ordinary turns that do not contain a direct watch lifecycle command' {
@@ -248,6 +270,11 @@ Describe 'Cross-thread PreToolUse guard' {
             command = '$f = Get-ChildItem scripts/hooks -Filter ''block*.ps1'' | Select-Object -First 1; (Get-Content -LiteralPath $f.FullName).Count; Get-FileHash -LiteralPath $f.FullName'
         })
         $fileNameInspection.Output | Should BeNullOrEmpty
+
+        $exactRegression = Invoke-CrossThreadHook -ToolName 'shell_command' -ToolInput ([ordered]@{
+            command = 'git diff -- scripts/hooks/block-cross-thread-send.ps1'
+        })
+        $exactRegression.Output | Should BeNullOrEmpty
     }
 
     It 'blocks multiline and nested-shell app-server send bypasses' {
@@ -315,7 +342,7 @@ text(result);
         }
     }
 
-    It 'blocks code-mode target mutations and the native automation sentinel while preserving view' {
+    It 'blocks every code-mode automation route and the native automation sentinel' {
         $targetTranscript = New-CanonicalWatchTranscript -Role target -SessionId 'target-test'
         foreach ($source in @(
             'const result = await tools.codex_app__automation_update({ mode: "delete", id: "watch-interrupted-task-v1-target-thread-id-target-test" }); text(result);',
@@ -326,25 +353,35 @@ text(result);
         }
 
         $view = Invoke-CrossThreadHook -ToolName 'exec' -ToolInput 'const result = await tools.codex_app__automation_update({ mode: "view", id: "watch-interrupted-task-v1-target-thread-id-target-test" }); text(result);' -SessionId 'target-test' -TranscriptPath $targetTranscript
-        $view.Output | Should BeNullOrEmpty
+        ($view.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
     }
 
-    It 'allows only another canonical watch target for code-mode fleet mutations' {
+    It 'does not treat regex-parsed code mode as a trusted automation mutation surface' {
         $canonicalPrompt = & $targetGenerator -TargetThreadId 'target-test'
         $encodedPrompt = $canonicalPrompt | ConvertTo-Json -Compress
         $fleetTranscript = New-CanonicalWatchTranscript -Role fleet -SessionId 'supervisor-test'
 
         $allowedDelete = Invoke-CrossThreadHook -ToolName 'exec' -ToolInput 'const result = await tools.codex_app__automation_update({ mode: "delete", id: "watch-interrupted-task-v1-target-thread-id-target-test" }); text(result);' -SessionId 'supervisor-test' -TranscriptPath $fleetTranscript
-        $allowedDelete.Output | Should BeNullOrEmpty
+        ($allowedDelete.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
 
         $allowedUpdateSource = 'const result = await tools.codex_app__automation_update({ mode: "update", targetThreadId: "target-test", prompt: ' + $encodedPrompt + ' }); text(result);'
         $allowedUpdate = Invoke-CrossThreadHook -ToolName 'exec' -ToolInput $allowedUpdateSource -SessionId 'supervisor-test' -TranscriptPath $fleetTranscript
-        $allowedUpdate.Output | Should BeNullOrEmpty
+        ($allowedUpdate.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
 
         foreach ($source in @(
             'const result = await tools.codex_app__automation_update({ mode: "delete", id: "watch-interrupted-task-v1-target-thread-id-supervisor-test" }); text(result);',
             'const result = await tools.codex_app__automation_update({ mode: "delete", id: "ordinary-automation" }); text(result);',
             'const result = await tools.codex_app__automation_update({ mode: "update", targetThreadId: "target-test", prompt: "arbitrary" }); text(result);'
+        )) {
+            $blocked = Invoke-CrossThreadHook -ToolName 'exec' -ToolInput $source -SessionId 'supervisor-test' -TranscriptPath $fleetTranscript
+            ($blocked.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+        }
+
+        foreach ($source in @(
+            'await tools.codex_app__automation_update({ mode: `delete`, id: `watch-interrupted-task-v1-target-thread-id-target-test` });',
+            'await tools.codex_app__list_threads({}); await tools.codex_app__automation_update({ mode: "delete", id: "watch-interrupted-task-v1-target-thread-id-target-test" });',
+            'const { codex_app__automation_update: mutate } = tools; await mutate({ mode: "delete", id: "watch-interrupted-task-v1-target-thread-id-target-test" });',
+            'const t = tools; const name = "codex_app__automation_update"; await t[name]({ mode: "delete", id: "watch-interrupted-task-v1-target-thread-id-target-test" });'
         )) {
             $blocked = Invoke-CrossThreadHook -ToolName 'exec' -ToolInput $source -SessionId 'supervisor-test' -TranscriptPath $fleetTranscript
             ($blocked.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
@@ -375,6 +412,34 @@ text(result);
     It 'fails closed when hook input is malformed' {
         $null = '{' | & pwsh -NoProfile -ExecutionPolicy Bypass -File $hookPath 2>$null
         $LASTEXITCODE | Should Be 2
+    }
+
+    It 'allows only the exact shutdown command from the shutdown-armed fleet heartbeat' {
+        $command = 'shutdown.exe /s /t 120 /c "watch-interrupted-task: all monitored tasks stopped"'
+        $standardFleet = New-CanonicalWatchTranscript -Role fleet -SessionId 'supervisor-test'
+        $armedFleet = New-CanonicalWatchTranscript -Role fleet_shutdown -SessionId 'supervisor-test'
+        $target = New-CanonicalWatchTranscript -Role target -SessionId 'target-test'
+
+        $standard = Invoke-CrossThreadHook -ToolName 'shell_command' -ToolInput ([ordered]@{ command = $command }) -SessionId 'supervisor-test' -TranscriptPath $standardFleet
+        ($standard.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+
+        $allowed = Invoke-CrossThreadHook -ToolName 'shell_command' -ToolInput ([ordered]@{ command = $command }) -SessionId 'supervisor-test' -TranscriptPath $armedFleet
+        $allowed.Output | Should BeNullOrEmpty
+
+        foreach ($blockedCommand in @(
+            'shutdown.exe /s /f /t 0',
+            'shutdown.exe /r /t 120',
+            ($command + '; Write-Output chained')
+        )) {
+            $blocked = Invoke-CrossThreadHook -ToolName 'shell_command' -ToolInput ([ordered]@{ command = $blockedCommand }) -SessionId 'supervisor-test' -TranscriptPath $armedFleet
+            ($blocked.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+        }
+
+        $targetBlocked = Invoke-CrossThreadHook -ToolName 'shell_command' -ToolInput ([ordered]@{ command = $command }) -SessionId 'target-test' -TranscriptPath $target
+        ($targetBlocked.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+
+        $codeMode = Invoke-CrossThreadHook -ToolName 'exec' -ToolInput 'await tools.shell_command({ command: "shutdown.exe /s /t 120" });' -SessionId 'supervisor-test' -TranscriptPath $armedFleet
+        ($codeMode.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
     }
 
     It 'fails closed when invoked for an event other than PreToolUse' {

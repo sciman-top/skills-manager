@@ -3,6 +3,15 @@ function Copy-AgentWorkflowValue($Value) {
     return (($Value | ConvertTo-Json -Depth 50 -Compress) | ConvertFrom-Json)
 }
 
+function Get-AgentCanonicalWritePath([string]$Path) {
+    if ([string]::IsNullOrWhiteSpace($Path) -or $Path -match '[\x00-\x1F<>:"|*?\[\]]') { return $null }
+    $normalized = $Path.Trim().Replace('\', '/')
+    if ($normalized -match '^(?:[A-Za-z]:|/|//)') { return $null }
+    $segments = $normalized.Split([char]'/', [StringSplitOptions]::None)
+    if ($segments.Count -eq 0 -or @($segments | Where-Object { [string]::IsNullOrWhiteSpace($_) -or $_ -in @('.', '..') }).Count -gt 0) { return $null }
+    return (@($segments | ForEach-Object { $_.ToLowerInvariant() }) -join '/')
+}
+
 function New-AgentTaskGraph {
     param(
         [Parameter(Mandatory = $true)][string]$GraphId,
@@ -56,7 +65,7 @@ function Test-AgentTaskGraphContract($TaskGraph) {
         elseif ($integrationOrders.ContainsKey($parsedOrder)) { $findings.Add((New-OperationFinding 'integration_order_duplicate' 'error' ($path + '.integration_order') 'integration_order must be unique.')) | Out-Null }
         else { $integrationOrders[$parsedOrder] = $taskId }
         foreach ($writePath in @((Get-OperationObjectProperty $task 'exact_write_set'))) {
-            if ([string]::IsNullOrWhiteSpace([string]$writePath) -or [string]$writePath -match '[*?\[\]]') { $findings.Add((New-OperationFinding 'write_set_not_exact' 'error' ($path + '.exact_write_set') 'Write-set entries must be non-empty exact paths without wildcards.')) | Out-Null }
+            if ($null -eq (Get-AgentCanonicalWritePath ([string]$writePath))) { $findings.Add((New-OperationFinding 'write_set_path_invalid' 'error' ($path + '.exact_write_set') 'Write-set entries must be canonical repository-relative paths without wildcards, empty segments, dot segments, or roots.')) | Out-Null }
         }
         foreach ($key in @((Get-OperationObjectProperty $task 'coordination_keys'))) {
             if ([string]$key -notmatch '^(read|write):.+$') { $findings.Add((New-OperationFinding 'coordination_key_invalid' 'error' ($path + '.coordination_keys') 'Coordination keys must use read:<resource> or write:<resource>.')) | Out-Null }
@@ -104,15 +113,17 @@ function New-RadarSnapshot {
         [Parameter(Mandatory = $true)][string]$SnapshotId,
         [Parameter(Mandatory = $true)][string]$Source,
         [Parameter(Mandatory = $true)][string]$CapturedAt,
+        [Parameter(Mandatory = $true)][string]$SourceUpdatedAt,
         [Parameter(Mandatory = $true)][string]$ExpiresAt,
         [Parameter(Mandatory = $true)][string]$RawHash,
         [object[]]$Entries = @()
     )
     return [pscustomobject][ordered]@{
-        schema_version = 1
+        schema_version = 2
         snapshot_id = $SnapshotId.Trim()
         source = $Source.Trim()
         captured_at = $CapturedAt
+        source_updated_at = $SourceUpdatedAt
         expires_at = $ExpiresAt
         raw_hash = $RawHash.ToLowerInvariant()
         entries = @($Entries | ForEach-Object { Copy-AgentWorkflowValue $_ } | Sort-Object model_family, reasoning_effort)
@@ -123,23 +134,31 @@ function Test-RadarSnapshotContract {
     param($Snapshot, [string]$Now)
     $findings = New-Object System.Collections.Generic.List[object]
     if ($null -eq $Snapshot) { return New-OperationValidationResult @((New-OperationFinding 'radar_snapshot_missing' 'error' '$' 'Radar snapshot is required.')) }
-    if ((Get-OperationObjectProperty $Snapshot 'schema_version') -ne 1) { $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only Radar snapshot schema version 1 is supported.')) | Out-Null }
-    foreach ($field in @('snapshot_id', 'source', 'captured_at', 'expires_at', 'raw_hash')) { if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Snapshot $field))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Required Radar snapshot field is missing.')) | Out-Null } }
+    if ((Get-OperationObjectProperty $Snapshot 'schema_version') -ne 2) { $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only Radar snapshot schema version 2 is supported.')) | Out-Null }
+    foreach ($field in @('snapshot_id', 'source', 'captured_at', 'source_updated_at', 'expires_at', 'raw_hash')) { if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Snapshot $field))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Required Radar snapshot field is missing.')) | Out-Null } }
+    if ($null -ne $Snapshot.PSObject.Properties['policy_overrides']) { $findings.Add((New-OperationFinding 'radar_decision_field_forbidden' 'error' '$.policy_overrides' 'Radar snapshots are observational evidence and cannot carry user or host policy decisions.')) | Out-Null }
     $sourceUri = $null
     if (-not [uri]::TryCreate([string](Get-OperationObjectProperty $Snapshot 'source'), [UriKind]::Absolute, [ref]$sourceUri) -or $sourceUri.Scheme -notin @('http', 'https')) { $findings.Add((New-OperationFinding 'radar_source_invalid' 'error' '$.source' 'Radar source must be an absolute HTTP(S) URI.')) | Out-Null }
     if ([string](Get-OperationObjectProperty $Snapshot 'raw_hash') -notmatch '^[a-fA-F0-9]{64}$') { $findings.Add((New-OperationFinding 'radar_raw_hash_invalid' 'error' '$.raw_hash' 'Radar raw_hash must be SHA-256.')) | Out-Null }
-    $captured = [datetimeoffset]::MinValue; $expires = [datetimeoffset]::MinValue; $nowValue = [datetimeoffset]::MinValue
+    $captured = [datetimeoffset]::MinValue; $sourceUpdated = [datetimeoffset]::MinValue; $expires = [datetimeoffset]::MinValue; $nowValue = [datetimeoffset]::MinValue
     $capturedValid = [datetimeoffset]::TryParse([string](Get-OperationObjectProperty $Snapshot 'captured_at'), [ref]$captured)
+    $sourceUpdatedValid = [datetimeoffset]::TryParse([string](Get-OperationObjectProperty $Snapshot 'source_updated_at'), [ref]$sourceUpdated)
     $expiresValid = [datetimeoffset]::TryParse([string](Get-OperationObjectProperty $Snapshot 'expires_at'), [ref]$expires)
     if (-not $capturedValid) { $findings.Add((New-OperationFinding 'radar_captured_at_invalid' 'error' '$.captured_at' 'captured_at must be ISO-8601.')) | Out-Null }
+    if (-not $sourceUpdatedValid) { $findings.Add((New-OperationFinding 'radar_source_updated_at_invalid' 'error' '$.source_updated_at' 'source_updated_at must be ISO-8601.')) | Out-Null }
     if (-not $expiresValid) { $findings.Add((New-OperationFinding 'radar_expires_at_invalid' 'error' '$.expires_at' 'expires_at must be ISO-8601.')) | Out-Null }
     if ($capturedValid -and $expiresValid -and $expires -le $captured) { $findings.Add((New-OperationFinding 'radar_expiry_invalid' 'error' '$.expires_at' 'expires_at must be later than captured_at.')) | Out-Null }
+    if ($capturedValid -and $sourceUpdatedValid) {
+        if ($sourceUpdated -gt $captured.AddMinutes(5)) { $findings.Add((New-OperationFinding 'radar_source_future' 'error' '$.source_updated_at' 'source_updated_at cannot be materially later than captured_at.')) | Out-Null }
+        elseif (($captured - $sourceUpdated).TotalHours -gt 36) { $findings.Add((New-OperationFinding 'radar_source_stale' 'error' '$.source_updated_at' 'Upstream Radar data is older than the 36-hour source freshness limit.')) | Out-Null }
+    }
     if (-not [string]::IsNullOrWhiteSpace($Now)) {
         if (-not [datetimeoffset]::TryParse($Now, [ref]$nowValue)) { $findings.Add((New-OperationFinding 'evaluation_time_invalid' 'error' '$.now' 'Evaluation time must be ISO-8601.')) | Out-Null }
         elseif ($expiresValid -and $nowValue -ge $expires) { $findings.Add((New-OperationFinding 'radar_snapshot_stale' 'error' '$.expires_at' 'Radar snapshot is expired and cannot drive a model proposal.')) | Out-Null }
     }
     $entries = Get-OperationObjectProperty $Snapshot 'entries'
     if (-not (Test-OperationArray $entries)) { $findings.Add((New-OperationFinding 'radar_entries_invalid' 'error' '$.entries' 'Radar entries must be an array.')) | Out-Null; $entries = @() }
+    if (@($entries).Count -eq 0) { $findings.Add((New-OperationFinding 'radar_entries_empty' 'error' '$.entries' 'Radar snapshots require at least one observation.')) | Out-Null }
     for ($i = 0; $i -lt @($entries).Count; $i++) {
         $entry = @($entries)[$i]; $path = '$.entries[{0}]' -f $i
         foreach ($field in @('model_label', 'model_family', 'reasoning_effort', 'confidence')) { if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $entry $field))) { $findings.Add((New-OperationFinding 'radar_entry_field_missing' 'error' ($path + '.' + $field) 'Radar entry field is required.')) | Out-Null } }
@@ -180,8 +199,15 @@ function Test-AgentFailurePacketContract($FailurePacket) {
     $attemptCount = 0; $escalationCount = 0
     if (-not [int]::TryParse([string](Get-OperationObjectProperty $FailurePacket 'attempt_count'), [ref]$attemptCount) -or $attemptCount -lt 1) { $findings.Add((New-OperationFinding 'attempt_count_invalid' 'error' '$.attempt_count' 'attempt_count must be at least one.')) | Out-Null }
     if (-not [int]::TryParse([string](Get-OperationObjectProperty $FailurePacket 'escalation_count'), [ref]$escalationCount) -or $escalationCount -lt 0) { $findings.Add((New-OperationFinding 'escalation_count_invalid' 'error' '$.escalation_count' 'escalation_count must be non-negative.')) | Out-Null }
+    if ($attemptCount -ge 1 -and $escalationCount -gt ($attemptCount - 1)) { $findings.Add((New-OperationFinding 'escalation_count_inconsistent' 'error' '$.escalation_count' 'escalation_count cannot exceed attempt_count minus one.')) | Out-Null }
     foreach ($field in @('commands', 'failures', 'verified_facts', 'unresolved_questions', 'artifacts', 'exact_write_set')) { if (-not (Test-OperationArray (Get-OperationObjectProperty $FailurePacket $field))) { $findings.Add((New-OperationFinding 'array_type_invalid' 'error' ('$.{0}' -f $field) 'FailurePacket field must be an array.')) | Out-Null } }
     if (@((Get-OperationObjectProperty $FailurePacket 'failures')).Count -eq 0) { $findings.Add((New-OperationFinding 'failures_required' 'error' '$.failures' 'FailurePacket must contain at least one observed failure.')) | Out-Null }
+    if ([string](Get-OperationObjectProperty $FailurePacket 'failure_kind') -eq 'capacity' -and $attemptCount -eq 1 -and
+        ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $FailurePacket 'correction_summary')) -or
+            @((Get-OperationObjectProperty $FailurePacket 'commands')).Count -eq 0 -or
+            @((Get-OperationObjectProperty $FailurePacket 'verified_facts')).Count -eq 0)) {
+        $findings.Add((New-OperationFinding 'correction_evidence_required' 'error' '$.correction_summary' 'A first capacity retry requires a correction summary, a verified command, and a verified fact.')) | Out-Null
+    }
     $serialized = $FailurePacket | ConvertTo-Json -Depth 20 -Compress
     if (Test-OperationSerializedSensitiveValue $serialized) { $findings.Add((New-OperationFinding 'sensitive_value_present' 'error' '$' 'FailurePacket contains a sensitive value.')) | Out-Null }
     return New-OperationValidationResult $findings.ToArray()

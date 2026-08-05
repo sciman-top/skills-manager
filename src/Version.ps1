@@ -6,7 +6,8 @@ param(
     [switch]$DryRun,
     [switch]$Locked,
     [switch]$Plan,
-    [switch]$Upgrade
+    [switch]$Upgrade,
+    [switch]$AllowUnverifiedHostProjection
 )
 
 $ErrorActionPreference = "Stop"

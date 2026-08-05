@@ -10,9 +10,9 @@
 **PROVIDER_CALL_STATUS**: `none`
 **NATIVE_MUTATION_STATUS**: `none`
 **RADAR_FETCH_STATUS**: `not_implemented`
-**HOST_LOADED_STATUS**: `host_evaluation_partial_pass`
-**HOST_ORCHESTRATION_STATUS**: `native_spawn_observed`
-**HOST_RADAR_REFRESH_STATUS**: `scheduled_run_pass`
+**HOST_LOADED_STATUS**: `host_evaluation_partial`
+**HOST_ORCHESTRATION_STATUS**: `native_spawn_partial`
+**HOST_RADAR_REFRESH_STATUS**: `pending_revalidation`
 **LIVE_ACCEPTANCE_STATUS**: `not_run`
 **P6_ADMISSION_STATUS**: `hold`
 **SCHEMA_POLICY**: `operation_contract_v1_compatible_no_major`
@@ -41,7 +41,7 @@
 
 ## 3. 输入合同
 
-CLI 输入是 UTF-8 JSON，schema version 1，最小字段如下。字段名与 `tests/fixtures/agent-workflow/valid-request.json` 保持一致；不再增加第二套 task manifest。
+CLI 请求仍是 UTF-8 JSON schema version 1；其中 `TaskGraph` 与 `FailurePacket` 为 v1，时变观测 `RadarSnapshot` 已升级为 v2。字段名与 `tests/fixtures/agent-workflow/valid-request.json` 保持一致；不再增加第二套 task manifest。
 
 ```json
 {
@@ -73,21 +73,25 @@ CLI 输入是 UTF-8 JSON，schema version 1，最小字段如下。字段名与 
     ]
   },
   "radar_snapshot": {
-    "schema_version": 1,
+    "schema_version": 2,
     "snapshot_id": "immutable-id",
     "source": "https://codexradar.com/",
     "captured_at": "RFC3339",
+    "source_updated_at": "RFC3339",
     "expires_at": "RFC3339",
     "raw_hash": "sha256",
-    "entries": []
+    "entries": ["at-least-one-observation"]
   },
   "completed_task_ids": [],
+  "completion_receipts": [],
   "requested_parallel_task_ids": [],
   "model_proposals": []
 }
 ```
 
-`FailurePacket` 是换档、重试或重切片的前置输入，必须包含 `issue_id/task_id/base_revision/failure_kind/attempt_count/escalation_count/attempted_tier/commands/failures/verified_facts/unresolved_questions/artifacts/exact_write_set`。failure kind 只允许 `task/context/tool/capacity/permission/credential/production_authorization/user_decision/unknown`。
+`completion_receipts[]` 为每个 `completed_task_ids[]` 提供 `task_id/base_revision/status=verified/verification_receipt`；未知、重复、未被 completed list 声明、revision 不一致、无证据或同时被选入当前 batch 均 fail-closed。`model_proposals[]` 必须引用 TaskGraph task、每 task 最多一项且 rationale 非空；其 `local_outcomes[]` 最少记录 `task_class/model_family/reasoning_effort/base_revision/gate_passed/rework_count/actual_cost/actual_duration_seconds/sampled_at`，并与 proposal pair 一致、evaluation time 可解析且不早于 90 天。
+
+`FailurePacket` 是换档、重试或重切片的前置输入，必须包含 `issue_id/task_id/base_revision/failure_kind/attempt_count/escalation_count/attempted_tier/commands/failures/verified_facts/unresolved_questions/artifacts/exact_write_set`。第一次 capacity corrected retry 还必须提供 `correction_summary`、至少一个 verified command 和 verified fact；`escalation_count` 不得大于 `attempt_count - 1`。failure kind 只允许 `task/context/tool/capacity/permission/credential/production_authorization/user_decision/unknown`。
 
 ## 4. 任务拆分与编排
 
@@ -113,17 +117,18 @@ CLI 输入是 UTF-8 JSON，schema version 1，最小字段如下。字段名与 
 
 ### 4.2 确定性 wave 算法
 
-`New-AgentExecutionPlan` 先验证 TaskGraph，再按 `integration_order/task_id` 做拓扑排序。每一 wave 只放入依赖已完成的 task；同 wave 内先放 serial task，再把 `parallelizable=true` 的 task 按 exact write set、coordination key、external resource 做 greedy disjoint grouping。任何验证失败都返回 `pass=false`，不返回可执行 wave。该算法只输出计划，不创建线程、不等待、不调用模型。
+`New-AgentExecutionPlan` 先验证 TaskGraph，再按 `integration_order/task_id` 做拓扑排序。每个 wave 只含一个真正可执行 group：任一 serial、high-risk 或 high-ambiguity task 独占 barrier wave；否则把 ready task 按 canonical exact write set、coordination key 和 external resource 做 greedy disjoint group。一个 group 完成后才形成下一 wave；内部 `planned-prior-wave` receipt 只用于静态拓扑模拟，宿主真实拉起下一 wave 前仍必须提交实际 verified completion receipt。任何验证失败都返回 `pass=false`，不返回可执行 wave。该算法只输出计划，不创建线程、不等待、不调用模型。
 
 ## 5. 并行 admission 与并发拉起
 
 `Test-AgentParallelAdmission` 必须在宿主拉起并发前通过。准入条件是：
 
-- 请求至少包含两个已声明 task，task ID 不重复且均存在；
-- 所有 `depends_on` 已在 `completed_task_ids` 中，DAG 无 unknown/cycle；
+- 空 `requested_parallel_task_ids` 是合法的 `not_requested`；若请求并行则至少包含两个已声明 task，task ID 不重复且均存在；
+- 所有 `depends_on` 已在 `completed_task_ids` 中，且每项有同 revision 的 verified completion receipt，DAG 无 unknown/cycle；
 - `base_revision` 相同且非空；
+- high-risk/high-ambiguity/`parallelizable=false` task 一律不得进入普通并发；
 - 每个 task 有唯一 `result_owner`、`verification` 和 stop condition；
-- `exact_write_set` 无通配符，候选间路径互斥；空 write set 只代表 read-only，不代表可写共享；
+- `exact_write_set` 必须是 canonical Windows-safe repo-relative path，禁止 root、drive、control/Windows-invalid chars（含 ADS `:`）、通配符、空 segment、`.` 或 `..`；比较时统一分隔符/大小写，并阻断相等及 ancestor/descendant 重叠；空 write set 只代表 read-only，不代表可写共享；
 - `coordination_keys` 不出现同资源的任意 write 冲突；外部 `write` 与任何同资源任务冲突；
 - candidate 能在自己的 worktree/branch 独立构建、测试、丢弃；integration owner/order 已声明。
 
@@ -131,7 +136,7 @@ CLI 输入是 UTF-8 JSON，schema version 1，最小字段如下。字段名与 
 
 ## 6. 三档模型软锚点
 
-三档只作为 host proposal 的可覆盖起点，不能被 deterministic script 静默路由：
+三档只作为 host proposal 的可覆盖起点，不能被 deterministic script 静默路由。`New-ModelPolicyProposal` 的语义固定为 `host_proposal_validation_only`：宿主先按完整上下文提出 pair，本仓只验证证据、可用性与 fallback，不替宿主选择任务语义。
 
 | tier | 软锚点 | 默认适用任务 |
 | --- | --- | --- |
@@ -143,9 +148,9 @@ CLI 输入是 UTF-8 JSON，schema version 1，最小字段如下。字段名与 
 
 ## 7. Radar snapshot
 
-Radar 只允许通过显式导入/刷新动作产生不可变 snapshot；本 track 不实现联网抓取。每个 entry 必须有 `model_label/model_family/reasoning_effort/score/estimated_cost/estimated_duration_seconds/sample_count/confidence`，snapshot 必须有 `source/captured_at/expires_at/raw_hash`。`expires_at <= now`、来源非 HTTP(S)、hash 非 SHA-256、样本/指标缺失或 schema 不兼容时 fail-closed，并忽略 Radar 对模型选择的影响。
+Radar 只允许通过显式导入/刷新动作产生不可变 v2 snapshot；本 track 不实现联网抓取。每个 entry 必须有 `model_label/model_family/reasoning_effort/score/estimated_cost/estimated_duration_seconds/sample_count/confidence`，entries 不得为空；snapshot 必须有 `source/captured_at/source_updated_at/expires_at/raw_hash`。上游 `source_updated_at` 距 capture 超过 36 小时、明显晚于 capture、`expires_at <= now`、来源非 HTTP(S)、hash 非 SHA-256、样本/指标缺失或 schema 不兼容时 fail-closed。`policy_overrides` 等用户/宿主决策字段禁止进入观测 snapshot。
 
-本地历史结果必须能记录同类任务的 gate pass、rework、actual cost/duration、人工纠正和集成成本；Radar 的社区分数不能替代真实任务证据，也不能证明 `live_accepted`。2026-08-05 的 host acceptance 已手工生成并验证 ignored snapshot，并创建每日 21:00 的宿主 Scheduled automation；首个 scheduled run 于 21:05 产生 21-entry fresh snapshot 并通过本仓 validator。它不构成本仓 scheduler/provider runtime，也不能自动修改模型配置。
+本地结果只有满足最小 comparable contract、pair 一致、freshness 与 gate 证据时才优先于 Radar；传入空对象或 stale/invalid outcome 不得屏蔽无效 Radar。Radar 的社区分数不能替代真实任务证据，也不能证明 `live_accepted`。2026-08-05 的 v1 snapshot 与首个 scheduled run 仅保留为历史 receipt；当前宿主 automation 已进入 v2 revalidation，在生成带 automation revision、实际 model/effort、run time 与 snapshot id 的新 receipt 前，`HOST_RADAR_REFRESH_STATUS=pending_revalidation`。
 
 ## 8. 失败与难度超预期
 
@@ -154,7 +159,7 @@ Radar 只允许通过显式导入/刷新动作产生不可变 snapshot；本 tra
 ```text
 route
   -> root-cause packet
-  -> one corrected retry (same tier, corrected context/tool)
+  -> one corrected retry (same tier, corrected context/tool; serial until re-admitted)
   -> task/context: add evidence or rescope/replan
   -> tool: repair tool or reassign
   -> capacity only: Luna max -> Sol medium -> Sol xhigh
@@ -162,7 +167,7 @@ route
   -> permission, credential, production authorization, user decision: fail-closed
 ```
 
-`Get-AgentEscalationDecision` 只在 `Test-AgentFailurePacketContract` 通过后给建议。一次失败不直接升档；同一 issue 第二次失败必须重新规划，两个升档或 high-risk task 由 supervisor 串行接管。缺权限、凭据、生产授权或用户产品决定时，升档没有意义，必须停止并请求相应授权/澄清。升级不会改变 write set、base 或用户授权。
+`Get-AgentEscalationDecision` 只在 `Test-AgentFailurePacketContract` 通过后给建议。任何 corrected retry/tool reassignment 都返回 `parallel_allowed=false` 与 `requires_parallel_readmission=true`；task/context/tool 同一 issue 第二次失败直接由 supervisor 串行接管，capacity 才允许按三档 replan/escalate，两个升档后同样 takeover。缺权限、凭据、生产授权或用户产品决定时，升档没有意义，必须停止并请求相应授权/澄清。
 
 ## 9. CLI 与零副作用合同
 
@@ -180,8 +185,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File skills.ps1 agent-plan --input test
 | Slice | 文件 | 停止条件 |
 | --- | --- | --- |
 | AWA-001 | 本 spec、manifest、产品映射 | 产品边界、truth level、非目标和官方依据可追踪 |
-| AWA-002 | `src/Domain/AgentWorkflow.ps1` | TaskGraph/Radar/FailurePacket v1 纯合同通过 focused tests |
-| AWA-003 | `src/Application/ModelAndAgentPolicy.ps1` | wave/admission/model/escalation deterministic tests 通过 |
+| AWA-002 | `src/Domain/AgentWorkflow.ps1` | TaskGraph/FailurePacket v1 与 RadarSnapshot v2 纯合同通过 focused tests |
+| AWA-003 | `src/Application/ModelAndAgentPolicy.ps1` | completion receipt、canonical path、barrier wave、proposal/outcome/escalation deterministic tests 通过 |
 | AWA-004 | `src/Commands/AgentWorkflow.ps1`、`src/Main.ps1`、`src/Version.ps1`、`build.ps1` | CLI build、JSON envelope、zero-write/provider-free 通过 |
 | AWA-005 | verifier、tests、evidence、产品/任务索引 | verifier + full gate 通过；未产生 host/live 变更 |
 
@@ -212,4 +217,4 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File skills.ps1 agent-plan --input test
 - Codex Radar：`https://codexradar.com/` 只作为用户指定的时变社区观察输入；其每日成本/时延/分数必须经 snapshot、hash、expiry 和本地结果复核后才可影响建议。
 - 社区项目只提供协议启发，按既有 `references/reference-shelf.manifest.json` 和 `docs/EXTERNAL_REFERENCE_REPO_TIERS.md` 记录，不执行外部脚本，不引入第二控制面。
 
-**最大声明**：本 track `repo_verified` 只证明 deterministic advisory contract、CLI 接线、文档和 verifier。独立 host acceptance 的早期 receipt 已观察到 Sol xhigh、Sol medium、Terra high 原生子代理以及首个 scheduled Radar snapshot；当前三档配置已投影到宿主文件，但 Luna 真实 spawn 尚未执行。这些仍只是 `host_evaluation_partial_pass`，不证明任意任务都会自动委派、Luna 在所有 spawn surface 可用、模型策略产生普遍净收益、外部生产动作获授权或业务 `live_accepted`。
+**最大声明**：本 track `repo_verified` 只证明 deterministic advisory contract、CLI 接线、文档和 verifier。2026-08-06 的 read-only ephemeral CLI probe 已实证 `codex_local_access / gpt-5.6-luna / max` 可用；但当前 collaboration spawn surface 对同一 Luna model 返回 unavailable，说明 provider/model 可用性不能外推到所有子代理 surface。早期 Radar v1 run 只保留历史真值，v2 scheduled receipt 仍待生成。这些仅构成 `host_evaluation_partial`，不证明任意任务都会自动委派、Luna 在所有 spawn surface 可用、模型策略产生普遍净收益、外部生产动作获授权或业务 `live_accepted`。

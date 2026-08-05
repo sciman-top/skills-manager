@@ -8,6 +8,74 @@ function New-ProjectionSkill([string]$root, [string]$dir, [string]$name, [string
 }
 
 Describe "Skill projection" {
+    Context "Host projection promotion boundary" {
+        It "Allows a clean committed source revision for an external host target" {
+            $oldRoot = $script:Root
+            try {
+                $repo = Join-Path $TestDrive "promotion-clean"
+                New-Item -ItemType Directory -Path $repo -Force | Out-Null
+                & git -C $repo init -q
+                Set-Content -LiteralPath (Join-Path $repo "tracked.txt") -Value "clean" -Encoding UTF8
+                & git -C $repo add tracked.txt
+                & git -C $repo -c user.name=fixture -c user.email=fixture@example.invalid commit -q -m initial
+                $script:Root = $repo
+                $cfg = [pscustomobject]@{ targets = @([pscustomobject]@{ path = (Join-Path $TestDrive "host-clean") }) }
+
+                $result = Get-HostProjectionPromotionContext $cfg
+
+                $result.required | Should Be $true
+                $result.source_worktree_dirty | Should Be $false
+                $result.source_git_state | Should Be "clean"
+                $result.promotion_mode | Should Be "verified_clean_commit"
+                $result.source_revision | Should Match '^[0-9a-f]{40}$'
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
+        }
+
+        It "Blocks dirty source projection unless the explicit override is supplied" {
+            $oldRoot = $script:Root
+            try {
+                $repo = Join-Path $TestDrive "promotion-dirty"
+                New-Item -ItemType Directory -Path $repo -Force | Out-Null
+                & git -C $repo init -q
+                Set-Content -LiteralPath (Join-Path $repo "tracked.txt") -Value "before" -Encoding UTF8
+                & git -C $repo add tracked.txt
+                & git -C $repo -c user.name=fixture -c user.email=fixture@example.invalid commit -q -m initial
+                Set-Content -LiteralPath (Join-Path $repo "tracked.txt") -Value "after" -Encoding UTF8
+                $script:Root = $repo
+                $cfg = [pscustomobject]@{ targets = @([pscustomobject]@{ path = (Join-Path $TestDrive "host-dirty") }) }
+
+                { Get-HostProjectionPromotionContext $cfg } | Should Throw
+                $override = Get-HostProjectionPromotionContext $cfg -AllowUnverified
+                $override.source_worktree_dirty | Should Be $true
+                $override.source_git_state | Should Be "dirty"
+                $override.promotion_mode | Should Be "unverified_override"
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
+        }
+
+        It "Does not require Git promotion for repository-local fixture targets" {
+            $oldRoot = $script:Root
+            try {
+                $script:Root = Join-Path $TestDrive "promotion-local"
+                New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+                $cfg = [pscustomobject]@{ targets = @([pscustomobject]@{ path = (Join-Path $script:Root "out") }) }
+
+                $result = Get-HostProjectionPromotionContext $cfg
+
+                $result.required | Should Be $false
+                $result.promotion_mode | Should Be "local_only"
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
+        }
+    }
+
     Context "Repository GPT-5.6 profile policy" {
         It "Keeps routine profiles free from the mandatory Superpowers bootstrap" {
             $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
@@ -844,20 +912,37 @@ unified_exec = true
                     sources = @([pscustomobject]@{ id = "managed"; path = $userRoot; priority = 200; platforms = @("codex") })
                 }
 
-                $cold = Sync-CodexSkillProjection $projection "sig-1"
+                $promotion = [pscustomobject]@{
+                    source_revision = "0123456789012345678901234567890123456789"
+                    source_worktree_dirty = $false
+                    source_git_state = "clean"
+                    promotion_mode = "verified_clean_commit"
+                    gate_receipt_status = "not_provided"
+                    gate_receipt_path = ""
+                }
+                $cold = Sync-CodexSkillProjection $projection "sig-1" $promotion
                 $coldManifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
                 $coldHash = [string]$cold.plan.skills[0].package_hash
 
                 $coldManifest.package_hash_cache_schema | Should Be 1
                 $coldManifest.agent_build_signature | Should Be "sig-1"
+                $coldManifest.source_revision | Should Be "0123456789012345678901234567890123456789"
+                $coldManifest.source_worktree_dirty | Should Be $false
+                $coldManifest.promotion_mode | Should Be "verified_clean_commit"
+                $coldManifest.gate_receipt.status | Should Be "not_provided"
+                $promotedAt = [string]$coldManifest.promoted_at
                 [string]::IsNullOrWhiteSpace([string]$coldManifest.skills[0].package_fingerprint) | Should Be $false
 
                 $hot = Sync-CodexSkillProjection $projection "sig-1"
+                $hotManifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
 
                 $hot.plan.skills[0].package_hash | Should Be $coldHash
                 $hot.package_hash_cache.cache_hits | Should Be 1
                 $hot.package_hash_cache.cache_misses | Should Be 0
                 $hot.package_hash_cache.full_hash_count | Should Be 0
+                $hotManifest.source_revision | Should Be "0123456789012345678901234567890123456789"
+                $hotManifest.promotion_mode | Should Be "verified_clean_commit"
+                $hotManifest.promoted_at | Should Be $promotedAt
             }
             finally {
                 $script:DryRun = $oldDryRun

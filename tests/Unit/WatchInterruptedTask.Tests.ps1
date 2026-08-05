@@ -107,7 +107,24 @@ Describe 'watch-interrupted-task conditional recovery contract' {
         $proved = & $dispositionScriptPath -State goal_satisfied -OperatingMode conditional_recovery -GoalStatus active -AcceptanceVerified
         $proved.task_action | Should Be 'stop_after_verification'
         $proved.goal_action | Should Be 'mark_complete'
-        $proved.automation_action | Should Be 'request_supervisor_cleanup'
+        $proved.automation_action | Should Be 'keep_active'
+    }
+
+    It 'requests cleanup only after terminal Goal fresh acceptance receipt and no active turn' {
+        $now = [DateTime]::UtcNow.ToString('o')
+        foreach ($goal in @('active', 'paused', 'blocked')) {
+            $blocked = & $dispositionScriptPath -State complete -OperatingMode conditional_recovery -GoalStatus $goal -AcceptanceVerified `
+                -HasPositiveEvidence -EvidenceTimestampUtc $now -CheckpointId 'acceptance' -ReceiptKey 'receipt-cleanup' -ExternalEffectState none -NoActiveTurn
+            $blocked.automation_action | Should Be 'keep_active'
+        }
+
+        $missingReceipt = & $dispositionScriptPath -State complete -OperatingMode conditional_recovery -GoalStatus complete -AcceptanceVerified -NoActiveTurn
+        $missingReceipt.automation_action | Should Be 'keep_active'
+
+        $accepted = & $dispositionScriptPath -State complete -OperatingMode conditional_recovery -GoalStatus complete -AcceptanceVerified `
+            -HasPositiveEvidence -EvidenceTimestampUtc $now -CheckpointId 'acceptance' -ReceiptKey 'receipt-cleanup' -ExternalEffectState none -NoActiveTurn
+        $accepted.automation_action | Should Be 'request_supervisor_cleanup'
+        $accepted.requires_receipt | Should Be $true
     }
 
     It 'marks a Goal blocked only after the same proved impasse repeats for three turns' {
@@ -137,6 +154,9 @@ Describe 'watch-interrupted-task conditional recovery contract' {
         $script:prompt | Should Match '<decision>DONT_NOTIFY\|NOTIFY</decision>'
         $script:prompt | Should Match '<message>'
         $script:prompt | Should Match 'receipt_key'
+        $script:prompt | Should Match 'task_stopped=true\|false'
+        $script:prompt | Should Match 'stop_reason'
+        $script:prompt | Should Match 'recovery_pending=true\|false'
         $script:prompt | Should -Not -Match 'entire assistant output must be exactly DONT_NOTIFY'
     }
 
@@ -146,5 +166,18 @@ Describe 'watch-interrupted-task conditional recovery contract' {
         $script:prompt | Should Match 'read-only list/read/wait'
         $script:recoveryDesign | Should Match 'idempotency'
         $script:recoveryDesign | Should Match 'Retry-After'
+    }
+
+    It 'keeps fleet shutdown separately armed and never equates transient interruption with stopped' {
+        $script:skill | Should Match 'Automatic computer shutdown is a distinct, direct-user fleet lifecycle mode'
+        $script:skill | Should Match 'ShutdownWhenAllStopped'
+        $script:skill | Should Match 'does not maintain a finite allowlist of stop reasons'
+        $script:skill | Should Match 'task_stopped=true'
+        $script:skill | Should Match 'recovery_pending=false'
+        $script:recoveryDesign | Should Match 'Goal presence does not change fleet aggregation'
+        $script:recoveryDesign | Should Match 'resume_eligible.*continuation_gap.*recoverable_task_failure'
+        $script:recoveryDesign | Should Match 'two consecutive ticks'
+        $script:recoveryDesign | Should Match 'shutdown\.exe /s /t 120'
+        $script:recoveryDesign | Should Match 'shutdown /a'
     }
 }

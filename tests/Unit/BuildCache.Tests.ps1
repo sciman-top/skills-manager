@@ -418,6 +418,41 @@ description: Execute a phased implementation plan using subagents.
             Assert-MockCalled 构建Agent -Times 0 -Exactly -Scope It
         }
 
+        It "Keeps the staged agent build when clean-commit host promotion is blocked" {
+            $cfg = [pscustomobject]@{
+                vendors = @()
+                mappings = @()
+                targets = @([pscustomobject]@{ path = "~/.claude/skills" })
+                sync_mode = "link"
+            }
+
+            Mock Preflight {}
+            Mock Invoke-PrebuildCheck {}
+            Mock LoadCfg { $cfg }
+            Mock Optimize-Imports {}
+            Mock Get-CfgChangeSummaryLines { @() }
+            Mock Write-BuildSummary {}
+            Mock Test-AgentBuildCacheHit { [pscustomobject]@{ hit = $false; reason = "changed" } }
+            Mock Start-BuildTransaction { [pscustomobject]@{ path = "fixture-txn" } }
+            Mock 构建Agent { @() }
+            Mock Load-BuildCache { @{ "__agent_build_signature" = "sig-2" } }
+            Mock Get-HostProjectionPromotionContext { throw "dirty source" }
+            Mock 应用到ClaudeCodex { throw "host apply must not run" }
+            Mock Start-DryRunMirrorCollect {}
+            Mock Stop-DryRunMirrorCollect {}
+            Mock Write-DryRunMirrorSummary {}
+            Mock Write-FailureSummary {}
+            Mock Complete-BuildTransaction {}
+            Mock Rollback-BuildTransaction {}
+            Mock Log {}
+
+            { 构建生效 } | Should Throw
+
+            Assert-MockCalled 应用到ClaudeCodex -Times 0 -Exactly -Scope It
+            Assert-MockCalled Complete-BuildTransaction -Times 1 -Exactly -Scope It
+            Assert-MockCalled Rollback-BuildTransaction -Times 0 -Exactly -Scope It
+        }
+
     }
 
     Context "Build Transaction" {

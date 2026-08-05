@@ -808,7 +808,132 @@ function Backup-CodexSkillProjectionConfig([string]$configPath) {
     return $backupPath
 }
 
-function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignature = "") {
+function Test-ConfiguredHostProjection($cfg) {
+    if ($null -eq $cfg) { return $false }
+    $repoRoot = [System.IO.Path]::GetFullPath($Root)
+    foreach ($targetCfg in @($cfg.targets)) {
+        if ($null -eq $targetCfg -or [string]::IsNullOrWhiteSpace([string]$targetCfg.path)) { continue }
+        $targetPath = Resolve-TargetDir ([string]$targetCfg.path)
+        if (-not [string]::IsNullOrWhiteSpace($targetPath) -and -not (Is-PathInsideOrEqual $targetPath $repoRoot)) {
+            return $true
+        }
+    }
+    if ($cfg.PSObject.Properties.Match("skill_projection").Count -eq 0 -or $null -eq $cfg.skill_projection) { return $false }
+    $projectionCfg = $cfg.skill_projection
+    foreach ($propertyName in @("user_skill_root", "codex_config_path")) {
+        if ($projectionCfg.PSObject.Properties.Match($propertyName).Count -eq 0) { continue }
+        $candidate = Resolve-SkillProjectionPath ([string]$projectionCfg.$propertyName)
+        if (-not [string]::IsNullOrWhiteSpace($candidate) -and -not (Is-PathInsideOrEqual $candidate $repoRoot)) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Invoke-HostProjectionGitText([string]$repositoryPath, [string[]]$gitArguments) {
+    $output = @(& git -C $repositoryPath @gitArguments 2>&1)
+    $exitCode = $LASTEXITCODE
+    $text = (($output | ForEach-Object { Convert-GitOutputLineToText $_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join "`n").Trim()
+    if ($exitCode -ne 0) {
+        throw ("git -C '{0}' {1} failed with exit code {2}: {3}" -f $repositoryPath, ($gitArguments -join " "), $exitCode, $text)
+    }
+    return $text
+}
+
+function Get-HostProjectionPromotionContext($cfg, [switch]$AllowUnverified) {
+    $requiresPromotion = Test-ConfiguredHostProjection $cfg
+    if (-not $requiresPromotion) {
+        return [pscustomobject]([ordered]@{
+                required = $false
+                source_revision = ""
+                source_worktree_dirty = $false
+                source_git_state = "not_checked_local_only"
+                promotion_mode = "local_only"
+                gate_receipt_status = "not_provided"
+                gate_receipt_path = ""
+            })
+    }
+
+    $sourceRevision = ""
+    $sourceDirty = $true
+    $gitState = "unavailable"
+    try {
+        $inside = Invoke-HostProjectionGitText $Root @("rev-parse", "--is-inside-work-tree")
+        Need ([string]::Equals($inside, "true", [System.StringComparison]::OrdinalIgnoreCase)) "当前技能源不在 Git 工作树中"
+        $sourceRevision = Invoke-HostProjectionGitText $Root @("rev-parse", "HEAD")
+        Need ($sourceRevision -match '^[0-9a-fA-F]{40,64}$') "无法解析技能源 commit"
+        $status = Invoke-HostProjectionGitText $Root @("status", "--porcelain=v1", "--untracked-files=all")
+        $sourceDirty = -not [string]::IsNullOrWhiteSpace($status)
+        $gitState = if ($sourceDirty) { "dirty" } else { "clean" }
+    }
+    catch {
+        if (-not $AllowUnverified) {
+            throw ("正式宿主投影要求可验证的 clean Git commit；Git 取证失败。可仅在明确接受风险时使用 -AllowUnverifiedHostProjection。{0}" -f $_.Exception.Message)
+        }
+        $gitState = "unavailable"
+    }
+
+    if ($sourceDirty -and -not $AllowUnverified) {
+        throw "正式宿主投影要求 clean Git commit；当前工作树存在未提交或未跟踪改动。请先完成门禁并提交，或仅在明确接受风险时使用 -AllowUnverifiedHostProjection。"
+    }
+
+    return [pscustomobject]([ordered]@{
+            required = $true
+            source_revision = $sourceRevision
+            source_worktree_dirty = [bool]$sourceDirty
+            source_git_state = $gitState
+            promotion_mode = if ($sourceDirty -or $gitState -ne "clean") { "unverified_override" } else { "verified_clean_commit" }
+            gate_receipt_status = "not_provided"
+            gate_receipt_path = ""
+        })
+}
+
+function Get-SkillProjectionPromotionRecord([string]$manifestPath, $promotionContext = $null) {
+    if ($null -ne $promotionContext) {
+        return [pscustomobject]@{
+            source_revision = [string]$promotionContext.source_revision
+            source_worktree_dirty = [bool]$promotionContext.source_worktree_dirty
+            source_git_state = [string]$promotionContext.source_git_state
+            promotion_mode = [string]$promotionContext.promotion_mode
+            promoted_at = (Get-Date).ToString("o")
+            gate_receipt_status = [string]$promotionContext.gate_receipt_status
+            gate_receipt_path = [string]$promotionContext.gate_receipt_path
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($manifestPath) -and (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        try {
+            $existingManifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
+            if ($existingManifest.PSObject.Properties.Match("promotion_mode").Count -gt 0) {
+                $existingGateReceipt = if ($existingManifest.PSObject.Properties.Match("gate_receipt").Count -gt 0) { $existingManifest.gate_receipt } else { $null }
+                return [pscustomobject]@{
+                    source_revision = [string]$existingManifest.source_revision
+                    source_worktree_dirty = [bool]$existingManifest.source_worktree_dirty
+                    source_git_state = [string]$existingManifest.source_git_state
+                    promotion_mode = [string]$existingManifest.promotion_mode
+                    promoted_at = [string]$existingManifest.promoted_at
+                    gate_receipt_status = if ($null -ne $existingGateReceipt) { [string]$existingGateReceipt.status } else { "not_provided" }
+                    gate_receipt_path = if ($null -ne $existingGateReceipt) { [string]$existingGateReceipt.path } else { "" }
+                }
+            }
+        }
+        catch {
+            Log ("技能投影晋级 provenance 读取失败，将记录为 not_evaluated：{0}" -f $_.Exception.Message) "WARN"
+        }
+    }
+
+    return [pscustomobject]@{
+        source_revision = ""
+        source_worktree_dirty = $false
+        source_git_state = "not_evaluated"
+        promotion_mode = "not_evaluated"
+        promoted_at = ""
+        gate_receipt_status = "not_provided"
+        gate_receipt_path = ""
+    }
+}
+
+function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignature = "", $promotionContext = $null) {
     $configRaw = if ($projectionCfg.PSObject.Properties.Match("codex_config_path").Count -gt 0) { [string]$projectionCfg.codex_config_path } else { "~/.codex/config.toml" }
     $manifestRaw = if ($projectionCfg.PSObject.Properties.Match("manifest_path").Count -gt 0) { [string]$projectionCfg.manifest_path } else { "reports/skill-projection/current.json" }
     $configPath = Resolve-SkillProjectionPath $configRaw
@@ -858,10 +983,20 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
                 $writtenBackupPath = Backup-CodexSkillProjectionConfig $configPath
                 Set-ContentUtf8 $configPath $desired
             }
+            $promotion = Get-SkillProjectionPromotionRecord $manifestPath $promotionContext
             $manifest = [ordered]@{
                 schema_version = 2
                 package_hash_cache_schema = Get-SkillProjectionPackageHashCacheSchemaVersion
                 agent_build_signature = $verifiedBuildSignature
+                source_revision = [string]$promotion.source_revision
+                source_worktree_dirty = [bool]$promotion.source_worktree_dirty
+                source_git_state = [string]$promotion.source_git_state
+                promotion_mode = [string]$promotion.promotion_mode
+                promoted_at = [string]$promotion.promoted_at
+                gate_receipt = [ordered]@{
+                    status = [string]$promotion.gate_receipt_status
+                    path = [string]$promotion.gate_receipt_path
+                }
                 enabled = [bool]$plan.enabled
                 generated_at = (Get-Date).ToString("o")
                 conflict_policy = [string]$plan.conflict_policy
@@ -1209,9 +1344,9 @@ function Invoke-SkillProfileCommand([string[]]$tokens) {
     }
 }
 
-function Sync-ConfiguredSkillProjection($cfg, [string]$verifiedBuildSignature = "") {
+function Sync-ConfiguredSkillProjection($cfg, [string]$verifiedBuildSignature = "", $promotionContext = $null) {
     if ($null -eq $cfg -or $cfg.PSObject.Properties.Match("skill_projection").Count -eq 0 -or $null -eq $cfg.skill_projection) {
         return [pscustomobject]@{ success = $true; persisted = $false; skipped = $true; plan = $null }
     }
-    return (Sync-CodexSkillProjection $cfg.skill_projection $verifiedBuildSignature)
+    return (Sync-CodexSkillProjection $cfg.skill_projection $verifiedBuildSignature $promotionContext)
 }

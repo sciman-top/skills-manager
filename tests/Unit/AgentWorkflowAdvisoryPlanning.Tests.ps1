@@ -15,7 +15,7 @@ function New-AgentWorkflowAdvisoryFixture([string]$Name) {
     foreach ($relativePath in @(
             'tasks/skills-manager-vnext-agent-workflow-advisory.tasks.json',
             'docs/superpowers/specs/2026-08-05-agent-workflow-advisory-runtime.md',
-            'docs/change-evidence/20260805-agent-workflow-advisory-runtime.md',
+            'docs/change-evidence/20260806-agent-workflow-and-watch-safety-hardening.md',
             'docs/product/skills-manager-vnext-prd.md',
             'docs/product/skills-manager-vnext-architecture.md',
             'docs/product/skills-manager-vnext-roadmap.md',
@@ -109,6 +109,19 @@ Describe 'Agent workflow advisory planning verifier' {
         @($parsed.findings | Where-Object code -eq 'model_tier_anchor_invalid').Count | Should Be 2
     }
 
+    It 'rejects invented pending Radar receipts and four-tier planning drift' {
+        $fixtureRoot = New-AgentWorkflowAdvisoryFixture 'host-receipt'
+        $manifestPath = Join-Path $fixtureRoot 'tasks\skills-manager-vnext-agent-workflow-advisory.tasks.json'
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        $manifest.host_radar_receipt.executed_model = 'gpt-5.6-luna'
+        $manifest | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+        Add-Content -LiteralPath (Join-Path $fixtureRoot 'docs\product\skills-manager-vnext-roadmap.md') -Value "`nfour soft tiers"
+
+        $parsed = (Invoke-AgentWorkflowAdvisoryVerifier $fixtureRoot).output | ConvertFrom-Json
+        @($parsed.findings | Where-Object code -eq 'host_radar_receipt_unverified_value').Count | Should Be 1
+        @($parsed.findings | Where-Object code -eq 'four_tier_wording_detected').Count | Should Be 1
+    }
+
     It 'rejects zero-side-effect and ownership drift' {
         $fixtureRoot = New-AgentWorkflowAdvisoryFixture 'effects-owner'
         $commandPath = Join-Path $fixtureRoot 'src\Commands\AgentWorkflow.ps1'
@@ -123,7 +136,7 @@ Describe 'Agent workflow advisory planning verifier' {
     It 'requires failure packet and stale Radar fail-closed policy' {
         $fixtureRoot = New-AgentWorkflowAdvisoryFixture 'failure-radar'
         $applicationPath = Join-Path $fixtureRoot 'src\Application\ModelAndAgentPolicy.ps1'
-        $application = (Get-Content -LiteralPath $applicationPath -Raw).Replace('Test-AgentFailurePacketContract $FailurePacket', '$true').Replace('if (-not $radarValidation.pass -and -not $hasLocal)', 'if ($false)')
+        $application = (Get-Content -LiteralPath $applicationPath -Raw).Replace('Test-AgentFailurePacketContract $FailurePacket', '$true').Replace('if (-not $radarValidation.pass -and -not $hasLocal -and -not $hostConfirmed)', 'if ($false)')
         Set-Content -LiteralPath $applicationPath -Value $application -Encoding UTF8
 
         $parsed = (Invoke-AgentWorkflowAdvisoryVerifier $fixtureRoot).output | ConvertFrom-Json

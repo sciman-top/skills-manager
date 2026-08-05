@@ -1,6 +1,6 @@
 ---
 name: custom-junior-physics-animation
-description: Use when building junior middle school physics animations, interactive explanations, SVG/web simulations, Manim videos, or classroom demonstrations for mechanics, optics, electricity, heat, sound, and measurement.
+description: "Use when junior-middle-school physics pedagogy is the hard part: establish the lesson goal and misconception, validate the physics, choose among web/SVG, Manim, PPT, or static media, and define classroom verification. Do not use merely to create an interactive visualization, image, video, or slide artifact when a native artifact capability directly handles the request."
 ---
 
 # Junior Physics Animation

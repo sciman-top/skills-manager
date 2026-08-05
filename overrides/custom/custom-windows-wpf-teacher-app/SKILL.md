@@ -46,6 +46,6 @@ Use this skill for practical classroom software on Windows machines.
 
 ## Verification
 
-- Run `dotnet build` and focused tests.
+- Run the target repository's real build and focused test gates. Only fall back to `dotnet build` when the repository defines no build contract.
 - Use `-p:UseSharedCompilation=false` when compiler server locks cause noisy local failures.
 - For UI changes, capture before/after screenshots or run a manual classroom-flow probe.

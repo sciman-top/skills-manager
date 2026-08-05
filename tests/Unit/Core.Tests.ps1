@@ -2933,6 +2933,37 @@ Describe "Reference shelf governance" {
     $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
     $manifestPath = Join-Path $repoRoot "references\reference-shelf.manifest.json"
     $refreshScript = Join-Path $repoRoot "scripts\refresh-reference-repos.ps1"
+    $governanceScript = Join-Path $repoRoot "scripts\verify-reference-governance.ps1"
+
+    It "Rejects rooted and traversal reference paths before normalization" {
+        . $governanceScript
+
+        Test-ContainedReferenceRelativePath "/absolute/path" | Should Be $false
+        Test-ContainedReferenceRelativePath "C:\absolute\path" | Should Be $false
+        Test-ContainedReferenceRelativePath "nested/../../escape" | Should Be $false
+        Test-ContainedReferenceRelativePath "safe/./repo" | Should Be $false
+        Test-ContainedReferenceRelativePath "safe/repo" | Should Be $true
+    }
+
+    It "Fails closed on manifest path traversal before reference refresh operations" {
+        $fixtureManifest = Join-Path $TestDrive "traversal-reference-manifest.json"
+        $fixture = [ordered]@{
+            schema_version = 1
+            references_root = (Join-Path $TestDrive "reference-root")
+            default_refresh_set = @("escape")
+            repos = @([ordered]@{
+                    name = "escape"
+                    tier = "core-mainline"
+                    status = "active"
+                    upstream_url = "https://example.invalid/escape.git"
+                    relative_path = "nested/../../escape"
+                })
+        }
+        [System.IO.File]::WriteAllText($fixtureManifest, ($fixture | ConvertTo-Json -Depth 8), [System.Text.UTF8Encoding]::new($false))
+
+        { & $refreshScript -ManifestPath $fixtureManifest -ReferencesRoot $fixture.references_root -RepoNames escape -FetchOnly } | Should Throw
+        Test-Path -LiteralPath (Join-Path $TestDrive "escape") | Should Be $false
+    }
 
     It "Uses openai plugins as current official source and keeps openai skills historical" {
         $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
@@ -2973,7 +3004,7 @@ Describe "Reference shelf governance" {
         [System.IO.File]::ReadAllText($latestPath) | Should Be $before
     }
 
-    It "Keeps reviewed discovery candidates conditional, licensed, and revision-pinned" {
+    It "Keeps reviewed discovery candidates conditional, traceable, and revision-pinned" {
         $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
         $expected = @(
             "anthropics-k12-teacher-skills",
@@ -2992,8 +3023,67 @@ Describe "Reference shelf governance" {
             [string]$candidate.license | Should Not BeNullOrEmpty
             [string]$candidate.review_decision | Should Not BeNullOrEmpty
             [string]$candidate.review_revision | Should Match '^[0-9a-f]{40}$'
+            [string]$candidate.reviewed_at | Should Match '^\d{4}-\d{2}-\d{2}$'
+            [string]$candidate.activation_trigger | Should Not BeNullOrEmpty
+            $evidencePath = Join-Path $repoRoot ([string]$candidate.review_evidence)
+            Test-Path -LiteralPath $evidencePath -PathType Leaf | Should Be $true
             [string]$candidate.relative_path | Should Match '^conditional/'
             @($manifest.default_refresh_set) -contains $candidate.name | Should Be $false
         }
+    }
+
+    It "Distinguishes fetched remote refs from the consumable local checkout revision" {
+        if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-Host "git not found, skipping reference refresh provenance test."
+            return
+        }
+        $remote = Join-Path $TestDrive "reference-remote.git"
+        $publisher = Join-Path $TestDrive "reference-publisher"
+        $referencesRoot = Join-Path $TestDrive "reference-consumer"
+        $consumer = Join-Path $referencesRoot "core\demo"
+        $outputDirectory = Join-Path $TestDrive "reference-reports"
+        $fixtureManifest = Join-Path $TestDrive "reference-manifest.json"
+        & git init --bare -q $remote
+        & git clone -q $remote $publisher
+        & git -C $publisher config user.name fixture
+        & git -C $publisher config user.email fixture@example.invalid
+        Set-Content -LiteralPath (Join-Path $publisher "README.md") -Value "one" -Encoding UTF8
+        & git -C $publisher add README.md
+        & git -C $publisher commit -q -m one
+        & git -C $publisher push -q origin HEAD
+        New-Item -ItemType Directory -Path (Split-Path $consumer -Parent) -Force | Out-Null
+        & git clone -q $remote $consumer
+        $manifest = [ordered]@{
+            schema_version = 1
+            references_root = $referencesRoot
+            default_refresh_set = @("demo")
+            repos = @([ordered]@{
+                    name = "demo"
+                    tier = "core-mainline"
+                    status = "active"
+                    upstream_url = $remote
+                    relative_path = "core/demo"
+                })
+        }
+        [System.IO.File]::WriteAllText($fixtureManifest, ($manifest | ConvertTo-Json -Depth 8), [System.Text.UTF8Encoding]::new($false))
+
+        $current = & $refreshScript -ManifestPath $fixtureManifest -OutputDirectory $outputDirectory -FetchOnly
+        $current.results[0].remote_refs_current | Should Be $true
+        $current.results[0].working_tree_matches_upstream | Should Be $true
+        [string]$current.results[0].consumable_revision | Should Match '^[0-9a-f]{40}$'
+        $current.results[0].consumable_revision | Should Be $current.results[0].upstream_revision
+
+        Set-Content -LiteralPath (Join-Path $publisher "README.md") -Value "two" -Encoding UTF8
+        & git -C $publisher add README.md
+        & git -C $publisher commit -q -m two
+        & git -C $publisher push -q origin HEAD
+        $behind = & $refreshScript -ManifestPath $fixtureManifest -OutputDirectory $outputDirectory -FetchOnly
+        $behind.results[0].remote_refs_current | Should Be $true
+        $behind.results[0].working_tree_matches_upstream | Should Be $false
+        $behind.results[0].consumable_revision | Should Not Be $behind.results[0].upstream_revision
+        $report = Get-Content -LiteralPath $behind.output_path -Raw -Encoding UTF8
+        $report | Should Match 'remote refs current：`true`'
+        $report | Should Match 'working tree matches upstream：`false`'
+        $report | Should Match 'consumable revision：`[0-9a-f]{40}`'
     }
 }

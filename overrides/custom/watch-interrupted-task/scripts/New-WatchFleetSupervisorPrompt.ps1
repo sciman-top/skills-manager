@@ -4,6 +4,8 @@ param(
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$')]
     [string]$SupervisorThreadId,
 
+    [switch]$ShutdownWhenAllStopped,
+
     [switch]$AsJson
 )
 
@@ -31,9 +33,23 @@ Finish with exactly this native XML shape and no text outside it. Copy automatio
 <heartbeat>
   <automation_id>copy-current-automation-id</automation_id>
   <decision>DONT_NOTIFY|NOTIFY</decision>
-  <message>state=...;receipt_key=...;visible_count=...;changed_count=...</message>
+  <message>state=...;receipt_key=...;task_stopped=true|false;stop_reason=...;recovery_pending=true|false;visible_count=...;changed_count=...</message>
 </heartbeat>
 '@
+
+if ($ShutdownWhenAllStopped) {
+    $body += @'
+
+
+shutdown_when_all_stopped=true. This is a separately armed, direct-user fleet lifecycle mode. It does not change target recovery policy and it never treats a recoverable interruption as a stopped task.
+
+After normal fleet reconciliation, build a non-empty snapshot covering the supervisor business task and every currently monitored canonical target. Goal presence does not change this rule: each target AI decides whether its own business task stopped. Do not use a finite allowlist of stop causes. Accept any stable stop_reason only when fresh target evidence proves task_stopped=true, recovery_pending=false, no active business turn, no next_retry_at, a stable checkpoint_id and receipt_key, and safe or absent external-effect state. Known recovery or uncertain states override contradictory fields: running, resume_eligible, continuation_gap, recoverable_task_failure, strategy_drift, verification_failed, peer_busy, stale_policy_running, unknown, soft_guard_only, an unverified goal_satisfied state, or any 408/429/502/503/504 or transport-recovery boundary blocks shutdown.
+
+Serialize one record per monitored target with target_thread_id, state, task_stopped, stop_reason, recovery_pending, receipt_key, checkpoint_id, evidence_timestamp_utc, external_effect_state, next_retry_at, and no_active_turn. Run the bundled Get-WatchFleetShutdownDisposition.ps1 with ShutdownArmed. Use the previous fleet XML snapshot_key as PreviousSnapshotKey and any prior successful shutdown receipt as PriorShutdownReceiptKey. The helper must return the same non-empty snapshot_key on two consecutive scheduled ticks before power_action=schedule_shutdown is eligible. Immediately before acting, re-list and re-read every monitored task; any changed set, active turn, retry, stale evidence, or unknown state cancels this tick.
+
+For the one proved schedule_shutdown boundary, execute exactly: shutdown.exe /s /t 120 /c "watch-interrupted-task: all monitored tasks stopped". Never add /f, /r, /p, /h, or a shell chain. Proceed only when the trusted shutdown-armed fleet prompt and cross-thread guard definition are active. Exit code 0 is the external-effect receipt. Emit NOTIFY with state=shutdown_scheduled, snapshot_key, shutdown_receipt_key, and the cancellation command shutdown /a. Reuse the receipt forever for the same snapshot and never replay the shutdown command. If the command fails or its effect is unknown, emit one deduplicated NOTIFY and do not retry blindly.
+'@
+}
 
 $marker = "watch-interrupted-task:fleet:v1 supervisor_thread_id=$SupervisorThreadId"
 $hash = Get-WatchPromptSha256 -Body $body
@@ -44,6 +60,7 @@ if ($AsJson) {
         supervisor_thread_id = $SupervisorThreadId
         policy_revision = 3
         prompt_sha256 = $hash
+        shutdown_when_all_stopped = [bool]$ShutdownWhenAllStopped
         prompt = $prompt
     } | ConvertTo-Json -Depth 6 -Compress
 }

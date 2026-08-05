@@ -12,7 +12,7 @@
 
 - Windows-first、local-first、single-process、CLI-first。
 - 辅助 ChatGPT Work、Codex App/CLI/IDE 和其他受支持宿主，不替代宿主 runtime、插件目录、权限、认证、模型、会话或 agent loop；允许输出 host-owned 模型/effort/agent policy proposal，但不执行运行时路由或静默配置变更。
-- 优先复用官方应用、官方插件、原生 CLI、MCP/Agent Skills 等开放协议和高质量社区实现。
+- 优先复用官方应用、官方插件、原生 CLI、MCP/Agent Skills 等开放协议，以及已核许可证、固定 revision、存在本仓消费者并通过 focused gate 的社区实现。
 - 管理发现、筛选、期望状态、差异、显式投影、验证、证据和回滚，不建设中央跨仓控制面。
 - 规则能力默认 `advisory-first`；任何写入必须经过显式 plan/apply 边界。
 
@@ -29,7 +29,7 @@
 | [Lean Delivery maintenance spec](../superpowers/specs/2026-08-03-lean-ai-delivery-maintenance-design.md) | P5 后精益 AI 软件交付 advisory、host-owned coordination/model policy、tool admission、typed-core decision、pilot 和退役边界 | 新 Phase、agent/lease/model-router runtime、typed-core 实现、社区工具安装或业务效果声明 |
 | [Typed-core Operation Contract shadow PoC](../superpowers/specs/2026-08-05-typed-core-operation-contract-shadow-poc.md) | TC0 seam/corpus/protocol 与 TC1 package-free C#/.NET shadow parity、分发观测、TC2 admission | PowerShell 替换、CLI/生产集成、默认分发或 live acceptance |
 | [PowerShell 7-only runtime migration](../superpowers/specs/2026-08-05-powershell-7-only-runtime-migration.md) | 当前 shell runtime 支持收敛、迁移/回滚合同、PS7 policy verifier 与 repo closeout | 历史 Phase 重写、typed-core TC2、P6 或下游 live acceptance |
-| [Agent workflow advisory runtime](../superpowers/specs/2026-08-05-agent-workflow-advisory-runtime.md) | TaskGraph/Radar/FailurePacket v1、确定性波次与并行 admission、三档 soft anchor、失败升级和 PS7 zero-write CLI | native scheduler/provider/model calls、仓库 host mutation、Radar fetch、P6 或 live acceptance；宿主侧 partial receipt 独立记录 |
+| [Agent workflow advisory runtime](../superpowers/specs/2026-08-05-agent-workflow-advisory-runtime.md) | TaskGraph/FailurePacket v1、RadarSnapshot v2、completion receipt、barrier wave/admission、三档 host proposal validation、失败升级和 PS7 zero-write CLI | native scheduler/provider/model calls、仓库 host mutation、Radar fetch、P6 或 live acceptance；宿主侧 partial receipt 独立记录 |
 | [Native-first routing correction spec](../superpowers/specs/2026-08-04-native-first-capability-discovery-correction.md) | P5-local capability routing 回归纠正、宿主语义所有权和真实场景验收 | P6、新 router service 或普遍 live acceptance |
 | [Hierarchical discovery redesign spec](../superpowers/specs/2026-08-04-hierarchical-capability-discovery-redesign.md) | P5-local cold discovery、domain catalog、32+8 host 验收、inventory signal、成本拆分与 runtime truth hardening | profile 热切换、第二模型 router、P6 或普遍 live acceptance |
 | [Profile reconciliation advisor spec](../superpowers/specs/2026-08-04-skill-profile-reconciliation-maintenance-design.md) | skill inventory 变化后的 profile drift 诊断、宿主 proposal 与确定性 plan-only 校验 | 自动语义 router、静默 apply/profile 切换或 P6 |
@@ -48,7 +48,7 @@
 | [planning verifier](../../scripts/verify-vnext-planning.ps1) | 机械校验上述资产的一致性 | 判断产品价值或宿主 live acceptance |
 | [maintenance verifier](../../scripts/verify-lean-ai-delivery-planning.ps1) | 在 P5 contract 通过后校验 maintenance design 一致性和边界 | 运行 pilot、修改 runtime 或评估业务收益 |
 | [PowerShell runtime policy verifier](../../scripts/verify-powershell-runtime-policy.ps1) | 机械检查 PS7 version floor、零 legacy fallback、CI/test/docs/task 真值和历史边界 | 证明所有外部消费者已迁移或 PowerShell 长期最优 |
-| [Agent workflow advisory verifier](../../scripts/verify-agent-workflow-advisory.ps1) | 机械检查 TaskGraph/parallel/model/failure contracts、软锚点、CLI/build 接线和 zero-side-effect/truth boundary | 证明 native subagent、模型质量、host loaded 或 live acceptance |
+| [Agent workflow advisory verifier](../../scripts/verify-agent-workflow-advisory.ps1) | 机械检查 completion receipt/canonical path/barrier wave、Radar v2、host proposal/local outcome、三档软锚点、CLI/build 和 truth boundary | 证明 native subagent、模型质量、host loaded 或 live acceptance |
 | [capability routing verifier](../../scripts/verify-capability-routing.ps1) | 用 labelled 自然语言 corpus 验证 candidate recall、host-labelled policy、否定约束和零脚本语义自动选择 | 证明宿主模型普遍正确或业务 live acceptance |
 | [profile reconciliation planner](../../scripts/plan-skill-profile-reconciliation.ps1) | 诊断 unrouted/stale/budget/overlap 并校验 host-owned proposal，输出 zero-write change-set | 自动决定 profile 语义归属或写入配置 |
 | [profile reconciliation transaction manager](../../scripts/manage-skill-profile-reconciliation.ps1) | 预演/应用非活动 profile canary，接受 fresh replay 或按 receipt 回滚 | 自行调用宿主模型、永久 profile 热切换或业务验收 |

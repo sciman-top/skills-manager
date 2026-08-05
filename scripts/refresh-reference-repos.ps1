@@ -190,14 +190,30 @@ function Resolve-ManifestRepoPath {
     )
 
     if ($ManifestRepo.PSObject.Properties.Match("absolute_path").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$ManifestRepo.absolute_path)) {
-        return [string]$ManifestRepo.absolute_path
+        $absolutePath = ([string]$ManifestRepo.absolute_path).Trim()
+        if (-not [System.IO.Path]::IsPathRooted($absolutePath)) {
+            throw ("reference manifest absolute_path must be rooted: {0}" -f $absolutePath)
+        }
+        return [System.IO.Path]::GetFullPath($absolutePath)
     }
 
-    if ($ManifestRepo.PSObject.Properties.Match("relative_path").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$ManifestRepo.relative_path)) {
-        return (Join-Path $ReferencesRoot ([string]$ManifestRepo.relative_path))
+    $relativePath = if ($ManifestRepo.PSObject.Properties.Match("relative_path").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$ManifestRepo.relative_path)) {
+        ([string]$ManifestRepo.relative_path).Trim()
+    }
+    else { ([string]$ManifestRepo.name).Trim() }
+    $normalizedRelative = $relativePath.Replace("\", "/")
+    $segments = @($normalizedRelative.Split(@('/'), [System.StringSplitOptions]::RemoveEmptyEntries))
+    if ([string]::IsNullOrWhiteSpace($relativePath) -or [System.IO.Path]::IsPathRooted($relativePath) -or $normalizedRelative.StartsWith("/", [System.StringComparison]::Ordinal) -or $normalizedRelative -match '^[A-Za-z]:' -or @($segments | Where-Object { $_ -eq "." -or $_ -eq ".." }).Count -gt 0) {
+        throw ("reference manifest relative path must stay inside references root: {0}" -f $relativePath)
     }
 
-    return (Join-Path $ReferencesRoot ([string]$ManifestRepo.name))
+    $rootPath = [System.IO.Path]::GetFullPath($ReferencesRoot).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+    $candidatePath = [System.IO.Path]::GetFullPath((Join-Path $rootPath $relativePath))
+    $rootPrefix = $rootPath + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $candidatePath.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw ("reference manifest path escaped references root: {0}" -f $relativePath)
+    }
+    return $candidatePath
 }
 
 $manifest = Read-ReferenceManifest -Path $ManifestPath
@@ -377,7 +393,7 @@ foreach ($repoName in $RepoNames) {
     }
 
     $branch = Invoke-GitText -RepositoryPath $repoPath -Arguments @("branch", "--show-current")
-    $headBefore = Invoke-GitText -RepositoryPath $repoPath -Arguments @("rev-parse", "--short=10", "HEAD")
+    $headBefore = Invoke-GitText -RepositoryPath $repoPath -Arguments @("rev-parse", "HEAD")
     $statusText = Invoke-GitText -RepositoryPath $repoPath -Arguments @("status", "--short")
     $isDirty = -not [string]::IsNullOrWhiteSpace($statusText)
 
@@ -422,6 +438,12 @@ foreach ($repoName in $RepoNames) {
         continue
     }
 
+    $upstreamRevision = if (-not [string]::IsNullOrWhiteSpace($branch)) {
+        try { Invoke-GitText -RepositoryPath $repoPath -Arguments @("rev-parse", ("origin/{0}" -f $branch)) }
+        catch { $null }
+    }
+    else { $null }
+
     $statusLabel = if ($FetchOnly) { "fetch-only" } else { "pull --ff-only" }
     $note = if ($FetchOnly) { "remote refs fetched" } else { "pull --ff-only completed" }
 
@@ -439,6 +461,10 @@ foreach ($repoName in $RepoNames) {
                     changed = $false
                     cloned = $cloned
                     ahead_behind = $null
+                    remote_refs_current = $true
+                    working_tree_matches_upstream = $null
+                    upstream_revision = $upstreamRevision
+                    consumable_revision = $headBefore
                     note = "current branch is empty; skipped pull"
                     compare_log = @()
                 })
@@ -451,7 +477,7 @@ foreach ($repoName in $RepoNames) {
         catch {
             $results.Add([pscustomobject]@{
                     repo = $repoName
-                    tier = $tier
+                    tier = $repoTier
                     upstream = $upstreamUrl
                     path = $repoPath
                     status = "pull-failed"
@@ -461,6 +487,10 @@ foreach ($repoName in $RepoNames) {
                     changed = $false
                     cloned = $cloned
                     ahead_behind = $null
+                    remote_refs_current = $true
+                    working_tree_matches_upstream = ($headBefore -eq $upstreamRevision)
+                    upstream_revision = $upstreamRevision
+                    consumable_revision = $headBefore
                     note = Get-TrimmedErrorMessage -Message $_.Exception.Message
                     compare_log = @()
                 })
@@ -468,7 +498,7 @@ foreach ($repoName in $RepoNames) {
         }
     }
 
-    $headAfter = Invoke-GitText -RepositoryPath $repoPath -Arguments @("rev-parse", "--short=10", "HEAD")
+    $headAfter = Invoke-GitText -RepositoryPath $repoPath -Arguments @("rev-parse", "HEAD")
     $changed = ($headBefore -ne $headAfter)
     $aheadBehind = if (-not [string]::IsNullOrWhiteSpace($branch)) {
         try {
@@ -500,6 +530,10 @@ foreach ($repoName in $RepoNames) {
             changed = $changed
             cloned = $cloned
             ahead_behind = $aheadBehind
+            remote_refs_current = $true
+            working_tree_matches_upstream = (-not [string]::IsNullOrWhiteSpace($upstreamRevision) -and $headAfter -eq $upstreamRevision)
+            upstream_revision = $upstreamRevision
+            consumable_revision = $headAfter
             note = $note
             compare_log = $compareLog
         })
@@ -549,6 +583,18 @@ foreach ($result in $results) {
     }
     if ($result.ahead_behind) {
         $lines.Add(('- ahead/behind：`' + $result.ahead_behind + '`'))
+    }
+    if ($null -ne $result.remote_refs_current) {
+        $lines.Add(('- remote refs current：`' + ([bool]$result.remote_refs_current).ToString().ToLowerInvariant() + '`'))
+    }
+    if ($null -ne $result.working_tree_matches_upstream) {
+        $lines.Add(('- working tree matches upstream：`' + ([bool]$result.working_tree_matches_upstream).ToString().ToLowerInvariant() + '`'))
+    }
+    if ($result.upstream_revision) {
+        $lines.Add(('- upstream revision：`' + $result.upstream_revision + '`'))
+    }
+    if ($result.consumable_revision) {
+        $lines.Add(('- consumable revision：`' + $result.consumable_revision + '`'))
     }
     $lines.Add(("- 说明：{0}" -f $result.note))
     if ($result.compare_log -and $result.compare_log.Count -gt 0) {

@@ -78,10 +78,11 @@
     ]
   },
   "radar_snapshot": {
-    "schema_version": 1,
+    "schema_version": 2,
     "snapshot_id": "radar-20260805-1324",
     "source": "https://codexradar.com/",
     "captured_at": "2026-08-05T05:24:00Z",
+    "source_updated_at": "2026-08-05T04:55:00Z",
     "expires_at": "2026-08-06T05:24:00Z",
     "raw_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "entries": [
@@ -118,6 +119,14 @@
     ]
   },
   "completed_task_ids": ["discover"],
+  "completion_receipts": [
+    {
+      "task_id": "discover",
+      "base_revision": "84cb53aa",
+      "status": "verified",
+      "verification_receipt": "receipt:discover:84cb53aa"
+    }
+  ],
   "requested_parallel_task_ids": ["implement", "document"],
   "model_proposals": [
     {
@@ -128,12 +137,15 @@
       "host_available_pairs": ["gpt-5.6-luna|max", "gpt-5.6-sol|medium", "gpt-5.6-sol|xhigh"],
       "local_outcomes": [
         {
-          "tier": "luna_max",
-          "similar_task_count": 4,
-          "gate_pass_rate": 1.0,
-          "rework_rate": 0.0,
+          "task_class": "bounded_implementation",
+          "model_family": "gpt-5.6-luna",
+          "reasoning_effort": "max",
+          "base_revision": "84cb53aa",
+          "gate_passed": true,
+          "rework_count": 0,
           "actual_cost": 0.38,
-          "actual_duration_seconds": 1320
+          "actual_duration_seconds": 1320,
+          "sampled_at": "2026-08-04T10:00:00Z"
         }
       ]
     }

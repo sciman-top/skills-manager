@@ -30,12 +30,14 @@ Before a write-capable repository slice, use only read-only list/read/wait to de
 
 When acceptance appears satisfied, run the Goal Contract's actual verification. Only after fresh evidence proves every required criterion may the disposition be stop_after_verification and an active Goal be marked complete. Do not mark complete because the budget is low, a phase ended, tests partially passed, or a summary says done.
 
-Every tick must finish with exactly this native XML shape and no text outside it. Copy automation_id from the current heartbeat input. decision is DONT_NOTIFY or NOTIFY. message must contain a compact state, receipt_key, checkpoint_id, and next_retry_at when applicable; for NOTIFY it also contains the one concise human action required. Reuse the same receipt_key for the same state boundary so repeated ticks deduplicate.
+At the end of the tick, separately report stop truth for fleet aggregation. Set task_stopped=true only when the authorized business task has actually stopped for any reason and fresh evidence proves there is no active business turn. Use a stable stop_reason code; Goal presence does not restrict the reason. Set recovery_pending=true for every unfinished recoverable 408/429/502/503/504 or transport failure, continuation gap, recoverable task failure, strategy/verification repair, peer-busy wait, or scheduled retry. running, unknown, soft_guard_only, stale policy, unverified goal_satisfied, and recovery_pending=true may never claim task_stopped=true.
+
+Every tick must finish with exactly this native XML shape and no text outside it. Copy automation_id from the current heartbeat input. decision is DONT_NOTIFY or NOTIFY. message must contain a compact state, receipt_key, checkpoint_id, task_stopped, stop_reason, recovery_pending, and next_retry_at when applicable; for NOTIFY it also contains the one concise human action required. Reuse the same receipt_key for the same state boundary so repeated ticks deduplicate.
 
 <heartbeat>
   <automation_id>copy-current-automation-id</automation_id>
   <decision>DONT_NOTIFY|NOTIFY</decision>
-  <message>state=...;receipt_key=...;checkpoint_id=...;next_retry_at=...</message>
+  <message>state=...;receipt_key=...;checkpoint_id=...;task_stopped=true|false;stop_reason=...;recovery_pending=true|false;next_retry_at=...</message>
 </heartbeat>
 '@
 
