@@ -15,7 +15,7 @@ The guard lacked role-aware capability enforcement for native automation mutatio
 
 The target contract also demanded a fresh trust/live-path precondition without installing a fresh-process doctor or defining a safe negative probe. That made `soft_guard_only` correct but unrecoverable.
 
-Current Codex hook semantics support `PreToolUse` for local function tools, including native automation management, and expose `session_id`, `turn_id`, `transcript_path`, `tool_name`, and `tool_input`. The official manual also says transcript format is not a stable interface. The implementation therefore treats transcript classification as evidence, never as an assumed schema, and denies watch mutation when classification cannot be proved.
+Current Codex hook semantics support `PreToolUse` for many local function tools and expose `session_id`, `turn_id`, `transcript_path`, `tool_name`, and `tool_input`. The official manual also says transcript format is not a stable interface and specialized tool paths may opt out of the default hook path. The implementation therefore treats transcript classification as evidence, never as an assumed schema, and denies watch mutation when classification cannot be proved, but this repository-side policy is effective only when the host actually invokes the hook.
 
 ## Implemented changes
 
@@ -46,25 +46,45 @@ Current Codex hook semantics support `PreToolUse` for local function tools, incl
 - Final affected-suite regression after the real app-server notification fix: `45 passed / 0 failed`.
 - Coverage includes target self-delete, cross-target mutation, fleet self-mutation, unrelated automation mutation, direct-user lifecycle access, unreadable provenance, fresh runtime doctor trusted/modified/disabled states, notification-before-response parsing, shell negative probe semantics, native sentinel semantics, and stale completion evidence.
 - The isolated worktree initially lacked materialized contents for its tracked `imports/*` gitlinks and generated/vendor runtime baseline. This produced unrelated `SkillProjection`, `skill-integrity`, and `skill-routing` failures. After hydrating the three explicit engineering-skill fixtures from the exact pinned gitlink (`2ab958093e83e0ec752e6c1c5932da465bf23e0c`) and the current canonical generated/vendor baseline without changing test assertions, the affected projection test passed `32/32`.
-- Final full gate on the rebased `origin/main` baseline: `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree` exited `0`. All `820` Unit and `18` E2E tests passed; build, repository hygiene, generated sync, skill integrity (`107 skills`), skill routing, dependency baseline, skills config, host capability, planning, and doctor JSON stages also passed in `181824 ms`.
+- Final full gate after rebasing the isolated worktree onto current `origin/main`: `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree` exited `0`. All `834` Unit and `18` E2E tests passed; build, repository hygiene, generated sync, skill integrity (`107 skills`), skill routing, dependency baseline, skills config, host capability, planning, and doctor JSON stages also passed in `191978 ms`. The fresh timing receipt records `852` Pester cases and `suite_elapsed_ms=187783`.
 - Final repository hook SHA-256 is `52cea5b40b1a9d8a748f5428cdec9762172af33c48cfb3e6b269dbce18fc1fb6`; `git ls-files --eol` reports `i/lf w/lf attr/text eol=lf`. The LF-pinned runtime doctor SHA-256 is `4857d7c43f64de89707a600007c28219eef1f901a677fdfbdf146606941027dc`.
-- Fresh generated policy-revision-2 prompt hashes are `a6bb7b28516027e7895206d96e933f4e45cf7c68abadc533b4a031f1ae5109b4` for target prompts and `43671532d2fdb2863119768987d2fba7a61045193b24dfee4c30411c2b6a1705` for the fleet supervisor prompt. These replace the earlier target/fleet hashes and must be projected through the generators, never reconstructed manually.
+- Fresh generated policy-revision-2 monitor-only prompt hashes are `f324317ed56f0372d60b5b8ffdd3c1304f0de776ef822eaf981c0ad41e77a8b8` for legacy target classification and `d5d7e83fa1362a78cea9d06bc7fe964963dc356cd83d98d38e38e4023ec4ea44` for the fleet supervisor prompt. These replace the earlier target/fleet hashes and must be projected through the generators, never reconstructed manually.
 - The first real fresh-process doctor run exposed an additional live-path defect: app-server emitted a notification without a JSON-RPC `id`, and strict mode raised `The property 'id' cannot be found on this object`. The doctor now reads `id` as an optional property, a fake app-server regression emits the notification before responses, and the runtime doctor is LF-pinned so its installed receipt is stable across Windows checkouts.
-- The first fresh-session shell probe exposed the remaining specialized-path gap: the current tool surface records nested calls as the outer `exec` function tool, so `tools.shell_command({ command: "codex app-server ... thread/send" })` reached app-server before the Bash-only branch could inspect it. The guard now parses the outer code-mode source, blocks nested shell/send calls, blocks nested target-heartbeat automation mutations and the native sentinel, and permits only a literal canonical fleet target mutation or read-only view.
-- The affected-suite regression after code-mode coverage is `48 passed / 0 failed`; the added cases cover nested shell send, direct nested send tool, target self-delete, fleet self/foreign/untrusted mutations, and the code-mode sentinel.
+- The first fresh-session shell probe exposed a code-mode payload shape that the parser did not yet cover. The guard was extended to parse the outer code-mode source and its direct stdin regression blocks nested shell/send calls, target-heartbeat automation mutations, and the native sentinel while permitting only the reviewed fleet form or read-only view.
+- The affected-suite regression after parser coverage was `48 passed / 0 failed`; these tests prove how the hook behaves when invoked, not that every Desktop tool path invokes it.
+
+## Post-install live finding and final architecture decision
+
+After the exact hook definition was reviewed in `/hooks`, the fresh runtime doctor passed with one enabled trusted matching definition and exact script-hash parity. A real outer code-mode probe then executed:
+
+```text
+tools.shell_command({
+  command: "codex app-server request thread/send --thread 019ffeed-0000-7000-8000-000000000002 --prompt guard-live-probe"
+})
+```
+
+The shell actually ran and returned `error: unrecognized subcommand 'request'`. The current session transcript recorded the outer tool as `exec` but contained no `PreToolUse` decision event. Feeding the same `tool_name=exec` payload directly to the installed hook returned `permissionDecision=deny`. This isolates the remaining root cause at the host boundary: the Desktop outer code-mode `exec` path did not invoke the trusted hook. Adding more PowerShell payload parsing cannot enforce a host path that never calls the script.
+
+The user selected the fail-closed architecture on 2026-08-05:
+
+- `operating_mode=supervisor_monitor_only` is embedded in both generated prompts;
+- the supervisor may list/read/wait and classify visible truth but performs no recovery and no target automation mutation under any runtime result;
+- per-target heartbeats are not created; any legacy target remains ACTIVE and observe-only for every state, including `complete`, `resume_eligible`, and `continuation_gap`;
+- scheduled shell/native mutation probes are disabled because their current specialized paths are already outside the proved enforcement boundary;
+- the mode never promotes itself after a future successful probe. Restoration requires another direct user decision, a reviewed contract change, and fresh live coverage for every write-capable path.
+
+The monitor-only regression was developed red-green: the first run of the two prompt/disposition suites produced `20 passed / 6 failed`; after implementation they produced `26 passed / 0 failed`. The new assertions reject recovery language in the target prompt, reject target mutation and cleanup language in the fleet prompt, and require `observe_only / keep_active / mutation_owner=none` for completion and recovery-shaped classifications.
 
 ## Live acceptance boundary
 
-Repository tests prove the policy and generated contracts, not that the new host definition is already loaded and trusted. Installing these changed bytes creates a new hook definition hash and intentionally returns `installed_untrusted`. Live acceptance requires all of the following after merge:
+Repository tests prove the monitor-only policy and generated contracts. They do not prove hard isolation, and the live probe positively proves that the current specialized code-mode path is outside that boundary. The accepted live state is therefore a safe functional downgrade, not automatic continuity acceptance:
 
-1. Run the managed installer from the merged canonical checkout.
-2. Review and trust the new exact definition in `/hooks` from a fresh Codex session.
-3. Run the installed runtime doctor and require `configuration_ready=true`.
-4. Prove the shell sender negative path is denied before shell execution using a nonexistent thread id, through the same outer `exec` path used by the current host.
-5. Prove the native automation sentinel is denied before the host automation call using a nonexistent sentinel id, through the same outer `exec` path when that is how the host exposes the native tool.
-6. Only then project fresh generated target and fleet prompts through native automation management and re-read every receipt.
+1. Project the rebuilt Skill and prompt generators through the managed installer without changing provider, auth, model, sandbox, or Desktop process state.
+2. In a direct user lifecycle turn, update only the existing supervisor automation to the generated `supervisor_monitor_only` prompt, preserving cadence and notification policy; re-read its native receipt.
+3. Verify that no per-target watch automation exists. Do not create one to test the policy.
+4. Keep `soft_guard_only` as the host enforcement truth and `supervisor_monitor_only` as the operating policy. Routine incomplete and complete classifications both return `DONT_NOTIFY` and cause no cleanup.
 
-Until those steps pass, the correct state remains `soft_guard_only`; do not claim the two live automations are repaired merely because repository gates pass.
+Do not describe this as recovered automatic continuity. The two reported failure modes are contained by removing target recovery and target automation mutation authority. Restoring those capabilities remains separately open until Desktop covers every required live path and the user explicitly changes policy.
 
 ## Rollback
 

@@ -5,7 +5,7 @@ Describe 'watch-interrupted-task fleet supervisor contract' {
         $script:prompt = & $generator -SupervisorThreadId 'supervisor-test'
     }
 
-    It 'continuously reconciles all newly eligible visible local tasks' {
+    It 'continuously observes all newly eligible visible local tasks' {
         $script:prompt | Should Match 'watch-interrupted-task:fleet:v1 supervisor_thread_id=supervisor-test'
         $script:prompt | Should Match 'policy_revision=2'
         $script:prompt | Should Match 'prompt_sha256=[0-9a-f]{64}'
@@ -14,16 +14,14 @@ Describe 'watch-interrupted-task fleet supervisor contract' {
         $script:prompt | Should Match 'at most 50'
     }
 
-    It 'is the sole automation writer and reconciles idempotently' {
-        $script:prompt | Should Match 'sole automation writer'
-        $script:prompt | Should Match 'exactly one target heartbeat'
+    It 'pins the fleet to the user-selected read-only operating mode' {
+        $script:prompt | Should Match 'operating_mode=supervisor_monitor_only'
         $script:prompt | Should Match 'New-WatchHeartbeatPrompt.ps1'
-        $script:prompt | Should Match 'delete completed orphan heartbeats'
-        $script:prompt | Should Match 'installed target contract.*entire assistant output must be exactly DONT_NOTIFY'
-        $script:prompt | Should Match 'do not mutate target automations until the newer generator is projected'
-        $script:prompt | Should Match 'Test-WatchGuardRuntime.ps1'
-        $script:prompt | Should Match 'live-probe sentinel'
-        $script:prompt | Should Match 'denied before the native automation call executes'
+        $script:prompt | Should Match 'target contract.*exact silence rule "entire assistant output must be exactly DONT_NOTIFY"'
+        $script:prompt | Should Match 'do not create, update, activate, pause, or delete target automations under any runtime result'
+        $script:prompt | Should Match 'must not leave this mode automatically'
+        $script:prompt | Should -Not -Match 'live-probe sentinel'
+        $script:prompt | Should -Not -Match 'delete completed orphan heartbeats'
     }
 
     It 'also protects its host task because Desktop permits one heartbeat per task' {
@@ -46,12 +44,11 @@ Describe 'watch-interrupted-task fleet supervisor contract' {
         $script:prompt | Should Match 'entire assistant output must be exactly DONT_NOTIFY'
     }
 
-    It 'does not delete from stale completion evidence or an active target' {
-        $script:prompt | Should Match 'immediately before deletion'
-        $script:prompt | Should Match 'current thread status is active'
+    It 'classifies completion without cleanup or delayed success chatter' {
         $script:prompt | Should Match 'contextCompaction handoff summary'
         $script:prompt | Should Match 'historical verification'
         $script:prompt | Should Match 'target heartbeat final answer'
-        $script:prompt | Should Match 'do not delete'
+        $script:prompt | Should Match 'never claim that a target automation was deleted'
+        $script:prompt | Should Match 'completion is not a new user-action boundary'
     }
 }

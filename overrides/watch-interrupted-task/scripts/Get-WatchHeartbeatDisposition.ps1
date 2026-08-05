@@ -21,21 +21,7 @@ $result = [ordered]@{
     state = $State
     task_action = 'observe_only'
     automation_action = 'keep_active'
-    mutation_owner = 'fleet_supervisor'
-}
-
-switch ($State) {
-    'resume_eligible' {
-        $result.task_action = 'recover'
-        $result.mutation_owner = 'none'
-    }
-    'continuation_gap' {
-        $result.task_action = 'recover'
-        $result.mutation_owner = 'none'
-    }
-    'complete' {
-        $result.automation_action = 'supervisor_cleanup'
-    }
+    mutation_owner = 'none'
 }
 
 [pscustomobject]$result

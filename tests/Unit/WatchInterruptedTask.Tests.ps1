@@ -8,39 +8,50 @@ Describe "watch-interrupted-task contract" {
         $script:prompt = & $promptScriptPath -TargetThreadId 'target-test'
     }
 
+    It "pins legacy targets to the user-selected supervisor monitor-only mode" {
+        $script:prompt | Should Match "operating_mode=supervisor_monitor_only"
+        $script:prompt | Should Match "never execute recovery work"
+        $script:prompt | Should Match "must not leave this mode automatically"
+        $script:prompt | Should -Not -Match "start a continuous recovery session"
+        $script:prompt | Should -Not -Match "may recover in parallel"
+    }
+
     It "classifies an unfinished context compaction as a continuation gap" {
         $script:skill | Should Match "continuation_gap"
         $script:skill | Should Match "contextCompaction"
         $script:skill | Should Match "no final"
-        $script:skill | Should Match "continuous recovery session"
+        $script:prompt | Should Match "continuation_gap only to describe current truth"
+        $script:prompt | Should Match "classification is observation only"
     }
 
-    It "continues all remaining safe work instead of yielding after one slice" {
+    It "retains the bounded recovery design without granting it to the current prompt" {
         $script:skill | Should Match "continue all remaining authorized safe work"
         $script:skill | Should Match "sequential bounded, verifiable slices"
         $script:skill | Should Match "Do not yield merely because"
+        $script:prompt | Should -Not -Match "continue all remaining authorized safe work"
         $script:skill | Should -Not -Match "Continue only one bounded"
         $script:skill | Should -Not -Match "Resume one bounded safe slice"
     }
 
-    It "does not let an agent manufacture a natural pause during recovery" {
-        $script:prompt | Should Match "natural_pause only as a pre-existing explicit user handoff"
-        $script:prompt | Should Match "standing instructions to continue autonomously through completion"
-        $script:prompt | Should Match "do not yield or emit a final answer merely because one slice"
-        $script:prompt | Should Match "Once recovery starts, stop only at completion"
+    It "does not let classification reactivate conditional recovery" {
+        $script:prompt | Should Match "classification is observation only"
+        $script:prompt | Should Match "even when.*resume_eligible.*continuation_gap"
+        $script:prompt | Should Match "direct user policy change"
     }
 
     It "does not let an in-flight heartbeat overwrite a newer durable prompt" {
-        $script:skill | Should Match "fleet supervisor is the only automation writer"
+        $script:skill | Should Match "operating_mode=supervisor_monitor_only"
+        $script:skill | Should -Not -Match "fleet supervisor is the only automation writer"
+        $script:skill | Should Match "no scheduled heartbeat is an automation writer"
         $script:prompt | Should Match "Never update, pause, resume, or delete automation metadata"
         $script:prompt | Should Match "continuous monitoring reason remains active"
         $script:prompt | Should Match "generic heartbeat lifecycle instruction"
         $script:prompt | Should Match "never claim that automation was deleted"
     }
 
-    It "makes peer busy a secondary gate after recovery eligibility" {
+    It "does not enter peer arbitration in monitor-only mode" {
         $script:skill | Should Match 'Reach `peer_busy` only as a secondary write gate'
-        $script:prompt | Should Match "do not inspect peers unless positive evidence already establishes resume_eligible or continuation_gap"
+        $script:prompt | Should Match "do not inspect peers for recovery eligibility, ownership, or write arbitration"
         $script:skill | Should Match "peer activity must never turn an otherwise ineligible heartbeat into work"
     }
 
@@ -84,11 +95,10 @@ Describe "watch-interrupted-task contract" {
         $script:prompt | Should Match "denied before shell execution"
     }
 
-    It "keeps every shared-checkout heartbeat armed and deterministically serializes writers" {
-        $script:prompt | Should Match "peer_busy"
+    It "keeps every legacy target armed without entering write arbitration" {
         $script:prompt | Should Match "keep the heartbeat ACTIVE"
-        $script:prompt | Should Match "updatedAt.*thread id"
-        $script:skill | Should Match "arm every eligible thread"
+        $script:prompt | Should Match "do not inspect peers for write arbitration"
+        $script:skill | Should Match "do not create target heartbeats"
     }
 
     It "uses the fleet supervisor as its host task heartbeat instead of double-attaching" {
@@ -105,10 +115,11 @@ Describe "watch-interrupted-task contract" {
         $script:skill | Should Match "verify the second receipt"
     }
 
-    It "permits parallel recovery for isolated worktrees and evidenced read-only tasks" {
+    It "keeps the prior parallel-recovery design inactive" {
         $script:skill | Should Match "isolated worktrees"
         $script:skill | Should Match "read-only"
         $script:skill | Should Match "parallel"
+        $script:prompt | Should -Not -Match "recover in parallel"
     }
 
     It "keeps unknown fail-closed and external side effects outside automatic retry" {
@@ -125,7 +136,7 @@ Describe "watch-interrupted-task contract" {
         $script:prompt | Should Match "prompt_sha256=[0-9a-f]{64}"
     }
 
-    It "keeps monitor-only states active and delegates cleanup to the supervisor" {
+    It "keeps every state active without cleanup or recovery" {
         foreach ($state in @('natural_pause', 'needs_input', 'non_transient_failure', 'unknown', 'stale_policy_running', 'soft_guard_only')) {
             $result = & $dispositionScriptPath -State $state
             $result.task_action | Should Be 'observe_only'
@@ -134,8 +145,15 @@ Describe "watch-interrupted-task contract" {
 
         $complete = & $dispositionScriptPath -State 'complete'
         $complete.task_action | Should Be 'observe_only'
-        $complete.automation_action | Should Be 'supervisor_cleanup'
-        $complete.mutation_owner | Should Be 'fleet_supervisor'
+        $complete.automation_action | Should Be 'keep_active'
+        $complete.mutation_owner | Should Be 'none'
+
+        foreach ($state in @('resume_eligible', 'continuation_gap')) {
+            $result = & $dispositionScriptPath -State $state
+            $result.task_action | Should Be 'observe_only'
+            $result.automation_action | Should Be 'keep_active'
+            $result.mutation_owner | Should Be 'none'
+        }
     }
 
     It "keeps repeated observe-only heartbeats silent" {

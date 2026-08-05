@@ -7,6 +7,20 @@ description: Fail-closed Desktop continuity after 429/503 or host continuation g
 
 Use ChatGPT Desktop's native thread heartbeat as a conditional recovery trigger. Treat the heartbeat as a detector and continuous recovery controller, never as blanket authorization beyond the user's existing task scope.
 
+## Current operating mode (authoritative)
+
+`operating_mode=supervisor_monitor_only`
+
+The user selected this fail-closed mode after a real Desktop code-mode `exec` call bypassed the trusted `PreToolUse` hook. This mode overrides every conditional-recovery, target-enrollment, fleet-mutation, cleanup, and live-probe instruction later in this Skill:
+
+- Keep at most one dual-role supervisor heartbeat. It may use read-only list/read/wait and host-managed metadata views to classify visible tasks, but it never executes task recovery and never creates, updates, activates, pauses, or deletes target automations.
+- Do not create per-target heartbeats. A target heartbeat that already exists is legacy monitor-only state: keep it ACTIVE, classify every business state as `observe_only`, and never let `complete`, `resume_eligible`, or `continuation_gap` authorize task work or automation cleanup.
+- Do not run shell-send or native-automation mutation sentinels from a scheduled heartbeat. Their specialized host paths are already proved outside the current enforcement boundary; more scheduled mutation probes cannot promote this mode.
+- A trusted hook and successful future probes are necessary but not sufficient to restore recovery. This mode must not change automatically. Restoration requires a direct user policy decision, an updated reviewed contract, and fresh live coverage for every write-capable path.
+- Routine observation and completion remain silent. Completion is not a new user-action boundary, and no heartbeat may claim that an automation was deleted without a direct user lifecycle action and verified native receipt.
+
+The recovery and multi-target sections below are retained only as a disabled restoration design. They do not grant runtime authority while `operating_mode=supervisor_monitor_only` is present in the generated prompts.
+
 ## Preserve the core contract
 
 - Resume only with positive evidence for either a transient provider/transport failure or a host `continuation_gap` as defined below.
@@ -14,7 +28,7 @@ Use ChatGPT Desktop's native thread heartbeat as a conditional recovery trigger.
 - Never infer permission to continue from inactivity, remaining TODOs, an unfinished branch, or an incomplete goal alone.
 - Never override an explicit pause, pending approval, request for user input, user-defined checkpoint, or completed result.
 - Never replay a whole turn. Re-read current thread, worktree, verification, and external-effect truth before choosing the next safe action.
-- Once positive evidence makes an unfinished task eligible, continue all remaining authorized safe work in the same heartbeat turn. Use bounded, verified slices internally, but do not yield merely because one slice, test, or phase completed.
+- In the current operating mode, positive recovery evidence is classification-only and never authorizes task work. The disabled restoration design would continue all remaining authorized safe work in the same heartbeat turn using bounded, verified slices.
 - Stop continuous recovery only at completion, a real human or approval gate, `peer_busy`, a non-transient or unknown state, an unproved external-effect boundary, another transient interruption, or a host execution limit.
 - Treat `natural_pause` only as a pre-existing user handoff or agreed checkpoint discovered before recovery starts. Once continuous recovery starts, an agent-authored phase summary, milestone, test pass, commit, push, or intermediate final answer must not create a new pause while authorized safe work remains.
 - Treat cross-thread communication as an external side effect. Under this skill, never send, hand off, wake, create, fork, rename, or otherwise inject content into another task for heartbeat arbitration or incident containment. There is no AI-operated cross-task communication escape hatch in this contract.
@@ -26,7 +40,7 @@ Use ChatGPT Desktop's native thread heartbeat as a conditional recovery trigger.
 - Prove the target shell path with a fresh nonexistent thread id and a `codex app-server ... thread/send` negative probe. It passes only when `PreToolUse` denies the command before shell execution; a command that reaches app-server and merely returns target-not-found is a failed guard probe.
 - Prove the fleet native automation path with a unique nonexistent `watch-interrupted-task-v1-live-probe-<nonce>` automation id. The host hook must deny the sentinel mutation before the native automation call executes. A native not-found receipt means the mutation reached the host and must block reconciliation.
 - Ignore heartbeat turns when identifying the latest business turn. A heartbeat's own final answer must not hide the state that it was created to inspect.
-- Keep one heartbeat per target thread. Update an existing matching heartbeat instead of creating a duplicate.
+- In the current operating mode, keep only the dual-role supervisor and do not create target heartbeats. If a legacy target heartbeat exists, never duplicate or mutate it from a scheduled heartbeat.
 - The current Desktop host permits at most one heartbeat automation attached to a task. In fleet mode, the fleet supervisor is dual-role: it also applies the generated target contract to its own host task. The supervisor thread must not receive a separate target heartbeat; the supervisor automation counts as that task's one heartbeat.
 - Use no end time unless the user explicitly requests one.
 - Default to a 10-minute cadence for a single task.
@@ -34,8 +48,8 @@ Use ChatGPT Desktop's native thread heartbeat as a conditional recovery trigger.
 
 ## Interpret user commands
 
-- `开启守夜：当前任务` or equivalent: create or update one heartbeat for the current local Codex thread.
-- `为所有正在执行的任务开启守夜` or equivalent: discover the currently visible eligible local Codex threads and create or update one staggered heartbeat per eligible thread.
+- `开启守夜：当前任务` or equivalent: create or update one monitor-only dual-role supervisor heartbeat for the current local Codex thread.
+- `为所有正在执行的任务开启守夜` or equivalent: discover visible task truth and create or update only one monitor-only dual-role supervisor. Do not create per-target heartbeats.
 - `暂停守夜`: pause the matching heartbeat without deleting it.
 - `恢复守夜`: reactivate the matching paused heartbeat; do not create a duplicate.
 - `关闭守夜`: delete the matching heartbeat.
@@ -56,14 +70,14 @@ Do not include secrets, API keys, raw provider responses, or sensitive repositor
 
 1. Use the app's automation-management capability to create, view, update, pause, reactivate, or delete heartbeats.
 2. Use a thread heartbeat attached to the existing local thread. Do not substitute a standalone cron automation or create a new task per run.
-3. Resolve existing matching automations before creation. Use the deterministic marker, target thread id, and existing automation metadata to prevent duplicates. A repeated enable request must update or report `already_active`; it must never create a second heartbeat.
+3. Resolve the existing dual-role supervisor before creation. Use the deterministic marker, supervisor thread id, and existing automation metadata to prevent duplicates. A repeated enable request must update or report `already_active`; it must never create a second heartbeat.
 4. Use the native status values exactly as exposed by the host. The current Desktop automation tool requires uppercase `ACTIVE` and `PAUSED`; never send lowercase variants.
-5. Capture and retain the returned automation id when the host exposes one. Include enough deterministic identity in the heartbeat prompt for later self-pause or self-delete.
+5. Capture and retain the returned automation id when the host exposes one. Include enough deterministic identity for later direct-user lifecycle actions; a scheduled heartbeat never self-pauses or self-deletes.
 6. After every mutation, verify the returned receipt or re-read host-managed metadata. A create receipt that omits the actual status is not proof of the requested state: re-read the host-managed metadata, and if fail-closed setup requires `PAUSED` but the host persisted `ACTIVE`, issue a full-field update to `PAUSED`, then verify the second receipt and metadata. Report the actual automation id, target thread id, cadence, status, and `created`, `updated`, `already_active`, `paused`, `resumed`, `deleted`, or `failed` outcome. Include first/next run time only when the host exposes it.
 7. Preserve existing notification settings unless the user asks to change them.
-8. The fleet supervisor is the only automation writer after fleet mode is enabled. Target heartbeats classify and recover only; the host hook denies every target-heartbeat automation mutation, including self-delete, even when a generic heartbeat lifecycle instruction says the hosted business task is complete. Immediately before a supervisor mutation, re-read the current host-managed metadata and skip conflicting identity, policy revision, or prompt hash rather than overwriting newer state.
-9. A fleet heartbeat may mutate only another canonical watch target. The host hook denies mutation of the supervisor's own dual-role automation and unrelated automations; direct user lifecycle commands remain available outside heartbeat turns.
-10. Before a fleet mutation, run the fresh runtime doctor and the native sentinel negative probe described above. If either is unproved, classify `soft_guard_only` and perform no create, update, activate, pause, or delete operation.
+8. In `supervisor_monitor_only`, no scheduled heartbeat is an automation writer. Existing target heartbeats classify only, and the supervisor uses read-only metadata views only.
+9. Direct user lifecycle commands remain available outside heartbeat turns. Immediately before such a user-authorized supervisor mutation, re-read current host-managed metadata and skip conflicting identity, policy revision, or prompt hash rather than overwriting newer state.
+10. Do not run shell-send or native-automation mutation probes from a scheduled heartbeat. Keep the proved specialized-path bypass as `soft_guard_only` evidence until a separately reviewed restoration policy replaces this mode.
 11. Because Desktop allows at most one heartbeat automation per task, update an existing heartbeat on the chosen supervisor thread in place to the dual-role supervisor prompt. Do not create a second heartbeat or a workaround cron. Treat automation ids as opaque; the prompt/name marker establishes the current role.
 12. Never edit Desktop databases, session JSONL, global state, or automation TOML directly. Reading host-managed automation metadata to resolve an id is allowed when the native tool requires it; mutate only through the native automation capability.
 13. Never restart or stop ChatGPT/Codex as part of heartbeat setup.
@@ -77,12 +91,12 @@ Read the target thread's recent status and, when relevant, current repository tr
 | State | Required evidence | Action |
 |---|---|---|
 | `running` | A turn or relevant operation is currently active | Do nothing |
-| `resume_eligible` | Explicit transient gateway/transport failure, unfinished authorized goal, and no active turn or human gate | Start a continuous recovery session and finish all remaining authorized safe work unless a terminal boundary is reached |
-| `continuation_gap` | The latest non-heartbeat business turn ended with explicit `contextCompaction` or a host continuity/system termination, has no final answer, the previously authorized goal is still unfinished, and the exact first unproved step is identifiable | Start the same continuous recovery session after the side-effect checks used for `resume_eligible` |
+| `resume_eligible` | Explicit transient gateway/transport failure, unfinished authorized goal, and no active turn or human gate | Current mode: observe only and keep ACTIVE; retain the evidence for a future user-authorized recovery policy |
+| `continuation_gap` | The latest non-heartbeat business turn ended with explicit `contextCompaction` or a host continuity/system termination, has no final answer, the previously authorized goal is still unfinished, and the exact first unproved step is identifiable | Current mode: observe only and keep ACTIVE; never resume automatically |
 | `peer_busy` | After `resume_eligible` or `continuation_gap` is established, another write-capable thread in the same checkout is active or deterministically wins shared-checkout arbitration | Silently do nothing and keep the heartbeat ACTIVE for a later tick |
 | `natural_pause` | Before recovery starts, the latest business turn explicitly handed control back to the user or reached a user-defined checkpoint, and no standing continue-to-completion authorization applies | Observe only and keep the heartbeat ACTIVE |
 | `needs_input` | Approval, credential, choice, clarification, or other user action is required | Observe only, report once when deduplication is available, and keep ACTIVE |
-| `complete` | Completion criteria and required verification are satisfied; no required work remains | Observe only; expose completion truth for fleet-supervisor cleanup |
+| `complete` | Completion criteria and required verification are satisfied; no required work remains | Observe only and keep ACTIVE; completion cleanup is disabled |
 | `non_transient_failure` | 400/401/403, schema/config error, deterministic test failure, policy denial, or business-logic failure | Observe only, report once, and keep ACTIVE; do not call it gateway recovery |
 | `unknown` | Evidence is missing, conflicting, stale, or inaccessible | Observe only and keep ACTIVE; never guess |
 | `stale_policy_running` | A write-capable turn started before the current isolation policy or hook load boundary | Observe only and keep ACTIVE until the stale turn ends |
@@ -93,6 +107,8 @@ Treat 408, 429, 502, 503, 504, connection timeout/reset/refusal, DNS failure, an
 Do not infer `continuation_gap` from idle state, missing TODOs, a dirty worktree, or no final answer alone. Require the explicit host continuity marker plus an unfinished authorized goal, no human gate, and an identifiable next safe step. Before recovery starts, a normal final answer that explicitly hands control back to the user, a user-input request, an approval boundary, or a user-defined checkpoint remains `natural_pause`, `needs_input`, or `complete`. A phase ending by itself is not a natural pause when standing authorization still requires all remaining work to continue.
 
 ## Resume safely
+
+This section is an inactive restoration reference while `operating_mode=supervisor_monitor_only` is in force. Do not execute it from a current scheduled heartbeat.
 
 For `resume_eligible` or `continuation_gap`:
 
@@ -108,6 +124,8 @@ For `resume_eligible` or `continuation_gap`:
 10. Respect host-owned goal and approval semantics. If the host marks the task as requiring attention or the goal cannot be resumed automatically, observe only, report the boundary once when possible, and keep monitoring ACTIVE.
 
 ## Coordinate multiple tasks safely
+
+This section is also an inactive restoration reference while `operating_mode=supervisor_monitor_only` is in force. Current scheduled heartbeats do not arm targets, arbitrate writers, or recover in parallel.
 
 Use one heartbeat per target thread even when several tasks belong to the same project. Separate monitoring concurrency from mutation concurrency:
 
@@ -131,31 +149,24 @@ If the gateway is unavailable before a heartbeat turn can start, the skill canno
 ## Create a heartbeat for the current task
 
 1. Confirm the current backing kind is a local Codex thread and obtain its thread id.
-2. Inspect recent status. It is valid to add protection while the task is currently running; later ticks must classify `running` and no-op.
-3. Resolve an existing heartbeat with the deterministic marker.
-4. Create or update the thread heartbeat with a 10-minute cadence unless the user specifies another cadence.
-5. Generate the durable prompt only with `scripts/New-WatchHeartbeatPrompt.ps1 -TargetThreadId <thread-id>`. Do not reconstruct or paraphrase it from this file.
-6. Report the target, cadence, current automation state, and whether it was created or updated.
+2. Resolve the existing dual-role supervisor, if any; do not create a target heartbeat.
+3. Generate the durable supervisor prompt only with `scripts/New-WatchFleetSupervisorPrompt.ps1 -SupervisorThreadId <thread-id>`.
+4. Create or update that monitor-only supervisor only in a direct user lifecycle turn, preserving the requested cadence and notification policy.
+5. Re-read the native receipt and report the actual automation id, cadence, and status.
 
 ## Create heartbeats for all executing tasks
 
-Treat `all` as a standing fleet reconciliation request for eligible tasks visible through the current app/host tools, not as a one-time snapshot and not as proof of every task on every machine or cloud surface. Honor the current listing limit; the present Desktop `list_threads` surface returns at most 50 recent tasks per call. Report the returned count, unavailable hosts or sources, and this visibility boundary.
+Treat `all` as a standing fleet observation request for eligible tasks visible through the current app/host tools, not as a one-time snapshot and not as proof of every task on every machine or cloud surface. Honor the current listing limit; the present Desktop `list_threads` surface returns at most 50 recent tasks per call. Report the returned count, unavailable hosts or sources, and this visibility boundary.
 
-1. List the broadest currently visible thread set supported by the app.
-2. Keep local Codex threads on the current host that are currently running, have an active unfinished goal, or most recently stopped because of an evidenced transient provider failure.
-3. Read enough recent status per candidate to classify it. Never select by title or preview alone.
-4. Exclude completed, archived, projectless idle, ChatGPT chat, cloud, inaccessible remote-host, natural-pause, needs-input, approval-blocked, and non-transient-failure threads unless the user explicitly broadens scope and the host supports them.
-5. Group candidates by normalized checkout path and classify their execution domain. Arm every eligible thread; isolated worktrees and evidenced read-only tasks may run in parallel, while write-capable tasks in one checkout use the deterministic `peer_busy` arbitration above.
-6. Resolve existing matching heartbeats before creating any new one. Create or update one dual-role fleet supervisor heartbeat with a prompt generated only by `scripts/New-WatchFleetSupervisorPrompt.ps1`; it continuously enrolls newly eligible visible tasks, cleans verified completed orphans, and applies the generated target contract to its own host task. If that task already has a target heartbeat, update it in place; do not double-attach.
-7. Use one per-thread heartbeat so each task retains its own context; the supervisor automation is its host task's heartbeat. Stagger their first runs across the cadence window when the native tool exposes a first-run or start-time control. If it does not, create targets sequentially, report `platform_na` for verified first-run staggering, and do not claim that staggering was proven.
-8. Choose the default fleet cadence as the smallest multiple of 5 minutes that is at least both 10 and the number of selected tasks. This keeps the average scheduled attempt rate at roughly one per minute or less. Honor an explicit user cadence, but still stagger starts.
-9. Apply changes per target. Do not silently claim all-or-nothing behavior. Preserve successful updates and report each partial failure.
-10. Return a receipt with `created`, `updated`, `already_active`, `skipped`, and `failed` groups, plus any visibility limitation.
-11. Before activating reconciliation or reporting silent fleet acceptance, verify the user-level `PreToolUse` guard definition is exact-hash reviewed and trusted and exercise the supported tool path in a fresh Codex session. Existing in-progress turns remain outside the new hook/config load boundary, and specialized-path limitations must remain explicit.
+1. List the broadest currently visible thread set supported by the app, up to the host limit, and read enough current status to classify candidates without trusting titles or previews.
+2. Resolve the existing dual-role supervisor heartbeat by deterministic marker. Do not create, update, pause, activate, or delete any target heartbeat.
+3. In a direct user lifecycle turn only, create or update one supervisor using `scripts/New-WatchFleetSupervisorPrompt.ps1`; preserve cadence and notification policy unless the user changed them.
+4. Keep every scheduled supervisor tick read-only. It may classify running, unfinished, completed, transient-failure, continuation-gap, and user-action states, but it must not enroll, recover, or clean up targets.
+5. Return a receipt only for the direct user-authorized supervisor lifecycle operation, plus the visible task-count boundary. Routine scheduled ticks use `DONT_NOTIFY` unless they discover a new deduplicated user-action boundary.
 
 ## Lifecycle actions
 
-- On `complete`, a normal target heartbeat observes only. The fleet supervisor deletes the matching target heartbeat after re-reading positive completion and verification truth. Completion of the supervisor's hosted business task does not delete the dual-role supervisor automation; it remains the fleet control plane until the user explicitly pauses or closes it.
+- On `complete`, every current or legacy heartbeat observes only and remains ACTIVE. The supervisor does not delete a matching target heartbeat. Completion of the supervisor's hosted business task does not delete the dual-role supervisor automation; only a direct user lifecycle command may pause or close it.
 - On `peer_busy`, leave the matching heartbeat ACTIVE, take no task action, and make no cross-thread tool call or user-visible peer notification.
 - On `natural_pause`, `needs_input`, `non_transient_failure`, `unknown`, `stale_policy_running`, or `soft_guard_only`, leave the matching heartbeat ACTIVE and observe only. Never turn a normal task phase boundary into a watch pause.
 - Only an explicit user command such as `暂停守夜` changes a heartbeat to PAUSED. Ordinary task messages need no watch reactivation because monitor-only states remain ACTIVE. After an explicit pause, require an explicit `恢复守夜`, `开启守夜`, or equivalent request.
@@ -170,7 +181,7 @@ Treat `all` as a standing fleet reconciliation request for eligible tasks visibl
 - Do not change provider, auth, model, sandbox, plugin, MCP, or Desktop process state while managing heartbeats.
 - Use the minimum access necessary and preserve unrelated automations.
 - Report current facts and limitations; never claim coverage for threads the app did not expose.
-- `DONT_NOTIFY` suppresses routine run notifications and output chatter; it does not hide the scheduled input card or run transcript that Desktop retains in the target task. The native thread-heartbeat surface currently has no transcript-hiding control. Do not promise an invisible task history while per-task heartbeat recovery remains enabled.
+- `DONT_NOTIFY` suppresses routine run notifications and output chatter; it does not hide the scheduled input card or run transcript that Desktop retains. The native thread-heartbeat surface currently has no transcript-hiding control. Do not promise invisible task history.
 
 ## Generate durable prompts
 
