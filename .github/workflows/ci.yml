@@ -11,6 +11,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Verify PowerShell 7 runtime
         shell: pwsh
@@ -44,8 +46,12 @@ jobs:
             throw 'Verified Pester 4.10.1 did not load.'
           }
 
-          "PSModulePath=$moduleBase$([System.IO.Path]::PathSeparator)$env:PSModulePath" |
-            Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+                "PSModulePath=$moduleBase$([System.IO.Path]::PathSeparator)$env:PSModulePath" |
+                  Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Rebuild locked skill sources
+        shell: pwsh
+        run: .\skills.ps1 更新 -Locked
 
       - name: Run repository full quality gate
         shell: pwsh

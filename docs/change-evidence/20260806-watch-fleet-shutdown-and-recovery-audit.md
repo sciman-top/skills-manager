@@ -33,7 +33,8 @@ The write set is limited to the watch helper/prompt generators, their tests, the
 
 ### Supply-chain and provenance hardening
 
-- GitHub Actions checkout v7.0.1 is pinned to commit `3d3c42e5aac5ba805825da76410c181273ba90b1` and uses the official Node 24 action runtime. The job has a 20-minute timeout, and Pester 4.10.1 is downloaded from its exact package URL, verified against SHA-256 `898210e1a30c52cd46ba317c2278a9324345214213aa2f7d6b7dfa7b98f37ac9`, and imported from a runner-temporary module root. `-SkipPublisherCheck` is not used.
+- GitHub Actions checkout v7.0.1 is pinned to commit `3d3c42e5aac5ba805825da76410c181273ba90b1`, uses the official Node 24 action runtime, and does not persist repository credentials. The job has a 20-minute timeout, and Pester 4.10.1 is downloaded from its exact package URL, verified against SHA-256 `898210e1a30c52cd46ba317c2278a9324345214213aa2f7d6b7dfa7b98f37ac9`, and imported from a runner-temporary module root. `-SkipPublisherCheck` is not used.
+- Before the full gate, the ephemeral runner executes the repository's existing `skills.ps1 更新 -Locked` path. This rebuilds ignored vendor/import/agent runtime state from `skills.lock.json` instead of weakening skill-integrity, committing generated caches, or inventing workflow-local clone logic.
 - Reference refresh now compares the actual normalized `origin` with the manifest `upstream_url` before fetch or pull. Mismatch records redacted provenance with `status=origin-mismatch` and performs no remote update.
 
 ### Hermetic test correction
@@ -63,7 +64,7 @@ The write set is limited to the watch helper/prompt generators, their tests, the
   pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full
   ```
 
-  exited `0` after the hosted-CI hermeticity fix. The timing receipt records Pester `4.10.1`, `896` Unit plus `18` E2E cases (`914 / 914` passed), and `suite_elapsed_ms=239394`. The full runner also passed build, repository hygiene, generated sync, 107-skill integrity, reference governance `29/7/3`, the 32-case non-watch activation corpus, routing, dependency/config/host/planning/PS7/Agent/doctor contracts, with `total_elapsed_ms=244179`.
+  exited `0` after the hosted-CI hermeticity and locked-hydration workflow fixes. The timing receipt records Pester `4.10.1`, `896` Unit plus `18` E2E cases (`914 / 914` passed), and `suite_elapsed_ms=254877`. The full runner also passed build, repository hygiene, generated sync, 107-skill integrity, reference governance `29/7/3`, the 32-case non-watch activation corpus, routing, dependency/config/host/planning/PS7/Agent/doctor contracts, with `total_elapsed_ms=260031`.
 
 ## Truth boundary and remaining live acceptance
 
@@ -71,7 +72,7 @@ The write set is limited to the watch helper/prompt generators, their tests, the
 - No real shutdown was scheduled, cancelled, or executed. The 120-second shutdown path therefore remains intentionally untested as an external effect.
 - No watch automation was created, updated, paused, resumed, or deleted; no Goal was created, replaced, cleared, or completed.
 - No live hook was installed or re-trusted. The host may remain `soft_guard_only`, and specialized tool paths are not claimed to be absolutely isolated.
-- The first GitHub-hosted run, `31043635015`, proved the pinned Pester install step and then correctly failed the host-specific Phase1 test. A clean new-commit hosted workflow receipt remains required after the hermeticity fix and again after main integration.
+- GitHub-hosted run `31043635015` proved the pinned Pester install step and then correctly failed the host-specific Phase1 test. Run `31044798776` proved the fixture correction (`896 / 896` Unit and `18 / 18` E2E) and then failed at skill-integrity because a clean checkout intentionally excludes generated `agent/`. The workflow now uses the locked rebuild entry before the full gate; a clean new-commit hosted receipt remains required for that correction and again after main integration.
 - The isolated runtime caches are ignored verification inputs and are not part of the commit.
 
 ## Rollback
