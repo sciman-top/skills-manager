@@ -155,15 +155,19 @@ Describe "Skill projection" {
             $grillPolicy = Get-ContentUtf8 (Join-Path $repoRoot "overrides\patches\grill-with-docs\agents\openai.yaml")
             $grillPolicy | Should Match "allow_implicit_invocation:\s*true"
 
-            foreach ($explicitName in @("improve-codebase-architecture", "to-spec", "to-tickets")) {
-                $source = Get-ChildItem -LiteralPath (Join-Path $repoRoot "imports") -Recurse -Filter "SKILL.md" -File |
-                    Where-Object { (Get-ContentUtf8 $_.FullName) -match ("(?m)^name:\s*" + [regex]::Escape($explicitName) + "\s*$") } |
-                    Select-Object -First 1
-                ($null -ne $source) | Should Be $true
-                (Get-ContentUtf8 $source.FullName) | Should Match "disable-model-invocation:\s*true"
-                $agentMetadata = Join-Path $source.Directory.FullName "agents\openai.yaml"
-                (Test-Path -LiteralPath $agentMetadata -PathType Leaf) | Should Be $true
-                (Get-ContentUtf8 $agentMetadata) | Should Match "allow_implicit_invocation:\s*false"
+            $expectedExplicitSources = @{
+                "improve-codebase-architecture" = "skills\engineering\improve-codebase-architecture"
+                "to-spec" = "skills\engineering\to-spec"
+                "to-tickets" = "skills\engineering\to-tickets"
+            }
+            foreach ($explicitName in $expectedExplicitSources.Keys) {
+                $source = @($config.imports | Where-Object { [string]$_.skill -eq $expectedExplicitSources[$explicitName] })
+                $source.Count | Should Be 1
+                [string]$source[0].repo | Should Be "https://github.com/mattpocock/skills.git"
+                [string]$source[0].mode | Should Be "manual"
+                $routingMember = @($engineeringFlow.members | Where-Object name -eq $explicitName)
+                $routingMember.Count | Should Be 1
+                [string]$routingMember[0].activation | Should Match 'explicit'
             }
 
             $setupSkill = Get-ContentUtf8 (Join-Path $repoRoot "overrides\patches\setup-matt-pocock-skills\SKILL.md")
