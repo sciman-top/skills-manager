@@ -119,6 +119,20 @@ name: demo
         @($result.Report.errors | Where-Object code -eq "missing_required_skill").Count | Should Be 1
     }
 
+    It "does not let a profile reference self-prove an undeclared dependency" {
+        $fixture = New-IntegrityFixture "profile-is-not-inventory" "" @(
+            @{ skill = "demo"; requires = @("required-skill") }
+        )
+        $config = Get-Content -Raw $fixture.ConfigPath | ConvertFrom-Json
+        $config.skill_projection.profiles.default.enabled_names = @("demo", "required-skill")
+        $config | ConvertTo-Json -Depth 8 | Set-Content -Path $fixture.ConfigPath -Encoding UTF8
+
+        $result = Invoke-IntegrityFixture $fixture
+
+        $result.ExitCode | Should Be 1
+        @($result.Report.errors | Where-Object code -eq "missing_required_skill").Count | Should Be 1
+    }
+
     It "fails when a profile enables a caller without its required skill" {
         $fixture = New-IntegrityFixture "profile-gap" "" @(
             @{ skill = "demo"; requires = @("required-skill") }
@@ -129,6 +143,35 @@ name: demo
 
         $result.ExitCode | Should Be 1
         @($result.Report.errors | Where-Object code -eq "profile_missing_dependency").Count | Should Be 1
+    }
+
+    It "validates dependency closure from tracked portable declarations when imported packages are not materialized" {
+        $fixture = New-IntegrityFixture "clean-portable-inventory" "" @(
+            @{ skill = "imported-caller"; requires = @("mapped-required") },
+            @{ skill = "mapped-caller"; requires = @("imported-required") }
+        )
+        $config = Get-Content -Raw $fixture.ConfigPath | ConvertFrom-Json
+        $config | Add-Member -NotePropertyName imports -NotePropertyValue @(
+            @{ name = "caller-source"; skill = "skills\imported-caller" },
+            @{ name = "required-source"; skill = "skills\imported-required" }
+        )
+        $config | Add-Member -NotePropertyName mappings -NotePropertyValue @(
+            @{ vendor = "fixture"; from = "skills\mapped-caller"; to = "fixture-mapped-caller" },
+            @{ vendor = "fixture"; from = "skills\mapped-required"; to = "fixture-mapped-required" }
+        )
+        $config.skill_projection.profiles.default.enabled_names = @(
+            "demo",
+            "imported-caller",
+            "mapped-required",
+            "mapped-caller",
+            "imported-required"
+        )
+        $config | ConvertTo-Json -Depth 8 | Set-Content -Path $fixture.ConfigPath -Encoding UTF8
+
+        $result = Invoke-IntegrityFixture $fixture
+
+        $result.ExitCode | Should Be 0
+        @($result.Report.errors).Count | Should Be 0
     }
 
     It "fails when OpenAI metadata references a missing icon" {
