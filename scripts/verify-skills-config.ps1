@@ -4,6 +4,7 @@ param(
     [string]$ConfigPath,
     [string]$SchemaPath,
     [string]$ReportPath,
+    [switch]$RequireDeclaredSchemaVersion,
     [switch]$NoExit
 )
 
@@ -64,6 +65,14 @@ else {
         $versionSource = $contract.schema.source
         foreach ($observation in @($contract.observations)) { $observations.Add($observation) | Out-Null }
         foreach ($errorText in @($contract.errors)) { $findings.Add((ConvertTo-SafeContractFinding ([string]$errorText))) | Out-Null }
+
+        $rootConfigPath = [System.IO.Path]::GetFullPath((Join-Path $repoRoot 'skills.json'))
+        $currentConfigPath = [System.IO.Path]::GetFullPath($ConfigPath)
+        $declaredVersionRequired = $RequireDeclaredSchemaVersion -or
+            $currentConfigPath.Equals($rootConfigPath, [System.StringComparison]::OrdinalIgnoreCase)
+        if ($declaredVersionRequired -and $versionSource -ne 'declared') {
+            $findings.Add((New-SafeFinding 'schema_version_required' '$.schema_version' 'Repository configuration must declare schema_version explicitly.')) | Out-Null
+        }
     }
     catch {
         $findings.Add((New-SafeFinding "config_invalid_json" "$" "Configuration is not valid JSON or could not be evaluated.")) | Out-Null
@@ -83,6 +92,7 @@ $result = [ordered]@{
     would_block = (-not $valid)
     config_version = $version
     version_source = $versionSource
+    declared_version_required = [bool]$declaredVersionRequired
     config_sha256_before = $beforeHash
     config_sha256_after = $afterHash
     finding_count = $findings.Count

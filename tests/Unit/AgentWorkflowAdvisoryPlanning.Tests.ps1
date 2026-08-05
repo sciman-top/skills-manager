@@ -114,11 +114,13 @@ Describe 'Agent workflow advisory planning verifier' {
         $manifestPath = Join-Path $fixtureRoot 'tasks\skills-manager-vnext-agent-workflow-advisory.tasks.json'
         $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
         $manifest.host_radar_receipt.executed_model = 'gpt-5.6-luna'
+        $manifest.host_spawn_model_probe_receipt.status = 'confirmed_available'
         $manifest | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
         Add-Content -LiteralPath (Join-Path $fixtureRoot 'docs\product\skills-manager-vnext-roadmap.md') -Value "`nfour soft tiers"
 
         $parsed = (Invoke-AgentWorkflowAdvisoryVerifier $fixtureRoot).output | ConvertFrom-Json
         @($parsed.findings | Where-Object code -eq 'host_radar_receipt_unverified_value').Count | Should Be 1
+        @($parsed.findings | Where-Object code -eq 'host_spawn_model_probe_receipt_invalid').Count | Should Be 1
         @($parsed.findings | Where-Object code -eq 'four_tier_wording_detected').Count | Should Be 1
     }
 
@@ -136,12 +138,33 @@ Describe 'Agent workflow advisory planning verifier' {
     It 'requires failure packet and stale Radar fail-closed policy' {
         $fixtureRoot = New-AgentWorkflowAdvisoryFixture 'failure-radar'
         $applicationPath = Join-Path $fixtureRoot 'src\Application\ModelAndAgentPolicy.ps1'
-        $application = (Get-Content -LiteralPath $applicationPath -Raw).Replace('Test-AgentFailurePacketContract $FailurePacket', '$true').Replace('if (-not $radarValidation.pass -and -not $hasLocal -and -not $hostConfirmed)', 'if ($false)')
+        $application = (Get-Content -LiteralPath $applicationPath -Raw).Replace('Test-AgentFailurePacketContract $FailurePacket', '$true').Replace('if (-not $radarValidation.pass -and -not $hasLocal -and -not $hostConfirmed)', 'if ($false)').Replace('host_pair_availability_unknown', 'host_pair_state_missing')
         Set-Content -LiteralPath $applicationPath -Value $application -Encoding UTF8
 
         $parsed = (Invoke-AgentWorkflowAdvisoryVerifier $fixtureRoot).output | ConvertFrom-Json
         @($parsed.findings | Where-Object code -eq 'failure_packet_gate_missing').Count | Should Be 1
         @($parsed.findings | Where-Object code -eq 'stale_radar_fallback_missing').Count | Should Be 1
+        @($parsed.findings | Where-Object code -eq 'host_surface_availability_gate_missing').Count | Should Be 1
+    }
+
+    It 'requires structured completion planning-only Radar allowlists and input reparse guards' {
+        $fixtureRoot = New-AgentWorkflowAdvisoryFixture 'adversarial-contracts'
+        $applicationPath = Join-Path $fixtureRoot 'src\Application\ModelAndAgentPolicy.ps1'
+        $application = (Get-Content -LiteralPath $applicationPath -Raw).Replace('function Test-AgentCompletionVerificationReceipt', 'function Test-UntrustedReceipt').Replace("'planned_dependency_order_only'", "'claimed_complete'")
+        Set-Content -LiteralPath $applicationPath -Value $application -Encoding UTF8
+        $domainPath = Join-Path $fixtureRoot 'src\Domain\AgentWorkflow.ps1'
+        $domain = (Get-Content -LiteralPath $domainPath -Raw).Replace('radar_source_untrusted', 'radar_source_unknown').Replace('$allowedPairs = @(''gpt-5.6-sol|xhigh'', ''gpt-5.6-sol|medium'', ''gpt-5.6-luna|max'')', '$allowedPairs = @(''gpt-5.6-terra|high'')')
+        Set-Content -LiteralPath $domainPath -Value $domain -Encoding UTF8
+        $commandPath = Join-Path $fixtureRoot 'src\Commands\AgentWorkflow.ps1'
+        $command = (Get-Content -LiteralPath $commandPath -Raw).Replace('Agent workflow input cannot traverse a reparse point.', 'Agent workflow input is invalid.')
+        Set-Content -LiteralPath $commandPath -Value $command -Encoding UTF8
+
+        $parsed = (Invoke-AgentWorkflowAdvisoryVerifier $fixtureRoot).output | ConvertFrom-Json
+        @($parsed.findings | Where-Object code -eq 'completion_receipt_gate_missing').Count | Should BeGreaterThan 0
+        @($parsed.findings | Where-Object code -eq 'planning_only_semantics_missing').Count | Should Be 1
+        @($parsed.findings | Where-Object code -eq 'radar_source_allowlist_missing').Count | Should Be 1
+        @($parsed.findings | Where-Object code -eq 'radar_pair_allowlist_missing').Count | Should Be 1
+        @($parsed.findings | Where-Object code -eq 'input_reparse_guard_missing').Count | Should Be 1
     }
 
     It 'requires the advisory verifier in the full quality gate' {

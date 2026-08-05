@@ -78,17 +78,74 @@ function Rotate-LogIfNeeded([string]$TargetPath) {
     }
     catch {}
 }
+function Protect-SensitiveText([string]$Text) {
+    if ([string]::IsNullOrEmpty($Text)) { return $Text }
+
+    $environmentReferences = [System.Collections.Generic.List[string]]::new()
+    $masked = [regex]::Replace($Text, '\$\{[A-Za-z_][A-Za-z0-9_]*\}', {
+        param($match)
+        $index = $environmentReferences.Count
+        $environmentReferences.Add($match.Value) | Out-Null
+        return "__SKILLS_ENV_REFERENCE_${index}__"
+    })
+
+    $masked = [regex]::Replace($masked, '(?i)([a-z][a-z0-9+.-]*://)([^/@\s:]+):([^/@\s]+)@', '$1<redacted>@')
+    $masked = [regex]::Replace($masked, '(?i)([?&](?:access_token|auth|authorization|password|passwd|secret|token|api[-_]?key)=)[^&#\s]+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)((?:authorization|proxy-authorization)\s*[:=]\s*(?:basic|bearer)?\s*)[^\s"'',;]+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)(\bbearer\s+)[^\s"'',;]+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)((?:password|passwd|secret|token|api[-_]?key)\s*[=:]\s*)[^\s"'',;]+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)(\b(?:password|passwd|secret|token|api[-_]?key)\s+)[^\s"'',;]+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)\b(?:github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+)\b', '<redacted>')
+
+    for ($i = 0; $i -lt $environmentReferences.Count; $i++) {
+        $masked = $masked.Replace("__SKILLS_ENV_REFERENCE_${i}__", $environmentReferences[$i])
+    }
+    return $masked
+}
+function Protect-SensitiveLogValue([object]$Value, [string]$KeyName = '') {
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [string]) {
+        $text = [string]$Value
+        $sensitiveKey = $KeyName -match '(?i)(?:authorization|credential|password|passwd|secret|token|api[-_]?key)'
+        $environmentKey = $KeyName -match '(?i)(?:env(?:ironment)?(?:_var)?|_env_var)$'
+        $environmentReference = $text -match '^\$\{[A-Za-z_][A-Za-z0-9_]*\}$' -or
+            ($environmentKey -and $text -match '^[A-Za-z_][A-Za-z0-9_]*$')
+        if ($sensitiveKey -and -not $environmentReference) { return '<redacted>' }
+        return (Protect-SensitiveText $text)
+    }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $copy = [ordered]@{}
+        foreach ($key in @($Value.Keys)) {
+            $keyText = [string]$key
+            $copy[$keyText] = Protect-SensitiveLogValue $Value[$key] $keyText
+        }
+        return $copy
+    }
+    if ($Value -is [pscustomobject]) {
+        $copy = [ordered]@{}
+        foreach ($property in @($Value.PSObject.Properties)) {
+            $copy[$property.Name] = Protect-SensitiveLogValue $property.Value $property.Name
+        }
+        return [pscustomobject]$copy
+    }
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+        return @($Value | ForEach-Object { Protect-SensitiveLogValue $_ $KeyName })
+    }
+    return $Value
+}
 function Write-LogRecord([string]$Level, [string]$Message, [object]$Data) {
     if ($DryRun) { return }
     $targetPath = Resolve-ActiveLogPath
     if ([string]::IsNullOrWhiteSpace($targetPath)) { return }
     Rotate-LogIfNeeded $targetPath
+    $safeMessage = Protect-SensitiveText $Message
+    $safeData = Protect-SensitiveLogValue $Data
     $record = [ordered]@{
         ts    = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
         level = $Level.ToUpperInvariant()
-        msg   = $Message
+        msg   = $safeMessage
     }
-    if ($null -ne $Data) { $record.data = $Data }
+    if ($null -ne $safeData) { $record.data = $safeData }
     $json = ($record | ConvertTo-Json -Depth 20 -Compress)
     try {
         $json | Out-File -FilePath $targetPath -Append -Encoding UTF8
@@ -113,7 +170,9 @@ function Write-LogRecord([string]$Level, [string]$Message, [object]$Data) {
 function Log([string]$msg, [string]$Level = "INFO", [switch]$NoHost, [object]$Data) {
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $lvl = $Level.ToUpperInvariant()
-    $line = "[{0}][{1}] {2}" -f $timestamp, $lvl, $msg
+    $safeMessage = Protect-SensitiveText $msg
+    $safeData = Protect-SensitiveLogValue $Data
+    $line = "[{0}][{1}] {2}" -f $timestamp, $lvl, $safeMessage
     if (-not $NoHost) {
         switch ($lvl) {
             "WARN" { Write-Host $line -ForegroundColor Yellow }
@@ -122,7 +181,7 @@ function Log([string]$msg, [string]$Level = "INFO", [switch]$NoHost, [object]$Da
             default { Write-Host $line }
         }
     }
-    Write-LogRecord $lvl $msg $Data
+    Write-LogRecord $lvl $safeMessage $safeData
 }
 function Invoke-WithMetric(
     [string]$Metric,

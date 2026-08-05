@@ -171,17 +171,74 @@ function Rotate-LogIfNeeded([string]$TargetPath) {
     }
     catch {}
 }
+function Protect-SensitiveText([string]$Text) {
+    if ([string]::IsNullOrEmpty($Text)) { return $Text }
+
+    $environmentReferences = [System.Collections.Generic.List[string]]::new()
+    $masked = [regex]::Replace($Text, '\$\{[A-Za-z_][A-Za-z0-9_]*\}', {
+        param($match)
+        $index = $environmentReferences.Count
+        $environmentReferences.Add($match.Value) | Out-Null
+        return "__SKILLS_ENV_REFERENCE_${index}__"
+    })
+
+    $masked = [regex]::Replace($masked, '(?i)([a-z][a-z0-9+.-]*://)([^/@\s:]+):([^/@\s]+)@', '$1<redacted>@')
+    $masked = [regex]::Replace($masked, '(?i)([?&](?:access_token|auth|authorization|password|passwd|secret|token|api[-_]?key)=)[^&#\s]+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)((?:authorization|proxy-authorization)\s*[:=]\s*(?:basic|bearer)?\s*)[^\s"'',;]+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)(\bbearer\s+)[^\s"'',;]+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)((?:password|passwd|secret|token|api[-_]?key)\s*[=:]\s*)[^\s"'',;]+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)(\b(?:password|passwd|secret|token|api[-_]?key)\s+)[^\s"'',;]+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)\b(?:github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+)\b', '<redacted>')
+
+    for ($i = 0; $i -lt $environmentReferences.Count; $i++) {
+        $masked = $masked.Replace("__SKILLS_ENV_REFERENCE_${i}__", $environmentReferences[$i])
+    }
+    return $masked
+}
+function Protect-SensitiveLogValue([object]$Value, [string]$KeyName = '') {
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [string]) {
+        $text = [string]$Value
+        $sensitiveKey = $KeyName -match '(?i)(?:authorization|credential|password|passwd|secret|token|api[-_]?key)'
+        $environmentKey = $KeyName -match '(?i)(?:env(?:ironment)?(?:_var)?|_env_var)$'
+        $environmentReference = $text -match '^\$\{[A-Za-z_][A-Za-z0-9_]*\}$' -or
+            ($environmentKey -and $text -match '^[A-Za-z_][A-Za-z0-9_]*$')
+        if ($sensitiveKey -and -not $environmentReference) { return '<redacted>' }
+        return (Protect-SensitiveText $text)
+    }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $copy = [ordered]@{}
+        foreach ($key in @($Value.Keys)) {
+            $keyText = [string]$key
+            $copy[$keyText] = Protect-SensitiveLogValue $Value[$key] $keyText
+        }
+        return $copy
+    }
+    if ($Value -is [pscustomobject]) {
+        $copy = [ordered]@{}
+        foreach ($property in @($Value.PSObject.Properties)) {
+            $copy[$property.Name] = Protect-SensitiveLogValue $property.Value $property.Name
+        }
+        return [pscustomobject]$copy
+    }
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+        return @($Value | ForEach-Object { Protect-SensitiveLogValue $_ $KeyName })
+    }
+    return $Value
+}
 function Write-LogRecord([string]$Level, [string]$Message, [object]$Data) {
     if ($DryRun) { return }
     $targetPath = Resolve-ActiveLogPath
     if ([string]::IsNullOrWhiteSpace($targetPath)) { return }
     Rotate-LogIfNeeded $targetPath
+    $safeMessage = Protect-SensitiveText $Message
+    $safeData = Protect-SensitiveLogValue $Data
     $record = [ordered]@{
         ts    = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
         level = $Level.ToUpperInvariant()
-        msg   = $Message
+        msg   = $safeMessage
     }
-    if ($null -ne $Data) { $record.data = $Data }
+    if ($null -ne $safeData) { $record.data = $safeData }
     $json = ($record | ConvertTo-Json -Depth 20 -Compress)
     try {
         $json | Out-File -FilePath $targetPath -Append -Encoding UTF8
@@ -206,7 +263,9 @@ function Write-LogRecord([string]$Level, [string]$Message, [object]$Data) {
 function Log([string]$msg, [string]$Level = "INFO", [switch]$NoHost, [object]$Data) {
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $lvl = $Level.ToUpperInvariant()
-    $line = "[{0}][{1}] {2}" -f $timestamp, $lvl, $msg
+    $safeMessage = Protect-SensitiveText $msg
+    $safeData = Protect-SensitiveLogValue $Data
+    $line = "[{0}][{1}] {2}" -f $timestamp, $lvl, $safeMessage
     if (-not $NoHost) {
         switch ($lvl) {
             "WARN" { Write-Host $line -ForegroundColor Yellow }
@@ -215,7 +274,7 @@ function Log([string]$msg, [string]$Level = "INFO", [switch]$NoHost, [object]$Da
             default { Write-Host $line }
         }
     }
-    Write-LogRecord $lvl $msg $Data
+    Write-LogRecord $lvl $safeMessage $safeData
 }
 function Invoke-WithMetric(
     [string]$Metric,
@@ -1502,7 +1561,7 @@ function Test-OperationSensitiveKey([string]$Name) {
 }
 function Test-OperationSerializedSensitiveValue([string]$Value) {
     if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
-    return $Value -match '(?i)(Bearer\s+(?!<redacted>)[A-Za-z0-9._-]+|postgres(?:ql)?://|(?:Password|Pwd)\s*[=:]\s*(?!<redacted>)[^;\s"}]+|(?:[A-Z0-9_]*(?:API_?KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD))\s*=\s*(?!<redacted>)[^\s"}]+|gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]{8,}|[?&](?:access_token|api_key|apikey|token|secret|password|key)=(?!<redacted>)[^&#\s"}]+|"(?:token|api_key|apikey|password|passwd|pwd|secret|authorization|connection_string|oauth)[^"]*"\s*:\s*"(?!<redacted>))'
+    return $Value -match '(?i)(Bearer\s+(?!<redacted>)[A-Za-z0-9._-]+|postgres(?:ql)?://|(?:Password|Pwd)\s*[=:]\s*(?!<redacted>)[^;\s"}]+|\b(?:token|secret|password|passwd|api[-_]?key)\s+(?!<redacted>)[^\s"},;]+|(?:[A-Z0-9_]*(?:API_?KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD))\s*=\s*(?!<redacted>)[^\s"}]+|gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]{8,}|[?&](?:access_token|api_key|apikey|token|secret|password|key)=(?!<redacted>)[^&#\s"}]+|"(?:token|api_key|apikey|password|passwd|pwd|secret|authorization|connection_string|oauth)[^"]*"\s*:\s*"(?!<redacted>))'
 }
 function Protect-OperationSensitiveValue($Value, [string]$PropertyName = "") {
     if ($null -eq $Value) { return $null }
@@ -2120,11 +2179,18 @@ function Copy-AgentWorkflowValue($Value) {
 
 function Get-AgentCanonicalWritePath([string]$Path) {
     if ([string]::IsNullOrWhiteSpace($Path) -or $Path -match '[\x00-\x1F<>:"|*?\[\]]') { return $null }
-    $normalized = $Path.Trim().Replace('\', '/')
+    if ($Path -cne $Path.Trim()) { return $null }
+    $normalized = $Path.Replace('\', '/')
     if ($normalized -match '^(?:[A-Za-z]:|/|//)') { return $null }
     $segments = $normalized.Split([char]'/', [StringSplitOptions]::None)
     if ($segments.Count -eq 0 -or @($segments | Where-Object { [string]::IsNullOrWhiteSpace($_) -or $_ -in @('.', '..') }).Count -gt 0) { return $null }
-    return (@($segments | ForEach-Object { $_.ToLowerInvariant() }) -join '/')
+    $canonicalSegments = New-Object System.Collections.Generic.List[string]
+    foreach ($segment in @($segments)) {
+        if ($segment -cne $segment.TrimEnd(' ', '.')) { return $null }
+        if ($segment -match '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)') { return $null }
+        $canonicalSegments.Add($segment.Normalize([Text.NormalizationForm]::FormC).ToLowerInvariant()) | Out-Null
+    }
+    return ($canonicalSegments.ToArray() -join '/')
 }
 
 function New-AgentTaskGraph {
@@ -2253,7 +2319,13 @@ function Test-RadarSnapshotContract {
     foreach ($field in @('snapshot_id', 'source', 'captured_at', 'source_updated_at', 'expires_at', 'raw_hash')) { if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Snapshot $field))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Required Radar snapshot field is missing.')) | Out-Null } }
     if ($null -ne $Snapshot.PSObject.Properties['policy_overrides']) { $findings.Add((New-OperationFinding 'radar_decision_field_forbidden' 'error' '$.policy_overrides' 'Radar snapshots are observational evidence and cannot carry user or host policy decisions.')) | Out-Null }
     $sourceUri = $null
-    if (-not [uri]::TryCreate([string](Get-OperationObjectProperty $Snapshot 'source'), [UriKind]::Absolute, [ref]$sourceUri) -or $sourceUri.Scheme -notin @('http', 'https')) { $findings.Add((New-OperationFinding 'radar_source_invalid' 'error' '$.source' 'Radar source must be an absolute HTTP(S) URI.')) | Out-Null }
+    $sourceUriValid = [uri]::TryCreate([string](Get-OperationObjectProperty $Snapshot 'source'), [UriKind]::Absolute, [ref]$sourceUri)
+    if (-not $sourceUriValid -or $sourceUri.Scheme -cne 'https') {
+        $findings.Add((New-OperationFinding 'radar_source_invalid' 'error' '$.source' 'Radar source must be an absolute HTTPS URI.')) | Out-Null
+    }
+    elseif ($sourceUri.Host -notin @('codexradar.com', 'www.codexradar.com')) {
+        $findings.Add((New-OperationFinding 'radar_source_untrusted' 'error' '$.source' 'Radar source host is not allowlisted.')) | Out-Null
+    }
     if ([string](Get-OperationObjectProperty $Snapshot 'raw_hash') -notmatch '^[a-fA-F0-9]{64}$') { $findings.Add((New-OperationFinding 'radar_raw_hash_invalid' 'error' '$.raw_hash' 'Radar raw_hash must be SHA-256.')) | Out-Null }
     $captured = [datetimeoffset]::MinValue; $sourceUpdated = [datetimeoffset]::MinValue; $expires = [datetimeoffset]::MinValue; $nowValue = [datetimeoffset]::MinValue
     $capturedValid = [datetimeoffset]::TryParse([string](Get-OperationObjectProperty $Snapshot 'captured_at'), [ref]$captured)
@@ -2274,10 +2346,15 @@ function Test-RadarSnapshotContract {
     $entries = Get-OperationObjectProperty $Snapshot 'entries'
     if (-not (Test-OperationArray $entries)) { $findings.Add((New-OperationFinding 'radar_entries_invalid' 'error' '$.entries' 'Radar entries must be an array.')) | Out-Null; $entries = @() }
     if (@($entries).Count -eq 0) { $findings.Add((New-OperationFinding 'radar_entries_empty' 'error' '$.entries' 'Radar snapshots require at least one observation.')) | Out-Null }
+    $allowedPairs = @('gpt-5.6-sol|xhigh', 'gpt-5.6-sol|medium', 'gpt-5.6-luna|max')
+    $observedPairs = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::Ordinal)
     for ($i = 0; $i -lt @($entries).Count; $i++) {
         $entry = @($entries)[$i]; $path = '$.entries[{0}]' -f $i
         foreach ($field in @('model_label', 'model_family', 'reasoning_effort', 'confidence')) { if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $entry $field))) { $findings.Add((New-OperationFinding 'radar_entry_field_missing' 'error' ($path + '.' + $field) 'Radar entry field is required.')) | Out-Null } }
         if ([string](Get-OperationObjectProperty $entry 'reasoning_effort') -notin @('low', 'medium', 'high', 'xhigh', 'max', 'ultra')) { $findings.Add((New-OperationFinding 'reasoning_effort_invalid' 'error' ($path + '.reasoning_effort') 'Radar reasoning effort is invalid.')) | Out-Null }
+        $pair = '{0}|{1}' -f [string](Get-OperationObjectProperty $entry 'model_family'), [string](Get-OperationObjectProperty $entry 'reasoning_effort')
+        if ($pair -notin $allowedPairs) { $findings.Add((New-OperationFinding 'radar_pair_not_allowlisted' 'error' $path 'Radar observation is outside the three policy model pairs.')) | Out-Null }
+        elseif (-not $observedPairs.Add($pair)) { $findings.Add((New-OperationFinding 'radar_pair_duplicate' 'error' $path 'Radar snapshot contains a duplicate model and effort pair.')) | Out-Null }
         foreach ($field in @('score', 'estimated_cost', 'estimated_duration_seconds', 'sample_count')) { $number = 0.0; if (-not [double]::TryParse([string](Get-OperationObjectProperty $entry $field), [ref]$number) -or $number -lt 0) { $findings.Add((New-OperationFinding 'radar_metric_invalid' 'error' ($path + '.' + $field) 'Radar metric must be a non-negative number.')) | Out-Null } }
     }
     return New-OperationValidationResult $findings.ToArray()
@@ -3237,6 +3314,15 @@ function Test-RuleEstateReviewContract($Review, [string]$ReviewRoot) {
         $findings.Add((New-RuleEstateFinding 'review_authority_invalid' '$.reviewed_by_type' 'AI self-review is not apply authority; use a human review or registered policy.')) | Out-Null
     }
     if ([string]::IsNullOrWhiteSpace([string](Get-RuleEstateProperty $Review 'reviewed_by'))) { $findings.Add((New-RuleEstateFinding 'reviewer_missing' '$.reviewed_by' 'Reviewer identity is required.')) | Out-Null }
+    $authorizationRelative = [string](Get-RuleEstateProperty $Review 'authorization_receipt')
+    if ([string]::IsNullOrWhiteSpace($authorizationRelative)) {
+        $findings.Add((New-RuleEstateFinding 'authorization_receipt_missing' '$.authorization_receipt' 'An independently issued authorization receipt is required.')) | Out-Null
+    }
+    else {
+        $authorizationPath = [IO.Path]::GetFullPath((Join-Path $ReviewRoot $authorizationRelative))
+        if (-not (Test-RuleDiscoveryPathWithin $authorizationPath $ReviewRoot) -or -not [IO.File]::Exists($authorizationPath)) { $findings.Add((New-RuleEstateFinding 'authorization_receipt_invalid' '$.authorization_receipt' 'Authorization receipt must exist below the reviewed change-set directory.')) | Out-Null }
+        elseif (Test-RuleEstateReparsePath $authorizationPath $ReviewRoot) { $findings.Add((New-RuleEstateFinding 'authorization_receipt_reparse_forbidden' '$.authorization_receipt' 'Authorization receipts reached through reparse points are not accepted.')) | Out-Null }
+    }
     $changes = @(Get-RuleEstateProperty $Review 'changes')
     if ($changes.Count -eq 0) { $findings.Add((New-RuleEstateFinding 'review_changes_empty' '$.changes' 'At least one reviewed change is required.')) | Out-Null }
     if ($changes.Count -gt 128) { $findings.Add((New-RuleEstateFinding 'review_changes_limit' '$.changes' 'Reviewed change-set exceeds the 128 action safety limit.')) | Out-Null }
@@ -3253,8 +3339,34 @@ function Test-RuleEstateReviewContract($Review, [string]$ReviewRoot) {
         if ([string]::IsNullOrWhiteSpace($desired)) { $findings.Add((New-RuleEstateFinding 'desired_file_missing' "$base.desired_file" 'Reviewed desired file is required.')) | Out-Null; continue }
         $desiredPath = [IO.Path]::GetFullPath((Join-Path $ReviewRoot $desired))
         if (-not (Test-RuleDiscoveryPathWithin $desiredPath $ReviewRoot) -or -not [IO.File]::Exists($desiredPath)) { $findings.Add((New-RuleEstateFinding 'desired_file_out_of_review_root' "$base.desired_file" 'Desired files must exist below the reviewed change-set directory.')) | Out-Null }
+        elseif (Test-RuleEstateReparsePath $desiredPath $ReviewRoot) { $findings.Add((New-RuleEstateFinding 'desired_file_reparse_forbidden' "$base.desired_file" 'Desired files reached through reparse points are not accepted.')) | Out-Null }
     }
     return [pscustomobject]@{ pass=($findings.Count -eq 0); findings=@($findings.ToArray()) }
+}
+
+function Get-RuleEstateAuthorizationReceipt {
+    param($Review,[string]$ReviewPath,[string]$WorkspaceRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot)
+    $reviewRoot=[IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($ReviewPath));$relative=[string](Get-RuleEstateProperty $Review 'authorization_receipt')
+    if([string]::IsNullOrWhiteSpace($relative)){throw 'Independent authorization receipt is required.'}
+    $path=[IO.Path]::GetFullPath((Join-Path $reviewRoot $relative))
+    if(-not (Test-RuleDiscoveryPathWithin $path $reviewRoot) -or -not [IO.File]::Exists($path) -or (Test-RuleEstateReparsePath $path $reviewRoot)){throw 'Independent authorization receipt path is invalid.'}
+    try{$raw=[IO.File]::ReadAllText($path);$receipt=$raw|ConvertFrom-Json}catch{throw ('Independent authorization receipt is invalid JSON: {0}' -f $_.Exception.Message)}
+    if((Get-RuleEstateProperty $receipt 'schema_version') -ne 1 -or [string](Get-RuleEstateProperty $receipt 'domain') -ne 'rule_estate_authorization' -or [string](Get-RuleEstateProperty $receipt 'decision') -ne 'approved'){throw 'Independent authorization receipt is not an approved v1 rule estate receipt.'}
+    $authorizationId=[string](Get-RuleEstateProperty $receipt 'authorization_id')
+    if($authorizationId -notmatch '^rule-estate-auth-[a-f0-9]{32}$'){throw 'Independent authorization receipt identity is invalid.'}
+    if([string](Get-RuleEstateProperty $receipt 'issued_by') -ne [string](Get-RuleEstateProperty $Review 'reviewed_by') -or [string](Get-RuleEstateProperty $receipt 'issued_by_type') -ne [string](Get-RuleEstateProperty $Review 'reviewed_by_type') -or [string](Get-RuleEstateProperty $receipt 'authorization_source') -ne [string](Get-RuleEstateProperty $Review 'authorization_source')){throw 'Independent authorization receipt reviewer identity does not match the review.'}
+    $reviewHash=Get-OperationSha256 ([IO.File]::ReadAllText([IO.Path]::GetFullPath($ReviewPath)))
+    if([string](Get-RuleEstateProperty $receipt 'review_sha256') -ne $reviewHash){throw 'Independent authorization receipt review hash does not match.'}
+    $workspace=[IO.Path]::GetFullPath($WorkspaceRoot);$codex=[IO.Path]::GetFullPath($CodexUserRoot);$claude=[IO.Path]::GetFullPath($ClaudeUserRoot)
+    try{$receiptWorkspace=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $receipt 'workspace_root'));$receiptCodex=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $receipt 'codex_user_root'));$receiptClaude=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $receipt 'claude_user_root'))}catch{throw 'Independent authorization receipt roots are invalid.'}
+    if($receiptWorkspace -ne $workspace -or $receiptCodex -ne $codex -or $receiptClaude -ne $claude){throw 'Independent authorization receipt roots do not match the requested roots.'}
+    if([int](Get-RuleEstateProperty $receipt 'approved_action_count') -ne @((Get-RuleEstateProperty $Review 'changes')).Count){throw 'Independent authorization receipt action count does not match the review.'}
+    $issued=[datetimeoffset]::MinValue;$expires=[datetimeoffset]::MinValue
+    if(-not [datetimeoffset]::TryParse([string](Get-RuleEstateProperty $receipt 'issued_at'),[ref]$issued) -or -not [datetimeoffset]::TryParse([string](Get-RuleEstateProperty $receipt 'expires_at'),[ref]$expires) -or $expires -le $issued){throw 'Independent authorization receipt validity window is invalid.'}
+    if($expires -le [datetimeoffset]::UtcNow){throw 'Independent authorization receipt has expired.'}
+    $applyToken=[string](Get-RuleEstateProperty $receipt 'apply_token')
+    if($applyToken -cnotmatch '^APPLY_RULE_ESTATE_PATCH_[A-F0-9]{16}$'){throw 'Independent authorization receipt apply token is invalid.'}
+    return [pscustomobject][ordered]@{path=$path;content_hash=Get-OperationSha256 $raw;authorization_id=$authorizationId;issued_by=[string](Get-RuleEstateProperty $receipt 'issued_by');issued_by_type=[string](Get-RuleEstateProperty $receipt 'issued_by_type');authorization_source=[string](Get-RuleEstateProperty $receipt 'authorization_source');issued_at=$issued.ToString('o');expires_at=$expires.ToString('o');review_sha256=$reviewHash;approved_action_count=[int](Get-RuleEstateProperty $receipt 'approved_action_count');apply_token=$applyToken}
 }
 
 function Get-RuleEstateTargetSetSnapshot([string]$WorkspaceRoot, [string[]]$ExcludeNames=@('external','文档')) {
@@ -3280,6 +3392,7 @@ function New-RuleEstatePlan {
     $workspace = Assert-RuleEstateSafeRoot $WorkspaceRoot 'workspace'
     $codex = Assert-RuleEstateSafeRoot $CodexUserRoot 'Codex user'
     $claude = Assert-RuleEstateSafeRoot $ClaudeUserRoot 'Claude user'
+    $authorization = Get-RuleEstateAuthorizationReceipt -Review $review -ReviewPath $reviewFile -WorkspaceRoot $workspace -CodexUserRoot $codex -ClaudeUserRoot $claude
     $inventory = Get-RuleEstateTargets -WorkspaceRoot $workspace -ExcludeNames $ExcludeNames
     $repoByName = @{}
     foreach ($target in @($inventory.targets)) { $repoByName[[string]$target.name] = [string]$target.path }
@@ -3327,8 +3440,9 @@ function New-RuleEstatePlan {
         schema_version=1; operation_id=('rule-estate-{0}' -f (Get-OperationSha256 $planSeed).Substring(0,16)); domain='rule_estate'; mode='plan'
         generated_at=[datetimeoffset]::UtcNow.ToString('o'); workspace_root=$workspace; exclude_names=@($ExcludeNames); codex_user_root=$codex; claude_user_root=$claude
         review=[pscustomobject]@{ path=$reviewFile; content_hash=Get-OperationSha256 ([IO.File]::ReadAllText($reviewFile)); reviewed_by=[string](Get-RuleEstateProperty $review 'reviewed_by'); reviewed_by_type=[string](Get-RuleEstateProperty $review 'reviewed_by_type'); authorization_source=[string](Get-RuleEstateProperty $review 'authorization_source') }
+        authorization=$authorization
         target_set=$targetSet; actions=@($actions.ToArray()); execution='preflight_all_then_apply_one_by_one_fail_fast'
-        apply=[pscustomobject]@{ required_token='APPLY_RULE_ESTATE_PATCH'; dirty_worktree='observe_preserve_unrelated'; target_file_freshness='fail_closed'; target_set_drift='fail_closed'; rollback_scope='per_target' }
+        apply=[pscustomobject]@{ required_token=[string]$authorization.apply_token; dirty_worktree='observe_preserve_unrelated'; target_file_freshness='fail_closed'; target_set_drift='fail_closed'; rollback_scope='per_target' }
         verification=[pscustomobject]@{ repo_verified='not_run'; host_loaded='not_run'; live_accepted='not_run' }
         provider_calls=0; native_mutations=0
     }
@@ -3343,16 +3457,47 @@ function Get-RuleEstateTextHashAtPath([string]$Path) {
     return Get-OperationSha256 ([IO.File]::ReadAllText($Path))
 }
 
+function Get-RuleEstateBytesHash([byte[]]$Bytes) {
+    if ($null -eq $Bytes) { $Bytes = [byte[]]@() }
+    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
+}
+
 function Test-RuleEstateApplyPreflight {
-    param($Plan,[string]$WorkspaceRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[string[]]$CompletedActionIds=@())
+    param($Plan,[string]$WorkspaceRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[string[]]$CompletedActionIds=@(),[switch]$IgnoreLocks)
     $findings = New-Object System.Collections.Generic.List[object]
     if ($null -eq $Plan -or (Get-RuleEstateProperty $Plan 'schema_version') -ne 1 -or [string](Get-RuleEstateProperty $Plan 'domain') -ne 'rule_estate') { return [pscustomobject]@{ pass=$false; findings=@((New-RuleEstateFinding 'plan_invalid' '$' 'Rule estate plan is invalid.')) } }
     $workspace = [IO.Path]::GetFullPath($WorkspaceRoot); $codex=[IO.Path]::GetFullPath($CodexUserRoot); $claude=[IO.Path]::GetFullPath($ClaudeUserRoot)
     if ($workspace -ne [IO.Path]::GetFullPath([string](Get-RuleEstateProperty $Plan 'workspace_root')) -or $codex -ne [IO.Path]::GetFullPath([string](Get-RuleEstateProperty $Plan 'codex_user_root')) -or $claude -ne [IO.Path]::GetFullPath([string](Get-RuleEstateProperty $Plan 'claude_user_root'))) { $findings.Add((New-RuleEstateFinding 'authorization_root_mismatch' '$' 'CLI roots must exactly match the plan roots.')) | Out-Null }
     $freshSet = Get-RuleEstateTargetSetSnapshot $workspace @(Get-RuleEstateProperty $Plan 'exclude_names')
     if ($freshSet.hash -ne [string](Get-RuleEstateProperty (Get-RuleEstateProperty $Plan 'target_set') 'hash')) { $findings.Add((New-RuleEstateFinding 'target_set_drift' '$.target_set' 'Workspace direct Git target set changed after planning.')) | Out-Null }
-    $review=Get-RuleEstateProperty $Plan 'review';$reviewPath=[string](Get-RuleEstateProperty $review 'path')
+    $review=Get-RuleEstateProperty $Plan 'review';$reviewPath=[string](Get-RuleEstateProperty $review 'path');$reviewDocument=$null
     if(-not [IO.File]::Exists($reviewPath) -or (Get-OperationSha256 ([IO.File]::ReadAllText($reviewPath))) -ne [string](Get-RuleEstateProperty $review 'content_hash')){$findings.Add((New-RuleEstateFinding 'review_stale' '$.review' 'Reviewed change-set changed or disappeared after planning.'))|Out-Null}
+    else {
+        try{$reviewDocument=[IO.File]::ReadAllText($reviewPath)|ConvertFrom-Json;$reviewValidation=Test-RuleEstateReviewContract $reviewDocument ([IO.Path]::GetDirectoryName($reviewPath));if(-not $reviewValidation.pass){throw ((@($reviewValidation.findings.code))-join ',')}}catch{$findings.Add((New-RuleEstateFinding 'review_stale' '$.review' ('Reviewed change-set is no longer valid: {0}' -f $_.Exception.Message)))|Out-Null}
+    }
+    $authorization=Get-RuleEstateProperty $Plan 'authorization';$authorizationPath=[string](Get-RuleEstateProperty $authorization 'path');$expires=[datetimeoffset]::MinValue
+    if([string]::IsNullOrWhiteSpace($authorizationPath) -or -not [IO.File]::Exists($authorizationPath) -or (Get-OperationSha256 ([IO.File]::ReadAllText($authorizationPath))) -ne [string](Get-RuleEstateProperty $authorization 'content_hash')){$findings.Add((New-RuleEstateFinding 'authorization_receipt_stale' '$.authorization' 'Authorization receipt changed or disappeared after planning.'))|Out-Null}
+    elseif(-not [datetimeoffset]::TryParse([string](Get-RuleEstateProperty $authorization 'expires_at'),[ref]$expires) -or $expires -le [datetimeoffset]::UtcNow){$findings.Add((New-RuleEstateFinding 'authorization_receipt_expired' '$.authorization.expires_at' 'Authorization receipt is expired or invalid.'))|Out-Null}
+    elseif($null -ne $reviewDocument){
+        try {
+            $freshAuthorization=Get-RuleEstateAuthorizationReceipt -Review $reviewDocument -ReviewPath $reviewPath -WorkspaceRoot $workspace -CodexUserRoot $codex -ClaudeUserRoot $claude
+            if([string]$freshAuthorization.content_hash -ne [string](Get-RuleEstateProperty $authorization 'content_hash') -or [string]$freshAuthorization.authorization_id -ne [string](Get-RuleEstateProperty $authorization 'authorization_id') -or [string]$freshAuthorization.apply_token -ne [string](Get-RuleEstateProperty (Get-RuleEstateProperty $Plan 'apply') 'required_token')){throw 'authorization fields differ from the independently issued receipt'}
+        } catch {$findings.Add((New-RuleEstateFinding 'authorization_receipt_invalid' '$.authorization' $_.Exception.Message))|Out-Null}
+    }
+    if($null -ne $reviewDocument){
+        $actions=@(Get-RuleEstateProperty $Plan 'actions');$changes=@(Get-RuleEstateProperty $reviewDocument 'changes')
+        if($actions.Count -ne $changes.Count){$findings.Add((New-RuleEstateFinding 'plan_review_binding_mismatch' '$.actions' 'Plan action count does not match the authorized review.'))|Out-Null}
+        $actionByTarget=@{}
+        foreach($candidate in $actions){$candidatePath=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $candidate 'target_path')).ToLowerInvariant();if($actionByTarget.ContainsKey($candidatePath)){$actionByTarget[$candidatePath]=$null}else{$actionByTarget[$candidatePath]=$candidate}}
+        foreach($change in $changes){
+            $scope=[string](Get-RuleEstateProperty $change 'target_scope');$repository=[string](Get-RuleEstateProperty $change 'repository')
+            $expectedRoot=switch($scope){'global_codex'{$codex};'global_claude'{$claude};default{[IO.Path]::GetFullPath((Join-Path $workspace $repository))}}
+            if([string]::IsNullOrWhiteSpace($expectedRoot)){continue}
+            $expectedTarget=[IO.Path]::GetFullPath((Join-Path $expectedRoot ([string](Get-RuleEstateProperty $change 'target_file'))));$desiredPath=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($reviewPath)) ([string](Get-RuleEstateProperty $change 'desired_file'))));$desired=[IO.File]::ReadAllText($desiredPath);$desiredHash=Get-OperationSha256 $desired;$identity='{0}|{1}|{2}' -f $scope,$expectedTarget.ToLowerInvariant(),$desiredHash;$expectedId='estate-{0}' -f (Get-OperationSha256 $identity).Substring(0,16)
+            $boundAction=if($actionByTarget.ContainsKey($expectedTarget.ToLowerInvariant())){$actionByTarget[$expectedTarget.ToLowerInvariant()]}else{$null}
+            if($null -eq $boundAction -or [string](Get-RuleEstateProperty $boundAction 'target_scope') -ne $scope -or ($scope -eq 'repository' -and [string](Get-RuleEstateProperty $boundAction 'repository') -ne $repository) -or [string](Get-RuleEstateProperty $boundAction 'action_id') -ne $expectedId -or [string](Get-RuleEstateProperty $boundAction 'desired_hash') -ne $desiredHash -or [string](Get-RuleEstateProperty $boundAction 'desired_text') -cne $desired){$findings.Add((New-RuleEstateFinding 'plan_review_binding_mismatch' '$.actions' ('Plan action is not an exact projection of the authorized review target: {0}' -f $expectedTarget)))|Out-Null}
+        }
+    }
     foreach ($action in @(Get-RuleEstateProperty $Plan 'actions')) {
         $id=[string](Get-RuleEstateProperty $action 'action_id'); $done=$id -in @($CompletedActionIds)
         $path=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'target_path')); $root=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'authorized_root')); $scope=[string](Get-RuleEstateProperty $action 'target_scope')
@@ -3363,7 +3508,7 @@ function Test-RuleEstateApplyPreflight {
         $currentHash=Get-RuleEstateTextHashAtPath $path; $expectedHash=if($done){[string](Get-RuleEstateProperty $action 'desired_hash')}else{[string](Get-RuleEstateProperty $action 'before_hash')}
         if ($currentHash -ne $expectedHash) { $findings.Add((New-RuleEstateFinding 'target_hash_stale' $path 'Target content no longer matches the planned state.')) | Out-Null }
         if((Get-OperationSha256 ([string](Get-RuleEstateProperty $action 'desired_text'))) -ne [string](Get-RuleEstateProperty $action 'desired_hash')){$findings.Add((New-RuleEstateFinding 'desired_hash_mismatch' '$.actions' 'Desired text does not match the planned hash.'))|Out-Null}
-        if ([IO.File]::Exists((Get-RuleEstateLockPath $action))) { $findings.Add((New-RuleEstateFinding 'target_locked' (Get-RuleEstateLockPath $action) 'Another rule estate writer holds this target lock.')) | Out-Null }
+        if (-not $IgnoreLocks -and [IO.File]::Exists((Get-RuleEstateLockPath $action))) { $findings.Add((New-RuleEstateFinding 'target_locked' (Get-RuleEstateLockPath $action) 'Another rule estate writer holds this target lock.')) | Out-Null }
     }
     return [pscustomobject]@{ pass=($findings.Count -eq 0); findings=@($findings.ToArray()) }
 }
@@ -3373,8 +3518,9 @@ function Write-RuleEstateReceipt([string]$Path, $Receipt) {
 }
 
 function Invoke-RuleEstateApply {
-    param($Plan,[string]$WorkspaceRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[string]$Token,[string]$ReceiptPath,[string]$ResumeReceiptPath=$null,[string]$TestFailBeforeActionId=$null)
-    if ($Token -cne 'APPLY_RULE_ESTATE_PATCH') { return [pscustomobject]@{ pass=$false; status='blocked'; findings=@((New-RuleEstateFinding 'apply_token_invalid' '$.apply.required_token' 'Explicit estate apply token does not match.')); writes=0; receipt=$null } }
+    param($Plan,[string]$WorkspaceRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[string]$Token,[string]$ReceiptPath,[string]$ResumeReceiptPath=$null,[string]$TestFailBeforeActionId=$null,[scriptblock]$TestHookAfterLocksAcquired=$null)
+    $expectedToken=[string](Get-RuleEstateProperty (Get-RuleEstateProperty $Plan 'apply') 'required_token')
+    if ([string]::IsNullOrWhiteSpace($expectedToken) -or $Token -cne $expectedToken) { return [pscustomobject]@{ pass=$false; status='blocked'; findings=@((New-RuleEstateFinding 'apply_token_invalid' '$.apply.required_token' 'Explicit estate apply token does not match the independent authorization receipt.')); writes=0; receipt=$null } }
     $receiptFile=[IO.Path]::GetFullPath($ReceiptPath); $existing=$null
     if (-not [string]::IsNullOrWhiteSpace($ResumeReceiptPath)) {
         $resumeFile=[IO.Path]::GetFullPath($ResumeReceiptPath)
@@ -3391,10 +3537,13 @@ function Invoke-RuleEstateApply {
     foreach($old in @(Get-RuleEstateProperty $receipt 'actions')){$actionResults.Add($old)|Out-Null}
     $lockStreams=New-Object System.Collections.Generic.List[object];$writes=0
     try {
-        foreach($action in @(Get-RuleEstateProperty $Plan 'actions')){
-            $lockPath=Get-RuleEstateLockPath $action
+        $lockPaths=@(Get-RuleEstateProperty $Plan 'actions'|ForEach-Object{Get-RuleEstateLockPath $_}|Sort-Object -Unique)
+        foreach($lockPath in $lockPaths){
             $stream=[IO.File]::Open($lockPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None);$lockStreams.Add([pscustomobject]@{stream=$stream;path=$lockPath})|Out-Null
         }
+        if($null -ne $TestHookAfterLocksAcquired){& $TestHookAfterLocksAcquired}
+        $lockedPreflight=Test-RuleEstateApplyPreflight $Plan $WorkspaceRoot $CodexUserRoot $ClaudeUserRoot $completedIds -IgnoreLocks
+        if(-not $lockedPreflight.pass){throw ('post_lock_preflight_failed:{0}' -f ((@($lockedPreflight.findings.code)-join ',')))}
         foreach($action in @(Get-RuleEstateProperty $Plan 'actions')){
             $id=[string](Get-RuleEstateProperty $action 'action_id')
             if($id -in $completedIds){continue}
@@ -3403,11 +3552,14 @@ function Invoke-RuleEstateApply {
             $backupRoot=Join-Path ([IO.Path]::GetDirectoryName($receiptFile)) ('.rule-estate-backups\{0}' -f [string](Get-RuleEstateProperty $Plan 'operation_id'))
             New-Item -ItemType Directory -Path $backupRoot -Force|Out-Null
             $backup=Join-Path $backupRoot ('{0}.bak' -f $id)
-            $beforeBytes=if([IO.File]::Exists($target)){[IO.File]::ReadAllBytes($target)}else{[byte[]]@()};[IO.File]::WriteAllBytes($backup,$beforeBytes)
+            [byte[]]$beforeBytes=$null
+            if([IO.File]::Exists($target)){$beforeBytes=[IO.File]::ReadAllBytes($target)}else{$beforeBytes=[byte[]]::new(0)}
+            [IO.File]::WriteAllBytes($backup,$beforeBytes)
+            $backupHash=Get-RuleEstateBytesHash $beforeBytes
             Write-Utf8FileAtomic -Path $target -Content ([string](Get-RuleEstateProperty $action 'desired_text'))
             if((Get-RuleEstateTextHashAtPath $target) -ne [string](Get-RuleEstateProperty $action 'desired_hash')){throw ('desired_hash_not_applied:{0}' -f $id)}
             $writes++
-            $actionResults.Add([pscustomobject][ordered]@{action_id=$id;status='applied';target_path=$target;target_scope=[string](Get-RuleEstateProperty $action 'target_scope');authorized_root=[string](Get-RuleEstateProperty $action 'authorized_root');operation=$operation;before_hash=[string](Get-RuleEstateProperty $action 'before_hash');desired_hash=[string](Get-RuleEstateProperty $action 'desired_hash');dirty_paths_at_plan=@(Get-RuleEstateProperty $action 'dirty_paths_at_plan');backup_path=$backup;applied_at=[datetimeoffset]::UtcNow.ToString('o')})|Out-Null
+            $actionResults.Add([pscustomobject][ordered]@{action_id=$id;status='applied';target_path=$target;target_scope=[string](Get-RuleEstateProperty $action 'target_scope');authorized_root=[string](Get-RuleEstateProperty $action 'authorized_root');operation=$operation;before_hash=[string](Get-RuleEstateProperty $action 'before_hash');desired_hash=[string](Get-RuleEstateProperty $action 'desired_hash');dirty_paths_at_plan=@(Get-RuleEstateProperty $action 'dirty_paths_at_plan');backup_path=$backup;backup_sha256=$backupHash;backup_length=[long]$beforeBytes.LongLength;applied_at=[datetimeoffset]::UtcNow.ToString('o')})|Out-Null
             $receipt.actions=@($actionResults.ToArray());Write-RuleEstateReceipt $receiptFile $receipt
         }
         $receipt.status='applied';$receipt.completed_at=[datetimeoffset]::UtcNow.ToString('o');$receipt.actions=@($actionResults.ToArray());Write-RuleEstateReceipt $receiptFile $receipt
@@ -3438,7 +3590,9 @@ function Invoke-RuleEstateRollback {
     $operationId=[string](Get-RuleEstateProperty $receipt 'operation_id');if($operationId -notmatch '^rule-estate-[a-f0-9]{16}$' -or $ActionId -notmatch '^estate-[a-f0-9]{16}$'){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_identity_invalid' '$' 'Receipt operation or action identity is invalid.'));writes=0}}
     $expectedBackup=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($receiptFile)) ('.rule-estate-backups\{0}\{1}.bak' -f $operationId,$ActionId)));$backup=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'backup_path'))
     if($backup -ne $expectedBackup -or -not [IO.File]::Exists($backup)){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_backup_invalid' $backup 'Per-target backup path is missing or outside the receipt backup directory.'));writes=0}}
-    if([string](Get-RuleEstateProperty $action 'operation') -eq 'create'){[IO.File]::Delete($target)}else{Write-BytesAtomic -Path $target -Bytes ([IO.File]::ReadAllBytes($backup))}
+    $backupBytes=[IO.File]::ReadAllBytes($backup);$expectedBackupHash=[string](Get-RuleEstateProperty $action 'backup_sha256');$expectedBackupLength=[long](Get-RuleEstateProperty $action 'backup_length')
+    if([string]::IsNullOrWhiteSpace($expectedBackupHash) -or $backupBytes.LongLength -ne $expectedBackupLength -or (Get-RuleEstateBytesHash $backupBytes) -ne $expectedBackupHash){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_backup_stale' $backup 'Per-target backup content no longer matches the apply receipt.'));writes=0}}
+    if([string](Get-RuleEstateProperty $action 'operation') -eq 'create'){[IO.File]::Delete($target)}else{Write-BytesAtomic -Path $target -Bytes $backupBytes}
     $action.status='rolled_back';$action | Add-Member -NotePropertyName rolled_back_at -NotePropertyValue ([datetimeoffset]::UtcNow.ToString('o')) -Force;Write-RuleEstateReceipt $receiptFile $receipt
     return [pscustomobject]@{pass=$true;status='rolled_back';findings=@();writes=1;action_id=$ActionId}
 }
@@ -3794,8 +3948,21 @@ function Add-AgentAccessConflictFindings($Findings, [object[]]$Items, [string]$C
     foreach ($resource in @($byResource.Keys)) { if ($byResource[$resource].Count -gt 1 -and @($byResource[$resource] | Where-Object { $_ -eq 'write' }).Count -gt 0) { $Findings.Add((New-OperationFinding $Code 'error' $Path ($Message + ': ' + $resource))) | Out-Null } }
 }
 
+function Test-AgentCompletionVerificationReceipt($Evidence) {
+    if ($null -eq $Evidence -or $Evidence -is [string]) { return $false }
+    if ((Get-OperationObjectProperty $Evidence 'schema_version') -ne 1) { return $false }
+    if ([string](Get-OperationObjectProperty $Evidence 'receipt_id') -notmatch '^verify-[A-Za-z0-9][A-Za-z0-9._-]{1,127}$') { return $false }
+    if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Evidence 'verifier'))) { return $false }
+    if ([string](Get-OperationObjectProperty $Evidence 'evidence_sha256') -notmatch '^[a-fA-F0-9]{64}$') { return $false }
+    if (-not (Test-OperationArray (Get-OperationObjectProperty $Evidence 'commands')) -or @((Get-OperationObjectProperty $Evidence 'commands')).Count -eq 0) { return $false }
+    $verifiedAt = [datetimeoffset]::MinValue
+    if (-not [datetimeoffset]::TryParse([string](Get-OperationObjectProperty $Evidence 'verified_at'), [ref]$verifiedAt)) { return $false }
+    if (Test-OperationSerializedSensitiveValue ($Evidence | ConvertTo-Json -Depth 20 -Compress)) { return $false }
+    return $true
+}
+
 function Test-AgentParallelAdmission {
-    param($TaskGraph, [string[]]$TaskIds = @(), [string[]]$CompletedTaskIds = @(), [object[]]$CompletedTaskReceipts = @())
+    param($TaskGraph, [string[]]$TaskIds = @(), [string[]]$CompletedTaskIds = @(), [object[]]$CompletedTaskReceipts = @(), [switch]$PlanningOnly)
     $findings = New-Object System.Collections.Generic.List[object]
     $graphValidation = Test-AgentTaskGraphContract $TaskGraph
     foreach ($finding in @($graphValidation.findings)) { $findings.Add($finding) | Out-Null }
@@ -3807,18 +3974,29 @@ function Test-AgentParallelAdmission {
         if (-not $taskIndex.ContainsKey($completedId.ToLowerInvariant())) { $findings.Add((New-OperationFinding 'completed_task_unknown' 'error' '$.completed_task_ids' 'Completed task is not declared in this TaskGraph.')) | Out-Null }
     }
     $receiptIndex = @{}
-    foreach ($receipt in @($CompletedTaskReceipts)) {
-        $receiptTaskId = ([string](Get-OperationObjectProperty $receipt 'task_id')).Trim()
-        $receiptKey = $receiptTaskId.ToLowerInvariant()
-        if ([string]::IsNullOrWhiteSpace($receiptTaskId) -or -not $taskIndex.ContainsKey($receiptKey)) { $findings.Add((New-OperationFinding 'completion_receipt_task_invalid' 'error' '$.completion_receipts' 'Completion receipt task_id must belong to the TaskGraph.')) | Out-Null; continue }
-        if ($receiptIndex.ContainsKey($receiptKey)) { $findings.Add((New-OperationFinding 'completion_receipt_duplicate' 'error' '$.completion_receipts' 'Completion receipt is duplicated.')) | Out-Null; continue }
-        $receiptIndex[$receiptKey] = $receipt
-        if ([string](Get-OperationObjectProperty $receipt 'base_revision') -cne [string](Get-OperationObjectProperty $TaskGraph 'base_revision')) { $findings.Add((New-OperationFinding 'completion_receipt_revision_mismatch' 'error' '$.completion_receipts' 'Completion receipt base_revision does not match the TaskGraph.')) | Out-Null }
-        if ([string](Get-OperationObjectProperty $receipt 'status') -cne 'verified') { $findings.Add((New-OperationFinding 'completion_receipt_unverified' 'error' '$.completion_receipts' 'Completion receipt status must be verified.')) | Out-Null }
-        if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $receipt 'verification_receipt'))) { $findings.Add((New-OperationFinding 'completion_receipt_evidence_missing' 'error' '$.completion_receipts' 'Completion receipt requires verification evidence.')) | Out-Null }
+    if (-not $PlanningOnly) {
+        foreach ($receipt in @($CompletedTaskReceipts)) {
+            $receiptTaskId = ([string](Get-OperationObjectProperty $receipt 'task_id')).Trim()
+            $receiptKey = $receiptTaskId.ToLowerInvariant()
+            if ([string]::IsNullOrWhiteSpace($receiptTaskId) -or -not $taskIndex.ContainsKey($receiptKey)) { $findings.Add((New-OperationFinding 'completion_receipt_task_invalid' 'error' '$.completion_receipts' 'Completion receipt task_id must belong to the TaskGraph.')) | Out-Null; continue }
+            if ($receiptIndex.ContainsKey($receiptKey)) { $findings.Add((New-OperationFinding 'completion_receipt_duplicate' 'error' '$.completion_receipts' 'Completion receipt is duplicated.')) | Out-Null; continue }
+            $receiptIndex[$receiptKey] = $receipt
+            if ([string](Get-OperationObjectProperty $receipt 'base_revision') -cne [string](Get-OperationObjectProperty $TaskGraph 'base_revision')) { $findings.Add((New-OperationFinding 'completion_receipt_revision_mismatch' 'error' '$.completion_receipts' 'Completion receipt base_revision does not match the TaskGraph.')) | Out-Null }
+            if ([string](Get-OperationObjectProperty $receipt 'status') -cne 'verified') { $findings.Add((New-OperationFinding 'completion_receipt_unverified' 'error' '$.completion_receipts' 'Completion receipt status must be verified.')) | Out-Null }
+            $evidence = Get-OperationObjectProperty $receipt 'verification_receipt'
+            if ($null -eq $evidence) { $findings.Add((New-OperationFinding 'completion_receipt_evidence_missing' 'error' '$.completion_receipts' 'Completion receipt requires verification evidence.')) | Out-Null }
+            elseif (-not (Test-AgentCompletionVerificationReceipt $evidence)) { $findings.Add((New-OperationFinding 'completion_receipt_evidence_invalid' 'error' '$.completion_receipts' 'Completion verification evidence must be a structured, hashed, command-backed receipt.')) | Out-Null }
+        }
+        foreach ($completedId in @($completed)) { if (-not $receiptIndex.ContainsKey($completedId.ToLowerInvariant())) { $findings.Add((New-OperationFinding 'completion_receipt_missing' 'error' '$.completion_receipts' ('Verified completion receipt is missing for task: {0}' -f $completedId))) | Out-Null } }
+        foreach ($receiptTaskId in @($receiptIndex.Keys)) { if (-not $completed.Contains($receiptTaskId)) { $findings.Add((New-OperationFinding 'completion_receipt_unclaimed' 'error' '$.completion_receipts' ('Completion receipt is not declared in completed_task_ids: {0}' -f $receiptTaskId))) | Out-Null } }
     }
-    foreach ($completedId in @($completed)) { if (-not $receiptIndex.ContainsKey($completedId.ToLowerInvariant())) { $findings.Add((New-OperationFinding 'completion_receipt_missing' 'error' '$.completion_receipts' ('Verified completion receipt is missing for task: {0}' -f $completedId))) | Out-Null } }
-    foreach ($receiptTaskId in @($receiptIndex.Keys)) { if (-not $completed.Contains($receiptTaskId)) { $findings.Add((New-OperationFinding 'completion_receipt_unclaimed' 'error' '$.completion_receipts' ('Completion receipt is not declared in completed_task_ids: {0}' -f $receiptTaskId))) | Out-Null } }
+    foreach ($completedId in @($completed)) {
+        $completedKey = $completedId.ToLowerInvariant()
+        if (-not $taskIndex.ContainsKey($completedKey)) { continue }
+        foreach ($dependency in @((Get-OperationObjectProperty $taskIndex[$completedKey] 'depends_on'))) {
+            if (-not $completed.Contains([string]$dependency)) { $findings.Add((New-OperationFinding 'completed_dependency_not_closed' 'error' '$.completed_task_ids' ('Completed task dependency is not also completed: {0} -> {1}' -f $completedId, [string]$dependency))) | Out-Null }
+        }
+    }
     $selected = New-Object System.Collections.Generic.List[object]
     $seen = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::OrdinalIgnoreCase)
     foreach ($taskId in @($TaskIds)) {
@@ -3862,6 +4040,7 @@ function Test-AgentParallelAdmission {
     $result = New-OperationValidationResult $findings.ToArray()
     $result | Add-Member -NotePropertyName mode -NotePropertyValue $(if ($result.pass -and $selected.Count -eq 0) { 'not_requested' } elseif ($result.pass) { 'isolated_parallel' } else { 'sequential_required' })
     $result | Add-Member -NotePropertyName task_ids -NotePropertyValue @($selected.ToArray() | ForEach-Object { [string](Get-OperationObjectProperty $_ 'task_id') })
+    $result | Add-Member -NotePropertyName completion_evidence_semantics -NotePropertyValue $(if ($PlanningOnly) { 'planned_dependency_order_only' } else { 'verified_receipts_required' })
     return $result
 }
 
@@ -3883,11 +4062,10 @@ function New-AgentExecutionPlan {
         $selectedTasks = New-Object System.Collections.Generic.List[object]
         if ($mustRunSerial.Count -gt 0) { $selectedTasks.Add($mustRunSerial[0]) | Out-Null }
         else {
-            $receipts = @($completed | ForEach-Object { [pscustomobject]@{ task_id = $_; base_revision = [string](Get-OperationObjectProperty $TaskGraph 'base_revision'); status = 'verified'; verification_receipt = 'planned-prior-wave' } })
             foreach ($task in @($ready)) {
                 if ($selectedTasks.Count -eq 0) { $selectedTasks.Add($task) | Out-Null; continue }
                 $candidateIds = @($selectedTasks.ToArray() | ForEach-Object { [string](Get-OperationObjectProperty $_ 'task_id') }) + [string](Get-OperationObjectProperty $task 'task_id')
-                if ((Test-AgentParallelAdmission -TaskGraph $TaskGraph -TaskIds $candidateIds -CompletedTaskIds @($completed) -CompletedTaskReceipts $receipts).pass) { $selectedTasks.Add($task) | Out-Null }
+                if ((Test-AgentParallelAdmission -TaskGraph $TaskGraph -TaskIds $candidateIds -CompletedTaskIds @($completed) -PlanningOnly).pass) { $selectedTasks.Add($task) | Out-Null }
             }
         }
         $selectedIds = @($selectedTasks.ToArray() | ForEach-Object { [string](Get-OperationObjectProperty $_ 'task_id') })
@@ -3934,6 +4112,7 @@ function New-ModelPolicyProposal {
         [Parameter(Mandatory = $true)][string]$RequestedTier,
         [Parameter(Mandatory = $true)][string]$Rationale,
         $RadarSnapshot,
+        [string]$HostSurface,
         [string[]]$HostAvailablePairs = @(),
         [object[]]$LocalOutcomes = @(),
         [Parameter(Mandatory = $true)][string]$Now,
@@ -3954,10 +4133,22 @@ function New-ModelPolicyProposal {
     if ([string]::IsNullOrWhiteSpace($Rationale)) { $fallbackReasons.Add('rationale_missing') | Out-Null }
     if (@($LocalOutcomes).Count -gt 0 -and -not $hasLocal) { $fallbackReasons.Add('local_outcome_invalid') | Out-Null }
     $hostConfirmed = $false
+    $hostAvailabilityState = 'unknown'
+    $hostSurfaceKnown = -not [string]::IsNullOrWhiteSpace($HostSurface) -and $HostSurface -match '^[a-z][a-z0-9_]{1,63}$'
+    if (-not $hostSurfaceKnown) { $fallbackReasons.Add('host_surface_unknown') | Out-Null }
     if ($null -ne $anchor) {
         $pair = '{0}|{1}' -f $anchor.model_family, $anchor.reasoning_effort
-        $hostConfirmed = $pair -in @($HostAvailablePairs)
-        if (@($HostAvailablePairs).Count -gt 0 -and $pair -notin @($HostAvailablePairs)) { $fallbackReasons.Add('host_pair_unavailable') | Out-Null }
+        if ($hostSurfaceKnown -and @($HostAvailablePairs).Count -eq 0) {
+            $fallbackReasons.Add('host_pair_availability_unknown') | Out-Null
+        }
+        elseif ($hostSurfaceKnown -and $pair -in @($HostAvailablePairs)) {
+            $hostConfirmed = $true
+            $hostAvailabilityState = 'confirmed_available'
+        }
+        elseif ($hostSurfaceKnown) {
+            $hostAvailabilityState = 'confirmed_unavailable'
+            $fallbackReasons.Add('host_pair_unavailable') | Out-Null
+        }
     }
     if (-not $radarValidation.pass -and -not $hasLocal -and -not $hostConfirmed) { foreach ($code in @($radarValidation.findings.code | Sort-Object -Unique)) { $fallbackReasons.Add([string]$code) | Out-Null } }
     $radarEntry = $null
@@ -3972,7 +4163,7 @@ function New-ModelPolicyProposal {
         rationale = $Rationale; user_override = (-not [string]::IsNullOrWhiteSpace($UserOverrideTier)); fallback_reason = $(if ($fallback) { @($fallbackReasons) -join ',' } else { $null })
         evidence_priority = 'user_override_then_local_outcomes_then_host_availability_then_radar_then_host_default'; selection_semantics = 'host_proposal_validation_only'
         local_outcomes = @(Copy-AgentWorkflowValue $validLocalOutcomes.ToArray()); radar_snapshot_id = Get-OperationObjectProperty $RadarSnapshot 'snapshot_id'; radar_entry = Copy-AgentWorkflowValue $radarEntry
-        evidence_sources = [pscustomobject][ordered]@{ local = [pscustomobject]@{ valid = $hasLocal; supplied = @($LocalOutcomes).Count; accepted = $validLocalOutcomes.Count; rejected_findings = @($localFindings.ToArray()) }; radar = [pscustomobject]@{ valid = $radarValidation.pass; used = (-not $fallback -and $null -ne $radarEntry); findings = @($radarValidation.findings) }; host_availability = [pscustomobject]@{ declared = @($HostAvailablePairs).Count -gt 0; pair_confirmed = $hostConfirmed } }
+        evidence_sources = [pscustomobject][ordered]@{ local = [pscustomobject]@{ valid = $hasLocal; supplied = @($LocalOutcomes).Count; accepted = $validLocalOutcomes.Count; rejected_findings = @($localFindings.ToArray()) }; radar = [pscustomobject]@{ valid = $radarValidation.pass; used = (-not $fallback -and $null -ne $radarEntry); findings = @($radarValidation.findings) }; host_availability = [pscustomobject]@{ surface = $(if ($hostSurfaceKnown) { $HostSurface } else { $null }); state = $hostAvailabilityState; declared = ($hostSurfaceKnown -and @($HostAvailablePairs).Count -gt 0); pair_confirmed = $hostConfirmed } }
         provider_calls = 0; native_mutations = 0; writes = 0
     }
 }
@@ -4020,7 +4211,7 @@ function Test-AgentWorkflowRequest($Request) {
         if (-not $proposalSeen.Add($taskId)) { $findings.Add((New-OperationFinding 'model_proposal_duplicate' 'error' '$.model_proposals.task_id' 'Only one model proposal is allowed per task.')) | Out-Null }
         $rationale = [string](Get-OperationObjectProperty $proposal 'rationale')
         if ([string]::IsNullOrWhiteSpace($rationale)) { $findings.Add((New-OperationFinding 'model_proposal_rationale_required' 'error' '$.model_proposals.rationale' 'Model proposal rationale is required.')) | Out-Null; continue }
-        $evaluated = New-ModelPolicyProposal -TaskId $taskId -RequestedTier ([string](Get-OperationObjectProperty $proposal 'requested_tier')) -Rationale $rationale -RadarSnapshot (Get-OperationObjectProperty $Request 'radar_snapshot') -HostAvailablePairs @((Get-OperationObjectProperty $proposal 'host_available_pairs')) -LocalOutcomes @((Get-OperationObjectProperty $proposal 'local_outcomes')) -Now ([string](Get-OperationObjectProperty $Request 'now')) -UserOverrideTier ([string](Get-OperationObjectProperty $proposal 'user_override_tier'))
+        $evaluated = New-ModelPolicyProposal -TaskId $taskId -RequestedTier ([string](Get-OperationObjectProperty $proposal 'requested_tier')) -Rationale $rationale -RadarSnapshot (Get-OperationObjectProperty $Request 'radar_snapshot') -HostSurface ([string](Get-OperationObjectProperty $proposal 'host_surface')) -HostAvailablePairs @((Get-OperationObjectProperty $proposal 'host_available_pairs')) -LocalOutcomes @((Get-OperationObjectProperty $proposal 'local_outcomes')) -Now ([string](Get-OperationObjectProperty $Request 'now')) -UserOverrideTier ([string](Get-OperationObjectProperty $proposal 'user_override_tier'))
         if ($evaluated.selected_tier -eq 'host_default') { $findings.Add((New-OperationFinding 'model_proposal_unusable' 'error' '$.model_proposals' ('Model proposal failed closed: {0}' -f $evaluated.fallback_reason))) | Out-Null }
     }
     $failurePacket = Get-OperationObjectProperty $Request 'failure_packet'
@@ -4033,7 +4224,7 @@ function New-AgentWorkflowAdvisoryPlan($Request) {
     $graph = Get-OperationObjectProperty $Request 'task_graph'
     $proposals = New-Object System.Collections.Generic.List[object]
     foreach ($proposal in @((Get-OperationObjectProperty $Request 'model_proposals'))) {
-        $proposals.Add((New-ModelPolicyProposal -TaskId ([string](Get-OperationObjectProperty $proposal 'task_id')) -RequestedTier ([string](Get-OperationObjectProperty $proposal 'requested_tier')) -Rationale ([string](Get-OperationObjectProperty $proposal 'rationale')) -RadarSnapshot (Get-OperationObjectProperty $Request 'radar_snapshot') -HostAvailablePairs @((Get-OperationObjectProperty $proposal 'host_available_pairs')) -LocalOutcomes @((Get-OperationObjectProperty $proposal 'local_outcomes')) -Now ([string](Get-OperationObjectProperty $Request 'now')) -UserOverrideTier ([string](Get-OperationObjectProperty $proposal 'user_override_tier')))) | Out-Null
+        $proposals.Add((New-ModelPolicyProposal -TaskId ([string](Get-OperationObjectProperty $proposal 'task_id')) -RequestedTier ([string](Get-OperationObjectProperty $proposal 'requested_tier')) -Rationale ([string](Get-OperationObjectProperty $proposal 'rationale')) -RadarSnapshot (Get-OperationObjectProperty $Request 'radar_snapshot') -HostSurface ([string](Get-OperationObjectProperty $proposal 'host_surface')) -HostAvailablePairs @((Get-OperationObjectProperty $proposal 'host_available_pairs')) -LocalOutcomes @((Get-OperationObjectProperty $proposal 'local_outcomes')) -Now ([string](Get-OperationObjectProperty $Request 'now')) -UserOverrideTier ([string](Get-OperationObjectProperty $proposal 'user_override_tier')))) | Out-Null
     }
     return [pscustomobject][ordered]@{
         schema_version = 1; pass = $requestValidation.pass; decision_owner = 'host_ai'; executor = 'host_native_runtime'; advisory_only = $true
@@ -4207,12 +4398,27 @@ function Guess-VendorName([string]$repo) {
     }
     return $name
 }
+function Mask-SensitiveGitText([string]$text) {
+    if ([string]::IsNullOrWhiteSpace($text)) { return $text }
+    if ($null -ne (Get-Command Protect-SensitiveText -CommandType Function -ErrorAction SilentlyContinue)) {
+        return (Protect-SensitiveText $text)
+    }
+    $masked = [string]$text
+    $masked = [regex]::Replace($masked, '(?i)([a-z][a-z0-9+.-]*://)([^/@\s:]+):([^/@\s]+)@', '$1<redacted>@')
+    $masked = [regex]::Replace($masked, '(?i)([?&](?:access_token|auth|authorization|password|passwd|secret|token|api[-_]?key)=)[^&\s]+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)((?:authorization|proxy-authorization)\s*[:=]\s*(?:basic|bearer)?\s*)[^\s"'']+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)((?:password|passwd|secret|token|api[-_]?key)\s*[=:]\s*)[^\s"'']+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)(\b(?:password|passwd|secret|token|api[-_]?key)\s+)[^\s"'',;]+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)\b(?:github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+)\b', '<redacted>')
+    return $masked
+}
 function Invoke-Git([string[]]$GitArgs) {
+    $safeArgs = @($GitArgs | ForEach-Object { Mask-SensitiveGitText ([string]$_) })
     if ($DryRun) {
-        Log ("DRYRUN git {0}" -f ($GitArgs -join " "))
+        Log ("DRYRUN git {0}" -f ($safeArgs -join " "))
         return
     }
-    $cmdText = ("git {0}" -f ($GitArgs -join " "))
+    $cmdText = ("git {0}" -f ($safeArgs -join " "))
     $retriedAfterLockRecovery = $false
     $canTuneNativeErrPref = ($PSVersionTable.PSVersion.Major -ge 7)
     while ($true) {
@@ -4238,13 +4444,13 @@ function Invoke-Git([string[]]$GitArgs) {
             foreach ($line in @($output)) {
                 $text = Convert-GitOutputLineToText $line
                 if ([string]::IsNullOrWhiteSpace($text)) { continue }
-                Write-Host $text
+                Write-Host (Mask-SensitiveGitText $text)
             }
         }
         if ($exitCode -eq 0) { return }
         if (-not $retriedAfterLockRecovery) {
             $repaired = $false
-            if (Repair-StaleGitLockFromOutput $output) {
+            if (Repair-StaleGitLockFromOutput (Get-Location).Path $output) {
                 $repaired = $true
             }
             elseif (Repair-StaleGitLockAfterFailure (Get-Location).Path $output) {
@@ -4263,11 +4469,12 @@ function Invoke-Git([string[]]$GitArgs) {
     }
 }
 function Invoke-GitCapture([string[]]$GitArgs) {
+    $safeArgs = @($GitArgs | ForEach-Object { Mask-SensitiveGitText ([string]$_) })
     if ($DryRun) {
-        Log ("DRYRUN git {0}" -f ($GitArgs -join " "))
+        Log ("DRYRUN git {0}" -f ($safeArgs -join " "))
         return ""
     }
-    Log ("git {0}" -f ($GitArgs -join " "))
+    Log ("git {0}" -f ($safeArgs -join " "))
     $canTuneNativeErrPref = ($PSVersionTable.PSVersion.Major -ge 7)
     $prevNativeErrorPref = $null
     $prevErrorActionPreference = $ErrorActionPreference
@@ -4290,11 +4497,12 @@ function Invoke-GitCapture([string[]]$GitArgs) {
     return (($out | Select-Object -First 1).ToString().Trim())
 }
 function Invoke-GitCaptureLines([string[]]$GitArgs) {
+    $safeArgs = @($GitArgs | ForEach-Object { Mask-SensitiveGitText ([string]$_) })
     if ($DryRun) {
-        Log ("DRYRUN git {0}" -f ($GitArgs -join " "))
+        Log ("DRYRUN git {0}" -f ($safeArgs -join " "))
         return @()
     }
-    Log ("git {0}" -f ($GitArgs -join " "))
+    Log ("git {0}" -f ($safeArgs -join " "))
     $canTuneNativeErrPref = ($PSVersionTable.PSVersion.Major -ge 7)
     $prevNativeErrorPref = $null
     $prevErrorActionPreference = $ErrorActionPreference
@@ -4392,15 +4600,78 @@ function Resolve-ZipExtractionRoot([string]$extractDir) {
     }
     return $extractDir
 }
+
+function Assert-ZipArchiveSafety {
+    param(
+        [Parameter(Mandatory=$true)][string]$ZipPath,
+        [long]$MaxArchiveBytes=536870912,
+        [int]$MaxEntries=50000,
+        [long]$MaxEntryBytes=536870912,
+        [long]$MaxExpandedBytes=2147483648,
+        [double]$MaxCompressionRatio=200,
+        [int]$MaxDepth=32
+    )
+    $file=Get-Item -LiteralPath $ZipPath -Force -ErrorAction Stop
+    Need ($file.Length -le $MaxArchiveBytes) ("zip archive exceeds byte budget: {0}" -f $file.Length)
+    $archive=[IO.Compression.ZipFile]::OpenRead($file.FullName)
+    try{
+        Need ($archive.Entries.Count -le $MaxEntries) ("zip archive exceeds entry budget: {0}" -f $archive.Entries.Count)
+        [long]$expanded=0
+        $canonicalPaths=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+        foreach($entry in $archive.Entries){
+            $name=[string]$entry.FullName
+            Need (-not [string]::IsNullOrWhiteSpace($name)) 'zip entry path is empty.'
+            Need (-not [IO.Path]::IsPathRooted($name) -and $name -notmatch '^[\\/]' -and $name -notmatch ':') ("zip entry path is absolute or contains ADS syntax: {0}" -f $name)
+            $segments=@((($name -replace '\\','/') -split '/')|Where-Object{$_ -ne ''})
+            Need ($segments.Count -le $MaxDepth) ("zip entry exceeds depth budget: {0}" -f $name)
+            Need (@($segments|Where-Object{$_ -eq '..' -or $_ -eq '.'}).Count -eq 0) ("zip entry traversal is forbidden: {0}" -f $name)
+            foreach($segment in $segments){
+                Need ($segment -eq $segment.TrimEnd(' ','.')) ("zip entry has a trailing dot or space: {0}" -f $name)
+                Need ($segment -notmatch '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)') ("zip entry uses a reserved Windows name: {0}" -f $name)
+            }
+            $canonicalName=((@($segments|ForEach-Object{$_.Normalize([Text.NormalizationForm]::FormC)}) -join '/').TrimEnd('/'))
+            Need ($canonicalPaths.Add($canonicalName)) ("zip entry has a duplicate canonical path: {0}" -f $name)
+            $unixType=(($entry.ExternalAttributes -shr 16) -band 0xF000)
+            Need ($unixType -ne 0xA000) ("zip symlink entry is forbidden: {0}" -f $name)
+            Need ($entry.Length -le $MaxEntryBytes) ("zip entry exceeds byte budget: {0}" -f $name)
+            $expanded+=[long]$entry.Length
+            Need ($expanded -le $MaxExpandedBytes) ("zip archive exceeds expanded byte budget: {0}" -f $expanded)
+            if($entry.Length -gt 0){
+                Need ($entry.CompressedLength -gt 0) ("zip entry has invalid zero compressed length: {0}" -f $name)
+                Need (([double]$entry.Length/[double]$entry.CompressedLength) -le $MaxCompressionRatio) ("zip entry exceeds compression ratio budget: {0}" -f $name)
+            }
+        }
+    }finally{$archive.Dispose()}
+}
+
+function Assert-StagedDirectoryNoReparse([string]$Path) {
+    foreach($entry in @(Get-ChildItem -LiteralPath $Path -Force -Recurse -ErrorAction Stop)){
+        Need (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ("staged archive contains a reparse point: {0}" -f $entry.FullName)
+    }
+}
+
+function Install-StagedDirectoryAtomic([string]$SourcePath,[string]$TargetPath,[bool]$ForceClean=$true) {
+    $targetExists=Test-Path -LiteralPath $TargetPath
+    if($targetExists){Need $ForceClean ("缓存目录已存在且 update_force=false：{0}" -f $TargetPath)}
+    EnsureDir (Split-Path $TargetPath -Parent)
+    $backupPath=("{0}.previous-{1}" -f $TargetPath,[guid]::NewGuid().ToString('N'))
+    $movedOld=$false
+    try{
+        if($targetExists){Invoke-MoveItem $TargetPath $backupPath;$movedOld=$true}
+        Invoke-MoveItem $SourcePath $TargetPath
+        if($movedOld){Invoke-RemoveItemWithRetry $backupPath -Recurse}
+    }catch{
+        if(Test-Path -LiteralPath $TargetPath){Invoke-RemoveItemWithRetry $TargetPath -Recurse -IgnoreFailure|Out-Null}
+        if($movedOld -and (Test-Path -LiteralPath $backupPath)){Invoke-MoveItem $backupPath $TargetPath}
+        throw
+    }
+}
+
 function Ensure-RepoFromZip([string]$path, [string]$zipPath, [bool]$forceClean = $true) {
     $zip = $zipPath.Trim().Trim("'`"")
     Need (Test-Path -LiteralPath $zip -PathType Leaf) ("zip 文件不存在：{0}" -f $zipPath)
 
-    if (Test-Path $path) {
-        Need $forceClean ("缓存目录已存在且 update_force=false：{0}" -f $path)
-        Invoke-RemoveItemWithRetry $path -Recurse
-    }
-    EnsureDir (Split-Path $path -Parent)
+    if (Test-Path $path) { Need $forceClean ("缓存目录已存在且 update_force=false：{0}" -f $path) }
 
     $tmpName = ("_zip_{0}" -f ([Guid]::NewGuid().ToString("N").Substring(0, 8)))
     $tmpBase = Join-Path $ImportDir $tmpName
@@ -4411,11 +4682,13 @@ function Ensure-RepoFromZip([string]$path, [string]$zipPath, [bool]$forceClean =
         Log ("Copy-Item {0} -> {1}" -f $zip, $tmpZip)
         Invoke-WithRetry { Copy-Item -LiteralPath $zip -Destination $tmpZip -Force } 3 250
 
+        Assert-ZipArchiveSafety -ZipPath $tmpZip
         Log ("Expand-Archive {0} -> {1}" -f $tmpZip, $extractDir)
         Invoke-WithRetry { Expand-Archive -LiteralPath $tmpZip -DestinationPath $extractDir -Force } 3 250
+        Assert-StagedDirectoryNoReparse $extractDir
 
         $sourceRoot = Resolve-ZipExtractionRoot $extractDir
-        Invoke-MoveItem $sourceRoot $path
+        Install-StagedDirectoryAtomic $sourceRoot $path $forceClean
     }
     catch {
         $msg = $_.Exception.Message
@@ -4434,24 +4707,23 @@ function Ensure-RepoFromGitArchive([string]$path, [string]$repo, [string]$ref, [
     $normalizedSkill = Normalize-SkillPath $skillPath
     Need ($normalizedSkill -ne ".") "git archive 回退模式不支持根路径 '.'，请指定具体子目录。"
 
-    if (Test-Path $path) {
-        Need $forceClean ("缓存目录已存在且 update_force=false：{0}" -f $path)
-        Invoke-RemoveItemWithRetry $path -Recurse
-    }
-    EnsureDir (Split-Path $path -Parent)
-    EnsureDir $path
+    if (Test-Path $path) { Need $forceClean ("缓存目录已存在且 update_force=false：{0}" -f $path) }
 
     $tmpName = ("_archive_{0}" -f ([Guid]::NewGuid().ToString("N").Substring(0, 8)))
     $tmpBase = Join-Path $ImportDir $tmpName
     $barePath = Join-Path $tmpBase "repo.git"
     $zipPath = Join-Path $tmpBase "export.zip"
+    $extractPath = Join-Path $tmpBase "extract"
     EnsureDir $tmpBase
     try {
         Invoke-Git @("clone", "--bare", $repo, $barePath)
         $gitDirArg = "--git-dir={0}" -f $barePath
         $gitPath = To-GitPath $normalizedSkill
         Invoke-Git @($gitDirArg, "archive", "--format=zip", "--output", $zipPath, $ref, $gitPath)
-        Expand-Archive -LiteralPath $zipPath -DestinationPath $path -Force
+        Assert-ZipArchiveSafety -ZipPath $zipPath
+        Expand-Archive -LiteralPath $zipPath -DestinationPath $extractPath -Force
+        Assert-StagedDirectoryNoReparse $extractPath
+        Install-StagedDirectoryAtomic (Resolve-ZipExtractionRoot $extractPath) $path $forceClean
     }
     finally {
         Invoke-RemoveItemWithRetry $tmpBase -Recurse -IgnoreFailure
@@ -4472,6 +4744,18 @@ function Resolve-GitHubOwnerRepo([string]$repo) {
     }
     return $null
 }
+
+function Get-GitBlobSha1ForFile([string]$Path) {
+    $bytes=[IO.File]::ReadAllBytes($Path)
+    $header=[Text.Encoding]::ASCII.GetBytes(("blob {0}`0" -f $bytes.LongLength))
+    $stream=[IO.MemoryStream]::new()
+    try{
+        $stream.Write($header,0,$header.Length);$stream.Write($bytes,0,$bytes.Length);$stream.Position=0
+        $sha=[Security.Cryptography.SHA1]::Create()
+        try{return (($sha.ComputeHash($stream)|ForEach-Object{$_.ToString('x2')})-join '')}finally{$sha.Dispose()}
+    }finally{$stream.Dispose()}
+}
+
 function Ensure-RepoFromGitHubTreeSnapshot([string]$path, [string]$repo, [string]$ref, [string]$skillPath, [bool]$forceClean = $true) {
     Need (-not [string]::IsNullOrWhiteSpace($repo)) "Repo URL 不能为空。"
     Need (-not [string]::IsNullOrWhiteSpace($ref)) "ref 不能为空。"
@@ -4481,21 +4765,21 @@ function Ensure-RepoFromGitHubTreeSnapshot([string]$path, [string]$repo, [string
     $ownerRepo = Resolve-GitHubOwnerRepo $repo
     Need ($null -ne $ownerRepo) ("GitHub 快照回退仅支持 github.com 仓库：{0}" -f $repo)
 
-    if (Test-Path $path) {
-        Need $forceClean ("缓存目录已存在且 update_force=false：{0}" -f $path)
-        Invoke-RemoveItemWithRetry $path -Recurse
-    }
-    EnsureDir (Split-Path $path -Parent)
-    EnsureDir $path
+    if (Test-Path $path) { Need $forceClean ("缓存目录已存在且 update_force=false：{0}" -f $path) }
 
     $headers = @{
         "User-Agent" = "skills-manager"
         "Accept" = "application/vnd.github+json"
     }
     $encodedRef = [System.Uri]::EscapeDataString($ref)
-    $treeUrl = ("https://api.github.com/repos/{0}/{1}/git/trees/{2}?recursive=1" -f $ownerRepo.owner, $ownerRepo.name, $encodedRef)
+    $commitUrl=("https://api.github.com/repos/{0}/{1}/commits/{2}" -f $ownerRepo.owner,$ownerRepo.name,$encodedRef)
+    $commitResp=Invoke-RestMethod -Uri $commitUrl -Headers $headers -Method Get -ErrorAction Stop
+    $commitSha=[string]$commitResp.sha;$treeSha=[string]$commitResp.commit.tree.sha
+    Need ($commitSha -match '^[a-fA-F0-9]{40}$' -and $treeSha -match '^[a-fA-F0-9]{40}$') 'GitHub commit response does not provide immutable commit/tree SHA.'
+    $treeUrl = ("https://api.github.com/repos/{0}/{1}/git/trees/{2}?recursive=1" -f $ownerRepo.owner, $ownerRepo.name, $treeSha)
     $treeResp = Invoke-RestMethod -Uri $treeUrl -Headers $headers -Method Get -ErrorAction Stop
     Need ($treeResp -and $treeResp.tree) ("GitHub 树接口返回为空：{0}" -f $treeUrl)
+    Need (-not [bool]$treeResp.truncated) 'GitHub tree response is truncated; refusing an incomplete snapshot.'
 
     $prefix = (To-GitPath $normalizedSkill).Trim("/")
     Need (-not [string]::IsNullOrWhiteSpace($prefix)) "技能路径无效。"
@@ -4505,17 +4789,44 @@ function Ensure-RepoFromGitHubTreeSnapshot([string]$path, [string]$repo, [string
             $_.type -eq "blob" -and $_.path -is [string] -and ($_.path -eq $prefix -or $_.path.StartsWith($prefixSlash))
         })
     Need ($blobs.Count -gt 0) ("GitHub 快照回退未找到目标路径：{0}" -f $normalizedSkill)
-
+    Need ($blobs.Count -le 50000) ("GitHub snapshot exceeds blob count budget: {0}" -f $blobs.Count)
+    [long]$snapshotBytes = 0
+    $snapshotPaths=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach ($blob in $blobs) {
-        $blobPath = [string]$blob.path
-        if ([string]::IsNullOrWhiteSpace($blobPath)) { continue }
-        $relPath = $blobPath -replace "/", "\"
-        $dstPath = Join-Path $path $relPath
-        EnsureDir (Split-Path $dstPath -Parent)
-
-        $rawUrl = ("https://raw.githubusercontent.com/{0}/{1}/{2}/{3}" -f $ownerRepo.owner, $ownerRepo.name, $ref, $blobPath)
-        Invoke-WebRequest -Uri $rawUrl -Headers @{ "User-Agent" = "skills-manager" } -OutFile $dstPath -ErrorAction Stop | Out-Null
+        $blobPath=[string]$blob.path
+        Need ($blobPath -notmatch '[\\:]' -and -not [IO.Path]::IsPathRooted($blobPath)) ("GitHub tree path is not portable: {0}" -f $blobPath)
+        $blobSegments=@($blobPath -split '/')
+        Need (@($blobSegments|Where-Object{[string]::IsNullOrWhiteSpace($_) -or $_ -eq '.' -or $_ -eq '..'}).Count -eq 0) ("GitHub tree path contains an invalid segment: {0}" -f $blobPath)
+        foreach($segment in $blobSegments){
+            Need ($segment -eq $segment.TrimEnd(' ','.')) ("GitHub tree path has a trailing dot or space: {0}" -f $blobPath)
+            Need ($segment -notmatch '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)') ("GitHub tree path uses a reserved Windows name: {0}" -f $blobPath)
+        }
+        $canonicalPath=(@($blobSegments|ForEach-Object{$_.Normalize([Text.NormalizationForm]::FormC)}) -join '/')
+        Need ($snapshotPaths.Add($canonicalPath)) ("GitHub tree contains a duplicate canonical path: {0}" -f $blobPath)
+        [long]$blobBytes = 0
+        Need ([long]::TryParse([string]$blob.size, [ref]$blobBytes) -and $blobBytes -ge 0) ("GitHub tree blob lacks a valid size: {0}" -f [string]$blob.path)
+        Need ($blobBytes -le 536870912) ("GitHub snapshot blob exceeds byte budget: {0}" -f [string]$blob.path)
+        $snapshotBytes += $blobBytes
+        Need ($snapshotBytes -le 2147483648) ("GitHub snapshot exceeds expanded byte budget: {0}" -f $snapshotBytes)
     }
+
+    $tmpBase=Join-Path $ImportDir ("_github_snapshot_{0}" -f [guid]::NewGuid().ToString('N').Substring(0,8));$extractDir=Join-Path $tmpBase 'extract';EnsureDir $extractDir
+    try{
+        foreach ($blob in $blobs) {
+            $blobPath = [string]$blob.path
+            if ([string]::IsNullOrWhiteSpace($blobPath)) { continue }
+            Need ([string]$blob.sha -match '^[a-fA-F0-9]{40}$') ("GitHub tree blob lacks immutable SHA: {0}" -f $blobPath)
+            $relPath = $blobPath -replace "/", "\"
+            $dstPath = [IO.Path]::GetFullPath((Join-Path $extractDir $relPath))
+            Need (Is-PathInsideOrEqual $dstPath $extractDir) ("GitHub tree path escapes snapshot root: {0}" -f $blobPath)
+            EnsureDir (Split-Path $dstPath -Parent)
+            $encodedBlobPath = ((@($blobPath -split '/') | ForEach-Object { [Uri]::EscapeDataString($_) }) -join '/')
+            $rawUrl = ("https://raw.githubusercontent.com/{0}/{1}/{2}/{3}" -f $ownerRepo.owner, $ownerRepo.name, $commitSha, $encodedBlobPath)
+            Invoke-WebRequest -Uri $rawUrl -Headers @{ "User-Agent" = "skills-manager" } -OutFile $dstPath -ErrorAction Stop | Out-Null
+            Need ((Get-GitBlobSha1ForFile $dstPath) -eq ([string]$blob.sha).ToLowerInvariant()) ("GitHub blob SHA mismatch: {0}" -f $blobPath)
+        }
+        Install-StagedDirectoryAtomic $extractDir $path $forceClean
+    }finally{Invoke-RemoveItemWithRetry $tmpBase -Recurse -IgnoreFailure|Out-Null}
 }
 function Parse-DefaultBranchFromSymref([string]$line) {
     if ([string]::IsNullOrWhiteSpace($line)) { return $null }
@@ -4617,10 +4928,6 @@ function Has-GitUpstream {
     $up = Invoke-GitCapture @("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
     return -not [string]::IsNullOrWhiteSpace($up)
 }
-function Test-GitUnrelatedHistoriesIssue([string]$message) {
-    if ([string]::IsNullOrWhiteSpace($message)) { return $false }
-    return ($message -match "unrelated histories|拒绝合并无关的历史")
-}
 function Update-CurrentBranchFromUpstream([bool]$AllowNetworkFetch = $true) {
     $branch = Get-GitHeadBranch
     if (-not $branch -or -not (Has-GitUpstream)) {
@@ -4629,15 +4936,10 @@ function Update-CurrentBranchFromUpstream([bool]$AllowNetworkFetch = $true) {
     }
     if ($AllowNetworkFetch) {
         try {
-            Invoke-Git @("pull")
+            Invoke-Git @("pull", "--ff-only")
         }
         catch {
-            if (Test-GitUnrelatedHistoriesIssue $_.Exception.Message) {
-                Log ("检测到本地历史与上游无共同祖先，已强制对齐：{0}" -f $branch) "WARN"
-                Invoke-Git @("reset", "--hard", "@{u}")
-                return
-            }
-            throw
+            throw ("网络 ff-only 快进失败，未执行破坏性 reset：{0}；原因：{1}" -f $branch, (Mask-SensitiveGitText $_.Exception.Message))
         }
         return
     }
@@ -4646,13 +4948,7 @@ function Update-CurrentBranchFromUpstream([bool]$AllowNetworkFetch = $true) {
         Log ("已基于本地 refs 快进分支：{0}" -f $branch)
     }
     catch {
-        if (Test-GitUnrelatedHistoriesIssue $_.Exception.Message) {
-            Log ("检测到本地历史与上游无共同祖先，已强制对齐：{0}" -f $branch) "WARN"
-            Invoke-Git @("reset", "--hard", "@{u}")
-            return
-        }
-        Log ("本地快进失败，已强制对齐上游：{0}；原因：{1}" -f $branch, $_.Exception.Message) "WARN"
-        Invoke-Git @("reset", "--hard", "@{u}")
+        throw ("本地 ff-only 快进失败，未执行破坏性 reset：{0}；原因：{1}" -f $branch, (Mask-SensitiveGitText $_.Exception.Message))
     }
 }
 function Has-GitChanges {
@@ -4856,19 +5152,39 @@ function Resolve-GitAdminDir([string]$repoPath) {
         return $null
     }
 }
-function Repair-StaleGitLockFromOutput($outputLines) {
+function Repair-StaleGitLockFromOutput([string]$repoPath, $outputLines) {
+    $gitAdminDir = Resolve-GitAdminDir $repoPath
+    if ([string]::IsNullOrWhiteSpace($gitAdminDir)) { return $false }
+    try {
+        $expectedLockPath = [System.IO.Path]::GetFullPath((Join-Path $gitAdminDir "index.lock"))
+    }
+    catch {
+        return $false
+    }
+
     $lockPath = $null
     foreach ($line in @($outputLines)) {
         $lockPath = Get-GitLockPathFromOutputLine ([string]$line)
         if (-not [string]::IsNullOrWhiteSpace($lockPath)) { break }
     }
     if ([string]::IsNullOrWhiteSpace($lockPath)) { return $false }
+    try {
+        $reportedLockPath = [System.IO.Path]::GetFullPath($lockPath)
+    }
+    catch {
+        return $false
+    }
+    if (-not [string]::Equals($reportedLockPath, $expectedLockPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+        Log ("Git stderr 报告的锁路径不属于当前仓库，已拒绝自动删除：{0}" -f $reportedLockPath) "WARN"
+        return $false
+    }
     if (-not (Test-Path -LiteralPath $lockPath -PathType Leaf)) { return $false }
+    if (Test-GitProcessRunning) {
+        Log ("检测到活动 Git 进程，已拒绝自动删除锁文件：{0}" -f $lockPath) "WARN"
+        return $false
+    }
     Log ("检测到陈旧 Git 锁文件，已自动移除：{0}" -f $lockPath) "WARN"
     if (Remove-GitLockFile $lockPath) { return $true }
-    if (Test-GitProcessRunning) {
-        throw ("检测到 Git 锁文件且自动移除失败（可能仍有 git 进程占用），请先等待或结束相关进程后重试：{0}" -f $lockPath)
-    }
     throw ("检测到 Git 锁文件，但自动移除失败：{0}" -f $lockPath)
 }
 function Repair-StaleGitLockInRepo([string]$repoPath) {
@@ -4877,11 +5193,12 @@ function Repair-StaleGitLockInRepo([string]$repoPath) {
     if ([string]::IsNullOrWhiteSpace($gitAdminDir)) { return $false }
     $lockPath = Join-Path $gitAdminDir "index.lock"
     if (-not (Test-Path -LiteralPath $lockPath -PathType Leaf)) { return $false }
+    if (Test-GitProcessRunning) {
+        Log ("检测到活动 Git 进程，已拒绝自动删除仓库锁文件：{0}" -f $lockPath) "WARN"
+        return $false
+    }
     Log ("检测到仓库残留 Git 锁文件，已自动移除：{0}" -f $lockPath) "WARN"
     if (Remove-GitLockFile $lockPath) { return $true }
-    if (Test-GitProcessRunning) {
-        throw ("检测到 Git 锁文件且自动移除失败（可能仍有 git 进程占用），请先等待或结束相关进程后重试：{0}" -f $lockPath)
-    }
     throw ("检测到 Git 锁文件，但自动移除失败：{0}" -f $lockPath)
 }
 function Repair-InProgressGitOperation([string]$repoPath) {
@@ -5043,11 +5360,12 @@ function Repair-GitSparseCheckoutRemoveWarnings([string]$repoPath, $outputLines)
     return (Repair-GitFailedRemovePaths $repoPath $rawPaths "sparse-checkout")
 }
 function Invoke-GitSparseCheckoutCommand([string[]]$GitArgs) {
+    $safeArgs = @($GitArgs | ForEach-Object { Mask-SensitiveGitText ([string]$_) })
     if ($DryRun) {
-        Log ("DRYRUN git {0}" -f ($GitArgs -join " "))
+        Log ("DRYRUN git {0}" -f ($safeArgs -join " "))
         return
     }
-    $cmdText = ("git {0}" -f ($GitArgs -join " "))
+    $cmdText = ("git {0}" -f ($safeArgs -join " "))
     Log $cmdText
     $canTuneNativeErrPref = ($PSVersionTable.PSVersion.Major -ge 7)
     $prevNativeErrorPref = $null
@@ -5076,12 +5394,12 @@ function Invoke-GitSparseCheckoutCommand([string[]]$GitArgs) {
             $deferredRemoveWarnings += $text
             continue
         }
-        Write-Host $text
+        Write-Host (Mask-SensitiveGitText $text)
     }
 
     if ($exitCode -ne 0) {
-        foreach ($text in $deferredRemoveWarnings) { Write-Host $text }
-        $summary = Get-GitOutputSummary $output
+        foreach ($text in $deferredRemoveWarnings) { Write-Host (Mask-SensitiveGitText $text) }
+        $summary = Mask-SensitiveGitText (Get-GitOutputSummary $output)
         if ([string]::IsNullOrWhiteSpace($summary)) {
             throw ("git 失败：{0}" -f $cmdText)
         }
@@ -5091,7 +5409,7 @@ function Invoke-GitSparseCheckoutCommand([string[]]$GitArgs) {
     if ($deferredRemoveWarnings.Count -gt 0) {
         $repoPath = (Get-Location).Path
         if (-not (Repair-GitSparseCheckoutRemoveWarnings $repoPath $deferredRemoveWarnings)) {
-            foreach ($text in $deferredRemoveWarnings) { Write-Host $text }
+            foreach ($text in $deferredRemoveWarnings) { Write-Host (Mask-SensitiveGitText $text) }
         }
     }
 }
@@ -5112,7 +5430,7 @@ function Repair-StaleGitLockAfterFailure([string]$repoPath, $outputLines) {
 }
 function Ensure-Repo([string]$path, [string]$repo, [string]$ref, [string]$sparsePath, [bool]$forceClean = $true, [bool]$confirmClean = $false, [bool]$doFetch = $true) {
     if ($DryRun) {
-        Log ("DRYRUN Ensure-Repo {0} <= {1} ({2})" -f $path, $repo, $ref)
+        Log ("DRYRUN Ensure-Repo {0} <= {1} ({2})" -f $path, (Mask-SensitiveGitText $repo), $ref)
         return
     }
     if (Test-LocalZipRepoInput $repo) {
@@ -5153,7 +5471,7 @@ function Ensure-Repo([string]$path, [string]$repo, [string]$ref, [string]$sparse
         finally { Pop-Location }
         if (-not (Is-SameRepoIdentity $existingOrigin $repo)) {
             Need $forceClean ("缓存目录已存在但来源仓库不匹配且 update_force=false：{0}" -f $path)
-            Log ("检测到缓存目录来源不匹配，已重建：{0} (old={1}, new={2})" -f $path, $existingOrigin, $repo) "WARN"
+            Log ("检测到缓存目录来源不匹配，已重建：{0} (old={1}, new={2})" -f $path, (Mask-SensitiveGitText $existingOrigin), (Mask-SensitiveGitText $repo)) "WARN"
             Invoke-RemoveItemWithRetry $path -Recurse
             Ensure-Repo $path $repo $ref $sparsePath $forceClean $confirmClean $doFetch
             return
@@ -10783,6 +11101,24 @@ function Assert-McpRemoteUrl([string]$url, [string]$name, [string]$transport) {
     if ($parsed.Scheme -ne [System.Uri]::UriSchemeHttp -and $parsed.Scheme -ne [System.Uri]::UriSchemeHttps) {
         throw ("{0} MCP URL 非法（仅支持 http/https）：{1}" -f $transport, $name)
     }
+    Need ([string]::IsNullOrWhiteSpace($parsed.UserInfo)) ("{0} MCP URL 不允许内嵌 userinfo/credential：{1}" -f $transport, $name)
+    if (-not [string]::IsNullOrWhiteSpace($parsed.Query)) {
+        foreach ($part in @($parsed.Query.TrimStart('?') -split '&')) {
+            if ([string]::IsNullOrWhiteSpace($part)) { continue }
+            $queryKey = [Uri]::UnescapeDataString(($part -split '=', 2)[0])
+            Need (-not (Test-McpSensitiveKeyName $queryKey)) ("{0} MCP URL 不允许在 query 中携带敏感字段；请改用环境变量引用或 bearer_token_env_var：{1}" -f $transport, $queryKey)
+        }
+    }
+}
+
+function Test-McpSensitiveKeyName([string]$name) {
+    if ([string]::IsNullOrWhiteSpace($name)) { return $false }
+    return ($name -match '(?i)(authorization|proxy-authorization|cookie|token|secret|password|passwd|api[-_]?key|private[-_]?key|credential)')
+}
+
+function Test-McpEnvironmentTemplate([string]$value) {
+    if ([string]::IsNullOrWhiteSpace($value)) { return $false }
+    return ($value.Trim() -match '^(?:(?:Bearer|Basic)\s+)?\$\{[A-Za-z_][A-Za-z0-9_]*\}$')
 }
 
 function Assert-McpKeyValueMapSafe($data, [string]$label) {
@@ -10801,6 +11137,26 @@ function Assert-McpKeyValueMapSafe($data, [string]$label) {
         $value = if ($null -eq $item.Value) { "" } else { [string]$item.Value }
         Need ($key -notmatch '[\r\n]') ("{0} key 不能包含换行：{1}" -f $label, $key)
         Need ($value -notmatch '[\r\n]') ("{0} value 不能包含换行：{1}" -f $label, $key)
+        if (Test-McpSensitiveKeyName $key) {
+            Need (Test-McpEnvironmentTemplate $value) ("{0} 敏感字段不得保存 literal value；请使用 `${{ENV_VAR}} 引用：{1}" -f $label, $key)
+        }
+    }
+}
+
+function Assert-McpProcessArgsSafe([object[]]$ProcessArgs,[string]$Label='args') {
+    $items=@($ProcessArgs|ForEach-Object{[string]$_})
+    for($i=0;$i -lt $items.Count;$i++){
+        $item=$items[$i]
+        Need ($item -notmatch '[\r\n]') ("{0} 不能包含换行。" -f $Label)
+        Need ($item -notmatch '(?i)\b(?:https?|postgres(?:ql)?)://[^/@\s:]+:[^/@\s]+@') ("{0} 不允许内嵌 URL credential；请改用环境变量模板。" -f $Label)
+        Need ($item -notmatch '(?i)\b(?:github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+)\b') ("{0} 不允许 literal access token；请改用环境变量模板。" -f $Label)
+        if($item -match '^(?i)(--?(?:access[-_]?key|api[-_]?key|authorization|password|passwd|secret|token))=(.*)$'){
+            Need (Test-McpEnvironmentTemplate ([string]$Matches[2])) ("{0} 敏感参数不得保存 literal value：{1}" -f $Label,$Matches[1])
+        }
+        elseif($item -match '^(?i)--?(?:access[-_]?key|api[-_]?key|authorization|password|passwd|secret|token)$'){
+            Need (($i+1) -lt $items.Count -and (Test-McpEnvironmentTemplate $items[$i+1])) ("{0} 敏感参数不得保存 literal value：{1}" -f $Label,$item)
+            $i++
+        }
     }
 }
 
@@ -10986,7 +11342,9 @@ function Parse-McpInstallArgs([string[]]$tokens) {
     Need (($result.transport -eq "stdio") -or ($result.transport -eq "sse") -or ($result.transport -eq "http")) "transport 仅支持 stdio/sse/http"
 
     if ($result.transport -eq "stdio") {
+        Assert-McpKeyValueMapSafe $result.env "--env"
         $result.args = Normalize-McpProcessArgs @($result.args)
+        Assert-McpProcessArgsSafe $result.args '--args'
         if ([string]::IsNullOrWhiteSpace($result.command) -and $result.args.Count -gt 0) {
             $result.command = [string]$result.args[0]
             if ($result.args.Count -gt 1) {
@@ -11084,6 +11442,7 @@ function Convert-McpServersToConfigMap($servers) {
         $entry.transport = $transport
         if ($transport -eq "stdio") {
             Assert-McpKeyValueMapSafe $s.env "env"
+            Assert-McpProcessArgsSafe @($s.args) 'args'
             if (-not [string]::IsNullOrWhiteSpace([string]$s.command)) { $entry.command = [string]$s.command }
             if ($s.PSObject.Properties.Match("args").Count -gt 0 -and $s.args -ne $null) { $entry.args = @($s.args) }
             if ($s.PSObject.Properties.Match("env").Count -gt 0 -and $s.env -ne $null) { $entry.env = $s.env }
@@ -11465,9 +11824,9 @@ function Ensure-CodexMcpNodeCacheWrapper([string]$codexRoot) {
     $scriptsDir = Join-Path $codexRoot "scripts"
     EnsureDir $scriptsDir
     $wrapperPath = Join-Path $scriptsDir "mcp-node-cache-wrapper.mjs"
-    Set-ContentUtf8 $wrapperPath (Get-CodexMcpNodeCacheWrapperContent)
+    Write-Utf8FileAtomic -Path $wrapperPath -Content (Get-CodexMcpNodeCacheWrapperContent)
     $postgresWrapperPath = Join-Path $scriptsDir "mcp-postgres-env-wrapper.mjs"
-    Set-ContentUtf8 $postgresWrapperPath (Get-CodexMcpPostgresEnvWrapperContent)
+    Write-Utf8FileAtomic -Path $postgresWrapperPath -Content (Get-CodexMcpPostgresEnvWrapperContent)
 }
 
 function Convert-McpMapToOrderedMap($mapLike) {
@@ -11519,26 +11878,12 @@ function Build-GenericMcpPayload([string]$existingContent, $servers) {
 function Get-NativeMcpKeyValueFlags($data, [string]$flagName, [string]$separator = "=") {
     $flags = @()
     if ($null -eq $data) { return $flags }
-    function Resolve-EnvTemplateValue([string]$rawValue) {
-        if ([string]::IsNullOrWhiteSpace($rawValue)) { return $rawValue }
-        return [System.Text.RegularExpressions.Regex]::Replace(
-            $rawValue,
-            '\$\{([A-Za-z_][A-Za-z0-9_]*)\}',
-            {
-                param($m)
-                $varName = [string]$m.Groups[1].Value
-                $resolved = [System.Environment]::GetEnvironmentVariable($varName)
-                if ($null -eq $resolved) { return $m.Value }
-                return [string]$resolved
-            }
-        )
-    }
 
     if ($data -is [hashtable] -or $data -is [System.Collections.IDictionary]) {
         foreach ($k in $data.Keys) {
             $key = [string]$k
             if ([string]::IsNullOrWhiteSpace($key)) { continue }
-            $value = Resolve-EnvTemplateValue ([string]$data[$k])
+            $value = [string]$data[$k]
             $flags += @($flagName, ("{0}{1}{2}" -f $key, $separator, $value))
         }
         return $flags
@@ -11548,7 +11893,7 @@ function Get-NativeMcpKeyValueFlags($data, [string]$flagName, [string]$separator
         foreach ($p in $data.PSObject.Properties) {
             $key = [string]$p.Name
             if ([string]::IsNullOrWhiteSpace($key)) { continue }
-            $value = Resolve-EnvTemplateValue ([string]$p.Value)
+            $value = [string]$p.Value
             $flags += @($flagName, ("{0}{1}{2}" -f $key, $separator, $value))
         }
         return $flags
@@ -12120,6 +12465,9 @@ function Mask-SensitiveMcpCommandText([string]$text) {
     $masked = [regex]::Replace($masked, '(?i)(Authorization\s*[:=]\s*Bearer\s+)([^"\s]+)', '$1<redacted>')
     $masked = [regex]::Replace($masked, '(?i)\bgithub_pat_[A-Za-z0-9_]+\b', '<redacted>')
     $masked = [regex]::Replace($masked, '(?i)\bgh[pousr]_[A-Za-z0-9_]+\b', '<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)((?:--)?(?:token|secret|password|passwd|api[-_]?key|authorization)\s*(?:=|:)\s*)([^\s"'']+)', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)((?:--)?(?:token|secret|password|passwd|api[-_]?key|authorization)\s+)([^\s"'']+)', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)(https?://)([^/@\s:]+):([^/@\s]+)@', '$1<redacted>@')
     return $masked
 }
 
@@ -12330,7 +12678,7 @@ function Verify-McpAcrossCliWithRetry($roots, [int]$maxAttempts = 6, [int]$inter
                 Log ("MCP 校验未通过：{0}，缺失/异常：{1}（reason={2}）" -f $check.cli, (($check.missing) -join ", "), $check.reason) "WARN"
                 $snippet = @($check.raw | Select-Object -First 6) -join " | "
                 if (-not [string]::IsNullOrWhiteSpace($snippet)) {
-                    Log ("{0} mcp list 输出片段：{1}" -f $check.cli, $snippet) "WARN"
+                    Log ("{0} mcp list 输出片段：{1}" -f $check.cli, (Mask-SensitiveMcpCommandText $snippet)) "WARN"
                 }
             }
         }
@@ -12388,7 +12736,7 @@ function Invoke-NativeMcpSync($servers) {
                     $removeArgs = @("mcp", "remove", [string]$s.name, "--scope", $scope)
                     $removed = Invoke-ExternalCommandWithTimeout "claude" @($removeArgs) $script:Root $timeoutSeconds
                     if ($removed.timed_out -or $removed.exit_code -ne 0) {
-                        Log ("原生 MCP 替换前清理失败（已忽略）：{0}（scope={1}，exit={2}）{3}" -f [string]$s.name, $scope, $removed.exit_code, $removed.error) "WARN"
+                        Log ("原生 MCP 替换前清理失败（已忽略）：{0}（scope={1}，exit={2}）{3}" -f [string]$s.name, $scope, $removed.exit_code, (Mask-SensitiveMcpCommandText ([string]$removed.error))) "WARN"
                         continue
                     }
 
@@ -12398,7 +12746,7 @@ function Invoke-NativeMcpSync($servers) {
                         continue
                     }
                 }
-                Log ("原生 MCP 同步失败（已忽略）：{0}（scope={1}，exit={2}）{3}" -f [string]$s.name, $scope, $native.exit_code, $native.error) "WARN"
+                Log ("原生 MCP 同步失败（已忽略）：{0}（scope={1}，exit={2}）{3}" -f [string]$s.name, $scope, $native.exit_code, (Mask-SensitiveMcpCommandText ([string]$native.error))) "WARN"
                 if (Test-IsNonInteractiveMcpError ([string]$native.error)) {
                     $script:SkipNativeMcpForSession = $true
                     Log "检测到原生 MCP CLI 在非交互环境不可用，已停止本轮后续原生 MCP 同步。" "WARN"
@@ -12409,7 +12757,7 @@ function Invoke-NativeMcpSync($servers) {
             Log ("已同步原生 MCP：{0}（scope={1}）" -f [string]$s.name, $scope)
         }
         catch {
-            Log ("原生 MCP 同步失败（已忽略）：{0}（scope={1}） -> {2}" -f [string]$s.name, $scope, $_.Exception.Message) "WARN"
+            Log ("原生 MCP 同步失败（已忽略）：{0}（scope={1}） -> {2}" -f [string]$s.name, $scope, (Mask-SensitiveMcpCommandText $_.Exception.Message)) "WARN"
             if (Test-IsNonInteractiveMcpError $_.Exception.Message) {
                 $script:SkipNativeMcpForSession = $true
                 Log "检测到原生 MCP CLI 在非交互环境不可用，已停止本轮后续原生 MCP 同步。" "WARN"
@@ -12453,7 +12801,7 @@ function Invoke-NativeMcpCleanup([string]$name) {
                 continue
             }
             if ($native.exit_code -ne 0) {
-                Log ("原生 MCP 清理失败（已忽略）：{0}（exit={1}）{2}" -f $cmdText, $native.exit_code, $native.error) "WARN"
+                Log ("原生 MCP 清理失败（已忽略）：{0}（exit={1}）{2}" -f (Mask-SensitiveMcpCommandText $cmdText), $native.exit_code, (Mask-SensitiveMcpCommandText ([string]$native.error))) "WARN"
                 if (Test-IsNonInteractiveMcpError ([string]$native.error)) {
                     $script:SkipNativeMcpForSession = $true
                     Log "检测到原生 MCP CLI 在非交互环境不可用，已停止本轮后续原生 MCP 清理。" "WARN"
@@ -12464,7 +12812,7 @@ function Invoke-NativeMcpCleanup([string]$name) {
             Log ("已执行原生 MCP 清理：{0}" -f $cmdText)
         }
         catch {
-            Log ("原生 MCP 清理失败（已忽略）：{0} -> {1}" -f $cmdText, $_.Exception.Message) "WARN"
+            Log ("原生 MCP 清理失败（已忽略）：{0} -> {1}" -f (Mask-SensitiveMcpCommandText $cmdText), (Mask-SensitiveMcpCommandText $_.Exception.Message)) "WARN"
             if (Test-IsNonInteractiveMcpError $_.Exception.Message) {
                 $script:SkipNativeMcpForSession = $true
                 Log "检测到原生 MCP CLI 在非交互环境不可用，已停止本轮后续原生 MCP 清理。" "WARN"
@@ -13150,7 +13498,7 @@ function Write-McpDesiredTarget($target) {
     $parent = Split-Path $path -Parent
     if (-not [string]::IsNullOrWhiteSpace($parent)) { EnsureDir $parent }
     if ([string]$target.kind -eq 'codex_toml') { Ensure-CodexMcpNodeCacheWrapper ([string]$target.root) }
-    Set-ContentUtf8 $path ([string]$target.desired_content)
+    Write-Utf8FileAtomic -Path $path -Content ([string]$target.desired_content)
     switch ([string]$target.kind) {
         'gemini_settings' { Log ("已同步 Gemini MCP 配置：{0}" -f $path) }
         'gemini_antigravity_settings' { Log ("已同步 Gemini Antigravity MCP 配置：{0}" -f $path) }
@@ -13158,6 +13506,129 @@ function Write-McpDesiredTarget($target) {
         'trae_json' { Log ("已同步 Trae MCP 配置：{0}" -f $path) }
         'trae_project_json' { Log ("已同步项目级 Trae MCP 配置：{0}" -f $path) }
         default { Log ("已同步 MCP 配置：{0}" -f $path) }
+    }
+}
+
+function Test-McpTargetReparsePath([string]$Path,[string]$Root) {
+    $cursor=[IO.Path]::GetFullPath($Path);$boundary=[IO.Path]::GetFullPath($Root).TrimEnd('\','/')
+    while($true){
+        if([IO.File]::Exists($cursor) -or [IO.Directory]::Exists($cursor)){if(([IO.File]::GetAttributes($cursor) -band [IO.FileAttributes]::ReparsePoint) -ne 0){return $true}}
+        if($cursor.TrimEnd('\','/').Equals($boundary,[StringComparison]::OrdinalIgnoreCase)){break}
+        $parent=[IO.Directory]::GetParent($cursor);if($null -eq $parent -or -not (Test-OperationPathWithinRoot $parent.FullName $boundary)){break};$cursor=$parent.FullName
+    }
+    return $false
+}
+
+function Assert-McpDesiredStateFresh([object[]]$DesiredState,[string]$ExpectedConfigRevision='') {
+    if(-not [string]::IsNullOrWhiteSpace($ExpectedConfigRevision)){
+        $currentConfigRevision=Get-OperationSha256 (Get-ContentUtf8 $CfgPath)
+        Need ($currentConfigRevision -eq $ExpectedConfigRevision) 'MCP source_revision_stale：skills.json changed after planning.'
+    }
+    foreach($target in @($DesiredState)){
+        $path=[IO.Path]::GetFullPath([string]$target.path);$root=[IO.Path]::GetFullPath([string]$target.root)
+        Need (Test-OperationPathWithinRoot $path $root) ("MCP target_out_of_root：{0}" -f $path)
+        Need (-not (Test-McpTargetReparsePath $path $root)) ("MCP target_reparse_forbidden：{0}" -f $path)
+        $exists=Test-Path -LiteralPath $path -PathType Leaf;$before=$target.before_hash
+        if($null -eq $before){Need (-not $exists) ("MCP target_created_since_plan：{0}" -f $path)}
+        else{Need $exists ("MCP target_missing_since_plan：{0}" -f $path);Need ((Get-OperationSha256 (Get-ContentUtf8 $path)) -eq [string]$before) ("MCP target_hash_stale：{0}" -f $path)}
+    }
+}
+
+function Restore-McpManagedTargetSnapshot([object[]]$Snapshot) {
+    $conflicts=New-Object System.Collections.Generic.List[string]
+    foreach($entry in @($Snapshot)){
+        $path=[string]$entry.path
+        if(Test-Path -LiteralPath $path -PathType Leaf){
+            $currentHash=Get-OperationSha256 (Get-ContentUtf8 $path)
+            $allowed=@([string]$entry.before_hash,[string]$entry.desired_hash)|Where-Object{-not [string]::IsNullOrWhiteSpace($_)}
+            if($currentHash -notin $allowed){$conflicts.Add($path)|Out-Null;continue}
+        }
+        if([bool]$entry.existed){Write-BytesAtomic -Path $path -Bytes ([byte[]]$entry.bytes)}
+        elseif(Test-Path -LiteralPath $path -PathType Leaf){Remove-Item -LiteralPath $path -Force}
+    }
+    Need ($conflicts.Count -eq 0) ("MCP rollback_conflict：managed targets changed outside this transaction: {0}" -f ($conflicts -join ', '))
+}
+
+function Get-McpImplicitSidecarTargets([object[]]$DesiredState) {
+    $targets=New-Object System.Collections.Generic.List[object]
+    $seen=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach($target in @($DesiredState|Where-Object{[string]$_.kind -eq 'codex_toml'})){
+        $root=[IO.Path]::GetFullPath([string]$target.root)
+        $nodePath=Join-Path $root 'scripts/mcp-node-cache-wrapper.mjs'
+        if($seen.Add($nodePath)){$targets.Add([pscustomobject]@{path=$nodePath;root=$root;desired_content=(Get-CodexMcpNodeCacheWrapperContent)})|Out-Null}
+        $postgresPath=Join-Path $root 'scripts/mcp-postgres-env-wrapper.mjs'
+        if($seen.Add($postgresPath)){$targets.Add([pscustomobject]@{path=$postgresPath;root=$root;desired_content=(Get-CodexMcpPostgresEnvWrapperContent)})|Out-Null}
+    }
+    return @($targets.ToArray())
+}
+
+function Remove-McpCreatedRootIfEmpty([string]$Root) {
+    if(-not (Test-Path -LiteralPath $Root -PathType Container)){return}
+    if(Test-McpTargetReparsePath $Root $Root){return}
+    $files=@([IO.Directory]::GetFiles($Root,'*',[IO.SearchOption]::AllDirectories))
+    if($files.Count -gt 0){return}
+    $reparse=@([IO.Directory]::GetFileSystemEntries($Root,'*',[IO.SearchOption]::AllDirectories)|Where-Object{([IO.File]::GetAttributes($_)-band [IO.FileAttributes]::ReparsePoint)-ne 0})
+    if($reparse.Count -gt 0){return}
+    Remove-Item -LiteralPath $Root -Recurse -Force
+}
+
+function Invoke-McpManagedTargetTransaction([object[]]$DesiredState,[string]$ExpectedConfigRevision='') {
+    $lockEntries=New-Object System.Collections.Generic.List[object]
+    $snapshot=New-Object System.Collections.Generic.List[object]
+    $createdRoots=New-Object System.Collections.Generic.List[string]
+    $transactionSucceeded=$false
+    try{
+        $roots=@($DesiredState|ForEach-Object{[IO.Path]::GetFullPath([string]$_.root)}|Sort-Object -Unique)
+        foreach($root in $roots){
+            $drive=[IO.Path]::GetPathRoot($root).TrimEnd('\','/');$trimmed=$root.TrimEnd('\','/')
+            Need (-not $trimmed.Equals($drive,[StringComparison]::OrdinalIgnoreCase)) ("MCP target_root_forbidden：{0}" -f $root)
+            if(Test-Path -LiteralPath $root){Need (Test-Path -LiteralPath $root -PathType Container) ("MCP target_root_not_directory：{0}" -f $root);continue}
+            $parent=[IO.Directory]::GetParent($root)
+            Need ($null -ne $parent -and (Test-Path -LiteralPath $parent.FullName -PathType Container)) ("MCP target_root_parent_missing：{0}" -f $root)
+            Need (-not (Test-McpTargetReparsePath $parent.FullName $parent.FullName)) ("MCP target_root_parent_reparse_forbidden：{0}" -f $root)
+        }
+        foreach($root in $roots){
+            if(-not (Test-Path -LiteralPath $root -PathType Container)){[IO.Directory]::CreateDirectory($root)|Out-Null;$createdRoots.Add($root)|Out-Null}
+            Need (-not (Test-McpTargetReparsePath $root $root)) ("MCP target_reparse_forbidden：{0}" -f $root)
+            $lockPath=Join-Path $root '.skills-manager-mcp-sync.lock'
+            $stream=[IO.File]::Open($lockPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+            $lockEntries.Add([pscustomobject]@{path=$lockPath;stream=$stream})|Out-Null
+        }
+        Assert-McpDesiredStateFresh $DesiredState $ExpectedConfigRevision
+        foreach($target in @($DesiredState)){
+            $path=[string]$target.path;$exists=Test-Path -LiteralPath $path -PathType Leaf
+            $snapshot.Add([pscustomobject]@{path=$path;existed=$exists;bytes=$(if($exists){[IO.File]::ReadAllBytes($path)}else{[byte[]]::new(0)});before_hash=$target.before_hash;desired_hash=(Get-OperationSha256 ([string]$target.desired_content))})|Out-Null
+        }
+        $sidecars=@(Get-McpImplicitSidecarTargets $DesiredState)
+        foreach($sidecar in $sidecars){
+            $path=[IO.Path]::GetFullPath([string]$sidecar.path);$root=[IO.Path]::GetFullPath([string]$sidecar.root)
+            Need (Test-OperationPathWithinRoot $path $root) ("MCP sidecar_out_of_root：{0}" -f $path)
+            Need (-not (Test-McpTargetReparsePath $path $root)) ("MCP sidecar_reparse_forbidden：{0}" -f $path)
+            $exists=Test-Path -LiteralPath $path -PathType Leaf
+            $beforeHash=$(if($exists){Get-OperationSha256 (Get-ContentUtf8 $path)}else{$null})
+            $sidecar|Add-Member -NotePropertyName before_hash -NotePropertyValue $beforeHash -Force
+            $snapshot.Add([pscustomobject]@{path=$path;existed=$exists;bytes=$(if($exists){[IO.File]::ReadAllBytes($path)}else{[byte[]]::new(0)});before_hash=$beforeHash;desired_hash=(Get-OperationSha256 ([string]$sidecar.desired_content))})|Out-Null
+        }
+        foreach($target in @($DesiredState|Where-Object changed)){
+            Assert-McpDesiredStateFresh @($target) $ExpectedConfigRevision
+            if([string]$target.kind -eq 'codex_toml'){
+                $targetRoot=[IO.Path]::GetFullPath([string]$target.root)
+                foreach($sidecar in @($sidecars|Where-Object{[IO.Path]::GetFullPath([string]$_.root) -eq $targetRoot})){
+                    $exists=Test-Path -LiteralPath $sidecar.path -PathType Leaf
+                    if($null -eq $sidecar.before_hash){Need (-not $exists) ("MCP sidecar_created_since_lock：{0}" -f $sidecar.path)}
+                    else{Need $exists ("MCP sidecar_missing_since_lock：{0}" -f $sidecar.path);Need ((Get-OperationSha256 (Get-ContentUtf8 $sidecar.path)) -eq [string]$sidecar.before_hash) ("MCP sidecar_hash_stale：{0}" -f $sidecar.path)}
+                }
+            }
+            Write-McpDesiredTarget $target
+        }
+        $transactionSucceeded=$true
+        return [pscustomobject]@{pass=$true;writes=@($DesiredState|Where-Object changed).Count;snapshot=@($snapshot.ToArray());rollback_policy='managed_files_only_before_native_effects'}
+    }catch{
+        if($snapshot.Count -gt 0){Restore-McpManagedTargetSnapshot @($snapshot.ToArray())}
+        throw
+    }finally{
+        foreach($lock in @($lockEntries.ToArray())){$lock.stream.Dispose();if(Test-Path -LiteralPath $lock.path -PathType Leaf){Remove-Item -LiteralPath $lock.path -Force -ErrorAction SilentlyContinue}}
+        if(-not $transactionSucceeded){foreach($root in @($createdRoots.ToArray())|Sort-Object Length -Descending){Remove-McpCreatedRootIfEmpty $root}}
     }
 }
 
@@ -13170,22 +13641,28 @@ function 同步MCP {
             Ensure-GhAuthForGithubMcp $context.active_servers
         }
 
-        foreach ($target in @($context.desired_state)) {
-            if ($DryRun) { Write-Host ("DRYRUN：将写入 MCP 配置 -> {0}" -f [string]$target.path) }
-            else { Write-McpDesiredTarget $target }
-        }
+        $managedTransaction=$null
+        foreach ($target in @($context.desired_state)) { if ($DryRun) { Write-Host ("DRYRUN：将写入 MCP 配置 -> {0}" -f [string]$target.path) } }
+        if(-not $DryRun){$managedTransaction=Invoke-McpManagedTargetTransaction -DesiredState @($context.desired_state) -ExpectedConfigRevision ([string]$context.config_revision)}
 
-        Write-Host ("已同步 MCP 服务配置到 {0} 个目标。" -f @($context.desired_state).Count)
-        foreach ($pruneName in @($context.prune_names)) { Invoke-NativeMcpCleanup $pruneName }
-        Invoke-NativeMcpSync $context.active_servers
-        if (-not $DryRun) {
-            $attemptsParsed = 0
-            $intervalParsed = 0
-            $attempts = if ([int]::TryParse([string]$env:SKILLS_MCP_VERIFY_ATTEMPTS, [ref]$attemptsParsed)) { $attemptsParsed } else { 6 }
-            $intervalSeconds = if ([int]::TryParse([string]$env:SKILLS_MCP_VERIFY_INTERVAL_SECONDS, [ref]$intervalParsed)) { $intervalParsed } else { 3 }
-            if ($attempts -lt 1) { $attempts = 1 }
-            if ($intervalSeconds -lt 1) { $intervalSeconds = 1 }
-            Verify-McpAcrossCliWithRetry $context.roots $attempts $intervalSeconds
+        $nativeMutationEnabled=Should-RunNativeMcpSync
+        try{
+            Write-Host ("已同步 MCP 服务配置到 {0} 个目标。" -f @($context.desired_state).Count)
+            foreach ($pruneName in @($context.prune_names)) { Invoke-NativeMcpCleanup $pruneName }
+            Invoke-NativeMcpSync $context.active_servers
+            if (-not $DryRun) {
+                $attemptsParsed = 0
+                $intervalParsed = 0
+                $attempts = if ([int]::TryParse([string]$env:SKILLS_MCP_VERIFY_ATTEMPTS, [ref]$attemptsParsed)) { $attemptsParsed } else { 6 }
+                $intervalSeconds = if ([int]::TryParse([string]$env:SKILLS_MCP_VERIFY_INTERVAL_SECONDS, [ref]$intervalParsed)) { $intervalParsed } else { 3 }
+                if ($attempts -lt 1) { $attempts = 1 }
+                if ($intervalSeconds -lt 1) { $intervalSeconds = 1 }
+                Verify-McpAcrossCliWithRetry $context.roots $attempts $intervalSeconds
+            }
+        }catch{
+            if($null -ne $managedTransaction -and -not $nativeMutationEnabled){Restore-McpManagedTargetSnapshot @($managedTransaction.snapshot)}
+            elseif($null -ne $managedTransaction){Log 'MCP managed files were retained because opt-in native side effects may already have occurred and cannot be transactionally compensated.' 'WARN'}
+            throw
         }
         if (@($context.servers).Count -eq 0) { Write-Host "提示：当前 mcp_servers 为空，已将各目标写为空配置。" }
     } @{ command = "同步MCP" } -NoHost
@@ -13577,7 +14054,9 @@ function Invoke-RuleEstateAuditCommand([object[]]$Tokens = @()) {
     }
     $json = $envelope | ConvertTo-Json -Depth 60 -Compress
     if ($reportRequested) {
-        $outPath = [System.IO.Path]::GetFullPath([string]$options.out_path)
+        $protected = @($report.inventory.targets | ForEach-Object { @([string]$_.agents_path, [string]$_.claude_path) })
+        if (-not [string]::IsNullOrWhiteSpace([string]$options.registry_path)) { $protected += [System.IO.Path]::GetFullPath([string]$options.registry_path) }
+        $outPath = Resolve-RuleEstateControlOutput ([string]$options.out_path) ([string]$options.workspace_root) $protected
         foreach ($target in @($report.inventory.targets)) {
             if ($outPath.Equals([System.IO.Path]::GetFullPath([string]$target.agents_path), [System.StringComparison]::OrdinalIgnoreCase) -or $outPath.Equals([System.IO.Path]::GetFullPath([string]$target.claude_path), [System.StringComparison]::OrdinalIgnoreCase)) { throw '--out cannot overwrite a target rule file.' }
         }
@@ -13605,15 +14084,48 @@ function Parse-RuleEstateMutationOptions([object[]]$Tokens, [ValidateSet('plan',
 
 function Resolve-RuleEstateControlOutput([string]$Path,[string]$WorkspaceRoot,[string[]]$Protected=@()){
     $resolved=[IO.Path]::GetFullPath($Path);$workspace=[IO.Path]::GetFullPath($WorkspaceRoot)
-    if(-not (Test-RuleDiscoveryPathWithin $resolved $workspace)){throw 'Estate plan and receipt outputs must remain inside the explicit workspace root.'}
+    if(-not (Test-RuleDiscoveryPathWithin $resolved $workspace)){throw 'Estate control outputs must remain inside the explicit workspace root.'}
+    if(Test-RuleEstateReparsePath $resolved $workspace){throw 'Estate control outputs must not cross a reparse point inside the explicit workspace root.'}
     foreach($item in @($Protected)){if(-not [string]::IsNullOrWhiteSpace($item) -and $resolved.Equals([IO.Path]::GetFullPath($item),[StringComparison]::OrdinalIgnoreCase)){throw 'Estate output cannot overwrite an input file.'}}
     return $resolved
 }
 
+function Get-RuleEstateReviewControlInputs([string]$ReviewPath) {
+    $inputs=New-Object System.Collections.Generic.List[string]
+    if([string]::IsNullOrWhiteSpace($ReviewPath)){return @()}
+    $reviewFile=[IO.Path]::GetFullPath($ReviewPath);$inputs.Add($reviewFile)|Out-Null
+    if(-not [IO.File]::Exists($reviewFile)){return @($inputs.ToArray())}
+    try{$review=[IO.File]::ReadAllText($reviewFile)|ConvertFrom-Json}catch{return @($inputs.ToArray())}
+    $reviewRoot=[IO.Path]::GetDirectoryName($reviewFile)
+    $authorization=[string](Get-RuleEstateProperty $review 'authorization_receipt')
+    if(-not [string]::IsNullOrWhiteSpace($authorization)){
+        try{$inputs.Add([IO.Path]::GetFullPath((Join-Path $reviewRoot $authorization)))|Out-Null}catch{}
+    }
+    foreach($change in @(Get-RuleEstateProperty $review 'changes')){
+        $desired=[string](Get-RuleEstateProperty $change 'desired_file')
+        if([string]::IsNullOrWhiteSpace($desired)){continue}
+        try{$inputs.Add([IO.Path]::GetFullPath((Join-Path $reviewRoot $desired)))|Out-Null}catch{}
+    }
+    return @($inputs.ToArray()|Sort-Object -Unique)
+}
+
+function Get-RuleEstatePlanControlInputs($Plan) {
+    $inputs=New-Object System.Collections.Generic.List[string]
+    $review=Get-RuleEstateProperty $Plan 'review';$reviewPath=[string](Get-RuleEstateProperty $review 'path')
+    foreach($path in @(Get-RuleEstateReviewControlInputs $reviewPath)){if(-not [string]::IsNullOrWhiteSpace($path)){$inputs.Add($path)|Out-Null}}
+    $authorizationPath=[string](Get-RuleEstateProperty (Get-RuleEstateProperty $Plan 'authorization') 'path')
+    if(-not [string]::IsNullOrWhiteSpace($authorizationPath)){$inputs.Add([IO.Path]::GetFullPath($authorizationPath))|Out-Null}
+    foreach($action in @(Get-RuleEstateProperty $Plan 'actions')){
+        $targetPath=[string](Get-RuleEstateProperty $action 'target_path')
+        if(-not [string]::IsNullOrWhiteSpace($targetPath)){$inputs.Add([IO.Path]::GetFullPath($targetPath))|Out-Null}
+    }
+    return @($inputs.ToArray()|Sort-Object -Unique)
+}
+
 function Invoke-RuleEstatePlanCommand([object[]]$Tokens=@()){
     $options=Parse-RuleEstateMutationOptions $Tokens plan
-    $out=Resolve-RuleEstateControlOutput $options.out_path $options.workspace_root @($options.review)
     $plan=New-RuleEstatePlan -ReviewPath $options.review -WorkspaceRoot $options.workspace_root -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -ExcludeNames $options.exclude_names
+    $out=Resolve-RuleEstateControlOutput $options.out_path $options.workspace_root @(Get-RuleEstatePlanControlInputs $plan)
     $envelope=[pscustomobject][ordered]@{schema_version=1;command='rule-estate-plan';pass=$true;exit_code=0;truth_boundary='reviewed_multi_target_plan';plan=$plan;writes=1;target_writes=0;host_writes=0;provider_calls=0;native_mutations=0}
     $json=$envelope|ConvertTo-Json -Depth 60 -Compress;Write-Utf8FileAtomic -Path $out -Content $json
     return [pscustomobject]@{exit_code=0;json=[bool]$options.json;output=$(if($options.json){$json}else{'Rule estate plan: actions={0}, target_set={1}' -f $plan.actions.Count,$plan.target_set.count});envelope=$envelope}
@@ -13622,8 +14134,9 @@ function Invoke-RuleEstatePlanCommand([object[]]$Tokens=@()){
 function Invoke-RuleEstateApplyCommand([object[]]$Tokens=@()){
     $options=Parse-RuleEstateMutationOptions $Tokens apply
     $planPath=[IO.Path]::GetFullPath($options.plan);if(-not [IO.File]::Exists($planPath)){throw 'Estate plan does not exist.'}
-    $out=Resolve-RuleEstateControlOutput $options.out_path $options.workspace_root @($planPath)
     $document=[IO.File]::ReadAllText($planPath)|ConvertFrom-Json;$plan=if([string](Get-RuleEstateProperty $document 'command') -eq 'rule-estate-plan'){Get-RuleEstateProperty $document 'plan'}else{$document}
+    $protected=@($planPath)+@(Get-RuleEstatePlanControlInputs $plan)
+    $out=Resolve-RuleEstateControlOutput $options.out_path $options.workspace_root $protected
     $result=Invoke-RuleEstateApply -Plan $plan -WorkspaceRoot $options.workspace_root -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -Token $options.token -ReceiptPath $out -ResumeReceiptPath $options.resume
     $exit=if($result.pass){0}else{2};$envelope=[pscustomobject][ordered]@{schema_version=1;command='rule-estate-apply';pass=$result.pass;exit_code=$exit;truth_boundary='filesystem_applied_not_host_loaded';result=$result;provider_calls=0;native_mutations=0}
     $json=$envelope|ConvertTo-Json -Depth 60 -Compress
@@ -13734,6 +14247,19 @@ function Read-AgentWorkflowRequest([string]$InputPath) {
     $fullPath = [IO.Path]::GetFullPath($InputPath)
     if (-not (Test-OperationPathWithinRoot $fullPath $Root)) { throw 'Agent workflow input must remain inside the repository root.' }
     if (-not [IO.File]::Exists($fullPath)) { throw ('Agent workflow input does not exist: {0}' -f $fullPath) }
+    $rootPath = [IO.Path]::GetFullPath($Root)
+    $cursor = $fullPath
+    while (Test-OperationPathWithinRoot $cursor $rootPath) {
+        if ([IO.File]::Exists($cursor) -or [IO.Directory]::Exists($cursor)) {
+            if (([IO.File]::GetAttributes($cursor) -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw 'Agent workflow input cannot traverse a reparse point.'
+            }
+        }
+        if ($cursor.Equals($rootPath, [StringComparison]::OrdinalIgnoreCase)) { break }
+        $parent = [IO.Directory]::GetParent($cursor)
+        if ($null -eq $parent) { break }
+        $cursor = $parent.FullName
+    }
     return [IO.File]::ReadAllText($fullPath) | ConvertFrom-Json
 }
 
@@ -18977,6 +19503,66 @@ function Resolve-AuditApplySelections {
     }
 }
 
+function Test-AuditApplyWorkflowReceipt([string]$RecommendationsPath) {
+    $resolved = [IO.Path]::GetFullPath($RecommendationsPath)
+    $workflowPath = Get-AuditWorkflowReportPath $resolved
+    if (-not (Test-Path -LiteralPath $workflowPath -PathType Leaf)) {
+        return [pscustomobject]@{ pass=$false; code='validated_dry_run_required'; message='Apply requires a successful 校验预演 workflow receipt.'; path=$workflowPath }
+    }
+    try { $receipt = Get-ContentUtf8 $workflowPath | ConvertFrom-Json }
+    catch { return [pscustomobject]@{ pass=$false; code='validated_dry_run_invalid'; message=('Workflow receipt is invalid JSON: {0}' -f $_.Exception.Message); path=$workflowPath } }
+    $shapeValid = $receipt.schema_version -eq 1 -and [string]$receipt.workflow -eq 'recommendations_validate_dry_run' -and [bool]$receipt.success -and -not [bool]$receipt.persisted -and [string]$receipt.stages.preflight.status -eq 'passed' -and [string]$receipt.stages.dry_run.status -eq 'passed' -and [string]$receipt.stages.input_stability.status -eq 'passed' -and [bool]$receipt.input_stability.matched
+    if (-not $shapeValid) { return [pscustomobject]@{ pass=$false; code='validated_dry_run_incomplete'; message='Workflow receipt does not prove preflight, dry-run, and stable inputs.'; path=$workflowPath } }
+    if ([IO.Path]::GetFullPath([string]$receipt.recommendations_path) -ne $resolved -or [string]$receipt.recommendations_sha256 -ne [string](Get-FileContentHash $resolved)) {
+        return [pscustomobject]@{ pass=$false; code='validated_dry_run_stale'; message='Recommendations changed after the validated dry-run.'; path=$workflowPath }
+    }
+    $current = Get-AuditWorkflowInputState $resolved
+    $accepted = $receipt.input_stability.after_dry_run
+    if ($null -eq $accepted -or [string]$current.file_fingerprint -ne [string]$accepted.file_fingerprint -or [string]$current.target_repo_fingerprint -ne [string]$accepted.target_repo_fingerprint) {
+        return [pscustomobject]@{ pass=$false; code='validated_dry_run_stale'; message='Audit bundle or target repositories changed after the validated dry-run.'; path=$workflowPath }
+    }
+    return [pscustomobject]@{ pass=$true; code=''; message=''; path=$workflowPath; receipt=$receipt; current_state=$current }
+}
+
+function New-AuditApplyTransactionSnapshot {
+    $exists = Test-Path -LiteralPath $CfgPath -PathType Leaf
+    [byte[]]$bytes = if ($exists) { [IO.File]::ReadAllBytes([IO.Path]::GetFullPath($CfgPath)) } else { [byte[]]::new(0) }
+    return [pscustomobject][ordered]@{ config_path=[IO.Path]::GetFullPath($CfgPath); config_existed=[bool]$exists; config_bytes=$bytes }
+}
+
+function Restore-AuditApplyTransaction {
+    param($Snapshot,[bool]$SkillProjectionAttempted,[bool]$McpProjectionAttempted)
+    $errors = New-Object System.Collections.Generic.List[string]
+    try {
+        if ([bool]$Snapshot.config_existed) { Write-BytesAtomic -Path ([string]$Snapshot.config_path) -Bytes ([byte[]]$Snapshot.config_bytes) }
+        elseif ([IO.File]::Exists([string]$Snapshot.config_path)) { [IO.File]::Delete([string]$Snapshot.config_path) }
+    }
+    catch { $errors.Add(('config_restore_failed:{0}' -f $_.Exception.Message)) | Out-Null }
+    $configRestoreFailed = @($errors | Where-Object { $_.StartsWith('config_restore_failed:',[StringComparison]::Ordinal) }).Count -gt 0
+    if (-not $configRestoreFailed -and $SkillProjectionAttempted) {
+        try { 构建生效 }
+        catch { $errors.Add(('skill_projection_restore_failed:{0}' -f $_.Exception.Message)) | Out-Null }
+    }
+    if (-not $configRestoreFailed -and $McpProjectionAttempted) {
+        try { 同步MCP }
+        catch { $errors.Add(('mcp_projection_restore_failed:{0}' -f $_.Exception.Message)) | Out-Null }
+    }
+    return [pscustomobject][ordered]@{
+        status = $(if($errors.Count -eq 0){'restored'}else{'failed'})
+        config_restored = (-not $configRestoreFailed)
+        skill_projection_attempted = $SkillProjectionAttempted
+        mcp_projection_attempted = $McpProjectionAttempted
+        errors = @($errors.ToArray())
+        residual_cache_boundary = 'Downloaded import/vendor caches and removal backup directories are not deleted automatically; restored config makes unreferenced caches inactive.'
+    }
+}
+
+function Set-AuditApplyItemsRolledBack($Plan) {
+    foreach($item in @($Plan.items)+@($Plan.removal_candidates)+@($Plan.mcp_items)+@($Plan.mcp_removal_candidates)) {
+        if([string]$item.status -in @('installed','removed','added','updated','failed')){$item.status='rolled_back'}
+    }
+}
+
 function Invoke-AuditRecommendationsApply {
     param(
         [string]$RecommendationsPath,
@@ -19003,6 +19589,10 @@ function Invoke-AuditRecommendationsApply {
     $rec = Load-AuditRecommendations $RecommendationsPath
     $recommendationDir = Split-Path -Parent $RecommendationsPath
     if ([string]::IsNullOrWhiteSpace($recommendationDir)) { $recommendationDir = "." }
+    if ($Apply) {
+        $workflowReceipt = Test-AuditApplyWorkflowReceipt $RecommendationsPath
+        if (-not [bool]$workflowReceipt.pass) { throw ('{0}：{1}' -f [string]$workflowReceipt.code,[string]$workflowReceipt.message) }
+    }
     $sourcePolicy = Get-AuditSourceEvidencePolicy $recommendationDir
     $sourceCoverageCheck = Test-AuditRecommendationSourceCoveragePolicy $rec $sourcePolicy
     $decisionQualityPolicy = Get-AuditDecisionQualityPolicy $recommendationDir
@@ -19239,6 +19829,7 @@ function Invoke-AuditRecommendationsApply {
         do_not_install = @($plan.do_not_install)
         source_observations = @($plan.source_observations)
         rollback = @()
+        compensation = [pscustomobject]@{ status='not_required'; config_restored=$false; skill_projection_attempted=$false; mcp_projection_attempted=$false; errors=@() }
     }
 
     Write-AuditRecommendationSummary $plan $snapshotState $liveState
@@ -19260,6 +19851,11 @@ function Invoke-AuditRecommendationsApply {
     $selectedRemove = $selections.remove
     $selectedMcpAdd = $selections.mcp_add
     $selectedMcpRemove = $selections.mcp_remove
+    $workflowReceipt = Test-AuditApplyWorkflowReceipt $RecommendationsPath
+    if (-not [bool]$workflowReceipt.pass) { throw ('{0}：{1}' -f [string]$workflowReceipt.code,[string]$workflowReceipt.message) }
+    $transaction = New-AuditApplyTransactionSnapshot
+    $skillMutationAttempted = $false
+    $mcpMutationAttempted = $false
 
     try {
         foreach ($item in @($selectedAdd.items)) {
@@ -19267,6 +19863,7 @@ function Invoke-AuditRecommendationsApply {
             try {
                 Write-Host ("Installing recommended skill: {0}" -f $item.name) -ForegroundColor Cyan
                 $beforeCfg = LoadCfg
+                $skillMutationAttempted = $true
                 $ok = Add-ImportFromArgs $item.tokens -NoBuild
                 if (-not $ok) { throw ("推荐技能安装失败：{0}" -f $item.name) }
                 Ensure-AuditNewManualImportsMapped $beforeCfg | Out-Null
@@ -19288,6 +19885,7 @@ function Invoke-AuditRecommendationsApply {
         }
 
         if (@($selectedRemove.items).Count -gt 0) {
+            $skillMutationAttempted = $true
             Remove-AuditSelectedInstalledSkills $selectedRemove.items | Out-Null
             foreach ($item in @($selectedRemove.items)) {
                 $report.rollback += ("Re-add removed skill mapping/import for '{0}' if rollback is required." -f $item.name)
@@ -19296,6 +19894,7 @@ function Invoke-AuditRecommendationsApply {
 
         if (@($selectedMcpAdd.items).Count -gt 0 -or @($selectedMcpRemove.items).Count -gt 0) {
             try {
+                $mcpMutationAttempted = $true
                 Apply-AuditMcpSelections $selectedMcpAdd.items $selectedMcpRemove.items | Out-Null
                 foreach ($item in @($selectedMcpAdd.items)) {
                     if ([string]$item.status -eq "added" -or [string]$item.status -eq "updated") {
@@ -19364,19 +19963,25 @@ function Invoke-AuditRecommendationsApply {
         return [pscustomobject]$report
     }
     catch {
+        $originalFailure = $_
         if ($report.success) { $report.success = $false }
+        if($skillMutationAttempted -or $mcpMutationAttempted) {
+            $report.compensation = Restore-AuditApplyTransaction -Snapshot $transaction -SkillProjectionAttempted $skillMutationAttempted -McpProjectionAttempted $mcpMutationAttempted
+            if([string]$report.compensation.status -eq 'restored'){Set-AuditApplyItemsRolledBack $plan}
+        }
         $report.items = @($plan.items)
         $report.removal_candidates = @($plan.removal_candidates)
         $report.mcp_items = @($plan.mcp_items)
         $report.mcp_removal_candidates = @($plan.mcp_removal_candidates)
         $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
-        $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
+        $report.persisted = if([string]$report.compensation.status -eq 'restored'){$false}else{((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)}
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
         $evidencePath = Write-AuditRuntimeEvidence "apply-failed" $RecommendationsPath ([pscustomobject]$report) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`" --apply --yes")
         if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
             Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
         }
-        throw
+        if([string]$report.compensation.status -eq 'failed'){throw ('{0}; compensation_failed:{1}' -f $originalFailure.Exception.Message,(@($report.compensation.errors)-join '|'))}
+        throw $originalFailure
     }
 }
 

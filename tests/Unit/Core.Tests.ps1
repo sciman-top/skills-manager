@@ -74,6 +74,7 @@ Describe "Core Functions" {
             Set-ContentUtf8 (Join-Path $repo ".git") ("gitdir: {0}" -f $gitAdmin)
             Set-ContentUtf8 (Join-Path $gitAdmin "index.lock") "stale"
 
+            Mock Test-GitProcessRunning { $false }
             $removed = Repair-StaleGitLockInRepo $repo
 
             $removed | Should Be $true
@@ -187,7 +188,30 @@ Describe "Core Functions" {
     }
 
     Context "Update-CurrentBranchFromUpstream" {
-        It "Uses git pull when network fetch is allowed" {
+        It "redacts credentials and sensitive query values from Git command text" {
+            $masked = Mask-SensitiveGitText 'https://user:pass@example.invalid/repo.git?token=secret-value Authorization: Bearer github_pat_abc123 token spaced-secret'
+            $masked | Should Not Match 'user|pass|secret-value|github_pat_abc123|spaced-secret'
+            $masked | Should Match '<redacted>'
+        }
+
+        It "redacts sparse-checkout dry-run arguments before logging" {
+            $oldDryRun = $script:DryRun
+            try {
+                $script:DryRun = $true
+                $script:sparseLog = $null
+                Mock Log { param($msg) $script:sparseLog = $msg }
+
+                Invoke-GitSparseCheckoutCommand @('sparse-checkout', 'set', 'https://user:pass@example.invalid/repo?token=sparse-secret')
+
+                $script:sparseLog | Should Match '<redacted>'
+                $script:sparseLog | Should Not Match 'user:pass|sparse-secret'
+            }
+            finally {
+                $script:DryRun = $oldDryRun
+            }
+        }
+
+        It "Uses git pull --ff-only when network fetch is allowed" {
             Mock Get-GitHeadBranch { "main" }
             Mock Has-GitUpstream { $true }
             Mock Invoke-Git {}
@@ -195,7 +219,7 @@ Describe "Core Functions" {
             Update-CurrentBranchFromUpstream $true
 
             Assert-MockCalled Invoke-Git -Times 1 -Exactly -Scope It -ParameterFilter {
-                @($GitArgs)[0] -eq "pull"
+                (@($GitArgs) -join ' ') -eq "pull --ff-only"
             }
         }
 
@@ -211,7 +235,7 @@ Describe "Core Functions" {
             }
         }
 
-        It "Resets hard to upstream when ff-only merge fails on cleaned caches" {
+        It "fails closed without reset when ff-only merge fails for an unknown reason" {
             Mock Get-GitHeadBranch { "main" }
             Mock Has-GitUpstream { $true }
             $script:syncCalls = New-Object System.Collections.Generic.List[string]
@@ -221,12 +245,12 @@ Describe "Core Functions" {
                 if (@($GitArgs)[0] -eq "merge") { throw "ff-only failed" }
             }
 
-            Update-CurrentBranchFromUpstream $false
+            { Update-CurrentBranchFromUpstream $false } | Should Throw
 
-            ($script:syncCalls -join ",") | Should Be "merge,reset"
+            ($script:syncCalls -join ",") | Should Be "merge"
         }
 
-        It "Resets hard to upstream when histories are unrelated" {
+        It "fails closed without reset when histories are unrelated" {
             Mock Get-GitHeadBranch { "main" }
             Mock Has-GitUpstream { $true }
             $script:syncCalls = New-Object System.Collections.Generic.List[string]
@@ -238,9 +262,25 @@ Describe "Core Functions" {
                 }
             }
 
-            Update-CurrentBranchFromUpstream $false
+            { Update-CurrentBranchFromUpstream $false } | Should Throw
 
-            ($script:syncCalls -join ",") | Should Be "merge,reset"
+            ($script:syncCalls -join ",") | Should Be "merge"
+        }
+
+        It "fails closed without reset when network pull reports unrelated histories" {
+            Mock Get-GitHeadBranch { "main" }
+            Mock Has-GitUpstream { $true }
+            $script:syncCalls = New-Object System.Collections.Generic.List[string]
+            Mock Invoke-Git {
+                param($GitArgs)
+                $script:syncCalls.Add((@($GitArgs) -join ' ')) | Out-Null
+                throw "fatal: refusing to merge unrelated histories"
+            }
+
+            { Update-CurrentBranchFromUpstream $true } | Should Throw
+
+            $script:syncCalls.Count | Should Be 1
+            $script:syncCalls[0] | Should Be 'pull --ff-only'
         }
     }
 
@@ -301,6 +341,38 @@ Describe "Core Functions" {
             finally {
                 $script:ImportDir = $oldImportDir
             }
+        }
+    }
+
+    Context "GitHub tree snapshot identity" {
+        It "binds tree and raw downloads to immutable SHAs and verifies each blob" {
+            $oldImportDir = $script:ImportDir
+            try {
+                $script:ImportDir = Join-Path $TestDrive "github-snapshot-imports"
+                New-Item -ItemType Directory -Path $script:ImportDir -Force | Out-Null
+                $contentPath = Join-Path $TestDrive "github-blob-content"
+                [IO.File]::WriteAllText($contentPath, 'hello', [Text.UTF8Encoding]::new($false))
+                $blobSha = Get-GitBlobSha1ForFile $contentPath
+                $commitSha = 'a' * 40
+                $treeSha = 'b' * 40
+                Mock Invoke-RestMethod {
+                    param($Uri)
+                    if ([string]$Uri -like '*/commits/*') { return [pscustomobject]@{ sha=$commitSha; commit=[pscustomobject]@{ tree=[pscustomobject]@{ sha=$treeSha } } } }
+                    return [pscustomobject]@{ truncated=$false; tree=@([pscustomobject]@{ type='blob'; path='skills/demo/SKILL.md'; sha=$blobSha; size=5 }) }
+                }
+                Mock Invoke-WebRequest {
+                    param($Uri,$Headers,$OutFile)
+                    [IO.File]::WriteAllText($OutFile, 'hello', [Text.UTF8Encoding]::new($false))
+                }
+                $target = Join-Path $TestDrive "github-snapshot-target"
+
+                Ensure-RepoFromGitHubTreeSnapshot $target 'https://github.com/owner/repo.git' 'main' 'skills/demo' $true
+
+                Get-Content -LiteralPath (Join-Path $target 'skills/demo/SKILL.md') | Should Be hello
+                Assert-MockCalled Invoke-RestMethod -Times 1 -ParameterFilter { [string]$Uri -like "*/git/trees/$treeSha*" }
+                Assert-MockCalled Invoke-WebRequest -Times 1 -ParameterFilter { [string]$Uri -like "*/$commitSha/skills/demo/SKILL.md" }
+            }
+            finally { $script:ImportDir = $oldImportDir }
         }
     }
 
@@ -942,6 +1014,71 @@ Describe "Core Functions" {
             $parsed.name | Should Be "github"
             $parsed.transport | Should Be "http"
             $parsed.bearer_token_env_var | Should Be "GITHUB_PERSONAL_ACCESS_TOKEN"
+        }
+
+        It "enforces ZIP entry budgets before extraction" {
+            $source = Join-Path $TestDrive "zip-budget-source"
+            New-Item -ItemType Directory -Path $source -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $source "one.txt") -Value one
+            Set-Content -LiteralPath (Join-Path $source "two.txt") -Value two
+            $zip = Join-Path $TestDrive "zip-budget.zip"
+            Compress-Archive -Path (Join-Path $source '*') -DestinationPath $zip
+
+            { Assert-ZipArchiveSafety -ZipPath $zip -MaxEntries 1 } | Should Throw
+        }
+
+        It "rejects traversal, symlink, and non-portable ZIP entry names" {
+            foreach($case in @(
+                [pscustomobject]@{ name='../escape.txt'; symlink=$false },
+                [pscustomobject]@{ name='link'; symlink=$true },
+                [pscustomobject]@{ name='CON.txt'; symlink=$false },
+                [pscustomobject]@{ name='trailing. '; symlink=$false }
+            )) {
+                $zip = Join-Path $TestDrive (([guid]::NewGuid().ToString('N')) + '.zip')
+                $archive = [IO.Compression.ZipFile]::Open($zip, [IO.Compression.ZipArchiveMode]::Create)
+                try {
+                    $entry = $archive.CreateEntry([string]$case.name)
+                    if([bool]$case.symlink){$entry.ExternalAttributes = (0xA000 -shl 16)}
+                    $writer = [IO.StreamWriter]::new($entry.Open())
+                    try { $writer.Write('x') } finally { $writer.Dispose() }
+                }
+                finally { $archive.Dispose() }
+
+                { Assert-ZipArchiveSafety -ZipPath $zip } | Should Throw
+            }
+        }
+
+        It "preserves the previous cache when ZIP validation fails" {
+            $oldImportDir = $script:ImportDir
+            try {
+                $script:ImportDir = Join-Path $TestDrive "imports-invalid-zip"
+                New-Item -ItemType Directory -Path $script:ImportDir -Force | Out-Null
+                $target = Join-Path $TestDrive "preserved-cache"
+                New-Item -ItemType Directory -Path $target -Force | Out-Null
+                Set-Content -LiteralPath (Join-Path $target "keep.txt") -Value keep
+                $invalidZip = Join-Path $TestDrive "invalid.zip"
+                Set-Content -LiteralPath $invalidZip -Value 'not a zip archive'
+
+                { Ensure-RepoFromZip $target $invalidZip $true } | Should Throw
+                Get-Content -LiteralPath (Join-Path $target "keep.txt") | Should Be keep
+            }
+            finally { $script:ImportDir = $oldImportDir }
+        }
+
+        It "Rejects literal MCP secrets and URL credentials while allowing environment templates" {
+            { Parse-McpInstallArgs @("stdio-secret", "--cmd", "tool", "--env", "API_KEY=literal-secret") | Out-Null } | Should Throw
+            { Parse-McpInstallArgs @("header-secret", "--transport", "http", "--url", "https://example.invalid/mcp", "--header", "Authorization=literal") | Out-Null } | Should Throw
+            { Parse-McpInstallArgs @("url-secret", "--transport", "http", "--url", "https://user:pass@example.invalid/mcp") | Out-Null } | Should Throw
+            { Parse-McpInstallArgs @("query-secret", "--transport", "http", "--url", "https://example.invalid/mcp?api_key=literal") | Out-Null } | Should Throw
+            { Parse-McpInstallArgs @("arg-secret", "--cmd", "tool", "--", "--token", "literal-secret") | Out-Null } | Should Throw
+            { Parse-McpInstallArgs @("arg-url-secret", "--cmd", "tool", "--", "postgresql://user:password@example.invalid/db") | Out-Null } | Should Throw
+
+            $parsed = Parse-McpInstallArgs @("safe-secret", "--cmd", "tool", "--env", 'API_KEY=${UNIT_TEST_MCP_TOKEN}')
+            [string]$parsed.env.API_KEY | Should Be '${UNIT_TEST_MCP_TOKEN}'
+            $safeArg = Parse-McpInstallArgs @("safe-arg", "--cmd", "tool", "--", "--token", '${UNIT_TEST_MCP_TOKEN}')
+            [string]$safeArg.args[1] | Should Be '${UNIT_TEST_MCP_TOKEN}'
+            $headerParsed = Parse-McpInstallArgs @("safe-header", "--transport", "http", "--url", "https://example.invalid/mcp", "--header", 'Authorization=Bearer ${UNIT_TEST_MCP_TOKEN}')
+            [string]$headerParsed.headers.Authorization | Should Be 'Bearer ${UNIT_TEST_MCP_TOKEN}'
         }
 
         It "Rejects remote MCP URLs that are not absolute http or https URLs" {
@@ -1865,7 +2002,7 @@ command = "cmd"
     }
 
     Context "Get-NativeMcpAddArgs" {
-        It "Places HTTP headers after name/url and expands env placeholders for Claude native MCP sync" {
+        It "Places HTTP headers after name/url without expanding env placeholders into argv" {
             $oldUnitToken = $env:UNIT_TEST_MCP_TOKEN
             $env:UNIT_TEST_MCP_TOKEN = "unit-test-token"
             try {
@@ -1881,7 +2018,8 @@ command = "cmd"
                 $args = Get-NativeMcpAddArgs $server "user"
                 $joined = $args -join ' '
                 $joined | Should Match '--transport http github https://api\.githubcopilot\.com/mcp'
-                $joined | Should Match '-H Authorization: Bearer unit-test-token'
+                $joined | Should Match '-H Authorization: Bearer \$\{UNIT_TEST_MCP_TOKEN\}'
+                $joined | Should Not Match 'Bearer unit-test-token'
                 $joined | Should Not Match 'Authorization=Bearer'
             }
             finally {
@@ -1892,6 +2030,131 @@ command = "cmd"
                     Remove-Item Env:\UNIT_TEST_MCP_TOKEN -ErrorAction SilentlyContinue
                 }
             }
+        }
+    }
+
+    Context "MCP managed target transaction" {
+        It "creates an absent managed root only below an existing non-reparse parent" {
+            $parent = Join-Path $TestDrive "mcp-new-root-parent"
+            $root = Join-Path $parent ".codex"
+            $path = Join-Path $root "mcp.json"
+            New-Item -ItemType Directory -Path $parent -Force | Out-Null
+            $target = [pscustomobject]@{path=$path;root=$root;kind='generic_json';before_hash=$null;desired_content='desired';changed=$true}
+
+            $result = Invoke-McpManagedTargetTransaction @($target)
+
+            $result.pass | Should Be $true
+            Get-ContentUtf8 $path | Should Be 'desired'
+            Test-Path -LiteralPath (Join-Path $root '.skills-manager-mcp-sync.lock') | Should Be $false
+        }
+
+        It "removes a transaction-created managed root when the first write fails" {
+            $parent = Join-Path $TestDrive "mcp-new-root-rollback-parent"
+            $root = Join-Path $parent ".codex"
+            $path = Join-Path $root "mcp.json"
+            New-Item -ItemType Directory -Path $parent -Force | Out-Null
+            $target = [pscustomobject]@{path=$path;root=$root;kind='generic_json';before_hash=$null;desired_content='desired';changed=$true}
+            Mock Write-McpDesiredTarget { throw 'injected first write failure' }
+
+            { Invoke-McpManagedTargetTransaction @($target) | Out-Null } | Should Throw
+
+            Test-Path -LiteralPath $root | Should Be $false
+        }
+
+        It "fails closed when a target changes after planning" {
+            $root = Join-Path $TestDrive "mcp-cas-root"
+            New-Item -ItemType Directory -Path $root -Force | Out-Null
+            $path = Join-Path $root "mcp.json"
+            Set-ContentUtf8 $path '{"state":"planned"}'
+            $target = [pscustomobject]@{ path=$path; root=$root; kind='generic_json'; before_hash=(Get-OperationSha256 (Get-ContentUtf8 $path)); desired_content='{"state":"desired"}'; changed=$true }
+            Set-ContentUtf8 $path '{"state":"concurrent"}'
+
+            { Invoke-McpManagedTargetTransaction @($target) | Out-Null } | Should Throw
+            Get-ContentUtf8 $path | Should Be '{"state":"concurrent"}'
+        }
+
+        It "restores earlier targets when a later managed write fails" {
+            $root = Join-Path $TestDrive "mcp-transaction-root"
+            New-Item -ItemType Directory -Path $root -Force | Out-Null
+            $firstPath = Join-Path $root "first.json"
+            $secondPath = Join-Path $root "second.json"
+            Set-ContentUtf8 $firstPath 'first-before'
+            Set-ContentUtf8 $secondPath 'second-before'
+            $targets = @(
+                [pscustomobject]@{ path=$firstPath; root=$root; kind='generic_json'; before_hash=(Get-OperationSha256 'first-before'); desired_content='first-after'; changed=$true },
+                [pscustomobject]@{ path=$secondPath; root=$root; kind='generic_json'; before_hash=(Get-OperationSha256 'second-before'); desired_content='second-after'; changed=$true }
+            )
+            Mock Write-McpDesiredTarget {
+                param($target)
+                if ([string]$target.path -eq $secondPath) { throw 'injected second write failure' }
+                Set-ContentUtf8 ([string]$target.path) ([string]$target.desired_content)
+            }
+
+            { Invoke-McpManagedTargetTransaction $targets | Out-Null } | Should Throw
+            Get-ContentUtf8 $firstPath | Should Be 'first-before'
+            Get-ContentUtf8 $secondPath | Should Be 'second-before'
+        }
+
+        It "refuses rollback over an independently changed managed target" {
+            $root = Join-Path $TestDrive "mcp-rollback-conflict"
+            New-Item -ItemType Directory -Path $root -Force | Out-Null
+            $path = Join-Path $root "mcp.json"
+            Set-ContentUtf8 $path 'outside-change'
+            $snapshot = [pscustomobject]@{
+                path = $path
+                existed = $true
+                bytes = [Text.UTF8Encoding]::new($false).GetBytes('before')
+                before_hash = Get-OperationSha256 'before'
+                desired_hash = Get-OperationSha256 'desired'
+            }
+
+            { Restore-McpManagedTargetSnapshot @($snapshot) } | Should Throw
+            Get-ContentUtf8 $path | Should Be 'outside-change'
+        }
+
+        It "redacts space-delimited secrets and URL userinfo in MCP diagnostics" {
+            $masked = Mask-SensitiveMcpCommandText 'token secret-value https://user:pass@example.invalid Authorization: Bearer abc123'
+            $masked | Should Not Match 'secret-value|user:pass|abc123'
+            $masked | Should Match '<redacted>'
+        }
+
+        It "rolls back implicit Codex wrapper sidecars when the target write fails" {
+            $root = Join-Path $TestDrive "mcp-sidecar-rollback"
+            $scripts = Join-Path $root "scripts"
+            New-Item -ItemType Directory -Path $scripts -Force | Out-Null
+            $targetPath = Join-Path $root "config.toml"
+            $nodeWrapper = Join-Path $scripts "mcp-node-cache-wrapper.mjs"
+            $postgresWrapper = Join-Path $scripts "mcp-postgres-env-wrapper.mjs"
+            Set-ContentUtf8 $targetPath 'before-target'
+            Set-ContentUtf8 $nodeWrapper 'before-node'
+            Set-ContentUtf8 $postgresWrapper 'before-postgres'
+            $target = [pscustomobject]@{path=$targetPath;root=$root;kind='codex_toml';before_hash=(Get-OperationSha256 'before-target');desired_content='after-target';changed=$true}
+            Mock Write-Utf8FileAtomic {
+                param($Path,$Content)
+                if(-not [string]::IsNullOrWhiteSpace([string]$targetPath) -and [IO.Path]::GetFullPath($Path) -eq [IO.Path]::GetFullPath($targetPath)){throw 'injected target failure'}
+                $parent=Split-Path $Path -Parent
+                if(-not [string]::IsNullOrWhiteSpace($parent)){[IO.Directory]::CreateDirectory($parent)|Out-Null}
+                [IO.File]::WriteAllText($Path,[string]$Content,[Text.UTF8Encoding]::new($false))
+            }
+
+            { Invoke-McpManagedTargetTransaction @($target) | Out-Null } | Should Throw
+            Get-ContentUtf8 $targetPath | Should Be 'before-target'
+            Get-ContentUtf8 $nodeWrapper | Should Be 'before-node'
+            Get-ContentUtf8 $postgresWrapper | Should Be 'before-postgres'
+        }
+
+        It "does not enter a managed transaction while the target root lock is held" {
+            $root = Join-Path $TestDrive "mcp-lock-held"
+            New-Item -ItemType Directory -Path $root -Force | Out-Null
+            $path = Join-Path $root "mcp.json"
+            Set-ContentUtf8 $path 'before'
+            $target = [pscustomobject]@{path=$path;root=$root;kind='generic_json';before_hash=(Get-OperationSha256 'before');desired_content='after';changed=$true}
+            $lockPath = Join-Path $root '.skills-manager-mcp-sync.lock'
+            $lock = [IO.File]::Open($lockPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+            try { { Invoke-McpManagedTargetTransaction @($target) | Out-Null } | Should Throw }
+            finally { $lock.Dispose(); Remove-Item -LiteralPath $lockPath -Force }
+
+            Get-ContentUtf8 $path | Should Be 'before'
         }
     }
 

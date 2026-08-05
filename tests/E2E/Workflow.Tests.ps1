@@ -353,12 +353,14 @@ description: demo skill
                 [pscustomobject]@{target_scope='repository';repository='repo-a';target_file='AGENTS.md';desired_file='repo.md';allow_create=$false;risk='medium';evidence_refs=@('e2e')},
                 [pscustomobject]@{target_scope='global_codex';target_file='AGENTS.md';desired_file='global.md';allow_create=$false;risk='high';evidence_refs=@('e2e')}
             ) }
-            $reviewPath=Join-Path $reviewRoot 'review.json';$review|ConvertTo-Json -Depth 20|Set-Content -LiteralPath $reviewPath -Encoding UTF8
+            $reviewPath=Join-Path $reviewRoot 'review.json';$authorizationPath=Join-Path $reviewRoot 'authorization.json';$review|Add-Member -NotePropertyName authorization_receipt -NotePropertyValue 'authorization.json';$review|ConvertTo-Json -Depth 20|Set-Content -LiteralPath $reviewPath -Encoding UTF8
+            $applyToken='APPLY_RULE_ESTATE_PATCH_'+[guid]::NewGuid().ToString('N').Substring(0,16).ToUpperInvariant()
+            [pscustomobject][ordered]@{schema_version=1;domain='rule_estate_authorization';authorization_id=('rule-estate-auth-'+[guid]::NewGuid().ToString('N'));decision='approved';issued_by='fixture-owner';issued_by_type='human';authorization_source='user_supplied';issued_at=[datetimeoffset]::UtcNow.AddMinutes(-1).ToString('o');expires_at=[datetimeoffset]::UtcNow.AddHours(1).ToString('o');review_sha256=Get-OperationSha256 ([IO.File]::ReadAllText($reviewPath));workspace_root=[IO.Path]::GetFullPath($workspace);codex_user_root=[IO.Path]::GetFullPath($codex);claude_user_root=[IO.Path]::GetFullPath($claude);approved_action_count=2;apply_token=$applyToken}|ConvertTo-Json -Depth 20|Set-Content -LiteralPath $authorizationPath -Encoding UTF8
             $planPath=Join-Path $workspace 'plan.json';$receiptPath=Join-Path $workspace 'receipt.json'
             $rootArgs=@('--workspace-root',$workspace,'--codex-user-root',$codex,'--claude-user-root',$claude)
 
             $planOutput=@(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') rule-estate-plan --review $reviewPath @rootArgs --out $planPath --json 2>&1);$planExit=$LASTEXITCODE;$planJson=($planOutput -join "`n")|ConvertFrom-Json
-            $applyOutput=@(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') rule-estate-apply --plan $planPath @rootArgs --token APPLY_RULE_ESTATE_PATCH --out $receiptPath --json 2>&1);$applyExit=$LASTEXITCODE;$applyJson=($applyOutput -join "`n")|ConvertFrom-Json
+            $applyOutput=@(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') rule-estate-apply --plan $planPath @rootArgs --token $applyToken --out $receiptPath --json 2>&1);$applyExit=$LASTEXITCODE;$applyJson=($applyOutput -join "`n")|ConvertFrom-Json
             $repoAction=@($applyJson.result.receipt.actions|Where-Object target_scope -eq 'repository')[0]
             $rollbackOutput=@(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') rule-estate-rollback --receipt $receiptPath --action-id $repoAction.action_id @rootArgs --token ROLLBACK_RULE_ESTATE_PATCH --json 2>&1);$rollbackExit=$LASTEXITCODE;$rollbackJson=($rollbackOutput -join "`n")|ConvertFrom-Json
 

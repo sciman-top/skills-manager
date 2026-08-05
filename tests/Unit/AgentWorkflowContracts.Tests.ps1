@@ -19,6 +19,17 @@ function Get-AgentWorkflowFixture([string]$Name) {
     return Get-Content -LiteralPath (Join-Path $repoRoot ('tests\fixtures\agent-workflow\{0}' -f $Name)) -Raw | ConvertFrom-Json
 }
 
+function New-AgentTestVerificationReceipt([string]$TaskId) {
+    return [pscustomobject]@{
+        schema_version = 1
+        receipt_id = 'verify-' + $TaskId
+        verified_at = '2026-08-05T04:40:00Z'
+        verifier = 'host_ai'
+        evidence_sha256 = ('b' * 64)
+        commands = @('pwsh -NoProfile -File tests/run.ps1')
+    }
+}
+
 Describe 'Agent workflow advisory contracts' {
     It 'constructs and validates a plain-object TaskGraph' {
         Assert-AgentWorkflowFunction 'New-AgentTaskGraph'
@@ -68,8 +79,8 @@ Describe 'Agent workflow advisory contracts' {
 
         $parallel = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $fixture.completion_receipts
         $integrationReceipts = @(
-            [pscustomobject]@{ task_id = 'implement'; base_revision = '84cb53aa'; status = 'verified'; verification_receipt = 'receipt:implement' },
-            [pscustomobject]@{ task_id = 'document'; base_revision = '84cb53aa'; status = 'verified'; verification_receipt = 'receipt:document' }
+            [pscustomobject]@{ task_id = 'implement'; base_revision = '84cb53aa'; status = 'verified'; verification_receipt = (New-AgentTestVerificationReceipt 'implement') },
+            [pscustomobject]@{ task_id = 'document'; base_revision = '84cb53aa'; status = 'verified'; verification_receipt = (New-AgentTestVerificationReceipt 'document') }
         )
         $integration = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('integrate') -CompletedTaskIds @('implement', 'document') -CompletedTaskReceipts $integrationReceipts
 
@@ -96,11 +107,11 @@ Describe 'Agent workflow advisory contracts' {
         $missingReceipt = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover')
         @($missingReceipt.findings | Where-Object code -eq 'completion_receipt_missing').Count | Should Be 1
 
-        $unknownReceipt = @([pscustomobject]@{ task_id = 'ghost'; base_revision = '84cb53aa'; status = 'verified'; verification_receipt = 'receipt:ghost' })
+        $unknownReceipt = @([pscustomobject]@{ task_id = 'ghost'; base_revision = '84cb53aa'; status = 'verified'; verification_receipt = (New-AgentTestVerificationReceipt 'ghost') })
         $unknown = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('implement', 'document') -CompletedTaskIds @('ghost') -CompletedTaskReceipts $unknownReceipt
         @($unknown.findings | Where-Object code -eq 'completed_task_unknown').Count | Should Be 1
 
-        $unclaimedReceipts = @($fixture.completion_receipts) + [pscustomobject]@{ task_id = 'document'; base_revision = '84cb53aa'; status = 'verified'; verification_receipt = 'receipt:document' }
+        $unclaimedReceipts = @($fixture.completion_receipts) + [pscustomobject]@{ task_id = 'document'; base_revision = '84cb53aa'; status = 'verified'; verification_receipt = (New-AgentTestVerificationReceipt 'document') }
         $unclaimed = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $unclaimedReceipts
         @($unclaimed.findings | Where-Object code -eq 'completion_receipt_unclaimed').Count | Should Be 1
 
@@ -109,6 +120,14 @@ Describe 'Agent workflow advisory contracts' {
         $overlapGraph.tasks[0].exact_write_set = @('src/discovery.ps1')
         $overlap = Test-AgentParallelAdmission -TaskGraph $overlapGraph -TaskIds @('discover', 'implement') -CompletedTaskIds @('discover') -CompletedTaskReceipts $fixture.completion_receipts
         @($overlap.findings | Where-Object code -eq 'selected_task_already_completed').Count | Should Be 1
+
+        $arbitraryReceipt = @([pscustomobject]@{ task_id = 'discover'; base_revision = '84cb53aa'; status = 'verified'; verification_receipt = 'arbitrary-string' })
+        $arbitrary = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $arbitraryReceipt
+        @($arbitrary.findings | Where-Object code -eq 'completion_receipt_evidence_invalid').Count | Should Be 1
+
+        $unclosedReceipt = @([pscustomobject]@{ task_id = 'implement'; base_revision = '84cb53aa'; status = 'verified'; verification_receipt = (New-AgentTestVerificationReceipt 'implement') })
+        $unclosed = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @() -CompletedTaskIds @('implement') -CompletedTaskReceipts $unclosedReceipt
+        @($unclosed.findings | Where-Object code -eq 'completed_dependency_not_closed').Count | Should Be 1
     }
 
     It 'canonicalizes repository paths and blocks parent child and high-risk parallel work' {
@@ -133,6 +152,18 @@ Describe 'Agent workflow advisory contracts' {
 
         $graph.tasks[1].exact_write_set = @('src/Feature.ps1:alternate-stream')
         @((Test-AgentTaskGraphContract $graph).findings | Where-Object code -eq 'write_set_path_invalid').Count | Should Be 1
+
+        foreach ($invalidPath in @('src/CON/file.ps1', 'src/file. ', 'src/aux.txt')) {
+            $graph.tasks[1].exact_write_set = @($invalidPath)
+            @((Test-AgentTaskGraphContract $graph).findings | Where-Object code -eq 'write_set_path_invalid').Count | Should Be 1
+        }
+
+        $graph.tasks[1].exact_write_set = @('src/café.ps1')
+        $graph.tasks[2].exact_write_set = @('src/cafe' + [char]0x301 + '.ps1')
+        $graph.tasks[1].coordination_keys = @()
+        $graph.tasks[2].coordination_keys = @()
+        $unicodeCollision = Test-AgentParallelAdmission -TaskGraph $graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $fixture.completion_receipts
+        @($unicodeCollision.findings | Where-Object code -eq 'write_set_conflict').Count | Should Be 1
     }
 
     It 'uses one executable group per wave and makes serial tasks an explicit barrier' {
@@ -177,12 +208,29 @@ Describe 'Agent workflow advisory contracts' {
         }
     }
 
+    It 'accepts only the trusted Codex Radar source and the three policy pairs' {
+        $fixture = Get-AgentWorkflowFixture 'valid-request.json'
+        $hostileSource = $fixture.radar_snapshot | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+        $hostileSource.source = 'https://example.invalid/codex-radar.json'
+        @((Test-RadarSnapshotContract -Snapshot $hostileSource -Now $fixture.now).findings | Where-Object code -eq 'radar_source_untrusted').Count | Should Be 1
+
+        $unknownPair = $fixture.radar_snapshot | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+        $unknownPair.entries[0].model_family = 'gpt-5.6-terra'
+        $unknownPair.entries[0].reasoning_effort = 'high'
+        @((Test-RadarSnapshotContract -Snapshot $unknownPair -Now $fixture.now).findings | Where-Object code -eq 'radar_pair_not_allowlisted').Count | Should Be 1
+
+        $duplicatePair = $fixture.radar_snapshot | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+        $duplicatePair.entries[1].model_family = $duplicatePair.entries[0].model_family
+        $duplicatePair.entries[1].reasoning_effort = $duplicatePair.entries[0].reasoning_effort
+        @((Test-RadarSnapshotContract -Snapshot $duplicatePair -Now $fixture.now).findings | Where-Object code -eq 'radar_pair_duplicate').Count | Should Be 1
+    }
+
     It 'keeps model routing host-owned and gives the user override priority across three soft anchors' {
         Assert-AgentWorkflowFunction 'New-ModelPolicyProposal'
         $fixture = Get-AgentWorkflowFixture 'valid-request.json'
         $proposal = $fixture.model_proposals[0]
 
-        $result = New-ModelPolicyProposal -TaskId $proposal.task_id -RequestedTier $proposal.requested_tier -Rationale $proposal.rationale -RadarSnapshot $fixture.radar_snapshot -HostAvailablePairs $proposal.host_available_pairs -LocalOutcomes $proposal.local_outcomes -Now $fixture.now -UserOverrideTier $proposal.user_override_tier
+        $result = New-ModelPolicyProposal -TaskId $proposal.task_id -RequestedTier $proposal.requested_tier -Rationale $proposal.rationale -RadarSnapshot $fixture.radar_snapshot -HostSurface $proposal.host_surface -HostAvailablePairs $proposal.host_available_pairs -LocalOutcomes $proposal.local_outcomes -Now $fixture.now -UserOverrideTier $proposal.user_override_tier
 
         $result.decision_owner | Should Be 'host_ai'
         $result.selected_tier | Should Be 'luna_max'
@@ -200,7 +248,7 @@ Describe 'Agent workflow advisory contracts' {
         $fixture = Get-AgentWorkflowFixture 'valid-request.json'
 
         (Get-AgentModelTierAnchor 'terra_high') | Should BeNullOrEmpty
-        $result = New-ModelPolicyProposal -TaskId 'legacy-terra' -RequestedTier 'terra_high' -Rationale 'Legacy request.' -RadarSnapshot $fixture.radar_snapshot -HostAvailablePairs @('gpt-5.6-luna|max', 'gpt-5.6-sol|medium', 'gpt-5.6-sol|xhigh') -Now $fixture.now
+        $result = New-ModelPolicyProposal -TaskId 'legacy-terra' -RequestedTier 'terra_high' -Rationale 'Legacy request.' -RadarSnapshot $fixture.radar_snapshot -HostSurface 'collaboration_spawn' -HostAvailablePairs @('gpt-5.6-luna|max', 'gpt-5.6-sol|medium', 'gpt-5.6-sol|xhigh') -Now $fixture.now
 
         $result.selected_tier | Should Be 'host_default'
         $result.fallback_reason | Should Match 'tier_unknown'
@@ -210,7 +258,7 @@ Describe 'Agent workflow advisory contracts' {
         Assert-AgentWorkflowFunction 'New-ModelPolicyProposal'
         $fixture = Get-AgentWorkflowFixture 'invalid-request.json'
 
-        $result = New-ModelPolicyProposal -TaskId 'alpha' -RequestedTier 'sol_xhigh' -Rationale 'Host proposal.' -RadarSnapshot $fixture.radar_snapshot -HostAvailablePairs @('gpt-5.6-luna|max') -Now $fixture.now
+        $result = New-ModelPolicyProposal -TaskId 'alpha' -RequestedTier 'sol_xhigh' -Rationale 'Host proposal.' -RadarSnapshot $fixture.radar_snapshot -HostSurface 'collaboration_spawn' -HostAvailablePairs @('gpt-5.6-luna|max') -Now $fixture.now
 
         $result.selected_tier | Should Be 'host_default'
         $result.fallback_reason | Should Match 'radar_snapshot_stale|host_pair_unavailable'
@@ -220,16 +268,39 @@ Describe 'Agent workflow advisory contracts' {
     It 'does not let malformed local outcomes hide Radar or missing pair failures' {
         $fixture = Get-AgentWorkflowFixture 'valid-request.json'
         $fixture.radar_snapshot.entries = @($fixture.radar_snapshot.entries | Where-Object model_family -ne 'gpt-5.6-luna')
-        $result = New-ModelPolicyProposal -TaskId 'implement' -RequestedTier 'luna_max' -Rationale 'Host proposal.' -RadarSnapshot $fixture.radar_snapshot -HostAvailablePairs @() -LocalOutcomes @([pscustomobject]@{}) -Now $fixture.now
+        $result = New-ModelPolicyProposal -TaskId 'implement' -RequestedTier 'luna_max' -Rationale 'Host proposal.' -RadarSnapshot $fixture.radar_snapshot -HostSurface 'collaboration_spawn' -HostAvailablePairs @() -LocalOutcomes @([pscustomobject]@{}) -Now $fixture.now
         $result.selected_tier | Should Be 'host_default'
         $result.fallback_reason | Should Match 'local_outcome_invalid|radar_pair_missing'
         $result.selection_semantics | Should Be 'host_proposal_validation_only'
 
         $validOutcome = $fixture.model_proposals[0].local_outcomes[0]
-        $invalidTime = New-ModelPolicyProposal -TaskId 'implement' -RequestedTier 'luna_max' -Rationale 'Host proposal.' -RadarSnapshot $fixture.radar_snapshot -HostAvailablePairs @() -LocalOutcomes @($validOutcome) -Now 'not-a-time'
+        $invalidTime = New-ModelPolicyProposal -TaskId 'implement' -RequestedTier 'luna_max' -Rationale 'Host proposal.' -RadarSnapshot $fixture.radar_snapshot -HostSurface 'collaboration_spawn' -HostAvailablePairs @() -LocalOutcomes @($validOutcome) -Now 'not-a-time'
         $invalidTime.selected_tier | Should Be 'host_default'
         $invalidTime.fallback_reason | Should Match 'local_outcome_invalid'
         @($invalidTime.evidence_sources.local.rejected_findings | Where-Object code -eq 'local_outcome_evaluation_time_invalid').Count | Should Be 1
+    }
+
+    It 'does not let fresh Radar or successful local outcomes promote unknown spawn availability' {
+        $fixture = Get-AgentWorkflowFixture 'valid-request.json'
+        $validOutcome = $fixture.model_proposals[0].local_outcomes[0]
+
+        $result = New-ModelPolicyProposal -TaskId 'implement' -RequestedTier 'luna_max' -Rationale 'Host proposal.' -RadarSnapshot $fixture.radar_snapshot -HostSurface 'collaboration_spawn' -HostAvailablePairs @() -LocalOutcomes @($validOutcome) -Now $fixture.now
+
+        $result.selected_tier | Should Be 'host_default'
+        $result.fallback_reason | Should Match 'host_pair_availability_unknown'
+        $result.evidence_sources.host_availability.surface | Should Be 'collaboration_spawn'
+        $result.evidence_sources.host_availability.state | Should Be 'unknown'
+        $result.evidence_sources.radar.used | Should Be $false
+    }
+
+    It 'requires availability evidence to name the host surface' {
+        $fixture = Get-AgentWorkflowFixture 'valid-request.json'
+
+        $result = New-ModelPolicyProposal -TaskId 'implement' -RequestedTier 'luna_max' -Rationale 'Host proposal.' -RadarSnapshot $fixture.radar_snapshot -HostAvailablePairs @('gpt-5.6-luna|max') -Now $fixture.now
+
+        $result.selected_tier | Should Be 'host_default'
+        $result.fallback_reason | Should Match 'host_surface_unknown'
+        $result.evidence_sources.host_availability.state | Should Be 'unknown'
     }
 
     It 'accepts a serial-only request and validates every model proposal against the TaskGraph' {
@@ -294,6 +365,9 @@ Describe 'Agent workflow advisory contracts' {
         $decision.action | Should Be 'corrected_retry'
         $decision.parallel_allowed | Should Be $false
         $decision.requires_parallel_readmission | Should Be $true
+
+        $secretPacket = New-AgentFailurePacket -IssueId 'issue-secret' -TaskId 'implement' -BaseRevision '84cb53aa' -FailureKind tool -AttemptCount 1 -AttemptedTier luna_max -Failures @('token spaced-secret-value')
+        @((Test-AgentFailurePacketContract $secretPacket).findings | Where-Object code -eq 'sensitive_value_present').Count | Should Be 1
     }
 
     It 'returns zero-write provider-free validate and plan envelopes' {
@@ -312,6 +386,23 @@ Describe 'Agent workflow advisory contracts' {
         $plan.envelope.provider_calls | Should Be 0
         $plan.envelope.executor | Should Be 'host_native_runtime'
         Test-Path -LiteralPath ($fixturePath + '.out') | Should Be $false
+    }
+
+    It 'rejects a repository-local input path that traverses an outbound junction' {
+        $oldRoot = $script:Root
+        $workspace = Join-Path $TestDrive 'agent-input-root'
+        $outside = Join-Path $TestDrive 'agent-input-outside'
+        $junction = Join-Path $workspace 'linked'
+        New-Item -ItemType Directory -Path $workspace, $outside -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $repoRoot 'tests\fixtures\agent-workflow\valid-request.json') -Destination (Join-Path $outside 'request.json')
+        New-Item -ItemType Junction -Path $junction -Target $outside | Out-Null
+        try {
+            $script:Root = $workspace
+            { Read-AgentWorkflowRequest (Join-Path $junction 'request.json') } | Should Throw
+        }
+        finally {
+            $script:Root = $oldRoot
+        }
     }
 
     It 'keeps the domain and application contracts free of IO clock environment and terminal effects' {

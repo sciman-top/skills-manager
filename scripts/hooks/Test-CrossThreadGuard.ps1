@@ -91,17 +91,21 @@ if (Test-Path -LiteralPath $hooksPath) {
 
 $simulationCases = [ordered]@{
     direct_send_tool = $false
+    direct_handoff_without_prompt = $false
     multiline_shell_send = $false
     nested_shell_send = $false
     code_mode_shell_send = $false
     read_only_filename_inspection = $false
+    git_diff_hook_inspection = $false
     read_only_subexpression_send = $false
     reader_exec_option_send = $false
     target_self_delete = $false
     code_mode_target_self_delete = $false
     fleet_self_delete = $false
+    fleet_target_pause = $false
     automation_live_probe_sentinel = $false
     code_mode_automation_live_probe_sentinel = $false
+    code_mode_dynamic_automation_route = $false
     direct_user_lifecycle_allowed = $false
     standard_fleet_shutdown_blocked = $false
     armed_fleet_shutdown_allowed = $false
@@ -121,6 +125,10 @@ if ($hostExists) {
         direct_send_tool = [ordered]@{
             tool_name = 'codex_app__send_message_to_thread'
             tool_input = [ordered]@{ threadId = 'doctor-target'; prompt = 'blocked probe' }
+        }
+        direct_handoff_without_prompt = [ordered]@{
+            tool_name = 'codex_app__handoff_thread'
+            tool_input = [ordered]@{ threadId = 'doctor-target' }
         }
         multiline_shell_send = [ordered]@{
             tool_name = 'shell_command'
@@ -143,6 +151,11 @@ if ($hostExists) {
             tool_input = [ordered]@{
                 command = '$f = Get-ChildItem scripts/hooks -Filter ''block*.ps1'' | Select-Object -First 1; (Get-Content -LiteralPath $f.FullName).Count; Get-FileHash -LiteralPath $f.FullName'
             }
+            expect = 'allow'
+        }
+        git_diff_hook_inspection = [ordered]@{
+            tool_name = 'shell_command'
+            tool_input = [ordered]@{ command = 'git diff -- scripts/hooks/block-cross-thread-send.ps1' }
             expect = 'allow'
         }
         read_only_subexpression_send = [ordered]@{
@@ -178,6 +191,13 @@ if ($hostExists) {
             tool_input = [ordered]@{ mode = 'delete'; id = 'watch-interrupted-task-v1-target-thread-id-doctor-fleet' }
             expect = 'deny'
         }
+        fleet_target_pause = [ordered]@{
+            session_id = 'doctor-fleet'
+            transcript_path = $fleetTranscript
+            tool_name = 'codex_app__automation_update'
+            tool_input = [ordered]@{ mode = 'update'; id = 'watch-interrupted-task-v1-target-thread-id-doctor-source'; targetThreadId = 'doctor-source'; status = 'PAUSED'; prompt = $targetDoctorPrompt }
+            expect = 'deny'
+        }
         automation_live_probe_sentinel = [ordered]@{
             session_id = 'doctor-source'
             transcript_path = $targetTranscript
@@ -190,6 +210,11 @@ if ($hostExists) {
             transcript_path = $targetTranscript
             tool_name = 'exec'
             tool_input = 'const result = await tools.codex_app__automation_update({ mode: "delete", id: "watch-interrupted-task-v1-live-probe-code-mode-doctor" }); text(result);'
+            expect = 'deny'
+        }
+        code_mode_dynamic_automation_route = [ordered]@{
+            tool_name = 'exec'
+            tool_input = 'const t = tools; const n = "codex_app__automation_" + "update"; const mutate = t[n]; await mutate({ mode: "delete", id: "watch-interrupted-task-v1-target-thread-id-doctor-source" });'
             expect = 'deny'
         }
         direct_user_lifecycle_allowed = [ordered]@{

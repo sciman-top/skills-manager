@@ -36,6 +36,15 @@ function Test-RuleEstateReviewContract($Review, [string]$ReviewRoot) {
         $findings.Add((New-RuleEstateFinding 'review_authority_invalid' '$.reviewed_by_type' 'AI self-review is not apply authority; use a human review or registered policy.')) | Out-Null
     }
     if ([string]::IsNullOrWhiteSpace([string](Get-RuleEstateProperty $Review 'reviewed_by'))) { $findings.Add((New-RuleEstateFinding 'reviewer_missing' '$.reviewed_by' 'Reviewer identity is required.')) | Out-Null }
+    $authorizationRelative = [string](Get-RuleEstateProperty $Review 'authorization_receipt')
+    if ([string]::IsNullOrWhiteSpace($authorizationRelative)) {
+        $findings.Add((New-RuleEstateFinding 'authorization_receipt_missing' '$.authorization_receipt' 'An independently issued authorization receipt is required.')) | Out-Null
+    }
+    else {
+        $authorizationPath = [IO.Path]::GetFullPath((Join-Path $ReviewRoot $authorizationRelative))
+        if (-not (Test-RuleDiscoveryPathWithin $authorizationPath $ReviewRoot) -or -not [IO.File]::Exists($authorizationPath)) { $findings.Add((New-RuleEstateFinding 'authorization_receipt_invalid' '$.authorization_receipt' 'Authorization receipt must exist below the reviewed change-set directory.')) | Out-Null }
+        elseif (Test-RuleEstateReparsePath $authorizationPath $ReviewRoot) { $findings.Add((New-RuleEstateFinding 'authorization_receipt_reparse_forbidden' '$.authorization_receipt' 'Authorization receipts reached through reparse points are not accepted.')) | Out-Null }
+    }
     $changes = @(Get-RuleEstateProperty $Review 'changes')
     if ($changes.Count -eq 0) { $findings.Add((New-RuleEstateFinding 'review_changes_empty' '$.changes' 'At least one reviewed change is required.')) | Out-Null }
     if ($changes.Count -gt 128) { $findings.Add((New-RuleEstateFinding 'review_changes_limit' '$.changes' 'Reviewed change-set exceeds the 128 action safety limit.')) | Out-Null }
@@ -52,8 +61,34 @@ function Test-RuleEstateReviewContract($Review, [string]$ReviewRoot) {
         if ([string]::IsNullOrWhiteSpace($desired)) { $findings.Add((New-RuleEstateFinding 'desired_file_missing' "$base.desired_file" 'Reviewed desired file is required.')) | Out-Null; continue }
         $desiredPath = [IO.Path]::GetFullPath((Join-Path $ReviewRoot $desired))
         if (-not (Test-RuleDiscoveryPathWithin $desiredPath $ReviewRoot) -or -not [IO.File]::Exists($desiredPath)) { $findings.Add((New-RuleEstateFinding 'desired_file_out_of_review_root' "$base.desired_file" 'Desired files must exist below the reviewed change-set directory.')) | Out-Null }
+        elseif (Test-RuleEstateReparsePath $desiredPath $ReviewRoot) { $findings.Add((New-RuleEstateFinding 'desired_file_reparse_forbidden' "$base.desired_file" 'Desired files reached through reparse points are not accepted.')) | Out-Null }
     }
     return [pscustomobject]@{ pass=($findings.Count -eq 0); findings=@($findings.ToArray()) }
+}
+
+function Get-RuleEstateAuthorizationReceipt {
+    param($Review,[string]$ReviewPath,[string]$WorkspaceRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot)
+    $reviewRoot=[IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($ReviewPath));$relative=[string](Get-RuleEstateProperty $Review 'authorization_receipt')
+    if([string]::IsNullOrWhiteSpace($relative)){throw 'Independent authorization receipt is required.'}
+    $path=[IO.Path]::GetFullPath((Join-Path $reviewRoot $relative))
+    if(-not (Test-RuleDiscoveryPathWithin $path $reviewRoot) -or -not [IO.File]::Exists($path) -or (Test-RuleEstateReparsePath $path $reviewRoot)){throw 'Independent authorization receipt path is invalid.'}
+    try{$raw=[IO.File]::ReadAllText($path);$receipt=$raw|ConvertFrom-Json}catch{throw ('Independent authorization receipt is invalid JSON: {0}' -f $_.Exception.Message)}
+    if((Get-RuleEstateProperty $receipt 'schema_version') -ne 1 -or [string](Get-RuleEstateProperty $receipt 'domain') -ne 'rule_estate_authorization' -or [string](Get-RuleEstateProperty $receipt 'decision') -ne 'approved'){throw 'Independent authorization receipt is not an approved v1 rule estate receipt.'}
+    $authorizationId=[string](Get-RuleEstateProperty $receipt 'authorization_id')
+    if($authorizationId -notmatch '^rule-estate-auth-[a-f0-9]{32}$'){throw 'Independent authorization receipt identity is invalid.'}
+    if([string](Get-RuleEstateProperty $receipt 'issued_by') -ne [string](Get-RuleEstateProperty $Review 'reviewed_by') -or [string](Get-RuleEstateProperty $receipt 'issued_by_type') -ne [string](Get-RuleEstateProperty $Review 'reviewed_by_type') -or [string](Get-RuleEstateProperty $receipt 'authorization_source') -ne [string](Get-RuleEstateProperty $Review 'authorization_source')){throw 'Independent authorization receipt reviewer identity does not match the review.'}
+    $reviewHash=Get-OperationSha256 ([IO.File]::ReadAllText([IO.Path]::GetFullPath($ReviewPath)))
+    if([string](Get-RuleEstateProperty $receipt 'review_sha256') -ne $reviewHash){throw 'Independent authorization receipt review hash does not match.'}
+    $workspace=[IO.Path]::GetFullPath($WorkspaceRoot);$codex=[IO.Path]::GetFullPath($CodexUserRoot);$claude=[IO.Path]::GetFullPath($ClaudeUserRoot)
+    try{$receiptWorkspace=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $receipt 'workspace_root'));$receiptCodex=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $receipt 'codex_user_root'));$receiptClaude=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $receipt 'claude_user_root'))}catch{throw 'Independent authorization receipt roots are invalid.'}
+    if($receiptWorkspace -ne $workspace -or $receiptCodex -ne $codex -or $receiptClaude -ne $claude){throw 'Independent authorization receipt roots do not match the requested roots.'}
+    if([int](Get-RuleEstateProperty $receipt 'approved_action_count') -ne @((Get-RuleEstateProperty $Review 'changes')).Count){throw 'Independent authorization receipt action count does not match the review.'}
+    $issued=[datetimeoffset]::MinValue;$expires=[datetimeoffset]::MinValue
+    if(-not [datetimeoffset]::TryParse([string](Get-RuleEstateProperty $receipt 'issued_at'),[ref]$issued) -or -not [datetimeoffset]::TryParse([string](Get-RuleEstateProperty $receipt 'expires_at'),[ref]$expires) -or $expires -le $issued){throw 'Independent authorization receipt validity window is invalid.'}
+    if($expires -le [datetimeoffset]::UtcNow){throw 'Independent authorization receipt has expired.'}
+    $applyToken=[string](Get-RuleEstateProperty $receipt 'apply_token')
+    if($applyToken -cnotmatch '^APPLY_RULE_ESTATE_PATCH_[A-F0-9]{16}$'){throw 'Independent authorization receipt apply token is invalid.'}
+    return [pscustomobject][ordered]@{path=$path;content_hash=Get-OperationSha256 $raw;authorization_id=$authorizationId;issued_by=[string](Get-RuleEstateProperty $receipt 'issued_by');issued_by_type=[string](Get-RuleEstateProperty $receipt 'issued_by_type');authorization_source=[string](Get-RuleEstateProperty $receipt 'authorization_source');issued_at=$issued.ToString('o');expires_at=$expires.ToString('o');review_sha256=$reviewHash;approved_action_count=[int](Get-RuleEstateProperty $receipt 'approved_action_count');apply_token=$applyToken}
 }
 
 function Get-RuleEstateTargetSetSnapshot([string]$WorkspaceRoot, [string[]]$ExcludeNames=@('external','文档')) {
@@ -79,6 +114,7 @@ function New-RuleEstatePlan {
     $workspace = Assert-RuleEstateSafeRoot $WorkspaceRoot 'workspace'
     $codex = Assert-RuleEstateSafeRoot $CodexUserRoot 'Codex user'
     $claude = Assert-RuleEstateSafeRoot $ClaudeUserRoot 'Claude user'
+    $authorization = Get-RuleEstateAuthorizationReceipt -Review $review -ReviewPath $reviewFile -WorkspaceRoot $workspace -CodexUserRoot $codex -ClaudeUserRoot $claude
     $inventory = Get-RuleEstateTargets -WorkspaceRoot $workspace -ExcludeNames $ExcludeNames
     $repoByName = @{}
     foreach ($target in @($inventory.targets)) { $repoByName[[string]$target.name] = [string]$target.path }
@@ -126,8 +162,9 @@ function New-RuleEstatePlan {
         schema_version=1; operation_id=('rule-estate-{0}' -f (Get-OperationSha256 $planSeed).Substring(0,16)); domain='rule_estate'; mode='plan'
         generated_at=[datetimeoffset]::UtcNow.ToString('o'); workspace_root=$workspace; exclude_names=@($ExcludeNames); codex_user_root=$codex; claude_user_root=$claude
         review=[pscustomobject]@{ path=$reviewFile; content_hash=Get-OperationSha256 ([IO.File]::ReadAllText($reviewFile)); reviewed_by=[string](Get-RuleEstateProperty $review 'reviewed_by'); reviewed_by_type=[string](Get-RuleEstateProperty $review 'reviewed_by_type'); authorization_source=[string](Get-RuleEstateProperty $review 'authorization_source') }
+        authorization=$authorization
         target_set=$targetSet; actions=@($actions.ToArray()); execution='preflight_all_then_apply_one_by_one_fail_fast'
-        apply=[pscustomobject]@{ required_token='APPLY_RULE_ESTATE_PATCH'; dirty_worktree='observe_preserve_unrelated'; target_file_freshness='fail_closed'; target_set_drift='fail_closed'; rollback_scope='per_target' }
+        apply=[pscustomobject]@{ required_token=[string]$authorization.apply_token; dirty_worktree='observe_preserve_unrelated'; target_file_freshness='fail_closed'; target_set_drift='fail_closed'; rollback_scope='per_target' }
         verification=[pscustomobject]@{ repo_verified='not_run'; host_loaded='not_run'; live_accepted='not_run' }
         provider_calls=0; native_mutations=0
     }
@@ -142,16 +179,47 @@ function Get-RuleEstateTextHashAtPath([string]$Path) {
     return Get-OperationSha256 ([IO.File]::ReadAllText($Path))
 }
 
+function Get-RuleEstateBytesHash([byte[]]$Bytes) {
+    if ($null -eq $Bytes) { $Bytes = [byte[]]@() }
+    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
+}
+
 function Test-RuleEstateApplyPreflight {
-    param($Plan,[string]$WorkspaceRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[string[]]$CompletedActionIds=@())
+    param($Plan,[string]$WorkspaceRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[string[]]$CompletedActionIds=@(),[switch]$IgnoreLocks)
     $findings = New-Object System.Collections.Generic.List[object]
     if ($null -eq $Plan -or (Get-RuleEstateProperty $Plan 'schema_version') -ne 1 -or [string](Get-RuleEstateProperty $Plan 'domain') -ne 'rule_estate') { return [pscustomobject]@{ pass=$false; findings=@((New-RuleEstateFinding 'plan_invalid' '$' 'Rule estate plan is invalid.')) } }
     $workspace = [IO.Path]::GetFullPath($WorkspaceRoot); $codex=[IO.Path]::GetFullPath($CodexUserRoot); $claude=[IO.Path]::GetFullPath($ClaudeUserRoot)
     if ($workspace -ne [IO.Path]::GetFullPath([string](Get-RuleEstateProperty $Plan 'workspace_root')) -or $codex -ne [IO.Path]::GetFullPath([string](Get-RuleEstateProperty $Plan 'codex_user_root')) -or $claude -ne [IO.Path]::GetFullPath([string](Get-RuleEstateProperty $Plan 'claude_user_root'))) { $findings.Add((New-RuleEstateFinding 'authorization_root_mismatch' '$' 'CLI roots must exactly match the plan roots.')) | Out-Null }
     $freshSet = Get-RuleEstateTargetSetSnapshot $workspace @(Get-RuleEstateProperty $Plan 'exclude_names')
     if ($freshSet.hash -ne [string](Get-RuleEstateProperty (Get-RuleEstateProperty $Plan 'target_set') 'hash')) { $findings.Add((New-RuleEstateFinding 'target_set_drift' '$.target_set' 'Workspace direct Git target set changed after planning.')) | Out-Null }
-    $review=Get-RuleEstateProperty $Plan 'review';$reviewPath=[string](Get-RuleEstateProperty $review 'path')
+    $review=Get-RuleEstateProperty $Plan 'review';$reviewPath=[string](Get-RuleEstateProperty $review 'path');$reviewDocument=$null
     if(-not [IO.File]::Exists($reviewPath) -or (Get-OperationSha256 ([IO.File]::ReadAllText($reviewPath))) -ne [string](Get-RuleEstateProperty $review 'content_hash')){$findings.Add((New-RuleEstateFinding 'review_stale' '$.review' 'Reviewed change-set changed or disappeared after planning.'))|Out-Null}
+    else {
+        try{$reviewDocument=[IO.File]::ReadAllText($reviewPath)|ConvertFrom-Json;$reviewValidation=Test-RuleEstateReviewContract $reviewDocument ([IO.Path]::GetDirectoryName($reviewPath));if(-not $reviewValidation.pass){throw ((@($reviewValidation.findings.code))-join ',')}}catch{$findings.Add((New-RuleEstateFinding 'review_stale' '$.review' ('Reviewed change-set is no longer valid: {0}' -f $_.Exception.Message)))|Out-Null}
+    }
+    $authorization=Get-RuleEstateProperty $Plan 'authorization';$authorizationPath=[string](Get-RuleEstateProperty $authorization 'path');$expires=[datetimeoffset]::MinValue
+    if([string]::IsNullOrWhiteSpace($authorizationPath) -or -not [IO.File]::Exists($authorizationPath) -or (Get-OperationSha256 ([IO.File]::ReadAllText($authorizationPath))) -ne [string](Get-RuleEstateProperty $authorization 'content_hash')){$findings.Add((New-RuleEstateFinding 'authorization_receipt_stale' '$.authorization' 'Authorization receipt changed or disappeared after planning.'))|Out-Null}
+    elseif(-not [datetimeoffset]::TryParse([string](Get-RuleEstateProperty $authorization 'expires_at'),[ref]$expires) -or $expires -le [datetimeoffset]::UtcNow){$findings.Add((New-RuleEstateFinding 'authorization_receipt_expired' '$.authorization.expires_at' 'Authorization receipt is expired or invalid.'))|Out-Null}
+    elseif($null -ne $reviewDocument){
+        try {
+            $freshAuthorization=Get-RuleEstateAuthorizationReceipt -Review $reviewDocument -ReviewPath $reviewPath -WorkspaceRoot $workspace -CodexUserRoot $codex -ClaudeUserRoot $claude
+            if([string]$freshAuthorization.content_hash -ne [string](Get-RuleEstateProperty $authorization 'content_hash') -or [string]$freshAuthorization.authorization_id -ne [string](Get-RuleEstateProperty $authorization 'authorization_id') -or [string]$freshAuthorization.apply_token -ne [string](Get-RuleEstateProperty (Get-RuleEstateProperty $Plan 'apply') 'required_token')){throw 'authorization fields differ from the independently issued receipt'}
+        } catch {$findings.Add((New-RuleEstateFinding 'authorization_receipt_invalid' '$.authorization' $_.Exception.Message))|Out-Null}
+    }
+    if($null -ne $reviewDocument){
+        $actions=@(Get-RuleEstateProperty $Plan 'actions');$changes=@(Get-RuleEstateProperty $reviewDocument 'changes')
+        if($actions.Count -ne $changes.Count){$findings.Add((New-RuleEstateFinding 'plan_review_binding_mismatch' '$.actions' 'Plan action count does not match the authorized review.'))|Out-Null}
+        $actionByTarget=@{}
+        foreach($candidate in $actions){$candidatePath=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $candidate 'target_path')).ToLowerInvariant();if($actionByTarget.ContainsKey($candidatePath)){$actionByTarget[$candidatePath]=$null}else{$actionByTarget[$candidatePath]=$candidate}}
+        foreach($change in $changes){
+            $scope=[string](Get-RuleEstateProperty $change 'target_scope');$repository=[string](Get-RuleEstateProperty $change 'repository')
+            $expectedRoot=switch($scope){'global_codex'{$codex};'global_claude'{$claude};default{[IO.Path]::GetFullPath((Join-Path $workspace $repository))}}
+            if([string]::IsNullOrWhiteSpace($expectedRoot)){continue}
+            $expectedTarget=[IO.Path]::GetFullPath((Join-Path $expectedRoot ([string](Get-RuleEstateProperty $change 'target_file'))));$desiredPath=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($reviewPath)) ([string](Get-RuleEstateProperty $change 'desired_file'))));$desired=[IO.File]::ReadAllText($desiredPath);$desiredHash=Get-OperationSha256 $desired;$identity='{0}|{1}|{2}' -f $scope,$expectedTarget.ToLowerInvariant(),$desiredHash;$expectedId='estate-{0}' -f (Get-OperationSha256 $identity).Substring(0,16)
+            $boundAction=if($actionByTarget.ContainsKey($expectedTarget.ToLowerInvariant())){$actionByTarget[$expectedTarget.ToLowerInvariant()]}else{$null}
+            if($null -eq $boundAction -or [string](Get-RuleEstateProperty $boundAction 'target_scope') -ne $scope -or ($scope -eq 'repository' -and [string](Get-RuleEstateProperty $boundAction 'repository') -ne $repository) -or [string](Get-RuleEstateProperty $boundAction 'action_id') -ne $expectedId -or [string](Get-RuleEstateProperty $boundAction 'desired_hash') -ne $desiredHash -or [string](Get-RuleEstateProperty $boundAction 'desired_text') -cne $desired){$findings.Add((New-RuleEstateFinding 'plan_review_binding_mismatch' '$.actions' ('Plan action is not an exact projection of the authorized review target: {0}' -f $expectedTarget)))|Out-Null}
+        }
+    }
     foreach ($action in @(Get-RuleEstateProperty $Plan 'actions')) {
         $id=[string](Get-RuleEstateProperty $action 'action_id'); $done=$id -in @($CompletedActionIds)
         $path=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'target_path')); $root=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'authorized_root')); $scope=[string](Get-RuleEstateProperty $action 'target_scope')
@@ -162,7 +230,7 @@ function Test-RuleEstateApplyPreflight {
         $currentHash=Get-RuleEstateTextHashAtPath $path; $expectedHash=if($done){[string](Get-RuleEstateProperty $action 'desired_hash')}else{[string](Get-RuleEstateProperty $action 'before_hash')}
         if ($currentHash -ne $expectedHash) { $findings.Add((New-RuleEstateFinding 'target_hash_stale' $path 'Target content no longer matches the planned state.')) | Out-Null }
         if((Get-OperationSha256 ([string](Get-RuleEstateProperty $action 'desired_text'))) -ne [string](Get-RuleEstateProperty $action 'desired_hash')){$findings.Add((New-RuleEstateFinding 'desired_hash_mismatch' '$.actions' 'Desired text does not match the planned hash.'))|Out-Null}
-        if ([IO.File]::Exists((Get-RuleEstateLockPath $action))) { $findings.Add((New-RuleEstateFinding 'target_locked' (Get-RuleEstateLockPath $action) 'Another rule estate writer holds this target lock.')) | Out-Null }
+        if (-not $IgnoreLocks -and [IO.File]::Exists((Get-RuleEstateLockPath $action))) { $findings.Add((New-RuleEstateFinding 'target_locked' (Get-RuleEstateLockPath $action) 'Another rule estate writer holds this target lock.')) | Out-Null }
     }
     return [pscustomobject]@{ pass=($findings.Count -eq 0); findings=@($findings.ToArray()) }
 }
@@ -172,8 +240,9 @@ function Write-RuleEstateReceipt([string]$Path, $Receipt) {
 }
 
 function Invoke-RuleEstateApply {
-    param($Plan,[string]$WorkspaceRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[string]$Token,[string]$ReceiptPath,[string]$ResumeReceiptPath=$null,[string]$TestFailBeforeActionId=$null)
-    if ($Token -cne 'APPLY_RULE_ESTATE_PATCH') { return [pscustomobject]@{ pass=$false; status='blocked'; findings=@((New-RuleEstateFinding 'apply_token_invalid' '$.apply.required_token' 'Explicit estate apply token does not match.')); writes=0; receipt=$null } }
+    param($Plan,[string]$WorkspaceRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[string]$Token,[string]$ReceiptPath,[string]$ResumeReceiptPath=$null,[string]$TestFailBeforeActionId=$null,[scriptblock]$TestHookAfterLocksAcquired=$null)
+    $expectedToken=[string](Get-RuleEstateProperty (Get-RuleEstateProperty $Plan 'apply') 'required_token')
+    if ([string]::IsNullOrWhiteSpace($expectedToken) -or $Token -cne $expectedToken) { return [pscustomobject]@{ pass=$false; status='blocked'; findings=@((New-RuleEstateFinding 'apply_token_invalid' '$.apply.required_token' 'Explicit estate apply token does not match the independent authorization receipt.')); writes=0; receipt=$null } }
     $receiptFile=[IO.Path]::GetFullPath($ReceiptPath); $existing=$null
     if (-not [string]::IsNullOrWhiteSpace($ResumeReceiptPath)) {
         $resumeFile=[IO.Path]::GetFullPath($ResumeReceiptPath)
@@ -190,10 +259,13 @@ function Invoke-RuleEstateApply {
     foreach($old in @(Get-RuleEstateProperty $receipt 'actions')){$actionResults.Add($old)|Out-Null}
     $lockStreams=New-Object System.Collections.Generic.List[object];$writes=0
     try {
-        foreach($action in @(Get-RuleEstateProperty $Plan 'actions')){
-            $lockPath=Get-RuleEstateLockPath $action
+        $lockPaths=@(Get-RuleEstateProperty $Plan 'actions'|ForEach-Object{Get-RuleEstateLockPath $_}|Sort-Object -Unique)
+        foreach($lockPath in $lockPaths){
             $stream=[IO.File]::Open($lockPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None);$lockStreams.Add([pscustomobject]@{stream=$stream;path=$lockPath})|Out-Null
         }
+        if($null -ne $TestHookAfterLocksAcquired){& $TestHookAfterLocksAcquired}
+        $lockedPreflight=Test-RuleEstateApplyPreflight $Plan $WorkspaceRoot $CodexUserRoot $ClaudeUserRoot $completedIds -IgnoreLocks
+        if(-not $lockedPreflight.pass){throw ('post_lock_preflight_failed:{0}' -f ((@($lockedPreflight.findings.code)-join ',')))}
         foreach($action in @(Get-RuleEstateProperty $Plan 'actions')){
             $id=[string](Get-RuleEstateProperty $action 'action_id')
             if($id -in $completedIds){continue}
@@ -202,11 +274,14 @@ function Invoke-RuleEstateApply {
             $backupRoot=Join-Path ([IO.Path]::GetDirectoryName($receiptFile)) ('.rule-estate-backups\{0}' -f [string](Get-RuleEstateProperty $Plan 'operation_id'))
             New-Item -ItemType Directory -Path $backupRoot -Force|Out-Null
             $backup=Join-Path $backupRoot ('{0}.bak' -f $id)
-            $beforeBytes=if([IO.File]::Exists($target)){[IO.File]::ReadAllBytes($target)}else{[byte[]]@()};[IO.File]::WriteAllBytes($backup,$beforeBytes)
+            [byte[]]$beforeBytes=$null
+            if([IO.File]::Exists($target)){$beforeBytes=[IO.File]::ReadAllBytes($target)}else{$beforeBytes=[byte[]]::new(0)}
+            [IO.File]::WriteAllBytes($backup,$beforeBytes)
+            $backupHash=Get-RuleEstateBytesHash $beforeBytes
             Write-Utf8FileAtomic -Path $target -Content ([string](Get-RuleEstateProperty $action 'desired_text'))
             if((Get-RuleEstateTextHashAtPath $target) -ne [string](Get-RuleEstateProperty $action 'desired_hash')){throw ('desired_hash_not_applied:{0}' -f $id)}
             $writes++
-            $actionResults.Add([pscustomobject][ordered]@{action_id=$id;status='applied';target_path=$target;target_scope=[string](Get-RuleEstateProperty $action 'target_scope');authorized_root=[string](Get-RuleEstateProperty $action 'authorized_root');operation=$operation;before_hash=[string](Get-RuleEstateProperty $action 'before_hash');desired_hash=[string](Get-RuleEstateProperty $action 'desired_hash');dirty_paths_at_plan=@(Get-RuleEstateProperty $action 'dirty_paths_at_plan');backup_path=$backup;applied_at=[datetimeoffset]::UtcNow.ToString('o')})|Out-Null
+            $actionResults.Add([pscustomobject][ordered]@{action_id=$id;status='applied';target_path=$target;target_scope=[string](Get-RuleEstateProperty $action 'target_scope');authorized_root=[string](Get-RuleEstateProperty $action 'authorized_root');operation=$operation;before_hash=[string](Get-RuleEstateProperty $action 'before_hash');desired_hash=[string](Get-RuleEstateProperty $action 'desired_hash');dirty_paths_at_plan=@(Get-RuleEstateProperty $action 'dirty_paths_at_plan');backup_path=$backup;backup_sha256=$backupHash;backup_length=[long]$beforeBytes.LongLength;applied_at=[datetimeoffset]::UtcNow.ToString('o')})|Out-Null
             $receipt.actions=@($actionResults.ToArray());Write-RuleEstateReceipt $receiptFile $receipt
         }
         $receipt.status='applied';$receipt.completed_at=[datetimeoffset]::UtcNow.ToString('o');$receipt.actions=@($actionResults.ToArray());Write-RuleEstateReceipt $receiptFile $receipt
@@ -237,7 +312,9 @@ function Invoke-RuleEstateRollback {
     $operationId=[string](Get-RuleEstateProperty $receipt 'operation_id');if($operationId -notmatch '^rule-estate-[a-f0-9]{16}$' -or $ActionId -notmatch '^estate-[a-f0-9]{16}$'){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_identity_invalid' '$' 'Receipt operation or action identity is invalid.'));writes=0}}
     $expectedBackup=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($receiptFile)) ('.rule-estate-backups\{0}\{1}.bak' -f $operationId,$ActionId)));$backup=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'backup_path'))
     if($backup -ne $expectedBackup -or -not [IO.File]::Exists($backup)){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_backup_invalid' $backup 'Per-target backup path is missing or outside the receipt backup directory.'));writes=0}}
-    if([string](Get-RuleEstateProperty $action 'operation') -eq 'create'){[IO.File]::Delete($target)}else{Write-BytesAtomic -Path $target -Bytes ([IO.File]::ReadAllBytes($backup))}
+    $backupBytes=[IO.File]::ReadAllBytes($backup);$expectedBackupHash=[string](Get-RuleEstateProperty $action 'backup_sha256');$expectedBackupLength=[long](Get-RuleEstateProperty $action 'backup_length')
+    if([string]::IsNullOrWhiteSpace($expectedBackupHash) -or $backupBytes.LongLength -ne $expectedBackupLength -or (Get-RuleEstateBytesHash $backupBytes) -ne $expectedBackupHash){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_backup_stale' $backup 'Per-target backup content no longer matches the apply receipt.'));writes=0}}
+    if([string](Get-RuleEstateProperty $action 'operation') -eq 'create'){[IO.File]::Delete($target)}else{Write-BytesAtomic -Path $target -Bytes $backupBytes}
     $action.status='rolled_back';$action | Add-Member -NotePropertyName rolled_back_at -NotePropertyValue ([datetimeoffset]::UtcNow.ToString('o')) -Force;Write-RuleEstateReceipt $receiptFile $receipt
     return [pscustomobject]@{pass=$true;status='rolled_back';findings=@();writes=1;action_id=$ActionId}
 }

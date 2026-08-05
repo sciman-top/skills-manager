@@ -88,6 +88,43 @@ Describe 'PowerShell 7-only runtime policy verifier' {
         @($parsed.findings | Where-Object code -eq 'legacy_fallback_detected').Count | Should BeGreaterThan 0
     }
 
+    It 'fails closed when a newly added active script invokes Windows PowerShell' {
+        $fixtureRoot = New-PowerShellRuntimePolicyFixture 'dynamic-script-estate'
+        $path = Join-Path $fixtureRoot 'scripts\new-entry.ps1'
+        New-Item -ItemType Directory -Path (Split-Path $path -Parent) -Force | Out-Null
+        Set-Content -LiteralPath $path -Value "& powershell.exe -NoProfile -Command 'exit 0'" -Encoding UTF8
+
+        $result = Invoke-PowerShellRuntimePolicyVerifier $fixtureRoot
+        $parsed = $result.output | ConvertFrom-Json
+        $result.exit_code | Should Be 1
+        @($parsed.findings | Where-Object {
+            $_.code -eq 'legacy_runtime_invocation_detected' -and
+            $_.path -eq 'scripts/new-entry.ps1'
+        }).Count | Should Be 1
+    }
+
+    It 'scans active test runners but excludes inert fixture history' {
+        $fixtureRoot = New-PowerShellRuntimePolicyFixture 'test-estate-boundary'
+        $fixturePath = Join-Path $fixtureRoot 'tests\fixtures\historical-legacy.ps1'
+        New-Item -ItemType Directory -Path (Split-Path $fixturePath -Parent) -Force | Out-Null
+        Set-Content -LiteralPath $fixturePath -Value '& powershell.exe -NoProfile' -Encoding UTF8
+
+        $allowed = Invoke-PowerShellRuntimePolicyVerifier $fixtureRoot
+        $allowed.exit_code | Should Be 0
+
+        $activeTestPath = Join-Path $fixtureRoot 'tests\Unit\new-legacy-runner.Tests.ps1'
+        New-Item -ItemType Directory -Path (Split-Path $activeTestPath -Parent) -Force | Out-Null
+        Set-Content -LiteralPath $activeTestPath -Value 'Start-Process powershell.exe -ArgumentList ''-NoProfile''' -Encoding UTF8
+
+        $rejected = Invoke-PowerShellRuntimePolicyVerifier $fixtureRoot
+        $parsed = $rejected.output | ConvertFrom-Json
+        $rejected.exit_code | Should Be 1
+        @($parsed.findings | Where-Object {
+            $_.code -eq 'legacy_runtime_invocation_detected' -and
+            $_.path -eq 'tests/Unit/new-legacy-runner.Tests.ps1'
+        }).Count | Should Be 1
+    }
+
     It 'fails closed when a current truth surface restores the bounded-smoke policy' {
         $fixtureRoot = New-PowerShellRuntimePolicyFixture 'current-policy'
         $path = Join-Path $fixtureRoot 'docs\superpowers\specs\2026-08-03-lean-ai-delivery-maintenance-design.md'

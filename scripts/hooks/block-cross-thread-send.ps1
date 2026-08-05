@@ -407,18 +407,22 @@ function Test-DirectWatchLifecycleIntent {
     if ([string]::IsNullOrWhiteSpace($text) -or $text -match '(?s)<heartbeat>.*?</heartbeat>') {
         return $false
     }
+    $text = $text.Trim()
     if ($text -notmatch '(?i)守夜|watch-interrupted-task|heartbeat') {
         return $false
     }
-    if ($text -match '(?i)(不要|不允许|不应|不能|do\s+not|don''t).{0,24}(关闭|删除|暂停|恢复|开启|启用|close|delete|pause|resume|enable|start)' -or
+    if ($text -match '(?i)(不要|请勿|无需|别|禁止|切勿|不允许|不应|不能|do\s+not|don''t).{0,24}(关闭|删除|暂停|恢复|开启|启用|close|delete|pause|resume|enable|start)' -or
         $text -match '(?i)(为什么|为何|怎么会|是否|会不会|\?|？)' -or
-        $text -match '(?i)(文档|示例|说明|写着|提到|quoted|example|documentation).{0,24}(关闭|删除|暂停|恢复|开启|启用|close|delete|pause|resume|enable|start)') {
+        $text -match '(?i)(?:(文档|示例|说明|写着|写进|提到|quoted|example|documentation).{0,32}(关闭|删除|暂停|恢复|开启|启用|close|delete|pause|resume|enable|start)|(关闭|删除|暂停|恢复|开启|启用|close|delete|pause|resume|enable|start).{0,32}(文档|示例|说明|写着|写进|提到|quoted|example|documentation))') {
         return $false
     }
 
     $sessionId = [string](Get-InputProperty -InputObject $Payload -Names @('session_id', 'sessionId'))
     $targetThreadId = [string](Get-WatchAutomationTargetId -ToolInput $ToolInput)
-    if (-not [string]::IsNullOrWhiteSpace($targetThreadId) -and $targetThreadId -cne $sessionId -and $text -notmatch [regex]::Escape($targetThreadId)) {
+    if ([string]::IsNullOrWhiteSpace($targetThreadId)) {
+        return $false
+    }
+    if ($targetThreadId -cne $sessionId -and $text -notmatch [regex]::Escape($targetThreadId)) {
         return $false
     }
 
@@ -494,11 +498,14 @@ elseif ($toolName -match '(?i)(^|__|\.)exec$') {
     $codeSkeleton = Get-JavaScriptCodeSkeleton -Source $source
     $hasHighRiskRouteName = $source -match '(?i)\b(?:[A-Za-z0-9_]+__)?(?:send_message_to_thread|handoff_thread|automation_update)\b'
     $hasPowerMutationRoute = $source -match '(?i)\b(?:shutdown(?:\.exe)?|Stop-Computer|Restart-Computer|Win32Shutdown|InitiateSystemShutdown|ExitWindowsEx)\b'
-    $hasAliasedDynamicRoute = $source -match '(?is)\b(?:const|let|var)\s+[A-Za-z_$][A-Za-z0-9_$]*\s*=\s*tools\s*;.*?\[[^\]]+\]\s*\('
+    # Code mode is not an AST-backed trust boundary. Permit ordinary direct
+    # calls, but fail closed when the tools object is aliased, destructured, or
+    # indexed because the callee can no longer be proven from this hook input.
+    $hasAliasedDynamicRoute = $codeSkeleton -match '(?is)\b(?:const|let|var)\s+(?:[A-Za-z_$][A-Za-z0-9_$]*|\{[^}]*\}|\[[^\]]*\])\s*=\s*tools\b'
     $hasNestedSendTool = Test-CodeModeHighRiskRoute -Source $source -CodeSkeleton $codeSkeleton -ToolNamePattern '(?:[A-Za-z0-9_]+__)?send_message_to_thread'
     $hasNestedShellTool = Test-CodeModeToolCall -CodeSkeleton $codeSkeleton -ToolNamePattern '(?:shell_command|exec_command)'
     $hasNestedAutomationTool = Test-CodeModeHighRiskRoute -Source $source -CodeSkeleton $codeSkeleton -ToolNamePattern '(?:[A-Za-z0-9_]+__)?automation_update'
-    $hasDynamicToolRoute = $codeSkeleton -match '(?i)\btools\s*(?:\?\s*\.)?\s*\[\s*[A-Za-z_$][A-Za-z0-9_$]*\s*\]\s*\('
+    $hasDynamicToolRoute = $codeSkeleton -match '(?is)\btools\s*(?:\?\s*\.)?\s*\[[^\]]*\]'
 
     if ($hasPowerMutationRoute) {
         $denyReason = 'Code mode is not a trusted power-action surface; the armed fleet heartbeat must use the native typed shell tool directly.'
@@ -581,6 +588,7 @@ elseif ($toolName -match '(?i)(^|__|\.)automation_update$') {
     $automationId = [string](Get-InputProperty -InputObject $toolInput -Names @('id'))
     $prompt = [string](Get-InputProperty -InputObject $toolInput -Names @('prompt'))
     $targetThreadId = [string](Get-InputProperty -InputObject $toolInput -Names @('targetThreadId', 'target_thread_id'))
+    $status = [string](Get-InputProperty -InputObject $toolInput -Names @('status'))
     $sessionId = [string]$payload.session_id
     $isWatchPrompt = $prompt -match '(?m)^watch-interrupted-task(?::fleet)?:v1 '
     $isCrossTargetPrompt = -not [string]::IsNullOrWhiteSpace($prompt) -and -not [string]::IsNullOrWhiteSpace($targetThreadId) -and $targetThreadId -cne $sessionId
@@ -596,6 +604,12 @@ elseif ($toolName -match '(?i)(^|__|\.)automation_update$') {
     }
     else {
         $turnRole = Get-WatchTurnRole -Payload $payload
+        $ordinaryMentionsWatchLifecycle = $false
+        if ($turnRole -ceq 'ordinary_turn') {
+            $ordinaryTurnText = Get-WatchTurnText -Payload $payload
+            $ordinaryMentionsWatchLifecycle = -not [string]::IsNullOrWhiteSpace($ordinaryTurnText) -and
+                $ordinaryTurnText -match '(?i)守夜|watch-interrupted-task|heartbeat'
+        }
         if ($turnRole -ceq 'target_heartbeat') {
             $denyReason = 'Target heartbeats are monitor/recovery workers and cannot mutate automation metadata; the fleet supervisor is the sole heartbeat writer.'
         }
@@ -606,14 +620,14 @@ elseif ($toolName -match '(?i)(^|__|\.)automation_update$') {
             elseif ([string]::IsNullOrWhiteSpace($watchTargetThreadId) -or $watchTargetThreadId -ceq $sessionId) {
                 $denyReason = 'The fleet supervisor heartbeat cannot mutate its own dual-role automation.'
             }
-            elseif ($mode -ceq 'delete') {
-                $denyReason = 'Fleet heartbeat deletion is fail-closed because PreToolUse cannot verify terminal Goal and cleanup receipt truth; a direct user lifecycle command is required.'
+            elseif ($mode -ceq 'delete' -or ($mode -ceq 'update' -and $status -ieq 'PAUSED')) {
+                $denyReason = 'Fleet heartbeat deletion or pause is fail-closed because PreToolUse cannot verify terminal Goal and cleanup receipt truth; a direct user lifecycle command is required.'
             }
             elseif ($mode -cne 'delete' -and -not (Test-CanonicalWatchPrompt -Prompt $prompt -ExpectedTargetThreadId $watchTargetThreadId)) {
                 $denyReason = 'Fleet target automation writes must use the trusted canonical watch-interrupted-task policy_revision=3 envelope.'
             }
         }
-        elseif ($turnRole -ceq 'ordinary_turn' -and $isWatchMutation -and
+        elseif ($turnRole -ceq 'ordinary_turn' -and ($isWatchMutation -or $ordinaryMentionsWatchLifecycle) -and
             -not (Test-DirectWatchLifecycleIntent -Payload $payload -Mode $mode -ToolInput $toolInput)) {
             $denyReason = 'Watch automation mutation requires a direct user lifecycle command in the current turn.'
         }
@@ -648,7 +662,9 @@ elseif ($toolName -match '(?i)^(Bash|shell_command|exec_command)$') {
         $trimmedSegment = $segment.Trim()
         $hasExecutableSend = $trimmedSegment -match '(?i)^\s*(?:&\s*)?(?:send_message_to_thread|sendMessageToThread)\b' -or
             $trimmedSegment -match '(?i)(?:^|\b(?:cmd|pwsh|powershell)(?:\.exe)?\s+(?:/c|-Command)\s+)["'']?\s*codex(?:\.(?:cmd|ps1|exe))?\s+app-server\b.*\bthread[\/.:-]send\b' -or
-            $trimmedSegment -match '(?i)^\s*(?:&\s*)?codex(?:\.(?:cmd|ps1|exe))?\s+app-server\b.*\bthread[\/.:-]send\b'
+            $trimmedSegment -match '(?i)^\s*(?:&\s*)?codex(?:\.(?:cmd|ps1|exe))?\s+app-server\b.*\bthread[\/.:-]send\b' -or
+            $trimmedSegment -match '(?i)^\s*(?:Invoke-Expression|iex)\b.*\bcodex(?:\.(?:cmd|ps1|exe))?\s+app-server\b.*\bthread[\/.:-]send\b' -or
+            $trimmedSegment -match '(?i)^\s*Start-Process\s+(?:-[A-Za-z]+\s+)*["'']?codex(?:\.(?:cmd|ps1|exe))?["'']?\b.*\bapp-server\b.*\bthread[\/.:-]send\b'
         $hasExecutionSubexpression = $trimmedSegment -match '(?is)(?:\$\s*\(|@\s*\(|\(\s*&?\s*)\s*codex(?:\.(?:cmd|ps1|exe))?\s+app-server\b.*\bthread[\/.:-]send\b'
         $hasReaderExecOption = $trimmedSegment -match '(?i)^\s*(?:&\s*)?rg(?:\.exe)?\b.*(?:^|\s)--pre(?:=|\s).*\bthread[\/.:-]send\b' -or
             $trimmedSegment -match '(?i)^\s*(?:&\s*)?git(?:\.exe)?\s+grep\b.*(?:-O|--open-files-in-pager).*\bthread[\/.:-]send\b'

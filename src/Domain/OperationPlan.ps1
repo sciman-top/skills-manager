@@ -101,7 +101,7 @@ function Test-OperationSensitiveKey([string]$Name) {
 }
 function Test-OperationSerializedSensitiveValue([string]$Value) {
     if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
-    return $Value -match '(?i)(Bearer\s+(?!<redacted>)[A-Za-z0-9._-]+|postgres(?:ql)?://|(?:Password|Pwd)\s*[=:]\s*(?!<redacted>)[^;\s"}]+|(?:[A-Z0-9_]*(?:API_?KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD))\s*=\s*(?!<redacted>)[^\s"}]+|gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]{8,}|[?&](?:access_token|api_key|apikey|token|secret|password|key)=(?!<redacted>)[^&#\s"}]+|"(?:token|api_key|apikey|password|passwd|pwd|secret|authorization|connection_string|oauth)[^"]*"\s*:\s*"(?!<redacted>))'
+    return $Value -match '(?i)(Bearer\s+(?!<redacted>)[A-Za-z0-9._-]+|postgres(?:ql)?://|(?:Password|Pwd)\s*[=:]\s*(?!<redacted>)[^;\s"}]+|\b(?:token|secret|password|passwd|api[-_]?key)\s+(?!<redacted>)[^\s"},;]+|(?:[A-Z0-9_]*(?:API_?KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD))\s*=\s*(?!<redacted>)[^\s"}]+|gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]{8,}|[?&](?:access_token|api_key|apikey|token|secret|password|key)=(?!<redacted>)[^&#\s"}]+|"(?:token|api_key|apikey|password|passwd|pwd|secret|authorization|connection_string|oauth)[^"]*"\s*:\s*"(?!<redacted>))'
 }
 function Protect-OperationSensitiveValue($Value, [string]$PropertyName = "") {
     if ($null -eq $Value) { return $null }

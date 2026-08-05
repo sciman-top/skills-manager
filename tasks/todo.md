@@ -49,7 +49,7 @@
 - [x] M0.1 补齐 North Star、native baseline、双证据流、删除评审与 pilot 计数合同。
 - [ ] M1 收集并 review 10 个真实 observe-only 样本（当前 0/10）。
 
-M0/M0.2/M0.3 maintenance design planning package 为 11/11 `repo_verified`；M1 已获授权并保持 `collecting (0/10)`，但没有任何真实样本、并行/工具/模型策略收益、pilot 完成或业务收益声明。coordinator/lease/model-router runtime、仓库 Radar live refresh、仓库 custom-agent/host config mutation和社区工具安装均未发生；宿主侧当前默认已收敛为 Luna max，Sol xhigh/Sol medium/Terra high native subagent 观察和首个 Radar Scheduled run（21 entries，合同通过）仅保留历史 receipt。typed-core TC0/TC1 只完成 shadow PoC，PowerShell 领域实现未替换。当前 shell 支持面已独立收敛为 PS7-only；M3/TC3 conditional、TC2/P6 admission/业务 `live_accepted` 均未执行。
+M0/M0.2/M0.3 maintenance design planning package 为 11/11 `repo_verified`；M1 已获授权并保持 `collecting (0/10)`，但没有任何真实样本、并行/工具/模型策略收益、pilot 完成或业务收益声明。coordinator/lease/model-router runtime、仓库 Radar live refresh、仓库 custom-agent/host config mutation和社区工具安装均未发生；Luna max 仅是用户/CLI provider 默认且 CLI 探针通过，当前 collaboration spawn receipt 为 `confirmed_unavailable`，不能写成宿主所有 surface 已收敛。Sol/Terra native subagent 与首个 Radar Scheduled run 仅保留对应 surface 的历史 receipt。typed-core TC0/TC1 只完成 shadow PoC，PowerShell 领域实现未替换。当前 shell 支持面已独立收敛为 PS7-only；M3/TC3 conditional、TC2/P6 admission/业务 `live_accepted` 均未执行。
 
 ## PowerShell 7 runtime migration checklist
 

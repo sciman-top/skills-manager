@@ -40,7 +40,7 @@ Describe 'reference refresh remote provenance safety' {
         $result = & $script:refreshScript -ManifestPath $manifestPath -ReferencesRoot $referencesRoot -OutputDirectory $outputDirectory -RepoNames victim -FetchOnly
         $record = @($result.results)[0]
 
-        $record.status | Should Be 'origin-mismatch'
+        $record.status | Should Be 'origin-identity-mismatch'
         $record.origin_matches_manifest | Should Be $false
         [System.IO.Path]::GetFullPath([string]$record.declared_upstream) | Should Be ([System.IO.Path]::GetFullPath($declaredRemote))
         [System.IO.Path]::GetFullPath([string]$record.actual_origin) | Should Be ([System.IO.Path]::GetFullPath($attackerRemote))

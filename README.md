@@ -52,7 +52,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\skills.ps1 agent-validate --inpu
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\skills.ps1 agent-plan --input .\tests\fixtures\agent-workflow\valid-request.json --json
 ```
 
-输出固定 `decision_owner=host_ai`、`executor=host_native_runtime` 和 `provider_calls/native_mutations/writes=0`。实际并发由宿主按当前 wave/group 使用原生 subagent/worktree 拉起，并以 verified completion receipt 解锁下一 wave；serial/high-risk/high-ambiguity、共享 seam、schema/migration、Git/external state 与最终 full gate 始终串行。当前最大真值是本仓 `repo_verified/repo_advisory_only` 加独立 `host_evaluation_partial`；Luna max 的 read-only CLI/provider probe 已通过，但 collaboration spawn 尚不可用，历史 Radar v1 receipt 也不满足 v2 revalidation。
+输出固定 `decision_owner=host_ai`、`executor=host_native_runtime` 和 `provider_calls/native_mutations/writes=0`。实际并发由宿主按当前 wave/group 使用原生 subagent/worktree 拉起，并以 verified completion receipt 解锁下一 wave；serial/high-risk/high-ambiguity、共享 seam、schema/migration、Git/external state 与最终 full gate 始终串行。模型可用性按目标 surface 归一为 `confirmed_available / confirmed_unavailable / unknown`，`unknown` 不得被 Radar 或另一 provider receipt 提升。当前最大真值是本仓 `repo_verified/repo_advisory_only` 加独立 `host_evaluation_partial`；Luna max 的 read-only CLI/provider probe 已通过，但 collaboration spawn 当前为 `confirmed_unavailable`，历史 Radar v1 receipt 也不满足 v2 revalidation。
 
 Phase 1 的只读入口（未指定 `--out` 时不写文件）：
 
@@ -62,7 +62,7 @@ Phase 1 的只读入口（未指定 `--out` 时不写文件）：
 .\skills.ps1 rule-estate-audit --workspace-root D:\CODE --registry .\audit-targets.json --json
 ```
 
-`rule-estate-audit` 默认排除 `external` 与 `文档`，自动发现工作区直属 Git 仓，报告目标清单漂移、Codex/Claude common/delta 对齐、规则版本和 `Global Rule -> Repo Action` 覆盖。`--out <report.json>` 只允许显式写一个报告文件，且不允许覆盖发现到的规则文件。
+`rule-estate-audit` 默认排除 `external` 与 `文档`，自动发现工作区直属 Git 仓，报告目标清单漂移、Codex/Claude common/delta 对齐、规则版本和 `Global Rule -> Repo Action` 覆盖。`--out <report.json>` 只允许在显式 workspace root 内写一个报告文件，不得穿过 reparse/junction 祖先，也不允许覆盖发现到的规则文件；plan/apply 控制文件使用同一边界。
 
 经人工或登记策略审阅的全局/项目规则 change-set 可进入受控多目标流程：
 

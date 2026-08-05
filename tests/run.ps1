@@ -4,7 +4,9 @@ param(
     [int]$TopSlowFiles = 10,
     [ValidateRange(1, 100)]
     [int]$TopSlowCases = 15,
-    [string]$TimingReportPath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'reports\test-timings\current.json')
+    [string]$TimingReportPath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'reports\test-timings\current.json'),
+    [string]$UnitTestPath = (Join-Path $PSScriptRoot 'Unit'),
+    [string]$E2ETestPath = (Join-Path $PSScriptRoot 'E2E')
 )
 
 $ErrorActionPreference = "Stop"
@@ -56,6 +58,13 @@ function Write-PesterTimingConsole($Profile, [int]$FileLimit, [int]$CaseLimit) {
         Write-Host ('slow_test_case stage={0} rank={1} elapsed_ms={2} result={3} path={4} describe={5} name={6}' -f $Profile.stage, $rank, $row.elapsed_ms, $row.result, $row.path, $row.describe, $row.name)
     }
 }
+
+function Assert-PesterStageDiscovered($PesterResult, [string]$Stage) {
+    $total = if ($null -ne $PesterResult) { [int]$PesterResult.TotalCount } else { 0 }
+    if ($total -le 0) {
+        throw ("{0} test discovery returned zero tests" -f $Stage)
+    }
+}
 $requiredPesterVersion = [version]"4.10.1"
 $requiredPester = Get-Module -ListAvailable -Name Pester |
     Where-Object { $_.Version -eq $requiredPesterVersion } |
@@ -68,17 +77,19 @@ $pesterVersion = (Get-Module Pester | Select-Object -First 1 -ExpandProperty Ver
 Write-Host ("Pester Version: {0}" -f $pesterVersion)
 $suiteTimer = [Diagnostics.Stopwatch]::StartNew()
 $stageTimer = [Diagnostics.Stopwatch]::StartNew()
-$unit = Invoke-Pester -Script "$PSScriptRoot\Unit" -PassThru -Show Failed,Summary
+$unit = Invoke-Pester -Script $UnitTestPath -PassThru -Show Failed,Summary
+Assert-PesterStageDiscovered $unit 'unit'
 $stageTimer.Stop()
 Write-Host ("unit_elapsed_ms={0}" -f $stageTimer.ElapsedMilliseconds)
 $stageTimer.Restart()
-$e2e = Invoke-Pester -Script "$PSScriptRoot\E2E" -PassThru -Show Failed,Summary
+$e2e = Invoke-Pester -Script $E2ETestPath -PassThru -Show Failed,Summary
+Assert-PesterStageDiscovered $e2e 'e2e'
 $stageTimer.Stop()
 Write-Host ("e2e_elapsed_ms={0}" -f $stageTimer.ElapsedMilliseconds)
 $suiteTimer.Stop()
 Write-Host ("test_suite_elapsed_ms={0}" -f $suiteTimer.ElapsedMilliseconds)
-$unitTiming = Get-PesterTimingProfile $unit 'unit' (Join-Path $PSScriptRoot 'Unit')
-$e2eTiming = Get-PesterTimingProfile $e2e 'e2e' (Join-Path $PSScriptRoot 'E2E')
+$unitTiming = Get-PesterTimingProfile $unit 'unit' ([System.IO.Path]::GetFullPath($UnitTestPath))
+$e2eTiming = Get-PesterTimingProfile $e2e 'e2e' ([System.IO.Path]::GetFullPath($E2ETestPath))
 Write-PesterTimingConsole $unitTiming $TopSlowFiles $TopSlowCases
 Write-PesterTimingConsole $e2eTiming $TopSlowFiles $TopSlowCases
 $timingReport = [pscustomobject][ordered]@{

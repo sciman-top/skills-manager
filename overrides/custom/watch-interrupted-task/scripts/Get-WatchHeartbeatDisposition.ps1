@@ -14,6 +14,7 @@ param(
         'needs_input',
         'complete',
         'non_transient_failure',
+        'stopped',
         'unknown',
         'stale_policy_running',
         'soft_guard_only'
@@ -39,6 +40,10 @@ param(
 
     [switch]$AcceptanceVerified,
     [switch]$NoActiveTurn,
+    [switch]$TaskStopped,
+    [AllowEmptyString()][string]$StopReason = '',
+    [switch]$RecoveryPending,
+    [AllowEmptyString()][string]$NextRetryAt = '',
     [ValidateRange(0, 1000)][int]$ConsecutiveSameBlockCount = 0,
     [switch]$SameBlockingConditionConfirmed,
     [switch]$NoMeaningfulProgressPossible,
@@ -56,9 +61,12 @@ $result = [ordered]@{
     automation_action = 'keep_active'
     mutation_owner = 'none'
     notification_action = 'dont_notify'
-    next_retry_at = $NextRetryAtUtc
+    next_retry_at = if (-not [string]::IsNullOrWhiteSpace($NextRetryAtUtc)) { $NextRetryAtUtc } else { $NextRetryAt }
     requires_receipt = $false
     reason_code = 'state_observed'
+    task_stopped = [bool]$TaskStopped
+    stop_reason = $StopReason
+    recovery_pending = [bool]$RecoveryPending
 }
 
 $evaluationNow = [DateTimeOffset]::MinValue
@@ -94,12 +102,12 @@ function Test-RecoveryEvidence {
         $result.reason_code = 'missing_or_stale_evidence'
         return $false
     }
-    if ([string]::IsNullOrWhiteSpace($CheckpointId)) {
-        $result.reason_code = 'missing_checkpoint'
+    if ($CheckpointId -notmatch '^watch-checkpoint:[0-9a-f]{64}$') {
+        $result.reason_code = 'invalid_checkpoint'
         return $false
     }
-    if ([string]::IsNullOrWhiteSpace($ReceiptKey)) {
-        $result.reason_code = 'missing_receipt_key'
+    if ($ReceiptKey -notmatch '^watch-receipt:[0-9a-f]{64}$') {
+        $result.reason_code = 'invalid_receipt_key'
         return $false
     }
     if ($ExternalEffectState -notin @('none', 'safe')) {
@@ -107,6 +115,26 @@ function Test-RecoveryEvidence {
         return $false
     }
     return $true
+}
+
+function Test-StoppedEvidence {
+    if (-not $TaskStopped) {
+        $result.reason_code = 'stop_decision_unproved'
+        return $false
+    }
+    if ($RecoveryPending -or -not [string]::IsNullOrWhiteSpace($NextRetryAt)) {
+        $result.reason_code = 'recovery_or_retry_pending'
+        return $false
+    }
+    if (-not $NoActiveTurn) {
+        $result.reason_code = 'active_turn_present_or_unproved'
+        return $false
+    }
+    if ([string]::IsNullOrWhiteSpace($StopReason) -or $StopReason -notmatch '^[a-z0-9][a-z0-9._:-]{0,127}$') {
+        $result.reason_code = 'stop_reason_invalid'
+        return $false
+    }
+    return (Test-RecoveryEvidence)
 }
 
 if ($OperatingMode -ceq 'supervisor_monitor_only') {
@@ -160,38 +188,39 @@ elseif ($State -ceq 'goal_satisfied') {
         $result.reason_code = 'acceptance_unproved'
     }
 }
-elseif ($State -ceq 'needs_input') {
-    $result.task_action = 'stop_for_user'
-    $result.notification_action = 'notify_once'
-    $result.reason_code = 'human_gate'
-    if ($GoalStatus -ceq 'active' -and $ConsecutiveSameBlockCount -ge 3 -and
-        $SameBlockingConditionConfirmed -and $NoMeaningfulProgressPossible) {
+elseif ($State -in @('natural_pause', 'needs_input', 'complete', 'non_transient_failure', 'stopped')) {
+    $result.task_action = if ($State -ceq 'needs_input') { 'stop_for_user' } else { 'stop_terminal' }
+    if ($State -in @('needs_input', 'non_transient_failure')) {
+        $result.notification_action = 'notify_once'
+    }
+    $result.reason_code = switch ($State) {
+        'natural_pause' { 'user_pause_or_checkpoint' }
+        'needs_input' { 'human_gate' }
+        'complete' { 'task_complete' }
+        'non_transient_failure' { 'non_transient_failure' }
+        default { 'stable_stop_observed' }
+    }
+    if ($State -ceq 'needs_input' -and $GoalStatus -ceq 'active' -and
+        $ConsecutiveSameBlockCount -ge 3 -and $SameBlockingConditionConfirmed -and
+        $NoMeaningfulProgressPossible) {
         $result.goal_action = 'mark_blocked'
-        $result.reason_code = 'proved_repeated_impasse'
+    }
+    if (Test-StoppedEvidence) {
+        $result.automation_action = 'request_supervisor_cleanup'
+        $result.mutation_owner = 'target_thread'
+        $result.requires_receipt = $true
+        $result.reason_code = 'proved_stopped_cleanup_ready'
     }
 }
-elseif ($State -in @('non_transient_failure', 'unknown', 'soft_guard_only')) {
+elseif ($State -in @('unknown', 'soft_guard_only')) {
     $result.notification_action = 'notify_once'
     $result.reason_code = $State
-}
-elseif ($State -ceq 'complete') {
-    if ($GoalStatus -in @('none', 'complete') -and $AcceptanceVerified -and $NoActiveTurn -and (Test-RecoveryEvidence)) {
-        $result.automation_action = 'request_supervisor_cleanup'
-        $result.requires_receipt = $true
-        $result.reason_code = 'already_complete_cleanup_ready'
-    }
-    else {
-        $result.reason_code = 'cleanup_evidence_required'
-    }
 }
 elseif ($State -ceq 'peer_busy') {
     $result.reason_code = 'peer_busy_retry_later'
 }
 elseif ($State -ceq 'running') {
     $result.reason_code = 'already_running'
-}
-elseif ($State -ceq 'natural_pause') {
-    $result.reason_code = 'user_pause_or_checkpoint'
 }
 elseif ($State -ceq 'stale_policy_running') {
     $result.reason_code = 'stale_turn_must_finish'

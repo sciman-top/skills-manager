@@ -26,6 +26,28 @@ function Set-AuditTestWorkspace([string]$root) {
     EnsureDir $script:ImportDir
 }
 
+function New-AuditValidatedWorkflowReceiptFixture([string]$RecommendationsPath) {
+    $resolved = [IO.Path]::GetFullPath($RecommendationsPath)
+    $state = Get-AuditWorkflowInputState $resolved
+    $receipt = [pscustomobject][ordered]@{
+        schema_version = 1
+        workflow = 'recommendations_validate_dry_run'
+        generated_at = [datetimeoffset]::UtcNow.ToString('o')
+        success = $true
+        persisted = $false
+        recommendations_path = $resolved
+        recommendations_sha256 = Get-FileContentHash $resolved
+        stages = [pscustomobject]@{
+            recommendations_validation = [pscustomobject]@{ status = 'passed' }
+            preflight = [pscustomobject]@{ status = 'passed' }
+            dry_run = [pscustomobject]@{ status = 'passed' }
+            input_stability = [pscustomobject]@{ status = 'passed' }
+        }
+        input_stability = [pscustomobject]@{ matched = $true; after_dry_run = $state }
+    }
+    Write-AuditJsonFile (Get-AuditWorkflowReportPath $resolved) $receipt
+}
+
 Describe "Skill Audit E2E" {
     Context "Audit bundle" {
         It "Emits outer AI prompt file in the audit bundle" {
@@ -158,6 +180,7 @@ Describe "Skill Audit E2E" {
                 do_not_install = @()
             }
             Set-ContentUtf8 $recommendationsPath ($recommendations | ConvertTo-Json -Depth 20)
+            New-AuditValidatedWorkflowReceiptFixture $recommendationsPath
 
             Mock 构建生效 {}
             Mock Invoke-Doctor { [pscustomobject]@{ pass = $true } }
@@ -256,6 +279,7 @@ Describe "Skill Audit E2E" {
                 )
             }
             Set-ContentUtf8 $recommendationsPath ($recommendations | ConvertTo-Json -Depth 20)
+            New-AuditValidatedWorkflowReceiptFixture $recommendationsPath
 
             Mock 同步MCP {}
             Mock 构建生效 {}

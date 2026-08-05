@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "sync_mode": "link",
   "skill_projection": {
     "enabled": true,

@@ -352,7 +352,7 @@ M0.2 不增加新的 pilot 样本类别或第二个 registry，而是在每个�
 
 M0.2 的执行协议如下：2–3 个 Agent 只在设计问题可独立时形成 read-only panel；写入只在 base revision 固定、依赖已满足、write set 互斥、candidate 可独立验证且 integration owner 明确时并行。共享文件、生成 seam、迁移、lock/config、Git ref/index 和同一外部状态一律单 writer/串行。lease 是 owner/write-set/base/recovery 的 coordinator claim；Git CAS/hash 只拒绝 stale 更新，不排队文件、不自动选 winner。当前实现完全复用宿主 task/subagent/worktree 与 Git，不建立 scheduler、daemon、database 或新 schema major。
 
-M0.3 的模型策略由宿主 AI 执行：用户拥有目标、价值排序和不可逆授权；宿主生成 TaskGraph、决定串并行、选择/升级模型并综合结果；skills-manager 提供 Radar/成本/风险建议与 deterministic admission；Codex native runtime 实际 spawn/wait/steer/integrate。`Sol xhigh / Sol medium / Luna max` 是当前三个软锚点，Luna max 是当前用户默认；Radar 以显式、带过期时间的 snapshot 更新，实际同类任务返工/门禁/费用/时长优先于排行榜，且不能自行增加第四档。缺工具/权限/凭据不允许通过升档伪装解决。
+M0.3 的模型策略由宿主 AI 执行：用户拥有目标、价值排序和不可逆授权；宿主生成 TaskGraph、决定串并行、选择/升级模型并综合结果；skills-manager 提供 Radar/成本/风险建议与 deterministic admission；Codex native runtime 实际 spawn/wait/steer/integrate。`Sol xhigh / Sol medium / Luna max` 是当前三个软锚点，Luna max 是当前用户默认；软锚点必须由目标 surface 的 `confirmed_available` receipt 解锁，CLI/API gateway 不能替 collaboration spawn 背书，`unknown` 不得被 Radar 提升。Radar 以显式、带过期时间的 snapshot 更新，实际同类任务返工/门禁/费用/时长优先于排行榜，且不能自行增加第四档。缺工具/权限/凭据不允许通过升档伪装解决。
 
 PowerShell 技术路线采用 strangler migration，不直接重写：
 
@@ -385,11 +385,11 @@ M3 判定优先删除性维护：pilot 没有缩短 TTFV、没有减少返工/�
 | --- | --- | --- | --- | --- |
 | `AWA-001` | `repo_verified` | spec、manifest、PRD/架构/路线图映射与边界 | `DECISION_OWNER=host_ai`、`RUNTIME_SCHEDULER_STATUS=not_introduced` 等 marker 通过 | native runtime |
 | `AWA-002` | `repo_verified` | `src/Domain/AgentWorkflow.ps1`：TaskGraph/FailurePacket v1、RadarSnapshot v2 与 canonical write-path validator | DAG cycle/unknown/order、source freshness/non-empty entries/forbidden policy field、failure correction/redaction 负例通过 | Radar quality |
-| `AWA-003` | `repo_verified` | `src/Application/ModelAndAgentPolicy.ps1`：completion receipt、one-group barrier waves、parallel admission、三档 host proposal validation/local outcomes 与 escalation | `discover -> implement+document -> integrate`；serial/high-risk/high-ambiguity barrier；stale Radar fail-closed；retry 重新准入 | auto model switch |
+| `AWA-003` | `repo_verified` | `src/Application/ModelAndAgentPolicy.ps1`：completion receipt、one-group barrier waves、parallel admission、三档 host proposal validation/local outcomes 与 escalation | `discover -> implement+document -> integrate`；surface-scoped availability 三态；unknown/Radar fail-closed；retry 重新准入 | auto model switch |
 | `AWA-004` | `repo_verified` | `agent-plan/agent-validate`、bundle 接线和 repo-contained JSON adapter | exit/envelope stable；provider/native/write counters 0 | provider/subagent call |
 | `AWA-005` | `repo_verified` | advisory verifier、focused tests、full gate、evidence/README/根契约同步 | verifier 0 findings；full gate 0；P6 hold/M1 0/10/live not_run | host_loaded/live_accepted |
 
-波次与 admission 的执行顺序是：宿主生成 Product Baseline 与 TaskGraph → `agent-validate` → `agent-plan` → 宿主只在当前通过的 wave/group 使用 native spawn/worktree → 等待实际 verified completion receipt → integration owner 串行消费 candidate → 下一 wave/affected/full gate。每 wave 只有一个可执行 group；serial/high-risk/high-ambiguity、共享文件、生成链、schema/migration、lock/config、Git index/ref、同一外部状态和最终 closeout永远串行。只有固定 base、依赖 receipt 完成、canonical write set 互斥、独立验证和 owner 齐全才可并行。模型只由宿主提案，本仓按 `user override -> local comparable outcomes -> host availability -> fresh Radar -> host default` 校验证据；corrected retry 默认串行，重新 admission 后才可并发。
+波次与 admission 的执行顺序是：宿主生成 Product Baseline 与 TaskGraph → `agent-validate` → `agent-plan` → 宿主只在当前通过的 wave/group 使用 native spawn/worktree → 等待实际 verified completion receipt → integration owner 串行消费 candidate → 下一 wave/affected/full gate。每 wave 只有一个可执行 group；serial/high-risk/high-ambiguity、共享文件、生成链、schema/migration、lock/config、Git index/ref、同一外部状态和最终 closeout永远串行。只有固定 base、依赖 receipt 完成、canonical write set 互斥、独立验证和 owner 齐全才可并行。模型只由宿主提案，本仓按 `user override -> local comparable outcomes -> surface-scoped host availability -> fresh Radar -> host default` 校验证据；availability 为三态前置门禁，corrected retry 默认串行，重新 admission 后才可并发。
 
 该 track 的 task truth 为 `tasks/skills-manager-vnext-agent-workflow-advisory.tasks.json`，spec 为 `docs/superpowers/specs/2026-08-05-agent-workflow-advisory-runtime.md`，verifier 为 `scripts/verify-agent-workflow-advisory.ps1`。它与 M0.3 历史 planning truth 并存但不计入 M1 的 10 个真实样本；若 native Codex 后续覆盖同一能力或 pilot 无净收益，按 retirement trigger 删除 advisory seam。
 
