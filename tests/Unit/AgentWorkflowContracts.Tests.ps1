@@ -100,18 +100,19 @@ Describe 'Agent workflow advisory contracts' {
         @($staleResult.findings | Where-Object code -eq 'radar_snapshot_stale').Count | Should Be 1
     }
 
-    It 'keeps model routing host-owned and treats the three tiers as soft anchors' {
+    It 'keeps model routing host-owned and gives the user override priority across four soft anchors' {
         Assert-AgentWorkflowFunction 'New-ModelPolicyProposal'
         $fixture = Get-AgentWorkflowFixture 'valid-request.json'
         $proposal = $fixture.model_proposals[0]
 
-        $result = New-ModelPolicyProposal -TaskId $proposal.task_id -RequestedTier $proposal.requested_tier -Rationale $proposal.rationale -RadarSnapshot $fixture.radar_snapshot -HostAvailablePairs $proposal.host_available_pairs -LocalOutcomes $proposal.local_outcomes -Now $fixture.now
+        $result = New-ModelPolicyProposal -TaskId $proposal.task_id -RequestedTier $proposal.requested_tier -Rationale $proposal.rationale -RadarSnapshot $fixture.radar_snapshot -HostAvailablePairs $proposal.host_available_pairs -LocalOutcomes $proposal.local_outcomes -Now $fixture.now -UserOverrideTier $proposal.user_override_tier
 
         $result.decision_owner | Should Be 'host_ai'
-        $result.selected_tier | Should Be 'luna_max'
-        $result.model_family | Should Be 'gpt-5.6-luna'
-        $result.reasoning_effort | Should Be 'max'
-        $result.evidence_priority | Should Be 'local_outcomes_then_radar_then_host_default'
+        $result.selected_tier | Should Be 'terra_high'
+        $result.model_family | Should Be 'gpt-5.6-terra'
+        $result.reasoning_effort | Should Be 'high'
+        $result.user_override | Should Be $true
+        $result.evidence_priority | Should Be 'user_override_then_local_outcomes_then_host_availability_then_radar_then_host_default'
         $result.provider_calls | Should Be 0
         $result.native_mutations | Should Be 0
     }
@@ -145,7 +146,13 @@ Describe 'Agent workflow advisory contracts' {
         $base.failure_kind = 'context'
         (Get-AgentEscalationDecision -FailurePacket $base).action | Should Be 'rescope_task_graph'
         $base.failure_kind = 'capacity'; $base.attempt_count = 2
-        (Get-AgentEscalationDecision -FailurePacket $base).action | Should Be 'replan_and_escalate'
+        $lunaEscalation = Get-AgentEscalationDecision -FailurePacket $base
+        $lunaEscalation.action | Should Be 'replan_and_escalate'
+        $lunaEscalation.next_tier | Should Be 'terra_high'
+        $base.attempted_tier = 'terra_high'; $base.escalation_count = 1
+        (Get-AgentEscalationDecision -FailurePacket $base).next_tier | Should Be 'sol_medium'
+        $base.attempted_tier = 'sol_medium'
+        (Get-AgentEscalationDecision -FailurePacket $base).next_tier | Should Be 'sol_xhigh'
         $base.failure_kind = 'permission'
         (Get-AgentEscalationDecision -FailurePacket $base).action | Should Be 'fail_closed'
         $base.failure_kind = 'capacity'; $base.attempt_count = 4; $base.escalation_count = 2; $base.attempted_tier = 'sol_xhigh'

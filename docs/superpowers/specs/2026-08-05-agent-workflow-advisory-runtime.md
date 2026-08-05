@@ -10,7 +10,9 @@
 **PROVIDER_CALL_STATUS**: `none`
 **NATIVE_MUTATION_STATUS**: `none`
 **RADAR_FETCH_STATUS**: `not_implemented`
-**HOST_LOADED_STATUS**: `not_run`
+**HOST_LOADED_STATUS**: `host_evaluation_partial_pass`
+**HOST_ORCHESTRATION_STATUS**: `native_spawn_observed`
+**HOST_RADAR_REFRESH_STATUS**: `scheduled_run_pass`
 **LIVE_ACCEPTANCE_STATUS**: `not_run`
 **P6_ADMISSION_STATUS**: `hold`
 **SCHEMA_POLICY**: `operation_contract_v1_compatible_no_major`
@@ -29,7 +31,7 @@
 | Codex native runtime | 实际 agent thread、worktree、模型调用、等待、steer 和 candidate integration | 否；由宿主使用 |
 | Git/tests/live probe | freshness、代码正确性、外部效果和验收真值 | 否；只记录边界 |
 
-因此，本 track 不修改 `active_profile`、custom agent、provider/auth、sandbox、session 或当前模型；不抓取 Radar、不保存 token、不启动 daemon/queue/database，不安装社区 orchestration 项目。
+因此，本 track 不修改 `active_profile`、custom agent、provider/auth、sandbox、session 或当前模型；不抓取 Radar、不保存 token、不启动 daemon/queue/database，不安装社区 orchestration 项目。宿主侧的全局委派规则、默认子代理配置和 Scheduled automation 属于独立 host acceptance，不改变本仓 effect counters 或产品边界。
 
 ## 2. 为什么加入而不违背产品定位
 
@@ -127,23 +129,24 @@ CLI 输入是 UTF-8 JSON，schema version 1，最小字段如下。字段名与 
 
 通过 admission 后，由宿主 AI 调用 Codex 原生 subagent/worktree surface，并为每个 task 传递最小 context、base、write set、verification 和 stop condition。宿主等待同一 wave 的结果，再由 integration owner 串行集成；本仓 CLI 的 `provider_calls/native_mutations/writes` 永远为 0。
 
-## 6. 三档模型软锚点
+## 6. 四档模型软锚点
 
-三档只作为 host proposal 的可覆盖起点，不能被 deterministic script 静默路由：
+四档只作为 host proposal 的可覆盖起点，不能被 deterministic script 静默路由：
 
 | tier | 软锚点 | 默认适用任务 |
 | --- | --- | --- |
 | `sol_xhigh` | `gpt-5.6-sol + xhigh` | 需求/产品澄清、总体架构、跨服务生产 RCA、高价值高风险审查、最终裁决 |
 | `sol_medium` | `gpt-5.6-sol + medium` | 一般实现、日常 Bug 排查、中等复杂度审查、集成准备 |
+| `terra_high` | `gpt-5.6-terra + high` | 用户偏好的 balanced 默认；read-heavy 扫描、独立评审、边界清晰的中等任务与成本/时延敏感任务 |
 | `luna_max` | `gpt-5.6-luna + max` | 常规接口、SQL、单测、技术文档、机械变换和边界清晰的重复任务 |
 
-实际选择优先级为 `local comparable outcomes -> current host availability/explicit override -> fresh Radar snapshot -> host native default`。费用、wall-clock、token/context、重试/返工和不可逆风险一起构成 Pareto 观察；不得把每天变化的 Radar 排名硬编码为总分或永久配置。模型不存在、宿主不可用或 snapshot stale 时返回 `host_default` 与 fallback reason。
+实际选择优先级为 `user override -> local comparable outcomes -> current host availability -> fresh Radar snapshot -> host native default`。`Terra high` 是当前用户明确覆盖的 balanced 默认；Radar 后续变化只能生成可审计建议，不能自动提升为 `Terra max`。费用、wall-clock、token/context、重试/返工和不可逆风险一起构成 Pareto 观察；不得把每天变化的 Radar 排名硬编码为总分或永久配置。模型不存在、宿主不可用或 snapshot stale 时返回 `host_default` 与 fallback reason。
 
 ## 7. Radar snapshot
 
 Radar 只允许通过显式导入/刷新动作产生不可变 snapshot；本 track 不实现联网抓取。每个 entry 必须有 `model_label/model_family/reasoning_effort/score/estimated_cost/estimated_duration_seconds/sample_count/confidence`，snapshot 必须有 `source/captured_at/expires_at/raw_hash`。`expires_at <= now`、来源非 HTTP(S)、hash 非 SHA-256、样本/指标缺失或 schema 不兼容时 fail-closed，并忽略 Radar 对模型选择的影响。
 
-本地历史结果必须能记录同类任务的 gate pass、rework、actual cost/duration、人工纠正和集成成本；Radar 的社区分数不能替代真实任务证据，也不能证明 `host_loaded` 或 `live_accepted`。建议每天刷新，但刷新频率是宿主/用户操作，不是本仓 scheduler。
+本地历史结果必须能记录同类任务的 gate pass、rework、actual cost/duration、人工纠正和集成成本；Radar 的社区分数不能替代真实任务证据，也不能证明 `live_accepted`。2026-08-05 的 host acceptance 已手工生成并验证 ignored snapshot，并创建每日 21:00 的宿主 Scheduled automation；首个 scheduled run 于 21:05 产生 21-entry fresh snapshot 并通过本仓 validator。它不构成本仓 scheduler/provider runtime，也不能自动修改模型配置。
 
 ## 8. 失败与难度超预期
 
@@ -155,7 +158,7 @@ route
   -> one corrected retry (same tier, corrected context/tool)
   -> task/context: add evidence or rescope/replan
   -> tool: repair tool or reassign
-  -> capacity only: Luna max -> Sol medium -> Sol xhigh
+  -> capacity only: Luna max -> Terra high -> Sol medium -> Sol xhigh
   -> same issue_id second failure: supervisor serial takeover / clarify
   -> permission, credential, production authorization, user decision: fail-closed
 ```
@@ -205,9 +208,9 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File skills.ps1 agent-plan --input test
 
 ## 13. 官方与社区依据
 
-- Codex manual：`https://learn.chatgpt.com/docs/agent-configuration/subagents`、`https://learn.chatgpt.com/docs/models`、`https://learn.chatgpt.com/docs/long-running-work`。官方说明 subagent 适合 read-heavy/可独立任务，写入需隔离 worktree；Sol 适合复杂开放任务，Luna 适合快速、清晰、重复任务；更高 reasoning effort 增加时间和 token；宿主负责 spawn/wait/steer/汇总。
+- Codex manual：`https://learn.chatgpt.com/docs/agent-configuration/subagents`、`https://learn.chatgpt.com/docs/automations`、`https://learn.chatgpt.com/docs/models`、`https://learn.chatgpt.com/docs/long-running-work`。官方说明 Codex 可因适用 `AGENTS.md`/skill 条件性委派，subagent 适合 read-heavy/可独立任务，写入需隔离 worktree；Sol 适合复杂开放任务，Terra 适合速度/效率优先的辅助工作，Luna 适合快速、清晰、重复任务；更高 reasoning effort 增加时间和 token；宿主负责 spawn/wait/steer/汇总，Scheduled task 承接稳定重复工作。
 - Codex configuration：`https://learn.chatgpt.com/docs/config-file/config-reference`。custom agent 可以声明 model/reasoning effort，但显式 spawn/宿主配置优先级属于宿主边界，本仓不修改。
 - Codex Radar：`https://codexradar.com/` 只作为用户指定的时变社区观察输入；其每日成本/时延/分数必须经 snapshot、hash、expiry 和本地结果复核后才可影响建议。
 - 社区项目只提供协议启发，按既有 `references/reference-shelf.manifest.json` 和 `docs/EXTERNAL_REFERENCE_REPO_TIERS.md` 记录，不执行外部脚本，不引入第二控制面。
 
-**最大声明**：本 track `repo_verified` 只证明 deterministic advisory contract、CLI 接线、文档和 verifier；不证明任何模型已被自动调用、并发线程已拉起、Radar 刷新已运行、宿主配置已加载、外部生产动作已授权或业务 `live_accepted`。
+**最大声明**：本 track `repo_verified` 只证明 deterministic advisory contract、CLI 接线、文档和 verifier。独立 host acceptance 已观察到 Sol xhigh、Sol medium、Terra high 原生子代理，fresh CLI 已加载全局规则/配置，手工与首个 scheduled Radar snapshot 均通过本仓 validator；这些仍只是 `host_evaluation_partial_pass`，不证明任意任务都会自动委派、Luna 在所有 spawn surface 可用、模型策略产生普遍净收益、外部生产动作获授权或业务 `live_accepted`。

@@ -103,6 +103,7 @@ function Get-AgentModelTierAnchor([string]$Tier) {
     switch ($Tier.ToLowerInvariant()) {
         'sol_xhigh' { return [pscustomobject]@{ tier = 'sol_xhigh'; label = 'Sol xhigh'; model_family = 'gpt-5.6-sol'; reasoning_effort = 'xhigh' } }
         'sol_medium' { return [pscustomobject]@{ tier = 'sol_medium'; label = 'Sol medium'; model_family = 'gpt-5.6-sol'; reasoning_effort = 'medium' } }
+        'terra_high' { return [pscustomobject]@{ tier = 'terra_high'; label = 'Terra high'; model_family = 'gpt-5.6-terra'; reasoning_effort = 'high' } }
         'luna_max' { return [pscustomobject]@{ tier = 'luna_max'; label = 'Luna max'; model_family = 'gpt-5.6-luna'; reasoning_effort = 'max' } }
         default { return $null }
     }
@@ -139,7 +140,7 @@ function New-ModelPolicyProposal {
         requested_tier = $RequestedTier; selected_tier = $(if ($fallback) { 'host_default' } else { $anchor.tier })
         model_family = $(if ($fallback) { $null } else { $anchor.model_family }); reasoning_effort = $(if ($fallback) { $null } else { $anchor.reasoning_effort })
         rationale = $Rationale; user_override = (-not [string]::IsNullOrWhiteSpace($UserOverrideTier)); fallback_reason = $(if ($fallback) { @($fallbackReasons) -join ',' } else { $null })
-        evidence_priority = 'local_outcomes_then_radar_then_host_default'; local_outcomes = @(Copy-AgentWorkflowValue $LocalOutcomes); radar_snapshot_id = Get-OperationObjectProperty $RadarSnapshot 'snapshot_id'; radar_entry = Copy-AgentWorkflowValue $radarEntry
+        evidence_priority = 'user_override_then_local_outcomes_then_host_availability_then_radar_then_host_default'; local_outcomes = @(Copy-AgentWorkflowValue $LocalOutcomes); radar_snapshot_id = Get-OperationObjectProperty $RadarSnapshot 'snapshot_id'; radar_entry = Copy-AgentWorkflowValue $radarEntry
         provider_calls = 0; native_mutations = 0; writes = 0
     }
 }
@@ -159,7 +160,14 @@ function Get-AgentEscalationDecision {
     elseif ($kind -eq 'capacity') {
         if ($attempt -le 1) { $action = 'corrected_retry' }
         elseif ($escalations -ge 2 -or $tier -eq 'sol_xhigh') { $action = 'supervisor_takeover'; $requiresGraph = $true }
-        else { $action = 'replan_and_escalate'; $requiresGraph = $true; $nextTier = if ($tier -eq 'luna_max') { 'sol_medium' } else { 'sol_xhigh' } }
+        else {
+            $action = 'replan_and_escalate'; $requiresGraph = $true
+            $nextTier = switch ($tier) {
+                'luna_max' { 'terra_high' }
+                'terra_high' { 'sol_medium' }
+                default { 'sol_xhigh' }
+            }
+        }
     }
     return [pscustomobject][ordered]@{ action = $action; next_tier = $nextTier; parallel_allowed = ($action -in @('corrected_retry', 'repair_tool_or_reassign')); requires_new_task_graph = $requiresGraph; issue_id = [string](Get-OperationObjectProperty $FailurePacket 'issue_id'); findings = @() }
 }

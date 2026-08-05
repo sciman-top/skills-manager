@@ -43,13 +43,13 @@
 - [x] `SMV-MD-006` 固化稀疏工具栈、社区 disposition、context-adapter admission 与 M1 observation contract。
 - [x] `SMV-MD-007` 增强 evidence-group、M0.2 policy 和 sample observation 的 fail-closed verifier/tests。
 - [x] `SMV-MD-008` 同步 M0.2 产品/根契约/evidence，运行唯一 full gate 并限定 truth closeout。
-- [x] `SMV-MD-009` 固化 host-owned TaskGraph、三档模型软锚点、Radar snapshot、并发 admission 和失败升级合同。
+- [x] `SMV-MD-009` 固化 host-owned TaskGraph、四档模型软锚点（Terra high 用户 balanced override）、Radar snapshot、并发 admission 和失败升级合同。
 - [x] `SMV-MD-010` 固化 PowerShell thin shell + C#/.NET typed-core 条件性架构、TC0-TC3、兼容与回滚门禁。
 - [x] `SMV-MD-011` 增强 M0.3 verifier/tests，同步索引/根契约/README/evidence 并完成唯一 full gate 收口。
 - [x] M0.1 补齐 North Star、native baseline、双证据流、删除评审与 pilot 计数合同。
 - [ ] M1 收集并 review 10 个真实 observe-only 样本（当前 0/10）。
 
-M0/M0.2/M0.3 maintenance design planning package 为 11/11 `repo_verified`；M1 已获授权并保持 `collecting (0/10)`，但没有任何真实样本、并行/工具/模型策略收益、pilot 完成或业务收益声明。coordinator/lease/model-router runtime、Radar live refresh、custom-agent/host config mutation和社区工具安装均未发生；typed-core TC0/TC1 只完成 shadow PoC，PowerShell 领域实现未替换。当前 shell 支持面已独立收敛为 PS7-only；M3/TC3 conditional、TC2/P6 admission/业务 `live_accepted` 均未执行。
+M0/M0.2/M0.3 maintenance design planning package 为 11/11 `repo_verified`；M1 已获授权并保持 `collecting (0/10)`，但没有任何真实样本、并行/工具/模型策略收益、pilot 完成或业务收益声明。coordinator/lease/model-router runtime、仓库 Radar live refresh、仓库 custom-agent/host config mutation和社区工具安装均未发生；宿主侧已独立完成 Terra high 默认配置、Sol xhigh/Sol medium/Terra high native subagent 观察、fresh prompt load 和首个 Radar Scheduled run（21 entries，合同通过）。typed-core TC0/TC1 只完成 shadow PoC，PowerShell 领域实现未替换。当前 shell 支持面已独立收敛为 PS7-only；M3/TC3 conditional、TC2/P6 admission/业务 `live_accepted` 均未执行。
 
 ## PowerShell 7 runtime migration checklist
 
@@ -65,11 +65,11 @@ M0/M0.2/M0.3 maintenance design planning package 为 11/11 `repo_verified`；M1 
 
 - [x] `SMV-AWA-001` 冻结 user/host/repo/native runtime 分责、TaskGraph/Radar/FailurePacket v1 和 P6/host/live 边界。
 - [x] `SMV-AWA-002` 实现 pure TaskGraph、RadarSnapshot 与 FailurePacket validators，覆盖 DAG/Radar/redaction 负例。
-- [x] `SMV-AWA-003` 实现 deterministic waves、parallel admission、三档 soft anchor 和 bounded escalation/fail-closed。
+- [x] `SMV-AWA-003` 实现 deterministic waves、parallel admission、四档 soft anchor、Terra high 用户 override 和 bounded escalation/fail-closed。
 - [x] `SMV-AWA-004` 接入 PS7 `agent-plan/agent-validate`，真实 bundle envelope 固定 provider/native/write counters 0。
 - [x] `SMV-AWA-005` 建立 verifier/negative tests、产品/根/README/evidence 同步并以唯一 full gate 收口。
 
-该 adjacent track 为 5/5 `repo_verified / repo_advisory_only`：只证明仓库合同与 CLI，不证明 native subagent 已拉起、模型已动态切换、Radar 已刷新、host config 已加载或业务 `live_accepted`。宿主 AI 继续负责语义 TaskGraph、并发拉起、模型/effort 和结果综合；M1 仍为 `collecting (0/10)`，P6 hold。
+该 adjacent track 为 5/5 `repo_verified / repo_advisory_only`：只证明仓库合同与 CLI。独立 host receipt 已观察 Sol xhigh/Sol medium/Terra high 子代理、fresh CLI host load、手工与首个 scheduled Radar snapshot，但仅为 `host_evaluation_partial_pass`，不证明 Luna 在当前 collaboration spawn surface 可用、任意项目会自动委派、未来 scheduled run 永久可靠、模型策略有普遍净收益或业务 `live_accepted`。宿主 AI 继续负责语义 TaskGraph、并发拉起、模型/effort 和结果综合；M1 仍为 `collecting (0/10)`，P6 hold。
 
 ## Typed-core Operation Contract checklist
 

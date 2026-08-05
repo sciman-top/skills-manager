@@ -57,7 +57,7 @@ Describe 'Agent workflow advisory planning verifier' {
         $parsed.truth_boundary | Should Be 'repo_advisory_only'
         $parsed.tasks | Should Be 5
         $parsed.done | Should Be 5
-        $parsed.model_tiers | Should Be 3
+        $parsed.model_tiers | Should Be 4
         $parsed.provider_calls | Should Be 0
         $parsed.native_mutations | Should Be 0
         $parsed.writes | Should Be 0
@@ -72,11 +72,13 @@ Describe 'Agent workflow advisory planning verifier' {
         $manifest.provider_call_status = 'enabled'
         $manifest.native_mutation_status = 'enabled'
         $manifest.host_loaded_status = 'loaded'
+        $manifest.host_orchestration_status = 'unbounded_runtime'
+        $manifest.host_radar_refresh_status = 'repo_scheduler'
         $manifest.live_acceptance_status = 'live_accepted'
         $manifest | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $path -Encoding UTF8
 
         $parsed = (Invoke-AgentWorkflowAdvisoryVerifier $fixtureRoot).output | ConvertFrom-Json
-        foreach ($code in @('runtime_scheduler_boundary_invalid', 'provider_call_boundary_invalid', 'native_mutation_boundary_invalid', 'host_loaded_boundary_invalid', 'live_acceptance_boundary_invalid')) {
+        foreach ($code in @('runtime_scheduler_boundary_invalid', 'provider_call_boundary_invalid', 'native_mutation_boundary_invalid', 'host_loaded_boundary_invalid', 'host_orchestration_boundary_invalid', 'host_radar_boundary_invalid', 'live_acceptance_boundary_invalid')) {
             @($parsed.findings | Where-Object code -eq $code).Count | Should Be 1
         }
     }

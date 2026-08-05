@@ -90,7 +90,9 @@ if ($null -ne $manifest) {
             @{ property='provider_call_status'; value='none'; code='provider_call_boundary_invalid' },
             @{ property='native_mutation_status'; value='none'; code='native_mutation_boundary_invalid' },
             @{ property='radar_fetch_status'; value='not_implemented'; code='radar_fetch_boundary_invalid' },
-            @{ property='host_loaded_status'; value='not_run'; code='host_loaded_boundary_invalid' },
+            @{ property='host_loaded_status'; value='host_evaluation_partial_pass'; code='host_loaded_boundary_invalid' },
+            @{ property='host_orchestration_status'; value='native_spawn_observed'; code='host_orchestration_boundary_invalid' },
+            @{ property='host_radar_refresh_status'; value='scheduled_run_pass'; code='host_radar_boundary_invalid' },
             @{ property='live_acceptance_status'; value='not_run'; code='live_acceptance_boundary_invalid' }
         )) {
         if ([string]$manifest.($boundary.property) -ne $boundary.value) {
@@ -124,6 +126,7 @@ if ($null -ne $manifest) {
     $expectedTiers = [ordered]@{
         sol_xhigh = 'gpt-5.6-sol|xhigh|soft_anchor'
         sol_medium = 'gpt-5.6-sol|medium|soft_anchor'
+        terra_high = 'gpt-5.6-terra|high|user_preferred_soft_anchor'
         luna_max = 'gpt-5.6-luna|max|soft_anchor'
     }
     $tiers = @($manifest.model_tiers)
@@ -143,7 +146,9 @@ foreach ($required in @(
         @{ key='spec'; literal='**IMPLEMENTATION_STATUS**: `repo_advisory_only`'; code='implementation_boundary_missing' },
         @{ key='spec'; literal='**RUNTIME_SCHEDULER_STATUS**: `not_introduced`'; code='runtime_boundary_missing' },
         @{ key='spec'; literal='**RADAR_FETCH_STATUS**: `not_implemented`'; code='radar_boundary_missing' },
-        @{ key='spec'; literal='**HOST_LOADED_STATUS**: `not_run`'; code='host_boundary_missing' },
+        @{ key='spec'; literal='**HOST_LOADED_STATUS**: `host_evaluation_partial_pass`'; code='host_boundary_missing' },
+        @{ key='spec'; literal='**HOST_ORCHESTRATION_STATUS**: `native_spawn_observed`'; code='host_boundary_missing' },
+        @{ key='spec'; literal='**HOST_RADAR_REFRESH_STATUS**: `scheduled_run_pass`'; code='host_boundary_missing' },
         @{ key='spec'; literal='**LIVE_ACCEPTANCE_STATUS**: `not_run`'; code='live_boundary_missing' },
         @{ key='prd'; literal='FR-EWF-018'; code='product_requirement_missing' },
         @{ key='architecture'; literal='ADR-SMV-029'; code='architecture_decision_missing' },

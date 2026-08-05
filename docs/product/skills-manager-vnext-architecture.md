@@ -437,11 +437,11 @@ FailurePacket
   artifacts[] / exact_write_set[] / next_recommendation
 ```
 
-默认模型档位是可覆盖的软锚点：`Sol xhigh = gpt-5.6-sol + xhigh` 用于承重需求澄清、架构/重构、跨服务生产 RCA、高价值高风险审查和最终裁决；`Sol medium = gpt-5.6-sol + medium` 用于一般实现、日常排障、中等复杂度审查和集成准备；`Luna max = gpt-5.6-luna + max` 用于边界清楚、重复度高、可独立验证的 CRUD/SQL/单测/文档/机械变换。model ID 不是永久白名单；名称不存在、宿主不可用或 Radar 过期时，回退宿主当前官方/default model，并记录实际值与 override reason，而不是猜测等价模型或修改配置。
+默认模型档位是可覆盖的软锚点：`Sol xhigh = gpt-5.6-sol + xhigh` 用于承重需求澄清、架构/重构、跨服务生产 RCA、高价值高风险审查和最终裁决；`Sol medium = gpt-5.6-sol + medium` 用于一般实现、日常排障、中等复杂度审查和集成准备；用户偏好的 `Terra high = gpt-5.6-terra + high` 用于 balanced 的 read-heavy 扫描、独立评审和成本/时延敏感任务；`Luna max = gpt-5.6-luna + max` 用于边界清楚、重复度高、可独立验证的 CRUD/SQL/单测/文档/机械变换。model ID 不是永久白名单；名称不存在、宿主不可用或 Radar 过期时，回退宿主当前官方/default model，并记录实际值与 override reason，而不是猜测等价模型或修改配置。
 
 并行 admission 必须同时满足依赖完成、base revision 固定、write set 互斥或完全只读、外部写入已声明、candidate 可独立验证/丢弃、integration owner/order 明确。共享 file/config/lock/source-generated seam、schema/migration/backfill、Git index/ref、同一外部对象和内容依赖任务默认串行；最终集成、完整门禁和 truth closeout 始终串行。
 
-升级状态机固定为：初始 route -> 根因诊断后一次 corrected retry -> 若任务定义/上下文不足则补证据或重切片 -> 仅在模型能力不足时 `Luna max -> Sol medium -> Sol xhigh` -> 同一 `issue_id` 第二次失败后 clarify/re-plan -> 两次升级或承重风险由 supervisor 串行接管。缺工具、权限、凭据、生产授权或用户产品决定时 fail-closed，不能通过换模型绕过。每次换档必须携带 `FailurePacket`；禁止同 prompt 无限重试或在运行中的 agent 内无审计热切换。
+升级状态机固定为：初始 route -> 根因诊断后一次 corrected retry -> 若任务定义/上下文不足则补证据或重切片 -> 仅在模型能力不足时 `Luna max -> Terra high -> Sol medium -> Sol xhigh` -> 同一 `issue_id` 第二次失败后 clarify/re-plan -> 两次升级或承重风险由 supervisor 串行接管。缺工具、权限、凭据、生产授权或用户产品决定时 fail-closed，不能通过换模型绕过。每次换档必须携带 `FailurePacket`；禁止同 prompt 无限重试或在运行中的 agent 内无审计热切换。
 
 Radar 数据通过独立、显式 refresh 形成不可变 snapshot：记录 source、captured_at、model、reasoning_effort、score、estimated cost/duration、sample count、confidence、raw hash 和 expires_at。snapshot 只影响建议；本地同类任务的 gate、返工、耗时、实际费用和人工纠正优先于公开榜单。决策保持 Pareto 多目标，不把智力、费用、时间和风险压成永久单分数。
 
@@ -728,7 +728,7 @@ PoC acceptance：同一 corpus 的结构化输出/exit/finding parity；至少�
 
 ### `ADR-SMV-029 Runtime-independent agent workflow advisory contracts`
 
-决定：在不改变 ADR-SMV-026 ownership 的前提下，把 M0.3 文档态合同实现为三个窄 seam：`Domain/AgentWorkflow.ps1` 校验 TaskGraph/RadarSnapshot/FailurePacket v1；`Application/ModelAndAgentPolicy.ps1` 生成拓扑 wave、并行 admission、三档 soft-anchor proposal 和 bounded escalation；`Commands/AgentWorkflow.ps1` 只读取仓内 JSON 并输出 `repo_advisory_only` envelope。`agent-plan/agent-validate` 的 effect counters 固定为 0，实际 spawn/wait/steer/worktree/model application 继续由 Codex native runtime 执行。
+决定：在不改变 ADR-SMV-026 ownership 的前提下，把 M0.3 文档态合同实现为三个窄 seam：`Domain/AgentWorkflow.ps1` 校验 TaskGraph/RadarSnapshot/FailurePacket v1；`Application/ModelAndAgentPolicy.ps1` 生成拓扑 wave、并行 admission、四档 soft-anchor proposal 和 bounded escalation；`Commands/AgentWorkflow.ps1` 只读取仓内 JSON 并输出 `repo_advisory_only` envelope。`agent-plan/agent-validate` 的 effect counters 固定为 0，实际 spawn/wait/steer/worktree/model application 继续由 Codex native runtime 执行。
 
 理由：仅文档无法机械阻止循环依赖、shared write set、stale Radar、无 FailurePacket 升档或完成真值越级；引入 scheduler/provider runtime 又会复制宿主能力。小型 plain-object contract 能复用既有 OperationPlan finding/redaction helper、PS7 bundle 和 full gate，并为未来 typed-core seam 保持稳定 JSON 边界。
 
