@@ -79,6 +79,52 @@ function Get-TrimmedErrorMessage {
     return $lines[-1].Trim()
 }
 
+function ConvertTo-NormalizedGitRemote {
+    param([Parameter(Mandatory = $true)][string]$Remote)
+
+    $value = $Remote.Trim()
+    if ([string]::IsNullOrWhiteSpace($value)) { return '' }
+    if ([System.IO.Path]::IsPathRooted($value)) {
+        return [System.IO.Path]::GetFullPath($value).TrimEnd('\', '/').ToLowerInvariant()
+    }
+
+    $uri = $null
+    if ([uri]::TryCreate($value, [UriKind]::Absolute, [ref]$uri)) {
+        if ($uri.IsFile) {
+            return [System.IO.Path]::GetFullPath($uri.LocalPath).TrimEnd('\', '/').ToLowerInvariant()
+        }
+        $path = $uri.AbsolutePath.TrimEnd('/')
+        if ($path.EndsWith('.git', [StringComparison]::OrdinalIgnoreCase)) { $path = $path.Substring(0, $path.Length - 4) }
+        $port = if ($uri.IsDefaultPort) { '' } else { ':' + $uri.Port }
+        return ('{0}://{1}{2}{3}' -f $uri.Scheme.ToLowerInvariant(), $uri.Host.ToLowerInvariant(), $port, $path.ToLowerInvariant())
+    }
+
+    if ($value -match '^(?:[^@/]+@)?(?<host>[^:/]+):(?<path>.+)$') {
+        $path = $Matches.path.TrimEnd('/').Replace('\', '/')
+        if ($path.EndsWith('.git', [StringComparison]::OrdinalIgnoreCase)) { $path = $path.Substring(0, $path.Length - 4) }
+        return ('ssh://{0}/{1}' -f $Matches.host.ToLowerInvariant(), $path.TrimStart('/').ToLowerInvariant())
+    }
+
+    return $value.TrimEnd('\', '/').ToLowerInvariant()
+}
+
+function Get-RedactedGitRemote {
+    param([AllowEmptyString()][string]$Remote)
+
+    $value = $Remote.Trim()
+    $uri = $null
+    if (-not [string]::IsNullOrWhiteSpace($value) -and [uri]::TryCreate($value, [UriKind]::Absolute, [ref]$uri) -and -not $uri.IsFile) {
+        $builder = [UriBuilder]::new($uri)
+        $builder.UserName = ''
+        $builder.Password = ''
+        $builder.Query = ''
+        $builder.Fragment = ''
+        return $builder.Uri.AbsoluteUri.TrimEnd('/')
+    }
+    if ($value -match '^(?:[^@/]+@)(?<rest>.+)$') { return $Matches.rest }
+    return $value
+}
+
 function New-UtcTimestamp {
     return (Get-Date).ToUniversalTime().ToString("yyyyMMdd-HHmmss")
 }
@@ -392,8 +438,37 @@ foreach ($repoName in $RepoNames) {
         }
     }
 
+    $actualOrigin = try { Invoke-GitText -RepositoryPath $repoPath -Arguments @("remote", "get-url", "origin") } catch { '' }
+    $redactedActualOrigin = Get-RedactedGitRemote -Remote $actualOrigin
+    $originMatchesManifest = -not [string]::IsNullOrWhiteSpace($actualOrigin) -and
+        (ConvertTo-NormalizedGitRemote -Remote $actualOrigin) -ceq (ConvertTo-NormalizedGitRemote -Remote $upstreamUrl)
     $branch = Invoke-GitText -RepositoryPath $repoPath -Arguments @("branch", "--show-current")
     $headBefore = Invoke-GitText -RepositoryPath $repoPath -Arguments @("rev-parse", "HEAD")
+    if (-not $originMatchesManifest) {
+        $results.Add([pscustomobject]@{
+                repo = $repoName
+                tier = $repoTier
+                upstream = $upstreamUrl
+                declared_upstream = $upstreamUrl
+                actual_origin = $redactedActualOrigin
+                origin_matches_manifest = $false
+                path = $repoPath
+                status = "origin-mismatch"
+                branch = $branch
+                head_before = $headBefore
+                head_after = $headBefore
+                changed = $false
+                cloned = $cloned
+                ahead_behind = $null
+                remote_refs_current = $false
+                working_tree_matches_upstream = $null
+                upstream_revision = $null
+                consumable_revision = $headBefore
+                note = "existing origin does not match manifest upstream; fetch and pull blocked"
+                compare_log = @()
+            })
+        continue
+    }
     $statusText = Invoke-GitText -RepositoryPath $repoPath -Arguments @("status", "--short")
     $isDirty = -not [string]::IsNullOrWhiteSpace($statusText)
 
@@ -402,6 +477,9 @@ foreach ($repoName in $RepoNames) {
                 repo = $repoName
                 tier = $repoTier
                 upstream = $upstreamUrl
+                declared_upstream = $upstreamUrl
+                actual_origin = $redactedActualOrigin
+                origin_matches_manifest = $true
                 path = $repoPath
                 status = if ($cloned) { "cloned-dirty" } else { "skipped-dirty" }
                 branch = $branch
@@ -424,6 +502,9 @@ foreach ($repoName in $RepoNames) {
                 repo = $repoName
                 tier = $repoTier
                 upstream = $upstreamUrl
+                declared_upstream = $upstreamUrl
+                actual_origin = $redactedActualOrigin
+                origin_matches_manifest = $true
                 path = $repoPath
                 status = "fetch-failed"
                 branch = $branch
@@ -453,6 +534,9 @@ foreach ($repoName in $RepoNames) {
                     repo = $repoName
                     tier = $repoTier
                     upstream = $upstreamUrl
+                    declared_upstream = $upstreamUrl
+                    actual_origin = $redactedActualOrigin
+                    origin_matches_manifest = $true
                     path = $repoPath
                     status = "pull-skipped-no-branch"
                     branch = $branch
@@ -479,6 +563,9 @@ foreach ($repoName in $RepoNames) {
                     repo = $repoName
                     tier = $repoTier
                     upstream = $upstreamUrl
+                    declared_upstream = $upstreamUrl
+                    actual_origin = $redactedActualOrigin
+                    origin_matches_manifest = $true
                     path = $repoPath
                     status = "pull-failed"
                     branch = $branch
@@ -522,6 +609,9 @@ foreach ($repoName in $RepoNames) {
             repo = $repoName
             tier = $repoTier
             upstream = $upstreamUrl
+            declared_upstream = $upstreamUrl
+            actual_origin = $redactedActualOrigin
+            origin_matches_manifest = $true
             path = $repoPath
             status = $finalStatus
             branch = $branch
@@ -564,6 +654,12 @@ foreach ($result in $results) {
     }
     if ($result.upstream) {
         $lines.Add(('- 上游：`' + $result.upstream + '`'))
+    }
+    if ($result.actual_origin) {
+        $lines.Add(('- 实际 origin：`' + $result.actual_origin + '`'))
+    }
+    if ($null -ne $result.origin_matches_manifest) {
+        $lines.Add(('- origin matches manifest：`' + ([bool]$result.origin_matches_manifest).ToString().ToLowerInvariant() + '`'))
     }
     if ($result.path) {
         $lines.Add(('- 路径：`' + $result.path + '`'))
