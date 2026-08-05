@@ -29,7 +29,7 @@ Describe 'Cross-thread guard installer and doctor' {
     It 'keeps the trusted hook bytes stable across checkouts' {
         $attributesPath = Join-Path $repoRoot '.gitattributes'
         Test-Path -LiteralPath $attributesPath | Should Be $true
-        (Get-Content -Raw -LiteralPath $attributesPath) | Should Match '(?m)^scripts/hooks/block-cross-thread-send\.ps1 text eol=lf$'
+        (Get-Content -Raw -LiteralPath $attributesPath) | Should Match '(?m)^scripts/hooks/block-cross-thread-send\.ps1 text eol=lf\r?$'
 
         $sourceBytes = [System.IO.File]::ReadAllBytes($sourceHook)
         @($sourceBytes | Where-Object { $_ -eq 13 }).Count | Should Be 0
