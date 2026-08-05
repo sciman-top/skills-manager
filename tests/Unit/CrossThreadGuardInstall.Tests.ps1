@@ -31,9 +31,12 @@ Describe 'Cross-thread guard installer and doctor' {
         $attributesPath = Join-Path $repoRoot '.gitattributes'
         Test-Path -LiteralPath $attributesPath | Should Be $true
         (Get-Content -Raw -LiteralPath $attributesPath) | Should Match '(?m)^scripts/hooks/block-cross-thread-send\.ps1 text eol=lf\r?$'
+        (Get-Content -Raw -LiteralPath $attributesPath) | Should Match '(?m)^scripts/hooks/Test-WatchGuardRuntime\.ps1 text eol=lf\r?$'
 
         $sourceBytes = [System.IO.File]::ReadAllBytes($sourceHook)
         @($sourceBytes | Where-Object { $_ -eq 13 }).Count | Should Be 0
+        $runtimeDoctorBytes = [System.IO.File]::ReadAllBytes($sourceRuntimeDoctor)
+        @($runtimeDoctorBytes | Where-Object { $_ -eq 13 }).Count | Should Be 0
     }
 
     It 'installs to a stable host path, preserves other hooks, and never edits config.toml' {

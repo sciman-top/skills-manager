@@ -8,6 +8,18 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+function Get-OptionalProperty {
+    param(
+        [AllowNull()][object]$InputObject,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    if ($null -eq $InputObject) { return $null }
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
 function Invoke-FreshHooksList {
     param([Parameter(Mandatory = $true)][int]$TimeoutSeconds)
 
@@ -52,14 +64,15 @@ function Invoke-FreshHooksList {
             if ($null -eq $line) { break }
             if ([string]::IsNullOrWhiteSpace($line)) { continue }
             $response = $line | ConvertFrom-Json -Depth 50
-            if ($response.id -eq 1 -and -not $sentHooksList) {
+            $responseId = Get-OptionalProperty -InputObject $response -Name 'id'
+            if ($responseId -eq 1 -and -not $sentHooksList) {
                 $process.StandardInput.WriteLine((@{ jsonrpc = '2.0'; method = 'initialized'; params = @{} } | ConvertTo-Json -Compress))
                 $process.StandardInput.WriteLine((@{ jsonrpc = '2.0'; id = 2; method = 'hooks/list'; params = @{} } | ConvertTo-Json -Compress))
                 $process.StandardInput.Flush()
                 $sentHooksList = $true
                 continue
             }
-            if ($response.id -eq 2) {
+            if ($responseId -eq 2) {
                 return $response
             }
         }

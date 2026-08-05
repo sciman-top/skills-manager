@@ -58,4 +58,34 @@ Describe 'watch guard fresh runtime doctor' {
             $result.overall | Should Be 'soft_guard_only'
         }
     }
+
+    It 'ignores app-server notifications that do not carry a JSON-RPC id' {
+        $fakeBin = Join-Path $TestDrive 'fake-bin'
+        $null = New-Item -ItemType Directory -Path $fakeBin -Force
+        $fakeCodex = Join-Path $fakeBin 'codex.cmd'
+        $notification = @{ jsonrpc = '2.0'; method = 'server/ready'; params = @{} } | ConvertTo-Json -Compress
+        $initialize = @{ jsonrpc = '2.0'; id = 1; result = @{} } | ConvertTo-Json -Compress
+        $hooksList = New-HooksListJson
+        @(
+            '@echo off'
+            ('echo ' + $notification)
+            ('echo ' + $initialize)
+            ('echo ' + $hooksList)
+            'more >nul'
+        ) | Set-Content -LiteralPath $fakeCodex -Encoding Ascii
+
+        $originalPath = $env:PATH
+        try {
+            $env:PATH = $fakeBin + [System.IO.Path]::PathSeparator + $originalPath
+            $result = & $runtimeDoctor -CodexHome $script:codexHome -TimeoutSeconds 5
+        }
+        finally {
+            $env:PATH = $originalPath
+        }
+
+        $result.fresh_process | Should Be $true
+        $result.configuration_ready | Should Be $true
+        $result.hook_count | Should Be 1
+        $result.error | Should BeNullOrEmpty
+    }
 }

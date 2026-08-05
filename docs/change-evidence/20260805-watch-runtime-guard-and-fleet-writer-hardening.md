@@ -37,17 +37,19 @@ Current Codex hook semantics support `PreToolUse` for local function tools, incl
 
 - Initial RED across the five affected suites: `42` tests, `34 passed / 8 failed`.
 - First implementation run: `44` tests, `41 passed / 3 failed`; the remaining failures identified a PowerShell `$Matches` case-insensitive automatic-variable collision and two missing contract phrases.
-- After root-cause corrections: `44 passed / 0 failed` across:
+- After the first root-cause corrections: `44 passed / 0 failed` across:
   - `tests/Unit/CrossThreadHook.Tests.ps1`
   - `tests/Unit/CrossThreadGuardInstall.Tests.ps1`
   - `tests/Unit/WatchGuardRuntime.Tests.ps1`
   - `tests/Unit/WatchInterruptedTask.Tests.ps1`
   - `tests/Unit/WatchFleetSupervisor.Tests.ps1`
-- Coverage includes target self-delete, cross-target mutation, fleet self-mutation, unrelated automation mutation, direct-user lifecycle access, unreadable provenance, fresh runtime doctor trusted/modified/disabled states, shell negative probe semantics, native sentinel semantics, and stale completion evidence.
+- Final affected-suite regression after the real app-server notification fix: `45 passed / 0 failed`.
+- Coverage includes target self-delete, cross-target mutation, fleet self-mutation, unrelated automation mutation, direct-user lifecycle access, unreadable provenance, fresh runtime doctor trusted/modified/disabled states, notification-before-response parsing, shell negative probe semantics, native sentinel semantics, and stale completion evidence.
 - The isolated worktree initially lacked its tracked `mattpocock/skills` gitlink checkout and generated/vendor runtime baseline. This produced unrelated `SkillProjection`, `skill-integrity`, and `skill-routing` failures. After hydrating the exact pinned gitlink (`2ab958093e83e0ec752e6c1c5932da465bf23e0c`) and the current canonical generated/vendor baseline without changing test assertions, the affected projection test passed `32/32`.
-- Final full gate: `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree` exited `0`. Build, complete Unit/E2E, repository hygiene, generated sync, skill integrity (`107 skills`), skill routing, dependency baseline, skills config, host capability, planning, and doctor JSON stages all passed in `171548 ms`.
-- Final repository hook SHA-256 is `e425ceb2afb505c2ea271bc45c109682c74269c9e1b38d2090dde08a0158b4a8`; `git ls-files --eol` reports `i/lf w/lf attr/text eol=lf`. The runtime doctor SHA-256 is `650b26cefb5202455d41f3d5add42805af625047ce85f7f7343b464da198bcb8`.
+- Final full gate: `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree` exited `0`. Build, complete Unit/E2E, repository hygiene, generated sync, skill integrity (`107 skills`), skill routing, dependency baseline, skills config, host capability, planning, and doctor JSON stages all passed in `173261 ms`.
+- Final repository hook SHA-256 is `e425ceb2afb505c2ea271bc45c109682c74269c9e1b38d2090dde08a0158b4a8`; `git ls-files --eol` reports `i/lf w/lf attr/text eol=lf`. The LF-pinned runtime doctor SHA-256 is `4857d7c43f64de89707a600007c28219eef1f901a677fdfbdf146606941027dc`.
 - Fresh generated policy-revision-2 prompt hashes are `a6bb7b28516027e7895206d96e933f4e45cf7c68abadc533b4a031f1ae5109b4` for target prompts and `43671532d2fdb2863119768987d2fba7a61045193b24dfee4c30411c2b6a1705` for the fleet supervisor prompt. These replace the earlier target/fleet hashes and must be projected through the generators, never reconstructed manually.
+- The first real fresh-process doctor run exposed an additional live-path defect: app-server emitted a notification without a JSON-RPC `id`, and strict mode raised `The property 'id' cannot be found on this object`. The doctor now reads `id` as an optional property, a fake app-server regression emits the notification before responses, and the runtime doctor is LF-pinned so its installed receipt is stable across Windows checkouts.
 
 ## Live acceptance boundary
 
