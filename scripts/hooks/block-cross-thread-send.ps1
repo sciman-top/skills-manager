@@ -2,7 +2,13 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^[0-9A-Fa-f]{64}$')]
-    [string]$ExpectedScriptSha256
+    [string]$ExpectedScriptSha256,
+
+    [ValidatePattern('^[0-9A-Fa-f]{64}$')]
+    [string]$ExpectedTargetPromptSha256,
+
+    [ValidatePattern('^[0-9A-Fa-f]{64}$')]
+    [string]$ExpectedFleetPromptSha256
 )
 
 if (-not [string]::IsNullOrWhiteSpace($ExpectedScriptSha256)) {
@@ -149,7 +155,20 @@ function Test-CodeModeToolCall {
         [Parameter(Mandatory = $true)][string]$ToolNamePattern
     )
 
-    return $CodeSkeleton -match ('(?i)(?:^|[^A-Za-z0-9_$])tools\s*\.\s*(?:' + $ToolNamePattern + ')\s*\(')
+    return $CodeSkeleton -match ('(?i)(?:^|[^A-Za-z0-9_$])tools\s*(?:\?\s*\.\s*|\.\s*)(?:' + $ToolNamePattern + ')\s*\(')
+}
+
+function Test-CodeModeHighRiskRoute {
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$CodeSkeleton,
+        [Parameter(Mandatory = $true)][string]$ToolNamePattern
+    )
+
+    $direct = Test-CodeModeToolCall -CodeSkeleton $CodeSkeleton -ToolNamePattern $ToolNamePattern
+    $bracket = $Source -match ('(?is)\btools\s*(?:\?\s*\.)?\s*\[\s*["''](?:' + $ToolNamePattern + ')["'']\s*\]\s*\(')
+    $alias = $CodeSkeleton -match ('(?i)\b(?:const|let|var)\s+[A-Za-z_$][A-Za-z0-9_$]*\s*=\s*tools\s*(?:\?\s*\.\s*|\.\s*)(?:' + $ToolNamePattern + ')\s*;')
+    return $direct -or $bracket -or $alias
 }
 
 function Get-JavaScriptPropertyString {
@@ -231,16 +250,19 @@ function Test-CanonicalWatchPrompt {
 
     $normalized = (($Prompt -replace "`r`n", "`n") -replace "`r", "`n").TrimEnd()
     $lines = @($normalized -split "`n")
-    if ($lines.Count -lt 5 -or $lines[1] -cne 'policy_revision=2' -or $lines[2] -cnotmatch '^prompt_sha256=([0-9a-f]{64})$' -or $lines[3] -ne '') {
+    if ($lines.Count -lt 5 -or $lines[1] -cne 'policy_revision=3' -or $lines[2] -cnotmatch '^prompt_sha256=([0-9a-f]{64})$' -or $lines[3] -ne '') {
         return $false
     }
 
     $markerTarget = $null
+    $expectedBodyHash = $null
     if ($lines[0] -match '^watch-interrupted-task:v1 target_thread_id=([A-Za-z0-9][A-Za-z0-9._:-]{0,255})$') {
         $markerTarget = $Matches[1]
+        $expectedBodyHash = $ExpectedTargetPromptSha256
     }
     elseif ($lines[0] -match '^watch-interrupted-task:fleet:v1 supervisor_thread_id=([A-Za-z0-9][A-Za-z0-9._:-]{0,255})$') {
         $markerTarget = $Matches[1]
+        $expectedBodyHash = $ExpectedFleetPromptSha256
     }
     else {
         return $false
@@ -251,11 +273,14 @@ function Test-CanonicalWatchPrompt {
     }
 
     $declaredHash = $lines[2].Substring('prompt_sha256='.Length)
+    if ([string]::IsNullOrWhiteSpace($expectedBodyHash) -or $declaredHash -cne $expectedBodyHash.ToLowerInvariant()) {
+        return $false
+    }
     $body = [string]::Join("`n", $lines[4..($lines.Count - 1)])
     return (Get-Sha256Lower -Text $body) -ceq $declaredHash
 }
 
-function Get-WatchTurnRole {
+function Get-WatchTurnText {
     param([Parameter(Mandatory = $true)][object]$Payload)
 
     $sessionId = [string](Get-InputProperty -InputObject $Payload -Names @('session_id', 'sessionId'))
@@ -263,7 +288,7 @@ function Get-WatchTurnRole {
     $transcriptPath = [string](Get-InputProperty -InputObject $Payload -Names @('transcript_path', 'transcriptPath'))
     if ([string]::IsNullOrWhiteSpace($sessionId) -or [string]::IsNullOrWhiteSpace($turnId) -or
         [string]::IsNullOrWhiteSpace($transcriptPath) -or -not (Test-Path -LiteralPath $transcriptPath -PathType Leaf)) {
-        return 'unknown'
+        return $null
     }
 
     $turnMessages = [System.Collections.Generic.List[string]]::new()
@@ -299,31 +324,74 @@ function Get-WatchTurnRole {
         }
     }
     catch {
-        return 'unknown'
+        return $null
     }
 
     if ($turnMessages.Count -eq 0) {
+        return $null
+    }
+
+    return [string]::Join("`n", $turnMessages)
+}
+
+function Get-WatchTurnRole {
+    param([Parameter(Mandatory = $true)][object]$Payload)
+
+    $sessionId = [string](Get-InputProperty -InputObject $Payload -Names @('session_id', 'sessionId'))
+    $combined = Get-WatchTurnText -Payload $Payload
+    if ([string]::IsNullOrWhiteSpace($combined)) {
         return 'unknown'
     }
 
-    $combined = [string]::Join("`n", $turnMessages)
-    if ($combined -match '(?s)<heartbeat>.*?watch-interrupted-task:fleet:v1 supervisor_thread_id=([A-Za-z0-9][A-Za-z0-9._:-]{0,255}).*?</heartbeat>') {
-        if ($Matches[1] -ceq $sessionId) {
+    $heartbeatPattern = '(?s)^\s*<heartbeat>\s*<automation_id>(?<automation>[^<]+)</automation_id>\s*(?:<current_time_iso>[^<]+</current_time_iso>\s*)?<instructions>\s*(?<prompt>watch-interrupted-task:(?<role>fleet:)?v1\s+.*?)\s*</instructions>\s*</heartbeat>\s*$'
+    $heartbeatMatch = [regex]::Match($combined, $heartbeatPattern)
+    if ($heartbeatMatch.Success) {
+        $prompt = $heartbeatMatch.Groups['prompt'].Value
+        $automationId = $heartbeatMatch.Groups['automation'].Value.Trim()
+        if ($automationId -cne "watch-interrupted-task-v1-target-thread-id-$sessionId") {
+            return 'unknown'
+        }
+        if (-not (Test-CanonicalWatchPrompt -Prompt $prompt -ExpectedTargetThreadId $sessionId)) {
+            return 'unknown'
+        }
+        if ($heartbeatMatch.Groups['role'].Success) {
             return 'fleet_heartbeat'
         }
-        return 'unknown'
-    }
-    if ($combined -match '(?s)<heartbeat>.*?watch-interrupted-task:v1 target_thread_id=([A-Za-z0-9][A-Za-z0-9._:-]{0,255}).*?</heartbeat>') {
-        if ($Matches[1] -ceq $sessionId) {
-            return 'target_heartbeat'
-        }
-        return 'unknown'
+        return 'target_heartbeat'
     }
     if ($combined -match '(?s)<heartbeat>.*?</heartbeat>') {
         return 'unknown'
     }
 
     return 'ordinary_turn'
+}
+
+function Test-DirectWatchLifecycleIntent {
+    param(
+        [Parameter(Mandatory = $true)][object]$Payload,
+        [Parameter(Mandatory = $true)][string]$Mode,
+        [AllowNull()][object]$ToolInput
+    )
+
+    $text = Get-WatchTurnText -Payload $Payload
+    if ([string]::IsNullOrWhiteSpace($text) -or $text -match '(?s)<heartbeat>.*?</heartbeat>') {
+        return $false
+    }
+    if ($text -notmatch '(?i)守夜|watch-interrupted-task|heartbeat') {
+        return $false
+    }
+
+    $status = [string](Get-InputProperty -InputObject $ToolInput -Names @('status'))
+    switch ($Mode.ToLowerInvariant()) {
+        'delete' { return $text -match '关闭|删除|close|delete' }
+        'create' { return $text -match '开启|启用|目标守夜|enable|start' }
+        'update' {
+            if ($status -ceq 'PAUSED') { return $text -match '暂停|pause' }
+            if ($status -ceq 'ACTIVE') { return $text -match '恢复|开启|启用|resume|enable|start' }
+            return $text -match '开启|启用|恢复|更新|迁移|目标守夜|enable|resume|update|migrate'
+        }
+        default { return $false }
+    }
 }
 
 function Get-WatchAutomationTargetId {
@@ -358,6 +426,12 @@ catch {
     exit 2
 }
 
+$hookEventName = [string](Get-InputProperty -InputObject $payload -Names @('hook_event_name', 'hookEventName'))
+if ($hookEventName -cne 'PreToolUse') {
+    [Console]::Error.WriteLine('Cross-thread guard was invoked outside PreToolUse; blocking fail-closed.')
+    exit 2
+}
+
 $toolNameProperty = $payload.PSObject.Properties['tool_name']
 if ($null -eq $toolNameProperty -or [string]::IsNullOrWhiteSpace([string]$toolNameProperty.Value)) {
     [Console]::Error.WriteLine('Cross-thread guard received PreToolUse input without tool_name; blocking fail-closed.')
@@ -380,17 +454,28 @@ elseif ($toolName -match '(?i)(^|__|\.)handoff_thread$') {
 elseif ($toolName -match '(?i)(^|__|\.)exec$') {
     $source = Get-ToolInputText -InputObject $toolInput
     $codeSkeleton = Get-JavaScriptCodeSkeleton -Source $source
-    $hasNestedSendTool = Test-CodeModeToolCall -CodeSkeleton $codeSkeleton -ToolNamePattern '(?:[A-Za-z0-9_]+__)?send_message_to_thread'
+    $hasNestedSendTool = Test-CodeModeHighRiskRoute -Source $source -CodeSkeleton $codeSkeleton -ToolNamePattern '(?:[A-Za-z0-9_]+__)?send_message_to_thread'
     $hasNestedShellTool = Test-CodeModeToolCall -CodeSkeleton $codeSkeleton -ToolNamePattern '(?:shell_command|exec_command)'
-    $hasNestedAutomationTool = Test-CodeModeToolCall -CodeSkeleton $codeSkeleton -ToolNamePattern '(?:[A-Za-z0-9_]+__)?automation_update'
+    $hasNestedAutomationTool = Test-CodeModeHighRiskRoute -Source $source -CodeSkeleton $codeSkeleton -ToolNamePattern '(?:[A-Za-z0-9_]+__)?automation_update'
+    $hasDynamicToolRoute = $codeSkeleton -match '(?i)\btools\s*(?:\?\s*\.)?\s*\[\s*[A-Za-z_$][A-Za-z0-9_$]*\s*\]\s*\('
 
     if ($hasNestedSendTool) {
         $denyReason = 'Cross-task message injection nested in code mode is disabled.'
     }
-    elseif ($hasNestedShellTool -and $source -match '(?i)(send_message_to_thread|sendMessageToThread|thread[\/.:-]send)') {
-        $denyReason = 'Shell or app-server cross-task send bypasses nested in code mode are disabled.'
+    elseif ($hasDynamicToolRoute) {
+        $denyReason = 'Dynamic code-mode tool dispatch cannot prove that cross-task and automation mutation routes are absent.'
     }
-    elseif ($hasNestedAutomationTool) {
+    elseif ($hasNestedShellTool) {
+        $nestedCommand = [string](Get-JavaScriptPropertyString -Source $source -Name 'command')
+        if ([string]::IsNullOrWhiteSpace($nestedCommand)) {
+            $nestedCommand = [string](Get-JavaScriptPropertyString -Source $source -Name 'cmd')
+        }
+        if ($nestedCommand -match '(?i)\bcodex(?:\.(?:cmd|ps1|exe))?\s+app-server\b[^\r\n;&|]*\bthread[\/.:-]send\b' -or
+            $nestedCommand -match '(?i)^\s*(?:send_message_to_thread|sendMessageToThread)\b') {
+            $denyReason = 'Shell or app-server cross-task send bypasses nested in code mode are disabled.'
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($denyReason) -and $hasNestedAutomationTool) {
         $mode = [string](Get-JavaScriptPropertyString -Source $source -Name 'mode')
         $automationId = [string](Get-JavaScriptPropertyString -Source $source -Name 'id')
         $prompt = [string](Get-JavaScriptPropertyString -Source $source -Name 'prompt')
@@ -425,8 +510,16 @@ elseif ($toolName -match '(?i)(^|__|\.)exec$') {
                     $denyReason = 'The fleet supervisor heartbeat cannot mutate its own dual-role automation through code mode.'
                 }
                 elseif ($mode -cne 'delete' -and -not (Test-CanonicalWatchPrompt -Prompt $prompt -ExpectedTargetThreadId $watchTargetThreadId)) {
-                    $denyReason = 'Fleet code-mode target writes must carry the hash-valid watch-interrupted-task policy_revision=2 envelope as a literal prompt.'
+                    $denyReason = 'Fleet code-mode target writes must carry the trusted canonical watch-interrupted-task policy_revision=3 envelope as a literal prompt.'
                 }
+            }
+            elseif ($turnRole -ceq 'ordinary_turn' -and $mode -cne 'view' -and $isWatchMutation -and
+                -not (Test-DirectWatchLifecycleIntent -Payload $payload -Mode $mode -ToolInput ([ordered]@{
+                    id = $automationId
+                    targetThreadId = $targetThreadId
+                    prompt = $prompt
+                }))) {
+                $denyReason = 'Code-mode watch automation mutation requires a direct user lifecycle command in the current turn.'
             }
             elseif ($turnRole -ceq 'unknown' -and $mode -cne 'view' -and $isWatchMutation) {
                 $denyReason = 'Code-mode watch automation mutation origin could not be classified from the current turn; blocking fail-closed.'
@@ -435,7 +528,7 @@ elseif ($toolName -match '(?i)(^|__|\.)exec$') {
 
         if ([string]::IsNullOrWhiteSpace($denyReason) -and $mode -cne 'view' -and $isWatchPrompt -and
             -not (Test-CanonicalWatchPrompt -Prompt $prompt -ExpectedTargetThreadId $watchTargetThreadId)) {
-            $denyReason = 'Code-mode watch automation prompts must use the hash-valid watch-interrupted-task policy_revision=2 envelope.'
+            $denyReason = 'Code-mode watch automation prompts must use the trusted canonical watch-interrupted-task policy_revision=3 envelope.'
         }
     }
 }
@@ -470,8 +563,12 @@ elseif ($toolName -match '(?i)(^|__|\.)automation_update$') {
                 $denyReason = 'The fleet supervisor heartbeat cannot mutate its own dual-role automation.'
             }
             elseif ($mode -cne 'delete' -and -not (Test-CanonicalWatchPrompt -Prompt $prompt -ExpectedTargetThreadId $watchTargetThreadId)) {
-                $denyReason = 'Fleet target automation writes must use the hash-valid watch-interrupted-task policy_revision=2 envelope.'
+                $denyReason = 'Fleet target automation writes must use the trusted canonical watch-interrupted-task policy_revision=3 envelope.'
             }
+        }
+        elseif ($turnRole -ceq 'ordinary_turn' -and $isWatchMutation -and
+            -not (Test-DirectWatchLifecycleIntent -Payload $payload -Mode $mode -ToolInput $toolInput)) {
+            $denyReason = 'Watch automation mutation requires a direct user lifecycle command in the current turn.'
         }
         elseif ($turnRole -ceq 'unknown' -and $isWatchMutation) {
             $denyReason = 'Watch automation mutation origin could not be classified from the current turn; blocking fail-closed.'
@@ -480,14 +577,20 @@ elseif ($toolName -match '(?i)(^|__|\.)automation_update$') {
 
     if ([string]::IsNullOrWhiteSpace($denyReason) -and ($isWatchPrompt -or $isCrossTargetPrompt) -and
         -not (Test-CanonicalWatchPrompt -Prompt $prompt -ExpectedTargetThreadId $(if ($watchTargetThreadId) { $watchTargetThreadId } else { $targetThreadId }))) {
-        $denyReason = 'Cross-target automation prompts must use the hash-valid watch-interrupted-task policy_revision=2 envelope.'
+        $denyReason = 'Cross-target automation prompts must use the trusted canonical watch-interrupted-task policy_revision=3 envelope.'
     }
 }
 elseif ($toolName -match '(?i)^(Bash|shell_command|exec_command)$') {
     $command = [string](Get-InputProperty -InputObject $toolInput -Names @('command', 'cmd'))
     foreach ($segment in @($command -split '[\r\n;&|]+')) {
         $trimmedSegment = $segment.Trim()
-        if ($trimmedSegment -notmatch '(?i)(send_message_to_thread|sendMessageToThread|thread[\/.:-]send)') {
+        $hasExecutableSend = $trimmedSegment -match '(?i)^\s*(?:&\s*)?(?:send_message_to_thread|sendMessageToThread)\b' -or
+            $trimmedSegment -match '(?i)(?:^|\b(?:cmd|pwsh|powershell)(?:\.exe)?\s+(?:/c|-Command)\s+)["'']?\s*codex(?:\.(?:cmd|ps1|exe))?\s+app-server\b.*\bthread[\/.:-]send\b' -or
+            $trimmedSegment -match '(?i)^\s*(?:&\s*)?codex(?:\.(?:cmd|ps1|exe))?\s+app-server\b.*\bthread[\/.:-]send\b'
+        $hasExecutionSubexpression = $trimmedSegment -match '(?is)(?:\$\s*\(|@\s*\(|\(\s*&?\s*)\s*codex(?:\.(?:cmd|ps1|exe))?\s+app-server\b.*\bthread[\/.:-]send\b'
+        $hasReaderExecOption = $trimmedSegment -match '(?i)^\s*(?:&\s*)?rg(?:\.exe)?\b.*(?:^|\s)--pre(?:=|\s).*\bthread[\/.:-]send\b' -or
+            $trimmedSegment -match '(?i)^\s*(?:&\s*)?git(?:\.exe)?\s+grep\b.*(?:-O|--open-files-in-pager).*\bthread[\/.:-]send\b'
+        if (-not ($hasExecutableSend -or $hasExecutionSubexpression -or $hasReaderExecOption)) {
             continue
         }
 

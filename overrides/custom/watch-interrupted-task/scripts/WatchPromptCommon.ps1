@@ -23,10 +23,11 @@ function Get-WatchPromptSha256 {
 function New-WatchPromptEnvelope {
     param(
         [Parameter(Mandatory = $true)][string]$Marker,
-        [Parameter(Mandatory = $true)][string]$Body
+        [Parameter(Mandatory = $true)][string]$Body,
+        [ValidateRange(1, 999)][int]$PolicyRevision = 3
     )
 
     $normalizedBody = ConvertTo-WatchNormalizedText -Text $Body
     $hash = Get-WatchPromptSha256 -Body $normalizedBody
-    return "$Marker`npolicy_revision=2`nprompt_sha256=$hash`n`n$normalizedBody"
+    return "$Marker`npolicy_revision=$PolicyRevision`nprompt_sha256=$hash`n`n$normalizedBody"
 }

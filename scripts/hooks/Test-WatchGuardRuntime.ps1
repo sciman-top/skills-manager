@@ -23,11 +23,23 @@ function Get-OptionalProperty {
 function Invoke-FreshHooksList {
     param([Parameter(Mandatory = $true)][int]$TimeoutSeconds)
 
+    $codexCommand = Get-Command codex -ErrorAction Stop | Select-Object -First 1
+    $codexPath = [string]$codexCommand.Source
+    if ([string]::IsNullOrWhiteSpace($codexPath)) { $codexPath = [string]$codexCommand.Path }
+    if ([string]::IsNullOrWhiteSpace($codexPath)) { throw 'Could not resolve the codex executable or PS7 script.' }
+
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
-    $psi.FileName = 'cmd.exe'
-    foreach ($argument in @('/d', '/s', '/c', 'codex app-server --stdio')) {
-        $psi.ArgumentList.Add($argument)
+    if ($codexCommand.CommandType -in @('ExternalScript', 'Function', 'Filter') -or [System.IO.Path]::GetExtension($codexPath) -ieq '.ps1') {
+        $pwshPath = Join-Path $PSHOME 'pwsh.exe'
+        if (-not (Test-Path -LiteralPath $pwshPath)) { $pwshPath = Join-Path $PSHOME 'pwsh' }
+        $psi.FileName = $pwshPath
+        foreach ($argument in @('-NoProfile', '-File', $codexPath, 'app-server', '--stdio')) { $psi.ArgumentList.Add($argument) }
     }
+    else {
+        $psi.FileName = $codexPath
+        foreach ($argument in @('app-server', '--stdio')) { $psi.ArgumentList.Add($argument) }
+    }
+    $script:watchGuardLauncherExecutable = $psi.FileName
     $psi.UseShellExecute = $false
     $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
@@ -43,7 +55,7 @@ function Invoke-FreshHooksList {
             id = 1
             method = 'initialize'
             params = [ordered]@{
-                clientInfo = [ordered]@{ name = 'watch-guard-runtime-doctor'; title = 'Watch guard runtime doctor'; version = '1.0.0' }
+                clientInfo = [ordered]@{ name = 'watch-guard-runtime-doctor'; title = 'Watch guard runtime doctor'; version = '2.0.0' }
                 capabilities = [ordered]@{ experimentalApi = $true }
             }
         } | ConvertTo-Json -Depth 10 -Compress
@@ -52,9 +64,9 @@ function Invoke-FreshHooksList {
 
         $sentHooksList = $false
         $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+        $readTask = $process.StandardOutput.ReadLineAsync()
         while ([DateTime]::UtcNow -lt $deadline) {
-            $readTask = $process.StandardOutput.ReadLineAsync()
-            $winner = [System.Threading.Tasks.Task]::WhenAny($readTask, [System.Threading.Tasks.Task]::Delay(1000)).GetAwaiter().GetResult()
+            $winner = [System.Threading.Tasks.Task]::WhenAny($readTask, [System.Threading.Tasks.Task]::Delay(500)).GetAwaiter().GetResult()
             if ($winner -ne $readTask) {
                 if ($process.HasExited) { break }
                 continue
@@ -62,8 +74,11 @@ function Invoke-FreshHooksList {
 
             $line = $readTask.GetAwaiter().GetResult()
             if ($null -eq $line) { break }
+            $readTask = $process.StandardOutput.ReadLineAsync()
             if ([string]::IsNullOrWhiteSpace($line)) { continue }
-            $response = $line | ConvertFrom-Json -Depth 50
+            try { $response = $line | ConvertFrom-Json -Depth 50 -ErrorAction Stop }
+            catch { continue }
+
             $responseId = Get-OptionalProperty -InputObject $response -Name 'id'
             if ($responseId -eq 1 -and -not $sentHooksList) {
                 $process.StandardInput.WriteLine((@{ jsonrpc = '2.0'; method = 'initialized'; params = @{} } | ConvertTo-Json -Compress))
@@ -72,9 +87,7 @@ function Invoke-FreshHooksList {
                 $sentHooksList = $true
                 continue
             }
-            if ($responseId -eq 2) {
-                return $response
-            }
+            if ($responseId -eq 2) { return $response }
         }
 
         throw 'Fresh app-server hooks/list did not return before timeout.'
@@ -90,13 +103,15 @@ function Invoke-FreshHooksList {
 
 $resolvedCodexHome = [System.IO.Path]::GetFullPath($CodexHome)
 $hostHook = Join-Path $resolvedCodexHome 'scripts\block-cross-thread-send.ps1'
+$hooksPath = Join-Path $resolvedCodexHome 'hooks.json'
 $hostExists = Test-Path -LiteralPath $hostHook -PathType Leaf
 $hostHash = if ($hostExists) { (Get-FileHash -Algorithm SHA256 -LiteralPath $hostHook).Hash.ToLowerInvariant() } else { $null }
 $freshProcess = [string]::IsNullOrWhiteSpace($HooksListJson)
+$script:watchGuardLauncherExecutable = $null
 $errorMessage = $null
 
 try {
-    $hooksList = if ($freshProcess) { Invoke-FreshHooksList -TimeoutSeconds $TimeoutSeconds } else { $HooksListJson | ConvertFrom-Json -Depth 50 }
+    $hooksList = if ($freshProcess) { Invoke-FreshHooksList -TimeoutSeconds $TimeoutSeconds } else { $HooksListJson | ConvertFrom-Json -Depth 50 -ErrorAction Stop }
 }
 catch {
     $hooksList = $null
@@ -108,30 +123,57 @@ if ($null -ne $hooksList) {
     $hookMatches = @(
         foreach ($entry in @($hooksList.result.data)) {
             foreach ($hook in @($entry.hooks)) {
-                if ([string]$hook.command -like '*block-cross-thread-send.ps1*') {
-                    $hook
-                }
+                if ([string]$hook.command -like '*block-cross-thread-send.ps1*') { $hook }
             }
         }
     )
 }
 
 $hook = if ($hookMatches.Count -eq 1) { $hookMatches[0] } else { $null }
-$expectedHash = $null
-if ($null -ne $hook -and [string]$hook.command -match '(?i)-ExpectedScriptSha256\s+["'']?([0-9a-f]{64})') {
-    $expectedHash = $Matches[1].ToLowerInvariant()
+$command = if ($null -ne $hook) { [string]$hook.command } else { '' }
+$expectedHash = if ($command -match '(?i)-ExpectedScriptSha256\s+["'']?([0-9a-f]{64})') { $Matches[1].ToLowerInvariant() } else { $null }
+$targetPromptHash = if ($command -match '(?i)-ExpectedTargetPromptSha256\s+["'']?([0-9a-f]{64})') { $Matches[1].ToLowerInvariant() } else { $null }
+$fleetPromptHash = if ($command -match '(?i)-ExpectedFleetPromptSha256\s+["'']?([0-9a-f]{64})') { $Matches[1].ToLowerInvariant() } else { $null }
+
+$sourceHookMatches = @()
+try {
+    if (Test-Path -LiteralPath $hooksPath -PathType Leaf) {
+        $sourceDocument = Get-Content -Raw -LiteralPath $hooksPath | ConvertFrom-Json -Depth 50 -ErrorAction Stop
+        foreach ($group in @($sourceDocument.hooks.PreToolUse)) {
+            foreach ($handler in @($group.hooks)) {
+                if ([string]$handler.command -like '*block-cross-thread-send.ps1*') {
+                    $sourceHookMatches += [pscustomobject]@{ group = $group; handler = $handler }
+                }
+            }
+        }
+    }
 }
+catch {
+    if ([string]::IsNullOrWhiteSpace($errorMessage)) { $errorMessage = $_.Exception.Message }
+}
+
+$sourceHook = if ($sourceHookMatches.Count -eq 1) { $sourceHookMatches[0] } else { $null }
+$sourceCommand = if ($null -ne $sourceHook) { [string]$sourceHook.handler.command } else { '' }
+$sourceCommandWindows = if ($null -ne $sourceHook) { [string](Get-OptionalProperty -InputObject $sourceHook.handler -Name 'commandWindows') } else { '' }
+$sourceShapeMatches = $null -ne $sourceHook -and [string]$sourceHook.group.matcher -ceq '*' -and
+    [string]$sourceHook.handler.type -ceq 'command' -and $sourceCommand -ceq $command -and
+    -not [string]::IsNullOrWhiteSpace($sourceCommandWindows) -and $sourceCommandWindows -ceq $sourceCommand
 
 $enabled = $null -ne $hook -and [bool]$hook.enabled
 $trustStatus = if ($null -ne $hook) { [string]$hook.trustStatus } else { 'missing' }
 $currentHash = if ($null -ne $hook) { [string]$hook.currentHash } else { $null }
-$definitionMatches = $hostExists -and -not [string]::IsNullOrWhiteSpace($expectedHash) -and $expectedHash -ceq $hostHash
+$runtimeShapeMatches = $null -ne $hook -and [string]$hook.eventName -ceq 'preToolUse' -and
+    [string]$hook.handlerType -ceq 'command' -and [string]$hook.matcher -ceq '*'
+$shapeMatches = $runtimeShapeMatches -and $sourceShapeMatches
+$definitionMatches = $hostExists -and -not [string]::IsNullOrWhiteSpace($expectedHash) -and $expectedHash -ceq $hostHash -and
+    $targetPromptHash -match '^[0-9a-f]{64}$' -and $fleetPromptHash -match '^[0-9a-f]{64}$' -and $shapeMatches
 $configurationReady = $hookMatches.Count -eq 1 -and $enabled -and $trustStatus -ceq 'trusted' -and $definitionMatches -and
     -not [string]::IsNullOrWhiteSpace($currentHash)
 
 [pscustomobject]@{
     configuration_ready = $configurationReady
     fresh_process = $freshProcess
+    launcher_executable = $script:watchGuardLauncherExecutable
     hook_count = $hookMatches.Count
     enabled = $enabled
     trust_status = $trustStatus
@@ -139,6 +181,11 @@ $configurationReady = $hookMatches.Count -eq 1 -and $enabled -and $trustStatus -
     host_hook_path = $hostHook
     host_sha256 = $hostHash
     expected_script_sha256 = $expectedHash
+    target_prompt_sha256 = $targetPromptHash
+    fleet_prompt_sha256 = $fleetPromptHash
+    runtime_shape_matches = $runtimeShapeMatches
+    source_shape_matches = $sourceShapeMatches
+    shape_matches = $shapeMatches
     definition_matches = $definitionMatches
     live_send_probe_required = $true
     live_automation_probe_required = $true

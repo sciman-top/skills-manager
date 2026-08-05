@@ -33,6 +33,8 @@ if ($sourceHash -and $hostHash) {
 }
 
 $definitionMatches = $false
+$targetPromptHash = $null
+$fleetPromptHash = $null
 if (Test-Path -LiteralPath $hooksPath) {
     try {
         $document = Get-Content -Raw -LiteralPath $hooksPath | ConvertFrom-Json -Depth 50
@@ -41,7 +43,14 @@ if (Test-Path -LiteralPath $hooksPath) {
                 continue
             }
             foreach ($handler in @($group.hooks)) {
-                if ([string]$handler.command -like "*$hostHook*" -and [string]$handler.command -like "*$hostHash*") {
+                $handlerCommand = [string]$handler.command
+                $handlerCommandWindows = [string]$handler.commandWindows
+                if ([string]$handler.type -ceq 'command' -and $handlerCommandWindows -ceq $handlerCommand -and
+                    $handlerCommand -like "*$hostHook*" -and $handlerCommand -like "*$hostHash*" -and
+                    $handlerCommand -match '(?i)-ExpectedTargetPromptSha256\s+["'']?([0-9a-f]{64})' -and
+                    $handlerCommand -match '(?i)-ExpectedFleetPromptSha256\s+["'']?([0-9a-f]{64})') {
+                    $targetPromptHash = [regex]::Match($handlerCommand, '(?i)-ExpectedTargetPromptSha256\s+["'']?([0-9a-f]{64})').Groups[1].Value.ToLowerInvariant()
+                    $fleetPromptHash = [regex]::Match($handlerCommand, '(?i)-ExpectedFleetPromptSha256\s+["'']?([0-9a-f]{64})').Groups[1].Value.ToLowerInvariant()
                     $definitionMatches = $true
                 }
             }
@@ -57,6 +66,7 @@ $simulationCases = [ordered]@{
     multiline_shell_send = $false
     nested_shell_send = $false
     code_mode_shell_send = $false
+    read_only_filename_inspection = $false
     read_only_subexpression_send = $false
     reader_exec_option_send = $false
     target_self_delete = $false
@@ -95,6 +105,13 @@ if ($hostExists) {
         code_mode_shell_send = [ordered]@{
             tool_name = 'exec'
             tool_input = 'const result = await tools.shell_command({ command: "codex app-server request thread/send --thread doctor-target --prompt blocked" }); text(result);'
+        }
+        read_only_filename_inspection = [ordered]@{
+            tool_name = 'shell_command'
+            tool_input = [ordered]@{
+                command = '$f = Get-ChildItem scripts/hooks -Filter ''block*.ps1'' | Select-Object -First 1; (Get-Content -LiteralPath $f.FullName).Count; Get-FileHash -LiteralPath $f.FullName'
+            }
+            expect = 'allow'
         }
         read_only_subexpression_send = [ordered]@{
             tool_name = 'shell_command'
@@ -162,7 +179,10 @@ if ($hostExists) {
             tool_use_id = "doctor-$($probe.Key)"
             tool_input = $probe.Value.tool_input
         } | ConvertTo-Json -Depth 8 -Compress
-        $output = $payload | & pwsh -NoProfile -ExecutionPolicy Bypass -File $hostHook -ExpectedScriptSha256 $hostHash 2>$null
+        $output = $payload | & pwsh -NoProfile -ExecutionPolicy Bypass -File $hostHook `
+            -ExpectedScriptSha256 $hostHash `
+            -ExpectedTargetPromptSha256 $targetPromptHash `
+            -ExpectedFleetPromptSha256 $fleetPromptHash 2>$null
         $expected = if ($probe.Value.expect) { [string]$probe.Value.expect } else { 'deny' }
         if ($LASTEXITCODE -eq 0 -and $expected -ceq 'allow' -and -not $output) {
             $simulationCases[$probe.Key] = $true
@@ -193,6 +213,8 @@ $configurationReady = $featuresEnabled -and $hashMatches -and $definitionMatches
     host_sha256 = $hostHash
     hash_matches = $hashMatches
     definition_matches = $definitionMatches
+    target_prompt_sha256 = $targetPromptHash
+    fleet_prompt_sha256 = $fleetPromptHash
     simulation_passed = $simulationPassed
     simulation_cases = [pscustomobject]$simulationCases
     trust_status = 'unverified_requires_slash_hooks'

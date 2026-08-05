@@ -2,7 +2,9 @@
 param(
     [string]$CodexHome = $(if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }),
     [string]$SourceHookPath = (Join-Path $PSScriptRoot 'block-cross-thread-send.ps1'),
-    [string]$RuntimeDoctorPath = (Join-Path $PSScriptRoot 'Test-WatchGuardRuntime.ps1')
+    [string]$RuntimeDoctorPath = (Join-Path $PSScriptRoot 'Test-WatchGuardRuntime.ps1'),
+    [string]$TargetPromptGeneratorPath = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'overrides\custom\watch-interrupted-task\scripts\New-WatchHeartbeatPrompt.ps1'),
+    [string]$FleetPromptGeneratorPath = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'overrides\custom\watch-interrupted-task\scripts\New-WatchFleetSupervisorPrompt.ps1')
 )
 
 Set-StrictMode -Version Latest
@@ -10,19 +12,28 @@ $ErrorActionPreference = 'Stop'
 
 $resolvedSource = (Resolve-Path -LiteralPath $SourceHookPath).Path
 $resolvedRuntimeDoctor = (Resolve-Path -LiteralPath $RuntimeDoctorPath).Path
+$resolvedTargetGenerator = (Resolve-Path -LiteralPath $TargetPromptGeneratorPath).Path
+$resolvedFleetGenerator = (Resolve-Path -LiteralPath $FleetPromptGeneratorPath).Path
 $resolvedCodexHome = [System.IO.Path]::GetFullPath($CodexHome)
 $hostScripts = Join-Path $resolvedCodexHome 'scripts'
 $hostHook = Join-Path $hostScripts 'block-cross-thread-send.ps1'
 $hostRuntimeDoctor = Join-Path $hostScripts 'Test-WatchGuardRuntime.ps1'
 $hooksPath = Join-Path $resolvedCodexHome 'hooks.json'
 
-$null = New-Item -ItemType Directory -Path $hostScripts -Force
-Copy-Item -LiteralPath $resolvedSource -Destination $hostHook -Force
-Copy-Item -LiteralPath $resolvedRuntimeDoctor -Destination $hostRuntimeDoctor -Force
-$sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedSource).Hash.ToLowerInvariant()
+# Validate every source and the existing document before touching host scripts.
+$targetPromptData = ((& $resolvedTargetGenerator -TargetThreadId 'canonical-digest-probe' -AsJson) | ConvertFrom-Json -ErrorAction Stop)
+$fleetPromptData = ((& $resolvedFleetGenerator -SupervisorThreadId 'canonical-digest-probe' -AsJson) | ConvertFrom-Json -ErrorAction Stop)
+$targetPromptHash = [string]$targetPromptData.prompt_sha256
+$fleetPromptHash = [string]$fleetPromptData.prompt_sha256
+if ($targetPromptData.policy_revision -ne 3 -or $fleetPromptData.policy_revision -ne 3 -or
+    $targetPromptHash -notmatch '^[0-9a-f]{64}$' -or $fleetPromptHash -notmatch '^[0-9a-f]{64}$') {
+    throw 'Revision-3 canonical watch prompt provenance could not be derived.'
+}
 
-if (Test-Path -LiteralPath $hooksPath) {
-    $document = Get-Content -Raw -LiteralPath $hooksPath | ConvertFrom-Json -Depth 50
+$hooksExisted = Test-Path -LiteralPath $hooksPath -PathType Leaf
+$originalHooksBytes = if ($hooksExisted) { [System.IO.File]::ReadAllBytes($hooksPath) } else { $null }
+if ($hooksExisted) {
+    $document = ([System.Text.UTF8Encoding]::new($false).GetString($originalHooksBytes)) | ConvertFrom-Json -Depth 50 -ErrorAction Stop
 }
 else {
     $document = [pscustomobject]@{
@@ -39,38 +50,78 @@ if ($null -eq $document.hooks.PSObject.Properties['PreToolUse']) {
 }
 
 $retained = @(
-    @($document.hooks.PreToolUse) | Where-Object {
-        $serialized = $_ | ConvertTo-Json -Depth 20 -Compress
-        $serialized -notmatch '(?i)block-cross-thread-send\.ps1|Blocking cross-task message injection|Blocking target heartbeat automation mutation'
+    foreach ($group in @($document.hooks.PreToolUse)) {
+        $managed = $false
+        foreach ($handler in @($group.hooks)) {
+            $handlerCommand = [string]$handler.command
+            if ([string]$group.matcher -ceq '*' -and [string]$handler.type -ceq 'command' -and
+                $handlerCommand -like "*$hostHook*" -and $handlerCommand -match '(?i)-ExpectedScriptSha256\b') {
+                $managed = $true
+                break
+            }
+        }
+        if (-not $managed) { $group }
     }
 )
 
-$command = 'pwsh -NoProfile -ExecutionPolicy Bypass -File "{0}" -ExpectedScriptSha256 "{1}"' -f $hostHook, $sourceHash
+$sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedSource).Hash.ToLowerInvariant()
+$command = 'pwsh -NoProfile -ExecutionPolicy Bypass -File "{0}" -ExpectedScriptSha256 "{1}" -ExpectedTargetPromptSha256 "{2}" -ExpectedFleetPromptSha256 "{3}"' -f $hostHook, $sourceHash, $targetPromptHash, $fleetPromptHash
 $guardGroup = [pscustomobject]@{
     matcher = '*'
-    hooks = @(
-        [pscustomobject]@{
-            type = 'command'
-            command = $command
-            commandWindows = $command
-            timeout = 10
-            statusMessage = 'Blocking cross-task injection and target heartbeat automation mutation'
-        }
-    )
+    hooks = @([pscustomobject]@{
+        type = 'command'
+        command = $command
+        commandWindows = $command
+        timeout = 10
+        statusMessage = 'Blocking cross-task injection and enforcing canonical watch recovery metadata'
+    })
 }
 $document.hooks.PreToolUse = @($retained) + @($guardGroup)
+$newHooksJson = $document | ConvertTo-Json -Depth 50
 
-$temporaryPath = "$hooksPath.tmp"
-$document | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath $temporaryPath -Encoding utf8
-Move-Item -LiteralPath $temporaryPath -Destination $hooksPath -Force
+$null = New-Item -ItemType Directory -Path $hostScripts -Force
+$nonce = [guid]::NewGuid().ToString('N')
+$stagedHook = Join-Path $hostScripts "block-cross-thread-send.$nonce.tmp"
+$stagedDoctor = Join-Path $hostScripts "Test-WatchGuardRuntime.$nonce.tmp"
+$stagedHooksJson = "$hooksPath.$nonce.tmp"
+
+$hostHookExisted = Test-Path -LiteralPath $hostHook -PathType Leaf
+$hostDoctorExisted = Test-Path -LiteralPath $hostRuntimeDoctor -PathType Leaf
+$originalHostHookBytes = if ($hostHookExisted) { [System.IO.File]::ReadAllBytes($hostHook) } else { $null }
+$originalHostDoctorBytes = if ($hostDoctorExisted) { [System.IO.File]::ReadAllBytes($hostRuntimeDoctor) } else { $null }
+
+try {
+    Copy-Item -LiteralPath $resolvedSource -Destination $stagedHook
+    Copy-Item -LiteralPath $resolvedRuntimeDoctor -Destination $stagedDoctor
+    [System.IO.File]::WriteAllText($stagedHooksJson, $newHooksJson, [System.Text.UTF8Encoding]::new($false))
+
+    Move-Item -LiteralPath $stagedHook -Destination $hostHook -Force
+    Move-Item -LiteralPath $stagedDoctor -Destination $hostRuntimeDoctor -Force
+    Move-Item -LiteralPath $stagedHooksJson -Destination $hooksPath -Force
+}
+catch {
+    if ($hostHookExisted) { [System.IO.File]::WriteAllBytes($hostHook, $originalHostHookBytes) }
+    elseif (Test-Path -LiteralPath $hostHook) { Remove-Item -LiteralPath $hostHook -Force }
+    if ($hostDoctorExisted) { [System.IO.File]::WriteAllBytes($hostRuntimeDoctor, $originalHostDoctorBytes) }
+    elseif (Test-Path -LiteralPath $hostRuntimeDoctor) { Remove-Item -LiteralPath $hostRuntimeDoctor -Force }
+    if ($hooksExisted) { [System.IO.File]::WriteAllBytes($hooksPath, $originalHooksBytes) }
+    elseif (Test-Path -LiteralPath $hooksPath) { Remove-Item -LiteralPath $hooksPath -Force }
+    throw
+}
+finally {
+    Remove-Item -LiteralPath $stagedHook, $stagedDoctor, $stagedHooksJson -Force -ErrorAction SilentlyContinue
+}
 
 [pscustomobject]@{
     status = 'installed_untrusted'
+    policy_revision = 3
     hooks_path = $hooksPath
     host_hook_path = $hostHook
     runtime_doctor_path = $hostRuntimeDoctor
     source_sha256 = $sourceHash
     host_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $hostHook).Hash.ToLowerInvariant()
     runtime_doctor_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $hostRuntimeDoctor).Hash.ToLowerInvariant()
+    target_prompt_sha256 = $targetPromptHash
+    fleet_prompt_sha256 = $fleetPromptHash
     trust_next_step = 'Open /hooks in a fresh Codex session and trust the exact current definition hash.'
 }
