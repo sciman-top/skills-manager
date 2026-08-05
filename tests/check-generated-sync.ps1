@@ -34,10 +34,20 @@ try {
         $beforeHash = (Get-FileHash -Algorithm SHA256 -LiteralPath ".\skills.ps1").Hash
     }
     .\build.ps1
-    $afterHash = $null
-    if (Test-Path -LiteralPath ".\skills.ps1" -PathType Leaf) {
-        $afterHash = (Get-FileHash -Algorithm SHA256 -LiteralPath ".\skills.ps1").Hash
+    if (-not (Test-Path -LiteralPath ".\skills.ps1" -PathType Leaf)) {
+        throw "generated_output_missing: build.ps1 did not produce skills.ps1."
     }
+    $firstBuildHash = (Get-FileHash -Algorithm SHA256 -LiteralPath ".\skills.ps1").Hash
+
+    .\build.ps1
+    if (-not (Test-Path -LiteralPath ".\skills.ps1" -PathType Leaf)) {
+        throw "generated_output_missing: the second build removed skills.ps1."
+    }
+    $afterHash = (Get-FileHash -Algorithm SHA256 -LiteralPath ".\skills.ps1").Hash
+    if ($firstBuildHash -ne $afterHash) {
+        throw ("generated_non_idempotent: consecutive builds produced different skills.ps1 hashes ({0} != {1})." -f $firstBuildHash, $afterHash)
+    }
+
     & git diff --quiet HEAD -- skills.ps1
     $diffExitCode = $LASTEXITCODE
     if ($diffExitCode -notin @(0, 1)) {

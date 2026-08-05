@@ -32,6 +32,18 @@
     "sandbox": "read-only",
     "run_at": "2026-08-05T17:05:00Z"
   },
+  "host_spawn_model_probe_receipt": {
+    "status": "confirmed_unavailable",
+    "surface": "collaboration_spawn",
+    "requested_model": "gpt-5.6-luna",
+    "requested_effort": "max",
+    "available_models": ["gpt-5.6-sol", "gpt-5.6-terra"],
+    "error_code": "unknown_model",
+    "run_at": "2026-08-05T19:23:59Z",
+    "expires_at": "2026-08-06T19:23:59Z",
+    "fallback_tier": "sol_medium",
+    "recovery_condition": "A fresh collaboration_spawn receipt reports gpt-5.6-luna|max as confirmed_available."
+  },
   "live_acceptance_status": "not_run",
   "model_tiers": [
     { "tier": "sol_xhigh", "model_family": "gpt-5.6-sol", "reasoning_effort": "xhigh", "mode": "soft_anchor" },
@@ -82,10 +94,10 @@
       "risk": "medium",
       "depends_on": ["SMV-AWA-002"],
       "write_set": ["src/Application/ModelAndAgentPolicy.ps1", "build.ps1", "tests/Unit/AgentWorkflowContracts.Tests.ps1"],
-      "goal": "把 completion receipt、barrier wave、canonical disjoint write-set admission、三档宿主 proposal 校验、Radar/local outcome fallback 和 FailurePacket 状态机做成 deterministic advisory。",
-      "implementation_steps": ["每 wave 只输出一个可执行 group，serial/high-risk/high-ambiguity 建立 barrier", "只有带 verified receipt 的前置依赖可进入并行准入", "校验 host proposal 与 comparable local outcome，不在本仓自动选模", "corrected retry 先串行并要求 parallel readmission"],
+      "goal": "把 completion receipt、barrier wave、canonical disjoint write-set admission、surface-scoped 三态可用性、三档宿主 proposal 校验、Radar/local outcome fallback 和 FailurePacket 状态机做成 deterministic advisory。",
+      "implementation_steps": ["每 wave 只输出一个可执行 group，serial/high-risk/high-ambiguity 建立 barrier", "静态 PlanningOnly 只推进 planned_dependency_order_only，不伪造完成回执", "只有带 schema v1、时间、verifier、SHA-256 和 commands 的 verified receipt 且依赖闭合的前置任务可进入并行准入", "将目标 host_surface 的 pair inventory 归一为 confirmed_available/confirmed_unavailable/unknown", "禁止 Radar、local outcome 或另一 surface receipt 把 unknown 提升为可用", "校验 host proposal 与 comparable local outcome，不在本仓自动选模", "corrected retry 先串行并要求 parallel readmission"],
       "verification": ["focused Pester", "valid/invalid fixture replay", "CLI output review"],
-      "stop_conditions": ["discover -> implement+document -> integrate barrier 可复现", "serial-only request 返回 not_requested", "stale Radar 且无有效 local/host evidence 时回退 host_default", "换档必须有 FailurePacket 且不得自动恢复并行"],
+      "stop_conditions": ["discover -> implement+document -> integrate barrier 可复现", "serial-only request 返回 not_requested", "缺 host_surface、空 pair inventory、confirmed_unavailable 或 stale Radar 时回退 host_default", "fresh Radar/local outcome 不能覆盖 unknown availability", "换档必须有 FailurePacket 且不得自动恢复并行"],
       "rollback": ["删除 AWA-003 application 增量和对应测试"],
       "evidence_group": "agent_workflow_advisory"
     },
@@ -97,7 +109,7 @@
       "depends_on": ["SMV-AWA-003"],
       "write_set": ["src/Commands/AgentWorkflow.ps1", "src/Main.ps1", "src/Version.ps1", "build.ps1", "skills.ps1", "tests/Unit/AgentWorkflowContracts.Tests.ps1"],
       "goal": "提供 repo-contained JSON 输入、稳定 JSON envelope 和 zero-write/provider-free CLI，不改变宿主运行时。",
-      "implementation_steps": ["加入 ValidateSet 与 Main dispatch", "限制 input path 在 repo root", "构建 bundle", "对 valid fixture 运行 plan/validate"],
+      "implementation_steps": ["加入 ValidateSet 与 Main dispatch", "限制 input path 在 repo root 并拒绝任一现有 reparse/junction 祖先", "构建 bundle", "对 valid fixture 运行 plan/validate"],
       "verification": ["pwsh -NoProfile -File build.ps1", "skills.ps1 agent-validate --json", "skills.ps1 agent-plan --json"],
       "stop_conditions": ["两条命令 exit 0", "decision_owner=host_ai", "executor=host_native_runtime", "writes/provider_calls/native_mutations=0"],
       "rollback": ["撤销 command/Main/Version/build 接线并重建 bundle"],

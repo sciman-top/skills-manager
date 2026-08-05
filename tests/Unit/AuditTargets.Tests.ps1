@@ -34,6 +34,28 @@ function Get-FunctionBody {
     throw "Failed to extract function body for $FunctionName"
 }
 
+function New-AuditValidatedWorkflowReceiptFixture([string]$RecommendationsPath) {
+    $resolved = [IO.Path]::GetFullPath($RecommendationsPath)
+    $state = Get-AuditWorkflowInputState $resolved
+    $receipt = [pscustomobject][ordered]@{
+        schema_version = 1
+        workflow = 'recommendations_validate_dry_run'
+        generated_at = [datetimeoffset]::UtcNow.ToString('o')
+        success = $true
+        persisted = $false
+        recommendations_path = $resolved
+        recommendations_sha256 = Get-FileContentHash $resolved
+        stages = [pscustomobject]@{
+            recommendations_validation = [pscustomobject]@{ status = 'passed' }
+            preflight = [pscustomobject]@{ status = 'passed' }
+            dry_run = [pscustomobject]@{ status = 'passed' }
+            input_stability = [pscustomobject]@{ status = 'passed' }
+        }
+        input_stability = [pscustomobject]@{ matched = $true; after_dry_run = $state }
+    }
+    Write-AuditJsonFile (Get-AuditWorkflowReportPath $resolved) $receipt
+}
+
 Describe "Audit Targets" {
     BeforeEach {
         Mock Get-AuditLiveInstalledState {
@@ -1836,6 +1858,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 }
                 Mock 构建生效 { }
                 Mock Invoke-Doctor { return [pscustomobject]@{ pass = $true } }
+                New-AuditValidatedWorkflowReceiptFixture $path
 
                 $report = Invoke-AuditRecommendationsApply -RecommendationsPath $path -Apply -Yes
 
@@ -2035,6 +2058,83 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             finally {
                 $script:Root = $oldRoot
             }
+        }
+
+        It "Blocks direct apply when no validated dry-run workflow receipt exists" {
+            $oldRoot = $script:Root
+            try {
+                $script:Root = Join-Path $TestDrive "ws-apply-receipt-required"
+                New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+                Initialize-AuditTargetsConfig | Out-Null
+                $path = Join-Path $script:Root "recommendations.json"
+                Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-receipt","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+
+                $thrown = $false
+                try { Invoke-AuditRecommendationsApply -RecommendationsPath $path -Apply -Yes | Out-Null }
+                catch { $thrown = $true; $_.Exception.Message | Should Match 'validated_dry_run_required' }
+                $thrown | Should Be $true
+            }
+            finally { $script:Root = $oldRoot }
+        }
+
+        It "Restores managed config and projections when MCP fails after a skill write" {
+            $oldRoot = $script:Root
+            $oldCfgPath = $script:CfgPath
+            try {
+                $script:Root = Join-Path $TestDrive "ws-apply-transaction"
+                New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+                $script:CfgPath = Join-Path $script:Root 'skills.json'
+                $initial = '{"schema_version":1,"imports":[],"mappings":[],"mcp_servers":[]}'
+                Set-ContentUtf8 $script:CfgPath $initial
+                $path = Join-Path $script:Root "recommendations.json"
+                Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-transaction","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"t","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["local"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[{"name":"playwright","reason_user_profile":"u","reason_target_repo":"t","confidence":"medium","sources":["local"],"server":{"name":"playwright","transport":"stdio","command":"npx","args":["@playwright/mcp@latest"]}}],"mcp_removal_candidates":[]}'
+                New-AuditValidatedWorkflowReceiptFixture $path
+
+                Mock LoadCfg { return [pscustomobject]@{ imports=@(); mappings=@(); vendors=@(); mcp_servers=@() } }
+                Mock Add-ImportFromArgs { Set-ContentUtf8 $script:CfgPath '{"mutated":"skill"}'; return $true }
+                Mock Ensure-AuditNewManualImportsMapped { return $true }
+                Mock Apply-AuditMcpSelections { Set-ContentUtf8 $script:CfgPath '{"mutated":"mcp"}'; throw 'mcp projection failed' }
+                Mock 构建生效 { }
+                Mock 同步MCP { }
+
+                $thrown = $false
+                try { Invoke-AuditRecommendationsApply -RecommendationsPath $path -Apply -Yes | Out-Null }
+                catch { $thrown = $true; $_.Exception.Message | Should Match 'mcp projection failed' }
+                $thrown | Should Be $true
+
+                (Get-ContentUtf8 $script:CfgPath) | Should Be $initial
+                Assert-MockCalled 构建生效 -Times 1 -Exactly -Scope It
+                Assert-MockCalled 同步MCP -Times 1 -Exactly -Scope It
+                $saved = Get-ContentUtf8 (Get-AuditApplyReportPath $path) | ConvertFrom-Json
+                $saved.persisted | Should Be $false
+                $saved.compensation.status | Should Be 'restored'
+                $saved.items[0].status | Should Be 'rolled_back'
+            }
+            finally {
+                $script:Root = $oldRoot
+                $script:CfgPath = $oldCfgPath
+            }
+        }
+
+        It "Attempts MCP compensation even when skill projection compensation fails" {
+            $oldCfgPath = $script:CfgPath
+            try {
+                $script:CfgPath = Join-Path $TestDrive 'transaction-independent-compensation.json'
+                Set-ContentUtf8 $script:CfgPath '{"before":true}'
+                $snapshot = New-AuditApplyTransactionSnapshot
+                Set-ContentUtf8 $script:CfgPath '{"after":true}'
+                Mock 构建生效 { throw 'build restore failed' }
+                Mock 同步MCP { }
+
+                $result = Restore-AuditApplyTransaction -Snapshot $snapshot -SkillProjectionAttempted $true -McpProjectionAttempted $true
+
+                (Get-ContentUtf8 $script:CfgPath) | Should Be '{"before":true}'
+                $result.status | Should Be 'failed'
+                $result.config_restored | Should Be $true
+                @($result.errors) -join '|' | Should Match 'skill_projection_restore_failed'
+                Assert-MockCalled 同步MCP -Times 1 -Exactly -Scope It
+            }
+            finally { $script:CfgPath = $oldCfgPath }
         }
 
         It "Runs validated dry-run in order and writes one fail-closed workflow report" {

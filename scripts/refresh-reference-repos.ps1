@@ -79,6 +79,62 @@ function Get-TrimmedErrorMessage {
     return $lines[-1].Trim()
 }
 
+function ConvertTo-CanonicalRepoIdentity {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Url,
+        [Parameter(Mandatory = $true)]
+        [string]$RepositoryPath
+    )
+
+    $candidate = $Url.Trim()
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+        throw 'repository URL is empty'
+    }
+
+    # Git accepts SCP-style SSH URLs, while System.Uri does not recognize them.
+    if ($candidate -notmatch '^[A-Za-z][A-Za-z0-9+.-]*://' -and
+        $candidate -notmatch '^[A-Za-z]:[\\/]' -and
+        $candidate -match '^(?:[^@/:]+@)?(?<host>[^/:]+):(?<path>.+)$') {
+        $hostName = $Matches.host.ToLowerInvariant()
+        $repoPath = $Matches.path.Replace('\', '/').Trim('/')
+        if ($repoPath.EndsWith('.git', [System.StringComparison]::OrdinalIgnoreCase)) {
+            $repoPath = $repoPath.Substring(0, $repoPath.Length - 4)
+        }
+        if ($hostName -eq 'github.com') {
+            $repoPath = $repoPath.ToLowerInvariant()
+        }
+        return ('remote:{0}/{1}' -f $hostName, $repoPath)
+    }
+
+    $uri = $null
+    if ([System.Uri]::TryCreate($candidate, [System.UriKind]::Absolute, [ref]$uri)) {
+        if ($uri.IsFile) {
+            $candidate = $uri.LocalPath
+        }
+        elseif (-not [string]::IsNullOrWhiteSpace($uri.Host)) {
+            $hostName = $uri.DnsSafeHost.ToLowerInvariant()
+            $port = if ($uri.IsDefaultPort) { '' } else { ':' + $uri.Port }
+            $repoPath = [System.Uri]::UnescapeDataString($uri.AbsolutePath).Replace('\', '/').Trim('/')
+            if ($repoPath.EndsWith('.git', [System.StringComparison]::OrdinalIgnoreCase)) {
+                $repoPath = $repoPath.Substring(0, $repoPath.Length - 4)
+            }
+            if ($hostName -eq 'github.com') {
+                $repoPath = $repoPath.ToLowerInvariant()
+            }
+            return ('remote:{0}{1}/{2}' -f $hostName, $port, $repoPath)
+        }
+    }
+
+    $localPath = if ([System.IO.Path]::IsPathRooted($candidate)) {
+        [System.IO.Path]::GetFullPath($candidate)
+    }
+    else {
+        [System.IO.Path]::GetFullPath((Join-Path $RepositoryPath $candidate))
+    }
+    return 'local:' + $localPath.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar).ToLowerInvariant()
+}
+
 function New-UtcTimestamp {
     return (Get-Date).ToUniversalTime().ToString("yyyyMMdd-HHmmss")
 }
@@ -392,6 +448,60 @@ foreach ($repoName in $RepoNames) {
         }
     }
 
+    $actualOriginUrls = @()
+    try {
+        $originUrlText = Invoke-GitText -RepositoryPath $repoPath -Arguments @('remote', 'get-url', '--all', 'origin')
+        if (-not [string]::IsNullOrWhiteSpace($originUrlText)) {
+            $actualOriginUrls = @($originUrlText -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        }
+    }
+    catch {
+        $actualOriginUrls = @()
+    }
+
+    $expectedIdentity = $null
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($upstreamUrl)) {
+            $expectedIdentity = ConvertTo-CanonicalRepoIdentity -Url $upstreamUrl -RepositoryPath $repoPath
+        }
+    }
+    catch {
+        $expectedIdentity = $null
+    }
+    $actualIdentities = @($actualOriginUrls | ForEach-Object {
+            try { ConvertTo-CanonicalRepoIdentity -Url $_ -RepositoryPath $repoPath }
+            catch { '__invalid_origin__' }
+        })
+    $originIdentityMatches = (-not [string]::IsNullOrWhiteSpace($expectedIdentity)) -and
+        $actualIdentities.Count -gt 0 -and
+        @($actualIdentities | Where-Object { $_ -ne $expectedIdentity }).Count -eq 0
+
+    if (-not $originIdentityMatches) {
+        $originStatus = if ($actualOriginUrls.Count -eq 0) { 'origin-missing' } else { 'origin-identity-mismatch' }
+        $results.Add([pscustomobject]@{
+                repo = $repoName
+                tier = $repoTier
+                upstream = $upstreamUrl
+                expected_upstream = $upstreamUrl
+                actual_origin = $actualOriginUrls
+                path = $repoPath
+                status = $originStatus
+                branch = $null
+                head_before = $null
+                head_after = $null
+                changed = $false
+                cloned = $cloned
+                ahead_behind = $null
+                remote_refs_current = $false
+                working_tree_matches_upstream = $null
+                upstream_revision = $null
+                consumable_revision = $null
+                note = ('origin identity verification blocked network operations; expected_upstream={0}; actual_origin={1}' -f $upstreamUrl, ($actualOriginUrls -join ', '))
+                compare_log = @()
+            })
+        continue
+    }
+
     $branch = Invoke-GitText -RepositoryPath $repoPath -Arguments @("branch", "--show-current")
     $headBefore = Invoke-GitText -RepositoryPath $repoPath -Arguments @("rev-parse", "HEAD")
     $statusText = Invoke-GitText -RepositoryPath $repoPath -Arguments @("status", "--short")
@@ -564,6 +674,13 @@ foreach ($result in $results) {
     }
     if ($result.upstream) {
         $lines.Add(('- 上游：`' + $result.upstream + '`'))
+    }
+    if ($result.expected_upstream) {
+        $lines.Add(('- 期望 origin：`' + $result.expected_upstream + '`'))
+    }
+    if ($null -ne $result.actual_origin) {
+        $actualOriginLabel = if (@($result.actual_origin).Count -gt 0) { @($result.actual_origin) -join ', ' } else { '<missing>' }
+        $lines.Add(('- 实际 origin：`' + $actualOriginLabel + '`'))
     }
     if ($result.path) {
         $lines.Add(('- 路径：`' + $result.path + '`'))

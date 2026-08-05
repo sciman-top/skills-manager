@@ -3,12 +3,13 @@ Describe 'skills.json versioned schema contract' {
     $scriptPath = Join-Path $repoRoot 'scripts\verify-skills-config.ps1'
     $fixtureRoot = Join-Path $repoRoot 'tests\fixtures\config-schema'
 
-    function Invoke-ConfigVerifier([string]$ConfigPath, [string]$Mode = 'enforce', [switch]$External) {
+    function Invoke-ConfigVerifier([string]$ConfigPath, [string]$Mode = 'enforce', [switch]$External, [switch]$RequireDeclaredSchemaVersion) {
+        $versionArgs = if ($RequireDeclaredSchemaVersion) { @{ RequireDeclaredSchemaVersion = $true } } else { @{} }
         $output = if ($External) {
-            @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -ConfigPath $ConfigPath -Mode $Mode 2>&1)
+            @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -ConfigPath $ConfigPath -Mode $Mode @versionArgs 2>&1)
         }
         else {
-            @(& $scriptPath -ConfigPath $ConfigPath -Mode $Mode -NoExit 2>&1)
+            @(& $scriptPath -ConfigPath $ConfigPath -Mode $Mode -NoExit @versionArgs 2>&1)
         }
         return [pscustomobject]@{ exit_code = $LASTEXITCODE; result = (($output -join "`n") | ConvertFrom-Json) }
     }
@@ -22,6 +23,7 @@ Describe 'skills.json versioned schema contract' {
         $run.exit_code | Should Be 0
         $run.result.valid | Should Be $true
         $run.result.finding_count | Should Be 0
+        $run.result.version_source | Should Be 'declared'
         $before | Should Be $after
         $run.result.config_sha256_before | Should Be $run.result.config_sha256_after
     }
@@ -41,6 +43,13 @@ Describe 'skills.json versioned schema contract' {
         $run.result.config_version | Should Be 1
         $run.result.version_source | Should Be 'legacy_default'
         @($run.result.observations | Where-Object code -eq 'legacy_schema_version_missing').Count | Should Be 1
+    }
+
+    It 'fails closed when a declared version is required for a legacy config' {
+        $run = Invoke-ConfigVerifier (Join-Path $fixtureRoot 'legacy-v1.json') -RequireDeclaredSchemaVersion
+        $run.exit_code | Should Be 1
+        $run.result.valid | Should Be $false
+        @($run.result.findings | Where-Object code -eq 'schema_version_required').Count | Should Be 1
     }
 
     $invalidCases = @(

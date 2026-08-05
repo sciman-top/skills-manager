@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [int]$SyncMcpThresholdMs = 0,
-    [switch]$WarnOnly
+    [switch]$WarnOnly,
+    [string]$CurrentSyncMcpSamplePath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -22,24 +23,31 @@ function Resolve-SyncMcpThresholdMs([int]$explicitValue) {
     return $parsed
 }
 
-function Assert-SyncMcpThreshold($report, [int]$thresholdMs, [bool]$warnOnly) {
-    if ($thresholdMs -le 0) { return }
+function Get-CurrentSyncMcpSample([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw ("Current sync_mcp sample does not exist: {0}" -f $path)
+    }
+    try {
+        $sample = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+    }
+    catch {
+        throw ("Current sync_mcp sample is not valid JSON: {0}" -f $_.Exception.Message)
+    }
+    if ([string]$sample.metric -ne 'sync_mcp') {
+        throw ("Current sync_mcp sample has unexpected metric: {0}" -f [string]$sample.metric)
+    }
+    return $sample
+}
 
-    if ($null -eq $report.performance -or $null -eq $report.performance.summary) {
-        $msg = "doctor --json report misses performance.summary required for sync_mcp threshold check."
-        if ($warnOnly) { Write-Warning $msg; return }
-        throw $msg
+function Assert-SyncMcpThreshold($metric, [int]$thresholdMs, [bool]$warnOnly) {
+    if ($thresholdMs -le 0) { return $true }
+
+    if ($null -eq $metric) {
+        Write-Host 'gate_na gate=sync_mcp-performance reason=no_current_sample alternative_verification=doctor_offline_contract evidence_link=doctor_json_contract expires_at=next_sync_mcp_performance_gate recovery_condition=provide_current_sync_mcp_sample'
+        return $false
     }
 
-    $summary = @($report.performance.summary)
-    $syncMetric = @($summary | Where-Object { $_ -and [string]$_.metric -eq "sync_mcp" } | Select-Object -First 1)
-    if ($syncMetric.Count -eq 0 -or $null -eq $syncMetric[0]) {
-        $msg = "doctor --json report misses sync_mcp metric in performance.summary."
-        if ($warnOnly) { Write-Warning $msg; return }
-        throw $msg
-    }
-
-    $metric = $syncMetric[0]
     $last = 0
     $avg = 0
     if (-not [int]::TryParse([string]$metric.last_ms, [ref]$last)) {
@@ -53,12 +61,12 @@ function Assert-SyncMcpThreshold($report, [int]$thresholdMs, [bool]$warnOnly) {
         throw $msg
     }
 
-    if ($last -le $thresholdMs -and $avg -le $thresholdMs) { return }
+    if ($last -le $thresholdMs -and $avg -le $thresholdMs) { return $true }
 
     $perfMessage = ("sync_mcp performance regression: last={0}ms avg={1}ms threshold={2}ms" -f $last, $avg, $thresholdMs)
     if ($warnOnly) {
         Write-Warning $perfMessage
-        return
+        return $true
     }
 
     throw $perfMessage
@@ -92,9 +100,10 @@ try {
     if ($null -eq $report.summary) { throw 'doctor --json report misses summary.' }
 
     $effectiveSyncThreshold = Resolve-SyncMcpThresholdMs $SyncMcpThresholdMs
-    Assert-SyncMcpThreshold $report $effectiveSyncThreshold ([bool]$WarnOnly)
+    $currentSyncSample = Get-CurrentSyncMcpSample $CurrentSyncMcpSamplePath
+    $syncThresholdEvaluated = Assert-SyncMcpThreshold $currentSyncSample $effectiveSyncThreshold ([bool]$WarnOnly)
 
-    if ($effectiveSyncThreshold -gt 0) {
+    if ($effectiveSyncThreshold -gt 0 -and $syncThresholdEvaluated) {
         Write-Host ("doctor JSON contract check passed (sync_mcp threshold={0}ms)." -f $effectiveSyncThreshold)
     }
     else {

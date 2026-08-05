@@ -16,6 +16,19 @@ function Read-AgentWorkflowRequest([string]$InputPath) {
     $fullPath = [IO.Path]::GetFullPath($InputPath)
     if (-not (Test-OperationPathWithinRoot $fullPath $Root)) { throw 'Agent workflow input must remain inside the repository root.' }
     if (-not [IO.File]::Exists($fullPath)) { throw ('Agent workflow input does not exist: {0}' -f $fullPath) }
+    $rootPath = [IO.Path]::GetFullPath($Root)
+    $cursor = $fullPath
+    while (Test-OperationPathWithinRoot $cursor $rootPath) {
+        if ([IO.File]::Exists($cursor) -or [IO.Directory]::Exists($cursor)) {
+            if (([IO.File]::GetAttributes($cursor) -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw 'Agent workflow input cannot traverse a reparse point.'
+            }
+        }
+        if ($cursor.Equals($rootPath, [StringComparison]::OrdinalIgnoreCase)) { break }
+        $parent = [IO.Directory]::GetParent($cursor)
+        if ($null -eq $parent) { break }
+        $cursor = $parent.FullName
+    }
     return [IO.File]::ReadAllText($fullPath) | ConvertFrom-Json
 }
 

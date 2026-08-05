@@ -1,4 +1,4 @@
 interface:
   display_name: "任务连续性守夜"
-  short_description: "自动恢复中断任务并监督 Goal 验收、纠偏与停止"
-  default_prompt: "Use $watch-interrupted-task to supervise this Goal, recover interrupted work from verified checkpoints, and stop only after acceptance evidence passes."
+  short_description: "自动恢复中断任务并在稳定停止后清理守夜"
+  default_prompt: "Use $watch-interrupted-task to recover this task from verified checkpoints and retire its watch after a proved stable stop."

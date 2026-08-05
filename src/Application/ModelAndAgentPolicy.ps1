@@ -22,8 +22,21 @@ function Add-AgentAccessConflictFindings($Findings, [object[]]$Items, [string]$C
     foreach ($resource in @($byResource.Keys)) { if ($byResource[$resource].Count -gt 1 -and @($byResource[$resource] | Where-Object { $_ -eq 'write' }).Count -gt 0) { $Findings.Add((New-OperationFinding $Code 'error' $Path ($Message + ': ' + $resource))) | Out-Null } }
 }
 
+function Test-AgentCompletionVerificationReceipt($Evidence) {
+    if ($null -eq $Evidence -or $Evidence -is [string]) { return $false }
+    if ((Get-OperationObjectProperty $Evidence 'schema_version') -ne 1) { return $false }
+    if ([string](Get-OperationObjectProperty $Evidence 'receipt_id') -notmatch '^verify-[A-Za-z0-9][A-Za-z0-9._-]{1,127}$') { return $false }
+    if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Evidence 'verifier'))) { return $false }
+    if ([string](Get-OperationObjectProperty $Evidence 'evidence_sha256') -notmatch '^[a-fA-F0-9]{64}$') { return $false }
+    if (-not (Test-OperationArray (Get-OperationObjectProperty $Evidence 'commands')) -or @((Get-OperationObjectProperty $Evidence 'commands')).Count -eq 0) { return $false }
+    $verifiedAt = [datetimeoffset]::MinValue
+    if (-not [datetimeoffset]::TryParse([string](Get-OperationObjectProperty $Evidence 'verified_at'), [ref]$verifiedAt)) { return $false }
+    if (Test-OperationSerializedSensitiveValue ($Evidence | ConvertTo-Json -Depth 20 -Compress)) { return $false }
+    return $true
+}
+
 function Test-AgentParallelAdmission {
-    param($TaskGraph, [string[]]$TaskIds = @(), [string[]]$CompletedTaskIds = @(), [object[]]$CompletedTaskReceipts = @())
+    param($TaskGraph, [string[]]$TaskIds = @(), [string[]]$CompletedTaskIds = @(), [object[]]$CompletedTaskReceipts = @(), [switch]$PlanningOnly)
     $findings = New-Object System.Collections.Generic.List[object]
     $graphValidation = Test-AgentTaskGraphContract $TaskGraph
     foreach ($finding in @($graphValidation.findings)) { $findings.Add($finding) | Out-Null }
@@ -35,18 +48,29 @@ function Test-AgentParallelAdmission {
         if (-not $taskIndex.ContainsKey($completedId.ToLowerInvariant())) { $findings.Add((New-OperationFinding 'completed_task_unknown' 'error' '$.completed_task_ids' 'Completed task is not declared in this TaskGraph.')) | Out-Null }
     }
     $receiptIndex = @{}
-    foreach ($receipt in @($CompletedTaskReceipts)) {
-        $receiptTaskId = ([string](Get-OperationObjectProperty $receipt 'task_id')).Trim()
-        $receiptKey = $receiptTaskId.ToLowerInvariant()
-        if ([string]::IsNullOrWhiteSpace($receiptTaskId) -or -not $taskIndex.ContainsKey($receiptKey)) { $findings.Add((New-OperationFinding 'completion_receipt_task_invalid' 'error' '$.completion_receipts' 'Completion receipt task_id must belong to the TaskGraph.')) | Out-Null; continue }
-        if ($receiptIndex.ContainsKey($receiptKey)) { $findings.Add((New-OperationFinding 'completion_receipt_duplicate' 'error' '$.completion_receipts' 'Completion receipt is duplicated.')) | Out-Null; continue }
-        $receiptIndex[$receiptKey] = $receipt
-        if ([string](Get-OperationObjectProperty $receipt 'base_revision') -cne [string](Get-OperationObjectProperty $TaskGraph 'base_revision')) { $findings.Add((New-OperationFinding 'completion_receipt_revision_mismatch' 'error' '$.completion_receipts' 'Completion receipt base_revision does not match the TaskGraph.')) | Out-Null }
-        if ([string](Get-OperationObjectProperty $receipt 'status') -cne 'verified') { $findings.Add((New-OperationFinding 'completion_receipt_unverified' 'error' '$.completion_receipts' 'Completion receipt status must be verified.')) | Out-Null }
-        if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $receipt 'verification_receipt'))) { $findings.Add((New-OperationFinding 'completion_receipt_evidence_missing' 'error' '$.completion_receipts' 'Completion receipt requires verification evidence.')) | Out-Null }
+    if (-not $PlanningOnly) {
+        foreach ($receipt in @($CompletedTaskReceipts)) {
+            $receiptTaskId = ([string](Get-OperationObjectProperty $receipt 'task_id')).Trim()
+            $receiptKey = $receiptTaskId.ToLowerInvariant()
+            if ([string]::IsNullOrWhiteSpace($receiptTaskId) -or -not $taskIndex.ContainsKey($receiptKey)) { $findings.Add((New-OperationFinding 'completion_receipt_task_invalid' 'error' '$.completion_receipts' 'Completion receipt task_id must belong to the TaskGraph.')) | Out-Null; continue }
+            if ($receiptIndex.ContainsKey($receiptKey)) { $findings.Add((New-OperationFinding 'completion_receipt_duplicate' 'error' '$.completion_receipts' 'Completion receipt is duplicated.')) | Out-Null; continue }
+            $receiptIndex[$receiptKey] = $receipt
+            if ([string](Get-OperationObjectProperty $receipt 'base_revision') -cne [string](Get-OperationObjectProperty $TaskGraph 'base_revision')) { $findings.Add((New-OperationFinding 'completion_receipt_revision_mismatch' 'error' '$.completion_receipts' 'Completion receipt base_revision does not match the TaskGraph.')) | Out-Null }
+            if ([string](Get-OperationObjectProperty $receipt 'status') -cne 'verified') { $findings.Add((New-OperationFinding 'completion_receipt_unverified' 'error' '$.completion_receipts' 'Completion receipt status must be verified.')) | Out-Null }
+            $evidence = Get-OperationObjectProperty $receipt 'verification_receipt'
+            if ($null -eq $evidence) { $findings.Add((New-OperationFinding 'completion_receipt_evidence_missing' 'error' '$.completion_receipts' 'Completion receipt requires verification evidence.')) | Out-Null }
+            elseif (-not (Test-AgentCompletionVerificationReceipt $evidence)) { $findings.Add((New-OperationFinding 'completion_receipt_evidence_invalid' 'error' '$.completion_receipts' 'Completion verification evidence must be a structured, hashed, command-backed receipt.')) | Out-Null }
+        }
+        foreach ($completedId in @($completed)) { if (-not $receiptIndex.ContainsKey($completedId.ToLowerInvariant())) { $findings.Add((New-OperationFinding 'completion_receipt_missing' 'error' '$.completion_receipts' ('Verified completion receipt is missing for task: {0}' -f $completedId))) | Out-Null } }
+        foreach ($receiptTaskId in @($receiptIndex.Keys)) { if (-not $completed.Contains($receiptTaskId)) { $findings.Add((New-OperationFinding 'completion_receipt_unclaimed' 'error' '$.completion_receipts' ('Completion receipt is not declared in completed_task_ids: {0}' -f $receiptTaskId))) | Out-Null } }
     }
-    foreach ($completedId in @($completed)) { if (-not $receiptIndex.ContainsKey($completedId.ToLowerInvariant())) { $findings.Add((New-OperationFinding 'completion_receipt_missing' 'error' '$.completion_receipts' ('Verified completion receipt is missing for task: {0}' -f $completedId))) | Out-Null } }
-    foreach ($receiptTaskId in @($receiptIndex.Keys)) { if (-not $completed.Contains($receiptTaskId)) { $findings.Add((New-OperationFinding 'completion_receipt_unclaimed' 'error' '$.completion_receipts' ('Completion receipt is not declared in completed_task_ids: {0}' -f $receiptTaskId))) | Out-Null } }
+    foreach ($completedId in @($completed)) {
+        $completedKey = $completedId.ToLowerInvariant()
+        if (-not $taskIndex.ContainsKey($completedKey)) { continue }
+        foreach ($dependency in @((Get-OperationObjectProperty $taskIndex[$completedKey] 'depends_on'))) {
+            if (-not $completed.Contains([string]$dependency)) { $findings.Add((New-OperationFinding 'completed_dependency_not_closed' 'error' '$.completed_task_ids' ('Completed task dependency is not also completed: {0} -> {1}' -f $completedId, [string]$dependency))) | Out-Null }
+        }
+    }
     $selected = New-Object System.Collections.Generic.List[object]
     $seen = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::OrdinalIgnoreCase)
     foreach ($taskId in @($TaskIds)) {
@@ -90,6 +114,7 @@ function Test-AgentParallelAdmission {
     $result = New-OperationValidationResult $findings.ToArray()
     $result | Add-Member -NotePropertyName mode -NotePropertyValue $(if ($result.pass -and $selected.Count -eq 0) { 'not_requested' } elseif ($result.pass) { 'isolated_parallel' } else { 'sequential_required' })
     $result | Add-Member -NotePropertyName task_ids -NotePropertyValue @($selected.ToArray() | ForEach-Object { [string](Get-OperationObjectProperty $_ 'task_id') })
+    $result | Add-Member -NotePropertyName completion_evidence_semantics -NotePropertyValue $(if ($PlanningOnly) { 'planned_dependency_order_only' } else { 'verified_receipts_required' })
     return $result
 }
 
@@ -111,11 +136,10 @@ function New-AgentExecutionPlan {
         $selectedTasks = New-Object System.Collections.Generic.List[object]
         if ($mustRunSerial.Count -gt 0) { $selectedTasks.Add($mustRunSerial[0]) | Out-Null }
         else {
-            $receipts = @($completed | ForEach-Object { [pscustomobject]@{ task_id = $_; base_revision = [string](Get-OperationObjectProperty $TaskGraph 'base_revision'); status = 'verified'; verification_receipt = 'planned-prior-wave' } })
             foreach ($task in @($ready)) {
                 if ($selectedTasks.Count -eq 0) { $selectedTasks.Add($task) | Out-Null; continue }
                 $candidateIds = @($selectedTasks.ToArray() | ForEach-Object { [string](Get-OperationObjectProperty $_ 'task_id') }) + [string](Get-OperationObjectProperty $task 'task_id')
-                if ((Test-AgentParallelAdmission -TaskGraph $TaskGraph -TaskIds $candidateIds -CompletedTaskIds @($completed) -CompletedTaskReceipts $receipts).pass) { $selectedTasks.Add($task) | Out-Null }
+                if ((Test-AgentParallelAdmission -TaskGraph $TaskGraph -TaskIds $candidateIds -CompletedTaskIds @($completed) -PlanningOnly).pass) { $selectedTasks.Add($task) | Out-Null }
             }
         }
         $selectedIds = @($selectedTasks.ToArray() | ForEach-Object { [string](Get-OperationObjectProperty $_ 'task_id') })
@@ -162,6 +186,7 @@ function New-ModelPolicyProposal {
         [Parameter(Mandatory = $true)][string]$RequestedTier,
         [Parameter(Mandatory = $true)][string]$Rationale,
         $RadarSnapshot,
+        [string]$HostSurface,
         [string[]]$HostAvailablePairs = @(),
         [object[]]$LocalOutcomes = @(),
         [Parameter(Mandatory = $true)][string]$Now,
@@ -182,10 +207,22 @@ function New-ModelPolicyProposal {
     if ([string]::IsNullOrWhiteSpace($Rationale)) { $fallbackReasons.Add('rationale_missing') | Out-Null }
     if (@($LocalOutcomes).Count -gt 0 -and -not $hasLocal) { $fallbackReasons.Add('local_outcome_invalid') | Out-Null }
     $hostConfirmed = $false
+    $hostAvailabilityState = 'unknown'
+    $hostSurfaceKnown = -not [string]::IsNullOrWhiteSpace($HostSurface) -and $HostSurface -match '^[a-z][a-z0-9_]{1,63}$'
+    if (-not $hostSurfaceKnown) { $fallbackReasons.Add('host_surface_unknown') | Out-Null }
     if ($null -ne $anchor) {
         $pair = '{0}|{1}' -f $anchor.model_family, $anchor.reasoning_effort
-        $hostConfirmed = $pair -in @($HostAvailablePairs)
-        if (@($HostAvailablePairs).Count -gt 0 -and $pair -notin @($HostAvailablePairs)) { $fallbackReasons.Add('host_pair_unavailable') | Out-Null }
+        if ($hostSurfaceKnown -and @($HostAvailablePairs).Count -eq 0) {
+            $fallbackReasons.Add('host_pair_availability_unknown') | Out-Null
+        }
+        elseif ($hostSurfaceKnown -and $pair -in @($HostAvailablePairs)) {
+            $hostConfirmed = $true
+            $hostAvailabilityState = 'confirmed_available'
+        }
+        elseif ($hostSurfaceKnown) {
+            $hostAvailabilityState = 'confirmed_unavailable'
+            $fallbackReasons.Add('host_pair_unavailable') | Out-Null
+        }
     }
     if (-not $radarValidation.pass -and -not $hasLocal -and -not $hostConfirmed) { foreach ($code in @($radarValidation.findings.code | Sort-Object -Unique)) { $fallbackReasons.Add([string]$code) | Out-Null } }
     $radarEntry = $null
@@ -200,7 +237,7 @@ function New-ModelPolicyProposal {
         rationale = $Rationale; user_override = (-not [string]::IsNullOrWhiteSpace($UserOverrideTier)); fallback_reason = $(if ($fallback) { @($fallbackReasons) -join ',' } else { $null })
         evidence_priority = 'user_override_then_local_outcomes_then_host_availability_then_radar_then_host_default'; selection_semantics = 'host_proposal_validation_only'
         local_outcomes = @(Copy-AgentWorkflowValue $validLocalOutcomes.ToArray()); radar_snapshot_id = Get-OperationObjectProperty $RadarSnapshot 'snapshot_id'; radar_entry = Copy-AgentWorkflowValue $radarEntry
-        evidence_sources = [pscustomobject][ordered]@{ local = [pscustomobject]@{ valid = $hasLocal; supplied = @($LocalOutcomes).Count; accepted = $validLocalOutcomes.Count; rejected_findings = @($localFindings.ToArray()) }; radar = [pscustomobject]@{ valid = $radarValidation.pass; used = (-not $fallback -and $null -ne $radarEntry); findings = @($radarValidation.findings) }; host_availability = [pscustomobject]@{ declared = @($HostAvailablePairs).Count -gt 0; pair_confirmed = $hostConfirmed } }
+        evidence_sources = [pscustomobject][ordered]@{ local = [pscustomobject]@{ valid = $hasLocal; supplied = @($LocalOutcomes).Count; accepted = $validLocalOutcomes.Count; rejected_findings = @($localFindings.ToArray()) }; radar = [pscustomobject]@{ valid = $radarValidation.pass; used = (-not $fallback -and $null -ne $radarEntry); findings = @($radarValidation.findings) }; host_availability = [pscustomobject]@{ surface = $(if ($hostSurfaceKnown) { $HostSurface } else { $null }); state = $hostAvailabilityState; declared = ($hostSurfaceKnown -and @($HostAvailablePairs).Count -gt 0); pair_confirmed = $hostConfirmed } }
         provider_calls = 0; native_mutations = 0; writes = 0
     }
 }
@@ -248,7 +285,7 @@ function Test-AgentWorkflowRequest($Request) {
         if (-not $proposalSeen.Add($taskId)) { $findings.Add((New-OperationFinding 'model_proposal_duplicate' 'error' '$.model_proposals.task_id' 'Only one model proposal is allowed per task.')) | Out-Null }
         $rationale = [string](Get-OperationObjectProperty $proposal 'rationale')
         if ([string]::IsNullOrWhiteSpace($rationale)) { $findings.Add((New-OperationFinding 'model_proposal_rationale_required' 'error' '$.model_proposals.rationale' 'Model proposal rationale is required.')) | Out-Null; continue }
-        $evaluated = New-ModelPolicyProposal -TaskId $taskId -RequestedTier ([string](Get-OperationObjectProperty $proposal 'requested_tier')) -Rationale $rationale -RadarSnapshot (Get-OperationObjectProperty $Request 'radar_snapshot') -HostAvailablePairs @((Get-OperationObjectProperty $proposal 'host_available_pairs')) -LocalOutcomes @((Get-OperationObjectProperty $proposal 'local_outcomes')) -Now ([string](Get-OperationObjectProperty $Request 'now')) -UserOverrideTier ([string](Get-OperationObjectProperty $proposal 'user_override_tier'))
+        $evaluated = New-ModelPolicyProposal -TaskId $taskId -RequestedTier ([string](Get-OperationObjectProperty $proposal 'requested_tier')) -Rationale $rationale -RadarSnapshot (Get-OperationObjectProperty $Request 'radar_snapshot') -HostSurface ([string](Get-OperationObjectProperty $proposal 'host_surface')) -HostAvailablePairs @((Get-OperationObjectProperty $proposal 'host_available_pairs')) -LocalOutcomes @((Get-OperationObjectProperty $proposal 'local_outcomes')) -Now ([string](Get-OperationObjectProperty $Request 'now')) -UserOverrideTier ([string](Get-OperationObjectProperty $proposal 'user_override_tier'))
         if ($evaluated.selected_tier -eq 'host_default') { $findings.Add((New-OperationFinding 'model_proposal_unusable' 'error' '$.model_proposals' ('Model proposal failed closed: {0}' -f $evaluated.fallback_reason))) | Out-Null }
     }
     $failurePacket = Get-OperationObjectProperty $Request 'failure_packet'
@@ -261,7 +298,7 @@ function New-AgentWorkflowAdvisoryPlan($Request) {
     $graph = Get-OperationObjectProperty $Request 'task_graph'
     $proposals = New-Object System.Collections.Generic.List[object]
     foreach ($proposal in @((Get-OperationObjectProperty $Request 'model_proposals'))) {
-        $proposals.Add((New-ModelPolicyProposal -TaskId ([string](Get-OperationObjectProperty $proposal 'task_id')) -RequestedTier ([string](Get-OperationObjectProperty $proposal 'requested_tier')) -Rationale ([string](Get-OperationObjectProperty $proposal 'rationale')) -RadarSnapshot (Get-OperationObjectProperty $Request 'radar_snapshot') -HostAvailablePairs @((Get-OperationObjectProperty $proposal 'host_available_pairs')) -LocalOutcomes @((Get-OperationObjectProperty $proposal 'local_outcomes')) -Now ([string](Get-OperationObjectProperty $Request 'now')) -UserOverrideTier ([string](Get-OperationObjectProperty $proposal 'user_override_tier')))) | Out-Null
+        $proposals.Add((New-ModelPolicyProposal -TaskId ([string](Get-OperationObjectProperty $proposal 'task_id')) -RequestedTier ([string](Get-OperationObjectProperty $proposal 'requested_tier')) -Rationale ([string](Get-OperationObjectProperty $proposal 'rationale')) -RadarSnapshot (Get-OperationObjectProperty $Request 'radar_snapshot') -HostSurface ([string](Get-OperationObjectProperty $proposal 'host_surface')) -HostAvailablePairs @((Get-OperationObjectProperty $proposal 'host_available_pairs')) -LocalOutcomes @((Get-OperationObjectProperty $proposal 'local_outcomes')) -Now ([string](Get-OperationObjectProperty $Request 'now')) -UserOverrideTier ([string](Get-OperationObjectProperty $proposal 'user_override_tier')))) | Out-Null
     }
     return [pscustomobject][ordered]@{
         schema_version = 1; pass = $requestValidation.pass; decision_owner = 'host_ai'; executor = 'host_native_runtime'; advisory_only = $true

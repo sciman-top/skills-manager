@@ -45,6 +45,112 @@ function Reject-Pattern([string]$Text, [string]$Pattern, [string]$Path, [string]
     }
 }
 
+function Get-ActivePowerShellFiles {
+    $excludedPrefixes = @(
+        '.git/',
+        'agent/',
+        'imports/',
+        'reports/',
+        'tests/fixtures/',
+        'vendor/'
+    )
+
+    foreach ($file in @(Get-ChildItem -LiteralPath $root -Filter '*.ps1' -File -Recurse -Force -ErrorAction Stop)) {
+        $relativePath = [System.IO.Path]::GetRelativePath($root, $file.FullName).Replace('\', '/')
+        $excluded = $false
+        foreach ($prefix in $excludedPrefixes) {
+            if ($relativePath.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $excluded = $true
+                break
+            }
+        }
+        if (-not $excluded) {
+            [pscustomobject]@{
+                path = $relativePath
+                full_path = $file.FullName
+            }
+        }
+    }
+}
+
+function Test-IsWindowsPowerShellName([string]$Value) {
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
+    $candidate = $Value.Trim().Trim('"', "'")
+    try {
+        $leaf = [System.IO.Path]::GetFileName($candidate)
+    }
+    catch {
+        $leaf = $candidate
+    }
+    return $leaf -in @('powershell', 'powershell.exe')
+}
+
+function Test-ActivePowerShellEstate {
+    $scanned = 0
+    foreach ($entry in @(Get-ActivePowerShellFiles)) {
+        $scanned++
+        $tokens = $null
+        $parseErrors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+            $entry.full_path,
+            [ref]$tokens,
+            [ref]$parseErrors
+        )
+
+        foreach ($parseError in @($parseErrors)) {
+            Add-Finding 'powershell_script_parse_failed' $entry.path (
+                'Active PowerShell script does not parse under PS7 at line {0}, column {1}: {2}' -f
+                    $parseError.Extent.StartLineNumber,
+                    $parseError.Extent.StartColumnNumber,
+                    $parseError.Message
+            )
+        }
+
+        $legacyInvocation = $null
+        foreach ($command in @($ast.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.CommandAst]
+        }, $true))) {
+            $commandName = [string]$command.GetCommandName()
+            if (Test-IsWindowsPowerShellName $commandName) {
+                $legacyInvocation = $command.Extent
+                break
+            }
+
+            if ($commandName -in @('Get-Command', 'Start-Process')) {
+                foreach ($element in @($command.CommandElements | Select-Object -Skip 1)) {
+                    if ($element -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
+                        (Test-IsWindowsPowerShellName ([string]$element.Value))) {
+                        $legacyInvocation = $element.Extent
+                        break
+                    }
+                }
+            }
+            if ($null -ne $legacyInvocation) { break }
+        }
+
+        if ($null -eq $legacyInvocation) {
+            $legacyVariable = $ast.Find({
+                param($node)
+                $node -is [System.Management.Automation.Language.VariableExpressionAst] -and
+                    [string]$node.VariablePath.UserPath -ieq 'env:CODEX_ALLOW_WINDOWS_POWERSHELL'
+            }, $true)
+            if ($null -ne $legacyVariable) {
+                $legacyInvocation = $legacyVariable.Extent
+            }
+        }
+
+        if ($null -ne $legacyInvocation) {
+            Add-Finding 'legacy_runtime_invocation_detected' $entry.path (
+                'Active PowerShell estate contains a Windows PowerShell execution path at line {0}, column {1}.' -f
+                    $legacyInvocation.StartLineNumber,
+                    $legacyInvocation.StartColumnNumber
+            )
+        }
+    }
+    return $scanned
+}
+
 $paths = [ordered]@{
     manifest = 'tasks/skills-manager-vnext-powershell7-migration.tasks.json'
     spec = 'docs/superpowers/specs/2026-08-05-powershell-7-only-runtime-migration.md'
@@ -140,6 +246,8 @@ Reject-Pattern $content.cmd '(?i)POWERSHELL_EXE=powershell\.exe|where\s+powershe
 Reject-Pattern $content.mcp '(?i)["'']powershell\.exe["'']' $paths.mcp 'legacy_fallback_detected' 'MCP environment wrapper must invoke pwsh.exe only.'
 Reject-Pattern $content.generated '(?i)CODEX_ALLOW_WINDOWS_POWERSHELL|Get-Command\s+powershell(?:\.exe)?|["'']powershell\.exe["'']' $paths.generated 'legacy_fallback_detected' 'Generated bundle contains a legacy runtime execution path.'
 
+$powershellFilesScanned = Test-ActivePowerShellEstate
+
 Require-Literal $content.cmd 'PowerShell 7+ (pwsh) is required' $paths.cmd 'cmd_diagnostic_missing'
 Require-Literal $content.mcp '"pwsh.exe"' $paths.mcp 'mcp_pwsh_wrapper_missing'
 Require-Literal $content.build 'deterministic UTF-8 BOM' $paths.build 'build_encoding_contract_missing'
@@ -197,6 +305,7 @@ $result = [pscustomobject][ordered]@{
     done = $doneCount
     historical_evidence = 'preserved'
     typed_core_production_status = 'not_started'
+    powershell_files_scanned = $powershellFilesScanned
     writes_performed = 0
     findings = $findings.ToArray()
 }

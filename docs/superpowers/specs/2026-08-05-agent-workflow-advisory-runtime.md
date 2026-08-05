@@ -89,7 +89,7 @@ CLI 请求仍是 UTF-8 JSON schema version 1；其中 `TaskGraph` 与 `FailurePa
 }
 ```
 
-`completion_receipts[]` 为每个 `completed_task_ids[]` 提供 `task_id/base_revision/status=verified/verification_receipt`；未知、重复、未被 completed list 声明、revision 不一致、无证据或同时被选入当前 batch 均 fail-closed。`model_proposals[]` 必须引用 TaskGraph task、每 task 最多一项且 rationale 非空；其 `local_outcomes[]` 最少记录 `task_class/model_family/reasoning_effort/base_revision/gate_passed/rework_count/actual_cost/actual_duration_seconds/sampled_at`，并与 proposal pair 一致、evaluation time 可解析且不早于 90 天。
+`completion_receipts[]` 为每个 `completed_task_ids[]` 提供 `task_id/base_revision/status=verified/verification_receipt`。`verification_receipt` 必须是 schema v1 对象，包含 `verify-*` receipt id、可解析的 `verified_at`、非空 `verifier`、64 位 `evidence_sha256` 和至少一条 verification command；任意字符串、空对象或敏感值均不构成证据。completed 集合还必须满足依赖闭包；未知、重复、未被 completed list 声明、revision 不一致、无证据、依赖未闭合或同时被选入当前 batch 均 fail-closed。`model_proposals[]` 必须引用 TaskGraph task、每 task 最多一项且 rationale 非空；其 `local_outcomes[]` 最少记录 `task_class/model_family/reasoning_effort/base_revision/gate_passed/rework_count/actual_cost/actual_duration_seconds/sampled_at`，并与 proposal pair 一致、evaluation time 可解析且不早于 90 天。
 
 `FailurePacket` 是换档、重试或重切片的前置输入，必须包含 `issue_id/task_id/base_revision/failure_kind/attempt_count/escalation_count/attempted_tier/commands/failures/verified_facts/unresolved_questions/artifacts/exact_write_set`。第一次 capacity corrected retry 还必须提供 `correction_summary`、至少一个 verified command 和 verified fact；`escalation_count` 不得大于 `attempt_count - 1`。failure kind 只允许 `task/context/tool/capacity/permission/credential/production_authorization/user_decision/unknown`。
 
@@ -117,7 +117,7 @@ CLI 请求仍是 UTF-8 JSON schema version 1；其中 `TaskGraph` 与 `FailurePa
 
 ### 4.2 确定性 wave 算法
 
-`New-AgentExecutionPlan` 先验证 TaskGraph，再按 `integration_order/task_id` 做拓扑排序。每个 wave 只含一个真正可执行 group：任一 serial、high-risk 或 high-ambiguity task 独占 barrier wave；否则把 ready task 按 canonical exact write set、coordination key 和 external resource 做 greedy disjoint group。一个 group 完成后才形成下一 wave；内部 `planned-prior-wave` receipt 只用于静态拓扑模拟，宿主真实拉起下一 wave 前仍必须提交实际 verified completion receipt。任何验证失败都返回 `pass=false`，不返回可执行 wave。该算法只输出计划，不创建线程、不等待、不调用模型。
+`New-AgentExecutionPlan` 先验证 TaskGraph，再按 `integration_order/task_id` 做拓扑排序。每个 wave 只含一个真正可执行 group：任一 serial、high-risk 或 high-ambiguity task 独占 barrier wave；否则把 ready task 按 canonical exact write set、coordination key 和 external resource 做 greedy disjoint group。静态规划显式调用 `PlanningOnly`，只允许 `planned_dependency_order_only` 推进拓扑，绝不伪造 completion receipt；一个 group 真实完成后，宿主拉起下一 wave 前仍必须提交实际 verified completion receipt。任何验证失败都返回 `pass=false`，不返回可执行 wave。该算法只输出计划，不创建线程、不等待、不调用模型。
 
 ## 5. 并行 admission 与并发拉起
 
@@ -128,7 +128,7 @@ CLI 请求仍是 UTF-8 JSON schema version 1；其中 `TaskGraph` 与 `FailurePa
 - `base_revision` 相同且非空；
 - high-risk/high-ambiguity/`parallelizable=false` task 一律不得进入普通并发；
 - 每个 task 有唯一 `result_owner`、`verification` 和 stop condition；
-- `exact_write_set` 必须是 canonical Windows-safe repo-relative path，禁止 root、drive、control/Windows-invalid chars（含 ADS `:`）、通配符、空 segment、`.` 或 `..`；比较时统一分隔符/大小写，并阻断相等及 ancestor/descendant 重叠；空 write set 只代表 read-only，不代表可写共享；
+- `exact_write_set` 必须是 canonical Windows-safe repo-relative path，禁止 root、drive、control/Windows-invalid chars（含 ADS `:`）、通配符、空 segment、`.`、`..`、Windows reserved device name、尾随点/空格；比较前做 NFC、统一分隔符/大小写，并阻断相等及 ancestor/descendant 重叠；空 write set 只代表 read-only，不代表可写共享；
 - `coordination_keys` 不出现同资源的任意 write 冲突；外部 `write` 与任何同资源任务冲突；
 - candidate 能在自己的 worktree/branch 独立构建、测试、丢弃；integration owner/order 已声明。
 
@@ -144,11 +144,11 @@ CLI 请求仍是 UTF-8 JSON schema version 1；其中 `TaskGraph` 与 `FailurePa
 | `sol_medium` | `gpt-5.6-sol + medium` | 一般实现、日常 Bug 排查、中等复杂度审查、集成准备 |
 | `luna_max` | `gpt-5.6-luna + max` | 用户默认；常规接口、SQL、单测、技术文档、机械变换和边界清晰的重复任务 |
 
-实际选择优先级为 `user override -> local comparable outcomes -> current host availability -> fresh Radar snapshot -> host native default`。`Luna max` 是当前用户明确覆盖的 routine 默认；Radar 后续变化只能生成可审计建议，不能自动增加 Terra 或其他第四档。费用、wall-clock、token/context、重试/返工和不可逆风险一起构成 Pareto 观察；不得把每天变化的 Radar 排名硬编码为总分或永久配置。模型不存在、宿主不可用、tier 已移除或 snapshot stale 时返回 `host_default` 与 fallback reason。
+实际选择优先级为 `user override -> local comparable outcomes -> current surface availability -> fresh Radar snapshot -> host native default`，但 availability 是执行前置门禁，不是可被前两项或 Radar 替代的评分证据。每个 proposal 必须声明 `host_surface`；该 surface 的 pair inventory 归一为 `confirmed_available / confirmed_unavailable / unknown`。空 inventory 或缺 surface 为 `unknown`，另一 CLI/provider/API gateway 的成功 receipt 不得投影到 `collaboration_spawn`；只有 `confirmed_available` 才可保留该 tier。`Luna max` 是当前用户明确覆盖的 routine 默认；Radar 后续变化只能生成可审计建议，不能自动增加 Terra 或其他第四档。费用、wall-clock、token/context、重试/返工和不可逆风险一起构成 Pareto 观察；不得把每天变化的 Radar 排名硬编码为总分或永久配置。模型不存在、宿主不可用、tier 已移除、availability 未确认或 snapshot stale 时返回 `host_default` 与 fallback reason。
 
 ## 7. Radar snapshot
 
-Radar 只允许通过显式导入/刷新动作产生不可变 v2 snapshot；本 track 不实现联网抓取。每个 entry 必须有 `model_label/model_family/reasoning_effort/score/estimated_cost/estimated_duration_seconds/sample_count/confidence`，entries 不得为空；snapshot 必须有 `source/captured_at/source_updated_at/expires_at/raw_hash`。上游 `source_updated_at` 距 capture 超过 36 小时、明显晚于 capture、`expires_at <= now`、来源非 HTTP(S)、hash 非 SHA-256、样本/指标缺失或 schema 不兼容时 fail-closed。`policy_overrides` 等用户/宿主决策字段禁止进入观测 snapshot。
+Radar 只允许通过显式导入/刷新动作产生不可变 v2 snapshot；本 track 不实现联网抓取。每个 entry 必须有 `model_label/model_family/reasoning_effort/score/estimated_cost/estimated_duration_seconds/sample_count/confidence`，entries 不得为空；snapshot 必须有 `source/captured_at/source_updated_at/expires_at/raw_hash`。source 只接受 `https://codexradar.com/` 或 `https://www.codexradar.com/`；entry 只接受 `gpt-5.6-sol|xhigh`、`gpt-5.6-sol|medium`、`gpt-5.6-luna|max` 三个唯一 pair。上游 `source_updated_at` 距 capture 超过 36 小时、明显晚于 capture、`expires_at <= now`、非 HTTPS/非 allowlisted host、未知或重复 pair、hash 非 SHA-256、样本/指标缺失或 schema 不兼容时 fail-closed。`policy_overrides` 等用户/宿主决策字段禁止进入观测 snapshot。
 
 本地结果只有满足最小 comparable contract、pair 一致、freshness 与 gate 证据时才优先于 Radar；传入空对象或 stale/invalid outcome 不得屏蔽无效 Radar。Radar 的社区分数不能替代真实任务证据，也不能证明 `live_accepted`。2026-08-05 的 v1 snapshot 与首个 scheduled run 仅保留为历史 receipt；当前宿主 automation 已进入 v2 revalidation，在生成带 automation revision、实际 model/effort、run time 与 snapshot id 的新 receipt 前，`HOST_RADAR_REFRESH_STATUS=pending_revalidation`。
 

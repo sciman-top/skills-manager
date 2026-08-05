@@ -16,5 +16,9 @@ steps:
     displayName: Verify PowerShell 7 runtime
 
 - pwsh: |
-    pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile quick
-  displayName: Run local quality gates
+    Install-Module Pester -RequiredVersion 4.10.1 -Scope CurrentUser -Force -SkipPublisherCheck
+  displayName: Install pinned Pester test runtime
+
+- pwsh: |
+    pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full
+  displayName: Run authoritative full quality gate

@@ -5,11 +5,18 @@ function Copy-AgentWorkflowValue($Value) {
 
 function Get-AgentCanonicalWritePath([string]$Path) {
     if ([string]::IsNullOrWhiteSpace($Path) -or $Path -match '[\x00-\x1F<>:"|*?\[\]]') { return $null }
-    $normalized = $Path.Trim().Replace('\', '/')
+    if ($Path -cne $Path.Trim()) { return $null }
+    $normalized = $Path.Replace('\', '/')
     if ($normalized -match '^(?:[A-Za-z]:|/|//)') { return $null }
     $segments = $normalized.Split([char]'/', [StringSplitOptions]::None)
     if ($segments.Count -eq 0 -or @($segments | Where-Object { [string]::IsNullOrWhiteSpace($_) -or $_ -in @('.', '..') }).Count -gt 0) { return $null }
-    return (@($segments | ForEach-Object { $_.ToLowerInvariant() }) -join '/')
+    $canonicalSegments = New-Object System.Collections.Generic.List[string]
+    foreach ($segment in @($segments)) {
+        if ($segment -cne $segment.TrimEnd(' ', '.')) { return $null }
+        if ($segment -match '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)') { return $null }
+        $canonicalSegments.Add($segment.Normalize([Text.NormalizationForm]::FormC).ToLowerInvariant()) | Out-Null
+    }
+    return ($canonicalSegments.ToArray() -join '/')
 }
 
 function New-AgentTaskGraph {
@@ -138,7 +145,13 @@ function Test-RadarSnapshotContract {
     foreach ($field in @('snapshot_id', 'source', 'captured_at', 'source_updated_at', 'expires_at', 'raw_hash')) { if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Snapshot $field))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Required Radar snapshot field is missing.')) | Out-Null } }
     if ($null -ne $Snapshot.PSObject.Properties['policy_overrides']) { $findings.Add((New-OperationFinding 'radar_decision_field_forbidden' 'error' '$.policy_overrides' 'Radar snapshots are observational evidence and cannot carry user or host policy decisions.')) | Out-Null }
     $sourceUri = $null
-    if (-not [uri]::TryCreate([string](Get-OperationObjectProperty $Snapshot 'source'), [UriKind]::Absolute, [ref]$sourceUri) -or $sourceUri.Scheme -notin @('http', 'https')) { $findings.Add((New-OperationFinding 'radar_source_invalid' 'error' '$.source' 'Radar source must be an absolute HTTP(S) URI.')) | Out-Null }
+    $sourceUriValid = [uri]::TryCreate([string](Get-OperationObjectProperty $Snapshot 'source'), [UriKind]::Absolute, [ref]$sourceUri)
+    if (-not $sourceUriValid -or $sourceUri.Scheme -cne 'https') {
+        $findings.Add((New-OperationFinding 'radar_source_invalid' 'error' '$.source' 'Radar source must be an absolute HTTPS URI.')) | Out-Null
+    }
+    elseif ($sourceUri.Host -notin @('codexradar.com', 'www.codexradar.com')) {
+        $findings.Add((New-OperationFinding 'radar_source_untrusted' 'error' '$.source' 'Radar source host is not allowlisted.')) | Out-Null
+    }
     if ([string](Get-OperationObjectProperty $Snapshot 'raw_hash') -notmatch '^[a-fA-F0-9]{64}$') { $findings.Add((New-OperationFinding 'radar_raw_hash_invalid' 'error' '$.raw_hash' 'Radar raw_hash must be SHA-256.')) | Out-Null }
     $captured = [datetimeoffset]::MinValue; $sourceUpdated = [datetimeoffset]::MinValue; $expires = [datetimeoffset]::MinValue; $nowValue = [datetimeoffset]::MinValue
     $capturedValid = [datetimeoffset]::TryParse([string](Get-OperationObjectProperty $Snapshot 'captured_at'), [ref]$captured)
@@ -159,10 +172,15 @@ function Test-RadarSnapshotContract {
     $entries = Get-OperationObjectProperty $Snapshot 'entries'
     if (-not (Test-OperationArray $entries)) { $findings.Add((New-OperationFinding 'radar_entries_invalid' 'error' '$.entries' 'Radar entries must be an array.')) | Out-Null; $entries = @() }
     if (@($entries).Count -eq 0) { $findings.Add((New-OperationFinding 'radar_entries_empty' 'error' '$.entries' 'Radar snapshots require at least one observation.')) | Out-Null }
+    $allowedPairs = @('gpt-5.6-sol|xhigh', 'gpt-5.6-sol|medium', 'gpt-5.6-luna|max')
+    $observedPairs = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::Ordinal)
     for ($i = 0; $i -lt @($entries).Count; $i++) {
         $entry = @($entries)[$i]; $path = '$.entries[{0}]' -f $i
         foreach ($field in @('model_label', 'model_family', 'reasoning_effort', 'confidence')) { if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $entry $field))) { $findings.Add((New-OperationFinding 'radar_entry_field_missing' 'error' ($path + '.' + $field) 'Radar entry field is required.')) | Out-Null } }
         if ([string](Get-OperationObjectProperty $entry 'reasoning_effort') -notin @('low', 'medium', 'high', 'xhigh', 'max', 'ultra')) { $findings.Add((New-OperationFinding 'reasoning_effort_invalid' 'error' ($path + '.reasoning_effort') 'Radar reasoning effort is invalid.')) | Out-Null }
+        $pair = '{0}|{1}' -f [string](Get-OperationObjectProperty $entry 'model_family'), [string](Get-OperationObjectProperty $entry 'reasoning_effort')
+        if ($pair -notin $allowedPairs) { $findings.Add((New-OperationFinding 'radar_pair_not_allowlisted' 'error' $path 'Radar observation is outside the three policy model pairs.')) | Out-Null }
+        elseif (-not $observedPairs.Add($pair)) { $findings.Add((New-OperationFinding 'radar_pair_duplicate' 'error' $path 'Radar snapshot contains a duplicate model and effort pair.')) | Out-Null }
         foreach ($field in @('score', 'estimated_cost', 'estimated_duration_seconds', 'sample_count')) { $number = 0.0; if (-not [double]::TryParse([string](Get-OperationObjectProperty $entry $field), [ref]$number) -or $number -lt 0) { $findings.Add((New-OperationFinding 'radar_metric_invalid' 'error' ($path + '.' + $field) 'Radar metric must be a non-negative number.')) | Out-Null } }
     }
     return New-OperationValidationResult $findings.ToArray()

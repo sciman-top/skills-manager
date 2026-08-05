@@ -15,11 +15,15 @@ Policy revision 3 restores recovery after the user's direct policy decision. It 
 
 - Recover explicit transient provider/transport failures, `continuation_gap`, recoverable task failures, verification failures, and strategy drift.
 - Continue from the first unproved safe step, not from the beginning of a turn.
-- Keep `unknown`, human gates, paused/terminal Goals, unsafe retries, stale policy turns, and unproved shared-checkout ownership fail-closed.
+- Keep `unknown`, unsafe retries, stale policy turns, and unproved shared-checkout ownership fail-closed. Human gates and paused/terminal Goals never grant recovery, but a separately proved stable task stop may retire its heartbeat without changing the Goal.
 - Treat the cross-task hook as defense in depth. Specialized paths may remain `guardrail_only`; never claim absolute isolation.
 - Let the fleet supervisor manage only trusted canonical heartbeat metadata. It never performs another task's business work.
 
 Use [references/recovery-design.md](references/recovery-design.md) when configuring Goal supervision, shared-checkout recovery, retry receipts, or fleet reconciliation. Routine view/pause/resume/close operations do not need that reference.
+
+## Guard turn provenance
+
+Apply an automation prompt only when the current input itself is the native heartbeat envelope whose automation id and target marker match fresh host metadata. Never carry heartbeat mode forward from prior turns, summaries, compaction context, or an existing automation. After every context compaction, re-check the current input kind before deciding any action or response shape. A direct user/business turn always exits the automation controller, continues the business request normally, and never emits heartbeat XML. This guard prevents a stale watch prompt from terminating a manually restarted task.
 
 ## Preserve the recovery boundary
 
@@ -77,7 +81,7 @@ The `v1` identity remains stable; `policy_revision=3` identifies the restored co
 6. Never edit Desktop databases, session JSONL, global state, or automation TOML directly. Read host-managed metadata only when needed to resolve identity; mutate only through the native capability.
 7. Never restart or stop ChatGPT/Codex.
 
-Automatic computer shutdown is a distinct, direct-user fleet lifecycle mode. It is not enabled by ordinary fleet monitoring, a target heartbeat, Goal completion, or a prior shutdown receipt. Use only the canonical `-ShutdownWhenAllStopped` fleet prompt. Goal and non-Goal tasks use the same rule: the target AI owns the stop decision and may use any stable `stop_reason`; the fleet does not maintain a finite allowlist of stop reasons. A target qualifies only from fresh `task_stopped=true`, `recovery_pending=false`, no active business turn, no scheduled retry, a stable checkpoint/receipt, and safe external-effect truth. A recoverable 408/429/502/503/504, transport interruption, continuation gap, strategy/verification repair, peer-busy boundary, running turn, or unknown truth always blocks shutdown even if another field claims stopped.
+Automatic computer shutdown is a distinct, direct-user fleet lifecycle mode. It is not enabled by ordinary fleet monitoring, a target heartbeat, Goal completion, or a prior shutdown receipt. Use only the canonical `-ShutdownWhenAllStopped` fleet prompt. Goal and non-Goal tasks use the same rule: the target AI owns the stop decision and may use any stable `stop_reason`; the fleet does not maintain a finite allowlist of stop reasons. A target qualifies for retirement only from fresh `task_stopped=true`, `recovery_pending=false`, no active business turn, no scheduled retry, a stable checkpoint/receipt, and safe external-effect truth. Natural pause, human wait, normal completion, non-recoverable failure, or another stable stop all retire the target heartbeat; `needs_input` and non-recoverable failure notify once first. A recoverable 408/429/502/503/504, transport interruption, continuation gap, strategy/verification repair, peer-busy boundary, running turn, or unknown truth always keeps the heartbeat and blocks shutdown even if another field claims stopped.
 
 Use typed native automation calls for mutation. Do not treat free-form JavaScript/code-mode text as a trustworthy automation contract: a code-mode call that contains `send_message_to_thread`, `handoff_thread`, `automation_update`, or aliased/dynamic tool dispatch is fail-closed, even if an earlier call in the same script is read-only. Native typed view/list operations remain read-only.
 
@@ -95,13 +99,14 @@ Ignore heartbeat turns when locating the latest business state. Evaluate `runnin
 | `verification_failed` | Acceptance command failed and failure is actionable in scope | Diagnose, repair, rerun minimum sufficient gate |
 | `goal_satisfied` | Acceptance appears met | Run fresh verification; if Goal is active, mark complete and keep heartbeat ACTIVE for a later terminal receipt |
 | `peer_busy` | Another writer owns the same checkout | Keep ACTIVE and retry later |
-| `needs_input` | Human choice, credential, approval, or irreversible ambiguity | Notify once and stop |
-| `natural_pause` | Explicit user pause/checkpoint with no standing completion authority | Observe only |
-| `complete` | Terminal Goal (`none|complete`), fresh acceptance evidence, no active turn, safe external state, checkpoint and receipt | Request supervisor cleanup |
-| `non_transient_failure` | Policy/config/auth/schema or out-of-scope deterministic failure | Notify once; do not mislabel as gateway recovery |
+| `needs_input` | Human choice, credential, approval, or irreversible ambiguity; proved stable stop receipt | Notify once, request supervisor cleanup, keep Goal unchanged unless its own blocked contract is proved |
+| `natural_pause` | Explicit user pause/checkpoint with no standing completion authority; proved stable stop receipt | Request supervisor cleanup |
+| `complete` | Fresh proved stable stop receipt | Request supervisor cleanup |
+| `non_transient_failure` | Policy/config/auth/schema or out-of-scope deterministic failure; proved stable stop receipt | Notify once, request supervisor cleanup; do not mislabel as gateway recovery |
+| `stopped` | Any other stable stop reason with complete stop evidence | Request supervisor cleanup |
 | `unknown` / `soft_guard_only` | Missing or conflicting proof | Observe only |
 
-Run `scripts/Get-WatchHeartbeatDisposition.ps1` with structured evidence. Its recovery result requires a timestamp, checkpoint id, idempotency receipt key, safe external-effect state, and compatible Goal status.
+Run `scripts/Get-WatchHeartbeatDisposition.ps1` with structured evidence. Recovery requires a timestamp, checkpoint id, idempotency receipt key, safe external-effect state, and compatible Goal status. Cleanup independently requires `task_stopped=true`, `recovery_pending=false`, no active turn or retry, a valid stable stop reason, the same fresh checkpoint/receipt evidence, and safe external-effect truth; Goal status is not a cleanup gate.
 
 ## Fleet reconciliation
 
@@ -110,15 +115,16 @@ Treat `all` as a standing request over local tasks exposed by the current host, 
 - Generate target prompts only with `scripts/New-WatchHeartbeatPrompt.ps1`.
 - Accept only the trusted revision-3 target body digest installed in the reviewed hook definition; a self-consistent caller hash is not canonical provenance.
 - Enroll or migrate a target only from fresh thread and automation truth. Never overwrite a conflict or newer direct-user lifecycle action.
-- Delete only after fresh acceptance evidence, `GoalStatus=none|complete`, no active turn, safe external-effect state, checkpoint/receipt identity, and a target XML receipt requesting cleanup. `goal_satisfied` with an active Goal first marks it complete and keeps the automation active; paused/blocked/active Goals never authorize cleanup.
-- A fleet heartbeat cannot prove the direct-user lifecycle authority needed for delete. Fleet-side delete is therefore fail-closed; deletion must be requested by a direct user lifecycle command after the terminal receipt exists.
-- The supervisor cannot mutate its own dual-role automation from its scheduled tick.
+- Treat a target XML `automation_action=request_supervisor_cleanup` receipt as eligible only with fresh `task_stopped=true`, `recovery_pending=false`, no active turn/retry, valid stop reason and checkpoint/receipt identity, and safe external-effect truth. Goal status neither grants nor blocks cleanup, and cleanup never mutates the Goal.
+- Ordinary fleet mode has no cross-target delete authority. The canonical shutdown-armed prompt carries the direct user's narrow authority to delete only a matching canonical target heartbeat after that proved receipt and a fresh native identity check.
+- Ordinary fleet mode cannot mutate its own dual-role automation. The shutdown-armed mode may delete the supervisor only after every target heartbeat is gone, the stopped snapshot is stable on two ticks, and a final complete-visibility re-read passes.
 - Shutdown mode requires a non-empty monitored set, fresh `task_stopped=true` receipts for every target, `recovery_pending=false`, and the same deterministic snapshot on two consecutive ticks. Any stable stop reason is accepted. `unknown`, `soft_guard_only`, an active turn, any recovery/retry candidate, unsafe external-effect truth, or target-set change cancels the tick.
-- After a final fresh re-read, schedule exactly one non-forced 120-second Windows shutdown. Record the deterministic shutdown receipt, notify with `shutdown /a`, and never replay the same receipt. A failed or unknown command result is a notify-once boundary, not automatic retry authority.
+- Retire each proved-stopped target immediately after its native delete receipt so its heartbeat cannot repeat terminal content. Re-enroll it only if a later fresh business turn becomes eligible again.
+- Before shutdown, scan the broadest visible local task set again, including tasks without heartbeat metadata. Any newly active eligible task cancels shutdown, receives the same canonical target heartbeat, and restarts stability observation. Bind the stable snapshot to the current supervisor automation id plus each target automation id, source turn id, evidence timestamp, external-effect state, structured checkpoint, and structured receipt; require two distinct ordered scheduled tick ids. Only after a final fresh re-read proves complete visibility, zero unmonitored active tasks, zero target heartbeats, and a helper-issued short-lived shutdown receipt may the supervisor be deleted and its native receipt verified within that window. Then schedule exactly one non-forced 120-second Windows shutdown. Record the deterministic shutdown receipt, notify with `shutdown /a`, and never replay the same receipt. A failed or unknown delete or command result is a notify-once boundary, not automatic retry authority.
 
 ## Output and prompt generation
 
-Heartbeat output must be the host XML envelope with `automation_id`, `decision`, and `message`. Use `DONT_NOTIFY` for routine work and `NOTIFY` only for a newly deduplicated human-action boundary. Store compact `state`, `receipt_key`, `checkpoint_id`, and retry time in the message so later ticks can deduplicate and resume.
+Heartbeat output must be the host XML envelope with `automation_id`, `decision`, and `message`. Use `DONT_NOTIFY` for routine work and `NOTIFY` only for a newly deduplicated human-action boundary. Encode `receipt_key` as `watch-receipt:<64 lowercase hex>` and `checkpoint_id` as `watch-checkpoint:<64 lowercase hex>` over their canonical evidence; store them with compact state and retry time so later ticks can deduplicate and resume.
 
 - Target prompt: `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/New-WatchHeartbeatPrompt.ps1 -TargetThreadId <thread-id>`
 - Fleet prompt: `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/New-WatchFleetSupervisorPrompt.ps1 -SupervisorThreadId <thread-id>`

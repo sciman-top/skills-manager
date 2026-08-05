@@ -78,6 +78,41 @@ Describe "Generated sync script" {
         $text | Should Match "检测到生成产物漂移"
     }
 
+    It "fails even in dirty-worktree mode when consecutive builds are not idempotent" {
+        $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+        $workspace = Join-Path $TestDrive "generated-sync-nondeterministic"
+        $testsDir = Join-Path $workspace "tests"
+        New-Item -ItemType Directory -Path $testsDir -Force | Out-Null
+
+        Copy-Item -LiteralPath (Join-Path $repoRoot "tests\check-generated-sync.ps1") -Destination (Join-Path $testsDir "check-generated-sync.ps1")
+        Set-Content -Path (Join-Path $workspace "build.ps1") -Value @'
+$counterPath = '.\build-counter.txt'
+$counter = if (Test-Path -LiteralPath $counterPath) { [int](Get-Content -LiteralPath $counterPath -Raw) } else { 0 }
+$counter++
+Set-Content -LiteralPath $counterPath -Value $counter -NoNewline
+Set-Content -LiteralPath '.\skills.ps1' -Value ("generated-{0}" -f $counter) -NoNewline
+'@
+        Set-Content -Path (Join-Path $workspace "skills.ps1") -Value "generated-0" -NoNewline
+
+        Push-Location $workspace
+        try {
+            & git init | Out-Null
+            & git config user.email "tests@example.com"
+            & git config user.name "tests"
+            & git add build.ps1 skills.ps1 tests/check-generated-sync.ps1
+            & git commit -m "init" | Out-Null
+        }
+        finally {
+            Pop-Location
+        }
+
+        $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $workspace "tests\check-generated-sync.ps1") -AllowDirtyWorktree 2>&1)
+        $text = ($output | Out-String)
+
+        $LASTEXITCODE | Should Not Be 0
+        $text | Should Match 'generated_non_idempotent'
+    }
+
     It "Recognizes a Git worktree instead of reporting no-repo" {
         $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
         $workspace = Join-Path $TestDrive "generated-sync"

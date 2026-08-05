@@ -41,5 +41,37 @@ Describe "Log Rotation" {
                 $global:LogMaxBackups = $oldGlobalMaxBackups
             }
         }
+
+        It "redacts secrets recursively at the final log sink while preserving environment references" {
+            $oldLogPath = $script:LogPath
+            $oldActiveLogPath = $script:ActiveLogPath
+            $oldDryRun = $script:DryRun
+            try {
+                $script:DryRun = $false
+                $script:LogPath = Join-Path $TestDrive "redacted-build.log"
+                $script:ActiveLogPath = $script:LogPath
+                $data = [ordered]@{
+                    password = 'nested-password-value'
+                    nested = [pscustomobject]@{
+                        token = 'nested-token-value'
+                        safe_template = '${UNIT_TEST_TOKEN_ENV}'
+                        bearer_token_env_var = 'UNIT_TEST_TOKEN_ENV'
+                    }
+                }
+
+                Write-LogRecord 'ERROR' 'token spaced-secret-value https://user:pass@example.invalid/repo?api_key=query-secret Authorization: Bearer bearer-secret' $data
+
+                $content = Get-Content -LiteralPath $script:LogPath -Raw
+                $content | Should Not Match 'spaced-secret-value|user:pass|query-secret|bearer-secret|nested-password-value|nested-token-value'
+                $content | Should Match '<redacted>'
+                $content | Should Match '\$\{UNIT_TEST_TOKEN_ENV\}'
+                $content | Should Match 'UNIT_TEST_TOKEN_ENV'
+            }
+            finally {
+                $script:LogPath = $oldLogPath
+                $script:ActiveLogPath = $oldActiveLogPath
+                $script:DryRun = $oldDryRun
+            }
+        }
     }
 }

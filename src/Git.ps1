@@ -39,12 +39,27 @@ function Guess-VendorName([string]$repo) {
     }
     return $name
 }
+function Mask-SensitiveGitText([string]$text) {
+    if ([string]::IsNullOrWhiteSpace($text)) { return $text }
+    if ($null -ne (Get-Command Protect-SensitiveText -CommandType Function -ErrorAction SilentlyContinue)) {
+        return (Protect-SensitiveText $text)
+    }
+    $masked = [string]$text
+    $masked = [regex]::Replace($masked, '(?i)([a-z][a-z0-9+.-]*://)([^/@\s:]+):([^/@\s]+)@', '$1<redacted>@')
+    $masked = [regex]::Replace($masked, '(?i)([?&](?:access_token|auth|authorization|password|passwd|secret|token|api[-_]?key)=)[^&\s]+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)((?:authorization|proxy-authorization)\s*[:=]\s*(?:basic|bearer)?\s*)[^\s"'']+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)((?:password|passwd|secret|token|api[-_]?key)\s*[=:]\s*)[^\s"'']+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)(\b(?:password|passwd|secret|token|api[-_]?key)\s+)[^\s"'',;]+', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)\b(?:github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+)\b', '<redacted>')
+    return $masked
+}
 function Invoke-Git([string[]]$GitArgs) {
+    $safeArgs = @($GitArgs | ForEach-Object { Mask-SensitiveGitText ([string]$_) })
     if ($DryRun) {
-        Log ("DRYRUN git {0}" -f ($GitArgs -join " "))
+        Log ("DRYRUN git {0}" -f ($safeArgs -join " "))
         return
     }
-    $cmdText = ("git {0}" -f ($GitArgs -join " "))
+    $cmdText = ("git {0}" -f ($safeArgs -join " "))
     $retriedAfterLockRecovery = $false
     $canTuneNativeErrPref = ($PSVersionTable.PSVersion.Major -ge 7)
     while ($true) {
@@ -70,13 +85,13 @@ function Invoke-Git([string[]]$GitArgs) {
             foreach ($line in @($output)) {
                 $text = Convert-GitOutputLineToText $line
                 if ([string]::IsNullOrWhiteSpace($text)) { continue }
-                Write-Host $text
+                Write-Host (Mask-SensitiveGitText $text)
             }
         }
         if ($exitCode -eq 0) { return }
         if (-not $retriedAfterLockRecovery) {
             $repaired = $false
-            if (Repair-StaleGitLockFromOutput $output) {
+            if (Repair-StaleGitLockFromOutput (Get-Location).Path $output) {
                 $repaired = $true
             }
             elseif (Repair-StaleGitLockAfterFailure (Get-Location).Path $output) {
@@ -95,11 +110,12 @@ function Invoke-Git([string[]]$GitArgs) {
     }
 }
 function Invoke-GitCapture([string[]]$GitArgs) {
+    $safeArgs = @($GitArgs | ForEach-Object { Mask-SensitiveGitText ([string]$_) })
     if ($DryRun) {
-        Log ("DRYRUN git {0}" -f ($GitArgs -join " "))
+        Log ("DRYRUN git {0}" -f ($safeArgs -join " "))
         return ""
     }
-    Log ("git {0}" -f ($GitArgs -join " "))
+    Log ("git {0}" -f ($safeArgs -join " "))
     $canTuneNativeErrPref = ($PSVersionTable.PSVersion.Major -ge 7)
     $prevNativeErrorPref = $null
     $prevErrorActionPreference = $ErrorActionPreference
@@ -122,11 +138,12 @@ function Invoke-GitCapture([string[]]$GitArgs) {
     return (($out | Select-Object -First 1).ToString().Trim())
 }
 function Invoke-GitCaptureLines([string[]]$GitArgs) {
+    $safeArgs = @($GitArgs | ForEach-Object { Mask-SensitiveGitText ([string]$_) })
     if ($DryRun) {
-        Log ("DRYRUN git {0}" -f ($GitArgs -join " "))
+        Log ("DRYRUN git {0}" -f ($safeArgs -join " "))
         return @()
     }
-    Log ("git {0}" -f ($GitArgs -join " "))
+    Log ("git {0}" -f ($safeArgs -join " "))
     $canTuneNativeErrPref = ($PSVersionTable.PSVersion.Major -ge 7)
     $prevNativeErrorPref = $null
     $prevErrorActionPreference = $ErrorActionPreference
@@ -224,15 +241,78 @@ function Resolve-ZipExtractionRoot([string]$extractDir) {
     }
     return $extractDir
 }
+
+function Assert-ZipArchiveSafety {
+    param(
+        [Parameter(Mandatory=$true)][string]$ZipPath,
+        [long]$MaxArchiveBytes=536870912,
+        [int]$MaxEntries=50000,
+        [long]$MaxEntryBytes=536870912,
+        [long]$MaxExpandedBytes=2147483648,
+        [double]$MaxCompressionRatio=200,
+        [int]$MaxDepth=32
+    )
+    $file=Get-Item -LiteralPath $ZipPath -Force -ErrorAction Stop
+    Need ($file.Length -le $MaxArchiveBytes) ("zip archive exceeds byte budget: {0}" -f $file.Length)
+    $archive=[IO.Compression.ZipFile]::OpenRead($file.FullName)
+    try{
+        Need ($archive.Entries.Count -le $MaxEntries) ("zip archive exceeds entry budget: {0}" -f $archive.Entries.Count)
+        [long]$expanded=0
+        $canonicalPaths=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+        foreach($entry in $archive.Entries){
+            $name=[string]$entry.FullName
+            Need (-not [string]::IsNullOrWhiteSpace($name)) 'zip entry path is empty.'
+            Need (-not [IO.Path]::IsPathRooted($name) -and $name -notmatch '^[\\/]' -and $name -notmatch ':') ("zip entry path is absolute or contains ADS syntax: {0}" -f $name)
+            $segments=@((($name -replace '\\','/') -split '/')|Where-Object{$_ -ne ''})
+            Need ($segments.Count -le $MaxDepth) ("zip entry exceeds depth budget: {0}" -f $name)
+            Need (@($segments|Where-Object{$_ -eq '..' -or $_ -eq '.'}).Count -eq 0) ("zip entry traversal is forbidden: {0}" -f $name)
+            foreach($segment in $segments){
+                Need ($segment -eq $segment.TrimEnd(' ','.')) ("zip entry has a trailing dot or space: {0}" -f $name)
+                Need ($segment -notmatch '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)') ("zip entry uses a reserved Windows name: {0}" -f $name)
+            }
+            $canonicalName=((@($segments|ForEach-Object{$_.Normalize([Text.NormalizationForm]::FormC)}) -join '/').TrimEnd('/'))
+            Need ($canonicalPaths.Add($canonicalName)) ("zip entry has a duplicate canonical path: {0}" -f $name)
+            $unixType=(($entry.ExternalAttributes -shr 16) -band 0xF000)
+            Need ($unixType -ne 0xA000) ("zip symlink entry is forbidden: {0}" -f $name)
+            Need ($entry.Length -le $MaxEntryBytes) ("zip entry exceeds byte budget: {0}" -f $name)
+            $expanded+=[long]$entry.Length
+            Need ($expanded -le $MaxExpandedBytes) ("zip archive exceeds expanded byte budget: {0}" -f $expanded)
+            if($entry.Length -gt 0){
+                Need ($entry.CompressedLength -gt 0) ("zip entry has invalid zero compressed length: {0}" -f $name)
+                Need (([double]$entry.Length/[double]$entry.CompressedLength) -le $MaxCompressionRatio) ("zip entry exceeds compression ratio budget: {0}" -f $name)
+            }
+        }
+    }finally{$archive.Dispose()}
+}
+
+function Assert-StagedDirectoryNoReparse([string]$Path) {
+    foreach($entry in @(Get-ChildItem -LiteralPath $Path -Force -Recurse -ErrorAction Stop)){
+        Need (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) ("staged archive contains a reparse point: {0}" -f $entry.FullName)
+    }
+}
+
+function Install-StagedDirectoryAtomic([string]$SourcePath,[string]$TargetPath,[bool]$ForceClean=$true) {
+    $targetExists=Test-Path -LiteralPath $TargetPath
+    if($targetExists){Need $ForceClean ("缓存目录已存在且 update_force=false：{0}" -f $TargetPath)}
+    EnsureDir (Split-Path $TargetPath -Parent)
+    $backupPath=("{0}.previous-{1}" -f $TargetPath,[guid]::NewGuid().ToString('N'))
+    $movedOld=$false
+    try{
+        if($targetExists){Invoke-MoveItem $TargetPath $backupPath;$movedOld=$true}
+        Invoke-MoveItem $SourcePath $TargetPath
+        if($movedOld){Invoke-RemoveItemWithRetry $backupPath -Recurse}
+    }catch{
+        if(Test-Path -LiteralPath $TargetPath){Invoke-RemoveItemWithRetry $TargetPath -Recurse -IgnoreFailure|Out-Null}
+        if($movedOld -and (Test-Path -LiteralPath $backupPath)){Invoke-MoveItem $backupPath $TargetPath}
+        throw
+    }
+}
+
 function Ensure-RepoFromZip([string]$path, [string]$zipPath, [bool]$forceClean = $true) {
     $zip = $zipPath.Trim().Trim("'`"")
     Need (Test-Path -LiteralPath $zip -PathType Leaf) ("zip 文件不存在：{0}" -f $zipPath)
 
-    if (Test-Path $path) {
-        Need $forceClean ("缓存目录已存在且 update_force=false：{0}" -f $path)
-        Invoke-RemoveItemWithRetry $path -Recurse
-    }
-    EnsureDir (Split-Path $path -Parent)
+    if (Test-Path $path) { Need $forceClean ("缓存目录已存在且 update_force=false：{0}" -f $path) }
 
     $tmpName = ("_zip_{0}" -f ([Guid]::NewGuid().ToString("N").Substring(0, 8)))
     $tmpBase = Join-Path $ImportDir $tmpName
@@ -243,11 +323,13 @@ function Ensure-RepoFromZip([string]$path, [string]$zipPath, [bool]$forceClean =
         Log ("Copy-Item {0} -> {1}" -f $zip, $tmpZip)
         Invoke-WithRetry { Copy-Item -LiteralPath $zip -Destination $tmpZip -Force } 3 250
 
+        Assert-ZipArchiveSafety -ZipPath $tmpZip
         Log ("Expand-Archive {0} -> {1}" -f $tmpZip, $extractDir)
         Invoke-WithRetry { Expand-Archive -LiteralPath $tmpZip -DestinationPath $extractDir -Force } 3 250
+        Assert-StagedDirectoryNoReparse $extractDir
 
         $sourceRoot = Resolve-ZipExtractionRoot $extractDir
-        Invoke-MoveItem $sourceRoot $path
+        Install-StagedDirectoryAtomic $sourceRoot $path $forceClean
     }
     catch {
         $msg = $_.Exception.Message
@@ -266,24 +348,23 @@ function Ensure-RepoFromGitArchive([string]$path, [string]$repo, [string]$ref, [
     $normalizedSkill = Normalize-SkillPath $skillPath
     Need ($normalizedSkill -ne ".") "git archive 回退模式不支持根路径 '.'，请指定具体子目录。"
 
-    if (Test-Path $path) {
-        Need $forceClean ("缓存目录已存在且 update_force=false：{0}" -f $path)
-        Invoke-RemoveItemWithRetry $path -Recurse
-    }
-    EnsureDir (Split-Path $path -Parent)
-    EnsureDir $path
+    if (Test-Path $path) { Need $forceClean ("缓存目录已存在且 update_force=false：{0}" -f $path) }
 
     $tmpName = ("_archive_{0}" -f ([Guid]::NewGuid().ToString("N").Substring(0, 8)))
     $tmpBase = Join-Path $ImportDir $tmpName
     $barePath = Join-Path $tmpBase "repo.git"
     $zipPath = Join-Path $tmpBase "export.zip"
+    $extractPath = Join-Path $tmpBase "extract"
     EnsureDir $tmpBase
     try {
         Invoke-Git @("clone", "--bare", $repo, $barePath)
         $gitDirArg = "--git-dir={0}" -f $barePath
         $gitPath = To-GitPath $normalizedSkill
         Invoke-Git @($gitDirArg, "archive", "--format=zip", "--output", $zipPath, $ref, $gitPath)
-        Expand-Archive -LiteralPath $zipPath -DestinationPath $path -Force
+        Assert-ZipArchiveSafety -ZipPath $zipPath
+        Expand-Archive -LiteralPath $zipPath -DestinationPath $extractPath -Force
+        Assert-StagedDirectoryNoReparse $extractPath
+        Install-StagedDirectoryAtomic (Resolve-ZipExtractionRoot $extractPath) $path $forceClean
     }
     finally {
         Invoke-RemoveItemWithRetry $tmpBase -Recurse -IgnoreFailure
@@ -304,6 +385,18 @@ function Resolve-GitHubOwnerRepo([string]$repo) {
     }
     return $null
 }
+
+function Get-GitBlobSha1ForFile([string]$Path) {
+    $bytes=[IO.File]::ReadAllBytes($Path)
+    $header=[Text.Encoding]::ASCII.GetBytes(("blob {0}`0" -f $bytes.LongLength))
+    $stream=[IO.MemoryStream]::new()
+    try{
+        $stream.Write($header,0,$header.Length);$stream.Write($bytes,0,$bytes.Length);$stream.Position=0
+        $sha=[Security.Cryptography.SHA1]::Create()
+        try{return (($sha.ComputeHash($stream)|ForEach-Object{$_.ToString('x2')})-join '')}finally{$sha.Dispose()}
+    }finally{$stream.Dispose()}
+}
+
 function Ensure-RepoFromGitHubTreeSnapshot([string]$path, [string]$repo, [string]$ref, [string]$skillPath, [bool]$forceClean = $true) {
     Need (-not [string]::IsNullOrWhiteSpace($repo)) "Repo URL 不能为空。"
     Need (-not [string]::IsNullOrWhiteSpace($ref)) "ref 不能为空。"
@@ -313,21 +406,21 @@ function Ensure-RepoFromGitHubTreeSnapshot([string]$path, [string]$repo, [string
     $ownerRepo = Resolve-GitHubOwnerRepo $repo
     Need ($null -ne $ownerRepo) ("GitHub 快照回退仅支持 github.com 仓库：{0}" -f $repo)
 
-    if (Test-Path $path) {
-        Need $forceClean ("缓存目录已存在且 update_force=false：{0}" -f $path)
-        Invoke-RemoveItemWithRetry $path -Recurse
-    }
-    EnsureDir (Split-Path $path -Parent)
-    EnsureDir $path
+    if (Test-Path $path) { Need $forceClean ("缓存目录已存在且 update_force=false：{0}" -f $path) }
 
     $headers = @{
         "User-Agent" = "skills-manager"
         "Accept" = "application/vnd.github+json"
     }
     $encodedRef = [System.Uri]::EscapeDataString($ref)
-    $treeUrl = ("https://api.github.com/repos/{0}/{1}/git/trees/{2}?recursive=1" -f $ownerRepo.owner, $ownerRepo.name, $encodedRef)
+    $commitUrl=("https://api.github.com/repos/{0}/{1}/commits/{2}" -f $ownerRepo.owner,$ownerRepo.name,$encodedRef)
+    $commitResp=Invoke-RestMethod -Uri $commitUrl -Headers $headers -Method Get -ErrorAction Stop
+    $commitSha=[string]$commitResp.sha;$treeSha=[string]$commitResp.commit.tree.sha
+    Need ($commitSha -match '^[a-fA-F0-9]{40}$' -and $treeSha -match '^[a-fA-F0-9]{40}$') 'GitHub commit response does not provide immutable commit/tree SHA.'
+    $treeUrl = ("https://api.github.com/repos/{0}/{1}/git/trees/{2}?recursive=1" -f $ownerRepo.owner, $ownerRepo.name, $treeSha)
     $treeResp = Invoke-RestMethod -Uri $treeUrl -Headers $headers -Method Get -ErrorAction Stop
     Need ($treeResp -and $treeResp.tree) ("GitHub 树接口返回为空：{0}" -f $treeUrl)
+    Need (-not [bool]$treeResp.truncated) 'GitHub tree response is truncated; refusing an incomplete snapshot.'
 
     $prefix = (To-GitPath $normalizedSkill).Trim("/")
     Need (-not [string]::IsNullOrWhiteSpace($prefix)) "技能路径无效。"
@@ -337,17 +430,44 @@ function Ensure-RepoFromGitHubTreeSnapshot([string]$path, [string]$repo, [string
             $_.type -eq "blob" -and $_.path -is [string] -and ($_.path -eq $prefix -or $_.path.StartsWith($prefixSlash))
         })
     Need ($blobs.Count -gt 0) ("GitHub 快照回退未找到目标路径：{0}" -f $normalizedSkill)
-
+    Need ($blobs.Count -le 50000) ("GitHub snapshot exceeds blob count budget: {0}" -f $blobs.Count)
+    [long]$snapshotBytes = 0
+    $snapshotPaths=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach ($blob in $blobs) {
-        $blobPath = [string]$blob.path
-        if ([string]::IsNullOrWhiteSpace($blobPath)) { continue }
-        $relPath = $blobPath -replace "/", "\"
-        $dstPath = Join-Path $path $relPath
-        EnsureDir (Split-Path $dstPath -Parent)
-
-        $rawUrl = ("https://raw.githubusercontent.com/{0}/{1}/{2}/{3}" -f $ownerRepo.owner, $ownerRepo.name, $ref, $blobPath)
-        Invoke-WebRequest -Uri $rawUrl -Headers @{ "User-Agent" = "skills-manager" } -OutFile $dstPath -ErrorAction Stop | Out-Null
+        $blobPath=[string]$blob.path
+        Need ($blobPath -notmatch '[\\:]' -and -not [IO.Path]::IsPathRooted($blobPath)) ("GitHub tree path is not portable: {0}" -f $blobPath)
+        $blobSegments=@($blobPath -split '/')
+        Need (@($blobSegments|Where-Object{[string]::IsNullOrWhiteSpace($_) -or $_ -eq '.' -or $_ -eq '..'}).Count -eq 0) ("GitHub tree path contains an invalid segment: {0}" -f $blobPath)
+        foreach($segment in $blobSegments){
+            Need ($segment -eq $segment.TrimEnd(' ','.')) ("GitHub tree path has a trailing dot or space: {0}" -f $blobPath)
+            Need ($segment -notmatch '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)') ("GitHub tree path uses a reserved Windows name: {0}" -f $blobPath)
+        }
+        $canonicalPath=(@($blobSegments|ForEach-Object{$_.Normalize([Text.NormalizationForm]::FormC)}) -join '/')
+        Need ($snapshotPaths.Add($canonicalPath)) ("GitHub tree contains a duplicate canonical path: {0}" -f $blobPath)
+        [long]$blobBytes = 0
+        Need ([long]::TryParse([string]$blob.size, [ref]$blobBytes) -and $blobBytes -ge 0) ("GitHub tree blob lacks a valid size: {0}" -f [string]$blob.path)
+        Need ($blobBytes -le 536870912) ("GitHub snapshot blob exceeds byte budget: {0}" -f [string]$blob.path)
+        $snapshotBytes += $blobBytes
+        Need ($snapshotBytes -le 2147483648) ("GitHub snapshot exceeds expanded byte budget: {0}" -f $snapshotBytes)
     }
+
+    $tmpBase=Join-Path $ImportDir ("_github_snapshot_{0}" -f [guid]::NewGuid().ToString('N').Substring(0,8));$extractDir=Join-Path $tmpBase 'extract';EnsureDir $extractDir
+    try{
+        foreach ($blob in $blobs) {
+            $blobPath = [string]$blob.path
+            if ([string]::IsNullOrWhiteSpace($blobPath)) { continue }
+            Need ([string]$blob.sha -match '^[a-fA-F0-9]{40}$') ("GitHub tree blob lacks immutable SHA: {0}" -f $blobPath)
+            $relPath = $blobPath -replace "/", "\"
+            $dstPath = [IO.Path]::GetFullPath((Join-Path $extractDir $relPath))
+            Need (Is-PathInsideOrEqual $dstPath $extractDir) ("GitHub tree path escapes snapshot root: {0}" -f $blobPath)
+            EnsureDir (Split-Path $dstPath -Parent)
+            $encodedBlobPath = ((@($blobPath -split '/') | ForEach-Object { [Uri]::EscapeDataString($_) }) -join '/')
+            $rawUrl = ("https://raw.githubusercontent.com/{0}/{1}/{2}/{3}" -f $ownerRepo.owner, $ownerRepo.name, $commitSha, $encodedBlobPath)
+            Invoke-WebRequest -Uri $rawUrl -Headers @{ "User-Agent" = "skills-manager" } -OutFile $dstPath -ErrorAction Stop | Out-Null
+            Need ((Get-GitBlobSha1ForFile $dstPath) -eq ([string]$blob.sha).ToLowerInvariant()) ("GitHub blob SHA mismatch: {0}" -f $blobPath)
+        }
+        Install-StagedDirectoryAtomic $extractDir $path $forceClean
+    }finally{Invoke-RemoveItemWithRetry $tmpBase -Recurse -IgnoreFailure|Out-Null}
 }
 function Parse-DefaultBranchFromSymref([string]$line) {
     if ([string]::IsNullOrWhiteSpace($line)) { return $null }
@@ -449,10 +569,6 @@ function Has-GitUpstream {
     $up = Invoke-GitCapture @("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
     return -not [string]::IsNullOrWhiteSpace($up)
 }
-function Test-GitUnrelatedHistoriesIssue([string]$message) {
-    if ([string]::IsNullOrWhiteSpace($message)) { return $false }
-    return ($message -match "unrelated histories|拒绝合并无关的历史")
-}
 function Update-CurrentBranchFromUpstream([bool]$AllowNetworkFetch = $true) {
     $branch = Get-GitHeadBranch
     if (-not $branch -or -not (Has-GitUpstream)) {
@@ -461,15 +577,10 @@ function Update-CurrentBranchFromUpstream([bool]$AllowNetworkFetch = $true) {
     }
     if ($AllowNetworkFetch) {
         try {
-            Invoke-Git @("pull")
+            Invoke-Git @("pull", "--ff-only")
         }
         catch {
-            if (Test-GitUnrelatedHistoriesIssue $_.Exception.Message) {
-                Log ("检测到本地历史与上游无共同祖先，已强制对齐：{0}" -f $branch) "WARN"
-                Invoke-Git @("reset", "--hard", "@{u}")
-                return
-            }
-            throw
+            throw ("网络 ff-only 快进失败，未执行破坏性 reset：{0}；原因：{1}" -f $branch, (Mask-SensitiveGitText $_.Exception.Message))
         }
         return
     }
@@ -478,13 +589,7 @@ function Update-CurrentBranchFromUpstream([bool]$AllowNetworkFetch = $true) {
         Log ("已基于本地 refs 快进分支：{0}" -f $branch)
     }
     catch {
-        if (Test-GitUnrelatedHistoriesIssue $_.Exception.Message) {
-            Log ("检测到本地历史与上游无共同祖先，已强制对齐：{0}" -f $branch) "WARN"
-            Invoke-Git @("reset", "--hard", "@{u}")
-            return
-        }
-        Log ("本地快进失败，已强制对齐上游：{0}；原因：{1}" -f $branch, $_.Exception.Message) "WARN"
-        Invoke-Git @("reset", "--hard", "@{u}")
+        throw ("本地 ff-only 快进失败，未执行破坏性 reset：{0}；原因：{1}" -f $branch, (Mask-SensitiveGitText $_.Exception.Message))
     }
 }
 function Has-GitChanges {
@@ -688,19 +793,39 @@ function Resolve-GitAdminDir([string]$repoPath) {
         return $null
     }
 }
-function Repair-StaleGitLockFromOutput($outputLines) {
+function Repair-StaleGitLockFromOutput([string]$repoPath, $outputLines) {
+    $gitAdminDir = Resolve-GitAdminDir $repoPath
+    if ([string]::IsNullOrWhiteSpace($gitAdminDir)) { return $false }
+    try {
+        $expectedLockPath = [System.IO.Path]::GetFullPath((Join-Path $gitAdminDir "index.lock"))
+    }
+    catch {
+        return $false
+    }
+
     $lockPath = $null
     foreach ($line in @($outputLines)) {
         $lockPath = Get-GitLockPathFromOutputLine ([string]$line)
         if (-not [string]::IsNullOrWhiteSpace($lockPath)) { break }
     }
     if ([string]::IsNullOrWhiteSpace($lockPath)) { return $false }
+    try {
+        $reportedLockPath = [System.IO.Path]::GetFullPath($lockPath)
+    }
+    catch {
+        return $false
+    }
+    if (-not [string]::Equals($reportedLockPath, $expectedLockPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+        Log ("Git stderr 报告的锁路径不属于当前仓库，已拒绝自动删除：{0}" -f $reportedLockPath) "WARN"
+        return $false
+    }
     if (-not (Test-Path -LiteralPath $lockPath -PathType Leaf)) { return $false }
+    if (Test-GitProcessRunning) {
+        Log ("检测到活动 Git 进程，已拒绝自动删除锁文件：{0}" -f $lockPath) "WARN"
+        return $false
+    }
     Log ("检测到陈旧 Git 锁文件，已自动移除：{0}" -f $lockPath) "WARN"
     if (Remove-GitLockFile $lockPath) { return $true }
-    if (Test-GitProcessRunning) {
-        throw ("检测到 Git 锁文件且自动移除失败（可能仍有 git 进程占用），请先等待或结束相关进程后重试：{0}" -f $lockPath)
-    }
     throw ("检测到 Git 锁文件，但自动移除失败：{0}" -f $lockPath)
 }
 function Repair-StaleGitLockInRepo([string]$repoPath) {
@@ -709,11 +834,12 @@ function Repair-StaleGitLockInRepo([string]$repoPath) {
     if ([string]::IsNullOrWhiteSpace($gitAdminDir)) { return $false }
     $lockPath = Join-Path $gitAdminDir "index.lock"
     if (-not (Test-Path -LiteralPath $lockPath -PathType Leaf)) { return $false }
+    if (Test-GitProcessRunning) {
+        Log ("检测到活动 Git 进程，已拒绝自动删除仓库锁文件：{0}" -f $lockPath) "WARN"
+        return $false
+    }
     Log ("检测到仓库残留 Git 锁文件，已自动移除：{0}" -f $lockPath) "WARN"
     if (Remove-GitLockFile $lockPath) { return $true }
-    if (Test-GitProcessRunning) {
-        throw ("检测到 Git 锁文件且自动移除失败（可能仍有 git 进程占用），请先等待或结束相关进程后重试：{0}" -f $lockPath)
-    }
     throw ("检测到 Git 锁文件，但自动移除失败：{0}" -f $lockPath)
 }
 function Repair-InProgressGitOperation([string]$repoPath) {
@@ -875,11 +1001,12 @@ function Repair-GitSparseCheckoutRemoveWarnings([string]$repoPath, $outputLines)
     return (Repair-GitFailedRemovePaths $repoPath $rawPaths "sparse-checkout")
 }
 function Invoke-GitSparseCheckoutCommand([string[]]$GitArgs) {
+    $safeArgs = @($GitArgs | ForEach-Object { Mask-SensitiveGitText ([string]$_) })
     if ($DryRun) {
-        Log ("DRYRUN git {0}" -f ($GitArgs -join " "))
+        Log ("DRYRUN git {0}" -f ($safeArgs -join " "))
         return
     }
-    $cmdText = ("git {0}" -f ($GitArgs -join " "))
+    $cmdText = ("git {0}" -f ($safeArgs -join " "))
     Log $cmdText
     $canTuneNativeErrPref = ($PSVersionTable.PSVersion.Major -ge 7)
     $prevNativeErrorPref = $null
@@ -908,12 +1035,12 @@ function Invoke-GitSparseCheckoutCommand([string[]]$GitArgs) {
             $deferredRemoveWarnings += $text
             continue
         }
-        Write-Host $text
+        Write-Host (Mask-SensitiveGitText $text)
     }
 
     if ($exitCode -ne 0) {
-        foreach ($text in $deferredRemoveWarnings) { Write-Host $text }
-        $summary = Get-GitOutputSummary $output
+        foreach ($text in $deferredRemoveWarnings) { Write-Host (Mask-SensitiveGitText $text) }
+        $summary = Mask-SensitiveGitText (Get-GitOutputSummary $output)
         if ([string]::IsNullOrWhiteSpace($summary)) {
             throw ("git 失败：{0}" -f $cmdText)
         }
@@ -923,7 +1050,7 @@ function Invoke-GitSparseCheckoutCommand([string[]]$GitArgs) {
     if ($deferredRemoveWarnings.Count -gt 0) {
         $repoPath = (Get-Location).Path
         if (-not (Repair-GitSparseCheckoutRemoveWarnings $repoPath $deferredRemoveWarnings)) {
-            foreach ($text in $deferredRemoveWarnings) { Write-Host $text }
+            foreach ($text in $deferredRemoveWarnings) { Write-Host (Mask-SensitiveGitText $text) }
         }
     }
 }
@@ -944,7 +1071,7 @@ function Repair-StaleGitLockAfterFailure([string]$repoPath, $outputLines) {
 }
 function Ensure-Repo([string]$path, [string]$repo, [string]$ref, [string]$sparsePath, [bool]$forceClean = $true, [bool]$confirmClean = $false, [bool]$doFetch = $true) {
     if ($DryRun) {
-        Log ("DRYRUN Ensure-Repo {0} <= {1} ({2})" -f $path, $repo, $ref)
+        Log ("DRYRUN Ensure-Repo {0} <= {1} ({2})" -f $path, (Mask-SensitiveGitText $repo), $ref)
         return
     }
     if (Test-LocalZipRepoInput $repo) {
@@ -985,7 +1112,7 @@ function Ensure-Repo([string]$path, [string]$repo, [string]$ref, [string]$sparse
         finally { Pop-Location }
         if (-not (Is-SameRepoIdentity $existingOrigin $repo)) {
             Need $forceClean ("缓存目录已存在但来源仓库不匹配且 update_force=false：{0}" -f $path)
-            Log ("检测到缓存目录来源不匹配，已重建：{0} (old={1}, new={2})" -f $path, $existingOrigin, $repo) "WARN"
+            Log ("检测到缓存目录来源不匹配，已重建：{0} (old={1}, new={2})" -f $path, (Mask-SensitiveGitText $existingOrigin), (Mask-SensitiveGitText $repo)) "WARN"
             Invoke-RemoveItemWithRetry $path -Recurse
             Ensure-Repo $path $repo $ref $sparsePath $forceClean $confirmClean $doFetch
             return

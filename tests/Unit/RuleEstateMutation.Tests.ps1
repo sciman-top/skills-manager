@@ -8,6 +8,14 @@ $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $repoRoot 'src\Commands\RuleEstate.ps1')
 
 Describe 'Reviewed rule estate mutation' {
+    function Update-EstateAuthorizationFixture($Fixture) {
+        $review = [IO.File]::ReadAllText($Fixture.review) | ConvertFrom-Json
+        $authorization = [IO.File]::ReadAllText($Fixture.authorization) | ConvertFrom-Json
+        $authorization.review_sha256 = Get-OperationSha256 ([IO.File]::ReadAllText($Fixture.review))
+        $authorization.approved_action_count = @($review.changes).Count
+        $authorization | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $Fixture.authorization -Encoding UTF8
+    }
+
     function New-EstateMutationFixture {
         $fixtureId = [guid]::NewGuid().ToString('N')
         $workspace = Join-Path $TestDrive ('workspace-' + $fixtureId)
@@ -41,8 +49,28 @@ Describe 'Reviewed rule estate mutation' {
             )
         }
         $reviewPath = Join-Path $reviewRoot 'review.json'
+        $authorizationPath = Join-Path $reviewRoot 'authorization.json'
+        $review | Add-Member -NotePropertyName authorization_receipt -NotePropertyValue 'authorization.json'
         $review | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $reviewPath -Encoding UTF8
-        return [pscustomobject]@{ workspace=$workspace; repo_a=$repoA; repo_b=$repoB; codex=$codex; claude=$claude; review=$reviewPath }
+        $authorization = [pscustomobject][ordered]@{
+            schema_version = 1
+            domain = 'rule_estate_authorization'
+            authorization_id = ('rule-estate-auth-' + [guid]::NewGuid().ToString('N'))
+            decision = 'approved'
+            issued_by = 'workspace-owner'
+            issued_by_type = 'human'
+            authorization_source = 'user_supplied'
+            issued_at = [datetimeoffset]::UtcNow.AddMinutes(-1).ToString('o')
+            expires_at = [datetimeoffset]::UtcNow.AddHours(1).ToString('o')
+            review_sha256 = Get-OperationSha256 ([IO.File]::ReadAllText($reviewPath))
+            workspace_root = [IO.Path]::GetFullPath($workspace)
+            codex_user_root = [IO.Path]::GetFullPath($codex)
+            claude_user_root = [IO.Path]::GetFullPath($claude)
+            approved_action_count = 2
+            apply_token = ('APPLY_RULE_ESTATE_PATCH_' + [guid]::NewGuid().ToString('N').Substring(0,16).ToUpperInvariant())
+        }
+        $authorization | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $authorizationPath -Encoding UTF8
+        return [pscustomobject]@{ workspace=$workspace; repo_a=$repoA; repo_b=$repoB; codex=$codex; claude=$claude; review=$reviewPath; authorization=$authorizationPath; token=$authorization.apply_token }
     }
 
     It 'rejects AI self-reviewed manifests and forbidden target surfaces' {
@@ -59,6 +87,23 @@ Describe 'Reviewed rule estate mutation' {
         @($validation.findings.code) | Should Contain 'target_file_forbidden'
     }
 
+    It 'rejects desired files reached through a review-root junction' {
+        $f = New-EstateMutationFixture
+        $outside = Join-Path $TestDrive ('review-outside-' + [guid]::NewGuid().ToString('N'))
+        $link = Join-Path ([IO.Path]::GetDirectoryName($f.review)) 'linked'
+        New-Item -ItemType Directory -Path $outside -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $outside 'desired.md') -Value '# outside'
+        cmd /c "mklink /J `"$link`" `"$outside`"" | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'junction fixture creation failed' }
+
+        $review = [IO.File]::ReadAllText($f.review) | ConvertFrom-Json
+        $review.changes[0].desired_file = 'linked/desired.md'
+        $validation = Test-RuleEstateReviewContract $review ([IO.Path]::GetDirectoryName($f.review))
+
+        $validation.pass | Should Be $false
+        @($validation.findings.code) | Should Contain 'desired_file_reparse_forbidden'
+    }
+
     It 'plans exact global and discovered repository targets without mutation' {
         $f = New-EstateMutationFixture
         $beforeRepo = [IO.File]::ReadAllText((Join-Path $f.repo_a 'AGENTS.md'))
@@ -67,7 +112,8 @@ Describe 'Reviewed rule estate mutation' {
 
         $plan.actions.Count | Should Be 2
         $plan.target_set.paths.Count | Should Be 2
-        $plan.apply.required_token | Should Be 'APPLY_RULE_ESTATE_PATCH'
+        $plan.apply.required_token | Should Be $f.token
+        $plan.authorization.authorization_id | Should Match '^rule-estate-auth-'
         [IO.File]::ReadAllText((Join-Path $f.repo_a 'AGENTS.md')) | Should Be $beforeRepo
         [IO.File]::ReadAllText((Join-Path $f.codex 'AGENTS.md')) | Should Be $beforeGlobal
     }
@@ -103,7 +149,7 @@ Describe 'Reviewed rule estate mutation' {
         $f = New-EstateMutationFixture
         $plan = New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
         $receiptPath = Join-Path $f.workspace 'estate-receipt.json'
-        $result = Invoke-RuleEstateApply -Plan $plan -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude -Token 'APPLY_RULE_ESTATE_PATCH' -ReceiptPath $receiptPath
+        $result = Invoke-RuleEstateApply -Plan $plan -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude -Token $f.token -ReceiptPath $receiptPath
 
         if (-not $result.pass) { throw ($result | ConvertTo-Json -Depth 20) }
         $result.pass | Should Be $true
@@ -111,7 +157,7 @@ Describe 'Reviewed rule estate mutation' {
         [IO.File]::ReadAllText((Join-Path $f.repo_a 'AGENTS.md')) | Should Match 'improved'
         Test-Path -LiteralPath $receiptPath | Should Be $true
 
-        $resumed = Invoke-RuleEstateApply -Plan $plan -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude -Token 'APPLY_RULE_ESTATE_PATCH' -ReceiptPath $receiptPath -ResumeReceiptPath $receiptPath
+        $resumed = Invoke-RuleEstateApply -Plan $plan -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude -Token $f.token -ReceiptPath $receiptPath -ResumeReceiptPath $receiptPath
         $resumed.pass | Should Be $true
         $resumed.writes | Should Be 0
 
@@ -121,13 +167,74 @@ Describe 'Reviewed rule estate mutation' {
         [IO.File]::ReadAllText((Join-Path $f.repo_a 'AGENTS.md')) | Should Match '# repo-a'
     }
 
+    It 'deduplicates locks for multiple actions under the same authorized root' {
+        $f = New-EstateMutationFixture
+        $review = [IO.File]::ReadAllText($f.review) | ConvertFrom-Json
+        $reviewRoot = [IO.Path]::GetDirectoryName($f.review)
+        Set-Content -LiteralPath (Join-Path $reviewRoot 'repo-a-claude.desired.md') -Value '# repo-a claude improved'
+        $review.changes += [pscustomobject]@{ target_scope='repository'; repository='repo-a'; target_file='CLAUDE.md'; desired_file='repo-a-claude.desired.md'; allow_create=$true; risk='medium'; evidence_refs=@('fixture') }
+        $review | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $f.review -Encoding UTF8
+        Update-EstateAuthorizationFixture $f
+        $plan = New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+
+        $result = Invoke-RuleEstateApply -Plan $plan -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude -Token $f.token -ReceiptPath (Join-Path $f.workspace 'same-root-receipt.json')
+
+        if (-not $result.pass) { throw ($result | ConvertTo-Json -Depth 20) }
+        $result.pass | Should Be $true
+        $result.writes | Should Be 3
+        [IO.File]::ReadAllText((Join-Path $f.repo_a 'CLAUDE.md')) | Should Match 'improved'
+    }
+
+    It 'rechecks target freshness after locks are acquired and before the first write' {
+        $f = New-EstateMutationFixture
+        $plan = New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        $target = Join-Path $f.repo_a 'AGENTS.md'
+        $hook = { Set-Content -LiteralPath $target -Value '# concurrent owner change' }.GetNewClosure()
+
+        $result = Invoke-RuleEstateApply -Plan $plan -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude -Token $f.token -ReceiptPath (Join-Path $f.workspace 'toctou-receipt.json') -TestHookAfterLocksAcquired $hook
+
+        $result.pass | Should Be $false
+        $result.writes | Should Be 0
+        [IO.File]::ReadAllText($target) | Should Match 'concurrent owner change'
+    }
+
+    It 'rejects plan actions that no longer exactly project the authorized review' {
+        $f = New-EstateMutationFixture
+        $plan = New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        $plan.actions[0].desired_text = '# unauthorized replacement'
+        $plan.actions[0].desired_hash = Get-OperationSha256 ([string]$plan.actions[0].desired_text)
+        $plan.actions[0].action_id = 'estate-' + (Get-OperationSha256 'tampered').Substring(0,16)
+
+        $result = Invoke-RuleEstateApply -Plan $plan -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude -Token $f.token -ReceiptPath (Join-Path $f.workspace 'tampered-plan-receipt.json')
+
+        $result.pass | Should Be $false
+        $result.writes | Should Be 0
+        @($result.findings.code) | Should Contain 'plan_review_binding_mismatch'
+        [IO.File]::ReadAllText((Join-Path $f.repo_a 'AGENTS.md')) | Should Match '# repo-a'
+    }
+
+    It 'rejects rollback when the recorded backup has been modified' {
+        $f = New-EstateMutationFixture
+        $plan = New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        $receiptPath = Join-Path $f.workspace 'backup-integrity-receipt.json'
+        $result = Invoke-RuleEstateApply -Plan $plan -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude -Token $f.token -ReceiptPath $receiptPath
+        $action = @($result.receipt.actions)[0]
+        Set-Content -LiteralPath ([string]$action.backup_path) -Value 'tampered backup'
+
+        $rollback = Invoke-RuleEstateRollback -ReceiptPath $receiptPath -ActionId ([string]$action.action_id) -Token 'ROLLBACK_RULE_ESTATE_PATCH' -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+
+        $rollback.pass | Should Be $false
+        @($rollback.findings.code) | Should Contain 'rollback_backup_stale'
+        [IO.File]::ReadAllText(([string]$action.target_path)) | Should Match 'improved'
+    }
+
     It 'rejects drive-root authorization and tampered rollback targets' {
         $f = New-EstateMutationFixture
         { New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot ([IO.Path]::GetPathRoot($f.codex)) -ClaudeUserRoot $f.claude } | Should Throw
 
         $plan = New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
         $receiptPath = Join-Path $f.workspace 'tampered-receipt.json'
-        $result = Invoke-RuleEstateApply -Plan $plan -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude -Token 'APPLY_RULE_ESTATE_PATCH' -ReceiptPath $receiptPath
+        $result = Invoke-RuleEstateApply -Plan $plan -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude -Token $f.token -ReceiptPath $receiptPath
         $receipt = [IO.File]::ReadAllText($receiptPath) | ConvertFrom-Json
         $victim = Join-Path $f.repo_a 'victim.txt'; [IO.File]::WriteAllText($victim, 'keep')
         $receipt.actions[0].target_path = $victim
@@ -150,12 +257,91 @@ Describe 'Reviewed rule estate mutation' {
 
         $receiptPath = Join-Path $f.workspace 'failed-receipt.json'
         $secondId = [string]$document.plan.actions[1].action_id
-        $result = Invoke-RuleEstateApply -Plan $document.plan -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude -Token 'APPLY_RULE_ESTATE_PATCH' -ReceiptPath $receiptPath -TestFailBeforeActionId $secondId
+        $result = Invoke-RuleEstateApply -Plan $document.plan -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude -Token $f.token -ReceiptPath $receiptPath -TestFailBeforeActionId $secondId
 
         $result.pass | Should Be $false
         $result.writes | Should Be 1
         [IO.File]::ReadAllText((Join-Path $f.repo_a 'AGENTS.md')) | Should Match 'improved'
         [IO.File]::ReadAllText((Join-Path $f.codex 'AGENTS.md')) | Should Match 'global codex'
         @($result.receipt.actions).Count | Should Be 1
+    }
+
+    It 'rejects plan and apply outputs reached through a workspace junction before mutation' {
+        $f = New-EstateMutationFixture
+        $outside = Join-Path $TestDrive ('control-outside-' + [guid]::NewGuid().ToString('N'))
+        $link = Join-Path $f.workspace 'linked-output'
+        New-Item -ItemType Directory -Path $outside -Force | Out-Null
+        cmd /c "mklink /J `"$link`" `"$outside`"" | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'junction fixture creation failed' }
+
+        $outsidePlan = Join-Path $link 'estate-plan.json'
+        { Invoke-RuleEstatePlanCommand @('--review',$f.review,'--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--out',$outsidePlan,'--json') } | Should Throw
+        Test-Path -LiteralPath (Join-Path $outside 'estate-plan.json') | Should Be $false
+
+        $planPath = Join-Path $f.workspace 'estate-plan.json'
+        $planCommand = Invoke-RuleEstatePlanCommand @('--review',$f.review,'--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--out',$planPath,'--json')
+        $plan = ($planCommand.output | ConvertFrom-Json).plan
+        $beforeRepo = [IO.File]::ReadAllText((Join-Path $f.repo_a 'AGENTS.md'))
+        $outsideReceipt = Join-Path $link 'estate-receipt.json'
+
+        { Invoke-RuleEstateApplyCommand @('--plan',$planPath,'--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--token',$f.token,'--out',$outsideReceipt,'--json') } | Should Throw
+        [IO.File]::ReadAllText((Join-Path $f.repo_a 'AGENTS.md')) | Should Be $beforeRepo
+        Test-Path -LiteralPath (Join-Path $outside 'estate-receipt.json') | Should Be $false
+        @($plan.actions).Count | Should Be 2
+    }
+
+    It 'rejects plan and apply outputs that overwrite reviewed inputs or target rules' {
+        $f = New-EstateMutationFixture
+        $authorizationBefore = [IO.File]::ReadAllText($f.authorization)
+        { Invoke-RuleEstatePlanCommand @('--review',$f.review,'--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--out',$f.authorization,'--json') } | Should Throw
+        [IO.File]::ReadAllText($f.authorization) | Should Be $authorizationBefore
+
+        $f = New-EstateMutationFixture
+        $review = [IO.File]::ReadAllText($f.review) | ConvertFrom-Json
+        $desiredPath = Join-Path ([IO.Path]::GetDirectoryName($f.review)) ([string]$review.changes[0].desired_file)
+        $desiredBefore = [IO.File]::ReadAllText($desiredPath)
+        { Invoke-RuleEstatePlanCommand @('--review',$f.review,'--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--out',$desiredPath,'--json') } | Should Throw
+        [IO.File]::ReadAllText($desiredPath) | Should Be $desiredBefore
+
+        $f = New-EstateMutationFixture
+        $planPath = Join-Path $f.workspace 'estate-plan.json'
+        Invoke-RuleEstatePlanCommand @('--review',$f.review,'--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--out',$planPath,'--json') | Out-Null
+        $targetPath = Join-Path $f.repo_a 'AGENTS.md'
+        $targetBefore = [IO.File]::ReadAllText($targetPath)
+        { Invoke-RuleEstateApplyCommand @('--plan',$planPath,'--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--token',$f.token,'--out',$targetPath,'--json') } | Should Throw
+        [IO.File]::ReadAllText($targetPath) | Should Be $targetBefore
+    }
+
+    It 'rejects missing, stale, expired, or root-mismatched independent authorization receipts' {
+        $f = New-EstateMutationFixture
+        Remove-Item -LiteralPath $f.authorization
+        $message='';try{New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude|Out-Null}catch{$message=$_.Exception.Message};$message|Should Match 'authorization_receipt'
+
+        $f = New-EstateMutationFixture
+        $authorization = [IO.File]::ReadAllText($f.authorization) | ConvertFrom-Json
+        $authorization.review_sha256 = 'deadbeef'
+        $authorization | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $f.authorization -Encoding UTF8
+        $message='';try{New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude|Out-Null}catch{$message=$_.Exception.Message};$message|Should Match 'review hash'
+
+        $f = New-EstateMutationFixture
+        $authorization = [IO.File]::ReadAllText($f.authorization) | ConvertFrom-Json
+        $authorization.issued_at = [datetimeoffset]::UtcNow.AddHours(-2).ToString('o')
+        $authorization.expires_at = [datetimeoffset]::UtcNow.AddHours(-1).ToString('o')
+        $authorization | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $f.authorization -Encoding UTF8
+        $message='';try{New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude|Out-Null}catch{$message=$_.Exception.Message};$message|Should Match 'expired'
+
+        $f = New-EstateMutationFixture
+        $authorization = [IO.File]::ReadAllText($f.authorization) | ConvertFrom-Json
+        $authorization.workspace_root = [IO.Path]::GetTempPath()
+        $authorization | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $f.authorization -Encoding UTF8
+        $message='';try{New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude|Out-Null}catch{$message=$_.Exception.Message};$message|Should Match 'roots'
+
+        $f = New-EstateMutationFixture
+        $plan = New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        $authorization = [IO.File]::ReadAllText($f.authorization) | ConvertFrom-Json
+        $authorization.decision = 'denied'
+        $authorization | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $f.authorization -Encoding UTF8
+        $result=Invoke-RuleEstateApply -Plan $plan -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude -Token $f.token -ReceiptPath (Join-Path $f.workspace 'stale-auth-receipt.json')
+        @($result.findings.code)|Should Contain 'authorization_receipt_stale'
     }
 }

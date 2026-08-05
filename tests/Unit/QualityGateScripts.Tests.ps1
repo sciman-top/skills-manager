@@ -65,6 +65,64 @@ Describe "Quality gate scripts" {
         $runner | Should Match 'reports.test-timings.current.json'
     }
 
+    It "fails closed when either Pester stage discovers zero tests" {
+        $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
+        $runner = Join-Path $root 'tests\run.ps1'
+        $passingRoot = Join-Path $TestDrive 'runner-passing'
+        $emptyRoot = Join-Path $TestDrive 'runner-empty'
+        New-Item -ItemType Directory -Path $passingRoot, $emptyRoot -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $passingRoot 'Passing.Tests.ps1') -Encoding UTF8 -Value @'
+Describe 'fixture unit' {
+    It 'passes' { $true | Should Be $true }
+}
+'@
+
+        $cases = @(
+            @{ name = 'unit'; unit = $emptyRoot; e2e = $passingRoot },
+            @{ name = 'e2e'; unit = $passingRoot; e2e = $emptyRoot }
+        )
+        foreach ($case in $cases) {
+            $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $runner -UnitTestPath $case.unit -E2ETestPath $case.e2e -TimingReportPath (Join-Path $TestDrive ("timings-{0}.json" -f $case.name)) 2>&1)
+
+            $LASTEXITCODE | Should Not Be 0
+            ($output -join "`n") | Should Match ("{0} test discovery returned zero tests" -f $case.name)
+        }
+    }
+
+    It "reports sync_mcp performance as gate_na when no current sample is supplied" {
+        $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
+        $checker = Join-Path $root 'scripts\quality\check-doctor-json.ps1'
+
+        $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $checker -SyncMcpThresholdMs 12000 2>&1)
+
+        $LASTEXITCODE | Should Be 0
+        ($output -join "`n") | Should Match 'gate_na gate=sync_mcp-performance'
+        ($output -join "`n") | Should Match 'reason=no_current_sample'
+        ($output -join "`n") | Should Match 'recovery_condition=provide_current_sync_mcp_sample'
+    }
+
+    It "enforces the sync_mcp threshold when an explicit current sample is supplied" {
+        $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
+        $checker = Join-Path $root 'scripts\quality\check-doctor-json.ps1'
+        $samplePath = Join-Path $TestDrive 'current-sync-sample.json'
+        @{ metric = 'sync_mcp'; last_ms = 13000; avg_ms = 10000 } |
+            ConvertTo-Json | Set-Content -LiteralPath $samplePath -Encoding UTF8
+
+        $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $checker -SyncMcpThresholdMs 12000 -CurrentSyncMcpSamplePath $samplePath 2>&1)
+
+        $LASTEXITCODE | Should Not Be 0
+        ($output -join "`n") | Should Match 'sync_mcp performance regression: last=13000ms avg=10000ms threshold=12000ms'
+    }
+
+    It "keeps clean-runner acceptance tests independent from host paths and materialized imports" {
+        $root = Join-Path $PSScriptRoot '..\..'
+        $phase1 = Get-Content -LiteralPath (Join-Path $root 'tests\Unit\Phase1Acceptance.Tests.ps1') -Raw
+        $projection = Get-Content -LiteralPath (Join-Path $root 'tests\Unit\SkillProjection.Tests.ps1') -Raw
+
+        $phase1 | Should Not Match '(?i)[A-Z]:\\CODE'
+        $projection | Should Not Match 'Get-ChildItem[^\r\n]+Join-Path \$repoRoot ["'']imports["'']'
+    }
+
     It "forbids tests from reading or writing User-scope environment variables" {
         $root = Join-Path $PSScriptRoot "..\.."
         $testSources = Get-ChildItem -LiteralPath (Join-Path $root 'tests') -Recurse -Filter '*.ps1' |
@@ -238,6 +296,20 @@ Describe "Quality gate scripts" {
         $fullGateIndex -ge 0 | Should Be $true
         $pesterIndex -lt $fullGateIndex | Should Be $true
         $raw | Should Not Match "No supply-chain script found, skip"
+    }
+
+    It "keeps every formal CI surface on the authoritative full quality gate" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $contracts = @(
+            @{ Path = 'azure-pipelines.yml'; Label = 'Azure Pipelines' },
+            @{ Path = '.gitlab-ci.yml'; Label = 'GitLab CI' }
+        )
+
+        foreach ($contract in $contracts) {
+            $raw = Get-Content -LiteralPath (Join-Path $root $contract.Path) -Raw
+            $raw | Should Match 'run-local-quality-gates\.ps1 -Profile full'
+            $raw | Should Not Match 'run-local-quality-gates\.ps1 -Profile quick'
+        }
     }
 
     It "Reports untracked runtime artifacts without failing by default" {

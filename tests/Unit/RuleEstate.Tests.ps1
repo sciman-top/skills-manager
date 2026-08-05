@@ -10,6 +10,7 @@ $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $repoRoot 'src\Application\RuleAdvisor.ps1')
 . (Join-Path $repoRoot 'src\Application\RuleAudit.ps1')
 . (Join-Path $repoRoot 'src\Application\RuleEstate.ps1')
+. (Join-Path $repoRoot 'src\Application\RuleEstateMutation.ps1')
 . (Join-Path $repoRoot 'src\Commands\RuleEstate.ps1')
 
 Describe 'Workspace rule estate audit' {
@@ -105,7 +106,7 @@ verify drift
     }
 
     It 'returns a single JSON envelope and only writes an explicit report' {
-        $f = New-RuleEstateFixture; $out = Join-Path $TestDrive 'estate.json'
+        $f = New-RuleEstateFixture; $out = Join-Path $f.workspace 'estate.json'
         $result = Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--out',$out,'--json')
         $parsed = $result.output | ConvertFrom-Json
 
@@ -114,6 +115,29 @@ verify drift
         $parsed.writes | Should Be 1
         $parsed.report.writes | Should Be 0
         Test-Path -LiteralPath $out | Should Be $true
+    }
+
+    It 'rejects an audit output reached through a workspace junction' {
+        $f = New-RuleEstateFixture
+        $outside = Join-Path $TestDrive ('audit-outside-' + [guid]::NewGuid().ToString('N'))
+        $link = Join-Path $f.workspace 'linked-output'
+        New-Item -ItemType Directory -Path $outside -Force | Out-Null
+        cmd /c "mklink /J `"$link`" `"$outside`"" | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'junction fixture creation failed' }
+
+        $out = Join-Path $link 'estate.json'
+        { Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--out',$out,'--json') } | Should Throw
+        Test-Path -LiteralPath (Join-Path $outside 'estate.json') | Should Be $false
+    }
+
+    It 'rejects an audit output that overwrites its registry input' {
+        $f = New-RuleEstateFixture
+        $registryPath = Join-Path $f.workspace 'registry.json'
+        $registryText = '{"targets":[]}'
+        [IO.File]::WriteAllText($registryPath, $registryText)
+
+        { Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--registry',$registryPath,'--out',$registryPath,'--json') } | Should Throw
+        [IO.File]::ReadAllText($registryPath) | Should Be $registryText
     }
 
     It 'reports stale project global-rule review releases' {

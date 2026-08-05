@@ -10,8 +10,8 @@ Describe 'MCP machine-readable planning' {
             name = $Name
             transport = 'stdio'
             command = 'fixture-command'
-            args = @('--token', 'fixture-secret-argv')
-            env = [pscustomobject]@{ API_TOKEN = 'fixture-secret-env' }
+            args = @('--token', '${FIXTURE_ARG_TOKEN}')
+            env = [pscustomobject]@{ API_TOKEN = '${FIXTURE_ENV_TOKEN}' }
         }
     }
 
@@ -72,7 +72,7 @@ Describe 'MCP machine-readable planning' {
         @($result.operation_plan.actions).Count | Should Be 1
         $result.summary.native_mutation_planned | Should Be $false
         $result.summary.profile_changed | Should Be $false
-        foreach ($secret in @('fixture-secret-argv', 'fixture-secret-env', 'API_TOKEN', 'desired_content')) {
+        foreach ($secret in @('FIXTURE_ARG_TOKEN', 'FIXTURE_ENV_TOKEN', 'API_TOKEN', 'desired_content')) {
             $json | Should Not Match ([regex]::Escape($secret))
         }
     }

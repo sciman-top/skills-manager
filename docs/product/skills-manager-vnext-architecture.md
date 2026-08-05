@@ -424,10 +424,13 @@ TaskGraph
   depends_on[] / risk / ambiguity / parallelizable
   exact_write_set[] / coordination_keys[] / external_state[]
   verification[] / result_owner / integration_order / stop_condition
-  completion_receipt: task_id / base_revision / status=verified / verification_receipt
+  completion_receipt: task_id / base_revision / status=verified
+    verification_receipt: schema_version=1 / verify-* receipt_id / verified_at
+    verifier / evidence_sha256 / commands[]
 
 HostModelProposal
   task_id / requested_tier / rationale / user_override
+  host_surface / available_pairs[] -> availability_state
   selection_semantics=host_proposal_validation_only
   comparable local outcome: pair / base / gate / rework / cost / duration / sampled_at
 
@@ -444,13 +447,13 @@ FailurePacket
   artifacts[] / exact_write_set[] / next_recommendation
 ```
 
-默认模型档位是可覆盖的三个软锚点：`Sol xhigh = gpt-5.6-sol + xhigh` 用于承重需求澄清、架构/重构、跨服务生产 RCA、高价值高风险审查和最终裁决；`Sol medium = gpt-5.6-sol + medium` 用于一般实现、日常排障、中等复杂度审查和集成准备；用户偏好的 `Luna max = gpt-5.6-luna + max` 是 routine/default 档，用于边界清楚、重复度高、可独立验证的 CRUD/SQL/单测/文档/机械变换。model ID 不是永久白名单；名称不存在、宿主不可用或 Radar 过期时，回退宿主当前官方/default model，并记录实际值与 override reason，而不是猜测等价模型或修改配置。Terra Radar 条目只能作为外部观察，不能恢复为项目 tier。
+默认模型档位是可覆盖的三个软锚点：`Sol xhigh = gpt-5.6-sol + xhigh` 用于承重需求澄清、架构/重构、跨服务生产 RCA、高价值高风险审查和最终裁决；`Sol medium = gpt-5.6-sol + medium` 用于一般实现、日常排障、中等复杂度审查和集成准备；用户偏好的 `Luna max = gpt-5.6-luna + max` 是 routine/default 档，用于边界清楚、重复度高、可独立验证的 CRUD/SQL/单测/文档/机械变换。软锚点不等于运行时许可：host evidence 必须绑定具体 surface，并归一为 `confirmed_available / confirmed_unavailable / unknown`；`unknown` 和 `confirmed_unavailable` 都回退 host default，Radar、CLI receipt 或另一 API gateway 不能替 collaboration spawn 解锁。model ID 不是永久白名单；名称不存在、宿主不可用或 Radar 过期时，记录实际值与 fallback reason，而不是猜测等价模型或修改配置。Terra Radar 条目只能作为外部观察，不能恢复为项目 tier。
 
-并行 admission 必须同时满足依赖完成且有同 revision 的 verified receipt、receipt 与 completed list 完全对应、base revision 固定、Windows-safe canonical repo-relative write set 互斥或完全只读、外部写入已声明、candidate 可独立验证/丢弃、integration owner/order 明确。路径比较统一分隔符/大小写并阻断相等、ancestor/descendant 与 ADS/invalid path；high-risk/high-ambiguity、共享 seam、schema/migration、Git index/ref、同一外部对象和内容依赖任务默认串行。
+并行 admission 必须同时满足依赖闭包完成且有同 revision 的 structured verified receipt、receipt 与 completed list 完全对应、base revision 固定、Windows-safe canonical repo-relative write set 互斥或完全只读、外部写入已声明、candidate 可独立验证/丢弃、integration owner/order 明确。receipt 必须绑定 schema、时间、verifier、SHA-256 和实际 verification commands；字符串声明或静态规划占位不算完成。路径比较先做 NFC，再统一分隔符/大小写并阻断相等、ancestor/descendant、ADS、reserved device name、尾随点空格与其他 invalid path；high-risk/high-ambiguity、共享 seam、schema/migration、Git index/ref、同一外部对象和内容依赖任务默认串行。
 
 升级状态机固定为：初始 route -> 根因诊断后一次带 correction evidence 的 corrected retry -> task/context/tool 第二次失败由 supervisor 串行接管 -> 仅 capacity 可 `Luna max -> Sol medium -> Sol xhigh` -> 两次升级后 takeover。corrected retry/tool reassignment 返回 `parallel_allowed=false`，重新通过 admission 才能并发。缺工具、权限、凭据、生产授权或用户产品决定时 fail-closed。
 
-Radar 数据通过独立、显式 refresh 形成不可变 v2 snapshot：记录 source、captured_at、source_updated_at、model、reasoning_effort、score、estimated cost/duration、sample count、confidence、raw hash 和 expires_at，entries 非空且不得携带 policy override。source age 超过 36 小时即 fail-closed。snapshot 只影响宿主 proposal 的证据验证；本地结果只有 pair/base/freshness/gate/rework/cost/duration 完整时才优先。决策保持 Pareto 多目标，不把智力、费用、时间和风险压成永久单分数。
+Radar 数据通过独立、显式 refresh 形成不可变 v2 snapshot：记录 source、captured_at、source_updated_at、model、reasoning_effort、score、estimated cost/duration、sample count、confidence、raw hash 和 expires_at，entries 非空且不得携带 policy override。source 只允许 Codex Radar 的 HTTPS 主机，entry 只允许三档软锚点对应的三个唯一 model/effort pair；source age 超过 36 小时、未知/重复 pair 或过期均 fail-closed。snapshot 只影响宿主 proposal 的证据验证；本地结果只有 pair/base/freshness/gate/rework/cost/duration 完整时才优先。决策保持 Pareto 多目标，不把智力、费用、时间和风险压成永久单分数。
 
 ### 3.12 `TypedCoreBoundary`
 

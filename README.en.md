@@ -52,7 +52,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\skills.ps1 agent-validate --inpu
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\skills.ps1 agent-plan --input .\tests\fixtures\agent-workflow\valid-request.json --json
 ```
 
-Output is fixed to `decision_owner=host_ai`, `executor=host_native_runtime`, and `provider_calls/native_mutations/writes=0`. The host launches only the current admitted wave/group and uses verified completion receipts to unlock the next wave; serial/high-risk/high-ambiguity work, shared seams, schema/migrations, Git/external state, final integration, and the full gate stay serial. The maximum current truth is `repo_verified/repo_advisory_only + host_evaluation_partial`; Luna max passed a real read-only CLI/provider probe, but collaboration spawn remains unavailable and historical Radar v1 runs do not satisfy v2 revalidation.
+Output is fixed to `decision_owner=host_ai`, `executor=host_native_runtime`, and `provider_calls/native_mutations/writes=0`. The host launches only the current admitted wave/group and uses verified completion receipts to unlock the next wave; serial/high-risk/high-ambiguity work, shared seams, schema/migrations, Git/external state, final integration, and the full gate stay serial. Model availability is normalized per target surface as `confirmed_available / confirmed_unavailable / unknown`; Radar or a receipt from another provider cannot promote `unknown`. The maximum current truth is `repo_verified/repo_advisory_only + host_evaluation_partial`; Luna max passed a real read-only CLI/provider probe, but collaboration spawn is currently `confirmed_unavailable` and historical Radar v1 runs do not satisfy v2 revalidation.
 
 The resident `capability-router` is now a compatibility fallback, not a lexical semantic router. Codex/ChatGPT first match visible skill metadata natively; when no visible capability fits, the fallback exposes domain names and purposes, the host chooses at most two domains, and only then receives bounded candidates. The host supplies its semantic choice to deterministic policy, which alone decides containment, availability, reuse, activation, and approval. The script reports `decision_owner=host_ai`, never assigns semantic confidence, and performs no host mutation. Run `scripts/verify-capability-routing.ps1` for the deterministic discovery/policy corpus and `scripts/evaluate-host-skill-selection.ps1` for opt-in fresh host selection/cold-load evaluation.
 
@@ -68,7 +68,7 @@ Phase 1 read-only entry points (no file writes without `--out`):
 .\skills.ps1 rule-estate-audit --workspace-root D:\CODE --registry .\audit-targets.json --json
 ```
 
-`rule-estate-audit` excludes `external` and `文档` by default, discovers direct Git roots, and reports target-list drift, Codex/Claude common/delta alignment, rule releases, and `Global Rule -> Repo Action` coverage. `--out <report.json>` writes exactly one explicit report and cannot overwrite a discovered rule file.
+`rule-estate-audit` excludes `external` and `文档` by default, discovers direct Git roots, and reports target-list drift, Codex/Claude common/delta alignment, rule releases, and `Global Rule -> Repo Action` coverage. `--out <report.json>` writes exactly one explicit report inside the workspace root, cannot cross a reparse/junction ancestor, and cannot overwrite a discovered rule file; plan/apply control outputs use the same boundary.
 
 Reviewed global/project rule change-sets use the controlled multi-target flow:
 

@@ -161,6 +161,15 @@ if ($null -ne $manifest) {
         [string]::IsNullOrWhiteSpace([string]$hostModelProbe.provider) -or [string]::IsNullOrWhiteSpace([string]$hostModelProbe.run_at)) {
         Add-Finding 'host_model_probe_receipt_invalid' $paths.manifest 'Host model receipt must preserve the bounded Luna max read-only CLI probe truth.'
     }
+    $hostSpawnProbe = $manifest.host_spawn_model_probe_receipt
+    if ($null -eq $hostSpawnProbe -or [string]$hostSpawnProbe.status -ne 'confirmed_unavailable' -or
+        [string]$hostSpawnProbe.surface -ne 'collaboration_spawn' -or [string]$hostSpawnProbe.requested_model -ne 'gpt-5.6-luna' -or
+        [string]$hostSpawnProbe.requested_effort -ne 'max' -or [string]$hostSpawnProbe.error_code -ne 'unknown_model' -or
+        [string]::IsNullOrWhiteSpace([string]$hostSpawnProbe.run_at) -or [string]::IsNullOrWhiteSpace([string]$hostSpawnProbe.expires_at) -or
+        [string]$hostSpawnProbe.fallback_tier -ne 'sol_medium' -or [string]::IsNullOrWhiteSpace([string]$hostSpawnProbe.recovery_condition) -or
+        @($hostSpawnProbe.available_models).Count -ne 2 -or 'gpt-5.6-sol' -notin @($hostSpawnProbe.available_models) -or 'gpt-5.6-terra' -notin @($hostSpawnProbe.available_models)) {
+        Add-Finding 'host_spawn_model_probe_receipt_invalid' $paths.manifest 'Host spawn receipt must preserve the current surface-scoped Luna rejection and surfaced Sol/Terra inventory.'
+    }
 }
 
 foreach ($required in @(
@@ -171,6 +180,9 @@ foreach ($required in @(
         @{ key='spec'; literal='**HOST_ORCHESTRATION_STATUS**: `native_spawn_partial`'; code='host_boundary_missing' },
         @{ key='spec'; literal='**HOST_RADAR_REFRESH_STATUS**: `pending_revalidation`'; code='host_boundary_missing' },
         @{ key='spec'; literal='**LIVE_ACCEPTANCE_STATUS**: `not_run`'; code='live_boundary_missing' },
+        @{ key='spec'; literal='`verification_receipt` 必须是 schema v1 对象'; code='completion_receipt_spec_missing' },
+        @{ key='spec'; literal='`planned_dependency_order_only`'; code='planning_only_spec_missing' },
+        @{ key='spec'; literal='`gpt-5.6-luna|max` 三个唯一 pair'; code='radar_allowlist_spec_missing' },
         @{ key='prd'; literal='FR-EWF-018'; code='product_requirement_missing' },
         @{ key='architecture'; literal='ADR-SMV-029'; code='architecture_decision_missing' },
         @{ key='roadmap'; literal='agent_workflow_advisory_runtime'; code='roadmap_track_missing' },
@@ -193,27 +205,38 @@ foreach ($required in @(
         @{ key='domain'; literal='function Test-RadarSnapshotContract'; code='domain_contract_missing' },
         @{ key='domain'; literal='source_updated_at'; code='radar_v2_contract_missing' },
         @{ key='domain'; literal='radar_decision_field_forbidden'; code='radar_observation_boundary_missing' },
+        @{ key='domain'; literal='radar_source_untrusted'; code='radar_source_allowlist_missing' },
+        @{ key='domain'; literal='$allowedPairs = @(''gpt-5.6-sol|xhigh'', ''gpt-5.6-sol|medium'', ''gpt-5.6-luna|max'')'; code='radar_pair_allowlist_missing' },
         @{ key='domain'; literal='correction_evidence_required'; code='failure_packet_correction_missing' },
         @{ key='domain'; literal='function New-AgentFailurePacket'; code='domain_contract_missing' },
         @{ key='domain'; literal='function Test-AgentFailurePacketContract'; code='domain_contract_missing' },
         @{ key='application'; literal='function Test-AgentParallelAdmission'; code='application_contract_missing' },
+        @{ key='application'; literal='function Test-AgentCompletionVerificationReceipt'; code='completion_receipt_gate_missing' },
+        @{ key='application'; literal='evidence_sha256'; code='completion_receipt_gate_missing' },
         @{ key='application'; literal='CompletedTaskReceipts'; code='completion_receipt_gate_missing' },
         @{ key='application'; literal='completion_receipt_unclaimed'; code='completion_receipt_gate_missing' },
+        @{ key='application'; literal='completed_dependency_not_closed'; code='completion_receipt_gate_missing' },
         @{ key='application'; literal='high_risk_parallel_forbidden'; code='parallel_risk_gate_missing' },
         @{ key='application'; literal='high_ambiguity_parallel_forbidden'; code='parallel_ambiguity_gate_missing' },
         @{ key='application'; literal="'not_requested'"; code='serial_only_mode_missing' },
         @{ key='application'; literal='function New-AgentExecutionPlan'; code='application_contract_missing' },
         @{ key='application'; literal='groups = @('; code='single_group_wave_missing' },
+        @{ key='application'; literal='completion_evidence_semantics'; code='planning_only_semantics_missing' },
+        @{ key='application'; literal='planned_dependency_order_only'; code='planning_only_semantics_missing' },
         @{ key='application'; literal='function New-ModelPolicyProposal'; code='application_contract_missing' },
         @{ key='application'; literal='function Test-AgentLocalOutcomeContract'; code='local_outcome_contract_missing' },
         @{ key='application'; literal='local_outcome_evaluation_time_invalid'; code='local_outcome_contract_missing' },
         @{ key='application'; literal="selection_semantics = 'host_proposal_validation_only'"; code='proposal_semantics_missing' },
+        @{ key='application'; literal='host_surface_unknown'; code='host_surface_availability_gate_missing' },
+        @{ key='application'; literal='host_pair_availability_unknown'; code='host_surface_availability_gate_missing' },
+        @{ key='application'; literal="hostAvailabilityState = 'confirmed_available'"; code='host_surface_availability_gate_missing' },
         @{ key='application'; literal='function Get-AgentEscalationDecision'; code='application_contract_missing' },
         @{ key='application'; literal='Test-AgentFailurePacketContract $FailurePacket'; code='failure_packet_gate_missing' },
         @{ key='application'; literal='if (-not $radarValidation.pass -and -not $hasLocal -and -not $hostConfirmed)'; code='stale_radar_fallback_missing' },
         @{ key='application'; literal='requires_parallel_readmission'; code='parallel_readmission_missing' },
         @{ key='command'; literal='function Invoke-AgentPlanCommand'; code='cli_command_wiring_missing' },
         @{ key='command'; literal='function Invoke-AgentValidateCommand'; code='cli_command_wiring_missing' },
+        @{ key='command'; literal='Agent workflow input cannot traverse a reparse point.'; code='input_reparse_guard_missing' },
         @{ key='command'; literal="decision_owner = 'host_ai'"; code='host_decision_owner_missing' },
         @{ key='command'; literal='provider_calls = 0; native_mutations = 0; writes = 0'; code='zero_side_effect_contract_missing' },
         @{ key='version'; literal='"agent-plan"'; code='cli_command_wiring_missing' },
@@ -225,6 +248,7 @@ foreach ($required in @(
         @{ key='build'; literal='"Commands/AgentWorkflow.ps1"'; code='build_source_wiring_missing' },
         @{ key='contractTests'; literal="Describe 'Agent workflow advisory contracts'"; code='focused_test_missing' },
         @{ key='validFixture'; literal='"graph_id": "graph-demo-001"'; code='fixture_contract_missing' },
+        @{ key='validFixture'; literal='"host_surface": "collaboration_spawn"'; code='fixture_contract_missing' },
         @{ key='invalidFixture'; literal='"graph_id": "graph-invalid-001"'; code='fixture_contract_missing' }
     )) { Require-Literal $content[$required.key] $required.literal $paths[$required.key] $required.code }
 

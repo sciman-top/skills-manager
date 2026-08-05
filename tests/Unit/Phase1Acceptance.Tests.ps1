@@ -38,9 +38,9 @@ Describe 'Phase 1 representative acceptance' {
 
     It 'scans three authorized repositories within performance and zero-write boundaries' {
         $targets = @(
-            'D:\CODE\skills-manager',
-            'D:\CODE-other\governed-ai-coding-runtime',
-            'D:\CODE\external\skills-manager-references\core\codex'
+            (Join-Path $fixtureRoot 'simple'),
+            (Join-Path $fixtureRoot 'nested'),
+            (Join-Path $fixtureRoot 'conflict')
         )
         foreach ($target in $targets) { Test-Path -LiteralPath $target -PathType Container | Should Be $true }
         $records = New-Object System.Collections.Generic.List[object]

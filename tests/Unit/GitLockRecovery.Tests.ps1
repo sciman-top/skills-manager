@@ -23,13 +23,13 @@ Describe "Git lock recovery" {
 
             Mock Test-GitProcessRunning { $false }
 
-            $repaired = Repair-StaleGitLockFromOutput @("fatal: Unable to create '$lockPath': File exists.")
+            $repaired = Repair-StaleGitLockFromOutput $repo @("fatal: Unable to create '$lockPath': File exists.")
 
             $repaired | Should Be $true
             (Test-Path $lockPath) | Should Be $false
         }
 
-        It "Still removes lock when git process exists but file is removable" {
+        It "Does not remove lock when a Git process exists" {
             $repo = Join-Path $TestDrive "repo2"
             $gitDir = Join-Path $repo ".git"
             New-Item -ItemType Directory -Path $gitDir -Force | Out-Null
@@ -38,13 +38,36 @@ Describe "Git lock recovery" {
 
             Mock Test-GitProcessRunning { $true }
 
-            $repaired = Repair-StaleGitLockFromOutput @("fatal: Unable to create '$lockPath': File exists.")
+            $repaired = Repair-StaleGitLockFromOutput $repo @("fatal: Unable to create '$lockPath': File exists.")
 
-            $repaired | Should Be $true
-            (Test-Path $lockPath) | Should Be $false
+            $repaired | Should Be $false
+            (Test-Path $lockPath) | Should Be $true
         }
 
-        It "Throws only when lock cannot be removed and git process is still running" {
+        It "Rejects stderr lock paths outside the current repository Git admin directory" {
+            $repo = Join-Path $TestDrive "repo-outside-guard"
+            $gitDir = Join-Path $repo ".git"
+            $outsideDir = Join-Path $TestDrive "outside-git"
+            New-Item -ItemType Directory -Path $gitDir -Force | Out-Null
+            New-Item -ItemType Directory -Path $outsideDir -Force | Out-Null
+            $outsideLock = Join-Path $outsideDir "index.lock"
+            Set-Content -Path $outsideLock -Value "keep"
+
+            Mock Test-GitProcessRunning { $false }
+
+            Push-Location $repo
+            try {
+                $repaired = Repair-StaleGitLockFromOutput $repo @("fatal: Unable to create '$outsideLock': File exists.")
+            }
+            finally {
+                Pop-Location
+            }
+
+            $repaired | Should Be $false
+            (Test-Path -LiteralPath $outsideLock -PathType Leaf) | Should Be $true
+        }
+
+        It "Does not attempt removal when a Git process is still running" {
             $repo = Join-Path $TestDrive "repo2-busy"
             $gitDir = Join-Path $repo ".git"
             New-Item -ItemType Directory -Path $gitDir -Force | Out-Null
@@ -54,15 +77,10 @@ Describe "Git lock recovery" {
             Mock Test-GitProcessRunning { $true }
             Mock Remove-GitLockFile { $false }
 
-            $thrown = $false
-            try {
-                Repair-StaleGitLockFromOutput @("fatal: Unable to create '$lockPath': File exists.") | Out-Null
-            }
-            catch {
-                $thrown = $true
-                $_.Exception.Message | Should Match "git 进程"
-            }
-            $thrown | Should Be $true
+            $repaired = Repair-StaleGitLockFromOutput $repo @("fatal: Unable to create '$lockPath': File exists.")
+
+            $repaired | Should Be $false
+            Assert-MockCalled Remove-GitLockFile -Times 0
             (Test-Path $lockPath) | Should Be $true
         }
     }

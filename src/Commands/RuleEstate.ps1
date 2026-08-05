@@ -42,7 +42,9 @@ function Invoke-RuleEstateAuditCommand([object[]]$Tokens = @()) {
     }
     $json = $envelope | ConvertTo-Json -Depth 60 -Compress
     if ($reportRequested) {
-        $outPath = [System.IO.Path]::GetFullPath([string]$options.out_path)
+        $protected = @($report.inventory.targets | ForEach-Object { @([string]$_.agents_path, [string]$_.claude_path) })
+        if (-not [string]::IsNullOrWhiteSpace([string]$options.registry_path)) { $protected += [System.IO.Path]::GetFullPath([string]$options.registry_path) }
+        $outPath = Resolve-RuleEstateControlOutput ([string]$options.out_path) ([string]$options.workspace_root) $protected
         foreach ($target in @($report.inventory.targets)) {
             if ($outPath.Equals([System.IO.Path]::GetFullPath([string]$target.agents_path), [System.StringComparison]::OrdinalIgnoreCase) -or $outPath.Equals([System.IO.Path]::GetFullPath([string]$target.claude_path), [System.StringComparison]::OrdinalIgnoreCase)) { throw '--out cannot overwrite a target rule file.' }
         }
@@ -70,15 +72,48 @@ function Parse-RuleEstateMutationOptions([object[]]$Tokens, [ValidateSet('plan',
 
 function Resolve-RuleEstateControlOutput([string]$Path,[string]$WorkspaceRoot,[string[]]$Protected=@()){
     $resolved=[IO.Path]::GetFullPath($Path);$workspace=[IO.Path]::GetFullPath($WorkspaceRoot)
-    if(-not (Test-RuleDiscoveryPathWithin $resolved $workspace)){throw 'Estate plan and receipt outputs must remain inside the explicit workspace root.'}
+    if(-not (Test-RuleDiscoveryPathWithin $resolved $workspace)){throw 'Estate control outputs must remain inside the explicit workspace root.'}
+    if(Test-RuleEstateReparsePath $resolved $workspace){throw 'Estate control outputs must not cross a reparse point inside the explicit workspace root.'}
     foreach($item in @($Protected)){if(-not [string]::IsNullOrWhiteSpace($item) -and $resolved.Equals([IO.Path]::GetFullPath($item),[StringComparison]::OrdinalIgnoreCase)){throw 'Estate output cannot overwrite an input file.'}}
     return $resolved
 }
 
+function Get-RuleEstateReviewControlInputs([string]$ReviewPath) {
+    $inputs=New-Object System.Collections.Generic.List[string]
+    if([string]::IsNullOrWhiteSpace($ReviewPath)){return @()}
+    $reviewFile=[IO.Path]::GetFullPath($ReviewPath);$inputs.Add($reviewFile)|Out-Null
+    if(-not [IO.File]::Exists($reviewFile)){return @($inputs.ToArray())}
+    try{$review=[IO.File]::ReadAllText($reviewFile)|ConvertFrom-Json}catch{return @($inputs.ToArray())}
+    $reviewRoot=[IO.Path]::GetDirectoryName($reviewFile)
+    $authorization=[string](Get-RuleEstateProperty $review 'authorization_receipt')
+    if(-not [string]::IsNullOrWhiteSpace($authorization)){
+        try{$inputs.Add([IO.Path]::GetFullPath((Join-Path $reviewRoot $authorization)))|Out-Null}catch{}
+    }
+    foreach($change in @(Get-RuleEstateProperty $review 'changes')){
+        $desired=[string](Get-RuleEstateProperty $change 'desired_file')
+        if([string]::IsNullOrWhiteSpace($desired)){continue}
+        try{$inputs.Add([IO.Path]::GetFullPath((Join-Path $reviewRoot $desired)))|Out-Null}catch{}
+    }
+    return @($inputs.ToArray()|Sort-Object -Unique)
+}
+
+function Get-RuleEstatePlanControlInputs($Plan) {
+    $inputs=New-Object System.Collections.Generic.List[string]
+    $review=Get-RuleEstateProperty $Plan 'review';$reviewPath=[string](Get-RuleEstateProperty $review 'path')
+    foreach($path in @(Get-RuleEstateReviewControlInputs $reviewPath)){if(-not [string]::IsNullOrWhiteSpace($path)){$inputs.Add($path)|Out-Null}}
+    $authorizationPath=[string](Get-RuleEstateProperty (Get-RuleEstateProperty $Plan 'authorization') 'path')
+    if(-not [string]::IsNullOrWhiteSpace($authorizationPath)){$inputs.Add([IO.Path]::GetFullPath($authorizationPath))|Out-Null}
+    foreach($action in @(Get-RuleEstateProperty $Plan 'actions')){
+        $targetPath=[string](Get-RuleEstateProperty $action 'target_path')
+        if(-not [string]::IsNullOrWhiteSpace($targetPath)){$inputs.Add([IO.Path]::GetFullPath($targetPath))|Out-Null}
+    }
+    return @($inputs.ToArray()|Sort-Object -Unique)
+}
+
 function Invoke-RuleEstatePlanCommand([object[]]$Tokens=@()){
     $options=Parse-RuleEstateMutationOptions $Tokens plan
-    $out=Resolve-RuleEstateControlOutput $options.out_path $options.workspace_root @($options.review)
     $plan=New-RuleEstatePlan -ReviewPath $options.review -WorkspaceRoot $options.workspace_root -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -ExcludeNames $options.exclude_names
+    $out=Resolve-RuleEstateControlOutput $options.out_path $options.workspace_root @(Get-RuleEstatePlanControlInputs $plan)
     $envelope=[pscustomobject][ordered]@{schema_version=1;command='rule-estate-plan';pass=$true;exit_code=0;truth_boundary='reviewed_multi_target_plan';plan=$plan;writes=1;target_writes=0;host_writes=0;provider_calls=0;native_mutations=0}
     $json=$envelope|ConvertTo-Json -Depth 60 -Compress;Write-Utf8FileAtomic -Path $out -Content $json
     return [pscustomobject]@{exit_code=0;json=[bool]$options.json;output=$(if($options.json){$json}else{'Rule estate plan: actions={0}, target_set={1}' -f $plan.actions.Count,$plan.target_set.count});envelope=$envelope}
@@ -87,8 +122,9 @@ function Invoke-RuleEstatePlanCommand([object[]]$Tokens=@()){
 function Invoke-RuleEstateApplyCommand([object[]]$Tokens=@()){
     $options=Parse-RuleEstateMutationOptions $Tokens apply
     $planPath=[IO.Path]::GetFullPath($options.plan);if(-not [IO.File]::Exists($planPath)){throw 'Estate plan does not exist.'}
-    $out=Resolve-RuleEstateControlOutput $options.out_path $options.workspace_root @($planPath)
     $document=[IO.File]::ReadAllText($planPath)|ConvertFrom-Json;$plan=if([string](Get-RuleEstateProperty $document 'command') -eq 'rule-estate-plan'){Get-RuleEstateProperty $document 'plan'}else{$document}
+    $protected=@($planPath)+@(Get-RuleEstatePlanControlInputs $plan)
+    $out=Resolve-RuleEstateControlOutput $options.out_path $options.workspace_root $protected
     $result=Invoke-RuleEstateApply -Plan $plan -WorkspaceRoot $options.workspace_root -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -Token $options.token -ReceiptPath $out -ResumeReceiptPath $options.resume
     $exit=if($result.pass){0}else{2};$envelope=[pscustomobject][ordered]@{schema_version=1;command='rule-estate-apply';pass=$result.pass;exit_code=$exit;truth_boundary='filesystem_applied_not_host_loaded';result=$result;provider_calls=0;native_mutations=0}
     $json=$envelope|ConvertTo-Json -Depth 60 -Compress

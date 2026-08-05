@@ -103,9 +103,13 @@ Describe 'Cross-thread guard installer and doctor' {
         $result.prompt_digests_match | Should Be $true
         $result.simulation_passed | Should Be $true
         $result.simulation_cases.direct_send_tool | Should Be $true
+        $result.simulation_cases.direct_handoff_without_prompt | Should Be $true
         $result.simulation_cases.code_mode_shell_send | Should Be $true
+        $result.simulation_cases.code_mode_dynamic_automation_route | Should Be $true
         $result.simulation_cases.code_mode_target_self_delete | Should Be $true
         $result.simulation_cases.code_mode_automation_live_probe_sentinel | Should Be $true
+        $result.simulation_cases.fleet_target_pause | Should Be $true
+        $result.simulation_cases.git_diff_hook_inspection | Should Be $true
         $result.simulation_cases.standard_fleet_shutdown_blocked | Should Be $true
         $result.simulation_cases.armed_fleet_shutdown_allowed | Should Be $true
         $result.trust_status | Should Be 'unverified_requires_slash_hooks'
@@ -125,5 +129,32 @@ Describe 'Cross-thread guard installer and doctor' {
         $result.prompt_digests_match | Should Be $false
         $result.static_configuration_ready | Should Be $false
         $result.overall | Should Be 'soft_guard_only'
+    }
+
+    # Keep this fault-injection test last because Pester 4 retains command mocks
+    # for the enclosing Describe scope after an It block completes.
+    It 'restores every managed target when the final hooks document move fails' {
+        $hostScripts = Join-Path $script:codexHome 'scripts'
+        $null = New-Item -ItemType Directory -Path $hostScripts -Force
+        $hostHook = Join-Path $hostScripts 'block-cross-thread-send.ps1'
+        $hostDoctor = Join-Path $hostScripts 'Test-WatchGuardRuntime.ps1'
+        $hooksPath = Join-Path $script:codexHome 'hooks.json'
+        $oldHook = 'old-hook-bytes'
+        $oldDoctor = 'old-doctor-bytes'
+        $oldHooks = Get-Content -Raw -LiteralPath $hooksPath
+        Set-Content -LiteralPath $hostHook -Value $oldHook -NoNewline
+        Set-Content -LiteralPath $hostDoctor -Value $oldDoctor -NoNewline
+
+        Mock Move-Item {
+            if ([string]$Destination -ceq $hooksPath) {
+                throw 'injected final move failure'
+            }
+            Microsoft.PowerShell.Management\Move-Item -LiteralPath $LiteralPath -Destination $Destination -Force
+        }
+
+        { & $installer -CodexHome $script:codexHome -SourceHookPath $sourceHook } | Should Throw
+        (Get-Content -Raw -LiteralPath $hostHook) | Should Be $oldHook
+        (Get-Content -Raw -LiteralPath $hostDoctor) | Should Be $oldDoctor
+        (Get-Content -Raw -LiteralPath $hooksPath) | Should Be $oldHooks
     }
 }

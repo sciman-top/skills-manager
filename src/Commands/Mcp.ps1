@@ -156,6 +156,24 @@ function Assert-McpRemoteUrl([string]$url, [string]$name, [string]$transport) {
     if ($parsed.Scheme -ne [System.Uri]::UriSchemeHttp -and $parsed.Scheme -ne [System.Uri]::UriSchemeHttps) {
         throw ("{0} MCP URL 非法（仅支持 http/https）：{1}" -f $transport, $name)
     }
+    Need ([string]::IsNullOrWhiteSpace($parsed.UserInfo)) ("{0} MCP URL 不允许内嵌 userinfo/credential：{1}" -f $transport, $name)
+    if (-not [string]::IsNullOrWhiteSpace($parsed.Query)) {
+        foreach ($part in @($parsed.Query.TrimStart('?') -split '&')) {
+            if ([string]::IsNullOrWhiteSpace($part)) { continue }
+            $queryKey = [Uri]::UnescapeDataString(($part -split '=', 2)[0])
+            Need (-not (Test-McpSensitiveKeyName $queryKey)) ("{0} MCP URL 不允许在 query 中携带敏感字段；请改用环境变量引用或 bearer_token_env_var：{1}" -f $transport, $queryKey)
+        }
+    }
+}
+
+function Test-McpSensitiveKeyName([string]$name) {
+    if ([string]::IsNullOrWhiteSpace($name)) { return $false }
+    return ($name -match '(?i)(authorization|proxy-authorization|cookie|token|secret|password|passwd|api[-_]?key|private[-_]?key|credential)')
+}
+
+function Test-McpEnvironmentTemplate([string]$value) {
+    if ([string]::IsNullOrWhiteSpace($value)) { return $false }
+    return ($value.Trim() -match '^(?:(?:Bearer|Basic)\s+)?\$\{[A-Za-z_][A-Za-z0-9_]*\}$')
 }
 
 function Assert-McpKeyValueMapSafe($data, [string]$label) {
@@ -174,6 +192,26 @@ function Assert-McpKeyValueMapSafe($data, [string]$label) {
         $value = if ($null -eq $item.Value) { "" } else { [string]$item.Value }
         Need ($key -notmatch '[\r\n]') ("{0} key 不能包含换行：{1}" -f $label, $key)
         Need ($value -notmatch '[\r\n]') ("{0} value 不能包含换行：{1}" -f $label, $key)
+        if (Test-McpSensitiveKeyName $key) {
+            Need (Test-McpEnvironmentTemplate $value) ("{0} 敏感字段不得保存 literal value；请使用 `${{ENV_VAR}} 引用：{1}" -f $label, $key)
+        }
+    }
+}
+
+function Assert-McpProcessArgsSafe([object[]]$ProcessArgs,[string]$Label='args') {
+    $items=@($ProcessArgs|ForEach-Object{[string]$_})
+    for($i=0;$i -lt $items.Count;$i++){
+        $item=$items[$i]
+        Need ($item -notmatch '[\r\n]') ("{0} 不能包含换行。" -f $Label)
+        Need ($item -notmatch '(?i)\b(?:https?|postgres(?:ql)?)://[^/@\s:]+:[^/@\s]+@') ("{0} 不允许内嵌 URL credential；请改用环境变量模板。" -f $Label)
+        Need ($item -notmatch '(?i)\b(?:github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+)\b') ("{0} 不允许 literal access token；请改用环境变量模板。" -f $Label)
+        if($item -match '^(?i)(--?(?:access[-_]?key|api[-_]?key|authorization|password|passwd|secret|token))=(.*)$'){
+            Need (Test-McpEnvironmentTemplate ([string]$Matches[2])) ("{0} 敏感参数不得保存 literal value：{1}" -f $Label,$Matches[1])
+        }
+        elseif($item -match '^(?i)--?(?:access[-_]?key|api[-_]?key|authorization|password|passwd|secret|token)$'){
+            Need (($i+1) -lt $items.Count -and (Test-McpEnvironmentTemplate $items[$i+1])) ("{0} 敏感参数不得保存 literal value：{1}" -f $Label,$item)
+            $i++
+        }
     }
 }
 
@@ -359,7 +397,9 @@ function Parse-McpInstallArgs([string[]]$tokens) {
     Need (($result.transport -eq "stdio") -or ($result.transport -eq "sse") -or ($result.transport -eq "http")) "transport 仅支持 stdio/sse/http"
 
     if ($result.transport -eq "stdio") {
+        Assert-McpKeyValueMapSafe $result.env "--env"
         $result.args = Normalize-McpProcessArgs @($result.args)
+        Assert-McpProcessArgsSafe $result.args '--args'
         if ([string]::IsNullOrWhiteSpace($result.command) -and $result.args.Count -gt 0) {
             $result.command = [string]$result.args[0]
             if ($result.args.Count -gt 1) {
@@ -457,6 +497,7 @@ function Convert-McpServersToConfigMap($servers) {
         $entry.transport = $transport
         if ($transport -eq "stdio") {
             Assert-McpKeyValueMapSafe $s.env "env"
+            Assert-McpProcessArgsSafe @($s.args) 'args'
             if (-not [string]::IsNullOrWhiteSpace([string]$s.command)) { $entry.command = [string]$s.command }
             if ($s.PSObject.Properties.Match("args").Count -gt 0 -and $s.args -ne $null) { $entry.args = @($s.args) }
             if ($s.PSObject.Properties.Match("env").Count -gt 0 -and $s.env -ne $null) { $entry.env = $s.env }
@@ -838,9 +879,9 @@ function Ensure-CodexMcpNodeCacheWrapper([string]$codexRoot) {
     $scriptsDir = Join-Path $codexRoot "scripts"
     EnsureDir $scriptsDir
     $wrapperPath = Join-Path $scriptsDir "mcp-node-cache-wrapper.mjs"
-    Set-ContentUtf8 $wrapperPath (Get-CodexMcpNodeCacheWrapperContent)
+    Write-Utf8FileAtomic -Path $wrapperPath -Content (Get-CodexMcpNodeCacheWrapperContent)
     $postgresWrapperPath = Join-Path $scriptsDir "mcp-postgres-env-wrapper.mjs"
-    Set-ContentUtf8 $postgresWrapperPath (Get-CodexMcpPostgresEnvWrapperContent)
+    Write-Utf8FileAtomic -Path $postgresWrapperPath -Content (Get-CodexMcpPostgresEnvWrapperContent)
 }
 
 function Convert-McpMapToOrderedMap($mapLike) {
@@ -892,26 +933,12 @@ function Build-GenericMcpPayload([string]$existingContent, $servers) {
 function Get-NativeMcpKeyValueFlags($data, [string]$flagName, [string]$separator = "=") {
     $flags = @()
     if ($null -eq $data) { return $flags }
-    function Resolve-EnvTemplateValue([string]$rawValue) {
-        if ([string]::IsNullOrWhiteSpace($rawValue)) { return $rawValue }
-        return [System.Text.RegularExpressions.Regex]::Replace(
-            $rawValue,
-            '\$\{([A-Za-z_][A-Za-z0-9_]*)\}',
-            {
-                param($m)
-                $varName = [string]$m.Groups[1].Value
-                $resolved = [System.Environment]::GetEnvironmentVariable($varName)
-                if ($null -eq $resolved) { return $m.Value }
-                return [string]$resolved
-            }
-        )
-    }
 
     if ($data -is [hashtable] -or $data -is [System.Collections.IDictionary]) {
         foreach ($k in $data.Keys) {
             $key = [string]$k
             if ([string]::IsNullOrWhiteSpace($key)) { continue }
-            $value = Resolve-EnvTemplateValue ([string]$data[$k])
+            $value = [string]$data[$k]
             $flags += @($flagName, ("{0}{1}{2}" -f $key, $separator, $value))
         }
         return $flags
@@ -921,7 +948,7 @@ function Get-NativeMcpKeyValueFlags($data, [string]$flagName, [string]$separator
         foreach ($p in $data.PSObject.Properties) {
             $key = [string]$p.Name
             if ([string]::IsNullOrWhiteSpace($key)) { continue }
-            $value = Resolve-EnvTemplateValue ([string]$p.Value)
+            $value = [string]$p.Value
             $flags += @($flagName, ("{0}{1}{2}" -f $key, $separator, $value))
         }
         return $flags
@@ -1493,6 +1520,9 @@ function Mask-SensitiveMcpCommandText([string]$text) {
     $masked = [regex]::Replace($masked, '(?i)(Authorization\s*[:=]\s*Bearer\s+)([^"\s]+)', '$1<redacted>')
     $masked = [regex]::Replace($masked, '(?i)\bgithub_pat_[A-Za-z0-9_]+\b', '<redacted>')
     $masked = [regex]::Replace($masked, '(?i)\bgh[pousr]_[A-Za-z0-9_]+\b', '<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)((?:--)?(?:token|secret|password|passwd|api[-_]?key|authorization)\s*(?:=|:)\s*)([^\s"'']+)', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)((?:--)?(?:token|secret|password|passwd|api[-_]?key|authorization)\s+)([^\s"'']+)', '$1<redacted>')
+    $masked = [regex]::Replace($masked, '(?i)(https?://)([^/@\s:]+):([^/@\s]+)@', '$1<redacted>@')
     return $masked
 }
 
@@ -1703,7 +1733,7 @@ function Verify-McpAcrossCliWithRetry($roots, [int]$maxAttempts = 6, [int]$inter
                 Log ("MCP 校验未通过：{0}，缺失/异常：{1}（reason={2}）" -f $check.cli, (($check.missing) -join ", "), $check.reason) "WARN"
                 $snippet = @($check.raw | Select-Object -First 6) -join " | "
                 if (-not [string]::IsNullOrWhiteSpace($snippet)) {
-                    Log ("{0} mcp list 输出片段：{1}" -f $check.cli, $snippet) "WARN"
+                    Log ("{0} mcp list 输出片段：{1}" -f $check.cli, (Mask-SensitiveMcpCommandText $snippet)) "WARN"
                 }
             }
         }
@@ -1761,7 +1791,7 @@ function Invoke-NativeMcpSync($servers) {
                     $removeArgs = @("mcp", "remove", [string]$s.name, "--scope", $scope)
                     $removed = Invoke-ExternalCommandWithTimeout "claude" @($removeArgs) $script:Root $timeoutSeconds
                     if ($removed.timed_out -or $removed.exit_code -ne 0) {
-                        Log ("原生 MCP 替换前清理失败（已忽略）：{0}（scope={1}，exit={2}）{3}" -f [string]$s.name, $scope, $removed.exit_code, $removed.error) "WARN"
+                        Log ("原生 MCP 替换前清理失败（已忽略）：{0}（scope={1}，exit={2}）{3}" -f [string]$s.name, $scope, $removed.exit_code, (Mask-SensitiveMcpCommandText ([string]$removed.error))) "WARN"
                         continue
                     }
 
@@ -1771,7 +1801,7 @@ function Invoke-NativeMcpSync($servers) {
                         continue
                     }
                 }
-                Log ("原生 MCP 同步失败（已忽略）：{0}（scope={1}，exit={2}）{3}" -f [string]$s.name, $scope, $native.exit_code, $native.error) "WARN"
+                Log ("原生 MCP 同步失败（已忽略）：{0}（scope={1}，exit={2}）{3}" -f [string]$s.name, $scope, $native.exit_code, (Mask-SensitiveMcpCommandText ([string]$native.error))) "WARN"
                 if (Test-IsNonInteractiveMcpError ([string]$native.error)) {
                     $script:SkipNativeMcpForSession = $true
                     Log "检测到原生 MCP CLI 在非交互环境不可用，已停止本轮后续原生 MCP 同步。" "WARN"
@@ -1782,7 +1812,7 @@ function Invoke-NativeMcpSync($servers) {
             Log ("已同步原生 MCP：{0}（scope={1}）" -f [string]$s.name, $scope)
         }
         catch {
-            Log ("原生 MCP 同步失败（已忽略）：{0}（scope={1}） -> {2}" -f [string]$s.name, $scope, $_.Exception.Message) "WARN"
+            Log ("原生 MCP 同步失败（已忽略）：{0}（scope={1}） -> {2}" -f [string]$s.name, $scope, (Mask-SensitiveMcpCommandText $_.Exception.Message)) "WARN"
             if (Test-IsNonInteractiveMcpError $_.Exception.Message) {
                 $script:SkipNativeMcpForSession = $true
                 Log "检测到原生 MCP CLI 在非交互环境不可用，已停止本轮后续原生 MCP 同步。" "WARN"
@@ -1826,7 +1856,7 @@ function Invoke-NativeMcpCleanup([string]$name) {
                 continue
             }
             if ($native.exit_code -ne 0) {
-                Log ("原生 MCP 清理失败（已忽略）：{0}（exit={1}）{2}" -f $cmdText, $native.exit_code, $native.error) "WARN"
+                Log ("原生 MCP 清理失败（已忽略）：{0}（exit={1}）{2}" -f (Mask-SensitiveMcpCommandText $cmdText), $native.exit_code, (Mask-SensitiveMcpCommandText ([string]$native.error))) "WARN"
                 if (Test-IsNonInteractiveMcpError ([string]$native.error)) {
                     $script:SkipNativeMcpForSession = $true
                     Log "检测到原生 MCP CLI 在非交互环境不可用，已停止本轮后续原生 MCP 清理。" "WARN"
@@ -1837,7 +1867,7 @@ function Invoke-NativeMcpCleanup([string]$name) {
             Log ("已执行原生 MCP 清理：{0}" -f $cmdText)
         }
         catch {
-            Log ("原生 MCP 清理失败（已忽略）：{0} -> {1}" -f $cmdText, $_.Exception.Message) "WARN"
+            Log ("原生 MCP 清理失败（已忽略）：{0} -> {1}" -f (Mask-SensitiveMcpCommandText $cmdText), (Mask-SensitiveMcpCommandText $_.Exception.Message)) "WARN"
             if (Test-IsNonInteractiveMcpError $_.Exception.Message) {
                 $script:SkipNativeMcpForSession = $true
                 Log "检测到原生 MCP CLI 在非交互环境不可用，已停止本轮后续原生 MCP 清理。" "WARN"
@@ -2523,7 +2553,7 @@ function Write-McpDesiredTarget($target) {
     $parent = Split-Path $path -Parent
     if (-not [string]::IsNullOrWhiteSpace($parent)) { EnsureDir $parent }
     if ([string]$target.kind -eq 'codex_toml') { Ensure-CodexMcpNodeCacheWrapper ([string]$target.root) }
-    Set-ContentUtf8 $path ([string]$target.desired_content)
+    Write-Utf8FileAtomic -Path $path -Content ([string]$target.desired_content)
     switch ([string]$target.kind) {
         'gemini_settings' { Log ("已同步 Gemini MCP 配置：{0}" -f $path) }
         'gemini_antigravity_settings' { Log ("已同步 Gemini Antigravity MCP 配置：{0}" -f $path) }
@@ -2531,6 +2561,129 @@ function Write-McpDesiredTarget($target) {
         'trae_json' { Log ("已同步 Trae MCP 配置：{0}" -f $path) }
         'trae_project_json' { Log ("已同步项目级 Trae MCP 配置：{0}" -f $path) }
         default { Log ("已同步 MCP 配置：{0}" -f $path) }
+    }
+}
+
+function Test-McpTargetReparsePath([string]$Path,[string]$Root) {
+    $cursor=[IO.Path]::GetFullPath($Path);$boundary=[IO.Path]::GetFullPath($Root).TrimEnd('\','/')
+    while($true){
+        if([IO.File]::Exists($cursor) -or [IO.Directory]::Exists($cursor)){if(([IO.File]::GetAttributes($cursor) -band [IO.FileAttributes]::ReparsePoint) -ne 0){return $true}}
+        if($cursor.TrimEnd('\','/').Equals($boundary,[StringComparison]::OrdinalIgnoreCase)){break}
+        $parent=[IO.Directory]::GetParent($cursor);if($null -eq $parent -or -not (Test-OperationPathWithinRoot $parent.FullName $boundary)){break};$cursor=$parent.FullName
+    }
+    return $false
+}
+
+function Assert-McpDesiredStateFresh([object[]]$DesiredState,[string]$ExpectedConfigRevision='') {
+    if(-not [string]::IsNullOrWhiteSpace($ExpectedConfigRevision)){
+        $currentConfigRevision=Get-OperationSha256 (Get-ContentUtf8 $CfgPath)
+        Need ($currentConfigRevision -eq $ExpectedConfigRevision) 'MCP source_revision_stale：skills.json changed after planning.'
+    }
+    foreach($target in @($DesiredState)){
+        $path=[IO.Path]::GetFullPath([string]$target.path);$root=[IO.Path]::GetFullPath([string]$target.root)
+        Need (Test-OperationPathWithinRoot $path $root) ("MCP target_out_of_root：{0}" -f $path)
+        Need (-not (Test-McpTargetReparsePath $path $root)) ("MCP target_reparse_forbidden：{0}" -f $path)
+        $exists=Test-Path -LiteralPath $path -PathType Leaf;$before=$target.before_hash
+        if($null -eq $before){Need (-not $exists) ("MCP target_created_since_plan：{0}" -f $path)}
+        else{Need $exists ("MCP target_missing_since_plan：{0}" -f $path);Need ((Get-OperationSha256 (Get-ContentUtf8 $path)) -eq [string]$before) ("MCP target_hash_stale：{0}" -f $path)}
+    }
+}
+
+function Restore-McpManagedTargetSnapshot([object[]]$Snapshot) {
+    $conflicts=New-Object System.Collections.Generic.List[string]
+    foreach($entry in @($Snapshot)){
+        $path=[string]$entry.path
+        if(Test-Path -LiteralPath $path -PathType Leaf){
+            $currentHash=Get-OperationSha256 (Get-ContentUtf8 $path)
+            $allowed=@([string]$entry.before_hash,[string]$entry.desired_hash)|Where-Object{-not [string]::IsNullOrWhiteSpace($_)}
+            if($currentHash -notin $allowed){$conflicts.Add($path)|Out-Null;continue}
+        }
+        if([bool]$entry.existed){Write-BytesAtomic -Path $path -Bytes ([byte[]]$entry.bytes)}
+        elseif(Test-Path -LiteralPath $path -PathType Leaf){Remove-Item -LiteralPath $path -Force}
+    }
+    Need ($conflicts.Count -eq 0) ("MCP rollback_conflict：managed targets changed outside this transaction: {0}" -f ($conflicts -join ', '))
+}
+
+function Get-McpImplicitSidecarTargets([object[]]$DesiredState) {
+    $targets=New-Object System.Collections.Generic.List[object]
+    $seen=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach($target in @($DesiredState|Where-Object{[string]$_.kind -eq 'codex_toml'})){
+        $root=[IO.Path]::GetFullPath([string]$target.root)
+        $nodePath=Join-Path $root 'scripts/mcp-node-cache-wrapper.mjs'
+        if($seen.Add($nodePath)){$targets.Add([pscustomobject]@{path=$nodePath;root=$root;desired_content=(Get-CodexMcpNodeCacheWrapperContent)})|Out-Null}
+        $postgresPath=Join-Path $root 'scripts/mcp-postgres-env-wrapper.mjs'
+        if($seen.Add($postgresPath)){$targets.Add([pscustomobject]@{path=$postgresPath;root=$root;desired_content=(Get-CodexMcpPostgresEnvWrapperContent)})|Out-Null}
+    }
+    return @($targets.ToArray())
+}
+
+function Remove-McpCreatedRootIfEmpty([string]$Root) {
+    if(-not (Test-Path -LiteralPath $Root -PathType Container)){return}
+    if(Test-McpTargetReparsePath $Root $Root){return}
+    $files=@([IO.Directory]::GetFiles($Root,'*',[IO.SearchOption]::AllDirectories))
+    if($files.Count -gt 0){return}
+    $reparse=@([IO.Directory]::GetFileSystemEntries($Root,'*',[IO.SearchOption]::AllDirectories)|Where-Object{([IO.File]::GetAttributes($_)-band [IO.FileAttributes]::ReparsePoint)-ne 0})
+    if($reparse.Count -gt 0){return}
+    Remove-Item -LiteralPath $Root -Recurse -Force
+}
+
+function Invoke-McpManagedTargetTransaction([object[]]$DesiredState,[string]$ExpectedConfigRevision='') {
+    $lockEntries=New-Object System.Collections.Generic.List[object]
+    $snapshot=New-Object System.Collections.Generic.List[object]
+    $createdRoots=New-Object System.Collections.Generic.List[string]
+    $transactionSucceeded=$false
+    try{
+        $roots=@($DesiredState|ForEach-Object{[IO.Path]::GetFullPath([string]$_.root)}|Sort-Object -Unique)
+        foreach($root in $roots){
+            $drive=[IO.Path]::GetPathRoot($root).TrimEnd('\','/');$trimmed=$root.TrimEnd('\','/')
+            Need (-not $trimmed.Equals($drive,[StringComparison]::OrdinalIgnoreCase)) ("MCP target_root_forbidden：{0}" -f $root)
+            if(Test-Path -LiteralPath $root){Need (Test-Path -LiteralPath $root -PathType Container) ("MCP target_root_not_directory：{0}" -f $root);continue}
+            $parent=[IO.Directory]::GetParent($root)
+            Need ($null -ne $parent -and (Test-Path -LiteralPath $parent.FullName -PathType Container)) ("MCP target_root_parent_missing：{0}" -f $root)
+            Need (-not (Test-McpTargetReparsePath $parent.FullName $parent.FullName)) ("MCP target_root_parent_reparse_forbidden：{0}" -f $root)
+        }
+        foreach($root in $roots){
+            if(-not (Test-Path -LiteralPath $root -PathType Container)){[IO.Directory]::CreateDirectory($root)|Out-Null;$createdRoots.Add($root)|Out-Null}
+            Need (-not (Test-McpTargetReparsePath $root $root)) ("MCP target_reparse_forbidden：{0}" -f $root)
+            $lockPath=Join-Path $root '.skills-manager-mcp-sync.lock'
+            $stream=[IO.File]::Open($lockPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+            $lockEntries.Add([pscustomobject]@{path=$lockPath;stream=$stream})|Out-Null
+        }
+        Assert-McpDesiredStateFresh $DesiredState $ExpectedConfigRevision
+        foreach($target in @($DesiredState)){
+            $path=[string]$target.path;$exists=Test-Path -LiteralPath $path -PathType Leaf
+            $snapshot.Add([pscustomobject]@{path=$path;existed=$exists;bytes=$(if($exists){[IO.File]::ReadAllBytes($path)}else{[byte[]]::new(0)});before_hash=$target.before_hash;desired_hash=(Get-OperationSha256 ([string]$target.desired_content))})|Out-Null
+        }
+        $sidecars=@(Get-McpImplicitSidecarTargets $DesiredState)
+        foreach($sidecar in $sidecars){
+            $path=[IO.Path]::GetFullPath([string]$sidecar.path);$root=[IO.Path]::GetFullPath([string]$sidecar.root)
+            Need (Test-OperationPathWithinRoot $path $root) ("MCP sidecar_out_of_root：{0}" -f $path)
+            Need (-not (Test-McpTargetReparsePath $path $root)) ("MCP sidecar_reparse_forbidden：{0}" -f $path)
+            $exists=Test-Path -LiteralPath $path -PathType Leaf
+            $beforeHash=$(if($exists){Get-OperationSha256 (Get-ContentUtf8 $path)}else{$null})
+            $sidecar|Add-Member -NotePropertyName before_hash -NotePropertyValue $beforeHash -Force
+            $snapshot.Add([pscustomobject]@{path=$path;existed=$exists;bytes=$(if($exists){[IO.File]::ReadAllBytes($path)}else{[byte[]]::new(0)});before_hash=$beforeHash;desired_hash=(Get-OperationSha256 ([string]$sidecar.desired_content))})|Out-Null
+        }
+        foreach($target in @($DesiredState|Where-Object changed)){
+            Assert-McpDesiredStateFresh @($target) $ExpectedConfigRevision
+            if([string]$target.kind -eq 'codex_toml'){
+                $targetRoot=[IO.Path]::GetFullPath([string]$target.root)
+                foreach($sidecar in @($sidecars|Where-Object{[IO.Path]::GetFullPath([string]$_.root) -eq $targetRoot})){
+                    $exists=Test-Path -LiteralPath $sidecar.path -PathType Leaf
+                    if($null -eq $sidecar.before_hash){Need (-not $exists) ("MCP sidecar_created_since_lock：{0}" -f $sidecar.path)}
+                    else{Need $exists ("MCP sidecar_missing_since_lock：{0}" -f $sidecar.path);Need ((Get-OperationSha256 (Get-ContentUtf8 $sidecar.path)) -eq [string]$sidecar.before_hash) ("MCP sidecar_hash_stale：{0}" -f $sidecar.path)}
+                }
+            }
+            Write-McpDesiredTarget $target
+        }
+        $transactionSucceeded=$true
+        return [pscustomobject]@{pass=$true;writes=@($DesiredState|Where-Object changed).Count;snapshot=@($snapshot.ToArray());rollback_policy='managed_files_only_before_native_effects'}
+    }catch{
+        if($snapshot.Count -gt 0){Restore-McpManagedTargetSnapshot @($snapshot.ToArray())}
+        throw
+    }finally{
+        foreach($lock in @($lockEntries.ToArray())){$lock.stream.Dispose();if(Test-Path -LiteralPath $lock.path -PathType Leaf){Remove-Item -LiteralPath $lock.path -Force -ErrorAction SilentlyContinue}}
+        if(-not $transactionSucceeded){foreach($root in @($createdRoots.ToArray())|Sort-Object Length -Descending){Remove-McpCreatedRootIfEmpty $root}}
     }
 }
 
@@ -2543,22 +2696,28 @@ function 同步MCP {
             Ensure-GhAuthForGithubMcp $context.active_servers
         }
 
-        foreach ($target in @($context.desired_state)) {
-            if ($DryRun) { Write-Host ("DRYRUN：将写入 MCP 配置 -> {0}" -f [string]$target.path) }
-            else { Write-McpDesiredTarget $target }
-        }
+        $managedTransaction=$null
+        foreach ($target in @($context.desired_state)) { if ($DryRun) { Write-Host ("DRYRUN：将写入 MCP 配置 -> {0}" -f [string]$target.path) } }
+        if(-not $DryRun){$managedTransaction=Invoke-McpManagedTargetTransaction -DesiredState @($context.desired_state) -ExpectedConfigRevision ([string]$context.config_revision)}
 
-        Write-Host ("已同步 MCP 服务配置到 {0} 个目标。" -f @($context.desired_state).Count)
-        foreach ($pruneName in @($context.prune_names)) { Invoke-NativeMcpCleanup $pruneName }
-        Invoke-NativeMcpSync $context.active_servers
-        if (-not $DryRun) {
-            $attemptsParsed = 0
-            $intervalParsed = 0
-            $attempts = if ([int]::TryParse([string]$env:SKILLS_MCP_VERIFY_ATTEMPTS, [ref]$attemptsParsed)) { $attemptsParsed } else { 6 }
-            $intervalSeconds = if ([int]::TryParse([string]$env:SKILLS_MCP_VERIFY_INTERVAL_SECONDS, [ref]$intervalParsed)) { $intervalParsed } else { 3 }
-            if ($attempts -lt 1) { $attempts = 1 }
-            if ($intervalSeconds -lt 1) { $intervalSeconds = 1 }
-            Verify-McpAcrossCliWithRetry $context.roots $attempts $intervalSeconds
+        $nativeMutationEnabled=Should-RunNativeMcpSync
+        try{
+            Write-Host ("已同步 MCP 服务配置到 {0} 个目标。" -f @($context.desired_state).Count)
+            foreach ($pruneName in @($context.prune_names)) { Invoke-NativeMcpCleanup $pruneName }
+            Invoke-NativeMcpSync $context.active_servers
+            if (-not $DryRun) {
+                $attemptsParsed = 0
+                $intervalParsed = 0
+                $attempts = if ([int]::TryParse([string]$env:SKILLS_MCP_VERIFY_ATTEMPTS, [ref]$attemptsParsed)) { $attemptsParsed } else { 6 }
+                $intervalSeconds = if ([int]::TryParse([string]$env:SKILLS_MCP_VERIFY_INTERVAL_SECONDS, [ref]$intervalParsed)) { $intervalParsed } else { 3 }
+                if ($attempts -lt 1) { $attempts = 1 }
+                if ($intervalSeconds -lt 1) { $intervalSeconds = 1 }
+                Verify-McpAcrossCliWithRetry $context.roots $attempts $intervalSeconds
+            }
+        }catch{
+            if($null -ne $managedTransaction -and -not $nativeMutationEnabled){Restore-McpManagedTargetSnapshot @($managedTransaction.snapshot)}
+            elseif($null -ne $managedTransaction){Log 'MCP managed files were retained because opt-in native side effects may already have occurred and cannot be transactionally compensated.' 'WARN'}
+            throw
         }
         if (@($context.servers).Count -eq 0) { Write-Host "提示：当前 mcp_servers 为空，已将各目标写为空配置。" }
     } @{ command = "同步MCP" } -NoHost

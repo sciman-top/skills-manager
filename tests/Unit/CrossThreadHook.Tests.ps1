@@ -118,14 +118,17 @@ Describe 'Cross-thread PreToolUse guard' {
         }
     }
 
-    It 'blocks every cross-task handoff even when no follow-up prompt is supplied' {
-        foreach ($toolInput in @(
-            [ordered]@{ threadId = 'target-test'; followUpPrompt = 'take over this task' },
-            [ordered]@{ threadId = 'target-test'; followUpPrompt = '' },
-            [ordered]@{ threadId = 'target-test' }
-        )) {
-            $result = Invoke-CrossThreadHook -ToolName 'codex_app__handoff_thread' -ToolInput $toolInput
-            ($result.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+    It 'blocks every cross-task handoff spelling even when fields or follow-up prompt are absent' {
+        foreach ($toolName in @('handoff_thread', 'codex_app__handoff_thread', 'codex_app.handoff_thread')) {
+            foreach ($toolInput in @(
+                [ordered]@{ threadId = 'target-test'; followUpPrompt = 'take over this task' },
+                [ordered]@{ thread_id = 'target-test'; follow_up_prompt = '' },
+                [ordered]@{ threadId = 'target-test' },
+                [ordered]@{}
+            )) {
+                $result = Invoke-CrossThreadHook -ToolName $toolName -ToolInput $toolInput
+                ($result.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+            }
         }
     }
 
@@ -182,7 +185,8 @@ Describe 'Cross-thread PreToolUse guard' {
         foreach ($toolInput in @(
             [ordered]@{ mode = 'delete'; id = 'watch-interrupted-task-v1-target-thread-id-target-test' },
             [ordered]@{ mode = 'delete'; id = 'watch-interrupted-task-v1-target-thread-id-supervisor-test' },
-            [ordered]@{ mode = 'delete'; id = 'ordinary-automation' }
+            [ordered]@{ mode = 'delete'; id = 'ordinary-automation' },
+            [ordered]@{ mode = 'update'; id = 'watch-interrupted-task-v1-target-thread-id-target-test'; targetThreadId = 'target-test'; status = 'PAUSED'; prompt = $canonicalPrompt }
         )) {
             $blocked = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput $toolInput -SessionId 'supervisor-test' -TranscriptPath $fleetTranscript
             ($blocked.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
@@ -208,7 +212,13 @@ Describe 'Cross-thread PreToolUse guard' {
     }
 
     It 'does not mistake negation questions quotations or unbound targets for lifecycle authorization' {
-        foreach ($text in @('不要关闭当前任务守夜。', '为什么会出现“关闭守夜”？', '文档中写着关闭守夜。')) {
+        foreach ($text in @(
+            '不要关闭当前任务守夜。',
+            '请勿关闭当前任务守夜。',
+            '为什么会出现“关闭守夜”？',
+            '文档中写着关闭守夜。',
+            '请把“关闭守夜”写进文档。'
+        )) {
             $transcript = New-WatchTurnTranscript -Text $text
             $result = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode = 'delete'; id = 'watch-interrupted-task-v1-target-thread-id-target-test' }) -SessionId 'target-test' -TranscriptPath $transcript
             ($result.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
@@ -217,6 +227,9 @@ Describe 'Cross-thread PreToolUse guard' {
         $currentOnly = New-WatchTurnTranscript -Text '关闭当前任务守夜。'
         $otherTarget = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode = 'delete'; id = 'watch-interrupted-task-v1-target-thread-id-other-test' }) -SessionId 'target-test' -TranscriptPath $currentOnly
         ($otherTarget.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+
+        $missingTarget = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode = 'delete' }) -SessionId 'target-test' -TranscriptPath $currentOnly
+        ($missingTarget.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
     }
 
     It 'blocks ordinary turns that do not contain a direct watch lifecycle command' {
@@ -335,9 +348,23 @@ text(result);
             'await tools?.codex_app__send_message_to_thread({ threadId: "target-test", prompt: "blocked" });',
             'await tools["codex_app__send_message_to_thread"]({ threadId: "target-test", prompt: "blocked" });',
             'const sender = tools.codex_app__send_message_to_thread; await sender({ threadId: "target-test", prompt: "blocked" });',
-            'const name = "codex_app__automation_" + "update"; await tools[name]({ mode: "delete", id: "watch-interrupted-task-v1-target-thread-id-target-test" });'
+            'const name = "codex_app__automation_" + "update"; await tools[name]({ mode: "delete", id: "watch-interrupted-task-v1-target-thread-id-target-test" });',
+            'const t = tools; const name = "codex_app__automation_" + "update"; const mutate = t[name]; await mutate({ mode: "delete", id: "watch-interrupted-task-v1-target-thread-id-target-test" });',
+            'await tools["codex_app__automation_" + "update"]({ mode: "delete", id: "watch-interrupted-task-v1-target-thread-id-target-test" });',
+            'const suffix = "update"; await tools[`codex_app__automation_${suffix}`]({ mode: "delete", id: "watch-interrupted-task-v1-target-thread-id-target-test" });'
         )) {
             $result = Invoke-CrossThreadHook -ToolName 'exec' -ToolInput $source
+            ($result.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+        }
+    }
+
+    It 'blocks common shell execution wrappers around app-server thread send' {
+        foreach ($command in @(
+            'Invoke-Expression ''codex app-server request thread/send --thread target-test''',
+            'iex ''codex app-server request thread/send --thread target-test''',
+            'Start-Process codex -ArgumentList ''app-server request thread/send --thread target-test'''
+        )) {
+            $result = Invoke-CrossThreadHook -ToolName 'shell_command' -ToolInput ([ordered]@{ command = $command })
             ($result.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
         }
     }
@@ -346,7 +373,11 @@ text(result);
         $targetTranscript = New-CanonicalWatchTranscript -Role target -SessionId 'target-test'
         foreach ($source in @(
             'const result = await tools.codex_app__automation_update({ mode: "delete", id: "watch-interrupted-task-v1-target-thread-id-target-test" }); text(result);',
-            'const result = await tools.codex_app__automation_update({ mode: "delete", id: "watch-interrupted-task-v1-live-probe-code-mode" }); text(result);'
+            'const result = await tools.codex_app__automation_update({ mode: "delete", id: "watch-interrupted-task-v1-live-probe-code-mode" }); text(result);',
+            'await tools.codex_app__automation_update({ mode: "update", id: "watch-interrupted-task-v1-target-thread-id-target-test", status: "PAUSED" });',
+            'await tools.codex_app__automation_update({ mode: "update", id: "watch-interrupted-task-v1-target-thread-id-target-test", status: "ACTIVE" });',
+            'await tools.codex_app__automation_update({ mode: "update", id: "watch-interrupted-task-v1-target-thread-id-target-test" });',
+            'await tools.codex_app__list_threads({ status: "ACTIVE" }); await tools.codex_app__automation_update({ mode: "update", id: "watch-interrupted-task-v1-target-thread-id-target-test", status: "PAUSED" });'
         )) {
             $result = Invoke-CrossThreadHook -ToolName 'exec' -ToolInput $source -SessionId 'target-test' -TranscriptPath $targetTranscript
             ($result.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'

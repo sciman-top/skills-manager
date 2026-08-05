@@ -28,6 +28,77 @@ if ([int]$corpus.schema_version -ne 2 -or [string]$corpus.decision_owner -ne 'ho
 $config = Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json
 $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('skills-manager-routing-contract-{0}' -f [Guid]::NewGuid().ToString('N'))
 $manifestFile = Join-Path $fixtureRoot 'manifest.json'
+$findings = [Collections.Generic.List[object]]::new()
+$invalidInventoryCases = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+
+function Add-Finding([string]$CaseId, [string]$Code, [string]$Message) {
+    $findings.Add([pscustomobject]@{ case_id = $CaseId; code = $Code; message = $Message }) | Out-Null
+}
+
+function Add-InventoryNames([Collections.Generic.HashSet[string]]$Set, $Values) {
+    foreach ($value in @($Values)) {
+        $name = ([string]$value).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($name)) { $Set.Add($name) | Out-Null }
+    }
+}
+
+# The routing corpus is an expectation source, never an existence source. Build the
+# portable inventory from tracked configuration declarations before synthesizing files.
+$availableSkillNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+Add-InventoryNames $availableSkillNames $config.skill_projection.resident_names
+foreach ($property in @($config.skill_projection.profiles.PSObject.Properties)) {
+    Add-InventoryNames $availableSkillNames $property.Value.enabled_names
+}
+foreach ($property in @($config.skill_projection.discovery_catalog.domain_memberships.PSObject.Properties)) {
+    Add-InventoryNames $availableSkillNames $property.Value
+}
+Add-InventoryNames $availableSkillNames @($config.imports | ForEach-Object { [string]$_.name })
+
+$availableMcpNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+Add-InventoryNames $availableMcpNames @($config.mcp_servers | ForEach-Object { [string]$_.name })
+$hostOnlyKinds = @('plugin', 'app', 'connector', 'native_tool', 'tool')
+
+foreach ($case in @($corpus.cases)) {
+    $caseId = [string]$case.id
+    $externalRefs = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    if (-not [string]::IsNullOrWhiteSpace([string]$case.snapshot_path)) {
+        $snapshotFile = Resolve-RepoFile ([string]$case.snapshot_path)
+        if (Test-Path -LiteralPath $snapshotFile -PathType Leaf) {
+            $snapshot = Get-Content -LiteralPath $snapshotFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            foreach ($capability in @($snapshot.capabilities)) {
+                $externalRefs.Add(('{0}|{1}' -f ([string]$capability.kind).ToLowerInvariant(), [string]$capability.name)) | Out-Null
+            }
+        }
+    }
+    foreach ($field in @('expected_candidates', 'host_selected')) {
+        foreach ($item in @($case.$field)) {
+            $kind = ([string]$item.kind).Trim().ToLowerInvariant()
+            $name = ([string]$item.name).Trim()
+            $code = ''
+            $message = ''
+            if ($kind -eq 'skill' -and -not $availableSkillNames.Contains($name)) {
+                $code = 'unknown_skill_reference'
+                $message = ("{0} references skill '{1}', which is absent from the tracked portable skill inventory." -f $field, $name)
+            }
+            elseif ($kind -eq 'mcp' -and -not $availableMcpNames.Contains($name)) {
+                $code = 'unknown_mcp_reference'
+                $message = ("{0} references MCP '{1}', which is absent from skills.json.mcp_servers." -f $field, $name)
+            }
+            elseif ($kind -in $hostOnlyKinds -and -not $externalRefs.Contains(('{0}|{1}' -f $kind, $name))) {
+                $code = 'undeclared_host_capability'
+                $message = ("{0} references host-only capability '{1}|{2}' without an explicit runtime snapshot declaration." -f $field, $kind, $name)
+            }
+            elseif ($kind -notin @('skill', 'mcp') -and $kind -notin $hostOnlyKinds) {
+                $code = 'unsupported_capability_kind'
+                $message = ("{0} uses unsupported capability kind '{1}'." -f $field, $kind)
+            }
+            if (-not [string]::IsNullOrWhiteSpace($code)) {
+                Add-Finding $caseId $code $message
+                $invalidInventoryCases.Add($caseId) | Out-Null
+            }
+        }
+    }
+}
 
 function New-RoutingContractManifest {
     New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null
@@ -36,7 +107,7 @@ function New-RoutingContractManifest {
         foreach ($field in @('expected_candidates', 'forbidden_candidates', 'host_exclude')) {
             if ($case.PSObject.Properties.Match($field).Count -eq 0) { continue }
             foreach ($item in @($case.$field)) {
-                if ([string]$item.kind -eq 'skill' -and -not [string]::IsNullOrWhiteSpace([string]$item.name)) {
+                if ([string]$item.kind -eq 'skill' -and $availableSkillNames.Contains([string]$item.name)) {
                     $names.Add([string]$item.name) | Out-Null
                 }
             }
@@ -71,17 +142,12 @@ function New-RoutingContractManifest {
 
 New-RoutingContractManifest
 
-$findings = [Collections.Generic.List[object]]::new()
 $passedCases = 0
 $candidateRecallPassed = 0
 $policyPassed = 0
 $negativeConstraintViolations = 0
 $semanticAutoSelections = 0
 $routerMetadataCache = @{}
-
-function Add-Finding([string]$CaseId, [string]$Code, [string]$Message) {
-    $findings.Add([pscustomobject]@{ case_id = $CaseId; code = $Code; message = $Message }) | Out-Null
-}
 
 function Get-CapabilityRef($Item) {
     return ('{0}|{1}' -f ([string]$Item.kind).ToLowerInvariant(), [string]$Item.name)
@@ -119,6 +185,7 @@ function Invoke-RouterCase($Case, [string[]]$Candidate = @()) {
 try {
 foreach ($case in @($corpus.cases)) {
     $caseId = [string]$case.id
+    if ($invalidInventoryCases.Contains($caseId)) { continue }
     if ([string]::IsNullOrWhiteSpace($caseId) -or [string]::IsNullOrWhiteSpace([string]$case.query)) {
         Add-Finding $caseId 'case_invalid' 'Case id and query are required.'
         continue

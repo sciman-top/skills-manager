@@ -859,6 +859,66 @@ function Resolve-AuditApplySelections {
     }
 }
 
+function Test-AuditApplyWorkflowReceipt([string]$RecommendationsPath) {
+    $resolved = [IO.Path]::GetFullPath($RecommendationsPath)
+    $workflowPath = Get-AuditWorkflowReportPath $resolved
+    if (-not (Test-Path -LiteralPath $workflowPath -PathType Leaf)) {
+        return [pscustomobject]@{ pass=$false; code='validated_dry_run_required'; message='Apply requires a successful 校验预演 workflow receipt.'; path=$workflowPath }
+    }
+    try { $receipt = Get-ContentUtf8 $workflowPath | ConvertFrom-Json }
+    catch { return [pscustomobject]@{ pass=$false; code='validated_dry_run_invalid'; message=('Workflow receipt is invalid JSON: {0}' -f $_.Exception.Message); path=$workflowPath } }
+    $shapeValid = $receipt.schema_version -eq 1 -and [string]$receipt.workflow -eq 'recommendations_validate_dry_run' -and [bool]$receipt.success -and -not [bool]$receipt.persisted -and [string]$receipt.stages.preflight.status -eq 'passed' -and [string]$receipt.stages.dry_run.status -eq 'passed' -and [string]$receipt.stages.input_stability.status -eq 'passed' -and [bool]$receipt.input_stability.matched
+    if (-not $shapeValid) { return [pscustomobject]@{ pass=$false; code='validated_dry_run_incomplete'; message='Workflow receipt does not prove preflight, dry-run, and stable inputs.'; path=$workflowPath } }
+    if ([IO.Path]::GetFullPath([string]$receipt.recommendations_path) -ne $resolved -or [string]$receipt.recommendations_sha256 -ne [string](Get-FileContentHash $resolved)) {
+        return [pscustomobject]@{ pass=$false; code='validated_dry_run_stale'; message='Recommendations changed after the validated dry-run.'; path=$workflowPath }
+    }
+    $current = Get-AuditWorkflowInputState $resolved
+    $accepted = $receipt.input_stability.after_dry_run
+    if ($null -eq $accepted -or [string]$current.file_fingerprint -ne [string]$accepted.file_fingerprint -or [string]$current.target_repo_fingerprint -ne [string]$accepted.target_repo_fingerprint) {
+        return [pscustomobject]@{ pass=$false; code='validated_dry_run_stale'; message='Audit bundle or target repositories changed after the validated dry-run.'; path=$workflowPath }
+    }
+    return [pscustomobject]@{ pass=$true; code=''; message=''; path=$workflowPath; receipt=$receipt; current_state=$current }
+}
+
+function New-AuditApplyTransactionSnapshot {
+    $exists = Test-Path -LiteralPath $CfgPath -PathType Leaf
+    [byte[]]$bytes = if ($exists) { [IO.File]::ReadAllBytes([IO.Path]::GetFullPath($CfgPath)) } else { [byte[]]::new(0) }
+    return [pscustomobject][ordered]@{ config_path=[IO.Path]::GetFullPath($CfgPath); config_existed=[bool]$exists; config_bytes=$bytes }
+}
+
+function Restore-AuditApplyTransaction {
+    param($Snapshot,[bool]$SkillProjectionAttempted,[bool]$McpProjectionAttempted)
+    $errors = New-Object System.Collections.Generic.List[string]
+    try {
+        if ([bool]$Snapshot.config_existed) { Write-BytesAtomic -Path ([string]$Snapshot.config_path) -Bytes ([byte[]]$Snapshot.config_bytes) }
+        elseif ([IO.File]::Exists([string]$Snapshot.config_path)) { [IO.File]::Delete([string]$Snapshot.config_path) }
+    }
+    catch { $errors.Add(('config_restore_failed:{0}' -f $_.Exception.Message)) | Out-Null }
+    $configRestoreFailed = @($errors | Where-Object { $_.StartsWith('config_restore_failed:',[StringComparison]::Ordinal) }).Count -gt 0
+    if (-not $configRestoreFailed -and $SkillProjectionAttempted) {
+        try { 构建生效 }
+        catch { $errors.Add(('skill_projection_restore_failed:{0}' -f $_.Exception.Message)) | Out-Null }
+    }
+    if (-not $configRestoreFailed -and $McpProjectionAttempted) {
+        try { 同步MCP }
+        catch { $errors.Add(('mcp_projection_restore_failed:{0}' -f $_.Exception.Message)) | Out-Null }
+    }
+    return [pscustomobject][ordered]@{
+        status = $(if($errors.Count -eq 0){'restored'}else{'failed'})
+        config_restored = (-not $configRestoreFailed)
+        skill_projection_attempted = $SkillProjectionAttempted
+        mcp_projection_attempted = $McpProjectionAttempted
+        errors = @($errors.ToArray())
+        residual_cache_boundary = 'Downloaded import/vendor caches and removal backup directories are not deleted automatically; restored config makes unreferenced caches inactive.'
+    }
+}
+
+function Set-AuditApplyItemsRolledBack($Plan) {
+    foreach($item in @($Plan.items)+@($Plan.removal_candidates)+@($Plan.mcp_items)+@($Plan.mcp_removal_candidates)) {
+        if([string]$item.status -in @('installed','removed','added','updated','failed')){$item.status='rolled_back'}
+    }
+}
+
 function Invoke-AuditRecommendationsApply {
     param(
         [string]$RecommendationsPath,
@@ -885,6 +945,10 @@ function Invoke-AuditRecommendationsApply {
     $rec = Load-AuditRecommendations $RecommendationsPath
     $recommendationDir = Split-Path -Parent $RecommendationsPath
     if ([string]::IsNullOrWhiteSpace($recommendationDir)) { $recommendationDir = "." }
+    if ($Apply) {
+        $workflowReceipt = Test-AuditApplyWorkflowReceipt $RecommendationsPath
+        if (-not [bool]$workflowReceipt.pass) { throw ('{0}：{1}' -f [string]$workflowReceipt.code,[string]$workflowReceipt.message) }
+    }
     $sourcePolicy = Get-AuditSourceEvidencePolicy $recommendationDir
     $sourceCoverageCheck = Test-AuditRecommendationSourceCoveragePolicy $rec $sourcePolicy
     $decisionQualityPolicy = Get-AuditDecisionQualityPolicy $recommendationDir
@@ -1121,6 +1185,7 @@ function Invoke-AuditRecommendationsApply {
         do_not_install = @($plan.do_not_install)
         source_observations = @($plan.source_observations)
         rollback = @()
+        compensation = [pscustomobject]@{ status='not_required'; config_restored=$false; skill_projection_attempted=$false; mcp_projection_attempted=$false; errors=@() }
     }
 
     Write-AuditRecommendationSummary $plan $snapshotState $liveState
@@ -1142,6 +1207,11 @@ function Invoke-AuditRecommendationsApply {
     $selectedRemove = $selections.remove
     $selectedMcpAdd = $selections.mcp_add
     $selectedMcpRemove = $selections.mcp_remove
+    $workflowReceipt = Test-AuditApplyWorkflowReceipt $RecommendationsPath
+    if (-not [bool]$workflowReceipt.pass) { throw ('{0}：{1}' -f [string]$workflowReceipt.code,[string]$workflowReceipt.message) }
+    $transaction = New-AuditApplyTransactionSnapshot
+    $skillMutationAttempted = $false
+    $mcpMutationAttempted = $false
 
     try {
         foreach ($item in @($selectedAdd.items)) {
@@ -1149,6 +1219,7 @@ function Invoke-AuditRecommendationsApply {
             try {
                 Write-Host ("Installing recommended skill: {0}" -f $item.name) -ForegroundColor Cyan
                 $beforeCfg = LoadCfg
+                $skillMutationAttempted = $true
                 $ok = Add-ImportFromArgs $item.tokens -NoBuild
                 if (-not $ok) { throw ("推荐技能安装失败：{0}" -f $item.name) }
                 Ensure-AuditNewManualImportsMapped $beforeCfg | Out-Null
@@ -1170,6 +1241,7 @@ function Invoke-AuditRecommendationsApply {
         }
 
         if (@($selectedRemove.items).Count -gt 0) {
+            $skillMutationAttempted = $true
             Remove-AuditSelectedInstalledSkills $selectedRemove.items | Out-Null
             foreach ($item in @($selectedRemove.items)) {
                 $report.rollback += ("Re-add removed skill mapping/import for '{0}' if rollback is required." -f $item.name)
@@ -1178,6 +1250,7 @@ function Invoke-AuditRecommendationsApply {
 
         if (@($selectedMcpAdd.items).Count -gt 0 -or @($selectedMcpRemove.items).Count -gt 0) {
             try {
+                $mcpMutationAttempted = $true
                 Apply-AuditMcpSelections $selectedMcpAdd.items $selectedMcpRemove.items | Out-Null
                 foreach ($item in @($selectedMcpAdd.items)) {
                     if ([string]$item.status -eq "added" -or [string]$item.status -eq "updated") {
@@ -1246,19 +1319,25 @@ function Invoke-AuditRecommendationsApply {
         return [pscustomobject]$report
     }
     catch {
+        $originalFailure = $_
         if ($report.success) { $report.success = $false }
+        if($skillMutationAttempted -or $mcpMutationAttempted) {
+            $report.compensation = Restore-AuditApplyTransaction -Snapshot $transaction -SkillProjectionAttempted $skillMutationAttempted -McpProjectionAttempted $mcpMutationAttempted
+            if([string]$report.compensation.status -eq 'restored'){Set-AuditApplyItemsRolledBack $plan}
+        }
         $report.items = @($plan.items)
         $report.removal_candidates = @($plan.removal_candidates)
         $report.mcp_items = @($plan.mcp_items)
         $report.mcp_removal_candidates = @($plan.mcp_removal_candidates)
         $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
-        $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
+        $report.persisted = if([string]$report.compensation.status -eq 'restored'){$false}else{((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)}
         Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
         $evidencePath = Write-AuditRuntimeEvidence "apply-failed" $RecommendationsPath ([pscustomobject]$report) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`" --apply --yes")
         if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
             Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
         }
-        throw
+        if([string]$report.compensation.status -eq 'failed'){throw ('{0}; compensation_failed:{1}' -f $originalFailure.Exception.Message,(@($report.compensation.errors)-join '|'))}
+        throw $originalFailure
     }
 }
 

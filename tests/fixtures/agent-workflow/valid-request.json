@@ -124,7 +124,14 @@
       "task_id": "discover",
       "base_revision": "84cb53aa",
       "status": "verified",
-      "verification_receipt": "receipt:discover:84cb53aa"
+      "verification_receipt": {
+        "schema_version": 1,
+        "receipt_id": "verify-discover",
+        "verified_at": "2026-08-05T04:40:00Z",
+        "verifier": "host_ai",
+        "evidence_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "commands": ["pwsh -NoProfile -File tests/run.ps1"]
+      }
     }
   ],
   "requested_parallel_task_ids": ["implement", "document"],
@@ -134,6 +141,7 @@
       "requested_tier": "sol_medium",
       "user_override_tier": "luna_max",
       "rationale": "Host AI judged the implementation bounded and independently verifiable.",
+      "host_surface": "collaboration_spawn",
       "host_available_pairs": ["gpt-5.6-luna|max", "gpt-5.6-sol|medium", "gpt-5.6-sol|xhigh"],
       "local_outcomes": [
         {
