@@ -43,6 +43,7 @@ The write set is limited to the watch helper/prompt generators, their tests, the
 - The isolated red reproduction was `34 passed / 1 failed`; the corrected file passed `35 / 35`.
 - The first hosted CI run exposed a second non-hermetic acceptance test: `Phase1Acceptance.Tests.ps1` required three host-specific `D:\...` repositories. The clean Windows runner failed `895 passed / 1 failed` even though E2E passed `18 / 18`. The test now exercises the same three-repository, zero-write, and performance contract against the repository's `simple`, `nested`, and `conflict` fixtures; the focused file passes `4 / 4` locally.
 - Hosted run `31046390230` then proved that checkout and locked source reconstruction reached a clean generated `agent/`, but exposed a policy-boundary defect before the full gate: `imagegen`, `playwright`, and `screenshot` were host-provided capabilities incorrectly declared as required repository-local routing members. The routing policy now keeps those names outside `groups.members`, preserves host selection in the relevant selection policies, and continues to expose Playwright through the separate capability surface. A regression test failed before the correction (`10 / 11`) and passes after it (`11 / 11`).
+- Hosted run `31047934893` proved the routing correction and passed locked reconstruction, all `897` Unit and `18` E2E tests, and every contract before the final doctor JSON check. It then exposed that clean CI intentionally has no historical `sync_mcp` sample while the workflow injected a blocking threshold. The documented contract already requires `-WarnOnly` for this no-sample environment, so full CI now runs the structural doctor contract without that threshold and follows it with a dedicated `-SyncMcpThresholdMs 12000 -WarnOnly` observation. The workflow regression test failed before the correction (`1 / 2`) and passes after it (`2 / 2`).
 
 ## Verification evidence
 
@@ -51,7 +52,7 @@ The write set is limited to the watch helper/prompt generators, their tests, the
   - target recovery disposition: `14 passed / 0 failed`;
   - combined watch/cross-thread coverage: `62 passed / 0 failed`;
   - reference refresh safety: `2 passed / 0 failed`;
-  - CI workflow contract: `1 passed / 0 failed`;
+  - CI workflow contract: `2 passed / 0 failed`;
   - skill projection: `35 passed / 0 failed`;
   - skill routing policy boundary: `11 passed / 0 failed`, with skill integrity `107` and routing findings `0`.
 - The isolated worktree initially lacked ignored runtime source and generated-agent caches. The failure sequence was diagnostic rather than waived:
@@ -66,7 +67,7 @@ The write set is limited to the watch helper/prompt generators, their tests, the
   pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full
   ```
 
-  exited `0` after the hosted-CI hermeticity, locked-hydration, checkout-compatibility, and host-provided routing-boundary corrections. The timing receipt records Pester `4.10.1`, `897` Unit plus `18` E2E cases (`915 / 915` passed), and `suite_elapsed_ms=259074`. The full runner also passed build, repository hygiene, generated sync, 107-skill integrity, reference governance `29/7/3`, the 32-case non-watch activation corpus, routing with `0` findings, dependency/config/host/planning/PS7/Agent/doctor contracts, with `total_elapsed_ms=264540`.
+  exited `0` after the hosted-CI hermeticity, locked-hydration, checkout-compatibility, host-provided routing-boundary, and clean-runner performance-observation corrections. The final suite uses Pester `4.10.1` and passes `898` Unit plus `18` E2E cases (`916 / 916`). The full runner also passes build, repository hygiene, generated sync, 107-skill integrity, reference governance `29/7/3`, the 32-case non-watch activation corpus, routing with `0` findings, dependency/config/host/planning/PS7/Agent/doctor contracts.
 
 ## Truth boundary and remaining live acceptance
 
@@ -74,7 +75,7 @@ The write set is limited to the watch helper/prompt generators, their tests, the
 - No real shutdown was scheduled, cancelled, or executed. The 120-second shutdown path therefore remains intentionally untested as an external effect.
 - No watch automation was created, updated, paused, resumed, or deleted; no Goal was created, replaced, cleared, or completed.
 - No live hook was installed or re-trusted. The host may remain `soft_guard_only`, and specialized tool paths are not claimed to be absolutely isolated.
-- GitHub-hosted run `31043635015` proved the pinned Pester install step and then correctly failed the host-specific Phase1 test. Run `31044798776` proved the fixture correction (`896 / 896` Unit and `18 / 18` E2E) and then failed at skill-integrity because a clean checkout intentionally excludes generated `agent/`. Run `31045797982` exposed that checkout v7 auth cleanup with `persist-credentials:false` is incompatible with this repository's gitlink-without-`.gitmodules` layout, so that optional setting was removed. Run `31046390230` proved checkout compatibility and locked reconstruction through generated projection, then failed on the host-provided/local-member routing-policy mismatch described above. The workflow retains checkout v7 and the locked rebuild entry; a clean new-commit hosted receipt remains required for the routing correction and again after main integration.
+- GitHub-hosted run `31043635015` proved the pinned Pester install step and then correctly failed the host-specific Phase1 test. Run `31044798776` proved the fixture correction (`896 / 896` Unit and `18 / 18` E2E) and then failed at skill-integrity because a clean checkout intentionally excludes generated `agent/`. Run `31045797982` exposed that checkout v7 auth cleanup with `persist-credentials:false` is incompatible with this repository's gitlink-without-`.gitmodules` layout, so that optional setting was removed. Run `31046390230` proved checkout compatibility and locked reconstruction through generated projection, then failed on the host-provided/local-member routing-policy mismatch. Run `31047934893` proved that correction and reached the final doctor contract before exposing the no-sample performance-threshold mismatch described above. The workflow retains checkout v7 and the locked rebuild entry; a clean new-commit hosted receipt remains required for the observation correction and again after main integration.
 - The isolated runtime caches are ignored verification inputs and are not part of the commit.
 
 ## Rollback

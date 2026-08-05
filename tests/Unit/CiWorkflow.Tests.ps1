@@ -13,4 +13,10 @@ Describe 'GitHub CI workflow supply-chain contract' {
         $script:workflow | Should Match '(?s)Rebuild locked skill sources.*skills\.ps1 更新 -Locked.*Run repository full quality gate'
         $script:workflow | Should Not Match 'SkipPublisherCheck'
     }
+
+    It 'keeps sample-dependent sync MCP performance observational in clean CI' {
+        $script:workflow | Should Match '(?s)- name: Run repository full quality gate\s+shell: pwsh\s+run: \.\\scripts\\quality\\run-local-quality-gates\.ps1 -Profile full\s+- name: Observe sync MCP performance threshold'
+        $script:workflow | Should Match '(?s)- name: Observe sync MCP performance threshold\s+shell: pwsh\s+run: \.\\scripts\\quality\\check-doctor-json\.ps1 -SyncMcpThresholdMs 12000 -WarnOnly'
+        $script:workflow | Should Not Match '(?s)- name: Run repository full quality gate\s+shell: pwsh\s+env:'
+    }
 }
