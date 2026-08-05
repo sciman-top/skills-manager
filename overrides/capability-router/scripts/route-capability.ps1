@@ -8,6 +8,7 @@ param(
     [string]$CapabilitySnapshotPath = '',
     [string]$HostSnapshotPath = '',
     [string]$SessionSnapshotPath = '',
+    [string]$SessionIdentity = '',
     [ValidateRange(1, 10080)][int]$MaxSnapshotAgeMinutes = 60,
     [string[]]$SkillRoot = @(),
     [string[]]$DomainHint = @(),
@@ -132,9 +133,71 @@ function Get-CapabilityReference([string]$Text) {
 
 function Get-Key([string]$Kind, [string]$Name) { return ('{0}|{1}' -f $Kind.ToLowerInvariant(), $Name.ToLowerInvariant()) }
 
+function Get-TextSha256([string]$Value) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        return (($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Value)) | ForEach-Object { $_.ToString('x2') }) -join '')
+    }
+    finally { $sha.Dispose() }
+}
+
+function Get-FileSha256([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [IO.File]::OpenRead($Path)
+        try { return (($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) -join '') }
+        finally { $stream.Dispose() }
+    }
+    finally { $sha.Dispose() }
+}
+
+function Get-CatalogFingerprint($Catalog) {
+    $copy = $Catalog | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+    $copy.PSObject.Properties.Remove('catalog_fingerprint')
+    return Get-TextSha256 ($copy | ConvertTo-Json -Depth 20 -Compress)
+}
+
+function Test-TrueProperty($Value, [string]$Name) {
+    if ($null -eq $Value -or $Value.PSObject.Properties.Match($Name).Count -eq 0) { return $false }
+    return ($Value.$Name -is [bool]) -and [bool]$Value.$Name
+}
+
+function Test-SnapshotCapabilityCoverage($Coverage, [string]$Kind) {
+    switch ($Kind) {
+        'skill' { return Test-TrueProperty $Coverage 'skills' }
+        'mcp' { return Test-TrueProperty $Coverage 'mcp_servers' }
+        'app' { return (Test-TrueProperty $Coverage 'installed_apps') -or (Test-TrueProperty $Coverage 'app_catalog') }
+        'plugin' { return Test-TrueProperty $Coverage 'plugins' }
+        'connector' { return Test-TrueProperty $Coverage 'connectors' }
+        'native_tool' { return Test-TrueProperty $Coverage 'native_tools' }
+        'tool' { return Test-TrueProperty $Coverage 'tools' }
+        default { return $false }
+    }
+}
+
+$excludedResults = [Collections.Generic.List[object]]::new()
+$catalogStaleNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $catalogFile = Find-Catalog
 $catalog = if ($catalogFile) { Get-Content -LiteralPath $catalogFile -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 if ($null -ne $catalog -and [int]$catalog.schema_version -ne 1) { throw "unsupported capability catalog schema_version: $($catalog.schema_version)" }
+$catalogStatus = if ($catalogFile) { 'legacy_unverified' } else { 'not_provided' }
+$catalogFingerprint = ''
+if ($null -ne $catalog -and $catalog.PSObject.Properties.Match('catalog_fingerprint').Count -gt 0) {
+    $catalogFingerprint = ([string]$catalog.catalog_fingerprint).Trim().ToLowerInvariant()
+    $actualCatalogFingerprint = Get-CatalogFingerprint $catalog
+    if ($catalogFingerprint -notmatch '^[0-9a-f]{64}$' -or $actualCatalogFingerprint -ne $catalogFingerprint) {
+        $catalogStatus = 'stale'
+        foreach ($item in @($catalog.skills)) {
+            $name = ([string]$item.name).Trim()
+            if ([string]::IsNullOrWhiteSpace($name)) { continue }
+            $catalogStaleNames.Add($name) | Out-Null
+            $excludedResults.Add([pscustomobject]@{ kind = 'skill'; name = $name; reason = 'catalog_stale' }) | Out-Null
+        }
+        $catalog = $null
+    }
+    else { $catalogStatus = 'current' }
+}
 $catalogSkillRoot = if ($catalogFile) { [IO.Path]::GetFullPath((Split-Path (Split-Path $catalogFile -Parent) -Parent)) } else { '' }
 $manifestFile = Find-Manifest
 $manifest = if ($manifestFile) { Get-Content -LiteralPath $manifestFile -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
@@ -189,10 +252,35 @@ $activeNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordi
 if ($null -ne $catalog) {
     foreach ($item in @($catalog.skills)) {
         $relativePath = [string]$item.relative_path
-        if ([string]::IsNullOrWhiteSpace($relativePath) -or [IO.Path]::IsPathRooted($relativePath)) { continue }
+        $catalogName = ([string]$item.name).Trim()
+        if ([string]::IsNullOrWhiteSpace($relativePath) -or [IO.Path]::IsPathRooted($relativePath)) {
+            if (-not [string]::IsNullOrWhiteSpace($catalogName)) {
+                $catalogStaleNames.Add($catalogName) | Out-Null
+                $excludedResults.Add([pscustomobject]@{ kind = 'skill'; name = $catalogName; reason = 'catalog_stale' }) | Out-Null
+                $catalogStatus = 'stale'
+            }
+            continue
+        }
         $skillPath = [IO.Path]::GetFullPath((Join-Path (Split-Path $catalogFile -Parent) $relativePath))
+        $expectedEntrypointHash = ([string]$item.entrypoint_sha256).Trim().ToLowerInvariant()
+        $actualEntrypointHash = if (Test-Contained $skillPath $catalogSkillRoot) { Get-FileSha256 $skillPath } else { '' }
+        if ($expectedEntrypointHash -notmatch '^[0-9a-f]{64}$' -or $actualEntrypointHash -ne $expectedEntrypointHash) {
+            if (-not [string]::IsNullOrWhiteSpace($catalogName)) {
+                $catalogStaleNames.Add($catalogName) | Out-Null
+                $excludedResults.Add([pscustomobject]@{ kind = 'skill'; name = $catalogName; reason = 'catalog_stale' }) | Out-Null
+                $catalogStatus = 'stale'
+            }
+            continue
+        }
         $entry = Read-SkillMetadata $skillPath $catalogSkillRoot $false
-        if ($null -eq $entry -or -not [string]::Equals([string]$entry.name, [string]$item.name, [StringComparison]::OrdinalIgnoreCase)) { continue }
+        if ($null -eq $entry -or -not [string]::Equals([string]$entry.name, $catalogName, [StringComparison]::OrdinalIgnoreCase)) {
+            if (-not [string]::IsNullOrWhiteSpace($catalogName)) {
+                $catalogStaleNames.Add($catalogName) | Out-Null
+                $excludedResults.Add([pscustomobject]@{ kind = 'skill'; name = $catalogName; reason = 'catalog_stale' }) | Out-Null
+                $catalogStatus = 'stale'
+            }
+            continue
+        }
         if (-not [string]::IsNullOrWhiteSpace([string]$item.description)) { $entry.description = [string]$item.description }
         $entry | Add-Member -NotePropertyName load_side_effect -NotePropertyValue $(if ([string]::IsNullOrWhiteSpace([string]$item.load_side_effect)) { 'read_only' } else { [string]$item.load_side_effect }) -Force
         if ($entry.name -ne 'capability-router' -and $seen.Add((Get-Key 'skill' $entry.name))) { $entries.Add($entry) }
@@ -251,25 +339,69 @@ foreach ($entry in $entries) { $entryByKey[(Get-Key ([string]$entry.kind) ([stri
 $snapshotStatus = 'not_provided'
 $snapshotSource = ''
 $snapshotCapturedAt = $null
-$excludedResults = [Collections.Generic.List[object]]::new()
+$snapshotProducerStatus = ''
+$snapshotCoverage = $null
+$snapshotSourceErrors = @()
+$snapshotReason = ''
+$runtimeExcluded = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 if ($snapshotFile) {
     $snapshot = Get-Content -LiteralPath $snapshotFile -Raw -Encoding UTF8 | ConvertFrom-Json
     $snapshotItems = if ($snapshot.PSObject.Properties.Match('capabilities').Count -gt 0) { @($snapshot.capabilities) } else { @($snapshot) }
     $snapshotSource = if ($snapshot.PSObject.Properties.Match('source').Count -gt 0) { [string]$snapshot.source } else { 'caller-provided' }
-    $snapshotStatus = 'current'
-    if ($snapshot.PSObject.Properties.Match('captured_at').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshot.captured_at)) {
-        $snapshotCapturedAt = [DateTimeOffset]::Parse([string]$snapshot.captured_at)
-        if (([DateTimeOffset]::UtcNow - $snapshotCapturedAt).TotalMinutes -gt $MaxSnapshotAgeMinutes) { $snapshotStatus = 'stale' }
+    $snapshotProducerStatus = if ($snapshot.PSObject.Properties.Match('status').Count -gt 0) { ([string]$snapshot.status).Trim() } else { '' }
+    $snapshotCoverage = if ($snapshot.PSObject.Properties.Match('coverage').Count -gt 0) { $snapshot.coverage } else { $null }
+    $snapshotSourceErrors = if ($snapshot.PSObject.Properties.Match('source_errors').Count -gt 0) { @($snapshot.source_errors) } else { @() }
+    $snapshotStatus = 'invalid'
+    if ($snapshot.PSObject.Properties.Match('schema_version').Count -eq 0 -or [string]$snapshot.schema_version -ne '2') {
+        $snapshotReason = 'unsupported_schema'
+    }
+    elseif ($snapshot.PSObject.Properties.Match('read_only').Count -eq 0 -or -not ($snapshot.read_only -is [bool]) -or -not [bool]$snapshot.read_only) {
+        $snapshotReason = 'read_only_required'
+    }
+    elseif ($snapshotProducerStatus -notin @('complete', 'runtime_complete_catalog_partial', 'partial')) {
+        $snapshotReason = 'invalid_producer_status'
+    }
+    elseif ($null -eq $snapshotCoverage) {
+        $snapshotReason = 'coverage_required'
+    }
+    elseif ($snapshot.PSObject.Properties.Match('source_errors').Count -eq 0) {
+        $snapshotReason = 'source_errors_required'
+    }
+    elseif ($snapshot.PSObject.Properties.Match('captured_at').Count -eq 0 -or [string]::IsNullOrWhiteSpace([string]$snapshot.captured_at)) {
+        $snapshotReason = 'missing_captured_at'
+    }
+    else {
+        try { $snapshotCapturedAt = [DateTimeOffset]::Parse([string]$snapshot.captured_at) }
+        catch { $snapshotReason = 'invalid_captured_at' }
+        if ([string]::IsNullOrWhiteSpace($snapshotReason)) {
+            $now = [DateTimeOffset]::UtcNow
+            if ($snapshotCapturedAt -gt $now.AddMinutes(5)) {
+                $snapshotReason = 'future_captured_at'
+            }
+            elseif (($now - $snapshotCapturedAt).TotalMinutes -gt $MaxSnapshotAgeMinutes) {
+                $snapshotStatus = 'stale'
+                $snapshotReason = 'expired'
+            }
+            else {
+                $completeCoverage = $true
+                foreach ($coverageName in @('skills', 'installed_apps', 'app_catalog', 'mcp_servers')) {
+                    if (-not (Test-TrueProperty $snapshotCoverage $coverageName)) { $completeCoverage = $false; break }
+                }
+                $snapshotStatus = if ($snapshotProducerStatus -eq 'complete' -and $completeCoverage -and $snapshotSourceErrors.Count -eq 0) { 'current_complete' } else { 'current_partial' }
+            }
+        }
     }
     foreach ($capability in $snapshotItems) {
         $kind = ([string]$capability.kind).Trim().ToLowerInvariant()
         $name = ([string]$capability.name).Trim()
         if ($kind -notin @('skill', 'mcp', 'plugin', 'app', 'connector', 'native_tool', 'tool') -or [string]::IsNullOrWhiteSpace($name)) { continue }
-        if ($snapshotStatus -eq 'stale') {
-            $excludedResults.Add([pscustomobject]@{ kind = $kind; name = $name; reason = 'stale_snapshot' }) | Out-Null
+        $key = Get-Key $kind $name
+        $snapshotExclusionReason = if ($snapshotStatus -eq 'invalid') { 'invalid_snapshot' } elseif ($snapshotStatus -eq 'stale') { 'stale_snapshot' } elseif (-not (Test-SnapshotCapabilityCoverage $snapshotCoverage $kind)) { 'snapshot_coverage_missing' } else { '' }
+        if (-not [string]::IsNullOrWhiteSpace($snapshotExclusionReason)) {
+            $runtimeExcluded.Add($key) | Out-Null
+            $excludedResults.Add([pscustomobject]@{ kind = $kind; name = $name; reason = $snapshotExclusionReason }) | Out-Null
             continue
         }
-        $key = Get-Key $kind $name
         $availability = if ([string]::IsNullOrWhiteSpace([string]$capability.availability)) { 'unknown' } else { [string]$capability.availability }
         if ($capability.PSObject.Properties.Match('callable').Count -gt 0 -and -not [bool]$capability.callable) { $availability = 'not_callable' }
         if ($capability.PSObject.Properties.Match('accessible').Count -gt 0 -and -not [bool]$capability.accessible) { $availability = 'inaccessible' }
@@ -302,7 +434,9 @@ $currentProfile = if ($null -ne $manifest) { [string]$manifest.active_profile } 
 if ($null -ne $catalog) {
     foreach ($domain in @($catalog.domains)) {
         $set = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-        foreach ($name in @(Get-StringArray $domain.skill_names)) { $set.Add($name) | Out-Null }
+        foreach ($name in @(Get-StringArray $domain.skill_names)) {
+            if (-not $catalogStaleNames.Contains($name)) { $set.Add($name) | Out-Null }
+        }
         $profiles[[string]$domain.name] = $set
         $profileCatalog.Add([pscustomobject]@{ name = [string]$domain.name; purpose = [string]$domain.purpose; enabled_name_count = $set.Count; active = $false }) | Out-Null
     }
@@ -397,7 +531,7 @@ $discoverySeen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Or
 foreach ($entry in $entries) {
     if ($domainResolutionFailed) { continue }
     $key = Get-Key $entry.kind $entry.name
-    if ($hostExcluded.Contains($key)) { continue }
+    if ($hostExcluded.Contains($key) -or $runtimeExcluded.Contains($key)) { continue }
     $include = $false
     if ($entry.kind -eq 'skill') {
         foreach ($hint in $validHints) { if ($profiles[$hint].Contains([string]$entry.name)) { $include = $true; break } }
@@ -423,7 +557,7 @@ foreach ($ref in @($requestedRefs)) {
     $matches = if ([string]::IsNullOrWhiteSpace([string]$ref.kind)) { @($entries | Where-Object { $_.name -eq $ref.name }) } else { @($entries | Where-Object { $_.kind -eq $ref.kind -and $_.name -eq $ref.name }) }
     foreach ($entry in $matches) {
         $key = Get-Key $entry.kind $entry.name
-        if (-not $hostExcluded.Contains($key) -and $discoverySeen.Add($key)) { $discovery.Add((Convert-ToPublicEntry $entry)) | Out-Null }
+        if (-not $hostExcluded.Contains($key) -and -not $runtimeExcluded.Contains($key) -and $discoverySeen.Add($key)) { $discovery.Add((Convert-ToPublicEntry $entry)) | Out-Null }
     }
 }
 $availableCandidateCount = $discovery.Count
@@ -440,7 +574,7 @@ foreach ($ref in @($requestedRefs | Select-Object -First 3)) {
     }
     foreach ($entry in $matches) {
         $key = Get-Key $entry.kind $entry.name
-        if ($hostExcluded.Contains($key)) { continue }
+        if ($hostExcluded.Contains($key) -or $runtimeExcluded.Contains($key)) { continue }
         if ($selectedSeen.Add($key)) { $selected.Add((Convert-ToPublicEntry $entry)) | Out-Null }
     }
 }
@@ -489,11 +623,69 @@ $activationPlan = foreach ($item in $selected) {
     }
 }
 
-$session = if ($sessionFile) { Get-Content -LiteralPath $sessionFile -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
+$session = $null
+$sessionStatus = 'not_provided'
+$sessionReason = ''
+$sessionCapturedAt = $null
+$sessionSnapshotIdentity = ''
+if ($sessionFile) {
+    $sessionCandidate = Get-Content -LiteralPath $sessionFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    $sessionStatus = 'invalid'
+    $sessionSnapshotIdentity = if ($sessionCandidate.PSObject.Properties.Match('session_id').Count -gt 0) { [string]$sessionCandidate.session_id } else { '' }
+    if ($sessionCandidate.PSObject.Properties.Match('schema_version').Count -eq 0 -or [string]$sessionCandidate.schema_version -ne '2') {
+        $sessionStatus = 'legacy_unverified'
+        $sessionReason = 'unsupported_schema'
+    }
+    elseif ($sessionCandidate.PSObject.Properties.Match('read_only').Count -eq 0 -or -not ($sessionCandidate.read_only -is [bool]) -or -not [bool]$sessionCandidate.read_only) {
+        $sessionReason = 'read_only_required'
+    }
+    elseif ([string]::IsNullOrWhiteSpace($SessionIdentity) -or [string]::IsNullOrWhiteSpace($sessionSnapshotIdentity)) {
+        $sessionReason = 'session_identity_required'
+    }
+    elseif (-not [string]::Equals($SessionIdentity, $sessionSnapshotIdentity, [StringComparison]::Ordinal)) {
+        $sessionStatus = 'foreign_session'
+        $sessionReason = 'session_identity_mismatch'
+    }
+    elseif ($sessionCandidate.PSObject.Properties.Match('loaded').Count -eq 0) {
+        $sessionReason = 'loaded_inventory_required'
+    }
+    elseif ($sessionCandidate.PSObject.Properties.Match('captured_at').Count -eq 0 -or [string]::IsNullOrWhiteSpace([string]$sessionCandidate.captured_at)) {
+        $sessionReason = 'missing_captured_at'
+    }
+    else {
+        try { $sessionCapturedAt = [DateTimeOffset]::Parse([string]$sessionCandidate.captured_at) }
+        catch { $sessionReason = 'invalid_captured_at' }
+        if ([string]::IsNullOrWhiteSpace($sessionReason)) {
+            $now = [DateTimeOffset]::UtcNow
+            if ($sessionCapturedAt -gt $now.AddMinutes(5)) {
+                $sessionReason = 'future_captured_at'
+            }
+            elseif (($now - $sessionCapturedAt).TotalMinutes -gt $MaxSnapshotAgeMinutes) {
+                $sessionStatus = 'stale'
+                $sessionReason = 'expired'
+            }
+            else {
+                $sessionStatus = 'current'
+                foreach ($loadedItem in @($sessionCandidate.loaded | Where-Object { [string]$_.kind -eq 'skill' })) {
+                    $loadedKey = Get-Key 'skill' ([string]$loadedItem.name)
+                    $expectedHash = ([string]$loadedItem.entrypoint_sha256).Trim().ToLowerInvariant()
+                    $currentEntry = if ($entryByKey.ContainsKey($loadedKey)) { $entryByKey[$loadedKey] } else { $null }
+                    $currentHash = if ($null -ne $currentEntry -and -not [string]::IsNullOrWhiteSpace([string]$currentEntry.path)) { Get-FileSha256 ([string]$currentEntry.path) } else { '' }
+                    if ($expectedHash -notmatch '^[0-9a-f]{64}$' -or $currentHash -ne $expectedHash) {
+                        $sessionStatus = 'stale'
+                        $sessionReason = 'entrypoint_mismatch'
+                        break
+                    }
+                }
+                if ($sessionStatus -eq 'current') { $session = $sessionCandidate }
+            }
+        }
+    }
+}
 $reuse = [Collections.Generic.List[object]]::new()
 $load = [Collections.Generic.List[object]]::new()
 foreach ($item in $selected) {
-    $loadedMatch = if ($null -eq $session) { @() } else { @($session.loaded | Where-Object { [string]$_.kind -eq [string]$item.kind -and [string]$_.name -eq [string]$item.name }) }
+    $loadedMatch = if ($null -eq $session -or [string]$item.kind -ne 'skill') { @() } else { @($session.loaded | Where-Object { [string]$_.kind -eq [string]$item.kind -and [string]$_.name -eq [string]$item.name }) }
     if ($loadedMatch.Count -gt 0) { $reuse.Add([pscustomobject]@{ kind = $item.kind; name = $item.name }) | Out-Null }
     else { $load.Add([pscustomobject]@{ kind = $item.kind; name = $item.name }) | Out-Null }
 }
@@ -539,6 +731,7 @@ $capabilityGraph = [ordered]@{
     intents = @()
     manifest_path = $manifestFile
     catalog_path = $catalogFile
+    catalog = [ordered]@{ status = $catalogStatus; fingerprint = $catalogFingerprint; path = $catalogFile }
     policy_path = $policyFile
     config_path = $configFile
     current_profile = $currentProfile
@@ -546,7 +739,16 @@ $capabilityGraph = [ordered]@{
     discovery_architecture = 'hierarchical_domains_v1'
     discovery_domains = @($profileCatalog | Sort-Object name)
     profile_catalog = @($profileCatalog | Sort-Object name)
-    host_snapshot = [ordered]@{ status = $snapshotStatus; source = $snapshotSource; captured_at = $snapshotCapturedAt; path = $snapshotFile }
+    host_snapshot = [ordered]@{
+        status = $snapshotStatus
+        reason = $snapshotReason
+        producer_status = $snapshotProducerStatus
+        source = $snapshotSource
+        captured_at = $snapshotCapturedAt
+        coverage = $snapshotCoverage
+        source_errors = @($snapshotSourceErrors)
+        path = $snapshotFile
+    }
     retrieval = [ordered]@{
         strategy = 'hierarchical_domain_discovery'
         domain_hints = @($validHints)
@@ -558,7 +760,8 @@ $capabilityGraph = [ordered]@{
         top_candidates = @()
     }
     capability_graph = $capabilityGraph
-    session_plan = [ordered]@{ reuse = @($reuse); load = @($load); release = @(); state_update = [ordered]@{ semantic_owner = 'host_ai' } }
+    session_snapshot = [ordered]@{ status = $sessionStatus; reason = $sessionReason; session_id = $sessionSnapshotIdentity; captured_at = $sessionCapturedAt; path = $sessionFile }
+    session_plan = [ordered]@{ reuse = @($reuse); load = @($load); release = @(); state_update = [ordered]@{ semantic_owner = 'host_ai'; reuse_verified = ($sessionStatus -eq 'current') } }
     preheat_recommendation = [ordered]@{ profile = $profileRecommendation; add = @($load); remove = @(); apply = $false }
     selection_mode = $selectionMode
     selected = @($selected)

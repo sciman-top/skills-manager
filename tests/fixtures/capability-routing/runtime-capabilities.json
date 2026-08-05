@@ -1,5 +1,18 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "captured_at": "__CURRENT__",
+  "source": "routing-contract-fixture",
+  "read_only": true,
+  "status": "complete",
+  "coverage": {
+    "skills": true,
+    "installed_apps": true,
+    "app_catalog": true,
+    "mcp_servers": true,
+    "plugins": true,
+    "native_tools": true
+  },
+  "source_errors": [],
   "capabilities": [
     { "kind": "skill", "name": "debug:dotnet", "description": "Host-visible .NET debugger.", "availability": "disabled", "side_effect": "read_only" },
     { "kind": "mcp", "name": "openaiDeveloperDocs", "description": "Host MCP status for official OpenAI documentation.", "availability": "needs_auth", "side_effect": "external_read" },

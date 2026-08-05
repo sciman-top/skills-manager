@@ -282,6 +282,15 @@ function Add-CapabilityCatalogMembership([hashtable]$Membership, [string]$SkillN
     $Membership[$SkillName].Add($DomainName) | Out-Null
 }
 
+function Get-CapabilityCatalogTextSha256([string]$Value) {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Value)
+        return (($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') }) -join '')
+    }
+    finally { $sha.Dispose() }
+}
+
 function New-CapabilityRouterCatalogDocument($projectionCfg) {
     Need ($null -ne $projectionCfg) 'skill_projection 配置为空'
     Need ($projectionCfg.PSObject.Properties.Match('managed_source_path').Count -gt 0) 'skill_projection 缺少 managed_source_path'
@@ -358,6 +367,7 @@ function New-CapabilityRouterCatalogDocument($projectionCfg) {
                 name = $name
                 description = [string]$meta.description
                 relative_path = $relativeFromRouter
+                entrypoint_sha256 = Get-FileContentHash ([string]$item.file)
                 domains = @($membership[$name] | Sort-Object)
                 load_side_effect = 'read_only'
                 routing_rules = @($rules)
@@ -376,7 +386,7 @@ function New-CapabilityRouterCatalogDocument($projectionCfg) {
     }
 
     $capabilities = if ($null -ne $policy) { @($policy.capabilities | Sort-Object kind, name) } else { @() }
-    return [ordered]@{
+    $catalog = [ordered]@{
         schema_version = 1
         decision_owner = 'host_ai'
         semantic_routing_performed = $false
@@ -384,6 +394,8 @@ function New-CapabilityRouterCatalogDocument($projectionCfg) {
         skills = @($skills.ToArray() | Sort-Object name)
         capabilities = $capabilities
     }
+    $catalog.catalog_fingerprint = Get-CapabilityCatalogTextSha256 ($catalog | ConvertTo-Json -Depth 20 -Compress)
+    return $catalog
 }
 
 function Sync-CapabilityRouterCatalog($projectionCfg) {

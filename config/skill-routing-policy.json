@@ -41,18 +41,18 @@
   "groups": [
     {
       "id": "capability-selection",
-      "purpose": "Let the host AI select visible skills natively; provide profile-scoped cold discovery and deterministic safety policy only when no visible capability matches.",
+      "purpose": "Let the host AI select visible skills natively; provide portable domain-scoped cold discovery and deterministic safety policy only when no visible capability matches.",
       "router": "",
       "selection_policy": "host semantic judgment owns relevance and negative constraints; the fallback script never performs lexical semantic ranking and never mutates profile state",
       "members": [
-        { "name": "capability-router", "role": "reference", "activation": "explicit capability discovery, missing visible capability, or cross-profile cold discovery" }
+        { "name": "capability-router", "role": "reference", "activation": "explicit capability discovery, missing visible capability, or portable domain-scoped cold discovery" }
       ]
     },
     {
       "id": "development-flow",
       "purpose": "Use GPT-5.6 and Codex native planning, goal tracking, review, and agent controls for routine work; profiles expose narrow task capabilities but never replace native task orchestration.",
       "router": "",
-      "selection_policy": "select the task profile before starting a new Codex task; within a running task let the host AI invoke visible matching skills natively, then use profile-scoped discovery only for a real reachability gap; never imply hot profile switching, mandatory workflows, or automatic delegation",
+      "selection_policy": "select the task profile before starting a new Codex task; within a running task let the host AI invoke visible matching skills natively, then use portable domain-scoped discovery only for a real reachability gap; never imply hot profile switching, mandatory workflows, or automatic delegation",
       "members": [
         { "name": "brainstorming", "role": "workflow", "activation": "the user explicitly requests exploratory design or product intent remains materially ambiguous" },
         { "name": "planning-and-task-breakdown", "role": "workflow", "activation": "the user explicitly needs a durable implementation breakdown beyond native Plan mode" },

@@ -227,6 +227,10 @@ Describe 'Native-first capability discovery and policy' {
             schema_version = 2
             captured_at = '2020-01-01T00:00:00Z'
             source = 'codex-app-server'
+            read_only = $true
+            status = 'complete'
+            coverage = [ordered]@{ skills = $true; installed_apps = $true; app_catalog = $true; mcp_servers = $true }
+            source_errors = @()
             capabilities = @([ordered]@{ kind = 'app'; name = 'gmail'; description = 'Read Gmail'; availability = 'available'; side_effect = 'external_read' })
         } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $snapshotPath -Encoding UTF8
 
@@ -235,6 +239,96 @@ Describe 'Native-first capability discovery and policy' {
         $result.host_snapshot.status | Should Be 'stale'
         @($result.selected.name) | Should Not Contain 'gmail'
         @($result.excluded | Where-Object { $_.name -eq 'gmail' -and $_.reason -eq 'stale_snapshot' }).Count | Should Be 1
+    }
+
+    It 'Fails closed when a host snapshot omits its capture time' {
+        $snapshotPath = Join-Path $TestDrive 'missing-capture-time.json'
+        [ordered]@{
+            schema_version = 2
+            source = 'codex-app-server'
+            read_only = $true
+            status = 'complete'
+            coverage = [ordered]@{ skills = $true; installed_apps = $true; app_catalog = $true; mcp_servers = $true }
+            source_errors = @()
+            capabilities = @([ordered]@{ kind = 'app'; name = 'gmail'; availability = 'available'; side_effect = 'external_read' })
+        } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $snapshotPath -Encoding UTF8
+
+        $result = Invoke-TestRouter '用 gmail 总结未读邮件' @{ HostSnapshotPath = $snapshotPath; Candidate = @('app|gmail') }
+
+        $result.host_snapshot.status | Should Be 'invalid'
+        @($result.selected.name) | Should Not Contain 'gmail'
+        @($result.excluded | Where-Object { $_.name -eq 'gmail' -and $_.reason -eq 'invalid_snapshot' }).Count | Should Be 1
+    }
+
+    It 'Fails closed when a host snapshot capture time is beyond clock-skew tolerance' {
+        $snapshotPath = Join-Path $TestDrive 'future-snapshot.json'
+        [ordered]@{
+            schema_version = 2
+            captured_at = [DateTimeOffset]::UtcNow.AddMinutes(10).ToString('o')
+            source = 'codex-app-server'
+            read_only = $true
+            status = 'complete'
+            coverage = [ordered]@{ skills = $true; installed_apps = $true; app_catalog = $true; mcp_servers = $true }
+            source_errors = @()
+            capabilities = @([ordered]@{ kind = 'app'; name = 'gmail'; availability = 'available'; side_effect = 'external_read' })
+        } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $snapshotPath -Encoding UTF8
+
+        $result = Invoke-TestRouter '用 gmail 总结未读邮件' @{ HostSnapshotPath = $snapshotPath; Candidate = @('app|gmail') }
+
+        $result.host_snapshot.status | Should Be 'invalid'
+        $result.host_snapshot.reason | Should Be 'future_captured_at'
+        @($result.selected.name) | Should Not Contain 'gmail'
+    }
+
+    It 'Fails closed when a host snapshot schema or read-only contract is invalid' {
+        $snapshotPath = Join-Path $TestDrive 'invalid-envelope.json'
+        [ordered]@{
+            schema_version = 1
+            captured_at = [DateTimeOffset]::UtcNow.ToString('o')
+            source = 'codex-app-server'
+            read_only = $false
+            status = 'complete'
+            coverage = [ordered]@{ skills = $true; installed_apps = $true; app_catalog = $true; mcp_servers = $true }
+            source_errors = @()
+            capabilities = @([ordered]@{ kind = 'skill'; name = 'plugin-only-skill'; availability = 'available'; side_effect = 'read_only' })
+        } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $snapshotPath -Encoding UTF8
+
+        $result = Invoke-TestRouter '使用插件技能' @{ HostSnapshotPath = $snapshotPath; Candidate = @('skill|plugin-only-skill') }
+
+        $result.host_snapshot.status | Should Be 'invalid'
+        $result.host_snapshot.reason | Should Be 'unsupported_schema'
+        @($result.selected.name) | Should Not Contain 'plugin-only-skill'
+    }
+
+    It 'Preserves partial producer truth and consumes coverage by capability kind' {
+        $snapshotPath = Join-Path $TestDrive 'partial-snapshot.json'
+        [ordered]@{
+            schema_version = 2
+            captured_at = [DateTimeOffset]::UtcNow.ToString('o')
+            source = 'codex-app-server'
+            read_only = $true
+            status = 'partial'
+            coverage = [ordered]@{ skills = $true; installed_apps = $true; app_catalog = $false; mcp_servers = $false }
+            source_errors = @([ordered]@{ request_id = 4; message = 'MCP status unavailable' })
+            capabilities = @(
+                [ordered]@{ kind = 'skill'; name = 'plugin-only-skill'; availability = 'available'; side_effect = 'read_only' },
+                [ordered]@{ kind = 'mcp'; name = 'openaiDeveloperDocs'; availability = 'available'; side_effect = 'external_read' }
+            )
+        } | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath $snapshotPath -Encoding UTF8
+
+        $result = Invoke-TestRouter '使用插件技能并查询官方文档' @{
+            HostSnapshotPath = $snapshotPath
+            Candidate = @('skill|plugin-only-skill', 'mcp|openaiDeveloperDocs')
+        }
+
+        $result.host_snapshot.status | Should Be 'current_partial'
+        $result.host_snapshot.producer_status | Should Be 'partial'
+        $result.host_snapshot.coverage.skills | Should Be $true
+        $result.host_snapshot.coverage.mcp_servers | Should Be $false
+        @($result.host_snapshot.source_errors).Count | Should Be 1
+        @($result.selected.name) | Should Contain 'plugin-only-skill'
+        @($result.selected.name) | Should Not Contain 'openaiDeveloperDocs'
+        @($result.excluded | Where-Object { $_.name -eq 'openaiDeveloperDocs' -and $_.reason -eq 'snapshot_coverage_missing' }).Count | Should Be 1
     }
 
     It 'Fails closed when every explicitly requested discovery domain is unknown' {
@@ -270,6 +364,10 @@ Describe 'Native-first capability discovery and policy' {
             schema_version = 2
             captured_at = [DateTimeOffset]::UtcNow.ToString('o')
             source = 'codex-app-server'
+            read_only = $true
+            status = 'complete'
+            coverage = [ordered]@{ skills = $true; installed_apps = $true; app_catalog = $true; mcp_servers = $true }
+            source_errors = @()
             capabilities = @(
                 [ordered]@{ kind = 'skill'; name = 'debug:dotnet'; description = 'Host-visible .NET debugger.'; availability = 'disabled'; side_effect = 'read_only' },
                 [ordered]@{ kind = 'skill'; name = 'plugin-only-skill'; description = 'Host plugin skill.'; availability = 'available'; side_effect = 'read_only' },
@@ -286,21 +384,71 @@ Describe 'Native-first capability discovery and policy' {
         $debugCandidate = @($result.retrieval.candidates | Where-Object { $_.kind -eq 'skill' -and $_.name -eq 'debug:dotnet' })[0]
         $debugCandidate.description | Should Be 'Host-visible .NET debugger.'
         $debugCandidate.availability | Should Be 'disabled'
+        $result.host_snapshot.status | Should Be 'current_complete'
         @($result.activation_plan | Where-Object name -eq 'debug:dotnet')[0].action | Should Be 'request_activation'
         @($result.activation_plan | Where-Object name -eq 'plugin-only-skill')[0].action | Should Be 'use_active_skill'
         @($result.activation_plan | Where-Object name -eq 'openaiDeveloperDocs')[0].action | Should Be 'request_mcp_activation'
     }
 
-    It 'Reuses an already loaded host-selected capability without inventing a task domain' {
+    It 'Treats a legacy session snapshot as unverified advice' {
         $sessionPath = Join-Path $TestDrive 'session.json'
         [ordered]@{ schema_version = 1; task_domain = 'legacy-value'; loaded = @([ordered]@{ kind = 'skill'; name = 'debug:dotnet' }) } |
             ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $sessionPath -Encoding UTF8
 
         $result = Invoke-TestRouter '继续诊断 WPF .NET 启动失败' @{ ProfileHint = @('dotnet'); Candidate = @('skill|debug:dotnet'); SessionSnapshotPath = $sessionPath }
 
-        @($result.session_plan.reuse.name) | Should Contain 'debug:dotnet'
+        @($result.session_plan.reuse.name) | Should Not Contain 'debug:dotnet'
+        @($result.session_plan.load.name) | Should Contain 'debug:dotnet'
+        $result.session_snapshot.status | Should Be 'legacy_unverified'
         $result.preheat_recommendation.profile | Should Be 'dotnet'
         $result.preheat_recommendation.apply | Should Be $false
         $result.writes_performed | Should Be $false
+    }
+
+    It 'Reuses only a fresh same-session skill whose entrypoint hash still matches' {
+        $sessionPath = Join-Path $TestDrive 'current-session.json'
+        [ordered]@{
+            schema_version = 2
+            captured_at = [DateTimeOffset]::UtcNow.ToString('o')
+            read_only = $true
+            session_id = 'session-a'
+            loaded = @([ordered]@{
+                    kind = 'skill'
+                    name = 'debug:dotnet'
+                    entrypoint_sha256 = (Get-FileHash -LiteralPath $debug.path -Algorithm SHA256).Hash.ToLowerInvariant()
+                })
+        } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $sessionPath -Encoding UTF8
+
+        $current = Invoke-TestRouter '继续诊断 WPF .NET 启动失败' @{
+            ProfileHint = @('dotnet')
+            Candidate = @('skill|debug:dotnet')
+            SessionSnapshotPath = $sessionPath
+            SessionIdentity = 'session-a'
+        }
+        $foreign = Invoke-TestRouter '继续诊断 WPF .NET 启动失败' @{
+            ProfileHint = @('dotnet')
+            Candidate = @('skill|debug:dotnet')
+            SessionSnapshotPath = $sessionPath
+            SessionIdentity = 'session-b'
+        }
+        $staleSnapshot = Get-Content -LiteralPath $sessionPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $staleSnapshot.loaded[0].entrypoint_sha256 = ('0' * 64)
+        $staleSnapshot | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $sessionPath -Encoding UTF8
+        $stale = Invoke-TestRouter '继续诊断 WPF .NET 启动失败' @{
+            ProfileHint = @('dotnet')
+            Candidate = @('skill|debug:dotnet')
+            SessionSnapshotPath = $sessionPath
+            SessionIdentity = 'session-a'
+        }
+
+        $current.session_snapshot.status | Should Be 'current'
+        @($current.session_plan.reuse.name) | Should Contain 'debug:dotnet'
+        @($current.session_plan.load.name) | Should Not Contain 'debug:dotnet'
+        $foreign.session_snapshot.status | Should Be 'foreign_session'
+        @($foreign.session_plan.reuse.name) | Should Not Contain 'debug:dotnet'
+        @($foreign.session_plan.load.name) | Should Contain 'debug:dotnet'
+        $stale.session_snapshot.status | Should Be 'stale'
+        $stale.session_snapshot.reason | Should Be 'entrypoint_mismatch'
+        @($stale.session_plan.reuse.name) | Should Not Contain 'debug:dotnet'
     }
 }

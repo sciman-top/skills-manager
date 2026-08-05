@@ -1,6 +1,6 @@
 ---
 name: capability-router
-description: Mandatory read-only cold discovery when no visible skill or native tool matches architecture/domain, coding/test, existing marketing-copy or document editing, MCP/database, or migration work. Skip factual Q&A, translation, math, read-only existing-code explanation without change/diagnosis/review, and requests already covered by visible capabilities; host AI owns semantic selection.
+description: Use only when a specialized architecture/domain, coding/test, existing copy or document editing, MCP/database, or migration request has no visible matching skill or callable native tool. Do not use for factual Q&A, translation, math, read-only code explanation, or requests already covered by a visible capability; host AI owns semantic selection.
 ---
 
 # Native-First Hierarchical Capability Discovery
@@ -36,7 +36,7 @@ Prefer the host's native skill and tool selection. This compatibility skill no l
    - `use_active_skill` or `load_skill`: `load_allowed` authorizes only reading the selected `SKILL.md`; then apply its ordinary trigger and safety rules. It never pre-authorizes repository writes, external actions, publication, or configuration changes.
    - `use_available_mcp` or `use_available_capability`: use only the surfaced callable capability.
    - `execution_policy=approval_required`, `request_approval`, `request_mcp_activation`, or `request_activation`: keep the actual operation behind the required authorization or host activation step.
-6. Reuse compatible items in `session_plan.reuse`. Domain hints are read-only index partitions, not active-profile changes. Treat `preheat_recommendation` as advice for a future task boundary; never hot-switch a profile or restart the current task.
+6. Reuse only items in `session_plan.reuse` whose `session_snapshot.status=current`. Verified reuse requires the caller to pass `-SessionIdentity` and a schema-v2, fresh, read-only session snapshot with the same `session_id`; every loaded skill must retain the current `SKILL.md` SHA-256. Legacy, foreign, stale, or mismatched snapshots fall back to `session_plan.load`. Domain hints are read-only index partitions, not active-profile changes. Treat `preheat_recommendation` as advice for a future task boundary; never hot-switch a profile or restart the current task.
 
 Only explicit `$skill`/`@skill` mentions may go directly to policy validation. An unsigiled capability name remains ordinary natural language—even when hyphenated or namespaced—because it may appear inside a negation. The script reports `decision_owner=host_ai`, `semantic_routing_performed=false`, and never assigns semantic confidence.
 

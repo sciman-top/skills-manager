@@ -198,16 +198,28 @@ Describe "Skill projection" {
                 $first = Sync-CapabilityRouterCatalog $cfg
                 $second = Sync-CapabilityRouterCatalog $cfg
                 $catalog = Get-ContentUtf8 $first.path | ConvertFrom-Json
+                $initialFingerprint = [string]$catalog.catalog_fingerprint
 
                 $first.changed | Should Be $true
                 $second.changed | Should Be $false
                 $catalog.schema_version | Should Be 1
+                $catalog.catalog_fingerprint | Should Match '^[0-9a-f]{64}$'
                 @($catalog.domains | Where-Object name -eq "engineering")[0].skill_names | Should Contain "unrouted-tool"
                 $design = @($catalog.skills | Where-Object name -eq "codebase-design")[0]
                 @($design.routing_rules).Count | Should Be 2
                 $design.relative_path | Should Be "..\codebase-design\SKILL.md"
                 $design.load_side_effect | Should Be "read_only"
+                $design.entrypoint_sha256 | Should Be (Get-FileContentHash (Join-Path $managed 'codebase-design\SKILL.md'))
                 ([IO.Path]::IsPathRooted([string]$design.relative_path)) | Should Be $false
+
+                Add-Content -LiteralPath (Join-Path $managed 'codebase-design\SKILL.md') -Encoding UTF8 -Value "`n# Changed body"
+                $third = Sync-CapabilityRouterCatalog $cfg
+                $updatedCatalog = Get-ContentUtf8 $third.path | ConvertFrom-Json
+                $updatedDesign = @($updatedCatalog.skills | Where-Object name -eq "codebase-design")[0]
+
+                $third.changed | Should Be $true
+                $updatedDesign.entrypoint_sha256 | Should Not Be $design.entrypoint_sha256
+                $updatedCatalog.catalog_fingerprint | Should Not Be $initialFingerprint
             }
             finally {
                 $script:DryRun = $oldDryRun

@@ -1,4 +1,12 @@
 Describe 'Portable capability-router cold discovery' {
+    function Get-TestSha256([string]$Value) {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            return (($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Value)) | ForEach-Object { $_.ToString('x2') }) -join '')
+        }
+        finally { $sha.Dispose() }
+    }
+
     BeforeEach {
         $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
         $sourceRouter = Join-Path $repoRoot 'overrides\capability-router\scripts\route-capability.ps1'
@@ -20,8 +28,10 @@ description: >-
 
 # Codebase design
 '@
-        [ordered]@{
+        $catalog = [ordered]@{
             schema_version = 1
+            decision_owner = 'host_ai'
+            semantic_routing_performed = $false
             domains = @(
                 [ordered]@{
                     name = 'engineering'
@@ -34,12 +44,15 @@ description: >-
                     name = 'codebase-design'
                     description = 'Design module boundaries, stable interfaces, and an evidence-based target architecture.'
                     relative_path = '..\codebase-design\SKILL.md'
+                    entrypoint_sha256 = (Get-FileHash -LiteralPath (Join-Path $targetRoot 'SKILL.md') -Algorithm SHA256).Hash.ToLowerInvariant()
                     load_side_effect = 'read_only'
                     routing_rules = @()
                 }
             )
             capabilities = @()
-        } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $routerRoot 'catalog.json') -Encoding UTF8
+        }
+        $catalog.catalog_fingerprint = Get-TestSha256 ($catalog | ConvertTo-Json -Depth 20 -Compress)
+        $catalog | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $routerRoot 'catalog.json') -Encoding UTF8
 
         $script:unrelatedCwd = Join-Path $TestDrive 'unrelated-repository'
         New-Item -ItemType Directory -Path $script:unrelatedCwd -Force | Out-Null
@@ -56,6 +69,7 @@ description: >-
         }
 
         $domains.catalog_path | Should Match 'capability-router[\\/]catalog\.json$'
+        $domains.catalog.status | Should Be 'current'
         @($domains.discovery_domains.name) | Should Contain 'engineering'
         @($candidates.retrieval.candidates.name) | Should Contain 'codebase-design'
         $candidate = @($candidates.retrieval.candidates | Where-Object name -eq 'codebase-design')[0]
@@ -66,5 +80,17 @@ description: >-
         $candidates.config_path | Should BeNullOrEmpty
         $candidates.policy_path | Should BeNullOrEmpty
         $candidates.writes_performed | Should Be $false
+    }
+
+    It 'excludes a cold skill when its entrypoint no longer matches the catalog hash' {
+        Add-Content -LiteralPath (Join-Path $targetRoot 'SKILL.md') -Encoding UTF8 -Value "`n# Drift after catalog projection"
+
+        $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File $script:routerScript `
+            -Query '设计模块边界和工程终态' -DomainHint engineering -Candidate 'skill|codebase-design' | ConvertFrom-Json
+
+        $result.catalog.status | Should Be 'stale'
+        @($result.retrieval.candidates.name) | Should Not Contain 'codebase-design'
+        @($result.selected.name) | Should Not Contain 'codebase-design'
+        @($result.excluded | Where-Object { $_.name -eq 'codebase-design' -and $_.reason -eq 'catalog_stale' }).Count | Should Be 1
     }
 }

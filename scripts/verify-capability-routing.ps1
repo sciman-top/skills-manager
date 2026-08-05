@@ -99,7 +99,15 @@ function Invoke-RouterCase($Case, [string[]]$Candidate = @()) {
         MetadataCache = $routerMetadataCache
     }
     if (-not [string]::IsNullOrWhiteSpace([string]$Case.snapshot_path)) {
-        $routerArgs.HostSnapshotPath = Resolve-RepoFile ([string]$Case.snapshot_path)
+        $snapshotSourcePath = Resolve-RepoFile ([string]$Case.snapshot_path)
+        $snapshot = Get-Content -LiteralPath $snapshotSourcePath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ([string]$snapshot.captured_at -eq '__CURRENT__') {
+            $snapshot.captured_at = [DateTimeOffset]::UtcNow.ToString('o')
+            $snapshotFixturePath = Join-Path $fixtureRoot (Split-Path $snapshotSourcePath -Leaf)
+            $snapshot | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $snapshotFixturePath -Encoding UTF8
+            $routerArgs.HostSnapshotPath = $snapshotFixturePath
+        }
+        else { $routerArgs.HostSnapshotPath = $snapshotSourcePath }
     }
     $global:LASTEXITCODE = 0
     $raw = @(& $routerFile @routerArgs 2>&1)
