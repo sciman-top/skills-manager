@@ -8,7 +8,7 @@ function Set-RouterTestSkill([string]$Root, [string]$Folder, [string]$Name, [str
 
 Describe 'Native-first capability discovery and policy' {
     BeforeEach {
-        $scriptPath = Join-Path $PSScriptRoot '..\..\overrides\capability-router\scripts\route-capability.ps1'
+        $scriptPath = Join-Path $PSScriptRoot '..\..\overrides\custom\capability-router\scripts\route-capability.ps1'
         $skillRoot = Join-Path $TestDrive 'skills'
         New-Item -ItemType Directory -Path $skillRoot -Force | Out-Null
         $debug = Set-RouterTestSkill $skillRoot 'debug-dotnet' 'debug:dotnet' 'Debug .NET, ASP.NET Core, and WPF runtime failures.'

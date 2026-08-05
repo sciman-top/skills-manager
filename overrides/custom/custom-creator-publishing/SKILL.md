@@ -15,6 +15,7 @@ Use this skill for Chinese article workflows where structure, credibility, image
 4. Draft in Markdown as the canonical source. Keep headings, callouts, image placeholders, references, and publication notes explicit.
 5. For WeChat, plan title, subtitle, cover image, lead paragraph, section rhythm, pull quotes, and end CTA.
 6. For Zhihu, emphasize searchable question framing, concise claims, examples, and defensible reasoning.
+7. Treat actual publication, scheduling, account changes, and audience notifications as external writes. Draft and export locally by default. Publish only after the user explicitly authorizes the exact platform/account and final payload in the current task; verify the resulting receipt before retrying a failed submission.
 
 ## Tool Priority
 
@@ -26,3 +27,4 @@ Use this skill for Chinese article workflows where structure, credibility, image
 
 - Check for unsupported claims, broken image references, title/body mismatch, and platform-inappropriate formatting.
 - Keep credentials, cookies, and publication tokens out of article source and logs.
+- Do not interpret a request to write, format, illustrate, or convert an article as permission to publish it.

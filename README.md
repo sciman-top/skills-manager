@@ -107,10 +107,12 @@ P3 plugin-aware 命令中，inventory/lint/eval 为只读；export 仍严格 fix
 | `skills.ps1` | 生成后的入口脚本 | 不手改；由 `build.ps1` 生成 |
 | `vendor/` | 上游整库缓存 | 不手改；通过 `更新` 或锁文件重建 |
 | `imports/` | 定向导入来源落地层 | 仅作为输入层维护，不把它当生成产物修补 |
-| `overrides/` | 本地自定义和补丁层 | 放自定义 skill、本地 patch、同名替换 |
+| `overrides/` | 已审阅的本地输入层 | `custom/` 放本仓自定义能力，`patches/` 放上游替换/补丁，`resources/` 放无 `SKILL.md` 的资源桥；根级只放具名单文件 override |
 | `agent/` | 生成产物与同步源 | 不手改；通过 `构建生效` 重建 |
 | `reports/skill-audit/<run-id>/ai-brief.md` | 审查运行包摘要 | 运行态产物，不手改 |
 | `reports/skill-audit/<run-id>/outer-ai-prompt.md` | 外层 AI 执行提示词 | 运行态产物；改默认提示词请改 `src/Commands/AuditTargets.ps1` 或 `overrides/audit-outer-ai-prompt.md` |
+
+分类目录的叶子名仍是稳定输出名：`overrides/<category>/<leaf>` 会生成 `agent/<leaf>`。旧的 `overrides/<leaf>` 扁平目录只在迁移窗口内兼容读取；新内容不得继续放入扁平目录，跨分类同名会阻断构建。详见 [overrides/README.md](overrides/README.md)。
 
 ## 快速开始
 

@@ -104,7 +104,7 @@
         "tests/Unit/OperationContracts.Tests.ps1",
         "tests/Unit/RulePatchPlan.Tests.ps1",
         "tests/Unit/SkillIntegrityScript.Tests.ps1",
-        "overrides/custom-powershell-windows-automation/SKILL.md"
+        "overrides/custom/custom-powershell-windows-automation/SKILL.md"
       ],
       "implementation_steps": [
         "remove Windows PowerShell CI jobs and legacy shell syntax",

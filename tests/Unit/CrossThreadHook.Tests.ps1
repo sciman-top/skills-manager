@@ -83,7 +83,7 @@ Describe 'Cross-thread PreToolUse guard' {
     }
 
     It 'allows only a hash-valid revision-2 watch prompt for cross-target automation updates' {
-        $generator = Join-Path $repoRoot 'overrides\watch-interrupted-task\scripts\New-WatchHeartbeatPrompt.ps1'
+        $generator = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchHeartbeatPrompt.ps1'
         $canonicalPrompt = & $generator -TargetThreadId 'target-test'
         $fleetTranscript = New-WatchTurnTranscript -Text @'
 <heartbeat>
@@ -140,7 +140,7 @@ watch-interrupted-task:v1 target_thread_id=target-test
     }
 
     It 'allows a fleet heartbeat to mutate another canonical target but never itself or unrelated automations' {
-        $generator = Join-Path $repoRoot 'overrides\watch-interrupted-task\scripts\New-WatchHeartbeatPrompt.ps1'
+        $generator = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchHeartbeatPrompt.ps1'
         $canonicalPrompt = & $generator -TargetThreadId 'target-test'
         $fleetTranscript = New-WatchTurnTranscript -Text @'
 <heartbeat>
@@ -279,7 +279,7 @@ watch-interrupted-task:v1 target_thread_id=target-test
     }
 
     It 'allows only another canonical watch target for code-mode fleet mutations' {
-        $generator = Join-Path $repoRoot 'overrides\watch-interrupted-task\scripts\New-WatchHeartbeatPrompt.ps1'
+        $generator = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchHeartbeatPrompt.ps1'
         $canonicalPrompt = & $generator -TargetThreadId 'target-test'
         $encodedPrompt = $canonicalPrompt | ConvertTo-Json -Compress
         $fleetTranscript = New-WatchTurnTranscript -Text @'

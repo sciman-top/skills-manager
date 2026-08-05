@@ -14,7 +14,7 @@
 
 ## A. 仓库事实与模块边界
 - `build.ps1` 从 `src/*` 生成根 `skills.ps1`；`agent/` 与 `vendor/` 是生成或缓存目录，`agent/` 禁止手改。
-- 自定义改动优先放 `overrides/` 或受管 `imports/`；第三方 import 内规则是上游数据，不属于根规则批量改写范围。
+- `overrides/custom/` 承接本仓自定义能力，`overrides/patches/` 承接上游替换/补丁，`overrides/resources/` 承接无 `SKILL.md` 的资源桥；根级只放具名单文件 override。分类叶子仍生成同名 `agent/<leaf>`，跨分类重名阻断；旧扁平目录仅兼容读取。第三方 import 内规则是上游数据，不属于根规则批量改写范围。
 - `skills.json` + `同步MCP` 只托管 MCP server 清单和目标配置段；model、auth、provider、context、sandbox 不在本仓边界。
 - `skills.json.skill_projection` 托管技能根并集、选主、路径级开关与 portable discovery domain mapping；生成 catalog 在 `agent/capability-router/catalog.json`，manifest 在 `reports/skill-projection/current.json`。原技能目录不属于自动删除边界。
 - `src/Commands/AuditTargets.ps1` 是目标审查与外层 AI prompt 真源；`reports/skill-audit/<run-id>/` 是运行产物，禁止手改。

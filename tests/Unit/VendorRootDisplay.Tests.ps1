@@ -70,7 +70,7 @@ Describe "Vendor root display filtering" {
                 ,@([pscustomobject]@{
                     vendor = "overrides"
                     from = "custom-windows-encoding-guard"
-                    full = (Join-Path $root "overrides\custom-windows-encoding-guard")
+                    full = (Join-Path $root "overrides\custom\custom-windows-encoding-guard")
                 })
             }
 

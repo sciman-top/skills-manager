@@ -74,6 +74,10 @@ function Resolve-InstalledSkillLocalPath($cfg, $mapping) {
         return (Join-Path (Join-Path $script:ImportDir $from) $skillPath)
     }
     if ($vendor -eq "overrides") {
+        $override = Resolve-OverrideDir $from
+        if ($null -ne $override -and @($override).Count -gt 0) {
+            return [string]$override[0].FullName
+        }
         return (Join-Path $script:OverridesDir $from)
     }
     return (Join-Path (VendorPath $vendor) $from)

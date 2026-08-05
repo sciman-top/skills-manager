@@ -82,9 +82,9 @@ Describe "Skill projection" {
             $engineeringFlow.selection_policy | Should Match "draft-spec"
             $engineeringFlow.selection_policy | Should Match "explicit"
 
-            $grillSkill = Get-ContentUtf8 (Join-Path $repoRoot "overrides\grill-with-docs\SKILL.md")
+            $grillSkill = Get-ContentUtf8 (Join-Path $repoRoot "overrides\patches\grill-with-docs\SKILL.md")
             $grillSkill | Should Not Match "disable-model-invocation:\s*true"
-            $grillPolicy = Get-ContentUtf8 (Join-Path $repoRoot "overrides\grill-with-docs\agents\openai.yaml")
+            $grillPolicy = Get-ContentUtf8 (Join-Path $repoRoot "overrides\patches\grill-with-docs\agents\openai.yaml")
             $grillPolicy | Should Match "allow_implicit_invocation:\s*true"
 
             foreach ($explicitName in @("improve-codebase-architecture", "to-spec", "to-tickets")) {
@@ -98,9 +98,9 @@ Describe "Skill projection" {
                 (Get-ContentUtf8 $agentMetadata) | Should Match "allow_implicit_invocation:\s*false"
             }
 
-            $setupSkill = Get-ContentUtf8 (Join-Path $repoRoot "overrides\setup-matt-pocock-skills\SKILL.md")
-            $setupSkill | Should Match "disable-model-invocation:\s*true"
-            $setupPolicy = Get-ContentUtf8 (Join-Path $repoRoot "overrides\setup-matt-pocock-skills\agents\openai.yaml")
+            $setupSkill = Get-ContentUtf8 (Join-Path $repoRoot "overrides\patches\setup-matt-pocock-skills\SKILL.md")
+            $setupSkill | Should Not Match "disable-model-invocation:"
+            $setupPolicy = Get-ContentUtf8 (Join-Path $repoRoot "overrides\patches\setup-matt-pocock-skills\agents\openai.yaml")
             $setupPolicy | Should Match "allow_implicit_invocation:\s*false"
         }
     }

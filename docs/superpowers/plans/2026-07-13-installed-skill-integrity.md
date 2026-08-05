@@ -40,7 +40,7 @@
 **Files:**
 - Modify: `skills.json`
 - Modify: `skills.lock.json` through `skills.ps1` lock generation
-- Create: `overrides/requesting-code-review/code-reviewer.md`
+- Create: `overrides/resources/requesting-code-review/code-reviewer.md`
 - Delete gitlinks: `imports/openpyxl`, `imports/python-docx`, `imports/python-pptx`, `imports/ppt-master`, `imports/python-design-patterns`, `vendor/web-quality-skills`
 
 **Interfaces:**

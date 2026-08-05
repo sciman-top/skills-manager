@@ -699,9 +699,13 @@ function Backup-DirIfNeeded([string]$path) {
     return $bak
 }
 function Backup-OverrideDir([string]$overrideName) {
-    $src = Join-Path $OverridesDir $overrideName
+    $override = Resolve-OverrideDir $overrideName
+    if ($null -eq $override -or @($override).Count -eq 0) { return $null }
+    $src = [string]$override[0].FullName
     if (-not (Test-PathEntry $src)) { return $null }
-    $bakRoot = Join-Path $OverridesDir ".bak"
+    $category = [string]$override[0].override_category
+    if ([string]::IsNullOrWhiteSpace($category)) { $category = "legacy" }
+    $bakRoot = Join-Path (Join-Path $OverridesDir ".bak") $category
     EnsureDir $bakRoot
     $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
     $bakName = "{0}.bak.{1}" -f $overrideName, $stamp
@@ -8065,8 +8069,45 @@ function Get-OverridesDirs {
     if (-not (Test-Path $OverridesDir)) {
         return @()
     }
-    return Get-ChildItem $OverridesDir -Directory -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -ne ".bak" -and $null -ne (Get-ChildItem -LiteralPath $_.FullName -File -Recurse -Force -ErrorAction SilentlyContinue | Select-Object -First 1) }
+
+    $items = New-Object System.Collections.Generic.List[object]
+    $categories = @("custom", "patches", "resources")
+    foreach ($category in $categories) {
+        $categoryRoot = Join-Path $OverridesDir $category
+        if (-not (Test-Path -LiteralPath $categoryRoot -PathType Container)) { continue }
+        foreach ($directory in (Get-ChildItem -LiteralPath $categoryRoot -Directory -ErrorAction SilentlyContinue)) {
+            $firstFile = Get-ChildItem -LiteralPath $directory.FullName -File -Recurse -Force -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($null -eq $firstFile) { continue }
+            $items.Add([pscustomobject]@{
+                    Name = $directory.Name
+                    FullName = $directory.FullName
+                    override_category = $category
+                }) | Out-Null
+        }
+    }
+
+    foreach ($directory in (Get-ChildItem -LiteralPath $OverridesDir -Directory -ErrorAction SilentlyContinue)) {
+        if ($directory.Name -eq ".bak" -or $categories -contains $directory.Name) { continue }
+        $firstFile = Get-ChildItem -LiteralPath $directory.FullName -File -Recurse -Force -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -eq $firstFile) { continue }
+        $items.Add([pscustomobject]@{
+                Name = $directory.Name
+                FullName = $directory.FullName
+                override_category = "legacy"
+            }) | Out-Null
+    }
+
+    $resolved = @($items.ToArray() | Sort-Object Name)
+    foreach ($group in @($resolved | Group-Object Name | Where-Object Count -gt 1)) {
+        $locations = @($group.Group | ForEach-Object { "{0}:{1}" -f $_.override_category, $_.FullName }) -join ", "
+        throw ("override output name is duplicated [{0}]: {1}" -f $group.Name, $locations)
+    }
+    return $resolved
+}
+
+function Resolve-OverrideDir([string]$overrideName) {
+    if ([string]::IsNullOrWhiteSpace($overrideName)) { return $null }
+    return @(Get-OverridesDirs | Where-Object { [string]::Equals($_.Name, $overrideName, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1)
 }
 
 function 收集OverridesSkills {
@@ -16326,6 +16367,10 @@ function Resolve-InstalledSkillLocalPath($cfg, $mapping) {
         return (Join-Path (Join-Path $script:ImportDir $from) $skillPath)
     }
     if ($vendor -eq "overrides") {
+        $override = Resolve-OverrideDir $from
+        if ($null -ne $override -and @($override).Count -gt 0) {
+            return [string]$override[0].FullName
+        }
         return (Join-Path $script:OverridesDir $from)
     }
     return (Join-Path (VendorPath $vendor) $from)
@@ -22306,7 +22351,8 @@ MCP/门禁环境变量：
 
 本地技能：
   - add/npx 显式指定 --skill 时默认落入 imports（mode=manual），可用 --mode vendor 改为 vendor 管理。
-  - manual/ 仅用于旧数据兼容；自定义改动请放入 overrides/。
+  - manual/ 仅用于旧数据兼容；本仓自定义能力放 `overrides/custom/`，上游替换/补丁放 `overrides/patches/`，无 SKILL.md 的资源桥放 `overrides/resources/`。
+  - 分类目录的叶子名会生成同名 `agent/<leaf>`；旧 `overrides/<leaf>` 扁平目录只兼容读取，跨分类同名会阻断构建。
   - “命令导入安装”支持多行输入 add / npx skills add / npx add-skill。
   - `安装` / `卸载` / `更新` / `构建生效` / `锁定` 等旧命令仍可使用。
 

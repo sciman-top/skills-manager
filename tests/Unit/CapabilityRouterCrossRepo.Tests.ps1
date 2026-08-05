@@ -9,7 +9,7 @@ Describe 'Portable capability-router cold discovery' {
 
     BeforeEach {
         $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-        $sourceRouter = Join-Path $repoRoot 'overrides\capability-router\scripts\route-capability.ps1'
+        $sourceRouter = Join-Path $repoRoot 'overrides\custom\capability-router\scripts\route-capability.ps1'
         $portableRoot = Join-Path $TestDrive 'portable-skills'
         $routerRoot = Join-Path $portableRoot 'capability-router'
         $routerScripts = Join-Path $routerRoot 'scripts'

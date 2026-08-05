@@ -16,11 +16,12 @@ Use this skill when the goal is teaching a concept through motion or interaction
 
 ## Design Rules
 
-1. Start with the misconception or phenomenon the animation should resolve.
-2. Keep variables visible: value, unit, direction, and sign convention.
-3. Use color consistently: force/vector, path/ray, measured quantity, result.
-4. Provide pause/replay/step controls for classroom pacing.
-5. Use physically meaningful scales or clearly label schematic/not-to-scale scenes.
+1. Establish the target grade, textbook/standard, lesson objective, and the misconception or phenomenon the visual should resolve.
+2. Use animation only when change over time, causality, or interaction adds teaching value; prefer a static annotated diagram for a state that does not need motion.
+3. Keep variables visible: value, unit, direction, and sign convention.
+4. Use color consistently, but never make color the only carrier of force/vector, path/ray, measured quantity, or result.
+5. Provide pause/replay/step controls for classroom pacing, plus a reduced-motion or static fallback.
+6. Use physically meaningful scales or clearly label schematic/not-to-scale scenes.
 
 ## Physics Coverage
 
@@ -32,5 +33,7 @@ Use this skill when the goal is teaching a concept through motion or interaction
 ## Verification
 
 - Check physics correctness before visual polish.
+- Verify claims, symbols, sign conventions, and expected observations against the named textbook/standard or another identified authoritative teaching source.
 - Run in desktop and classroom projector aspect ratios.
-- For web/SVG output, verify animation is nonblank, controls are reachable, and Chinese labels fit.
+- For web/SVG output, verify animation is nonblank, keyboard controls are reachable, focus is visible, motion can be paused, and Chinese labels fit.
+- Provide a short textual explanation or caption that preserves the teaching point when motion is unavailable.

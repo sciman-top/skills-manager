@@ -1098,6 +1098,32 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             }
         }
 
+        It "Resolves categorized override mappings by stable output name" {
+            $oldOverridesDir = $script:OverridesDir
+            try {
+                $script:OverridesDir = Join-Path $TestDrive "categorized-override-mapping"
+                $overrideDir = Join-Path $script:OverridesDir "custom\custom-demo"
+                New-Item -ItemType Directory -Path $overrideDir -Force | Out-Null
+                Set-Content -Path (Join-Path $overrideDir "SKILL.md") -Value "---`nname: custom-demo`ndescription: Categorized override.`n---`nUse for categorized tests."
+                $cfg = [pscustomobject]@{
+                    vendors = @()
+                    imports = @()
+                    mappings = @([pscustomobject]@{ vendor = "overrides"; from = "custom-demo"; to = "custom-demo" })
+                }
+
+                $facts = Get-InstalledSkillFacts $cfg
+
+                @($facts).Count | Should Be 1
+                $facts[0].declared_name | Should Be "custom-demo"
+                $facts[0].description | Should Be "Categorized override."
+                $facts[0].local_path | Should Be $overrideDir
+                $facts[0].content_hash | Should Be (Get-FileContentHash (Join-Path $overrideDir "SKILL.md"))
+            }
+            finally {
+                $script:OverridesDir = $oldOverridesDir
+            }
+        }
+
         It "Excludes resource-only override directories from installed skill facts" {
             $oldOverridesDir = $script:OverridesDir
             try {

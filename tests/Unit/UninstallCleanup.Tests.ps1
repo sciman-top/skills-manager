@@ -20,6 +20,82 @@ Describe "Uninstall cleanup" {
         }
     }
 
+    It "discovers categorized overrides by stable output name while preserving legacy flat inputs" {
+        $oldOverridesDir = $script:OverridesDir
+        try {
+            $script:OverridesDir = Join-Path $TestDrive "categorized-overrides"
+            $fixtures = @(
+                [pscustomobject]@{ category = "custom"; name = "custom-demo"; file = "SKILL.md" },
+                [pscustomobject]@{ category = "patches"; name = "patched-demo"; file = "SKILL.md" },
+                [pscustomobject]@{ category = "resources"; name = "resource-demo"; file = "bridge.md" }
+            )
+            foreach ($fixture in $fixtures) {
+                $directory = Join-Path $script:OverridesDir (Join-Path $fixture.category $fixture.name)
+                New-Item -ItemType Directory -Path $directory -Force | Out-Null
+                Set-Content -LiteralPath (Join-Path $directory $fixture.file) -Value "fixture"
+            }
+            $legacyDirectory = Join-Path $script:OverridesDir "legacy-demo"
+            New-Item -ItemType Directory -Path $legacyDirectory -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $legacyDirectory "SKILL.md") -Value "fixture"
+
+            $items = @(Get-OverridesDirs | Sort-Object Name)
+
+            @($items | ForEach-Object Name) | Should Be @("custom-demo", "legacy-demo", "patched-demo", "resource-demo")
+            @($items | Where-Object Name -eq "custom-demo")[0].override_category | Should Be "custom"
+            @($items | Where-Object Name -eq "patched-demo")[0].override_category | Should Be "patches"
+            @($items | Where-Object Name -eq "resource-demo")[0].override_category | Should Be "resources"
+            @($items | Where-Object Name -eq "legacy-demo")[0].override_category | Should Be "legacy"
+            @($items | Where-Object Name -eq "custom-demo")[0].FullName | Should Be (Join-Path $script:OverridesDir "custom\custom-demo")
+        }
+        finally {
+            $script:OverridesDir = $oldOverridesDir
+        }
+    }
+
+    It "fails closed when categorized overrides reuse the same output name" {
+        $oldOverridesDir = $script:OverridesDir
+        try {
+            $script:OverridesDir = Join-Path $TestDrive "duplicate-overrides"
+            foreach ($category in @("custom", "patches")) {
+                $directory = Join-Path $script:OverridesDir (Join-Path $category "duplicate-demo")
+                New-Item -ItemType Directory -Path $directory -Force | Out-Null
+                Set-Content -LiteralPath (Join-Path $directory "SKILL.md") -Value "fixture"
+            }
+
+            $failureMessage = ""
+            try {
+                @(Get-OverridesDirs) | Out-Null
+            }
+            catch {
+                $failureMessage = $_.Exception.Message
+            }
+            $failureMessage | Should Match "duplicate-demo"
+        }
+        finally {
+            $script:OverridesDir = $oldOverridesDir
+        }
+    }
+
+    It "backs up a categorized override by stable output name and preserves its category" {
+        $oldOverridesDir = $script:OverridesDir
+        try {
+            $script:OverridesDir = Join-Path $TestDrive "backup-overrides"
+            $source = Join-Path $script:OverridesDir "custom\custom-demo"
+            New-Item -ItemType Directory -Path $source -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $source "SKILL.md") -Value "fixture"
+
+            $backup = Backup-OverrideDir "custom-demo"
+
+            (Test-Path -LiteralPath $source) | Should Be $false
+            (Test-Path -LiteralPath $backup -PathType Container) | Should Be $true
+            (Split-Path (Split-Path $backup -Parent) -Leaf) | Should Be "custom"
+            (Split-Path $backup -Leaf) | Should Match '^custom-demo\.bak\.'
+        }
+        finally {
+            $script:OverridesDir = $oldOverridesDir
+        }
+    }
+
     It "Removes matching vendor import when uninstalling a vendor skill" {
         $cfg = [pscustomobject]@{
             vendors = @(

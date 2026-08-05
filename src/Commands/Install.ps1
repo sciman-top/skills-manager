@@ -888,8 +888,45 @@ function Get-OverridesDirs {
     if (-not (Test-Path $OverridesDir)) {
         return @()
     }
-    return Get-ChildItem $OverridesDir -Directory -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -ne ".bak" -and $null -ne (Get-ChildItem -LiteralPath $_.FullName -File -Recurse -Force -ErrorAction SilentlyContinue | Select-Object -First 1) }
+
+    $items = New-Object System.Collections.Generic.List[object]
+    $categories = @("custom", "patches", "resources")
+    foreach ($category in $categories) {
+        $categoryRoot = Join-Path $OverridesDir $category
+        if (-not (Test-Path -LiteralPath $categoryRoot -PathType Container)) { continue }
+        foreach ($directory in (Get-ChildItem -LiteralPath $categoryRoot -Directory -ErrorAction SilentlyContinue)) {
+            $firstFile = Get-ChildItem -LiteralPath $directory.FullName -File -Recurse -Force -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($null -eq $firstFile) { continue }
+            $items.Add([pscustomobject]@{
+                    Name = $directory.Name
+                    FullName = $directory.FullName
+                    override_category = $category
+                }) | Out-Null
+        }
+    }
+
+    foreach ($directory in (Get-ChildItem -LiteralPath $OverridesDir -Directory -ErrorAction SilentlyContinue)) {
+        if ($directory.Name -eq ".bak" -or $categories -contains $directory.Name) { continue }
+        $firstFile = Get-ChildItem -LiteralPath $directory.FullName -File -Recurse -Force -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -eq $firstFile) { continue }
+        $items.Add([pscustomobject]@{
+                Name = $directory.Name
+                FullName = $directory.FullName
+                override_category = "legacy"
+            }) | Out-Null
+    }
+
+    $resolved = @($items.ToArray() | Sort-Object Name)
+    foreach ($group in @($resolved | Group-Object Name | Where-Object Count -gt 1)) {
+        $locations = @($group.Group | ForEach-Object { "{0}:{1}" -f $_.override_category, $_.FullName }) -join ", "
+        throw ("override output name is duplicated [{0}]: {1}" -f $group.Name, $locations)
+    }
+    return $resolved
+}
+
+function Resolve-OverrideDir([string]$overrideName) {
+    if ([string]::IsNullOrWhiteSpace($overrideName)) { return $null }
+    return @(Get-OverridesDirs | Where-Object { [string]::Equals($_.Name, $overrideName, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1)
 }
 
 function 收集OverridesSkills {

@@ -43,7 +43,7 @@ exit 0
         New-TestFile (Join-Path $workspace "config\skill-routing-policy.json") "{}"
         New-TestFile (Join-Path $workspace "scripts\quality\check-doctor-json.ps1")
         New-TestFile (Join-Path $workspace "tests\run.ps1")
-        New-TestFile (Join-Path $workspace "overrides\custom-demo\SKILL.md")
+        New-TestFile (Join-Path $workspace "overrides\custom\custom-demo\SKILL.md")
         New-TestFile (Join-Path $workspace "docs\runbooks\migration.md")
         New-TestFile (Join-Path $workspace "docs\change-evidence\template.md")
         New-TestFile (Join-Path $workspace "docs\change-evidence\20260530-audit-runtime-test.md")

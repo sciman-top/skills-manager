@@ -607,9 +607,13 @@ function Backup-DirIfNeeded([string]$path) {
     return $bak
 }
 function Backup-OverrideDir([string]$overrideName) {
-    $src = Join-Path $OverridesDir $overrideName
+    $override = Resolve-OverrideDir $overrideName
+    if ($null -eq $override -or @($override).Count -eq 0) { return $null }
+    $src = [string]$override[0].FullName
     if (-not (Test-PathEntry $src)) { return $null }
-    $bakRoot = Join-Path $OverridesDir ".bak"
+    $category = [string]$override[0].override_category
+    if ([string]::IsNullOrWhiteSpace($category)) { $category = "legacy" }
+    $bakRoot = Join-Path (Join-Path $OverridesDir ".bak") $category
     EnsureDir $bakRoot
     $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
     $bakName = "{0}.bak.{1}" -f $overrideName, $stamp

@@ -2,7 +2,7 @@
 param(
     [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent),
     [string]$CorpusPath = 'config/capability-routing-golden.json',
-    [string]$RouterPath = 'overrides/capability-router/scripts/route-capability.ps1',
+    [string]$RouterPath = 'overrides/custom/capability-router/scripts/route-capability.ps1',
     [switch]$Json
 )
 

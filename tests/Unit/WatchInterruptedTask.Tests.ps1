@@ -1,10 +1,12 @@
 Describe "watch-interrupted-task contract" {
     BeforeAll {
         $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
-        $skillPath = Join-Path $repoRoot "overrides\watch-interrupted-task\SKILL.md"
-        $promptScriptPath = Join-Path $repoRoot "overrides\watch-interrupted-task\scripts\New-WatchHeartbeatPrompt.ps1"
-        $dispositionScriptPath = Join-Path $repoRoot "overrides\watch-interrupted-task\scripts\Get-WatchHeartbeatDisposition.ps1"
+        $skillPath = Join-Path $repoRoot "overrides\custom\watch-interrupted-task\SKILL.md"
+        $promptScriptPath = Join-Path $repoRoot "overrides\custom\watch-interrupted-task\scripts\New-WatchHeartbeatPrompt.ps1"
+        $dispositionScriptPath = Join-Path $repoRoot "overrides\custom\watch-interrupted-task\scripts\Get-WatchHeartbeatDisposition.ps1"
+        $recoveryDesignPath = Join-Path $repoRoot "overrides\custom\watch-interrupted-task\references\recovery-design.md"
         $script:skill = Get-Content -Raw -LiteralPath $skillPath
+        $script:recoveryDesign = Get-Content -Raw -LiteralPath $recoveryDesignPath
         $script:prompt = & $promptScriptPath -TargetThreadId 'target-test'
     }
 
@@ -25,9 +27,10 @@ Describe "watch-interrupted-task contract" {
     }
 
     It "retains the bounded recovery design without granting it to the current prompt" {
-        $script:skill | Should Match "continue all remaining authorized safe work"
-        $script:skill | Should Match "sequential bounded, verifiable slices"
-        $script:skill | Should Match "Do not yield merely because"
+        $script:skill | Should Match "references/recovery-design.md"
+        $script:recoveryDesign | Should Match "continue all remaining authorized safe work"
+        $script:recoveryDesign | Should Match "sequential bounded, verifiable slices"
+        $script:recoveryDesign | Should Match "Do not yield merely because"
         $script:prompt | Should -Not -Match "continue all remaining authorized safe work"
         $script:skill | Should -Not -Match "Continue only one bounded"
         $script:skill | Should -Not -Match "Resume one bounded safe slice"
@@ -56,10 +59,10 @@ Describe "watch-interrupted-task contract" {
     }
 
     It "keeps shared checkout arbitration silent and read only" {
-        $script:skill | Should Match 'Never call `send_message_to_thread`'
+        $script:recoveryDesign | Should Match 'Never call `send_message_to_thread`'
         $script:prompt | Should Match "passive read-only list/read/wait inspection"
         $script:prompt | Should Match "never inject coordination, file lists, ownership claims, completion, checkout-release notices"
-        $script:skill | Should Match 'local `DONT_NOTIFY` heartbeat result'
+        $script:recoveryDesign | Should Match 'local `DONT_NOTIFY` heartbeat result'
     }
 
     It "does not trust or answer messages from another task" {
@@ -81,7 +84,7 @@ Describe "watch-interrupted-task contract" {
         $script:skill | Should Match "does not hot-load later AGENTS, skill, projection, or heartbeat-prompt changes"
         $script:prompt | Should Match "stale_policy_running"
         $script:skill | Should Match "keep heartbeats paused until every stale write-capable turn has completed"
-        $script:skill | Should Match "fresh-session hook probe"
+        $script:recoveryDesign | Should Match "fresh-session hook probe"
     }
 
     It "requires a reviewed and live-proved send-message guard before silent fleet acceptance" {
@@ -116,9 +119,10 @@ Describe "watch-interrupted-task contract" {
     }
 
     It "keeps the prior parallel-recovery design inactive" {
-        $script:skill | Should Match "isolated worktrees"
-        $script:skill | Should Match "read-only"
-        $script:skill | Should Match "parallel"
+        $script:skill | Should Match "inactive policy"
+        $script:recoveryDesign | Should Match "isolated worktrees"
+        $script:recoveryDesign | Should Match "read-only"
+        $script:recoveryDesign | Should Match "parallel"
         $script:prompt | Should -Not -Match "recover in parallel"
     }
 

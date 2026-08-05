@@ -467,7 +467,8 @@ MCP/门禁环境变量：
 
 本地技能：
   - add/npx 显式指定 --skill 时默认落入 imports（mode=manual），可用 --mode vendor 改为 vendor 管理。
-  - manual/ 仅用于旧数据兼容；自定义改动请放入 overrides/。
+  - manual/ 仅用于旧数据兼容；本仓自定义能力放 `overrides/custom/`，上游替换/补丁放 `overrides/patches/`，无 SKILL.md 的资源桥放 `overrides/resources/`。
+  - 分类目录的叶子名会生成同名 `agent/<leaf>`；旧 `overrides/<leaf>` 扁平目录只兼容读取，跨分类同名会阻断构建。
   - “命令导入安装”支持多行输入 add / npx skills add / npx add-skill。
   - `安装` / `卸载` / `更新` / `构建生效` / `锁定` 等旧命令仍可使用。
 

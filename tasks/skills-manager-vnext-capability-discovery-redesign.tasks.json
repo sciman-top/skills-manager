@@ -35,7 +35,7 @@
       "architecture_decision_ids": ["ADR-SMV-017", "ADR-SMV-020"],
       "goal": "让宿主先理解 domain purpose 再发现候选，同时保持旧 ProfileHint 和确定性 policy 兼容。",
       "preconditions": ["no lexical ranking", "profile metadata budget ceiling retained", "agent directory remains generated"],
-      "write_set": ["overrides/capability-router/SKILL.md", "overrides/capability-router/scripts/route-capability.ps1", "skills.json", "config/skills.schema.json", "scripts/verify-capability-routing.ps1", "tests/Unit/CapabilityRouter.Tests.ps1"],
+      "write_set": ["overrides/custom/capability-router/SKILL.md", "overrides/custom/capability-router/scripts/route-capability.ps1", "skills.json", "config/skills.schema.json", "scripts/verify-capability-routing.ps1", "tests/Unit/CapabilityRouter.Tests.ps1"],
       "implementation_steps": ["增加 purpose 和 DomainHint", "规范化最多两个 comma/array hints", "返回 discovery_domains 与 candidate domains", "压缩 resident description 守住 8000 字符预算", "保留 ProfileHint compatibility"],
       "tests": ["CapabilityRouter.Tests.ps1", "CapabilityRoutingVerifier.Tests.ps1", "verify-capability-routing.ps1 -Json"],
       "verification": ["hierarchical_domains_v1", "hierarchical_domain_discovery", "writes_performed=false", "profile budget pass"],

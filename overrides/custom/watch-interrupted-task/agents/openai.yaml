@@ -1,0 +1,4 @@
+interface:
+  display_name: "任务连续性守夜"
+  short_description: "只读监控 Codex 中断任务，保留人工操作与外部写入边界"
+  default_prompt: "Use $watch-interrupted-task to create or manage monitor-only Desktop heartbeats without resuming tasks or mutating target automations."

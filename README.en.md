@@ -113,10 +113,12 @@ This Phase only supports the verified Codex skills-only package. These commands 
 | `skills.ps1` | Generated entry script | Do not edit directly; regenerate from `build.ps1` |
 | `vendor/` | Upstream full-repo cache | Do not patch by hand; rebuild through `更新` or lock replay |
 | `imports/` | Materialized targeted imports | Treat as an input layer, not a generated patch sink |
-| `overrides/` | Local custom and patch layer | Put custom skills, local patches, and same-name replacements here |
+| `overrides/` | Reviewed local input layer | Use `custom/` for repository-owned capabilities, `patches/` for upstream replacements, `resources/` for non-skill resource bridges, and the root only for named file overrides |
 | `agent/` | Generated output and sync source | Do not edit directly; rebuild through `构建生效` |
 | `reports/skill-audit/<run-id>/ai-brief.md` | Audit runtime summary | Runtime artifact; do not hand-edit |
 | `reports/skill-audit/<run-id>/outer-ai-prompt.md` | Outer-AI execution prompt | Runtime artifact; change the default in `src/Commands/AuditTargets.ps1` or `overrides/audit-outer-ai-prompt.md` |
+
+The leaf name remains the stable output name: `overrides/<category>/<leaf>` generates `agent/<leaf>`. Flat `overrides/<leaf>` directories are read only during the migration window; do not add new flat inputs, and duplicate leaf names across categories fail the build. See [overrides/README.md](overrides/README.md).
 
 ## Quick Start
 

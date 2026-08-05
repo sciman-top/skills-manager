@@ -1,7 +1,7 @@
 Describe 'watch-interrupted-task fleet supervisor contract' {
     BeforeAll {
         $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
-        $generator = Join-Path $repoRoot 'overrides\watch-interrupted-task\scripts\New-WatchFleetSupervisorPrompt.ps1'
+        $generator = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchFleetSupervisorPrompt.ps1'
         $script:prompt = & $generator -SupervisorThreadId 'supervisor-test'
     }
 
