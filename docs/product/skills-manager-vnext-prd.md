@@ -263,6 +263,9 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 - `FR-EWF-015`：三档默认锚点为 `Sol xhigh`（需求澄清、架构、生产 RCA、高风险审查和最终裁决）、`Sol medium`（一般实现、日常排障、中等审查和集成准备）、`Luna max`（边界清楚的 CRUD/SQL/单测/文档和机械变换）；锚点可被宿主覆盖，不得硬编码为静默路由规则。
 - `FR-EWF-016`：Radar snapshot 必须记录 `source / captured_at / model / reasoning_effort / score / estimated_cost / estimated_duration / sample_count / confidence / raw_hash / expires_at`；过期、缺样本或来源不可核验时回退官方/native 默认，Radar 只影响建议，不证明质量或 live acceptance。
 - `FR-EWF-017`：并行/串行与模型升级必须使用显式状态机：依赖、base、write set、集成 owner、验证和外部写入全部满足才允许并行；一次根因修复失败后只重试一次，同一 `issue_id` 第二次失败必须 re-scope/re-plan；能力不足才按 `Luna max -> Sol medium -> Sol xhigh` 升级，权限/凭据/用户决策缺失则 fail-closed。
+- `FR-EWF-018`：仓库必须提供 runtime-independent 的 `TaskGraph/RadarSnapshot/FailurePacket v1` plain-object validator、deterministic dependency wave、并行 admission、model proposal 与 escalation decision；它们只返回建议和 findings，不创建 agent thread、不调用 provider、不修改 host/native state。
+- `FR-EWF-019`：生成 bundle 必须提供 `agent-validate` 与 `agent-plan` 两个 repo-contained JSON 命令；稳定 envelope 固定 `truth_boundary=repo_advisory_only / decision_owner=host_ai / executor=host_native_runtime / provider_calls=0 / native_mutations=0 / writes=0`，失败时以 machine-readable findings 和非零 exit fail-closed。
+- `FR-EWF-020`：advisory implementation 必须保持层次边界：domain/application 是无文件、时钟、环境、网络和 terminal 副作用的 pure layer；command adapter 只读取仓内显式输入并呈现结果；Radar refresh、spawn/wait/steer、worktree 创建和模型/effort 应用继续由宿主显式执行。
 
 ### 6.12 Typed-core shadow migration
 
@@ -296,6 +299,8 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 - `NFR-EWF-004`：tool/skill promotion 的语义判断可由宿主 AI 提议，但 availability、freshness、权限、预算、供应链、测试和 truth-level advancement 必须由确定性证据或人工 review 约束。
 - `NFR-EWF-005`：模型策略是多目标 Pareto 建议，必须同时观察正确性/用户结果、费用、wall-clock、token/context、重试和集成成本及不可逆风险；不得把动态 Radar 分数压成不可解释的固定总分或单项硬门禁。
 - `NFR-EWF-006`：PS7-only runtime policy 必须覆盖 source、generated bundle、installer、`skills.cmd`、CI、tests、subprocess wrapper、runbook 和 release contract；历史 Phase/证据中的 5.1 记录只保留为历史事实，不能恢复为当前支持承诺。新 typed core 候选仍须以 versioned protocol、single source of truth、PS7 回滚路径和可删除 PoC 证明，不得在无门禁的情况下形成双写或双真源。
+- `NFR-EWF-007`：`agent_workflow_advisory_runtime` 只允许 schema v1 compatible 的 minor admission；P6、scheduler/daemon/database/provider gateway、Radar fetch、custom-agent/config/profile/session mutation 和业务 live acceptance 必须保持显式未实现/未运行。
+- `NFR-EWF-008`：Agent workflow verifier 必须进入 full quality gate，机械检查五项 task、三档 soft anchor、CLI/build 接线、FailurePacket 和 stale-Radar fallback、zero-side-effect envelope 与 `repo_verified != host_loaded != live_accepted` 边界。
 - `NFR-TEC-001`：替代技术栈评估优先比较 C#/.NET、TypeScript/Node、Python 和 Rust 的 Windows/native CLI 适配、类型/并发、分发、供应链、维护与回滚成本；当前推荐 C#/.NET typed core + PowerShell thin shell 作为条件性目标架构，只实施可删除 shadow PoC，不实施全仓重写。
 - `NFR-TEC-002`：TC1 必须 pin 受支持 LTS SDK、零第三方 `PackageReference`、4/4 corpus parity、结构化协议负例、零生产引用和可删除回滚；framework-dependent/self-contained/single-file 的体积/启动数据只作描述性观察。TC2 前 PowerShell runtime 必须保持 authoritative，生产集成为 `not_started`。
 
@@ -322,6 +327,9 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 16. verifier 能阻断“Git CAS 等于文件排队/抢占胜出”、共享路径无 owner 并行写入、社区 control plane 偷渡、无证据工具接入和 P6/live truth 越级。
 17. 任一外部知识库或代码图 adapter 在接入前都有两个独立真实失败样本、语言/隐私/freshness/资源/供应链/卸载证据；条件不满足时保持 defer，repo-native 工具仍可完成主链。
 18. skill/tool 的保留以真实 replay/pilot 净收益为依据；强模型或宿主原生能力覆盖后能通过已记录 retirement trigger 降级或删除，不以资产数量作为成功指标。
+19. `agent-plan` 能对有效 TaskGraph 稳定输出 `discover -> implement+document -> integrate` 波次，对共享路径、coordination key、外部写入、依赖、owner 或 verification 缺失 fail-closed，且不实际拉起并发。
+20. 三档模型只在宿主显式 proposal 后作为软锚点出现；过期 Radar、宿主模型不可用或未知 tier 回退 host default，权限/凭据/生产授权/用户决策不允许通过升档绕过。
+21. Agent workflow advisory 的 repo verifier、focused tests 和 full gate 通过只能声明 `repo_verified/repo_advisory_only`；host load、真实 subagent 并发、模型效果、Radar refresh 与业务 live acceptance 仍需独立证据。
 
 ## 9. 成功指标
 

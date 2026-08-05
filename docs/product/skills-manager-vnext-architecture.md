@@ -416,7 +416,7 @@ candidate 集成顺序固定为：验证 candidate 的 base 与 declared write s
 
 职责：把任务 DAG、串并行 admission、模型/推理强度候选、Radar snapshot、fallback/escalation 和失败交接表达为宿主可消费的 advisory contract。user intent 是 authority owner，host AI 是 accountable semantic coordinator，skills-manager 是 evidence/policy advisor，deterministic verifier 是安全 admission guard，Codex native runtime 是实际 executor，Git/tests/live probe 裁决完成真值。
 
-不负责：调用模型、创建或调度 subagent、修改 active session/custom-agent/provider/auth/config、保证 Radar 排名等于生产质量、把费用/时长预测当完成门禁。当前 M0.3 只有文档、task contract、verifier 和 tests。
+不负责：调用模型、创建或调度 subagent、修改 active session/custom-agent/provider/auth/config、保证 Radar 排名等于生产质量、把费用/时长预测当完成门禁。历史 M0.3 只完成 planning contract；独立 `agent_workflow_advisory_runtime` adjacent track 已把 plain-object validator、deterministic wave/admission、model/escalation proposal 和 zero-write CLI 接入 PS7 生成 bundle，仍不构成 native agent/model runtime。
 
 ```text
 TaskGraph
@@ -473,10 +473,12 @@ src/
     RuleDocument.ps1
     OperationPlan.ps1
     Receipt.ps1
+    AgentWorkflow.ps1
   Application/
     CapabilityInventory.ps1
     RuleAdvisor.ps1
     OperationPlanner.ps1
+    ModelAndAgentPolicy.ps1
   Adapters/
     Sources/
       GitSource.ps1
@@ -499,6 +501,7 @@ typed-core/
     Redaction.ps1
     NativeProcess.ps1
   Commands/
+    AgentWorkflow.ps1
   Main.ps1
 ```
 
@@ -722,6 +725,14 @@ PoC acceptance：同一 corpus 的结构化输出/exit/finding parity；至少�
 决定：TC0 选择 `OperationPlan/Receipt v1` validation 作为第一个 typed-core seam；TC1 用 .NET 10 LTS + `System.Text.Json` 的 package-free console 通过 versioned stdin/stdout JSON shadow 运行。生产 PowerShell、CLI 和 bundle 不引用 candidate；TC2 前 PowerShell 保持 authoritative。
 
 理由：该 seam 是纯 in-process module，已有三个真实 caller、四个固定 fixture 和稳定 finding/exit contract，能以小接口隐藏足够验证复杂度。它比迁移 host adapter、能力路由或写入事务风险更低。4/4 corpus 与 4/4 protocol negative 已通过，但 self-contained 73–80 MB，故只接受 shadow PoC，不接受默认分发或生产迁移。
+
+### `ADR-SMV-029 Runtime-independent agent workflow advisory contracts`
+
+决定：在不改变 ADR-SMV-026 ownership 的前提下，把 M0.3 文档态合同实现为三个窄 seam：`Domain/AgentWorkflow.ps1` 校验 TaskGraph/RadarSnapshot/FailurePacket v1；`Application/ModelAndAgentPolicy.ps1` 生成拓扑 wave、并行 admission、三档 soft-anchor proposal 和 bounded escalation；`Commands/AgentWorkflow.ps1` 只读取仓内 JSON 并输出 `repo_advisory_only` envelope。`agent-plan/agent-validate` 的 effect counters 固定为 0，实际 spawn/wait/steer/worktree/model application 继续由 Codex native runtime 执行。
+
+理由：仅文档无法机械阻止循环依赖、shared write set、stale Radar、无 FailurePacket 升档或完成真值越级；引入 scheduler/provider runtime 又会复制宿主能力。小型 plain-object contract 能复用既有 OperationPlan finding/redaction helper、PS7 bundle 和 full gate，并为未来 typed-core seam 保持稳定 JSON 边界。
+
+退役/扩展：Codex 原生若公开等价的可验证 TaskGraph/admission/model proposal/failure trace，本 seam 缩减为 compatibility verifier 或删除；真实 M1 replay 无相对 native-only 净收益时同样删除。Radar live fetch、跨进程 coordinator、provider routing 或 host config mutation 不在本 ADR 内，只有 P6 admission 和用户新授权后才可评估。
 
 ### `ADR-SMV-003 Separate domain models`
 

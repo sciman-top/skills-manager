@@ -17,6 +17,7 @@
 | `maintenance_design` | Lean AI Software Delivery | `M0/M0.2/M0.3 repo_verified / M1 collecting 0/10` | M0 基线 4/4 + M0.2 工程化协调/工具组合 4/4 + M0.3 模型策略/typed-core 决策 3/3 repo_verified；M1 仅启动真实样本收集，M3 conditional；`TC0-TC3 conditional` 是 M0.3 closeout 历史，当前 TC0/TC1 由独立 track 承接 |
 | `typed_core_shadow_poc` | Operation contract typed core | `TC0/TC1 repo_verified` | `OperationPlan/Receipt v1` package-free C#/.NET shadow 3/3；4/4 corpus + 4/4 protocol negatives；PowerShell authoritative，TC2/生产集成 not_started |
 | `powershell7_runtime_migration` | PowerShell runtime support contraction | `repo_verified` | 当前生产入口、生成链、CI、tests、subprocess、文档与发布合同收敛到 `ps7_only`；历史 5.1 事实保留；不启动 TC2/P6 |
+| `agent_workflow_advisory_runtime` | Runtime-independent Agent workflow advisory | `repo_verified` | AWA-001..005 5/5；TaskGraph/Radar/FailurePacket、确定性 wave/admission、三档 soft anchor、FailurePacket escalation 与 PS7 zero-write CLI 已实现；native spawn/model/provider/host/live 仍未运行 |
 | `profile_reconciliation_advisor` | Skill profile drift reconciliation | `repo_verified` | P5-local plan-only advisor 4/4；宿主负责语义 proposal，确定性 planner 零写入校验；apply/live 未执行，不构成 P6 |
 | `profile_optimization_canary` | Bounded profile apply and replay | `repo_verified` | P5-local 3/3；非活动 profile canary、receipt/replay/rollback 已验证；6/6 host replay 为 partial，live acceptance not run |
 | `capability_routing_correction` | Native-first discovery/policy | `repo_verified` | P5-local regression correction 4/4；不改写 P5 历史状态，不授权 P6；host replay partial，live acceptance not run |
@@ -375,6 +376,22 @@ M2 correction 的最终目标流为：`visible skill/native tool -> host-native 
 observe-only 指标为 TTFV、返工切片、非预期人工打断、非产品 artifact、focused/full gate 耗时和 repo_verified→live_accepted 转化。pilot review 前不设数值阈值；指标不作为单项 completion gate，LLM 评分不作为唯一证据。对每项任务同时记录任务复杂度、既有测试健康和人工授权差异，避免把环境差异误判为流程收益。
 
 M3 判定优先删除性维护：pilot 没有缩短 TTFV、没有减少返工/打断，或新增 artifact/上下文/维护成本抵消收益时，删除候选模板、规则或 skill；只有稳定重复且经 replay/shadow/canary 的做法才 reviewed promotion。首轮候选复用现有文档字段评审，不建第二个 lifecycle registry：`session_plan`、`preheat_recommendation`、hierarchical router/catalog、plugin fixture export、Rule Estate multi-target apply、maintenance companion verifier，以及规划/evidence 资产自身。每项记录 `unique_value / native_equivalent / real_consumers / maintenance_cost / retirement_trigger / latest_evidence`。宿主模型或官方能力已原生覆盖时，相关功能进入 adapt/retire，而不是为了保留项目范围继续包装。
+
+### 9.2 Runtime-independent Agent workflow advisory adjacent track
+
+用户明确提出相邻需求后，经 minor admission 复核，本 track 复用 Codex 原生 subagent、worktree、model/reasoning 和等待能力，只增加可删除、可验证的仓库侧 advisory runtime。它不改变 `current_phase=P5`、不创建 P6 manifest、不扩 schema major、不写 host/profile/session/provider/auth，不抓取 Radar。
+
+| Slice | 状态 | 真实实现 | 退出条件 | 不证明 |
+| --- | --- | --- | --- | --- |
+| `AWA-001` | `repo_verified` | spec、manifest、PRD/架构/路线图映射与边界 | `DECISION_OWNER=host_ai`、`RUNTIME_SCHEDULER_STATUS=not_introduced` 等 marker 通过 | native runtime |
+| `AWA-002` | `repo_verified` | `src/Domain/AgentWorkflow.ps1`：TaskGraph/RadarSnapshot/FailurePacket v1 validator | DAG cycle/unknown/order、Radar expiry/hash/metrics、failure redaction 负例通过 | Radar quality |
+| `AWA-003` | `repo_verified` | `src/Application/ModelAndAgentPolicy.ps1`：deterministic waves、parallel admission、soft tiers、escalation | `discover -> implement+document -> integrate`；shared seam 串行；stale Radar 回退 | auto model switch |
+| `AWA-004` | `repo_verified` | `agent-plan/agent-validate`、bundle 接线和 repo-contained JSON adapter | exit/envelope stable；provider/native/write counters 0 | provider/subagent call |
+| `AWA-005` | `repo_verified` | advisory verifier、focused tests、full gate、evidence/README/根契约同步 | verifier 0 findings；full gate 0；P6 hold/M1 0/10/live not_run | host_loaded/live_accepted |
+
+波次与 admission 的执行顺序是：宿主生成 Product Baseline 与 TaskGraph → `agent-validate` → `agent-plan` → 宿主在通过的 wave 中使用 native spawn/worktree → 等待并收集结果 → integration owner 串行消费 candidate → affected/full gate。共享文件、生成链、schema/migration、lock/config、Git index/ref、同一外部状态和最终 closeout 永远串行；只有固定 base、依赖完成、精确 write set 互斥、独立验证和 owner 齐全才可并行。模型选择按 `local comparable outcomes -> host availability/override -> fresh Radar -> host default`，三档仅软锚点；FailurePacket 先根因后一次 corrected retry，能力不足才升档，权限/凭据/授权/用户决策 fail-closed。
+
+该 track 的 task truth 为 `tasks/skills-manager-vnext-agent-workflow-advisory.tasks.json`，spec 为 `docs/superpowers/specs/2026-08-05-agent-workflow-advisory-runtime.md`，verifier 为 `scripts/verify-agent-workflow-advisory.ps1`。它与 M0.3 历史 planning truth 并存但不计入 M1 的 10 个真实样本；若 native Codex 后续覆盖同一能力或 pilot 无净收益，按 retirement trigger 删除 advisory seam。
 
 ## 10. 风险登记
 

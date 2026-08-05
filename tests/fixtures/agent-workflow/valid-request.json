@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "now": "2026-08-05T10:00:00Z",
+  "task_graph": {
+    "schema_version": 1,
+    "graph_id": "graph-demo-001",
+    "base_revision": "84cb53aa",
+    "integration_owner": "supervisor",
+    "tasks": [
+      {
+        "task_id": "discover",
+        "goal": "Map the affected code paths.",
+        "inputs": ["user_goal"],
+        "outputs": ["code_map"],
+        "depends_on": [],
+        "risk": "low",
+        "ambiguity": "medium",
+        "parallelizable": false,
+        "exact_write_set": [],
+        "coordination_keys": [],
+        "external_state": [],
+        "verification": ["review code_map"],
+        "result_owner": "explorer",
+        "integration_order": 1,
+        "stop_condition": "code_map_complete"
+      },
+      {
+        "task_id": "implement",
+        "goal": "Implement the bounded domain contract.",
+        "inputs": ["code_map"],
+        "outputs": ["source_patch"],
+        "depends_on": ["discover"],
+        "risk": "medium",
+        "ambiguity": "low",
+        "parallelizable": true,
+        "exact_write_set": ["src/Domain/Feature.ps1"],
+        "coordination_keys": ["write:domain-feature"],
+        "external_state": [],
+        "verification": ["focused unit tests"],
+        "result_owner": "worker-implementation",
+        "integration_order": 2,
+        "stop_condition": "focused_tests_pass"
+      },
+      {
+        "task_id": "document",
+        "goal": "Document the verified contract.",
+        "inputs": ["code_map"],
+        "outputs": ["docs_patch"],
+        "depends_on": ["discover"],
+        "risk": "low",
+        "ambiguity": "low",
+        "parallelizable": true,
+        "exact_write_set": ["docs/feature.md"],
+        "coordination_keys": ["write:feature-docs"],
+        "external_state": [],
+        "verification": ["documentation contract"],
+        "result_owner": "worker-docs",
+        "integration_order": 3,
+        "stop_condition": "docs_contract_pass"
+      },
+      {
+        "task_id": "integrate",
+        "goal": "Integrate candidates and close truth boundaries.",
+        "inputs": ["source_patch", "docs_patch"],
+        "outputs": ["verified_change"],
+        "depends_on": ["implement", "document"],
+        "risk": "high",
+        "ambiguity": "medium",
+        "parallelizable": false,
+        "exact_write_set": [],
+        "coordination_keys": ["write:git-index", "write:full-gate"],
+        "external_state": [],
+        "verification": ["full quality gate"],
+        "result_owner": "supervisor",
+        "integration_order": 4,
+        "stop_condition": "repo_verified"
+      }
+    ]
+  },
+  "radar_snapshot": {
+    "schema_version": 1,
+    "snapshot_id": "radar-20260805-1324",
+    "source": "https://codexradar.com/",
+    "captured_at": "2026-08-05T05:24:00Z",
+    "expires_at": "2026-08-06T05:24:00Z",
+    "raw_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "entries": [
+      {
+        "model_label": "Sol xhigh",
+        "model_family": "gpt-5.6-sol",
+        "reasoning_effort": "xhigh",
+        "score": 107.1,
+        "estimated_cost": 6.46,
+        "estimated_duration_seconds": 1560,
+        "sample_count": 13,
+        "confidence": "community_observed"
+      },
+      {
+        "model_label": "Sol medium",
+        "model_family": "gpt-5.6-sol",
+        "reasoning_effort": "medium",
+        "score": 89.7,
+        "estimated_cost": 3.70,
+        "estimated_duration_seconds": 1020,
+        "sample_count": 22,
+        "confidence": "community_observed"
+      },
+      {
+        "model_label": "Luna max",
+        "model_family": "gpt-5.6-luna",
+        "reasoning_effort": "max",
+        "score": 96.4,
+        "estimated_cost": 0.46,
+        "estimated_duration_seconds": 1860,
+        "sample_count": 50,
+        "confidence": "community_observed"
+      }
+    ]
+  },
+  "completed_task_ids": ["discover"],
+  "requested_parallel_task_ids": ["implement", "document"],
+  "model_proposals": [
+    {
+      "task_id": "implement",
+      "requested_tier": "luna_max",
+      "rationale": "Host AI judged the implementation bounded and independently verifiable.",
+      "host_available_pairs": ["gpt-5.6-luna|max", "gpt-5.6-sol|medium", "gpt-5.6-sol|xhigh"],
+      "local_outcomes": [
+        {
+          "tier": "luna_max",
+          "similar_task_count": 4,
+          "gate_pass_rate": 1.0,
+          "rework_rate": 0.0,
+          "actual_cost": 0.38,
+          "actual_duration_seconds": 1320
+        }
+      ]
+    }
+  ]
+}

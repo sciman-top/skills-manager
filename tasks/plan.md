@@ -14,6 +14,9 @@
 **typed_core_status**: TC0/TC1 repo_verified; shadow_only; TC2 not_started
 **powershell_runtime_track**: powershell7_runtime_migration
 **powershell_runtime_status**: ps7_only; repo_verified
+**agent_workflow_advisory_track**: agent_workflow_advisory_runtime
+**agent_workflow_advisory_truth**: `tasks/skills-manager-vnext-agent-workflow-advisory.tasks.json`
+**agent_workflow_advisory_status**: 5/5 repo_verified; repo_advisory_only; host/live not_run
 **active_correction_track**: capability_routing_correction
 **correction_task_truth**: `tasks/skills-manager-vnext-capability-routing-correction.tasks.json`
 **correction_status**: repo_verified
@@ -97,7 +100,23 @@ Failure routing：文档/manifest/registry 漂移先修当前真源；同一 ver
 
 Verification：迭代运行 focused planning tests、Lean verifier、typed-core planning verifier 与 shadow parity；文件稳定后由 `scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree` 统一运行一次完整套件，随后执行 `git diff --check` 和 Git boundary 检查。不在 full gate 前后另行重复完整 suite。
 
-## 7.1 Typed-core Operation Contract TC0/TC1
+## 7.1 Agent workflow advisory runtime
+
+Goal：把 M0.3 的 TaskGraph/model policy 规划推进为 runtime-independent、repo-contained、zero-write 的真实合同和 CLI；宿主仍负责语义、native spawn/wait/steer、模型/effort 应用和最终综合。
+
+| Order | Task | Slice | Exit checkpoint |
+| ---: | --- | --- | --- |
+| 1 | `SMV-AWA-001` | product/spec boundary | 官方依据、user/host/repo/native runtime 分责、P6/host/live marker 完整 |
+| 2 | `SMV-AWA-002` | domain contracts | TaskGraph/Radar/FailurePacket v1；cycle/expiry/redaction 负例；pure layer |
+| 3 | `SMV-AWA-003` | application policy | deterministic waves；disjoint admission；三档 soft anchor；bounded escalation |
+| 4 | `SMV-AWA-004` | PS7 CLI | `agent-plan/agent-validate` 接入 bundle；repo-contained JSON；effect counters 0 |
+| 5 | `SMV-AWA-005` | verifier/closeout | focused + advisory verifier + full gate；evidence/docs/root sync；truth boundary 不越级 |
+
+Execution：宿主先固定 Product Baseline/base revision，再生成 TaskGraph；`agent-validate` 通过后用 `agent-plan` 取得 wave。只读或 exact write set 互斥、依赖已完成、owner/verification/stop condition 齐全的 task 才可由宿主在隔离 worktree 拉起并发；shared file/generated/schema/config/Git/external state/final integration/full gate 串行。模型优先级为 local outcomes → host availability/override → fresh Radar → host default；FailurePacket 先根因、一次 corrected retry、re-scope，再仅对 capacity 升档。权限、凭据、生产授权和用户决策 fail-closed。
+
+Verification：`AgentWorkflowContracts.Tests.ps1`、build、真 bundle 的两条 CLI、`verify-agent-workflow-advisory.ps1 -Json`，最后唯一 full gate。禁止把 5/5 `repo_verified` 写成 native scheduler/model call、Radar refresh、host loaded、M1 sample 或 live accepted。
+
+## 7.2 Typed-core Operation Contract TC0/TC1
 
 | Order | Task | Slice | Exit checkpoint |
 | ---: | --- | --- | --- |

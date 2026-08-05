@@ -32,6 +32,7 @@ It will not become an agent runtime, plugin marketplace, provider/model/auth/ses
 - [vNext roadmap](docs/product/skills-manager-vnext-roadmap.md)
 - [Rule-governance adoption matrix](docs/product/rule-governance-adoption-matrix.md)
 - [Current Phase 5 task manifest](tasks/skills-manager-vnext-phase5.tasks.json)
+- [Agent workflow advisory spec](docs/superpowers/specs/2026-08-05-agent-workflow-advisory-runtime.md) / [task manifest](tasks/skills-manager-vnext-agent-workflow-advisory.tasks.json)
 - [Historical Phase 4 task manifest](tasks/skills-manager-vnext-phase4.tasks.json)
 - [Historical Phase 3 task manifest](tasks/skills-manager-vnext-phase3.tasks.json)
 - [Historical Phase 2 task manifest](tasks/skills-manager-vnext-phase2.tasks.json)
@@ -44,7 +45,14 @@ PowerShell 7 (`pwsh`) is the only supported runtime; PowerShell 7.6 LTS is the r
 
 PowerShell remains the only current runtime truth, but it is no longer the permanent default home for every future domain rule. To reduce parser, quoting, dynamic-type, encoding, and native-process rework in AI-authored scripts, the target architecture is `versioned protocol -> conditional C#/.NET typed core -> PowerShell thin shell`. TC0/TC1 now provide a package-free C#/.NET `shadow_only` PoC for `OperationPlan/Receipt v1` with fixed-corpus PowerShell/C# parity. It is not wired into the CLI or generated bundle, TC2 production migration remains `not_started`, and a full rewrite or dual source of truth is forbidden.
 
-The host AI continues to own long-chain task decomposition, subagent orchestration, and model/effort selection. This repository only advises with a reviewable TaskGraph, Radar snapshot, three soft model tiers, serial/parallel admission, and failure escalation. `Sol xhigh / Sol medium / Luna max` are overrideable defaults, not an implemented runtime router; this repository does not mutate the active session, custom agents, provider/auth, or host config.
+The host AI continues to own long-chain task decomposition, subagent orchestration, and model/effort selection. The repository now implements runtime-independent TaskGraph, Radar snapshot, three soft model tiers, serial/parallel admission, and failure-escalation advice. `Sol xhigh / Sol medium / Luna max` are overrideable defaults, not a runtime router; the repository does not spawn subagents, call a provider, fetch Radar, or mutate the active session, custom agents, provider/auth, or host config. Repository-side validation and planning commands are:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\skills.ps1 agent-validate --input .\tests\fixtures\agent-workflow\valid-request.json --json
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\skills.ps1 agent-plan --input .\tests\fixtures\agent-workflow\valid-request.json --json
+```
+
+Output is fixed to `decision_owner=host_ai`, `executor=host_native_runtime`, and `provider_calls/native_mutations/writes=0`. The host uses native subagent/worktree surfaces after admission; shared files, generated seams, schema/migrations, Git/external state, final integration, and the full gate stay serial. The maximum current truth is `repo_verified/repo_advisory_only`, not `host_loaded/live_accepted`.
 
 The resident `capability-router` is now a compatibility fallback, not a lexical semantic router. Codex/ChatGPT first match visible skill metadata natively; when no visible capability fits, the fallback exposes domain names and purposes, the host chooses at most two domains, and only then receives bounded candidates. The host supplies its semantic choice to deterministic policy, which alone decides containment, availability, reuse, activation, and approval. The script reports `decision_owner=host_ai`, never assigns semantic confidence, and performs no host mutation. Run `scripts/verify-capability-routing.ps1` for the deterministic discovery/policy corpus and `scripts/evaluate-host-skill-selection.ps1` for opt-in fresh host selection/cold-load evaluation.
 

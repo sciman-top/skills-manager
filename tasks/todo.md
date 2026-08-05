@@ -61,6 +61,16 @@ M0/M0.2/M0.3 maintenance design planning package 为 11/11 `repo_verified`；M1 
 
 本 track 只改变当前 shell runtime support：最低 PowerShell 7.0、推荐 7.6 LTS、缺少 `pwsh` 时 fail-closed。它不改写历史 Phase manifest，不证明所有下游消费者已迁移，不启动 TC2/P6，也不把 Windows PowerShell 5.1 描述为已被微软停止支持。
 
+## Agent workflow advisory runtime checklist
+
+- [x] `SMV-AWA-001` 冻结 user/host/repo/native runtime 分责、TaskGraph/Radar/FailurePacket v1 和 P6/host/live 边界。
+- [x] `SMV-AWA-002` 实现 pure TaskGraph、RadarSnapshot 与 FailurePacket validators，覆盖 DAG/Radar/redaction 负例。
+- [x] `SMV-AWA-003` 实现 deterministic waves、parallel admission、三档 soft anchor 和 bounded escalation/fail-closed。
+- [x] `SMV-AWA-004` 接入 PS7 `agent-plan/agent-validate`，真实 bundle envelope 固定 provider/native/write counters 0。
+- [x] `SMV-AWA-005` 建立 verifier/negative tests、产品/根/README/evidence 同步并以唯一 full gate 收口。
+
+该 adjacent track 为 5/5 `repo_verified / repo_advisory_only`：只证明仓库合同与 CLI，不证明 native subagent 已拉起、模型已动态切换、Radar 已刷新、host config 已加载或业务 `live_accepted`。宿主 AI 继续负责语义 TaskGraph、并发拉起、模型/effort 和结果综合；M1 仍为 `collecting (0/10)`，P6 hold。
+
 ## Typed-core Operation Contract checklist
 
 - [x] `SMV-TC-001` 冻结 `OperationPlan/Receipt v1` read-only seam、三个 caller、四个 corpus hash、protocol/SDK/rollback。

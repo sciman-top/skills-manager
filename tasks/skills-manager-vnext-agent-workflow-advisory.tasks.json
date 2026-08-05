@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "program_id": "skills-manager-vnext",
+  "track": "agent_workflow_advisory_runtime",
+  "base_phase": "P5",
+  "track_status": "repo_verified",
+  "truth_boundary": "repo_advisory_only",
+  "decision_owner": "host_ai",
+  "executor": "host_native_runtime",
+  "p6_admission_status": "hold",
+  "runtime_scheduler_status": "not_introduced",
+  "provider_call_status": "none",
+  "native_mutation_status": "none",
+  "radar_fetch_status": "not_implemented",
+  "host_loaded_status": "not_run",
+  "live_acceptance_status": "not_run",
+  "model_tiers": [
+    { "tier": "sol_xhigh", "model_family": "gpt-5.6-sol", "reasoning_effort": "xhigh", "mode": "soft_anchor" },
+    { "tier": "sol_medium", "model_family": "gpt-5.6-sol", "reasoning_effort": "medium", "mode": "soft_anchor" },
+    { "tier": "luna_max", "model_family": "gpt-5.6-luna", "reasoning_effort": "max", "mode": "soft_anchor" }
+  ],
+  "allowed_statuses": ["done"],
+  "tasks": [
+    {
+      "id": "SMV-AWA-001",
+      "title": "冻结 Agent workflow advisory 产品边界与输入合同",
+      "status": "done",
+      "risk": "low",
+      "depends_on": [],
+      "write_set": [
+        "docs/superpowers/specs/2026-08-05-agent-workflow-advisory-runtime.md",
+        "tasks/skills-manager-vnext-agent-workflow-advisory.tasks.json",
+        "docs/product/skills-manager-vnext-prd.md",
+        "docs/product/skills-manager-vnext-architecture.md",
+        "docs/product/skills-manager-vnext-roadmap.md",
+        "docs/product/README.md"
+      ],
+      "goal": "把用户/宿主/本仓/native runtime 的责任和 TaskGraph、Radar、FailurePacket v1 字段固化为不越权的 advisory contract。",
+      "implementation_steps": ["核对 Codex 官方 subagent/model/worktree 文档", "复核 P5/M0.3 边界", "同步 PRD/架构/路线图/索引"],
+      "verification": ["ConvertFrom-Json manifest", "spec marker review", "scripts/verify-agent-workflow-advisory.ps1 -Json"],
+      "stop_conditions": ["产品真源可追踪", "P6 hold", "runtime/provider/host mutation remain none"],
+      "rollback": ["撤销 AWA-001 文档增量，不修改历史 M0/M0.3 或 PS7 migration"],
+      "evidence_group": "agent_workflow_advisory"
+    },
+    {
+      "id": "SMV-AWA-002",
+      "title": "实现 TaskGraph、Radar 与 FailurePacket 纯合同",
+      "status": "done",
+      "risk": "medium",
+      "depends_on": ["SMV-AWA-001"],
+      "write_set": ["src/Domain/AgentWorkflow.ps1", "build.ps1", "tests/Unit/AgentWorkflowContracts.Tests.ps1", "tests/fixtures/agent-workflow/valid-request.json", "tests/fixtures/agent-workflow/invalid-request.json"],
+      "goal": "对 DAG、依赖、cycle、integration order、exact write set、Radar freshness/hash/metrics、FailurePacket/redaction 做 fail-closed 校验。",
+      "implementation_steps": ["先运行 RED focused tests", "实现 plain-object v1 validators", "保持 domain 无 IO/clock/env/network/terminal"],
+      "verification": ["Invoke-Pester tests/Unit/AgentWorkflowContracts.Tests.ps1", "build.ps1"],
+      "stop_conditions": ["12 focused cases pass", "生成入口包含 Domain/AgentWorkflow.ps1", "无 provider/native mutation"],
+      "rollback": ["删除 AWA-002 源码/fixture/test，并恢复 build 列表"],
+      "evidence_group": "agent_workflow_advisory"
+    },
+    {
+      "id": "SMV-AWA-003",
+      "title": "实现波次、并行 admission、模型建议与失败升级",
+      "status": "done",
+      "risk": "medium",
+      "depends_on": ["SMV-AWA-002"],
+      "write_set": ["src/Application/ModelAndAgentPolicy.ps1", "build.ps1", "tests/Unit/AgentWorkflowContracts.Tests.ps1"],
+      "goal": "把依赖 wave、disjoint write-set admission、三档软锚点、Radar/local outcome fallback 和 FailurePacket 状态机做成 deterministic advisory。",
+      "implementation_steps": ["按 integration_order 生成拓扑 wave", "shared seam/external write 默认串行", "local outcome 优先于 Radar", "permission/credential/authorization fail-closed"],
+      "verification": ["focused Pester", "valid/invalid fixture replay", "CLI output review"],
+      "stop_conditions": ["discover -> implement+document -> integrate 可复现", "stale Radar 回退 host_default", "换档必须有 FailurePacket"],
+      "rollback": ["删除 AWA-003 application 增量和对应测试"],
+      "evidence_group": "agent_workflow_advisory"
+    },
+    {
+      "id": "SMV-AWA-004",
+      "title": "接入 PS7 CLI 的 agent-plan/agent-validate",
+      "status": "done",
+      "risk": "medium",
+      "depends_on": ["SMV-AWA-003"],
+      "write_set": ["src/Commands/AgentWorkflow.ps1", "src/Main.ps1", "src/Version.ps1", "build.ps1", "skills.ps1", "tests/Unit/AgentWorkflowContracts.Tests.ps1"],
+      "goal": "提供 repo-contained JSON 输入、稳定 JSON envelope 和 zero-write/provider-free CLI，不改变宿主运行时。",
+      "implementation_steps": ["加入 ValidateSet 与 Main dispatch", "限制 input path 在 repo root", "构建 bundle", "对 valid fixture 运行 plan/validate"],
+      "verification": ["pwsh -NoProfile -File build.ps1", "skills.ps1 agent-validate --json", "skills.ps1 agent-plan --json"],
+      "stop_conditions": ["两条命令 exit 0", "decision_owner=host_ai", "executor=host_native_runtime", "writes/provider_calls/native_mutations=0"],
+      "rollback": ["撤销 command/Main/Version/build 接线并重建 bundle"],
+      "evidence_group": "agent_workflow_advisory"
+    },
+    {
+      "id": "SMV-AWA-005",
+      "title": "建立 advisory verifier、证据与 full-gate 收口",
+      "status": "done",
+      "risk": "medium",
+      "depends_on": ["SMV-AWA-004"],
+      "write_set": ["scripts/verify-agent-workflow-advisory.ps1", "tests/Unit/AgentWorkflowAdvisoryPlanning.Tests.ps1", "scripts/quality/run-local-quality-gates.ps1", "docs/change-evidence/20260805-agent-workflow-advisory-runtime.md", "AGENTS.md", "tasks/plan.md", "tasks/todo.md", "README.md", "README.en.md"],
+      "goal": "以确定性 verifier 检查代码接线、模型软锚点、串并行/升级负向边界、零副作用和 truth boundary，并运行唯一 full gate。",
+      "implementation_steps": ["实现 current/negative verifier fixtures", "将 verifier 加入 full quality gate", "同步根契约/计划/清单/README", "记录 fresh receipts 和回滚边界"],
+      "verification": ["Invoke-Pester tests/Unit/AgentWorkflowAdvisoryPlanning.Tests.ps1", "scripts/verify-agent-workflow-advisory.ps1 -Json", "scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree"],
+      "stop_conditions": ["verifier zero findings", "full gate exit 0", "P6 hold/M1 collecting 0/10/live not_run", "无 host/config/provider/runtime mutation"],
+      "rollback": ["只回滚 AWA-005 及本 track 增量，保留 PS7-only 与历史规划真值"],
+      "evidence_group": "agent_workflow_advisory"
+    }
+  ]
+}
