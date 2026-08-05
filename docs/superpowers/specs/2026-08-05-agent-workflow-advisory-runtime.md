@@ -129,18 +129,17 @@ CLI 输入是 UTF-8 JSON，schema version 1，最小字段如下。字段名与 
 
 通过 admission 后，由宿主 AI 调用 Codex 原生 subagent/worktree surface，并为每个 task 传递最小 context、base、write set、verification 和 stop condition。宿主等待同一 wave 的结果，再由 integration owner 串行集成；本仓 CLI 的 `provider_calls/native_mutations/writes` 永远为 0。
 
-## 6. 四档模型软锚点
+## 6. 三档模型软锚点
 
-四档只作为 host proposal 的可覆盖起点，不能被 deterministic script 静默路由：
+三档只作为 host proposal 的可覆盖起点，不能被 deterministic script 静默路由：
 
 | tier | 软锚点 | 默认适用任务 |
 | --- | --- | --- |
 | `sol_xhigh` | `gpt-5.6-sol + xhigh` | 需求/产品澄清、总体架构、跨服务生产 RCA、高价值高风险审查、最终裁决 |
 | `sol_medium` | `gpt-5.6-sol + medium` | 一般实现、日常 Bug 排查、中等复杂度审查、集成准备 |
-| `terra_high` | `gpt-5.6-terra + high` | 用户偏好的 balanced 默认；read-heavy 扫描、独立评审、边界清晰的中等任务与成本/时延敏感任务 |
-| `luna_max` | `gpt-5.6-luna + max` | 常规接口、SQL、单测、技术文档、机械变换和边界清晰的重复任务 |
+| `luna_max` | `gpt-5.6-luna + max` | 用户默认；常规接口、SQL、单测、技术文档、机械变换和边界清晰的重复任务 |
 
-实际选择优先级为 `user override -> local comparable outcomes -> current host availability -> fresh Radar snapshot -> host native default`。`Terra high` 是当前用户明确覆盖的 balanced 默认；Radar 后续变化只能生成可审计建议，不能自动提升为 `Terra max`。费用、wall-clock、token/context、重试/返工和不可逆风险一起构成 Pareto 观察；不得把每天变化的 Radar 排名硬编码为总分或永久配置。模型不存在、宿主不可用或 snapshot stale 时返回 `host_default` 与 fallback reason。
+实际选择优先级为 `user override -> local comparable outcomes -> current host availability -> fresh Radar snapshot -> host native default`。`Luna max` 是当前用户明确覆盖的 routine 默认；Radar 后续变化只能生成可审计建议，不能自动增加 Terra 或其他第四档。费用、wall-clock、token/context、重试/返工和不可逆风险一起构成 Pareto 观察；不得把每天变化的 Radar 排名硬编码为总分或永久配置。模型不存在、宿主不可用、tier 已移除或 snapshot stale 时返回 `host_default` 与 fallback reason。
 
 ## 7. Radar snapshot
 
@@ -158,7 +157,7 @@ route
   -> one corrected retry (same tier, corrected context/tool)
   -> task/context: add evidence or rescope/replan
   -> tool: repair tool or reassign
-  -> capacity only: Luna max -> Terra high -> Sol medium -> Sol xhigh
+  -> capacity only: Luna max -> Sol medium -> Sol xhigh
   -> same issue_id second failure: supervisor serial takeover / clarify
   -> permission, credential, production authorization, user decision: fail-closed
 ```
@@ -213,4 +212,4 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File skills.ps1 agent-plan --input test
 - Codex Radar：`https://codexradar.com/` 只作为用户指定的时变社区观察输入；其每日成本/时延/分数必须经 snapshot、hash、expiry 和本地结果复核后才可影响建议。
 - 社区项目只提供协议启发，按既有 `references/reference-shelf.manifest.json` 和 `docs/EXTERNAL_REFERENCE_REPO_TIERS.md` 记录，不执行外部脚本，不引入第二控制面。
 
-**最大声明**：本 track `repo_verified` 只证明 deterministic advisory contract、CLI 接线、文档和 verifier。独立 host acceptance 已观察到 Sol xhigh、Sol medium、Terra high 原生子代理，fresh CLI 已加载全局规则/配置，手工与首个 scheduled Radar snapshot 均通过本仓 validator；这些仍只是 `host_evaluation_partial_pass`，不证明任意任务都会自动委派、Luna 在所有 spawn surface 可用、模型策略产生普遍净收益、外部生产动作获授权或业务 `live_accepted`。
+**最大声明**：本 track `repo_verified` 只证明 deterministic advisory contract、CLI 接线、文档和 verifier。独立 host acceptance 的早期 receipt 已观察到 Sol xhigh、Sol medium、Terra high 原生子代理以及首个 scheduled Radar snapshot；当前三档配置已投影到宿主文件，但 Luna 真实 spawn 尚未执行。这些仍只是 `host_evaluation_partial_pass`，不证明任意任务都会自动委派、Luna 在所有 spawn surface 可用、模型策略产生普遍净收益、外部生产动作获授权或业务 `live_accepted`。

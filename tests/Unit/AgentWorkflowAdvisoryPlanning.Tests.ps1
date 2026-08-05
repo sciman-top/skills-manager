@@ -57,7 +57,7 @@ Describe 'Agent workflow advisory planning verifier' {
         $parsed.truth_boundary | Should Be 'repo_advisory_only'
         $parsed.tasks | Should Be 5
         $parsed.done | Should Be 5
-        $parsed.model_tiers | Should Be 4
+        $parsed.model_tiers | Should Be 3
         $parsed.provider_calls | Should Be 0
         $parsed.native_mutations | Should Be 0
         $parsed.writes | Should Be 0

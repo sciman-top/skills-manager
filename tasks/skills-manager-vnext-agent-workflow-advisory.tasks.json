@@ -19,8 +19,7 @@
   "model_tiers": [
     { "tier": "sol_xhigh", "model_family": "gpt-5.6-sol", "reasoning_effort": "xhigh", "mode": "soft_anchor" },
     { "tier": "sol_medium", "model_family": "gpt-5.6-sol", "reasoning_effort": "medium", "mode": "soft_anchor" },
-    { "tier": "terra_high", "model_family": "gpt-5.6-terra", "reasoning_effort": "high", "mode": "user_preferred_soft_anchor" },
-    { "tier": "luna_max", "model_family": "gpt-5.6-luna", "reasoning_effort": "max", "mode": "soft_anchor" }
+    { "tier": "luna_max", "model_family": "gpt-5.6-luna", "reasoning_effort": "max", "mode": "user_preferred_soft_anchor" }
   ],
   "allowed_statuses": ["done"],
   "tasks": [
@@ -66,7 +65,7 @@
       "risk": "medium",
       "depends_on": ["SMV-AWA-002"],
       "write_set": ["src/Application/ModelAndAgentPolicy.ps1", "build.ps1", "tests/Unit/AgentWorkflowContracts.Tests.ps1"],
-      "goal": "把依赖 wave、disjoint write-set admission、四档软锚点、Radar/local outcome/user override fallback 和 FailurePacket 状态机做成 deterministic advisory。",
+      "goal": "把依赖 wave、disjoint write-set admission、三档软锚点、Radar/local outcome/user override fallback 和 FailurePacket 状态机做成 deterministic advisory。",
       "implementation_steps": ["按 integration_order 生成拓扑 wave", "shared seam/external write 默认串行", "local outcome 优先于 Radar", "permission/credential/authorization fail-closed"],
       "verification": ["focused Pester", "valid/invalid fixture replay", "CLI output review"],
       "stop_conditions": ["discover -> implement+document -> integrate 可复现", "stale Radar 回退 host_default", "换档必须有 FailurePacket"],

@@ -1,5 +1,7 @@
 # Host-native agent routing and Radar automation
 
+> Superseded for current policy by `20260805-three-tier-model-policy-and-worktree-closeout.md`. The Terra-high configuration and runtime observations below remain immutable historical receipts; they are no longer active model-tier policy.
+
 ## Goal and boundary
 
 This slice validates the host-owned part of the existing `agent_workflow_advisory_runtime` without introducing a repository scheduler, provider gateway, daemon, queue, database, or second agent runtime. The user owns goals, value/cost preferences, irreversible authorization, and vetoes. Codex owns semantic TaskGraph construction, dependency waves, native spawn/wait/steer/stop, per-agent model and reasoning effort, integration, and final verification. `skills-manager` remains a deterministic advisory and evidence layer.

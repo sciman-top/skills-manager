@@ -82,7 +82,7 @@ Goal：把 skills-manager 面向高效 AI 软件交付的总体方案落为 advi
 | 6 | `SMV-MD-006` | sparse tool stack + pilot observations | disposition/context-adapter/skill lifecycle 完整；M1 仍 collecting 0/10 |
 | 7 | `SMV-MD-007` | M0.2 verifier | evidence-group、policy literal、sample observation 与负向边界 fail-closed |
 | 8 | `SMV-MD-008` | M0.2 closeout | 独立 evidence；产品索引/根契约同步；唯一 full gate；不声明 runtime/live |
-| 9 | `SMV-MD-009` | TaskGraph + model policy | host-owned semantics；四档软锚点（Terra high 为用户 balanced override）；Radar expiring snapshot；并行 admission 与 escalation |
+| 9 | `SMV-MD-009` | TaskGraph + model policy | host-owned semantics；三档软锚点（Luna max 为用户默认）；Radar expiring snapshot；并行 admission 与 escalation |
 | 10 | `SMV-MD-010` | PowerShell/typed-core architecture | 当前 PS 单一真源；C#/.NET thin-shell PoC 路线；TC0-TC3；拒绝重写/双真源 |
 | 11 | `SMV-MD-011` | M0.3 verifier + closeout | 三组 evidence；模型/runtime/typed-core 边界 fail-closed；唯一 full gate；不声明 PoC/live |
 
@@ -92,7 +92,7 @@ M0.2 execution contract：2–3 个 Agent 只可并行输出 read-only 设计候
 
 Tool admission：默认 `host-native + repo-native + Git + gates`；只有重复 workflow 进入 skill，分发需要进入 plugin，current external data/action 进入 MCP/connector，两个独立 repo-native 检索失败且语言/privacy/freshness/resource/supply-chain/rollback 完整时才评估 read-only context adapter。所有候选必须有 adopt/adapt/defer/reject、native equivalent、consumer、evaluation、maintenance cost 和 retirement trigger。
 
-M0.3 model policy：用户拥有目标、价值排序、不可逆风险和外部授权；宿主 AI 负责 TaskGraph、串并行、模型/effort、spawn/wait/steer、升级、集成和最终综合；skills-manager 只提供 Radar/cost/risk proposal 与 deterministic admission。默认 `Sol xhigh / Sol medium / Terra high / Luna max` 是可覆盖软锚点，Terra high 是当前用户 balanced override。一次 corrected retry 后仍失败则补证据/re-scope；仅模型能力不足才按 `Luna max -> Terra high -> Sol medium -> Sol xhigh` 有界升级；同一 issue 两次失败或两次升档由 supervisor 串行接管。shared seam、final integration 和 full gate 始终串行。
+M0.3 model policy：用户拥有目标、价值排序、不可逆风险和外部授权；宿主 AI 负责 TaskGraph、串并行、模型/effort、spawn/wait/steer、升级、集成和最终综合；skills-manager 只提供 Radar/cost/risk proposal 与 deterministic admission。默认 `Sol xhigh / Sol medium / Luna max` 是可覆盖软锚点，Luna max 是当前用户默认。一次 corrected retry 后仍失败则补证据/re-scope；仅模型能力不足才按 `Luna max -> Sol medium -> Sol xhigh` 有界升级；同一 issue 两次失败或两次升档由 supervisor 串行接管。shared seam、final integration 和 full gate 始终串行。
 
 M0.3 technology path：PowerShell 7/生成 bundle 继续是唯一运行真源；独立 `powershell7_runtime_migration` 已把当前 source/installer/CLI/CI/tests/subprocess/docs/release 支持面收敛为 `ps7_only`，5.1 仅存在于历史事实，不再有 fallback 或 bounded smoke。独立 `typed_core_shadow_poc` 已完成 TC0/TC1：选择 `operation_contract_validation_v1`、三个真实 caller、四个固定 fixture、.NET 10.0.302 protocol v1，并实现 package-free C# shadow parity/发布观测。生产 `src`/CLI/bundle 未引用 candidate；TC2 单 seam 迁移保持 `not_started`，TC3 retain/revise/retire 保持 conditional。
 
@@ -108,11 +108,11 @@ Goal：把 M0.3 的 TaskGraph/model policy 规划推进为 runtime-independent�
 | ---: | --- | --- | --- |
 | 1 | `SMV-AWA-001` | product/spec boundary | 官方依据、user/host/repo/native runtime 分责、P6/host/live marker 完整 |
 | 2 | `SMV-AWA-002` | domain contracts | TaskGraph/Radar/FailurePacket v1；cycle/expiry/redaction 负例；pure layer |
-| 3 | `SMV-AWA-003` | application policy | deterministic waves；disjoint admission；四档 soft anchor；user override；bounded escalation |
+| 3 | `SMV-AWA-003` | application policy | deterministic waves；disjoint admission；三档 soft anchor；user override；bounded escalation |
 | 4 | `SMV-AWA-004` | PS7 CLI | `agent-plan/agent-validate` 接入 bundle；repo-contained JSON；effect counters 0 |
 | 5 | `SMV-AWA-005` | verifier/closeout | focused + advisory verifier + full gate；evidence/docs/root sync；truth boundary 不越级 |
 
-Execution：宿主先固定 Product Baseline/base revision，再生成 TaskGraph；`agent-validate` 通过后用 `agent-plan` 取得 wave。只读或 exact write set 互斥、依赖已完成、owner/verification/stop condition 齐全的 task 才可由宿主在隔离 worktree 拉起并发；shared file/generated/schema/config/Git/external state/final integration/full gate 串行。模型优先级为 user override → local outcomes → host availability → fresh Radar → host default；FailurePacket 先根因、一次 corrected retry、re-scope，再仅对 capacity 按四档有界升档。权限、凭据、生产授权和用户决策 fail-closed。
+Execution：宿主先固定 Product Baseline/base revision，再生成 TaskGraph；`agent-validate` 通过后用 `agent-plan` 取得 wave。只读或 exact write set 互斥、依赖已完成、owner/verification/stop condition 齐全的 task 才可由宿主在隔离 worktree 拉起并发；shared file/generated/schema/config/Git/external state/final integration/full gate 串行。模型优先级为 user override → local outcomes → host availability → fresh Radar → host default；FailurePacket 先根因、一次 corrected retry、re-scope，再仅对 capacity 按三档有界升档。权限、凭据、生产授权、未知 tier 和用户决策 fail-closed。
 
 Verification：`AgentWorkflowContracts.Tests.ps1`、build、真 bundle 的两条 CLI、`verify-agent-workflow-advisory.ps1 -Json`，最后唯一 full gate。5/5 `repo_verified` 不能推出 native scheduler/model call、Radar refresh、host load、M1 sample 或 live accepted；独立 host receipt 只能声明观察到的 partial scope。
 

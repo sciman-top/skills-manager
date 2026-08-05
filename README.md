@@ -45,7 +45,7 @@ vNext P0-P5 已完成 repo-side 验收（P0/P1 各 9/9，P2/P3 各 7/7，P4 6/6�
 
 PowerShell 仍是当前唯一运行真源，但不再是所有未来领域逻辑的默认永久归宿。针对 AI 生成脚本常见的 parser/quoting/动态类型/encoding/native-process 返工，目标架构采用 `versioned protocol -> 条件性 C#/.NET typed core -> PowerShell thin shell`。当前 TC0/TC1 已对 `OperationPlan/Receipt v1` 建立 package-free C#/.NET `shadow_only` PoC，并在固定 corpus 上实现 PowerShell/C# parity；它没有接入 CLI/生成 bundle，TC2 生产迁移仍为 `not_started`，禁止直接全仓重写或形成双真源。
 
-长链路任务的模型与子 Agent 编排继续由宿主 AI 负责；本仓已实现可审查、runtime-independent 的 TaskGraph、Radar snapshot、四档模型软锚点、串并行 admission 和 failure escalation 建议。`Sol xhigh / Sol medium / Terra high / Luna max` 是可覆盖软锚点，Terra high 是当前用户偏好的 balanced 默认；它们不是仓库动态路由。本仓不拉起 subagent、不调用 provider、不抓取 Radar，也不修改 active session、custom-agent、provider/auth 或 host config；独立宿主侧已完成全局条件性委派规则、Terra-high 默认、三种真实子代理观察和首个 Radar Scheduled run。仓库侧验证与计划入口：
+长链路任务的模型与子 Agent 编排继续由宿主 AI 负责；本仓已实现可审查、runtime-independent 的 TaskGraph、Radar snapshot、三档模型软锚点、串并行 admission 和 failure escalation 建议。`Sol xhigh / Sol medium / Luna max` 是可覆盖软锚点，Luna max 是当前用户默认；它们不是仓库动态路由。本仓不拉起 subagent、不调用 provider、不抓取 Radar，也不修改 active session、custom-agent、provider/auth 或 host config；宿主侧配置与 Radar Scheduled automation 由独立 host acceptance 管理，既有 Terra-high 运行记录只保留为历史证据。仓库侧验证与计划入口：
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\skills.ps1 agent-validate --input .\tests\fixtures\agent-workflow\valid-request.json --json

@@ -126,8 +126,7 @@ if ($null -ne $manifest) {
     $expectedTiers = [ordered]@{
         sol_xhigh = 'gpt-5.6-sol|xhigh|soft_anchor'
         sol_medium = 'gpt-5.6-sol|medium|soft_anchor'
-        terra_high = 'gpt-5.6-terra|high|user_preferred_soft_anchor'
-        luna_max = 'gpt-5.6-luna|max|soft_anchor'
+        luna_max = 'gpt-5.6-luna|max|user_preferred_soft_anchor'
     }
     $tiers = @($manifest.model_tiers)
     $modelTierCount = $tiers.Count

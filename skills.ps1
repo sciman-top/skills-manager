@@ -3848,7 +3848,6 @@ function Get-AgentModelTierAnchor([string]$Tier) {
     switch ($Tier.ToLowerInvariant()) {
         'sol_xhigh' { return [pscustomobject]@{ tier = 'sol_xhigh'; label = 'Sol xhigh'; model_family = 'gpt-5.6-sol'; reasoning_effort = 'xhigh' } }
         'sol_medium' { return [pscustomobject]@{ tier = 'sol_medium'; label = 'Sol medium'; model_family = 'gpt-5.6-sol'; reasoning_effort = 'medium' } }
-        'terra_high' { return [pscustomobject]@{ tier = 'terra_high'; label = 'Terra high'; model_family = 'gpt-5.6-terra'; reasoning_effort = 'high' } }
         'luna_max' { return [pscustomobject]@{ tier = 'luna_max'; label = 'Luna max'; model_family = 'gpt-5.6-luna'; reasoning_effort = 'max' } }
         default { return $null }
     }
@@ -3903,14 +3902,14 @@ function Get-AgentEscalationDecision {
     elseif ($kind -in @('task', 'context')) { $action = 'rescope_task_graph'; $requiresGraph = $true }
     elseif ($kind -eq 'tool') { $action = 'repair_tool_or_reassign' }
     elseif ($kind -eq 'capacity') {
-        if ($attempt -le 1) { $action = 'corrected_retry' }
+        if ($tier -notin @('luna_max', 'sol_medium', 'sol_xhigh')) { $action = 'supervisor_review' }
+        elseif ($attempt -le 1) { $action = 'corrected_retry' }
         elseif ($escalations -ge 2 -or $tier -eq 'sol_xhigh') { $action = 'supervisor_takeover'; $requiresGraph = $true }
         else {
             $action = 'replan_and_escalate'; $requiresGraph = $true
             $nextTier = switch ($tier) {
-                'luna_max' { 'terra_high' }
-                'terra_high' { 'sol_medium' }
-                default { 'sol_xhigh' }
+                'luna_max' { 'sol_medium' }
+                'sol_medium' { 'sol_xhigh' }
             }
         }
     }
