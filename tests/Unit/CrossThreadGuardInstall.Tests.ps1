@@ -4,6 +4,7 @@ Describe 'Cross-thread guard installer and doctor' {
         $installer = Join-Path $repoRoot 'scripts\hooks\Install-CrossThreadGuard.ps1'
         $doctor = Join-Path $repoRoot 'scripts\hooks\Test-CrossThreadGuard.ps1'
         $sourceHook = Join-Path $repoRoot 'scripts\hooks\block-cross-thread-send.ps1'
+        $sourceRuntimeDoctor = Join-Path $repoRoot 'scripts\hooks\Test-WatchGuardRuntime.ps1'
     }
 
     BeforeEach {
@@ -41,7 +42,11 @@ Describe 'Cross-thread guard installer and doctor' {
         (Get-Content -Raw -LiteralPath $script:configPath) | Should Be $script:originalConfig
 
         $hostHook = Join-Path $script:codexHome 'scripts\block-cross-thread-send.ps1'
+        $hostRuntimeDoctor = Join-Path $script:codexHome 'scripts\Test-WatchGuardRuntime.ps1'
         (Get-FileHash -Algorithm SHA256 -LiteralPath $hostHook).Hash | Should Be (Get-FileHash -Algorithm SHA256 -LiteralPath $sourceHook).Hash
+        Test-Path -LiteralPath $hostRuntimeDoctor | Should Be $true
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $hostRuntimeDoctor).Hash | Should Be (Get-FileHash -Algorithm SHA256 -LiteralPath $sourceRuntimeDoctor).Hash
+        $receipt.runtime_doctor_path | Should Be $hostRuntimeDoctor
 
         $hooks = Get-Content -Raw -LiteralPath (Join-Path $script:codexHome 'hooks.json') | ConvertFrom-Json
         @($hooks.hooks.PostToolUse).Count | Should Be 1

@@ -58,8 +58,20 @@ $simulationCases = [ordered]@{
     nested_shell_send = $false
     read_only_subexpression_send = $false
     reader_exec_option_send = $false
+    target_self_delete = $false
+    fleet_self_delete = $false
+    automation_live_probe_sentinel = $false
+    direct_user_lifecycle_allowed = $false
 }
 if ($hostExists) {
+    $targetTranscript = [System.IO.Path]::GetTempFileName()
+    $fleetTranscript = [System.IO.Path]::GetTempFileName()
+    $ordinaryTranscript = [System.IO.Path]::GetTempFileName()
+    try {
+        [ordered]@{ timestamp = '2026-08-05T00:00:00Z'; type = 'response_item'; payload = [ordered]@{ type = 'message'; role = 'user'; content = @([ordered]@{ type = 'input_text'; text = '<heartbeat><automation_id>watch-interrupted-task-v1-target-thread-id-doctor-source</automation_id><instructions>watch-interrupted-task:v1 target_thread_id=doctor-source</instructions></heartbeat>' }); internal_chat_message_metadata_passthrough = [ordered]@{ turn_id = 'doctor-turn' } } } | ConvertTo-Json -Depth 10 -Compress | Set-Content -LiteralPath $targetTranscript -NoNewline
+        [ordered]@{ timestamp = '2026-08-05T00:00:00Z'; type = 'response_item'; payload = [ordered]@{ type = 'message'; role = 'user'; content = @([ordered]@{ type = 'input_text'; text = '<heartbeat><automation_id>watch-interrupted-task-v1-target-thread-id-doctor-fleet</automation_id><instructions>watch-interrupted-task:fleet:v1 supervisor_thread_id=doctor-fleet</instructions></heartbeat>' }); internal_chat_message_metadata_passthrough = [ordered]@{ turn_id = 'doctor-turn' } } } | ConvertTo-Json -Depth 10 -Compress | Set-Content -LiteralPath $fleetTranscript -NoNewline
+        [ordered]@{ timestamp = '2026-08-05T00:00:00Z'; type = 'response_item'; payload = [ordered]@{ type = 'message'; role = 'user'; content = @([ordered]@{ type = 'input_text'; text = '关闭当前任务守夜。' }); internal_chat_message_metadata_passthrough = [ordered]@{ turn_id = 'doctor-turn' } } } | ConvertTo-Json -Depth 10 -Compress | Set-Content -LiteralPath $ordinaryTranscript -NoNewline
+
     $probes = [ordered]@{
         direct_send_tool = [ordered]@{
             tool_name = 'codex_app__send_message_to_thread'
@@ -89,19 +101,52 @@ if ($hostExists) {
                 command = 'rg --pre "codex app-server request thread/send --thread doctor-target --prompt blocked" thread/send docs'
             }
         }
+        target_self_delete = [ordered]@{
+            session_id = 'doctor-source'
+            transcript_path = $targetTranscript
+            tool_name = 'codex_app__automation_update'
+            tool_input = [ordered]@{ mode = 'delete'; id = 'watch-interrupted-task-v1-target-thread-id-doctor-source' }
+            expect = 'deny'
+        }
+        fleet_self_delete = [ordered]@{
+            session_id = 'doctor-fleet'
+            transcript_path = $fleetTranscript
+            tool_name = 'codex_app__automation_update'
+            tool_input = [ordered]@{ mode = 'delete'; id = 'watch-interrupted-task-v1-target-thread-id-doctor-fleet' }
+            expect = 'deny'
+        }
+        automation_live_probe_sentinel = [ordered]@{
+            session_id = 'doctor-source'
+            transcript_path = $targetTranscript
+            tool_name = 'codex_app__automation_update'
+            tool_input = [ordered]@{ mode = 'delete'; id = 'watch-interrupted-task-v1-live-probe-doctor' }
+            expect = 'deny'
+        }
+        direct_user_lifecycle_allowed = [ordered]@{
+            session_id = 'doctor-source'
+            transcript_path = $ordinaryTranscript
+            tool_name = 'codex_app__automation_update'
+            tool_input = [ordered]@{ mode = 'delete'; id = 'watch-interrupted-task-v1-target-thread-id-doctor-source' }
+            expect = 'allow'
+        }
     }
 
     foreach ($probe in $probes.GetEnumerator()) {
         $payload = [ordered]@{
-            session_id = 'doctor-source'
+            session_id = if ($probe.Value.session_id) { $probe.Value.session_id } else { 'doctor-source' }
             turn_id = 'doctor-turn'
+            transcript_path = $probe.Value.transcript_path
             hook_event_name = 'PreToolUse'
             tool_name = $probe.Value.tool_name
             tool_use_id = "doctor-$($probe.Key)"
             tool_input = $probe.Value.tool_input
         } | ConvertTo-Json -Depth 8 -Compress
         $output = $payload | & pwsh -NoProfile -ExecutionPolicy Bypass -File $hostHook -ExpectedScriptSha256 $hostHash 2>$null
-        if ($LASTEXITCODE -eq 0 -and $output) {
+        $expected = if ($probe.Value.expect) { [string]$probe.Value.expect } else { 'deny' }
+        if ($LASTEXITCODE -eq 0 -and $expected -ceq 'allow' -and -not $output) {
+            $simulationCases[$probe.Key] = $true
+        }
+        elseif ($LASTEXITCODE -eq 0 -and $output) {
             try {
                 $decision = (@($output) -join "`n") | ConvertFrom-Json
                 $simulationCases[$probe.Key] = [string]$decision.hookSpecificOutput.permissionDecision -eq 'deny'
@@ -110,6 +155,10 @@ if ($hostExists) {
                 $simulationCases[$probe.Key] = $false
             }
         }
+    }
+    }
+    finally {
+        Remove-Item -LiteralPath $targetTranscript, $fleetTranscript, $ordinaryTranscript -Force -ErrorAction SilentlyContinue
     }
 }
 $simulationPassed = @($simulationCases.Values | Where-Object { -not $_ }).Count -eq 0

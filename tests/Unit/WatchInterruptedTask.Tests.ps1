@@ -33,6 +33,9 @@ Describe "watch-interrupted-task contract" {
     It "does not let an in-flight heartbeat overwrite a newer durable prompt" {
         $script:skill | Should Match "fleet supervisor is the only automation writer"
         $script:prompt | Should Match "Never update, pause, resume, or delete automation metadata"
+        $script:prompt | Should Match "continuous monitoring reason remains active"
+        $script:prompt | Should Match "generic heartbeat lifecycle instruction"
+        $script:prompt | Should Match "never claim that automation was deleted"
     }
 
     It "makes peer busy a secondary gate after recovery eligibility" {
@@ -76,6 +79,9 @@ Describe "watch-interrupted-task contract" {
         $script:prompt | Should Match "soft_guard_only"
         $script:prompt | Should Match "reviewed and trusted"
         $script:prompt | Should Match "specialized tool paths"
+        $script:prompt | Should Match "Test-WatchGuardRuntime.ps1"
+        $script:prompt | Should Match "nonexistent target"
+        $script:prompt | Should Match "denied before shell execution"
     }
 
     It "keeps every shared-checkout heartbeat armed and deterministically serializes writers" {

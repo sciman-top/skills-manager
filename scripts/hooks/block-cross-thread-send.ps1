@@ -123,6 +123,101 @@ function Test-CanonicalWatchPrompt {
     return (Get-Sha256Lower -Text $body) -ceq $declaredHash
 }
 
+function Get-WatchTurnRole {
+    param([Parameter(Mandatory = $true)][object]$Payload)
+
+    $sessionId = [string](Get-InputProperty -InputObject $Payload -Names @('session_id', 'sessionId'))
+    $turnId = [string](Get-InputProperty -InputObject $Payload -Names @('turn_id', 'turnId'))
+    $transcriptPath = [string](Get-InputProperty -InputObject $Payload -Names @('transcript_path', 'transcriptPath'))
+    if ([string]::IsNullOrWhiteSpace($sessionId) -or [string]::IsNullOrWhiteSpace($turnId) -or
+        [string]::IsNullOrWhiteSpace($transcriptPath) -or -not (Test-Path -LiteralPath $transcriptPath -PathType Leaf)) {
+        return 'unknown'
+    }
+
+    $turnMessages = [System.Collections.Generic.List[string]]::new()
+    try {
+        foreach ($line in @(Get-Content -LiteralPath $transcriptPath -Tail 2000)) {
+            if ([string]::IsNullOrWhiteSpace($line)) {
+                continue
+            }
+
+            try {
+                $record = $line | ConvertFrom-Json -Depth 50 -ErrorAction Stop
+            }
+            catch {
+                continue
+            }
+
+            if ([string]$record.type -cne 'response_item' -or [string]$record.payload.type -cne 'message' -or
+                [string]$record.payload.role -cne 'user') {
+                continue
+            }
+
+            $recordTurnId = [string](Get-InputProperty -InputObject $record.payload.internal_chat_message_metadata_passthrough -Names @('turn_id', 'turnId'))
+            if ($recordTurnId -cne $turnId) {
+                continue
+            }
+
+            foreach ($content in @($record.payload.content)) {
+                $text = [string](Get-InputProperty -InputObject $content -Names @('text'))
+                if (-not [string]::IsNullOrWhiteSpace($text)) {
+                    $turnMessages.Add($text)
+                }
+            }
+        }
+    }
+    catch {
+        return 'unknown'
+    }
+
+    if ($turnMessages.Count -eq 0) {
+        return 'unknown'
+    }
+
+    $combined = [string]::Join("`n", $turnMessages)
+    if ($combined -match '(?s)<heartbeat>.*?watch-interrupted-task:fleet:v1 supervisor_thread_id=([A-Za-z0-9][A-Za-z0-9._:-]{0,255}).*?</heartbeat>') {
+        if ($Matches[1] -ceq $sessionId) {
+            return 'fleet_heartbeat'
+        }
+        return 'unknown'
+    }
+    if ($combined -match '(?s)<heartbeat>.*?watch-interrupted-task:v1 target_thread_id=([A-Za-z0-9][A-Za-z0-9._:-]{0,255}).*?</heartbeat>') {
+        if ($Matches[1] -ceq $sessionId) {
+            return 'target_heartbeat'
+        }
+        return 'unknown'
+    }
+    if ($combined -match '(?s)<heartbeat>.*?</heartbeat>') {
+        return 'unknown'
+    }
+
+    return 'ordinary_turn'
+}
+
+function Get-WatchAutomationTargetId {
+    param([AllowNull()][object]$ToolInput)
+
+    $id = [string](Get-InputProperty -InputObject $ToolInput -Names @('id'))
+    if ($id -match '^watch-interrupted-task-v1-target-thread-id-([A-Za-z0-9][A-Za-z0-9._:-]{0,255})$') {
+        return $Matches[1]
+    }
+
+    $targetThreadId = [string](Get-InputProperty -InputObject $ToolInput -Names @('targetThreadId', 'target_thread_id'))
+    if (-not [string]::IsNullOrWhiteSpace($targetThreadId)) {
+        return $targetThreadId
+    }
+
+    $prompt = [string](Get-InputProperty -InputObject $ToolInput -Names @('prompt'))
+    if ($prompt -match '(?m)^watch-interrupted-task:v1 target_thread_id=([A-Za-z0-9][A-Za-z0-9._:-]{0,255})$') {
+        return $Matches[1]
+    }
+    if ($prompt -match '(?m)^watch-interrupted-task:fleet:v1 supervisor_thread_id=([A-Za-z0-9][A-Za-z0-9._:-]{0,255})$') {
+        return $Matches[1]
+    }
+
+    return $null
+}
+
 try {
     $payload = $rawInput | ConvertFrom-Json -Depth 50 -ErrorAction Stop
 }
@@ -151,13 +246,46 @@ elseif ($toolName -match '(?i)(^|__|\.)handoff_thread$') {
     }
 }
 elseif ($toolName -match '(?i)(^|__|\.)automation_update$') {
+    $mode = [string](Get-InputProperty -InputObject $toolInput -Names @('mode'))
+    $automationId = [string](Get-InputProperty -InputObject $toolInput -Names @('id'))
     $prompt = [string](Get-InputProperty -InputObject $toolInput -Names @('prompt'))
     $targetThreadId = [string](Get-InputProperty -InputObject $toolInput -Names @('targetThreadId', 'target_thread_id'))
     $sessionId = [string]$payload.session_id
     $isWatchPrompt = $prompt -match '(?m)^watch-interrupted-task(?::fleet)?:v1 '
     $isCrossTargetPrompt = -not [string]::IsNullOrWhiteSpace($prompt) -and -not [string]::IsNullOrWhiteSpace($targetThreadId) -and $targetThreadId -cne $sessionId
+    $watchTargetThreadId = [string](Get-WatchAutomationTargetId -ToolInput $toolInput)
+    $isWatchMutation = -not [string]::IsNullOrWhiteSpace($watchTargetThreadId) -or $isWatchPrompt -or
+        $automationId -match '^watch-interrupted-task-v1-live-probe-'
 
-    if (($isWatchPrompt -or $isCrossTargetPrompt) -and -not (Test-CanonicalWatchPrompt -Prompt $prompt -ExpectedTargetThreadId $targetThreadId)) {
+    if ($mode -ceq 'view') {
+        # Read-only automation inspection is allowed from every turn role.
+    }
+    elseif ($automationId -match '^watch-interrupted-task-v1-live-probe-[A-Za-z0-9._:-]+$') {
+        $denyReason = 'Watch automation live-probe sentinel was denied before the native automation call executed.'
+    }
+    else {
+        $turnRole = Get-WatchTurnRole -Payload $payload
+        if ($turnRole -ceq 'target_heartbeat') {
+            $denyReason = 'Target heartbeats are monitor/recovery workers and cannot mutate automation metadata; the fleet supervisor is the sole heartbeat writer.'
+        }
+        elseif ($turnRole -ceq 'fleet_heartbeat') {
+            if (-not $isWatchMutation) {
+                $denyReason = 'The fleet supervisor heartbeat may mutate only canonical watch-interrupted-task automations.'
+            }
+            elseif ([string]::IsNullOrWhiteSpace($watchTargetThreadId) -or $watchTargetThreadId -ceq $sessionId) {
+                $denyReason = 'The fleet supervisor heartbeat cannot mutate its own dual-role automation.'
+            }
+            elseif ($mode -cne 'delete' -and -not (Test-CanonicalWatchPrompt -Prompt $prompt -ExpectedTargetThreadId $watchTargetThreadId)) {
+                $denyReason = 'Fleet target automation writes must use the hash-valid watch-interrupted-task policy_revision=2 envelope.'
+            }
+        }
+        elseif ($turnRole -ceq 'unknown' -and $isWatchMutation) {
+            $denyReason = 'Watch automation mutation origin could not be classified from the current turn; blocking fail-closed.'
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($denyReason) -and ($isWatchPrompt -or $isCrossTargetPrompt) -and
+        -not (Test-CanonicalWatchPrompt -Prompt $prompt -ExpectedTargetThreadId $(if ($watchTargetThreadId) { $watchTargetThreadId } else { $targetThreadId }))) {
         $denyReason = 'Cross-target automation prompts must use the hash-valid watch-interrupted-task policy_revision=2 envelope.'
     }
 }
