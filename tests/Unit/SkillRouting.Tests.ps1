@@ -178,6 +178,16 @@ enabled = true # current browser state
         { New-SkillRoutingReport $projection @($router) @($router) @() } | Should Throw
     }
 
+    It 'Keeps host-provided capabilities out of required local routing members' {
+        $policyPath = Join-Path $PSScriptRoot '..\..\config\skill-routing-policy.json'
+        $policy = Get-ContentUtf8 $policyPath | ConvertFrom-Json
+        $requiredLocalNames = @($policy.groups | ForEach-Object { @($_.members).name })
+
+        foreach ($hostProvidedName in @('imagegen', 'playwright', 'screenshot')) {
+            $requiredLocalNames | Should Not Contain $hostProvidedName
+        }
+    }
+
     It 'Rejects a router member whose role is not router' {
         $root = Join-Path $TestDrive 'invalid-router-role'
         $worker = New-RoutingSkillEntry $root 'worker' 'Worker.'

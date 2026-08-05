@@ -12,7 +12,7 @@ This slice closes the repository-side findings from the watch-interrupted-task d
 - harden CI tool acquisition and reference-repository provenance;
 - remove a local-cache dependency from the skill-projection unit contract.
 
-The write set is limited to the watch helper/prompt generators, their tests, the CI workflow and contract test, reference refresh and its safety test, the skill-projection test, and this evidence file. No Desktop automation, Goal, hook trust, host configuration, provider/auth/model/sandbox setting, or power state is changed.
+The write set is limited to the watch helper/prompt generators, their tests, the CI workflow and contract test, reference refresh and its safety test, the skill-projection and routing-policy contracts, and this evidence file. No Desktop automation, Goal, hook trust, host configuration, provider/auth/model/sandbox setting, or power state is changed.
 
 ## Implemented changes
 
@@ -42,6 +42,7 @@ The write set is limited to the watch helper/prompt generators, their tests, the
 - `SkillProjection.Tests.ps1` no longer requires ignored `imports/` working copies for three manual engineering skills. It verifies their stable `skills.json.imports` declarations and explicit routing-policy activation instead.
 - The isolated red reproduction was `34 passed / 1 failed`; the corrected file passed `35 / 35`.
 - The first hosted CI run exposed a second non-hermetic acceptance test: `Phase1Acceptance.Tests.ps1` required three host-specific `D:\...` repositories. The clean Windows runner failed `895 passed / 1 failed` even though E2E passed `18 / 18`. The test now exercises the same three-repository, zero-write, and performance contract against the repository's `simple`, `nested`, and `conflict` fixtures; the focused file passes `4 / 4` locally.
+- Hosted run `31046390230` then proved that checkout and locked source reconstruction reached a clean generated `agent/`, but exposed a policy-boundary defect before the full gate: `imagegen`, `playwright`, and `screenshot` were host-provided capabilities incorrectly declared as required repository-local routing members. The routing policy now keeps those names outside `groups.members`, preserves host selection in the relevant selection policies, and continues to expose Playwright through the separate capability surface. A regression test failed before the correction (`10 / 11`) and passes after it (`11 / 11`).
 
 ## Verification evidence
 
@@ -51,7 +52,8 @@ The write set is limited to the watch helper/prompt generators, their tests, the
   - combined watch/cross-thread coverage: `62 passed / 0 failed`;
   - reference refresh safety: `2 passed / 0 failed`;
   - CI workflow contract: `1 passed / 0 failed`;
-  - skill projection: `35 passed / 0 failed`.
+  - skill projection: `35 passed / 0 failed`;
+  - skill routing policy boundary: `11 passed / 0 failed`, with skill integrity `107` and routing findings `0`.
 - The isolated worktree initially lacked ignored runtime source and generated-agent caches. The failure sequence was diagnostic rather than waived:
   - the projection test exposed its dependency on manual import caches and was corrected at the contract source;
   - the required parent runtime sources were accepted only after clean Git status, exact `origin`, and exact `skills.lock.json` commit parity;
@@ -64,7 +66,7 @@ The write set is limited to the watch helper/prompt generators, their tests, the
   pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full
   ```
 
-  exited `0` after the hosted-CI hermeticity, locked-hydration, and checkout-compatibility workflow fixes. The timing receipt records Pester `4.10.1`, `896` Unit plus `18` E2E cases (`914 / 914` passed), and `suite_elapsed_ms=295064`. The full runner also passed build, repository hygiene, generated sync, 107-skill integrity, reference governance `29/7/3`, the 32-case non-watch activation corpus, routing, dependency/config/host/planning/PS7/Agent/doctor contracts, with `total_elapsed_ms=300525`.
+  exited `0` after the hosted-CI hermeticity, locked-hydration, checkout-compatibility, and host-provided routing-boundary corrections. The timing receipt records Pester `4.10.1`, `897` Unit plus `18` E2E cases (`915 / 915` passed), and `suite_elapsed_ms=259074`. The full runner also passed build, repository hygiene, generated sync, 107-skill integrity, reference governance `29/7/3`, the 32-case non-watch activation corpus, routing with `0` findings, dependency/config/host/planning/PS7/Agent/doctor contracts, with `total_elapsed_ms=264540`.
 
 ## Truth boundary and remaining live acceptance
 
@@ -72,7 +74,7 @@ The write set is limited to the watch helper/prompt generators, their tests, the
 - No real shutdown was scheduled, cancelled, or executed. The 120-second shutdown path therefore remains intentionally untested as an external effect.
 - No watch automation was created, updated, paused, resumed, or deleted; no Goal was created, replaced, cleared, or completed.
 - No live hook was installed or re-trusted. The host may remain `soft_guard_only`, and specialized tool paths are not claimed to be absolutely isolated.
-- GitHub-hosted run `31043635015` proved the pinned Pester install step and then correctly failed the host-specific Phase1 test. Run `31044798776` proved the fixture correction (`896 / 896` Unit and `18 / 18` E2E) and then failed at skill-integrity because a clean checkout intentionally excludes generated `agent/`. Run `31045797982` exposed that checkout v7 auth cleanup with `persist-credentials:false` is incompatible with this repository's gitlink-without-`.gitmodules` layout, so that optional setting was removed. The workflow retains checkout v7 and now uses the locked rebuild entry before the full gate; a clean new-commit hosted receipt remains required for that correction and again after main integration.
+- GitHub-hosted run `31043635015` proved the pinned Pester install step and then correctly failed the host-specific Phase1 test. Run `31044798776` proved the fixture correction (`896 / 896` Unit and `18 / 18` E2E) and then failed at skill-integrity because a clean checkout intentionally excludes generated `agent/`. Run `31045797982` exposed that checkout v7 auth cleanup with `persist-credentials:false` is incompatible with this repository's gitlink-without-`.gitmodules` layout, so that optional setting was removed. Run `31046390230` proved checkout compatibility and locked reconstruction through generated projection, then failed on the host-provided/local-member routing-policy mismatch described above. The workflow retains checkout v7 and the locked rebuild entry; a clean new-commit hosted receipt remains required for the routing correction and again after main integration.
 - The isolated runtime caches are ignored verification inputs and are not part of the commit.
 
 ## Rollback

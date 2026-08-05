@@ -105,7 +105,7 @@
       "id": "creator-publishing",
       "purpose": "Keep Chinese long-form content orchestration separate from writing, illustration, formatting, and authenticated publication executors.",
       "router": "custom-creator-publishing",
-      "selection_policy": "canonical Markdown first; add executors only for requested production stages",
+      "selection_policy": "canonical Markdown first; add repository executors only for requested production stages; let the host select host-provided image generation separately when visible",
       "members": [
         { "name": "custom-creator-publishing", "role": "router", "activation": "WeChat, Zhihu, blog, or teaching-newsletter workflow" },
         { "name": "copy-editing", "role": "executor", "activation": "editing and prose refinement" },
@@ -116,8 +116,7 @@
         { "name": "baoyu-format-markdown", "role": "executor", "activation": "Markdown formatting" },
         { "name": "baoyu-post-to-wechat", "role": "operator", "activation": "authorized WeChat draft or publication operation" },
         { "name": "baoyu-url-to-markdown", "role": "executor", "activation": "source-page conversion" },
-        { "name": "baoyu-compress-image", "role": "executor", "activation": "publication asset compression" },
-        { "name": "imagegen", "role": "executor", "activation": "new raster imagery is requested" }
+        { "name": "baoyu-compress-image", "role": "executor", "activation": "publication asset compression" }
       ],
       "external_members": [
         { "qualified_name": "chrome@openai-bundled::control-chrome", "role": "operator", "activation": "publication requires the user's authenticated Chrome state", "optional": true }
@@ -127,7 +126,7 @@
       "id": "junior-physics-animation",
       "purpose": "Use the physics-domain router to choose Web/SVG, D3, Manim, Remotion, or PPT animation according to classroom delivery needs.",
       "router": "custom-junior-physics-animation",
-      "selection_policy": "one primary medium; add verification skills for that medium",
+      "selection_policy": "one primary medium; add repository verification skills for that medium; let the host select host-provided browser validation separately when visible",
       "members": [
         { "name": "custom-junior-physics-animation", "role": "router", "activation": "junior-middle-school physics motion or interaction" },
         { "name": "manim-composer", "role": "executor", "activation": "formula, geometry, or vector video" },
@@ -139,8 +138,7 @@
         { "name": "remotion-best-practices", "role": "validator", "activation": "React video composition" },
         { "name": "frontend-design", "role": "executor", "activation": "classroom Web interface design" },
         { "name": "frontend-ui-engineering", "role": "executor", "activation": "production Web UI implementation" },
-        { "name": "vite", "role": "reference", "activation": "Vite project implementation" },
-        { "name": "playwright", "role": "validator", "activation": "isolated Web animation verification" }
+        { "name": "vite", "role": "reference", "activation": "Vite project implementation" }
       ]
     },
     {
@@ -161,12 +159,10 @@
       "id": "browser-automation",
       "purpose": "Choose ordinary Web reading, isolated browser validation, authenticated Chrome control, or desktop control by state and permission boundary.",
       "router": "",
-      "selection_policy": "prefer the lowest-permission capability that preserves required browser state",
+      "selection_policy": "prefer the lowest-permission repository or host capability that preserves required browser state; host-provided Playwright and screenshot executors are selected outside the required local inventory",
       "members": [
-        { "name": "playwright", "role": "validator", "activation": "isolated Web testing and screenshots" },
         { "name": "playwright-best-practices", "role": "reference", "activation": "Playwright test implementation guidance" },
-        { "name": "webapp-testing", "role": "validator", "activation": "general Web application quality workflow" },
-        { "name": "screenshot", "role": "executor", "activation": "page or region screenshot capture" }
+        { "name": "webapp-testing", "role": "validator", "activation": "general Web application quality workflow" }
       ],
       "external_members": [
         { "qualified_name": "chrome@openai-bundled::control-chrome", "role": "operator", "activation": "existing cookies, tabs, extensions, or authenticated state are required", "optional": true },
