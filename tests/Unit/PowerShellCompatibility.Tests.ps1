@@ -7,6 +7,9 @@ Describe 'PowerShell runtime compatibility contract' {
         $runbook | Should Match 'PowerShell 7 \(`pwsh`\)'
         $runbook | Should Match 'Windows PowerShell 5\.1'
         $runbook | Should Match 'Compatibility removal gate'
+        $runbook | Should Match 'Typed-core migration boundary'
+        $runbook | Should Match 'C#/\.NET typed core'
+        $runbook | Should Match 'dual implementations or dual configuration truth are forbidden'
         $runbook | Should Match 'does not promise every workflow'
         $runbook | Should Match 'repo_verified'
     }

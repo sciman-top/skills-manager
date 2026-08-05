@@ -22,6 +22,14 @@ Current host evidence on 2026-08-01: PowerShell `7.6.3` primary and Windows Powe
 - CI uses `pwsh` for authoritative gates. Windows PowerShell runs only the bounded smoke and must not be described as full support.
 - Missing `powershell.exe` is `platform_na` outside Windows: record the missing executable, use PS7 parse/contract tests as alternative evidence, and recover when a Windows runner is available.
 
+## Typed-core migration boundary
+
+The compatibility contract does not imply that PowerShell must remain the permanent implementation language for every domain rule. Current evidence proves the PS7 build/full path and a bounded 5.1 smoke; it does not remove recurring AI-edit risks around parser/quoting, dynamic types, encoding, native-process invocation, error propagation, and 5.1/7 differences.
+
+The conditional target is a versioned UTF-8 JSON protocol with a C#/.NET typed core and a thin PowerShell compatibility shell. PowerShell keeps installer fallback, existing aliases/Chinese commands, Junction and host/native adapters, bundle compatibility, and user-facing error translation. A typed candidate may initially own only read-only pure validation/policy logic; it must not own provider/auth/session, daemon/database, or undeclared external writes.
+
+Before creating a PoC, the task must identify one pure read-only seam, at least two real callers, a frozen characterization corpus, stable JSON/finding/exit contracts, a current supported .NET LTS pin proposal, distribution modes to measure, and exact deletion/rollback steps. Shadow output must match the current PowerShell source of truth. Production migration is admitted one seam at a time only after reviewed parity and net-benefit evidence; a failed PoC is deleted, and long-lived dual implementations or dual configuration truth are forbidden.
+
 ## Compatibility removal gate
 
 Do not remove the 5.1 fallback, raise `#requires`, or use incompatible syntax across the generated bundle until all conditions are met:

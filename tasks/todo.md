@@ -39,10 +39,13 @@
 - [x] `SMV-MD-006` 固化稀疏工具栈、社区 disposition、context-adapter admission 与 M1 observation contract。
 - [x] `SMV-MD-007` 增强 evidence-group、M0.2 policy 和 sample observation 的 fail-closed verifier/tests。
 - [x] `SMV-MD-008` 同步 M0.2 产品/根契约/evidence，运行唯一 full gate 并限定 truth closeout。
+- [x] `SMV-MD-009` 固化 host-owned TaskGraph、三档模型软锚点、Radar snapshot、并发 admission 和失败升级合同。
+- [x] `SMV-MD-010` 固化 PowerShell thin shell + C#/.NET typed-core 条件性架构、TC0-TC3、兼容与回滚门禁。
+- [x] `SMV-MD-011` 增强 M0.3 verifier/tests，同步索引/根契约/README/evidence 并完成唯一 full gate 收口。
 - [x] M0.1 补齐 North Star、native baseline、双证据流、删除评审与 pilot 计数合同。
 - [ ] M1 收集并 review 10 个真实 observe-only 样本（当前 0/10）。
 
-M0/M0.2 maintenance design planning package 为 8/8 `repo_verified`；M1 已获授权并进入 `collecting (0/10)`，但没有任何真实样本、并行/工具组合收益、pilot 完成或业务收益声明。coordinator/lease runtime 与社区工具安装均未发生。M3 仍为 `conditional`；runtime/host mutation、P6 admission 和 business `live_accepted` 均未执行。
+M0/M0.2/M0.3 maintenance design planning package 为 11/11 `repo_verified`；M1 已获授权并进入 `collecting (0/10)`，但没有任何真实样本、并行/工具/模型策略收益、pilot 完成或业务收益声明。coordinator/lease/model-router runtime、Radar live refresh、custom-agent/host config mutation、typed-core PoC/PowerShell 替换与社区工具安装均未发生。M3 与 TC0-TC3 仍为 `conditional/not_started`；P6 admission 和 business `live_accepted` 均未执行。
 
 ## Capability routing correction checklist
 

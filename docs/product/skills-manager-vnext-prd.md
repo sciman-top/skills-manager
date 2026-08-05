@@ -11,9 +11,9 @@
 
 面向高效 AI 软件交付时，它额外提供一层精益、按阶段启用的 advisory lens：把产品目标、主链、当前切片、停止条件、最低充分验证和完成等级说清楚，再由 ChatGPT/Codex/Claude 等宿主原生 Agent 执行。它引导和约束 AI 编码，但不复制模型的推理、编码、会话、多代理或长期运行能力。
 
-North Star：在不复制宿主原生推理、编码和运行能力的前提下，持续提高每单位用户注意力、token 与长期维护成本所产生的可验证用户价值；任何辅助功能都必须证明相对 native baseline 的净收益，并始终可绕过、可回滚、可替换、可删除。
+North Star：在不复制宿主原生推理、编码和运行能力的前提下，最大化 verified value、correctness 和 user outcome，同时最小化 user attention、wall-clock latency、provider/model spend、token/context、retry、coordination/integration、maintenance cost 与不可逆失败风险；任何辅助功能都必须证明相对 native baseline 的 Pareto 净收益，并始终可绕过、可回滚、可替换、可删除。
 
-它不是 AI coding runtime，不执行或接管 agent loop，不提供模型路由、账号、认证、权限、会话、云任务、插件商店或中央跨仓治理服务。
+它不是 AI coding runtime，不执行或接管 agent loop，不提供运行时模型路由、账号、认证、权限、会话、云任务、插件商店或中央跨仓治理服务。允许生成由宿主拥有、可审查、可绕过、可回滚的模型/推理强度建议、custom-agent 配置草案、fallback/escalation 策略和评估证据，但不得静默修改 active session、provider、auth 或宿主配置。
 
 ## 2. 背景与问题
 
@@ -116,6 +116,10 @@ Git 保存版本、分支、candidate commit 和集成结果；宿主原生 coor
 ### `PP-011 Sparse capabilities, evidence-gated adapters`
 
 默认工具栈保持稀疏：宿主原生推理与 Git/仓库门禁是主干，skill 只承接稳定重复 workflow，MCP/connector 只承接实时外部数据或动作，知识库/代码图只在 repo-native 搜索和文档不足的真实样本中作为可替换 adapter。没有净收益证据的能力不进入默认面。
+
+### `PP-012 Typed-core migration without shell rupture`
+
+PowerShell 是当前 Windows-first 的兼容入口和适配层，不再被视为长期承载所有领域语义的唯一实现。新领域逻辑优先通过稳定 JSON/protocol contract、纯函数和可测试 typed core 评估；迁移必须保持旧 CLI、生成 bundle、安装 fallback 和受界定的 5.1 smoke 可回滚。没有两个真实 caller、characterization baseline 和迁移收益证据，不创建第二实现或开始重写。
 
 ## 6. 功能需求
 
@@ -252,6 +256,11 @@ Git 保存版本、分支、candidate commit 和集成结果；宿主原生 coor
 - `FR-EWF-010`：知识库/代码图/理解工具只有在至少两个独立真实任务证明 repo-native `rg`、符号/测试/文档与宿主上下文不足，且语言覆盖、隐私、索引 freshness、资源、供应链和卸载/重建路径均可验证时，才进入 read-only canary；它们不成为源码、任务或验收真源。
 - `FR-EWF-011`：skill 优化只借鉴 `real sample -> replay -> shadow -> bounded canary -> reviewed promotion -> retain/revise/retire`；不得把领域研究系统的自动蒸馏、provider/embedding/solver 依赖直接解释为通用 workflow 自动升级能力。
 - `FR-EWF-012`：M1 pilot 在既有 10 个真实样本中同时观察 coordination mode、shared-write policy、tool disposition、external context adapter 和 skill lifecycle action；本 maintenance 切片自身不计数，也不为观察字段建设 daemon 或 telemetry。
+- `FR-EWF-013`：每个长链路任务可由宿主生成 machine-readable `TaskGraph`，至少声明 `task_id / goal / inputs / outputs / depends_on / risk / ambiguity / parallelizable / write_set / external_state / verification / result_owner / integration_order / stop_condition`；本仓只校验合同，不执行 DAG。
+- `FR-EWF-014`：模型策略必须由宿主 AI 依据用户意图和完整上下文主导；本仓只提供 capability/model 候选、Radar snapshot、成本/时延/风险观察、fallback/escalation 建议和确定性 admission findings。
+- `FR-EWF-015`：三档默认锚点为 `Sol xhigh`（需求澄清、架构、生产 RCA、高风险审查和最终裁决）、`Sol medium`（一般实现、日常排障、中等审查和集成准备）、`Luna max`（边界清楚的 CRUD/SQL/单测/文档和机械变换）；锚点可被宿主覆盖，不得硬编码为静默路由规则。
+- `FR-EWF-016`：Radar snapshot 必须记录 `source / captured_at / model / reasoning_effort / score / estimated_cost / estimated_duration / sample_count / confidence / raw_hash / expires_at`；过期、缺样本或来源不可核验时回退官方/native 默认，Radar 只影响建议，不证明质量或 live acceptance。
+- `FR-EWF-017`：并行/串行与模型升级必须使用显式状态机：依赖、base、write set、集成 owner、验证和外部写入全部满足才允许并行；一次根因修复失败后只重试一次，同一 `issue_id` 第二次失败必须 re-scope/re-plan；能力不足才按 `Luna max -> Sol medium -> Sol xhigh` 升级，权限/凭据/用户决策缺失则 fail-closed。
 
 ## 7. 非功能需求
 
@@ -279,6 +288,9 @@ Git 保存版本、分支、candidate commit 和集成结果；宿主原生 coor
 - `NFR-EWF-002`：共享 write set 的默认策略必须是 `single_writer`；任何 parallel-write exception 都必须有可复核的路径互斥证明和 integration owner，不能由模型置信度或 Git merge 成功替代。
 - `NFR-EWF-003`：外部 context adapter 默认只读、最小 root、redaction-first、可重建且可移除；索引或图谱过期、语言不支持、权限不明或证据来源缺失时 fail-closed，并回退 repo-native 工具。
 - `NFR-EWF-004`：tool/skill promotion 的语义判断可由宿主 AI 提议，但 availability、freshness、权限、预算、供应链、测试和 truth-level advancement 必须由确定性证据或人工 review 约束。
+- `NFR-EWF-005`：模型策略是多目标 Pareto 建议，必须同时观察正确性/用户结果、费用、wall-clock、token/context、重试和集成成本及不可逆风险；不得把动态 Radar 分数压成不可解释的固定总分或单项硬门禁。
+- `NFR-EWF-006`：PowerShell 5.1 只保留 bootstrap、生成脚本 parse、plain-object/selected-fixture smoke；PS7 是开发/CI/full gate 主路径。新 typed core 候选必须以 versioned protocol、single source of truth、双运行时回退和可删除 PoC 证明，不得在无门禁的情况下形成双写或双真源。
+- `NFR-TEC-001`：替代技术栈评估优先比较 C#/.NET、TypeScript/Node、Python 和 Rust 的 Windows/native CLI 适配、类型/并发、分发、供应链、维护与回滚成本；当前推荐 C#/.NET typed core + PowerShell thin shell 作为条件性目标架构，暂不实施重写。
 
 ## 8. 产品级验收
 
@@ -343,6 +355,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - P5-local follow-up 已把 canonical inventory delta 接到 projection 主链的 advisory signal；宿主在同一任务边界可据此启动 reconciliation，但 profile proposal/apply 仍遵守 ADR-SMV-018/019，不等于静默写配置。
 - P5 后的 `maintenance_design` 已建立 Lean Delivery advisory 规划契约，并由独立 registry 启动 M1 `collecting (0/10)`；它不是新 Phase，不改变 P5/P6 状态，也不证明 pilot 已执行、完成或产生业务效果。
 - `maintenance_design` M0.2 只补强 host-owned coordination、single-writer write-set admission、Git freshness/CAS 语义、tool disposition 和 context-adapter admission；不引入 coordinator/lease runtime，也不安装 Trellis、AGOS、GBrain、CodeGraphContext、Understand Anything 或 OptSkills。
+- `maintenance_design` M0.3 只落盘 host-owned TaskGraph/model policy、expiring Radar snapshot、三档软锚点、failure escalation 和 typed-core 迁移决策；不执行动态路由、不修改 custom-agent/host 配置、不启动 C#/.NET PoC 或替换 PowerShell。
 - GUI、daemon、远端协作、数据库和 domain core 重写均为 conditional，不进入当前承诺。
 
 ## 11. 官方与社区依据
@@ -358,11 +371,14 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - [OpenAI Codex execution plans](https://developers.openai.com/cookbook/articles/codex_exec_plans)：适配长任务的目标、进度、决策和验证追踪，不把计划本身当作交付结果。
 - [OpenAI Long-running work](https://learn.chatgpt.com/docs/long-running-work)：`/plan`、`/goal` 与持久目标由宿主承接；本项目只提供可验证的目标/切片输入，不另建 goal runtime。
 - [OpenAI Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents)：独立探索、测试和分诊可由宿主有界并行；共享 write set 保持单 writer，本项目不托管固定角色团队。
+- [OpenAI Models](https://learn.chatgpt.com/docs/models) 与 [Configuration Reference](https://learn.chatgpt.com/docs/config-file/config-reference)：模型、reasoning effort、default subagent model 和显式 agent override 属于宿主原生配置/执行面；本项目只生成可审查 proposal，不热改 active session。
 - [OpenAI Memories](https://learn.chatgpt.com/docs/customization/memories)：local memories 是可选回忆层，稳定规则仍进入 `AGENTS.md`/仓库文档；本项目不复制记忆库。
 - [OpenAI Codex App Server](https://learn.chatgpt.com/docs/app-server) 与 [Codex SDK](https://learn.chatgpt.com/docs/codex-sdk)：深度客户端集成和编程式线程控制已有原生入口；只有未来独立产品需求与 P6 admission 同时成立时才评估集成，不在本仓复制。
 - [OpenAI Scheduled tasks](https://learn.chatgpt.com/docs/automations)：稳定重复流程可由宿主 scheduled tasks + skill 承接；先人工跑通并验证，再自动化。本仓不建 daemon/scheduler。
 - [Git `update-ref`](https://git-scm.com/docs/git-update-ref) 与 [`git push --force-with-lease`](https://git-scm.com/docs/git-push)：采用 expected-old ref 作为 stale-write guard；明确它们不提供文件级锁、排队、公平性或自动冲突裁决。
 - [MCP specification](https://modelcontextprotocol.io/specification/latest) 与 [MCP Registry](https://registry.modelcontextprotocol.io/)：采用 schema、versioning、validation 和来源/所有权边界。
+- [PowerShell differences from Windows PowerShell](https://learn.microsoft.com/powershell/scripting/whats-new/differences-from-windows-powershell)：采用 PS7 主路径和 5.1 有界兼容窗口，不把两套 runtime 描述成同等全功能支持。
+- [.NET application publishing](https://learn.microsoft.com/dotnet/core/deploying/) 与 [single-file deployment](https://learn.microsoft.com/dotnet/core/deploying/single-file/overview)：typed-core PoC 比较 framework-dependent/self-contained/single-file 的体积、启动、平台和更新成本，发布形态由实测而非偏好决定。
 
 ### 社区采纳或适配
 
@@ -387,7 +403,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 
 - `DEC-PROD-001`：产品定位为 local capability curator + rule advisor。
 - `DEC-PROD-002`：规则永久默认 advisory-first；显式 apply 是唯一写入入口。
-- `DEC-PROD-003`：PowerShell 模块化单体继续作为主技术方向。
+- `DEC-PROD-003`：PowerShell 继续作为当前兼容入口、安装 fallback、宿主/文件适配层和单文件发行面；领域核心的长期方向改为“可选 C#/.NET typed core + PowerShell thin shell”，只有 PoC/迁移门禁通过后才实施，不允许形成双真源。
 - `DEC-PROD-004`：不立即改仓库名；只有规则/plugin 两条新主路径经过真实使用验收后再评估品牌更名。
 - `DEC-PROD-005`：未来 Phase 在进入实施前各自生成详细 task manifest，避免提前维护大量猜测任务。
 - `DEC-PROD-006`：Rules Advisor 使用责任覆盖模型，不建立通用规则 AST、重型 policy engine 或强制统一模板。
@@ -395,6 +411,8 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - `DEC-PROD-008`：Goal、subagents、scheduled tasks、local memories、App Server/SDK 属于宿主 native baseline 和本项目退役触发器；只有本仓独有的 capability/rule discovery、advice、bounded transaction 与 verification seam 可在证据支持下保留。
 - `DEC-PROD-009`：工程化多 Agent 采用“host-owned coordinator + read-only design panel + disjoint-worktree execution + single-writer shared seam + sequential integration”；Git 是真值主干和 stale guard，不是文件任务队列。
 - `DEC-PROD-010`：社区 workflow、知识库、代码图和自动 skill 学习均先进入证据化 disposition；当前候选只采纳协议启发，不安装运行时，M1 真实任务证据决定后续 retain/adapt/retire。
+- `DEC-PROD-011`：宿主 AI 是任务语义、DAG、串并行和模型档位的 accountable coordinator；skills-manager 只提供建议、合同和确定性安全阻断，Codex native runtime 执行 spawn/wait/integration。
+- `DEC-PROD-012`：PowerShell 兼容性风险通过边界收缩和 typed-core PoC 处理，而不是直接全仓重写；PoC 在真实收益不足、兼容成本过高或无消费者时必须删除。
 
 以下选择有意延迟到有真实代码/宿主证据的任务，不允许 AI 在更早任务中猜定：
 

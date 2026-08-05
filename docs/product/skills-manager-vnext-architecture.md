@@ -7,7 +7,7 @@
 
 ## 1. 架构结论
 
-采用“PowerShell 模块化单体 + build-time 单文件 bundle + 文件型 versioned contracts + host adapters”的架构。
+当前实现继续采用“PowerShell 7 模块化单体 + build-time 单文件 bundle + 文件型 versioned contracts + host adapters”；长期目标边界调整为“versioned protocol + 可选 C#/.NET typed core + PowerShell thin compatibility shell”。typed core 尚未实现，现有 PowerShell 仍是唯一运行真源。
 
 本项目位于宿主和能力来源之间，负责本地 inventory、选择、plan、显式 apply 和 evidence；宿主继续负责 agent execution、auth、permission、session、plugin/connector runtime 和 native loading。
 
@@ -39,7 +39,7 @@ Official directories / Git / local inputs / host inventory
 - Pester 承担 unit/E2E，Python verifier 承担 dependency baseline，PowerShell scripts 承担生成同步、完整性、路由和 doctor contract。
 - `reports/skill-projection/current.json`、audit bundles 和 change evidence 已提供部分 manifest/evidence 模式。
 
-当前问题不是 PowerShell 本身，而是 bounded context、应用层和 IO seam 不够明确。Phase 0 先建立 seam，不做语言重写。
+当前问题既包含 bounded context、应用层和 IO seam 不够明确，也包含 PowerShell 动态类型、解析/引用规则、5.1/7 差异、编码/进程调用和 AI 生成脚本容易产生的语法脆弱性。现有兼容测试已证明当前 bundle 可解析和基本合同可运行，但只覆盖有界 smoke；它不能证明 PowerShell 是长期领域核心的最优载体。先收紧 seam 和 protocol，再用可删除 PoC 判断是否把纯领域逻辑迁到 typed core，禁止直接全仓重写。
 
 ## 3. Bounded contexts
 
@@ -412,6 +412,54 @@ candidate 集成顺序固定为：验证 candidate 的 base 与 declared write s
 
 当前参考 disposition：Trellis 适配 repo-based spec/task/journal，但 defer AGPL/自动控制面安装；AGOS 适配 `write_scope`、candidate/ledger/merge-gate 词汇，但 reject Alpha runtime 接管；OptSkills 只适配 replay/distill/eval/checkpoint 原理，不把数学优化系统当通用 workflow upgrader；GBrain、CodeGraphContext、Understand Anything 都保持 external/defer，直到真实任务、PowerShell/语言覆盖、隐私和资源门禁成立。“souljourney lightweight workflows”来源未唯一定位，按 unknown source fail-closed。
 
+### 3.11 `ModelAndAgentPolicyAdvisor`
+
+职责：把任务 DAG、串并行 admission、模型/推理强度候选、Radar snapshot、fallback/escalation 和失败交接表达为宿主可消费的 advisory contract。user intent 是 authority owner，host AI 是 accountable semantic coordinator，skills-manager 是 evidence/policy advisor，deterministic verifier 是安全 admission guard，Codex native runtime 是实际 executor，Git/tests/live probe 裁决完成真值。
+
+不负责：调用模型、创建或调度 subagent、修改 active session/custom-agent/provider/auth/config、保证 Radar 排名等于生产质量、把费用/时长预测当完成门禁。当前 M0.3 只有文档、task contract、verifier 和 tests。
+
+```text
+TaskGraph
+  task_id / goal / inputs[] / outputs[]
+  depends_on[] / risk / ambiguity / parallelizable
+  exact_write_set[] / external_state[]
+  verification[] / result_owner / integration_order / stop_condition
+
+ModelPolicy
+  radar_snapshot_id / captured_at / expires_at
+  model / reasoning_effort / host_availability
+  score / estimated_cost / estimated_duration / sample_count / confidence
+  fallback / escalation_trigger / user_override
+
+FailurePacket
+  base_revision / task_id / attempted_model / attempted_effort
+  commands[] / failures[] / verified_facts[] / unresolved_questions[]
+  artifacts[] / exact_write_set[] / next_recommendation
+```
+
+默认模型档位是可覆盖的软锚点：`Sol xhigh = gpt-5.6-sol + xhigh` 用于承重需求澄清、架构/重构、跨服务生产 RCA、高价值高风险审查和最终裁决；`Sol medium = gpt-5.6-sol + medium` 用于一般实现、日常排障、中等复杂度审查和集成准备；`Luna max = gpt-5.6-luna + max` 用于边界清楚、重复度高、可独立验证的 CRUD/SQL/单测/文档/机械变换。model ID 不是永久白名单；名称不存在、宿主不可用或 Radar 过期时，回退宿主当前官方/default model，并记录实际值与 override reason，而不是猜测等价模型或修改配置。
+
+并行 admission 必须同时满足依赖完成、base revision 固定、write set 互斥或完全只读、外部写入已声明、candidate 可独立验证/丢弃、integration owner/order 明确。共享 file/config/lock/source-generated seam、schema/migration/backfill、Git index/ref、同一外部对象和内容依赖任务默认串行；最终集成、完整门禁和 truth closeout 始终串行。
+
+升级状态机固定为：初始 route -> 根因诊断后一次 corrected retry -> 若任务定义/上下文不足则补证据或重切片 -> 仅在模型能力不足时 `Luna max -> Sol medium -> Sol xhigh` -> 同一 `issue_id` 第二次失败后 clarify/re-plan -> 两次升级或承重风险由 supervisor 串行接管。缺工具、权限、凭据、生产授权或用户产品决定时 fail-closed，不能通过换模型绕过。每次换档必须携带 `FailurePacket`；禁止同 prompt 无限重试或在运行中的 agent 内无审计热切换。
+
+Radar 数据通过独立、显式 refresh 形成不可变 snapshot：记录 source、captured_at、model、reasoning_effort、score、estimated cost/duration、sample count、confidence、raw hash 和 expires_at。snapshot 只影响建议；本地同类任务的 gate、返工、耗时、实际费用和人工纠正优先于公开榜单。决策保持 Pareto 多目标，不把智力、费用、时间和风险压成永久单分数。
+
+### 3.12 `TypedCoreBoundary`
+
+职责：为减少 AI 生成 PowerShell 的语法/类型/兼容风险，定义“PowerShell thin shell + optional C#/.NET typed core”的可逆迁移边界。`PowerShell remains a compatibility shell, not the domain-policy source of truth` 是目标态约束；在 PoC 通过前，当前仓库仍由 PowerShell 实现且只有一个运行真源。
+
+目标职责划分：
+
+| 层 | 保留/目标职责 | 禁止 |
+| --- | --- | --- |
+| PowerShell shell | `install.ps1` fallback、旧 CLI aliases/中文命令、Junction/host-native command adapter、bundle 兼容和错误呈现 | 新增长期复杂 policy/DAG/schema 语义、跨模块共享可变状态 |
+| versioned protocol | stdin/stdout UTF-8 JSON、schema/version、stable finding/exit code、redaction/freshness/receipt | 传递 token、未版本化对象、隐式环境状态 |
+| C#/.NET typed core candidate | descriptor/plan/receipt validation、hash/path normalization、DAG/admission/model-policy evaluation、纯转换与 deterministic rules | host auth/session/provider、daemon/database、直接外部写入、第二套配置真源 |
+| host adapters | 由 PowerShell 或 typed CLI 调用 native host/Git/filesystem，并保留现有 authority/rollback | 绕过 plan、freshness、receipt 或 native approval |
+
+PoC 只允许选择一个 read-only、两个以上真实 caller、已有 characterization tests 的 seam；固定输入 corpus 同时喂给现有 PowerShell 与 typed candidate，逐字段比较 JSON、finding code、exit code 和性能。接受需要零行为漂移或 reviewed additive difference、Windows x64 分发可复现、framework-dependent 与 self-contained 体积/启动数据、无新增常驻服务、旧入口可回退、单一实现真源迁移方案和删除 PoC 的命令。PoC 未达标即删除，不形成长期双实现。
+
 ## 4. 目标源码结构
 
 结构按渐进迁移建立，不要求 Phase 0 一次移动全部旧函数：
@@ -597,25 +645,28 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 
 若暂时忽略本仓迁移成本，一个更接近全局最优的长期参考形态是：protocol-first 的稳定 domain contracts、可替换的 source/host adapters、无宿主状态的 planning engine、显式事务/证据协议、跨平台 typed core，以及按真实规模选择的 CLI/TUI/API 和可选本地索引。它是 north star，不是当前 backlog；database、daemon、remote control、extension SDK 等只有触发条件成立后才进入实现。
 
-当前约束下的适配性最优则把已验证事实纳入目标函数：Windows-first、现有 PowerShell/Pester 投资、单文件便携分发、当前用户规模、CLI/Junction/Git 密集工作和兼容成本。当前核心工作是建立模块 seam 和合同，以最低行为风险获得主要维护收益。
+当前约束下的适配性最优把已验证事实纳入目标函数：Windows-first、现有 PowerShell/Pester 投资、单文件便携分发、当前用户规模、CLI/Junction/Git 密集工作和兼容成本，同时正视 AI 生成 PowerShell 的解析、动态类型、quoting、encoding、native-process 和 5.1/7 差异成本。当前运行真值仍是 PowerShell；目标架构优先收敛 protocol seam，并以 C#/.NET typed-core PoC 作为唯一推荐的替代评估，不直接重写。
 
 | 维度 | 全局最优参考 | 当前适配性最优 |
 | --- | --- | --- |
 | 优化范围 | 已知及合理未来场景 | 当前用户、仓库和近两个 Phase |
 | 迁移成本 | 可作为长期投资处理 | 作为真实高权重成本 |
 | 不确定性 | 用可替换边界保留选择权 | 延迟未被证据证明的能力 |
-| 技术选择 | 可接受 typed core/多入口/可选索引 | PowerShell 模块化单体 + 单文件 bundle |
+| 技术选择 | 可接受 typed core/多入口/可选索引 | 当前 PowerShell + 条件性 C#/.NET typed core |
 | 验收 | 跨平台、规模、生态和演进性 | 兼容、门禁、可回滚和真实工作流 |
 | 主要风险 | 过早平台化 | 被当前实现锁死、错过重评时点 |
 
 | 方案 | 现有兼容/迁移风险 | Windows 与 native CLI 适配 | 分发复杂度 | 长期类型/并发能力 | 当前决定 |
 | --- | --- | --- | --- | --- | --- |
-| PowerShell 模块化单体 + 单文件 bundle | 高兼容、低迁移风险 | 高 | 低 | 中 | 采用 |
-| .NET 单体 CLI | 中低兼容、需迁移入口/测试 | 高 | 中 | 高 | 条件重评 |
-| TypeScript/Node CLI | 中低兼容、增加 runtime/打包 | 中 | 中高 | 高 | 当前拒绝 |
+| PowerShell 模块化单体 + 单文件 bundle | 高兼容、低迁移风险；AI 生成/维护脆弱性继续累积 | 高 | 低 | 中 | 当前运行真源；冻结新增复杂领域语义 |
+| C#/.NET typed core + PowerShell thin shell | 中；需 protocol、双跑 corpus、wrapper 与分发迁移 | 高 | 中；可 framework-dependent 或 self-contained | 高 | `AI 推荐` 的条件性目标；先做一个可删除 PoC |
+| C#/.NET 全量重写 | 低兼容；一次性迁移/回归风险高 | 高 | 中 | 高 | 拒绝；只允许逐 seam strangler migration |
+| TypeScript/Node CLI | 中低兼容；增加 Node/npm/runtime/打包 | 中 | 中高 | 高 | 当前拒绝；宿主 UI/plugin 成为主面时重评 |
+| Python CLI/core | 中；venv/解释器/打包/Windows path/encoding 增加部署面 | 中 | 中高 | 高 | 只保留数据/eval helper，不作为默认核心 |
+| Rust native CLI | 低兼容；团队/FFI/构建迁移成本高 | 高 | 中 | 很高 | defer；性能/单文件安全瓶颈有证据时重评 |
 | daemon/API + database | 破坏 local single-process 边界 | 中 | 高 | 高 | 无需求证据，拒绝 |
 
-改进方向不是重写，而是依次完成：纯 Domain contract、Application orchestration、Infrastructure/Host adapter seam、结构化 plan/receipt、兼容 wrapper 和 characterization tests。只有出现可量化的跨平台、并发、类型安全或性能瓶颈，且连续多个有界切片无法解决，才启动替代技术栈 ADR/PoC；PoC 必须证明迁移收益、兼容策略、分发和回滚，不能仅以代码风格作为理由。
+改进方向不是重写，而是依次完成：纯 Domain contract、Application orchestration、Infrastructure/Host adapter seam、结构化 plan/receipt、兼容 wrapper 和 characterization tests；随后从 `descriptor/plan/receipt validation` 或 `DAG/admission evaluation` 中选择一个无外部写入 seam 做 typed-core PoC。触发不再要求等到“多个 Phase 无法修复”：当前已存在大量 PowerShell 文件、专门兼容测试和用户反复语法/兼容摩擦，足以准入 planning/PoC；但只有 PoC 证明 correctness、AI edit failure/rework、性能、分发和回滚净收益后才准入生产迁移。
 
 选择算法固定为：先列 hard constraints 和不可接受结果；再比较满足约束方案的用户价值、总拥有成本、风险、可逆性和 option value；删除被支配方案；选择能完成下一真实里程碑的最小 Pareto 方案；最后为未选择的更重方案记录量化重评触发。全局参考用于检查方向，适配性方案用于决定当前实现。
 
@@ -623,6 +674,7 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 
 - Runtime：PowerShell 7 主路径；Windows PowerShell 5.1 仅保留有界 bootstrap/smoke 兼容窗口。
 - Source/build：`src/*.ps1` 模块化源码 + `build.ps1` 确定性 bundle + 根 `skills.ps1` 便携入口。
+- Typed-core candidate：当前宿主已发现 .NET SDK `8.0.423` 与 `10.0.302`；PoC 实施时选择当前受支持 LTS、以 `global.json`/lock 明确 pin，并先保持 network-free、read-only、无 host mutation。该本机探针只是可行性证据，不是仓库依赖或实现完成。
 - Contracts：UTF-8 JSON、显式 `schema_version`、plain object validator 和稳定 finding/exit contract；具体 schema validator 在 `SMV-P0-003` 以当前依赖事实选定。
 - Tests：Pester 4.10.1 unit/E2E、fixture/golden/characterization/fault injection，以及 Python dependency baseline verifier。
 - Distribution/state：Git、lock/manifest、文件 hash、ignored plan/receipt/backup；不增加数据库或常驻服务。
@@ -630,17 +682,31 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 
 ### `ADR-SMV-001 Keep PowerShell modular monolith`
 
-决定：继续使用 PowerShell，按模块 seam 演进，保留单文件发行。
+决定：作为当前实现与兼容期决策，继续使用 PowerShell、按模块 seam 演进并保留单文件发行；新复杂领域核心的目标方向由 ADR-SMV-027 补充为 protocol-first typed-core PoC。ADR-SMV-001 不再被解释为“所有未来逻辑永久使用 PowerShell”。
 
 理由：当前主要工作是 Windows 文件、Git、Junction、CLI 和宿主配置；现有测试/发布投资大，重写不会直接改善产品价值。
 
-重评触发：非 Windows 成为核心使用量、需要常驻 API/并发服务、类型/性能缺陷连续多个 Phase 无法通过 seam 修复。
+重评触发：非 Windows 成为核心使用量、需要常驻 API/并发服务、类型/性能缺陷无法通过 seam 修复，或 AI 生成 PowerShell 的解析/兼容/返工成本已有重复真实证据。最后一项已满足 planning/PoC 准入，但未满足生产迁移准入。
 
 ### `ADR-SMV-002 PowerShell 7 primary, 5.1 compatibility window`
 
 决定：开发/CI 以 PowerShell 7 为主；5.1 保留 bootstrap 和显式 smoke。
 
 理由：避免 legacy runtime 永久限制结构化错误处理、跨平台和依赖能力，同时保持现有 Windows 用户迁移路径。
+
+### `ADR-SMV-026 Host-owned task and model policy`
+
+决定：用户拥有目标与不可逆授权，宿主 AI 负责语义、TaskGraph、串并行、模型/推理强度和最终综合；skills-manager 只输出 Radar/model policy、admission/escalation 建议和确定性 findings，Codex native runtime 实际 spawn/wait/steer/integrate。
+
+理由：宿主拥有完整对话、当前可用模型和执行线程；在本仓复制 scheduler/router 会产生过期价格/能力数据、双重控制面和权限漂移。确定性 verifier 仍可阻断 DAG cycle、shared write overlap、stale base/snapshot、unknown model、缺验证/owner/预算和 truth 越级。
+
+### `ADR-SMV-027 Protocol-first typed core with PowerShell thin shell`
+
+决定：当前 PowerShell 运行真值保持不变，但新复杂领域语义不再默认追加到脚本单体。先稳定 versioned JSON/exit/finding protocol，再以 C#/.NET read-only PoC 证明 typed core；接受后按一个 seam 一次的 strangler pattern 迁移，PowerShell 保留安装/兼容/host adapter shell。
+
+理由：C#/.NET 与 Windows、native CLI、single-file/self-contained 分发和现有 .NET SDK 最匹配，能用编译器、nullable/类型、结构化并发和成熟测试降低 AI 生成脚本的语法/运行时缺陷；相比 Node/Python/Rust，它在本仓的 runtime 增量、Windows 适配和迁移风险上处于更合适的 Pareto 点。直接重写会丢失现有 CLI/Pester/兼容证据，因此明确拒绝。
+
+PoC acceptance：同一 corpus 的结构化输出/exit/finding parity；至少两个真实 caller；AI 修改的一次通过率、返工、测试时间和启动/分发成本有 baseline；旧 wrapper 与 rollback 通过；无双写/双配置/daemon/provider/host mutation。任一项失败则删除 PoC 并继续收紧 PowerShell seam。
 
 ### `ADR-SMV-003 Separate domain models`
 

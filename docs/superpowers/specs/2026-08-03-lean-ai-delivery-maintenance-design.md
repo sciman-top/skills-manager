@@ -14,6 +14,10 @@
 **SHARED_WRITE_SET_POLICY: single_writer**
 **GIT_CAS_SEMANTICS: ref_freshness_not_file_queue**
 **TOOL_DISPOSITION_POLICY: adopt_adapt_defer_reject**
+**MODEL_POLICY_STATUS: host_advisory_only**
+**RADAR_SNAPSHOT_POLICY: advisory_expiring_snapshot**
+**TYPED_CORE_STATUS: poc_not_started**
+**POWERSHELL_COMPATIBILITY_STATUS: ps7_primary_ps51_bounded_smoke**
 **日期**: 2026-08-05
 
 ## 1. Problem and evidence
@@ -34,7 +38,7 @@ Primary user 是 Windows-first、维护多个本地仓库、希望显著减少�
 
 ## 3. Product constitution
 
-North Star：在不复制宿主原生推理、编码和运行能力的前提下，持续提高每单位用户注意力、token 与长期维护成本所产生的可验证用户价值；任何辅助功能都必须证明相对 native baseline 的净收益，并始终可绕过、可回滚、可替换、可删除。
+North Star：在不复制宿主原生推理、编码和运行能力的前提下，最大化 verified value、correctness 和 user outcome，同时最小化 user attention、wall-clock latency、provider/model spend、token/context、retry、coordination/integration、maintenance cost 与不可逆失败风险；任何辅助功能都必须证明相对 native baseline 的 Pareto 净收益，并始终可绕过、可回滚、可替换、可删除。
 
 1. 用户价值主链优先：先有可演示结果，再稳定化和重构。
 2. 官方/宿主原生优先：复用模型推理、Codex/Claude 执行、plugins、skills、MCP、hooks 和权限系统。
@@ -59,6 +63,7 @@ In scope：
 - 定义 M0-M3 maintenance 路线和 10-task observe-only pilot 的准入/退出方法，并以轻量 registry 启动真实样本收集。
 - 提供 machine-readable maintenance manifest、companion verifier、负向测试和一份 reviewed evidence。
 - 在同一 maintenance manifest 中增加 M0.2 工程化协调/工具组合任务，扩展 M1 sample observation，但不增加样本类别、runtime object 或第二个 registry。
+- 在同一 manifest 中增加 M0.3 host-owned TaskGraph/model policy、Radar snapshot、failure escalation 与 typed-core migration decision；只增加 planning/verifier/test/evidence，不改 host/runtime。
 
 Out of scope：
 
@@ -68,6 +73,7 @@ Out of scope：
 - 安装或运行 Trellis、AGOS、OptSkills、GBrain、CodeGraphContext、Understand Anything；创建 coordinator/lease daemon、dashboard、数据库、自动 reviewer 或 Git hook control plane。
 - 伪造、回填或在当前切片内宣称完成真实 10-task pilot；生产部署、付费模型调用、跨仓 apply 或业务 `live_accepted` 验收。
 - 把 spec-driven development 的强制 TDD、每任务文件数限制或全流程人工审批移入本仓契约。
+- 动态抓取 Codex Radar、静默选择/切换模型、修改 `.codex/agents`/active session、实现 model router/scheduler/provider gateway，或在本切片创建 C#/.NET project/PoC、迁移任何 PowerShell 生产 seam。
 
 ## 5. Lifecycle modes
 
@@ -171,6 +177,53 @@ knowledge/code-graph adapter 只允许 read-only canary，并同时声明最小 
 
 面向用户只保留四类稳定意图：`Discover` 发现能力与仓库事实；`Advise` 生成最小组合、规划/规则建议和退役判断；`Transact` 仅通过既有显式 token、freshness、backup/receipt/rollback seam 执行受管写入；`Verify` 分层证明 repo、host 与 live 状态。Lean Delivery 只消费 `Discover + Advise + Verify`，不会借 advisory 自动取得 `Transact` 权限。
 
+### 13.1 Host-owned TaskGraph and model policy
+
+责任边界固定为：user intent = authority owner；host AI = accountable semantic coordinator；skills-manager = evidence and policy advisor；deterministic verifier = admission and safety guard；Codex native runtime = subagent executor；Git/tests/scripts/live probes = truth adjudicator。宿主负责拆分、串并行、spawn/steer/wait/stop、模型档位、升级、集成和最终综合，本仓不得以 lexical router、LLM proxy 或后台 scheduler 替代。
+
+长链路任务的最小合同：
+
+```text
+TaskGraph:
+  task_id, goal, inputs, outputs, depends_on, risk, ambiguity,
+  parallelizable, exact_write_set, external_state, verification,
+  result_owner, integration_order, stop_condition
+
+ModelPolicy:
+  radar_snapshot_id, captured_at, expires_at, model, reasoning_effort,
+  host_availability, score, estimated_cost, estimated_duration,
+  sample_count, confidence, fallback, escalation_trigger, user_override
+
+FailurePacket:
+  base_revision, task_id, attempted_model, attempted_effort, commands,
+  failures, verified_facts, unresolved_questions, artifacts,
+  exact_write_set, next_recommendation
+```
+
+三档默认策略只是软锚点：
+
+| 档位 | Host-resolved pair | 默认任务 | 不应自动承担 |
+| --- | --- | --- | --- |
+| `Sol xhigh` | `gpt-5.6-sol` + `xhigh` | 需求/产品澄清、架构与大型重构、跨服务生产 RCA、高风险代码审查、最终 integration/adjudication | 清楚且机械的批量任务 |
+| `Sol medium` | `gpt-5.6-sol` + `medium` | 一般实现、日常 Bug 排查、中等复杂度审查、集成准备 | 缺权限/工具/用户决策的问题 |
+| `Luna max` | `gpt-5.6-luna` + `max` | 清楚、窄、可重复和高吞吐的 CRUD/SQL/单测/文档/机械转换、异步 workers | 承重架构裁决或失败后的无限重试 |
+
+`Host-resolved pair` 是当前可理解的 model/effort 组合，不是永久 model ID 白名单；宿主不可用、名称变化或 Radar stale 时由宿主选择当前官方/default，并在 ModelPolicy 中记录实际值和 override reason。
+
+Radar refresh 与 task execution 分离；snapshot 必须显式产生、记录原始 hash 和过期时间，不能在每个 task 隐式联网。stale/unavailable 时回退宿主官方/default；本地同类任务的 gate、返工、费用、时长和人工纠正优先于榜单。Radar 不证明准确率、生产质量或 live acceptance，模型策略不压成永久单分数。
+
+串并行 admission：完全只读或 exact write set 互斥、base 固定、依赖完成、外部写入可见、candidate 可独立验证/丢弃、integration owner/order 明确时才可并行。共享 file/config/lock/source-generated seam、schema/migration/backfill、Git index/ref、同一外部对象、内容依赖和 final integration/full gate/closeout 一律串行。并发数由宿主可用槽位和任务独立性共同约束，不以“模型更强”放宽 write-set 规则。
+
+升级状态机：initial route -> root-cause diagnosis 后一次 corrected retry -> task/context 问题则补证据或 re-scope -> 只有 capacity 问题按 `Luna max -> Sol medium -> Sol xhigh` 升档 -> 同一 issue 两次失败 clarify/re-plan -> 两次升级或承重风险由 supervisor 串行接管。缺 auth/permission/tool/production/user decision 直接 fail-closed。禁止无 `FailurePacket` 换档、同 prompt 无限重试、子 Agent 扩大 write set 或运行中无审计热切换。
+
+### 13.2 PowerShell and typed-core migration contract
+
+当前事实：PS7 build 和 generated bundle 通过，PS5.1 parse/plain-object smoke 通过；这些证据只证明当前有界兼容合同，不证明 PowerShell 对 AI 长期维护最优。PowerShell 动态类型、parser/quoting、encoding、native process、错误传播与 5.1/7 差异确实增加 AI 修改的返工面，因此技术方向从“永久 PowerShell core”柔化为“当前 PowerShell runtime + protocol-first + 条件性 C#/.NET typed core”。
+
+候选比较结论：C#/.NET 在 Windows/native CLI、编译期类型、结构化并发、测试、framework-dependent/self-contained/single-file 分发上最匹配，推荐作为唯一 PoC；TypeScript/Node 增加 Node/npm/打包面，Python 增加解释器/venv/Windows path/encoding 面，Rust 的迁移/维护成本在当前规模过高，均保持 defer。PowerShell 仍保留 installer、旧 CLI aliases、Junction/host adapter、bundle 和错误呈现；typed candidate 只承接纯 domain/policy/validation。
+
+PoC admission 必须同时满足：一个 read-only pure seam；至少两个真实 caller；已有 characterization corpus；versioned stdin/stdout UTF-8 JSON、stable finding/exit contract；当前受支持 .NET LTS pin proposal；PowerShell 与 candidate shadow parity；framework-dependent/self-contained 的启动/体积/发布数据；无外部写入/daemon/provider/host mutation；旧路径可一键回退；PoC 可删除。通过后仍按一个 seam 一次迁移并保持单一实现真源；不允许长期双写、双配置或全仓重写。
+
 ## 14. Outcome metrics and pilot design
 
 M1 需要 10 个真实任务，覆盖模糊需求、从零主链、缺陷修复、重构、跨 seam 实现、测试策略、发布、运维、能力选择和简单任务负样本。`tasks/skills-manager-vnext-lean-delivery-pilot.json` 只在任务达到证据停止点后追加样本；synthetic、候选和 M0.1/M0.2/registry/bootstrap 自身不得计数。每项记录 task complexity、baseline workflow、advisory workflow、TTFV、返工切片、非预期人工打断、非产品 artifact、focused/full gate 时间、最终 truth level 和用户接受结果。
@@ -205,6 +258,11 @@ M0/M2 不再被误写为串行前置关系；证据流是 `M0 -> M1 pilot -> M3`
 | target/base/hash drift | 拒绝 candidate integration，rebase/replan 后重新验证 | expected/current revision + diff |
 | Git CAS 被描述为文件锁/队列 | planning verifier fail-closed，修正文档/任务 | `ref_freshness_not_file_queue` contract |
 | context adapter admission 不完整 | 保持 defer，回退 repo-native 工具 | language/privacy/freshness/resource/supply-chain matrix |
+| Radar snapshot 过期/来源或样本不可核验 | 忽略 snapshot，回退官方/native default；不改 host config | captured_at/expires_at/raw_hash + host availability |
+| 子任务首次失败 | 诊断 task/context/tool/capacity 根因，只允许一次 corrected retry | issue_id + FailurePacket + attempt 1 |
+| 同一 issue 第二次失败或两次升档 | 停止并行，re-scope/clarify；承重任务由 supervisor 串行接管 | attempt/escalation history + new TaskGraph |
+| PowerShell 语法/兼容回归 | 先缩小 seam、修当前运行真源并通过 PS7/full + 5.1 bounded smoke；不得借机全仓重写 | parser/error + compatibility tests |
+| typed-core parity/分发/回滚不达标 | 删除 PoC，继续 PowerShell 单一真源；不得保留双实现 | corpus diff + delete/rollback receipt |
 | host/live 未执行 | 保持 not_run/not_verified | truth boundary |
 
 ## 17. Verification order
@@ -212,7 +270,7 @@ M0/M2 不再被误写为串行前置关系；证据流是 `M0 -> M1 pilot -> M3`
 `VERIFICATION_DECLARATION_START`
 
 1. `pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1`
-2. 运行 `ProductPlanning.Tests.ps1` 与 `LeanAiDeliveryPlanning.Tests.ps1` 的 focused Pester tests。
+2. 运行 `ProductPlanning.Tests.ps1`、`LeanAiDeliveryPlanning.Tests.ps1` 与 `PowerShellCompatibility.Tests.ps1` 的 focused Pester tests。
 3. `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-vnext-planning.ps1 -Json`
 4. `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-lean-ai-delivery-planning.ps1 -Json`（同时校验 M1 registry/status/counting/truth boundary）
 5. `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree`
@@ -234,17 +292,20 @@ full quality gate 只运行一次并拥有完整 suite；focused tests 用于本
 | `SMV-MD-006` | FR-EWF-008/009/010/011/012 | ADR-SMV-025 | tool disposition、context adapter、skill lifecycle 与 M1 observation contract |
 | `SMV-MD-007` | FR-AIE-005、NFR-EWF-001/002/003/004 | ADR-SMV-024/025 | companion verifier 的 evidence-group、M0.2 和负向边界测试 |
 | `SMV-MD-008` | FR-EVD-003、NFR-TRU-001、NFR-EWF-001 | ADR-SMV-013/024/025 | 产品索引/根契约、M0.2 evidence、唯一 full gate 与 truth closeout |
+| `SMV-MD-009` | FR-EWF-013/014/015/016/017、NFR-EWF-005 | ADR-SMV-026 | TaskGraph、模型三档、Radar snapshot、并发 admission 与 escalation contract |
+| `SMV-MD-010` | PP-012、NFR-EWF-006、NFR-TEC-001 | ADR-SMV-001/002/027 | PowerShell 风险判断、typed-core 目标架构、TC0-TC3 与兼容/回滚边界 |
+| `SMV-MD-011` | FR-AIE-005、FR-EVD-003、NFR-TRU-001 | ADR-SMV-026/027 | M0.3 verifier/tests、产品/根状态、独立 evidence 和唯一 full gate |
 
-manifest 是 M0/M0.2 依赖、write set、步骤、验证、回滚、evidence group 和 done_when 的机器真源。本表只提供 requirement/ADR 可追踪入口；M1 不进入 maintenance task DAG，而由独立轻量 registry 登记真实样本。
+manifest 是 M0/M0.2/M0.3 依赖、write set、步骤、验证、回滚、evidence group 和 done_when 的机器真源。本表只提供 requirement/ADR 可追踪入口；M1 不进入 maintenance task DAG，而由独立轻量 registry 登记真实样本。
 
 ## 19. Rollback
 
-回滚范围只包含 maintenance design 的产品真源增量、当前 spec/manifest、M1 registry observation 增量、plan/todo maintenance 章节、companion verifier/tests、产品索引/AGENTS 状态行和本逻辑切片 evidence。M0 与 M0.2 使用独立 evidence group，回滚 M0.2 不改写 M0 历史证据。不得修改或回滚 P0-P5 manifest/spec/evidence、`src/`、`overrides/`、`agent/`、`vendor/`、`skills.json`、reports 或宿主状态。
+回滚范围只包含 maintenance design 的产品真源增量、当前 spec/manifest、M1 registry observation 增量、plan/todo maintenance 章节、companion verifier/tests、PowerShell compatibility runbook、产品索引/AGENTS/README 状态行和本逻辑切片 evidence。M0、M0.2、M0.3 使用独立 evidence group，回滚 M0.3 不改写前两组历史证据。不得修改或回滚 P0-P5 manifest/spec/evidence、`src/`、`overrides/`、`agent/`、`vendor/`、`skills.json`、reports、host/model config 或宿主状态。
 
 若 verifier 设计本身错误，先保持 track 为未验证并修复或删除 companion 资产；P5 仍由原 verifier 和历史真源独立成立。若后续 pilot 无净收益，删除/降级 advisory 候选和 pilot metadata，不删除已验证的 P5 capability selection/runtime-independent contracts。
 
 ## 20. Done definition
 
-M0 历史完成真值保持不变。M0.2 完成仅当：现有 PRD/架构/路线图仍为唯一产品真源；maintenance spec/manifest/plan/todo 与 M1 registry 完整；M0 四项与 M0.2 四项 planning tasks 均为 done；evidence group 各自可追；错误 Git CAS、shared-write overlap、control-plane/runtime、adapter admission 与 truth boundary 的负向 tests fail-closed；新旧 verifier、focused tests 和唯一 full gate 通过；P5 保持 5/5 `repo_verified`；P6 保持 hold 且不存在 P6 manifest；pilot 为 collecting 0/10，live/runtime 状态保持本文件头部声明。
+M0/M0.2 历史完成真值保持不变。M0.3 完成仅当：现有 PRD/架构/路线图仍为唯一产品真源；maintenance spec/manifest/plan/todo 与 M1 registry 完整；M0 四项、M0.2 四项和 M0.3 三项 planning tasks 均为 done；三个 evidence group 各自可追；错误 Git CAS/shared-write、runtime model routing、stale Radar、无 failure packet 升档、PowerShell/typed-core 双真源、P6/runtime/live 越级的负向 tests fail-closed；新旧 verifier、focused tests 和唯一 full gate 通过；P5 保持 5/5 `repo_verified`；P6 保持 hold 且不存在 P6 manifest；pilot 为 collecting 0/10，`TYPED_CORE_STATUS=poc_not_started`，live/runtime 状态保持本文件头部声明。
 
-允许的完成表述是“maintenance design M0/M0.2 与 M1 collecting contract repo_verified”。禁止表述为 coordinator/lease runtime、Trellis/AGOS/GBrain/code graph 已安装，多 Agent/工具组合收益已证明，10-task pilot 已执行/完成、host 已变更、P6 已准入或产品已 `live_accepted`。
+允许的完成表述是“maintenance design M0/M0.2/M0.3 与 M1 collecting contract repo_verified”。禁止表述为 coordinator/lease/model-routing runtime、Radar 模型选择效果已证明、custom-agent/host config 已修改、typed core/PoC 已实现、PowerShell 已替换、Trellis/AGOS/GBrain/code graph 已安装，多 Agent/工具组合收益已证明，10-task pilot 已执行/完成、P6 已准入或产品已 `live_accepted`。

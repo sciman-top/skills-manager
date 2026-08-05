@@ -14,7 +14,7 @@
 | `P3` | Plugin-aware distribution and evaluation | `complete` | 7/7 tasks repo_verified；fixture-first，host/live 未执行 |
 | `P4` | Unified capability selection and activation planning | `complete` | 6/6 tasks `repo_verified`；16-profile fresh prompt probe 已通过，host runtime activation/live acceptance 未执行 |
 | `P5` | Adaptive Capability Fabric | `complete` | 5/5 `repo_verified`；live read-only App Server snapshot 与 full gate 已通过，business live acceptance 未执行 |
-| `maintenance_design` | Lean AI Software Delivery | `M0/M0.2 repo_verified / M1 collecting 0/10` | M0 基线 4/4 + M0.2 工程化协调/工具组合 4/4 repo_verified；M1 仅启动真实样本收集，M3 conditional |
+| `maintenance_design` | Lean AI Software Delivery | `M0/M0.2/M0.3 repo_verified / M1 collecting 0/10` | M0 基线 4/4 + M0.2 工程化协调/工具组合 4/4 + M0.3 模型策略/typed-core 决策 3/3 repo_verified；M1 仅启动真实样本收集，M3/TC0-TC3 conditional |
 | `profile_reconciliation_advisor` | Skill profile drift reconciliation | `repo_verified` | P5-local plan-only advisor 4/4；宿主负责语义 proposal，确定性 planner 零写入校验；apply/live 未执行，不构成 P6 |
 | `profile_optimization_canary` | Bounded profile apply and replay | `repo_verified` | P5-local 3/3；非活动 profile canary、receipt/replay/rollback 已验证；6/6 host replay 为 partial，live acceptance not run |
 | `capability_routing_correction` | Native-first discovery/policy | `repo_verified` | P5-local regression correction 4/4；不改写 P5 历史状态，不授权 P6；host replay partial，live acceptance not run |
@@ -316,6 +316,8 @@ P5 完成后进入维护期，不按 Phase 编号惯性扩张。只有同时满�
 
 未满足上述条件时，只允许修缺陷、扩真实 corpus、删除无用字段、改善性能与文档；禁止新增 schema major、daemon/database/provider router、host mutation 或新的治理层。
 
+维护期允许一个不打开 P6 的 minor admission：用户明确提出相邻产品需求，复用官方 native surface，不扩 schema major、不实现 runtime、不修改 active host/session/provider/auth，只读或 shadow、bounded canary 可回滚、有 retirement trigger、且不创建第二 registry/P6 manifest。host-owned model/task policy 与 read-only typed-core PoC 只能经此入口；任何 scheduler、daemon、provider gateway、production migration 或持久控制面仍必须满足 P6 admission。
+
 ### 9.1 Lean AI Software Delivery maintenance track
 
 该 track 面向 skills-manager 辅助 ChatGPT/Codex/Claude 高效完成软件交付的总体方案，但只增加 advisory 规划与可验证契约。它与 P5 并行，不是 P6，不改变 Phase sequence，不授权 host/runtime 行为。
@@ -323,6 +325,7 @@ P5 完成后进入维护期，不按 Phase 编号惯性扩张。只有同时满�
 ```text
 M0 maintenance design package
   -> M0.2 engineered coordination and tool-admission clarification
+  -> M0.3 host-owned model policy + typed-core migration decision
   -> M1 10-task observe-only pilot
       -> M3 retain / revise / retire / P6 admission review
 
@@ -335,6 +338,7 @@ P5 real defects
 | --- | --- | --- | --- | --- |
 | `M0` | `repo_verified` | 综合 PRD/架构/路线图、maintenance spec/manifest、plan/todo、companion verifier、测试与一份 reviewed evidence | 4/4 planning tasks done；新旧 verifier 和 full gate 通过 | 新工作流业务有效、pilot 已运行、host loaded、live accepted |
 | `M0.2` | `repo_verified` | 在同一 maintenance 真源内补强 host-owned coordinator、只读设计 panel、single-writer write-set admission、Git freshness/CAS、tool disposition、context-adapter admission 与 M1 observation contract | 4 个增量任务 done；错误 CAS/共享写入/控制面膨胀/无证据 adapter 的负向 verifier 通过；唯一 full gate 通过 | coordinator/lease runtime 已实现、社区工具已安装、并行收益、M1 样本或业务 live acceptance |
+| `M0.3` | `repo_verified` | 落盘 host-owned TaskGraph/model policy、Radar snapshot、三档软锚点、failure escalation，以及 C#/.NET typed core + PowerShell thin shell 的条件性目标架构 | 3 个增量 planning tasks done；模型策略/typed-core/P6 边界负向 verifier 通过；唯一 full gate 通过 | 动态模型路由已实现、Radar 效果已证明、typed core/PoC 已实现、PowerShell 已替换、host/live acceptance |
 | `M1` | `collecting (0/10)` | 选取 10 个覆盖 Discovery/Main-chain/Stabilize/Refactor/Release/Operate 的真实任务，记录 native baseline 与 advisory treatment | 已获用户授权；registry/verifier 已启动；每项只做 observe，不设完成硬阈值 | pilot 已执行/完成、普遍效果、因果结论、自动 promotion |
 | `M2` | `repo_verified` | 以用户真实反馈和重复回放修正 P5 metadata、profile、golden、触发策略与直接缺陷；退役 lexical semantic router，保留 discovery/policy kernel | focused corpus、16-profile fresh probe、只读 host replay、planning/full gate 与共享 evidence 已收口 | M1 pilot 已运行、schema major、新 runtime、daemon/database、普遍 live acceptance |
 | `M3` | `conditional` | 比较净收益并决定 `retain | revise | retire`；仅把满足既有 admission 的证据提交 P6 review | 指标与失败样本经过人工 review；无净收益流程已删除或降级 | 自动 admitted、自动创建 P6 manifest |
@@ -344,6 +348,17 @@ M1 pilot 的最小样本覆盖：模糊需求澄清、从零主链、既有缺�
 M0.2 不增加新的 pilot 样本类别或第二个 registry，而是在每个未来样本的 `observations` 中记录：`coordination_mode`、`shared_write_set_policy`、`tool_dispositions`、`context_adapter` 和 `skill_lifecycle_action`。这些字段只解释“用了什么工程方式及其成本”，不成为 completion gate。简单任务应能记录 `single_agent / not_applicable / none`；不得为了填满字段强行使用 subagent、skill 或外部工具。
 
 M0.2 的执行协议如下：2–3 个 Agent 只在设计问题可独立时形成 read-only panel；写入只在 base revision 固定、依赖已满足、write set 互斥、candidate 可独立验证且 integration owner 明确时并行。共享文件、生成 seam、迁移、lock/config、Git ref/index 和同一外部状态一律单 writer/串行。lease 是 owner/write-set/base/recovery 的 coordinator claim；Git CAS/hash 只拒绝 stale 更新，不排队文件、不自动选 winner。当前实现完全复用宿主 task/subagent/worktree 与 Git，不建立 scheduler、daemon、database 或新 schema major。
+
+M0.3 的模型策略由宿主 AI 执行：用户拥有目标、价值排序和不可逆授权；宿主生成 TaskGraph、决定串并行、选择/升级模型并综合结果；skills-manager 提供 Radar/成本/风险建议与 deterministic admission；Codex native runtime 实际 spawn/wait/steer/integrate。`Sol xhigh / Sol medium / Luna max` 只是初始软锚点，Radar 以显式、带过期时间的 snapshot 更新，实际同类任务返工/门禁/费用/时长优先于排行榜。缺工具/权限/凭据不允许通过升档伪装解决。
+
+PowerShell 技术路线采用 strangler migration，不直接重写：
+
+| Step | 状态 | AI 可执行切片 | Exit gate |
+| --- | --- | --- | --- |
+| `TC0` | `conditional / not_started` | 选择一个 read-only pure seam，冻结输入 corpus/JSON/finding/exit baseline，记录两个真实 caller | seam、caller、baseline、rollback、SDK pin proposal 完整；无代码写入 |
+| `TC1` | `conditional` | 建立可删除的 C#/.NET typed-core PoC，以 stdin/stdout versioned JSON shadow 运行，不改旧 CLI 结果 | PowerShell/typed parity、零外部写入、启动/体积/测试/AI 返工数据齐全 |
+| `TC2` | `conditional` | 只在 TC1 reviewed accept 后把该 seam 切为单一 typed implementation，PowerShell 变薄 wrapper | 旧 alias/installer/bundle/PS7 full/5.1 smoke 兼容；rollback 可执行；无双真源 |
+| `TC3` | `conditional` | 依据两个以上已迁移 seam 的净收益决定继续、暂停或删除 typed core | reviewed retain/revise/retire；不得因目录愿景批量迁移 |
 
 工具采用顺序固定为：repo-native `rg`/symbols/tests/docs 与宿主原生能力 -> 窄 skill -> plugin distribution -> current external data/action 的 MCP/connector -> 有真实检索缺口的只读 knowledge/code-graph adapter。每个候选以 `adopt | adapt | defer | reject` 记录 source/revision/license、native equivalent、real consumers、data/auth/write boundary、evaluation、maintenance cost、retirement trigger 和 truth level。Trellis/AGOS 只适配 planning/write-scope/candidate/evidence 思想；OptSkills 只适配 replay/distill/eval；GBrain、CodeGraphContext、Understand Anything 继续 defer；来源不明的 souljourney workflow 保持 unknown/defer。
 
@@ -381,6 +396,10 @@ M3 判定优先删除性维护：pilot 没有缩短 TTFV、没有减少返工/�
 | `RISK-016` | 固定角色/控制面复制宿主 coordinator，增加状态、token 和无人负责的交接 | maintenance | read-only design panel + one result owner + no runtime/daemon/schema major verifier |
 | `RISK-017` | 社区知识库/代码图/skill 自动升级器无真实缺口就进入默认栈 | maintenance | ADR-SMV-025 + two-real-task admission + disposition/retirement contract + repo-native fallback |
 | `RISK-018` | lease 过期/reassign 后旧 writer 仍在运行并产生双写 | maintenance | explicit revoke/recovery + old-writer stop proof + candidate provenance preserved |
+| `RISK-019` | Radar 排名/价格/耗时每日变化，被硬编码后产生错误模型路由 | maintenance | ADR-SMV-026 + expiring snapshot + host override + local outcome priority |
+| `RISK-020` | 子任务模型能力不足时无限重试、无 failure packet 升档或把权限问题误判成模型问题 | maintenance | one corrected retry + issue_id/replan + bounded escalation + fail-closed auth/tool boundary |
+| `RISK-021` | PowerShell 动态语义、quoting/encoding/native process 和 5.1/7 差异持续增加 AI 返工 | maintenance | ADR-SMV-027 + PS7 primary + bounded 5.1 smoke + typed-core PoC |
+| `RISK-022` | typed-core PoC 变成全仓重写或长期 PowerShell/C# 双真源 | maintenance | one read-only seam + corpus parity + single implementation owner + delete/rollback gate |
 
 ## 11. 路线维护
 

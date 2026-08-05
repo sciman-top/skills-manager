@@ -9,7 +9,7 @@
 
 该参考仓值得参考，但只作为静态规则治理模式和测试证据来源。最有价值的不是固定文档模板，而是三层责任分工：全局 common 定义跨仓稳定 WHAT，平台 delta 定义宿主加载/诊断/权限差异，项目 action 定义本仓 WHERE/HOW。目标仓保持自治，任何建议先以只读 finding/patch plan 表达。
 
-全局最优会倾向完整 typed model、跨平台 adapter、统一索引和更广自动化；当前约束下的适配性最优则优先复用 PowerShell、文件/Git 真源、现有门禁与单用户工作流。当前选择后者，因为它以更低迁移和误写风险覆盖主要需求；只有真实规模、性能或多用户证据触发时才重新评估 typed core/service。
+全局最优会倾向完整 typed model、跨平台 adapter、统一索引和更广自动化；当前运行约束仍要求复用 PowerShell、文件/Git 真源、现有门禁与单用户工作流。2026-08-05 的用户重复兼容摩擦、仓库专门兼容矩阵和 AI 对动态脚本接口的易错性已足以触发一个 read-only C#/.NET typed-core PoC 规划，但不授权 service 或全仓重写；生产迁移仍须一个 seam、两个 caller、corpus parity、分发/回滚和净收益证据。
 
 ## 2. Adoption matrix
 

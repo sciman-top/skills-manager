@@ -252,10 +252,10 @@ if ($null -ne $manifest) {
         }
     }
 
-    foreach ($expectedTaskId in @(1..8 | ForEach-Object { 'SMV-MD-{0:d3}' -f $_ })) {
+    foreach ($expectedTaskId in @(1..11 | ForEach-Object { 'SMV-MD-{0:d3}' -f $_ })) {
         if (-not $tasksById.ContainsKey($expectedTaskId)) {
             Add-LeanPlanningFinding ([ref]$findings) 'missing_required_maintenance_task' $paths['manifest'] `
-                ('Required M0/M0.2 maintenance task is missing: {0}' -f $expectedTaskId)
+                ('Required M0/M0.2/M0.3 maintenance task is missing: {0}' -f $expectedTaskId)
         }
     }
 
@@ -603,7 +603,17 @@ foreach ($policyContract in @(
     @{ key = 'architecture'; literal = 'ADR-SMV-024'; code = 'coordination_architecture_decision_missing'; message = 'Architecture must contain the host-owned coordinator/single-writer ADR.' },
     @{ key = 'architecture'; literal = 'ADR-SMV-025'; code = 'tool_admission_architecture_decision_missing'; message = 'Architecture must contain the evidence-gated tool-adapter ADR.' },
     @{ key = 'architecture'; literal = 'Git CAS is not a file lock or task queue'; code = 'git_cas_negative_boundary_missing'; message = 'Architecture must explicitly reject file-lock/task-queue Git CAS semantics.' },
-    @{ key = 'roadmap'; literal = '| `M0.2` | `repo_verified` |'; code = 'm0_2_roadmap_status_missing'; message = 'Roadmap must register the bounded M0.2 clarification as repo_verified planning truth.' }
+    @{ key = 'roadmap'; literal = '| `M0.2` | `repo_verified` |'; code = 'm0_2_roadmap_status_missing'; message = 'Roadmap must register the bounded M0.2 clarification as repo_verified planning truth.' },
+    @{ key = 'spec'; literal = 'MODEL_POLICY_STATUS: host_advisory_only'; code = 'model_policy_status_missing'; message = 'M0.3 must keep model policy host-owned and advisory-only.' },
+    @{ key = 'spec'; literal = 'RADAR_SNAPSHOT_POLICY: advisory_expiring_snapshot'; code = 'radar_snapshot_policy_missing'; message = 'M0.3 must keep Radar data explicit, advisory, and expiring.' },
+    @{ key = 'spec'; literal = 'TYPED_CORE_STATUS: poc_not_started'; code = 'typed_core_status_missing'; message = 'M0.3 must not claim that a typed-core PoC or migration has started.' },
+    @{ key = 'spec'; literal = 'POWERSHELL_COMPATIBILITY_STATUS: ps7_primary_ps51_bounded_smoke'; code = 'powershell_compatibility_status_missing'; message = 'M0.3 must preserve PS7 primary and bounded PS5.1 compatibility truth.' },
+    @{ key = 'prd'; literal = 'FR-EWF-017'; code = 'model_escalation_requirement_missing'; message = 'PRD must define bounded model escalation and failure routing.' },
+    @{ key = 'prd'; literal = 'NFR-TEC-001'; code = 'typed_core_requirement_missing'; message = 'PRD must contain the conditional typed-core technology requirement.' },
+    @{ key = 'architecture'; literal = 'ADR-SMV-026'; code = 'model_policy_architecture_decision_missing'; message = 'Architecture must contain the host-owned task/model policy ADR.' },
+    @{ key = 'architecture'; literal = 'ADR-SMV-027'; code = 'typed_core_architecture_decision_missing'; message = 'Architecture must contain the protocol-first typed-core ADR.' },
+    @{ key = 'architecture'; literal = 'PowerShell remains a compatibility shell, not the domain-policy source of truth'; code = 'typed_core_negative_boundary_missing'; message = 'Architecture must state the PowerShell compatibility-shell target without claiming an implemented migration.' },
+    @{ key = 'roadmap'; literal = '| `M0.3` | `repo_verified` |'; code = 'm0_3_roadmap_status_missing'; message = 'Roadmap must register M0.3 as repo-verified planning truth only.' }
 )) {
     if (-not (Test-LeanContainsLiteral $content[$policyContract.key] $policyContract.literal)) {
         Add-LeanPlanningFinding ([ref]$findings) $policyContract.code $paths[$policyContract.key] $policyContract.message
@@ -637,6 +647,10 @@ $result = [ordered]@{
     track = 'maintenance_design'
     base_phase = 'P5'
     p6_admission_status = 'hold'
+    model_policy_status = 'host_advisory_only'
+    radar_snapshot_policy = 'advisory_expiring_snapshot'
+    typed_core_status = 'poc_not_started'
+    powershell_compatibility_status = 'ps7_primary_ps51_bounded_smoke'
     pilot_status = $pilotStatus
     pilot_sample_target = $pilotSampleTarget
     pilot_sample_count = $pilotSampleCount

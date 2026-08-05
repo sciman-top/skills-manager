@@ -42,6 +42,10 @@ vNext P0-P5 已完成 repo-side 验收（P0/P1 各 9/9，P2/P3 各 7/7，P4 6/6�
 
 运行时以 PowerShell 7 (`pwsh`) 为开发、CI 和完整门禁主路径；Windows PowerShell 5.1 仅保留安装 fallback、generated script parse 和 plain-object/selected fixture smoke。完整边界与移除条件见 [`docs/runbooks/powershell-runtime-compatibility.md`](docs/runbooks/powershell-runtime-compatibility.md)。
 
+PowerShell 仍是当前唯一运行真源，但不再是所有未来领域逻辑的默认永久归宿。针对 AI 生成脚本常见的 parser/quoting/动态类型/encoding/native-process/5.1-7 兼容返工，目标架构采用 `versioned protocol -> 条件性 C#/.NET typed core -> PowerShell thin shell`；当前只完成 M0.3 planning/verifier，typed-core PoC 尚未创建，禁止直接全仓重写或形成双真源。
+
+长链路任务的模型与子 Agent 编排继续由宿主 AI 负责；本仓只提供可审查的 TaskGraph、Radar snapshot、三档模型软锚点、串并行 admission 和 failure escalation 建议。`Sol xhigh / Sol medium / Luna max` 是可覆盖默认值，不是已实现的动态路由；本仓不修改 active session、custom-agent、provider/auth 或 host config。
+
 Phase 1 的只读入口（未指定 `--out` 时不写文件）：
 
 ```powershell

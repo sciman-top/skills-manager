@@ -6,6 +6,7 @@ Describe 'Lean AI delivery maintenance planning contract' {
     $maintenanceSpecRelative = 'docs\superpowers\specs\2026-08-03-lean-ai-delivery-maintenance-design.md'
     $maintenanceEvidenceRelative = 'docs\change-evidence\20260803-lean-ai-delivery-maintenance-design.md'
     $engineeredWorkflowEvidenceRelative = 'docs\change-evidence\20260805-engineered-agent-workflow-maintenance-design.md'
+    $modelPolicyTypedCoreEvidenceRelative = 'docs\change-evidence\20260805-model-policy-and-typed-core-maintenance-design.md'
     $fixtureRequiredFiles = @(
         'docs\product\README.md',
         'docs\product\skills-manager-vnext-prd.md',
@@ -20,7 +21,8 @@ Describe 'Lean AI delivery maintenance planning contract' {
         $maintenanceManifestRelative,
         $pilotRegistryRelative,
         $maintenanceEvidenceRelative,
-        $engineeredWorkflowEvidenceRelative
+        $engineeredWorkflowEvidenceRelative,
+        $modelPolicyTypedCoreEvidenceRelative
     )
 
     function Invoke-LeanPlanningVerifier([string]$Root, [switch]$External) {
@@ -125,10 +127,14 @@ exit 0
         $parsed.p6_admission_status | Should Be 'hold'
         $parsed.pass | Should Be $true
         $parsed.finding_count | Should Be 0
-        $parsed.task_count | Should Be 8
-        $parsed.done_count | Should Be 8
+        $parsed.task_count | Should Be 11
+        $parsed.done_count | Should Be 11
         $parsed.open_count | Should Be 0
-        @($parsed.evidence_groups).Count | Should Be 2
+        @($parsed.evidence_groups).Count | Should Be 3
+        $parsed.model_policy_status | Should Be 'host_advisory_only'
+        $parsed.radar_snapshot_policy | Should Be 'advisory_expiring_snapshot'
+        $parsed.typed_core_status | Should Be 'poc_not_started'
+        $parsed.powershell_compatibility_status | Should Be 'ps7_primary_ps51_bounded_smoke'
         $parsed.pilot_status | Should Be 'collecting'
         $parsed.pilot_sample_target | Should Be 10
         $parsed.pilot_sample_count | Should Be 0
@@ -261,10 +267,10 @@ exit 0
         @(((Invoke-LeanPlanningVerifier $invalidRoot).output | ConvertFrom-Json).findings | Where-Object code -eq 'invalid_task_id').Count | Should Be 1
     }
 
-    It 'requires the exact M0 and M0.2 task set and stable evidence groups' {
-        $missingTaskRoot = New-LeanPlanningFixture 'missing-m0-2-task'
+    It 'requires the exact M0 M0.2 and M0.3 task set and stable evidence groups' {
+        $missingTaskRoot = New-LeanPlanningFixture 'missing-m0-3-task'
         $manifest = Get-Content -LiteralPath (Join-Path $missingTaskRoot $maintenanceManifestRelative) -Raw | ConvertFrom-Json
-        $manifest.tasks = @($manifest.tasks | Where-Object { $_.id -ne 'SMV-MD-008' })
+        $manifest.tasks = @($manifest.tasks | Where-Object { $_.id -ne 'SMV-MD-011' })
         Save-LeanManifest $missingTaskRoot $manifest
         $missingTaskFindings = @(((Invoke-LeanPlanningVerifier $missingTaskRoot).output | ConvertFrom-Json).findings)
         @($missingTaskFindings | Where-Object code -eq 'missing_required_maintenance_task').Count | Should Be 1
@@ -347,6 +353,13 @@ exit 0
         @($parsed.findings | Where-Object code -eq 'done_task_evidence_missing').Count | Should Be 1
     }
 
+    It 'requires the M0.3 evidence file independently from M0 and M0.2 evidence' {
+        $fixtureRoot = New-LeanPlanningFixture 'm0-3-evidence-missing'
+        Remove-Item -LiteralPath (Join-Path $fixtureRoot $modelPolicyTypedCoreEvidenceRelative) -Force
+        $parsed = (Invoke-LeanPlanningVerifier $fixtureRoot).output | ConvertFrom-Json
+        @($parsed.findings | Where-Object code -eq 'done_task_evidence_missing').Count | Should Be 1
+    }
+
     It 'fails closed when engineered-workflow policy literals drift' {
         $fixtureRoot = New-LeanPlanningFixture 'm0-2-policy-drift'
         $specPath = Join-Path $fixtureRoot $maintenanceSpecRelative
@@ -364,6 +377,33 @@ exit 0
         @($findings | Where-Object code -eq 'control_plane_status_missing').Count | Should Be 1
         @($findings | Where-Object code -eq 'git_cas_semantics_missing').Count | Should Be 1
         @($findings | Where-Object code -eq 'git_cas_negative_boundary_missing').Count | Should Be 1
+    }
+
+    It 'fails closed when model policy Radar or typed-core boundaries drift' {
+        $fixtureRoot = New-LeanPlanningFixture 'm0-3-policy-drift'
+        $specPath = Join-Path $fixtureRoot $maintenanceSpecRelative
+        $spec = (Get-Content -LiteralPath $specPath -Raw).
+            Replace('MODEL_POLICY_STATUS: host_advisory_only', 'MODEL_POLICY_STATUS: runtime_router').
+            Replace('RADAR_SNAPSHOT_POLICY: advisory_expiring_snapshot', 'RADAR_SNAPSHOT_POLICY: permanent_hard_gate').
+            Replace('TYPED_CORE_STATUS: poc_not_started', 'TYPED_CORE_STATUS: production_migrated').
+            Replace('POWERSHELL_COMPATIBILITY_STATUS: ps7_primary_ps51_bounded_smoke', 'POWERSHELL_COMPATIBILITY_STATUS: unsupported')
+        Set-Content -LiteralPath $specPath -Value $spec -Encoding UTF8
+
+        $architecturePath = Join-Path $fixtureRoot 'docs\product\skills-manager-vnext-architecture.md'
+        $architecture = (Get-Content -LiteralPath $architecturePath -Raw).
+            Replace('PowerShell remains a compatibility shell, not the domain-policy source of truth', 'PowerShell and typed core remain equal sources of truth').
+            Replace('ADR-SMV-026', 'ADR-SMV-X26').
+            Replace('ADR-SMV-027', 'ADR-SMV-X27')
+        Set-Content -LiteralPath $architecturePath -Value $architecture -Encoding UTF8
+
+        $findings = @(((Invoke-LeanPlanningVerifier $fixtureRoot).output | ConvertFrom-Json).findings)
+        @($findings | Where-Object code -eq 'model_policy_status_missing').Count | Should Be 1
+        @($findings | Where-Object code -eq 'radar_snapshot_policy_missing').Count | Should Be 1
+        @($findings | Where-Object code -eq 'typed_core_status_missing').Count | Should Be 1
+        @($findings | Where-Object code -eq 'powershell_compatibility_status_missing').Count | Should Be 1
+        @($findings | Where-Object code -eq 'model_policy_architecture_decision_missing').Count | Should Be 1
+        @($findings | Where-Object code -eq 'typed_core_architecture_decision_missing').Count | Should Be 1
+        @($findings | Where-Object code -eq 'typed_core_negative_boundary_missing').Count | Should Be 1
     }
 
     It 'validates pilot observation dimensions and values' {

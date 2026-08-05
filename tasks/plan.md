@@ -74,14 +74,21 @@ Goal：把 skills-manager 面向高效 AI 软件交付的总体方案落为 advi
 | 6 | `SMV-MD-006` | sparse tool stack + pilot observations | disposition/context-adapter/skill lifecycle 完整；M1 仍 collecting 0/10 |
 | 7 | `SMV-MD-007` | M0.2 verifier | evidence-group、policy literal、sample observation 与负向边界 fail-closed |
 | 8 | `SMV-MD-008` | M0.2 closeout | 独立 evidence；产品索引/根契约同步；唯一 full gate；不声明 runtime/live |
+| 9 | `SMV-MD-009` | TaskGraph + model policy | host-owned semantics；三档软锚点；Radar expiring snapshot；并行 admission 与 escalation |
+| 10 | `SMV-MD-010` | PowerShell/typed-core architecture | 当前 PS 单一真源；C#/.NET thin-shell PoC 路线；TC0-TC3；拒绝重写/双真源 |
+| 11 | `SMV-MD-011` | M0.3 verifier + closeout | 三组 evidence；模型/runtime/typed-core 边界 fail-closed；唯一 full gate；不声明 PoC/live |
 
-M0.1/M0.2/M1 bootstrap：North Star、native baseline、双证据流、删除候选、host-owned coordinator、single-writer write-set admission、Git CAS truth、工具 disposition 和真实样本观察合同已落盘；M1 已获授权并进入 `collecting (0/10)`。后续只在真实任务达到证据停止点时追加 registry，不生成回溯性 synthetic 样本，也不把收集启动写成 pilot 已执行或业务收益。
+M0.1/M0.2/M0.3/M1 bootstrap：North Star、native baseline、双证据流、删除候选、host-owned coordinator、single-writer write-set admission、Git CAS truth、工具 disposition、TaskGraph/model policy、Radar freshness、失败升级与 typed-core 迁移决策已落盘；M1 已获授权并进入 `collecting (0/10)`。后续只在真实任务达到证据停止点时追加 registry，不生成回溯性 synthetic 样本，也不把收集启动写成 pilot 已执行、Radar 有效、typed core 已实现或业务收益。
 
 M0.2 execution contract：2–3 个 Agent 只可并行输出 read-only 设计候选，由一个 coordinator 综合决定；实现并行要求固定 base、依赖完成、exact write set 互斥、candidate 可独立验证和 integration owner 明确。共享文件、生成 seam、schema/migration、lock/config、Git index/ref 和同一外部状态使用单 writer/串行。lease 是 owner/write-set/base/recovery claim；Git CAS/hash 只检测 stale，不是文件锁、队列或 winner selector。本 track 不实现 scheduler/daemon/database，不安装 Trellis/AGOS/GBrain/code graph。
 
 Tool admission：默认 `host-native + repo-native + Git + gates`；只有重复 workflow 进入 skill，分发需要进入 plugin，current external data/action 进入 MCP/connector，两个独立 repo-native 检索失败且语言/privacy/freshness/resource/supply-chain/rollback 完整时才评估 read-only context adapter。所有候选必须有 adopt/adapt/defer/reject、native equivalent、consumer、evaluation、maintenance cost 和 retirement trigger。
 
-Failure routing：文档/manifest/registry 漂移先修当前真源；同一 verifier 缺陷连续失败两次后重审检查设计；未知工作树改动、P5 回归、P6 manifest、runtime write set 或 full gate 失败立即阻断收口。M1 达到 10 个真实样本并完成人工 review 前保持 collecting/observe-only。
+M0.3 model policy：用户拥有目标、价值排序、不可逆风险和外部授权；宿主 AI 负责 TaskGraph、串并行、模型/effort、spawn/wait/steer、升级、集成和最终综合；skills-manager 只提供 Radar/cost/risk proposal 与 deterministic admission。默认 `Sol xhigh / Sol medium / Luna max` 是可覆盖软锚点。一次 corrected retry 后仍失败则补证据/re-scope；仅模型能力不足才逐级升级；同一 issue 两次失败或两次升档由 supervisor 串行接管。shared seam、final integration 和 full gate 始终串行。
+
+M0.3 technology path：当前 PS7/生成 bundle 继续是唯一运行真源，5.1 只做 bounded smoke。候选目标是 C#/.NET typed core + PowerShell thin shell，不是全仓重写。下一可执行里程碑 `TC0` 只选择一个 read-only pure seam、两个真实 caller 与固定 corpus，形成 SDK pin/protocol/parity/rollback proposal；`TC1` PoC、`TC2` 单 seam 迁移和 `TC3` retain/revise/retire 都保持 conditional/not_started，需独立授权和证据。
+
+Failure routing：文档/manifest/registry 漂移先修当前真源；同一 verifier 缺陷连续失败两次后重审检查设计；Radar stale 回退 native default；子任务失败按 FailurePacket 判断 task/context/tool/capacity，不把权限问题伪装成模型问题；typed-core parity/分发/rollback 不达标则删除 PoC。未知工作树改动、P5 回归、P6 manifest、runtime write set、host/model mutation 或 full gate 失败立即阻断收口。M1 达到 10 个真实样本并完成人工 review 前保持 collecting/observe-only。
 
 Verification：迭代运行 focused planning tests 与两个 verifier；文件稳定后由 `scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree` 统一运行一次完整套件，随后执行 `git diff --check` 和 Git boundary 检查。不在 full gate 前后另行重复完整 suite。
 
