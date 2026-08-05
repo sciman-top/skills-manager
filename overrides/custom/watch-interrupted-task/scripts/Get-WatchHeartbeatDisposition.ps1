@@ -30,6 +30,9 @@ param(
     [AllowEmptyString()][string]$EvidenceTimestampUtc = '',
     [AllowEmptyString()][string]$CheckpointId = '',
     [AllowEmptyString()][string]$ReceiptKey = '',
+    [AllowEmptyString()][string]$NextRetryAtUtc = '',
+    [string]$NowUtc = ([DateTimeOffset]::UtcNow.ToString('o')),
+    [ValidateRange(1, 1440)][int]$EvidenceFreshnessMinutes = 15,
 
     [ValidateSet('none', 'safe', 'unknown', 'unsafe')]
     [string]$ExternalEffectState = 'unknown',
@@ -53,9 +56,25 @@ $result = [ordered]@{
     automation_action = 'keep_active'
     mutation_owner = 'none'
     notification_action = 'dont_notify'
+    next_retry_at = $NextRetryAtUtc
     requires_receipt = $false
     reason_code = 'state_observed'
 }
+
+$evaluationNow = [DateTimeOffset]::MinValue
+$evaluationTimeValid = [DateTimeOffset]::TryParse(
+    $NowUtc,
+    [System.Globalization.CultureInfo]::InvariantCulture,
+    [System.Globalization.DateTimeStyles]::AssumeUniversal,
+    [ref]$evaluationNow
+)
+$retryBoundary = [DateTimeOffset]::MinValue
+$retryBoundaryValid = [string]::IsNullOrWhiteSpace($NextRetryAtUtc) -or [DateTimeOffset]::TryParse(
+    $NextRetryAtUtc,
+    [System.Globalization.CultureInfo]::InvariantCulture,
+    [System.Globalization.DateTimeStyles]::AssumeUniversal,
+    [ref]$retryBoundary
+)
 
 function Test-RecoveryEvidence {
     $timestamp = [DateTimeOffset]::MinValue
@@ -65,8 +84,11 @@ function Test-RecoveryEvidence {
         [System.Globalization.DateTimeStyles]::AssumeUniversal,
         [ref]$timestamp
     )
-    $now = [DateTimeOffset]::UtcNow
-    $timestampFresh = $timestampValid -and $timestamp -ge $now.AddHours(-24) -and $timestamp -le $now.AddMinutes(5)
+    if (-not $evaluationTimeValid) {
+        $result.reason_code = 'evaluation_time_invalid'
+        return $false
+    }
+    $timestampFresh = $timestampValid -and $timestamp -ge $evaluationNow.AddMinutes(-$EvidenceFreshnessMinutes) -and $timestamp -le $evaluationNow.AddMinutes(5)
 
     if (-not $HasPositiveEvidence -or -not $timestampFresh) {
         $result.reason_code = 'missing_or_stale_evidence'
@@ -93,6 +115,15 @@ if ($OperatingMode -ceq 'supervisor_monitor_only') {
 elseif ($State -in @('resume_eligible', 'continuation_gap', 'recoverable_task_failure', 'strategy_drift', 'verification_failed')) {
     if ($GoalStatus -in @('paused', 'complete', 'blocked')) {
         $result.reason_code = 'goal_not_active'
+    }
+    elseif (-not $evaluationTimeValid) {
+        $result.reason_code = 'evaluation_time_invalid'
+    }
+    elseif (-not $retryBoundaryValid) {
+        $result.reason_code = 'retry_time_invalid'
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($NextRetryAtUtc) -and $retryBoundary -gt $evaluationNow) {
+        $result.reason_code = 'retry_not_due'
     }
     elseif (Test-RecoveryEvidence) {
         $result.task_action = switch ($State) {

@@ -180,4 +180,33 @@ Describe 'watch-interrupted-task conditional recovery contract' {
         $script:recoveryDesign | Should Match 'shutdown\.exe /s /t 120'
         $script:recoveryDesign | Should Match 'shutdown /a'
     }
+
+    It 'honors a future retry boundary and uses a configurable evidence freshness window' {
+        $now = [datetimeoffset]'2026-08-06T00:00:00Z'
+        $common = @{
+            State = 'resume_eligible'
+            GoalStatus = 'active'
+            HasPositiveEvidence = $true
+            EvidenceTimestampUtc = $now.AddMinutes(-20).ToString('o')
+            CheckpointId = 'retry-cp'
+            ReceiptKey = 'retry-receipt'
+            ExternalEffectState = 'none'
+            EvidenceFreshnessMinutes = 30
+        }
+
+        $deferred = & $dispositionScriptPath @common -NowUtc $now.ToString('o') -NextRetryAtUtc $now.AddMinutes(5).ToString('o')
+        $deferred.task_action | Should Be 'observe_only'
+        $deferred.reason_code | Should Be 'retry_not_due'
+        $deferred.next_retry_at | Should Be $now.AddMinutes(5).ToString('o')
+
+        $due = & $dispositionScriptPath @common -NowUtc $now.AddMinutes(6).ToString('o') -NextRetryAtUtc $now.AddMinutes(5).ToString('o')
+        $due.task_action | Should Be 'resume_from_checkpoint'
+        $due.reason_code | Should Be 'recovery_authorized'
+
+        $staleCommon = $common.Clone()
+        $staleCommon.EvidenceFreshnessMinutes = 15
+        $stale = & $dispositionScriptPath @staleCommon -NowUtc $now.ToString('o')
+        $stale.reason_code | Should Be 'missing_or_stale_evidence'
+        $script:prompt | Should Match 'NowUtc.*NextRetryAtUtc.*EvidenceFreshnessMinutes'
+    }
 }
