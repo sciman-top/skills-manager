@@ -53,6 +53,19 @@ function Add-IntegrityFinding($list, [string]$code, [string]$skill, [string]$mes
         }) | Out-Null
 }
 
+function Add-IntegritySkillNames([Collections.Generic.HashSet[string]]$set, $values) {
+    foreach ($value in @($values)) {
+        $name = ([string]$value).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($name)) { $set.Add($name) | Out-Null }
+    }
+}
+
+function Add-IntegritySkillPathLeaf([Collections.Generic.HashSet[string]]$set, [string]$value) {
+    $normalized = $value.Trim().Replace('\', '/').TrimEnd('/')
+    if ([string]::IsNullOrWhiteSpace($normalized)) { return }
+    Add-IntegritySkillNames $set (($normalized -split '/')[-1])
+}
+
 function ConvertFrom-OpenAiYamlScalar([string]$value) {
     $trimmed = $value.Trim()
     if ($trimmed.Length -ge 2) {
@@ -251,6 +264,19 @@ else {
         $dependencies = @($contract.dependencies)
         $dependencyCount = $dependencies.Count
 
+        # agent/ is generated from both tracked sources and locally materialized gitlinks.
+        # A clean checkout intentionally lacks the latter, so dependency existence must use
+        # tracked source declarations as well as any materialized package frontmatter. Profile,
+        # catalog and alias references are consumers and must never self-prove existence.
+        $availableSkillNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+        Add-IntegritySkillNames $availableSkillNames $skillNames
+        foreach ($import in @($config.imports)) {
+            Add-IntegritySkillPathLeaf $availableSkillNames ([string]$import.skill)
+        }
+        foreach ($mapping in @($config.mappings)) {
+            Add-IntegritySkillPathLeaf $availableSkillNames ([string]$mapping.from)
+        }
+
         $configuredMcpServers = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
         foreach ($server in @($config.mcp_servers)) {
             $serverName = ([string]$server.name).Trim()
@@ -269,14 +295,14 @@ else {
                 Add-IntegrityFinding $errors "invalid_dependency_entry" "" "dependency entry has no skill name" $DependencyContractPath
                 continue
             }
-            if (-not $skillNames.Contains($caller)) {
-                Add-IntegrityFinding $errors "missing_declared_skill" $caller "dependency contract caller is not installed" $DependencyContractPath
+            if (-not $availableSkillNames.Contains($caller)) {
+                Add-IntegrityFinding $errors "missing_declared_skill" $caller "dependency contract caller is absent from the materialized and tracked portable inventories" $DependencyContractPath
                 continue
             }
 
             foreach ($requiredName in $requiredNames) {
-                if (-not $skillNames.Contains($requiredName)) {
-                    Add-IntegrityFinding $errors "missing_required_skill" $caller ("required skill is not installed: {0}" -f $requiredName) $DependencyContractPath
+                if (-not $availableSkillNames.Contains($requiredName)) {
+                    Add-IntegrityFinding $errors "missing_required_skill" $caller ("required skill is absent from the materialized and tracked portable inventories: {0}" -f $requiredName) $DependencyContractPath
                 }
             }
 
@@ -288,7 +314,7 @@ else {
                 }
                 if (-not $enabled.Contains($caller)) { continue }
                 foreach ($requiredName in $requiredNames) {
-                    if ($skillNames.Contains($requiredName) -and -not $enabled.Contains($requiredName)) {
+                    if ($availableSkillNames.Contains($requiredName) -and -not $enabled.Contains($requiredName)) {
                         Add-IntegrityFinding $errors "profile_missing_dependency" $caller ("profile '{0}' omits required skill: {1}" -f $profileProperty.Name, $requiredName) $ConfigPath
                     }
                 }
