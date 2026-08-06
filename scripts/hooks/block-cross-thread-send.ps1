@@ -8,10 +8,16 @@ param(
     [string]$ExpectedTargetPromptSha256,
 
     [ValidatePattern('^[0-9A-Fa-f]{64}$')]
+    [string]$ExpectedShutdownTargetPromptSha256,
+
+    [ValidatePattern('^[0-9A-Fa-f]{64}$')]
     [string]$ExpectedFleetPromptSha256,
 
     [ValidatePattern('^[0-9A-Fa-f]{64}$')]
-    [string]$ExpectedFleetShutdownPromptSha256
+    [string]$ExpectedFleetShutdownPromptSha256,
+
+    [ValidatePattern('^watch-runtime-generation:[0-9a-f]{64}$')]
+    [string]$ExpectedRuntimeGenerationId
 )
 
 if (-not [string]::IsNullOrWhiteSpace($ExpectedScriptSha256)) {
@@ -57,6 +63,14 @@ function Get-InputProperty {
     }
 
     return $null
+}
+
+function Get-InputPropertyNames {
+    param([AllowNull()][object]$InputObject)
+
+    if ($null -eq $InputObject) { return @() }
+    if ($InputObject -is [System.Collections.IDictionary]) { return @($InputObject.Keys | ForEach-Object { [string]$_ }) }
+    return @($InputObject.PSObject.Properties.Name)
 }
 
 function Get-ToolInputText {
@@ -261,7 +275,7 @@ function Test-CanonicalWatchPrompt {
     $expectedBodyHashes = @()
     if ($lines[0] -match '^watch-interrupted-task:v1 target_thread_id=([A-Za-z0-9][A-Za-z0-9._:-]{0,255})$') {
         $markerTarget = $Matches[1]
-        $expectedBodyHashes = @($ExpectedTargetPromptSha256)
+        $expectedBodyHashes = @($ExpectedTargetPromptSha256, $ExpectedShutdownTargetPromptSha256)
     }
     elseif ($lines[0] -match '^watch-interrupted-task:fleet:v1 supervisor_thread_id=([A-Za-z0-9][A-Za-z0-9._:-]{0,255})$') {
         $markerTarget = $Matches[1]
@@ -281,7 +295,9 @@ function Test-CanonicalWatchPrompt {
         return $false
     }
     $body = [string]::Join("`n", $lines[4..($lines.Count - 1)])
-    return (Get-Sha256Lower -Text $body) -ceq $declaredHash
+    if ((Get-Sha256Lower -Text $body) -cne $declaredHash) { return $false }
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedRuntimeGenerationId) -and $body -notmatch ('(?m)^watch_runtime_generation_id=' + [regex]::Escape($ExpectedRuntimeGenerationId) + '$')) { return $false }
+    return $true
 }
 
 function Get-WatchTurnText {
@@ -394,6 +410,41 @@ function Test-ShutdownArmedFleetHeartbeat {
     }
     $lines = @(((($prompt -replace "`r`n", "`n") -replace "`r", "`n").TrimEnd()) -split "`n")
     return $lines.Count -ge 3 -and $lines[2] -ceq ('prompt_sha256=' + $ExpectedFleetShutdownPromptSha256.ToLowerInvariant())
+}
+
+function Test-ShutdownManagedTargetHeartbeat {
+    param([Parameter(Mandatory = $true)][object]$Payload)
+
+    if ([string]::IsNullOrWhiteSpace($ExpectedShutdownTargetPromptSha256)) { return $false }
+    $sessionId = [string](Get-InputProperty -InputObject $Payload -Names @('session_id', 'sessionId'))
+    $combined = Get-WatchTurnText -Payload $Payload
+    if ([string]::IsNullOrWhiteSpace($combined)) { return $false }
+    $heartbeatPattern = '(?s)^\s*<heartbeat>\s*<automation_id>(?<automation>[^<]+)</automation_id>\s*(?:<current_time_iso>[^<]+</current_time_iso>\s*)?<instructions>\s*(?<prompt>watch-interrupted-task:v1\s+.*?)\s*</instructions>\s*</heartbeat>\s*$'
+    $heartbeatMatch = [regex]::Match($combined, $heartbeatPattern)
+    if (-not $heartbeatMatch.Success -or $heartbeatMatch.Groups['automation'].Value.Trim() -cne "watch-interrupted-task-v1-target-thread-id-$sessionId") { return $false }
+    $prompt = $heartbeatMatch.Groups['prompt'].Value
+    if (-not (Test-CanonicalWatchPrompt -Prompt $prompt -ExpectedTargetThreadId $sessionId)) { return $false }
+    $lines = @(((($prompt -replace "`r`n", "`n") -replace "`r", "`n").TrimEnd()) -split "`n")
+    return $lines.Count -ge 3 -and $lines[2] -ceq ('prompt_sha256=' + $ExpectedShutdownTargetPromptSha256.ToLowerInvariant())
+}
+
+function Test-ExactTargetSelfPause {
+    param(
+        [Parameter(Mandatory = $true)][object]$Payload,
+        [Parameter(Mandatory = $true)][object]$ToolInput
+    )
+
+    $sessionId = [string](Get-InputProperty -InputObject $Payload -Names @('session_id', 'sessionId'))
+    $mode = [string](Get-InputProperty -InputObject $ToolInput -Names @('mode'))
+    $id = [string](Get-InputProperty -InputObject $ToolInput -Names @('id'))
+    $targetThreadId = [string](Get-InputProperty -InputObject $ToolInput -Names @('targetThreadId', 'target_thread_id'))
+    $status = [string](Get-InputProperty -InputObject $ToolInput -Names @('status'))
+    $allowedProperties = @('mode', 'id', 'targetThreadId', 'target_thread_id', 'status')
+    $unexpected = @(Get-InputPropertyNames -InputObject $ToolInput | Where-Object { $_ -notin $allowedProperties })
+    return $unexpected.Count -eq 0 -and $mode -ceq 'update' -and $status -ceq 'PAUSED' -and
+        $id -ceq "watch-interrupted-task-v1-target-thread-id-$sessionId" -and
+        ([string]::IsNullOrWhiteSpace($targetThreadId) -or $targetThreadId -ceq $sessionId) -and
+        (Test-ShutdownManagedTargetHeartbeat -Payload $Payload)
 }
 
 function Test-DirectWatchLifecycleIntent {
@@ -611,17 +662,28 @@ elseif ($toolName -match '(?i)(^|__|\.)automation_update$') {
                 $ordinaryTurnText -match '(?i)守夜|watch-interrupted-task|heartbeat'
         }
         if ($turnRole -ceq 'target_heartbeat') {
-            $denyReason = 'Target heartbeats are monitor/recovery workers and cannot mutate automation metadata; the fleet supervisor is the sole heartbeat writer.'
+            if (-not (Test-ExactTargetSelfPause -Payload $payload -ToolInput $toolInput)) {
+                $denyReason = 'A shutdown-managed target heartbeat may only pause its own exact canonical automation with a status-only ACTIVE-to-PAUSED update.'
+            }
         }
         elseif ($turnRole -ceq 'fleet_heartbeat') {
+            $shutdownArmedFleet = Test-ShutdownArmedFleetHeartbeat -Payload $payload
             if (-not $isWatchMutation) {
                 $denyReason = 'The fleet supervisor heartbeat may mutate only canonical watch-interrupted-task automations.'
             }
-            elseif ([string]::IsNullOrWhiteSpace($watchTargetThreadId) -or $watchTargetThreadId -ceq $sessionId) {
-                $denyReason = 'The fleet supervisor heartbeat cannot mutate its own dual-role automation.'
+            elseif ([string]::IsNullOrWhiteSpace($watchTargetThreadId)) {
+                $denyReason = 'The fleet supervisor heartbeat could not prove the target watch identity.'
             }
-            elseif ($mode -ceq 'delete' -or ($mode -ceq 'update' -and $status -ieq 'PAUSED')) {
-                $denyReason = 'Fleet heartbeat deletion or pause is fail-closed because PreToolUse cannot verify terminal Goal and cleanup receipt truth; a direct user lifecycle command is required.'
+            elseif ($mode -ceq 'delete') {
+                if (-not $shutdownArmedFleet) {
+                    $denyReason = 'Only the trusted shutdown-armed fleet heartbeat may delete a proved stopped target or perform its final self-delete.'
+                }
+            }
+            elseif ($watchTargetThreadId -ceq $sessionId) {
+                $denyReason = 'The fleet supervisor heartbeat cannot update or pause its own dual-role automation.'
+            }
+            elseif ($mode -ceq 'update' -and $status -ieq 'PAUSED') {
+                $denyReason = 'The target owns its exact shutdown-managed self-pause; the fleet supervisor may delete only after fresh PAUSED cleanup proof.'
             }
             elseif ($mode -cne 'delete' -and -not (Test-CanonicalWatchPrompt -Prompt $prompt -ExpectedTargetThreadId $watchTargetThreadId)) {
                 $denyReason = 'Fleet target automation writes must use the trusted canonical watch-interrupted-task policy_revision=3 envelope.'

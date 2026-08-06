@@ -14,9 +14,13 @@ param(
     [string]$PreviousSnapshotKey = '',
     [string]$PriorShutdownReceiptKey = '',
 
+    [ValidatePattern('^$|^watch-runtime-generation:[0-9a-f]{64}$')]
+    [string]$WatchRuntimeGenerationId = '',
+
     [string]$StateRoot = '',
     [string]$StatePath = '',
     [string]$ConfirmedShutdownReceiptKey = '',
+    [AllowEmptyString()][string]$MembershipJson = '',
 
     [switch]$VisibilityComplete,
     [switch]$ListLimitReached,
@@ -40,6 +44,12 @@ param(
     [ValidateRange(0, 100000)]
     [int]$UnknownCount = 0,
 
+    [ValidateRange(0, 1000)]
+    [int]$UnavailableHostCount = 0,
+
+    [ValidateRange(0, 1000)]
+    [int]$UnavailableSourceCount = 0,
+
     [ValidateRange(1, 60)]
     [int]$FreshnessMinutes = 15,
 
@@ -62,6 +72,9 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+. (Join-Path $PSScriptRoot 'WatchPromptCommon.ps1')
+$effectiveGenerationId = if ([string]::IsNullOrWhiteSpace($WatchRuntimeGenerationId)) { Get-WatchRuntimeGenerationId } else { $WatchRuntimeGenerationId }
 
 function Get-WatchFleetProperty {
     param(
@@ -89,15 +102,20 @@ function Get-WatchFleetSha256 {
 }
 
 function New-WatchFleetSupervisorState {
-    param([Parameter(Mandatory = $true)][string]$AutomationId)
+    param(
+        [Parameter(Mandatory = $true)][string]$AutomationId,
+        [Parameter(Mandatory = $true)][string]$GenerationId
+    )
 
     return [ordered]@{
-        schema_version = 2
+        schema_version = 3
         automation_id = $AutomationId
+        watch_runtime_generation_id = $GenerationId
         current_tick_id = ''
         previous_tick_id = ''
         snapshot_key = ''
         observed_at = ''
+        membership = @()
         successful_shutdown_receipt_keys = @()
     }
 }
@@ -105,11 +123,12 @@ function New-WatchFleetSupervisorState {
 function Read-WatchFleetSupervisorState {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string]$ExpectedAutomationId
+        [Parameter(Mandatory = $true)][string]$ExpectedAutomationId,
+        [Parameter(Mandatory = $true)][string]$ExpectedGenerationId
     )
 
     if (-not [IO.File]::Exists($Path)) {
-        return (New-WatchFleetSupervisorState -AutomationId $ExpectedAutomationId)
+        return (New-WatchFleetSupervisorState -AutomationId $ExpectedAutomationId -GenerationId $ExpectedGenerationId)
     }
 
     try {
@@ -119,9 +138,12 @@ function Read-WatchFleetSupervisorState {
         throw 'state_json_invalid'
     }
 
-    if ([int](Get-WatchFleetProperty $state 'schema_version') -ne 2) { throw 'state_schema_invalid' }
+    $schemaVersion = [int](Get-WatchFleetProperty $state 'schema_version')
+    if ($schemaVersion -notin @(2, 3)) { throw 'state_schema_invalid' }
     $stateAutomationId = [string](Get-WatchFleetProperty $state 'automation_id')
     if ($stateAutomationId -cne $ExpectedAutomationId) { throw 'state_automation_mismatch' }
+    $stateGenerationId = if ($schemaVersion -eq 2) { $ExpectedGenerationId } else { [string](Get-WatchFleetProperty $state 'watch_runtime_generation_id') }
+    if ($stateGenerationId -cne $ExpectedGenerationId) { throw 'state_generation_mismatch' }
     foreach ($field in @('current_tick_id', 'previous_tick_id')) {
         $value = Get-WatchFleetProperty $state $field
         if ($null -eq $value -or
@@ -148,13 +170,23 @@ function Read-WatchFleetSupervisorState {
         if (-not $normalizedReceipts.Contains($text)) { $normalizedReceipts.Add($text) | Out-Null }
     }
 
+    $membership = if ($schemaVersion -eq 2) { @() } else { @((Get-WatchFleetProperty $state 'membership')) }
+    foreach ($member in @($membership)) {
+        if ([string](Get-WatchFleetProperty $member 'target_thread_id') -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$' -or
+            [string](Get-WatchFleetProperty $member 'automation_id') -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$') {
+            throw 'state_schema_invalid'
+        }
+    }
+
     return [ordered]@{
-        schema_version = 2
+        schema_version = 3
         automation_id = $stateAutomationId
+        watch_runtime_generation_id = $stateGenerationId
         current_tick_id = if ($state.current_tick_id -is [string]) { [string]$state.current_tick_id } else { ([datetimeoffset]$state.current_tick_id).ToUniversalTime().ToString('o') }
         previous_tick_id = if ($state.previous_tick_id -is [string]) { [string]$state.previous_tick_id } else { ([datetimeoffset]$state.previous_tick_id).ToUniversalTime().ToString('o') }
         snapshot_key = [string]$snapshotValue
         observed_at = if ($observedAtValue -is [string]) { [string]$observedAtValue } else { ([datetimeoffset]$observedAtValue).ToString('o') }
+        membership = @($membership)
         successful_shutdown_receipt_keys = @($normalizedReceipts.ToArray())
     }
 }
@@ -225,6 +257,7 @@ function Test-WatchFleetStatePath {
 $result = [ordered]@{
     schema_version = 3
     automation_id = $AutomationId
+    watch_runtime_generation_id = $effectiveGenerationId
     current_tick_id = $CurrentTickId
     previous_tick_id = ''
     power_action = 'observe_only'
@@ -237,6 +270,8 @@ $result = [ordered]@{
     blocking_unmonitored_count = $BlockingUnmonitoredCount
     conflict_count = $ConflictCount
     unknown_count = $UnknownCount
+    unavailable_host_count = $UnavailableHostCount
+    unavailable_source_count = $UnavailableSourceCount
     stopped_count = 0
     tick_id = $CurrentTickId
     snapshot_key = ''
@@ -250,6 +285,7 @@ $result = [ordered]@{
     remaining_target_heartbeat_count = $RemainingTargetHeartbeatCount
     unmonitored_active_task_count = $UnmonitoredActiveTaskCount
     requires_fresh_recheck = $true
+    membership_count = 0
 }
 
 $statePathFull = ''
@@ -266,6 +302,12 @@ if ($ShutdownArmed) {
     elseif ($RemainingTargetHeartbeatCount -ne 0) {
         $result.reason_code = 'target_heartbeats_remain'
     }
+    elseif ($UnavailableHostCount -ne 0) {
+        $result.reason_code = 'host_visibility_unavailable'
+    }
+    elseif ($UnavailableSourceCount -ne 0) {
+        $result.reason_code = 'source_visibility_unavailable'
+    }
     elseif (-not [datetimeoffset]::TryParse($CurrentTickId, [ref]$currentTick)) {
         $result.reason_code = 'current_tick_invalid'
     }
@@ -279,9 +321,6 @@ if ($ShutdownArmed) {
     elseif (-not $GuardReady) {
         $result.reason_code = 'guard_not_ready'
     }
-    elseif ($ListLimitReached) {
-        $result.reason_code = 'visibility_truncated'
-    }
     elseif ([string]::IsNullOrWhiteSpace($StateRoot)) {
         $result.reason_code = 'state_root_invalid'
     }
@@ -292,6 +331,64 @@ if ($ShutdownArmed) {
         $result.reason_code = 'prior_receipt_invalid'
     }
     else {
+        if (-not [string]::IsNullOrWhiteSpace($MembershipJson)) {
+            try {
+                $parsedMembership = @($MembershipJson | ConvertFrom-Json -Depth 20 -ErrorAction Stop)
+                $memberIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+                $memberAutomationIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+                $membershipUpdateRows = [System.Collections.Generic.List[object]]::new()
+                foreach ($member in @($parsedMembership | Sort-Object { [string](Get-WatchFleetProperty $_ 'target_thread_id') })) {
+                    $memberId = [string](Get-WatchFleetProperty $member 'target_thread_id')
+                    $memberAutomationId = [string](Get-WatchFleetProperty $member 'automation_id')
+                    $memberSourceTurnId = [string](Get-WatchFleetProperty $member 'source_turn_id')
+                    if ($memberId -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$' -or -not $memberIds.Add($memberId) -or
+                        $memberAutomationId -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$' -or -not $memberAutomationIds.Add($memberAutomationId) -or
+                        $memberSourceTurnId -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$') {
+                        throw 'membership_identity_invalid'
+                    }
+                    $membershipUpdateRows.Add([pscustomobject][ordered]@{
+                        target_thread_id = $memberId
+                        automation_id = $memberAutomationId
+                        source_turn_id = $memberSourceTurnId
+                        last_stop_receipt_key = [string](Get-WatchFleetProperty $member 'last_stop_receipt_key')
+                        last_notification_receipt_key = [string](Get-WatchFleetProperty $member 'last_notification_receipt_key')
+                        last_cleanup_receipt_key = [string](Get-WatchFleetProperty $member 'last_cleanup_receipt_key')
+                        last_checkpoint_id = [string](Get-WatchFleetProperty $member 'last_checkpoint_id')
+                        last_stop_reason = [string](Get-WatchFleetProperty $member 'last_stop_reason')
+                        last_evidence_timestamp_utc = [string](Get-WatchFleetProperty $member 'last_evidence_timestamp_utc')
+                    }) | Out-Null
+                }
+                if ($membershipUpdateRows.Count -eq 0) { throw 'membership_empty' }
+
+                $statePathFull = [IO.Path]::GetFullPath($StatePath)
+                $membershipLockPath = $statePathFull + '.lock'
+                $membershipLock = $null
+                try {
+                    try { $membershipLock = [IO.File]::Open($membershipLockPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None) }
+                    catch [IO.IOException] { throw 'state_lock_busy' }
+                    $membershipState = Read-WatchFleetSupervisorState -Path $statePathFull -ExpectedAutomationId $AutomationId -ExpectedGenerationId $effectiveGenerationId
+                    $membershipState.membership = @($membershipUpdateRows.ToArray())
+                    $membershipState.observed_at = $now.ToString('o')
+                    Write-WatchFleetSupervisorState -Path $statePathFull -State $membershipState
+                    $result.membership_count = $membershipUpdateRows.Count
+                }
+                finally {
+                    if ($null -ne $membershipLock) {
+                        $membershipLock.Dispose()
+                        if ([IO.File]::Exists($membershipLockPath)) { [IO.File]::Delete($membershipLockPath) }
+                    }
+                }
+            }
+            catch {
+                $membershipReason = [string]$_.Exception.Message
+                $result.reason_code = if ($membershipReason -match '^(membership|state)_[a-z_]+$') { $membershipReason } else { 'membership_json_invalid' }
+            }
+        }
+
+        if ($result.reason_code -ne 'shutdown_not_armed') {
+            $records = @()
+        }
+        else {
         $canonicalCurrentTickId = $currentTick.ToUniversalTime().ToString('o')
         $canonicalPreviousTickId = if ([string]::IsNullOrWhiteSpace($PreviousTickId)) { '' } else { $callerPreviousTick.ToUniversalTime().ToString('o') }
         $result.current_tick_id = $canonicalCurrentTickId
@@ -304,8 +401,9 @@ if ($ShutdownArmed) {
             $records = @()
             $result.reason_code = 'snapshot_json_invalid'
         }
+        }
 
-        if ($result.reason_code -ne 'snapshot_json_invalid') {
+        if ($result.reason_code -eq 'shutdown_not_armed') {
             if ($records.Count -eq 0) {
                 $result.reason_code = 'monitored_set_empty'
             }
@@ -323,6 +421,7 @@ if ($ShutdownArmed) {
                 $ids = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
                 $automationIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
                 $canonicalRows = [System.Collections.Generic.List[string]]::new()
+                $membershipRows = [System.Collections.Generic.List[object]]::new()
                 $finding = $null
 
                 foreach ($record in @($records | Sort-Object { [string](Get-WatchFleetProperty $_ 'target_thread_id') })) {
@@ -339,6 +438,8 @@ if ($ShutdownArmed) {
                     $externalEffectState = [string](Get-WatchFleetProperty $record 'external_effect_state')
                     $nextRetryAt = [string](Get-WatchFleetProperty $record 'next_retry_at')
                     $noActiveTurn = Get-WatchFleetProperty $record 'no_active_turn'
+                    $notificationReceiptKey = [string](Get-WatchFleetProperty $record 'notification_receipt_key')
+                    $cleanupReceiptKey = [string](Get-WatchFleetProperty $record 'cleanup_receipt_key')
 
                     if ([string]::IsNullOrWhiteSpace($targetThreadId) -or
                         $targetThreadId -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$' -or
@@ -399,6 +500,14 @@ if ($ShutdownArmed) {
                         $finding = 'stop_receipt_invalid'
                         break
                     }
+                    if (-not [string]::IsNullOrWhiteSpace($notificationReceiptKey) -and $notificationReceiptKey -notmatch '^watch-receipt:[0-9a-f]{64}$') {
+                        $finding = 'notification_receipt_invalid'
+                        break
+                    }
+                    if (-not [string]::IsNullOrWhiteSpace($cleanupReceiptKey) -and $cleanupReceiptKey -notmatch '^watch-cleanup:[0-9a-f]{64}$') {
+                        $finding = 'cleanup_receipt_invalid'
+                        break
+                    }
 
                     $evidenceTimestamp = [datetimeoffset]::MinValue
                     if (-not [datetimeoffset]::TryParse($evidenceTimestampText, [ref]$evidenceTimestamp) -or
@@ -424,6 +533,17 @@ if ($ShutdownArmed) {
                         next_retry_at = $nextRetryAt
                         no_active_turn = $true
                     } | ConvertTo-Json -Compress)) | Out-Null
+                    $membershipRows.Add([pscustomobject][ordered]@{
+                        target_thread_id = $targetThreadId
+                        automation_id = $targetAutomationId
+                        source_turn_id = $sourceTurnId
+                        last_stop_receipt_key = $receiptKey
+                        last_notification_receipt_key = $notificationReceiptKey
+                        last_cleanup_receipt_key = $cleanupReceiptKey
+                        last_checkpoint_id = $checkpointId
+                        last_stop_reason = $stopReason
+                        last_evidence_timestamp_utc = $evidenceTimestamp.ToUniversalTime().ToString('o')
+                    }) | Out-Null
                 }
 
                 if ($null -ne $finding) {
@@ -449,8 +569,9 @@ if ($ShutdownArmed) {
 
                         if ($null -ne $lockStream) {
                             try {
-                                $supervisorState = Read-WatchFleetSupervisorState -Path $statePathFull -ExpectedAutomationId $AutomationId
+                                $supervisorState = Read-WatchFleetSupervisorState -Path $statePathFull -ExpectedAutomationId $AutomationId -ExpectedGenerationId $effectiveGenerationId
                                 $result.previous_tick_id = [string]$supervisorState.current_tick_id
+                                $supervisorState.membership = @($membershipRows.ToArray())
                                 $receiptSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
                                 foreach ($receipt in @($supervisorState.successful_shutdown_receipt_keys)) { $receiptSet.Add([string]$receipt) | Out-Null }
 

@@ -4,7 +4,8 @@ param(
     [string]$SourceHookPath = (Join-Path $PSScriptRoot 'block-cross-thread-send.ps1'),
     [string]$RuntimeDoctorPath = (Join-Path $PSScriptRoot 'Test-WatchGuardRuntime.ps1'),
     [string]$TargetPromptGeneratorPath = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'overrides\custom\watch-interrupted-task\scripts\New-WatchHeartbeatPrompt.ps1'),
-    [string]$FleetPromptGeneratorPath = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'overrides\custom\watch-interrupted-task\scripts\New-WatchFleetSupervisorPrompt.ps1')
+    [string]$FleetPromptGeneratorPath = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'overrides\custom\watch-interrupted-task\scripts\New-WatchFleetSupervisorPrompt.ps1'),
+    [Parameter(DontShow = $true)][switch]$InjectFinalHooksMoveFailure
 )
 
 Set-StrictMode -Version Latest
@@ -22,14 +23,18 @@ $hooksPath = Join-Path $resolvedCodexHome 'hooks.json'
 
 # Validate every source and the existing document before touching host scripts.
 $targetPromptData = ((& $resolvedTargetGenerator -TargetThreadId 'canonical-digest-probe' -AsJson) | ConvertFrom-Json -ErrorAction Stop)
+$shutdownTargetPromptData = ((& $resolvedTargetGenerator -TargetThreadId 'canonical-digest-probe' -ShutdownManaged -AsJson) | ConvertFrom-Json -ErrorAction Stop)
 $fleetPromptData = ((& $resolvedFleetGenerator -SupervisorThreadId 'canonical-digest-probe' -AsJson) | ConvertFrom-Json -ErrorAction Stop)
 $fleetShutdownPromptData = ((& $resolvedFleetGenerator -SupervisorThreadId 'canonical-digest-probe' -ShutdownWhenAllStopped -AsJson) | ConvertFrom-Json -ErrorAction Stop)
 $targetPromptHash = [string]$targetPromptData.prompt_sha256
+$runtimeGenerationId = [string]$targetPromptData.watch_runtime_generation_id
+$shutdownTargetPromptHash = [string]$shutdownTargetPromptData.prompt_sha256
 $fleetPromptHash = [string]$fleetPromptData.prompt_sha256
 $fleetShutdownPromptHash = [string]$fleetShutdownPromptData.prompt_sha256
-if ($targetPromptData.policy_revision -ne 3 -or $fleetPromptData.policy_revision -ne 3 -or $fleetShutdownPromptData.policy_revision -ne 3 -or
-    $targetPromptHash -notmatch '^[0-9a-f]{64}$' -or $fleetPromptHash -notmatch '^[0-9a-f]{64}$' -or $fleetShutdownPromptHash -notmatch '^[0-9a-f]{64}$' -or
-    $fleetShutdownPromptHash -ceq $fleetPromptHash) {
+if ($targetPromptData.policy_revision -ne 3 -or $shutdownTargetPromptData.policy_revision -ne 3 -or $fleetPromptData.policy_revision -ne 3 -or $fleetShutdownPromptData.policy_revision -ne 3 -or
+    $runtimeGenerationId -notmatch '^watch-runtime-generation:[0-9a-f]{64}$' -or $shutdownTargetPromptData.watch_runtime_generation_id -cne $runtimeGenerationId -or $fleetPromptData.watch_runtime_generation_id -cne $runtimeGenerationId -or $fleetShutdownPromptData.watch_runtime_generation_id -cne $runtimeGenerationId -or
+    $targetPromptHash -notmatch '^[0-9a-f]{64}$' -or $shutdownTargetPromptHash -notmatch '^[0-9a-f]{64}$' -or $fleetPromptHash -notmatch '^[0-9a-f]{64}$' -or $fleetShutdownPromptHash -notmatch '^[0-9a-f]{64}$' -or
+    $shutdownTargetPromptHash -ceq $targetPromptHash -or $fleetShutdownPromptHash -ceq $fleetPromptHash) {
     throw 'Revision-3 canonical watch prompt provenance could not be derived.'
 }
 
@@ -68,7 +73,7 @@ $retained = @(
 )
 
 $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedSource).Hash.ToLowerInvariant()
-$command = 'pwsh -NoProfile -ExecutionPolicy Bypass -File "{0}" -ExpectedScriptSha256 "{1}" -ExpectedTargetPromptSha256 "{2}" -ExpectedFleetPromptSha256 "{3}" -ExpectedFleetShutdownPromptSha256 "{4}"' -f $hostHook, $sourceHash, $targetPromptHash, $fleetPromptHash, $fleetShutdownPromptHash
+$command = 'pwsh -NoProfile -ExecutionPolicy Bypass -File "{0}" -ExpectedScriptSha256 "{1}" -ExpectedTargetPromptSha256 "{2}" -ExpectedShutdownTargetPromptSha256 "{3}" -ExpectedFleetPromptSha256 "{4}" -ExpectedFleetShutdownPromptSha256 "{5}" -ExpectedRuntimeGenerationId "{6}"' -f $hostHook, $sourceHash, $targetPromptHash, $shutdownTargetPromptHash, $fleetPromptHash, $fleetShutdownPromptHash, $runtimeGenerationId
 $guardGroup = [pscustomobject]@{
     matcher = '*'
     hooks = @([pscustomobject]@{
@@ -100,6 +105,7 @@ try {
 
     Move-Item -LiteralPath $stagedHook -Destination $hostHook -Force
     Move-Item -LiteralPath $stagedDoctor -Destination $hostRuntimeDoctor -Force
+    if ($InjectFinalHooksMoveFailure) { throw 'injected final hooks move failure' }
     Move-Item -LiteralPath $stagedHooksJson -Destination $hooksPath -Force
 }
 catch {
@@ -130,6 +136,7 @@ finally {
 [pscustomobject]@{
     status = 'installed_untrusted'
     policy_revision = 3
+    watch_runtime_generation_id = $runtimeGenerationId
     hooks_path = $hooksPath
     host_hook_path = $hostHook
     runtime_doctor_path = $hostRuntimeDoctor
@@ -137,6 +144,7 @@ finally {
     host_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $hostHook).Hash.ToLowerInvariant()
     runtime_doctor_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $hostRuntimeDoctor).Hash.ToLowerInvariant()
     target_prompt_sha256 = $targetPromptHash
+    shutdown_target_prompt_sha256 = $shutdownTargetPromptHash
     fleet_prompt_sha256 = $fleetPromptHash
     fleet_shutdown_prompt_sha256 = $fleetShutdownPromptHash
     trust_next_step = 'Open /hooks in a fresh Codex session and trust the exact current definition hash.'
