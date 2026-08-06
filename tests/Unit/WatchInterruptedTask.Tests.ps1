@@ -322,4 +322,24 @@ Describe 'watch-interrupted-task conditional recovery contract' {
         $stale.reason_code | Should Be 'missing_or_stale_evidence'
         $script:prompt | Should Match 'NowUtc.*NextRetryAtUtc.*EvidenceFreshnessMinutes'
     }
+
+    It 'rejects culture-dependent dates and requires RFC3339 timestamps' {
+        $common = @{
+            State = 'resume_eligible'
+            GoalStatus = 'active'
+            HasPositiveEvidence = $true
+            EvidenceTimestampUtc = '2026-08-05T00:00:00Z'
+            CheckpointId = $script:checkpoint
+            ReceiptKey = $script:receipt
+            ExternalEffectState = 'none'
+        }
+
+        $invalidNow = & $dispositionScriptPath @common -NowUtc '08/05/2026'
+        $invalidNow.task_action | Should Be 'observe_only'
+        $invalidNow.reason_code | Should Be 'evaluation_time_invalid'
+
+        $invalidRetry = & $dispositionScriptPath @common -NowUtc '2026-08-05T00:00:00Z' -NextRetryAtUtc '08/05/2026'
+        $invalidRetry.task_action | Should Be 'observe_only'
+        $invalidRetry.reason_code | Should Be 'retry_time_invalid'
+    }
 }

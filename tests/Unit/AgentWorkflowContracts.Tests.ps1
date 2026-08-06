@@ -77,12 +77,12 @@ Describe 'Agent workflow advisory contracts' {
         Assert-AgentWorkflowFunction 'Test-AgentParallelAdmission'
         $fixture = Get-AgentWorkflowFixture 'valid-request.json'
 
-        $parallel = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $fixture.completion_receipts
+        $parallel = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $fixture.completion_receipts -EvaluationTime $fixture.now
         $integrationReceipts = @(
             [pscustomobject]@{ task_id = 'implement'; base_revision = '84cb53aa'; status = 'verified'; verification_receipt = (New-AgentTestVerificationReceipt 'implement') },
             [pscustomobject]@{ task_id = 'document'; base_revision = '84cb53aa'; status = 'verified'; verification_receipt = (New-AgentTestVerificationReceipt 'document') }
         )
-        $integration = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('integrate') -CompletedTaskIds @('implement', 'document') -CompletedTaskReceipts $integrationReceipts
+        $integration = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('integrate') -CompletedTaskIds @('implement', 'document') -CompletedTaskReceipts $integrationReceipts -EvaluationTime $fixture.now
 
         $parallel.pass | Should Be $true
         $parallel.mode | Should Be 'isolated_parallel'
@@ -108,25 +108,25 @@ Describe 'Agent workflow advisory contracts' {
         @($missingReceipt.findings | Where-Object code -eq 'completion_receipt_missing').Count | Should Be 1
 
         $unknownReceipt = @([pscustomobject]@{ task_id = 'ghost'; base_revision = '84cb53aa'; status = 'verified'; verification_receipt = (New-AgentTestVerificationReceipt 'ghost') })
-        $unknown = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('implement', 'document') -CompletedTaskIds @('ghost') -CompletedTaskReceipts $unknownReceipt
+        $unknown = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('implement', 'document') -CompletedTaskIds @('ghost') -CompletedTaskReceipts $unknownReceipt -EvaluationTime $fixture.now
         @($unknown.findings | Where-Object code -eq 'completed_task_unknown').Count | Should Be 1
 
         $unclaimedReceipts = @($fixture.completion_receipts) + [pscustomobject]@{ task_id = 'document'; base_revision = '84cb53aa'; status = 'verified'; verification_receipt = (New-AgentTestVerificationReceipt 'document') }
-        $unclaimed = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $unclaimedReceipts
+        $unclaimed = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $unclaimedReceipts -EvaluationTime $fixture.now
         @($unclaimed.findings | Where-Object code -eq 'completion_receipt_unclaimed').Count | Should Be 1
 
         $overlapGraph = $fixture.task_graph | ConvertTo-Json -Depth 50 | ConvertFrom-Json
         $overlapGraph.tasks[0].parallelizable = $true
         $overlapGraph.tasks[0].exact_write_set = @('src/discovery.ps1')
-        $overlap = Test-AgentParallelAdmission -TaskGraph $overlapGraph -TaskIds @('discover', 'implement') -CompletedTaskIds @('discover') -CompletedTaskReceipts $fixture.completion_receipts
+        $overlap = Test-AgentParallelAdmission -TaskGraph $overlapGraph -TaskIds @('discover', 'implement') -CompletedTaskIds @('discover') -CompletedTaskReceipts $fixture.completion_receipts -EvaluationTime $fixture.now
         @($overlap.findings | Where-Object code -eq 'selected_task_already_completed').Count | Should Be 1
 
         $arbitraryReceipt = @([pscustomobject]@{ task_id = 'discover'; base_revision = '84cb53aa'; status = 'verified'; verification_receipt = 'arbitrary-string' })
-        $arbitrary = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $arbitraryReceipt
+        $arbitrary = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $arbitraryReceipt -EvaluationTime $fixture.now
         @($arbitrary.findings | Where-Object code -eq 'completion_receipt_evidence_invalid').Count | Should Be 1
 
         $unclosedReceipt = @([pscustomobject]@{ task_id = 'implement'; base_revision = '84cb53aa'; status = 'verified'; verification_receipt = (New-AgentTestVerificationReceipt 'implement') })
-        $unclosed = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @() -CompletedTaskIds @('implement') -CompletedTaskReceipts $unclosedReceipt
+        $unclosed = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @() -CompletedTaskIds @('implement') -CompletedTaskReceipts $unclosedReceipt -EvaluationTime $fixture.now
         @($unclosed.findings | Where-Object code -eq 'completed_dependency_not_closed').Count | Should Be 1
     }
 
@@ -138,12 +138,12 @@ Describe 'Agent workflow advisory contracts' {
         $graph.tasks[1].coordination_keys = @()
         $graph.tasks[2].coordination_keys = @()
 
-        $conflict = Test-AgentParallelAdmission -TaskGraph $graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $fixture.completion_receipts
+        $conflict = Test-AgentParallelAdmission -TaskGraph $graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $fixture.completion_receipts -EvaluationTime $fixture.now
         @($conflict.findings | Where-Object code -eq 'write_set_conflict').Count | Should Be 1
 
         $graph.tasks[2].exact_write_set = @('docs/feature.md')
         $graph.tasks[1].risk = 'high'
-        $risk = Test-AgentParallelAdmission -TaskGraph $graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $fixture.completion_receipts
+        $risk = Test-AgentParallelAdmission -TaskGraph $graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $fixture.completion_receipts -EvaluationTime $fixture.now
         @($risk.findings | Where-Object code -eq 'high_risk_parallel_forbidden').Count | Should Be 1
 
         $graph.tasks[1].risk = 'medium'
@@ -162,7 +162,7 @@ Describe 'Agent workflow advisory contracts' {
         $graph.tasks[2].exact_write_set = @('src/cafe' + [char]0x301 + '.ps1')
         $graph.tasks[1].coordination_keys = @()
         $graph.tasks[2].coordination_keys = @()
-        $unicodeCollision = Test-AgentParallelAdmission -TaskGraph $graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $fixture.completion_receipts
+        $unicodeCollision = Test-AgentParallelAdmission -TaskGraph $graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $fixture.completion_receipts -EvaluationTime $fixture.now
         @($unicodeCollision.findings | Where-Object code -eq 'write_set_conflict').Count | Should Be 1
     }
 
@@ -225,6 +225,40 @@ Describe 'Agent workflow advisory contracts' {
         @((Test-RadarSnapshotContract -Snapshot $duplicatePair -Now $fixture.now).findings | Where-Object code -eq 'radar_pair_duplicate').Count | Should Be 1
     }
 
+    It 'rejects non-finite or fractional Radar metrics and requires canonical labels' {
+        $fixture = Get-AgentWorkflowFixture 'valid-request.json'
+
+        $nonFinite = $fixture.radar_snapshot | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+        $nonFinite.entries[0].score = [double]::NaN
+        @((Test-RadarSnapshotContract -Snapshot $nonFinite -Now $fixture.now).findings | Where-Object code -eq 'radar_metric_invalid').Count | Should Be 1
+
+        $fractionalSample = $fixture.radar_snapshot | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+        $fractionalSample.entries[0].sample_count = 0.5
+        @((Test-RadarSnapshotContract -Snapshot $fractionalSample -Now $fixture.now).findings | Where-Object code -eq 'radar_sample_count_invalid').Count | Should Be 1
+
+        $mislabeled = $fixture.radar_snapshot | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+        $mislabeled.entries[0].model_label = 'Luna max'
+        @((Test-RadarSnapshotContract -Snapshot $mislabeled -Now $fixture.now).findings | Where-Object code -eq 'radar_model_label_mismatch').Count | Should Be 1
+    }
+
+    It 'rejects forbidden fields in dictionaries and requires strict RFC3339 Radar times' {
+        $fixture = Get-AgentWorkflowFixture 'valid-request.json'
+        $dictionary = $fixture.radar_snapshot | ConvertTo-Json -Depth 20 | ConvertFrom-Json -AsHashtable
+        $dictionary['policy_overrides'] = @(@{ requested_tier = 'sol_xhigh' })
+        @((Test-RadarSnapshotContract -Snapshot $dictionary -Now $fixture.now).findings | Where-Object code -eq 'radar_decision_field_forbidden').Count | Should Be 1
+
+        $orderedDictionary = [System.Collections.Specialized.OrderedDictionary]::new()
+        foreach ($property in $fixture.radar_snapshot.PSObject.Properties) { $orderedDictionary.Add($property.Name, $property.Value) }
+        $orderedDictionary.Add('policy_overrides', @([ordered]@{ requested_tier = 'sol_xhigh' }))
+        @((Test-RadarSnapshotContract -Snapshot $orderedDictionary -Now $fixture.now).findings | Where-Object code -eq 'radar_decision_field_forbidden').Count | Should Be 1
+
+        $cultureDate = $fixture.radar_snapshot | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+        $cultureDate.captured_at = '08/05/2026'
+        @((Test-RadarSnapshotContract -Snapshot $cultureDate -Now $fixture.now).findings | Where-Object code -eq 'radar_captured_at_invalid').Count | Should Be 1
+
+        @((Test-RadarSnapshotContract -Snapshot $fixture.radar_snapshot -Now '08/05/2026').findings | Where-Object code -eq 'evaluation_time_invalid').Count | Should Be 1
+    }
+
     It 'keeps model routing host-owned and gives the user override priority across three soft anchors' {
         Assert-AgentWorkflowFunction 'New-ModelPolicyProposal'
         $fixture = Get-AgentWorkflowFixture 'valid-request.json'
@@ -278,6 +312,50 @@ Describe 'Agent workflow advisory contracts' {
         $invalidTime.selected_tier | Should Be 'host_default'
         $invalidTime.fallback_reason | Should Match 'local_outcome_invalid'
         @($invalidTime.evidence_sources.local.rejected_findings | Where-Object code -eq 'local_outcome_evaluation_time_invalid').Count | Should Be 1
+    }
+
+    It 'rejects non-finite local outcome metrics and non-RFC3339 sample times' {
+        $fixture = Get-AgentWorkflowFixture 'valid-request.json'
+        $outcome = $fixture.model_proposals[0].local_outcomes[0] | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+        $outcome.actual_cost = [double]::NaN
+        $nonFinite = Test-AgentLocalOutcomeContract -Outcome $outcome -Anchor (Get-AgentModelTierAnchor 'luna_max') -Now $fixture.now
+        @($nonFinite.findings | Where-Object code -eq 'local_outcome_metric_invalid').Count | Should Be 1
+
+        $outcome.actual_cost = 0.38
+        $outcome.sampled_at = '08/04/2026'
+        $cultureDate = Test-AgentLocalOutcomeContract -Outcome $outcome -Anchor (Get-AgentModelTierAnchor 'luna_max') -Now $fixture.now
+        @($cultureDate.findings | Where-Object code -eq 'local_outcome_sampled_at_invalid').Count | Should Be 1
+    }
+
+    It 'requires non-empty commands strict non-future time and outer task revision binding for completion evidence' {
+        $fixture = Get-AgentWorkflowFixture 'valid-request.json'
+
+        $emptyCommandEvidence = New-AgentTestVerificationReceipt 'discover'
+        $emptyCommandEvidence.commands = @('  ')
+        (Test-AgentCompletionVerificationReceipt -Evidence $emptyCommandEvidence -EvaluationTime $fixture.now) | Should Be $false
+
+        $nonStringCommandEvidence = New-AgentTestVerificationReceipt 'discover'
+        $nonStringCommandEvidence.commands = @(123)
+        (Test-AgentCompletionVerificationReceipt -Evidence $nonStringCommandEvidence -EvaluationTime $fixture.now) | Should Be $false
+
+        $cultureDateEvidence = New-AgentTestVerificationReceipt 'discover'
+        $cultureDateEvidence.verified_at = '08/05/2026'
+        (Test-AgentCompletionVerificationReceipt -Evidence $cultureDateEvidence -EvaluationTime $fixture.now) | Should Be $false
+
+        $futureEvidence = New-AgentTestVerificationReceipt 'discover'
+        $futureEvidence.verified_at = '2099-01-01T00:00:00Z'
+        (Test-AgentCompletionVerificationReceipt -Evidence $futureEvidence -EvaluationTime $fixture.now) | Should Be $false
+
+        $validEvidence = New-AgentTestVerificationReceipt 'discover'
+        (Test-AgentCompletionVerificationReceipt -Evidence $validEvidence -EvaluationTime $fixture.now) | Should Be $true
+        (Test-AgentCompletionVerificationReceipt -Evidence $validEvidence) | Should Be $false
+
+        $wrongRevision = @([pscustomobject]@{ task_id = 'discover'; base_revision = 'other-revision'; status = 'verified'; verification_receipt = (New-AgentTestVerificationReceipt 'discover') })
+        $admission = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $wrongRevision -EvaluationTime $fixture.now
+        @($admission.findings | Where-Object code -eq 'completion_receipt_revision_mismatch').Count | Should Be 1
+
+        $missingEvaluation = Test-AgentParallelAdmission -TaskGraph $fixture.task_graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $fixture.completion_receipts
+        @($missingEvaluation.findings | Where-Object code -eq 'completion_evaluation_time_invalid').Count | Should Be 1
     }
 
     It 'does not let fresh Radar or successful local outcomes promote unknown spawn availability' {

@@ -55,6 +55,8 @@ param(
 
 Set-StrictMode -Version Latest
 
+. (Join-Path $PSScriptRoot 'WatchPromptCommon.ps1')
+
 $result = [ordered]@{
     state = $State
     operating_mode = $OperatingMode
@@ -75,28 +77,14 @@ $result = [ordered]@{
 }
 
 $evaluationNow = [DateTimeOffset]::MinValue
-$evaluationTimeValid = [DateTimeOffset]::TryParse(
-    $NowUtc,
-    [System.Globalization.CultureInfo]::InvariantCulture,
-    [System.Globalization.DateTimeStyles]::AssumeUniversal,
-    [ref]$evaluationNow
-)
+$evaluationTimeValid = Test-WatchRfc3339Timestamp -Value $NowUtc -Parsed ([ref]$evaluationNow)
 $retryBoundary = [DateTimeOffset]::MinValue
-$retryBoundaryValid = [string]::IsNullOrWhiteSpace($NextRetryAtUtc) -or [DateTimeOffset]::TryParse(
-    $NextRetryAtUtc,
-    [System.Globalization.CultureInfo]::InvariantCulture,
-    [System.Globalization.DateTimeStyles]::AssumeUniversal,
-    [ref]$retryBoundary
-)
+$retryBoundaryValid = [string]::IsNullOrWhiteSpace($NextRetryAtUtc) -or
+    (Test-WatchRfc3339Timestamp -Value $NextRetryAtUtc -Parsed ([ref]$retryBoundary))
 
 function Test-RecoveryEvidence {
     $timestamp = [DateTimeOffset]::MinValue
-    $timestampValid = [DateTimeOffset]::TryParse(
-        $EvidenceTimestampUtc,
-        [System.Globalization.CultureInfo]::InvariantCulture,
-        [System.Globalization.DateTimeStyles]::AssumeUniversal,
-        [ref]$timestamp
-    )
+    $timestampValid = Test-WatchRfc3339Timestamp -Value $EvidenceTimestampUtc -Parsed ([ref]$timestamp)
     if (-not $evaluationTimeValid) {
         $result.reason_code = 'evaluation_time_invalid'
         return $false

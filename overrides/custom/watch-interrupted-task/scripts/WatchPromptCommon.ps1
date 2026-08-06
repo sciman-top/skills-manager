@@ -1,9 +1,47 @@
 Set-StrictMode -Version Latest
 
-$script:CanonicalWatchRuntimeGenerationId = 'watch-runtime-generation:afeebb26f33764756b9e28d1c93bcfb2305064d8a0c8f8eb61623eacdfe0b2d5'
+$script:CanonicalWatchRuntimeGenerationId = 'watch-runtime-generation:4992baeae3bcfe2412e2428e72a48221cd8db27cf85ac043511fe86d0851f2f9'
 
 function Get-WatchRuntimeGenerationId {
     return $script:CanonicalWatchRuntimeGenerationId
+}
+
+function Test-WatchRfc3339Timestamp {
+    param(
+        [AllowNull()][object]$Value,
+        [Parameter(Mandatory = $true)][ref]$Parsed
+    )
+
+    if ($null -eq $Value) { return $false }
+    if ($Value -is [datetimeoffset] -or $Value -is [datetime]) {
+        $Parsed.Value = ([datetimeoffset]$Value).ToUniversalTime()
+        return $true
+    }
+
+    $text = [string]$Value
+    if ($text -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?(?:Z|[+-]\d{2}:\d{2})$') {
+        return $false
+    }
+
+    $candidate = [datetimeoffset]::MinValue
+    $formats = [string[]]@(
+        "yyyy-MM-dd'T'HH:mm:ss'Z'",
+        "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'",
+        "yyyy-MM-dd'T'HH:mm:sszzz",
+        "yyyy-MM-dd'T'HH:mm:ss.FFFFFFFzzz"
+    )
+    $styles = [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal
+    if (-not [datetimeoffset]::TryParseExact(
+            $text,
+            $formats,
+            [Globalization.CultureInfo]::InvariantCulture,
+            $styles,
+            [ref]$candidate)) {
+        return $false
+    }
+
+    $Parsed.Value = $candidate.ToUniversalTime()
+    return $true
 }
 
 function ConvertTo-WatchNormalizedText {

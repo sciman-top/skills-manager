@@ -22,21 +22,25 @@ function Add-AgentAccessConflictFindings($Findings, [object[]]$Items, [string]$C
     foreach ($resource in @($byResource.Keys)) { if ($byResource[$resource].Count -gt 1 -and @($byResource[$resource] | Where-Object { $_ -eq 'write' }).Count -gt 0) { $Findings.Add((New-OperationFinding $Code 'error' $Path ($Message + ': ' + $resource))) | Out-Null } }
 }
 
-function Test-AgentCompletionVerificationReceipt($Evidence) {
+function Test-AgentCompletionVerificationReceipt {
+    param($Evidence, $EvaluationTime)
+
     if ($null -eq $Evidence -or $Evidence -is [string]) { return $false }
     if ((Get-OperationObjectProperty $Evidence 'schema_version') -ne 1) { return $false }
     if ([string](Get-OperationObjectProperty $Evidence 'receipt_id') -notmatch '^verify-[A-Za-z0-9][A-Za-z0-9._-]{1,127}$') { return $false }
     if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Evidence 'verifier'))) { return $false }
     if ([string](Get-OperationObjectProperty $Evidence 'evidence_sha256') -notmatch '^[a-fA-F0-9]{64}$') { return $false }
-    if (-not (Test-OperationArray (Get-OperationObjectProperty $Evidence 'commands')) -or @((Get-OperationObjectProperty $Evidence 'commands')).Count -eq 0) { return $false }
-    $verifiedAt = [datetimeoffset]::MinValue
-    if (-not [datetimeoffset]::TryParse([string](Get-OperationObjectProperty $Evidence 'verified_at'), [ref]$verifiedAt)) { return $false }
+    $commands = Get-OperationObjectProperty $Evidence 'commands'
+    if (-not (Test-OperationArray $commands) -or @($commands).Count -eq 0 -or @($commands | Where-Object { $_ -isnot [string] -or [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) { return $false }
+    $verifiedAt = ConvertTo-AgentWorkflowRfc3339Value (Get-OperationObjectProperty $Evidence 'verified_at')
+    $evaluatedAt = ConvertTo-AgentWorkflowRfc3339Value $EvaluationTime
+    if ($null -eq $verifiedAt -or $null -eq $evaluatedAt -or $verifiedAt -gt $evaluatedAt.AddMinutes(5)) { return $false }
     if (Test-OperationSerializedSensitiveValue ($Evidence | ConvertTo-Json -Depth 20 -Compress)) { return $false }
     return $true
 }
 
 function Test-AgentParallelAdmission {
-    param($TaskGraph, [string[]]$TaskIds = @(), [string[]]$CompletedTaskIds = @(), [object[]]$CompletedTaskReceipts = @(), [switch]$PlanningOnly)
+    param($TaskGraph, [string[]]$TaskIds = @(), [string[]]$CompletedTaskIds = @(), [object[]]$CompletedTaskReceipts = @(), $EvaluationTime, [switch]$PlanningOnly)
     $findings = New-Object System.Collections.Generic.List[object]
     $graphValidation = Test-AgentTaskGraphContract $TaskGraph
     foreach ($finding in @($graphValidation.findings)) { $findings.Add($finding) | Out-Null }
@@ -49,6 +53,11 @@ function Test-AgentParallelAdmission {
     }
     $receiptIndex = @{}
     if (-not $PlanningOnly) {
+        $receiptEvaluationTime = $null
+        if (@($CompletedTaskReceipts).Count -gt 0) {
+            $receiptEvaluationTime = ConvertTo-AgentWorkflowRfc3339Value $EvaluationTime
+            if ($null -eq $receiptEvaluationTime) { $findings.Add((New-OperationFinding 'completion_evaluation_time_invalid' 'error' '$.now' 'Completion receipt validation requires an explicit RFC3339 evaluation time.')) | Out-Null }
+        }
         foreach ($receipt in @($CompletedTaskReceipts)) {
             $receiptTaskId = ([string](Get-OperationObjectProperty $receipt 'task_id')).Trim()
             $receiptKey = $receiptTaskId.ToLowerInvariant()
@@ -59,7 +68,7 @@ function Test-AgentParallelAdmission {
             if ([string](Get-OperationObjectProperty $receipt 'status') -cne 'verified') { $findings.Add((New-OperationFinding 'completion_receipt_unverified' 'error' '$.completion_receipts' 'Completion receipt status must be verified.')) | Out-Null }
             $evidence = Get-OperationObjectProperty $receipt 'verification_receipt'
             if ($null -eq $evidence) { $findings.Add((New-OperationFinding 'completion_receipt_evidence_missing' 'error' '$.completion_receipts' 'Completion receipt requires verification evidence.')) | Out-Null }
-            elseif (-not (Test-AgentCompletionVerificationReceipt $evidence)) { $findings.Add((New-OperationFinding 'completion_receipt_evidence_invalid' 'error' '$.completion_receipts' 'Completion verification evidence must be a structured, hashed, command-backed receipt.')) | Out-Null }
+            elseif (-not (Test-AgentCompletionVerificationReceipt -Evidence $evidence -EvaluationTime $receiptEvaluationTime)) { $findings.Add((New-OperationFinding 'completion_receipt_evidence_invalid' 'error' '$.completion_receipts' 'Completion verification evidence must be a structured, hashed, command-backed receipt evaluated against the request time.')) | Out-Null }
         }
         foreach ($completedId in @($completed)) { if (-not $receiptIndex.ContainsKey($completedId.ToLowerInvariant())) { $findings.Add((New-OperationFinding 'completion_receipt_missing' 'error' '$.completion_receipts' ('Verified completion receipt is missing for task: {0}' -f $completedId))) | Out-Null } }
         foreach ($receiptTaskId in @($receiptIndex.Keys)) { if (-not $completed.Contains($receiptTaskId)) { $findings.Add((New-OperationFinding 'completion_receipt_unclaimed' 'error' '$.completion_receipts' ('Completion receipt is not declared in completed_task_ids: {0}' -f $receiptTaskId))) | Out-Null } }
@@ -160,7 +169,7 @@ function Get-AgentModelTierAnchor([string]$Tier) {
 }
 
 function Test-AgentLocalOutcomeContract {
-    param($Outcome, $Anchor, [string]$Now)
+    param($Outcome, $Anchor, $Now)
     $findings = New-Object System.Collections.Generic.List[object]
     if ($null -eq $Outcome) { return New-OperationValidationResult @((New-OperationFinding 'local_outcome_missing' 'error' '$.local_outcomes' 'Local outcome is required.')) }
     foreach ($field in @('task_class', 'model_family', 'reasoning_effort', 'base_revision', 'sampled_at')) {
@@ -170,13 +179,12 @@ function Test-AgentLocalOutcomeContract {
     if ((Get-OperationObjectProperty $Outcome 'gate_passed') -isnot [bool]) { $findings.Add((New-OperationFinding 'local_outcome_gate_invalid' 'error' '$.local_outcomes.gate_passed' 'gate_passed must be a boolean.')) | Out-Null }
     $rework = 0
     if (-not [int]::TryParse([string](Get-OperationObjectProperty $Outcome 'rework_count'), [ref]$rework) -or $rework -lt 0) { $findings.Add((New-OperationFinding 'local_outcome_rework_invalid' 'error' '$.local_outcomes.rework_count' 'rework_count must be a non-negative integer.')) | Out-Null }
-    foreach ($field in @('actual_cost', 'actual_duration_seconds')) { $number = 0.0; if (-not [double]::TryParse([string](Get-OperationObjectProperty $Outcome $field), [ref]$number) -or $number -lt 0) { $findings.Add((New-OperationFinding 'local_outcome_metric_invalid' 'error' ('$.local_outcomes.{0}' -f $field) 'Local outcome metric must be non-negative.')) | Out-Null } }
-    $sampled = [datetimeoffset]::MinValue; $nowValue = [datetimeoffset]::MinValue
-    $sampledValid = [datetimeoffset]::TryParse([string](Get-OperationObjectProperty $Outcome 'sampled_at'), [ref]$sampled)
-    $nowValid = [datetimeoffset]::TryParse($Now, [ref]$nowValue)
-    if (-not $nowValid) { $findings.Add((New-OperationFinding 'local_outcome_evaluation_time_invalid' 'error' '$.now' 'Local outcome freshness requires a valid ISO-8601 evaluation time.')) | Out-Null }
-    if (-not $sampledValid) { $findings.Add((New-OperationFinding 'local_outcome_sampled_at_invalid' 'error' '$.local_outcomes.sampled_at' 'sampled_at must be ISO-8601.')) | Out-Null }
-    elseif ($nowValid -and ($sampled -gt $nowValue.AddMinutes(5) -or $sampled -lt $nowValue.AddDays(-90))) { $findings.Add((New-OperationFinding 'local_outcome_stale' 'error' '$.local_outcomes.sampled_at' 'Local outcome must be within the 90-day comparison window.')) | Out-Null }
+    foreach ($field in @('actual_cost', 'actual_duration_seconds')) { if (-not (Test-AgentWorkflowNonNegativeFiniteNumber (Get-OperationObjectProperty $Outcome $field))) { $findings.Add((New-OperationFinding 'local_outcome_metric_invalid' 'error' ('$.local_outcomes.{0}' -f $field) 'Local outcome metric must be a finite non-negative number.')) | Out-Null } }
+    $sampled = ConvertTo-AgentWorkflowRfc3339Value (Get-OperationObjectProperty $Outcome 'sampled_at')
+    $nowValue = ConvertTo-AgentWorkflowRfc3339Value $Now
+    if ($null -eq $nowValue) { $findings.Add((New-OperationFinding 'local_outcome_evaluation_time_invalid' 'error' '$.now' 'Local outcome freshness requires a valid RFC3339 evaluation time.')) | Out-Null }
+    if ($null -eq $sampled) { $findings.Add((New-OperationFinding 'local_outcome_sampled_at_invalid' 'error' '$.local_outcomes.sampled_at' 'sampled_at must be RFC3339.')) | Out-Null }
+    elseif ($null -ne $nowValue -and ($sampled -gt $nowValue.AddMinutes(5) -or $sampled -lt $nowValue.AddDays(-90))) { $findings.Add((New-OperationFinding 'local_outcome_stale' 'error' '$.local_outcomes.sampled_at' 'Local outcome must be within the 90-day comparison window.')) | Out-Null }
     return New-OperationValidationResult $findings.ToArray()
 }
 
@@ -189,7 +197,7 @@ function New-ModelPolicyProposal {
         [string]$HostSurface,
         [string[]]$HostAvailablePairs = @(),
         [object[]]$LocalOutcomes = @(),
-        [Parameter(Mandatory = $true)][string]$Now,
+        [Parameter(Mandatory = $true)]$Now,
         [string]$UserOverrideTier
     )
     $effectiveTier = if ([string]::IsNullOrWhiteSpace($UserOverrideTier)) { $RequestedTier } else { $UserOverrideTier }
@@ -274,8 +282,8 @@ function Test-AgentWorkflowRequest($Request) {
     if ($null -eq $Request) { return New-OperationValidationResult @((New-OperationFinding 'request_missing' 'error' '$' 'Agent workflow request is required.')) }
     foreach ($result in @(
             (Test-AgentTaskGraphContract (Get-OperationObjectProperty $Request 'task_graph')),
-            (Test-RadarSnapshotContract -Snapshot (Get-OperationObjectProperty $Request 'radar_snapshot') -Now ([string](Get-OperationObjectProperty $Request 'now'))),
-            (Test-AgentParallelAdmission -TaskGraph (Get-OperationObjectProperty $Request 'task_graph') -TaskIds @((Get-OperationObjectProperty $Request 'requested_parallel_task_ids')) -CompletedTaskIds @((Get-OperationObjectProperty $Request 'completed_task_ids')) -CompletedTaskReceipts @((Get-OperationObjectProperty $Request 'completion_receipts')))
+            (Test-RadarSnapshotContract -Snapshot (Get-OperationObjectProperty $Request 'radar_snapshot') -Now (Get-OperationObjectProperty $Request 'now')),
+            (Test-AgentParallelAdmission -TaskGraph (Get-OperationObjectProperty $Request 'task_graph') -TaskIds @((Get-OperationObjectProperty $Request 'requested_parallel_task_ids')) -CompletedTaskIds @((Get-OperationObjectProperty $Request 'completed_task_ids')) -CompletedTaskReceipts @((Get-OperationObjectProperty $Request 'completion_receipts')) -EvaluationTime (Get-OperationObjectProperty $Request 'now'))
         )) { foreach ($finding in @($result.findings)) { $findings.Add($finding) | Out-Null } }
     $taskIndex = Get-AgentTaskIndex (Get-OperationObjectProperty $Request 'task_graph')
     $proposalSeen = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::OrdinalIgnoreCase)
@@ -285,7 +293,7 @@ function Test-AgentWorkflowRequest($Request) {
         if (-not $proposalSeen.Add($taskId)) { $findings.Add((New-OperationFinding 'model_proposal_duplicate' 'error' '$.model_proposals.task_id' 'Only one model proposal is allowed per task.')) | Out-Null }
         $rationale = [string](Get-OperationObjectProperty $proposal 'rationale')
         if ([string]::IsNullOrWhiteSpace($rationale)) { $findings.Add((New-OperationFinding 'model_proposal_rationale_required' 'error' '$.model_proposals.rationale' 'Model proposal rationale is required.')) | Out-Null; continue }
-        $evaluated = New-ModelPolicyProposal -TaskId $taskId -RequestedTier ([string](Get-OperationObjectProperty $proposal 'requested_tier')) -Rationale $rationale -RadarSnapshot (Get-OperationObjectProperty $Request 'radar_snapshot') -HostSurface ([string](Get-OperationObjectProperty $proposal 'host_surface')) -HostAvailablePairs @((Get-OperationObjectProperty $proposal 'host_available_pairs')) -LocalOutcomes @((Get-OperationObjectProperty $proposal 'local_outcomes')) -Now ([string](Get-OperationObjectProperty $Request 'now')) -UserOverrideTier ([string](Get-OperationObjectProperty $proposal 'user_override_tier'))
+        $evaluated = New-ModelPolicyProposal -TaskId $taskId -RequestedTier ([string](Get-OperationObjectProperty $proposal 'requested_tier')) -Rationale $rationale -RadarSnapshot (Get-OperationObjectProperty $Request 'radar_snapshot') -HostSurface ([string](Get-OperationObjectProperty $proposal 'host_surface')) -HostAvailablePairs @((Get-OperationObjectProperty $proposal 'host_available_pairs')) -LocalOutcomes @((Get-OperationObjectProperty $proposal 'local_outcomes')) -Now (Get-OperationObjectProperty $Request 'now') -UserOverrideTier ([string](Get-OperationObjectProperty $proposal 'user_override_tier'))
         if ($evaluated.selected_tier -eq 'host_default') { $findings.Add((New-OperationFinding 'model_proposal_unusable' 'error' '$.model_proposals' ('Model proposal failed closed: {0}' -f $evaluated.fallback_reason))) | Out-Null }
     }
     $failurePacket = Get-OperationObjectProperty $Request 'failure_packet'
@@ -298,12 +306,12 @@ function New-AgentWorkflowAdvisoryPlan($Request) {
     $graph = Get-OperationObjectProperty $Request 'task_graph'
     $proposals = New-Object System.Collections.Generic.List[object]
     foreach ($proposal in @((Get-OperationObjectProperty $Request 'model_proposals'))) {
-        $proposals.Add((New-ModelPolicyProposal -TaskId ([string](Get-OperationObjectProperty $proposal 'task_id')) -RequestedTier ([string](Get-OperationObjectProperty $proposal 'requested_tier')) -Rationale ([string](Get-OperationObjectProperty $proposal 'rationale')) -RadarSnapshot (Get-OperationObjectProperty $Request 'radar_snapshot') -HostSurface ([string](Get-OperationObjectProperty $proposal 'host_surface')) -HostAvailablePairs @((Get-OperationObjectProperty $proposal 'host_available_pairs')) -LocalOutcomes @((Get-OperationObjectProperty $proposal 'local_outcomes')) -Now ([string](Get-OperationObjectProperty $Request 'now')) -UserOverrideTier ([string](Get-OperationObjectProperty $proposal 'user_override_tier')))) | Out-Null
+        $proposals.Add((New-ModelPolicyProposal -TaskId ([string](Get-OperationObjectProperty $proposal 'task_id')) -RequestedTier ([string](Get-OperationObjectProperty $proposal 'requested_tier')) -Rationale ([string](Get-OperationObjectProperty $proposal 'rationale')) -RadarSnapshot (Get-OperationObjectProperty $Request 'radar_snapshot') -HostSurface ([string](Get-OperationObjectProperty $proposal 'host_surface')) -HostAvailablePairs @((Get-OperationObjectProperty $proposal 'host_available_pairs')) -LocalOutcomes @((Get-OperationObjectProperty $proposal 'local_outcomes')) -Now (Get-OperationObjectProperty $Request 'now') -UserOverrideTier ([string](Get-OperationObjectProperty $proposal 'user_override_tier')))) | Out-Null
     }
     return [pscustomobject][ordered]@{
         schema_version = 1; pass = $requestValidation.pass; decision_owner = 'host_ai'; executor = 'host_native_runtime'; advisory_only = $true
         execution_plan = New-AgentExecutionPlan -TaskGraph $graph
-        current_parallel_admission = Test-AgentParallelAdmission -TaskGraph $graph -TaskIds @((Get-OperationObjectProperty $Request 'requested_parallel_task_ids')) -CompletedTaskIds @((Get-OperationObjectProperty $Request 'completed_task_ids')) -CompletedTaskReceipts @((Get-OperationObjectProperty $Request 'completion_receipts'))
+        current_parallel_admission = Test-AgentParallelAdmission -TaskGraph $graph -TaskIds @((Get-OperationObjectProperty $Request 'requested_parallel_task_ids')) -CompletedTaskIds @((Get-OperationObjectProperty $Request 'completed_task_ids')) -CompletedTaskReceipts @((Get-OperationObjectProperty $Request 'completion_receipts')) -EvaluationTime (Get-OperationObjectProperty $Request 'now')
         model_proposals = @($proposals.ToArray()); findings = @($requestValidation.findings); provider_calls = 0; native_mutations = 0; writes = 0
     }
 }

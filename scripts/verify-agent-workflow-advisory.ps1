@@ -145,8 +145,8 @@ if ($null -ne $manifest) {
         Add-Finding 'host_radar_receipt_missing' $paths.manifest 'Pending Radar v2 revalidation requires an explicit host receipt placeholder.'
     }
     else {
-        if ([string]$hostRadarReceipt.status -ne 'pending_revalidation' -or [string]$hostRadarReceipt.automation_revision -ne 'radar-snapshot-v2-20260806') {
-            Add-Finding 'host_radar_receipt_invalid' $paths.manifest 'Pending host Radar receipt must identify the v2 automation revision.'
+        if ([string]$hostRadarReceipt.status -ne 'pending_revalidation' -or [string]$hostRadarReceipt.automation_revision -ne 'radar-snapshot-v2-three-tier-20260806') {
+            Add-Finding 'host_radar_receipt_invalid' $paths.manifest 'Pending host Radar receipt must identify the three-tier v2 automation revision.'
         }
         foreach ($field in @('executed_model', 'executed_effort', 'run_at', 'snapshot_id')) {
             if ($null -eq $hostRadarReceipt.PSObject.Properties[$field]) { Add-Finding 'host_radar_receipt_field_missing' $paths.manifest ("Host Radar receipt field is missing: {0}" -f $field) }

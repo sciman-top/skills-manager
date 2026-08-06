@@ -19,7 +19,10 @@ param(
 
     [string]$StateRoot = '',
     [string]$StatePath = '',
+    [ValidatePattern('^$|^watch-fleet-shutdown:[0-9a-f]{64}$')]
     [string]$ConfirmedShutdownReceiptKey = '',
+    [ValidatePattern('^$|^watch-fleet-authorization:[0-9a-f]{64}$')]
+    [string]$ScheduleAuthorizationReceiptKey = '',
     [AllowEmptyString()][string]$MembershipJson = '',
 
     [switch]$VisibilityComplete,
@@ -117,6 +120,11 @@ function New-WatchFleetSupervisorState {
         observed_at = ''
         membership = @()
         successful_shutdown_receipt_keys = @()
+        schedule_authorization_receipt_key = ''
+        schedule_authorization_tick_id = ''
+        schedule_authorization_snapshot_key = ''
+        schedule_authorization_shutdown_receipt_key = ''
+        schedule_authorization_expires_at_utc = ''
     }
 }
 
@@ -178,6 +186,48 @@ function Read-WatchFleetSupervisorState {
         }
     }
 
+    $authorizationReceipt = [string](Get-WatchFleetProperty $state 'schedule_authorization_receipt_key')
+    $authorizationTickValue = Get-WatchFleetProperty $state 'schedule_authorization_tick_id'
+    $authorizationTickParsed = [datetimeoffset]::MinValue
+    $authorizationTick = if ($null -eq $authorizationTickValue -or [string]::IsNullOrWhiteSpace([string]$authorizationTickValue)) {
+        ''
+    }
+    elseif ($authorizationTickValue -is [datetimeoffset] -or $authorizationTickValue -is [datetime]) {
+        ([datetimeoffset]$authorizationTickValue).ToUniversalTime().ToString('o')
+    }
+    elseif (Test-WatchRfc3339Timestamp -Value $authorizationTickValue -Parsed ([ref]$authorizationTickParsed)) {
+        $authorizationTickParsed.ToUniversalTime().ToString('o')
+    }
+    else {
+        throw 'state_schema_invalid'
+    }
+    $authorizationSnapshot = [string](Get-WatchFleetProperty $state 'schedule_authorization_snapshot_key')
+    $authorizationShutdownReceipt = [string](Get-WatchFleetProperty $state 'schedule_authorization_shutdown_receipt_key')
+    $authorizationExpiresAtValue = Get-WatchFleetProperty $state 'schedule_authorization_expires_at_utc'
+    $authorizationExpiresAtParsed = [datetimeoffset]::MinValue
+    $authorizationExpiresAt = if ($null -eq $authorizationExpiresAtValue -or [string]::IsNullOrWhiteSpace([string]$authorizationExpiresAtValue)) {
+        ''
+    }
+    elseif ($authorizationExpiresAtValue -is [datetimeoffset] -or $authorizationExpiresAtValue -is [datetime]) {
+        ([datetimeoffset]$authorizationExpiresAtValue).ToUniversalTime().ToString('o')
+    }
+    elseif (Test-WatchRfc3339Timestamp -Value $authorizationExpiresAtValue -Parsed ([ref]$authorizationExpiresAtParsed)) {
+        $authorizationExpiresAtParsed.ToUniversalTime().ToString('o')
+    }
+    else {
+        throw 'state_schema_invalid'
+    }
+    $authorizationValues = @($authorizationReceipt, $authorizationTick, $authorizationSnapshot, $authorizationShutdownReceipt, $authorizationExpiresAt)
+    $authorizationPresent = @($authorizationValues | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -gt 0
+    if ($authorizationPresent -and (
+            $authorizationReceipt -notmatch '^watch-fleet-authorization:[0-9a-f]{64}$' -or
+            [string]::IsNullOrWhiteSpace($authorizationTick) -or
+            $authorizationSnapshot -notmatch '^watch-fleet-stopped:[0-9a-f]{64}$' -or
+            $authorizationShutdownReceipt -notmatch '^watch-fleet-shutdown:[0-9a-f]{64}$' -or
+            [string]::IsNullOrWhiteSpace($authorizationExpiresAt))) {
+        throw 'state_schema_invalid'
+    }
+
     return [ordered]@{
         schema_version = 3
         automation_id = $stateAutomationId
@@ -188,6 +238,11 @@ function Read-WatchFleetSupervisorState {
         observed_at = if ($observedAtValue -is [string]) { [string]$observedAtValue } else { ([datetimeoffset]$observedAtValue).ToString('o') }
         membership = @($membership)
         successful_shutdown_receipt_keys = @($normalizedReceipts.ToArray())
+        schedule_authorization_receipt_key = $authorizationReceipt
+        schedule_authorization_tick_id = $authorizationTick
+        schedule_authorization_snapshot_key = $authorizationSnapshot
+        schedule_authorization_shutdown_receipt_key = $authorizationShutdownReceipt
+        schedule_authorization_expires_at_utc = $authorizationExpiresAt
     }
 }
 
@@ -217,6 +272,65 @@ function Write-WatchFleetSupervisorState {
     finally {
         if ([IO.File]::Exists($tempPath)) { [IO.File]::Delete($tempPath) }
         if ([IO.File]::Exists($backupPath)) { [IO.File]::Delete($backupPath) }
+    }
+}
+
+function Enter-WatchFleetStateLock {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$AutomationId,
+        [Parameter(Mandatory = $true)][string]$GenerationId
+    )
+
+    $lockStream = $null
+    try {
+        $lockStream = [IO.File]::Open($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    }
+    catch [IO.IOException] {
+        $orphanHandle = $null
+        try {
+            $orphanHandle = [IO.FileStream]::new(
+                $Path,
+                [IO.FileMode]::Open,
+                [IO.FileAccess]::ReadWrite,
+                [IO.FileShare]::None,
+                4096,
+                [IO.FileOptions]::DeleteOnClose)
+        }
+        catch [IO.IOException] {
+            throw 'state_lock_busy'
+        }
+        finally {
+            if ($null -ne $orphanHandle) { $orphanHandle.Dispose() }
+        }
+
+        try {
+            $lockStream = [IO.File]::Open($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        }
+        catch [IO.IOException] {
+            throw 'state_lock_busy'
+        }
+    }
+
+    try {
+        $metadata = [ordered]@{
+            schema_version = 1
+            automation_id = $AutomationId
+            watch_runtime_generation_id = $GenerationId
+            owner_pid = $PID
+            acquired_at_utc = [datetimeoffset]::UtcNow.ToString('o')
+            nonce = [guid]::NewGuid().ToString('N')
+        } | ConvertTo-Json -Compress
+        $bytes = [Text.UTF8Encoding]::new($false).GetBytes($metadata)
+        $lockStream.SetLength(0)
+        $lockStream.Write($bytes, 0, $bytes.Length)
+        $lockStream.Flush($true)
+        return $lockStream
+    }
+    catch {
+        $lockStream.Dispose()
+        if ([IO.File]::Exists($Path)) { [IO.File]::Delete($Path) }
+        throw
     }
 }
 
@@ -276,6 +390,7 @@ $result = [ordered]@{
     tick_id = $CurrentTickId
     snapshot_key = ''
     shutdown_receipt_key = ''
+    schedule_authorization_receipt_key = ''
     successful_shutdown_receipt_count = 0
     state_error_type = ''
     state_root = $StateRoot
@@ -308,14 +423,14 @@ if ($ShutdownArmed) {
     elseif ($UnavailableSourceCount -ne 0) {
         $result.reason_code = 'source_visibility_unavailable'
     }
-    elseif (-not [datetimeoffset]::TryParse($CurrentTickId, [ref]$currentTick)) {
+    elseif (-not (Test-WatchRfc3339Timestamp -Value $CurrentTickId -Parsed ([ref]$currentTick))) {
         $result.reason_code = 'current_tick_invalid'
     }
     elseif ($currentTick -gt $now.AddMinutes(1) -or $currentTick -lt $now.AddMinutes(-$FreshnessMinutes)) {
         $result.reason_code = 'current_tick_stale'
     }
     elseif (-not [string]::IsNullOrWhiteSpace($PreviousTickId) -and
-            -not [datetimeoffset]::TryParse($PreviousTickId, [ref]$callerPreviousTick)) {
+            -not (Test-WatchRfc3339Timestamp -Value $PreviousTickId -Parsed ([ref]$callerPreviousTick))) {
         $result.reason_code = 'previous_tick_invalid'
     }
     elseif (-not $GuardReady) {
@@ -364,8 +479,7 @@ if ($ShutdownArmed) {
                 $membershipLockPath = $statePathFull + '.lock'
                 $membershipLock = $null
                 try {
-                    try { $membershipLock = [IO.File]::Open($membershipLockPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None) }
-                    catch [IO.IOException] { throw 'state_lock_busy' }
+                    $membershipLock = Enter-WatchFleetStateLock -Path $membershipLockPath -AutomationId $AutomationId -GenerationId $effectiveGenerationId
                     $membershipState = Read-WatchFleetSupervisorState -Path $statePathFull -ExpectedAutomationId $AutomationId -ExpectedGenerationId $effectiveGenerationId
                     $membershipState.membership = @($membershipUpdateRows.ToArray())
                     $membershipState.observed_at = $now.ToString('o')
@@ -434,7 +548,7 @@ if ($ShutdownArmed) {
                     $recoveryPending = Get-WatchFleetProperty $record 'recovery_pending'
                     $receiptKey = [string](Get-WatchFleetProperty $record 'receipt_key')
                     $checkpointId = [string](Get-WatchFleetProperty $record 'checkpoint_id')
-                    $evidenceTimestampText = [string](Get-WatchFleetProperty $record 'evidence_timestamp_utc')
+                    $evidenceTimestampValue = Get-WatchFleetProperty $record 'evidence_timestamp_utc'
                     $externalEffectState = [string](Get-WatchFleetProperty $record 'external_effect_state')
                     $nextRetryAt = [string](Get-WatchFleetProperty $record 'next_retry_at')
                     $noActiveTurn = Get-WatchFleetProperty $record 'no_active_turn'
@@ -510,7 +624,7 @@ if ($ShutdownArmed) {
                     }
 
                     $evidenceTimestamp = [datetimeoffset]::MinValue
-                    if (-not [datetimeoffset]::TryParse($evidenceTimestampText, [ref]$evidenceTimestamp) -or
+                    if (-not (Test-WatchRfc3339Timestamp -Value $evidenceTimestampValue -Parsed ([ref]$evidenceTimestamp)) -or
                         $evidenceTimestamp -gt $now.AddMinutes(1) -or
                         $evidenceTimestamp -lt $now.AddMinutes(-$FreshnessMinutes)) {
                         $finding = 'stop_evidence_stale'
@@ -561,9 +675,10 @@ if ($ShutdownArmed) {
                     $lockStream = $null
                     try {
                         try {
-                            $lockStream = [IO.File]::Open($lockPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+                            $lockStream = Enter-WatchFleetStateLock -Path $lockPath -AutomationId $AutomationId -GenerationId $effectiveGenerationId
                         }
-                        catch [IO.IOException] {
+                        catch {
+                            if ([string]$_.Exception.Message -ne 'state_lock_busy') { throw }
                             $result.reason_code = 'state_lock_busy'
                         }
 
@@ -576,12 +691,31 @@ if ($ShutdownArmed) {
                                 foreach ($receipt in @($supervisorState.successful_shutdown_receipt_keys)) { $receiptSet.Add([string]$receipt) | Out-Null }
 
                                 if (-not [string]::IsNullOrWhiteSpace($ConfirmedShutdownReceiptKey)) {
+                                    $confirmationAuthorizationExpiresAt = [datetimeoffset]::MinValue
                                     if ($ConfirmedShutdownReceiptKey -cne $shutdownReceiptKey) {
                                         $result.reason_code = 'confirmed_receipt_mismatch'
+                                    }
+                                    elseif ([string]::IsNullOrWhiteSpace($ScheduleAuthorizationReceiptKey)) {
+                                        $result.reason_code = 'confirmed_authorization_missing'
+                                    }
+                                    elseif ($ScheduleAuthorizationReceiptKey -cne [string]$supervisorState.schedule_authorization_receipt_key -or
+                                            [string]$supervisorState.schedule_authorization_tick_id -cne $canonicalCurrentTickId -or
+                                            [string]$supervisorState.schedule_authorization_snapshot_key -cne $snapshotKey -or
+                                            [string]$supervisorState.schedule_authorization_shutdown_receipt_key -cne $shutdownReceiptKey) {
+                                        $result.reason_code = 'confirmed_authorization_mismatch'
+                                    }
+                                    elseif (-not (Test-WatchRfc3339Timestamp -Value $supervisorState.schedule_authorization_expires_at_utc -Parsed ([ref]$confirmationAuthorizationExpiresAt)) -or
+                                            $confirmationAuthorizationExpiresAt -le $now) {
+                                        $result.reason_code = 'confirmed_authorization_expired'
                                     }
                                     else {
                                         $receiptSet.Add($ConfirmedShutdownReceiptKey) | Out-Null
                                         $supervisorState.successful_shutdown_receipt_keys = @($receiptSet | Sort-Object)
+                                        $supervisorState.schedule_authorization_receipt_key = ''
+                                        $supervisorState.schedule_authorization_tick_id = ''
+                                        $supervisorState.schedule_authorization_snapshot_key = ''
+                                        $supervisorState.schedule_authorization_shutdown_receipt_key = ''
+                                        $supervisorState.schedule_authorization_expires_at_utc = ''
                                         Write-WatchFleetSupervisorState -Path $statePathFull -State $supervisorState
                                         $result.reason_code = 'shutdown_receipt_recorded'
                                     }
@@ -595,14 +729,29 @@ if ($ShutdownArmed) {
                                     $result.reason_code = 'shutdown_already_scheduled'
                                 }
                                 elseif ($FinalRecheck) {
-                                    if ([string]$supervisorState.current_tick_id -cne $canonicalCurrentTickId -or
+                                    $authorizationExpiresAt = [datetimeoffset]::MinValue
+                                    if ([string]::IsNullOrWhiteSpace($ScheduleAuthorizationReceiptKey)) {
+                                        $result.reason_code = 'final_recheck_authorization_missing'
+                                    }
+                                    elseif ([string]$supervisorState.current_tick_id -cne $canonicalCurrentTickId -or
                                         [string]$supervisorState.snapshot_key -cne $snapshotKey) {
                                         $result.reason_code = 'final_recheck_state_mismatch'
+                                    }
+                                    elseif ($ScheduleAuthorizationReceiptKey -cne [string]$supervisorState.schedule_authorization_receipt_key -or
+                                            [string]$supervisorState.schedule_authorization_tick_id -cne $canonicalCurrentTickId -or
+                                            [string]$supervisorState.schedule_authorization_snapshot_key -cne $snapshotKey -or
+                                            [string]$supervisorState.schedule_authorization_shutdown_receipt_key -cne $shutdownReceiptKey) {
+                                        $result.reason_code = 'final_recheck_authorization_mismatch'
+                                    }
+                                    elseif (-not (Test-WatchRfc3339Timestamp -Value $supervisorState.schedule_authorization_expires_at_utc -Parsed ([ref]$authorizationExpiresAt)) -or
+                                            $authorizationExpiresAt -le $now) {
+                                        $result.reason_code = 'final_recheck_authorization_expired'
                                     }
                                     else {
                                         $result.power_action = 'schedule_shutdown'
                                         $result.reason_code = 'all_monitored_tasks_stopped'
-                                        $result.shutdown_receipt_expires_at_utc = $now.AddSeconds($ShutdownReceiptTtlSeconds).ToString('o')
+                                        $result.schedule_authorization_receipt_key = $ScheduleAuthorizationReceiptKey
+                                        $result.shutdown_receipt_expires_at_utc = $authorizationExpiresAt.ToUniversalTime().ToString('o')
                                     }
                                 }
                                 elseif ([string]$supervisorState.current_tick_id -ceq $canonicalCurrentTickId) {
@@ -620,7 +769,7 @@ if ($ShutdownArmed) {
                                         $persistedPreviousTick = [datetimeoffset]::MinValue
                                         $stableAcrossDistinctTicks = -not [string]::IsNullOrWhiteSpace($previousTickText) -and
                                             [string]$supervisorState.snapshot_key -ceq $snapshotKey -and
-                                            [datetimeoffset]::TryParse($previousTickText, [ref]$persistedPreviousTick) -and
+                                            (Test-WatchRfc3339Timestamp -Value $previousTickText -Parsed ([ref]$persistedPreviousTick)) -and
                                             $persistedPreviousTick -lt $currentTick
 
                                         $supervisorState.previous_tick_id = $previousTickText
@@ -628,16 +777,37 @@ if ($ShutdownArmed) {
                                         $supervisorState.snapshot_key = $snapshotKey
                                         $supervisorState.observed_at = $now.ToString('o')
                                         $supervisorState.successful_shutdown_receipt_keys = @($receiptSet | Sort-Object)
-                                        Write-WatchFleetSupervisorState -Path $statePathFull -State $supervisorState
 
                                         if (-not $stableAcrossDistinctTicks) {
+                                            $supervisorState.schedule_authorization_receipt_key = ''
+                                            $supervisorState.schedule_authorization_tick_id = ''
+                                            $supervisorState.schedule_authorization_snapshot_key = ''
+                                            $supervisorState.schedule_authorization_shutdown_receipt_key = ''
+                                            $supervisorState.schedule_authorization_expires_at_utc = ''
                                             $result.reason_code = 'stability_confirmation_required'
                                         }
                                         else {
+                                            $authorizationExpiresAt = $now.AddSeconds($ShutdownReceiptTtlSeconds).ToUniversalTime().ToString('o')
+                                            $authorizationHash = Get-WatchFleetSha256 -Text ([string]::Join("`n", @(
+                                                ('automation_id={0}' -f $AutomationId),
+                                                ('watch_runtime_generation_id={0}' -f $effectiveGenerationId),
+                                                ('current_tick_id={0}' -f $canonicalCurrentTickId),
+                                                ('snapshot_key={0}' -f $snapshotKey),
+                                                ('shutdown_receipt_key={0}' -f $shutdownReceiptKey),
+                                                ('expires_at_utc={0}' -f $authorizationExpiresAt)
+                                            )))
+                                            $authorizationReceiptKey = 'watch-fleet-authorization:' + $authorizationHash
+                                            $supervisorState.schedule_authorization_receipt_key = $authorizationReceiptKey
+                                            $supervisorState.schedule_authorization_tick_id = $canonicalCurrentTickId
+                                            $supervisorState.schedule_authorization_snapshot_key = $snapshotKey
+                                            $supervisorState.schedule_authorization_shutdown_receipt_key = $shutdownReceiptKey
+                                            $supervisorState.schedule_authorization_expires_at_utc = $authorizationExpiresAt
                                             $result.power_action = 'schedule_shutdown'
                                             $result.reason_code = 'all_monitored_tasks_stopped'
-                                            $result.shutdown_receipt_expires_at_utc = $now.AddSeconds($ShutdownReceiptTtlSeconds).ToString('o')
+                                            $result.schedule_authorization_receipt_key = $authorizationReceiptKey
+                                            $result.shutdown_receipt_expires_at_utc = $authorizationExpiresAt
                                         }
+                                        Write-WatchFleetSupervisorState -Path $statePathFull -State $supervisorState
                                     }
                                 }
 
