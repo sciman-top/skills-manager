@@ -2463,16 +2463,17 @@ function Parse-McpSyncPlanOptions([string[]]$Tokens = @()) {
     $json = $false
     $outPath = ''
     $plan = $false
-    for ($i = 0; $i -lt @($Tokens).Count; $i++) {
-        $token = ([string]$Tokens[$i]).Trim()
+    $items = @($Tokens | Where-Object { $null -ne $_ })
+    for ($i = 0; $i -lt $items.Count; $i++) {
+        $token = ([string]$items[$i]).Trim()
         switch -Regex ($token) {
             '^(?i)--plan$' { $plan = $true; continue }
             '^(?i)--json$' { $json = $true; continue }
             '^(?i)--out=(.+)$' { $outPath = [string]$Matches[1]; continue }
             '^(?i)--out$' {
-                Need (($i + 1) -lt @($Tokens).Count) '--out 需要路径值。'
+                Need (($i + 1) -lt $items.Count) '--out 需要路径值。'
                 $i++
-                $outPath = [string]$Tokens[$i]
+                $outPath = [string]$items[$i]
                 Need (-not [string]::IsNullOrWhiteSpace($outPath)) '--out 需要非空路径值。'
                 continue
             }

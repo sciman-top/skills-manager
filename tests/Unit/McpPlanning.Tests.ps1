@@ -143,12 +143,16 @@ Describe 'MCP machine-readable planning' {
     It 'parses MCP plan options without claiming global doctor JSON arguments' {
         $options = Parse-McpSyncPlanOptions @('--plan', '--json', '--out', '.\plan.json')
         $inline = Parse-McpSyncPlanOptions @('--out=.\inline.json')
+        $empty = Parse-McpSyncPlanOptions (Merge-FilterAndArgs $null $null)
         $versionSource = Get-Content -LiteralPath (Join-Path $repoRoot 'src\Version.ps1') -Raw
 
         $options.plan | Should Be $true
         $options.json | Should Be $true
         $options.out_path | Should Be '.\plan.json'
         $inline.out_path | Should Be '.\inline.json'
+        $empty.plan | Should Be $false
+        $empty.json | Should Be $false
+        $empty.out_path | Should Be ''
         $versionSource | Should Not Match '(?i)\[switch\]\$Json'
         $versionSource | Should Not Match '(?i)\[string\]\$Out'
     }
