@@ -85,7 +85,7 @@ function Write-TestWatchAutomationMetadata {
         ('name = {0}' -f (("Watch test $Id") | ConvertTo-Json -Compress))
         ('prompt = {0}' -f ($Prompt | ConvertTo-Json -Compress))
         ('status = {0}' -f ($Status | ConvertTo-Json -Compress))
-        'rrule = "FREQ=MINUTELY;INTERVAL=10"'
+        'rrule = "FREQ=MINUTELY;INTERVAL=12"'
         'notification_policy = "failed_runs_only"'
         ('target_thread_id = {0}' -f ($TargetThreadId | ConvertTo-Json -Compress))
     ) -join "`n"
@@ -215,21 +215,21 @@ Describe 'Cross-thread PreToolUse guard' {
         $prompt = & $targetGenerator -TargetThreadId 'target-test' -ShutdownManaged
         $shutdownTarget = New-CanonicalWatchTranscript -Role target_shutdown -SessionId 'target-test' -AutomationId $automationId
         $ordinaryTarget = New-CanonicalWatchTranscript -Role target -SessionId 'target-test' -AutomationId $automationId
-        $fullUpdate = [ordered]@{ mode='update'; id=$automationId; kind='heartbeat'; name='Watch target-test'; prompt=$prompt; rrule='FREQ=MINUTELY;INTERVAL=10'; status='PAUSED'; notificationPolicy='failed_runs_only'; targetThreadId='target-test' }
+        $fullUpdate = [ordered]@{ mode='update'; id=$automationId; kind='heartbeat'; name='Watch target-test'; prompt=$prompt; rrule='FREQ=MINUTELY;INTERVAL=12'; status='PAUSED'; notificationPolicy='failed_runs_only'; targetThreadId='target-test' }
 
         (Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput $fullUpdate -SessionId 'target-test' -TranscriptPath $shutdownTarget).Output | Should BeNullOrEmpty
 
         $promptLiteral = $prompt | ConvertTo-Json -Compress
-        $source = 'const result = await tools.codex_app__automation_update({ mode: "update", id: "automation-9", kind: "heartbeat", name: "Watch target-test", prompt: ' + $promptLiteral + ', rrule: "FREQ=MINUTELY;INTERVAL=10", status: "PAUSED", notificationPolicy: "failed_runs_only", targetThreadId: "target-test" }); text(result);'
+        $source = 'const result = await tools.codex_app__automation_update({ mode: "update", id: "automation-9", kind: "heartbeat", name: "Watch target-test", prompt: ' + $promptLiteral + ', rrule: "FREQ=MINUTELY;INTERVAL=12", status: "PAUSED", notificationPolicy: "failed_runs_only", targetThreadId: "target-test" }); text(result);'
         (Invoke-CrossThreadHook -ToolName 'exec' -ToolInput $source -SessionId 'target-test' -TranscriptPath $shutdownTarget).Output | Should BeNullOrEmpty
 
         foreach ($case in @(
             @{ Transcript=$ordinaryTarget; Input=$fullUpdate },
             @{ Transcript=$shutdownTarget; Input=[ordered]@{ mode='delete'; id=$automationId } },
-            @{ Transcript=$shutdownTarget; Input=[ordered]@{ mode='update'; id='automation-other'; kind='heartbeat'; name='Watch target-test'; prompt=$prompt; rrule='FREQ=MINUTELY;INTERVAL=10'; status='PAUSED'; notificationPolicy='failed_runs_only'; targetThreadId='target-test' } },
-            @{ Transcript=$shutdownTarget; Input=[ordered]@{ mode='update'; id=$automationId; kind='heartbeat'; name='Watch target-test'; prompt=$prompt; rrule='FREQ=MINUTELY;INTERVAL=10'; status='ACTIVE'; notificationPolicy='failed_runs_only'; targetThreadId='target-test' } },
+            @{ Transcript=$shutdownTarget; Input=[ordered]@{ mode='update'; id='automation-other'; kind='heartbeat'; name='Watch target-test'; prompt=$prompt; rrule='FREQ=MINUTELY;INTERVAL=12'; status='PAUSED'; notificationPolicy='failed_runs_only'; targetThreadId='target-test' } },
+            @{ Transcript=$shutdownTarget; Input=[ordered]@{ mode='update'; id=$automationId; kind='heartbeat'; name='Watch target-test'; prompt=$prompt; rrule='FREQ=MINUTELY;INTERVAL=12'; status='ACTIVE'; notificationPolicy='failed_runs_only'; targetThreadId='target-test' } },
             @{ Transcript=$shutdownTarget; Input=[ordered]@{ mode='update'; id=$automationId; kind='heartbeat'; name='Watch target-test'; prompt=$prompt; rrule='FREQ=MINUTELY;INTERVAL=1'; status='PAUSED'; notificationPolicy='failed_runs_only'; targetThreadId='target-test' } },
-            @{ Transcript=$shutdownTarget; Input=[ordered]@{ mode='update'; id=$automationId; kind='heartbeat'; name='Watch target-test'; prompt='replacement'; rrule='FREQ=MINUTELY;INTERVAL=10'; status='PAUSED'; notificationPolicy='failed_runs_only'; targetThreadId='target-test' } }
+            @{ Transcript=$shutdownTarget; Input=[ordered]@{ mode='update'; id=$automationId; kind='heartbeat'; name='Watch target-test'; prompt='replacement'; rrule='FREQ=MINUTELY;INTERVAL=12'; status='PAUSED'; notificationPolicy='failed_runs_only'; targetThreadId='target-test' } }
         )) {
             $blocked = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput $case.Input -SessionId 'target-test' -TranscriptPath $case.Transcript
             ($blocked.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'

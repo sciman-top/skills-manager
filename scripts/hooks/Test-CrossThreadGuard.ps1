@@ -139,7 +139,7 @@ function Write-WatchDoctorAutomationMetadata {
         ('name = {0}' -f (("Watch doctor $Id") | ConvertTo-Json -Compress))
         ('prompt = {0}' -f $quotedPrompt)
         ('status = {0}' -f ($Status | ConvertTo-Json -Compress))
-        'rrule = "FREQ=MINUTELY;INTERVAL=10"'
+        'rrule = "FREQ=MINUTELY;INTERVAL=12"'
         'notification_policy = "failed_runs_only"'
         ('target_thread_id = {0}' -f ($TargetThreadId | ConvertTo-Json -Compress))
     ) -join "`n"
@@ -273,7 +273,7 @@ if ($canonicalSimulationReady) {
             session_id = 'doctor-shutdown-target'
             transcript_path = $shutdownTargetTranscript
             tool_name = 'codex_app__automation_update'
-            tool_input = [ordered]@{ mode = 'update'; id = $shutdownTargetAutomationId; kind = 'heartbeat'; name = "Watch doctor $shutdownTargetAutomationId"; prompt = $shutdownTargetDoctorPrompt; rrule = 'FREQ=MINUTELY;INTERVAL=10'; status = 'PAUSED'; notificationPolicy = 'failed_runs_only'; targetThreadId = 'doctor-shutdown-target' }
+            tool_input = [ordered]@{ mode = 'update'; id = $shutdownTargetAutomationId; kind = 'heartbeat'; name = "Watch doctor $shutdownTargetAutomationId"; prompt = $shutdownTargetDoctorPrompt; rrule = 'FREQ=MINUTELY;INTERVAL=12'; status = 'PAUSED'; notificationPolicy = 'failed_runs_only'; targetThreadId = 'doctor-shutdown-target' }
             expect = 'allow'
         }
         code_mode_target_self_delete = [ordered]@{

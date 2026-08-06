@@ -350,7 +350,7 @@ function Test-ExactTargetSelfPause {
     return $unexpected.Count -eq 0 -and $mode -ceq 'update' -and $status -ceq 'PAUSED' -and $kind -ceq 'heartbeat' -and
         $id -ceq [string]$context.automation_id -and $targetThreadId -ceq $sessionId -and
         -not [string]::IsNullOrWhiteSpace($name) -and $prompt -ceq [string]$context.prompt -and
-        $rrule -ceq 'FREQ=MINUTELY;INTERVAL=10' -and $notificationPolicy -ceq 'failed_runs_only' -and
+        $rrule -ceq 'FREQ=MINUTELY;INTERVAL=12' -and $notificationPolicy -ceq 'failed_runs_only' -and
         (Test-ShutdownManagedTargetHeartbeat -Payload $Payload)
 }
 
@@ -583,9 +583,9 @@ elseif ($toolName -match '(?i)(^|__|\.)exec$') {
                     $rrule = [string](Get-InputProperty -InputObject $automationInput -Names @('rrule'))
                     if ([string]::IsNullOrWhiteSpace($targetId) -or $targetId -ceq [string]$payload.session_id -or
                         $mode -notin @('create','update') -or $kind -cne 'heartbeat' -or $status -cne 'ACTIVE' -or
-                        $rrule -cne 'FREQ=MINUTELY;INTERVAL=10' -or
+                        $rrule -cne 'FREQ=MINUTELY;INTERVAL=12' -or
                         -not (Test-CanonicalWatchPrompt -Prompt $prompt -ExpectedTargetThreadId $targetId)) {
-                        $denyReason = 'Fleet enrollment and migration require one exact ACTIVE canonical 10-minute target heartbeat.'
+                        $denyReason = 'Fleet enrollment and migration require one exact ACTIVE canonical 12-minute target heartbeat.'
                     }
                 }
             }

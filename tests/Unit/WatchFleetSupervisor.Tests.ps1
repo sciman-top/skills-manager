@@ -23,12 +23,12 @@ Describe 'watch-interrupted-task fleet supervisor revision-3 contract' {
         $script:prompt | Should Match 'create or update only the canonical target heartbeat'
     }
 
-    It 'keeps the fleet scheduled prompt self contained and uses the ten-minute cadence contract' {
+    It 'keeps the fleet scheduled prompt self contained and uses the twelve-minute cadence contract' {
         $script:prompt | Should -Not -Match 'Use \$watch-interrupted-task'
         $script:shutdownPrompt | Should -Not -Match 'Use \$watch-interrupted-task'
         $script:shutdownPrompt | Should Match 'watch_runtime_generation_id=watch-runtime-generation:[0-9a-f]{64}'
-        $script:shutdownPrompt | Should Match 'supervisor_cadence_minutes=10'
-        $script:shutdownPrompt | Should Match 'target_cadence_minutes=10'
+        $script:shutdownPrompt | Should Match 'supervisor_cadence_minutes=12'
+        $script:shutdownPrompt | Should Match 'target_cadence_minutes=12'
     }
 
     It 'requires current native heartbeat provenance after compaction' {
