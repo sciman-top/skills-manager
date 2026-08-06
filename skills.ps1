@@ -20831,6 +20831,38 @@ function Get-SkillRoutingLocalInventory($cfg) {
     return @($items.ToArray())
 }
 
+function Add-SkillRoutingDeclaredPathLeaf($names, [string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return }
+    $normalized = $path.Trim().Replace('\', '/').TrimEnd('/')
+    if ([string]::IsNullOrWhiteSpace($normalized)) { return }
+    $leaf = @($normalized -split '/')[-1].Trim()
+    if (-not [string]::IsNullOrWhiteSpace($leaf)) {
+        $names.Add($leaf) | Out-Null
+    }
+}
+
+function Get-SkillRoutingDeclaredSourceNames($cfg, $materializedSkills) {
+    $names = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in @($materializedSkills)) {
+        if ($null -eq $entry) { continue }
+        $path = Get-SkillRoutingEntryPath $entry
+        if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        $name = ([string]$entry.name).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($name)) {
+            $names.Add($name) | Out-Null
+        }
+    }
+    foreach ($import in @((Get-CfgObjectProperty $cfg 'imports'))) {
+        if ($null -eq $import) { continue }
+        Add-SkillRoutingDeclaredPathLeaf $names ([string](Get-CfgObjectProperty $import 'skill'))
+    }
+    foreach ($mapping in @((Get-CfgObjectProperty $cfg 'mappings'))) {
+        if ($null -eq $mapping) { continue }
+        Add-SkillRoutingDeclaredPathLeaf $names ([string](Get-CfgObjectProperty $mapping 'from'))
+    }
+    return @($names | Sort-Object)
+}
+
 function Get-SkillRoutingPolicy([string]$path) {
     Need (-not [string]::IsNullOrWhiteSpace($path)) 'skill routing policy path is empty'
     Need (Test-Path -LiteralPath $path -PathType Leaf) ("skill routing policy does not exist: {0}" -f $path)
@@ -20871,7 +20903,7 @@ function Add-SkillRoutingFinding($findings, [string]$code, [string]$severity, [s
             })) | Out-Null
 }
 
-function New-SkillRoutingReport($projectionCfg, $canonicalSkills, $activeSkills, $externalSkills) {
+function New-SkillRoutingReport($projectionCfg, $canonicalSkills, $activeSkills, $externalSkills, $declaredSkillNames = $null) {
     $routingPolicyPath = if ($null -eq $projectionCfg) { '' } else { [string](Get-CfgObjectProperty $projectionCfg 'routing_policy_path') }
     if ([string]::IsNullOrWhiteSpace($routingPolicyPath)) {
         return Get-EmptySkillRoutingReport
@@ -20882,9 +20914,15 @@ function New-SkillRoutingReport($projectionCfg, $canonicalSkills, $activeSkills,
     $active = @($activeSkills)
     $external = @($externalSkills)
     $canonicalNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $declaredNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     $activeNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     $externalNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($entry in $canonical) { $canonicalNames.Add(([string]$entry.name).Trim()) | Out-Null }
+    $effectiveDeclaredNames = if ($null -eq $declaredSkillNames) { @($canonicalNames) } else { @($declaredSkillNames) }
+    foreach ($name in $effectiveDeclaredNames) {
+        $trimmedName = ([string]$name).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($trimmedName)) { $declaredNames.Add($trimmedName) | Out-Null }
+    }
     foreach ($entry in $active) { $activeNames.Add(([string]$entry.name).Trim()) | Out-Null }
     foreach ($entry in $external) {
         $externalNames.Add(([string]$entry.qualified_name).Trim()) | Out-Null
@@ -20914,7 +20952,7 @@ function New-SkillRoutingReport($projectionCfg, $canonicalSkills, $activeSkills,
             Need ($allowedRoles -contains $role) ("unsupported skill routing role {0}: {1}/{2}" -f $role, $groupId, $name)
             Need (-not [string]::IsNullOrWhiteSpace([string]$member.activation)) ("skill routing member is missing activation: {0}/{1}" -f $groupId, $name)
             Need ($memberNames.Add($name)) ("duplicate skill routing member: {0}/{1}" -f $groupId, $name)
-            Need ($canonicalNames.Contains($name)) ("skill routing member is not installed: {0}/{1}" -f $groupId, $name)
+            Need ($declaredNames.Contains($name)) ("skill routing member has no declared source: {0}/{1}" -f $groupId, $name)
             $memberRoles[$name] = $role
             $coveredLocalNames.Add($name) | Out-Null
             if ($activeNames.Contains($name)) { $activeMembers.Add($name) | Out-Null }
@@ -20996,7 +21034,7 @@ function New-SkillRoutingReport($projectionCfg, $canonicalSkills, $activeSkills,
         Need (-not [string]::IsNullOrWhiteSpace([string]$conflict.resolution)) ("skill routing conflict is missing resolution: {0}" -f $conflictId)
         $members = @($conflict.members | ForEach-Object { ([string]$_).Trim() })
         Need ($members.Count -ge 2) ("skill routing conflict requires at least two members: {0}" -f $conflictId)
-        foreach ($name in $members) { Need ($canonicalNames.Contains($name)) ("skill routing conflict member is not installed: {0}/{1}" -f $conflictId, $name) }
+        foreach ($name in $members) { Need ($declaredNames.Contains($name)) ("skill routing conflict member has no declared source: {0}/{1}" -f $conflictId, $name) }
         $coactive = @($members | Where-Object { $activeNames.Contains($_) })
         if ($coactive.Count -eq $members.Count) {
             Add-SkillRoutingFinding $findings 'coactive_contract_conflict' $severity $conflictId ("Potentially conflicting skills are active together: {0}." -f ($members -join ', ')) ([string]$conflict.resolution)

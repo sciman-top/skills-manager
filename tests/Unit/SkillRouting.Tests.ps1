@@ -188,6 +188,97 @@ enabled = true # current browser state
         }
     }
 
+    It 'Accepts policy members backed only by tracked import and mapping source declarations' {
+        $policyPath = Join-Path $TestDrive 'declared-only-policy.json'
+        New-RoutingPolicyFile $policyPath @(
+            [ordered]@{
+                id = 'declared-flow'
+                purpose = 'clean checkout source declarations'
+                router = ''
+                selection_policy = 'fixture'
+                members = @(
+                    [ordered]@{ name = 'declared-import'; role = 'reference'; activation = 'reference' }
+                    [ordered]@{ name = 'declared-mapping'; role = 'executor'; activation = 'work' }
+                )
+                external_members = @()
+            }
+        )
+        $cfg = [pscustomobject]@{
+            imports = @([pscustomobject]@{ skill = 'skills\declared-import' })
+            mappings = @([pscustomobject]@{ from = 'skills/declared-mapping'; to = 'prefixed-deployment-name' })
+        }
+        $projection = [pscustomobject]@{ routing_policy_path = $policyPath }
+
+        $missingPlaceholder = [pscustomobject]@{
+            name = 'prefixed-deployment-name'
+            description = ''
+            path = (Join-Path $TestDrive 'not-materialized\SKILL.md')
+            is_system = $false
+        }
+        $declaredNames = @(Get-SkillRoutingDeclaredSourceNames $cfg @($missingPlaceholder))
+        $report = New-SkillRoutingReport $projection @() @() @() $declaredNames
+
+        @($declaredNames | Sort-Object) -join ',' | Should Be 'declared-import,declared-mapping'
+        $report.group_count | Should Be 1
+        $report.active_group_count | Should Be 0
+    }
+
+    It 'Does not let policy profile or catalog consumers self-prove a missing source' {
+        $policyPath = Join-Path $TestDrive 'consumer-self-proof-policy.json'
+        New-RoutingPolicyFile $policyPath @(
+            [ordered]@{
+                id = 'phantom-flow'
+                purpose = 'reject consumer-only names'
+                router = ''
+                selection_policy = 'fixture'
+                members = @([ordered]@{ name = 'phantom'; role = 'executor'; activation = 'work' })
+                external_members = @()
+            }
+        )
+        $cfg = [pscustomobject]@{
+            imports = @()
+            mappings = @()
+            skill_projection = [pscustomobject]@{
+                profiles = [pscustomobject]@{ default = [pscustomobject]@{ enabled_names = @('phantom') } }
+                discovery_domains = [pscustomobject]@{ coding = @('phantom') }
+            }
+        }
+        $projection = [pscustomobject]@{ routing_policy_path = $policyPath }
+
+        $declaredNames = @(Get-SkillRoutingDeclaredSourceNames $cfg @())
+
+        @($declaredNames).Count | Should Be 0
+        { New-SkillRoutingReport $projection @() @() @() $declaredNames } | Should Throw
+    }
+
+    It 'Keeps declared-only members inactive and outside metadata trigger scans' {
+        $policyPath = Join-Path $TestDrive 'declared-inactive-policy.json'
+        New-RoutingPolicyFile $policyPath @(
+            [ordered]@{
+                id = 'inactive-flow'
+                purpose = 'declared but not materialized'
+                router = ''
+                selection_policy = 'fixture'
+                members = @([ordered]@{ name = 'declared-worker'; role = 'executor'; activation = 'work' })
+                external_members = @()
+            }
+        ) @(
+            [ordered]@{ id = 'mandatory'; severity = 'warning'; scan_scope = 'full'; pattern = '\bMUST\b'; resolution = 'route narrowly' }
+        )
+        $cfg = [pscustomobject]@{
+            imports = @()
+            mappings = @([pscustomobject]@{ from = 'skills\declared-worker'; to = 'deployment-placeholder' })
+        }
+        $projection = [pscustomobject]@{ routing_policy_path = $policyPath }
+
+        $declaredNames = @(Get-SkillRoutingDeclaredSourceNames $cfg @())
+        $report = New-SkillRoutingReport $projection @() @() @() $declaredNames
+
+        $report.groups[0].active | Should Be $false
+        @($report.groups[0].active_local_members).Count | Should Be 0
+        @($report.findings | Where-Object code -eq 'strong_trigger_signal').Count | Should Be 0
+    }
+
     It 'Rejects a router member whose role is not router' {
         $root = Join-Path $TestDrive 'invalid-router-role'
         $worker = New-RoutingSkillEntry $root 'worker' 'Worker.'

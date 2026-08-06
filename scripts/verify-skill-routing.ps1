@@ -42,7 +42,8 @@ try {
     foreach ($name in @($profileProperty[0].Value.enabled_names)) { $enabledNames.Add(([string]$name).Trim()) | Out-Null }
     $active = @($canonical.ToArray() | Where-Object { [bool]$_.is_system -or $enabledNames.Contains([string]$_.name) })
     $externalInventory = Get-CodexExternalSkillInventory $cfg.skill_projection
-    $routing = New-SkillRoutingReport $cfg.skill_projection @($canonical.ToArray()) @($active) @($externalInventory.skills)
+    $declaredNames = @(Get-SkillRoutingDeclaredSourceNames $cfg @($canonical.ToArray()))
+    $routing = New-SkillRoutingReport $cfg.skill_projection @($canonical.ToArray()) @($active) @($externalInventory.skills) $declaredNames
     $report = [pscustomobject]([ordered]@{
             schema_version = 1
             generated_at = [DateTime]::UtcNow.ToString('o')
