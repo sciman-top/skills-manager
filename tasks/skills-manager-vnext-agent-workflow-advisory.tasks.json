@@ -17,7 +17,7 @@
   "host_radar_refresh_status": "pending_revalidation",
   "host_radar_receipt": {
     "status": "pending_revalidation",
-    "automation_revision": "radar-snapshot-v2-20260806",
+    "automation_revision": "radar-snapshot-v2-three-tier-20260806",
     "executed_model": null,
     "executed_effort": null,
     "run_at": null,
