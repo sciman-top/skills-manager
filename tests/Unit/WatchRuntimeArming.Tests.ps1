@@ -21,6 +21,7 @@ Describe 'watch runtime generation and shutdown arming preflight' {
             git -C $fixtureRoot init --quiet
             git -C $fixtureRoot config user.email 'watch-runtime-tests@example.invalid'
             git -C $fixtureRoot config user.name 'Watch Runtime Tests'
+            git -C $fixtureRoot config core.autocrlf true
             git -C $fixtureRoot add -- overrides scripts
             git -C $fixtureRoot commit --quiet -m 'fixture baseline'
             if ($LASTEXITCODE -ne 0) { throw 'fixture_commit_failed' }
@@ -29,6 +30,8 @@ Describe 'watch runtime generation and shutdown arming preflight' {
                 Root = $fixtureRoot
                 GenerationScript = Join-Path $fixtureScripts 'New-WatchRuntimeGeneration.ps1'
                 PreflightScript = Join-Path $fixtureScripts 'Test-WatchRuntimeArming.ps1'
+                TargetPromptScript = Join-Path $fixtureScripts 'New-WatchHeartbeatPrompt.ps1'
+                FleetPromptScript = Join-Path $fixtureScripts 'New-WatchFleetSupervisorPrompt.ps1'
                 HookSource = Join-Path $fixtureHooks 'block-cross-thread-send.ps1'
                 PolicySource = Join-Path $fixtureHooks 'CrossThreadGuardPolicy.ps1'
                 Head = (& git -C $fixtureRoot rev-parse HEAD).Trim()
@@ -50,6 +53,21 @@ Describe 'watch runtime generation and shutdown arming preflight' {
         $first.installed_hook_sha256 | Should Be $first.hook_source_sha256
         $first.installed_policy_sha256 | Should Be $first.hook_policy_source_sha256
         $first.generation_binding_sha256 | Should Match '^[0-9a-f]{64}$'
+    }
+
+    It 'keeps canonical prompt generation equal to clean HEAD across Windows working-tree EOL projection' {
+        $fixture = New-WatchRuntimeFixture
+        $commonPath = Join-Path (Split-Path -Parent $fixture.GenerationScript) 'WatchPromptCommon.ps1'
+        $commonText = [IO.File]::ReadAllText($commonPath) -replace "`r?`n", "`r`n"
+        [IO.File]::WriteAllText($commonPath, $commonText, [Text.UTF8Encoding]::new($false))
+        git -C $fixture.Root update-index --assume-unchanged -- overrides/custom/watch-interrupted-task/scripts/WatchPromptCommon.ps1
+
+        $generation = & $fixture.GenerationScript -InstalledHookPath $fixture.HookSource -InstalledPolicyPath $fixture.PolicySource
+        $target = (& $fixture.TargetPromptScript -TargetThreadId 'eol-target' -AsJson) | ConvertFrom-Json
+        $fleet = (& $fixture.FleetPromptScript -SupervisorThreadId 'eol-fleet' -ShutdownWhenAllStopped -AsJson) | ConvertFrom-Json
+
+        $target.watch_runtime_generation_id | Should Be $generation.watch_runtime_generation_id
+        $fleet.watch_runtime_generation_id | Should Be $generation.watch_runtime_generation_id
     }
 
     It 'removes the caller-controlled SourceCommit interface and rejects nonexistent or non-HEAD commits' {

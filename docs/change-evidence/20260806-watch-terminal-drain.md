@@ -19,6 +19,8 @@ shutdown-managed 终态采用：
 
 runtime generation 绑定 prompt digest、hook source/installed hash 与 source commit；arming preflight 在 generation、`/hooks` trust、fresh session probe 或 native automation capability 缺失/漂移时返回 `not_armed` 与 `rollback_required=true`，避免留下永久轮询半成品。
 
+宿主首次 arming preflight 进一步暴露了 Windows EOL 投影漂移：clean-generation 从 Git committed blob 计算，而 target/fleet prompt generator 曾从 CRLF working-tree bytes 计算。同一 clean HEAD 因此会生成不同的 `watch_runtime_generation_id`。prompt generator 与 fleet shutdown disposition 的默认 generation 现统一使用 committed canonical blobs（`Get-WatchRuntimeGenerationId -CommittedOnly`）；新增回归先稳定复现 working tree 为 CRLF、committed blob 为 LF 的失败，再验证 target/fleet generation 与 clean HEAD 完全一致。
+
 fleet journal 保存 generation、已纳管活跃 membership、target identity、stop/notification/cleanup receipt、连续 snapshot 与 shutdown receipt。非活跃历史达到 50 条不单独阻塞；活跃未纳管、不可用 host/source、未知/冲突/活动/重试状态仍 fail-closed。
 
 ## 验证记录
@@ -35,18 +37,18 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1
 Invoke-Pester -Script tests/Unit/CrossThreadHook.Tests.ps1, tests/Unit/CrossThreadGuardInstall.Tests.ps1, tests/Unit/WatchRuntimeArming.Tests.ps1, tests/Unit/WatchPeerArbitration.Tests.ps1, tests/Unit/WatchInterruptedTask.Tests.ps1, tests/Unit/WatchGuardRuntime.Tests.ps1, tests/Unit/WatchFleetSupervisor.Tests.ps1, tests/Unit/BuildScript.Tests.ps1, tests/Unit/GeneratedSyncScript.Tests.ps1 -PassThru
 ```
 
-结果：104 passed, 0 failed。
+该组合命令在 180 秒外层命令超时前，守夜核心 99 项均逐项显示 passed；因为未取得 Pester 最终退出码，不把该次组合运行单独记为完整通过。随后拆分验证：`BuildScript.Tests.ps1` 为 1 passed、0 failed，`GeneratedSyncScript.Tests.ps1` 为 5 passed、0 failed；generation/EOL 回归由 full gate 中的 `WatchRuntimeArming.Tests.ps1` 7 项覆盖。
 
 `git diff --check` 通过。
 
 ```text
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full
 ```
 
-结果：exit 0；993 unit + 18 E2E（共 1011 项）、generated-sync、skill integrity、reference governance、routing、dependency baseline、config/host/planning/runtime/advisory/doctor contracts 全部通过；summary 为 `Local quality gates passed (full)`，总门禁耗时 `450066ms`。
+结果：exit 0；995 unit + 18 E2E（共 1013 项）、generated-sync、skill integrity、reference governance、routing、dependency baseline、config/host/planning/runtime/advisory/doctor contracts 全部通过；summary 为 `Local quality gates passed (full)`，总门禁耗时 `452943ms`。
 
 提交/推送和宿主投影在 full gate 后继续执行；本文件不把 repo-side 验收写成 host-live 验收。
 
 ## 运行态边界
 
-旧 `automation` / `automation-2` 的迁移必须等 repo full gate、hook 安装、`/hooks` exact hash 信任和 fresh session probe 全部通过后进行。每次宿主 mutation 都要用 native receipt 与 fresh metadata 回读验收。真实关机只允许在实际已纳管活跃集合全部稳定停止、连续两个不同 scheduled tick 得到相同非空 snapshot、最终 supervisor delete receipt 存在且 shutdown exit-code receipt 为 0 时执行。
+现有 supervisor 与仍活跃业务任务的 migration 必须等 repo full gate、hook 安装、`/hooks` exact hash 信任和 fresh session probe 全部通过后进行。每次宿主 mutation 都要用 native receipt 与 fresh metadata 回读验收。真实关机只允许在实际已纳管活跃集合全部稳定停止、连续两个不同 scheduled tick 得到相同非空 snapshot、最终 supervisor delete receipt 存在且 shutdown exit-code receipt 为 0 时执行。

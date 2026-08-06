@@ -11,7 +11,7 @@ param(
 
 . (Join-Path $PSScriptRoot 'WatchPromptCommon.ps1')
 
-$generationId = Get-WatchRuntimeGenerationId
+$generationId = Get-WatchRuntimeGenerationId -CommittedOnly
 $body = "watch_runtime_generation_id=$generationId`n`n" + @'
 operating_mode=conditional_recovery. policy_revision=3 authorizes evidence-gated recovery inside this target thread only. It never authorizes cross-task messaging, broader permissions, silent Goal replacement, or blind replay.
 

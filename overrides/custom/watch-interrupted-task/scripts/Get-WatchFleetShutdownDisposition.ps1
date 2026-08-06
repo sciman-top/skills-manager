@@ -38,7 +38,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'WatchPromptCommon.ps1')
-$effectiveGenerationId = if ([string]::IsNullOrWhiteSpace($WatchRuntimeGenerationId)) { Get-WatchRuntimeGenerationId } else { $WatchRuntimeGenerationId }
+$effectiveGenerationId = if ([string]::IsNullOrWhiteSpace($WatchRuntimeGenerationId)) { Get-WatchRuntimeGenerationId -CommittedOnly } else { $WatchRuntimeGenerationId }
 
 function Get-WatchFleetProperty {
     param([AllowNull()][object]$InputObject, [Parameter(Mandatory = $true)][string]$Name)

@@ -11,7 +11,7 @@ param(
 
 . (Join-Path $PSScriptRoot 'WatchPromptCommon.ps1')
 
-$generationId = Get-WatchRuntimeGenerationId
+$generationId = Get-WatchRuntimeGenerationId -CommittedOnly
 $body = "watch_runtime_generation_id=$generationId`n`n" + @'
 operating_mode=conditional_recovery. policy_revision=3 gives this dual-role heartbeat two narrow duties: apply the target recovery contract to the supervisor thread itself, and reconcile strictly canonical target heartbeats for eligible visible local Codex tasks. It never performs business work in another task and never injects a peer message.
 
