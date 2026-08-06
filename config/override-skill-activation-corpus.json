@@ -1,12 +1,14 @@
 {
   "schema_version": 1,
   "corpus_id": "non-watch-override-activation-v1",
-  "case_count": 32,
+  "case_count": 40,
   "categories": ["direct", "indirect", "negative", "edge"],
   "target_skills": [
     "custom-creator-publishing",
     "custom-powershell-windows-automation",
     "custom-teacher-courseware-ppt",
+    "custom-windows-wpf-teacher-app",
+    "draft-spec",
     "draft-tickets",
     "grill-with-docs",
     "setup-matt-pocock-skills",
@@ -97,6 +99,62 @@
       "category": "edge",
       "request": "只在现有 PPTX 最后一页添加学校名称并保存，不重构课程内容。",
       "expected": { "required": ["presentations:Presentations"], "forbidden": ["custom-teacher-courseware-ppt"] }
+    },
+    {
+      "id": "wpf-teacher-direct",
+      "target_skill": "custom-windows-wpf-teacher-app",
+      "category": "direct",
+      "request": "Use $custom-windows-wpf-teacher-app to design a Windows-first WPF classroom app with pen input, a secondary projector view, local files, crash recovery, and UI Automation evidence.",
+      "expected": { "required": ["custom-windows-wpf-teacher-app"], "forbidden": [] }
+    },
+    {
+      "id": "wpf-teacher-indirect",
+      "target_skill": "custom-windows-wpf-teacher-app",
+      "category": "indirect",
+      "request": "学校要做一套离线 WPF 课堂软件：教师能触控批注、投影到第二屏、打开中文路径课件，并在断电后恢复课堂状态。",
+      "expected": { "required": ["custom-windows-wpf-teacher-app"], "forbidden": [] }
+    },
+    {
+      "id": "wpf-teacher-negative-concept",
+      "target_skill": "custom-windows-wpf-teacher-app",
+      "category": "negative",
+      "request": "解释 WPF 里 Grid 和 StackPanel 的布局差异，只需要一段说明，不设计课堂应用。",
+      "expected": { "required": [], "forbidden": ["custom-windows-wpf-teacher-app"] }
+    },
+    {
+      "id": "wpf-teacher-edge-debug",
+      "target_skill": "custom-windows-wpf-teacher-app",
+      "category": "edge",
+      "request": "一个 WPF 项目启动时抛出依赖注入异常；请定位这个通用 .NET 运行时错误，不讨论触控、投影或教师工作流。",
+      "expected": { "required": ["debug:dotnet"], "forbidden": ["custom-windows-wpf-teacher-app"] }
+    },
+    {
+      "id": "draft-spec-direct",
+      "target_skill": "draft-spec",
+      "category": "direct",
+      "request": "Use $draft-spec to turn the current repository discussion into a review-ready Markdown implementation spec in chat without publishing or writing files.",
+      "expected": { "required": ["draft-spec"], "forbidden": [] }
+    },
+    {
+      "id": "draft-spec-indirect",
+      "target_skill": "draft-spec",
+      "category": "indirect",
+      "request": "根据当前讨论和仓库术语整理一份供我评审的 PRD 草稿，区分事实、决定、假设和开放问题，先不要落盘或发布。",
+      "expected": { "required": ["draft-spec"], "forbidden": ["to-spec"] }
+    },
+    {
+      "id": "draft-spec-negative-publish",
+      "target_skill": "draft-spec",
+      "category": "negative",
+      "request": "这份规格已经批准，请把它正式发布到仓库配置的规格系统并返回链接。",
+      "expected": { "required": ["to-spec"], "forbidden": ["draft-spec"] }
+    },
+    {
+      "id": "draft-spec-edge-implementation",
+      "target_skill": "draft-spec",
+      "category": "edge",
+      "request": "设计已经批准，直接按可验证里程碑修改代码和测试；不要再生成 PRD 或规格草稿。",
+      "expected": { "required": ["incremental-implementation"], "forbidden": ["draft-spec"] }
     },
     {
       "id": "draft-tickets-direct",
