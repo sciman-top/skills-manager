@@ -8,6 +8,8 @@ Describe 'Cross-thread guard installer and doctor' {
         $targetGenerator = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchHeartbeatPrompt.ps1'
         $fleetGenerator = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchFleetSupervisorPrompt.ps1'
         $script:targetPromptDigest = ((& $targetGenerator -TargetThreadId 'digest-probe' -AsJson) | ConvertFrom-Json).prompt_sha256
+        $script:shutdownTargetPromptDigest = ((& $targetGenerator -TargetThreadId 'digest-probe' -ShutdownManaged -AsJson) | ConvertFrom-Json).prompt_sha256
+        $script:runtimeGenerationId = ((& $targetGenerator -TargetThreadId 'digest-probe' -AsJson) | ConvertFrom-Json).watch_runtime_generation_id
         $script:fleetPromptDigest = ((& $fleetGenerator -SupervisorThreadId 'digest-probe' -AsJson) | ConvertFrom-Json).prompt_sha256
         $script:fleetShutdownPromptDigest = ((& $fleetGenerator -SupervisorThreadId 'digest-probe' -ShutdownWhenAllStopped -AsJson) | ConvertFrom-Json).prompt_sha256
     }
@@ -57,10 +59,14 @@ Describe 'Cross-thread guard installer and doctor' {
         $command | Should Match ([regex]::Escape($hostHook))
         $command | Should Match ([regex]::Escape($receipt.source_sha256))
         $command | Should Match ([regex]::Escape($script:targetPromptDigest))
+        $command | Should Match ([regex]::Escape($script:shutdownTargetPromptDigest))
+        $command | Should Match ([regex]::Escape($script:runtimeGenerationId))
         $command | Should Match ([regex]::Escape($script:fleetPromptDigest))
         $command | Should Match ([regex]::Escape($script:fleetShutdownPromptDigest))
         $hooks.hooks.PreToolUse[0].hooks[0].commandWindows | Should Be $command
         $receipt.target_prompt_sha256 | Should Be $script:targetPromptDigest
+        $receipt.shutdown_target_prompt_sha256 | Should Be $script:shutdownTargetPromptDigest
+        $receipt.watch_runtime_generation_id | Should Be $script:runtimeGenerationId
         $receipt.fleet_prompt_sha256 | Should Be $script:fleetPromptDigest
         $receipt.fleet_shutdown_prompt_sha256 | Should Be $script:fleetShutdownPromptDigest
     }
@@ -107,6 +113,7 @@ Describe 'Cross-thread guard installer and doctor' {
         $result.simulation_cases.code_mode_shell_send | Should Be $true
         $result.simulation_cases.code_mode_dynamic_automation_route | Should Be $true
         $result.simulation_cases.code_mode_target_self_delete | Should Be $true
+        $result.simulation_cases.shutdown_target_self_pause | Should Be $true
         $result.simulation_cases.code_mode_automation_live_probe_sentinel | Should Be $true
         $result.simulation_cases.fleet_target_pause | Should Be $true
         $result.simulation_cases.git_diff_hook_inspection | Should Be $true
@@ -145,14 +152,7 @@ Describe 'Cross-thread guard installer and doctor' {
         Set-Content -LiteralPath $hostHook -Value $oldHook -NoNewline
         Set-Content -LiteralPath $hostDoctor -Value $oldDoctor -NoNewline
 
-        Mock Move-Item {
-            if ([string]$Destination -ceq $hooksPath) {
-                throw 'injected final move failure'
-            }
-            Microsoft.PowerShell.Management\Move-Item -LiteralPath $LiteralPath -Destination $Destination -Force
-        }
-
-        { & $installer -CodexHome $script:codexHome -SourceHookPath $sourceHook } | Should Throw
+        { & $installer -CodexHome $script:codexHome -SourceHookPath $sourceHook -InjectFinalHooksMoveFailure } | Should Throw
         (Get-Content -Raw -LiteralPath $hostHook) | Should Be $oldHook
         (Get-Content -Raw -LiteralPath $hostDoctor) | Should Be $oldDoctor
         (Get-Content -Raw -LiteralPath $hooksPath) | Should Be $oldHooks

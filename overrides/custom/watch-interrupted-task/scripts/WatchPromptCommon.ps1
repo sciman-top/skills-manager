@@ -1,5 +1,11 @@
 Set-StrictMode -Version Latest
 
+$script:CanonicalWatchRuntimeGenerationId = 'watch-runtime-generation:afeebb26f33764756b9e28d1c93bcfb2305064d8a0c8f8eb61623eacdfe0b2d5'
+
+function Get-WatchRuntimeGenerationId {
+    return $script:CanonicalWatchRuntimeGenerationId
+}
+
 function ConvertTo-WatchNormalizedText {
     param([Parameter(Mandatory = $true)][string]$Text)
 

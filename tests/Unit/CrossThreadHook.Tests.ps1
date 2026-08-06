@@ -3,6 +3,8 @@ $hookPath = Join-Path $repoRoot 'scripts\hooks\block-cross-thread-send.ps1'
 $targetGenerator = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchHeartbeatPrompt.ps1'
 $fleetGenerator = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchFleetSupervisorPrompt.ps1'
 $script:targetPromptDigest = ((& $targetGenerator -TargetThreadId 'digest-probe' -AsJson) | ConvertFrom-Json).prompt_sha256
+$script:runtimeGenerationId = ((& $targetGenerator -TargetThreadId 'digest-probe' -AsJson) | ConvertFrom-Json).watch_runtime_generation_id
+$script:shutdownTargetPromptDigest = ((& $targetGenerator -TargetThreadId 'digest-probe' -ShutdownManaged -AsJson) | ConvertFrom-Json).prompt_sha256
     $script:fleetPromptDigest = ((& $fleetGenerator -SupervisorThreadId 'digest-probe' -AsJson) | ConvertFrom-Json).prompt_sha256
     $script:fleetShutdownPromptDigest = ((& $fleetGenerator -SupervisorThreadId 'digest-probe' -ShutdownWhenAllStopped -AsJson) | ConvertFrom-Json).prompt_sha256
 
@@ -30,8 +32,10 @@ function Invoke-CrossThreadHook {
 
         $output = $payload | & pwsh -NoProfile -ExecutionPolicy Bypass -File $hookPath `
             -ExpectedTargetPromptSha256 $script:targetPromptDigest `
+            -ExpectedShutdownTargetPromptSha256 $script:shutdownTargetPromptDigest `
             -ExpectedFleetPromptSha256 $script:fleetPromptDigest `
-            -ExpectedFleetShutdownPromptSha256 $script:fleetShutdownPromptDigest
+            -ExpectedFleetShutdownPromptSha256 $script:fleetShutdownPromptDigest `
+            -ExpectedRuntimeGenerationId $script:runtimeGenerationId
     [pscustomobject]@{
         ExitCode = $LASTEXITCODE
         Output = @($output) -join "`n"
@@ -40,7 +44,7 @@ function Invoke-CrossThreadHook {
 
 function New-CanonicalWatchTranscript {
     param(
-        [Parameter(Mandatory = $true)][ValidateSet('target', 'fleet', 'fleet_shutdown')][string]$Role,
+        [Parameter(Mandatory = $true)][ValidateSet('target', 'target_shutdown', 'fleet', 'fleet_shutdown')][string]$Role,
         [Parameter(Mandatory = $true)][string]$SessionId,
         [string]$TurnId = 'turn-test'
     )
@@ -50,7 +54,7 @@ function New-CanonicalWatchTranscript {
         $automationId = "watch-interrupted-task-v1-target-thread-id-$SessionId"
     }
     else {
-        $prompt = & $targetGenerator -TargetThreadId $SessionId
+        $prompt = if ($Role -ceq 'target_shutdown') { & $targetGenerator -TargetThreadId $SessionId -ShutdownManaged } else { & $targetGenerator -TargetThreadId $SessionId }
         $automationId = "watch-interrupted-task-v1-target-thread-id-$SessionId"
     }
 
@@ -173,6 +177,40 @@ Describe 'Cross-thread PreToolUse guard' {
             id = 'watch-interrupted-task-v1-target-thread-id-target-test'
         }) -SessionId 'target-test' -TranscriptPath $targetTranscript
         $view.Output | Should BeNullOrEmpty
+    }
+
+    It 'allows only an exact shutdown-managed target to pause its own automation' {
+        $shutdownTarget = New-CanonicalWatchTranscript -Role target_shutdown -SessionId 'target-test'
+        $ordinaryTarget = New-CanonicalWatchTranscript -Role target -SessionId 'target-test'
+
+        $allowed = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode='update'; id='watch-interrupted-task-v1-target-thread-id-target-test'; targetThreadId='target-test'; status='PAUSED' }) -SessionId 'target-test' -TranscriptPath $shutdownTarget
+        $allowed.Output | Should BeNullOrEmpty
+
+        foreach ($case in @(
+            @{ Transcript=$ordinaryTarget; Input=[ordered]@{ mode='update'; id='watch-interrupted-task-v1-target-thread-id-target-test'; status='PAUSED' } },
+            @{ Transcript=$shutdownTarget; Input=[ordered]@{ mode='delete'; id='watch-interrupted-task-v1-target-thread-id-target-test' } },
+            @{ Transcript=$shutdownTarget; Input=[ordered]@{ mode='update'; id='watch-interrupted-task-v1-target-thread-id-other-test'; status='PAUSED' } },
+            @{ Transcript=$shutdownTarget; Input=[ordered]@{ mode='update'; id='watch-interrupted-task-v1-target-thread-id-target-test'; status='ACTIVE' } },
+            @{ Transcript=$shutdownTarget; Input=[ordered]@{ mode='update'; id='watch-interrupted-task-v1-target-thread-id-target-test'; status='PAUSED'; rrule='FREQ=MINUTELY;INTERVAL=1' } },
+            @{ Transcript=$shutdownTarget; Input=[ordered]@{ mode='update'; id='watch-interrupted-task-v1-target-thread-id-target-test'; status='PAUSED'; prompt='replacement' } }
+        )) {
+            $blocked = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput $case.Input -SessionId 'target-test' -TranscriptPath $case.Transcript
+            ($blocked.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+        }
+    }
+
+    It 'allows shutdown-armed fleet cleanup deletes while ordinary fleet remains read only' {
+        $armedFleet = New-CanonicalWatchTranscript -Role fleet_shutdown -SessionId 'supervisor-test'
+        $ordinaryFleet = New-CanonicalWatchTranscript -Role fleet -SessionId 'supervisor-test'
+
+        $targetDelete = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode='delete'; id='watch-interrupted-task-v1-target-thread-id-target-test' }) -SessionId 'supervisor-test' -TranscriptPath $armedFleet
+        $targetDelete.Output | Should BeNullOrEmpty
+
+        $selfDelete = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode='delete'; id='watch-interrupted-task-v1-target-thread-id-supervisor-test' }) -SessionId 'supervisor-test' -TranscriptPath $armedFleet
+        $selfDelete.Output | Should BeNullOrEmpty
+
+        $blocked = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode='delete'; id='watch-interrupted-task-v1-target-thread-id-target-test' }) -SessionId 'supervisor-test' -TranscriptPath $ordinaryFleet
+        ($blocked.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
     }
 
     It 'allows a fleet heartbeat to mutate another canonical target but never itself or unrelated automations' {
