@@ -95,15 +95,11 @@ Current stable-source receipts:
 - The three routing adversarial regressions were RED at 10/13 and GREEN at 13/13. The combined routing/projection/integrity focused set passed 61/61; the real routing verifier passed 8 groups with 0 findings.
 - Pre-rebase post-routing full diagnostic: the same full command exited 0 in `501158ms` with Unit 956/956 and E2E 18/18, but `origin/main` had advanced during the run, so this receipt does not close the integrated snapshot.
 - After rebasing the unpushed routing fix onto `2188f45f`, the merged host-capability and clean-unmaterialized focused set passed 64/64. The final integrated authoritative full gate exited 0 in `537945ms`: Pester 4.10.1 passed Unit 968/968 across 78 files and E2E 18/18 across 2 files; the test suite receipt elapsed `523027ms`. Repository hygiene, two-build generated synchronization, skill integrity 107, routing with 0 findings, every remaining contract/invariant and hotspot reporting passed.
+- GitHub Actions clean-runner run [`31071967990`](https://github.com/sciman-top/skills-manager/actions/runs/31071967990) on executable snapshot `e3f9d0f2` completed `success`. Locked source reconstruction, the authoritative full gate and the follow-up MCP observation all passed: Unit 968/968, E2E 18/18, test suite `393489ms`, full gate `403253ms`, skill integrity 107 and routing with 0 findings. The missing current-run MCP performance sample emitted the complete non-bypass `gate_na` receipt and did not claim a measured threshold result.
 
-The stable repository snapshot is locally `repo_verified / repo_advisory_only`. Remaining closeout work is operational rather than another implementation slice:
+Executable snapshot `e3f9d0f2` is locally and remotely `repo_verified / repo_advisory_only`. Exact diff, AST, staged secret review, push parity and remote clean-CI re-observation completed without an open repository-side repair item from this audit slice.
 
-1. exact diff, AST and staged secret review;
-2. `git diff --check` and exact staged review after this receipt-only insertion;
-3. implementation commit, push and remote clean-CI re-observation;
-4. record the successful remote run without broadening the maximum product claim.
-
-The post-gate edit to this evidence file is `gate_na`: reason=`receipt-only documentation`; alternative verification=`git diff --check` plus exact staged-diff review; expires_at=`this closeout`; recovery_condition=`any executable, contract, fixture or generated file changes`, which requires rerunning the full gate.
+The post-gate edit to this evidence file is `gate_na`: reason=`receipt-only documentation after executable SHA acceptance`; alternative verification=`git diff --check` plus exact staged-diff review and the follow-up docs-only CI run; evidence_link=`31071967990`; expires_at=`this closeout`; recovery_condition=`any executable, contract, fixture or generated file changes`, which requires rerunning the full gate.
 
 Maximum claim: `repo_verified / repo_advisory_only`; host state remains `host_evaluation_partial`.
 
