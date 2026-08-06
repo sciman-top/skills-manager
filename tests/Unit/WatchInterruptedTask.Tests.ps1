@@ -128,7 +128,7 @@ Describe 'watch-interrupted-task conditional recovery contract' {
         $proved.automation_action | Should Be 'keep_active'
     }
 
-    It 'requests cleanup for every proved stable stop regardless of Goal presence or stop reason' {
+    It 'returns native supervisor cleanup for every proved stable stop and notifies only actionable stops' {
         $now = [DateTime]::UtcNow.ToString('o')
         foreach ($case in @(
             @{ State = 'natural_pause'; Goal = 'none'; Reason = 'user_checkpoint'; Notify = 'dont_notify' },
@@ -143,13 +143,14 @@ Describe 'watch-interrupted-task conditional recovery contract' {
                 -CheckpointId $script:checkpoint -ReceiptKey $script:receipt `
                 -ExternalEffectState none -NoActiveTurn
             $accepted.automation_action | Should Be 'request_supervisor_cleanup'
+            $accepted.terminal_retirement | Should Be 'native'
             $accepted.notification_action | Should Be $case.Notify
             $accepted.requires_receipt | Should Be $true
             $accepted.reason_code | Should Be 'proved_stopped_cleanup_ready'
         }
     }
 
-    It 'quiesces a proved shutdown-managed terminal watch and suppresses the same notification receipt' {
+    It 'self-pauses a shutdown-managed terminal watch and suppresses the same notification receipt' {
         $now = [DateTime]::UtcNow.ToString('o')
         $common = @{
             State = 'needs_input'
@@ -181,10 +182,25 @@ Describe 'watch-interrupted-task conditional recovery contract' {
         $natural.notification_action | Should Be 'dont_notify'
     }
 
+    It 'does not expose a caller-authored switch that can downgrade native terminal retirement' {
+        $now = [DateTime]::UtcNow.ToString('o')
+        $native = & $dispositionScriptPath -State complete -OperatingMode conditional_recovery -GoalStatus complete `
+            -ShutdownManaged -TaskStopped -StopReason acceptance_complete `
+            -HasPositiveEvidence -EvidenceTimestampUtc $now -CheckpointId $script:checkpoint -ReceiptKey $script:receipt `
+            -ExternalEffectState none -NoActiveTurn
+        $native.terminal_retirement | Should Be 'native'
+        $native.automation_action | Should Be 'request_supervisor_cleanup'
+        $native.quiesce_action | Should Be 'pause_self'
+        $native.notification_action | Should Be 'dont_notify'
+    }
+
     It 'never asks for a second cleanup approval in shutdown-managed mode' {
+        $script:shutdownManagedPrompt | Should Match 'terminal_retirement=native'
         $script:shutdownManagedPrompt | Should Match 'quiesce_action=pause_self'
-        $script:shutdownManagedPrompt | Should Match 'native pause receipt'
+        $script:shutdownManagedPrompt | Should Match 'Never delete, resume, change cadence or prompt'
         $script:shutdownManagedPrompt | Should -Not -Match '允许清理|保留守夜|cleanup or keep|approve cleanup'
+        $script:skill | Should -Not -Match 'manual/platform_na|manual_platform_na|manual cleanup'
+        $script:recoveryDesign | Should -Not -Match 'manual/platform_na|manual_platform_na|manual cleanup'
     }
 
     It 'keeps stopped cleanup fail closed without fresh complete safe stop evidence' {
@@ -236,6 +252,16 @@ Describe 'watch-interrupted-task conditional recovery contract' {
         }
     }
 
+    It 'keeps unknown and soft_guard_only observe-only and quiet' {
+        foreach ($state in @('unknown', 'soft_guard_only')) {
+            $result = & $dispositionScriptPath -State $state -OperatingMode conditional_recovery -GoalStatus active
+            $result.task_action | Should Be 'observe_only'
+            $result.automation_action | Should Be 'keep_active'
+            $result.notification_action | Should Be 'dont_notify'
+            $result.reason_code | Should Be $state
+        }
+    }
+
     It 'marks a Goal blocked only after the same proved impasse repeats for three turns' {
         $early = & $dispositionScriptPath -State needs_input -OperatingMode conditional_recovery -GoalStatus active `
             -ConsecutiveSameBlockCount 2 -SameBlockingConditionConfirmed -NoMeaningfulProgressPossible
@@ -266,7 +292,7 @@ Describe 'watch-interrupted-task conditional recovery contract' {
         $script:prompt | Should Match 'task_stopped=true\|false'
         $script:prompt | Should Match 'stop_reason'
         $script:prompt | Should Match 'recovery_pending=true\|false'
-        $script:prompt | Should Match 'automation_action=request_supervisor_cleanup'
+        $script:prompt | Should Match 'automation_action=keep_active\|request_supervisor_cleanup'
         $script:prompt | Should Match 'evidence_timestamp_utc'
         $script:prompt | Should Match 'external_effect_state'
         $script:prompt | Should Match 'no_active_turn=true\|false'
@@ -289,8 +315,8 @@ Describe 'watch-interrupted-task conditional recovery contract' {
         $script:skill | Should Match 'recovery_pending=false'
         $script:recoveryDesign | Should Match 'Goal presence does not change fleet aggregation'
         $script:recoveryDesign | Should Match 'resume_eligible.*continuation_gap.*recoverable_task_failure'
-        $script:recoveryDesign | Should Match 'two consecutive.*ticks'
-        $script:recoveryDesign | Should Match 'shutdown\.exe /s /t 120'
+        $script:recoveryDesign | Should Match 'two distinct ordered ticks'
+        $script:recoveryDesign | Should Match 'power_action=delete_supervisor.*power_action=schedule_shutdown'
         $script:recoveryDesign | Should Match 'shutdown /a'
     }
 

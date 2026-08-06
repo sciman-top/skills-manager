@@ -3,6 +3,7 @@ Describe 'watch guard fresh runtime doctor' {
         $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
         $runtimeDoctor = Join-Path $repoRoot 'scripts\hooks\Test-WatchGuardRuntime.ps1'
         $sourceHook = Join-Path $repoRoot 'scripts\hooks\block-cross-thread-send.ps1'
+        $sourcePolicy = Join-Path $repoRoot 'scripts\hooks\CrossThreadGuardPolicy.ps1'
         $targetGenerator = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchHeartbeatPrompt.ps1'
         $fleetGenerator = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchFleetSupervisorPrompt.ps1'
         $script:targetPromptDigest = ((& $targetGenerator -TargetThreadId 'digest-probe' -AsJson) | ConvertFrom-Json).prompt_sha256
@@ -17,9 +18,12 @@ Describe 'watch guard fresh runtime doctor' {
         $hostScripts = Join-Path $script:codexHome 'scripts'
         $null = New-Item -ItemType Directory -Path $hostScripts -Force
         $script:hostHook = Join-Path $hostScripts 'block-cross-thread-send.ps1'
+        $script:hostPolicy = Join-Path $hostScripts 'CrossThreadGuardPolicy.ps1'
         Copy-Item -LiteralPath $sourceHook -Destination $script:hostHook
+        Copy-Item -LiteralPath $sourcePolicy -Destination $script:hostPolicy
         $script:hostHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $script:hostHook).Hash.ToLowerInvariant()
-        $script:hookCommand = 'pwsh -NoProfile -ExecutionPolicy Bypass -File "{0}" -ExpectedScriptSha256 "{1}" -ExpectedTargetPromptSha256 "{2}" -ExpectedShutdownTargetPromptSha256 "{3}" -ExpectedFleetPromptSha256 "{4}" -ExpectedFleetShutdownPromptSha256 "{5}" -ExpectedRuntimeGenerationId "{6}"' -f $script:hostHook, $script:hostHash, $script:targetPromptDigest, $script:shutdownTargetPromptDigest, $script:fleetPromptDigest, $script:fleetShutdownPromptDigest, $script:runtimeGenerationId
+        $script:policyHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $script:hostPolicy).Hash.ToLowerInvariant()
+        $script:hookCommand = 'pwsh -NoProfile -ExecutionPolicy Bypass -File "{0}" -ExpectedScriptSha256 "{1}" -ExpectedPolicySha256 "{2}" -ExpectedTargetPromptSha256 "{3}" -ExpectedShutdownTargetPromptSha256 "{4}" -ExpectedFleetPromptSha256 "{5}" -ExpectedFleetShutdownPromptSha256 "{6}" -ExpectedRuntimeGenerationId "{7}" -AutomationRoot "{8}" -WatchFleetStateRoot "{9}"' -f $script:hostHook, $script:hostHash, $script:policyHash, $script:targetPromptDigest, $script:shutdownTargetPromptDigest, $script:fleetPromptDigest, $script:fleetShutdownPromptDigest, $script:runtimeGenerationId, (Join-Path $script:codexHome 'automations'), (Join-Path $script:codexHome 'watch-interrupted-task\fleet')
         Write-SourceHooksJson
     }
 

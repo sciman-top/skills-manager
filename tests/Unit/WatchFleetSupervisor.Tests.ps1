@@ -23,11 +23,11 @@ Describe 'watch-interrupted-task fleet supervisor revision-3 contract' {
         $script:prompt | Should Match 'create or update only the canonical target heartbeat'
     }
 
-    It 'keeps the fleet scheduled prompt self contained and uses the five-minute shutdown cadence contract' {
+    It 'keeps the fleet scheduled prompt self contained and uses the ten-minute cadence contract' {
         $script:prompt | Should -Not -Match 'Use \$watch-interrupted-task'
         $script:shutdownPrompt | Should -Not -Match 'Use \$watch-interrupted-task'
         $script:shutdownPrompt | Should Match 'watch_runtime_generation_id=watch-runtime-generation:[0-9a-f]{64}'
-        $script:shutdownPrompt | Should Match 'supervisor_cadence_minutes=5'
+        $script:shutdownPrompt | Should Match 'supervisor_cadence_minutes=10'
         $script:shutdownPrompt | Should Match 'target_cadence_minutes=10'
     }
 
@@ -73,28 +73,21 @@ Describe 'watch-interrupted-task fleet supervisor revision-3 contract' {
     It 'keeps shutdown opt-in and excludes every recoverable or unknown stop boundary' {
         $script:prompt | Should -Not -Match 'shutdown_when_all_stopped=true'
         $script:shutdownPrompt | Should Match 'shutdown_when_all_stopped=true'
-        $script:shutdownPrompt | Should Match 'Goal presence does not change this rule'
-        $script:shutdownPrompt | Should Match 'Do not use a finite allowlist of stop causes'
-        $script:shutdownPrompt | Should Match 'task_stopped=true'
-        $script:shutdownPrompt | Should Match 'recovery_pending=false'
-        $script:shutdownPrompt | Should Match '408/429/502/503/504'
-        $script:shutdownPrompt | Should Match 'two consecutive scheduled ticks'
-        $script:shutdownPrompt | Should Match 'CurrentTickId'
-        $script:shutdownPrompt | Should Match 'PreviousTickId'
+        $script:shutdownPrompt | Should Match 'Goal and non-Goal'
+        $script:shutdownPrompt | Should Match 'stable stop'
+        $script:shutdownPrompt | Should Match 'generation'
+        $script:shutdownPrompt | Should Match 'two distinct ordered scheduled ticks'
         $script:shutdownPrompt | Should Match 'source_turn_id'
-        $script:shutdownPrompt | Should Match 'shutdown_receipt_expires_at_utc'
-        $script:shutdownPrompt | Should Match 'shutdown\.exe /s /t 120'
-        $script:shutdownPrompt | Should Match 'Never add /f'
+        $script:shutdownPrompt | Should Match 'candidate_receipt_expires_at_utc'
+        $script:shutdownPrompt | Should Match 'power_action=schedule_shutdown'
         $script:shutdownPrompt | Should Match 'shutdown /a'
-        $script:shutdownPrompt | Should Match 'automation_action=request_supervisor_cleanup'
-        $script:shutdownPrompt | Should Match 'delete the matching canonical target heartbeat'
-        $script:shutdownPrompt | Should Match 'verify.*delete.*receipt'
-        $script:shutdownPrompt | Should Match 'no canonical target heartbeat remains'
+        $script:shutdownPrompt | Should Match 'Then execute exactly shutdown\.exe'
+        $script:shutdownPrompt | Should Match 'delete a matching target heartbeat only when it is PAUSED'
+        $script:shutdownPrompt | Should Match 'preflight is not shutdown_armed.*roll back'
+        $script:shutdownPrompt | Should Match 'Membership is monotonic'
+        $script:shutdownPrompt | Should Match 'membership_shrink_detected'
+        $script:shutdownPrompt | Should Match 'FinalRecheck.*final_recheck_completed'
         $script:shutdownPrompt | Should Match 'delete this supervisor heartbeat'
-        $script:shutdownPrompt | Should Match 'Only after the native supervisor delete receipt'
-        $script:shutdownPrompt | Should Match 'visibility.*50'
-        $script:shutdownPrompt | Should Match 'newly active eligible task.*enrolling its heartbeat.*canceling shutdown'
-        $script:shutdownPrompt | Should Match 'UnmonitoredActiveTaskCount=0'
 
         $standardJson = ((& $generator -SupervisorThreadId 'json-supervisor' -AsJson) | ConvertFrom-Json)
         $shutdownJson = ((& $generator -SupervisorThreadId 'json-supervisor' -ShutdownWhenAllStopped -AsJson) | ConvertFrom-Json)
@@ -102,13 +95,12 @@ Describe 'watch-interrupted-task fleet supervisor revision-3 contract' {
         $shutdownJson.prompt_sha256 | Should Not Be $standardJson.prompt_sha256
     }
 
-    It 'requires a non-empty fresh all-stopped snapshot twice and deduplicates shutdown' {
+    It 'requires a non-empty fresh all-stopped snapshot twice and then a final candidate recheck' {
         $now = [datetimeoffset]::UtcNow
         $statePath = Join-Path $TestDrive 'dedupe-state.json'
         $coverage = @{ AutomationId=$script:supervisorAutomationId; StateRoot=$TestDrive; StatePath=$statePath; VisibilityComplete=$true; VisibleCount=2; EligibleCount=2; MonitoredCount=2; BlockingUnmonitoredCount=0; GuardReady=$true }
         $firstTick = $now.AddMinutes(-1).ToString('o')
         $secondTick = $now.ToString('o')
-        $thirdTick = $now.AddSeconds(1).ToString('o')
         $snapshot = @(
             [ordered]@{ target_thread_id='a'; automation_id='automation-target-a'; source_turn_id='turn-source-a'; state='complete'; task_stopped=$true; stop_reason='acceptance_complete'; recovery_pending=$false; receipt_key=$script:receiptA; checkpoint_id=$script:checkpointA; evidence_timestamp_utc=$now.ToString('o'); external_effect_state='none'; next_retry_at=''; no_active_turn=$true },
             [ordered]@{ target_thread_id='b'; automation_id='automation-target-b'; source_turn_id='turn-source-b'; state='needs_input'; task_stopped=$true; stop_reason='human_input_required'; recovery_pending=$false; receipt_key=$script:receiptB; checkpoint_id=$script:checkpointB; evidence_timestamp_utc=$now.ToString('o'); external_effect_state='safe'; next_retry_at=''; no_active_turn=$true }
@@ -119,21 +111,17 @@ Describe 'watch-interrupted-task fleet supervisor revision-3 contract' {
         $first.reason_code | Should Be 'stability_confirmation_required'
 
         $second = & $script:disposition -SnapshotJson $snapshot -CurrentTickId $secondTick -PreviousTickId $firstTick -PreviousSnapshotKey $first.snapshot_key -ShutdownArmed @coverage
-        $second.power_action | Should Be 'schedule_shutdown'
-        $second.reason_code | Should Be 'all_monitored_tasks_stopped'
-        $second.shutdown_receipt_key | Should Match '^watch-fleet-shutdown:[0-9a-f]{64}$'
-        $expires = [datetimeoffset]::Parse($second.shutdown_receipt_expires_at_utc)
+        $second.power_action | Should Be 'await_final_recheck'
+        $second.reason_code | Should Be 'candidate_receipt_ready'
+        $second.candidate_receipt_key | Should Match '^watch-fleet-candidate:[0-9a-f]{64}$'
+        $expires = [datetimeoffset]::Parse($second.candidate_receipt_expires_at_utc)
         $expires | Should BeGreaterThan ([datetimeoffset]::UtcNow)
         $expires | Should BeLessThan ([datetimeoffset]::UtcNow.AddMinutes(3))
 
         $rechecked = & $script:disposition -SnapshotJson $snapshot -CurrentTickId $secondTick -ShutdownArmed -FinalRecheck @coverage
-        $rechecked.power_action | Should Be 'schedule_shutdown'
-        $rechecked.shutdown_receipt_key | Should Be $second.shutdown_receipt_key
-
-        $null = & $script:disposition -SnapshotJson $snapshot -CurrentTickId $secondTick -ShutdownArmed -ConfirmedShutdownReceiptKey $second.shutdown_receipt_key @coverage
-        $deduplicated = & $script:disposition -SnapshotJson $snapshot -CurrentTickId $thirdTick -PreviousTickId $secondTick -PreviousSnapshotKey $first.snapshot_key -ShutdownArmed @coverage
-        $deduplicated.power_action | Should Be 'observe_only'
-        $deduplicated.reason_code | Should Be 'shutdown_already_scheduled'
+        $rechecked.power_action | Should Be 'delete_supervisor'
+        $rechecked.reason_code | Should Be 'final_candidate_delete_supervisor'
+        $rechecked.candidate_receipt_key | Should Be $second.candidate_receipt_key
     }
 
     It 'uses an internal clock and rejects a repeated scheduled tick outside final recheck' {
@@ -207,8 +195,8 @@ Describe 'watch-interrupted-task fleet supervisor revision-3 contract' {
         $secondTick = $now.ToString('o')
         $first = & $script:disposition -SnapshotJson $snapshot -CurrentTickId $firstTick -ShutdownArmed @coverage
         $second = & $script:disposition -SnapshotJson $snapshot -CurrentTickId $secondTick -PreviousTickId $firstTick -PreviousSnapshotKey $first.snapshot_key -ShutdownArmed @coverage
-        $second.power_action | Should Be 'schedule_shutdown'
-        $second.reason_code | Should Be 'all_monitored_tasks_stopped'
+        $second.power_action | Should Be 'await_final_recheck'
+        $second.reason_code | Should Be 'candidate_receipt_ready'
     }
 
     It 'blocks shutdown for transient recovery active retry unknown stale or empty snapshots' {
@@ -292,7 +280,7 @@ Describe 'watch-interrupted-task fleet supervisor revision-3 contract' {
 
         $null = & $script:disposition -SnapshotJson $snapshot -AutomationId $script:supervisorAutomationId -CurrentTickId $now.ToString('o') -ShutdownArmed -GuardReady -VisibilityComplete -VisibleCount 1 -EligibleCount 1 -MonitoredCount 1 -StateRoot $TestDrive -StatePath $statePath -WatchRuntimeGenerationId $generation
         $journal = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
-        $journal.schema_version | Should Be 3
+        $journal.schema_version | Should Be 4
         $journal.watch_runtime_generation_id | Should Be $generation
         @($journal.membership).Count | Should Be 1
         $journal.membership[0].target_thread_id | Should Be 'a'
@@ -343,19 +331,19 @@ Describe 'watch-interrupted-task fleet supervisor revision-3 contract' {
         $first = & $script:disposition -SnapshotJson $snapshot -ShutdownArmed -CurrentTickId $firstTick @coverage
         $first.reason_code | Should Be 'stability_confirmation_required'
         $second = & $script:disposition -SnapshotJson $snapshot -ShutdownArmed -CurrentTickId $secondTick @coverage
-        $second.power_action | Should Be 'schedule_shutdown'
+        $second.power_action | Should Be 'await_final_recheck'
 
         $duplicate = & $script:disposition -SnapshotJson $snapshot -ShutdownArmed -CurrentTickId $secondTick @coverage
         $duplicate.power_action | Should Be 'observe_only'
         $duplicate.reason_code | Should Be 'tick_already_evaluated'
     }
 
-    It 'persists successful shutdown receipt history across A to B to A snapshots' {
+    It 'never converts A to B to A candidate observations into a repository power authorization' {
         $now = [datetimeoffset]::UtcNow
         $statePath = Join-Path $TestDrive 'receipt-history-state.json'
         $coverage = @{ AutomationId=$script:supervisorAutomationId; StateRoot=$TestDrive; StatePath=$statePath; VisibilityComplete=$true; VisibleCount=1; EligibleCount=1; MonitoredCount=1; BlockingUnmonitoredCount=0; GuardReady=$true }
         $snapshotA = @([ordered]@{ target_thread_id='a'; automation_id='automation-target-a'; source_turn_id='turn-source-a'; state='complete'; task_stopped=$true; stop_reason='acceptance_complete'; recovery_pending=$false; receipt_key=$script:receiptA; checkpoint_id=$script:checkpointA; evidence_timestamp_utc=$now.ToString('o'); external_effect_state='none'; next_retry_at=''; no_active_turn=$true }) | ConvertTo-Json -Compress
-        $snapshotB = @([ordered]@{ target_thread_id='b'; automation_id='automation-target-b'; source_turn_id='turn-source-b'; state='needs_input'; task_stopped=$true; stop_reason='human_input_required'; recovery_pending=$false; receipt_key=$script:receiptB; checkpoint_id=$script:checkpointB; evidence_timestamp_utc=$now.ToString('o'); external_effect_state='none'; next_retry_at=''; no_active_turn=$true }) | ConvertTo-Json -Compress
+        $snapshotB = @([ordered]@{ target_thread_id='a'; automation_id='automation-target-a'; source_turn_id='turn-source-a'; state='needs_input'; task_stopped=$true; stop_reason='human_input_required'; recovery_pending=$false; receipt_key=$script:receiptB; checkpoint_id=$script:checkpointB; evidence_timestamp_utc=$now.ToString('o'); external_effect_state='none'; next_retry_at=''; no_active_turn=$true }) | ConvertTo-Json -Compress
         $tickA1 = $now.AddMinutes(-1).ToString('o')
         $tickA2 = $now.AddSeconds(-30).ToString('o')
         $tickB1 = $now.AddSeconds(-20).ToString('o')
@@ -364,24 +352,26 @@ Describe 'watch-interrupted-task fleet supervisor revision-3 contract' {
 
         $null = & $script:disposition -SnapshotJson $snapshotA -ShutdownArmed -CurrentTickId $tickA1 @coverage
         $scheduledA = & $script:disposition -SnapshotJson $snapshotA -ShutdownArmed -CurrentTickId $tickA2 @coverage
-        $scheduledA.power_action | Should Be 'schedule_shutdown'
-        $recorded = & $script:disposition -SnapshotJson $snapshotA -ShutdownArmed -CurrentTickId $tickA2 -ConfirmedShutdownReceiptKey $scheduledA.shutdown_receipt_key @coverage
-        $recorded.successful_shutdown_receipt_count | Should Be 1
+        $scheduledA.power_action | Should Be 'await_final_recheck'
 
         $null = & $script:disposition -SnapshotJson $snapshotB -ShutdownArmed -CurrentTickId $tickB1 @coverage
         $null = & $script:disposition -SnapshotJson $snapshotA -ShutdownArmed -CurrentTickId $tickA3 @coverage
         $replayedA = & $script:disposition -SnapshotJson $snapshotA -ShutdownArmed -CurrentTickId $tickA4 @coverage
-        $replayedA.power_action | Should Be 'observe_only'
-        $replayedA.reason_code | Should Be 'shutdown_already_scheduled'
+        $replayedA.power_action | Should Be 'await_final_recheck'
+        $replayedA.reason_code | Should Be 'candidate_receipt_ready'
+        $replayedA.successful_shutdown_receipt_count | Should Be 0
     }
 
     It 'publishes coverage and durable receipt fields in the shutdown heartbeat contract' {
         $script:shutdownPrompt | Should Match 'visibility_complete'
         $script:shutdownPrompt | Should Match 'blocking_unmonitored_count'
         $script:shutdownPrompt | Should Match 'current_tick_id'
-        $script:shutdownPrompt | Should Match 'successful_shutdown_receipt_keys'
-        $script:shutdownPrompt | Should Match 'snapshot_key=.*shutdown_receipt_key='
+        $script:shutdownPrompt | Should Match 'membership_epoch'
+        $script:shutdownPrompt | Should Match 'snapshot_key=.*candidate_receipt_key='
         $script:shutdownPrompt | Should Match 'soft_guard_only.*blocks shutdown'
+        $script:shutdownPrompt | Should Match 'checkout_identity'
+        $script:shutdownPrompt | Should Match 'operation_state=read_only\|external_wait\|write_planning\|writing\|git_ref_mutation'
+        $script:shutdownPrompt | Should Match 'write_domain=working_tree\|git_index\|git_refs\|generated_runtime\|host_config\|external_effect'
     }
 
     It 'rejects a state journal outside the explicitly approved repo runtime root' {
@@ -423,5 +413,88 @@ Describe 'watch-interrupted-task fleet supervisor revision-3 contract' {
         $newTask = & $script:disposition -SnapshotJson $snapshot -AutomationId $script:supervisorAutomationId -CurrentTickId $now.ToString('o') -ShutdownArmed -VisibilityComplete -UnmonitoredActiveTaskCount 1
         $newTask.reason_code | Should Be 'unmonitored_active_tasks'
         $newTask.power_action | Should Be 'observe_only'
+    }
+
+    It 'keeps enrolled membership monotonic and fails closed when a later snapshot omits a member' {
+        $now = [datetimeoffset]::UtcNow
+        $statePath = Join-Path $TestDrive 'monotonic-membership-state.json'
+        $coverage = @{ AutomationId=$script:supervisorAutomationId; StateRoot=$TestDrive; StatePath=$statePath; VisibilityComplete=$true; GuardReady=$true }
+        $membersAB = @(
+            [ordered]@{ target_thread_id='a'; automation_id='automation-target-a'; source_turn_id='turn-a' },
+            [ordered]@{ target_thread_id='b'; automation_id='automation-target-b'; source_turn_id='turn-b' }
+        ) | ConvertTo-Json -Compress
+        $membersA = @([ordered]@{ target_thread_id='a'; automation_id='automation-target-a'; source_turn_id='turn-a' }) | ConvertTo-Json -Compress
+        $snapshotAB = @(
+            [ordered]@{ target_thread_id='a'; automation_id='automation-target-a'; source_turn_id='turn-a'; state='complete'; task_stopped=$true; stop_reason='complete'; recovery_pending=$false; receipt_key=$script:receiptA; checkpoint_id=$script:checkpointA; evidence_timestamp_utc=$now.ToString('o'); external_effect_state='none'; next_retry_at=''; no_active_turn=$true },
+            [ordered]@{ target_thread_id='b'; automation_id='automation-target-b'; source_turn_id='turn-b'; state='complete'; task_stopped=$true; stop_reason='complete'; recovery_pending=$false; receipt_key=$script:receiptB; checkpoint_id=$script:checkpointB; evidence_timestamp_utc=$now.ToString('o'); external_effect_state='none'; next_retry_at=''; no_active_turn=$true }
+        ) | ConvertTo-Json -Compress
+        $snapshotA = @([ordered]@{ target_thread_id='a'; automation_id='automation-target-a'; source_turn_id='turn-a'; state='complete'; task_stopped=$true; stop_reason='complete'; recovery_pending=$false; receipt_key=$script:receiptA; checkpoint_id=$script:checkpointA; evidence_timestamp_utc=$now.ToString('o'); external_effect_state='none'; next_retry_at=''; no_active_turn=$true }) | ConvertTo-Json -Compress
+
+        $null = & $script:disposition -SnapshotJson $snapshotAB -MembershipJson $membersAB -ShutdownArmed -CurrentTickId $now.AddMinutes(-1).ToString('o') -VisibleCount 2 -EligibleCount 2 -MonitoredCount 2 @coverage
+        $shrunk = & $script:disposition -SnapshotJson $snapshotA -MembershipJson $membersA -ShutdownArmed -CurrentTickId $now.ToString('o') -VisibleCount 1 -EligibleCount 1 -MonitoredCount 1 @coverage
+        $journal = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
+
+        $shrunk.reason_code | Should Be 'membership_shrink_detected'
+        $shrunk.power_action | Should Be 'observe_only'
+        $shrunk.snapshot_key | Should BeNullOrEmpty
+        @($journal.membership).Count | Should Be 2
+        @($journal.membership.target_thread_id) | Should Contain 'b'
+        [string]$journal.snapshot_key | Should BeNullOrEmpty
+    }
+
+    It 'persists one candidate through supervisor deletion, shutdown scheduling, and receipt replay suppression' {
+        $now = [datetimeoffset]::UtcNow
+        $statePath = Join-Path $TestDrive 'durable-candidate-state.json'
+        $snapshot = @([ordered]@{ target_thread_id='a'; automation_id='automation-target-a'; source_turn_id='turn-source-a'; state='complete'; task_stopped=$true; stop_reason='acceptance_complete'; recovery_pending=$false; receipt_key=$script:receiptA; checkpoint_id=$script:checkpointA; cleanup_receipt_key=('watch-cleanup:' + ('f' * 64)); evidence_timestamp_utc=$now.ToString('o'); external_effect_state='none'; next_retry_at=''; no_active_turn=$true }) | ConvertTo-Json -Compress
+        $membership = @([ordered]@{ target_thread_id='a'; automation_id='automation-target-a'; source_turn_id='turn-source-a' }) | ConvertTo-Json -Compress
+        $coverage = @{ AutomationId=$script:supervisorAutomationId; StateRoot=$TestDrive; StatePath=$statePath; VisibilityComplete=$true; VisibleCount=1; EligibleCount=1; MonitoredCount=1; BlockingUnmonitoredCount=0; GuardReady=$true; MembershipJson=$membership }
+        $firstTick = $now.AddMinutes(-1).ToString('o')
+        $secondTick = $now.ToString('o')
+
+        $first = & $script:disposition -SnapshotJson $snapshot -ShutdownArmed -CurrentTickId $firstTick @coverage
+        $first.reason_code | Should Be 'stability_confirmation_required'
+        $second = & $script:disposition -SnapshotJson $snapshot -ShutdownArmed -CurrentTickId $secondTick @coverage
+        $second.reason_code | Should Be 'candidate_receipt_ready'
+        $second.power_action | Should Be 'await_final_recheck'
+        $second.candidate_receipt_key | Should Match '^watch-fleet-candidate:[0-9a-f]{64}$'
+        $second.candidate_receipt_expires_at_utc | Should Not BeNullOrEmpty
+
+        $final = & $script:disposition -SnapshotJson $snapshot -ShutdownArmed -FinalRecheck -CurrentTickId $secondTick @coverage
+        $journal = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
+        $final.reason_code | Should Be 'final_candidate_delete_supervisor'
+        $final.power_action | Should Be 'delete_supervisor'
+        $final.candidate_receipt_key | Should Be $second.candidate_receipt_key
+        $journal.candidate.receipt_key | Should Be $second.candidate_receipt_key
+        $journal.candidate.final_recheck_completed | Should Be $true
+        $journal.candidate.membership_epoch | Should Be $journal.membership_epoch
+        @($journal.candidate.member_receipts).Count | Should Be 1
+
+        $automationRoot = Join-Path $TestDrive 'automation-root-after-delete'
+        $null = New-Item -ItemType Directory -Path $automationRoot -Force
+        $confirmed = & $script:disposition -SnapshotJson $snapshot -ShutdownArmed -FinalRecheck -ConfirmSupervisorDeleted -AutomationRoot $automationRoot -CurrentTickId $secondTick @coverage
+        $confirmed.reason_code | Should Be 'supervisor_deleted_schedule_shutdown'
+        $confirmed.power_action | Should Be 'schedule_shutdown'
+        $confirmed.supervisor_delete_receipt_key | Should Match '^watch-supervisor-delete:[0-9a-f]{64}$'
+        $confirmed.shutdown_receipt_key | Should Match '^watch-fleet-shutdown:[0-9a-f]{64}$'
+
+        $recorded = & $script:disposition -SnapshotJson $snapshot -ShutdownArmed -FinalRecheck -ConfirmSupervisorDeleted -AutomationRoot $automationRoot -ConfirmedShutdownReceiptKey $confirmed.shutdown_receipt_key -CurrentTickId $secondTick @coverage
+        $recorded.reason_code | Should Be 'shutdown_receipt_recorded'
+        $recorded.power_action | Should Be 'observe_only'
+        $recorded.successful_shutdown_receipt_count | Should Be 1
+
+        $replayed = & $script:disposition -SnapshotJson $snapshot -ShutdownArmed -FinalRecheck -ConfirmSupervisorDeleted -AutomationRoot $automationRoot -ConfirmedShutdownReceiptKey $confirmed.shutdown_receipt_key -CurrentTickId $secondTick @coverage
+        $replayed.reason_code | Should Be 'shutdown_already_scheduled'
+        $replayed.power_action | Should Be 'observe_only'
+        $replayed.successful_shutdown_receipt_count | Should Be 1
+    }
+
+    It 'does not accept a shutdown receipt without the armed candidate and supervisor-delete proof' {
+        $now = [datetimeoffset]::UtcNow
+        $snapshot = @([ordered]@{ target_thread_id='a'; automation_id='automation-target-a'; source_turn_id='turn-source-a'; state='complete'; task_stopped=$true; stop_reason='complete'; recovery_pending=$false; receipt_key=$script:receiptA; checkpoint_id=$script:checkpointA; evidence_timestamp_utc=$now.ToString('o'); external_effect_state='none'; next_retry_at=''; no_active_turn=$true }) | ConvertTo-Json -Compress
+
+        $result = & $script:disposition -SnapshotJson $snapshot -AutomationId $script:supervisorAutomationId -CurrentTickId $now.ToString('o') -ConfirmedShutdownReceiptKey ('watch-fleet-shutdown:' + ('a' * 64))
+        $result.power_action | Should Be 'observe_only'
+        $result.reason_code | Should Be 'shutdown_not_armed'
+        $result.successful_shutdown_receipt_count | Should Be 0
     }
 }

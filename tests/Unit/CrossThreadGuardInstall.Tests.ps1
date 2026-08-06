@@ -4,6 +4,7 @@ Describe 'Cross-thread guard installer and doctor' {
         $installer = Join-Path $repoRoot 'scripts\hooks\Install-CrossThreadGuard.ps1'
         $doctor = Join-Path $repoRoot 'scripts\hooks\Test-CrossThreadGuard.ps1'
         $sourceHook = Join-Path $repoRoot 'scripts\hooks\block-cross-thread-send.ps1'
+        $sourcePolicy = Join-Path $repoRoot 'scripts\hooks\CrossThreadGuardPolicy.ps1'
         $sourceRuntimeDoctor = Join-Path $repoRoot 'scripts\hooks\Test-WatchGuardRuntime.ps1'
         $targetGenerator = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchHeartbeatPrompt.ps1'
         $fleetGenerator = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchFleetSupervisorPrompt.ps1'
@@ -36,8 +37,10 @@ Describe 'Cross-thread guard installer and doctor' {
         $attributesPath = Join-Path $repoRoot '.gitattributes'
         Test-Path -LiteralPath $attributesPath | Should Be $true
         (Get-Content -Raw -LiteralPath $attributesPath) | Should Match '(?m)^scripts/hooks/block-cross-thread-send\.ps1 text eol=lf\r?$'
+        (Get-Content -Raw -LiteralPath $attributesPath) | Should Match '(?m)^scripts/hooks/CrossThreadGuardPolicy\.ps1 text eol=lf\r?$'
         (Get-Content -Raw -LiteralPath $attributesPath) | Should Match '(?m)^scripts/hooks/Test-WatchGuardRuntime\.ps1 text eol=lf\r?$'
         @([System.IO.File]::ReadAllBytes($sourceHook) | Where-Object { $_ -eq 13 }).Count | Should Be 0
+        @([System.IO.File]::ReadAllBytes($sourcePolicy) | Where-Object { $_ -eq 13 }).Count | Should Be 0
         @([System.IO.File]::ReadAllBytes($sourceRuntimeDoctor) | Where-Object { $_ -eq 13 }).Count | Should Be 0
     }
 
@@ -47,8 +50,10 @@ Describe 'Cross-thread guard installer and doctor' {
         (Get-Content -Raw -LiteralPath $script:configPath) | Should Be $script:originalConfig
 
         $hostHook = Join-Path $script:codexHome 'scripts\block-cross-thread-send.ps1'
+        $hostPolicy = Join-Path $script:codexHome 'scripts\CrossThreadGuardPolicy.ps1'
         $hostRuntimeDoctor = Join-Path $script:codexHome 'scripts\Test-WatchGuardRuntime.ps1'
         (Get-FileHash -Algorithm SHA256 -LiteralPath $hostHook).Hash | Should Be (Get-FileHash -Algorithm SHA256 -LiteralPath $sourceHook).Hash
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $hostPolicy).Hash | Should Be (Get-FileHash -Algorithm SHA256 -LiteralPath $sourcePolicy).Hash
         (Get-FileHash -Algorithm SHA256 -LiteralPath $hostRuntimeDoctor).Hash | Should Be (Get-FileHash -Algorithm SHA256 -LiteralPath $sourceRuntimeDoctor).Hash
 
         $hooks = Get-Content -Raw -LiteralPath (Join-Path $script:codexHome 'hooks.json') | ConvertFrom-Json
@@ -58,17 +63,21 @@ Describe 'Cross-thread guard installer and doctor' {
         $command = [string]$hooks.hooks.PreToolUse[0].hooks[0].command
         $command | Should Match ([regex]::Escape($hostHook))
         $command | Should Match ([regex]::Escape($receipt.source_sha256))
+        $command | Should Match ([regex]::Escape($receipt.policy_source_sha256))
         $command | Should Match ([regex]::Escape($script:targetPromptDigest))
         $command | Should Match ([regex]::Escape($script:shutdownTargetPromptDigest))
         $command | Should Match ([regex]::Escape($script:runtimeGenerationId))
         $command | Should Match ([regex]::Escape($script:fleetPromptDigest))
         $command | Should Match ([regex]::Escape($script:fleetShutdownPromptDigest))
+        $command | Should Match ([regex]::Escape((Join-Path $script:codexHome 'automations')))
+        $command | Should Match ([regex]::Escape((Join-Path $script:codexHome 'watch-interrupted-task\fleet')))
         $hooks.hooks.PreToolUse[0].hooks[0].commandWindows | Should Be $command
         $receipt.target_prompt_sha256 | Should Be $script:targetPromptDigest
         $receipt.shutdown_target_prompt_sha256 | Should Be $script:shutdownTargetPromptDigest
         $receipt.watch_runtime_generation_id | Should Be $script:runtimeGenerationId
         $receipt.fleet_prompt_sha256 | Should Be $script:fleetPromptDigest
         $receipt.fleet_shutdown_prompt_sha256 | Should Be $script:fleetShutdownPromptDigest
+        $receipt.policy_source_sha256 | Should Be $receipt.policy_host_sha256
     }
 
     It 'validates malformed hooks JSON before touching host scripts' {
@@ -80,6 +89,7 @@ Describe 'Cross-thread guard installer and doctor' {
 
         (Get-Content -Raw -LiteralPath $hooksPath) | Should Be $malformed
         Test-Path -LiteralPath (Join-Path $script:codexHome 'scripts\block-cross-thread-send.ps1') | Should Be $false
+        Test-Path -LiteralPath (Join-Path $script:codexHome 'scripts\CrossThreadGuardPolicy.ps1') | Should Be $false
         Test-Path -LiteralPath (Join-Path $script:codexHome 'scripts\Test-WatchGuardRuntime.ps1') | Should Be $false
     }
 
@@ -114,6 +124,7 @@ Describe 'Cross-thread guard installer and doctor' {
         $result.simulation_cases.code_mode_dynamic_automation_route | Should Be $true
         $result.simulation_cases.code_mode_target_self_delete | Should Be $true
         $result.simulation_cases.shutdown_target_self_pause | Should Be $true
+        $result.simulation_cases.fleet_cleanup_delete | Should Be $true
         $result.simulation_cases.code_mode_automation_live_probe_sentinel | Should Be $true
         $result.simulation_cases.fleet_target_pause | Should Be $true
         $result.simulation_cases.git_diff_hook_inspection | Should Be $true
@@ -145,16 +156,20 @@ Describe 'Cross-thread guard installer and doctor' {
         $null = New-Item -ItemType Directory -Path $hostScripts -Force
         $hostHook = Join-Path $hostScripts 'block-cross-thread-send.ps1'
         $hostDoctor = Join-Path $hostScripts 'Test-WatchGuardRuntime.ps1'
+        $hostPolicy = Join-Path $hostScripts 'CrossThreadGuardPolicy.ps1'
         $hooksPath = Join-Path $script:codexHome 'hooks.json'
         $oldHook = 'old-hook-bytes'
         $oldDoctor = 'old-doctor-bytes'
+        $oldPolicy = 'old-policy-bytes'
         $oldHooks = Get-Content -Raw -LiteralPath $hooksPath
         Set-Content -LiteralPath $hostHook -Value $oldHook -NoNewline
         Set-Content -LiteralPath $hostDoctor -Value $oldDoctor -NoNewline
+        Set-Content -LiteralPath $hostPolicy -Value $oldPolicy -NoNewline
 
         { & $installer -CodexHome $script:codexHome -SourceHookPath $sourceHook -InjectFinalHooksMoveFailure } | Should Throw
         (Get-Content -Raw -LiteralPath $hostHook) | Should Be $oldHook
         (Get-Content -Raw -LiteralPath $hostDoctor) | Should Be $oldDoctor
+        (Get-Content -Raw -LiteralPath $hostPolicy) | Should Be $oldPolicy
         (Get-Content -Raw -LiteralPath $hooksPath) | Should Be $oldHooks
     }
 }

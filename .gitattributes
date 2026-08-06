@@ -1,2 +1,3 @@
 scripts/hooks/block-cross-thread-send.ps1 text eol=lf
+scripts/hooks/CrossThreadGuardPolicy.ps1 text eol=lf
 scripts/hooks/Test-WatchGuardRuntime.ps1 text eol=lf

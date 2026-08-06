@@ -103,9 +103,12 @@ function Invoke-FreshHooksList {
 
 $resolvedCodexHome = [System.IO.Path]::GetFullPath($CodexHome)
 $hostHook = Join-Path $resolvedCodexHome 'scripts\block-cross-thread-send.ps1'
+$hostPolicy = Join-Path $resolvedCodexHome 'scripts\CrossThreadGuardPolicy.ps1'
 $hooksPath = Join-Path $resolvedCodexHome 'hooks.json'
 $hostExists = Test-Path -LiteralPath $hostHook -PathType Leaf
+$policyHostExists = Test-Path -LiteralPath $hostPolicy -PathType Leaf
 $hostHash = if ($hostExists) { (Get-FileHash -Algorithm SHA256 -LiteralPath $hostHook).Hash.ToLowerInvariant() } else { $null }
+$policyHostHash = if ($policyHostExists) { (Get-FileHash -Algorithm SHA256 -LiteralPath $hostPolicy).Hash.ToLowerInvariant() } else { $null }
 $freshProcess = [string]::IsNullOrWhiteSpace($HooksListJson)
 $script:watchGuardLauncherExecutable = $null
 $errorMessage = $null
@@ -132,11 +135,14 @@ if ($null -ne $hooksList) {
 $hook = if ($hookMatches.Count -eq 1) { $hookMatches[0] } else { $null }
 $command = if ($null -ne $hook) { [string]$hook.command } else { '' }
 $expectedHash = if ($command -match '(?i)-ExpectedScriptSha256\s+["'']?([0-9a-f]{64})') { $Matches[1].ToLowerInvariant() } else { $null }
+$expectedPolicyHash = if ($command -match '(?i)-ExpectedPolicySha256\s+["'']?([0-9a-f]{64})') { $Matches[1].ToLowerInvariant() } else { $null }
 $targetPromptHash = if ($command -match '(?i)-ExpectedTargetPromptSha256\s+["'']?([0-9a-f]{64})') { $Matches[1].ToLowerInvariant() } else { $null }
 $shutdownTargetPromptHash = if ($command -match '(?i)-ExpectedShutdownTargetPromptSha256\s+["'']?([0-9a-f]{64})') { $Matches[1].ToLowerInvariant() } else { $null }
 $fleetPromptHash = if ($command -match '(?i)-ExpectedFleetPromptSha256\s+["'']?([0-9a-f]{64})') { $Matches[1].ToLowerInvariant() } else { $null }
 $fleetShutdownPromptHash = if ($command -match '(?i)-ExpectedFleetShutdownPromptSha256\s+["'']?([0-9a-f]{64})') { $Matches[1].ToLowerInvariant() } else { $null }
 $runtimeGenerationId = if ($command -match '(?i)-ExpectedRuntimeGenerationId\s+["'']?(watch-runtime-generation:[0-9a-f]{64})') { $Matches[1].ToLowerInvariant() } else { $null }
+$automationRoot = if ($command -match '(?i)-AutomationRoot\s+["'']([^"'']+)["'']') { [System.IO.Path]::GetFullPath($Matches[1]) } else { $null }
+$watchFleetStateRoot = if ($command -match '(?i)-WatchFleetStateRoot\s+["'']([^"'']+)["'']') { [System.IO.Path]::GetFullPath($Matches[1]) } else { $null }
 
 $sourceHookMatches = @()
 try {
@@ -168,7 +174,9 @@ $currentHash = if ($null -ne $hook) { [string]$hook.currentHash } else { $null }
 $runtimeShapeMatches = $null -ne $hook -and [string]$hook.eventName -ceq 'preToolUse' -and
     [string]$hook.handlerType -ceq 'command' -and [string]$hook.matcher -ceq '*'
 $shapeMatches = $runtimeShapeMatches -and $sourceShapeMatches
-$definitionMatches = $hostExists -and -not [string]::IsNullOrWhiteSpace($expectedHash) -and $expectedHash -ceq $hostHash -and
+$definitionMatches = $hostExists -and $policyHostExists -and -not [string]::IsNullOrWhiteSpace($expectedHash) -and $expectedHash -ceq $hostHash -and
+    -not [string]::IsNullOrWhiteSpace($expectedPolicyHash) -and $expectedPolicyHash -ceq $policyHostHash -and
+    -not [string]::IsNullOrWhiteSpace($automationRoot) -and -not [string]::IsNullOrWhiteSpace($watchFleetStateRoot) -and
     $targetPromptHash -match '^[0-9a-f]{64}$' -and $shutdownTargetPromptHash -match '^[0-9a-f]{64}$' -and $fleetPromptHash -match '^[0-9a-f]{64}$' -and $fleetShutdownPromptHash -match '^[0-9a-f]{64}$' -and $runtimeGenerationId -match '^watch-runtime-generation:[0-9a-f]{64}$' -and $shapeMatches
 $configurationReady = $hookMatches.Count -eq 1 -and $enabled -and $trustStatus -ceq 'trusted' -and $definitionMatches -and
     -not [string]::IsNullOrWhiteSpace($currentHash)
@@ -182,8 +190,15 @@ $configurationReady = $hookMatches.Count -eq 1 -and $enabled -and $trustStatus -
     trust_status = $trustStatus
     current_hash = $currentHash
     host_hook_path = $hostHook
+    host_policy_path = $hostPolicy
+    source_sha256 = $expectedHash
     host_sha256 = $hostHash
+    policy_source_sha256 = $expectedPolicyHash
+    policy_host_sha256 = $policyHostHash
     expected_script_sha256 = $expectedHash
+    expected_policy_sha256 = $expectedPolicyHash
+    automation_root = $automationRoot
+    watch_fleet_state_root = $watchFleetStateRoot
     watch_runtime_generation_id = $runtimeGenerationId
     target_prompt_sha256 = $targetPromptHash
     shutdown_target_prompt_sha256 = $shutdownTargetPromptHash
@@ -193,6 +208,7 @@ $configurationReady = $hookMatches.Count -eq 1 -and $enabled -and $trustStatus -
     source_shape_matches = $sourceShapeMatches
     shape_matches = $shapeMatches
     definition_matches = $definitionMatches
+    live_path_status = if ($freshProcess -and $configurationReady) { 'verified' } else { 'unverified_requires_fresh_session_probe' }
     live_send_probe_required = $true
     live_automation_probe_required = $true
     specialized_path_boundary = 'guardrail_only'

@@ -72,6 +72,19 @@ $result = [ordered]@{
     stop_reason = $StopReason
     recovery_pending = [bool]$RecoveryPending
     prior_notified_receipt_key = $PriorNotifiedReceiptKey
+    terminal_retirement = 'native'
+}
+
+function Set-WatchTerminalRetirement {
+    param([Parameter(Mandatory = $true)][string]$ReadyReason)
+    $result.automation_action = 'request_supervisor_cleanup'
+    if ($ShutdownManaged) { $result.quiesce_action = 'pause_self' }
+    $result.reason_code = $ReadyReason
+    if ($State -in @('needs_input', 'non_transient_failure') -and $PriorNotifiedReceiptKey -cne $ReceiptKey) {
+        $result.notification_action = 'notify_once'
+    }
+    $result.mutation_owner = 'target_thread'
+    $result.requires_receipt = $true
 }
 
 $evaluationNow = [DateTimeOffset]::MinValue
@@ -179,10 +192,7 @@ elseif ($State -ceq 'goal_satisfied') {
         $result.goal_action = if ($GoalStatus -ceq 'active') { 'mark_complete' } else { 'none' }
         $result.mutation_owner = 'target_thread'
         if ($GoalStatus -in @('none', 'complete') -and $NoActiveTurn -and (Test-RecoveryEvidence)) {
-            $result.automation_action = 'request_supervisor_cleanup'
-            if ($ShutdownManaged) { $result.quiesce_action = 'pause_self' }
-            $result.requires_receipt = $true
-            $result.reason_code = 'acceptance_verified_cleanup_ready'
+            Set-WatchTerminalRetirement -ReadyReason 'acceptance_verified_cleanup_ready'
         }
         else {
             $result.reason_code = if ($GoalStatus -ceq 'active') { 'acceptance_verified_goal_completion_pending_cleanup' } else { 'cleanup_evidence_required' }
@@ -209,18 +219,10 @@ elseif ($State -in @('natural_pause', 'needs_input', 'complete', 'non_transient_
         $result.goal_action = 'mark_blocked'
     }
     if (Test-StoppedEvidence) {
-        $result.automation_action = 'request_supervisor_cleanup'
-        if ($ShutdownManaged) { $result.quiesce_action = 'pause_self' }
-        $result.mutation_owner = 'target_thread'
-        $result.requires_receipt = $true
-        $result.reason_code = 'proved_stopped_cleanup_ready'
-        if ($State -in @('needs_input', 'non_transient_failure') -and $PriorNotifiedReceiptKey -cne $ReceiptKey) {
-            $result.notification_action = 'notify_once'
-        }
+        Set-WatchTerminalRetirement -ReadyReason 'proved_stopped_cleanup_ready'
     }
 }
 elseif ($State -in @('unknown', 'soft_guard_only')) {
-    $result.notification_action = 'notify_once'
     $result.reason_code = $State
 }
 elseif ($State -ceq 'peer_busy') {

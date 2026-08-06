@@ -5,7 +5,7 @@
 - 落点：`overrides/custom/watch-interrupted-task/` 的 prompt、状态判定、fleet journal 与 runtime generation；`scripts/hooks/` 的 canonical guard 与 fresh runtime doctor；对应 Pester 回归。
 - 目标归宿：shutdown-managed target 在稳定停止时自暂停并请求 supervisor cleanup；supervisor 只删除已验证的 paused target，所有已纳管成员稳定停止后才进入双 tick 关机候选。
 - 本切片不执行宿主 automation/hook 投影，不修改 Desktop 数据、automation TOML、session JSONL，不执行 `shutdown.exe`。
-- 共享工作树 `D:\CODE\skills-manager` 保持不变；本次验证在隔离 worktree `C:\Users\sciman\.codex\worktrees\watch-terminal-drain\skills-manager` 的 `codex/watch-terminal-drain` 分支进行。
+- 共享工作树 `D:\CODE\skills-manager` 保持不变；本次验证在隔离 worktree `C:\Users\sciman\.codex\worktrees\watch-safety-repair\skills-manager` 的 `codex/watch-safety-repair` 分支进行。
 
 ## 根因与协议收口
 
@@ -32,22 +32,10 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1
 结果：`Build success`。
 
 ```text
-Invoke-Pester -Path tests/Unit/WatchInterruptedTask.Tests.ps1, tests/Unit/WatchFleetSupervisor.Tests.ps1, tests/Unit/WatchRuntimeArming.Tests.ps1 -PassThru
+Invoke-Pester -Script tests/Unit/CrossThreadHook.Tests.ps1, tests/Unit/CrossThreadGuardInstall.Tests.ps1, tests/Unit/WatchRuntimeArming.Tests.ps1, tests/Unit/WatchPeerArbitration.Tests.ps1, tests/Unit/WatchInterruptedTask.Tests.ps1, tests/Unit/WatchGuardRuntime.Tests.ps1, tests/Unit/WatchFleetSupervisor.Tests.ps1, tests/Unit/BuildScript.Tests.ps1, tests/Unit/GeneratedSyncScript.Tests.ps1 -PassThru
 ```
 
-结果：47 passed, 0 failed。
-
-```text
-Invoke-Pester -Path tests/Unit/CrossThreadHook.Tests.ps1 -PassThru
-```
-
-结果：26 passed, 0 failed。
-
-```text
-Invoke-Pester -Path tests/Unit/CrossThreadGuardInstall.Tests.ps1, tests/Unit/WatchGuardRuntime.Tests.ps1 -PassThru
-```
-
-结果：11 passed, 0 failed。
+结果：104 passed, 0 failed。
 
 `git diff --check` 通过。
 
@@ -55,7 +43,7 @@ Invoke-Pester -Path tests/Unit/CrossThreadGuardInstall.Tests.ps1, tests/Unit/Wat
 pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree
 ```
 
-结果：exit 0；完整 unit/E2E、generated-sync、skill integrity、reference governance、routing、dependency baseline、config/host/planning/runtime/advisory/doctor contracts 全部通过；summary 为 `Local quality gates passed (full)`，总门禁耗时 `390304ms`。
+结果：exit 0；993 unit + 18 E2E（共 1011 项）、generated-sync、skill integrity、reference governance、routing、dependency baseline、config/host/planning/runtime/advisory/doctor contracts 全部通过；summary 为 `Local quality gates passed (full)`，总门禁耗时 `450066ms`。
 
 提交/推送和宿主投影在 full gate 后继续执行；本文件不把 repo-side 验收写成 host-live 验收。
 
