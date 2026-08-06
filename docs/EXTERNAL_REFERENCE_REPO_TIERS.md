@@ -59,12 +59,19 @@ D:\CODE\external\skills-manager-references\
 
 Discovery-only sources are not cloned by default.
 
+### 4.1 Autonomous discovery and clone boundary
+
+When official material and the existing shelf are insufficient, and source-level comparison has a concrete current consumer, the host AI may search for a public open-source reference repository. A candidate must first be reviewed and registered in `references/reference-shelf.manifest.json` as `conditional-not-cloned`, with its upstream URL, full reviewed revision, license, relevance, activation trigger, review evidence, and adoption decision. Only then may the existing refresh script clone that named candidate into its registered `conditional/` path.
+
+Discovery popularity is not admission. Missing or unclear licensing, authentication requirements, destination conflicts, a dirty existing checkout, no current consumer, or an unregistered destination blocks cloning. A successful clone authorizes read-only comparison only; it does not authorize adoption, dependency installation, script execution, runtime activation, or promotion into the persistent core/secondary shelf.
+
 Default operational commands:
 
 ```powershell
 .\scripts\refresh-reference-repos.ps1 -FetchOnly -SkipDirtyRepos
 .\scripts\refresh-reference-repos.ps1 -CloneMissing -FetchOnly -SkipDirtyRepos
 .\scripts\refresh-reference-repos.ps1 -Tier secondary -CloneMissing -FetchOnly -SkipDirtyRepos
+.\scripts\refresh-reference-repos.ps1 -RepoNames <registered-candidate> -CloneMissing -FetchOnly -SkipDirtyRepos
 ```
 
 Meaning:
@@ -72,6 +79,7 @@ Meaning:
 - first command: fetch the default `core-default` set without creating new clones; it updates remote refs but does not advance a behind checkout
 - second command: bootstrap missing `core` repos, then fetch them
 - third command: bootstrap or refresh the `secondary` tier without disturbing the stable `core-default` latest report
+- fourth command: clone one already reviewed and registered candidate into its manifest-controlled path without advancing an existing checkout
 
 For each successful fetch, the report distinguishes the fetched upstream revision from the local checkout. `remote refs current=true` means the fetch completed; only `working tree matches upstream=true` means the checkout itself is current. `consumable revision` is the full local `HEAD` that audits may safely cite. Omit `-FetchOnly` only when intentionally advancing a clean checkout with `pull --ff-only`.
 

@@ -31,6 +31,7 @@
 .\scripts\refresh-reference-repos.ps1 -FetchOnly -SkipDirtyRepos
 .\scripts\refresh-reference-repos.ps1 -Tier secondary -CloneMissing -FetchOnly -SkipDirtyRepos
 .\scripts\refresh-reference-repos.ps1 -Tier conditional -FetchOnly -SkipDirtyRepos
+.\scripts\refresh-reference-repos.ps1 -RepoNames <registered-candidate> -CloneMissing -FetchOnly -SkipDirtyRepos
 .\scripts\refresh-reference-repos.ps1 -Tier historical -FetchOnly -SkipDirtyRepos
 ```
 
@@ -39,3 +40,5 @@
 - 默认不带参数时，使用 manifest 的 `default_refresh_set`，也就是稳定的 `core-default`
 - 指定 `-Tier secondary` / `-Tier conditional` 时，会生成单独历史报告，但不会覆盖 `references/updates/reference-refresh-latest.md`
 - `historical-compatibility` 只能显式刷新；其内容不作为新能力推荐或默认安装来源
+- 现有资料不足且源码级比对有明确收益时，可以自主发现公开开源候选；必须先把 URL、完整 review revision、license、触发条件、review evidence 和采纳决定登记为 `conditional-not-cloned`，再按名称克隆到 manifest 控制的 `conditional/` 路径
+- 来源或许可证不明、需要认证、目录冲突、已有 checkout 脏或没有当前消费者时阻断；克隆只授权只读比对，不等于采纳、安装、执行或进入默认长期镜像

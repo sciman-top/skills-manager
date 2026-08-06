@@ -5,6 +5,8 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 $manifestPath = Join-Path $root "references\reference-shelf.manifest.json"
 $readmePath = Join-Path $root "references\README.md"
+$agentsPath = Join-Path $root "AGENTS.md"
+$tierDocPath = Join-Path $root "docs\EXTERNAL_REFERENCE_REPO_TIERS.md"
 $provenancePath = Join-Path $root "overrides\patches\provenance.json"
 $findings = [System.Collections.Generic.List[string]]::new()
 
@@ -88,6 +90,20 @@ $readme = Get-Content -LiteralPath $readmePath -Raw -Encoding UTF8
 foreach ($name in $names) {
     if ($readme.IndexOf($name, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
         Add-Finding "references README omits manifest repo: $name"
+    }
+}
+
+$agents = Get-Content -LiteralPath $agentsPath -Raw -Encoding UTF8
+$tierDoc = Get-Content -LiteralPath $tierDocPath -Raw -Encoding UTF8
+foreach ($contract in @(
+        @{ Label = "AGENTS"; Text = $agents; Tokens = @("conditional-not-cloned", "-CloneMissing -FetchOnly -SkipDirtyRepos", "克隆不等于采纳") },
+        @{ Label = "reference README"; Text = $readme; Tokens = @("<registered-candidate>", "conditional-not-cloned", "只读比对") },
+        @{ Label = "tier documentation"; Text = $tierDoc; Tokens = @("Autonomous discovery and clone boundary", "conditional-not-cloned", "does not authorize adoption") }
+    )) {
+    foreach ($token in $contract.Tokens) {
+        if ($contract.Text.IndexOf($token, [System.StringComparison]::Ordinal) -lt 0) {
+            Add-Finding ("{0} omits autonomous reference discovery contract token: {1}" -f $contract.Label, $token)
+        }
     }
 }
 

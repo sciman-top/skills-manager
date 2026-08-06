@@ -3198,6 +3198,18 @@ Describe "Reference shelf governance" {
     $refreshScript = Join-Path $repoRoot "scripts\refresh-reference-repos.ps1"
     $governanceScript = Join-Path $repoRoot "scripts\verify-reference-governance.ps1"
 
+    It "Keeps autonomous discovery review-gated and clone-only until separate adoption" {
+        $agents = Get-Content -LiteralPath (Join-Path $repoRoot "AGENTS.md") -Raw
+        $readme = Get-Content -LiteralPath (Join-Path $repoRoot "references\README.md") -Raw
+        $tierDoc = Get-Content -LiteralPath (Join-Path $repoRoot "docs\EXTERNAL_REFERENCE_REPO_TIERS.md") -Raw
+
+        $agents | Should Match "conditional-not-cloned"
+        $agents | Should Match "-CloneMissing -FetchOnly -SkipDirtyRepos"
+        $agents | Should Match "克隆不等于采纳"
+        $readme | Should Match "<registered-candidate>"
+        $tierDoc | Should Match "does not authorize adoption"
+    }
+
     It "Rejects rooted and traversal reference paths before normalization" {
         . $governanceScript
 

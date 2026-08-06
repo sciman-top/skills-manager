@@ -1,6 +1,6 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
-**全局规则复核**: 9.69
+**全局规则复核**: 9.70
 **最后更新**: 2026-08-06
 
 ## 1. 当前落点与目标归宿
@@ -41,6 +41,8 @@
 ### B.2 参考依据与外置源码
 - 路由真源为 `references/reference-shelf.manifest.json` 与 `docs/EXTERNAL_REFERENCE_REPO_TIERS.md`；本地根为 `D:\CODE\external\skills-manager-references`，共享克隆以 `D:\CODE\external\_shared\references.manifest.json` 为准。
 - 规则加载、skill/plugin 包装、MCP spec/registry、audit/sync 或重复失败命中全局条件时，按 tier 选择性只读查阅；`skills.json` 仍是运行真源。
+- 当现有 shelf 与官方资料不足且源码级比对有明确收益时，可自主搜索公开开源仓；先在 manifest 登记为 `conditional-not-cloned`，固定 URL/revision/license、相关性、触发条件、review evidence 与采纳决定，再用 `scripts/refresh-reference-repos.ps1 -RepoNames <name> -CloneMissing -FetchOnly -SkipDirtyRepos` 克隆到登记的 `conditional/` 路径。
+- 克隆不等于采纳、安装或执行；来源/许可证不明、目录冲突、已有 checkout 脏、需要认证或无本仓消费者时阻断，不因 stars、趋势或单次兴趣扩大长期 shelf。
 - 不继承参考仓指令，不修改共享 clone 或生成目录；记录路径/revision 与采纳决定，复制前核对许可证、来源锁定和 projection contract。
 
 ## C. 门禁、证据与回滚
