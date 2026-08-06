@@ -6,6 +6,8 @@ Describe 'watch guard fresh runtime doctor' {
         $targetGenerator = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchHeartbeatPrompt.ps1'
         $fleetGenerator = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchFleetSupervisorPrompt.ps1'
         $script:targetPromptDigest = ((& $targetGenerator -TargetThreadId 'digest-probe' -AsJson) | ConvertFrom-Json).prompt_sha256
+        $script:shutdownTargetPromptDigest = ((& $targetGenerator -TargetThreadId 'digest-probe' -ShutdownManaged -AsJson) | ConvertFrom-Json).prompt_sha256
+        $script:runtimeGenerationId = ((& $targetGenerator -TargetThreadId 'digest-probe' -AsJson) | ConvertFrom-Json).watch_runtime_generation_id
         $script:fleetPromptDigest = ((& $fleetGenerator -SupervisorThreadId 'digest-probe' -AsJson) | ConvertFrom-Json).prompt_sha256
         $script:fleetShutdownPromptDigest = ((& $fleetGenerator -SupervisorThreadId 'digest-probe' -ShutdownWhenAllStopped -AsJson) | ConvertFrom-Json).prompt_sha256
     }
@@ -17,7 +19,7 @@ Describe 'watch guard fresh runtime doctor' {
         $script:hostHook = Join-Path $hostScripts 'block-cross-thread-send.ps1'
         Copy-Item -LiteralPath $sourceHook -Destination $script:hostHook
         $script:hostHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $script:hostHook).Hash.ToLowerInvariant()
-        $script:hookCommand = 'pwsh -NoProfile -ExecutionPolicy Bypass -File "{0}" -ExpectedScriptSha256 "{1}" -ExpectedTargetPromptSha256 "{2}" -ExpectedFleetPromptSha256 "{3}" -ExpectedFleetShutdownPromptSha256 "{4}"' -f $script:hostHook, $script:hostHash, $script:targetPromptDigest, $script:fleetPromptDigest, $script:fleetShutdownPromptDigest
+        $script:hookCommand = 'pwsh -NoProfile -ExecutionPolicy Bypass -File "{0}" -ExpectedScriptSha256 "{1}" -ExpectedTargetPromptSha256 "{2}" -ExpectedShutdownTargetPromptSha256 "{3}" -ExpectedFleetPromptSha256 "{4}" -ExpectedFleetShutdownPromptSha256 "{5}" -ExpectedRuntimeGenerationId "{6}"' -f $script:hostHook, $script:hostHash, $script:targetPromptDigest, $script:shutdownTargetPromptDigest, $script:fleetPromptDigest, $script:fleetShutdownPromptDigest, $script:runtimeGenerationId
         Write-SourceHooksJson
     }
 
@@ -74,6 +76,7 @@ Describe 'watch guard fresh runtime doctor' {
         $result.current_hash | Should Be ('sha256:' + ('a' * 64))
         $result.host_sha256 | Should Be $script:hostHash
         $result.target_prompt_sha256 | Should Be $script:targetPromptDigest
+        $result.shutdown_target_prompt_sha256 | Should Be $script:shutdownTargetPromptDigest
         $result.fleet_prompt_sha256 | Should Be $script:fleetPromptDigest
         $result.fleet_shutdown_prompt_sha256 | Should Be $script:fleetShutdownPromptDigest
         $result.runtime_shape_matches | Should Be $true

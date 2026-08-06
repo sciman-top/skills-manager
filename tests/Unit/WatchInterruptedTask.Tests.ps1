@@ -8,6 +8,7 @@ Describe 'watch-interrupted-task conditional recovery contract' {
         $script:skill = Get-Content -Raw -LiteralPath $skillPath
         $script:recoveryDesign = Get-Content -Raw -LiteralPath $recoveryDesignPath
         $script:prompt = & $promptScriptPath -TargetThreadId 'target-test'
+        $script:shutdownManagedPrompt = & $promptScriptPath -TargetThreadId 'target-test' -ShutdownManaged
         $script:checkpoint = 'watch-checkpoint:' + ('c' * 64)
         $script:receipt = 'watch-receipt:' + ('d' * 64)
     }
@@ -18,6 +19,13 @@ Describe 'watch-interrupted-task conditional recovery contract' {
         $script:prompt | Should Match 'policy_revision=3'
         $script:prompt | Should Match 'resume_from_checkpoint'
         $script:prompt | Should -Not -Match 'classification is observation only'
+    }
+
+    It 'keeps canonical scheduled prompts self contained without runtime skill injection' {
+        $script:prompt | Should -Not -Match 'Use \$watch-interrupted-task'
+        $script:shutdownManagedPrompt | Should -Not -Match 'Use \$watch-interrupted-task'
+        $script:prompt | Should Match 'watch_runtime_generation_id=watch-runtime-generation:[0-9a-f]{64}'
+        $script:shutdownManagedPrompt | Should Match 'shutdown_managed=true'
     }
 
     It 'never lets stale heartbeat instructions hijack a direct user turn after compaction' {
@@ -139,6 +147,44 @@ Describe 'watch-interrupted-task conditional recovery contract' {
             $accepted.requires_receipt | Should Be $true
             $accepted.reason_code | Should Be 'proved_stopped_cleanup_ready'
         }
+    }
+
+    It 'quiesces a proved shutdown-managed terminal watch and suppresses the same notification receipt' {
+        $now = [DateTime]::UtcNow.ToString('o')
+        $common = @{
+            State = 'needs_input'
+            OperatingMode = 'conditional_recovery'
+            GoalStatus = 'paused'
+            TaskStopped = $true
+            StopReason = 'human_input_required'
+            HasPositiveEvidence = $true
+            EvidenceTimestampUtc = $now
+            CheckpointId = $script:checkpoint
+            ReceiptKey = $script:receipt
+            ExternalEffectState = 'none'
+            NoActiveTurn = $true
+            ShutdownManaged = $true
+        }
+
+        $first = & $dispositionScriptPath @common
+        $first.automation_action | Should Be 'request_supervisor_cleanup'
+        $first.quiesce_action | Should Be 'pause_self'
+        $first.notification_action | Should Be 'notify_once'
+
+        $repeat = & $dispositionScriptPath @common -PriorNotifiedReceiptKey $script:receipt
+        $repeat.automation_action | Should Be 'request_supervisor_cleanup'
+        $repeat.quiesce_action | Should Be 'pause_self'
+        $repeat.notification_action | Should Be 'dont_notify'
+
+        $natural = & $dispositionScriptPath @common -State natural_pause -StopReason user_checkpoint
+        $natural.quiesce_action | Should Be 'pause_self'
+        $natural.notification_action | Should Be 'dont_notify'
+    }
+
+    It 'never asks for a second cleanup approval in shutdown-managed mode' {
+        $script:shutdownManagedPrompt | Should Match 'quiesce_action=pause_self'
+        $script:shutdownManagedPrompt | Should Match 'native pause receipt'
+        $script:shutdownManagedPrompt | Should -Not -Match '允许清理|保留守夜|cleanup or keep|approve cleanup'
     }
 
     It 'keeps stopped cleanup fail closed without fresh complete safe stop evidence' {

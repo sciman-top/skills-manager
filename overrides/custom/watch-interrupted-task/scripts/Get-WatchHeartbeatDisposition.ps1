@@ -24,6 +24,9 @@ param(
     [ValidateSet('supervisor_monitor_only', 'conditional_recovery')]
     [string]$OperatingMode = 'conditional_recovery',
 
+    [switch]$ShutdownManaged,
+    [AllowEmptyString()][string]$PriorNotifiedReceiptKey = '',
+
     [ValidateSet('none', 'active', 'paused', 'complete', 'blocked')]
     [string]$GoalStatus = 'none',
 
@@ -59,6 +62,7 @@ $result = [ordered]@{
     task_action = 'observe_only'
     goal_action = 'keep_active'
     automation_action = 'keep_active'
+    quiesce_action = 'none'
     mutation_owner = 'none'
     notification_action = 'dont_notify'
     next_retry_at = if (-not [string]::IsNullOrWhiteSpace($NextRetryAtUtc)) { $NextRetryAtUtc } else { $NextRetryAt }
@@ -67,6 +71,7 @@ $result = [ordered]@{
     task_stopped = [bool]$TaskStopped
     stop_reason = $StopReason
     recovery_pending = [bool]$RecoveryPending
+    prior_notified_receipt_key = $PriorNotifiedReceiptKey
 }
 
 $evaluationNow = [DateTimeOffset]::MinValue
@@ -175,6 +180,7 @@ elseif ($State -ceq 'goal_satisfied') {
         $result.mutation_owner = 'target_thread'
         if ($GoalStatus -in @('none', 'complete') -and $NoActiveTurn -and (Test-RecoveryEvidence)) {
             $result.automation_action = 'request_supervisor_cleanup'
+            if ($ShutdownManaged) { $result.quiesce_action = 'pause_self' }
             $result.requires_receipt = $true
             $result.reason_code = 'acceptance_verified_cleanup_ready'
         }
@@ -190,9 +196,6 @@ elseif ($State -ceq 'goal_satisfied') {
 }
 elseif ($State -in @('natural_pause', 'needs_input', 'complete', 'non_transient_failure', 'stopped')) {
     $result.task_action = if ($State -ceq 'needs_input') { 'stop_for_user' } else { 'stop_terminal' }
-    if ($State -in @('needs_input', 'non_transient_failure')) {
-        $result.notification_action = 'notify_once'
-    }
     $result.reason_code = switch ($State) {
         'natural_pause' { 'user_pause_or_checkpoint' }
         'needs_input' { 'human_gate' }
@@ -207,9 +210,13 @@ elseif ($State -in @('natural_pause', 'needs_input', 'complete', 'non_transient_
     }
     if (Test-StoppedEvidence) {
         $result.automation_action = 'request_supervisor_cleanup'
+        if ($ShutdownManaged) { $result.quiesce_action = 'pause_self' }
         $result.mutation_owner = 'target_thread'
         $result.requires_receipt = $true
         $result.reason_code = 'proved_stopped_cleanup_ready'
+        if ($State -in @('needs_input', 'non_transient_failure') -and $PriorNotifiedReceiptKey -cne $ReceiptKey) {
+            $result.notification_action = 'notify_once'
+        }
     }
 }
 elseif ($State -in @('unknown', 'soft_guard_only')) {

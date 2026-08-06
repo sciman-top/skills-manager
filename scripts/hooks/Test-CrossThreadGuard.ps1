@@ -36,18 +36,26 @@ if ($sourceHash -and $hostHash) {
 
 $definitionMatches = $false
 $targetPromptHash = $null
+$shutdownTargetPromptHash = $null
 $fleetPromptHash = $null
 $fleetShutdownPromptHash = $null
 $currentTargetPromptHash = $null
+$currentShutdownTargetPromptHash = $null
 $currentFleetPromptHash = $null
 $currentFleetShutdownPromptHash = $null
+$runtimeGenerationId = $null
 $targetDoctorPrompt = $null
+$shutdownTargetDoctorPrompt = $null
 $fleetDoctorPrompt = $null
 $fleetShutdownDoctorPrompt = $null
 try {
     if (Test-Path -LiteralPath $SourceTargetPromptGeneratorPath -PathType Leaf) {
         $targetDoctorPrompt = & $SourceTargetPromptGeneratorPath -TargetThreadId 'doctor-source'
-        $currentTargetPromptHash = ((& $SourceTargetPromptGeneratorPath -TargetThreadId 'digest-probe' -AsJson) | ConvertFrom-Json).prompt_sha256
+        $currentTargetPromptData = ((& $SourceTargetPromptGeneratorPath -TargetThreadId 'digest-probe' -AsJson) | ConvertFrom-Json)
+        $currentTargetPromptHash = $currentTargetPromptData.prompt_sha256
+        $runtimeGenerationId = [string]$currentTargetPromptData.watch_runtime_generation_id
+        $shutdownTargetDoctorPrompt = & $SourceTargetPromptGeneratorPath -TargetThreadId 'doctor-shutdown-target' -ShutdownManaged
+        $currentShutdownTargetPromptHash = ((& $SourceTargetPromptGeneratorPath -TargetThreadId 'digest-probe' -ShutdownManaged -AsJson) | ConvertFrom-Json).prompt_sha256
     }
     if (Test-Path -LiteralPath $SourceFleetPromptGeneratorPath -PathType Leaf) {
         $fleetDoctorPrompt = & $SourceFleetPromptGeneratorPath -SupervisorThreadId 'doctor-fleet'
@@ -58,6 +66,7 @@ try {
 }
 catch {
     $currentTargetPromptHash = $null
+    $currentShutdownTargetPromptHash = $null
     $currentFleetPromptHash = $null
     $currentFleetShutdownPromptHash = $null
 }
@@ -74,12 +83,16 @@ if (Test-Path -LiteralPath $hooksPath) {
                 if ([string]$handler.type -ceq 'command' -and $handlerCommandWindows -ceq $handlerCommand -and
                     $handlerCommand -like "*$hostHook*" -and $handlerCommand -like "*$hostHash*" -and
                     $handlerCommand -match '(?i)-ExpectedTargetPromptSha256\s+["'']?([0-9a-f]{64})' -and
+                    $handlerCommand -match '(?i)-ExpectedShutdownTargetPromptSha256\s+["'']?([0-9a-f]{64})' -and
                     $handlerCommand -match '(?i)-ExpectedFleetPromptSha256\s+["'']?([0-9a-f]{64})' -and
-                    $handlerCommand -match '(?i)-ExpectedFleetShutdownPromptSha256\s+["'']?([0-9a-f]{64})') {
+                    $handlerCommand -match '(?i)-ExpectedFleetShutdownPromptSha256\s+["'']?([0-9a-f]{64})' -and
+                    $handlerCommand -match '(?i)-ExpectedRuntimeGenerationId\s+["'']?(watch-runtime-generation:[0-9a-f]{64})') {
                     $targetPromptHash = [regex]::Match($handlerCommand, '(?i)-ExpectedTargetPromptSha256\s+["'']?([0-9a-f]{64})').Groups[1].Value.ToLowerInvariant()
+                    $shutdownTargetPromptHash = [regex]::Match($handlerCommand, '(?i)-ExpectedShutdownTargetPromptSha256\s+["'']?([0-9a-f]{64})').Groups[1].Value.ToLowerInvariant()
                     $fleetPromptHash = [regex]::Match($handlerCommand, '(?i)-ExpectedFleetPromptSha256\s+["'']?([0-9a-f]{64})').Groups[1].Value.ToLowerInvariant()
                     $fleetShutdownPromptHash = [regex]::Match($handlerCommand, '(?i)-ExpectedFleetShutdownPromptSha256\s+["'']?([0-9a-f]{64})').Groups[1].Value.ToLowerInvariant()
-                    $definitionMatches = $targetPromptHash -ceq $currentTargetPromptHash -and $fleetPromptHash -ceq $currentFleetPromptHash -and $fleetShutdownPromptHash -ceq $currentFleetShutdownPromptHash
+                    $installedGenerationId = [regex]::Match($handlerCommand, '(?i)-ExpectedRuntimeGenerationId\s+["'']?(watch-runtime-generation:[0-9a-f]{64})').Groups[1].Value.ToLowerInvariant()
+                    $definitionMatches = $installedGenerationId -ceq $runtimeGenerationId -and $targetPromptHash -ceq $currentTargetPromptHash -and $shutdownTargetPromptHash -ceq $currentShutdownTargetPromptHash -and $fleetPromptHash -ceq $currentFleetPromptHash -and $fleetShutdownPromptHash -ceq $currentFleetShutdownPromptHash
                 }
             }
         }
@@ -100,6 +113,7 @@ $simulationCases = [ordered]@{
     read_only_subexpression_send = $false
     reader_exec_option_send = $false
     target_self_delete = $false
+    shutdown_target_self_pause = $false
     code_mode_target_self_delete = $false
     fleet_self_delete = $false
     fleet_target_pause = $false
@@ -112,11 +126,13 @@ $simulationCases = [ordered]@{
 }
 if ($hostExists) {
     $targetTranscript = [System.IO.Path]::GetTempFileName()
+    $shutdownTargetTranscript = [System.IO.Path]::GetTempFileName()
     $fleetTranscript = [System.IO.Path]::GetTempFileName()
     $fleetShutdownTranscript = [System.IO.Path]::GetTempFileName()
     $ordinaryTranscript = [System.IO.Path]::GetTempFileName()
     try {
         [ordered]@{ timestamp = '2026-08-05T00:00:00Z'; type = 'response_item'; payload = [ordered]@{ type = 'message'; role = 'user'; content = @([ordered]@{ type = 'input_text'; text = "<heartbeat>`n<automation_id>watch-interrupted-task-v1-target-thread-id-doctor-source</automation_id>`n<instructions>`n$targetDoctorPrompt`n</instructions>`n</heartbeat>" }); internal_chat_message_metadata_passthrough = [ordered]@{ turn_id = 'doctor-turn' } } } | ConvertTo-Json -Depth 10 -Compress | Set-Content -LiteralPath $targetTranscript -NoNewline
+        [ordered]@{ timestamp = '2026-08-05T00:00:00Z'; type = 'response_item'; payload = [ordered]@{ type = 'message'; role = 'user'; content = @([ordered]@{ type = 'input_text'; text = "<heartbeat>`n<automation_id>watch-interrupted-task-v1-target-thread-id-doctor-shutdown-target</automation_id>`n<instructions>`n$shutdownTargetDoctorPrompt`n</instructions>`n</heartbeat>" }); internal_chat_message_metadata_passthrough = [ordered]@{ turn_id = 'doctor-turn' } } } | ConvertTo-Json -Depth 10 -Compress | Set-Content -LiteralPath $shutdownTargetTranscript -NoNewline
         [ordered]@{ timestamp = '2026-08-05T00:00:00Z'; type = 'response_item'; payload = [ordered]@{ type = 'message'; role = 'user'; content = @([ordered]@{ type = 'input_text'; text = "<heartbeat>`n<automation_id>watch-interrupted-task-v1-target-thread-id-doctor-fleet</automation_id>`n<instructions>`n$fleetDoctorPrompt`n</instructions>`n</heartbeat>" }); internal_chat_message_metadata_passthrough = [ordered]@{ turn_id = 'doctor-turn' } } } | ConvertTo-Json -Depth 10 -Compress | Set-Content -LiteralPath $fleetTranscript -NoNewline
         [ordered]@{ timestamp = '2026-08-05T00:00:00Z'; type = 'response_item'; payload = [ordered]@{ type = 'message'; role = 'user'; content = @([ordered]@{ type = 'input_text'; text = "<heartbeat>`n<automation_id>watch-interrupted-task-v1-target-thread-id-doctor-fleet-shutdown</automation_id>`n<instructions>`n$fleetShutdownDoctorPrompt`n</instructions>`n</heartbeat>" }); internal_chat_message_metadata_passthrough = [ordered]@{ turn_id = 'doctor-turn' } } } | ConvertTo-Json -Depth 10 -Compress | Set-Content -LiteralPath $fleetShutdownTranscript -NoNewline
         [ordered]@{ timestamp = '2026-08-05T00:00:00Z'; type = 'response_item'; payload = [ordered]@{ type = 'message'; role = 'user'; content = @([ordered]@{ type = 'input_text'; text = '关闭当前任务守夜。' }); internal_chat_message_metadata_passthrough = [ordered]@{ turn_id = 'doctor-turn' } } } | ConvertTo-Json -Depth 10 -Compress | Set-Content -LiteralPath $ordinaryTranscript -NoNewline
@@ -176,6 +192,13 @@ if ($hostExists) {
             tool_name = 'codex_app__automation_update'
             tool_input = [ordered]@{ mode = 'delete'; id = 'watch-interrupted-task-v1-target-thread-id-doctor-source' }
             expect = 'deny'
+        }
+        shutdown_target_self_pause = [ordered]@{
+            session_id = 'doctor-shutdown-target'
+            transcript_path = $shutdownTargetTranscript
+            tool_name = 'codex_app__automation_update'
+            tool_input = [ordered]@{ mode = 'update'; id = 'watch-interrupted-task-v1-target-thread-id-doctor-shutdown-target'; targetThreadId = 'doctor-shutdown-target'; status = 'PAUSED' }
+            expect = 'allow'
         }
         code_mode_target_self_delete = [ordered]@{
             session_id = 'doctor-source'
@@ -253,8 +276,10 @@ if ($hostExists) {
         $output = $payload | & pwsh -NoProfile -ExecutionPolicy Bypass -File $hostHook `
             -ExpectedScriptSha256 $hostHash `
             -ExpectedTargetPromptSha256 $targetPromptHash `
+            -ExpectedShutdownTargetPromptSha256 $shutdownTargetPromptHash `
             -ExpectedFleetPromptSha256 $fleetPromptHash `
-            -ExpectedFleetShutdownPromptSha256 $fleetShutdownPromptHash 2>$null
+            -ExpectedFleetShutdownPromptSha256 $fleetShutdownPromptHash `
+            -ExpectedRuntimeGenerationId $runtimeGenerationId 2>$null
         $expected = if ($probe.Value.expect) { [string]$probe.Value.expect } else { 'deny' }
         if ($LASTEXITCODE -eq 0 -and $expected -ceq 'allow' -and -not $output) {
             $simulationCases[$probe.Key] = $true
@@ -271,7 +296,7 @@ if ($hostExists) {
     }
     }
     finally {
-        Remove-Item -LiteralPath $targetTranscript, $fleetTranscript, $fleetShutdownTranscript, $ordinaryTranscript -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $targetTranscript, $shutdownTargetTranscript, $fleetTranscript, $fleetShutdownTranscript, $ordinaryTranscript -Force -ErrorAction SilentlyContinue
     }
 }
 $simulationPassed = @($simulationCases.Values | Where-Object { -not $_ }).Count -eq 0
@@ -280,6 +305,7 @@ $staticConfigurationReady = $featuresEnabled -and $hashMatches -and $definitionM
 
 [pscustomobject]@{
     configuration_ready = $false
+    watch_runtime_generation_id = $runtimeGenerationId
     static_configuration_ready = $staticConfigurationReady
     feature_enabled = $featuresEnabled
     source_sha256 = $sourceHash
@@ -287,12 +313,14 @@ $staticConfigurationReady = $featuresEnabled -and $hashMatches -and $definitionM
     hash_matches = $hashMatches
     definition_matches = $definitionMatches
     target_prompt_sha256 = $targetPromptHash
+    shutdown_target_prompt_sha256 = $shutdownTargetPromptHash
     fleet_prompt_sha256 = $fleetPromptHash
     fleet_shutdown_prompt_sha256 = $fleetShutdownPromptHash
     current_target_prompt_sha256 = $currentTargetPromptHash
+    current_shutdown_target_prompt_sha256 = $currentShutdownTargetPromptHash
     current_fleet_prompt_sha256 = $currentFleetPromptHash
     current_fleet_shutdown_prompt_sha256 = $currentFleetShutdownPromptHash
-    prompt_digests_match = ($targetPromptHash -ceq $currentTargetPromptHash -and $fleetPromptHash -ceq $currentFleetPromptHash -and $fleetShutdownPromptHash -ceq $currentFleetShutdownPromptHash)
+    prompt_digests_match = ($targetPromptHash -ceq $currentTargetPromptHash -and $shutdownTargetPromptHash -ceq $currentShutdownTargetPromptHash -and $fleetPromptHash -ceq $currentFleetPromptHash -and $fleetShutdownPromptHash -ceq $currentFleetShutdownPromptHash)
     simulation_passed = $simulationPassed
     simulation_cases = [pscustomobject]$simulationCases
     trust_status = 'unverified_requires_slash_hooks'

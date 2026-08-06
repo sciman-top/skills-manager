@@ -4,14 +4,15 @@ param(
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$')]
     [string]$TargetThreadId,
 
+    [switch]$ShutdownManaged,
+
     [switch]$AsJson
 )
 
 . (Join-Path $PSScriptRoot 'WatchPromptCommon.ps1')
 
-$body = @'
-Use $watch-interrupted-task for this target thread.
-
+$generationId = Get-WatchRuntimeGenerationId
+$body = "watch_runtime_generation_id=$generationId`n`n" + @'
 operating_mode=conditional_recovery. policy_revision=3 authorizes evidence-gated recovery inside this target thread only. It never authorizes cross-task messaging, broader permissions, silent Goal replacement, or blind replay.
 
 Before doing anything, prove that the current user input itself is the native heartbeat envelope for this automation_id and target marker. Do not infer heartbeat mode from an earlier turn, conversation history, a summary, automation metadata, or remembered instructions. After any context compaction, immediately re-check the current input provenance before continuing or choosing the final response shape. If the current input is a direct user or business message rather than the native heartbeat envelope, exit this automation controller, ignore stale heartbeat instructions, continue the direct user task normally, and do not emit heartbeat XML.
@@ -41,9 +42,21 @@ Every tick must finish with exactly this native XML shape and no text outside it
 <heartbeat>
   <automation_id>copy-current-automation-id</automation_id>
   <decision>DONT_NOTIFY|NOTIFY</decision>
-  <message>state=...;receipt_key=...;checkpoint_id=...;task_stopped=true|false;stop_reason=...;recovery_pending=true|false;next_retry_at=...;evidence_timestamp_utc=...;external_effect_state=none|safe|unknown|unsafe;no_active_turn=true|false;automation_action=keep_active|request_supervisor_cleanup</message>
+  <message>state=...;receipt_key=...;checkpoint_id=...;task_stopped=true|false;stop_reason=...;recovery_pending=true|false;next_retry_at=...;evidence_timestamp_utc=...;external_effect_state=none|safe|unknown|unsafe;no_active_turn=true|false;automation_action=keep_active|request_supervisor_cleanup;quiesce_action=none|pause_self;pause_receipt_key=...</message>
 </heartbeat>
 '@
+
+if ($ShutdownManaged) {
+    $body += @'
+
+
+shutdown_managed=true. This target was enrolled by an already armed shutdown fleet. That direct-user lifecycle authority removes any later cleanup-or-keep approval gate; never ask the offline user whether to clean up or retain this watch.
+
+For a proved stable stop only, call Get-WatchHeartbeatDisposition.ps1 with ShutdownManaged and PriorNotifiedReceiptKey from the durable fleet journal. When and only when it returns automation_action=request_supervisor_cleanup and quiesce_action=pause_self, update exactly this target's matching canonical heartbeat from ACTIVE to PAUSED through the native automation capability. Change status only: never delete, resume, replace the prompt, change cadence or notification policy, or mutate another task. Verify the native pause receipt and fresh PAUSED metadata before emitting the final XML. Include quiesce_action=pause_self and pause_receipt_key in that XML. If pause is denied, unproved, or conflicts with fresh metadata, report the deduplicated control-plane fault once and leave shutdown ineligible.
+
+The PAUSED state is terminal quiescence, not business completion. The authorized supervisor will independently re-read the target, validate this cleanup receipt, delete the PAUSED heartbeat once, and retain the business stop record in its journal. needs_input and non_transient_failure keep one business explanation for the user's next login; natural_pause, complete, and other routine stable stops remain DONT_NOTIFY.
+'@
+}
 
 $marker = "watch-interrupted-task:v1 target_thread_id=$TargetThreadId"
 $hash = Get-WatchPromptSha256 -Body $body
@@ -53,7 +66,9 @@ if ($AsJson) {
     [pscustomobject]@{
         target_thread_id = $TargetThreadId
         policy_revision = 3
+        watch_runtime_generation_id = $generationId
         prompt_sha256 = $hash
+        shutdown_managed = [bool]$ShutdownManaged
         prompt = $prompt
     } | ConvertTo-Json -Depth 6 -Compress
 }
