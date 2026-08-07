@@ -30,8 +30,9 @@
 
 ```text
 pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1          pass
-CapabilityRouter.Tests + CapabilityRouterCrossRepo.Tests        27/27 pass
-global_catalog_discovery candidates                              112, truncated=false
+CapabilityRouter.Tests + CapabilityRouterCrossRepo.Tests + verifier 34/34 pass
+global_catalog_discovery candidates                              106, truncated=false
+discovery_catalog.domain_memberships covered                      47/47
 writing-plans / architecture-patterns cold policy               load_skill, load_allowed=true
 profile_switch_required / profile_mutation_allowed               false / false
 writes_performed                                                  false
