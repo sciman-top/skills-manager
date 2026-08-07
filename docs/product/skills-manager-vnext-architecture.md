@@ -908,6 +908,14 @@ host evaluation 同时记录 cumulative input、cached/uncached input、cache ra
 
 退役条件：真实 M1 样本没有显示相对 native baseline 的净收益；外部工具语言/索引/隐私/资源成本不满足；skill 长期无消费者、误触发或宿主已原生覆盖。退役优先于为保存范围继续包装。
 
+### `ADR-SMV-030 Resident dispatcher and complete-catalog cold entry`
+
+决定：profile 只负责 resident metadata 预算、domain/index partition 和未来任务的 preheat 建议；每个可能受益于本地 skill 的非平凡请求先进入 resident `capability-router` dispatcher。无显式 domain/profile hint 时，router 直接从相邻 portable catalog 暴露完整 canonical candidate index，再由宿主 AI 依据完整请求和否定约束选择最小技能集合，最后由既有 deterministic policy 校验 containment、freshness、availability、side effect、approval 和 activation。该入口不切换或写入 active profile。
+
+理由：官方 Codex skill contract 采用 progressive disclosure，初始 metadata 列表受 8,000 字符/2% context budget 限制并可能省略技能；skill description 的 implicit invocation 是宿主模型选择，不是 middleware 强制调用。原来的 fallback-only router 因而可能在看不到 cold skill 时永远不进入 discovery；原脚本的 no-hint current-profile 过滤还会让 portable catalog 在无 manifest/config 的普通 cwd 得到 0 candidate。resident dispatcher + complete catalog 解除信息循环，同时不把 111 个技能粗暴塞入初始 prompt。
+
+边界：仓库可以确定性地生成完整 catalog、返回 cold-load policy 和证明零写入，但不能把宿主模型是否调用 skill metadata 伪装成硬保证。若未来需要每个请求必经路由，必须由宿主 pre-model middleware/app-server 提供注入和 invocation trace；在官方 surface 未提供该能力前，本仓只承诺 `repo_verified + host_prompt_contract_verified`。
+
 ## 11. 安全与供应链
 
 - 外部内容是不可信输入，不执行其仓库指令或脚本，除非单独评估并授权。

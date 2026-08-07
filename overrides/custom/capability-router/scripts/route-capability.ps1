@@ -15,7 +15,8 @@ param(
     [string[]]$ProfileHint = @(),
     [Alias('SelectedCapability')][string[]]$Candidate = @(),
     [string[]]$ExcludeCapability = @(),
-    [ValidateRange(1, 100)][int]$MaxCandidates = 24,
+    [ValidateRange(1, 256)][int]$MaxCandidates = 128,
+    [switch]$AutoDiscover,
     [hashtable]$MetadataCache = $null
 )
 
@@ -463,7 +464,7 @@ foreach ($hint in $requestedDomainHints) {
         $excludedResults.Add([pscustomobject]@{ kind = if ($legacyOnly) { 'profile' } else { 'domain' }; name = $hint; reason = if ($legacyOnly) { 'unknown_profile' } else { 'unknown_domain' } }) | Out-Null
     }
 }
-if (-not $hasRequestedDomainHints -and $validHints.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($currentProfile) -and $profiles.ContainsKey($currentProfile)) { $validHints.Add($currentProfile) | Out-Null }
+$globalCatalogDiscovery = -not $hasRequestedDomainHints
 $domainResolutionFailed = $hasRequestedDomainHints -and $validHints.Count -eq 0
 
 $hostExcluded = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -534,7 +535,12 @@ foreach ($entry in $entries) {
     if ($hostExcluded.Contains($key) -or $runtimeExcluded.Contains($key)) { continue }
     $include = $false
     if ($entry.kind -eq 'skill') {
-        foreach ($hint in $validHints) { if ($profiles[$hint].Contains([string]$entry.name)) { $include = $true; break } }
+        if ($globalCatalogDiscovery) {
+            $include = $true
+        }
+        else {
+            foreach ($hint in $validHints) { if ($profiles[$hint].Contains([string]$entry.name)) { $include = $true; break } }
+        }
     }
     elseif ($entry.kind -eq 'mcp') {
         $mcpNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -736,7 +742,13 @@ $capabilityGraph = [ordered]@{
     config_path = $configFile
     current_profile = $currentProfile
     current_mcp_profile = $currentMcpProfile
-    discovery_architecture = 'hierarchical_domains_v1'
+    discovery_architecture = 'global_catalog_then_policy_v1'
+    automatic_dispatch = [ordered]@{
+        requested = ([bool]$AutoDiscover -or $globalCatalogDiscovery)
+        scope = if ($globalCatalogDiscovery) { 'all_catalog_skills' } else { 'explicit_domains' }
+        profile_switch_required = $false
+        profile_mutation_allowed = $false
+    }
     discovery_domains = @($profileCatalog | Sort-Object name)
     profile_catalog = @($profileCatalog | Sort-Object name)
     host_snapshot = [ordered]@{
@@ -750,7 +762,8 @@ $capabilityGraph = [ordered]@{
         path = $snapshotFile
     }
     retrieval = [ordered]@{
-        strategy = 'hierarchical_domain_discovery'
+        strategy = if ($globalCatalogDiscovery) { 'global_catalog_discovery' } else { 'hierarchical_domain_discovery' }
+        scope = if ($globalCatalogDiscovery) { 'all_catalog_skills' } else { 'domain_hints' }
         domain_hints = @($validHints)
         profile_hints = @($validHints)
         candidate_count = $discovery.Count

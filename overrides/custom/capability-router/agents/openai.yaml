@@ -1,6 +1,6 @@
 interface:
   display_name: "Capability Router"
-  short_description: "Discover cold capabilities and apply deterministic safety policy"
-  default_prompt: "Use $capability-router only when no visible matching skill or callable native tool covers the request. Let the host AI choose from portable domain-scoped candidates, then validate the chosen capability without changing host state."
+  short_description: "Dispatch every non-trivial task across the complete local skill catalog"
+  default_prompt: "At the start of every non-trivial task, run $capability-router with the complete request and -AutoDiscover; let the host AI choose the smallest sufficient local skill set, then validate/load it without switching profiles or changing host state."
 policy:
   allow_implicit_invocation: true

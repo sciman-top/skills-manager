@@ -373,6 +373,8 @@ M2 correction 的最终目标流为：`visible skill/native tool -> host-native 
 
 同日 portable-catalog correction：projection 将完整 canonical cold inventory 生成到 router 相邻 catalog，普通目标仓不再依赖本仓 manifest/config/policy 或 profile membership 才能发现候选；专用 cross-repo regression test 增加 repo 外 CWD probe，corpus verifier 不消费 ignored deployment state。本 correction 仍是既有 M2/P5-local follow-up，不新增 task/track，不改变 selection 32/32、cold-load 8/8 的历史 `host_evaluation_partial` 边界。
 
+2026-08-07 global dispatch correction：复核官方 progressive-disclosure/8,000-character contract 后确认，portable catalog 本身不能强制宿主 implicit invoke router；旧 router 的 fallback-only description 与无 hint 时 current-profile 过滤共同造成真实漏达。当前入口改为 resident dispatcher + no-hint `global_catalog_discovery`，profile 只保留预算/预热职责，显式 domain hint 仍可用于截断后的窄域检索。该修复的仓库和 prompt-contract 证据为 `repo_verified + host_prompt_contract_verified`；宿主 pre-model middleware、稳定 invocation trace 和 `live_accepted` 仍为 `not_run`。
+
 observe-only 指标为 TTFV、返工切片、非预期人工打断、非产品 artifact、focused/full gate 耗时和 repo_verified→live_accepted 转化。pilot review 前不设数值阈值；指标不作为单项 completion gate，LLM 评分不作为唯一证据。对每项任务同时记录任务复杂度、既有测试健康和人工授权差异，避免把环境差异误判为流程收益。
 
 M3 判定优先删除性维护：pilot 没有缩短 TTFV、没有减少返工/打断，或新增 artifact/上下文/维护成本抵消收益时，删除候选模板、规则或 skill；只有稳定重复且经 replay/shadow/canary 的做法才 reviewed promotion。首轮候选复用现有文档字段评审，不建第二个 lifecycle registry：`session_plan`、`preheat_recommendation`、hierarchical router/catalog、plugin fixture export、Rule Estate multi-target apply、maintenance companion verifier，以及规划/evidence 资产自身。每项记录 `unique_value / native_equivalent / real_consumers / maintenance_cost / retirement_trigger / latest_evidence`。宿主模型或官方能力已原生覆盖时，相关功能进入 adapt/retire，而不是为了保留项目范围继续包装。

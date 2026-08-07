@@ -142,6 +142,18 @@ Describe 'Native-first capability discovery and policy' {
         $result.writes_performed | Should Be $false
     }
 
+    It 'Exposes the complete catalog without a profile hint' {
+        $result = Invoke-TestRouter '设计清晰的模块边界和稳定接口'
+
+        $result.automatic_dispatch.scope | Should Be 'all_catalog_skills'
+        $result.automatic_dispatch.profile_switch_required | Should Be $false
+        $result.retrieval.strategy | Should Be 'global_catalog_discovery'
+        @($result.retrieval.candidates.name) | Should Contain 'codebase-design'
+        @($result.retrieval.candidates.name) | Should Contain 'debug:dotnet'
+        $result.retrieval.truncated | Should Be $false
+        $result.writes_performed | Should Be $false
+    }
+
     It 'Applies deterministic policy only after the host supplies a capability' {
         $result = Invoke-TestRouter '设计清晰的模块边界和稳定接口' @{ ProfileHint = @('engineering'); Candidate = @('skill|codebase-design') }
 

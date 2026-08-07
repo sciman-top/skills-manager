@@ -71,6 +71,10 @@ description: >-
         $domains.catalog_path | Should Match 'capability-router[\\/]catalog\.json$'
         $domains.catalog.status | Should Be 'current'
         @($domains.discovery_domains.name) | Should Contain 'engineering'
+        $domains.automatic_dispatch.scope | Should Be 'all_catalog_skills'
+        $domains.automatic_dispatch.profile_switch_required | Should Be $false
+        $domains.retrieval.strategy | Should Be 'global_catalog_discovery'
+        @($domains.retrieval.candidates.name) | Should Contain 'codebase-design'
         @($candidates.retrieval.candidates.name) | Should Contain 'codebase-design'
         $candidate = @($candidates.retrieval.candidates | Where-Object name -eq 'codebase-design')[0]
         $candidate.path | Should Be (Join-Path $portableRoot 'codebase-design\SKILL.md')

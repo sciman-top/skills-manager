@@ -185,7 +185,7 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 
 - `FR-SEL-001`：以统一 descriptor/policy contract 表达 skill、MCP、plugin/app/connector 和 native tool，但保留每种能力的 path、availability、auth、side-effect 与宿主字段；统一 policy 不等于统一 runtime 或语义路由器。
 - `FR-SEL-002`：宿主 AI 使用完整请求、对话上下文和可见 metadata 做唯一语义判断；确定性脚本只接受 `$skill`/`@skill` 形式的 explicit capability 或宿主标注的 candidate/exclusion，不再用正则、词频或固定同义词表决定相关性。普通文本中的能力名可能位于否定句，不构成选择授权。
-- `FR-SEL-003`：profile 是任务边界的有界预热包和 capability domain/index partition；没有可见匹配时，fallback discovery 先返回可理解的 domain `name + purpose`，宿主选择最多两个 domain 后再取候选，不静默切 profile，也不把 profile 当权限边界。
+- `FR-SEL-003`：profile 是任务边界的有界预热包和 capability domain/index partition；resident dispatcher 在每个可能受益于本地 skill 的非平凡请求中先暴露 portable catalog，宿主从 visible/cold 候选选择能力，不要求用户预先选 profile、不静默切 profile，也不把 profile 当权限边界。
 - `FR-SEL-004`：active/cold read-only skill 输出 `use_active_skill | load_skill`；operator skill 输出 `load_skill_with_approval`；读取必须受 declared root containment 保护。
 - `FR-SEL-005`：已可用 read-only/external-read 能力可自动使用；write/destructive/open-world/unknown 或 needs_activation 必须输出 approval/activation plan。
 - `FR-SEL-006`：建立 direct、indirect、negative、ambiguous、多阶段、architecture/stack、cross-domain、cross-kind、native/no-skill 和 side-effect 中英文自然语言 corpus；分别验证 resident trigger、domain/candidate discovery、宿主选择、policy、完整 SKILL.md 冷加载、零 semantic auto-selection 和零 negative/side-effect violation。
@@ -199,7 +199,7 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 - `FR-SEL-014`：profile 语义归属只能由宿主 AI 以 `decision_owner=host_ai` 的显式 proposal 提供；确定性 planner 校验 `skills.json` freshness、canonical skill/profile 存在性、protected skill、add/remove 冲突、no-op、理由、动作上限、预算和 routing policy，并只输出 `apply_allowed=false`、`writes_performed=false` 的精确 change-set。
 - `FR-SEL-015`：宿主 proposal 经 plan-only 校验后，可在常驻授权下进入非活动 profile 的 bounded canary；每次最多改变 5 个 skill、10 个 membership action，默认至少保留 256 字符 metadata headroom，禁止改变当前 active profile 或其 membership，并以 config hash、单 writer、原子 backup/write、receipt 和 drift-safe rollback 保护状态。
 - `FR-SEL-016`：canary promotion 必须使用 fresh ephemeral host task replay，覆盖每个新增 skill 的 positive/negative prompt 和每个 changed profile 的至少四类代表场景；profile 未恢复、模型输出/期望失败或覆盖不足时自动回滚。模型 replay 只能标记 `host_evaluation_partial`，不得作为唯一门禁或晋级为 live acceptance。
-- `FR-SEL-017`：cold discovery 必须使用 `hierarchical_domains_v1`：首次只暴露 domain `name + purpose`，宿主基于完整请求选择最多两个 domain，第二次才返回 `name + description + path + domains` 候选；不得要求宿主在看见 catalog 前猜不透明 profile 名。
+- `FR-SEL-017`：cold discovery 默认使用 `global_catalog_discovery`：resident dispatcher 在无显式 hint 时返回完整 `name + description + path + domains` candidate index，宿主基于完整请求选择最多三个候选；候选截断时才允许用 domain `name + purpose` 做只读窄化。不得要求宿主或用户在看见 catalog 前猜不透明 profile 名。
 - `FR-SEL-018`：`DomainHint` 支持数组或逗号分隔输入并最多保留两个有效值；`ProfileHint` 仅作为向后兼容别名。candidate 必须带 domain provenance，domain hint 不改变 `active_profile`。
 - `FR-SEL-019`：代表性宿主验收必须分开记录 selection trigger 与 cold-load chain，并观测 router script、router/target `SKILL.md` 全文读取、deterministic policy、profile restore、duration 和 tokens；结果最高为 `host_evaluation_partial`，不得外推为普遍语义正确或业务效果。
 - `FR-SEL-020`：canonical skill inventory 的 name/path/description 新增、删除或变化必须在投影 seam 生成 ignored `reconciliation_needed` signal，包含 before/after fingerprint、精确 delta、当前 config hash、profile/unrouted 摘要和 advisor command；profile-only/no-op sync 不生成新信号，信号不得直接写 profile。

@@ -201,8 +201,13 @@ foreach ($case in @($corpus.cases)) {
     if ([string]$discovery.decision_owner -ne 'host_ai' -or [bool]$discovery.semantic_routing_performed) {
         Add-Finding $caseId 'semantic_owner_mismatch' 'Host AI must own semantic selection and the script must report semantic_routing_performed=false.'
     }
-    if ([string]$discovery.discovery_architecture -ne 'hierarchical_domains_v1' -or [string]$discovery.retrieval.strategy -ne 'hierarchical_domain_discovery') {
-        Add-Finding $caseId 'discovery_architecture_mismatch' 'Router must expose hierarchical_domains_v1 and hierarchical_domain_discovery.'
+    $architecturePair = '{0}|{1}' -f [string]$discovery.discovery_architecture, [string]$discovery.retrieval.strategy
+    $supportedArchitecturePairs = @(
+        'global_catalog_then_policy_v1|global_catalog_discovery',
+        'global_catalog_then_policy_v1|hierarchical_domain_discovery'
+    )
+    if ($architecturePair -notin $supportedArchitecturePairs) {
+        Add-Finding $caseId 'discovery_architecture_mismatch' 'Router must expose global_catalog_then_policy_v1 with global_catalog_discovery (no hint) or hierarchical_domain_discovery (explicit domain hint).'
     }
     if (@($discovery.discovery_domains).Count -eq 0 -or @($discovery.discovery_domains | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.purpose) }).Count -gt 0) {
         Add-Finding $caseId 'discovery_domain_invalid' 'Every discovery domain must have a non-empty purpose.'

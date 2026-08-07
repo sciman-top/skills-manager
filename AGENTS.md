@@ -37,6 +37,7 @@
 - 测试覆盖真实输入形状和关键失败模式，不机械叠加 unit/fixture/E2E 全组合；一个风险由最低充分层级证明。
 - 同一逻辑切片默认共用一份 change evidence；禁止按 task 机械增 evidence、schema、fixture、wrapper 或空模块。
 - 新增/删除 skill 或修改 description 后，宿主 AI 先消费 advisor `host_handoff` 并允许 no-op；只有非活动 profile proposal 通过 deterministic preview、fresh replay 和回滚保护时才自动 apply。当前任务不得热切换 active profile。
+- 每个可能受益于本地技能的非平凡任务先执行 resident `capability-router` 的 complete-catalog dispatch；宿主 AI 从返回的完整候选中选择技能并继续普通 activation/policy，profile 只保留预算与预热职责，不要求用户预先选择或热切换 profile。
 
 ### B.2 参考依据与外置源码
 - 路由真源为 `references/reference-shelf.manifest.json` 与 `docs/EXTERNAL_REFERENCE_REPO_TIERS.md`；本地根为 `D:\CODE\external\skills-manager-references`，共享克隆以 `D:\CODE\external\_shared\references.manifest.json` 为准。
