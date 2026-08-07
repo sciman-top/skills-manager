@@ -220,7 +220,7 @@
       "query": "梳理库存、订单、支付、退款的统一业务语言和 bounded context",
       "profile_hints": ["engineering"],
       "expected_candidates": [{"kind": "skill", "name": "domain-modeling"}],
-      "host_selected": [{"kind": "skill", "name": "domain-modeling", "action": "load_skill"}]
+      "host_selected": [{"kind": "skill", "name": "domain-modeling", "action": "use_active_skill"}]
     },
     {
       "id": "performance",

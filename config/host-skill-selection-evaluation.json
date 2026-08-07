@@ -131,13 +131,13 @@
       "expected": { "required": ["planning-and-task-breakdown"], "forbidden": ["idea-refine"] }
     },
     {
-      "id": "ambiguous-cold-domain-en",
+      "id": "ambiguous-cold-architecture-en",
       "category": "ambiguous",
       "language": "en",
       "profile": "default",
-      "request": "The team keeps using conflicting meanings for account, tenant, workspace, and member; establish a shared model and decision boundary.",
-      "expected": { "required": ["capability-router"], "forbidden": ["domain-modeling"] },
-      "cold_probe": { "domain_hints": ["engineering", "review"], "target_skill": "domain-modeling", "forbidden": ["idea-refine"] }
+      "request": "The service has unclear module boundaries and unstable interfaces; challenge the architecture and propose deeper seams without implementing it.",
+      "expected": { "required": ["capability-router"], "forbidden": ["codebase-design"] },
+      "cold_probe": { "domain_hints": ["engineering", "review"], "target_skill": "codebase-design", "forbidden": ["idea-refine"] }
     },
     {
       "id": "architecture-end-state-zh",

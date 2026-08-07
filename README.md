@@ -251,7 +251,7 @@ P3 plugin-aware 命令中，inventory/lint/eval 为只读；export 仍严格 fix
 
 投影 manifest 为当前 profile 排除项保留 `decision = profile_excluded`，并通过 `profile_reachability` 与 `available_profiles` 区分“可从其他 profile 使用”和“未被任何 profile 路由”。`python`、`mcp`、`review`、`marketing` 与 `video` 用于承接高价值低频技能，避免把整个安装库存塞入 `default`。常用命令：
 
-GPT-5.6 日常路径优先使用 Codex 原生 Plan、Goal、Review、skill 语义匹配和 agent 控制。`default` 只保留故障诊断与完成验证；`coding` 增加增量实现、评审、API 与安全能力；`engineering` 面向产品澄清、spec、计划、领域/模块设计和官方研究。`coding-strict` 才额外提供 TDD 与强约束工作流。profile 是任务边界的预热候选包，当前任务不会热加载 profile 变更，vendor 与技能文件也不会因日常精简而删除。
+GPT-5.6 日常路径优先使用 Codex 原生 Plan、Goal、Review、skill 语义匹配和 agent 控制。`default` 保留故障诊断、完成验证，以及 `grill-with-docs` 所需的聚焦设计访谈依赖闭包；`coding` 增加增量实现、评审、API 与安全能力；`engineering` 面向产品澄清、spec、计划、领域/模块设计和官方研究。`coding-strict` 才额外提供 TDD 与强约束工作流。profile 是任务边界的预热候选包，当前任务不会热加载 profile 变更，vendor 与技能文件也不会因日常精简而删除。
 
 PPT 路由保持职责单一：`custom-teacher-courseware-ppt` 决定课堂课件结构，Presentations 创建或编辑 PPTX，`powerpoint-automation` 只操作 live PowerPoint/COM，`custom-powerpoint-accessibility` 在内容稳定后验证标题、替代文本、阅读顺序、表格、链接、字幕、对比度与动画。可访问性验证不能由截图单独判定；无法检查阅读顺序或辅助技术行为时必须标记为 `not_verified`。
 
@@ -295,7 +295,7 @@ P4/P5 的 lexical selector、task model 和 ranking 是历史 repo_verified 实�
 
 benchmark 使用 ephemeral、read-only Codex 任务，记录 skill 选择、计划/代理/worktree 倾向、耗时和 token，并核对 `original_profile`/`restored_profile`；产物写入忽略的 `artifacts/skill-profile-benchmark/`。它是 `host_evaluation_partial`，用于 canary 代表 prompt 验证和路由开销观察，不替代真实 skill-body trace、代码质量或 live acceptance。
 
-设计访谈统一使用 `grill-with-docs`：在 CLI/IDE 中可显式输入 `$grill-with-docs`，在 Work/Codex 桌面端可从技能选择器指定，也可由模型仅在“grill/设计质询/把方案磨清楚”等明确语义下隐式调用。它不会因为普通实现或重构请求自动启动；完成访谈后只有用户确认的持久决策才写入 `CONTEXT.md`、词汇表或 ADR。`grilling` 与 `domain-modeling` 作为依赖闭包保留，只有在直接进行决策树访谈或领域建模时才单独调用。
+设计访谈统一使用 `grill-with-docs`：在 CLI/IDE 中可显式输入 `$grill-with-docs`，在 Work/Codex 桌面端可从技能选择器指定，也可由模型仅在“grill/设计质询/把方案磨清楚”等明确语义下隐式调用。它不会因为普通实现或重构请求自动启动；完成访谈后只有用户确认的持久决策才写入 `CONTEXT.md`、词汇表或 ADR。`grilling` 与 `domain-modeling` 作为 `default` 的完整依赖闭包保留，防止主技能可见但运行依赖缺失；只有在直接进行决策树访谈或领域建模时才单独调用。
 
 工程 profile 常驻 `draft-spec`，并用 `planning-and-task-breakdown` 承担可审阅的任务拆分；`draft-tickets` 仍保留为显式冷调用能力，避免与通用计划能力重复占用 metadata 预算。这些 draft/planning 能力不调用 tracker，也不建立外部阻塞关系。`to-spec`、`to-tickets`、`setup-matt-pocock-skills` 和 `improve-codebase-architecture` 继续保持显式调用，因为它们会发布、修改仓库配置或执行高成本架构扫描。
 

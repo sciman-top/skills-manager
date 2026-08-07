@@ -74,7 +74,9 @@ try {
         "test-driven-development",
         "verification-before-completion",
         "code-review-and-quality",
-        "domain-modeling"
+        "domain-modeling",
+        "grill-with-docs",
+        "grilling"
     ) @(
         "using-superpowers",
         "brainstorming",
@@ -83,7 +85,7 @@ try {
         "dispatching-parallel-agents",
         "subagent-driven-development",
         "using-git-worktrees"
-    ) @("grill-with-docs", "grilling")
+    )
     Test-SkillProfile "engineering" @(
         "domain-modeling",
         "codebase-design",
@@ -173,6 +175,9 @@ try {
     Test-SkillProfile "default" @(
         "systematic-debugging",
         "verification-before-completion",
+        "domain-modeling",
+        "grill-with-docs",
+        "grilling",
         "chrome:control-chrome",
         "computer-use:computer-use"
     ) @(
@@ -181,7 +186,6 @@ try {
         "brainstorming",
         "planning-and-task-breakdown",
         "dispatching-parallel-agents",
-        "grill-with-docs",
         "custom-junior-physics-animation"
     )
 

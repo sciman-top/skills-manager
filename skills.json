@@ -113,11 +113,14 @@
     },
     "profiles": {
       "default": {
-        "purpose": "General debugging and evidence-based completion checks; simple native tasks need no skill.",
+        "purpose": "General debugging, evidence-based completion checks, and focused design grilling; simple native tasks need no skill.",
         "budget_limit_chars": 8000,
         "enabled_names": [
           "systematic-debugging",
-          "verification-before-completion"
+          "verification-before-completion",
+          "domain-modeling",
+          "grill-with-docs",
+          "grilling"
         ]
       },
       "coding": {
