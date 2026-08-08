@@ -15,9 +15,11 @@ $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 
 Describe 'Workspace rule estate audit' {
     function New-RuleEstateFixture {
-        $workspace = Join-Path $TestDrive 'workspace'; New-Item -ItemType Directory -Path $workspace -Force | Out-Null
+        $workspace = Join-Path $TestDrive ('workspace-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path $workspace -Force | Out-Null
         foreach ($name in @('repo-a', 'repo-b', 'external', '文档')) {
-            $path = Join-Path $workspace $name; New-Item -ItemType Directory -Path (Join-Path $path '.git') -Force | Out-Null
+            $path = Join-Path $workspace $name; New-Item -ItemType Directory -Path $path -Force | Out-Null
+            & git -C $path init -q -b main
+            if ($LASTEXITCODE -ne 0) { throw ('git fixture initialization failed: {0}' -f $path) }
             if ($name -notin @('external', '文档')) {
                 @'
 # Project
@@ -25,9 +27,23 @@ Describe 'Workspace rule estate audit' {
 
 ## D. Global Rule -> Repo Action
 
-- `R1-R2`: use repository commands and evidence.
-- `E4/E5/E6`: use health, supply-chain, and migration gates.
+- Git profile: baseline=`main`; upstream=`none`; closeout=`local_only`.
+- `gate_na`: reason=`fixture has no configured Git remote`; alternative_verification=`git symbolic-ref --short HEAD`; evidence_link=`docs/change-evidence/rule-contract.md`; expires_at=`2099-12-31`; recovery_condition=`a remote is configured`.
+- `R1`: declare the repository destination; evidence=`AGENTS.md`; rollback=revert this slice.
+- `R2`: close the smallest executable step; evidence=`scripts/verify-contract.ps1`; rollback=revert this slice.
+- `E4`: publish health evidence; evidence=`scripts/verify-contract.ps1`; rollback=revert this slice.
+- `E5`: verify supply-chain inputs; evidence=`scripts/verify-contract.ps1`; rollback=revert this slice.
+- `E6`: verify migration and rollback; evidence=`scripts/verify-contract.ps1`; rollback=revert this slice.
+- `S1`: enforce stable semantics with `scripts/verify-contract.ps1`; evidence=`scripts/verify-contract.ps1`; rollback=revert this slice.
+- `S2`: enforce deterministic behavior with `scripts/verify-contract.ps1`; evidence=`scripts/verify-contract.ps1`; rollback=revert this slice.
+- `S3`: enforce project actions with `scripts/verify-contract.ps1`; evidence=`scripts/verify-contract.ps1`; rollback=revert this slice.
+- `S4`: enforce repository evidence with `scripts/verify-contract.ps1`; evidence=`scripts/verify-contract.ps1`; rollback=revert this slice.
+- `S5`: enforce bounded rollback with `scripts/verify-contract.ps1`; evidence=`scripts/verify-contract.ps1`; rollback=revert this slice.
 '@ | Set-Content -LiteralPath (Join-Path $path 'AGENTS.md') -Encoding UTF8
+                New-Item -ItemType Directory -Path (Join-Path $path 'scripts') -Force | Out-Null
+                Set-Content -LiteralPath (Join-Path $path 'scripts\verify-contract.ps1') -Value '# fixture' -Encoding UTF8
+                New-Item -ItemType Directory -Path (Join-Path $path 'docs\change-evidence') -Force | Out-Null
+                Set-Content -LiteralPath (Join-Path $path 'docs\change-evidence\rule-contract.md') -Value '# fixture evidence' -Encoding UTF8
             }
         }
         Set-Content -LiteralPath (Join-Path $workspace 'repo-a\CLAUDE.md') -Value '@AGENTS.md' -Encoding UTF8
@@ -37,7 +53,7 @@ Describe 'Workspace rule estate audit' {
 
 ## A. Common
 
-R1 R2
+R1 R2 S1 S2 S3 S4 S5
 
 ## B. Platform
 
@@ -45,14 +61,14 @@ host delta
 
 ## C. Project contract
 
-Map R1-R2 and E4/E5/E6.
+Map R1-R2, E4/E5/E6, and S1-S5.
 
 ## D. Maintenance
 
 verify drift
 '@
-        Set-Content -LiteralPath (Join-Path $codex 'AGENTS.md') -Value $common -Encoding UTF8
-        Set-Content -LiteralPath (Join-Path $claude 'CLAUDE.md') -Value $common -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $codex 'AGENTS.md') -Value ($common.Replace('host delta', 'codex host delta')) -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $claude 'CLAUDE.md') -Value ($common.Replace('host delta', 'claude host delta')) -Encoding UTF8
         return [pscustomobject]@{ workspace=$workspace; codex=$codex; claude=$claude }
     }
 
@@ -76,7 +92,65 @@ verify drift
         $result.common_aligned | Should Be $true
         $result.codex_delta_present | Should Be $true
         $result.claude_delta_present | Should Be $true
+        $result.platform_deltas_distinct | Should Be $true
+        $result.releases.aligned | Should Be $true
+        @($result.budgets | Where-Object { -not $_.within_budget }).Count | Should Be 0
         @($result.findings).Count | Should Be 0
+    }
+
+    It 'reports flattened platform deltas and global budget overflow' {
+        $f = New-RuleEstateFixture
+        $codexPath = Join-Path $f.codex 'AGENTS.md'
+        $claudePath = Join-Path $f.claude 'CLAUDE.md'
+        $claudeText = [IO.File]::ReadAllText($claudePath).Replace('claude host delta', 'codex host delta')
+        [IO.File]::WriteAllText($claudePath, $claudeText)
+        [IO.File]::AppendAllText($codexPath, ('x' * 17000))
+
+        $result = Get-RuleEstateGlobalAlignment $f.codex $f.claude
+
+        $result.platform_deltas_distinct | Should Be $false
+        @($result.findings.code) | Should Contain 'platform_delta_not_distinct'
+        @($result.findings.code) | Should Contain 'global_rule_budget_exceeded'
+    }
+
+    It 'reports soft budget warning and addition-blocked states before the hard limit' {
+        $f = New-RuleEstateFixture
+        [IO.File]::AppendAllText((Join-Path $f.codex 'AGENTS.md'), ('x' * 14000))
+        [IO.File]::AppendAllText((Join-Path $f.claude 'CLAUDE.md'), ('x' * 15700))
+
+        $result = Get-RuleEstateGlobalAlignment $f.codex $f.claude
+        $codexBudget = @($result.budgets | Where-Object host -eq codex)[0]
+        $claudeBudget = @($result.budgets | Where-Object host -eq claude)[0]
+
+        $codexBudget.state | Should Be 'warning'
+        $claudeBudget.state | Should Be 'addition_blocked'
+        @($result.findings.code) | Should Contain 'global_rule_budget_warning'
+        @($result.findings.code) | Should Contain 'global_rule_budget_addition_blocked'
+        @($result.findings.code) | Should Not Contain 'global_rule_budget_exceeded'
+    }
+
+    It 'warns before a global rule exhausts its byte budget' {
+        $f = New-RuleEstateFixture
+        $codexPath = Join-Path $f.codex 'AGENTS.md'
+        [IO.File]::AppendAllText($codexPath, ('x' * 14200))
+
+        $result = Get-RuleEstateGlobalAlignment $f.codex $f.claude
+
+        @($result.budgets | Where-Object host -eq 'codex')[0].within_budget | Should Be $true
+        @($result.findings.code) | Should Contain 'global_rule_budget_low_headroom'
+    }
+
+    It 'reports host-specific implementation details in common sections' {
+        $f = New-RuleEstateFixture
+        foreach ($path in @((Join-Path $f.codex 'AGENTS.md'), (Join-Path $f.claude 'CLAUDE.md'))) {
+            $text = [IO.File]::ReadAllText($path).Replace('R1 R2 S1 S2 S3 S4 S5', 'R1 R2 S1 S2 S3 S4 S5 send_message_to_thread')
+            [IO.File]::WriteAllText($path, $text)
+        }
+
+        $result = Get-RuleEstateGlobalAlignment $f.codex $f.claude
+
+        $result.common_aligned | Should Be $true
+        @($result.findings.code) | Should Contain 'global_common_platform_leak'
     }
 
     It 'does not report registry drift when no registry comparison was requested' {
@@ -93,6 +167,8 @@ verify drift
         $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
 
         $report.summary.target_count | Should Be 2
+        $report.inventory.registry.supplied | Should Be $false
+        @($report.findings.code) | Should Not Contain 'target_registry_drift'
         $report.summary.covered_count | Should BeGreaterThan 0
         $report.summary.patch_candidate_count | Should Be 1
         $report.patch_candidates[0].target_path | Should Match 'repo-b\\CLAUDE\.md$'
@@ -115,6 +191,99 @@ verify drift
         $parsed.writes | Should Be 1
         $parsed.report.writes | Should Be 0
         Test-Path -LiteralPath $out | Should Be $true
+    }
+
+    It 'fails the command when a global stable constraint has no repository action' {
+        $f = New-RuleEstateFixture
+        $agents = Join-Path $f.workspace 'repo-a\AGENTS.md'
+        $text = [regex]::Replace([IO.File]::ReadAllText($agents), '(?m)^- `S1`:.*(?:\r?\n|$)', '')
+        [IO.File]::WriteAllText($agents, $text)
+
+        $result = Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--json')
+        $parsed = $result.output | ConvertFrom-Json
+
+        $result.exit_code | Should Be 2
+        $parsed.pass | Should Be $false
+        $parsed.report.semantic_coverage_pass | Should Be $false
+        @($parsed.report.findings | Where-Object { $_.code -eq 'global_repo_action_gap' -and $_.constraint_id -eq 'S1' }).Count | Should Be 1
+    }
+
+    It 'fails deterministic enforcement verification when a mapped path is absent' {
+        $f = New-RuleEstateFixture
+        $agents = Join-Path $f.workspace 'repo-a\AGENTS.md'
+        $text = [IO.File]::ReadAllText($agents).Replace('`scripts/verify-contract.ps1`', '`scripts/missing-contract.ps1`')
+        [IO.File]::WriteAllText($agents, $text)
+
+        $result = Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--json')
+        $parsed = $result.output | ConvertFrom-Json
+
+        $result.exit_code | Should Be 2
+        $parsed.pass | Should Be $false
+        $parsed.report.enforcement_verified | Should Be $false
+        @($parsed.report.findings | Where-Object code -eq 'enforcement_reference_missing').Count | Should BeGreaterThan 0
+    }
+
+    It 'requires S5 to map to a concrete deterministic enforcement reference' {
+        $f = New-RuleEstateFixture
+        $agents = Join-Path $f.workspace 'repo-a\AGENTS.md'
+        $text = [IO.File]::ReadAllText($agents).Replace('`scripts/verify-contract.ps1`', 'a repository gate')
+        [IO.File]::WriteAllText($agents, $text)
+
+        $result = Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--json')
+        $parsed = $result.output | ConvertFrom-Json
+
+        $result.exit_code | Should Be 2
+        @($parsed.report.findings | Where-Object { $_.code -eq 'enforcement_reference_required' -and $_.constraint_id -eq 'S5' }).Count | Should Be 1
+    }
+
+    It 'reports grouped project mappings as textual coverage only' {
+        $f = New-RuleEstateFixture
+        $agents = Join-Path $f.workspace 'repo-a\AGENTS.md'
+        $text = [IO.File]::ReadAllText($agents)
+        $text = [regex]::Replace($text, '(?m)^- `R1`:.*\r?\n- `R2`:.*$', '- `R1-R2`: grouped action; evidence=`AGENTS.md`; rollback=revert this slice.')
+        [IO.File]::WriteAllText($agents, $text)
+
+        $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+
+        @($report.findings | Where-Object code -eq 'project_mapping_grouped').Count | Should Be 1
+        $report.semantic_coverage_pass | Should Be $false
+        $report.summary.textual_mapping_covered_count | Should BeGreaterThan 0
+    }
+
+    It 'reports incomplete and non-expiring N/A records' {
+        $f = New-RuleEstateFixture
+        $agents = Join-Path $f.workspace 'repo-a\AGENTS.md'
+        [IO.File]::AppendAllText($agents, [Environment]::NewLine + '- `gate_na`: reason=fixture; evidence_link=docs/change-evidence/; expires_at=next_change; recovery_condition=code changes.' + [Environment]::NewLine)
+
+        $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+
+        @($report.findings | Where-Object code -eq 'project_na_invalid').Count | Should BeGreaterThan 0
+        $report.structural_pass | Should Be $false
+    }
+
+    It 'reports an N/A evidence link whose repository file is absent' {
+        $f = New-RuleEstateFixture
+        $agents = Join-Path $f.workspace 'repo-a\AGENTS.md'
+        $text = [IO.File]::ReadAllText($agents).Replace('docs/change-evidence/rule-contract.md', 'docs/change-evidence/missing.md')
+        [IO.File]::WriteAllText($agents, $text)
+
+        $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+
+        @($report.findings | Where-Object code -eq 'project_na_evidence_missing').Count | Should BeGreaterThan 0
+        $report.structural_pass | Should Be $false
+    }
+
+    It 'reports a Git profile that disagrees with repository truth' {
+        $f = New-RuleEstateFixture
+        $agents = Join-Path $f.workspace 'repo-a\AGENTS.md'
+        $text = [IO.File]::ReadAllText($agents).Replace('baseline=`main`; upstream=`none`', 'baseline=`release`; upstream=`origin/main`')
+        [IO.File]::WriteAllText($agents, $text)
+
+        $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+
+        @($report.findings | Where-Object code -eq 'project_git_baseline_mismatch').Count | Should Be 1
+        @($report.findings | Where-Object code -eq 'project_git_upstream_mismatch').Count | Should Be 1
+        $report.structural_pass | Should Be $false
     }
 
     It 'rejects an audit output reached through a workspace junction' {
@@ -150,5 +319,16 @@ verify drift
 
         @($report.targets | Where-Object name -eq 'repo-a')[0].release.aligned | Should Be $false
         @($report.findings.code) | Should Contain 'project_global_release_mismatch'
+    }
+
+    It 'reports missing project contract sections and an invalid Claude wrapper' {
+        $f = New-RuleEstateFixture
+        Set-Content -LiteralPath (Join-Path $f.workspace 'repo-a\CLAUDE.md') -Value '# host-only rules' -Encoding UTF8
+
+        $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        $repo = @($report.targets | Where-Object name -eq 'repo-a')[0]
+
+        @($repo.findings.code) | Should Contain 'project_contract_section_missing'
+        @($repo.findings.code) | Should Contain 'project_claude_wrapper_first_line_mismatch'
     }
 }

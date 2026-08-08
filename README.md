@@ -62,7 +62,7 @@ Phase 1 的只读入口（未指定 `--out` 时不写文件）：
 .\skills.ps1 rule-estate-audit --workspace-root D:\CODE --registry .\audit-targets.json --json
 ```
 
-`rule-estate-audit` 默认排除 `external` 与 `文档`，自动发现工作区直属 Git 仓，报告目标清单漂移、Codex/Claude common/delta 对齐、规则版本和 `Global Rule -> Repo Action` 覆盖。`--out <report.json>` 只允许在显式 workspace root 内写一个报告文件，不得穿过 reparse/junction 祖先，也不允许覆盖发现到的规则文件；plan/apply 控制文件使用同一边界。
+`rule-estate-audit` 默认排除 `external` 与 `文档`，动态发现直属 Git 仓，并分别报告 textual mapping 与 semantic gap；grouped mapping 不再视为语义通过。审计还验证 Codex/Claude A/C/D parity、B delta、release/预算余量、项目 `1/A/B/C/D`、Claude wrapper、逐项 R/S/E 映射、N/A 证据文件、Git baseline/upstream 真值及 S5 确定性引用。根规则只保存稳定规范/入口，易变 task/gate/host/live 状态从 manifest/spec/evidence fresh read。`--out <report.json>` 只在显式 workspace root 内写一个报告，不得穿过 reparse/junction 或覆盖输入；plan/apply 同界。
 
 经人工或登记策略审阅的全局/项目规则 change-set 可进入受控多目标流程：
 
@@ -247,44 +247,39 @@ P3 plugin-aware 命令中，inventory/lint/eval 为只读；export 仍严格 fix
 
 `skill_projection.managed_link_excludes` 按受管目录名排除 Codex 的逐技能 Junction；被排除项仍保留在 `agent/`，也不影响 Claude 指向 `agent/` 的根 Junction。该字段适用于保留其他宿主所需技能、但避免其与 Codex `.system` 技能同名冲突的场景。
 
-`skill_projection.aliases` 记录旧名称到替代项的迁移，不把近似能力重新复制成默认技能；`profiles` 控制当前用途下启用的 canonical 技能，`.system` 技能始终保留。顶层 `budget_limit_chars` 对“启用技能名称与描述 + 插件预留”设置 8000 字符 hard ceiling；profile 可用更低的同名字段收紧自身上限，当前 `default` 为 8000、`coding` 为 7500。`external_metadata_reserve_chars` 至少为 system/plugin Skill 预留 3500 字符，实时外部元数据更大时以实时值为准。任一 profile 超限都会阻断投影。
+`skill_projection.aliases` 记录旧名称到替代项的迁移，不把近似能力重新复制成默认技能；`.system` 技能始终保留。P6 native projection 会把所有 eligible enabled skills 交给宿主原生 discovery，profile 不再是 reachability filter；历史 profile 数据只保留在 `profile_compatibility` read-only view，`reachability_authority=none`。`budget_limit_chars` 和 `external_metadata_reserve_chars` 仍用于旧投影兼容边界，native metadata 使用有效 host snapshot 和独立 token-aware planner。
 
-投影 manifest 为当前 profile 排除项保留 `decision = profile_excluded`，并通过 `profile_reachability` 与 `available_profiles` 区分“可从其他 profile 使用”和“未被任何 profile 路由”。`python`、`mcp`、`review`、`marketing` 与 `video` 用于承接高价值低频技能，避免把整个安装库存塞入 `default`。常用命令：
+旧投影 manifest 的 profile 字段仅用于迁移/历史兼容报告；native projection 不得产生 profile reachability 排除。常用命令：
 
 GPT-5.6 日常路径优先使用 Codex 原生 Plan、Goal、Review、skill 语义匹配和 agent 控制。`default` 保留故障诊断、完成验证，以及 `grill-with-docs` 所需的聚焦设计访谈依赖闭包；`coding` 增加增量实现、评审、API 与安全能力；`engineering` 面向产品澄清、spec、计划、领域/模块设计和官方研究。`coding-strict` 才额外提供 TDD 与强约束工作流。profile 是任务边界的预热候选包，当前任务不会热加载 profile 变更，vendor 与技能文件也不会因日常精简而删除。
 
 PPT 路由保持职责单一：`custom-teacher-courseware-ppt` 决定课堂课件结构，Presentations 创建或编辑 PPTX，`powerpoint-automation` 只操作 live PowerPoint/COM，`custom-powerpoint-accessibility` 在内容稳定后验证标题、替代文本、阅读顺序、表格、链接、字幕、对比度与动画。可访问性验证不能由截图单独判定；无法检查阅读顺序或辅助技术行为时必须标记为 `not_verified`。
 
 ```powershell
-.\skills.ps1 技能配置 列表
-.\skills.ps1 技能配置 调和
-.\skills.ps1 技能配置 调和 .\proposal.json
-.\skills.ps1 技能配置 使用 coding
-.\skills.ps1 技能配置 使用 coding-strict
-.\skills.ps1 技能配置 使用 python
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-native-skill-metadata.ps1 -Json
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-skill-routing.ps1 -Json
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\plan-skill-profile-reconciliation.ps1 -Json
 ```
 
-`调和/reconcile` 是 profile 维护的只读 advisor。无 proposal 时报告 `unrouted`、失效引用、全部 metadata 预算和跨多个 profile 的重叠观察，同时输出 `host_handoff`；传入 proposal 时只接受 `schema_version=1`、`decision_owner=host_ai` 和当前 `skills.json` 的 `base_config_sha256`，再校验 skill/profile、protected skill、add/remove、no-op、理由、预算与 routing policy。advisor 本身始终 `apply_allowed=false`、`writes_performed=false`。
+profile reconciliation 脚本现在只承担迁移期的只读/回滚兼容职责，不再由 `skills.ps1` dispatch，也不改变 native reachability。旧 profile 字段必须先进入 `profile_compatibility` read-only view；`scripts/verify-skill-routing.ps1` 只报告 compatibility-only 状态，不能作为 quality gate 或语义 selector。
 
-技能投影会比较 canonical skill 的 name/path/description；真实增删或 metadata 变化时，在 ignored `reports/skill-profile-reconciliation/pending.json` 写入 `reconciliation_needed`，并提示当前宿主运行上述只读 advisor。profile-only/no-op 不产生新信号，signal 不会自行修改 profile。host evaluation 报告会分开 cumulative cached/uncached input 与 tool rounds；日常只跑 1–2 个 focused cold case，全量 8-case corpus 仅用于结构变化或 closeout。cold discovery 对未知 domain fail-closed、显式报告候选截断，并让 current host snapshot 覆盖静态 skill/MCP availability；disabled、needs-auth 或 not-callable 能力不会自动 load/use。
+native projection 编译全部 eligible enabled skills，并由 host snapshot、deterministic eligibility 和 token-aware metadata planner 共同决定是否可投影；profile membership 不能再排除 native skill。host evaluation 区分 listed、selected、injected、executed 和 abstained；本轮 fresh CLI 仅得到 `host_evaluation_partial`，selection/body invocation 不可观测，因此不构成 `host_loaded` 或 `live_accepted`。
 
-宿主已生成最小 proposal 后，可用独立事务 manager 做 apply preview，或在常驻授权下对非活动 profile 运行 canary：
+历史 proposal/canary 接口仅保留用于读取旧 receipt 和回滚审计；P6 staged removal 后不再提供普通请求的 profile apply/热切换路径：
 
 ```powershell
-.scripts\manage-skill-profile-reconciliation.ps1 -Mode Plan -ProposalPath .\proposal.json -Json
-.scripts\manage-skill-profile-reconciliation.ps1 -Mode Apply -ProposalPath .\proposal.json -Token APPLY_PROFILE_RECONCILIATION_CANARY -Json
-.scripts\manage-skill-profile-reconciliation.ps1 -Mode Accept -ReceiptPath <receipt> -ReplayReportPath <report> -CorpusPath <corpus> -Token ACCEPT_PROFILE_RECONCILIATION_CANARY -RollbackOnFailure -Json
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\manage-skill-profile-reconciliation.ps1 -Mode Plan -ProposalPath .\proposal.json -Json
 ```
 
-canary 最多修改 5 个 skill/10 个 membership action，默认至少保留 256 字符 metadata headroom，并禁止触碰当前 active profile；配置写入有原子 backup/receipt。接受必须来自 fresh ephemeral host replay，覆盖 changed skill 的正负 prompt 并证明 profile 已恢复；失败时按 hash 自动回滚。日常只重放 changed profile/skill 的 4–6 个场景，全量 corpus 只用于结构变化或 closeout。脚本不调用第二个模型、不安装/删除 skill，也不提供当前任务 profile 热切换。运行态 receipt/backup 位于忽略的 `reports/skill-profile-reconciliation/`。
+迁移 receipt/backup 仍位于忽略的 `reports/skill-profile-reconciliation/`；任何宿主、provider、session 或 live profile mutation 都不属于本任务。
 
-所有 profile 共享轻量常驻 `capability-router` 与 `watch-interrupted-task`。`capability-router` 现为兼容名称：宿主 AI 先根据完整请求、对话和可见 skill description 原生选择；只有没有可见匹配、用户询问可用能力或需要跨 profile 冷发现时，才先读取 domain `name + purpose`，选择最多两个 domain 后再取得候选。脚本不再用正则/词频理解任务，也不再给出语义置信度；宿主选定最多 3 个候选后，脚本只验证路径、freshness、availability、side effect 与 activation。profile 是 domain/index partition 和任务边界预热包，不会在当前 turn 静默切换。`watch-interrupted-task` 仍只响应明确守夜/心跳口令。
+`capability-router` 现为显式兼容/fallback 资产，不再是 mandatory resident。宿主 AI 根据完整请求、对话和 native metadata 原生选择；只有显式 strict fallback 或兼容性审查才读取 router 资产，脚本只验证路径、freshness、availability、side effect 与 activation。profile 不再是 domain/index reachability partition，也不会在当前 turn 静默切换。旧 `watch-interrupted-task` 已从 resident set 移除，仅保留 fail-closed 清理 stub，禁止创建、恢复或武装 heartbeat；替代架构规划位于 `D:\CODE\codex-watch-runtime`。
 
 P4/P5 的 lexical selector、task model 和 ranking 是历史 repo_verified 实现；真实中文场景回放证明它们不能代表路由实效，已在 maintenance correction 中退役为 `decision_owner=host_ai`、`semantic_routing_performed=false` 的 discovery/policy contract。`scripts/verify-capability-routing.ps1` 使用 direct、indirect、negative、多阶段、架构、调试、评审、跨领域和 side-effect 自然语言 corpus，分别验证候选可达性、宿主标注选择后的 policy 与零自动语义选择；它仍不把 repo corpus 外推为 live acceptance。
 
 `scripts/get-codex-app-server-capability-snapshot.ps1` 只调用稳定只读 App Server RPC；陈旧、不可访问、不可调用和认证缺失事实 fail-closed，单来源故障报告 `partial`。session/profile 输出只是 `apply=false` 的计划或预热建议，不会静默切换宿主状态。
 
-技能初始列表预算的全局硬上限为 `8000` 字符。`resident_names ∪ active_profile.enabled_names` 必须整体通过预算门禁；低频研究、发布、专用执行器优先冷加载，不在多个 profile 中重复常驻。
+技能初始列表由宿主 native metadata surface 决定；当前配置的 `resident_names` 为空，`capability-router` 只作为显式兼容/fallback 资产，不是 mandatory resident。native metadata 预算由 host snapshot、token-aware planner 和 `enabled_total == kept_total` / `omitted=0` invariant 共同约束。
 
 用无模型模式校验 GPT-5.6 profile A/B 语料，或显式执行 12 场景 × 2 profile 的只读 benchmark：
 
@@ -360,7 +355,6 @@ pwsh -NoProfile -File .\scripts\retire-agents-user-skills.ps1 -Apply
 | `卸载MCP` | `mcp-uninstall` |
 | `同步MCP` | `mcp-sync` |
 | `MCP配置` | `mcp-profile` |
-| `技能配置` | `skill-profile` |
 | `清理无效映射` | `prune-invalid-mappings` |
 | `add` | `add` |
 | `npx` | `npx` |
@@ -442,7 +436,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Mode CurrentUser -D
 
 含义：
 
-- `quick`：`build -> repo-hygiene -> generated-sync -> skill-integrity -> skill-routing -> dependency-baseline -> skills-config-contract -> planning-contract -> doctor-json-contract`
+- `quick`：`build -> repo-hygiene -> generated-sync -> skill-integrity -> native-skill-metadata -> dependency-baseline -> skills-config-contract -> planning-contract -> doctor-json-contract`
 - `full`：`quick + tests`
 
 规划合同也可单独执行：

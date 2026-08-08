@@ -4,6 +4,7 @@ Describe 'watch-interrupted-task conditional recovery contract' {
         $skillPath = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\SKILL.md'
         $promptScriptPath = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchHeartbeatPrompt.ps1'
         $dispositionScriptPath = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\Get-WatchHeartbeatDisposition.ps1'
+        $turnDispositionScriptPath = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\Get-WatchHeartbeatDisposition.ps1'
         $recoveryDesignPath = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\references\recovery-design.md'
         $script:skill = Get-Content -Raw -LiteralPath $skillPath
         $script:recoveryDesign = Get-Content -Raw -LiteralPath $recoveryDesignPath
@@ -34,6 +35,56 @@ Describe 'watch-interrupted-task conditional recovery contract' {
         $script:prompt | Should Match 'direct user or business message'
         $script:prompt | Should Match 'do not emit heartbeat XML'
         $script:prompt | Should Match 'ignore stale heartbeat instructions'
+    }
+
+    It 'excludes the current heartbeat turn from business running evidence' {
+        $script:prompt | Should Match 'current heartbeat turn itself never counts as an active business turn'
+        $script:prompt | Should Match 'latest non-heartbeat business turn'
+        $script:prompt | Should Match 'completed before this heartbeat envelope arrived'
+        $script:prompt | Should Match 'recoverable 408/429/502/503/504'
+        $script:prompt | Should Match 'recovery_pending=true'
+    }
+
+    It 'deterministically ignores the active heartbeat and recovers the failed business turn' {
+        $turns = [ordered]@{ turns = @(
+            [ordered]@{ id='heartbeat-now'; status='inProgress'; startedAt=200; error=$null; items=@([ordered]@{ type='userMessage'; content=@([ordered]@{ type='text'; text="<heartbeat>`n<automation_id>automation-2</automation_id>`n<instructions>watch-interrupted-task:v1 target_thread_id=t</instructions>`n</heartbeat>" }) }) },
+            [ordered]@{ id='business-failed'; status='completed'; startedAt=100; error='exceeded retry limit, last status: 429 Too Many Requests'; items=@([ordered]@{ type='agentMessage'; phase='commentary'; text='checkpoint ready' }) }
+        ) } | ConvertTo-Json -Depth 12 -Compress
+        $result = & $turnDispositionScriptPath -TurnsJson $turns | ConvertFrom-Json
+        $result.latest_business_turn_id | Should Be 'business-failed'
+        $result.state | Should Be 'resume_eligible'
+        $result.no_active_turn | Should Be $true
+        $result.task_stopped | Should Be $false
+        $result.recovery_pending | Should Be $true
+    }
+
+    It 'classifies a completed business final as a natural terminal candidate' {
+        $turns = [ordered]@{ turns = @(
+            [ordered]@{ id='heartbeat-now'; status='inProgress'; startedAt=200; error=$null; items=@([ordered]@{ type='userMessage'; content=@([ordered]@{ type='text'; text="<heartbeat>`n<automation_id>a</automation_id>`n<instructions>watch-interrupted-task:v1 target_thread_id=t</instructions>`n</heartbeat>" }) }) },
+            [ordered]@{ id='business-done'; status='completed'; startedAt=100; error=$null; items=@([ordered]@{ type='agentMessage'; phase='final_answer'; text='done' }) }
+        ) } | ConvertTo-Json -Depth 12 -Compress
+        $result = & $turnDispositionScriptPath -TurnsJson $turns | ConvertFrom-Json
+        $result.state | Should Be 'complete'
+        $result.reason_code | Should Be 'business_final_answer_completed'
+        $result.task_stopped | Should Be $true
+        $result.recovery_pending | Should Be $false
+    }
+
+    It 'classifies compaction without a final answer as a continuation gap' {
+        $turns = [ordered]@{ turns = @(
+            [ordered]@{ id='business-gap'; status='completed'; startedAt=100; error=$null; items=@([ordered]@{ type='contextCompaction' }) }
+        ) } | ConvertTo-Json -Depth 12 -Compress
+        $result = & $turnDispositionScriptPath -TurnsJson $turns | ConvertFrom-Json
+        $result.state | Should Be 'continuation_gap'
+        $result.task_stopped | Should Be $false
+        $result.recovery_pending | Should Be $true
+    }
+
+    It 'retires a naturally stopped target from positive business-turn evidence' {
+        $script:prompt | Should Match 'naturally stopped'
+        $script:prompt | Should Match 'latest non-heartbeat business turn has a completed final answer'
+        $script:prompt | Should Match 'automation_action=request_supervisor_cleanup'
+        $script:shutdownManagedPrompt | Should Match 'quiesce_action=pause_self'
     }
 
     It 'treats an active Goal as persisted intent but not completion evidence' {
@@ -297,6 +348,12 @@ Describe 'watch-interrupted-task conditional recovery contract' {
         $script:prompt | Should Match 'external_effect_state'
         $script:prompt | Should Match 'no_active_turn=true\|false'
         $script:prompt | Should -Not -Match 'entire assistant output must be exactly DONT_NOTIFY'
+    }
+
+    It 'keeps routine heartbeat output minimal and does not emit commentary' {
+        $script:prompt | Should Match 'Do not emit commentary or progress prose during a heartbeat tick'
+        $script:prompt | Should Match 'DONT_NOTIFY suppresses notification only'
+        $script:prompt | Should Match 'smallest valid receipt payload'
     }
 
     It 'never uses cross-task messaging or blindly replays external effects' {

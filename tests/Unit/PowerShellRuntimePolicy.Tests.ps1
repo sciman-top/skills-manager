@@ -46,6 +46,15 @@ function New-PowerShellRuntimePolicyFixture([string]$Name) {
         Copy-Item -LiteralPath $source -Destination $destination -Force
     }
 
+    # Mutation cases exercise one targeted contract each. The current-repository
+    # acceptance above already parses the real generated bundle, so keep fixture
+    # replays deterministic without reparsing the same 1+ MiB bundle eight times.
+    [IO.File]::WriteAllText(
+        (Join-Path $fixtureRoot 'skills.ps1'),
+        "#requires -Version 7.0`r`n# focused generated-bundle fixture`r`n",
+        [Text.UTF8Encoding]::new($true)
+    )
+
     return $fixtureRoot
 }
 
@@ -62,7 +71,13 @@ Describe 'PowerShell 7-only runtime policy verifier' {
         $parsed.done | Should Be 5
         $parsed.historical_evidence | Should Be 'preserved'
         $parsed.typed_core_production_status | Should Be 'not_started'
+        $parsed.current_p6_admission_status | Should Be 'admitted'
         @($parsed.findings).Count | Should Be 0
+    }
+
+    It 'keeps mutation fixtures focused instead of copying the multi-megabyte generated bundle' {
+        $fixtureRoot = New-PowerShellRuntimePolicyFixture 'fixture-size'
+        (Get-Item -LiteralPath (Join-Path $fixtureRoot 'skills.ps1')).Length | Should BeLessThan 4096
     }
 
     It 'fails closed when the source runtime floor drifts to 5.1' {

@@ -4,27 +4,51 @@ Describe 'Host skill selection effectiveness evaluation' {
         $scriptPath = Join-Path $repoRoot 'scripts\evaluate-host-skill-selection.ps1'
     }
 
-    It 'Validates 32 selection cases and eight cold-load probes without model calls' {
+    It 'Validates the P6 host-native selection corpus without legacy cold-load probes or model calls' {
         $raw = & pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -Json
 
         $LASTEXITCODE | Should Be 0
         $plan = ($raw -join "`n") | ConvertFrom-Json
         $plan.valid | Should Be $true
         $plan.execute | Should Be $false
-        $plan.selection_case_count | Should Be 32
-        $plan.cold_load_case_count | Should Be 8
-        $plan.planned_calls | Should Be 40
+        $plan.selection_case_count | Should Be 33
+        $plan.cold_load_case_count | Should Be 0
+        $plan.planned_calls | Should Be 33
         $plan.evaluation_cwd | Should Be 'isolated_non_repo_directory'
-        $plan.real_profile_mutation_required | Should Be $true
-        $plan.real_profile_mutation_authorized | Should Be $false
+        $plan.real_profile_mutation_required | Should Be $false
+        $plan.selection_execution_mode | Should Be 'host_native'
 
         $corpus = Get-Content -LiteralPath (Join-Path $repoRoot 'config\host-skill-selection-evaluation.json') -Raw | ConvertFrom-Json
         @($corpus.cases.category | Sort-Object -Unique).Count | Should Be 8
         @($corpus.cases | Where-Object language -eq 'zh').Count | Should Be 16
-        @($corpus.cases | Where-Object language -eq 'en').Count | Should Be 16
+        @($corpus.cases | Where-Object language -eq 'en').Count | Should Be 17
+
+        @($corpus.cases | Where-Object { $null -ne $_.cold_probe }).Count | Should Be 0
+        foreach ($expectedNativeTarget in @{
+            'direct-python-tests-en' = 'python-testing-patterns'
+            'indirect-copy-edit-zh' = 'copy-editing'
+            'indirect-cold-doc-zh' = 'doc-coauthoring'
+            'negative-cold-ui-review-en' = 'web-design-guidelines'
+            'ambiguous-cold-architecture-en' = 'codebase-design'
+            'architecture-python-stack-en' = 'modern-python'
+            'architecture-cold-dotnet-zh' = 'dotnet-backend-patterns'
+            'side-effect-mcp-builder-en' = 'mcp-builder'
+        }.GetEnumerator()) {
+            $case = $corpus.cases | Where-Object id -eq $expectedNativeTarget.Key
+            @($case.expected.required) | Should Contain $expectedNativeTarget.Value
+            @($case.expected.required) | Should Not Contain 'capability-router'
+        }
+
+        $fallbackCase = $corpus.cases | Where-Object id -eq 'direct-policy-fallback-en'
+        @($fallbackCase.expected.required) | Should Contain 'capability-router'
+        $fallbackCase.explicit_fallback | Should Be $true
+
+        $approvedPlanCase = $corpus.cases | Where-Object id -eq 'ambiguous-approved-plan-zh'
+        @($approvedPlanCase.expected.required_any[0]) | Should Contain 'planning-and-task-breakdown'
+        @($approvedPlanCase.expected.required_any[0]) | Should Contain 'draft-tickets'
     }
 
-    It 'Uses per-case profiles without a profile cross product' {
+    It 'Keeps legacy profile labels as read-only corpus metadata' {
         $raw = & pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
             -CaseId 'direct-debug-zh,architecture-python-stack-en' -Mode selection -Json
 
@@ -33,16 +57,25 @@ Describe 'Host skill selection effectiveness evaluation' {
         $plan.selection_case_count | Should Be 2
         $plan.cold_load_case_count | Should Be 0
         $plan.planned_calls | Should Be 2
+        $plan.real_profile_mutation_required | Should Be $false
+        $plan.profile_compatibility_mode | Should Be 'read_only_metadata'
     }
 
-    It 'Plans only the eight paired treatment calls in cold-load mode' {
+    It 'contains no profile mutation command or authorization switch' {
+        $scriptText = Get-Content -LiteralPath $scriptPath -Raw
+        $scriptText | Should Not Match 'AllowRealProfileMutation'
+        $scriptText | Should Not Match 'Set-EvaluationProfile'
+        $scriptText | Should Not Match "'技能配置'\s+'使用'"
+    }
+
+    It 'Keeps the retired cold-load mode as a zero-call compatibility surface' {
         $raw = & pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -Mode cold_load -Json
 
         $LASTEXITCODE | Should Be 0
         $plan = ($raw -join "`n") | ConvertFrom-Json
         $plan.selection_case_count | Should Be 0
-        $plan.cold_load_case_count | Should Be 8
-        $plan.planned_calls | Should Be 8
+        $plan.cold_load_case_count | Should Be 0
+        $plan.planned_calls | Should Be 0
         $plan.real_profile_mutation_required | Should Be $false
     }
 
@@ -65,6 +98,21 @@ Describe 'Host skill selection effectiveness evaluation' {
         $browserCase = $corpus.cases | Where-Object id -eq 'side-effect-browser-test-zh'
         @($browserCase.expected.required_any[0]) | Should Contain 'playwright'
         @($browserCase.expected.required_any[0]) | Should Contain 'webapp-testing'
+    }
+
+    It 'models explicit router fallback as a named host invocation instead of implicit catalog selection' {
+        $tokens = $null
+        $errors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$errors)
+        $functionAst = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-HostSelectionPrompt' }, $true)
+        ($null -ne $functionAst) | Should Be $true
+        if ($null -ne $functionAst) {
+            . ([scriptblock]::Create($functionAst.Extent.Text))
+            $explicitPrompt = Get-HostSelectionPrompt ([pscustomobject]@{ request = 'validate policy'; explicit_fallback = $true })
+            $ordinaryPrompt = Get-HostSelectionPrompt ([pscustomobject]@{ request = 'debug this'; explicit_fallback = $false })
+            $explicitPrompt | Should Match '\$capability-router'
+            $ordinaryPrompt | Should Not Match 'explicitly invoked `\$capability-router`'
+        }
     }
 
     It 'Separates uncached input and command round metrics from cumulative cached usage' {

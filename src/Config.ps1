@@ -1425,6 +1425,12 @@ function Ensure-LockedState($cfg = $null) {
     return $lock
 }
 
+function 验证锁定 {
+    $cfg = LoadCfg
+    $lock = Ensure-LockedState $cfg
+    Write-Host ("锁定状态验证通过：vendors={0}, imports={1}" -f @($lock.vendors).Count, @($lock.imports).Count)
+}
+
 function Apply-LockToWorkspace($cfg, $lock) {
     foreach ($v in @($lock.vendors)) {
         $name = [string]($v.name)

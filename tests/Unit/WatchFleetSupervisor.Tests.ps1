@@ -45,6 +45,18 @@ Describe 'watch-interrupted-task fleet supervisor revision-3 contract' {
         $script:prompt | Should Match 'cannot mutate its own automation'
     }
 
+    It 'never treats the current supervisor heartbeat as business activity' {
+        $script:prompt | Should Match 'current fleet heartbeat turn itself is control-plane activity, never business activity'
+        $script:prompt | Should Match 'supervisor control task is excluded'
+        $script:prompt | Should Match 'do not classify it running merely because this scheduled turn is in progress'
+    }
+
+    It 'deduplicates control-plane faults instead of repeating them every tick' {
+        $script:shutdownPrompt | Should Match 'same control-plane fault receipt is DONT_NOTIFY on later ticks'
+        $script:shutdownPrompt | Should Match 'persist the first fault receipt before notifying'
+        $script:shutdownPrompt | Should Match 'never repeat the same fault text'
+    }
+
     It 'limits fleet writes to canonical provenance and verified cleanup' {
         $script:prompt | Should Match 'trusted canonical target body digest'
         $script:prompt | Should Match 'fresh host metadata'
@@ -58,6 +70,16 @@ Describe 'watch-interrupted-task fleet supervisor revision-3 contract' {
         $script:prompt | Should Match '<heartbeat>'
         $script:prompt | Should Match '<decision>DONT_NOTIFY\|NOTIFY</decision>'
         $script:prompt | Should -Not -Match 'entire assistant output must be exactly DONT_NOTIFY'
+        $script:prompt | Should Match 'Do not emit commentary or progress prose during a fleet heartbeat tick'
+    }
+
+    It 'keeps generated resident watch skill synchronized with its custom source' {
+        $sourceRoot = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task'
+        $generatedRoot = Join-Path $repoRoot 'agent\watch-interrupted-task'
+        foreach ($relativePath in @('SKILL.md', 'scripts\Get-WatchHeartbeatDisposition.ps1')) {
+            (Get-Content -Raw -LiteralPath (Join-Path $generatedRoot $relativePath)) |
+                Should Be (Get-Content -Raw -LiteralPath (Join-Path $sourceRoot $relativePath))
+        }
     }
 
     It 'outputs real JSON in a fresh process' {

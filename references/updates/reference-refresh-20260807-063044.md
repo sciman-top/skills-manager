@@ -1,0 +1,421 @@
+# 参考仓刷新摘要
+
+生成时间（UTC）：`2026-08-07T06:30:50Z`
+模式：`pull --ff-only`
+clone_missing：`false`
+根目录：`D:\CODE\external\skills-manager-references`
+manifest：`D:\CODE\skills-manager\references\reference-shelf.manifest.json`
+集合：`custom`
+更新 latest：`false`
+仓列表：`codex`
+
+## codex
+
+- 分层：`core-mainline`
+- 上游：`https://github.com/openai/codex.git`
+- origin matches manifest：`true`
+- 实际 origin：`https://github.com/openai/codex.git`
+- 路径：`D:\CODE\external\skills-manager-references\core\codex`
+- 分支：`main`
+- 状态：`updated`
+- 本次是否克隆：`false`
+- 更新前：`61a44880a85d2fd0d8770908dea5733495e571c8`
+- 更新后：`4ee41929eaf4fc1e5662c9b4befd05230688ca62`
+- ahead/behind：`0	0`
+- remote refs current：`true`
+- working tree matches upstream：`true`
+- upstream revision：`4ee41929eaf4fc1e5662c9b4befd05230688ca62`
+- consumable revision：`4ee41929eaf4fc1e5662c9b4befd05230688ca62`
+- 说明：pull --ff-only completed
+- 本次更新 commit：
+  - `4ee41929 (HEAD -> main, origin/main, origin/HEAD) Add tool namespace metadata configuration (#37389)`
+  - `0bdce9f4 Restore archived sessions from the resume picker (#37371)`
+  - `1efd8fcb Add session archiving to the resume picker (#37369)`
+  - `66225461 Restore approval policy when resuming threads (#37368)`
+  - `80858a8c Add session forking to `codex exec` (#37367)`
+  - `9daa491f Harden local MCP server process tree cleanup (#37366)`
+  - `81b9bc21 Recognize MCP tool hook configurations (#37363)`
+  - `5bdc8897 Use consistent TUI input placeholders (#37360)`
+  - `2801d126 Add Markdown conversation export to the TUI (#37358)`
+  - `4d7e3e90 Clamp short wait_agent timeouts to the configured minimum (#37357)`
+  - `b94343ab Support agent identity endpoint overrides (#37356)`
+  - `9afb96fa Retry busy app-server test executable spawns (#37354)`
+  - `d0c8f422 Configure the default code-mode exec yield timeout (#37352)`
+  - `9457f8f7 Allow `ThreadManager` to customize thread ID generation (#37350)`
+  - `912524d6 Mount a minimal `/dev` in full-filesystem Bubblewrap sandboxes (#37349)`
+  - `4bb7ee34 Add rollout migration tooling and background migration (#37348)`
+  - `69b6152c Track context windows per agent (#37347)`
+  - `270d9326 Send model routing hints to the Codex backend (#37345)`
+  - `4ffeddcb Fix subagent MCP startup status settling (#37344)`
+  - `a9da0bdb Stage Bazel app-server test binaries in `TEST_TMPDIR` (#37343)`
+  - `bcea6447 Preserve foreign cwd URIs for turn-input contributors (#37342)`
+  - `29dce2db Support content references for inline visualizations (#37341)`
+  - `f8ac8fa6 Consolidate deferred environment provisioning APIs (#37340)`
+  - `d9eac104 Reload app-server telemetry after account changes (#37339)`
+  - `84254764 Honor the configured ChatGPT origin in connector install URLs (#37338)`
+  - `b3ffe3d0 Recover MCP servers after OAuth reauthentication (#37337)`
+  - `7257826a Use step environments for extension turn input (#37336)`
+  - `303a2925 Fully repaint inline viewports after history overlap (#37335)`
+  - `57f42a81 Avoid cloning immutable metadata on tool search cache hits (#37279)`
+  - `e1831db7 Reuse MCP handlers across sampling steps (#37273)`
+  - `bfb6a6ea Support plugin roots in the host skill loader (#37267)`
+  - `1151b23f Start cached MCP servers lazily for subagents (#37261)`
+  - `a17da5e6 Fix first-turn model switching and rollback (#37260)`
+  - `82b17bc7 Allow agent roles on full-history forks (#37252)`
+  - `74b8f8db Cover remote MCP discovery timeout cleanup (#37248)`
+  - `7a0e974e Harden network proxy MITM authorization (#37211)`
+  - `1ae82ce6 Fetch remote installed plugins across all scopes (#37210)`
+  - `0a0ebb85 Add a unified image budget (#37206)`
+  - `bc8b25ea Add durable user-message queue dispatch (#37204)`
+  - `70b46532 Track thread archive analytics (#37199)`
+  - `547080e4 Prefer persisted cwd when reading local threads (#37198)`
+  - `aac9f842 Preserve legacy semantics during rollout migration (#37191)`
+  - `f141dc77 Interrupt cyber model turns after one Guardian denial (#37190)`
+  - `92b83e22 Track multi-agent usage hints in world state (#37189)`
+  - `98da2c44 Reserve the `tool_search` namespace for the search tool (#37188)`
+  - `928bda82 Preserve image transparency metadata in app-server items (#37178)`
+  - `a3ebd19f Move explicit skill selection into the skills crate (#37177)`
+  - `6bb6e904 Add legacy rollout migration to paginated history (#37175)`
+  - `e3465b48 Centralize skill invocation helpers in `codex-skills` (#37174)`
+  - `f380b487 Move plugin skill snapshot integration tests into core (#37169)`
+  - `e244a9d9 Bound remote MCP handshake HTTP requests (#37168)`
+  - `15ea598c Expose session sources to MCP contributors (#37167)`
+  - `ad6e48dd Keep textarea cursors and rendering inside the viewport (#37166)`
+  - `bd36d69a Load host skill roots through the skills extension (#37162)`
+  - `c38a60de Harden named session lookup in the TUI (#37157)`
+  - `b6cddbf6 Test remote environments reported ready before selection (#37156)`
+  - `0c07c7ee Use Azure Key Vault for macOS notarization (#37154)`
+  - `b6c3b515 Coalesce concurrent Git status scans (#37151)`
+  - `a1890b69 Project orchestrator skills through world state (#37149)`
+  - `f5345f1e Track provisioned environment state across registration (#37147)`
+  - `2b915a2e Gate Apps usage instructions by model capability (#37145)`
+  - `72d937ed Preserve discovery paths for symlinked skills (#37144)`
+  - `fa5d5ae0 Report prompt image resizing to the model (#37134)`
+  - `2994f545 Enforce managed authentication requirements locally (#37132)`
+  - `4cb8676d Make Windows path URI comparisons ASCII-case-insensitive (#37129)`
+  - `778b8698 Centralize tool approval handling in `Session` (#37128)`
+  - `9d00bb01 Add per-session code-mode execution limits (#37114)`
+  - `2707dfc2 Bound interactive telemetry shutdown (#37109)`
+  - `c4f42d16 Use Luna for API-key Guardian reviews (#37103)`
+  - `952e87d3 Reuse stable MCP bindings across sampling steps (#37101)`
+  - `5c44f110 Consolidate unified exec output state (#37083)`
+  - `f2d82553 Fall back to per-process MCP cleanup on macOS (#37068)`
+  - `fcc4ca55 Preserve longer MCP source descriptions in tool search (#37066)`
+  - `757c151a Add safer TUI defaults for cyber models (#37055)`
+  - `31711668 Reject conflicting namespace descriptions in strict tool mode (#37053)`
+  - `ed2f985a Use turn environment permissions for context and discovery (#37040)`
+  - `bac3ef1d Use turn environment permissions for tool execution (#37038)`
+  - `1fe6be97 Align registry tests with canonical tool names (#37035)`
+  - `30d99232 Apply permission profile updates to future turn environments (#37031)`
+  - `56b82e67 Enforce Agent Plugin runtime boundaries (#37027)`
+  - `f21dc463 Canonicalize default tools under the `functions` namespace (#37022)`
+  - `1e489ada Enforce strict tool name collision errors (#37020)`
+  - `5d89ab65 Keep shared skill caches fresh across plugin loads (#37000)`
+  - `431c78eb Support deferred custom tools in tool search (#36998)`
+  - `e87e2b49 Support `includeTurns` reads for paginated threads (#36993)`
+  - `44cb66e4 Allow injecting model catalog caches (#36992)`
+  - `11e390bb Remove legacy collaboration mode variants (#36990)`
+  - `bae8d8f5 Preserve shared bundled skill caches (#36989)`
+  - `eeae88d8 Add opt-in concurrent exec-server request dispatch (#36987)`
+  - `1d952f02 Add process-scoped PSP routing for ChatGPT requests (#36986)`
+  - `411f3f06 Support configured ChatGPT cookies in HTTP clients (#36984)`
+  - `bf05737d Preserve ChatGPT auth for trusted staging MCP servers (#36983)`
+  - `b9ba969f Enable remote compaction for Amazon Bedrock (#36981)`
+  - `e1f39b5f Add Fence auditing to the blob size workflow (#36979)`
+  - `1a5e1521 Improve connector detection for migrated sessions (#36977)`
+  - `1b90b1d1 Honor explicit-only orchestrator skills (#36976)`
+  - `c607da9f Make token budget context identity configurable (#36970)`
+  - `720c9d68 Skip symlinks when installing plugins (#36967)`
+  - `78f00743 Allow disabling the built-in image viewer (#36966)`
+  - `e9a692d5 Preserve working directories when importing external sessions (#36964)`
+  - `40d226e3 Link Codex attribution in pull request bodies (#36963)`
+  - `17801b42 Prompt before trusting local project directories (#36960)`
+  - `92689b6b Track connectors detected in external agent sessions (#36959)`
+  - `4bd5b9fd Keep image resize notices attached during remote compaction (#36956)`
+  - `9952933c Add tool registry collision policy configuration (#36954)`
+  - `b87981a5 Add durable per-thread user submission queues (#36952)`
+  - `449f099f Harden paginated history handling in the TUI (#36951)`
+  - `dbcd837c Paginate TUI transcript history (#36950)`
+  - `3b8d22ec Improve paginated TUI history loading (#36949)`
+  - `8bfa49e3 Paginate transcript history in the TUI (#36948)`
+  - `989a0b05 Accept user input when starting idle turns (#36947)`
+  - `ceaa8188 Grant the blob size policy job read access to contents (#36945)`
+  - `1a7519fa Move host skill root resolution into the skills extension (#36943)`
+  - `d1fb77d6 Use current session settings for review threads (#36941)`
+  - `2b1357c2 Include policy approval reasons in Guardian reviews (#36939)`
+  - `3ca9f375 Enable cached web search for Amazon Bedrock (#36938)`
+  - `1e59dc5b Trust undecided local projects automatically (#36935)`
+  - `90314a92 Read turn permissions from the current configuration (#36930)`
+  - `7ada37a1 Reject implicitly discovered bare Git repositories (#36924)`
+  - `02bc1dd7 Move the host skills service into the skills extension (#36921)`
+  - `d75f94a9 Merge local plugins into plugin search results (#36919)`
+  - `7325f348 Test explicit plugin mentions with disabled apps (#36917)`
+  - `c8e255e7 Centralize app enabled-state evaluation (#36916)`
+  - `2999b8e8 Move skill policy resolution into `codex-skills` (#36913)`
+  - `6a828ca2 Read approval policy from the current turn configuration (#36912)`
+  - `ee46c5ba Negotiate MCP extensions per app-server session (#36910)`
+  - `bab7c2dc Improve bearer token secret redaction (#36908)`
+  - `d1f14e31 Preserve model providers when reloading v2 agents (#36906)`
+  - `d98eb72e Limit RMCP logs persisted to SQLite (#36904)`
+  - `49b0aebd Load skill interface metadata in the host loader (#36903)`
+  - `f9310961 Propagate updated permissions to review threads (#36901)`
+  - `18f03c1e Register app tools independently of the connector list (#36900)`
+  - `40e5de94 Avoid redundant filesystem metadata probes (#36898)`
+  - `17df7545 Handle late MCP startup results after lag timeout (#36895)`
+  - `fcf636a4 Redact secrets from app-server command execution items (#36893)`
+  - `6d4d9442 Support leaf models in multi-agent v2 (#36892)`
+  - `1669c240 Add host skill root loading (#36884)`
+  - `fd1e4d7a Preserve complete MCP namespace descriptions (#36882)`
+  - `77ce1d10 Move direct executor skill discovery into the skills extension (#36880)`
+  - `4c25d6cc Move executor skill bundle loading into the skills extension (#36877)`
+  - `2a16af82 Parallelize R2 asset publishing with DotSlash (#36871)`
+  - `9873cba8 Consolidate thread spawning behind a request object (#36862)`
+  - `d4fb78bf Support custom tools in namespaces (#36857)`
+  - `12288240 Support deferred loading for freeform tools (#36856)`
+  - `5af85998 Keep API request metrics out of Statsig exports (#36840)`
+  - `db1a4145 Avoid requesting key-release events in Ghostty (#36834)`
+  - `8e3b5d3e Time out stalled code-mode host requests (#36830)`
+  - `b2dc8b3e Consolidate approval telemetry context (#36825)`
+  - `64bb8094 Fix typo in approval resolver name (#36822)`
+  - `7431f10d Identify agents by name in token budget context (#36815)`
+  - `60c722e0 Add a dual-WebSocket transport for code mode (#36812)`
+  - `b258c028 Honor per-environment login shell policy (#36811)`
+  - `61dc1d97 Add MCP client conformance regression gates (#36810)`
+  - `41e2f67e Prefer the state database for `exec resume --last` (#36809)`
+  - `9c8f9ce8 Prefer SQLite names for local session archive commands (#36808)`
+  - `cc03518c Extract audio preparation into a utility crate (#36807)`
+  - `1bbfb5cf Avoid reinjecting permissions after command approvals (#36800)`
+  - `51d4aa94 Normalize rusty_v8 checksum manifest line endings (#36797)`
+  - `bd12b3a9 Add Agent Plugins MCP config parsing (#36796)`
+  - `3149fa4b Terminate timed-out Git process trees (#36793)`
+  - `e4e0c707 Gate plugin usage instructions by model capability (#36792)`
+  - `df72fdb4 Consolidate model instructions in `ModelMessages` (#36787)`
+  - `bbcf5e10 Add Guardian session reuse and interruption tests (#36782)`
+  - `51c9ed6d Add per-surface MCP tool exposure controls (#36781)`
+  - `136f75e7 Stabilize network policy event capture in concurrent tests (#36779)`
+  - `78306a32 Clarify config layer iteration APIs (#36774)`
+  - `224ea64c Derive the active user config layer from the layer stack (#36773)`
+  - `e4e04088 Raise the host-owned Codex Apps catalog limit (#36772)`
+  - `82ccbc75 Harden Linux managed proxy helper lifecycles (#36771)`
+  - `f94b5d89 Stabilize deferred goal fork testing (#36770)`
+  - `c82cb044 Stabilize the startup Git enrichment integration test (#36769)`
+  - `ca2b4799 Avoid building code-mode definitions during registration (#36764)`
+  - `8922a784 Harden the TUI focus palette regression test (#36759)`
+  - `c39d3e99 Wait for patch events before reading shell snapshots (#36757)`
+  - `77504659 Consolidate apply_patch runtime execution (#36745)`
+  - `62839fec Store the extension registry directly in its builder (#36744)`
+  - `7dd2f689 Simplify contextual user fragment registration (#36742)`
+  - `79479cdf Store turn skill state in extension data (#36740)`
+  - `d6407d73 Deduplicate MCP resource list handling (#36734)`
+  - `87e2d41e Stabilize the cloud environment HTTP test (#36732)`
+  - `155f1ca9 Correlate code mode tool analytics with model responses (#36729)`
+  - `dae21222 Simplify turn metadata state ownership (#36727)`
+  - `1b594980 Deduplicate MCP resource operation handling (#36716)`
+  - `8b8fa727 Use provider-reported rollout budget units (#36715)`
+  - `bb5054fe Capture rollout budget units from response usage (#36641)`
+  - `5157493c Expose onboarding hints in login completion notifications (#36635)`
+  - `9949245d Preserve SQLite thread metadata during goal mutations (#36632)`
+  - `2b5bdcf6 Support portable Agent Plugins throughout installation (#36544)`
+  - `58256999 Raise the MCP catalog item limit to 2,048 (#36534)`
+  - `1e85ca09 Support two-stroke TUI key chords (#36511)`
+  - `a1dd74b5 Retain attempted tool metadata across prompts (#36507)`
+  - `feee0b07 Increase remote plugin bundle size limits (#36485)`
+  - `7dc18566 Avoid querying terminal size on every TUI redraw (#36482)`
+  - `ee0247f9 Extract exec-server request dispatching (#36440)`
+  - `6751b54c Add a realtime delegation acknowledgement control (#36413)`
+  - `4c219fdb Use Git repositories as pre-tool hook test markers (#36411)`
+  - `e2c08379 Make user input blocking behavior explicit (#36410)`
+  - `a850875a Implement remote plugin search (#36409)`
+  - `670f6941 Allow custom Codex instructions for realtime transitions (#36408)`
+  - `64b2a300 Declare the experimental plugin search API (#36402)`
+  - `003ec63b Avoid redundant filesystem probes (#36393)`
+  - `dc60dadc Enforce single-writer ownership for all thread histories (#36389)`
+  - `1bef1689 Track image preparation details in turn analytics (#36388)`
+  - `bf7804c2 Add acknowledged user message submission to core (#36385)`
+  - `332eac4b Load turn summaries with paginated queries (#36384)`
+  - `c42ea41e Add thread section management APIs (#36380)`
+  - `d62353a3 Load local session pickers from the state DB first (#36378)`
+  - `2e32d958 Enable sandboxed V8 for code mode (#36374)`
+  - `b7a61066 Add an `--approve-for-me` CLI flag (#36373)`
+  - `845497f4 Run native Windows Bazel tests with MSVC (#36372)`
+  - `775fb21d Keep effective tool exposure in the registry (#36367)`
+  - `287e1020 Add strict automatic review for MCP elicitations (#36365)`
+  - `0d109f09 Move skill catalog rendering out of core (#36364)`
+  - `da2c7ca8 Migrate Cursor-managed skills into Codex (#36361)`
+  - `385fe95c Use MCP bindings as the step tool catalog (#36360)`
+  - `d97cb0dc Consolidate MCP config editing in codex-core (#36359)`
+  - `66ebeb70 Use the step-scoped router for tool execution (#36357)`
+  - `bbbf3968 Sync updates to imported external agent sessions (#36356)`
+  - `c4f2746c Keep MCP tool calls bound to their thread (#36355)`
+  - `35eab505 Pass sessions directly to session tasks (#36354)`
+  - `2c005abb Use model catalog collaboration mode messages (#36351)`
+  - `7b38c48d Require explicit sandbox permissions with shell justifications (#36350)`
+  - `3d1d2691 Stop publishing legacy Linux bundle archives (#36342)`
+  - `5548c95d Enable skills in the MCP server (#36339)`
+  - `448118f5 Detect connectors used in external agent sessions (#36336)`
+  - `ef293f7a Restrict `shell_command` to a single local environment (#36329)`
+  - `66d63afd Preserve discovery order for host skill path aliases (#36327)`
+  - `aea26afa Include skills in debug prompt input output (#36311)`
+  - `164b3bfe Isolate MCP OAuth credentials by environment (#36310)`
+  - `5e8b2248 Use the host skill provider catalog in world state (#36309)`
+  - `bf4d3f51 Restrict hosted MCP credentials to local environments (#36306)`
+  - `f0c30e52 Derive report prompt hashes from persisted rollouts (#36271)`
+  - `53d06e24 Prefer the bundled resource for the code mode host (#36264)`
+  - `46423705 Refresh precomputed app-server protocol exports (#36239)`
+  - `413492cd Ignore symbolic slash-tmp permissions on Windows (#36237)`
+  - `3016671b Support Enterprise automation account plans (#36228)`
+  - `a01a2d91 Preserve executor paths in read command actions (#36223)`
+  - `745603a5 Ignore passthrough metadata when reconciling rollout items (#36221)`
+  - `e6cfd40c Expose connector candidates in external agent detection (#36218)`
+  - `97576b17 Run code mode exclusively through the standalone host (#36217)`
+  - `acd540f1 Precompute app-server protocol exports (#36212)`
+  - `0042b009 Record normalized sandbox violation events (#36207)`
+  - `789c72dc Avoid shifting bytes in streaming output buffers (#36194)`
+  - `ba42e686 Label explicit skill injection metrics (#36191)`
+  - `6256a7cc Make thread history projection resilient to malformed rollouts (#36188)`
+  - `9eeac78b Refresh environment dates from the configured clock (#36187)`
+  - `483559cc Coalesce concurrent remote metadata requests (#36184)`
+  - `0dcad0c9 Use permission profiles throughout sandbox execution (#36183)`
+  - `ceb4bc72 Record attempted tool calls in response metadata (#36181)`
+  - `355d2a80 Test remote Guardian network approval scoping (#36177)`
+  - `578c1b22 Test workspace-root patch protection for metadata (#36171)`
+  - `b445967c Make tool telemetry tag collection synchronous (#36168)`
+  - `13ddc7aa Harden the auto-review model override test (#36167)`
+  - `856bf5a3 Make pending realtime sideband test deterministic (#36166)`
+  - `2fbbb1a1 Stabilize file approval replay test (#36165)`
+  - `b545c940 Strengthen session file change approval coverage (#36149)`
+  - `25eecb07 Harden the file change approval integration test (#36148)`
+  - `5a1097ed Stabilize approval scenario tests (#36146)`
+  - `5ad367fb Wait for memory consolidation shutdown before finishing jobs (#36140)`
+  - `9588f660 Bound the code mode output termination test (#36139)`
+  - `aa064463 Isolate apply-patch permission test variants (#36138)`
+  - `bdda5da5 Preserve executor workspace permissions for apply_patch (#36133)`
+  - `c126f206 Resolve normalized tool name collisions in code mode (#36129)`
+  - `4f6d06d4 Preserve delegated tasks across remote compaction (#36128)`
+  - `89a0eed9 Centralize tool registration and protect host tools (#36127)`
+  - `5decb399 Respect filesystem permissions during capability discovery (#36124)`
+  - `3d805abd Sandbox executor skill resource reads (#36121)`
+  - `9a46fd33 Delegate readiness waits to tool runtimes (#36120)`
+  - `b293412c Unify tool runtime assembly before router construction (#36119)`
+  - `6219b7c4 Correlate image requests and explicit interrupts with turns (#36092)`
+  - `88ec932e Handle fractional rate limits in thread history projection (#36083)`
+  - `7d5253d2 Route Ollama through the shared HTTP client (#36078)`
+  - `ff352fab Remove codex-core's direct reqwest dependency (#36076)`
+  - `406dc923 Expose MCP read-only hints in tool call items (#36055)`
+  - `1c5f336c Remove legacy `--full-auto` handling from `codex exec` (#36054)`
+  - `b1ccaa0e Avoid overwriting symlinked migration targets (#36051)`
+  - `7b93b3bf Keep tool-call metrics out of Statsig exports (#36049)`
+  - `410c22b3 Extract MCP environment headers into a local variable (#36047)`
+  - `7ec480dd Distinguish unknown MCP authentication status (#36045)`
+  - `64934171 Document the Responses API proxy reqwest exception (#36043)`
+  - `3e3ae088 Limit MCP catalog pagination (#36039)`
+  - `3834c47c Deny network access when an allow amendment fails (#36037)`
+  - `a1286d12 Allow naming forked chats from the TUI (#36036)`
+  - `9cf6b390 Exit the stdio app-server when its connection closes (#36035)`
+  - `5989dcc4 Use the shared HTTP client in codex-protocol (#36033)`
+  - `78a61de9 Load cloud-managed servers in MCP CLI commands (#36031)`
+  - `1dad11f8 Increase the app-server tracing test stack size (#36030)`
+  - `88d6c2b2 Avoid cloning ignored analytics notifications (#36020)`
+  - `a5082373 Refine OpenAI docs skill source routing (#36014)`
+  - `85c082cc Share optional MCP startup grace across connection sets (#36011)`
+  - `09cf6092 Route pet asset downloads through the shared HTTP client (#36008)`
+  - `ad6fc66b Add persisted manual ordering for thread sections (#36007)`
+  - `c41a38dd Reduce response serialization and rollout scan overhead (#36006)`
+  - `7579a2b4 Resolve MCP file uploads with environment-native paths (#36002)`
+  - `a05bcda3 Upgrade rmcp to 3.0.0 (#36001)`
+  - `df326d31 Remove obsolete rusty_v8 146.4.0 Bazel targets (#35997)`
+  - `f9b18d04 Group external agent config migration into a module (#35992)`
+  - `1da9f846 Test exec-server compatibility across Codex versions (#35990)`
+  - `1e3c0042 Display title-only reasoning summaries in the TUI (#35989)`
+  - `1ae2b988 Avoid cloning rollout history when truncating forks (#35982)`
+  - `3725f02c Fix TUI layout for halfwidth Japanese sound marks (#35962)`
+  - `cef3910e Preserve hyperlink cell widths during terminal diffing (#35960)`
+  - `00cb5c46 Upgrade Ratatui to 0.30.2 (#35959)`
+  - `e1895710 Fix TUI input queue handling during MCP startup (#35957)`
+  - `9a6668f6 Report direct input capability for listed subagents (#35944)`
+  - `a4d2f310 Update tests for current tool call and app-server event types (#35942)`
+  - `ddf33ea8 Bound MCP namespace descriptions (#35941)`
+  - `fbf666fa Let unrelated tools run while MCP servers start (#35937)`
+  - `fe01054a Inherit ready step environments when spawning agents (#35895)`
+  - `d06c7ac0 Clean up side conversations in the background (#35887)`
+  - `b96ebfb3 Show blocked goals as stalled in the TUI (#35886)`
+  - `250de82b Use step environments for MCP file uploads (#35878)`
+  - `6c13b113 Allow environment readiness updates in place (#35875)`
+  - `0a6616f4 Mark the primary environment in model context (#35874)`
+  - `9f23e977 Include session titles in external agent import history (#35870)`
+  - `28f3f1f9 Expose plugin installation timestamps in app-server summaries (#35859)`
+  - `b9b7c218 Add Bazel unit test targets for Rust binaries (#35857)`
+  - `fcd2273d Resolve imported connectors by MCP server name (#35856)`
+  - `07490c75 Box app-server event payloads (#35854)`
+  - `8707a351 Normalize Windows namespace paths in path URIs (#35851)`
+  - `101d6b8c Preserve foreign paths in background terminal listings (#35850)`
+  - `03edf16f Support plaintext collaboration tool messages (#35845)`
+  - `166658a3 Tie remote exec servers to their parent stdin (#35843)`
+  - `9f4c20aa Handle legacy MCP discovery prevalidation errors (#35840)`
+  - `3a797496 Decouple recommended plugins from tool suggestions (#35839)`
+  - `12b961d4 Expose plugin eligibility metadata in app-server summaries (#35837)`
+  - `c550cb3e Clean up cancelled MCP elicitation requests (#35836)`
+  - `1def0a89 Track parent turns for nested Codex requests (#35835)`
+  - `12b3e880 (tag: rusty-v8-v150.4.0) Update rusty_v8 to 150.4.0 (#35831)`
+  - `438c9e98 Route WebRTC sideband joins to the Realtime API (#35830)`
+  - `50a7328f Enforce centralized SQLite connection creation (#35828)`
+  - `155c3e29 Use the shared HTTP client for announcement tips (#35825)`
+  - `8bbdf6c8 Use the shared HTTP client for TUI network checks (#35821)`
+  - `dd6b8803 Advance latest-alpha-cli after release publishing completes (#35818)`
+  - `709283b4 Use configured HTTP clients for all MCP OAuth requests (#35814)`
+  - `9ea975a2 Route MCP OAuth through configured HTTP clients (#35806)`
+  - `8f00b9a0 Tag reports with the selected turn's model and effort (#35802)`
+  - `4f6eaf7a Wait for MCP readiness in the curated sync test (#35794)`
+  - `fa1d4c40 Gate paginated thread history on the state database (#35787)`
+  - `cf7e9cfe Support self-serve Business ProLite accounts (#35785)`
+  - `bb1af235 Load thread titles concurrently during session startup (#35779)`
+  - `84ccb293 Resolve MCP tool catalogs concurrently (#35777)`
+  - `03748ad5 Scale skill metadata budgets with context windows (#35773)`
+  - `7cde2323 Throttle models cache TTL renewals (#35772)`
+  - `f6160ca5 Share the skills budget across host and executor catalogs (#35769)`
+  - `a68d0a74 Emit host skill budget warnings from world state (#35766)`
+  - `e597169e Keep agent registry identities consistent (#35744)`
+  - `d9e1c9cd Avoid blocking turns on optional MCP startup (#35742)`
+  - `8e271dc0 Add bounded metadata for executed tool calls (#35738)`
+  - `f2bee854 Complete MCP 2026 client support (#35725)`
+  - `be2e4afc Add MCP 2026-07-28 discovery support (#35724)`
+  - `85c6da1c Add persisted sections for organizing threads (#35722)`
+  - `9291a123 Honor disabled code mode fallback without a process host (#35721)`
+  - `61de0d8f Upgrade rmcp to 3.0.0-beta.3 (#35720)`
+  - `899539c0 Reuse route-aware clients for OpenAI file uploads (#35717)`
+  - `2494d939 Support streaming bodies in route-aware HTTP requests (#35715)`
+  - `49025589 Add configurable developer instructions for v2 subagents (#35708)`
+  - `3418498f Honor the configured SQLite home in the logs client (#35695)`
+  - `f029bb79 Refresh the subagent picker in the background (#35693)`
+  - `63682c4e Include empty-preview threads in relationship listings (#35691)`
+  - `8d6a91b1 Preserve item timestamps in thread history projections (#35689)`
+  - `8c72d617 Point crossterm patch to the OpenAI OSS fork (#35688)`
+  - `fb6aad9a Load cloud-managed profiles for `codex sandbox` (#35685)`
+  - `4d1f66bf Preserve paginated thread metadata across resumes (#35678)`
+  - `bbeee9a4 Prepare MCP and plugin recommendations concurrently (#35675)`
+  - `294d8132 Route curated plugins by authentication mode (#35671)`
+  - `fd41e813 Raise the Windows exec yield floor to 10 seconds (#35670)`
+  - `bbb92457 Expose the network proxy spec constructor (#35668)`
+  - `c21c8a5e Fix the async watcher test harness on Windows (#35665)`
+  - `b672b3c4 Evaluate character matching over skill routing metadata (#35663)`
+  - `8495963a Place host skills before permission instructions (#35661)`
+  - `2f19a577 Preserve multi-agent settings across config representations (#35656)`
+  - `6b23635a Terminate Windows non-TTY processes on interrupt (#35655)`
+  - `9f82ffed Test developer instruction inheritance for multi-agent workers (#35653)`
+  - `462ed19a Enable network policy callbacks for remote exec (#35652)`
+  - `976129f0 Preserve TUI input when terminal focus returns (#35649)`
+  - `e8f0f64f Preserve thread metadata when rollout files are missing (#35644)`
+  - `0affaf2a Make OpenTelemetry provider shutdown idempotent (#35642)`
+  - `bd2de422 Parse Claude and Cursor session records separately (#35623)`
+  - `fea2d8b1 Skip restored token usage replay for exec resumes (#35621)`
+  - `fbe65995 Support model-owned token budget defaults (#35608)`
+  - `16d7daad Record metrics for empty skill catalogs (#35607)`
+  - `d6ea5991 Add metrics for extension-rendered skill catalogs (#35597)`
+  - `3d519bf6 Allow alpha hotfix versions in R2 releases (#35595)`
+  - `8a1c9414 Recommend longer waits in the v2 wait_agent schema (#35594)`
+  - `3bbf1fe7 Expose cached MCP tools before server startup (#35590)`
+  - `95637f70 Add managed policy for in-app updates (#35537)`
+  - `18f50c9e Track model and personality in world state (#35530)`
+  - `0896bf6f Skip inactive TUI threads without pending user interaction (#35525)`
+  - `9ca6df68 Preserve terminal turn errors in replayed history (#35524)`
+  - `5a3808b7 Shut down the in-process outbound router explicitly (#35523)`

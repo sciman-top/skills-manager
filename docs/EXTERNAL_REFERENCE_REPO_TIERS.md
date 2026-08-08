@@ -15,6 +15,7 @@ This document defines how `skills-manager` should manage long-lived external ref
 - `skills.json` remains the only repo-owned truth for `vendors`, `imports`, `mappings`, `targets`, `mcp_servers`, and `mcp_targets`.
 - `vendor/` and `imports/` are runtime materialization layers for installed content. They are not the same thing as a curated reference shelf.
 - The dedicated external shelf for this repo lives under `D:\CODE\external\skills-manager-references`.
+- This is the only owned external write root. `D:\CODE\external` itself, sibling `*-references` shelves, shared checkouts, and product repositories are excluded from this project's inventory, refresh, move, and delete authority. `_shared` manifests are read-only routing inputs.
 - Do not delete a currently used repo from `skills.json` just because it is not part of the default long-lived reference shelf.
 - Repo-side governance entrypoints live in:
   - `references/reference-shelf.manifest.json`
@@ -64,6 +65,22 @@ Discovery-only sources are not cloned by default.
 When official material and the existing shelf are insufficient, and source-level comparison has a concrete current consumer, the host AI may search for a public open-source reference repository. A candidate must first be reviewed and registered in `references/reference-shelf.manifest.json` as `conditional-not-cloned`, with its upstream URL, full reviewed revision, license, relevance, activation trigger, review evidence, and adoption decision. Only then may the existing refresh script clone that named candidate into its registered `conditional/` path.
 
 Discovery popularity is not admission. Missing or unclear licensing, authentication requirements, destination conflicts, a dirty existing checkout, no current consumer, or an unregistered destination blocks cloning. A successful clone authorizes read-only comparison only; it does not authorize adoption, dependency installation, script execution, runtime activation, or promotion into the persistent core/secondary shelf.
+
+### 4.2 Portfolio lifecycle and removal boundary
+
+The shelf is a reversible evidence portfolio, not an append-only archive:
+
+```text
+discover -> conditional-not-cloned -> on-demand read-only
+         -> secondary -> core-mainline
+         -> historical-compatibility -> retire/remove
+```
+
+Promotion requires first-party authority or repeated current consumers plus a pinned source, compatible license, focused evidence, acceptable maintenance cost, and a stated retirement trigger. Demote or retire an entry when an official replacement exists, consumers disappear, another source covers the same decision, evidence is stale, license/supply-chain risk changes, or maintenance cost exceeds verified value. Discovery-only popularity never blocks demotion.
+
+Demotion is not runtime removal. First remove an entry from the default refresh set or lower its tier, preserve replacement and historical evidence where compatibility remains, and only then consider deleting a clean manifest-controlled checkout. Removing a reference checkout never authorizes removing a `skills.json` runtime source/import; that requires its own consumer, compatibility, migration, verification, and rollback review. Prefer retire before delete when provenance or rollback value remains.
+
+Owned-root boundary: every mutable checkout must resolve below the manifest `references_root` (`D:\CODE\external\skills-manager-references`). Discovery may read other explicitly mapped sources, but this project never recursively adopts or manages the parent external root, a sibling project's shelf, `_shared`, or a product checkout.
 
 Default operational commands:
 
@@ -150,6 +167,12 @@ These sources are useful, but they should not be part of the default persistent 
 ### 7.1 Reviewed candidates from the 2026-08-05 discovery pass
 
 These repositories were checked through GitHub's public metadata and selected files. They are recorded in the manifest as `conditional-not-cloned`; no repository was cloned or installed as a result of popularity alone.
+
+### 7.2 Watch runtime rearchitecture reference set
+
+The 2026-08-07 watch-runtime workstream adds a bounded, manifest-controlled source set under `conditional/watch-runtime/`. The set exists to replace the failed heartbeat/prompt-supervisor architecture with Cockpit readiness, deterministic durable recovery, native Codex Goal integration, terminal cleanup, and fleet shutdown. Its reviewed revisions, licenses, and adopt/adapt/reject decisions are recorded in `docs/change-evidence/20260807-watch-runtime-reference-review.md`.
+
+Cloned state does not promote these repositories into the default refresh set. `openai/codex` remains the official core source; `codex-watchdog`, Polly, Temporal .NET, Hangfire, Quartz.NET, Uptime Kuma, and the MCP C# SDK remain conditional read-only comparison material. No upstream dependency, service, scheduler, daemon, installer, or script is adopted merely because its checkout exists.
 
 | Repo / revision | License | What was useful | Decision |
 | --- | --- | --- | --- |

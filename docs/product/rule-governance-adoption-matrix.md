@@ -3,7 +3,7 @@
 **scope**: `skills-manager vNext` Rules Advisor planning
 **reference_revision**: `D:\CODE-other\governed-ai-coding-runtime@bbf5aba4b221ecf5ac0279ad41c9c51c104b4191`
 **status**: adopted_with_rule_estate_followthrough
-**最后更新**: 2026-08-01
+**最后更新**: 2026-08-08
 
 ## 1. 结论
 
@@ -20,6 +20,7 @@
 | 根规则只保留高频硬规则和入口 | `adopt` | `FR-RUL-011` | 降低常驻上下文，支持渐进披露 | byte/duplicate/surface findings |
 | prose 与确定性 enforcement 分离 | `adopt` | `deterministic_enforcement` responsibility | `AGENTS.md`/`CLAUDE.md` 不是权限系统 | script/hook/CI/rules 引用检查 |
 | `Global Rule -> Repo Action` 映射 | `adapt` | coverage 五态 | 保留可执行承接，允许 `not_applicable` 和非 R1-R8 规则族 | gap/conflict/duplicate fixtures |
+| stable rule / dynamic state 分离 | `adopt` | `FR-RUL-020`、项目根状态真源指针 | 防止任务计数、gate 与 host/live 快照在根规则中过期 | fresh manifest read + estate structural findings |
 | 固定 `1/A/B/C/D` 结构 | `adapt` | 可选 profile | 对当前用户规则有效，但不是宿主官方通用要求 | profile opt-in，不作为默认 universal blocker |
 | 全局 130 lines/16 KiB、项目 80 lines/10 KiB | `adapt` | 可配置 budget finding | 可作保守默认；Codex 官方限制是合并项目链预算且可配置，不是这些固定数字 | host/profile budget source |
 | Claude `@AGENTS.md` 薄 wrapper | `adapt` | Claude profile candidate | 能减少双份维护，但 import/上下文语义必须由当前官方资料或 native probe 证明 | BOM/import/static + Claude-native evidence |

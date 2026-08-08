@@ -79,6 +79,19 @@ function Get-TrimmedErrorMessage {
     return $lines[-1].Trim()
 }
 
+function Get-ConditionalCloneReviewGap {
+    param([Parameter(Mandatory = $true)]$ManifestRepo)
+
+    if ([string]$ManifestRepo.tier -ne 'conditional-not-cloned') { return @() }
+    $missing = [System.Collections.Generic.List[string]]::new()
+    foreach ($field in @('review_revision', 'license', 'review_decision', 'reviewed_at', 'review_evidence', 'activation_trigger')) {
+        if ($ManifestRepo.PSObject.Properties.Match($field).Count -eq 0 -or [string]::IsNullOrWhiteSpace([string]$ManifestRepo.$field)) { $missing.Add($field) }
+    }
+    if ($missing.Count -eq 0 -and [string]$ManifestRepo.license -match '^(?i:NOASSERTION|UNKNOWN|NONE)$') { $missing.Add('license(resolved)') }
+    if ($missing.Count -eq 0 -and [string]$ManifestRepo.review_revision -notmatch '^[0-9a-fA-F]{40}$') { $missing.Add('review_revision(full_commit)') }
+    return @($missing.ToArray())
+}
+
 function ConvertTo-CanonicalRepoIdentity {
     param(
         [Parameter(Mandatory = $true)]
@@ -441,8 +454,26 @@ foreach ($repoName in $RepoNames) {
             continue
         }
 
+        $reviewMetadataGap = @(Get-ConditionalCloneReviewGap -ManifestRepo $manifestRepo)
+        if ($reviewMetadataGap.Count -gt 0) {
+            $results.Add([pscustomobject]@{
+                    repo = $repoName; tier = $repoTier; upstream = $upstreamUrl; path = $repoPath
+                    status = 'clone-blocked'; branch = $null; head_before = $null; head_after = $null
+                    changed = $false; cloned = $false; ahead_behind = $null
+                    note = ('conditional clone requires complete review metadata: {0}' -f ($reviewMetadataGap -join ', '))
+                    compare_log = @()
+                })
+            continue
+        }
+
         try {
             Invoke-GitClone -UpstreamUrl $upstreamUrl -DestinationPath $repoPath -Branch $branchHint | Out-Null
+            if ($repoTier -eq 'conditional-not-cloned') {
+                $reviewRevision = ([string]$manifestRepo.review_revision).ToLowerInvariant()
+                Invoke-GitText -RepositoryPath $repoPath -Arguments @('checkout', '--detach', $reviewRevision) | Out-Null
+                $checkedOutRevision = (Invoke-GitText -RepositoryPath $repoPath -Arguments @('rev-parse', 'HEAD')).ToLowerInvariant()
+                if ($checkedOutRevision -ne $reviewRevision) { throw ('reviewed revision checkout mismatch: expected={0}; observed={1}' -f $reviewRevision, $checkedOutRevision) }
+            }
             $cloned = $true
         }
         catch {

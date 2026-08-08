@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-08-06T10:53:27.4656119Z",
+  "generated_at": "2026-08-08T12:48:57.3310351Z",
   "vendors": [
     {
       "name": "agent-skills",
@@ -12,7 +12,7 @@
       "name": "agent-skills-2",
       "repo": "https://github.com/addyosmani/agent-skills.git",
       "ref": "main",
-      "commit": "f03b4a84b08b76608bbab3133e56e49e361f230b"
+      "commit": "d2478bf0c73a6357df39a3ed6aff16acaa218843"
     },
     {
       "name": "anthropics-skills",
@@ -77,7 +77,7 @@
       "ref": "main",
       "skill": "skills\\performance-optimization",
       "sparse": false,
-      "commit": "f03b4a84b08b76608bbab3133e56e49e361f230b"
+      "commit": "d2478bf0c73a6357df39a3ed6aff16acaa218843"
     },
     {
       "name": "ant-design",
@@ -131,7 +131,7 @@
       "ref": "main",
       "skill": "data\\skills\\data-visualization",
       "sparse": false,
-      "commit": "40c0e75c9f0aa7beb96b246a90eace0890f32da8"
+      "commit": "5ee4541fa29fc41808ef176cf272ff0ccc921246"
     },
     {
       "name": "debug-dotnet",
@@ -149,7 +149,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\domain-modeling",
       "sparse": true,
-      "commit": "8b36d4fb2635b3c21998dcd8144439c9e5ba7302"
+      "commit": "84fdeffd12f2ee307994d1eb6feb48173b6e0502"
     },
     {
       "name": "dotnet-backend-patterns",
@@ -167,7 +167,7 @@
       "ref": "master",
       "skill": "drawio-diagram-forge",
       "sparse": false,
-      "commit": "0ffa211d64f80164e12e20ad97cc62038210f303"
+      "commit": "9eae47fb389dbd1ccc54de9b2992cfb25a8413e8"
     },
     {
       "name": "error-handling-patterns",
@@ -194,7 +194,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\grill-with-docs",
       "sparse": true,
-      "commit": "8b36d4fb2635b3c21998dcd8144439c9e5ba7302"
+      "commit": "84fdeffd12f2ee307994d1eb6feb48173b6e0502"
     },
     {
       "name": "grilling",
@@ -203,7 +203,7 @@
       "ref": "main",
       "skill": "skills\\productivity\\grilling",
       "sparse": true,
-      "commit": "8b36d4fb2635b3c21998dcd8144439c9e5ba7302"
+      "commit": "84fdeffd12f2ee307994d1eb6feb48173b6e0502"
     },
     {
       "name": "improve-codebase-architecture",
@@ -212,7 +212,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\improve-codebase-architecture",
       "sparse": false,
-      "commit": "8b36d4fb2635b3c21998dcd8144439c9e5ba7302"
+      "commit": "84fdeffd12f2ee307994d1eb6feb48173b6e0502"
     },
     {
       "name": "manim-composer",
@@ -257,7 +257,7 @@
       "ref": "main",
       "skill": "skills\\mcp-cli",
       "sparse": true,
-      "commit": "6c7fe1b15f1be7e29d3aaf04fb3423ee5a226353"
+      "commit": "811ed362dd9cdbbc83efc10e43039598654a7dda"
     },
     {
       "name": "microsoft-code-reference",
@@ -284,7 +284,7 @@
       "ref": "main",
       "skill": "plugins\\modern-python\\skills\\modern-python",
       "sparse": false,
-      "commit": "ea7c60e6283d97f4cae485b1671b3936dc604fcb"
+      "commit": "02b8a5eb8d107c3fefd05a0f11a871e8d4a1af1e"
     },
     {
       "name": "playwright-best-practices",
@@ -302,7 +302,7 @@
       "ref": "master",
       "skill": "powerpoint-automation",
       "sparse": false,
-      "commit": "0ffa211d64f80164e12e20ad97cc62038210f303"
+      "commit": "9eae47fb389dbd1ccc54de9b2992cfb25a8413e8"
     },
     {
       "name": "prd-to-issues",
@@ -311,7 +311,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\to-tickets",
       "sparse": false,
-      "commit": "8b36d4fb2635b3c21998dcd8144439c9e5ba7302"
+      "commit": "84fdeffd12f2ee307994d1eb6feb48173b6e0502"
     },
     {
       "name": "prompt-engineering-patterns",
@@ -347,7 +347,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\research",
       "sparse": true,
-      "commit": "8b36d4fb2635b3c21998dcd8144439c9e5ba7302"
+      "commit": "84fdeffd12f2ee307994d1eb6feb48173b6e0502"
     },
     {
       "name": "setup-matt-pocock-skills",
@@ -419,7 +419,7 @@
       "ref": "main",
       "skill": "skills\\ui-animation",
       "sparse": false,
-      "commit": "73c8a4cefccdc3c86c2395f92223a41ce5c72903"
+      "commit": "5c65087e862732d2e8c16344f94a52e562b1143d"
     },
     {
       "name": "vite",
@@ -437,7 +437,7 @@
       "ref": "main",
       "skill": "skills\\windows-desktop-e2e",
       "sparse": true,
-      "commit": "623f2c020f052319657674e4e6c29ab5d0ad566b"
+      "commit": "9aac8585ab887d9c51252730240b25d9cca180da"
     },
     {
       "name": "write-a-prd",
@@ -446,7 +446,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\to-spec",
       "sparse": false,
-      "commit": "8b36d4fb2635b3c21998dcd8144439c9e5ba7302"
+      "commit": "84fdeffd12f2ee307994d1eb6feb48173b6e0502"
     }
   ]
 }

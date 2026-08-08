@@ -1,0 +1,200 @@
+{
+  "schema_version": 1,
+  "evaluation_id": "native-skill-metadata-v1",
+  "decision_owner": "host_ai",
+  "semantic_selection_applied": false,
+  "description": "Repository contract corpus for host-native metadata quality and observable selection evaluation. It records expectations; it never performs semantic routing.",
+  "categories": [
+    "direct",
+    "indirect",
+    "negative",
+    "ambiguous",
+    "no_skill"
+  ],
+  "metadata_limits": {
+    "min_description_characters": 24,
+    "max_description_characters": 384,
+    "max_trigger_phrases": 3
+  },
+  "metadata_targets": [
+    {
+      "name": "capability-router",
+      "source": "overrides/custom/capability-router/agents/openai.yaml",
+      "field": "interface.short_description",
+      "activation_group": "native-policy-fallback",
+      "trigger_phrases": [
+        "host-selected",
+        "policy"
+      ],
+      "formerly_unreachable": false
+    },
+    {
+      "name": "grill-with-docs",
+      "source": "agent/grill-with-docs/SKILL.md",
+      "field": "frontmatter.description",
+      "activation_group": "design-interrogation",
+      "trigger_phrases": [
+        "grill",
+        "design"
+      ],
+      "formerly_unreachable": true
+    },
+    {
+      "name": "verification-before-completion",
+      "source": "agent/superpowers-skills-verification-before-completion/SKILL.md",
+      "field": "frontmatter.description",
+      "activation_group": "completion-verification",
+      "trigger_phrases": [
+        "claim",
+        "passing"
+      ],
+      "formerly_unreachable": false
+    },
+    {
+      "name": "test-driven-development",
+      "source": "agent/superpowers-skills-test-driven-development/SKILL.md",
+      "field": "frontmatter.description",
+      "activation_group": "test-first-implementation",
+      "trigger_phrases": [
+        "implementing",
+        "feature"
+      ],
+      "formerly_unreachable": false
+    }
+  ],
+  "metrics": {
+    "native_only": [
+      "listed",
+      "selected",
+      "injected",
+      "executed",
+      "abstained",
+      "false_positive",
+      "false_negative",
+      "correction",
+      "token_estimate",
+      "ttfv_ms",
+      "tool_rounds"
+    ],
+    "strict_fallback": [
+      "dispatch_requested",
+      "host_adjudicated",
+      "injected",
+      "executed",
+      "abstained"
+    ],
+    "acceptance_boundary": "Selection is host_evaluation_partial until host selection and full body invocation are both observable."
+  },
+  "cases": [
+    {
+      "id": "direct-policy-fallback",
+      "category": "direct",
+      "request": "Use the deterministic capability policy fallback to validate this explicit skill set.",
+      "required_skills": [
+        "capability-router"
+      ],
+      "forbidden_skills": [],
+      "expected_host_action": "load_or_invoke",
+      "formerly_unreachable": false
+    },
+    {
+      "id": "direct-test-first",
+      "category": "direct",
+      "request": "Use test-driven development before implementing this new feature.",
+      "required_skills": [
+        "test-driven-development"
+      ],
+      "forbidden_skills": [],
+      "expected_host_action": "load_or_invoke",
+      "formerly_unreachable": false
+    },
+    {
+      "id": "indirect-design-interrogation",
+      "category": "indirect",
+      "request": "Challenge the assumptions and tradeoffs in this proposed architecture one question at a time.",
+      "required_skills": [
+        "grill-with-docs"
+      ],
+      "forbidden_skills": [],
+      "expected_host_action": "load_or_invoke",
+      "formerly_unreachable": true
+    },
+    {
+      "id": "indirect-verification",
+      "category": "indirect",
+      "request": "Before I say this change is ready, gather fresh evidence for the tests and build.",
+      "required_skills": [
+        "verification-before-completion"
+      ],
+      "forbidden_skills": [],
+      "expected_host_action": "load_or_invoke",
+      "formerly_unreachable": false
+    },
+    {
+      "id": "negative-ordinary-implementation",
+      "category": "negative",
+      "request": "Implement the fix directly and do not use verification-before-completion for this request.",
+      "required_skills": [],
+      "forbidden_skills": [
+        "verification-before-completion"
+      ],
+      "expected_host_action": "abstain",
+      "formerly_unreachable": false
+    },
+    {
+      "id": "negative-no-router-profile-switch",
+      "category": "negative",
+      "request": "Do not switch profiles or invoke capability-router; only explain the existing repository state.",
+      "required_skills": [],
+      "forbidden_skills": [
+        "capability-router"
+      ],
+      "expected_host_action": "abstain",
+      "formerly_unreachable": false
+    },
+    {
+      "id": "ambiguous-approved-delivery",
+      "category": "ambiguous",
+      "request": "The implementation is approved; write the tests, implement it, and prove the final result.",
+      "required_skills": [
+        "test-driven-development",
+        "verification-before-completion"
+      ],
+      "forbidden_skills": [],
+      "expected_host_action": "minimal_set",
+      "formerly_unreachable": false
+    },
+    {
+      "id": "ambiguous-design-or-build",
+      "category": "ambiguous",
+      "request": "Work through this proposal and take it as far as the evidence supports.",
+      "required_skills": [
+        "grill-with-docs"
+      ],
+      "forbidden_skills": [],
+      "expected_host_action": "minimal_set",
+      "formerly_unreachable": true
+    },
+    {
+      "id": "no-skill-arithmetic",
+      "category": "no_skill",
+      "request": "What is 2 + 2?",
+      "required_skills": [],
+      "forbidden_skills": [],
+      "expected_host_action": "abstain",
+      "formerly_unreachable": false
+    },
+    {
+      "id": "no-skill-status-only",
+      "category": "no_skill",
+      "request": "Summarize the already supplied facts in one sentence.",
+      "required_skills": [],
+      "forbidden_skills": [],
+      "expected_host_action": "abstain",
+      "formerly_unreachable": false
+    }
+  ],
+  "case_count": 10,
+  "metadata_target_count": 4,
+  "formerly_unreachable_skill_count": 1
+}

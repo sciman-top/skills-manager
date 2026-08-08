@@ -27,6 +27,8 @@ Describe 'Native-first capability routing verifier' {
         $result.data.semantic_auto_selection_count | Should Be 0
         $result.data.negative_constraint_violation_count | Should Be 0
         $result.data.side_effect_violation_count | Should Be 0
+        $result.data.catalog_policy_cache_hit_count | Should BeGreaterThan 0
+        $result.data.catalog_policy_cache_hit_count | Should BeLessThan $result.data.router_call_count
         $result.data.writes_performed | Should Be $false
     }
 

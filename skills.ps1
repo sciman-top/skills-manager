@@ -1,6 +1,6 @@
 ﻿#requires -Version 7.0
 param(
-    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "锁定", "生成锁文件", "清理无效映射", "打开配置", "解除关联", "清理备份", "自动更新设置", "帮助", "help", "--help", "-h", "doctor", "add", "npx", "技能配置", "skill-profile", "安装MCP", "卸载MCP", "同步MCP", "MCP配置", "mcp-profile", "mcp-install", "mcp-uninstall", "mcp-sync", "审查目标", "audit-targets", "能力清单", "capability-inventory", "agent-plan", "agent-validate", "plugin-inventory", "plugin-lint", "plugin-export", "plugin-eval", "规则审查", "rule-audit", "规则全域审查", "rule-estate-audit", "规则全域计划", "rule-estate-plan", "规则全域应用", "rule-estate-apply", "规则全域回滚", "rule-estate-rollback", "规则计划", "rule-plan", "规则应用", "rule-apply", "一键", "workflow", "prune-invalid-mappings")]
+    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "锁定", "生成锁文件", "验证锁定", "verify-lock", "清理无效映射", "打开配置", "解除关联", "清理备份", "自动更新设置", "帮助", "help", "--help", "-h", "doctor", "add", "npx", "安装MCP", "卸载MCP", "同步MCP", "MCP配置", "mcp-profile", "mcp-install", "mcp-uninstall", "mcp-sync", "审查目标", "audit-targets", "能力清单", "capability-inventory", "agent-plan", "agent-validate", "plugin-inventory", "plugin-lint", "plugin-export", "plugin-eval", "规则审查", "rule-audit", "规则全域审查", "rule-estate-audit", "规则全域计划", "rule-estate-plan", "规则全域应用", "rule-estate-apply", "规则全域回滚", "rule-estate-rollback", "规则计划", "rule-plan", "规则应用", "rule-apply", "一键", "workflow", "prune-invalid-mappings")]
     [string]$Cmd = "menu",
     [string]$Filter = "",
     [switch]$DryRun,
@@ -1713,6 +1713,517 @@ function Test-OperationPlanFreshness {
     return New-OperationValidationResult $findings.ToArray()
 }
 
+function Copy-HostCapabilitySnapshotValue($Value) {
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $copy = [ordered]@{}
+        foreach ($key in @($Value.Keys)) { $copy[[string]$key] = Copy-HostCapabilitySnapshotValue $Value[$key] }
+        return [pscustomobject]$copy
+    }
+    if ($Value -is [pscustomobject]) {
+        $copy = [ordered]@{}
+        foreach ($property in @($Value.PSObject.Properties)) { $copy[$property.Name] = Copy-HostCapabilitySnapshotValue $property.Value }
+        return [pscustomobject]$copy
+    }
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+        return @($Value | ForEach-Object { Copy-HostCapabilitySnapshotValue $_ })
+    }
+    return $Value
+}
+
+function Get-HostCapabilitySnapshotSourcePrecedence {
+    return @('turn_override', 'thread_runtime', 'config_layered', 'model_catalog', 'unknown_fallback')
+}
+
+function Get-HostCapabilitySnapshotCapabilityNames {
+    return @('model', 'context_window', 'metadata_budget', 'skills_inventory')
+}
+
+function New-HostCapabilityFact {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        $Value,
+        [Parameter(Mandatory = $true)][string]$Source,
+        [string]$CapturedAt,
+        [ValidateSet('fresh', 'stale', 'unknown')][string]$Freshness = 'unknown',
+        [string]$UnknownReason
+    )
+
+    return [pscustomobject][ordered]@{
+        name = $Name
+        value = Copy-HostCapabilitySnapshotValue $Value
+        source = $Source
+        captured_at = if ([string]::IsNullOrWhiteSpace($CapturedAt)) { $null } else { $CapturedAt }
+        freshness = $Freshness
+        unknown_reason = if ([string]::IsNullOrWhiteSpace($UnknownReason)) { $null } else { $UnknownReason.Trim() }
+    }
+}
+
+function New-HostCapabilitySnapshot {
+    param(
+        [Parameter(Mandatory = $true)][string]$Surface,
+        [Parameter(Mandatory = $true)][string]$CapturedAt,
+        [string]$ThreadId,
+        [string]$TurnId,
+        [Parameter(Mandatory = $true)]$Capabilities,
+        [string[]]$SourcePrecedence = (Get-HostCapabilitySnapshotSourcePrecedence),
+        [string[]]$UnknownReasons = @()
+    )
+
+    $normalizedCapabilities = [ordered]@{}
+    foreach ($name in Get-HostCapabilitySnapshotCapabilityNames) {
+        $fact = Get-OperationObjectProperty $Capabilities $name
+        $normalizedCapabilities[$name] = $fact
+    }
+
+    $identity = [ordered]@{
+        surface = $Surface.Trim()
+        thread_id = if ([string]::IsNullOrWhiteSpace($ThreadId)) { $null } else { $ThreadId.Trim() }
+        turn_id = if ([string]::IsNullOrWhiteSpace($TurnId)) { $null } else { $TurnId.Trim() }
+        captured_at = $CapturedAt
+        capabilities = $normalizedCapabilities
+        source_precedence = @($SourcePrecedence)
+    }
+    $snapshotId = 'hcs-{0}' -f (Get-OperationSha256 ($identity | ConvertTo-Json -Depth 30 -Compress)).Substring(0, 16)
+
+    return [pscustomobject][ordered]@{
+        schema_version = 1
+        snapshot_id = $snapshotId
+        surface = $identity.surface
+        thread_id = $identity.thread_id
+        turn_id = $identity.turn_id
+        captured_at = $CapturedAt
+        source_precedence = @($SourcePrecedence)
+        capabilities = [pscustomobject]$normalizedCapabilities
+        unknown_reasons = @($UnknownReasons | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | ForEach-Object { [string]$_ } | Sort-Object -Unique)
+    }
+}
+
+function Test-HostCapabilitySnapshotContract {
+    param([Parameter(Mandatory = $false)]$Snapshot)
+
+    $findings = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Snapshot) {
+        return New-OperationValidationResult @((New-OperationFinding 'host_snapshot_missing' 'error' '$' 'Host capability snapshot is required.'))
+    }
+    if ((Get-OperationObjectProperty $Snapshot 'schema_version') -ne 1) { $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only HostCapabilitySnapshot schema version 1 is supported.')) | Out-Null }
+    foreach ($field in @('snapshot_id', 'surface', 'captured_at')) {
+        if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Snapshot $field))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Required snapshot field is missing.')) | Out-Null }
+    }
+    if ([string](Get-OperationObjectProperty $Snapshot 'snapshot_id') -notmatch '^hcs-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'snapshot_id_invalid' 'error' '$.snapshot_id' 'Snapshot id must be a deterministic hcs hash.')) | Out-Null }
+    if (-not (Test-OperationRfc3339 (Get-OperationObjectProperty $Snapshot 'captured_at'))) { $findings.Add((New-OperationFinding 'captured_at_invalid' 'error' '$.captured_at' 'Snapshot captured_at must be RFC3339.')) | Out-Null }
+
+    $expectedPrecedence = @(Get-HostCapabilitySnapshotSourcePrecedence)
+    $actualPrecedence = @((Get-OperationObjectProperty $Snapshot 'source_precedence') | ForEach-Object { [string]$_ })
+    if (-not (Test-OperationArray (Get-OperationObjectProperty $Snapshot 'source_precedence')) -or ($actualPrecedence -join '|') -ne ($expectedPrecedence -join '|')) {
+        $findings.Add((New-OperationFinding 'source_precedence_invalid' 'error' '$.source_precedence' 'Snapshot source precedence must be turn, thread, config, catalog, then unknown fallback.')) | Out-Null
+    }
+
+    $capabilities = Get-OperationObjectProperty $Snapshot 'capabilities'
+    if ($null -eq $capabilities) {
+        $findings.Add((New-OperationFinding 'capabilities_missing' 'error' '$.capabilities' 'Snapshot capabilities are required.')) | Out-Null
+    }
+    else {
+        foreach ($name in Get-HostCapabilitySnapshotCapabilityNames) {
+            $path = '$.capabilities.{0}' -f $name
+            $fact = Get-OperationObjectProperty $capabilities $name
+            if ($null -eq $fact) { $findings.Add((New-OperationFinding 'capability_fact_missing' 'error' $path 'Every capability fact is required.')); continue }
+            foreach ($field in @('source', 'freshness')) {
+                if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $fact $field))) { $findings.Add((New-OperationFinding 'fact_field_missing' 'error' ($path + '.' + $field) 'Capability fact field is required.')) | Out-Null }
+            }
+            if ([string](Get-OperationObjectProperty $fact 'source') -notin $expectedPrecedence) { $findings.Add((New-OperationFinding 'fact_source_invalid' 'error' ($path + '.source') 'Capability fact source is not in the declared precedence.')) | Out-Null }
+            if ([string](Get-OperationObjectProperty $fact 'freshness') -notin @('fresh', 'stale', 'unknown')) { $findings.Add((New-OperationFinding 'fact_freshness_invalid' 'error' ($path + '.freshness') 'Capability fact freshness is invalid.')) | Out-Null }
+            $factCapturedAt = Get-OperationObjectProperty $fact 'captured_at'
+            if ($null -ne $factCapturedAt -and -not (Test-OperationRfc3339 $factCapturedAt)) { $findings.Add((New-OperationFinding 'fact_captured_at_invalid' 'error' ($path + '.captured_at') 'Capability fact captured_at must be RFC3339 when present.')) | Out-Null }
+            $unknownReason = [string](Get-OperationObjectProperty $fact 'unknown_reason')
+            if ([string](Get-OperationObjectProperty $fact 'freshness') -eq 'unknown' -and [string]::IsNullOrWhiteSpace($unknownReason)) { $findings.Add((New-OperationFinding 'unknown_reason_missing' 'error' ($path + '.unknown_reason') 'Unknown facts must expose an unknown reason.')) | Out-Null }
+            $value = Get-OperationObjectProperty $fact 'value'
+            if ($name -eq 'context_window' -and $null -ne $value) {
+                $number = 0L
+                if (-not [long]::TryParse([string]$value, [ref]$number) -or $number -le 0) { $findings.Add((New-OperationFinding 'context_window_invalid' 'error' ($path + '.value') 'Context window must be a positive integer when known.')) | Out-Null }
+            }
+            if ($name -eq 'metadata_budget' -and $null -ne $value) {
+                $number = 0L
+                if (-not [long]::TryParse([string]$value, [ref]$number) -or $number -lt 0) { $findings.Add((New-OperationFinding 'metadata_budget_invalid' 'error' ($path + '.value') 'Metadata budget must be a non-negative integer when known.')) | Out-Null }
+            }
+            if ($name -eq 'skills_inventory' -and $null -ne $value -and -not (Test-OperationArray $value)) { $findings.Add((New-OperationFinding 'skills_inventory_invalid' 'error' ($path + '.value') 'Skills inventory must be an array when known.')) | Out-Null }
+            if ($name -eq 'model' -and $null -ne $value -and [string]::IsNullOrWhiteSpace([string]$value)) { $findings.Add((New-OperationFinding 'model_invalid' 'error' ($path + '.value') 'Model must be non-empty when known.')) | Out-Null }
+        }
+    }
+    if (-not (Test-OperationArray (Get-OperationObjectProperty $Snapshot 'unknown_reasons'))) { $findings.Add((New-OperationFinding 'unknown_reasons_invalid' 'error' '$.unknown_reasons' 'unknown_reasons must be an array.')) | Out-Null }
+    return New-OperationValidationResult $findings.ToArray()
+}
+
+$script:NativeInvocationTraceStages = @('listed', 'selected', 'injected', 'executed', 'abstained')
+$script:NativeInvocationTraceSources = @('app_server', 'cli', 'native_host', 'fixture', 'unknown')
+$script:NativeInvocationTraceFreshness = @('fresh', 'stale', 'unknown')
+$script:NativeInvocationTraceTruthLevels = @('unknown', 'host_evaluation_partial', 'host_loaded')
+
+function Get-NativeInvocationTraceProperty($Object, [string[]]$Names) {
+    foreach ($name in @($Names)) {
+        if (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue) {
+            if (Test-OperationObjectProperty $Object $name) { return Get-OperationObjectProperty $Object $name }
+        }
+        elseif ($null -ne $Object -and $null -ne ($Object.PSObject.Properties | Where-Object Name -eq $name | Select-Object -First 1)) {
+            return $Object.$name
+        }
+    }
+    return $null
+}
+
+function Get-NativeInvocationTraceHash([string]$Value) {
+    if (Get-Command Get-OperationSha256 -ErrorAction SilentlyContinue) { return Get-OperationSha256 ([string]$Value) }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return (($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes([string]$Value)) | ForEach-Object { $_.ToString('x2') }) -join '') }
+    finally { $sha.Dispose() }
+}
+
+function New-NativeInvocationTraceRedactedId([string]$Prefix, [string]$Value) {
+    if ([string]::IsNullOrWhiteSpace($Value)) { return ('{0}-unknown' -f $Prefix) }
+    return ('{0}-{1}' -f $Prefix, (Get-NativeInvocationTraceHash $Value).Substring(0, 16))
+}
+
+function New-NativeInvocationTraceStage([string]$Name, [object[]]$Events) {
+    $items = @($Events)
+    return [pscustomobject][ordered]@{
+        name = $Name
+        observed = $items.Count -gt 0
+        event_count = $items.Count
+        event_ids = [string[]]@($items | ForEach-Object { [string]$_.event_id })
+        first_observed_at = if ($items.Count -gt 0) { [string]$items[0].occurred_at } else { $null }
+    }
+}
+
+function New-NativeInvocationTrace {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$TraceId,
+        [Parameter(Mandatory = $true)][string]$Surface,
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][ValidateSet('fresh', 'stale', 'unknown')][string]$Freshness,
+        [Parameter(Mandatory = $true)][string]$CapturedAt,
+        [object[]]$Events = @()
+    )
+
+    $findings = New-Object System.Collections.Generic.List[object]
+    $normalizedEvents = New-Object System.Collections.Generic.List[object]
+    $allowedStages = @($script:NativeInvocationTraceStages)
+    $unknownEventObserved = $false
+    if ($Source -notin @($script:NativeInvocationTraceSources)) { $findings.Add((New-OperationFinding 'trace_source_invalid' 'error' '$.source' 'Trace source is not supported.')) | Out-Null }
+    if (-not (Test-OperationRfc3339 $CapturedAt)) { $findings.Add((New-OperationFinding 'captured_at_invalid' 'error' '$.captured_at' 'Trace captured_at must be RFC3339.')) | Out-Null }
+
+    $eventIndex = 0
+    foreach ($event in @($Events)) {
+        $path = '$.events[{0}]' -f $eventIndex
+        $rawKind = ([string](Get-NativeInvocationTraceProperty $event @('kind', 'stage', 'event_type', 'type'))).Trim().ToLowerInvariant()
+        $kind = $rawKind
+        if ($allowedStages -notcontains $kind) {
+            $findings.Add((New-OperationFinding 'unknown_event_type' 'error' ($path + '.kind') ('Unknown invocation event type: {0}' -f $rawKind))) | Out-Null
+            $unknownEventObserved = $true
+            $kind = 'unknown'
+        }
+        $skillName = ([string](Get-NativeInvocationTraceProperty $event @('skill_name', 'name', 'skill', 'capability_name'))).Trim()
+        if ([string]::IsNullOrWhiteSpace($skillName)) { $findings.Add((New-OperationFinding 'event_skill_missing' 'error' ($path + '.skill_name') 'Invocation events require a skill name.')) | Out-Null }
+        $occurredAt = [string](Get-NativeInvocationTraceProperty $event @('occurred_at', 'timestamp', 'captured_at'))
+        if (-not (Test-OperationRfc3339 $occurredAt)) { $findings.Add((New-OperationFinding 'event_timestamp_invalid' 'error' ($path + '.occurred_at') 'Invocation event occurred_at must be RFC3339.')) | Out-Null }
+        $rawEventId = [string](Get-NativeInvocationTraceProperty $event @('event_id', 'id'))
+        $rawCorrelation = [string](Get-NativeInvocationTraceProperty $event @('correlation_id', 'correlation', 'turn_id', 'thread_id'))
+        $reason = [string](Get-NativeInvocationTraceProperty $event @('reason', 'abstention_reason'))
+        $eventIdentity = if ([string]::IsNullOrWhiteSpace($rawEventId)) { '{0}|{1}|{2}' -f $TraceId, $eventIndex, $skillName } else { $rawEventId }
+        $normalizedEvents.Add([pscustomobject][ordered]@{
+                event_id = New-NativeInvocationTraceRedactedId 'evt' $eventIdentity
+                kind = $kind
+                skill_name = $skillName
+                occurred_at = if ([string]::IsNullOrWhiteSpace($occurredAt)) { $null } else { $occurredAt }
+                correlation_id = New-NativeInvocationTraceRedactedId 'corr' $rawCorrelation
+                reason = if ([string]::IsNullOrWhiteSpace($reason)) { $null } else { Protect-OperationSensitiveString $reason }
+            }) | Out-Null
+        $eventIndex++
+    }
+
+    $stageObjects = [ordered]@{}
+    foreach ($stageName in $allowedStages) {
+        $stageObjects[$stageName] = New-NativeInvocationTraceStage $stageName @($normalizedEvents | Where-Object kind -eq $stageName)
+    }
+    $stages = [pscustomobject]$stageObjects
+    $hasListed = [bool]$stages.listed.observed
+    $hasSelected = [bool]$stages.selected.observed
+    $hasInjected = [bool]$stages.injected.observed
+    $hasExecuted = [bool]$stages.executed.observed
+    $hasAbstained = [bool]$stages.abstained.observed
+    $truthLevel = if ($Freshness -eq 'fresh') { 'host_evaluation_partial' } else { 'unknown' }
+    $status = if ($Freshness -eq 'fresh') { 'partial' } else { 'unknown' }
+    $outcome = 'not_observed'
+    $bodyInjectionObservable = $hasInjected
+    $invocationObservable = $false
+
+    if ($unknownEventObserved) {
+        $truthLevel = 'unknown'
+        $status = 'unknown'
+    }
+
+    if ($normalizedEvents.Count -eq 0) {
+        $truthLevel = 'unknown'
+        $status = 'unknown'
+        $findings.Add((New-OperationFinding 'trace_events_missing' 'error' '$.events' 'At least one host event is required to establish trace truth.')) | Out-Null
+    }
+    if ($hasSelected -and -not $hasListed) { $findings.Add((New-OperationFinding 'listing_not_observable' 'warning' '$.stages.listed' 'Selection was observed without a listed event; visibility coverage is partial.')) | Out-Null }
+    if ($hasInjected -and -not $hasSelected) { $findings.Add((New-OperationFinding 'selection_not_observable' 'warning' '$.stages.selected' 'Injection was observed without a selected event; selection coverage is partial.')) | Out-Null }
+    if ($hasExecuted -and -not $hasInjected) {
+        $findings.Add((New-OperationFinding 'executed_without_injection' 'error' '$.stages.executed' 'Execution cannot be promoted without an observed injection event.')) | Out-Null
+        $truthLevel = 'unknown'
+        $status = 'unknown'
+    }
+    if ($hasAbstained -and $hasExecuted) {
+        $findings.Add((New-OperationFinding 'outcome_conflict' 'error' '$.stages' 'A trace cannot be both abstained and executed.')) | Out-Null
+        $truthLevel = 'unknown'
+        $status = 'unknown'
+    }
+    elseif ($hasExecuted -and $hasInjected) {
+        $truthLevel = if ($Freshness -eq 'fresh') { 'host_loaded' } else { 'unknown' }
+        $status = if ($Freshness -eq 'fresh') { 'complete' } else { 'unknown' }
+        $outcome = 'executed'
+        $invocationObservable = ($Freshness -eq 'fresh')
+    }
+    elseif ($hasAbstained) {
+        $outcome = 'abstained'
+    }
+    elseif ($hasInjected) {
+        $outcome = 'injected'
+    }
+    elseif ($hasSelected) {
+        $outcome = 'selected'
+    }
+    elseif ($hasListed) {
+        $outcome = 'listed'
+    }
+
+    $correlationSource = [string](@($normalizedEvents | Where-Object { $_.correlation_id -ne 'corr-unknown' } | Select-Object -First 1).correlation_id)
+    if ([string]::IsNullOrWhiteSpace($correlationSource)) { $correlationSource = 'corr-unknown' }
+    $redaction = [pscustomobject][ordered]@{
+        applied = $true
+        strategy = 'allowlist-normalized-events-and-hashed-identifiers'
+        dropped_fields = @('payload', 'args', 'argv', 'headers', 'authorization', 'token', 'secret')
+    }
+    $trace = [pscustomobject][ordered]@{
+        schema_version = 1
+        trace_id = New-NativeInvocationTraceRedactedId 'nit' $TraceId
+        surface = $Surface
+        source = $Source
+        freshness = $Freshness
+        captured_at = $CapturedAt
+        correlation_id = $correlationSource
+        status = $status
+        truth_level = $truthLevel
+        outcome = $outcome
+        body_injection_observable = $bodyInjectionObservable
+        invocation_observable = $invocationObservable
+        stages = $stages
+        events = [object[]]@($normalizedEvents.ToArray())
+        redaction = $redaction
+        receipt = [pscustomobject][ordered]@{ schema_version = 1; status = $status; truth_level = $truthLevel; complete = ($truthLevel -eq 'host_loaded') }
+        provider_calls = 0
+        native_mutations = 0
+        writes = 0
+        findings = [object[]]@($findings.ToArray())
+        pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0)
+    }
+    return $trace
+}
+
+function Test-NativeInvocationTraceContract {
+    param($Trace)
+
+    $findings = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Trace) { return New-OperationValidationResult @((New-OperationFinding 'trace_missing' 'error' '$' 'Native invocation trace is required.')) }
+    if ((Get-NativeInvocationTraceProperty $Trace @('schema_version')) -ne 1) { $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only NativeInvocationTrace schema version 1 is supported.')) | Out-Null }
+    foreach ($field in @('trace_id', 'surface', 'source', 'freshness', 'captured_at', 'truth_level', 'status', 'outcome')) {
+        if ([string]::IsNullOrWhiteSpace([string](Get-NativeInvocationTraceProperty $Trace @($field)))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Required trace field is missing.')) | Out-Null }
+    }
+    if ([string](Get-NativeInvocationTraceProperty $Trace @('source')) -notin @($script:NativeInvocationTraceSources)) { $findings.Add((New-OperationFinding 'trace_source_invalid' 'error' '$.source' 'Trace source is not supported.')) | Out-Null }
+    if ([string](Get-NativeInvocationTraceProperty $Trace @('freshness')) -notin @($script:NativeInvocationTraceFreshness)) { $findings.Add((New-OperationFinding 'trace_freshness_invalid' 'error' '$.freshness' 'Trace freshness is not supported.')) | Out-Null }
+    if ([string](Get-NativeInvocationTraceProperty $Trace @('truth_level')) -notin @($script:NativeInvocationTraceTruthLevels)) { $findings.Add((New-OperationFinding 'truth_level_invalid' 'error' '$.truth_level' 'Trace truth level is not supported.')) | Out-Null }
+    if (-not (Test-OperationRfc3339 (Get-NativeInvocationTraceProperty $Trace @('captured_at')))) { $findings.Add((New-OperationFinding 'captured_at_invalid' 'error' '$.captured_at' 'Trace captured_at must be RFC3339.')) | Out-Null }
+    if (-not (Test-OperationArray (Get-NativeInvocationTraceProperty $Trace @('events')))) { $findings.Add((New-OperationFinding 'events_type_invalid' 'error' '$.events' 'Trace events must be an array.')) | Out-Null }
+    $stages = Get-NativeInvocationTraceProperty $Trace @('stages')
+    foreach ($stageName in @($script:NativeInvocationTraceStages)) {
+        $stage = Get-NativeInvocationTraceProperty $stages @($stageName)
+        if ($null -eq $stage -or (Get-NativeInvocationTraceProperty $stage @('observed')) -isnot [bool]) { $findings.Add((New-OperationFinding 'stage_invalid' 'error' ('$.stages.{0}' -f $stageName) 'Every trace stage must declare boolean observed.')) | Out-Null }
+    }
+    $redaction = Get-NativeInvocationTraceProperty $Trace @('redaction')
+    if ((Get-NativeInvocationTraceProperty $redaction @('applied')) -ne $true) { $findings.Add((New-OperationFinding 'redaction_required' 'error' '$.redaction.applied' 'Trace redaction must be applied.')) | Out-Null }
+    if ((Get-NativeInvocationTraceProperty $Trace @('invocation_observable')) -eq $true -and (Get-NativeInvocationTraceProperty $Trace @('stages')).executed.observed -ne $true) { $findings.Add((New-OperationFinding 'invocation_promotion_invalid' 'error' '$.invocation_observable' 'Invocation cannot be observable without executed evidence.')) | Out-Null }
+    if ([string](Get-NativeInvocationTraceProperty $Trace @('truth_level')) -eq 'host_loaded') {
+        if ((Get-NativeInvocationTraceProperty $stages @('injected')).observed -ne $true -or (Get-NativeInvocationTraceProperty $stages @('executed')).observed -ne $true) { $findings.Add((New-OperationFinding 'host_loaded_evidence_missing' 'error' '$.truth_level' 'host_loaded requires injected and executed evidence.')) | Out-Null }
+    }
+    foreach ($field in @('provider_calls', 'native_mutations', 'writes')) {
+        $value = Get-NativeInvocationTraceProperty $Trace @($field)
+        if ($null -eq $value -or [long]$value -ne 0) { $findings.Add((New-OperationFinding 'side_effect_forbidden' 'error' ('$.{0}' -f $field) 'Trace normalization must be zero-side-effect.')) | Out-Null }
+    }
+    $serialized = $Trace | ConvertTo-Json -Depth 40 -Compress
+    if (Get-Command Test-OperationSerializedSensitiveValue -ErrorAction SilentlyContinue) {
+        if (Test-OperationSerializedSensitiveValue $serialized) { $findings.Add((New-OperationFinding 'sensitive_value_present' 'error' '$' 'Trace contains an unredacted sensitive value.')) | Out-Null }
+    }
+    foreach ($finding in @((Get-NativeInvocationTraceProperty $Trace @('findings')))) {
+        if ([string](Get-NativeInvocationTraceProperty $finding @('severity')) -eq 'error') { $findings.Add($finding) | Out-Null }
+    }
+    return New-OperationValidationResult $findings.ToArray()
+}
+
+if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) {
+    $operationPlanPath = Join-Path (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path 'src\Domain\OperationPlan.ps1'
+    . $operationPlanPath
+}
+
+function Get-SkillCatalogProperty {
+    param($Object, [string[]]$Names)
+
+    foreach ($name in @($Names)) {
+        if (Test-OperationObjectProperty $Object $name) { return Get-OperationObjectProperty $Object $name }
+    }
+    return $null
+}
+
+function Get-SkillCatalogStringArray {
+    param($Value)
+
+    $items = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @($Value)) {
+        $text = ([string]$item).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($text) -and -not $items.Contains($text)) { $items.Add($text) | Out-Null }
+    }
+    return [string[]]@($items.ToArray() | Sort-Object)
+}
+
+function Get-SkillCatalogForbiddenSemanticFieldNames {
+    return @(
+        'active_profile', 'current_profile', 'profile_excluded', 'profile_reachability',
+        'semantic_score', 'semantic_rank', 'semantic_confidence', 'query_match',
+        'selected_by_router', 'router_selected', 'ranking', 'rank', 'confidence'
+    )
+}
+
+function New-SkillCatalogEntry {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Description,
+        [string]$Path = '',
+        [string]$SourceRoot = '',
+        [string]$ContentHash = '',
+        [string]$MetadataHash = '',
+        [bool]$Enabled = $true,
+        [string]$Availability = 'available',
+        [ValidateSet('fresh', 'stale', 'unknown')][string]$Freshness = 'fresh',
+        [string]$LoadSideEffect = 'read_only',
+        [string]$SideEffect = 'read_only',
+        [string[]]$Dependencies = @(),
+        [string[]]$Surfaces = @(),
+        $Provenance = $null
+    )
+
+    return [pscustomobject][ordered]@{
+        schema_version = 1
+        kind = 'skill'
+        name = $Name.Trim()
+        description = $Description.Trim()
+        path = $Path
+        source_root = $SourceRoot
+        content_hash = if ([string]::IsNullOrWhiteSpace($ContentHash)) { $null } else { $ContentHash.Trim().ToLowerInvariant() }
+        metadata_hash = if ([string]::IsNullOrWhiteSpace($MetadataHash)) { $null } else { $MetadataHash.Trim().ToLowerInvariant() }
+        enabled = $Enabled
+        availability = $Availability.Trim()
+        freshness = $Freshness
+        load_side_effect = $LoadSideEffect.Trim()
+        side_effect = $SideEffect.Trim()
+        dependencies = Get-SkillCatalogStringArray $Dependencies
+        surfaces = Get-SkillCatalogStringArray $Surfaces
+        provenance = $Provenance
+    }
+}
+
+function New-SkillCatalog {
+    [CmdletBinding()]
+    param(
+        [object[]]$Entries = @(),
+        [object[]]$Decisions = @(),
+        [Parameter(Mandatory = $true)][string]$GeneratedAt,
+        [string[]]$SourceRoots = @(),
+        [bool]$Complete = $true,
+        [object[]]$Findings = @()
+    )
+
+    $normalizedEntries = @($Entries | Sort-Object @{ Expression = { ([string]$_.name).ToLowerInvariant() } }, path)
+    $identity = [ordered]@{
+        schema_version = 1
+        generated_at = $GeneratedAt
+        source_roots = @(Get-SkillCatalogStringArray $SourceRoots)
+        entries = @($normalizedEntries | ForEach-Object { [ordered]@{ name = [string]$_.name; path = [string]$_.path; content_hash = [string]$_.content_hash } })
+    }
+    $catalogId = 'sc-{0}' -f (Get-OperationSha256 ($identity | ConvertTo-Json -Depth 30 -Compress)).Substring(0, 16)
+    return [pscustomobject][ordered]@{
+        schema_version = 1
+        catalog_id = $catalogId
+        generated_at = $GeneratedAt
+        source_roots = [string[]]@(Get-SkillCatalogStringArray $SourceRoots)
+        entries = [object[]]$normalizedEntries
+        decisions = [object[]]@($Decisions)
+        findings = [object[]]@($Findings)
+        complete = $Complete
+        profile_filter_applied = $false
+        semantic_selection_applied = $false
+        semantic_routing_performed = $false
+        decision_owner = 'host_ai'
+        provider_calls = 0
+        native_mutations = 0
+        writes = 0
+    }
+}
+
+function Test-SkillCatalogContract {
+    param($Catalog)
+
+    $findings = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Catalog) { return New-OperationValidationResult @((New-OperationFinding 'skill_catalog_missing' 'error' '$' 'Skill catalog is required.')) }
+    if ((Get-SkillCatalogProperty $Catalog @('schema_version')) -ne 1) { $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only SkillCatalog schema version 1 is supported.')) | Out-Null }
+    foreach ($field in @('catalog_id', 'generated_at', 'decision_owner')) {
+        if ([string]::IsNullOrWhiteSpace([string](Get-SkillCatalogProperty $Catalog @($field)))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Required catalog field is missing.')) | Out-Null }
+    }
+    if ([string](Get-SkillCatalogProperty $Catalog @('catalog_id')) -notmatch '^sc-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'catalog_id_invalid' 'error' '$.catalog_id' 'Catalog id must be deterministic.')) | Out-Null }
+    if (-not (Test-OperationRfc3339 (Get-SkillCatalogProperty $Catalog @('generated_at')))) { $findings.Add((New-OperationFinding 'generated_at_invalid' 'error' '$.generated_at' 'Catalog generated_at must be RFC3339.')) | Out-Null }
+    if ([string](Get-SkillCatalogProperty $Catalog @('decision_owner')) -ne 'host_ai') { $findings.Add((New-OperationFinding 'decision_owner_invalid' 'error' '$.decision_owner' 'Semantic decision ownership must remain host_ai.')) | Out-Null }
+    foreach ($field in @('profile_filter_applied', 'semantic_selection_applied', 'semantic_routing_performed')) {
+        if ((Get-SkillCatalogProperty $Catalog @($field)) -ne $false) { $findings.Add((New-OperationFinding 'semantic_boundary_breached' 'error' ('$.{0}' -f $field) 'Catalog core cannot apply profile or semantic selection.')) | Out-Null }
+    }
+    foreach ($field in @('provider_calls', 'native_mutations', 'writes')) {
+        if ([long](Get-SkillCatalogProperty $Catalog @($field)) -ne 0) { $findings.Add((New-OperationFinding 'side_effect_forbidden' 'error' ('$.{0}' -f $field) 'Catalog compilation must be zero-side-effect.')) | Out-Null }
+    }
+    if (-not (Test-OperationArray (Get-SkillCatalogProperty $Catalog @('entries')))) { $findings.Add((New-OperationFinding 'entries_type_invalid' 'error' '$.entries' 'Catalog entries must be an array.')) | Out-Null }
+    if (-not (Test-OperationArray (Get-SkillCatalogProperty $Catalog @('decisions')))) { $findings.Add((New-OperationFinding 'decisions_type_invalid' 'error' '$.decisions' 'Catalog decisions must be an array.')) | Out-Null }
+    $forbidden = @(Get-SkillCatalogForbiddenSemanticFieldNames | ForEach-Object { $_.ToLowerInvariant() })
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $index = 0
+    foreach ($entry in @((Get-SkillCatalogProperty $Catalog @('entries')))) {
+        $path = '$.entries[{0}]' -f $index
+        $name = [string](Get-SkillCatalogProperty $entry @('name'))
+        if ([string]::IsNullOrWhiteSpace($name) -or -not $seen.Add($name)) { $findings.Add((New-OperationFinding 'entry_identity_invalid' 'error' ($path + '.name') 'Catalog entry name is missing or duplicated.')) | Out-Null }
+        foreach ($field in @('description', 'availability', 'freshness', 'load_side_effect', 'side_effect')) {
+            if ([string]::IsNullOrWhiteSpace([string](Get-SkillCatalogProperty $entry @($field)))) { $findings.Add((New-OperationFinding 'entry_field_missing' 'error' ($path + '.' + $field) 'Catalog entry field is required.')) | Out-Null }
+        }
+        if ((Get-SkillCatalogProperty $entry @('kind')) -ne 'skill') { $findings.Add((New-OperationFinding 'entry_kind_invalid' 'error' ($path + '.kind') 'SkillCatalog entries must have kind=skill.')) | Out-Null }
+        if ((Get-SkillCatalogProperty $entry @('enabled')) -isnot [bool]) { $findings.Add((New-OperationFinding 'entry_enabled_invalid' 'error' ($path + '.enabled') 'Catalog entry enabled must be boolean.')) | Out-Null }
+        if ([string](Get-SkillCatalogProperty $entry @('freshness')) -notin @('fresh', 'stale', 'unknown')) { $findings.Add((New-OperationFinding 'entry_freshness_invalid' 'error' ($path + '.freshness') 'Catalog entry freshness is invalid.')) | Out-Null }
+        foreach ($property in @($entry.PSObject.Properties)) {
+            if ($forbidden -contains $property.Name.ToLowerInvariant()) { $findings.Add((New-OperationFinding 'semantic_field_forbidden' 'error' ($path + '.' + $property.Name) 'Semantic ranking/profile fields cannot enter the catalog core.')) | Out-Null }
+        }
+        $index++
+    }
+    foreach ($decision in @((Get-SkillCatalogProperty $Catalog @('decisions')))) {
+        if ([string](Get-SkillCatalogProperty $decision @('disposition')) -eq 'profile_excluded') { $findings.Add((New-OperationFinding 'profile_exclusion_forbidden' 'error' '$.decisions' 'Profile exclusion cannot be a catalog disposition.')) | Out-Null }
+    }
+    return New-OperationValidationResult $findings.ToArray()
+}
+
 $script:OperationVerificationLevels = @("static_validated", "repo_gates_passed", "host_loaded", "live_accepted")
 $script:OperationVerificationStates = @("pass", "fail", "not_run", "not_applicable")
 function New-OperationVerificationState($InputState = $null) {
@@ -2546,6 +3057,2435 @@ function ConvertTo-CapabilityDescriptorsFromSkillsConfig {
     return $items.ToArray()
 }
 
+function Get-HostCapabilityCandidate {
+    param(
+        $Payload,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Source
+    )
+
+    if ($null -eq $Payload -or -not (Test-OperationObjectProperty $Payload $Name)) {
+        return [pscustomobject]@{ present = $false; source = $Source; value = $null; captured_at = $null; freshness = 'unknown'; unknown_reason = $null }
+    }
+
+    $raw = Get-OperationObjectProperty $Payload $Name
+    $value = $raw
+    $capturedAt = $null
+    $freshness = 'unknown'
+    $unknownReason = $null
+    if ($null -ne $raw -and (Test-OperationObjectProperty $raw 'value')) {
+        $value = Get-OperationObjectProperty $raw 'value'
+        $capturedAt = [string](Get-OperationObjectProperty $raw 'captured_at')
+        $freshness = [string](Get-OperationObjectProperty $raw 'freshness')
+        $unknownReason = [string](Get-OperationObjectProperty $raw 'unknown_reason')
+    }
+    if ($freshness -notin @('fresh', 'stale', 'unknown')) { $freshness = 'unknown' }
+    if ($Source -eq 'unknown_fallback' -and [string]::IsNullOrWhiteSpace($unknownReason) -and $freshness -eq 'unknown') { $unknownReason = '{0}_unknown' -f $Name }
+    return [pscustomobject]@{
+        present = $true
+        source = $Source
+        value = $value
+        captured_at = if ([string]::IsNullOrWhiteSpace($capturedAt)) { $null } else { $capturedAt }
+        freshness = $freshness
+        unknown_reason = if ([string]::IsNullOrWhiteSpace($unknownReason)) { $null } else { $unknownReason.Trim() }
+    }
+}
+
+function Test-HostCapabilityCandidateValue {
+    param([Parameter(Mandatory = $true)][string]$Name, $Value)
+
+    if ($Name -eq 'model') {
+        if ($null -eq $Value) { return $false }
+        if ($Value -is [pscustomobject] -or $Value -is [System.Collections.IDictionary]) { return @($Value.PSObject.Properties).Count -gt 0 -or @($Value.Keys).Count -gt 0 }
+        return -not [string]::IsNullOrWhiteSpace([string]$Value)
+    }
+    if ($Name -eq 'context_window') {
+        $number = 0L
+        return $null -ne $Value -and [long]::TryParse([string]$Value, [ref]$number) -and $number -gt 0
+    }
+    if ($Name -eq 'metadata_budget') {
+        $number = 0L
+        return $null -ne $Value -and [long]::TryParse([string]$Value, [ref]$number) -and $number -ge 0
+    }
+    if ($Name -eq 'skills_inventory') { return $null -ne $Value -and (Test-OperationArray $Value) }
+    return $false
+}
+
+function Resolve-HostCapabilityFact {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [object[]]$Sources = @(),
+        $UnknownFallback,
+        [System.Collections.Generic.List[string]]$UnknownReasons
+    )
+
+    foreach ($source in @($Sources)) {
+        $candidate = Get-HostCapabilityCandidate -Payload (Get-OperationObjectProperty $source 'payload') -Name $Name -Source ([string](Get-OperationObjectProperty $source 'source'))
+        if (-not [bool]$candidate.present) { continue }
+        if (Test-HostCapabilityCandidateValue -Name $Name -Value $candidate.value) {
+            return New-HostCapabilityFact -Name $Name -Value $candidate.value -Source $candidate.source -CapturedAt $candidate.captured_at -Freshness $candidate.freshness -UnknownReason $candidate.unknown_reason
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$candidate.unknown_reason) -and $null -ne $UnknownReasons) { $UnknownReasons.Add(('{0}:{1}' -f $candidate.source, $candidate.unknown_reason)) | Out-Null }
+    }
+
+    $fallback = Get-HostCapabilityCandidate -Payload $UnknownFallback -Name $Name -Source 'unknown_fallback'
+    if (Test-HostCapabilityCandidateValue -Name $Name -Value $fallback.value) {
+        return New-HostCapabilityFact -Name $Name -Value $fallback.value -Source 'unknown_fallback' -CapturedAt $fallback.captured_at -Freshness 'unknown' -UnknownReason $fallback.unknown_reason
+    }
+    $reason = if ([string]::IsNullOrWhiteSpace([string]$fallback.unknown_reason)) { '{0}_unknown' -f $Name } else { [string]$fallback.unknown_reason }
+    if ($null -ne $UnknownReasons) { $UnknownReasons.Add($reason) | Out-Null }
+    return New-HostCapabilityFact -Name $Name -Value $null -Source 'unknown_fallback' -CapturedAt $fallback.captured_at -Freshness 'unknown' -UnknownReason $reason
+}
+
+function Resolve-HostCapabilitySnapshot {
+    param(
+        [Parameter(Mandatory = $true)][string]$Surface,
+        [Parameter(Mandatory = $true)][string]$CapturedAt,
+        [string]$ThreadId,
+        [string]$TurnId,
+        $TurnOverride,
+        $ThreadRuntime,
+        $ConfigLayered,
+        $ModelCatalog,
+        $UnknownFallback
+    )
+
+    if ($null -eq $UnknownFallback) {
+        $UnknownFallback = [pscustomobject]@{
+            model = [pscustomobject]@{ value = $null; freshness = 'unknown'; unknown_reason = 'effective_model_unknown' }
+            context_window = [pscustomobject]@{ value = $null; freshness = 'unknown'; unknown_reason = 'context_window_unknown' }
+            metadata_budget = [pscustomobject]@{ value = $null; freshness = 'unknown'; unknown_reason = 'metadata_budget_unknown' }
+            skills_inventory = [pscustomobject]@{ value = $null; freshness = 'unknown'; unknown_reason = 'skills_inventory_unknown' }
+        }
+    }
+
+    $sources = @(
+        [pscustomobject]@{ source = 'turn_override'; payload = $TurnOverride },
+        [pscustomobject]@{ source = 'thread_runtime'; payload = $ThreadRuntime },
+        [pscustomobject]@{ source = 'config_layered'; payload = $ConfigLayered },
+        [pscustomobject]@{ source = 'model_catalog'; payload = $ModelCatalog }
+    )
+    $unknownReasons = New-Object System.Collections.Generic.List[string]
+    $capabilities = [ordered]@{}
+    foreach ($name in Get-HostCapabilitySnapshotCapabilityNames) {
+        $capabilities[$name] = Resolve-HostCapabilityFact -Name $name -Sources $sources -UnknownFallback $UnknownFallback -UnknownReasons $unknownReasons
+    }
+
+    return New-HostCapabilitySnapshot -Surface $Surface -ThreadId $ThreadId -TurnId $TurnId -CapturedAt $CapturedAt -Capabilities $capabilities -UnknownReasons $unknownReasons.ToArray()
+}
+
+$skillCatalogCompilerRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
+if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) { . (Join-Path $skillCatalogCompilerRepoRoot 'src\Domain\OperationPlan.ps1') }
+if ($null -eq (Get-Command New-SkillCatalog -ErrorAction SilentlyContinue)) { . (Join-Path $skillCatalogCompilerRepoRoot 'src\Domain\SkillCatalog.ps1') }
+
+function Test-SkillCatalogCompilerContained {
+    param([string]$Path, [string]$Root)
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Root)) { return $false }
+    if (Get-Command Test-OperationPathWithinRoot -ErrorAction SilentlyContinue) { return Test-OperationPathWithinRoot $Path $Root }
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $fullRoot = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    return $fullPath.StartsWith($fullRoot, [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-SkillCatalogCompilerTextHash([string]$Text) {
+    if (Get-Command Get-OperationSha256 -ErrorAction SilentlyContinue) { return Get-OperationSha256 $Text }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return (($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text)) | ForEach-Object { $_.ToString('x2') }) -join '') }
+    finally { $sha.Dispose() }
+}
+
+function Read-SkillCatalogCompilerMetadata {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $text = [IO.File]::ReadAllText($Path)
+    $frontmatter = [regex]::Match($text, '(?s)\A---\s*\r?\n(?<yaml>.*?)\r?\n---')
+    if (-not $frontmatter.Success) { return [pscustomobject]@{ valid = $false; reason = 'frontmatter_missing'; text = $text } }
+    $yaml = $frontmatter.Groups['yaml'].Value
+    $nameMatch = [regex]::Match($yaml, '(?m)^name:\s*["'']?(?<value>[^\r\n"'']+)')
+    $descriptionMatch = [regex]::Match($yaml, '(?m)^description:\s*["'']?(?<value>[^\r\n]+)')
+    if (-not $nameMatch.Success -or -not $descriptionMatch.Success) {
+        return [pscustomobject]@{ valid = $false; reason = 'frontmatter_identity_missing'; text = $text }
+    }
+    return [pscustomobject]@{
+        valid = $true
+        name = $nameMatch.Groups['value'].Value.Trim()
+        description = $descriptionMatch.Groups['value'].Value.Trim().Trim('"', "'")
+        text = $text
+    }
+}
+
+function ConvertTo-SkillCatalogCompilerEntry {
+    param(
+        [Parameter(Mandatory = $true)]$InputEntry,
+        [string]$DefaultRoot = '',
+        [System.Collections.Generic.List[object]]$Findings
+    )
+
+    $path = [string](Get-SkillCatalogProperty $InputEntry @('path', 'local_path'))
+    if (-not [string]::IsNullOrWhiteSpace($path) -and (Test-Path -LiteralPath $path -PathType Container)) { $path = Join-Path $path 'SKILL.md' }
+    if (-not [string]::IsNullOrWhiteSpace($path)) { $path = [IO.Path]::GetFullPath($path) }
+    $sourceRoot = [string](Get-SkillCatalogProperty $InputEntry @('source_root', 'root'))
+    if ([string]::IsNullOrWhiteSpace($sourceRoot)) { $sourceRoot = $DefaultRoot }
+    if (-not [string]::IsNullOrWhiteSpace($sourceRoot)) { $sourceRoot = [IO.Path]::GetFullPath($sourceRoot) }
+    if (-not [string]::IsNullOrWhiteSpace($path) -and -not [string]::IsNullOrWhiteSpace($sourceRoot) -and -not (Test-SkillCatalogCompilerContained $path $sourceRoot)) {
+        if ($null -ne $Findings) { $Findings.Add((New-OperationFinding 'path_outside_source_root' 'error' $path 'Skill entry is outside its declared source root.')) | Out-Null }
+        return $null
+    }
+
+    $metadata = $null
+    $text = ''
+    if (-not [string]::IsNullOrWhiteSpace($path) -and (Test-Path -LiteralPath $path -PathType Leaf)) {
+        $metadata = Read-SkillCatalogCompilerMetadata $path
+        $text = [string]$metadata.text
+        if (-not [bool]$metadata.valid) {
+            if ($null -ne $Findings) { $Findings.Add((New-OperationFinding 'skill_metadata_invalid' 'error' $path ([string]$metadata.reason))) | Out-Null }
+            return $null
+        }
+    }
+    $name = [string](Get-SkillCatalogProperty $InputEntry @('name', 'declared_name'))
+    $description = [string](Get-SkillCatalogProperty $InputEntry @('description'))
+    if ($metadata -and [string]::IsNullOrWhiteSpace($name)) { $name = [string]$metadata.name }
+    if ($metadata -and [string]::IsNullOrWhiteSpace($description)) { $description = [string]$metadata.description }
+    if ([string]::IsNullOrWhiteSpace($name) -or [string]::IsNullOrWhiteSpace($description)) {
+        if ($null -ne $Findings) { $Findings.Add((New-OperationFinding 'skill_identity_missing' 'error' $path 'Skill name and description are required.')) | Out-Null }
+        return $null
+    }
+
+    $enabledValue = Get-SkillCatalogProperty $InputEntry @('enabled')
+    $enabled = if ($enabledValue -is [bool]) { [bool]$enabledValue } else { $true }
+    $availability = [string](Get-SkillCatalogProperty $InputEntry @('availability'))
+    if ([string]::IsNullOrWhiteSpace($availability)) { $availability = 'available' }
+    $freshness = [string](Get-SkillCatalogProperty $InputEntry @('freshness'))
+    if ([string]::IsNullOrWhiteSpace($freshness)) { $freshness = if ($text) { 'fresh' } else { 'unknown' } }
+    if ($freshness -notin @('fresh', 'stale', 'unknown')) { $freshness = 'unknown' }
+    $contentHash = [string](Get-SkillCatalogProperty $InputEntry @('content_hash', 'entrypoint_sha256'))
+    if ([string]::IsNullOrWhiteSpace($contentHash) -and $text) { $contentHash = Get-SkillCatalogCompilerTextHash $text }
+    $metadataHash = [string](Get-SkillCatalogProperty $InputEntry @('metadata_hash'))
+    if ([string]::IsNullOrWhiteSpace($metadataHash)) { $metadataHash = Get-SkillCatalogCompilerTextHash ('{0}|{1}' -f $name.Trim(), $description.Trim()) }
+    $provenance = Get-SkillCatalogProperty $InputEntry @('provenance', 'source')
+    if ($null -eq $provenance) {
+        $provenance = [pscustomobject][ordered]@{ type = 'skill_root'; path = $sourceRoot; revision = 'working-tree' }
+    }
+    return New-SkillCatalogEntry -Name $name -Description $description -Path $path -SourceRoot $sourceRoot -ContentHash $contentHash -MetadataHash $metadataHash -Enabled $enabled -Availability $availability -Freshness $freshness -LoadSideEffect ([string]$(if ([string]::IsNullOrWhiteSpace([string](Get-SkillCatalogProperty $InputEntry @('load_side_effect')))) { 'read_only' } else { Get-SkillCatalogProperty $InputEntry @('load_side_effect') })) -SideEffect ([string]$(if ([string]::IsNullOrWhiteSpace([string](Get-SkillCatalogProperty $InputEntry @('side_effect')))) { 'read_only' } else { Get-SkillCatalogProperty $InputEntry @('side_effect') })) -Dependencies @(Get-SkillCatalogProperty $InputEntry @('dependencies')) -Surfaces @(Get-SkillCatalogProperty $InputEntry @('surfaces')) -Provenance $provenance
+}
+
+function Get-SkillCatalogCompilerProjectionEntry {
+    param($Projection, [string]$Name)
+
+    if ($null -eq $Projection) { return $null }
+    foreach ($field in @('entries', 'skills', 'canonical')) {
+        $items = Get-SkillCatalogProperty $Projection @($field)
+        foreach ($item in @($items)) {
+            if ([string]::Equals([string](Get-SkillCatalogProperty $item @('name', 'id')), $Name, [StringComparison]::OrdinalIgnoreCase)) { return $item }
+        }
+    }
+    return $null
+}
+
+function Compile-SkillCatalog {
+    [CmdletBinding()]
+    param(
+        [string[]]$Roots = @(),
+        [object[]]$Entries = @(),
+        $Projection = $null,
+        [string]$GeneratedAt = ([DateTimeOffset]::UtcNow.ToString('o'))
+    )
+
+    $findings = New-Object System.Collections.Generic.List[object]
+    $candidates = New-Object System.Collections.Generic.List[object]
+    $sourceRoots = New-Object System.Collections.Generic.List[string]
+    foreach ($root in @($Roots)) {
+        if ([string]::IsNullOrWhiteSpace($root)) { continue }
+        if (-not (Test-Path -LiteralPath $root -PathType Container)) {
+            $findings.Add((New-OperationFinding 'skill_root_missing' 'error' $root 'Skill root does not exist.')) | Out-Null
+            continue
+        }
+        $fullRoot = [IO.Path]::GetFullPath($root)
+        if (-not $sourceRoots.Contains($fullRoot)) { $sourceRoots.Add($fullRoot) | Out-Null }
+        foreach ($file in @(Get-ChildItem -LiteralPath $fullRoot -Recurse -File -Filter 'SKILL.md' -Force -ErrorAction SilentlyContinue)) {
+            if (-not (Test-SkillCatalogCompilerContained $file.FullName $fullRoot)) {
+                $findings.Add((New-OperationFinding 'skill_path_outside_root' 'error' $file.FullName 'Discovered skill path is outside its root.')) | Out-Null
+                continue
+            }
+            $entry = ConvertTo-SkillCatalogCompilerEntry -InputEntry ([pscustomobject]@{ path = $file.FullName; source_root = $fullRoot }) -DefaultRoot $fullRoot -Findings $findings
+            if ($null -ne $entry) { $candidates.Add($entry) | Out-Null }
+        }
+    }
+    foreach ($inputEntry in @($Entries)) {
+        if ($null -eq $inputEntry) { continue }
+        $entry = ConvertTo-SkillCatalogCompilerEntry -InputEntry $inputEntry -Findings $findings
+        if ($null -ne $entry) { $candidates.Add($entry) | Out-Null }
+    }
+
+    $groups = @($candidates.ToArray() | Group-Object { ([string]$_.name).ToLowerInvariant() })
+    $canonical = New-Object System.Collections.Generic.List[object]
+    $decisions = New-Object System.Collections.Generic.List[object]
+    foreach ($group in @($groups | Sort-Object Name)) {
+        $items = @($group.Group | Sort-Object path, source_root)
+        $canonical.Add($items[0]) | Out-Null
+        if ($items.Count -gt 1) {
+            $decisions.Add([pscustomobject][ordered]@{
+                    key = $group.Name
+                    disposition = 'duplicate'
+                    reason = 'canonical_identity_deduplicated'
+                    kept_path = [string]$items[0].path
+                    source_paths = @($items | ForEach-Object { [string]$_.path })
+                }) | Out-Null
+        }
+    }
+    $complete = @($findings | Where-Object { [string]$_.severity -eq 'error' }).Count -eq 0
+    return New-SkillCatalog -Entries $canonical.ToArray() -Decisions $decisions.ToArray() -GeneratedAt $GeneratedAt -SourceRoots $sourceRoots.ToArray() -Complete $complete -Findings $findings.ToArray()
+}
+
+$skillEligibilityPolicyRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
+if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) { . (Join-Path $skillEligibilityPolicyRepoRoot 'src\Domain\OperationPlan.ps1') }
+if ($null -eq (Get-Command Get-SkillCatalogStringArray -ErrorAction SilentlyContinue)) { . (Join-Path $skillEligibilityPolicyRepoRoot 'src\Domain\SkillCatalog.ps1') }
+
+function Add-SkillEligibilityFinding {
+    param(
+        [System.Collections.Generic.List[object]]$Findings,
+        [string]$Code,
+        [string]$Severity,
+        [string]$Path,
+        [string]$Message
+    )
+    $Findings.Add((New-OperationFinding $Code $Severity $Path $Message)) | Out-Null
+}
+
+function Test-SkillEligibilityContained {
+    param([string]$Path, [string[]]$AllowedRoots)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    if (@($AllowedRoots).Count -eq 0) { return $true }
+    foreach ($root in @($AllowedRoots)) {
+        if (-not [string]::IsNullOrWhiteSpace($root) -and (Test-OperationPathWithinRoot $Path $root)) { return $true }
+    }
+    return $false
+}
+
+function Evaluate-SkillEligibility {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Skill,
+        [string]$Surface = '',
+        [string[]]$AllowedRoots = @(),
+        [bool]$ApprovalGranted = $false,
+        [string[]]$AvailableDependencies = @()
+    )
+
+    $findings = New-Object System.Collections.Generic.List[object]
+    $name = ([string](Get-OperationObjectProperty $Skill 'name')).Trim()
+    $path = [string](Get-OperationObjectProperty $Skill 'path')
+    if ([string]::IsNullOrWhiteSpace($name)) { Add-SkillEligibilityFinding $findings 'skill_name_missing' 'error' '$.name' 'Skill name is required.' }
+    if ([string]::IsNullOrWhiteSpace($path)) { Add-SkillEligibilityFinding $findings 'path_missing' 'error' '$.path' 'Skill path is required for deterministic containment.' }
+    elseif (-not (Test-SkillEligibilityContained $path $AllowedRoots)) { Add-SkillEligibilityFinding $findings 'path_outside_allowed_root' 'error' '$.path' 'Skill path is outside the allowed roots.' }
+
+    $freshness = ([string](Get-OperationObjectProperty $Skill 'freshness')).Trim().ToLowerInvariant()
+    if ([string]::IsNullOrWhiteSpace($freshness)) { $freshness = 'unknown' }
+    if ($freshness -ne 'fresh') { Add-SkillEligibilityFinding $findings 'freshness_not_current' 'error' '$.freshness' 'Stale or unknown skill metadata cannot be eligible.' }
+
+    $availability = ([string](Get-OperationObjectProperty $Skill 'availability')).Trim().ToLowerInvariant()
+    if ($availability -eq 'cold_load' -or $availability -eq 'needs_activation') {
+        Add-SkillEligibilityFinding $findings 'availability_activation_required' 'warning' '$.availability' 'Skill requires explicit host activation before use.'
+    }
+    elseif ($availability -ne 'available') {
+        Add-SkillEligibilityFinding $findings 'availability_not_eligible' 'error' '$.availability' 'Skill availability is not eligible for the requested surface.'
+    }
+
+    $surfaces = @(Get-SkillCatalogStringArray (Get-OperationObjectProperty $Skill 'surfaces'))
+    if (-not [string]::IsNullOrWhiteSpace($Surface) -and $surfaces.Count -gt 0 -and $surfaces -notcontains $Surface) {
+        Add-SkillEligibilityFinding $findings 'surface_incompatible' 'error' '$.surfaces' 'Skill is not compatible with the requested surface.'
+    }
+
+    $available = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($dependency in @($AvailableDependencies)) { if (-not [string]::IsNullOrWhiteSpace([string]$dependency)) { $available.Add(([string]$dependency).Trim()) | Out-Null } }
+    foreach ($dependency in @(Get-SkillCatalogStringArray (Get-OperationObjectProperty $Skill 'dependencies'))) {
+        if (-not $available.Contains($dependency)) { Add-SkillEligibilityFinding $findings 'dependency_missing' 'error' '$.dependencies' ('Required dependency is unavailable: {0}' -f $dependency) }
+    }
+
+    $sideEffect = ([string](Get-OperationObjectProperty $Skill 'side_effect')).Trim().ToLowerInvariant()
+    if ($sideEffect -notin @('read_only', 'external_read', 'controlled_write')) {
+        Add-SkillEligibilityFinding $findings 'side_effect_unknown' 'error' '$.side_effect' 'Unknown side effect must fail closed.'
+    }
+    $requiresApproval = [bool](Get-OperationObjectProperty $Skill 'requires_approval') -or $sideEffect -eq 'controlled_write'
+    if ($requiresApproval -and -not $ApprovalGranted) { Add-SkillEligibilityFinding $findings 'approval_required' 'warning' '$.requires_approval' 'Explicit approval is required before activation.' }
+
+    $hasDeny = @($findings | Where-Object { [string]$_.severity -eq 'error' }).Count -gt 0
+    $needsActivation = @($findings | Where-Object { $_.code -in @('availability_activation_required', 'approval_required') }).Count -gt 0
+    $decision = if ($hasDeny) { 'deny' } elseif ($needsActivation) { 'needs_activation' } else { 'allow' }
+    return [pscustomobject][ordered]@{
+        schema_version = 1
+        skill_name = $name
+        decision = $decision
+        eligible = ($decision -eq 'allow')
+        activation_required = ($decision -eq 'needs_activation')
+        findings = [object[]]@($findings.ToArray())
+        decision_owner = 'deterministic_policy'
+        semantic_selection_performed = $false
+        profile_filter_applied = $false
+        provider_calls = 0
+        native_mutations = 0
+        writes = 0
+    }
+}
+
+function Test-SkillEligibilityResultContract {
+    param($Result)
+
+    $findings = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Result) { return New-OperationValidationResult @((New-OperationFinding 'eligibility_result_missing' 'error' '$' 'Eligibility result is required.')) }
+    if ((Get-OperationObjectProperty $Result 'schema_version') -ne 1) { $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only eligibility schema version 1 is supported.')) | Out-Null }
+    if ([string](Get-OperationObjectProperty $Result 'decision') -notin @('allow', 'deny', 'needs_activation')) { $findings.Add((New-OperationFinding 'decision_invalid' 'error' '$.decision' 'Eligibility decision is invalid.')) | Out-Null }
+    if ([string](Get-OperationObjectProperty $Result 'decision_owner') -ne 'deterministic_policy') { $findings.Add((New-OperationFinding 'decision_owner_invalid' 'error' '$.decision_owner' 'Eligibility decision owner is invalid.')) | Out-Null }
+    if ((Get-OperationObjectProperty $Result 'semantic_selection_performed') -ne $false -or (Get-OperationObjectProperty $Result 'profile_filter_applied') -ne $false) { $findings.Add((New-OperationFinding 'semantic_boundary_breached' 'error' '$' 'Eligibility policy cannot perform semantic selection or profile filtering.')) | Out-Null }
+    $expectedEligible = ([string](Get-OperationObjectProperty $Result 'decision') -eq 'allow')
+    if ((Get-OperationObjectProperty $Result 'eligible') -ne $expectedEligible) { $findings.Add((New-OperationFinding 'eligible_flag_invalid' 'error' '$.eligible' 'Eligible flag must match the deterministic decision.')) | Out-Null }
+    if (-not (Test-OperationArray (Get-OperationObjectProperty $Result 'findings'))) { $findings.Add((New-OperationFinding 'findings_type_invalid' 'error' '$.findings' 'Eligibility findings must be an array.')) | Out-Null }
+    foreach ($field in @('provider_calls', 'native_mutations', 'writes')) {
+        if ([long](Get-OperationObjectProperty $Result $field) -ne 0) { $findings.Add((New-OperationFinding 'side_effect_forbidden' 'error' ('$.{0}' -f $field) 'Eligibility policy must be zero-side-effect.')) | Out-Null }
+    }
+    return New-OperationValidationResult $findings.ToArray()
+}
+
+$nativeMetadataPlannerRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
+if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) { . (Join-Path $nativeMetadataPlannerRepoRoot 'src\Domain\OperationPlan.ps1') }
+
+function Get-NativeMetadataPlannerProperty {
+    param($Object, [string[]]$Names)
+
+    foreach ($name in @($Names)) {
+        if (Test-OperationObjectProperty $Object $name) { return Get-OperationObjectProperty $Object $name }
+    }
+    return $null
+}
+
+function Get-DefaultNativeMetadataPolicy {
+    return [pscustomobject][ordered]@{
+        schema_version = 1
+        context_ratio = 0.02
+        headroom_ratio = 0.20
+        unknown_context_character_ceiling = 8000
+        estimated_tokens_per_utf8_byte = 0.25
+        max_compacted_description_characters = 160
+        min_compacted_description_characters = 24
+    }
+}
+
+function Get-NativeMetadataPolicyValue {
+    param($Policy, [string]$Name, $Default)
+
+    $value = Get-NativeMetadataPlannerProperty $Policy @($Name)
+    if ($null -eq $value) { return $Default }
+    return $value
+}
+
+function Get-NativeMetadataSnapshotFact {
+    param($Snapshot, [string]$Name)
+
+    $capabilities = Get-NativeMetadataPlannerProperty $Snapshot @('capabilities')
+    $raw = Get-NativeMetadataPlannerProperty $capabilities @($Name)
+    if ($null -eq $raw) {
+        return [pscustomobject]@{ value = $null; source = 'unknown_fallback'; freshness = 'unknown'; unknown_reason = ('{0}_missing' -f $Name) }
+    }
+    if (Test-OperationObjectProperty $raw 'value') {
+        return [pscustomobject]@{
+            value = Get-OperationObjectProperty $raw 'value'
+            source = [string]$(if (Test-OperationObjectProperty $raw 'source') { Get-OperationObjectProperty $raw 'source' } else { 'unknown_fallback' })
+            freshness = [string]$(if (Test-OperationObjectProperty $raw 'freshness') { Get-OperationObjectProperty $raw 'freshness' } else { 'unknown' })
+            unknown_reason = [string]$(if (Test-OperationObjectProperty $raw 'unknown_reason') { Get-OperationObjectProperty $raw 'unknown_reason' } else { '' })
+        }
+    }
+    return [pscustomobject]@{ value = $raw; source = 'unknown_fallback'; freshness = 'unknown'; unknown_reason = ('{0}_unwrapped' -f $Name) }
+}
+
+function ConvertTo-NativeMetadataPositiveInteger {
+    param($Value, [bool]$AllowZero = $false)
+
+    $number = 0L
+    if ($null -eq $Value -or -not [long]::TryParse([string]$Value, [ref]$number)) { return $null }
+    if ($AllowZero) {
+        if ($number -lt 0) { return $null }
+    }
+    elseif ($number -le 0) { return $null }
+    return [long]$number
+}
+
+function ConvertTo-NativeMetadataRatio {
+    param($Value, [double]$Default)
+
+    $number = 0.0
+    if ($null -eq $Value -or -not [double]::TryParse([string]$Value, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$number)) { return $Default }
+    if ($number -lt 0.0 -or $number -ge 1.0) { return $Default }
+    return $number
+}
+
+function Get-NativeMetadataInventoryEntries {
+    param($Inventory)
+
+    if ($null -eq $Inventory) { return @() }
+    $rawEntries = if (Test-OperationObjectProperty $Inventory 'entries') {
+        Get-OperationObjectProperty $Inventory 'entries'
+    }
+    elseif (Test-OperationObjectProperty $Inventory 'skills') {
+        Get-OperationObjectProperty $Inventory 'skills'
+    }
+    else { $Inventory }
+
+    return @($rawEntries | Where-Object {
+            $null -ne $_ -and
+            ((-not (Test-OperationObjectProperty $_ 'enabled')) -or [bool](Get-OperationObjectProperty $_ 'enabled'))
+        } | Sort-Object @{ Expression = { ([string](Get-NativeMetadataPlannerProperty $_ @('name', 'id'))).ToLowerInvariant() } }, path)
+}
+
+function Compress-NativeMetadataDescription {
+    param(
+        [string]$Description,
+        [int]$MaximumCharacters,
+        [int]$MinimumCharacters
+    )
+
+    $normalized = ([regex]::Replace([string]$Description, '\s+', ' ')).Trim()
+    if ($normalized.Length -le $MaximumCharacters) { return $normalized }
+    $limit = [Math]::Max(3, $MaximumCharacters)
+    $prefixLength = [Math]::Max(1, $limit - 1)
+    $prefix = $normalized.Substring(0, [Math]::Min($prefixLength, $normalized.Length)).TrimEnd()
+    if ($prefix.Length -lt [Math]::Min($MinimumCharacters, $prefix.Length)) { return $normalized.Substring(0, [Math]::Min($limit, $normalized.Length)).TrimEnd() }
+    return ($prefix + '…')
+}
+
+function Get-NativeMetadataCost {
+    param(
+        $Entry,
+        [string]$Description,
+        [double]$TokensPerUtf8Byte
+    )
+
+    $name = [string](Get-NativeMetadataPlannerProperty $Entry @('name', 'id'))
+    $path = [string](Get-NativeMetadataPlannerProperty $Entry @('path'))
+    $payload = ('{0}`n{1}`n{2}' -f $name, $Description, $path)
+    $characterCount = [Text.Encoding]::UTF8.GetByteCount($payload)
+    $provided = Get-NativeMetadataPlannerProperty $Entry @('token_estimate', 'estimated_tokens', 'tokens')
+    $providedNumber = ConvertTo-NativeMetadataPositiveInteger $provided $true
+    if ($null -ne $providedNumber) {
+        return [pscustomobject]@{ character_count = [long]$characterCount; token_estimate = [long]$providedNumber; token_estimate_source = 'provided' }
+    }
+    $estimated = [long][Math]::Ceiling($characterCount * $TokensPerUtf8Byte)
+    return [pscustomobject]@{ character_count = [long]$characterCount; token_estimate = [long]$estimated; token_estimate_source = 'utf8_byte_estimate' }
+}
+
+function ConvertTo-NativeMetadataItem {
+    param(
+        $Entry,
+        [double]$TokensPerUtf8Byte,
+        [int]$MaximumDescriptionCharacters,
+        [int]$MinimumDescriptionCharacters,
+        [bool]$Compact
+    )
+
+    $name = [string](Get-NativeMetadataPlannerProperty $Entry @('name', 'id'))
+    $description = [string](Get-NativeMetadataPlannerProperty $Entry @('description'))
+    $finalDescription = if ($Compact) { Compress-NativeMetadataDescription $description $MaximumDescriptionCharacters $MinimumDescriptionCharacters } else { $description }
+    $cost = Get-NativeMetadataCost $Entry $finalDescription $TokensPerUtf8Byte
+    return [pscustomobject][ordered]@{
+        kind = [string]$(if (Test-OperationObjectProperty $Entry 'kind') { Get-OperationObjectProperty $Entry 'kind' } else { 'skill' })
+        name = $name
+        description = $finalDescription
+        path = [string](Get-NativeMetadataPlannerProperty $Entry @('path'))
+        content_hash = Get-NativeMetadataPlannerProperty $Entry @('content_hash', 'entrypoint_sha256')
+        metadata_hash = Get-NativeMetadataPlannerProperty $Entry @('metadata_hash')
+        character_count = $cost.character_count
+        token_estimate = $cost.token_estimate
+        token_estimate_source = $cost.token_estimate_source
+        compacted = ($finalDescription -ne $description)
+    }
+}
+
+function Get-NativeMetadataMeasuredCost {
+    param($Items, [string]$Mode)
+
+    if ($Mode -eq 'tokens') { return [long]((@($Items | ForEach-Object { [long]$_.token_estimate } | Measure-Object -Sum).Sum)) }
+    return [long]((@($Items | ForEach-Object { [long]$_.character_count } | Measure-Object -Sum).Sum))
+}
+
+function Plan-NativeMetadata {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Inventory,
+        [Parameter(Mandatory = $true)]$Snapshot,
+        $Policy = $null
+    )
+
+    if ($null -eq $Policy) { $Policy = Get-DefaultNativeMetadataPolicy }
+    $contextRatio = ConvertTo-NativeMetadataRatio (Get-NativeMetadataPolicyValue $Policy 'context_ratio' 0.02) 0.02
+    $headroomRatio = ConvertTo-NativeMetadataRatio (Get-NativeMetadataPolicyValue $Policy 'headroom_ratio' 0.20) 0.20
+    $tokensPerByte = [double](Get-NativeMetadataPolicyValue $Policy 'estimated_tokens_per_utf8_byte' 0.25)
+    if ($tokensPerByte -le 0) { $tokensPerByte = 0.25 }
+    $fallbackCharacters = [int](Get-NativeMetadataPolicyValue $Policy 'unknown_context_character_ceiling' 8000)
+    if ($fallbackCharacters -le 0) { $fallbackCharacters = 8000 }
+    $maxDescriptionCharacters = [int](Get-NativeMetadataPolicyValue $Policy 'max_compacted_description_characters' 160)
+    if ($maxDescriptionCharacters -le 0) { $maxDescriptionCharacters = 160 }
+    $minDescriptionCharacters = [int](Get-NativeMetadataPolicyValue $Policy 'min_compacted_description_characters' 24)
+    if ($minDescriptionCharacters -le 0) { $minDescriptionCharacters = 24 }
+    $minDescriptionCharacters = [Math]::Min($minDescriptionCharacters, $maxDescriptionCharacters)
+
+    $contextFact = Get-NativeMetadataSnapshotFact $Snapshot 'context_window'
+    $metadataBudgetFact = Get-NativeMetadataSnapshotFact $Snapshot 'metadata_budget'
+    $contextValue = if ([string]$contextFact.freshness -eq 'fresh') { ConvertTo-NativeMetadataPositiveInteger $contextFact.value $false } else { $null }
+    $hostBudget = if ([string]$metadataBudgetFact.freshness -eq 'fresh') { ConvertTo-NativeMetadataPositiveInteger $metadataBudgetFact.value $true } else { $null }
+    $mode = 'character_fallback'
+    $budgetSource = 'unknown_fallback'
+    $formula = 'unknown_context_character_fallback'
+    $tokenCeiling = $null
+    $characterCeiling = [long]$fallbackCharacters
+    $hostCeilingApplied = $false
+
+    if ($null -ne $contextValue) {
+        $tokenCeiling = [long][Math]::Floor($contextValue * $contextRatio)
+        $mode = 'tokens'
+        $budgetSource = [string]$contextFact.source
+        $formula = 'floor(context_window * context_ratio)'
+        if ($null -ne $hostBudget -and $hostBudget -lt $tokenCeiling) {
+            $tokenCeiling = [long]$hostBudget
+            $budgetSource = [string]$metadataBudgetFact.source
+            $formula = 'min(floor(context_window * context_ratio), host_metadata_budget)'
+            $hostCeilingApplied = $true
+        }
+    }
+    elseif ($null -ne $hostBudget) {
+        $mode = 'tokens'
+        $tokenCeiling = [long]$hostBudget
+        $budgetSource = [string]$metadataBudgetFact.source
+        $formula = 'host_metadata_budget_without_context_window'
+        $hostCeilingApplied = $true
+    }
+
+    $headroom = if ($mode -eq 'tokens') { [long][Math]::Floor($tokenCeiling * $headroomRatio) } else { [long][Math]::Floor($characterCeiling * $headroomRatio) }
+    $usableTokens = if ($mode -eq 'tokens') { [long][Math]::Max(0, $tokenCeiling - $headroom) } else { $null }
+    $usableCharacters = if ($mode -eq 'character_fallback') { [long][Math]::Max(0, $characterCeiling - $headroom) } else { $null }
+    $usableCost = if ($mode -eq 'tokens') { $usableTokens } else { $usableCharacters }
+
+    $enabledEntries = @(Get-NativeMetadataInventoryEntries $Inventory)
+    $rawItems = @($enabledEntries | ForEach-Object { ConvertTo-NativeMetadataItem $_ $tokensPerByte $maxDescriptionCharacters $minDescriptionCharacters $false })
+    $rawCost = Get-NativeMetadataMeasuredCost $rawItems $mode
+    $compactionAttempted = $rawCost -gt $usableCost
+    $finalItems = $rawItems
+    $compactionChanged = @()
+    $finalDescriptionCharacters = $maxDescriptionCharacters
+    if ($compactionAttempted) {
+        $finalItems = @($enabledEntries | ForEach-Object { ConvertTo-NativeMetadataItem $_ $tokensPerByte $maxDescriptionCharacters $minDescriptionCharacters $true })
+        $compactedCost = Get-NativeMetadataMeasuredCost $finalItems $mode
+        if ($compactedCost -gt $usableCost -and $minDescriptionCharacters -lt $maxDescriptionCharacters) {
+            $minimumItems = @($enabledEntries | ForEach-Object { ConvertTo-NativeMetadataItem $_ $tokensPerByte $minDescriptionCharacters $minDescriptionCharacters $true })
+            $minimumCost = Get-NativeMetadataMeasuredCost $minimumItems $mode
+            if ($minimumCost -le $usableCost) {
+                $bestItems = $minimumItems
+                $bestLimit = $minDescriptionCharacters
+                $low = $minDescriptionCharacters + 1
+                $high = $maxDescriptionCharacters - 1
+                while ($low -le $high) {
+                    $mid = [int][Math]::Floor(($low + $high) / 2)
+                    $candidateItems = @($enabledEntries | ForEach-Object { ConvertTo-NativeMetadataItem $_ $tokensPerByte $mid $minDescriptionCharacters $true })
+                    $candidateCost = Get-NativeMetadataMeasuredCost $candidateItems $mode
+                    if ($candidateCost -le $usableCost) {
+                        $bestItems = $candidateItems
+                        $bestLimit = $mid
+                        $low = $mid + 1
+                    }
+                    else { $high = $mid - 1 }
+                }
+                $finalItems = $bestItems
+                $finalDescriptionCharacters = $bestLimit
+            }
+            else {
+                $finalItems = $minimumItems
+                $finalDescriptionCharacters = $minDescriptionCharacters
+            }
+        }
+        $compactionChanged = @($finalItems | Where-Object compacted | ForEach-Object name)
+    }
+    $finalCost = Get-NativeMetadataMeasuredCost $finalItems $mode
+    $pass = $finalCost -le $usableCost
+    $enabledNames = @($enabledEntries | ForEach-Object { [string](Get-NativeMetadataPlannerProperty $_ @('name', 'id')) })
+    $keptItems = if ($pass) { @($finalItems) } else { @() }
+    $keptNames = @($keptItems | ForEach-Object name)
+    $omittedNames = if ($pass) { @() } else { @($enabledNames) }
+    $offenders = if ($pass) { @() } else {
+        @($finalItems | ForEach-Object {
+                [pscustomobject][ordered]@{
+                    name = [string]$_.name
+                    required = if ($mode -eq 'tokens') { [long]$_.token_estimate } else { [long]$_.character_count }
+                    token_estimate = [long]$_.token_estimate
+                    character_count = [long]$_.character_count
+                    token_estimate_source = [string]$_.token_estimate_source
+                }
+            })
+    }
+    $totalTokens = [long]((@($finalItems | ForEach-Object { [long]$_.token_estimate } | Measure-Object -Sum).Sum))
+    $totalCharacters = [long]((@($finalItems | ForEach-Object { [long]$_.character_count } | Measure-Object -Sum).Sum))
+    $identity = [ordered]@{
+        mode = $mode
+        token_ceiling = $tokenCeiling
+        character_ceiling = $characterCeiling
+        usable_cost = $usableCost
+        entries = @($finalItems | ForEach-Object { [ordered]@{ name = $_.name; token_estimate = $_.token_estimate; character_count = $_.character_count; description = $_.description } })
+    }
+    $planId = 'nmp-{0}' -f (Get-OperationSha256 ($identity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)
+    $findings = New-Object System.Collections.Generic.List[object]
+    if (-not $pass) { $findings.Add((New-OperationFinding 'metadata_budget_overflow' 'error' '$.metadata' 'All enabled metadata could not fit after deterministic compaction.')) | Out-Null }
+
+    return [pscustomobject][ordered]@{
+        schema_version = 1
+        plan_id = $planId
+        pass = $pass
+        status = if ($pass) { 'ready' } else { 'blocked' }
+        block_reason = if ($pass) { $null } else { 'metadata_budget_overflow' }
+        budget = [ordered]@{
+            mode = $mode
+            unit = if ($mode -eq 'tokens') { 'tokens' } else { 'characters' }
+            source = $budgetSource
+            formula = $formula
+            context_window = $contextValue
+            context_window_source = [string]$contextFact.source
+            context_window_freshness = [string]$contextFact.freshness
+            metadata_budget = $hostBudget
+            metadata_budget_source = [string]$metadataBudgetFact.source
+            metadata_budget_freshness = [string]$metadataBudgetFact.freshness
+            host_ceiling_applied = $hostCeilingApplied
+            context_ratio = $contextRatio
+            headroom_ratio = $headroomRatio
+            headroom = $headroom
+            token_ceiling = $tokenCeiling
+            ceiling_tokens = $tokenCeiling
+            character_ceiling = if ($mode -eq 'character_fallback') { $characterCeiling } else { $null }
+            usable_tokens = $usableTokens
+            usable_characters = $usableCharacters
+            provenance = [ordered]@{
+                context_window_source = [string]$contextFact.source
+                metadata_budget_source = [string]$metadataBudgetFact.source
+                unknown_reason = if ($mode -eq 'character_fallback') { if ([string]::IsNullOrWhiteSpace([string]$contextFact.unknown_reason)) { 'context_window_unknown' } else { [string]$contextFact.unknown_reason } } else { $null }
+            }
+        }
+        measurement = [ordered]@{
+            unit = if ($mode -eq 'tokens') { 'tokens' } else { 'characters' }
+            token_estimate_used = ($mode -eq 'tokens')
+            estimator = if ($mode -eq 'tokens') { 'provided_or_utf8_byte_estimate' } else { 'not_used_for_budget' }
+            character_count_is_not_token_count = $true
+        }
+        enabled = [object[]]@($enabledNames)
+        kept = [object[]]@($keptNames)
+        omitted = [object[]]@($omittedNames)
+        metadata = [object[]]@($keptItems)
+        enabled_total = $enabledEntries.Count
+        kept_total = $keptItems.Count
+        omitted_total = $omittedNames.Count
+        disabled_total = @($Inventory.entries | Where-Object { (Test-OperationObjectProperty $_ 'enabled') -and -not [bool](Get-OperationObjectProperty $_ 'enabled') }).Count
+        truncated = (-not $pass)
+        token_estimate = if ($mode -eq 'tokens') { $totalTokens } else { $null }
+        estimated_token_total = $totalTokens
+        character_count = $totalCharacters
+        compaction = [ordered]@{
+            attempted = $compactionAttempted
+            applied = ($compactionChanged.Count -gt 0)
+            changed_names = @($compactionChanged)
+            before_cost = $rawCost
+            after_cost = $finalCost
+            maximum_description_characters = $maxDescriptionCharacters
+            final_maximum_description_characters = $finalDescriptionCharacters
+            minimum_description_characters = $minDescriptionCharacters
+        }
+        overflow = [ordered]@{
+            offenders = [object[]]@($offenders)
+            required = if ($pass) { 0 } else { $finalCost }
+            available = $usableCost
+            unit = if ($mode -eq 'tokens') { 'tokens' } else { 'characters' }
+        }
+        findings = [object[]]@($findings.ToArray())
+        decision_owner = 'deterministic_planner'
+        semantic_selection_applied = $false
+        profile_filter_applied = $false
+        provider_calls = 0
+        native_mutations = 0
+        writes = 0
+    }
+}
+
+function Test-NativeMetadataPlanContract {
+    param($Plan)
+
+    $findings = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Plan) { return New-OperationValidationResult @((New-OperationFinding 'metadata_plan_missing' 'error' '$' 'Native metadata plan is required.')) }
+    if ((Get-OperationObjectProperty $Plan 'schema_version') -ne 1) { $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only NativeMetadataPlan schema version 1 is supported.')) | Out-Null }
+    if ([string](Get-OperationObjectProperty $Plan 'plan_id') -notmatch '^nmp-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'plan_id_invalid' 'error' '$.plan_id' 'Metadata plan id must be deterministic.')) | Out-Null }
+    if ([string](Get-OperationObjectProperty $Plan 'decision_owner') -ne 'deterministic_planner') { $findings.Add((New-OperationFinding 'decision_owner_invalid' 'error' '$.decision_owner' 'Metadata planning is deterministic and cannot own semantic selection.')) | Out-Null }
+    foreach ($field in @('semantic_selection_applied', 'profile_filter_applied')) {
+        if ((Get-OperationObjectProperty $Plan $field) -ne $false) { $findings.Add((New-OperationFinding 'semantic_boundary_breached' 'error' ('$.{0}' -f $field) 'Metadata planner cannot apply semantic selection or profile filtering.')) | Out-Null }
+    }
+    foreach ($field in @('provider_calls', 'native_mutations', 'writes')) {
+        if ([long](Get-OperationObjectProperty $Plan $field) -ne 0) { $findings.Add((New-OperationFinding 'side_effect_forbidden' 'error' ('$.{0}' -f $field) 'Metadata planning must be zero-side-effect.')) | Out-Null }
+    }
+    foreach ($field in @('enabled', 'kept', 'omitted', 'metadata', 'findings')) {
+        if (-not (Test-OperationArray (Get-OperationObjectProperty $Plan $field))) { $findings.Add((New-OperationFinding 'array_field_invalid' 'error' ('$.{0}' -f $field) 'Metadata plan arrays are required.')) | Out-Null }
+    }
+    $enabledTotal = [int](Get-OperationObjectProperty $Plan 'enabled_total')
+    $keptTotal = [int](Get-OperationObjectProperty $Plan 'kept_total')
+    $omittedTotal = [int](Get-OperationObjectProperty $Plan 'omitted_total')
+    if ($enabledTotal -ne @((Get-OperationObjectProperty $Plan 'enabled')).Count) { $findings.Add((New-OperationFinding 'enabled_count_invalid' 'error' '$.enabled_total' 'enabled_total must match enabled names.')) | Out-Null }
+    if ($keptTotal -ne @((Get-OperationObjectProperty $Plan 'kept')).Count) { $findings.Add((New-OperationFinding 'kept_count_invalid' 'error' '$.kept_total' 'kept_total must match kept names.')) | Out-Null }
+    if ($omittedTotal -ne @((Get-OperationObjectProperty $Plan 'omitted')).Count) { $findings.Add((New-OperationFinding 'omitted_count_invalid' 'error' '$.omitted_total' 'omitted_total must match omitted names.')) | Out-Null }
+    $pass = [bool](Get-OperationObjectProperty $Plan 'pass')
+    if ($pass -and ($keptTotal -ne $enabledTotal -or $omittedTotal -ne 0 -or (Get-OperationObjectProperty $Plan 'truncated') -ne $false)) { $findings.Add((New-OperationFinding 'complete_projection_invalid' 'error' '$' 'A passing plan must keep every enabled item without truncation.')) | Out-Null }
+    if (-not $pass -and ($omittedTotal -eq 0 -or (Get-OperationObjectProperty $Plan 'truncated') -ne $true)) { $findings.Add((New-OperationFinding 'blocked_projection_invalid' 'error' '$' 'A blocked plan must expose explicit omission and truncation.')) | Out-Null }
+    $budget = Get-OperationObjectProperty $Plan 'budget'
+    $mode = [string](Get-OperationObjectProperty $budget 'mode')
+    if ($mode -notin @('tokens', 'character_fallback')) { $findings.Add((New-OperationFinding 'budget_mode_invalid' 'error' '$.budget.mode' 'Budget mode is invalid.')) | Out-Null }
+    $measurement = Get-OperationObjectProperty $Plan 'measurement'
+    if ([string](Get-OperationObjectProperty $measurement 'unit') -ne $(if ($mode -eq 'tokens') { 'tokens' } else { 'characters' })) { $findings.Add((New-OperationFinding 'measurement_unit_invalid' 'error' '$.measurement.unit' 'Measurement unit must match budget mode.')) | Out-Null }
+    return New-OperationValidationResult $findings.ToArray()
+}
+
+$skillProjectionApplicationRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
+if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionApplicationRepoRoot 'src\Domain\OperationPlan.ps1') }
+if ($null -eq (Get-Command Get-SkillCatalogProperty -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionApplicationRepoRoot 'src\Domain\SkillCatalog.ps1') }
+
+function Get-NativeSkillProjectionProperty {
+    param($Object, [string[]]$Names)
+
+    foreach ($name in @($Names)) {
+        if (Test-OperationObjectProperty $Object $name) { return (Get-OperationObjectProperty $Object $name) }
+    }
+    return $null
+}
+
+function Resolve-NativeSkillProjectionPath {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
+    $resolved = $Path.Trim()
+    if ($resolved.StartsWith('~')) { $resolved = $resolved -replace '^~', [Environment]::GetFolderPath('UserProfile') }
+    if (-not [IO.Path]::IsPathRooted($resolved)) { $resolved = Join-Path $skillProjectionApplicationRepoRoot $resolved }
+    return [IO.Path]::GetFullPath($resolved)
+}
+
+function Get-NativeSkillProjectionSettings {
+    param([Parameter(Mandatory = $true)]$Config)
+
+    $skillProjection = Get-NativeSkillProjectionProperty $Config @('skill_projection')
+    $settings = Get-NativeSkillProjectionProperty $skillProjection @('native_projection')
+    if ($null -eq $settings) { throw 'skill_projection.native_projection is required for native projection.' }
+    $enabled = if (Test-OperationObjectProperty $settings 'enabled') { [bool](Get-OperationObjectProperty $settings 'enabled') } else { $true }
+    $owner = ([string](Get-NativeSkillProjectionProperty $settings @('owner'))).Trim()
+    $targetRoot = Resolve-NativeSkillProjectionPath ([string](Get-NativeSkillProjectionProperty $settings @('target_root', 'user_skill_root')))
+    $receiptPath = Resolve-NativeSkillProjectionPath ([string](Get-NativeSkillProjectionProperty $settings @('receipt_path')))
+    $notificationMethod = ([string](Get-NativeSkillProjectionProperty $settings @('notification_method'))).Trim()
+    $notificationMode = ([string](Get-NativeSkillProjectionProperty $settings @('notification_mode'))).Trim()
+    if ([string]::IsNullOrWhiteSpace($owner)) { throw 'skill_projection.native_projection.owner is required.' }
+    if ([string]::IsNullOrWhiteSpace($targetRoot)) { throw 'skill_projection.native_projection.target_root is required.' }
+    if ([string]::IsNullOrWhiteSpace($receiptPath)) { throw 'skill_projection.native_projection.receipt_path is required.' }
+    if ([string]::IsNullOrWhiteSpace($notificationMethod)) { $notificationMethod = 'skills/changed' }
+    if ([string]::IsNullOrWhiteSpace($notificationMode)) { $notificationMode = 'plan_only' }
+    return [pscustomobject][ordered]@{
+        enabled = $enabled
+        owner = $owner
+        target_root = $targetRoot
+        receipt_path = $receiptPath
+        apply_requires_token = if (Test-OperationObjectProperty $settings 'apply_requires_token') { [bool](Get-OperationObjectProperty $settings 'apply_requires_token') } else { $true }
+        notification_method = $notificationMethod
+        notification_mode = $notificationMode
+    }
+}
+
+function Get-NativeSkillProjectionMetadataByName {
+    param($MetadataPlan)
+
+    $result = @{}
+    foreach ($item in @(Get-NativeSkillProjectionProperty $MetadataPlan @('metadata'))) {
+        $name = ([string](Get-NativeSkillProjectionProperty $item @('name', 'id'))).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($name)) { $result[$name] = $item }
+    }
+    return $result
+}
+
+function Get-NativeSkillProjectionEligibilityByName {
+    param([object[]]$Eligibility)
+
+    $result = @{}
+    foreach ($item in @($Eligibility)) {
+        $name = ([string](Get-NativeSkillProjectionProperty $item @('skill_name', 'name'))).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($name)) { $result[$name] = $item }
+    }
+    return $result
+}
+
+function New-NativeSkillProjectionBlockedPlan {
+    param(
+        $Settings,
+        $Catalog,
+        $MetadataPlan,
+        [string[]]$EnabledNames,
+        [object[]]$Findings
+    )
+
+    $identity = [ordered]@{
+        status = 'blocked'
+        target_root = [string]$Settings.target_root
+        catalog_id = [string](Get-NativeSkillProjectionProperty $Catalog @('catalog_id'))
+        metadata_plan_id = [string](Get-NativeSkillProjectionProperty $MetadataPlan @('plan_id'))
+        enabled = @($EnabledNames | Sort-Object)
+        findings = @($Findings | ForEach-Object { [ordered]@{ code = [string]$_.code; path = [string]$_.path; message = [string]$_.message } })
+    }
+    $planId = 'nsp-{0}' -f (Get-OperationSha256 ($identity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)
+    return [pscustomobject][ordered]@{
+        schema_version = 1
+        plan_id = $planId
+        status = 'blocked'
+        pass = $false
+        owner = [string]$Settings.owner
+        target_root = [string]$Settings.target_root
+        receipt_path = [string]$Settings.receipt_path
+        apply_requires_token = [bool]$Settings.apply_requires_token
+        apply_token = ''
+        catalog_id = [string](Get-NativeSkillProjectionProperty $Catalog @('catalog_id'))
+        metadata_plan_id = [string](Get-NativeSkillProjectionProperty $MetadataPlan @('plan_id'))
+        enabled = [object[]]@($EnabledNames | Sort-Object)
+        kept = [object[]]@()
+        omitted = [object[]]@($EnabledNames | Sort-Object)
+        skills = [object[]]@()
+        actions = [object[]]@()
+        enabled_total = @($EnabledNames).Count
+        kept_total = 0
+        omitted_total = @($EnabledNames).Count
+        truncated = $true
+        findings = [object[]]@($Findings)
+        notification = [ordered]@{
+            method = [string]$Settings.notification_method
+            mode = [string]$Settings.notification_mode
+            status = 'blocked'
+            changed_names = @()
+            host_mutation = $false
+        }
+        decision_owner = 'deterministic_projection'
+        semantic_selection_applied = $false
+        profile_filter_applied = $false
+        provider_calls = 0
+        native_mutations = 0
+        writes = 0
+    }
+}
+
+function New-NativeSkillProjectionPlan {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Catalog,
+        [Parameter(Mandatory = $true)][object[]]$Eligibility,
+        [Parameter(Mandatory = $true)]$MetadataPlan,
+        [Parameter(Mandatory = $true)]$Config
+    )
+
+    $settings = Get-NativeSkillProjectionSettings $Config
+    if (-not $settings.enabled) {
+        return New-NativeSkillProjectionBlockedPlan $settings $Catalog $MetadataPlan @() @((New-OperationFinding 'native_projection_disabled' 'error' '$.skill_projection.native_projection.enabled' 'Native projection is disabled.'))
+    }
+    if (-not [bool](Get-NativeSkillProjectionProperty $MetadataPlan @('pass'))) {
+        return New-NativeSkillProjectionBlockedPlan $settings $Catalog $MetadataPlan @((Get-NativeSkillProjectionProperty $MetadataPlan @('enabled'))) @((New-OperationFinding 'metadata_plan_blocked' 'error' '$.metadata_plan' 'Native metadata plan is blocked; projection cannot omit enabled metadata.'))
+    }
+
+    $entries = @(Get-NativeSkillProjectionProperty $Catalog @('entries'))
+    $eligibilityByName = Get-NativeSkillProjectionEligibilityByName $Eligibility
+    $entryByName = @{}
+    $eligibleEntries = New-Object System.Collections.Generic.List[object]
+    $enabledNames = New-Object System.Collections.Generic.List[string]
+    foreach ($entry in $entries) {
+        $name = ([string](Get-NativeSkillProjectionProperty $entry @('name', 'id'))).Trim()
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $entryByName[$name] = $entry
+        $enabled = -not (Test-OperationObjectProperty $entry 'enabled') -or [bool](Get-NativeSkillProjectionProperty $entry @('enabled'))
+        if (-not $enabled) { continue }
+        $decision = if ($eligibilityByName.ContainsKey($name)) { $eligibilityByName[$name] } else { $null }
+        if ($null -ne $decision -and [string](Get-NativeSkillProjectionProperty $decision @('decision')) -eq 'allow') {
+            $eligibleEntries.Add($entry) | Out-Null
+            $enabledNames.Add($name) | Out-Null
+        }
+    }
+
+    $metadataByName = Get-NativeSkillProjectionMetadataByName $MetadataPlan
+    $findings = New-Object System.Collections.Generic.List[object]
+    $rows = New-Object System.Collections.Generic.List[object]
+    $targetLeaves = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in @($eligibleEntries.ToArray() | Sort-Object name)) {
+        $name = ([string](Get-NativeSkillProjectionProperty $entry @('name', 'id'))).Trim()
+        $metadata = if ($metadataByName.ContainsKey($name)) { $metadataByName[$name] } else { $null }
+        if ($null -eq $metadata) {
+            $findings.Add((New-OperationFinding 'metadata_missing' 'error' ('$.metadata[{0}]' -f $name) 'Every eligible enabled skill must have native metadata.')) | Out-Null
+            continue
+        }
+        $sourcePath = [string](Get-NativeSkillProjectionProperty $metadata @('path'))
+        if ([string]::IsNullOrWhiteSpace($sourcePath)) { $sourcePath = [string](Get-NativeSkillProjectionProperty $entry @('path')) }
+        $sourcePath = if ([string]::IsNullOrWhiteSpace($sourcePath)) { '' } else { [IO.Path]::GetFullPath($sourcePath) }
+        $sourceRoot = [string](Get-NativeSkillProjectionProperty $entry @('source_root'))
+        if (-not [string]::IsNullOrWhiteSpace($sourceRoot)) { $sourceRoot = [IO.Path]::GetFullPath($sourceRoot) }
+        if ([string]::IsNullOrWhiteSpace($sourcePath) -or -not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+            $findings.Add((New-OperationFinding 'source_path_missing' 'error' ('$.skills[{0}].source_path' -f $name) 'Native projection source path must exist.')) | Out-Null
+            continue
+        }
+        if (-not [string]::IsNullOrWhiteSpace($sourceRoot) -and -not (Test-OperationPathWithinRoot $sourcePath $sourceRoot)) {
+            $findings.Add((New-OperationFinding 'source_path_outside_root' 'error' ('$.skills[{0}].source_path' -f $name) 'Native projection source path is outside its declared source root.')) | Out-Null
+            continue
+        }
+        $contentHash = ([string](Get-NativeSkillProjectionProperty $metadata @('content_hash'))).Trim().ToLowerInvariant()
+        if ([string]::IsNullOrWhiteSpace($contentHash)) { $contentHash = ([string](Get-NativeSkillProjectionProperty $entry @('content_hash'))).Trim().ToLowerInvariant() }
+        $metadataHash = ([string](Get-NativeSkillProjectionProperty $metadata @('metadata_hash'))).Trim().ToLowerInvariant()
+        if ([string]::IsNullOrWhiteSpace($metadataHash)) { $metadataHash = ([string](Get-NativeSkillProjectionProperty $entry @('metadata_hash'))).Trim().ToLowerInvariant() }
+        if ($contentHash -notmatch '^[0-9a-f]{64}$') { $findings.Add((New-OperationFinding 'content_hash_missing' 'error' ('$.skills[{0}].content_hash' -f $name) 'Native projection requires a SHA-256 content hash.')) | Out-Null }
+        if ($metadataHash -notmatch '^[0-9a-f]{64}$') { $findings.Add((New-OperationFinding 'metadata_hash_missing' 'error' ('$.skills[{0}].metadata_hash' -f $name) 'Native projection requires a SHA-256 metadata hash.')) | Out-Null }
+        $sourceDirectory = [IO.Path]::GetDirectoryName($sourcePath)
+        $targetLeaf = [IO.Path]::GetFileName($sourceDirectory.TrimEnd('\', '/'))
+        if ([string]::IsNullOrWhiteSpace($targetLeaf) -or $targetLeaf -in @('.', '..') -or $targetLeaf.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0) {
+            $findings.Add((New-OperationFinding 'target_leaf_unsafe' 'error' ('$.entries[{0}].path' -f $name) 'The managed package directory leaf is unsafe for native projection.')) | Out-Null
+            continue
+        }
+        if (-not $targetLeaves.Add($targetLeaf)) {
+            $findings.Add((New-OperationFinding 'target_leaf_duplicate' 'error' ('$.entries[{0}].path' -f $name) 'Multiple semantic skills resolve to the same native package directory.')) | Out-Null
+            continue
+        }
+        $targetDirectory = Join-Path $settings.target_root $targetLeaf
+        $targetPath = Join-Path $targetDirectory 'SKILL.md'
+        $description = [string](Get-NativeSkillProjectionProperty $metadata @('description'))
+        if ([string]::IsNullOrWhiteSpace($description)) { $description = [string](Get-NativeSkillProjectionProperty $entry @('description')) }
+        $rows.Add([pscustomobject][ordered]@{
+                kind = 'skill'
+                name = $name
+                target_name = $targetLeaf
+                source_path = $sourcePath
+                source_directory = $sourceDirectory
+                source_root = $sourceRoot
+                target_directory = $targetDirectory
+                target_path = $targetPath
+                content_hash = $contentHash
+                metadata_hash = $metadataHash
+                metadata = [ordered]@{
+                    kind = 'skill'
+                    name = $name
+                    description = $description
+                    path = $sourcePath
+                    content_hash = $contentHash
+                    metadata_hash = $metadataHash
+                }
+            }) | Out-Null
+    }
+
+    $enabledNamesSorted = @($enabledNames.ToArray() | Sort-Object)
+    if ($findings.Count -gt 0) { return New-NativeSkillProjectionBlockedPlan $settings $Catalog $MetadataPlan $enabledNamesSorted $findings.ToArray() }
+
+    $skillRows = @($rows.ToArray() | Sort-Object name)
+    $identity = [ordered]@{
+        target_root = [string]$settings.target_root
+        owner = [string]$settings.owner
+        catalog_id = [string](Get-NativeSkillProjectionProperty $Catalog @('catalog_id'))
+        metadata_plan_id = [string](Get-NativeSkillProjectionProperty $MetadataPlan @('plan_id'))
+        skills = @($skillRows | ForEach-Object { [ordered]@{ name = $_.name; source_path = $_.source_path; target_path = $_.target_path; content_hash = $_.content_hash; metadata_hash = $_.metadata_hash } })
+    }
+    $planId = 'nsp-{0}' -f (Get-OperationSha256 ($identity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)
+    $applyToken = 'nsp-token-{0}' -f (Get-OperationSha256 ('{0}|apply' -f $planId)).Substring(0, 16)
+    $actions = @($skillRows | ForEach-Object {
+            [ordered]@{
+                action_id = 'nspa-{0}' -f (Get-OperationSha256 ('{0}|{1}' -f $planId, $_.name)).Substring(0, 16)
+                type = 'junction'
+                name = $_.name
+                source_directory = $_.source_directory
+                target_directory = $_.target_directory
+                target_path = $_.target_path
+                expected_content_hash = $_.content_hash
+                risk = 'explicit_native_root_write'
+            }
+        })
+    return [pscustomobject][ordered]@{
+        schema_version = 1
+        plan_id = $planId
+        status = 'ready'
+        pass = $true
+        owner = [string]$settings.owner
+        target_root = [string]$settings.target_root
+        receipt_path = [string]$settings.receipt_path
+        apply_requires_token = [bool]$settings.apply_requires_token
+        apply_token = $applyToken
+        catalog_id = [string](Get-NativeSkillProjectionProperty $Catalog @('catalog_id'))
+        metadata_plan_id = [string](Get-NativeSkillProjectionProperty $MetadataPlan @('plan_id'))
+        enabled = [object[]]$enabledNamesSorted
+        kept = [object[]]@($skillRows | ForEach-Object name)
+        omitted = [object[]]@()
+        skills = [object[]]$skillRows
+        actions = [object[]]$actions
+        enabled_total = $enabledNamesSorted.Count
+        kept_total = $skillRows.Count
+        omitted_total = 0
+        truncated = $false
+        findings = [object[]]@()
+        notification = [ordered]@{
+            method = [string]$settings.notification_method
+            mode = [string]$settings.notification_mode
+            status = 'planned_only'
+            changed_names = @($skillRows | ForEach-Object name)
+            host_mutation = $false
+        }
+        decision_owner = 'deterministic_projection'
+        semantic_selection_applied = $false
+        profile_filter_applied = $false
+        provider_calls = 0
+        native_mutations = 0
+        writes = 0
+    }
+}
+
+function Test-NativeSkillProjectionPlanContract {
+    param($Plan)
+
+    $findings = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Plan) { return New-OperationValidationResult @((New-OperationFinding 'projection_plan_missing' 'error' '$' 'Native skill projection plan is required.')) }
+    if ((Get-NativeSkillProjectionProperty $Plan @('schema_version')) -ne 1) { $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only native skill projection schema version 1 is supported.')) | Out-Null }
+    if ([string](Get-NativeSkillProjectionProperty $Plan @('plan_id')) -notmatch '^nsp-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'plan_id_invalid' 'error' '$.plan_id' 'Projection plan id is invalid.')) | Out-Null }
+    if ([string](Get-NativeSkillProjectionProperty $Plan @('status')) -notin @('ready', 'blocked')) { $findings.Add((New-OperationFinding 'status_invalid' 'error' '$.status' 'Projection plan status is invalid.')) | Out-Null }
+    foreach ($field in @('owner', 'target_root', 'receipt_path')) { if ([string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $Plan @($field)))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Projection plan field is required.')) | Out-Null } }
+    foreach ($field in @('enabled', 'kept', 'omitted', 'skills', 'actions', 'findings')) { if (-not (Test-OperationArray (Get-OperationObjectProperty $Plan $field))) { $findings.Add((New-OperationFinding 'array_field_invalid' 'error' ('$.{0}' -f $field) 'Projection plan field must be an array.')) | Out-Null } }
+    $enabled = @((Get-NativeSkillProjectionProperty $Plan @('enabled')))
+    $kept = @((Get-NativeSkillProjectionProperty $Plan @('kept')))
+    $omitted = @((Get-NativeSkillProjectionProperty $Plan @('omitted')))
+    if ([int](Get-NativeSkillProjectionProperty $Plan @('enabled_total')) -ne $enabled.Count) { $findings.Add((New-OperationFinding 'enabled_count_invalid' 'error' '$.enabled_total' 'enabled_total must match enabled names.')) | Out-Null }
+    if ([int](Get-NativeSkillProjectionProperty $Plan @('kept_total')) -ne $kept.Count) { $findings.Add((New-OperationFinding 'kept_count_invalid' 'error' '$.kept_total' 'kept_total must match kept names.')) | Out-Null }
+    if ([int](Get-NativeSkillProjectionProperty $Plan @('omitted_total')) -ne $omitted.Count) { $findings.Add((New-OperationFinding 'omitted_count_invalid' 'error' '$.omitted_total' 'omitted_total must match omitted names.')) | Out-Null }
+    if ((Get-NativeSkillProjectionProperty $Plan @('status')) -eq 'ready') {
+        if ([bool](Get-NativeSkillProjectionProperty $Plan @('pass')) -ne $true -or $kept.Count -ne $enabled.Count -or $omitted.Count -ne 0 -or (Get-NativeSkillProjectionProperty $Plan @('truncated')) -ne $false) { $findings.Add((New-OperationFinding 'complete_projection_invalid' 'error' '$' 'A ready plan must retain every eligible enabled skill.')) | Out-Null }
+        if ([string](Get-NativeSkillProjectionProperty $Plan @('apply_token')) -notmatch '^nsp-token-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'apply_token_invalid' 'error' '$.apply_token' 'Ready plans require an explicit apply token.')) | Out-Null }
+    }
+    if ((Get-NativeSkillProjectionProperty $Plan @('semantic_selection_applied')) -ne $false -or (Get-NativeSkillProjectionProperty $Plan @('profile_filter_applied')) -ne $false) { $findings.Add((New-OperationFinding 'semantic_boundary_breached' 'error' '$' 'Projection cannot apply semantic or profile reachability filtering.')) | Out-Null }
+    foreach ($field in @('provider_calls', 'native_mutations', 'writes')) { if ([long](Get-NativeSkillProjectionProperty $Plan @($field)) -ne 0) { $findings.Add((New-OperationFinding 'side_effect_forbidden' 'error' ('$.{0}' -f $field) 'Planning must not mutate the native surface.')) | Out-Null } }
+    $notification = Get-NativeSkillProjectionProperty $Plan @('notification')
+    if ([string](Get-NativeSkillProjectionProperty $notification @('method')) -ne 'skills/changed') { $findings.Add((New-OperationFinding 'notification_method_invalid' 'error' '$.notification.method' 'Native projection uses the skills/changed notification plan.')) | Out-Null }
+    if ([string](Get-NativeSkillProjectionProperty $notification @('status')) -notin @('planned_only', 'blocked')) { $findings.Add((New-OperationFinding 'notification_status_invalid' 'error' '$.notification.status' 'Notification must remain a plan-only or blocked action.')) | Out-Null }
+    foreach ($skill in @((Get-NativeSkillProjectionProperty $Plan @('skills')))) {
+        foreach ($field in @('name', 'source_path', 'target_path', 'content_hash', 'metadata_hash')) { if ([string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $skill @($field)))) { $findings.Add((New-OperationFinding 'skill_field_missing' 'error' '$.skills' ('Projected skill field is missing: {0}' -f $field))) | Out-Null } }
+        if ([string](Get-NativeSkillProjectionProperty $skill @('content_hash')) -notmatch '^[0-9a-f]{64}$' -or [string](Get-NativeSkillProjectionProperty $skill @('metadata_hash')) -notmatch '^[0-9a-f]{64}$') { $findings.Add((New-OperationFinding 'skill_hash_invalid' 'error' '$.skills' 'Projected skill hashes must be SHA-256.')) | Out-Null }
+        $metadata = Get-NativeSkillProjectionProperty $skill @('metadata')
+        if ([string](Get-NativeSkillProjectionProperty $metadata @('name')) -ne [string](Get-NativeSkillProjectionProperty $skill @('name')) -or [string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $metadata @('description')))) { $findings.Add((New-OperationFinding 'skill_metadata_invalid' 'error' '$.skills.metadata' 'Projected skill metadata must include matching name and description.')) | Out-Null }
+    }
+    return New-OperationValidationResult $findings.ToArray()
+}
+
+$nativeSkillProjectionRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
+if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) { . (Join-Path $nativeSkillProjectionRepoRoot 'src\Domain\OperationPlan.ps1') }
+if ($null -eq (Get-Command New-NativeSkillProjectionPlan -ErrorAction SilentlyContinue)) { . (Join-Path $nativeSkillProjectionRepoRoot 'src\Application\SkillProjection.ps1') }
+
+function Get-NativeSkillProjectionFileHash {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
+    return ([string](Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash).ToLowerInvariant()
+}
+
+function Get-NativeSkillProjectionLinkTarget {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Container)) { return '' }
+    try {
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        if (-not [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return '' }
+        $targetProperty = $item.PSObject.Properties['Target']
+        if ($null -eq $targetProperty) { return '' }
+        $target = $targetProperty.Value
+        if ($target -is [array]) { $target = @($target)[0] }
+        if ([string]::IsNullOrWhiteSpace([string]$target)) { return '' }
+        return [IO.Path]::GetFullPath([string]$target).TrimEnd('\', '/')
+    }
+    catch { return '' }
+}
+
+function Get-NativeSkillProjectionTargetState {
+    param([Parameter(Mandatory = $true)][string]$DirectoryPath)
+
+    $directory = [IO.Path]::GetFullPath($DirectoryPath).TrimEnd('\', '/')
+    $skillPath = Join-Path $directory 'SKILL.md'
+    if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
+        return [pscustomobject][ordered]@{
+            exists = $false
+            kind = 'missing'
+            directory_path = $directory
+            skill_path = $skillPath
+            link_target = ''
+            content_hash = ''
+        }
+    }
+    $item = Get-Item -LiteralPath $directory -Force
+    $isReparse = [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+    return [pscustomobject][ordered]@{
+        exists = $true
+        kind = if ($isReparse) { 'junction' } else { 'directory' }
+        directory_path = $directory
+        skill_path = $skillPath
+        link_target = if ($isReparse) { Get-NativeSkillProjectionLinkTarget $directory } else { '' }
+        content_hash = Get-NativeSkillProjectionFileHash $skillPath
+    }
+}
+
+function Ensure-NativeSkillProjectionDirectory {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { New-Item -ItemType Directory -Path $Path -Force | Out-Null }
+}
+
+function Remove-NativeSkillProjectionPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    $item = Get-Item -LiteralPath $Path -Force
+    if ([bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not $item.PSIsContainer) { Remove-Item -LiteralPath $Path -Force }
+    else { Remove-Item -LiteralPath $Path -Recurse -Force }
+}
+
+function Test-NativeSkillProjectionStateEqual {
+    param($Expected, $Actual)
+
+    if ([bool]$Expected.exists -ne [bool]$Actual.exists) { return $false }
+    if (-not [bool]$Expected.exists) { return $true }
+    if ([string]$Expected.kind -ne [string]$Actual.kind) { return $false }
+    if (-not [string]::IsNullOrWhiteSpace([string]$Expected.link_target) -and -not [string]::Equals([string]$Expected.link_target, [string]$Actual.link_target, [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    if (-not [string]::IsNullOrWhiteSpace([string]$Expected.content_hash) -and -not [string]::Equals([string]$Expected.content_hash, [string]$Actual.content_hash, [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    return $true
+}
+
+function Write-NativeSkillProjectionJsonAtomic {
+    param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)]$Value)
+
+    Ensure-NativeSkillProjectionDirectory (Split-Path -Parent $Path)
+    $temporaryPath = '{0}.tmp.{1}' -f $Path, ([guid]::NewGuid().ToString('N'))
+    try {
+        $encoding = New-Object System.Text.UTF8Encoding($false)
+        [IO.File]::WriteAllText($temporaryPath, ($Value | ConvertTo-Json -Depth 40), $encoding)
+        Move-Item -LiteralPath $temporaryPath -Destination $Path -Force
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath) { Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function New-NativeSkillProjectionJunction {
+    param([Parameter(Mandatory = $true)][string]$LinkPath, [Parameter(Mandatory = $true)][string]$TargetPath)
+
+    Ensure-NativeSkillProjectionDirectory (Split-Path -Parent $LinkPath)
+    if (Get-Command New-Junction -ErrorAction SilentlyContinue) {
+        New-Junction $LinkPath $TargetPath -QuietIfUnchanged
+        return
+    }
+    New-Item -ItemType Junction -Path $LinkPath -Target $TargetPath | Out-Null
+}
+
+function Restore-NativeSkillProjectionBeforeState {
+    param([object[]]$Before, [string]$TargetRoot)
+
+    foreach ($state in @($Before | Sort-Object directory_path)) {
+        $directory = [IO.Path]::GetFullPath([string]$state.directory_path)
+        if (-not (Test-OperationPathWithinRoot $directory $TargetRoot)) { throw 'Projection rollback target escaped the owned root.' }
+        if (-not [bool]$state.exists) {
+            Remove-NativeSkillProjectionPath $directory
+            continue
+        }
+        if ([string]$state.kind -ne 'junction' -or [string]::IsNullOrWhiteSpace([string]$state.link_target)) { throw ('Unsupported pre-transaction target state: {0}' -f $directory) }
+        Remove-NativeSkillProjectionPath $directory
+        New-NativeSkillProjectionJunction $directory ([string]$state.link_target)
+    }
+}
+
+function Get-NativeSkillProjectionReceiptPath {
+    param($Plan, [string]$ReceiptPath)
+
+    $path = if ([string]::IsNullOrWhiteSpace($ReceiptPath)) { [string]$Plan.receipt_path } else { $ReceiptPath }
+    if ([string]::IsNullOrWhiteSpace($path)) { throw 'Projection receipt path is required.' }
+    return [IO.Path]::GetFullPath($path)
+}
+
+function Apply-NativeSkillProjection {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Plan,
+        [Parameter(Mandatory = $true)][string]$ApplyToken,
+        [string]$ReceiptPath = ''
+    )
+
+    $contract = Test-NativeSkillProjectionPlanContract $Plan
+    if (-not [bool]$contract.pass) { throw ('Projection plan contract failed: {0}' -f (@($contract.findings | ForEach-Object code) -join ', ')) }
+    if ([string]$Plan.status -ne 'ready' -or -not [bool]$Plan.pass) { throw 'Only a ready native projection plan can be applied.' }
+    if ([bool]$Plan.apply_requires_token -and -not [string]::Equals($ApplyToken, [string]$Plan.apply_token, [StringComparison]::Ordinal)) { throw 'Native projection apply token is invalid.' }
+
+    $targetRoot = [IO.Path]::GetFullPath([string]$Plan.target_root)
+    Ensure-NativeSkillProjectionDirectory $targetRoot
+    $receiptFile = Get-NativeSkillProjectionReceiptPath $Plan $ReceiptPath
+    $before = @($Plan.skills | Sort-Object target_directory | ForEach-Object { Get-NativeSkillProjectionTargetState ([string]$_.target_directory) })
+    $changedNames = New-Object System.Collections.Generic.List[string]
+    $createdDirectories = New-Object System.Collections.Generic.List[string]
+    $temporaryPaths = New-Object System.Collections.Generic.List[string]
+    try {
+        foreach ($skill in @($Plan.skills | Sort-Object name)) {
+            $sourcePath = [IO.Path]::GetFullPath([string]$skill.source_path)
+            $sourceDirectory = [IO.Path]::GetFullPath([string]$skill.source_directory)
+            $targetDirectory = [IO.Path]::GetFullPath([string]$skill.target_directory)
+            if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw ('Projection source drifted: {0}' -f $sourcePath) }
+            if (-not [string]::Equals((Get-NativeSkillProjectionFileHash $sourcePath), [string]$skill.content_hash, [StringComparison]::OrdinalIgnoreCase)) { throw ('Projection source hash drifted: {0}' -f $sourcePath) }
+            if (-not (Test-OperationPathWithinRoot $targetDirectory $targetRoot)) { throw ('Projection target escaped the owned root: {0}' -f $targetDirectory) }
+            $current = Get-NativeSkillProjectionTargetState $targetDirectory
+            if ([bool]$current.exists) {
+                if ([string]$current.kind -eq 'junction' -and [string]::Equals([string]$current.link_target, $sourceDirectory, [StringComparison]::OrdinalIgnoreCase) -and [string]::Equals([string]$current.content_hash, [string]$skill.content_hash, [StringComparison]::OrdinalIgnoreCase)) { continue }
+                throw ('Projection target conflict or drift: {0}' -f $targetDirectory)
+            }
+            $temporaryPath = Join-Path $targetRoot ('.skills-manager-native-projection-{0}' -f ([guid]::NewGuid().ToString('N')))
+            $temporaryPaths.Add($temporaryPath) | Out-Null
+            New-NativeSkillProjectionJunction $temporaryPath $sourceDirectory
+            Move-Item -LiteralPath $temporaryPath -Destination $targetDirectory
+            $temporaryPaths.Remove($temporaryPath) | Out-Null
+            $createdDirectories.Add($targetDirectory) | Out-Null
+            $changedNames.Add([string]$skill.name) | Out-Null
+        }
+
+        $after = @($Plan.skills | Sort-Object target_directory | ForEach-Object { Get-NativeSkillProjectionTargetState ([string]$_.target_directory) })
+        foreach ($index in 0..([Math]::Max(0, $after.Count - 1))) {
+            if ($after.Count -eq 0) { break }
+            $skill = @($Plan.skills | Sort-Object target_directory)[$index]
+            if (-not [string]::Equals([string]$after[$index].content_hash, [string]$skill.content_hash, [StringComparison]::OrdinalIgnoreCase)) { throw ('Projection target hash verification failed: {0}' -f $skill.name) }
+        }
+        $receiptIdentity = [ordered]@{ plan_id = [string]$Plan.plan_id; target_root = $targetRoot; changed_names = @($changedNames.ToArray()) }
+        $receiptId = 'nsr-{0}' -f (Get-OperationSha256 ($receiptIdentity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)
+        $receipt = [pscustomobject][ordered]@{
+            schema_version = 1
+            receipt_id = $receiptId
+            status = 'applied'
+            owner = [string]$Plan.owner
+            plan_id = [string]$Plan.plan_id
+            target_root = $targetRoot
+            receipt_path = $receiptFile
+            applied_at = [DateTimeOffset]::UtcNow.ToString('o')
+            before = [object[]]$before
+            after = [object[]]$after
+            changed_names = [object[]]@($changedNames.ToArray() | Sort-Object)
+            notification = [ordered]@{
+                method = [string]$Plan.notification.method
+                mode = [string]$Plan.notification.mode
+                status = 'not_sent'
+                plan_status = [string]$Plan.notification.status
+                changed_names = [object[]]@($changedNames.ToArray() | Sort-Object)
+                host_mutation = $false
+            }
+            rollback = [ordered]@{ status = 'available'; guard = 'target_state_must_match_after'; drift_safe = $true }
+            provider_calls = 0
+            native_mutations = $createdDirectories.Count
+            writes = $createdDirectories.Count
+        }
+        if (Test-NativeSkillProjectionReceiptContract $receipt | Select-Object -ExpandProperty pass) { Write-NativeSkillProjectionJsonAtomic $receiptFile $receipt } else { throw 'Generated native projection receipt failed its contract.' }
+        return [pscustomobject][ordered]@{
+            status = 'applied'
+            receipt_id = $receiptId
+            plan_id = [string]$Plan.plan_id
+            receipt_path = $receiptFile
+            changed_names = [object[]]@($changedNames.ToArray() | Sort-Object)
+            notification = $receipt.notification
+            receipt = $receipt
+        }
+    }
+    catch {
+        foreach ($temporaryPath in @($temporaryPaths.ToArray())) { Remove-NativeSkillProjectionPath $temporaryPath }
+        foreach ($directory in @($createdDirectories.ToArray() | Sort-Object -Descending)) { Remove-NativeSkillProjectionPath $directory }
+        throw
+    }
+}
+
+function Test-NativeSkillProjectionReceiptContract {
+    param($Receipt)
+
+    $findings = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Receipt) { return New-OperationValidationResult @((New-OperationFinding 'receipt_missing' 'error' '$' 'Projection receipt is required.')) }
+    if ((Get-OperationObjectProperty $Receipt 'schema_version') -ne 1) { $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only receipt schema version 1 is supported.')) | Out-Null }
+    if ([string](Get-OperationObjectProperty $Receipt 'receipt_id') -notmatch '^nsr-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'receipt_id_invalid' 'error' '$.receipt_id' 'Receipt id is invalid.')) | Out-Null }
+    if ([string](Get-OperationObjectProperty $Receipt 'status') -notin @('applied', 'rolled_back')) { $findings.Add((New-OperationFinding 'status_invalid' 'error' '$.status' 'Receipt status is invalid.')) | Out-Null }
+    foreach ($field in @('owner', 'plan_id', 'target_root', 'receipt_path')) { if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Receipt $field))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Receipt field is required.')) | Out-Null } }
+    foreach ($field in @('before', 'after', 'changed_names')) { if (-not (Test-OperationArray (Get-OperationObjectProperty $Receipt $field))) { $findings.Add((New-OperationFinding 'array_field_invalid' 'error' ('$.{0}' -f $field) 'Receipt field must be an array.')) | Out-Null } }
+    if ([long](Get-OperationObjectProperty $Receipt 'provider_calls') -ne 0) { $findings.Add((New-OperationFinding 'provider_calls_forbidden' 'error' '$.provider_calls' 'Projection cannot call a provider.')) | Out-Null }
+    $notification = Get-OperationObjectProperty $Receipt 'notification'
+    if ([string](Get-OperationObjectProperty $notification 'method') -ne 'skills/changed') { $findings.Add((New-OperationFinding 'notification_method_invalid' 'error' '$.notification.method' 'Receipt notification method is invalid.')) | Out-Null }
+    $rollback = Get-OperationObjectProperty $Receipt 'rollback'
+    if ((Get-OperationObjectProperty $rollback 'drift_safe') -ne $true) { $findings.Add((New-OperationFinding 'rollback_guard_invalid' 'error' '$.rollback.drift_safe' 'Receipt rollback must be drift-safe.')) | Out-Null }
+    return New-OperationValidationResult $findings.ToArray()
+}
+
+function Rollback-NativeSkillProjection {
+    [CmdletBinding()]
+    param(
+        $Receipt = $null,
+        [string]$ReceiptPath = ''
+    )
+
+    if ($null -eq $Receipt) {
+        if ([string]::IsNullOrWhiteSpace($ReceiptPath) -or -not (Test-Path -LiteralPath $ReceiptPath -PathType Leaf)) { throw 'Projection receipt was not found.' }
+        $Receipt = Get-Content -LiteralPath $ReceiptPath -Raw | ConvertFrom-Json
+    }
+    $contract = Test-NativeSkillProjectionReceiptContract $Receipt
+    if (-not [bool]$contract.pass) { throw ('Projection receipt contract failed: {0}' -f (@($contract.findings | ForEach-Object code) -join ', ')) }
+    if ([string]$Receipt.status -eq 'rolled_back') { return $Receipt }
+    $targetRoot = [IO.Path]::GetFullPath([string]$Receipt.target_root)
+    foreach ($expected in @($Receipt.after)) {
+        $actual = Get-NativeSkillProjectionTargetState ([string]$expected.directory_path)
+        if (-not (Test-NativeSkillProjectionStateEqual $expected $actual)) { throw ('rollback_drift_detected: {0}' -f [string]$expected.directory_path) }
+    }
+    try {
+        Restore-NativeSkillProjectionBeforeState -Before @($Receipt.before) -TargetRoot $targetRoot
+    }
+    catch { throw }
+    $Receipt.status = 'rolled_back'
+    $rolledBackAt = [DateTimeOffset]::UtcNow.ToString('o')
+    if ($null -ne $Receipt.PSObject.Properties['rolled_back_at']) { $Receipt.rolled_back_at = $rolledBackAt }
+    else { $Receipt | Add-Member -NotePropertyName rolled_back_at -NotePropertyValue $rolledBackAt }
+    $Receipt.rollback.status = 'rolled_back'
+    if (-not [string]::IsNullOrWhiteSpace($ReceiptPath)) { Write-NativeSkillProjectionJsonAtomic ([IO.Path]::GetFullPath($ReceiptPath)) $Receipt }
+    return $Receipt
+}
+
+function New-NativeSkillProjectionRuntimePlan {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$ManagedRoot,
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)]$Snapshot,
+        $Policy = $null,
+        [string[]]$ExcludedNames = @(),
+        [string]$GeneratedAt = ([DateTimeOffset]::UtcNow.ToString('o'))
+    )
+
+    $root = [IO.Path]::GetFullPath($ManagedRoot)
+    if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw ('Managed skill root does not exist: {0}' -f $root) }
+    $excluded = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in @($ExcludedNames)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$name)) { $excluded.Add(([string]$name).Trim()) | Out-Null }
+    }
+    $entries = @(
+        Get-ChildItem -LiteralPath $root -Directory -Force |
+            Where-Object { $_.Name -ne '.system' -and -not $excluded.Contains($_.Name) } |
+            Sort-Object Name |
+            ForEach-Object {
+                $skillPath = Join-Path $_.FullName 'SKILL.md'
+                if (Test-Path -LiteralPath $skillPath -PathType Leaf) {
+                    [pscustomobject][ordered]@{
+                        path = $skillPath
+                        source_root = $root
+                        enabled = $true
+                        availability = 'available'
+                        freshness = 'fresh'
+                        load_side_effect = 'read_only'
+                        side_effect = 'read_only'
+                        surfaces = @('native_discovery')
+                    }
+                }
+            }
+    )
+    $catalog = Compile-SkillCatalog -Entries $entries -GeneratedAt $GeneratedAt
+    $catalogContract = Test-SkillCatalogContract $catalog
+    if (-not [bool]$catalog.complete -or -not [bool]$catalogContract.pass) {
+        throw ('Native runtime catalog contract failed: {0}' -f (@($catalog.findings + $catalogContract.findings | ForEach-Object code | Select-Object -Unique) -join ', '))
+    }
+    $availableNames = @($catalog.entries | ForEach-Object { [string]$_.name })
+    $eligibility = @($catalog.entries | ForEach-Object {
+            Evaluate-SkillEligibility -Skill $_ -Surface 'native_discovery' -AllowedRoots @($root) -AvailableDependencies $availableNames
+        })
+    $metadata = Plan-NativeMetadata -Inventory $catalog -Snapshot $Snapshot -Policy $Policy
+    $metadataContract = Test-NativeMetadataPlanContract $metadata
+    if (-not [bool]$metadataContract.pass) {
+        throw ('Native metadata plan contract failed: {0}' -f (@($metadataContract.findings | ForEach-Object code) -join ', '))
+    }
+    $plan = New-NativeSkillProjectionPlan -Catalog $catalog -Eligibility $eligibility -MetadataPlan $metadata -Config $Config
+    $planContract = Test-NativeSkillProjectionPlanContract $plan
+    if (-not [bool]$planContract.pass) {
+        throw ('Native projection plan contract failed: {0}' -f (@($planContract.findings | ForEach-Object code) -join ', '))
+    }
+    return $plan
+}
+
+$hostCapabilityAdaptersRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
+
+if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) {
+    . (Join-Path $hostCapabilityAdaptersRepoRoot 'src\Domain\OperationPlan.ps1')
+}
+if ($null -eq (Get-Command New-HostCapabilitySnapshot -ErrorAction SilentlyContinue)) {
+    . (Join-Path $hostCapabilityAdaptersRepoRoot 'src\Domain\HostCapabilitySnapshot.ps1')
+}
+if ($null -eq (Get-Command Resolve-HostCapabilitySnapshot -ErrorAction SilentlyContinue)) {
+    . (Join-Path $hostCapabilityAdaptersRepoRoot 'src\Application\HostCapabilityResolution.ps1')
+}
+
+function Get-HostCapabilityAdapterProperty {
+    param(
+        $Object,
+        [string[]]$Names
+    )
+
+    foreach ($name in @($Names)) {
+        if (Test-OperationObjectProperty $Object $name) {
+            return Get-OperationObjectProperty $Object $name
+        }
+    }
+    return $null
+}
+
+function Get-HostCapabilityAdapterResponseBody {
+    param($Response)
+
+    if ($null -eq $Response) { return $null }
+    if (Test-OperationObjectProperty $Response 'result') {
+        return Get-OperationObjectProperty $Response 'result'
+    }
+    return $Response
+}
+
+function Get-HostCapabilityAdapterResponseError {
+    param(
+        $Response,
+        [Parameter(Mandatory = $true)][string]$Method
+    )
+
+    if ($null -eq $Response -or -not (Test-OperationObjectProperty $Response 'error')) { return $null }
+    $error = Get-OperationObjectProperty $Response 'error'
+    $message = if ($error -is [string]) { [string]$error } else { [string](Get-HostCapabilityAdapterProperty $error @('message', 'detail', 'code')) }
+    if ([string]::IsNullOrWhiteSpace($message)) { $message = 'App Server returned an error without a diagnostic message.' }
+    $message = Protect-OperationSensitiveString (($message -replace '\s+', ' ').Trim())
+    if ($message.Length -gt 240) { $message = $message.Substring(0, 240) }
+    return [pscustomobject][ordered]@{ method = $Method; message = $message }
+}
+
+function Get-HostCapabilityAdapterRows {
+    param($Response, [string[]]$CollectionNames)
+
+    $body = Get-HostCapabilityAdapterResponseBody $Response
+    foreach ($name in @($CollectionNames)) {
+        if (Test-OperationObjectProperty $body $name) {
+            $value = Get-OperationObjectProperty $body $name
+            if ($null -eq $value) { return @() }
+            return @($value)
+        }
+    }
+    if ($null -eq $body) { return @() }
+    if (Test-OperationArray $body) { return @($body) }
+    return @($body)
+}
+
+function New-HostCapabilityAdapterCandidate {
+    param(
+        $Value,
+        [Parameter(Mandatory = $true)][string]$CapturedAt,
+        [string]$UnknownReason
+    )
+
+    return [pscustomobject][ordered]@{
+        value = $Value
+        captured_at = $CapturedAt
+        freshness = if ($null -eq $Value) { 'unknown' } else { 'fresh' }
+        unknown_reason = if ($null -eq $Value) { $UnknownReason } else { $null }
+    }
+}
+
+function Add-HostCapabilityAdapterMetadata {
+    param(
+        [Parameter(Mandatory = $true)]$Snapshot,
+        [Parameter(Mandatory = $true)][string]$Adapter,
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Status,
+        $Coverage = [pscustomobject]@{},
+        [object[]]$Errors = @()
+    )
+
+    $Snapshot | Add-Member -NotePropertyName adapter -NotePropertyValue $Adapter
+    $Snapshot | Add-Member -NotePropertyName source -NotePropertyValue $Source
+    $Snapshot | Add-Member -NotePropertyName adapter_source -NotePropertyValue $Source
+    $Snapshot | Add-Member -NotePropertyName status -NotePropertyValue $Status
+    $Snapshot | Add-Member -NotePropertyName coverage -NotePropertyValue $Coverage
+    $Snapshot | Add-Member -NotePropertyName errors -NotePropertyValue @($Errors)
+    $Snapshot | Add-Member -NotePropertyName read_only -NotePropertyValue $true
+    $Snapshot | Add-Member -NotePropertyName provider_calls -NotePropertyValue 0
+    $Snapshot | Add-Member -NotePropertyName writes -NotePropertyValue 0
+    $Snapshot | Add-Member -NotePropertyName native_mutations -NotePropertyValue 0
+    return $Snapshot
+}
+
+function New-HostCapabilityUnknownAdapterSnapshot {
+    param(
+        [Parameter(Mandatory = $true)][string]$Adapter,
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Surface,
+        [Parameter(Mandatory = $true)][string]$CapturedAt,
+        [Parameter(Mandatory = $true)][string]$Status,
+        [string]$UnknownReason,
+        [switch]$PlatformNa
+    )
+
+    $fallback = [pscustomobject]@{
+        model = [pscustomobject]@{ value = $null; freshness = 'unknown'; unknown_reason = if ($UnknownReason) { $UnknownReason } else { 'effective_model_unknown' } }
+        context_window = [pscustomobject]@{ value = $null; freshness = 'unknown'; unknown_reason = 'context_window_unknown' }
+        metadata_budget = [pscustomobject]@{ value = $null; freshness = 'unknown'; unknown_reason = 'metadata_budget_unknown' }
+        skills_inventory = [pscustomobject]@{ value = $null; freshness = 'unknown'; unknown_reason = 'skills_inventory_unknown' }
+    }
+    $snapshot = Resolve-HostCapabilitySnapshot -Surface $Surface -CapturedAt $CapturedAt -UnknownFallback $fallback
+    if (-not [string]::IsNullOrWhiteSpace($UnknownReason)) {
+        $snapshot.unknown_reasons = @($snapshot.unknown_reasons + $UnknownReason | Sort-Object -Unique)
+    }
+    $result = Add-HostCapabilityAdapterMetadata -Snapshot $snapshot -Adapter $Adapter -Source $Source -Status $Status
+    $result | Add-Member -NotePropertyName platform_na -NotePropertyValue ([bool]$PlatformNa)
+    return $result
+}
+
+function Test-HostCapabilityAdapterContract {
+    param($Snapshot)
+
+    $findings = New-Object System.Collections.Generic.List[object]
+    $baseResult = Test-HostCapabilitySnapshotContract $Snapshot
+    foreach ($finding in @($baseResult.findings)) { $findings.Add($finding) | Out-Null }
+    if ($null -eq $Snapshot) { return New-OperationValidationResult $findings.ToArray() }
+
+    $adapter = [string](Get-OperationObjectProperty $Snapshot 'adapter')
+    $source = [string](Get-OperationObjectProperty $Snapshot 'source')
+    $status = [string](Get-OperationObjectProperty $Snapshot 'status')
+    if ($adapter -notin @('app_server', 'cli', 'offline_config')) { $findings.Add((New-OperationFinding 'adapter_invalid' 'error' '$.adapter' 'Adapter must be app_server, cli or offline_config.')) | Out-Null }
+    if ($source -notin @('app_server', 'cli', 'config_fallback')) { $findings.Add((New-OperationFinding 'adapter_source_invalid' 'error' '$.source' 'Adapter source is not supported.')) | Out-Null }
+    if ($status -notin @('complete', 'partial', 'platform_na', 'unknown')) { $findings.Add((New-OperationFinding 'adapter_status_invalid' 'error' '$.status' 'Adapter status is not supported.')) | Out-Null }
+    if ($null -eq (Get-OperationObjectProperty $Snapshot 'coverage')) { $findings.Add((New-OperationFinding 'adapter_coverage_missing' 'error' '$.coverage' 'Adapter coverage is required.')) | Out-Null }
+    if ((Get-OperationObjectProperty $Snapshot 'read_only') -ne $true) { $findings.Add((New-OperationFinding 'adapter_read_only_required' 'error' '$.read_only' 'Adapters must declare read_only=true.')) | Out-Null }
+    foreach ($field in @('provider_calls', 'writes', 'native_mutations')) {
+        $value = Get-OperationObjectProperty $Snapshot $field
+        $number = 0L
+        if ($null -eq $value -or -not [long]::TryParse([string]$value, [ref]$number) -or $number -ne 0) {
+            $code = 'adapter_{0}_forbidden' -f $field
+            $findings.Add((New-OperationFinding $code 'error' ('$.{0}' -f $field) ('Adapter {0} must remain zero.' -f $field))) | Out-Null
+        }
+    }
+    if ($source -eq 'config_fallback') {
+        foreach ($name in Get-HostCapabilitySnapshotCapabilityNames) {
+            $fact = Get-OperationObjectProperty (Get-OperationObjectProperty $Snapshot 'capabilities') $name
+            if ([string](Get-OperationObjectProperty $fact 'source') -eq 'config_fallback') {
+                $findings.Add((New-OperationFinding 'adapter_fallback_fact_source_invalid' 'error' ('$.capabilities.{0}.source' -f $name) 'Config fallback must remain visible at adapter level and cannot become a runtime fact source.')) | Out-Null
+            }
+        }
+    }
+    $serialized = $Snapshot | ConvertTo-Json -Depth 40 -Compress
+    if (Test-OperationSerializedSensitiveValue $serialized) { $findings.Add((New-OperationFinding 'adapter_sensitive_value_present' 'error' '$' 'Adapter output contains an unredacted sensitive value.')) | Out-Null }
+    return New-OperationValidationResult $findings.ToArray()
+}
+
+function New-HostCapabilitySnapshotFromCli {
+    [CmdletBinding()]
+    param(
+        $PromptInput,
+        [string]$Surface = 'cli',
+        [Parameter(Mandatory = $true)][string]$CapturedAt,
+        [string]$ThreadId,
+        [string]$TurnId,
+        [bool]$ExecutableAvailable = $true,
+        [string]$UnavailableReason = 'cli_unavailable_platform_na'
+    )
+
+    if (-not $ExecutableAvailable) {
+        return New-HostCapabilityUnknownAdapterSnapshot -Adapter 'cli' -Source 'cli' -Surface $Surface -CapturedAt $CapturedAt -Status 'platform_na' -UnknownReason $UnavailableReason -PlatformNa
+    }
+
+    $inputValue = $PromptInput
+    $errors = New-Object System.Collections.Generic.List[object]
+    if ($inputValue -is [string]) {
+        try { $inputValue = $inputValue | ConvertFrom-Json -ErrorAction Stop }
+        catch { $errors.Add([pscustomobject]@{ code = 'cli_prompt_input_invalid_json'; message = 'CLI prompt-input was not valid JSON; text parsing continued.' }) | Out-Null }
+    }
+
+    $model = Get-HostCapabilityAdapterProperty $inputValue @('model', 'model_id', 'modelId')
+    $contextWindow = Get-HostCapabilityAdapterProperty $inputValue @('context_window', 'model_context_window', 'contextWindow', 'modelContextWindow')
+    $metadataBudget = Get-HostCapabilityAdapterProperty $inputValue @('metadata_budget', 'metadataBudget', 'skill_metadata_budget', 'skillMetadataBudget')
+    $directSkills = Get-HostCapabilityAdapterProperty $inputValue @('skills_inventory', 'skills')
+    $skillRows = @()
+    if ($null -ne $directSkills) {
+        $skillRows = @(Get-HostCapabilityAdapterRows $directSkills @('data', 'skills'))
+    }
+
+    $texts = New-Object System.Collections.Generic.List[string]
+    function Add-HostCapabilityCliText($Value) {
+        if ($null -eq $Value) { return }
+        if ($Value -is [string]) { $texts.Add([string]$Value) | Out-Null; return }
+        if (Test-OperationArray $Value) {
+            foreach ($item in @($Value)) { Add-HostCapabilityCliText $item }
+            return
+        }
+        $content = Get-HostCapabilityAdapterProperty $Value @('content')
+        if ($null -ne $content) { Add-HostCapabilityCliText $content }
+        $text = Get-HostCapabilityAdapterProperty $Value @('text')
+        if ($null -ne $text) { Add-HostCapabilityCliText $text }
+    }
+    Add-HostCapabilityCliText $inputValue
+    $combinedText = $texts -join "`n"
+    if ($skillRows.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($combinedText)) {
+        $sectionMatch = [regex]::Match($combinedText, '(?ms)###\s*Available skills\s*(?<section>.*?)(?:\r?\n###|\z)')
+        if ($sectionMatch.Success) {
+            foreach ($line in ($sectionMatch.Groups['section'].Value -split "`r?`n")) {
+                $itemMatch = [regex]::Match($line, '^\s*-\s+(?<name>[A-Za-z0-9][A-Za-z0-9_.:-]*):\s*(?<description>.+?)\s*$')
+                if ($itemMatch.Success) {
+                    $skillRows += [pscustomobject][ordered]@{
+                        name = $itemMatch.Groups['name'].Value
+                        description = $itemMatch.Groups['description'].Value.Trim()
+                        enabled = $true
+                        availability = 'available'
+                    }
+                }
+            }
+        }
+    }
+
+    $inventory = @($skillRows | ForEach-Object {
+        $name = [string](Get-HostCapabilityAdapterProperty $_ @('name', 'id', 'skill'))
+        if ([string]::IsNullOrWhiteSpace($name)) { return }
+        [pscustomobject][ordered]@{
+            name = $name
+            description = [string](Get-HostCapabilityAdapterProperty $_ @('description', 'summary'))
+            enabled = if (Test-OperationObjectProperty $_ 'enabled') { [bool](Get-OperationObjectProperty $_ 'enabled') } else { $true }
+            availability = if (Test-OperationObjectProperty $_ 'availability') { [string](Get-OperationObjectProperty $_ 'availability') } else { 'available' }
+        }
+    })
+    $runtime = [pscustomobject]@{
+        model = New-HostCapabilityAdapterCandidate $model $CapturedAt 'cli_model_unknown'
+        context_window = New-HostCapabilityAdapterCandidate $contextWindow $CapturedAt 'cli_context_window_unknown'
+        metadata_budget = New-HostCapabilityAdapterCandidate $metadataBudget $CapturedAt 'cli_metadata_budget_unknown'
+        skills_inventory = New-HostCapabilityAdapterCandidate $inventory $CapturedAt 'cli_skills_inventory_unknown'
+    }
+    $snapshot = Resolve-HostCapabilitySnapshot -Surface $Surface -ThreadId $ThreadId -TurnId $TurnId -CapturedAt $CapturedAt -ThreadRuntime $runtime
+    if ($inventory.Count -gt 0) { $snapshot.capabilities.skills_inventory.value = @($inventory) }
+    $coverage = [pscustomobject][ordered]@{
+        prompt_input = $null -ne $PromptInput
+        model = $null -ne $model
+        context_window = $null -ne $contextWindow
+        metadata_budget = $null -ne $metadataBudget
+        skills_inventory = $inventory.Count -gt 0
+    }
+    $known = @($snapshot.capabilities.PSObject.Properties | Where-Object { $_.Value.freshness -ne 'fresh' }).Count -eq 0
+    $status = if ($known) { 'complete' } else { 'partial' }
+    $result = Add-HostCapabilityAdapterMetadata -Snapshot $snapshot -Adapter 'cli' -Source 'cli' -Status $status -Coverage $coverage -Errors $errors.ToArray()
+    $result | Add-Member -NotePropertyName platform_na -NotePropertyValue $false
+    return $result
+}
+
+function ConvertFrom-HostCapabilityConfigScalar {
+    param([string]$RawValue)
+
+    $value = ([string]$RawValue).Trim()
+    if ($value -match '^"(?<quoted>.*)"$' -or $value -match "^'(?<quoted>.*)'$") { return $Matches['quoted'] }
+    if ($value -match '^(?<number>\d+)$') { return [long]$Matches['number'] }
+    if ($value -match '^(?i:true|false)$') { return [bool]::Parse($value) }
+    return $value
+}
+
+function New-HostCapabilitySnapshotFromConfigFallback {
+    [CmdletBinding()]
+    param(
+        [string]$ConfigText = '',
+        [string]$ConfigPath = '',
+        [string]$Surface = 'offline',
+        [Parameter(Mandatory = $true)][string]$CapturedAt,
+        [string]$ThreadId,
+        [string]$TurnId
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ConfigText) -and -not [string]::IsNullOrWhiteSpace($ConfigPath)) {
+        if (Test-Path -LiteralPath $ConfigPath -PathType Leaf) {
+            $ConfigText = [IO.File]::ReadAllText([IO.Path]::GetFullPath($ConfigPath))
+        }
+    }
+
+    $values = [ordered]@{}
+    $secretCount = 0
+    foreach ($line in @(([string]$ConfigText) -split "`r?`n")) {
+        $match = [regex]::Match($line, '^\s*(?<key>[A-Za-z0-9_.-]+)\s*=\s*(?<value>.*?)\s*(?:#.*)?$')
+        if (-not $match.Success) { continue }
+        $key = $match.Groups['key'].Value
+        $rawValue = $match.Groups['value'].Value.Trim()
+        if (Test-OperationSensitiveKey $key -or $key -match '(?i)(token|secret|password|api[-_]?key|authorization)') {
+            $secretCount++
+            continue
+        }
+        if ($key -in @('model', 'model_id', 'model_context_window', 'context_window', 'metadata_budget', 'skill_metadata_budget')) {
+            $values[$key] = ConvertFrom-HostCapabilityConfigScalar $rawValue
+        }
+    }
+
+    $model = if ($values.Contains('model')) { $values['model'] } elseif ($values.Contains('model_id')) { $values['model_id'] } else { $null }
+    $contextWindow = if ($values.Contains('model_context_window')) { $values['model_context_window'] } elseif ($values.Contains('context_window')) { $values['context_window'] } else { $null }
+    $metadataBudget = if ($values.Contains('metadata_budget')) { $values['metadata_budget'] } elseif ($values.Contains('skill_metadata_budget')) { $values['skill_metadata_budget'] } else { $null }
+    $configPayload = [pscustomobject]@{
+        model = New-HostCapabilityAdapterCandidate $model $CapturedAt 'config_fallback_model_unknown'
+        context_window = New-HostCapabilityAdapterCandidate $contextWindow $CapturedAt 'config_fallback_context_window_unknown'
+        metadata_budget = New-HostCapabilityAdapterCandidate $metadataBudget $CapturedAt 'config_fallback_metadata_budget_unknown'
+        skills_inventory = New-HostCapabilityAdapterCandidate $null $CapturedAt 'config_fallback_skills_inventory_unknown'
+    }
+    $snapshot = Resolve-HostCapabilitySnapshot -Surface $Surface -ThreadId $ThreadId -TurnId $TurnId -CapturedAt $CapturedAt -ConfigLayered $configPayload
+    $known = @($snapshot.capabilities.PSObject.Properties | Where-Object { $_.Value.freshness -ne 'fresh' }).Count -eq 0
+    $status = if ($known) { 'complete' } else { 'partial' }
+    $coverage = [pscustomobject][ordered]@{
+        config_text = -not [string]::IsNullOrWhiteSpace($ConfigText)
+        config_path = -not [string]::IsNullOrWhiteSpace($ConfigPath)
+        model = $null -ne $model
+        context_window = $null -ne $contextWindow
+        metadata_budget = $null -ne $metadataBudget
+        skills_inventory = $false
+    }
+    $result = Add-HostCapabilityAdapterMetadata -Snapshot $snapshot -Adapter 'offline_config' -Source 'config_fallback' -Status $status -Coverage $coverage
+    $result | Add-Member -NotePropertyName platform_na -NotePropertyValue $false
+    $result | Add-Member -NotePropertyName redaction -NotePropertyValue ([pscustomobject][ordered]@{ applied = $secretCount -gt 0; secret_count = $secretCount; marker = '<redacted>' })
+    return $result
+}
+
+function New-HostCapabilitySnapshotFromAppServer {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Responses,
+        [string]$Surface = 'app_server',
+        [Parameter(Mandatory = $true)][string]$CapturedAt,
+        [string]$ThreadId,
+        [string]$TurnId
+    )
+
+    $configResponse = Get-HostCapabilityAdapterProperty $Responses @('config_read', 'config/read')
+    $modelResponse = Get-HostCapabilityAdapterProperty $Responses @('model_list', 'model/list')
+    $providerResponse = Get-HostCapabilityAdapterProperty $Responses @('model_provider_capabilities_read', 'modelProvider/capabilities/read')
+    $skillsResponse = Get-HostCapabilityAdapterProperty $Responses @('skills_list', 'skills/list')
+
+    $config = Get-HostCapabilityAdapterResponseBody $configResponse
+    if ($null -ne $config -and (Test-OperationObjectProperty $config 'config')) {
+        $config = Get-OperationObjectProperty $config 'config'
+    }
+    $modelRows = Get-HostCapabilityAdapterRows $modelResponse @('data', 'models')
+    $firstModel = if ($modelRows.Count -gt 0) { $modelRows[0] } else { $null }
+    $provider = Get-HostCapabilityAdapterResponseBody $providerResponse
+    if ($null -ne $provider -and (Test-OperationObjectProperty $provider 'capabilities')) {
+        $provider = Get-OperationObjectProperty $provider 'capabilities'
+    }
+    $skillEntries = Get-HostCapabilityAdapterRows $skillsResponse @('data', 'skills')
+    $skillsRows = @($skillEntries | ForEach-Object {
+        if (Test-OperationObjectProperty $_ 'skills') {
+            foreach ($skill in @((Get-OperationObjectProperty $_ 'skills'))) { $skill }
+        }
+        else { $_ }
+    })
+    $errors = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in @(
+        [pscustomobject]@{ method = 'config/read'; response = $configResponse },
+        [pscustomobject]@{ method = 'model/list'; response = $modelResponse },
+        [pscustomobject]@{ method = 'modelProvider/capabilities/read'; response = $providerResponse },
+        [pscustomobject]@{ method = 'skills/list'; response = $skillsResponse }
+    )) {
+        $error = Get-HostCapabilityAdapterResponseError $entry.response $entry.method
+        if ($null -ne $error) { $errors.Add($error) | Out-Null }
+    }
+
+    $model = Get-HostCapabilityAdapterProperty $config @('model', 'model_id', 'modelId')
+    if ($null -eq $model) { $model = Get-HostCapabilityAdapterProperty $firstModel @('id', 'name', 'model', 'model_id', 'modelId') }
+    $contextWindow = Get-HostCapabilityAdapterProperty $config @('context_window', 'model_context_window', 'modelContextWindow')
+    if ($null -eq $contextWindow) { $contextWindow = Get-HostCapabilityAdapterProperty $firstModel @('context_window', 'model_context_window', 'contextWindow', 'modelContextWindow') }
+    $metadataBudget = Get-HostCapabilityAdapterProperty $provider @('metadata_budget', 'metadataBudget', 'skill_metadata_budget', 'skillMetadataBudget')
+
+    $inventory = @($skillsRows | ForEach-Object {
+        $name = [string](Get-HostCapabilityAdapterProperty $_ @('name', 'id', 'skill'))
+        if ([string]::IsNullOrWhiteSpace($name)) { return }
+        [pscustomobject][ordered]@{
+            name = $name
+            description = [string](Get-HostCapabilityAdapterProperty $_ @('description', 'summary'))
+            enabled = if (Test-OperationObjectProperty $_ 'enabled') { [bool](Get-OperationObjectProperty $_ 'enabled') } else { $true }
+            availability = if (Test-OperationObjectProperty $_ 'availability') { [string](Get-OperationObjectProperty $_ 'availability') } else { 'available' }
+        }
+    })
+
+    $runtime = [pscustomobject]@{
+        model = New-HostCapabilityAdapterCandidate $model $CapturedAt 'app_server_model_unknown'
+        context_window = New-HostCapabilityAdapterCandidate $contextWindow $CapturedAt 'app_server_context_window_unknown'
+        metadata_budget = New-HostCapabilityAdapterCandidate $metadataBudget $CapturedAt 'app_server_metadata_budget_unknown'
+        skills_inventory = New-HostCapabilityAdapterCandidate $inventory $CapturedAt 'app_server_skills_inventory_unknown'
+    }
+    $snapshot = Resolve-HostCapabilitySnapshot -Surface $Surface -ThreadId $ThreadId -TurnId $TurnId -CapturedAt $CapturedAt -ThreadRuntime $runtime
+    $coverage = [pscustomobject][ordered]@{
+        config_read = ($null -ne $configResponse -and $null -eq (Get-HostCapabilityAdapterResponseError $configResponse 'config/read'))
+        model_list = ($null -ne $modelResponse -and $null -eq (Get-HostCapabilityAdapterResponseError $modelResponse 'model/list'))
+        model_provider_capabilities_read = ($null -ne $providerResponse -and $null -eq (Get-HostCapabilityAdapterResponseError $providerResponse 'modelProvider/capabilities/read'))
+        skills_list = ($null -ne $skillsResponse -and $null -eq (Get-HostCapabilityAdapterResponseError $skillsResponse 'skills/list'))
+    }
+    $complete = @($coverage.PSObject.Properties | Where-Object { -not [bool]$_.Value }).Count -eq 0
+    $known = @($snapshot.capabilities.PSObject.Properties | Where-Object { $_.Value.freshness -ne 'fresh' }).Count -eq 0
+    $status = if ($complete -and $known -and $errors.Count -eq 0) { 'complete' } else { 'partial' }
+    if ($inventory.Count -gt 0) { $snapshot.capabilities.skills_inventory.value = @($inventory) }
+    return Add-HostCapabilityAdapterMetadata -Snapshot $snapshot -Adapter 'app_server' -Source 'app_server' -Status $status -Coverage $coverage -Errors $errors.ToArray()
+}
+
+if ($null -eq (Get-Command New-NativeInvocationTrace -ErrorAction SilentlyContinue)) {
+    $tracePath = Join-Path (Split-Path $PSScriptRoot -Parent) 'Domain\NativeInvocationTrace.ps1'
+    . $tracePath
+}
+
+function Get-NativeInvocationAdapterProperty($Object, [string[]]$Names) {
+    foreach ($name in @($Names)) {
+        if (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue) {
+            if (Test-OperationObjectProperty $Object $name) { return Get-OperationObjectProperty $Object $name }
+        }
+        elseif ($null -ne $Object -and $null -ne ($Object.PSObject.Properties | Where-Object Name -eq $name | Select-Object -First 1)) {
+            return $Object.$name
+        }
+    }
+    return $null
+}
+
+function Resolve-NativeInvocationEventKind($Event) {
+    $raw = ([string](Get-NativeInvocationAdapterProperty $Event @('kind', 'stage', 'event_type', 'type'))).Trim().ToLowerInvariant()
+    switch -Regex ($raw) {
+        '^(listed|list|skills/list|skill_list|skill_listed)$' { return 'listed' }
+        '^(selected|select|skill_selected|skill/selected|selection)$' { return 'selected' }
+        '^(injected|skill_injected|skill/injected|skills/injected)$' { return 'injected' }
+        '^(executed|execute|skill_executed|skill/invoked|skill_invoked|invocation)$' { return 'executed' }
+        '^(abstained|abstain|skill_abstained|skill/abstained|selection_abstained)$' { return 'abstained' }
+        default { return $raw }
+    }
+}
+
+function ConvertTo-NativeInvocationTrace {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Events,
+        [Parameter(Mandatory = $true)][string]$TraceId,
+        [Parameter(Mandatory = $true)][string]$Surface,
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][ValidateSet('fresh', 'stale', 'unknown')][string]$Freshness,
+        [Parameter(Mandatory = $true)][string]$CapturedAt
+    )
+
+    $normalized = New-Object System.Collections.Generic.List[object]
+    foreach ($event in @($Events)) {
+        $capability = Get-NativeInvocationAdapterProperty $event @('capability', 'skill_item')
+        $name = [string](Get-NativeInvocationAdapterProperty $event @('skill_name', 'name', 'skill'))
+        if ([string]::IsNullOrWhiteSpace($name) -and $null -ne $capability) { $name = [string](Get-NativeInvocationAdapterProperty $capability @('name', 'id', 'skill')) }
+        $normalized.Add([pscustomobject][ordered]@{
+                event_id = [string](Get-NativeInvocationAdapterProperty $event @('event_id', 'id'))
+                kind = Resolve-NativeInvocationEventKind $event
+                skill_name = $name
+                occurred_at = [string](Get-NativeInvocationAdapterProperty $event @('occurred_at', 'timestamp', 'captured_at'))
+                correlation_id = [string](Get-NativeInvocationAdapterProperty $event @('correlation_id', 'correlation', 'turn_id', 'thread_id'))
+                reason = [string](Get-NativeInvocationAdapterProperty $event @('reason', 'abstention_reason'))
+            }) | Out-Null
+    }
+    return New-NativeInvocationTrace -TraceId $TraceId -Surface $Surface -Source $Source -Freshness $Freshness -CapturedAt $CapturedAt -Events $normalized.ToArray()
+}
+
+function New-NativeInvocationTraceFromHostEvents {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Events,
+        [Parameter(Mandatory = $true)][string]$TraceId,
+        [Parameter(Mandatory = $true)][string]$Surface,
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][ValidateSet('fresh', 'stale', 'unknown')][string]$Freshness,
+        [Parameter(Mandatory = $true)][string]$CapturedAt
+    )
+    return ConvertTo-NativeInvocationTrace -Events $Events -TraceId $TraceId -Surface $Surface -Source $Source -Freshness $Freshness -CapturedAt $CapturedAt
+}
+
+$appServerSkillDispatchAdapterRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
+if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) {
+    . (Join-Path $appServerSkillDispatchAdapterRepoRoot 'src\Domain\OperationPlan.ps1')
+}
+
+function Get-AppServerSkillDispatchProperty {
+    param(
+        $Object,
+        [string[]]$Names
+    )
+
+    foreach ($name in @($Names)) {
+        if (Test-OperationObjectProperty $Object $name) {
+            return Get-OperationObjectProperty $Object $name
+        }
+    }
+    return $null
+}
+
+function Get-AppServerSkillDispatchStringArray {
+    param($Value)
+
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $items = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @($Value)) {
+        $text = ([string]$item).Trim().ToLowerInvariant()
+        if (-not [string]::IsNullOrWhiteSpace($text) -and $seen.Add($text)) {
+            $items.Add($text) | Out-Null
+        }
+    }
+    return ,([string[]]@($items.ToArray()))
+}
+
+function New-AppServerSkillDispatchAdapter {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$CapturedAt,
+        [string[]]$SupportedItemTypes = @(),
+        [bool]$Available = $true,
+        [string]$Surface = 'app_server'
+    )
+
+    $normalizedTypes = Get-AppServerSkillDispatchStringArray $SupportedItemTypes
+    $supportsSkillInjection = $Available -and ($normalizedTypes -contains 'skill')
+    $platformNa = -not $supportsSkillInjection
+    return [pscustomobject][ordered]@{
+        schema_version = 1
+        adapter = 'app_server'
+        surface = $Surface
+        status = if ($platformNa) { 'platform_na' } else { 'complete' }
+        platform_na = $platformNa
+        available = $Available
+        supported_item_types = $normalizedTypes
+        supports_skill_injection = $supportsSkillInjection
+        injection_contract = [pscustomobject][ordered]@{
+            item_type = 'skill'
+            supported = $supportsSkillInjection
+            payload_shape = 'items[].type=skill'
+        }
+        captured_at = $CapturedAt
+        freshness = if ($Available) { 'fresh' } else { 'unknown' }
+        read_only = $true
+        provider_calls = 0
+        native_mutations = 0
+        writes = 0
+    }
+}
+
+function Test-AppServerSkillDispatchAdapterContract {
+    param($Adapter)
+
+    $findings = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Adapter) {
+        return New-OperationValidationResult @((New-OperationFinding 'adapter_missing' 'error' '$' 'App Server dispatch adapter is required.'))
+    }
+    if ((Get-AppServerSkillDispatchProperty $Adapter @('schema_version')) -ne 1) {
+        $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only App Server skill dispatch adapter schema version 1 is supported.')) | Out-Null
+    }
+    if ([string](Get-AppServerSkillDispatchProperty $Adapter @('adapter')) -ne 'app_server') {
+        $findings.Add((New-OperationFinding 'adapter_invalid' 'error' '$.adapter' 'Adapter must be app_server.')) | Out-Null
+    }
+    if (-not (Test-OperationRfc3339 (Get-AppServerSkillDispatchProperty $Adapter @('captured_at')))) {
+        $findings.Add((New-OperationFinding 'captured_at_invalid' 'error' '$.captured_at' 'Adapter captured_at must be RFC3339.')) | Out-Null
+    }
+    $supportedTypes = Get-AppServerSkillDispatchStringArray (Get-AppServerSkillDispatchProperty $Adapter @('supported_item_types'))
+    if (-not (Test-OperationArray (Get-AppServerSkillDispatchProperty $Adapter @('supported_item_types')))) {
+        $findings.Add((New-OperationFinding 'supported_item_types_invalid' 'error' '$.supported_item_types' 'Supported App Server item types must be an array.')) | Out-Null
+    }
+    $supportsSkill = [bool](Get-AppServerSkillDispatchProperty $Adapter @('supports_skill_injection'))
+    if ($supportsSkill -and $supportedTypes -notcontains 'skill') {
+        $findings.Add((New-OperationFinding 'skill_support_mismatch' 'error' '$.supports_skill_injection' 'Skill injection support must be declared by the supported item types.')) | Out-Null
+    }
+    $contract = Get-AppServerSkillDispatchProperty $Adapter @('injection_contract')
+    if ([string](Get-AppServerSkillDispatchProperty $contract @('item_type')) -ne 'skill') {
+        $findings.Add((New-OperationFinding 'injection_type_invalid' 'error' '$.injection_contract.item_type' 'Strict dispatch only supports type=skill injection.')) | Out-Null
+    }
+    if ([bool](Get-AppServerSkillDispatchProperty $Adapter @('read_only')) -ne $true) {
+        $findings.Add((New-OperationFinding 'read_only_required' 'error' '$.read_only' 'The adapter must remain read-only.')) | Out-Null
+    }
+    foreach ($field in @('provider_calls', 'native_mutations', 'writes')) {
+        if ([long](Get-AppServerSkillDispatchProperty $Adapter @($field)) -ne 0) {
+            $findings.Add((New-OperationFinding 'side_effect_forbidden' 'error' ('$.{0}' -f $field) 'App Server dispatch planning must remain zero-side-effect.')) | Out-Null
+        }
+    }
+    $expectedPlatformNa = -not $supportsSkill
+    if ([bool](Get-AppServerSkillDispatchProperty $Adapter @('platform_na')) -ne $expectedPlatformNa) {
+        $findings.Add((New-OperationFinding 'platform_na_invalid' 'error' '$.platform_na' 'Unsupported skill injection must be marked platform_na.')) | Out-Null
+    }
+    return New-OperationValidationResult $findings.ToArray()
+}
+
+function New-AppServerSkillInjectionRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Adapter,
+        [Parameter(Mandatory = $true)][object[]]$Skills
+    )
+
+    $adapterContract = Test-AppServerSkillDispatchAdapterContract $Adapter
+    if (-not [bool]$adapterContract.pass -or -not [bool]$Adapter.supports_skill_injection) {
+        return [pscustomobject][ordered]@{
+            schema_version = 1
+            status = 'platform_na'
+            platform_na = $true
+            items = [object[]]@()
+            reason = 'app_server_skill_injection_unsupported'
+            findings = [object[]]@($adapterContract.findings)
+            provider_calls = 0
+            native_mutations = 0
+            writes = 0
+        }
+    }
+
+    $items = New-Object System.Collections.Generic.List[object]
+    foreach ($skill in @($Skills)) {
+        $name = ([string](Get-AppServerSkillDispatchProperty $skill @('name', 'skill_name'))).Trim()
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $items.Add([pscustomobject][ordered]@{
+                type = 'skill'
+                name = $name
+                path = [string](Get-AppServerSkillDispatchProperty $skill @('path'))
+                content_hash = [string](Get-AppServerSkillDispatchProperty $skill @('content_hash'))
+            }) | Out-Null
+    }
+    return [pscustomobject][ordered]@{
+        schema_version = 1
+        status = 'ready'
+        platform_na = $false
+        items = [object[]]@($items.ToArray())
+        item_type = 'skill'
+        host_mutation = $false
+        provider_calls = 0
+        native_mutations = 0
+        writes = 0
+    }
+}
+
+function Test-AppServerSkillInjectionRequestContract {
+    param($Request)
+
+    $findings = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Request) {
+        return New-OperationValidationResult @((New-OperationFinding 'injection_request_missing' 'error' '$' 'App Server skill injection request is required.'))
+    }
+    if ((Get-AppServerSkillDispatchProperty $Request @('schema_version')) -ne 1) {
+        $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only injection request schema version 1 is supported.')) | Out-Null
+    }
+    if ([string](Get-AppServerSkillDispatchProperty $Request @('item_type')) -ne 'skill' -and [string](Get-AppServerSkillDispatchProperty $Request @('status')) -eq 'ready') {
+        $findings.Add((New-OperationFinding 'item_type_invalid' 'error' '$.item_type' 'Ready injection requests must use item_type=skill.')) | Out-Null
+    }
+    if (-not (Test-OperationArray (Get-AppServerSkillDispatchProperty $Request @('items')))) {
+        $findings.Add((New-OperationFinding 'items_invalid' 'error' '$.items' 'Injection request items must be an array.')) | Out-Null
+    }
+    $items = Get-AppServerSkillDispatchProperty $Request @('items')
+    foreach ($item in $items) {
+        if ([string](Get-AppServerSkillDispatchProperty $item @('type')) -ne 'skill') {
+            $findings.Add((New-OperationFinding 'item_type_invalid' 'error' '$.items[].type' 'Only type=skill items can be injected.')) | Out-Null
+        }
+    }
+    if ([bool](Get-AppServerSkillDispatchProperty $Request @('host_mutation')) -ne $false) {
+        $findings.Add((New-OperationFinding 'host_mutation_forbidden' 'error' '$.host_mutation' 'The fixture adapter cannot perform a live host mutation.')) | Out-Null
+    }
+    foreach ($field in @('provider_calls', 'native_mutations', 'writes')) {
+        if ([long](Get-AppServerSkillDispatchProperty $Request @($field)) -ne 0) {
+            $findings.Add((New-OperationFinding 'side_effect_forbidden' 'error' ('$.{0}' -f $field) 'Injection request construction must remain zero-side-effect.')) | Out-Null
+        }
+    }
+    return New-OperationValidationResult $findings.ToArray()
+}
+
+$strictSkillDispatchRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
+if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) {
+    . (Join-Path $strictSkillDispatchRepoRoot 'src\Domain\OperationPlan.ps1')
+}
+if ($null -eq (Get-Command Evaluate-SkillEligibility -ErrorAction SilentlyContinue)) {
+    . (Join-Path $strictSkillDispatchRepoRoot 'src\Application\SkillEligibilityPolicy.ps1')
+}
+if ($null -eq (Get-Command New-NativeInvocationTrace -ErrorAction SilentlyContinue)) {
+    . (Join-Path $strictSkillDispatchRepoRoot 'src\Domain\NativeInvocationTrace.ps1')
+}
+if ($null -eq (Get-Command New-AppServerSkillInjectionRequest -ErrorAction SilentlyContinue)) {
+    . (Join-Path $strictSkillDispatchRepoRoot 'src\Infrastructure\AppServerSkillDispatchAdapter.ps1')
+}
+
+function Get-StrictSkillDispatchProperty {
+    param(
+        $Object,
+        [string[]]$Names
+    )
+
+    foreach ($name in @($Names)) {
+        if (Test-OperationObjectProperty $Object $name) {
+            return Get-OperationObjectProperty $Object $name
+        }
+    }
+    return $null
+}
+
+function Get-StrictSkillDispatchNames {
+    param($Value)
+
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $names = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @($Value)) {
+        $name = ([string]$item).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($name) -and $seen.Add($name)) {
+            $names.Add($name) | Out-Null
+        }
+    }
+    return [string[]]@($names.ToArray())
+}
+
+function Test-StrictSkillDispatchNameSetEqual {
+    param(
+        [string[]]$Left,
+        [string[]]$Right
+    )
+
+    $leftNames = Get-StrictSkillDispatchNames $Left
+    $rightNames = Get-StrictSkillDispatchNames $Right
+    if ($leftNames.Count -ne $rightNames.Count) { return $false }
+    $rightSet = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in $rightNames) { $rightSet.Add($name) | Out-Null }
+    foreach ($name in $leftNames) { if (-not $rightSet.Contains($name)) { return $false } }
+    return $true
+}
+
+function Test-StrictSkillDispatchOptIn {
+    param($Request)
+
+    $explicit = Get-StrictSkillDispatchProperty $Request @('strict_dispatch', 'strict')
+    if ($explicit -is [bool]) { return [bool]$explicit }
+    if ($explicit -is [string]) { return [string]::Equals($explicit.Trim(), 'true', [StringComparison]::OrdinalIgnoreCase) }
+    $mode = ([string](Get-StrictSkillDispatchProperty $Request @('dispatch_mode', 'mode', 'fallback'))).Trim().ToLowerInvariant()
+    return $mode -in @('strict', 'strict_fallback')
+}
+
+function New-StrictSkillDispatchTrace {
+    param(
+        [Parameter(Mandatory = $true)][string]$TraceId,
+        [Parameter(Mandatory = $true)]$Request,
+        [string[]]$CandidateNames = @(),
+        [string[]]$SelectedNames = @(),
+        [string[]]$InjectedNames = @(),
+        [string]$AbstainedReason = '',
+        [Parameter(Mandatory = $true)][string]$CapturedAt
+    )
+
+    $events = New-Object System.Collections.Generic.List[object]
+    $correlationId = [string](Get-StrictSkillDispatchProperty $Request @('correlation_id', 'request_id', 'thread_id'))
+    $index = 0
+    foreach ($name in @($CandidateNames)) {
+        $events.Add([pscustomobject][ordered]@{
+                event_id = ('{0}|listed|{1}|{2}' -f $TraceId, $name, $index)
+                kind = 'listed'
+                skill_name = $name
+                occurred_at = $CapturedAt
+                correlation_id = $correlationId
+            }) | Out-Null
+        $index++
+    }
+    foreach ($name in @($SelectedNames)) {
+        $events.Add([pscustomobject][ordered]@{
+                event_id = ('{0}|selected|{1}|{2}' -f $TraceId, $name, $index)
+                kind = 'selected'
+                skill_name = $name
+                occurred_at = $CapturedAt
+                correlation_id = $correlationId
+            }) | Out-Null
+        $index++
+    }
+    foreach ($name in @($InjectedNames)) {
+        $events.Add([pscustomobject][ordered]@{
+                event_id = ('{0}|injected|{1}|{2}' -f $TraceId, $name, $index)
+                kind = 'injected'
+                skill_name = $name
+                occurred_at = $CapturedAt
+                correlation_id = $correlationId
+            }) | Out-Null
+        $index++
+    }
+    if (-not [string]::IsNullOrWhiteSpace($AbstainedReason)) {
+        $abstainedNames = if (@($SelectedNames).Count -gt 0) { @($SelectedNames) } elseif (@($CandidateNames).Count -gt 0) { @($CandidateNames) } else { @('strict-dispatch') }
+        foreach ($name in $abstainedNames) {
+            $events.Add([pscustomobject][ordered]@{
+                    event_id = ('{0}|abstained|{1}|{2}' -f $TraceId, $name, $index)
+                    kind = 'abstained'
+                    skill_name = $name
+                    occurred_at = $CapturedAt
+                    correlation_id = $correlationId
+                    reason = $AbstainedReason
+                }) | Out-Null
+            $index++
+        }
+    }
+    return New-NativeInvocationTrace -TraceId $TraceId -Surface 'app_server' -Source 'app_server' -Freshness 'fresh' -CapturedAt $CapturedAt -Events $events.ToArray()
+}
+
+function New-StrictSkillDispatchResult {
+    param(
+        [Parameter(Mandatory = $true)][string]$Status,
+        [Parameter(Mandatory = $true)][bool]$FallbackEntered,
+        [bool]$PlatformNa = $false,
+        [object[]]$Candidates = @(),
+        [string[]]$SelectedNames = @(),
+        $Injection = $null,
+        [Parameter(Mandatory = $true)]$Trace,
+        [object[]]$Findings = @(),
+        [string]$ReceiptId = ''
+    )
+
+    return [pscustomobject][ordered]@{
+        schema_version = 1
+        status = $Status
+        fallback_entered = $FallbackEntered
+        platform_na = $PlatformNa
+        candidates = [object[]]@($Candidates)
+        candidate_count = @($Candidates).Count
+        selected_names = [string[]]@($SelectedNames)
+        injection = $Injection
+        host_adjudication_receipt_id = if ([string]::IsNullOrWhiteSpace($ReceiptId)) { $null } else { $ReceiptId }
+        trace = $Trace
+        findings = [object[]]@($Findings)
+        provider_calls = 0
+        native_mutations = 0
+        writes = 0
+    }
+}
+
+function Get-StrictSkillDispatchEligibleEntries {
+    param(
+        [object[]]$Candidates,
+        [object[]]$EligibilityResults
+    )
+
+    $eligible = New-Object System.Collections.Generic.List[object]
+    foreach ($candidate in @($Candidates)) {
+        if ($null -eq $candidate) { continue }
+        $name = ([string](Get-StrictSkillDispatchProperty $candidate @('name', 'skill_name'))).Trim()
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        if ((Get-StrictSkillDispatchProperty $candidate @('kind')) -and [string](Get-StrictSkillDispatchProperty $candidate @('kind')) -ne 'skill') { continue }
+        if (Test-OperationObjectProperty $candidate 'enabled' -and -not [bool](Get-StrictSkillDispatchProperty $candidate @('enabled'))) { continue }
+        $decision = @($EligibilityResults | Where-Object { [string]$_.skill_name -ieq $name } | Select-Object -First 1)
+        if ($decision.Count -eq 0) { continue }
+        $policyResult = $decision[0]
+        $contract = Test-SkillEligibilityResultContract $policyResult
+        if (-not [bool]$contract.pass) { continue }
+        if ([string]$policyResult.decision -ne 'allow' -or [bool]$policyResult.eligible -ne $true) { continue }
+        if ([string]$policyResult.decision_owner -ne 'deterministic_policy') { continue }
+        if ([bool]$policyResult.semantic_selection_performed -ne $false -or [bool]$policyResult.profile_filter_applied -ne $false) { continue }
+        $eligible.Add($candidate) | Out-Null
+    }
+    return [object[]]@($eligible.ToArray())
+}
+
+function Test-StrictSkillDispatchHostAdjudicationReceipt {
+    param(
+        $Receipt,
+        [string]$RequestId,
+        [string[]]$CandidateNames
+    )
+
+    $findings = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Receipt) {
+        $findings.Add((New-OperationFinding 'adjudication_receipt_required' 'error' '$.host_adjudication_receipt' 'Host adjudication receipt is required before skill injection.')) | Out-Null
+        return [pscustomobject][ordered]@{ pass = $false; selected_names = @(); receipt_id = ''; findings = $findings.ToArray() }
+    }
+    if ((Get-StrictSkillDispatchProperty $Receipt @('schema_version')) -ne 1) { $findings.Add((New-OperationFinding 'adjudication_schema_invalid' 'error' '$.schema_version' 'Only host adjudication receipt schema version 1 is supported.')) | Out-Null }
+    if ([string](Get-StrictSkillDispatchProperty $Receipt @('status')) -ne 'accepted') { $findings.Add((New-OperationFinding 'adjudication_status_invalid' 'error' '$.status' 'Host adjudication must be explicitly accepted.')) | Out-Null }
+    if ([string](Get-StrictSkillDispatchProperty $Receipt @('decision_owner')) -ne 'host_ai') { $findings.Add((New-OperationFinding 'adjudication_owner_invalid' 'error' '$.decision_owner' 'Host AI must own semantic adjudication.')) | Out-Null }
+    if ([string](Get-StrictSkillDispatchProperty $Receipt @('freshness')) -ne 'fresh') { $findings.Add((New-OperationFinding 'adjudication_stale' 'error' '$.freshness' 'Stale or unknown adjudication cannot authorize injection.')) | Out-Null }
+    if (-not (Test-OperationRfc3339 (Get-StrictSkillDispatchProperty $Receipt @('captured_at')))) { $findings.Add((New-OperationFinding 'adjudication_timestamp_invalid' 'error' '$.captured_at' 'Host adjudication captured_at must be RFC3339.')) | Out-Null }
+    $receiptRequestId = [string](Get-StrictSkillDispatchProperty $Receipt @('request_id'))
+    if (-not [string]::IsNullOrWhiteSpace($RequestId) -and -not [string]::Equals($receiptRequestId, $RequestId, [StringComparison]::Ordinal)) { $findings.Add((New-OperationFinding 'adjudication_request_mismatch' 'error' '$.request_id' 'Host adjudication receipt does not belong to this request.')) | Out-Null }
+    $receiptCandidates = Get-StrictSkillDispatchNames (Get-StrictSkillDispatchProperty $Receipt @('candidate_names', 'candidates'))
+    $selectedNames = Get-StrictSkillDispatchNames (Get-StrictSkillDispatchProperty $Receipt @('selected_names', 'selected'))
+    if (-not (Test-OperationArray (Get-StrictSkillDispatchProperty $Receipt @('candidate_names', 'candidates')))) { $findings.Add((New-OperationFinding 'adjudication_candidates_invalid' 'error' '$.candidate_names' 'Host adjudication candidate_names must be an array.')) | Out-Null }
+    if (-not (Test-OperationArray (Get-StrictSkillDispatchProperty $Receipt @('selected_names', 'selected')))) { $findings.Add((New-OperationFinding 'adjudication_selection_invalid' 'error' '$.selected_names' 'Host adjudication selected_names must be an array.')) | Out-Null }
+    if (-not (Test-StrictSkillDispatchNameSetEqual $receiptCandidates $CandidateNames)) { $findings.Add((New-OperationFinding 'adjudication_candidate_mismatch' 'error' '$.candidate_names' 'Host adjudication must cover exactly the bounded eligible candidate set.')) | Out-Null }
+    $candidateSet = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in @($CandidateNames)) { $candidateSet.Add($name) | Out-Null }
+    foreach ($name in @($selectedNames)) { if (-not $candidateSet.Contains($name)) { $findings.Add((New-OperationFinding 'adjudication_selection_outside_candidates' 'error' '$.selected_names' 'Host adjudication selected a non-eligible candidate.')) | Out-Null } }
+    foreach ($field in @('provider_calls', 'native_mutations', 'writes')) {
+        if ([long](Get-StrictSkillDispatchProperty $Receipt @($field)) -ne 0) { $findings.Add((New-OperationFinding 'adjudication_side_effect_forbidden' 'error' ('$.{0}' -f $field) 'Host adjudication receipt must be zero-side-effect.')) | Out-Null }
+    }
+    return [pscustomobject][ordered]@{
+        pass = @($findings | Where-Object severity -eq 'error').Count -eq 0
+        selected_names = [string[]]@($selectedNames)
+        receipt_id = [string](Get-StrictSkillDispatchProperty $Receipt @('receipt_id'))
+        findings = [object[]]@($findings.ToArray())
+    }
+}
+
+function Invoke-StrictSkillDispatch {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Request,
+        [object[]]$Candidates = @(),
+        [object[]]$EligibilityResults = @(),
+        $HostAdjudicationReceipt = $null,
+        [Parameter(Mandatory = $true)]$Adapter,
+        [ValidateRange(1, 32)][int]$MaxCandidates = 3,
+        [Parameter(Mandatory = $true)][string]$CapturedAt,
+        [string]$TraceId = ''
+    )
+
+    $requestId = [string](Get-StrictSkillDispatchProperty $Request @('request_id', 'turn_id', 'thread_id'))
+    if ([string]::IsNullOrWhiteSpace($TraceId)) { $TraceId = if ([string]::IsNullOrWhiteSpace($requestId)) { 'strict-dispatch' } else { $requestId + '|strict-dispatch' } }
+    $rawCandidates = [object[]]@($Candidates | Where-Object { $null -ne $_ })
+
+    if (-not (Test-StrictSkillDispatchOptIn $Request)) {
+        $trace = New-StrictSkillDispatchTrace -TraceId $TraceId -Request $Request -AbstainedReason 'strict_opt_in_required' -CapturedAt $CapturedAt
+        return New-StrictSkillDispatchResult -Status 'not_requested' -FallbackEntered $false -Trace $trace
+    }
+
+    if ($rawCandidates.Count -gt $MaxCandidates) {
+        $trace = New-StrictSkillDispatchTrace -TraceId $TraceId -Request $Request -AbstainedReason 'candidate_set_too_large' -CapturedAt $CapturedAt
+        $finding = New-OperationFinding 'candidate_set_too_large' 'error' '$.candidates' ('Strict dispatch candidate set exceeds the bound of {0}.' -f $MaxCandidates)
+        return New-StrictSkillDispatchResult -Status 'candidate_set_too_large' -FallbackEntered $true -Trace $trace -Findings @($finding)
+    }
+
+    $eligible = Get-StrictSkillDispatchEligibleEntries -Candidates $rawCandidates -EligibilityResults $EligibilityResults
+    $eligibleNames = [string[]]@($eligible | ForEach-Object { [string]$_.name })
+    if ($eligible.Count -eq 0) {
+        $trace = New-StrictSkillDispatchTrace -TraceId $TraceId -Request $Request -AbstainedReason 'no_eligible_candidates' -CapturedAt $CapturedAt
+        $finding = New-OperationFinding 'no_eligible_candidates' 'error' '$.candidates' 'No candidate passed the shared deterministic eligibility policy.'
+        return New-StrictSkillDispatchResult -Status 'no_eligible_candidates' -FallbackEntered $true -Trace $trace -Findings @($finding)
+    }
+
+    $adapterContract = Test-AppServerSkillDispatchAdapterContract $Adapter
+    if (-not [bool]$adapterContract.pass -or -not [bool]$Adapter.supports_skill_injection) {
+        $trace = New-StrictSkillDispatchTrace -TraceId $TraceId -Request $Request -CandidateNames $eligibleNames -AbstainedReason 'app_server_skill_injection_unsupported' -CapturedAt $CapturedAt
+        $finding = New-OperationFinding 'app_server_skill_injection_unsupported' 'warning' '$.adapter' 'App Server skill item injection is unavailable; native-only remains primary.'
+        return New-StrictSkillDispatchResult -Status 'platform_na' -FallbackEntered $true -PlatformNa $true -Candidates $eligible -Trace $trace -Findings @($finding)
+    }
+
+    $adjudication = Test-StrictSkillDispatchHostAdjudicationReceipt -Receipt $HostAdjudicationReceipt -RequestId $requestId -CandidateNames $eligibleNames
+    if (-not [bool]$adjudication.pass) {
+        $status = if ($null -eq $HostAdjudicationReceipt) { 'adjudication_required' } else { 'adjudication_invalid' }
+        $trace = New-StrictSkillDispatchTrace -TraceId $TraceId -Request $Request -CandidateNames $eligibleNames -AbstainedReason $status -CapturedAt $CapturedAt
+        return New-StrictSkillDispatchResult -Status $status -FallbackEntered $true -Candidates $eligible -Trace $trace -Findings @($adjudication.findings)
+    }
+
+    $selectedNames = [string[]]@($adjudication.selected_names)
+    if ($selectedNames.Count -eq 0) {
+        $trace = New-StrictSkillDispatchTrace -TraceId $TraceId -Request $Request -CandidateNames $eligibleNames -AbstainedReason 'host_adjudication_abstained' -CapturedAt $CapturedAt
+        $finding = New-OperationFinding 'host_adjudication_abstained' 'warning' '$.selected_names' 'Host adjudication selected no skill for injection.'
+        return New-StrictSkillDispatchResult -Status 'abstained' -FallbackEntered $true -Candidates $eligible -Trace $trace -Findings @($finding) -ReceiptId $adjudication.receipt_id
+    }
+
+    $selectedSkills = @($eligible | Where-Object { $selectedNames -contains [string]$_.name })
+    $injection = New-AppServerSkillInjectionRequest -Adapter $Adapter -Skills $selectedSkills
+    if ([string]$injection.status -ne 'ready') {
+        $trace = New-StrictSkillDispatchTrace -TraceId $TraceId -Request $Request -CandidateNames $eligibleNames -SelectedNames $selectedNames -AbstainedReason 'app_server_skill_injection_unsupported' -CapturedAt $CapturedAt
+        return New-StrictSkillDispatchResult -Status 'platform_na' -FallbackEntered $true -PlatformNa $true -Candidates $eligible -SelectedNames $selectedNames -Injection $null -Trace $trace -Findings @($injection.findings) -ReceiptId $adjudication.receipt_id
+    }
+
+    $injectedNames = [string[]]@($injection.items | ForEach-Object { [string]$_.name })
+    $trace = New-StrictSkillDispatchTrace -TraceId $TraceId -Request $Request -CandidateNames $eligibleNames -SelectedNames $selectedNames -InjectedNames $injectedNames -CapturedAt $CapturedAt
+    return New-StrictSkillDispatchResult -Status 'planned' -FallbackEntered $true -Candidates $eligible -SelectedNames $selectedNames -Injection $injection -Trace $trace -ReceiptId $adjudication.receipt_id
+}
+
+function Test-StrictSkillDispatchResultContract {
+    param($Result)
+
+    $findings = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Result) { return New-OperationValidationResult @((New-OperationFinding 'dispatch_result_missing' 'error' '$' 'Strict dispatch result is required.')) }
+    if ((Get-StrictSkillDispatchProperty $Result @('schema_version')) -ne 1) { $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only strict dispatch result schema version 1 is supported.')) | Out-Null }
+    if ([string]::IsNullOrWhiteSpace([string](Get-StrictSkillDispatchProperty $Result @('status')))) { $findings.Add((New-OperationFinding 'status_missing' 'error' '$.status' 'Strict dispatch status is required.')) | Out-Null }
+    if ((Get-StrictSkillDispatchProperty $Result @('fallback_entered')) -isnot [bool]) { $findings.Add((New-OperationFinding 'fallback_boundary_invalid' 'error' '$.fallback_entered' 'Fallback entry must be explicitly boolean.')) | Out-Null }
+    $trace = Get-StrictSkillDispatchProperty $Result @('trace')
+    $traceContract = Test-NativeInvocationTraceContract $trace
+    foreach ($finding in @($traceContract.findings)) { $findings.Add($finding) | Out-Null }
+    foreach ($field in @('provider_calls', 'native_mutations', 'writes')) {
+        if ([long](Get-StrictSkillDispatchProperty $Result @($field)) -ne 0) { $findings.Add((New-OperationFinding 'side_effect_forbidden' 'error' ('$.{0}' -f $field) 'Strict dispatch must remain zero-side-effect.')) | Out-Null }
+    }
+    return New-OperationValidationResult $findings.ToArray()
+}
+
 function ConvertFrom-CodexPluginInventorySnapshot {
     param($Snapshot, [ValidateSet('official', 'personal', 'workspace')][string]$Scope)
 
@@ -3138,6 +6078,139 @@ function Get-RuleEstateMarkdownSection([string]$Text, [string]$SectionName) {
     return ($match.Value -replace "`r`n", "`n").Trim()
 }
 
+function Get-RuleEstateInlineField([string]$Line, [string]$Name) {
+    $match = [regex]::Match($Line, '(?i)(?:^|[`、,，;；\s])' + [regex]::Escape($Name) + '\s*=\s*(?:`(?<quoted>[^`]+)`|(?<plain>[^`、,，;；\r\n]+))')
+    if (-not $match.Success) { return '' }
+    $value = if ($match.Groups['quoted'].Success) { [string]$match.Groups['quoted'].Value } else { [string]$match.Groups['plain'].Value }
+    return $value.Trim()
+}
+
+function Get-RuleEstateNaFindings([string]$ProjectText, [string]$AgentsPath) {
+    $findings = New-Object System.Collections.Generic.List[object]
+    $lines = @($ProjectText -split "`r?`n")
+    for ($index = 0; $index -lt $lines.Count; $index++) {
+        $line = [string]$lines[$index]
+        if ($line -notmatch '(?i)`(?:platform_na|gate_na)`') { continue }
+        $invalid = New-Object System.Collections.Generic.List[string]
+        $values = [ordered]@{}
+        foreach ($field in @('reason','alternative_verification','evidence_link','expires_at','recovery_condition')) {
+            $values[$field] = Get-RuleEstateInlineField $line $field
+            if ([string]::IsNullOrWhiteSpace([string]$values[$field])) { $invalid.Add($field) | Out-Null }
+        }
+        $expires = [string]$values['expires_at']
+        $parsedExpiry = [datetime]::MinValue
+        if (-not [string]::IsNullOrWhiteSpace($expires) -and ($expires -notmatch '^\d{4}-\d{2}-\d{2}$' -or -not [datetime]::TryParseExact($expires, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$parsedExpiry))) {
+            $invalid.Add('expires_at_iso_date') | Out-Null
+        }
+        $evidence = [string]$values['evidence_link']
+        if (-not [string]::IsNullOrWhiteSpace($evidence)) {
+            $evidencePath = ($evidence -split '#', 2)[0].Trim()
+            if ([string]::IsNullOrWhiteSpace($evidencePath) -or $evidencePath.EndsWith('/') -or $evidencePath.EndsWith('\') -or [System.IO.Path]::GetExtension($evidencePath) -notin @('.md','.json','.csv','.txt','.log')) { $invalid.Add('evidence_link_file') | Out-Null }
+            elseif ($invalid.Count -eq 0) {
+                try {
+                    $repoRoot = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($AgentsPath))
+                    $resolvedEvidence = if ([System.IO.Path]::IsPathRooted($evidencePath)) { [System.IO.Path]::GetFullPath($evidencePath) } else { [System.IO.Path]::GetFullPath((Join-Path $repoRoot $evidencePath)) }
+                    if (-not (Test-RuleDiscoveryPathWithin $resolvedEvidence $repoRoot) -or -not [System.IO.File]::Exists($resolvedEvidence)) {
+                        $findings.Add([pscustomobject][ordered]@{
+                            code = 'project_na_evidence_missing'; severity = 'error'; path = $AgentsPath; line = $index + 1
+                            evidence_link = $evidence; resolved_path = $resolvedEvidence; disposition = 'adapt'
+                            message = 'N/A evidence_link must resolve to an existing file inside the repository.'
+                        }) | Out-Null
+                    }
+                }
+                catch {
+                    $findings.Add([pscustomobject][ordered]@{
+                        code = 'project_na_evidence_missing'; severity = 'error'; path = $AgentsPath; line = $index + 1
+                        evidence_link = $evidence; resolved_path = ''; disposition = 'adapt'
+                        message = 'N/A evidence_link could not be resolved inside the repository.'
+                    }) | Out-Null
+                }
+            }
+            else {
+                try {
+                    $repoRoot = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($AgentsPath))
+                    $resolvedEvidence = if ([System.IO.Path]::IsPathRooted($evidencePath)) { [System.IO.Path]::GetFullPath($evidencePath) } else { [System.IO.Path]::GetFullPath((Join-Path $repoRoot $evidencePath)) }
+                    if (-not (Test-RuleDiscoveryPathWithin $resolvedEvidence $repoRoot) -or -not [System.IO.File]::Exists($resolvedEvidence)) {
+                        $findings.Add([pscustomobject][ordered]@{ code = 'project_na_evidence_missing'; severity = 'error'; path = $AgentsPath; line = $index + 1; evidence_link = $evidence; resolved_path = $resolvedEvidence; disposition = 'adapt'; message = 'N/A evidence_link must resolve to an existing repository file.' }) | Out-Null
+                    }
+                }
+                catch {
+                    $findings.Add([pscustomobject][ordered]@{ code = 'project_na_evidence_missing'; severity = 'error'; path = $AgentsPath; line = $index + 1; evidence_link = $evidence; resolved_path = ''; disposition = 'adapt'; message = 'N/A evidence_link could not be resolved inside the repository.' }) | Out-Null
+                }
+            }
+        }
+        if ($invalid.Count -gt 0) {
+            $findings.Add([pscustomobject][ordered]@{
+                code = 'project_na_invalid'; severity = 'error'; path = $AgentsPath; line = $index + 1
+                invalid_fields = @($invalid.ToArray() | Sort-Object -Unique); disposition = 'adapt'
+                message = 'N/A record must provide reason, alternative verification, a concrete evidence file, an ISO expiry date, and a recovery condition.'
+            }) | Out-Null
+        }
+    }
+    return @($findings.ToArray())
+}
+
+function Invoke-RuleEstateGitQuery([string]$RepoRoot, [string[]]$Arguments) {
+    $start = [System.Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = 'git'
+    $start.UseShellExecute = $false
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $start.CreateNoWindow = $true
+    $start.ArgumentList.Add('-C')
+    $start.ArgumentList.Add($RepoRoot)
+    foreach ($argument in @($Arguments)) { $start.ArgumentList.Add([string]$argument) }
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    if (-not $process.Start()) { return [pscustomobject]@{ exit_code = 1; output = ''; error = 'git process did not start' } }
+    $output = $process.StandardOutput.ReadToEnd().Trim()
+    $errorText = $process.StandardError.ReadToEnd().Trim()
+    $process.WaitForExit()
+    return [pscustomobject]@{ exit_code = $process.ExitCode; output = $output; error = $errorText }
+}
+
+function Get-RuleEstateGitProfileFindings([string]$ProjectText, [string]$AgentsPath) {
+    $findings = New-Object System.Collections.Generic.List[object]
+    $repoRoot = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($AgentsPath))
+    $profileLine = @($ProjectText -split "`r?`n" | Where-Object { $_ -match '(?i)Git\s+profile\s*:' } | Select-Object -First 1)
+    if ($profileLine.Count -eq 0) {
+        $findings.Add([pscustomobject]@{ code = 'project_git_profile_missing'; severity = 'error'; path = $AgentsPath; disposition = 'adapt'; message = 'Project contract must declare Git profile baseline and upstream.' }) | Out-Null
+        return @($findings.ToArray())
+    }
+    $line = [string]$profileLine[0]
+    $baseline = Get-RuleEstateInlineField $line 'baseline'
+    $upstream = Get-RuleEstateInlineField $line 'upstream'
+    if ([string]::IsNullOrWhiteSpace($baseline) -or [string]::IsNullOrWhiteSpace($upstream)) {
+        $findings.Add([pscustomobject]@{ code = 'project_git_profile_invalid'; severity = 'error'; path = $AgentsPath; disposition = 'adapt'; message = 'Git profile must provide non-empty baseline and upstream fields.' }) | Out-Null
+        return @($findings.ToArray())
+    }
+
+    $head = Invoke-RuleEstateGitQuery $repoRoot @('symbolic-ref', '--quiet', '--short', 'HEAD')
+    $baselineRef = Invoke-RuleEstateGitQuery $repoRoot @('show-ref', '--verify', '--quiet', ('refs/heads/{0}' -f $baseline))
+    if (($head.exit_code -ne 0 -or $head.output -ne $baseline) -and $baselineRef.exit_code -ne 0) {
+        $findings.Add([pscustomobject]@{ code = 'project_git_baseline_mismatch'; severity = 'error'; path = $AgentsPath; declared = $baseline; observed_head = $head.output; disposition = 'adapt'; message = 'Declared Git baseline is neither the symbolic HEAD nor an existing local branch.' }) | Out-Null
+    }
+
+    $remotesResult = Invoke-RuleEstateGitQuery $repoRoot @('remote')
+    $remotes = @($remotesResult.output -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($upstream -eq 'none') {
+        $hasNoRemoteNa = [regex]::IsMatch($ProjectText, '(?im)^.*`gate_na`.*(?:Git\s+remote|upstream|remote).*?$')
+        if ($remotes.Count -ne 0 -or -not $hasNoRemoteNa) {
+            $findings.Add([pscustomobject]@{ code = 'project_git_upstream_mismatch'; severity = 'error'; path = $AgentsPath; declared = 'none'; observed_remotes = $remotes; disposition = 'adapt'; message = 'A no-upstream Git profile requires zero configured remotes and a bounded gate_na record.' }) | Out-Null
+        }
+    }
+    else {
+        $parts = @($upstream -split '/', 2)
+        $remoteExists = $parts.Count -eq 2 -and $remotes -contains $parts[0]
+        $remoteRef = if ($parts.Count -eq 2) { Invoke-RuleEstateGitQuery $repoRoot @('show-ref', '--verify', '--quiet', ('refs/remotes/{0}' -f $upstream)) } else { [pscustomobject]@{ exit_code = 1 } }
+        $tracking = Invoke-RuleEstateGitQuery $repoRoot @('for-each-ref', '--format=%(upstream:short)', ('refs/heads/{0}' -f $baseline))
+        if (-not $remoteExists -or $remoteRef.exit_code -ne 0 -or $tracking.output -ne $upstream) {
+            $findings.Add([pscustomobject]@{ code = 'project_git_upstream_mismatch'; severity = 'error'; path = $AgentsPath; declared = $upstream; observed_tracking = $tracking.output; observed_remotes = $remotes; disposition = 'adapt'; message = 'Declared Git upstream must exist as a remote-tracking ref and match the baseline branch tracking configuration.' }) | Out-Null
+        }
+    }
+    return @($findings.ToArray())
+}
+
 function Get-RuleEstateGlobalDocument([string]$UserRoot, [ValidateSet('codex', 'claude')][string]$HostName) {
     if ([string]::IsNullOrWhiteSpace($UserRoot)) { return $null }
     $root = Get-RuleEstateNormalizedPath $UserRoot
@@ -3168,11 +6241,41 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
             claude_hash = if ([string]::IsNullOrWhiteSpace($claudeText)) { '' } else { Get-RulePatchTextHash $claudeText }
         }) | Out-Null
         if (-not $aligned) { $findings.Add([pscustomobject][ordered]@{ code = 'global_common_section_drift'; severity = 'warning'; section = $name; disposition = 'adapt'; message = ('Codex and Claude global common section {0} is absent or different.' -f $name) }) | Out-Null }
+        if ($name -eq 'A' -and $codexText -match '(?i)send_message_to_thread|codex_delegation|source_thread_id|non-managed hook|specialized tool path') {
+            $tokens = @([regex]::Matches($codexText, '(?i)send_message_to_thread|codex_delegation|source_thread_id|non-managed hook|specialized tool path') | ForEach-Object { $_.Value.ToLowerInvariant() } | Sort-Object -Unique)
+            $findings.Add([pscustomobject][ordered]@{ code = 'global_common_platform_leak'; severity = 'warning'; section = 'A'; tokens = $tokens; disposition = 'adapt'; message = 'Common section A contains Codex-specific tool or hook implementation details that belong in platform delta B.' }) | Out-Null
+        }
     }
     $codexDelta = if ($null -eq $codex) { '' } else { Get-RuleEstateMarkdownSection ([string]$codex.text) 'B' }
     $claudeDelta = if ($null -eq $claude) { '' } else { Get-RuleEstateMarkdownSection ([string]$claude.text) 'B' }
     if ([string]::IsNullOrWhiteSpace($codexDelta)) { $findings.Add([pscustomobject]@{ code = 'codex_platform_delta_missing'; severity = 'warning'; section = 'B'; disposition = 'adapt'; message = 'Codex global platform delta section B is missing.' }) | Out-Null }
     if ([string]::IsNullOrWhiteSpace($claudeDelta)) { $findings.Add([pscustomobject]@{ code = 'claude_platform_delta_missing'; severity = 'warning'; section = 'B'; disposition = 'adapt'; message = 'Claude global platform delta section B is missing.' }) | Out-Null }
+    if (-not [string]::IsNullOrWhiteSpace($codexDelta) -and $codexDelta -ceq $claudeDelta) { $findings.Add([pscustomobject]@{ code = 'platform_delta_not_distinct'; severity = 'warning'; section = 'B'; disposition = 'adapt'; message = 'Codex and Claude platform delta sections are identical; verify that host-specific loading and enforcement facts were not flattened.' }) | Out-Null }
+
+    $budgets = New-Object System.Collections.Generic.List[object]
+    foreach ($document in @($codex, $claude)) {
+        if ($null -eq $document) { continue }
+        $text = [string]$document.text
+        $byteCount = [System.Text.Encoding]::UTF8.GetByteCount($text)
+        $lineCount = @($text -split "`r?`n").Count
+        $withinBudget = $byteCount -le 16384 -and $lineCount -le 130
+        $byteHeadroom = 16384 - $byteCount; $lineHeadroom = 130 - $lineCount
+        $budgetRatio = [math]::Max(($byteCount / 16384), ($lineCount / 130))
+        $budgetState = if (-not $withinBudget) { 'exceeded' } elseif ($budgetRatio -ge 0.95) { 'addition_blocked' } elseif ($budgetRatio -ge 0.85) { 'warning' } else { 'healthy' }
+        $lowHeadroom = $budgetState -in @('warning', 'addition_blocked')
+        $budgets.Add([pscustomobject][ordered]@{ host = [string]$document.host; path = [string]$document.path; bytes = $byteCount; lines = $lineCount; max_bytes = 16384; max_lines = 130; byte_headroom = $byteHeadroom; line_headroom = $lineHeadroom; ratio = [math]::Round($budgetRatio, 4); state = $budgetState; within_budget = $withinBudget; low_headroom = $lowHeadroom }) | Out-Null
+        if (-not $withinBudget) { $findings.Add([pscustomobject]@{ code = 'global_rule_budget_exceeded'; severity = 'warning'; path = [string]$document.path; disposition = 'adapt'; message = ('Global rule uses {0} bytes/{1} lines; profile budget is 16384 bytes/130 lines.' -f $byteCount, $lineCount) }) | Out-Null }
+        elseif ($lowHeadroom) {
+            $stateCode = if ($budgetState -eq 'addition_blocked') { 'global_rule_budget_addition_blocked' } else { 'global_rule_budget_warning' }
+            $findings.Add([pscustomobject]@{ code = $stateCode; severity = 'warning'; path = [string]$document.path; disposition = 'adapt'; message = ('Global rule budget state is {0}: {1} bytes and {2} lines remain.' -f $budgetState, $byteHeadroom, $lineHeadroom) }) | Out-Null
+            $findings.Add([pscustomobject]@{ code = 'global_rule_budget_low_headroom'; severity = 'warning'; path = [string]$document.path; disposition = 'adapt'; message = ('Global rule has low headroom: {0} bytes and {1} lines remain.' -f $byteHeadroom, $lineHeadroom) }) | Out-Null
+        }
+    }
+
+    $codexRelease = if ($null -eq $codex) { '' } else { Get-RuleEstateRelease ([string]$codex.text) global }
+    $claudeRelease = if ($null -eq $claude) { '' } else { Get-RuleEstateRelease ([string]$claude.text) global }
+    $releaseAligned = -not [string]::IsNullOrWhiteSpace($codexRelease) -and $codexRelease -eq $claudeRelease
+    if (-not $releaseAligned) { $findings.Add([pscustomobject]@{ code = 'global_release_mismatch'; severity = 'warning'; disposition = 'adapt'; expected = $codexRelease; observed = $claudeRelease; message = 'Codex and Claude global rule releases are absent or different.' }) | Out-Null }
     return [pscustomobject][ordered]@{
         codex_path = if ($null -eq $codex) { '' } else { [string]$codex.path }
         claude_path = if ($null -eq $claude) { '' } else { [string]$claude.path }
@@ -3180,6 +6283,9 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
         common_aligned = (@($sections | Where-Object { -not $_.aligned }).Count -eq 0)
         codex_delta_present = -not [string]::IsNullOrWhiteSpace($codexDelta)
         claude_delta_present = -not [string]::IsNullOrWhiteSpace($claudeDelta)
+        platform_deltas_distinct = (-not [string]::IsNullOrWhiteSpace($codexDelta) -and -not [string]::IsNullOrWhiteSpace($claudeDelta) -and $codexDelta -cne $claudeDelta)
+        releases = [pscustomobject][ordered]@{ codex = $codexRelease; claude = $claudeRelease; aligned = $releaseAligned }
+        budgets = @($budgets.ToArray())
         findings = @($findings.ToArray())
     }
 }
@@ -3202,8 +6308,10 @@ function Get-RuleEstateProjectActions([string]$AgentsPath) {
     $raw = @(Get-RuleAuditResponsibilityConstraints -Documents @($document))
     $actions = New-Object System.Collections.Generic.List[object]
     foreach ($item in $raw) {
-        foreach ($id in @(Expand-RuleEstateConstraintId ([string]$item.constraint_id))) {
-            $actions.Add([pscustomobject][ordered]@{ constraint_id = $id; action = [string]$item.common_intent; evidence = @($item.evidence) }) | Out-Null
+        $expandedIds = @(Expand-RuleEstateConstraintId ([string]$item.constraint_id))
+        foreach ($id in $expandedIds) {
+            if ($id -notmatch '^[RES]\d+$') { continue }
+            $actions.Add([pscustomobject][ordered]@{ constraint_id = $id; source_constraint_id = [string]$item.constraint_id; grouped = ($expandedIds.Count -gt 1); action = [string]$item.common_intent; evidence = @($item.evidence) }) | Out-Null
         }
     }
     return @($actions.ToArray())
@@ -3213,10 +6321,28 @@ function Get-RuleEstateExpectedConstraintIds([string]$CodexGlobalText, [string]$
     $ids = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($action in @($ProjectActions)) { $ids.Add([string]$action.constraint_id) | Out-Null }
     $contractText = (Get-RuleEstateMarkdownSection $CodexGlobalText 'C') + "`n" + (Get-RuleEstateMarkdownSection $ClaudeGlobalText 'C')
-    foreach ($match in @([regex]::Matches($contractText, '(?i)\b(?:R\d+(?:\s*-\s*R?\d+)?|E\d+(?:/E\d+)+)\b'))) {
+    foreach ($match in @([regex]::Matches($contractText, '(?i)\b(?:[RS]\d+(?:\s*-\s*[RS]?\d+)?|E\d+(?:/E\d+)+)\b'))) {
         foreach ($id in @(Expand-RuleEstateConstraintId ([string]$match.Value))) { $ids.Add($id) | Out-Null }
     }
     return @($ids | Sort-Object)
+}
+
+function Get-RuleEstateEnforcementChecks([string]$RepoRoot, [object[]]$ActionMatches) {
+    $checks = New-Object System.Collections.Generic.List[object]
+    foreach ($actionMatch in @($ActionMatches)) {
+        foreach ($match in @([regex]::Matches([string]$actionMatch.action, '`(?<value>[^`\r\n]+)`'))) {
+            $value = ([string]$match.Groups['value'].Value).Trim()
+            if ($value -match '\s' -or $value -notmatch '(?i)(?:^|[\\/])(?:scripts?|hooks?|config|ci)(?:[\\/]|$)|\.(?:ps1|py|json|ya?ml|toml)$') { continue }
+            try {
+                $resolved = if ([System.IO.Path]::IsPathRooted($value)) { [System.IO.Path]::GetFullPath($value) } else { [System.IO.Path]::GetFullPath((Join-Path $RepoRoot $value)) }
+                $contained = Test-RuleDiscoveryPathWithin $resolved $RepoRoot
+                $exists = $contained -and ([System.IO.File]::Exists($resolved) -or [System.IO.Directory]::Exists($resolved))
+            }
+            catch { $resolved = ''; $contained = $false; $exists = $false }
+            $checks.Add([pscustomobject][ordered]@{ value = $value; resolved_path = $resolved; contained = $contained; exists = $exists }) | Out-Null
+        }
+    }
+    return @($checks.ToArray() | Sort-Object value -Unique)
 }
 
 function Get-RuleEstateRelease([string]$Text, [ValidateSet('global', 'project')][string]$Scope) {
@@ -3234,9 +6360,14 @@ function Get-RuleEstateRelease([string]$Text, [ValidateSet('global', 'project')]
 function Get-RuleEstateCoverage {
     param([string]$AgentsPath, $GlobalAlignment, [string]$CodexGlobalText, [string]$ClaudeGlobalText)
     $actions = @(Get-RuleEstateProjectActions $AgentsPath)
+    $repoRoot = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($AgentsPath))
     $constraints = New-Object System.Collections.Generic.List[object]
+    $enforcementChecks = New-Object System.Collections.Generic.List[object]
+    $groupedMappings = @($actions | Where-Object grouped | Select-Object source_constraint_id,evidence -Unique)
     foreach ($id in @(Get-RuleEstateExpectedConstraintIds $CodexGlobalText $ClaudeGlobalText $actions)) {
         $actionMatches = @($actions | Where-Object { [string]$_.constraint_id -eq $id })
+        $checks = @(Get-RuleEstateEnforcementChecks -RepoRoot $repoRoot -ActionMatches $actionMatches)
+        foreach ($check in $checks) { $enforcementChecks.Add($check) | Out-Null }
         $constraintPattern = '(?i)(?<![A-Z0-9])' + [regex]::Escape($id) + '(?![A-Z0-9])'
         $codexHas = [regex]::IsMatch($CodexGlobalText, $constraintPattern)
         $claudeHas = [regex]::IsMatch($ClaudeGlobalText, $constraintPattern)
@@ -3248,13 +6379,17 @@ function Get-RuleEstateCoverage {
             common_intent = if ($codexHas -and $claudeHas) { 'declared_by_both_global_rules' } else { '' }
             platform_deltas = @($platformDeltas.ToArray())
             project_actions = @($actionMatches | ForEach-Object { [string]$_.action })
-            enforcement_refs = @()
+            enforcement_refs = @($checks | ForEach-Object { [string]$_.value })
             evidence = @($actionMatches | ForEach-Object { $_.evidence } | ForEach-Object { $_ })
             recovery_condition = if ($actionMatches.Count -eq 0) { 'Add an evidence-backed repository action or an explicit N/A with recovery condition.' } else { '' }
             need_kind = 'project_guidance'
         }) | Out-Null
     }
-    return Invoke-RuleAdvisor -Constraints @($constraints.ToArray())
+    $advisor = Invoke-RuleAdvisor -Constraints @($constraints.ToArray())
+    $advisor | Add-Member -NotePropertyName enforcement_checks -NotePropertyValue @($enforcementChecks.ToArray())
+    $advisor | Add-Member -NotePropertyName grouped_mappings -NotePropertyValue @($groupedMappings)
+    $advisor | Add-Member -NotePropertyName coverage_kind -NotePropertyValue 'textual_mapping_coverage'
+    return $advisor
 }
 
 function New-RuleEstateTargetAudit {
@@ -3268,6 +6403,11 @@ function New-RuleEstateTargetAudit {
     $projectText = if ([System.IO.File]::Exists([string]$Target.agents_path)) { [System.IO.File]::ReadAllText([string]$Target.agents_path) } else { '' }
     $globalRelease = Get-RuleEstateRelease $CodexGlobalText global
     $projectRelease = Get-RuleEstateRelease $projectText project
+    $projectBytes = [System.Text.Encoding]::UTF8.GetByteCount($projectText)
+    $projectLines = @($projectText -split "`r?`n").Count
+    $projectWithinBudget = $projectBytes -le 10240 -and $projectLines -le 80
+    $projectByteHeadroom = 10240 - $projectBytes; $projectLineHeadroom = 80 - $projectLines
+    $projectLowHeadroom = $projectWithinBudget -and ($projectBytes -ge [math]::Floor(10240 * 0.85) -or $projectByteHeadroom -lt 1024 -or $projectLineHeadroom -lt 5)
     $findings = New-Object System.Collections.Generic.List[object]
     foreach ($finding in @($codexDiagnostics.findings) + @($claudeDiagnostics.findings)) {
         $findingPath = [string](Get-OperationObjectProperty $finding 'path')
@@ -3275,8 +6415,26 @@ function New-RuleEstateTargetAudit {
     }
     if (-not [bool]$Target.agents_exists) { $findings.Add([pscustomobject]@{ code = 'project_agents_missing'; severity = 'error'; path = $Target.agents_path; disposition = 'adapt'; message = 'Target repository has no AGENTS.md project contract.' }) | Out-Null }
     if (-not [bool]$Target.claude_exists) { $findings.Add([pscustomobject]@{ code = 'project_claude_wrapper_missing'; severity = 'warning'; path = $Target.claude_path; disposition = 'adapt'; message = 'Target repository has no CLAUDE.md adapter or Claude-specific project rule.' }) | Out-Null }
+    if ([bool]$Target.agents_exists) {
+        foreach ($sectionName in @('1', 'A', 'B', 'C', 'D')) {
+            if ([string]::IsNullOrWhiteSpace((Get-RuleEstateMarkdownSection $projectText $sectionName))) { $findings.Add([pscustomobject]@{ code = 'project_contract_section_missing'; severity = 'warning'; path = $Target.agents_path; section = $sectionName; disposition = 'adapt'; message = ('Project contract section {0} is missing from the active profile.' -f $sectionName) }) | Out-Null }
+        }
+    }
+    if ([bool]$Target.claude_exists) {
+        $claudeBytes = [System.IO.File]::ReadAllBytes([string]$Target.claude_path)
+        $claudeText = [System.IO.File]::ReadAllText([string]$Target.claude_path)
+        $claudeLines = @($claudeText -split "`r?`n")
+        if ($claudeBytes.Length -ge 3 -and $claudeBytes[0] -eq 0xEF -and $claudeBytes[1] -eq 0xBB -and $claudeBytes[2] -eq 0xBF) { $findings.Add([pscustomobject]@{ code = 'project_claude_wrapper_bom'; severity = 'warning'; path = $Target.claude_path; disposition = 'adapt'; message = 'Claude project wrapper must begin without a UTF-8 BOM.' }) | Out-Null }
+        if ($claudeLines.Count -eq 0 -or $claudeLines[0] -cne '@AGENTS.md') { $findings.Add([pscustomobject]@{ code = 'project_claude_wrapper_first_line_mismatch'; severity = 'warning'; path = $Target.claude_path; disposition = 'adapt'; message = 'Claude project wrapper first physical line must be @AGENTS.md for the active shared-contract profile.' }) | Out-Null }
+    }
     if (-not [string]::IsNullOrWhiteSpace($globalRelease) -and $projectRelease -ne $globalRelease) { $findings.Add([pscustomobject]@{ code = 'project_global_release_mismatch'; severity = 'warning'; path = $Target.agents_path; disposition = 'adapt'; expected = $globalRelease; observed = $projectRelease; message = ('Project global-rule review is {0}; current global release is {1}.' -f $(if ([string]::IsNullOrWhiteSpace($projectRelease)) { 'undeclared' } else { $projectRelease }), $globalRelease) }) | Out-Null }
     foreach ($item in @($coverage.coverage | Where-Object { $_.coverage -ne 'covered' })) { $findings.Add([pscustomobject]@{ code = 'global_repo_action_gap'; severity = 'warning'; path = $Target.agents_path; constraint_id = $item.constraint_id; disposition = 'adapt'; message = ('Constraint {0} coverage is {1}.' -f $item.constraint_id, $item.coverage) }) | Out-Null }
+    foreach ($item in @($coverage.coverage | Where-Object { $_.constraint_id -eq 'S5' -and @($_.enforcement_refs).Count -eq 0 })) { $findings.Add([pscustomobject]@{ code = 'enforcement_reference_required'; severity = 'error'; path = $Target.agents_path; constraint_id = 'S5'; disposition = 'adapt'; message = 'S5 must map to at least one concrete script/config/hook/CI reference.' }) | Out-Null }
+    foreach ($check in @($coverage.enforcement_checks | Where-Object { -not $_.exists })) { $findings.Add([pscustomobject]@{ code = 'enforcement_reference_missing'; severity = 'error'; path = $Target.agents_path; reference = $check.value; resolved_path = $check.resolved_path; disposition = 'adapt'; message = ('Mapped deterministic enforcement reference is absent or outside the repository: {0}' -f $check.value) }) | Out-Null }
+    foreach ($mapping in @($coverage.grouped_mappings)) { $findings.Add([pscustomobject]@{ code = 'project_mapping_grouped'; severity = 'warning'; path = $Target.agents_path; constraint_id = [string]$mapping.source_constraint_id; disposition = 'adapt'; message = 'Grouped mappings are textual coverage only; map each global constraint to its own repository action.' }) | Out-Null }
+    foreach ($finding in @(Get-RuleEstateNaFindings $projectText $Target.agents_path)) { $findings.Add($finding) | Out-Null }
+    foreach ($finding in @(Get-RuleEstateGitProfileFindings $projectText $Target.agents_path)) { $findings.Add($finding) | Out-Null }
+    if ($projectLowHeadroom) { $findings.Add([pscustomobject]@{ code = 'project_rule_budget_low_headroom'; severity = 'warning'; path = $Target.agents_path; disposition = 'adapt'; message = ('Project rule has low headroom: {0} bytes and {1} lines remain.' -f $projectByteHeadroom, $projectLineHeadroom) }) | Out-Null }
     $patchCandidates = @()
     if ([bool]$Target.agents_exists -and -not [bool]$Target.claude_exists) {
         $desired = "@AGENTS.md`n"
@@ -3292,6 +6450,7 @@ function New-RuleEstateTargetAudit {
         claude = [pscustomobject][ordered]@{ documents = @($claudeDiscovery.documents); findings = @($claudeDiagnostics.findings); load_verification = 'not_run' }
         responsibility = $coverage
         release = [pscustomobject][ordered]@{ global = $globalRelease; project_review = $projectRelease; aligned = (-not [string]::IsNullOrWhiteSpace($globalRelease) -and $projectRelease -eq $globalRelease) }
+        budget = [pscustomobject][ordered]@{ bytes = $projectBytes; lines = $projectLines; max_bytes = 10240; max_lines = 80; byte_headroom = $projectByteHeadroom; line_headroom = $projectLineHeadroom; within_budget = $projectWithinBudget; low_headroom = $projectLowHeadroom }
         findings = @($findings.ToArray())
         patch_candidates = @($patchCandidates)
         writes = 0; provider_calls = 0; native_mutations = 0
@@ -3299,7 +6458,7 @@ function New-RuleEstateTargetAudit {
 }
 
 function Invoke-RuleEstateAudit {
-    param([string]$WorkspaceRoot, [string[]]$ExcludeNames, [object[]]$RegistryTargets, [string]$CodexUserRoot, [string]$ClaudeUserRoot, [int]$MaxTargets = 64)
+    param([string]$WorkspaceRoot, [string[]]$ExcludeNames, [object[]]$RegistryTargets = @(), [string]$CodexUserRoot, [string]$ClaudeUserRoot, [int]$MaxTargets = 64)
     $inventory = Get-RuleEstateTargets -WorkspaceRoot $WorkspaceRoot -ExcludeNames $ExcludeNames -RegistryTargets $RegistryTargets -MaxTargets $MaxTargets
     $alignment = Get-RuleEstateGlobalAlignment $CodexUserRoot $ClaudeUserRoot
     $codexGlobal = Get-RuleEstateGlobalDocument $CodexUserRoot codex
@@ -3310,16 +6469,24 @@ function Invoke-RuleEstateAudit {
     foreach ($target in @($inventory.targets)) { $audits.Add((New-RuleEstateTargetAudit $target $CodexUserRoot $ClaudeUserRoot $alignment $codexText $claudeText)) | Out-Null }
     $findings = @($alignment.findings) + @($audits | ForEach-Object { $_.findings })
     if (-not $inventory.registry.in_sync) { $findings += [pscustomobject]@{ code = 'target_registry_drift'; severity = 'warning'; path = $inventory.workspace_root; disposition = 'adapt'; message = 'Configured audit targets differ from the discovered workspace Git roots.' } }
+    $gapCount = @($audits | ForEach-Object { $_.responsibility.coverage } | Where-Object coverage -ne 'covered').Count
+    $structuralPass = @($findings | Where-Object severity -eq 'error' | Where-Object code -notin @('enforcement_reference_missing', 'enforcement_reference_required')).Count -eq 0
+    $semanticCoveragePass = $gapCount -eq 0 -and @($findings | Where-Object code -eq 'project_mapping_grouped').Count -eq 0
+    $enforcementVerified = @($findings | Where-Object code -in @('enforcement_reference_missing', 'enforcement_reference_required')).Count -eq 0
     return [pscustomobject][ordered]@{
         schema_version = 1; truth_boundary = 'workspace_static_audit'; generated_at = [datetimeoffset]::UtcNow.ToString('o')
         inventory = $inventory; global_alignment = $alignment; targets = @($audits.ToArray())
         summary = [pscustomobject][ordered]@{
             target_count = $inventory.target_count; finding_count = @($findings).Count
             patch_candidate_count = @($audits | ForEach-Object { $_.patch_candidates }).Count
+            textual_mapping_covered_count = @($audits | ForEach-Object { $_.responsibility.coverage } | Where-Object coverage -eq 'covered').Count
+            semantic_gap_count = $gapCount + @($findings | Where-Object code -eq 'project_mapping_grouped').Count
             covered_count = @($audits | ForEach-Object { $_.responsibility.coverage } | Where-Object coverage -eq 'covered').Count
-            gap_count = @($audits | ForEach-Object { $_.responsibility.coverage } | Where-Object coverage -ne 'covered').Count
+            gap_count = $gapCount
         }
         findings = @($findings); patch_candidates = @($audits | ForEach-Object { $_.patch_candidates })
+        command_succeeded = $true; structural_pass = $structuralPass; findings_present = (@($findings).Count -gt 0)
+        semantic_coverage_pass = $semanticCoveragePass; enforcement_verified = $enforcementVerified
         reference_basis = @(
             [pscustomobject]@{ authority = 'official'; source = 'https://learn.chatgpt.com/docs/agent-configuration/agents-md'; disposition = 'adopt'; use = 'Codex global/project/nested discovery and precedence' },
             [pscustomobject]@{ authority = 'official'; source = 'https://learn.chatgpt.com/docs/agent-configuration/rules'; disposition = 'adopt'; use = 'Separate prose guidance from deterministic command policy' },
@@ -3657,6 +6824,14 @@ function Get-SkillProfileReconciliationProperty($Object, [string]$Name) {
     return $property.Value
 }
 
+function Read-SkillProfileReconciliationProposal([string]$Path) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
+    $full = if ([System.IO.Path]::IsPathRooted($Path)) { [System.IO.Path]::GetFullPath($Path) } else { [System.IO.Path]::GetFullPath((Join-Path $Root $Path)) }
+    Need (Test-Path -LiteralPath $full -PathType Leaf) ("Proposal file does not exist: {0}" -f $full)
+    try { return (Get-ContentUtf8 $full | ConvertFrom-Json) }
+    catch { throw ("Proposal JSON is invalid: {0}" -f $_.Exception.Message) }
+}
+
 function New-SkillProfileReconciliationTransactionFinding([string]$Code, [string]$Message, [string]$Skill = "", [string]$Profile = "") {
     return [pscustomobject]([ordered]@{
             code = $Code
@@ -3975,6 +7150,264 @@ function Complete-SkillProfileReconciliationCanary {
     $receipt | Add-Member -NotePropertyName accepted_at -NotePropertyValue ([datetimeoffset]::UtcNow.ToString("o")) -Force
     Write-SkillProfileReconciliationReceipt $receiptFile $receipt
     return [pscustomobject]@{ pass = $true; status = "accepted"; replay_status = [string]$validation.host_replay_status; rollback_performed = $false; findings = @(); receipt = $receipt }
+}
+
+function New-SkillProfileMigrationFinding([string]$Code, [string]$Message, [bool]$Blocking = $true) {
+    return [pscustomobject][ordered]@{
+        code = $Code
+        message = $Message
+        blocking = $Blocking
+    }
+}
+
+function Get-SkillProfileCompatibilityView {
+    param(
+        [Parameter(Mandatory = $true)]$ProjectionConfig
+    )
+
+    Need ($null -ne $ProjectionConfig) "skill_projection config is required"
+    $directProfilesProperty = $ProjectionConfig.PSObject.Properties["profiles"]
+    $compatibilityProperty = $ProjectionConfig.PSObject.Properties["profile_compatibility"]
+    $directActiveProperty = $ProjectionConfig.PSObject.Properties["active_profile"]
+    $directCurrentProperty = $ProjectionConfig.PSObject.Properties["current_profile"]
+
+    if ($null -eq $directProfilesProperty -and $null -eq $compatibilityProperty -and $null -eq $directActiveProperty -and $null -eq $directCurrentProperty) {
+        return [pscustomobject][ordered]@{
+            schema_version = 1
+            kind = "ProfileCompatibilityView"
+            status = "absent"
+            source_schema = "none"
+            source_fields = @()
+            reachability_authority = "none"
+            active_profile = ""
+            current_profile = ""
+            profiles = [pscustomobject]@{}
+            writes_performed = $false
+            provider_calls = 0
+            native_mutations = 0
+        }
+    }
+
+    $source = if ($null -ne $compatibilityProperty -and $null -eq $directProfilesProperty) { "profile_compatibility" } else { "legacy_skill_projection" }
+    $sourceObject = if ($source -eq "profile_compatibility") { $compatibilityProperty.Value } else { $ProjectionConfig }
+    Need ($null -ne $sourceObject) "Profile compatibility source is required"
+
+    $activeProfile = ([string]$sourceObject.active_profile).Trim()
+    $currentProfile = ([string]$sourceObject.current_profile).Trim()
+    if ([string]::IsNullOrWhiteSpace($activeProfile)) { $activeProfile = $currentProfile }
+    if (-not [string]::IsNullOrWhiteSpace($activeProfile) -and -not [string]::IsNullOrWhiteSpace($currentProfile)) {
+        Need ([string]::Equals($activeProfile, $currentProfile, [System.StringComparison]::OrdinalIgnoreCase)) "active_profile and current_profile disagree"
+    }
+
+    $profiles = $sourceObject.PSObject.Properties["profiles"]
+    Need ($null -ne $profiles -and $null -ne $profiles.Value) "Profile compatibility data must contain profiles"
+    $profilesCopy = Copy-SkillsManagerConfig $profiles.Value
+    foreach ($property in @($profilesCopy.PSObject.Properties)) {
+        Need ($null -ne $property.Value -and $property.Value.PSObject.Properties.Match("enabled_names").Count -gt 0) ("Profile '{0}' is missing enabled_names" -f [string]$property.Name)
+        $property.Value.enabled_names = @($property.Value.enabled_names | ForEach-Object { ([string]$_).Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    }
+
+    return [pscustomobject][ordered]@{
+        schema_version = 1
+        kind = "ProfileCompatibilityView"
+        status = "read_only"
+        source_schema = if ($source -eq "profile_compatibility") { "profile_compatibility.v1" } else { "skill_projection.profile_fields.v1" }
+        source_fields = if ($source -eq "profile_compatibility") { @("profile_compatibility") } else { @("active_profile", "current_profile", "profiles") | Where-Object { $null -ne $ProjectionConfig.PSObject.Properties[$_] } }
+        reachability_authority = "none"
+        active_profile = $activeProfile
+        current_profile = $currentProfile
+        profiles = $profilesCopy
+        writes_performed = $false
+        provider_calls = 0
+        native_mutations = 0
+    }
+}
+
+function New-SkillProfileMigrationPlan {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][string]$ConfigPath
+    )
+
+    $findings = New-Object System.Collections.Generic.List[object]
+    $configFile = [System.IO.Path]::GetFullPath($ConfigPath)
+    if (-not (Test-Path -LiteralPath $configFile -PathType Leaf)) {
+        $findings.Add((New-SkillProfileMigrationFinding "config_missing" ("skills.json does not exist: {0}" -f $configFile))) | Out-Null
+        return [pscustomobject][ordered]@{ schema_version = 1; command = "migrate-skill-profile-config"; status = "blocked"; pass = $false; migration_required = $false; writes_performed = $false; findings = @($findings.ToArray()) }
+    }
+    if ($null -eq $Config -or $null -eq $Config.PSObject.Properties["skill_projection"] -or $null -eq $Config.skill_projection) {
+        $findings.Add((New-SkillProfileMigrationFinding "skill_projection_missing" "Config must contain skill_projection.")) | Out-Null
+        return [pscustomobject][ordered]@{ schema_version = 1; command = "migrate-skill-profile-config"; status = "blocked"; pass = $false; migration_required = $false; writes_performed = $false; findings = @($findings.ToArray()) }
+    }
+
+    $projection = $Config.skill_projection
+    $directFieldNames = @("active_profile", "current_profile", "profiles")
+    $directFieldPresent = @($directFieldNames | Where-Object { $null -ne $projection.PSObject.Properties[$_] })
+    $compatibilityPresent = $null -ne $projection.PSObject.Properties["profile_compatibility"]
+    $view = $null
+    try { $view = Get-SkillProfileCompatibilityView $projection }
+    catch { $findings.Add((New-SkillProfileMigrationFinding "legacy_profile_invalid" $_.Exception.Message)) | Out-Null }
+
+    if ($directFieldPresent.Count -gt 0 -and $compatibilityPresent) {
+        $findings.Add((New-SkillProfileMigrationFinding "mixed_profile_schema" "Legacy profile fields and profile_compatibility cannot coexist during migration.")) | Out-Null
+    }
+
+    $targetConfig = Copy-SkillsManagerConfig $Config
+    $migrationRequired = $directFieldPresent.Count -gt 0
+    $status = if ($migrationRequired) { "ready" } elseif ($compatibilityPresent) { "already_migrated" } else { "not_applicable" }
+    if ($migrationRequired -and $null -ne $view) {
+        foreach ($field in $directFieldNames) {
+            if ($null -ne $targetConfig.skill_projection.PSObject.Properties[$field]) { $targetConfig.skill_projection.PSObject.Properties.Remove($field) }
+        }
+        $targetConfig.skill_projection | Add-Member -NotePropertyName profile_compatibility -NotePropertyValue $view -Force
+    }
+
+    $beforeHash = Get-FileContentHash $configFile
+    $targetJson = $targetConfig | ConvertTo-Json -Depth 50
+    $targetHash = Get-OperationSha256 $targetJson
+    $operationId = "profile-migration-{0}" -f (Get-OperationSha256 ("{0}|{1}|profile-compatibility-v1" -f $beforeHash, $targetHash)).Substring(0, 16)
+    $activeProfile = if ($null -eq $view) { "" } else { [string]$view.active_profile }
+    $profileCount = if ($null -eq $view) { 0 } else { @($view.profiles.PSObject.Properties).Count }
+    if ($findings.Count -gt 0) { $status = "blocked" }
+
+    return [pscustomobject][ordered]@{
+        schema_version = 1
+        command = "migrate-skill-profile-config"
+        operation_id = $operationId
+        status = $status
+        pass = ($findings.Count -eq 0)
+        migration_required = $migrationRequired
+        config_path = $configFile
+        before_config_sha256 = $beforeHash
+        target_config_sha256 = $targetHash
+        active_profile = $activeProfile
+        legacy_profile_count = $profileCount
+        compatibility_view = $view
+        migrated_config = $targetConfig
+        rollback = [pscustomobject][ordered]@{
+            required = $migrationRequired
+            status = if ($migrationRequired) { "available" } else { "not_required" }
+            source = "migration_receipt.backup_path"
+        }
+        decision_owner = "deterministic_migration"
+        host_mutation = $false
+        provider_calls = 0
+        native_mutations = 0
+        writes_performed = $false
+        finding_count = $findings.Count
+        findings = @($findings.ToArray())
+    }
+}
+
+function Invoke-SkillProfileMigration {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$ConfigPath,
+        [Parameter(Mandatory = $true)][string]$ReceiptPath,
+        [Parameter(Mandatory = $true)][string]$Token
+    )
+
+    if ($Token -cne "MIGRATE_SKILL_PROFILE_CONFIG") {
+        return [pscustomobject]@{ pass = $false; status = "blocked"; writes_performed = 0; findings = @((New-SkillProfileMigrationFinding "migration_token_invalid" "Explicit profile migration token does not match.")) }
+    }
+    $configFile = [System.IO.Path]::GetFullPath($ConfigPath)
+    $receiptFile = [System.IO.Path]::GetFullPath($ReceiptPath)
+    if (Test-Path -LiteralPath $receiptFile -PathType Leaf) {
+        return [pscustomobject]@{ pass = $false; status = "blocked"; writes_performed = 0; findings = @((New-SkillProfileMigrationFinding "receipt_already_exists" "Receipt path already exists; use a new migration receipt.")) }
+    }
+
+    $beforeBytes = $null
+    $configWritten = $false
+    $lockStream = $null
+    try {
+        Need (Test-Path -LiteralPath $configFile -PathType Leaf) ("skills.json does not exist: {0}" -f $configFile)
+        $beforeBytes = [System.IO.File]::ReadAllBytes($configFile)
+        $config = Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        $plan = New-SkillProfileMigrationPlan -Config $config -ConfigPath $configFile
+        if (-not [bool]$plan.pass) { return [pscustomobject]@{ pass = $false; status = "blocked"; writes_performed = 0; findings = @($plan.findings); plan = $plan } }
+        if (-not [bool]$plan.migration_required) { return [pscustomobject]@{ pass = $true; status = "noop"; writes_performed = 0; findings = @(); plan = $plan; receipt = $null } }
+
+        $lockPath = "{0}.profile-migration.lock" -f $configFile
+        $backupPath = Join-Path ([System.IO.Path]::GetDirectoryName($receiptFile)) (".skill-profile-migration-backups\{0}.skills.json.bak" -f [string]$plan.operation_id)
+        $lockStream = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        Need ((Get-FileContentHash $configFile) -eq [string]$plan.before_config_sha256) "skills.json changed after migration planning"
+        Write-BytesAtomic -Path $backupPath -Bytes $beforeBytes
+        Write-Utf8FileAtomic -Path $configFile -Content ($plan.migrated_config | ConvertTo-Json -Depth 50)
+        $configWritten = $true
+        $afterHash = Get-FileContentHash $configFile
+        $afterConfig = Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        $postPlan = New-SkillProfileMigrationPlan -Config $afterConfig -ConfigPath $configFile
+        Need ([bool]$postPlan.pass -and -not [bool]$postPlan.migration_required) "Migrated skills.json did not enter compatibility-only form"
+        Need ([string]::Equals([string]$postPlan.active_profile, [string]$plan.active_profile, [System.StringComparison]::OrdinalIgnoreCase)) "active_profile changed during profile migration"
+        $now = [datetimeoffset]::UtcNow.ToString("o")
+        $receipt = [pscustomobject][ordered]@{
+            schema_version = 1
+            domain = "skill_profile_migration"
+            operation_id = [string]$plan.operation_id
+            status = "migrated"
+            started_at = $now
+            completed_at = $now
+            config_path = $configFile
+            before_config_sha256 = [string]$plan.before_config_sha256
+            after_config_sha256 = $afterHash
+            active_profile = [string]$plan.active_profile
+            legacy_profile_count = [int]$plan.legacy_profile_count
+            backup_path = [System.IO.Path]::GetFullPath($backupPath)
+            compatibility_view = $plan.compatibility_view
+            rollback = [pscustomobject]@{ status = "available"; token = "ROLLBACK_SKILL_PROFILE_CONFIG" }
+            host_mutation = $false
+            provider_calls = 0
+            native_mutations = 0
+            writes = 1
+        }
+        Write-Utf8FileAtomic -Path $receiptFile -Content ($receipt | ConvertTo-Json -Depth 50)
+        return [pscustomobject]@{ pass = $true; status = "migrated"; writes_performed = 1; findings = @(); receipt = $receipt; receipt_path = $receiptFile; plan = $plan }
+    }
+    catch {
+        if ($configWritten -and $null -ne $beforeBytes) { Write-BytesAtomic -Path $configFile -Bytes $beforeBytes }
+        return [pscustomobject]@{ pass = $false; status = if ($configWritten) { "failed_rolled_back" } else { "failed" }; writes_performed = if ($configWritten) { 1 } else { 0 }; findings = @((New-SkillProfileMigrationFinding "migration_failed" $_.Exception.Message)); receipt = $null }
+    }
+    finally {
+        if ($null -ne $lockStream) {
+            $lockStream.Dispose()
+            $lockPath = "{0}.profile-migration.lock" -f $configFile
+            if (Test-Path -LiteralPath $lockPath -PathType Leaf) { Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue }
+        }
+    }
+}
+
+function Invoke-SkillProfileMigrationRollback {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$ConfigPath,
+        [Parameter(Mandatory = $true)][string]$ReceiptPath,
+        [Parameter(Mandatory = $true)][string]$Token
+    )
+
+    if ($Token -cne "ROLLBACK_SKILL_PROFILE_CONFIG") {
+        return [pscustomobject]@{ pass = $false; status = "blocked"; writes_performed = 0; findings = @((New-SkillProfileMigrationFinding "rollback_token_invalid" "Explicit profile migration rollback token does not match.")) }
+    }
+    $configFile = [System.IO.Path]::GetFullPath($ConfigPath)
+    $receiptFile = [System.IO.Path]::GetFullPath($ReceiptPath)
+    if (-not (Test-Path -LiteralPath $receiptFile -PathType Leaf)) { throw "Profile migration receipt does not exist: $receiptFile" }
+    $receipt = Get-Content -LiteralPath $receiptFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    $findings = New-Object System.Collections.Generic.List[object]
+    if ([int]$receipt.schema_version -ne 1 -or [string]$receipt.domain -ne "skill_profile_migration") { $findings.Add((New-SkillProfileMigrationFinding "rollback_receipt_invalid" "Receipt is not a supported profile migration receipt.")) | Out-Null }
+    if ([string]$receipt.status -ne "migrated") { $findings.Add((New-SkillProfileMigrationFinding "rollback_status_invalid" "Receipt is not in a rollback-eligible state.")) | Out-Null }
+    if (-not [string]::Equals([System.IO.Path]::GetFullPath([string]$receipt.config_path), $configFile, [System.StringComparison]::OrdinalIgnoreCase)) { $findings.Add((New-SkillProfileMigrationFinding "rollback_target_invalid" "Receipt config path does not match the requested skills.json.")) | Out-Null }
+    if ((Get-FileContentHash $configFile) -ne [string]$receipt.after_config_sha256) { $findings.Add((New-SkillProfileMigrationFinding "rollback_target_stale" "skills.json changed after profile migration; automatic rollback is blocked.")) | Out-Null }
+    $expectedBackup = [System.IO.Path]::GetFullPath((Join-Path ([System.IO.Path]::GetDirectoryName($receiptFile)) (".skill-profile-migration-backups\{0}.skills.json.bak" -f [string]$receipt.operation_id)))
+    $backupPath = [System.IO.Path]::GetFullPath([string]$receipt.backup_path)
+    if (-not [string]::Equals($backupPath, $expectedBackup, [System.StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $backupPath -PathType Leaf) -or (Get-FileContentHash $backupPath) -ne [string]$receipt.before_config_sha256) { $findings.Add((New-SkillProfileMigrationFinding "rollback_backup_invalid" "Migration backup is missing, stale, or outside the receipt backup path.")) | Out-Null }
+    if ($findings.Count -gt 0) { return [pscustomobject]@{ pass = $false; status = "blocked"; writes_performed = 0; findings = @($findings.ToArray()); receipt = $receipt } }
+
+    Write-BytesAtomic -Path $configFile -Bytes ([System.IO.File]::ReadAllBytes($backupPath))
+    Need ((Get-FileContentHash $configFile) -eq [string]$receipt.before_config_sha256) "Profile migration rollback did not restore the original skills.json hash."
+    $receipt.status = "rolled_back"
+    $receipt | Add-Member -NotePropertyName rolled_back_at -NotePropertyValue ([datetimeoffset]::UtcNow.ToString("o")) -Force
+    Write-Utf8FileAtomic -Path $receiptFile -Content ($receipt | ConvertTo-Json -Depth 50)
+    return [pscustomobject]@{ pass = $true; status = "rolled_back"; writes_performed = 1; findings = @(); receipt = $receipt }
 }
 
 function Get-AgentTaskIndex($TaskGraph) {
@@ -6981,6 +10414,12 @@ function Ensure-LockedState($cfg = $null) {
     Assert-LockMatchesCfg $cfg $lock
     Assert-LockMatchesWorkspace $cfg $lock
     return $lock
+}
+
+function 验证锁定 {
+    $cfg = LoadCfg
+    $lock = Ensure-LockedState $cfg
+    Write-Host ("锁定状态验证通过：vendors={0}, imports={1}" -f @($lock.vendors).Count, @($lock.imports).Count)
 }
 
 function Apply-LockToWorkspace($cfg, $lock) {
@@ -14110,8 +17549,10 @@ function Invoke-RuleEstateAuditCommand([object[]]$Tokens = @()) {
     }
     $report = Invoke-RuleEstateAudit -WorkspaceRoot $options.workspace_root -ExcludeNames $options.exclude_names -RegistryTargets $registryTargets -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -MaxTargets $options.max_targets
     $reportRequested = -not [string]::IsNullOrWhiteSpace([string]$options.out_path)
+    $pass = [bool]$report.structural_pass -and [bool]$report.semantic_coverage_pass -and [bool]$report.enforcement_verified
+    $exitCode = if ($pass) { 0 } else { 2 }
     $envelope = [pscustomobject][ordered]@{
-        schema_version = 1; command = 'rule-estate-audit'; pass = $true; exit_code = 0; truth_boundary = $report.truth_boundary
+        schema_version = 1; command = 'rule-estate-audit'; pass = $pass; exit_code = $exitCode; truth_boundary = $report.truth_boundary
         report = $report; writes = $(if ($reportRequested) { 1 } else { 0 }); provider_calls = 0; native_mutations = 0
     }
     $json = $envelope | ConvertTo-Json -Depth 60 -Compress
@@ -14124,8 +17565,8 @@ function Invoke-RuleEstateAuditCommand([object[]]$Tokens = @()) {
         }
         Write-Utf8FileAtomic -Path $outPath -Content $json
     }
-    $output = if ($options.json) { $json } else { 'Rule estate audit: targets={0}, findings={1}, gaps={2}, patch_candidates={3}' -f $report.summary.target_count, $report.summary.finding_count, $report.summary.gap_count, $report.summary.patch_candidate_count }
-    return [pscustomobject]@{ exit_code = 0; output = $output; json = [bool]$options.json; envelope = $envelope }
+    $output = if ($options.json) { $json } else { 'Rule estate audit: targets={0}, findings={1}, textual_covered={2}, semantic_gaps={3}, patch_candidates={4}' -f $report.summary.target_count, $report.summary.finding_count, $report.summary.textual_mapping_covered_count, $report.summary.semantic_gap_count, $report.summary.patch_candidate_count }
+    return [pscustomobject]@{ exit_code = $exitCode; output = $output; json = [bool]$options.json; envelope = $envelope }
 }
 
 function Parse-RuleEstateMutationOptions([object[]]$Tokens, [ValidateSet('plan','apply','rollback')][string]$Mode) {
@@ -20694,25 +24135,38 @@ function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
     }
 }
 
-function Get-EmptySkillRoutingReport {
+function Resolve-SkillProjectionPath([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    $resolved = $path.Trim()
+    if ($resolved.StartsWith("~")) {
+        $resolved = $resolved -replace "^~", [Environment]::GetFolderPath("UserProfile")
+    }
+    $resolved = $resolved.Replace("/", "\")
+    if (-not [System.IO.Path]::IsPathRooted($resolved)) {
+        $resolved = Join-Path $Root $resolved
+    }
+    return [System.IO.Path]::GetFullPath($resolved)
+}
+
+function New-SkillProjectionCompatibilityReport {
     return [pscustomobject]([ordered]@{
             schema_version = 1
             enabled = $false
-            mode = "observe"
-            policy_path = ""
+            mode = 'compatibility_only'
+            policy_path = ''
             group_count = 0
             active_group_count = 0
             finding_count = 0
             blocking = $false
+            semantic_selection_applied = $false
+            profile_reachability_authority = 'none'
             groups = @()
             findings = @()
         })
 }
 
 function Get-CodexEnabledPluginIds([string]$configPath) {
-    if ([string]::IsNullOrWhiteSpace($configPath) -or -not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
-        return @()
-    }
+    if ([string]::IsNullOrWhiteSpace($configPath) -or -not (Test-Path -LiteralPath $configPath -PathType Leaf)) { return @() }
 
     $content = Get-ContentUtf8 $configPath
     $pattern = '(?ms)^\s*\[plugins\.(?:"(?<quoted>[^"]+)"|(?<bare>[^\]\r\n]+))\]\s*\r?\n(?<body>.*?)(?=^\s*\[|\z)'
@@ -20725,27 +24179,21 @@ function Get-CodexEnabledPluginIds([string]$configPath) {
         if (-not $enabledRegex.IsMatch($body)) { continue }
         $id = if ($match.Groups['quoted'].Success) { [string]$match.Groups['quoted'].Value } else { [string]$match.Groups['bare'].Value }
         $id = $id.Trim()
-        if (-not [string]::IsNullOrWhiteSpace($id) -and $seen.Add($id)) {
-            $ids.Add($id) | Out-Null
-        }
+        if (-not [string]::IsNullOrWhiteSpace($id) -and $seen.Add($id)) { $ids.Add($id) | Out-Null }
     }
     return @($ids.ToArray() | Sort-Object)
 }
 
 function Add-SkillExternalInventoryWarning($warnings, [string]$code, [string]$subject, [string]$message) {
-    $warnings.Add([pscustomobject]([ordered]@{
-                code = $code
-                subject = $subject
-                message = $message
-            })) | Out-Null
+    $warnings.Add([pscustomobject][ordered]@{ code = $code; subject = $subject; message = $message }) | Out-Null
 }
 
 function Get-CodexExternalSkillInventory($projectionCfg) {
     $result = [ordered]@{
         enabled = $false
-        config_path = ""
-        plugin_cache_path = ""
-        cache_selection = "newest_usable_version_by_mtime"
+        config_path = ''
+        plugin_cache_path = ''
+        cache_selection = 'newest_usable_version_by_mtime'
         enabled_plugin_ids = @()
         plugin_count = 0
         skill_count = 0
@@ -20753,9 +24201,7 @@ function Get-CodexExternalSkillInventory($projectionCfg) {
         skills = @()
         warnings = @()
     }
-    if ($null -eq $projectionCfg) {
-        return [pscustomobject]$result
-    }
+    if ($null -eq $projectionCfg) { return [pscustomobject]$result }
     $inventoryCfg = Get-CfgObjectProperty $projectionCfg 'external_skill_inventory'
     if ($null -eq $inventoryCfg) { return [pscustomobject]$result }
     $enabledRaw = Get-CfgObjectProperty $inventoryCfg 'enabled'
@@ -20831,305 +24277,27 @@ function Get-CodexExternalSkillInventory($projectionCfg) {
             $meta = Get-SkillMetadataFromFile $skillFile.FullName
             $name = if ([string]::IsNullOrWhiteSpace([string]$meta.declared_name)) { $skillFile.Directory.Name } else { [string]$meta.declared_name }
             $description = [string]$meta.description
-            $skills.Add([pscustomobject]([ordered]@{
-                        plugin_id = $pluginId
-                        plugin_name = $pluginName
-                        marketplace = $marketplace
-                        cache_version = [string]$selectedVersion.Name
-                        name = $name
-                        qualified_name = ("{0}::{1}" -f $pluginId, $name)
-                        description = $description
-                        path = $skillFile.FullName
-                    })) | Out-Null
+            $skills.Add([pscustomobject][ordered]@{
+                    plugin_id = $pluginId
+                    plugin_name = $pluginName
+                    marketplace = $marketplace
+                    cache_version = [string]$selectedVersion.Name
+                    name = $name
+                    qualified_name = ("{0}::{1}" -f $pluginId, $name)
+                    description = $description
+                    path = $skillFile.FullName
+                }) | Out-Null
         }
     }
 
     $metadataChars = 0
-    foreach ($skill in @($skills.ToArray())) {
-        $metadataChars += ([string]$skill.name).Length + ([string]$skill.description).Length
-    }
+    foreach ($skill in @($skills.ToArray())) { $metadataChars += ([string]$skill.name).Length + ([string]$skill.description).Length }
     $result.plugin_count = $pluginIds.Count
     $result.skill_count = $skills.Count
     $result.metadata_chars = $metadataChars
     $result.skills = @($skills.ToArray() | Sort-Object plugin_id, name)
     $result.warnings = @($warnings.ToArray())
     return [pscustomobject]$result
-}
-
-function Get-SkillRoutingLocalInventory($cfg) {
-    $items = New-Object System.Collections.Generic.List[object]
-    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($mapping in @($cfg.mappings)) {
-        if ($null -eq $mapping -or -not (Should-SyncMappingToAgent $mapping)) { continue }
-        $vendor = [string]$mapping.vendor
-        $from = [string]$mapping.from
-        if (-not $seen.Add(("{0}|{1}" -f $vendor, $from))) { continue }
-        $localPath = Resolve-InstalledSkillLocalPath $cfg $mapping
-        $skillFile = Join-Path $localPath 'SKILL.md'
-        $meta = Get-SkillMetadataFromFile $skillFile
-        $name = if ([string]::IsNullOrWhiteSpace([string]$meta.declared_name)) { [string]$mapping.to } else { [string]$meta.declared_name }
-        $items.Add([pscustomobject]([ordered]@{
-                    name = $name
-                    description = [string]$meta.description
-                    path = $skillFile
-                    is_system = $false
-                })) | Out-Null
-    }
-    foreach ($override in @(收集OverridesSkills)) {
-        if ($null -eq $override) { continue }
-        $from = [string]$override.from
-        if ([string]::IsNullOrWhiteSpace($from) -or -not $seen.Add(("overrides|{0}" -f $from))) { continue }
-        $skillFile = Join-Path ([string]$override.full) 'SKILL.md'
-        if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { continue }
-        $meta = Get-SkillMetadataFromFile $skillFile
-        $name = if ([string]::IsNullOrWhiteSpace([string]$meta.declared_name)) { $from } else { [string]$meta.declared_name }
-        $items.Add([pscustomobject]([ordered]@{
-                    name = $name
-                    description = [string]$meta.description
-                    path = $skillFile
-                    is_system = $false
-                })) | Out-Null
-    }
-    return @($items.ToArray())
-}
-
-function Add-SkillRoutingDeclaredPathLeaf($names, [string]$path) {
-    if ([string]::IsNullOrWhiteSpace($path)) { return }
-    $normalized = $path.Trim().Replace('\', '/').TrimEnd('/')
-    if ([string]::IsNullOrWhiteSpace($normalized)) { return }
-    $leaf = @($normalized -split '/')[-1].Trim()
-    if (-not [string]::IsNullOrWhiteSpace($leaf)) {
-        $names.Add($leaf) | Out-Null
-    }
-}
-
-function Get-SkillRoutingDeclaredSourceNames($cfg, $materializedSkills) {
-    $names = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($entry in @($materializedSkills)) {
-        if ($null -eq $entry) { continue }
-        $path = Get-SkillRoutingEntryPath $entry
-        if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
-        $name = ([string]$entry.name).Trim()
-        if (-not [string]::IsNullOrWhiteSpace($name)) {
-            $names.Add($name) | Out-Null
-        }
-    }
-    foreach ($import in @((Get-CfgObjectProperty $cfg 'imports'))) {
-        if ($null -eq $import) { continue }
-        Add-SkillRoutingDeclaredPathLeaf $names ([string](Get-CfgObjectProperty $import 'skill'))
-    }
-    foreach ($mapping in @((Get-CfgObjectProperty $cfg 'mappings'))) {
-        if ($null -eq $mapping) { continue }
-        Add-SkillRoutingDeclaredPathLeaf $names ([string](Get-CfgObjectProperty $mapping 'from'))
-    }
-    return @($names | Sort-Object)
-}
-
-function Get-SkillRoutingPolicy([string]$path) {
-    Need (-not [string]::IsNullOrWhiteSpace($path)) 'skill routing policy path is empty'
-    Need (Test-Path -LiteralPath $path -PathType Leaf) ("skill routing policy does not exist: {0}" -f $path)
-    try {
-        $policy = Get-ContentUtf8 $path | ConvertFrom-Json
-    }
-    catch {
-        throw ("skill routing policy JSON parse failed: {0}" -f $_.Exception.Message)
-    }
-    Need ([int]$policy.schema_version -in @(1, 2)) 'skill routing policy only supports schema_version=1 or 2'
-    $mode = ([string]$policy.mode).Trim().ToLowerInvariant()
-    Need ($mode -eq 'observe' -or $mode -eq 'enforce') ("skill routing policy mode only supports observe/enforce: {0}" -f $mode)
-    $policy.mode = $mode
-    foreach ($field in @('trigger_rules', 'groups', 'conflicts')) {
-        Need ($policy.PSObject.Properties.Match($field).Count -gt 0 -and (Assert-IsArray $policy.$field)) ("skill routing policy {0} must be an array" -f $field)
-    }
-    return $policy
-}
-
-function Get-SkillRoutingEntryPath($entry) {
-    if ($null -eq $entry) { return '' }
-    if ($entry.PSObject.Properties.Match('path').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$entry.path)) {
-        return [string]$entry.path
-    }
-    if ($entry.PSObject.Properties.Match('local_path').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$entry.local_path)) {
-        return (Join-Path ([string]$entry.local_path) 'SKILL.md')
-    }
-    return ''
-}
-
-function Add-SkillRoutingFinding($findings, [string]$code, [string]$severity, [string]$subject, [string]$message, [string]$resolution = '') {
-    $findings.Add([pscustomobject]([ordered]@{
-                code = $code
-                severity = $severity
-                subject = $subject
-                message = $message
-                resolution = $resolution
-            })) | Out-Null
-}
-
-function New-SkillRoutingReport($projectionCfg, $canonicalSkills, $activeSkills, $externalSkills, $declaredSkillNames = $null) {
-    $routingPolicyPath = if ($null -eq $projectionCfg) { '' } else { [string](Get-CfgObjectProperty $projectionCfg 'routing_policy_path') }
-    if ([string]::IsNullOrWhiteSpace($routingPolicyPath)) {
-        return Get-EmptySkillRoutingReport
-    }
-    $policyPath = Resolve-SkillProjectionPath $routingPolicyPath
-    $policy = Get-SkillRoutingPolicy $policyPath
-    $canonical = @($canonicalSkills)
-    $active = @($activeSkills)
-    $external = @($externalSkills)
-    $canonicalNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-    $declaredNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-    $activeNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-    $externalNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($entry in $canonical) { $canonicalNames.Add(([string]$entry.name).Trim()) | Out-Null }
-    $effectiveDeclaredNames = if ($null -eq $declaredSkillNames) { @($canonicalNames) } else { @($declaredSkillNames) }
-    foreach ($name in $effectiveDeclaredNames) {
-        $trimmedName = ([string]$name).Trim()
-        if (-not [string]::IsNullOrWhiteSpace($trimmedName)) { $declaredNames.Add($trimmedName) | Out-Null }
-    }
-    foreach ($entry in $active) { $activeNames.Add(([string]$entry.name).Trim()) | Out-Null }
-    foreach ($entry in $external) {
-        $externalNames.Add(([string]$entry.qualified_name).Trim()) | Out-Null
-        $externalNames.Add(([string]$entry.name).Trim()) | Out-Null
-    }
-
-    $findings = New-Object System.Collections.Generic.List[object]
-    $groupReports = New-Object System.Collections.Generic.List[object]
-    $groupIds = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-    $coveredLocalNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-    $allowedRoles = @('router', 'executor', 'validator', 'operator', 'workflow', 'reference')
-    foreach ($group in @($policy.groups)) {
-        Need ($null -ne $group) 'skill routing group cannot be null'
-        $groupId = ([string]$group.id).Trim()
-        Need (-not [string]::IsNullOrWhiteSpace($groupId)) 'skill routing group is missing id'
-        Need ($groupIds.Add($groupId)) ("duplicate skill routing group id: {0}" -f $groupId)
-        Need (-not [string]::IsNullOrWhiteSpace([string]$group.purpose)) ("skill routing group is missing purpose: {0}" -f $groupId)
-        Need ($group.PSObject.Properties.Match('members').Count -gt 0 -and (Assert-IsArray $group.members)) ("skill routing group members must be an array: {0}" -f $groupId)
-
-        $memberNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-        $memberRoles = @{}
-        $activeMembers = New-Object System.Collections.Generic.List[string]
-        foreach ($member in @($group.members)) {
-            $name = ([string]$member.name).Trim()
-            $role = ([string]$member.role).Trim().ToLowerInvariant()
-            Need (-not [string]::IsNullOrWhiteSpace($name)) ("skill routing group member is missing name: {0}" -f $groupId)
-            Need ($allowedRoles -contains $role) ("unsupported skill routing role {0}: {1}/{2}" -f $role, $groupId, $name)
-            Need (-not [string]::IsNullOrWhiteSpace([string]$member.activation)) ("skill routing member is missing activation: {0}/{1}" -f $groupId, $name)
-            Need ($memberNames.Add($name)) ("duplicate skill routing member: {0}/{1}" -f $groupId, $name)
-            Need ($declaredNames.Contains($name)) ("skill routing member has no declared source: {0}/{1}" -f $groupId, $name)
-            $memberRoles[$name] = $role
-            $coveredLocalNames.Add($name) | Out-Null
-            if ($activeNames.Contains($name)) { $activeMembers.Add($name) | Out-Null }
-        }
-        $router = ([string]$group.router).Trim()
-        if (-not [string]::IsNullOrWhiteSpace($router)) {
-            Need ($memberNames.Contains($router)) ("skill routing group router must also be a member: {0}/{1}" -f $groupId, $router)
-            Need ([string]$memberRoles[$router] -eq 'router') ("skill routing group router member must use role=router: {0}/{1}" -f $groupId, $router)
-        }
-
-        $activeExternal = New-Object System.Collections.Generic.List[string]
-        if ($group.PSObject.Properties.Match('external_members').Count -gt 0 -and $null -ne $group.external_members) {
-            Need (Assert-IsArray $group.external_members) ("skill routing group external_members must be an array: {0}" -f $groupId)
-            foreach ($member in @($group.external_members)) {
-                $qualifiedName = ([string]$member.qualified_name).Trim()
-                $role = ([string]$member.role).Trim().ToLowerInvariant()
-                Need (-not [string]::IsNullOrWhiteSpace($qualifiedName)) ("external skill routing member is missing qualified_name: {0}" -f $groupId)
-                Need ($allowedRoles -contains $role) ("unsupported external skill routing role {0}: {1}/{2}" -f $role, $groupId, $qualifiedName)
-                Need (-not [string]::IsNullOrWhiteSpace([string]$member.activation)) ("external skill routing member is missing activation: {0}/{1}" -f $groupId, $qualifiedName)
-                if ($externalNames.Contains($qualifiedName)) {
-                    $activeExternal.Add($qualifiedName) | Out-Null
-                }
-                elseif (-not ($member.PSObject.Properties.Match('optional').Count -gt 0 -and [bool]$member.optional)) {
-                    Add-SkillRoutingFinding $findings 'external_member_unavailable' 'warning' $qualifiedName ("Required external member for routing group '{0}' is unavailable." -f $groupId) 'Enable or install the declared plugin, or mark the member optional.'
-                }
-            }
-        }
-
-        $groupReports.Add([pscustomobject]([ordered]@{
-                    id = $groupId
-                    purpose = [string]$group.purpose
-                    router = $router
-                    router_active = (-not [string]::IsNullOrWhiteSpace($router) -and $activeNames.Contains($router))
-                    active = ($activeMembers.Count -gt 0 -or $activeExternal.Count -gt 0)
-                    active_local_members = @($activeMembers.ToArray())
-                    active_external_members = @($activeExternal.ToArray())
-                    selection_policy = [string]$group.selection_policy
-                })) | Out-Null
-    }
-
-    $triggerRuleIds = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($rule in @($policy.trigger_rules)) {
-        $ruleId = ([string]$rule.id).Trim()
-        $severity = ([string]$rule.severity).Trim().ToLowerInvariant()
-        Need (-not [string]::IsNullOrWhiteSpace($ruleId)) 'skill routing trigger rule is missing id'
-        Need ($triggerRuleIds.Add($ruleId)) ("duplicate skill routing trigger rule id: {0}" -f $ruleId)
-        Need ($severity -eq 'info' -or $severity -eq 'warning' -or $severity -eq 'error') ("unsupported trigger rule severity: {0}/{1}" -f $ruleId, $severity)
-        Need (-not [string]::IsNullOrWhiteSpace([string]$rule.pattern)) ("skill routing trigger rule is missing pattern: {0}" -f $ruleId)
-        try { $regex = [regex]::new([string]$rule.pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase, [TimeSpan]::FromSeconds(1)) }
-        catch { throw ("invalid skill routing trigger regex {0}: {1}" -f $ruleId, $_.Exception.Message) }
-        $scope = ([string]$rule.scan_scope).Trim().ToLowerInvariant()
-        if ([string]::IsNullOrWhiteSpace($scope)) { $scope = 'description' }
-        Need ($scope -eq 'description' -or $scope -eq 'full') ("trigger rule scan_scope only supports description/full: {0}" -f $ruleId)
-        foreach ($entry in $active) {
-            $text = [string]$entry.description
-            if ($scope -eq 'full') {
-                $entryPath = Get-SkillRoutingEntryPath $entry
-                if (-not [string]::IsNullOrWhiteSpace($entryPath) -and (Test-Path -LiteralPath $entryPath -PathType Leaf)) {
-                    $text = Get-ContentUtf8 $entryPath
-                }
-            }
-            if (-not $regex.IsMatch($text)) { continue }
-            $name = [string]$entry.name
-            Add-SkillRoutingFinding $findings 'strong_trigger_signal' $severity $name ("Active skill matches trigger rule '{0}'." -f $ruleId) ([string]$rule.resolution)
-            if (-not $coveredLocalNames.Contains($name)) {
-                Add-SkillRoutingFinding $findings 'unrouted_strong_trigger' 'warning' $name 'An active skill with a strong trigger is not covered by any routing group.' 'Add it to a routing group or narrow its trigger text.'
-            }
-        }
-    }
-
-    $conflictIds = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($conflict in @($policy.conflicts)) {
-        $conflictId = ([string]$conflict.id).Trim()
-        $severity = ([string]$conflict.severity).Trim().ToLowerInvariant()
-        Need (-not [string]::IsNullOrWhiteSpace($conflictId)) 'skill routing conflict is missing id'
-        Need ($conflictIds.Add($conflictId)) ("duplicate skill routing conflict id: {0}" -f $conflictId)
-        Need ($conflict.PSObject.Properties.Match('members').Count -gt 0 -and (Assert-IsArray $conflict.members)) ("skill routing conflict members must be an array: {0}" -f $conflictId)
-        Need ($severity -eq 'warning' -or $severity -eq 'error') ("skill routing conflict severity only supports warning/error: {0}" -f $conflictId)
-        Need (-not [string]::IsNullOrWhiteSpace([string]$conflict.resolution)) ("skill routing conflict is missing resolution: {0}" -f $conflictId)
-        $members = @($conflict.members | ForEach-Object { ([string]$_).Trim() })
-        Need ($members.Count -ge 2) ("skill routing conflict requires at least two members: {0}" -f $conflictId)
-        foreach ($name in $members) { Need ($declaredNames.Contains($name)) ("skill routing conflict member has no declared source: {0}/{1}" -f $conflictId, $name) }
-        $coactive = @($members | Where-Object { $activeNames.Contains($_) })
-        if ($coactive.Count -eq $members.Count) {
-            Add-SkillRoutingFinding $findings 'coactive_contract_conflict' $severity $conflictId ("Potentially conflicting skills are active together: {0}." -f ($members -join ', ')) ([string]$conflict.resolution)
-        }
-    }
-
-    $findingItems = @($findings.ToArray())
-    $blocking = $policy.mode -eq 'enforce' -and @($findingItems | Where-Object severity -eq 'error').Count -gt 0
-    return [pscustomobject]([ordered]@{
-            schema_version = 1
-            enabled = $true
-            mode = [string]$policy.mode
-            policy_path = $policyPath
-            group_count = $groupReports.Count
-            active_group_count = @($groupReports.ToArray() | Where-Object active).Count
-            finding_count = $findingItems.Count
-            blocking = $blocking
-            groups = @($groupReports.ToArray())
-            findings = @($findingItems | Sort-Object severity, code, subject)
-        })
-}
-
-function Resolve-SkillProjectionPath([string]$path) {
-    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
-    $resolved = $path.Trim()
-    if ($resolved.StartsWith("~")) {
-        $resolved = $resolved -replace "^~", [Environment]::GetFolderPath("UserProfile")
-    }
-    $resolved = $resolved.Replace("/", "\")
-    if (-not [System.IO.Path]::IsPathRooted($resolved)) {
-        $resolved = Join-Path $Root $resolved
-    }
-    return [System.IO.Path]::GetFullPath($resolved)
 }
 
 function Get-SkillProjectionFiles([string]$rootPath) {
@@ -21349,7 +24517,7 @@ function New-SkillProfileReconciliationSignal($projectionCfg, [string]$manifestP
             after_fingerprint = [string]$after.fingerprint
             config_sha256 = if (Test-Path -LiteralPath $skillsConfigPath -PathType Leaf) { Get-FileContentHash $skillsConfigPath } else { "" }
             next_action = if ($changed) { "host_ai_profile_reconciliation" } else { "none" }
-            advisor_command = if ($changed) { "skills.ps1 技能配置 调和" } else { "" }
+            advisor_command = if ($changed) { "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/plan-skill-profile-reconciliation.ps1 -Json" } else { "" }
             active_profile = [string]$currentPlan.active_profile
             profile_names = @($currentPlan.profile_budgets | ForEach-Object { [string]$_.profile } | Sort-Object -Unique)
             unrouted_names = @($currentPlan.unrouted_names)
@@ -21591,7 +24759,7 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
     Need ($null -ne $projectionCfg) "skill_projection 配置为空"
     $enabled = -not ($projectionCfg.PSObject.Properties.Match("enabled").Count -gt 0) -or [bool]$projectionCfg.enabled
     if (-not $enabled) {
-        return [pscustomobject]@{ schema_version = 2; enabled = $false; skills = @(); canonical = @(); active = @(); disabled = @(); conflicts = @(); unique_names = @(); active_names = @(); duplicate_name_groups = 0; profile_routed_name_count = 0; unrouted_name_count = 0; profile_routed_names = @(); unrouted_names = @(); external_skills = @(); external_inventory_warnings = @(); routing_report = (Get-EmptySkillRoutingReport) }
+        return [pscustomobject]@{ schema_version = 2; enabled = $false; skills = @(); canonical = @(); active = @(); disabled = @(); conflicts = @(); unique_names = @(); active_names = @(); duplicate_name_groups = 0; profile_routed_name_count = 0; unrouted_name_count = 0; profile_routed_names = @(); unrouted_names = @(); external_skills = @(); external_inventory_warnings = @(); routing_report = (New-SkillProjectionCompatibilityReport) }
     }
 
     Need ($projectionCfg.PSObject.Properties.Match("sources").Count -gt 0 -and $null -ne $projectionCfg.sources) "skill_projection 缺少 sources"
@@ -21821,7 +24989,7 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
     }
     $estimatedMetadataChars = $skillMetadataChars + $effectiveExternalMetadataChars
     $allProfilesBudgetPass = @($profileBudgets.ToArray() | Where-Object { -not [bool]$_.budget_pass }).Count -eq 0
-    $routingReport = New-SkillRoutingReport $projectionCfg @($canonical.ToArray()) @($active.ToArray()) @($externalInventory.skills)
+    $routingReport = New-SkillProjectionCompatibilityReport
 
     return [pscustomobject]([ordered]@{
         schema_version = 2
@@ -22060,6 +25228,29 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
     $configPath = Resolve-SkillProjectionPath $configRaw
     $manifestPath = Resolve-SkillProjectionPath $manifestRaw
     $catalogProjection = Invoke-WithMetric 'projection_capability_catalog' { Sync-CapabilityRouterCatalog $projectionCfg } @{ command = '技能投影' } -NoHost
+    $nativeProjectionPlan = $null
+    $nativeProjectionApply = $null
+    $nativeProjectionAuthoritative = $false
+    $nativeSettings = Get-CfgObjectProperty $projectionCfg 'native_projection'
+    if ($null -ne $nativeSettings -and [bool](Get-CfgObjectProperty $nativeSettings 'enabled')) {
+        $managedRoot = Resolve-SkillProjectionPath ([string](Get-CfgObjectProperty $projectionCfg 'managed_source_path'))
+        $excludedNames = @((Get-CfgObjectProperty $projectionCfg 'managed_link_excludes') | ForEach-Object { [string]$_ })
+        $capturedAt = [DateTimeOffset]::UtcNow.ToString('o')
+        $snapshot = New-HostCapabilitySnapshotFromConfigFallback -ConfigPath $configPath -Surface 'cli' -CapturedAt $capturedAt
+        $policyPath = Join-Path $Root 'config\native-skill-metadata-policy.json'
+        $policy = if (Test-Path -LiteralPath $policyPath -PathType Leaf) { Get-ContentUtf8 $policyPath | ConvertFrom-Json } else { Get-DefaultNativeMetadataPolicy }
+        $nativeProjectionPlan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $managedRoot -Config ([pscustomobject]@{ skill_projection = $projectionCfg }) -Snapshot $snapshot -Policy $policy -ExcludedNames $excludedNames -GeneratedAt $capturedAt
+        Need ([string]$nativeProjectionPlan.status -eq 'ready' -and [bool]$nativeProjectionPlan.pass) ("native skill projection blocked: enabled={0}, kept={1}, omitted={2}" -f [int]$nativeProjectionPlan.enabled_total, [int]$nativeProjectionPlan.kept_total, [int]$nativeProjectionPlan.omitted_total)
+        $nativeProjectionAuthoritative = $true
+        if ($DryRun) {
+            $nativeProjectionApply = [pscustomobject]@{ status = 'planned'; receipt_id = ''; receipt_path = [string]$nativeProjectionPlan.receipt_path; changed_names = @(); receipt = $null }
+        }
+        else {
+            $nativeProjectionApply = Invoke-WithMetric 'native_projection_apply' {
+                Apply-NativeSkillProjection -Plan $nativeProjectionPlan -ApplyToken ([string]$nativeProjectionPlan.apply_token)
+            } @{ command = '技能投影'; enabled_total = [int]$nativeProjectionPlan.enabled_total } -NoHost
+        }
+    }
     $linkProjection = $null
     if ($projectionCfg.PSObject.Properties.Match("managed_source_path").Count -gt 0 -or $projectionCfg.PSObject.Properties.Match("user_skill_root").Count -gt 0) {
         $linkProjection = Invoke-WithMetric "projection_link_reconcile" { Sync-CodexManagedSkillLinks $projectionCfg } @{ command = "技能投影" } -NoHost
@@ -22086,9 +25277,11 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
             success = $true
         })
     if ([bool]$plan.enabled) {
-        Need ([bool]$plan.budget_pass) ("技能描述预算超限：estimated={0}, limit={1}, profile={2}" -f [int]$plan.estimated_metadata_chars, [int]$plan.effective_budget_limit_chars, [string]$plan.active_profile)
-        $oversizedProfiles = @($plan.profile_budgets | Where-Object { -not [bool]$_.budget_pass } | ForEach-Object { "{0}={1}/{2}" -f $_.profile, $_.estimated_metadata_chars, $_.budget_limit_chars })
-        Need ([bool]$plan.all_profiles_budget_pass) ("技能 profile 描述预算超限：{0}" -f ($oversizedProfiles -join ", "))
+        if (-not $nativeProjectionAuthoritative) {
+            Need ([bool]$plan.budget_pass) ("技能描述预算超限：estimated={0}, limit={1}, profile={2}" -f [int]$plan.estimated_metadata_chars, [int]$plan.effective_budget_limit_chars, [string]$plan.active_profile)
+            $oversizedProfiles = @($plan.profile_budgets | Where-Object { -not [bool]$_.budget_pass } | ForEach-Object { "{0}={1}/{2}" -f $_.profile, $_.estimated_metadata_chars, $_.budget_limit_chars })
+            Need ([bool]$plan.all_profiles_budget_pass) ("技能 profile 描述预算超限：{0}" -f ($oversizedProfiles -join ", "))
+        }
         Need (-not [bool]$plan.routing_report.blocking) "技能路由策略存在 enforce 模式阻断项"
     }
 
@@ -22153,6 +25346,18 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
                 active = @($plan.active)
                 disabled = @($plan.disabled)
                 conflicts = @($plan.conflicts)
+                native_projection = if (-not $nativeProjectionAuthoritative) { $null } else { [ordered]@{
+                    authoritative = $true
+                    status = [string]$nativeProjectionApply.status
+                    plan_id = [string]$nativeProjectionPlan.plan_id
+                    receipt_id = [string]$nativeProjectionApply.receipt_id
+                    receipt_path = [string]$nativeProjectionApply.receipt_path
+                    enabled_total = [int]$nativeProjectionPlan.enabled_total
+                    kept_total = [int]$nativeProjectionPlan.kept_total
+                    omitted_total = [int]$nativeProjectionPlan.omitted_total
+                    truncated = [bool]$nativeProjectionPlan.truncated
+                    notification = $nativeProjectionApply.notification
+                } }
             }
             Set-ContentUtf8 $manifestPath ($manifest | ConvertTo-Json -Depth 20)
             if ([string]$reconciliation.status -eq "reconciliation_needed") {
@@ -22178,6 +25383,7 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
         backup_path = if ($null -eq $backupPath) { "" } else { [string]$backupPath }
         managed_link_projection = $linkProjection
         capability_catalog_projection = $catalogProjection
+        native_projection = if (-not $nativeProjectionAuthoritative) { $null } else { [pscustomobject]@{ plan = $nativeProjectionPlan; apply = $nativeProjectionApply } }
         reconciliation = $reconciliation
         package_hash_cache = [pscustomobject]@{
             cache_valid = [bool]$packageHashContext.cache_valid
@@ -22417,52 +25623,6 @@ function New-SkillProfileReconciliationPlan($projectionCfg, [string]$configSha25
             finding_count = $findings.Count
             findings = @($findings.ToArray())
         })
-}
-
-function Read-SkillProfileReconciliationProposal([string]$path) {
-    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
-    $full = if ([System.IO.Path]::IsPathRooted($path)) { [System.IO.Path]::GetFullPath($path) } else { [System.IO.Path]::GetFullPath((Join-Path $Root $path)) }
-    Need (Test-Path -LiteralPath $full -PathType Leaf) ("Proposal file does not exist: {0}" -f $full)
-    try { return (Get-ContentUtf8 $full | ConvertFrom-Json) }
-    catch { throw ("Proposal JSON is invalid: {0}" -f $_.Exception.Message) }
-}
-
-function Invoke-SkillProfileCommand([string[]]$tokens) {
-    $cfg = LoadCfg
-    Need ($cfg.PSObject.Properties.Match("skill_projection").Count -gt 0 -and $null -ne $cfg.skill_projection) "未配置 skill_projection"
-    $projection = $cfg.skill_projection
-    Need ($projection.PSObject.Properties.Match("profiles").Count -gt 0 -and $null -ne $projection.profiles) "未配置技能 profiles"
-    $action = if ($null -eq $tokens -or $tokens.Count -eq 0) { "列表" } else { ([string]$tokens[0]).Trim().ToLowerInvariant() }
-    if ($action -in @("列表", "list")) {
-        foreach ($property in @($projection.profiles.PSObject.Properties | Sort-Object Name)) {
-            $marker = if ([string]::Equals($property.Name, [string]$projection.active_profile, [System.StringComparison]::OrdinalIgnoreCase)) { "*" } else { " " }
-            Write-Host ("{0} {1} ({2} skills)" -f $marker, $property.Name, @($property.Value.enabled_names).Count)
-        }
-        return
-    }
-    if ($action -in @("调和", "reconcile")) {
-        Need ($tokens.Count -le 2) "技能配置 调和/reconcile 最多接受一个 proposal JSON 路径"
-        $proposal = if ($tokens.Count -eq 2) { Read-SkillProfileReconciliationProposal ([string]$tokens[1]) } else { $null }
-        $result = New-SkillProfileReconciliationPlan $projection (Get-FileContentHash $CfgPath) $proposal
-        Write-Output ($result | ConvertTo-Json -Depth 20)
-        if (-not [bool]$result.pass) { exit 2 }
-        return
-    }
-    Need ($action -in @("使用", "use")) ("技能配置仅支持 列表/list、调和/reconcile 或 使用/use：{0}" -f $action)
-    Need ($tokens.Count -ge 2) "技能配置 使用 缺少 profile 名称"
-    $name = ([string]$tokens[1]).Trim()
-    $profileProperty = @($projection.profiles.PSObject.Properties | Where-Object { [string]::Equals($_.Name, $name, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1)
-    Need ($profileProperty.Count -eq 1) ("技能 profile 不存在：{0}" -f $name)
-    $projection.active_profile = [string]$profileProperty[0].Name
-    $plan = New-SkillProjectionPlan $projection
-    Need ([bool]$plan.budget_pass) ("技能 profile 超出描述预算：{0} ({1}/{2})" -f $name, $plan.estimated_metadata_chars, $plan.effective_budget_limit_chars)
-    $raw = Get-ContentUtf8 $CfgPath
-    SaveCfgSafe $cfg $raw
-    $result = Sync-CodexSkillProjection $projection
-    Write-Host ("已使用技能 profile：{0}；active={1}, metadata={2}/{3}, persisted={4}" -f $name, @($result.plan.active).Count, $result.plan.estimated_metadata_chars, $result.plan.effective_budget_limit_chars, [bool]$result.persisted)
-    if ([bool]$result.reconciliation.signal_updated) {
-        Write-Host ("检测到 canonical skill inventory 变化；profile reconciliation signal：{0}" -f [string]$result.reconciliation.signal_path) -ForegroundColor Yellow
-    }
 }
 
 function Sync-ConfiguredSkillProjection($cfg, [string]$verifiedBuildSignature = "", $promotionContext = $null) {
@@ -23249,8 +26409,8 @@ Plugin（P3 repo/fixture-only）：
   全域写入只接受 reviewed change-set，执行全量预检、逐目标 receipt、fail-fast、resume 和单目标 rollback；不自动 commit/push。
 
 技能投影：
-  .\skills.ps1 技能配置 列表
-  .\skills.ps1 技能配置 使用 default|coding|coding-strict|engineering|python|mcp|review|dotnet|ppt|content|marketing|physics|video|design|browser|database
+  .\skills.ps1 构建生效
+  .\scripts\verify-native-skill-metadata.ps1 -Json
 
 目标仓审查：
   .\skills.ps1 审查目标 需求设置
@@ -23597,10 +26757,10 @@ if ($MyInvocation.InvocationName -ne '.') {
             "更新上游并重建" { 更新 }
             "锁定" { 锁定 }
             "生成锁文件" { 锁定 }
+            "验证锁定" { 验证锁定 }
+            "verify-lock" { 验证锁定 }
             "清理无效映射" { 清理无效映射 (Merge-FilterAndArgs $Filter $args) }
             "prune-invalid-mappings" { 清理无效映射 (Merge-FilterAndArgs $Filter $args) }
-            "技能配置" { Invoke-SkillProfileCommand (Merge-FilterAndArgs $Filter $args) }
-            "skill-profile" { Invoke-SkillProfileCommand (Merge-FilterAndArgs $Filter $args) }
             "安装MCP" {
                 $mcpTokens = @()
                 if (-not [string]::IsNullOrWhiteSpace($Filter)) { $mcpTokens += $Filter }

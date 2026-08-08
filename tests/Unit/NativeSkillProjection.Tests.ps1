@@ -1,0 +1,193 @@
+$repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
+. (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1')
+. (Join-Path $repoRoot 'src\Domain\SkillCatalog.ps1')
+. (Join-Path $repoRoot 'src\Application\SkillCatalogCompiler.ps1')
+. (Join-Path $repoRoot 'src\Application\SkillEligibilityPolicy.ps1')
+. (Join-Path $repoRoot 'src\Application\NativeMetadataPlanner.ps1')
+
+$projectionPath = Join-Path $repoRoot 'src\Application\SkillProjection.ps1'
+$nativeProjectionPath = Join-Path $repoRoot 'src\Application\NativeSkillProjection.ps1'
+$runtimeCoordinatorPath = Join-Path $repoRoot 'src\Application\NativeSkillProjectionCoordinator.ps1'
+if (Test-Path -LiteralPath $projectionPath -PathType Leaf) { . $projectionPath }
+if (Test-Path -LiteralPath $nativeProjectionPath -PathType Leaf) { . $nativeProjectionPath }
+if (Test-Path -LiteralPath $runtimeCoordinatorPath -PathType Leaf) { . $runtimeCoordinatorPath }
+
+function New-P6ProjectionSkill {
+    param(
+        [string]$Root,
+        [string]$Directory,
+        [string]$Name,
+        [string]$Description = 'Projection fixture.',
+        [bool]$Enabled = $true
+    )
+
+    $skillDirectory = Join-Path $Root $Directory
+    New-Item -ItemType Directory -Path $skillDirectory -Force | Out-Null
+    @(
+        '---'
+        ('name: {0}' -f $Name)
+        ('description: {0}' -f $Description)
+        '---'
+        ('# {0}' -f $Name)
+    ) | Set-Content -LiteralPath (Join-Path $skillDirectory 'SKILL.md') -Encoding utf8
+    return [pscustomobject]@{
+        name = $Name
+        path = Join-Path $skillDirectory 'SKILL.md'
+        source_root = $Root
+        enabled = $Enabled
+    }
+}
+
+function New-P6ProjectionSnapshot {
+    param([int]$ContextWindow = 272000)
+
+    return [pscustomobject]@{
+        capabilities = [pscustomobject]@{
+            context_window = [pscustomobject]@{ value = $ContextWindow; source = 'app_server'; freshness = 'fresh' }
+            metadata_budget = [pscustomobject]@{ value = $null; source = 'unknown_fallback'; freshness = 'unknown'; unknown_reason = 'metadata_budget_unknown' }
+        }
+    }
+}
+
+function New-P6ProjectionFixture {
+    $suffix = [guid]::NewGuid().ToString('N')
+    $sourceRoot = Join-Path $TestDrive ('p6-native-source-{0}' -f $suffix)
+    $targetRoot = Join-Path $TestDrive ('p6-native-target-{0}' -f $suffix)
+    $receiptPath = Join-Path $TestDrive ('p6-native-receipt-{0}.json' -f $suffix)
+    $profileOnly = New-P6ProjectionSkill $sourceRoot 'profile-only' 'profile-only' 'Formerly profile-excluded capability.'
+    $resident = New-P6ProjectionSkill $sourceRoot 'resident' 'resident' 'Resident capability.'
+    $disabled = New-P6ProjectionSkill $sourceRoot 'disabled' 'disabled' 'Disabled capability.' $false
+    $entries = @(
+        [pscustomobject]@{ name = $profileOnly.Name; description = 'Formerly profile-excluded capability.'; path = $profileOnly.path; source_root = $sourceRoot; enabled = $true; availability = 'available'; freshness = 'fresh'; side_effect = 'read_only'; load_side_effect = 'read_only' }
+        [pscustomobject]@{ name = $resident.Name; description = 'Resident capability.'; path = $resident.path; source_root = $sourceRoot; enabled = $true; availability = 'available'; freshness = 'fresh'; side_effect = 'read_only'; load_side_effect = 'read_only' }
+        [pscustomobject]@{ name = $disabled.Name; description = 'Disabled capability.'; path = $disabled.path; source_root = $sourceRoot; enabled = $false; availability = 'available'; freshness = 'fresh'; side_effect = 'read_only'; load_side_effect = 'read_only' }
+    )
+    $catalog = Compile-SkillCatalog -Entries $entries -GeneratedAt '2026-08-07T06:00:00Z'
+    $eligibility = @($catalog.entries | ForEach-Object {
+            Evaluate-SkillEligibility -Skill $_ -Surface 'native_discovery' -AllowedRoots @($sourceRoot)
+        })
+    $metadata = Plan-NativeMetadata -Inventory $catalog -Snapshot (New-P6ProjectionSnapshot)
+    $config = [pscustomobject]@{
+        skill_projection = [pscustomobject]@{
+            native_projection = [pscustomobject]@{
+                enabled = $true
+                owner = 'skills-manager'
+                target_root = $targetRoot
+                receipt_path = $receiptPath
+                notification_method = 'skills/changed'
+            }
+        }
+    }
+    return [pscustomobject]@{
+        source_root = $sourceRoot
+        target_root = $targetRoot
+        receipt_path = $receiptPath
+        catalog = $catalog
+        eligibility = $eligibility
+        metadata = $metadata
+        config = $config
+    }
+}
+
+Describe 'P6 native skill projection plan and transaction' {
+    It 'builds a complete runtime plan from managed top-level skill packages' {
+        (Get-Command New-NativeSkillProjectionRuntimePlan -ErrorAction SilentlyContinue) | Should Not BeNullOrEmpty
+        $fixture = New-P6ProjectionFixture
+
+        $plan = New-NativeSkillProjectionRuntimePlan `
+            -ManagedRoot $fixture.source_root `
+            -Config $fixture.config `
+            -Snapshot (New-P6ProjectionSnapshot)
+
+        $plan.status | Should Be 'ready'
+        $plan.enabled_total | Should Be 3
+        $plan.kept_total | Should Be 3
+        $plan.omitted_total | Should Be 0
+        $plan.truncated | Should Be $false
+    }
+
+    It 'keeps namespaced semantic names while using the safe package directory leaf' {
+        $sourceRoot = Join-Path $TestDrive 'namespaced-source'
+        $targetRoot = Join-Path $TestDrive 'namespaced-target'
+        $skill = New-P6ProjectionSkill $sourceRoot 'debug-dotnet' 'debug:dotnet' 'Debug .NET applications.'
+        $catalog = Compile-SkillCatalog -Entries @([pscustomobject]@{ name = $skill.Name; description = 'Debug .NET applications.'; path = $skill.path; source_root = $sourceRoot; enabled = $true; availability = 'available'; freshness = 'fresh'; side_effect = 'read_only'; load_side_effect = 'read_only' })
+        $eligibility = @($catalog.entries | ForEach-Object { Evaluate-SkillEligibility -Skill $_ -Surface 'native_discovery' -AllowedRoots @($sourceRoot) })
+        $metadata = Plan-NativeMetadata -Inventory $catalog -Snapshot (New-P6ProjectionSnapshot)
+        $config = [pscustomobject]@{ skill_projection = [pscustomobject]@{ native_projection = [pscustomobject]@{ enabled = $true; owner = 'skills-manager'; target_root = $targetRoot; receipt_path = (Join-Path $TestDrive 'namespaced-receipt.json'); notification_method = 'skills/changed' } } }
+
+        $plan = New-NativeSkillProjectionPlan -Catalog $catalog -Eligibility $eligibility -MetadataPlan $metadata -Config $config
+
+        $plan.status | Should Be 'ready'
+        $plan.skills[0].name | Should Be 'debug:dotnet'
+        (Split-Path $plan.skills[0].target_directory -Leaf) | Should Be 'debug-dotnet'
+    }
+
+
+    It 'projects formerly profile-excluded enabled skills with complete metadata while excluding disabled paths' {
+        $fixture = New-P6ProjectionFixture
+
+        $plan = New-NativeSkillProjectionPlan -Catalog $fixture.catalog -Eligibility $fixture.eligibility -MetadataPlan $fixture.metadata -Config $fixture.config
+
+        $plan.status | Should Be 'ready'
+        $plan.enabled_total | Should Be 2
+        $plan.kept_total | Should Be 2
+        $plan.omitted_total | Should Be 0
+        $plan.truncated | Should Be $false
+        @($plan.omitted).Count | Should Be 0
+        @($plan.skills | ForEach-Object name) | Should Be @('profile-only', 'resident')
+        @($plan.skills | Where-Object name -eq 'disabled').Count | Should Be 0
+        foreach ($skill in @($plan.skills)) {
+            (Test-Path -LiteralPath $skill.source_path -PathType Leaf) | Should Be $true
+            [string]$skill.target_path | Should Match ([regex]::Escape($fixture.target_root))
+            [string]$skill.content_hash | Should Match '^[0-9a-f]{64}$'
+            [string]$skill.metadata_hash | Should Match '^[0-9a-f]{64}$'
+            $skill.metadata.name | Should Be $skill.name
+            [string]$skill.metadata.description | Should Not BeNullOrEmpty
+        }
+        $plan.apply_token | Should Match '^nsp-token-[0-9a-f]{16}$'
+        $plan.notification.method | Should Be 'skills/changed'
+        $plan.notification.status | Should Be 'planned_only'
+        @($plan.notification.changed_names) | Should Be @('profile-only', 'resident')
+        (Test-NativeSkillProjectionPlanContract $plan).pass | Should Be $true
+    }
+
+    It 'requires the explicit apply token and rolls back a partial apply atomically' {
+        $fixture = New-P6ProjectionFixture
+        $plan = New-NativeSkillProjectionPlan -Catalog $fixture.catalog -Eligibility $fixture.eligibility -MetadataPlan $fixture.metadata -Config $fixture.config
+
+        { Apply-NativeSkillProjection -Plan $plan -ApplyToken 'wrong-token' -ReceiptPath $fixture.receipt_path } | Should Throw
+
+        Remove-Item -LiteralPath (Join-Path $fixture.source_root 'resident\SKILL.md') -Force
+        { Apply-NativeSkillProjection -Plan $plan -ApplyToken $plan.apply_token -ReceiptPath $fixture.receipt_path } | Should Throw
+
+        (Test-Path -LiteralPath (Join-Path $fixture.target_root 'profile-only')) | Should Be $false
+        (Test-Path -LiteralPath (Join-Path $fixture.target_root 'resident')) | Should Be $false
+        (Test-Path -LiteralPath $fixture.receipt_path -PathType Leaf) | Should Be $false
+    }
+
+    It 'writes a receipt, blocks rollback after target drift, and rolls back an unchanged target' {
+        $fixture = New-P6ProjectionFixture
+        $plan = New-NativeSkillProjectionPlan -Catalog $fixture.catalog -Eligibility $fixture.eligibility -MetadataPlan $fixture.metadata -Config $fixture.config
+        $applied = Apply-NativeSkillProjection -Plan $plan -ApplyToken $plan.apply_token -ReceiptPath $fixture.receipt_path
+
+        $applied.status | Should Be 'applied'
+        $applied.receipt_id | Should Match '^nsr-[0-9a-f]{16}$'
+        (Test-Path -LiteralPath $fixture.receipt_path -PathType Leaf) | Should Be $true
+        (Test-Path -LiteralPath (Join-Path $fixture.target_root 'profile-only\SKILL.md') -PathType Leaf) | Should Be $true
+        (Test-NativeSkillProjectionReceiptContract ($applied.receipt)).pass | Should Be $true
+
+        Remove-Item -LiteralPath (Join-Path $fixture.target_root 'profile-only') -Recurse -Force
+        New-Item -ItemType Directory -Path (Join-Path $fixture.target_root 'profile-only') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $fixture.target_root 'profile-only\SKILL.md') -Value 'drifted' -Encoding utf8
+        { Rollback-NativeSkillProjection -ReceiptPath $fixture.receipt_path } | Should Throw
+        (Test-Path -LiteralPath (Join-Path $fixture.target_root 'profile-only\SKILL.md') -PathType Leaf) | Should Be $true
+
+        $cleanFixture = New-P6ProjectionFixture
+        $cleanPlan = New-NativeSkillProjectionPlan -Catalog $cleanFixture.catalog -Eligibility $cleanFixture.eligibility -MetadataPlan $cleanFixture.metadata -Config $cleanFixture.config
+        Apply-NativeSkillProjection -Plan $cleanPlan -ApplyToken $cleanPlan.apply_token -ReceiptPath $cleanFixture.receipt_path | Out-Null
+        $rolledBack = Rollback-NativeSkillProjection -ReceiptPath $cleanFixture.receipt_path
+        $rolledBack.status | Should Be 'rolled_back'
+        (Test-Path -LiteralPath (Join-Path $cleanFixture.target_root 'profile-only')) | Should Be $false
+        (Test-Path -LiteralPath (Join-Path $cleanFixture.target_root 'resident')) | Should Be $false
+    }
+}

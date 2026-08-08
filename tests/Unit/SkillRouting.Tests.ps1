@@ -1,4 +1,7 @@
 . $PSScriptRoot\..\..\skills.ps1
+# The legacy routing module is intentionally not part of the generated bundle.
+# These tests retain the compatibility-only source contract until its removal receipt is archived.
+. $PSScriptRoot\..\..\src\Commands\SkillRouting.ps1
 
 function New-RoutingSkillEntry([string]$root, [string]$name, [string]$description, [string]$body = '') {
     $dir = Join-Path $root $name

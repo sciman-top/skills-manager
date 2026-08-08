@@ -1,10 +1,10 @@
-# Implementation Plan: skills-manager vNext Phase 5
+# Implementation Plan: skills-manager vNext Phase 6
 
 **program_id**: `skills-manager-vnext`
-**current_phase**: `P5`
-**task_truth**: `tasks/skills-manager-vnext-phase5.tasks.json`
-**status**: repo_verified
-**next_phase_admission**: hold
+**current_phase**: `P6`
+**task_truth**: `tasks/skills-manager-vnext-phase6.tasks.json`
+**status**: host_loaded; 12/12 implemented; runtime migration completed; fresh inventory 124/124; current full passed 1121/1121; host_evaluation_partial; live_accepted failed on observability gap
+**next_phase_admission**: n/a; P6 admitted 2026-08-07
 **active_maintenance_track**: maintenance_design
 **maintenance_task_truth**: `tasks/skills-manager-vnext-maintenance-design.tasks.json`
 **maintenance_pilot_truth**: `tasks/skills-manager-vnext-lean-delivery-pilot.json`
@@ -32,7 +32,28 @@
 
 ## 1. Goal
 
-实现 Adaptive Capability Fabric：结构化理解任务、检索与策略判决、组合最小 capability DAG、复用会话能力、消费宿主实时只读快照，并由宿主原生执行。
+完成 Host-Native Skill Lifecycle Reset：让宿主 AI 原生语义选择覆盖全部 eligible enabled skills，仓库只负责 snapshot、catalog、eligibility、token-aware projection、trace、migration 和 strict fallback。
+
+## P6 ordered work
+
+| Order | Task | Slice | Exit checkpoint |
+| ---: | --- | --- | --- |
+| 1 | `SMV-P6-001` | admission + supersession map | P6 planning contract and rollback boundary |
+| 2 | `SMV-P6-002` | effective host snapshot | precedence, freshness and unknown fallback |
+| 3 | `SMV-P6-003` | official host adapters | App Server/CLI/config-fallback share one schema |
+| 4 | `SMV-P6-004` | compiler + eligibility split | no script semantic/profile selector in core |
+| 5 | `SMV-P6-005` | token-aware metadata plan | no silent enabled omission |
+| 6 | `SMV-P6-006` | all-skills native projection | complete atomic projection and rollback |
+| 7 | `SMV-P6-007` | metadata lint + corpus | direct/indirect/negative/no-skill coverage |
+| 8 | `SMV-P6-008` | invocation trace | listed/selected/injected/executed separated |
+| 9 | `SMV-P6-009` | native/legacy shadow | zero-write retirement evidence |
+| 10 | `SMV-P6-010` | profile retirement | compatibility migration and round trip |
+| 11 | `SMV-P6-011` | strict fallback | opt-in bounded App Server dispatch |
+| 12 | `SMV-P6-012` | staged removal + closeout | fresh host evidence and unique full gate |
+
+P6-012 已完成 repo-side staged removal、native projection 和 fresh host inventory 验收。两个早期 current-tree full 分别被并发中间态和 v9.73 stale-literal contracts 阻断并保留在 evidence；最终稳定树 full exit 0：`1121/1121`，全部 contract/invariant 通过，总耗时 `316483ms`。P6 manifest 为 12/12 done，`runtime_migration=completed`，fresh App Server inventory `124/124` 因而 `host_loaded=passed`；native invocation events 仍不可见，所以 `host_evaluation_partial` 且 `live_accepted=failed`。
+
+Detailed TDD steps, interfaces, commands and wave constraints are in `docs/superpowers/plans/2026-08-07-host-native-skill-lifecycle-reset.md`. P5 content below is retained as historical closeout context; it is not the current execution queue.
 
 ## 2. Execution contract
 
@@ -61,16 +82,16 @@ Five tasks done, current golden/fresh/live read-only probes and full gate pass, 
 
 Phase 5 已按本规则完成 5/5；当前宿主只读 snapshot 为 `host_loaded` 级证据，认证业务动作与 `live_accepted` 未执行。
 
-## 6. Maintenance hold
+## 6. Historical P5 maintenance hold
 
 - P4 lifecycle 已显式闭合；跨阶段 planning contract 会阻断历史 phase 未完成却推进当前 phase。
-- 当前只维护 P5 seam、真实消费者和已测热点，不创建 P6 manifest，不预扩 schema 或治理层。
-- P6 仅在路线图 admission 条件全部满足并获得用户明确授权后进入规划；未满足时继续直接修复 P5。
+- P5 maintenance hold 曾保护 P5 seam、真实消费者和已测热点；该 hold 已由用户授权和 reachability failure evidence 解除。
+- P6 曾以 `planning_contract` admitted，现已完成 12/12 repo-side closeout 并达到 `repo_verified`；本节仍不授权宿主写入或 live acceptance。
 - 运行时 receipt 留在 ignored `reports/`，历史 receipt 归档；`docs/change-evidence/` 只保留 reviewed logical-slice evidence。
 
 ## 7. Lean AI Software Delivery maintenance design
 
-Goal：把 skills-manager 面向高效 AI 软件交付的总体方案落为 advisory planning contract，解决主链缺失、过度设计、角色接力、门禁膨胀、方向漂移和未经验证的“自学习”，同时不实现新的 runtime 或启动 P6。
+Goal：把 skills-manager 面向高效 AI 软件交付的总体方案落为 advisory planning contract，解决主链缺失、过度设计、角色接力、门禁膨胀、方向漂移和未经验证的“自学习”；该 adjacent track 本身不实现新的 runtime，P6 另由独立 manifest 管理。
 
 | Order | Task | Slice | Exit checkpoint |
 | ---: | --- | --- | --- |

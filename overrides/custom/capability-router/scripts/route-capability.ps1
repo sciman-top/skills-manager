@@ -17,10 +17,41 @@ param(
     [string[]]$ExcludeCapability = @(),
     [ValidateRange(1, 256)][int]$MaxCandidates = 128,
     [switch]$AutoDiscover,
-    [hashtable]$MetadataCache = $null
+    [hashtable]$MetadataCache = $null,
+    [hashtable]$CatalogPolicyCache = $null
 )
 
 $ErrorActionPreference = 'Stop'
+
+$catalogPolicySeam = [ordered]@{
+    available = $false
+    reason = 'not_found'
+}
+$catalogPolicyCursor = [IO.DirectoryInfo]::new([IO.Path]::GetFullPath($PSScriptRoot))
+while ($null -ne $catalogPolicyCursor) {
+    $candidateRoot = $catalogPolicyCursor.FullName
+    $operationPlanPath = Join-Path $candidateRoot 'src\Domain\OperationPlan.ps1'
+    $catalogDomainPath = Join-Path $candidateRoot 'src\Domain\SkillCatalog.ps1'
+    $catalogCompilerPath = Join-Path $candidateRoot 'src\Application\SkillCatalogCompiler.ps1'
+    $eligibilityPolicyPath = Join-Path $candidateRoot 'src\Application\SkillEligibilityPolicy.ps1'
+    if ((Test-Path -LiteralPath $catalogDomainPath -PathType Leaf) -and
+        (Test-Path -LiteralPath $catalogCompilerPath -PathType Leaf) -and
+        (Test-Path -LiteralPath $eligibilityPolicyPath -PathType Leaf)) {
+        try {
+            if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath $operationPlanPath -PathType Leaf)) { . $operationPlanPath }
+            . $catalogDomainPath
+            . $catalogCompilerPath
+            . $eligibilityPolicyPath
+            $catalogPolicySeam.available = $true
+            $catalogPolicySeam.reason = 'loaded'
+        }
+        catch {
+            $catalogPolicySeam.reason = 'load_failed'
+        }
+        break
+    }
+    $catalogPolicyCursor = $catalogPolicyCursor.Parent
+}
 
 function Resolve-ExistingFile([string]$Path) {
     if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
@@ -431,7 +462,13 @@ if ($snapshotFile) {
 
 $profiles = @{}
 $profileCatalog = [Collections.Generic.List[object]]::new()
-$currentProfile = if ($null -ne $manifest) { [string]$manifest.active_profile } elseif ($null -ne $config) { [string]$config.skill_projection.active_profile } else { '' }
+$configuredProfiles = if ($null -ne $config) { $config.skill_projection.profiles } else { $null }
+$configuredActiveProfile = if ($null -ne $config) { [string]$config.skill_projection.active_profile } else { '' }
+if ($null -eq $configuredProfiles -and $null -ne $config -and $null -ne $config.skill_projection.profile_compatibility) {
+    $configuredProfiles = $config.skill_projection.profile_compatibility.profiles
+    $configuredActiveProfile = [string]$config.skill_projection.profile_compatibility.active_profile
+}
+$currentProfile = if ($null -ne $manifest) { [string]$manifest.active_profile } else { $configuredActiveProfile }
 if ($null -ne $catalog) {
     foreach ($domain in @($catalog.domains)) {
         $set = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -442,8 +479,8 @@ if ($null -ne $catalog) {
         $profileCatalog.Add([pscustomobject]@{ name = [string]$domain.name; purpose = [string]$domain.purpose; enabled_name_count = $set.Count; active = $false }) | Out-Null
     }
 }
-elseif ($null -ne $config -and $config.PSObject.Properties.Match('skill_projection').Count -gt 0 -and $null -ne $config.skill_projection.profiles) {
-    foreach ($property in @($config.skill_projection.profiles.PSObject.Properties)) {
+elseif ($null -ne $configuredProfiles) {
+    foreach ($property in @($configuredProfiles.PSObject.Properties)) {
         $names = @(Get-StringArray $property.Value.enabled_names)
         $set = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         foreach ($name in $names) { $set.Add($name) | Out-Null }
@@ -727,6 +764,116 @@ $capabilityGraph = [ordered]@{
     )
 }
 
+$catalogPolicyCompatibility = [ordered]@{
+    schema_version = 1
+    adapter = 'legacy_router_compatibility'
+    status = 'unavailable'
+    reason = [string]$catalogPolicySeam.reason
+    catalog = [ordered]@{
+        schema_version = 1
+        catalog_id = ''
+        complete = $false
+        entry_count = 0
+        entries = @()
+        decisions = @()
+        findings = @()
+        contract_pass = $false
+        profile_filter_applied = $false
+        semantic_selection_applied = $false
+        semantic_routing_performed = $false
+        decision_owner = 'host_ai'
+    }
+    eligibility = [ordered]@{
+        schema_version = 1
+        evaluated_count = 0
+        allow_count = 0
+        deny_count = 0
+        needs_activation_count = 0
+        results = @()
+        contract_pass = $false
+        decision_owner = 'deterministic_policy'
+        semantic_selection_performed = $false
+        profile_filter_applied = $false
+    }
+    legacy = [ordered]@{
+        retained = $true
+        compatibility_only = $true
+        output_schema_version = 3
+        selection_behavior = 'unchanged'
+        core_profile_filter_applied = $false
+        core_semantic_selection_applied = $false
+    }
+    provider_calls = 0
+    native_mutations = 0
+    writes = 0
+}
+
+$catalogPolicyCacheHit = $false
+$catalogPolicyCacheKey = ''
+if ($null -ne $CatalogPolicyCache) {
+    $cacheStamps = foreach ($cachePath in @($catalogFile, $manifestFile, $policyFile, $configFile, $snapshotFile)) {
+        if ([string]::IsNullOrWhiteSpace([string]$cachePath)) { continue }
+        $cacheItem = Get-Item -LiteralPath $cachePath -ErrorAction SilentlyContinue
+        if ($null -ne $cacheItem) { '{0}|{1}|{2}' -f $cacheItem.FullName, $cacheItem.Length, $cacheItem.LastWriteTimeUtc.Ticks }
+    }
+    $catalogPolicyCacheKey = ($cacheStamps -join ';')
+    if ($CatalogPolicyCache.ContainsKey($catalogPolicyCacheKey)) {
+        $catalogPolicyCompatibility = $CatalogPolicyCache[$catalogPolicyCacheKey]
+        $catalogPolicyCacheHit = $true
+    }
+}
+
+if (-not $catalogPolicyCacheHit -and [bool]$catalogPolicySeam.available) {
+    $legacySkillEntries = @($entries | Where-Object { [string]$_.kind -eq 'skill' })
+    $compiledCatalog = Compile-SkillCatalog -Entries $legacySkillEntries -GeneratedAt ([DateTimeOffset]::UtcNow.ToString('o'))
+    $catalogContract = Test-SkillCatalogContract $compiledCatalog
+    $catalogPolicyCompatibility.catalog.catalog_id = [string]$compiledCatalog.catalog_id
+    $catalogPolicyCompatibility.catalog.complete = [bool]$compiledCatalog.complete
+    $catalogPolicyCompatibility.catalog.entry_count = @($compiledCatalog.entries).Count
+    $catalogPolicyCompatibility.catalog.entries = @($compiledCatalog.entries)
+    $catalogPolicyCompatibility.catalog.decisions = @($compiledCatalog.decisions)
+    $catalogPolicyCompatibility.catalog.findings = @($compiledCatalog.findings)
+    $catalogPolicyCompatibility.catalog.contract_pass = [bool]$catalogContract.pass
+
+    $allowedRoots = @($compiledCatalog.entries | ForEach-Object { [string]$_.source_root } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+    $availableDependencies = @($compiledCatalog.entries | ForEach-Object { [string]$_.name })
+    $eligibilityResults = [Collections.Generic.List[object]]::new()
+    $eligibilityContractPass = $true
+    foreach ($skill in @($compiledCatalog.entries)) {
+        $rules = if ($routing.ContainsKey((Get-Key 'skill' ([string]$skill.name)))) { @($routing[(Get-Key 'skill' ([string]$skill.name))].ToArray()) } else { @() }
+        $operatorRule = @($rules | Where-Object { [string]$_.role -eq 'operator' } | Select-Object -First 1)
+        $sideEffect = ([string]$skill.side_effect).Trim().ToLowerInvariant()
+        if ([string]::IsNullOrWhiteSpace($sideEffect) -or $sideEffect -eq 'unknown') {
+            $sideEffect = if (-not [string]::IsNullOrWhiteSpace([string]$skill.load_side_effect)) { ([string]$skill.load_side_effect).Trim().ToLowerInvariant() } else { 'unknown' }
+        }
+        if ($operatorRule.Count -gt 0) { $sideEffect = 'controlled_write' }
+        $policySkill = [pscustomobject][ordered]@{
+            name = [string]$skill.name
+            path = [string]$skill.path
+            freshness = [string]$skill.freshness
+            availability = [string]$skill.availability
+            dependencies = @($skill.dependencies)
+            surfaces = @($skill.surfaces)
+            side_effect = $sideEffect
+            requires_approval = ($operatorRule.Count -gt 0)
+        }
+        $eligibility = Evaluate-SkillEligibility -Skill $policySkill -AllowedRoots $allowedRoots -AvailableDependencies $availableDependencies
+        $eligibilityResults.Add($eligibility) | Out-Null
+        if (-not (Test-SkillEligibilityResultContract $eligibility).pass) { $eligibilityContractPass = $false }
+    }
+    $catalogPolicyCompatibility.eligibility.evaluated_count = @($eligibilityResults).Count
+    $catalogPolicyCompatibility.eligibility.allow_count = @($eligibilityResults | Where-Object { [string]$_.decision -eq 'allow' }).Count
+    $catalogPolicyCompatibility.eligibility.deny_count = @($eligibilityResults | Where-Object { [string]$_.decision -eq 'deny' }).Count
+    $catalogPolicyCompatibility.eligibility.needs_activation_count = @($eligibilityResults | Where-Object { [string]$_.decision -eq 'needs_activation' }).Count
+    $catalogPolicyCompatibility.eligibility.results = @($eligibilityResults.ToArray())
+    $catalogPolicyCompatibility.eligibility.contract_pass = $eligibilityContractPass
+    $catalogPolicyCompatibility.status = if ($catalogPolicyCompatibility.catalog.contract_pass -and $eligibilityContractPass) { 'available' } else { 'partial' }
+    $catalogPolicyCompatibility.reason = 'compiler_and_policy_loaded'
+}
+if (-not $catalogPolicyCacheHit -and $null -ne $CatalogPolicyCache -and -not [string]::IsNullOrWhiteSpace($catalogPolicyCacheKey)) {
+    $CatalogPolicyCache[$catalogPolicyCacheKey] = $catalogPolicyCompatibility
+}
+
 [ordered]@{
     schema_version = 3
     query = $Query
@@ -737,6 +884,7 @@ $capabilityGraph = [ordered]@{
     intents = @()
     manifest_path = $manifestFile
     catalog_path = $catalogFile
+    catalog_policy_compatibility = $catalogPolicyCompatibility
     catalog = [ordered]@{ status = $catalogStatus; fingerprint = $catalogFingerprint; path = $catalogFile }
     policy_path = $policyFile
     config_path = $configFile

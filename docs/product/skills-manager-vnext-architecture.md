@@ -3,7 +3,7 @@
 **program_id**: `skills-manager-vnext`
 **architecture_version**: 1
 **status**: accepted-direction
-**最后更新**: 2026-08-05
+**最后更新**: 2026-08-08
 
 ## 1. 架构结论
 
@@ -138,6 +138,14 @@ RuleResponsibility
 职责：扫描目标仓事实、用户画像、当前能力和推荐候选，为 capability/rule plan 提供证据。
 
 不负责：把 AI recommendation 直接当作 apply authority。
+
+#### 3.5.1 `ReferencePortfolio`
+
+职责：把官方资料、第一方源码、本地参考棚和社区候选建模为可逆证据组合；管理 `discover / conditional-not-cloned / on-demand read-only / secondary / core-mainline / historical-compatibility / retire` 状态、来源锁定、消费者、采纳决定、刷新和删除前置条件。
+
+不负责：成为 runtime/install 真源、通用联网爬虫、社区项目自动安装器、目标仓知识权威或 `D:\CODE\external` 中央管理器。宿主拥有语义搜索和外部读取；本仓只保存 reviewed metadata、确定性 policy、刷新工具和 receipt，并只写 manifest-owned 的 `skills-manager-references` 子树。
+
+`ReferenceCandidate` 是尚未取得长期镜像资格的来源；`ReferenceShelfEntry` 是 manifest 管理的证据项；`RuntimeSource` 是 `skills.json` 管理的安装来源。三者生命周期独立，降级参考项不能隐式删除 runtime source，删除 runtime source 也不能靠 reference review 越级授权。
 
 ### 3.6 `OperationPlanning`
 
@@ -649,6 +657,8 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 
 默认 profile 可以建议 common/platform/project 分区、全局与项目体量预算及薄 wrapper，但 profile 必须可配置。宿主官方加载模型、目标仓规模或真实差异不匹配时，应给出 `adapt` 或 `defer`，不能为了模板一致性改写仓库。
 
+根规则内容再按变化频率分层：稳定 `normative` 约束和 `advisory` 入口留在全局/项目根；项目命令、路径、阻断和回滚属于 `project_action`；任务计数、Phase gate、host/live 状态属于 dynamic state，只在 manifest/spec/evidence 维护并在执行前 fresh read。`RuleEstate` 对当前 2.0 profile 静态校验 A/C/D parity、B delta 独立、release、预算、项目 `1/A/B/C/D` 与 Claude 首行 wrapper；它不推断语义正确性，也不把 `filesystem_applied` 提升为 `host_loaded/live_accepted`。
+
 ## 9. 配置与 schema
 
 - `skills.json` 在兼容窗口内继续是 skill/MCP runtime truth，不加入 rules 文本或 host auth/model 设置。
@@ -770,6 +780,8 @@ PoC acceptance：同一 corpus 的结构化输出/exit/finding parity；至少�
 
 2026-08-02 follow-through：`rule-estate-audit` 将动态 Git 目标、registry drift、global common/platform delta、规则 release 和责任覆盖汇总为 zero-write report；`rule-estate-plan/apply/rollback` 通过 fixture/E2E 与一次用户显式授权的真实 11 文件 rollout，证明 reviewed global/project multi-target plan、全量预检、逐目标 receipt、fail-fast、resume 与单目标 rollback。Codex fresh-process load 为 9/9；Claude load 为 `platform_na`；`live_accepted` 仍未执行。
 
+2026-08-08 hardening：coverage 明确拆为 `textual_mapping_covered_count` 与 `semantic_gap_count`，grouped mapping 仅算文本覆盖；静态审计新增全局/项目预算余量状态、N/A schema 与仓内证据存在性、Git baseline/upstream 真值及 S5 enforcement 引用检查。`structural_pass / semantic_coverage_pass / enforcement_verified` 独立，仍不外推为 `host_loaded` 或 `live_accepted`。
+
 ### `ADR-SMV-008 Responsibility coverage over universal template`
 
 决定：以 `common + platform_delta + project_action` 的责任覆盖和证据判断协同效果；固定 `1/A/B/C/D`、体量预算和 wrapper 只作为可配置 profile。
@@ -808,7 +820,7 @@ PoC acceptance：同一 corpus 的结构化输出/exit/finding parity；至少�
 
 ### `ADR-SMV-013 Maintenance design is not P6`
 
-决定：design package 与条件性 10-task pilot 进入 `maintenance_design` 平行维护轨，基于 P5 且保持 `P6_ADMISSION_STATUS: hold`。
+决定（P5 期间历史状态）：design package 与条件性 10-task pilot 进入 `maintenance_design` 平行维护轨，基于 P5 且当时保持 `P6_ADMISSION_STATUS: hold`。2026-08-07 admission 后，该 hold 已被 supersede；maintenance track 仍不授权宿主 mutation 或 live acceptance。
 
 理由：规划和 observe-only pilot 不构成新的产品 runtime 或 Phase admission 证据。只有路线图既有五项条件同时满足并由用户明确授权，才允许创建 P6 spec/manifest。
 
@@ -910,11 +922,71 @@ host evaluation 同时记录 cumulative input、cached/uncached input、cache ra
 
 ### `ADR-SMV-030 Resident dispatcher and complete-catalog cold entry`
 
-决定：profile 只负责 resident metadata 预算、domain/index partition 和未来任务的 preheat 建议；每个可能受益于本地 skill 的非平凡请求先进入 resident `capability-router` dispatcher。无显式 domain/profile hint 时，router 直接从相邻 portable catalog 暴露完整 canonical candidate index，再由宿主 AI 依据完整请求和否定约束选择最小技能集合，最后由既有 deterministic policy 校验 containment、freshness、availability、side effect、approval 和 activation。该入口不切换或写入 active profile。
+决定（P5-local 历史/prompt-contract，ADR-SMV-031 superseded）：profile 只负责 resident metadata 预算、domain/index partition 和未来任务的 preheat 建议；每个可能受益于本地 skill 的非平凡请求先进入 resident `capability-router` dispatcher。无显式 domain/profile hint 时，router 直接从相邻 portable catalog 暴露完整 canonical candidate index，再由宿主 AI 依据完整请求和否定约束选择最小技能集合，最后由既有 deterministic policy 校验 containment、freshness、availability、side effect、approval 和 activation。该入口不切换或写入 active profile。
 
 理由：官方 Codex skill contract 采用 progressive disclosure，初始 metadata 列表受 8,000 字符/2% context budget 限制并可能省略技能；skill description 的 implicit invocation 是宿主模型选择，不是 middleware 强制调用。原来的 fallback-only router 因而可能在看不到 cold skill 时永远不进入 discovery；原脚本的 no-hint current-profile 过滤还会让 portable catalog 在无 manifest/config 的普通 cwd 得到 0 candidate。resident dispatcher + complete catalog 解除信息循环，同时不把 111 个技能粗暴塞入初始 prompt。
 
 边界：仓库可以确定性地生成完整 catalog、返回 cold-load policy 和证明零写入，但不能把宿主模型是否调用 skill metadata 伪装成硬保证。若未来需要每个请求必经路由，必须由宿主 pre-model middleware/app-server 提供注入和 invocation trace；在官方 surface 未提供该能力前，本仓只承诺 `repo_verified + host_prompt_contract_verified`。
+
+### `ADR-SMV-031 Host AI owns semantic skill selection`
+
+决定：普通请求只走宿主原生 progressive disclosure；skills-manager 负责编译 inventory、资格、安全、投影和证据，不再要求 resident `capability-router` 先行，也不把 profile/cold domain 当语义或可达性边界。P5 router/profile 只作为 P6 迁移期 shadow/compatibility 输入。
+
+理由：仓库可发现与宿主触发长期断裂，证明第二套 router 无法强制 host invocation，还会重复模型已有语义能力。将语义选择交回宿主，仓库保留确定性且高杠杆的 lifecycle seam，减少 token、延迟、双真源和热加载问题。
+
+### `ADR-SMV-032 Effective HostCapabilitySnapshot, not raw config`
+
+决定：以 `HostCapabilitySnapshot` 聚合 turn、thread、effective config、model/provider catalog 和 unknown fallback。App Server/CLI 是当前事实 adapter；直接读取 `config.toml` 只为 `source=config_fallback`。已知 context 下 metadata ceiling 使用 `floor(context_window * 0.02)` 或宿主更严格值，并保留 configurable headroom。
+
+理由：`model_context_window` 可缺省、由模型/provider 推导或被 thread/turn 覆盖。原始 TOML 是配置输入，不是每个 surface 的有效运行事实。
+
+### `ADR-SMV-033 Split compiler and eligibility policy from legacy router`
+
+决定：把 router 内可保留职责拆成 `SkillCatalogCompiler`、`SkillEligibilityPolicy` 和 `SkillInventoryDoctor`；它们分别拥有 canonical metadata/provenance、确定性 allow/deny/activation 和健康诊断。任何 lexical/profile semantic ranking 不进入这些模块。
+
+理由：这些职责深、稳定、可测试并被 projection/doctor/fallback 多处复用；与宿主语义选择隔离后，模块接口更窄且 legacy router 可渐进删除。
+
+### `ADR-SMV-034 Complete token-aware native metadata projection`
+
+决定：所有 eligible enabled skill 都进入 native discovery plan；以宿主有效 token budget 和 description compaction 规划，验收为 `enabled_total == kept_total`、`truncated=false`、`omitted=0`。预算不足时 fail-closed 并报告 offenders，不恢复 profile 分片。
+
+理由：仅证明 catalog 完整不能解决宿主看不见；而固定字符 ceiling 不能表达 272000 等不同 context window 的官方 2% token budget。完整投影把可达性还给宿主，同时让成本和遗漏可测。
+
+### `ADR-SMV-035 Metadata-first activation evaluation`
+
+决定：用 concise metadata lint 与 direct/indirect/negative/ambiguous/no-skill corpus 评价宿主原生选择。失败先修 name/description/边界，禁止用 corpus 反向生成脚本 semantic router。
+
+理由：宿主选择的稳定输入是 metadata；metadata 质量可被确定性 lint 和代表 replay 改善，又不会建立第二模型或长期索引。
+
+### `ADR-SMV-036 Invocation trace defines truth level`
+
+决定：统一 `NativeInvocationTrace` 状态为 listed、selected、injected、executed、abstained，缺少宿主事件时保持 partial/unknown。visibility、prompt presence 和 selection 都不能推断 full body execution。
+
+理由：过去 fresh prompt/projection 证据被迫依赖间接推断。显式 truth ladder 防止 repo reachability 被误报为自动调用或 live acceptance。
+
+### `ADR-SMV-037 Retire profile reachability through versioned migration`
+
+决定：profile、active/current profile、reconciliation 和 canary 从运行主链退役；迁移期只读兼容、shadow、deprecation 和 round-trip receipt 先行，达到 removal gate 后删除 runtime 路径，历史 spec/manifest/evidence 不改写。
+
+理由：profile 既不能热加载当前任务，也不应成为全局技能全集的可达性门；继续维护它只会让用户在新任务前选 profile，并复制宿主 native selection。
+
+### `ADR-SMV-038 Strict App Server dispatch is opt-in fallback`
+
+决定：只有明确 strict/fallback 请求才允许 `pre-turn dispatch -> bounded candidates -> host adjudication -> supported type=skill injection -> trace`。普通请求不进入，候选必须先过共享 eligibility policy，缺宿主裁决或 surface 支持即 fail-closed/platform_na。
+
+理由：pre-turn middleware 可提供更强的强制与 trace，但若默认覆盖所有请求会重新建立第二套路由和额外 token/延迟。窄 fallback 保留必要控制而不破坏 host-native 主链。
+
+### `ADR-SMV-039 Reference portfolio is reversible evidence, not accumulated runtime`
+
+决定：外部资料采用 official-first、manifest-controlled 的可逆组合；社区候选先 discovery/review，再按需只读，只有第一方权威或重复真实消费者才晋级。官方替代、无消费者、重复、stale、许可证/供应链风险或维护成本超出净收益时先降级/停刷，满足独立 runtime/import 与 checkout 守卫后才删除。写权限只覆盖 manifest-owned `skills-manager-references`，不扩展为 `D:\CODE\external` 根或兄弟项目 shelf 管理权。
+
+理由：只增不减会扩大上下文、供应链和维护成本，把参考输入误写成产品范围；立即物理删除又可能破坏历史兼容或 runtime import。分层退役保留取证与回滚，同时贯彻可绕过、可替换、可删除的 North Star。
+
+### P6-012 staged-removal status（2026-08-08，repo_verified）
+
+P6-012 已进入 repo-side closeout：默认生成 bundle 不再编入 legacy `SkillRouting`，普通入口不再暴露 `技能配置`/`skill-profile` dispatch；profile compatibility view 保留为 `read_only` 且 `reachability_authority=none`。未生成的 legacy routing source 和 compatibility verifier/test 只作为迁移期回读与回归边界，不能成为当前语义选择或 reachability owner。
+
+当前 fresh CLI 仅能提供 `host_evaluation_partial`，因为 selection、injection 和 body invocation 不可观测；`runtime_migration=not_started`、`host_loaded=not_run`、`live_accepted=not_run`。P6-001 至 P6-012 的 repo-side staged removal 与 single-flight full gate 已通过，阶段为 `repo_verified`；该状态不提升宿主或业务 truth level。
 
 ## 11. 安全与供应链
 

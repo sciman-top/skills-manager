@@ -11,6 +11,158 @@ function Resolve-SkillProjectionPath([string]$path) {
     return [System.IO.Path]::GetFullPath($resolved)
 }
 
+function New-SkillProjectionCompatibilityReport {
+    return [pscustomobject]([ordered]@{
+            schema_version = 1
+            enabled = $false
+            mode = 'compatibility_only'
+            policy_path = ''
+            group_count = 0
+            active_group_count = 0
+            finding_count = 0
+            blocking = $false
+            semantic_selection_applied = $false
+            profile_reachability_authority = 'none'
+            groups = @()
+            findings = @()
+        })
+}
+
+function Get-CodexEnabledPluginIds([string]$configPath) {
+    if ([string]::IsNullOrWhiteSpace($configPath) -or -not (Test-Path -LiteralPath $configPath -PathType Leaf)) { return @() }
+
+    $content = Get-ContentUtf8 $configPath
+    $pattern = '(?ms)^\s*\[plugins\.(?:"(?<quoted>[^"]+)"|(?<bare>[^\]\r\n]+))\]\s*\r?\n(?<body>.*?)(?=^\s*\[|\z)'
+    $ids = New-Object System.Collections.Generic.List[string]
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $tableRegex = [regex]::new($pattern, [System.Text.RegularExpressions.RegexOptions]::None, [TimeSpan]::FromSeconds(1))
+    $enabledRegex = [regex]::new('^\s*enabled\s*=\s*true\s*(?:#.*)?$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::Multiline, [TimeSpan]::FromSeconds(1))
+    foreach ($match in $tableRegex.Matches($content)) {
+        $body = [string]$match.Groups['body'].Value
+        if (-not $enabledRegex.IsMatch($body)) { continue }
+        $id = if ($match.Groups['quoted'].Success) { [string]$match.Groups['quoted'].Value } else { [string]$match.Groups['bare'].Value }
+        $id = $id.Trim()
+        if (-not [string]::IsNullOrWhiteSpace($id) -and $seen.Add($id)) { $ids.Add($id) | Out-Null }
+    }
+    return @($ids.ToArray() | Sort-Object)
+}
+
+function Add-SkillExternalInventoryWarning($warnings, [string]$code, [string]$subject, [string]$message) {
+    $warnings.Add([pscustomobject][ordered]@{ code = $code; subject = $subject; message = $message }) | Out-Null
+}
+
+function Get-CodexExternalSkillInventory($projectionCfg) {
+    $result = [ordered]@{
+        enabled = $false
+        config_path = ''
+        plugin_cache_path = ''
+        cache_selection = 'newest_usable_version_by_mtime'
+        enabled_plugin_ids = @()
+        plugin_count = 0
+        skill_count = 0
+        metadata_chars = 0
+        skills = @()
+        warnings = @()
+    }
+    if ($null -eq $projectionCfg) { return [pscustomobject]$result }
+    $inventoryCfg = Get-CfgObjectProperty $projectionCfg 'external_skill_inventory'
+    if ($null -eq $inventoryCfg) { return [pscustomobject]$result }
+    $enabledRaw = Get-CfgObjectProperty $inventoryCfg 'enabled'
+    $enabled = ($null -eq $enabledRaw) -or [bool]$enabledRaw
+    $result.enabled = $enabled
+    if (-not $enabled) { return [pscustomobject]$result }
+
+    $configRawValue = Get-CfgObjectProperty $projectionCfg 'codex_config_path'
+    $cacheRawValue = Get-CfgObjectProperty $inventoryCfg 'plugin_cache_path'
+    $configRaw = if ([string]::IsNullOrWhiteSpace([string]$configRawValue)) { '~/.codex/config.toml' } else { [string]$configRawValue }
+    $cacheRaw = if ([string]::IsNullOrWhiteSpace([string]$cacheRawValue)) { '~/.codex/plugins/cache' } else { [string]$cacheRawValue }
+    $configPath = Resolve-SkillProjectionPath $configRaw
+    $cachePath = Resolve-SkillProjectionPath $cacheRaw
+    $result.config_path = $configPath
+    $result.plugin_cache_path = $cachePath
+    $warnings = New-Object System.Collections.Generic.List[object]
+    $skills = New-Object System.Collections.Generic.List[object]
+
+    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+        Add-SkillExternalInventoryWarning $warnings 'codex_config_missing' $configPath 'Codex config is unavailable; external plugin skills were not inventoried.'
+        $result.warnings = @($warnings.ToArray())
+        return [pscustomobject]$result
+    }
+
+    $pluginIds = @(Get-CodexEnabledPluginIds $configPath)
+    $result.enabled_plugin_ids = @($pluginIds)
+    if (-not (Test-Path -LiteralPath $cachePath -PathType Container)) {
+        Add-SkillExternalInventoryWarning $warnings 'plugin_cache_missing' $cachePath 'Codex plugin cache is unavailable; enabled plugins could not be resolved to skill metadata.'
+        $result.plugin_count = $pluginIds.Count
+        $result.warnings = @($warnings.ToArray())
+        return [pscustomobject]$result
+    }
+
+    foreach ($pluginId in $pluginIds) {
+        $separator = $pluginId.LastIndexOf('@')
+        if ($separator -le 0 -or $separator -ge ($pluginId.Length - 1)) {
+            Add-SkillExternalInventoryWarning $warnings 'invalid_plugin_id' $pluginId 'Expected enabled plugin id in name@marketplace form.'
+            continue
+        }
+        $pluginName = $pluginId.Substring(0, $separator)
+        $marketplace = $pluginId.Substring($separator + 1)
+        $safeSegmentPattern = '^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9_-])?$'
+        if ($pluginName -notmatch $safeSegmentPattern -or $marketplace -notmatch $safeSegmentPattern) {
+            Add-SkillExternalInventoryWarning $warnings 'unsafe_plugin_id' $pluginId 'Plugin id contains a path segment and was not resolved against the cache.'
+            continue
+        }
+        $pluginRoot = Join-Path (Join-Path $cachePath $marketplace) $pluginName
+        if (-not (Test-Path -LiteralPath $pluginRoot -PathType Container)) {
+            Add-SkillExternalInventoryWarning $warnings 'enabled_plugin_cache_missing' $pluginId ("No cache directory was found at {0}." -f $pluginRoot)
+            continue
+        }
+
+        $selectedVersion = $null
+        $selectedSkillFiles = @()
+        foreach ($versionDir in @(Get-ChildItem -LiteralPath $pluginRoot -Directory -ErrorAction SilentlyContinue | Sort-Object @{ Expression = 'LastWriteTimeUtc'; Descending = $true }, @{ Expression = 'Name'; Descending = $true })) {
+            $skillsRoot = Join-Path $versionDir.FullName 'skills'
+            if (-not (Test-Path -LiteralPath $skillsRoot -PathType Container)) { continue }
+            $candidateFiles = @(Get-ChildItem -LiteralPath $skillsRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                    $skillFile = Join-Path $_.FullName 'SKILL.md'
+                    if (Test-Path -LiteralPath $skillFile -PathType Leaf) { Get-Item -LiteralPath $skillFile }
+                })
+            if ($candidateFiles.Count -eq 0) { continue }
+            $selectedVersion = $versionDir
+            $selectedSkillFiles = @($candidateFiles)
+            break
+        }
+        if ($null -eq $selectedVersion) {
+            Add-SkillExternalInventoryWarning $warnings 'enabled_plugin_skills_missing' $pluginId 'The newest usable plugin cache has no direct skills/*/SKILL.md entries.'
+            continue
+        }
+
+        foreach ($skillFile in @($selectedSkillFiles | Sort-Object FullName)) {
+            $meta = Get-SkillMetadataFromFile $skillFile.FullName
+            $name = if ([string]::IsNullOrWhiteSpace([string]$meta.declared_name)) { $skillFile.Directory.Name } else { [string]$meta.declared_name }
+            $description = [string]$meta.description
+            $skills.Add([pscustomobject][ordered]@{
+                    plugin_id = $pluginId
+                    plugin_name = $pluginName
+                    marketplace = $marketplace
+                    cache_version = [string]$selectedVersion.Name
+                    name = $name
+                    qualified_name = ("{0}::{1}" -f $pluginId, $name)
+                    description = $description
+                    path = $skillFile.FullName
+                }) | Out-Null
+        }
+    }
+
+    $metadataChars = 0
+    foreach ($skill in @($skills.ToArray())) { $metadataChars += ([string]$skill.name).Length + ([string]$skill.description).Length }
+    $result.plugin_count = $pluginIds.Count
+    $result.skill_count = $skills.Count
+    $result.metadata_chars = $metadataChars
+    $result.skills = @($skills.ToArray() | Sort-Object plugin_id, name)
+    $result.warnings = @($warnings.ToArray())
+    return [pscustomobject]$result
+}
+
 function Get-SkillProjectionFiles([string]$rootPath) {
     $files = New-Object System.Collections.Generic.List[object]
     if ([string]::IsNullOrWhiteSpace($rootPath) -or -not (Test-Path -LiteralPath $rootPath -PathType Container)) {
@@ -228,7 +380,7 @@ function New-SkillProfileReconciliationSignal($projectionCfg, [string]$manifestP
             after_fingerprint = [string]$after.fingerprint
             config_sha256 = if (Test-Path -LiteralPath $skillsConfigPath -PathType Leaf) { Get-FileContentHash $skillsConfigPath } else { "" }
             next_action = if ($changed) { "host_ai_profile_reconciliation" } else { "none" }
-            advisor_command = if ($changed) { "skills.ps1 技能配置 调和" } else { "" }
+            advisor_command = if ($changed) { "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/plan-skill-profile-reconciliation.ps1 -Json" } else { "" }
             active_profile = [string]$currentPlan.active_profile
             profile_names = @($currentPlan.profile_budgets | ForEach-Object { [string]$_.profile } | Sort-Object -Unique)
             unrouted_names = @($currentPlan.unrouted_names)
@@ -470,7 +622,7 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
     Need ($null -ne $projectionCfg) "skill_projection 配置为空"
     $enabled = -not ($projectionCfg.PSObject.Properties.Match("enabled").Count -gt 0) -or [bool]$projectionCfg.enabled
     if (-not $enabled) {
-        return [pscustomobject]@{ schema_version = 2; enabled = $false; skills = @(); canonical = @(); active = @(); disabled = @(); conflicts = @(); unique_names = @(); active_names = @(); duplicate_name_groups = 0; profile_routed_name_count = 0; unrouted_name_count = 0; profile_routed_names = @(); unrouted_names = @(); external_skills = @(); external_inventory_warnings = @(); routing_report = (Get-EmptySkillRoutingReport) }
+        return [pscustomobject]@{ schema_version = 2; enabled = $false; skills = @(); canonical = @(); active = @(); disabled = @(); conflicts = @(); unique_names = @(); active_names = @(); duplicate_name_groups = 0; profile_routed_name_count = 0; unrouted_name_count = 0; profile_routed_names = @(); unrouted_names = @(); external_skills = @(); external_inventory_warnings = @(); routing_report = (New-SkillProjectionCompatibilityReport) }
     }
 
     Need ($projectionCfg.PSObject.Properties.Match("sources").Count -gt 0 -and $null -ne $projectionCfg.sources) "skill_projection 缺少 sources"
@@ -700,7 +852,7 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
     }
     $estimatedMetadataChars = $skillMetadataChars + $effectiveExternalMetadataChars
     $allProfilesBudgetPass = @($profileBudgets.ToArray() | Where-Object { -not [bool]$_.budget_pass }).Count -eq 0
-    $routingReport = New-SkillRoutingReport $projectionCfg @($canonical.ToArray()) @($active.ToArray()) @($externalInventory.skills)
+    $routingReport = New-SkillProjectionCompatibilityReport
 
     return [pscustomobject]([ordered]@{
         schema_version = 2
@@ -939,6 +1091,29 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
     $configPath = Resolve-SkillProjectionPath $configRaw
     $manifestPath = Resolve-SkillProjectionPath $manifestRaw
     $catalogProjection = Invoke-WithMetric 'projection_capability_catalog' { Sync-CapabilityRouterCatalog $projectionCfg } @{ command = '技能投影' } -NoHost
+    $nativeProjectionPlan = $null
+    $nativeProjectionApply = $null
+    $nativeProjectionAuthoritative = $false
+    $nativeSettings = Get-CfgObjectProperty $projectionCfg 'native_projection'
+    if ($null -ne $nativeSettings -and [bool](Get-CfgObjectProperty $nativeSettings 'enabled')) {
+        $managedRoot = Resolve-SkillProjectionPath ([string](Get-CfgObjectProperty $projectionCfg 'managed_source_path'))
+        $excludedNames = @((Get-CfgObjectProperty $projectionCfg 'managed_link_excludes') | ForEach-Object { [string]$_ })
+        $capturedAt = [DateTimeOffset]::UtcNow.ToString('o')
+        $snapshot = New-HostCapabilitySnapshotFromConfigFallback -ConfigPath $configPath -Surface 'cli' -CapturedAt $capturedAt
+        $policyPath = Join-Path $Root 'config\native-skill-metadata-policy.json'
+        $policy = if (Test-Path -LiteralPath $policyPath -PathType Leaf) { Get-ContentUtf8 $policyPath | ConvertFrom-Json } else { Get-DefaultNativeMetadataPolicy }
+        $nativeProjectionPlan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $managedRoot -Config ([pscustomobject]@{ skill_projection = $projectionCfg }) -Snapshot $snapshot -Policy $policy -ExcludedNames $excludedNames -GeneratedAt $capturedAt
+        Need ([string]$nativeProjectionPlan.status -eq 'ready' -and [bool]$nativeProjectionPlan.pass) ("native skill projection blocked: enabled={0}, kept={1}, omitted={2}" -f [int]$nativeProjectionPlan.enabled_total, [int]$nativeProjectionPlan.kept_total, [int]$nativeProjectionPlan.omitted_total)
+        $nativeProjectionAuthoritative = $true
+        if ($DryRun) {
+            $nativeProjectionApply = [pscustomobject]@{ status = 'planned'; receipt_id = ''; receipt_path = [string]$nativeProjectionPlan.receipt_path; changed_names = @(); receipt = $null }
+        }
+        else {
+            $nativeProjectionApply = Invoke-WithMetric 'native_projection_apply' {
+                Apply-NativeSkillProjection -Plan $nativeProjectionPlan -ApplyToken ([string]$nativeProjectionPlan.apply_token)
+            } @{ command = '技能投影'; enabled_total = [int]$nativeProjectionPlan.enabled_total } -NoHost
+        }
+    }
     $linkProjection = $null
     if ($projectionCfg.PSObject.Properties.Match("managed_source_path").Count -gt 0 -or $projectionCfg.PSObject.Properties.Match("user_skill_root").Count -gt 0) {
         $linkProjection = Invoke-WithMetric "projection_link_reconcile" { Sync-CodexManagedSkillLinks $projectionCfg } @{ command = "技能投影" } -NoHost
@@ -965,9 +1140,11 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
             success = $true
         })
     if ([bool]$plan.enabled) {
-        Need ([bool]$plan.budget_pass) ("技能描述预算超限：estimated={0}, limit={1}, profile={2}" -f [int]$plan.estimated_metadata_chars, [int]$plan.effective_budget_limit_chars, [string]$plan.active_profile)
-        $oversizedProfiles = @($plan.profile_budgets | Where-Object { -not [bool]$_.budget_pass } | ForEach-Object { "{0}={1}/{2}" -f $_.profile, $_.estimated_metadata_chars, $_.budget_limit_chars })
-        Need ([bool]$plan.all_profiles_budget_pass) ("技能 profile 描述预算超限：{0}" -f ($oversizedProfiles -join ", "))
+        if (-not $nativeProjectionAuthoritative) {
+            Need ([bool]$plan.budget_pass) ("技能描述预算超限：estimated={0}, limit={1}, profile={2}" -f [int]$plan.estimated_metadata_chars, [int]$plan.effective_budget_limit_chars, [string]$plan.active_profile)
+            $oversizedProfiles = @($plan.profile_budgets | Where-Object { -not [bool]$_.budget_pass } | ForEach-Object { "{0}={1}/{2}" -f $_.profile, $_.estimated_metadata_chars, $_.budget_limit_chars })
+            Need ([bool]$plan.all_profiles_budget_pass) ("技能 profile 描述预算超限：{0}" -f ($oversizedProfiles -join ", "))
+        }
         Need (-not [bool]$plan.routing_report.blocking) "技能路由策略存在 enforce 模式阻断项"
     }
 
@@ -1032,6 +1209,18 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
                 active = @($plan.active)
                 disabled = @($plan.disabled)
                 conflicts = @($plan.conflicts)
+                native_projection = if (-not $nativeProjectionAuthoritative) { $null } else { [ordered]@{
+                    authoritative = $true
+                    status = [string]$nativeProjectionApply.status
+                    plan_id = [string]$nativeProjectionPlan.plan_id
+                    receipt_id = [string]$nativeProjectionApply.receipt_id
+                    receipt_path = [string]$nativeProjectionApply.receipt_path
+                    enabled_total = [int]$nativeProjectionPlan.enabled_total
+                    kept_total = [int]$nativeProjectionPlan.kept_total
+                    omitted_total = [int]$nativeProjectionPlan.omitted_total
+                    truncated = [bool]$nativeProjectionPlan.truncated
+                    notification = $nativeProjectionApply.notification
+                } }
             }
             Set-ContentUtf8 $manifestPath ($manifest | ConvertTo-Json -Depth 20)
             if ([string]$reconciliation.status -eq "reconciliation_needed") {
@@ -1057,6 +1246,7 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
         backup_path = if ($null -eq $backupPath) { "" } else { [string]$backupPath }
         managed_link_projection = $linkProjection
         capability_catalog_projection = $catalogProjection
+        native_projection = if (-not $nativeProjectionAuthoritative) { $null } else { [pscustomobject]@{ plan = $nativeProjectionPlan; apply = $nativeProjectionApply } }
         reconciliation = $reconciliation
         package_hash_cache = [pscustomobject]@{
             cache_valid = [bool]$packageHashContext.cache_valid
@@ -1296,52 +1486,6 @@ function New-SkillProfileReconciliationPlan($projectionCfg, [string]$configSha25
             finding_count = $findings.Count
             findings = @($findings.ToArray())
         })
-}
-
-function Read-SkillProfileReconciliationProposal([string]$path) {
-    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
-    $full = if ([System.IO.Path]::IsPathRooted($path)) { [System.IO.Path]::GetFullPath($path) } else { [System.IO.Path]::GetFullPath((Join-Path $Root $path)) }
-    Need (Test-Path -LiteralPath $full -PathType Leaf) ("Proposal file does not exist: {0}" -f $full)
-    try { return (Get-ContentUtf8 $full | ConvertFrom-Json) }
-    catch { throw ("Proposal JSON is invalid: {0}" -f $_.Exception.Message) }
-}
-
-function Invoke-SkillProfileCommand([string[]]$tokens) {
-    $cfg = LoadCfg
-    Need ($cfg.PSObject.Properties.Match("skill_projection").Count -gt 0 -and $null -ne $cfg.skill_projection) "未配置 skill_projection"
-    $projection = $cfg.skill_projection
-    Need ($projection.PSObject.Properties.Match("profiles").Count -gt 0 -and $null -ne $projection.profiles) "未配置技能 profiles"
-    $action = if ($null -eq $tokens -or $tokens.Count -eq 0) { "列表" } else { ([string]$tokens[0]).Trim().ToLowerInvariant() }
-    if ($action -in @("列表", "list")) {
-        foreach ($property in @($projection.profiles.PSObject.Properties | Sort-Object Name)) {
-            $marker = if ([string]::Equals($property.Name, [string]$projection.active_profile, [System.StringComparison]::OrdinalIgnoreCase)) { "*" } else { " " }
-            Write-Host ("{0} {1} ({2} skills)" -f $marker, $property.Name, @($property.Value.enabled_names).Count)
-        }
-        return
-    }
-    if ($action -in @("调和", "reconcile")) {
-        Need ($tokens.Count -le 2) "技能配置 调和/reconcile 最多接受一个 proposal JSON 路径"
-        $proposal = if ($tokens.Count -eq 2) { Read-SkillProfileReconciliationProposal ([string]$tokens[1]) } else { $null }
-        $result = New-SkillProfileReconciliationPlan $projection (Get-FileContentHash $CfgPath) $proposal
-        Write-Output ($result | ConvertTo-Json -Depth 20)
-        if (-not [bool]$result.pass) { exit 2 }
-        return
-    }
-    Need ($action -in @("使用", "use")) ("技能配置仅支持 列表/list、调和/reconcile 或 使用/use：{0}" -f $action)
-    Need ($tokens.Count -ge 2) "技能配置 使用 缺少 profile 名称"
-    $name = ([string]$tokens[1]).Trim()
-    $profileProperty = @($projection.profiles.PSObject.Properties | Where-Object { [string]::Equals($_.Name, $name, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1)
-    Need ($profileProperty.Count -eq 1) ("技能 profile 不存在：{0}" -f $name)
-    $projection.active_profile = [string]$profileProperty[0].Name
-    $plan = New-SkillProjectionPlan $projection
-    Need ([bool]$plan.budget_pass) ("技能 profile 超出描述预算：{0} ({1}/{2})" -f $name, $plan.estimated_metadata_chars, $plan.effective_budget_limit_chars)
-    $raw = Get-ContentUtf8 $CfgPath
-    SaveCfgSafe $cfg $raw
-    $result = Sync-CodexSkillProjection $projection
-    Write-Host ("已使用技能 profile：{0}；active={1}, metadata={2}/{3}, persisted={4}" -f $name, @($result.plan.active).Count, $result.plan.estimated_metadata_chars, $result.plan.effective_budget_limit_chars, [bool]$result.persisted)
-    if ([bool]$result.reconciliation.signal_updated) {
-        Write-Host ("检测到 canonical skill inventory 变化；profile reconciliation signal：{0}" -f [string]$result.reconciliation.signal_path) -ForegroundColor Yellow
-    }
 }
 
 function Sync-ConfiguredSkillProjection($cfg, [string]$verifiedBuildSignature = "", $promotionContext = $null) {

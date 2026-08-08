@@ -30,8 +30,11 @@ function Get-Expectation($Case, [string]$Profile) {
 
 $corpus = Get-Content -LiteralPath $CorpusPath -Raw | ConvertFrom-Json
 $config = Get-Content -LiteralPath (Join-Path $repoRoot "skills.json") -Raw | ConvertFrom-Json
-$originalProfile = [string]$config.skill_projection.active_profile
-$configuredProfiles = @($config.skill_projection.profiles.PSObject.Properties.Name)
+$compatibilityView = $config.skill_projection.profile_compatibility
+$compatibilityOnly = $null -ne $compatibilityView -and [string]$compatibilityView.status -eq 'read_only'
+$profileSource = if ($compatibilityOnly) { $compatibilityView.profiles } else { $config.skill_projection.profiles }
+$originalProfile = if ($compatibilityOnly) { [string]$compatibilityView.active_profile } else { [string]$config.skill_projection.active_profile }
+$configuredProfiles = @($profileSource.PSObject.Properties.Name)
 $normalizedProfiles = @($Profiles | ForEach-Object { @(([string]$_) -split ',') } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 $normalizedCaseIds = @($CaseId | ForEach-Object { @(([string]$_) -split ',') } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 $selectedProfiles = if ($normalizedProfiles.Count -gt 0) { $normalizedProfiles } else { @($corpus.profiles) }
@@ -39,16 +42,17 @@ $cases = @($corpus.cases)
 if ($normalizedCaseIds.Count -gt 0) { $cases = @($cases | Where-Object { $normalizedCaseIds -contains $_.id }) }
 if ($cases.Count -eq 0) { throw "no benchmark cases selected" }
 
-foreach ($profile in $selectedProfiles) {
-    if ($profile -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw "unsafe profile name: $profile" }
-    if ($configuredProfiles -notcontains $profile) { throw "unknown profile: $profile" }
-    foreach ($case in $cases) { Get-Expectation $case $profile | Out-Null }
-}
 $selectedCaseIds = @($cases | ForEach-Object { [string]$_.id })
 foreach ($selectedCaseId in $selectedCaseIds) {
     if ($selectedCaseId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw "unsafe benchmark case id: $selectedCaseId" }
 }
 if (@($selectedCaseIds | Sort-Object -Unique).Count -ne $selectedCaseIds.Count) { throw "duplicate benchmark case ids" }
+
+foreach ($profile in $selectedProfiles) {
+    if ($profile -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw "unsafe profile name: $profile" }
+    if ($configuredProfiles -notcontains $profile) { throw "unknown profile: $profile" }
+    foreach ($case in $cases) { Get-Expectation $case $profile | Out-Null }
+}
 
 $plannedCalls = $selectedProfiles.Count * $cases.Count * $Repeat
 if (-not $Execute) {
@@ -56,6 +60,7 @@ if (-not $Execute) {
     if ($Json) { $plan | ConvertTo-Json -Depth 5 } else { Write-Host ("benchmark corpus valid: profiles={0}, cases={1}, repeat={2}, planned_calls={3}" -f $selectedProfiles.Count, $cases.Count, $Repeat, $plannedCalls) }
     exit 0
 }
+if ($compatibilityOnly) { throw 'profile benchmark execution retired: profile_compatibility is read_only' }
 
 $runId = Get-Date -Format "yyyyMMdd-HHmmss-fff"
 $runRoot = Join-Path $OutputRoot $runId

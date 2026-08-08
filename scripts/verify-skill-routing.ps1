@@ -10,82 +10,85 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) { $ConfigPath = Join-Path $repoRoot 'skills.json' }
 
+function New-RetiredSkillRoutingReport {
+    param([object]$Config, [string]$Path)
+
+    Need ($null -ne $Config.skill_projection) 'skills config has no skill_projection section'
+    $projection = $Config.skill_projection
+    $directFieldNames = @('active_profile', 'profiles')
+    $directFields = @($projection.PSObject.Properties.Name | Where-Object { $directFieldNames -contains $_ })
+    Need ($directFields.Count -eq 0) ('retired profile fields remain authoritative: {0}' -f ($directFields -join ', '))
+    Need ($null -ne $projection.profile_compatibility) 'skill_projection.profile_compatibility is required during staged removal'
+    $compatibility = $projection.profile_compatibility
+    Need ([string]$compatibility.status -eq 'read_only') 'profile compatibility view must be read_only'
+    Need ([string]$compatibility.reachability_authority -eq 'none') 'profile compatibility view cannot own reachability'
+
+    $manifestPath = Join-Path $repoRoot 'reports/skill-projection/current.json'
+    $projectedCount = 0
+    if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
+        try {
+            $manifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
+            if ($null -ne $manifest.skills) { $projectedCount = @($manifest.skills).Count }
+        }
+        catch { $projectedCount = 0 }
+    }
+
+    return [pscustomobject][ordered]@{
+        schema_version = 2
+        verifier_id = 'skill-routing-compatibility'
+        generated_at = [DateTime]::UtcNow.ToString('o')
+        ok = $true
+        blocking = $false
+        mode = 'compatibility_only'
+        policy_path = if ([string]::IsNullOrWhiteSpace($PolicyPath)) { [string]$projection.routing_policy_path } else { [string]$PolicyPath }
+        active_profile = [string]$compatibility.active_profile
+        projected_skill_count = $projectedCount
+        legacy_router_semantic_authority = $false
+        profile_reachability_authority = 'none'
+        writes_performed = $false
+        provider_calls = 0
+        native_mutations = 0
+        compatibility_view = $compatibility
+        findings = @()
+        finding_count = 0
+    }
+}
+
 try {
     . (Join-Path $repoRoot 'skills.ps1')
     Need (Test-Path -LiteralPath $ConfigPath -PathType Leaf) ("skills config does not exist: {0}" -f $ConfigPath)
     $cfg = Get-ContentUtf8 $ConfigPath | ConvertFrom-Json
-    Need ($null -ne $cfg.skill_projection) 'skills config has no skill_projection section'
-    if (-not [string]::IsNullOrWhiteSpace($PolicyPath)) {
-        $cfg.skill_projection | Add-Member -NotePropertyName routing_policy_path -NotePropertyValue $PolicyPath -Force
-    }
-
-    $canonical = New-Object System.Collections.Generic.List[object]
-    foreach ($fact in @(Get-SkillRoutingLocalInventory $cfg)) { $canonical.Add($fact) | Out-Null }
-
-    $userSkillRootRaw = if ($cfg.skill_projection.PSObject.Properties.Match('user_skill_root').Count -gt 0) { [string]$cfg.skill_projection.user_skill_root } else { '~/.agents/skills' }
-    $userSkillRoot = Resolve-SkillProjectionPath $userSkillRootRaw
-    foreach ($item in @(Get-SkillProjectionFiles $userSkillRoot | Where-Object is_system)) {
-        $meta = Get-SkillMetadataFromFile ([string]$item.file)
-        $canonical.Add([pscustomobject]([ordered]@{
-                    name = [string]$meta.declared_name
-                    description = [string]$meta.description
-                    path = [string]$item.file
-                    is_system = $true
-                })) | Out-Null
-    }
-
-    $activeProfile = ([string]$cfg.skill_projection.active_profile).Trim()
-    Need (-not [string]::IsNullOrWhiteSpace($activeProfile)) 'skill_projection.active_profile is empty'
-    $profileProperty = @($cfg.skill_projection.profiles.PSObject.Properties | Where-Object { [string]::Equals($_.Name, $activeProfile, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1)
-    Need ($profileProperty.Count -eq 1) ("skill_projection.active_profile does not exist: {0}" -f $activeProfile)
-    $enabledNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($name in @($profileProperty[0].Value.enabled_names)) { $enabledNames.Add(([string]$name).Trim()) | Out-Null }
-    $active = @($canonical.ToArray() | Where-Object { [bool]$_.is_system -or $enabledNames.Contains([string]$_.name) })
-    $externalInventory = Get-CodexExternalSkillInventory $cfg.skill_projection
-    $declaredNames = @(Get-SkillRoutingDeclaredSourceNames $cfg @($canonical.ToArray()))
-    $routing = New-SkillRoutingReport $cfg.skill_projection @($canonical.ToArray()) @($active) @($externalInventory.skills) $declaredNames
-    $report = [pscustomobject]([ordered]@{
-            schema_version = 1
-            generated_at = [DateTime]::UtcNow.ToString('o')
-            ok = (-not [bool]$routing.blocking)
-            active_profile = $activeProfile
-            active_skill_count = @($active).Count
-            external_skill_count = [int]$externalInventory.skill_count
-            external_inventory_warnings = @($externalInventory.warnings)
-            routing = $routing
-        })
+    $report = New-RetiredSkillRoutingReport $cfg $ConfigPath
 }
 catch {
-    $report = [pscustomobject]([ordered]@{
-            schema_version = 1
-            generated_at = [DateTime]::UtcNow.ToString('o')
-            ok = $false
-            error = $_.Exception.Message
-        })
+    $report = [pscustomobject][ordered]@{
+        schema_version = 2
+        verifier_id = 'skill-routing-compatibility'
+        generated_at = [DateTime]::UtcNow.ToString('o')
+        ok = $false
+        blocking = $true
+        mode = 'compatibility_only'
+        legacy_router_semantic_authority = $false
+        profile_reachability_authority = 'none'
+        writes_performed = $false
+        provider_calls = 0
+        native_mutations = 0
+        error = $_.Exception.Message
+        findings = @()
+        finding_count = 1
+    }
 }
 
-$serialized = $report | ConvertTo-Json -Depth 20
+$serialized = $report | ConvertTo-Json -Depth 30
 if (-not [string]::IsNullOrWhiteSpace($ReportPath)) {
     $parent = Split-Path -Parent $ReportPath
     if (-not [string]::IsNullOrWhiteSpace($parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
     Set-ContentUtf8 $ReportPath $serialized
 }
 
-if ($Json) {
-    Write-Output $serialized
-}
-elseif ([bool]$report.ok) {
-    Write-Host ("skill routing verified: profile={0}, active={1}, external={2}, findings={3}, mode={4}" -f $report.active_profile, $report.active_skill_count, $report.external_skill_count, $report.routing.finding_count, $report.routing.mode)
-    foreach ($finding in @($report.routing.findings)) {
-        Write-Host ("- [{0}/{1}] {2}: {3}" -f $finding.severity, $finding.code, $finding.subject, $finding.message) -ForegroundColor Yellow
-    }
-    foreach ($warning in @($report.external_inventory_warnings)) {
-        Write-Host ("- [inventory/{0}] {1}: {2}" -f $warning.code, $warning.subject, $warning.message) -ForegroundColor Yellow
-    }
-}
-else {
-    Write-Host ("skill routing verification failed: {0}" -f [string]$report.error) -ForegroundColor Red
-}
+if ($Json) { Write-Output $serialized }
+elseif ([bool]$report.ok) { Write-Host ('skill routing compatibility verified: mode={0}, projected={1}, profile_authority={2}' -f $report.mode, $report.projected_skill_count, $report.profile_reachability_authority) }
+else { Write-Host ('skill routing compatibility verification failed: {0}' -f [string]$report.error) -ForegroundColor Red }
 
 if (-not [bool]$report.ok) { exit 1 }
 exit 0

@@ -26,10 +26,10 @@ if ($MyInvocation.InvocationName -ne '.') {
             "更新上游并重建" { 更新 }
             "锁定" { 锁定 }
             "生成锁文件" { 锁定 }
+            "验证锁定" { 验证锁定 }
+            "verify-lock" { 验证锁定 }
             "清理无效映射" { 清理无效映射 (Merge-FilterAndArgs $Filter $args) }
             "prune-invalid-mappings" { 清理无效映射 (Merge-FilterAndArgs $Filter $args) }
-            "技能配置" { Invoke-SkillProfileCommand (Merge-FilterAndArgs $Filter $args) }
-            "skill-profile" { Invoke-SkillProfileCommand (Merge-FilterAndArgs $Filter $args) }
             "安装MCP" {
                 $mcpTokens = @()
                 if (-not [string]::IsNullOrWhiteSpace($Filter)) { $mcpTokens += $Filter }

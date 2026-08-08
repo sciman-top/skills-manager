@@ -1,6 +1,7 @@
-# skills-manager vNext Phase 5 Checklist
+# skills-manager vNext Phase 6 Checklist
 
-**task truth**: `tasks/skills-manager-vnext-phase5.tasks.json`
+**task truth**: `tasks/skills-manager-vnext-phase6.tasks.json`
+**status**: host_loaded; 12/12 implemented; runtime migration completed; fresh inventory 124/124; full passed 1121/1121; host_evaluation_partial; live_accepted failed
 **active_maintenance_track**: `maintenance_design`
 **maintenance_task_truth**: `tasks/skills-manager-vnext-maintenance-design.tasks.json`
 **maintenance_pilot_truth**: `tasks/skills-manager-vnext-lean-delivery-pilot.json`
@@ -14,6 +15,23 @@
 **profile_optimization_task_truth**: `tasks/skills-manager-vnext-profile-optimization.tasks.json`
 **active_discovery_redesign_track**: `capability_discovery_redesign`
 **discovery_redesign_task_truth**: `tasks/skills-manager-vnext-capability-discovery-redesign.tasks.json`
+
+## P6 Host-Native Skill Lifecycle Reset checklist
+
+- [x] `SMV-P6-001` 固化 admission、历史 supersession map、规划真源与负向 verifier。
+- [x] `SMV-P6-002` 实现 HostCapabilitySnapshot 合同和有效来源优先级。
+- [x] `SMV-P6-003` 实现 App Server、fresh CLI 和 config fallback adapters。
+- [x] `SMV-P6-004` 从 legacy router 拆出 catalog compiler 与 eligibility policy。
+- [x] `SMV-P6-005` 实现 token-aware 全 enabled metadata planner。
+- [x] `SMV-P6-006` 实现 all-skills native projection、receipt 和 rollback。
+- [x] `SMV-P6-007` 建立 metadata lint 与 direct/indirect/negative/no-skill corpus。
+- [x] `SMV-P6-008` 实现 native invocation trace 和 truth ladder。
+- [x] `SMV-P6-009` 完成 native-only 与 legacy path 的 zero-write shadow comparison。
+- [x] `SMV-P6-010` 退役 profile reachability 并完成配置 round-trip migration。
+- [x] `SMV-P6-011` 实现 opt-in strict App Server dispatch fallback。
+- [x] `SMV-P6-012` 完成 staged removal、runner 稳定化、single-flight full closeout 与 truth-boundary evidence；fresh host 仍仅 `host_evaluation_partial`。
+
+当前 P6 manifest 为 12/12 done，runtime projection 已完成；fresh App Server inventory 为 `124/124`，因此 `host_loaded=passed`。代表性 selection replay 为 7/7，但宿主不暴露 native selected/injected/executed events，故仍是 `host_evaluation_partial` 且 `live_accepted=failed`，不得声称 124 个技能面对所有任务必然正确命中。两个失败 full 已保留，最终稳定树 full exit 0：`1121/1121`、总耗时 `316483ms`。
 
 - [x] `SMV-P5-001` 建立 P5 Adaptive Capability Fabric 规划真源。
 - [x] `SMV-P5-002` 实现 task model、schema v3 与 capability DAG。
@@ -31,7 +49,7 @@
 - P0-P4 保持历史 `repo_verified` 真源。
 - P5 已完成 5/5 `repo_verified`；live read-only snapshot 与 full closeout 已通过。
 - Plugin/MCP install、OAuth、host writes、profile/session mutation、ChatGPT web local projection 和 business `live_accepted` 不在自动执行面。
-- 当前进入 P5 maintenance hold；不创建 P6 task manifest，除非路线图 admission 条件全部满足且用户明确授权。
+- P5 maintenance hold 已由用户授权和 reachability failure evidence 解除；P6 已完成 12/12 repo-side closeout，宿主写入与 live acceptance 仍不在本次结果内。
 
 ## Maintenance design checklist
 

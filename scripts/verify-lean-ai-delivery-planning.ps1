@@ -621,12 +621,18 @@ foreach ($policyContract in @(
         Add-LeanPlanningFinding ([ref]$findings) $policyContract.code $paths[$policyContract.key] $policyContract.message
     }
 }
-if (-not (Test-LeanContainsLiteral $content['roadmap'] 'P6_ADMISSION_STATUS: hold')) {
-    Add-LeanPlanningFinding ([ref]$findings) 'roadmap_p6_hold_missing' $paths['roadmap'] 'Roadmap must keep P6_ADMISSION_STATUS: hold.'
-}
-
 $p6ManifestRelativePath = 'tasks/skills-manager-vnext-phase6.tasks.json'
-if (Test-Path -LiteralPath (Join-Path $root $p6ManifestRelativePath) -PathType Leaf) {
+$currentP6AdmissionStatus = if (Test-LeanContainsLiteral $content['roadmap'] 'P6_ADMISSION_STATUS: admitted') {
+    'admitted'
+}
+elseif (Test-LeanContainsLiteral $content['roadmap'] 'P6_ADMISSION_STATUS: hold') {
+    'hold'
+}
+else {
+    Add-LeanPlanningFinding ([ref]$findings) 'roadmap_p6_admission_missing' $paths['roadmap'] 'Roadmap must declare the current P6 admission status.'
+    'unknown'
+}
+if ($currentP6AdmissionStatus -eq 'hold' -and (Test-Path -LiteralPath (Join-Path $root $p6ManifestRelativePath) -PathType Leaf)) {
     Add-LeanPlanningFinding ([ref]$findings) 'p6_manifest_created_while_on_hold' $p6ManifestRelativePath `
         'A P6 manifest is forbidden while admission remains on hold.'
 }
@@ -649,6 +655,7 @@ $result = [ordered]@{
     track = 'maintenance_design'
     base_phase = 'P5'
     p6_admission_status = 'hold'
+    current_p6_admission_status = $currentP6AdmissionStatus
     model_policy_status = 'host_advisory_only'
     radar_snapshot_policy = 'advisory_expiring_snapshot'
     m0_3_typed_core_status = 'poc_not_started'

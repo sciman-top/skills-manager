@@ -3203,11 +3203,49 @@ Describe "Reference shelf governance" {
         $readme = Get-Content -LiteralPath (Join-Path $repoRoot "references\README.md") -Raw
         $tierDoc = Get-Content -LiteralPath (Join-Path $repoRoot "docs\EXTERNAL_REFERENCE_REPO_TIERS.md") -Raw
 
-        $agents | Should Match "conditional-not-cloned"
-        $agents | Should Match "-CloneMissing -FetchOnly -SkipDirtyRepos"
-        $agents | Should Match "克隆不等于采纳"
+        $agents | Should Match "references/reference-shelf.manifest.json"
+        $agents | Should Match "scripts/refresh-reference-repos.ps1"
+        $agents | Should Match "克隆不等于采纳/安装/执行"
         $readme | Should Match "<registered-candidate>"
         $tierDoc | Should Match "does not authorize adoption"
+    }
+
+    It "Keeps the reference portfolio reversible and separate from runtime removal" {
+        $productIndex = Get-Content -LiteralPath (Join-Path $repoRoot "docs\product\README.md") -Raw
+        $prd = Get-Content -LiteralPath (Join-Path $repoRoot "docs\product\skills-manager-vnext-prd.md") -Raw
+        $architecture = Get-Content -LiteralPath (Join-Path $repoRoot "docs\product\skills-manager-vnext-architecture.md") -Raw
+        $roadmap = Get-Content -LiteralPath (Join-Path $repoRoot "docs\product\skills-manager-vnext-roadmap.md") -Raw
+        $tierDoc = Get-Content -LiteralPath (Join-Path $repoRoot "docs\EXTERNAL_REFERENCE_REPO_TIERS.md") -Raw
+
+        $productIndex | Should Match "可逆 reference portfolio"
+        $productIndex | Should Match "最薄真实主链"
+        $productIndex.Contains('不接管 `D:\CODE\external` 根') | Should Be $true
+        $prd | Should Match "PP-013 Bounded research and reversible reference portfolio"
+        $prd | Should Match "FR-CAT-00[6789]"
+        $architecture | Should Match "ReferencePortfolio"
+        $architecture | Should Match "ADR-SMV-039"
+        $roadmap | Should Match "reference_portfolio_action"
+        $tierDoc | Should Match "Demotion is not runtime removal"
+        $tierDoc | Should Match "retire before delete"
+        $tierDoc | Should Match "Owned-root boundary"
+    }
+
+    It "Limits reference portfolio mutations to the project-owned external root" {
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        $manifest.references_root | Should Be "D:\CODE\external\skills-manager-references"
+        $agents = Get-Content -LiteralPath (Join-Path $repoRoot "AGENTS.md") -Raw
+        $agents | Should Match "不在联动边界"
+    }
+
+    It "Enforces reference portfolio tier and status lifecycle pairs" {
+        . $governanceScript
+
+        Test-ReferenceLifecycleState "core-mainline" "active" | Should Be $true
+        Test-ReferenceLifecycleState "secondary" "active" | Should Be $true
+        Test-ReferenceLifecycleState "historical-compatibility" "deprecated" | Should Be $true
+        Test-ReferenceLifecycleState "conditional-not-cloned" "not-cloned" | Should Be $true
+        Test-ReferenceLifecycleState "core-mainline" "deprecated" | Should Be $false
+        Test-ReferenceLifecycleState "secondary" "not-cloned" | Should Be $false
     }
 
     It "Rejects rooted and traversal reference paths before normalization" {

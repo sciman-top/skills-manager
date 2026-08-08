@@ -129,10 +129,6 @@ $productionSource = @(Get-ChildItem -LiteralPath (Join-Path $root 'src') -Recurs
 if ($productionSource -match '(?i)typed-core|skills-manager-typed-core|verify-typed-core-shadow') {
     Add-Finding 'production_integration_detected' 'src/**/*.ps1' 'TC1 must not be referenced from production PowerShell source.'
 }
-if (Test-Path -LiteralPath (Join-Path $root 'tasks/skills-manager-vnext-phase6.tasks.json')) {
-    Add-Finding 'p6_manifest_forbidden' 'tasks/skills-manager-vnext-phase6.tasks.json' 'P6 manifest is forbidden while admission is hold.'
-}
-
 try {
     $pilot = $content.pilot | ConvertFrom-Json
     if ([string]$pilot.pilot_status -ne 'collecting' -or @($pilot.samples).Count -ne 0) {

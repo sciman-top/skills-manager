@@ -10,17 +10,23 @@
     "managed_link_excludes": [
       "anthropics-skills-skills-skill-creator"
     ],
-    "active_profile": "default",
     "budget_limit_chars": 8000,
     "external_metadata_reserve_chars": 3500,
     "routing_policy_path": "config/skill-routing-policy.json",
-    "resident_names": [
-      "capability-router",
-      "watch-interrupted-task"
-    ],
+    "resident_names": [],
     "external_skill_inventory": {
       "enabled": true,
       "plugin_cache_path": "~/.codex/plugins/cache"
+    },
+    "native_projection": {
+      "schema_version": 1,
+      "enabled": true,
+      "owner": "skills-manager",
+      "target_root": "~/.agents/skills",
+      "apply_requires_token": true,
+      "receipt_path": "reports/skill-projection/native-receipt.json",
+      "notification_method": "skills/changed",
+      "notification_mode": "plan_only"
     },
     "aliases": [
       {
@@ -111,179 +117,6 @@
         ]
       }
     },
-    "profiles": {
-      "default": {
-        "purpose": "General debugging, evidence-based completion checks, and focused design grilling; simple native tasks need no skill.",
-        "budget_limit_chars": 8000,
-        "enabled_names": [
-          "systematic-debugging",
-          "verification-before-completion",
-          "domain-modeling",
-          "grill-with-docs",
-          "grilling"
-        ]
-      },
-      "coding": {
-        "purpose": "Routine implementation, API design, code review, and security hardening.",
-        "budget_limit_chars": 7500,
-        "enabled_names": [
-          "systematic-debugging",
-          "verification-before-completion",
-          "incremental-implementation",
-          "code-review-and-quality",
-          "api-and-interface-design",
-          "security-and-hardening"
-        ]
-      },
-      "coding-strict": {
-        "purpose": "High-rigor specification, TDD, domain, review, and verification workflows.",
-        "enabled_names": [
-          "systematic-debugging",
-          "test-driven-development",
-          "verification-before-completion",
-          "code-review-and-quality",
-          "api-and-interface-design",
-          "security-and-hardening",
-          "domain-modeling",
-          "grill-with-docs",
-          "grilling"
-        ]
-      },
-      "engineering": {
-        "purpose": "Product discovery, architecture and domain design, specifications, research, and task planning.",
-        "enabled_names": [
-          "codebase-design",
-          "idea-refine",
-          "spec-driven-development",
-          "planning-and-task-breakdown",
-          "research",
-          "domain-modeling",
-          "draft-spec"
-        ]
-      },
-      "python": {
-        "purpose": "Modern Python tooling, pytest strategy, performance work, review, and security.",
-        "enabled_names": [
-          "systematic-debugging",
-          "verification-before-completion",
-          "code-review-and-quality",
-          "modern-python",
-          "python-testing-patterns",
-          "python-performance-optimization",
-          "security-and-hardening"
-        ]
-      },
-      "mcp": {
-        "purpose": "MCP server design, MCP CLI interaction, API boundaries, research, and security.",
-        "enabled_names": [
-          "research",
-          "mcp-builder",
-          "mcp-cli",
-          "api-and-interface-design",
-          "security-and-hardening",
-          "verification-before-completion"
-        ]
-      },
-      "review": {
-        "purpose": "Code review, simplification, review-feedback handling, deprecation, and migration.",
-        "enabled_names": [
-          "code-review-and-quality",
-          "receiving-code-review",
-          "code-simplification",
-          "verification-before-completion",
-          "security-and-hardening",
-          "deprecation-and-migration"
-        ]
-      },
-      "dotnet": {
-        "purpose": ".NET backend architecture, Microsoft API references, WPF products, and runtime diagnosis.",
-        "enabled_names": [
-          "microsoft-code-reference",
-          "custom-windows-wpf-teacher-app",
-          "dotnet-backend-patterns",
-          "debug:dotnet",
-          "systematic-debugging",
-          "verification-before-completion"
-        ]
-      },
-      "ppt": {
-        "purpose": "PowerPoint creation, automation, accessibility, classroom courseware, and editable diagrams.",
-        "enabled_names": [
-          "custom-teacher-courseware-ppt",
-          "custom-powerpoint-accessibility",
-          "powerpoint-automation",
-          "baoyu-slide-deck",
-          "canvas-design",
-          "drawio-diagram-forge"
-        ]
-      },
-      "content": {
-        "purpose": "Document coauthoring, Chinese publishing workflows, copy editing, and Markdown formatting.",
-        "enabled_names": [
-          "baoyu-format-markdown",
-          "copy-editing",
-          "custom-creator-publishing",
-          "doc-coauthoring"
-        ]
-      },
-      "marketing": {
-        "purpose": "Content strategy, persuasive copywriting, and editing existing marketing copy.",
-        "enabled_names": [
-          "content-strategy",
-          "copywriting",
-          "copy-editing"
-        ]
-      },
-      "physics": {
-        "purpose": "Interactive junior physics explanations, classroom simulations, and animation delivery.",
-        "enabled_names": [
-          "custom-junior-physics-animation",
-          "manim-composer",
-          "manimce-best-practices",
-          "remotion-best-practices",
-          "playwright"
-        ]
-      },
-      "video": {
-        "purpose": "Storyboards and programmatic video or mathematical animation workflows.",
-        "enabled_names": [
-          "storyboard-creation",
-          "remotion-best-practices",
-          "manim-composer",
-          "manimce-best-practices"
-        ]
-      },
-      "design": {
-        "purpose": "Production frontend UI, visual direction, design systems, interface review, and motion.",
-        "enabled_names": [
-          "frontend-design",
-          "frontend-ui-engineering",
-          "ant-design",
-          "tailwind-design-system",
-          "web-design-guidelines",
-          "ui-animation"
-        ]
-      },
-      "browser": {
-        "purpose": "Browser automation, local web testing, screenshots, Playwright guidance, and web research.",
-        "enabled_names": [
-          "playwright",
-          "playwright-best-practices",
-          "webapp-testing",
-          "screenshot",
-          "research"
-        ]
-      },
-      "database": {
-        "purpose": "Postgres schema, migration, RLS, query performance, API boundaries, and data security.",
-        "enabled_names": [
-          "supabase-postgres-best-practices",
-          "api-and-interface-design",
-          "performance-optimization",
-          "security-and-hardening"
-        ]
-      }
-    },
     "sources": [
       {
         "id": "agents-user",
@@ -293,7 +126,196 @@
           "codex"
         ]
       }
-    ]
+    ],
+    "profile_compatibility": {
+      "schema_version": 1,
+      "kind": "ProfileCompatibilityView",
+      "status": "read_only",
+      "source_schema": "skill_projection.profile_fields.v1",
+      "source_fields": [
+        "active_profile",
+        "profiles"
+      ],
+      "reachability_authority": "none",
+      "active_profile": "default",
+      "current_profile": "",
+      "profiles": {
+        "default": {
+          "purpose": "General debugging, evidence-based completion checks, and focused design grilling; simple native tasks need no skill.",
+          "budget_limit_chars": 8000,
+          "enabled_names": [
+            "systematic-debugging",
+            "verification-before-completion",
+            "domain-modeling",
+            "grill-with-docs",
+            "grilling"
+          ]
+        },
+        "coding": {
+          "purpose": "Routine implementation, API design, code review, and security hardening.",
+          "budget_limit_chars": 7500,
+          "enabled_names": [
+            "systematic-debugging",
+            "verification-before-completion",
+            "incremental-implementation",
+            "code-review-and-quality",
+            "api-and-interface-design",
+            "security-and-hardening"
+          ]
+        },
+        "coding-strict": {
+          "purpose": "High-rigor specification, TDD, domain, review, and verification workflows.",
+          "enabled_names": [
+            "systematic-debugging",
+            "test-driven-development",
+            "verification-before-completion",
+            "code-review-and-quality",
+            "api-and-interface-design",
+            "security-and-hardening",
+            "domain-modeling",
+            "grill-with-docs",
+            "grilling"
+          ]
+        },
+        "engineering": {
+          "purpose": "Product discovery, architecture and domain design, specifications, research, and task planning.",
+          "enabled_names": [
+            "codebase-design",
+            "idea-refine",
+            "spec-driven-development",
+            "planning-and-task-breakdown",
+            "research",
+            "domain-modeling",
+            "draft-spec"
+          ]
+        },
+        "python": {
+          "purpose": "Modern Python tooling, pytest strategy, performance work, review, and security.",
+          "enabled_names": [
+            "systematic-debugging",
+            "verification-before-completion",
+            "code-review-and-quality",
+            "modern-python",
+            "python-testing-patterns",
+            "python-performance-optimization",
+            "security-and-hardening"
+          ]
+        },
+        "mcp": {
+          "purpose": "MCP server design, MCP CLI interaction, API boundaries, research, and security.",
+          "enabled_names": [
+            "research",
+            "mcp-builder",
+            "mcp-cli",
+            "api-and-interface-design",
+            "security-and-hardening",
+            "verification-before-completion"
+          ]
+        },
+        "review": {
+          "purpose": "Code review, simplification, review-feedback handling, deprecation, and migration.",
+          "enabled_names": [
+            "code-review-and-quality",
+            "receiving-code-review",
+            "code-simplification",
+            "verification-before-completion",
+            "security-and-hardening",
+            "deprecation-and-migration"
+          ]
+        },
+        "dotnet": {
+          "purpose": ".NET backend architecture, Microsoft API references, WPF products, and runtime diagnosis.",
+          "enabled_names": [
+            "microsoft-code-reference",
+            "custom-windows-wpf-teacher-app",
+            "dotnet-backend-patterns",
+            "debug:dotnet",
+            "systematic-debugging",
+            "verification-before-completion"
+          ]
+        },
+        "ppt": {
+          "purpose": "PowerPoint creation, automation, accessibility, classroom courseware, and editable diagrams.",
+          "enabled_names": [
+            "custom-teacher-courseware-ppt",
+            "custom-powerpoint-accessibility",
+            "powerpoint-automation",
+            "baoyu-slide-deck",
+            "canvas-design",
+            "drawio-diagram-forge"
+          ]
+        },
+        "content": {
+          "purpose": "Document coauthoring, Chinese publishing workflows, copy editing, and Markdown formatting.",
+          "enabled_names": [
+            "baoyu-format-markdown",
+            "copy-editing",
+            "custom-creator-publishing",
+            "doc-coauthoring"
+          ]
+        },
+        "marketing": {
+          "purpose": "Content strategy, persuasive copywriting, and editing existing marketing copy.",
+          "enabled_names": [
+            "content-strategy",
+            "copywriting",
+            "copy-editing"
+          ]
+        },
+        "physics": {
+          "purpose": "Interactive junior physics explanations, classroom simulations, and animation delivery.",
+          "enabled_names": [
+            "custom-junior-physics-animation",
+            "manim-composer",
+            "manimce-best-practices",
+            "remotion-best-practices",
+            "playwright"
+          ]
+        },
+        "video": {
+          "purpose": "Storyboards and programmatic video or mathematical animation workflows.",
+          "enabled_names": [
+            "storyboard-creation",
+            "remotion-best-practices",
+            "manim-composer",
+            "manimce-best-practices"
+          ]
+        },
+        "design": {
+          "purpose": "Production frontend UI, visual direction, design systems, interface review, and motion.",
+          "enabled_names": [
+            "frontend-design",
+            "frontend-ui-engineering",
+            "ant-design",
+            "tailwind-design-system",
+            "web-design-guidelines",
+            "ui-animation"
+          ]
+        },
+        "browser": {
+          "purpose": "Browser automation, local web testing, screenshots, Playwright guidance, and web research.",
+          "enabled_names": [
+            "playwright",
+            "playwright-best-practices",
+            "webapp-testing",
+            "screenshot",
+            "research"
+          ]
+        },
+        "database": {
+          "purpose": "Postgres schema, migration, RLS, query performance, API boundaries, and data security.",
+          "enabled_names": [
+            "supabase-postgres-best-practices",
+            "api-and-interface-design",
+            "performance-optimization",
+            "security-and-hardening"
+          ]
+        }
+      },
+      "writes_performed": false,
+      "provider_calls": 0,
+      "native_mutations": 0
+    }
   },
   "vendors": [
     {

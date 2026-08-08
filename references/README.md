@@ -18,7 +18,7 @@
 - `core-mainline`：`codex`、`openai-plugins`、`anthropics-skills`、`gemini-cli`、`agentskills`、`modelcontextprotocol`、`registry`
 - `historical-compatibility`：`openai-skills`；只用于现有 runtime mapping 和迁移取证，不进入默认刷新或新安装推荐
 - `secondary`：`servers`、`vercel-agent-skills`、`obra-superpowers`、`wshobson-agents`、`mattpocock-skills`、`trailofbits-skills`、`awesome-copilot`
-- `conditional-not-cloned`：`workspace-hub`、`aktsmm-agent-skills`、`manim-skill`、`playwright-best-practices-skill`、`supabase-agent-skills`、`antd-skill`、`slidev`、`knowledge-work-plugins`、`remotion-skills`、`anthropics-k12-teacher-skills`、`community-accessibility-agents`、`iofficeai-officecli`、`emilkowalski-skills`、`tirth8205-code-review-graph`
+- `conditional-not-cloned`：`workspace-hub`、`aktsmm-agent-skills`、`manim-skill`、`playwright-best-practices-skill`、`supabase-agent-skills`、`antd-skill`、`slidev`、`knowledge-work-plugins`、`remotion-skills`、`anthropics-k12-teacher-skills`、`community-accessibility-agents`、`iofficeai-officecli`、`emilkowalski-skills`、`tirth8205-code-review-graph`、`codex-watchdog`、`polly`、`temporal-dotnet`、`hangfire`、`quartznet`、`uptime-kuma`、`mcp-csharp-sdk`
 
 默认只刷新 manifest 的 `core-default` 集合，不把所有 runtime source repo 都自动升级成长期镜像参考棚。
 
@@ -42,3 +42,6 @@
 - `historical-compatibility` 只能显式刷新；其内容不作为新能力推荐或默认安装来源
 - 现有资料不足且源码级比对有明确收益时，可以自主发现公开开源候选；必须先把 URL、完整 review revision、license、触发条件、review evidence 和采纳决定登记为 `conditional-not-cloned`，再按名称克隆到 manifest 控制的 `conditional/` 路径
 - 来源或许可证不明、需要认证、目录冲突、已有 checkout 脏或没有当前消费者时阻断；克隆只授权只读比对，不等于采纳、安装、执行或进入默认长期镜像
+- Portfolio lifecycle：`discover -> conditional-not-cloned -> on-demand read-only -> secondary/core-mainline -> historical-compatibility -> retire/remove`；晋级需要第一方权威或重复当前消费者，官方替代、长期无消费者、重复、stale、许可证/供应链风险或维护成本过高时降级/退役
+- 先降级、停刷或保留 historical evidence，再删除干净且 manifest-controlled 的 checkout；reference checkout 删除、manifest 删除和 `skills.json` runtime/import 删除是独立事务，不得联动误删
+- Owned-root boundary：只管理 `D:\CODE\external\skills-manager-references` 内 manifest 登记路径；`D:\CODE\external` 根、兄弟 `*-references`、`_shared` 和产品 checkout 只可按显式映射只读查阅，不纳入自动 refresh/move/delete

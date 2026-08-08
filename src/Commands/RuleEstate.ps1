@@ -36,8 +36,10 @@ function Invoke-RuleEstateAuditCommand([object[]]$Tokens = @()) {
     }
     $report = Invoke-RuleEstateAudit -WorkspaceRoot $options.workspace_root -ExcludeNames $options.exclude_names -RegistryTargets $registryTargets -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -MaxTargets $options.max_targets
     $reportRequested = -not [string]::IsNullOrWhiteSpace([string]$options.out_path)
+    $pass = [bool]$report.structural_pass -and [bool]$report.semantic_coverage_pass -and [bool]$report.enforcement_verified
+    $exitCode = if ($pass) { 0 } else { 2 }
     $envelope = [pscustomobject][ordered]@{
-        schema_version = 1; command = 'rule-estate-audit'; pass = $true; exit_code = 0; truth_boundary = $report.truth_boundary
+        schema_version = 1; command = 'rule-estate-audit'; pass = $pass; exit_code = $exitCode; truth_boundary = $report.truth_boundary
         report = $report; writes = $(if ($reportRequested) { 1 } else { 0 }); provider_calls = 0; native_mutations = 0
     }
     $json = $envelope | ConvertTo-Json -Depth 60 -Compress
@@ -50,8 +52,8 @@ function Invoke-RuleEstateAuditCommand([object[]]$Tokens = @()) {
         }
         Write-Utf8FileAtomic -Path $outPath -Content $json
     }
-    $output = if ($options.json) { $json } else { 'Rule estate audit: targets={0}, findings={1}, gaps={2}, patch_candidates={3}' -f $report.summary.target_count, $report.summary.finding_count, $report.summary.gap_count, $report.summary.patch_candidate_count }
-    return [pscustomobject]@{ exit_code = 0; output = $output; json = [bool]$options.json; envelope = $envelope }
+    $output = if ($options.json) { $json } else { 'Rule estate audit: targets={0}, findings={1}, textual_covered={2}, semantic_gaps={3}, patch_candidates={4}' -f $report.summary.target_count, $report.summary.finding_count, $report.summary.textual_mapping_covered_count, $report.summary.semantic_gap_count, $report.summary.patch_candidate_count }
+    return [pscustomobject]@{ exit_code = $exitCode; output = $output; json = [bool]$options.json; envelope = $envelope }
 }
 
 function Parse-RuleEstateMutationOptions([object[]]$Tokens, [ValidateSet('plan','apply','rollback')][string]$Mode) {

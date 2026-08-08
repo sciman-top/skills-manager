@@ -14,6 +14,19 @@ Describe "Quality gate scripts" {
         $raw | Should Match 'total_elapsed_ms'
     }
 
+    It "fails closed on workspace-to-lock commit drift during full gate" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $gate = Get-Content -LiteralPath (Join-Path $root 'scripts\quality\run-local-quality-gates.ps1') -Raw
+        $main = Get-Content -LiteralPath (Join-Path $root 'src\Main.ps1') -Raw
+        $config = Get-Content -LiteralPath (Join-Path $root 'src\Config.ps1') -Raw
+
+        $gate | Should Match "Invoke-QualityGate 'workspace-lock-parity'"
+        $gate | Should Match "skills\.ps1 verify-lock"
+        $main | Should Match '"verify-lock"\s*\{\s*验证锁定\s*\}'
+        $config | Should Match '(?m)^function 验证锁定\b'
+        $config | Should Match 'Ensure-LockedState'
+    }
+
     It "keeps closeout on one full-gate entry plus the explicit live Doctor probe" {
         $root = Join-Path $PSScriptRoot "..\.."
         $agents = Get-Content -LiteralPath (Join-Path $root 'AGENTS.md') -Raw
@@ -55,14 +68,57 @@ Describe "Quality gate scripts" {
     It "keeps full-suite output failure-focused and reports actionable timing profiles" {
         $root = Join-Path $PSScriptRoot "..\.."
         $runner = Get-Content -LiteralPath (Join-Path $root 'tests\run.ps1') -Raw
+        $worker = Get-Content -LiteralPath (Join-Path $root 'tests\run-pester-test-file.ps1') -Raw
 
-        $runner | Should Match '-Show Failed,Summary'
+        ($runner + "`n" + $worker) | Should Match '-Show Failed,Summary'
         $runner | Should Match 'unit_elapsed_ms'
         $runner | Should Match 'e2e_elapsed_ms'
         $runner | Should Match 'test_suite_elapsed_ms'
         $runner | Should Match 'slow_test_file'
         $runner | Should Match 'slow_test_case'
         $runner | Should Match 'reports.test-timings.current.json'
+    }
+
+    It "isolates test files in bounded workers with timeout logs and terminal receipts" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $runner = Get-Content -LiteralPath (Join-Path $root 'tests\run.ps1') -Raw
+        $workerPath = Join-Path $root 'tests\run-pester-test-file.ps1'
+
+        Test-Path -LiteralPath $workerPath | Should Be $true
+        $runner | Should Match '\[int\]\$MaxParallel'
+        $runner | Should Match '\[int\]\$TestFileTimeoutSeconds'
+        $runner | Should Match 'Start-Process'
+        $runner | Should Match 'test-shards'
+        $runner | Should Match 'SerialTestFiles'
+        $runner | Should Match 'InProcessTestFiles'
+        $runner | Should Match 'Invoke-InProcessTestFile'
+        $runner | Should Match 'SelectionCancellation\.Tests\.ps1'
+        $runner | Should Match 'WatchRuntimeArming\.Tests\.ps1'
+        $runner | Should Match '\$orderedFiles'
+        $runner | Should Match '\.Dispose\(\)'
+        $runner | Should Match 'timed_out'
+        $runner | Should Match 'receipt\.json'
+        $runner | Should Not Match 'Invoke-Pester -Script \$UnitTestPath'
+
+        if (Test-Path -LiteralPath $workerPath) {
+            $worker = Get-Content -LiteralPath $workerPath -Raw
+            $worker | Should Match 'Invoke-Pester'
+            $worker | Should Match '-PassThru'
+            $worker | Should Match 'receipt'
+            $worker | Should Match 'TotalCount'
+            $worker | Should Match 'FailedCount'
+        }
+    }
+
+    It "fails fast when another full gate already owns the repository" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $gate = Get-Content -LiteralPath (Join-Path $root 'scripts\quality\run-local-quality-gates.ps1') -Raw
+
+        $gate | Should Match 'quality_gate_peer_busy'
+        $gate | Should Match 'System\.Threading\.Mutex'
+        $gate | Should Match 'WaitOne\(0\)'
+        $gate | Should Match 'Win32_Process'
+        $gate | Should Match 'exit 75'
     }
 
     It "fails closed when either Pester stage discovers zero tests" {
@@ -176,12 +232,15 @@ Describe 'fixture unit' {
         Test-Path -LiteralPath (Join-Path $root 'docs\archive\change-evidence\README.md') | Should Be $true
     }
 
-    It "keeps the routing gate on its lightweight inventory instead of audit hashes" {
+    It "keeps the retired routing verifier compatibility-only" {
         $root = Join-Path $PSScriptRoot "..\.."
         $routingVerifier = Get-Content -LiteralPath (Join-Path $root 'scripts\verify-skill-routing.ps1') -Raw
 
-        $routingVerifier | Should Match 'Get-SkillRoutingLocalInventory'
-        $routingVerifier | Should Not Match 'Get-InstalledSkillFacts'
+        $routingVerifier | Should Match 'skill-routing-compatibility'
+        $routingVerifier | Should Match 'compatibility_only'
+        $routingVerifier | Should Match 'profile_reachability_authority'
+        $routingVerifier | Should Not Match 'Get-SkillRoutingLocalInventory'
+        $routingVerifier | Should Not Match 'New-SkillRoutingReport'
     }
 
     It "Runs repository hygiene in the reusable local quality gate" {
@@ -203,24 +262,24 @@ Describe 'fixture unit' {
         $skillIntegrityIndex = $raw.IndexOf("skill-integrity")
         $referenceGovernanceIndex = $raw.IndexOf("reference-governance")
         $overrideActivationIndex = $raw.IndexOf("override-activation-corpus")
-        $skillRoutingIndex = $raw.IndexOf("skill-routing")
+        $nativeMetadataIndex = $raw.IndexOf("native-skill-metadata")
         $dependencyBaselineIndex = $raw.IndexOf("dependency-baseline")
 
         $generatedSyncIndex -ge 0 | Should Be $true
         $skillIntegrityIndex -ge 0 | Should Be $true
         $referenceGovernanceIndex -ge 0 | Should Be $true
         $overrideActivationIndex -ge 0 | Should Be $true
-        $skillRoutingIndex -ge 0 | Should Be $true
+        $nativeMetadataIndex -ge 0 | Should Be $true
         $dependencyBaselineIndex -ge 0 | Should Be $true
         $generatedSyncIndex -lt $skillIntegrityIndex | Should Be $true
         $skillIntegrityIndex -lt $referenceGovernanceIndex | Should Be $true
         $referenceGovernanceIndex -lt $overrideActivationIndex | Should Be $true
-        $overrideActivationIndex -lt $skillRoutingIndex | Should Be $true
-        $skillRoutingIndex -lt $dependencyBaselineIndex | Should Be $true
+        $overrideActivationIndex -lt $nativeMetadataIndex | Should Be $true
+        $nativeMetadataIndex -lt $dependencyBaselineIndex | Should Be $true
         $raw | Should Match "verify-skill-integrity\.ps1"
         $raw | Should Match "verify-reference-governance\.ps1"
         $raw | Should Match "verify-override-skill-activation\.ps1"
-        $raw | Should Match "verify-skill-routing\.ps1"
+        $raw | Should Match "verify-native-skill-metadata\.ps1"
     }
 
     It "Runs the vNext planning contract after dependency baseline and before doctor contract" {
@@ -281,7 +340,7 @@ Describe 'fixture unit' {
         $raw = Get-Content -LiteralPath $helpSourcePath -Raw
 
         $raw | Should Match "scripts\\verify-skill-integrity\.ps1"
-        $raw | Should Match "scripts\\verify-skill-routing\.ps1"
+        $raw | Should Match "scripts\\verify-native-skill-metadata\.ps1"
     }
 
     It "Uses the repo-owned full quality gate in GitHub CI" {

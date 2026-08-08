@@ -76,19 +76,22 @@ Describe "Skill projection" {
         }
     }
 
-    Context "Repository GPT-5.6 profile policy" {
-        It "Keeps routine profiles free from the mandatory Superpowers bootstrap" {
+    Context "Repository GPT-5.6 profile compatibility view" {
+        It "Keeps migrated routine profile data read-only and free from the mandatory Superpowers bootstrap" {
             $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
             $config = Get-ContentUtf8 (Join-Path $repoRoot "skills.json") | ConvertFrom-Json
+            $compatibility = $config.skill_projection.profile_compatibility
+            $compatibility.status | Should Be "read_only"
+            $compatibility.reachability_authority | Should Be "none"
             $routineProfiles = @("default", "coding", "engineering", "python", "mcp", "review", "dotnet")
 
             foreach ($profileName in $routineProfiles) {
-                $enabledNames = @($config.skill_projection.profiles.$profileName.enabled_names)
+                $enabledNames = @($compatibility.profiles.$profileName.enabled_names)
                 ($enabledNames -contains "using-superpowers") | Should Be $false
             }
 
-            $defaultNames = @($config.skill_projection.profiles.default.enabled_names)
-            $config.skill_projection.profiles.default.budget_limit_chars | Should Be 8000
+            $defaultNames = @($compatibility.profiles.default.enabled_names)
+            $compatibility.profiles.default.budget_limit_chars | Should Be 8000
             $defaultNames | Should Be @(
                 "systematic-debugging",
                 "verification-before-completion",
@@ -96,13 +99,13 @@ Describe "Skill projection" {
                 "grill-with-docs",
                 "grilling"
             )
-            @($config.skill_projection.resident_names) | Should Be @("capability-router", "watch-interrupted-task")
+            @($config.skill_projection.resident_names) | Should Be @()
             foreach ($workflowName in @("research", "brainstorming", "planning-and-task-breakdown", "git-workflow-and-versioning", "incremental-implementation")) {
                 ($defaultNames -contains $workflowName) | Should Be $false
             }
 
-            $codingNames = @($config.skill_projection.profiles.coding.enabled_names)
-            $config.skill_projection.profiles.coding.budget_limit_chars | Should Be 7500
+            $codingNames = @($compatibility.profiles.coding.enabled_names)
+            $compatibility.profiles.coding.budget_limit_chars | Should Be 7500
             $codingNames | Should Be @(
                 "systematic-debugging",
                 "verification-before-completion",
@@ -119,7 +122,7 @@ Describe "Skill projection" {
         It "Keeps the strict profile evidence-focused and removes the mandatory router" {
             $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
             $config = Get-ContentUtf8 (Join-Path $repoRoot "skills.json") | ConvertFrom-Json
-            $strictNames = @($config.skill_projection.profiles."coding-strict".enabled_names)
+            $strictNames = @($config.skill_projection.profile_compatibility.profiles."coding-strict".enabled_names)
             foreach ($workflowName in @("systematic-debugging", "test-driven-development", "verification-before-completion", "code-review-and-quality", "domain-modeling", "grill-with-docs", "grilling")) {
                 ($strictNames -contains $workflowName) | Should Be $true
             }
@@ -137,7 +140,7 @@ Describe "Skill projection" {
         It "Separates visible engineering planning from explicit side-effecting skills" {
             $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
             $config = Get-ContentUtf8 (Join-Path $repoRoot "skills.json") | ConvertFrom-Json
-            $engineeringNames = @($config.skill_projection.profiles.engineering.enabled_names)
+            $engineeringNames = @($config.skill_projection.profile_compatibility.profiles.engineering.enabled_names)
             $engineeringNames | Should Be @(
                 "codebase-design",
                 "idea-refine",
@@ -1054,6 +1057,20 @@ enabled = false
             finally {
                 $script:DryRun = $oldDryRun
             }
+        }
+    }
+
+    Context "P6 native projection configuration boundary" {
+        It "declares an explicit tokenized plan-only native projection surface" {
+            $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
+            $config = Get-ContentUtf8 (Join-Path $repoRoot "skills.json") | ConvertFrom-Json
+            $native = $config.skill_projection.native_projection
+
+            $native.enabled | Should Be $true
+            $native.owner | Should Be "skills-manager"
+            $native.apply_requires_token | Should Be $true
+            $native.notification_method | Should Be "skills/changed"
+            $native.notification_mode | Should Be "plan_only"
         }
     }
 }

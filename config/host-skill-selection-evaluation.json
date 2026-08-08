@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "evaluation_id": "host-skill-selection-effectiveness-v1",
-  "selection_case_count": 32,
-  "cold_load_case_count": 8,
+  "selection_case_count": 33,
+  "cold_load_case_count": 0,
   "category_count": 8,
   "languages": ["zh", "en"],
   "cases": [
@@ -28,8 +28,16 @@
       "language": "en",
       "profile": "default",
       "request": "Set up a pytest suite with fixtures and mocks for this Python package.",
-      "expected": { "required": ["capability-router"], "forbidden": ["python-testing-patterns", "python-performance-optimization"] },
-      "cold_probe": { "domain_hints": ["python", "coding"], "target_skill": "python-testing-patterns", "forbidden": ["python-performance-optimization"] }
+      "expected": { "required": ["python-testing-patterns"], "forbidden": ["python-performance-optimization", "capability-router"] }
+    },
+    {
+      "id": "direct-policy-fallback-en",
+      "category": "direct",
+      "language": "en",
+      "profile": "default",
+      "request": "Explicitly use the deterministic capability policy fallback to validate the skill set for this request.",
+      "explicit_fallback": true,
+      "expected": { "required": ["capability-router"], "forbidden": [] }
     },
     {
       "id": "direct-code-review-zh",
@@ -53,8 +61,7 @@
       "language": "zh",
       "profile": "default",
       "request": "这段现有落地页文案太啰嗦、读起来生硬，请在不改核心承诺的前提下收紧表达。",
-      "expected": { "required": ["capability-router"], "forbidden": ["copy-editing", "copywriting"] },
-      "cold_probe": { "domain_hints": ["marketing", "content"], "target_skill": "copy-editing", "forbidden": ["copywriting"] }
+      "expected": { "required": ["copy-editing"], "forbidden": ["copywriting", "capability-router"] }
     },
     {
       "id": "indirect-domain-language-en",
@@ -70,8 +77,7 @@
       "language": "zh",
       "profile": "default",
       "request": "和我一起逐轮完善一份技术提案，先收集上下文，再迭代结构并验证读者能否理解。",
-      "expected": { "required": ["capability-router"], "forbidden": ["doc-coauthoring"] },
-      "cold_probe": { "domain_hints": ["content", "engineering"], "target_skill": "doc-coauthoring", "forbidden": ["draft-spec"] }
+      "expected": { "required": ["doc-coauthoring"], "forbidden": ["draft-spec", "capability-router"] }
     },
     {
       "id": "negative-explain-only-zh",
@@ -103,8 +109,7 @@
       "language": "en",
       "profile": "default",
       "request": "Review this UI for accessibility and interface guideline violations, but do not automate or open a browser.",
-      "expected": { "required": ["capability-router"], "forbidden": ["web-design-guidelines", "playwright"] },
-      "cold_probe": { "domain_hints": ["design", "browser"], "target_skill": "web-design-guidelines", "forbidden": ["playwright", "webapp-testing"] }
+      "expected": { "required": ["web-design-guidelines"], "forbidden": ["playwright", "webapp-testing", "capability-router"] }
     },
     {
       "id": "ambiguous-idea-zh",
@@ -128,7 +133,7 @@
       "language": "zh",
       "profile": "engineering",
       "request": "规格已经评审通过，请把它拆成有依赖关系、可实施、可验证的任务清单。",
-      "expected": { "required": ["planning-and-task-breakdown"], "forbidden": ["idea-refine"] }
+      "expected": { "required": [], "required_any": [["planning-and-task-breakdown", "draft-tickets"]], "forbidden": ["idea-refine"] }
     },
     {
       "id": "ambiguous-cold-architecture-en",
@@ -136,8 +141,7 @@
       "language": "en",
       "profile": "default",
       "request": "The service has unclear module boundaries and unstable interfaces; challenge the architecture and propose deeper seams without implementing it.",
-      "expected": { "required": ["capability-router"], "forbidden": ["codebase-design"] },
-      "cold_probe": { "domain_hints": ["engineering", "review"], "target_skill": "codebase-design", "forbidden": ["idea-refine"] }
+      "expected": { "required": ["codebase-design"], "forbidden": ["idea-refine", "capability-router"] }
     },
     {
       "id": "architecture-end-state-zh",
@@ -153,8 +157,7 @@
       "language": "en",
       "profile": "default",
       "request": "Choose and configure a modern Python CLI stack using uv, ruff, and ty, replacing the legacy pip and black setup.",
-      "expected": { "required": ["capability-router"], "forbidden": ["modern-python", "python-performance-optimization"] },
-      "cold_probe": { "domain_hints": ["python", "coding"], "target_skill": "modern-python", "forbidden": ["python-performance-optimization"] }
+      "expected": { "required": ["modern-python"], "forbidden": ["python-performance-optimization", "capability-router"] }
     },
     {
       "id": "architecture-tailwind-system-en",
@@ -170,8 +173,7 @@
       "language": "zh",
       "profile": "default",
       "request": "规划一个 C# 后端 API 的 async、依赖注入、EF Core、缓存与 xUnit 工程架构，不是在排查故障。",
-      "expected": { "required": ["capability-router"], "forbidden": ["dotnet-backend-patterns", "systematic-debugging"] },
-      "cold_probe": { "domain_hints": ["dotnet", "coding"], "target_skill": "dotnet-backend-patterns", "forbidden": ["debug:dotnet", "systematic-debugging"] }
+      "expected": { "required": ["dotnet-backend-patterns"], "forbidden": ["debug:dotnet", "systematic-debugging", "capability-router"] }
     },
     {
       "id": "multi-auth-api-security-en",
@@ -211,8 +213,7 @@
       "language": "en",
       "profile": "default",
       "request": "Design and implement an MCP server that exposes a third-party inventory API through safe, well-described tools.",
-      "expected": { "required": ["capability-router"], "forbidden": ["mcp-builder", "mcp-cli"] },
-      "cold_probe": { "domain_hints": ["mcp", "coding"], "target_skill": "mcp-builder", "forbidden": ["mcp-cli"] }
+      "expected": { "required": ["mcp-builder"], "forbidden": ["mcp-cli", "capability-router"] }
     },
     {
       "id": "side-effect-browser-test-zh",

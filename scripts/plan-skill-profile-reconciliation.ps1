@@ -22,8 +22,28 @@ try {
     $cfg = Get-ContentUtf8 $configPath | ConvertFrom-Json
     if ($null -eq $cfg -or $cfg.PSObject.Properties.Match("skill_projection").Count -eq 0) { throw "skills.json does not define skill_projection." }
     if ($cfg.PSObject.Properties.Match("skill_projection").Count -eq 0 -or $null -eq $cfg.skill_projection) { throw "skills.json does not define skill_projection." }
-    $proposal = if ([string]::IsNullOrWhiteSpace($ProposalPath)) { $null } else { Read-SkillProfileReconciliationProposal $ProposalPath }
-    $result = New-SkillProfileReconciliationPlan $cfg.skill_projection (Get-FileContentHash $configPath) $proposal
+    if ([string]::IsNullOrWhiteSpace($ProposalPath)) {
+        $result = New-SkillProfileMigrationPlan -Config $cfg -ConfigPath $configPath
+    }
+    else {
+        $null = Read-SkillProfileReconciliationProposal $ProposalPath
+        $result = [pscustomobject][ordered]@{
+            schema_version = 1
+            command = "plan-skill-profile-reconciliation"
+            decision_owner = "deterministic_migration"
+            semantic_routing_performed = $false
+            status = "deprecated"
+            pass = $false
+            migration_required = $false
+            writes_performed = $false
+            finding_count = 1
+            findings = @([pscustomobject]@{
+                    code = "profile_reconciliation_retired"
+                    message = "Profile reconciliation proposals are retired; use the read-only migration plan and explicit config migration receipt."
+                    blocking = $true
+                })
+        }
+    }
 }
 catch {
     $result = [pscustomobject]([ordered]@{

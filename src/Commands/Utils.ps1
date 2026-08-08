@@ -414,8 +414,8 @@ Plugin（P3 repo/fixture-only）：
   全域写入只接受 reviewed change-set，执行全量预检、逐目标 receipt、fail-fast、resume 和单目标 rollback；不自动 commit/push。
 
 技能投影：
-  .\skills.ps1 技能配置 列表
-  .\skills.ps1 技能配置 使用 default|coding|coding-strict|engineering|python|mcp|review|dotnet|ppt|content|marketing|physics|video|design|browser|database
+  .\skills.ps1 构建生效
+  .\scripts\verify-native-skill-metadata.ps1 -Json
 
 目标仓审查：
   .\skills.ps1 审查目标 需求设置

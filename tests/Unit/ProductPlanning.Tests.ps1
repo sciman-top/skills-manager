@@ -1,9 +1,9 @@
 Describe 'vNext product planning contract' {
     $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
     $scriptPath = Join-Path $repoRoot 'scripts\verify-vnext-planning.ps1'
-    $currentPhase = 'P5'
-    $currentManifestRelative = 'tasks\skills-manager-vnext-phase5.tasks.json'
-    $currentSpecRelative = 'docs\superpowers\specs\2026-08-03-capability-manager-vnext-phase-5-design.md'
+    $currentPhase = 'P6'
+    $currentManifestRelative = 'tasks\skills-manager-vnext-phase6.tasks.json'
+    $currentSpecRelative = 'docs\superpowers\specs\2026-08-07-capability-manager-vnext-phase-6-design.md'
     $requiredFiles = @(
         'docs\product\README.md', 'docs\product\skills-manager-vnext-prd.md', 'docs\product\skills-manager-vnext-architecture.md',
         'docs\product\skills-manager-vnext-roadmap.md', 'docs\product\rule-governance-adoption-matrix.md',
@@ -11,10 +11,11 @@ Describe 'vNext product planning contract' {
         'docs\superpowers\specs\2026-08-02-capability-manager-vnext-phase-1-design.md',
         'docs\superpowers\specs\2026-08-02-capability-manager-vnext-phase-2-design.md',
         'docs\superpowers\specs\2026-08-02-capability-manager-vnext-phase-3-design.md',
-        'docs\superpowers\specs\2026-08-02-capability-manager-vnext-phase-4-design.md', $currentSpecRelative,
+        'docs\superpowers\specs\2026-08-02-capability-manager-vnext-phase-4-design.md',
+        'docs\superpowers\specs\2026-08-03-capability-manager-vnext-phase-5-design.md', $currentSpecRelative,
         'tasks\skills-manager-vnext-phase0.tasks.json', 'tasks\skills-manager-vnext-phase1.tasks.json',
         'tasks\skills-manager-vnext-phase2.tasks.json', 'tasks\skills-manager-vnext-phase3.tasks.json',
-        'tasks\skills-manager-vnext-phase4.tasks.json', $currentManifestRelative,
+        'tasks\skills-manager-vnext-phase4.tasks.json', 'tasks\skills-manager-vnext-phase5.tasks.json', $currentManifestRelative,
         'tasks\plan.md', 'tasks\todo.md', 'README.md', 'AGENTS.md', 'config\vnext-phase4-entry-gate.json'
     )
 
@@ -35,7 +36,7 @@ Describe 'vNext product planning contract' {
         $fixtureRoot = Join-Path $TestDrive $Name
         New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null
         $currentManifest = Get-Content -LiteralPath (Join-Path $repoRoot $currentManifestRelative) -Raw | ConvertFrom-Json
-        $historicalEvidence = @('phase0', 'phase1', 'phase2', 'phase3', 'phase4') | ForEach-Object {
+        $historicalEvidence = @('phase0', 'phase1', 'phase2', 'phase3', 'phase4', 'phase5') | ForEach-Object {
             $manifest = Get-Content -LiteralPath (Join-Path $repoRoot ('tasks\skills-manager-vnext-{0}.tasks.json' -f $_)) -Raw | ConvertFrom-Json
             @($manifest.tasks | Where-Object status -eq 'done' | ForEach-Object write_set | Where-Object { $_ -like 'docs/change-evidence/*' -and $_ -notmatch '[*?<>]' })
         }
@@ -61,9 +62,27 @@ Describe 'vNext product planning contract' {
         $result.exit_code | Should Be 0
         $parsed.pass | Should Be $true
         $parsed.finding_count | Should Be 0
-        $parsed.task_count | Should Be 5
+        $parsed.task_count | Should Be 12
         $parsed.current_phase | Should Be $currentPhase
         $parsed.historical_mode | Should Be $false
+        $parsed.truth_level | Should Be 'host_loaded'
+        $parsed.full_gate | Should Be 'passed'
+        $parsed.runtime_migration | Should Be 'completed'
+        $parsed.host_evaluation | Should Be 'host_evaluation_partial'
+        $parsed.host_loaded | Should Be 'passed'
+        $parsed.live_accepted | Should Be 'failed'
+    }
+
+    It 'fails closed when the current phase truth ladder is incomplete' {
+        $fixtureRoot = New-PlanningFixture 'missing-phase-truth'; $path = Join-Path $fixtureRoot $currentManifestRelative
+        $manifest = Get-Content $path -Raw | ConvertFrom-Json
+        $manifest.PSObject.Properties.Remove('truth_level')
+        $manifest | ConvertTo-Json -Depth 100 | Set-Content $path -Encoding UTF8
+
+        $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
+
+        @($parsed.findings | Where-Object code -eq phase_truth_field_missing).Count | Should Be 1
+        $parsed.pass | Should Be $false
     }
 
     It 'fails closed on duplicate task ids' {
@@ -76,8 +95,12 @@ Describe 'vNext product planning contract' {
     It 'rejects redundant standalone full-suite verification' {
         $fixtureRoot = New-PlanningFixture 'redundant-full-suite'; $path = Join-Path $fixtureRoot $currentManifestRelative
         $manifest = Get-Content $path -Raw | ConvertFrom-Json
+        $manifest.tasks[0].status = 'done'
         $manifest.tasks[0].verification = @('tests/run.ps1', 'scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree')
         $manifest | ConvertTo-Json -Depth 100 | Set-Content $path -Encoding UTF8
+        $todoPath = Join-Path $fixtureRoot 'tasks\todo.md'
+        $todo = (Get-Content $todoPath -Raw).Replace(('- [ ] `{0}`' -f $manifest.tasks[0].id), ('- [x] `{0}`' -f $manifest.tasks[0].id))
+        Set-Content $todoPath $todo -Encoding UTF8
         $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
         @($parsed.findings | Where-Object code -eq redundant_full_test_invocation).Count | Should Be 1
     }
@@ -102,9 +125,11 @@ Describe 'vNext product planning contract' {
         @($parsed.findings | Where-Object code -eq historical_phase_not_closed).Count | Should Be 1
     }
 
-    It 'blocks a P6 manifest while the roadmap admission status is hold' {
+    It 'blocks a P6 manifest if the roadmap regresses admission to hold' {
         $fixtureRoot = New-PlanningFixture 'p6-hold'
-        Set-Content -LiteralPath (Join-Path $fixtureRoot 'tasks\skills-manager-vnext-phase6.tasks.json') -Value '{"schema_version":1}' -Encoding UTF8
+        $roadmapPath = Join-Path $fixtureRoot 'docs\product\skills-manager-vnext-roadmap.md'
+        $roadmap = (Get-Content -LiteralPath $roadmapPath -Raw).Replace('P6_ADMISSION_STATUS: admitted', 'P6_ADMISSION_STATUS: hold')
+        Set-Content -LiteralPath $roadmapPath -Value $roadmap -Encoding UTF8
         $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
         @($parsed.findings | Where-Object code -eq next_phase_started_while_on_hold).Count | Should Be 1
     }
@@ -120,7 +145,7 @@ Describe 'vNext product planning contract' {
         $fixtureRoot = New-PlanningFixture 'todo-drift'; $todoPath = Join-Path $fixtureRoot 'tasks\todo.md'
         $tasks = @((Get-Content (Join-Path $fixtureRoot $currentManifestRelative) -Raw | ConvertFrom-Json).tasks)
         $coverageTaskId = [string]$tasks[1].id
-        $statusTaskId = [string]$tasks[0].id
+        $statusTaskId = [string](@($tasks | Where-Object { [string]$_.status -eq 'done' } | Select-Object -Last 1).id)
         $todo = (Get-Content $todoPath -Raw).Replace($coverageTaskId, 'SMV-P2-X99').Replace(('- [x] `{0}`' -f $statusTaskId), ('- [ ] `{0}`' -f $statusTaskId)); Set-Content $todoPath $todo -Encoding UTF8
         $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
         @($parsed.findings | Where-Object code -eq task_todo_coverage_mismatch).Count | Should BeGreaterThan 0
@@ -130,10 +155,16 @@ Describe 'vNext product planning contract' {
     It 'fails closed when a done task evidence file is missing' {
         $fixtureRoot = New-PlanningFixture 'missing-evidence'; $path = Join-Path $fixtureRoot $currentManifestRelative
         $manifest = Get-Content $path -Raw | ConvertFrom-Json
+        $manifest.tasks[0].status = 'done'
+        $manifest | ConvertTo-Json -Depth 100 | Set-Content $path -Encoding UTF8
+        $todoPath = Join-Path $fixtureRoot 'tasks\todo.md'
+        $todo = (Get-Content $todoPath -Raw).Replace(('- [ ] `{0}`' -f $manifest.tasks[0].id), ('- [x] `{0}`' -f $manifest.tasks[0].id))
+        Set-Content $todoPath $todo -Encoding UTF8
         $doneTask = @($manifest.tasks | Where-Object { [string]$_.status -eq 'done' -and @($_.write_set | Where-Object { $_ -like 'docs/change-evidence/*' -and $_ -notmatch '[*?<>]' }).Count -gt 0 } | Select-Object -Last 1)
         $doneTask | Should Not BeNullOrEmpty
         $evidencePath = @($doneTask.write_set | Where-Object { $_ -like 'docs/change-evidence/*' -and $_ -notmatch '[*?<>]' } | Select-Object -Last 1)
-        Remove-Item -LiteralPath (Join-Path $fixtureRoot $evidencePath) -Force
+        $missingEvidencePath = Join-Path $fixtureRoot $evidencePath
+        if (Test-Path -LiteralPath $missingEvidencePath) { Remove-Item -LiteralPath $missingEvidencePath -Force }
         $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
         @($parsed.findings | Where-Object code -eq done_task_evidence_missing).Count | Should BeGreaterThan 0
     }
@@ -168,9 +199,9 @@ Describe 'vNext product planning contract' {
         @($parsed.findings | Where-Object code -eq plan_manifest_phase_mismatch).Count | Should Be 1
     }
 
-    It 'validates P0 through P4 through explicit historical routing' {
-        foreach ($phase in @(0, 1, 2, 3, 4)) {
-            $date = if ($phase -eq 0) { '2026-08-01' } else { '2026-08-02' }
+    It 'validates P0 through P5 through explicit historical routing' {
+        foreach ($phase in @(0, 1, 2, 3, 4, 5)) {
+            $date = if ($phase -eq 0) { '2026-08-01' } elseif ($phase -eq 5) { '2026-08-03' } else { '2026-08-02' }
             $result = Invoke-PlanningVerifier $repoRoot ('tasks/skills-manager-vnext-phase{0}.tasks.json' -f $phase) ('docs/superpowers/specs/{0}-capability-manager-vnext-phase-{1}-design.md' -f $date, $phase)
             $result.exit_code | Should Be 0
             ($result.output | ConvertFrom-Json).current_phase | Should Be ('P{0}' -f $phase)

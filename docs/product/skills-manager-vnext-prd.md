@@ -3,7 +3,7 @@
 **program_id**: `skills-manager-vnext`
 **status**: accepted-direction
 **implementation_status**: phase-5-adaptive-capability-fabric-repo-verified-maintenance-hold
-**最后更新**: 2026-08-05
+**最后更新**: 2026-08-08
 
 ## 1. 产品结论
 
@@ -123,6 +123,10 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 
 当前 TC0/TC1 只对 `OperationPlan/Receipt v1` 完成 package-free C#/.NET `shadow_only` PoC：固定 corpus 与 PowerShell validator parity，生产 CLI/bundle 未接入，TC2 仍需独立 reviewed admission。
 
+### `PP-013 Bounded research and reversible reference portfolio`
+
+外部研究默认只读且有停止条件：本仓事实与官方资料优先，社区仓、issue、文章和趋势只作候选证据。reference shelf 是可增、可降级、可退役的证据组合，不是累计式 runtime 或档案馆；搜索、阅读、fetch 或 clone 均不自动取得采纳、复制、安装、执行、宿主写入或 live authority。
+
 ## 6. 功能需求
 
 ### 6.1 Capability catalog
@@ -132,6 +136,10 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 - `FR-CAT-003`：区分 runtime truth、reference shelf、official directory、host-installed inventory 和 discovery-only candidate。
 - `FR-CAT-004`：同名/近似能力必须输出 canonical、duplicate、alternative 或 conflict 决策和依据，不直接按名称删除。
 - `FR-CAT-005`：官方已存在等价插件/系统技能时默认推荐复用，只有明确缺口才进入自维护候选。
+- `FR-CAT-006`：reference portfolio 生命周期固定为 `discover -> conditional-not-cloned -> on-demand read-only -> secondary/core-mainline -> historical-compatibility -> retire/remove`；每次转换记录消费者、来源/revision/license、证据、维护成本、决定和退役条件。
+- `FR-CAT-007`：晋级要求重复当前价值或第一方权威；降级/退役由官方替代、长期无消费者、重复、stale、许可证/供应链风险或维护成本高于净收益触发。reference shelf、runtime import/source 和物理 checkout 是三个独立删除面，不得联动误删。
+- `FR-CAT-008`：宿主可为当前非平凡任务自主搜索官方文档、标准、第一方源码和公开社区候选；达到足以选择可逆方案的证据停止点后停止。认证、私有源、依赖安装、上游脚本、生产动作和宿主 mutation 继续走独立授权。
+- `FR-CAT-009`：本项目只拥有 manifest 指定的 `D:\CODE\external\skills-manager-references` 子树；`D:\CODE\external` 根、其他项目的 `*-references`、共享 checkout 和产品仓不进入自动 inventory、refresh、move 或 delete。`_shared` manifest 只能作为只读映射输入。
 
 ### 6.2 Profiles and desired state
 
@@ -162,6 +170,7 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 - `FR-RUL-017`：目标集合漂移、目标规则 hash 陈旧、越界文件、并发锁或 resume receipt 不匹配时 fail-closed；无关 dirty paths 必须记录但不得阻断、覆盖、暂存或纳入回滚。
 - `FR-RUL-018`：支持从 receipt resume 和按 action 单目标 rollback；默认不自动 commit/push 任何目标仓，也不常驻后台同步。
 - `FR-RUL-019`：规则变更后的证据严格区分 `filesystem_applied | repo_verified | host_loaded | live_accepted`；fresh session/native probe 与真实用户 workflow 未执行时不得晋级。
+- `FR-RUL-020`：规则体系采用 `stable normative/advisory entrypoint -> project action -> dynamic manifest/evidence state` 分层；根规则不得复制易过期任务计数、gate 或 host/live 快照。estate audit 必须检查共同段 parity、差异段独立、全局/项目预算、项目 `1/A/B/C/D` profile、Claude 首行 wrapper 与全局/项目 release 对齐，但结构通过不等于宿主已加载或强制。
 
 ### 6.4 Plugin awareness
 
@@ -271,6 +280,30 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 
 - `FR-TEC-001`：typed-core PoC 只能选择一个 read-only pure seam，至少两个真实 caller 和固定 characterization corpus；协议必须是 versioned stdin/stdout UTF-8 JSON，并固定 finding/exit/redaction contract。TC1 只 shadow 比较，不能改变旧 CLI 输出、生成 bundle 或生产 side effect。
 
+### 6.13 P6 Host-Native Skill Lifecycle Reset
+
+- `FR-HNS-001`：宿主 AI 是技能语义选择的唯一 owner；仓库编译、资格判决和评估不得形成 lexical、embedding、第二模型或 profile-owned 语义真源。
+- `FR-HNS-002`：提供 versioned `HostCapabilitySnapshot`，按 turn override、thread effective model、effective config layering、model/provider catalog、unknown fallback 解析有效上下文窗、metadata budget、surface 和 skills inventory。
+- `FR-HNS-003`：App Server、fresh CLI probe 和 offline config adapter 映射同一 snapshot schema；直接读取 `config.toml` 只能标记 `source=config_fallback`。
+- `FR-HNS-004`：`SkillCatalogCompiler` 从受管 roots 编译完整 canonical inventory 和 provenance，不得以 profile/current_profile 过滤 enabled skill。
+- `FR-HNS-005`：`SkillEligibilityPolicy` 只判决 containment、freshness、availability、dependency、side effect、approval 和 surface compatibility；语义置信度不得放宽 deny。
+- `FR-HNS-006`：metadata planner 使用宿主有效 token ceiling；已知上下文默认 ceiling 为 `floor(context_window * 0.02)` 或宿主更严格值，headroom 可配置，禁止用固定字符数伪装 token 真值。
+- `FR-HNS-007`：每个 eligible enabled skill 必须进入宿主原生 discovery projection；验收要求 `enabled_total == kept_total`、`truncated=false`、`omitted=0`。
+- `FR-HNS-008`：metadata 质量以 concise description lint 和 direct/indirect/negative/ambiguous/no-skill corpus 验证；修复选择错误时优先改 metadata，不增加第二套 semantic router。
+- `FR-HNS-009`：提供 `NativeInvocationTrace`，区分 listed、selected、injected、executed 和 abstained；不可观测层保持 partial/unknown。
+- `FR-HNS-010`：legacy router/profile 只能在 zero-write shadow 中与 native path 对比，shadow 结果不得改变当前执行或覆盖宿主选择。
+- `FR-HNS-011`：profile、active_profile、current_profile、reconciliation 和 canary 从可达性主链退役；迁移期可兼容读取，但必须有 versioned migration、round-trip 和 rollback receipt。
+- `FR-HNS-012`：strict dispatch 仅允许显式 opt-in；采用 pre-turn bounded candidates、宿主裁决、支持时的 App Server `type=skill` 注入和 trace，普通请求不得默认进入。
+- `FR-HNS-013`：legacy runtime 只在 all-enabled projection、shadow evidence、compatibility migration、fresh host evidence 和 rollback gate 满足后 staged removal；P5 文档和 evidence 保持历史真值。
+
+### 6.14 P6 当前实现与验收边界
+
+2026-08-08 的 P6-012 repo-side closeout 已完成。P6-001 至 P6-012 均已完成仓库侧切片；staged removal 已同步 source、config、生成链和 compatibility verifier。single-flight full quality gate exit 0，`1097/1097` tests 与全部 contract/invariant 通过，阶段真值为 `repo_verified`。
+
+当前仓库侧 compatibility boundary 为：默认生成 bundle 不再编入 legacy `SkillRouting`，`技能配置`/`skill-profile` dispatch 已退役；profile compatibility view 仅为 `read_only`、`reachability_authority=none`，未生成的旧 routing source 仅允许显式 compatibility-only test/verifier 读取。P5 profile advisor、resident dispatcher 与 cold-load 描述保留为历史或迁移契约，不是普通请求的当前语义选择 owner。
+
+fresh CLI probe 只得到 `host_evaluation_partial`：selection、injection 和 skill-body invocation 不可观测，且 `provider_calls=0`、`native_mutations=0`、`writes=0`。本轮 `runtime_migration=not_started`、`host_loaded=not_run`、`live_accepted=not_run`；这些状态只能由对应独立证据晋级，不能由 metadata visibility、focused tests 或 planning verifier 推导。
+
 ## 7. 非功能需求
 
 - `NFR-COMP-001`：现有 `skills.json`、lock、CLI aliases、generated `skills.ps1` 和 MCP/skill projection 行为保持兼容。
@@ -303,6 +336,17 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 - `NFR-EWF-008`：Agent workflow verifier 必须进入 full quality gate，机械检查五项 task、严格三档 soft anchor、completion receipt/canonical path/barrier wave、proposal/local outcome、FailurePacket parallel readmission、RadarSnapshot v2 与 forbidden decision fields、zero-side-effect envelope 和 `repo_verified != host_loaded != live_accepted` 边界。
 - `NFR-TEC-001`：替代技术栈评估优先比较 C#/.NET、TypeScript/Node、Python 和 Rust 的 Windows/native CLI 适配、类型/并发、分发、供应链、维护与回滚成本；当前推荐 C#/.NET typed core + PowerShell thin shell 作为条件性目标架构，只实施可删除 shadow PoC，不实施全仓重写。
 - `NFR-TEC-002`：TC1 必须 pin 受支持 LTS SDK、零第三方 `PackageReference`、4/4 corpus parity、结构化协议负例、零生产引用和可删除回滚；framework-dependent/self-contained/single-file 的体积/启动数据只作描述性观察。TC2 前 PowerShell runtime 必须保持 authoritative，生产集成为 `not_started`。
+- `NFR-HNS-001`：P6 admission 是 planning/implementation authority，不自动授权宿主重启、provider/auth/session/plugin/MCP mutation 或业务 live action。
+- `NFR-HNS-002`：snapshot 每个推导值携带 source、captured_at、freshness 和 unknown reason；未知不得被默认配置提升为 runtime truth。
+- `NFR-HNS-003`：host adapters bounded、timeout、redaction-first、provider-free、zero-write；surface 不支持时报告 `platform_na`。
+- `NFR-HNS-004`：metadata budget 溢出列出 exact offenders 和 compaction result；不得静默增大 ceiling、切 profile 或丢弃 enabled skill。
+- `NFR-HNS-005`：projection apply 需要显式 token、expected hash、atomic replace、receipt 和 drift-safe rollback；plan 保持 zero-write。
+- `NFR-HNS-006`：activation corpus 只评估 metadata/host behavior，不得成为脚本 semantic selector 或权限门禁。
+- `NFR-HNS-007`：invocation trace redaction-first、correlated、freshness-aware；visibility 不得升级为 full skill body execution。
+- `NFR-HNS-008`：shadow comparison writes=0，不调用第二模型，不把 partial trace 当作输赢依据。
+- `NFR-HNS-009`：profile migration 兼容读取旧 schema，且旧数据可 round-trip 恢复；当前 task 不热切换 active profile。
+- `NFR-HNS-010`：strict fallback 与 native main path 复用同一 eligibility policy，候选集有界，缺宿主裁决或 injection 支持时 fail-closed/platform_na。
+- `NFR-HNS-011`：P6 真值阶梯固定为 `planning_contract -> implemented -> repo_verified -> host_evaluation_partial -> host_loaded -> live_accepted`，不得越级。
 
 ## 8. 产品级验收
 
@@ -430,6 +474,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - `DEC-PROD-010`：社区 workflow、知识库、代码图和自动 skill 学习均先进入证据化 disposition；当前候选只采纳协议启发，不安装运行时，M1 真实任务证据决定后续 retain/adapt/retire。
 - `DEC-PROD-011`：宿主 AI 是任务语义、DAG、串并行和模型档位的 accountable coordinator；skills-manager 只提供建议、合同和确定性安全阻断，Codex native runtime 执行 spawn/wait/integration。
 - `DEC-PROD-012`：当前 shell runtime 强制收敛为 PS7-only，以删除 5.1/7 双运行时解析、quoting、encoding 和测试分支；这是支持面迁移，不是 typed-core 生产迁移。复杂领域语义仍通过边界收缩和 typed-core PoC 评估，不直接全仓重写；PoC 在真实收益不足、兼容成本过高或无消费者时必须删除。
+- `DEC-PROD-013`：P6 正式采用 host-native skill lifecycle reset；profile/router/cold-load 不再是技能可达性或语义选择主链，完整 native discovery、确定性 eligibility 和 invocation trace 成为新边界。
 
 以下选择有意延迟到有真实代码/宿主证据的任务，不允许 AI 在更早任务中猜定：
 

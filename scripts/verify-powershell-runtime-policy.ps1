@@ -266,7 +266,7 @@ foreach ($required in @(
     @{ key='roadmap'; literal='`powershell7_runtime_migration`'; code='current_policy_missing' },
     @{ key='plan'; literal='**powershell_runtime_status**: ps7_only; repo_verified'; code='current_policy_missing' },
     @{ key='todo'; literal='SMV-PS7-005'; code='current_policy_missing' },
-    @{ key='agents'; literal='当前 runtime contract 是 PS7-only'; code='current_policy_missing' },
+    @{ key='agents'; literal='runtime 为 PS7-only'; code='current_policy_missing' },
     @{ key='release'; literal='PowerShell 7 (`pwsh`) only'; code='release_policy_missing' },
     @{ key='runbook'; literal='Migration guide'; code='migration_guide_missing' },
     @{ key='runbook'; literal='Rollback'; code='rollback_missing' },
@@ -292,7 +292,17 @@ try {
 }
 catch { Add-Finding 'typed_core_manifest_invalid' $paths.typedManifest $_.Exception.Message }
 
-if (Test-Path -LiteralPath (Join-Path $root 'tasks/skills-manager-vnext-phase6.tasks.json')) {
+$currentP6AdmissionStatus = if ($content.roadmap.IndexOf('P6_ADMISSION_STATUS: admitted', [System.StringComparison]::Ordinal) -ge 0) {
+    'admitted'
+}
+elseif ($content.roadmap.IndexOf('P6_ADMISSION_STATUS: hold', [System.StringComparison]::Ordinal) -ge 0) {
+    'hold'
+}
+else {
+    Add-Finding 'roadmap_p6_admission_missing' $paths.roadmap 'Roadmap must declare the current P6 admission status.'
+    'unknown'
+}
+if ($currentP6AdmissionStatus -eq 'hold' -and (Test-Path -LiteralPath (Join-Path $root 'tasks/skills-manager-vnext-phase6.tasks.json'))) {
     Add-Finding 'p6_manifest_forbidden' 'tasks/skills-manager-vnext-phase6.tasks.json' 'P6 manifest is forbidden while admission remains hold.'
 }
 
@@ -305,6 +315,7 @@ $result = [pscustomobject][ordered]@{
     done = $doneCount
     historical_evidence = 'preserved'
     typed_core_production_status = 'not_started'
+    current_p6_admission_status = $currentP6AdmissionStatus
     powershell_files_scanned = $powershellFilesScanned
     writes_performed = 0
     findings = $findings.ToArray()

@@ -125,6 +125,7 @@ exit 0
         $parsed.track | Should Be 'maintenance_design'
         $parsed.base_phase | Should Be 'P5'
         $parsed.p6_admission_status | Should Be 'hold'
+        $parsed.current_p6_admission_status | Should Be 'admitted'
         $parsed.pass | Should Be $true
         $parsed.finding_count | Should Be 0
         $parsed.task_count | Should Be 11
@@ -440,6 +441,9 @@ exit 0
 
     It 'blocks a P6 manifest while admission is on hold' {
         $fixtureRoot = New-LeanPlanningFixture 'p6-manifest'
+        $roadmapPath = Join-Path $fixtureRoot 'docs\product\skills-manager-vnext-roadmap.md'
+        $roadmap = (Get-Content -LiteralPath $roadmapPath -Raw).Replace('P6_ADMISSION_STATUS: admitted', 'P6_ADMISSION_STATUS: hold')
+        Set-Content -LiteralPath $roadmapPath -Value $roadmap -Encoding UTF8
         Set-Content -LiteralPath (Join-Path $fixtureRoot 'tasks\skills-manager-vnext-phase6.tasks.json') -Value '{"schema_version":1}' -Encoding UTF8
         $parsed = (Invoke-LeanPlanningVerifier $fixtureRoot).output | ConvertFrom-Json
         @($parsed.findings | Where-Object code -eq 'p6_manifest_created_while_on_hold').Count | Should Be 1

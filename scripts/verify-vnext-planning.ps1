@@ -152,6 +152,38 @@ if ($null -ne $manifest) {
         Add-PlanningFinding ([ref]$findings) 'unexpected_program_id' $paths['manifest'] 'program_id must be skills-manager-vnext.'
     }
 
+    if (-not $explicitHistoricalMode) {
+        $requiredTruthFields = @('truth_level', 'full_gate', 'runtime_migration', 'host_evaluation', 'host_loaded', 'live_accepted', 'latest_evidence', 'main_chain', 'stop_conditions', 'first_open_task', 'next_milestone')
+        foreach ($field in $requiredTruthFields) {
+            if ($manifest.PSObject.Properties.Match($field).Count -eq 0) {
+                Add-PlanningFinding ([ref]$findings) 'phase_truth_field_missing' $paths['manifest'] ('Current phase truth field is missing: {0}' -f $field)
+            }
+        }
+        foreach ($contract in @(
+                @{ field = 'truth_level'; allowed = @('design_only', 'repo_verified', 'host_evaluation_partial', 'host_loaded', 'live_accepted') },
+                @{ field = 'full_gate'; allowed = @('not_run', 'passed', 'failed', 'stale') },
+                @{ field = 'runtime_migration'; allowed = @('not_started', 'in_progress', 'completed', 'blocked') },
+                @{ field = 'host_evaluation'; allowed = @('not_run', 'host_evaluation_partial', 'passed', 'failed') },
+                @{ field = 'host_loaded'; allowed = @('not_run', 'passed', 'failed') },
+                @{ field = 'live_accepted'; allowed = @('not_run', 'passed', 'failed') }
+            )) {
+            if ($manifest.PSObject.Properties.Match([string]$contract.field).Count -gt 0 -and [string]$manifest.($contract.field) -notin @($contract.allowed)) {
+                Add-PlanningFinding ([ref]$findings) 'phase_truth_value_invalid' $paths['manifest'] ('Unsupported {0}: {1}' -f $contract.field, [string]$manifest.($contract.field))
+            }
+        }
+        foreach ($field in @('main_chain', 'stop_conditions')) {
+            if ($manifest.PSObject.Properties.Match($field).Count -gt 0 -and @($manifest.$field | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -eq 0) {
+                Add-PlanningFinding ([ref]$findings) 'phase_truth_array_empty' $paths['manifest'] ('Current phase truth array must not be empty: {0}' -f $field)
+            }
+        }
+        if ($manifest.PSObject.Properties.Match('latest_evidence').Count -gt 0) {
+            $latestEvidence = [string]$manifest.latest_evidence
+            if ([string]::IsNullOrWhiteSpace($latestEvidence) -or -not (Test-Path -LiteralPath (Join-Path $root $latestEvidence) -PathType Leaf)) {
+                Add-PlanningFinding ([ref]$findings) 'phase_truth_evidence_missing' $paths['manifest'] ('latest_evidence does not resolve to a file: {0}' -f $latestEvidence)
+            }
+        }
+    }
+
     $phaseSequence = @($manifest.phase_sequence | ForEach-Object { [string]$_ })
     $allowedStatuses = @($manifest.allowed_statuses | ForEach-Object { [string]$_ })
     $allowedRisks = @('low', 'medium', 'high')
@@ -299,6 +331,15 @@ if ($null -ne $manifest) {
 
     Test-TaskDependencyCycles $tasksById $paths['manifest'] ([ref]$findings)
 
+    if (-not $explicitHistoricalMode -and $manifest.PSObject.Properties.Match('first_open_task').Count -gt 0) {
+        $derivedFirstOpen = @($manifest.tasks | Where-Object { [string]$_.status -ne 'done' } | Select-Object -First 1)
+        $derivedFirstOpenId = if ($derivedFirstOpen.Count -eq 0) { $null } else { [string]$derivedFirstOpen[0].id }
+        $declaredFirstOpenId = if ($null -eq $manifest.first_open_task) { $null } else { [string]$manifest.first_open_task }
+        if ($declaredFirstOpenId -ne $derivedFirstOpenId) {
+            Add-PlanningFinding ([ref]$findings) 'first_open_task_mismatch' $paths['manifest'] ('first_open_task is {0}; derived value is {1}.' -f $declaredFirstOpenId, $derivedFirstOpenId)
+        }
+    }
+
     foreach ($phase in $phaseSequence) {
         if (-not (Test-ContainsLiteral $content['roadmap'] $phase)) {
             Add-PlanningFinding ([ref]$findings) 'phase_missing_from_roadmap' $paths['roadmap'] ('Phase missing from roadmap: {0}' -f $phase)
@@ -347,6 +388,12 @@ $result = [ordered]@{
     program_id = 'skills-manager-vnext'
     current_phase = if ($null -ne $manifest) { [string]$manifest.current_phase } else { $planPhase }
     historical_mode = $explicitHistoricalMode
+    truth_level = if ($null -ne $manifest -and -not $explicitHistoricalMode) { [string]$manifest.truth_level } else { 'historical' }
+    full_gate = if ($null -ne $manifest -and -not $explicitHistoricalMode) { [string]$manifest.full_gate } else { 'not_applicable' }
+    runtime_migration = if ($null -ne $manifest -and -not $explicitHistoricalMode) { [string]$manifest.runtime_migration } else { 'not_applicable' }
+    host_evaluation = if ($null -ne $manifest -and -not $explicitHistoricalMode) { [string]$manifest.host_evaluation } else { 'not_applicable' }
+    host_loaded = if ($null -ne $manifest -and -not $explicitHistoricalMode) { [string]$manifest.host_loaded } else { 'not_applicable' }
+    live_accepted = if ($null -ne $manifest -and -not $explicitHistoricalMode) { [string]$manifest.live_accepted } else { 'not_applicable' }
     pass = ($findings.Count -eq 0)
     task_count = $taskCount
     done_count = $doneCount

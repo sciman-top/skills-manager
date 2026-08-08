@@ -1,15 +1,15 @@
 ---
 name: capability-router
-description: Global local-skill dispatcher. Before responding to any non-trivial user request that could benefit from a local skill, run this dispatcher once—even when a visible skill appears to match—so the host AI can choose from the complete portable catalog without a profile switch. Skip only trivial factual, translation, or math requests with no skill workflow; host AI owns semantic selection.
+description: Deterministic local-skill discovery and policy fallback. Invoke explicitly only when host-native visible skill metadata is insufficient, cross-directory discovery is needed, or a host-selected candidate needs policy validation. Host AI owns semantic selection; this skill never switches profiles or mutates host state.
 ---
 
 # Global local-skill dispatch
 
-This is the resident dispatch boundary for the local skill inventory. It is part of the normal start-of-task path, not an optional fallback and not a profile selector. The script is deterministic and read-only; the host AI remains the only semantic selector.
+This is an explicit discovery and policy fallback for the local skill inventory, not a normal start-of-task path and not a profile selector. The script is deterministic and read-only; the host AI remains the only semantic selector.
 
-## Start every non-trivial task with the complete catalog
+## Use complete-catalog discovery only after native selection needs fallback
 
-1. Unless the request is a trivial factual, translation, or math answer with no skill workflow, call the script once with the complete request and the full portable catalog. Do not ask the user to choose a profile and do not omit this call merely because a resident skill looks like a match.
+1. Call the script with the complete request only after the host has determined that directly visible native skill/tool metadata is insufficient, cross-directory discovery is required, or deterministic policy validation is needed. Do not ask the user to choose a profile and do not invoke this fallback when a directly visible skill or native tool already matches.
 
    ```powershell
    $result = pwsh -NoProfile -ExecutionPolicy Bypass -File <skill-dir>/scripts/route-capability.ps1 -Query '<complete request>' -AutoDiscover -MaxCandidates 256 | ConvertFrom-Json
@@ -40,7 +40,7 @@ This is the resident dispatch boundary for the local skill inventory. It is part
    - `execution_policy=approval_required`, `request_approval`, `request_mcp_activation`, or `request_activation`: keep the actual operation behind the required authorization or host activation step.
 5. Reuse only items in `session_plan.reuse` whose `session_snapshot.status=current`. Verified reuse requires the caller to pass `-SessionIdentity` and a schema-v2, fresh, read-only session snapshot with the same `session_id`; every loaded skill must retain the current `SKILL.md` SHA-256. Legacy, foreign, stale, or mismatched snapshots fall back to `session_plan.load`. Domain hints are read-only index partitions, not active-profile changes. Treat `preheat_recommendation` as advice for a future task boundary; never hot-switch a profile or restart the current task.
 
-Explicit `$skill`/`@skill` mentions may go directly to policy validation, but a normal natural-language request still goes through the complete-catalog dispatch first. An unsigiled capability name remains ordinary natural language—even when hyphenated or namespaced—because it may appear inside a negation. The script reports `decision_owner=host_ai`, `semantic_routing_performed=false`, and never assigns semantic confidence.
+Explicit `$skill`/`@skill` mentions may go directly to the named visible skill or to policy validation when needed. A normal natural-language request remains on the host-native selection path and does not automatically invoke this router. An unsigiled capability name remains ordinary natural language—even when hyphenated or namespaced—because it may appear inside a negation. The script reports `decision_owner=host_ai`, `semantic_routing_performed=false`, and never assigns semantic confidence.
 
 ## Boundaries
 

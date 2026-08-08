@@ -2,7 +2,7 @@
 
 **program_id**: `skills-manager-vnext`
 **roadmap_version**: 1
-**最后更新**: 2026-08-05
+**最后更新**: 2026-08-08
 
 ## 1. 状态总览
 
@@ -307,7 +307,9 @@ P5 5/5 task、schema compatibility、golden、fresh query、live read-only multi
 
 ## 9. Maintenance hold and P6 admission
 
-`P6_ADMISSION_STATUS: hold`
+`P6_ADMISSION_STATUS: admitted`
+
+2026-08-07 admission decision：用户明确授权一次彻底的产品/技术栈/架构重构；“仓库可发现但宿主不触发”、47 个历史未路由技能、profile 外技能无法自动命中，以及多轮 router/profile/cold-load 修复仍不能建立宿主调用闭环，构成跨任务、跨领域且无法继续由 P5 seam 局部修复的证据。P6 因此正式进入 `planning_contract`，当前 runtime migration 尚未开始。
 
 P5 完成后进入维护期，不按 Phase 编号惯性扩张。只有同时满足以下条件，才可把状态改为 `admitted` 并创建 P6 spec/manifest：
 
@@ -317,11 +319,32 @@ P5 完成后进入维护期，不按 Phase 编号惯性扩张。只有同时满�
 - 当前 phase truth、历史 entry lifecycle、full-suite 单次执行、evidence ledger 和 test timing debt 均已闭合。
 - 用户明确授权新的产品目标；新 Phase 仍须给出非目标、write set、退出条件和 live boundary。
 
-未满足上述条件时，只允许修缺陷、扩真实 corpus、删除无用字段、改善性能与文档；禁止新增 schema major、daemon/database/provider router、host mutation 或新的治理层。
+上述条件的 P6 admission review 已由 2026-08-07 用户授权和历史 failure/evidence map 满足。该 admission 只授权本仓规划和后续逐任务实现，不授权 provider/auth/session mutation、宿主重启、业务写入或越级 live acceptance。
 
-维护期允许一个不打开 P6 的 minor admission：用户明确提出相邻产品需求，复用官方 native surface，不扩 schema major、不实现 runtime、不修改 active host/session/provider/auth，只读或 shadow、bounded canary 可回滚、有 retirement trigger、且不创建第二 registry/P6 manifest。host-owned model/task policy 与 read-only typed-core PoC 只能经此入口；任何 scheduler、daemon、provider gateway、production migration 或持久控制面仍必须满足 P6 admission。
+历史 maintenance minor-admission track 保留为 P5 期间事实；新工作不得再用它规避 P6 manifest、migration、compatibility 和 rollback 门禁。
 
-### 9.1 Lean AI Software Delivery maintenance track
+### 9.1 P6 Host-Native Skill Lifecycle Reset
+
+**状态**：`planning_contract`
+**任务真源**：`tasks/skills-manager-vnext-phase6.tasks.json`
+**详细 spec**：`docs/superpowers/specs/2026-08-07-capability-manager-vnext-phase-6-design.md`
+**实施计划**：`docs/superpowers/plans/2026-08-07-host-native-skill-lifecycle-reset.md`
+
+P6 的目标是让宿主 AI 重新成为唯一语义选择 owner，以完整的 native discovery set、有效 host capability snapshot、token-aware metadata planning 和 invocation trace 形成闭环。旧 `capability-router`、profile reachability、active-profile switch、reconciliation/canary 和 cold-load 层只作为分阶段迁移输入；App Server strict dispatch 是显式 opt-in fallback。
+
+| Wave | Tasks | Exit gate |
+| --- | --- | --- |
+| Contract | P6-001–P6-003 | admission、snapshot schema、官方 adapter 和 unknown/fallback truth 可验证 |
+| Core | P6-004–P6-006 | compiler/policy 无第二语义路由；全 enabled native projection 无遗漏 |
+| Evidence | P6-007–P6-009 | metadata corpus、invocation trace、native/legacy shadow evidence 可复现 |
+| Migration | P6-010–P6-011 | profile reachability 退役；strict dispatch 保持 opt-in |
+| Closeout | P6-012 | staged removal、fresh host evidence、唯一 full gate 和 rollback receipt |
+
+当前 P6-012 closeout（2026-08-08，repo_verified）：P6-001 至 P6-012 均已完成仓库侧切片。staged removal 已应用到 source/config/generation seam；legacy router source 只保留 compatibility-only 读取，profile compatibility view 为 read-only 且不拥有 reachability authority。single-flight full gate exit 0，`1097/1097` tests 与全部 contract/invariant 通过。fresh CLI 只能给出 `host_evaluation_partial`（selection、injection、body invocation 均不可观测），`runtime_migration=not_started`、`host_loaded=not_run`、`live_accepted=not_run`、`full_gate=passed`。
+
+P6 exit gate：12/12 tasks `done`；fresh snapshot 下 `enabled_total == kept_total`、`truncated=false`、`omitted=0`；profile/router membership 不再控制可达性；trace 不把 listed 误写为 invoked；strict fallback 非默认；迁移/回滚通过；full gate 唯一执行并通过。当前 staged removal 已进入 closeout，但上述 exit gate 尚未满足，不能把本轮 repo-side 状态写成 `host_loaded` 或 `live_accepted`。
+
+### 9.2 Lean AI Software Delivery maintenance track
 
 该 track 面向 skills-manager 辅助 ChatGPT/Codex/Claude 高效完成软件交付的总体方案，但只增加 advisory 规划与可验证契约。它与 P5 并行，不是 P6，不改变 Phase sequence，不授权 host/runtime 行为。
 
@@ -365,6 +388,8 @@ PowerShell 技术路线采用 strangler migration，不直接重写：
 
 工具采用顺序固定为：repo-native `rg`/symbols/tests/docs 与宿主原生能力 -> 窄 skill -> plugin distribution -> current external data/action 的 MCP/connector -> 有真实检索缺口的只读 knowledge/code-graph adapter。每个候选以 `adopt | adapt | defer | reject` 记录 source/revision/license、native equivalent、real consumers、data/auth/write boundary、evaluation、maintenance cost、retirement trigger 和 truth level。Trellis/AGOS 只适配 planning/write-scope/candidate/evidence 思想；OptSkills 只适配 replay/distill/eval；GBrain、CodeGraphContext、Understand Anything 继续 defer；来源不明的 souljourney workflow 保持 unknown/defer。
 
+reference portfolio 不新建 Phase 或第二个 registry；沿用 `references/reference-shelf.manifest.json` 记录 `reference_portfolio_action = discover | promote | retain | demote | retire` 的审阅结论。官方/第一方权威或重复真实消费者可晋级；官方替代、长期无消费者、重复、stale、许可证/供应链风险或维护成本超出净收益时优先降级、停刷或退役。任何物理 checkout 删除和 `skills.json` runtime/import 删除仍是独立受管事务，不能由 research/advisory 自动触发；写入面仅限 manifest-owned `D:\CODE\external\skills-manager-references`，不创建 `D:\CODE\external` 中央管理能力。
+
 M2 correction 的最终目标流为：`visible skill/native tool -> host-native semantic match -> direct use`；只有无可见匹配或显式能力发现时才进入 `domain purpose catalog -> host domain choice -> candidate discovery -> host adjudication -> deterministic policy -> native activation`。旧 profile-first baseline 的 automatic trigger 仅 4/8，hierarchical redesign 后 selection 32/32、cold-load chain 8/8；这些都是 `host_evaluation_partial`，不等于普遍无感或 live acceptance。低风险已可用能力可无感使用，安装、认证、profile/config mutation、写入和破坏性动作继续保持可见授权。若真实任务未显示净改善，优先进一步删除 router 行为，而不是继续加词法规则。
 
 2026-08-04 follow-up：canonical skill name/path/description delta 已在 projection seam 生成 ignored reconciliation signal，profile-only/no-op 不触发；宿主可在产生变化的同一任务边界接续 advisor，但 proposal/canary/apply 边界不变。cold-load 成本已拆分 cached/uncached/tool rounds；两个真实 A/B 证明强行合并工具回合会增加延迟并降低稳定性，故已回退，只保留成本观测和 focused replay 策略。
@@ -379,7 +404,7 @@ observe-only 指标为 TTFV、返工切片、非预期人工打断、非产品 a
 
 M3 判定优先删除性维护：pilot 没有缩短 TTFV、没有减少返工/打断，或新增 artifact/上下文/维护成本抵消收益时，删除候选模板、规则或 skill；只有稳定重复且经 replay/shadow/canary 的做法才 reviewed promotion。首轮候选复用现有文档字段评审，不建第二个 lifecycle registry：`session_plan`、`preheat_recommendation`、hierarchical router/catalog、plugin fixture export、Rule Estate multi-target apply、maintenance companion verifier，以及规划/evidence 资产自身。每项记录 `unique_value / native_equivalent / real_consumers / maintenance_cost / retirement_trigger / latest_evidence`。宿主模型或官方能力已原生覆盖时，相关功能进入 adapt/retire，而不是为了保留项目范围继续包装。
 
-### 9.2 Runtime-independent Agent workflow advisory adjacent track
+### 9.3 Runtime-independent Agent workflow advisory adjacent track
 
 用户明确提出相邻需求后，经 minor admission 复核，本 track 复用 Codex 原生 subagent、worktree、model/reasoning 和等待能力，只增加可删除、可验证的仓库侧 advisory runtime。它不改变 `current_phase=P5`、不创建 P6 manifest、不扩 schema major、不写 host/profile/session/provider/auth，不抓取 Radar。
 

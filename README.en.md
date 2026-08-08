@@ -56,9 +56,9 @@ Output is fixed to `decision_owner=host_ai`, `executor=host_native_runtime`, and
 
 The resident `capability-router` is now a compatibility fallback, not a lexical semantic router. Codex/ChatGPT first match visible skill metadata natively; when no visible capability fits, the fallback exposes domain names and purposes, the host chooses at most two domains, and only then receives bounded candidates. The host supplies its semantic choice to deterministic policy, which alone decides containment, availability, reuse, activation, and approval. The script reports `decision_owner=host_ai`, never assigns semantic confidence, and performs no host mutation. Run `scripts/verify-capability-routing.ps1` for the deterministic discovery/policy corpus and `scripts/evaluate-host-skill-selection.ps1` for opt-in fresh host selection/cold-load evaluation.
 
-Skill profile maintenance uses the same ownership split. `skills.ps1 skill-profile reconcile [proposal.json]` and `scripts/plan-skill-profile-reconciliation.ps1 -Json` report unrouted/stale/budget/overlap facts, emit a machine-readable host handoff, and validate an explicit `decision_owner=host_ai` proposal against the current `skills.json` hash. The advisor remains zero-write. After the host supplies a minimum proposal, `scripts/manage-skill-profile-reconciliation.ps1` can preview or canary-apply at most 5 skills/10 membership actions to non-active profiles, with an atomic backup and receipt. Acceptance requires fresh ephemeral positive/negative replay and profile restoration; `-RollbackOnFailure` restores the exact prior hash. This path does not call another model, install/remove skills, permanently switch `active_profile`, or claim current-turn hot reload/live acceptance.
+Skill profile data is now migration-only. `skills.ps1 skill-profile` has been removed from the runtime entrypoint; legacy fields are retained under `skill_projection.profile_compatibility` with `status=read_only` and `reachability_authority=none`. `scripts/plan-skill-profile-reconciliation.ps1 -Json` remains a compatibility report, while `scripts/verify-skill-routing.ps1 -Json` is compatibility-only and is not a quality gate or semantic selector. No current request may hot-switch a profile or mutate host/session state.
 
-Projection now compares canonical skill names, paths, and descriptions. A real add/remove/metadata delta writes an ignored `reports/skill-profile-reconciliation/pending.json` handoff for the current host; profile-only and no-op syncs do not emit a new signal, and the signal never writes profile configuration itself. Host evaluation separates cached and uncached input plus tool rounds. Routine maintenance uses one or two focused cold cases; the full eight-case cold corpus is reserved for structural changes or closeout. Cold discovery now fails closed on unknown domains, reports bounded-candidate truncation, and lets a current host snapshot override static skill/MCP availability; disabled, needs-auth, or not-callable capabilities are never auto-loaded or auto-used.
+Native projection compiles all eligible enabled skills and uses the host snapshot plus deterministic eligibility/metadata planning; profile membership cannot omit a native skill. Host evaluation separates listed, selected, injected, executed and abstained states. The current fresh CLI probe is `host_evaluation_partial` because selection and body invocation are not observable; it does not establish `host_loaded` or `live_accepted`.
 
 Phase 1 read-only entry points (no file writes without `--out`):
 
@@ -68,7 +68,7 @@ Phase 1 read-only entry points (no file writes without `--out`):
 .\skills.ps1 rule-estate-audit --workspace-root D:\CODE --registry .\audit-targets.json --json
 ```
 
-`rule-estate-audit` excludes `external` and `文档` by default, discovers direct Git roots, and reports target-list drift, Codex/Claude common/delta alignment, rule releases, and `Global Rule -> Repo Action` coverage. `--out <report.json>` writes exactly one explicit report inside the workspace root, cannot cross a reparse/junction ancestor, and cannot overwrite a discovered rule file; plan/apply control outputs use the same boundary.
+`rule-estate-audit` excludes `external` and `文档` by default, dynamically discovers direct Git roots, and reports textual mappings separately from semantic gaps; grouped mappings no longer pass semantic coverage. It also verifies Codex/Claude A/C/D parity, distinct B deltas, release/budget headroom, the project `1/A/B/C/D` profile, the Claude wrapper, individual R/S/E mappings, existing N/A evidence files, Git baseline/upstream truth, and S5 enforcement references. Root rules retain stable entry points; volatile task/gate/host/live state is read fresh from manifests, specs, and evidence. `--out <report.json>` writes one report inside the workspace root, cannot cross a reparse/junction or overwrite inputs; plan/apply uses the same boundary.
 
 Reviewed global/project rule change-sets use the controlled multi-target flow:
 
@@ -377,7 +377,7 @@ The repo also provides local/CI parity quality gate scripts:
 
 Meaning:
 
-- `quick`: `build -> repo-hygiene -> generated-sync -> skill-integrity -> skill-routing -> dependency-baseline -> skills-config-contract -> planning-contract -> doctor-json-contract`
+- `quick`: `build -> repo-hygiene -> generated-sync -> skill-integrity -> native-skill-metadata -> dependency-baseline -> skills-config-contract -> planning-contract -> doctor-json-contract`
 - `full`: `quick + tests`
 
 Run the planning contract independently with:

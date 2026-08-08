@@ -26,6 +26,14 @@ if ([int]$corpus.schema_version -ne 2 -or [string]$corpus.decision_owner -ne 'ho
     throw 'Routing corpus must use schema_version=2, decision_owner=host_ai, and contain cases.'
 }
 $config = Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json
+$profileSource = $config.skill_projection.profiles
+$activeProfile = [string]$config.skill_projection.active_profile
+$profileSourceKind = 'legacy_runtime'
+if ($null -eq $profileSource -and $null -ne $config.skill_projection.profile_compatibility) {
+    $profileSource = $config.skill_projection.profile_compatibility.profiles
+    $activeProfile = [string]$config.skill_projection.profile_compatibility.active_profile
+    $profileSourceKind = 'read_only_compatibility'
+}
 $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('skills-manager-routing-contract-{0}' -f [Guid]::NewGuid().ToString('N'))
 $manifestFile = Join-Path $fixtureRoot 'manifest.json'
 $findings = [Collections.Generic.List[object]]::new()
@@ -46,7 +54,7 @@ function Add-InventoryNames([Collections.Generic.HashSet[string]]$Set, $Values) 
 # portable inventory from tracked configuration declarations before synthesizing files.
 $availableSkillNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 Add-InventoryNames $availableSkillNames $config.skill_projection.resident_names
-foreach ($property in @($config.skill_projection.profiles.PSObject.Properties)) {
+foreach ($property in @($profileSource.PSObject.Properties)) {
     Add-InventoryNames $availableSkillNames $property.Value.enabled_names
 }
 foreach ($property in @($config.skill_projection.discovery_catalog.domain_memberships.PSObject.Properties)) {
@@ -126,14 +134,15 @@ function New-RoutingContractManifest {
         $entries.Add([pscustomobject]@{ name = $name; path = $skillPath; source_root = $fixtureRoot }) | Out-Null
     }
 
-    $activeProfile = [string]$config.skill_projection.active_profile
     $activeNames = @()
-    $activeProperty = @($config.skill_projection.profiles.PSObject.Properties | Where-Object Name -eq $activeProfile | Select-Object -First 1)
+    $activeProperty = @($profileSource.PSObject.Properties | Where-Object Name -eq $activeProfile | Select-Object -First 1)
     if ($activeProperty.Count -eq 1) { $activeNames = @($activeProperty[0].Value.enabled_names) }
     $active = @($entries | Where-Object { [string]$_.name -in $activeNames })
     [ordered]@{
         schema_version = 2
         active_profile = $activeProfile
+        profile_source = $profileSourceKind
+        profile_reachability_authority = 'none'
         resident_names = @($config.skill_projection.resident_names)
         active = $active
         canonical = @($entries.ToArray())
@@ -148,12 +157,17 @@ $policyPassed = 0
 $negativeConstraintViolations = 0
 $semanticAutoSelections = 0
 $routerMetadataCache = @{}
+$routerCatalogPolicyCache = @{}
+$routerCallCount = 0
+$catalogPolicyCacheHitCount = 0
 
 function Get-CapabilityRef($Item) {
     return ('{0}|{1}' -f ([string]$Item.kind).ToLowerInvariant(), [string]$Item.name)
 }
 
 function Invoke-RouterCase($Case, [string[]]$Candidate = @()) {
+    $script:routerCallCount++
+    $cacheCountBefore = $routerCatalogPolicyCache.Count
     $routerArgs = @{
         Query = [string]$Case.query
         ManifestPath = $manifestFile
@@ -163,6 +177,7 @@ function Invoke-RouterCase($Case, [string[]]$Candidate = @()) {
         Candidate = @($Candidate)
         ExcludeCapability = @($Case.host_exclude | ForEach-Object { Get-CapabilityRef $_ })
         MetadataCache = $routerMetadataCache
+        CatalogPolicyCache = $routerCatalogPolicyCache
     }
     if (-not [string]::IsNullOrWhiteSpace([string]$Case.snapshot_path)) {
         $snapshotSourcePath = Resolve-RepoFile ([string]$Case.snapshot_path)
@@ -177,6 +192,7 @@ function Invoke-RouterCase($Case, [string[]]$Candidate = @()) {
     }
     $global:LASTEXITCODE = 0
     $raw = @(& $routerFile @routerArgs 2>&1)
+    if ($routerCatalogPolicyCache.Count -eq $cacheCountBefore -and $cacheCountBefore -gt 0) { $script:catalogPolicyCacheHitCount++ }
     if ($LASTEXITCODE -ne 0) { return [pscustomobject]@{ error = ($raw -join "`n"); data = $null } }
     try { return [pscustomobject]@{ error = ''; data = (($raw -join "`n") | ConvertFrom-Json) } }
     catch { return [pscustomobject]@{ error = $_.Exception.Message; data = $null } }
@@ -298,6 +314,8 @@ $resultEnvelope = [ordered]@{
     negative_constraint_violation_count = $negativeConstraintViolations
     finding_count = $findings.Count
     side_effect_violation_count = @($findings | Where-Object code -eq 'side_effect_violation').Count
+    router_call_count = $routerCallCount
+    catalog_policy_cache_hit_count = $catalogPolicyCacheHitCount
     writes_performed = $false
     findings = @($findings.ToArray())
 }

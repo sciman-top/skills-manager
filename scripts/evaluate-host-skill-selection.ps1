@@ -5,7 +5,6 @@ param(
     [string[]]$CaseId,
     [ValidateSet('selection', 'cold_load', 'all')][string]$Mode = 'all',
     [string]$Model = 'gpt-5.6-sol',
-    [switch]$AllowRealProfileMutation,
     [switch]$Execute,
     [switch]$Json
 )
@@ -15,17 +14,11 @@ $repoRoot = Split-Path $PSScriptRoot -Parent
 if ([string]::IsNullOrWhiteSpace($CorpusPath)) { $CorpusPath = Join-Path $repoRoot 'config\host-skill-selection-evaluation.json' }
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) { $OutputRoot = Join-Path $repoRoot 'reports\host-skill-selection-acceptance' }
 $schemaPath = Join-Path $repoRoot 'config\codex-skill-profile-benchmark-output.schema.json'
-$skillsScript = Join-Path $repoRoot 'skills.ps1'
 $configPath = Join-Path $repoRoot 'skills.json'
 $projectionPath = Join-Path $repoRoot 'reports\skill-projection\current.json'
 
 function Get-NormalizedStringArray($Value) {
     return @($Value | ForEach-Object { @(([string]$_) -split ',') } | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
-}
-
-function Set-EvaluationProfile([string]$Name) {
-    & pwsh -NoProfile -ExecutionPolicy Bypass -File $skillsScript '技能配置' '使用' $Name | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "profile switch failed: $Name" }
 }
 
 function Get-ExpectationResult($Expected, [string[]]$Selected) {
@@ -83,15 +76,25 @@ function Test-RawSkillRead([string[]]$Commands, [string]$SkillPath) {
     return $false
 }
 
-function Invoke-HostCase($Case, [string]$RunMode, [string]$RunRoot, [string]$CaseCwd, $CanonicalByName) {
-    $prompt = if ($RunMode -eq 'selection') {
-@"
+function Get-HostSelectionPrompt($Case) {
+    if ([bool]$Case.explicit_fallback) {
+        $selectionContract = 'The user explicitly invoked `$capability-router`. Treat that named invocation as authoritative and include capability-router in selected_skills.'
+    }
+    else {
+        $selectionContract = 'Using only the skill name/description catalog visible at this fresh task boundary and the ordinary trigger rules, return the exact skill names you would invoke before doing the work. Do not invent a cold skill that is not visible. If no direct visible skill matches, select capability-router only when explicit fallback discovery is actually needed. If no skill is needed, return an empty array.'
+    }
+    return @"
 This is a read-only host-native skill-selection evaluation. Do not call tools, modify files, switch profiles, create a plan, delegate, or use a worktree. Do not solve the user request.
-Using only the skill name/description catalog visible at this fresh task boundary and the ordinary trigger rules, return the exact skill names you would invoke before doing the work. Do not invent a cold skill that is not visible. If no direct visible skill matches, select capability-router only when its cross-profile cold-discovery trigger applies. If no skill is needed, return an empty array.
+$selectionContract
 
 User request:
 $($Case.request)
 "@
+}
+
+function Invoke-HostCase($Case, [string]$RunMode, [string]$RunRoot, [string]$CaseCwd, $CanonicalByName) {
+    $prompt = if ($RunMode -eq 'selection') {
+        Get-HostSelectionPrompt $Case
     }
     else {
 @"
@@ -165,9 +168,31 @@ $($Case.request)
 $corpus = Get-Content -LiteralPath $CorpusPath -Raw | ConvertFrom-Json
 if ([int]$corpus.schema_version -ne 1) { throw 'unsupported evaluation corpus schema_version' }
 $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-$originalProfile = [string]$config.skill_projection.active_profile
-$configuredProfiles = @($config.skill_projection.profiles.PSObject.Properties.Name)
-$defaultNames = @($config.skill_projection.profiles.default.enabled_names | ForEach-Object { [string]$_ })
+$projectionConfig = $config.skill_projection
+$legacyProfilesProperty = $projectionConfig.PSObject.Properties['profiles']
+$compatibilityProperty = $projectionConfig.PSObject.Properties['profile_compatibility']
+if ($null -ne $legacyProfilesProperty -and $null -ne $legacyProfilesProperty.Value) {
+    $profileSource = $projectionConfig
+    $profileSourceKind = 'legacy_skill_projection'
+}
+elseif ($null -ne $compatibilityProperty -and $null -ne $compatibilityProperty.Value) {
+    $profileSource = $compatibilityProperty.Value
+    $profileSourceKind = 'profile_compatibility'
+}
+else {
+    throw 'skill_projection has neither legacy profiles nor profile_compatibility data'
+}
+$profilesProperty = $profileSource.PSObject.Properties['profiles']
+if ($null -eq $profilesProperty -or $null -eq $profilesProperty.Value) {
+    throw ("{0} does not contain profile compatibility data" -f $profileSourceKind)
+}
+$originalProfile = [string]$profileSource.active_profile
+$configuredProfiles = @($profilesProperty.Value.PSObject.Properties.Name)
+$defaultProfile = $profilesProperty.Value.PSObject.Properties['default']
+if ($null -eq $defaultProfile -or $null -eq $defaultProfile.Value) {
+    throw ("{0} does not contain a default profile" -f $profileSourceKind)
+}
+$defaultNames = @($defaultProfile.Value.enabled_names | ForEach-Object { [string]$_ })
 $requestedCaseIds = Get-NormalizedStringArray $CaseId
 $cases = @($corpus.cases)
 if ($requestedCaseIds.Count -gt 0) { $cases = @($cases | Where-Object { $requestedCaseIds -contains $_.id }) }
@@ -206,8 +231,9 @@ $plan = [ordered]@{
     mode = $Mode
     execution_boundary = 'fresh_ephemeral_task'
     evaluation_cwd = 'isolated_non_repo_directory'
-    real_profile_mutation_required = ($selectionCases.Count -gt 0)
-    real_profile_mutation_authorized = [bool]$AllowRealProfileMutation
+    real_profile_mutation_required = $false
+    selection_execution_mode = 'host_native'
+    profile_compatibility_mode = 'read_only_metadata'
     semantic_owner = 'host_ai'
     selection_case_count = $selectionCases.Count
     cold_load_case_count = $coldCases.Count
@@ -218,10 +244,6 @@ if (-not $Execute) {
     if ($Json) { $plan | ConvertTo-Json -Depth 5 } else { Write-Host ("evaluation corpus valid: selection={0}, cold_load={1}, planned_calls={2}" -f $selectionCases.Count, $coldCases.Count, $plannedCalls) }
     exit 0
 }
-if ($selectionCases.Count -gt 0 -and -not $AllowRealProfileMutation) {
-    throw 'selection execution changes the real active profile; rerun with -AllowRealProfileMutation or use -Mode cold_load'
-}
-
 $projection = Get-Content -LiteralPath $projectionPath -Raw | ConvertFrom-Json
 $canonicalByName = @{}
 foreach ($entry in @($projection.canonical)) { $canonicalByName[[string]$entry.name] = [string]$entry.path }
@@ -235,22 +257,12 @@ New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
 $evaluationCwd = Join-Path $runRoot 'unrelated-workspace'
 New-Item -ItemType Directory -Path $evaluationCwd -Force | Out-Null
 $results = [Collections.Generic.List[object]]::new()
-try {
-    foreach ($group in @($selectionCases | Group-Object profile)) {
-        Set-EvaluationProfile ([string]$group.Name)
-        foreach ($case in @($group.Group)) { $results.Add((Invoke-HostCase $case 'selection' $runRoot $evaluationCwd $canonicalByName)) | Out-Null }
-    }
-    if ($coldCases.Count -gt 0) {
-        foreach ($case in $coldCases) { $results.Add((Invoke-HostCase $case 'cold_load' $runRoot $evaluationCwd $canonicalByName)) | Out-Null }
-    }
+foreach ($case in $selectionCases) {
+    $results.Add((Invoke-HostCase $case 'selection' $runRoot $evaluationCwd $canonicalByName)) | Out-Null
 }
-finally {
-    if ($selectionCases.Count -gt 0) { Set-EvaluationProfile $originalProfile }
+foreach ($case in $coldCases) {
+    $results.Add((Invoke-HostCase $case 'cold_load' $runRoot $evaluationCwd $canonicalByName)) | Out-Null
 }
-
-$restored = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-$restoredProfile = [string]$restored.skill_projection.active_profile
-if (-not [string]::Equals($restoredProfile, $originalProfile, [StringComparison]::OrdinalIgnoreCase)) { throw "evaluation did not restore active profile: expected=$originalProfile actual=$restoredProfile" }
 $items = @($results.ToArray())
 $summary = @($items | Group-Object mode | ForEach-Object {
     $modeItems = @($_.Group)
@@ -280,10 +292,11 @@ $report = [ordered]@{
     model = $Model
     execution_boundary = 'fresh_ephemeral_task'
     evaluation_cwd = $evaluationCwd
-    real_profile_mutation = ($selectionCases.Count -gt 0)
+    real_profile_mutation = $false
+    selection_execution_mode = 'host_native'
+    profile_compatibility_mode = 'read_only_metadata'
     truth_level = 'host_evaluation_partial'
     original_profile = $originalProfile
-    restored_profile = $restoredProfile
     pass = (@($items | Where-Object { -not $_.pass }).Count -eq 0)
     summary = $summary
     results = $items

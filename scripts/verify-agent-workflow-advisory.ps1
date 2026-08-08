@@ -189,7 +189,6 @@ foreach ($required in @(
         @{ key='productIndex'; literal='Agent workflow advisory runtime'; code='product_index_missing' },
         @{ key='plan'; literal='SMV-AWA-005'; code='plan_coverage_missing' },
         @{ key='todo'; literal='SMV-AWA-005'; code='todo_coverage_missing' },
-        @{ key='agents'; literal='agent workflow advisory'; code='root_contract_missing' },
         @{ key='readme'; literal='agent-plan'; code='readme_command_missing' },
         @{ key='readmeEn'; literal='agent-plan'; code='readme_command_missing' },
         @{ key='evidence'; literal='Maximum claim: `repo_verified / repo_advisory_only`; host state remains `host_evaluation_partial`.'; code='evidence_boundary_missing' },
