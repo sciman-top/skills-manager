@@ -38,6 +38,26 @@ Describe 'Host-profile rule discovery' {
         $result.documents[0].path | Should Match 'PROJECT\.md$'
     }
 
+    It 'skips an empty global override and selects the first non-empty Codex rule' {
+        $fixture = New-RuleFixture 'empty-global-override'
+        [IO.File]::WriteAllText((Join-Path $fixture.user 'AGENTS.override.md'), " `t")
+
+        $result = Get-RuleDiscovery -RepoRoot $fixture.repo -CurrentDirectory $fixture.repo -HostName codex -UserRuleRoot $fixture.user
+
+        $result.documents[0].path | Should Be (Join-Path $fixture.user 'AGENTS.md')
+        @($result.candidates | Where-Object { $_.path -match 'AGENTS\.override\.md$' -and $_.reason -eq 'empty_candidate' }).Count | Should BeGreaterThan 0
+    }
+
+    It 'skips an empty project override and selects the next non-empty Codex rule' {
+        $fixture = New-RuleFixture 'empty-project-override'
+        [IO.File]::WriteAllText((Join-Path $fixture.repo 'AGENTS.override.md'), "`r`n`t")
+
+        $result = Get-RuleDiscovery -RepoRoot $fixture.repo -CurrentDirectory $fixture.repo -HostName codex
+
+        $result.documents[0].path | Should Be (Join-Path $fixture.repo 'AGENTS.md')
+        @($result.candidates | Where-Object { $_.path -match 'AGENTS\.override\.md$' -and $_.reason -eq 'empty_candidate' }).Count | Should Be 1
+    }
+
     It 'marks Claude precedence inferred instead of copying Codex semantics' {
         $fixture = New-RuleFixture 'claude'
         Set-Content -LiteralPath (Join-Path $fixture.user 'CLAUDE.md') -Value '# global claude' -Encoding UTF8

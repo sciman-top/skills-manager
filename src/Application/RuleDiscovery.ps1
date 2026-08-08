@@ -10,6 +10,10 @@ function Test-RuleDiscoveryPathWithin([string]$Path, [string]$Root) {
     return $candidate.Equals($boundary, [System.StringComparison]::OrdinalIgnoreCase) -or $candidate.StartsWith(($boundary + [System.IO.Path]::DirectorySeparatorChar), [System.StringComparison]::OrdinalIgnoreCase)
 }
 
+function Test-RuleDiscoveryNonEmptyFile([string]$Path) {
+    return [System.IO.File]::Exists($Path) -and -not [string]::IsNullOrWhiteSpace([System.IO.File]::ReadAllText($Path))
+}
+
 function New-ObservedRuleDocument([string]$Path, [string]$HostName, [string]$Scope, [int]$Precedence, [string]$Responsibility = 'project_action') {
     $bytes = [System.IO.File]::ReadAllBytes($Path)
     return New-RuleDocument -Host $HostName -Scope $Scope -Responsibility $Responsibility -Path ([System.IO.Path]::GetFullPath($Path)) -Owner $(if ($Scope -eq 'global') { 'user' } else { 'repo' }) -ContentHash (Get-RuleFileSha256 $Path) -ByteSize $bytes.Length -Precedence $Precedence -DiscoveryState observed -SourceOfTruth 'filesystem' -VerificationState static_validated -Evidence @([pscustomobject]@{ type = 'file'; path = [System.IO.Path]::GetFullPath($Path) })
@@ -36,8 +40,10 @@ function Get-RuleDiscovery {
         foreach ($name in $globalNames) {
             $path = Join-Path $user $name
             $exists = [System.IO.File]::Exists($path)
-            $candidates.Add([pscustomobject]@{ path = $path; scope = 'global'; exists = $exists; selected = $false; reason = 'candidate' }) | Out-Null
-            if ($exists) { $documents.Add((New-ObservedRuleDocument $path $HostName $(if ($name -match 'override') { 'override' } else { 'global' }) $precedence $(if ($HostName -eq 'codex') { 'common' } else { 'platform_delta' }))) | Out-Null; $candidates[$candidates.Count - 1].selected = $true; $candidates[$candidates.Count - 1].reason = 'first_existing_candidate'; $precedence++; break }
+            $nonEmpty = $exists -and (Test-RuleDiscoveryNonEmptyFile $path)
+            $reason = if (-not $exists) { 'absent' } elseif (-not $nonEmpty) { 'empty_candidate' } else { 'candidate' }
+            $candidates.Add([pscustomobject]@{ path = $path; scope = 'global'; exists = $exists; selected = $false; reason = $reason }) | Out-Null
+            if ($nonEmpty) { $documents.Add((New-ObservedRuleDocument $path $HostName $(if ($name -match 'override') { 'override' } else { 'global' }) $precedence $(if ($HostName -eq 'codex') { 'common' } else { 'platform_delta' }))) | Out-Null; $candidates[$candidates.Count - 1].selected = $true; $candidates[$candidates.Count - 1].reason = 'first_non_empty_candidate'; $precedence++; break }
         }
     }
     $dirs = New-Object System.Collections.Generic.List[string]
@@ -55,12 +61,14 @@ function Get-RuleDiscovery {
         foreach ($name in $names) {
             $path = Join-Path $dir $name
             $exists = [System.IO.File]::Exists($path)
-            $candidate = [pscustomobject]@{ path = $path; scope = $(if ($dir -eq $repo) { 'repo' } else { 'subtree' }); exists = $exists; selected = $false; reason = $(if ($exists) { 'shadowed_by_higher_priority_candidate' } else { 'absent' }) }
-            if ($exists -and -not $selected) {
+            $nonEmpty = $exists -and (Test-RuleDiscoveryNonEmptyFile $path)
+            $reason = if (-not $exists) { 'absent' } elseif (-not $nonEmpty) { 'empty_candidate' } else { 'shadowed_by_higher_priority_candidate' }
+            $candidate = [pscustomobject]@{ path = $path; scope = $(if ($dir -eq $repo) { 'repo' } else { 'subtree' }); exists = $exists; selected = $false; reason = $reason }
+            if ($nonEmpty -and -not $selected) {
                 $scope = if ($name -match 'override') { 'override' } elseif ($dir -eq $repo) { 'repo' } else { 'subtree' }
                 $document = New-ObservedRuleDocument $path $HostName $scope $precedence $(if ($HostName -eq 'codex') { 'project_action' } else { 'platform_delta' })
                 if ($HostName -eq 'claude') { $document.discovery_state = 'inferred'; $document.precedence = $null }
-                $documents.Add($document) | Out-Null; $candidate.selected = $true; $candidate.reason = $(if ($HostName -eq 'codex') { 'first_existing_candidate' } else { 'candidate_precedence_not_verified' }); $selected = $true; $precedence++
+                $documents.Add($document) | Out-Null; $candidate.selected = $true; $candidate.reason = $(if ($HostName -eq 'codex') { 'first_non_empty_candidate' } else { 'candidate_precedence_not_verified' }); $selected = $true; $precedence++
             }
             $candidates.Add($candidate) | Out-Null
         }

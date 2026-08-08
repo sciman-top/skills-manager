@@ -780,7 +780,7 @@ PoC acceptance：同一 corpus 的结构化输出/exit/finding parity；至少�
 
 2026-08-02 follow-through：`rule-estate-audit` 将动态 Git 目标、registry drift、global common/platform delta、规则 release 和责任覆盖汇总为 zero-write report；`rule-estate-plan/apply/rollback` 通过 fixture/E2E 与一次用户显式授权的真实 11 文件 rollout，证明 reviewed global/project multi-target plan、全量预检、逐目标 receipt、fail-fast、resume 与单目标 rollback。Codex fresh-process load 为 9/9；Claude load 为 `platform_na`；`live_accepted` 仍未执行。
 
-2026-08-08 hardening：coverage 明确拆为 `textual_mapping_covered_count` 与 `semantic_gap_count`，grouped mapping 仅算文本覆盖；静态审计新增全局/项目预算余量状态、N/A schema 与仓内证据存在性、Git baseline/upstream 真值及 S5 enforcement 引用检查。`structural_pass / semantic_coverage_pass / enforcement_verified` 独立，仍不外推为 `host_loaded` 或 `live_accepted`。
+2026-08-09 adversarial hardening：coverage 以全局 C 契约为唯一约束集合，grouped、未知、重复 mapping 均只算文本出现并阻断 semantic pass；静态审计把全局/项目硬预算、缺失结构、Claude wrapper、过期 N/A 与非文件 S5 enforcement 引用转为真实门禁。`textual_mapping_covered_count / semantic_gap_count` 是 v1 主字段；`covered_count` 仅兼容 textual count，`gap_count` 仅兼容旧的缺动作计数且不含 mapping issue，消费者不得用二者推断 semantic pass。`structural_pass / semantic_coverage_pass / enforcement_verified` 继续独立，且不外推为 `host_loaded` 或 `live_accepted`。
 
 ### `ADR-SMV-008 Responsibility coverage over universal template`
 

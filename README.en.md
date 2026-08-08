@@ -65,10 +65,10 @@ Phase 1 read-only entry points (no file writes without `--out`):
 ```powershell
 .\skills.ps1 capability-inventory --json
 .\skills.ps1 rule-audit --repo . --host codex --json
-.\skills.ps1 rule-estate-audit --workspace-root D:\CODE --registry .\audit-targets.json --json
+.\skills.ps1 rule-estate-audit --workspace-root D:\CODE --json
 ```
 
-`rule-estate-audit` excludes `external` and `文档` by default, dynamically discovers direct Git roots, and reports textual mappings separately from semantic gaps; grouped mappings no longer pass semantic coverage. It also verifies Codex/Claude A/C/D parity, distinct B deltas, release/budget headroom, the project `1/A/B/C/D` profile, the Claude wrapper, individual R/S/E mappings, existing N/A evidence files, Git baseline/upstream truth, and S5 enforcement references. Root rules retain stable entry points; volatile task/gate/host/live state is read fresh from manifests, specs, and evidence. `--out <report.json>` writes one report inside the workspace root, cannot cross a reparse/junction or overwrite inputs; plan/apply uses the same boundary.
+`rule-estate-audit` excludes `external` and `文档` by default, dynamically discovers direct Git roots, and reports textual mappings separately from semantic gaps; grouped, unknown, and duplicate mappings do not pass semantic coverage. It also verifies the Codex/Claude global `1/A/B/C/D` structure, A/C/D parity, distinct B deltas, release and hard budgets, plus the project `1/A/B/C/D` profile, the Claude wrapper, individual R/S/E mappings, N/A evidence and expiry, Git baseline/upstream truth, and concrete-file S5 enforcement references. Optional `--registry <snapshot.json>` only compares a supplied snapshot with dynamic discovery for drift; it neither changes the target set nor becomes a central source of truth. Root rules retain stable entry points; volatile task/gate/host/live state is read fresh from manifests, specs, and evidence. `--out <report.json>` writes one report inside the workspace root, cannot cross a reparse/junction or overwrite inputs; plan/apply uses the same boundary.
 
 Reviewed global/project rule change-sets use the controlled multi-target flow:
 

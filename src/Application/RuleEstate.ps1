@@ -103,6 +103,13 @@ function Get-RuleEstateNaFindings([string]$ProjectText, [string]$AgentsPath) {
         if (-not [string]::IsNullOrWhiteSpace($expires) -and ($expires -notmatch '^\d{4}-\d{2}-\d{2}$' -or -not [datetime]::TryParseExact($expires, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$parsedExpiry))) {
             $invalid.Add('expires_at_iso_date') | Out-Null
         }
+        elseif ($parsedExpiry -ne [datetime]::MinValue -and $parsedExpiry.Date -lt [datetime]::UtcNow.Date) {
+            $findings.Add([pscustomobject][ordered]@{
+                code = 'project_na_expired'; severity = 'error'; path = $AgentsPath; line = $index + 1
+                expires_at = $expires; disposition = 'adapt'
+                message = 'N/A record has expired and must be revalidated or removed.'
+            }) | Out-Null
+        }
         $evidence = [string]$values['evidence_link']
         if (-not [string]::IsNullOrWhiteSpace($evidence)) {
             $evidencePath = ($evidence -split '#', 2)[0].Trim()
@@ -220,6 +227,7 @@ function Get-RuleEstateGlobalDocument([string]$UserRoot, [ValidateSet('codex', '
         $path = Join-Path $root $name
         if ([System.IO.File]::Exists($path)) {
             $text = [System.IO.File]::ReadAllText($path)
+            if ([string]::IsNullOrWhiteSpace($text)) { continue }
             return [pscustomobject][ordered]@{ host = $HostName; path = $path; text = $text; hash = Get-RulePatchTextHash $text }
         }
     }
@@ -231,6 +239,15 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
     $claude = Get-RuleEstateGlobalDocument $ClaudeUserRoot claude
     $sections = New-Object System.Collections.Generic.List[object]
     $findings = New-Object System.Collections.Generic.List[object]
+    foreach ($document in @(
+        [pscustomobject]@{ host = 'codex'; value = $codex },
+        [pscustomobject]@{ host = 'claude'; value = $claude }
+    )) {
+        $text = if ($null -eq $document.value) { '' } else { [string]$document.value.text }
+        if ([string]::IsNullOrWhiteSpace((Get-RuleEstateMarkdownSection $text '1'))) {
+            $findings.Add([pscustomobject][ordered]@{ code = 'global_contract_section_missing'; severity = 'error'; host = [string]$document.host; section = '1'; path = if ($null -eq $document.value) { '' } else { [string]$document.value.path }; disposition = 'adapt'; message = 'Global rule contract section 1 is missing.' }) | Out-Null
+        }
+    }
     foreach ($name in @('A', 'C', 'D')) {
         $codexText = if ($null -eq $codex) { '' } else { Get-RuleEstateMarkdownSection ([string]$codex.text) $name }
         $claudeText = if ($null -eq $claude) { '' } else { Get-RuleEstateMarkdownSection ([string]$claude.text) $name }
@@ -241,17 +258,17 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
             codex_hash = if ([string]::IsNullOrWhiteSpace($codexText)) { '' } else { Get-RulePatchTextHash $codexText }
             claude_hash = if ([string]::IsNullOrWhiteSpace($claudeText)) { '' } else { Get-RulePatchTextHash $claudeText }
         }) | Out-Null
-        if (-not $aligned) { $findings.Add([pscustomobject][ordered]@{ code = 'global_common_section_drift'; severity = 'warning'; section = $name; disposition = 'adapt'; message = ('Codex and Claude global common section {0} is absent or different.' -f $name) }) | Out-Null }
+        if (-not $aligned) { $findings.Add([pscustomobject][ordered]@{ code = 'global_common_section_drift'; severity = 'error'; section = $name; disposition = 'adapt'; message = ('Codex and Claude global common section {0} is absent or different.' -f $name) }) | Out-Null }
         if ($name -eq 'A' -and $codexText -match '(?i)send_message_to_thread|codex_delegation|source_thread_id|non-managed hook|specialized tool path') {
             $tokens = @([regex]::Matches($codexText, '(?i)send_message_to_thread|codex_delegation|source_thread_id|non-managed hook|specialized tool path') | ForEach-Object { $_.Value.ToLowerInvariant() } | Sort-Object -Unique)
-            $findings.Add([pscustomobject][ordered]@{ code = 'global_common_platform_leak'; severity = 'warning'; section = 'A'; tokens = $tokens; disposition = 'adapt'; message = 'Common section A contains Codex-specific tool or hook implementation details that belong in platform delta B.' }) | Out-Null
+            $findings.Add([pscustomobject][ordered]@{ code = 'global_common_platform_leak'; severity = 'error'; section = 'A'; tokens = $tokens; disposition = 'adapt'; message = 'Common section A contains Codex-specific tool or hook implementation details that belong in platform delta B.' }) | Out-Null
         }
     }
     $codexDelta = if ($null -eq $codex) { '' } else { Get-RuleEstateMarkdownSection ([string]$codex.text) 'B' }
     $claudeDelta = if ($null -eq $claude) { '' } else { Get-RuleEstateMarkdownSection ([string]$claude.text) 'B' }
-    if ([string]::IsNullOrWhiteSpace($codexDelta)) { $findings.Add([pscustomobject]@{ code = 'codex_platform_delta_missing'; severity = 'warning'; section = 'B'; disposition = 'adapt'; message = 'Codex global platform delta section B is missing.' }) | Out-Null }
-    if ([string]::IsNullOrWhiteSpace($claudeDelta)) { $findings.Add([pscustomobject]@{ code = 'claude_platform_delta_missing'; severity = 'warning'; section = 'B'; disposition = 'adapt'; message = 'Claude global platform delta section B is missing.' }) | Out-Null }
-    if (-not [string]::IsNullOrWhiteSpace($codexDelta) -and $codexDelta -ceq $claudeDelta) { $findings.Add([pscustomobject]@{ code = 'platform_delta_not_distinct'; severity = 'warning'; section = 'B'; disposition = 'adapt'; message = 'Codex and Claude platform delta sections are identical; verify that host-specific loading and enforcement facts were not flattened.' }) | Out-Null }
+    if ([string]::IsNullOrWhiteSpace($codexDelta)) { $findings.Add([pscustomobject]@{ code = 'codex_platform_delta_missing'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'Codex global platform delta section B is missing.' }) | Out-Null }
+    if ([string]::IsNullOrWhiteSpace($claudeDelta)) { $findings.Add([pscustomobject]@{ code = 'claude_platform_delta_missing'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'Claude global platform delta section B is missing.' }) | Out-Null }
+    if (-not [string]::IsNullOrWhiteSpace($codexDelta) -and $codexDelta -ceq $claudeDelta) { $findings.Add([pscustomobject]@{ code = 'platform_delta_not_distinct'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'Codex and Claude platform delta sections are identical; verify that host-specific loading and enforcement facts were not flattened.' }) | Out-Null }
 
     $budgets = New-Object System.Collections.Generic.List[object]
     foreach ($document in @($codex, $claude)) {
@@ -265,7 +282,7 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
         $budgetState = if (-not $withinBudget) { 'exceeded' } elseif ($budgetRatio -ge 0.95) { 'addition_blocked' } elseif ($budgetRatio -ge 0.85) { 'warning' } else { 'healthy' }
         $lowHeadroom = $budgetState -in @('warning', 'addition_blocked')
         $budgets.Add([pscustomobject][ordered]@{ host = [string]$document.host; path = [string]$document.path; bytes = $byteCount; lines = $lineCount; max_bytes = 16384; max_lines = 130; byte_headroom = $byteHeadroom; line_headroom = $lineHeadroom; ratio = [math]::Round($budgetRatio, 4); state = $budgetState; within_budget = $withinBudget; low_headroom = $lowHeadroom }) | Out-Null
-        if (-not $withinBudget) { $findings.Add([pscustomobject]@{ code = 'global_rule_budget_exceeded'; severity = 'warning'; path = [string]$document.path; disposition = 'adapt'; message = ('Global rule uses {0} bytes/{1} lines; profile budget is 16384 bytes/130 lines.' -f $byteCount, $lineCount) }) | Out-Null }
+        if (-not $withinBudget) { $findings.Add([pscustomobject]@{ code = 'global_rule_budget_exceeded'; severity = 'error'; path = [string]$document.path; disposition = 'adapt'; message = ('Global rule uses {0} bytes/{1} lines; profile budget is 16384 bytes/130 lines.' -f $byteCount, $lineCount) }) | Out-Null }
         elseif ($lowHeadroom) {
             $stateCode = if ($budgetState -eq 'addition_blocked') { 'global_rule_budget_addition_blocked' } else { 'global_rule_budget_warning' }
             $findings.Add([pscustomobject]@{ code = $stateCode; severity = 'warning'; path = [string]$document.path; disposition = 'adapt'; message = ('Global rule budget state is {0}: {1} bytes and {2} lines remain.' -f $budgetState, $byteHeadroom, $lineHeadroom) }) | Out-Null
@@ -276,7 +293,7 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
     $codexRelease = if ($null -eq $codex) { '' } else { Get-RuleEstateRelease ([string]$codex.text) global }
     $claudeRelease = if ($null -eq $claude) { '' } else { Get-RuleEstateRelease ([string]$claude.text) global }
     $releaseAligned = -not [string]::IsNullOrWhiteSpace($codexRelease) -and $codexRelease -eq $claudeRelease
-    if (-not $releaseAligned) { $findings.Add([pscustomobject]@{ code = 'global_release_mismatch'; severity = 'warning'; disposition = 'adapt'; expected = $codexRelease; observed = $claudeRelease; message = 'Codex and Claude global rule releases are absent or different.' }) | Out-Null }
+    if (-not $releaseAligned) { $findings.Add([pscustomobject]@{ code = 'global_release_mismatch'; severity = 'error'; disposition = 'adapt'; expected = $codexRelease; observed = $claudeRelease; message = 'Codex and Claude global rule releases are absent or different.' }) | Out-Null }
     return [pscustomobject][ordered]@{
         codex_path = if ($null -eq $codex) { '' } else { [string]$codex.path }
         claude_path = if ($null -eq $claude) { '' } else { [string]$claude.path }
@@ -310,17 +327,22 @@ function Get-RuleEstateProjectActions([string]$AgentsPath) {
     $actions = New-Object System.Collections.Generic.List[object]
     foreach ($item in $raw) {
         $expandedIds = @(Expand-RuleEstateConstraintId ([string]$item.constraint_id))
+        $projectActions = @($item.project_actions)
+        if ($projectActions.Count -eq 0) { $projectActions = @([string]$item.common_intent) }
+        $evidenceItems = @($item.evidence)
         foreach ($id in $expandedIds) {
             if ($id -notmatch '^[RES]\d+$') { continue }
-            $actions.Add([pscustomobject][ordered]@{ constraint_id = $id; source_constraint_id = [string]$item.constraint_id; grouped = ($expandedIds.Count -gt 1); action = [string]$item.common_intent; evidence = @($item.evidence) }) | Out-Null
+            for ($index = 0; $index -lt $projectActions.Count; $index++) {
+                $evidence = if ($index -lt $evidenceItems.Count) { @($evidenceItems[$index]) } else { @($evidenceItems) }
+                $actions.Add([pscustomobject][ordered]@{ constraint_id = $id; source_constraint_id = [string]$item.constraint_id; grouped = ($expandedIds.Count -gt 1); action = [string]$projectActions[$index]; evidence = $evidence }) | Out-Null
+            }
         }
     }
     return @($actions.ToArray())
 }
 
-function Get-RuleEstateExpectedConstraintIds([string]$CodexGlobalText, [string]$ClaudeGlobalText, [object[]]$ProjectActions) {
+function Get-RuleEstateExpectedConstraintIds([string]$CodexGlobalText, [string]$ClaudeGlobalText) {
     $ids = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($action in @($ProjectActions)) { $ids.Add([string]$action.constraint_id) | Out-Null }
     $contractText = (Get-RuleEstateMarkdownSection $CodexGlobalText 'C') + "`n" + (Get-RuleEstateMarkdownSection $ClaudeGlobalText 'C')
     foreach ($match in @([regex]::Matches($contractText, '(?i)\b(?:[RS]\d+(?:\s*-\s*[RS]?\d+)?|E\d+(?:/E\d+)+)\b'))) {
         foreach ($id in @(Expand-RuleEstateConstraintId ([string]$match.Value))) { $ids.Add($id) | Out-Null }
@@ -337,10 +359,13 @@ function Get-RuleEstateEnforcementChecks([string]$RepoRoot, [object[]]$ActionMat
             try {
                 $resolved = if ([System.IO.Path]::IsPathRooted($value)) { [System.IO.Path]::GetFullPath($value) } else { [System.IO.Path]::GetFullPath((Join-Path $RepoRoot $value)) }
                 $contained = Test-RuleDiscoveryPathWithin $resolved $RepoRoot
-                $exists = $contained -and ([System.IO.File]::Exists($resolved) -or [System.IO.Directory]::Exists($resolved))
+                $fileExists = $contained -and [System.IO.File]::Exists($resolved)
+                $directoryExists = $contained -and [System.IO.Directory]::Exists($resolved)
+                $exists = $fileExists -or $directoryExists
+                $kind = if ($fileExists) { 'file' } elseif ($directoryExists) { 'directory' } elseif (-not $contained) { 'outside_repository' } else { 'missing' }
             }
-            catch { $resolved = ''; $contained = $false; $exists = $false }
-            $checks.Add([pscustomobject][ordered]@{ value = $value; resolved_path = $resolved; contained = $contained; exists = $exists }) | Out-Null
+            catch { $resolved = ''; $contained = $false; $exists = $false; $fileExists = $false; $directoryExists = $false; $kind = 'invalid' }
+            $checks.Add([pscustomobject][ordered]@{ value = $value; resolved_path = $resolved; contained = $contained; exists = $exists; is_file = $fileExists; is_directory = $directoryExists; kind = $kind; enforceable_file = $fileExists }) | Out-Null
         }
     }
     return @($checks.ToArray() | Sort-Object value -Unique)
@@ -365,7 +390,16 @@ function Get-RuleEstateCoverage {
     $constraints = New-Object System.Collections.Generic.List[object]
     $enforcementChecks = New-Object System.Collections.Generic.List[object]
     $groupedMappings = @($actions | Where-Object grouped | Select-Object source_constraint_id,evidence -Unique)
-    foreach ($id in @(Get-RuleEstateExpectedConstraintIds $CodexGlobalText $ClaudeGlobalText $actions)) {
+    $expectedIds = @(Get-RuleEstateExpectedConstraintIds $CodexGlobalText $ClaudeGlobalText)
+    $expectedSet = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($id in $expectedIds) { $expectedSet.Add([string]$id) | Out-Null }
+    $unknownMappings = @($actions | Where-Object { -not $expectedSet.Contains([string]$_.constraint_id) } | Group-Object constraint_id | ForEach-Object {
+        [pscustomobject][ordered]@{ constraint_id = [string]$_.Name; count = $_.Count; evidence = @($_.Group | ForEach-Object { $_.evidence } | ForEach-Object { $_ }) }
+    })
+    $duplicateMappings = @($actions | Group-Object constraint_id | Where-Object Count -gt 1 | ForEach-Object {
+        [pscustomobject][ordered]@{ constraint_id = [string]$_.Name; count = $_.Count; evidence = @($_.Group | ForEach-Object { $_.evidence } | ForEach-Object { $_ }) }
+    })
+    foreach ($id in $expectedIds) {
         $actionMatches = @($actions | Where-Object { [string]$_.constraint_id -eq $id })
         $checks = @(Get-RuleEstateEnforcementChecks -RepoRoot $repoRoot -ActionMatches $actionMatches)
         foreach ($check in $checks) { $enforcementChecks.Add($check) | Out-Null }
@@ -389,6 +423,8 @@ function Get-RuleEstateCoverage {
     $advisor = Invoke-RuleAdvisor -Constraints @($constraints.ToArray())
     $advisor | Add-Member -NotePropertyName enforcement_checks -NotePropertyValue @($enforcementChecks.ToArray())
     $advisor | Add-Member -NotePropertyName grouped_mappings -NotePropertyValue @($groupedMappings)
+    $advisor | Add-Member -NotePropertyName unknown_mappings -NotePropertyValue @($unknownMappings)
+    $advisor | Add-Member -NotePropertyName duplicate_mappings -NotePropertyValue @($duplicateMappings)
     $advisor | Add-Member -NotePropertyName coverage_kind -NotePropertyValue 'textual_mapping_coverage'
     return $advisor
 }
@@ -415,27 +451,31 @@ function New-RuleEstateTargetAudit {
         if (-not [string]::IsNullOrWhiteSpace($findingPath) -and (Test-RuleDiscoveryPathWithin $findingPath $Target.path)) { $findings.Add($finding) | Out-Null }
     }
     if (-not [bool]$Target.agents_exists) { $findings.Add([pscustomobject]@{ code = 'project_agents_missing'; severity = 'error'; path = $Target.agents_path; disposition = 'adapt'; message = 'Target repository has no AGENTS.md project contract.' }) | Out-Null }
-    if (-not [bool]$Target.claude_exists) { $findings.Add([pscustomobject]@{ code = 'project_claude_wrapper_missing'; severity = 'warning'; path = $Target.claude_path; disposition = 'adapt'; message = 'Target repository has no CLAUDE.md adapter or Claude-specific project rule.' }) | Out-Null }
+    if (-not [bool]$Target.claude_exists) { $findings.Add([pscustomobject]@{ code = 'project_claude_wrapper_missing'; severity = 'error'; path = $Target.claude_path; disposition = 'adapt'; message = 'Target repository has no CLAUDE.md adapter or Claude-specific project rule.' }) | Out-Null }
     if ([bool]$Target.agents_exists) {
         foreach ($sectionName in @('1', 'A', 'B', 'C', 'D')) {
-            if ([string]::IsNullOrWhiteSpace((Get-RuleEstateMarkdownSection $projectText $sectionName))) { $findings.Add([pscustomobject]@{ code = 'project_contract_section_missing'; severity = 'warning'; path = $Target.agents_path; section = $sectionName; disposition = 'adapt'; message = ('Project contract section {0} is missing from the active profile.' -f $sectionName) }) | Out-Null }
+            if ([string]::IsNullOrWhiteSpace((Get-RuleEstateMarkdownSection $projectText $sectionName))) { $findings.Add([pscustomobject]@{ code = 'project_contract_section_missing'; severity = 'error'; path = $Target.agents_path; section = $sectionName; disposition = 'adapt'; message = ('Project contract section {0} is missing from the active profile.' -f $sectionName) }) | Out-Null }
         }
     }
     if ([bool]$Target.claude_exists) {
         $claudeBytes = [System.IO.File]::ReadAllBytes([string]$Target.claude_path)
         $claudeText = [System.IO.File]::ReadAllText([string]$Target.claude_path)
         $claudeLines = @($claudeText -split "`r?`n")
-        if ($claudeBytes.Length -ge 3 -and $claudeBytes[0] -eq 0xEF -and $claudeBytes[1] -eq 0xBB -and $claudeBytes[2] -eq 0xBF) { $findings.Add([pscustomobject]@{ code = 'project_claude_wrapper_bom'; severity = 'warning'; path = $Target.claude_path; disposition = 'adapt'; message = 'Claude project wrapper must begin without a UTF-8 BOM.' }) | Out-Null }
-        if ($claudeLines.Count -eq 0 -or $claudeLines[0] -cne '@AGENTS.md') { $findings.Add([pscustomobject]@{ code = 'project_claude_wrapper_first_line_mismatch'; severity = 'warning'; path = $Target.claude_path; disposition = 'adapt'; message = 'Claude project wrapper first physical line must be @AGENTS.md for the active shared-contract profile.' }) | Out-Null }
+        if ($claudeBytes.Length -ge 3 -and $claudeBytes[0] -eq 0xEF -and $claudeBytes[1] -eq 0xBB -and $claudeBytes[2] -eq 0xBF) { $findings.Add([pscustomobject]@{ code = 'project_claude_wrapper_bom'; severity = 'error'; path = $Target.claude_path; disposition = 'adapt'; message = 'Claude project wrapper must begin without a UTF-8 BOM.' }) | Out-Null }
+        if ($claudeLines.Count -eq 0 -or $claudeLines[0] -cne '@AGENTS.md') { $findings.Add([pscustomobject]@{ code = 'project_claude_wrapper_first_line_mismatch'; severity = 'error'; path = $Target.claude_path; disposition = 'adapt'; message = 'Claude project wrapper first physical line must be @AGENTS.md for the active shared-contract profile.' }) | Out-Null }
     }
     if (-not [string]::IsNullOrWhiteSpace($globalRelease) -and $projectRelease -ne $globalRelease) { $findings.Add([pscustomobject]@{ code = 'project_global_release_mismatch'; severity = 'warning'; path = $Target.agents_path; disposition = 'adapt'; expected = $globalRelease; observed = $projectRelease; message = ('Project global-rule review is {0}; current global release is {1}.' -f $(if ([string]::IsNullOrWhiteSpace($projectRelease)) { 'undeclared' } else { $projectRelease }), $globalRelease) }) | Out-Null }
     foreach ($item in @($coverage.coverage | Where-Object { $_.coverage -ne 'covered' })) { $findings.Add([pscustomobject]@{ code = 'global_repo_action_gap'; severity = 'warning'; path = $Target.agents_path; constraint_id = $item.constraint_id; disposition = 'adapt'; message = ('Constraint {0} coverage is {1}.' -f $item.constraint_id, $item.coverage) }) | Out-Null }
     foreach ($item in @($coverage.coverage | Where-Object { $_.constraint_id -eq 'S5' -and @($_.enforcement_refs).Count -eq 0 })) { $findings.Add([pscustomobject]@{ code = 'enforcement_reference_required'; severity = 'error'; path = $Target.agents_path; constraint_id = 'S5'; disposition = 'adapt'; message = 'S5 must map to at least one concrete script/config/hook/CI reference.' }) | Out-Null }
     foreach ($check in @($coverage.enforcement_checks | Where-Object { -not $_.exists })) { $findings.Add([pscustomobject]@{ code = 'enforcement_reference_missing'; severity = 'error'; path = $Target.agents_path; reference = $check.value; resolved_path = $check.resolved_path; disposition = 'adapt'; message = ('Mapped deterministic enforcement reference is absent or outside the repository: {0}' -f $check.value) }) | Out-Null }
+    foreach ($check in @($coverage.enforcement_checks | Where-Object is_directory)) { $findings.Add([pscustomobject]@{ code = 'enforcement_reference_not_file'; severity = 'error'; path = $Target.agents_path; reference = $check.value; resolved_path = $check.resolved_path; observed_kind = $check.kind; disposition = 'adapt'; message = ('Mapped deterministic enforcement reference must be a concrete file: {0}' -f $check.value) }) | Out-Null }
     foreach ($mapping in @($coverage.grouped_mappings)) { $findings.Add([pscustomobject]@{ code = 'project_mapping_grouped'; severity = 'warning'; path = $Target.agents_path; constraint_id = [string]$mapping.source_constraint_id; disposition = 'adapt'; message = 'Grouped mappings are textual coverage only; map each global constraint to its own repository action.' }) | Out-Null }
+    foreach ($mapping in @($coverage.unknown_mappings)) { $findings.Add([pscustomobject]@{ code = 'project_mapping_unknown'; severity = 'warning'; path = $Target.agents_path; constraint_id = [string]$mapping.constraint_id; disposition = 'adapt'; message = 'Project mapping id is not declared by the current global project contract.' }) | Out-Null }
+    foreach ($mapping in @($coverage.duplicate_mappings)) { $findings.Add([pscustomobject]@{ code = 'project_mapping_duplicate'; severity = 'warning'; path = $Target.agents_path; constraint_id = [string]$mapping.constraint_id; count = [int]$mapping.count; disposition = 'adapt'; message = 'Map each global constraint exactly once to avoid duplicate or conflicting repository actions.' }) | Out-Null }
     foreach ($finding in @(Get-RuleEstateNaFindings $projectText $Target.agents_path)) { $findings.Add($finding) | Out-Null }
     foreach ($finding in @(Get-RuleEstateGitProfileFindings $projectText $Target.agents_path)) { $findings.Add($finding) | Out-Null }
-    if ($projectLowHeadroom) { $findings.Add([pscustomobject]@{ code = 'project_rule_budget_low_headroom'; severity = 'warning'; path = $Target.agents_path; disposition = 'adapt'; message = ('Project rule has low headroom: {0} bytes and {1} lines remain.' -f $projectByteHeadroom, $projectLineHeadroom) }) | Out-Null }
+    if (-not $projectWithinBudget) { $findings.Add([pscustomobject]@{ code = 'project_rule_budget_exceeded'; severity = 'error'; path = $Target.agents_path; disposition = 'adapt'; message = ('Project rule uses {0} bytes/{1} lines; root budget is 10240 bytes/80 lines.' -f $projectBytes, $projectLines) }) | Out-Null }
+    elseif ($projectLowHeadroom) { $findings.Add([pscustomobject]@{ code = 'project_rule_budget_low_headroom'; severity = 'warning'; path = $Target.agents_path; disposition = 'adapt'; message = ('Project rule has low headroom: {0} bytes and {1} lines remain.' -f $projectByteHeadroom, $projectLineHeadroom) }) | Out-Null }
     $patchCandidates = @()
     if ([bool]$Target.agents_exists -and -not [bool]$Target.claude_exists) {
         $desired = "@AGENTS.md`n"
@@ -471,9 +511,12 @@ function Invoke-RuleEstateAudit {
     $findings = @($alignment.findings) + @($audits | ForEach-Object { $_.findings })
     if (-not $inventory.registry.in_sync) { $findings += [pscustomobject]@{ code = 'target_registry_drift'; severity = 'warning'; path = $inventory.workspace_root; disposition = 'adapt'; message = 'Configured audit targets differ from the discovered workspace Git roots.' } }
     $gapCount = @($audits | ForEach-Object { $_.responsibility.coverage } | Where-Object coverage -ne 'covered').Count
-    $structuralPass = @($findings | Where-Object severity -eq 'error' | Where-Object code -notin @('enforcement_reference_missing', 'enforcement_reference_required')).Count -eq 0
-    $semanticCoveragePass = $gapCount -eq 0 -and @($findings | Where-Object code -eq 'project_mapping_grouped').Count -eq 0
-    $enforcementVerified = @($findings | Where-Object code -in @('enforcement_reference_missing', 'enforcement_reference_required')).Count -eq 0
+    $enforcementCodes = @('enforcement_reference_missing', 'enforcement_reference_required', 'enforcement_reference_not_file')
+    $mappingCodes = @('project_mapping_grouped', 'project_mapping_unknown', 'project_mapping_duplicate')
+    $mappingIssueCount = @($findings | Where-Object code -in $mappingCodes).Count
+    $structuralPass = @($findings | Where-Object severity -eq 'error' | Where-Object code -notin $enforcementCodes).Count -eq 0
+    $semanticCoveragePass = $gapCount -eq 0 -and $mappingIssueCount -eq 0
+    $enforcementVerified = @($findings | Where-Object code -in $enforcementCodes).Count -eq 0
     return [pscustomobject][ordered]@{
         schema_version = 1; truth_boundary = 'workspace_static_audit'; generated_at = [datetimeoffset]::UtcNow.ToString('o')
         inventory = $inventory; global_alignment = $alignment; targets = @($audits.ToArray())
@@ -481,7 +524,7 @@ function Invoke-RuleEstateAudit {
             target_count = $inventory.target_count; finding_count = @($findings).Count
             patch_candidate_count = @($audits | ForEach-Object { $_.patch_candidates }).Count
             textual_mapping_covered_count = @($audits | ForEach-Object { $_.responsibility.coverage } | Where-Object coverage -eq 'covered').Count
-            semantic_gap_count = $gapCount + @($findings | Where-Object code -eq 'project_mapping_grouped').Count
+            semantic_gap_count = $gapCount + $mappingIssueCount
             covered_count = @($audits | ForEach-Object { $_.responsibility.coverage } | Where-Object coverage -eq 'covered').Count
             gap_count = $gapCount
         }
@@ -491,7 +534,7 @@ function Invoke-RuleEstateAudit {
         reference_basis = @(
             [pscustomobject]@{ authority = 'official'; source = 'https://learn.chatgpt.com/docs/agent-configuration/agents-md'; disposition = 'adopt'; use = 'Codex global/project/nested discovery and precedence' },
             [pscustomobject]@{ authority = 'official'; source = 'https://learn.chatgpt.com/docs/agent-configuration/rules'; disposition = 'adopt'; use = 'Separate prose guidance from deterministic command policy' },
-            [pscustomobject]@{ authority = 'local_reference'; source = 'D:\CODE-other\governed-ai-coding-runtime'; disposition = 'adapt'; use = 'common/platform_delta/project_action responsibility model; runtime remains retired' }
+            [pscustomobject]@{ authority = 'repository_evidence'; source = 'docs/product/rule-governance-adoption-matrix.md'; disposition = 'adapt'; use = 'Pinned provenance for the common/platform_delta/project_action responsibility model; referenced runtime remains retired' }
         )
         writes = 0; provider_calls = 0; native_mutations = 0; host_loaded = 'not_run'; live_accepted = 'not_run'
     }

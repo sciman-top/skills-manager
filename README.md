@@ -59,10 +59,10 @@ Phase 1 的只读入口（未指定 `--out` 时不写文件）：
 ```powershell
 .\skills.ps1 capability-inventory --json
 .\skills.ps1 rule-audit --repo . --host codex --json
-.\skills.ps1 rule-estate-audit --workspace-root D:\CODE --registry .\audit-targets.json --json
+.\skills.ps1 rule-estate-audit --workspace-root D:\CODE --json
 ```
 
-`rule-estate-audit` 默认排除 `external` 与 `文档`，动态发现直属 Git 仓，并分别报告 textual mapping 与 semantic gap；grouped mapping 不再视为语义通过。审计还验证 Codex/Claude A/C/D parity、B delta、release/预算余量、项目 `1/A/B/C/D`、Claude wrapper、逐项 R/S/E 映射、N/A 证据文件、Git baseline/upstream 真值及 S5 确定性引用。根规则只保存稳定规范/入口，易变 task/gate/host/live 状态从 manifest/spec/evidence fresh read。`--out <report.json>` 只在显式 workspace root 内写一个报告，不得穿过 reparse/junction 或覆盖输入；plan/apply 同界。
+`rule-estate-audit` 默认排除 `external` 与 `文档`，动态发现直属 Git 仓，并分别报告 textual mapping 与 semantic gap；grouped、未知或重复映射均不视为语义通过。审计还验证 Codex/Claude 全局 `1/A/B/C/D` 结构、A/C/D parity、B delta、release/硬预算，以及项目 `1/A/B/C/D`、Claude wrapper、逐项 R/S/E 映射、N/A 证据与有效期、Git baseline/upstream 真值及 S5 具体文件引用。可选 `--registry <snapshot.json>` 只比较动态发现结果与外部快照的 drift，不改变目标集合，也不是中央真源。根规则只保存稳定规范/入口，易变 task/gate/host/live 状态从 manifest/spec/evidence fresh read。`--out <report.json>` 只在显式 workspace root 内写一个报告，不得穿过 reparse/junction 或覆盖输入；plan/apply 同界。
 
 经人工或登记策略审阅的全局/项目规则 change-set 可进入受控多目标流程：
 
