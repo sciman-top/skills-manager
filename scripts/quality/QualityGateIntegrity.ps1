@@ -42,7 +42,9 @@ function Get-QualityGateSourceFingerprint {
     $resolvedRoot = [IO.Path]::GetFullPath($RepoRoot)
     $head = Invoke-QualityGateGit $resolvedRoot @('rev-parse', 'HEAD')
     $indexTree = Invoke-QualityGateGit $resolvedRoot @('write-tree')
-    $trackedDiff = Invoke-QualityGateGit $resolvedRoot @('diff', '--binary', '--no-ext-diff', '--no-color', '--no-renames', 'HEAD', '--')
+    $trackedOutput = @(& git -C $resolvedRoot diff --binary --no-ext-diff --no-color --no-renames HEAD -- 2>$null)
+    if ($LASTEXITCODE -ne 0) { throw ('git command failed: git -C {0} diff --binary --no-ext-diff --no-color --no-renames HEAD --' -f $resolvedRoot) }
+    $trackedDiff = ($trackedOutput -join [Environment]::NewLine).Trim()
     $trackedBytes = [Text.Encoding]::UTF8.GetBytes($trackedDiff)
     $trackedHash = ([Security.Cryptography.SHA256]::HashData($trackedBytes) | ForEach-Object ToString x2) -join ''
     $untracked = Get-QualityGateUntrackedFingerprint -RepoRoot $resolvedRoot

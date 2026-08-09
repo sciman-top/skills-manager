@@ -205,4 +205,27 @@ Describe 'Quality gate receipt integrity' {
         $stale.pass | Should Be $false
         @($stale.findings.code) | Should Contain 'quality_gate_current_source_stale'
     }
+
+    It 'ignores Git conversion warnings when tracked file content is unchanged' {
+        $fixture = New-QualityGateIntegrityFixture 'stderr-warning-fingerprint'
+        & git -C $fixture.root config core.autocrlf true
+        $trackedPath = Join-Path $fixture.root 'tracked.txt'
+        [IO.File]::WriteAllText($trackedPath, "fixture`n", [Text.UTF8Encoding]::new($false))
+        & git -C $fixture.root add tracked.txt
+        & git -C $fixture.root commit -qm 'normalize fixture'
+        [IO.File]::WriteAllText($trackedPath, "fixture`r`n", [Text.UTF8Encoding]::new($false))
+        & git -C $fixture.root update-index --refresh
+        $cleanGitOutput = @(& git -C $fixture.root diff --binary --no-ext-diff --no-color --no-renames HEAD -- 2>&1)
+        $start = Get-QualityGateSourceFingerprint -RepoRoot $fixture.root
+
+        Start-Sleep -Milliseconds 1100
+        [IO.File]::WriteAllText($trackedPath, "fixture`n", [Text.UTF8Encoding]::new($false))
+        $indexBlob = ([string](& git -C $fixture.root ls-files -s -- tracked.txt)).Split()[1]
+        $worktreeBlob = [string](& git -C $fixture.root hash-object -- tracked.txt)
+        $end = Get-QualityGateSourceFingerprint -RepoRoot $fixture.root
+
+        ($cleanGitOutput -join "`n") | Should Not Match 'will be replaced by CRLF'
+        $worktreeBlob | Should Be $indexBlob
+        (Compare-QualityGateSourceFingerprint -Start $start -End $end).pass | Should Be $true
+    }
 }

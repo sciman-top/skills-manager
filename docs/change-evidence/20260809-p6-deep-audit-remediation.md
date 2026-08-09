@@ -484,14 +484,44 @@ Focused evidence for the corrected seams is:
 - `NativeInvocationTrace.Tests.ps1`: `9/9`;
 - modified PowerShell parser sweep: `23/23`, and `git diff --check`: exit `0`.
 
-The current receipt verifier still intentionally rejects the legacy pointer
-`qgr-20260809-052523-8da64429` with five findings: pointer schema v1,
-receipt schema v1, invalid source binding, missing full timing binding and
-stale exact-current source. Therefore the repository-side remediation and
-planning contract are synchronized, but the final candidate full gate has
-not yet been run or accepted. Current truth remains
+That legacy schema-v1 pointer was subsequently superseded by the schema-v2
+candidate receipt described in Slice J. The replacement pointer is structurally
+current but records `status=source_drift`, so it is not a passing full-gate
+authority. Current truth remains
 `host_inventory_loaded=observed`, `host_evaluation=host_evaluation_partial`,
 `host_invocation_observed=not_observed`, and `live_accepted=not_accepted`.
+
+## Slice J: exclude Git conversion warnings from tracked-source identity
+
+The first full run on candidate `7d56c212dab69b3ef63e43a4897c3a92642bd099`
+produced schema-v2 receipt `qgr-20260809-081512-277f307f`. All 17 gate rows
+reported `passed=true`; Unit/E2E totaled `1093/1093`, the isolated suite took
+`241,447ms`, the gate-row elapsed sum was `255,041ms`, and historical LPT
+matched 90 test files. The terminal receipt nevertheless recorded
+`status=source_drift`, with only `tracked_worktree_fingerprint` changed.
+Therefore this run is not reported as a passing full gate.
+
+The source itself had not changed: start/end HEAD and index tree were identical,
+the tracked worktree was content-clean after the run, and the worktree/index
+blob for the generated `skills.ps1` was the same Git object. The false drift
+originated in `Get-QualityGateSourceFingerprint`: its generic Git wrapper
+merged stderr into stdout, so Git's `LF will be replaced by CRLF` conversion
+warning became part of the tracked-diff SHA-256 even when `git diff` contained
+no content change.
+
+The focused regression creates an isolated `core.autocrlf=true` repository,
+keeps the tracked Git blob unchanged while changing only its worktree line
+ending, and requires stable source comparison. It failed before the fix at
+`6 passed / 1 failed`. The minimal implementation now hashes only `git diff`
+stdout at this call site, suppresses stderr from the hash input, and still
+checks the native Git exit code so a real diff failure remains fail-closed.
+Focused GREEN is `QualityGateIntegrity.Tests.ps1=7/7` and
+`QualityGateScripts.Tests.ps1=32/32`.
+
+A new candidate commit and one replacement full run are still required after
+this evidence update. Only a schema-v2 `profile=full`, `status=passed` receipt
+whose 17 gate rows, timing binding and exact-current source binding all verify
+may close the repository full-gate boundary.
 
 ## Rollback
 
