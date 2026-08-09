@@ -17,5 +17,5 @@ This file is a stable pointer, not a second checklist. Task IDs, completion boxe
 ## Closeout boundary
 
 - Iteration uses affected tests and contracts.
-- Repository closeout uses one candidate commit followed by one full quality gate and the current receipt verifier.
+- Repository closeout follows `tasks/plan.md`'s frozen verification ceiling: use focused verification when sufficient, or one candidate/full/receipt path when its risk triggers apply.
 - `repo_verified`, `host_loaded`, `host_invocation_observed`, and `live_accepted` remain distinct.

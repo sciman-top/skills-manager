@@ -1051,7 +1051,7 @@ P6-012 已进入 repo-side closeout：默认生成 bundle 不再编入 legacy `S
 
 AI 编码开始前使用六项范围检查，不建设新的治理子系统：真实问题和用户是否明确、官方/既有 surface 是否可复用、最小直接方案是什么、预计新增哪些长期维护面、最低充分测试是什么、什么条件触发停止或重新评审。任一项无答案时保持 design/deferred。
 
-验证采用升级制：日常迭代只跑受影响测试；共享 config/write/generated seam 使用 quick contract；phase、commit 或 release closeout 才跑一次 full。低层已充分证明的风险不重复堆 unit/fixture/E2E；同一切片共用 evidence，文件未变化不重复跑 full。若实际 write set、抽象数量或测试层级明显超过计划，停止编码并重新做复用/删除/延后判断。
+验证采用升级制：日常迭代只跑受影响测试；共享 config/write/generated seam 使用 quick contract；不改运行面、安全、数据/迁移、公开契约、依赖/包或 release 的 closeout 使用 focused verification，上述风险或 focused 发现的跨面风险才触发一次 full。低层已充分证明的风险不重复堆 unit/fixture/E2E；同一切片共用 evidence，文件未变化不重复跑 full。若实际 write set、抽象数量或测试层级明显超过计划，停止编码并重新做复用/删除/延后判断。
 
 任一条件触发 anti-overdesign checkpoint：首次可演示价值仍未出现但新增了三个以上非产品 artifact；计划外长期维护面出现；同一风险存在两层以上重复证明；新增抽象没有两个调用点/稳定协议/量化热点；实现不能用一句话说明用户可见增量。checkpoint 的默认动作是删除、合并、推迟或回到 Main-chain，而不是新增治理文档。
 

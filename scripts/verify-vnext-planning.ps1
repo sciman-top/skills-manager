@@ -122,8 +122,19 @@ foreach ($key in @($paths.Keys)) {
 foreach ($required in @(
         @{ key = 'prd'; literal = '### PP-000 Host-native-first main-chain-first self-retiring'; code = 'engineering_constitution_missing' },
         @{ key = 'prd'; literal = '同等风险基线下，经代表性真实任务证明的宿主原生能力越强，本项目附加治理负担必须递减'; code = 'engineering_constitution_missing' },
+        @{ key = 'prd'; literal = '达到已声明的停止条件必须结束'; code = 'engineering_constitution_missing' },
+        @{ key = 'prd'; literal = '“继续/自动自主连续执行”只授权冻结范围内推进，不授权范围扩展'; code = 'engineering_constitution_missing' },
+        @{ key = 'prd'; literal = 'scope expansion'; code = 'engineering_constitution_missing' },
         @{ key = 'prd'; literal = '不得为执行本条款建立第二套治理或运行控制面'; code = 'engineering_constitution_missing' },
-        @{ key = 'agents'; literal = 'TOP_LEVEL_ENGINEERING_PRINCIPLE: PP-000'; code = 'engineering_constitution_mapping_missing' }
+        @{ key = 'agents'; literal = 'TOP_LEVEL_ENGINEERING_PRINCIPLE: PP-000'; code = 'engineering_constitution_mapping_missing' },
+        @{ key = 'agents'; literal = 'focused closeout'; code = 'engineering_constitution_mapping_missing' },
+        @{ key = 'agents'; literal = 'integration_blocker'; code = 'engineering_constitution_mapping_missing' },
+        @{ key = 'plan'; literal = 'verification ceiling'; code = 'engineering_execution_contract_missing' },
+        @{ key = 'plan'; literal = 'scope expansion requires re-admission'; code = 'engineering_execution_contract_missing' },
+        @{ key = 'plan'; literal = 'out-of-scope remote divergence'; code = 'engineering_execution_contract_missing' },
+        @{ key = 'plan'; literal = 'minimal user closure -> stop'; code = 'engineering_execution_contract_missing' },
+        @{ key = 'todo'; literal = 'frozen verification ceiling'; code = 'engineering_execution_contract_missing' },
+        @{ key = 'architecture'; literal = 'focused 发现的跨面风险'; code = 'engineering_execution_contract_missing' }
     )) {
     if (-not (Test-ContainsLiteral $content[$required.key] $required.literal)) {
         Add-PlanningFinding ([ref]$findings) $required.code $paths[$required.key] `

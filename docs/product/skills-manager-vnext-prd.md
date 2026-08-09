@@ -73,9 +73,9 @@ North Star：在不复制宿主原生推理、编码和运行能力的前提下�
 
 ### PP-000 Host-native-first main-chain-first self-retiring
 
-在授权、安全、数据、兼容、供应链和真值边界内，本项目最大化宿主 AI 原生能力并优先交付最短真实主链；无真实重复、稳定协议、已证实风险或量化热点，不新增抽象、治理或优化层。在这些边界不变的同等风险基线下，经代表性真实任务证明的宿主原生能力越强，本项目附加治理负担必须递减；模型名称、版本升级、单次成功或模型自评本身都不是删减门禁的充分证据。本项目仅补宿主原生能力的真实缺口；当原生能力覆盖、功能重叠、消费者消失或维护成本超过净收益时，相关能力必须依据可复核证据进入弱化或退役处置，有兼容义务时先转为 `compatibility-only/deprecated`，义务结束后最终 `retired`。门禁、审计、字段、证据、skill 和流程必须覆盖独立失败模式并保持正净收益；否则合并、降级、转为兼容层或退役。仅仅缺少遥测或使用记录不能单独证明消费者消失。不得为执行本条款建立第二套治理或运行控制面。
+在授权、安全、数据、兼容、供应链和真值边界内，本项目最大化宿主 AI 原生能力并优先交付最短真实主链；无真实重复、稳定协议、已证实风险或量化热点，不新增抽象、治理或优化层。本条优先解释“继续、完成、closeout”：完成是冻结范围内的最小充分验收闭环，达到已声明的停止条件必须结束；“仍可继续做”不等于“必须继续做”。“继续/自动自主连续执行”只授权冻结范围内推进，不授权范围扩展；具体执行表示：仅在已冻结的用户目标、授权边界、`admission_scope`、`exact_write_set`、`verification ceiling` 和 `stop_condition` 内持续执行，完成该最小闭环即停止；任何新文件/模块/抽象/治理/证据、扩大 write set、升级 full、创建 worktree/子代理、吸收范围外远端/并发改动、修改宿主或产生外部副作用都是 `scope expansion`，必须先证明其防止当前任务内的独立现实失败并重新 admission；证明不足则跳过、降级、保持分支或报告独立阻断。在这些边界不变的同等风险基线下，经代表性真实任务证明的宿主原生能力越强，本项目附加治理负担必须递减；模型名称、版本升级、单次成功或模型自评本身都不是删减门禁的充分证据。本项目仅补宿主原生能力的真实缺口；当原生能力覆盖、功能重叠、消费者消失或维护成本超过净收益时，相关能力必须依据可复核证据进入弱化或退役处置，有兼容义务时先转为 `compatibility-only/deprecated`，义务结束后最终 `retired`。门禁、审计、字段、证据、skill 和流程必须覆盖独立失败模式并保持正净收益；否则合并、降级、转为兼容层或退役。仅仅缺少遥测或使用记录不能单独证明消费者消失。不得为执行本条款建立第二套治理或运行控制面。
 
-本条是 `PP-001` 至 `PP-013` 的优先级解释，不复制或替代其具体契约。
+本条是 `PP-001` 至 `PP-013` 的优先级解释，不复制或替代其具体契约。所有原则仅通过一次最小执行转译进入动作：用现有 `user_outcome/admission_scope` 表达触发与边界，`reuse_decision/main_chain_checkpoint` 表达默认动作，`authority/exact_write_set` 表达禁止越界，`verification/stop_condition` 表达最低充分验证与停止；方向、风险、授权、写集、验证上限或外部副作用扩大时重新 admission。简单任务可在进度更新中等价声明，不新增 schema、registry、verifier 或 evidence。
 
 ### `PP-001 Official-first`
 
@@ -113,7 +113,7 @@ Discovery 先确定用户、问题、成功信号和非目标；实现先跑通�
 
 ### `PP-009 Adaptive governance`
 
-治理、角色 lens、测试层级和能力组合随生命周期模式与风险升级，并在同等风险基线下随已经验证的宿主原生能力增强而递减。一个风险只使用最低充分且相互独立的证明；未产生净收益的流程、字段、skill 和指标应降级或退役。日常实现不隐式串联固定的 brainstorming、计划、worktree、子代理、review 和分支收尾流程；宿主原生 Plan/Goal/Review/agent/worktree 控制优先，窄 validator 只在当前风险或明确请求命中。TDD 仅在显式 strict test-first 合同下启用；配置、文档和生成物不机械套用 TDD、CI 或覆盖率门禁。
+治理、角色 lens、测试层级和能力组合随生命周期模式与风险升级，并在同等风险基线下随已经验证的宿主原生能力增强而递减。一个风险只使用最低充分且相互独立的证明；未产生净收益的流程、字段、skill 和指标应降级或退役。日常实现不隐式串联固定的 brainstorming、计划、worktree、子代理、review 和分支收尾流程；宿主原生 Plan/Goal/Review/agent/worktree 控制优先，窄 validator 只在当前风险或明确请求命中。日常 closeout 在 focused/full 中只走最低充分的一条，只有运行面或 release 风险变化才升级 full。TDD 仅在显式 strict test-first 合同下启用；配置、文档和生成物不机械套用 TDD、CI 或覆盖率门禁。
 
 ### `PP-010 Git truth spine, host-owned coordination`
 
@@ -328,7 +328,7 @@ fresh inventory、host evaluation、injected/executed invocation 与业务 accep
 - `NFR-PERF-001`：inventory/doctor 使用有界扫描、缓存和明确超时；性能退化不能通过跳过完整性校验解决。
 - `NFR-OBS-001`：关键阶段输出稳定的 machine-readable status 和 phase timing。
 - `NFR-TST-001`：测试按风险选择最低充分层级；优先真实输入形状和关键失败模式，不要求每个改动机械同时新增 unit、fixture/golden、E2E 和 native probe。更高层不可用时按 N/A 记录恢复条件。
-- `NFR-GOV-001`：编码前记录问题证据、官方/既有复用结论、最小方案、write set 与停止条件；full gate 和独立 evidence 仅在共享边界、closeout 或 release 需要时增加。
+- `NFR-GOV-001`：编码前记录问题证据、官方/既有复用结论、最小方案、write set 与停止条件；full gate 仅由运行面、安全、数据/迁移、公开契约、依赖/包、release 或 focused 发现的跨面风险触发，独立 evidence 仅在现有切片证据不足时增加。
 - `NFR-GOV-002`：P5 后默认 maintenance hold；没有跨域真实失败、已消费 P5 输出、现有 seam 无法修复和用户明确授权，不创建 P6 manifest 或 schema major。
 - `NFR-TRU-001`：任何“完成/生效/验收”声明必须绑定 verification level 和 evidence path。
 - `NFR-LDL-001`：maintenance design/pilot 不增加 schema major、daemon、数据库、长期任务引擎、固定角色 runtime 或任何宿主写入行为。

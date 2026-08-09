@@ -96,6 +96,17 @@ Describe 'vNext product planning contract' {
 
         @($policyParsed.findings | Where-Object code -eq 'engineering_constitution_missing').Count | Should Be 1
         $policyParsed.pass | Should Be $false
+
+        $scopeFixtureRoot = New-PlanningFixture 'missing-scope-stop-clause'
+        $scopePath = Join-Path $scopeFixtureRoot 'docs\product\skills-manager-vnext-prd.md'
+        $scopeContent = Get-Content -LiteralPath $scopePath -Raw
+        $scopeContent = $scopeContent.Replace('达到已声明的停止条件必须结束', '停止条件条款已删除').Replace('“继续/自动自主连续执行”只授权冻结范围内推进，不授权范围扩展', '连续执行范围条款已删除').Replace('scope expansion', 'scope marker removed')
+        Set-Content -LiteralPath $scopePath -Value $scopeContent -Encoding UTF8
+
+        $scopeParsed = (Invoke-PlanningVerifier $scopeFixtureRoot).output | ConvertFrom-Json
+
+        @($scopeParsed.findings | Where-Object code -eq 'engineering_constitution_missing').Count | Should Be 3
+        $scopeParsed.pass | Should Be $false
     }
 
     It 'requires the repository action mapping without duplicating the constitution' {
@@ -108,9 +119,20 @@ Describe 'vNext product planning contract' {
 
         @($parsed.findings | Where-Object code -eq 'engineering_constitution_mapping_missing').Count | Should Be 1
         $parsed.pass | Should Be $false
+
+        $closeoutFixtureRoot = New-PlanningFixture 'missing-proportional-closeout-mapping'
+        $closeoutPath = Join-Path $closeoutFixtureRoot 'AGENTS.md'
+        $closeoutContent = Get-Content -LiteralPath $closeoutPath -Raw
+        $closeoutContent = $closeoutContent.Replace('focused closeout', 'focused mapping removed').Replace('integration_blocker', 'integration mapping removed')
+        Set-Content -LiteralPath $closeoutPath -Value $closeoutContent -Encoding UTF8
+
+        $closeoutParsed = (Invoke-PlanningVerifier $closeoutFixtureRoot).output | ConvertFrom-Json
+
+        @($closeoutParsed.findings | Where-Object code -eq 'engineering_constitution_mapping_missing').Count | Should Be 2
+        $closeoutParsed.pass | Should Be $false
     }
 
-    It 'requires a candidate commit before the exact-source full gate and push' {
+    It 'requires proportional closeout and a candidate before the exact-source full gate and push' {
         $agentsPath = Join-Path $repoRoot 'AGENTS.md'
         $content = Get-Content -LiteralPath $agentsPath -Raw
         $closeout = @($content -split "`r?`n" | Where-Object { $_ -match 'Git closeout' } | Select-Object -First 1)[0]
@@ -124,6 +146,41 @@ Describe 'vNext product planning contract' {
         $receipt | Should BeGreaterThan $full
         $push | Should BeGreaterThan $receipt
         $content | Should Not Match 'full 通过后提交'
+        $content.Contains('closeout=`proportional_focused_or_full`') | Should Be $true
+        $content | Should Match 'focused closeout'
+        $content | Should Match 'full closeout'
+        $content | Should Not Match 'closeout 只走 full'
+    }
+
+    It 'requires bounded autonomy and proportional verification in the execution index' {
+        $planPath = Join-Path $repoRoot 'tasks\plan.md'
+        $content = Get-Content -LiteralPath $planPath -Raw
+
+        $content | Should Match 'verification ceiling'
+        $content | Should Match 'scope expansion requires re-admission'
+        $content | Should Match 'out-of-scope remote divergence'
+        $content | Should Match 'minimal user closure.*stop'
+
+        $fixtureRoot = New-PlanningFixture 'missing-bounded-execution-contract'
+        $fixturePath = Join-Path $fixtureRoot 'tasks\plan.md'
+        $fixtureContent = Get-Content -LiteralPath $fixturePath -Raw
+        foreach ($marker in @('verification ceiling', 'scope expansion requires re-admission', 'out-of-scope remote divergence', 'minimal user closure -> stop')) {
+            $fixtureContent = $fixtureContent.Replace($marker, ('removed-{0}' -f $marker.Length))
+        }
+        Set-Content -LiteralPath $fixturePath -Value $fixtureContent -Encoding UTF8
+
+        $todoPath = Join-Path $fixtureRoot 'tasks\todo.md'
+        $todoContent = (Get-Content -LiteralPath $todoPath -Raw).Replace('frozen verification ceiling', 'verification marker removed')
+        Set-Content -LiteralPath $todoPath -Value $todoContent -Encoding UTF8
+
+        $architecturePath = Join-Path $fixtureRoot 'docs\product\skills-manager-vnext-architecture.md'
+        $architectureContent = (Get-Content -LiteralPath $architecturePath -Raw).Replace('focused 发现的跨面风险', 'risk marker removed')
+        Set-Content -LiteralPath $architecturePath -Value $architectureContent -Encoding UTF8
+
+        $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
+
+        @($parsed.findings | Where-Object code -eq 'engineering_execution_contract_missing').Count | Should Be 6
+        $parsed.pass | Should Be $false
     }
 
     It 'requires current product documents to delegate dynamic truth to the current manifest' {

@@ -27,13 +27,16 @@
 
 ## Execution order
 
-1. Read the target manifest fresh and select its first task whose status is not terminal and whose dependencies are satisfied.
-2. Freeze the declared write set and stop conditions before editing.
-3. Run affected build, tests, and contracts during iteration.
-4. Create a candidate commit, then enter the receipt-aware full quality gate once; it reuses only an exact-current passed receipt and otherwise runs fresh.
-5. Treat the immutable current receipt as repository evidence only; host and live acceptance remain separate.
+1. Read the target manifest fresh and select its first task whose status is not terminal and whose dependencies are satisfied; a simple direct task may use an equivalent progress update without creating a manifest or evidence file.
+2. Freeze `user_outcome`, `admission_scope`, `exact_write_set`, `reuse_decision`, `verification ceiling`, and `stop_condition`; translate applicable PP-001 through PP-013 into the slice's default and prohibited actions.
+3. Run the shortest real main chain and only the affected build, tests, or contracts required by the frozen verification ceiling.
+4. `scope expansion requires re-admission`: expanding direction, authority, write set, verification ceiling, external effects, files, abstractions, governance, worktrees, or agents requires evidence of an independent current-task failure; otherwise skip, defer, or route it separately.
+5. Close out through one proportional path: focused verification for non-runtime rules/docs/tests/verifiers/scripts/config, or the receipt-aware full gate for runtime, security, data/migration, public-contract, dependency/package, release, or discovered cross-surface risk.
+6. `minimal user closure -> stop`: once the frozen stop condition and minimum verification are met, stop; do not continue merely because adjacent work exists.
+7. A full-gate receipt, when required, is repository evidence only; host and live acceptance remain separate.
 
 ## Failure routing
 
 - Unknown dependency, write-set overlap, source drift, failed gate, or missing evidence blocks closeout.
+- `out-of-scope remote divergence` is not merged into the current task; retain the slice/branch and use an authorized task branch/PR or report `integration_blocker`.
 - Roll back only the current manifest slice. Do not overwrite unrelated imports, reports, host state, or concurrent worktree changes.
