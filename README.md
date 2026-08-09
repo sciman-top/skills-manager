@@ -275,14 +275,7 @@ P4/P5 的 lexical selector、task model 和 ranking 是历史 repo_verified 实�
 
 技能初始列表由宿主 native metadata surface 决定；当前配置的 `resident_names` 为空，`capability-router` 只作为显式兼容/fallback 资产，不是 mandatory resident。native metadata 预算由 host snapshot、token-aware planner 和 `enabled_total == kept_total` / `omitted=0` invariant 共同约束。
 
-用无模型模式校验 GPT-5.6 profile A/B 语料，或显式执行 12 场景 × 2 profile 的只读 benchmark：
-
-```powershell
-.\scripts\benchmark-codex-skill-profiles.ps1
-.\scripts\benchmark-codex-skill-profiles.ps1 -Execute
-```
-
-benchmark 使用 ephemeral、read-only Codex 任务，记录 skill 选择、计划/代理/worktree 倾向、耗时和 token，并核对 `original_profile`/`restored_profile`；产物写入忽略的 `artifacts/skill-profile-benchmark/`。它是 `host_evaluation_partial`，用于 canary 代表 prompt 验证和路由开销观察，不替代真实 skill-body trace、代码质量或 live acceptance。
+旧 profile A/B benchmark 已随 profile 热切换退役；不再保留只能校验历史 profile 语料、但无法执行当前主链的操作入口。需要显式评估宿主原生 selection/cold-load 时，使用现有 opt-in `scripts/evaluate-host-skill-selection.ps1`；该评估不切换 profile，结果仍只属于 `host_evaluation_partial`，不替代 skill-body trace、代码质量或 live acceptance。
 
 设计访谈统一使用 `grill-with-docs`：在 CLI/IDE 中可显式输入 `$grill-with-docs`，在 Work/Codex 桌面端可从技能选择器指定，也可由模型仅在“grill/设计质询/把方案磨清楚”等明确语义下隐式调用。它不会因为普通实现或重构请求自动启动；完成访谈后只有用户确认的持久决策才写入 `CONTEXT.md`、词汇表或 ADR。`grilling` 与 `domain-modeling` 作为 `default` 的完整依赖闭包保留，防止主技能可见但运行依赖缺失；只有在直接进行决策树访谈或领域建模时才单独调用。
 
