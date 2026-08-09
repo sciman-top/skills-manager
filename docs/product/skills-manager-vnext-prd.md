@@ -351,7 +351,7 @@ fresh inventory、host evaluation、injected/executed invocation 与业务 accep
 - `NFR-HNS-005`：projection apply 需要显式 token、expected hash、atomic replace、receipt 和 drift-safe rollback；plan 保持 zero-write。
 - `NFR-HNS-006`：activation corpus 只评估 metadata/host behavior，不得成为脚本 semantic selector 或权限门禁。
 - `NFR-HNS-007`：invocation trace redaction-first、correlated、freshness-aware；visibility 不得升级为 full skill body execution。
-- `NFR-HNS-008`：shadow comparison writes=0，不调用第二模型，不把 partial trace 当作输赢依据。
+- `NFR-HNS-008`：退役裁决阶段的 shadow comparison 必须 writes=0、不调用第二模型、不把 partial trace 当作输赢依据；P6 removal gate 完成后删除比较器和专用测试，仅保留历史 manifest/evidence。
 - `NFR-HNS-009`：profile migration 兼容读取旧 schema，且旧数据可 round-trip 恢复；当前 task 不热切换 active profile。
 - `NFR-HNS-010`：strict fallback 与 native main path 复用同一 eligibility policy，候选集有界，缺宿主裁决或 injection 支持时 fail-closed/platform_na。
 - `NFR-HNS-011`：P6 真值阶梯固定为 `planning_contract -> implemented -> repo_verified -> host_inventory_loaded -> host_evaluation_partial -> host_invocation_observed -> live_accepted`，不得越级；inventory 不得冒充 invocation。

@@ -339,7 +339,7 @@ P6 的目标是让宿主 AI 重新成为唯一语义选择 owner，以完整的 
 | --- | --- | --- |
 | Contract | P6-001–P6-003 | admission、snapshot schema、官方 adapter 和 unknown/fallback truth 可验证 |
 | Core | P6-004–P6-006 | compiler/policy 无第二语义路由；全 enabled native projection 无遗漏 |
-| Evidence | P6-007–P6-009 | metadata corpus、invocation trace、native/legacy shadow evidence 可复现 |
+| Evidence | P6-007–P6-009 | metadata corpus 与 invocation trace 继续可验证；native/legacy shadow 仅保留 point-in-time manifest/evidence，比较器在 removal gate 后退役 |
 | Migration | P6-010–P6-011 | profile reachability 退役；strict dispatch 保持 opt-in |
 | Closeout | P6-012 | staged removal、fresh host evidence、唯一 full gate 和 rollback receipt |
 
