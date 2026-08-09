@@ -102,13 +102,16 @@ Describe 'vNext product planning contract' {
     It 'requires a candidate commit before the exact-source full gate and push' {
         $agentsPath = Join-Path $repoRoot 'AGENTS.md'
         $content = Get-Content -LiteralPath $agentsPath -Raw
-        $candidate = $content.IndexOf('candidate commit', [StringComparison]::OrdinalIgnoreCase)
-        $full = $content.IndexOf('唯一运行 full gate', [StringComparison]::OrdinalIgnoreCase)
-        $push = $content.IndexOf('推送 `origin/main`', [StringComparison]::OrdinalIgnoreCase)
+        $closeout = @($content -split "`r?`n" | Where-Object { $_ -match 'Git closeout' } | Select-Object -First 1)[0]
+        $candidate = $closeout.IndexOf('candidate commit', [StringComparison]::OrdinalIgnoreCase)
+        $full = $closeout.IndexOf('full', [StringComparison]::OrdinalIgnoreCase)
+        $receipt = $closeout.IndexOf('current receipt verifier', [StringComparison]::OrdinalIgnoreCase)
+        $push = $closeout.IndexOf('推送', [StringComparison]::OrdinalIgnoreCase)
 
         $candidate | Should BeGreaterThan -1
         $full | Should BeGreaterThan $candidate
-        $push | Should BeGreaterThan $full
+        $receipt | Should BeGreaterThan $full
+        $push | Should BeGreaterThan $receipt
         $content | Should Not Match 'full 通过后提交'
     }
 

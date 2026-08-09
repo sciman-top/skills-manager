@@ -51,12 +51,12 @@
 | [Discovery redesign manifest](../../tasks/skills-manager-vnext-capability-discovery-redesign.tasks.json) | hierarchical cold discovery、host acceptance 和收口任务真值 | P6 admission、host mutation 或业务验收 |
 | [Profile reconciliation manifest](../../tasks/skills-manager-vnext-profile-reconciliation.tasks.json) | P5-local profile advisor 的实现、测试、规划和收口真值 | 自动 apply、P6 admission 或 host mutation |
 | [Profile optimization manifest](../../tasks/skills-manager-vnext-profile-optimization.tasks.json) | P5-local bounded canary、host replay 和收口真值 | semantic router、skill 安装删除或 P6 admission |
-| [任务清单](../../tasks/todo.md) | 人类可扫描的当前任务状态 | manifest 中的结构化细节副本 |
+| [任务索引](../../tasks/todo.md) | 路由到各 track 的结构化真源 | 任务 ID、勾选、计数或 mutable status 副本 |
 | [planning verifier](../../scripts/verify-vnext-planning.ps1) | 机械校验上述资产的一致性 | 判断产品价值或宿主 live acceptance |
 | [host-native lifecycle planning verifier](../../scripts/verify-host-native-skill-lifecycle-planning.ps1) | 历史 P6/migration 显式诊断；检查完整投影和 fallback 边界 | 默认 quick/full closeout gate，或执行 host projection/invocation |
 | [maintenance verifier](../../scripts/verify-lean-ai-delivery-planning.ps1) | 在 P5 contract 通过后校验 maintenance design 一致性和边界 | 运行 pilot、修改 runtime 或评估业务收益 |
 | [PowerShell runtime policy verifier](../../scripts/verify-powershell-runtime-policy.ps1) | 机械检查 PS7 version floor、零 legacy fallback、CI/test/docs/task 真值和历史边界 | 证明所有外部消费者已迁移或 PowerShell 长期最优 |
-| [Agent workflow advisory verifier](../../scripts/verify-agent-workflow-advisory.ps1) | 机械检查 completion receipt/canonical path/barrier wave、Radar v2、host proposal/local outcome、三档软锚点、CLI/build 和 truth boundary | 证明 native subagent、模型质量、host loaded 或 live acceptance |
+| [Agent workflow advisory verifier](../../scripts/verify-agent-workflow-advisory.ps1) | 检查 manifest/truth、三档锚点、CLI/build wiring、host ownership、pure-layer 与 runtime-control 禁令 | 镜像行为测试内部错误码/函数/fixture，或证明 host/live acceptance |
 | [capability routing verifier](../../scripts/verify-capability-routing.ps1) | 用 labelled 自然语言 corpus 验证 candidate recall、host-labelled policy、否定约束和零脚本语义自动选择 | 证明宿主模型普遍正确或业务 live acceptance |
 | [profile reconciliation planner](../../scripts/plan-skill-profile-reconciliation.ps1) | 诊断 unrouted/stale/budget/overlap 并校验 host-owned proposal，输出 zero-write change-set | 自动决定 profile 语义归属或写入配置 |
 | [profile reconciliation transaction manager](../../scripts/manage-skill-profile-reconciliation.ps1) | 预演/应用非活动 profile canary，接受 fresh replay 或按 receipt 回滚 | 自行调用宿主模型、永久 profile 热切换或业务验收 |
@@ -126,7 +126,7 @@ CURRENT_PHASE_TRUTH_SOURCE: tasks/skills-manager-vnext-phase6.tasks.json
 - 改产品范围先改 PRD，再判断是否影响架构、路线图和任务 manifest。
 - 改模块、数据契约或写入协议先改架构和当前 Phase spec。
 - 改 Phase 状态先提供退出门禁证据，再改路线图和 task status。
-- task manifest 是任务 ID、依赖、write set 和完成条件真源；todo 只保留相同 ID 的简表。
+- task manifest 是任务 ID、依赖、write set、状态和完成条件真源；plan/todo 只保留稳定索引，不复制动态字段。
 - 运行 `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-vnext-planning.ps1` 校验文档和任务一致性。
 - maintenance track 先运行 vNext verifier，再运行 `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-lean-ai-delivery-planning.ps1`；它不替代 full gate，也不创建 P6 manifest。
 - 规划 verifier 通过只证明规划资产内部一致，不证明产品代码、宿主加载或真实使用效果。
