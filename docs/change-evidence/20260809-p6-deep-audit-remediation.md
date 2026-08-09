@@ -582,6 +582,28 @@ This slice creates a new candidate and invalidates all earlier full receipts.
 Repository full-gate status remains unaccepted until one schema-v2 exact-source
 full receipt verifies against that committed candidate.
 
+## Slice M: keep bounded workers without hidden-window incompatibility
+
+The clean `6076e218` full run `qgr-20260809-094345-76307fa6` proved that the
+worker-only simplification removed the unbounded runner branch, but it also
+reproduced the historical hidden-worker incompatibility. The
+`SelectionCancellation.Tests.ps1` worker remained under `-WindowStyle Hidden`
+until its existing 180-second limit emitted a terminal `timed_out` receipt;
+the full run correctly ended `failed` instead of hanging indefinitely.
+
+A controlled launch of the same real test with `-NoNewWindow` completed in
+`4.398s` with `3/3` passing and a schema-v1 receipt. RED then added the worker
+launch contract and produced `QualityGateScripts=33/34`. The one-line runtime
+change replaced `-WindowStyle Hidden` with `-NoNewWindow`; GREEN is
+`QualityGateScripts=34/34`. A real runner probe completed
+`SelectionCancellation=3/3` in `3.665s` plus `SkillAudit E2E=3/3`, with both
+files using the existing bounded worker and terminal receipt path. No special
+test lane, timeout, process type, schema, or configuration was added.
+
+This slice again invalidates earlier full receipts. Repository full-gate
+status remains unaccepted until a fresh exact-source schema-v2 full receipt is
+verified against the committed Slice M candidate.
+
 ## Rollback
 
 Repository rollback is limited to the files in this remediation slice. Host

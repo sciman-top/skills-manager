@@ -1,0 +1,6 @@
+interface:
+  display_name: "Focused TDD"
+  short_description: "Run explicit test-first work on one seam"
+  default_prompt: "Use $test-driven-development only for the explicitly requested test-first behavior seam."
+policy:
+  allow_implicit_invocation: true

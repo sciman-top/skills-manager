@@ -52,7 +52,6 @@
         ],
         "engineering": [
           "architecture-patterns",
-          "brainstorming",
           "context-engineering",
           "documentation-and-adrs",
           "draft-tickets",
@@ -60,8 +59,7 @@
           "prompt-engineering-patterns",
           "setup-matt-pocock-skills",
           "to-spec",
-          "to-tickets",
-          "writing-plans"
+          "to-tickets"
         ],
         "content": [
           "baoyu-article-illustrator",
@@ -80,18 +78,13 @@
           "custom-powershell-windows-automation",
           "debugging-and-error-recovery",
           "error-handling-patterns",
-          "executing-plans",
-          "finishing-a-development-branch",
           "git-workflow-and-versioning",
           "security-best-practices",
           "shipping-and-launch",
-          "using-git-worktrees",
           "vite"
         ],
         "coding-strict": [
-          "dispatching-parallel-agents",
-          "subagent-driven-development",
-          "using-superpowers"
+          "test-driven-development"
         ],
         "default": [
           "find-skills"
@@ -111,7 +104,7 @@
           "slidev"
         ],
         "review": [
-          "requesting-code-review"
+          "receiving-code-review"
         ],
         "video": [
           "transcribe"
@@ -768,53 +761,8 @@
     },
     {
       "vendor": "superpowers",
-      "to": "superpowers-skills-dispatching-parallel-agents",
-      "from": "skills\\dispatching-parallel-agents"
-    },
-    {
-      "vendor": "superpowers",
-      "to": "superpowers-skills-subagent-driven-development",
-      "from": "skills\\subagent-driven-development"
-    },
-    {
-      "vendor": "superpowers",
-      "to": "superpowers-skills-using-git-worktrees",
-      "from": "skills\\using-git-worktrees"
-    },
-    {
-      "vendor": "superpowers",
-      "to": "superpowers-skills-brainstorming",
-      "from": "skills\\brainstorming"
-    },
-    {
-      "vendor": "superpowers",
-      "to": "superpowers-skills-executing-plans",
-      "from": "skills\\executing-plans"
-    },
-    {
-      "vendor": "superpowers",
-      "to": "superpowers-skills-finishing-a-development-branch",
-      "from": "skills\\finishing-a-development-branch"
-    },
-    {
-      "vendor": "superpowers",
       "to": "superpowers-skills-receiving-code-review",
       "from": "skills\\receiving-code-review"
-    },
-    {
-      "vendor": "superpowers",
-      "to": "superpowers-skills-requesting-code-review",
-      "from": "skills\\requesting-code-review"
-    },
-    {
-      "vendor": "superpowers",
-      "to": "superpowers-skills-using-superpowers",
-      "from": "skills\\using-superpowers"
-    },
-    {
-      "vendor": "superpowers",
-      "to": "superpowers-skills-writing-plans",
-      "from": "skills\\writing-plans"
     },
     {
       "from": "research",
@@ -848,14 +796,6 @@
     }
   ],
   "imports": [
-    {
-      "mode": "vendor",
-      "sparse": false,
-      "skill": "skills\\using-git-worktrees",
-      "ref": "main",
-      "repo": "https://github.com/obra/superpowers.git",
-      "name": "superpowers"
-    },
     {
       "name": "find-skills",
       "skill": "skills\\find-skills",

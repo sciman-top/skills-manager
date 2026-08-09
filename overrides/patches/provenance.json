@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "reviewed_at": "2026-08-06",
+  "reviewed_at": "2026-08-09",
   "patches": [
     {
       "name": "agent-skills-2-skills-code-review-and-quality",
@@ -28,6 +28,24 @@
       "reviewed_revision": "c553e932f0606df0d52ee207b41a24d57a2beafb",
       "license": "MIT",
       "local_delta_reason": "Rebase current tracker/spec terminology while preserving the repository's shared AGENTS.md and CLAUDE.md wrapper compatibility rules plus explicit-only Codex metadata."
+    },
+    {
+      "name": "superpowers-skills-test-driven-development",
+      "upstream_repo": "https://github.com/obra/superpowers.git",
+      "upstream_path": "skills/test-driven-development",
+      "base_revision": "44c9b2d6e889982ac18c27d05a19fefe335194e1",
+      "reviewed_revision": "44c9b2d6e889982ac18c27d05a19fefe335194e1",
+      "license": "MIT",
+      "local_delta_reason": "Narrow activation to explicit strict TDD or a task-level test-first contract, keep verification focused on the declared seam, and remove automatic full-suite, CI, coverage, and file-expansion pressure."
+    },
+    {
+      "name": "research",
+      "upstream_repo": "https://github.com/mattpocock/skills.git",
+      "upstream_path": "skills/engineering/research",
+      "base_revision": "84fdeffd12f2ee307994d1eb6feb48173b6e0502",
+      "reviewed_revision": "84fdeffd12f2ee307994d1eb6feb48173b6e0502",
+      "license": "MIT",
+      "local_delta_reason": "Make research decision-relevant and read-only by default; delegation requires an independent bounded seam and repository persistence requires an explicit user request."
     }
   ]
 }

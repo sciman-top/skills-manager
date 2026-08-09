@@ -62,6 +62,57 @@ function New-CloseoutSnapshot {
 }
 
 Describe 'P6 host-native skill lifecycle closeout' {
+    It 'retires fixed workflow chains while retaining narrow validators' {
+        $config = Get-CloseoutRepoText 'skills.json' | ConvertFrom-Json
+        $dependencyClosure = Get-CloseoutRepoText 'config/skill-dependency-closure.json' | ConvertFrom-Json
+        $provenance = Get-CloseoutRepoText 'overrides/patches/provenance.json' | ConvertFrom-Json
+        $retired = @(
+            'using-superpowers',
+            'brainstorming',
+            'writing-plans',
+            'executing-plans',
+            'subagent-driven-development',
+            'dispatching-parallel-agents',
+            'using-git-worktrees',
+            'requesting-code-review',
+            'finishing-a-development-branch'
+        )
+        $retained = @(
+            'systematic-debugging',
+            'verification-before-completion',
+            'receiving-code-review',
+            'test-driven-development'
+        )
+        $mappingNames = @($config.mappings | ForEach-Object {
+                ([string]$_.from -replace '^.*[\\/]', '')
+            })
+        $importNames = @($config.imports | ForEach-Object {
+                ([string]$_.skill -replace '^.*[\\/]', '')
+            })
+        $domainNames = @($config.skill_projection.discovery_catalog.domain_memberships.PSObject.Properties | ForEach-Object {
+                @($_.Value)
+            })
+        $dependencyNames = @($dependencyClosure.dependencies | ForEach-Object {
+                @([string]$_.skill) + @($_.requires)
+            })
+
+        foreach ($name in $retired) {
+            $mappingNames | Should Not Contain $name
+            $importNames | Should Not Contain $name
+            $domainNames | Should Not Contain $name
+            $dependencyNames | Should Not Contain $name
+        }
+        foreach ($name in $retained) {
+            $mappingNames | Should Contain $name
+        }
+
+        @($config.imports | Where-Object { [string]$_.skill -eq 'skills\engineering\research' }).Count | Should Be 1
+        @($provenance.patches | Where-Object name -eq 'superpowers-skills-test-driven-development').Count | Should Be 1
+        @($provenance.patches | Where-Object name -eq 'research').Count | Should Be 1
+        Test-Path -LiteralPath (Join-Path $repoRoot 'overrides\patches\superpowers-skills-test-driven-development\SKILL.md') -PathType Leaf | Should Be $true
+        Test-Path -LiteralPath (Join-Path $repoRoot 'overrides\patches\research\SKILL.md') -PathType Leaf | Should Be $true
+    }
+
     It 'removes profile reachability authority while retaining a read-only compatibility view' {
         $config = Get-CloseoutRepoText 'skills.json' | ConvertFrom-Json
         $projection = $config.skill_projection

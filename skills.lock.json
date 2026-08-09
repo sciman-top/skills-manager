@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-08-08T12:48:57.3310351Z",
+  "generated_at": "2026-08-09T09:56:15.9304044Z",
   "vendors": [
     {
       "name": "agent-skills",
@@ -393,15 +393,6 @@
       "skill": "skills\\supabase-postgres-best-practices",
       "sparse": false,
       "commit": "1207767388a0ffb55f21fb4e6988fee96942431d"
-    },
-    {
-      "name": "superpowers",
-      "mode": "vendor",
-      "repo": "https://github.com/obra/superpowers.git",
-      "ref": "main",
-      "skill": "skills\\using-git-worktrees",
-      "sparse": false,
-      "commit": "44c9b2d6e889982ac18c27d05a19fefe335194e1"
     },
     {
       "name": "tailwind-design-system",

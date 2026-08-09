@@ -1,0 +1,6 @@
+interface:
+  display_name: "Bounded Research"
+  short_description: "Gather decision-relevant primary evidence"
+  default_prompt: "Use $research read-only until current primary-source evidence is sufficient for the decision."
+policy:
+  allow_implicit_invocation: true

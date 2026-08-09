@@ -167,7 +167,7 @@ while ($pending.Count -gt 0 -or $active.Count -gt 0) {
         if ($active.Count -gt 0 -and [string]$pending.Peek().stage -ne [string]$active[0].item.stage) { break }
         if ($active.Count -gt 0 -and ([bool]$pending.Peek().serial -or @($active | Where-Object { $_.item.serial }).Count -gt 0)) { break }
         $item = $pending.Dequeue()
-        $process = Start-Process -FilePath 'pwsh' -ArgumentList (New-WorkerArguments $item) -PassThru -WindowStyle Hidden -RedirectStandardOutput $item.stdout_path -RedirectStandardError $item.stderr_path
+        $process = Start-Process -FilePath 'pwsh' -ArgumentList (New-WorkerArguments $item) -PassThru -NoNewWindow -RedirectStandardOutput $item.stdout_path -RedirectStandardError $item.stderr_path
         $active.Add([pscustomobject]@{ item = $item; process = $process; timer = [Diagnostics.Stopwatch]::StartNew() }) | Out-Null
     }
 

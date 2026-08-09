@@ -25,6 +25,32 @@ function Invoke-NativeSkillMetadataVerifier {
 }
 
 Describe 'Host-native skill metadata and activation corpus' {
+    It 'keeps TDD explicit and research bounded by decision relevance and persistence authority' {
+        $corpus = Get-Content -LiteralPath $corpusPath -Raw | ConvertFrom-Json
+        $tddTarget = @($corpus.metadata_targets | Where-Object name -eq 'test-driven-development')
+        $researchTarget = @($corpus.metadata_targets | Where-Object name -eq 'research')
+        $strictTdd = @($corpus.cases | Where-Object id -eq 'direct-strict-tdd')
+        $routineImplementation = @($corpus.cases | Where-Object id -eq 'negative-routine-implementation')
+        $decisionResearch = @($corpus.cases | Where-Object id -eq 'direct-decision-research')
+        $suppliedFacts = @($corpus.cases | Where-Object id -eq 'negative-supplied-facts-no-research')
+
+        $tddTarget.Count | Should Be 1
+        [string]$tddTarget[0].source | Should Be 'overrides/patches/superpowers-skills-test-driven-development/SKILL.md'
+        @($tddTarget[0].trigger_phrases) | Should Contain 'strict TDD'
+        $researchTarget.Count | Should Be 1
+        [string]$researchTarget[0].source | Should Be 'overrides/patches/research/SKILL.md'
+        @($researchTarget[0].trigger_phrases) | Should Contain 'read-only'
+
+        $strictTdd.Count | Should Be 1
+        @($strictTdd[0].required_skills) | Should Be @('test-driven-development')
+        $routineImplementation.Count | Should Be 1
+        @($routineImplementation[0].forbidden_skills) | Should Contain 'test-driven-development'
+        $decisionResearch.Count | Should Be 1
+        @($decisionResearch[0].required_skills) | Should Be @('research')
+        $suppliedFacts.Count | Should Be 1
+        @($suppliedFacts[0].forbidden_skills) | Should Contain 'research'
+    }
+
     It 'verifies the repository corpus without pretending host metadata was observed' {
         $result = Invoke-NativeSkillMetadataVerifier
 

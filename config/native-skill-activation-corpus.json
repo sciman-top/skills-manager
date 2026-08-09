@@ -52,12 +52,25 @@
     },
     {
       "name": "test-driven-development",
-      "source": "agent/superpowers-skills-test-driven-development/SKILL.md",
+      "source": "overrides/patches/superpowers-skills-test-driven-development/SKILL.md",
       "field": "frontmatter.description",
       "activation_group": "test-first-implementation",
       "trigger_phrases": [
-        "implementing",
-        "feature"
+        "strict TDD",
+        "Red-Green-Refactor",
+        "test-first"
+      ],
+      "formerly_unreachable": false
+    },
+    {
+      "name": "research",
+      "source": "overrides/patches/research/SKILL.md",
+      "field": "frontmatter.description",
+      "activation_group": "decision-relevant-research",
+      "trigger_phrases": [
+        "primary-source",
+        "read-only",
+        "persistence"
       ],
       "formerly_unreachable": false
     }
@@ -148,9 +161,9 @@
       "formerly_unreachable": false
     },
     {
-      "id": "direct-test-first",
+      "id": "direct-strict-tdd",
       "category": "direct",
-      "request": "Use test-driven development before implementing this new feature.",
+      "request": "Use strict TDD with a Red-Green-Refactor loop for this critical behavior seam.",
       "required_skills": [
         "test-driven-development"
       ],
@@ -181,12 +194,12 @@
       "formerly_unreachable": false
     },
     {
-      "id": "negative-ordinary-implementation",
+      "id": "negative-routine-implementation",
       "category": "negative",
-      "request": "Implement the fix directly and do not use verification-before-completion for this request.",
+      "request": "Implement this approved routine fix directly with the minimum sufficient focused test; strict TDD was not requested.",
       "required_skills": [],
       "forbidden_skills": [
-        "verification-before-completion"
+        "test-driven-development"
       ],
       "expected_host_action": "abstain",
       "formerly_unreachable": false
@@ -207,10 +220,11 @@
       "category": "ambiguous",
       "request": "The implementation is approved; write the tests, implement it, and prove the final result.",
       "required_skills": [
-        "test-driven-development",
         "verification-before-completion"
       ],
-      "forbidden_skills": [],
+      "forbidden_skills": [
+        "test-driven-development"
+      ],
       "expected_host_action": "minimal_set",
       "formerly_unreachable": false
     },
@@ -240,6 +254,28 @@
       "request": "Summarize the already supplied facts in one sentence.",
       "required_skills": [],
       "forbidden_skills": [],
+      "expected_host_action": "abstain",
+      "formerly_unreachable": false
+    },
+    {
+      "id": "direct-decision-research",
+      "category": "direct",
+      "request": "Research the current official API contract because it materially changes the implementation decision; keep the work read-only unless I ask for a note.",
+      "required_skills": [
+        "research"
+      ],
+      "forbidden_skills": [],
+      "expected_host_action": "load_or_invoke",
+      "formerly_unreachable": false
+    },
+    {
+      "id": "negative-supplied-facts-no-research",
+      "category": "negative",
+      "request": "Answer from the supplied stable facts only; do not launch research, delegate background reading, or write a research file.",
+      "required_skills": [],
+      "forbidden_skills": [
+        "research"
+      ],
       "expected_host_action": "abstain",
       "formerly_unreachable": false
     },
@@ -404,8 +440,8 @@
       "dimensions": ["no_browser", "side_effect_boundary"]
     }
   ],
-  "case_count": 26,
-  "metadata_target_count": 4,
+  "case_count": 28,
+  "metadata_target_count": 5,
   "pairwise_target_count": 15,
   "pairwise_group_count": 5,
   "pairwise_case_count": 16,

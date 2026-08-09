@@ -218,6 +218,8 @@ Describe "Quality gate scripts" {
         $runner | Should Match '\[int\]\$MaxParallel'
         $runner | Should Match '\[int\]\$TestFileTimeoutSeconds'
         $runner | Should Match 'Start-Process'
+        $runner | Should Match '-NoNewWindow'
+        $runner | Should Not Match '-WindowStyle\s+Hidden'
         $runner | Should Match 'test-shards'
         $runner | Should Match 'SerialTestFiles'
         $runner | Should Not Match 'WatchRuntimeArming\.Tests\.ps1'
@@ -263,7 +265,7 @@ Describe 'fixture e2e' {
             '-TimingReportPath', ('"{0}"' -f (Join-Path $TestDrive 'bounded-selection-timing.json')),
             '-ShardReportRoot', ('"{0}"' -f $shardRoot), '-SchedulingTimingPath', ('"{0}"' -f (Join-Path $TestDrive 'missing-timing.json')),
             '-MaxParallel', '1', '-TestFileTimeoutSeconds', '10'
-        ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        ) -PassThru -NoNewWindow -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
         $completed = $false
         $exitCode = $null
         try {
