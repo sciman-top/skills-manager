@@ -376,13 +376,15 @@ The repo also provides local/CI parity quality gate scripts:
 
 ```powershell
 ./scripts/quality/run-local-quality-gates.ps1 -Profile quick
-./scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree
+./scripts/quality/run-local-quality-gates.ps1 -Profile full -ReuseCurrentReceipt
 ```
 
 Meaning:
 
 - `quick`: `build -> repo-hygiene -> generated-sync -> skill-integrity -> native-skill-metadata -> dependency-baseline -> skills-config-contract -> planning-contract -> doctor-json-contract`
 - `full`: `quick + tests`
+- `-ReuseCurrentReceipt`: reuses an immutable receipt only when the source fingerprint, `full/passed` status, and dirty-worktree policy match exactly; otherwise it runs a fresh full gate.
+- `-ForceFresh`: explicitly ignores a reusable receipt and reruns the gate; it is mutually exclusive with `-ReuseCurrentReceipt`. Add `-AllowDirtyWorktree` separately when the source is intentionally dirty.
 
 Run the planning contract independently with:
 

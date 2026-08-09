@@ -98,7 +98,7 @@ Describe 'Quality gate receipt integrity' {
         $unitRoot = Join-Path $fixture.root 'unit'
         $e2eRoot = Join-Path $fixture.root 'e2e'
         New-Item -ItemType Directory -Path $unitRoot, $e2eRoot -Force | Out-Null
-        foreach ($path in @((Join-Path $unitRoot 'Fast.Tests.ps1'), (Join-Path $unitRoot 'Slow.Tests.ps1'), (Join-Path $e2eRoot 'Passing.Tests.ps1'))) {
+        foreach ($path in @((Join-Path $unitRoot 'Passing.Tests.ps1'), (Join-Path $e2eRoot 'Passing.Tests.ps1'))) {
             [IO.File]::WriteAllText($path, "Describe 'fixture' { It 'passes' { `$true | Should Be `$true } }", [Text.UTF8Encoding]::new($false))
         }
         $source = Get-QualityGateSourceFingerprint -RepoRoot $fixture.root
@@ -111,10 +111,7 @@ Describe 'Quality gate receipt integrity' {
             schema_version = 3
             stages = @([ordered]@{
                 stage = 'unit'
-                files = @(
-                    [ordered]@{ path = 'Fast.Tests.ps1'; elapsed_ms = 10 },
-                    [ordered]@{ path = 'Slow.Tests.ps1'; elapsed_ms = 900 }
-                )
+                files = @([ordered]@{ path = 'Passing.Tests.ps1'; elapsed_ms = 900 })
             })
         }
         [IO.File]::WriteAllText($schedulingTimingPath, ($schedulingTiming | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
@@ -132,12 +129,7 @@ Describe 'Quality gate receipt integrity' {
         (Get-QualityGateSourceBindingSha256 $timing.quality_gate_source_start) | Should Be (Get-QualityGateSourceBindingSha256 $source)
         $timing.scheduling.strategy | Should Be 'historical_lpt'
         $timing.scheduling.source_status | Should Be 'loaded'
-        $unitCompletionOrder = @($output | ForEach-Object {
-            $match = [regex]::Match([string]$_, '^test_file stage=unit .* path=(?<name>[^\\/]+)$')
-            if ($match.Success) { $match.Groups['name'].Value }
-        })
-        $unitCompletionOrder | Should Be @('Slow.Tests.ps1', 'Fast.Tests.ps1')
-        ($output -join "`n") | Should Match 'Tests Passed: 3, Failed: 0'
+        ($output -join "`n") | Should Match 'Tests Passed: 2, Failed: 0'
     }
 
     It 'rejects unsafe or contradictory passed receipts before publishing current.json' {

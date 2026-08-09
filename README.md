@@ -431,13 +431,15 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Mode CurrentUser -D
 
 ```powershell
 ./scripts/quality/run-local-quality-gates.ps1 -Profile quick
-./scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree
+./scripts/quality/run-local-quality-gates.ps1 -Profile full -ReuseCurrentReceipt
 ```
 
 含义：
 
 - `quick`：`build -> repo-hygiene -> generated-sync -> skill-integrity -> native-skill-metadata -> dependency-baseline -> skills-config-contract -> planning-contract -> doctor-json-contract`
 - `full`：`quick + tests`
+- `-ReuseCurrentReceipt`：仅在 source fingerprint、`full/passed` 状态与 dirty-worktree policy 都精确匹配时复用 immutable receipt；否则自动执行 fresh full。
+- `-ForceFresh`：显式忽略可复用 receipt 并重新执行；与 `-ReuseCurrentReceipt` 互斥。脏工作树仍需另加 `-AllowDirtyWorktree`。
 
 规划合同也可单独执行：
 

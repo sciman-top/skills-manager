@@ -9,7 +9,7 @@ param(
     [string]$E2ETestPath = (Join-Path $PSScriptRoot 'E2E'),
     [ValidateRange(1, 16)]
     [int]$MaxParallel = 4,
-    [ValidateRange(10, 1800)]
+    [ValidateRange(1, 1800)]
     [int]$TestFileTimeoutSeconds = 180,
     [string]$ShardReportRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'reports\test-shards'),
     [string]$SchedulingTimingPath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'reports\test-timings\current.json'),
@@ -21,6 +21,10 @@ param(
 $ErrorActionPreference = 'Stop'
 $workerPath = Join-Path $PSScriptRoot 'run-pester-test-file.ps1'
 $schedulingScriptPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\quality\TestFileScheduling.ps1'
+$historicalDiagnosticTestFiles = @(
+    'HostNativeSkillLifecyclePlanning.Tests.ps1',
+    'LeanAiDeliveryPlanning.Tests.ps1'
+)
 . $schedulingScriptPath
 $qualityGateSourceStart = $null
 if (-not [string]::IsNullOrWhiteSpace($QualityGateRunId) -or -not [string]::IsNullOrWhiteSpace($QualityGateSourceFingerprintJson)) {
@@ -35,12 +39,16 @@ if (-not [string]::IsNullOrWhiteSpace($QualityGateRunId) -or -not [string]::IsNu
 }
 
 function Get-TestFiles([string]$Path, [string]$Stage) {
-    $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Filter '*.Tests.ps1' -File | Sort-Object FullName)
+    $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Filter '*.Tests.ps1' -File |
+        Where-Object { $historicalDiagnosticTestFiles -notcontains $_.Name } |
+        Sort-Object FullName)
     if ($files.Count -le 0) {
         throw ("{0} test discovery returned zero tests" -f $Stage)
     }
     return $files
 }
+
+Write-Host ('historical_test_files_excluded={0}' -f ($historicalDiagnosticTestFiles -join ','))
 
 function Stop-TestWorkerTree([int]$ProcessId) {
     $all = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)

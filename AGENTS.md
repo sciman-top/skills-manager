@@ -39,7 +39,7 @@
 ## C. 门禁、证据与回滚
 - fixed order：`build -> test -> contract/invariant -> hotspot`。
 - 迭代：先运行 `pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1`，再运行受影响 Pester 与相关 contract；共享写入/config/generated seam 才升级 quick。
-- closeout/full：`pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full` 是唯一 build、完整测试和 repo contract 编排入口；不得在前后重复运行其内置步骤。
+- closeout/full：`pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full -ReuseCurrentReceipt` 是唯一 build、完整测试和 repo contract 编排入口；只复用 exact-current、同一 dirty-policy 的 full/passed receipt，需重跑时显式用 `-ForceFresh`，不得在前后重复运行其内置步骤。
 - live 补充探针：仅当 release/host health 验收需要真实网络时，在 full 之后单独运行一次 `pwsh -NoProfile -ExecutionPolicy Bypass -File skills.ps1 doctor --strict --threshold-ms 8000`；它不替代 full，也不触发宿主写入。
 - 脏工作树可显式加 `-AllowDirtyWorktree` 并列明既有改动；该开关不允许忽略本任务生成漂移。
 - build、generated-sync、dependency、doctor 或 Pester 任一失败即阻断；不得手改生成物绕过。

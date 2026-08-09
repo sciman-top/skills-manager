@@ -2,10 +2,15 @@
 param(
     [ValidateSet('quick', 'full')]
     [string]$Profile = 'quick',
-    [switch]$AllowDirtyWorktree
+    [switch]$AllowDirtyWorktree,
+    [switch]$ReuseCurrentReceipt,
+    [switch]$ForceFresh
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ($ReuseCurrentReceipt -and $ForceFresh) { throw '-ReuseCurrentReceipt and -ForceFresh are mutually exclusive.' }
+if ($ReuseCurrentReceipt -and $Profile -ne 'full') { throw '-ReuseCurrentReceipt is supported only for the full profile.' }
 
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 . (Join-Path $PSScriptRoot 'QualityGateIntegrity.ps1')
@@ -56,6 +61,23 @@ try {
     }
     Push-Location $root
     try {
+    $receiptRoot = Join-Path $root 'reports\quality-gates'
+    if ($ReuseCurrentReceipt) {
+        $current = Test-QualityGateCurrentReceipt -ReceiptRoot $receiptRoot -RepoRoot $root -RequiredProfile full -RequiredStatus passed
+        $allowDirtyMatches = $current.pass -and ([bool]$current.receipt.allow_dirty_worktree -eq [bool]$AllowDirtyWorktree)
+        if ($allowDirtyMatches) {
+            Write-Host ('quality_gate_receipt_reused={0}; quality_gate_pointer={1}; run_id={2}' -f $current.pointer.receipt_path, $current.pointer_path, $current.pointer.run_id)
+            Write-Host 'Local quality gates reused (full).'
+            exit 0
+        }
+        $reuseMissCodes = if ($current.pass) {
+            'quality_gate_allow_dirty_worktree_mismatch'
+        }
+        else {
+            @($current.findings | ForEach-Object { $_.code } | Sort-Object -Unique) -join ','
+        }
+        Write-Host ('quality_gate_receipt_reuse_miss={0}; action=run_fresh' -f $reuseMissCodes)
+    }
     $runId = 'qgr-{0}-{1}' -f ([DateTimeOffset]::UtcNow.ToString('yyyyMMdd-HHmmss')), ([guid]::NewGuid().ToString('N').Substring(0, 8))
     $timingReportPath = Join-Path $root ('reports\test-timings\{0}.json' -f $runId)
     $startedAt = [DateTimeOffset]::UtcNow.ToString('o')
@@ -124,7 +146,7 @@ try {
         if ($null -ne $sourceStart -and $null -ne $sourceEnd) {
             try {
                 $boundTimingReportPath = if ($Profile -eq 'full' -and (Test-Path -LiteralPath $timingReportPath -PathType Leaf)) { $timingReportPath } else { '' }
-                $receipt = Write-QualityGateImmutableReceipt -ReceiptRoot (Join-Path $root 'reports\quality-gates') -RunId $runId -Profile $Profile -Status $runStatus -SourceStart $sourceStart -SourceEnd $sourceEnd -GateResults @($script:GateResults.ToArray()) -StartedAt $startedAt -CompletedAt ([DateTimeOffset]::UtcNow.ToString('o')) -AllowDirtyWorktree ([bool]$AllowDirtyWorktree) -ErrorMessage $runError -TimingReportPath $boundTimingReportPath
+                $receipt = Write-QualityGateImmutableReceipt -ReceiptRoot $receiptRoot -RunId $runId -Profile $Profile -Status $runStatus -SourceStart $sourceStart -SourceEnd $sourceEnd -GateResults @($script:GateResults.ToArray()) -StartedAt $startedAt -CompletedAt ([DateTimeOffset]::UtcNow.ToString('o')) -AllowDirtyWorktree ([bool]$AllowDirtyWorktree) -ErrorMessage $runError -TimingReportPath $boundTimingReportPath
                 Write-Host ("quality_gate_receipt={0}; quality_gate_pointer={1}" -f $receipt.receipt_path, $receipt.pointer_path)
             }
             catch {

@@ -21,6 +21,75 @@ Describe "Quality gate scripts" {
         }
     }
 
+    It "reuses only an exact current full receipt unless a fresh run is forced" {
+        $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
+        $integrityPath = Join-Path $root 'scripts\quality\QualityGateIntegrity.ps1'
+        . $integrityPath
+
+        $fixtureRoot = Join-Path $TestDrive 'quality-gate-reuse-current'
+        $qualityRoot = Join-Path $fixtureRoot 'scripts\quality'
+        New-Item -ItemType Directory -Path $qualityRoot -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $root 'scripts\quality\run-local-quality-gates.ps1') -Destination $qualityRoot
+        Copy-Item -LiteralPath $integrityPath -Destination $qualityRoot
+        Set-Content -LiteralPath (Join-Path $fixtureRoot '.gitignore') -Value 'reports/' -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $fixtureRoot 'build.ps1') -Encoding UTF8 -Value @'
+$marker = Join-Path $PSScriptRoot 'reports\forced-fresh-build.marker'
+New-Item -ItemType Directory -Path (Split-Path -Parent $marker) -Force | Out-Null
+Set-Content -LiteralPath $marker -Value 'executed' -Encoding UTF8
+'@
+
+        git -C $fixtureRoot init -q
+        git -C $fixtureRoot config user.email 'quality-gate@example.invalid'
+        git -C $fixtureRoot config user.name 'Quality Gate Test'
+        git -C $fixtureRoot add .
+        git -C $fixtureRoot commit -qm 'fixture'
+
+        $runId = 'qgr-reuse-fixture'
+        $source = Get-QualityGateSourceFingerprint -RepoRoot $fixtureRoot
+        $timingPath = Join-Path $fixtureRoot ('reports\test-timings\{0}.json' -f $runId)
+        New-Item -ItemType Directory -Path (Split-Path -Parent $timingPath) -Force | Out-Null
+        [IO.File]::WriteAllText($timingPath, ([ordered]@{
+                    schema_version = 3
+                    quality_gate_run_id = $runId
+                    quality_gate_source_start = $source
+                } | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
+        $receiptRoot = Join-Path $fixtureRoot 'reports\quality-gates'
+        $written = Write-QualityGateImmutableReceipt -ReceiptRoot $receiptRoot -RunId $runId -Profile full -Status passed `
+            -SourceStart $source -SourceEnd $source -GateResults @([pscustomobject]@{ name = 'fixture'; passed = $true; elapsed_ms = 1 }) `
+            -TimingReportPath $timingPath
+        $runner = Join-Path $qualityRoot 'run-local-quality-gates.ps1'
+        $markerPath = Join-Path $fixtureRoot 'reports\forced-fresh-build.marker'
+
+        $reuseOutput = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $runner -Profile full -ReuseCurrentReceipt 2>&1)
+        $reuseExit = $LASTEXITCODE
+
+        $reuseExit | Should Be 0
+        ($reuseOutput -join "`n") | Should Match 'quality_gate_receipt_reused='
+        ($reuseOutput -join "`n") | Should Match $runId
+        Test-Path -LiteralPath $markerPath | Should Be $false
+        (Get-Content -LiteralPath (Join-Path $receiptRoot 'current.json') -Raw | ConvertFrom-Json).run_id | Should Be $runId
+
+        $dirtyMismatchOutput = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $runner -Profile full -ReuseCurrentReceipt -AllowDirtyWorktree 2>&1)
+        $dirtyMismatchExit = $LASTEXITCODE
+
+        $dirtyMismatchExit | Should Not Be 0
+        ($dirtyMismatchOutput -join "`n") | Should Match 'quality_gate_receipt_reuse_miss=quality_gate_allow_dirty_worktree_mismatch'
+        Test-Path -LiteralPath $markerPath | Should Be $true
+
+        Write-QualityGateJsonAtomic -Path (Join-Path $receiptRoot 'current.json') -Value $written.pointer
+        Remove-Item -LiteralPath $markerPath -Force
+        $freshOutput = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $runner -Profile full -ForceFresh 2>&1)
+        $freshExit = $LASTEXITCODE
+
+        $freshExit | Should Not Be 0
+        ($freshOutput -join "`n") | Should Not Match 'quality_gate_receipt_reused='
+        Test-Path -LiteralPath $markerPath | Should Be $true
+
+        $conflictOutput = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $runner -Profile full -ReuseCurrentReceipt -ForceFresh 2>&1)
+        $LASTEXITCODE | Should Not Be 0
+        ($conflictOutput -join "`n") | Should Match 'mutually exclusive'
+    }
+
     It "Keeps full-gate execution in build, test, then contract order with timings" {
         $root = Join-Path $PSScriptRoot "..\.."
         $scriptPath = Join-Path $root "scripts\quality\run-local-quality-gates.ps1"
@@ -167,6 +236,8 @@ Describe "Quality gate scripts" {
         $gateSection = [regex]::Match($agents, '(?s)## C\. 门禁、证据与回滚(?<body>.*?)(?:\r?\n## D\.|\z)').Groups['body'].Value
 
         $gateSection | Should Match 'run-local-quality-gates\.ps1 -Profile full'
+        $gateSection | Should Match 'ReuseCurrentReceipt'
+        $gateSection | Should Match 'ForceFresh'
         $gateSection | Should Match 'doctor --strict --threshold-ms 8000'
         $gateSection | Should Not Match 'tests/run\.ps1'
         $gateSection | Should Not Match 'verify-dependency-baseline\.py'
@@ -227,11 +298,15 @@ Describe "Quality gate scripts" {
         Test-Path -LiteralPath $workerPath | Should Be $true
         $runner | Should Match '\[int\]\$MaxParallel'
         $runner | Should Match '\[int\]\$TestFileTimeoutSeconds'
+        $runner | Should Match '\[int\]\$TestFileTimeoutSeconds\s*=\s*180'
         $runner | Should Match 'Start-Process'
         $runner | Should Match '-NoNewWindow'
         $runner | Should Not Match '-WindowStyle\s+Hidden'
         $runner | Should Match 'test-shards'
         $runner | Should Match 'SerialTestFiles'
+        $runner | Should Match 'HostNativeSkillLifecyclePlanning\.Tests\.ps1'
+        $runner | Should Match 'LeanAiDeliveryPlanning\.Tests\.ps1'
+        $runner | Should Match '\$historicalDiagnosticTestFiles\s+-notcontains\s+\$_.Name'
         $runner | Should Not Match 'WatchRuntimeArming\.Tests\.ps1'
         $runner | Should Match '\$orderedFiles'
         $runner | Should Match '\.Dispose\(\)'
@@ -274,7 +349,7 @@ Describe 'fixture e2e' {
             '-UnitTestPath', ('"{0}"' -f $unitRoot), '-E2ETestPath', ('"{0}"' -f $e2eRoot),
             '-TimingReportPath', ('"{0}"' -f (Join-Path $TestDrive 'bounded-selection-timing.json')),
             '-ShardReportRoot', ('"{0}"' -f $shardRoot), '-SchedulingTimingPath', ('"{0}"' -f (Join-Path $TestDrive 'missing-timing.json')),
-            '-MaxParallel', '1', '-TestFileTimeoutSeconds', '10'
+            '-MaxParallel', '1', '-TestFileTimeoutSeconds', '1'
         ) -PassThru -NoNewWindow -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
         $completed = $false
         $exitCode = $null
@@ -299,7 +374,7 @@ Describe 'fixture e2e' {
 
     It "serializes one repository without blocking a different repository" {
         $root = Join-Path $PSScriptRoot "..\.."
-        function New-GatePeerFixture([string]$Name, [int]$BuildDelaySeconds) {
+        function New-GatePeerFixture([string]$Name, [switch]$WaitForRelease) {
             $fixtureRoot = Join-Path $TestDrive $Name
             $qualityRoot = Join-Path $fixtureRoot 'scripts\quality'
             New-Item -ItemType Directory -Path $qualityRoot -Force | Out-Null
@@ -307,7 +382,21 @@ Describe 'fixture e2e' {
             Copy-Item -LiteralPath (Join-Path $root 'scripts\quality\QualityGateIntegrity.ps1') -Destination $qualityRoot
             Set-Content -LiteralPath (Join-Path $fixtureRoot '.gitignore') -Value 'reports/' -Encoding UTF8
             Set-Content -LiteralPath (Join-Path $fixtureRoot 'tracked.txt') -Value 'fixture' -Encoding UTF8
-            Set-Content -LiteralPath (Join-Path $fixtureRoot 'build.ps1') -Value ("Start-Sleep -Seconds {0}" -f $BuildDelaySeconds) -Encoding UTF8
+            $build = if ($WaitForRelease) {
+                @'
+$ready = Join-Path $PSScriptRoot 'reports\gate-ready.marker'
+$release = Join-Path $PSScriptRoot 'reports\gate-release.marker'
+New-Item -ItemType Directory -Path (Split-Path -Parent $ready) -Force | Out-Null
+Set-Content -LiteralPath $ready -Value 'ready' -Encoding UTF8
+$deadline = [DateTimeOffset]::UtcNow.AddSeconds(10)
+while (-not (Test-Path -LiteralPath $release)) {
+    if ([DateTimeOffset]::UtcNow -gt $deadline) { throw 'fixture release handshake timed out' }
+    Start-Sleep -Milliseconds 20
+}
+'@
+            }
+            else { '$true | Out-Null' }
+            Set-Content -LiteralPath (Join-Path $fixtureRoot 'build.ps1') -Value $build -Encoding UTF8
             git -C $fixtureRoot init -q
             git -C $fixtureRoot config user.email 'quality-gate@example.invalid'
             git -C $fixtureRoot config user.name 'Quality Gate Test'
@@ -316,14 +405,21 @@ Describe 'fixture e2e' {
             return $fixtureRoot
         }
 
-        $ownedRoot = New-GatePeerFixture 'quality-gate-owned' 5
-        $otherRoot = New-GatePeerFixture 'quality-gate-other' 0
+        $ownedRoot = New-GatePeerFixture 'quality-gate-owned' -WaitForRelease
+        $otherRoot = New-GatePeerFixture 'quality-gate-other'
         $ownedRunner = Join-Path $ownedRoot 'scripts\quality\run-local-quality-gates.ps1'
+        $readyPath = Join-Path $ownedRoot 'reports\gate-ready.marker'
+        $releasePath = Join-Path $ownedRoot 'reports\gate-release.marker'
         $ownerOut = Join-Path $TestDrive 'owner.out.log'
         $ownerErr = Join-Path $TestDrive 'owner.err.log'
         $owner = Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $ownedRunner), '-Profile', 'quick') -PassThru -WindowStyle Hidden -RedirectStandardOutput $ownerOut -RedirectStandardError $ownerErr
         try {
-            Start-Sleep -Milliseconds 750
+            $readyDeadline = [DateTimeOffset]::UtcNow.AddSeconds(10)
+            while (-not (Test-Path -LiteralPath $readyPath)) {
+                if ($owner.HasExited) { throw 'quality gate owner exited before acquiring the fixture mutex' }
+                if ([DateTimeOffset]::UtcNow -gt $readyDeadline) { throw 'quality gate owner readiness timed out' }
+                Start-Sleep -Milliseconds 20
+            }
             $sameOutput = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $ownedRunner -Profile quick 2>&1)
             $sameExit = $LASTEXITCODE
             $otherOutput = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $otherRoot 'scripts\quality\run-local-quality-gates.ps1') -Profile quick 2>&1)
@@ -335,6 +431,8 @@ Describe 'fixture e2e' {
             ($otherOutput -join "`n") | Should Not Match 'quality_gate_peer_busy'
         }
         finally {
+            New-Item -ItemType Directory -Path (Split-Path -Parent $releasePath) -Force | Out-Null
+            Set-Content -LiteralPath $releasePath -Value 'release' -Encoding UTF8
             if (-not $owner.HasExited) { $owner.WaitForExit(10000) | Out-Null }
             $owner.Dispose()
         }
@@ -462,95 +560,45 @@ Describe 'fixture unit' {
         $routingVerifier | Should Not Match 'New-SkillRoutingReport'
     }
 
-    It "Runs repository hygiene in the reusable local quality gate" {
+    It "owns the complete quality-gate stage sequence and verifier wiring centrally" {
         $root = Join-Path $PSScriptRoot "..\.."
         $scriptPath = Join-Path $root "scripts\quality\run-local-quality-gates.ps1"
         $raw = Get-Content -LiteralPath $scriptPath -Raw
 
-        $raw | Should Match "repo-hygiene"
-        $raw | Should Match "check-repo-hygiene\.ps1"
-        $raw | Should Match "ReportUntrackedRuntimeArtifacts"
-    }
-
-    It "Runs override governance between skill integrity and routing before dependency baseline" {
-        $root = Join-Path $PSScriptRoot "..\.."
-        $scriptPath = Join-Path $root "scripts\quality\run-local-quality-gates.ps1"
-        $raw = Get-Content -LiteralPath $scriptPath -Raw
-
-        $generatedSyncIndex = $raw.IndexOf("generated-sync")
-        $skillIntegrityIndex = $raw.IndexOf("skill-integrity")
-        $referenceGovernanceIndex = $raw.IndexOf("reference-governance")
-        $overrideActivationIndex = $raw.IndexOf("override-activation-corpus")
-        $nativeMetadataIndex = $raw.IndexOf("native-skill-metadata")
-        $dependencyBaselineIndex = $raw.IndexOf("dependency-baseline")
-
-        $generatedSyncIndex -ge 0 | Should Be $true
-        $skillIntegrityIndex -ge 0 | Should Be $true
-        $referenceGovernanceIndex -ge 0 | Should Be $true
-        $overrideActivationIndex -ge 0 | Should Be $true
-        $nativeMetadataIndex -ge 0 | Should Be $true
-        $dependencyBaselineIndex -ge 0 | Should Be $true
-        $generatedSyncIndex -lt $skillIntegrityIndex | Should Be $true
-        $skillIntegrityIndex -lt $referenceGovernanceIndex | Should Be $true
-        $referenceGovernanceIndex -lt $overrideActivationIndex | Should Be $true
-        $overrideActivationIndex -lt $nativeMetadataIndex | Should Be $true
-        $nativeMetadataIndex -lt $dependencyBaselineIndex | Should Be $true
-        $raw | Should Match "verify-skill-integrity\.ps1"
-        $raw | Should Match "verify-reference-governance\.ps1"
-        $raw | Should Match "verify-override-skill-activation\.ps1"
-        $raw | Should Match "verify-native-skill-metadata\.ps1"
-    }
-
-    It "Runs the vNext planning contract after dependency baseline and before doctor contract" {
-        $root = Join-Path $PSScriptRoot "..\.."
-        $scriptPath = Join-Path $root "scripts\quality\run-local-quality-gates.ps1"
-        $raw = Get-Content -LiteralPath $scriptPath -Raw
-
-        $dependencyBaselineIndex = $raw.IndexOf("dependency-baseline")
-        $planningContractIndex = $raw.IndexOf("planning-contract")
-        $doctorContractIndex = $raw.IndexOf("doctor-json-contract")
-
-        $dependencyBaselineIndex -ge 0 | Should Be $true
-        $planningContractIndex -ge 0 | Should Be $true
-        $doctorContractIndex -ge 0 | Should Be $true
-        $dependencyBaselineIndex -lt $planningContractIndex | Should Be $true
-        $planningContractIndex -lt $doctorContractIndex | Should Be $true
-        $raw | Should Match "verify-vnext-planning\.ps1"
-    }
-
-    It "Runs the skills config contract after dependency baseline and before planning" {
-        $root = Join-Path $PSScriptRoot "..\.."
-        $scriptPath = Join-Path $root "scripts\quality\run-local-quality-gates.ps1"
-        $raw = Get-Content -LiteralPath $scriptPath -Raw
-
-        $dependencyBaselineIndex = $raw.IndexOf("dependency-baseline")
-        $configContractIndex = $raw.IndexOf("skills-config-contract")
-        $planningContractIndex = $raw.IndexOf("planning-contract")
-
-        $dependencyBaselineIndex -ge 0 | Should Be $true
-        $configContractIndex -ge 0 | Should Be $true
-        $planningContractIndex -ge 0 | Should Be $true
-        $dependencyBaselineIndex -lt $configContractIndex | Should Be $true
-        $configContractIndex -lt $planningContractIndex | Should Be $true
-        $raw | Should Match "verify-skills-config\.ps1"
-        $raw | Should Match "-Mode enforce"
-    }
-
-    It "Runs the host capability contract after config and before planning" {
-        $root = Join-Path $PSScriptRoot "..\.."
-        $scriptPath = Join-Path $root "scripts\quality\run-local-quality-gates.ps1"
-        $raw = Get-Content -LiteralPath $scriptPath -Raw
-
-        $configContractIndex = $raw.IndexOf("skills-config-contract")
-        $hostContractIndex = $raw.IndexOf("host-capability-contract")
-        $planningContractIndex = $raw.IndexOf("planning-contract")
-
-        $configContractIndex -ge 0 | Should Be $true
-        $hostContractIndex -ge 0 | Should Be $true
-        $planningContractIndex -ge 0 | Should Be $true
-        $configContractIndex -lt $hostContractIndex | Should Be $true
-        $hostContractIndex -lt $planningContractIndex | Should Be $true
-        $raw | Should Match "verify-host-capability-matrix\.ps1"
+        $actualStages = @([regex]::Matches($raw, "Invoke-QualityGate '([^']+)'\s*\{") | ForEach-Object { $_.Groups[1].Value })
+        $actualStages | Should Be @(
+            'build',
+            'tests',
+            'repo-hygiene',
+            'generated-sync',
+            'generated-sync',
+            'workspace-lock-parity',
+            'skill-integrity',
+            'reference-governance',
+            'override-activation-corpus',
+            'native-skill-metadata',
+            'dependency-baseline',
+            'skills-config-contract',
+            'host-capability-contract',
+            'planning-contract',
+            'powershell-runtime-policy',
+            'agent-workflow-advisory',
+            'doctor-json-contract'
+        )
+        foreach ($literal in @(
+                'check-repo-hygiene.ps1 -ReportUntrackedRuntimeArtifacts',
+                'verify-skill-integrity.ps1',
+                'verify-reference-governance.ps1',
+                'verify-override-skill-activation.ps1',
+                'verify-native-skill-metadata.ps1',
+                'verify-skills-config.ps1 -Mode enforce',
+                'verify-host-capability-matrix.ps1',
+                'verify-vnext-planning.ps1',
+                'verify-powershell-runtime-policy.ps1',
+                'verify-agent-workflow-advisory.ps1'
+            )) {
+            $raw | Should Match ([regex]::Escape($literal))
+        }
     }
 
     It "Documents the standalone skill integrity verifier in CLI help" {
