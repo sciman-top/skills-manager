@@ -3,7 +3,7 @@
 **program_id**: `skills-manager-vnext`
 **status**: accepted-direction
 **implementation_status**: phase-5-adaptive-capability-fabric-repo-verified-maintenance-hold
-**最后更新**: 2026-08-08
+**最后更新**: 2026-08-09
 
 ## 1. 产品结论
 
@@ -73,7 +73,7 @@ North Star：在不复制宿主原生推理、编码和运行能力的前提下�
 
 ### PP-000 Host-native-first main-chain-first self-retiring
 
-在授权、安全、数据、兼容和真值边界内，本项目最大化宿主 AI 原生能力并优先交付最短真实主链；无真实重复、稳定协议、已证实风险或量化热点，不新增抽象、治理或优化层。本项目仅补宿主原生能力的真实缺口；当原生能力覆盖、功能重叠、消费者消失或维护成本超过净收益时，相关能力必须依据可复核证据进入弱化或退役处置，有兼容义务时先转为 `compatibility-only/deprecated`，义务结束后最终 `retired`。仅仅缺少遥测或使用记录不能单独证明消费者消失。不得为执行本条款建立第二套治理或运行控制面。
+在授权、安全、数据、兼容、供应链和真值边界内，本项目最大化宿主 AI 原生能力并优先交付最短真实主链；无真实重复、稳定协议、已证实风险或量化热点，不新增抽象、治理或优化层。在这些边界不变的同等风险基线下，经代表性真实任务证明的宿主原生能力越强，本项目附加治理负担必须递减；模型名称、版本升级、单次成功或模型自评本身都不是删减门禁的充分证据。本项目仅补宿主原生能力的真实缺口；当原生能力覆盖、功能重叠、消费者消失或维护成本超过净收益时，相关能力必须依据可复核证据进入弱化或退役处置，有兼容义务时先转为 `compatibility-only/deprecated`，义务结束后最终 `retired`。门禁、审计、字段、证据、skill 和流程必须覆盖独立失败模式并保持正净收益；否则合并、降级、转为兼容层或退役。仅仅缺少遥测或使用记录不能单独证明消费者消失。不得为执行本条款建立第二套治理或运行控制面。
 
 本条是 `PP-001` 至 `PP-013` 的优先级解释，不复制或替代其具体契约。
 
@@ -113,7 +113,7 @@ Discovery 先确定用户、问题、成功信号和非目标；实现先跑通�
 
 ### `PP-009 Adaptive governance`
 
-治理、角色 lens、测试层级和能力组合随生命周期模式与风险升级。一个风险只使用最低充分证明；未产生净收益的流程、字段、skill 和指标应降级或退役。日常实现不隐式串联固定的 brainstorming、计划、worktree、子代理、review 和分支收尾流程；宿主原生 Plan/Goal/Review/agent/worktree 控制优先，窄 validator 只在当前风险或明确请求命中。TDD 仅在显式 strict test-first 合同下启用；配置、文档和生成物不机械套用 TDD、CI 或覆盖率门禁。
+治理、角色 lens、测试层级和能力组合随生命周期模式与风险升级，并在同等风险基线下随已经验证的宿主原生能力增强而递减。一个风险只使用最低充分且相互独立的证明；未产生净收益的流程、字段、skill 和指标应降级或退役。日常实现不隐式串联固定的 brainstorming、计划、worktree、子代理、review 和分支收尾流程；宿主原生 Plan/Goal/Review/agent/worktree 控制优先，窄 validator 只在当前风险或明确请求命中。TDD 仅在显式 strict test-first 合同下启用；配置、文档和生成物不机械套用 TDD、CI 或覆盖率门禁。
 
 ### `PP-010 Git truth spine, host-owned coordination`
 

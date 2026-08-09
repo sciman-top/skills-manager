@@ -121,6 +121,7 @@ foreach ($key in @($paths.Keys)) {
 
 foreach ($required in @(
         @{ key = 'prd'; literal = '### PP-000 Host-native-first main-chain-first self-retiring'; code = 'engineering_constitution_missing' },
+        @{ key = 'prd'; literal = '同等风险基线下，经代表性真实任务证明的宿主原生能力越强，本项目附加治理负担必须递减'; code = 'engineering_constitution_missing' },
         @{ key = 'prd'; literal = '不得为执行本条款建立第二套治理或运行控制面'; code = 'engineering_constitution_missing' },
         @{ key = 'agents'; literal = 'TOP_LEVEL_ENGINEERING_PRINCIPLE: PP-000'; code = 'engineering_constitution_mapping_missing' }
     )) {

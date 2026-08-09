@@ -27,6 +27,7 @@
 - `TOP_LEVEL_ENGINEERING_PRINCIPLE: PP-000` 唯一正文在 PRD；manifest/TaskGraph 声明主链、复用、最低验证和退役条件，`verify-vnext-planning.ps1`/`verify-agent-workflow-advisory.ps1` 阻断结构/安全漂移，closeout 只走 full；不建第二控制面。
 - 编码前定用户问题、复用、最小方案、write set、停止条件；证据不足保持 design/deferred。先通最薄真实主链，仅前置安全、数据和不可逆阻断。
 - 新抽象只允许消除至少两个真实重复、隔离已证实风险、匹配稳定外部协议或降低量化热点；否则优先直接实现、删除或延后。
+- 同等风险下仅由代表性真实任务证据触发治理递减；模型版本、单次成功或模型自评不是删减门禁证据。新增或保留的 gate/audit 必须覆盖独立失败模式且净收益为正，否则合并、降级或退役。
 - 迭代跑受影响测试/contract，共享写入/config/generated seam 才升级 quick；full 仅 closeout 一次，源码变化才重跑；每项风险用最低充分层级证明。
 - 同一逻辑切片默认一份 evidence；不按 task 机械增加 evidence/schema/fixture/wrapper/空模块。
 - skill/description 变化后宿主先消费 `host_handoff` 并允许 no-op；仅非活动 profile proposal 经 preview、fresh replay、rollback 后可 apply，禁止热切 active profile。

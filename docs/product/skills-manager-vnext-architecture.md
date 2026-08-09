@@ -3,7 +3,7 @@
 **program_id**: `skills-manager-vnext`
 **architecture_version**: 1
 **status**: accepted-direction
-**最后更新**: 2026-08-08
+**最后更新**: 2026-08-09
 
 ## 1. 架构结论
 
@@ -918,7 +918,7 @@ host evaluation 同时记录 cumulative input、cached/uncached input、cache ra
 
 决定：默认栈为宿主原生执行 + Git/repo truth + affected/full gates；skill、plugin、MCP、knowledge/code graph 按稳定 surface 职责逐层增加。所有社区候选统一记录 `adopt | adapt | defer | reject`、native equivalent、real consumers、data/auth/write boundary、evaluation、maintenance cost、retirement trigger 和 truth level。外部 context adapter 需两个独立真实失败样本后才进入 read-only canary；skill 需 replay/shadow/bounded canary/review 后 promotion。
 
-理由：强模型会降低部分提示词和 workflow 的边际价值，但不会消除持久规则、权限、外部 current truth、确定性测试、证据和回滚。相反，能力堆叠会增加 metadata、触发竞争、供应链、索引 stale 和维护成本。证据化 admission 能保留真正独特的 adapter seam，并在宿主原生能力覆盖时可删除。
+理由：强模型会降低部分提示词和 workflow 的边际价值，但不会消除持久规则、权限、外部 current truth、确定性测试、证据和回滚。相反，能力堆叠会增加 metadata、触发竞争、供应链、索引 stale 和维护成本。证据化 admission 能保留真正独特的 adapter seam，并在宿主原生能力覆盖时可删除。在授权、外部作用和风险基线不变时，只有代表性真实任务的对照证据才能触发治理减重；模型版本、单次成功或模型自评均不能单独触发。新增或保留的门禁和审计必须说明其独立失败模式，否则优先合并或退役。
 
 退役条件：真实 M1 样本没有显示相对 native baseline 的净收益；外部工具语言/索引/隐私/资源成本不满足；skill 长期无消费者、误触发或宿主已原生覆盖。退役优先于为保存范围继续包装。
 

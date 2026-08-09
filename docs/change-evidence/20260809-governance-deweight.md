@@ -1,12 +1,14 @@
 # Governance Deweight Evidence
 
 **Date**: 2026-08-09
-**Scope**: planning truth, default quality-gate composition, agent-workflow advisory verification
+**Scope**: engineering constitution, planning truth, default quality-gate composition, agent-workflow advisory verification
 **Maximum claim**: repository governance reduction verified by focused tests; host loading, invocation, business acceptance, and final full-gate status remain independently authoritative.
 
 ## Decision
 
 The audit found real local over-governance, not a reason to delete the repository's protection model. The accepted change removes repeated proof while retaining the boundaries that have caught real failures.
+
+The follow-up locks the same direction into existing `PP-000`/`PP-009` and the existing planning verifier: at an unchanged authority, external-effect, and risk baseline, only representative real-task evidence can trigger lower governance weight; a model name, version upgrade, one success, or model self-assessment is insufficient. A retained or new gate/audit must cover an independent failure mode and keep positive net value. This reuses the existing verifier and test surface; it adds no principle number, schema, verifier, quality-gate stage, registry, or telemetry system.
 
 Removed:
 
@@ -35,7 +37,7 @@ Measured against the slice baseline `7e765d8f` and the pre-advisory commit `9acb
 | advisory exact literal checks | 79 | 18 | 61 checks |
 | default full gate stages | 17 | 16 | 1 completed duplicate stage |
 
-The current project `AGENTS.md` is 8,056 bytes, 78.7% of its 10 KiB project budget, below the 85% warning threshold. It states that manifests own dynamic truth, plan/todo are indexes, and the P6 verifier is explicit historical/migration diagnostics.
+The current project `AGENTS.md` is 8,373 bytes, 81.8% of its 10 KiB project budget, below the 85% warning threshold. It states that manifests own dynamic truth, plan/todo are indexes, and the P6 verifier is explicit historical/migration diagnostics.
 
 ## TDD evidence
 
@@ -58,6 +60,8 @@ Agent-workflow advisory:
 
 Fresh combined verification after the rule-text follow-up passed all eight affected test files at `150/150`. The vNext, explicit P6 historical, maintenance, typed-core, PowerShell runtime, and agent-workflow verifiers all returned pass with zero findings; `build.ps1` also completed without tracked generated drift.
 
+Governance-decrease reinforcement reused those same surfaces: `build.ps1` exited 0, `ProductPlanning.Tests.ps1` passed `20/20`, and `verify-vnext-planning.ps1 -Json` returned `pass=true` with zero findings. The existing planning verifier now rejects removal of the stable same-risk governance-decrease clause; no additional test file, verifier, schema, receipt type, or full-gate stage was created.
+
 An isolated-worktree quick run passed build, repo hygiene, and generated sync, then stopped at workspace-lock parity because ignored `vendor/agent-skills` was not materialized in that temporary worktree. This is setup evidence, not a passed quick receipt and not a source failure; final authority is deferred to the integrated primary workspace, which retains the repository's vendor/lock materialization.
 
 ## Closeout truth
@@ -68,4 +72,4 @@ No provider call, host mutation, active-profile switch, MCP/plugin change, live 
 
 ## Rollback
 
-Revert the four governance-deweight commits in reverse order. Do not revert the primary worktree's independent `tests/run.ps1`, `QualityGateScripts.Tests.ps1`, or P6 deep-audit evidence changes unless they are explicitly included in a later reviewed integration commit.
+Revert the governance-deweight logical-slice commits in reverse chronological order. Do not revert the primary worktree's independent `tests/run.ps1`, `QualityGateScripts.Tests.ps1`, or P6 deep-audit evidence changes unless they are explicitly included in a later reviewed integration commit.

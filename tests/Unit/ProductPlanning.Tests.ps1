@@ -75,7 +75,7 @@ Describe 'vNext product planning contract' {
         $parsed.live_accepted | Should Be 'not_accepted'
     }
 
-    It 'requires the unique top-level engineering constitution in the PRD' {
+    It 'requires the unique top-level engineering constitution and governance decrease clause in the PRD' {
         $fixtureRoot = New-PlanningFixture 'missing-engineering-constitution'
         $path = Join-Path $fixtureRoot 'docs\product\skills-manager-vnext-prd.md'
         $content = (Get-Content -LiteralPath $path -Raw).Replace('### PP-000 Host-native-first main-chain-first self-retiring', '### PP-000 removed')
@@ -85,6 +85,17 @@ Describe 'vNext product planning contract' {
 
         @($parsed.findings | Where-Object code -eq 'engineering_constitution_missing').Count | Should Be 1
         $parsed.pass | Should Be $false
+
+        $policyFixtureRoot = New-PlanningFixture 'missing-governance-decrease-clause'
+        $policyPath = Join-Path $policyFixtureRoot 'docs\product\skills-manager-vnext-prd.md'
+        $policy = '同等风险基线下，经代表性真实任务证明的宿主原生能力越强，本项目附加治理负担必须递减'
+        $policyContent = (Get-Content -LiteralPath $policyPath -Raw).Replace($policy, '治理递减条款已删除')
+        Set-Content -LiteralPath $policyPath -Value $policyContent -Encoding UTF8
+
+        $policyParsed = (Invoke-PlanningVerifier $policyFixtureRoot).output | ConvertFrom-Json
+
+        @($policyParsed.findings | Where-Object code -eq 'engineering_constitution_missing').Count | Should Be 1
+        $policyParsed.pass | Should Be $false
     }
 
     It 'requires the repository action mapping without duplicating the constitution' {
