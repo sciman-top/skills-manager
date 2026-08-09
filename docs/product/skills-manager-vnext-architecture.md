@@ -416,6 +416,8 @@ candidate 集成顺序固定为：验证 candidate 的 base 与 declared write s
 | Git/worktree | 版本真值、candidate 隔离、集成与回滚证据 | 所有代码写入主链 | scheduler、文件 lease、live acceptance |
 | knowledge/code-graph adapter | 只读补充检索、关系或影响分析 | 两个独立真实任务证明 repo-native baseline 不足 | 源码/任务/验收真源 |
 
+当前 GPT-5.6 默认投影采用轻量组合：宿主原生 Plan、Goal、Review、agent 和 worktree 控制不再由固定 skill 链复制。`using-superpowers`、`brainstorming`、`writing-plans`、`executing-plans`、`subagent-driven-development`、`dispatching-parallel-agents`、`using-git-worktrees`、`requesting-code-review` 和 `finishing-a-development-branch` 从 native discovery mappings 退役；vendor checkout 仍可作为只读参考，不等于安装或卸载宿主能力。保留 `systematic-debugging`、`verification-before-completion`、`receiving-code-review` 等窄 validator，并用 reviewed patch 将 `test-driven-development` 收窄到显式 strict TDD，将 `research` 收窄到 decision-relevant、read-only、显式持久化。该组合由 `config/native-skill-activation-corpus.json` 的正/负样本和 `verify-capability-routing.ps1` 验证，不能越级证明 host invocation 或 live acceptance。
+
 知识库/代码图 adapter 的 admission 必须一起证明：目标语言和关系类型确实覆盖；最小 read root 与敏感数据策略；index source revision、captured_at 和 stale/rebuild 行为；CPU/RAM/disk/token/latency baseline；package/revision/license 与外部调用；zero-write/read-only canary；卸载、索引删除和回退 repo-native `rg`/symbols/tests/docs 的路径。任一项未知则 `defer`，不得因可视化效果或 star 数进入默认 profile/MCP。
 
 当前参考 disposition：Trellis 适配 repo-based spec/task/journal，但 defer AGPL/自动控制面安装；AGOS 适配 `write_scope`、candidate/ledger/merge-gate 词汇，但 reject Alpha runtime 接管；OptSkills 只适配 replay/distill/eval/checkpoint 原理，不把数学优化系统当通用 workflow upgrader；GBrain、CodeGraphContext、Understand Anything 都保持 external/defer，直到真实任务、PowerShell/语言覆盖、隐私和资源门禁成立。“souljourney lightweight workflows”来源未唯一定位，按 unknown source fail-closed。

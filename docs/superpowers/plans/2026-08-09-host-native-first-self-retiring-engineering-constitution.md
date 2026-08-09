@@ -413,3 +413,15 @@ git diff main...HEAD --check
 ```
 
 Expected: 工作树 clean；本任务 commit 可独立回滚；最大 claim 为 `repo_contract_enforced`。`host_loaded/live_accepted` 不升级，且不自动推送或修改远端策略。
+
+### Task 4: 退役固定全流程并收窄 TDD/research
+
+本切片把 GPT-5.6 的默认路径从“固定 workflow 链”收窄为宿主原生控制 + 按风险触发的窄 validator。它不新增 runtime、registry、CI step 或第二治理面。
+
+- [x] RED：扩展 `HostNativeSkillLifecycleCloseout.Tests.ps1` 与 `NativeSkillMetadata.Tests.ps1`，证明退役 mappings/domain/dependency/golden candidate、strict TDD 正向触发、普通实现负向约束和 bounded research 约束。
+- [x] GREEN：从 `skills.json`、dependency closure、routing policy 和 lock 中移除九个固定全流程技能；保留 `systematic-debugging`、`verification-before-completion`、`receiving-code-review` 与 strict TDD。
+- [x] GREEN：新增 reviewed `overrides/patches/superpowers-skills-test-driven-development/` 和 `overrides/patches/research/`，并登记 source/revision/license/delta provenance。
+- [x] GREEN：更新 native activation corpus 与 capability-routing golden，普通实现不再要求 TDD，research 默认不派代理、不写文件。
+- [ ] CLOSEOUT：build、affected Pester、routing/metadata/integrity/planning/override contracts 通过后，candidate HEAD 再运行唯一 full gate 和 current receipt verifier；最终状态只读 current receipt，不回写本 checklist。
+
+Truth boundary 保持：本切片最高为 `repo_contract_enforced`；`host_loaded`、`host_invocation_observed` 和 `live_accepted` 不因 repo projection 或 synthetic corpus 升级。

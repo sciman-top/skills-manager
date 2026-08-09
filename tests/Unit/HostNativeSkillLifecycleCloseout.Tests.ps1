@@ -66,6 +66,7 @@ Describe 'P6 host-native skill lifecycle closeout' {
         $config = Get-CloseoutRepoText 'skills.json' | ConvertFrom-Json
         $dependencyClosure = Get-CloseoutRepoText 'config/skill-dependency-closure.json' | ConvertFrom-Json
         $provenance = Get-CloseoutRepoText 'overrides/patches/provenance.json' | ConvertFrom-Json
+        $golden = Get-CloseoutRepoText 'config/capability-routing-golden.json' | ConvertFrom-Json
         $retired = @(
             'using-superpowers',
             'brainstorming',
@@ -95,12 +96,16 @@ Describe 'P6 host-native skill lifecycle closeout' {
         $dependencyNames = @($dependencyClosure.dependencies | ForEach-Object {
                 @([string]$_.skill) + @($_.requires)
             })
+        $goldenCandidateNames = @($golden.cases | ForEach-Object {
+                @($_.expected_candidates | ForEach-Object name)
+            })
 
         foreach ($name in $retired) {
             $mappingNames | Should Not Contain $name
             $importNames | Should Not Contain $name
             $domainNames | Should Not Contain $name
             $dependencyNames | Should Not Contain $name
+            $goldenCandidateNames | Should Not Contain $name
         }
         foreach ($name in $retained) {
             $mappingNames | Should Contain $name

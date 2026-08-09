@@ -101,3 +101,14 @@ verify-agent-workflow-advisory.ps1 -Json: status=pass, findings=[], provider_cal
 3. 撤销 PP-000、AGENTS mapping 与 planning verifier findings。
 
 回滚不得覆盖其他任务改动，不删除历史 spec/evidence，不修改宿主或远端策略。
+
+## Follow-on workflow-weight optimization
+
+本轮继续执行同一 constitution 的最小运行 seam：
+
+- retired from native discovery mappings/domain/dependency closure：`using-superpowers`、`brainstorming`、`writing-plans`、`executing-plans`、`subagent-driven-development`、`dispatching-parallel-agents`、`using-git-worktrees`、`requesting-code-review`、`finishing-a-development-branch`；vendor checkout 未删除，仍只是只读参考输入。
+- retained narrow validators：`systematic-debugging`、`verification-before-completion`、`receiving-code-review`，以及只在 explicit strict TDD/test-first contract 下触发的 `test-driven-development`。
+- `research` override 改为 decision-relevant、read-only；仅存在独立 bounded seam 时才考虑后台代理，只有用户明确要求才持久化 Markdown/evidence。
+- native corpus 现在包含 strict-TDD positive、routine-implementation negative、decision-research positive 和 supplied-facts negative；capability golden 的正向候选同步删除退役技能。
+
+本 follow-on 只改变 `skills.json`/lock、activation corpus、routing/dependency contract、reviewed overrides、tests 和文档；不修改 active profile、provider、auth、session、插件、宿主配置或 live runtime。它仍不证明 host invocation，最高 truth level 取决于 candidate exact-source full receipt。

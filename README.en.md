@@ -250,6 +250,10 @@ Notes:
 - `github` MCP prefers `gh auth token` and writes the result into User-scope `CODEX_GITHUB_PERSONAL_ACCESS_TOKEN`; Codex config stores only `bearer_token_env_var`, never a literal token.
 - The local weekly task `skills-manager-weekly-update-friday-2000` runs `更新 -> 同步MCP`, so durable MCP environment fixes must live in the source chain, not only in live `~/.codex/config.toml`.
 
+### Native skill projection
+
+GPT-5.6 routine work prefers Codex-native Plan, Goal, Review, skill semantic matching, and agent controls. Fixed Superpowers full-workflow chains are no longer in native discovery; `coding-strict` keeps only the explicit strict-TDD entry point. Routine implementation, configuration, documentation, and generated files do not mechanically trigger TDD, full-suite testing, CI, or multi-agent work. `research` activates only when current primary-source facts can change the decision, remains read-only by default, and never writes a research file automatically. Profiles are read-only compatibility/warm-up views; the current task never hot-loads profile changes. Vendor checkouts may remain as references and are not the generated projection.
+
 ### Target repository audit
 
 ```powershell

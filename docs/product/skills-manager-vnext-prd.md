@@ -113,7 +113,7 @@ Discovery 先确定用户、问题、成功信号和非目标；实现先跑通�
 
 ### `PP-009 Adaptive governance`
 
-治理、角色 lens、测试层级和能力组合随生命周期模式与风险升级。一个风险只使用最低充分证明；未产生净收益的流程、字段、skill 和指标应降级或退役。
+治理、角色 lens、测试层级和能力组合随生命周期模式与风险升级。一个风险只使用最低充分证明；未产生净收益的流程、字段、skill 和指标应降级或退役。日常实现不隐式串联固定的 brainstorming、计划、worktree、子代理、review 和分支收尾流程；宿主原生 Plan/Goal/Review/agent/worktree 控制优先，窄 validator 只在当前风险或明确请求命中。TDD 仅在显式 strict test-first 合同下启用；配置、文档和生成物不机械套用 TDD、CI 或覆盖率门禁。
 
 ### `PP-010 Git truth spine, host-owned coordination`
 
@@ -131,7 +131,7 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 
 ### `PP-013 Bounded research and reversible reference portfolio`
 
-外部研究默认只读且有停止条件：本仓事实与官方资料优先，社区仓、issue、文章和趋势只作候选证据。reference shelf 是可增、可降级、可退役的证据组合，不是累计式 runtime 或档案馆；搜索、阅读、fetch 或 clone 均不自动取得采纳、复制、安装、执行、宿主写入或 live authority。
+外部研究默认只读且有停止条件：本仓事实与官方资料优先，社区仓、issue、文章和趋势只作候选证据。reference shelf 是可增、可降级、可退役的证据组合，不是累计式 runtime 或档案馆；搜索、阅读、fetch 或 clone 均不自动取得采纳、复制、安装、执行、宿主写入或 live authority。只有当前事实可能改变决定时才触发 research；后台代理必须有独立且有界的研究 seam，Markdown/evidence 持久化必须由用户明确要求。
 
 ## 6. 功能需求
 

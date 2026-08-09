@@ -251,7 +251,7 @@ P3 plugin-aware 命令中，inventory/lint/eval 为只读；export 仍严格 fix
 
 旧投影 manifest 的 profile 字段仅用于迁移/历史兼容报告；native projection 不得产生 profile reachability 排除。常用命令：
 
-GPT-5.6 日常路径优先使用 Codex 原生 Plan、Goal、Review、skill 语义匹配和 agent 控制。`default` 保留故障诊断、完成验证，以及 `grill-with-docs` 所需的聚焦设计访谈依赖闭包；`coding` 增加增量实现、评审、API 与安全能力；`engineering` 面向产品澄清、spec、计划、领域/模块设计和官方研究。`coding-strict` 才额外提供 TDD 与强约束工作流。profile 是任务边界的预热候选包，当前任务不会热加载 profile 变更，vendor 与技能文件也不会因日常精简而删除。
+GPT-5.6 日常路径优先使用 Codex 原生 Plan、Goal、Review、skill 语义匹配和 agent 控制。`default` 保留故障诊断、完成验证，以及 `grill-with-docs` 所需的聚焦设计访谈依赖闭包；`coding` 增加增量实现、评审、API 与安全能力；`engineering` 面向产品澄清、spec、计划、领域/模块设计和官方研究。固定的 Superpowers 全流程不再进入 native discovery；`coding-strict` 只保留显式 strict TDD 的窄入口。普通实现、配置、文档和生成物不机械触发 TDD、全套测试、CI 或多代理。`research` 只有在当前 primary-source 事实可能改变决定时触发，默认只读且不会自动写研究文件。profile 是只读兼容/预热视图，当前任务不会热加载 profile 变更；vendor checkout 仍可保留为参考，不等于生成 projection。
 
 PPT 路由保持职责单一：`custom-teacher-courseware-ppt` 决定课堂课件结构，Presentations 创建或编辑 PPTX，`powerpoint-automation` 只操作 live PowerPoint/COM，`custom-powerpoint-accessibility` 在内容稳定后验证标题、替代文本、阅读顺序、表格、链接、字幕、对比度与动画。可访问性验证不能由截图单独判定；无法检查阅读顺序或辅助技术行为时必须标记为 `not_verified`。
 

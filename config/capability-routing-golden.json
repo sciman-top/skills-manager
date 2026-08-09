@@ -33,7 +33,7 @@
       "category": "discovery",
       "query": "我只有一个模糊产品想法，请先和我讨论用户、痛点、定位和最小可行功能",
       "profile_hints": ["engineering"],
-      "expected_candidates": [{"kind": "skill", "name": "idea-refine"}, {"kind": "skill", "name": "brainstorming"}],
+      "expected_candidates": [{"kind": "skill", "name": "idea-refine"}],
       "host_selected": [{"kind": "skill", "name": "idea-refine", "action": "load_skill"}]
     },
     {
@@ -50,7 +50,7 @@
       "category": "planning",
       "query": "根据已经批准的 spec 制定可执行开发计划和任务清单，但本轮不要执行",
       "profile_hints": ["engineering"],
-      "expected_candidates": [{"kind": "skill", "name": "planning-and-task-breakdown"}, {"kind": "skill", "name": "writing-plans"}],
+      "expected_candidates": [{"kind": "skill", "name": "planning-and-task-breakdown"}],
       "host_selected": [{"kind": "skill", "name": "planning-and-task-breakdown", "action": "load_skill"}],
       "forbidden_candidates": [{"kind": "skill", "name": "executing-plans"}]
     },
