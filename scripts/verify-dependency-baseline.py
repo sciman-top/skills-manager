@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,36 @@ def _parse_iso8601(value: str) -> dt.datetime:
     if text.endswith("Z"):
         text = text[:-1] + "+00:00"
     return dt.datetime.fromisoformat(text)
+
+
+def _expected_repo_id(repo_root: Path) -> str:
+    fallback = repo_root.name.strip()
+    try:
+        top_level = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "--show-toplevel"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip()
+        if Path(top_level).resolve() != repo_root:
+            return fallback
+        common_dir_text = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "--git-common-dir"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip()
+        common_dir = Path(common_dir_text)
+        if not common_dir.is_absolute():
+            common_dir = repo_root / common_dir
+        common_dir = common_dir.resolve()
+        if common_dir.name == ".git":
+            return common_dir.parent.name.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return fallback
 
 
 def _emit(args: argparse.Namespace, payload: dict[str, Any]) -> None:
@@ -176,7 +207,7 @@ def verify(args: argparse.Namespace) -> int:
             )
 
     repo_id = str(data.get("repo_id", "")).strip()
-    expected_repo_id = repo_root.name.strip()
+    expected_repo_id = _expected_repo_id(repo_root)
     if repo_id and expected_repo_id and repo_id != expected_repo_id:
         errors.append(
             f"repo_id mismatch: baseline={repo_id}, expected={expected_repo_id}"

@@ -13,6 +13,7 @@
 **HOST_LOADED_STATUS**: `host_evaluation_partial`
 **HOST_ORCHESTRATION_STATUS**: `native_spawn_partial`
 **HOST_RADAR_REFRESH_STATUS**: `disabled`
+**HOST_LIFECYCLE_ACCEPTANCE_STATUS**: `low_medium_blocked_close_agent_unavailable_xhigh_deferred`
 **LIVE_ACCEPTANCE_STATUS**: `not_run`
 **P6_ADMISSION_STATUS**: `hold`
 **SCHEMA_POLICY**: `operation_contract_v1_compatible_no_major`
@@ -31,7 +32,9 @@
 | Codex native runtime | 实际 agent thread、worktree、模型调用、等待、steer 和 candidate integration | 否；由宿主使用 |
 | Git/tests/live probe | freshness、代码正确性、外部效果和验收真值 | 否；只记录边界 |
 
-因此，本 track 不修改 `active_profile`、custom agent、provider/auth、sandbox、session 或当前模型；不抓取 Radar、不保存 token、不启动 daemon/queue/database，不安装社区 orchestration 项目。宿主侧的全局委派规则、默认子代理配置和 Scheduled automation 属于独立 host acceptance，不改变本仓 effect counters 或产品边界。
+因此，本 track 的 repo runtime 不修改 `active_profile`、custom agent、provider/auth、sandbox、session 或当前模型；不抓取 Radar、不启动 daemon/queue/database，不安装社区 orchestration 项目。当前用户明确授权的三份 `~/.codex/agents/*.toml` 投影属于独立 host acceptance：它只在每个 custom-agent layer 内设置 `[agents] enabled=false` 以禁止后代委派，不改变主配置的 `approval_policy="never"`、`default_permissions=":danger-full-access"`、全局 `[agents] enabled=true` 或 `max_concurrent_threads_per_session=2`，也不改变本仓 effect counters。
+
+2026-08-09 的投影文件、TOML 解析和 SHA-256 已验证，故 `custom_agent_descendant_spawn=config_disabled`。但本次 low lifecycle spawn 被 `agent thread limit reached` 拒绝；同一父会话中两个历史子代理已有 `task_complete`，活动列表只剩 `/root`，却没有原生 `close_agent` 工具可释放 open-thread slot。`interrupt_agent` 只中断当前 turn 并保留 agent，不能替代 close。故 low/medium 均为 `blocked_agent_thread_leak`，`close_agent=platform_na`，不得把旧 completion、配置投影或列表消失写成新生命周期通过；xhigh 与硬 token fuse 继续按用户要求暂缓。
 
 ## 2. 为什么加入而不违背产品定位
 
@@ -62,6 +65,8 @@ CLI 请求仍是 UTF-8 JSON schema version 1；其中 `TaskGraph` 与 `FailurePa
         "risk": "low|medium|high",
         "ambiguity": "low|medium|high",
         "parallelizable": true,
+        "execution_mode": "root|delegate",
+        "host_default_accepted": false,
         "exact_write_set": [],
         "coordination_keys": [],
         "external_state": [],
@@ -89,7 +94,13 @@ CLI 请求仍是 UTF-8 JSON schema version 1；其中 `TaskGraph` 与 `FailurePa
 }
 ```
 
-`completion_receipts[]` 为每个 `completed_task_ids[]` 提供 `task_id/base_revision/status=verified/verification_receipt`。`verification_receipt` 必须是 schema v1 对象，包含 `verify-*` receipt id、可解析的 `verified_at`、非空 `verifier`、64 位 `evidence_sha256` 和至少一条 verification command；任意字符串、空对象或敏感值均不构成证据。每次带真实 completion receipt 的 admission 必须由 request 显式提供 RFC3339 `now` 作为 evaluation time；纯 verifier 不读取系统时钟，`verified_at` 只允许不晚于该评估时刻 5 分钟。completed 集合还必须满足依赖闭包；未知、重复、未被 completed list 声明、revision 不一致、无证据、依赖未闭合或同时被选入当前 batch 均 fail-closed。`model_proposals[]` 必须引用 TaskGraph task、每 task 最多一项且 rationale 非空；其 `local_outcomes[]` 最少记录 `task_class/model_family/reasoning_effort/base_revision/gate_passed/rework_count/actual_cost/actual_duration_seconds/sampled_at`，并与 proposal pair 一致、evaluation time 可解析且不早于 90 天。
+`execution_mode` 缺省时安全回落为 `root`；只有显式 `delegate` 的 task 才能进入 spawned-agent parallel batch。task ID、dependency、completed、selected、proposal 和 receipt 的比较都使用同一小写 canonical key；声明值仍可保留大小写，但任何首尾空白或非法字符都在规划前 fail-closed。
+
+`completion_receipts[]` 为每个 `completed_task_ids[]` 提供 `task_id/base_revision/status=verified/verification_receipt`。`verification_receipt` 必须是 schema v1 对象，包含 `verify-*` receipt id、可解析的 `verified_at`、非空 `verifier`、64 位 `evidence_sha256` 和至少一条 verification command；任意字符串、空对象或敏感值均不构成证据。每次带真实 completion receipt 的 admission 必须由 request 显式提供 RFC3339 `now` 作为 evaluation time；纯 verifier 不读取系统时钟，`verified_at` 只允许不晚于该评估时刻 5 分钟。completed 集合还必须满足依赖闭包；未知、重复、未被 completed list 声明、revision 不一致、无证据、依赖未闭合或同时被选入当前 batch 均 fail-closed。
+
+每个 delegated completion 还必须提供 `execution_receipt`，至少包含 `agent_type/model_family/reasoning_effort/started_at/ended_at/terminal_state/token_usage`。`agent_type` 只能是三份受管 custom agent，pair 必须与有效 proposal 一致，时间必须有序且不晚于 evaluation time 5 分钟，verified completion 只接受 `terminal_state=completed`。`token_usage` 记录非负 `input_tokens/output_tokens/total_tokens` 且总量内部一致；它只做观察和后续审计，不构成当前硬 token 熔断。
+
+`model_proposals[]` 必须引用 TaskGraph task、每 task 最多一项且 rationale 非空；每个 `execution_mode=delegate` task 必须恰好有一个可用 proposal，或显式 `host_default_accepted=true`。其 `local_outcomes[]` 最少记录 `task_class/model_family/reasoning_effort/base_revision/gate_passed/rework_count/actual_cost/actual_duration_seconds/sampled_at`，并与 proposal pair 一致、evaluation time 可解析且不早于 90 天。
 
 `FailurePacket` 是换档、重试或重切片的前置输入，必须包含 `issue_id/task_id/base_revision/failure_kind/attempt_count/escalation_count/attempted_tier/commands/failures/verified_facts/unresolved_questions/artifacts/exact_write_set`。第一次 capacity corrected retry 还必须提供 `correction_summary`、至少一个 verified command 和 verified fact；`escalation_count` 不得大于 `attempt_count - 1`。failure kind 只允许 `task/context/tool/capacity/permission/credential/production_authorization/user_decision/unknown`。
 
@@ -117,16 +128,17 @@ CLI 请求仍是 UTF-8 JSON schema version 1；其中 `TaskGraph` 与 `FailurePa
 
 ### 4.2 确定性 wave 算法
 
-`New-AgentExecutionPlan` 先验证 TaskGraph，再按 `integration_order/task_id` 做拓扑排序。每个 wave 只含一个真正可执行 group：任一 serial、high-risk 或 high-ambiguity task 独占 barrier wave；否则把 ready task 按 canonical exact write set、coordination key 和 external resource 做 greedy disjoint group。静态规划显式调用 `PlanningOnly`，只允许 `planned_dependency_order_only` 推进拓扑，绝不伪造 completion receipt；一个 group 真实完成后，宿主拉起下一 wave 前仍必须提交实际 verified completion receipt。任何验证失败都返回 `pass=false`，不返回可执行 wave。该算法只输出计划，不创建线程、不等待、不调用模型。
+`New-AgentExecutionPlan` 先验证 TaskGraph，再按 `integration_order/task_id` 做拓扑排序。预算固定为 `max_parallel=2 / max_delegations=4 / max_xhigh_per_wave=1`：三项 ready delegate 必须拆为 `2+1`，全图超过四项 delegate 直接 fail-closed，同一 wave 的第二个 xhigh 留到后续 wave。每个 wave 只含一个真正可执行 group：任一 root、serial、high-risk 或 high-ambiguity task 独占 barrier wave；否则把 ready delegate 按 canonical exact write set、coordination key 和 external resource 做 greedy disjoint group。静态规划显式调用 `PlanningOnly`，只允许 `planned_dependency_order_only` 推进拓扑，绝不伪造 completion receipt；一个 group 真实完成后，宿主拉起下一 wave 前仍必须提交实际 verified completion receipt。任何验证失败都返回 `pass=false`，不返回可执行 wave。该算法只输出计划，不创建线程、不等待、不调用模型。
 
 ## 5. 并行 admission 与并发拉起
 
 `Test-AgentParallelAdmission` 必须在宿主拉起并发前通过。准入条件是：
 
-- 空 `requested_parallel_task_ids` 是合法的 `not_requested`；若请求并行则至少包含两个已声明 task，task ID 不重复且均存在；
+- 空 `requested_parallel_task_ids` 是合法的 `not_requested`；若请求并行则必须恰好包含两个已声明 delegated task，task ID 不重复且均存在；
 - 所有 `depends_on` 已在 `completed_task_ids` 中，且每项有同 revision 的 verified completion receipt，DAG 无 unknown/cycle；
 - `base_revision` 相同且非空；
 - high-risk/high-ambiguity/`parallelizable=false` task 一律不得进入普通并发；
+- 同一 wave 最多一个 `sol_xhigh`；全图累计最多四个 delegate，超过预算不以额外 wave 或后代 spawn 绕过；
 - 每个 task 有唯一 `result_owner`、`verification` 和 stop condition；
 - `exact_write_set` 必须是 canonical Windows-safe repo-relative path，禁止 root、drive、control/Windows-invalid chars（含 ADS `:`）、通配符、空 segment、`.`、`..`、Windows reserved device name、尾随点/空格；比较前做 NFC、统一分隔符/大小写，并阻断相等及 ancestor/descendant 重叠；空 write set 只代表 read-only，不代表可写共享；
 - `coordination_keys` 不出现同资源的任意 write 冲突；外部 `write` 与任何同资源任务冲突；
@@ -144,7 +156,7 @@ CLI 请求仍是 UTF-8 JSON schema version 1；其中 `TaskGraph` 与 `FailurePa
 | `sol_medium` | `gpt-5.6-sol + medium` | 一般实现、日常 Bug 排查、中等复杂度审查、集成准备 |
 | `sol_low` | `gpt-5.6-sol + low` | 常规接口、SQL、单测、技术文档、机械变换和边界清晰的重复任务 |
 
-实际选择优先级为 `user override -> local comparable outcomes -> current surface availability -> host native default`。availability 是执行前置门禁；每个 proposal 必须声明 `host_surface`，该 surface 的 pair inventory 归一为 `confirmed_available / confirmed_unavailable / unknown`。空 inventory 或缺 surface 为 `unknown`，另一 CLI/provider/API gateway 的成功 receipt 不得投影到 `collaboration_spawn`；只有 `confirmed_available` 才可保留该 tier。三档均使用 `gpt-5.6-sol`，分别是 `sol_xhigh / sol_medium / sol_low`。Radar、外部榜单和历史 probe 不得改变 tier、优先级或 fallback。模型不存在、宿主不可用、tier 已移除或 availability 未确认时返回 `host_default` 与 fallback reason。
+实际选择优先级为 `user override -> local comparable outcomes -> current surface availability -> host native default`。availability 是执行前置门禁；每个 proposal 必须声明 `host_surface`，该 surface 的 pair inventory 在比较前统一 Trim + 小写，并归一为 `confirmed_available / confirmed_unavailable / unknown`。空 inventory 或缺 surface 为 `unknown`，另一 CLI/provider/API gateway 的成功 receipt 不得投影到 `collaboration_spawn`；只有 `confirmed_available` 才可保留该 tier。三档均使用 `gpt-5.6-sol`，分别是 `sol_xhigh / sol_medium / sol_low`。Radar、外部榜单和历史 probe 不得改变 tier、优先级或 fallback。模型不存在、宿主不可用、tier 已移除或 availability 未确认时返回 `host_default` 与 fallback reason。
 
 ## 7. Legacy Radar snapshot compatibility
 

@@ -93,6 +93,7 @@ if ($null -ne $manifest) {
             @{ property='host_loaded_status'; value='host_evaluation_partial'; code='host_loaded_boundary_invalid' },
             @{ property='host_orchestration_status'; value='native_spawn_partial'; code='host_orchestration_boundary_invalid' },
             @{ property='host_radar_refresh_status'; value='disabled'; code='host_radar_boundary_invalid' },
+            @{ property='host_lifecycle_acceptance_status'; value='low_medium_blocked_close_agent_unavailable_xhigh_deferred'; code='host_lifecycle_boundary_invalid' },
             @{ property='live_acceptance_status'; value='not_run'; code='live_acceptance_boundary_invalid' }
         )) {
         if ([string]$manifest.($boundary.property) -ne $boundary.value) {
@@ -140,6 +141,21 @@ if ($null -ne $manifest) {
         if ([string]$tier.tier -notin @($expectedTiers.Keys)) { Add-Finding 'model_tier_anchor_invalid' $paths.manifest ("Unknown model tier: {0}" -f [string]$tier.tier) }
     }
 
+    $delegationPolicy = $manifest.delegation_policy
+    if ($null -eq $delegationPolicy -or [string]$delegationPolicy.execution_mode_default -ne 'root' -or
+        [int]$delegationPolicy.max_parallel -ne 2 -or [int]$delegationPolicy.max_delegations -ne 4 -or [int]$delegationPolicy.max_xhigh_per_wave -ne 1 -or
+        [string]$delegationPolicy.model_proposal_requirement -ne 'exactly_one_or_explicit_host_default' -or
+        $delegationPolicy.execution_receipt_required -ne $true -or [string]$delegationPolicy.token_usage_policy -ne 'observe_only_no_hard_fuse' -or
+        [string]$delegationPolicy.task_id_policy -ne 'canonical_no_outer_whitespace_case_insensitive') {
+        Add-Finding 'delegation_policy_invalid' $paths.manifest 'Delegation policy must preserve root default, 2/4/1 limits, proposal/receipt binding, canonical IDs, and observe-only token usage.'
+    }
+    $hostAcceptance = $manifest.host_acceptance
+    if ($null -eq $hostAcceptance -or [string]$hostAcceptance.custom_agent_descendant_spawn -ne 'config_disabled' -or
+        [string]$hostAcceptance.low_lifecycle -ne 'blocked_agent_thread_leak' -or [string]$hostAcceptance.medium_lifecycle -ne 'blocked_agent_thread_leak' -or
+        [string]$hostAcceptance.xhigh_lifecycle -ne 'deferred_by_user' -or [string]$hostAcceptance.hard_token_fuse -ne 'deferred_by_user') {
+        Add-Finding 'host_acceptance_receipt_invalid' $paths.manifest 'Host acceptance must record descendant-spawn disablement, low/medium lifecycle blocked by the unreleased agent-thread slot, and user-deferred xhigh/token fuse.'
+    }
+
     if ($null -eq $manifest.legacy_read_only_receipts) {
         Add-Finding 'legacy_receipts_missing' $paths.manifest 'Historical Radar/model probes must remain explicitly read-only when retained.'
     }
@@ -152,8 +168,11 @@ foreach ($required in @(
         @{ key='spec'; literal='**HOST_LOADED_STATUS**: `host_evaluation_partial`'; code='host_boundary_missing' },
         @{ key='spec'; literal='**HOST_ORCHESTRATION_STATUS**: `native_spawn_partial`'; code='host_boundary_missing' },
         @{ key='spec'; literal='**HOST_RADAR_REFRESH_STATUS**: `disabled`'; code='host_boundary_missing' },
+        @{ key='spec'; literal='**HOST_LIFECYCLE_ACCEPTANCE_STATUS**: `low_medium_blocked_close_agent_unavailable_xhigh_deferred`'; code='host_lifecycle_boundary_missing' },
         @{ key='spec'; literal='**LIVE_ACCEPTANCE_STATUS**: `not_run`'; code='live_boundary_missing' },
         @{ key='spec'; literal='`verification_receipt` 必须是 schema v1 对象'; code='completion_receipt_spec_missing' },
+        @{ key='spec'; literal='`max_parallel=2 / max_delegations=4 / max_xhigh_per_wave=1`'; code='delegation_limit_spec_missing' },
+        @{ key='spec'; literal='`execution_receipt`'; code='execution_receipt_spec_missing' },
         @{ key='spec'; literal='`planned_dependency_order_only`'; code='planning_only_spec_missing' },
         @{ key='spec'; literal='| `sol_low` | `gpt-5.6-sol + low` |'; code='model_tier_spec_missing' },
         @{ key='prd'; literal='FR-EWF-018'; code='product_requirement_missing' },
@@ -165,6 +184,7 @@ foreach ($required in @(
         @{ key='readme'; literal='agent-plan'; code='readme_command_missing' },
         @{ key='readmeEn'; literal='agent-plan'; code='readme_command_missing' },
         @{ key='evidence'; literal='Maximum claim: `repo_verified / repo_advisory_only`; host state remains `host_evaluation_partial`.'; code='evidence_boundary_missing' },
+        @{ key='evidence'; literal='`close_agent=platform_na`'; code='host_lifecycle_platform_boundary_missing' },
         @{ key='quality'; literal="Invoke-QualityGate 'agent-workflow-advisory' { & .\scripts\verify-agent-workflow-advisory.ps1 }"; code='full_gate_integration_missing' }
     )) { Require-Literal $content[$required.key] $required.literal $paths[$required.key] $required.code }
 
@@ -172,6 +192,8 @@ foreach ($required in @(
         @{ key='domain'; literal='function New-AgentTaskGraph'; code='domain_contract_missing' },
         @{ key='domain'; literal='function Test-AgentTaskGraphContract'; code='domain_contract_missing' },
         @{ key='domain'; literal='function Get-AgentCanonicalWritePath'; code='canonical_write_path_missing' },
+        @{ key='domain'; literal='function Get-AgentCanonicalTaskId'; code='canonical_task_id_missing' },
+        @{ key='domain'; literal='task_id_not_canonical'; code='canonical_task_id_missing' },
         @{ key='domain'; literal='\x00-\x1F<>:"|'; code='windows_safe_write_path_missing' },
         @{ key='domain'; literal='function New-RadarSnapshot'; code='domain_contract_missing' },
         @{ key='domain'; literal='function Test-RadarSnapshotContract'; code='domain_contract_missing' },
@@ -184,6 +206,10 @@ foreach ($required in @(
         @{ key='domain'; literal='function Test-AgentFailurePacketContract'; code='domain_contract_missing' },
         @{ key='application'; literal='function Test-AgentParallelAdmission'; code='application_contract_missing' },
         @{ key='application'; literal='function Test-AgentCompletionVerificationReceipt'; code='completion_receipt_gate_missing' },
+        @{ key='application'; literal='function Test-AgentExecutionReceipt'; code='execution_receipt_gate_missing' },
+        @{ key='application'; literal='execution_receipt_proposal_mismatch'; code='execution_receipt_gate_missing' },
+        @{ key='application'; literal='execution_receipt_terminal_state_invalid'; code='execution_receipt_gate_missing' },
+        @{ key='application'; literal='execution_receipt_token_total_mismatch'; code='execution_receipt_gate_missing' },
         @{ key='application'; literal='evidence_sha256'; code='completion_receipt_gate_missing' },
         @{ key='application'; literal='CompletedTaskReceipts'; code='completion_receipt_gate_missing' },
         @{ key='application'; literal='completion_receipt_unclaimed'; code='completion_receipt_gate_missing' },
@@ -192,6 +218,10 @@ foreach ($required in @(
         @{ key='application'; literal='high_ambiguity_parallel_forbidden'; code='parallel_ambiguity_gate_missing' },
         @{ key='application'; literal="'not_requested'"; code='serial_only_mode_missing' },
         @{ key='application'; literal='function New-AgentExecutionPlan'; code='application_contract_missing' },
+        @{ key='application'; literal='max_parallel = 2; max_delegations = 4; max_xhigh_per_wave = 1'; code='delegation_limits_missing' },
+        @{ key='application'; literal='delegation_budget_exceeded'; code='delegation_limits_missing' },
+        @{ key='application'; literal='xhigh_parallel_limit_exceeded'; code='delegation_limits_missing' },
+        @{ key='application'; literal='delegated_task_model_proposal_missing'; code='proposal_coverage_missing' },
         @{ key='application'; literal='groups = @('; code='single_group_wave_missing' },
         @{ key='application'; literal='completion_evidence_semantics'; code='planning_only_semantics_missing' },
         @{ key='application'; literal='planned_dependency_order_only'; code='planning_only_semantics_missing' },
@@ -219,7 +249,10 @@ foreach ($required in @(
         @{ key='build'; literal='"Application/ModelAndAgentPolicy.ps1"'; code='build_source_wiring_missing' },
         @{ key='build'; literal='"Commands/AgentWorkflow.ps1"'; code='build_source_wiring_missing' },
         @{ key='contractTests'; literal="Describe 'Agent workflow advisory contracts'"; code='focused_test_missing' },
+        @{ key='contractTests'; literal='caps each delegated wave at two tasks'; code='delegation_limit_test_missing' },
+        @{ key='contractTests'; literal='binds delegated completion receipts'; code='execution_receipt_test_missing' },
         @{ key='validFixture'; literal='"graph_id": "graph-demo-001"'; code='fixture_contract_missing' },
+        @{ key='validFixture'; literal='"execution_mode": "delegate"'; code='fixture_contract_missing' },
         @{ key='validFixture'; literal='"host_surface": "collaboration_spawn"'; code='fixture_contract_missing' },
         @{ key='invalidFixture'; literal='"graph_id": "graph-invalid-001"'; code='fixture_contract_missing' }
     )) { Require-Literal $content[$required.key] $required.literal $paths[$required.key] $required.code }

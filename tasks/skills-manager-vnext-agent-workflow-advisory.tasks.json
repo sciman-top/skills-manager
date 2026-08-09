@@ -15,6 +15,25 @@
   "host_loaded_status": "host_evaluation_partial",
   "host_orchestration_status": "native_spawn_partial",
   "host_radar_refresh_status": "disabled",
+  "host_lifecycle_acceptance_status": "low_medium_blocked_close_agent_unavailable_xhigh_deferred",
+  "delegation_policy": {
+    "execution_mode_default": "root",
+    "max_parallel": 2,
+    "max_delegations": 4,
+    "max_xhigh_per_wave": 1,
+    "model_proposal_requirement": "exactly_one_or_explicit_host_default",
+    "execution_receipt_required": true,
+    "token_usage_policy": "observe_only_no_hard_fuse",
+    "task_id_policy": "canonical_no_outer_whitespace_case_insensitive"
+  },
+  "host_acceptance": {
+    "custom_agent_descendant_spawn": "config_disabled",
+    "low_lifecycle": "blocked_agent_thread_leak",
+    "medium_lifecycle": "blocked_agent_thread_leak",
+    "xhigh_lifecycle": "deferred_by_user",
+    "hard_token_fuse": "deferred_by_user",
+    "evidence_path": "docs/change-evidence/20260806-agent-workflow-and-watch-safety-hardening.md"
+  },
   "legacy_read_only_receipts": {
     "radar_snapshot_contract": "v2_compatibility_parser_only",
     "radar_automation_status": "deleted",
@@ -88,10 +107,10 @@
       "risk": "medium",
       "depends_on": ["SMV-AWA-002"],
       "write_set": ["src/Application/ModelAndAgentPolicy.ps1", "build.ps1", "tests/Unit/AgentWorkflowContracts.Tests.ps1"],
-      "goal": "把 completion receipt、barrier wave、canonical disjoint write-set admission、surface-scoped 三态可用性、Sol 三档宿主 proposal 校验、local outcome fallback 和 FailurePacket 状态机做成 deterministic advisory。",
-      "implementation_steps": ["每 wave 只输出一个可执行 group，serial/high-risk/high-ambiguity 建立 barrier", "静态 PlanningOnly 只推进 planned_dependency_order_only，不伪造完成回执", "只有带 schema v1、时间、verifier、SHA-256 和 commands 的 verified receipt 且依赖闭合的前置任务可进入并行准入", "将目标 host_surface 的 pair inventory 归一为 confirmed_available/confirmed_unavailable/unknown", "禁止 Radar、外榜、local outcome 或另一 surface receipt 把 unknown 提升为可用", "校验 host proposal 与 comparable local outcome，不在本仓自动选模", "corrected retry 先串行并要求 parallel readmission"],
+      "goal": "把 completion/execution receipt、barrier wave、2/4/1 委派预算、canonical disjoint write-set admission、surface-scoped 三态可用性、Sol 三档宿主 proposal 校验、local outcome fallback 和 FailurePacket 状态机做成 deterministic advisory。",
+      "implementation_steps": ["execution_mode 缺省为 root；每 wave 最多 2、累计最多 4、xhigh 每 wave 最多 1", "静态 PlanningOnly 只推进 planned_dependency_order_only，不伪造完成回执", "只有带 schema v1、时间、verifier、SHA-256 和 commands 的 verified receipt 且依赖闭合的前置任务可进入并行准入", "delegated completion 额外绑定 agent_type/model/effort/terminal/time/token usage execution receipt", "每个 delegated task 要求唯一可用 proposal 或显式 host default 接受", "将目标 host_surface 的 pair inventory Trim/小写后归一为 confirmed_available/confirmed_unavailable/unknown", "禁止 Radar、外榜、local outcome 或另一 surface receipt 把 unknown 提升为可用", "corrected retry 先串行并要求 parallel readmission"],
       "verification": ["focused Pester", "valid/invalid fixture replay", "CLI output review"],
-      "stop_conditions": ["discover -> implement+document -> integrate barrier 可复现", "serial-only request 返回 not_requested", "缺 host_surface、空 pair inventory或 confirmed_unavailable 时回退 host_default", "Radar 不出现在活动 proposal/evidence", "换档必须有 FailurePacket 且不得自动恢复并行"],
+      "stop_conditions": ["discover -> implement+document -> integrate barrier 可复现", "三项 ready delegate 拆 2+1、第五项 delegate fail-closed、双 xhigh 不同 wave", "delegated task 缺 proposal/host default 或 receipt pair/terminal/token 不一致时 fail-closed", "serial-only request 返回 not_requested", "缺 host_surface、空 pair inventory或 confirmed_unavailable 时回退 host_default", "Radar 不出现在活动 proposal/evidence", "换档必须有 FailurePacket 且不得自动恢复并行"],
       "rollback": ["删除 AWA-003 application 增量和对应测试"],
       "evidence_group": "agent_workflow_advisory"
     },
