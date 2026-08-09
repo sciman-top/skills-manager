@@ -582,7 +582,6 @@ Describe 'fixture unit' {
             'host-capability-contract',
             'planning-contract',
             'powershell-runtime-policy',
-            'agent-workflow-advisory',
             'doctor-json-contract'
         )
         foreach ($literal in @(
@@ -594,11 +593,11 @@ Describe 'fixture unit' {
                 'verify-skills-config.ps1 -Mode enforce',
                 'verify-host-capability-matrix.ps1',
                 'verify-vnext-planning.ps1',
-                'verify-powershell-runtime-policy.ps1',
-                'verify-agent-workflow-advisory.ps1'
+                'verify-powershell-runtime-policy.ps1'
             )) {
             $raw | Should Match ([regex]::Escape($literal))
         }
+        $raw | Should Not Match 'agent-workflow-advisory|verify-agent-workflow-advisory\.ps1'
     }
 
     It "Documents the standalone skill integrity verifier in CLI help" {

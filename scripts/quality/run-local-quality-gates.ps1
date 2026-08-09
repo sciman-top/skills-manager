@@ -111,7 +111,6 @@ try {
             Invoke-QualityGate 'host-capability-contract' { & .\scripts\verify-host-capability-matrix.ps1 }
             Invoke-QualityGate 'planning-contract' { & .\scripts\verify-vnext-planning.ps1 }
             Invoke-QualityGate 'powershell-runtime-policy' { & .\scripts\verify-powershell-runtime-policy.ps1 }
-            Invoke-QualityGate 'agent-workflow-advisory' { & .\scripts\verify-agent-workflow-advisory.ps1 }
             Invoke-QualityGate 'doctor-json-contract' { & .\scripts\quality\check-doctor-json.ps1 }
             $runStatus = 'passed'
             $runExitCode = 0

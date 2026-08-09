@@ -18,7 +18,7 @@
 | `maintenance_design` | Lean AI Software Delivery | `M0/M0.2/M0.3 repo_verified / M1 deferred 0/10` | M0 基线 4/4 + M0.2 工程化协调/工具组合 4/4 + M0.3 模型策略/typed-core 决策 3/3 repo_verified；M1 无 active owner/collection task，已退出日常治理活动面，显式恢复后才收集；`TC0-TC3 conditional` 是 M0.3 closeout 历史，当前 TC0/TC1 由独立 track 承接 |
 | `typed_core_shadow_poc` | Operation contract typed core | `TC0/TC1 repo_verified` | `OperationPlan/Receipt v1` package-free C#/.NET shadow 3/3；4/4 corpus + 4/4 protocol negatives；PowerShell authoritative，TC2/生产集成 not_started |
 | `powershell7_runtime_migration` | PowerShell runtime support contraction | `repo_verified` | 当前生产入口、生成链、CI、tests、subprocess、文档与发布合同收敛到 `ps7_only`；历史 5.1 事实保留；不启动 TC2/P6 |
-| `agent_workflow_advisory_runtime` | Runtime-independent Agent workflow advisory | `repo_verified` + host evaluation partial | AWA-001..005 5/5；TaskGraph v2 delivery admission、TaskGraph v1 compatibility、FailurePacket v1、completion + execution receipt、2/4/1 委派预算、三档 Sol proposal/实际 agent pair 绑定与 PS7 zero-write CLI 已实现；custom-agent 后代委派已禁用，low/medium 生命周期因宿主缺 `close_agent` 且 open-thread slot 未释放而阻塞，xhigh 依用户要求暂缓；Radar 已退出活动决策链，v2 parser 仅保留历史只读兼容 |
+| `agent_workflow_advisory_runtime` | Runtime-independent Agent workflow advisory | `retired` | AWA-001..005 的历史 repo-side 完成记录保留；因无仓库外消费者且与宿主原生 Plan/Goal/subagent/worktree 重叠，source、CLI、tests、verifier 和默认 gate 已删除 |
 | `profile_reconciliation_advisor` | Skill profile drift reconciliation | `repo_verified` | P5-local plan-only advisor 4/4；宿主负责语义 proposal，确定性 planner 零写入校验；apply/live 未执行，不构成 P6 |
 | `profile_optimization_canary` | Bounded profile apply and replay | `repo_verified` | P5-local 3/3；非活动 profile canary、receipt/replay/rollback 已验证；6/6 host replay 为 partial，live acceptance not run |
 | `capability_routing_correction` | Native-first discovery/policy | `repo_verified` | P5-local regression correction 4/4；不改写 P5 历史状态，不授权 P6；host replay partial，live acceptance not run |
@@ -378,7 +378,7 @@ M0.2 不增加新的 pilot 样本类别或第二个 registry，而是在每个�
 
 M0.2 的执行协议如下：2–3 个 Agent 只在设计问题可独立时形成 read-only panel；写入只在 base revision 固定、依赖已满足、write set 互斥、candidate 可独立验证且 integration owner 明确时并行。共享文件、生成 seam、迁移、lock/config、Git ref/index 和同一外部状态一律单 writer/串行。lease 是 owner/write-set/base/recovery 的 coordinator claim；Git CAS/hash 只拒绝 stale 更新，不排队文件、不自动选 winner。当前实现完全复用宿主 task/subagent/worktree 与 Git，不建立 scheduler、daemon、database 或新 schema major。
 
-M0.3 的模型策略由宿主 AI 执行：用户拥有目标、价值排序和不可逆授权；宿主生成 TaskGraph、决定串并行、选择/升级模型并综合结果；skills-manager 提供 deterministic admission 与风险建议；Codex native runtime 实际 spawn/wait/steer/integrate。`Sol xhigh / Sol medium / Sol low` 是当前三个软锚点；软锚点必须由目标 surface 的 `confirmed_available` receipt 解锁，CLI/API gateway 不能替 collaboration spawn 背书。Radar、外部榜单和历史 probe 不参与活动选档。缺工具/权限/凭据不允许通过升档伪装解决。
+M0.3 的模型策略只作为历史 planning 记录：用户拥有目标、价值排序和不可逆授权，宿主原生能力负责任务图、串并行、模型选择/升级和结果综合。skills-manager 不再提供通用 admission、三档模型建议或 Radar 兼容层；只保留自身产品领域的确定性安全边界。
 
 PowerShell 技术路线采用 strangler migration，不直接重写：
 
@@ -407,23 +407,9 @@ observe-only 指标为 TTFV、返工切片、非预期人工打断、非产品 a
 
 M3 判定优先删除性维护：pilot 没有缩短 TTFV、没有减少返工/打断，或新增 artifact/上下文/维护成本抵消收益时，删除候选模板、规则或 skill；只有稳定重复且经 replay/shadow/canary 的做法才 reviewed promotion。首轮候选复用现有文档字段评审，不建第二个 lifecycle registry：`session_plan`、`preheat_recommendation`、hierarchical router/catalog、plugin fixture export、Rule Estate multi-target apply、maintenance companion verifier，以及规划/evidence 资产自身。每项记录 `unique_value / native_equivalent / real_consumers / maintenance_cost / retirement_trigger / latest_evidence`。宿主模型或官方能力已原生覆盖时，相关功能进入 adapt/retire，而不是为了保留项目范围继续包装。
 
-### 9.3 Runtime-independent Agent workflow advisory adjacent track
+### 9.3 Retired Agent workflow advisory record
 
-用户明确提出相邻需求后，经 minor admission 复核，本 track 复用 Codex 原生 subagent、worktree、model/reasoning 和等待能力，只增加可删除、可验证的仓库侧 advisory runtime。它不改变 `current_phase=P5`、不创建 P6 manifest、不扩 schema major、不写 host/profile/session/provider/auth，不抓取 Radar。
-
-| Slice | 状态 | 真实实现 | 退出条件 | 不证明 |
-| --- | --- | --- | --- | --- |
-| `AWA-001` | `repo_verified` | spec、manifest、PRD/架构/路线图映射与边界 | `DECISION_OWNER=host_ai`、`RUNTIME_SCHEDULER_STATUS=not_introduced` 等 marker 通过 | native runtime |
-| `AWA-002` | `repo_verified` | `src/Domain/AgentWorkflow.ps1`：TaskGraph/FailurePacket v1、canonical write-path validator 与 legacy RadarSnapshot v2 read-only parser | DAG cycle/unknown/order、failure correction/redaction，以及历史 Radar receipt 兼容负例通过 | contract quality |
-| `AWA-003` | `repo_verified` | `src/Application/ModelAndAgentPolicy.ps1`：completion + execution receipt、2/4/1 委派预算、one-group barrier waves、parallel admission、三档 host proposal validation/local outcomes 与 escalation | `discover -> implement+document -> integrate`；三项拆 2+1、第五项/双 xhigh fail-closed；proposal 与实际 agent/model/effort/terminal/token receipt 绑定；unknown/Radar fail-closed | auto model switch / hard token fuse |
-| `AWA-004` | `repo_verified` | `agent-plan/agent-validate`、bundle 接线和 repo-contained JSON adapter | exit/envelope stable；provider/native/write counters 0 | provider/subagent call |
-| `AWA-005` | `repo_verified` | advisory verifier、focused tests、full gate、evidence/README/根契约同步 | verifier 0 findings；full gate 0；P6 hold/M1 0/10/live not_run | host_loaded/live_accepted |
-
-波次与 admission 的执行顺序是：宿主生成 Product Baseline 与 TaskGraph → `agent-validate` → `agent-plan` → 宿主只在当前通过的 wave/group 使用 native spawn/worktree → 等待实际 verified completion + execution receipt → integration owner 串行消费 candidate → 下一 wave/affected/full gate。每 wave 只有一个可执行 group且最多 2 个 delegate，全图累计最多 4 个，每 wave 最多 1 个 xhigh；serial/root/high-risk/high-ambiguity、共享文件、生成链、schema/migration、lock/config、Git index/ref、同一外部状态和最终 closeout永远串行。只有固定 base、依赖 receipt 完成、canonical write set 互斥、独立验证和 owner 齐全才可并行。模型只由宿主提案，每个 delegate 必须有唯一可用 proposal 或显式 host default，本仓按 `user override -> local comparable outcomes -> surface-scoped host availability -> host default` 校验证据并把实际 agent/model/effort 与 completion receipt 绑定；Radar 不参与，corrected retry 默认串行，重新 admission 后才可并发。
-
-该 track 的 task truth 为 `tasks/skills-manager-vnext-agent-workflow-advisory.tasks.json`，spec 为 `docs/superpowers/specs/2026-08-05-agent-workflow-advisory-runtime.md`，verifier 为 `scripts/verify-agent-workflow-advisory.ps1`。它与 M0.3 历史 planning truth 并存但不计入 M1 的 10 个真实样本；若 native Codex 后续覆盖同一能力或 pilot 无净收益，按 retirement trigger 删除 advisory seam。
-
-当前 host acceptance 边界为 `low_medium_blocked_close_agent_unavailable_xhigh_deferred`：配置投影已验证，但新 low/medium lifecycle 不能在泄漏的 open-thread slot 上实跑。恢复条件是 fresh session 或当前宿主重新暴露可调用的原生 `close_agent` 并证明 completed agent 的 slot 已释放；不得用恢复长父会话轮询、`interrupt_agent`、归档任务或重启客户端伪装通过。
+`agent_workflow_advisory_runtime` 的 AWA-001..005 完成状态是 2026-08-05 的历史 repo-side 记录，不是当前 runtime 或 host acceptance。当前宿主原生 Plan/Goal/subagent/worktree 已覆盖任务编排；仓库外消费者搜索为零，因此该 track 的 source、CLI、tests、verifier 和默认 gate 已删除。spec、manifest 与 evidence 保留为不可变追溯记录，不能重新进入 active truth source，也不能被用来证明 host loaded 或 live accepted。
 
 ## 10. 风险登记
 

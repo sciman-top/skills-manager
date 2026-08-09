@@ -422,53 +422,11 @@ candidate 集成顺序固定为：验证 candidate 的 base 与 declared write s
 
 当前参考 disposition：Trellis 适配 repo-based spec/task/journal，但 defer AGPL/自动控制面安装；AGOS 适配 `write_scope`、candidate/ledger/merge-gate 词汇，但 reject Alpha runtime 接管；OptSkills 只适配 replay/distill/eval/checkpoint 原理，不把数学优化系统当通用 workflow upgrader；GBrain、CodeGraphContext、Understand Anything 都保持 external/defer，直到真实任务、PowerShell/语言覆盖、隐私和资源门禁成立。“souljourney lightweight workflows”来源未唯一定位，按 unknown source fail-closed。
 
-### 3.11 `ModelAndAgentPolicyAdvisor`
+### 3.11 Retired `ModelAndAgentPolicyAdvisor`
 
-职责：把任务 DAG、串并行 admission、模型/推理强度候选、fallback/escalation 和失败交接表达为宿主可消费的 advisory contract。user intent 是 authority owner，host AI 是 accountable semantic coordinator，skills-manager 是 evidence/policy advisor，deterministic verifier 是安全 admission guard，Codex native runtime 是实际 executor，Git/tests/live probe 裁决完成真值。
+历史 M0.3 和 Agent Workflow advisory 曾把通用 TaskGraph、模型 proposal、并行 admission、FailurePacket 与 Radar 兼容解析接入仓库。该面没有发现本仓外消费者，且其职责已由宿主原生 Plan、Goal、模型选择、subagent/worktree 和失败恢复覆盖，因此当前 source、CLI、fixture、tests、verifier 与默认 gate 全部删除。
 
-不负责：调用模型、创建或调度 subagent、修改 active session/custom-agent/provider/auth/config、保证 Radar 排名等于生产质量、把费用/时长预测当完成门禁。历史 M0.3 只完成 planning contract；独立 `agent_workflow_advisory_runtime` adjacent track 已把 plain-object validator、deterministic wave/admission、model/escalation proposal 和 zero-write CLI 接入 PS7 生成 bundle，仍不构成 native agent/model runtime。
-
-```text
-TaskGraph
-  task_id / goal / inputs[] / outputs[]
-  depends_on[] / risk / ambiguity / parallelizable / execution_mode=root|delegate
-  exact_write_set[] / coordination_keys[] / external_state[]
-  verification[] / result_owner / integration_order / stop_condition
-  completion_receipt: task_id / base_revision / status=verified
-    verification_receipt: schema_version=1 / verify-* receipt_id / verified_at
-    verifier / evidence_sha256 / commands[]
-    execution_receipt for delegate: agent_type / model_family / reasoning_effort
-      started_at / ended_at / terminal_state=completed / token_usage
-
-DelegationBudget
-  max_parallel=2 / max_delegations=4 / max_xhigh_per_wave=1
-
-HostModelProposal
-  task_id / requested_tier / rationale / user_override
-  host_surface / available_pairs[] -> availability_state
-  selection_semantics=host_proposal_validation_only
-  comparable local outcome: pair / base / gate / rework / cost / duration / sampled_at
-
-Legacy RadarSnapshot v2 (read-only compatibility)
-  radar_snapshot_id / captured_at / source_updated_at / expires_at
-  model / reasoning_effort / host_availability
-  score / estimated_cost / estimated_duration / sample_count / confidence
-  raw_hash / entries[]; policy_overrides forbidden
-
-FailurePacket
-  issue_id / base_revision / task_id / attempted_model / attempted_effort
-  attempt_count / escalation_count / correction_summary
-  commands[] / failures[] / verified_facts[] / unresolved_questions[]
-  artifacts[] / exact_write_set[] / next_recommendation
-```
-
-默认模型档位是可覆盖的三个软锚点：`Sol xhigh = gpt-5.6-sol + xhigh` 用于承重需求澄清、架构/重构、跨服务生产 RCA、高价值高风险审查和最终裁决；`Sol medium = gpt-5.6-sol + medium` 用于一般实现、日常排障、中等复杂度审查和集成准备；`Sol low = gpt-5.6-sol + low` 用于边界清楚、重复度高、可独立验证的 CRUD/SQL/单测/文档/机械变换。软锚点不等于运行时许可：host evidence 必须绑定具体 surface，并归一为 `confirmed_available / confirmed_unavailable / unknown`；`unknown` 和 `confirmed_unavailable` 都回退 host default，CLI receipt、历史 probe 或另一 API gateway 不能替 collaboration spawn 解锁。Radar 与外部榜单不参与 active tier、fallback 或 evidence priority。
-
-并行 admission 必须同时满足依赖闭包完成且有同 revision 的 structured verified receipt、receipt 与 completed list 完全对应、base revision 固定、Windows-safe canonical repo-relative write set 互斥或完全只读、外部写入已声明、candidate 可独立验证/丢弃、integration owner/order 明确。receipt 必须绑定 schema、时间、verifier、SHA-256 和实际 verification commands；字符串声明或静态规划占位不算完成。路径比较先做 NFC，再统一分隔符/大小写并阻断相等、ancestor/descendant、ADS、reserved device name、尾随点空格与其他 invalid path；high-risk/high-ambiguity、共享 seam、schema/migration、Git index/ref、同一外部对象和内容依赖任务默认串行。
-
-升级状态机固定为：初始 route -> 根因诊断后一次带 correction evidence 的 corrected retry -> task/context/tool 第二次失败由 supervisor 串行接管 -> 仅 capacity 可 `Sol low -> Sol medium -> Sol xhigh` -> 两次升级后 takeover。corrected retry/tool reassignment 返回 `parallel_allowed=false`，重新通过 admission 才能并发。缺工具、权限、凭据、生产授权或用户产品决定时 fail-closed。
-
-历史 Radar v2 parser 继续校验既有 receipt 的 source、captured/source-updated、pair、hash、expiry 与 forbidden fields，但该 parser 不得被 `New-ModelPolicyProposal` 或 `Test-AgentWorkflowRequest` 调用。Radar refresh 已停用，旧 snapshot 只读，不产生 active evidence。
+历史 spec、manifest 和 evidence 原样保留用于追溯，不进入 build 或当前 truth source。当前架构只保留一条负向边界：skills-manager 可以为自身 capability/rule/projection 写入提供领域专属 plan/receipt/rollback，但不得重建通用 AI 工程编排、模型路由、agent admission、Radar 或第二治理面。宿主行为和业务效果仍由宿主/真实工作流独立取证。
 
 ### 3.12 `TypedCoreBoundary`
 
@@ -480,7 +438,7 @@ FailurePacket
 | --- | --- | --- |
 | PowerShell 7 shell | `install.ps1` PS7 preflight、旧 CLI aliases/中文命令、Junction/host-native command adapter、bundle 兼容和错误呈现 | `powershell.exe` fallback、新增长期复杂 policy/DAG/schema 语义、跨模块共享可变状态 |
 | versioned protocol | stdin/stdout UTF-8 JSON、schema/version、stable finding/exit code、redaction/freshness/receipt | 传递 token、未版本化对象、隐式环境状态 |
-| C#/.NET typed core candidate | descriptor/plan/receipt validation、hash/path normalization、DAG/admission/model-policy evaluation、纯转换与 deterministic rules | host auth/session/provider、daemon/database、直接外部写入、第二套配置真源 |
+| C#/.NET typed core candidate | descriptor/plan/receipt validation、hash/path normalization、纯转换与 deterministic product-domain rules | host auth/session/provider、agent orchestration/model policy、daemon/database、直接外部写入、第二套配置真源 |
 | host adapters | 由 PowerShell 或 typed CLI 调用 native host/Git/filesystem，并保留现有 authority/rollback | 绕过 plan、freshness、receipt 或 native approval |
 
 PoC 只允许选择一个 read-only、两个以上真实 caller、已有 characterization tests 的 seam；固定输入 corpus 同时喂给现有 PowerShell 与 typed candidate，逐字段比较 JSON、finding code、exit code 和性能。接受需要零行为漂移或 reviewed additive difference、Windows x64 分发可复现、framework-dependent 与 self-contained 体积/启动数据、无新增常驻服务、旧入口可回退、单一实现真源迁移方案和删除 PoC 的命令。PoC 未达标即删除，不形成长期双实现。
@@ -498,12 +456,10 @@ src/
     RuleDocument.ps1
     OperationPlan.ps1
     Receipt.ps1
-    AgentWorkflow.ps1
   Application/
     CapabilityInventory.ps1
     RuleAdvisor.ps1
     OperationPlanner.ps1
-    ModelAndAgentPolicy.ps1
   Adapters/
     Sources/
       GitSource.ps1
@@ -526,7 +482,6 @@ typed-core/
     Redaction.ps1
     NativeProcess.ps1
   Commands/
-    AgentWorkflow.ps1
   Main.ps1
 ```
 
@@ -735,7 +690,7 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 
 ### `ADR-SMV-026 Host-owned task and model policy`
 
-决定：用户拥有目标与不可逆授权，宿主 AI 负责语义、TaskGraph、串并行、模型/推理强度和最终综合；skills-manager 只输出 model policy、admission/escalation 建议和确定性 findings，Codex native runtime 实际 spawn/wait/steer/integrate。
+决定：用户拥有目标与不可逆授权，宿主 AI 负责语义、任务图、串并行、模型/推理强度、失败恢复和最终综合；skills-manager 不再输出通用 model policy、agent admission 或 escalation 建议，只约束自身产品领域的确定性写入边界。
 
 理由：宿主拥有完整对话、当前可用模型和执行线程；在本仓复制 scheduler/router 会产生过期价格/能力数据、双重控制面和权限漂移。确定性 verifier 仍可阻断 DAG cycle、shared write overlap、stale base/snapshot、unknown model、缺验证/owner/预算和 truth 越级。
 
@@ -760,6 +715,8 @@ PoC acceptance：同一 corpus 的结构化输出/exit/finding parity；至少�
 理由：仅文档无法机械阻止循环依赖、伪造 completed task、路径父子重叠、serial/high-risk 混 wave、过量 delegate/双 xhigh、缺 proposal 的静默 medium fallback、proposal 与实际 spawn 错配、终态仍显示 processing、stale upstream Radar、空 local outcome 屏蔽失败、无 FailurePacket 升档或 corrected retry 自动并发；引入 scheduler/provider runtime 又会复制宿主能力。小型 plain-object contract 能复用既有 OperationPlan finding/redaction helper、PS7 bundle 和 full gate，并为未来 typed-core seam 保持稳定 JSON 边界。token usage 当前只观察，不实现硬熔断。
 
 退役/扩展：Codex 原生若公开等价的可验证 TaskGraph/admission/model proposal/failure trace，本 seam 缩减为 compatibility verifier 或删除；真实 M1 replay 无相对 native-only 净收益时同样删除。Radar live fetch、跨进程 coordinator、provider routing 或 host config mutation 不在本 ADR 内，只有 P6 admission 和用户新授权后才可评估。
+
+当前处置（2026-08-09）：原生 Plan/Goal/subagent/worktree 已覆盖核心职责，且仓库外消费者搜索为零；retirement trigger 已满足，三个 source seam、CLI、fixtures、tests、verifier 和默认 gate 均已删除。历史 spec/manifest/evidence 保留。
 
 ### `ADR-SMV-003 Separate domain models`
 

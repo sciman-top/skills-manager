@@ -32,7 +32,7 @@
 - [vNext 路线图](docs/product/skills-manager-vnext-roadmap.md)
 - [规则治理参考采纳矩阵](docs/product/rule-governance-adoption-matrix.md)
 - [当前 Phase 6 任务 manifest](tasks/skills-manager-vnext-phase6.tasks.json)
-- [Agent workflow advisory spec](docs/superpowers/specs/2026-08-05-agent-workflow-advisory-runtime.md) / [任务 manifest](tasks/skills-manager-vnext-agent-workflow-advisory.tasks.json)
+- [历史 Agent workflow advisory spec](docs/superpowers/specs/2026-08-05-agent-workflow-advisory-runtime.md) / [历史 manifest](tasks/skills-manager-vnext-agent-workflow-advisory.tasks.json)
 - [历史 Phase 5 任务 manifest](tasks/skills-manager-vnext-phase5.tasks.json)
 - [历史 Phase 4 任务 manifest](tasks/skills-manager-vnext-phase4.tasks.json)
 - [历史 Phase 3 任务 manifest](tasks/skills-manager-vnext-phase3.tasks.json)
@@ -46,14 +46,7 @@ vNext 当前动态真值由 P6 manifest 管理；当前仓库实现已完成 P6 
 
 PowerShell 仍是当前唯一运行真源，但不再是所有未来领域逻辑的默认永久归宿。针对 AI 生成脚本常见的 parser/quoting/动态类型/encoding/native-process 返工，目标架构采用 `versioned protocol -> 条件性 C#/.NET typed core -> PowerShell thin shell`。当前 TC0/TC1 已对 `OperationPlan/Receipt v1` 建立 package-free C#/.NET `shadow_only` PoC，并在固定 corpus 上实现 PowerShell/C# parity；它没有接入 CLI/生成 bundle，TC2 生产迁移仍为 `not_started`，禁止直接全仓重写或形成双真源。
 
-长链路任务的模型与子 Agent 编排继续由宿主 AI 负责；本仓已实现可审查、runtime-independent 的 TaskGraph v2 delivery admission、TaskGraph v1 compatibility、FailurePacket v1、RadarSnapshot v2 只读兼容、completion receipt、barrier wave、三档宿主 proposal 校验和 failure escalation 建议。`Sol xhigh / Sol medium / Sol low` 是可覆盖软锚点；它们不是仓库动态路由。本仓不拉起 subagent、不调用 provider、不抓取 Radar，也不修改 active session、custom-agent、provider/auth 或 host config。仓库侧验证与计划入口：
-
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\skills.ps1 agent-validate --input .\tests\fixtures\agent-workflow\valid-request.json --json
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\skills.ps1 agent-plan --input .\tests\fixtures\agent-workflow\valid-request.json --json
-```
-
-输出固定 `decision_owner=host_ai`、`executor=host_native_runtime` 和 `provider_calls/native_mutations/writes=0`。实际并发由宿主按当前 wave/group 使用原生 subagent/worktree 拉起，并以 verified completion receipt 解锁下一 wave；serial/high-risk/high-ambiguity、共享 seam、schema/migration、Git/external state 与最终 full gate 始终串行。模型可用性按目标 surface 归一为 `confirmed_available / confirmed_unavailable / unknown`，`unknown` 不得被 Radar 或另一 provider receipt 提升。当前最大真值是本仓 `repo_verified/repo_advisory_only` 加独立 `host_evaluation_partial`；Luna max 的 read-only CLI/provider probe 已通过，但 collaboration spawn 当前为 `confirmed_unavailable`，历史 Radar v1 receipt 也不满足 v2 revalidation。
+长链路任务分解、模型选择、子 Agent/worktree 编排、失败恢复和集成继续完全由宿主 AI 原生能力负责。仓库曾实现的通用 TaskGraph/model-policy advisory 没有发现本仓外消费者，且与宿主 Plan/Goal/subagent 控制面重叠，现已从 build、CLI、默认 gate 和当前测试面退役；历史 spec/manifest/evidence 仅用于追溯。本项目只为自身 capability/rule/projection 领域提供必要的 plan/receipt/rollback 合同，不再建立通用 AI 工程编排或第二治理面。
 
 Phase 1 的只读入口（未指定 `--out` 时不写文件）：
 

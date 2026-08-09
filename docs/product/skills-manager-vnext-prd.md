@@ -273,13 +273,13 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 - `FR-EWF-010`：知识库/代码图/理解工具只有在至少两个独立真实任务证明 repo-native `rg`、符号/测试/文档与宿主上下文不足，且语言覆盖、隐私、索引 freshness、资源、供应链和卸载/重建路径均可验证时，才进入 read-only canary；它们不成为源码、任务或验收真源。
 - `FR-EWF-011`：skill 优化只借鉴 `real sample -> replay -> shadow -> bounded canary -> reviewed promotion -> retain/revise/retire`；不得把领域研究系统的自动蒸馏、provider/embedding/solver 依赖直接解释为通用 workflow 自动升级能力。
 - `FR-EWF-012`：M1 pilot 在既有 10 个真实样本中同时观察 coordination mode、shared-write policy、tool disposition、external context adapter 和 skill lifecycle action；本 maintenance 切片自身不计数，也不为观察字段建设 daemon 或 telemetry。
-- `FR-EWF-013`：每个长链路任务可由宿主生成 machine-readable `TaskGraph v2`，在既有 `task_id / goal / inputs / outputs / depends_on / risk / ambiguity / parallelizable / execution_mode / exact_write_set / coordination_keys / external_state / verification / result_owner / integration_order / stop_condition` 上增加 `delivery_stage / admission_scope / user_outcome / entrypoint / main_chain_checkpoint / reuse_decision`；`execution_mode` 缺省为 `root`，所有 task/dependency/receipt 引用共用无首尾空白、大小写不敏感的 canonical ID；`verification` 直接承接最低充分验证，不增加同义字段。AI capability、治理和长期维护面按范围增加 native baseline，长期维护面还必须有 complexity evidence、真实消费者、维护成本和 retirement trigger。已完成集合必须依赖闭合，每项还必须有同 `base_revision` 的 `status=verified` completion receipt，内含 schema v1、receipt id、verified timestamp、verifier、evidence SHA-256 与非空 verification commands。字符串、空对象、额外/unclaimed receipt 或静态规划占位均 fail-closed。本仓只校验合同，不执行 DAG。
-- `FR-EWF-014`：模型策略必须由宿主 AI 依据用户意图和完整上下文主导；本仓 `New-ModelPolicyProposal` 只执行 `host_proposal_validation_only`，校验宿主提出的 task/tier/rationale、surface-scoped host availability、可比本地结果和 Radar evidence，不实现语义 selector 或静默换模。可用性固定为 `confirmed_available / confirmed_unavailable / unknown` 三态；CLI/provider、Desktop picker、collaboration spawn、scheduled run 和外部 API gateway 的 receipt 不得跨 surface 复用，`unknown` 不得被 Radar 或历史 local outcome 提升为可用。
-- `FR-EWF-015`：三档默认软锚点为 `Sol xhigh`（需求澄清、架构、生产 RCA、高风险审查和最终裁决）、`Sol medium`（一般实现、日常排障、中等审查和集成准备）和 `Sol low`（边界清楚的 CRUD/SQL/单测/文档、机械变换和高吞吐窄任务）；三档模型均为 `gpt-5.6-sol`，锚点可被宿主覆盖，不得硬编码为静默路由规则。
-- `FR-EWF-016`：Radar、外部榜单及历史模型 probe 不得参与活动 proposal validation、fallback、evidence priority 或 tier mutation。既有 `RadarSnapshot v2` validator 仅为历史 receipt 提供只读兼容解析；Radar automation 保持删除状态。
-- `FR-EWF-017`：并行/串行与模型升级必须使用显式状态机：每 wave 最多 2 个 delegate、TaskGraph 累计最多 4 个、每 wave 最多 1 个 xhigh；依赖 completion receipt、base、Windows-safe canonical write set、集成 owner、验证和外部写入全部满足才允许并行。每个 delegated task 必须有唯一可用 proposal 或显式接受 host default；delegated completion 还要以 execution receipt 绑定实际 custom agent、model/effort、terminal state、时间与观测 token usage。high-risk/high-ambiguity、root 与 serial task 建立 barrier。corrected retry 默认串行，重新通过 parallel admission 才可并发；task/context/tool 同一 issue 第二次失败由 supervisor 接管，只有 capacity 可按 `Sol low -> Sol medium -> Sol xhigh` 升级，权限/凭据/用户决策缺失则 fail-closed。
-- `FR-EWF-018`：仓库必须提供 runtime-independent 的 `TaskGraph v2 / FailurePacket v1`、one-group-per-wave dependency plan、并行 admission、host proposal validator 与 escalation decision；TaskGraph v1 只保留 compatibility validation，不能证明 v2 delivery admission 已通过；历史 `RadarSnapshot v2` parser 与活动决策链隔离。它们只返回建议和 findings，不创建 agent thread、不调用 provider、不修改 host/native state。
-- `FR-EWF-019`：生成 bundle 必须提供 `agent-validate` 与 `agent-plan` 两个 repo-contained JSON 命令；稳定 envelope 固定 `truth_boundary=repo_advisory_only / decision_owner=host_ai / executor=host_native_runtime / provider_calls=0 / native_mutations=0 / writes=0`，失败时以 machine-readable findings 和非零 exit fail-closed。
+- `FR-EWF-013`：长链路任务的分解、DAG、Plan/Goal 状态和完成回执由宿主原生能力拥有；本仓 task manifest 仅描述本产品自己的实现工作，不升级为通用 `TaskGraph` runtime 或跨项目治理合同。
+- `FR-EWF-014`：模型、reasoning effort、fallback 和可用性由用户与宿主根据当前 surface 决定；本仓不维护模型档位、proposal validator、Radar 或外部榜单决策链。
+- `FR-EWF-015`：任务需要子 Agent/worktree 时直接使用宿主原生控制面；本仓不规定固定角色、固定模型三档或仓库级并发配额。
+- `FR-EWF-016`：Radar automation、活动决策链及其兼容 parser 均退出当前 runtime；历史记录只保存在 spec/manifest/evidence，不进入 bundle。
+- `FR-EWF-017`：共享写集、迁移、配置、Git 和最终集成保持单 writer/串行；其余串并行判断由宿主按当前任务证据负责，不通过仓库通用 admission engine 重复裁决。
+- `FR-EWF-018`：仓库不得提供通用 Agent Workflow contract/runtime；只保留 capability、rule、projection 等产品领域自身必要的 plan/receipt/rollback。
+- `FR-EWF-019`：生成 bundle、CLI help 和默认 quality gate 不得暴露 `agent-validate`、`agent-plan` 或专用 Agent Workflow verifier；历史 spec/manifest/evidence 继续可追溯。
 - `FR-EWF-020`：advisory implementation 必须保持层次边界：domain/application 是无文件、时钟、环境、网络和 terminal 副作用的 pure layer；command adapter 只读取仓内显式输入并呈现结果；Radar refresh、spawn/wait/steer、worktree 创建和模型/effort 应用继续由宿主显式执行。
 
 ### 6.12 Typed-core shadow migration
@@ -340,8 +340,8 @@ fresh inventory、host evaluation、injected/executed invocation 与业务 accep
 - `NFR-EWF-004`：tool/skill promotion 的语义判断可由宿主 AI 提议，但 availability、freshness、权限、预算、供应链、测试和 truth-level advancement 必须由确定性证据或人工 review 约束。
 - `NFR-EWF-005`：模型策略是多目标 Pareto 建议，必须同时观察正确性/用户结果、费用、wall-clock、token/context、重试和集成成本及不可逆风险；不得把动态 Radar 分数压成不可解释的固定总分或单项硬门禁。
 - `NFR-EWF-006`：PS7-only runtime policy 必须覆盖 source、generated bundle、installer、`skills.cmd`、CI、tests、subprocess wrapper、runbook 和 release contract；历史 Phase/证据中的 5.1 记录只保留为历史事实，不能恢复为当前支持承诺。新 typed core 候选仍须以 versioned protocol、single source of truth、PS7 回滚路径和可删除 PoC 证明，不得在无门禁的情况下形成双写或双真源。
-- `NFR-EWF-007`：`agent_workflow_advisory_runtime` 只允许 schema v1 compatible 的 minor admission；P6、仓库 scheduler/daemon/database/provider gateway、仓库 Radar fetch、仓库发起的 custom-agent/config/profile/session mutation 和业务 live acceptance 必须保持显式未实现/未运行。用户明确授权的宿主 custom-agent 防后代委派投影、Scheduled automation、全局委派规则和默认子代理配置属于独立 host acceptance，不改变本仓 runtime 边界或 effect counters。
-- `NFR-EWF-008`：Agent workflow verifier 必须进入 full quality gate，机械检查五项 task、严格三档 Sol soft anchor、completion receipt/canonical path/barrier wave、proposal/local outcome、FailurePacket parallel readmission、Radar-independent 活动决策链、legacy Radar read-only parser、zero-side-effect envelope 和 `repo_verified != host_loaded != live_accepted` 边界。
+- `NFR-EWF-007`：不得重新引入仓库 scheduler/daemon/database/provider gateway、Radar fetch、通用 TaskGraph/model policy 或仓库发起的 custom-agent/config/profile/session mutation；宿主侧授权动作不改变本仓 runtime 边界。
+- `NFR-EWF-008`：现有 build/dispatch/gate contract 必须阻断 `agent-plan`、`agent-validate`、Agent Workflow 源模块或专用 verifier 回流；该负向约束复用现有测试，不建立新的治理 registry。
 - `NFR-TEC-001`：替代技术栈评估优先比较 C#/.NET、TypeScript/Node、Python 和 Rust 的 Windows/native CLI 适配、类型/并发、分发、供应链、维护与回滚成本；当前推荐 C#/.NET typed core + PowerShell thin shell 作为条件性目标架构，只实施可删除 shadow PoC，不实施全仓重写。
 - `NFR-TEC-002`：TC1 必须 pin 受支持 LTS SDK、零第三方 `PackageReference`、4/4 corpus parity、结构化协议负例、零生产引用和可删除回滚；framework-dependent/self-contained/single-file 的体积/启动数据只作描述性观察。TC2 前 PowerShell runtime 必须保持 authoritative，生产集成为 `not_started`。
 - `NFR-HNS-001`：P6 admission 是 planning/implementation authority，不自动授权宿主重启、provider/auth/session/plugin/MCP mutation 或业务 live action。
@@ -379,9 +379,9 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 16. verifier 能阻断“Git CAS 等于文件排队/抢占胜出”、共享路径无 owner 并行写入、社区 control plane 偷渡、无证据工具接入和 P6/live truth 越级。
 17. 任一外部知识库或代码图 adapter 在接入前都有两个独立真实失败样本、语言/隐私/freshness/资源/供应链/卸载证据；条件不满足时保持 defer，repo-native 工具仍可完成主链。
 18. skill/tool 的保留以真实 replay/pilot 净收益为依据；强模型或宿主原生能力覆盖后能通过已记录 retirement trigger 降级或删除，不以资产数量作为成功指标。
-19. `agent-plan` 能对有效 TaskGraph 稳定输出 `discover -> implement+document -> integrate` barrier waves，每 wave 仅一个可执行 group；三项 ready delegate 拆成 `2+1`，第五项 delegate fail-closed，双 xhigh 不进入同一 wave。空 parallel request 返回 `not_requested`，高风险/高歧义、缺 completion/execution receipt、路径相等或父子重叠、共享 coordination/external state、owner/verification 缺失均 fail-closed，且不实际拉起并发。
-20. 三档模型只在宿主显式 proposal 后作为软锚点出现；每个 delegated task 必须有唯一可用 proposal 或显式接受 host default，完成时实际 agent/model/effort 必须与 proposal receipt 一致。用户 override 优先，只有有效 local outcome 与当前 surface host availability 可支撑 proposal；host pair 比较统一 Trim/小写。Radar 与外部榜单不得参与；未知/已移除的 Luna/Terra tier fail-closed；corrected retry 不自动恢复并行；权限、凭据、生产授权或用户决策不允许通过升档绕过。
-21. Agent workflow advisory 的 repo verifier、focused tests 和 full gate 通过只能声明 `repo_verified/repo_advisory_only`；host load、真实 subagent 并发、模型效果、Radar refresh 与业务 live acceptance 仍需独立 receipt。历史 v1 Radar run 不得满足当前 v2 host revalidation。
+19. build、CLI help、生成 bundle、默认 gate 和当前测试面均不包含 `agent-plan`、`agent-validate` 或通用 Agent Workflow 实现。
+20. 历史 Agent Workflow spec、manifest 和 evidence 仍可追溯，但不被当前索引写成 active truth source，也不能证明宿主行为或业务效果。
+21. 日常 AI 编码直接使用宿主 Plan/Goal/subagent/worktree 能力；本仓只在自身产品领域存在独立失败模式时增加确定性合同。
 
 ## 9. 成功指标
 
@@ -422,7 +422,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - 当前主链是 `effective host snapshot -> canonical compiler -> eligibility policy -> all-enabled native metadata -> host AI selection -> full skill injection -> invocation trace`；strict fallback 只在宿主原生注入不可用且显式请求时启用。
 - P5 后的 `maintenance_design` 已建立 Lean Delivery advisory 规划契约；M1 registry 当前为 `deferred (0/10)`，因为没有 active owner/collection task，只有显式建立两者后才恢复。它不是新 Phase，也不证明 pilot 已执行、完成或产生业务效果。
 - `maintenance_design` M0.2 只补强 host-owned coordination、single-writer write-set admission、Git freshness/CAS 语义、tool disposition 和 context-adapter admission；不引入 coordinator/lease runtime，也不安装 Trellis、AGOS、GBrain、CodeGraphContext、Understand Anything 或 OptSkills。
-- `maintenance_design` M0.3 只落盘 host-owned TaskGraph/model policy、三档 Sol 软锚点、failure escalation 和 typed-core 迁移决策；不执行动态路由、不修改 custom-agent/host 配置或替换 PowerShell。后续独立 TC1 shadow PoC 仍未接入生产；Radar automation 已删除，旧 Luna/Terra/Radar 记录只作为历史 receipt。
+- `maintenance_design` M0.3 的 TaskGraph/model policy 是历史 planning truth；后续通用 advisory runtime 因无外部消费者且与宿主原生能力重叠已退役。独立 TC1 shadow PoC 仍未接入生产；Radar automation 已删除，旧 Luna/Terra/Radar 记录只作为历史 receipt。
 - GUI、daemon、远端协作、数据库和 domain core 重写均为 conditional，不进入当前承诺。
 
 ## 11. 官方与社区依据
@@ -479,7 +479,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - `DEC-PROD-008`：Goal、subagents、scheduled tasks、local memories、App Server/SDK 属于宿主 native baseline 和本项目退役触发器；只有本仓独有的 capability/rule discovery、advice、bounded transaction 与 verification seam 可在证据支持下保留。
 - `DEC-PROD-009`：工程化多 Agent 采用“host-owned coordinator + read-only design panel + disjoint-worktree execution + single-writer shared seam + sequential integration”；Git 是真值主干和 stale guard，不是文件任务队列。
 - `DEC-PROD-010`：社区 workflow、知识库、代码图和自动 skill 学习均先进入证据化 disposition；当前候选只采纳协议启发，不安装运行时，M1 真实任务证据决定后续 retain/adapt/retire。
-- `DEC-PROD-011`：宿主 AI 是任务语义、DAG、串并行和模型档位的 accountable coordinator；skills-manager 只提供建议、合同和确定性安全阻断，Codex native runtime 执行 spawn/wait/integration。
+- `DEC-PROD-011`：宿主 AI 独立拥有任务语义、DAG、串并行、模型档位和 spawn/wait/integration；skills-manager 不再提供通用编排建议或 admission，只保留自身产品领域的确定性安全合同。
 - `DEC-PROD-012`：当前 shell runtime 强制收敛为 PS7-only，以删除 5.1/7 双运行时解析、quoting、encoding 和测试分支；这是支持面迁移，不是 typed-core 生产迁移。复杂领域语义仍通过边界收缩和 typed-core PoC 评估，不直接全仓重写；PoC 在真实收益不足、兼容成本过高或无消费者时必须删除。
 - `DEC-PROD-013`：P6 正式采用 host-native skill lifecycle reset；profile/router/cold-load 不再是技能可达性或语义选择主链，完整 native discovery、确定性 eligibility 和 invocation trace 成为新边界。
 
