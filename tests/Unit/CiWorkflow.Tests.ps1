@@ -14,6 +14,10 @@ Describe 'GitHub CI workflow supply-chain contract' {
         $script:workflow | Should Not Match 'SkipPublisherCheck'
     }
 
+    It 'avoids duplicate feature-branch push runs while retaining PR main and tag coverage' {
+        $script:workflow | Should Match '(?ms)^on:\s*\r?\n\s+push:\s*\r?\n\s+branches:\s*\r?\n\s+- main\s*\r?\n\s+tags:\s*\r?\n\s+- ''\*''\s*\r?\n\s+pull_request:\s*$'
+    }
+
     It 'keeps sample-dependent sync MCP performance observational in clean CI' {
         $script:workflow | Should Match '(?s)- name: Run repository full quality gate\s+shell: pwsh\s+run: \.\\scripts\\quality\\run-local-quality-gates\.ps1 -Profile full\s+- name: Observe sync MCP performance threshold'
         $script:workflow | Should Match '(?s)- name: Observe sync MCP performance threshold\s+shell: pwsh\s+run: \.\\scripts\\quality\\check-doctor-json\.ps1 -SyncMcpThresholdMs 12000 -WarnOnly'
