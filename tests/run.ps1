@@ -14,7 +14,6 @@ param(
     [string]$ShardReportRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'reports\test-shards'),
     [string]$SchedulingTimingPath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'reports\test-timings\current.json'),
     [string[]]$SerialTestFiles = @(),
-    [string[]]$InProcessTestFiles = @('SelectionCancellation.Tests.ps1'),
     [string]$QualityGateRunId = '',
     [string]$QualityGateSourceFingerprintJson = ''
 )
@@ -73,23 +72,6 @@ function Write-FailureTail([string]$Path, [string]$Label) {
     if (Test-Path -LiteralPath $Path) {
         Write-Host ("{0}:" -f $Label)
         Get-Content -LiteralPath $Path -Tail 80 | ForEach-Object { Write-Host $_ }
-    }
-}
-
-function Invoke-InProcessTestFile($Item) {
-    $startedAt = [datetimeoffset]::UtcNow
-    $timer = [Diagnostics.Stopwatch]::StartNew()
-    $result = Invoke-Pester -Script $Item.file.FullName -PassThru -Show Failed,Summary
-    $timer.Stop()
-    if (-not $result -or [int]$result.TotalCount -le 0) { throw ("{0} test discovery returned zero tests for {1}" -f $Item.stage, $Item.file.FullName) }
-    return [pscustomobject][ordered]@{
-        schema_version = 1; stage = $Item.stage; test_file = $Item.file.FullName
-        status = if ([int]$result.FailedCount -eq 0) { 'passed' } else { 'failed' }
-        total_count = [int]$result.TotalCount; passed_count = [int]$result.PassedCount; failed_count = [int]$result.FailedCount
-        skipped_count = [int]$result.SkippedCount; pending_count = [int]$result.PendingCount; inconclusive_count = [int]$result.InconclusiveCount
-        started_at = $startedAt.ToString('o'); elapsed_ms = $timer.ElapsedMilliseconds
-        cases = @($result.TestResult | ForEach-Object { [pscustomobject]@{ describe = [string]$_.Describe; name = [string]$_.Name; result = [string]$_.Result; elapsed_ms = [math]::Round([double]$_.Time.TotalMilliseconds, 3) } })
-        error = $null
     }
 }
 
@@ -156,7 +138,7 @@ foreach ($stageSpec in @(
     @{ stage = 'e2e'; files = $e2eFiles; root = $E2ETestPath }
 )) {
     $schedule = Get-TestFileSchedule -Files @($stageSpec.files) -Stage $stageSpec.stage -RootPath $stageSpec.root -Timing $schedulingTiming `
-        -InProcessTestFiles $InProcessTestFiles -SerialTestFiles $SerialTestFiles
+        -SerialTestFiles $SerialTestFiles
     $orderedFiles = @($schedule.files)
     $schedulingStages.Add([pscustomobject][ordered]@{
         stage = $stageSpec.stage
@@ -168,8 +150,7 @@ foreach ($stageSpec in @(
         $pending.Enqueue([pscustomobject]@{
             stage = $stageSpec.stage
             file = $file
-            serial = ($SerialTestFiles -contains $file.Name) -or ($InProcessTestFiles -contains $file.Name)
-            in_process = $InProcessTestFiles -contains $file.Name
+            serial = $SerialTestFiles -contains $file.Name
             receipt_path = Join-Path $runRoot ($safeName + '.receipt.json')
             stdout_path = Join-Path $runRoot ($safeName + '.out.log')
             stderr_path = Join-Path $runRoot ($safeName + '.err.log')
@@ -186,13 +167,6 @@ while ($pending.Count -gt 0 -or $active.Count -gt 0) {
         if ($active.Count -gt 0 -and [string]$pending.Peek().stage -ne [string]$active[0].item.stage) { break }
         if ($active.Count -gt 0 -and ([bool]$pending.Peek().serial -or @($active | Where-Object { $_.item.serial }).Count -gt 0)) { break }
         $item = $pending.Dequeue()
-        if ($item.in_process) {
-            $receipt = Invoke-InProcessTestFile $item
-            [System.IO.File]::WriteAllText($item.receipt_path, ($receipt | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding($false)))
-            $receipts.Add($receipt) | Out-Null
-            Write-Host ('test_file stage={0} in_process=true status={1} elapsed_ms={2} tests={3} path={4}' -f $receipt.stage, $receipt.status, $receipt.elapsed_ms, $receipt.total_count, $item.file.Name)
-            continue
-        }
         $process = Start-Process -FilePath 'pwsh' -ArgumentList (New-WorkerArguments $item) -PassThru -WindowStyle Hidden -RedirectStandardOutput $item.stdout_path -RedirectStandardError $item.stderr_path
         $active.Add([pscustomobject]@{ item = $item; process = $process; timer = [Diagnostics.Stopwatch]::StartNew() }) | Out-Null
     }

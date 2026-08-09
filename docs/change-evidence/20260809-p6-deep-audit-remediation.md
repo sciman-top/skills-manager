@@ -554,6 +554,33 @@ it did not run the remaining 15 contracts. It is not acceptance evidence. A
 fresh exact-source full receipt is still required after the Slice K candidate
 is committed.
 
+## Slice L: remove the unbounded in-process test exception
+
+The next replacement full exposed one remaining exception in the simplified
+test runner. `tests/run.ps1` sent `SelectionCancellation.Tests.ps1` through a
+special in-process path while every other file used an isolated worker with a
+180-second timeout and terminal receipt. The run stayed immediately after
+`test_scheduling` for about ten minutes with unchanged CPU, zero shard files
+and no stderr. A separate focused invocation completed the same three tests in
+`1.34s`, proving that the test logic was healthy and the runner exception was
+the failed seam. Only the orphaned full PID was stopped; the watch runtime was
+left running and the source remained clean at candidate `7e765d8f`.
+
+The behavioral regression uses a deliberately hanging file with the canonical
+`SelectionCancellation.Tests.ps1` name and a 10-second file timeout. RED's
+20-second observer expired without a terminal process (`33 passed / 1 failed`);
+the regression now allows a 30-second outer observation window so loaded full
+gate runs still test the 10-second worker timeout rather than scheduler delay. The special
+parameter, function and branch were then deleted, so every test file now uses
+the same existing bounded worker path. GREEN is `QualityGateScripts=34/34`;
+the real selection-cancellation file also passed through that worker at `3/3`
+with a terminal schema-v1 shard receipt. No worker, schema or timeout mechanism
+was added.
+
+This slice creates a new candidate and invalidates all earlier full receipts.
+Repository full-gate status remains unaccepted until one schema-v2 exact-source
+full receipt verifies against that committed candidate.
+
 ## Rollback
 
 Repository rollback is limited to the files in this remediation slice. Host

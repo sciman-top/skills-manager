@@ -220,9 +220,6 @@ Describe "Quality gate scripts" {
         $runner | Should Match 'Start-Process'
         $runner | Should Match 'test-shards'
         $runner | Should Match 'SerialTestFiles'
-        $runner | Should Match 'InProcessTestFiles'
-        $runner | Should Match 'Invoke-InProcessTestFile'
-        $runner | Should Match 'SelectionCancellation\.Tests\.ps1'
         $runner | Should Not Match 'WatchRuntimeArming\.Tests\.ps1'
         $runner | Should Match '\$orderedFiles'
         $runner | Should Match '\.Dispose\(\)'
@@ -238,6 +235,54 @@ Describe "Quality gate scripts" {
             $worker | Should Match 'TotalCount'
             $worker | Should Match 'FailedCount'
         }
+    }
+
+    It "times out the selection cancellation test through the bounded worker path" {
+        $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
+        $runner = Join-Path $root 'tests\run.ps1'
+        $unitRoot = Join-Path $TestDrive 'bounded-selection-unit'
+        $e2eRoot = Join-Path $TestDrive 'bounded-selection-e2e'
+        $shardRoot = Join-Path $TestDrive 'bounded-selection-shards'
+        $stdoutPath = Join-Path $TestDrive 'bounded-selection.out.log'
+        $stderrPath = Join-Path $TestDrive 'bounded-selection.err.log'
+        New-Item -ItemType Directory -Path $unitRoot, $e2eRoot -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $unitRoot 'SelectionCancellation.Tests.ps1') -Encoding UTF8 -Value @'
+Describe 'hung selection cancellation fixture' {
+    It 'does not complete' { Start-Sleep -Seconds 60 }
+}
+'@
+        Set-Content -LiteralPath (Join-Path $e2eRoot 'Passing.Tests.ps1') -Encoding UTF8 -Value @'
+Describe 'fixture e2e' {
+    It 'passes' { $true | Should Be $true }
+}
+'@
+
+        $process = Start-Process -FilePath 'pwsh' -ArgumentList @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $runner),
+            '-UnitTestPath', ('"{0}"' -f $unitRoot), '-E2ETestPath', ('"{0}"' -f $e2eRoot),
+            '-TimingReportPath', ('"{0}"' -f (Join-Path $TestDrive 'bounded-selection-timing.json')),
+            '-ShardReportRoot', ('"{0}"' -f $shardRoot), '-SchedulingTimingPath', ('"{0}"' -f (Join-Path $TestDrive 'missing-timing.json')),
+            '-MaxParallel', '1', '-TestFileTimeoutSeconds', '10'
+        ) -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        $completed = $false
+        $exitCode = $null
+        try {
+            $completed = $process.WaitForExit(30000)
+            if ($completed) { $exitCode = $process.ExitCode }
+        }
+        finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+            $process.Dispose()
+        }
+
+        $output = @(
+            Get-Content -LiteralPath $stdoutPath -ErrorAction SilentlyContinue
+            Get-Content -LiteralPath $stderrPath -ErrorAction SilentlyContinue
+        ) -join "`n"
+        $completed | Should Be $true
+        $exitCode | Should Not Be 0
+        $output | Should Match 'status=timed_out'
+        $output | Should Match 'path=SelectionCancellation\.Tests\.ps1'
     }
 
     It "serializes one repository without blocking a different repository" {
