@@ -600,6 +600,23 @@ Describe 'fixture unit' {
         $raw | Should Not Match 'agent-workflow-advisory|verify-agent-workflow-advisory\.ps1'
     }
 
+    It "keeps the retired Agent Workflow control plane out of active runtime surfaces" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        foreach ($relativePath in @(
+                'src\Domain\AgentWorkflow.ps1',
+                'src\Application\ModelAndAgentPolicy.ps1',
+                'src\Commands\AgentWorkflow.ps1',
+                'scripts\verify-agent-workflow-advisory.ps1'
+            )) {
+            Test-Path -LiteralPath (Join-Path $root $relativePath) | Should Be $false
+        }
+
+        foreach ($relativePath in @('build.ps1', 'src\Main.ps1', 'src\Version.ps1', 'skills.ps1')) {
+            $raw = Get-Content -LiteralPath (Join-Path $root $relativePath) -Raw
+            $raw | Should Not Match 'agent-plan|agent-validate|AgentWorkflow|ModelAndAgentPolicy'
+        }
+    }
+
     It "Documents the standalone skill integrity verifier in CLI help" {
         $root = Join-Path $PSScriptRoot "..\.."
         $helpSourcePath = Join-Path $root "src\Commands\Utils.ps1"
