@@ -106,6 +106,8 @@ Describe 'P6 host-native skill lifecycle closeout' {
             $domainNames | Should Not Contain $name
             $dependencyNames | Should Not Contain $name
             $goldenCandidateNames | Should Not Contain $name
+            $retiredSkillPath = Join-Path $repoRoot (Join-Path 'agent' (Join-Path $name 'SKILL.md'))
+            Test-Path -LiteralPath $retiredSkillPath -PathType Leaf | Should Be $false
         }
         foreach ($name in $retained) {
             $mappingNames | Should Contain $name
