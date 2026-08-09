@@ -20,8 +20,6 @@
 | PowerShell 7 migration | `tasks/skills-manager-vnext-powershell7-migration.tasks.json` |
 | Native-first routing correction | `tasks/skills-manager-vnext-capability-routing-correction.tasks.json` |
 | Capability discovery redesign | `tasks/skills-manager-vnext-capability-discovery-redesign.tasks.json` |
-| Profile reconciliation | `tasks/skills-manager-vnext-profile-reconciliation.tasks.json` |
-| Profile optimization canary | `tasks/skills-manager-vnext-profile-optimization.tasks.json` |
 
 ## Historical records
 
@@ -29,6 +27,8 @@
 | --- | --- |
 | Retired Agent workflow advisory | `tasks/skills-manager-vnext-agent-workflow-advisory.tasks.json` |
 | Retired typed-core shadow pilot | `tasks/skills-manager-vnext-typed-core-pilot.tasks.json` |
+| Retired profile reconciliation advisor | `tasks/skills-manager-vnext-profile-reconciliation.tasks.json` |
+| Retired profile optimization canary | `tasks/skills-manager-vnext-profile-optimization.tasks.json` |
 
 ## Execution order
 

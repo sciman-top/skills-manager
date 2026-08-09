@@ -38,8 +38,8 @@
 | [历史 Agent workflow advisory runtime](../superpowers/specs/2026-08-05-agent-workflow-advisory-runtime.md) | 保存曾完成的 TaskGraph/model-policy advisory 设计与 repo-side 结果；当前 source/CLI/tests/verifier/gate 已因无外部消费者且与宿主原生能力重叠而退役 | 当前运行入口、当前质量门禁或宿主编排合同 |
 | [Native-first routing correction spec](../superpowers/specs/2026-08-04-native-first-capability-discovery-correction.md) | P5-local capability routing 回归纠正、宿主语义所有权和真实场景验收 | P6、新 router service 或普遍 live acceptance |
 | [Hierarchical discovery redesign spec](../superpowers/specs/2026-08-04-hierarchical-capability-discovery-redesign.md) | P5-local cold discovery、domain catalog、32+8 host 验收、inventory signal、成本拆分与 runtime truth hardening | profile 热切换、第二模型 router、P6 或普遍 live acceptance |
-| [Profile reconciliation advisor spec](../superpowers/specs/2026-08-04-skill-profile-reconciliation-maintenance-design.md) | skill inventory 变化后的 profile drift 诊断、宿主 proposal 与确定性 plan-only 校验 | 自动语义 router、静默 apply/profile 切换或 P6 |
-| [Profile optimization canary spec](../superpowers/specs/2026-08-04-bounded-profile-optimization-canary.md) | 宿主 proposal 后的非活动 profile canary、fresh replay、receipt 和失败回滚 | provider 路由、永久 active profile 切换、P6 或 live acceptance |
+| [历史 Profile reconciliation advisor spec](../superpowers/specs/2026-08-04-skill-profile-reconciliation-maintenance-design.md) | 保存 profile drift/proposal/plan-only 的 P5 点时设计与结果；当前 proposal planner 已退役 | 当前 runtime、自动语义 router、静默 apply/profile 切换或 P6 |
+| [历史 Profile optimization canary spec](../superpowers/specs/2026-08-04-bounded-profile-optimization-canary.md) | 保存非活动 profile canary、fresh replay、receipt 和回滚的点时证据；当前 apply/accept/replay 已退役 | 当前 runtime、provider 路由、永久 active profile 切换或 live acceptance |
 | [当前实施计划](../../tasks/plan.md) | 当前 Phase 执行顺序、检查点、失败分流 | 产品背景全文 |
 | [Phase 5 manifest](../../tasks/skills-manager-vnext-phase5.tasks.json) | P5 历史任务、依赖、write set、验证、回滚和完成条件 | 当前 Phase 动态状态 |
 | [Phase 6 manifest](../../tasks/skills-manager-vnext-phase6.tasks.json) | 当前 host-native lifecycle reset 的任务、truth ladder、full gate 与 `latest_evidence` 唯一动态真值 | 在产品文档复制易漂移状态 |
@@ -49,15 +49,15 @@
 | [M1 pilot registry](../../tasks/skills-manager-vnext-lean-delivery-pilot.json) | 10 个真实任务的 observe-only 样本、计数、coordination/tool observations 和 truth boundary | agent runtime、自动指标门禁或 P6 admission |
 | [Routing correction manifest](../../tasks/skills-manager-vnext-capability-routing-correction.tasks.json) | P5-local 缺陷纠正的任务、write set、验证与回滚真值 | 历史 Phase 状态改写或 P6 admission |
 | [Discovery redesign manifest](../../tasks/skills-manager-vnext-capability-discovery-redesign.tasks.json) | hierarchical cold discovery、host acceptance 和收口任务真值 | P6 admission、host mutation 或业务验收 |
-| [Profile reconciliation manifest](../../tasks/skills-manager-vnext-profile-reconciliation.tasks.json) | P5-local profile advisor 的实现、测试、规划和收口真值 | 自动 apply、P6 admission 或 host mutation |
-| [Profile optimization manifest](../../tasks/skills-manager-vnext-profile-optimization.tasks.json) | P5-local bounded canary、host replay 和收口真值 | semantic router、skill 安装删除或 P6 admission |
+| [历史 Profile reconciliation manifest](../../tasks/skills-manager-vnext-profile-reconciliation.tasks.json) | 保存 P5-local profile advisor 的实现、测试、规划和收口点时真值 | 当前 runtime、自动 apply、P6 admission 或 host mutation |
+| [历史 Profile optimization manifest](../../tasks/skills-manager-vnext-profile-optimization.tasks.json) | 保存 P5-local bounded canary、host replay 和收口点时真值 | 当前 runtime、semantic router、skill 安装删除或 P6 admission |
 | [任务索引](../../tasks/todo.md) | 路由到各 track 的结构化真源 | 任务 ID、勾选、计数或 mutable status 副本 |
 | [planning verifier](../../scripts/verify-vnext-planning.ps1) | 机械校验上述资产的一致性 | 判断产品价值或宿主 live acceptance |
 | [host-native lifecycle planning verifier](../../scripts/verify-host-native-skill-lifecycle-planning.ps1) | 历史 P6/migration 显式诊断；检查完整投影和 fallback 边界 | 默认 quick/full closeout gate，或执行 host projection/invocation |
 | [maintenance verifier](../../scripts/verify-lean-ai-delivery-planning.ps1) | 在 P5 contract 通过后校验 maintenance design 一致性和边界 | 运行 pilot、修改 runtime 或评估业务收益 |
 | [PowerShell runtime policy verifier](../../scripts/verify-powershell-runtime-policy.ps1) | 默认只检查 active PS7 execution surface；`-HistoricalMigration` 显式检查已完成 migration/history/P6/typed-core 边界 | 证明所有外部消费者已迁移或 PowerShell 长期最优 |
 | [capability routing verifier](../../scripts/verify-capability-routing.ps1) | 用 labelled 自然语言 corpus 验证 candidate recall、host-labelled policy、否定约束和零脚本语义自动选择 | 证明宿主模型普遍正确或业务 live acceptance |
-| [profile reconciliation planner](../../scripts/plan-skill-profile-reconciliation.ps1) | 诊断 unrouted/stale/budget/overlap 并校验 host-owned proposal，输出 zero-write change-set | 自动决定 profile 语义归属或写入配置 |
+| [profile migration compatibility planner](../../scripts/plan-skill-profile-reconciliation.ps1) | 无 proposal 时生成只读 versioned migration plan；任何 legacy proposal 输入固定返回 `deprecated` 和零写入 | 诊断/维护 profile membership、校验语义 proposal 或写入配置 |
 | [profile migration manager](../../scripts/manage-skill-profile-reconciliation.ps1) | 生成只读迁移计划，并以显式 token 执行 versioned migration 或 receipt rollback；旧 canary `Apply`/`Accept` 模式固定返回 `deprecated` 且零写入 | 恢复 profile 可达性、调用宿主模型、永久 profile 热切换或业务验收 |
 | [历史 evidence archive](../archive/change-evidence/README.md) | 保存已退出活跃账本的旧 runtime receipts | 当前 closeout 证明或运行态输出目录 |
 
@@ -114,8 +114,7 @@ CURRENT_PHASE_TRUTH_SOURCE: tasks/skills-manager-vnext-phase6.tasks.json
 - P5-local routing correction 已完成 4/4 `repo_verified`：以真实用户反馈和自然语言反例退役 lexical task model/ranking；历史 P5 状态保留，当前实现只把宿主选中的 candidate 送入确定性 policy。宿主回放仍为 `host_evaluation_partial`，业务验收未执行。
 - P5-local hierarchical discovery redesign 已完成 4/4 `repo_verified`：旧 default-profile cold baseline 仅 4/8 主动触发；重构后 32-case selection 为 32/32、8-case cold-load chain 为 8/8。follow-up 增加 canonical inventory delta signal 与 cached/uncached/tool-round 指标；两个真实 A/B 已否决负收益的 combined command 方案。结果仍仅为 `host_evaluation_partial`，没有证明普遍 token 成本改善或业务验收。
 - 历史 P5-local 的 2026-08-07 global skill dispatch correction 曾修复一个确定性入口缺口：无 domain/profile hint 时 router 暴露完整 portable catalog，且不要求 profile switch；该结果及其 prompt contract 证据保留供迁移审计，当前普通请求的主链以 P6 host-native projection 为准。
-- P5-local profile reconciliation advisor 已完成 4/4 `repo_verified`：可报告 stale/unrouted/budget/overlap 并校验 host-owned proposal，输出 exact zero-write change-set；不自动更新 profile、不切换 active profile，reviewed apply 和真实维护收益尚未验收。
-- P5-local profile optimization canary 已完成 3/3 `repo_verified`：proposal 后只允许非活动 profile 的有界事务，并以 fresh-task replay/receipt/rollback 收口；`doc-coauthoring -> content` 的 6/6 代表回放仅为 `host_evaluation_partial_pass`，不等于普遍语义正确或业务验收。
+- P5-local profile reconciliation advisor 的 4/4 `repo_verified` 与 profile optimization canary 的 3/3、6/6 partial replay 只保留为历史结果。当前 proposal planner、canary apply/accept/replay 已退役；只读 compatibility view、versioned migration 和历史 receipt rollback 是唯一保留 seam，不参与 native reachability 或语义选择。
 - `maintenance_design` 的 M0/M0.2/M0.3 规划包已完成 11/11 `repo_verified`；独立 `typed_core_shadow_poc` 的 TC0/TC1 3/3 parity 与本机发布观测只作为历史结果保留，当前实现/verifier/test/SDK pin 已因无消费者和净收益证据退役。独立 `powershell7_runtime_migration` 已把当前 shell 支持面收敛为 `ps7_only`，PowerShell 是唯一 runtime truth。M1 因无 active owner/collection task 已转为 `deferred (0/10)`，只有显式建立两者后才恢复；coordinator/lease/model-router runtime、custom-agent/host mutation、pilot 执行/完成、业务效果和 live acceptance 均未发生；Radar automation 已删除且不参与模型编排，旧 Luna/Terra/Radar receipt 仅保留历史真值。
 - 通用 Agent Workflow advisory 已完成 retirement：宿主原生 Plan/Goal/subagent/worktree 能力承接任务编排，本仓不再生成通用 TaskGraph、模型档位或并发 admission；历史 spec/manifest/evidence 保留但不进入 build、CLI、默认 gate 或当前测试面。
 - `governed-ai-coding-runtime` 只作为静态规则模型参考；不得恢复其已退役的目标仓 registry、同步器或中央 verifier。

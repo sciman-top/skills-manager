@@ -1483,227 +1483,29 @@ function Copy-SkillProjectionConfig($projectionCfg) {
     return (($projectionCfg | ConvertTo-Json -Depth 50) | ConvertFrom-Json)
 }
 
-function Add-SkillProfileReconciliationFinding($findings, [string]$code, [string]$message, [bool]$blocking, [string]$skill = "", [string]$profile = "") {
-    $findings.Add([pscustomobject]([ordered]@{
-                code = $code
-                message = $message
-                blocking = $blocking
-                skill = $skill
-                profile = $profile
-            })) | Out-Null
-}
-
 function New-SkillProfileReconciliationPlan($projectionCfg, [string]$configSha256, $proposal = $null, [int]$maxChanges = 50) {
-    Need ($null -ne $projectionCfg) "skill_projection 配置为空"
-    Need (Test-SkillProjectionSha256 $configSha256) "configSha256 必须是 SHA-256"
-    Need ($maxChanges -gt 0 -and $maxChanges -le 200) "maxChanges 必须位于 1..200"
-
-    $findings = New-Object System.Collections.Generic.List[object]
-    $actions = New-Object System.Collections.Generic.List[object]
-    $inventoryCfg = Copy-SkillProjectionConfig $projectionCfg
-    foreach ($propertyName in @("profiles", "active_profile", "resident_names", "aliases")) {
-        if ($inventoryCfg.PSObject.Properties.Match($propertyName).Count -gt 0) {
-            $inventoryCfg.PSObject.Properties.Remove($propertyName)
-        }
-    }
-    $inventory = New-SkillProjectionPlan $inventoryCfg
-    $canonicalByName = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($entry in @($inventory.canonical)) { $canonicalByName[[string]$entry.name] = $entry }
-
-    $profileByName = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    if ($projectionCfg.PSObject.Properties.Match("profiles").Count -eq 0 -or $null -eq $projectionCfg.profiles) {
-        Add-SkillProfileReconciliationFinding $findings "profiles_missing" "skill_projection.profiles is required." $true
-    }
-    else {
-        foreach ($property in @($projectionCfg.profiles.PSObject.Properties)) { $profileByName[[string]$property.Name] = $property }
-    }
-
-    $residentNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($name in @($projectionCfg.resident_names)) { if (-not [string]::IsNullOrWhiteSpace([string]$name)) { $residentNames.Add([string]$name) | Out-Null } }
-    $aliasNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($alias in @($projectionCfg.aliases)) { if ($null -ne $alias -and -not [string]::IsNullOrWhiteSpace([string]$alias.name)) { $aliasNames.Add([string]$alias.name) | Out-Null } }
-
-    $membership = @{}
-    foreach ($property in @($projectionCfg.profiles.PSObject.Properties)) {
-        $profileName = [string]$property.Name
-        foreach ($rawName in @($property.Value.enabled_names)) {
-            $skillName = ([string]$rawName).Trim()
-            if (-not $canonicalByName.ContainsKey($skillName)) {
-                Add-SkillProfileReconciliationFinding $findings "stale_profile_reference" ("Profile '{0}' references missing skill '{1}'." -f $profileName, $skillName) $true $skillName $profileName
-                continue
-            }
-            $key = $skillName.ToLowerInvariant()
-            if (-not $membership.ContainsKey($key)) { $membership[$key] = New-Object System.Collections.Generic.List[string] }
-            $membership[$key].Add($profileName) | Out-Null
-        }
-    }
-    foreach ($name in @($residentNames)) {
-        if (-not $canonicalByName.ContainsKey($name)) {
-            Add-SkillProfileReconciliationFinding $findings "stale_resident_reference" ("resident_names references missing skill '{0}'." -f $name) $true $name
-        }
-    }
-
-    $overlaps = New-Object System.Collections.Generic.List[object]
-    foreach ($key in @($membership.Keys | Sort-Object)) {
-        $profiles = @($membership[$key].ToArray() | Sort-Object -Unique)
-        if ($profiles.Count -ge 3) {
-            $entry = $canonicalByName[$key]
-            $overlaps.Add([pscustomobject]@{ skill = [string]$entry.name; profiles = $profiles; profile_count = $profiles.Count }) | Out-Null
-        }
-    }
-
-    $currentPlan = $null
-    if (@($findings | Where-Object blocking).Count -eq 0) {
-        try { $currentPlan = New-SkillProjectionPlan $projectionCfg }
-        catch { Add-SkillProfileReconciliationFinding $findings "current_projection_invalid" $_.Exception.Message $true }
-    }
-
-    $proposedPlan = $null
-    if ($null -ne $proposal) {
-        if ($proposal.PSObject.Properties.Match("schema_version").Count -eq 0 -or [int]$proposal.schema_version -ne 1) {
-            Add-SkillProfileReconciliationFinding $findings "proposal_schema_invalid" "Proposal must use schema_version=1." $true
-        }
-        if ([string]$proposal.decision_owner -ne "host_ai") {
-            Add-SkillProfileReconciliationFinding $findings "proposal_owner_invalid" "Proposal decision_owner must be host_ai." $true
-        }
-        if (-not [string]::Equals([string]$proposal.base_config_sha256, $configSha256, [System.StringComparison]::OrdinalIgnoreCase)) {
-            Add-SkillProfileReconciliationFinding $findings "stale_config_hash" "Proposal base_config_sha256 does not match the current skills.json." $true
-        }
-        $changes = @($proposal.changes)
-        if ($proposal.PSObject.Properties.Match("changes").Count -eq 0 -or $changes.Count -eq 0) {
-            Add-SkillProfileReconciliationFinding $findings "proposal_changes_missing" "Proposal changes must be a non-empty array." $true
-        }
-        elseif ($changes.Count -gt $maxChanges) {
-            Add-SkillProfileReconciliationFinding $findings "proposal_change_limit_exceeded" ("Proposal has {0} changes; limit is {1}." -f $changes.Count, $maxChanges) $true
-        }
-
-        $proposedCfg = Copy-SkillProjectionConfig $projectionCfg
-        $seenSkills = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-        foreach ($change in $changes) {
-            if ($null -eq $change) { Add-SkillProfileReconciliationFinding $findings "proposal_change_invalid" "Proposal changes cannot contain null." $true; continue }
-            $skillName = ([string]$change.skill).Trim()
-            if ([string]::IsNullOrWhiteSpace($skillName) -or -not $canonicalByName.ContainsKey($skillName)) {
-                Add-SkillProfileReconciliationFinding $findings "unknown_skill" ("Unknown skill '{0}'." -f $skillName) $true $skillName
-                continue
-            }
-            $canonicalEntry = $canonicalByName[$skillName]
-            $canonicalName = [string]$canonicalEntry.name
-            if (-not $seenSkills.Add($canonicalName)) {
-                Add-SkillProfileReconciliationFinding $findings "duplicate_skill_change" ("Skill '{0}' appears more than once in proposal changes." -f $canonicalName) $true $canonicalName
-                continue
-            }
-            if ([bool]$canonicalEntry.is_system -or $residentNames.Contains($canonicalName) -or $aliasNames.Contains($canonicalName)) {
-                Add-SkillProfileReconciliationFinding $findings "protected_skill_mutation" ("System, resident, and alias skills cannot be reconciled through profiles: '{0}'." -f $canonicalName) $true $canonicalName
-                continue
-            }
-            if ([string]::IsNullOrWhiteSpace([string]$change.reason)) {
-                Add-SkillProfileReconciliationFinding $findings "reason_missing" ("Skill '{0}' requires a non-empty host rationale." -f $canonicalName) $true $canonicalName
-                continue
-            }
-            $addNames = @($change.add_profiles | ForEach-Object { ([string]$_).Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
-            $removeNames = @($change.remove_profiles | ForEach-Object { ([string]$_).Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
-            if ($addNames.Count -eq 0 -and $removeNames.Count -eq 0) {
-                Add-SkillProfileReconciliationFinding $findings "empty_profile_change" ("Skill '{0}' must add or remove at least one profile." -f $canonicalName) $true $canonicalName
-                continue
-            }
-            foreach ($profileName in @($addNames | Where-Object { $_ -in $removeNames })) {
-                Add-SkillProfileReconciliationFinding $findings "profile_operation_conflict" ("Profile '{0}' is both added and removed for '{1}'." -f $profileName, $canonicalName) $true $canonicalName $profileName
-            }
-            foreach ($operation in @(
-                    @($addNames | ForEach-Object { [pscustomobject]@{ name = $_; operation = "add" } }) +
-                    @($removeNames | ForEach-Object { [pscustomobject]@{ name = $_; operation = "remove" } })
-                )) {
-                $requestedProfile = [string]$operation.name
-                if (-not $profileByName.ContainsKey($requestedProfile)) {
-                    Add-SkillProfileReconciliationFinding $findings "unknown_profile" ("Unknown profile '{0}'." -f $requestedProfile) $true $canonicalName $requestedProfile
-                    continue
-                }
-                $profileName = [string]$profileByName[$requestedProfile].Name
-                $proposedProfile = $proposedCfg.profiles.PSObject.Properties[$profileName].Value
-                $before = @($proposedProfile.enabled_names | ForEach-Object { [string]$_ })
-                $contains = @($before | Where-Object { [string]::Equals($_, $canonicalName, [System.StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
-                if ($operation.operation -eq "add" -and $contains) {
-                    Add-SkillProfileReconciliationFinding $findings "add_existing_membership" ("Skill '{0}' already belongs to profile '{1}'." -f $canonicalName, $profileName) $true $canonicalName $profileName
-                    continue
-                }
-                if ($operation.operation -eq "remove" -and -not $contains) {
-                    Add-SkillProfileReconciliationFinding $findings "remove_missing_membership" ("Skill '{0}' does not belong to profile '{1}'." -f $canonicalName, $profileName) $true $canonicalName $profileName
-                    continue
-                }
-                $after = if ($operation.operation -eq "add") { @($before + $canonicalName | Sort-Object -Unique) } else { @($before | Where-Object { -not [string]::Equals($_, $canonicalName, [System.StringComparison]::OrdinalIgnoreCase) }) }
-                $proposedProfile.enabled_names = @($after)
-                $actions.Add([pscustomobject]([ordered]@{
-                            operation = [string]$operation.operation
-                            skill = $canonicalName
-                            profile = $profileName
-                            path = ("skill_projection.profiles.{0}.enabled_names" -f $profileName)
-                            before = @($before)
-                            after = @($after)
-                            reason = [string]$change.reason
-                        })) | Out-Null
-            }
-        }
-
-        if (@($findings | Where-Object blocking).Count -eq 0) {
-            try {
-                Need ([string]::Equals([string]$proposedCfg.active_profile, [string]$projectionCfg.active_profile, [System.StringComparison]::Ordinal)) "active_profile changed during reconciliation"
-                $proposedPlan = New-SkillProjectionPlan $proposedCfg
-                if (-not [bool]$proposedPlan.all_profiles_budget_pass) {
-                    $oversized = @($proposedPlan.profile_budgets | Where-Object { -not [bool]$_.budget_pass } | ForEach-Object { "{0}={1}/{2}" -f $_.profile, $_.estimated_metadata_chars, $_.budget_limit_chars })
-                    Add-SkillProfileReconciliationFinding $findings "proposed_budget_exceeded" ("Proposed profile metadata exceeds budget: {0}." -f ($oversized -join ", ")) $true
-                }
-                if ([bool]$proposedPlan.routing_report.blocking) {
-                    Add-SkillProfileReconciliationFinding $findings "proposed_routing_blocked" "Proposed projection violates an enforce-mode routing policy." $true
-                }
-            }
-            catch { Add-SkillProfileReconciliationFinding $findings "proposed_projection_invalid" $_.Exception.Message $true }
-        }
-    }
-
-    if ($null -eq $proposal -and $null -ne $currentPlan) {
-        if (-not [bool]$currentPlan.all_profiles_budget_pass) { Add-SkillProfileReconciliationFinding $findings "current_budget_exceeded" "One or more current profiles exceed the metadata budget." $true }
-        if ([bool]$currentPlan.routing_report.blocking) { Add-SkillProfileReconciliationFinding $findings "current_routing_blocked" "Current projection violates an enforce-mode routing policy." $true }
-    }
-
-    $currentSummary = if ($null -eq $currentPlan) { $null } else { [pscustomobject]([ordered]@{
-                active_profile = [string]$currentPlan.active_profile
-                unrouted_names = @($currentPlan.unrouted_names)
-                profile_budgets = @($currentPlan.profile_budgets)
-                all_profiles_budget_pass = [bool]$currentPlan.all_profiles_budget_pass
-            }) }
-    $proposedSummary = if ($null -eq $proposedPlan) { $null } else { [pscustomobject]([ordered]@{
-                active_profile = [string]$proposedPlan.active_profile
-                unrouted_names = @($proposedPlan.unrouted_names)
-                profile_budgets = @($proposedPlan.profile_budgets)
-                all_profiles_budget_pass = [bool]$proposedPlan.all_profiles_budget_pass
-            }) }
-    $hostHandoff = [pscustomobject]([ordered]@{
-            required = ($null -eq $proposal)
-            semantic_owner = "host_ai"
-            next_action = if ($null -eq $proposal) { "inspect_full_skill_descriptions_and_create_minimum_proposal" } elseif (@($findings | Where-Object blocking).Count -eq 0) { "proposal_validated" } else { "revise_proposal_from_findings" }
-            base_config_sha256 = $configSha256.ToLowerInvariant()
-            profile_names = @($profileByName.Keys | Sort-Object)
-            candidate_names = if ($null -eq $currentSummary) { @() } else { @($currentSummary.unrouted_names) }
-            constraints = @("no_lexical_router", "non_active_profile_canary_only", "fresh_task_replay_required", "receipt_and_rollback_required")
+    return [pscustomobject][ordered]@{
+        schema_version = 1
+        command = "plan-skill-profile-reconciliation"
+        decision_owner = "host_ai"
+        semantic_routing_performed = $false
+        status = "deprecated"
+        pass = $false
+        apply_allowed = $false
+        writes_performed = $false
+        current = $null
+        actions = @()
+        proposed = $null
+        overlaps = @()
+        finding_count = 1
+        findings = @([pscustomobject][ordered]@{
+            code = "profile_reconciliation_retired"
+            message = "Profile reconciliation proposals are retired; use the read-only compatibility view and explicit versioned migration or receipt rollback."
+            blocking = $true
+            skill = ""
+            profile = ""
         })
-    return [pscustomobject]([ordered]@{
-            schema_version = 1
-            command = "plan-skill-profile-reconciliation"
-            decision_owner = "host_ai"
-            semantic_routing_performed = $false
-            pass = (@($findings | Where-Object blocking).Count -eq 0)
-            apply_allowed = $false
-            writes_performed = $false
-            config_sha256 = $configSha256.ToLowerInvariant()
-            proposal_supplied = ($null -ne $proposal)
-            current = $currentSummary
-            actions = @($actions.ToArray())
-            proposed = $proposedSummary
-            overlaps = @($overlaps.ToArray())
-            host_handoff = $hostHandoff
-            finding_count = $findings.Count
-            findings = @($findings.ToArray())
-        })
+    }
 }
 
 function Sync-ConfiguredSkillProjection($cfg, [string]$verifiedBuildSignature = "", $promotionContext = $null) {

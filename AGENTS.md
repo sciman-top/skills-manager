@@ -14,7 +14,7 @@
 - `skills.json.skill_projection` 托管技能根、选主、开关和 domain mapping；生成 catalog/report，不自动删除源技能。
 - `src/Commands/AuditTargets.ps1` 是目标审查与外层 AI prompt 真源；`reports/skill-audit/<run-id>/` 是运行产物，禁止手改。
 - `RuleEstate.ps1` 动态只读审查；mutation 只消费 reviewed change-set，逐目标 fail-fast/receipt，不承诺跨仓原子事务。
-- profile reconciliation 只消费宿主 proposal，对非活动 profile 做 canary/replay/rollback；不调用模型、决定语义或永久切 active profile。
+- profile reconciliation proposal/canary 已退役；当前只保留 `profile_compatibility` 只读视图、versioned migration 与历史 receipt 的 stale-safe rollback，不调用模型、不参与语义选择或永久切 active profile。
 - typed-core TC1 `shadow_only` PoC 已因零生产/仓外消费者、无可比返工净收益和持续 gate/SDK 成本退役；专用 spec/manifest/evidence 仅作历史记录。未来候选须由新的真实失败、消费者、对比收益和回滚证据重新准入，不得恢复长期双实现。
 - runtime 为 PS7-only；入口、CI、tests 和受管子进程只用 `pwsh`，禁止恢复 Windows PowerShell fallback。历史 5.1 记录不构成支持面。
 - task manifest 是动态执行真源，plan/todo 仅索引；`verify-vnext-planning.ps1` 校验结构，P6 专用 verifier 仅供历史/migration 显式诊断，均不证明宿主验收。
@@ -30,7 +30,7 @@
 - 同等风险仅由代表性真实任务证据触发治理递减；模型版本/单次成功/模型自评不构成删门禁证据。gate/audit 须覆盖独立失败模式且净收益>0，否则合并/降级/退役。
 - 每项风险用最低充分层级证明：迭代跑受影响 test/contract，共享写入/config/generated seam 才升 quick；closeout 在 focused/full 中选一条，相关源码变化才重跑。
 - 同一逻辑切片默认一份 evidence；不按 task 机械增加 evidence/schema/fixture/wrapper/空模块。
-- skill/description 变化：宿主消费 `host_handoff`，可 no-op；仅非活动 profile proposal 经 preview/replay/rollback 可 apply，不热切 active。
+- skill/description 变化：宿主消费 `host_handoff`，可 no-op；profile proposal/canary 不再 apply，仅 legacy config 的显式 versioned migration 或 receipt rollback 可写，且不热切 active。
 - 宿主 AI 先按可见 skill/tool 元数据选最小集合；`capability-router` 仅作显式跨目录 fallback/policy validation，不是启动前置或 implicit invocation。profile 只负责只读兼容、预算与预热。
 ### B.2 参考依据与外置源码
 - 参考真源：`references/reference-shelf.manifest.json`/`docs/EXTERNAL_REFERENCE_REPO_TIERS.md`；联动仅限 `D:\CODE\external\skills-manager-references` 的 manifest checkout，`D:\CODE\external` 根、共享/兄弟/runtime/import 不联动。

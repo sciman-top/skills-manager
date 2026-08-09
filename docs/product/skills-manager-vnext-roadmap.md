@@ -19,8 +19,8 @@
 | `typed_core_shadow_poc` | Operation contract typed core | `retired` | TC0/TC1 的 parity、分发观测和回滚记录保留为历史；因零生产/仓外消费者、无可比返工净收益和持续 SDK/full-gate 成本，当前实现/verifier/test 已删除 |
 | `powershell7_runtime_migration` | PowerShell runtime support contraction | `repo_verified` | 当前生产入口、生成链、CI、tests、subprocess、文档与发布合同收敛到 `ps7_only`；历史 5.1 事实保留；不启动 TC2/P6 |
 | `agent_workflow_advisory_runtime` | Runtime-independent Agent workflow advisory | `retired` | AWA-001..005 的历史 repo-side 完成记录保留；因无仓库外消费者且与宿主原生 Plan/Goal/subagent/worktree 重叠，source、CLI、tests、verifier 和默认 gate 已删除 |
-| `profile_reconciliation_advisor` | Skill profile drift reconciliation | `repo_verified` | P5-local plan-only advisor 4/4；宿主负责语义 proposal，确定性 planner 零写入校验；apply/live 未执行，不构成 P6 |
-| `profile_optimization_canary` | Bounded profile apply and replay | `repo_verified` | P5-local 3/3；非活动 profile canary、receipt/replay/rollback 已验证；6/6 host replay 为 partial，live acceptance not run |
+| `profile_reconciliation_advisor` | Skill profile drift reconciliation | `historical / retired` | P5-local 4/4 repo-side 结果保留；proposal planner 已从 active bundle 退役，当前只保留只读迁移兼容与 receipt rollback |
+| `profile_optimization_canary` | Bounded profile apply and replay | `historical / retired` | P5-local 3/3 与 6/6 partial replay 只作历史证据；apply/accept/replay runtime 已退役，旧 receipt rollback 保留 |
 | `capability_routing_correction` | Native-first discovery/policy | `repo_verified` | P5-local regression correction 4/4；不改写 P5 历史状态，不授权 P6；host replay partial，live acceptance not run |
 | `capability_discovery_redesign` | Hierarchical cold discovery | `repo_verified` | P5-local 4/4；selection 32/32、cold-load 8/8 均为 host_evaluation_partial；P6/live 不变 |
 

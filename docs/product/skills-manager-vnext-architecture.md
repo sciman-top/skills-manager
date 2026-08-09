@@ -203,25 +203,11 @@ CapabilityDiscoveryPolicyResult
 
 “无感切换”限定为同一任务内使用已可见、已可用且低副作用的能力；不等于静默修改 profile、安装 plugin/MCP、认证、写配置或执行外部写操作。profile 只在新任务边界作为预热候选包；当前任务发现不到合适能力时回退宿主原生推理，不阻塞主链。
 
-#### Profile reconciliation advisor
+#### Historical profile reconciliation compatibility
 
-skill inventory 变化后的 profile 维护继续遵守相同的 ownership 分层：宿主 AI 读取完整 skill description、profile 目的和用户上下文后提出语义归属；仓库只计算和校验可确定事实。
+P5 曾实现 `host_ai proposal -> deterministic plan -> bounded canary -> replay/rollback`，但 P6 已取消 profile reachability authority，真实收益也未证明足以维持第二套语义归属流程。当前 active bundle 不再计算 unrouted/overlap、校验 proposal 或生成 membership change-set；所有 legacy proposal 和 canary `Apply`/`Accept` 入口固定返回 `status=deprecated`、零写入。
 
-```text
-skill add/remove/metadata change
-  -> canonical inventory + current profile diagnostics
-  -> host_ai proposal (base_config_sha256 + add/remove + reason)
-  -> freshness / existence / protected-kind / no-op / budget / policy checks
-  -> exact dry-run change-set (apply_allowed=false, writes_performed=false)
-  -> bounded non-active-profile canary (explicit token)
-  -> atomic backup + receipt
-  -> fresh ephemeral host replay
-  -> accept partial evidence or automatic rollback
-```
-
-诊断直接复用 `New-SkillProjectionPlan` 的 canonical、reachability 和 budget 计算，不建立词法分类器、embedding、provider call、daemon 或第二个 profile schema。system skill、resident skill 和 alias 迁移项不允许由 proposal 放入或移出 profile；`active_profile` 在 current/proposed view 中必须完全一致。跨三个及以上 profile 的 membership 只作为 overlap observation，不能在缺少语义证据时自动删除。
-
-`Application/SkillProfileReconciliation.ps1` 是 proposal 后唯一的 profile mutation seam。它不负责语义归类，只实现最多 5 skill/10 action、默认 256 字符预算余量、非活动 profile 限制、hash freshness、single-writer、atomic backup/write、receipt、fresh replay acceptance 和 stale-safe rollback。执行型 benchmark 可临时投影被测 profile，但报告必须证明恢复原 profile；当前 Codex JSONL 无独立 skill-body invocation event，因此 replay 保持 `host_evaluation_partial`。
+当前只保留三项有限兼容职责：`Get-SkillProfileCompatibilityView` 以 `reachability_authority=none` 读取旧字段，versioned migration 将旧结构搬入 `profile_compatibility`，历史 migration/canary receipt 可在 hash 与 backup 一致时执行 stale-safe rollback。它们不调用 provider、不切换 active profile，也不参与 native skill 选择；历史 spec/manifest/evidence 保留点时真值。
 
 ### 3.9 `LeanDeliveryAdvisory`
 
@@ -801,21 +787,11 @@ M1 baseline 优先使用近期可比 native-only 历史任务或交替匹配任�
 
 在当前约束下这是 Pareto-optimal，而不是宣称永恒或全局绝对最优：相对于继续堆词法规则，它提高语义质量并降低维护成本；相对于额外 provider/embedding/router service，它不增加模型调用、daemon、数据库、凭据或故障点；相对于只保留一个超大 profile，它守住元数据预算和渐进披露；相对于全手工选择，它允许低风险已可用能力无感使用。若未来官方提供可查询、可约束且带稳定 trace 的跨 profile 原生 discovery，本兼容 router 应继续缩减或退役；若真实 replay 不能降低误调用、漏调用、纠正次数或 TTFV，也应仅保留 policy kernel。
 
-### `ADR-SMV-018 Host-proposed deterministic profile reconciliation`
+### `ADR-SMV-018/019 Historical profile reconciliation and canary (superseded by ADR-SMV-037)`
 
-决定：profile reconciliation 采用 `host_ai proposal -> deterministic validation -> plan-only change-set`。planner 只接受带当前 `skills.json` SHA-256 的 schema v1 proposal，拒绝 stale/unknown/protected/conflicting/no-op/unjustified/over-budget/policy-blocking 变更，并固定 `semantic_routing_performed=false`、`apply_allowed=false`、`writes_performed=false`。
+历史决定曾以宿主 proposal、确定性 plan-only 校验、非活动 profile canary、fresh replay 和 receipt rollback 维护 profile membership。P6 已证明 profile 不应承担 reachability 或语义选择，旧 advisor/canary 的真实维护净收益也未建立，因此 proposal planner、apply、accept 和 replay runtime 已退役。
 
-理由：新增/删除 skill 后确实需要维护 profile，但自动关键词归类会重新引入已退役的 lexical router；静默 apply 或 active profile 切换又会制造当前任务不可热加载、预算漂移和宿主副作用。宿主已有完整语义上下文，仓库已有稳定 canonical/budget/policy 计算，二者以窄 proposal 契约组合能获得自动建议与确定性安全，同时保留 reviewed apply 的授权边界。
-
-退役条件：若官方宿主未来原生管理跨 profile metadata 预算、变更计划和可审阅 apply，本 advisor 应缩减为兼容检查或删除；若 proposal replay 不能降低 profile stale/unrouted 的人工维护成本，也不继续增加自动化层。
-
-### `ADR-SMV-019 Bounded profile canary with fresh-task replay`
-
-决定：在 ADR-SMV-018 的 plan-only advisor 后增加 `host proposal -> deterministic bounded canary -> fresh ephemeral replay -> accept/rollback`。apply 仅允许非活动 profile、最多 5 skill/10 action、默认至少 256 字符 metadata headroom，必须显式 token、config hash、原子 backup/receipt；replay 对每个 added skill 同时要求 positive/negative case，并确认 original/restored profile。失败默认自动回滚，hash 漂移时停止而非覆盖。
-
-理由：宿主 AI 更擅长完整上下文语义，但不适合替代 freshness、预算、冲突、权限与原子状态；完全静默写 profile 会降低可重复性并可能改变当前任务可见能力。非活动 canary 将用户打断降到最低，又保留审计、恢复和新任务真实验证。官方支持 skill invalidation/force reload，但没有 skills-manager `active_profile` 或当前 turn hot switch，因此 promotion 边界必须是 fresh task。
-
-退役条件：官方若提供稳定的原生 profile/capability set、事务、trace 和 rollback，本 seam 应适配或删除；真实维护数据若不能降低 stale、纠正次数或 TTFV，则回退 plan-only advisor。
+当前仅为旧配置和已存在 receipt 保留 read-only compatibility view、versioned migration 与 stale-safe rollback；proposal 入口返回 `profile_reconciliation_retired`。若未来出现新的独立迁移失败，应在该兼容 seam 内最小修复，不能恢复自动语义归属、active-profile 热切换或 canary 控制面。
 
 ### `ADR-SMV-020 Hierarchical domain discovery before candidate adjudication`
 

@@ -210,10 +210,10 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 - `FR-SEL-010`：caller-provided session snapshot 只用于 compatible reuse/load/release planning；profile 只输出 `apply=false` preheat recommendation。
 - `FR-SEL-011`：Codex host snapshot 优先来自稳定只读 App Server RPC；包含 source/captured_at/freshness/availability/callable/access/auth evidence，陈旧事实 fail-closed，单来源失败可 truthful partial。
 - `FR-SEL-012`：任何辅助发现层不得降低 host-native/profile baseline；若真实 replay/canary 不能减少误调用、漏调用、用户纠正或 TTFV，则语义路由功能必须继续降级或删除，仅保留 policy kernel。
-- `FR-SEL-013`：skill 新增、删除或 metadata 变化后，profile reconciliation advisor 必须报告未路由技能、失效 profile/resident 引用、全部 profile metadata 预算和明显多 profile 重叠；诊断不得按名称关键词自动决定归属。
-- `FR-SEL-014`：profile 语义归属只能由宿主 AI 以 `decision_owner=host_ai` 的显式 proposal 提供；确定性 planner 校验 `skills.json` freshness、canonical skill/profile 存在性、protected skill、add/remove 冲突、no-op、理由、动作上限、预算和 routing policy，并只输出 `apply_allowed=false`、`writes_performed=false` 的精确 change-set。
-- `FR-SEL-015`：宿主 proposal 经 plan-only 校验后，可在常驻授权下进入非活动 profile 的 bounded canary；每次最多改变 5 个 skill、10 个 membership action，默认至少保留 256 字符 metadata headroom，禁止改变当前 active profile 或其 membership，并以 config hash、单 writer、原子 backup/write、receipt 和 drift-safe rollback 保护状态。
-- `FR-SEL-016`：canary promotion 必须使用 fresh ephemeral host task replay，覆盖每个新增 skill 的 positive/negative prompt 和每个 changed profile 的至少四类代表场景；profile 未恢复、模型输出/期望失败或覆盖不足时自动回滚。模型 replay 只能标记 `host_evaluation_partial`，不得作为唯一门禁或晋级为 live acceptance。
+- `FR-SEL-013`：历史 profile reconciliation 诊断与 proposal 结果只作 P5 证据；当前 active runtime 不再计算 unrouted/overlap 或维护 profile membership。
+- `FR-SEL-014`：所有 legacy profile proposal 入口必须返回 `status=deprecated`、`profile_reconciliation_retired`、`apply_allowed=false` 和零写入，不再生成 change-set。
+- `FR-SEL-015`：历史 canary `Apply`/`Accept`/replay runtime 保持退役；当前唯一允许的写路径是显式 versioned profile migration 与 hash/backup 一致时的 receipt rollback。
+- `FR-SEL-016`：历史 canary/replay receipt 只保留点时 `host_evaluation_partial` 与回滚证据，不参与当前 native selection、gate 或 live acceptance。
 - `FR-SEL-017`：cold discovery 默认使用 `global_catalog_discovery`：resident dispatcher 在无显式 hint 时返回完整 `name + description + path + domains` candidate index，宿主基于完整请求选择最多三个候选；候选截断时才允许用 domain `name + purpose` 做只读窄化。不得要求宿主或用户在看见 catalog 前猜不透明 profile 名。
 - `FR-SEL-018`：`DomainHint` 支持数组或逗号分隔输入并最多保留两个有效值；`ProfileHint` 仅作为向后兼容别名。candidate 必须带 domain provenance，domain hint 不改变 `active_profile`。
 - `FR-SEL-019`：代表性宿主验收必须分开记录 selection trigger 与 cold-load chain，并观测 router script、router/target `SKILL.md` 全文读取、deterministic policy、profile restore、duration 和 tokens；结果最高为 `host_evaluation_partial`，不得外推为普遍语义正确或业务效果。
@@ -320,7 +320,7 @@ fresh inventory、host evaluation、injected/executed invocation 与业务 accep
 - `NFR-PORT-001`：PowerShell 7 是唯一受支持的开发、CI、安装和运行 runtime；当前最低版本为 7.0，推荐 PowerShell 7.6 LTS。入口、子进程和 CI 必须只解析 `pwsh`，缺失时 fail-closed，不提供 Windows PowerShell 5.1 fallback/smoke。
 - `NFR-SAF-001`：只读命令不能调用 provider、写宿主配置或改变 active profile。
 - `NFR-SAF-002`：所有外部写入必须显式授权；高风险写入必须先有可执行回滚。
-- `NFR-SAF-003`：profile reconciliation 的兼容诊断和 proposal 校验必须 network-free、provider-free、zero-write，且不得修改 `active_profile`、安装/删除 skill 或写宿主配置；当前写路径仅限 versioned migration/rollback，旧 canary `Apply`/`Accept` 必须 fail-closed 为 `deprecated`。
+- `NFR-SAF-003`：profile compatibility view 与 retired proposal stub 必须 network-free、provider-free、zero-write，且不得修改 `active_profile`、安装/删除 skill 或写宿主配置；当前写路径仅限 versioned migration/rollback，旧 proposal/canary 入口必须 fail-closed 为 `deprecated`。
 - `NFR-SAF-004`：历史 profile canary receipt/backup 仅作为迁移与回滚兼容证据保留；不得恢复 canary apply/accept、直接调用 provider、修改 skill/plugin/MCP 安装、永久切换 active profile，或在 hash 漂移后覆盖用户修改。
 - `NFR-SAF-005`：hierarchical discovery 只读、network-free、provider-free、zero-write；domain/purpose 和宿主语义选择不能覆盖 containment、freshness、availability、side-effect、approval 或 activation。
 - `NFR-SAF-006`：reconciliation signal 属于 advisory handoff；写入失败只记录 warning，不得阻断已验证的 skill projection，也不得触发第二模型、active profile 热切换或无 token apply。
@@ -402,7 +402,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 | `MET-011` | 非产品 artifact 数量与维护成本 | observe-only；无消费者或无验证价值的候选进入删除评审 |
 | `MET-012` | `repo_verified` 向明确 `live_accepted` 的转化 | observe-only；未运行真实工作流时保持 not_run |
 | `MET-013` | capability routing precision/recall、误调用、漏调用与用户纠正 | labelled corpus + 只读 host replay 分层记录；未建立跨任务 baseline 前不设硬阈值 |
-| `MET-014` | profile reconciliation proposal 的 stale/no-op/budget/policy 拒绝 | compatibility observation；不建立自动 apply 指标门禁 |
+| `MET-014` | retired profile proposal 入口的 fail-closed 与零写入 | compatibility observation；不恢复 proposal/canary 指标或自动 apply 门禁 |
 | `MET-015` | 历史 profile canary receipt 的迁移/回滚兼容性 | compatibility observation；当前 canary apply/accept 已退役 |
 | `MET-016` | cold discovery 的 uncached input、cached ratio、tool rounds 与 latency | observe-only；按同 prompt A/B；任何减少回合但增加 uncached/延迟或降低完整读取可靠性的方案必须回退 |
 | `MET-017` | 多 Agent 写入冲突、stale candidate、shared-write reassignment 与集成返工 | observe-only；按真实任务记录，未建立 baseline 前不设并行度或冲突率 KPI |
