@@ -22,6 +22,7 @@
         "risk": "low",
         "ambiguity": "medium",
         "parallelizable": false,
+        "execution_mode": "root",
         "exact_write_set": [],
         "coordination_keys": [],
         "external_state": [],
@@ -45,6 +46,7 @@
         "risk": "medium",
         "ambiguity": "low",
         "parallelizable": true,
+        "execution_mode": "delegate",
         "exact_write_set": ["src/Domain/Feature.ps1"],
         "coordination_keys": ["write:domain-feature"],
         "external_state": [],
@@ -68,6 +70,7 @@
         "risk": "low",
         "ambiguity": "low",
         "parallelizable": true,
+        "execution_mode": "delegate",
         "exact_write_set": ["docs/feature.md"],
         "coordination_keys": ["write:feature-docs"],
         "external_state": [],
@@ -91,6 +94,7 @@
         "risk": "high",
         "ambiguity": "medium",
         "parallelizable": false,
+        "execution_mode": "root",
         "exact_write_set": [],
         "coordination_keys": ["write:git-index", "write:full-gate"],
         "external_state": [],
@@ -180,6 +184,14 @@
           "sampled_at": "2026-08-04T10:00:00Z"
         }
       ]
+    },
+    {
+      "task_id": "document",
+      "requested_tier": "sol_low",
+      "rationale": "Host AI judged the documentation task mechanical and bounded.",
+      "host_surface": "collaboration_spawn",
+      "host_available_pairs": ["gpt-5.6-sol|low", "gpt-5.6-sol|medium", "gpt-5.6-sol|xhigh"],
+      "local_outcomes": []
     }
   ]
 }

@@ -431,12 +431,17 @@ candidate 集成顺序固定为：验证 candidate 的 base 与 declared write s
 ```text
 TaskGraph
   task_id / goal / inputs[] / outputs[]
-  depends_on[] / risk / ambiguity / parallelizable
+  depends_on[] / risk / ambiguity / parallelizable / execution_mode=root|delegate
   exact_write_set[] / coordination_keys[] / external_state[]
   verification[] / result_owner / integration_order / stop_condition
   completion_receipt: task_id / base_revision / status=verified
     verification_receipt: schema_version=1 / verify-* receipt_id / verified_at
     verifier / evidence_sha256 / commands[]
+    execution_receipt for delegate: agent_type / model_family / reasoning_effort
+      started_at / ended_at / terminal_state=completed / token_usage
+
+DelegationBudget
+  max_parallel=2 / max_delegations=4 / max_xhigh_per_wave=1
 
 HostModelProposal
   task_id / requested_tier / rationale / user_override
@@ -750,9 +755,9 @@ PoC acceptance：同一 corpus 的结构化输出/exit/finding parity；至少�
 
 ### `ADR-SMV-029 Runtime-independent agent workflow advisory contracts`
 
-决定：在不改变 ADR-SMV-026 ownership 的前提下，把 M0.3 文档态合同实现为三个窄 seam：`Domain/AgentWorkflow.ps1` 以 TaskGraph v2 校验 delivery stage、admission scope、用户结果、主链 checkpoint、原生基线和按需 complexity/retirement evidence，同时只读兼容 TaskGraph v1 与历史 RadarSnapshot v2；`Application/ModelAndAgentPolicy.ps1` 生成 one-group barrier waves、已验证 admission 的只读投影、带 completion receipt 的并行 admission、三档 Sol host proposal validation 和 bounded escalation；`Commands/AgentWorkflow.ps1` 只读取仓内 JSON 并输出 `repo_advisory_only` envelope。FailurePacket 保持 v1；`agent-plan/agent-validate` 的 effect counters 固定为 0，实际 spawn/wait/steer/worktree/model application 继续由 Codex native runtime 执行。
+决定：在不改变 ADR-SMV-026 ownership 的前提下，把 M0.3 文档态合同实现为三个窄 seam：`Domain/AgentWorkflow.ps1` 以 TaskGraph v2 校验 delivery stage、admission scope、用户结果、主链 checkpoint、原生基线、按需 complexity/retirement evidence、`execution_mode` 与 canonical task ID，同时只读兼容 TaskGraph v1 与历史 RadarSnapshot v2；`Application/ModelAndAgentPolicy.ps1` 生成 one-group barrier waves，以 `max_parallel=2 / max_delegations=4 / max_xhigh_per_wave=1` 约束委派，并用 completion + execution receipt 绑定实际 custom agent/model/effort/terminal/token observation，同时保留三档 Sol host proposal validation 和 bounded escalation；`Commands/AgentWorkflow.ps1` 只读取仓内 JSON 并输出 `repo_advisory_only` envelope。FailurePacket 保持 v1；`agent-plan/agent-validate` 的 effect counters 固定为 0，实际 spawn/wait/steer/worktree/model application 继续由 Codex native runtime 执行。
 
-理由：仅文档无法机械阻止循环依赖、伪造 completed task、路径父子重叠、serial/high-risk 混 wave、stale upstream Radar、空 local outcome 屏蔽失败、无 FailurePacket 升档或 corrected retry 自动并发；引入 scheduler/provider runtime 又会复制宿主能力。小型 plain-object contract 能复用既有 OperationPlan finding/redaction helper、PS7 bundle 和 full gate，并为未来 typed-core seam 保持稳定 JSON 边界。
+理由：仅文档无法机械阻止循环依赖、伪造 completed task、路径父子重叠、serial/high-risk 混 wave、过量 delegate/双 xhigh、缺 proposal 的静默 medium fallback、proposal 与实际 spawn 错配、终态仍显示 processing、stale upstream Radar、空 local outcome 屏蔽失败、无 FailurePacket 升档或 corrected retry 自动并发；引入 scheduler/provider runtime 又会复制宿主能力。小型 plain-object contract 能复用既有 OperationPlan finding/redaction helper、PS7 bundle 和 full gate，并为未来 typed-core seam 保持稳定 JSON 边界。token usage 当前只观察，不实现硬熔断。
 
 退役/扩展：Codex 原生若公开等价的可验证 TaskGraph/admission/model proposal/failure trace，本 seam 缩减为 compatibility verifier 或删除；真实 M1 replay 无相对 native-only 净收益时同样删除。Radar live fetch、跨进程 coordinator、provider routing 或 host config mutation 不在本 ADR 内，只有 P6 admission 和用户新授权后才可评估。
 

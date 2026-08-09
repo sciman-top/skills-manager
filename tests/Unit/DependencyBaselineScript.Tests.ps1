@@ -33,6 +33,41 @@ Describe "Dependency baseline verifier script" {
         (($output -join "`n") -like "*verified*") | Should Be $true
     }
 
+    It "uses the canonical Git common root name for a linked worktree" {
+        if (-not (Get-Command python -ErrorAction SilentlyContinue) -or -not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-Host "python or git not found, skipping linked worktree dependency baseline verifier test."
+            return
+        }
+
+        $canonicalRepo = Join-Path $TestDrive "canonical-repo"
+        $linkedRoot = Join-Path $TestDrive "renamed-linked-worktree"
+        New-Item -ItemType Directory -Path $canonicalRepo -Force | Out-Null
+        & git -C $canonicalRepo init --quiet
+        $LASTEXITCODE | Should Be 0
+        New-DependencyBaselineFixture $canonicalRepo
+        & git -C $canonicalRepo add .governed-ai/dependency-baseline.json
+        $LASTEXITCODE | Should Be 0
+        & git -C $canonicalRepo -c user.name=fixture -c user.email=fixture@example.invalid commit --quiet -m "Add dependency baseline fixture"
+        $LASTEXITCODE | Should Be 0
+
+        try {
+            & git -C $canonicalRepo worktree add --quiet -b fixture-linked-worktree $linkedRoot HEAD
+            $LASTEXITCODE | Should Be 0
+
+            $output = @(& python $scriptPath --target-repo-root $linkedRoot --require-target-repo-baseline 2>&1)
+            $exitCode = $LASTEXITCODE
+
+            $exitCode | Should Be 0
+            (($output -join "`n") -like "*verified*") | Should Be $true
+        }
+        finally {
+            if (Test-Path -LiteralPath $linkedRoot) {
+                & git -C $canonicalRepo worktree remove $linkedRoot
+            }
+            & git -C $canonicalRepo branch -d fixture-linked-worktree 2>$null | Out-Null
+        }
+    }
+
     It "fails when baseline is required but missing" {
         if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
             Write-Host "python not found, skipping dependency baseline verifier test."

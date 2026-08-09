@@ -19,6 +19,12 @@ function Get-AgentCanonicalWritePath([string]$Path) {
     return ($canonicalSegments.ToArray() -join '/')
 }
 
+function Get-AgentCanonicalTaskId([string]$TaskId) {
+    if ([string]::IsNullOrWhiteSpace($TaskId) -or $TaskId -cne $TaskId.Trim()) { return $null }
+    if ($TaskId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { return $null }
+    return $TaskId.ToLowerInvariant()
+}
+
 function New-AgentTaskGraph {
     param(
         [Parameter(Mandatory = $true)][string]$GraphId,
@@ -59,11 +65,15 @@ function Test-AgentTaskGraphContract($TaskGraph) {
     $allowedComplexityKinds = @('two_real_repetitions', 'stable_external_protocol', 'proven_safety_or_data_seam', 'measured_hotspot')
     for ($i = 0; $i -lt @($tasks).Count; $i++) {
         $task = @($tasks)[$i]
-        $taskId = ([string](Get-OperationObjectProperty $task 'task_id')).Trim()
+        $rawTaskId = [string](Get-OperationObjectProperty $task 'task_id')
+        $taskId = Get-AgentCanonicalTaskId $rawTaskId
         $path = '$.tasks[{0}]' -f $i
-        if ([string]::IsNullOrWhiteSpace($taskId) -or $taskId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { $findings.Add((New-OperationFinding 'task_id_invalid' 'error' ($path + '.task_id') 'Task ID is missing or invalid.')) | Out-Null }
-        elseif ($taskIndex.ContainsKey($taskId.ToLowerInvariant())) { $findings.Add((New-OperationFinding 'task_id_duplicate' 'error' ($path + '.task_id') 'Task ID is duplicated.')) | Out-Null }
-        else { $taskIndex[$taskId.ToLowerInvariant()] = $task }
+        if ($null -eq $taskId) {
+            $code = if (-not [string]::IsNullOrWhiteSpace($rawTaskId) -and $rawTaskId -cne $rawTaskId.Trim()) { 'task_id_not_canonical' } else { 'task_id_invalid' }
+            $findings.Add((New-OperationFinding $code 'error' ($path + '.task_id') 'Task ID must be a canonical identifier without surrounding whitespace.')) | Out-Null
+        }
+        elseif ($taskIndex.ContainsKey($taskId)) { $findings.Add((New-OperationFinding 'task_id_duplicate' 'error' ($path + '.task_id') 'Task ID is duplicated.')) | Out-Null }
+        else { $taskIndex[$taskId] = $task }
         foreach ($field in @('goal', 'result_owner', 'stop_condition')) {
             if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $task $field))) { $findings.Add((New-OperationFinding ('{0}_required' -f $field) 'error' ($path + '.' + $field) ('Task {0} is required.' -f $field))) | Out-Null }
         }
@@ -117,6 +127,10 @@ function Test-AgentTaskGraphContract($TaskGraph) {
         if ([string](Get-OperationObjectProperty $task 'risk') -notin @('low', 'medium', 'high')) { $findings.Add((New-OperationFinding 'risk_invalid' 'error' ($path + '.risk') 'Task risk is invalid.')) | Out-Null }
         if ([string](Get-OperationObjectProperty $task 'ambiguity') -notin @('low', 'medium', 'high')) { $findings.Add((New-OperationFinding 'ambiguity_invalid' 'error' ($path + '.ambiguity') 'Task ambiguity is invalid.')) | Out-Null }
         if ((Get-OperationObjectProperty $task 'parallelizable') -isnot [bool]) { $findings.Add((New-OperationFinding 'parallelizable_invalid' 'error' ($path + '.parallelizable') 'parallelizable must be a boolean.')) | Out-Null }
+        $executionMode = Get-OperationObjectProperty $task 'execution_mode'
+        if ($null -ne $executionMode -and [string]$executionMode -notin @('root', 'delegate')) { $findings.Add((New-OperationFinding 'execution_mode_invalid' 'error' ($path + '.execution_mode') 'execution_mode must be root or delegate when supplied.')) | Out-Null }
+        $hostDefaultAccepted = Get-OperationObjectProperty $task 'host_default_accepted'
+        if ($null -ne $hostDefaultAccepted -and $hostDefaultAccepted -isnot [bool]) { $findings.Add((New-OperationFinding 'host_default_accepted_invalid' 'error' ($path + '.host_default_accepted') 'host_default_accepted must be a boolean when supplied.')) | Out-Null }
         $order = Get-OperationObjectProperty $task 'integration_order'
         $parsedOrder = 0
         if ($null -eq $order -or -not [int]::TryParse([string]$order, [ref]$parsedOrder) -or $parsedOrder -lt 1) { $findings.Add((New-OperationFinding 'integration_order_invalid' 'error' ($path + '.integration_order') 'integration_order must be a positive integer.')) | Out-Null }
@@ -136,8 +150,13 @@ function Test-AgentTaskGraphContract($TaskGraph) {
     foreach ($taskKey in @($taskIndex.Keys)) {
         $task = $taskIndex[$taskKey]
         foreach ($dependency in @((Get-OperationObjectProperty $task 'depends_on'))) {
-            $dependencyId = ([string]$dependency).Trim().ToLowerInvariant()
-            if (-not $taskIndex.ContainsKey($dependencyId)) { $findings.Add((New-OperationFinding 'dependency_unknown' 'error' ('$.tasks[{0}].depends_on' -f [string](Get-OperationObjectProperty $task 'task_id')) 'Task dependency is not declared.')) | Out-Null }
+            $rawDependencyId = [string]$dependency
+            $dependencyId = Get-AgentCanonicalTaskId $rawDependencyId
+            if ($null -eq $dependencyId) {
+                $code = if (-not [string]::IsNullOrWhiteSpace($rawDependencyId) -and $rawDependencyId -cne $rawDependencyId.Trim()) { 'dependency_id_not_canonical' } else { 'dependency_id_invalid' }
+                $findings.Add((New-OperationFinding $code 'error' ('$.tasks[{0}].depends_on' -f [string](Get-OperationObjectProperty $task 'task_id')) 'Task dependency must be a canonical identifier without surrounding whitespace.')) | Out-Null
+            }
+            elseif (-not $taskIndex.ContainsKey($dependencyId)) { $findings.Add((New-OperationFinding 'dependency_unknown' 'error' ('$.tasks[{0}].depends_on' -f [string](Get-OperationObjectProperty $task 'task_id')) 'Task dependency is not declared.')) | Out-Null }
             elseif ($dependencyId -eq $taskKey) { $findings.Add((New-OperationFinding 'dependency_self_reference' 'error' ('$.tasks[{0}].depends_on' -f [string](Get-OperationObjectProperty $task 'task_id')) 'Task cannot depend on itself.')) | Out-Null }
         }
     }
@@ -180,8 +199,8 @@ function Test-AgentTaskGraphContract($TaskGraph) {
         foreach ($taskKey in @($taskIndex.Keys)) { $inDegree[$taskKey] = 0; $dependents[$taskKey] = New-Object System.Collections.Generic.List[string] }
         foreach ($taskKey in @($taskIndex.Keys)) {
             foreach ($dependency in @((Get-OperationObjectProperty $taskIndex[$taskKey] 'depends_on'))) {
-                $dependencyId = ([string]$dependency).Trim().ToLowerInvariant()
-                if (-not $taskIndex.ContainsKey($dependencyId) -or $dependencyId -eq $taskKey) { continue }
+                $dependencyId = Get-AgentCanonicalTaskId ([string]$dependency)
+                if ($null -eq $dependencyId -or -not $taskIndex.ContainsKey($dependencyId) -or $dependencyId -eq $taskKey) { continue }
                 $inDegree[$taskKey] = [int]$inDegree[$taskKey] + 1
                 $dependents[$dependencyId].Add($taskKey) | Out-Null
             }

@@ -30,6 +30,26 @@ function New-AgentTestVerificationReceipt([string]$TaskId) {
     }
 }
 
+function New-AgentTestExecutionReceipt([string]$AgentType, [string]$Effort) {
+    return [pscustomobject]@{
+        agent_type = $AgentType
+        model_family = 'gpt-5.6-sol'
+        reasoning_effort = $Effort
+        started_at = '2026-08-05T04:30:00Z'
+        ended_at = '2026-08-05T04:39:00Z'
+        terminal_state = 'completed'
+        token_usage = [pscustomobject]@{
+            input_tokens = 1200
+            output_tokens = 300
+            total_tokens = 1500
+        }
+    }
+}
+
+function Set-AgentTestProperty($InputObject, [string]$Name, $Value) {
+    $InputObject | Add-Member -NotePropertyName $Name -NotePropertyValue $Value -Force
+}
+
 Describe 'Agent workflow advisory contracts' {
     It 'constructs and validates a plain-object TaskGraph' {
         Assert-AgentWorkflowFunction 'New-AgentTaskGraph'
@@ -264,6 +284,140 @@ Describe 'Agent workflow advisory contracts' {
         @($plan.waves[0].groups).Count | Should Be 1
         $plan.waves[0].groups[0].mode | Should Be 'sequential'
         (@($plan.waves[0].groups[0].task_ids) -join ',') | Should Be 'discover'
+    }
+
+    It 'caps each delegated wave at two tasks and splits three ready delegates as two plus one' {
+        $fixture = Get-AgentWorkflowFixture 'valid-request.json'
+        $graph = $fixture.task_graph | ConvertTo-Json -Depth 50 | ConvertFrom-Json
+        $first = $graph.tasks[1]
+        $second = $graph.tasks[2]
+        $third = $graph.tasks[2] | ConvertTo-Json -Depth 50 | ConvertFrom-Json
+        $first.task_id = 'alpha'; $first.depends_on = @(); $first.integration_order = 1; $first.exact_write_set = @('src/alpha.ps1'); $first.coordination_keys = @('write:alpha'); Set-AgentTestProperty $first execution_mode delegate
+        $second.task_id = 'beta'; $second.depends_on = @(); $second.integration_order = 2; $second.exact_write_set = @('src/beta.ps1'); $second.coordination_keys = @('write:beta'); Set-AgentTestProperty $second execution_mode delegate
+        $third.task_id = 'gamma'; $third.depends_on = @(); $third.integration_order = 3; $third.exact_write_set = @('src/gamma.ps1'); $third.coordination_keys = @('write:gamma'); Set-AgentTestProperty $third execution_mode delegate
+        $graph.tasks = @($first, $second, $third)
+
+        $plan = New-AgentExecutionPlan -TaskGraph $graph
+
+        $plan.pass | Should Be $true
+        $plan.limits.max_parallel | Should Be 2
+        $plan.limits.max_delegations | Should Be 4
+        $plan.limits.max_xhigh_per_wave | Should Be 1
+        @($plan.waves).Count | Should Be 2
+        (@($plan.waves[0].groups[0].task_ids) -join ',') | Should Be 'alpha,beta'
+        (@($plan.waves[1].groups[0].task_ids) -join ',') | Should Be 'gamma'
+    }
+
+    It 'fails closed when a task graph exceeds four delegated tasks' {
+        $fixture = Get-AgentWorkflowFixture 'valid-request.json'
+        $template = $fixture.task_graph.tasks[1]
+        $tasks = @()
+        foreach ($index in 1..5) {
+            $task = $template | ConvertTo-Json -Depth 50 | ConvertFrom-Json
+            $task.task_id = 'delegate-{0}' -f $index
+            $task.depends_on = @()
+            $task.integration_order = $index
+            $task.exact_write_set = @('src/delegate-{0}.ps1' -f $index)
+            $task.coordination_keys = @('write:delegate-{0}' -f $index)
+            Set-AgentTestProperty $task execution_mode delegate
+            $tasks += $task
+        }
+        $fixture.task_graph.tasks = $tasks
+
+        $plan = New-AgentExecutionPlan -TaskGraph $fixture.task_graph
+
+        $plan.pass | Should Be $false
+        @($plan.findings | Where-Object code -eq 'delegation_budget_exceeded').Count | Should Be 1
+    }
+
+    It 'allows at most one Sol xhigh delegate in a parallel wave' {
+        $fixture = Get-AgentWorkflowFixture 'valid-request.json'
+        $graph = $fixture.task_graph | ConvertTo-Json -Depth 50 | ConvertFrom-Json
+        Set-AgentTestProperty $graph.tasks[1] execution_mode delegate
+        Set-AgentTestProperty $graph.tasks[2] execution_mode delegate
+        $proposals = @(
+            [pscustomobject]@{ task_id = 'implement'; requested_tier = 'sol_xhigh' },
+            [pscustomobject]@{ task_id = 'document'; requested_tier = 'sol_xhigh' }
+        )
+
+        $admission = Test-AgentParallelAdmission -TaskGraph $graph -TaskIds @('implement', 'document') -CompletedTaskIds @('discover') -CompletedTaskReceipts $fixture.completion_receipts -EvaluationTime $fixture.now -ModelProposals $proposals
+
+        $admission.pass | Should Be $false
+        @($admission.findings | Where-Object code -eq 'xhigh_parallel_limit_exceeded').Count | Should Be 1
+    }
+
+    It 'rejects noncanonical task and dependency IDs before planning' {
+        $fixture = Get-AgentWorkflowFixture 'valid-request.json'
+        $taskWhitespace = $fixture.task_graph | ConvertTo-Json -Depth 50 | ConvertFrom-Json
+        $taskWhitespace.tasks[1].task_id = ' implement '
+        @((Test-AgentTaskGraphContract $taskWhitespace).findings | Where-Object code -eq 'task_id_not_canonical').Count | Should Be 1
+
+        $dependencyWhitespace = $fixture.task_graph | ConvertTo-Json -Depth 50 | ConvertFrom-Json
+        $dependencyWhitespace.tasks[1].depends_on = @(' discover ')
+        @((Test-AgentTaskGraphContract $dependencyWhitespace).findings | Where-Object code -eq 'dependency_id_not_canonical').Count | Should Be 1
+    }
+
+    It 'requires one usable proposal or explicit host default acceptance for every delegated task' {
+        $fixture = Get-AgentWorkflowFixture 'valid-request.json'
+        Set-AgentTestProperty $fixture.task_graph.tasks[0] execution_mode root
+        Set-AgentTestProperty $fixture.task_graph.tasks[1] execution_mode delegate
+        Set-AgentTestProperty $fixture.task_graph.tasks[2] execution_mode delegate
+        Set-AgentTestProperty $fixture.task_graph.tasks[3] execution_mode root
+        $fixture.model_proposals = @($fixture.model_proposals | Where-Object task_id -eq 'implement')
+
+        $result = Test-AgentWorkflowRequest $fixture
+
+        $result.pass | Should Be $false
+        @($result.findings | Where-Object code -eq 'delegated_task_model_proposal_missing').Count | Should Be 1
+
+        Set-AgentTestProperty $fixture.task_graph.tasks[2] host_default_accepted $true
+        (Test-AgentWorkflowRequest $fixture).pass | Should Be $true
+    }
+
+    It 'binds delegated completion receipts to the proposed agent model and effort' {
+        $fixture = Get-AgentWorkflowFixture 'valid-request.json'
+        Set-AgentTestProperty $fixture.task_graph.tasks[0] execution_mode root
+        Set-AgentTestProperty $fixture.task_graph.tasks[1] execution_mode delegate
+        Set-AgentTestProperty $fixture.task_graph.tasks[2] execution_mode delegate
+        Set-AgentTestProperty $fixture.task_graph.tasks[2] host_default_accepted $true
+        Set-AgentTestProperty $fixture.task_graph.tasks[3] execution_mode root
+        $fixture.requested_parallel_task_ids = @()
+        $fixture.completed_task_ids = @('discover', 'implement')
+        $implementReceipt = [pscustomobject]@{
+            task_id = 'implement'
+            base_revision = $fixture.task_graph.base_revision
+            status = 'verified'
+            verification_receipt = (New-AgentTestVerificationReceipt 'implement')
+            execution_receipt = (New-AgentTestExecutionReceipt 'sol_medium_worker' 'medium')
+        }
+        $fixture.completion_receipts = @($fixture.completion_receipts) + $implementReceipt
+
+        $result = Test-AgentWorkflowRequest $fixture
+
+        $result.pass | Should Be $false
+        @($result.findings | Where-Object code -eq 'execution_receipt_proposal_mismatch').Count | Should Be 1
+    }
+
+    It 'requires a completed terminal state and internally consistent observational token usage' {
+        $fixture = Get-AgentWorkflowFixture 'valid-request.json'
+        $receipt = New-AgentTestExecutionReceipt 'sol_low_worker' 'low'
+
+        (Test-AgentExecutionReceipt -Receipt $receipt -EvaluationTime $fixture.now -ExpectedModelFamily 'gpt-5.6-sol' -ExpectedReasoningEffort 'low').pass | Should Be $true
+
+        $receipt.terminal_state = 'processing'
+        $receipt.token_usage.total_tokens = 1501
+        $invalid = Test-AgentExecutionReceipt -Receipt $receipt -EvaluationTime $fixture.now -ExpectedModelFamily 'gpt-5.6-sol' -ExpectedReasoningEffort 'low'
+        @($invalid.findings | Where-Object code -eq 'execution_receipt_terminal_state_invalid').Count | Should Be 1
+        @($invalid.findings | Where-Object code -eq 'execution_receipt_token_total_mismatch').Count | Should Be 1
+    }
+
+    It 'normalizes host model pairs before availability comparison' {
+        $fixture = Get-AgentWorkflowFixture 'valid-request.json'
+
+        $result = New-ModelPolicyProposal -TaskId 'routine' -RequestedTier 'sol_low' -Rationale 'Bounded mechanical task.' -HostSurface 'collaboration_spawn' -HostAvailablePairs @(' GPT-5.6-SOL|LOW ') -Now $fixture.now
+
+        $result.selected_tier | Should Be 'sol_low'
+        $result.evidence_sources.host_availability.state | Should Be 'confirmed_available'
     }
 
     It 'validates an immutable fresh Radar snapshot and rejects stale advisory data' {

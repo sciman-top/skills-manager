@@ -92,6 +92,7 @@ if ($null -ne $manifest) {
             @{ property='host_loaded_status'; value='host_evaluation_partial'; code='host_loaded_boundary_invalid' },
             @{ property='host_orchestration_status'; value='native_spawn_partial'; code='host_orchestration_boundary_invalid' },
             @{ property='host_radar_refresh_status'; value='disabled'; code='host_radar_boundary_invalid' },
+            @{ property='host_lifecycle_acceptance_status'; value='low_medium_blocked_close_agent_unavailable_xhigh_deferred'; code='host_lifecycle_boundary_invalid' },
             @{ property='live_acceptance_status'; value='not_run'; code='live_acceptance_boundary_invalid' }
         )) {
         if ([string]$manifest.($boundary.property) -ne $boundary.value) {
@@ -137,6 +138,21 @@ if ($null -ne $manifest) {
     }
     foreach ($tier in $tiers) {
         if ([string]$tier.tier -notin @($expectedTiers.Keys)) { Add-Finding 'model_tier_anchor_invalid' $paths.manifest ("Unknown model tier: {0}" -f [string]$tier.tier) }
+    }
+
+    $delegationPolicy = $manifest.delegation_policy
+    if ($null -eq $delegationPolicy -or [string]$delegationPolicy.execution_mode_default -ne 'root' -or
+        [int]$delegationPolicy.max_parallel -ne 2 -or [int]$delegationPolicy.max_delegations -ne 4 -or [int]$delegationPolicy.max_xhigh_per_wave -ne 1 -or
+        [string]$delegationPolicy.model_proposal_requirement -ne 'exactly_one_or_explicit_host_default' -or
+        $delegationPolicy.execution_receipt_required -ne $true -or [string]$delegationPolicy.token_usage_policy -ne 'observe_only_no_hard_fuse' -or
+        [string]$delegationPolicy.task_id_policy -ne 'canonical_no_outer_whitespace_case_insensitive') {
+        Add-Finding 'delegation_policy_invalid' $paths.manifest 'Delegation policy must preserve root default, 2/4/1 limits, proposal/receipt binding, canonical IDs, and observe-only token usage.'
+    }
+    $hostAcceptance = $manifest.host_acceptance
+    if ($null -eq $hostAcceptance -or [string]$hostAcceptance.custom_agent_descendant_spawn -ne 'config_disabled' -or
+        [string]$hostAcceptance.low_lifecycle -ne 'blocked_agent_thread_leak' -or [string]$hostAcceptance.medium_lifecycle -ne 'blocked_agent_thread_leak' -or
+        [string]$hostAcceptance.xhigh_lifecycle -ne 'deferred_by_user' -or [string]$hostAcceptance.hard_token_fuse -ne 'deferred_by_user') {
+        Add-Finding 'host_acceptance_receipt_invalid' $paths.manifest 'Host acceptance must record descendant-spawn disablement, low/medium lifecycle blocked by the unreleased agent-thread slot, and user-deferred xhigh/token fuse.'
     }
 
     if ($null -eq $manifest.legacy_read_only_receipts) {
