@@ -570,7 +570,8 @@ The behavioral regression uses a deliberately hanging file with the canonical
 `SelectionCancellation.Tests.ps1` name and a 10-second file timeout. RED's
 20-second observer expired without a terminal process (`33 passed / 1 failed`);
 the regression now allows a 30-second outer observation window so loaded full
-gate runs still test the 10-second worker timeout rather than scheduler delay. The special
+gate runs still test the 10-second worker timeout rather than scheduler delay.
+The special
 parameter, function and branch were then deleted, so every test file now uses
 the same existing bounded worker path. GREEN is `QualityGateScripts=34/34`;
 the real selection-cancellation file also passed through that worker at `3/3`
