@@ -53,7 +53,7 @@
 | [Profile optimization manifest](../../tasks/skills-manager-vnext-profile-optimization.tasks.json) | P5-local bounded canary、host replay 和收口真值 | semantic router、skill 安装删除或 P6 admission |
 | [任务清单](../../tasks/todo.md) | 人类可扫描的当前任务状态 | manifest 中的结构化细节副本 |
 | [planning verifier](../../scripts/verify-vnext-planning.ps1) | 机械校验上述资产的一致性 | 判断产品价值或宿主 live acceptance |
-| [host-native lifecycle planning verifier](../../scripts/verify-host-native-skill-lifecycle-planning.ps1) | 阻断 P6 admission、任务覆盖、完整投影和 fallback 边界漂移 | 执行 host projection 或 invocation |
+| [host-native lifecycle planning verifier](../../scripts/verify-host-native-skill-lifecycle-planning.ps1) | 历史 P6/migration 显式诊断；检查完整投影和 fallback 边界 | 默认 quick/full closeout gate，或执行 host projection/invocation |
 | [maintenance verifier](../../scripts/verify-lean-ai-delivery-planning.ps1) | 在 P5 contract 通过后校验 maintenance design 一致性和边界 | 运行 pilot、修改 runtime 或评估业务收益 |
 | [PowerShell runtime policy verifier](../../scripts/verify-powershell-runtime-policy.ps1) | 机械检查 PS7 version floor、零 legacy fallback、CI/test/docs/task 真值和历史边界 | 证明所有外部消费者已迁移或 PowerShell 长期最优 |
 | [Agent workflow advisory verifier](../../scripts/verify-agent-workflow-advisory.ps1) | 机械检查 completion receipt/canonical path/barrier wave、Radar v2、host proposal/local outcome、三档软锚点、CLI/build 和 truth boundary | 证明 native subagent、模型质量、host loaded 或 live acceptance |
