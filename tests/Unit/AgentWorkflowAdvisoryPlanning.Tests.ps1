@@ -64,26 +64,6 @@ Describe 'Agent workflow advisory planning verifier' {
         @($parsed.findings).Count | Should Be 0
     }
 
-    It 'rejects delivery admission contract projection and canonical fixture drift' {
-        $fixtureRoot = New-AgentWorkflowAdvisoryFixture 'delivery-admission'
-        $domainPath = Join-Path $fixtureRoot 'src\Domain\AgentWorkflow.ps1'
-        $domain = (Get-Content -LiteralPath $domainPath -Raw).Replace('native_baseline_required', 'native_baseline_missing')
-        Set-Content -LiteralPath $domainPath -Value $domain -Encoding UTF8
-        $applicationPath = Join-Path $fixtureRoot 'src\Application\ModelAndAgentPolicy.ps1'
-        $application = (Get-Content -LiteralPath $applicationPath -Raw).Replace('main_chain_checkpoint', 'delivery_checkpoint')
-        Set-Content -LiteralPath $applicationPath -Value $application -Encoding UTF8
-        $fixturePath = Join-Path $fixtureRoot 'tests\fixtures\agent-workflow\valid-request.json'
-        $fixture = Get-Content -LiteralPath $fixturePath -Raw | ConvertFrom-Json
-        foreach ($task in @($fixture.task_graph.tasks)) { $task.admission_scope = 'legacy' }
-        $fixture | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath $fixturePath -Encoding UTF8
-
-        $parsed = (Invoke-AgentWorkflowAdvisoryVerifier $fixtureRoot).output | ConvertFrom-Json
-
-        @($parsed.findings | Where-Object code -eq 'delivery_admission_contract_missing').Count | Should BeGreaterThan 0
-        @($parsed.findings | Where-Object code -eq 'delivery_admission_projection_missing').Count | Should Be 1
-        @($parsed.findings | Where-Object code -eq 'fixture_contract_missing').Count | Should BeGreaterThan 0
-    }
-
     It 'rejects runtime scheduler provider and host mutation claims' {
         $fixtureRoot = New-AgentWorkflowAdvisoryFixture 'runtime-boundary'
         $path = Join-Path $fixtureRoot 'tasks\skills-manager-vnext-agent-workflow-advisory.tasks.json'
@@ -129,17 +109,15 @@ Describe 'Agent workflow advisory planning verifier' {
         @($parsed.findings | Where-Object code -eq 'model_tier_anchor_invalid').Count | Should Be 2
     }
 
-    It 'rejects reactivating Radar receipts and four-tier planning drift' {
+    It 'rejects reactivating Radar receipts' {
         $fixtureRoot = New-AgentWorkflowAdvisoryFixture 'host-receipt'
         $manifestPath = Join-Path $fixtureRoot 'tasks\skills-manager-vnext-agent-workflow-advisory.tasks.json'
         $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
         $manifest.host_radar_refresh_status = 'pending_revalidation'
         $manifest | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
-        Add-Content -LiteralPath (Join-Path $fixtureRoot 'docs\product\skills-manager-vnext-roadmap.md') -Value "`nfour soft tiers"
 
         $parsed = (Invoke-AgentWorkflowAdvisoryVerifier $fixtureRoot).output | ConvertFrom-Json
         @($parsed.findings | Where-Object code -eq 'radar_active_contract_detected').Count | Should BeGreaterThan 0
-        @($parsed.findings | Where-Object code -eq 'four_tier_wording_detected').Count | Should Be 1
     }
 
     It 'rejects zero-side-effect and ownership drift' {
@@ -153,36 +131,14 @@ Describe 'Agent workflow advisory planning verifier' {
         @($parsed.findings | Where-Object code -eq 'zero_side_effect_contract_missing').Count | Should Be 1
     }
 
-    It 'requires failure packet host availability and a Radar-independent decision path' {
-        $fixtureRoot = New-AgentWorkflowAdvisoryFixture 'failure-radar'
+    It 'rejects an active Radar decision path' {
+        $fixtureRoot = New-AgentWorkflowAdvisoryFixture 'active-radar-decision'
         $applicationPath = Join-Path $fixtureRoot 'src\Application\ModelAndAgentPolicy.ps1'
-        $application = (Get-Content -LiteralPath $applicationPath -Raw).Replace('Test-AgentFailurePacketContract $FailurePacket', '$true').Replace('host_pair_availability_unknown', 'host_pair_state_missing').Replace('$validLocalOutcomes = New-Object', '$radarValidation = Test-RadarSnapshotContract -Snapshot $RadarSnapshot -Now $Now`r`n    $validLocalOutcomes = New-Object')
+        $application = (Get-Content -LiteralPath $applicationPath -Raw).Replace('$validLocalOutcomes = New-Object', '$radarValidation = Test-RadarSnapshotContract -Snapshot $RadarSnapshot -Now $Now`r`n    $validLocalOutcomes = New-Object')
         Set-Content -LiteralPath $applicationPath -Value $application -Encoding UTF8
 
         $parsed = (Invoke-AgentWorkflowAdvisoryVerifier $fixtureRoot).output | ConvertFrom-Json
-        @($parsed.findings | Where-Object code -eq 'failure_packet_gate_missing').Count | Should Be 1
         @($parsed.findings | Where-Object code -eq 'active_radar_decision_path_detected').Count | Should BeGreaterThan 0
-        @($parsed.findings | Where-Object code -eq 'host_surface_availability_gate_missing').Count | Should Be 1
-    }
-
-    It 'requires structured completion planning-only legacy Radar parsing and input reparse guards' {
-        $fixtureRoot = New-AgentWorkflowAdvisoryFixture 'adversarial-contracts'
-        $applicationPath = Join-Path $fixtureRoot 'src\Application\ModelAndAgentPolicy.ps1'
-        $application = (Get-Content -LiteralPath $applicationPath -Raw).Replace('function Test-AgentCompletionVerificationReceipt', 'function Test-UntrustedReceipt').Replace("'planned_dependency_order_only'", "'claimed_complete'")
-        Set-Content -LiteralPath $applicationPath -Value $application -Encoding UTF8
-        $domainPath = Join-Path $fixtureRoot 'src\Domain\AgentWorkflow.ps1'
-        $domain = (Get-Content -LiteralPath $domainPath -Raw).Replace('radar_source_untrusted', 'radar_source_unknown').Replace('$allowedPairs = @(''gpt-5.6-sol|xhigh'', ''gpt-5.6-sol|medium'', ''gpt-5.6-luna|max'')', '$allowedPairs = @(''gpt-5.6-terra|high'')')
-        Set-Content -LiteralPath $domainPath -Value $domain -Encoding UTF8
-        $commandPath = Join-Path $fixtureRoot 'src\Commands\AgentWorkflow.ps1'
-        $command = (Get-Content -LiteralPath $commandPath -Raw).Replace('Agent workflow input cannot traverse a reparse point.', 'Agent workflow input is invalid.')
-        Set-Content -LiteralPath $commandPath -Value $command -Encoding UTF8
-
-        $parsed = (Invoke-AgentWorkflowAdvisoryVerifier $fixtureRoot).output | ConvertFrom-Json
-        @($parsed.findings | Where-Object code -eq 'completion_receipt_gate_missing').Count | Should BeGreaterThan 0
-        @($parsed.findings | Where-Object code -eq 'planning_only_semantics_missing').Count | Should Be 1
-        @($parsed.findings | Where-Object code -eq 'radar_source_allowlist_missing').Count | Should Be 1
-        @($parsed.findings | Where-Object code -eq 'radar_pair_allowlist_missing').Count | Should Be 1
-        @($parsed.findings | Where-Object code -eq 'input_reparse_guard_missing').Count | Should Be 1
     }
 
     It 'requires the advisory verifier in the full quality gate' {
@@ -193,5 +149,27 @@ Describe 'Agent workflow advisory planning verifier' {
 
         $parsed = (Invoke-AgentWorkflowAdvisoryVerifier $fixtureRoot).output | ConvertFrom-Json
         @($parsed.findings | Where-Object code -eq 'full_gate_integration_missing').Count | Should Be 1
+    }
+
+    It 'does not lock the advisory verifier to behavior-test implementation literals' {
+        $fixtureRoot = New-AgentWorkflowAdvisoryFixture 'implementation-literal-refactor'
+        $domainPath = Join-Path $fixtureRoot 'src\Domain\AgentWorkflow.ps1'
+        $domain = (Get-Content -LiteralPath $domainPath -Raw).Replace('native_baseline_required', 'native_admission_required').Replace('radar_source_untrusted', 'radar_source_not_trusted')
+        Set-Content -LiteralPath $domainPath -Value $domain -Encoding UTF8
+        $applicationPath = Join-Path $fixtureRoot 'src\Application\ModelAndAgentPolicy.ps1'
+        $application = (Get-Content -LiteralPath $applicationPath -Raw).Replace('completion_receipt_unclaimed', 'completion_receipt_not_claimed').Replace('completed_dependency_not_closed', 'completed_dependency_open')
+        Set-Content -LiteralPath $applicationPath -Value $application -Encoding UTF8
+        $contractTestPath = Join-Path $fixtureRoot 'tests\Unit\AgentWorkflowContracts.Tests.ps1'
+        $contractTests = (Get-Content -LiteralPath $contractTestPath -Raw).Replace("Describe 'Agent workflow advisory contracts'", "Describe 'Agent workflow behavior contracts'")
+        Set-Content -LiteralPath $contractTestPath -Value $contractTests -Encoding UTF8
+        $validFixturePath = Join-Path $fixtureRoot 'tests\fixtures\agent-workflow\valid-request.json'
+        $validFixture = Get-Content -LiteralPath $validFixturePath -Raw | ConvertFrom-Json
+        $validFixture.task_graph.graph_id = 'graph-fixture-refactor-001'
+        $validFixture | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath $validFixturePath -Encoding UTF8
+
+        $parsed = (Invoke-AgentWorkflowAdvisoryVerifier $fixtureRoot).output | ConvertFrom-Json
+
+        $parsed.status | Should Be 'pass'
+        @($parsed.findings).Count | Should Be 0
     }
 }

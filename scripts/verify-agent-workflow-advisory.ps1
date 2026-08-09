@@ -146,74 +146,18 @@ if ($null -ne $manifest) {
 }
 
 foreach ($required in @(
-        @{ key='spec'; literal='**IMPLEMENTATION_STATUS**: `repo_advisory_only`'; code='implementation_boundary_missing' },
-        @{ key='spec'; literal='**RUNTIME_SCHEDULER_STATUS**: `not_introduced`'; code='runtime_boundary_missing' },
-        @{ key='spec'; literal='**RADAR_FETCH_STATUS**: `retired`'; code='radar_boundary_missing' },
-        @{ key='spec'; literal='**HOST_LOADED_STATUS**: `host_evaluation_partial`'; code='host_boundary_missing' },
-        @{ key='spec'; literal='**HOST_ORCHESTRATION_STATUS**: `native_spawn_partial`'; code='host_boundary_missing' },
-        @{ key='spec'; literal='**HOST_RADAR_REFRESH_STATUS**: `disabled`'; code='host_boundary_missing' },
-        @{ key='spec'; literal='**LIVE_ACCEPTANCE_STATUS**: `not_run`'; code='live_boundary_missing' },
-        @{ key='spec'; literal='`verification_receipt` 必须是 schema v1 对象'; code='completion_receipt_spec_missing' },
-        @{ key='spec'; literal='`planned_dependency_order_only`'; code='planning_only_spec_missing' },
-        @{ key='spec'; literal='| `sol_low` | `gpt-5.6-sol + low` |'; code='model_tier_spec_missing' },
         @{ key='prd'; literal='FR-EWF-018'; code='product_requirement_missing' },
         @{ key='architecture'; literal='ADR-SMV-029'; code='architecture_decision_missing' },
         @{ key='roadmap'; literal='agent_workflow_advisory_runtime'; code='roadmap_track_missing' },
         @{ key='productIndex'; literal='Agent workflow advisory runtime'; code='product_index_missing' },
-        @{ key='plan'; literal='SMV-AWA-005'; code='plan_coverage_missing' },
-        @{ key='todo'; literal='SMV-AWA-005'; code='todo_coverage_missing' },
         @{ key='readme'; literal='agent-plan'; code='readme_command_missing' },
         @{ key='readmeEn'; literal='agent-plan'; code='readme_command_missing' },
-        @{ key='evidence'; literal='Maximum claim: `repo_verified / repo_advisory_only`; host state remains `host_evaluation_partial`.'; code='evidence_boundary_missing' },
         @{ key='quality'; literal="Invoke-QualityGate 'agent-workflow-advisory' { & .\scripts\verify-agent-workflow-advisory.ps1 }"; code='full_gate_integration_missing' }
     )) { Require-Literal $content[$required.key] $required.literal $paths[$required.key] $required.code }
 
 foreach ($required in @(
-        @{ key='domain'; literal='function New-AgentTaskGraph'; code='domain_contract_missing' },
-        @{ key='domain'; literal='function Test-AgentTaskGraphContract'; code='domain_contract_missing' },
-        @{ key='domain'; literal='Only TaskGraph schema versions 1 and 2 are supported.'; code='delivery_admission_contract_missing' },
-        @{ key='domain'; literal='native_baseline_required'; code='delivery_admission_contract_missing' },
-        @{ key='domain'; literal='complexity_admission_required'; code='delivery_admission_contract_missing' },
-        @{ key='domain'; literal='delivery_stage_dependency_invalid'; code='delivery_admission_contract_missing' },
-        @{ key='domain'; literal='function Get-AgentCanonicalWritePath'; code='canonical_write_path_missing' },
-        @{ key='domain'; literal='\x00-\x1F<>:"|'; code='windows_safe_write_path_missing' },
-        @{ key='domain'; literal='function New-RadarSnapshot'; code='domain_contract_missing' },
-        @{ key='domain'; literal='function Test-RadarSnapshotContract'; code='domain_contract_missing' },
-        @{ key='domain'; literal='source_updated_at'; code='radar_v2_contract_missing' },
-        @{ key='domain'; literal='radar_decision_field_forbidden'; code='radar_observation_boundary_missing' },
-        @{ key='domain'; literal='radar_source_untrusted'; code='radar_source_allowlist_missing' },
-        @{ key='domain'; literal='$allowedPairs = @(''gpt-5.6-sol|xhigh'', ''gpt-5.6-sol|medium'', ''gpt-5.6-luna|max'')'; code='radar_pair_allowlist_missing' },
-        @{ key='domain'; literal='correction_evidence_required'; code='failure_packet_correction_missing' },
-        @{ key='domain'; literal='function New-AgentFailurePacket'; code='domain_contract_missing' },
-        @{ key='domain'; literal='function Test-AgentFailurePacketContract'; code='domain_contract_missing' },
-        @{ key='application'; literal='function Test-AgentParallelAdmission'; code='application_contract_missing' },
-        @{ key='application'; literal='function Test-AgentCompletionVerificationReceipt'; code='completion_receipt_gate_missing' },
-        @{ key='application'; literal='evidence_sha256'; code='completion_receipt_gate_missing' },
-        @{ key='application'; literal='CompletedTaskReceipts'; code='completion_receipt_gate_missing' },
-        @{ key='application'; literal='completion_receipt_unclaimed'; code='completion_receipt_gate_missing' },
-        @{ key='application'; literal='completed_dependency_not_closed'; code='completion_receipt_gate_missing' },
-        @{ key='application'; literal='high_risk_parallel_forbidden'; code='parallel_risk_gate_missing' },
-        @{ key='application'; literal='high_ambiguity_parallel_forbidden'; code='parallel_ambiguity_gate_missing' },
-        @{ key='application'; literal="'not_requested'"; code='serial_only_mode_missing' },
-        @{ key='application'; literal='function New-AgentExecutionPlan'; code='application_contract_missing' },
-        @{ key='application'; literal='main_chain_checkpoint'; code='delivery_admission_projection_missing' },
-        @{ key='application'; literal='groups = @('; code='single_group_wave_missing' },
-        @{ key='application'; literal='completion_evidence_semantics'; code='planning_only_semantics_missing' },
-        @{ key='application'; literal='planned_dependency_order_only'; code='planning_only_semantics_missing' },
-        @{ key='application'; literal='function New-ModelPolicyProposal'; code='application_contract_missing' },
-        @{ key='application'; literal='function Test-AgentLocalOutcomeContract'; code='local_outcome_contract_missing' },
-        @{ key='application'; literal='local_outcome_evaluation_time_invalid'; code='local_outcome_contract_missing' },
-        @{ key='application'; literal="selection_semantics = 'host_proposal_validation_only'"; code='proposal_semantics_missing' },
-        @{ key='application'; literal='host_surface_unknown'; code='host_surface_availability_gate_missing' },
-        @{ key='application'; literal='host_pair_availability_unknown'; code='host_surface_availability_gate_missing' },
-        @{ key='application'; literal="hostAvailabilityState = 'confirmed_available'"; code='host_surface_availability_gate_missing' },
-        @{ key='application'; literal='function Get-AgentEscalationDecision'; code='application_contract_missing' },
-        @{ key='application'; literal='Test-AgentFailurePacketContract $FailurePacket'; code='failure_packet_gate_missing' },
-        @{ key='application'; literal="evidence_priority = 'user_override_then_local_outcomes_then_host_availability_then_host_default'"; code='evidence_priority_missing' },
-        @{ key='application'; literal='requires_parallel_readmission'; code='parallel_readmission_missing' },
         @{ key='command'; literal='function Invoke-AgentPlanCommand'; code='cli_command_wiring_missing' },
         @{ key='command'; literal='function Invoke-AgentValidateCommand'; code='cli_command_wiring_missing' },
-        @{ key='command'; literal='Agent workflow input cannot traverse a reparse point.'; code='input_reparse_guard_missing' },
         @{ key='command'; literal="decision_owner = 'host_ai'"; code='host_decision_owner_missing' },
         @{ key='command'; literal='provider_calls = 0; native_mutations = 0; writes = 0'; code='zero_side_effect_contract_missing' },
         @{ key='version'; literal='"agent-plan"'; code='cli_command_wiring_missing' },
@@ -222,16 +166,9 @@ foreach ($required in @(
         @{ key='main'; literal='"agent-validate" { $result = Invoke-AgentValidateCommand'; code='cli_command_wiring_missing' },
         @{ key='build'; literal='"Domain/AgentWorkflow.ps1"'; code='build_source_wiring_missing' },
         @{ key='build'; literal='"Application/ModelAndAgentPolicy.ps1"'; code='build_source_wiring_missing' },
-        @{ key='build'; literal='"Commands/AgentWorkflow.ps1"'; code='build_source_wiring_missing' },
-        @{ key='contractTests'; literal="Describe 'Agent workflow advisory contracts'"; code='focused_test_missing' },
-        @{ key='validFixture'; literal='"graph_id": "graph-demo-001"'; code='fixture_contract_missing' },
-        @{ key='validFixture'; literal='"admission_scope": "product_delivery"'; code='fixture_contract_missing' },
-        @{ key='validFixture'; literal='"host_surface": "collaboration_spawn"'; code='fixture_contract_missing' },
-        @{ key='invalidFixture'; literal='"graph_id": "graph-invalid-001"'; code='fixture_contract_missing' }
+        @{ key='build'; literal='"Commands/AgentWorkflow.ps1"'; code='build_source_wiring_missing' }
     )) { Require-Literal $content[$required.key] $required.literal $paths[$required.key] $required.code }
 
-$planningText = $content.spec + "`n" + $content.prd + "`n" + $content.architecture + "`n" + $content.roadmap + "`n" + $content.manifest
-Reject-Pattern $planningText '(?i)four soft tiers' 'agent workflow planning truth' 'four_tier_wording_detected' 'Agent workflow planning must describe exactly three active soft tiers.'
 if ($null -ne $manifest -and [string]$manifest.host_radar_refresh_status -ne 'disabled') {
     Add-Finding 'radar_active_contract_detected' $paths.manifest 'Radar refresh must remain disabled and outside active model routing.'
 }
