@@ -523,6 +523,37 @@ this evidence update. Only a schema-v2 `profile=full`, `status=passed` receipt
 whose 17 gate rows, timing binding and exact-current source binding all verify
 may close the repository full-gate boundary.
 
+## Slice K: stop wasted gates and remove the duplicate global lock
+
+The exact-source baseline receipt `qgr-20260809-084855-89752648` passed all
+17 gates at HEAD `5ff0a30562de9f293108ea06fffe703cad5f1ba1`; its test suite was
+`1103/1103` in `281,349ms` with `max_parallel=4`. A controlled
+`max_parallel=8` experiment completed in `272,439ms`, only about 3% faster,
+and exposed one cross-repository gate-collision failure. The experiment was
+rejected: the default remains 4 and no batching or new worker abstraction was
+added.
+
+Two smaller changes remove measured waste without weakening the gate set:
+
+- `Invoke-QualityGate` now compares the current source with the run start after
+  every successful gate. The behavioral RED continued into `repo-hygiene`
+  after build drift (`32/33`); GREEN stops with exit 78, a one-row receipt and
+  no next-gate output (`33/33`). This does not cancel a gate already running,
+  but it prevents every later gate from consuming time after drift.
+- The runner already used a mutex whose name is derived from the repository
+  root, yet it also scanned every host `run-local-quality-gates.ps1` process.
+  That duplicate global scan blocked independent fixture repositories and was
+  the max-8 collision root cause. A real two-repository RED proved the false
+  exit 75; the scan was deleted while the repo-scoped mutex remained. GREEN
+  proves same-repository serialization and different-repository independence,
+  with the focused file at `33/33`.
+
+An overlapping full run while this slice was being edited ended as
+`qgr-20260809-090022-0019b3bf`, `status=source_drift`, after build and tests;
+it did not run the remaining 15 contracts. It is not acceptance evidence. A
+fresh exact-source full receipt is still required after the Slice K candidate
+is committed.
+
 ## Rollback
 
 Repository rollback is limited to the files in this remediation slice. Host
