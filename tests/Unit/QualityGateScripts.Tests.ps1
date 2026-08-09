@@ -36,6 +36,16 @@ Describe "Quality gate scripts" {
         $raw | Should Match 'total_elapsed_ms'
     }
 
+    It "keeps the completed P6 verifier explicit and outside the default gate" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $scriptPath = Join-Path $root "scripts\quality\run-local-quality-gates.ps1"
+        $raw = Get-Content -LiteralPath $scriptPath -Raw
+
+        $raw | Should Match "Invoke-QualityGate 'planning-contract'"
+        $raw | Should Not Match "Invoke-QualityGate 'host-native-lifecycle-planning'"
+        Test-Path -LiteralPath (Join-Path $root 'scripts\verify-host-native-skill-lifecycle-planning.ps1') -PathType Leaf | Should Be $true
+    }
+
     It "keeps successful metadata gate output concise while preserving the verifier" {
         $root = Join-Path $PSScriptRoot "..\.."
         $gate = Get-Content -LiteralPath (Join-Path $root 'scripts\quality\run-local-quality-gates.ps1') -Raw
