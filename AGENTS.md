@@ -1,6 +1,6 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
-**全局规则复核**: 9.74
+**全局规则复核**: 9.75
 **最后更新**: 2026-08-09
 ## 1. 当前落点与目标归宿
 - 当前落点：`skills.ps1` 是入口，`skills.json` 是 vendor/mapping/target/sync/MCP 的配置真源。
