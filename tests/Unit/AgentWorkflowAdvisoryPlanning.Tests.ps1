@@ -109,18 +109,16 @@ Describe 'Agent workflow advisory planning verifier' {
         @($parsed.findings | Where-Object code -eq 'model_tier_anchor_invalid').Count | Should Be 2
     }
 
-    It 'rejects invented pending Radar receipts and four-tier planning drift' {
+    It 'rejects reactivating Radar receipts and four-tier planning drift' {
         $fixtureRoot = New-AgentWorkflowAdvisoryFixture 'host-receipt'
         $manifestPath = Join-Path $fixtureRoot 'tasks\skills-manager-vnext-agent-workflow-advisory.tasks.json'
         $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-        $manifest.host_radar_receipt.executed_model = 'gpt-5.6-luna'
-        $manifest.host_spawn_model_probe_receipt.status = 'confirmed_available'
+        $manifest.host_radar_refresh_status = 'pending_revalidation'
         $manifest | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
         Add-Content -LiteralPath (Join-Path $fixtureRoot 'docs\product\skills-manager-vnext-roadmap.md') -Value "`nfour soft tiers"
 
         $parsed = (Invoke-AgentWorkflowAdvisoryVerifier $fixtureRoot).output | ConvertFrom-Json
-        @($parsed.findings | Where-Object code -eq 'host_radar_receipt_unverified_value').Count | Should Be 1
-        @($parsed.findings | Where-Object code -eq 'host_spawn_model_probe_receipt_invalid').Count | Should Be 1
+        @($parsed.findings | Where-Object code -eq 'radar_active_contract_detected').Count | Should BeGreaterThan 0
         @($parsed.findings | Where-Object code -eq 'four_tier_wording_detected').Count | Should Be 1
     }
 
@@ -135,19 +133,19 @@ Describe 'Agent workflow advisory planning verifier' {
         @($parsed.findings | Where-Object code -eq 'zero_side_effect_contract_missing').Count | Should Be 1
     }
 
-    It 'requires failure packet and stale Radar fail-closed policy' {
+    It 'requires failure packet host availability and a Radar-independent decision path' {
         $fixtureRoot = New-AgentWorkflowAdvisoryFixture 'failure-radar'
         $applicationPath = Join-Path $fixtureRoot 'src\Application\ModelAndAgentPolicy.ps1'
-        $application = (Get-Content -LiteralPath $applicationPath -Raw).Replace('Test-AgentFailurePacketContract $FailurePacket', '$true').Replace('if (-not $radarValidation.pass -and -not $hasLocal -and -not $hostConfirmed)', 'if ($false)').Replace('host_pair_availability_unknown', 'host_pair_state_missing')
+        $application = (Get-Content -LiteralPath $applicationPath -Raw).Replace('Test-AgentFailurePacketContract $FailurePacket', '$true').Replace('host_pair_availability_unknown', 'host_pair_state_missing').Replace('$validLocalOutcomes = New-Object', '$radarValidation = Test-RadarSnapshotContract -Snapshot $RadarSnapshot -Now $Now`r`n    $validLocalOutcomes = New-Object')
         Set-Content -LiteralPath $applicationPath -Value $application -Encoding UTF8
 
         $parsed = (Invoke-AgentWorkflowAdvisoryVerifier $fixtureRoot).output | ConvertFrom-Json
         @($parsed.findings | Where-Object code -eq 'failure_packet_gate_missing').Count | Should Be 1
-        @($parsed.findings | Where-Object code -eq 'stale_radar_fallback_missing').Count | Should Be 1
+        @($parsed.findings | Where-Object code -eq 'active_radar_decision_path_detected').Count | Should BeGreaterThan 0
         @($parsed.findings | Where-Object code -eq 'host_surface_availability_gate_missing').Count | Should Be 1
     }
 
-    It 'requires structured completion planning-only Radar allowlists and input reparse guards' {
+    It 'requires structured completion planning-only legacy Radar parsing and input reparse guards' {
         $fixtureRoot = New-AgentWorkflowAdvisoryFixture 'adversarial-contracts'
         $applicationPath = Join-Path $fixtureRoot 'src\Application\ModelAndAgentPolicy.ps1'
         $application = (Get-Content -LiteralPath $applicationPath -Raw).Replace('function Test-AgentCompletionVerificationReceipt', 'function Test-UntrustedReceipt').Replace("'planned_dependency_order_only'", "'claimed_complete'")

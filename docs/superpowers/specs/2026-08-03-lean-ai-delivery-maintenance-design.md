@@ -208,15 +208,15 @@ FailurePacket:
 | --- | --- | --- | --- |
 | `Sol xhigh` | `gpt-5.6-sol` + `xhigh` | 需求/产品澄清、架构与大型重构、跨服务生产 RCA、高风险代码审查、最终 integration/adjudication | 清楚且机械的批量任务 |
 | `Sol medium` | `gpt-5.6-sol` + `medium` | 一般实现、日常 Bug 排查、中等复杂度审查、集成准备 | 缺权限/工具/用户决策的问题 |
-| `Luna max` | `gpt-5.6-luna` + `max` | 清楚、窄、可重复和高吞吐的 CRUD/SQL/单测/文档/机械转换、异步 workers | 承重架构裁决或失败后的无限重试 |
+| `Sol low` | `gpt-5.6-sol` + `low` | 清楚、窄、可重复和高吞吐的 CRUD/SQL/单测/文档/机械转换、异步 workers | 承重架构裁决或失败后的无限重试 |
 
 `Host-resolved pair` 是当前可理解的 model/effort 组合，不是永久 model ID 白名单；宿主不可用、名称变化或 Radar stale 时由宿主选择当前官方/default，并在 ModelPolicy 中记录实际值和 override reason。
 
-Radar refresh 与 task execution 分离；snapshot 必须显式产生、记录原始 hash 和过期时间，不能在每个 task 隐式联网。stale/unavailable 时回退宿主官方/default；本地同类任务的 gate、返工、费用、时长和人工纠正优先于榜单。Radar 不证明准确率、生产质量或 live acceptance，模型策略不压成永久单分数。
+Radar refresh 已停用并与 task execution 及模型编排彻底隔离；旧 snapshot 仅保留只读兼容。当前 surface availability、本地同类任务的 gate、返工、费用、时长和人工纠正可以构成 proposal evidence，外部榜单不参与。模型策略不压成永久单分数。
 
 串并行 admission：完全只读或 exact write set 互斥、base 固定、依赖完成、外部写入可见、candidate 可独立验证/丢弃、integration owner/order 明确时才可并行。共享 file/config/lock/source-generated seam、schema/migration/backfill、Git index/ref、同一外部对象、内容依赖和 final integration/full gate/closeout 一律串行。并发数由宿主可用槽位和任务独立性共同约束，不以“模型更强”放宽 write-set 规则。
 
-升级状态机：initial route -> root-cause diagnosis 后一次 corrected retry -> task/context 问题则补证据或 re-scope -> 只有 capacity 问题按 `Luna max -> Sol medium -> Sol xhigh` 升档 -> 同一 issue 两次失败 clarify/re-plan -> 两次升级或承重风险由 supervisor 串行接管。缺 auth/permission/tool/production/user decision 直接 fail-closed。禁止无 `FailurePacket` 换档、同 prompt 无限重试、子 Agent 扩大 write set 或运行中无审计热切换。
+升级状态机：initial route -> root-cause diagnosis 后一次 corrected retry -> task/context 问题则补证据或 re-scope -> 只有 capacity 问题按 `Sol low -> Sol medium -> Sol xhigh` 升档 -> 同一 issue 两次失败 clarify/re-plan -> 两次升级或承重风险由 supervisor 串行接管。缺 auth/permission/tool/production/user decision 直接 fail-closed。禁止无 `FailurePacket` 换档、同 prompt 无限重试、子 Agent 扩大 write set 或运行中无审计热切换。
 
 ### 13.2 PowerShell and typed-core migration contract
 

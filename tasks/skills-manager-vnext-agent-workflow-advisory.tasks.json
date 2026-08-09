@@ -11,44 +11,38 @@
   "runtime_scheduler_status": "not_introduced",
   "provider_call_status": "none",
   "native_mutation_status": "none",
-  "radar_fetch_status": "not_implemented",
+  "radar_fetch_status": "retired",
   "host_loaded_status": "host_evaluation_partial",
   "host_orchestration_status": "native_spawn_partial",
-  "host_radar_refresh_status": "pending_revalidation",
-  "host_radar_receipt": {
-    "status": "pending_revalidation",
-    "automation_revision": "radar-snapshot-v2-three-tier-20260806",
-    "executed_model": null,
-    "executed_effort": null,
-    "run_at": null,
-    "snapshot_id": null
-  },
-  "host_model_probe_receipt": {
-    "status": "cli_model_probe_pass",
-    "surface": "codex_exec_ephemeral",
-    "executed_model": "gpt-5.6-luna",
-    "executed_effort": "max",
-    "provider": "codex_local_access",
-    "sandbox": "read-only",
-    "run_at": "2026-08-05T17:05:00Z"
-  },
-  "host_spawn_model_probe_receipt": {
-    "status": "confirmed_unavailable",
-    "surface": "collaboration_spawn",
-    "requested_model": "gpt-5.6-luna",
-    "requested_effort": "max",
-    "available_models": ["gpt-5.6-sol", "gpt-5.6-terra"],
-    "error_code": "unknown_model",
-    "run_at": "2026-08-05T19:23:59Z",
-    "expires_at": "2026-08-06T19:23:59Z",
-    "fallback_tier": "sol_medium",
-    "recovery_condition": "A fresh collaboration_spawn receipt reports gpt-5.6-luna|max as confirmed_available."
+  "host_radar_refresh_status": "disabled",
+  "legacy_read_only_receipts": {
+    "radar_snapshot_contract": "v2_compatibility_parser_only",
+    "radar_automation_status": "deleted",
+    "historical_model_probe": {
+      "status": "cli_model_probe_pass",
+      "surface": "codex_exec_ephemeral",
+      "executed_model": "gpt-5.6-luna",
+      "executed_effort": "max",
+      "provider": "codex_local_access",
+      "sandbox": "read-only",
+      "run_at": "2026-08-05T17:05:00Z"
+    },
+    "historical_spawn_probe": {
+      "status": "confirmed_unavailable",
+      "surface": "collaboration_spawn",
+      "requested_model": "gpt-5.6-luna",
+      "requested_effort": "max",
+      "available_models": ["gpt-5.6-sol", "gpt-5.6-terra"],
+      "error_code": "unknown_model",
+      "run_at": "2026-08-05T19:23:59Z",
+      "expires_at": "2026-08-06T19:23:59Z"
+    }
   },
   "live_acceptance_status": "not_run",
   "model_tiers": [
     { "tier": "sol_xhigh", "model_family": "gpt-5.6-sol", "reasoning_effort": "xhigh", "mode": "soft_anchor" },
     { "tier": "sol_medium", "model_family": "gpt-5.6-sol", "reasoning_effort": "medium", "mode": "soft_anchor" },
-    { "tier": "luna_max", "model_family": "gpt-5.6-luna", "reasoning_effort": "max", "mode": "user_preferred_soft_anchor" }
+    { "tier": "sol_low", "model_family": "gpt-5.6-sol", "reasoning_effort": "low", "mode": "soft_anchor" }
   ],
   "allowed_statuses": ["done"],
   "tasks": [
@@ -66,7 +60,7 @@
         "docs/product/skills-manager-vnext-roadmap.md",
         "docs/product/README.md"
       ],
-      "goal": "把用户/宿主/本仓/native runtime 的责任和 TaskGraph v1、RadarSnapshot v2、FailurePacket v1 字段固化为不越权的 advisory contract。",
+      "goal": "把用户/宿主/本仓/native runtime 的责任和 TaskGraph v1、FailurePacket v1、legacy Radar read-only compatibility 固化为不越权的 advisory contract。",
       "implementation_steps": ["核对 Codex 官方 subagent/model/worktree 文档", "复核 P5/M0.3 边界", "同步 PRD/架构/路线图/索引"],
       "verification": ["ConvertFrom-Json manifest", "spec marker review", "scripts/verify-agent-workflow-advisory.ps1 -Json"],
       "stop_conditions": ["产品真源可追踪", "P6 hold", "runtime/provider/host mutation remain none"],
@@ -81,7 +75,7 @@
       "depends_on": ["SMV-AWA-001"],
       "write_set": ["src/Domain/AgentWorkflow.ps1", "build.ps1", "tests/Unit/AgentWorkflowContracts.Tests.ps1", "tests/fixtures/agent-workflow/valid-request.json", "tests/fixtures/agent-workflow/invalid-request.json"],
       "goal": "对 DAG、依赖、cycle、integration order、canonical exact write set、Radar source freshness/hash/non-empty observation、FailurePacket/redaction 做 fail-closed 校验。",
-      "implementation_steps": ["先运行 RED focused tests", "实现 TaskGraph/FailurePacket v1 与 RadarSnapshot v2 plain-object validators", "禁止 Radar policy_overrides 并保持 domain 无 IO/clock/env/network/terminal"],
+      "implementation_steps": ["先运行 RED focused tests", "实现 TaskGraph/FailurePacket v1 validators 与 legacy Radar v2 read-only parser", "保持 domain 无 IO/clock/env/network/terminal"],
       "verification": ["Invoke-Pester tests/Unit/AgentWorkflowContracts.Tests.ps1", "build.ps1"],
       "stop_conditions": ["20 focused cases pass", "生成入口包含 Domain/AgentWorkflow.ps1", "无 provider/native mutation"],
       "rollback": ["删除 AWA-002 源码/fixture/test，并恢复 build 列表"],
@@ -94,10 +88,10 @@
       "risk": "medium",
       "depends_on": ["SMV-AWA-002"],
       "write_set": ["src/Application/ModelAndAgentPolicy.ps1", "build.ps1", "tests/Unit/AgentWorkflowContracts.Tests.ps1"],
-      "goal": "把 completion receipt、barrier wave、canonical disjoint write-set admission、surface-scoped 三态可用性、三档宿主 proposal 校验、Radar/local outcome fallback 和 FailurePacket 状态机做成 deterministic advisory。",
-      "implementation_steps": ["每 wave 只输出一个可执行 group，serial/high-risk/high-ambiguity 建立 barrier", "静态 PlanningOnly 只推进 planned_dependency_order_only，不伪造完成回执", "只有带 schema v1、时间、verifier、SHA-256 和 commands 的 verified receipt 且依赖闭合的前置任务可进入并行准入", "将目标 host_surface 的 pair inventory 归一为 confirmed_available/confirmed_unavailable/unknown", "禁止 Radar、local outcome 或另一 surface receipt 把 unknown 提升为可用", "校验 host proposal 与 comparable local outcome，不在本仓自动选模", "corrected retry 先串行并要求 parallel readmission"],
+      "goal": "把 completion receipt、barrier wave、canonical disjoint write-set admission、surface-scoped 三态可用性、Sol 三档宿主 proposal 校验、local outcome fallback 和 FailurePacket 状态机做成 deterministic advisory。",
+      "implementation_steps": ["每 wave 只输出一个可执行 group，serial/high-risk/high-ambiguity 建立 barrier", "静态 PlanningOnly 只推进 planned_dependency_order_only，不伪造完成回执", "只有带 schema v1、时间、verifier、SHA-256 和 commands 的 verified receipt 且依赖闭合的前置任务可进入并行准入", "将目标 host_surface 的 pair inventory 归一为 confirmed_available/confirmed_unavailable/unknown", "禁止 Radar、外榜、local outcome 或另一 surface receipt 把 unknown 提升为可用", "校验 host proposal 与 comparable local outcome，不在本仓自动选模", "corrected retry 先串行并要求 parallel readmission"],
       "verification": ["focused Pester", "valid/invalid fixture replay", "CLI output review"],
-      "stop_conditions": ["discover -> implement+document -> integrate barrier 可复现", "serial-only request 返回 not_requested", "缺 host_surface、空 pair inventory、confirmed_unavailable 或 stale Radar 时回退 host_default", "fresh Radar/local outcome 不能覆盖 unknown availability", "换档必须有 FailurePacket 且不得自动恢复并行"],
+      "stop_conditions": ["discover -> implement+document -> integrate barrier 可复现", "serial-only request 返回 not_requested", "缺 host_surface、空 pair inventory或 confirmed_unavailable 时回退 host_default", "Radar 不出现在活动 proposal/evidence", "换档必须有 FailurePacket 且不得自动恢复并行"],
       "rollback": ["删除 AWA-003 application 增量和对应测试"],
       "evidence_group": "agent_workflow_advisory"
     },

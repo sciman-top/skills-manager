@@ -115,6 +115,8 @@ function Test-AgentTaskGraphContract($TaskGraph) {
     return New-OperationValidationResult $findings.ToArray()
 }
 
+# Legacy read-only compatibility for historical Radar v2 receipts. Active model
+# proposals must not call these functions or use their output as evidence.
 function New-RadarSnapshot {
     param(
         [Parameter(Mandatory = $true)][string]$SnapshotId,

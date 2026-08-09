@@ -61,13 +61,13 @@
 - [x] `SMV-MD-006` 固化稀疏工具栈、社区 disposition、context-adapter admission 与 M1 observation contract。
 - [x] `SMV-MD-007` 增强 evidence-group、M0.2 policy 和 sample observation 的 fail-closed verifier/tests。
 - [x] `SMV-MD-008` 同步 M0.2 产品/根契约/evidence，运行唯一 full gate 并限定 truth closeout。
-- [x] `SMV-MD-009` 固化 host-owned TaskGraph、三档模型软锚点（Luna max 用户默认）、Radar snapshot、并发 admission 和失败升级合同。
+- [x] `SMV-MD-009` 固化 host-owned TaskGraph、Sol xhigh/medium/low 三档软锚点、Radar-independent 编排、并发 admission 和失败升级合同。
 - [x] `SMV-MD-010` 固化 PowerShell thin shell + C#/.NET typed-core 条件性架构、TC0-TC3、兼容与回滚门禁。
 - [x] `SMV-MD-011` 增强 M0.3 verifier/tests，同步索引/根契约/README/evidence 并完成唯一 full gate 收口。
 - [x] M0.1 补齐 North Star、native baseline、双证据流、删除评审与 pilot 计数合同。
 - [ ] M1 收集并 review 10 个真实 observe-only 样本（当前 0/10）。
 
-M0/M0.2/M0.3 maintenance design planning package 为 11/11 `repo_verified`；M1 已获授权并保持 `collecting (0/10)`，但没有任何真实样本、并行/工具/模型策略收益、pilot 完成或业务收益声明。coordinator/lease/model-router runtime、仓库 Radar live refresh、仓库 custom-agent/host config mutation和社区工具安装均未发生；Luna max 仅是用户/CLI provider 默认且 CLI 探针通过，当前 collaboration spawn receipt 为 `confirmed_unavailable`，不能写成宿主所有 surface 已收敛。Sol/Terra native subagent 与首个 Radar Scheduled run 仅保留对应 surface 的历史 receipt。typed-core TC0/TC1 只完成 shadow PoC，PowerShell 领域实现未替换。当前 shell 支持面已独立收敛为 PS7-only；M3/TC3 conditional、TC2/P6 admission/业务 `live_accepted` 均未执行。
+M0/M0.2/M0.3 maintenance design planning package 为 11/11 `repo_verified`；M1 已获授权并保持 `collecting (0/10)`，但没有任何真实样本、并行/工具/模型策略收益、pilot 完成或业务收益声明。coordinator/lease/model-router runtime、仓库 custom-agent/host config mutation和社区工具安装均未发生；活动档位已经收敛为 Sol xhigh/medium/low，Radar refresh 已禁用且不参与编排。旧 Luna/Terra native subagent 与 Radar Scheduled run 仅保留对应 surface 的历史 receipt。typed-core TC0/TC1 只完成 shadow PoC，PowerShell 领域实现未替换。当前 shell 支持面已独立收敛为 PS7-only；M3/TC3 conditional、TC2/P6 admission/业务 `live_accepted` 均未执行。
 
 ## PowerShell 7 runtime migration checklist
 
@@ -81,13 +81,13 @@ M0/M0.2/M0.3 maintenance design planning package 为 11/11 `repo_verified`；M1 
 
 ## Agent workflow advisory runtime checklist
 
-- [x] `SMV-AWA-001` 冻结 user/host/repo/native runtime 分责、TaskGraph/FailurePacket v1、RadarSnapshot v2 和 P6/host/live 边界。
+- [x] `SMV-AWA-001` 冻结 user/host/repo/native runtime 分责、TaskGraph/FailurePacket v1、legacy Radar read-only compatibility 和 P6/host/live 边界。
 - [x] `SMV-AWA-002` 实现 canonical write path、completion receipt、Radar upstream freshness/non-empty/observation-only 与 FailurePacket correction validators。
 - [x] `SMV-AWA-003` 实现 one-group barrier waves、parallel admission、三档 host proposal/local outcome validation 和 bounded escalation/readmission。
 - [x] `SMV-AWA-004` 接入 PS7 `agent-plan/agent-validate`，真实 bundle envelope 固定 provider/native/write counters 0。
 - [x] `SMV-AWA-005` 建立 verifier/negative tests、产品/根/README/evidence 同步并以唯一 full gate 收口。
 
-该 adjacent track 为 5/5 `repo_verified / repo_advisory_only`：只证明仓库合同与 CLI。当前宿主状态为 `host_evaluation_partial`：Luna max 已通过 `codex exec --ephemeral --sandbox read-only` 的真实 provider/model 探针，但 collaboration spawn surface 尚不可用；Sol spawn 本轮遇到 429，历史 v1 Radar run 不满足 v2 revalidation，且未用 Terra 恢复第四档。它不证明任意项目必然自动委派、未来 scheduled run 永久可靠、模型策略有普遍净收益或业务 `live_accepted`。
+该 adjacent track 为 5/5 `repo_verified / repo_advisory_only`：只证明仓库合同与 CLI。当前活动三档为 `Sol xhigh / Sol medium / Sol low`，均由宿主按任务语义提案并受当前 surface availability 约束；Radar automation 已删除，旧 Luna/Terra/Radar probe 仅为历史只读 receipt。它不证明任意项目必然自动委派、模型策略有普遍净收益或业务 `live_accepted`。
 
 ## Typed-core Operation Contract checklist
 

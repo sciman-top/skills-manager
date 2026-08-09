@@ -9,17 +9,17 @@
 **RUNTIME_SCHEDULER_STATUS**: `not_introduced`
 **PROVIDER_CALL_STATUS**: `none`
 **NATIVE_MUTATION_STATUS**: `none`
-**RADAR_FETCH_STATUS**: `not_implemented`
+**RADAR_FETCH_STATUS**: `retired`
 **HOST_LOADED_STATUS**: `host_evaluation_partial`
 **HOST_ORCHESTRATION_STATUS**: `native_spawn_partial`
-**HOST_RADAR_REFRESH_STATUS**: `pending_revalidation`
+**HOST_RADAR_REFRESH_STATUS**: `disabled`
 **LIVE_ACCEPTANCE_STATUS**: `not_run`
 **P6_ADMISSION_STATUS**: `hold`
 **SCHEMA_POLICY**: `operation_contract_v1_compatible_no_major`
 
 ## 1. 决策摘要
 
-用户提出的动态模型选择、长链路主 Agent、任务拆分、串并行子 Agent 协调、Radar 成本/时延参考和失败升档，属于宿主 AI 的语义与执行职责；它们不应被实现成仓库内第二个 Agent runtime。Codex 原生已经提供 subagent spawn、wait、steer、thread 汇总、custom-agent 的 model/reasoning effort 和 worktree 隔离。本 track 只补一层 runtime-independent advisory contract，让宿主可以生成可审查的任务图、请求确定性 admission、消费模型软锚点与失败建议。
+动态模型选择、长链路主 Agent、任务拆分、串并行子 Agent 协调和失败升档属于宿主 AI 的语义与执行职责；它们不应被实现成仓库内第二个 Agent runtime。Codex 原生已经提供 subagent spawn、wait、steer、thread 汇总、custom-agent 的 model/reasoning effort 和 worktree 隔离。本 track 只补一层 runtime-independent advisory contract，让宿主可以生成可审查的任务图、请求确定性 admission、消费模型软锚点与失败建议。
 
 本实现采用以下责任分界：
 
@@ -27,7 +27,7 @@
 | --- | --- | --- |
 | 用户 | 目标、价值排序、不可逆风险、生产/外部授权和最终否决 | 否；用户输入是 authority |
 | 宿主 AI | 需求澄清、TaskGraph、串并行、模型/effort、spawn/wait/steer、升级、集成和最终综合 | 否；输出 `decision_owner=host_ai` |
-| `skills-manager` | TaskGraph/Radar/FailurePacket 合同、deterministic admission、模型建议、证据和 zero-write envelope | 是 |
+| `skills-manager` | TaskGraph/FailurePacket 合同、deterministic admission、模型建议、证据和 zero-write envelope；旧 Radar v2 仅只读兼容解析 | 是 |
 | Codex native runtime | 实际 agent thread、worktree、模型调用、等待、steer 和 candidate integration | 否；由宿主使用 |
 | Git/tests/live probe | freshness、代码正确性、外部效果和验收真值 | 否；只记录边界 |
 
@@ -41,7 +41,7 @@
 
 ## 3. 输入合同
 
-CLI 请求仍是 UTF-8 JSON schema version 1；其中 `TaskGraph` 与 `FailurePacket` 为 v1，时变观测 `RadarSnapshot` 已升级为 v2。字段名与 `tests/fixtures/agent-workflow/valid-request.json` 保持一致；不再增加第二套 task manifest。
+CLI 请求仍是 UTF-8 JSON schema version 1；其中 `TaskGraph` 与 `FailurePacket` 为 v1。`radar_snapshot` 只作为旧请求的可选兼容字段被忽略，不参与 proposal validation、fallback 或 evidence。字段名与 `tests/fixtures/agent-workflow/valid-request.json` 保持一致；不再增加第二套 task manifest。
 
 ```json
 {
@@ -142,15 +142,15 @@ CLI 请求仍是 UTF-8 JSON schema version 1；其中 `TaskGraph` 与 `FailurePa
 | --- | --- | --- |
 | `sol_xhigh` | `gpt-5.6-sol + xhigh` | 需求/产品澄清、总体架构、跨服务生产 RCA、高价值高风险审查、最终裁决 |
 | `sol_medium` | `gpt-5.6-sol + medium` | 一般实现、日常 Bug 排查、中等复杂度审查、集成准备 |
-| `luna_max` | `gpt-5.6-luna + max` | 用户默认；常规接口、SQL、单测、技术文档、机械变换和边界清晰的重复任务 |
+| `sol_low` | `gpt-5.6-sol + low` | 常规接口、SQL、单测、技术文档、机械变换和边界清晰的重复任务 |
 
-实际选择优先级为 `user override -> local comparable outcomes -> current surface availability -> fresh Radar snapshot -> host native default`，但 availability 是执行前置门禁，不是可被前两项或 Radar 替代的评分证据。每个 proposal 必须声明 `host_surface`；该 surface 的 pair inventory 归一为 `confirmed_available / confirmed_unavailable / unknown`。空 inventory 或缺 surface 为 `unknown`，另一 CLI/provider/API gateway 的成功 receipt 不得投影到 `collaboration_spawn`；只有 `confirmed_available` 才可保留该 tier。`Luna max` 是当前用户明确覆盖的 routine 默认；Radar 后续变化只能生成可审计建议，不能自动增加 Terra 或其他第四档。费用、wall-clock、token/context、重试/返工和不可逆风险一起构成 Pareto 观察；不得把每天变化的 Radar 排名硬编码为总分或永久配置。模型不存在、宿主不可用、tier 已移除、availability 未确认或 snapshot stale 时返回 `host_default` 与 fallback reason。
+实际选择优先级为 `user override -> local comparable outcomes -> current surface availability -> host native default`。availability 是执行前置门禁；每个 proposal 必须声明 `host_surface`，该 surface 的 pair inventory 归一为 `confirmed_available / confirmed_unavailable / unknown`。空 inventory 或缺 surface 为 `unknown`，另一 CLI/provider/API gateway 的成功 receipt 不得投影到 `collaboration_spawn`；只有 `confirmed_available` 才可保留该 tier。三档均使用 `gpt-5.6-sol`，分别是 `sol_xhigh / sol_medium / sol_low`。Radar、外部榜单和历史 probe 不得改变 tier、优先级或 fallback。模型不存在、宿主不可用、tier 已移除或 availability 未确认时返回 `host_default` 与 fallback reason。
 
-## 7. Radar snapshot
+## 7. Legacy Radar snapshot compatibility
 
-Radar 只允许通过显式导入/刷新动作产生不可变 v2 snapshot；本 track 不实现联网抓取。每个 entry 必须有 `model_label/model_family/reasoning_effort/score/estimated_cost/estimated_duration_seconds/sample_count/confidence`，entries 不得为空；snapshot 必须有 `source/captured_at/source_updated_at/expires_at/raw_hash`。source 只接受 `https://codexradar.com/` 或 `https://www.codexradar.com/`；entry 只接受 `gpt-5.6-sol|xhigh`、`gpt-5.6-sol|medium`、`gpt-5.6-luna|max` 三个唯一 pair，并使用 `Sol xhigh`、`Sol medium`、`Luna max` canonical label。每日上游的 Terra、其他 effort 或其他模型只允许保存在 `audit_metadata.external_observations` 作为不可决策观察，禁止混入 entries、model proposal 或 active tier。上游 `source_updated_at` 距 capture 超过 36 小时、明显晚于 capture、`expires_at <= now`、非 HTTPS/非 allowlisted host、未知或重复 active pair、hash 非 SHA-256、样本/指标缺失或 schema 不兼容时 fail-closed。`policy_overrides` 等用户/宿主决策字段禁止进入观测 snapshot。
+`New-RadarSnapshot` 与 `Test-RadarSnapshotContract` 仅为既有 v2 receipt 提供只读兼容解析，保留当时的三 pair、source/hash/expiry 与 forbidden-field 校验，避免历史证据失去可读性。活动 `New-ModelPolicyProposal` 和 `Test-AgentWorkflowRequest` 不得调用该 validator、读取 entry 或返回 Radar evidence；宿主 Radar automation 已删除，`HOST_RADAR_REFRESH_STATUS=disabled`。
 
-本地结果只有满足最小 comparable contract、pair 一致、freshness 与 gate 证据时才优先于 Radar；传入空对象或 stale/invalid outcome 不得屏蔽无效 Radar。Radar 的社区分数不能替代真实任务证据，也不能证明 `live_accepted`。2026-08-05 的 v1 snapshot 与首个 scheduled run 仅保留为历史 receipt；21-entry manual v2 probe 因 18 个非 allowlisted pair 和 3 个非 canonical label 未通过当前 validator，只能作为失败诊断。宿主 automation 已更新为 `radar-snapshot-v2-three-tier-20260806` 并进入重新验收；在生成带该 revision、实际 model/effort、run time 与 snapshot id 的新 scheduled receipt 前，`HOST_RADAR_REFRESH_STATUS=pending_revalidation`。
+本地 comparable outcome 只能补充当前任务证据，不能绕过 host surface availability。历史 Radar 社区分数、v1/v2 snapshots、manual probe 和 scheduled receipts 均不参与活动建议，也不能证明 `live_accepted`；它们只保留在历史 evidence 或 manifest 的 `legacy_read_only_receipts` 中。
 
 ## 8. 失败与难度超预期
 
@@ -162,7 +162,7 @@ route
   -> one corrected retry (same tier, corrected context/tool; serial until re-admitted)
   -> task/context: add evidence or rescope/replan
   -> tool: repair tool or reassign
-  -> capacity only: Luna max -> Sol medium -> Sol xhigh
+  -> capacity only: Sol low -> Sol medium -> Sol xhigh
   -> same issue_id second failure: supervisor serial takeover / clarify
   -> permission, credential, production authorization, user decision: fail-closed
 ```
@@ -214,7 +214,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File skills.ps1 agent-plan --input test
 
 - Codex manual：`https://learn.chatgpt.com/docs/agent-configuration/subagents`、`https://learn.chatgpt.com/docs/automations`、`https://learn.chatgpt.com/docs/models`、`https://learn.chatgpt.com/docs/long-running-work`。官方说明 Codex 可因适用 `AGENTS.md`/skill 条件性委派，subagent 适合 read-heavy/可独立任务，写入需隔离 worktree；Sol 适合复杂开放任务，Terra 适合速度/效率优先的辅助工作，Luna 适合快速、清晰、重复任务；更高 reasoning effort 增加时间和 token；宿主负责 spawn/wait/steer/汇总，Scheduled task 承接稳定重复工作。
 - Codex configuration：`https://learn.chatgpt.com/docs/config-file/config-reference`。custom agent 可以声明 model/reasoning effort，但显式 spawn/宿主配置优先级属于宿主边界，本仓不修改。
-- Codex Radar：`https://codexradar.com/` 只作为用户指定的时变社区观察输入；其每日成本/时延/分数必须经 snapshot、hash、expiry 和本地结果复核后才可影响建议。
+- Legacy Codex Radar：`https://codexradar.com/` 仅用于解释历史 receipt；不再刷新，也不得影响活动建议。
 - 社区项目只提供协议启发，按既有 `references/reference-shelf.manifest.json` 和 `docs/EXTERNAL_REFERENCE_REPO_TIERS.md` 记录，不执行外部脚本，不引入第二控制面。
 
-**最大声明**：本 track `repo_verified` 只证明 deterministic advisory contract、CLI 接线、文档和 verifier。2026-08-06 的 read-only ephemeral CLI probe 已实证 `codex_local_access / gpt-5.6-luna / max` 可用；但当前 collaboration spawn surface 对同一 Luna model 返回 unavailable，说明 provider/model 可用性不能外推到所有子代理 surface。早期 Radar v1 run 只保留历史真值，v2 scheduled receipt 仍待生成。这些仅构成 `host_evaluation_partial`，不证明任意任务都会自动委派、Luna 在所有 spawn surface 可用、模型策略产生普遍净收益、外部生产动作获授权或业务 `live_accepted`。
+**最大声明**：本 track `repo_verified` 只证明 deterministic advisory contract、CLI 接线、文档和 verifier。旧 Luna/Terra/Radar probes 只保留历史真值，不能投影为当前三档可用性；当前三档仍须由目标 host surface 的 fresh availability 解锁。这仅构成 `host_evaluation_partial`，不证明任意任务都会自动委派、模型策略产生普遍净收益、外部生产动作获授权或业务 `live_accepted`。

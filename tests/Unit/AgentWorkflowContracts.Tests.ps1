@@ -267,13 +267,46 @@ Describe 'Agent workflow advisory contracts' {
         $result = New-ModelPolicyProposal -TaskId $proposal.task_id -RequestedTier $proposal.requested_tier -Rationale $proposal.rationale -RadarSnapshot $fixture.radar_snapshot -HostSurface $proposal.host_surface -HostAvailablePairs $proposal.host_available_pairs -LocalOutcomes $proposal.local_outcomes -Now $fixture.now -UserOverrideTier $proposal.user_override_tier
 
         $result.decision_owner | Should Be 'host_ai'
-        $result.selected_tier | Should Be 'luna_max'
-        $result.model_family | Should Be 'gpt-5.6-luna'
-        $result.reasoning_effort | Should Be 'max'
+        $result.selected_tier | Should Be 'sol_low'
+        $result.model_family | Should Be 'gpt-5.6-sol'
+        $result.reasoning_effort | Should Be 'low'
         $result.user_override | Should Be $true
-        $result.evidence_priority | Should Be 'user_override_then_local_outcomes_then_host_availability_then_radar_then_host_default'
+        $result.evidence_priority | Should Be 'user_override_then_local_outcomes_then_host_availability_then_host_default'
         $result.provider_calls | Should Be 0
         $result.native_mutations | Should Be 0
+    }
+
+    It 'uses Sol low as the routine tier and keeps Radar outside the active decision path' {
+        Assert-AgentWorkflowFunction 'Get-AgentModelTierAnchor'
+        Assert-AgentWorkflowFunction 'New-ModelPolicyProposal'
+        $fixture = Get-AgentWorkflowFixture 'invalid-request.json'
+
+        $anchor = Get-AgentModelTierAnchor 'sol_low'
+        $anchor.model_family | Should Be 'gpt-5.6-sol'
+        $anchor.reasoning_effort | Should Be 'low'
+        (Get-AgentModelTierAnchor 'luna_max') | Should BeNullOrEmpty
+
+        $result = New-ModelPolicyProposal -TaskId 'routine' -RequestedTier 'sol_low' -Rationale 'Bounded mechanical task.' -RadarSnapshot $fixture.radar_snapshot -HostSurface 'collaboration_spawn' -HostAvailablePairs @('gpt-5.6-sol|low') -Now $fixture.now
+
+        $result.selected_tier | Should Be 'sol_low'
+        $result.model_family | Should Be 'gpt-5.6-sol'
+        $result.reasoning_effort | Should Be 'low'
+        $result.evidence_priority | Should Be 'user_override_then_local_outcomes_then_host_availability_then_host_default'
+        $result.PSObject.Properties.Name | Should Not Contain 'radar_snapshot_id'
+        $result.PSObject.Properties.Name | Should Not Contain 'radar_entry'
+        $result.evidence_sources.PSObject.Properties.Name | Should Not Contain 'radar'
+
+        $request = Get-AgentWorkflowFixture 'valid-request.json'
+        $request.radar_snapshot.entries = @()
+        (Test-AgentWorkflowRequest $request).pass | Should Be $true
+    }
+
+    It 'escalates a capacity failure from Sol low to Sol medium' {
+        $packet = New-AgentFailurePacket -IssueId 'issue-low-capacity' -TaskId 'routine' -BaseRevision '84cb53aa' -FailureKind capacity -AttemptCount 2 -EscalationCount 0 -AttemptedTier sol_low -AttemptedModel 'gpt-5.6-sol' -AttemptedEffort low -Commands @('focused tests') -Failures @('reasoning incomplete') -VerifiedFacts @('inputs present') -ExactWriteSet @('src/Domain/Feature.ps1') -CorrectionSummary 'Reduced the write set.' -NextRecommendation 'replan and escalate'
+
+        $decision = Get-AgentEscalationDecision $packet
+        $decision.action | Should Be 'replan_and_escalate'
+        $decision.next_tier | Should Be 'sol_medium'
     }
 
     It 'rejects the removed Terra high tier instead of silently routing it' {
@@ -282,33 +315,32 @@ Describe 'Agent workflow advisory contracts' {
         $fixture = Get-AgentWorkflowFixture 'valid-request.json'
 
         (Get-AgentModelTierAnchor 'terra_high') | Should BeNullOrEmpty
-        $result = New-ModelPolicyProposal -TaskId 'legacy-terra' -RequestedTier 'terra_high' -Rationale 'Legacy request.' -RadarSnapshot $fixture.radar_snapshot -HostSurface 'collaboration_spawn' -HostAvailablePairs @('gpt-5.6-luna|max', 'gpt-5.6-sol|medium', 'gpt-5.6-sol|xhigh') -Now $fixture.now
+        $result = New-ModelPolicyProposal -TaskId 'legacy-terra' -RequestedTier 'terra_high' -Rationale 'Legacy request.' -RadarSnapshot $fixture.radar_snapshot -HostSurface 'collaboration_spawn' -HostAvailablePairs @('gpt-5.6-sol|low', 'gpt-5.6-sol|medium', 'gpt-5.6-sol|xhigh') -Now $fixture.now
 
         $result.selected_tier | Should Be 'host_default'
         $result.fallback_reason | Should Match 'tier_unknown'
     }
 
-    It 'falls back to the host default when Radar is stale or a pair is unavailable' {
+    It 'ignores stale Radar and falls back only when the host pair is unavailable' {
         Assert-AgentWorkflowFunction 'New-ModelPolicyProposal'
         $fixture = Get-AgentWorkflowFixture 'invalid-request.json'
 
-        $result = New-ModelPolicyProposal -TaskId 'alpha' -RequestedTier 'sol_xhigh' -Rationale 'Host proposal.' -RadarSnapshot $fixture.radar_snapshot -HostSurface 'collaboration_spawn' -HostAvailablePairs @('gpt-5.6-luna|max') -Now $fixture.now
+        $result = New-ModelPolicyProposal -TaskId 'alpha' -RequestedTier 'sol_xhigh' -Rationale 'Host proposal.' -RadarSnapshot $fixture.radar_snapshot -HostSurface 'collaboration_spawn' -HostAvailablePairs @('gpt-5.6-sol|low') -Now $fixture.now
 
         $result.selected_tier | Should Be 'host_default'
-        $result.fallback_reason | Should Match 'radar_snapshot_stale|host_pair_unavailable'
+        $result.fallback_reason | Should Be 'host_pair_unavailable'
         $result.advisory_only | Should Be $true
     }
 
-    It 'does not let malformed local outcomes hide Radar or missing pair failures' {
+    It 'does not let malformed local outcomes hide missing host availability' {
         $fixture = Get-AgentWorkflowFixture 'valid-request.json'
-        $fixture.radar_snapshot.entries = @($fixture.radar_snapshot.entries | Where-Object model_family -ne 'gpt-5.6-luna')
-        $result = New-ModelPolicyProposal -TaskId 'implement' -RequestedTier 'luna_max' -Rationale 'Host proposal.' -RadarSnapshot $fixture.radar_snapshot -HostSurface 'collaboration_spawn' -HostAvailablePairs @() -LocalOutcomes @([pscustomobject]@{}) -Now $fixture.now
+        $result = New-ModelPolicyProposal -TaskId 'implement' -RequestedTier 'sol_low' -Rationale 'Host proposal.' -RadarSnapshot $fixture.radar_snapshot -HostSurface 'collaboration_spawn' -HostAvailablePairs @() -LocalOutcomes @([pscustomobject]@{}) -Now $fixture.now
         $result.selected_tier | Should Be 'host_default'
-        $result.fallback_reason | Should Match 'local_outcome_invalid|radar_pair_missing'
+        $result.fallback_reason | Should Match 'local_outcome_invalid|host_pair_availability_unknown'
         $result.selection_semantics | Should Be 'host_proposal_validation_only'
 
         $validOutcome = $fixture.model_proposals[0].local_outcomes[0]
-        $invalidTime = New-ModelPolicyProposal -TaskId 'implement' -RequestedTier 'luna_max' -Rationale 'Host proposal.' -RadarSnapshot $fixture.radar_snapshot -HostSurface 'collaboration_spawn' -HostAvailablePairs @() -LocalOutcomes @($validOutcome) -Now 'not-a-time'
+        $invalidTime = New-ModelPolicyProposal -TaskId 'implement' -RequestedTier 'sol_low' -Rationale 'Host proposal.' -RadarSnapshot $fixture.radar_snapshot -HostSurface 'collaboration_spawn' -HostAvailablePairs @() -LocalOutcomes @($validOutcome) -Now 'not-a-time'
         $invalidTime.selected_tier | Should Be 'host_default'
         $invalidTime.fallback_reason | Should Match 'local_outcome_invalid'
         @($invalidTime.evidence_sources.local.rejected_findings | Where-Object code -eq 'local_outcome_evaluation_time_invalid').Count | Should Be 1
@@ -318,12 +350,12 @@ Describe 'Agent workflow advisory contracts' {
         $fixture = Get-AgentWorkflowFixture 'valid-request.json'
         $outcome = $fixture.model_proposals[0].local_outcomes[0] | ConvertTo-Json -Depth 20 | ConvertFrom-Json
         $outcome.actual_cost = [double]::NaN
-        $nonFinite = Test-AgentLocalOutcomeContract -Outcome $outcome -Anchor (Get-AgentModelTierAnchor 'luna_max') -Now $fixture.now
+        $nonFinite = Test-AgentLocalOutcomeContract -Outcome $outcome -Anchor (Get-AgentModelTierAnchor 'sol_low') -Now $fixture.now
         @($nonFinite.findings | Where-Object code -eq 'local_outcome_metric_invalid').Count | Should Be 1
 
         $outcome.actual_cost = 0.38
         $outcome.sampled_at = '08/04/2026'
-        $cultureDate = Test-AgentLocalOutcomeContract -Outcome $outcome -Anchor (Get-AgentModelTierAnchor 'luna_max') -Now $fixture.now
+        $cultureDate = Test-AgentLocalOutcomeContract -Outcome $outcome -Anchor (Get-AgentModelTierAnchor 'sol_low') -Now $fixture.now
         @($cultureDate.findings | Where-Object code -eq 'local_outcome_sampled_at_invalid').Count | Should Be 1
     }
 
@@ -358,23 +390,23 @@ Describe 'Agent workflow advisory contracts' {
         @($missingEvaluation.findings | Where-Object code -eq 'completion_evaluation_time_invalid').Count | Should Be 1
     }
 
-    It 'does not let fresh Radar or successful local outcomes promote unknown spawn availability' {
+    It 'does not let successful local outcomes promote unknown spawn availability' {
         $fixture = Get-AgentWorkflowFixture 'valid-request.json'
         $validOutcome = $fixture.model_proposals[0].local_outcomes[0]
 
-        $result = New-ModelPolicyProposal -TaskId 'implement' -RequestedTier 'luna_max' -Rationale 'Host proposal.' -RadarSnapshot $fixture.radar_snapshot -HostSurface 'collaboration_spawn' -HostAvailablePairs @() -LocalOutcomes @($validOutcome) -Now $fixture.now
+        $result = New-ModelPolicyProposal -TaskId 'implement' -RequestedTier 'sol_low' -Rationale 'Host proposal.' -RadarSnapshot $fixture.radar_snapshot -HostSurface 'collaboration_spawn' -HostAvailablePairs @() -LocalOutcomes @($validOutcome) -Now $fixture.now
 
         $result.selected_tier | Should Be 'host_default'
         $result.fallback_reason | Should Match 'host_pair_availability_unknown'
         $result.evidence_sources.host_availability.surface | Should Be 'collaboration_spawn'
         $result.evidence_sources.host_availability.state | Should Be 'unknown'
-        $result.evidence_sources.radar.used | Should Be $false
+        $result.evidence_sources.PSObject.Properties.Name | Should Not Contain 'radar'
     }
 
     It 'requires availability evidence to name the host surface' {
         $fixture = Get-AgentWorkflowFixture 'valid-request.json'
 
-        $result = New-ModelPolicyProposal -TaskId 'implement' -RequestedTier 'luna_max' -Rationale 'Host proposal.' -RadarSnapshot $fixture.radar_snapshot -HostAvailablePairs @('gpt-5.6-luna|max') -Now $fixture.now
+        $result = New-ModelPolicyProposal -TaskId 'implement' -RequestedTier 'sol_low' -Rationale 'Host proposal.' -RadarSnapshot $fixture.radar_snapshot -HostAvailablePairs @('gpt-5.6-sol|low') -Now $fixture.now
 
         $result.selected_tier | Should Be 'host_default'
         $result.fallback_reason | Should Match 'host_surface_unknown'
@@ -399,7 +431,7 @@ Describe 'Agent workflow advisory contracts' {
     It 'requires a FailurePacket before a model tier can change' {
         Assert-AgentWorkflowFunction 'New-AgentFailurePacket'
         Assert-AgentWorkflowFunction 'Test-AgentFailurePacketContract'
-        $packet = New-AgentFailurePacket -IssueId 'issue-capacity-1' -TaskId 'implement' -BaseRevision '84cb53aa' -FailureKind capacity -AttemptCount 2 -EscalationCount 0 -AttemptedTier luna_max -AttemptedModel 'gpt-5.6-luna' -AttemptedEffort max -Commands @('focused tests') -Failures @('reasoning incomplete') -VerifiedFacts @('inputs present') -ExactWriteSet @('src/Domain/Feature.ps1') -CorrectionSummary 'Added the missing invariant.' -NextRecommendation 'replan and escalate'
+        $packet = New-AgentFailurePacket -IssueId 'issue-capacity-1' -TaskId 'implement' -BaseRevision '84cb53aa' -FailureKind capacity -AttemptCount 2 -EscalationCount 0 -AttemptedTier sol_low -AttemptedModel 'gpt-5.6-sol' -AttemptedEffort low -Commands @('focused tests') -Failures @('reasoning incomplete') -VerifiedFacts @('inputs present') -ExactWriteSet @('src/Domain/Feature.ps1') -CorrectionSummary 'Added the missing invariant.' -NextRecommendation 'replan and escalate'
 
         (Test-AgentFailurePacketContract $packet).pass | Should Be $true
         $packet.issue_id | Should Be 'issue-capacity-1'
@@ -408,7 +440,7 @@ Describe 'Agent workflow advisory contracts' {
 
     It 'chooses corrected retry rescope bounded escalation and supervisor takeover by failure kind' {
         Assert-AgentWorkflowFunction 'Get-AgentEscalationDecision'
-        $base = [pscustomobject]@{ schema_version = 1; issue_id = 'issue-1'; task_id = 'task-1'; base_revision = '84cb53aa'; failure_kind = 'capacity'; attempt_count = 1; escalation_count = 0; attempted_tier = 'luna_max'; attempted_model = 'gpt-5.6-luna'; attempted_effort = 'max'; commands = @('test'); failures = @('incomplete'); verified_facts = @('context complete'); unresolved_questions = @(); artifacts = @(); exact_write_set = @('src/a.ps1'); correction_summary = 'Tightened acceptance criteria.'; next_recommendation = 'retry' }
+        $base = [pscustomobject]@{ schema_version = 1; issue_id = 'issue-1'; task_id = 'task-1'; base_revision = '84cb53aa'; failure_kind = 'capacity'; attempt_count = 1; escalation_count = 0; attempted_tier = 'sol_low'; attempted_model = 'gpt-5.6-sol'; attempted_effort = 'low'; commands = @('test'); failures = @('incomplete'); verified_facts = @('context complete'); unresolved_questions = @(); artifacts = @(); exact_write_set = @('src/a.ps1'); correction_summary = 'Tightened acceptance criteria.'; next_recommendation = 'retry' }
 
         (Get-AgentEscalationDecision -FailurePacket $base).action | Should Be 'corrected_retry'
         $base.failure_kind = 'context'
@@ -432,19 +464,19 @@ Describe 'Agent workflow advisory contracts' {
     }
 
     It 'rejects contradictory escalation counts and uncorrected retries' {
-        $packet = New-AgentFailurePacket -IssueId 'issue-bad' -TaskId 'implement' -BaseRevision '84cb53aa' -FailureKind capacity -AttemptCount 1 -EscalationCount 2 -AttemptedTier luna_max -Failures @('incomplete')
+        $packet = New-AgentFailurePacket -IssueId 'issue-bad' -TaskId 'implement' -BaseRevision '84cb53aa' -FailureKind capacity -AttemptCount 1 -EscalationCount 2 -AttemptedTier sol_low -Failures @('incomplete')
         $invalid = Test-AgentFailurePacketContract $packet
         @($invalid.findings | Where-Object code -eq 'escalation_count_inconsistent').Count | Should Be 1
         @($invalid.findings | Where-Object code -eq 'correction_evidence_required').Count | Should Be 1
         (Get-AgentEscalationDecision $packet).action | Should Be 'supervisor_review'
 
-        $corrected = New-AgentFailurePacket -IssueId 'issue-good' -TaskId 'implement' -BaseRevision '84cb53aa' -FailureKind capacity -AttemptCount 1 -EscalationCount 0 -AttemptedTier luna_max -Commands @('focused test') -Failures @('incomplete') -VerifiedFacts @('context complete') -CorrectionSummary 'Corrected the missing context.'
+        $corrected = New-AgentFailurePacket -IssueId 'issue-good' -TaskId 'implement' -BaseRevision '84cb53aa' -FailureKind capacity -AttemptCount 1 -EscalationCount 0 -AttemptedTier sol_low -Commands @('focused test') -Failures @('incomplete') -VerifiedFacts @('context complete') -CorrectionSummary 'Corrected the missing context.'
         $decision = Get-AgentEscalationDecision $corrected
         $decision.action | Should Be 'corrected_retry'
         $decision.parallel_allowed | Should Be $false
         $decision.requires_parallel_readmission | Should Be $true
 
-        $secretPacket = New-AgentFailurePacket -IssueId 'issue-secret' -TaskId 'implement' -BaseRevision '84cb53aa' -FailureKind tool -AttemptCount 1 -AttemptedTier luna_max -Failures @('token spaced-secret-value')
+        $secretPacket = New-AgentFailurePacket -IssueId 'issue-secret' -TaskId 'implement' -BaseRevision '84cb53aa' -FailureKind tool -AttemptCount 1 -AttemptedTier sol_low -Failures @('token spaced-secret-value')
         @((Test-AgentFailurePacketContract $secretPacket).findings | Where-Object code -eq 'sensitive_value_present').Count | Should Be 1
     }
 

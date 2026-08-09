@@ -163,7 +163,7 @@ function Get-AgentModelTierAnchor([string]$Tier) {
     switch ($Tier.ToLowerInvariant()) {
         'sol_xhigh' { return [pscustomobject]@{ tier = 'sol_xhigh'; label = 'Sol xhigh'; model_family = 'gpt-5.6-sol'; reasoning_effort = 'xhigh' } }
         'sol_medium' { return [pscustomobject]@{ tier = 'sol_medium'; label = 'Sol medium'; model_family = 'gpt-5.6-sol'; reasoning_effort = 'medium' } }
-        'luna_max' { return [pscustomobject]@{ tier = 'luna_max'; label = 'Luna max'; model_family = 'gpt-5.6-luna'; reasoning_effort = 'max' } }
+        'sol_low' { return [pscustomobject]@{ tier = 'sol_low'; label = 'Sol low'; model_family = 'gpt-5.6-sol'; reasoning_effort = 'low' } }
         default { return $null }
     }
 }
@@ -203,7 +203,6 @@ function New-ModelPolicyProposal {
     $effectiveTier = if ([string]::IsNullOrWhiteSpace($UserOverrideTier)) { $RequestedTier } else { $UserOverrideTier }
     $anchor = Get-AgentModelTierAnchor $effectiveTier
     $fallbackReasons = New-Object System.Collections.Generic.List[string]
-    $radarValidation = Test-RadarSnapshotContract -Snapshot $RadarSnapshot -Now $Now
     $validLocalOutcomes = New-Object System.Collections.Generic.List[object]
     $localFindings = New-Object System.Collections.Generic.List[object]
     foreach ($outcome in @($LocalOutcomes)) {
@@ -232,20 +231,15 @@ function New-ModelPolicyProposal {
             $fallbackReasons.Add('host_pair_unavailable') | Out-Null
         }
     }
-    if (-not $radarValidation.pass -and -not $hasLocal -and -not $hostConfirmed) { foreach ($code in @($radarValidation.findings.code | Sort-Object -Unique)) { $fallbackReasons.Add([string]$code) | Out-Null } }
-    $radarEntry = $null
-    if ($null -ne $anchor -and $radarValidation.pass) { $radarEntry = @((Get-OperationObjectProperty $RadarSnapshot 'entries') | Where-Object { [string](Get-OperationObjectProperty $_ 'model_family') -eq $anchor.model_family -and [string](Get-OperationObjectProperty $_ 'reasoning_effort') -eq $anchor.reasoning_effort } | Select-Object -First 1) }
-    if ($radarEntry -is [array]) { $radarEntry = if ($radarEntry.Count -gt 0) { $radarEntry[0] } else { $null } }
-    if ($null -ne $anchor -and $radarValidation.pass -and $null -eq $radarEntry -and -not $hasLocal -and -not $hostConfirmed) { $fallbackReasons.Add('radar_pair_missing') | Out-Null }
     $fallback = $fallbackReasons.Count -gt 0
     return [pscustomobject][ordered]@{
         schema_version = 1; task_id = $TaskId; decision_owner = 'host_ai'; advisory_only = $true
         requested_tier = $RequestedTier; selected_tier = $(if ($fallback) { 'host_default' } else { $anchor.tier })
         model_family = $(if ($fallback) { $null } else { $anchor.model_family }); reasoning_effort = $(if ($fallback) { $null } else { $anchor.reasoning_effort })
         rationale = $Rationale; user_override = (-not [string]::IsNullOrWhiteSpace($UserOverrideTier)); fallback_reason = $(if ($fallback) { @($fallbackReasons) -join ',' } else { $null })
-        evidence_priority = 'user_override_then_local_outcomes_then_host_availability_then_radar_then_host_default'; selection_semantics = 'host_proposal_validation_only'
-        local_outcomes = @(Copy-AgentWorkflowValue $validLocalOutcomes.ToArray()); radar_snapshot_id = Get-OperationObjectProperty $RadarSnapshot 'snapshot_id'; radar_entry = Copy-AgentWorkflowValue $radarEntry
-        evidence_sources = [pscustomobject][ordered]@{ local = [pscustomobject]@{ valid = $hasLocal; supplied = @($LocalOutcomes).Count; accepted = $validLocalOutcomes.Count; rejected_findings = @($localFindings.ToArray()) }; radar = [pscustomobject]@{ valid = $radarValidation.pass; used = (-not $fallback -and $null -ne $radarEntry); findings = @($radarValidation.findings) }; host_availability = [pscustomobject]@{ surface = $(if ($hostSurfaceKnown) { $HostSurface } else { $null }); state = $hostAvailabilityState; declared = ($hostSurfaceKnown -and @($HostAvailablePairs).Count -gt 0); pair_confirmed = $hostConfirmed } }
+        evidence_priority = 'user_override_then_local_outcomes_then_host_availability_then_host_default'; selection_semantics = 'host_proposal_validation_only'
+        local_outcomes = @(Copy-AgentWorkflowValue $validLocalOutcomes.ToArray())
+        evidence_sources = [pscustomobject][ordered]@{ local = [pscustomobject]@{ valid = $hasLocal; supplied = @($LocalOutcomes).Count; accepted = $validLocalOutcomes.Count; rejected_findings = @($localFindings.ToArray()) }; host_availability = [pscustomobject]@{ surface = $(if ($hostSurfaceKnown) { $HostSurface } else { $null }); state = $hostAvailabilityState; declared = ($hostSurfaceKnown -and @($HostAvailablePairs).Count -gt 0); pair_confirmed = $hostConfirmed } }
         provider_calls = 0; native_mutations = 0; writes = 0
     }
 }
@@ -263,13 +257,13 @@ function Get-AgentEscalationDecision {
     elseif ($kind -in @('task', 'context')) { $action = $(if ($attempt -ge 2) { 'supervisor_takeover' } else { 'rescope_task_graph' }); $requiresGraph = $true }
     elseif ($kind -eq 'tool') { $action = $(if ($attempt -ge 2) { 'supervisor_takeover' } else { 'repair_tool_or_reassign' }); $requiresGraph = ($attempt -ge 2) }
     elseif ($kind -eq 'capacity') {
-        if ($tier -notin @('luna_max', 'sol_medium', 'sol_xhigh')) { $action = 'supervisor_review' }
+        if ($tier -notin @('sol_low', 'sol_medium', 'sol_xhigh')) { $action = 'supervisor_review' }
         elseif ($escalations -ge 2 -or ($tier -eq 'sol_xhigh' -and $attempt -gt 1)) { $action = 'supervisor_takeover'; $requiresGraph = $true }
         elseif ($attempt -le 1) { $action = 'corrected_retry' }
         else {
             $action = 'replan_and_escalate'; $requiresGraph = $true
             $nextTier = switch ($tier) {
-                'luna_max' { 'sol_medium' }
+                'sol_low' { 'sol_medium' }
                 'sol_medium' { 'sol_xhigh' }
             }
         }
@@ -282,7 +276,6 @@ function Test-AgentWorkflowRequest($Request) {
     if ($null -eq $Request) { return New-OperationValidationResult @((New-OperationFinding 'request_missing' 'error' '$' 'Agent workflow request is required.')) }
     foreach ($result in @(
             (Test-AgentTaskGraphContract (Get-OperationObjectProperty $Request 'task_graph')),
-            (Test-RadarSnapshotContract -Snapshot (Get-OperationObjectProperty $Request 'radar_snapshot') -Now (Get-OperationObjectProperty $Request 'now')),
             (Test-AgentParallelAdmission -TaskGraph (Get-OperationObjectProperty $Request 'task_graph') -TaskIds @((Get-OperationObjectProperty $Request 'requested_parallel_task_ids')) -CompletedTaskIds @((Get-OperationObjectProperty $Request 'completed_task_ids')) -CompletedTaskReceipts @((Get-OperationObjectProperty $Request 'completion_receipts')) -EvaluationTime (Get-OperationObjectProperty $Request 'now'))
         )) { foreach ($finding in @($result.findings)) { $findings.Add($finding) | Out-Null } }
     $taskIndex = Get-AgentTaskIndex (Get-OperationObjectProperty $Request 'task_graph')

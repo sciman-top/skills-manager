@@ -89,10 +89,10 @@ if ($null -ne $manifest) {
             @{ property='runtime_scheduler_status'; value='not_introduced'; code='runtime_scheduler_boundary_invalid' },
             @{ property='provider_call_status'; value='none'; code='provider_call_boundary_invalid' },
             @{ property='native_mutation_status'; value='none'; code='native_mutation_boundary_invalid' },
-            @{ property='radar_fetch_status'; value='not_implemented'; code='radar_fetch_boundary_invalid' },
+            @{ property='radar_fetch_status'; value='retired'; code='radar_fetch_boundary_invalid' },
             @{ property='host_loaded_status'; value='host_evaluation_partial'; code='host_loaded_boundary_invalid' },
             @{ property='host_orchestration_status'; value='native_spawn_partial'; code='host_orchestration_boundary_invalid' },
-            @{ property='host_radar_refresh_status'; value='pending_revalidation'; code='host_radar_boundary_invalid' },
+            @{ property='host_radar_refresh_status'; value='disabled'; code='host_radar_boundary_invalid' },
             @{ property='live_acceptance_status'; value='not_run'; code='live_acceptance_boundary_invalid' }
         )) {
         if ([string]$manifest.($boundary.property) -ne $boundary.value) {
@@ -126,7 +126,7 @@ if ($null -ne $manifest) {
     $expectedTiers = [ordered]@{
         sol_xhigh = 'gpt-5.6-sol|xhigh|soft_anchor'
         sol_medium = 'gpt-5.6-sol|medium|soft_anchor'
-        luna_max = 'gpt-5.6-luna|max|user_preferred_soft_anchor'
+        sol_low = 'gpt-5.6-sol|low|soft_anchor'
     }
     $tiers = @($manifest.model_tiers)
     $modelTierCount = $tiers.Count
@@ -140,49 +140,22 @@ if ($null -ne $manifest) {
         if ([string]$tier.tier -notin @($expectedTiers.Keys)) { Add-Finding 'model_tier_anchor_invalid' $paths.manifest ("Unknown model tier: {0}" -f [string]$tier.tier) }
     }
 
-    $hostRadarReceipt = $manifest.host_radar_receipt
-    if ($null -eq $hostRadarReceipt) {
-        Add-Finding 'host_radar_receipt_missing' $paths.manifest 'Pending Radar v2 revalidation requires an explicit host receipt placeholder.'
-    }
-    else {
-        if ([string]$hostRadarReceipt.status -ne 'pending_revalidation' -or [string]$hostRadarReceipt.automation_revision -ne 'radar-snapshot-v2-three-tier-20260806') {
-            Add-Finding 'host_radar_receipt_invalid' $paths.manifest 'Pending host Radar receipt must identify the three-tier v2 automation revision.'
-        }
-        foreach ($field in @('executed_model', 'executed_effort', 'run_at', 'snapshot_id')) {
-            if ($null -eq $hostRadarReceipt.PSObject.Properties[$field]) { Add-Finding 'host_radar_receipt_field_missing' $paths.manifest ("Host Radar receipt field is missing: {0}" -f $field) }
-            elseif ($null -ne $hostRadarReceipt.$field) { Add-Finding 'host_radar_receipt_unverified_value' $paths.manifest ("Pending host Radar receipt must not invent a value for: {0}" -f $field) }
-        }
-    }
-
-    $hostModelProbe = $manifest.host_model_probe_receipt
-    if ($null -eq $hostModelProbe -or [string]$hostModelProbe.status -ne 'cli_model_probe_pass' -or
-        [string]$hostModelProbe.surface -ne 'codex_exec_ephemeral' -or [string]$hostModelProbe.executed_model -ne 'gpt-5.6-luna' -or
-        [string]$hostModelProbe.executed_effort -ne 'max' -or [string]$hostModelProbe.sandbox -ne 'read-only' -or
-        [string]::IsNullOrWhiteSpace([string]$hostModelProbe.provider) -or [string]::IsNullOrWhiteSpace([string]$hostModelProbe.run_at)) {
-        Add-Finding 'host_model_probe_receipt_invalid' $paths.manifest 'Host model receipt must preserve the bounded Luna max read-only CLI probe truth.'
-    }
-    $hostSpawnProbe = $manifest.host_spawn_model_probe_receipt
-    if ($null -eq $hostSpawnProbe -or [string]$hostSpawnProbe.status -ne 'confirmed_unavailable' -or
-        [string]$hostSpawnProbe.surface -ne 'collaboration_spawn' -or [string]$hostSpawnProbe.requested_model -ne 'gpt-5.6-luna' -or
-        [string]$hostSpawnProbe.requested_effort -ne 'max' -or [string]$hostSpawnProbe.error_code -ne 'unknown_model' -or
-        [string]::IsNullOrWhiteSpace([string]$hostSpawnProbe.run_at) -or [string]::IsNullOrWhiteSpace([string]$hostSpawnProbe.expires_at) -or
-        [string]$hostSpawnProbe.fallback_tier -ne 'sol_medium' -or [string]::IsNullOrWhiteSpace([string]$hostSpawnProbe.recovery_condition) -or
-        @($hostSpawnProbe.available_models).Count -ne 2 -or 'gpt-5.6-sol' -notin @($hostSpawnProbe.available_models) -or 'gpt-5.6-terra' -notin @($hostSpawnProbe.available_models)) {
-        Add-Finding 'host_spawn_model_probe_receipt_invalid' $paths.manifest 'Host spawn receipt must preserve the current surface-scoped Luna rejection and surfaced Sol/Terra inventory.'
+    if ($null -eq $manifest.legacy_read_only_receipts) {
+        Add-Finding 'legacy_receipts_missing' $paths.manifest 'Historical Radar/model probes must remain explicitly read-only when retained.'
     }
 }
 
 foreach ($required in @(
         @{ key='spec'; literal='**IMPLEMENTATION_STATUS**: `repo_advisory_only`'; code='implementation_boundary_missing' },
         @{ key='spec'; literal='**RUNTIME_SCHEDULER_STATUS**: `not_introduced`'; code='runtime_boundary_missing' },
-        @{ key='spec'; literal='**RADAR_FETCH_STATUS**: `not_implemented`'; code='radar_boundary_missing' },
+        @{ key='spec'; literal='**RADAR_FETCH_STATUS**: `retired`'; code='radar_boundary_missing' },
         @{ key='spec'; literal='**HOST_LOADED_STATUS**: `host_evaluation_partial`'; code='host_boundary_missing' },
         @{ key='spec'; literal='**HOST_ORCHESTRATION_STATUS**: `native_spawn_partial`'; code='host_boundary_missing' },
-        @{ key='spec'; literal='**HOST_RADAR_REFRESH_STATUS**: `pending_revalidation`'; code='host_boundary_missing' },
+        @{ key='spec'; literal='**HOST_RADAR_REFRESH_STATUS**: `disabled`'; code='host_boundary_missing' },
         @{ key='spec'; literal='**LIVE_ACCEPTANCE_STATUS**: `not_run`'; code='live_boundary_missing' },
         @{ key='spec'; literal='`verification_receipt` 必须是 schema v1 对象'; code='completion_receipt_spec_missing' },
         @{ key='spec'; literal='`planned_dependency_order_only`'; code='planning_only_spec_missing' },
-        @{ key='spec'; literal='`gpt-5.6-luna|max` 三个唯一 pair'; code='radar_allowlist_spec_missing' },
+        @{ key='spec'; literal='| `sol_low` | `gpt-5.6-sol + low` |'; code='model_tier_spec_missing' },
         @{ key='prd'; literal='FR-EWF-018'; code='product_requirement_missing' },
         @{ key='architecture'; literal='ADR-SMV-029'; code='architecture_decision_missing' },
         @{ key='roadmap'; literal='agent_workflow_advisory_runtime'; code='roadmap_track_missing' },
@@ -231,7 +204,7 @@ foreach ($required in @(
         @{ key='application'; literal="hostAvailabilityState = 'confirmed_available'"; code='host_surface_availability_gate_missing' },
         @{ key='application'; literal='function Get-AgentEscalationDecision'; code='application_contract_missing' },
         @{ key='application'; literal='Test-AgentFailurePacketContract $FailurePacket'; code='failure_packet_gate_missing' },
-        @{ key='application'; literal='if (-not $radarValidation.pass -and -not $hasLocal -and -not $hostConfirmed)'; code='stale_radar_fallback_missing' },
+        @{ key='application'; literal="evidence_priority = 'user_override_then_local_outcomes_then_host_availability_then_host_default'"; code='evidence_priority_missing' },
         @{ key='application'; literal='requires_parallel_readmission'; code='parallel_readmission_missing' },
         @{ key='command'; literal='function Invoke-AgentPlanCommand'; code='cli_command_wiring_missing' },
         @{ key='command'; literal='function Invoke-AgentValidateCommand'; code='cli_command_wiring_missing' },
@@ -253,7 +226,16 @@ foreach ($required in @(
 
 $planningText = $content.spec + "`n" + $content.prd + "`n" + $content.architecture + "`n" + $content.roadmap + "`n" + $content.manifest
 Reject-Pattern $planningText '(?i)four soft tiers' 'agent workflow planning truth' 'four_tier_wording_detected' 'Agent workflow planning must describe exactly three active soft tiers.'
-Reject-Pattern $content.manifest '(?i)terra[_ -]?(high|medium|max|xhigh)' $paths.manifest 'removed_model_tier_detected' 'Terra must not re-enter the active model tier manifest.'
+if ($null -ne $manifest -and [string]$manifest.host_radar_refresh_status -ne 'disabled') {
+    Add-Finding 'radar_active_contract_detected' $paths.manifest 'Radar refresh must remain disabled and outside active model routing.'
+}
+
+$proposalStart = $content.application.IndexOf('function New-ModelPolicyProposal', [StringComparison]::Ordinal)
+$proposalEnd = $content.application.IndexOf('function Get-AgentEscalationDecision', [StringComparison]::Ordinal)
+if ($proposalStart -ge 0 -and $proposalEnd -gt $proposalStart) {
+    $proposalText = $content.application.Substring($proposalStart, $proposalEnd - $proposalStart)
+    Reject-Pattern $proposalText '(?i)Test-RadarSnapshotContract|\$radarValidation|radar_entry|evidence_sources[^\r\n]*radar' $paths.application 'active_radar_decision_path_detected' 'Model proposals must not validate, score, prioritize or emit Radar data.'
+}
 
 $pureLayers = $content.domain + "`n" + $content.application
 Reject-Pattern $pureLayers '(?im)^\s*(Get-Content|Set-Content|Add-Content|Remove-Item|Copy-Item|Move-Item|Test-Path|Resolve-Path|Get-Date|Write-Host|Write-Output|Start-Process|Invoke-WebRequest|Invoke-RestMethod|exit)\b' 'src/Domain/AgentWorkflow.ps1;src/Application/ModelAndAgentPolicy.ps1' 'pure_layer_side_effect_detected' 'Domain/application advisory code must remain free of IO, clock, network, terminal and process effects.'

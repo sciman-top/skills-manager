@@ -216,7 +216,7 @@
       "depends_on": ["SMV-MD-008"],
       "requirement_ids": ["FR-EWF-013", "FR-EWF-014", "FR-EWF-015", "FR-EWF-016", "FR-EWF-017", "NFR-EWF-005"],
       "architecture_decision_ids": ["ADR-SMV-024", "ADR-SMV-026"],
-      "goal": "把用户目标、任务 DAG、串并行 admission、Sol xhigh/Sol medium/Luna max 软锚点、Codex Radar snapshot、失败交接与升降档固化为宿主拥有且可审查的 AI 执行合同。",
+      "goal": "把用户目标、任务 DAG、串并行 admission、Sol xhigh/Sol medium/Sol low 软锚点、失败交接与升降档固化为宿主拥有且可审查的 AI 执行合同；Radar 与外榜不参与活动编排。",
       "preconditions": ["P5 and M0/M0.2 remain repo_verified", "P6 admission remains hold", "Codex native runtime owns subagent execution", "no active host/model/provider mutation is authorized"],
       "write_set": [
         "docs/product/skills-manager-vnext-prd.md",
@@ -228,7 +228,7 @@
         "tasks/todo.md",
         "docs/change-evidence/20260805-model-policy-and-typed-core-maintenance-design.md"
       ],
-      "implementation_steps": ["定义 user/host/advisor/verifier/runtime/truth adjudicator 职责", "定义 TaskGraph/ModelPolicy/FailurePacket 字段", "定义 read-only/disjoint-write 并行与 shared-seam 串行规则", "定义三档软锚点、Radar freshness/Pareto 与本地结果优先级", "定义 corrected retry/re-scope/escalate/supervisor takeover/fail-closed 状态机"],
+      "implementation_steps": ["定义 user/host/advisor/verifier/runtime/truth adjudicator 职责", "定义 TaskGraph/ModelPolicy/FailurePacket 字段", "定义 read-only/disjoint-write 并行与 shared-seam 串行规则", "定义三档 Sol 软锚点、surface availability 与本地结果优先级", "定义 corrected retry/re-scope/escalate/supervisor takeover/fail-closed 状态机"],
       "tests": ["required model-policy literals and ADR references are unique", "stale Radar and runtime-routing claims fail closed", "missing owner/write set/integration/verification cannot be described as parallel", "P6/runtime/live boundaries remain unchanged"],
       "verification": ["git diff --check", "scripts/verify-lean-ai-delivery-planning.ps1 -Json"],
       "rollback": ["只撤销 M0.3 model/task policy 规划增量与共享 evidence，不修改宿主配置、M1 样本或 M0/M0.2 历史"],

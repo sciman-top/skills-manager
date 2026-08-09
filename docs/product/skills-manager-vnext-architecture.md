@@ -422,7 +422,7 @@ candidate 集成顺序固定为：验证 candidate 的 base 与 declared write s
 
 ### 3.11 `ModelAndAgentPolicyAdvisor`
 
-职责：把任务 DAG、串并行 admission、模型/推理强度候选、Radar snapshot、fallback/escalation 和失败交接表达为宿主可消费的 advisory contract。user intent 是 authority owner，host AI 是 accountable semantic coordinator，skills-manager 是 evidence/policy advisor，deterministic verifier 是安全 admission guard，Codex native runtime 是实际 executor，Git/tests/live probe 裁决完成真值。
+职责：把任务 DAG、串并行 admission、模型/推理强度候选、fallback/escalation 和失败交接表达为宿主可消费的 advisory contract。user intent 是 authority owner，host AI 是 accountable semantic coordinator，skills-manager 是 evidence/policy advisor，deterministic verifier 是安全 admission guard，Codex native runtime 是实际 executor，Git/tests/live probe 裁决完成真值。
 
 不负责：调用模型、创建或调度 subagent、修改 active session/custom-agent/provider/auth/config、保证 Radar 排名等于生产质量、把费用/时长预测当完成门禁。历史 M0.3 只完成 planning contract；独立 `agent_workflow_advisory_runtime` adjacent track 已把 plain-object validator、deterministic wave/admission、model/escalation proposal 和 zero-write CLI 接入 PS7 生成 bundle，仍不构成 native agent/model runtime。
 
@@ -442,7 +442,7 @@ HostModelProposal
   selection_semantics=host_proposal_validation_only
   comparable local outcome: pair / base / gate / rework / cost / duration / sampled_at
 
-RadarSnapshot v2
+Legacy RadarSnapshot v2 (read-only compatibility)
   radar_snapshot_id / captured_at / source_updated_at / expires_at
   model / reasoning_effort / host_availability
   score / estimated_cost / estimated_duration / sample_count / confidence
@@ -455,13 +455,13 @@ FailurePacket
   artifacts[] / exact_write_set[] / next_recommendation
 ```
 
-默认模型档位是可覆盖的三个软锚点：`Sol xhigh = gpt-5.6-sol + xhigh` 用于承重需求澄清、架构/重构、跨服务生产 RCA、高价值高风险审查和最终裁决；`Sol medium = gpt-5.6-sol + medium` 用于一般实现、日常排障、中等复杂度审查和集成准备；用户偏好的 `Luna max = gpt-5.6-luna + max` 是 routine/default 档，用于边界清楚、重复度高、可独立验证的 CRUD/SQL/单测/文档/机械变换。软锚点不等于运行时许可：host evidence 必须绑定具体 surface，并归一为 `confirmed_available / confirmed_unavailable / unknown`；`unknown` 和 `confirmed_unavailable` 都回退 host default，Radar、CLI receipt 或另一 API gateway 不能替 collaboration spawn 解锁。model ID 不是永久白名单；名称不存在、宿主不可用或 Radar 过期时，记录实际值与 fallback reason，而不是猜测等价模型或修改配置。Terra Radar 条目只能作为外部观察，不能恢复为项目 tier。
+默认模型档位是可覆盖的三个软锚点：`Sol xhigh = gpt-5.6-sol + xhigh` 用于承重需求澄清、架构/重构、跨服务生产 RCA、高价值高风险审查和最终裁决；`Sol medium = gpt-5.6-sol + medium` 用于一般实现、日常排障、中等复杂度审查和集成准备；`Sol low = gpt-5.6-sol + low` 用于边界清楚、重复度高、可独立验证的 CRUD/SQL/单测/文档/机械变换。软锚点不等于运行时许可：host evidence 必须绑定具体 surface，并归一为 `confirmed_available / confirmed_unavailable / unknown`；`unknown` 和 `confirmed_unavailable` 都回退 host default，CLI receipt、历史 probe 或另一 API gateway 不能替 collaboration spawn 解锁。Radar 与外部榜单不参与 active tier、fallback 或 evidence priority。
 
 并行 admission 必须同时满足依赖闭包完成且有同 revision 的 structured verified receipt、receipt 与 completed list 完全对应、base revision 固定、Windows-safe canonical repo-relative write set 互斥或完全只读、外部写入已声明、candidate 可独立验证/丢弃、integration owner/order 明确。receipt 必须绑定 schema、时间、verifier、SHA-256 和实际 verification commands；字符串声明或静态规划占位不算完成。路径比较先做 NFC，再统一分隔符/大小写并阻断相等、ancestor/descendant、ADS、reserved device name、尾随点空格与其他 invalid path；high-risk/high-ambiguity、共享 seam、schema/migration、Git index/ref、同一外部对象和内容依赖任务默认串行。
 
-升级状态机固定为：初始 route -> 根因诊断后一次带 correction evidence 的 corrected retry -> task/context/tool 第二次失败由 supervisor 串行接管 -> 仅 capacity 可 `Luna max -> Sol medium -> Sol xhigh` -> 两次升级后 takeover。corrected retry/tool reassignment 返回 `parallel_allowed=false`，重新通过 admission 才能并发。缺工具、权限、凭据、生产授权或用户产品决定时 fail-closed。
+升级状态机固定为：初始 route -> 根因诊断后一次带 correction evidence 的 corrected retry -> task/context/tool 第二次失败由 supervisor 串行接管 -> 仅 capacity 可 `Sol low -> Sol medium -> Sol xhigh` -> 两次升级后 takeover。corrected retry/tool reassignment 返回 `parallel_allowed=false`，重新通过 admission 才能并发。缺工具、权限、凭据、生产授权或用户产品决定时 fail-closed。
 
-Radar 数据通过独立、显式 refresh 形成不可变 v2 snapshot：记录 source、captured_at、source_updated_at、model、reasoning_effort、score、estimated cost/duration、sample count、confidence、raw hash 和 expires_at，entries 非空且不得携带 policy override。source 只允许 Codex Radar 的 HTTPS 主机，entry 只允许三档软锚点对应的三个唯一 model/effort pair；source age 超过 36 小时、未知/重复 pair 或过期均 fail-closed。snapshot 只影响宿主 proposal 的证据验证；本地结果只有 pair/base/freshness/gate/rework/cost/duration 完整时才优先。决策保持 Pareto 多目标，不把智力、费用、时间和风险压成永久单分数。
+历史 Radar v2 parser 继续校验既有 receipt 的 source、captured/source-updated、pair、hash、expiry 与 forbidden fields，但该 parser 不得被 `New-ModelPolicyProposal` 或 `Test-AgentWorkflowRequest` 调用。Radar refresh 已停用，旧 snapshot 只读，不产生 active evidence。
 
 ### 3.12 `TypedCoreBoundary`
 
@@ -728,7 +728,7 @@ Semantic findings 在没有 deterministic evidence 时只能是 recommendation�
 
 ### `ADR-SMV-026 Host-owned task and model policy`
 
-决定：用户拥有目标与不可逆授权，宿主 AI 负责语义、TaskGraph、串并行、模型/推理强度和最终综合；skills-manager 只输出 Radar/model policy、admission/escalation 建议和确定性 findings，Codex native runtime 实际 spawn/wait/steer/integrate。
+决定：用户拥有目标与不可逆授权，宿主 AI 负责语义、TaskGraph、串并行、模型/推理强度和最终综合；skills-manager 只输出 model policy、admission/escalation 建议和确定性 findings，Codex native runtime 实际 spawn/wait/steer/integrate。
 
 理由：宿主拥有完整对话、当前可用模型和执行线程；在本仓复制 scheduler/router 会产生过期价格/能力数据、双重控制面和权限漂移。确定性 verifier 仍可阻断 DAG cycle、shared write overlap、stale base/snapshot、unknown model、缺验证/owner/预算和 truth 越级。
 
@@ -748,7 +748,7 @@ PoC acceptance：同一 corpus 的结构化输出/exit/finding parity；至少�
 
 ### `ADR-SMV-029 Runtime-independent agent workflow advisory contracts`
 
-决定：在不改变 ADR-SMV-026 ownership 的前提下，把 M0.3 文档态合同实现为三个窄 seam：`Domain/AgentWorkflow.ps1` 校验 TaskGraph/FailurePacket v1 与 RadarSnapshot v2；`Application/ModelAndAgentPolicy.ps1` 生成 one-group barrier waves、带 completion receipt 的并行 admission、三档 host proposal validation 和 bounded escalation；`Commands/AgentWorkflow.ps1` 只读取仓内 JSON 并输出 `repo_advisory_only` envelope。`agent-plan/agent-validate` 的 effect counters 固定为 0，实际 spawn/wait/steer/worktree/model application 继续由 Codex native runtime 执行。
+决定：在不改变 ADR-SMV-026 ownership 的前提下，把 M0.3 文档态合同实现为三个窄 seam：`Domain/AgentWorkflow.ps1` 校验 TaskGraph/FailurePacket v1，并只读兼容历史 RadarSnapshot v2；`Application/ModelAndAgentPolicy.ps1` 生成 one-group barrier waves、带 completion receipt 的并行 admission、三档 Sol host proposal validation 和 bounded escalation；`Commands/AgentWorkflow.ps1` 只读取仓内 JSON 并输出 `repo_advisory_only` envelope。`agent-plan/agent-validate` 的 effect counters 固定为 0，实际 spawn/wait/steer/worktree/model application 继续由 Codex native runtime 执行。
 
 理由：仅文档无法机械阻止循环依赖、伪造 completed task、路径父子重叠、serial/high-risk 混 wave、stale upstream Radar、空 local outcome 屏蔽失败、无 FailurePacket 升档或 corrected retry 自动并发；引入 scheduler/provider runtime 又会复制宿主能力。小型 plain-object contract 能复用既有 OperationPlan finding/redaction helper、PS7 bundle 和 full gate，并为未来 typed-core seam 保持稳定 JSON 边界。
 
