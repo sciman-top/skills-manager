@@ -59,7 +59,7 @@
 | [Agent workflow advisory verifier](../../scripts/verify-agent-workflow-advisory.ps1) | 检查 manifest/truth、三档锚点、CLI/build wiring、host ownership、pure-layer 与 runtime-control 禁令 | 镜像行为测试内部错误码/函数/fixture，或证明 host/live acceptance |
 | [capability routing verifier](../../scripts/verify-capability-routing.ps1) | 用 labelled 自然语言 corpus 验证 candidate recall、host-labelled policy、否定约束和零脚本语义自动选择 | 证明宿主模型普遍正确或业务 live acceptance |
 | [profile reconciliation planner](../../scripts/plan-skill-profile-reconciliation.ps1) | 诊断 unrouted/stale/budget/overlap 并校验 host-owned proposal，输出 zero-write change-set | 自动决定 profile 语义归属或写入配置 |
-| [profile reconciliation transaction manager](../../scripts/manage-skill-profile-reconciliation.ps1) | 预演/应用非活动 profile canary，接受 fresh replay 或按 receipt 回滚 | 自行调用宿主模型、永久 profile 热切换或业务验收 |
+| [profile migration manager](../../scripts/manage-skill-profile-reconciliation.ps1) | 生成只读迁移计划，并以显式 token 执行 versioned migration 或 receipt rollback；旧 canary `Apply`/`Accept` 模式固定返回 `deprecated` 且零写入 | 恢复 profile 可达性、调用宿主模型、永久 profile 热切换或业务验收 |
 | [历史 evidence archive](../archive/change-evidence/README.md) | 保存已退出活跃账本的旧 runtime receipts | 当前 closeout 证明或运行态输出目录 |
 
 ## 3. 事实优先级

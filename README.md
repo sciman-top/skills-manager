@@ -31,15 +31,16 @@
 - [vNext 架构](docs/product/skills-manager-vnext-architecture.md)
 - [vNext 路线图](docs/product/skills-manager-vnext-roadmap.md)
 - [规则治理参考采纳矩阵](docs/product/rule-governance-adoption-matrix.md)
-- [当前 Phase 5 任务 manifest](tasks/skills-manager-vnext-phase5.tasks.json)
+- [当前 Phase 6 任务 manifest](tasks/skills-manager-vnext-phase6.tasks.json)
 - [Agent workflow advisory spec](docs/superpowers/specs/2026-08-05-agent-workflow-advisory-runtime.md) / [任务 manifest](tasks/skills-manager-vnext-agent-workflow-advisory.tasks.json)
+- [历史 Phase 5 任务 manifest](tasks/skills-manager-vnext-phase5.tasks.json)
 - [历史 Phase 4 任务 manifest](tasks/skills-manager-vnext-phase4.tasks.json)
 - [历史 Phase 3 任务 manifest](tasks/skills-manager-vnext-phase3.tasks.json)
 - [Phase 2 历史任务 manifest](tasks/skills-manager-vnext-phase2.tasks.json)
 - [Phase 1 历史任务 manifest](tasks/skills-manager-vnext-phase1.tasks.json)
 - [Phase 0 历史任务 manifest](tasks/skills-manager-vnext-phase0.tasks.json)
 
-vNext P0-P5 已完成 repo-side 验收（P0/P1 各 9/9，P2/P3 各 7/7，P4 6/6，P5 5/5）；这是历史仓库契约真值，不等于自然语言路由实效。P5-local maintenance 已把语义选择权交回宿主 AI，并把 profile-first cold discovery 重构为 `domain purpose catalog -> host domain/candidate adjudication -> deterministic policy`；只读 App Server snapshot、session reuse 建议和 containment/freshness/availability/side-effect/approval/activation policy 继续保留。plugin/MCP 安装、OAuth、host/profile/session 写入、重启与 `live_accepted` 仍不在边界。
+vNext 当前动态真值由 P6 manifest 管理；当前仓库实现已完成 P6 host-native lifecycle reset 的 repo-side 收口，最高证据层仍是 `host_evaluation_partial`。完整 native inventory、宿主选择、完整 skill body injection、执行与业务 `live_accepted` 必须分别取证，不能由 repo gate 或可见性推断。P0-P5 计数只作为历史仓库契约保留；plugin/MCP 安装、OAuth、host/profile/session 写入和重启仍不在本次自动边界。
 
 本项目仅支持 PowerShell 7 (`pwsh`)；PowerShell 7.6 LTS 是推荐基线。Windows PowerShell 5.1 不再提供安装 fallback、CI 或 smoke 支持，缺少 `pwsh` 时入口 fail-closed。迁移、编码与回滚边界见 [`docs/runbooks/powershell-runtime-compatibility.md`](docs/runbooks/powershell-runtime-compatibility.md)。
 

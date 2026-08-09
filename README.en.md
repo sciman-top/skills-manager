@@ -31,15 +31,16 @@ It will not become an agent runtime, plugin marketplace, provider/model/auth/ses
 - [vNext architecture](docs/product/skills-manager-vnext-architecture.md)
 - [vNext roadmap](docs/product/skills-manager-vnext-roadmap.md)
 - [Rule-governance adoption matrix](docs/product/rule-governance-adoption-matrix.md)
-- [Current Phase 5 task manifest](tasks/skills-manager-vnext-phase5.tasks.json)
+- [Current Phase 6 task manifest](tasks/skills-manager-vnext-phase6.tasks.json)
 - [Agent workflow advisory spec](docs/superpowers/specs/2026-08-05-agent-workflow-advisory-runtime.md) / [task manifest](tasks/skills-manager-vnext-agent-workflow-advisory.tasks.json)
+- [Historical Phase 5 task manifest](tasks/skills-manager-vnext-phase5.tasks.json)
 - [Historical Phase 4 task manifest](tasks/skills-manager-vnext-phase4.tasks.json)
 - [Historical Phase 3 task manifest](tasks/skills-manager-vnext-phase3.tasks.json)
 - [Historical Phase 2 task manifest](tasks/skills-manager-vnext-phase2.tasks.json)
 - [Historical Phase 1 task manifest](tasks/skills-manager-vnext-phase1.tasks.json)
 - [Historical Phase 0 task manifest](tasks/skills-manager-vnext-phase0.tasks.json)
 
-vNext P0-P5 have passed repository-side acceptance (P0/P1: 9/9 each; P2/P3: 7/7 each; P4: 6/6; P5: 5/5). That historical status proves repository contracts, not natural-language routing quality. P5-local maintenance now makes the host AI the semantic decision owner and replaces profile-first cold discovery with `domain purpose catalog -> host domain/candidate adjudication -> deterministic policy`. Profiles remain bounded preheat/index partitions. Plugin/MCP installation, OAuth, silent host/profile/session writes, restart, and live acceptance remain out of scope.
+The P6 manifest is the current dynamic truth source. The repository implementation has closed out the P6 host-native lifecycle reset on the repo side, while its highest evidence level remains `host_evaluation_partial`. Complete native inventory, host selection, full skill-body injection, execution, and business `live_accepted` each require separate evidence and cannot be inferred from a repo gate or visibility. P0-P5 counts remain historical contract truth; plugin/MCP installation, OAuth, host/profile/session writes, and restart remain outside the automatic boundary.
 
 PowerShell 7 (`pwsh`) is the only supported runtime; PowerShell 7.6 LTS is the recommended baseline. Windows PowerShell 5.1 has no installer fallback, CI job, or smoke-support path, and entry points fail closed when `pwsh` is missing. See [`docs/runbooks/powershell-runtime-compatibility.md`](docs/runbooks/powershell-runtime-compatibility.md) for migration, encoding, and rollback boundaries.
 

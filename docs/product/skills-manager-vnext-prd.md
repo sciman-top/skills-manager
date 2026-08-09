@@ -2,7 +2,7 @@
 
 **program_id**: `skills-manager-vnext`
 **status**: accepted-direction
-**implementation_status**: phase-5-adaptive-capability-fabric-repo-verified-maintenance-hold
+**implementation_status**: phase-6-host-native-lifecycle-repo-verified-host-evaluation-partial
 **最后更新**: 2026-08-09
 
 ## 1. 产品结论
@@ -320,8 +320,8 @@ fresh inventory、host evaluation、injected/executed invocation 与业务 accep
 - `NFR-PORT-001`：PowerShell 7 是唯一受支持的开发、CI、安装和运行 runtime；当前最低版本为 7.0，推荐 PowerShell 7.6 LTS。入口、子进程和 CI 必须只解析 `pwsh`，缺失时 fail-closed，不提供 Windows PowerShell 5.1 fallback/smoke。
 - `NFR-SAF-001`：只读命令不能调用 provider、写宿主配置或改变 active profile。
 - `NFR-SAF-002`：所有外部写入必须显式授权；高风险写入必须先有可执行回滚。
-- `NFR-SAF-003`：profile reconciliation 的诊断和 proposal 校验必须 network-free、provider-free、zero-write，且不得修改 `active_profile`、安装/删除 skill 或写宿主配置；未来 apply 路径必须另行设计、审阅和授权。
-- `NFR-SAF-004`：profile canary apply 只能消费显式宿主 proposal 与 apply token，runtime receipt/backup 留在 ignored `reports/`；不得直接调用 provider、修改 skill/plugin/MCP 安装、永久切换 active profile，或在 hash 漂移后覆盖用户修改。
+- `NFR-SAF-003`：profile reconciliation 的兼容诊断和 proposal 校验必须 network-free、provider-free、zero-write，且不得修改 `active_profile`、安装/删除 skill 或写宿主配置；当前写路径仅限 versioned migration/rollback，旧 canary `Apply`/`Accept` 必须 fail-closed 为 `deprecated`。
+- `NFR-SAF-004`：历史 profile canary receipt/backup 仅作为迁移与回滚兼容证据保留；不得恢复 canary apply/accept、直接调用 provider、修改 skill/plugin/MCP 安装、永久切换 active profile，或在 hash 漂移后覆盖用户修改。
 - `NFR-SAF-005`：hierarchical discovery 只读、network-free、provider-free、zero-write；domain/purpose 和宿主语义选择不能覆盖 containment、freshness、availability、side-effect、approval 或 activation。
 - `NFR-SAF-006`：reconciliation signal 属于 advisory handoff；写入失败只记录 warning，不得阻断已验证的 skill projection，也不得触发第二模型、active profile 热切换或无 token apply。
 - `NFR-SEC-001`：不持久化 API key/OAuth/token；日志、plan 和 receipt 使用 redaction-first。
@@ -374,7 +374,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 12. capability 辅助层必须在“只使用宿主原生匹配 + 当前 profile”基线之上证明净收益；deterministic corpus、profile 可见性和少量 host replay 分别报告，不互相冒充。
 13. typed-core TC1 的完成只能证明固定 `OperationPlan/Receipt v1` corpus 的 shadow parity；未执行 TC2 时不得宣称 CLI/生产迁移、PowerShell 替换或默认分发已接受。
 13. skill inventory 变化后可获得确定性的 profile drift 诊断；宿主 proposal stale、引用未知对象、触碰 protected skill、产生 no-op/冲突或超预算时 fail-closed，且诊断全过程不改变配置和 active profile。
-14. 经授权的 profile 优化只对非活动 profile 执行有界 canary；fresh-task replay 必须证明正负代表场景并恢复原 active profile，失败时按 receipt 自动回滚，整个链路保持 host semantics 与 deterministic state policy 分离。
+14. 历史 profile canary 的 receipt 和 rollback 必须可用于兼容迁移审计；当前 `Apply`/`Accept` 固定 fail-closed 为 `deprecated`，只有显式 versioned migration/rollback 可写配置，且不得恢复 profile reachability authority。
 15. 多 Agent 设计评议可并行，但所有写入任务都能追到一个 result owner、固定 base revision、互斥或单 writer write set、集成顺序和最终 closeout owner。
 16. verifier 能阻断“Git CAS 等于文件排队/抢占胜出”、共享路径无 owner 并行写入、社区 control plane 偷渡、无证据工具接入和 P6/live truth 越级。
 17. 任一外部知识库或代码图 adapter 在接入前都有两个独立真实失败样本、语言/隐私/freshness/资源/供应链/卸载证据；条件不满足时保持 defer，repo-native 工具仍可完成主链。
@@ -402,8 +402,8 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 | `MET-011` | 非产品 artifact 数量与维护成本 | observe-only；无消费者或无验证价值的候选进入删除评审 |
 | `MET-012` | `repo_verified` 向明确 `live_accepted` 的转化 | observe-only；未运行真实工作流时保持 not_run |
 | `MET-013` | capability routing precision/recall、误调用、漏调用与用户纠正 | labelled corpus + 只读 host replay 分层记录；未建立跨任务 baseline 前不设硬阈值 |
-| `MET-014` | profile reconciliation proposal 的 stale/no-op/budget/policy 拒绝与 reviewed apply 转化 | observe-only；当前只实现 plan，不建立自动 apply 指标门禁 |
-| `MET-015` | profile canary replay 通过、回滚、用户纠正与 active profile 恢复 | observe-only；deterministic contract 与 host replay 分层，未建立跨任务净收益前不设语义硬阈值 |
+| `MET-014` | profile reconciliation proposal 的 stale/no-op/budget/policy 拒绝 | compatibility observation；不建立自动 apply 指标门禁 |
+| `MET-015` | 历史 profile canary receipt 的迁移/回滚兼容性 | compatibility observation；当前 canary apply/accept 已退役 |
 | `MET-016` | cold discovery 的 uncached input、cached ratio、tool rounds 与 latency | observe-only；按同 prompt A/B；任何减少回合但增加 uncached/延迟或降低完整读取可靠性的方案必须回退 |
 | `MET-017` | 多 Agent 写入冲突、stale candidate、shared-write reassignment 与集成返工 | observe-only；按真实任务记录，未建立 baseline 前不设并行度或冲突率 KPI |
 | `MET-018` | 工具候选的 adopt/adapt/defer/reject 分布、真实消费者、维护成本与退役转化 | observe-only；热度、star 或一次演示不构成 adoption success |
@@ -417,13 +417,12 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - Phase 3 才评估 personal plugin lint/export，不创建公共 marketplace。
 - Phase 4 只增加统一 capability selection 和 activation planning；宿主仍拥有 MCP/plugin/tool runtime、认证、权限、approval 和 session。
 - Phase 5 增加 task understanding、capability DAG、session reuse planning 和只读 host snapshot；仍不接管执行、安装、认证、审批、profile 或 session mutation。
-- P5 maintenance correction 以真实用户反馈和重复自然语言回放退役 lexical task understanding/ranking；该修正不改写 P5 历史任务状态，不构成 P6，也不宣称 host-native 路由已经 live accepted。
-- P5-local profile reconciliation advisor 只诊断 profile drift 并校验宿主语义 proposal；它不自动优化 `skills.json`、不热切换 profile、不实现 apply，也不构成 P6 或 live acceptance。
-- P5-local profile optimization canary 在 advisor 之后增加显式 token、非活动 profile 的 bounded apply、runtime receipt、fresh-task replay 和失败回滚；它不自行调用宿主 AI、不永久切换 active profile，也不构成 P6 或 live acceptance。
-- P5-local follow-up 已把 canonical inventory delta 接到 projection 主链的 advisory signal；宿主在同一任务边界可据此启动 reconciliation，但 profile proposal/apply 仍遵守 ADR-SMV-018/019，不等于静默写配置。
+- P5 maintenance correction、profile reconciliation advisor、hierarchical cold-load 与 profile optimization canary 保留为历史结果或 P6 迁移/兼容证据，不再代表当前 reachability 主链。
+- P6 已将 profile reachability authority 退役；旧 canary `Apply`/`Accept` 固定返回 `deprecated` 且零写入，当前只保留显式 versioned migration/rollback 和只读兼容报告。
+- 当前主链是 `effective host snapshot -> canonical compiler -> eligibility policy -> all-enabled native metadata -> host AI selection -> full skill injection -> invocation trace`；strict fallback 只在宿主原生注入不可用且显式请求时启用。
 - P5 后的 `maintenance_design` 已建立 Lean Delivery advisory 规划契约；M1 registry 当前为 `deferred (0/10)`，因为没有 active owner/collection task，只有显式建立两者后才恢复。它不是新 Phase，也不证明 pilot 已执行、完成或产生业务效果。
 - `maintenance_design` M0.2 只补强 host-owned coordination、single-writer write-set admission、Git freshness/CAS 语义、tool disposition 和 context-adapter admission；不引入 coordinator/lease runtime，也不安装 Trellis、AGOS、GBrain、CodeGraphContext、Understand Anything 或 OptSkills。
-- `maintenance_design` M0.3 只落盘 host-owned TaskGraph/model policy、三档 Sol 软锚点、failure escalation 和 typed-core 迁移决策；不执行动态路由、不修改 custom-agent/host 配置、不启动 C#/.NET PoC 或替换 PowerShell。Radar automation 已删除；旧 Luna/Terra/Radar 记录只作为历史 receipt。
+- `maintenance_design` M0.3 只落盘 host-owned TaskGraph/model policy、三档 Sol 软锚点、failure escalation 和 typed-core 迁移决策；不执行动态路由、不修改 custom-agent/host 配置或替换 PowerShell。后续独立 TC1 shadow PoC 仍未接入生产；Radar automation 已删除，旧 Luna/Terra/Radar 记录只作为历史 receipt。
 - GUI、daemon、远端协作、数据库和 domain core 重写均为 conditional，不进入当前承诺。
 
 ## 11. 官方与社区依据
