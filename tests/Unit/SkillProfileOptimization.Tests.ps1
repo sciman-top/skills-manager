@@ -34,6 +34,12 @@ function New-ProfileScriptSandbox([string]$root) {
 }
 
 Describe "P6 profile reachability retirement" {
+    It "Does not bundle retired canary apply or acceptance functions" {
+        foreach ($name in @("New-SkillProfileReconciliationApplyPlan", "Invoke-SkillProfileReconciliationApply", "Test-SkillProfileReconciliationReplay", "Complete-SkillProfileReconciliationCanary")) {
+            Get-Command $name -ErrorAction SilentlyContinue | Should Be $null
+        }
+    }
+
     It "Does not let legacy profile membership exclude an enabled native skill after migration" {
         $cfg = New-ProfileOptimizationConfig (Join-Path $TestDrive "reachability")
         $configPath = Join-Path $TestDrive "reachability.json"
@@ -118,16 +124,64 @@ Describe "P6 profile reachability retirement" {
         Test-Path -LiteralPath $receiptPath | Should Be $true
     }
 
-    It "Blocks deprecated profile canary apply through the manager without writes" {
-        $sandbox = New-ProfileScriptSandbox (Join-Path $TestDrive "deprecated-apply")
+    It "Blocks retired profile canary planning, apply, and acceptance without writes" {
+        $sandbox = New-ProfileScriptSandbox (Join-Path $TestDrive "deprecated-canary")
         $scriptPath = Join-Path $sandbox.repo_root "scripts\manage-skill-profile-reconciliation.ps1"
+        $proposalPath = Join-Path $sandbox.root "proposal.json"
+        Set-ContentUtf8 $proposalPath '{}'
+        $beforeHash = Get-FileContentHash $sandbox.config_path
 
-        $raw = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -Mode Apply -RepoRoot $sandbox.root -Json -NoExit)
+        foreach ($case in @(
+                [pscustomobject]@{ mode = "Plan"; extra = @("-ProposalPath", $proposalPath) },
+                [pscustomobject]@{ mode = "Apply"; extra = @() },
+                [pscustomobject]@{ mode = "Accept"; extra = @() }
+            )) {
+            $arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $scriptPath, "-Mode", $case.mode, "-RepoRoot", $sandbox.root, "-Json", "-NoExit") + @($case.extra)
+            $raw = @(& pwsh @arguments)
+            $result = ($raw -join "`n") | ConvertFrom-Json
+
+            $result.pass | Should Be $false
+            $result.status | Should Be "deprecated"
+            $result.writes_performed | Should Be 0
+            @($result.findings.code) | Should Contain "profile_reconciliation_retired"
+            (Get-FileContentHash $sandbox.config_path) | Should Be $beforeHash
+        }
+    }
+
+    It "Keeps rollback available for an existing canary receipt" {
+        $sandbox = New-ProfileScriptSandbox (Join-Path $TestDrive "legacy-canary-rollback")
+        $scriptPath = Join-Path $sandbox.repo_root "scripts\manage-skill-profile-reconciliation.ps1"
+        $receiptPath = Join-Path $sandbox.root "reports\legacy-canary.json"
+        $operationId = "legacy-canary-fixture"
+        $backupPath = Join-Path (Split-Path $receiptPath -Parent) (".skill-profile-backups\{0}.skills.json.bak" -f $operationId)
+        New-Item -ItemType Directory -Path (Split-Path $backupPath -Parent) -Force | Out-Null
+        $beforeBytes = [IO.File]::ReadAllBytes($sandbox.config_path)
+        [IO.File]::WriteAllBytes($backupPath, $beforeBytes)
+        $beforeHash = Get-FileContentHash $sandbox.config_path
+
+        $changed = Get-Content -LiteralPath $sandbox.config_path -Raw | ConvertFrom-Json
+        $changed.skill_projection.external_metadata_reserve_chars = 1
+        Set-ContentUtf8 $sandbox.config_path ($changed | ConvertTo-Json -Depth 50)
+        $afterHash = Get-FileContentHash $sandbox.config_path
+        $receipt = [pscustomobject]@{
+            schema_version = 1
+            domain = "skill_profile_reconciliation"
+            operation_id = $operationId
+            status = "canary_applied"
+            config_path = $sandbox.config_path
+            before_config_sha256 = $beforeHash
+            after_config_sha256 = $afterHash
+            backup_path = $backupPath
+        }
+        Set-ContentUtf8 $receiptPath ($receipt | ConvertTo-Json -Depth 20)
+
+        $raw = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -Mode Rollback -RepoRoot $sandbox.root -ReceiptPath $receiptPath -Token "ROLLBACK_PROFILE_RECONCILIATION_CANARY" -Json -NoExit)
         $result = ($raw -join "`n") | ConvertFrom-Json
 
-        $result.pass | Should Be $false
-        $result.status | Should Be "deprecated"
-        $result.writes_performed | Should Be 0
-        @($result.findings.code) | Should Contain "profile_reconciliation_retired"
+        $result.pass | Should Be $true
+        $result.status | Should Be "rolled_back"
+        $result.writes_performed | Should Be 1
+        (Get-FileContentHash $sandbox.config_path) | Should Be $beforeHash
+        (Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json).status | Should Be "rolled_back"
     }
 }

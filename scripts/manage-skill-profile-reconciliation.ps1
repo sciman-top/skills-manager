@@ -20,13 +20,6 @@ $root = [System.IO.Path]::GetFullPath($RepoRoot)
 $entry = Join-Path $root "skills.ps1"
 $configPath = Join-Path $root "skills.json"
 
-function Resolve-InputFile([string]$Path, [string]$Label) {
-    if ([string]::IsNullOrWhiteSpace($Path)) { throw "$Label path is required." }
-    $full = if ([System.IO.Path]::IsPathRooted($Path)) { [System.IO.Path]::GetFullPath($Path) } else { [System.IO.Path]::GetFullPath((Join-Path $root $Path)) }
-    if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { throw "$Label file does not exist: $full" }
-    return $full
-}
-
 function Resolve-ReceiptFile([string]$Path, [bool]$MustExist) {
     if ([string]::IsNullOrWhiteSpace($Path)) {
         if ($MustExist) { throw "ReceiptPath is required." }
@@ -35,6 +28,22 @@ function Resolve-ReceiptFile([string]$Path, [bool]$MustExist) {
     $full = if ([System.IO.Path]::IsPathRooted($Path)) { [System.IO.Path]::GetFullPath($Path) } else { [System.IO.Path]::GetFullPath((Join-Path $root $Path)) }
     if ($MustExist -and -not (Test-Path -LiteralPath $full -PathType Leaf)) { throw "Receipt file does not exist: $full" }
     return $full
+}
+
+function New-RetiredProfileReconciliationResult([string]$ModeName, [string]$Message) {
+    return [pscustomobject][ordered]@{
+        schema_version = 1
+        command = "manage-skill-profile-reconciliation"
+        mode = $ModeName.ToLowerInvariant()
+        status = "deprecated"
+        pass = $false
+        writes_performed = 0
+        findings = @([pscustomobject]@{
+                code = "profile_reconciliation_retired"
+                message = $Message
+                blocking = $true
+            })
+    }
 }
 
 try {
@@ -53,8 +62,7 @@ try {
                 $result = New-SkillProfileMigrationPlan -Config $cfg -ConfigPath $configPath
             }
             else {
-                $proposal = Read-SkillProfileReconciliationProposal (Resolve-InputFile $ProposalPath "Proposal")
-                $result = New-SkillProfileReconciliationApplyPlan -Config $cfg -ConfigPath $configPath -Proposal $proposal -MaxSkillChanges $MaxSkillChanges -MaxActions $MaxActions -MinBudgetHeadroomChars $MinBudgetHeadroomChars
+                $result = New-RetiredProfileReconciliationResult "Plan" "Profile canary proposal planning is retired; use the read-only migration plan without ProposalPath."
             }
         }
         "Migrate" {
@@ -67,34 +75,10 @@ try {
             $result = Invoke-SkillProfileMigrationRollback -ConfigPath $configPath -ReceiptPath $receipt -Token $Token
         }
         "Apply" {
-            $result = [pscustomobject][ordered]@{
-                schema_version = 1
-                command = "manage-skill-profile-reconciliation"
-                mode = "apply"
-                status = "deprecated"
-                pass = $false
-                writes_performed = 0
-                findings = @([pscustomobject]@{
-                        code = "profile_reconciliation_retired"
-                        message = "Profile canary apply is retired; use explicit config migration with a versioned receipt."
-                        blocking = $true
-                    })
-            }
+            $result = New-RetiredProfileReconciliationResult "Apply" "Profile canary apply is retired; use explicit config migration with a versioned receipt."
         }
         "Accept" {
-            $result = [pscustomobject][ordered]@{
-                schema_version = 1
-                command = "manage-skill-profile-reconciliation"
-                mode = "accept"
-                status = "deprecated"
-                pass = $false
-                writes_performed = 0
-                findings = @([pscustomobject]@{
-                        code = "profile_reconciliation_retired"
-                        message = "Profile canary acceptance is retired; use the read-only migration report and receipt."
-                        blocking = $true
-                    })
-            }
+            $result = New-RetiredProfileReconciliationResult "Accept" "Profile canary acceptance is retired; use the read-only migration report and receipt."
         }
         "Rollback" {
             $receipt = Resolve-ReceiptFile $ReceiptPath $true
