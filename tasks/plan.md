@@ -3,7 +3,7 @@
 **program_id**: `skills-manager-vnext`
 **current_phase**: `P6`
 **task_truth**: `tasks/skills-manager-vnext-phase6.tasks.json`
-**status**: host_loaded; 12/12 implemented; runtime migration completed; fresh inventory 124/124; current full passed 1121/1121; host_evaluation_partial; live_accepted failed on observability gap
+**status**: host_evaluation_partial; 12/12 implemented; runtime migration completed; host_inventory_loaded observed at 122/122 (106/106 managed projection; two previously observed sites skills are external inventory drift); host_invocation_observed not_observed; final full receipt authority is `reports/quality-gates/current.json`; live_accepted not_accepted
 **next_phase_admission**: n/a; P6 admitted 2026-08-07
 **active_maintenance_track**: maintenance_design
 **maintenance_task_truth**: `tasks/skills-manager-vnext-maintenance-design.tasks.json`
@@ -51,7 +51,7 @@
 | 11 | `SMV-P6-011` | strict fallback | opt-in bounded App Server dispatch |
 | 12 | `SMV-P6-012` | staged removal + closeout | fresh host evidence and unique full gate |
 
-P6-012 已完成 repo-side staged removal、native projection 和 fresh host inventory 验收。两个早期 current-tree full 分别被并发中间态和 v9.73 stale-literal contracts 阻断并保留在 evidence；最终稳定树 full exit 0：`1121/1121`，全部 contract/invariant 通过，总耗时 `316483ms`。P6 manifest 为 12/12 done，`runtime_migration=completed`，fresh App Server inventory `124/124` 因而 `host_loaded=passed`；native invocation events 仍不可见，所以 `host_evaluation_partial` 且 `live_accepted=failed`。
+P6-012 已完成 repo-side staged removal、native projection 和 fresh host inventory 验收。最终 full 的唯一权威是本轮收口后生成的 immutable receipt 及其 `reports/quality-gates/current.json` pointer；旧候选 full 仅保留为历史 evidence。当前 fresh App Server inventory 连续两次为 `122/122`，其中受管 projection `106/106`、`missing=0`；旧快照中的 `sites:sites-building` 与 `sites:sites-hosting` 属于外部宿主 inventory 漂移，不是仓库投影缺口。该 inventory 只证明 `host_inventory_loaded=observed`。native injected/executed events 仍不可见，故当前最高真值为 `host_evaluation_partial`，`host_invocation_observed=not_observed`，`live_accepted=not_accepted`；不得声称全部技能面对所有任务必然正确命中。
 
 Detailed TDD steps, interfaces, commands and wave constraints are in `docs/superpowers/plans/2026-08-07-host-native-skill-lifecycle-reset.md`. P5 content below is retained as historical closeout context; it is not the current execution queue.
 

@@ -85,6 +85,7 @@ function New-NativeSkillProjectionBlockedPlan {
         target_root = [string]$Settings.target_root
         catalog_id = [string](Get-NativeSkillProjectionProperty $Catalog @('catalog_id'))
         metadata_plan_id = [string](Get-NativeSkillProjectionProperty $MetadataPlan @('plan_id'))
+        metadata_projection_effect = 'plan_only'
         enabled = @($EnabledNames | Sort-Object)
         findings = @($Findings | ForEach-Object { [ordered]@{ code = [string]$_.code; path = [string]$_.path; message = [string]$_.message } })
     }
@@ -101,6 +102,7 @@ function New-NativeSkillProjectionBlockedPlan {
         apply_token = ''
         catalog_id = [string](Get-NativeSkillProjectionProperty $Catalog @('catalog_id'))
         metadata_plan_id = [string](Get-NativeSkillProjectionProperty $MetadataPlan @('plan_id'))
+        metadata_projection_effect = 'plan_only'
         enabled = [object[]]@($EnabledNames | Sort-Object)
         kept = [object[]]@()
         omitted = [object[]]@($EnabledNames | Sort-Object)
@@ -204,8 +206,8 @@ function New-NativeSkillProjectionPlan {
         }
         $targetDirectory = Join-Path $settings.target_root $targetLeaf
         $targetPath = Join-Path $targetDirectory 'SKILL.md'
-        $description = [string](Get-NativeSkillProjectionProperty $metadata @('description'))
-        if ([string]::IsNullOrWhiteSpace($description)) { $description = [string](Get-NativeSkillProjectionProperty $entry @('description')) }
+        $plannedDescription = [string](Get-NativeSkillProjectionProperty $metadata @('planned_description'))
+        $observedSourceDescription = [string](Get-NativeSkillProjectionProperty $entry @('description'))
         $rows.Add([pscustomobject][ordered]@{
                 kind = 'skill'
                 name = $name
@@ -220,7 +222,10 @@ function New-NativeSkillProjectionPlan {
                 metadata = [ordered]@{
                     kind = 'skill'
                     name = $name
-                    description = $description
+                    projection_effect = 'plan_only'
+                    materialization = 'source_package_junction'
+                    planned_description = $plannedDescription
+                    observed_source_description = $observedSourceDescription
                     path = $sourcePath
                     content_hash = $contentHash
                     metadata_hash = $metadataHash
@@ -237,6 +242,7 @@ function New-NativeSkillProjectionPlan {
         owner = [string]$settings.owner
         catalog_id = [string](Get-NativeSkillProjectionProperty $Catalog @('catalog_id'))
         metadata_plan_id = [string](Get-NativeSkillProjectionProperty $MetadataPlan @('plan_id'))
+        metadata_projection_effect = 'plan_only'
         skills = @($skillRows | ForEach-Object { [ordered]@{ name = $_.name; source_path = $_.source_path; target_path = $_.target_path; content_hash = $_.content_hash; metadata_hash = $_.metadata_hash } })
     }
     $planId = 'nsp-{0}' -f (Get-OperationSha256 ($identity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)
@@ -250,6 +256,7 @@ function New-NativeSkillProjectionPlan {
                 target_directory = $_.target_directory
                 target_path = $_.target_path
                 expected_content_hash = $_.content_hash
+                metadata_materialization = 'source_package_junction'
                 risk = 'explicit_native_root_write'
             }
         })
@@ -265,6 +272,7 @@ function New-NativeSkillProjectionPlan {
         apply_token = $applyToken
         catalog_id = [string](Get-NativeSkillProjectionProperty $Catalog @('catalog_id'))
         metadata_plan_id = [string](Get-NativeSkillProjectionProperty $MetadataPlan @('plan_id'))
+        metadata_projection_effect = 'plan_only'
         enabled = [object[]]$enabledNamesSorted
         kept = [object[]]@($skillRows | ForEach-Object name)
         omitted = [object[]]@()
@@ -300,6 +308,7 @@ function Test-NativeSkillProjectionPlanContract {
     if ([string](Get-NativeSkillProjectionProperty $Plan @('plan_id')) -notmatch '^nsp-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'plan_id_invalid' 'error' '$.plan_id' 'Projection plan id is invalid.')) | Out-Null }
     if ([string](Get-NativeSkillProjectionProperty $Plan @('status')) -notin @('ready', 'blocked')) { $findings.Add((New-OperationFinding 'status_invalid' 'error' '$.status' 'Projection plan status is invalid.')) | Out-Null }
     foreach ($field in @('owner', 'target_root', 'receipt_path')) { if ([string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $Plan @($field)))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Projection plan field is required.')) | Out-Null } }
+    if ([string](Get-NativeSkillProjectionProperty $Plan @('metadata_projection_effect')) -ne 'plan_only') { $findings.Add((New-OperationFinding 'metadata_projection_effect_invalid' 'error' '$.metadata_projection_effect' 'Junction projection cannot claim advisory metadata materialization.')) | Out-Null }
     foreach ($field in @('enabled', 'kept', 'omitted', 'skills', 'actions', 'findings')) { if (-not (Test-OperationArray (Get-OperationObjectProperty $Plan $field))) { $findings.Add((New-OperationFinding 'array_field_invalid' 'error' ('$.{0}' -f $field) 'Projection plan field must be an array.')) | Out-Null } }
     $enabled = @((Get-NativeSkillProjectionProperty $Plan @('enabled')))
     $kept = @((Get-NativeSkillProjectionProperty $Plan @('kept')))
@@ -320,7 +329,14 @@ function Test-NativeSkillProjectionPlanContract {
         foreach ($field in @('name', 'source_path', 'target_path', 'content_hash', 'metadata_hash')) { if ([string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $skill @($field)))) { $findings.Add((New-OperationFinding 'skill_field_missing' 'error' '$.skills' ('Projected skill field is missing: {0}' -f $field))) | Out-Null } }
         if ([string](Get-NativeSkillProjectionProperty $skill @('content_hash')) -notmatch '^[0-9a-f]{64}$' -or [string](Get-NativeSkillProjectionProperty $skill @('metadata_hash')) -notmatch '^[0-9a-f]{64}$') { $findings.Add((New-OperationFinding 'skill_hash_invalid' 'error' '$.skills' 'Projected skill hashes must be SHA-256.')) | Out-Null }
         $metadata = Get-NativeSkillProjectionProperty $skill @('metadata')
-        if ([string](Get-NativeSkillProjectionProperty $metadata @('name')) -ne [string](Get-NativeSkillProjectionProperty $skill @('name')) -or [string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $metadata @('description')))) { $findings.Add((New-OperationFinding 'skill_metadata_invalid' 'error' '$.skills.metadata' 'Projected skill metadata must include matching name and description.')) | Out-Null }
+        if ([string](Get-NativeSkillProjectionProperty $metadata @('name')) -ne [string](Get-NativeSkillProjectionProperty $skill @('name')) -or
+            [string](Get-NativeSkillProjectionProperty $metadata @('projection_effect')) -ne 'plan_only' -or
+            [string](Get-NativeSkillProjectionProperty $metadata @('materialization')) -ne 'source_package_junction' -or
+            [string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $metadata @('planned_description'))) -or
+            [string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $metadata @('observed_source_description'))) -or
+            (Test-OperationObjectProperty $metadata 'description')) {
+            $findings.Add((New-OperationFinding 'skill_metadata_invalid' 'error' '$.skills.metadata' 'Projection metadata must separate advisory planned text from the source package description materialized by the junction.')) | Out-Null
+        }
     }
     return New-OperationValidationResult $findings.ToArray()
 }

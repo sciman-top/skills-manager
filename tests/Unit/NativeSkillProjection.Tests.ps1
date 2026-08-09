@@ -123,7 +123,7 @@ Describe 'P6 native skill projection plan and transaction' {
     }
 
 
-    It 'projects formerly profile-excluded enabled skills with complete metadata while excluding disabled paths' {
+    It 'projects formerly profile-excluded enabled skills while keeping advisory metadata plan-only' {
         $fixture = New-P6ProjectionFixture
 
         $plan = New-NativeSkillProjectionPlan -Catalog $fixture.catalog -Eligibility $fixture.eligibility -MetadataPlan $fixture.metadata -Config $fixture.config
@@ -142,13 +142,46 @@ Describe 'P6 native skill projection plan and transaction' {
             [string]$skill.content_hash | Should Match '^[0-9a-f]{64}$'
             [string]$skill.metadata_hash | Should Match '^[0-9a-f]{64}$'
             $skill.metadata.name | Should Be $skill.name
-            [string]$skill.metadata.description | Should Not BeNullOrEmpty
+            [string]$skill.metadata.observed_source_description | Should Not BeNullOrEmpty
+            [string]$skill.metadata.planned_description | Should Not BeNullOrEmpty
+            $skill.metadata.projection_effect | Should Be 'plan_only'
+            $skill.metadata.materialization | Should Be 'source_package_junction'
+            @($skill.metadata.PSObject.Properties.Name) | Should Not Contain 'description'
         }
         $plan.apply_token | Should Match '^nsp-token-[0-9a-f]{16}$'
         $plan.notification.method | Should Be 'skills/changed'
         $plan.notification.status | Should Be 'planned_only'
         @($plan.notification.changed_names) | Should Be @('profile-only', 'resident')
         (Test-NativeSkillProjectionPlanContract $plan).pass | Should Be $true
+    }
+
+    It 'keeps a compacted advisory description separate from the junction materialized source description' {
+        $sourceRoot = Join-Path $TestDrive 'plan-only-source'
+        $targetRoot = Join-Path $TestDrive 'plan-only-target'
+        $sourceDescription = ('Use this capability when ' + ('the original host-visible trigger context must remain intact. ' * 8)).TrimEnd()
+        $skill = New-P6ProjectionSkill $sourceRoot 'plan-only' 'plan-only' $sourceDescription
+        $catalog = Compile-SkillCatalog -Entries @([pscustomobject]@{ name = $skill.Name; description = $sourceDescription; path = $skill.path; source_root = $sourceRoot; enabled = $true; availability = 'available'; freshness = 'fresh'; side_effect = 'read_only'; load_side_effect = 'read_only' })
+        $eligibility = @($catalog.entries | ForEach-Object { Evaluate-SkillEligibility -Skill $_ -Surface 'native_discovery' -AllowedRoots @($sourceRoot) })
+        $snapshot = [pscustomobject]@{ capabilities = [pscustomobject]@{
+                context_window = [pscustomobject]@{ value = 20000; source = 'app_server'; freshness = 'fresh' }
+                metadata_budget = [pscustomobject]@{ value = 60; source = 'app_server'; freshness = 'fresh' }
+            } }
+        $metadata = Plan-NativeMetadata -Inventory $catalog -Snapshot $snapshot
+        $config = [pscustomobject]@{ skill_projection = [pscustomobject]@{ native_projection = [pscustomobject]@{ enabled = $true; owner = 'skills-manager'; target_root = $targetRoot; receipt_path = (Join-Path $TestDrive 'plan-only-receipt.json'); notification_method = 'skills/changed' } } }
+
+        $metadata.pass | Should Be $true
+        $metadata.compaction.applied | Should Be $true
+        $plan = New-NativeSkillProjectionPlan -Catalog $catalog -Eligibility $eligibility -MetadataPlan $metadata -Config $config
+
+        $plan.skills[0].metadata.projection_effect | Should Be 'plan_only'
+        $plan.skills[0].metadata.planned_description.Length | Should BeLessThan $sourceDescription.Length
+        $plan.skills[0].metadata.observed_source_description | Should Be $sourceDescription
+        @($plan.skills[0].metadata.PSObject.Properties.Name) | Should Not Contain 'description'
+
+        Apply-NativeSkillProjection -Plan $plan -ApplyToken $plan.apply_token -ReceiptPath $config.skill_projection.native_projection.receipt_path | Out-Null
+        $materialized = Get-Content -LiteralPath (Join-Path $targetRoot 'plan-only\SKILL.md') -Raw
+        $materialized | Should Match ([regex]::Escape($sourceDescription))
+        $materialized | Should Not Match ([regex]::Escape([string]$plan.skills[0].metadata.planned_description) + '\r?\n---')
     }
 
     It 'requires the explicit apply token and rolls back a partial apply atomically' {

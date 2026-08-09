@@ -62,6 +62,56 @@
       "formerly_unreachable": false
     }
   ],
+  "pairwise_dimensions": [
+    "artifact_create",
+    "artifact_read",
+    "portable_fallback",
+    "signed_in_session",
+    "live_control",
+    "local_testing",
+    "test_authoring",
+    "no_browser",
+    "side_effect_boundary"
+  ],
+  "pairwise_targets": [
+    "docx",
+    "documents:documents",
+    "pdf",
+    "pdf:pdf",
+    "xlsx",
+    "spreadsheets:Spreadsheets",
+    "spreadsheets:excel-live-control",
+    "pptx",
+    "presentations:Presentations",
+    "agent-browser",
+    "browser:control-in-app-browser",
+    "chrome:control-chrome",
+    "playwright",
+    "playwright-best-practices",
+    "webapp-testing"
+  ],
+  "pairwise_groups": [
+    {
+      "id": "word-artifact",
+      "skills": ["docx", "documents:documents"]
+    },
+    {
+      "id": "pdf-artifact",
+      "skills": ["pdf", "pdf:pdf"]
+    },
+    {
+      "id": "spreadsheet-artifact",
+      "skills": ["xlsx", "spreadsheets:Spreadsheets", "spreadsheets:excel-live-control"]
+    },
+    {
+      "id": "presentation-artifact",
+      "skills": ["pptx", "presentations:Presentations"]
+    },
+    {
+      "id": "browser-control",
+      "skills": ["agent-browser", "browser:control-in-app-browser", "chrome:control-chrome", "playwright", "playwright-best-practices", "webapp-testing"]
+    }
+  ],
   "metrics": {
     "native_only": [
       "listed",
@@ -192,9 +242,172 @@
       "forbidden_skills": [],
       "expected_host_action": "abstain",
       "formerly_unreachable": false
+    },
+    {
+      "id": "pair-word-render-create",
+      "category": "direct",
+      "request": "Create report.docx, render every page to images, and visually verify the layout before delivery.",
+      "required_skills": ["documents:documents"],
+      "forbidden_skills": ["docx"],
+      "expected_host_action": "load_or_invoke",
+      "pairwise_group": "word-artifact",
+      "dimensions": ["artifact_create", "side_effect_boundary"]
+    },
+    {
+      "id": "pair-word-portable-dotx-read",
+      "category": "direct",
+      "request": "The container document runtime is unavailable; use the portable workflow to read comments from legacy-template.dotx without editing it.",
+      "required_skills": ["docx"],
+      "forbidden_skills": ["documents:documents"],
+      "expected_host_action": "load_or_invoke",
+      "pairwise_group": "word-artifact",
+      "dimensions": ["artifact_read", "portable_fallback"]
+    },
+    {
+      "id": "pair-pdf-layout-form",
+      "category": "direct",
+      "request": "Fill this AcroForm PDF and render the completed pages to verify visual alignment.",
+      "required_skills": ["pdf:pdf"],
+      "forbidden_skills": ["pdf"],
+      "expected_host_action": "load_or_invoke",
+      "pairwise_group": "pdf-artifact",
+      "dimensions": ["artifact_create", "side_effect_boundary"]
+    },
+    {
+      "id": "pair-pdf-portable-merge",
+      "category": "direct",
+      "request": "The primary PDF plugin is unavailable; use the portable PDF workflow to merge a.pdf and b.pdf without OCR or layout changes.",
+      "required_skills": ["pdf"],
+      "forbidden_skills": ["pdf:pdf"],
+      "expected_host_action": "load_or_invoke",
+      "pairwise_group": "pdf-artifact",
+      "dimensions": ["artifact_read", "portable_fallback"]
+    },
+    {
+      "id": "pair-sheet-standalone-create",
+      "category": "direct",
+      "request": "Create a standalone budget.xlsx workbook and verify its formulas; do not control a live Excel session.",
+      "required_skills": ["spreadsheets:Spreadsheets"],
+      "forbidden_skills": ["xlsx", "spreadsheets:excel-live-control"],
+      "expected_host_action": "load_or_invoke",
+      "pairwise_group": "spreadsheet-artifact",
+      "dimensions": ["artifact_create", "side_effect_boundary"]
+    },
+    {
+      "id": "pair-sheet-live-control",
+      "category": "direct",
+      "request": "In the Excel workbook currently open through the connected add-in, update the selected table and keep the live session active.",
+      "required_skills": ["spreadsheets:excel-live-control"],
+      "forbidden_skills": ["xlsx", "spreadsheets:Spreadsheets"],
+      "expected_host_action": "load_or_invoke",
+      "pairwise_group": "spreadsheet-artifact",
+      "dimensions": ["live_control", "side_effect_boundary"]
+    },
+    {
+      "id": "pair-sheet-portable-fallback",
+      "category": "direct",
+      "request": "The spreadsheet plugins are unavailable; use the portable workbook workflow to repair formulas in forecast.xlsx.",
+      "required_skills": ["xlsx"],
+      "forbidden_skills": ["spreadsheets:Spreadsheets", "spreadsheets:excel-live-control"],
+      "expected_host_action": "load_or_invoke",
+      "pairwise_group": "spreadsheet-artifact",
+      "dimensions": ["artifact_read", "portable_fallback"]
+    },
+    {
+      "id": "pair-presentation-native-create",
+      "category": "direct",
+      "request": "Create and visually verify a PowerPoint deck for delivery using the primary presentation artifact workflow.",
+      "required_skills": ["presentations:Presentations"],
+      "forbidden_skills": ["pptx"],
+      "expected_host_action": "load_or_invoke",
+      "pairwise_group": "presentation-artifact",
+      "dimensions": ["artifact_create", "side_effect_boundary"]
+    },
+    {
+      "id": "pair-presentation-portable-read",
+      "category": "direct",
+      "request": "The primary presentation plugin is unavailable; use the portable PPTX workflow to extract speaker notes from lesson.pptx.",
+      "required_skills": ["pptx"],
+      "forbidden_skills": ["presentations:Presentations"],
+      "expected_host_action": "load_or_invoke",
+      "pairwise_group": "presentation-artifact",
+      "dimensions": ["artifact_read", "portable_fallback"]
+    },
+    {
+      "id": "pair-browser-chrome-session",
+      "category": "direct",
+      "request": "Use my already signed-in Chrome tab and installed extension to inspect the current account page.",
+      "required_skills": ["chrome:control-chrome"],
+      "forbidden_skills": ["browser:control-in-app-browser", "agent-browser", "playwright", "webapp-testing"],
+      "expected_host_action": "load_or_invoke",
+      "pairwise_group": "browser-control",
+      "dimensions": ["signed_in_session", "side_effect_boundary"]
+    },
+    {
+      "id": "pair-browser-in-app-session",
+      "category": "direct",
+      "request": "Continue in the in-app Browser that is already open and inspect the visible page without switching to Chrome.",
+      "required_skills": ["browser:control-in-app-browser"],
+      "forbidden_skills": ["chrome:control-chrome", "agent-browser", "playwright"],
+      "expected_host_action": "load_or_invoke",
+      "pairwise_group": "browser-control",
+      "dimensions": ["signed_in_session", "side_effect_boundary"]
+    },
+    {
+      "id": "pair-browser-terminal-automation",
+      "category": "direct",
+      "request": "Automate a real browser from the terminal to navigate, fill a form, and capture a screenshot; no existing signed-in session is needed.",
+      "required_skills": ["playwright"],
+      "forbidden_skills": ["chrome:control-chrome", "browser:control-in-app-browser", "playwright-best-practices"],
+      "expected_host_action": "load_or_invoke",
+      "pairwise_group": "browser-control",
+      "dimensions": ["local_testing", "side_effect_boundary"]
+    },
+    {
+      "id": "pair-browser-local-webapp-testing",
+      "category": "direct",
+      "request": "Test the local web application, reproduce the UI bug, capture screenshots, and inspect browser console logs.",
+      "required_skills": ["webapp-testing"],
+      "forbidden_skills": ["playwright-best-practices", "chrome:control-chrome", "browser:control-in-app-browser"],
+      "expected_host_action": "load_or_invoke",
+      "pairwise_group": "browser-control",
+      "dimensions": ["local_testing", "side_effect_boundary"]
+    },
+    {
+      "id": "pair-browser-test-authoring",
+      "category": "direct",
+      "request": "Write and review Playwright test code for OAuth, fixtures, and CI flake handling; do not open or control a browser now.",
+      "required_skills": ["playwright-best-practices"],
+      "forbidden_skills": ["playwright", "agent-browser", "chrome:control-chrome", "browser:control-in-app-browser", "webapp-testing"],
+      "expected_host_action": "load_or_invoke",
+      "pairwise_group": "browser-control",
+      "dimensions": ["test_authoring", "no_browser"]
+    },
+    {
+      "id": "pair-browser-agent-cloud",
+      "category": "direct",
+      "request": "Use the agent-browser CLI in a cloud browser to dogfood the website and collect screenshots; no local Chrome state is required.",
+      "required_skills": ["agent-browser"],
+      "forbidden_skills": ["chrome:control-chrome", "browser:control-in-app-browser", "playwright-best-practices"],
+      "expected_host_action": "load_or_invoke",
+      "pairwise_group": "browser-control",
+      "dimensions": ["local_testing", "side_effect_boundary"]
+    },
+    {
+      "id": "pair-browser-no-side-effects",
+      "category": "negative",
+      "request": "Only explain the supplied HTML snippet. Do not open, control, test, or automate any browser and do not perform external side effects.",
+      "required_skills": [],
+      "forbidden_skills": ["agent-browser", "browser:control-in-app-browser", "chrome:control-chrome", "playwright", "playwright-best-practices", "webapp-testing"],
+      "expected_host_action": "abstain",
+      "pairwise_group": "browser-control",
+      "dimensions": ["no_browser", "side_effect_boundary"]
     }
   ],
-  "case_count": 10,
+  "case_count": 26,
   "metadata_target_count": 4,
+  "pairwise_target_count": 15,
+  "pairwise_group_count": 5,
+  "pairwise_case_count": 16,
   "formerly_unreachable_skill_count": 1
 }

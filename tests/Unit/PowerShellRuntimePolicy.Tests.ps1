@@ -140,6 +140,34 @@ Describe 'PowerShell 7-only runtime policy verifier' {
         }).Count | Should Be 1
     }
 
+    It 'excludes transaction backups from the active PowerShell estate' {
+        $fixtureRoot = New-PowerShellRuntimePolicyFixture 'transaction-backup-boundary'
+        $backupPath = Join-Path $fixtureRoot '.txn\build-fixture\agent.backup\legacy.ps1'
+        New-Item -ItemType Directory -Path (Split-Path $backupPath -Parent) -Force | Out-Null
+        Set-Content -LiteralPath $backupPath -Value '& powershell.exe -NoProfile' -Encoding UTF8
+
+        $result = Invoke-PowerShellRuntimePolicyVerifier $fixtureRoot
+        if ($result.exit_code -ne 0) { Write-Host $result.output }
+        $parsed = $result.output | ConvertFrom-Json
+
+        $result.exit_code | Should Be 0
+        $parsed.status | Should Be 'pass'
+        @($parsed.findings | Where-Object code -eq 'legacy_runtime_invocation_detected').Count | Should Be 0
+    }
+
+    It 'checks the generated bundle through its dedicated policy instead of the source estate scan' {
+        $fixtureRoot = New-PowerShellRuntimePolicyFixture 'generated-policy-boundary'
+        $generatedPath = Join-Path $fixtureRoot 'skills.ps1'
+        Add-Content -LiteralPath $generatedPath -Value "`nStart-Process powershell.exe -ArgumentList '-NoProfile'"
+
+        $result = Invoke-PowerShellRuntimePolicyVerifier $fixtureRoot
+        $parsed = $result.output | ConvertFrom-Json
+
+        $result.exit_code | Should Be 1
+        @($parsed.findings | Where-Object { $_.code -eq 'legacy_fallback_detected' -and $_.path -eq 'skills.ps1' }).Count | Should Be 1
+        @($parsed.findings | Where-Object { $_.code -eq 'legacy_runtime_invocation_detected' -and $_.path -eq 'skills.ps1' }).Count | Should Be 0
+    }
+
     It 'fails closed when a current truth surface restores the bounded-smoke policy' {
         $fixtureRoot = New-PowerShellRuntimePolicyFixture 'current-policy'
         $path = Join-Path $fixtureRoot 'docs\superpowers\specs\2026-08-03-lean-ai-delivery-maintenance-design.md'

@@ -145,31 +145,46 @@ $pendingCount = 0
 $phaseEvidencePaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
 if ($null -ne $manifest) {
-    if ([int]$manifest.schema_version -ne 1) {
-        Add-PlanningFinding ([ref]$findings) 'unsupported_manifest_schema' $paths['manifest'] 'schema_version must be 1.'
+    $expectedManifestSchema = if ($explicitHistoricalMode) { 1 } else { 2 }
+    if ([int]$manifest.schema_version -ne $expectedManifestSchema) {
+        Add-PlanningFinding ([ref]$findings) 'unsupported_manifest_schema' $paths['manifest'] ("schema_version must be $expectedManifestSchema for this verification mode.")
     }
     if ([string]$manifest.program_id -ne 'skills-manager-vnext') {
         Add-PlanningFinding ([ref]$findings) 'unexpected_program_id' $paths['manifest'] 'program_id must be skills-manager-vnext.'
     }
 
     if (-not $explicitHistoricalMode) {
-        $requiredTruthFields = @('truth_level', 'full_gate', 'runtime_migration', 'host_evaluation', 'host_loaded', 'live_accepted', 'latest_evidence', 'main_chain', 'stop_conditions', 'first_open_task', 'next_milestone')
+        $requiredTruthFields = @('truth_level', 'full_gate', 'runtime_migration', 'host_inventory_loaded', 'host_evaluation', 'host_invocation_observed', 'live_accepted', 'latest_evidence', 'main_chain', 'stop_conditions', 'first_open_task', 'next_milestone')
         foreach ($field in $requiredTruthFields) {
             if ($manifest.PSObject.Properties.Match($field).Count -eq 0) {
                 Add-PlanningFinding ([ref]$findings) 'phase_truth_field_missing' $paths['manifest'] ('Current phase truth field is missing: {0}' -f $field)
             }
         }
         foreach ($contract in @(
-                @{ field = 'truth_level'; allowed = @('design_only', 'repo_verified', 'host_evaluation_partial', 'host_loaded', 'live_accepted') },
+                @{ field = 'truth_level'; allowed = @('design_only', 'repo_verified', 'host_inventory_loaded', 'host_evaluation_partial', 'host_invocation_observed', 'live_accepted') },
                 @{ field = 'full_gate'; allowed = @('not_run', 'passed', 'failed', 'stale') },
                 @{ field = 'runtime_migration'; allowed = @('not_started', 'in_progress', 'completed', 'blocked') },
+                @{ field = 'host_inventory_loaded'; allowed = @('not_run', 'observed', 'not_observed', 'stale') },
                 @{ field = 'host_evaluation'; allowed = @('not_run', 'host_evaluation_partial', 'passed', 'failed') },
-                @{ field = 'host_loaded'; allowed = @('not_run', 'passed', 'failed') },
-                @{ field = 'live_accepted'; allowed = @('not_run', 'passed', 'failed') }
+                @{ field = 'host_invocation_observed'; allowed = @('not_run', 'observed', 'not_observed', 'blocked') },
+                @{ field = 'live_accepted'; allowed = @('not_run', 'not_accepted', 'blocked', 'accepted') }
             )) {
             if ($manifest.PSObject.Properties.Match([string]$contract.field).Count -gt 0 -and [string]$manifest.($contract.field) -notin @($contract.allowed)) {
                 Add-PlanningFinding ([ref]$findings) 'phase_truth_value_invalid' $paths['manifest'] ('Unsupported {0}: {1}' -f $contract.field, [string]$manifest.($contract.field))
             }
+        }
+        if ($manifest.PSObject.Properties.Match('host_invocation_observed').Count -gt 0 -and
+            [string]$manifest.host_invocation_observed -eq 'observed' -and
+            [string]$manifest.truth_level -notin @('host_invocation_observed','live_accepted')) {
+            Add-PlanningFinding ([ref]$findings) 'phase_truth_order_invalid' $paths['manifest'] 'Inventory or evaluation truth cannot be promoted to invocation without host_invocation_observed truth.'
+        }
+        if ($manifest.PSObject.Properties.Match('truth_level').Count -gt 0 -and [string]$manifest.truth_level -eq 'host_invocation_observed' -and
+            [string]$manifest.host_invocation_observed -ne 'observed') {
+            Add-PlanningFinding ([ref]$findings) 'phase_truth_order_invalid' $paths['manifest'] 'host_invocation_observed truth requires observed injected and executed evidence.'
+        }
+        if ($manifest.PSObject.Properties.Match('live_accepted').Count -gt 0 -and [string]$manifest.live_accepted -eq 'accepted' -and
+            [string]$manifest.host_invocation_observed -ne 'observed') {
+            Add-PlanningFinding ([ref]$findings) 'phase_truth_order_invalid' $paths['manifest'] 'live acceptance requires host invocation evidence before business acceptance.'
         }
         foreach ($field in @('main_chain', 'stop_conditions')) {
             if ($manifest.PSObject.Properties.Match($field).Count -gt 0 -and @($manifest.$field | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -eq 0) {
@@ -348,6 +363,14 @@ if ($null -ne $manifest) {
 }
 
 if (-not $explicitHistoricalMode) {
+    $currentTruthMarker = 'CURRENT_PHASE_TRUTH_SOURCE: {0}' -f $ManifestPath
+    foreach ($documentKey in @('index', 'roadmap')) {
+        if (-not (Test-ContainsLiteral $content[$documentKey] $currentTruthMarker)) {
+            Add-PlanningFinding ([ref]$findings) 'current_truth_source_mismatch' $paths[$documentKey] `
+                ('Current product truth must delegate to the active manifest with marker: {0}' -f $currentTruthMarker)
+        }
+    }
+
     $currentPhaseNumber = if ($planPhase -match '^P([0-9]+)$') { [int]$Matches[1] } else { -1 }
     if ($currentPhaseNumber -gt 4 -and -not [string]::IsNullOrWhiteSpace($content['p4_entry'])) {
         try {
@@ -384,15 +407,16 @@ if ($null -ne $manifest -and -not $explicitHistoricalMode -and $planPhase -ne [s
 }
 
 $result = [ordered]@{
-    schema_version = 1
+    schema_version = 2
     program_id = 'skills-manager-vnext'
     current_phase = if ($null -ne $manifest) { [string]$manifest.current_phase } else { $planPhase }
     historical_mode = $explicitHistoricalMode
     truth_level = if ($null -ne $manifest -and -not $explicitHistoricalMode) { [string]$manifest.truth_level } else { 'historical' }
     full_gate = if ($null -ne $manifest -and -not $explicitHistoricalMode) { [string]$manifest.full_gate } else { 'not_applicable' }
     runtime_migration = if ($null -ne $manifest -and -not $explicitHistoricalMode) { [string]$manifest.runtime_migration } else { 'not_applicable' }
+    host_inventory_loaded = if ($null -ne $manifest -and -not $explicitHistoricalMode) { [string]$manifest.host_inventory_loaded } else { 'not_applicable' }
     host_evaluation = if ($null -ne $manifest -and -not $explicitHistoricalMode) { [string]$manifest.host_evaluation } else { 'not_applicable' }
-    host_loaded = if ($null -ne $manifest -and -not $explicitHistoricalMode) { [string]$manifest.host_loaded } else { 'not_applicable' }
+    host_invocation_observed = if ($null -ne $manifest -and -not $explicitHistoricalMode) { [string]$manifest.host_invocation_observed } else { 'not_applicable' }
     live_accepted = if ($null -ne $manifest -and -not $explicitHistoricalMode) { [string]$manifest.live_accepted } else { 'not_applicable' }
     pass = ($findings.Count -eq 0)
     task_count = $taskCount

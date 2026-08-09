@@ -48,15 +48,27 @@ function Reject-Pattern([string]$Text, [string]$Pattern, [string]$Path, [string]
 function Get-ActivePowerShellFiles {
     $excludedPrefixes = @(
         '.git/',
+        '.txn/',
         'agent/',
         'imports/',
         'reports/',
         'tests/fixtures/',
         'vendor/'
     )
+    $separatelyValidatedFiles = @('skills.ps1')
+    $relativePaths = @()
 
-    foreach ($file in @(Get-ChildItem -LiteralPath $root -Filter '*.ps1' -File -Recurse -Force -ErrorAction Stop)) {
-        $relativePath = [System.IO.Path]::GetRelativePath($root, $file.FullName).Replace('\', '/')
+    if ((Test-Path -LiteralPath (Join-Path $root '.git')) -and (Get-Command git -ErrorAction SilentlyContinue)) {
+        $relativePaths = @(& git -C $root ls-files --cached --others --exclude-standard -- '*.ps1' 2>$null)
+        if ($LASTEXITCODE -ne 0) { $relativePaths = @() }
+    }
+    if ($relativePaths.Count -eq 0) {
+        $relativePaths = @(Get-ChildItem -LiteralPath $root -Filter '*.ps1' -File -Recurse -Force -ErrorAction Stop |
+            ForEach-Object { [System.IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/') })
+    }
+
+    foreach ($relativePath in @($relativePaths | ForEach-Object { ([string]$_).Trim().Replace('\', '/') } | Sort-Object -Unique)) {
+        if ([string]::IsNullOrWhiteSpace($relativePath) -or $relativePath -in $separatelyValidatedFiles) { continue }
         $excluded = $false
         foreach ($prefix in $excludedPrefixes) {
             if ($relativePath.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -65,9 +77,11 @@ function Get-ActivePowerShellFiles {
             }
         }
         if (-not $excluded) {
+            $fullPath = Join-Path $root $relativePath
+            if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) { continue }
             [pscustomobject]@{
                 path = $relativePath
-                full_path = $file.FullName
+                full_path = $fullPath
             }
         }
     }
@@ -244,7 +258,7 @@ Reject-Pattern $content.core '(?i)CODEX_ALLOW_WINDOWS_POWERSHELL|Get-Command\s+p
 Reject-Pattern $content.installer '(?i)Get-Command\s+powershell(?:\.exe)?|&\s*[''\"]?powershell(?:\.exe)?' $paths.installer 'legacy_fallback_detected' 'Installer must not resolve or invoke Windows PowerShell.'
 Reject-Pattern $content.cmd '(?i)POWERSHELL_EXE=powershell\.exe|where\s+powershell(?:\.exe)?|\bpause\b' $paths.cmd 'legacy_fallback_detected' 'CMD wrapper must resolve only pwsh and must not pause.'
 Reject-Pattern $content.mcp '(?i)["'']powershell\.exe["'']' $paths.mcp 'legacy_fallback_detected' 'MCP environment wrapper must invoke pwsh.exe only.'
-Reject-Pattern $content.generated '(?i)CODEX_ALLOW_WINDOWS_POWERSHELL|Get-Command\s+powershell(?:\.exe)?|["'']powershell\.exe["'']' $paths.generated 'legacy_fallback_detected' 'Generated bundle contains a legacy runtime execution path.'
+Reject-Pattern $content.generated '(?i)CODEX_ALLOW_WINDOWS_POWERSHELL|(?:Get-Command|Start-Process)\s+(?:-FilePath\s+)?["'']?powershell(?:\.exe)?["'']?|&\s*["'']?powershell(?:\.exe)?["'']?|["'']powershell\.exe["'']' $paths.generated 'legacy_fallback_detected' 'Generated bundle contains a legacy runtime execution path.'
 
 $powershellFilesScanned = Test-ActivePowerShellEstate
 

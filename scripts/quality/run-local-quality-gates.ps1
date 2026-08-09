@@ -8,6 +8,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+. (Join-Path $PSScriptRoot 'QualityGateIntegrity.ps1')
 $script:GateResults = [Collections.Generic.List[object]]::new()
 
 function Get-QualityGateMutexName([string]$RepoRoot) {
@@ -65,35 +66,88 @@ try {
 
     Push-Location $root
     try {
-    Invoke-QualityGate 'build' { & .\build.ps1 }
-    if ($Profile -eq 'full') {
-        Invoke-QualityGate 'tests' { & .\tests\run.ps1 }
-    }
-    Invoke-QualityGate 'repo-hygiene' { & .\scripts\quality\check-repo-hygiene.ps1 -ReportUntrackedRuntimeArtifacts }
-    if ($AllowDirtyWorktree) {
-        Invoke-QualityGate 'generated-sync' { & .\tests\check-generated-sync.ps1 -AllowDirtyWorktree }
-    }
-    else {
-        Invoke-QualityGate 'generated-sync' { & .\tests\check-generated-sync.ps1 -StrictNoGit }
-    }
-    Invoke-QualityGate 'workspace-lock-parity' { & .\skills.ps1 verify-lock }
-    Invoke-QualityGate 'skill-integrity' { & .\scripts\verify-skill-integrity.ps1 }
-    Invoke-QualityGate 'reference-governance' { & .\scripts\verify-reference-governance.ps1 }
-    Invoke-QualityGate 'override-activation-corpus' { & .\scripts\verify-override-skill-activation.ps1 }
-    Invoke-QualityGate 'native-skill-metadata' { & .\scripts\verify-native-skill-metadata.ps1 -Json }
-    Invoke-QualityGate 'dependency-baseline' { & python .\scripts\verify-dependency-baseline.py --target-repo-root . --require-target-repo-baseline }
-    Invoke-QualityGate 'skills-config-contract' { & .\scripts\verify-skills-config.ps1 -Mode enforce }
-    Invoke-QualityGate 'host-capability-contract' { & .\scripts\verify-host-capability-matrix.ps1 }
-    Invoke-QualityGate 'planning-contract' { & .\scripts\verify-vnext-planning.ps1 }
-    Invoke-QualityGate 'host-native-lifecycle-planning' { & .\scripts\verify-host-native-skill-lifecycle-planning.ps1 }
-    Invoke-QualityGate 'powershell-runtime-policy' { & .\scripts\verify-powershell-runtime-policy.ps1 }
-    Invoke-QualityGate 'agent-workflow-advisory' { & .\scripts\verify-agent-workflow-advisory.ps1 }
-    Invoke-QualityGate 'doctor-json-contract' { & .\scripts\quality\check-doctor-json.ps1 }
+    $runId = 'qgr-{0}-{1}' -f ([DateTimeOffset]::UtcNow.ToString('yyyyMMdd-HHmmss')), ([guid]::NewGuid().ToString('N').Substring(0, 8))
+    $startedAt = [DateTimeOffset]::UtcNow.ToString('o')
+    $sourceStart = $null
+    $sourceEnd = $null
+    $runStatus = 'failed'
+    $runExitCode = 1
+    $runError = ''
+    $sourceStart = Get-QualityGateSourceFingerprint -RepoRoot $root
+        try {
+            Invoke-QualityGate 'build' { & .\build.ps1 }
+            if ($Profile -eq 'full') {
+                Invoke-QualityGate 'tests' { & .\tests\run.ps1 }
+            }
+            Invoke-QualityGate 'repo-hygiene' { & .\scripts\quality\check-repo-hygiene.ps1 -ReportUntrackedRuntimeArtifacts }
+            if ($AllowDirtyWorktree) {
+                Invoke-QualityGate 'generated-sync' { & .\tests\check-generated-sync.ps1 -AllowDirtyWorktree }
+            }
+            else {
+                Invoke-QualityGate 'generated-sync' { & .\tests\check-generated-sync.ps1 -StrictNoGit }
+            }
+            Invoke-QualityGate 'workspace-lock-parity' { & .\skills.ps1 verify-lock }
+            Invoke-QualityGate 'skill-integrity' { & .\scripts\verify-skill-integrity.ps1 }
+            Invoke-QualityGate 'reference-governance' { & .\scripts\verify-reference-governance.ps1 }
+            Invoke-QualityGate 'override-activation-corpus' { & .\scripts\verify-override-skill-activation.ps1 }
+            Invoke-QualityGate 'native-skill-metadata' { & .\scripts\verify-native-skill-metadata.ps1 }
+            Invoke-QualityGate 'dependency-baseline' { & python .\scripts\verify-dependency-baseline.py --target-repo-root . --require-target-repo-baseline }
+            Invoke-QualityGate 'skills-config-contract' { & .\scripts\verify-skills-config.ps1 -Mode enforce }
+            Invoke-QualityGate 'host-capability-contract' { & .\scripts\verify-host-capability-matrix.ps1 }
+            Invoke-QualityGate 'planning-contract' { & .\scripts\verify-vnext-planning.ps1 }
+            Invoke-QualityGate 'host-native-lifecycle-planning' { & .\scripts\verify-host-native-skill-lifecycle-planning.ps1 }
+            Invoke-QualityGate 'powershell-runtime-policy' { & .\scripts\verify-powershell-runtime-policy.ps1 }
+            Invoke-QualityGate 'agent-workflow-advisory' { & .\scripts\verify-agent-workflow-advisory.ps1 }
+            Invoke-QualityGate 'doctor-json-contract' { & .\scripts\quality\check-doctor-json.ps1 }
+            $runStatus = 'passed'
+            $runExitCode = 0
+        }
+        catch {
+            $runError = $_.Exception.Message
+            [Console]::Error.WriteLine(('quality_gate_failed: {0}' -f $runError))
+        }
+        finally {
+            try { $sourceEnd = Get-QualityGateSourceFingerprint -RepoRoot $root }
+            catch {
+                $runStatus = 'terminal_evidence_unavailable'
+                $runExitCode = 1
+                $runError = ('Unable to capture end source fingerprint: {0}' -f $_.Exception.Message)
+                [Console]::Error.WriteLine(('quality_gate_receipt_unavailable: {0}' -f $runError))
+            }
+        }
 
-    Write-Host ""
-    $totalElapsed = [long](($script:GateResults | Measure-Object -Property elapsed_ms -Sum).Sum)
-    Write-Host ("Gate summary: {0}; total_elapsed_ms={1}" -f (($script:GateResults | ForEach-Object { '{0}={1}ms' -f $_.name, $_.elapsed_ms }) -join ', '), $totalElapsed)
-    Write-Host ("Local quality gates passed ({0})." -f $Profile)
+        if ($null -ne $sourceStart -and $null -ne $sourceEnd) {
+            $sourceComparison = Compare-QualityGateSourceFingerprint -Start $sourceStart -End $sourceEnd
+            if (-not $sourceComparison.pass) {
+                $runStatus = 'source_drift'
+                $runExitCode = 78
+                $runError = ('Source drift detected during quality gate: {0}' -f (($sourceComparison.changed_fields) -join ', '))
+                [Console]::Error.WriteLine(('quality_gate_source_drift: {0}' -f (($sourceComparison.changed_fields) -join ', ')))
+            }
+        }
+
+        Write-Host ""
+        $totalElapsed = [long](($script:GateResults | Measure-Object -Property elapsed_ms -Sum).Sum)
+        Write-Host ("Gate summary: {0}; total_elapsed_ms={1}" -f (($script:GateResults | ForEach-Object { '{0}={1}ms' -f $_.name, $_.elapsed_ms }) -join ', '), $totalElapsed)
+        if ($null -ne $sourceStart -and $null -ne $sourceEnd) {
+            try {
+                $receipt = Write-QualityGateImmutableReceipt -ReceiptRoot (Join-Path $root 'reports\quality-gates') -RunId $runId -Profile $Profile -Status $runStatus -SourceStart $sourceStart -SourceEnd $sourceEnd -GateResults @($script:GateResults.ToArray()) -StartedAt $startedAt -CompletedAt ([DateTimeOffset]::UtcNow.ToString('o')) -AllowDirtyWorktree ([bool]$AllowDirtyWorktree) -ErrorMessage $runError
+                Write-Host ("quality_gate_receipt={0}; quality_gate_pointer={1}" -f $receipt.receipt_path, $receipt.pointer_path)
+            }
+            catch {
+                $runExitCode = 1
+                $runStatus = 'terminal_evidence_unavailable'
+                $runError = ('Unable to write immutable quality gate receipt: {0}' -f $_.Exception.Message)
+                [Console]::Error.WriteLine(('quality_gate_receipt_unavailable: {0}' -f $runError))
+            }
+        }
+        if ($runExitCode -eq 0) {
+            Write-Host ("Local quality gates passed ({0})." -f $Profile)
+        }
+        else {
+            Write-Host ("Local quality gates stopped: status={0}." -f $runStatus)
+        }
+    if ($runExitCode -ne 0) { exit $runExitCode }
     }
     finally {
         Pop-Location

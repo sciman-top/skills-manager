@@ -1,16 +1,17 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "program_id": "skills-manager-vnext",
   "current_phase": "P6",
   "phase_sequence": ["P0", "P1", "P2", "P3", "P4", "P5", "P6"],
   "allowed_statuses": ["pending", "in_progress", "blocked", "deferred", "done"],
-  "truth_level": "host_loaded",
+  "truth_level": "host_evaluation_partial",
   "full_gate": "passed",
   "runtime_migration": "completed",
+  "host_inventory_loaded": "observed",
   "host_evaluation": "host_evaluation_partial",
-  "host_loaded": "passed",
-  "live_accepted": "failed",
-  "latest_evidence": "docs/change-evidence/20260807-p6-host-native-skill-lifecycle-closeout.md",
+  "host_invocation_observed": "not_observed",
+  "live_accepted": "not_accepted",
+  "latest_evidence": "docs/change-evidence/20260809-p6-deep-audit-remediation.md",
   "main_chain": [
     "compile the complete eligible skill catalog",
     "plan metadata within the verified host budget",
@@ -24,7 +25,7 @@
     "live acceptance is inferred from repository or inventory evidence"
   ],
   "first_open_task": null,
-  "next_milestone": "Keep live acceptance blocked until native selection, injection and execution events are observable; do not generalize representative replay to all tasks.",
+  "next_milestone": "Keep live acceptance not accepted until native injection/execution plus a real business workflow are observed; treat external host inventory count changes independently from the complete managed projection.",
   "tasks": [
     {
       "id": "SMV-P6-001", "phase": "P6", "title": "P6 admission 与历史 supersession map", "status": "done", "risk": "low", "depends_on": [],

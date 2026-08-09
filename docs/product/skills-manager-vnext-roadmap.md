@@ -2,7 +2,7 @@
 
 **program_id**: `skills-manager-vnext`
 **roadmap_version**: 1
-**最后更新**: 2026-08-08
+**最后更新**: 2026-08-09
 
 ## 1. 状态总览
 
@@ -14,6 +14,7 @@
 | `P3` | Plugin-aware distribution and evaluation | `complete` | 7/7 tasks repo_verified；fixture-first，host/live 未执行 |
 | `P4` | Unified capability selection and activation planning | `complete` | 6/6 tasks `repo_verified`；16-profile fresh prompt probe 已通过，host runtime activation/live acceptance 未执行 |
 | `P5` | Adaptive Capability Fabric | `complete` | 5/5 `repo_verified`；live read-only App Server snapshot 与 full gate 已通过，business live acceptance 未执行 |
+| `P6` | Host-Native Skill Lifecycle Reset | `dynamic` | 任务、truth ladder、full gate 和最新 evidence 只从当前 P6 manifest 读取 |
 | `maintenance_design` | Lean AI Software Delivery | `M0/M0.2/M0.3 repo_verified / M1 collecting 0/10` | M0 基线 4/4 + M0.2 工程化协调/工具组合 4/4 + M0.3 模型策略/typed-core 决策 3/3 repo_verified；M1 仅启动真实样本收集，M3 conditional；`TC0-TC3 conditional` 是 M0.3 closeout 历史，当前 TC0/TC1 由独立 track 承接 |
 | `typed_core_shadow_poc` | Operation contract typed core | `TC0/TC1 repo_verified` | `OperationPlan/Receipt v1` package-free C#/.NET shadow 3/3；4/4 corpus + 4/4 protocol negatives；PowerShell authoritative，TC2/生产集成 not_started |
 | `powershell7_runtime_migration` | PowerShell runtime support contraction | `repo_verified` | 当前生产入口、生成链、CI、tests、subprocess、文档与发布合同收敛到 `ps7_only`；历史 5.1 事实保留；不启动 TC2/P6 |
@@ -309,7 +310,7 @@ P5 5/5 task、schema compatibility、golden、fresh query、live read-only multi
 
 `P6_ADMISSION_STATUS: admitted`
 
-2026-08-07 admission decision：用户明确授权一次彻底的产品/技术栈/架构重构；“仓库可发现但宿主不触发”、47 个历史未路由技能、profile 外技能无法自动命中，以及多轮 router/profile/cold-load 修复仍不能建立宿主调用闭环，构成跨任务、跨领域且无法继续由 P5 seam 局部修复的证据。P6 因此正式进入 `planning_contract`，当前 runtime migration 尚未开始。
+2026-08-07 admission-time snapshot（历史）：用户明确授权一次彻底的产品/技术栈/架构重构；“仓库可发现但宿主不触发”、47 个历史未路由技能、profile 外技能无法自动命中，以及多轮 router/profile/cold-load 修复仍不能建立宿主调用闭环，构成跨任务、跨领域且无法继续由 P5 seam 局部修复的证据。P6 当时正式进入 `planning_contract`，runtime migration 当时尚未开始；这不是当前状态。
 
 P5 完成后进入维护期，不按 Phase 编号惯性扩张。只有同时满足以下条件，才可把状态改为 `admitted` 并创建 P6 spec/manifest：
 
@@ -325,10 +326,12 @@ P5 完成后进入维护期，不按 Phase 编号惯性扩张。只有同时满�
 
 ### 9.1 P6 Host-Native Skill Lifecycle Reset
 
-**状态**：`planning_contract`
+**状态**：动态读取当前 manifest；路线图不复制易漂移状态
 **任务真源**：`tasks/skills-manager-vnext-phase6.tasks.json`
 **详细 spec**：`docs/superpowers/specs/2026-08-07-capability-manager-vnext-phase-6-design.md`
 **实施计划**：`docs/superpowers/plans/2026-08-07-host-native-skill-lifecycle-reset.md`
+
+CURRENT_PHASE_TRUTH_SOURCE: tasks/skills-manager-vnext-phase6.tasks.json
 
 P6 的目标是让宿主 AI 重新成为唯一语义选择 owner，以完整的 native discovery set、有效 host capability snapshot、token-aware metadata planning 和 invocation trace 形成闭环。旧 `capability-router`、profile reachability、active-profile switch、reconciliation/canary 和 cold-load 层只作为分阶段迁移输入；App Server strict dispatch 是显式 opt-in fallback。
 
@@ -340,9 +343,9 @@ P6 的目标是让宿主 AI 重新成为唯一语义选择 owner，以完整的 
 | Migration | P6-010–P6-011 | profile reachability 退役；strict dispatch 保持 opt-in |
 | Closeout | P6-012 | staged removal、fresh host evidence、唯一 full gate 和 rollback receipt |
 
-当前 P6-012 closeout（2026-08-08，repo_verified）：P6-001 至 P6-012 均已完成仓库侧切片。staged removal 已应用到 source/config/generation seam；legacy router source 只保留 compatibility-only 读取，profile compatibility view 为 read-only 且不拥有 reachability authority。single-flight full gate exit 0，`1097/1097` tests 与全部 contract/invariant 通过。fresh CLI 只能给出 `host_evaluation_partial`（selection、injection、body invocation 均不可观测），`runtime_migration=not_started`、`host_loaded=not_run`、`live_accepted=not_run`、`full_gate=passed`。
+当前 P6 closeout 状态只从 manifest 及其 `latest_evidence` 读取。仓库侧 staged removal 已应用到 source/config/generation seam；legacy router source 只保留 compatibility-only 读取，profile compatibility view 为 read-only 且不拥有 reachability authority。2026-08-08 的 full/test 结果保留为 point-in-time evidence；任何后续 executable/config/generated/fixture 变化都会使该 full receipt 失效，不得把历史结果冒充当前 gate。
 
-P6 exit gate：12/12 tasks `done`；fresh snapshot 下 `enabled_total == kept_total`、`truncated=false`、`omitted=0`；profile/router membership 不再控制可达性；trace 不把 listed 误写为 invoked；strict fallback 非默认；迁移/回滚通过；full gate 唯一执行并通过。当前 staged removal 已进入 closeout，但上述 exit gate 尚未满足，不能把本轮 repo-side 状态写成 `host_loaded` 或 `live_accepted`。
+P6 exit gate 定义：全部 manifest tasks `done`；fresh snapshot 下 `enabled_total == kept_total`、`truncated=false`、`omitted=0`；profile/router membership 不再控制可达性；trace 不把 listed 误写为 invoked；strict fallback 非默认；迁移/回滚通过；full gate 对最终稳定 source 唯一执行并通过。当前是否满足只由 manifest/evidence 判定；inventory 或 repo-side 结果不能越级写成 invocation 或 `live_accepted`。
 
 ### 9.2 Lean AI Software Delivery maintenance track
 

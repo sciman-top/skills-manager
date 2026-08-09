@@ -5,14 +5,6 @@ Describe 'Cross-thread guard installer and doctor' {
         $doctor = Join-Path $repoRoot 'scripts\hooks\Test-CrossThreadGuard.ps1'
         $sourceHook = Join-Path $repoRoot 'scripts\hooks\block-cross-thread-send.ps1'
         $sourcePolicy = Join-Path $repoRoot 'scripts\hooks\CrossThreadGuardPolicy.ps1'
-        $sourceRuntimeDoctor = Join-Path $repoRoot 'scripts\hooks\Test-WatchGuardRuntime.ps1'
-        $targetGenerator = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchHeartbeatPrompt.ps1'
-        $fleetGenerator = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchFleetSupervisorPrompt.ps1'
-        $script:targetPromptDigest = ((& $targetGenerator -TargetThreadId 'digest-probe' -AsJson) | ConvertFrom-Json).prompt_sha256
-        $script:shutdownTargetPromptDigest = ((& $targetGenerator -TargetThreadId 'digest-probe' -ShutdownManaged -AsJson) | ConvertFrom-Json).prompt_sha256
-        $script:runtimeGenerationId = ((& $targetGenerator -TargetThreadId 'digest-probe' -AsJson) | ConvertFrom-Json).watch_runtime_generation_id
-        $script:fleetPromptDigest = ((& $fleetGenerator -SupervisorThreadId 'digest-probe' -AsJson) | ConvertFrom-Json).prompt_sha256
-        $script:fleetShutdownPromptDigest = ((& $fleetGenerator -SupervisorThreadId 'digest-probe' -ShutdownWhenAllStopped -AsJson) | ConvertFrom-Json).prompt_sha256
     }
 
     BeforeEach {
@@ -34,27 +26,35 @@ Describe 'Cross-thread guard installer and doctor' {
     }
 
     It 'keeps the trusted hook bytes stable across checkouts' {
-        $attributesPath = Join-Path $repoRoot '.gitattributes'
-        Test-Path -LiteralPath $attributesPath | Should Be $true
-        (Get-Content -Raw -LiteralPath $attributesPath) | Should Match '(?m)^scripts/hooks/block-cross-thread-send\.ps1 text eol=lf\r?$'
-        (Get-Content -Raw -LiteralPath $attributesPath) | Should Match '(?m)^scripts/hooks/CrossThreadGuardPolicy\.ps1 text eol=lf\r?$'
-        (Get-Content -Raw -LiteralPath $attributesPath) | Should Match '(?m)^scripts/hooks/Test-WatchGuardRuntime\.ps1 text eol=lf\r?$'
+        $attributes = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.gitattributes')
+        $attributes | Should Match '(?m)^scripts/hooks/block-cross-thread-send\.ps1 text eol=lf\r?$'
+        $attributes | Should Match '(?m)^scripts/hooks/CrossThreadGuardPolicy\.ps1 text eol=lf\r?$'
         @([System.IO.File]::ReadAllBytes($sourceHook) | Where-Object { $_ -eq 13 }).Count | Should Be 0
         @([System.IO.File]::ReadAllBytes($sourcePolicy) | Where-Object { $_ -eq 13 }).Count | Should Be 0
-        @([System.IO.File]::ReadAllBytes($sourceRuntimeDoctor) | Where-Object { $_ -eq 13 }).Count | Should Be 0
     }
 
-    It 'installs canonical revision-3 provenance and preserves other hooks and config' {
+    It 'installs the revision-4 retired-watch guard and preserves unrelated hooks and config' {
+        $hostScripts = Join-Path $script:codexHome 'scripts'
+        $null = New-Item -ItemType Directory -Path $hostScripts -Force
+        @'
+[CmdletBinding()]
+# retired managed runtime probe
+clientInfo = 'watch-guard-runtime-doctor'
+watch_runtime_generation_id = 'legacy'
+'@ | Set-Content -LiteralPath (Join-Path $hostScripts 'Test-WatchGuardRuntime.ps1') -NoNewline
+
         $receipt = & $installer -CodexHome $script:codexHome -SourceHookPath $sourceHook
         $receipt.status | Should Be 'installed_untrusted'
+        $receipt.policy_revision | Should Be 4
+        $receipt.watch_runtime_status | Should Be 'retired_fail_closed'
+        $receipt.legacy_doctor_removed | Should Be $true
         (Get-Content -Raw -LiteralPath $script:configPath) | Should Be $script:originalConfig
 
-        $hostHook = Join-Path $script:codexHome 'scripts\block-cross-thread-send.ps1'
-        $hostPolicy = Join-Path $script:codexHome 'scripts\CrossThreadGuardPolicy.ps1'
-        $hostRuntimeDoctor = Join-Path $script:codexHome 'scripts\Test-WatchGuardRuntime.ps1'
+        $hostHook = Join-Path $hostScripts 'block-cross-thread-send.ps1'
+        $hostPolicy = Join-Path $hostScripts 'CrossThreadGuardPolicy.ps1'
         (Get-FileHash -Algorithm SHA256 -LiteralPath $hostHook).Hash | Should Be (Get-FileHash -Algorithm SHA256 -LiteralPath $sourceHook).Hash
         (Get-FileHash -Algorithm SHA256 -LiteralPath $hostPolicy).Hash | Should Be (Get-FileHash -Algorithm SHA256 -LiteralPath $sourcePolicy).Hash
-        (Get-FileHash -Algorithm SHA256 -LiteralPath $hostRuntimeDoctor).Hash | Should Be (Get-FileHash -Algorithm SHA256 -LiteralPath $sourceRuntimeDoctor).Hash
+        Test-Path -LiteralPath (Join-Path $hostScripts 'Test-WatchGuardRuntime.ps1') | Should Be $false
 
         $hooks = Get-Content -Raw -LiteralPath (Join-Path $script:codexHome 'hooks.json') | ConvertFrom-Json
         @($hooks.hooks.PostToolUse).Count | Should Be 1
@@ -64,33 +64,21 @@ Describe 'Cross-thread guard installer and doctor' {
         $command | Should Match ([regex]::Escape($hostHook))
         $command | Should Match ([regex]::Escape($receipt.source_sha256))
         $command | Should Match ([regex]::Escape($receipt.policy_source_sha256))
-        $command | Should Match ([regex]::Escape($script:targetPromptDigest))
-        $command | Should Match ([regex]::Escape($script:shutdownTargetPromptDigest))
-        $command | Should Match ([regex]::Escape($script:runtimeGenerationId))
-        $command | Should Match ([regex]::Escape($script:fleetPromptDigest))
-        $command | Should Match ([regex]::Escape($script:fleetShutdownPromptDigest))
-        $command | Should Match ([regex]::Escape((Join-Path $script:codexHome 'automations')))
-        $command | Should Match ([regex]::Escape((Join-Path $script:codexHome 'watch-interrupted-task\fleet')))
+        $command | Should Not Match 'ExpectedTargetPromptSha256|ExpectedShutdownTargetPromptSha256|ExpectedFleetPromptSha256|ExpectedFleetShutdownPromptSha256|ExpectedRuntimeGenerationId|AutomationRoot|WatchFleetStateRoot'
         $hooks.hooks.PreToolUse[0].hooks[0].commandWindows | Should Be $command
-        $receipt.target_prompt_sha256 | Should Be $script:targetPromptDigest
-        $receipt.shutdown_target_prompt_sha256 | Should Be $script:shutdownTargetPromptDigest
-        $receipt.watch_runtime_generation_id | Should Be $script:runtimeGenerationId
-        $receipt.fleet_prompt_sha256 | Should Be $script:fleetPromptDigest
-        $receipt.fleet_shutdown_prompt_sha256 | Should Be $script:fleetShutdownPromptDigest
+        $hooks.hooks.PreToolUse[0].hooks[0].statusMessage | Should Match 'retired watch lifecycle'
         $receipt.policy_source_sha256 | Should Be $receipt.policy_host_sha256
     }
 
     It 'validates malformed hooks JSON before touching host scripts' {
         $hooksPath = Join-Path $script:codexHome 'hooks.json'
-        $malformed = '{'
-        Set-Content -LiteralPath $hooksPath -Value $malformed -NoNewline
+        Set-Content -LiteralPath $hooksPath -Value '{' -NoNewline
 
         { & $installer -CodexHome $script:codexHome -SourceHookPath $sourceHook } | Should Throw
 
-        (Get-Content -Raw -LiteralPath $hooksPath) | Should Be $malformed
+        (Get-Content -Raw -LiteralPath $hooksPath) | Should Be '{'
         Test-Path -LiteralPath (Join-Path $script:codexHome 'scripts\block-cross-thread-send.ps1') | Should Be $false
         Test-Path -LiteralPath (Join-Path $script:codexHome 'scripts\CrossThreadGuardPolicy.ps1') | Should Be $false
-        Test-Path -LiteralPath (Join-Path $script:codexHome 'scripts\Test-WatchGuardRuntime.ps1') | Should Be $false
     }
 
     It 'preserves unrelated groups with a similar status message' {
@@ -101,7 +89,7 @@ Describe 'Cross-thread guard installer and doctor' {
             hooks = @([pscustomobject]@{
                 type = 'command'
                 command = 'unrelated.ps1'
-                statusMessage = 'Blocking target heartbeat automation mutation for another product'
+                statusMessage = 'Blocking retired watch lifecycle for another product'
             })
         })
         $document | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $hooksPath
@@ -111,40 +99,38 @@ Describe 'Cross-thread guard installer and doctor' {
         @($installed.hooks.PreToolUse | Where-Object { $_.matcher -eq 'unrelated_tool' }).Count | Should Be 1
     }
 
-    It 'reports soft_guard_only until slash-hooks trust and fresh live probes exist' {
+    It 'reports a static retired-watch guard while trust and fresh live probes remain open' {
         $null = & $installer -CodexHome $script:codexHome -SourceHookPath $sourceHook
         $result = & $doctor -CodexHome $script:codexHome -SourceHookPath $sourceHook
+
         $result.configuration_ready | Should Be $false
         $result.static_configuration_ready | Should Be $true
-        $result.prompt_digests_match | Should Be $true
+        $result.hash_matches | Should Be $true
+        $result.definition_matches | Should Be $true
         $result.simulation_passed | Should Be $true
-        $result.simulation_cases.direct_send_tool | Should Be $true
-        $result.simulation_cases.direct_handoff_without_prompt | Should Be $true
-        $result.simulation_cases.code_mode_shell_send | Should Be $true
-        $result.simulation_cases.code_mode_dynamic_automation_route | Should Be $true
-        $result.simulation_cases.code_mode_target_self_delete | Should Be $true
-        $result.simulation_cases.shutdown_target_self_pause | Should Be $true
-        $result.simulation_cases.fleet_cleanup_delete | Should Be $true
-        $result.simulation_cases.code_mode_automation_live_probe_sentinel | Should Be $true
-        $result.simulation_cases.fleet_target_pause | Should Be $true
-        $result.simulation_cases.git_diff_hook_inspection | Should Be $true
-        $result.simulation_cases.standard_fleet_shutdown_blocked | Should Be $true
-        $result.simulation_cases.armed_fleet_shutdown_allowed | Should Be $true
+        $result.simulation_cases.direct_send_blocked | Should Be $true
+        $result.simulation_cases.direct_handoff_blocked | Should Be $true
+        $result.simulation_cases.heartbeat_mutation_blocked | Should Be $true
+        $result.simulation_cases.heartbeat_power_blocked | Should Be $true
+        $result.simulation_cases.exact_legacy_delete_allowed | Should Be $true
+        $result.simulation_cases.negated_delete_blocked | Should Be $true
+        $result.simulation_cases.read_only_view_allowed | Should Be $true
+        $result.watch_runtime_status | Should Be 'retired_fail_closed'
+        @($result.PSObject.Properties.Name) | Should Not Contain 'watch_runtime_generation_id'
+        @($result.PSObject.Properties.Name) | Should Not Contain 'prompt_digests_match'
         $result.trust_status | Should Be 'unverified_requires_slash_hooks'
         $result.live_path_status | Should Be 'unverified_requires_fresh_session_probe'
         $result.specialized_path_boundary | Should Be 'guardrail_only'
         $result.overall | Should Be 'soft_guard_only'
     }
 
-    It 'detects canonical prompt generator drift even when the installed command still has valid hashes' {
+    It 'detects installed policy drift without consulting retired prompt generators' {
         $null = & $installer -CodexHome $script:codexHome -SourceHookPath $sourceHook
-        $driftedTargetGenerator = Join-Path $TestDrive 'New-WatchHeartbeatPrompt.ps1'
-        Copy-Item -LiteralPath $targetGenerator -Destination $driftedTargetGenerator
-        ((Get-Content -Raw -LiteralPath $driftedTargetGenerator) -replace 'operating_mode=conditional_recovery', 'operating_mode=conditional_recovery_drift') | Set-Content -LiteralPath $driftedTargetGenerator -NoNewline
+        $hostPolicy = Join-Path $script:codexHome 'scripts\CrossThreadGuardPolicy.ps1'
+        Add-Content -LiteralPath $hostPolicy -Value '# drift'
 
-        $result = & $doctor -CodexHome $script:codexHome -SourceHookPath $sourceHook `
-            -SourceTargetPromptGeneratorPath $driftedTargetGenerator -SourceFleetPromptGeneratorPath $fleetGenerator
-        $result.prompt_digests_match | Should Be $false
+        $result = & $doctor -CodexHome $script:codexHome -SourceHookPath $sourceHook
+        $result.hash_matches | Should Be $false
         $result.static_configuration_ready | Should Be $false
         $result.overall | Should Be 'soft_guard_only'
     }

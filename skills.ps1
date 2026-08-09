@@ -1857,7 +1857,7 @@ function Test-HostCapabilitySnapshotContract {
 $script:NativeInvocationTraceStages = @('listed', 'selected', 'injected', 'executed', 'abstained')
 $script:NativeInvocationTraceSources = @('app_server', 'cli', 'native_host', 'fixture', 'unknown')
 $script:NativeInvocationTraceFreshness = @('fresh', 'stale', 'unknown')
-$script:NativeInvocationTraceTruthLevels = @('unknown', 'host_evaluation_partial', 'host_loaded')
+$script:NativeInvocationTraceTruthLevels = @('unknown', 'host_inventory_loaded', 'host_evaluation_partial', 'host_invocation_observed')
 
 function Get-NativeInvocationTraceProperty($Object, [string[]]$Names) {
     foreach ($name in @($Names)) {
@@ -1951,8 +1951,8 @@ function New-NativeInvocationTrace {
     $hasInjected = [bool]$stages.injected.observed
     $hasExecuted = [bool]$stages.executed.observed
     $hasAbstained = [bool]$stages.abstained.observed
-    $truthLevel = if ($Freshness -eq 'fresh') { 'host_evaluation_partial' } else { 'unknown' }
-    $status = if ($Freshness -eq 'fresh') { 'partial' } else { 'unknown' }
+    $truthLevel = 'unknown'
+    $status = 'unknown'
     $outcome = 'not_observed'
     $bodyInjectionObservable = $hasInjected
     $invocationObservable = $false
@@ -1980,22 +1980,30 @@ function New-NativeInvocationTrace {
         $status = 'unknown'
     }
     elseif ($hasExecuted -and $hasInjected) {
-        $truthLevel = if ($Freshness -eq 'fresh') { 'host_loaded' } else { 'unknown' }
+        $truthLevel = if ($Freshness -eq 'fresh') { 'host_invocation_observed' } else { 'unknown' }
         $status = if ($Freshness -eq 'fresh') { 'complete' } else { 'unknown' }
         $outcome = 'executed'
         $invocationObservable = ($Freshness -eq 'fresh')
     }
     elseif ($hasAbstained) {
         $outcome = 'abstained'
+        $truthLevel = if ($Freshness -eq 'fresh') { 'host_evaluation_partial' } else { 'unknown' }
+        $status = if ($Freshness -eq 'fresh') { 'partial' } else { 'unknown' }
     }
     elseif ($hasInjected) {
         $outcome = 'injected'
+        $truthLevel = if ($Freshness -eq 'fresh') { 'host_evaluation_partial' } else { 'unknown' }
+        $status = if ($Freshness -eq 'fresh') { 'partial' } else { 'unknown' }
     }
     elseif ($hasSelected) {
         $outcome = 'selected'
+        $truthLevel = if ($Freshness -eq 'fresh') { 'host_evaluation_partial' } else { 'unknown' }
+        $status = if ($Freshness -eq 'fresh') { 'partial' } else { 'unknown' }
     }
     elseif ($hasListed) {
         $outcome = 'listed'
+        $truthLevel = if ($Freshness -eq 'fresh') { 'host_inventory_loaded' } else { 'unknown' }
+        $status = if ($Freshness -eq 'fresh') { 'inventory_loaded' } else { 'unknown' }
     }
 
     $correlationSource = [string](@($normalizedEvents | Where-Object { $_.correlation_id -ne 'corr-unknown' } | Select-Object -First 1).correlation_id)
@@ -2021,7 +2029,7 @@ function New-NativeInvocationTrace {
         stages = $stages
         events = [object[]]@($normalizedEvents.ToArray())
         redaction = $redaction
-        receipt = [pscustomobject][ordered]@{ schema_version = 1; status = $status; truth_level = $truthLevel; complete = ($truthLevel -eq 'host_loaded') }
+        receipt = [pscustomobject][ordered]@{ schema_version = 1; status = $status; truth_level = $truthLevel; complete = ($truthLevel -eq 'host_invocation_observed') }
         provider_calls = 0
         native_mutations = 0
         writes = 0
@@ -2053,8 +2061,8 @@ function Test-NativeInvocationTraceContract {
     $redaction = Get-NativeInvocationTraceProperty $Trace @('redaction')
     if ((Get-NativeInvocationTraceProperty $redaction @('applied')) -ne $true) { $findings.Add((New-OperationFinding 'redaction_required' 'error' '$.redaction.applied' 'Trace redaction must be applied.')) | Out-Null }
     if ((Get-NativeInvocationTraceProperty $Trace @('invocation_observable')) -eq $true -and (Get-NativeInvocationTraceProperty $Trace @('stages')).executed.observed -ne $true) { $findings.Add((New-OperationFinding 'invocation_promotion_invalid' 'error' '$.invocation_observable' 'Invocation cannot be observable without executed evidence.')) | Out-Null }
-    if ([string](Get-NativeInvocationTraceProperty $Trace @('truth_level')) -eq 'host_loaded') {
-        if ((Get-NativeInvocationTraceProperty $stages @('injected')).observed -ne $true -or (Get-NativeInvocationTraceProperty $stages @('executed')).observed -ne $true) { $findings.Add((New-OperationFinding 'host_loaded_evidence_missing' 'error' '$.truth_level' 'host_loaded requires injected and executed evidence.')) | Out-Null }
+    if ([string](Get-NativeInvocationTraceProperty $Trace @('truth_level')) -eq 'host_invocation_observed') {
+        if ((Get-NativeInvocationTraceProperty $stages @('injected')).observed -ne $true -or (Get-NativeInvocationTraceProperty $stages @('executed')).observed -ne $true) { $findings.Add((New-OperationFinding 'host_invocation_evidence_missing' 'error' '$.truth_level' 'host_invocation_observed requires injected and executed evidence.')) | Out-Null }
     }
     foreach ($field in @('provider_calls', 'native_mutations', 'writes')) {
         $value = Get-NativeInvocationTraceProperty $Trace @($field)
@@ -3590,7 +3598,7 @@ function ConvertTo-NativeMetadataItem {
     return [pscustomobject][ordered]@{
         kind = [string]$(if (Test-OperationObjectProperty $Entry 'kind') { Get-OperationObjectProperty $Entry 'kind' } else { 'skill' })
         name = $name
-        description = $finalDescription
+        planned_description = $finalDescription
         path = [string](Get-NativeMetadataPlannerProperty $Entry @('path'))
         content_hash = Get-NativeMetadataPlannerProperty $Entry @('content_hash', 'entrypoint_sha256')
         metadata_hash = Get-NativeMetadataPlannerProperty $Entry @('metadata_hash')
@@ -3728,7 +3736,7 @@ function Plan-NativeMetadata {
         token_ceiling = $tokenCeiling
         character_ceiling = $characterCeiling
         usable_cost = $usableCost
-        entries = @($finalItems | ForEach-Object { [ordered]@{ name = $_.name; token_estimate = $_.token_estimate; character_count = $_.character_count; description = $_.description } })
+        entries = @($finalItems | ForEach-Object { [ordered]@{ name = $_.name; token_estimate = $_.token_estimate; character_count = $_.character_count; planned_description = $_.planned_description } })
     }
     $planId = 'nmp-{0}' -f (Get-OperationSha256 ($identity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)
     $findings = New-Object System.Collections.Generic.List[object]
@@ -3737,6 +3745,8 @@ function Plan-NativeMetadata {
     return [pscustomobject][ordered]@{
         schema_version = 1
         plan_id = $planId
+        projection_effect = 'plan_only'
+        pass_scope = 'advisory_planning_contract'
         pass = $pass
         status = if ($pass) { 'ready' } else { 'blocked' }
         block_reason = if ($pass) { $null } else { 'metadata_budget_overflow' }
@@ -3751,6 +3761,8 @@ function Plan-NativeMetadata {
             metadata_budget = $hostBudget
             metadata_budget_source = [string]$metadataBudgetFact.source
             metadata_budget_freshness = [string]$metadataBudgetFact.freshness
+            host_budget_status = if ($null -ne $hostBudget) { 'observed' } else { 'unknown' }
+            host_budget_pass = if ($null -ne $hostBudget) { ($totalTokens -le [long][Math]::Max(0, [Math]::Floor($hostBudget * (1.0 - $headroomRatio)))) } else { $null }
             host_ceiling_applied = $hostCeilingApplied
             context_ratio = $contextRatio
             headroom_ratio = $headroomRatio
@@ -3817,6 +3829,8 @@ function Test-NativeMetadataPlanContract {
     if ($null -eq $Plan) { return New-OperationValidationResult @((New-OperationFinding 'metadata_plan_missing' 'error' '$' 'Native metadata plan is required.')) }
     if ((Get-OperationObjectProperty $Plan 'schema_version') -ne 1) { $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only NativeMetadataPlan schema version 1 is supported.')) | Out-Null }
     if ([string](Get-OperationObjectProperty $Plan 'plan_id') -notmatch '^nmp-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'plan_id_invalid' 'error' '$.plan_id' 'Metadata plan id must be deterministic.')) | Out-Null }
+    if ([string](Get-OperationObjectProperty $Plan 'projection_effect') -ne 'plan_only') { $findings.Add((New-OperationFinding 'projection_effect_invalid' 'error' '$.projection_effect' 'Metadata descriptions are advisory plan-only values.')) | Out-Null }
+    if ([string](Get-OperationObjectProperty $Plan 'pass_scope') -ne 'advisory_planning_contract') { $findings.Add((New-OperationFinding 'pass_scope_invalid' 'error' '$.pass_scope' 'Metadata plan pass cannot claim host materialization or host budget acceptance.')) | Out-Null }
     if ([string](Get-OperationObjectProperty $Plan 'decision_owner') -ne 'deterministic_planner') { $findings.Add((New-OperationFinding 'decision_owner_invalid' 'error' '$.decision_owner' 'Metadata planning is deterministic and cannot own semantic selection.')) | Out-Null }
     foreach ($field in @('semantic_selection_applied', 'profile_filter_applied')) {
         if ((Get-OperationObjectProperty $Plan $field) -ne $false) { $findings.Add((New-OperationFinding 'semantic_boundary_breached' 'error' ('$.{0}' -f $field) 'Metadata planner cannot apply semantic selection or profile filtering.')) | Out-Null }
@@ -3826,6 +3840,10 @@ function Test-NativeMetadataPlanContract {
     }
     foreach ($field in @('enabled', 'kept', 'omitted', 'metadata', 'findings')) {
         if (-not (Test-OperationArray (Get-OperationObjectProperty $Plan $field))) { $findings.Add((New-OperationFinding 'array_field_invalid' 'error' ('$.{0}' -f $field) 'Metadata plan arrays are required.')) | Out-Null }
+    }
+    foreach ($item in @((Get-OperationObjectProperty $Plan 'metadata'))) {
+        if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $item 'planned_description'))) { $findings.Add((New-OperationFinding 'planned_description_missing' 'error' '$.metadata' 'Each retained item requires an advisory planned_description.')) | Out-Null }
+        if (Test-OperationObjectProperty $item 'description') { $findings.Add((New-OperationFinding 'materialization_claim_forbidden' 'error' '$.metadata.description' 'Generic description would imply the advisory value was materialized.')) | Out-Null }
     }
     $enabledTotal = [int](Get-OperationObjectProperty $Plan 'enabled_total')
     $keptTotal = [int](Get-OperationObjectProperty $Plan 'kept_total')
@@ -3839,6 +3857,9 @@ function Test-NativeMetadataPlanContract {
     $budget = Get-OperationObjectProperty $Plan 'budget'
     $mode = [string](Get-OperationObjectProperty $budget 'mode')
     if ($mode -notin @('tokens', 'character_fallback')) { $findings.Add((New-OperationFinding 'budget_mode_invalid' 'error' '$.budget.mode' 'Budget mode is invalid.')) | Out-Null }
+    $hostBudgetStatus = [string](Get-OperationObjectProperty $budget 'host_budget_status')
+    if ($hostBudgetStatus -notin @('observed', 'unknown')) { $findings.Add((New-OperationFinding 'host_budget_status_invalid' 'error' '$.budget.host_budget_status' 'Host metadata budget status must be explicit.')) | Out-Null }
+    if ($hostBudgetStatus -eq 'unknown' -and $null -ne (Get-OperationObjectProperty $budget 'host_budget_pass')) { $findings.Add((New-OperationFinding 'unknown_host_budget_pass_forbidden' 'error' '$.budget.host_budget_pass' 'Unknown host metadata budget cannot be reported as pass or fail.')) | Out-Null }
     $measurement = Get-OperationObjectProperty $Plan 'measurement'
     if ([string](Get-OperationObjectProperty $measurement 'unit') -ne $(if ($mode -eq 'tokens') { 'tokens' } else { 'characters' })) { $findings.Add((New-OperationFinding 'measurement_unit_invalid' 'error' '$.measurement.unit' 'Measurement unit must match budget mode.')) | Out-Null }
     return New-OperationValidationResult $findings.ToArray()
@@ -3931,6 +3952,7 @@ function New-NativeSkillProjectionBlockedPlan {
         target_root = [string]$Settings.target_root
         catalog_id = [string](Get-NativeSkillProjectionProperty $Catalog @('catalog_id'))
         metadata_plan_id = [string](Get-NativeSkillProjectionProperty $MetadataPlan @('plan_id'))
+        metadata_projection_effect = 'plan_only'
         enabled = @($EnabledNames | Sort-Object)
         findings = @($Findings | ForEach-Object { [ordered]@{ code = [string]$_.code; path = [string]$_.path; message = [string]$_.message } })
     }
@@ -3947,6 +3969,7 @@ function New-NativeSkillProjectionBlockedPlan {
         apply_token = ''
         catalog_id = [string](Get-NativeSkillProjectionProperty $Catalog @('catalog_id'))
         metadata_plan_id = [string](Get-NativeSkillProjectionProperty $MetadataPlan @('plan_id'))
+        metadata_projection_effect = 'plan_only'
         enabled = [object[]]@($EnabledNames | Sort-Object)
         kept = [object[]]@()
         omitted = [object[]]@($EnabledNames | Sort-Object)
@@ -4050,8 +4073,8 @@ function New-NativeSkillProjectionPlan {
         }
         $targetDirectory = Join-Path $settings.target_root $targetLeaf
         $targetPath = Join-Path $targetDirectory 'SKILL.md'
-        $description = [string](Get-NativeSkillProjectionProperty $metadata @('description'))
-        if ([string]::IsNullOrWhiteSpace($description)) { $description = [string](Get-NativeSkillProjectionProperty $entry @('description')) }
+        $plannedDescription = [string](Get-NativeSkillProjectionProperty $metadata @('planned_description'))
+        $observedSourceDescription = [string](Get-NativeSkillProjectionProperty $entry @('description'))
         $rows.Add([pscustomobject][ordered]@{
                 kind = 'skill'
                 name = $name
@@ -4066,7 +4089,10 @@ function New-NativeSkillProjectionPlan {
                 metadata = [ordered]@{
                     kind = 'skill'
                     name = $name
-                    description = $description
+                    projection_effect = 'plan_only'
+                    materialization = 'source_package_junction'
+                    planned_description = $plannedDescription
+                    observed_source_description = $observedSourceDescription
                     path = $sourcePath
                     content_hash = $contentHash
                     metadata_hash = $metadataHash
@@ -4083,6 +4109,7 @@ function New-NativeSkillProjectionPlan {
         owner = [string]$settings.owner
         catalog_id = [string](Get-NativeSkillProjectionProperty $Catalog @('catalog_id'))
         metadata_plan_id = [string](Get-NativeSkillProjectionProperty $MetadataPlan @('plan_id'))
+        metadata_projection_effect = 'plan_only'
         skills = @($skillRows | ForEach-Object { [ordered]@{ name = $_.name; source_path = $_.source_path; target_path = $_.target_path; content_hash = $_.content_hash; metadata_hash = $_.metadata_hash } })
     }
     $planId = 'nsp-{0}' -f (Get-OperationSha256 ($identity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)
@@ -4096,6 +4123,7 @@ function New-NativeSkillProjectionPlan {
                 target_directory = $_.target_directory
                 target_path = $_.target_path
                 expected_content_hash = $_.content_hash
+                metadata_materialization = 'source_package_junction'
                 risk = 'explicit_native_root_write'
             }
         })
@@ -4111,6 +4139,7 @@ function New-NativeSkillProjectionPlan {
         apply_token = $applyToken
         catalog_id = [string](Get-NativeSkillProjectionProperty $Catalog @('catalog_id'))
         metadata_plan_id = [string](Get-NativeSkillProjectionProperty $MetadataPlan @('plan_id'))
+        metadata_projection_effect = 'plan_only'
         enabled = [object[]]$enabledNamesSorted
         kept = [object[]]@($skillRows | ForEach-Object name)
         omitted = [object[]]@()
@@ -4146,6 +4175,7 @@ function Test-NativeSkillProjectionPlanContract {
     if ([string](Get-NativeSkillProjectionProperty $Plan @('plan_id')) -notmatch '^nsp-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'plan_id_invalid' 'error' '$.plan_id' 'Projection plan id is invalid.')) | Out-Null }
     if ([string](Get-NativeSkillProjectionProperty $Plan @('status')) -notin @('ready', 'blocked')) { $findings.Add((New-OperationFinding 'status_invalid' 'error' '$.status' 'Projection plan status is invalid.')) | Out-Null }
     foreach ($field in @('owner', 'target_root', 'receipt_path')) { if ([string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $Plan @($field)))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Projection plan field is required.')) | Out-Null } }
+    if ([string](Get-NativeSkillProjectionProperty $Plan @('metadata_projection_effect')) -ne 'plan_only') { $findings.Add((New-OperationFinding 'metadata_projection_effect_invalid' 'error' '$.metadata_projection_effect' 'Junction projection cannot claim advisory metadata materialization.')) | Out-Null }
     foreach ($field in @('enabled', 'kept', 'omitted', 'skills', 'actions', 'findings')) { if (-not (Test-OperationArray (Get-OperationObjectProperty $Plan $field))) { $findings.Add((New-OperationFinding 'array_field_invalid' 'error' ('$.{0}' -f $field) 'Projection plan field must be an array.')) | Out-Null } }
     $enabled = @((Get-NativeSkillProjectionProperty $Plan @('enabled')))
     $kept = @((Get-NativeSkillProjectionProperty $Plan @('kept')))
@@ -4166,7 +4196,14 @@ function Test-NativeSkillProjectionPlanContract {
         foreach ($field in @('name', 'source_path', 'target_path', 'content_hash', 'metadata_hash')) { if ([string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $skill @($field)))) { $findings.Add((New-OperationFinding 'skill_field_missing' 'error' '$.skills' ('Projected skill field is missing: {0}' -f $field))) | Out-Null } }
         if ([string](Get-NativeSkillProjectionProperty $skill @('content_hash')) -notmatch '^[0-9a-f]{64}$' -or [string](Get-NativeSkillProjectionProperty $skill @('metadata_hash')) -notmatch '^[0-9a-f]{64}$') { $findings.Add((New-OperationFinding 'skill_hash_invalid' 'error' '$.skills' 'Projected skill hashes must be SHA-256.')) | Out-Null }
         $metadata = Get-NativeSkillProjectionProperty $skill @('metadata')
-        if ([string](Get-NativeSkillProjectionProperty $metadata @('name')) -ne [string](Get-NativeSkillProjectionProperty $skill @('name')) -or [string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $metadata @('description')))) { $findings.Add((New-OperationFinding 'skill_metadata_invalid' 'error' '$.skills.metadata' 'Projected skill metadata must include matching name and description.')) | Out-Null }
+        if ([string](Get-NativeSkillProjectionProperty $metadata @('name')) -ne [string](Get-NativeSkillProjectionProperty $skill @('name')) -or
+            [string](Get-NativeSkillProjectionProperty $metadata @('projection_effect')) -ne 'plan_only' -or
+            [string](Get-NativeSkillProjectionProperty $metadata @('materialization')) -ne 'source_package_junction' -or
+            [string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $metadata @('planned_description'))) -or
+            [string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $metadata @('observed_source_description'))) -or
+            (Test-OperationObjectProperty $metadata 'description')) {
+            $findings.Add((New-OperationFinding 'skill_metadata_invalid' 'error' '$.skills.metadata' 'Projection metadata must separate advisory planned text from the source package description materialized by the junction.')) | Out-Null
+        }
     }
     return New-OperationValidationResult $findings.ToArray()
 }

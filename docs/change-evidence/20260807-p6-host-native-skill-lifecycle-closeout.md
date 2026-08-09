@@ -297,3 +297,16 @@ documentation write-set. Restore the previous projection only through recorded
 hash/CAS migration receipts. Do not rewrite historical evidence or touch
 unrelated import/reference/watch-runtime changes. Rebuild and rerun the affected
 runner contracts plus the single full owner before any rollback closeout.
+
+## 2026-08-09 truth-ladder terminology correction
+
+The 2026-08-08 receipts above remain point-in-time evidence, but their
+`host_loaded` label overloaded two different facts. Under the corrected schema,
+fresh `skills/list` inventory is `host_inventory_loaded=observed`; representative
+selection without native injected/executed events remains
+`host_evaluation_partial`; only fresh injected plus executed evidence can become
+`host_invocation_observed`. The current business state is
+`live_accepted=not_accepted`, not `failed`, because no observable invocation and
+no real acceptance workflow were available. The current changed-tree full is
+`stale` until the remediation closeout runs the single final full gate. See
+`docs/change-evidence/20260809-p6-deep-audit-remediation.md` for the active truth.

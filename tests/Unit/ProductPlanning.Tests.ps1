@@ -41,7 +41,7 @@ Describe 'vNext product planning contract' {
             @($manifest.tasks | Where-Object status -eq 'done' | ForEach-Object write_set | Where-Object { $_ -like 'docs/change-evidence/*' -and $_ -notmatch '[*?<>]' })
         }
         $currentEvidence = @($currentManifest.tasks | Where-Object status -eq 'done' | ForEach-Object write_set | Where-Object { $_ -like 'docs/change-evidence/*' -and $_ -notmatch '[*?<>]' })
-        foreach ($relativePath in @($requiredFiles) + @($historicalEvidence) + @($currentEvidence) | Sort-Object -Unique) {
+        foreach ($relativePath in @($requiredFiles) + @($historicalEvidence) + @($currentEvidence) + @([string]$currentManifest.latest_evidence) | Sort-Object -Unique) {
             $source = Join-Path $repoRoot $relativePath
             $destination = Join-Path $fixtureRoot $relativePath
             New-Item -ItemType Directory -Path (Split-Path $destination -Parent) -Force | Out-Null
@@ -59,18 +59,35 @@ Describe 'vNext product planning contract' {
     It 'accepts the current repository planning contract' {
         $result = Invoke-PlanningVerifier $repoRoot -External
         $parsed = $result.output | ConvertFrom-Json
+        $currentManifest = Get-Content -LiteralPath (Join-Path $repoRoot $currentManifestRelative) -Raw | ConvertFrom-Json
         $result.exit_code | Should Be 0
         $parsed.pass | Should Be $true
         $parsed.finding_count | Should Be 0
         $parsed.task_count | Should Be 12
         $parsed.current_phase | Should Be $currentPhase
         $parsed.historical_mode | Should Be $false
-        $parsed.truth_level | Should Be 'host_loaded'
-        $parsed.full_gate | Should Be 'passed'
+        $parsed.truth_level | Should Be 'host_evaluation_partial'
+        $parsed.full_gate | Should Be ([string]$currentManifest.full_gate)
         $parsed.runtime_migration | Should Be 'completed'
         $parsed.host_evaluation | Should Be 'host_evaluation_partial'
-        $parsed.host_loaded | Should Be 'passed'
-        $parsed.live_accepted | Should Be 'failed'
+        $parsed.host_inventory_loaded | Should Be 'observed'
+        $parsed.host_invocation_observed | Should Be 'not_observed'
+        $parsed.live_accepted | Should Be 'not_accepted'
+    }
+
+    It 'requires current product documents to delegate dynamic truth to the current manifest' {
+        $fixtureRoot = New-PlanningFixture 'current-truth-source'
+        $truthMarker = 'CURRENT_PHASE_TRUTH_SOURCE: tasks/skills-manager-vnext-phase6.tasks.json'
+        foreach ($relativePath in @('docs\product\README.md', 'docs\product\skills-manager-vnext-roadmap.md')) {
+            $path = Join-Path $fixtureRoot $relativePath
+            $content = (Get-Content -LiteralPath $path -Raw).Replace($truthMarker, 'CURRENT_PHASE_TRUTH_SOURCE: tasks/missing-current-phase.tasks.json')
+            Set-Content -LiteralPath $path -Value $content -Encoding UTF8
+        }
+
+        $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
+
+        @($parsed.findings | Where-Object code -eq current_truth_source_mismatch).Count | Should Be 2
+        $parsed.pass | Should Be $false
     }
 
     It 'fails closed when the current phase truth ladder is incomplete' {
@@ -82,6 +99,21 @@ Describe 'vNext product planning contract' {
         $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
 
         @($parsed.findings | Where-Object code -eq phase_truth_field_missing).Count | Should Be 1
+        $parsed.pass | Should Be $false
+    }
+
+    It 'rejects inventory evidence promoted to invocation and failed used for missing live observability' {
+        $fixtureRoot = New-PlanningFixture 'truth-overpromotion'; $path = Join-Path $fixtureRoot $currentManifestRelative
+        $manifest = Get-Content $path -Raw | ConvertFrom-Json
+        $manifest.truth_level = 'host_inventory_loaded'
+        $manifest.host_invocation_observed = 'observed'
+        $manifest.live_accepted = 'failed'
+        $manifest | ConvertTo-Json -Depth 100 | Set-Content $path -Encoding UTF8
+
+        $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
+
+        @($parsed.findings | Where-Object code -eq phase_truth_order_invalid).Count | Should Be 1
+        @($parsed.findings | Where-Object code -eq phase_truth_value_invalid).Count | Should Be 1
         $parsed.pass | Should Be $false
     }
 

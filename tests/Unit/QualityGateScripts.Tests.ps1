@@ -14,6 +14,73 @@ Describe "Quality gate scripts" {
         $raw | Should Match 'total_elapsed_ms'
     }
 
+    It "keeps successful metadata gate output concise while preserving the verifier" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $gate = Get-Content -LiteralPath (Join-Path $root 'scripts\quality\run-local-quality-gates.ps1') -Raw
+
+        $gate | Should Match "Invoke-QualityGate 'native-skill-metadata'"
+        $gate | Should Match "verify-native-skill-metadata\.ps1\s*}"
+        $gate | Should Not Match "verify-native-skill-metadata\.ps1\s+-Json"
+    }
+
+    It "fails closed when tracked source drifts during a run and keeps an immutable receipt behind a pointer" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $integrityPath = Join-Path $root 'scripts\quality\QualityGateIntegrity.ps1'
+        Test-Path -LiteralPath $integrityPath -PathType Leaf | Should Be $true
+        . $integrityPath
+
+        $fixtureRoot = Join-Path $TestDrive 'quality-gate-integrity-fixture'
+        New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null
+        Push-Location $fixtureRoot
+        try {
+            git init -q
+            git config user.email 'quality-gate@example.invalid'
+            git config user.name 'Quality Gate Test'
+            Set-Content -LiteralPath (Join-Path $fixtureRoot 'tracked.txt') -Value 'before' -Encoding UTF8
+            Set-Content -LiteralPath (Join-Path $fixtureRoot '.gitignore') -Value 'reports/' -Encoding UTF8
+            git add tracked.txt .gitignore
+            git commit -qm 'fixture'
+
+            $start = Get-QualityGateSourceFingerprint -RepoRoot $fixtureRoot
+            Set-Content -LiteralPath (Join-Path $fixtureRoot 'tracked.txt') -Value 'during-run-drift' -Encoding UTF8
+            $end = Get-QualityGateSourceFingerprint -RepoRoot $fixtureRoot
+            $comparison = Compare-QualityGateSourceFingerprint -Start $start -End $end
+
+            $comparison.pass | Should Be $false
+            $comparison.code | Should Be 'quality_gate_source_drift'
+            @($comparison.changed_fields) | Should Contain 'tracked_worktree_fingerprint'
+
+            Set-Content -LiteralPath (Join-Path $fixtureRoot 'tracked.txt') -Value 'before' -Encoding UTF8
+            $untrackedStart = Get-QualityGateSourceFingerprint -RepoRoot $fixtureRoot
+            Set-Content -LiteralPath (Join-Path $fixtureRoot 'new-source.ps1') -Value '# new source' -Encoding UTF8
+            $untrackedEnd = Get-QualityGateSourceFingerprint -RepoRoot $fixtureRoot
+            $untrackedComparison = Compare-QualityGateSourceFingerprint -Start $untrackedStart -End $untrackedEnd
+            $untrackedComparison.pass | Should Be $false
+            @($untrackedComparison.changed_fields) | Should Contain 'untracked_worktree_fingerprint'
+
+            $ignoredStart = Get-QualityGateSourceFingerprint -RepoRoot $fixtureRoot
+            New-Item -ItemType Directory -Path (Join-Path $fixtureRoot 'reports') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $fixtureRoot 'reports\runtime.json') -Value '{}' -Encoding UTF8
+            $ignoredEnd = Get-QualityGateSourceFingerprint -RepoRoot $fixtureRoot
+            (Compare-QualityGateSourceFingerprint -Start $ignoredStart -End $ignoredEnd).pass | Should Be $true
+
+            $receiptRoot = Join-Path $fixtureRoot 'reports\quality-gates'
+            $written = Write-QualityGateImmutableReceipt -ReceiptRoot $receiptRoot -RunId 'qgr-fixture-001' -Profile 'full' -Status 'source_drift' -SourceStart $start -SourceEnd $end -GateResults @() -AllowDirtyWorktree $true
+            Test-Path -LiteralPath $written.receipt_path -PathType Leaf | Should Be $true
+            Test-Path -LiteralPath $written.pointer_path -PathType Leaf | Should Be $true
+            $written.receipt_path | Should Not Be $written.pointer_path
+            $pointer = Get-Content -LiteralPath $written.pointer_path -Raw | ConvertFrom-Json
+            $pointer.receipt_path | Should Be $written.receipt_path
+            $pointer.receipt_sha256 | Should Be ((Get-FileHash -Algorithm SHA256 -LiteralPath $written.receipt_path).Hash.ToLowerInvariant())
+            $written.receipt.immutable | Should Be $true
+            $written.receipt.allow_dirty_worktree | Should Be $true
+            { Write-QualityGateImmutableReceipt -ReceiptRoot $receiptRoot -RunId 'qgr-fixture-001' -Profile 'full' -Status 'source_drift' -SourceStart $start -SourceEnd $end -GateResults @() -AllowDirtyWorktree $true } | Should Throw
+        }
+        finally {
+            Pop-Location
+        }
+    }
+
     It "fails closed on workspace-to-lock commit drift during full gate" {
         $root = Join-Path $PSScriptRoot "..\.."
         $gate = Get-Content -LiteralPath (Join-Path $root 'scripts\quality\run-local-quality-gates.ps1') -Raw

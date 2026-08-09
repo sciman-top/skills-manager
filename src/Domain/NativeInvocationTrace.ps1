@@ -1,7 +1,7 @@
 $script:NativeInvocationTraceStages = @('listed', 'selected', 'injected', 'executed', 'abstained')
 $script:NativeInvocationTraceSources = @('app_server', 'cli', 'native_host', 'fixture', 'unknown')
 $script:NativeInvocationTraceFreshness = @('fresh', 'stale', 'unknown')
-$script:NativeInvocationTraceTruthLevels = @('unknown', 'host_evaluation_partial', 'host_loaded')
+$script:NativeInvocationTraceTruthLevels = @('unknown', 'host_inventory_loaded', 'host_evaluation_partial', 'host_invocation_observed')
 
 function Get-NativeInvocationTraceProperty($Object, [string[]]$Names) {
     foreach ($name in @($Names)) {
@@ -95,8 +95,8 @@ function New-NativeInvocationTrace {
     $hasInjected = [bool]$stages.injected.observed
     $hasExecuted = [bool]$stages.executed.observed
     $hasAbstained = [bool]$stages.abstained.observed
-    $truthLevel = if ($Freshness -eq 'fresh') { 'host_evaluation_partial' } else { 'unknown' }
-    $status = if ($Freshness -eq 'fresh') { 'partial' } else { 'unknown' }
+    $truthLevel = 'unknown'
+    $status = 'unknown'
     $outcome = 'not_observed'
     $bodyInjectionObservable = $hasInjected
     $invocationObservable = $false
@@ -124,22 +124,30 @@ function New-NativeInvocationTrace {
         $status = 'unknown'
     }
     elseif ($hasExecuted -and $hasInjected) {
-        $truthLevel = if ($Freshness -eq 'fresh') { 'host_loaded' } else { 'unknown' }
+        $truthLevel = if ($Freshness -eq 'fresh') { 'host_invocation_observed' } else { 'unknown' }
         $status = if ($Freshness -eq 'fresh') { 'complete' } else { 'unknown' }
         $outcome = 'executed'
         $invocationObservable = ($Freshness -eq 'fresh')
     }
     elseif ($hasAbstained) {
         $outcome = 'abstained'
+        $truthLevel = if ($Freshness -eq 'fresh') { 'host_evaluation_partial' } else { 'unknown' }
+        $status = if ($Freshness -eq 'fresh') { 'partial' } else { 'unknown' }
     }
     elseif ($hasInjected) {
         $outcome = 'injected'
+        $truthLevel = if ($Freshness -eq 'fresh') { 'host_evaluation_partial' } else { 'unknown' }
+        $status = if ($Freshness -eq 'fresh') { 'partial' } else { 'unknown' }
     }
     elseif ($hasSelected) {
         $outcome = 'selected'
+        $truthLevel = if ($Freshness -eq 'fresh') { 'host_evaluation_partial' } else { 'unknown' }
+        $status = if ($Freshness -eq 'fresh') { 'partial' } else { 'unknown' }
     }
     elseif ($hasListed) {
         $outcome = 'listed'
+        $truthLevel = if ($Freshness -eq 'fresh') { 'host_inventory_loaded' } else { 'unknown' }
+        $status = if ($Freshness -eq 'fresh') { 'inventory_loaded' } else { 'unknown' }
     }
 
     $correlationSource = [string](@($normalizedEvents | Where-Object { $_.correlation_id -ne 'corr-unknown' } | Select-Object -First 1).correlation_id)
@@ -165,7 +173,7 @@ function New-NativeInvocationTrace {
         stages = $stages
         events = [object[]]@($normalizedEvents.ToArray())
         redaction = $redaction
-        receipt = [pscustomobject][ordered]@{ schema_version = 1; status = $status; truth_level = $truthLevel; complete = ($truthLevel -eq 'host_loaded') }
+        receipt = [pscustomobject][ordered]@{ schema_version = 1; status = $status; truth_level = $truthLevel; complete = ($truthLevel -eq 'host_invocation_observed') }
         provider_calls = 0
         native_mutations = 0
         writes = 0
@@ -197,8 +205,8 @@ function Test-NativeInvocationTraceContract {
     $redaction = Get-NativeInvocationTraceProperty $Trace @('redaction')
     if ((Get-NativeInvocationTraceProperty $redaction @('applied')) -ne $true) { $findings.Add((New-OperationFinding 'redaction_required' 'error' '$.redaction.applied' 'Trace redaction must be applied.')) | Out-Null }
     if ((Get-NativeInvocationTraceProperty $Trace @('invocation_observable')) -eq $true -and (Get-NativeInvocationTraceProperty $Trace @('stages')).executed.observed -ne $true) { $findings.Add((New-OperationFinding 'invocation_promotion_invalid' 'error' '$.invocation_observable' 'Invocation cannot be observable without executed evidence.')) | Out-Null }
-    if ([string](Get-NativeInvocationTraceProperty $Trace @('truth_level')) -eq 'host_loaded') {
-        if ((Get-NativeInvocationTraceProperty $stages @('injected')).observed -ne $true -or (Get-NativeInvocationTraceProperty $stages @('executed')).observed -ne $true) { $findings.Add((New-OperationFinding 'host_loaded_evidence_missing' 'error' '$.truth_level' 'host_loaded requires injected and executed evidence.')) | Out-Null }
+    if ([string](Get-NativeInvocationTraceProperty $Trace @('truth_level')) -eq 'host_invocation_observed') {
+        if ((Get-NativeInvocationTraceProperty $stages @('injected')).observed -ne $true -or (Get-NativeInvocationTraceProperty $stages @('executed')).observed -ne $true) { $findings.Add((New-OperationFinding 'host_invocation_evidence_missing' 'error' '$.truth_level' 'host_invocation_observed requires injected and executed evidence.')) | Out-Null }
     }
     foreach ($field in @('provider_calls', 'native_mutations', 'writes')) {
         $value = Get-NativeInvocationTraceProperty $Trace @($field)

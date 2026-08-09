@@ -140,7 +140,7 @@ function ConvertTo-NativeMetadataItem {
     return [pscustomobject][ordered]@{
         kind = [string]$(if (Test-OperationObjectProperty $Entry 'kind') { Get-OperationObjectProperty $Entry 'kind' } else { 'skill' })
         name = $name
-        description = $finalDescription
+        planned_description = $finalDescription
         path = [string](Get-NativeMetadataPlannerProperty $Entry @('path'))
         content_hash = Get-NativeMetadataPlannerProperty $Entry @('content_hash', 'entrypoint_sha256')
         metadata_hash = Get-NativeMetadataPlannerProperty $Entry @('metadata_hash')
@@ -278,7 +278,7 @@ function Plan-NativeMetadata {
         token_ceiling = $tokenCeiling
         character_ceiling = $characterCeiling
         usable_cost = $usableCost
-        entries = @($finalItems | ForEach-Object { [ordered]@{ name = $_.name; token_estimate = $_.token_estimate; character_count = $_.character_count; description = $_.description } })
+        entries = @($finalItems | ForEach-Object { [ordered]@{ name = $_.name; token_estimate = $_.token_estimate; character_count = $_.character_count; planned_description = $_.planned_description } })
     }
     $planId = 'nmp-{0}' -f (Get-OperationSha256 ($identity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)
     $findings = New-Object System.Collections.Generic.List[object]
@@ -287,6 +287,8 @@ function Plan-NativeMetadata {
     return [pscustomobject][ordered]@{
         schema_version = 1
         plan_id = $planId
+        projection_effect = 'plan_only'
+        pass_scope = 'advisory_planning_contract'
         pass = $pass
         status = if ($pass) { 'ready' } else { 'blocked' }
         block_reason = if ($pass) { $null } else { 'metadata_budget_overflow' }
@@ -301,6 +303,8 @@ function Plan-NativeMetadata {
             metadata_budget = $hostBudget
             metadata_budget_source = [string]$metadataBudgetFact.source
             metadata_budget_freshness = [string]$metadataBudgetFact.freshness
+            host_budget_status = if ($null -ne $hostBudget) { 'observed' } else { 'unknown' }
+            host_budget_pass = if ($null -ne $hostBudget) { ($totalTokens -le [long][Math]::Max(0, [Math]::Floor($hostBudget * (1.0 - $headroomRatio)))) } else { $null }
             host_ceiling_applied = $hostCeilingApplied
             context_ratio = $contextRatio
             headroom_ratio = $headroomRatio
@@ -367,6 +371,8 @@ function Test-NativeMetadataPlanContract {
     if ($null -eq $Plan) { return New-OperationValidationResult @((New-OperationFinding 'metadata_plan_missing' 'error' '$' 'Native metadata plan is required.')) }
     if ((Get-OperationObjectProperty $Plan 'schema_version') -ne 1) { $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only NativeMetadataPlan schema version 1 is supported.')) | Out-Null }
     if ([string](Get-OperationObjectProperty $Plan 'plan_id') -notmatch '^nmp-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'plan_id_invalid' 'error' '$.plan_id' 'Metadata plan id must be deterministic.')) | Out-Null }
+    if ([string](Get-OperationObjectProperty $Plan 'projection_effect') -ne 'plan_only') { $findings.Add((New-OperationFinding 'projection_effect_invalid' 'error' '$.projection_effect' 'Metadata descriptions are advisory plan-only values.')) | Out-Null }
+    if ([string](Get-OperationObjectProperty $Plan 'pass_scope') -ne 'advisory_planning_contract') { $findings.Add((New-OperationFinding 'pass_scope_invalid' 'error' '$.pass_scope' 'Metadata plan pass cannot claim host materialization or host budget acceptance.')) | Out-Null }
     if ([string](Get-OperationObjectProperty $Plan 'decision_owner') -ne 'deterministic_planner') { $findings.Add((New-OperationFinding 'decision_owner_invalid' 'error' '$.decision_owner' 'Metadata planning is deterministic and cannot own semantic selection.')) | Out-Null }
     foreach ($field in @('semantic_selection_applied', 'profile_filter_applied')) {
         if ((Get-OperationObjectProperty $Plan $field) -ne $false) { $findings.Add((New-OperationFinding 'semantic_boundary_breached' 'error' ('$.{0}' -f $field) 'Metadata planner cannot apply semantic selection or profile filtering.')) | Out-Null }
@@ -376,6 +382,10 @@ function Test-NativeMetadataPlanContract {
     }
     foreach ($field in @('enabled', 'kept', 'omitted', 'metadata', 'findings')) {
         if (-not (Test-OperationArray (Get-OperationObjectProperty $Plan $field))) { $findings.Add((New-OperationFinding 'array_field_invalid' 'error' ('$.{0}' -f $field) 'Metadata plan arrays are required.')) | Out-Null }
+    }
+    foreach ($item in @((Get-OperationObjectProperty $Plan 'metadata'))) {
+        if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $item 'planned_description'))) { $findings.Add((New-OperationFinding 'planned_description_missing' 'error' '$.metadata' 'Each retained item requires an advisory planned_description.')) | Out-Null }
+        if (Test-OperationObjectProperty $item 'description') { $findings.Add((New-OperationFinding 'materialization_claim_forbidden' 'error' '$.metadata.description' 'Generic description would imply the advisory value was materialized.')) | Out-Null }
     }
     $enabledTotal = [int](Get-OperationObjectProperty $Plan 'enabled_total')
     $keptTotal = [int](Get-OperationObjectProperty $Plan 'kept_total')
@@ -389,6 +399,9 @@ function Test-NativeMetadataPlanContract {
     $budget = Get-OperationObjectProperty $Plan 'budget'
     $mode = [string](Get-OperationObjectProperty $budget 'mode')
     if ($mode -notin @('tokens', 'character_fallback')) { $findings.Add((New-OperationFinding 'budget_mode_invalid' 'error' '$.budget.mode' 'Budget mode is invalid.')) | Out-Null }
+    $hostBudgetStatus = [string](Get-OperationObjectProperty $budget 'host_budget_status')
+    if ($hostBudgetStatus -notin @('observed', 'unknown')) { $findings.Add((New-OperationFinding 'host_budget_status_invalid' 'error' '$.budget.host_budget_status' 'Host metadata budget status must be explicit.')) | Out-Null }
+    if ($hostBudgetStatus -eq 'unknown' -and $null -ne (Get-OperationObjectProperty $budget 'host_budget_pass')) { $findings.Add((New-OperationFinding 'unknown_host_budget_pass_forbidden' 'error' '$.budget.host_budget_pass' 'Unknown host metadata budget cannot be reported as pass or fail.')) | Out-Null }
     $measurement = Get-OperationObjectProperty $Plan 'measurement'
     if ([string](Get-OperationObjectProperty $measurement 'unit') -ne $(if ($mode -eq 'tokens') { 'tokens' } else { 'characters' })) { $findings.Add((New-OperationFinding 'measurement_unit_invalid' 'error' '$.measurement.unit' 'Measurement unit must match budget mode.')) | Out-Null }
     return New-OperationValidationResult $findings.ToArray()

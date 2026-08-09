@@ -90,6 +90,11 @@ Describe 'Native metadata planner' {
         $result.budget.source | Should Be 'unknown_fallback'
         $result.measurement.unit | Should Be 'characters'
         $result.measurement.token_estimate_used | Should Be $false
+        $result.projection_effect | Should Be 'plan_only'
+        $result.budget.host_budget_status | Should Be 'unknown'
+        $result.budget.host_budget_pass | Should Be $null
+        $result.metadata[0].planned_description | Should Not BeNullOrEmpty
+        @($result.metadata[0].PSObject.Properties.Name) | Should Not Contain 'description'
         $result.truncated | Should Be $false
         (Test-NativeMetadataPlanContract $result).pass | Should Be $true
     }

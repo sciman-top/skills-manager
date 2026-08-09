@@ -1,7 +1,7 @@
 # skills-manager vNext Phase 6 Checklist
 
 **task truth**: `tasks/skills-manager-vnext-phase6.tasks.json`
-**status**: host_loaded; 12/12 implemented; runtime migration completed; fresh inventory 124/124; full passed 1121/1121; host_evaluation_partial; live_accepted failed
+**status**: host_evaluation_partial; 12/12 implemented; runtime migration completed; host_inventory_loaded observed at 122/122 (106/106 managed projection; two previously observed sites skills are external inventory drift); host_invocation_observed not_observed; final full receipt authority is `reports/quality-gates/current.json`; live_accepted not_accepted
 **active_maintenance_track**: `maintenance_design`
 **maintenance_task_truth**: `tasks/skills-manager-vnext-maintenance-design.tasks.json`
 **maintenance_pilot_truth**: `tasks/skills-manager-vnext-lean-delivery-pilot.json`
@@ -31,7 +31,7 @@
 - [x] `SMV-P6-011` 实现 opt-in strict App Server dispatch fallback。
 - [x] `SMV-P6-012` 完成 staged removal、runner 稳定化、single-flight full closeout 与 truth-boundary evidence；fresh host 仍仅 `host_evaluation_partial`。
 
-当前 P6 manifest 为 12/12 done，runtime projection 已完成；fresh App Server inventory 为 `124/124`，因此 `host_loaded=passed`。代表性 selection replay 为 7/7，但宿主不暴露 native selected/injected/executed events，故仍是 `host_evaluation_partial` 且 `live_accepted=failed`，不得声称 124 个技能面对所有任务必然正确命中。两个失败 full 已保留，最终稳定树 full exit 0：`1121/1121`、总耗时 `316483ms`。
+当前 P6 manifest 为 12/12 done，runtime projection 已完成；fresh App Server inventory 连续两次为 `122/122`，其中受管 projection `106/106`、`missing=0`，只证明 `host_inventory_loaded=observed`。旧快照中的 `sites:sites-building` 与 `sites:sites-hosting` 是外部宿主 inventory 漂移，不是仓库投影缺口。代表性 selection replay 为 7/7，但宿主不暴露 native injected/executed events，故最高真值仍是 `host_evaluation_partial`，`host_invocation_observed=not_observed`，`live_accepted=not_accepted`；不得声称全部技能面对所有任务必然正确命中。最终 full 只以本轮收口后生成的 immutable receipt 和 `reports/quality-gates/current.json` pointer 为权威。
 
 - [x] `SMV-P5-001` 建立 P5 Adaptive Capability Fabric 规划真源。
 - [x] `SMV-P5-002` 实现 task model、schema v3 与 capability DAG。

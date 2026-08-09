@@ -2,7 +2,7 @@
 
 **program_id**: `skills-manager-vnext`
 **文档状态**: active
-**最后更新**: 2026-08-08
+**最后更新**: 2026-08-09
 
 ## 1. 目的
 
@@ -29,8 +29,8 @@
 | [路线图](skills-manager-vnext-roadmap.md) | Phase、依赖、入口/退出门禁、状态边界 | 逐文件实现细节 |
 | [规则治理参考采纳矩阵](rule-governance-adoption-matrix.md) | 官方/参考仓模式的 adopt/adapt/reject/defer 与验证边界 | 当前宿主安装或跨仓写入状态 |
 | [规则全域 reviewed change-set](rule-estate-reviewed-change-set.md) | 全局/多目标仓 plan、apply、resume、rollback 输入契约 | AI 自行批准或宿主加载证明 |
-| [Phase 5 Spec](../superpowers/specs/2026-08-03-capability-manager-vnext-phase-5-design.md) | 当前 adaptive decision plane、host snapshot、兼容和测试契约 | 宿主 runtime 或认证实现 |
-| [Phase 6 host-native reset spec](../superpowers/specs/2026-08-07-capability-manager-vnext-phase-6-design.md) | 当前 P6 领域语言、技术栈、架构迁移、任务和验收真源 | 把 pending runtime migration 写成已实现或 live accepted |
+| [Phase 5 Spec](../superpowers/specs/2026-08-03-capability-manager-vnext-phase-5-design.md) | 历史 adaptive decision plane、host snapshot、兼容和测试契约 | 当前 P6 runtime truth 或认证实现 |
+| [Phase 6 host-native reset spec](../superpowers/specs/2026-08-07-capability-manager-vnext-phase-6-design.md) | P6 领域语言、技术栈、架构迁移、任务和验收契约 | 替代当前 manifest 的动态状态或越级写成 live accepted |
 | [Phase 6 implementation plan](../superpowers/plans/2026-08-07-host-native-skill-lifecycle-reset.md) | 12-task DAG、waves、逐任务 TDD/文件/命令/停止点 | 替代 manifest 状态或跳过单任务验证 |
 | [Lean Delivery maintenance spec](../superpowers/specs/2026-08-03-lean-ai-delivery-maintenance-design.md) | P5 后精益 AI 软件交付 advisory、host-owned coordination/model policy、tool admission、typed-core decision、pilot 和退役边界 | 新 Phase、agent/lease/model-router runtime、typed-core 实现、社区工具安装或业务效果声明 |
 | [Typed-core Operation Contract shadow PoC](../superpowers/specs/2026-08-05-typed-core-operation-contract-shadow-poc.md) | TC0 seam/corpus/protocol 与 TC1 package-free C#/.NET shadow parity、分发观测、TC2 admission | PowerShell 替换、CLI/生产集成、默认分发或 live acceptance |
@@ -40,9 +40,9 @@
 | [Hierarchical discovery redesign spec](../superpowers/specs/2026-08-04-hierarchical-capability-discovery-redesign.md) | P5-local cold discovery、domain catalog、32+8 host 验收、inventory signal、成本拆分与 runtime truth hardening | profile 热切换、第二模型 router、P6 或普遍 live acceptance |
 | [Profile reconciliation advisor spec](../superpowers/specs/2026-08-04-skill-profile-reconciliation-maintenance-design.md) | skill inventory 变化后的 profile drift 诊断、宿主 proposal 与确定性 plan-only 校验 | 自动语义 router、静默 apply/profile 切换或 P6 |
 | [Profile optimization canary spec](../superpowers/specs/2026-08-04-bounded-profile-optimization-canary.md) | 宿主 proposal 后的非活动 profile canary、fresh replay、receipt 和失败回滚 | provider 路由、永久 active profile 切换、P6 或 live acceptance |
-| [实施计划](../../tasks/plan.md) | Phase 5 执行顺序、检查点、失败分流 | 产品背景全文 |
-| [任务 manifest](../../tasks/skills-manager-vnext-phase5.tasks.json) | AI 可解析的任务、依赖、write set、验证、回滚、完成条件 | 长篇设计解释 |
-| [Phase 6 manifest](../../tasks/skills-manager-vnext-phase6.tasks.json) | host-native lifecycle reset 的 12 个 pending 编码任务真值 | 宣称 runtime 已迁移 |
+| [当前实施计划](../../tasks/plan.md) | 当前 Phase 执行顺序、检查点、失败分流 | 产品背景全文 |
+| [Phase 5 manifest](../../tasks/skills-manager-vnext-phase5.tasks.json) | P5 历史任务、依赖、write set、验证、回滚和完成条件 | 当前 Phase 动态状态 |
+| [Phase 6 manifest](../../tasks/skills-manager-vnext-phase6.tasks.json) | 当前 host-native lifecycle reset 的任务、truth ladder、full gate 与 `latest_evidence` 唯一动态真值 | 在产品文档复制易漂移状态 |
 | [Maintenance manifest](../../tasks/skills-manager-vnext-maintenance-design.tasks.json) | 非 Phase 的 M0/M0.2/M0.3 规划任务、evidence group 与 write-set 真值 | M1 pilot 任务、runtime/typed-core implementation 或 P6 admission |
 | [Typed-core shadow manifest](../../tasks/skills-manager-vnext-typed-core-pilot.tasks.json) | TC0/TC1 的 seam、代码、parity、发布测量、回滚与 truth closeout | TC2 生产迁移或 P6 admission |
 | [PowerShell 7 migration manifest](../../tasks/skills-manager-vnext-powershell7-migration.tasks.json) | PS7-only 决策、生产入口/CI/test/docs/verifier 的 write set、验证和回滚真值 | 历史 manifest 改写、typed-core 生产迁移或宿主 mutation |
@@ -91,10 +91,12 @@
 
 ## 5. 当前基线
 
-- 当前 Phase 是 P6 `Host-Native Skill Lifecycle Reset`。12/12 manifest tasks 已完成仓库侧 closeout，single-flight full gate exit 0，阶段真值为 `repo_verified`；fresh CLI 仍仅提供 `host_evaluation_partial`。
+CURRENT_PHASE_TRUTH_SOURCE: tasks/skills-manager-vnext-phase6.tasks.json
+
+- 当前 Phase 是 P6 `Host-Native Skill Lifecycle Reset`。任务计数、runtime migration、truth ladder、full gate 和最新 evidence 只从上述 manifest 及其 `latest_evidence` 读取；本索引不复制这些易漂移字段。
 - P6-012 的仓库侧 staged removal 已落盘并重建生成 bundle：默认生成路径不再编入 legacy `SkillRouting`，`skill-profile`/`技能配置` dispatch 已移除，profile compatibility view 保留为 `read_only` 且 `reachability_authority=none`；未生成的旧 routing source 仅供显式 compatibility verifier/test 使用。
-- fresh CLI probe 当前只能分类为 `host_evaluation_partial`：`selection_observable=false`、`invocation_observable=false`、`body_injection_observable=false`，`provider_calls=0`、`native_mutations=0`、`writes=0`。这不证明 `host_loaded` 或 `live_accepted`。
-- 当前 P6 closeout 边界为 `runtime_migration=not_started`、`host_loaded=not_run`、`live_accepted=not_run`、`full_gate=passed`。full 只证明 repo-side build/test/contracts，不证明宿主加载、真实技能 body invocation 或业务 live acceptance。
+- fresh host inventory、host evaluation、host invocation 和 live acceptance 是彼此独立的证据层；inventory 可见性不得升级为 selection、完整 body injection、execution 或业务验收。
+- 任一 full receipt 只绑定其运行期间稳定的 repo source；后续 executable/config/generated/fixture 变化会使它失效。即使 full 通过，也只证明 repo-side build/test/contracts，不证明真实技能 invocation 或业务 live acceptance。
 - P5 profile advisor、resident dispatcher、hierarchical cold-load 与相关架构描述保留为历史结果或 P6 迁移/兼容契约，不再表示当前普通请求的 runtime reachability 主链。
 - 目标主链是 `effective host snapshot -> canonical compiler -> eligibility policy -> all-enabled native metadata -> host AI selection -> full skill injection -> invocation trace`；strict App Server dispatch 仅为显式 opt-in fallback。
 - 当前 `model_context_window=272000` 的配置样本对应官方 2% ceiling 约 5440 tokens，但 P6 不把单个 TOML 值当运行真值；最终由 `HostCapabilitySnapshot` 按 surface/thread/turn 解析并以完整无 omission 验收。

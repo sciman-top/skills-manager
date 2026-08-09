@@ -1,12 +1,9 @@
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $hookPath = Join-Path $repoRoot 'scripts\hooks\block-cross-thread-send.ps1'
+$policyPath = Join-Path $repoRoot 'scripts\hooks\CrossThreadGuardPolicy.ps1'
 $targetGenerator = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchHeartbeatPrompt.ps1'
 $fleetGenerator = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchFleetSupervisorPrompt.ps1'
-$script:targetPromptDigest = ((& $targetGenerator -TargetThreadId 'digest-probe' -AsJson) | ConvertFrom-Json).prompt_sha256
-$script:runtimeGenerationId = ((& $targetGenerator -TargetThreadId 'digest-probe' -AsJson) | ConvertFrom-Json).watch_runtime_generation_id
-$script:shutdownTargetPromptDigest = ((& $targetGenerator -TargetThreadId 'digest-probe' -ShutdownManaged -AsJson) | ConvertFrom-Json).prompt_sha256
-    $script:fleetPromptDigest = ((& $fleetGenerator -SupervisorThreadId 'digest-probe' -AsJson) | ConvertFrom-Json).prompt_sha256
-    $script:fleetShutdownPromptDigest = ((& $fleetGenerator -SupervisorThreadId 'digest-probe' -ShutdownWhenAllStopped -AsJson) | ConvertFrom-Json).prompt_sha256
+. $policyPath
 
 function Invoke-CrossThreadHook {
     param(
@@ -22,7 +19,23 @@ function Invoke-CrossThreadHook {
         [string]$WatchFleetStateRoot = ''
     )
 
-    $payload = [ordered]@{
+    $turnText = ''
+    if (-not [string]::IsNullOrWhiteSpace($TranscriptPath) -and (Test-Path -LiteralPath $TranscriptPath -PathType Leaf)) {
+        $messages = @(
+            foreach ($line in @(Get-Content -LiteralPath $TranscriptPath)) {
+                if ([string]::IsNullOrWhiteSpace($line)) { continue }
+                try { $record = $line | ConvertFrom-Json -Depth 30 -ErrorAction Stop } catch { continue }
+                if ([string]$record.type -cne 'response_item' -or [string]$record.payload.type -cne 'message' -or [string]$record.payload.role -cne 'user') { continue }
+                if ([string]$record.payload.internal_chat_message_metadata_passthrough.turn_id -cne $TurnId) { continue }
+                foreach ($content in @($record.payload.content)) {
+                    if (-not [string]::IsNullOrWhiteSpace([string]$content.text)) { [string]$content.text }
+                }
+            }
+        )
+        $turnText = $messages -join "`n"
+    }
+
+    $payload = [pscustomobject][ordered]@{
         session_id = $SessionId
         turn_id = $TurnId
         transcript_path = $TranscriptPath
@@ -30,22 +43,16 @@ function Invoke-CrossThreadHook {
         tool_name = $ToolName
         tool_use_id = 'tool-test'
         tool_input = $ToolInput
-    } | ConvertTo-Json -Depth 5 -Compress
-
-    $arguments = @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $hookPath,
-        '-ExpectedTargetPromptSha256', $script:targetPromptDigest,
-        '-ExpectedShutdownTargetPromptSha256', $script:shutdownTargetPromptDigest,
-        '-ExpectedFleetPromptSha256', $script:fleetPromptDigest,
-        '-ExpectedFleetShutdownPromptSha256', $script:fleetShutdownPromptDigest,
-        '-ExpectedRuntimeGenerationId', $script:runtimeGenerationId
-    )
-    if (-not [string]::IsNullOrWhiteSpace($AutomationRoot)) { $arguments += @('-AutomationRoot',$AutomationRoot) }
-    if (-not [string]::IsNullOrWhiteSpace($WatchFleetStateRoot)) { $arguments += @('-WatchFleetStateRoot',$WatchFleetStateRoot) }
-    $output = $payload | & pwsh @arguments
+        __watch_turn_text = $turnText
+    }
+    $decision = Get-CrossThreadGuardDecision -Payload $payload
+    $output = if ([string]$decision.permission_decision -ceq 'deny') {
+        [ordered]@{ hookSpecificOutput=[ordered]@{ hookEventName='PreToolUse'; permissionDecision='deny'; permissionDecisionReason=[string]$decision.reason } } | ConvertTo-Json -Depth 5 -Compress
+    }
+    else { '' }
     [pscustomobject]@{
-        ExitCode = $LASTEXITCODE
-        Output = @($output) -join "`n"
+        ExitCode = [int]$decision.exit_code
+        Output = $output
     }
 }
 
@@ -167,7 +174,7 @@ Describe 'Cross-thread PreToolUse guard' {
         }
     }
 
-    It 'allows only the trusted canonical revision-3 watch body for cross-target automation updates' {
+    It 'denies canonical and noncanonical cross-target watch creation from heartbeat turns' {
         $canonicalPrompt = & $targetGenerator -TargetThreadId 'target-test'
         $fleetTranscript = New-CanonicalWatchTranscript -Role fleet -SessionId 'supervisor-test'
         $valid = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{
@@ -175,7 +182,7 @@ Describe 'Cross-thread PreToolUse guard' {
             targetThreadId = 'target-test'
             prompt = $canonicalPrompt
         }) -SessionId 'supervisor-test' -TranscriptPath $fleetTranscript
-        $valid.Output | Should BeNullOrEmpty
+        ($valid.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
 
         foreach ($prompt in @(
             'arbitrary cross-task prompt',
@@ -210,18 +217,18 @@ Describe 'Cross-thread PreToolUse guard' {
         $view.Output | Should BeNullOrEmpty
     }
 
-    It 'allows only the exact full native ACTIVE-to-PAUSED update for the current shutdown-managed target' {
+    It 'denies even the former exact ACTIVE-to-PAUSED target update after retirement' {
         $automationId = 'automation-9'
         $prompt = & $targetGenerator -TargetThreadId 'target-test' -ShutdownManaged
         $shutdownTarget = New-CanonicalWatchTranscript -Role target_shutdown -SessionId 'target-test' -AutomationId $automationId
         $ordinaryTarget = New-CanonicalWatchTranscript -Role target -SessionId 'target-test' -AutomationId $automationId
         $fullUpdate = [ordered]@{ mode='update'; id=$automationId; kind='heartbeat'; name='Watch target-test'; prompt=$prompt; rrule='FREQ=MINUTELY;INTERVAL=12'; status='PAUSED'; notificationPolicy='failed_runs_only'; targetThreadId='target-test' }
 
-        (Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput $fullUpdate -SessionId 'target-test' -TranscriptPath $shutdownTarget).Output | Should BeNullOrEmpty
+        ((Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput $fullUpdate -SessionId 'target-test' -TranscriptPath $shutdownTarget).Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
 
         $promptLiteral = $prompt | ConvertTo-Json -Compress
         $source = 'const result = await tools.codex_app__automation_update({ mode: "update", id: "automation-9", kind: "heartbeat", name: "Watch target-test", prompt: ' + $promptLiteral + ', rrule: "FREQ=MINUTELY;INTERVAL=12", status: "PAUSED", notificationPolicy: "failed_runs_only", targetThreadId: "target-test" }); text(result);'
-        (Invoke-CrossThreadHook -ToolName 'exec' -ToolInput $source -SessionId 'target-test' -TranscriptPath $shutdownTarget).Output | Should BeNullOrEmpty
+        ((Invoke-CrossThreadHook -ToolName 'exec' -ToolInput $source -SessionId 'target-test' -TranscriptPath $shutdownTarget).Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
 
         foreach ($case in @(
             @{ Transcript=$ordinaryTarget; Input=$fullUpdate },
@@ -236,42 +243,20 @@ Describe 'Cross-thread PreToolUse guard' {
         }
     }
 
-    It 'allows the shutdown supervisor to delete a matching PAUSED target and itself only after a final candidate' {
-        $automationRoot = Join-Path $TestDrive 'automation-metadata'
-        $fleetStateRoot = Join-Path $TestDrive 'fleet-state'
-        $null = New-Item -ItemType Directory -Path $automationRoot,$fleetStateRoot -Force
-        $targetAutomationId = 'automation-target'
-        $supervisorAutomationId = 'automation-supervisor'
-        $targetPrompt = & $targetGenerator -TargetThreadId 'target-test' -ShutdownManaged
-        $supervisorPrompt = & $fleetGenerator -SupervisorThreadId 'supervisor-test' -ShutdownWhenAllStopped
-        Write-TestWatchAutomationMetadata -Root $automationRoot -Id $targetAutomationId -TargetThreadId 'target-test' -Prompt $targetPrompt -Status PAUSED
-        Write-TestWatchAutomationMetadata -Root $automationRoot -Id $supervisorAutomationId -TargetThreadId 'supervisor-test' -Prompt $supervisorPrompt -Status ACTIVE
-        $armedFleet = New-CanonicalWatchTranscript -Role fleet_shutdown -SessionId 'supervisor-test' -AutomationId $supervisorAutomationId
-        $ordinaryFleet = New-CanonicalWatchTranscript -Role fleet -SessionId 'supervisor-test' -AutomationId $supervisorAutomationId
-
-        (Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode='delete'; id=$targetAutomationId }) -SessionId 'supervisor-test' -TranscriptPath $armedFleet -AutomationRoot $automationRoot -WatchFleetStateRoot $fleetStateRoot).Output | Should BeNullOrEmpty
-
-        Write-TestWatchAutomationMetadata -Root $automationRoot -Id $targetAutomationId -TargetThreadId 'target-test' -Prompt $targetPrompt -Status ACTIVE
-        $activeDelete = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode='delete'; id=$targetAutomationId }) -SessionId 'supervisor-test' -TranscriptPath $armedFleet -AutomationRoot $automationRoot -WatchFleetStateRoot $fleetStateRoot
-        ($activeDelete.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
-
-        $withoutCandidate = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode='delete'; id=$supervisorAutomationId }) -SessionId 'supervisor-test' -TranscriptPath $armedFleet -AutomationRoot $automationRoot -WatchFleetStateRoot $fleetStateRoot
-        ($withoutCandidate.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
-
-        [ordered]@{ schema_version=4; automation_id=$supervisorAutomationId; watch_runtime_generation_id=$script:runtimeGenerationId; candidate=[ordered]@{ final_recheck_completed=$true; expires_at_utc=[datetimeoffset]::UtcNow.AddMinutes(5).ToString('o'); supervisor_deleted=$false; supervisor_delete_receipt_key='' } } |
-            ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $fleetStateRoot ($supervisorAutomationId + '.json'))
-        (Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode='delete'; id=$supervisorAutomationId }) -SessionId 'supervisor-test' -TranscriptPath $armedFleet -AutomationRoot $automationRoot -WatchFleetStateRoot $fleetStateRoot).Output | Should BeNullOrEmpty
-
-        $ordinaryDelete = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode='delete'; id=$targetAutomationId }) -SessionId 'supervisor-test' -TranscriptPath $ordinaryFleet -AutomationRoot $automationRoot -WatchFleetStateRoot $fleetStateRoot
-        ($ordinaryDelete.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+    It 'denies every former fleet cleanup and self-delete path' {
+        $armedFleet = New-CanonicalWatchTranscript -Role fleet_shutdown -SessionId 'supervisor-test' -AutomationId 'automation-supervisor'
+        foreach ($id in @('automation-target','automation-supervisor','watch-interrupted-task-v1-target-thread-id-target-test')) {
+            $result = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode='delete'; id=$id }) -SessionId 'supervisor-test' -TranscriptPath $armedFleet
+            ($result.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+        }
     }
 
-    It 'allows a fleet heartbeat to mutate another canonical target but never itself or unrelated automations' {
+    It 'denies fleet heartbeat creation update and delete mutations' {
         $canonicalPrompt = & $targetGenerator -TargetThreadId 'target-test'
         $fleetTranscript = New-CanonicalWatchTranscript -Role fleet -SessionId 'supervisor-test'
 
         $allowed = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode = 'create'; targetThreadId = 'target-test'; prompt = $canonicalPrompt }) -SessionId 'supervisor-test' -TranscriptPath $fleetTranscript
-        $allowed.Output | Should BeNullOrEmpty
+        ($allowed.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
 
         foreach ($toolInput in @(
             [ordered]@{ mode = 'delete'; id = 'watch-interrupted-task-v1-target-thread-id-target-test' },
@@ -284,7 +269,7 @@ Describe 'Cross-thread PreToolUse guard' {
         }
     }
 
-    It 'keeps direct user lifecycle commands outside heartbeat turns available' {
+    It 'keeps only direct current legacy delete available and rejects pause or resume' {
         $ordinaryTranscript = New-WatchTurnTranscript -Text '关闭当前任务守夜。'
         $result = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{
             mode = 'delete'
@@ -298,7 +283,7 @@ Describe 'Cross-thread PreToolUse guard' {
         )) {
             $transcript = New-WatchTurnTranscript -Text $case.Text
             $update = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode = 'update'; id = 'watch-interrupted-task-v1-target-thread-id-target-test'; status = $case.Status }) -SessionId 'target-test' -TranscriptPath $transcript
-            $update.Output | Should BeNullOrEmpty
+            ($update.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
         }
     }
 
@@ -563,18 +548,10 @@ text(result);
         $codeMode = Invoke-CrossThreadHook -ToolName 'exec' -ToolInput 'await tools.shell_command({ command: "shutdown.exe /s /t 120" });' -SessionId 'supervisor-test' -TranscriptPath $armedFleet
         ($codeMode.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
 
-        $automationRoot = Join-Path $TestDrive 'power-automations'
-        $fleetStateRoot = Join-Path $TestDrive 'power-fleet-state'
-        $null = New-Item -ItemType Directory -Path $automationRoot,$fleetStateRoot -Force
-        $supervisorAutomationId = 'automation-power-supervisor'
-        $supervisorPrompt = & $fleetGenerator -SupervisorThreadId 'supervisor-test' -ShutdownWhenAllStopped
-        Write-TestWatchAutomationMetadata -Root $automationRoot -Id $supervisorAutomationId -TargetThreadId 'supervisor-test' -Prompt $supervisorPrompt -Status ACTIVE
-        $receiptBoundFleet = New-CanonicalWatchTranscript -Role fleet_shutdown -SessionId 'supervisor-test' -AutomationId $supervisorAutomationId
-        [ordered]@{ schema_version=4; automation_id=$supervisorAutomationId; watch_runtime_generation_id=$script:runtimeGenerationId; candidate=[ordered]@{ final_recheck_completed=$true; expires_at_utc=[datetimeoffset]::UtcNow.AddMinutes(5).ToString('o'); supervisor_deleted=$true; supervisor_delete_receipt_key='watch-supervisor-delete:' + ('a' * 64) } } |
-            ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $fleetStateRoot ($supervisorAutomationId + '.json'))
-        (Invoke-CrossThreadHook -ToolName 'shell_command' -ToolInput ([ordered]@{ command=$command }) -SessionId 'supervisor-test' -TranscriptPath $receiptBoundFleet -AutomationRoot $automationRoot -WatchFleetStateRoot $fleetStateRoot).Output | Should BeNullOrEmpty
+        $receiptBoundFleet = New-CanonicalWatchTranscript -Role fleet_shutdown -SessionId 'supervisor-test' -AutomationId 'automation-power-supervisor'
+        ((Invoke-CrossThreadHook -ToolName 'shell_command' -ToolInput ([ordered]@{ command=$command }) -SessionId 'supervisor-test' -TranscriptPath $receiptBoundFleet).Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
         $staticPower = 'const result = await tools.shell_command({ command: "shutdown.exe /s /t 120 /c \"watch-interrupted-task: all monitored tasks stopped\"" }); text(result);'
-        (Invoke-CrossThreadHook -ToolName 'exec' -ToolInput $staticPower -SessionId 'supervisor-test' -TranscriptPath $receiptBoundFleet -AutomationRoot $automationRoot -WatchFleetStateRoot $fleetStateRoot).Output | Should BeNullOrEmpty
+        ((Invoke-CrossThreadHook -ToolName 'exec' -ToolInput $staticPower -SessionId 'supervisor-test' -TranscriptPath $receiptBoundFleet).Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
     }
 
     It 'denies incomplete target pause fleet delete self-delete and power calls' {

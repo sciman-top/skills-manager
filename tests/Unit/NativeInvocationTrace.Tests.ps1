@@ -22,12 +22,29 @@ Describe 'Native invocation trace' {
     It 'keeps listed visibility separate from invocation' {
         $trace = New-NativeInvocationTrace -TraceId 'trace-listed' -Surface 'cli' -Source 'cli' -Freshness 'fresh' -CapturedAt '2026-08-07T06:00:01Z' -Events @((New-TraceEvent 'listed'))
 
-        $trace.truth_level | Should Be 'host_evaluation_partial'
+        $trace.truth_level | Should Be 'host_inventory_loaded'
         $trace.stages.listed.observed | Should Be $true
         $trace.stages.selected.observed | Should Be $false
         $trace.stages.injected.observed | Should Be $false
         $trace.stages.executed.observed | Should Be $false
         $trace.invocation_observable | Should Be $false
+        (Test-NativeInvocationTraceContract $trace).pass | Should Be $true
+    }
+
+    It 'promotes only fresh injected and executed evidence to invocation observed' {
+        $events = @(
+            (New-TraceEvent 'listed' -EventId 'evt-listed'),
+            (New-TraceEvent 'selected' -EventId 'evt-selected'),
+            (New-TraceEvent 'injected' -EventId 'evt-injected'),
+            (New-TraceEvent 'executed' -EventId 'evt-executed')
+        )
+        $trace = New-NativeInvocationTrace -TraceId 'trace-executed' -Surface 'app_server' -Source 'app_server' -Freshness 'fresh' -CapturedAt '2026-08-07T06:00:01Z' -Events $events
+
+        $trace.truth_level | Should Be 'host_invocation_observed'
+        $trace.stages.injected.observed | Should Be $true
+        $trace.stages.executed.observed | Should Be $true
+        $trace.invocation_observable | Should Be $true
+        $trace.receipt.complete | Should Be $true
         (Test-NativeInvocationTraceContract $trace).pass | Should Be $true
     }
 
