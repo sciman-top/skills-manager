@@ -34,18 +34,29 @@ function Get-JavaScriptCodeSkeleton {
     $state = 'code'
     $quote = [char]0
     $escaped = $false
+    $templateExpressionDepth = 0
     for ($index = 0; $index -lt $Source.Length; $index++) {
         $character = $Source[$index]
         $next = if ($index + 1 -lt $Source.Length) { $Source[$index + 1] } else { [char]0 }
         if ($state -ceq 'code') {
-            if ($character -eq "'" -or $character -eq '"' -or [int]$character -eq 96) {
+            if ($character -eq "'" -or $character -eq '"') {
                 $state = 'string'; $quote = $character; $escaped = $false; [void]$builder.Append(' ')
+            }
+            elseif ([int]$character -eq 96) {
+                $state = 'template'; $escaped = $false; [void]$builder.Append(' ')
             }
             elseif ($character -eq '/' -and $next -eq '/') {
                 $state = 'line_comment'; [void]$builder.Append('  '); $index++
             }
             elseif ($character -eq '/' -and $next -eq '*') {
                 $state = 'block_comment'; [void]$builder.Append('  '); $index++
+            }
+            elseif ($templateExpressionDepth -gt 0 -and $character -eq '{') {
+                $templateExpressionDepth++; [void]$builder.Append($character)
+            }
+            elseif ($templateExpressionDepth -gt 0 -and $character -eq '}') {
+                $templateExpressionDepth--; [void]$builder.Append($character)
+                if ($templateExpressionDepth -eq 0) { $state = 'template' }
             }
             else { [void]$builder.Append($character) }
             continue
@@ -55,6 +66,16 @@ function Get-JavaScriptCodeSkeleton {
             if ($escaped) { $escaped = $false }
             elseif ($character -eq '\') { $escaped = $true }
             elseif ($character -eq $quote) { $state = 'code' }
+            continue
+        }
+        if ($state -ceq 'template') {
+            [void]$builder.Append($(if ($character -eq "`n" -or $character -eq "`r") { $character } else { ' ' }))
+            if ($escaped) { $escaped = $false }
+            elseif ($character -eq '\') { $escaped = $true }
+            elseif ([int]$character -eq 96) { $state = 'code' }
+            elseif ($character -eq '$' -and $next -eq '{') {
+                [void]$builder.Append('{'); $index++; $templateExpressionDepth = 1; $state = 'code'
+            }
             continue
         }
         if ($state -ceq 'line_comment') {
@@ -73,7 +94,7 @@ function Test-CodeModeToolCall {
         [Parameter(Mandatory = $true)][string]$CodeSkeleton,
         [Parameter(Mandatory = $true)][string]$ToolNamePattern
     )
-    return $CodeSkeleton -match ('(?i)(?:^|[^A-Za-z0-9_$])tools\s*(?:\?\s*\.\s*|\.\s*)(?:' + $ToolNamePattern + ')\s*\(')
+    return $CodeSkeleton -match ('(?i)(?:^|[^A-Za-z0-9_$])tools\s*(?:\?\s*\.\s*|\.\s*)(?:' + $ToolNamePattern + ')(?:\s*\.\s*(?:call|apply|bind))?\s*\(')
 }
 
 function Test-CodeModeHighRiskRoute {
@@ -83,7 +104,7 @@ function Test-CodeModeHighRiskRoute {
         [Parameter(Mandatory = $true)][string]$ToolNamePattern
     )
     $direct = Test-CodeModeToolCall -CodeSkeleton $CodeSkeleton -ToolNamePattern $ToolNamePattern
-    $bracket = $Source -match ('(?is)\btools\s*(?:\?\s*\.)?\s*\[\s*["''](?:' + $ToolNamePattern + ')["'']\s*\]\s*\(')
+    $bracket = $CodeSkeleton -match ('(?is)\btools\s*(?:\?\s*\.)?\s*\[\s*["''](?:' + $ToolNamePattern + ')["'']\s*\]\s*\(')
     $alias = $CodeSkeleton -match ('(?i)\b(?:const|let|var)\s+[A-Za-z_$][A-Za-z0-9_$]*\s*=\s*tools\s*(?:\?\s*\.\s*|\.\s*)(?:' + $ToolNamePattern + ')\s*;')
     return $direct -or $bracket -or $alias
 }

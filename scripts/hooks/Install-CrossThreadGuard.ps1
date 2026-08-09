@@ -43,16 +43,20 @@ if ($null -eq $document.hooks.PSObject.Properties['PreToolUse']) {
 
 $retained = @(
     foreach ($group in @($document.hooks.PreToolUse)) {
-        $managed = $false
+        $retainedHandlers = @(
         foreach ($handler in @($group.hooks)) {
             $handlerCommand = [string]$handler.command
             if ([string]$group.matcher -ceq '*' -and [string]$handler.type -ceq 'command' -and
                 $handlerCommand -like "*$hostHook*" -and $handlerCommand -match '(?i)-ExpectedScriptSha256\b') {
-                $managed = $true
-                break
+                    continue
+                }
+                $handler
             }
+        )
+        if ($retainedHandlers.Count -gt 0) {
+            $group.hooks = @($retainedHandlers)
+            $group
         }
-        if (-not $managed) { $group }
     }
 )
 
@@ -83,14 +87,6 @@ $originalHostHookBytes = if ($hostHookExisted) { [System.IO.File]::ReadAllBytes(
 $originalHostPolicyBytes = if ($hostPolicyExisted) { [System.IO.File]::ReadAllBytes($hostPolicy) } else { $null }
 $originalLegacyDoctorBytes = if ($legacyDoctorExisted) { [System.IO.File]::ReadAllBytes($legacyDoctor) } else { $null }
 $removeLegacyDoctor = $false
-if ($legacyDoctorExisted) {
-    try {
-        $legacyDoctorText = [System.Text.UTF8Encoding]::new($false).GetString($originalLegacyDoctorBytes)
-        $removeLegacyDoctor = $legacyDoctorText -match 'watch-guard-runtime-doctor' -and
-            $legacyDoctorText -match 'watch_runtime_generation_id'
-    }
-    catch { $removeLegacyDoctor = $false }
-}
 
 try {
     Copy-Item -LiteralPath $resolvedSource -Destination $stagedHook
@@ -99,7 +95,6 @@ try {
 
     Move-Item -LiteralPath $stagedHook -Destination $hostHook -Force
     Move-Item -LiteralPath $stagedPolicy -Destination $hostPolicy -Force
-    if ($removeLegacyDoctor) { Remove-Item -LiteralPath $legacyDoctor -Force }
     if ($InjectFinalHooksMoveFailure) { throw 'injected final hooks move failure' }
     Move-Item -LiteralPath $stagedHooksJson -Destination $hooksPath -Force
 }
@@ -135,7 +130,7 @@ finally {
 
 [pscustomobject]@{
     status = 'installed_untrusted'
-    policy_revision = 4
+    policy_revision = 5
     watch_runtime_status = 'retired_fail_closed'
     hooks_path = $hooksPath
     host_hook_path = $hostHook
@@ -145,5 +140,6 @@ finally {
     policy_source_sha256 = $policyHash
     policy_host_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $hostPolicy).Hash.ToLowerInvariant()
     legacy_doctor_removed = $removeLegacyDoctor
+    legacy_doctor_cleanup_status = if ($legacyDoctorExisted) { 'manual_review_required' } else { 'not_present' }
     trust_next_step = 'Open /hooks in a fresh Codex session and trust the exact current definition hash.'
 }

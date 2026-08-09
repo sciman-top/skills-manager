@@ -154,7 +154,7 @@ if ($null -ne $manifest) {
     }
 
     if (-not $explicitHistoricalMode) {
-        $requiredTruthFields = @('truth_level', 'full_gate', 'runtime_migration', 'host_inventory_loaded', 'host_evaluation', 'host_invocation_observed', 'live_accepted', 'latest_evidence', 'main_chain', 'stop_conditions', 'first_open_task', 'next_milestone')
+        $requiredTruthFields = @('truth_level', 'full_gate', 'full_gate_receipt', 'runtime_migration', 'host_inventory_loaded', 'host_evaluation', 'host_invocation_observed', 'live_accepted', 'latest_evidence', 'main_chain', 'stop_conditions', 'first_open_task', 'next_milestone')
         foreach ($field in $requiredTruthFields) {
             if ($manifest.PSObject.Properties.Match($field).Count -eq 0) {
                 Add-PlanningFinding ([ref]$findings) 'phase_truth_field_missing' $paths['manifest'] ('Current phase truth field is missing: {0}' -f $field)
@@ -162,7 +162,7 @@ if ($null -ne $manifest) {
         }
         foreach ($contract in @(
                 @{ field = 'truth_level'; allowed = @('design_only', 'repo_verified', 'host_inventory_loaded', 'host_evaluation_partial', 'host_invocation_observed', 'live_accepted') },
-                @{ field = 'full_gate'; allowed = @('not_run', 'passed', 'failed', 'stale') },
+                @{ field = 'full_gate'; allowed = @('receipt_authoritative') },
                 @{ field = 'runtime_migration'; allowed = @('not_started', 'in_progress', 'completed', 'blocked') },
                 @{ field = 'host_inventory_loaded'; allowed = @('not_run', 'observed', 'not_observed', 'stale') },
                 @{ field = 'host_evaluation'; allowed = @('not_run', 'host_evaluation_partial', 'passed', 'failed') },
@@ -172,6 +172,15 @@ if ($null -ne $manifest) {
             if ($manifest.PSObject.Properties.Match([string]$contract.field).Count -gt 0 -and [string]$manifest.($contract.field) -notin @($contract.allowed)) {
                 Add-PlanningFinding ([ref]$findings) 'phase_truth_value_invalid' $paths['manifest'] ('Unsupported {0}: {1}' -f $contract.field, [string]$manifest.($contract.field))
             }
+        }
+        $fullGateReceipt = if ($manifest.PSObject.Properties.Match('full_gate_receipt').Count -gt 0) { $manifest.full_gate_receipt } else { $null }
+        if ([string]$manifest.full_gate -ne 'receipt_authoritative' -or $null -eq $fullGateReceipt -or
+            [string]$fullGateReceipt.pointer -ne 'reports/quality-gates/current.json' -or
+            [string]$fullGateReceipt.required_profile -ne 'full' -or
+            [string]$fullGateReceipt.required_status -ne 'passed' -or
+            [string]$fullGateReceipt.source_binding -ne 'exact_current_source') {
+            Add-PlanningFinding ([ref]$findings) 'phase_full_gate_authority_invalid' $paths['manifest'] `
+                'Current full status must be delegated to reports/quality-gates/current.json with full/passed/exact_current_source requirements.'
         }
         if ($manifest.PSObject.Properties.Match('host_invocation_observed').Count -gt 0 -and
             [string]$manifest.host_invocation_observed -eq 'observed' -and
@@ -364,7 +373,7 @@ if ($null -ne $manifest) {
 
 if (-not $explicitHistoricalMode) {
     $currentTruthMarker = 'CURRENT_PHASE_TRUTH_SOURCE: {0}' -f $ManifestPath
-    foreach ($documentKey in @('index', 'roadmap')) {
+    foreach ($documentKey in @('index', 'prd', 'architecture', 'roadmap')) {
         if (-not (Test-ContainsLiteral $content[$documentKey] $currentTruthMarker)) {
             Add-PlanningFinding ([ref]$findings) 'current_truth_source_mismatch' $paths[$documentKey] `
                 ('Current product truth must delegate to the active manifest with marker: {0}' -f $currentTruthMarker)

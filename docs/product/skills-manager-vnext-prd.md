@@ -298,11 +298,13 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 
 ### 6.14 P6 当前实现与验收边界
 
-2026-08-08 的 P6-012 repo-side closeout 已完成。P6-001 至 P6-012 均已完成仓库侧切片；staged removal 已同步 source、config、生成链和 compatibility verifier。single-flight full quality gate exit 0，`1097/1097` tests 与全部 contract/invariant 通过，阶段真值为 `repo_verified`。
+CURRENT_PHASE_TRUTH_SOURCE: tasks/skills-manager-vnext-phase6.tasks.json
+
+2026-08-08 的 P6-012 repo-side closeout 与 `1097/1097` full 结果是 point-in-time 历史证据。P6-001 至 P6-012 的仓库侧切片、staged removal、source/config/生成链和 compatibility verifier 已落盘；当前任务计数、runtime migration、truth ladder、full authority 与最新 evidence 只从上述 manifest 读取。
 
 当前仓库侧 compatibility boundary 为：默认生成 bundle 不再编入 legacy `SkillRouting`，`技能配置`/`skill-profile` dispatch 已退役；profile compatibility view 仅为 `read_only`、`reachability_authority=none`，未生成的旧 routing source 仅允许显式 compatibility-only test/verifier 读取。P5 profile advisor、resident dispatcher 与 cold-load 描述保留为历史或迁移契约，不是普通请求的当前语义选择 owner。
 
-fresh CLI probe 只得到 `host_evaluation_partial`：selection、injection 和 skill-body invocation 不可观测，且 `provider_calls=0`、`native_mutations=0`、`writes=0`。本轮 `runtime_migration=not_started`、`host_loaded=not_run`、`live_accepted=not_run`；这些状态只能由对应独立证据晋级，不能由 metadata visibility、focused tests 或 planning verifier 推导。
+fresh inventory、host evaluation、injected/executed invocation 与业务 acceptance 是独立层级；它们只能由对应证据晋级，不能由 metadata visibility、focused tests 或 planning verifier 推导。tracked manifest 不复制 `passed|stale` 运行态：当前 full 是否有效只由 `reports/quality-gates/current.json` 指向的 immutable full receipt 及 exact-current-source 校验决定。
 
 ## 7. 非功能需求
 
@@ -346,7 +348,7 @@ fresh CLI probe 只得到 `host_evaluation_partial`：selection、injection 和 
 - `NFR-HNS-008`：shadow comparison writes=0，不调用第二模型，不把 partial trace 当作输赢依据。
 - `NFR-HNS-009`：profile migration 兼容读取旧 schema，且旧数据可 round-trip 恢复；当前 task 不热切换 active profile。
 - `NFR-HNS-010`：strict fallback 与 native main path 复用同一 eligibility policy，候选集有界，缺宿主裁决或 injection 支持时 fail-closed/platform_na。
-- `NFR-HNS-011`：P6 真值阶梯固定为 `planning_contract -> implemented -> repo_verified -> host_evaluation_partial -> host_loaded -> live_accepted`，不得越级。
+- `NFR-HNS-011`：P6 真值阶梯固定为 `planning_contract -> implemented -> repo_verified -> host_inventory_loaded -> host_evaluation_partial -> host_invocation_observed -> live_accepted`，不得越级；inventory 不得冒充 invocation。
 
 ## 8. 产品级验收
 

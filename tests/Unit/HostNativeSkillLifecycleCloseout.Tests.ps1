@@ -145,8 +145,8 @@ Describe 'P6 host-native skill lifecycle closeout' {
         $projectionCommand | Should Match 'Apply-NativeSkillProjection'
         $projectionCommand | Should Match '\$nativeProjectionAuthoritative'
         $projectionCommand | Should Match 'if \(-not \$nativeProjectionAuthoritative\)'
-        $syncStart = $projectionCommand.IndexOf('function Sync-CodexSkillProjection')
-        $applyIndex = $projectionCommand.IndexOf('Apply-NativeSkillProjection', $syncStart)
+        $syncStart = $projectionCommand.IndexOf('function Invoke-CodexSkillProjectionSyncCore')
+        $applyIndex = $projectionCommand.IndexOf('Apply-NativeSkillProjection -Plan', $syncStart)
         $linkIndex = $projectionCommand.IndexOf('Sync-CodexManagedSkillLinks', $applyIndex)
         $applyIndex | Should BeLessThan $linkIndex
     }

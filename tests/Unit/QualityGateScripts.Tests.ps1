@@ -1,4 +1,26 @@
 Describe "Quality gate scripts" {
+    It "parses the complete generated bundle before replacing skills.ps1" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $build = Get-Content -LiteralPath (Join-Path $root 'build.ps1') -Raw
+
+        $build | Should Match 'Parser\]::ParseInput'
+        $build | Should Match 'bundle_parse_failed'
+        $build.IndexOf('Parser]::ParseInput') | Should BeLessThan $build.IndexOf('WriteAllBytes')
+    }
+
+    It "exposes a standalone current full receipt verifier for post-commit closeout" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $verifierPath = Join-Path $root 'scripts\quality\verify-current-quality-gate.ps1'
+
+        Test-Path -LiteralPath $verifierPath -PathType Leaf | Should Be $true
+        if (Test-Path -LiteralPath $verifierPath -PathType Leaf) {
+            $verifier = Get-Content -LiteralPath $verifierPath -Raw
+            $verifier | Should Match 'Test-QualityGateCurrentReceipt'
+            $verifier | Should Match 'RequiredProfile'
+            $verifier | Should Match 'RequiredStatus'
+        }
+    }
+
     It "Keeps full-gate execution in build, test, then contract order with timings" {
         $root = Join-Path $PSScriptRoot "..\.."
         $scriptPath = Join-Path $root "scripts\quality\run-local-quality-gates.ps1"
@@ -144,6 +166,12 @@ Describe "Quality gate scripts" {
         $runner | Should Match 'slow_test_file'
         $runner | Should Match 'slow_test_case'
         $runner | Should Match 'reports.test-timings.current.json'
+        $runner | Should Match 'QualityGateRunId'
+        $runner | Should Match 'QualityGateSourceFingerprintJson'
+        $runner | Should Match 'quality_gate_source_start'
+        $gate = Get-Content -LiteralPath (Join-Path $root 'scripts\quality\run-local-quality-gates.ps1') -Raw
+        $gate | Should Match 'QualityGateRunId'
+        $gate | Should Match 'TimingReportPath'
     }
 
     It "isolates test files in bounded workers with timeout logs and terminal receipts" {
@@ -160,7 +188,7 @@ Describe "Quality gate scripts" {
         $runner | Should Match 'InProcessTestFiles'
         $runner | Should Match 'Invoke-InProcessTestFile'
         $runner | Should Match 'SelectionCancellation\.Tests\.ps1'
-        $runner | Should Match 'WatchRuntimeArming\.Tests\.ps1'
+        $runner | Should Not Match 'WatchRuntimeArming\.Tests\.ps1'
         $runner | Should Match '\$orderedFiles'
         $runner | Should Match '\.Dispose\(\)'
         $runner | Should Match 'timed_out'

@@ -818,6 +818,74 @@ unified_exec = true
         }
     }
 
+    Context "Sync-CodexSkillProjection aggregate transaction" {
+        It "Rolls back catalog, native projection, managed links, config, and manifest when the aggregate sync fails" {
+            $oldDryRun = $script:DryRun
+            try {
+                $script:DryRun = $false
+                $managedRoot = Join-Path $TestDrive "transaction-managed"
+                $userRoot = Join-Path $TestDrive "transaction-user"
+                $configPath = Join-Path $TestDrive "transaction-codex\config.toml"
+                $manifestPath = Join-Path $TestDrive "transaction-reports\projection.json"
+                $receiptPath = Join-Path $TestDrive "transaction-reports\native-receipt.json"
+                $routerDir = New-ProjectionSkill $managedRoot "capability-router" "capability-router"
+                $demoDir = New-ProjectionSkill $managedRoot "demo" "demo"
+                $retiredDir = New-ProjectionSkill $managedRoot "retired" "retired"
+                EnsureDir $userRoot
+                New-Junction (Join-Path $userRoot "retired") $retiredDir
+                $catalogPath = Join-Path $routerDir "catalog.json"
+                Set-ContentUtf8 $catalogPath "catalog-before"
+                Set-ContentUtf8 $configPath @'
+model = "fixture"
+
+# BEGIN skills-manager:skills-projection
+[[skills.config]]
+path = "C:\\old\\SKILL.md"
+enabled = false
+# END skills-manager:skills-projection
+'@
+                Set-ContentUtf8 $manifestPath "manifest-before"
+                $projection = [pscustomobject]@{
+                    enabled = $true
+                    managed_source_path = $managedRoot
+                    user_skill_root = $userRoot
+                    managed_link_excludes = @("retired")
+                    codex_config_path = $configPath
+                    manifest_path = $manifestPath
+                    native_projection = [pscustomobject]@{
+                        enabled = $true
+                        owner = "skills-manager-test"
+                        target_root = $userRoot
+                        receipt_path = $receiptPath
+                        apply_requires_token = $true
+                        notification_method = "skills/changed"
+                        notification_mode = "plan_only"
+                    }
+                    sources = @([pscustomobject]@{ id = "managed"; path = $userRoot; priority = 200; platforms = @("codex") })
+                }
+
+                Mock Set-ContentUtf8 { throw "injected manifest write failure" } -ParameterFilter {
+                    [string]::Equals([IO.Path]::GetFullPath($path), [IO.Path]::GetFullPath($manifestPath), [StringComparison]::OrdinalIgnoreCase)
+                }
+
+                { Sync-CodexSkillProjection $projection } | Should Throw
+
+                (Get-ContentUtf8 $catalogPath) | Should Be "catalog-before"
+                (Get-ContentUtf8 $configPath) | Should Match 'C:\\\\old\\\\SKILL\.md'
+                (Get-ContentUtf8 $manifestPath) | Should Be "manifest-before"
+                (Test-Path -LiteralPath $receiptPath) | Should Be $false
+                (Test-Path -LiteralPath (Join-Path $userRoot "capability-router")) | Should Be $false
+                (Test-Path -LiteralPath (Join-Path $userRoot "demo")) | Should Be $false
+                (Is-ReparsePoint (Join-Path $userRoot "retired")) | Should Be $true
+                (Get-ReparsePointTargetFullPath (Join-Path $userRoot "retired")) | Should Be ([IO.Path]::GetFullPath($retiredDir))
+                (Test-Path -LiteralPath (Join-Path $demoDir "SKILL.md") -PathType Leaf) | Should Be $true
+            }
+            finally {
+                $script:DryRun = $oldDryRun
+            }
+        }
+    }
+
     Context "Sync-CodexSkillProjection" {
         It "Signals canonical inventory changes but ignores profile-only and no-op syncs" {
             $oldDryRun = $script:DryRun
@@ -956,6 +1024,52 @@ unified_exec = true
                 $hotManifest.source_revision | Should Be "0123456789012345678901234567890123456789"
                 $hotManifest.promotion_mode | Should Be "verified_clean_commit"
                 $hotManifest.promoted_at | Should Be $promotedAt
+            }
+            finally {
+                $script:DryRun = $oldDryRun
+            }
+        }
+
+        It "invalidates inherited promotion provenance when the projected skill content changes" {
+            $oldDryRun = $script:DryRun
+            try {
+                $script:DryRun = $false
+                $managedRoot = Join-Path $TestDrive "projection-provenance-managed"
+                $userRoot = Join-Path $TestDrive "projection-provenance-user"
+                $skillDir = New-ProjectionSkill $managedRoot "demo" "demo" "before"
+                $configPath = Join-Path $TestDrive "projection-provenance-codex\config.toml"
+                $manifestPath = Join-Path $TestDrive "projection-provenance-reports\projection.json"
+                $projection = [pscustomobject]@{
+                    enabled = $true
+                    managed_source_path = $managedRoot
+                    user_skill_root = $userRoot
+                    codex_config_path = $configPath
+                    manifest_path = $manifestPath
+                    sources = @([pscustomobject]@{ id = "managed"; path = $userRoot; priority = 200; platforms = @("codex") })
+                }
+                $promotion = [pscustomobject]@{
+                    source_revision = "0123456789012345678901234567890123456789"
+                    source_worktree_dirty = $false
+                    source_git_state = "clean"
+                    promotion_mode = "verified_clean_commit"
+                    gate_receipt_status = "passed"
+                    gate_receipt_path = "receipt.json"
+                }
+
+                Sync-CodexSkillProjection $projection "sig-provenance" $promotion | Out-Null
+                $before = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
+                $before.promotion_mode | Should Be "verified_clean_commit"
+                $before.projection_fingerprint | Should Match '^[0-9a-f]{64}$'
+
+                Set-ContentUtf8 (Join-Path $skillDir "SKILL.md") "---`nname: demo`ndescription: after`n---`n"
+                Sync-CodexSkillProjection $projection "sig-provenance" | Out-Null
+                $after = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
+
+                $after.projection_fingerprint | Should Not Be $before.projection_fingerprint
+                $after.promotion_mode | Should Be "stale"
+                $after.source_revision | Should Be ""
+                $after.source_git_state | Should Be "not_evaluated_after_projection_change"
+                $after.gate_receipt.status | Should Be "stale"
             }
             finally {
                 $script:DryRun = $oldDryRun

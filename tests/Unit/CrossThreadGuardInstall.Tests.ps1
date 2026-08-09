@@ -33,7 +33,7 @@ Describe 'Cross-thread guard installer and doctor' {
         @([System.IO.File]::ReadAllBytes($sourcePolicy) | Where-Object { $_ -eq 13 }).Count | Should Be 0
     }
 
-    It 'installs the revision-4 retired-watch guard and preserves unrelated hooks and config' {
+    It 'installs the revision-5 retired-watch guard without deleting a marker-only legacy file' {
         $hostScripts = Join-Path $script:codexHome 'scripts'
         $null = New-Item -ItemType Directory -Path $hostScripts -Force
         @'
@@ -45,16 +45,17 @@ watch_runtime_generation_id = 'legacy'
 
         $receipt = & $installer -CodexHome $script:codexHome -SourceHookPath $sourceHook
         $receipt.status | Should Be 'installed_untrusted'
-        $receipt.policy_revision | Should Be 4
+        $receipt.policy_revision | Should Be 5
         $receipt.watch_runtime_status | Should Be 'retired_fail_closed'
-        $receipt.legacy_doctor_removed | Should Be $true
+        $receipt.legacy_doctor_removed | Should Be $false
+        $receipt.legacy_doctor_cleanup_status | Should Be 'manual_review_required'
         (Get-Content -Raw -LiteralPath $script:configPath) | Should Be $script:originalConfig
 
         $hostHook = Join-Path $hostScripts 'block-cross-thread-send.ps1'
         $hostPolicy = Join-Path $hostScripts 'CrossThreadGuardPolicy.ps1'
         (Get-FileHash -Algorithm SHA256 -LiteralPath $hostHook).Hash | Should Be (Get-FileHash -Algorithm SHA256 -LiteralPath $sourceHook).Hash
         (Get-FileHash -Algorithm SHA256 -LiteralPath $hostPolicy).Hash | Should Be (Get-FileHash -Algorithm SHA256 -LiteralPath $sourcePolicy).Hash
-        Test-Path -LiteralPath (Join-Path $hostScripts 'Test-WatchGuardRuntime.ps1') | Should Be $false
+        Test-Path -LiteralPath (Join-Path $hostScripts 'Test-WatchGuardRuntime.ps1') | Should Be $true
 
         $hooks = Get-Content -Raw -LiteralPath (Join-Path $script:codexHome 'hooks.json') | ConvertFrom-Json
         @($hooks.hooks.PostToolUse).Count | Should Be 1
@@ -97,6 +98,27 @@ watch_runtime_generation_id = 'legacy'
         $null = & $installer -CodexHome $script:codexHome -SourceHookPath $sourceHook
         $installed = Get-Content -Raw -LiteralPath $hooksPath | ConvertFrom-Json
         @($installed.hooks.PreToolUse | Where-Object { $_.matcher -eq 'unrelated_tool' }).Count | Should Be 1
+    }
+
+    It 'preserves unrelated handlers that share a group with the managed handler' {
+        $hooksPath = Join-Path $script:codexHome 'hooks.json'
+        $hostHook = Join-Path $script:codexHome 'scripts\block-cross-thread-send.ps1'
+        $document = Get-Content -Raw -LiteralPath $hooksPath | ConvertFrom-Json
+        $document.hooks | Add-Member -MemberType NoteProperty -Name PreToolUse -Value @([pscustomobject]@{
+            matcher = '*'
+            hooks = @(
+                [pscustomobject]@{ type = 'command'; command = ('pwsh -File "{0}" -ExpectedScriptSha256 "{1}"' -f $hostHook, ('a' * 64)) }
+                [pscustomobject]@{ type = 'command'; command = 'unrelated-security-hook.ps1'; statusMessage = 'Keep this handler' }
+            )
+        })
+        $document | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $hooksPath
+
+        $null = & $installer -CodexHome $script:codexHome -SourceHookPath $sourceHook
+        $installed = Get-Content -Raw -LiteralPath $hooksPath | ConvertFrom-Json
+        $handlers = @($installed.hooks.PreToolUse | ForEach-Object { @($_.hooks) })
+
+        @($handlers | Where-Object command -eq 'unrelated-security-hook.ps1').Count | Should Be 1
+        @($handlers | Where-Object { [string]$_.command -like "*$hostHook*" }).Count | Should Be 1
     }
 
     It 'reports a static retired-watch guard while trust and fresh live probes remain open' {

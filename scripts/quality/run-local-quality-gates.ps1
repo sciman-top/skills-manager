@@ -67,6 +67,7 @@ try {
     Push-Location $root
     try {
     $runId = 'qgr-{0}-{1}' -f ([DateTimeOffset]::UtcNow.ToString('yyyyMMdd-HHmmss')), ([guid]::NewGuid().ToString('N').Substring(0, 8))
+    $timingReportPath = Join-Path $root ('reports\test-timings\{0}.json' -f $runId)
     $startedAt = [DateTimeOffset]::UtcNow.ToString('o')
     $sourceStart = $null
     $sourceEnd = $null
@@ -77,7 +78,8 @@ try {
         try {
             Invoke-QualityGate 'build' { & .\build.ps1 }
             if ($Profile -eq 'full') {
-                Invoke-QualityGate 'tests' { & .\tests\run.ps1 }
+                $sourceStartJson = $sourceStart | ConvertTo-Json -Depth 10 -Compress
+                Invoke-QualityGate 'tests' { & .\tests\run.ps1 -TimingReportPath $timingReportPath -QualityGateRunId $runId -QualityGateSourceFingerprintJson $sourceStartJson }
             }
             Invoke-QualityGate 'repo-hygiene' { & .\scripts\quality\check-repo-hygiene.ps1 -ReportUntrackedRuntimeArtifacts }
             if ($AllowDirtyWorktree) {
@@ -131,7 +133,8 @@ try {
         Write-Host ("Gate summary: {0}; total_elapsed_ms={1}" -f (($script:GateResults | ForEach-Object { '{0}={1}ms' -f $_.name, $_.elapsed_ms }) -join ', '), $totalElapsed)
         if ($null -ne $sourceStart -and $null -ne $sourceEnd) {
             try {
-                $receipt = Write-QualityGateImmutableReceipt -ReceiptRoot (Join-Path $root 'reports\quality-gates') -RunId $runId -Profile $Profile -Status $runStatus -SourceStart $sourceStart -SourceEnd $sourceEnd -GateResults @($script:GateResults.ToArray()) -StartedAt $startedAt -CompletedAt ([DateTimeOffset]::UtcNow.ToString('o')) -AllowDirtyWorktree ([bool]$AllowDirtyWorktree) -ErrorMessage $runError
+                $boundTimingReportPath = if ($Profile -eq 'full' -and (Test-Path -LiteralPath $timingReportPath -PathType Leaf)) { $timingReportPath } else { '' }
+                $receipt = Write-QualityGateImmutableReceipt -ReceiptRoot (Join-Path $root 'reports\quality-gates') -RunId $runId -Profile $Profile -Status $runStatus -SourceStart $sourceStart -SourceEnd $sourceEnd -GateResults @($script:GateResults.ToArray()) -StartedAt $startedAt -CompletedAt ([DateTimeOffset]::UtcNow.ToString('o')) -AllowDirtyWorktree ([bool]$AllowDirtyWorktree) -ErrorMessage $runError -TimingReportPath $boundTimingReportPath
                 Write-Host ("quality_gate_receipt={0}; quality_gate_pointer={1}" -f $receipt.receipt_path, $receipt.pointer_path)
             }
             catch {

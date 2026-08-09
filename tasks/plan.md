@@ -3,7 +3,7 @@
 **program_id**: `skills-manager-vnext`
 **current_phase**: `P6`
 **task_truth**: `tasks/skills-manager-vnext-phase6.tasks.json`
-**status**: host_evaluation_partial; 12/12 implemented; runtime migration completed; host_inventory_loaded observed at 122/122 (106/106 managed projection; two previously observed sites skills are external inventory drift); host_invocation_observed not_observed; final full receipt authority is `reports/quality-gates/current.json`; live_accepted not_accepted
+**status**: host_evaluation_partial; 12/12 implemented; runtime migration completed; host_inventory_loaded observed at 122/122 (106/106 managed projection; two previously observed sites skills are external inventory drift); host_invocation_observed not_observed; full status is resolved only from an exact-current-source `reports/quality-gates/current.json` receipt; live_accepted not_accepted
 **next_phase_admission**: n/a; P6 admitted 2026-08-07
 **active_maintenance_track**: maintenance_design
 **maintenance_task_truth**: `tasks/skills-manager-vnext-maintenance-design.tasks.json`

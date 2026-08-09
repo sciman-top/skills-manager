@@ -73,6 +73,60 @@ Describe 'Native invocation trace' {
         (Test-NativeInvocationTraceContract $trace).pass | Should Be $true
     }
 
+    It 'does not combine injection and execution from different skills or correlations' {
+        $events = @(
+            [pscustomobject]@{ event_id = 'evt-injected-a'; kind = 'injected'; skill_name = 'skill-a'; occurred_at = '2026-08-07T06:00:02Z'; correlation_id = 'corr-a' }
+            [pscustomobject]@{ event_id = 'evt-executed-b'; kind = 'executed'; skill_name = 'skill-b'; occurred_at = '2026-08-07T06:00:01Z'; correlation_id = 'corr-b' }
+        )
+        $trace = New-NativeInvocationTrace -TraceId 'trace-mixed-chain' -Surface 'app_server' -Source 'fixture' -Freshness 'fresh' -CapturedAt '2026-08-07T06:00:03Z' -Events $events
+
+        $trace.truth_level | Should Be 'unknown'
+        $trace.invocation_observable | Should Be $false
+        @($trace.findings | Where-Object code -eq 'invocation_chain_missing').Count | Should Be 1
+        (Test-NativeInvocationTraceContract $trace).pass | Should Be $false
+    }
+
+    It 'does not promote execution that occurs before injection in the same chain' {
+        $events = @(
+            [pscustomobject]@{ event_id = 'evt-executed'; kind = 'executed'; skill_name = 'skill-a'; occurred_at = '2026-08-07T06:00:01Z'; correlation_id = 'corr-a' }
+            [pscustomobject]@{ event_id = 'evt-injected'; kind = 'injected'; skill_name = 'skill-a'; occurred_at = '2026-08-07T06:00:02Z'; correlation_id = 'corr-a' }
+        )
+        $trace = New-NativeInvocationTrace -TraceId 'trace-out-of-order' -Surface 'app_server' -Source 'fixture' -Freshness 'fresh' -CapturedAt '2026-08-07T06:00:03Z' -Events $events
+
+        $trace.truth_level | Should Be 'unknown'
+        $trace.invocation_observable | Should Be $false
+        @($trace.findings | Where-Object code -eq 'invocation_stage_order_invalid').Count | Should Be 1
+        (Test-NativeInvocationTraceContract $trace).pass | Should Be $false
+    }
+
+    It 'does not treat another skill abstaining as a conflict with a valid execution chain' {
+        $events = @(
+            [pscustomobject]@{ event_id = 'evt-injected-a'; kind = 'injected'; skill_name = 'skill-a'; occurred_at = '2026-08-07T06:00:01Z'; correlation_id = 'corr-a' }
+            [pscustomobject]@{ event_id = 'evt-executed-a'; kind = 'executed'; skill_name = 'skill-a'; occurred_at = '2026-08-07T06:00:02Z'; correlation_id = 'corr-a' }
+            [pscustomobject]@{ event_id = 'evt-abstained-b'; kind = 'abstained'; skill_name = 'skill-b'; occurred_at = '2026-08-07T06:00:02Z'; correlation_id = 'corr-b' }
+        )
+        $trace = New-NativeInvocationTrace -TraceId 'trace-mixed-outcomes' -Surface 'app_server' -Source 'fixture' -Freshness 'fresh' -CapturedAt '2026-08-07T06:00:03Z' -Events $events
+
+        $trace.truth_level | Should Be 'host_invocation_observed'
+        $trace.invocation_observable | Should Be $true
+        @($trace.findings | Where-Object code -eq 'outcome_conflict').Count | Should Be 0
+        (Test-NativeInvocationTraceContract $trace).pass | Should Be $true
+    }
+
+    It 'does not promote a valid invocation chain when the same trace contains an unknown event' {
+        $events = @(
+            [pscustomobject]@{ event_id = 'evt-injected'; kind = 'injected'; skill_name = 'skill-a'; occurred_at = '2026-08-07T06:00:01Z'; correlation_id = 'corr-a' }
+            [pscustomobject]@{ event_id = 'evt-executed'; kind = 'executed'; skill_name = 'skill-a'; occurred_at = '2026-08-07T06:00:02Z'; correlation_id = 'corr-a' }
+            [pscustomobject]@{ event_id = 'evt-unknown'; kind = 'host-internal-unknown'; skill_name = 'skill-a'; occurred_at = '2026-08-07T06:00:03Z'; correlation_id = 'corr-a' }
+        )
+        $trace = New-NativeInvocationTrace -TraceId 'trace-mixed-unknown' -Surface 'app_server' -Source 'fixture' -Freshness 'fresh' -CapturedAt '2026-08-07T06:00:04Z' -Events $events
+
+        $trace.truth_level | Should Be 'unknown'
+        $trace.invocation_observable | Should Be $false
+        @($trace.findings | Where-Object code -eq 'unknown_event_type').Count | Should Be 1
+        (Test-NativeInvocationTraceContract $trace).pass | Should Be $false
+    }
+
     It 'fails closed on unknown events and redacts correlation and payload secrets' {
         $event = New-TraceEvent 'skill_loaded'
         $event.payload = [pscustomobject]@{ authorization = 'Bearer trace-secret'; args = @('api_key=trace-secret') }

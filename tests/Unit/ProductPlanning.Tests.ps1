@@ -75,10 +75,28 @@ Describe 'vNext product planning contract' {
         $parsed.live_accepted | Should Be 'not_accepted'
     }
 
+    It 'requires a candidate commit before the exact-source full gate and push' {
+        $agentsPath = Join-Path $repoRoot 'AGENTS.md'
+        $content = Get-Content -LiteralPath $agentsPath -Raw
+        $candidate = $content.IndexOf('candidate commit', [StringComparison]::OrdinalIgnoreCase)
+        $full = $content.IndexOf('唯一运行 full gate', [StringComparison]::OrdinalIgnoreCase)
+        $push = $content.IndexOf('推送 `origin/main`', [StringComparison]::OrdinalIgnoreCase)
+
+        $candidate | Should BeGreaterThan -1
+        $full | Should BeGreaterThan $candidate
+        $push | Should BeGreaterThan $full
+        $content | Should Not Match 'full 通过后提交'
+    }
+
     It 'requires current product documents to delegate dynamic truth to the current manifest' {
         $fixtureRoot = New-PlanningFixture 'current-truth-source'
         $truthMarker = 'CURRENT_PHASE_TRUTH_SOURCE: tasks/skills-manager-vnext-phase6.tasks.json'
-        foreach ($relativePath in @('docs\product\README.md', 'docs\product\skills-manager-vnext-roadmap.md')) {
+        foreach ($relativePath in @(
+            'docs\product\README.md',
+            'docs\product\skills-manager-vnext-prd.md',
+            'docs\product\skills-manager-vnext-architecture.md',
+            'docs\product\skills-manager-vnext-roadmap.md'
+        )) {
             $path = Join-Path $fixtureRoot $relativePath
             $content = (Get-Content -LiteralPath $path -Raw).Replace($truthMarker, 'CURRENT_PHASE_TRUTH_SOURCE: tasks/missing-current-phase.tasks.json')
             Set-Content -LiteralPath $path -Value $content -Encoding UTF8
@@ -86,7 +104,21 @@ Describe 'vNext product planning contract' {
 
         $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
 
-        @($parsed.findings | Where-Object code -eq current_truth_source_mismatch).Count | Should Be 2
+        @($parsed.findings | Where-Object code -eq current_truth_source_mismatch).Count | Should Be 4
+        $parsed.pass | Should Be $false
+    }
+
+    It 'requires the tracked manifest to delegate current full status to an exact-source receipt' {
+        $fixtureRoot = New-PlanningFixture 'full-receipt-authority'
+        $path = Join-Path $fixtureRoot $currentManifestRelative
+        $manifest = Get-Content $path -Raw | ConvertFrom-Json
+        $manifest.full_gate = 'passed'
+        $manifest.PSObject.Properties.Remove('full_gate_receipt')
+        $manifest | ConvertTo-Json -Depth 100 | Set-Content $path -Encoding UTF8
+
+        $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
+
+        @($parsed.findings | Where-Object code -eq phase_full_gate_authority_invalid).Count | Should Be 1
         $parsed.pass | Should Be $false
     }
 

@@ -38,6 +38,10 @@ function New-NativeInvocationTraceStage([string]$Name, [object[]]$Events) {
     }
 }
 
+function Get-NativeInvocationTraceEventChainKey($Event) {
+    return ('{0}|{1}' -f ([string]$Event.skill_name).Trim().ToLowerInvariant(), [string]$Event.correlation_id)
+}
+
 function New-NativeInvocationTrace {
     [CmdletBinding()]
     param(
@@ -52,7 +56,6 @@ function New-NativeInvocationTrace {
     $findings = New-Object System.Collections.Generic.List[object]
     $normalizedEvents = New-Object System.Collections.Generic.List[object]
     $allowedStages = @($script:NativeInvocationTraceStages)
-    $unknownEventObserved = $false
     if ($Source -notin @($script:NativeInvocationTraceSources)) { $findings.Add((New-OperationFinding 'trace_source_invalid' 'error' '$.source' 'Trace source is not supported.')) | Out-Null }
     if (-not (Test-OperationRfc3339 $CapturedAt)) { $findings.Add((New-OperationFinding 'captured_at_invalid' 'error' '$.captured_at' 'Trace captured_at must be RFC3339.')) | Out-Null }
 
@@ -63,7 +66,6 @@ function New-NativeInvocationTrace {
         $kind = $rawKind
         if ($allowedStages -notcontains $kind) {
             $findings.Add((New-OperationFinding 'unknown_event_type' 'error' ($path + '.kind') ('Unknown invocation event type: {0}' -f $rawKind))) | Out-Null
-            $unknownEventObserved = $true
             $kind = 'unknown'
         }
         $skillName = ([string](Get-NativeInvocationTraceProperty $event @('skill_name', 'name', 'skill', 'capability_name'))).Trim()
@@ -100,30 +102,63 @@ function New-NativeInvocationTrace {
     $outcome = 'not_observed'
     $bodyInjectionObservable = $hasInjected
     $invocationObservable = $false
+    $validInvocationObserved = $false
+    $invocationChainInvalid = $false
+    $outcomeConflictObserved = $false
 
-    if ($unknownEventObserved) {
-        $truthLevel = 'unknown'
-        $status = 'unknown'
+    $eventArray = @($normalizedEvents.ToArray())
+    for ($executionIndex = 0; $executionIndex -lt $eventArray.Count; $executionIndex++) {
+        $executionEvent = $eventArray[$executionIndex]
+        if ([string]$executionEvent.kind -ne 'executed') { continue }
+
+        $chainKey = Get-NativeInvocationTraceEventChainKey $executionEvent
+        $sameChainInjections = @($eventArray | Where-Object { [string]$_.kind -eq 'injected' -and (Get-NativeInvocationTraceEventChainKey $_) -eq $chainKey })
+        if ($sameChainInjections.Count -eq 0) {
+            $code = if ($hasInjected) { 'invocation_chain_missing' } else { 'executed_without_injection' }
+            $message = if ($hasInjected) { 'Execution cannot be promoted without injection evidence for the same skill and correlation.' } else { 'Execution cannot be promoted without an observed injection event.' }
+            $findings.Add((New-OperationFinding $code 'error' '$.stages.executed' $message)) | Out-Null
+            $invocationChainInvalid = $true
+            continue
+        }
+
+        $executionTime = [DateTimeOffset]::MinValue
+        $executionTimeValid = [DateTimeOffset]::TryParse([string]$executionEvent.occurred_at, [ref]$executionTime)
+        $orderedInjectionObserved = $false
+        for ($injectionIndex = 0; $injectionIndex -lt $executionIndex; $injectionIndex++) {
+            $injectionEvent = $eventArray[$injectionIndex]
+            if ([string]$injectionEvent.kind -ne 'injected' -or (Get-NativeInvocationTraceEventChainKey $injectionEvent) -ne $chainKey) { continue }
+            $injectionTime = [DateTimeOffset]::MinValue
+            if ($executionTimeValid -and [DateTimeOffset]::TryParse([string]$injectionEvent.occurred_at, [ref]$injectionTime) -and $injectionTime -le $executionTime) {
+                $orderedInjectionObserved = $true
+                break
+            }
+        }
+        if (-not $orderedInjectionObserved) {
+            $findings.Add((New-OperationFinding 'invocation_stage_order_invalid' 'error' '$.stages.executed' 'Execution must follow injection for the same skill and correlation.')) | Out-Null
+            $invocationChainInvalid = $true
+            continue
+        }
+
+        $validInvocationObserved = $true
+        if (@($eventArray | Where-Object { [string]$_.kind -eq 'abstained' -and (Get-NativeInvocationTraceEventChainKey $_) -eq $chainKey }).Count -gt 0) {
+            $outcomeConflictObserved = $true
+        }
     }
 
     if ($normalizedEvents.Count -eq 0) {
-        $truthLevel = 'unknown'
-        $status = 'unknown'
         $findings.Add((New-OperationFinding 'trace_events_missing' 'error' '$.events' 'At least one host event is required to establish trace truth.')) | Out-Null
     }
     if ($hasSelected -and -not $hasListed) { $findings.Add((New-OperationFinding 'listing_not_observable' 'warning' '$.stages.listed' 'Selection was observed without a listed event; visibility coverage is partial.')) | Out-Null }
     if ($hasInjected -and -not $hasSelected) { $findings.Add((New-OperationFinding 'selection_not_observable' 'warning' '$.stages.selected' 'Injection was observed without a selected event; selection coverage is partial.')) | Out-Null }
-    if ($hasExecuted -and -not $hasInjected) {
-        $findings.Add((New-OperationFinding 'executed_without_injection' 'error' '$.stages.executed' 'Execution cannot be promoted without an observed injection event.')) | Out-Null
-        $truthLevel = 'unknown'
-        $status = 'unknown'
-    }
-    if ($hasAbstained -and $hasExecuted) {
+    if ($outcomeConflictObserved) {
         $findings.Add((New-OperationFinding 'outcome_conflict' 'error' '$.stages' 'A trace cannot be both abstained and executed.')) | Out-Null
+    }
+    $blockingFindingObserved = @($findings | Where-Object severity -eq 'error').Count -gt 0
+    if ($blockingFindingObserved) {
         $truthLevel = 'unknown'
         $status = 'unknown'
     }
-    elseif ($hasExecuted -and $hasInjected) {
+    elseif ($validInvocationObserved) {
         $truthLevel = if ($Freshness -eq 'fresh') { 'host_invocation_observed' } else { 'unknown' }
         $status = if ($Freshness -eq 'fresh') { 'complete' } else { 'unknown' }
         $outcome = 'executed'

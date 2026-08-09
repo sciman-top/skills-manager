@@ -85,6 +85,13 @@ foreach ($f in $Files) {
 $utf8NoBom = [System.Text.Encoding]::UTF8
 $bom = (New-Object System.Text.UTF8Encoding($true)).GetPreamble()
 $payloadText = ($Content -join "")
+$parseTokens = $null
+$parseErrors = $null
+[System.Management.Automation.Language.Parser]::ParseInput($payloadText, [ref]$parseTokens, [ref]$parseErrors) | Out-Null
+if (@($parseErrors).Count -gt 0) {
+    $details = @($parseErrors | ForEach-Object { '{0} at line {1}, column {2}' -f $_.Message, $_.Extent.StartLineNumber, $_.Extent.StartColumnNumber }) -join '; '
+    throw ("bundle_parse_failed: {0}" -f $details)
+}
 $payload = $utf8NoBom.GetBytes($payloadText)
 $bytes = New-Object byte[] ($bom.Length + $payload.Length)
 [Array]::Copy($bom, 0, $bytes, 0, $bom.Length)

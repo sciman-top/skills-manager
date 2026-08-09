@@ -351,7 +351,6 @@ function New-HostCapabilitySnapshotFromAppServer {
         $config = Get-OperationObjectProperty $config 'config'
     }
     $modelRows = Get-HostCapabilityAdapterRows $modelResponse @('data', 'models')
-    $firstModel = if ($modelRows.Count -gt 0) { $modelRows[0] } else { $null }
     $provider = Get-HostCapabilityAdapterResponseBody $providerResponse
     if ($null -ne $provider -and (Test-OperationObjectProperty $provider 'capabilities')) {
         $provider = Get-OperationObjectProperty $provider 'capabilities'
@@ -375,9 +374,16 @@ function New-HostCapabilitySnapshotFromAppServer {
     }
 
     $model = Get-HostCapabilityAdapterProperty $config @('model', 'model_id', 'modelId')
-    if ($null -eq $model) { $model = Get-HostCapabilityAdapterProperty $firstModel @('id', 'name', 'model', 'model_id', 'modelId') }
+    $effectiveModelRow = $null
+    if ($null -ne $model) {
+        $matchingModels = @($modelRows | Where-Object {
+                $catalogModel = Get-HostCapabilityAdapterProperty $_ @('id', 'name', 'model', 'model_id', 'modelId')
+                -not [string]::IsNullOrWhiteSpace([string]$catalogModel) -and [string]::Equals([string]$catalogModel, [string]$model, [StringComparison]::OrdinalIgnoreCase)
+            } | Select-Object -First 1)
+        if ($matchingModels.Count -gt 0) { $effectiveModelRow = $matchingModels[0] }
+    }
     $contextWindow = Get-HostCapabilityAdapterProperty $config @('context_window', 'model_context_window', 'modelContextWindow')
-    if ($null -eq $contextWindow) { $contextWindow = Get-HostCapabilityAdapterProperty $firstModel @('context_window', 'model_context_window', 'contextWindow', 'modelContextWindow') }
+    if ($null -eq $contextWindow -and $null -ne $effectiveModelRow) { $contextWindow = Get-HostCapabilityAdapterProperty $effectiveModelRow @('context_window', 'model_context_window', 'contextWindow', 'modelContextWindow') }
     $metadataBudget = Get-HostCapabilityAdapterProperty $provider @('metadata_budget', 'metadataBudget', 'skill_metadata_budget', 'skillMetadataBudget')
 
     $inventory = @($skillsRows | ForEach-Object {

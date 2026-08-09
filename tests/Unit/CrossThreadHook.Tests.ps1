@@ -1,8 +1,6 @@
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $hookPath = Join-Path $repoRoot 'scripts\hooks\block-cross-thread-send.ps1'
 $policyPath = Join-Path $repoRoot 'scripts\hooks\CrossThreadGuardPolicy.ps1'
-$targetGenerator = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchHeartbeatPrompt.ps1'
-$fleetGenerator = Join-Path $repoRoot 'overrides\custom\watch-interrupted-task\scripts\New-WatchFleetSupervisorPrompt.ps1'
 . $policyPath
 
 function Invoke-CrossThreadHook {
@@ -64,16 +62,24 @@ function New-CanonicalWatchTranscript {
         [string]$AutomationId = ''
     )
 
-    if ($Role -in @('fleet', 'fleet_shutdown')) {
-        $prompt = if ($Role -ceq 'fleet_shutdown') { & $fleetGenerator -SupervisorThreadId $SessionId -ShutdownWhenAllStopped } else { & $fleetGenerator -SupervisorThreadId $SessionId }
-        if ([string]::IsNullOrWhiteSpace($AutomationId)) { $AutomationId = "watch-interrupted-task-v1-target-thread-id-$SessionId" }
+    if ([string]::IsNullOrWhiteSpace($AutomationId)) { $AutomationId = "watch-interrupted-task-v1-target-thread-id-$SessionId" }
+    $prompt = if ($Role -in @('fleet', 'fleet_shutdown')) {
+        "watch-interrupted-task:fleet:v1 supervisor_thread_id=$SessionId"
     }
     else {
-        $prompt = if ($Role -ceq 'target_shutdown') { & $targetGenerator -TargetThreadId $SessionId -ShutdownManaged } else { & $targetGenerator -TargetThreadId $SessionId }
-        if ([string]::IsNullOrWhiteSpace($AutomationId)) { $AutomationId = "watch-interrupted-task-v1-target-thread-id-$SessionId" }
+        "watch-interrupted-task:v1 target_thread_id=$SessionId"
     }
 
     return New-WatchTurnTranscript -TurnId $TurnId -Text "<heartbeat>`n<automation_id>$AutomationId</automation_id>`n<current_time_iso>2026-08-05T14:08:38.949Z</current_time_iso>`n<instructions>`n$prompt`n</instructions>`n</heartbeat>"
+}
+
+function New-RetiredWatchPromptFixture {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('target', 'fleet')][string]$Role,
+        [Parameter(Mandatory = $true)][string]$SessionId
+    )
+    if ($Role -ceq 'fleet') { return "watch-interrupted-task:fleet:v1 supervisor_thread_id=$SessionId" }
+    return "watch-interrupted-task:v1 target_thread_id=$SessionId"
 }
 
 function Write-TestWatchAutomationMetadata {
@@ -104,7 +110,12 @@ function New-SelfHashedNonCanonicalPrompt {
 
     $normalized = (($CanonicalPrompt -replace "`r`n", "`n") -replace "`r", "`n").TrimEnd()
     $lines = @($normalized -split "`n")
-    $body = [string]::Join("`n", $lines[4..($lines.Count - 1)]) + "`ncaller-authored-extension"
+    $body = if ($lines.Count -ge 5) {
+        [string]::Join("`n", $lines[4..($lines.Count - 1)]) + "`ncaller-authored-extension"
+    }
+    else {
+        "$normalized`ncaller-authored-extension"
+    }
     $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($body)
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {
@@ -175,7 +186,7 @@ Describe 'Cross-thread PreToolUse guard' {
     }
 
     It 'denies canonical and noncanonical cross-target watch creation from heartbeat turns' {
-        $canonicalPrompt = & $targetGenerator -TargetThreadId 'target-test'
+        $canonicalPrompt = New-RetiredWatchPromptFixture -Role target -SessionId 'target-test'
         $fleetTranscript = New-CanonicalWatchTranscript -Role fleet -SessionId 'supervisor-test'
         $valid = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{
             mode = 'create'
@@ -219,7 +230,7 @@ Describe 'Cross-thread PreToolUse guard' {
 
     It 'denies even the former exact ACTIVE-to-PAUSED target update after retirement' {
         $automationId = 'automation-9'
-        $prompt = & $targetGenerator -TargetThreadId 'target-test' -ShutdownManaged
+        $prompt = New-RetiredWatchPromptFixture -Role target -SessionId 'target-test'
         $shutdownTarget = New-CanonicalWatchTranscript -Role target_shutdown -SessionId 'target-test' -AutomationId $automationId
         $ordinaryTarget = New-CanonicalWatchTranscript -Role target -SessionId 'target-test' -AutomationId $automationId
         $fullUpdate = [ordered]@{ mode='update'; id=$automationId; kind='heartbeat'; name='Watch target-test'; prompt=$prompt; rrule='FREQ=MINUTELY;INTERVAL=12'; status='PAUSED'; notificationPolicy='failed_runs_only'; targetThreadId='target-test' }
@@ -252,7 +263,7 @@ Describe 'Cross-thread PreToolUse guard' {
     }
 
     It 'denies fleet heartbeat creation update and delete mutations' {
-        $canonicalPrompt = & $targetGenerator -TargetThreadId 'target-test'
+        $canonicalPrompt = New-RetiredWatchPromptFixture -Role target -SessionId 'target-test'
         $fleetTranscript = New-CanonicalWatchTranscript -Role fleet -SessionId 'supervisor-test'
 
         $allowed = Invoke-CrossThreadHook -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode = 'create'; targetThreadId = 'target-test'; prompt = $canonicalPrompt }) -SessionId 'supervisor-test' -TranscriptPath $fleetTranscript
@@ -434,6 +445,25 @@ text(result);
         }
     }
 
+    It 'blocks call apply bind and template-interpolated high-risk code-mode routes' {
+        foreach ($source in @(
+            'await tools.codex_app__send_message_to_thread.call(null, { threadId: "target-test", prompt: "blocked" });',
+            'await tools.codex_app__automation_update.apply(null, [{ mode: "create", prompt: "watch-interrupted-task:v1 target_thread_id=target-test" }]);',
+            'const sender = tools.codex_app__send_message_to_thread.bind(null); await sender({ threadId: "target-test", prompt: "blocked" });',
+            'const result = `${await tools.codex_app__send_message_to_thread({ threadId: "target-test", prompt: "blocked" })}`; text(result);'
+        )) {
+            $result = Invoke-CrossThreadHook -ToolName 'exec' -ToolInput $source
+            ($result.Output | ConvertFrom-Json).hookSpecificOutput.permissionDecision | Should Be 'deny'
+        }
+    }
+
+    It 'does not treat commented high-risk syntax as executable code-mode access' {
+        $source = '/* tools["codex_app__send_message_to_thread"]({ threadId: "target-test" }); */ text("safe");'
+        $result = Invoke-CrossThreadHook -ToolName 'exec' -ToolInput $source
+
+        $result.Output | Should BeNullOrEmpty
+    }
+
     It 'blocks common shell execution wrappers around app-server thread send' {
         foreach ($command in @(
             'Invoke-Expression ''codex app-server request thread/send --thread target-test''',
@@ -464,7 +494,7 @@ text(result);
     }
 
     It 'does not treat regex-parsed code mode as a trusted automation mutation surface' {
-        $canonicalPrompt = & $targetGenerator -TargetThreadId 'target-test'
+        $canonicalPrompt = New-RetiredWatchPromptFixture -Role target -SessionId 'target-test'
         $encodedPrompt = $canonicalPrompt | ConvertTo-Json -Compress
         $fleetTranscript = New-CanonicalWatchTranscript -Role fleet -SessionId 'supervisor-test'
 

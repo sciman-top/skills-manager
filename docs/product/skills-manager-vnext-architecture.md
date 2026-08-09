@@ -984,9 +984,11 @@ host evaluation 同时记录 cumulative input、cached/uncached input、cache ra
 
 ### P6-012 staged-removal status（2026-08-08，repo_verified）
 
+CURRENT_PHASE_TRUTH_SOURCE: tasks/skills-manager-vnext-phase6.tasks.json
+
 P6-012 已进入 repo-side closeout：默认生成 bundle 不再编入 legacy `SkillRouting`，普通入口不再暴露 `技能配置`/`skill-profile` dispatch；profile compatibility view 保留为 `read_only` 且 `reachability_authority=none`。未生成的 legacy routing source 和 compatibility verifier/test 只作为迁移期回读与回归边界，不能成为当前语义选择或 reachability owner。
 
-当前 fresh CLI 仅能提供 `host_evaluation_partial`，因为 selection、injection 和 body invocation 不可观测；`runtime_migration=not_started`、`host_loaded=not_run`、`live_accepted=not_run`。P6-001 至 P6-012 的 repo-side staged removal 与 single-flight full gate 已通过，阶段为 `repo_verified`；该状态不提升宿主或业务 truth level。
+本节标题和 2026-08-08 full 只保留 point-in-time 架构/历史事实。当前 P6 任务、runtime migration、inventory/evaluation/invocation/live truth 与最新 evidence 动态读取上述 manifest；full 运行态不写回 tracked manifest，只由 `reports/quality-gates/current.json` 的 immutable receipt 证明 `profile=full`、`status=passed` 和 exact-current-source。任何 inventory 或 repo-side 结果都不得提升为 invocation 或业务 acceptance。
 
 ## 11. 安全与供应链
 

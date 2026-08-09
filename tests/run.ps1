@@ -12,12 +12,28 @@ param(
     [ValidateRange(10, 1800)]
     [int]$TestFileTimeoutSeconds = 180,
     [string]$ShardReportRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'reports\test-shards'),
+    [string]$SchedulingTimingPath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'reports\test-timings\current.json'),
     [string[]]$SerialTestFiles = @(),
-    [string[]]$InProcessTestFiles = @('SelectionCancellation.Tests.ps1', 'WatchRuntimeArming.Tests.ps1')
+    [string[]]$InProcessTestFiles = @('SelectionCancellation.Tests.ps1'),
+    [string]$QualityGateRunId = '',
+    [string]$QualityGateSourceFingerprintJson = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $workerPath = Join-Path $PSScriptRoot 'run-pester-test-file.ps1'
+$schedulingScriptPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\quality\TestFileScheduling.ps1'
+. $schedulingScriptPath
+$qualityGateSourceStart = $null
+if (-not [string]::IsNullOrWhiteSpace($QualityGateRunId) -or -not [string]::IsNullOrWhiteSpace($QualityGateSourceFingerprintJson)) {
+    if ($QualityGateRunId -notmatch '^qgr-[A-Za-z0-9][A-Za-z0-9._-]{0,95}$' -or [string]::IsNullOrWhiteSpace($QualityGateSourceFingerprintJson)) {
+        throw 'Quality gate timing binding requires a safe run id and source fingerprint JSON.'
+    }
+    try { $qualityGateSourceStart = $QualityGateSourceFingerprintJson | ConvertFrom-Json -ErrorAction Stop }
+    catch { throw ("Quality gate source fingerprint JSON is invalid: {0}" -f $_.Exception.Message) }
+    foreach ($field in @('repo_root', 'head', 'index_fingerprint', 'tracked_worktree_fingerprint', 'untracked_worktree_fingerprint')) {
+        if ([string]::IsNullOrWhiteSpace([string]$qualityGateSourceStart.$field)) { throw ("Quality gate source fingerprint is missing {0}." -f $field) }
+    }
+}
 
 function Get-TestFiles([string]$Path, [string]$Stage) {
     $files = @(Get-ChildItem -LiteralPath $Path -Recurse -Filter '*.Tests.ps1' -File | Sort-Object FullName)
@@ -125,6 +141,7 @@ function Write-PesterTimingConsole($Profile, [int]$FileLimit, [int]$CaseLimit) {
 
 $unitFiles = Get-TestFiles $UnitTestPath 'unit'
 $e2eFiles = Get-TestFiles $E2ETestPath 'e2e'
+$schedulingTiming = Import-TestFileSchedulingTiming -Path $SchedulingTimingPath
 $runId = '{0}-{1}' -f ([datetimeoffset]::UtcNow.ToString('yyyyMMdd-HHmmss')), ([guid]::NewGuid().ToString('N').Substring(0, 8))
 $runRoot = Join-Path $ShardReportRoot $runId
 New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
@@ -133,11 +150,19 @@ if (-not $requiredPester) { throw 'Pester 4.10.1 is required to run the test sui
 Import-Module Pester -RequiredVersion 4.10.1 -Force | Out-Null
 
 $pending = [Collections.Generic.Queue[object]]::new()
+$schedulingStages = [Collections.Generic.List[object]]::new()
 foreach ($stageSpec in @(
-    @{ stage = 'unit'; files = $unitFiles },
-    @{ stage = 'e2e'; files = $e2eFiles }
+    @{ stage = 'unit'; files = $unitFiles; root = $UnitTestPath },
+    @{ stage = 'e2e'; files = $e2eFiles; root = $E2ETestPath }
 )) {
-    $orderedFiles = @($stageSpec.files | Sort-Object @{ Expression = { if ($InProcessTestFiles -contains $_.Name) { 0 } elseif ($SerialTestFiles -contains $_.Name) { 1 } else { 2 } } }, Name)
+    $schedule = Get-TestFileSchedule -Files @($stageSpec.files) -Stage $stageSpec.stage -RootPath $stageSpec.root -Timing $schedulingTiming `
+        -InProcessTestFiles $InProcessTestFiles -SerialTestFiles $SerialTestFiles
+    $orderedFiles = @($schedule.files)
+    $schedulingStages.Add([pscustomobject][ordered]@{
+        stage = $stageSpec.stage
+        file_count = $schedule.file_count
+        matched_file_count = $schedule.matched_file_count
+    }) | Out-Null
     foreach ($file in $orderedFiles) {
         $safeName = '{0}-{1}' -f $stageSpec.stage, ($file.BaseName -replace '[^A-Za-z0-9_.-]', '_')
         $pending.Enqueue([pscustomobject]@{
@@ -151,6 +176,7 @@ foreach ($stageSpec in @(
         })
     }
 }
+Write-Host ('test_scheduling strategy=historical_lpt source_status={0} matched_files={1} source={2}' -f $schedulingTiming.status, (($schedulingStages | Measure-Object -Property matched_file_count -Sum).Sum), $schedulingTiming.path)
 
 $active = [Collections.Generic.List[object]]::new()
 $receipts = [Collections.Generic.List[object]]::new()
@@ -246,10 +272,19 @@ Write-Host ('Tests completed in {0}ms' -f $suiteTimer.ElapsedMilliseconds)
 Write-Host ('Tests Passed: {0}, Failed: {1}, Skipped: {2}, Pending: {3}, Inconclusive: {4}, Total: {5}' -f $totals.passed, $totals.failed, $totals.skipped, $totals.pending, $totals.inconclusive, $totals.total)
 
 $timingReport = [pscustomobject][ordered]@{
-    schema_version = 2
+    schema_version = 3
     generated_at = [datetimeoffset]::UtcNow.ToString('o')
+    quality_gate_run_id = if ([string]::IsNullOrWhiteSpace($QualityGateRunId)) { $null } else { $QualityGateRunId }
+    quality_gate_source_start = $qualityGateSourceStart
     pester_version = '4.10.1'
     execution_model = 'isolated_file_workers'
+    scheduling = [pscustomobject][ordered]@{
+        strategy = 'historical_lpt'
+        source_status = $schedulingTiming.status
+        source_path = $schedulingTiming.path
+        matched_file_count = [int](($schedulingStages | Measure-Object -Property matched_file_count -Sum).Sum)
+        stages = [object[]]@($schedulingStages.ToArray())
+    }
     max_parallel = $MaxParallel
     test_file_timeout_seconds = $TestFileTimeoutSeconds
     suite_elapsed_ms = $suiteTimer.ElapsedMilliseconds

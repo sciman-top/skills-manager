@@ -43,7 +43,7 @@
 - live 补充探针：仅当 release/host health 验收需要真实网络时，在 full 之后单独运行一次 `pwsh -NoProfile -ExecutionPolicy Bypass -File skills.ps1 doctor --strict --threshold-ms 8000`；它不替代 full，也不触发宿主写入。
 - 脏工作树可显式加 `-AllowDirtyWorktree` 并列明既有改动；该开关不允许忽略本任务生成漂移。
 - build、generated-sync、dependency、doctor 或 Pester 任一失败即阻断；不得手改生成物绕过。
-- Git closeout：full 通过后提交本任务；如 agent 自建临时分支/worktree，则并回 `main`、推送 `origin/main`，再仅清理已合并且干净的本任务分支/worktree；冲突、未知改动/远端漂移、保护策略或门禁失败即阻断。
+- Git closeout：先完成 focused/contract/build，按精确 write set 暂存并创建 candidate commit；确认 candidate HEAD 后，工作树必须 clean，或仅保留已逐项列明且冻结的并发输入并显式使用 `-AllowDirtyWorktree`，且 exact source fingerprint 必须覆盖这些输入；随后唯一运行 full gate，再只运行 current receipt verifier，禁止修改 tracked source；最后按授权推送 `origin/main`。若 full 后必须修复，必须生成新 candidate commit 并重跑 full；如 agent 自建临时分支/worktree，则并回 `main`、推送 `origin/main`，再仅清理已合并且干净的本任务分支/worktree；冲突、未知改动/远端漂移、保护策略或门禁失败即阻断。
 - reviewed 逻辑切片证据放 `docs/change-evidence/`，每个切片默认一份；runtime receipt 放 ignored `reports/`。历史 runtime receipts 只读归档在 `docs/archive/change-evidence/`，不得重新进入活跃账本。
 - 回滚只撤销本次文件和宿主受管块；不得覆盖无关 `imports/**`、audit/MCP 源码或用户改动。
 ## D. Global Rule -> Repo Action

@@ -1040,7 +1040,26 @@ function Get-HostProjectionPromotionContext($cfg, [switch]$AllowUnverified) {
         })
 }
 
-function Get-SkillProjectionPromotionRecord([string]$manifestPath, $promotionContext = $null) {
+function Get-SkillProjectionPlanFingerprint($Plan, $NativeProjectionPlan = $null) {
+    $identity = [ordered]@{
+        enabled = [bool]$Plan.enabled
+        canonical = @($Plan.canonical | Sort-Object name, path | ForEach-Object {
+                [ordered]@{
+                    name = [string]$_.name
+                    path = [IO.Path]::GetFullPath([string]$_.path)
+                    content_hash = [string]$_.content_hash
+                    package_hash = [string]$_.package_hash
+                }
+            })
+        disabled = @($Plan.disabled | Sort-Object name, path | ForEach-Object {
+                [ordered]@{ name = [string]$_.name; path = [IO.Path]::GetFullPath([string]$_.path); decision = [string]$_.decision }
+            })
+        native_plan_id = if ($null -eq $NativeProjectionPlan) { '' } else { [string]$NativeProjectionPlan.plan_id }
+    }
+    return Get-StringSha256 ($identity | ConvertTo-Json -Depth 12 -Compress)
+}
+
+function Get-SkillProjectionPromotionRecord([string]$manifestPath, $promotionContext = $null, [string]$projectionFingerprint = '') {
     if ($null -ne $promotionContext) {
         return [pscustomobject]@{
             source_revision = [string]$promotionContext.source_revision
@@ -1048,6 +1067,7 @@ function Get-SkillProjectionPromotionRecord([string]$manifestPath, $promotionCon
             source_git_state = [string]$promotionContext.source_git_state
             promotion_mode = [string]$promotionContext.promotion_mode
             promoted_at = (Get-Date).ToString("o")
+            provenance_status = "current"
             gate_receipt_status = [string]$promotionContext.gate_receipt_status
             gate_receipt_path = [string]$promotionContext.gate_receipt_path
         }
@@ -1057,6 +1077,19 @@ function Get-SkillProjectionPromotionRecord([string]$manifestPath, $promotionCon
         try {
             $existingManifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
             if ($existingManifest.PSObject.Properties.Match("promotion_mode").Count -gt 0) {
+                $existingFingerprint = if ($existingManifest.PSObject.Properties.Match('projection_fingerprint').Count -gt 0) { [string]$existingManifest.projection_fingerprint } else { '' }
+                if ([string]::IsNullOrWhiteSpace($projectionFingerprint) -or -not [string]::Equals($existingFingerprint, $projectionFingerprint, [StringComparison]::OrdinalIgnoreCase)) {
+                    return [pscustomobject]@{
+                        source_revision = ""
+                        source_worktree_dirty = $true
+                        source_git_state = "not_evaluated_after_projection_change"
+                        promotion_mode = "stale"
+                        promoted_at = ""
+                        provenance_status = "stale"
+                        gate_receipt_status = "stale"
+                        gate_receipt_path = ""
+                    }
+                }
                 $existingGateReceipt = if ($existingManifest.PSObject.Properties.Match("gate_receipt").Count -gt 0) { $existingManifest.gate_receipt } else { $null }
                 return [pscustomobject]@{
                     source_revision = [string]$existingManifest.source_revision
@@ -1064,6 +1097,7 @@ function Get-SkillProjectionPromotionRecord([string]$manifestPath, $promotionCon
                     source_git_state = [string]$existingManifest.source_git_state
                     promotion_mode = [string]$existingManifest.promotion_mode
                     promoted_at = [string]$existingManifest.promoted_at
+                    provenance_status = "current"
                     gate_receipt_status = if ($null -ne $existingGateReceipt) { [string]$existingGateReceipt.status } else { "not_provided" }
                     gate_receipt_path = if ($null -ne $existingGateReceipt) { [string]$existingGateReceipt.path } else { "" }
                 }
@@ -1080,12 +1114,159 @@ function Get-SkillProjectionPromotionRecord([string]$manifestPath, $promotionCon
         source_git_state = "not_evaluated"
         promotion_mode = "not_evaluated"
         promoted_at = ""
+        provenance_status = "not_evaluated"
         gate_receipt_status = "not_provided"
         gate_receipt_path = ""
     }
 }
 
-function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignature = "", $promotionContext = $null) {
+function Get-SkillProjectionFileTransactionSnapshot([string]$Path) {
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    if (Test-PathEntry $fullPath) {
+        Need (Test-Path -LiteralPath $fullPath -PathType Leaf) ("Projection transaction expected a file target: {0}" -f $fullPath)
+        return [pscustomobject]@{ path = $fullPath; existed = $true; bytes = [IO.File]::ReadAllBytes($fullPath) }
+    }
+    return [pscustomobject]@{ path = $fullPath; existed = $false; bytes = [byte[]]@() }
+}
+
+function Restore-SkillProjectionFileTransactionSnapshot($Snapshot) {
+    $path = [IO.Path]::GetFullPath([string]$Snapshot.path)
+    if (-not [bool]$Snapshot.existed) {
+        if (Test-PathEntry $path) {
+            Need (Test-Path -LiteralPath $path -PathType Leaf) ("Projection rollback found non-file drift: {0}" -f $path)
+            Remove-Item -LiteralPath $path -Force
+        }
+        return
+    }
+
+    EnsureDir (Split-Path -Parent $path)
+    $temporaryPath = '{0}.rollback.{1}' -f $path, ([guid]::NewGuid().ToString('N'))
+    try {
+        [IO.File]::WriteAllBytes($temporaryPath, [byte[]]$Snapshot.bytes)
+        Move-Item -LiteralPath $temporaryPath -Destination $path -Force
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath) { Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Get-CodexManagedSkillLinkTransactionSnapshot($projectionCfg, [string]$TargetRoot) {
+    $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
+    $targetRootPath = Resolve-SkillProjectionPath $TargetRoot
+    $rootExisted = Test-Path -LiteralPath $targetRootPath -PathType Container
+    if (Test-PathEntry $targetRootPath) {
+        Need $rootExisted ("Projection target root is not a directory: {0}" -f $targetRootPath)
+    }
+
+    $excluded = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in @($projectionCfg.managed_link_excludes)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$name)) { $excluded.Add(([string]$name).Trim()) | Out-Null }
+    }
+    $affected = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($directory in @(Get-ChildItem -LiteralPath $managedRoot -Directory -Force | Where-Object Name -ne '.system' | Sort-Object Name)) {
+        if ($excluded.Contains($directory.Name)) { continue }
+        $linkPath = [IO.Path]::GetFullPath((Join-Path $targetRootPath $directory.Name))
+        if (Test-PathEntry $linkPath) {
+            Need (Is-ReparsePoint $linkPath) ("Projection target conflict is not a managed junction: {0}" -f $linkPath)
+            $target = Get-ReparsePointTargetFullPath $linkPath
+            Need (-not [string]::IsNullOrWhiteSpace($target)) ("Projection target junction cannot be resolved: {0}" -f $linkPath)
+            $affected[$linkPath] = [pscustomobject]@{ path = $linkPath; existed = $true; target = $target }
+        }
+        else {
+            $affected[$linkPath] = [pscustomobject]@{ path = $linkPath; existed = $false; target = '' }
+        }
+    }
+
+    if ($rootExisted) {
+        $managedPrefix = $managedRoot.TrimEnd('\') + '\'
+        foreach ($entry in @(Get-ChildItem -LiteralPath $targetRootPath -Directory -Force -ErrorAction SilentlyContinue | Where-Object Name -ne '.system')) {
+            if (-not (Is-ReparsePoint $entry.FullName)) { continue }
+            $target = Get-ReparsePointTargetFullPath $entry.FullName
+            if ([string]::IsNullOrWhiteSpace($target) -or -not $target.StartsWith($managedPrefix, [StringComparison]::OrdinalIgnoreCase)) { continue }
+            $linkPath = [IO.Path]::GetFullPath($entry.FullName)
+            if (-not $affected.ContainsKey($linkPath)) {
+                $affected[$linkPath] = [pscustomobject]@{ path = $linkPath; existed = $true; target = $target }
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        managed_root = $managedRoot
+        target_root = $targetRootPath
+        root_existed = $rootExisted
+        entries = @($affected.Values | Sort-Object path)
+    }
+}
+
+function Restore-CodexManagedSkillLinkTransactionSnapshot($Snapshot) {
+    $managedRoot = [IO.Path]::GetFullPath([string]$Snapshot.managed_root)
+    foreach ($state in @($Snapshot.entries | Sort-Object path -Descending)) {
+        $path = [IO.Path]::GetFullPath([string]$state.path)
+        if ([bool]$state.existed) {
+            if (Test-PathEntry $path) {
+                Need (Is-ReparsePoint $path) ("Projection link rollback found non-junction drift: {0}" -f $path)
+                $currentTarget = Get-ReparsePointTargetFullPath $path
+                if ([string]::Equals([string]$currentTarget, [string]$state.target, [StringComparison]::OrdinalIgnoreCase)) { continue }
+                Invoke-RemoveItem $path -Recurse
+            }
+            New-Junction $path ([string]$state.target) -QuietIfUnchanged
+            continue
+        }
+
+        if (Test-PathEntry $path) {
+            Need (Is-ReparsePoint $path) ("Projection link rollback found unexpected non-junction state: {0}" -f $path)
+            $currentTarget = Get-ReparsePointTargetFullPath $path
+            Need (-not [string]::IsNullOrWhiteSpace($currentTarget) -and (Is-PathInsideOrEqual $currentTarget $managedRoot)) ("Projection link rollback refused an unrelated junction: {0}" -f $path)
+            Invoke-RemoveItem $path -Recurse
+        }
+    }
+
+    $targetRoot = [IO.Path]::GetFullPath([string]$Snapshot.target_root)
+    if (-not [bool]$Snapshot.root_existed -and (Test-Path -LiteralPath $targetRoot -PathType Container) -and @(Get-ChildItem -LiteralPath $targetRoot -Force).Count -eq 0) {
+        Remove-Item -LiteralPath $targetRoot -Force
+    }
+}
+
+function New-CodexSkillProjectionTransaction($projectionCfg, [string]$ConfigPath, [string]$ManifestPath) {
+    $filePaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $filePaths.Add([IO.Path]::GetFullPath($ConfigPath)) | Out-Null
+    $filePaths.Add([IO.Path]::GetFullPath($ManifestPath)) | Out-Null
+    $filePaths.Add([IO.Path]::GetFullPath((Resolve-SkillProfileReconciliationSignalPath $projectionCfg $ManifestPath))) | Out-Null
+
+    $managedRoot = ''
+    if ($projectionCfg.PSObject.Properties.Match('managed_source_path').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$projectionCfg.managed_source_path)) {
+        $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
+        $filePaths.Add([IO.Path]::GetFullPath((Join-Path $managedRoot 'capability-router\catalog.json'))) | Out-Null
+    }
+    $nativeSettings = Get-CfgObjectProperty $projectionCfg 'native_projection'
+    if ($null -ne $nativeSettings -and -not [string]::IsNullOrWhiteSpace([string](Get-CfgObjectProperty $nativeSettings 'receipt_path'))) {
+        $filePaths.Add([IO.Path]::GetFullPath((Resolve-SkillProjectionPath ([string](Get-CfgObjectProperty $nativeSettings 'receipt_path'))))) | Out-Null
+    }
+
+    $linkSnapshots = New-Object Collections.Generic.List[object]
+    if (-not [string]::IsNullOrWhiteSpace($managedRoot) -and (Test-Path -LiteralPath $managedRoot -PathType Container)) {
+        $targetRoots = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        if ($projectionCfg.PSObject.Properties.Match('user_skill_root').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$projectionCfg.user_skill_root)) {
+            $userSkillRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.user_skill_root)
+            $targetRoots.Add($userSkillRoot) | Out-Null
+        }
+        if ($null -ne $nativeSettings -and [bool](Get-CfgObjectProperty $nativeSettings 'enabled') -and -not [string]::IsNullOrWhiteSpace([string](Get-CfgObjectProperty $nativeSettings 'target_root'))) {
+            $nativeTargetRoot = Resolve-SkillProjectionPath ([string](Get-CfgObjectProperty $nativeSettings 'target_root'))
+            $targetRoots.Add($nativeTargetRoot) | Out-Null
+        }
+        foreach ($targetRoot in @($targetRoots | Sort-Object)) {
+            $linkSnapshots.Add((Get-CodexManagedSkillLinkTransactionSnapshot $projectionCfg $targetRoot)) | Out-Null
+        }
+    }
+
+    return [pscustomobject]@{
+        file_snapshots = @($filePaths | Sort-Object | ForEach-Object { Get-SkillProjectionFileTransactionSnapshot $_ })
+        link_snapshots = @($linkSnapshots.ToArray())
+        config_backup_path = ''
+    }
+}
+
+function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBuildSignature = "", $promotionContext = $null, $transaction = $null) {
     $configRaw = if ($projectionCfg.PSObject.Properties.Match("codex_config_path").Count -gt 0) { [string]$projectionCfg.codex_config_path } else { "~/.codex/config.toml" }
     $manifestRaw = if ($projectionCfg.PSObject.Properties.Match("manifest_path").Count -gt 0) { [string]$projectionCfg.manifest_path } else { "reports/skill-projection/current.json" }
     $configPath = Resolve-SkillProjectionPath $configRaw
@@ -1158,18 +1339,22 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
             $writtenBackupPath = $null
             if ($changed) {
                 $writtenBackupPath = Backup-CodexSkillProjectionConfig $configPath
+                if ($null -ne $transaction) { $transaction.config_backup_path = if ($null -eq $writtenBackupPath) { '' } else { [string]$writtenBackupPath } }
                 Set-ContentUtf8 $configPath $desired
             }
-            $promotion = Get-SkillProjectionPromotionRecord $manifestPath $promotionContext
+            $projectionFingerprint = Get-SkillProjectionPlanFingerprint $plan $nativeProjectionPlan
+            $promotion = Get-SkillProjectionPromotionRecord $manifestPath $promotionContext $projectionFingerprint
             $manifest = [ordered]@{
                 schema_version = 2
                 package_hash_cache_schema = Get-SkillProjectionPackageHashCacheSchemaVersion
                 agent_build_signature = $verifiedBuildSignature
+                projection_fingerprint = $projectionFingerprint
                 source_revision = [string]$promotion.source_revision
                 source_worktree_dirty = [bool]$promotion.source_worktree_dirty
                 source_git_state = [string]$promotion.source_git_state
                 promotion_mode = [string]$promotion.promotion_mode
                 promoted_at = [string]$promotion.promoted_at
+                provenance_status = [string]$promotion.provenance_status
                 gate_receipt = [ordered]@{
                     status = [string]$promotion.gate_receipt_status
                     path = [string]$promotion.gate_receipt_path
@@ -1257,6 +1442,39 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
             full_hash_ms = [int]$packageHashContext.full_hash_ms
         }
         plan = $plan
+    }
+}
+
+function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignature = "", $promotionContext = $null) {
+    if ($DryRun) { return Invoke-CodexSkillProjectionSyncCore $projectionCfg $verifiedBuildSignature $promotionContext }
+
+    $configRaw = if ($projectionCfg.PSObject.Properties.Match('codex_config_path').Count -gt 0) { [string]$projectionCfg.codex_config_path } else { '~/.codex/config.toml' }
+    $manifestRaw = if ($projectionCfg.PSObject.Properties.Match('manifest_path').Count -gt 0) { [string]$projectionCfg.manifest_path } else { 'reports/skill-projection/current.json' }
+    $transaction = New-CodexSkillProjectionTransaction $projectionCfg (Resolve-SkillProjectionPath $configRaw) (Resolve-SkillProjectionPath $manifestRaw)
+    try {
+        $result = Invoke-CodexSkillProjectionSyncCore $projectionCfg $verifiedBuildSignature $promotionContext $transaction
+        $result | Add-Member -NotePropertyName transaction_status -NotePropertyValue 'committed' -Force
+        return $result
+    }
+    catch {
+        $failure = $_
+        $rollbackErrors = New-Object Collections.Generic.List[string]
+        foreach ($snapshot in @($transaction.link_snapshots | Sort-Object target_root -Descending)) {
+            try { Restore-CodexManagedSkillLinkTransactionSnapshot $snapshot }
+            catch { $rollbackErrors.Add($_.Exception.Message) | Out-Null }
+        }
+        foreach ($snapshot in @($transaction.file_snapshots | Sort-Object path -Descending)) {
+            try { Restore-SkillProjectionFileTransactionSnapshot $snapshot }
+            catch { $rollbackErrors.Add($_.Exception.Message) | Out-Null }
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$transaction.config_backup_path) -and (Test-Path -LiteralPath ([string]$transaction.config_backup_path) -PathType Leaf)) {
+            try { Remove-Item -LiteralPath ([string]$transaction.config_backup_path) -Force }
+            catch { $rollbackErrors.Add($_.Exception.Message) | Out-Null }
+        }
+        if ($rollbackErrors.Count -gt 0) {
+            throw ("Skill projection sync failed and aggregate rollback was incomplete. original={0}; rollback={1}" -f $failure.Exception.Message, ($rollbackErrors -join ' | '))
+        }
+        throw $failure
     }
 }
 

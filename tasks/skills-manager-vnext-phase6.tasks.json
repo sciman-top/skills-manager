@@ -5,7 +5,13 @@
   "phase_sequence": ["P0", "P1", "P2", "P3", "P4", "P5", "P6"],
   "allowed_statuses": ["pending", "in_progress", "blocked", "deferred", "done"],
   "truth_level": "host_evaluation_partial",
-  "full_gate": "passed",
+  "full_gate": "receipt_authoritative",
+  "full_gate_receipt": {
+    "pointer": "reports/quality-gates/current.json",
+    "required_profile": "full",
+    "required_status": "passed",
+    "source_binding": "exact_current_source"
+  },
   "runtime_migration": "completed",
   "host_inventory_loaded": "observed",
   "host_evaluation": "host_evaluation_partial",

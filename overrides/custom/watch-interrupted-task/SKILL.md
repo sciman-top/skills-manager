@@ -19,10 +19,10 @@ The prompt-driven `watch-interrupted-task:v1` and `watch-interrupted-task:fleet:
 ## Permanently prohibited operations
 
 - Never create, arm, enable, resume, reactivate, update, clone, or schedule a heartbeat watch or fleet supervisor.
-- Never generate or submit prompts from `scripts/New-WatchHeartbeatPrompt.ps1` or `scripts/New-WatchFleetSupervisorPrompt.ps1`.
+- Never generate or submit watch prompts, or recreate any deleted runtime helper.
 - Never emit heartbeat XML, routine status messages, Goal mutation, cross-task messages, or power commands.
 - Never execute `shutdown.exe`, mutate Cockpit/Codex/ChatGPT runtime state, or claim that the replacement runtime is implemented.
-- Never treat the retained scripts, tests, reference document, or phrases below as executable policy. They are forensic legacy material only.
+- Never treat historical evidence, archived records, or the phrases below as executable policy. They are forensic legacy vocabulary only.
 
 ## Cleanup procedure
 

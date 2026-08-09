@@ -70,6 +70,36 @@ Describe 'Host capability adapters' {
         (Test-HostCapabilitySnapshotContract $snapshot).pass | Should Be $true
     }
 
+    It 'does not infer an effective model from catalog ordering' {
+        $responses = [pscustomobject]@{
+            config_read = [pscustomobject]@{}
+            model_list = [pscustomobject]@{
+                data = @([pscustomobject]@{ id = 'catalog-first'; context_window = 111000 }, [pscustomobject]@{ id = 'catalog-second'; context_window = 222000 })
+            }
+        }
+
+        $snapshot = New-HostCapabilitySnapshotFromAppServer -Responses $responses -Surface 'app_server' -CapturedAt '2026-08-07T04:00:00Z'
+
+        $snapshot.capabilities.model.value | Should BeNullOrEmpty
+        $snapshot.capabilities.context_window.value | Should BeNullOrEmpty
+        (Test-HostCapabilitySnapshotContract $snapshot).pass | Should Be $true
+    }
+
+    It 'uses the model-matching catalog row when config omits only context window' {
+        $responses = [pscustomobject]@{
+            config_read = [pscustomobject]@{ model = 'catalog-second' }
+            model_list = [pscustomobject]@{
+                data = @([pscustomobject]@{ id = 'catalog-first'; context_window = 111000 }, [pscustomobject]@{ id = 'catalog-second'; context_window = 222000 })
+            }
+        }
+
+        $snapshot = New-HostCapabilitySnapshotFromAppServer -Responses $responses -Surface 'app_server' -CapturedAt '2026-08-07T04:00:00Z'
+
+        $snapshot.capabilities.model.value | Should Be 'catalog-second'
+        $snapshot.capabilities.context_window.value | Should Be 222000
+        (Test-HostCapabilitySnapshotContract $snapshot).pass | Should Be $true
+    }
+
     It 'flattens the Codex 0.146 skills list response by cwd' {
         $responses = [pscustomobject]@{
             skills_list = [pscustomobject]@{

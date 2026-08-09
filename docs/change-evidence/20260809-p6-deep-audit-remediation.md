@@ -128,8 +128,12 @@ had no separate invocation field and still accepted `live_accepted=failed`.
   `host_evaluation=host_evaluation_partial`,
   `host_invocation_observed=not_observed`, and
   `live_accepted=not_accepted`.
-- Because this remediation changes executable/config/test inputs, the manifest
-  records `full_gate=stale` until the single final full run.
+- At this historical checkpoint, because the remediation changed
+  executable/config/test inputs, the manifest temporarily recorded
+  `full_gate=stale` until the single final full run. The later
+  receipt-authority contract superseded that transient field: the current
+  tracked manifest delegates full status to the exact-current-source receipt
+  and its `reports/quality-gates/current.json` pointer.
 - The generic planning verifier rejects inventory-to-invocation promotion and
   rejects `failed` as a substitute for missing live observability.
 
@@ -260,8 +264,10 @@ were identical:
 
 The pointer hash matches the immutable receipt, `source_comparison.pass=true`,
 and all 16 gate rows are present. This quick receipt validates integration but
-does not replace the final full gate; the current manifest remains
-`full_gate=stale`.
+does not replace the final full gate. At that historical point the manifest
+still used the temporary `full_gate=stale` hold; the current manifest instead
+uses `full_gate=receipt_authoritative` and delegates status to the exact-current
+source receipt.
 
 ## Slice E: pairwise activation risks and dynamic product truth
 
@@ -445,6 +451,47 @@ and the manifest truth are stable. That receipt must independently prove
 17/17 gates passed, source start/end parity (including non-ignored untracked
 files), and pointer hash parity. This ledger does not promote inventory to
 selection, full body injection, invocation, or live business acceptance.
+
+## Slice I: final deep-audit convergence and current gate boundary
+
+The final review of the accumulated P6 changes found two consistency defects
+outside the runtime path: the closeout rule ordered the full gate before the
+candidate commit even though the receipt binds to exact current source, and
+this ledger repeated the obsolete `full_gate=stale` snapshot as if it were
+current. Both were repaired with a focused contract test and a documentation
+update.
+
+The same review rechecked the high-risk implementation seams:
+
+- the retired watch runtime has no active recovery helper, mutation path or
+  runtime generation surface; the remaining hook is a bounded cross-thread
+  guard and is documented as defense-in-depth only;
+- native trace and host adapter states keep inventory, evaluation, invocation
+  and live acceptance separate, and any trace error blocks truth promotion;
+- native skill projection keeps aggregate rollback and provenance together;
+- quality receipts use schema v2, immutable per-run files, exact source
+  binding, gate-row semantics and timing-report binding;
+- ordinary parallel test workers use measured longest-processing-time ordering
+  from `reports/test-timings/current.json`, with stable filename fallback and
+  unchanged serial barriers/max parallelism.
+
+Focused evidence for the corrected seams is:
+
+- `ProductPlanning.Tests.ps1`: RED `17 passed / 1 failed`, then GREEN `18/18`;
+- `QualityGateIntegrity.Tests.ps1`: `6/6`;
+- `QualityGateScripts.Tests.ps1`: `32/32`;
+- `HostNativeSkillLifecycleCloseout.Tests.ps1`: `4/4`;
+- `NativeInvocationTrace.Tests.ps1`: `9/9`;
+- modified PowerShell parser sweep: `23/23`, and `git diff --check`: exit `0`.
+
+The current receipt verifier still intentionally rejects the legacy pointer
+`qgr-20260809-052523-8da64429` with five findings: pointer schema v1,
+receipt schema v1, invalid source binding, missing full timing binding and
+stale exact-current source. Therefore the repository-side remediation and
+planning contract are synchronized, but the final candidate full gate has
+not yet been run or accepted. Current truth remains
+`host_inventory_loaded=observed`, `host_evaluation=host_evaluation_partial`,
+`host_invocation_observed=not_observed`, and `live_accepted=not_accepted`.
 
 ## Rollback
 
