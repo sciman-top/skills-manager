@@ -240,15 +240,47 @@ Describe "Quality gate scripts" {
         }
     }
 
-    It "fails fast when another full gate already owns the repository" {
+    It "serializes one repository without blocking a different repository" {
         $root = Join-Path $PSScriptRoot "..\.."
-        $gate = Get-Content -LiteralPath (Join-Path $root 'scripts\quality\run-local-quality-gates.ps1') -Raw
+        function New-GatePeerFixture([string]$Name, [int]$BuildDelaySeconds) {
+            $fixtureRoot = Join-Path $TestDrive $Name
+            $qualityRoot = Join-Path $fixtureRoot 'scripts\quality'
+            New-Item -ItemType Directory -Path $qualityRoot -Force | Out-Null
+            Copy-Item -LiteralPath (Join-Path $root 'scripts\quality\run-local-quality-gates.ps1') -Destination $qualityRoot
+            Copy-Item -LiteralPath (Join-Path $root 'scripts\quality\QualityGateIntegrity.ps1') -Destination $qualityRoot
+            Set-Content -LiteralPath (Join-Path $fixtureRoot '.gitignore') -Value 'reports/' -Encoding UTF8
+            Set-Content -LiteralPath (Join-Path $fixtureRoot 'tracked.txt') -Value 'fixture' -Encoding UTF8
+            Set-Content -LiteralPath (Join-Path $fixtureRoot 'build.ps1') -Value ("Start-Sleep -Seconds {0}" -f $BuildDelaySeconds) -Encoding UTF8
+            git -C $fixtureRoot init -q
+            git -C $fixtureRoot config user.email 'quality-gate@example.invalid'
+            git -C $fixtureRoot config user.name 'Quality Gate Test'
+            git -C $fixtureRoot add .
+            git -C $fixtureRoot commit -qm 'fixture'
+            return $fixtureRoot
+        }
 
-        $gate | Should Match 'quality_gate_peer_busy'
-        $gate | Should Match 'System\.Threading\.Mutex'
-        $gate | Should Match 'WaitOne\(0\)'
-        $gate | Should Match 'Win32_Process'
-        $gate | Should Match 'exit 75'
+        $ownedRoot = New-GatePeerFixture 'quality-gate-owned' 5
+        $otherRoot = New-GatePeerFixture 'quality-gate-other' 0
+        $ownedRunner = Join-Path $ownedRoot 'scripts\quality\run-local-quality-gates.ps1'
+        $ownerOut = Join-Path $TestDrive 'owner.out.log'
+        $ownerErr = Join-Path $TestDrive 'owner.err.log'
+        $owner = Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $ownedRunner), '-Profile', 'quick') -PassThru -WindowStyle Hidden -RedirectStandardOutput $ownerOut -RedirectStandardError $ownerErr
+        try {
+            Start-Sleep -Milliseconds 750
+            $sameOutput = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $ownedRunner -Profile quick 2>&1)
+            $sameExit = $LASTEXITCODE
+            $otherOutput = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $otherRoot 'scripts\quality\run-local-quality-gates.ps1') -Profile quick 2>&1)
+            $otherExit = $LASTEXITCODE
+
+            $sameExit | Should Be 75
+            ($sameOutput -join "`n") | Should Match 'quality_gate_peer_busy'
+            $otherExit | Should Not Be 75
+            ($otherOutput -join "`n") | Should Not Match 'quality_gate_peer_busy'
+        }
+        finally {
+            if (-not $owner.HasExited) { $owner.WaitForExit(10000) | Out-Null }
+            $owner.Dispose()
+        }
     }
 
     It "fails closed when either Pester stage discovers zero tests" {

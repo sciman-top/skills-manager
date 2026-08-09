@@ -18,18 +18,6 @@ function Get-QualityGateMutexName([string]$RepoRoot) {
     return "Local\skills-manager-quality-gate-$($hash.Substring(0, 24))"
 }
 
-function Get-OlderQualityGateProcesses {
-    $current = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $PID)
-    $currentStarted = if ($current.CreationDate -is [datetime]) { [datetime]$current.CreationDate } else { [Management.ManagementDateTimeConverter]::ToDateTime([string]$current.CreationDate) }
-    return @(Get-CimInstance Win32_Process | Where-Object {
-        $_.ProcessId -ne $PID -and
-        $_.Name -eq 'pwsh.exe' -and
-        $_.CommandLine -notmatch '(?i)\s-Command\s' -and
-        $_.CommandLine -match '(?i)-File\s+"?[^"\s]*run-local-quality-gates\.ps1' -and
-        $(if ($_.CreationDate -is [datetime]) { [datetime]$_.CreationDate } else { [Management.ManagementDateTimeConverter]::ToDateTime([string]$_.CreationDate) }) -lt $currentStarted
-    })
-}
-
 function Invoke-QualityGate([string]$Name, [scriptblock]$Action) {
     Write-Host ""
     Write-Host ("== {0} ==" -f $Name)
@@ -66,12 +54,6 @@ try {
         [Console]::Error.WriteLine('quality_gate_peer_busy: another quality gate owns this repository')
         exit 75
     }
-    $olderPeers = @(Get-OlderQualityGateProcesses)
-    if ($olderPeers.Count -gt 0) {
-        [Console]::Error.WriteLine(("quality_gate_peer_busy: older gate pid={0}" -f (($olderPeers.ProcessId | Sort-Object) -join ',')))
-        exit 75
-    }
-
     Push-Location $root
     try {
     $runId = 'qgr-{0}-{1}' -f ([DateTimeOffset]::UtcNow.ToString('yyyyMMdd-HHmmss')), ([guid]::NewGuid().ToString('N').Substring(0, 8))
