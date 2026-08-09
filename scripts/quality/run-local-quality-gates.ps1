@@ -10,6 +10,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 . (Join-Path $PSScriptRoot 'QualityGateIntegrity.ps1')
 $script:GateResults = [Collections.Generic.List[object]]::new()
+$script:QualityGateSourceStart = $null
 
 function Get-QualityGateMutexName([string]$RepoRoot) {
     $bytes = [Text.Encoding]::UTF8.GetBytes(([System.IO.Path]::GetFullPath($RepoRoot)).ToLowerInvariant())
@@ -41,6 +42,13 @@ function Invoke-QualityGate([string]$Name, [scriptblock]$Action) {
             throw ("Quality gate failed: {0} (exit={1})" -f $Name, $LASTEXITCODE)
         }
         $passed = $true
+        if ($null -ne $script:QualityGateSourceStart) {
+            $checkpoint = Get-QualityGateSourceFingerprint -RepoRoot $root
+            $checkpointComparison = Compare-QualityGateSourceFingerprint -Start $script:QualityGateSourceStart -End $checkpoint
+            if (-not $checkpointComparison.pass) {
+                throw ("Quality gate source drift after {0}: {1}" -f $Name, (($checkpointComparison.changed_fields) -join ', '))
+            }
+        }
     }
     finally {
         $stopwatch.Stop()
@@ -75,6 +83,7 @@ try {
     $runExitCode = 1
     $runError = ''
     $sourceStart = Get-QualityGateSourceFingerprint -RepoRoot $root
+    $script:QualityGateSourceStart = $sourceStart
         try {
             Invoke-QualityGate 'build' { & .\build.ps1 }
             if ($Profile -eq 'full') {

@@ -103,6 +103,41 @@ Describe "Quality gate scripts" {
         }
     }
 
+    It "stops before the next gate when source drifts after a successful gate" {
+        $root = Join-Path $PSScriptRoot "..\.."
+        $fixtureRoot = Join-Path $TestDrive 'quality-gate-early-drift'
+        $qualityRoot = Join-Path $fixtureRoot 'scripts\quality'
+        New-Item -ItemType Directory -Path $qualityRoot -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $root 'scripts\quality\run-local-quality-gates.ps1') -Destination $qualityRoot
+        Copy-Item -LiteralPath (Join-Path $root 'scripts\quality\QualityGateIntegrity.ps1') -Destination $qualityRoot
+        Set-Content -LiteralPath (Join-Path $fixtureRoot '.gitignore') -Value 'reports/' -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $fixtureRoot 'tracked.txt') -Value 'before-build' -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $fixtureRoot 'build.ps1') -Value "Set-Content -LiteralPath (Join-Path `$PSScriptRoot 'tracked.txt') -Value 'after-build' -Encoding UTF8" -Encoding UTF8
+
+        Push-Location $fixtureRoot
+        try {
+            git init -q
+            git config user.email 'quality-gate@example.invalid'
+            git config user.name 'Quality Gate Test'
+            git add .
+            git commit -qm 'fixture'
+
+            $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File '.\scripts\quality\run-local-quality-gates.ps1' -Profile quick 2>&1)
+            $exitCode = $LASTEXITCODE
+            $pointer = Get-Content -LiteralPath (Join-Path $fixtureRoot 'reports\quality-gates\current.json') -Raw | ConvertFrom-Json
+            $receipt = Get-Content -LiteralPath $pointer.receipt_path -Raw | ConvertFrom-Json
+
+            $exitCode | Should Be 78
+            $receipt.status | Should Be 'source_drift'
+            @($receipt.gates).Count | Should Be 1
+            $receipt.gates[0].name | Should Be 'build'
+            ($output -join "`n") | Should Not Match '== repo-hygiene =='
+        }
+        finally {
+            Pop-Location
+        }
+    }
+
     It "fails closed on workspace-to-lock commit drift during full gate" {
         $root = Join-Path $PSScriptRoot "..\.."
         $gate = Get-Content -LiteralPath (Join-Path $root 'scripts\quality\run-local-quality-gates.ps1') -Raw
