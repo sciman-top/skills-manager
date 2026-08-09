@@ -16,7 +16,6 @@ $hostScripts = Join-Path $resolvedCodexHome 'scripts'
 $hostHook = Join-Path $hostScripts 'block-cross-thread-send.ps1'
 $hostPolicy = Join-Path $hostScripts 'CrossThreadGuardPolicy.ps1'
 $hooksPath = Join-Path $resolvedCodexHome 'hooks.json'
-$legacyDoctor = Join-Path $hostScripts 'Test-WatchGuardRuntime.ps1'
 
 $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedSource).Hash.ToLowerInvariant()
 $policyHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedPolicy).Hash.ToLowerInvariant()
@@ -68,7 +67,7 @@ $guardGroup = [pscustomobject]@{
         command = $command
         commandWindows = $command
         timeout = 10
-        statusMessage = 'Blocking cross-task injection and retired watch lifecycle mutations'
+        statusMessage = 'Blocking cross-task injection, automation mutation, and power mutation'
     })
 }
 $document.hooks.PreToolUse = @($retained) + @($guardGroup)
@@ -82,11 +81,8 @@ $stagedHooksJson = "$hooksPath.$nonce.tmp"
 
 $hostHookExisted = Test-Path -LiteralPath $hostHook -PathType Leaf
 $hostPolicyExisted = Test-Path -LiteralPath $hostPolicy -PathType Leaf
-$legacyDoctorExisted = Test-Path -LiteralPath $legacyDoctor -PathType Leaf
 $originalHostHookBytes = if ($hostHookExisted) { [System.IO.File]::ReadAllBytes($hostHook) } else { $null }
 $originalHostPolicyBytes = if ($hostPolicyExisted) { [System.IO.File]::ReadAllBytes($hostPolicy) } else { $null }
-$originalLegacyDoctorBytes = if ($legacyDoctorExisted) { [System.IO.File]::ReadAllBytes($legacyDoctor) } else { $null }
-$removeLegacyDoctor = $false
 
 try {
     Copy-Item -LiteralPath $resolvedSource -Destination $stagedHook
@@ -112,11 +108,6 @@ catch {
     }
     catch { $rollbackErrors.Add(('host_policy: {0}' -f $_.Exception.Message)) | Out-Null }
     try {
-        if ($legacyDoctorExisted) { [System.IO.File]::WriteAllBytes($legacyDoctor, $originalLegacyDoctorBytes) }
-        elseif (Test-Path -LiteralPath $legacyDoctor) { Remove-Item -LiteralPath $legacyDoctor -Force }
-    }
-    catch { $rollbackErrors.Add(('legacy_doctor: {0}' -f $_.Exception.Message)) | Out-Null }
-    try {
         if ($hooksExisted) { [System.IO.File]::WriteAllBytes($hooksPath, $originalHooksBytes) }
         elseif (Test-Path -LiteralPath $hooksPath) { Remove-Item -LiteralPath $hooksPath -Force }
     }
@@ -130,8 +121,7 @@ finally {
 
 [pscustomobject]@{
     status = 'installed_untrusted'
-    policy_revision = 5
-    watch_runtime_status = 'retired_fail_closed'
+    policy_revision = 6
     hooks_path = $hooksPath
     host_hook_path = $hostHook
     host_policy_path = $hostPolicy
@@ -139,7 +129,5 @@ finally {
     host_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $hostHook).Hash.ToLowerInvariant()
     policy_source_sha256 = $policyHash
     policy_host_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $hostPolicy).Hash.ToLowerInvariant()
-    legacy_doctor_removed = $removeLegacyDoctor
-    legacy_doctor_cleanup_status = if ($legacyDoctorExisted) { 'manual_review_required' } else { 'not_present' }
     trust_next_step = 'Open /hooks in a fresh Codex session and trust the exact current definition hash.'
 }

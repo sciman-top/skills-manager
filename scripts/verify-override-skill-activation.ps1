@@ -19,7 +19,6 @@ if (($declaredCategories -join "|") -ne ($expectedCategories -join "|")) {
 $targetNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 foreach ($nameValue in @($corpus.target_skills)) {
     $name = [string]$nameValue
-    if ($name -eq "watch-interrupted-task") { Add-Finding "watch-interrupted-task is frozen and must not enter this corpus" }
     if (-not $targetNames.Add($name)) { Add-Finding "duplicate target skill: $name" }
 }
 
@@ -67,4 +66,4 @@ if ($findings.Count -gt 0) {
     throw ("override activation corpus verification failed with {0} finding(s)" -f $findings.Count)
 }
 
-Write-Host ("Override activation corpus OK: targets={0}, cases={1}, watch=excluded" -f $targetNames.Count, $ids.Count) -ForegroundColor Green
+Write-Host ("Override activation corpus OK: targets={0}, cases={1}" -f $targetNames.Count, $ids.Count) -ForegroundColor Green

@@ -8,8 +8,7 @@
     "managed_source_path": "agent",
     "user_skill_root": "~/.agents/skills",
     "managed_link_excludes": [
-      "anthropics-skills-skills-skill-creator",
-      "watch-interrupted-task"
+      "anthropics-skills-skills-skill-creator"
     ],
     "budget_limit_chars": 8000,
     "external_metadata_reserve_chars": 3500,

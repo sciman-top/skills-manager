@@ -142,60 +142,6 @@ function Test-ReadOnlyInspectionSegment {
     return $true
 }
 
-function Get-WatchTurnText {
-    param([Parameter(Mandatory = $true)][object]$Payload)
-    $turnText = Get-InputProperty -InputObject $Payload -Names @('__watch_turn_text')
-    if ($turnText -isnot [string] -or [string]::IsNullOrWhiteSpace([string]$turnText)) { return $null }
-    return [string]$turnText
-}
-
-function Test-RetiredWatchHeartbeatTurn {
-    param([Parameter(Mandatory = $true)][object]$Payload)
-    $text = Get-WatchTurnText -Payload $Payload
-    return -not [string]::IsNullOrWhiteSpace($text) -and $text -match '(?is)<heartbeat>.*?</heartbeat>'
-}
-
-function Get-RetiredWatchTargetId {
-    param([AllowNull()][object]$ToolInput)
-
-    $id = [string](Get-InputProperty -InputObject $ToolInput -Names @('id'))
-    if ($id -match '^watch-interrupted-task-v1-target-thread-id-([A-Za-z0-9][A-Za-z0-9._:-]{0,255})$') { return $Matches[1] }
-    $targetThreadId = [string](Get-InputProperty -InputObject $ToolInput -Names @('targetThreadId','target_thread_id'))
-    if (-not [string]::IsNullOrWhiteSpace($targetThreadId)) { return $targetThreadId }
-    $prompt = [string](Get-InputProperty -InputObject $ToolInput -Names @('prompt'))
-    if ($prompt -match '(?m)^watch-interrupted-task:v1 target_thread_id=([A-Za-z0-9][A-Za-z0-9._:-]{0,255})$') { return $Matches[1] }
-    if ($prompt -match '(?m)^watch-interrupted-task:fleet:v1 supervisor_thread_id=([A-Za-z0-9][A-Za-z0-9._:-]{0,255})$') { return $Matches[1] }
-    return $null
-}
-
-function Test-ExplicitLegacyWatchCleanupIntent {
-    param([Parameter(Mandatory = $true)][string]$Text)
-
-    $trimmed = $Text.Trim()
-    if ($trimmed -notmatch '(?i)守夜|watch-interrupted-task|heartbeat') { return $false }
-    if ($trimmed -notmatch '(?i)关闭|删除|清理|移除|close|delete|remove|clean\s*up') { return $false }
-    if ($trimmed -match '(?i)(不要|请勿|无需|别|禁止|切勿|不允许|不应|不能|do\s+not|don''t).{0,24}(关闭|删除|清理|移除|close|delete|remove|clean\s*up)' -or
-        $trimmed -match '(?i)(为什么|为何|怎么会|是否|会不会|\?|？)' -or
-        $trimmed -match '(?i)(?:(文档|示例|说明|写着|写进|提到|quoted|example|documentation).{0,32}(关闭|删除|清理|移除|close|delete|remove)|(关闭|删除|清理|移除|close|delete|remove).{0,32}(文档|示例|说明|写着|写进|提到|quoted|example|documentation))') { return $false }
-    return $true
-}
-
-function Test-ExactCurrentLegacyWatchDelete {
-    param(
-        [Parameter(Mandatory = $true)][object]$Payload,
-        [Parameter(Mandatory = $true)][object]$ToolInput
-    )
-
-    if (Test-RetiredWatchHeartbeatTurn -Payload $Payload) { return $false }
-    $sessionId = [string](Get-InputProperty -InputObject $Payload -Names @('session_id','sessionId'))
-    $mode = [string](Get-InputProperty -InputObject $ToolInput -Names @('mode'))
-    $id = [string](Get-InputProperty -InputObject $ToolInput -Names @('id'))
-    $text = Get-WatchTurnText -Payload $Payload
-    return -not [string]::IsNullOrWhiteSpace($sessionId) -and $mode -ceq 'delete' -and
-        $id -ceq "watch-interrupted-task-v1-target-thread-id-$sessionId" -and
-        -not [string]::IsNullOrWhiteSpace($text) -and (Test-ExplicitLegacyWatchCleanupIntent -Text $text)
-}
-
 function Get-CrossThreadGuardDecision {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][object]$Payload)
@@ -230,7 +176,7 @@ function Get-CrossThreadGuardDecision {
         $hasDynamicToolRoute = $codeSkeleton -match '(?is)\btools\s*(?:\?\s*\.)?\s*\[[^\]]*\]'
 
         if ($hasNestedAutomationTool) {
-            $denyReason = 'Code-mode automation mutation is disabled after watch runtime retirement; use the native read-only view or exact current legacy delete path.'
+            $denyReason = 'Code-mode automation mutation is disabled; use the native read-only view path.'
         }
         elseif ($hasPowerMutationRoute) {
             $denyReason = 'Code-mode power actions are blocked because their turn origin cannot be proven at the native tool boundary.'
@@ -252,33 +198,18 @@ function Get-CrossThreadGuardDecision {
     }
     elseif ($toolName -match '(?i)(^|__|\.)automation_update$') {
         $mode = [string](Get-InputProperty -InputObject $toolInput -Names @('mode'))
-        $automationId = [string](Get-InputProperty -InputObject $toolInput -Names @('id'))
-        $prompt = [string](Get-InputProperty -InputObject $toolInput -Names @('prompt'))
-        $watchTargetThreadId = [string](Get-RetiredWatchTargetId -ToolInput $toolInput)
-        $turnText = Get-WatchTurnText -Payload $Payload
-        $mentionsWatchLifecycle = -not [string]::IsNullOrWhiteSpace($turnText) -and $turnText -match '(?i)守夜|watch-interrupted-task|heartbeat'
-        $isWatchMutation = -not [string]::IsNullOrWhiteSpace($watchTargetThreadId) -or
-            $prompt -match '(?m)^watch-interrupted-task(?::fleet)?:v1 ' -or
-            $automationId -match '^watch-interrupted-task-v1-live-probe-'
-
         if ($mode -ceq 'view') {
-            # Read-only automation inspection remains available from every turn role.
+            # Read-only automation inspection remains available.
         }
-        elseif (Test-RetiredWatchHeartbeatTurn -Payload $Payload) {
-            $denyReason = 'Heartbeat turns cannot mutate automation after watch runtime retirement.'
-        }
-        elseif (($isWatchMutation -or $mentionsWatchLifecycle) -and -not (Test-ExactCurrentLegacyWatchDelete -Payload $Payload -ToolInput $toolInput)) {
-            $denyReason = 'Retired watch automation is cleanup-only; only an explicit ordinary-turn delete for the exact current legacy watch id is allowed.'
+        else {
+            $denyReason = 'Automation mutation is disabled at this generic cross-task guard boundary.'
         }
     }
     elseif ($toolName -match '(?i)^(Bash|shell_command|exec_command)$') {
         $command = [string](Get-InputProperty -InputObject $toolInput -Names @('command','cmd'))
         $hasPowerMutation = $command -match '(?im)(?:^|[\r\n;&|])\s*(?:&\s*)?(?:(?:cmd|pwsh|powershell)(?:\.exe)?\s+(?:/c|-Command)\s+)?(?:shutdown(?:\.exe)?|Stop-Computer|Restart-Computer|Win32Shutdown|InitiateSystemShutdown|ExitWindowsEx)\b'
-        if ($hasPowerMutation -and (Test-RetiredWatchHeartbeatTurn -Payload $Payload)) {
-            $denyReason = 'Heartbeat-origin power actions are disabled after watch runtime retirement.'
-        }
-        elseif ($hasPowerMutation -and [string]::IsNullOrWhiteSpace((Get-WatchTurnText -Payload $Payload))) {
-            $denyReason = 'Power action turn origin could not be classified; blocking fail-closed.'
+        if ($hasPowerMutation) {
+            $denyReason = 'Power mutation is disabled at this generic cross-task guard boundary.'
         }
 
         foreach ($segment in @($command -split '[\r\n;&|]+')) {

@@ -34,40 +34,10 @@ if (-not [string]::IsNullOrWhiteSpace($ExpectedPolicySha256) -and
 }
 . $policyPath
 
-function Get-CrossThreadGuardTranscriptTurnText {
-    param([Parameter(Mandatory = $true)][object]$Payload)
-
-    $sessionId = [string](Get-InputProperty -InputObject $Payload -Names @('session_id','sessionId'))
-    $turnId = [string](Get-InputProperty -InputObject $Payload -Names @('turn_id','turnId'))
-    $transcriptPath = [string](Get-InputProperty -InputObject $Payload -Names @('transcript_path','transcriptPath'))
-    if ([string]::IsNullOrWhiteSpace($sessionId) -or [string]::IsNullOrWhiteSpace($turnId) -or
-        [string]::IsNullOrWhiteSpace($transcriptPath) -or -not (Test-Path -LiteralPath $transcriptPath -PathType Leaf)) { return $null }
-
-    $messages = [Collections.Generic.List[string]]::new()
-    try {
-        foreach ($line in @(Get-Content -LiteralPath $transcriptPath -Tail 2500)) {
-            if ([string]::IsNullOrWhiteSpace($line)) { continue }
-            try { $record = $line | ConvertFrom-Json -Depth 60 -ErrorAction Stop } catch { continue }
-            if ([string]$record.type -cne 'response_item' -or [string]$record.payload.type -cne 'message' -or
-                [string]$record.payload.role -cne 'user') { continue }
-            $recordTurn = [string](Get-InputProperty -InputObject $record.payload.internal_chat_message_metadata_passthrough -Names @('turn_id','turnId'))
-            if ($recordTurn -cne $turnId) { continue }
-            foreach ($content in @($record.payload.content)) {
-                $text = [string](Get-InputProperty -InputObject $content -Names @('text'))
-                if (-not [string]::IsNullOrWhiteSpace($text)) { $messages.Add($text) }
-            }
-        }
-    }
-    catch { return $null }
-    if ($messages.Count -eq 0) { return $null }
-    return [string]::Join("`n", $messages.ToArray())
-}
-
 $rawInput = [Console]::In.ReadToEnd()
 try { $payload = $rawInput | ConvertFrom-Json -Depth 60 -ErrorAction Stop }
 catch { Stop-CrossThreadGuard 'Cross-thread guard could not parse PreToolUse input; blocking fail-closed.' }
 
-$payload | Add-Member -NotePropertyName '__watch_turn_text' -NotePropertyValue (Get-CrossThreadGuardTranscriptTurnText $payload) -Force
 $decision = Get-CrossThreadGuardDecision -Payload $payload
 
 if ([int]$decision.exit_code -ne 0) { Stop-CrossThreadGuard ([string]$decision.reason) }

@@ -1,4 +1,0 @@
-interface:
-  display_name: "旧守夜退役入口"
-  short_description: "仅清理旧 heartbeat；不再创建或恢复守夜"
-  default_prompt: "Report that heartbeat watch v1 is retired. Only inspect or remove a residual matching automation when the user directly requests cleanup; never create, arm, resume, or update a watch."

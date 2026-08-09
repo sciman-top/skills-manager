@@ -12,7 +12,6 @@ function Invoke-CrossThreadPolicyProbe {
     param(
         [Parameter(Mandatory = $true)][string]$ToolName,
         [AllowNull()][object]$ToolInput,
-        [AllowEmptyString()][string]$TurnText = '',
         [string]$SessionId = 'doctor-source'
     )
 
@@ -21,7 +20,6 @@ function Invoke-CrossThreadPolicyProbe {
         hook_event_name = 'PreToolUse'
         tool_name = $ToolName
         tool_input = $ToolInput
-        __watch_turn_text = $TurnText
     })
 }
 
@@ -78,10 +76,8 @@ catch {
 $simulationCases = [ordered]@{
     direct_send_blocked = $false
     direct_handoff_blocked = $false
-    heartbeat_mutation_blocked = $false
-    heartbeat_power_blocked = $false
-    exact_legacy_delete_allowed = $false
-    negated_delete_blocked = $false
+    automation_mutation_blocked = $false
+    power_mutation_blocked = $false
     read_only_view_allowed = $false
 }
 $simulationFailures = [ordered]@{}
@@ -89,15 +85,12 @@ $simulationFailures = [ordered]@{}
 if ($hashMatches) {
     try {
         . $hostPolicy
-        $heartbeat = '<heartbeat><automation_id>legacy-watch</automation_id><instructions>watch-interrupted-task:v1 target_thread_id=doctor-source</instructions></heartbeat>'
         $probes = [ordered]@{
             direct_send_blocked = [ordered]@{ Expected='deny'; Decision=(Invoke-CrossThreadPolicyProbe -ToolName 'codex_app__send_message_to_thread' -ToolInput ([ordered]@{ threadId='target'; prompt='blocked' })) }
             direct_handoff_blocked = [ordered]@{ Expected='deny'; Decision=(Invoke-CrossThreadPolicyProbe -ToolName 'codex_app__handoff_thread' -ToolInput ([ordered]@{ threadId='target' })) }
-            heartbeat_mutation_blocked = [ordered]@{ Expected='deny'; Decision=(Invoke-CrossThreadPolicyProbe -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode='update'; id='watch-interrupted-task-v1-target-thread-id-doctor-source'; status='ACTIVE' }) -TurnText $heartbeat) }
-            heartbeat_power_blocked = [ordered]@{ Expected='deny'; Decision=(Invoke-CrossThreadPolicyProbe -ToolName 'shell_command' -ToolInput ([ordered]@{ command='shutdown.exe /s /t 120' }) -TurnText $heartbeat) }
-            exact_legacy_delete_allowed = [ordered]@{ Expected='allow'; Decision=(Invoke-CrossThreadPolicyProbe -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode='delete'; id='watch-interrupted-task-v1-target-thread-id-doctor-source' }) -TurnText '关闭当前任务的旧守夜。') }
-            negated_delete_blocked = [ordered]@{ Expected='deny'; Decision=(Invoke-CrossThreadPolicyProbe -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode='delete'; id='watch-interrupted-task-v1-target-thread-id-doctor-source' }) -TurnText '不要关闭当前任务守夜。') }
-            read_only_view_allowed = [ordered]@{ Expected='allow'; Decision=(Invoke-CrossThreadPolicyProbe -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode='view'; id='watch-interrupted-task-v1-target-thread-id-doctor-source' }) -TurnText $heartbeat) }
+            automation_mutation_blocked = [ordered]@{ Expected='deny'; Decision=(Invoke-CrossThreadPolicyProbe -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode='update'; id='ordinary-automation'; status='ACTIVE' })) }
+            power_mutation_blocked = [ordered]@{ Expected='deny'; Decision=(Invoke-CrossThreadPolicyProbe -ToolName 'shell_command' -ToolInput ([ordered]@{ command='shutdown.exe /s /t 120' })) }
+            read_only_view_allowed = [ordered]@{ Expected='allow'; Decision=(Invoke-CrossThreadPolicyProbe -ToolName 'codex_app__automation_update' -ToolInput ([ordered]@{ mode='view'; id='ordinary-automation' })) }
         }
         foreach ($probe in $probes.GetEnumerator()) {
             $actual = [string]$probe.Value.Decision.permission_decision
@@ -117,7 +110,6 @@ $staticConfigurationReady = $featureEnabled -and $hashMatches -and $definitionMa
     configuration_ready = $false
     static_configuration_ready = $staticConfigurationReady
     feature_enabled = $featureEnabled
-    watch_runtime_status = 'retired_fail_closed'
     source_sha256 = $sourceHash
     host_sha256 = $hostHash
     policy_source_sha256 = $policySourceHash
