@@ -15,7 +15,7 @@
 - `src/Commands/AuditTargets.ps1` 是目标审查与外层 AI prompt 真源；`reports/skill-audit/<run-id>/` 是运行产物，禁止手改。
 - `RuleEstate.ps1` 动态只读审查；mutation 只消费 reviewed change-set，逐目标 fail-fast/receipt，不承诺跨仓原子事务。
 - profile reconciliation 只消费宿主 proposal，对非活动 profile 做 canary/replay/rollback；不调用模型、决定语义或永久切 active profile。
-- `typed-core/SkillsManager.TypedCore/` 是 TC1 `shadow_only` PoC，仅供 `scripts/verify-typed-core-shadow.ps1`/测试；TC2 前不得接入 `src`/build/bundle、双写或双真源。
+- typed-core TC1 `shadow_only` PoC 已因零生产/仓外消费者、无可比返工净收益和持续 gate/SDK 成本退役；专用 spec/manifest/evidence 仅作历史记录。未来候选须由新的真实失败、消费者、对比收益和回滚证据重新准入，不得恢复长期双实现。
 - runtime 为 PS7-only；入口、CI、tests 和受管子进程只用 `pwsh`，禁止恢复 Windows PowerShell fallback。历史 5.1 记录不构成支持面。
 - task manifest 是动态执行真源，plan/todo 仅索引；`verify-vnext-planning.ps1` 校验结构，P6 专用 verifier 仅供历史/migration 显式诊断，均不证明宿主验收。
 ## B. 执行与风险边界

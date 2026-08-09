@@ -17,7 +17,7 @@
 **MODEL_POLICY_STATUS: host_advisory_only**
 **RADAR_SNAPSHOT_POLICY: advisory_expiring_snapshot**
 **M0_3_TYPED_CORE_STATUS: poc_not_started**
-**TYPED_CORE_STATUS: tc1_shadow_repo_verified**
+**TYPED_CORE_STATUS: retired_after_tc1**
 **TYPED_CORE_PRODUCTION_STATUS: not_started**
 **POWERSHELL_COMPATIBILITY_STATUS: ps7_only**
 **日期**: 2026-08-05
@@ -308,6 +308,6 @@ manifest 是 M0/M0.2/M0.3 依赖、write set、步骤、验证、回滚、eviden
 
 ## 20. Done definition
 
-M0/M0.2 历史完成真值保持不变。M0.3 完成仅当：现有 PRD/架构/路线图仍为唯一产品真源；maintenance spec/manifest/plan/todo 与 M1 registry 完整；M0 四项、M0.2 四项和 M0.3 三项 planning tasks 均为 done；三个 evidence group 各自可追；错误 Git CAS/shared-write、runtime model routing、stale Radar、无 failure packet 升档、PowerShell/typed-core 双真源、P6/runtime/live 越级的负向 tests fail-closed；新旧 verifier、focused tests 和唯一 full gate 通过；P5 保持 5/5 `repo_verified`；P6 保持 hold 且不存在 P6 manifest；pilot 为 collecting 0/10，M0.3 closeout 历史保持 `M0_3_TYPED_CORE_STATUS=poc_not_started`。2026-08-05 的独立 adjacent follow-up 已把当前状态推进到 `TYPED_CORE_STATUS=tc1_shadow_repo_verified`，但生产迁移仍为 `TYPED_CORE_PRODUCTION_STATUS=not_started`；live/runtime 状态保持本文件头部声明。
+M0/M0.2 历史完成真值保持不变。M0.3 完成仅当：现有 PRD/架构/路线图仍为唯一产品真源；maintenance spec/manifest/plan/todo 与 M1 registry 完整；M0 四项、M0.2 四项和 M0.3 三项 planning tasks 均为 done；三个 evidence group 各自可追；错误 Git CAS/shared-write、runtime model routing、stale Radar、无 failure packet 升档、PowerShell/typed-core 双真源、P6/runtime/live 越级的负向 tests fail-closed；新旧 verifier、focused tests 和唯一 full gate 通过；P5 保持 5/5 `repo_verified`；P6 保持 hold 且不存在 P6 manifest；pilot 为 collecting 0/10，M0.3 closeout 历史保持 `M0_3_TYPED_CORE_STATUS=poc_not_started`。2026-08-05 的独立 adjacent follow-up 曾完成 TC1 shadow PoC，随后因零生产/仓外消费者、无可比返工净收益和持续 gate/SDK 成本退役，当前为 `TYPED_CORE_STATUS=retired_after_tc1`；生产迁移仍为 `TYPED_CORE_PRODUCTION_STATUS=not_started`，live/runtime 状态保持本文件头部声明。
 
-允许的当前表述是“maintenance design M0/M0.2/M0.3 contract repo_verified；M1 collection deferred 0/10；独立 adjacent track 已完成 TC1 shadow PoC”。禁止表述为 coordinator/lease/model-routing runtime、Radar 模型选择效果已证明、custom-agent/host config 已修改、typed core 已接入 CLI/生产、PowerShell 已替换、Trellis/AGOS/GBrain/code graph 已安装，多 Agent/工具组合收益已证明，10-task pilot 已执行/完成或产品已 `live_accepted`。
+允许的当前表述是“maintenance design M0/M0.2/M0.3 contract repo_verified；M1 collection deferred 0/10；独立 TC1 shadow PoC 历史完成后已退役”。禁止表述为 coordinator/lease/model-routing runtime、Radar 模型选择效果已证明、custom-agent/host config 已修改、typed core 仍在当前实现或已接入 CLI/生产、PowerShell 已替换、Trellis/AGOS/GBrain/code graph 已安装，多 Agent/工具组合收益已证明，10-task pilot 已执行/完成或产品已 `live_accepted`。

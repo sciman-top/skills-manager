@@ -135,7 +135,7 @@ exit 0
         $parsed.model_policy_status | Should Be 'host_advisory_only'
         $parsed.radar_snapshot_policy | Should Be 'advisory_expiring_snapshot'
         $parsed.m0_3_typed_core_status | Should Be 'poc_not_started'
-        $parsed.typed_core_status | Should Be 'tc1_shadow_repo_verified'
+        $parsed.typed_core_status | Should Be 'retired_after_tc1'
         $parsed.typed_core_production_status | Should Be 'not_started'
         $parsed.powershell_compatibility_status | Should Be 'ps7_only'
         $parsed.pilot_status | Should Be 'deferred'
@@ -384,7 +384,7 @@ exit 0
             Replace('MODEL_POLICY_STATUS: host_advisory_only', 'MODEL_POLICY_STATUS: runtime_router').
             Replace('RADAR_SNAPSHOT_POLICY: advisory_expiring_snapshot', 'RADAR_SNAPSHOT_POLICY: permanent_hard_gate').
             Replace('M0_3_TYPED_CORE_STATUS: poc_not_started', 'M0_3_TYPED_CORE_STATUS: production_migrated').
-            Replace('TYPED_CORE_STATUS: tc1_shadow_repo_verified', 'TYPED_CORE_STATUS: production_migrated').
+            Replace('TYPED_CORE_STATUS: retired_after_tc1', 'TYPED_CORE_STATUS: production_migrated').
             Replace('TYPED_CORE_PRODUCTION_STATUS: not_started', 'TYPED_CORE_PRODUCTION_STATUS: complete').
             Replace('POWERSHELL_COMPATIBILITY_STATUS: ps7_only', 'POWERSHELL_COMPATIBILITY_STATUS: unsupported')
         Set-Content -LiteralPath $specPath -Value $spec -Encoding UTF8

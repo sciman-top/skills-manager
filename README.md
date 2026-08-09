@@ -44,7 +44,7 @@ vNext 当前动态真值由 P6 manifest 管理；当前仓库实现已完成 P6 
 
 本项目仅支持 PowerShell 7 (`pwsh`)；PowerShell 7.6 LTS 是推荐基线。Windows PowerShell 5.1 不再提供安装 fallback、CI 或 smoke 支持，缺少 `pwsh` 时入口 fail-closed。迁移、编码与回滚边界见 [`docs/runbooks/powershell-runtime-compatibility.md`](docs/runbooks/powershell-runtime-compatibility.md)。
 
-PowerShell 仍是当前唯一运行真源，但不再是所有未来领域逻辑的默认永久归宿。针对 AI 生成脚本常见的 parser/quoting/动态类型/encoding/native-process 返工，目标架构采用 `versioned protocol -> 条件性 C#/.NET typed core -> PowerShell thin shell`。当前 TC0/TC1 已对 `OperationPlan/Receipt v1` 建立 package-free C#/.NET `shadow_only` PoC，并在固定 corpus 上实现 PowerShell/C# parity；它没有接入 CLI/生成 bundle，TC2 生产迁移仍为 `not_started`，禁止直接全仓重写或形成双真源。
+PowerShell 7 仍是当前唯一运行真源。新领域逻辑先收敛为窄、纯、versioned JSON/protocol seam；只有当前失败无法用更简单方式修复，且真实消费者、对比收益、分发与回滚证据同时成立时，才重新评估 typed implementation。2026-08-05 的 C#/.NET TC1 `shadow_only` PoC 虽完成固定 corpus parity，但始终零生产/仓外消费者、未证明 AI 返工净收益，并持续引入 SDK pin 与 full-gate 成本，现已删除实现/verifier/test；其 spec/manifest/evidence 仅作历史记录。
 
 长链路任务分解、模型选择、子 Agent/worktree 编排、失败恢复和集成继续完全由宿主 AI 原生能力负责。仓库曾实现的通用 TaskGraph/model-policy advisory 没有发现本仓外消费者，且与宿主 Plan/Goal/subagent 控制面重叠，现已从 build、CLI、默认 gate 和当前测试面退役；历史 spec/manifest/evidence 仅用于追溯。本项目只为自身 capability/rule/projection 领域提供必要的 plan/receipt/rollback 合同，不再建立通用 AI 工程编排或第二治理面。
 

@@ -125,9 +125,9 @@ Git 保存版本、分支、candidate commit 和集成结果；宿主原生 coor
 
 ### `PP-012 Typed-core migration without shell rupture`
 
-PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和适配层，不再被视为长期承载所有领域语义的唯一实现。新领域逻辑优先通过稳定 JSON/protocol contract、纯函数和可测试 typed core 评估；迁移必须保持旧 CLI aliases、生成 bundle、PS7 安装/执行路径和回滚可用。Windows PowerShell 5.1 不再是受支持 runtime，缺少 `pwsh` 时 fail-closed；没有两个真实 caller、characterization baseline 和迁移收益证据，不创建第二实现或开始 typed-core 生产重写。
+PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和适配层。新领域逻辑优先通过稳定 JSON/protocol contract、纯函数和窄 seam 评估；只有当前失败无法用更简单方式修复，且真实消费者、对比收益、分发与回滚证据同时成立时，才重新准入 typed implementation。Windows PowerShell 5.1 不再是受支持 runtime，缺少 `pwsh` 时 fail-closed；没有这些证据，不创建第二实现或开始 typed-core 生产重写。
 
-当前 TC0/TC1 只对 `OperationPlan/Receipt v1` 完成 package-free C#/.NET `shadow_only` PoC：固定 corpus 与 PowerShell validator parity，生产 CLI/bundle 未接入，TC2 仍需独立 reviewed admission。
+2026-08-05 的 TC0/TC1 `OperationPlan/Receipt v1` package-free C#/.NET `shadow_only` PoC 已完成固定 corpus parity，但因零生产/仓外消费者、无可比 AI 返工净收益和持续 SDK/full-gate 成本退役；专用 spec/manifest/evidence 仅作历史记录，PowerShell 仍是唯一当前运行真源。
 
 ### `PP-013 Bounded research and reversible reference portfolio`
 
@@ -282,9 +282,9 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 - `FR-EWF-019`：生成 bundle、CLI help 和默认 quality gate 不得暴露 `agent-validate`、`agent-plan` 或专用 Agent Workflow verifier；历史 spec/manifest/evidence 继续可追溯。
 - `FR-EWF-020`：advisory implementation 必须保持层次边界：domain/application 是无文件、时钟、环境、网络和 terminal 副作用的 pure layer；command adapter 只读取仓内显式输入并呈现结果；Radar refresh、spawn/wait/steer、worktree 创建和模型/effort 应用继续由宿主显式执行。
 
-### 6.12 Typed-core shadow migration
+### 6.12 Retired typed-core shadow experiment
 
-- `FR-TEC-001`：typed-core PoC 只能选择一个 read-only pure seam，至少两个真实 caller 和固定 characterization corpus；协议必须是 versioned stdin/stdout UTF-8 JSON，并固定 finding/exit/redaction contract。TC1 只 shadow 比较，不能改变旧 CLI 输出、生成 bundle 或生产 side effect。
+- `FR-TEC-001`：历史 typed-core PoC 只允许选择一个 read-only pure seam，至少两个真实 caller 和固定 characterization corpus；协议必须是 versioned stdin/stdout UTF-8 JSON，并固定 finding/exit/redaction contract。当前实现不得保留 shadow runtime、SDK pin、专用 verifier/test 或生产 side effect；未来恢复必须由新的真实失败、消费者、对比收益、分发与回滚证据重新 reviewed admission。
 
 ### 6.13 P6 Host-Native Skill Lifecycle Reset
 
@@ -342,8 +342,8 @@ fresh inventory、host evaluation、injected/executed invocation 与业务 accep
 - `NFR-EWF-006`：PS7-only runtime policy 必须覆盖 source、generated bundle、installer、`skills.cmd`、CI、tests、subprocess wrapper、runbook 和 release contract；历史 Phase/证据中的 5.1 记录只保留为历史事实，不能恢复为当前支持承诺。新 typed core 候选仍须以 versioned protocol、single source of truth、PS7 回滚路径和可删除 PoC 证明，不得在无门禁的情况下形成双写或双真源。
 - `NFR-EWF-007`：不得重新引入仓库 scheduler/daemon/database/provider gateway、Radar fetch、通用 TaskGraph/model policy 或仓库发起的 custom-agent/config/profile/session mutation；宿主侧授权动作不改变本仓 runtime 边界。
 - `NFR-EWF-008`：现有 build/dispatch/gate contract 必须阻断 `agent-plan`、`agent-validate`、Agent Workflow 源模块或专用 verifier 回流；该负向约束复用现有测试，不建立新的治理 registry。
-- `NFR-TEC-001`：替代技术栈评估优先比较 C#/.NET、TypeScript/Node、Python 和 Rust 的 Windows/native CLI 适配、类型/并发、分发、供应链、维护与回滚成本；当前推荐 C#/.NET typed core + PowerShell thin shell 作为条件性目标架构，只实施可删除 shadow PoC，不实施全仓重写。
-- `NFR-TEC-002`：TC1 必须 pin 受支持 LTS SDK、零第三方 `PackageReference`、4/4 corpus parity、结构化协议负例、零生产引用和可删除回滚；framework-dependent/self-contained/single-file 的体积/启动数据只作描述性观察。TC2 前 PowerShell runtime 必须保持 authoritative，生产集成为 `not_started`。
+- `NFR-TEC-001`：替代技术栈只在新的真实失败或消费者触发时比较 C#/.NET、TypeScript/Node、Python 和 Rust 的 Windows/native CLI 适配、类型/并发、分发、供应链、维护与回滚成本；不得把历史 C#/.NET 偏好升级为当前目标架构或默认依赖。
+- `NFR-TEC-002`：历史 TC1 曾 pin 受支持 LTS SDK、保持零第三方 `PackageReference`、4/4 corpus parity、结构化协议负例、零生产引用和可删除回滚；这些结果仅作历史 evidence。当前 PowerShell runtime 必须保持 authoritative，任何未来生产迁移都必须重新证明单一真源和净收益。
 - `NFR-HNS-001`：P6 admission 是 planning/implementation authority，不自动授权宿主重启、provider/auth/session/plugin/MCP mutation 或业务 live action。
 - `NFR-HNS-002`：snapshot 每个推导值携带 source、captured_at、freshness 和 unknown reason；未知不得被默认配置提升为 runtime truth。
 - `NFR-HNS-003`：host adapters bounded、timeout、redaction-first、provider-free、zero-write；surface 不支持时报告 `platform_na`。
@@ -372,7 +372,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 10. 同类失败两次、方向证据变化、授权越界或 live/生产动作出现时会停止并重新规划或询问；普通低风险实现不会因固定角色审批而中断。
 11. 交付效果只以真实 pilot 观察；规划包、synthetic replay 或 repo verifier 不能被表述为真实业务收益。
 12. capability 辅助层必须在“只使用宿主原生匹配 + 当前 profile”基线之上证明净收益；deterministic corpus、profile 可见性和少量 host replay 分别报告，不互相冒充。
-13. typed-core TC1 的完成只能证明固定 `OperationPlan/Receipt v1` corpus 的 shadow parity；未执行 TC2 时不得宣称 CLI/生产迁移、PowerShell 替换或默认分发已接受。
+13. typed-core TC1 的历史完成只能证明固定 `OperationPlan/Receipt v1` corpus 的 shadow parity；当前实现已退役，不得宣称 CLI/生产迁移、PowerShell 替换或默认分发已接受。
 13. skill inventory 变化后可获得确定性的 profile drift 诊断；宿主 proposal stale、引用未知对象、触碰 protected skill、产生 no-op/冲突或超预算时 fail-closed，且诊断全过程不改变配置和 active profile。
 14. 历史 profile canary 的 receipt 和 rollback 必须可用于兼容迁移审计；当前 `Apply`/`Accept` 固定 fail-closed 为 `deprecated`，只有显式 versioned migration/rollback 可写配置，且不得恢复 profile reachability authority。
 15. 多 Agent 设计评议可并行，但所有写入任务都能追到一个 result owner、固定 base revision、互斥或单 writer write set、集成顺序和最终 closeout owner。
@@ -422,7 +422,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - 当前主链是 `effective host snapshot -> canonical compiler -> eligibility policy -> all-enabled native metadata -> host AI selection -> full skill injection -> invocation trace`；strict fallback 只在宿主原生注入不可用且显式请求时启用。
 - P5 后的 `maintenance_design` 已建立 Lean Delivery advisory 规划契约；M1 registry 当前为 `deferred (0/10)`，因为没有 active owner/collection task，只有显式建立两者后才恢复。它不是新 Phase，也不证明 pilot 已执行、完成或产生业务效果。
 - `maintenance_design` M0.2 只补强 host-owned coordination、single-writer write-set admission、Git freshness/CAS 语义、tool disposition 和 context-adapter admission；不引入 coordinator/lease runtime，也不安装 Trellis、AGOS、GBrain、CodeGraphContext、Understand Anything 或 OptSkills。
-- `maintenance_design` M0.3 的 TaskGraph/model policy 是历史 planning truth；后续通用 advisory runtime 因无外部消费者且与宿主原生能力重叠已退役。独立 TC1 shadow PoC 仍未接入生产；Radar automation 已删除，旧 Luna/Terra/Radar 记录只作为历史 receipt。
+- `maintenance_design` M0.3 的 TaskGraph/model policy 是历史 planning truth；后续通用 advisory runtime 因无外部消费者且与宿主原生能力重叠已退役。独立 TC1 shadow PoC 也已因无消费者和净收益证据退役；Radar automation 已删除，旧 Luna/Terra/Radar 记录只作为历史 receipt。
 - GUI、daemon、远端协作、数据库和 domain core 重写均为 conditional，不进入当前承诺。
 
 ## 11. 官方与社区依据
@@ -471,7 +471,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 
 - `DEC-PROD-001`：产品定位为 local capability curator + rule advisor。
 - `DEC-PROD-002`：规则永久默认 advisory-first；显式 apply 是唯一写入入口。
-- `DEC-PROD-003`：PowerShell 继续作为当前兼容入口、安装 fallback、宿主/文件适配层和单文件发行面；领域核心的长期方向改为“可选 C#/.NET typed core + PowerShell thin shell”，只有 PoC/迁移门禁通过后才实施，不允许形成双真源。
+- `DEC-PROD-003`：PowerShell 继续作为当前兼容入口、宿主/文件适配层和单文件发行面；领域核心先通过 versioned protocol 与窄 pure seam 降低复杂度。历史 C#/.NET typed-core PoC 已退役，未来只有新的失败、消费者和净收益证据通过 reviewed admission 后才可重评，不允许形成双真源。
 - `DEC-PROD-004`：不立即改仓库名；只有规则/plugin 两条新主路径经过真实使用验收后再评估品牌更名。
 - `DEC-PROD-005`：未来 Phase 在进入实施前各自生成详细 task manifest，避免提前维护大量猜测任务。
 - `DEC-PROD-006`：Rules Advisor 使用责任覆盖模型，不建立通用规则 AST、重型 policy engine 或强制统一模板。
@@ -480,7 +480,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - `DEC-PROD-009`：工程化多 Agent 采用“host-owned coordinator + read-only design panel + disjoint-worktree execution + single-writer shared seam + sequential integration”；Git 是真值主干和 stale guard，不是文件任务队列。
 - `DEC-PROD-010`：社区 workflow、知识库、代码图和自动 skill 学习均先进入证据化 disposition；当前候选只采纳协议启发，不安装运行时，M1 真实任务证据决定后续 retain/adapt/retire。
 - `DEC-PROD-011`：宿主 AI 独立拥有任务语义、DAG、串并行、模型档位和 spawn/wait/integration；skills-manager 不再提供通用编排建议或 admission，只保留自身产品领域的确定性安全合同。
-- `DEC-PROD-012`：当前 shell runtime 强制收敛为 PS7-only，以删除 5.1/7 双运行时解析、quoting、encoding 和测试分支；这是支持面迁移，不是 typed-core 生产迁移。复杂领域语义仍通过边界收缩和 typed-core PoC 评估，不直接全仓重写；PoC 在真实收益不足、兼容成本过高或无消费者时必须删除。
+- `DEC-PROD-012`：当前 shell runtime 强制收敛为 PS7-only，以删除 5.1/7 双运行时解析、quoting、encoding 和测试分支；这是支持面迁移，不是 typed-core 生产迁移。历史 typed-core PoC 已因真实收益不足、兼容/SDK 成本和无消费者退役；未来只有新的独立失败和 reviewed 净收益证据才能重新准入一个可删除 seam。
 - `DEC-PROD-013`：P6 正式采用 host-native skill lifecycle reset；profile/router/cold-load 不再是技能可达性或语义选择主链，完整 native discovery、确定性 eligibility 和 invocation trace 成为新边界。
 
 以下选择有意延迟到有真实代码/宿主证据的任务，不允许 AI 在更早任务中猜定：

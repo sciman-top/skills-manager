@@ -17,7 +17,6 @@
 | Current P6 lifecycle | `tasks/skills-manager-vnext-phase6.tasks.json` |
 | Lean delivery maintenance | `tasks/skills-manager-vnext-maintenance-design.tasks.json` |
 | Lean delivery pilot (deferred) | `tasks/skills-manager-vnext-lean-delivery-pilot.json` |
-| Typed-core shadow pilot | `tasks/skills-manager-vnext-typed-core-pilot.tasks.json` |
 | PowerShell 7 migration | `tasks/skills-manager-vnext-powershell7-migration.tasks.json` |
 | Native-first routing correction | `tasks/skills-manager-vnext-capability-routing-correction.tasks.json` |
 | Capability discovery redesign | `tasks/skills-manager-vnext-capability-discovery-redesign.tasks.json` |
@@ -29,6 +28,7 @@
 | Scope | Record |
 | --- | --- |
 | Retired Agent workflow advisory | `tasks/skills-manager-vnext-agent-workflow-advisory.tasks.json` |
+| Retired typed-core shadow pilot | `tasks/skills-manager-vnext-typed-core-pilot.tasks.json` |
 
 ## Execution order
 
