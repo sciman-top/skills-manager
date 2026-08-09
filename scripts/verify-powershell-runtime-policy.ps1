@@ -2,7 +2,8 @@
 [CmdletBinding()]
 param(
     [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent),
-    [switch]$Json
+    [switch]$Json,
+    [switch]$HistoricalMigration
 )
 
 $ErrorActionPreference = 'Stop'
@@ -191,140 +192,118 @@ $paths = [ordered]@{
     historicalManifest = 'tasks/skills-manager-vnext-phase0.tasks.json'
 }
 
+$activeKeys = @('agents', 'release', 'version', 'build', 'installer', 'cmd', 'core', 'mcp', 'generated', 'github', 'azure', 'gitlab')
+$historicalKeys = @('manifest', 'spec', 'evidence', 'runbook', 'prd', 'architecture', 'roadmap', 'lean', 'agents', 'release', 'typedManifest', 'historicalManifest')
 $content = @{}
-foreach ($key in @($paths.Keys)) {
+foreach ($key in $(if ($HistoricalMigration) { $historicalKeys } else { $activeKeys })) {
     $content[$key] = Read-Required $paths[$key]
 }
 
 $manifest = $null
-if (-not [string]::IsNullOrWhiteSpace($content.manifest)) {
-    try { $manifest = $content.manifest | ConvertFrom-Json }
-    catch { Add-Finding 'manifest_parse_failed' $paths.manifest $_.Exception.Message }
-}
-
-$expectedTaskIds = @('SMV-PS7-001', 'SMV-PS7-002', 'SMV-PS7-003', 'SMV-PS7-004', 'SMV-PS7-005')
 $doneCount = 0
-if ($null -ne $manifest) {
-    if ([int]$manifest.schema_version -ne 1 -or [string]$manifest.program_id -ne 'skills-manager-vnext' -or [string]$manifest.track -ne 'powershell7_runtime_migration' -or [string]$manifest.base_phase -ne 'P5') {
-        Add-Finding 'manifest_identity_invalid' $paths.manifest 'Manifest identity must remain schema 1 / skills-manager-vnext / powershell7_runtime_migration / P5.'
+$powershellFilesScanned = 0
+$currentP6AdmissionStatus = 'not_evaluated'
+if (-not $HistoricalMigration) {
+    $versionPattern = '(?m)^#requires\s+-Version\s+7\.0\s*$'
+    foreach ($key in @('version', 'build', 'installer', 'generated')) {
+        Require-Pattern $content[$key] $versionPattern $paths[$key] 'powershell_version_floor_invalid' ("{0} must require PowerShell 7.0." -f $paths[$key])
     }
-    foreach ($check in @(
-        @{ property='track_status'; value='repo_verified'; code='track_status_invalid' },
-        @{ property='runtime_policy'; value='ps7_only'; code='runtime_policy_invalid' },
-        @{ property='minimum_version'; value='7.0'; code='minimum_version_invalid' },
-        @{ property='recommended_baseline'; value='7.6_lts'; code='recommended_baseline_invalid' },
-        @{ property='legacy_runtime_status'; value='unsupported'; code='legacy_runtime_status_invalid' },
-        @{ property='historical_evidence_policy'; value='preserve'; code='historical_policy_invalid' },
-        @{ property='typed_core_production_status'; value='not_started'; code='typed_core_boundary_invalid' },
-        @{ property='p6_admission_status'; value='hold'; code='p6_status_invalid' },
-        @{ property='live_acceptance_status'; value='not_run'; code='live_status_invalid' }
-    )) {
-        if ([string]$manifest.($check.property) -ne $check.value) {
-            Add-Finding $check.code $paths.manifest ("{0} must be {1}." -f $check.property, $check.value)
+    if (-not [string]::IsNullOrWhiteSpace($content.generated)) {
+        $bytes = [System.IO.File]::ReadAllBytes((Join-Path $root $paths.generated))
+        if ($bytes.Length -lt 3 -or $bytes[0] -ne 239 -or $bytes[1] -ne 187 -or $bytes[2] -ne 191) {
+            Add-Finding 'generated_encoding_invalid' $paths.generated 'Generated bundle must keep deterministic UTF-8 BOM encoding.'
         }
     }
-
-    $tasks = @($manifest.tasks)
-    $actualTaskSet = (@($tasks | ForEach-Object { [string]$_.id } | Sort-Object) -join ',')
-    $expectedTaskSet = (@($expectedTaskIds | Sort-Object) -join ',')
-    if ($actualTaskSet -ne $expectedTaskSet) {
-        Add-Finding 'task_set_invalid' $paths.manifest 'Manifest must contain exactly SMV-PS7-001 through SMV-PS7-005.'
-    }
-    foreach ($task in $tasks) {
-        if ([string]$task.status -eq 'done') { $doneCount++ }
-        else { Add-Finding 'task_not_done' $paths.manifest ("Task is not done: {0}" -f [string]$task.id) }
-        if ([string]$task.evidence_group -ne 'powershell7_runtime_migration') {
-            Add-Finding 'evidence_group_invalid' $paths.manifest ("Task evidence group drifted: {0}" -f [string]$task.id)
-        }
-    }
-}
-
-$versionPattern = '(?m)^#requires\s+-Version\s+7\.0\s*$'
-foreach ($key in @('version', 'build', 'installer', 'generated')) {
-    Require-Pattern $content[$key] $versionPattern $paths[$key] 'powershell_version_floor_invalid' ("{0} must require PowerShell 7.0." -f $paths[$key])
-}
-
-if (-not [string]::IsNullOrWhiteSpace($content.generated)) {
-    $generatedPath = Join-Path $root $paths.generated
-    $bytes = [System.IO.File]::ReadAllBytes($generatedPath)
-    if ($bytes.Length -lt 3 -or $bytes[0] -ne 239 -or $bytes[1] -ne 187 -or $bytes[2] -ne 191) {
-        Add-Finding 'generated_encoding_invalid' $paths.generated 'Generated bundle must keep deterministic UTF-8 BOM encoding.'
-    }
-}
-
-Reject-Pattern $content.core '(?i)CODEX_ALLOW_WINDOWS_POWERSHELL|Get-Command\s+powershell(?:\.exe)?' $paths.core 'legacy_fallback_detected' 'Core must not resolve or authorize Windows PowerShell.'
-Reject-Pattern $content.installer '(?i)Get-Command\s+powershell(?:\.exe)?|&\s*[''\"]?powershell(?:\.exe)?' $paths.installer 'legacy_fallback_detected' 'Installer must not resolve or invoke Windows PowerShell.'
-Reject-Pattern $content.cmd '(?i)POWERSHELL_EXE=powershell\.exe|where\s+powershell(?:\.exe)?|\bpause\b' $paths.cmd 'legacy_fallback_detected' 'CMD wrapper must resolve only pwsh and must not pause.'
-Reject-Pattern $content.mcp '(?i)["'']powershell\.exe["'']' $paths.mcp 'legacy_fallback_detected' 'MCP environment wrapper must invoke pwsh.exe only.'
-Reject-Pattern $content.generated '(?i)CODEX_ALLOW_WINDOWS_POWERSHELL|(?:Get-Command|Start-Process)\s+(?:-FilePath\s+)?["'']?powershell(?:\.exe)?["'']?|&\s*["'']?powershell(?:\.exe)?["'']?|["'']powershell\.exe["'']' $paths.generated 'legacy_fallback_detected' 'Generated bundle contains a legacy runtime execution path.'
-
-$powershellFilesScanned = Test-ActivePowerShellEstate
-
-Require-Literal $content.cmd 'PowerShell 7+ (pwsh) is required' $paths.cmd 'cmd_diagnostic_missing'
-Require-Literal $content.mcp '"pwsh.exe"' $paths.mcp 'mcp_pwsh_wrapper_missing'
-Require-Literal $content.build 'deterministic UTF-8 BOM' $paths.build 'build_encoding_contract_missing'
-
-Reject-Pattern $content.github '(?i)Windows PowerShell 5\.1|shell:\s*powershell(?:\s|$)' $paths.github 'legacy_ci_detected' 'GitHub Actions must not contain a Windows PowerShell job or shell.'
-Reject-Pattern $content.azure '(?im)Windows PowerShell 5\.1|^-\s*powershell:' $paths.azure 'legacy_ci_detected' 'Azure Pipelines must not contain a Windows PowerShell task.'
-Reject-Pattern $content.gitlab '(?i)powershell\.exe' $paths.gitlab 'legacy_ci_detected' 'GitLab CI must not invoke powershell.exe.'
-Require-Literal $content.github 'Verify PowerShell 7 runtime' $paths.github 'ps7_ci_missing'
-Require-Literal $content.azure 'Verify PowerShell 7 runtime' $paths.azure 'ps7_ci_missing'
-Require-Literal $content.gitlab 'pwsh -NoProfile' $paths.gitlab 'ps7_ci_missing'
-
-foreach ($required in @(
-    @{ key='spec'; literal='**RUNTIME_POLICY**: `ps7_only`'; code='current_policy_missing' },
-    @{ key='manifest'; literal='"runtime_policy": "ps7_only"'; code='current_policy_missing' },
-    @{ key='lean'; literal='POWERSHELL_COMPATIBILITY_STATUS: ps7_only'; code='current_policy_missing' },
-    @{ key='roadmap'; literal='`powershell7_runtime_migration`'; code='current_policy_missing' },
-    @{ key='agents'; literal='runtime 为 PS7-only'; code='current_policy_missing' },
-    @{ key='release'; literal='PowerShell 7 (`pwsh`) only'; code='release_policy_missing' },
-    @{ key='runbook'; literal='Migration guide'; code='migration_guide_missing' },
-    @{ key='runbook'; literal='Rollback'; code='rollback_missing' },
-    @{ key='runbook'; literal='powershell-support-lifecycle'; code='official_reference_missing' },
-    @{ key='runbook'; literal='migrating-from-windows-powershell-51-to-powershell-7'; code='official_reference_missing' },
-    @{ key='evidence'; literal='Typed-core TC2 / production integration: `not_started`'; code='evidence_boundary_missing' },
-    @{ key='quality'; literal="Invoke-QualityGate 'powershell-runtime-policy'"; code='full_gate_integration_missing' }
-)) {
-    Require-Literal $content[$required.key] $required.literal $paths[$required.key] $required.code
-}
-
-foreach ($key in @('lean', 'agents', 'roadmap')) {
-    Reject-Pattern $content[$key] 'ps7_primary_ps51_bounded_smoke' $paths[$key] 'stale_current_policy_detected' 'A current truth surface still claims the retired compatibility policy.'
-}
-
-Require-Pattern $content.historicalManifest 'PowerShell 5\.1|PS5\.1|5\.1 bounded smoke' $paths.historicalManifest 'historical_truth_missing' 'Historical Phase 0 compatibility evidence must remain traceable.'
-
-try {
-    $typed = $content.typedManifest | ConvertFrom-Json
-    if ([string]$typed.tc2_status -ne 'not_started' -or [string]$typed.production_integration_status -ne 'not_started' -or [string]$typed.powershell_runtime_status -ne 'authoritative') {
-        Add-Finding 'typed_core_boundary_invalid' $paths.typedManifest 'PS7-only shell support must not advance TC2 or typed-core production integration.'
-    }
-}
-catch { Add-Finding 'typed_core_manifest_invalid' $paths.typedManifest $_.Exception.Message }
-
-$currentP6AdmissionStatus = if ($content.roadmap.IndexOf('P6_ADMISSION_STATUS: admitted', [System.StringComparison]::Ordinal) -ge 0) {
-    'admitted'
-}
-elseif ($content.roadmap.IndexOf('P6_ADMISSION_STATUS: hold', [System.StringComparison]::Ordinal) -ge 0) {
-    'hold'
+    Reject-Pattern $content.core '(?i)CODEX_ALLOW_WINDOWS_POWERSHELL|Get-Command\s+powershell(?:\.exe)?' $paths.core 'legacy_fallback_detected' 'Core must not resolve or authorize Windows PowerShell.'
+    Reject-Pattern $content.installer '(?i)Get-Command\s+powershell(?:\.exe)?|&\s*[''\"]?powershell(?:\.exe)?' $paths.installer 'legacy_fallback_detected' 'Installer must not resolve or invoke Windows PowerShell.'
+    Reject-Pattern $content.cmd '(?i)POWERSHELL_EXE=powershell\.exe|where\s+powershell(?:\.exe)?|\bpause\b' $paths.cmd 'legacy_fallback_detected' 'CMD wrapper must resolve only pwsh and must not pause.'
+    Reject-Pattern $content.mcp '(?i)["'']powershell\.exe["'']' $paths.mcp 'legacy_fallback_detected' 'MCP environment wrapper must invoke pwsh.exe only.'
+    Reject-Pattern $content.generated '(?i)CODEX_ALLOW_WINDOWS_POWERSHELL|(?:Get-Command|Start-Process)\s+(?:-FilePath\s+)?["'']?powershell(?:\.exe)?["'']?|&\s*["'']?powershell(?:\.exe)?["'']?|["'']powershell\.exe["'']' $paths.generated 'legacy_fallback_detected' 'Generated bundle contains a legacy runtime execution path.'
+    $powershellFilesScanned = Test-ActivePowerShellEstate
+    Require-Literal $content.cmd 'PowerShell 7+ (pwsh) is required' $paths.cmd 'cmd_diagnostic_missing'
+    Require-Literal $content.mcp '"pwsh.exe"' $paths.mcp 'mcp_pwsh_wrapper_missing'
+    Require-Literal $content.build 'deterministic UTF-8 BOM' $paths.build 'build_encoding_contract_missing'
+    Require-Literal $content.agents 'runtime 为 PS7-only' $paths.agents 'current_policy_missing'
+    Require-Literal $content.release 'PowerShell 7 (`pwsh`) only' $paths.release 'release_policy_missing'
+    Reject-Pattern $content.github '(?i)Windows PowerShell 5\.1|shell:\s*powershell(?:\s|$)' $paths.github 'legacy_ci_detected' 'GitHub Actions must not contain a Windows PowerShell job or shell.'
+    Reject-Pattern $content.azure '(?im)Windows PowerShell 5\.1|^-\s*powershell:' $paths.azure 'legacy_ci_detected' 'Azure Pipelines must not contain a Windows PowerShell task.'
+    Reject-Pattern $content.gitlab '(?i)powershell\.exe' $paths.gitlab 'legacy_ci_detected' 'GitLab CI must not invoke powershell.exe.'
+    Require-Literal $content.github 'Verify PowerShell 7 runtime' $paths.github 'ps7_ci_missing'
+    Require-Literal $content.azure 'Verify PowerShell 7 runtime' $paths.azure 'ps7_ci_missing'
+    Require-Literal $content.gitlab 'pwsh -NoProfile' $paths.gitlab 'ps7_ci_missing'
 }
 else {
-    Add-Finding 'roadmap_p6_admission_missing' $paths.roadmap 'Roadmap must declare the current P6 admission status.'
-    'unknown'
-}
-if ($currentP6AdmissionStatus -eq 'hold' -and (Test-Path -LiteralPath (Join-Path $root 'tasks/skills-manager-vnext-phase6.tasks.json'))) {
-    Add-Finding 'p6_manifest_forbidden' 'tasks/skills-manager-vnext-phase6.tasks.json' 'P6 manifest is forbidden while admission remains hold.'
+    try { $manifest = $content.manifest | ConvertFrom-Json }
+    catch { Add-Finding 'manifest_parse_failed' $paths.manifest $_.Exception.Message }
+    $expectedTaskIds = @('SMV-PS7-001', 'SMV-PS7-002', 'SMV-PS7-003', 'SMV-PS7-004', 'SMV-PS7-005')
+    if ($null -ne $manifest) {
+        if ([int]$manifest.schema_version -ne 1 -or [string]$manifest.program_id -ne 'skills-manager-vnext' -or [string]$manifest.track -ne 'powershell7_runtime_migration' -or [string]$manifest.base_phase -ne 'P5') {
+            Add-Finding 'manifest_identity_invalid' $paths.manifest 'Manifest identity must remain schema 1 / skills-manager-vnext / powershell7_runtime_migration / P5.'
+        }
+        foreach ($check in @(
+            @{ property='track_status'; value='repo_verified'; code='track_status_invalid' },
+            @{ property='runtime_policy'; value='ps7_only'; code='runtime_policy_invalid' },
+            @{ property='minimum_version'; value='7.0'; code='minimum_version_invalid' },
+            @{ property='recommended_baseline'; value='7.6_lts'; code='recommended_baseline_invalid' },
+            @{ property='legacy_runtime_status'; value='unsupported'; code='legacy_runtime_status_invalid' },
+            @{ property='historical_evidence_policy'; value='preserve'; code='historical_policy_invalid' },
+            @{ property='typed_core_production_status'; value='not_started'; code='typed_core_boundary_invalid' },
+            @{ property='p6_admission_status'; value='hold'; code='p6_status_invalid' },
+            @{ property='live_acceptance_status'; value='not_run'; code='live_status_invalid' }
+        )) {
+            if ([string]$manifest.($check.property) -ne $check.value) { Add-Finding $check.code $paths.manifest ("{0} must be {1}." -f $check.property, $check.value) }
+        }
+        $tasks = @($manifest.tasks)
+        if ((@($tasks | ForEach-Object { [string]$_.id } | Sort-Object) -join ',') -ne (@($expectedTaskIds | Sort-Object) -join ',')) {
+            Add-Finding 'task_set_invalid' $paths.manifest 'Manifest must contain exactly SMV-PS7-001 through SMV-PS7-005.'
+        }
+        foreach ($task in $tasks) {
+            if ([string]$task.status -eq 'done') { $doneCount++ } else { Add-Finding 'task_not_done' $paths.manifest ("Task is not done: {0}" -f [string]$task.id) }
+            if ([string]$task.evidence_group -ne 'powershell7_runtime_migration') { Add-Finding 'evidence_group_invalid' $paths.manifest ("Task evidence group drifted: {0}" -f [string]$task.id) }
+        }
+    }
+    foreach ($required in @(
+        @{ key='spec'; literal='**RUNTIME_POLICY**: `ps7_only`'; code='current_policy_missing' },
+        @{ key='manifest'; literal='"runtime_policy": "ps7_only"'; code='current_policy_missing' },
+        @{ key='lean'; literal='POWERSHELL_COMPATIBILITY_STATUS: ps7_only'; code='current_policy_missing' },
+        @{ key='roadmap'; literal='`powershell7_runtime_migration`'; code='current_policy_missing' },
+        @{ key='agents'; literal='runtime 为 PS7-only'; code='current_policy_missing' },
+        @{ key='release'; literal='PowerShell 7 (`pwsh`) only'; code='release_policy_missing' },
+        @{ key='runbook'; literal='Migration guide'; code='migration_guide_missing' },
+        @{ key='runbook'; literal='Rollback'; code='rollback_missing' },
+        @{ key='runbook'; literal='powershell-support-lifecycle'; code='official_reference_missing' },
+        @{ key='runbook'; literal='migrating-from-windows-powershell-51-to-powershell-7'; code='official_reference_missing' },
+        @{ key='evidence'; literal='Typed-core TC2 / production integration: `not_started`'; code='evidence_boundary_missing' }
+    )) { Require-Literal $content[$required.key] $required.literal $paths[$required.key] $required.code }
+    foreach ($key in @('lean', 'agents', 'roadmap')) {
+        Reject-Pattern $content[$key] 'ps7_primary_ps51_bounded_smoke' $paths[$key] 'stale_current_policy_detected' 'A current truth surface still claims the retired compatibility policy.'
+    }
+    Require-Pattern $content.historicalManifest 'PowerShell 5\.1|PS5\.1|5\.1 bounded smoke' $paths.historicalManifest 'historical_truth_missing' 'Historical Phase 0 compatibility evidence must remain traceable.'
+    try {
+        $typed = $content.typedManifest | ConvertFrom-Json
+        if ([string]$typed.tc2_status -ne 'not_started' -or [string]$typed.production_integration_status -ne 'not_started' -or [string]$typed.powershell_runtime_status -ne 'authoritative') {
+            Add-Finding 'typed_core_boundary_invalid' $paths.typedManifest 'PS7-only shell support must not advance TC2 or typed-core production integration.'
+        }
+    }
+    catch { Add-Finding 'typed_core_manifest_invalid' $paths.typedManifest $_.Exception.Message }
+    $currentP6AdmissionStatus = if ($content.roadmap.IndexOf('P6_ADMISSION_STATUS: admitted', [System.StringComparison]::Ordinal) -ge 0) { 'admitted' }
+        elseif ($content.roadmap.IndexOf('P6_ADMISSION_STATUS: hold', [System.StringComparison]::Ordinal) -ge 0) { 'hold' }
+        else { Add-Finding 'roadmap_p6_admission_missing' $paths.roadmap 'Roadmap must declare the current P6 admission status.'; 'unknown' }
+    if ($currentP6AdmissionStatus -eq 'hold' -and (Test-Path -LiteralPath (Join-Path $root 'tasks/skills-manager-vnext-phase6.tasks.json'))) {
+        Add-Finding 'p6_manifest_forbidden' 'tasks/skills-manager-vnext-phase6.tasks.json' 'P6 manifest is forbidden while admission remains hold.'
+    }
 }
 
 $result = [pscustomobject][ordered]@{
     schema_version = 1
     status = if ($findings.Count -eq 0) { 'pass' } else { 'fail' }
-    track = 'powershell7_runtime_migration'
-    runtime_policy = if ($null -ne $manifest) { [string]$manifest.runtime_policy } else { 'unknown' }
-    tasks = 5
+    track = 'powershell_runtime_policy'
+    scope = if ($HistoricalMigration) { 'migration_history' } else { 'active_runtime' }
+    runtime_policy = if ($HistoricalMigration -and $null -ne $manifest) { [string]$manifest.runtime_policy } else { 'ps7_only' }
+    tasks = if ($HistoricalMigration) { 5 } else { 0 }
     done = $doneCount
-    historical_evidence = 'preserved'
-    typed_core_production_status = 'not_started'
+    historical_evidence = if ($HistoricalMigration) { 'preserved' } else { 'not_evaluated' }
+    typed_core_production_status = if ($HistoricalMigration) { 'not_started' } else { 'not_evaluated' }
     current_p6_admission_status = $currentP6AdmissionStatus
     powershell_files_scanned = $powershellFilesScanned
     writes_performed = 0
@@ -338,7 +317,7 @@ else {
     foreach ($finding in $findings) {
         Write-Host ("[{0}] {1}: {2}" -f $finding.code, $finding.path, $finding.message)
     }
-    Write-Host ("PowerShell runtime policy: status={0}; policy={1}; tasks={2}/{3}; findings={4}" -f $result.status, $result.runtime_policy, $result.done, $result.tasks, $findings.Count)
+    Write-Host ("PowerShell runtime policy: status={0}; scope={1}; policy={2}; tasks={3}/{4}; findings={5}" -f $result.status, $result.scope, $result.runtime_policy, $result.done, $result.tasks, $findings.Count)
 }
 
 if ($findings.Count -gt 0) { exit 1 }

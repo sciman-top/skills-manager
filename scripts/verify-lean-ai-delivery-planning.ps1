@@ -343,7 +343,7 @@ if ($null -ne $pilotRegistry) {
         'context_adapter',
         'skill_lifecycle_action'
     )
-    $allowedPilotStatuses = @('pilot_not_executed', 'collecting', 'review_ready', 'reviewed')
+    $allowedPilotStatuses = @('pilot_not_executed', 'collecting', 'deferred', 'review_ready', 'reviewed')
     $allowedSampleStatuses = @('observed', 'reviewed')
     $allowedComparisonModes = @('matched_historical_native_only', 'alternating_matched_task', 'descriptive_only')
     $allowedTruthLevels = @('not_verified', 'designed', 'implemented', 'repo_verified', 'host_loaded', 'live_accepted')
@@ -528,9 +528,9 @@ if ($null -ne $pilotRegistry) {
         Add-LeanPlanningFinding ([ref]$findings) 'pilot_sample_limit_exceeded' $paths['pilot'] `
             ('Pilot contains {0} samples, above target {1}.' -f $pilotSampleCount, $pilotSampleTarget)
     }
-    if ($pilotStatus -eq 'pilot_not_executed' -and $pilotSampleCount -ne 0) {
+    if ($pilotStatus -in @('pilot_not_executed', 'deferred') -and $pilotSampleCount -ne 0) {
         Add-LeanPlanningFinding ([ref]$findings) 'unexecuted_pilot_has_samples' $paths['pilot'] `
-            'pilot_not_executed cannot contain samples.'
+            ('{0} cannot contain samples.' -f $pilotStatus)
     }
     if ($pilotStatus -in @('review_ready', 'reviewed')) {
         if ($countedPilotSamples.Count -ne $pilotSampleTarget) {

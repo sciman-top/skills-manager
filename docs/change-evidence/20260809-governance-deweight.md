@@ -1,7 +1,7 @@
 # Governance Deweight Evidence
 
 **Date**: 2026-08-09
-**Scope**: engineering constitution, planning truth, default quality-gate composition, agent-workflow advisory verification
+**Scope**: engineering constitution, planning truth, receipt-aware quality-gate composition, agent-workflow advisory verification
 **Maximum claim**: repository governance reduction verified by focused tests; host loading, invocation, business acceptance, and final full-gate status remain independently authoritative.
 
 ## Decision
@@ -37,7 +37,7 @@ Measured against the slice baseline `7e765d8f` and the pre-advisory commit `9acb
 | advisory exact literal checks | 79 | 18 | 61 checks |
 | default full gate stages | 17 | 16 | 1 completed duplicate stage |
 
-The current project `AGENTS.md` is 8,373 bytes, 81.8% of its 10 KiB project budget, below the 85% warning threshold. It states that manifests own dynamic truth, plan/todo are indexes, and the P6 verifier is explicit historical/migration diagnostics.
+The current project `AGENTS.md` is 8,503 bytes, 83.0% of its 10 KiB project budget, below the 85% warning threshold. It states that manifests own dynamic truth, plan/todo are indexes, and the P6 verifier is explicit historical/migration diagnostics.
 
 ## TDD evidence
 
@@ -61,6 +61,10 @@ Agent-workflow advisory:
 Fresh combined verification after the rule-text follow-up passed all eight affected test files at `150/150`. The vNext, explicit P6 historical, maintenance, typed-core, PowerShell runtime, and agent-workflow verifiers all returned pass with zero findings; `build.ps1` also completed without tracked generated drift.
 
 Governance-decrease reinforcement reused those same surfaces: `build.ps1` exited 0, `ProductPlanning.Tests.ps1` passed `20/20`, and `verify-vnext-planning.ps1 -Json` returned `pass=true` with zero findings. The existing planning verifier now rejects removal of the stable same-risk governance-decrease clause; no additional test file, verifier, schema, receipt type, or full-gate stage was created.
+
+Receipt-aware closeout then removed another repeated cost without weakening source truth: `-ReuseCurrentReceipt` accepts only an exact-current `full/passed` immutable receipt with the same dirty-worktree policy, falls through to a fresh full run on any mismatch, and remains mutually exclusive with explicit `-ForceFresh`. The test runner keeps its production default timeout at 180 seconds while allowing a one-second synthetic timeout and condition-based mutex handshake, replacing fixed waits and nondeterministic completion-order assertions.
+
+The inactive M1 registry also moved from `collecting (0/10)` to `deferred (0/10)` because it has neither an active owner nor a real-task collection task; both are required to resume it. `HostNativeSkillLifecyclePlanning.Tests.ps1` and `LeanAiDeliveryPlanning.Tests.ps1` remain explicit historical/migration diagnostics but no longer run in every default full suite. Stable focused verification passed `119/119` across product planning, lean-delivery planning, host-native lifecycle planning, typed-core shadow, active PowerShell runtime policy, explicit PowerShell migration history, agent-workflow advisory, receipt integrity, and quality-gate scripts. `build.ps1` and all four explicit planning verifiers passed with zero findings.
 
 An isolated-worktree quick run passed build, repo hygiene, and generated sync, then stopped at workspace-lock parity because ignored `vendor/agent-skills` was not materialized in that temporary worktree. This is setup evidence, not a passed quick receipt and not a source failure; final authority is deferred to the integrated primary workspace, which retains the repository's vendor/lock materialization.
 

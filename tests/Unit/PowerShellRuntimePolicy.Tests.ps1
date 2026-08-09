@@ -14,18 +14,6 @@ function New-PowerShellRuntimePolicyFixture([string]$Name) {
     New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null
 
     foreach ($relativePath in @(
-        'tasks/skills-manager-vnext-powershell7-migration.tasks.json',
-        'tasks/skills-manager-vnext-typed-core-pilot.tasks.json',
-        'tasks/skills-manager-vnext-phase0.tasks.json',
-        'docs/superpowers/specs/2026-08-05-powershell-7-only-runtime-migration.md',
-        'docs/superpowers/specs/2026-08-03-lean-ai-delivery-maintenance-design.md',
-        'docs/change-evidence/20260805-powershell-7-only-runtime-migration.md',
-        'docs/runbooks/powershell-runtime-compatibility.md',
-        'docs/product/skills-manager-vnext-prd.md',
-        'docs/product/skills-manager-vnext-architecture.md',
-        'docs/product/skills-manager-vnext-roadmap.md',
-        'tasks/plan.md',
-        'tasks/todo.md',
         'AGENTS.md',
         'RELEASE_TEMPLATE.md',
         'src/Version.ps1',
@@ -37,8 +25,7 @@ function New-PowerShellRuntimePolicyFixture([string]$Name) {
         'skills.ps1',
         '.github/workflows/ci.yml',
         'azure-pipelines.yml',
-        '.gitlab-ci.yml',
-        'scripts/quality/run-local-quality-gates.ps1'
+        '.gitlab-ci.yml'
     )) {
         $source = Join-Path $repoRoot $relativePath
         $destination = Join-Path $fixtureRoot $relativePath
@@ -66,30 +53,12 @@ Describe 'PowerShell 7-only runtime policy verifier' {
 
         $result.exit_code | Should Be 0
         $parsed.status | Should Be 'pass'
+        $parsed.scope | Should Be 'active_runtime'
         $parsed.runtime_policy | Should Be 'ps7_only'
-        $parsed.tasks | Should Be 5
-        $parsed.done | Should Be 5
-        $parsed.historical_evidence | Should Be 'preserved'
-        $parsed.typed_core_production_status | Should Be 'not_started'
-        $parsed.current_p6_admission_status | Should Be 'admitted'
+        $parsed.tasks | Should Be 0
+        $parsed.historical_evidence | Should Be 'not_evaluated'
+        $parsed.powershell_files_scanned | Should BeGreaterThan 0
         @($parsed.findings).Count | Should Be 0
-    }
-
-    It 'accepts plan and todo as stable indexes without copied PS7 task status' {
-        $fixtureRoot = New-PowerShellRuntimePolicyFixture 'manifest-only-task-truth'
-        foreach ($relativePath in @('tasks/plan.md', 'tasks/todo.md')) {
-            $path = Join-Path $fixtureRoot $relativePath
-            $text = Get-Content -LiteralPath $path -Raw
-            $text = $text.Replace('**powershell_runtime_status**: ps7_only; repo_verified', '')
-            foreach ($id in @('SMV-PS7-001', 'SMV-PS7-002', 'SMV-PS7-003', 'SMV-PS7-004', 'SMV-PS7-005')) { $text = $text.Replace($id, '') }
-            Set-Content -LiteralPath $path -Value $text -Encoding UTF8
-        }
-
-        $result = Invoke-PowerShellRuntimePolicyVerifier $fixtureRoot
-        $parsed = $result.output | ConvertFrom-Json
-
-        $result.exit_code | Should Be 0
-        $parsed.status | Should Be 'pass'
     }
 
     It 'keeps mutation fixtures focused instead of copying the multi-megabyte generated bundle' {
@@ -185,40 +154,4 @@ Describe 'PowerShell 7-only runtime policy verifier' {
         @($parsed.findings | Where-Object { $_.code -eq 'legacy_runtime_invocation_detected' -and $_.path -eq 'skills.ps1' }).Count | Should Be 0
     }
 
-    It 'fails closed when a current truth surface restores the bounded-smoke policy' {
-        $fixtureRoot = New-PowerShellRuntimePolicyFixture 'current-policy'
-        $path = Join-Path $fixtureRoot 'docs\superpowers\specs\2026-08-03-lean-ai-delivery-maintenance-design.md'
-        $text = (Get-Content -LiteralPath $path -Raw).Replace('POWERSHELL_COMPATIBILITY_STATUS: ps7_only', 'POWERSHELL_COMPATIBILITY_STATUS: ps7_primary_ps51_bounded_smoke')
-        Set-Content -LiteralPath $path -Value $text -Encoding UTF8
-
-        $result = Invoke-PowerShellRuntimePolicyVerifier $fixtureRoot
-        $parsed = $result.output | ConvertFrom-Json
-        $result.exit_code | Should Be 1
-        @($parsed.findings | Where-Object { $_.code -in @('current_policy_missing', 'stale_current_policy_detected') }).Count | Should Be 2
-    }
-
-    It 'fails closed when historical Phase 0 compatibility evidence is erased' {
-        $fixtureRoot = New-PowerShellRuntimePolicyFixture 'historical-truth'
-        $path = Join-Path $fixtureRoot 'tasks\skills-manager-vnext-phase0.tasks.json'
-        Set-Content -LiteralPath $path -Value '{"schema_version":1,"tasks":[]}' -Encoding UTF8
-
-        $result = Invoke-PowerShellRuntimePolicyVerifier $fixtureRoot
-        $parsed = $result.output | ConvertFrom-Json
-        $result.exit_code | Should Be 1
-        @($parsed.findings | Where-Object code -eq 'historical_truth_missing').Count | Should Be 1
-    }
-
-    It 'fails closed when PS7 support contraction is misreported as TC2 integration' {
-        $fixtureRoot = New-PowerShellRuntimePolicyFixture 'typed-core-boundary'
-        $path = Join-Path $fixtureRoot 'tasks\skills-manager-vnext-typed-core-pilot.tasks.json'
-        $manifest = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
-        $manifest.tc2_status = 'repo_verified'
-        $manifest.production_integration_status = 'integrated'
-        $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
-
-        $result = Invoke-PowerShellRuntimePolicyVerifier $fixtureRoot
-        $parsed = $result.output | ConvertFrom-Json
-        $result.exit_code | Should Be 1
-        @($parsed.findings | Where-Object code -eq 'typed_core_boundary_invalid').Count | Should Be 1
-    }
 }

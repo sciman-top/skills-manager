@@ -421,7 +421,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - P5-local profile reconciliation advisor 只诊断 profile drift 并校验宿主语义 proposal；它不自动优化 `skills.json`、不热切换 profile、不实现 apply，也不构成 P6 或 live acceptance。
 - P5-local profile optimization canary 在 advisor 之后增加显式 token、非活动 profile 的 bounded apply、runtime receipt、fresh-task replay 和失败回滚；它不自行调用宿主 AI、不永久切换 active profile，也不构成 P6 或 live acceptance。
 - P5-local follow-up 已把 canonical inventory delta 接到 projection 主链的 advisory signal；宿主在同一任务边界可据此启动 reconciliation，但 profile proposal/apply 仍遵守 ADR-SMV-018/019，不等于静默写配置。
-- P5 后的 `maintenance_design` 已建立 Lean Delivery advisory 规划契约，并由独立 registry 启动 M1 `collecting (0/10)`；它不是新 Phase，不改变 P5/P6 状态，也不证明 pilot 已执行、完成或产生业务效果。
+- P5 后的 `maintenance_design` 已建立 Lean Delivery advisory 规划契约；M1 registry 当前为 `deferred (0/10)`，因为没有 active owner/collection task，只有显式建立两者后才恢复。它不是新 Phase，也不证明 pilot 已执行、完成或产生业务效果。
 - `maintenance_design` M0.2 只补强 host-owned coordination、single-writer write-set admission、Git freshness/CAS 语义、tool disposition 和 context-adapter admission；不引入 coordinator/lease runtime，也不安装 Trellis、AGOS、GBrain、CodeGraphContext、Understand Anything 或 OptSkills。
 - `maintenance_design` M0.3 只落盘 host-owned TaskGraph/model policy、三档 Sol 软锚点、failure escalation 和 typed-core 迁移决策；不执行动态路由、不修改 custom-agent/host 配置、不启动 C#/.NET PoC 或替换 PowerShell。Radar automation 已删除；旧 Luna/Terra/Radar 记录只作为历史 receipt。
 - GUI、daemon、远端协作、数据库和 domain core 重写均为 conditional，不进入当前承诺。

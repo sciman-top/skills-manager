@@ -138,7 +138,7 @@ exit 0
         $parsed.typed_core_status | Should Be 'tc1_shadow_repo_verified'
         $parsed.typed_core_production_status | Should Be 'not_started'
         $parsed.powershell_compatibility_status | Should Be 'ps7_only'
-        $parsed.pilot_status | Should Be 'collecting'
+        $parsed.pilot_status | Should Be 'deferred'
         $parsed.pilot_sample_target | Should Be 10
         $parsed.pilot_sample_count | Should Be 0
         $parsed.counted_pilot_sample_count | Should Be 0
@@ -205,7 +205,7 @@ exit 0
         $registry.samples = @(1..9 | ForEach-Object { New-LeanPilotSample $_ $registry.required_categories[$_ - 1] })
         Save-LeanPilotRegistry $countRoot $registry
         $specPath = Join-Path $countRoot $maintenanceSpecRelative
-        Set-Content -LiteralPath $specPath -Value ((Get-Content -LiteralPath $specPath -Raw).Replace('PILOT_STATUS: collecting', 'PILOT_STATUS: review_ready')) -Encoding UTF8
+        Set-Content -LiteralPath $specPath -Value ((Get-Content -LiteralPath $specPath -Raw).Replace('PILOT_STATUS: deferred', 'PILOT_STATUS: review_ready')) -Encoding UTF8
         $countFindings = @(((Invoke-LeanPlanningVerifier $countRoot).output | ConvertFrom-Json).findings)
         @($countFindings | Where-Object code -eq 'pilot_review_sample_count_incomplete').Count | Should Be 1
 
@@ -215,7 +215,7 @@ exit 0
         $registry.samples = @(1..10 | ForEach-Object { New-LeanPilotSample $_ 'ambiguous_requirement' })
         Save-LeanPilotRegistry $coverageRoot $registry
         $specPath = Join-Path $coverageRoot $maintenanceSpecRelative
-        Set-Content -LiteralPath $specPath -Value ((Get-Content -LiteralPath $specPath -Raw).Replace('PILOT_STATUS: collecting', 'PILOT_STATUS: review_ready')) -Encoding UTF8
+        Set-Content -LiteralPath $specPath -Value ((Get-Content -LiteralPath $specPath -Raw).Replace('PILOT_STATUS: deferred', 'PILOT_STATUS: review_ready')) -Encoding UTF8
         $coverageFindings = @(((Invoke-LeanPlanningVerifier $coverageRoot).output | ConvertFrom-Json).findings)
         @($coverageFindings | Where-Object code -eq 'pilot_review_category_coverage_incomplete').Count | Should Be 1
     }
@@ -448,7 +448,7 @@ exit 0
         $fixtureRoot = New-LeanPlanningFixture 'pilot-live-claims'
         $specPath = Join-Path $fixtureRoot $maintenanceSpecRelative
         $spec = (Get-Content -LiteralPath $specPath -Raw).
-            Replace('PILOT_STATUS: collecting', 'PILOT_STATUS: reviewed').
+            Replace('PILOT_STATUS: deferred', 'PILOT_STATUS: reviewed').
             Replace('LIVE_ACCEPTANCE_STATUS: not_run', 'LIVE_ACCEPTANCE_STATUS: live_accepted')
         Set-Content -LiteralPath $specPath -Value $spec -Encoding UTF8
         $findings = @(((Invoke-LeanPlanningVerifier $fixtureRoot).output | ConvertFrom-Json).findings)

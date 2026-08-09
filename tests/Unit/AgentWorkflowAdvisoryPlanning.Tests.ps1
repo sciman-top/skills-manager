@@ -31,7 +31,6 @@ function New-AgentWorkflowAdvisoryFixture([string]$Name) {
             'src/Main.ps1',
             'src/Version.ps1',
             'build.ps1',
-            'scripts/quality/run-local-quality-gates.ps1',
             'tests/Unit/AgentWorkflowContracts.Tests.ps1',
             'tests/fixtures/agent-workflow/valid-request.json',
             'tests/fixtures/agent-workflow/invalid-request.json'
@@ -139,16 +138,6 @@ Describe 'Agent workflow advisory planning verifier' {
 
         $parsed = (Invoke-AgentWorkflowAdvisoryVerifier $fixtureRoot).output | ConvertFrom-Json
         @($parsed.findings | Where-Object code -eq 'active_radar_decision_path_detected').Count | Should BeGreaterThan 0
-    }
-
-    It 'requires the advisory verifier in the full quality gate' {
-        $fixtureRoot = New-AgentWorkflowAdvisoryFixture 'full-gate'
-        $path = Join-Path $fixtureRoot 'scripts\quality\run-local-quality-gates.ps1'
-        $text = (Get-Content -LiteralPath $path -Raw).Replace("    Invoke-QualityGate 'agent-workflow-advisory' { & .\scripts\verify-agent-workflow-advisory.ps1 }", '')
-        Set-Content -LiteralPath $path -Value $text -Encoding UTF8
-
-        $parsed = (Invoke-AgentWorkflowAdvisoryVerifier $fixtureRoot).output | ConvertFrom-Json
-        @($parsed.findings | Where-Object code -eq 'full_gate_integration_missing').Count | Should Be 1
     }
 
     It 'does not lock the advisory verifier to behavior-test implementation literals' {

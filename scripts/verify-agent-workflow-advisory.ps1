@@ -58,7 +58,6 @@ $paths = [ordered]@{
     main = 'src/Main.ps1'
     version = 'src/Version.ps1'
     build = 'build.ps1'
-    quality = 'scripts/quality/run-local-quality-gates.ps1'
     contractTests = 'tests/Unit/AgentWorkflowContracts.Tests.ps1'
     validFixture = 'tests/fixtures/agent-workflow/valid-request.json'
     invalidFixture = 'tests/fixtures/agent-workflow/invalid-request.json'
@@ -151,8 +150,7 @@ foreach ($required in @(
         @{ key='roadmap'; literal='agent_workflow_advisory_runtime'; code='roadmap_track_missing' },
         @{ key='productIndex'; literal='Agent workflow advisory runtime'; code='product_index_missing' },
         @{ key='readme'; literal='agent-plan'; code='readme_command_missing' },
-        @{ key='readmeEn'; literal='agent-plan'; code='readme_command_missing' },
-        @{ key='quality'; literal="Invoke-QualityGate 'agent-workflow-advisory' { & .\scripts\verify-agent-workflow-advisory.ps1 }"; code='full_gate_integration_missing' }
+        @{ key='readmeEn'; literal='agent-plan'; code='readme_command_missing' }
     )) { Require-Literal $content[$required.key] $required.literal $paths[$required.key] $required.code }
 
 foreach ($required in @(

@@ -5,7 +5,7 @@
 **base_phase**: `P5`
 **status**: `repo_verified`
 **P6_ADMISSION_STATUS: hold**
-**PILOT_STATUS: collecting**
+**PILOT_STATUS: deferred**
 **RUNTIME_IMPLEMENTATION_STATUS: no_runtime_implementation**
 **LIVE_ACCEPTANCE_STATUS: not_run**
 **METRICS_MODE: observe_only**
@@ -232,7 +232,7 @@ M1 需要 10 个真实任务，覆盖模糊需求、从零主链、缺陷修复�
 
 每个 sample 的 `observations` 还必须记录：`coordination_mode`（`single_agent | read_only_panel | isolated_parallel | sequential_shared_write`）、`shared_write_set_policy`（`single_writer | not_applicable`）、`tool_dispositions[]`（只允许 adopt/adapt/defer/reject）、`context_adapter`（`none | repo_native | external_read_only`）和 `skill_lifecycle_action`（`none | candidate | replay | shadow | canary | promote | revise | retire`）。这些观察允许 `none/not_applicable`，不得为了填表强行使用 Agent 或工具，也不成为 metrics completion gate。
 
-pilot 先 observe，不随机宣称因果，不设未经 baseline 的硬阈值，不因指标跳过安全/兼容门禁。baseline 优先使用近期可比 native-only 历史任务或交替匹配任务；不可比时保持 `descriptive_only`，不要求把同一任务机械执行两遍。M3 以净收益评审：保留真正减少主链时间/返工且维护成本可接受的最小部分；修订触发或文案漂移；删除无收益或被模型/宿主覆盖的流程。当前状态是 authorized/collecting 0/10，只证明收集合同已启动，不能声称 pilot 已执行或指标改善。
+pilot 先 observe，不随机宣称因果，不设未经 baseline 的硬阈值，不因指标跳过安全/兼容门禁。baseline 优先使用近期可比 native-only 历史任务或交替匹配任务；不可比时保持 `descriptive_only`，不要求把同一任务机械执行两遍。M3 以净收益评审：保留真正减少主链时间/返工且维护成本可接受的最小部分；修订触发或文案漂移；删除无收益或被模型/宿主覆盖的流程。当前状态是 `deferred 0/10`：没有 active owner 或 real-task collection task，不再作为日常治理活动面；只有同时明确 owner 与真实任务收集任务时才恢复。不能声称 pilot 已执行、完成或产生指标改善。
 
 M0/M2 不再被误写为串行前置关系；证据流是 `M0 -> M1 pilot -> M3` 与 `P5 real defects -> M2 correction -> M3`。M3 首轮复用现有文档字段评审，不新建 lifecycle registry；候选至少包括 `session_plan`、`preheat_recommendation`、hierarchical router/catalog、plugin fixture export、Rule Estate multi-target apply、maintenance companion verifier，以及规划/evidence 资产自身。每项只记录 `unique_value / native_equivalent / real_consumers / maintenance_cost / retirement_trigger / latest_evidence`。
 
@@ -310,4 +310,4 @@ manifest 是 M0/M0.2/M0.3 依赖、write set、步骤、验证、回滚、eviden
 
 M0/M0.2 历史完成真值保持不变。M0.3 完成仅当：现有 PRD/架构/路线图仍为唯一产品真源；maintenance spec/manifest/plan/todo 与 M1 registry 完整；M0 四项、M0.2 四项和 M0.3 三项 planning tasks 均为 done；三个 evidence group 各自可追；错误 Git CAS/shared-write、runtime model routing、stale Radar、无 failure packet 升档、PowerShell/typed-core 双真源、P6/runtime/live 越级的负向 tests fail-closed；新旧 verifier、focused tests 和唯一 full gate 通过；P5 保持 5/5 `repo_verified`；P6 保持 hold 且不存在 P6 manifest；pilot 为 collecting 0/10，M0.3 closeout 历史保持 `M0_3_TYPED_CORE_STATUS=poc_not_started`。2026-08-05 的独立 adjacent follow-up 已把当前状态推进到 `TYPED_CORE_STATUS=tc1_shadow_repo_verified`，但生产迁移仍为 `TYPED_CORE_PRODUCTION_STATUS=not_started`；live/runtime 状态保持本文件头部声明。
 
-允许的完成表述是“maintenance design M0/M0.2/M0.3 与 M1 collecting contract repo_verified；独立 adjacent track 已完成 TC1 shadow PoC”。禁止表述为 coordinator/lease/model-routing runtime、Radar 模型选择效果已证明、custom-agent/host config 已修改、typed core 已接入 CLI/生产、PowerShell 已替换、Trellis/AGOS/GBrain/code graph 已安装，多 Agent/工具组合收益已证明，10-task pilot 已执行/完成、P6 已准入或产品已 `live_accepted`。
+允许的当前表述是“maintenance design M0/M0.2/M0.3 contract repo_verified；M1 collection deferred 0/10；独立 adjacent track 已完成 TC1 shadow PoC”。禁止表述为 coordinator/lease/model-routing runtime、Radar 模型选择效果已证明、custom-agent/host config 已修改、typed core 已接入 CLI/生产、PowerShell 已替换、Trellis/AGOS/GBrain/code graph 已安装，多 Agent/工具组合收益已证明，10-task pilot 已执行/完成或产品已 `live_accepted`。

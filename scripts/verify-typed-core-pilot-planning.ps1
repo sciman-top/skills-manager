@@ -127,7 +127,7 @@ if ($productionSource -match '(?i)typed-core|skills-manager-typed-core|verify-ty
 }
 try {
     $pilot = $content.pilot | ConvertFrom-Json
-    if ([string]$pilot.pilot_status -ne 'collecting' -or @($pilot.samples).Count -ne 0) {
+    if ([string]$pilot.pilot_status -ne 'deferred' -or @($pilot.samples).Count -ne 0) {
         Add-Finding 'm1_status_changed' $paths.pilot 'TC0/TC1 self-referential work must not count as an M1 sample.'
     }
 }

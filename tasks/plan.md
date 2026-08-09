@@ -16,7 +16,7 @@
 | --- | --- |
 | Current P6 lifecycle | `tasks/skills-manager-vnext-phase6.tasks.json` |
 | Lean delivery maintenance | `tasks/skills-manager-vnext-maintenance-design.tasks.json` |
-| Lean delivery pilot | `tasks/skills-manager-vnext-lean-delivery-pilot.json` |
+| Lean delivery pilot (deferred) | `tasks/skills-manager-vnext-lean-delivery-pilot.json` |
 | Agent workflow advisory | `tasks/skills-manager-vnext-agent-workflow-advisory.tasks.json` |
 | Typed-core shadow pilot | `tasks/skills-manager-vnext-typed-core-pilot.tasks.json` |
 | PowerShell 7 migration | `tasks/skills-manager-vnext-powershell7-migration.tasks.json` |
@@ -30,7 +30,7 @@
 1. Read the target manifest fresh and select its first task whose status is not terminal and whose dependencies are satisfied.
 2. Freeze the declared write set and stop conditions before editing.
 3. Run affected build, tests, and contracts during iteration.
-4. Create a candidate commit, then run the repository full quality gate exactly once for closeout.
+4. Create a candidate commit, then enter the receipt-aware full quality gate once; it reuses only an exact-current passed receipt and otherwise runs fresh.
 5. Treat the immutable current receipt as repository evidence only; host and live acceptance remain separate.
 
 ## Failure routing

@@ -3,7 +3,7 @@
   "program_id": "skills-manager-vnext",
   "track": "lean_delivery_pilot",
   "base_phase": "P5",
-  "pilot_status": "collecting",
+  "pilot_status": "deferred",
   "sample_target": 10,
   "metrics_mode": "observe_only",
   "metrics_completion_gate": false,
@@ -47,7 +47,8 @@
     "The M0.1 correction, M0.2 engineered-workflow clarification, and this registry bootstrap are self-referential maintenance work and do not count toward the ten real-task samples.",
     "Samples are appended only after a real task reaches an evidence-backed stopping point; candidate or retrospective synthetic rows are forbidden.",
     "Each future sample records coordination_mode, shared_write_set_policy, tool_dispositions, context_adapter, and skill_lifecycle_action; none/not_applicable values are valid and must not trigger unnecessary agents or tools.",
-    "collecting does not mean the pilot has executed or demonstrated benefit."
+    "The pilot is deferred because no active owner or real-task collection task exists; reopen only with both explicitly assigned.",
+    "Deferred does not mean the pilot executed, completed, or demonstrated benefit."
   ],
   "samples": []
 }
