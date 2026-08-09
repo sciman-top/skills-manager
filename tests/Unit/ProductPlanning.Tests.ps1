@@ -75,6 +75,30 @@ Describe 'vNext product planning contract' {
         $parsed.live_accepted | Should Be 'not_accepted'
     }
 
+    It 'requires the unique top-level engineering constitution in the PRD' {
+        $fixtureRoot = New-PlanningFixture 'missing-engineering-constitution'
+        $path = Join-Path $fixtureRoot 'docs\product\skills-manager-vnext-prd.md'
+        $content = (Get-Content -LiteralPath $path -Raw).Replace('### PP-000 Host-native-first main-chain-first self-retiring', '### PP-000 removed')
+        Set-Content -LiteralPath $path -Value $content -Encoding UTF8
+
+        $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
+
+        @($parsed.findings | Where-Object code -eq 'engineering_constitution_missing').Count | Should Be 1
+        $parsed.pass | Should Be $false
+    }
+
+    It 'requires the repository action mapping without duplicating the constitution' {
+        $fixtureRoot = New-PlanningFixture 'missing-engineering-constitution-mapping'
+        $path = Join-Path $fixtureRoot 'AGENTS.md'
+        $content = (Get-Content -LiteralPath $path -Raw).Replace('TOP_LEVEL_ENGINEERING_PRINCIPLE: PP-000', 'TOP_LEVEL_ENGINEERING_PRINCIPLE: missing')
+        Set-Content -LiteralPath $path -Value $content -Encoding UTF8
+
+        $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
+
+        @($parsed.findings | Where-Object code -eq 'engineering_constitution_mapping_missing').Count | Should Be 1
+        $parsed.pass | Should Be $false
+    }
+
     It 'requires a candidate commit before the exact-source full gate and push' {
         $agentsPath = Join-Path $repoRoot 'AGENTS.md'
         $content = Get-Content -LiteralPath $agentsPath -Raw

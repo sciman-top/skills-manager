@@ -25,6 +25,7 @@
 - 当前工作树可能含用户 audit/MCP 与第三方 import 更新；先用 `git diff` 分界，不回退、不重排、不纳入本次回滚。
 - Pester、Python、GitHub 或宿主工具缺失时按 N/A 留痕，不为纯规则改动擅自安装或升级依赖。
 ### B.1 AI 编码范围与复杂度
+- `TOP_LEVEL_ENGINEERING_PRINCIPLE: PP-000`：唯一正文在 PRD；任务以当前 manifest/TaskGraph 声明主链、原生复用、最低验证和退役条件，`verify-vnext-planning.ps1`/`verify-agent-workflow-advisory.ps1` 机械阻断，closeout 仍只走 full gate；不得另建治理或运行控制面。
 - 编码前写清问题/用户、复用结论、最小方案、write set、停止条件；证据不足则保持设计态/deferred。先跑通用户、入口、seam、终态和证据构成的最薄真实主链，只前置安全/数据/不可逆契约和阻断项。
 - 新抽象只允许消除至少两个真实重复、隔离已证实风险、匹配稳定外部协议或降低量化热点；否则优先直接实现、删除或延后。
 - 迭代只跑受影响测试/contract，共享写入/config/generated seam 才升级 quick；full 仅在 closeout 跑一次，相关文件变化才重跑。测试覆盖真实输入和关键失败；一项风险用最低充分层级证明。
