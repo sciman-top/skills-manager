@@ -40,8 +40,89 @@ Describe 'Agent workflow advisory contracts' {
         $result = Test-AgentTaskGraphContract $graph
 
         $result.pass | Should Be $true
-        $graph.schema_version | Should Be 1
+        $graph.schema_version | Should Be 2
         (@($graph.tasks.task_id) -join ',') | Should Be 'discover,implement,document,integrate'
+    }
+
+    It 'accepts a direct fix without native or complexity admission' {
+        $graph = (Get-AgentWorkflowFixture 'valid-request.json').task_graph | ConvertTo-Json -Depth 50 | ConvertFrom-Json
+        $task = $graph.tasks[1]
+        $task.admission_scope = 'direct_fix'
+        $task.PSObject.Properties.Remove('native_baseline')
+        $task.PSObject.Properties.Remove('complexity_admission')
+
+        (Test-AgentTaskGraphContract $graph).pass | Should Be $true
+    }
+
+    It 'requires user-facing admission fields on the v2 standard path' {
+        $graph = (Get-AgentWorkflowFixture 'valid-request.json').task_graph | ConvertTo-Json -Depth 50 | ConvertFrom-Json
+        $graph.tasks[1].PSObject.Properties.Remove('user_outcome')
+
+        $result = Test-AgentTaskGraphContract $graph
+
+        @($result.findings | Where-Object code -eq 'user_outcome_required').Count | Should Be 1
+    }
+
+    It 'requires native evidence for capability governance and long-lived surfaces' {
+        $graph = (Get-AgentWorkflowFixture 'valid-request.json').task_graph | ConvertTo-Json -Depth 50 | ConvertFrom-Json
+        $graph.tasks[1].admission_scope = 'ai_capability'
+
+        $capability = Test-AgentTaskGraphContract $graph
+
+        @($capability.findings | Where-Object code -eq 'native_baseline_required').Count | Should Be 1
+
+        $graph.tasks[1].admission_scope = 'long_lived_surface'
+        $graph.tasks[1] | Add-Member -Force -NotePropertyName native_baseline -NotePropertyValue ([pscustomobject]@{
+            equivalent = 'none'
+            observed_gap = 'The host does not expose the required deterministic contract.'
+            evidence = @('official help and repository contract evidence')
+        })
+
+        $longLived = Test-AgentTaskGraphContract $graph
+
+        @($longLived.findings | Where-Object code -eq 'complexity_admission_required').Count | Should Be 1
+    }
+
+    It 'accepts a long-lived surface only with bounded complexity and retirement evidence' {
+        $graph = (Get-AgentWorkflowFixture 'valid-request.json').task_graph | ConvertTo-Json -Depth 50 | ConvertFrom-Json
+        $graph.tasks[1].admission_scope = 'long_lived_surface'
+        $graph.tasks[1] | Add-Member -Force -NotePropertyName native_baseline -NotePropertyValue ([pscustomobject]@{
+            equivalent = 'none'
+            observed_gap = 'The host does not expose the required deterministic contract.'
+            evidence = @('official help and repository contract evidence')
+        })
+        $graph.tasks[1] | Add-Member -Force -NotePropertyName complexity_admission -NotePropertyValue ([pscustomobject]@{
+            kind = 'two_real_repetitions'
+            evidence_refs = @('evidence://repeat-a', 'evidence://repeat-b')
+            real_consumers = @('consumer-a')
+            maintenance_cost = 'One focused validator and its contract tests.'
+            retirement_trigger = 'The host exposes an equivalent stable contract.'
+        })
+
+        (Test-AgentTaskGraphContract $graph).pass | Should Be $true
+    }
+
+    It 'rejects stage inversion and missing main-chain ancestry' {
+        $graph = (Get-AgentWorkflowFixture 'valid-request.json').task_graph | ConvertTo-Json -Depth 50 | ConvertFrom-Json
+        $graph.tasks[0].delivery_stage = 'release'
+        $graph.tasks[1].delivery_stage = 'main_chain'
+
+        $result = Test-AgentTaskGraphContract $graph
+
+        @($result.findings | Where-Object code -eq 'delivery_stage_dependency_invalid').Count | Should BeGreaterThan 0
+        @($result.findings | Where-Object code -eq 'delivery_stage_ancestor_missing').Count | Should BeGreaterThan 0
+    }
+
+    It 'preserves explicit TaskGraph v1 compatibility validation' {
+        $legacy = (Get-AgentWorkflowFixture 'valid-request.json').task_graph | ConvertTo-Json -Depth 50 | ConvertFrom-Json
+        $legacy.schema_version = 1
+        foreach ($task in @($legacy.tasks)) {
+            foreach ($field in @('delivery_stage', 'admission_scope', 'user_outcome', 'entrypoint', 'main_chain_checkpoint', 'reuse_decision', 'native_baseline', 'complexity_admission')) {
+                $task.PSObject.Properties.Remove($field)
+            }
+        }
+
+        (Test-AgentTaskGraphContract $legacy).pass | Should Be $true
     }
 
     It 'fails closed for unknown dependencies cycles and duplicate integration order' {

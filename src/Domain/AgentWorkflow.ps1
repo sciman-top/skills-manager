@@ -24,11 +24,12 @@ function New-AgentTaskGraph {
         [Parameter(Mandatory = $true)][string]$GraphId,
         [Parameter(Mandatory = $true)][string]$BaseRevision,
         [Parameter(Mandatory = $true)][string]$IntegrationOwner,
+        [ValidateSet(1, 2)][int]$SchemaVersion = 2,
         [object[]]$Tasks = @()
     )
     $normalizedTasks = @($Tasks | ForEach-Object { Copy-AgentWorkflowValue $_ } | Sort-Object { [int](Get-OperationObjectProperty $_ 'integration_order') }, { [string](Get-OperationObjectProperty $_ 'task_id') })
     return [pscustomobject][ordered]@{
-        schema_version = 1
+        schema_version = $SchemaVersion
         graph_id = $GraphId.Trim()
         base_revision = $BaseRevision.Trim()
         integration_owner = $IntegrationOwner.Trim()
@@ -39,7 +40,10 @@ function New-AgentTaskGraph {
 function Test-AgentTaskGraphContract($TaskGraph) {
     $findings = New-Object System.Collections.Generic.List[object]
     if ($null -eq $TaskGraph) { return New-OperationValidationResult @((New-OperationFinding 'task_graph_missing' 'error' '$' 'TaskGraph is required.')) }
-    if ((Get-OperationObjectProperty $TaskGraph 'schema_version') -ne 1) { $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only TaskGraph schema version 1 is supported.')) | Out-Null }
+    $schemaVersion = 0
+    if (-not [int]::TryParse([string](Get-OperationObjectProperty $TaskGraph 'schema_version'), [ref]$schemaVersion) -or $schemaVersion -notin @(1, 2)) {
+        $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only TaskGraph schema versions 1 and 2 are supported.')) | Out-Null
+    }
     foreach ($field in @('graph_id', 'base_revision', 'integration_owner')) {
         if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $TaskGraph $field))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Required TaskGraph field is missing.')) | Out-Null }
     }
@@ -49,6 +53,10 @@ function Test-AgentTaskGraphContract($TaskGraph) {
 
     $taskIndex = @{}
     $integrationOrders = @{}
+    $allowedDeliveryStages = @('discovery', 'main_chain', 'stabilize', 'refactor', 'release', 'operate')
+    $allowedAdmissionScopes = @('direct_fix', 'product_delivery', 'ai_capability', 'governance', 'long_lived_surface')
+    $allowedReuseDecisions = @('adopt', 'adapt', 'defer', 'reject')
+    $allowedComplexityKinds = @('two_real_repetitions', 'stable_external_protocol', 'proven_safety_or_data_seam', 'measured_hotspot')
     for ($i = 0; $i -lt @($tasks).Count; $i++) {
         $task = @($tasks)[$i]
         $taskId = ([string](Get-OperationObjectProperty $task 'task_id')).Trim()
@@ -63,6 +71,49 @@ function Test-AgentTaskGraphContract($TaskGraph) {
             if (-not (Test-OperationArray (Get-OperationObjectProperty $task $field))) { $findings.Add((New-OperationFinding 'array_type_invalid' 'error' ($path + '.' + $field) 'Task field must be an array.')) | Out-Null }
         }
         if (@((Get-OperationObjectProperty $task 'verification')).Count -eq 0) { $findings.Add((New-OperationFinding 'verification_required' 'error' ($path + '.verification') 'Every task requires explicit verification.')) | Out-Null }
+        if ($schemaVersion -eq 2) {
+            $deliveryStage = [string](Get-OperationObjectProperty $task 'delivery_stage')
+            $admissionScope = [string](Get-OperationObjectProperty $task 'admission_scope')
+            $reuseDecision = [string](Get-OperationObjectProperty $task 'reuse_decision')
+            if ($deliveryStage -notin $allowedDeliveryStages) { $findings.Add((New-OperationFinding 'delivery_stage_invalid' 'error' ($path + '.delivery_stage') 'Task delivery_stage is invalid.')) | Out-Null }
+            if ($admissionScope -notin $allowedAdmissionScopes) { $findings.Add((New-OperationFinding 'admission_scope_invalid' 'error' ($path + '.admission_scope') 'Task admission_scope is invalid.')) | Out-Null }
+            foreach ($field in @('user_outcome', 'entrypoint', 'main_chain_checkpoint')) {
+                if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $task $field))) {
+                    $findings.Add((New-OperationFinding ('{0}_required' -f $field) 'error' ($path + '.' + $field) ('Task {0} is required for TaskGraph v2.' -f $field))) | Out-Null
+                }
+            }
+            if ($reuseDecision -notin $allowedReuseDecisions) { $findings.Add((New-OperationFinding 'reuse_decision_invalid' 'error' ($path + '.reuse_decision') 'Task reuse_decision is invalid.')) | Out-Null }
+
+            $nativeBaseline = Get-OperationObjectProperty $task 'native_baseline'
+            if ($admissionScope -in @('ai_capability', 'governance', 'long_lived_surface') -and $null -eq $nativeBaseline) {
+                $findings.Add((New-OperationFinding 'native_baseline_required' 'error' ($path + '.native_baseline') 'Capability, governance, and long-lived surface tasks require a native baseline.')) | Out-Null
+            }
+            elseif ($null -ne $nativeBaseline) {
+                $nativeEvidence = Get-OperationObjectProperty $nativeBaseline 'evidence'
+                if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $nativeBaseline 'equivalent')) -or
+                    [string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $nativeBaseline 'observed_gap')) -or
+                    -not (Test-OperationArray $nativeEvidence) -or @($nativeEvidence).Count -eq 0) {
+                    $findings.Add((New-OperationFinding 'native_baseline_invalid' 'error' ($path + '.native_baseline') 'Native baseline requires equivalent, observed_gap, and non-empty evidence.')) | Out-Null
+                }
+            }
+
+            $complexityAdmission = Get-OperationObjectProperty $task 'complexity_admission'
+            if ($admissionScope -eq 'long_lived_surface' -and $null -eq $complexityAdmission) {
+                $findings.Add((New-OperationFinding 'complexity_admission_required' 'error' ($path + '.complexity_admission') 'Long-lived surfaces require bounded complexity and retirement evidence.')) | Out-Null
+            }
+            elseif ($null -ne $complexityAdmission) {
+                $complexityKind = [string](Get-OperationObjectProperty $complexityAdmission 'kind')
+                $evidenceRefs = Get-OperationObjectProperty $complexityAdmission 'evidence_refs'
+                $realConsumers = Get-OperationObjectProperty $complexityAdmission 'real_consumers'
+                if ($complexityKind -notin $allowedComplexityKinds -or
+                    -not (Test-OperationArray $evidenceRefs) -or @($evidenceRefs).Count -eq 0 -or
+                    -not (Test-OperationArray $realConsumers) -or @($realConsumers).Count -eq 0 -or
+                    [string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $complexityAdmission 'maintenance_cost')) -or
+                    [string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $complexityAdmission 'retirement_trigger'))) {
+                    $findings.Add((New-OperationFinding 'complexity_admission_invalid' 'error' ($path + '.complexity_admission') 'Complexity admission requires a supported kind, evidence, consumers, maintenance cost, and retirement trigger.')) | Out-Null
+                }
+            }
+        }
         if ([string](Get-OperationObjectProperty $task 'risk') -notin @('low', 'medium', 'high')) { $findings.Add((New-OperationFinding 'risk_invalid' 'error' ($path + '.risk') 'Task risk is invalid.')) | Out-Null }
         if ([string](Get-OperationObjectProperty $task 'ambiguity') -notin @('low', 'medium', 'high')) { $findings.Add((New-OperationFinding 'ambiguity_invalid' 'error' ($path + '.ambiguity') 'Task ambiguity is invalid.')) | Out-Null }
         if ((Get-OperationObjectProperty $task 'parallelizable') -isnot [bool]) { $findings.Add((New-OperationFinding 'parallelizable_invalid' 'error' ($path + '.parallelizable') 'parallelizable must be a boolean.')) | Out-Null }
@@ -88,6 +139,38 @@ function Test-AgentTaskGraphContract($TaskGraph) {
             $dependencyId = ([string]$dependency).Trim().ToLowerInvariant()
             if (-not $taskIndex.ContainsKey($dependencyId)) { $findings.Add((New-OperationFinding 'dependency_unknown' 'error' ('$.tasks[{0}].depends_on' -f [string](Get-OperationObjectProperty $task 'task_id')) 'Task dependency is not declared.')) | Out-Null }
             elseif ($dependencyId -eq $taskKey) { $findings.Add((New-OperationFinding 'dependency_self_reference' 'error' ('$.tasks[{0}].depends_on' -f [string](Get-OperationObjectProperty $task 'task_id')) 'Task cannot depend on itself.')) | Out-Null }
+        }
+    }
+
+    if ($schemaVersion -eq 2) {
+        $deliveryStageRanks = @{ discovery = 0; main_chain = 1; stabilize = 2; refactor = 3; release = 4; operate = 5 }
+        foreach ($taskKey in @($taskIndex.Keys)) {
+            $task = $taskIndex[$taskKey]
+            $taskStage = [string](Get-OperationObjectProperty $task 'delivery_stage')
+            if (-not $deliveryStageRanks.ContainsKey($taskStage)) { continue }
+            $ancestorStages = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            $visitedAncestors = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            $pendingAncestors = New-Object System.Collections.Generic.Queue[string]
+            foreach ($dependency in @((Get-OperationObjectProperty $task 'depends_on'))) { $pendingAncestors.Enqueue(([string]$dependency).ToLowerInvariant()) }
+            while ($pendingAncestors.Count -gt 0) {
+                $dependencyKey = $pendingAncestors.Dequeue()
+                if (-not $taskIndex.ContainsKey($dependencyKey) -or -not $visitedAncestors.Add($dependencyKey)) { continue }
+                $dependencyTask = $taskIndex[$dependencyKey]
+                $dependencyStage = [string](Get-OperationObjectProperty $dependencyTask 'delivery_stage')
+                if ($deliveryStageRanks.ContainsKey($dependencyStage)) {
+                    $ancestorStages.Add($dependencyStage) | Out-Null
+                    if ([int]$deliveryStageRanks[$taskStage] -lt [int]$deliveryStageRanks[$dependencyStage]) {
+                        $findings.Add((New-OperationFinding 'delivery_stage_dependency_invalid' 'error' ('$.tasks[{0}].depends_on' -f [string](Get-OperationObjectProperty $task 'task_id')) 'A task cannot depend on a later delivery stage.')) | Out-Null
+                    }
+                }
+                foreach ($ancestorDependency in @((Get-OperationObjectProperty $dependencyTask 'depends_on'))) { $pendingAncestors.Enqueue(([string]$ancestorDependency).ToLowerInvariant()) }
+            }
+            if ($taskStage -in @('stabilize', 'refactor', 'release') -and -not $ancestorStages.Contains('main_chain')) {
+                $findings.Add((New-OperationFinding 'delivery_stage_ancestor_missing' 'error' ('$.tasks[{0}].delivery_stage' -f [string](Get-OperationObjectProperty $task 'task_id')) 'This delivery stage requires a main_chain ancestor.')) | Out-Null
+            }
+            if ($taskStage -eq 'operate' -and -not $ancestorStages.Contains('release')) {
+                $findings.Add((New-OperationFinding 'delivery_stage_ancestor_missing' 'error' ('$.tasks[{0}].delivery_stage' -f [string](Get-OperationObjectProperty $task 'task_id')) 'Operate requires a release ancestor.')) | Out-Null
+            }
         }
     }
 
