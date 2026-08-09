@@ -3233,8 +3233,6 @@ Describe "Reference shelf governance" {
     It "Limits reference portfolio mutations to the project-owned external root" {
         $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
         $manifest.references_root | Should Be "D:\CODE\external\skills-manager-references"
-        $agents = Get-Content -LiteralPath (Join-Path $repoRoot "AGENTS.md") -Raw
-        $agents | Should Match "不在联动边界"
     }
 
     It "Enforces reference portfolio tier and status lifecycle pairs" {

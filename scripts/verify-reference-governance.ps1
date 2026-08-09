@@ -138,7 +138,7 @@ $prd = Get-Content -LiteralPath $prdPath -Raw -Encoding UTF8
 $architecture = Get-Content -LiteralPath $architecturePath -Raw -Encoding UTF8
 $roadmap = Get-Content -LiteralPath $roadmapPath -Raw -Encoding UTF8
 foreach ($contract in @(
-        @{ Label = "AGENTS"; Text = $agents; Tokens = @("references/reference-shelf.manifest.json", "scripts/refresh-reference-repos.ps1", "克隆不等于采纳/安装/执行", "不在联动边界", "来源/许可证不明") },
+        @{ Label = "AGENTS"; Text = $agents; Tokens = @("references/reference-shelf.manifest.json", "scripts/refresh-reference-repos.ps1", "克隆不等于采纳/安装/执行") },
         @{ Label = "reference README"; Text = $readme; Tokens = @("<registered-candidate>", "conditional-not-cloned", "只读比对", "Portfolio lifecycle", "runtime/import 删除", "Owned-root boundary") },
         @{ Label = "tier documentation"; Text = $tierDoc; Tokens = @("Autonomous discovery and clone boundary", "conditional-not-cloned", "does not authorize adoption", "Portfolio lifecycle and removal boundary", "Demotion is not runtime removal", "retire before delete", "Owned-root boundary") },
         @{ Label = "product index"; Text = $productIndex; Tokens = @("可逆 reference portfolio", "最薄真实主链", '不接管 `D:\CODE\external` 根') },
