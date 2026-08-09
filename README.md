@@ -405,16 +405,9 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Mode CurrentUser -D
 
 ## 本地门禁
 
-项目级硬门禁顺序固定为：
+开发与收口使用比例门禁，不把所有命令固定串行执行：规则、文档和注释优先运行 `git diff --check` 与受影响 verifier/test；test、verifier、script、config 或 CI 变化运行受影响 contract；只有 source、generated 或共享 config seam 变化才提升到 `quick`。未触发 runtime、安全、数据/迁移、公开契约、依赖/包或 release 风险时使用 focused closeout；触发这些风险，或 focused 暴露跨面风险时，才运行一次 `full`。
 
-```powershell
-./build.ps1
-./skills.ps1 发现
-./skills.ps1 doctor --strict --threshold-ms 8000
-./skills.ps1 构建生效
-```
-
-仓库还提供本地 / CI 同款质量门禁脚本：
+仓库提供本地 / CI 同款质量门禁入口：
 
 ```powershell
 ./scripts/quality/run-local-quality-gates.ps1 -Profile quick
@@ -423,10 +416,12 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Mode CurrentUser -D
 
 含义：
 
-- `quick`：`build -> repo-hygiene -> generated-sync -> skill-integrity -> native-skill-metadata -> dependency-baseline -> skills-config-contract -> planning-contract -> doctor-json-contract`
-- `full`：`quick + tests`
+- `quick`：执行 build 与确定性仓库 contracts，不运行完整 Pester suite。
+- `full`：按 `build -> tests -> contracts` 执行完整仓库门禁。
 - `-ReuseCurrentReceipt`：仅在 source fingerprint、`full/passed` 状态与 dirty-worktree policy 都精确匹配时复用 immutable receipt；否则自动执行 fresh full。
 - `-ForceFresh`：显式忽略可复用 receipt 并重新执行；与 `-ReuseCurrentReceipt` 互斥。脏工作树仍需另加 `-AllowDirtyWorktree`。
+
+`./skills.ps1 发现` 与 `./skills.ps1 构建生效` 是产品发现/投影工作流，不是每次代码修改的固定质量门禁；其中 `构建生效` 会写入生成目录和受管宿主目标，只在该工作流进入当前授权范围时执行。真实网络或宿主健康验收需要时，才在 full 之后单独运行一次 `./skills.ps1 doctor --strict --threshold-ms 8000`；它不替代 full。
 
 规划合同也可单独执行：
 
