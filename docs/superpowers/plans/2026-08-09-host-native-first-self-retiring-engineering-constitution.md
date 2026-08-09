@@ -87,7 +87,7 @@ It 'requires the repository action mapping without duplicating the constitution'
 Run:
 
 ```powershell
-pwsh -NoProfile -Command "Import-Module Pester -RequiredVersion 4.10.1; Invoke-Pester -Script tests/Unit/ProductPlanning.Tests.ps1"
+pwsh -NoProfile -Command "Import-Module Pester -RequiredVersion 4.10.1; Invoke-Pester -Script tests/Unit/ProductPlanning.Tests.ps1 -EnableExit"
 ```
 
 Expected: 新增两个用例失败，因为 verifier 尚未产生对应 finding。
@@ -130,7 +130,7 @@ foreach ($required in @(
 Run:
 
 ```powershell
-pwsh -NoProfile -Command "Import-Module Pester -RequiredVersion 4.10.1; Invoke-Pester -Script tests/Unit/ProductPlanning.Tests.ps1"
+pwsh -NoProfile -Command "Import-Module Pester -RequiredVersion 4.10.1; Invoke-Pester -Script tests/Unit/ProductPlanning.Tests.ps1 -EnableExit"
 pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-vnext-planning.ps1 -Json
 ```
 
@@ -210,7 +210,7 @@ It 'rejects stage inversion and preserves TaskGraph v1 compatibility' {
 Run:
 
 ```powershell
-pwsh -NoProfile -Command "Import-Module Pester -RequiredVersion 4.10.1; Invoke-Pester -Script tests/Unit/AgentWorkflowContracts.Tests.ps1"
+pwsh -NoProfile -Command "Import-Module Pester -RequiredVersion 4.10.1; Invoke-Pester -Script tests/Unit/AgentWorkflowContracts.Tests.ps1 -EnableExit"
 ```
 
 Expected: v2 admission tests失败，因为 validator 尚未识别新字段和 stage ordering。
@@ -262,7 +262,7 @@ $allowedComplexityKinds = @('two_real_repetitions','stable_external_protocol','p
 Run:
 
 ```powershell
-pwsh -NoProfile -Command "Import-Module Pester -RequiredVersion 4.10.1; Invoke-Pester -Script tests/Unit/AgentWorkflowContracts.Tests.ps1"
+pwsh -NoProfile -Command "Import-Module Pester -RequiredVersion 4.10.1; Invoke-Pester -Script tests/Unit/AgentWorkflowContracts.Tests.ps1 -EnableExit"
 ```
 
 Expected: v2 positive/negative cases和现有 v1 behavior全部通过；无 provider/native/write effect。
@@ -319,7 +319,7 @@ $plan.waves[0].groups[0].admission[0].main_chain_checkpoint | Should Not BeNullO
 Run:
 
 ```powershell
-pwsh -NoProfile -Command "Import-Module Pester -RequiredVersion 4.10.1; Invoke-Pester -Script @('tests/Unit/AgentWorkflowContracts.Tests.ps1','tests/Unit/AgentWorkflowAdvisoryPlanning.Tests.ps1')"
+pwsh -NoProfile -Command "Import-Module Pester -RequiredVersion 4.10.1; Invoke-Pester -Script @('tests/Unit/AgentWorkflowContracts.Tests.ps1','tests/Unit/AgentWorkflowAdvisoryPlanning.Tests.ps1') -EnableExit"
 ```
 
 Expected: projection 和 verifier marker 用例失败。
@@ -378,7 +378,7 @@ Run:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1
-pwsh -NoProfile -Command "Import-Module Pester -RequiredVersion 4.10.1; Invoke-Pester -Script @('tests/Unit/ProductPlanning.Tests.ps1','tests/Unit/AgentWorkflowContracts.Tests.ps1','tests/Unit/AgentWorkflowAdvisoryPlanning.Tests.ps1')"
+pwsh -NoProfile -Command "Import-Module Pester -RequiredVersion 4.10.1; Invoke-Pester -Script @('tests/Unit/ProductPlanning.Tests.ps1','tests/Unit/AgentWorkflowContracts.Tests.ps1','tests/Unit/AgentWorkflowAdvisoryPlanning.Tests.ps1') -EnableExit"
 pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-vnext-planning.ps1 -Json
 pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-agent-workflow-advisory.ps1 -Json
 ```

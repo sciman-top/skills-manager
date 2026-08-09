@@ -153,7 +153,17 @@ function New-AgentExecutionPlan {
         }
         $selectedIds = @($selectedTasks.ToArray() | ForEach-Object { [string](Get-OperationObjectProperty $_ 'task_id') })
         $mode = if ($selectedIds.Count -gt 1) { 'isolated_parallel' } else { 'sequential' }
-        $waves.Add([pscustomobject][ordered]@{ wave = $waveNumber; groups = @([pscustomobject][ordered]@{ mode = $mode; task_ids = $selectedIds }) }) | Out-Null
+        $admission = if ([int](Get-OperationObjectProperty $TaskGraph 'schema_version') -eq 2) {
+            @($selectedTasks.ToArray() | ForEach-Object {
+                [pscustomobject][ordered]@{
+                    task_id = [string](Get-OperationObjectProperty $_ 'task_id')
+                    delivery_stage = [string](Get-OperationObjectProperty $_ 'delivery_stage')
+                    main_chain_checkpoint = [string](Get-OperationObjectProperty $_ 'main_chain_checkpoint')
+                }
+            })
+        }
+        else { @() }
+        $waves.Add([pscustomobject][ordered]@{ wave = $waveNumber; groups = @([pscustomobject][ordered]@{ mode = $mode; task_ids = $selectedIds; admission = @($admission) }) }) | Out-Null
         foreach ($taskId in @($selectedIds)) { $remaining.Remove($taskId.ToLowerInvariant()) | Out-Null; $completed.Add($taskId) | Out-Null }
     }
     return [pscustomobject][ordered]@{ schema_version = 1; pass = ($remaining.Count -eq 0); decision_owner = 'host_ai'; executor = 'host_native_runtime'; waves = @($waves.ToArray()); findings = @(); provider_calls = 0; native_mutations = 0; writes = 0 }

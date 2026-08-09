@@ -64,6 +64,26 @@ Describe 'Agent workflow advisory planning verifier' {
         @($parsed.findings).Count | Should Be 0
     }
 
+    It 'rejects delivery admission contract projection and canonical fixture drift' {
+        $fixtureRoot = New-AgentWorkflowAdvisoryFixture 'delivery-admission'
+        $domainPath = Join-Path $fixtureRoot 'src\Domain\AgentWorkflow.ps1'
+        $domain = (Get-Content -LiteralPath $domainPath -Raw).Replace('native_baseline_required', 'native_baseline_missing')
+        Set-Content -LiteralPath $domainPath -Value $domain -Encoding UTF8
+        $applicationPath = Join-Path $fixtureRoot 'src\Application\ModelAndAgentPolicy.ps1'
+        $application = (Get-Content -LiteralPath $applicationPath -Raw).Replace('main_chain_checkpoint', 'delivery_checkpoint')
+        Set-Content -LiteralPath $applicationPath -Value $application -Encoding UTF8
+        $fixturePath = Join-Path $fixtureRoot 'tests\fixtures\agent-workflow\valid-request.json'
+        $fixture = Get-Content -LiteralPath $fixturePath -Raw | ConvertFrom-Json
+        foreach ($task in @($fixture.task_graph.tasks)) { $task.admission_scope = 'legacy' }
+        $fixture | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath $fixturePath -Encoding UTF8
+
+        $parsed = (Invoke-AgentWorkflowAdvisoryVerifier $fixtureRoot).output | ConvertFrom-Json
+
+        @($parsed.findings | Where-Object code -eq 'delivery_admission_contract_missing').Count | Should BeGreaterThan 0
+        @($parsed.findings | Where-Object code -eq 'delivery_admission_projection_missing').Count | Should Be 1
+        @($parsed.findings | Where-Object code -eq 'fixture_contract_missing').Count | Should BeGreaterThan 0
+    }
+
     It 'rejects runtime scheduler provider and host mutation claims' {
         $fixtureRoot = New-AgentWorkflowAdvisoryFixture 'runtime-boundary'
         $path = Join-Path $fixtureRoot 'tasks\skills-manager-vnext-agent-workflow-advisory.tasks.json'

@@ -149,6 +149,9 @@ Describe 'Agent workflow advisory contracts' {
         (@($plan.waves[0].groups[0].task_ids) -join ',') | Should Be 'discover'
         (@($plan.waves[1].groups[0].task_ids) -join ',') | Should Be 'implement,document'
         (@($plan.waves[2].groups[0].task_ids) -join ',') | Should Be 'integrate'
+        $plan.waves[0].groups[0].admission[0].task_id | Should Be 'discover'
+        $plan.waves[0].groups[0].admission[0].delivery_stage | Should Be 'discovery'
+        $plan.waves[0].groups[0].admission[0].main_chain_checkpoint | Should Not BeNullOrEmpty
         $plan.provider_calls | Should Be 0
         $plan.native_mutations | Should Be 0
         $plan.writes | Should Be 0

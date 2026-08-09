@@ -748,7 +748,7 @@ PoC acceptance：同一 corpus 的结构化输出/exit/finding parity；至少�
 
 ### `ADR-SMV-029 Runtime-independent agent workflow advisory contracts`
 
-决定：在不改变 ADR-SMV-026 ownership 的前提下，把 M0.3 文档态合同实现为三个窄 seam：`Domain/AgentWorkflow.ps1` 校验 TaskGraph/FailurePacket v1，并只读兼容历史 RadarSnapshot v2；`Application/ModelAndAgentPolicy.ps1` 生成 one-group barrier waves、带 completion receipt 的并行 admission、三档 Sol host proposal validation 和 bounded escalation；`Commands/AgentWorkflow.ps1` 只读取仓内 JSON 并输出 `repo_advisory_only` envelope。`agent-plan/agent-validate` 的 effect counters 固定为 0，实际 spawn/wait/steer/worktree/model application 继续由 Codex native runtime 执行。
+决定：在不改变 ADR-SMV-026 ownership 的前提下，把 M0.3 文档态合同实现为三个窄 seam：`Domain/AgentWorkflow.ps1` 以 TaskGraph v2 校验 delivery stage、admission scope、用户结果、主链 checkpoint、原生基线和按需 complexity/retirement evidence，同时只读兼容 TaskGraph v1 与历史 RadarSnapshot v2；`Application/ModelAndAgentPolicy.ps1` 生成 one-group barrier waves、已验证 admission 的只读投影、带 completion receipt 的并行 admission、三档 Sol host proposal validation 和 bounded escalation；`Commands/AgentWorkflow.ps1` 只读取仓内 JSON 并输出 `repo_advisory_only` envelope。FailurePacket 保持 v1；`agent-plan/agent-validate` 的 effect counters 固定为 0，实际 spawn/wait/steer/worktree/model application 继续由 Codex native runtime 执行。
 
 理由：仅文档无法机械阻止循环依赖、伪造 completed task、路径父子重叠、serial/high-risk 混 wave、stale upstream Radar、空 local outcome 屏蔽失败、无 FailurePacket 升档或 corrected retry 自动并发；引入 scheduler/provider runtime 又会复制宿主能力。小型 plain-object contract 能复用既有 OperationPlan finding/redaction helper、PS7 bundle 和 full gate，并为未来 typed-core seam 保持稳定 JSON 边界。
 

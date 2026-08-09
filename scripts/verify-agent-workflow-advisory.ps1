@@ -171,6 +171,10 @@ foreach ($required in @(
 foreach ($required in @(
         @{ key='domain'; literal='function New-AgentTaskGraph'; code='domain_contract_missing' },
         @{ key='domain'; literal='function Test-AgentTaskGraphContract'; code='domain_contract_missing' },
+        @{ key='domain'; literal='Only TaskGraph schema versions 1 and 2 are supported.'; code='delivery_admission_contract_missing' },
+        @{ key='domain'; literal='native_baseline_required'; code='delivery_admission_contract_missing' },
+        @{ key='domain'; literal='complexity_admission_required'; code='delivery_admission_contract_missing' },
+        @{ key='domain'; literal='delivery_stage_dependency_invalid'; code='delivery_admission_contract_missing' },
         @{ key='domain'; literal='function Get-AgentCanonicalWritePath'; code='canonical_write_path_missing' },
         @{ key='domain'; literal='\x00-\x1F<>:"|'; code='windows_safe_write_path_missing' },
         @{ key='domain'; literal='function New-RadarSnapshot'; code='domain_contract_missing' },
@@ -192,6 +196,7 @@ foreach ($required in @(
         @{ key='application'; literal='high_ambiguity_parallel_forbidden'; code='parallel_ambiguity_gate_missing' },
         @{ key='application'; literal="'not_requested'"; code='serial_only_mode_missing' },
         @{ key='application'; literal='function New-AgentExecutionPlan'; code='application_contract_missing' },
+        @{ key='application'; literal='main_chain_checkpoint'; code='delivery_admission_projection_missing' },
         @{ key='application'; literal='groups = @('; code='single_group_wave_missing' },
         @{ key='application'; literal='completion_evidence_semantics'; code='planning_only_semantics_missing' },
         @{ key='application'; literal='planned_dependency_order_only'; code='planning_only_semantics_missing' },
@@ -220,6 +225,7 @@ foreach ($required in @(
         @{ key='build'; literal='"Commands/AgentWorkflow.ps1"'; code='build_source_wiring_missing' },
         @{ key='contractTests'; literal="Describe 'Agent workflow advisory contracts'"; code='focused_test_missing' },
         @{ key='validFixture'; literal='"graph_id": "graph-demo-001"'; code='fixture_contract_missing' },
+        @{ key='validFixture'; literal='"admission_scope": "product_delivery"'; code='fixture_contract_missing' },
         @{ key='validFixture'; literal='"host_surface": "collaboration_spawn"'; code='fixture_contract_missing' },
         @{ key='invalidFixture'; literal='"graph_id": "graph-invalid-001"'; code='fixture_contract_missing' }
     )) { Require-Literal $content[$required.key] $required.literal $paths[$required.key] $required.code }
