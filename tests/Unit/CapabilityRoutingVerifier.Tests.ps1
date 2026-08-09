@@ -16,6 +16,10 @@ Describe 'Native-first capability routing verifier' {
         return [pscustomobject]@{ exit_code = $LASTEXITCODE; data = (($output -join "`n") | ConvertFrom-Json) }
     }
 
+    function Copy-RoutingCase($Case) {
+        return (($Case | ConvertTo-Json -Depth 20) | ConvertFrom-Json)
+    }
+
     It 'passes the natural-language corpus without semantic auto-selection or side-effect violations' {
         $result = Invoke-RoutingVerifier $corpusPath
         $result.exit_code | Should Be 0
@@ -32,70 +36,48 @@ Describe 'Native-first capability routing verifier' {
         $result.data.writes_performed | Should Be $false
     }
 
-    It 'fails closed when the labelled host selection drifts' {
-        $path = Join-Path $TestDrive 'bad-corpus.json'
-        $corpus = Get-Content -LiteralPath $corpusPath -Raw | ConvertFrom-Json
-        $corpus.cases = @($corpus.cases[0])
-        $corpus.cases[0].host_selected[0].name = 'missing-skill'
-        $corpus | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
-        $result = Invoke-RoutingVerifier $path
-        $result.exit_code | Should Be 2
-        @($result.data.findings.code) | Should Contain 'unknown_skill_reference'
-    }
+    It 'validates inventory provenance and host-only declarations in one verifier run' {
+        $path = Join-Path $TestDrive 'inventory-contract-corpus.json'
+        $sourceCorpus = Get-Content -LiteralPath $corpusPath -Raw | ConvertFrom-Json
 
-    It 'rejects an explicitly mentioned skill that exists only in the corpus' {
-        $path = Join-Path $TestDrive 'invented-skill-corpus.json'
-        $corpus = Get-Content -LiteralPath $corpusPath -Raw | ConvertFrom-Json
-        $corpus.cases = @($corpus.cases[0])
-        $corpus.cases[0].query = '请使用 $definitely-nonexistent-routing-skill'
-        $corpus.cases[0].profile_hints = @()
-        $corpus.cases[0].expected_candidates = @([pscustomobject]@{ kind = 'skill'; name = 'definitely-nonexistent-routing-skill' })
-        $corpus.cases[0].host_selected = @([pscustomobject]@{ kind = 'skill'; name = 'definitely-nonexistent-routing-skill'; action = 'load_skill' })
-        $corpus.cases[0].forbidden_candidates = @()
-        $corpus | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
+        $missingHostSelection = Copy-RoutingCase $sourceCorpus.cases[0]
+        $missingHostSelection.id = 'missing-host-selected-skill'
+        $missingHostSelection.host_selected[0].name = 'missing-skill'
 
-        $result = Invoke-RoutingVerifier $path
+        $inventedExplicitSkill = Copy-RoutingCase $sourceCorpus.cases[0]
+        $inventedExplicitSkill.id = 'invented-explicit-skill'
+        $inventedExplicitSkill.query = '请使用 $definitely-nonexistent-routing-skill'
+        $inventedExplicitSkill.profile_hints = @()
+        $inventedExplicitSkill.expected_candidates = @([pscustomobject]@{ kind = 'skill'; name = 'definitely-nonexistent-routing-skill' })
+        $inventedExplicitSkill.host_selected = @([pscustomobject]@{ kind = 'skill'; name = 'definitely-nonexistent-routing-skill'; action = 'load_skill' })
+        $inventedExplicitSkill.forbidden_candidates = @()
 
-        $result.exit_code | Should Be 2
-        @($result.data.findings.code) | Should Contain 'unknown_skill_reference'
-    }
+        $missingMcp = Copy-RoutingCase (@($sourceCorpus.cases | Where-Object id -eq 'official-docs')[0])
+        $missingMcp.id = 'missing-mcp'
+        $missingMcp.expected_candidates[0].name = 'definitely-nonexistent-routing-mcp'
+        $missingMcp.host_selected = @()
 
-    It 'rejects an MCP reference that is absent from skills.json' {
-        $path = Join-Path $TestDrive 'invented-mcp-corpus.json'
-        $corpus = Get-Content -LiteralPath $corpusPath -Raw | ConvertFrom-Json
-        $corpus.cases = @($corpus.cases | Where-Object id -eq 'official-docs')
-        $corpus.cases[0].expected_candidates[0].name = 'definitely-nonexistent-routing-mcp'
-        $corpus.cases[0].host_selected = @()
-        $corpus | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
+        $declaredHostCapability = Copy-RoutingCase (@($sourceCorpus.cases | Where-Object id -eq 'mcp-read')[0])
+        $declaredHostCapability.id = 'declared-host-capability'
+
+        $undeclaredHostCapability = Copy-RoutingCase $declaredHostCapability
+        $undeclaredHostCapability.id = 'undeclared-host-capability'
+        $undeclaredHostCapability.PSObject.Properties.Remove('snapshot_path')
+
+        $sourceCorpus.cases = @($missingHostSelection, $inventedExplicitSkill, $missingMcp, $declaredHostCapability, $undeclaredHostCapability)
+        $sourceCorpus | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
 
         $result = Invoke-RoutingVerifier $path
 
         $result.exit_code | Should Be 2
+        $result.data.case_count | Should Be 5
+        $result.data.passed_case_count | Should Be 1
+        @($result.data.findings | Where-Object code -eq 'unknown_skill_reference').Count | Should Be 3
+        @($result.data.findings.case_id) | Should Contain 'missing-host-selected-skill'
+        @($result.data.findings.case_id) | Should Contain 'invented-explicit-skill'
         @($result.data.findings.code) | Should Contain 'unknown_mcp_reference'
-    }
-
-    It 'accepts host-only capabilities declared by the case runtime snapshot' {
-        $path = Join-Path $TestDrive 'declared-host-capability-corpus.json'
-        $corpus = Get-Content -LiteralPath $corpusPath -Raw | ConvertFrom-Json
-        $corpus.cases = @($corpus.cases | Where-Object id -eq 'mcp-read')
-        $corpus | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
-
-        $result = Invoke-RoutingVerifier $path
-
-        $result.exit_code | Should Be 0
-        $result.data.pass | Should Be $true
-    }
-
-    It 'rejects host-only capabilities without an explicit runtime snapshot declaration' {
-        $path = Join-Path $TestDrive 'undeclared-host-capability-corpus.json'
-        $corpus = Get-Content -LiteralPath $corpusPath -Raw | ConvertFrom-Json
-        $corpus.cases = @($corpus.cases | Where-Object id -eq 'mcp-read')
-        $corpus.cases[0].PSObject.Properties.Remove('snapshot_path')
-        $corpus | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
-
-        $result = Invoke-RoutingVerifier $path
-
-        $result.exit_code | Should Be 2
         @($result.data.findings.code) | Should Contain 'undeclared_host_capability'
+        @($result.data.findings.case_id) | Should Not Contain 'declared-host-capability'
+        $result.data.writes_performed | Should Be $false
     }
 }
