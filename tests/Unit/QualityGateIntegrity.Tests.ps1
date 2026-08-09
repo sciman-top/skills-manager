@@ -228,4 +228,24 @@ Describe 'Quality gate receipt integrity' {
         $worktreeBlob | Should Be $indexBlob
         (Compare-QualityGateSourceFingerprint -Start $start -End $end).pass | Should Be $true
     }
+
+    It 'retries bounded transient index lock contention when capturing a source fingerprint' {
+        $fixture = New-QualityGateIntegrityFixture 'transient-index-lock'
+        $lockPath = Join-Path $fixture.root '.git\index.lock'
+        [IO.File]::WriteAllText($lockPath, 'fixture lock', [Text.UTF8Encoding]::new($false))
+        $escapedLockPath = $lockPath.Replace("'", "''")
+        $releaseScript = "Start-Sleep -Milliseconds 350; Remove-Item -LiteralPath '$escapedLockPath' -Force"
+        $encodedReleaseScript = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($releaseScript))
+        $releaseProcess = Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-EncodedCommand', $encodedReleaseScript) -PassThru -WindowStyle Hidden
+
+        try {
+            $fingerprint = Get-QualityGateSourceFingerprint -RepoRoot $fixture.root
+            $fingerprint.index_fingerprint | Should Not BeNullOrEmpty
+        }
+        finally {
+            $releaseProcess.WaitForExit(5000) | Out-Null
+            $releaseProcess.Dispose()
+            Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+        }
+    }
 }

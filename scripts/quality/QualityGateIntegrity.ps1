@@ -6,9 +6,24 @@ function Invoke-QualityGateGit {
         [Parameter(Mandatory = $true)][string[]]$Arguments
     )
 
-    $output = @(& git -C $RepoRoot @Arguments 2>&1)
-    if ($LASTEXITCODE -ne 0) { throw ('git command failed: git -C {0} {1}' -f $RepoRoot, ($Arguments -join ' ')) }
-    return ($output -join [Environment]::NewLine).Trim()
+    $isWriteTree = $Arguments.Count -eq 1 -and [string]::Equals($Arguments[0], 'write-tree', [StringComparison]::Ordinal)
+    $maxAttempts = if ($isWriteTree) { 10 } else { 1 }
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        $output = @(& git -C $RepoRoot @Arguments 2>&1)
+        $exitCode = $LASTEXITCODE
+        $outputText = ($output -join [Environment]::NewLine).Trim()
+        if ($exitCode -eq 0) { return $outputText }
+
+        $transientIndexLock = $isWriteTree -and $outputText -match '(?i)index\.lock' -and
+            $outputText -match '(?i)(unable to create|file exists|another git process)'
+        if ($transientIndexLock -and $attempt -lt $maxAttempts) {
+            Start-Sleep -Milliseconds 100
+            continue
+        }
+
+        $detail = if ([string]::IsNullOrWhiteSpace($outputText)) { 'no diagnostic output' } else { $outputText }
+        throw ('git command failed: git -C {0} {1}: {2}' -f $RepoRoot, ($Arguments -join ' '), $detail)
+    }
 }
 
 function Get-QualityGateUntrackedFingerprint {
