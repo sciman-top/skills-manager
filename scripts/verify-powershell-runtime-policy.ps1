@@ -174,8 +174,6 @@ $paths = [ordered]@{
     architecture = 'docs/product/skills-manager-vnext-architecture.md'
     roadmap = 'docs/product/skills-manager-vnext-roadmap.md'
     lean = 'docs/superpowers/specs/2026-08-03-lean-ai-delivery-maintenance-design.md'
-    plan = 'tasks/plan.md'
-    todo = 'tasks/todo.md'
     agents = 'AGENTS.md'
     release = 'RELEASE_TEMPLATE.md'
     version = 'src/Version.ps1'
@@ -278,8 +276,6 @@ foreach ($required in @(
     @{ key='manifest'; literal='"runtime_policy": "ps7_only"'; code='current_policy_missing' },
     @{ key='lean'; literal='POWERSHELL_COMPATIBILITY_STATUS: ps7_only'; code='current_policy_missing' },
     @{ key='roadmap'; literal='`powershell7_runtime_migration`'; code='current_policy_missing' },
-    @{ key='plan'; literal='**powershell_runtime_status**: ps7_only; repo_verified'; code='current_policy_missing' },
-    @{ key='todo'; literal='SMV-PS7-005'; code='current_policy_missing' },
     @{ key='agents'; literal='runtime 为 PS7-only'; code='current_policy_missing' },
     @{ key='release'; literal='PowerShell 7 (`pwsh`) only'; code='release_policy_missing' },
     @{ key='runbook'; literal='Migration guide'; code='migration_guide_missing' },
@@ -292,7 +288,7 @@ foreach ($required in @(
     Require-Literal $content[$required.key] $required.literal $paths[$required.key] $required.code
 }
 
-foreach ($key in @('lean', 'plan', 'todo', 'agents', 'roadmap')) {
+foreach ($key in @('lean', 'agents', 'roadmap')) {
     Reject-Pattern $content[$key] 'ps7_primary_ps51_bounded_smoke' $paths[$key] 'stale_current_policy_detected' 'A current truth surface still claims the retired compatibility policy.'
 }
 

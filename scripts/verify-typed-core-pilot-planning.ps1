@@ -34,8 +34,6 @@ $paths = [ordered]@{
     prd = 'docs/product/skills-manager-vnext-prd.md'
     architecture = 'docs/product/skills-manager-vnext-architecture.md'
     roadmap = 'docs/product/skills-manager-vnext-roadmap.md'
-    plan = 'tasks/plan.md'
-    todo = 'tasks/todo.md'
     agents = 'AGENTS.md'
     project = 'typed-core/SkillsManager.TypedCore/SkillsManager.TypedCore.csproj'
     program = 'typed-core/SkillsManager.TypedCore/Program.cs'
@@ -104,8 +102,6 @@ foreach ($required in @(
     @{ key='prd'; literal='NFR-TEC-002'; code='prd_typed_core_nfr_missing' },
     @{ key='architecture'; literal='ADR-SMV-028'; code='architecture_decision_missing' },
     @{ key='roadmap'; literal='| `TC1` | `repo_verified / shadow_only` |'; code='roadmap_tc1_status_missing' },
-    @{ key='plan'; literal='typed_core_shadow_poc'; code='plan_track_missing' },
-    @{ key='todo'; literal='SMV-TC-003'; code='todo_task_missing' },
     @{ key='agents'; literal='TC1 `shadow_only`'; code='agents_boundary_missing' },
     @{ key='evidence'; literal='TC2: `not_started`'; code='evidence_boundary_missing' }
 )) { Require-Literal $content[$required.key] $required.literal $paths[$required.key] $required.code }

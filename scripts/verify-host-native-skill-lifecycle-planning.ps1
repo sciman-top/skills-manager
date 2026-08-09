@@ -44,7 +44,6 @@ $paths = [ordered]@{
     implementation_plan = 'docs/superpowers/plans/2026-08-07-host-native-skill-lifecycle-reset.md'
     manifest = 'tasks/skills-manager-vnext-phase6.tasks.json'
     plan = 'tasks/plan.md'
-    todo = 'tasks/todo.md'
     evidence = 'docs/change-evidence/20260807-host-native-skill-lifecycle-reset-planning.md'
     project_agents = 'AGENTS.md'
     router_skill = 'overrides/custom/capability-router/SKILL.md'
@@ -67,8 +66,6 @@ if ($null -ne $manifest) {
     foreach ($id in $expected) {
         $matches = @($tasks | Where-Object { [string]$_.id -eq $id })
         if ($matches.Count -ne 1) { Add-Finding 'task_identity_mismatch' $paths.manifest "Task must appear exactly once: $id" }
-        if (([regex]::Matches($content.plan, [regex]::Escape($id))).Count -ne 1) { Add-Finding 'plan_task_coverage_mismatch' $paths.plan "Task must appear exactly once in plan: $id" }
-        if (([regex]::Matches($content.todo, [regex]::Escape($id))).Count -ne 1) { Add-Finding 'todo_task_coverage_mismatch' $paths.todo "Task must appear exactly once in todo: $id" }
     }
     foreach ($task in $tasks) {
         if ($allowedStatuses -notcontains [string]$task.status) {

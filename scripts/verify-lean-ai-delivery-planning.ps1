@@ -31,11 +31,6 @@ function Test-LeanContainsLiteral([string]$Text, [string]$Literal) {
         $Text.IndexOf($Literal, [System.StringComparison]::Ordinal) -ge 0)
 }
 
-function Get-LeanLiteralCount([string]$Text, [string]$Literal) {
-    if ([string]::IsNullOrWhiteSpace($Text)) { return 0 }
-    return [regex]::Matches($Text, [regex]::Escape($Literal)).Count
-}
-
 function Test-LeanObjectProperty($Object, [string]$Name) {
     return ($null -ne $Object -and $null -ne $Object.PSObject.Properties[$Name])
 }
@@ -92,8 +87,6 @@ $paths = [ordered]@{
     spec = 'docs/superpowers/specs/2026-08-03-lean-ai-delivery-maintenance-design.md'
     manifest = 'tasks/skills-manager-vnext-maintenance-design.tasks.json'
     pilot = 'tasks/skills-manager-vnext-lean-delivery-pilot.json'
-    plan = 'tasks/plan.md'
-    todo = 'tasks/todo.md'
     agents = 'AGENTS.md'
     evidence = 'docs/change-evidence/20260803-lean-ai-delivery-maintenance-design.md'
 }
@@ -290,22 +283,6 @@ if ($null -ne $manifest) {
             }
         }
 
-        foreach ($coverageKey in @('spec', 'plan', 'todo')) {
-            if ((Get-LeanLiteralCount $content[$coverageKey] $taskId) -ne 1) {
-                Add-LeanPlanningFinding ([ref]$findings) ('task_{0}_coverage_mismatch' -f $coverageKey) $paths[$coverageKey] `
-                    ('Task must appear exactly once in {0}: {1}' -f $coverageKey, $taskId)
-            }
-        }
-
-        if ((Get-LeanLiteralCount $content['todo'] $taskId) -eq 1) {
-            $todoLine = @($content['todo'] -split "`r?`n" | Where-Object { Test-LeanContainsLiteral $_ $taskId })[0]
-            $todoDone = $todoLine -match '^\s*-\s+\[[xX]\]'
-            $manifestDone = ([string]$task.status -eq 'done')
-            if ($todoDone -ne $manifestDone) {
-                Add-LeanPlanningFinding ([ref]$findings) 'task_todo_status_mismatch' $paths['todo'] `
-                    ('Task {0} status is {1}, but todo marker is {2}.' -f $taskId, [string]$task.status, $(if ($todoDone) { 'done' } else { 'open' }))
-            }
-        }
     }
 
     Test-LeanTaskDependencyCycles $tasksById $paths['manifest'] ([ref]$findings)

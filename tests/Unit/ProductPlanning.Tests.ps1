@@ -229,15 +229,20 @@ Describe 'vNext product planning contract' {
         @($parsed.findings | Where-Object code -eq unknown_task_dependency).Count | Should Be 1
     }
 
-    It 'fails closed when todo coverage or completion status drifts' {
-        $fixtureRoot = New-PlanningFixture 'todo-drift'; $todoPath = Join-Path $fixtureRoot 'tasks\todo.md'
+    It 'accepts the manifest as the sole current task and status truth' {
+        $fixtureRoot = New-PlanningFixture 'manifest-only-task-truth'
         $tasks = @((Get-Content (Join-Path $fixtureRoot $currentManifestRelative) -Raw | ConvertFrom-Json).tasks)
-        $coverageTaskId = [string]$tasks[1].id
-        $statusTaskId = [string](@($tasks | Where-Object { [string]$_.status -eq 'done' } | Select-Object -Last 1).id)
-        $todo = (Get-Content $todoPath -Raw).Replace($coverageTaskId, 'SMV-P2-X99').Replace(('- [x] `{0}`' -f $statusTaskId), ('- [ ] `{0}`' -f $statusTaskId)); Set-Content $todoPath $todo -Encoding UTF8
+        foreach ($relativePath in @($currentSpecRelative, 'tasks\plan.md', 'tasks\todo.md')) {
+            $path = Join-Path $fixtureRoot $relativePath
+            $text = Get-Content -LiteralPath $path -Raw
+            foreach ($task in $tasks) { $text = $text.Replace([string]$task.id, '') }
+            Set-Content -LiteralPath $path -Value $text -Encoding UTF8
+        }
+
         $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
-        @($parsed.findings | Where-Object code -eq task_todo_coverage_mismatch).Count | Should BeGreaterThan 0
-        @($parsed.findings | Where-Object code -eq task_todo_status_mismatch).Count | Should Be 1
+
+        $parsed.pass | Should Be $true
+        @($parsed.findings | Where-Object code -match 'task_(?:plan|todo)_|task_missing_from_spec').Count | Should Be 0
     }
 
     It 'fails closed when a done task evidence file is missing' {

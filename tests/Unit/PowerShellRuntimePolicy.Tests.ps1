@@ -75,6 +75,23 @@ Describe 'PowerShell 7-only runtime policy verifier' {
         @($parsed.findings).Count | Should Be 0
     }
 
+    It 'accepts plan and todo as stable indexes without copied PS7 task status' {
+        $fixtureRoot = New-PowerShellRuntimePolicyFixture 'manifest-only-task-truth'
+        foreach ($relativePath in @('tasks/plan.md', 'tasks/todo.md')) {
+            $path = Join-Path $fixtureRoot $relativePath
+            $text = Get-Content -LiteralPath $path -Raw
+            $text = $text.Replace('**powershell_runtime_status**: ps7_only; repo_verified', '')
+            foreach ($id in @('SMV-PS7-001', 'SMV-PS7-002', 'SMV-PS7-003', 'SMV-PS7-004', 'SMV-PS7-005')) { $text = $text.Replace($id, '') }
+            Set-Content -LiteralPath $path -Value $text -Encoding UTF8
+        }
+
+        $result = Invoke-PowerShellRuntimePolicyVerifier $fixtureRoot
+        $parsed = $result.output | ConvertFrom-Json
+
+        $result.exit_code | Should Be 0
+        $parsed.status | Should Be 'pass'
+    }
+
     It 'keeps mutation fixtures focused instead of copying the multi-megabyte generated bundle' {
         $fixtureRoot = New-PowerShellRuntimePolicyFixture 'fixture-size'
         (Get-Item -LiteralPath (Join-Path $fixtureRoot 'skills.ps1')).Length | Should BeLessThan 4096

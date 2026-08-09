@@ -90,6 +90,22 @@ Describe 'Typed-core OperationPlan and Receipt shadow PoC' {
         @($parsed.findings).Count | Should Be 0
     }
 
+    It 'accepts plan and todo as stable indexes without copied typed-core task ids' {
+        $fixtureRoot = New-TypedCorePlanningFixture 'manifest-only-task-truth'
+        foreach ($relativePath in @('tasks/plan.md', 'tasks/todo.md')) {
+            $path = Join-Path $fixtureRoot $relativePath
+            $text = Get-Content -LiteralPath $path -Raw
+            foreach ($id in @('SMV-TC-001', 'SMV-TC-002', 'SMV-TC-003')) { $text = $text.Replace($id, '') }
+            Set-Content -LiteralPath $path -Value $text -Encoding UTF8
+        }
+
+        $result = Invoke-TypedCorePlanningVerifier $fixtureRoot
+        $parsed = $result.output | ConvertFrom-Json
+
+        $result.exit_code | Should Be 0
+        $parsed.status | Should Be 'pass'
+    }
+
     It 'fails closed when production integration status drifts' {
         $fixtureRoot = New-TypedCorePlanningFixture 'production-status'
         $manifestPath = Join-Path $fixtureRoot 'tasks\skills-manager-vnext-typed-core-pilot.tasks.json'

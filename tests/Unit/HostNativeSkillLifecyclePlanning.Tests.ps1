@@ -66,12 +66,19 @@ Describe 'Host-native skill lifecycle planning contract' {
         @($result.parsed.findings | Where-Object code -eq 'unknown_task_status').Count | Should Be 1
     }
 
-    It 'rejects task coverage drift' {
-        $root = New-Fixture 'coverage'
-        $path = Join-Path $root 'tasks/todo.md'
-        (Get-Content $path -Raw).Replace('SMV-P6-008', 'SMV-P6-X08') | Set-Content $path -Encoding UTF8
+    It 'accepts plan and todo as stable indexes without copied P6 task ids' {
+        $root = New-Fixture 'manifest-only-task-truth'
+        foreach ($relativePath in @('tasks/plan.md', 'tasks/todo.md')) {
+            $path = Join-Path $root $relativePath
+            $text = Get-Content -LiteralPath $path -Raw
+            foreach ($id in (1..12 | ForEach-Object { 'SMV-P6-{0:d3}' -f $_ })) { $text = $text.Replace($id, '') }
+            Set-Content -LiteralPath $path -Value $text -Encoding UTF8
+        }
+
         $result = Invoke-Verifier $root
-        @($result.parsed.findings | Where-Object code -eq 'todo_task_coverage_mismatch').Count | Should Be 1
+
+        $result.parsed.pass | Should Be $true
+        @($result.parsed.findings | Where-Object code -match '(?:plan|todo)_task_coverage_mismatch').Count | Should Be 0
     }
 
     It 'rejects planning evidence that claims host loading' {
