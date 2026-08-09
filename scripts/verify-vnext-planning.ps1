@@ -36,11 +36,6 @@ function Test-ContainsLiteral([string]$Text, [string]$Literal) {
     return (-not [string]::IsNullOrWhiteSpace($Text) -and $Text.IndexOf($Literal, [System.StringComparison]::Ordinal) -ge 0)
 }
 
-function Get-LiteralCount([string]$Text, [string]$Literal) {
-    if ([string]::IsNullOrWhiteSpace($Text)) { return 0 }
-    return [regex]::Matches($Text, [regex]::Escape($Literal)).Count
-}
-
 function Test-TaskDependencyCycles($TasksById, [string]$CurrentManifestPath, [ref]$FindingList) {
     $state = @{}
 
@@ -313,27 +308,6 @@ if ($null -ne $manifest) {
         foreach ($decisionId in @($task.architecture_decision_ids | ForEach-Object { [string]$_ })) {
             if (-not (Test-ContainsLiteral $content['architecture'] $decisionId)) {
                 Add-PlanningFinding ([ref]$findings) 'unknown_architecture_decision_reference' $paths['manifest'] ('Task {0} references decision missing from architecture: {1}' -f $taskId, $decisionId)
-            }
-        }
-
-        if ((Get-LiteralCount $content['spec'] $taskId) -lt 1) {
-            Add-PlanningFinding ([ref]$findings) 'task_missing_from_spec' $paths['spec'] ('Task missing from current phase spec: {0}' -f $taskId)
-        }
-        if (-not $explicitHistoricalMode) {
-            if ((Get-LiteralCount $content['plan'] $taskId) -ne 1) {
-                Add-PlanningFinding ([ref]$findings) 'task_plan_coverage_mismatch' $paths['plan'] ('Task must appear exactly once in plan: {0}' -f $taskId)
-            }
-            if ((Get-LiteralCount $content['todo'] $taskId) -ne 1) {
-                Add-PlanningFinding ([ref]$findings) 'task_todo_coverage_mismatch' $paths['todo'] ('Task must appear exactly once in todo: {0}' -f $taskId)
-            }
-            else {
-                $todoLine = @($content['todo'] -split "`r?`n" | Where-Object { Test-ContainsLiteral $_ $taskId })[0]
-                $todoDone = $todoLine -match '^\s*-\s+\[[xX]\]'
-                $manifestDone = ([string]$task.status -eq 'done')
-                if ($todoDone -ne $manifestDone) {
-                    Add-PlanningFinding ([ref]$findings) 'task_todo_status_mismatch' $paths['todo'] `
-                        ('Task {0} status is {1}, but todo marker is {2}.' -f $taskId, [string]$task.status, $(if ($todoDone) { 'done' } else { 'open' }))
-                }
             }
         }
 

@@ -312,25 +312,20 @@ exit 0
         @($findings | Where-Object code -eq 'unknown_architecture_decision_reference').Count | Should Be 1
     }
 
-    It 'rejects spec plan and todo task coverage drift' {
-        $fixtureRoot = New-LeanPlanningFixture 'coverage-drift'
+    It 'accepts the maintenance manifest as the sole task and status truth' {
+        $fixtureRoot = New-LeanPlanningFixture 'manifest-only-task-truth'
+        $manifest = Get-Content -LiteralPath (Join-Path $fixtureRoot $maintenanceManifestRelative) -Raw | ConvertFrom-Json
         foreach ($relativePath in @($maintenanceSpecRelative, 'tasks\plan.md', 'tasks\todo.md')) {
             $path = Join-Path $fixtureRoot $relativePath
-            Set-Content -LiteralPath $path -Value ((Get-Content -LiteralPath $path -Raw).Replace('SMV-MD-002', 'SMV-MD-X02')) -Encoding UTF8
+            $text = Get-Content -LiteralPath $path -Raw
+            foreach ($task in @($manifest.tasks)) { $text = $text.Replace([string]$task.id, '') }
+            Set-Content -LiteralPath $path -Value $text -Encoding UTF8
         }
-        $findings = @(((Invoke-LeanPlanningVerifier $fixtureRoot).output | ConvertFrom-Json).findings)
-        @($findings | Where-Object code -eq 'task_spec_coverage_mismatch').Count | Should Be 1
-        @($findings | Where-Object code -eq 'task_plan_coverage_mismatch').Count | Should Be 1
-        @($findings | Where-Object code -eq 'task_todo_coverage_mismatch').Count | Should Be 1
-    }
 
-    It 'rejects todo completion status drift' {
-        $fixtureRoot = New-LeanPlanningFixture 'todo-status'
-        $todoPath = Join-Path $fixtureRoot 'tasks\todo.md'
-        $todo = (Get-Content -LiteralPath $todoPath -Raw).Replace('- [x] `SMV-MD-003`', '- [ ] `SMV-MD-003`')
-        Set-Content -LiteralPath $todoPath -Value $todo -Encoding UTF8
         $parsed = (Invoke-LeanPlanningVerifier $fixtureRoot).output | ConvertFrom-Json
-        @($parsed.findings | Where-Object code -eq 'task_todo_status_mismatch').Count | Should Be 1
+
+        $parsed.pass | Should Be $true
+        @($parsed.findings | Where-Object code -match 'task_(?:spec|plan|todo)_coverage_mismatch|task_todo_status_mismatch').Count | Should Be 0
     }
 
     It 'rejects runtime generated report and host paths in the maintenance write set' {
