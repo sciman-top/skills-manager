@@ -308,7 +308,7 @@ CURRENT_PHASE_TRUTH_SOURCE: tasks/skills-manager-vnext-phase6.tasks.json
 
 2026-08-08 的 P6-012 repo-side closeout 与 `1097/1097` full 结果是 point-in-time 历史证据。P6-001 至 P6-012 的仓库侧切片、staged removal、source/config/生成链和 compatibility verifier 已落盘；当前任务计数、runtime migration、truth ladder、full authority 与最新 evidence 只从上述 manifest 读取。
 
-当前仓库侧 compatibility boundary 为：默认生成 bundle 不再编入 legacy `SkillRouting`，`技能配置`/`skill-profile` dispatch 已退役；profile compatibility view 仅为 `read_only`、`reachability_authority=none`，未生成的旧 routing source 仅允许显式 compatibility-only test/verifier 读取。P5 profile advisor、resident dispatcher 与 cold-load 描述保留为历史或迁移契约，不是普通请求的当前语义选择 owner。
+当前仓库侧 compatibility boundary 为：legacy `SkillRouting` source 及其自测已删除，`技能配置`/`skill-profile` dispatch 已退役；profile compatibility view 仅为 `read_only`、`reachability_authority=none`，独立 verifier 只读取配置并报告 migration compatibility 状态。P5 profile advisor、resident dispatcher 与 cold-load 描述保留为历史或迁移契约，不是普通请求的当前语义选择 owner。
 
 fresh inventory、host evaluation、injected/executed invocation 与业务 acceptance 是独立层级；它们只能由对应证据晋级，不能由 metadata visibility、focused tests 或 planning verifier 推导。tracked manifest 不复制 `passed|stale` 运行态：当前 full 是否有效只由 `reports/quality-gates/current.json` 指向的 immutable full receipt 及 exact-current-source 校验决定。
 

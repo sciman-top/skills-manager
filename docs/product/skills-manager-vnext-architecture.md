@@ -993,7 +993,7 @@ host evaluation 同时记录 cumulative input、cached/uncached input、cache ra
 
 CURRENT_PHASE_TRUTH_SOURCE: tasks/skills-manager-vnext-phase6.tasks.json
 
-P6-012 已进入 repo-side closeout：默认生成 bundle 不再编入 legacy `SkillRouting`，普通入口不再暴露 `技能配置`/`skill-profile` dispatch；profile compatibility view 保留为 `read_only` 且 `reachability_authority=none`。未生成的 legacy routing source 和 compatibility verifier/test 只作为迁移期回读与回归边界，不能成为当前语义选择或 reachability owner。
+P6-012 已进入 repo-side closeout：legacy `SkillRouting` source 及其自测已删除，普通入口不再暴露 `技能配置`/`skill-profile` dispatch；profile compatibility view 保留为 `read_only` 且 `reachability_authority=none`。独立 compatibility verifier 只读取配置并报告 migration 状态，不能成为当前语义选择或 reachability owner。
 
 本节标题和 2026-08-08 full 只保留 point-in-time 架构/历史事实。当前 P6 任务、runtime migration、inventory/evaluation/invocation/live truth 与最新 evidence 动态读取上述 manifest；full 运行态不写回 tracked manifest，只由 `reports/quality-gates/current.json` 的 immutable receipt 证明 `profile=full`、`status=passed` 和 exact-current-source。任何 inventory 或 repo-side 结果都不得提升为 invocation 或业务 acceptance。
 
