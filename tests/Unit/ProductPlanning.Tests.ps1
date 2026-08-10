@@ -73,6 +73,10 @@ Describe 'vNext product planning contract' {
         $parsed.host_inventory_loaded | Should Be 'observed'
         $parsed.host_invocation_observed | Should Be 'not_observed'
         $parsed.live_accepted | Should Be 'not_accepted'
+        $currentMainChain = @($currentManifest.main_chain) -join "`n"
+        $currentMainChain | Should Match 'managed_link_includes'
+        $currentMainChain | Should Match 'host AI.*capability-router only for explicit cold discovery or policy validation'
+        $currentMainChain | Should Not Match '(?i)project all enabled skills'
     }
 
     It 'requires the unique top-level engineering constitution and governance decrease clause in the PRD' {

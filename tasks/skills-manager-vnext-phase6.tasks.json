@@ -19,10 +19,12 @@
   "live_accepted": "not_accepted",
   "latest_evidence": "docs/change-evidence/20260809-p6-deep-audit-remediation.md",
   "main_chain": [
-    "compile the complete eligible skill catalog",
-    "plan metadata within the verified host budget",
-    "project all enabled skills transactionally",
-    "verify repository contracts before separate host and live acceptance"
+    "compile the complete canonical skill catalog",
+    "admit only managed_link_includes into the resident projection",
+    "plan resident metadata within the verified host budget",
+    "project placement-admitted resident skills transactionally",
+    "let host AI select visible metadata natively and use capability-router only for explicit cold discovery or policy validation",
+    "verify repository contracts before separate host invocation and live acceptance"
   ],
   "stop_conditions": [
     "full gate fails or becomes stale after a relevant file change",
