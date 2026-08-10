@@ -53,7 +53,7 @@ jobs:
 
       - name: Rebuild locked skill sources
         shell: pwsh
-        run: .\skills.ps1 更新 -Locked
+        run: .\skills.ps1 更新 -Locked -SkipHostProjection
 
       - name: Run repository full quality gate
         shell: pwsh

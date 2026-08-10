@@ -7,7 +7,8 @@ param(
     [switch]$Locked,
     [switch]$Plan,
     [switch]$Upgrade,
-    [switch]$AllowUnverifiedHostProjection
+    [switch]$AllowUnverifiedHostProjection,
+    [switch]$SkipHostProjection
 )
 
 $ErrorActionPreference = "Stop"

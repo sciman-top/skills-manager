@@ -202,6 +202,7 @@ P3 plugin-aware 命令中，inventory/lint/eval 为只读；export 仍严格 fix
 
 - 只想把当前配置重新输出到 `agent/` 和目标目录时，用 `构建生效`。
 - `构建生效` 在写入仓库外的宿主技能/config 目录前要求当前技能源是 clean Git commit，并在 projection manifest 记录 source revision、dirty 状态和 promotion mode。`-AllowUnverifiedHostProjection` 只用于明确接受风险的例外，manifest 会如实标记 `unverified_override`，不会伪装成已通过 full gate。
+- CI 或隔离构建只需物化锁定来源和生成 `agent/`、不应写宿主目标时，使用 `更新 -Locked -SkipHostProjection`；该开关跳过 configured targets 与 native skill projection，不弱化正常宿主投影的 fail-closed。
 - 需要拉取上游新内容时，用 `更新`；`-Plan` 只看预览，`-Upgrade` 会更新后刷新 `skills.lock.json`。
 - `锁定` 会生成或刷新 `skills.lock.json`，给后续 `更新 -Locked` 和 portable 安装重放使用。
 - `doctor --strict` 在校验不通过时会返回非零退出码，适合作为脚本门禁。

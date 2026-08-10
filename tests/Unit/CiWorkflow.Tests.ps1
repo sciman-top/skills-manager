@@ -10,7 +10,7 @@ Describe 'GitHub CI workflow supply-chain contract' {
         $script:workflow | Should Match '898210e1a30c52cd46ba317c2278a9324345214213aa2f7d6b7dfa7b98f37ac9'
         $script:workflow | Should Match 'Get-FileHash[^\r\n]+SHA256'
         $script:workflow | Should Match 'GITHUB_ENV'
-        $script:workflow | Should Match '(?s)Rebuild locked skill sources.*skills\.ps1 更新 -Locked.*Run repository full quality gate'
+        $script:workflow | Should Match '(?s)Rebuild locked skill sources.*skills\.ps1 更新 -Locked -SkipHostProjection.*Run repository full quality gate'
         $script:workflow | Should Not Match 'SkipPublisherCheck'
     }
 

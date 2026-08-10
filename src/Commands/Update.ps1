@@ -629,7 +629,7 @@ function 更新 {
             $lock = Load-LockData
             Assert-LockMatchesCfg $cfg $lock
             Apply-LockToWorkspace $cfg $lock
-            构建生效
+            构建生效 -SkipHostProjection:$SkipHostProjection
             Write-Host "已按锁文件固定版本完成更新与构建。"
             return
         }
@@ -645,7 +645,7 @@ function 更新 {
         $planItems = @(Get-UpdatePlanItems $cfg -PreferLocalRefs:$prefetchOk)
         if (Test-UpdateCanFastNoop $cfg $planItems) {
             Log ("更新快路径：{0} 个缓存源均已是目标版本，跳过 fetch/reset，仅验证构建生效。" -f $planItems.Count)
-            构建生效
+            构建生效 -SkipHostProjection:$SkipHostProjection
             Write-Host "更新完成：所有技能源已是最新版本。"
             return
         }
@@ -654,7 +654,7 @@ function 更新 {
         if ($importFailures) { $failures += $importFailures }
         $vendorFailures = 更新Vendor $cfg -SkipPreflight -SkipForceClean $skipForceClean -SkipFetch:$prefetchOk
         if ($vendorFailures) { $failures += $vendorFailures }
-        构建生效
+        构建生效 -SkipHostProjection:$SkipHostProjection
         if ($Upgrade -and $failures.Count -eq 0) {
             Save-LockData $cfg | Out-Null
             Write-Host ("已刷新锁文件：{0}" -f (Get-LockPath))

@@ -2522,7 +2522,10 @@ function Write-FailureSummary([string]$title, [string[]]$failures, [string]$deta
     }
 }
 
-function 构建生效([switch]$AllowUnverifiedProjection = $AllowUnverifiedHostProjection) {
+function 构建生效(
+    [switch]$AllowUnverifiedProjection = $AllowUnverifiedHostProjection,
+    [switch]$SkipHostProjection
+) {
     Invoke-WithMetric "build_apply_total" {
         Preflight
         Invoke-PrebuildCheck
@@ -2564,6 +2567,9 @@ function 构建生效([switch]$AllowUnverifiedProjection = $AllowUnverifiedHostP
             if ($buildFailures -and @($buildFailures).Count -gt 0) {
                 Log "检测到构建失败，已跳过同步阶段。" "WARN"
                 Write-Host "⚠️ 构建失败，未执行同步。请先修复上方错误后重试【构建生效】。" -ForegroundColor Yellow
+            }
+            elseif ($SkipHostProjection) {
+                Log "已按显式请求跳过宿主目标与 native skill projection；仅保留 agent/ 构建产物。"
             }
             else {
                 $verifiedAgentBuildSignature = if ($agentBuildCacheHit.hit) {

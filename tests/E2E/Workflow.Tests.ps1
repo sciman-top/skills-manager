@@ -61,6 +61,38 @@ description: demo skill
             (Test-Path (Join-Path $root "out\skills\demo-hello\SKILL.md")) | Should Be $true
         }
 
+        It "Builds agent without writing host targets when projection is explicitly skipped" {
+            $root = Join-Path $TestDrive "ws-build-without-host-projection"
+            New-Item -ItemType Directory -Path $root -Force | Out-Null
+            Set-TestWorkspace $root
+
+            $skillDir = Join-Path $script:VendorDir "demo\skills\hello"
+            New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
+            Set-Content -Path (Join-Path $skillDir "SKILL.md") -Value @'
+---
+name: hello
+description: demo skill
+---
+'@
+
+            $cfg = [pscustomobject]@{
+                vendors = @([pscustomobject]@{ name = "demo"; repo = "https://example.com/demo.git"; ref = "main" })
+                targets = @([pscustomobject]@{ path = (Join-Path $root "out\skills") })
+                mappings = @([pscustomobject]@{ vendor = "demo"; from = "skills\hello"; to = "demo-hello" })
+                imports = @()
+                mcp_servers = @()
+                mcp_targets = @()
+                update_force = $false
+                sync_mode = "sync"
+            }
+            SaveCfg $cfg
+
+            构建生效 -SkipHostProjection
+
+            (Test-Path (Join-Path $script:AgentDir "demo-hello\SKILL.md")) | Should Be $true
+            (Test-Path (Join-Path $root "out\skills")) | Should Be $false
+        }
+
         It "Fails closed and rolls back when agent build reports failures" {
             $root = Join-Path $TestDrive "ws-build-failure"
             New-Item -ItemType Directory -Path $root -Force | Out-Null
@@ -139,8 +171,10 @@ description: demo skill
 
         It "Applies lock snapshot directly when -Locked is enabled" {
             $oldLocked = $script:Locked
+            $oldSkipHostProjection = $script:SkipHostProjection
             try {
                 $script:Locked = $true
+                $script:SkipHostProjection = $true
                 Mock LoadCfg {
                     [pscustomobject]@{
                         vendors = @()
@@ -165,11 +199,13 @@ description: demo skill
 
                 Assert-MockCalled Apply-LockToWorkspace -Times 1 -Exactly
                 Assert-MockCalled 构建生效 -Times 1 -Exactly
+                Assert-MockCalled 构建生效 -Times 1 -Exactly -ParameterFilter { [bool]$SkipHostProjection }
                 Assert-MockCalled 更新Imports -Times 0 -Exactly
                 Assert-MockCalled 更新Vendor -Times 0 -Exactly
             }
             finally {
                 $script:Locked = $oldLocked
+                $script:SkipHostProjection = $oldSkipHostProjection
             }
         }
     }

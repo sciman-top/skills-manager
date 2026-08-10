@@ -20,8 +20,8 @@ if ($MyInvocation.InvocationName -ne '.') {
             "卸载" { 卸载 (Merge-FilterAndArgs $Filter $args) }
             "卸载技能" { 卸载 (Merge-FilterAndArgs $Filter $args) }
             "选择" { 选择 }
-            "构建生效" { 构建生效 -AllowUnverifiedProjection:$AllowUnverifiedHostProjection }
-            "构建并生效" { 构建生效 -AllowUnverifiedProjection:$AllowUnverifiedHostProjection }
+            "构建生效" { 构建生效 -AllowUnverifiedProjection:$AllowUnverifiedHostProjection -SkipHostProjection:$SkipHostProjection }
+            "构建并生效" { 构建生效 -AllowUnverifiedProjection:$AllowUnverifiedHostProjection -SkipHostProjection:$SkipHostProjection }
             "更新" { 更新 }
             "更新上游并重建" { 更新 }
             "锁定" { 锁定 }

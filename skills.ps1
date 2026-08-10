@@ -7,7 +7,8 @@ param(
     [switch]$Locked,
     [switch]$Plan,
     [switch]$Upgrade,
-    [switch]$AllowUnverifiedHostProjection
+    [switch]$AllowUnverifiedHostProjection,
+    [switch]$SkipHostProjection
 )
 
 $ErrorActionPreference = "Stop"
@@ -12877,7 +12878,10 @@ function Write-FailureSummary([string]$title, [string[]]$failures, [string]$deta
     }
 }
 
-function 构建生效([switch]$AllowUnverifiedProjection = $AllowUnverifiedHostProjection) {
+function 构建生效(
+    [switch]$AllowUnverifiedProjection = $AllowUnverifiedHostProjection,
+    [switch]$SkipHostProjection
+) {
     Invoke-WithMetric "build_apply_total" {
         Preflight
         Invoke-PrebuildCheck
@@ -12919,6 +12923,9 @@ function 构建生效([switch]$AllowUnverifiedProjection = $AllowUnverifiedHostP
             if ($buildFailures -and @($buildFailures).Count -gt 0) {
                 Log "检测到构建失败，已跳过同步阶段。" "WARN"
                 Write-Host "⚠️ 构建失败，未执行同步。请先修复上方错误后重试【构建生效】。" -ForegroundColor Yellow
+            }
+            elseif ($SkipHostProjection) {
+                Log "已按显式请求跳过宿主目标与 native skill projection；仅保留 agent/ 构建产物。"
             }
             else {
                 $verifiedAgentBuildSignature = if ($agentBuildCacheHit.hit) {
@@ -13662,7 +13669,7 @@ function 更新 {
             $lock = Load-LockData
             Assert-LockMatchesCfg $cfg $lock
             Apply-LockToWorkspace $cfg $lock
-            构建生效
+            构建生效 -SkipHostProjection:$SkipHostProjection
             Write-Host "已按锁文件固定版本完成更新与构建。"
             return
         }
@@ -13678,7 +13685,7 @@ function 更新 {
         $planItems = @(Get-UpdatePlanItems $cfg -PreferLocalRefs:$prefetchOk)
         if (Test-UpdateCanFastNoop $cfg $planItems) {
             Log ("更新快路径：{0} 个缓存源均已是目标版本，跳过 fetch/reset，仅验证构建生效。" -f $planItems.Count)
-            构建生效
+            构建生效 -SkipHostProjection:$SkipHostProjection
             Write-Host "更新完成：所有技能源已是最新版本。"
             return
         }
@@ -13687,7 +13694,7 @@ function 更新 {
         if ($importFailures) { $failures += $importFailures }
         $vendorFailures = 更新Vendor $cfg -SkipPreflight -SkipForceClean $skipForceClean -SkipFetch:$prefetchOk
         if ($vendorFailures) { $failures += $vendorFailures }
-        构建生效
+        构建生效 -SkipHostProjection:$SkipHostProjection
         if ($Upgrade -and $failures.Count -eq 0) {
             Save-LockData $cfg | Out-Null
             Write-Host ("已刷新锁文件：{0}" -f (Get-LockPath))
@@ -25972,8 +25979,8 @@ if ($MyInvocation.InvocationName -ne '.') {
             "卸载" { 卸载 (Merge-FilterAndArgs $Filter $args) }
             "卸载技能" { 卸载 (Merge-FilterAndArgs $Filter $args) }
             "选择" { 选择 }
-            "构建生效" { 构建生效 -AllowUnverifiedProjection:$AllowUnverifiedHostProjection }
-            "构建并生效" { 构建生效 -AllowUnverifiedProjection:$AllowUnverifiedHostProjection }
+            "构建生效" { 构建生效 -AllowUnverifiedProjection:$AllowUnverifiedHostProjection -SkipHostProjection:$SkipHostProjection }
+            "构建并生效" { 构建生效 -AllowUnverifiedProjection:$AllowUnverifiedHostProjection -SkipHostProjection:$SkipHostProjection }
             "更新" { 更新 }
             "更新上游并重建" { 更新 }
             "锁定" { 锁定 }
