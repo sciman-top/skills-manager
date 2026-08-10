@@ -77,7 +77,6 @@
           "custom-powershell-windows-automation",
           "debugging-and-error-recovery",
           "error-handling-patterns",
-          "git-workflow-and-versioning",
           "security-best-practices",
           "shipping-and-launch",
           "vite"
@@ -499,28 +498,8 @@
       "vendor": "agent-skills-2"
     },
     {
-      "from": "skills\\git-workflow-and-versioning",
-      "to": "agent-skills-2-skills-git-workflow-and-versioning",
-      "vendor": "agent-skills-2"
-    },
-    {
-      "from": "skills\\incremental-implementation",
-      "to": "agent-skills-2-skills-incremental-implementation",
-      "vendor": "agent-skills-2"
-    },
-    {
-      "from": "skills\\planning-and-task-breakdown",
-      "to": "agent-skills-2-skills-planning-and-task-breakdown",
-      "vendor": "agent-skills-2"
-    },
-    {
       "from": "skills\\security-and-hardening",
       "to": "agent-skills-2-skills-security-and-hardening",
-      "vendor": "agent-skills-2"
-    },
-    {
-      "from": "skills\\spec-driven-development",
-      "to": "agent-skills-2-skills-spec-driven-development",
       "vendor": "agent-skills-2"
     },
     {

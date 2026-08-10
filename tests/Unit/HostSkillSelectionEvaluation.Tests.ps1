@@ -44,7 +44,6 @@ Describe 'Host skill selection effectiveness evaluation' {
         $fallbackCase.explicit_fallback | Should Be $true
 
         $approvedPlanCase = $corpus.cases | Where-Object id -eq 'ambiguous-approved-plan-zh'
-        @($approvedPlanCase.expected.required_any[0]) | Should Contain 'planning-and-task-breakdown'
         @($approvedPlanCase.expected.required_any[0]) | Should Contain 'draft-tickets'
     }
 

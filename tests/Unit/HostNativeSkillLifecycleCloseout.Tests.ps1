@@ -76,7 +76,11 @@ Describe 'P6 host-native skill lifecycle closeout' {
             'dispatching-parallel-agents',
             'using-git-worktrees',
             'requesting-code-review',
-            'finishing-a-development-branch'
+            'finishing-a-development-branch',
+            'spec-driven-development',
+            'planning-and-task-breakdown',
+            'incremental-implementation',
+            'git-workflow-and-versioning'
         )
         $retained = @(
             'systematic-debugging',

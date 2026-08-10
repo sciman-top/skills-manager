@@ -154,7 +154,7 @@
       "target_skill": "draft-spec",
       "category": "edge",
       "request": "设计已经批准，直接按可验证里程碑修改代码和测试；不要再生成 PRD 或规格草稿。",
-      "expected": { "required": ["incremental-implementation"], "forbidden": ["draft-spec"] }
+      "expected": { "required": ["verification-before-completion"], "forbidden": ["draft-spec"] }
     },
     {
       "id": "draft-tickets-direct",

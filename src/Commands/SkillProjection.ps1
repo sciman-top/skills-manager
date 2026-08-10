@@ -594,6 +594,11 @@ function Sync-CodexManagedSkillLinks($projectionCfg) {
     $desired = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($dir in @(Get-ChildItem -LiteralPath $managedRoot -Directory -Force | Where-Object Name -ne ".system" | Sort-Object Name)) {
         if ($excluded.Contains($dir.Name)) { continue }
+        # Only generated skill packages with an entrypoint belong in the host
+        # skill root.  Override-only directories (for example a resource or
+        # agent policy directory without SKILL.md) must remain in agent/ but
+        # must not become loadable host junctions.
+        if (-not (Test-Path -LiteralPath (Join-Path $dir.FullName "SKILL.md") -PathType Leaf)) { continue }
         $linkPath = Join-Path $userRoot $dir.Name
         New-Junction $linkPath $dir.FullName -QuietIfUnchanged
         $desired.Add($dir.Name) | Out-Null
@@ -1405,6 +1410,12 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBu
                     omitted_total = [int]$nativeProjectionPlan.omitted_total
                     truncated = [bool]$nativeProjectionPlan.truncated
                     notification = $nativeProjectionApply.notification
+                } }
+                managed_link_projection = if ($null -eq $linkProjection) { $null } else { [ordered]@{
+                    managed_source_path = [string]$linkProjection.managed_source_path
+                    user_skill_root = [string]$linkProjection.user_skill_root
+                    managed_link_count = [int]$linkProjection.managed_link_count
+                    stale_link_count = [int]$linkProjection.stale_link_count
                 } }
             }
             Set-ContentUtf8 $manifestPath ($manifest | ConvertTo-Json -Depth 20)

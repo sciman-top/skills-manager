@@ -117,7 +117,7 @@
       "language": "zh",
       "profile": "engineering",
       "request": "我有个模糊的 AI 助手想法，先帮我发散、检验假设并收敛成可行动概念。",
-      "expected": { "required": ["idea-refine"], "forbidden": ["planning-and-task-breakdown"] }
+      "expected": { "required": ["idea-refine"], "forbidden": [] }
     },
     {
       "id": "ambiguous-feature-en",
@@ -125,7 +125,7 @@
       "language": "en",
       "profile": "engineering",
       "request": "Start a significant team dashboard feature, but the roles, constraints, and acceptance criteria are still vague.",
-      "expected": { "required": ["spec-driven-development"], "forbidden": [] }
+      "expected": { "required": ["draft-spec"], "forbidden": [] }
     },
     {
       "id": "ambiguous-approved-plan-zh",
@@ -133,7 +133,7 @@
       "language": "zh",
       "profile": "engineering",
       "request": "规格已经评审通过，请把它拆成有依赖关系、可实施、可验证的任务清单。",
-      "expected": { "required": [], "required_any": [["planning-and-task-breakdown", "draft-tickets"]], "forbidden": ["idea-refine"] }
+      "expected": { "required": [], "required_any": [["draft-tickets"]], "forbidden": ["idea-refine"] }
     },
     {
       "id": "ambiguous-cold-architecture-en",
@@ -197,7 +197,7 @@
       "language": "zh",
       "profile": "engineering",
       "request": "根据现有讨论起草一份可评审 PRD，然后把其中已明确的实施范围拆成有序任务。",
-      "expected": { "required": ["draft-spec", "planning-and-task-breakdown"], "forbidden": [] }
+      "expected": { "required": ["draft-spec", "draft-tickets"], "forbidden": [] }
     },
     {
       "id": "multi-cold-physics-en",

@@ -41,7 +41,7 @@
       "category": "discovery",
       "query": "把需求梳理清楚，最多问我三个高价值问题，然后形成 PRD 草案，仅供审阅",
       "profile_hints": ["engineering"],
-      "expected_candidates": [{"kind": "skill", "name": "draft-spec"}, {"kind": "skill", "name": "spec-driven-development"}],
+      "expected_candidates": [{"kind": "skill", "name": "draft-spec"}],
       "host_selected": [{"kind": "skill", "name": "draft-spec", "action": "load_skill"}],
       "forbidden_candidates": [{"kind": "skill", "name": "to-spec"}]
     },
@@ -50,8 +50,8 @@
       "category": "planning",
       "query": "根据已经批准的 spec 制定可执行开发计划和任务清单，但本轮不要执行",
       "profile_hints": ["engineering"],
-      "expected_candidates": [{"kind": "skill", "name": "planning-and-task-breakdown"}],
-      "host_selected": [{"kind": "skill", "name": "planning-and-task-breakdown", "action": "load_skill"}],
+      "expected_candidates": [{"kind": "skill", "name": "draft-spec"}],
+      "host_selected": [{"kind": "skill", "name": "draft-spec", "action": "load_skill"}],
       "forbidden_candidates": [{"kind": "skill", "name": "executing-plans"}]
     },
     {
@@ -59,8 +59,8 @@
       "category": "delivery",
       "query": "方案已批准，请继续把实现做完，按切片验证，遇到问题自行修复",
       "profile_hints": ["coding"],
-      "expected_candidates": [{"kind": "skill", "name": "incremental-implementation"}, {"kind": "skill", "name": "systematic-debugging"}],
-      "host_selected": [{"kind": "skill", "name": "incremental-implementation", "action": "load_skill"}],
+      "expected_candidates": [{"kind": "skill", "name": "verification-before-completion"}, {"kind": "skill", "name": "systematic-debugging"}],
+      "host_selected": [{"kind": "skill", "name": "verification-before-completion", "action": "use_active_skill"}],
       "forbidden_candidates": [{"kind": "skill", "name": "debug:dotnet"}]
     },
     {

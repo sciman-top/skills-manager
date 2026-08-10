@@ -280,7 +280,7 @@ P4/P5 的 lexical selector、task model 和 ranking 是历史 repo_verified 实�
 
 设计访谈统一使用 `grill-with-docs`：在 CLI/IDE 中可显式输入 `$grill-with-docs`，在 Work/Codex 桌面端可从技能选择器指定，也可由模型仅在“grill/设计质询/把方案磨清楚”等明确语义下隐式调用。它不会因为普通实现或重构请求自动启动；完成访谈后只有用户确认的持久决策才写入 `CONTEXT.md`、词汇表或 ADR。`grilling` 与 `domain-modeling` 作为 `default` 的完整依赖闭包保留，防止主技能可见但运行依赖缺失；只有在直接进行决策树访谈或领域建模时才单独调用。
 
-工程 profile 常驻 `draft-spec`，并用 `planning-and-task-breakdown` 承担可审阅的任务拆分；`draft-tickets` 仍保留为显式冷调用能力，避免与通用计划能力重复占用 metadata 预算。这些 draft/planning 能力不调用 tracker，也不建立外部阻塞关系。`to-spec`、`to-tickets`、`setup-matt-pocock-skills` 和 `improve-codebase-architecture` 继续保持显式调用，因为它们会发布、修改仓库配置或执行高成本架构扫描。
+工程能力优先使用 `draft-spec` 和 `draft-tickets` 生成本地、可审阅的输出；它们不调用 tracker，也不建立外部阻塞关系。已退役的通用 spec/plan/slice/Git workflow skill 不再进入活跃映射；`profile_compatibility` 只保留历史只读元数据，不是启用或删除入口。`to-spec`、`to-tickets`、`setup-matt-pocock-skills` 和 `improve-codebase-architecture` 继续保持显式调用，因为它们会发布、修改仓库配置或执行高成本架构扫描。
 
 `-DryRun` 只生成内存计划，不写配置或 manifest。Codex 在新任务加载初始技能列表；当前已运行任务不会热更新该列表。常驻 router 可以在当前任务读取磁盘上的冷技能，实现能力层无缝切换，但不能把 profile 变更伪装成热加载。投影后仍应以 fresh process/task 复核初始列表，不应通过删除 `.agents/skills` 强制生效。
 

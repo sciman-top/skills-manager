@@ -194,6 +194,7 @@ Describe "Skill projection" {
                 $managed = Join-Path $TestDrive "managed-links"
                 $userRoot = Join-Path $TestDrive "agents-skills"
                 New-ProjectionSkill $managed "demo" "demo" | Out-Null
+                New-Item -ItemType Directory -Path (Join-Path $managed "resource-only") -Force | Out-Null
                 New-ProjectionSkill (Join-Path $userRoot ".system") "system" "system" | Out-Null
                 $cfg = [pscustomobject]@{
                     managed_source_path = $managed
@@ -204,6 +205,7 @@ Describe "Skill projection" {
 
                 $result.managed_link_count | Should Be 1
                 (Is-ReparsePoint (Join-Path $userRoot "demo")) | Should Be $true
+                (Test-Path -LiteralPath (Join-Path $userRoot "resource-only")) | Should Be $false
                 (Get-ReparsePointTargetFullPath (Join-Path $userRoot "demo")) | Should Be ([System.IO.Path]::GetFullPath((Join-Path $managed "demo")))
                 (Test-Path -LiteralPath (Join-Path $userRoot ".system\system\SKILL.md") -PathType Leaf) | Should Be $true
             }

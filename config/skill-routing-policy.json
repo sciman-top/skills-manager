@@ -54,10 +54,7 @@
       "router": "",
       "selection_policy": "do not require a task profile before starting; resident dispatcher exposes the portable catalog first, then the host AI selects visible/cold skills and native orchestration proceeds without hot profile switching or automatic delegation",
       "members": [
-        { "name": "planning-and-task-breakdown", "role": "workflow", "activation": "the user explicitly needs a durable implementation breakdown beyond native Plan mode" },
         { "name": "systematic-debugging", "role": "workflow", "activation": "a bug, failed test, or unexpected behavior needs diagnosis" },
-        { "name": "incremental-implementation", "role": "workflow", "activation": "the user explicitly requests incremental delivery with independently verifiable milestones" },
-        { "name": "git-workflow-and-versioning", "role": "workflow", "activation": "an authorized commit, branch, merge, release, or conflict-resolution operation is required" },
         { "name": "code-review-and-quality", "role": "validator", "activation": "a change is ready for review or merge assessment" },
         { "name": "verification-before-completion", "role": "validator", "activation": "before any completion or passing claim" },
         { "name": "research", "role": "reference", "activation": "current primary-source evidence can materially change the decision; default read-only and persist only on explicit request" }
@@ -173,8 +170,8 @@
     {
       "id": "implicit-commit-pressure",
       "severity": "warning",
-      "members": ["git-workflow-and-versioning", "incremental-implementation"],
-      "resolution": "Use git for inspection and rollback boundaries, but commit or push only when the task explicitly authorizes persistence."
+      "members": ["verification-before-completion", "code-review-and-quality"],
+      "resolution": "Use repository verification and review evidence for completion claims, but commit or push only when the task explicitly authorizes persistence."
     }
   ]
 }

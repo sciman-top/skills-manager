@@ -20005,6 +20005,36 @@ function Get-AuditFingerprintFromExternalSkillFacts($facts) {
     return (Get-AuditFingerprintFromVendorFromPairs $rows $true)
 }
 
+function Get-AuditHostProjectionState($cfg) {
+    $projection = if ($null -ne $cfg -and $cfg.PSObject.Properties.Match('skill_projection').Count -gt 0) { $cfg.skill_projection } else { $null }
+    if ($null -eq $projection -or $projection.PSObject.Properties.Match('managed_source_path').Count -eq 0 -or $projection.PSObject.Properties.Match('user_skill_root').Count -eq 0) {
+        return [pscustomobject]([ordered]@{ status = 'not_provided'; managed_count = 0; broken_count = 0; stale_count = 0; fingerprint = '' })
+    }
+    try {
+        $managedRoot = Resolve-SkillProjectionPath ([string]$projection.managed_source_path)
+        $userRoot = Resolve-SkillProjectionPath ([string]$projection.user_skill_root)
+        if (-not (Test-Path -LiteralPath $managedRoot -PathType Container) -or -not (Test-Path -LiteralPath $userRoot -PathType Container)) {
+            return [pscustomobject]([ordered]@{ status = 'unavailable'; managed_count = 0; broken_count = 0; stale_count = 0; fingerprint = '' })
+        }
+        $excluded = @($projection.managed_link_excludes | ForEach-Object { [string]$_ })
+        $expected = @(Get-ChildItem -LiteralPath $managedRoot -Directory -Force | Where-Object { $_.Name -ne '.system' -and $_.Name -notin $excluded -and (Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf) } | ForEach-Object Name)
+        $rows = @(); $managedCount = 0; $brokenCount = 0; $staleCount = 0
+        foreach ($entry in @(Get-ChildItem -LiteralPath $userRoot -Directory -Force -ErrorAction SilentlyContinue | Where-Object Name -ne '.system')) {
+            if (-not (Is-ReparsePoint $entry.FullName)) { continue }
+            $target = Get-ReparsePointTargetFullPath $entry.FullName
+            if ([string]::IsNullOrWhiteSpace($target)) { $brokenCount++; continue }
+            $managedPrefix = $managedRoot.TrimEnd('\') + '\'
+            if ($target.StartsWith($managedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $managedCount++
+                if ($entry.Name -notin $expected -or -not (Test-Path -LiteralPath $target -PathType Container)) { $staleCount++ }
+                $rows += (([ordered]@{ name = $entry.Name; target = $target }) | ConvertTo-Json -Compress)
+            }
+        }
+        foreach ($name in $expected) { if (-not (Test-Path -LiteralPath (Join-Path $userRoot $name))) { $staleCount++ } }
+        return [pscustomobject]([ordered]@{ status = 'available'; managed_count = $managedCount; broken_count = $brokenCount; stale_count = $staleCount; fingerprint = (Get-AuditFingerprintFromVendorFromPairs $rows $true) })
+    } catch { return [pscustomobject]([ordered]@{ status = 'unavailable'; managed_count = 0; broken_count = 0; stale_count = 0; fingerprint = '' }) }
+}
+
 function Get-AuditLiveInstalledState($cfg = $null) {
     if ($null -eq $cfg) { $cfg = LoadCfg }
     $facts = @(Get-InstalledSkillFacts $cfg)
@@ -20022,6 +20052,7 @@ function Get-AuditLiveInstalledState($cfg = $null) {
         external_skill_fingerprint = (Get-AuditFingerprintFromExternalSkillFacts $externalFacts)
         mcp_server_count = @($mcpServers).Count
         mcp_fingerprint = (Get-AuditFingerprintFromMcpServers $mcpServers)
+        host_projection = (Get-AuditHostProjectionState $cfg)
     })
 }
 
@@ -20083,6 +20114,7 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
     if ([string]::IsNullOrWhiteSpace($mcpFingerprint) -and @($mcpServers).Count -gt 0) {
         $mcpFingerprint = (Get-AuditFingerprintFromMcpServers $mcpServers)
     }
+    $hostProjection = if (Test-AuditJsonProperty $data 'host_projection') { $data.host_projection } else { $null }
     $capturedAt = ""
     if (Test-AuditJsonProperty $data "captured_at") { $capturedAt = [string]$data.captured_at }
     $snapshotKind = ""
@@ -20097,6 +20129,7 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
         external_skill_fingerprint = $externalSkillFingerprint
         mcp_server_count = @($mcpServers).Count
         mcp_fingerprint = $mcpFingerprint
+        host_projection = $hostProjection
     })
 }
 
@@ -20111,6 +20144,7 @@ function New-AuditInstalledSnapshotFallbackState($liveState, [string]$snapshotPa
         external_skill_fingerprint = if ($liveState.PSObject.Properties.Match('external_skill_fingerprint').Count -gt 0) { [string]$liveState.external_skill_fingerprint } else { '' }
         mcp_server_count = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
         mcp_fingerprint = if ($liveState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$liveState.mcp_fingerprint } else { "" }
+        host_projection = if ($liveState.PSObject.Properties.Match('host_projection').Count -gt 0) { $liveState.host_projection } else { $null }
     })
 }
 
@@ -20124,11 +20158,19 @@ function Get-AuditInstalledSnapshotStaleness($snapshotState, $liveState) {
     if ($snapshotState.PSObject.Properties.Match('external_skill_fingerprint').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshotState.external_skill_fingerprint)) {
         $externalSkillStale = ([string]$snapshotState.external_skill_fingerprint -ne [string]$liveState.external_skill_fingerprint)
     }
+    $hostStale = $false
+    if ($snapshotState.PSObject.Properties.Match('host_projection').Count -gt 0 -and $null -ne $snapshotState.host_projection -and $liveState.PSObject.Properties.Match('host_projection').Count -gt 0) {
+        $snapshotHost = $snapshotState.host_projection; $liveHost = $liveState.host_projection
+        if ([string]$snapshotHost.status -eq 'available' -and [string]$liveHost.status -eq 'available') {
+            $hostStale = ([string]$snapshotHost.fingerprint -ne [string]$liveHost.fingerprint -or [int]$liveHost.stale_count -gt 0 -or [int]$liveHost.broken_count -gt 0)
+        }
+    }
     return [pscustomobject]([ordered]@{
-            is_stale = ($skillStale -or $mcpStale -or $externalSkillStale)
+            is_stale = ($skillStale -or $mcpStale -or $externalSkillStale -or $hostStale)
             skill_stale = $skillStale
             mcp_stale = $mcpStale
             external_skill_stale = $externalSkillStale
+            host_projection_stale = $hostStale
         })
 }
 
@@ -21135,6 +21177,7 @@ function Invoke-AuditTargetsScan {
             live_external_skill_fingerprint = if ($liveState.PSObject.Properties.Match('external_skill_fingerprint').Count -gt 0) { [string]$liveState.external_skill_fingerprint } else { '' }
             live_mcp_server_count = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
             live_mcp_fingerprint = if ($liveState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$liveState.mcp_fingerprint } else { "" }
+            host_projection = if ($liveState.PSObject.Properties.Match('host_projection').Count -gt 0) { $liveState.host_projection } else { $null }
             skills = @($installedSkills)
             external_skills = @($externalSkills)
             mcp_servers = @($installedMcpServers)
@@ -21277,6 +21320,7 @@ function Invoke-AuditSkillDiscovery {
             live_external_skill_fingerprint = if ($liveState.PSObject.Properties.Match('external_skill_fingerprint').Count -gt 0) { [string]$liveState.external_skill_fingerprint } else { '' }
             live_mcp_server_count = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
             live_mcp_fingerprint = if ($liveState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$liveState.mcp_fingerprint } else { "" }
+            host_projection = if ($liveState.PSObject.Properties.Match('host_projection').Count -gt 0) { $liveState.host_projection } else { $null }
             skills = @($installedSkills)
             external_skills = @($externalSkills)
             mcp_servers = @($installedMcpServers)
@@ -23939,6 +23983,11 @@ function Sync-CodexManagedSkillLinks($projectionCfg) {
     $desired = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($dir in @(Get-ChildItem -LiteralPath $managedRoot -Directory -Force | Where-Object Name -ne ".system" | Sort-Object Name)) {
         if ($excluded.Contains($dir.Name)) { continue }
+        # Only generated skill packages with an entrypoint belong in the host
+        # skill root.  Override-only directories (for example a resource or
+        # agent policy directory without SKILL.md) must remain in agent/ but
+        # must not become loadable host junctions.
+        if (-not (Test-Path -LiteralPath (Join-Path $dir.FullName "SKILL.md") -PathType Leaf)) { continue }
         $linkPath = Join-Path $userRoot $dir.Name
         New-Junction $linkPath $dir.FullName -QuietIfUnchanged
         $desired.Add($dir.Name) | Out-Null
@@ -24750,6 +24799,12 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBu
                     omitted_total = [int]$nativeProjectionPlan.omitted_total
                     truncated = [bool]$nativeProjectionPlan.truncated
                     notification = $nativeProjectionApply.notification
+                } }
+                managed_link_projection = if ($null -eq $linkProjection) { $null } else { [ordered]@{
+                    managed_source_path = [string]$linkProjection.managed_source_path
+                    user_skill_root = [string]$linkProjection.user_skill_root
+                    managed_link_count = [int]$linkProjection.managed_link_count
+                    stale_link_count = [int]$linkProjection.stale_link_count
                 } }
             }
             Set-ContentUtf8 $manifestPath ($manifest | ConvertTo-Json -Depth 20)
