@@ -256,7 +256,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-skill-routing.ps1
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\plan-skill-profile-reconciliation.ps1 -Json
 ```
 
-profile reconciliation 脚本现在只承担迁移期的只读/回滚兼容职责，不再由 `skills.ps1` dispatch，也不改变 native reachability。旧 profile 字段必须先进入 `profile_compatibility` read-only view；`scripts/verify-skill-routing.ps1` 只报告 compatibility-only 状态，不能作为 quality gate 或语义 selector。
+profile reconciliation 脚本现在只承担迁移期的只读/回滚兼容职责，不再由 `skills.ps1` dispatch，也不改变 native reachability。旧 profile 字段必须先进入 `profile_compatibility` read-only view；`scripts/verify-skill-routing.ps1` 只报告 compatibility-only 状态，不能作为 quality gate 或语义 selector。canonical inventory 变化只写 `host_refresh_needed` signal，动作是 `fresh_session_or_host_handoff`；它不含 advisor command，也不恢复 profile planner。
 
 native projection 编译全部 eligible enabled skills，并由 host snapshot、deterministic eligibility 和 token-aware metadata planner 共同决定是否可投影；profile membership 不能再排除 native skill。host evaluation 区分 listed、selected、injected、executed 和 abstained；本轮 fresh CLI 仅得到 `host_evaluation_partial`，selection/body invocation 不可观测，因此不构成 `host_loaded` 或 `live_accepted`。
 
@@ -280,7 +280,7 @@ P4/P5 的 lexical selector、task model 和 ranking 是历史 repo_verified 实�
 
 设计访谈统一使用 `grill-with-docs`：在 CLI/IDE 中可显式输入 `$grill-with-docs`，在 Work/Codex 桌面端可从技能选择器指定，也可由模型仅在“grill/设计质询/把方案磨清楚”等明确语义下隐式调用。它不会因为普通实现或重构请求自动启动；完成访谈后只有用户确认的持久决策才写入 `CONTEXT.md`、词汇表或 ADR。`grilling` 与 `domain-modeling` 作为 `default` 的完整依赖闭包保留，防止主技能可见但运行依赖缺失；只有在直接进行决策树访谈或领域建模时才单独调用。
 
-工程能力优先使用 `draft-spec` 和 `draft-tickets` 生成本地、可审阅的输出；它们不调用 tracker，也不建立外部阻塞关系。已退役的通用 spec/plan/slice/Git workflow skill 不再进入活跃映射；`profile_compatibility` 只保留历史只读元数据，不是启用或删除入口。`to-spec`、`to-tickets`、`setup-matt-pocock-skills` 和 `improve-codebase-architecture` 继续保持显式调用，因为它们会发布、修改仓库配置或执行高成本架构扫描。
+工程能力优先使用 `draft-spec` 和 `draft-tickets` 生成本地、可审阅的输出；它们不调用 tracker，也不建立外部阻塞关系。`setup-matt-pocock-skills`、`to-spec`、`to-tickets` 和 `improve-codebase-architecture` 已退役，旧别名 `to-prd` / `to-issues` 仅路由到轻量草稿技能；外部发布由宿主工具在单独授权后执行，不再由常驻工作流 skill 接管。`profile_compatibility` 只保留历史只读元数据，不是启用或删除入口。
 
 `-DryRun` 只生成内存计划，不写配置或 manifest。Codex 在新任务加载初始技能列表；当前已运行任务不会热更新该列表。常驻 router 可以在当前任务读取磁盘上的冷技能，实现能力层无缝切换，但不能把 profile 变更伪装成热加载。投影后仍应以 fresh process/task 复核初始列表，不应通过删除 `.agents/skills` 强制生效。
 

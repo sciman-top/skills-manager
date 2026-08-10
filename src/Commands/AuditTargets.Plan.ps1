@@ -179,7 +179,16 @@ function Assert-AuditOverlapFinding($item) {
     if ($item.PSObject.Properties.Match("routing").Count -eq 0 -or $null -eq $item.routing) { return }
 
     Need (Test-AuditObjectLike $item.routing) ("重叠发现 routing 必须是对象：{0}" -f [string]$item.name)
-    Need (-not [string]::IsNullOrWhiteSpace([string]$item.routing.router)) ("重叠发现 routing 缺少 router：{0}" -f [string]$item.name)
+    $decisionOwner = if ($item.routing.PSObject.Properties.Match("decision_owner").Count -gt 0) { ([string]$item.routing.decision_owner).Trim().ToLowerInvariant() } else { "" }
+    if (-not [string]::IsNullOrWhiteSpace($decisionOwner)) {
+        Need ($decisionOwner -eq "host_ai") ("重叠发现 routing.decision_owner 仅支持 host_ai：{0}/{1}" -f [string]$item.name, $decisionOwner)
+        $item.routing.decision_owner = $decisionOwner
+    }
+    $router = if ($item.routing.PSObject.Properties.Match("router").Count -gt 0) { ([string]$item.routing.router).Trim() } else { "" }
+    $fallbackRouter = if ($item.routing.PSObject.Properties.Match("fallback_router").Count -gt 0) { ([string]$item.routing.fallback_router).Trim() } else { "" }
+    if ([string]::IsNullOrWhiteSpace($decisionOwner)) {
+        Need (-not [string]::IsNullOrWhiteSpace($router)) ("重叠发现 routing 缺少 router：{0}" -f [string]$item.name)
+    }
     Need (-not [string]::IsNullOrWhiteSpace([string]$item.routing.selection_policy)) ("重叠发现 routing 缺少 selection_policy：{0}" -f [string]$item.name)
     Need ($item.routing.PSObject.Properties.Match("members").Count -gt 0 -and (Assert-IsArray $item.routing.members)) ("重叠发现 routing.members 必须是数组：{0}" -f [string]$item.name)
     Need (@($item.routing.members).Count -ge 2) ("重叠发现 routing.members 至少需要两个成员：{0}" -f [string]$item.name)
@@ -196,9 +205,120 @@ function Assert-AuditOverlapFinding($item) {
         $member.role = $role
         $memberRoles[$memberName] = $role
     }
-    $router = ([string]$item.routing.router).Trim()
-    Need ($seenMembers.Contains($router)) ("重叠发现 routing.router 必须出现在 members：{0}/{1}" -f [string]$item.name, $router)
-    Need ([string]$memberRoles[$router] -eq "router") ("重叠发现 routing.router 对应成员必须使用 role=router：{0}/{1}" -f [string]$item.name, $router)
+    if (-not [string]::IsNullOrWhiteSpace($router)) {
+        Need ($seenMembers.Contains($router)) ("重叠发现 routing.router 必须出现在 members：{0}/{1}" -f [string]$item.name, $router)
+        Need ([string]$memberRoles[$router] -eq "router") ("重叠发现 routing.router 对应成员必须使用 role=router：{0}/{1}" -f [string]$item.name, $router)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($fallbackRouter)) {
+        Need ($seenMembers.Contains($fallbackRouter)) ("重叠发现 routing.fallback_router 必须出现在 members：{0}/{1}" -f [string]$item.name, $fallbackRouter)
+        Need ([string]$memberRoles[$fallbackRouter] -eq "router") ("重叠发现 routing.fallback_router 对应成员必须使用 role=router：{0}/{1}" -f [string]$item.name, $fallbackRouter)
+    }
+}
+
+function Add-AuditExactJsonValueReferences($value, [string]$needle, [string]$jsonPath, [string]$file, $references) {
+    if ($null -eq $value) { return }
+    if ($value -is [string]) {
+        if ([string]::Equals([string]$value, $needle, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $references.Add([pscustomobject]([ordered]@{ file = $file; path = $jsonPath })) | Out-Null
+        }
+        return
+    }
+    if ($value -is [System.Collections.IDictionary]) {
+        foreach ($key in $value.Keys) {
+            Add-AuditExactJsonValueReferences $value[$key] $needle ("{0}.{1}" -f $jsonPath, [string]$key) $file $references
+        }
+        return
+    }
+    if ((Assert-IsArray $value) -or ($value -is [System.Collections.IList])) {
+        $index = 0
+        foreach ($entry in @($value)) {
+            Add-AuditExactJsonValueReferences $entry $needle ("{0}[{1}]" -f $jsonPath, $index) $file $references
+            $index++
+        }
+        return
+    }
+    if (Test-AuditObjectLike $value) {
+        foreach ($property in $value.PSObject.Properties) {
+            Add-AuditExactJsonValueReferences $property.Value $needle ("{0}.{1}" -f $jsonPath, [string]$property.Name) $file $references
+        }
+    }
+}
+
+function Test-AuditRemovalDependencyClosure {
+    param(
+        $Config,
+        $RemovalCandidates,
+        [string]$RepositoryRoot = $Root
+    )
+    $blocked = New-Object System.Collections.Generic.List[object]
+    $issues = New-Object System.Collections.Generic.List[string]
+    $checkedFiles = @(
+        "skills.json",
+        "config/skill-dependency-closure.json",
+        "config/skill-routing-policy.json",
+        "config/override-skill-activation-corpus.json",
+        "config/capability-routing-golden.json",
+        "overrides/patches/provenance.json"
+    )
+    $candidateIndex = 0
+    foreach ($candidate in @($RemovalCandidates)) {
+        $candidateIndex++
+        $name = ([string]$candidate.name).Trim()
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $references = New-Object System.Collections.Generic.List[object]
+        if ($null -ne $Config -and $Config.PSObject.Properties.Match("skill_projection").Count -gt 0 -and $null -ne $Config.skill_projection) {
+            $projection = $Config.skill_projection
+            if ($projection.PSObject.Properties.Match("aliases").Count -gt 0) {
+                $aliasIndex = 0
+                foreach ($alias in @($projection.aliases)) {
+                    if ($null -ne $alias -and [string]::Equals([string]$alias.replacement, $name, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $references.Add([pscustomobject]([ordered]@{ file = "skills.json"; path = "$.skill_projection.aliases[$aliasIndex].replacement" })) | Out-Null
+                    }
+                    $aliasIndex++
+                }
+            }
+            if ($projection.PSObject.Properties.Match("resident_names").Count -gt 0) {
+                $residentIndex = 0
+                foreach ($residentName in @($projection.resident_names)) {
+                    if ([string]::Equals([string]$residentName, $name, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $references.Add([pscustomobject]([ordered]@{ file = "skills.json"; path = "$.skill_projection.resident_names[$residentIndex]" })) | Out-Null
+                    }
+                    $residentIndex++
+                }
+            }
+            if ($projection.PSObject.Properties.Match("discovery_catalog").Count -gt 0 -and $null -ne $projection.discovery_catalog) {
+                Add-AuditExactJsonValueReferences $projection.discovery_catalog $name '$.skill_projection.discovery_catalog' "skills.json" $references
+            }
+        }
+        foreach ($relativePath in @($checkedFiles | Select-Object -Skip 1)) {
+            $fullPath = Join-Path $RepositoryRoot $relativePath
+            if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) { continue }
+            try {
+                $json = Get-ContentUtf8 $fullPath | ConvertFrom-Json
+                Add-AuditExactJsonValueReferences $json $name '$' ($relativePath -replace '\\', '/') $references
+            }
+            catch {
+                $references.Add([pscustomobject]([ordered]@{ file = ($relativePath -replace '\\', '/'); path = '$'; error = "json_parse_failed: $($_.Exception.Message)" })) | Out-Null
+            }
+        }
+        if ($references.Count -gt 0) {
+            $originalIndex = if ($candidate.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$candidate.original_index } else { $candidateIndex }
+            $entry = [pscustomobject]([ordered]@{
+                    original_index = $originalIndex
+                    name = $name
+                    references = $references.ToArray()
+                })
+            $blocked.Add($entry) | Out-Null
+            $referenceText = ($references.ToArray() | ForEach-Object { "{0}{1}" -f [string]$_.file, [string]$_.path }) -join ", "
+            $issues.Add(("removal_dependency_blocked：{0}) {1} <- {2}" -f $originalIndex, $name, $referenceText)) | Out-Null
+        }
+    }
+    return [pscustomobject]([ordered]@{
+            ok = ($blocked.Count -eq 0)
+            checked_files = $checkedFiles
+            blocked = $blocked.ToArray()
+            issues = $issues.ToArray()
+        })
 }
 
 function Assert-AuditRecommendationItem($item) {

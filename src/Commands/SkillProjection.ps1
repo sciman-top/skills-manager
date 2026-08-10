@@ -371,7 +371,7 @@ function New-SkillProfileReconciliationSignal($projectionCfg, [string]$manifestP
     $skillsConfigPath = Join-Path $Root "skills.json"
     return [pscustomobject]([ordered]@{
             schema_version = 1
-            status = if ($changed) { "reconciliation_needed" } else { "not_needed" }
+            status = if ($changed) { "host_refresh_needed" } else { "not_needed" }
             reason = if ($changed) { "canonical_inventory_changed" } else { "canonical_inventory_unchanged" }
             added_names = $added
             removed_names = $removed
@@ -379,14 +379,13 @@ function New-SkillProfileReconciliationSignal($projectionCfg, [string]$manifestP
             before_fingerprint = [string]$before.fingerprint
             after_fingerprint = [string]$after.fingerprint
             config_sha256 = if (Test-Path -LiteralPath $skillsConfigPath -PathType Leaf) { Get-FileContentHash $skillsConfigPath } else { "" }
-            next_action = if ($changed) { "host_ai_profile_reconciliation" } else { "none" }
-            advisor_command = if ($changed) { "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/plan-skill-profile-reconciliation.ps1 -Json" } else { "" }
+            next_action = if ($changed) { "fresh_session_or_host_handoff" } else { "none" }
+            advisor_command = ""
             active_profile = [string]$currentPlan.active_profile
             profile_names = @($currentPlan.profile_budgets | ForEach-Object { [string]$_.profile } | Sort-Object -Unique)
             unrouted_names = @($currentPlan.unrouted_names)
             writes_profile_config = $false
             signal_path = $signalPath
-            signal_updated = $false
         })
 }
 
@@ -1419,13 +1418,13 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBu
                 } }
             }
             Set-ContentUtf8 $manifestPath ($manifest | ConvertTo-Json -Depth 20)
-            if ([string]$reconciliation.status -eq "reconciliation_needed") {
+            if ([string]$reconciliation.status -eq "host_refresh_needed") {
                 try {
                     Set-ContentUtf8 ([string]$reconciliation.signal_path) ($reconciliation | ConvertTo-Json -Depth 8)
-                    $reconciliation.signal_updated = $true
+                    $reconciliation | Add-Member -NotePropertyName signal_updated -NotePropertyValue $true -Force
                 }
                 catch {
-                    Log ("profile reconciliation signal 写入失败，不阻断技能投影：{0}" -f $_.Exception.Message) "WARN"
+                    Log ("host refresh signal 写入失败，不阻断技能投影：{0}" -f $_.Exception.Message) "WARN"
                 }
             }
             return [pscustomobject]@{ backup_path = if ($null -eq $writtenBackupPath) { "" } else { [string]$writtenBackupPath } }

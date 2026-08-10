@@ -80,9 +80,9 @@
     },
     {
       "id": "engineering-design-and-delivery",
-      "purpose": "Separate low-side-effect design drafts from design interviews, architecture scans, repository setup, and tracker publication.",
+      "purpose": "Keep engineering design and delivery narrow: local review drafts, focused design interviews, primary-source research, and explicit architecture vocabulary.",
       "router": "",
-      "selection_policy": "Prefer draft-spec or draft-tickets for review-only output; allow grill-with-docs to start a focused design interview when the request clearly asks for grilling; keep setup, architecture scanning, and tracker publication explicit.",
+      "selection_policy": "Prefer draft-spec or draft-tickets for review-only output; use grill-with-docs only for an explicit design challenge; use codebase-design for architecture vocabulary; let the host own implementation and separately authorize external publication.",
       "members": [
         { "name": "research", "role": "reference", "activation": "current primary-source evidence is required for the engineering decision" },
         { "name": "domain-modeling", "role": "workflow", "activation": "durable domain terms, boundaries, or decisions need clarification" },
@@ -90,11 +90,7 @@
         { "name": "grill-with-docs", "role": "workflow", "activation": "the user asks to grill a design or sharpen an ADR/glossary decision", "negative_activation": "ordinary implementation or direct fixing is requested" },
         { "name": "draft-spec", "role": "executor", "activation": "the user asks for a review-only spec or PRD draft", "negative_activation": "implementation is requested in the same task" },
         { "name": "draft-tickets", "role": "executor", "activation": "the user asks for a review-only ticket or vertical-slice breakdown", "negative_activation": "implementation is requested in the same task" },
-        { "name": "setup-matt-pocock-skills", "role": "operator", "activation": "the repository engineering-skill configuration must be initialized or changed explicitly" },
-        { "name": "codebase-design", "role": "reference", "activation": "architecture vocabulary is needed for an engineering design" },
-        { "name": "improve-codebase-architecture", "role": "workflow", "activation": "the user explicitly requests a codebase architecture scan and visual report" },
-        { "name": "to-spec", "role": "operator", "activation": "the user explicitly approves publishing a spec to the configured tracker", "negative_activation": "drafting, review, or implementation without publication approval" },
-        { "name": "to-tickets", "role": "operator", "activation": "the user explicitly approves publishing tickets and blocking relationships", "negative_activation": "drafting, review, or implementation without publication approval" }
+        { "name": "codebase-design", "role": "reference", "activation": "architecture vocabulary is needed for an engineering design" }
       ]
     },
     {

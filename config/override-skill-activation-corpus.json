@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "corpus_id": "non-watch-override-activation-v1",
-  "case_count": 40,
+  "case_count": 36,
   "categories": ["direct", "indirect", "negative", "edge"],
   "target_skills": [
     "custom-creator-publishing",
@@ -11,7 +11,6 @@
     "draft-spec",
     "draft-tickets",
     "grill-with-docs",
-    "setup-matt-pocock-skills",
     "custom-powerpoint-accessibility",
     "custom-junior-physics-animation"
   ],
@@ -140,14 +139,14 @@
       "target_skill": "draft-spec",
       "category": "indirect",
       "request": "根据当前讨论和仓库术语整理一份供我评审的 PRD 草稿，区分事实、决定、假设和开放问题，先不要落盘或发布。",
-      "expected": { "required": ["draft-spec"], "forbidden": ["to-spec"] }
+      "expected": { "required": ["draft-spec"], "forbidden": [] }
     },
     {
       "id": "draft-spec-negative-publish",
       "target_skill": "draft-spec",
       "category": "negative",
       "request": "这份规格已经批准，请把它正式发布到仓库配置的规格系统并返回链接。",
-      "expected": { "required": ["to-spec"], "forbidden": ["draft-spec"] }
+      "expected": { "required": [], "forbidden": ["draft-spec"] }
     },
     {
       "id": "draft-spec-edge-implementation",
@@ -168,14 +167,14 @@
       "target_skill": "draft-tickets",
       "category": "indirect",
       "request": "规格已通过，请把范围写成可评审的纵向切片 ticket 草稿，标出依赖和验证方式，但不要发布到 issue tracker。",
-      "expected": { "required": ["draft-tickets"], "forbidden": ["to-tickets"] }
+      "expected": { "required": ["draft-tickets"], "forbidden": [] }
     },
     {
       "id": "draft-tickets-negative",
       "target_skill": "draft-tickets",
       "category": "negative",
       "request": "把已经批准的 ticket 真实创建到仓库的 GitHub Issues 并设置依赖。",
-      "expected": { "required": ["to-tickets"], "forbidden": ["draft-tickets"] }
+      "expected": { "required": [], "forbidden": ["draft-tickets"] }
     },
     {
       "id": "draft-tickets-edge-vague",
@@ -211,34 +210,6 @@
       "category": "edge",
       "request": "我只有一个很模糊的点子，先开放发散可能方向，不做设计审讯或 ADR 决策。",
       "expected": { "required": ["idea-refine"], "forbidden": ["grill-with-docs"] }
-    },
-    {
-      "id": "setup-direct",
-      "target_skill": "setup-matt-pocock-skills",
-      "category": "direct",
-      "request": "Use $setup-matt-pocock-skills to inspect this repository and propose its tracker, triage labels, and domain-doc configuration.",
-      "expected": { "required": ["setup-matt-pocock-skills"], "forbidden": [] }
-    },
-    {
-      "id": "setup-indirect",
-      "target_skill": "setup-matt-pocock-skills",
-      "category": "indirect",
-      "request": "这个仓库可能缺少工程技能配置；只解释可能需要哪些文件，不要检查或写入仓库。",
-      "expected": { "required": [], "forbidden": ["setup-matt-pocock-skills"] }
-    },
-    {
-      "id": "setup-negative",
-      "target_skill": "setup-matt-pocock-skills",
-      "category": "negative",
-      "request": "解释现有 docs/agents/domain.md 的内容，不修改配置。",
-      "expected": { "required": [], "forbidden": ["setup-matt-pocock-skills"] }
-    },
-    {
-      "id": "setup-edge-contract-conflict",
-      "target_skill": "setup-matt-pocock-skills",
-      "category": "edge",
-      "request": "Run $setup-matt-pocock-skills, but first detect whether AGENTS.md and CLAUDE.md are independent conflicting contracts and stop before choosing an owner.",
-      "expected": { "required": ["setup-matt-pocock-skills"], "forbidden": [] }
     },
     {
       "id": "ppt-accessibility-direct",

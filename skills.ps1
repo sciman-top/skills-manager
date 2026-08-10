@@ -12852,7 +12852,7 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, [string]$Ver
                 $plan = $projectionResult.plan
                 Log ("技能投影已生成：entries={0}, unique={1}, disabled={2}, conflicts={3}, persisted={4}" -f @($plan.skills).Count, @($plan.unique_names).Count, @($plan.disabled).Count, @($plan.conflicts).Count, [bool]$projectionResult.persisted)
                 if ([bool]$projectionResult.reconciliation.signal_updated) {
-                    Log ("技能清单已变化，宿主 AI 应在任务边界执行 profile reconciliation：{0}" -f [string]$projectionResult.reconciliation.signal_path) "WARN"
+                    Log ("技能清单已变化，宿主应在任务边界刷新或新建会话并核验加载：{0}" -f [string]$projectionResult.reconciliation.signal_path) "WARN"
                 }
             }
         }
@@ -17055,14 +17055,14 @@ function Get-DefaultAuditOuterAiPrompt {
 - 每条变更建议都要说明相对 installed-skills.json / mcp_servers 的非重复增量价值，或给出具体卸载理由；重复、泛化、证据弱则留空或放入 ``do_not_install``
 - MCP server/env 不得包含明文 token/password/key；需要凭据时只写环境变量名或占位说明，并用 sources / source_observations 说明依据
 - MCP 新增写 ``mcp_new_servers`` 且 ``name==server.name``；MCP 卸载写 ``mcp_removal_candidates``
-- ``overlap_findings`` 仅报告，并用 ``routing.router / selection_policy / members(name,role)`` 说明择优调用；``external_skills`` 不得写成可自动卸载项；``do_not_install`` 仅记录当前不应安装项；证据不足留空
+- ``overlap_findings`` 仅报告；宿主原生选择用 ``routing.decision_owner=host_ai / selection_policy / members(name,role)``，只有真实 skill fallback 才写 ``fallback_router``；旧 ``routing.router`` 继续兼容；``external_skills`` 不得写成可自动卸载项；``do_not_install`` 仅记录当前不应安装项；证据不足留空
 - 若四类新增/卸载建议均为空，可输出有效 no-op；no-op 不强制网络搜索，``source_observations=[]`` 合法，但必须在 ``decision_basis.summary`` 或 ``empty_recommendation_reasons`` 中说明本地覆盖依据。
 
 5) 自检、预检、dry-run
 - 自检：JSON/schema/双理由/sources/source_observations/keyword_trace/无占位符/无重复建议
 - 预检：
   ``.\skills.ps1 审查目标 预检 --recommendations "reports\skill-audit\<run-id>\recommendations.json"``
-- 若预检失败（如 stale_snapshot、prompt_contract_mismatch、insufficient_source_coverage、insufficient_decision_quality、user_profile_invalid），停止并报告阻断项；不要绕过。
+- 若预检失败（如 stale_snapshot、prompt_contract_mismatch、insufficient_source_coverage、insufficient_decision_quality、user_profile_invalid、removal_dependency_blocked），停止并报告阻断项；删除项须先清理报告给出的精确反向引用，不要绕过。
 - dry-run：
   ``.\skills.ps1 审查目标 应用 --recommendations "reports\skill-audit\<run-id>\recommendations.json" --dry-run-ack "我知道未落盘"``
 - 自检、预检或 dry-run 失败即停止并报告阻断项
@@ -17666,7 +17666,7 @@ function Get-AuditRunId {
 }
 
 function Get-AuditPromptContractVersion {
-    return "audit-prompt-v20260714.1"
+    return "audit-prompt-v20260810.1"
 }
 
 function Get-AuditReportRoot([string]$runId) {
@@ -19562,11 +19562,11 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
                 sources = @("<source-url-1>")
                 note = "<report-only observation; no automatic uninstall>"
                 routing = [ordered]@{
-                    router = "<domain-router-skill>"
+                    decision_owner = "host_ai"
                     selection_policy = "<how to choose executors without invoking every overlapping skill>"
                     members = @(
-                        [ordered]@{ name = "<skill-name>"; role = "router" }
-                        [ordered]@{ name = "<executor-or-validator>"; role = "executor" }
+                        [ordered]@{ name = "<primary-skill>"; role = "executor" }
+                        [ordered]@{ name = "<alternative-or-validator>"; role = "validator" }
                     )
                 }
             }
@@ -20505,7 +20505,16 @@ function Assert-AuditOverlapFinding($item) {
     if ($item.PSObject.Properties.Match("routing").Count -eq 0 -or $null -eq $item.routing) { return }
 
     Need (Test-AuditObjectLike $item.routing) ("重叠发现 routing 必须是对象：{0}" -f [string]$item.name)
-    Need (-not [string]::IsNullOrWhiteSpace([string]$item.routing.router)) ("重叠发现 routing 缺少 router：{0}" -f [string]$item.name)
+    $decisionOwner = if ($item.routing.PSObject.Properties.Match("decision_owner").Count -gt 0) { ([string]$item.routing.decision_owner).Trim().ToLowerInvariant() } else { "" }
+    if (-not [string]::IsNullOrWhiteSpace($decisionOwner)) {
+        Need ($decisionOwner -eq "host_ai") ("重叠发现 routing.decision_owner 仅支持 host_ai：{0}/{1}" -f [string]$item.name, $decisionOwner)
+        $item.routing.decision_owner = $decisionOwner
+    }
+    $router = if ($item.routing.PSObject.Properties.Match("router").Count -gt 0) { ([string]$item.routing.router).Trim() } else { "" }
+    $fallbackRouter = if ($item.routing.PSObject.Properties.Match("fallback_router").Count -gt 0) { ([string]$item.routing.fallback_router).Trim() } else { "" }
+    if ([string]::IsNullOrWhiteSpace($decisionOwner)) {
+        Need (-not [string]::IsNullOrWhiteSpace($router)) ("重叠发现 routing 缺少 router：{0}" -f [string]$item.name)
+    }
     Need (-not [string]::IsNullOrWhiteSpace([string]$item.routing.selection_policy)) ("重叠发现 routing 缺少 selection_policy：{0}" -f [string]$item.name)
     Need ($item.routing.PSObject.Properties.Match("members").Count -gt 0 -and (Assert-IsArray $item.routing.members)) ("重叠发现 routing.members 必须是数组：{0}" -f [string]$item.name)
     Need (@($item.routing.members).Count -ge 2) ("重叠发现 routing.members 至少需要两个成员：{0}" -f [string]$item.name)
@@ -20522,9 +20531,120 @@ function Assert-AuditOverlapFinding($item) {
         $member.role = $role
         $memberRoles[$memberName] = $role
     }
-    $router = ([string]$item.routing.router).Trim()
-    Need ($seenMembers.Contains($router)) ("重叠发现 routing.router 必须出现在 members：{0}/{1}" -f [string]$item.name, $router)
-    Need ([string]$memberRoles[$router] -eq "router") ("重叠发现 routing.router 对应成员必须使用 role=router：{0}/{1}" -f [string]$item.name, $router)
+    if (-not [string]::IsNullOrWhiteSpace($router)) {
+        Need ($seenMembers.Contains($router)) ("重叠发现 routing.router 必须出现在 members：{0}/{1}" -f [string]$item.name, $router)
+        Need ([string]$memberRoles[$router] -eq "router") ("重叠发现 routing.router 对应成员必须使用 role=router：{0}/{1}" -f [string]$item.name, $router)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($fallbackRouter)) {
+        Need ($seenMembers.Contains($fallbackRouter)) ("重叠发现 routing.fallback_router 必须出现在 members：{0}/{1}" -f [string]$item.name, $fallbackRouter)
+        Need ([string]$memberRoles[$fallbackRouter] -eq "router") ("重叠发现 routing.fallback_router 对应成员必须使用 role=router：{0}/{1}" -f [string]$item.name, $fallbackRouter)
+    }
+}
+
+function Add-AuditExactJsonValueReferences($value, [string]$needle, [string]$jsonPath, [string]$file, $references) {
+    if ($null -eq $value) { return }
+    if ($value -is [string]) {
+        if ([string]::Equals([string]$value, $needle, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $references.Add([pscustomobject]([ordered]@{ file = $file; path = $jsonPath })) | Out-Null
+        }
+        return
+    }
+    if ($value -is [System.Collections.IDictionary]) {
+        foreach ($key in $value.Keys) {
+            Add-AuditExactJsonValueReferences $value[$key] $needle ("{0}.{1}" -f $jsonPath, [string]$key) $file $references
+        }
+        return
+    }
+    if ((Assert-IsArray $value) -or ($value -is [System.Collections.IList])) {
+        $index = 0
+        foreach ($entry in @($value)) {
+            Add-AuditExactJsonValueReferences $entry $needle ("{0}[{1}]" -f $jsonPath, $index) $file $references
+            $index++
+        }
+        return
+    }
+    if (Test-AuditObjectLike $value) {
+        foreach ($property in $value.PSObject.Properties) {
+            Add-AuditExactJsonValueReferences $property.Value $needle ("{0}.{1}" -f $jsonPath, [string]$property.Name) $file $references
+        }
+    }
+}
+
+function Test-AuditRemovalDependencyClosure {
+    param(
+        $Config,
+        $RemovalCandidates,
+        [string]$RepositoryRoot = $Root
+    )
+    $blocked = New-Object System.Collections.Generic.List[object]
+    $issues = New-Object System.Collections.Generic.List[string]
+    $checkedFiles = @(
+        "skills.json",
+        "config/skill-dependency-closure.json",
+        "config/skill-routing-policy.json",
+        "config/override-skill-activation-corpus.json",
+        "config/capability-routing-golden.json",
+        "overrides/patches/provenance.json"
+    )
+    $candidateIndex = 0
+    foreach ($candidate in @($RemovalCandidates)) {
+        $candidateIndex++
+        $name = ([string]$candidate.name).Trim()
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $references = New-Object System.Collections.Generic.List[object]
+        if ($null -ne $Config -and $Config.PSObject.Properties.Match("skill_projection").Count -gt 0 -and $null -ne $Config.skill_projection) {
+            $projection = $Config.skill_projection
+            if ($projection.PSObject.Properties.Match("aliases").Count -gt 0) {
+                $aliasIndex = 0
+                foreach ($alias in @($projection.aliases)) {
+                    if ($null -ne $alias -and [string]::Equals([string]$alias.replacement, $name, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $references.Add([pscustomobject]([ordered]@{ file = "skills.json"; path = "$.skill_projection.aliases[$aliasIndex].replacement" })) | Out-Null
+                    }
+                    $aliasIndex++
+                }
+            }
+            if ($projection.PSObject.Properties.Match("resident_names").Count -gt 0) {
+                $residentIndex = 0
+                foreach ($residentName in @($projection.resident_names)) {
+                    if ([string]::Equals([string]$residentName, $name, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $references.Add([pscustomobject]([ordered]@{ file = "skills.json"; path = "$.skill_projection.resident_names[$residentIndex]" })) | Out-Null
+                    }
+                    $residentIndex++
+                }
+            }
+            if ($projection.PSObject.Properties.Match("discovery_catalog").Count -gt 0 -and $null -ne $projection.discovery_catalog) {
+                Add-AuditExactJsonValueReferences $projection.discovery_catalog $name '$.skill_projection.discovery_catalog' "skills.json" $references
+            }
+        }
+        foreach ($relativePath in @($checkedFiles | Select-Object -Skip 1)) {
+            $fullPath = Join-Path $RepositoryRoot $relativePath
+            if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) { continue }
+            try {
+                $json = Get-ContentUtf8 $fullPath | ConvertFrom-Json
+                Add-AuditExactJsonValueReferences $json $name '$' ($relativePath -replace '\\', '/') $references
+            }
+            catch {
+                $references.Add([pscustomobject]([ordered]@{ file = ($relativePath -replace '\\', '/'); path = '$'; error = "json_parse_failed: $($_.Exception.Message)" })) | Out-Null
+            }
+        }
+        if ($references.Count -gt 0) {
+            $originalIndex = if ($candidate.PSObject.Properties.Match("original_index").Count -gt 0) { [int]$candidate.original_index } else { $candidateIndex }
+            $entry = [pscustomobject]([ordered]@{
+                    original_index = $originalIndex
+                    name = $name
+                    references = $references.ToArray()
+                })
+            $blocked.Add($entry) | Out-Null
+            $referenceText = ($references.ToArray() | ForEach-Object { "{0}{1}" -f [string]$_.file, [string]$_.path }) -join ", "
+            $issues.Add(("removal_dependency_blocked：{0}) {1} <- {2}" -f $originalIndex, $name, $referenceText)) | Out-Null
+        }
+    }
+    return [pscustomobject]([ordered]@{
+            ok = ($blocked.Count -eq 0)
+            checked_files = $checkedFiles
+            blocked = $blocked.ToArray()
+            issues = $issues.ToArray()
+        })
 }
 
 function Assert-AuditRecommendationItem($item) {
@@ -22101,6 +22221,12 @@ function Invoke-AuditRecommendationsPreflight {
     $targetSnapshotState = Get-AuditTargetRepoSnapshotState $recommendationDir
     $targetLiveState = Get-AuditTargetRepoLiveState $targetSnapshotState
     $targetStaleness = Get-AuditTargetRepoStaleness $targetSnapshotState $targetLiveState
+    if ($null -ne $rec) {
+        $removalDependencyCheck = Test-AuditRemovalDependencyClosure -Config (LoadCfg) -RemovalCandidates @($rec.removal_candidates) -RepositoryRoot $Root
+    }
+    else {
+        $removalDependencyCheck = [pscustomobject]@{ ok = $true; checked_files = @(); blocked = @(); issues = @() }
+    }
 
     $issues = New-Object System.Collections.Generic.List[string]
     if (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) {
@@ -22126,6 +22252,9 @@ function Invoke-AuditRecommendationsPreflight {
     foreach ($issue in @($userProfileCheck.issues)) {
         $issues.Add(("user_profile_invalid：{0}" -f [string]$issue)) | Out-Null
     }
+    foreach ($issue in @($removalDependencyCheck.issues)) {
+        $issues.Add([string]$issue) | Out-Null
+    }
     $sourceCoveragePassed = if ($sourceCoverageCheck.PSObject.Properties.Match("pass").Count -gt 0) { [bool]$sourceCoverageCheck.pass } else { [bool]$sourceCoverageCheck.ok }
     $decisionQualityPassed = if ($decisionQualityCheck.PSObject.Properties.Match("pass").Count -gt 0) { [bool]$decisionQualityCheck.pass } else { [bool]$decisionQualityCheck.ok }
 
@@ -22135,7 +22264,7 @@ function Invoke-AuditRecommendationsPreflight {
         run_id = if ($null -ne $rec) { [string]$rec.run_id } else { Get-AuditPreflightRunIdFromBundle $recommendationDir $RunId }
         target = if ($null -ne $rec) { [string]$rec.target } else { "" }
         success = ($issues.Count -eq 0)
-        error_code = if (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) { "invalid_recommendations" } elseif ([bool]$targetStaleness.is_stale) { "target_repo_drift" } elseif ($isSnapshotStale) { "stale_snapshot" } elseif (-not $promptVersionMatched) { "prompt_contract_mismatch" } elseif (-not $sourceCoveragePassed) { "insufficient_source_coverage" } elseif (-not $decisionQualityPassed) { "insufficient_decision_quality" } elseif (-not [bool]$userProfileCheck.ok) { "user_profile_invalid" } else { "" }
+        error_code = if (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) { "invalid_recommendations" } elseif ([bool]$targetStaleness.is_stale) { "target_repo_drift" } elseif ($isSnapshotStale) { "stale_snapshot" } elseif (-not $promptVersionMatched) { "prompt_contract_mismatch" } elseif (-not $sourceCoveragePassed) { "insufficient_source_coverage" } elseif (-not $decisionQualityPassed) { "insufficient_decision_quality" } elseif (-not [bool]$userProfileCheck.ok) { "user_profile_invalid" } elseif (-not [bool]$removalDependencyCheck.ok) { "removal_dependency_blocked" } else { "" }
         recommendations_path = $resolvedRecommendations
         recommendations_exists = $recommendationsExists
         prompt_contract = [ordered]@{
@@ -22155,6 +22284,7 @@ function Invoke-AuditRecommendationsPreflight {
         target_snapshot_state = $targetSnapshotState
         target_live_state = $targetLiveState
         target_staleness = $targetStaleness
+        removal_dependency_check = $removalDependencyCheck
         issues = @($issues)
     }
     $reportPath = Join-Path $recommendationDir "preflight-report.json"
@@ -23760,7 +23890,7 @@ function New-SkillProfileReconciliationSignal($projectionCfg, [string]$manifestP
     $skillsConfigPath = Join-Path $Root "skills.json"
     return [pscustomobject]([ordered]@{
             schema_version = 1
-            status = if ($changed) { "reconciliation_needed" } else { "not_needed" }
+            status = if ($changed) { "host_refresh_needed" } else { "not_needed" }
             reason = if ($changed) { "canonical_inventory_changed" } else { "canonical_inventory_unchanged" }
             added_names = $added
             removed_names = $removed
@@ -23768,14 +23898,13 @@ function New-SkillProfileReconciliationSignal($projectionCfg, [string]$manifestP
             before_fingerprint = [string]$before.fingerprint
             after_fingerprint = [string]$after.fingerprint
             config_sha256 = if (Test-Path -LiteralPath $skillsConfigPath -PathType Leaf) { Get-FileContentHash $skillsConfigPath } else { "" }
-            next_action = if ($changed) { "host_ai_profile_reconciliation" } else { "none" }
-            advisor_command = if ($changed) { "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/plan-skill-profile-reconciliation.ps1 -Json" } else { "" }
+            next_action = if ($changed) { "fresh_session_or_host_handoff" } else { "none" }
+            advisor_command = ""
             active_profile = [string]$currentPlan.active_profile
             profile_names = @($currentPlan.profile_budgets | ForEach-Object { [string]$_.profile } | Sort-Object -Unique)
             unrouted_names = @($currentPlan.unrouted_names)
             writes_profile_config = $false
             signal_path = $signalPath
-            signal_updated = $false
         })
 }
 
@@ -24808,13 +24937,13 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBu
                 } }
             }
             Set-ContentUtf8 $manifestPath ($manifest | ConvertTo-Json -Depth 20)
-            if ([string]$reconciliation.status -eq "reconciliation_needed") {
+            if ([string]$reconciliation.status -eq "host_refresh_needed") {
                 try {
                     Set-ContentUtf8 ([string]$reconciliation.signal_path) ($reconciliation | ConvertTo-Json -Depth 8)
-                    $reconciliation.signal_updated = $true
+                    $reconciliation | Add-Member -NotePropertyName signal_updated -NotePropertyValue $true -Force
                 }
                 catch {
-                    Log ("profile reconciliation signal 写入失败，不阻断技能投影：{0}" -f $_.Exception.Message) "WARN"
+                    Log ("host refresh signal 写入失败，不阻断技能投影：{0}" -f $_.Exception.Message) "WARN"
                 }
             }
             return [pscustomobject]@{ backup_path = if ($null -eq $writtenBackupPath) { "" } else { [string]$writtenBackupPath } }

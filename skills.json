@@ -35,11 +35,11 @@
       },
       {
         "name": "to-prd",
-        "replacement": "to-spec"
+        "replacement": "draft-spec"
       },
       {
         "name": "to-issues",
-        "replacement": "to-tickets"
+        "replacement": "draft-tickets"
       }
     ],
     "discovery_catalog": {
@@ -54,11 +54,7 @@
           "context-engineering",
           "documentation-and-adrs",
           "draft-tickets",
-          "improve-codebase-architecture",
-          "prompt-engineering-patterns",
-          "setup-matt-pocock-skills",
-          "to-spec",
-          "to-tickets"
+          "prompt-engineering-patterns"
         ],
         "content": [
           "baoyu-article-illustrator",
@@ -628,28 +624,8 @@
       "vendor": "manual"
     },
     {
-      "from": "write-a-prd",
-      "to": "to-spec",
-      "vendor": "manual"
-    },
-    {
-      "from": "prd-to-issues",
-      "to": "to-tickets",
-      "vendor": "manual"
-    },
-    {
-      "from": "improve-codebase-architecture",
-      "to": "improve-codebase-architecture",
-      "vendor": "manual"
-    },
-    {
       "from": "codebase-design",
       "to": "codebase-design",
-      "vendor": "manual"
-    },
-    {
-      "from": "setup-matt-pocock-skills",
-      "to": "setup-matt-pocock-skills",
       "vendor": "manual"
     },
     {
@@ -967,30 +943,6 @@
       "name": "marketingskills"
     },
     {
-      "sparse": false,
-      "repo": "https://github.com/mattpocock/skills.git",
-      "name": "write-a-prd",
-      "skill": "skills\\engineering\\to-spec",
-      "mode": "manual",
-      "ref": "main"
-    },
-    {
-      "repo": "https://github.com/mattpocock/skills.git",
-      "ref": "main",
-      "skill": "skills\\engineering\\to-tickets",
-      "name": "prd-to-issues",
-      "sparse": false,
-      "mode": "manual"
-    },
-    {
-      "mode": "manual",
-      "sparse": false,
-      "repo": "https://github.com/mattpocock/skills.git",
-      "skill": "skills\\engineering\\improve-codebase-architecture",
-      "name": "improve-codebase-architecture",
-      "ref": "main"
-    },
-    {
       "skill": "skills\\remotion-best-practices",
       "repo": "https://github.com/remotion-dev/skills.git",
       "sparse": false,
@@ -1066,14 +1018,6 @@
       "name": "codebase-design",
       "ref": "391a2701dd948f94f56a39f7533f8eea9a859c87",
       "skill": "skills\\engineering\\codebase-design",
-      "repo": "https://github.com/mattpocock/skills.git",
-      "mode": "manual",
-      "sparse": true
-    },
-    {
-      "name": "setup-matt-pocock-skills",
-      "ref": "391a2701dd948f94f56a39f7533f8eea9a859c87",
-      "skill": "skills\\engineering\\setup-matt-pocock-skills",
       "repo": "https://github.com/mattpocock/skills.git",
       "mode": "manual",
       "sparse": true

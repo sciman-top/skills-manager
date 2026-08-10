@@ -1475,6 +1475,8 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $template.do_not_install[0].name | Should Be "<skill-not-recommended>"
             $template.source_observations[0].candidate_type | Should Be "skill"
             $template.source_observations[1].source_categories[0] | Should Be "mcp-provider-docs"
+            $template.overlap_findings[0].routing.decision_owner | Should Be "host_ai"
+            $template.overlap_findings[0].routing.router | Should BeNullOrEmpty
             $template.mcp_new_servers[0].server.transport | Should Be "stdio"
             $template.mcp_removal_candidates[0].installed.name | Should Be "<installed-mcp-name>"
         }

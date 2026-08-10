@@ -702,6 +702,12 @@ function Invoke-AuditRecommendationsPreflight {
     $targetSnapshotState = Get-AuditTargetRepoSnapshotState $recommendationDir
     $targetLiveState = Get-AuditTargetRepoLiveState $targetSnapshotState
     $targetStaleness = Get-AuditTargetRepoStaleness $targetSnapshotState $targetLiveState
+    if ($null -ne $rec) {
+        $removalDependencyCheck = Test-AuditRemovalDependencyClosure -Config (LoadCfg) -RemovalCandidates @($rec.removal_candidates) -RepositoryRoot $Root
+    }
+    else {
+        $removalDependencyCheck = [pscustomobject]@{ ok = $true; checked_files = @(); blocked = @(); issues = @() }
+    }
 
     $issues = New-Object System.Collections.Generic.List[string]
     if (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) {
@@ -727,6 +733,9 @@ function Invoke-AuditRecommendationsPreflight {
     foreach ($issue in @($userProfileCheck.issues)) {
         $issues.Add(("user_profile_invalid：{0}" -f [string]$issue)) | Out-Null
     }
+    foreach ($issue in @($removalDependencyCheck.issues)) {
+        $issues.Add([string]$issue) | Out-Null
+    }
     $sourceCoveragePassed = if ($sourceCoverageCheck.PSObject.Properties.Match("pass").Count -gt 0) { [bool]$sourceCoverageCheck.pass } else { [bool]$sourceCoverageCheck.ok }
     $decisionQualityPassed = if ($decisionQualityCheck.PSObject.Properties.Match("pass").Count -gt 0) { [bool]$decisionQualityCheck.pass } else { [bool]$decisionQualityCheck.ok }
 
@@ -736,7 +745,7 @@ function Invoke-AuditRecommendationsPreflight {
         run_id = if ($null -ne $rec) { [string]$rec.run_id } else { Get-AuditPreflightRunIdFromBundle $recommendationDir $RunId }
         target = if ($null -ne $rec) { [string]$rec.target } else { "" }
         success = ($issues.Count -eq 0)
-        error_code = if (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) { "invalid_recommendations" } elseif ([bool]$targetStaleness.is_stale) { "target_repo_drift" } elseif ($isSnapshotStale) { "stale_snapshot" } elseif (-not $promptVersionMatched) { "prompt_contract_mismatch" } elseif (-not $sourceCoveragePassed) { "insufficient_source_coverage" } elseif (-not $decisionQualityPassed) { "insufficient_decision_quality" } elseif (-not [bool]$userProfileCheck.ok) { "user_profile_invalid" } else { "" }
+        error_code = if (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) { "invalid_recommendations" } elseif ([bool]$targetStaleness.is_stale) { "target_repo_drift" } elseif ($isSnapshotStale) { "stale_snapshot" } elseif (-not $promptVersionMatched) { "prompt_contract_mismatch" } elseif (-not $sourceCoveragePassed) { "insufficient_source_coverage" } elseif (-not $decisionQualityPassed) { "insufficient_decision_quality" } elseif (-not [bool]$userProfileCheck.ok) { "user_profile_invalid" } elseif (-not [bool]$removalDependencyCheck.ok) { "removal_dependency_blocked" } else { "" }
         recommendations_path = $resolvedRecommendations
         recommendations_exists = $recommendationsExists
         prompt_contract = [ordered]@{
@@ -756,6 +765,7 @@ function Invoke-AuditRecommendationsPreflight {
         target_snapshot_state = $targetSnapshotState
         target_live_state = $targetLiveState
         target_staleness = $targetStaleness
+        removal_dependency_check = $removalDependencyCheck
         issues = @($issues)
     }
     $reportPath = Join-Path $recommendationDir "preflight-report.json"

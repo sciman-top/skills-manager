@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-08-09T09:56:15.9304044Z",
+  "generated_at": "2026-08-10T11:24:05.4363822Z",
   "vendors": [
     {
       "name": "agent-skills",
@@ -206,15 +206,6 @@
       "commit": "84fdeffd12f2ee307994d1eb6feb48173b6e0502"
     },
     {
-      "name": "improve-codebase-architecture",
-      "mode": "manual",
-      "repo": "https://github.com/mattpocock/skills.git",
-      "ref": "main",
-      "skill": "skills\\engineering\\improve-codebase-architecture",
-      "sparse": false,
-      "commit": "84fdeffd12f2ee307994d1eb6feb48173b6e0502"
-    },
-    {
       "name": "manim-composer",
       "mode": "manual",
       "repo": "https://github.com/adithya-s-k/manim_skill.git",
@@ -305,15 +296,6 @@
       "commit": "9eae47fb389dbd1ccc54de9b2992cfb25a8413e8"
     },
     {
-      "name": "prd-to-issues",
-      "mode": "manual",
-      "repo": "https://github.com/mattpocock/skills.git",
-      "ref": "main",
-      "skill": "skills\\engineering\\to-tickets",
-      "sparse": false,
-      "commit": "84fdeffd12f2ee307994d1eb6feb48173b6e0502"
-    },
-    {
       "name": "prompt-engineering-patterns",
       "mode": "manual",
       "repo": "https://github.com/wshobson/agents.git",
@@ -348,15 +330,6 @@
       "skill": "skills\\engineering\\research",
       "sparse": true,
       "commit": "84fdeffd12f2ee307994d1eb6feb48173b6e0502"
-    },
-    {
-      "name": "setup-matt-pocock-skills",
-      "mode": "manual",
-      "repo": "https://github.com/mattpocock/skills.git",
-      "ref": "391a2701dd948f94f56a39f7533f8eea9a859c87",
-      "skill": "skills\\engineering\\setup-matt-pocock-skills",
-      "sparse": true,
-      "commit": "391a2701dd948f94f56a39f7533f8eea9a859c87"
     },
     {
       "name": "skills-2",
@@ -429,15 +402,6 @@
       "skill": "skills\\windows-desktop-e2e",
       "sparse": true,
       "commit": "9aac8585ab887d9c51252730240b25d9cca180da"
-    },
-    {
-      "name": "write-a-prd",
-      "mode": "manual",
-      "repo": "https://github.com/mattpocock/skills.git",
-      "ref": "main",
-      "skill": "skills\\engineering\\to-spec",
-      "sparse": false,
-      "commit": "84fdeffd12f2ee307994d1eb6feb48173b6e0502"
     }
   ]
 }

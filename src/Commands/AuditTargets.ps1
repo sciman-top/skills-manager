@@ -56,14 +56,14 @@ function Get-DefaultAuditOuterAiPrompt {
 - 每条变更建议都要说明相对 installed-skills.json / mcp_servers 的非重复增量价值，或给出具体卸载理由；重复、泛化、证据弱则留空或放入 ``do_not_install``
 - MCP server/env 不得包含明文 token/password/key；需要凭据时只写环境变量名或占位说明，并用 sources / source_observations 说明依据
 - MCP 新增写 ``mcp_new_servers`` 且 ``name==server.name``；MCP 卸载写 ``mcp_removal_candidates``
-- ``overlap_findings`` 仅报告，并用 ``routing.router / selection_policy / members(name,role)`` 说明择优调用；``external_skills`` 不得写成可自动卸载项；``do_not_install`` 仅记录当前不应安装项；证据不足留空
+- ``overlap_findings`` 仅报告；宿主原生选择用 ``routing.decision_owner=host_ai / selection_policy / members(name,role)``，只有真实 skill fallback 才写 ``fallback_router``；旧 ``routing.router`` 继续兼容；``external_skills`` 不得写成可自动卸载项；``do_not_install`` 仅记录当前不应安装项；证据不足留空
 - 若四类新增/卸载建议均为空，可输出有效 no-op；no-op 不强制网络搜索，``source_observations=[]`` 合法，但必须在 ``decision_basis.summary`` 或 ``empty_recommendation_reasons`` 中说明本地覆盖依据。
 
 5) 自检、预检、dry-run
 - 自检：JSON/schema/双理由/sources/source_observations/keyword_trace/无占位符/无重复建议
 - 预检：
   ``.\skills.ps1 审查目标 预检 --recommendations "reports\skill-audit\<run-id>\recommendations.json"``
-- 若预检失败（如 stale_snapshot、prompt_contract_mismatch、insufficient_source_coverage、insufficient_decision_quality、user_profile_invalid），停止并报告阻断项；不要绕过。
+- 若预检失败（如 stale_snapshot、prompt_contract_mismatch、insufficient_source_coverage、insufficient_decision_quality、user_profile_invalid、removal_dependency_blocked），停止并报告阻断项；删除项须先清理报告给出的精确反向引用，不要绕过。
 - dry-run：
   ``.\skills.ps1 审查目标 应用 --recommendations "reports\skill-audit\<run-id>\recommendations.json" --dry-run-ack "我知道未落盘"``
 - 自检、预检或 dry-run 失败即停止并报告阻断项
@@ -667,7 +667,7 @@ function Get-AuditRunId {
 }
 
 function Get-AuditPromptContractVersion {
-    return "audit-prompt-v20260714.1"
+    return "audit-prompt-v20260810.1"
 }
 
 function Get-AuditReportRoot([string]$runId) {

@@ -398,11 +398,11 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
                 sources = @("<source-url-1>")
                 note = "<report-only observation; no automatic uninstall>"
                 routing = [ordered]@{
-                    router = "<domain-router-skill>"
+                    decision_owner = "host_ai"
                     selection_policy = "<how to choose executors without invoking every overlapping skill>"
                     members = @(
-                        [ordered]@{ name = "<skill-name>"; role = "router" }
-                        [ordered]@{ name = "<executor-or-validator>"; role = "executor" }
+                        [ordered]@{ name = "<primary-skill>"; role = "executor" }
+                        [ordered]@{ name = "<alternative-or-validator>"; role = "validator" }
                     )
                 }
             }

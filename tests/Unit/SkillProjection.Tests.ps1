@@ -137,7 +137,7 @@ Describe "Skill projection" {
             (@($developmentFlow.members | Where-Object name -eq "using-superpowers").Count) | Should Be 0
         }
 
-        It "Separates visible engineering planning from explicit side-effecting skills" {
+        It "Keeps engineering planning narrow after retiring tracker and scan workflow chains" {
             $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
             $config = Get-ContentUtf8 (Join-Path $repoRoot "skills.json") | ConvertFrom-Json
             $engineeringNames = @($config.skill_projection.profile_compatibility.profiles.engineering.enabled_names)
@@ -157,32 +157,20 @@ Describe "Skill projection" {
             @($engineeringFlow.members | Where-Object name -eq "draft-spec").Count | Should Be 1
             @($engineeringFlow.members | Where-Object name -eq "draft-tickets").Count | Should Be 1
             $engineeringFlow.selection_policy | Should Match "draft-spec"
-            $engineeringFlow.selection_policy | Should Match "explicit"
+            $engineeringFlow.selection_policy | Should Match "host"
 
             $grillSkill = Get-ContentUtf8 (Join-Path $repoRoot "overrides\patches\grill-with-docs\SKILL.md")
             $grillSkill | Should Not Match "disable-model-invocation:\s*true"
             $grillPolicy = Get-ContentUtf8 (Join-Path $repoRoot "overrides\patches\grill-with-docs\agents\openai.yaml")
             $grillPolicy | Should Match "allow_implicit_invocation:\s*true"
 
-            $expectedExplicitSources = @{
-                "improve-codebase-architecture" = "skills\engineering\improve-codebase-architecture"
-                "to-spec" = "skills\engineering\to-spec"
-                "to-tickets" = "skills\engineering\to-tickets"
-            }
-            foreach ($explicitName in $expectedExplicitSources.Keys) {
-                $source = @($config.imports | Where-Object { [string]$_.skill -eq $expectedExplicitSources[$explicitName] })
-                $source.Count | Should Be 1
-                [string]$source[0].repo | Should Be "https://github.com/mattpocock/skills.git"
-                [string]$source[0].mode | Should Be "manual"
-                $routingMember = @($engineeringFlow.members | Where-Object name -eq $explicitName)
-                $routingMember.Count | Should Be 1
-                [string]$routingMember[0].activation | Should Match 'explicit'
+            foreach ($retiredName in @("setup-matt-pocock-skills", "to-spec", "to-tickets", "improve-codebase-architecture")) {
+                @($config.imports | Where-Object { ([string]$_.skill -replace '^.*[\\/]', '') -eq $retiredName }).Count | Should Be 0
+                @($engineeringFlow.members | Where-Object name -eq $retiredName).Count | Should Be 0
             }
 
-            $setupSkill = Get-ContentUtf8 (Join-Path $repoRoot "overrides\patches\setup-matt-pocock-skills\SKILL.md")
-            $setupSkill | Should Not Match "disable-model-invocation:"
-            $setupPolicy = Get-ContentUtf8 (Join-Path $repoRoot "overrides\patches\setup-matt-pocock-skills\agents\openai.yaml")
-            $setupPolicy | Should Match "allow_implicit_invocation:\s*false"
+            @($config.skill_projection.aliases | Where-Object name -eq "to-prd")[0].replacement | Should Be "draft-spec"
+            @($config.skill_projection.aliases | Where-Object name -eq "to-issues")[0].replacement | Should Be "draft-tickets"
         }
     }
 
@@ -912,9 +900,16 @@ enabled = false
                 }
 
                 $initial = Sync-CodexSkillProjection $projection
-                $initial.reconciliation.status | Should Be "reconciliation_needed"
+                $initial.reconciliation.status | Should Be "host_refresh_needed"
+                $initial.reconciliation.next_action | Should Be "fresh_session_or_host_handoff"
+                $initial.reconciliation.advisor_command | Should BeNullOrEmpty
                 $initial.reconciliation.added_names | Should Be @("alpha")
                 (Test-Path -LiteralPath $signalPath -PathType Leaf) | Should Be $true
+                $persistedSignal = Get-ContentUtf8 $signalPath | ConvertFrom-Json
+                $persistedSignal.status | Should Be "host_refresh_needed"
+                $persistedSignal.next_action | Should Be "fresh_session_or_host_handoff"
+                $persistedSignal.advisor_command | Should BeNullOrEmpty
+                $persistedSignal.PSObject.Properties.Match("signal_updated").Count | Should Be 0
 
                 Remove-Item -LiteralPath $signalPath -Force
                 $noOp = Sync-CodexSkillProjection $projection
@@ -929,7 +924,7 @@ enabled = false
                 New-ProjectionSkill $source "alpha" "alpha" "updated" | Out-Null
                 New-ProjectionSkill $source "beta" "beta" "second" | Out-Null
                 $metadataAndAdd = Sync-CodexSkillProjection $projection
-                $metadataAndAdd.reconciliation.status | Should Be "reconciliation_needed"
+                $metadataAndAdd.reconciliation.status | Should Be "host_refresh_needed"
                 $metadataAndAdd.reconciliation.added_names | Should Be @("beta")
                 $metadataAndAdd.reconciliation.metadata_changed_names | Should Be @("alpha")
 

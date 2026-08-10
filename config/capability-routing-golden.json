@@ -42,8 +42,7 @@
       "query": "把需求梳理清楚，最多问我三个高价值问题，然后形成 PRD 草案，仅供审阅",
       "profile_hints": ["engineering"],
       "expected_candidates": [{"kind": "skill", "name": "draft-spec"}],
-      "host_selected": [{"kind": "skill", "name": "draft-spec", "action": "load_skill"}],
-      "forbidden_candidates": [{"kind": "skill", "name": "to-spec"}]
+      "host_selected": [{"kind": "skill", "name": "draft-spec", "action": "load_skill"}]
     },
     {
       "id": "plan-only",
@@ -205,14 +204,6 @@
       "snapshot_path": "tests/fixtures/capability-routing/runtime-capabilities.json",
       "expected_candidates": [{"kind": "plugin", "name": "stripe"}],
       "host_selected": [{"kind": "plugin", "name": "stripe", "action": "request_approval"}]
-    },
-    {
-      "id": "operator-publication",
-      "category": "side_effect",
-      "query": "使用 $to-spec 把批准的 spec 发布到 tracker",
-      "profile_hints": ["engineering"],
-      "expected_candidates": [{"kind": "skill", "name": "to-spec"}],
-      "host_selected": [{"kind": "skill", "name": "to-spec", "action": "load_skill"}]
     },
     {
       "id": "architecture-domain-language",

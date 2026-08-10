@@ -805,7 +805,7 @@ M1 baseline 优先使用近期可比 native-only 历史任务或交替匹配任�
 
 ### `ADR-SMV-021 Inventory-delta signal and cost-aware cold discovery`
 
-决定：`Sync-CodexSkillProjection` 在覆盖旧 manifest 前比较 canonical `name + path + description` fingerprint。只有真实 delta 才写 ignored `reports/skill-profile-reconciliation/pending.json`，并向当前宿主返回 `reconciliation_needed + exact delta + config hash + advisor command`；profile-only/no-op 不产生新信号。signal 只启动 ADR-SMV-018 的宿主语义 handoff，不直接 proposal/apply，不切 active profile；signal 写失败不阻断技能投影主链。
+决定：`Sync-CodexSkillProjection` 在覆盖旧 manifest 前比较 canonical `name + path + description` fingerprint。只有真实 delta 才复用 ignored `reports/skill-profile-reconciliation/pending.json` 写入 `host_refresh_needed + exact delta + config hash + fresh_session_or_host_handoff`；不生成 advisor command，profile-only/no-op 不产生新信号。signal 只请求宿主刷新/新会话核验，不直接 proposal/apply、不切 active profile、不恢复已退役 planner；signal 写失败不阻断技能投影主链。
 
 host evaluation 同时记录 cumulative input、cached/uncached input、cache ratio、command/router/tool-round count 和 latency。2026-08-04 两个同 prompt A/B 中，合并工具回合尝试把 5 回合降为 4、累计 input 下降约 13%–16%，但 uncached input 无改善或上升、延迟分别约 +5% 与 +51%，并因合并命令重试降低链稳定性，因此 reject 该实现并恢复 separate 分层调用。保留完整 router/target `SKILL.md` 读取、宿主语义裁决和确定性 policy；日常通过按需触发与 focused replay 控制成本，不删除正确性步骤。
 

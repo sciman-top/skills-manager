@@ -217,7 +217,7 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 - `FR-SEL-017`：cold discovery 默认使用 `global_catalog_discovery`：resident dispatcher 在无显式 hint 时返回完整 `name + description + path + domains` candidate index，宿主基于完整请求选择最多三个候选；候选截断时才允许用 domain `name + purpose` 做只读窄化。不得要求宿主或用户在看见 catalog 前猜不透明 profile 名。
 - `FR-SEL-018`：`DomainHint` 支持数组或逗号分隔输入并最多保留两个有效值；`ProfileHint` 仅作为向后兼容别名。candidate 必须带 domain provenance，domain hint 不改变 `active_profile`。
 - `FR-SEL-019`：代表性宿主验收必须分开记录 selection trigger 与 cold-load chain，并观测 router script、router/target `SKILL.md` 全文读取、deterministic policy、profile restore、duration 和 tokens；结果最高为 `host_evaluation_partial`，不得外推为普遍语义正确或业务效果。
-- `FR-SEL-020`：canonical skill inventory 的 name/path/description 新增、删除或变化必须在投影 seam 生成 ignored `reconciliation_needed` signal，包含 before/after fingerprint、精确 delta、当前 config hash、profile/unrouted 摘要和 advisor command；profile-only/no-op sync 不生成新信号，信号不得直接写 profile。
+- `FR-SEL-020`：canonical skill inventory 的 name/path/description 新增、删除或变化必须在投影 seam 生成 ignored `host_refresh_needed` signal，包含 before/after fingerprint、精确 delta、当前 config hash 和 profile/unrouted 兼容摘要，下一动作固定为 `fresh_session_or_host_handoff`；不得生成 advisor command、直接写 profile 或恢复已退役 planner，profile-only/no-op sync 不生成新信号。
 - `FR-SEL-021`：host evaluation 必须将累计 input 拆分为 cached/uncached，并记录 cache ratio、command/router/tool-round count。focused 维护默认只运行 1–2 个代表 cold case；8-case full cold corpus 仅用于结构变化或 closeout，不把累计 cached input 当作真实新增上下文。
 - `FR-SEL-022`：调用方显式提供 domain/profile hint 且全部未知时必须 fail-closed，不得静默回退 `active_profile`；显式 `$skill`/`@skill` 仍可绕过 discovery 并进入确定性 policy。
 - `FR-SEL-023`：candidate pool 超过 `MaxCandidates` 时必须同时报告显示数、截断前总数和 `truncated=true`，宿主应缩小到一个有效 domain 后重试，不得从不完整候选中猜测。

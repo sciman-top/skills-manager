@@ -80,7 +80,11 @@ Describe 'P6 host-native skill lifecycle closeout' {
             'spec-driven-development',
             'planning-and-task-breakdown',
             'incremental-implementation',
-            'git-workflow-and-versioning'
+            'git-workflow-and-versioning',
+            'setup-matt-pocock-skills',
+            'to-spec',
+            'to-tickets',
+            'improve-codebase-architecture'
         )
         $retained = @(
             'systematic-debugging',

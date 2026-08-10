@@ -209,6 +209,81 @@ Describe "Audit target hardening" {
         ($report.issues -join " ") | Should Match "routing.router"
     }
 
+    It "Allows host AI to own overlap selection without pretending it is a skill router" {
+        $recPath = Join-Path $TestDrive "host-native-overlap.json"
+        Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-host-native","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[{"name":"native-selection","reason_user_profile":"u","reason_target_repo":"t","sources":["https://example.com"],"note":"host selects","routing":{"decision_owner":"host_ai","selection_policy":"use the narrowest matching skill","members":[{"name":"alpha","role":"executor"},{"name":"beta","role":"validator"}]}}],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+
+        $rec = Load-AuditRecommendations $recPath
+
+        $rec.overlap_findings[0].routing.decision_owner | Should Be "host_ai"
+        $rec.overlap_findings[0].routing.router | Should BeNullOrEmpty
+    }
+
+    It "Rejects a host-native fallback router that is not a declared router member" {
+        $recPath = Join-Path $TestDrive "host-native-invalid-fallback.json"
+        Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-host-native-invalid","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[{"name":"native-selection","reason_user_profile":"u","reason_target_repo":"t","sources":["https://example.com"],"note":"host selects","routing":{"decision_owner":"host_ai","fallback_router":"missing","selection_policy":"use the narrowest matching skill","members":[{"name":"alpha","role":"executor"},{"name":"beta","role":"validator"}]}}],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+
+        { Load-AuditRecommendations $recPath | Out-Null } | Should Throw
+    }
+
+    It "Finds exact reverse references before a skill removal mutates configuration" {
+        $repo = Join-Path $TestDrive "removal-closure"
+        New-Item -ItemType Directory -Path (Join-Path $repo "config") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $repo "overrides\patches") -Force | Out-Null
+        $cfg = [pscustomobject]@{
+            skill_projection = [pscustomobject]@{
+                resident_names = @()
+                aliases = @([pscustomobject]@{ name = "legacy"; replacement = "retired-skill" })
+                discovery_catalog = [pscustomobject]@{ domain_memberships = [pscustomobject]@{} }
+            }
+        }
+        Set-ContentUtf8 (Join-Path $repo "config\skill-dependency-closure.json") '{"dependencies":[{"skill":"consumer","requires":["retired-skill"],"note":"retired-skill-extra"}]}'
+        Set-ContentUtf8 (Join-Path $repo "config\skill-routing-policy.json") '{"groups":[]}'
+        Set-ContentUtf8 (Join-Path $repo "config\override-skill-activation-corpus.json") '{"target_skills":[]}'
+        Set-ContentUtf8 (Join-Path $repo "config\capability-routing-golden.json") '{"cases":[]}'
+        Set-ContentUtf8 (Join-Path $repo "overrides\patches\provenance.json") '{"patches":[]}'
+        $removals = @([pscustomobject]@{ name = "retired-skill"; original_index = 3 })
+
+        $check = Test-AuditRemovalDependencyClosure -Config $cfg -RemovalCandidates $removals -RepositoryRoot $repo
+
+        $check.ok | Should Be $false
+        $check.blocked[0].name | Should Be "retired-skill"
+        $check.blocked[0].original_index | Should Be 3
+        $check.blocked[0].references[0].path | Should Be '$.skill_projection.aliases[0].replacement'
+        $check.blocked[0].references[1].file | Should Be "config/skill-dependency-closure.json"
+        $check.blocked[0].references[1].path | Should Be '$.dependencies[0].requires[0]'
+        @($check.blocked[0].references).Count | Should Be 2
+
+        $substringOnly = Test-AuditRemovalDependencyClosure -Config $cfg -RemovalCandidates @([pscustomobject]@{ name = "retired" }) -RepositoryRoot $repo
+        $substringOnly.ok | Should Be $true
+    }
+
+    It "Reports removal dependency blockers from preflight" {
+        $runDir = Join-Path $TestDrive "removal-preflight"
+        New-Item -ItemType Directory -Path $runDir -Force | Out-Null
+        $recPath = Join-Path $runDir "recommendations.json"
+        Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-removal-blocked","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[{"name":"retired-skill","reason_user_profile":"u","reason_target_repo":"t","sources":["https://example.com"],"installed":{"vendor":"manual","from":"retired-skill"}}],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+        Set-ContentUtf8 (Join-Path $runDir "audit-meta.json") ('{"schema_version":1,"run_id":"r-removal-blocked","mode":"target-repo","prompt_contract_version":"' + (Get-AuditPromptContractVersion) + '"}')
+        Mock Test-AuditRemovalDependencyClosure {
+            [pscustomobject]@{
+                ok = $false
+                blocked = @([pscustomobject]@{
+                        name = "retired-skill"
+                        original_index = 1
+                        references = @([pscustomobject]@{ file = "skills.json"; path = '$.skill_projection.aliases[0].replacement' })
+                    })
+                issues = @('removal_dependency_blocked：1) retired-skill <- skills.json$.skill_projection.aliases[0].replacement')
+            }
+        }
+
+        { Invoke-AuditRecommendationsPreflight -RecommendationsPath $recPath | Out-Null } | Should Throw
+
+        $report = Get-ContentUtf8 (Join-Path $runDir "preflight-report.json") | ConvertFrom-Json
+        $report.success | Should Be $false
+        $report.error_code | Should Be "removal_dependency_blocked"
+        $report.removal_dependency_check.blocked[0].name | Should Be "retired-skill"
+    }
+
     It "Makes dry-run summaries self-contained and keeps category-specific empty reasons" {
         $plan = [pscustomobject]@{
             run_id = "r-summary"

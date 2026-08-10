@@ -7,26 +7,6 @@
         "grilling",
         "domain-modeling"
       ]
-    },
-    {
-      "skill": "improve-codebase-architecture",
-      "requires": [
-        "codebase-design",
-        "grilling",
-        "domain-modeling"
-      ]
-    },
-    {
-      "skill": "to-spec",
-      "requires": [
-        "setup-matt-pocock-skills"
-      ]
-    },
-    {
-      "skill": "to-tickets",
-      "requires": [
-        "setup-matt-pocock-skills"
-      ]
     }
   ]
 }

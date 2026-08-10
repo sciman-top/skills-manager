@@ -21,15 +21,6 @@
       "local_delta_reason": "Narrow implicit activation to explicit design grilling and preserve local domain-document and Codex invocation boundaries."
     },
     {
-      "name": "setup-matt-pocock-skills",
-      "upstream_repo": "https://github.com/mattpocock/skills.git",
-      "upstream_path": "skills/engineering/setup-matt-pocock-skills",
-      "base_revision": "391a2701dd948f94f56a39f7533f8eea9a859c87",
-      "reviewed_revision": "c553e932f0606df0d52ee207b41a24d57a2beafb",
-      "license": "MIT",
-      "local_delta_reason": "Rebase current tracker/spec terminology while preserving the repository's shared AGENTS.md and CLAUDE.md wrapper compatibility rules plus explicit-only Codex metadata."
-    },
-    {
       "name": "superpowers-skills-test-driven-development",
       "upstream_repo": "https://github.com/obra/superpowers.git",
       "upstream_path": "skills/test-driven-development",

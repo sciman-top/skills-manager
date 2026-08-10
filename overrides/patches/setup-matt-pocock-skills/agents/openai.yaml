@@ -1,6 +1,0 @@
-interface:
-  display_name: "Setup Engineering Skills"
-  short_description: "Configure repo tracker and domain docs"
-  default_prompt: "Use $setup-matt-pocock-skills to inspect this repository and configure its engineering skill conventions."
-policy:
-  allow_implicit_invocation: false
