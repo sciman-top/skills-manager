@@ -376,7 +376,14 @@ function Get-AuditHostProjectionState($cfg) {
             return [pscustomobject]([ordered]@{ status = 'unavailable'; managed_count = 0; broken_count = 0; stale_count = 0; fingerprint = '' })
         }
         $excluded = @($projection.managed_link_excludes | ForEach-Object { [string]$_ })
-        $expected = @(Get-ChildItem -LiteralPath $managedRoot -Directory -Force | Where-Object { $_.Name -ne '.system' -and $_.Name -notin $excluded -and (Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf) } | ForEach-Object Name)
+        $hasManagedLinkIncludes = $projection.PSObject.Properties.Match('managed_link_includes').Count -gt 0
+        $included = if ($hasManagedLinkIncludes) { @($projection.managed_link_includes | ForEach-Object { [string]$_ }) } else { @() }
+        $expected = @(Get-ChildItem -LiteralPath $managedRoot -Directory -Force | Where-Object {
+                $_.Name -ne '.system' -and
+                $_.Name -notin $excluded -and
+                (-not $hasManagedLinkIncludes -or $_.Name -in $included) -and
+                (Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf)
+            } | ForEach-Object Name)
         $rows = @(); $managedCount = 0; $brokenCount = 0; $staleCount = 0
         foreach ($entry in @(Get-ChildItem -LiteralPath $userRoot -Directory -Force -ErrorAction SilentlyContinue | Where-Object Name -ne '.system')) {
             if (-not (Is-ReparsePoint $entry.FullName)) { continue }

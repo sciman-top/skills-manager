@@ -284,6 +284,33 @@ Describe "Audit target hardening" {
         $report.removal_dependency_check.blocked[0].name | Should Be "retired-skill"
     }
 
+    It "Scopes host projection health to the admitted resident set" {
+        $managedRoot = Join-Path $TestDrive "bounded-managed-root"
+        $userRoot = Join-Path $TestDrive "bounded-user-root"
+        foreach ($name in @("resident-skill", "cold-skill")) {
+            $skillRoot = Join-Path $managedRoot $name
+            New-Item -ItemType Directory -Path $skillRoot -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $skillRoot "SKILL.md") ("---`nname: {0}`ndescription: test`n---" -f $name)
+        }
+        New-Item -ItemType Directory -Path $userRoot -Force | Out-Null
+        New-Item -ItemType Junction -Path (Join-Path $userRoot "resident-skill") -Target (Join-Path $managedRoot "resident-skill") | Out-Null
+        $cfg = [pscustomobject]@{
+            skill_projection = [pscustomobject]@{
+                managed_source_path = $managedRoot
+                user_skill_root = $userRoot
+                managed_link_includes = @("resident-skill")
+                managed_link_excludes = @()
+            }
+        }
+
+        $state = Get-AuditHostProjectionState $cfg
+
+        $state.status | Should Be "available"
+        $state.managed_count | Should Be 1
+        $state.broken_count | Should Be 0
+        $state.stale_count | Should Be 0
+    }
+
     It "Makes dry-run summaries self-contained and keeps category-specific empty reasons" {
         $plan = [pscustomobject]@{
             run_id = "r-summary"
