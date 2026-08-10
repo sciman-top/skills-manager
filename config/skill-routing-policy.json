@@ -41,18 +41,18 @@
   "groups": [
     {
       "id": "capability-selection",
-      "purpose": "Dispatch every non-trivial request through the resident portable catalog, then let the host AI select visible or cold skills and let deterministic policy validate the selection.",
+      "purpose": "Use the host's native metadata selection for ordinary requests; expose the portable catalog only for explicit cold discovery or compatibility review.",
       "router": "",
-      "selection_policy": "the resident dispatcher exposes the complete catalog without a profile switch; host semantic judgment owns relevance and negative constraints; deterministic policy never performs lexical semantic ranking and never mutates profile state",
+      "selection_policy": "host semantic judgment owns relevance for the bounded resident set; explicit cold discovery may expose the complete catalog without a profile switch; deterministic policy never performs lexical semantic ranking or mutates profile state",
       "members": [
-        { "name": "capability-router", "role": "reference", "activation": "resident dispatch for any non-trivial request that may benefit from a local skill; explicit capability discovery and domain narrowing remain supported" }
+        { "name": "capability-router", "role": "reference", "activation": "explicit capability discovery, cold catalog lookup, or compatibility validation" }
       ]
     },
     {
       "id": "development-flow",
       "purpose": "Use GPT-5.6 and Codex native planning, goal tracking, review, and agent controls for routine work; profiles expose narrow task capabilities but never replace native task orchestration.",
       "router": "",
-      "selection_policy": "do not require a task profile before starting; resident dispatcher exposes the portable catalog first, then the host AI selects visible/cold skills and native orchestration proceeds without hot profile switching or automatic delegation",
+      "selection_policy": "do not require a task profile or router preflight; the host AI selects visible skills natively, and cold catalog discovery remains explicit without hot profile switching or automatic delegation",
       "members": [
         { "name": "systematic-debugging", "role": "workflow", "activation": "a bug, failed test, or unexpected behavior needs diagnosis" },
         { "name": "code-review-and-quality", "role": "validator", "activation": "a change is ready for review or merge assessment" },

@@ -333,19 +333,19 @@ P5 完成后进入维护期，不按 Phase 编号惯性扩张。只有同时满�
 
 CURRENT_PHASE_TRUTH_SOURCE: tasks/skills-manager-vnext-phase6.tasks.json
 
-P6 的目标是让宿主 AI 重新成为唯一语义选择 owner，以完整的 native discovery set、有效 host capability snapshot、token-aware metadata planning 和 invocation trace 形成闭环。旧 `capability-router`、profile reachability、active-profile switch、reconciliation/canary 和 cold-load 层只作为分阶段迁移输入；App Server strict dispatch 是显式 opt-in fallback。
+P6 的历史目标是让宿主 AI 重新成为唯一语义选择 owner，并完成 profile reachability 退役、snapshot、metadata planning 和 invocation truth ladder。后续 placement correction 保留这一语义所有权，把“完整 inventory”与“USER 常驻集合”分开；App Server strict dispatch 和 catalog cold discovery 都是显式 opt-in fallback。
 
 | Wave | Tasks | Exit gate |
 | --- | --- | --- |
 | Contract | P6-001–P6-003 | admission、snapshot schema、官方 adapter 和 unknown/fallback truth 可验证 |
-| Core | P6-004–P6-006 | compiler/policy 无第二语义路由；全 enabled native projection 无遗漏 |
+| Core | P6-004–P6-006 | compiler/policy 无第二语义路由；当时的全 enabled native projection 无遗漏（历史迁移 gate） |
 | Evidence | P6-007–P6-009 | metadata corpus 与 invocation trace 继续可验证；native/legacy shadow 仅保留 point-in-time manifest/evidence，比较器在 removal gate 后退役 |
 | Migration | P6-010–P6-011 | profile reachability 退役；strict dispatch 保持 opt-in |
 | Closeout | P6-012 | staged removal、fresh host evidence、唯一 full gate 和 rollback receipt |
 
 当前 P6 closeout 状态只从 manifest 及其 `latest_evidence` 读取。仓库侧 staged removal 已应用到 source/config/generation seam；legacy router source 只保留 compatibility-only 读取，profile compatibility view 为 read-only 且不拥有 reachability authority。2026-08-08 的 full/test 结果保留为 point-in-time evidence；任何后续 executable/config/generated/fixture 变化都会使该 full receipt 失效，不得把历史结果冒充当前 gate。
 
-P6 exit gate 定义：全部 manifest tasks `done`；fresh snapshot 下 `enabled_total == kept_total`、`truncated=false`、`omitted=0`；profile/router membership 不再控制可达性；trace 不把 listed 误写为 invoked；strict fallback 非默认；迁移/回滚通过；full gate 对最终稳定 source 唯一执行并通过。当前是否满足只由 manifest/evidence 判定；inventory 或 repo-side 结果不能越级写成 invocation 或 `live_accepted`。
+P6 历史 exit gate 定义：全部 manifest tasks `done`；当时的 fresh snapshot 下 `enabled_total == kept_total`、`truncated=false`、`omitted=0`；profile 不再控制可达性；trace 不把 listed 误写为 invoked；strict fallback 非默认。2026-08-10 的 post-P6 correction 把上述无遗漏 invariant 限定到 `managed_link_includes` 常驻集合，完整 inventory 则由 portable catalog 保留；这不重写 P6 manifest 的点时事实，也不把 repo-side 结果越级为 invocation 或 `live_accepted`。
 
 ### 9.2 Lean AI Software Delivery maintenance track
 
@@ -399,7 +399,7 @@ M2 correction 的最终目标流为：`visible skill/native tool -> host-native 
 
 同日 portable-catalog correction：projection 将完整 canonical cold inventory 生成到 router 相邻 catalog，普通目标仓不再依赖本仓 manifest/config/policy 或 profile membership 才能发现候选；专用 cross-repo regression test 增加 repo 外 CWD probe，corpus verifier 不消费 ignored deployment state。本 correction 仍是既有 M2/P5-local follow-up，不新增 task/track，不改变 selection 32/32、cold-load 8/8 的历史 `host_evaluation_partial` 边界。
 
-2026-08-07 global dispatch correction：复核官方 progressive-disclosure/8,000-character contract 后确认，portable catalog 本身不能强制宿主 implicit invoke router；旧 router 的 fallback-only description 与无 hint 时 current-profile 过滤共同造成真实漏达。当前入口改为 resident dispatcher + no-hint `global_catalog_discovery`，profile 只保留预算/预热职责，显式 domain hint 仍可用于截断后的窄域检索。该修复的仓库和 prompt-contract 证据为 `repo_verified + host_prompt_contract_verified`；宿主 pre-model middleware、稳定 invocation trace 和 `live_accepted` 仍为 `not_run`。
+2026-08-07 global dispatch correction（历史点时）：当时把入口改为 resident dispatcher + no-hint `global_catalog_discovery`，用于验证 portable catalog 可解除 profile 信息循环。2026-08-10 的 placement correction 又基于真实 88-skill metadata 超限证据将 router 收窄为 explicit-only；profile 继续只保留兼容视图。两次结果都只属于 repo/prompt-contract 证据，宿主 invocation 与 `live_accepted` 仍未由此证明。
 
 observe-only 指标为 TTFV、返工切片、非预期人工打断、非产品 artifact、focused/full gate 耗时和 repo_verified→live_accepted 转化。pilot review 前不设数值阈值；指标不作为单项 completion gate，LLM 评分不作为唯一证据。对每项任务同时记录任务复杂度、既有测试健康和人工授权差异，避免把环境差异误判为流程收益。
 

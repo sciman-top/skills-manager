@@ -86,6 +86,21 @@ description: >-
         $candidates.writes_performed | Should Be $false
     }
 
+    It 'resolves cold skills through the router junction when siblings are not resident' {
+        $residentRoot = Join-Path $TestDrive 'resident-skills'
+        New-Item -ItemType Directory -Path $residentRoot -Force | Out-Null
+        $residentRouter = Join-Path $residentRoot 'capability-router'
+        New-Item -ItemType Junction -Path $residentRouter -Target $routerRoot | Out-Null
+
+        $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $residentRouter 'scripts\route-capability.ps1') `
+            -Query '设计模块边界和工程终态' -DomainHint engineering | ConvertFrom-Json
+
+        (Test-Path -LiteralPath (Join-Path $residentRoot 'codebase-design')) | Should Be $false
+        $result.catalog.status | Should Be 'current'
+        $candidate = @($result.retrieval.candidates | Where-Object name -eq 'codebase-design')[0]
+        $candidate.path | Should Be (Join-Path $portableRoot 'codebase-design\SKILL.md')
+    }
+
     It 'excludes a cold skill when its entrypoint no longer matches the catalog hash' {
         Add-Content -LiteralPath (Join-Path $targetRoot 'SKILL.md') -Encoding UTF8 -Value "`n# Drift after catalog projection"
 

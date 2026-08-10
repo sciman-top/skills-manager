@@ -871,11 +871,11 @@ host evaluation 同时记录 cumulative input、cached/uncached input、cache ra
 
 理由：这些职责深、稳定、可测试并被 projection/doctor/fallback 多处复用；与宿主语义选择隔离后，模块接口更窄且 legacy router 可渐进删除。
 
-### `ADR-SMV-034 Complete token-aware native metadata projection`
+### `ADR-SMV-034 Historical complete native metadata projection (superseded by ADR-SMV-040)`
 
-决定：所有 eligible enabled skill 都进入 native discovery plan；以宿主有效 token budget 和 description compaction 规划，验收为 `enabled_total == kept_total`、`truncated=false`、`omitted=0`。预算不足时 fail-closed 并报告 offenders，不恢复 profile 分片。
+历史决定：P6 曾要求所有 eligible enabled skill 都进入 native discovery plan，并以 `enabled_total == kept_total`、`truncated=false`、`omitted=0` 验收。该决定完成了 profile reachability 退役，但后续真实投影显示 USER metadata 远超配置预算，因此常驻 placement 已由 ADR-SMV-040 收窄。
 
-理由：仅证明 catalog 完整不能解决宿主看不见；而固定字符 ceiling 不能表达 272000 等不同 context window 的官方 2% token budget。完整投影把可达性还给宿主，同时让成本和遗漏可测。
+历史理由：完整投影用于证明 profile 不应拥有可达性；这一迁移目标已完成，不再要求所有能力永久占用 USER 初始 metadata surface。
 
 ### `ADR-SMV-035 Metadata-first activation evaluation`
 
@@ -906,6 +906,12 @@ host evaluation 同时记录 cumulative input、cached/uncached input、cache ra
 决定：外部资料采用 official-first、manifest-controlled 的可逆组合；社区候选先 discovery/review，再按需只读，只有第一方权威或重复真实消费者才晋级。官方替代、无消费者、重复、stale、许可证/供应链风险或维护成本超出净收益时先降级/停刷，满足独立 runtime/import 与 checkout 守卫后才删除。写权限只覆盖 manifest-owned `skills-manager-references`，不扩展为 `D:\CODE\external` 根或兄弟项目 shelf 管理权。
 
 理由：只增不减会扩大上下文、供应链和维护成本，把参考输入误写成产品范围；立即物理删除又可能破坏历史兼容或 runtime import。分层退役保留取证与回滚，同时贯彻可绕过、可替换、可删除的 North Star。
+
+### `ADR-SMV-040 Bounded resident projection with portable cold catalog`
+
+决定：`SkillCatalogCompiler` 继续编译完整 inventory，`capability-router/catalog.json` 继续保存可移植相对路径；`managed_link_includes` 是 USER-scope 唯一 placement admission，native projection 与 legacy Junction reconcile 消费同一集合。router 保留在集合中但 `allow_implicit_invocation=false`，只在显式 cold discovery/compatibility review 时解析自身 Junction 真目标并读取非驻留技能。集合内仍强制 `enabled_total == kept_total`、`truncated=false`、`omitted=0`。
+
+理由：当前完整投影观测为 88 个常驻项、约 37k 估算 metadata 对 8k 上限，证明 all-enabled 常驻会制造持续预算失败、触发竞争和治理成本；常用 6 项 description 约 1.4k 字符。该拆分最大化宿主对高频能力的原生选择，同时保留全部能力的显式可达性，不增加 daemon、第二模型、profile router 或新的状态真源。
 
 ### P6-012 staged-removal status（2026-08-08，repo_verified）
 

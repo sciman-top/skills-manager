@@ -30,6 +30,24 @@
       "local_delta_reason": "Narrow activation to explicit strict TDD or a task-level test-first contract, keep verification focused on the declared seam, and remove automatic full-suite, CI, coverage, and file-expansion pressure."
     },
     {
+      "name": "superpowers-skills-systematic-debugging",
+      "upstream_repo": "https://github.com/obra/superpowers.git",
+      "upstream_path": "skills/systematic-debugging",
+      "base_revision": "44c9b2d6e889982ac18c27d05a19fefe335194e1",
+      "reviewed_revision": "44c9b2d6e889982ac18c27d05a19fefe335194e1",
+      "license": "MIT",
+      "local_delta_reason": "Keep evidence-first root-cause analysis while bounding it to an observed failure, the cheapest discriminating evidence, and the repository's proportional verification ceiling."
+    },
+    {
+      "name": "superpowers-skills-verification-before-completion",
+      "upstream_repo": "https://github.com/obra/superpowers.git",
+      "upstream_path": "skills/verification-before-completion",
+      "base_revision": "44c9b2d6e889982ac18c27d05a19fefe335194e1",
+      "reviewed_revision": "44c9b2d6e889982ac18c27d05a19fefe335194e1",
+      "license": "MIT",
+      "local_delta_reason": "Preserve evidence-before-claims while selecting the lowest sufficient gate, reusing exact-current receipts, and preventing verification from expanding scope by itself."
+    },
+    {
       "name": "research",
       "upstream_repo": "https://github.com/mattpocock/skills.git",
       "upstream_path": "skills/engineering/research",

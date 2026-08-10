@@ -590,9 +590,16 @@ function Sync-CodexManagedSkillLinks($projectionCfg) {
             $excluded.Add(([string]$name).Trim()) | Out-Null
         }
     }
+    $included = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if ($projectionCfg.PSObject.Properties.Match("managed_link_includes").Count -gt 0 -and $null -ne $projectionCfg.managed_link_includes) {
+        foreach ($name in @($projectionCfg.managed_link_includes)) {
+            $included.Add(([string]$name).Trim()) | Out-Null
+        }
+    }
+    $useIncludeFilter = $included.Count -gt 0
     $desired = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($dir in @(Get-ChildItem -LiteralPath $managedRoot -Directory -Force | Where-Object Name -ne ".system" | Sort-Object Name)) {
-        if ($excluded.Contains($dir.Name)) { continue }
+        if ($excluded.Contains($dir.Name) -or ($useIncludeFilter -and -not $included.Contains($dir.Name))) { continue }
         # Only generated skill packages with an entrypoint belong in the host
         # skill root.  Override-only directories (for example a resource or
         # agent policy directory without SKILL.md) must remain in agent/ but
@@ -602,6 +609,8 @@ function Sync-CodexManagedSkillLinks($projectionCfg) {
         New-Junction $linkPath $dir.FullName -QuietIfUnchanged
         $desired.Add($dir.Name) | Out-Null
     }
+    $missingIncludedPackages = @($included | Where-Object { -not $desired.Contains($_) } | Sort-Object)
+    Need ($missingIncludedPackages.Count -eq 0) ("managed_link_includes 中的技能包不存在或缺少 SKILL.md：{0}" -f ($missingIncludedPackages -join ", "))
 
     $staleRemoved = 0
     foreach ($entry in @(Get-ChildItem -LiteralPath $userRoot -Directory -Force -ErrorAction SilentlyContinue | Where-Object Name -ne ".system")) {
@@ -1166,9 +1175,14 @@ function Get-CodexManagedSkillLinkTransactionSnapshot($projectionCfg, [string]$T
     foreach ($name in @($projectionCfg.managed_link_excludes)) {
         if (-not [string]::IsNullOrWhiteSpace([string]$name)) { $excluded.Add(([string]$name).Trim()) | Out-Null }
     }
+    $included = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in @($projectionCfg.managed_link_includes)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$name)) { $included.Add(([string]$name).Trim()) | Out-Null }
+    }
+    $useIncludeFilter = $included.Count -gt 0
     $affected = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($directory in @(Get-ChildItem -LiteralPath $managedRoot -Directory -Force | Where-Object Name -ne '.system' | Sort-Object Name)) {
-        if ($excluded.Contains($directory.Name)) { continue }
+        if ($excluded.Contains($directory.Name) -or ($useIncludeFilter -and -not $included.Contains($directory.Name))) { continue }
         $linkPath = [IO.Path]::GetFullPath((Join-Path $targetRootPath $directory.Name))
         if (Test-PathEntry $linkPath) {
             Need (Is-ReparsePoint $linkPath) ("Projection target conflict is not a managed junction: {0}" -f $linkPath)
@@ -1282,12 +1296,13 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBu
     $nativeSettings = Get-CfgObjectProperty $projectionCfg 'native_projection'
     if ($null -ne $nativeSettings -and [bool](Get-CfgObjectProperty $nativeSettings 'enabled')) {
         $managedRoot = Resolve-SkillProjectionPath ([string](Get-CfgObjectProperty $projectionCfg 'managed_source_path'))
+        $includedNames = @((Get-CfgObjectProperty $projectionCfg 'managed_link_includes') | ForEach-Object { [string]$_ })
         $excludedNames = @((Get-CfgObjectProperty $projectionCfg 'managed_link_excludes') | ForEach-Object { [string]$_ })
         $capturedAt = [DateTimeOffset]::UtcNow.ToString('o')
         $snapshot = New-HostCapabilitySnapshotFromConfigFallback -ConfigPath $configPath -Surface 'cli' -CapturedAt $capturedAt
         $policyPath = Join-Path $Root 'config\native-skill-metadata-policy.json'
         $policy = if (Test-Path -LiteralPath $policyPath -PathType Leaf) { Get-ContentUtf8 $policyPath | ConvertFrom-Json } else { Get-DefaultNativeMetadataPolicy }
-        $nativeProjectionPlan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $managedRoot -Config ([pscustomobject]@{ skill_projection = $projectionCfg }) -Snapshot $snapshot -Policy $policy -ExcludedNames $excludedNames -GeneratedAt $capturedAt
+        $nativeProjectionPlan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $managedRoot -Config ([pscustomobject]@{ skill_projection = $projectionCfg }) -Snapshot $snapshot -Policy $policy -IncludedNames $includedNames -ExcludedNames $excludedNames -GeneratedAt $capturedAt
         Need ([string]$nativeProjectionPlan.status -eq 'ready' -and [bool]$nativeProjectionPlan.pass) ("native skill projection blocked: enabled={0}, kept={1}, omitted={2}" -f [int]$nativeProjectionPlan.enabled_total, [int]$nativeProjectionPlan.kept_total, [int]$nativeProjectionPlan.omitted_total)
         $nativeProjectionAuthoritative = $true
         if ($DryRun) {

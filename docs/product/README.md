@@ -53,8 +53,6 @@
 | [历史 Profile optimization manifest](../../tasks/skills-manager-vnext-profile-optimization.tasks.json) | 保存 P5-local bounded canary、host replay 和收口点时真值 | 当前 runtime、semantic router、skill 安装删除或 P6 admission |
 | [任务索引](../../tasks/todo.md) | 路由到各 track 的结构化真源 | 任务 ID、勾选、计数或 mutable status 副本 |
 | [planning verifier](../../scripts/verify-vnext-planning.ps1) | 机械校验上述资产的一致性 | 判断产品价值或宿主 live acceptance |
-| [host-native lifecycle planning verifier](../../scripts/verify-host-native-skill-lifecycle-planning.ps1) | 历史 P6/migration 显式诊断；检查完整投影和 fallback 边界 | 默认 quick/full closeout gate，或执行 host projection/invocation |
-| [maintenance verifier](../../scripts/verify-lean-ai-delivery-planning.ps1) | 在 P5 contract 通过后校验 maintenance design 一致性和边界 | 运行 pilot、修改 runtime 或评估业务收益 |
 | [PowerShell runtime policy verifier](../../scripts/verify-powershell-runtime-policy.ps1) | 默认只检查 active PS7 execution surface；`-HistoricalMigration` 显式检查已完成 migration/history/P6/typed-core 边界 | 证明所有外部消费者已迁移或 PowerShell 长期最优 |
 | [capability routing verifier](../../scripts/verify-capability-routing.ps1) | 用 labelled 自然语言 corpus 验证 candidate recall、host-labelled policy、否定约束和零脚本语义自动选择 | 证明宿主模型普遍正确或业务 live acceptance |
 | [profile migration compatibility planner](../../scripts/plan-skill-profile-reconciliation.ps1) | 无 proposal 时生成只读 versioned migration plan；任何 legacy proposal 输入固定返回 `deprecated` 和零写入 | 诊断/维护 profile membership、校验语义 proposal 或写入配置 |
@@ -97,7 +95,7 @@ CURRENT_PHASE_TRUTH_SOURCE: tasks/skills-manager-vnext-phase6.tasks.json
 - fresh host inventory、host evaluation、host invocation 和 live acceptance 是彼此独立的证据层；inventory 可见性不得升级为 selection、完整 body injection、execution 或业务验收。
 - 任一 full receipt 只绑定其运行期间稳定的 repo source；后续 executable/config/generated/fixture 变化会使它失效。即使 full 通过，也只证明 repo-side build/test/contracts，不证明真实技能 invocation 或业务 live acceptance。
 - P5 profile advisor、resident dispatcher、hierarchical cold-load 与相关架构描述保留为历史结果或 P6 迁移/兼容契约，不再表示当前普通请求的 runtime reachability 主链。
-- 目标主链是 `effective host snapshot -> canonical compiler -> eligibility policy -> all-enabled native metadata -> host AI selection -> full skill injection -> invocation trace`；strict App Server dispatch 仅为显式 opt-in fallback。
+- 目标主链是 `canonical inventory -> managed_link_includes placement -> eligible resident metadata -> host AI native selection -> full skill injection -> invocation trace`；portable catalog 保留非驻留能力，cold discovery 与 strict App Server dispatch 仅为显式 opt-in fallback。
 - 当前 `model_context_window=272000` 的配置样本对应官方 2% ceiling 约 5440 tokens，但 P6 不把单个 TOML 值当运行真值；最终由 `HostCapabilitySnapshot` 按 surface/thread/turn 解析并以完整无 omission 验收。
 
 历史基线（截至 2026-08-05）：
@@ -127,5 +125,5 @@ CURRENT_PHASE_TRUTH_SOURCE: tasks/skills-manager-vnext-phase6.tasks.json
 - 改 Phase 状态先提供退出门禁证据，再改路线图和 task status。
 - task manifest 是任务 ID、依赖、write set、状态和完成条件真源；plan/todo 只保留稳定索引，不复制动态字段。
 - 运行 `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-vnext-planning.ps1` 校验文档和任务一致性。
-- maintenance track 先运行 vNext verifier，再运行 `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-lean-ai-delivery-planning.ps1`；它不替代 full gate，也不创建 P6 manifest。
+- 历史 P6/maintenance 的专用 verifier/test 已在任务完成且退出默认 suite 后退役；需要追溯时读取原 spec、manifest 与 evidence，不恢复平行 planning gate。
 - 规划 verifier 通过只证明规划资产内部一致，不证明产品代码、宿主加载或真实使用效果。

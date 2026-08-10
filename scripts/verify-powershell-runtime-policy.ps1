@@ -185,14 +185,12 @@ $paths = [ordered]@{
     mcp = 'src/Commands/Mcp.ps1'
     generated = 'skills.ps1'
     github = '.github/workflows/ci.yml'
-    azure = 'azure-pipelines.yml'
-    gitlab = '.gitlab-ci.yml'
     quality = 'scripts/quality/run-local-quality-gates.ps1'
     typedManifest = 'tasks/skills-manager-vnext-typed-core-pilot.tasks.json'
     historicalManifest = 'tasks/skills-manager-vnext-phase0.tasks.json'
 }
 
-$activeKeys = @('agents', 'release', 'version', 'build', 'installer', 'cmd', 'core', 'mcp', 'generated', 'github', 'azure', 'gitlab')
+$activeKeys = @('agents', 'release', 'version', 'build', 'installer', 'cmd', 'core', 'mcp', 'generated', 'github')
 $historicalKeys = @('manifest', 'spec', 'evidence', 'runbook', 'prd', 'architecture', 'roadmap', 'lean', 'agents', 'release', 'typedManifest', 'historicalManifest')
 $content = @{}
 foreach ($key in $(if ($HistoricalMigration) { $historicalKeys } else { $activeKeys })) {
@@ -226,11 +224,7 @@ if (-not $HistoricalMigration) {
     Require-Literal $content.agents 'runtime 为 PS7-only' $paths.agents 'current_policy_missing'
     Require-Literal $content.release 'PowerShell 7 (`pwsh`) only' $paths.release 'release_policy_missing'
     Reject-Pattern $content.github '(?i)Windows PowerShell 5\.1|shell:\s*powershell(?:\s|$)' $paths.github 'legacy_ci_detected' 'GitHub Actions must not contain a Windows PowerShell job or shell.'
-    Reject-Pattern $content.azure '(?im)Windows PowerShell 5\.1|^-\s*powershell:' $paths.azure 'legacy_ci_detected' 'Azure Pipelines must not contain a Windows PowerShell task.'
-    Reject-Pattern $content.gitlab '(?i)powershell\.exe' $paths.gitlab 'legacy_ci_detected' 'GitLab CI must not invoke powershell.exe.'
     Require-Literal $content.github 'Verify PowerShell 7 runtime' $paths.github 'ps7_ci_missing'
-    Require-Literal $content.azure 'Verify PowerShell 7 runtime' $paths.azure 'ps7_ci_missing'
-    Require-Literal $content.gitlab 'pwsh -NoProfile' $paths.gitlab 'ps7_ci_missing'
 }
 else {
     try { $manifest = $content.manifest | ConvertFrom-Json }

@@ -240,9 +240,9 @@ P3 plugin-aware 命令中，inventory/lint/eval 为只读；export 仍严格 fix
 
 非主副本不会被删除或移动，而是写入 `~/.codex/config.toml` 的受管块，以 `[[skills.config]]` + `enabled = false` 精确停用。完整的来源、内容哈希、包哈希、选主结果和冲突记录写入 `reports/skill-projection/current.json`。配置发生变化时，原文件先备份到 `~/.codex/config-backups/config.toml.skills-projection.<timestamp>.bak`。
 
-`skill_projection.managed_link_excludes` 按受管目录名排除 Codex 的逐技能 Junction；被排除项仍保留在 `agent/`，也不影响 Claude 指向 `agent/` 的根 Junction。该字段适用于保留其他宿主所需技能、但避免其与 Codex `.system` 技能同名冲突的场景。
+`skill_projection.managed_link_includes` 按受管包目录名定义 Codex USER-scope 的最小常驻集合；未列入的技能仍保留在完整 `agent/` catalog，可由 explicit-only `capability-router` 冷发现。`managed_link_excludes` 继续用于同名冲突，include/exclude 重叠会被配置门禁拒绝。Claude 指向 `agent/` 的根 Junction 不受 USER-scope 收窄影响。
 
-`skill_projection.aliases` 记录旧名称到替代项的迁移，不把近似能力重新复制成默认技能；`.system` 技能始终保留。P6 native projection 会把所有 eligible enabled skills 交给宿主原生 discovery，profile 不再是 reachability filter；历史 profile 数据只保留在 `profile_compatibility` read-only view，`reachability_authority=none`。`budget_limit_chars` 和 `external_metadata_reserve_chars` 仍用于旧投影兼容边界，native metadata 使用有效 host snapshot 和独立 token-aware planner。
+`skill_projection.aliases` 记录旧名称到替代项的迁移，不把近似能力重新复制成默认技能；`.system` 技能始终保留。native projection 只把 placement-admitted 的 `managed_link_includes` 交给宿主原生 discovery，profile 不再是 reachability filter；历史 profile 数据只保留在 `profile_compatibility` read-only view，`reachability_authority=none`。完整 canonical inventory 仍进入 portable catalog，`budget_limit_chars` 和 host snapshot/token-aware planner 约束常驻 metadata。
 
 旧投影 manifest 的 profile 字段仅用于迁移/历史兼容报告；native projection 不得产生 profile reachability 排除。常用命令：
 
@@ -258,7 +258,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\plan-skill-profile-recon
 
 profile reconciliation 脚本现在只承担迁移期的只读/回滚兼容职责，不再由 `skills.ps1` dispatch，也不改变 native reachability。旧 profile 字段必须先进入 `profile_compatibility` read-only view；`scripts/verify-skill-routing.ps1` 只报告 compatibility-only 状态，不能作为 quality gate 或语义 selector。canonical inventory 变化只写 `host_refresh_needed` signal，动作是 `fresh_session_or_host_handoff`；它不含 advisor command，也不恢复 profile planner。
 
-native projection 编译全部 eligible enabled skills，并由 host snapshot、deterministic eligibility 和 token-aware metadata planner 共同决定是否可投影；profile membership 不能再排除 native skill。host evaluation 区分 listed、selected、injected、executed 和 abstained；本轮 fresh CLI 仅得到 `host_evaluation_partial`，selection/body invocation 不可观测，因此不构成 `host_loaded` 或 `live_accepted`。
+native projection 先按 `managed_link_includes` 做确定性 placement admission，再由 host snapshot、eligibility 和 token-aware metadata planner 验证常驻集合无静默遗漏；profile membership 不能改变该集合。未常驻技能仍在 portable catalog 中，可经 explicit-only cold discovery 读取。host evaluation 区分 listed、selected、injected、executed 和 abstained；selection/body invocation 不可观测时仍保持 partial，不构成 `host_loaded` 或 `live_accepted`。
 
 历史 proposal/canary 接口仅保留用于读取旧 receipt 和回滚审计；P6 staged removal 后不再提供普通请求的 profile apply/热切换路径：
 
@@ -268,13 +268,13 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\manage-skill-profile-rec
 
 迁移 receipt/backup 仍位于忽略的 `reports/skill-profile-reconciliation/`；任何宿主、provider、session 或 live profile mutation 都不属于本任务。
 
-`capability-router` 现为显式兼容/fallback 资产，不再是 mandatory resident。宿主 AI 根据完整请求、对话和 native metadata 原生选择；只有显式 strict fallback 或兼容性审查才读取 router 资产，脚本只验证路径、freshness、availability、side effect 与 activation。profile 不再是 domain/index reachability partition，也不会在当前 turn 静默切换。旧 `watch-interrupted-task` 已从 resident set 移除，仅保留 fail-closed 清理 stub，禁止创建、恢复或武装 heartbeat；替代架构规划位于 `D:\CODE\codex-watch-runtime`。
+`capability-router` 保留为 USER-scope 中 explicit-only 的兼容/fallback 入口，但不是每个请求的 mandatory middleware。宿主 AI 先根据完整请求、对话和常驻 native metadata 原生选择；只有显式 cold discovery 或兼容性审查才读取 router catalog。router 解析自身 Junction 真目标后读取完整 `agent/`，因此冷技能无需成为 USER sibling Junction。旧 `watch-interrupted-task` 已移除；watch-runtime 的参考与产品所有权位于 `D:\CODE\codex-watch-runtime\docs\reference-basis.md`，本仓不再维护其重复 reference portfolio。
 
 P4/P5 的 lexical selector、task model 和 ranking 是历史 repo_verified 实现；真实中文场景回放证明它们不能代表路由实效，已在 maintenance correction 中退役为 `decision_owner=host_ai`、`semantic_routing_performed=false` 的 discovery/policy contract。`scripts/verify-capability-routing.ps1` 使用 direct、indirect、negative、多阶段、架构、调试、评审、跨领域和 side-effect 自然语言 corpus，分别验证候选可达性、宿主标注选择后的 policy 与零自动语义选择；它仍不把 repo corpus 外推为 live acceptance。
 
 `scripts/get-codex-app-server-capability-snapshot.ps1` 只调用稳定只读 App Server RPC；陈旧、不可访问、不可调用和认证缺失事实 fail-closed，单来源故障报告 `partial`。session/profile 输出只是 `apply=false` 的计划或预热建议，不会静默切换宿主状态。
 
-技能初始列表由宿主 native metadata surface 决定；当前配置的 `resident_names` 为空，`capability-router` 只作为显式兼容/fallback 资产，不是 mandatory resident。native metadata 预算由 host snapshot、token-aware planner 和 `enabled_total == kept_total` / `omitted=0` invariant 共同约束。
+技能初始列表由宿主 native metadata surface 决定；当前 USER-scope 只投影 `managed_link_includes` 中的最小集合。native metadata 预算和 `enabled_total == kept_total` / `omitted=0` invariant 只约束这个 placement-admitted 集合；完整 capability catalog 不因此删除或复制。
 
 旧 profile A/B benchmark 已随 profile 热切换退役；不再保留只能校验历史 profile 语料、但无法执行当前主链的操作入口。需要显式评估宿主原生 selection/cold-load 时，使用现有 opt-in `scripts/evaluate-host-skill-selection.ps1`；该评估不切换 profile，结果仍只属于 `host_evaluation_partial`，不替代 skill-body trace、代码质量或 live acceptance。
 

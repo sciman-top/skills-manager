@@ -170,9 +170,7 @@ These repositories were checked through GitHub's public metadata and selected fi
 
 ### 7.2 Watch runtime rearchitecture reference set
 
-The 2026-08-07 watch-runtime workstream adds a bounded, manifest-controlled source set under `conditional/watch-runtime/`. The set exists to replace the failed heartbeat/prompt-supervisor architecture with Cockpit readiness, deterministic durable recovery, native Codex Goal integration, terminal cleanup, and fleet shutdown. Its reviewed revisions, licenses, and adopt/adapt/reject decisions are recorded in `docs/change-evidence/20260807-watch-runtime-reference-review.md`.
-
-Cloned state does not promote these repositories into the default refresh set. `openai/codex` remains the official core source; `codex-watchdog`, Polly, Temporal .NET, Hangfire, Quartz.NET, Uptime Kuma, and the MCP C# SDK remain conditional read-only comparison material. No upstream dependency, service, scheduler, daemon, installer, or script is adopted merely because its checkout exists.
+The 2026-08-07 watch-runtime comparison set is historical in this repository. Its point-in-time review remains in `docs/change-evidence/20260807-watch-runtime-reference-review.md`, while current product/reference ownership belongs to `D:\CODE\codex-watch-runtime\docs\reference-basis.md`. The skills-manager manifest no longer refreshes or governs that independent product's comparison repositories, and existing external checkouts are not deleted by this ownership change.
 
 | Repo / revision | License | What was useful | Decision |
 | --- | --- | --- | --- |

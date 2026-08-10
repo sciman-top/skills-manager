@@ -230,7 +230,20 @@ if ($null -ne $catalog -and $catalog.PSObject.Properties.Match('catalog_fingerpr
     }
     else { $catalogStatus = 'current' }
 }
-$catalogSkillRoot = if ($catalogFile) { [IO.Path]::GetFullPath((Split-Path (Split-Path $catalogFile -Parent) -Parent)) } else { '' }
+$catalogRouterRoot = if ($catalogFile) { [IO.Path]::GetFullPath((Split-Path $catalogFile -Parent)) } else { '' }
+$resolvedCatalogRouterRoot = $catalogRouterRoot
+if (-not [string]::IsNullOrWhiteSpace($catalogRouterRoot)) {
+    $catalogRouterItem = Get-Item -LiteralPath $catalogRouterRoot -Force -ErrorAction SilentlyContinue
+    if ($null -ne $catalogRouterItem -and -not [string]::IsNullOrWhiteSpace([string]$catalogRouterItem.LinkType)) {
+        $linkTarget = @($catalogRouterItem.Target | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -First 1)
+        if ($linkTarget.Count -gt 0) {
+            $targetPath = [string]$linkTarget[0]
+            if (-not [IO.Path]::IsPathRooted($targetPath)) { $targetPath = Join-Path (Split-Path $catalogRouterRoot -Parent) $targetPath }
+            $resolvedCatalogRouterRoot = [IO.Path]::GetFullPath($targetPath)
+        }
+    }
+}
+$catalogSkillRoot = if ($resolvedCatalogRouterRoot) { [IO.Path]::GetFullPath((Split-Path $resolvedCatalogRouterRoot -Parent)) } else { '' }
 $manifestFile = Find-Manifest
 $manifest = if ($manifestFile) { Get-Content -LiteralPath $manifestFile -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $repoRoot = ''
@@ -293,7 +306,7 @@ if ($null -ne $catalog) {
             }
             continue
         }
-        $skillPath = [IO.Path]::GetFullPath((Join-Path (Split-Path $catalogFile -Parent) $relativePath))
+        $skillPath = [IO.Path]::GetFullPath((Join-Path $resolvedCatalogRouterRoot $relativePath))
         $expectedEntrypointHash = ([string]$item.entrypoint_sha256).Trim().ToLowerInvariant()
         $actualEntrypointHash = if (Test-Contained $skillPath $catalogSkillRoot) { Get-FileSha256 $skillPath } else { '' }
         if ($expectedEntrypointHash -notmatch '^[0-9a-f]{64}$' -or $actualEntrypointHash -ne $expectedEntrypointHash) {

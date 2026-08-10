@@ -105,14 +105,15 @@ Set-Content -LiteralPath $marker -Value 'executed' -Encoding UTF8
         $raw | Should Match 'total_elapsed_ms'
     }
 
-    It "keeps the completed P6 verifier explicit and outside the default gate" {
+    It "uses the general planning contract without a retired P6-specific gate" {
         $root = Join-Path $PSScriptRoot "..\.."
         $scriptPath = Join-Path $root "scripts\quality\run-local-quality-gates.ps1"
         $raw = Get-Content -LiteralPath $scriptPath -Raw
 
         $raw | Should Match "Invoke-QualityGate 'planning-contract'"
         $raw | Should Not Match "Invoke-QualityGate 'host-native-lifecycle-planning'"
-        Test-Path -LiteralPath (Join-Path $root 'scripts\verify-host-native-skill-lifecycle-planning.ps1') -PathType Leaf | Should Be $true
+        Test-Path -LiteralPath (Join-Path $root 'scripts\verify-host-native-skill-lifecycle-planning.ps1') | Should Be $false
+        Test-Path -LiteralPath (Join-Path $root 'scripts\verify-lean-ai-delivery-planning.ps1') | Should Be $false
     }
 
     It "keeps successful metadata gate output concise while preserving the verifier" {
@@ -304,9 +305,9 @@ Set-Content -LiteralPath $marker -Value 'executed' -Encoding UTF8
         $runner | Should Not Match '-WindowStyle\s+Hidden'
         $runner | Should Match 'test-shards'
         $runner | Should Match 'SerialTestFiles'
-        $runner | Should Match 'HostNativeSkillLifecyclePlanning\.Tests\.ps1'
-        $runner | Should Match 'LeanAiDeliveryPlanning\.Tests\.ps1'
-        $runner | Should Match '\$historicalDiagnosticTestFiles\s+-notcontains\s+\$_.Name'
+        $runner | Should Not Match 'HostNativeSkillLifecyclePlanning\.Tests\.ps1'
+        $runner | Should Not Match 'LeanAiDeliveryPlanning\.Tests\.ps1'
+        $runner | Should Not Match '\$historicalDiagnosticTestFiles'
         $runner | Should Not Match 'WatchRuntimeArming\.Tests\.ps1'
         $runner | Should Match '\$orderedFiles'
         $runner | Should Match '\.Dispose\(\)'
@@ -647,18 +648,11 @@ Describe 'fixture unit' {
         $raw | Should Not Match "No supply-chain script found, skip"
     }
 
-    It "keeps every formal CI surface on the authoritative full quality gate" {
+    It "keeps GitHub as the single formal CI surface" {
         $root = Join-Path $PSScriptRoot "..\.."
-        $contracts = @(
-            @{ Path = 'azure-pipelines.yml'; Label = 'Azure Pipelines' },
-            @{ Path = '.gitlab-ci.yml'; Label = 'GitLab CI' }
-        )
-
-        foreach ($contract in $contracts) {
-            $raw = Get-Content -LiteralPath (Join-Path $root $contract.Path) -Raw
-            $raw | Should Match 'run-local-quality-gates\.ps1 -Profile full'
-            $raw | Should Not Match 'run-local-quality-gates\.ps1 -Profile quick'
-        }
+        Test-Path -LiteralPath (Join-Path $root '.github\workflows\ci.yml') -PathType Leaf | Should Be $true
+        Test-Path -LiteralPath (Join-Path $root 'azure-pipelines.yml') | Should Be $false
+        Test-Path -LiteralPath (Join-Path $root '.gitlab-ci.yml') | Should Be $false
     }
 
     It "Reports untracked runtime artifacts without failing by default" {

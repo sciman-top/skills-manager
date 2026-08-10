@@ -425,12 +425,12 @@ function Get-CfgContractErrors($cfg) {
             }
         }
         $managedLinkExcludes = Get-CfgObjectProperty $skillProjection "managed_link_excludes"
+        $normalizedExcludes = @()
         if ($null -ne $managedLinkExcludes) {
             if (-not (Assert-IsArray $managedLinkExcludes)) {
                 $errors.Add("skill_projection.managed_link_excludes 必须是数组") | Out-Null
             }
             else {
-                $normalizedExcludes = @()
                 foreach ($exclude in @($managedLinkExcludes)) {
                     $name = [string]$exclude
                     if ([string]::IsNullOrWhiteSpace($name)) {
@@ -442,6 +442,34 @@ function Get-CfgContractErrors($cfg) {
                 $duplicateExcludes = @(Get-DuplicateValues $normalizedExcludes)
                 if ($duplicateExcludes.Count -gt 0) {
                     $errors.Add(("skill_projection.managed_link_excludes 重复：{0}" -f ($duplicateExcludes -join ", "))) | Out-Null
+                }
+            }
+        }
+        $managedLinkIncludes = Get-CfgObjectProperty $skillProjection "managed_link_includes"
+        if ($null -ne $managedLinkIncludes) {
+            if (-not (Assert-IsArray $managedLinkIncludes)) {
+                $errors.Add("skill_projection.managed_link_includes 必须是数组") | Out-Null
+            }
+            else {
+                $normalizedIncludes = @()
+                foreach ($include in @($managedLinkIncludes)) {
+                    $name = [string]$include
+                    if ([string]::IsNullOrWhiteSpace($name)) {
+                        $errors.Add("skill_projection.managed_link_includes 不能包含空字符串") | Out-Null
+                        continue
+                    }
+                    $normalizedIncludes += $name.Trim().ToLowerInvariant()
+                }
+                if ($normalizedIncludes.Count -eq 0) {
+                    $errors.Add("skill_projection.managed_link_includes 至少需要一个技能") | Out-Null
+                }
+                $duplicateIncludes = @(Get-DuplicateValues $normalizedIncludes)
+                if ($duplicateIncludes.Count -gt 0) {
+                    $errors.Add(("skill_projection.managed_link_includes 重复：{0}" -f ($duplicateIncludes -join ", "))) | Out-Null
+                }
+                $conflictingLinks = @($normalizedIncludes | Where-Object { $normalizedExcludes -contains $_ } | Sort-Object -Unique)
+                if ($conflictingLinks.Count -gt 0) {
+                    $errors.Add(("skill_projection managed link include/exclude 冲突：{0}" -f ($conflictingLinks -join ", "))) | Out-Null
                 }
             }
         }
@@ -1045,6 +1073,19 @@ function Assert-Cfg($cfg) {
             }
             $dupManagedLinkExcludes = @(Get-DuplicateValues ($projection.managed_link_excludes | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() }))
             Need ($dupManagedLinkExcludes.Count -eq 0) ("skill_projection.managed_link_excludes 重复：{0}" -f ($dupManagedLinkExcludes -join ", "))
+        }
+        if ($projection.PSObject.Properties.Match("managed_link_includes").Count -gt 0 -and $null -ne $projection.managed_link_includes) {
+            Need (Assert-IsArray $projection.managed_link_includes) "skill_projection.managed_link_includes 必须是数组"
+            Need (@($projection.managed_link_includes).Count -gt 0) "skill_projection.managed_link_includes 至少需要一个技能"
+            foreach ($include in @($projection.managed_link_includes)) {
+                Need (-not [string]::IsNullOrWhiteSpace([string]$include)) "skill_projection.managed_link_includes 不能包含空字符串"
+            }
+            $normalizedManagedLinkIncludes = @($projection.managed_link_includes | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() })
+            $dupManagedLinkIncludes = @(Get-DuplicateValues $normalizedManagedLinkIncludes)
+            Need ($dupManagedLinkIncludes.Count -eq 0) ("skill_projection.managed_link_includes 重复：{0}" -f ($dupManagedLinkIncludes -join ", "))
+            $normalizedManagedLinkExcludes = @($projection.managed_link_excludes | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() })
+            $managedLinkConflicts = @($normalizedManagedLinkIncludes | Where-Object { $normalizedManagedLinkExcludes -contains $_ } | Sort-Object -Unique)
+            Need ($managedLinkConflicts.Count -eq 0) ("skill_projection managed link include/exclude 冲突：{0}" -f ($managedLinkConflicts -join ", "))
         }
         if ($projection.PSObject.Properties.Match("resident_names").Count -gt 0 -and $null -ne $projection.resident_names) {
             Need (Assert-IsArray $projection.resident_names) "skill_projection.resident_names 必须是数组"

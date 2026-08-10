@@ -85,20 +85,6 @@ Describe 'MCP machine-readable planning' {
         (@($result.operation_plan.targets.path | Sort-Object) -join ',') | Should Be (@($desired.path | Sort-Object) -join ',')
     }
 
-    It 'builds a valid deterministic dry-run receipt without executing actions' {
-        $desired = @(New-TestDesiredState (Join-Path $TestDrive 'receipt'))
-        $result = New-McpSyncOperationPlanResult -DesiredState $desired -CreatedAt $createdAt -SourceRevision $sourceRevision
-        $receipt = New-McpPlanReceiptSkeleton -Plan $result.operation_plan -StartedAt $createdAt -CompletedAt $createdAt
-
-        (Test-OperationReceiptContract $receipt).pass | Should Be $true
-        $receipt.status | Should Be 'dry_run'
-        @($receipt.actions | Where-Object status -ne 'not_run').Count | Should Be 0
-        $receipt.verification.static_validated | Should Be 'pass'
-        $receipt.verification.repo_gates_passed | Should Be 'not_run'
-        $receipt.verification.host_loaded | Should Be 'not_run'
-        $receipt.verification.live_accepted | Should Be 'not_run'
-    }
-
     It 'does not write managed targets or invoke native mutation in plan mode' {
         $root = Join-Path $TestDrive 'zero-write'
         New-Item -ItemType Directory -Path $root -Force | Out-Null

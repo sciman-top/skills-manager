@@ -185,7 +185,7 @@ Describe "Config And Update Enhancements" {
             { Assert-Cfg $invalid } | Should Throw
         }
 
-        It "Validates managed Codex link exclusions" {
+        It "Validates managed Codex link placement" {
             $valid = @'
 {
   "vendors": [],
@@ -198,6 +198,7 @@ Describe "Config And Update Enhancements" {
   "skill_projection": {
     "sources": [],
     "aliases": [],
+    "managed_link_includes": ["capability-router", "systematic-debugging"],
     "managed_link_excludes": ["anthropics-skills-skills-skill-creator"]
   }
 }
@@ -218,6 +219,21 @@ Describe "Config And Update Enhancements" {
             $errors | Should Match "managed_link_excludes 不能包含空字符串"
             $errors | Should Match "managed_link_excludes 重复"
             { Assert-Cfg $invalidItems } | Should Throw
+
+            $invalidIncludes = $valid.PSObject.Copy()
+            $invalidIncludes.skill_projection = $valid.skill_projection.PSObject.Copy()
+            $invalidIncludes.skill_projection.managed_link_includes = @(" ", "Skill-A", "skill-a")
+            $errors = @(Get-CfgContractErrors $invalidIncludes) -join "`n"
+            $errors | Should Match "managed_link_includes 不能包含空字符串"
+            $errors | Should Match "managed_link_includes 重复"
+            { Assert-Cfg $invalidIncludes } | Should Throw
+
+            $conflict = $valid.PSObject.Copy()
+            $conflict.skill_projection = $valid.skill_projection.PSObject.Copy()
+            $conflict.skill_projection.managed_link_includes = @("Skill-A")
+            $conflict.skill_projection.managed_link_excludes = @("skill-a")
+            (@(Get-CfgContractErrors $conflict) -join "`n") | Should Match "include/exclude 冲突"
+            { Assert-Cfg $conflict } | Should Throw
         }
 
         It "Collects contract errors without mutating config shape" {

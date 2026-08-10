@@ -17,7 +17,7 @@
 - profile reconciliation proposal/canary 已退役；当前只保留 `profile_compatibility` 只读视图、versioned migration 与历史 receipt 的 stale-safe rollback，不调用模型、不参与语义选择或永久切 active profile。
 - typed-core TC1 `shadow_only` PoC 已因零生产/仓外消费者、无可比返工净收益和持续 gate/SDK 成本退役；专用 spec/manifest/evidence 仅作历史记录。未来候选须由新的真实失败、消费者、对比收益和回滚证据重新准入，不得恢复长期双实现。
 - runtime 为 PS7-only；入口、CI、tests 和受管子进程只用 `pwsh`，禁止恢复 Windows PowerShell fallback。历史 5.1 记录不构成支持面。
-- task manifest 是动态执行真源，plan/todo 仅索引；`verify-vnext-planning.ps1` 校验结构，P6 专用 verifier 仅供历史/migration 显式诊断，均不证明宿主验收。
+- task manifest 是动态执行真源，plan/todo 仅索引；`verify-vnext-planning.ps1` 校验当前结构。历史 P6/maintenance 专用 verifier 与重复测试已退役，历史 spec/evidence 只作追溯，均不证明宿主验收。
 ## B. 执行与风险边界
 - 生成链先改 `src/`、配置或 override，再构建验证；禁止直接修补 `agent/` 或运行态 report。
 - 更新 vendor、import 或 MCP 前记录来源、锁定/校验、目标影响和回滚；不得把非 MCP 设置塞进 `skills.json`。

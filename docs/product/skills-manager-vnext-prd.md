@@ -200,10 +200,10 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 
 - `FR-SEL-001`：以统一 descriptor/policy contract 表达 skill、MCP、plugin/app/connector 和 native tool，但保留每种能力的 path、availability、auth、side-effect 与宿主字段；统一 policy 不等于统一 runtime 或语义路由器。
 - `FR-SEL-002`：宿主 AI 使用完整请求、对话上下文和可见 metadata 做唯一语义判断；确定性脚本只接受 `$skill`/`@skill` 形式的 explicit capability 或宿主标注的 candidate/exclusion，不再用正则、词频或固定同义词表决定相关性。普通文本中的能力名可能位于否定句，不构成选择授权。
-- `FR-SEL-003`：profile 是任务边界的有界预热包和 capability domain/index partition；resident dispatcher 在每个可能受益于本地 skill 的非平凡请求中先暴露 portable catalog，宿主从 visible/cold 候选选择能力，不要求用户预先选 profile、不静默切 profile，也不把 profile 当权限边界。
+- `FR-SEL-003`：profile 只保留 read-only compatibility/preheat 视图，不拥有 reachability；普通请求由宿主从 `managed_link_includes` 常驻 metadata 原生选择，portable catalog 只在显式 cold discovery 时暴露，不要求用户预先选 profile，也不静默切 profile。
 - `FR-SEL-004`：active/cold read-only skill 输出 `use_active_skill | load_skill`；operator skill 输出 `load_skill_with_approval`；读取必须受 declared root containment 保护。
 - `FR-SEL-005`：已可用 read-only/external-read 能力可自动使用；write/destructive/open-world/unknown 或 needs_activation 必须输出 approval/activation plan。
-- `FR-SEL-006`：建立 direct、indirect、negative、ambiguous、多阶段、architecture/stack、cross-domain、cross-kind、native/no-skill 和 side-effect 中英文自然语言 corpus；分别验证 resident trigger、domain/candidate discovery、宿主选择、policy、完整 SKILL.md 冷加载、零 semantic auto-selection 和零 negative/side-effect violation。
+- `FR-SEL-006`：建立 direct、indirect、negative、ambiguous、多阶段、architecture/stack、cross-domain、cross-kind、native/no-skill 和 side-effect 中英文自然语言 corpus；分别验证常驻 metadata 边界、显式 domain/candidate discovery、宿主选择、policy、完整 SKILL.md 冷加载、零脚本 semantic auto-selection 和零 negative/side-effect violation。
 - `FR-SEL-007`：discovery/policy 全程只读，不切 profile、不创建任务、不重启宿主、不额外调用 provider，也不保存或推断 OAuth/token/session 状态。
 - `FR-SEL-008`：脚本必须报告 `decision_owner=host_ai`、`semantic_routing_performed=false`、`task_type/domain=host_adjudicated` 和 `confidence=null`；不得伪造未由宿主提供的意图、风险置信度或工程阶段。
 - `FR-SEL-009`：capability graph 只表达 `discover -> host_adjudication -> policy -> activate` 的责任顺序；产品交付阶段与多步执行计划继续由宿主 Agent/Plan/Goal 拥有。
@@ -214,7 +214,7 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 - `FR-SEL-014`：所有 legacy profile proposal 入口必须返回 `status=deprecated`、`profile_reconciliation_retired`、`apply_allowed=false` 和零写入，不再生成 change-set。
 - `FR-SEL-015`：历史 canary `Apply`/`Accept`/replay runtime 保持退役；当前唯一允许的写路径是显式 versioned profile migration 与 hash/backup 一致时的 receipt rollback。
 - `FR-SEL-016`：历史 canary/replay receipt 只保留点时 `host_evaluation_partial` 与回滚证据，不参与当前 native selection、gate 或 live acceptance。
-- `FR-SEL-017`：cold discovery 默认使用 `global_catalog_discovery`：resident dispatcher 在无显式 hint 时返回完整 `name + description + path + domains` candidate index，宿主基于完整请求选择最多三个候选；候选截断时才允许用 domain `name + purpose` 做只读窄化。不得要求宿主或用户在看见 catalog 前猜不透明 profile 名。
+- `FR-SEL-017`：显式 cold discovery 使用 `global_catalog_discovery`：router 在无 hint 时返回完整 `name + description + path + domains` candidate index，宿主基于完整请求选择最小候选；显式 domain hint 可用 `name + purpose` 做只读窄化。普通请求不得把这一路径当 mandatory preflight，也不得要求用户先猜 profile。
 - `FR-SEL-018`：`DomainHint` 支持数组或逗号分隔输入并最多保留两个有效值；`ProfileHint` 仅作为向后兼容别名。candidate 必须带 domain provenance，domain hint 不改变 `active_profile`。
 - `FR-SEL-019`：代表性宿主验收必须分开记录 selection trigger 与 cold-load chain，并观测 router script、router/target `SKILL.md` 全文读取、deterministic policy、profile restore、duration 和 tokens；结果最高为 `host_evaluation_partial`，不得外推为普遍语义正确或业务效果。
 - `FR-SEL-020`：canonical skill inventory 的 name/path/description 新增、删除或变化必须在投影 seam 生成 ignored `host_refresh_needed` signal，包含 before/after fingerprint、精确 delta、当前 config hash 和 profile/unrouted 兼容摘要，下一动作固定为 `fresh_session_or_host_handoff`；不得生成 advisor command、直接写 profile 或恢复已退役 planner，profile-only/no-op sync 不生成新信号。
@@ -294,13 +294,13 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 - `FR-HNS-004`：`SkillCatalogCompiler` 从受管 roots 编译完整 canonical inventory 和 provenance，不得以 profile/current_profile 过滤 enabled skill。
 - `FR-HNS-005`：`SkillEligibilityPolicy` 只判决 containment、freshness、availability、dependency、side effect、approval 和 surface compatibility；语义置信度不得放宽 deny。
 - `FR-HNS-006`：metadata planner 使用宿主有效 token ceiling；已知上下文默认 ceiling 为 `floor(context_window * 0.02)` 或宿主更严格值，headroom 可配置，禁止用固定字符数伪装 token 真值。
-- `FR-HNS-007`：每个 eligible enabled skill 必须进入宿主原生 discovery projection；验收要求 `enabled_total == kept_total`、`truncated=false`、`omitted=0`。
+- `FR-HNS-007`：Codex USER-scope 只投影 `managed_link_includes` 明确准入的最小常驻集合；该集合中的 eligible enabled skill 必须满足 `enabled_total == kept_total`、`truncated=false`、`omitted=0`。未准入项不得从 canonical inventory/portable catalog 删除，可由 explicit-only cold discovery 读取。
 - `FR-HNS-008`：metadata 质量以 concise description lint 和 direct/indirect/negative/ambiguous/no-skill corpus 验证；修复选择错误时优先改 metadata，不增加第二套 semantic router。
 - `FR-HNS-009`：提供 `NativeInvocationTrace`，区分 listed、selected、injected、executed 和 abstained；不可观测层保持 partial/unknown。
 - `FR-HNS-010`：legacy router/profile 只能在 zero-write shadow 中与 native path 对比，shadow 结果不得改变当前执行或覆盖宿主选择。
 - `FR-HNS-011`：profile、active_profile、current_profile、reconciliation 和 canary 从可达性主链退役；迁移期可兼容读取，但必须有 versioned migration、round-trip 和 rollback receipt。
 - `FR-HNS-012`：strict dispatch 仅允许显式 opt-in；采用 pre-turn bounded candidates、宿主裁决、支持时的 App Server `type=skill` 注入和 trace，普通请求不得默认进入。
-- `FR-HNS-013`：legacy runtime 只在 all-enabled projection、shadow evidence、compatibility migration、fresh host evidence 和 rollback gate 满足后 staged removal；P5 文档和 evidence 保持历史真值。
+- `FR-HNS-013`：legacy runtime 的 staged removal 是已完成的历史迁移，不因常驻 placement 收窄而恢复；P5/P6 文档和 evidence 保持历史真值，当前只保留 versioned compatibility/rollback seam。
 
 ### 6.14 P6 当前实现与验收边界
 
@@ -347,7 +347,7 @@ fresh inventory、host evaluation、injected/executed invocation 与业务 accep
 - `NFR-HNS-001`：P6 admission 是 planning/implementation authority，不自动授权宿主重启、provider/auth/session/plugin/MCP mutation 或业务 live action。
 - `NFR-HNS-002`：snapshot 每个推导值携带 source、captured_at、freshness 和 unknown reason；未知不得被默认配置提升为 runtime truth。
 - `NFR-HNS-003`：host adapters bounded、timeout、redaction-first、provider-free、zero-write；surface 不支持时报告 `platform_na`。
-- `NFR-HNS-004`：metadata budget 溢出列出 exact offenders 和 compaction result；不得静默增大 ceiling、切 profile 或丢弃 enabled skill。
+- `NFR-HNS-004`：常驻 metadata budget 溢出列出 exact offenders 和 compaction result；不得静默增大 ceiling、切 profile 或丢弃 placement-admitted skill。扩大常驻集合必须有真实高频消费者和预算证据，完整 catalog 不作为常驻预算的借口。
 - `NFR-HNS-005`：projection apply 需要显式 token、expected hash、atomic replace、receipt 和 drift-safe rollback；plan 保持 zero-write。
 - `NFR-HNS-006`：activation corpus 只评估 metadata/host behavior，不得成为脚本 semantic selector 或权限门禁。
 - `NFR-HNS-007`：invocation trace redaction-first、correlated、freshness-aware；visibility 不得升级为 full skill body execution。
@@ -419,7 +419,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - Phase 5 增加 task understanding、capability DAG、session reuse planning 和只读 host snapshot；仍不接管执行、安装、认证、审批、profile 或 session mutation。
 - P5 maintenance correction、profile reconciliation advisor、hierarchical cold-load 与 profile optimization canary 保留为历史结果或 P6 迁移/兼容证据，不再代表当前 reachability 主链。
 - P6 已将 profile reachability authority 退役；旧 canary `Apply`/`Accept` 固定返回 `deprecated` 且零写入，当前只保留显式 versioned migration/rollback 和只读兼容报告。
-- 当前主链是 `effective host snapshot -> canonical compiler -> eligibility policy -> all-enabled native metadata -> host AI selection -> full skill injection -> invocation trace`；strict fallback 只在宿主原生注入不可用且显式请求时启用。
+- 当前主链是 `canonical inventory -> managed_link_includes placement -> eligible resident metadata -> host AI native selection -> full skill injection -> invocation trace`；未常驻能力保留在 portable catalog，只由 explicit cold discovery/fallback 读取。profile、第二 semantic router 和 mandatory router preflight 均不在主链。
 - P5 后的 `maintenance_design` 已建立 Lean Delivery advisory 规划契约；M1 registry 当前为 `deferred (0/10)`，因为没有 active owner/collection task，只有显式建立两者后才恢复。它不是新 Phase，也不证明 pilot 已执行、完成或产生业务效果。
 - `maintenance_design` M0.2 只补强 host-owned coordination、single-writer write-set admission、Git freshness/CAS 语义、tool disposition 和 context-adapter admission；不引入 coordinator/lease runtime，也不安装 Trellis、AGOS、GBrain、CodeGraphContext、Understand Anything 或 OptSkills。
 - `maintenance_design` M0.3 的 TaskGraph/model policy 是历史 planning truth；后续通用 advisory runtime 因无外部消费者且与宿主原生能力重叠已退役。独立 TC1 shadow PoC 也已因无消费者和净收益证据退役；Radar automation 已删除，旧 Luna/Terra/Radar 记录只作为历史 receipt。

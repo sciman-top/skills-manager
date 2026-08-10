@@ -1,0 +1,6 @@
+interface:
+  display_name: "Proportional Verification"
+  short_description: "Prove the claim with the smallest sufficient gate"
+  default_prompt: "Use $verification-before-completion to prove only the declared claim, reuse exact-current evidence, and avoid unrequired gate escalation."
+policy:
+  allow_implicit_invocation: true

@@ -189,12 +189,3 @@ function New-McpSyncOperationPlanResult {
         }
     }
 }
-function New-McpPlanReceiptSkeleton {
-    param(
-        [Parameter(Mandatory = $true)]$Plan,
-        [string]$StartedAt = [datetimeoffset]::UtcNow.ToString('o'),
-        [string]$CompletedAt = [datetimeoffset]::UtcNow.ToString('o')
-    )
-    $validation = Test-OperationPlanContract $Plan
-    return New-OperationReceipt -OperationId ([string](Get-OperationObjectProperty $Plan 'operation_id')) -Status dry_run -StartedAt $StartedAt -CompletedAt $CompletedAt -Actions @((Get-OperationObjectProperty $Plan 'actions') | ForEach-Object { [pscustomobject]@{ action_id=[string]$_.action_id; status='not_run'; target_ref=[string]$_.target_ref } }) -Verification ([pscustomobject]@{static_validated=$(if($validation.pass){'pass'}else{'fail'});repo_gates_passed='not_run';host_loaded='not_run';live_accepted='not_run'}) -Rollback @('not_run')
-}

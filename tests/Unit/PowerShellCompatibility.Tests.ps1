@@ -25,19 +25,14 @@ Describe 'PowerShell 7-only runtime contract' {
         @($bytes[0..2]) -join ',' | Should Be '239,187,191'
     }
 
-    It 'uses only pwsh for authoritative CI and removes the legacy CI job' {
+    It 'uses only pwsh in the single authoritative GitHub CI surface' {
         $github = Get-Content -LiteralPath (Join-Path $repoRoot '.github\workflows\ci.yml') -Raw
-        $azure = Get-Content -LiteralPath (Join-Path $repoRoot 'azure-pipelines.yml') -Raw
-        $gitlab = Get-Content -LiteralPath (Join-Path $repoRoot '.gitlab-ci.yml') -Raw
 
         $github | Should Match 'Verify PowerShell 7 runtime'
         $github | Should Not Match 'Windows PowerShell 5\.1'
         $github | Should Not Match 'shell:\s*powershell'
-        $azure | Should Match 'Verify PowerShell 7 runtime'
-        $azure | Should Not Match 'Windows PowerShell 5\.1'
-        $azure | Should Not Match '(?m)^- powershell:'
-        $gitlab | Should Match 'pwsh -NoProfile'
-        $gitlab | Should Not Match 'powershell\.exe'
+        Test-Path -LiteralPath (Join-Path $repoRoot 'azure-pipelines.yml') | Should Be $false
+        Test-Path -LiteralPath (Join-Path $repoRoot '.gitlab-ci.yml') | Should Be $false
     }
 
     It 'fails closed instead of falling back to Windows PowerShell' {

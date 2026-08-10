@@ -5,6 +5,7 @@ function New-NativeSkillProjectionRuntimePlan {
         [Parameter(Mandatory = $true)]$Config,
         [Parameter(Mandatory = $true)]$Snapshot,
         $Policy = $null,
+        [string[]]$IncludedNames = @(),
         [string[]]$ExcludedNames = @(),
         [string]$GeneratedAt = ([DateTimeOffset]::UtcNow.ToString('o'))
     )
@@ -15,13 +16,20 @@ function New-NativeSkillProjectionRuntimePlan {
     foreach ($name in @($ExcludedNames)) {
         if (-not [string]::IsNullOrWhiteSpace([string]$name)) { $excluded.Add(([string]$name).Trim()) | Out-Null }
     }
+    $included = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in @($IncludedNames)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$name)) { $included.Add(([string]$name).Trim()) | Out-Null }
+    }
+    $useIncludeFilter = $included.Count -gt 0
+    $discoveredPackages = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $entries = @(
         Get-ChildItem -LiteralPath $root -Directory -Force |
-            Where-Object { $_.Name -ne '.system' -and -not $excluded.Contains($_.Name) } |
+            Where-Object { $_.Name -ne '.system' -and -not $excluded.Contains($_.Name) -and (-not $useIncludeFilter -or $included.Contains($_.Name)) } |
             Sort-Object Name |
             ForEach-Object {
                 $skillPath = Join-Path $_.FullName 'SKILL.md'
                 if (Test-Path -LiteralPath $skillPath -PathType Leaf) {
+                    $discoveredPackages.Add($_.Name) | Out-Null
                     [pscustomobject][ordered]@{
                         path = $skillPath
                         source_root = $root
@@ -35,6 +43,10 @@ function New-NativeSkillProjectionRuntimePlan {
                 }
             }
     )
+    $missingIncludedPackages = @($included | Where-Object { -not $discoveredPackages.Contains($_) } | Sort-Object)
+    if ($missingIncludedPackages.Count -gt 0) {
+        throw ('Managed link include packages are missing or lack SKILL.md: {0}' -f ($missingIncludedPackages -join ', '))
+    }
     $catalog = Compile-SkillCatalog -Entries $entries -GeneratedAt $GeneratedAt
     $catalogContract = Test-SkillCatalogContract $catalog
     if (-not [bool]$catalog.complete -or -not [bool]$catalogContract.pass) {

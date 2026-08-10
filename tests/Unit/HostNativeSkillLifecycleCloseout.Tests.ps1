@@ -139,6 +139,30 @@ Describe 'P6 host-native skill lifecycle closeout' {
         $projection.profile_compatibility.reachability_authority | Should Be 'none'
     }
 
+    It 'keeps the USER resident set bounded while preserving explicit cold discovery' {
+        $config = Get-CloseoutRepoText 'skills.json' | ConvertFrom-Json
+        $projection = $config.skill_projection
+        $included = @($projection.managed_link_includes)
+        $excluded = @($projection.managed_link_excludes)
+        $generatedSkillCount = @(Get-ChildItem -LiteralPath (Join-Path $repoRoot 'agent') -Directory | Where-Object {
+                Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md') -PathType Leaf
+            }).Count
+
+        $included.Count | Should BeGreaterThan 0
+        $included.Count | Should BeLessThan $generatedSkillCount
+        $included | Should Contain 'capability-router'
+        $included | Should Contain 'superpowers-skills-systematic-debugging'
+        $included | Should Contain 'superpowers-skills-verification-before-completion'
+        $included | Should Not Contain 'superpowers-skills-test-driven-development'
+        @($included | Where-Object { $excluded -contains $_ }).Count | Should Be 0
+
+        (Get-CloseoutRepoText 'overrides/custom/capability-router/agents/openai.yaml') | Should Match 'allow_implicit_invocation:\s*false'
+        (Get-CloseoutRepoText 'overrides/patches/superpowers-skills-test-driven-development/agents/openai.yaml') | Should Match 'allow_implicit_invocation:\s*false'
+        (Get-CloseoutRepoText 'overrides/patches/superpowers-skills-systematic-debugging/agents/openai.yaml') | Should Match 'allow_implicit_invocation:\s*true'
+        (Get-CloseoutRepoText 'overrides/patches/superpowers-skills-verification-before-completion/agents/openai.yaml') | Should Match 'allow_implicit_invocation:\s*true'
+        (Get-CloseoutRepoText 'overrides/patches/superpowers-skills-verification-before-completion/SKILL.md') | Should Match 'does not itself authorize a full suite'
+    }
+
     It 'removes profile/router runtime dispatch from the generated entrypoint and quality gate' {
         $main = Get-CloseoutRepoText 'src/Main.ps1'
         $version = Get-CloseoutRepoText 'src/Version.ps1'

@@ -106,6 +106,22 @@ Describe 'P6 native skill projection plan and transaction' {
         $plan.truncated | Should Be $false
     }
 
+    It 'limits the runtime plan to explicitly included package directories' {
+        $fixture = New-P6ProjectionFixture
+
+        $plan = New-NativeSkillProjectionRuntimePlan `
+            -ManagedRoot $fixture.source_root `
+            -Config $fixture.config `
+            -Snapshot (New-P6ProjectionSnapshot) `
+            -IncludedNames @('resident')
+
+        $plan.status | Should Be 'ready'
+        $plan.enabled_total | Should Be 1
+        $plan.kept_total | Should Be 1
+        @($plan.skills | ForEach-Object name) | Should Be @('resident')
+        { New-NativeSkillProjectionRuntimePlan -ManagedRoot $fixture.source_root -Config $fixture.config -Snapshot (New-P6ProjectionSnapshot) -IncludedNames @('missing') } | Should Throw
+    }
+
     It 'keeps namespaced semantic names while using the safe package directory leaf' {
         $sourceRoot = Join-Path $TestDrive 'namespaced-source'
         $targetRoot = Join-Path $TestDrive 'namespaced-target'

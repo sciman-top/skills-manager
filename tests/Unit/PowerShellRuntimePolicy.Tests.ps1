@@ -23,9 +23,7 @@ function New-PowerShellRuntimePolicyFixture([string]$Name) {
         'install.ps1',
         'skills.cmd',
         'skills.ps1',
-        '.github/workflows/ci.yml',
-        'azure-pipelines.yml',
-        '.gitlab-ci.yml'
+        '.github/workflows/ci.yml'
     )) {
         $source = Join-Path $repoRoot $relativePath
         $destination = Join-Path $fixtureRoot $relativePath

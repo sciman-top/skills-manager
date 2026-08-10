@@ -4239,6 +4239,7 @@ function New-NativeSkillProjectionRuntimePlan {
         [Parameter(Mandatory = $true)]$Config,
         [Parameter(Mandatory = $true)]$Snapshot,
         $Policy = $null,
+        [string[]]$IncludedNames = @(),
         [string[]]$ExcludedNames = @(),
         [string]$GeneratedAt = ([DateTimeOffset]::UtcNow.ToString('o'))
     )
@@ -4249,13 +4250,20 @@ function New-NativeSkillProjectionRuntimePlan {
     foreach ($name in @($ExcludedNames)) {
         if (-not [string]::IsNullOrWhiteSpace([string]$name)) { $excluded.Add(([string]$name).Trim()) | Out-Null }
     }
+    $included = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in @($IncludedNames)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$name)) { $included.Add(([string]$name).Trim()) | Out-Null }
+    }
+    $useIncludeFilter = $included.Count -gt 0
+    $discoveredPackages = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $entries = @(
         Get-ChildItem -LiteralPath $root -Directory -Force |
-            Where-Object { $_.Name -ne '.system' -and -not $excluded.Contains($_.Name) } |
+            Where-Object { $_.Name -ne '.system' -and -not $excluded.Contains($_.Name) -and (-not $useIncludeFilter -or $included.Contains($_.Name)) } |
             Sort-Object Name |
             ForEach-Object {
                 $skillPath = Join-Path $_.FullName 'SKILL.md'
                 if (Test-Path -LiteralPath $skillPath -PathType Leaf) {
+                    $discoveredPackages.Add($_.Name) | Out-Null
                     [pscustomobject][ordered]@{
                         path = $skillPath
                         source_root = $root
@@ -4269,6 +4277,10 @@ function New-NativeSkillProjectionRuntimePlan {
                 }
             }
     )
+    $missingIncludedPackages = @($included | Where-Object { -not $discoveredPackages.Contains($_) } | Sort-Object)
+    if ($missingIncludedPackages.Count -gt 0) {
+        throw ('Managed link include packages are missing or lack SKILL.md: {0}' -f ($missingIncludedPackages -join ', '))
+    }
     $catalog = Compile-SkillCatalog -Entries $entries -GeneratedAt $GeneratedAt
     $catalogContract = Test-SkillCatalogContract $catalog
     if (-not [bool]$catalog.complete -or -not [bool]$catalogContract.pass) {
@@ -8675,12 +8687,12 @@ function Get-CfgContractErrors($cfg) {
             }
         }
         $managedLinkExcludes = Get-CfgObjectProperty $skillProjection "managed_link_excludes"
+        $normalizedExcludes = @()
         if ($null -ne $managedLinkExcludes) {
             if (-not (Assert-IsArray $managedLinkExcludes)) {
                 $errors.Add("skill_projection.managed_link_excludes 必须是数组") | Out-Null
             }
             else {
-                $normalizedExcludes = @()
                 foreach ($exclude in @($managedLinkExcludes)) {
                     $name = [string]$exclude
                     if ([string]::IsNullOrWhiteSpace($name)) {
@@ -8692,6 +8704,34 @@ function Get-CfgContractErrors($cfg) {
                 $duplicateExcludes = @(Get-DuplicateValues $normalizedExcludes)
                 if ($duplicateExcludes.Count -gt 0) {
                     $errors.Add(("skill_projection.managed_link_excludes 重复：{0}" -f ($duplicateExcludes -join ", "))) | Out-Null
+                }
+            }
+        }
+        $managedLinkIncludes = Get-CfgObjectProperty $skillProjection "managed_link_includes"
+        if ($null -ne $managedLinkIncludes) {
+            if (-not (Assert-IsArray $managedLinkIncludes)) {
+                $errors.Add("skill_projection.managed_link_includes 必须是数组") | Out-Null
+            }
+            else {
+                $normalizedIncludes = @()
+                foreach ($include in @($managedLinkIncludes)) {
+                    $name = [string]$include
+                    if ([string]::IsNullOrWhiteSpace($name)) {
+                        $errors.Add("skill_projection.managed_link_includes 不能包含空字符串") | Out-Null
+                        continue
+                    }
+                    $normalizedIncludes += $name.Trim().ToLowerInvariant()
+                }
+                if ($normalizedIncludes.Count -eq 0) {
+                    $errors.Add("skill_projection.managed_link_includes 至少需要一个技能") | Out-Null
+                }
+                $duplicateIncludes = @(Get-DuplicateValues $normalizedIncludes)
+                if ($duplicateIncludes.Count -gt 0) {
+                    $errors.Add(("skill_projection.managed_link_includes 重复：{0}" -f ($duplicateIncludes -join ", "))) | Out-Null
+                }
+                $conflictingLinks = @($normalizedIncludes | Where-Object { $normalizedExcludes -contains $_ } | Sort-Object -Unique)
+                if ($conflictingLinks.Count -gt 0) {
+                    $errors.Add(("skill_projection managed link include/exclude 冲突：{0}" -f ($conflictingLinks -join ", "))) | Out-Null
                 }
             }
         }
@@ -9295,6 +9335,19 @@ function Assert-Cfg($cfg) {
             }
             $dupManagedLinkExcludes = @(Get-DuplicateValues ($projection.managed_link_excludes | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() }))
             Need ($dupManagedLinkExcludes.Count -eq 0) ("skill_projection.managed_link_excludes 重复：{0}" -f ($dupManagedLinkExcludes -join ", "))
+        }
+        if ($projection.PSObject.Properties.Match("managed_link_includes").Count -gt 0 -and $null -ne $projection.managed_link_includes) {
+            Need (Assert-IsArray $projection.managed_link_includes) "skill_projection.managed_link_includes 必须是数组"
+            Need (@($projection.managed_link_includes).Count -gt 0) "skill_projection.managed_link_includes 至少需要一个技能"
+            foreach ($include in @($projection.managed_link_includes)) {
+                Need (-not [string]::IsNullOrWhiteSpace([string]$include)) "skill_projection.managed_link_includes 不能包含空字符串"
+            }
+            $normalizedManagedLinkIncludes = @($projection.managed_link_includes | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() })
+            $dupManagedLinkIncludes = @(Get-DuplicateValues $normalizedManagedLinkIncludes)
+            Need ($dupManagedLinkIncludes.Count -eq 0) ("skill_projection.managed_link_includes 重复：{0}" -f ($dupManagedLinkIncludes -join ", "))
+            $normalizedManagedLinkExcludes = @($projection.managed_link_excludes | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() })
+            $managedLinkConflicts = @($normalizedManagedLinkIncludes | Where-Object { $normalizedManagedLinkExcludes -contains $_ } | Sort-Object -Unique)
+            Need ($managedLinkConflicts.Count -eq 0) ("skill_projection managed link include/exclude 冲突：{0}" -f ($managedLinkConflicts -join ", "))
         }
         if ($projection.PSObject.Properties.Match("resident_names").Count -gt 0 -and $null -ne $projection.resident_names) {
             Need (Assert-IsArray $projection.resident_names) "skill_projection.resident_names 必须是数组"
@@ -16624,15 +16677,6 @@ function New-McpSyncOperationPlanResult {
             live_accepted = 'not_run'
         }
     }
-}
-function New-McpPlanReceiptSkeleton {
-    param(
-        [Parameter(Mandatory = $true)]$Plan,
-        [string]$StartedAt = [datetimeoffset]::UtcNow.ToString('o'),
-        [string]$CompletedAt = [datetimeoffset]::UtcNow.ToString('o')
-    )
-    $validation = Test-OperationPlanContract $Plan
-    return New-OperationReceipt -OperationId ([string](Get-OperationObjectProperty $Plan 'operation_id')) -Status dry_run -StartedAt $StartedAt -CompletedAt $CompletedAt -Actions @((Get-OperationObjectProperty $Plan 'actions') | ForEach-Object { [pscustomobject]@{ action_id=[string]$_.action_id; status='not_run'; target_ref=[string]$_.target_ref } }) -Verification ([pscustomobject]@{static_validated=$(if($validation.pass){'pass'}else{'fail'});repo_gates_passed='not_run';host_loaded='not_run';live_accepted='not_run'}) -Rollback @('not_run')
 }
 
 function Parse-ReadOnlyCapabilityOptions([object[]]$Tokens) {
@@ -24109,9 +24153,16 @@ function Sync-CodexManagedSkillLinks($projectionCfg) {
             $excluded.Add(([string]$name).Trim()) | Out-Null
         }
     }
+    $included = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if ($projectionCfg.PSObject.Properties.Match("managed_link_includes").Count -gt 0 -and $null -ne $projectionCfg.managed_link_includes) {
+        foreach ($name in @($projectionCfg.managed_link_includes)) {
+            $included.Add(([string]$name).Trim()) | Out-Null
+        }
+    }
+    $useIncludeFilter = $included.Count -gt 0
     $desired = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($dir in @(Get-ChildItem -LiteralPath $managedRoot -Directory -Force | Where-Object Name -ne ".system" | Sort-Object Name)) {
-        if ($excluded.Contains($dir.Name)) { continue }
+        if ($excluded.Contains($dir.Name) -or ($useIncludeFilter -and -not $included.Contains($dir.Name))) { continue }
         # Only generated skill packages with an entrypoint belong in the host
         # skill root.  Override-only directories (for example a resource or
         # agent policy directory without SKILL.md) must remain in agent/ but
@@ -24121,6 +24172,8 @@ function Sync-CodexManagedSkillLinks($projectionCfg) {
         New-Junction $linkPath $dir.FullName -QuietIfUnchanged
         $desired.Add($dir.Name) | Out-Null
     }
+    $missingIncludedPackages = @($included | Where-Object { -not $desired.Contains($_) } | Sort-Object)
+    Need ($missingIncludedPackages.Count -eq 0) ("managed_link_includes 中的技能包不存在或缺少 SKILL.md：{0}" -f ($missingIncludedPackages -join ", "))
 
     $staleRemoved = 0
     foreach ($entry in @(Get-ChildItem -LiteralPath $userRoot -Directory -Force -ErrorAction SilentlyContinue | Where-Object Name -ne ".system")) {
@@ -24685,9 +24738,14 @@ function Get-CodexManagedSkillLinkTransactionSnapshot($projectionCfg, [string]$T
     foreach ($name in @($projectionCfg.managed_link_excludes)) {
         if (-not [string]::IsNullOrWhiteSpace([string]$name)) { $excluded.Add(([string]$name).Trim()) | Out-Null }
     }
+    $included = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in @($projectionCfg.managed_link_includes)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$name)) { $included.Add(([string]$name).Trim()) | Out-Null }
+    }
+    $useIncludeFilter = $included.Count -gt 0
     $affected = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($directory in @(Get-ChildItem -LiteralPath $managedRoot -Directory -Force | Where-Object Name -ne '.system' | Sort-Object Name)) {
-        if ($excluded.Contains($directory.Name)) { continue }
+        if ($excluded.Contains($directory.Name) -or ($useIncludeFilter -and -not $included.Contains($directory.Name))) { continue }
         $linkPath = [IO.Path]::GetFullPath((Join-Path $targetRootPath $directory.Name))
         if (Test-PathEntry $linkPath) {
             Need (Is-ReparsePoint $linkPath) ("Projection target conflict is not a managed junction: {0}" -f $linkPath)
@@ -24801,12 +24859,13 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBu
     $nativeSettings = Get-CfgObjectProperty $projectionCfg 'native_projection'
     if ($null -ne $nativeSettings -and [bool](Get-CfgObjectProperty $nativeSettings 'enabled')) {
         $managedRoot = Resolve-SkillProjectionPath ([string](Get-CfgObjectProperty $projectionCfg 'managed_source_path'))
+        $includedNames = @((Get-CfgObjectProperty $projectionCfg 'managed_link_includes') | ForEach-Object { [string]$_ })
         $excludedNames = @((Get-CfgObjectProperty $projectionCfg 'managed_link_excludes') | ForEach-Object { [string]$_ })
         $capturedAt = [DateTimeOffset]::UtcNow.ToString('o')
         $snapshot = New-HostCapabilitySnapshotFromConfigFallback -ConfigPath $configPath -Surface 'cli' -CapturedAt $capturedAt
         $policyPath = Join-Path $Root 'config\native-skill-metadata-policy.json'
         $policy = if (Test-Path -LiteralPath $policyPath -PathType Leaf) { Get-ContentUtf8 $policyPath | ConvertFrom-Json } else { Get-DefaultNativeMetadataPolicy }
-        $nativeProjectionPlan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $managedRoot -Config ([pscustomobject]@{ skill_projection = $projectionCfg }) -Snapshot $snapshot -Policy $policy -ExcludedNames $excludedNames -GeneratedAt $capturedAt
+        $nativeProjectionPlan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $managedRoot -Config ([pscustomobject]@{ skill_projection = $projectionCfg }) -Snapshot $snapshot -Policy $policy -IncludedNames $includedNames -ExcludedNames $excludedNames -GeneratedAt $capturedAt
         Need ([string]$nativeProjectionPlan.status -eq 'ready' -and [bool]$nativeProjectionPlan.pass) ("native skill projection blocked: enabled={0}, kept={1}, omitted={2}" -f [int]$nativeProjectionPlan.enabled_total, [int]$nativeProjectionPlan.kept_total, [int]$nativeProjectionPlan.omitted_total)
         $nativeProjectionAuthoritative = $true
         if ($DryRun) {

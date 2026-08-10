@@ -7,6 +7,14 @@
     "manifest_path": "reports/skill-projection/current.json",
     "managed_source_path": "agent",
     "user_skill_root": "~/.agents/skills",
+    "managed_link_includes": [
+      "capability-router",
+      "codebase-design",
+      "custom-powershell-windows-automation",
+      "research",
+      "superpowers-skills-systematic-debugging",
+      "superpowers-skills-verification-before-completion"
+    ],
     "managed_link_excludes": [
       "anthropics-skills-skills-skill-creator"
     ],

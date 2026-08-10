@@ -234,6 +234,34 @@ Describe "Skill projection" {
                 $script:DryRun = $oldDryRun
             }
         }
+
+        It "Projects only explicitly included managed directories and removes stale managed links" {
+            $oldDryRun = $script:DryRun
+            try {
+                $script:DryRun = $false
+                $managed = Join-Path $TestDrive "managed-link-includes"
+                $userRoot = Join-Path $TestDrive "agents-skills-includes"
+                $coreDir = New-ProjectionSkill $managed "core" "core"
+                $coldDir = New-ProjectionSkill $managed "cold" "cold"
+                Sync-CodexManagedSkillLinks ([pscustomobject]@{ managed_source_path = $managed; user_skill_root = $userRoot }) | Out-Null
+
+                $result = Sync-CodexManagedSkillLinks ([pscustomobject]@{
+                        managed_source_path = $managed
+                        user_skill_root = $userRoot
+                        managed_link_includes = @("core")
+                    })
+
+                $result.managed_link_count | Should Be 1
+                $result.stale_link_count | Should Be 1
+                (Get-ReparsePointTargetFullPath (Join-Path $userRoot "core")) | Should Be ([IO.Path]::GetFullPath($coreDir))
+                (Test-Path -LiteralPath (Join-Path $userRoot "cold")) | Should Be $false
+                (Test-Path -LiteralPath (Join-Path $coldDir "SKILL.md") -PathType Leaf) | Should Be $true
+                { Sync-CodexManagedSkillLinks ([pscustomobject]@{ managed_source_path = $managed; user_skill_root = $userRoot; managed_link_includes = @("missing") }) } | Should Throw
+            }
+            finally {
+                $script:DryRun = $oldDryRun
+            }
+        }
     }
 
     Context "Capability-router catalog projection" {
