@@ -109,6 +109,7 @@ if ($MyInvocation.InvocationName -ne '.') {
                 }
             }
         }
+        exit 0
     }
     catch {
         $msg = $_.Exception.Message

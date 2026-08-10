@@ -28,6 +28,16 @@ function Set-TestWorkspace([string]$root) {
 }
 
 Describe "E2E Workflows" {
+    Context "CLI process contract" {
+        It "Clears stale native exit state after a successful command" {
+            $entry = (Join-Path $repoRoot "skills.ps1").Replace("'", "''")
+            $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -Command "`$global:LASTEXITCODE = 128; & '$entry' help; exit `$LASTEXITCODE" 2>&1)
+
+            $LASTEXITCODE | Should Be 0
+            ($output -join "`n") | Should Match "skills\.ps1"
+        }
+    }
+
     Context "构建生效 + 同步" {
         It "Builds agent and syncs to target in sync mode" {
             $root = Join-Path $TestDrive "ws-build"
