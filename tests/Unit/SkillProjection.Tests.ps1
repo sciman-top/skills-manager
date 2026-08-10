@@ -468,6 +468,32 @@ Describe "Skill projection" {
             $alias.canonical_path | Should Match "social\\SKILL\.md$"
         }
 
+        It "Keeps aliases dormant when neither side is resident" {
+            $managed = Join-Path $TestDrive "managed-dormant-alias"
+            New-ProjectionSkill $managed "core" "core" "resident" | Out-Null
+
+            $plan = New-SkillProjectionPlan ([pscustomobject]@{
+                    enabled = $true
+                    aliases = @([pscustomobject]@{ name = "social-content"; replacement = "social" })
+                    sources = @([pscustomobject]@{ id = "managed"; path = $managed; priority = 200; platforms = @("codex") })
+                })
+
+            @($plan.active).Count | Should Be 1
+            $plan.active[0].name | Should Be "core"
+            @($plan.disabled | Where-Object decision -eq "alias_replaced").Count | Should Be 0
+        }
+
+        It "Rejects a projected alias whose replacement is absent" {
+            $managed = Join-Path $TestDrive "managed-broken-alias"
+            New-ProjectionSkill $managed "social-content" "social-content" "legacy" | Out-Null
+
+            { New-SkillProjectionPlan ([pscustomobject]@{
+                        enabled = $true
+                        aliases = @([pscustomobject]@{ name = "social-content"; replacement = "social" })
+                        sources = @([pscustomobject]@{ id = "managed"; path = $managed; priority = 200; platforms = @("codex") })
+                    }) } | Should Throw
+        }
+
         It "Keeps system skills and only profile-enabled canonical skills active" {
             $root = Join-Path $TestDrive "profile"
             New-ProjectionSkill $root "always" "always" | Out-Null
