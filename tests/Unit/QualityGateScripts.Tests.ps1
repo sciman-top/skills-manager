@@ -305,7 +305,6 @@ Set-Content -LiteralPath $marker -Value 'executed' -Encoding UTF8
         $runner | Should Not Match '-WindowStyle\s+Hidden'
         $runner | Should Match 'test-shards'
         $runner | Should Match 'SerialTestFiles'
-        $runner | Should Match '\[string\[\]\]\$SerialTestFiles\s*=\s*@\(''SelectionCancellation\.Tests\.ps1''\)'
         $runner | Should Not Match 'HostNativeSkillLifecyclePlanning\.Tests\.ps1'
         $runner | Should Not Match 'LeanAiDeliveryPlanning\.Tests\.ps1'
         $runner | Should Not Match '\$historicalDiagnosticTestFiles'

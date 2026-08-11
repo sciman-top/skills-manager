@@ -13,7 +13,7 @@ param(
     [int]$TestFileTimeoutSeconds = 180,
     [string]$ShardReportRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'reports\test-shards'),
     [string]$SchedulingTimingPath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'reports\test-timings\current.json'),
-    [string[]]$SerialTestFiles = @('SelectionCancellation.Tests.ps1'),
+    [string[]]$SerialTestFiles = @(),
     [string]$QualityGateRunId = '',
     [string]$QualityGateSourceFingerprintJson = ''
 )

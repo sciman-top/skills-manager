@@ -1402,7 +1402,7 @@ function 安装 {
     Preflight
     $cfg = LoadCfg
     $manualItems = 收集ManualSkills $cfg
-    $filter = Read-Host "可选：关键词过滤（空格=AND，或 /regex/）"
+    $filter = Read-HostSafe "可选：关键词过滤（空格=AND，或 /regex/）"
     $all = 收集Skills "" $cfg $manualItems
     Need ($all.Count -gt 0) "未发现任何 skills。请先【新增技能库】。"
     $list = Hide-VendorRootSkills (Filter-Skills $all $filter)
