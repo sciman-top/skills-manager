@@ -277,6 +277,8 @@ Describe 'SkillEvolution controlled lifecycle' {
         $receipt.lifecycle.projection_state | Should -Be 'staged_not_projected'
         @((Get-Content -LiteralPath (Join-Path $script:fixtureRepo 'skills.json') -Raw | ConvertFrom-Json).skill_projection.managed_link_includes) | Should -Contain 'demo-skill'
         (Test-SkillEvolutionProjectionAuthorization $receipt $decisionPath PROJECT_SKILL_TO_HOST $script:fixtureRepo).pass | Should -BeTrue
+        $serializedReceipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+        (Test-SkillEvolutionProjectionAuthorization $serializedReceipt $decisionPath PROJECT_SKILL_TO_HOST $script:fixtureRepo).pass | Should -BeTrue
         $rolled = Invoke-SkillEvolutionActivationRollback -Receipt $receipt -Token ROLLBACK_SKILL_ACTIVATION -OutPath (Join-Path $script:evolutionRoot 'activation-rollback.json') -RepoRoot $script:fixtureRepo
         $rolled.status | Should -Be 'rolled_back'
         @((Get-Content -LiteralPath (Join-Path $script:fixtureRepo 'skills.json') -Raw | ConvertFrom-Json).skill_projection.managed_link_includes) | Should -Not -Contain 'demo-skill'

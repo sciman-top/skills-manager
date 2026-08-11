@@ -1089,8 +1089,13 @@ function Invoke-SkillEvolutionActivationApply {
     $decisionRequestPath = Assert-SkillEvolutionReportPath ([string]$decision.request_path) $RepoRoot
     $expectedToken = Get-SkillEvolutionReviewToken activation ([string]$life.activation_action)
     if ([string]$decision.decision -ne 'approve' -or [string]$decision.review_type -ne 'activation' -or [string]$decision.action -ne [string]$life.activation_action -or [string]$decision.skill_name -ne $skillName -or [string]$decision.subject_fingerprint -ne [string]$life.package_fingerprint -or $decisionRequestPath -ne $requestPath -or [string]$decision.request_hash -ne [string]$life.request_hash -or [string]$decision.authorization_token -cne $expectedToken -or [string]$request.action -ne [string]$life.activation_action -or [string]$request.skill_name -ne $skillName -or [string]$request.subject_fingerprint -ne [string]$life.package_fingerprint -or [string]$request.catalog_fingerprint -ne [string]$life.catalog_fingerprint) { throw 'Activation request or decision semantics do not match the plan.' }
+    $lifeReviewExpiresAt = ConvertTo-SkillEvolutionRfc3339 $life.review_expires_at
+    $decisionReviewExpiresAt = ConvertTo-SkillEvolutionRfc3339 $decision.expires_at
     $expires = [datetimeoffset]::MinValue
-    if (-not [datetimeoffset]::TryParse([string]$life.review_expires_at, [ref]$expires) -or $expires -le [datetimeoffset]::UtcNow -or (ConvertTo-SkillEvolutionRfc3339 $decision.expires_at) -ne [string]$life.review_expires_at) { throw 'Activation review expired or changed before apply.' }
+    $decisionExpires = [datetimeoffset]::MinValue
+    $lifeExpiryParsed = [datetimeoffset]::TryParse($lifeReviewExpiresAt, [ref]$expires)
+    $decisionExpiryParsed = [datetimeoffset]::TryParse($decisionReviewExpiresAt, [ref]$decisionExpires)
+    if (-not $lifeExpiryParsed -or -not $decisionExpiryParsed -or $expires -le [datetimeoffset]::UtcNow -or $expires -ne $decisionExpires) { throw 'Activation review expired or changed before apply.' }
     try { $configRaw = [System.IO.File]::ReadAllText($configPath); $config = $configRaw | ConvertFrom-Json }
     catch { throw ('Activation config cannot be parsed: {0}' -f $_.Exception.Message) }
     $desired = Get-SkillEvolutionDesiredActivationConfig $config $skillName ([string]$life.activation_action)
@@ -1189,8 +1194,13 @@ function Test-SkillEvolutionProjectionAuthorization {
         if ($decisionRequestFull -ne $requestFull -or (Get-SkillEvolutionFileHash $requestFull) -ne [string]$life.request_hash) { throw 'request mismatch' }
     }
     catch { $findings.Add((New-OperationFinding 'projection_request_path_invalid' 'error' '$.request_path' 'Projection request path/hash binding is invalid.')) | Out-Null }
+    $lifeReviewExpiresAt = ConvertTo-SkillEvolutionRfc3339 $life.review_expires_at
+    $decisionReviewExpiresAt = if ($null -ne $decision) { ConvertTo-SkillEvolutionRfc3339 $decision.expires_at } else { '' }
     $expires = [datetimeoffset]::MinValue
-    if (-not [datetimeoffset]::TryParse([string]$life.review_expires_at, [ref]$expires) -or $expires -le [datetimeoffset]::UtcNow -or $null -eq $decision -or (ConvertTo-SkillEvolutionRfc3339 $decision.expires_at) -ne [string]$life.review_expires_at) { $findings.Add((New-OperationFinding 'projection_review_expired' 'error' '$.review_expires_at' 'Activation authorization expired or changed before projection.')) | Out-Null }
+    $decisionExpires = [datetimeoffset]::MinValue
+    $lifeExpiryParsed = [datetimeoffset]::TryParse($lifeReviewExpiresAt, [ref]$expires)
+    $decisionExpiryParsed = [datetimeoffset]::TryParse($decisionReviewExpiresAt, [ref]$decisionExpires)
+    if (-not $lifeExpiryParsed -or -not $decisionExpiryParsed -or $expires -le [datetimeoffset]::UtcNow -or $null -eq $decision -or $expires -ne $decisionExpires) { $findings.Add((New-OperationFinding 'projection_review_expired' 'error' '$.review_expires_at' 'Activation authorization expired or changed before projection.')) | Out-Null }
     if ((Get-SkillEvolutionFileHash (Join-Path ([System.IO.Path]::GetFullPath($RepoRoot)) 'skills.json')) -ne [string]$life.config_after_hash) { $findings.Add((New-OperationFinding 'projection_config_drift' 'error' '$.config_after_hash' 'skills.json drifted before projection.')) | Out-Null }
     $target = Get-SkillEvolutionTargetState $RepoRoot ([string]$life.skill_name)
     if (-not $target.exists -or -not $target.pass -or $target.fingerprint -ne [string]$life.package_fingerprint) { $findings.Add((New-OperationFinding 'projection_package_drift' 'error' '$.package_fingerprint' 'Skill package drifted before projection.')) | Out-Null }
