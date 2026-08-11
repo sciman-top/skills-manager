@@ -361,6 +361,9 @@ fresh inventory、host evaluation、injected/executed invocation 与业务 accep
 - `NFR-HNS-009`：profile migration 兼容读取旧 schema，且旧数据可 round-trip 恢复；当前 task 不热切换 active profile。
 - `NFR-HNS-010`：strict fallback 与 native main path 复用同一 eligibility policy，候选集有界，缺宿主裁决或 injection 支持时 fail-closed/platform_na。
 - `NFR-HNS-011`：P6 真值阶梯固定为 `planning_contract -> implemented -> repo_verified -> host_inventory_loaded -> host_evaluation_partial -> host_invocation_observed -> live_accepted`，不得越级；inventory 不得冒充 invocation。
+- `NFR-HNS-012`：SkillEvolution 以 ChatGPT Desktop 当前任务为首选审核面；repo CLI 只输出 machine-readable `host_action`/`interaction`，宿主自动执行 `automatic=true` 的安全步骤，遇到 question 必须通知并暂停。用户自然语言决定由宿主映射为 token，不能由模型自报或默认值代替。
+- `NFR-HNS-013`：包晋级、活跃覆盖和正式宿主投影是三个独立状态；批准晋级自动 cold build，但只有 activation review、clean commit 和 exact-current full gate 同时成立才可 project。退役先移出活跃覆盖并保留冷包，不自动物理删除源码。
+- `NFR-HNS-014`：promotion 拒绝默认保留 7 天；`reject_delete` 是独立销毁授权，只能出现在 promotion 审核并删除 exact-current、未晋级、位于 `reports/skill-evolution/**` 的 candidate，永不触及 `overrides/custom`、`skills.json`、`agent`、用户技能根或宿主配置。activation/retire 审核只提供批准或拒绝，拒绝时包保持冷态。
 
 ## 8. 产品级验收
 
@@ -488,6 +491,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - `DEC-PROD-011`：宿主 AI 独立拥有任务语义、DAG、串并行、模型档位和 spawn/wait/integration；skills-manager 不再提供通用编排建议或 admission，只保留自身产品领域的确定性安全合同。
 - `DEC-PROD-012`：当前 shell runtime 强制收敛为 PS7-only，以删除 5.1/7 双运行时解析、quoting、encoding 和测试分支；这是支持面迁移，不是 typed-core 生产迁移。历史 typed-core PoC 已因真实收益不足、兼容/SDK 成本和无消费者退役；未来只有新的独立失败和 reviewed 净收益证据才能重新准入一个可删除 seam。
 - `DEC-PROD-013`：P6 正式采用 host-native skill lifecycle reset；profile/router/cold-load 不再是技能可达性或语义选择主链，完整 native discovery、确定性 eligibility 和 invocation trace 成为新边界。
+- `DEC-PROD-014`：ChatGPT Desktop 是 SkillEvolution 的用户交互主面；用户只审核自然语言问题，CLI/token/plan/receipt 由宿主 AI 代为编排。Desktop notification 设置仍由用户控制，本仓不修改宿主配置或建立第二套通知服务。
 
 以下选择有意延迟到有真实代码/宿主证据的任务，不允许 AI 在更早任务中猜定：
 

@@ -68,6 +68,41 @@ Official OpenAI documentation states that current local Codex releases support d
 
 `skill-evolution apply` promotes only an evaluated package into `overrides/custom/<skill>`. New skills remain cold-catalog-only. This closeout did not add names to `managed_link_includes`, run host projection, enable a host-visible skill, or retire a package. Activation/projection and retirement remain separate reviewed, receipt-backed operations; repository source promotion is not host enablement.
 
+## ChatGPT Desktop-first controlled automation hardening
+
+ChatGPT Desktop is now the preferred user interaction surface for SkillEvolution. The repository emits a machine-readable `host_action` and `interaction.kind=question`; the host automates exact-current safe steps, pauses on the question, and maps the user's natural-language decision to the internal token/CLI operation. The repository does not modify Desktop notification settings, and the user does not need to operate the CLI.
+
+The lifecycle remains deliberately layered:
+
+1. admitted real-task signals allow the host to prepare and author an isolated candidate with `skill-creator`;
+2. successful isolated evaluation creates a promotion question;
+3. promotion approval atomically writes only `overrides/custom/<skill>` and runs a no-host cold build;
+4. a separate activation/refresh/retire question stages only the reviewed `managed_link_includes` change;
+5. formal host projection remains blocked until a clean commit and exact-current full gate, and authorization is rechecked after that gate immediately before any host write.
+
+Promotion review exposes `approve / reject / reject_delete`. Activation, refresh, and retire expose only `approve / reject`; rejection leaves the package in its current cold-catalog state. Candidate deletion remains an independent exact-current authorization and cannot target promoted sources, `skills.json`, `agent`, the user skill root, or host projection.
+
+The strengthened receipt chain binds the persisted request path/hash, decision path/hash, package fingerprint, catalog fingerprint, config before/after hashes, authorization expiry, and reviewed action. Apply re-reads persisted request/decision semantics. Project rejects an alternate decision path even when its content hash matches, rejects catalog/config/package drift, and rechecks expiry after the full gate.
+
+Focused evidence for this slice:
+
+- `SkillEvolution.Tests.ps1` plus `OperationContracts.Tests.ps1`: 36 passed, 0 failed;
+- PowerShell parser: 0 errors in the changed application/command/domain/test files;
+- JSON parsing: operation plan, operation receipt, SkillEvolution decision, and review-request schemas parsed successfully;
+- `verify-skills-config -Mode enforce`: passed with zero findings;
+- `verify-skill-integrity`: 89 skills verified;
+- `verify-native-skill-metadata`: 5 samples and 28 cases passed;
+- `verify-vnext-planning`: 15 tasks done, 0 open;
+- `check-generated-sync -AllowDirtyWorktree`: generated `skills.ps1` matched current `src`.
+
+The final full command for this tracked source is:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree -ForceFresh
+```
+
+Its authoritative exact-current result is the stable `reports/quality-gates/current.json` pointer generated after this evidence section was added. No `skill-evolution project`, host mutation, restart, or live business workflow was executed in this automation hardening slice.
+
 ## Final truth
 
 - repository: `repo_verified` after the exact-current full gate pointer is refreshed;

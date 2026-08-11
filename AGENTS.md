@@ -1,7 +1,7 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
 **全局规则复核**: 9.75
-**最后更新**: 2026-08-09
+**最后更新**: 2026-08-11
 ## 1. 当前落点与目标归宿
 - 当前落点：`skills.ps1` 是入口，`skills.json` 是 vendor/mapping/target/sync/MCP 的配置真源。
 - 目标归宿：演进为 local-first AI capability curator 与 rule advisor；复用官方 skills/plugins/MCP/规则 surface，不替代宿主 runtime、auth、权限、会话或插件目录。
@@ -32,6 +32,7 @@
 - 同一逻辑切片默认一份 evidence；不按 task 机械增加 evidence/schema/fixture/wrapper/空模块。
 - skill/description 变化：宿主消费 `host_handoff`，可 no-op；profile proposal/canary 不再 apply，仅 legacy config 的显式 versioned migration 或 receipt rollback 可写，且不热切 active。
 - 宿主 AI 先按可见 skill/tool 元数据选最小集合；`capability-router` 仅作显式跨目录 fallback/policy validation，不是启动前置或 implicit invocation。profile 只负责只读兼容、预算与预热。
+- ChatGPT Desktop 是 SkillEvolution 首选交互面：宿主自动执行 `host_action.automatic=true` 的 exact-current 安全步骤；遇到 `interaction.kind=question` 必须在当前任务通知用户并暂停，把用户自然语言决定映射为 token 后续跑，用户无需操作 CLI；拒绝默认保留，只有明确“拒绝并删除”才授权候选清理。
 ### B.2 参考依据与外置源码
 - 参考真源：`references/reference-shelf.manifest.json`/`docs/EXTERNAL_REFERENCE_REPO_TIERS.md`；联动仅限 `D:\CODE\external\skills-manager-references` 的 manifest checkout，`D:\CODE\external` 根、共享/兄弟/runtime/import 不联动。
 - 按 tier 有界只读研究；新增先登记 URL/revision/license/消费者/触发/证据/决定，再运行 `scripts/refresh-reference-repos.ps1 ... -CloneMissing -FetchOnly -SkipDirtyRepos`。

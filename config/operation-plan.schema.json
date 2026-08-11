@@ -17,7 +17,7 @@
     "preconditions": { "type": "array" },
     "verification": { "type": "array" },
     "rollback": { "type": "array" },
-    "lifecycle": { "$ref": "#/$defs/skillLifecycle" }
+    "lifecycle": { "oneOf": [{ "$ref": "#/$defs/skillPromotionLifecycle" }, { "$ref": "#/$defs/skillActivationLifecycle" }] }
   },
   "$defs": {
     "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
@@ -46,7 +46,7 @@
         "metadata": { "type": "object" }
       }
     },
-    "skillLifecycle": {
+    "skillPromotionLifecycle": {
       "type": "object",
       "additionalProperties": true,
       "required": ["skill_name", "candidate_directory", "candidate_fingerprint", "baseline_fingerprint", "catalog_fingerprint", "evaluation_path", "evaluation_hash", "review_path", "review_hash", "review_expires_at", "allowed_paths", "projection_disposition", "host_mutation"],
@@ -64,6 +64,31 @@
         "allowed_paths": { "type": "array", "minItems": 1, "items": { "type": "string" } },
         "projection_disposition": { "type": "string", "const": "cold_catalog_only" },
         "host_mutation": { "type": "boolean", "const": false }
+      }
+    },
+    "skillActivationLifecycle": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["operation_kind", "skill_name", "activation_action", "package_fingerprint", "catalog_fingerprint", "config_path", "config_before_hash", "config_after_hash", "desired_managed_link_includes", "request_path", "request_hash", "review_path", "review_hash", "review_expires_at", "allowed_paths", "projection_disposition", "host_mutation", "projection_token"],
+      "properties": {
+        "operation_kind": { "type": "string", "const": "activation" },
+        "skill_name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+        "activation_action": { "type": "string", "enum": ["enable", "refresh", "retire"] },
+        "package_fingerprint": { "$ref": "#/$defs/sha256" },
+        "catalog_fingerprint": { "$ref": "#/$defs/sha256" },
+        "config_path": { "type": "string", "minLength": 1 },
+        "config_before_hash": { "$ref": "#/$defs/sha256" },
+        "config_after_hash": { "$ref": "#/$defs/sha256" },
+        "desired_managed_link_includes": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "request_path": { "type": "string", "minLength": 1 },
+        "request_hash": { "$ref": "#/$defs/sha256" },
+        "review_path": { "type": "string", "minLength": 1 },
+        "review_hash": { "$ref": "#/$defs/sha256" },
+        "review_expires_at": { "type": "string", "format": "date-time" },
+        "allowed_paths": { "type": "array", "const": ["skills.json"] },
+        "projection_disposition": { "type": "string", "const": "staged_then_project_after_clean_gate" },
+        "host_mutation": { "type": "boolean", "const": true },
+        "projection_token": { "type": "string", "const": "PROJECT_SKILL_TO_HOST" }
       }
     }
   },

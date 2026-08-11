@@ -1,9 +1,12 @@
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 . (Join-Path $repoRoot 'src\Application\SkillEvolution.ps1')
+. (Join-Path $repoRoot 'src\Commands\SkillEvolution.ps1')
+
+function 构建生效 { param([switch]$SkipHostProjection) $script:skillEvolutionBuildCalls++ }
 
 function New-SkillEvolutionFixtureRepo([string]$Root) {
     New-Item -ItemType Directory -Force -Path (Join-Path $Root 'overrides\custom') | Out-Null
-    [IO.File]::WriteAllText((Join-Path $Root 'skills.json'), '{"schema_version":1}', [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $Root 'skills.json'), '{"schema_version":1,"skill_projection":{"managed_link_includes":["core-skill"],"manifest_path":"reports/skill-projection/current.json"}}', [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $Root 'skills.lock.json'), '{"schema_version":1}', [Text.UTF8Encoding]::new($false))
 }
 
@@ -53,6 +56,8 @@ Describe 'SkillEvolution controlled lifecycle' {
         New-Item -ItemType Directory -Force -Path $script:fixtureRoot | Out-Null
         $script:fixtureRepo = Join-Path $script:fixtureRoot 'repo'
         New-SkillEvolutionFixtureRepo $script:fixtureRepo
+        $script:Root = $script:fixtureRepo
+        $script:skillEvolutionBuildCalls = 0
         $script:evolutionRoot = Join-Path $script:fixtureRepo 'reports\skill-evolution\fixture-run'
         New-Item -ItemType Directory -Force -Path $script:evolutionRoot | Out-Null
     }
@@ -203,5 +208,204 @@ Describe 'SkillEvolution controlled lifecycle' {
         $receipt = Invoke-SkillEvolutionApply -Plan $plan -Token PROMOTE_SKILL_CANDIDATE -ReceiptPath (Join-Path $script:evolutionRoot 'receipts\receipt.json') -RepoRoot $script:fixtureRepo
         Add-Content -LiteralPath (Join-Path $script:fixtureRepo 'overrides\custom\demo-skill\SKILL.md') -Value 'drift'
         { Invoke-SkillEvolutionRollback -Receipt $receipt -Token ROLLBACK_SKILL_PROMOTION -RepoRoot $script:fixtureRepo } | Should -Throw
+    }
+
+    It 'emits a structured question review request without active or host writes' {
+        $candidate = New-SkillEvolutionCandidate $script:evolutionRoot
+        $evaluation = Invoke-SkillEvolutionEvaluate -CandidateDirectory $candidate -Corpus (New-SkillEvolutionCorpus) -CaseResults (New-SkillEvolutionCaseResults) -Execute -RepoRoot $script:fixtureRepo
+        $evaluationPath = Join-Path $script:evolutionRoot 'evaluation-review.json'; Write-SkillEvolutionJsonAtomic $evaluationPath $evaluation
+        $requestPath = Join-Path $script:evolutionRoot 'promotion-review-request.json'
+        $result = New-SkillEvolutionPromotionReviewRequest -CandidateDirectory $candidate -Evaluation $evaluation -EvaluationPath $evaluationPath -OutPath $requestPath -RepoRoot $script:fixtureRepo
+        $result.request.status | Should -Be 'authorization_required'
+        $result.request.interaction.kind | Should -Be 'question'
+        $result.request.interaction.host_must_pause | Should -BeTrue
+        $result.request.interaction.default_decision | Should -Be 'reject'
+        $result.request.authorization_token | Should -Be 'PROMOTE_SKILL_CANDIDATE'
+        Test-Path -LiteralPath (Join-Path $script:fixtureRepo 'overrides\custom\demo-skill') | Should -BeFalse
+    }
+
+    It 'turns an approval into the existing exact reviewed promotion plan' {
+        $candidate = New-SkillEvolutionCandidate $script:evolutionRoot
+        $evaluation = Invoke-SkillEvolutionEvaluate -CandidateDirectory $candidate -Corpus (New-SkillEvolutionCorpus) -CaseResults (New-SkillEvolutionCaseResults) -Execute -RepoRoot $script:fixtureRepo
+        $evaluationPath = Join-Path $script:evolutionRoot 'evaluation-decision.json'; Write-SkillEvolutionJsonAtomic $evaluationPath $evaluation
+        $requestPath = Join-Path $script:evolutionRoot 'promotion-decision-request.json'
+        $requestResult = New-SkillEvolutionPromotionReviewRequest -CandidateDirectory $candidate -Evaluation $evaluation -EvaluationPath $evaluationPath -OutPath $requestPath -RepoRoot $script:fixtureRepo
+        $decisionPath = Join-Path $script:evolutionRoot 'promotion-decision.json'
+        $decisionResult = New-SkillEvolutionDecision -Request $requestResult.request -RequestPath $requestPath -Decision approve -Reviewer user -Token PROMOTE_SKILL_CANDIDATE -OutPath $decisionPath -RepoRoot $script:fixtureRepo
+        $plan = New-SkillEvolutionPlan -CandidateDirectory $candidate -Evaluation $evaluation -EvaluationPath $evaluationPath -Review $decisionResult.decision -ReviewPath $decisionPath -RepoRoot $script:fixtureRepo
+        (Test-OperationPlanContract $plan).pass | Should -BeTrue
+        $plan.lifecycle.projection_disposition | Should -Be 'cold_catalog_only'
+    }
+
+    It 'deletes only an explicitly rejected isolated candidate' {
+        $candidate = New-SkillEvolutionCandidate $script:evolutionRoot
+        $evaluation = Invoke-SkillEvolutionEvaluate -CandidateDirectory $candidate -Corpus (New-SkillEvolutionCorpus) -CaseResults (New-SkillEvolutionCaseResults) -Execute -RepoRoot $script:fixtureRepo
+        $evaluationPath = Join-Path $script:evolutionRoot 'evaluation-reject.json'; Write-SkillEvolutionJsonAtomic $evaluationPath $evaluation
+        $requestPath = Join-Path $script:evolutionRoot 'promotion-reject-request.json'
+        $requestResult = New-SkillEvolutionPromotionReviewRequest -CandidateDirectory $candidate -Evaluation $evaluation -EvaluationPath $evaluationPath -OutPath $requestPath -RepoRoot $script:fixtureRepo
+        $decisionPath = Join-Path $script:evolutionRoot 'promotion-reject-decision.json'
+        $decision = New-SkillEvolutionDecision -Request $requestResult.request -RequestPath $requestPath -Decision reject_delete -Reviewer user -Token DELETE_REJECTED_SKILL_CANDIDATE -OutPath $decisionPath -RepoRoot $script:fixtureRepo
+        $configHash = Get-SkillEvolutionFileHash (Join-Path $script:fixtureRepo 'skills.json')
+        $cleaned = Invoke-SkillEvolutionRejectedCleanup -Decision $decision.decision -Token DELETE_REJECTED_SKILL_CANDIDATE -OutPath (Join-Path $script:evolutionRoot 'cleanup-receipt.json') -RepoRoot $script:fixtureRepo
+        $cleaned.status | Should -Be 'cleaned'
+        Test-Path -LiteralPath $candidate | Should -BeFalse
+        (Get-SkillEvolutionFileHash (Join-Path $script:fixtureRepo 'skills.json')) | Should -Be $configHash
+        Test-Path -LiteralPath (Join-Path $script:fixtureRepo 'overrides\custom\demo-skill') | Should -BeFalse
+    }
+
+    It 'stages activation through OperationPlan and rolls back before projection' {
+        $candidate = New-SkillEvolutionCandidate $script:evolutionRoot
+        $target = Join-Path $script:fixtureRepo 'overrides\custom\demo-skill'
+        Copy-SkillEvolutionPackage $candidate $target @('SKILL.md')
+        $promotionReceiptPath = Join-Path $script:evolutionRoot 'fixture-promotion-receipt.json'
+        $targetState = Get-SkillEvolutionTargetState $script:fixtureRepo 'demo-skill'
+        $promotionReceipt = New-OperationReceipt -OperationId fixture-promotion -Status applied -StartedAt ([datetimeoffset]::UtcNow.AddMinutes(-1).ToString('o')) -CompletedAt ([datetimeoffset]::UtcNow.ToString('o'))
+        $promotionReceipt | Add-Member -NotePropertyName lifecycle -NotePropertyValue ([pscustomobject]@{ skill_name = 'demo-skill'; after_fingerprint = $targetState.fingerprint })
+        Write-SkillEvolutionJsonAtomic $promotionReceiptPath $promotionReceipt
+        $requestPath = Join-Path $script:evolutionRoot 'activation-request.json'
+        $requestResult = New-SkillEvolutionActivationReviewRequest -SkillName demo-skill -Action auto -PromotionReceiptPath $promotionReceiptPath -OutPath $requestPath -RepoRoot $script:fixtureRepo
+        $requestResult.request.action | Should -Be 'enable'
+        (@($requestResult.request.interaction.options.decision) -join '|') | Should -Be 'approve|reject'
+        ($null -eq $requestResult.request.interaction.deletion_token) | Should -BeTrue
+        $decisionPath = Join-Path $script:evolutionRoot 'activation-decision.json'
+        $decision = New-SkillEvolutionDecision -Request $requestResult.request -RequestPath $requestPath -Decision approve -Reviewer user -Token ACTIVATE_SKILL_ON_HOST -OutPath $decisionPath -RepoRoot $script:fixtureRepo
+        $plan = New-SkillEvolutionActivationPlan -Request $requestResult.request -RequestPath $requestPath -Decision $decision.decision -DecisionPath $decisionPath -RepoRoot $script:fixtureRepo
+        (Test-OperationPlanContract $plan).pass | Should -BeTrue
+        $plan.lifecycle.projection_disposition | Should -Be 'staged_then_project_after_clean_gate'
+        $receiptPath = Join-Path $script:evolutionRoot 'activation-receipt.json'
+        $receipt = Invoke-SkillEvolutionActivationApply -Plan $plan -Token ACTIVATE_SKILL_ON_HOST -ReceiptPath $receiptPath -RepoRoot $script:fixtureRepo
+        $receipt.lifecycle.projection_state | Should -Be 'staged_not_projected'
+        @((Get-Content -LiteralPath (Join-Path $script:fixtureRepo 'skills.json') -Raw | ConvertFrom-Json).skill_projection.managed_link_includes) | Should -Contain 'demo-skill'
+        (Test-SkillEvolutionProjectionAuthorization $receipt $decisionPath PROJECT_SKILL_TO_HOST $script:fixtureRepo).pass | Should -BeTrue
+        $rolled = Invoke-SkillEvolutionActivationRollback -Receipt $receipt -Token ROLLBACK_SKILL_ACTIVATION -OutPath (Join-Path $script:evolutionRoot 'activation-rollback.json') -RepoRoot $script:fixtureRepo
+        $rolled.status | Should -Be 'rolled_back'
+        @((Get-Content -LiteralPath (Join-Path $script:fixtureRepo 'skills.json') -Raw | ConvertFrom-Json).skill_projection.managed_link_includes) | Should -Not -Contain 'demo-skill'
+    }
+
+    It 'stages retirement without deleting the source package' {
+        $candidate = New-SkillEvolutionCandidate $script:evolutionRoot
+        $target = Join-Path $script:fixtureRepo 'overrides\custom\demo-skill'; Copy-SkillEvolutionPackage $candidate $target @('SKILL.md')
+        $cfgPath = Join-Path $script:fixtureRepo 'skills.json'; $cfg = Get-Content -LiteralPath $cfgPath -Raw | ConvertFrom-Json; $cfg.skill_projection.managed_link_includes = @('core-skill', 'demo-skill'); Write-SkillEvolutionJsonAtomic $cfgPath $cfg
+        $requestPath = Join-Path $script:evolutionRoot 'retire-request.json'
+        $requestResult = New-SkillEvolutionActivationReviewRequest -SkillName demo-skill -Action retire -OutPath $requestPath -RepoRoot $script:fixtureRepo
+        $decisionPath = Join-Path $script:evolutionRoot 'retire-decision.json'
+        $decision = New-SkillEvolutionDecision -Request $requestResult.request -RequestPath $requestPath -Decision approve -Reviewer user -Token RETIRE_SKILL_ON_HOST -OutPath $decisionPath -RepoRoot $script:fixtureRepo
+        $plan = New-SkillEvolutionActivationPlan -Request $requestResult.request -RequestPath $requestPath -Decision $decision.decision -DecisionPath $decisionPath -RepoRoot $script:fixtureRepo
+        $receipt = Invoke-SkillEvolutionActivationApply -Plan $plan -Token RETIRE_SKILL_ON_HOST -ReceiptPath (Join-Path $script:evolutionRoot 'retire-receipt.json') -RepoRoot $script:fixtureRepo
+        @((Get-Content -LiteralPath $cfgPath -Raw | ConvertFrom-Json).skill_projection.managed_link_includes) | Should -Not -Contain 'demo-skill'
+        Test-Path -LiteralPath (Join-Path $target 'SKILL.md') | Should -BeTrue
+        $receipt.lifecycle.host_writes | Should -Be 0
+    }
+
+    It 'keeps an activation package cold when the Desktop reviewer rejects it' {
+        $candidate = New-SkillEvolutionCandidate $script:evolutionRoot
+        $target = Join-Path $script:fixtureRepo 'overrides\custom\demo-skill'; Copy-SkillEvolutionPackage $candidate $target @('SKILL.md')
+        $requestPath = Join-Path $script:evolutionRoot 'activation-reject-request.json'
+        $request = New-SkillEvolutionActivationReviewRequest -SkillName demo-skill -Action enable -OutPath $requestPath -RepoRoot $script:fixtureRepo
+        $configHash = Get-SkillEvolutionFileHash (Join-Path $script:fixtureRepo 'skills.json')
+        $run = Invoke-SkillEvolutionCommand @('decide', '--request', $requestPath, '--decision', 'reject', '--reviewer', 'user', '--token', 'REJECT_SKILL_ACTIVATION_CHANGE', '--out', (Join-Path $script:evolutionRoot 'activation-reject'), '--json')
+        $run.envelope.data.status | Should -Be 'rejected_package_remains_cold'
+        $run.envelope.data.disposition | Should -Be 'package_remains_cold'
+        $run.envelope.data.cleanup_not_before | Should -BeNullOrEmpty
+        (Get-SkillEvolutionFileHash (Join-Path $script:fixtureRepo 'skills.json')) | Should -Be $configHash
+        Test-Path -LiteralPath (Join-Path $target 'SKILL.md') | Should -BeTrue
+    }
+
+    It 'rejects activation review after catalog drift' {
+        $candidate = New-SkillEvolutionCandidate $script:evolutionRoot
+        $target = Join-Path $script:fixtureRepo 'overrides\custom\demo-skill'; Copy-SkillEvolutionPackage $candidate $target @('SKILL.md')
+        $requestPath = Join-Path $script:evolutionRoot 'activation-catalog-request.json'
+        $request = New-SkillEvolutionActivationReviewRequest -SkillName demo-skill -Action enable -OutPath $requestPath -RepoRoot $script:fixtureRepo
+        Add-Content -LiteralPath (Join-Path $script:fixtureRepo 'skills.lock.json') -Value 'drift'
+        $validation = Test-SkillEvolutionReviewRequest $request.request $requestPath $script:fixtureRepo
+        $validation.pass | Should -BeFalse
+        @($validation.findings.code) | Should -Contain 'review_request_catalog_drift'
+    }
+
+    It 're-reads activation request and decision semantics before apply' {
+        $candidate = New-SkillEvolutionCandidate $script:evolutionRoot
+        $target = Join-Path $script:fixtureRepo 'overrides\custom\demo-skill'; Copy-SkillEvolutionPackage $candidate $target @('SKILL.md')
+        $requestPath = Join-Path $script:evolutionRoot 'activation-reread-request.json'
+        $request = New-SkillEvolutionActivationReviewRequest -SkillName demo-skill -Action enable -OutPath $requestPath -RepoRoot $script:fixtureRepo
+        $decisionPath = Join-Path $script:evolutionRoot 'activation-reread-decision.json'
+        $decision = New-SkillEvolutionDecision -Request $request.request -RequestPath $requestPath -Decision approve -Reviewer user -Token ACTIVATE_SKILL_ON_HOST -OutPath $decisionPath -RepoRoot $script:fixtureRepo
+        $plan = New-SkillEvolutionActivationPlan -Request $request.request -RequestPath $requestPath -Decision $decision.decision -DecisionPath $decisionPath -RepoRoot $script:fixtureRepo
+        $forgedDecision = Get-Content -LiteralPath $decisionPath -Raw | ConvertFrom-Json
+        $forgedDecision.decision = 'reject'; Write-SkillEvolutionJsonAtomic $decisionPath $forgedDecision
+        $plan.lifecycle.review_hash = Get-SkillEvolutionFileHash $decisionPath
+        { Invoke-SkillEvolutionActivationApply -Plan $plan -Token ACTIVATE_SKILL_ON_HOST -ReceiptPath (Join-Path $script:evolutionRoot 'forged-decision-receipt.json') -RepoRoot $script:fixtureRepo } | Should -Throw
+
+        $requestPath2 = Join-Path $script:evolutionRoot 'activation-reread-request-2.json'
+        $request2 = New-SkillEvolutionActivationReviewRequest -SkillName demo-skill -Action enable -OutPath $requestPath2 -RepoRoot $script:fixtureRepo
+        $decisionPath2 = Join-Path $script:evolutionRoot 'activation-reread-decision-2.json'
+        $decision2 = New-SkillEvolutionDecision -Request $request2.request -RequestPath $requestPath2 -Decision approve -Reviewer user -Token ACTIVATE_SKILL_ON_HOST -OutPath $decisionPath2 -RepoRoot $script:fixtureRepo
+        $plan2 = New-SkillEvolutionActivationPlan -Request $request2.request -RequestPath $requestPath2 -Decision $decision2.decision -DecisionPath $decisionPath2 -RepoRoot $script:fixtureRepo
+        $forgedRequest = Get-Content -LiteralPath $requestPath2 -Raw | ConvertFrom-Json
+        $forgedRequest.authorization_token = 'FORGED'; $forgedRequest.interaction.approval_token = 'FORGED'; Write-SkillEvolutionJsonAtomic $requestPath2 $forgedRequest
+        $plan2.lifecycle.request_hash = Get-SkillEvolutionFileHash $requestPath2
+        { Invoke-SkillEvolutionActivationApply -Plan $plan2 -Token ACTIVATE_SKILL_ON_HOST -ReceiptPath (Join-Path $script:evolutionRoot 'forged-request-receipt.json') -RepoRoot $script:fixtureRepo } | Should -Throw
+    }
+
+    It 'rejects a different decision path even when its content hash matches' {
+        $candidate = New-SkillEvolutionCandidate $script:evolutionRoot
+        $target = Join-Path $script:fixtureRepo 'overrides\custom\demo-skill'; Copy-SkillEvolutionPackage $candidate $target @('SKILL.md')
+        $requestPath = Join-Path $script:evolutionRoot 'activation-path-request.json'
+        $request = New-SkillEvolutionActivationReviewRequest -SkillName demo-skill -Action enable -OutPath $requestPath -RepoRoot $script:fixtureRepo
+        $decisionPath = Join-Path $script:evolutionRoot 'activation-path-decision.json'
+        $decision = New-SkillEvolutionDecision -Request $request.request -RequestPath $requestPath -Decision approve -Reviewer user -Token ACTIVATE_SKILL_ON_HOST -OutPath $decisionPath -RepoRoot $script:fixtureRepo
+        $plan = New-SkillEvolutionActivationPlan -Request $request.request -RequestPath $requestPath -Decision $decision.decision -DecisionPath $decisionPath -RepoRoot $script:fixtureRepo
+        $receipt = Invoke-SkillEvolutionActivationApply -Plan $plan -Token ACTIVATE_SKILL_ON_HOST -ReceiptPath (Join-Path $script:evolutionRoot 'activation-path-receipt.json') -RepoRoot $script:fixtureRepo
+        $copyPath = Join-Path $script:evolutionRoot 'activation-path-decision-copy.json'; Copy-Item -LiteralPath $decisionPath -Destination $copyPath
+        $authorization = Test-SkillEvolutionProjectionAuthorization $receipt $copyPath PROJECT_SKILL_TO_HOST $script:fixtureRepo
+        $authorization.pass | Should -BeFalse
+        @($authorization.findings.code) | Should -Contain 'projection_decision_path_invalid'
+    }
+
+    It 'rechecks projection authorization after the full gate before any host write' {
+        $candidate = New-SkillEvolutionCandidate $script:evolutionRoot
+        $target = Join-Path $script:fixtureRepo 'overrides\custom\demo-skill'; Copy-SkillEvolutionPackage $candidate $target @('SKILL.md')
+        [IO.File]::WriteAllText((Join-Path $script:fixtureRepo '.gitignore'), "reports/`n", [Text.UTF8Encoding]::new($false))
+        & git -C $script:fixtureRepo init -q
+        & git -C $script:fixtureRepo config user.email fixture@example.invalid
+        & git -C $script:fixtureRepo config user.name fixture
+        & git -C $script:fixtureRepo add .
+        & git -C $script:fixtureRepo commit -q -m fixture
+        $LASTEXITCODE | Should -Be 0
+
+        $receiptPath = Join-Path $script:evolutionRoot 'project-recheck-receipt.json'
+        $decisionPath = Join-Path $script:evolutionRoot 'project-recheck-decision.json'
+        $receipt = New-OperationReceipt -OperationId project-recheck -Status applied -StartedAt ([datetimeoffset]::UtcNow.AddMinutes(-1).ToString('o')) -CompletedAt ([datetimeoffset]::UtcNow.ToString('o'))
+        $receipt | Add-Member -NotePropertyName lifecycle -NotePropertyValue ([pscustomobject]@{ operation_kind = 'activation'; skill_name = 'demo-skill'; activation_action = 'enable'; projection_state = 'staged_not_projected' })
+        Write-SkillEvolutionJsonAtomic $receiptPath $receipt
+        Write-SkillEvolutionJsonAtomic $decisionPath ([pscustomobject]@{ decision = 'approve' })
+
+        $script:projectionAuthorizationChecks = 0
+        Mock Test-SkillEvolutionProjectionAuthorization {
+            $script:projectionAuthorizationChecks++
+            if ($script:projectionAuthorizationChecks -eq 1) { return [pscustomobject]@{ pass = $true; findings = @() } }
+            return [pscustomobject]@{ pass = $false; findings = @([pscustomobject]@{ code = 'projection_review_expired' }) }
+        }
+        Mock Invoke-SkillEvolutionFullGateForProjection { return [pscustomobject]@{ status = 'passed' } }
+
+        { Invoke-SkillEvolutionCommand @('project', '--receipt', $receiptPath, '--decision', $decisionPath, '--token', 'PROJECT_SKILL_TO_HOST', '--out', (Join-Path $script:evolutionRoot 'projection.json'), '--json') } | Should -Throw
+        $script:projectionAuthorizationChecks | Should -Be 2
+        $script:skillEvolutionBuildCalls | Should -Be 0
+    }
+
+    It 'automatically promotes, cold-builds, and returns the next activation question after approval' {
+        $candidate = New-SkillEvolutionCandidate $script:evolutionRoot
+        $evaluation = Invoke-SkillEvolutionEvaluate -CandidateDirectory $candidate -Corpus (New-SkillEvolutionCorpus) -CaseResults (New-SkillEvolutionCaseResults) -Execute -RepoRoot $script:fixtureRepo
+        $evaluationPath = Join-Path $script:evolutionRoot 'command-evaluation.json'; Write-SkillEvolutionJsonAtomic $evaluationPath $evaluation
+        $requestPath = Join-Path $script:evolutionRoot 'command-promotion-request.json'
+        $request = New-SkillEvolutionPromotionReviewRequest -CandidateDirectory $candidate -Evaluation $evaluation -EvaluationPath $evaluationPath -OutPath $requestPath -RepoRoot $script:fixtureRepo
+        $outRoot = Join-Path $script:evolutionRoot 'command-approve'
+        $run = Invoke-SkillEvolutionCommand @('decide', '--request', $requestPath, '--decision', 'approve', '--reviewer', 'user', '--token', 'PROMOTE_SKILL_CANDIDATE', '--out', $outRoot, '--json')
+        $run.exit_code | Should -Be 0
+        $run.envelope.data.status | Should -Be 'authorization_required'
+        $run.envelope.data.interaction.kind | Should -Be 'question'
+        $run.envelope.data.truth_boundary | Should -Be 'promoted_cold_catalog_not_projected'
+        $script:skillEvolutionBuildCalls | Should -Be 1
+        Test-Path -LiteralPath (Join-Path $script:fixtureRepo 'overrides\custom\demo-skill\SKILL.md') | Should -BeTrue
+        @((Get-Content -LiteralPath (Join-Path $script:fixtureRepo 'skills.json') -Raw | ConvertFrom-Json).skill_projection.managed_link_includes) | Should -Not -Contain 'demo-skill'
     }
 }

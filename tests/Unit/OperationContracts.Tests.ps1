@@ -69,6 +69,14 @@ Describe 'OperationPlan and Receipt v1 contracts' {
         @((Test-OperationPlanContract $plan).findings.code) | Should Contain 'skill_lifecycle_paths_invalid'
     }
 
+    It 'accepts activation only when it binds staged config and later controlled projection' {
+        $plan = New-OperationPlan -OperationId 'skill-activation-fixture' -Domain skill_lifecycle -Mode apply -CreatedAt '2026-08-01T08:00:00Z' -SourceRevision $hashA -Targets @([pscustomobject]@{ target_ref = 'skills.json'; path = 'C:\repo\skills.json'; before_hash = $hashA; desired_hash = $hashB; owner = 'skills-manager' }) -Actions @([pscustomobject]@{ type = 'update'; target_ref = 'skills.json'; summary = 'Stage activation'; risk = 'high'; metadata = [pscustomobject]@{ allowed_paths = @('skills.json') } })
+        $plan | Add-Member -NotePropertyName lifecycle -NotePropertyValue ([pscustomobject]@{ operation_kind = 'activation'; skill_name = 'demo-skill'; activation_action = 'enable'; package_fingerprint = $hashA; catalog_fingerprint = $hashA; config_path = 'C:\repo\skills.json'; config_before_hash = $hashA; config_after_hash = $hashB; desired_managed_link_includes = @('core-skill', 'demo-skill'); request_path = 'C:\repo\reports\skill-evolution\request.json'; request_hash = $hashA; review_path = 'C:\repo\reports\skill-evolution\decision.json'; review_hash = $hashB; review_expires_at = '2026-08-02T08:00:00Z'; allowed_paths = @('skills.json'); projection_disposition = 'staged_then_project_after_clean_gate'; host_mutation = $true; projection_token = 'PROJECT_SKILL_TO_HOST' })
+        (Test-OperationPlanContract $plan).pass | Should Be $true
+        $plan.lifecycle.projection_token = 'wrong'
+        @((Test-OperationPlanContract $plan).findings.code) | Should Contain 'skill_activation_boundary_invalid'
+    }
+
     It 'produces stable action ids and target ordering when input enumeration is reordered' {
         $targets = @(
             [pscustomobject]@{ target_ref = 'target-b'; path = 'C:\repo\b.json'; before_hash = $hashA; desired_hash = $hashB; owner = 'adapter' },

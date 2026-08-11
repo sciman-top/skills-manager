@@ -207,6 +207,19 @@ P3 plugin-aware 命令中，inventory/lint/eval 为只读；export 仍严格 fix
 - `锁定` 会生成或刷新 `skills.lock.json`，给后续 `更新 -Locked` 和 portable 安装重放使用。
 - `doctor --strict` 在校验不通过时会返回非零退出码，适合作为脚本门禁。
 
+### ChatGPT Desktop 优先的受控技能进化
+
+ChatGPT Desktop 是首选操作面；用户不需要运行 CLI、复制 token 或手工拼接 plan。候选满足真实任务 admission 后，宿主 AI 自动调用 `prepare`，使用 `skill-creator` 在隔离目录编写候选，并执行静态/forward evaluation。通过后 CLI 产出 `interaction.kind=question` 的 `review_request`，Desktop 在当前任务向用户提问并进入 `Needs input`；是否出现系统级弹窗由 Desktop 的 **Settings → Notifications** 中 permission/question notification 开关决定，仓库不会修改该设置。
+
+生命周期分两次可理解的授权：
+
+1. 包晋级：批准后自动原子写入 `overrides/custom/<skill>` 并执行 `构建生效 -SkipHostProjection`；随后自动发起活跃覆盖审核。
+2. 启用/刷新/退役：批准后自动 stage `managed_link_includes`、cold build，由宿主完成精确 Git 收口；正式 `project` 只在 clean commit 和 exact-current full gate 后写受管用户技能根/Codex 配置。
+
+用户在 Desktop 里审核候选晋级时可回复“批准”“拒绝并保留”或“拒绝并删除”；审核启用、刷新或退役时只显示“批准 / 拒绝（保持冷态）”。普通候选拒绝不晋级、不构建、不投影，候选默认保留 7 天以便审计；“拒绝并删除”同时构成独立删除授权，只清理尚未晋级的 `reports/skill-evolution/**` candidate。activation 拒绝保持当前冷 catalog 状态且不提供删除选项；退役只退出活跃覆盖并重新投影，源码继续留在冷 catalog 以支持回滚。
+
+CLI 仍作为宿主内部确定性执行器和故障恢复面，完整命令可见 `skills.ps1 帮助`。自动化不建立后台 daemon，也不会监控或保存所有 Desktop 会话；它从已记录且满足 admission 的脱敏真实任务信号开始。
+
 ### MCP 管理
 
 ```powershell
