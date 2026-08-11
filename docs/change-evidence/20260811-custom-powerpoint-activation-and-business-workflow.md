@@ -1,7 +1,7 @@
 # `custom-powerpoint-accessibility` activation and real business workflow
 
-**Date**: 2026-08-11  
-**Scope**: one explicitly authorized custom skill lifecycle pilot and one real PPTX accessibility audit  
+**Date**: 2026-08-11
+**Scope**: one explicitly authorized custom skill lifecycle pilot and one real PPTX accessibility audit
 **Input**: `D:\CODE\physicist_chinese_poster_batch_tool\outputs\final-delivery\courseware\person\person-courseware.pptx`
 
 ## Authorization and boundaries
