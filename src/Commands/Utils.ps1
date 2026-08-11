@@ -365,6 +365,7 @@ Skills 管理器（中文菜单）
   - `add`/`npx` 未指定 `--skill` 时只新增技能库，不会安装整库技能
   - `应用` 默认只 dry-run；只有 `--apply --yes` 才真正写入
   - `构建生效` 写入仓库外宿主目录前要求 clean Git commit；仅在明确接受风险时使用 `-AllowUnverifiedHostProjection`，receipt 会标记为 unverified override
+  - `skill-evolution` 的 prepare/evaluate 默认不调用 provider、不写宿主；晋级必须经过 reviewed change-set 和显式 token
 
 常用命令：
   .\skills.ps1 发现
@@ -415,7 +416,16 @@ Plugin（P3 repo/fixture-only）：
 
 技能投影：
   .\skills.ps1 构建生效
+  .\skills.ps1 capability-inventory --view skill-surfaces [--host-snapshot <snapshot.json>] --json
   .\scripts\verify-native-skill-metadata.ps1 -Json
+
+受控技能进化：
+  .\skills.ps1 skill-evolution prepare --signal <sample-id>... (--skill <name> | --new-skill <name>) --out <run-root> --json
+  .\skills.ps1 skill-evolution evaluate --candidate <candidate-dir> --corpus <cases.json> [--execute] --model gpt-5.6-sol --reasoning-effort medium --json
+  .\skills.ps1 skill-evolution plan --candidate <candidate-dir> --evaluation <receipt.json> --review <reviewed-change-set.json> --out <plan.json> --json
+  .\skills.ps1 skill-evolution apply --plan <plan.json> --token PROMOTE_SKILL_CANDIDATE --out <receipt.json> --json
+  .\skills.ps1 skill-evolution rollback --receipt <receipt.json> --token ROLLBACK_SKILL_PROMOTION --json
+  只晋级 `SKILL.md`、`agents/openai.yaml` 和非执行型 references；不自动构建、投影、写用户技能根或修改宿主配置。
 
 目标仓审查：
   .\skills.ps1 审查目标 需求设置

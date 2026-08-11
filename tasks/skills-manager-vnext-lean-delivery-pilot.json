@@ -3,7 +3,10 @@
   "program_id": "skills-manager-vnext",
   "track": "lean_delivery_pilot",
   "base_phase": "P5",
-  "pilot_status": "deferred",
+  "pilot_status": "collecting",
+  "owner": "host_ai_coordinator",
+  "collection_started_at": "2026-08-11T00:00:00+08:00",
+  "recovery_condition": "Continue only from evidence-backed stopping points of independent real tasks; pause when no owner, evidence link, or safe redaction boundary exists.",
   "sample_target": 10,
   "metrics_mode": "observe_only",
   "metrics_completion_gate": false,
@@ -34,6 +37,25 @@
     "synthetic_samples_count": false,
     "self_referential_tasks_count": false
   },
+  "sample_schema": {
+    "required_identity_fields": ["sample_id", "task_id", "category", "countable", "synthetic", "self_referential", "evidence_link"],
+    "skill_signal_v1": {
+      "optional": true,
+      "allowed_signal_types": ["missed_trigger", "wrong_trigger", "execution_failure", "repeated_manual_work", "obsolete_overlap", "no_change"],
+      "fields": ["schema_version", "signal_type", "surface", "target_skill", "issue_signature", "evidence_link", "baseline", "native_equivalent", "disposition", "negative_case", "control_case", "workflow_stable", "consumer", "net_benefit_metric", "rollback_condition", "retirement_condition"],
+      "forbidden_fields": ["raw_prompt", "credentials", "business_data", "full_session_transcript"],
+      "no_change_is_valid": true
+    }
+  },
+  "skill_candidate_admission_gate": {
+    "minimum_independent_real_tasks": 2,
+    "same_issue_signature_required": true,
+    "negative_or_no_skill_case_required": true,
+    "native_equivalent_must_be_absent": true,
+    "stable_repeatable_workflow_required": true,
+    "consumer_net_benefit_rollback_retirement_required": true,
+    "synthetic_or_self_referential_samples_count": false
+  },
   "baseline_policy": {
     "preferred_comparisons": [
       "matched_historical_native_only",
@@ -47,8 +69,9 @@
     "The M0.1 correction, M0.2 engineered-workflow clarification, and this registry bootstrap are self-referential maintenance work and do not count toward the ten real-task samples.",
     "Samples are appended only after a real task reaches an evidence-backed stopping point; candidate or retrospective synthetic rows are forbidden.",
     "Each future sample records coordination_mode, shared_write_set_policy, tool_dispositions, context_adapter, and skill_lifecycle_action; none/not_applicable values are valid and must not trigger unnecessary agents or tools.",
-    "The pilot is deferred because no active owner or real-task collection task exists; reopen only with both explicitly assigned.",
-    "Deferred does not mean the pilot executed, completed, or demonstrated benefit."
+    "The pilot is collecting under the host AI coordinator; collection does not authorize synthetic backfill, provider calls, host mutation, or automatic skill promotion.",
+    "A candidate may be prepared only after its admission gate passes; reviewed promotion still requires an exact-current evaluation receipt, reviewed change-set, and explicit token.",
+    "Until all ten required real-task categories are represented, report pilot_collecting and do not claim that controlled skill evolution has demonstrated system-level benefit."
   ],
   "samples": []
 }

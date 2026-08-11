@@ -5,6 +5,14 @@
   "cold_load_case_count": 0,
   "category_count": 8,
   "languages": ["zh", "en"],
+  "invocation_case_count": 5,
+  "invocation_cases": [
+    { "id": "invoke-debug-positive", "category": "debug_positive", "expected_skill": "systematic-debugging", "expected_outcome": "executed" },
+    { "id": "invoke-verification-positive", "category": "completion_verification_positive", "expected_skill": "verification-before-completion", "expected_outcome": "executed" },
+    { "id": "invoke-powershell-positive", "category": "powershell_custom_positive", "expected_skill": "custom-powershell-windows-automation", "expected_outcome": "executed" },
+    { "id": "invoke-no-skill-negative", "category": "no_skill_negative", "expected_skill": null, "expected_outcome": "abstained" },
+    { "id": "invoke-router-fallback", "category": "explicit_router_fallback", "expected_skill": "capability-router", "expected_outcome": "executed" }
+  ],
   "cases": [
     {
       "id": "direct-debug-zh",

@@ -1,6 +1,6 @@
 ﻿#requires -Version 7.0
 param(
-    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "锁定", "生成锁文件", "验证锁定", "verify-lock", "清理无效映射", "打开配置", "解除关联", "清理备份", "自动更新设置", "帮助", "help", "--help", "-h", "doctor", "add", "npx", "安装MCP", "卸载MCP", "同步MCP", "MCP配置", "mcp-profile", "mcp-install", "mcp-uninstall", "mcp-sync", "审查目标", "audit-targets", "能力清单", "capability-inventory", "plugin-inventory", "plugin-lint", "plugin-export", "plugin-eval", "规则审查", "rule-audit", "规则全域审查", "rule-estate-audit", "规则全域计划", "rule-estate-plan", "规则全域应用", "rule-estate-apply", "规则全域回滚", "rule-estate-rollback", "规则计划", "rule-plan", "规则应用", "rule-apply", "一键", "workflow", "prune-invalid-mappings")]
+    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "锁定", "生成锁文件", "验证锁定", "verify-lock", "清理无效映射", "打开配置", "解除关联", "清理备份", "自动更新设置", "帮助", "help", "--help", "-h", "doctor", "add", "npx", "安装MCP", "卸载MCP", "同步MCP", "MCP配置", "mcp-profile", "mcp-install", "mcp-uninstall", "mcp-sync", "审查目标", "audit-targets", "能力清单", "capability-inventory", "skill-evolution", "技能进化", "plugin-inventory", "plugin-lint", "plugin-export", "plugin-eval", "规则审查", "rule-audit", "规则全域审查", "rule-estate-audit", "规则全域计划", "rule-estate-plan", "规则全域应用", "rule-estate-apply", "规则全域回滚", "rule-estate-rollback", "规则计划", "rule-plan", "规则应用", "rule-apply", "一键", "workflow", "prune-invalid-mappings")]
     [string]$Cmd = "menu",
     [string]$Filter = "",
     [switch]$DryRun,
@@ -1650,7 +1650,7 @@ function Test-OperationPlanContract($Plan) {
         if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Plan $field))) { $findings.Add((New-OperationFinding "required_field_missing" "error" ("$.{0}" -f $field) "Required field is missing.")) | Out-Null }
     }
     if (-not (Test-OperationRfc3339 (Get-OperationObjectProperty $Plan "created_at"))) { $findings.Add((New-OperationFinding "created_at_invalid" "error" "$.created_at" "Created time must be RFC3339.")) | Out-Null }
-    if ([string](Get-OperationObjectProperty $Plan "domain") -notin @("mcp", "skill_projection", "rules", "plugin")) { $findings.Add((New-OperationFinding "domain_invalid" "error" "$.domain" "Domain is not supported.")) | Out-Null }
+    if ([string](Get-OperationObjectProperty $Plan "domain") -notin @("mcp", "skill_projection", "rules", "plugin", "skill_lifecycle")) { $findings.Add((New-OperationFinding "domain_invalid" "error" "$.domain" "Domain is not supported.")) | Out-Null }
     if ([string](Get-OperationObjectProperty $Plan "mode") -notin @("dry_run", "apply")) { $findings.Add((New-OperationFinding "mode_invalid" "error" "$.mode" "Mode is not supported.")) | Out-Null }
     $targets = Get-OperationObjectProperty $Plan "targets"
     $actions = Get-OperationObjectProperty $Plan "actions"
@@ -1681,6 +1681,28 @@ function Test-OperationPlanContract($Plan) {
         if ([string](Get-OperationObjectProperty $action "type") -notin @("create", "update", "delete", "native_command")) { $findings.Add((New-OperationFinding "action_type_invalid" "error" ("$.actions[{0}].type" -f $i) "Action type is not supported.")) | Out-Null }
         if ([string](Get-OperationObjectProperty $action "risk") -notin @("low", "medium", "high")) { $findings.Add((New-OperationFinding "risk_invalid" "error" ("$.actions[{0}].risk" -f $i) "Risk is not supported.")) | Out-Null }
         if (-not $targetRefs.Contains([string](Get-OperationObjectProperty $action "target_ref"))) { $findings.Add((New-OperationFinding "action_target_unknown" "error" ("$.actions[{0}].target_ref" -f $i) "Action target is not declared.")) | Out-Null }
+    }
+    if ([string](Get-OperationObjectProperty $Plan "domain") -eq 'skill_lifecycle') {
+        $lifecycle = Get-OperationObjectProperty $Plan 'lifecycle'
+        if ($null -eq $lifecycle) { $findings.Add((New-OperationFinding 'skill_lifecycle_missing' 'error' '$.lifecycle' 'Skill lifecycle plans require a lifecycle binding.')) | Out-Null }
+        else {
+            foreach ($field in @('skill_name', 'candidate_directory', 'candidate_fingerprint', 'baseline_fingerprint', 'catalog_fingerprint', 'evaluation_path', 'evaluation_hash', 'review_path', 'review_hash', 'review_expires_at', 'projection_disposition')) {
+                if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $lifecycle $field))) { $findings.Add((New-OperationFinding 'skill_lifecycle_field_missing' 'error' ('$.lifecycle.{0}' -f $field) 'Skill lifecycle binding field is required.')) | Out-Null }
+            }
+            if ([string](Get-OperationObjectProperty $lifecycle 'skill_name') -notmatch '^[a-z0-9][a-z0-9-]{0,63}$') { $findings.Add((New-OperationFinding 'skill_lifecycle_name_invalid' 'error' '$.lifecycle.skill_name' 'Skill lifecycle name must be lowercase kebab-case.')) | Out-Null }
+            foreach ($hashField in @('candidate_fingerprint', 'baseline_fingerprint', 'catalog_fingerprint', 'evaluation_hash', 'review_hash')) {
+                if ([string](Get-OperationObjectProperty $lifecycle $hashField) -notmatch '^[a-fA-F0-9]{64}$') { $findings.Add((New-OperationFinding 'skill_lifecycle_hash_invalid' 'error' ('$.lifecycle.{0}' -f $hashField) 'Skill lifecycle hashes must be SHA-256 values.')) | Out-Null }
+            }
+            if (-not (Test-OperationRfc3339 (Get-OperationObjectProperty $lifecycle 'review_expires_at'))) { $findings.Add((New-OperationFinding 'skill_lifecycle_expiry_invalid' 'error' '$.lifecycle.review_expires_at' 'Review expiry must be RFC3339.')) | Out-Null }
+            if ((Get-OperationObjectProperty $lifecycle 'host_mutation') -ne $false -or [string](Get-OperationObjectProperty $lifecycle 'projection_disposition') -ne 'cold_catalog_only') { $findings.Add((New-OperationFinding 'skill_lifecycle_boundary_invalid' 'error' '$.lifecycle' 'Skill lifecycle promotion cannot mutate host projection.')) | Out-Null }
+            $allowedPaths = Get-OperationObjectProperty $lifecycle 'allowed_paths'
+            if (-not (Test-OperationArray $allowedPaths) -or @($allowedPaths).Count -lt 1) { $findings.Add((New-OperationFinding 'skill_lifecycle_paths_invalid' 'error' '$.lifecycle.allowed_paths' 'Skill lifecycle allowed_paths must be a non-empty array.')) | Out-Null }
+            else {
+                $normalizedPaths = @($allowedPaths | ForEach-Object { ([string]$_).Replace('/', '\') })
+                if (@($normalizedPaths | Sort-Object -Unique).Count -ne $normalizedPaths.Count -or @($normalizedPaths | Where-Object { [System.IO.Path]::IsPathRooted($_) -or $_ -match '(^|\\)\.\.(\\|$)' }).Count -gt 0) { $findings.Add((New-OperationFinding 'skill_lifecycle_paths_invalid' 'error' '$.lifecycle.allowed_paths' 'Skill lifecycle paths must be unique contained relative paths.')) | Out-Null }
+            }
+            if (@($targets).Count -ne 1 -or @($actions).Count -ne 1 -or [string](Get-OperationObjectProperty $Plan 'mode') -ne 'apply') { $findings.Add((New-OperationFinding 'skill_lifecycle_shape_invalid' 'error' '$' 'Skill lifecycle promotion requires one target, one action, and apply mode.')) | Out-Null }
+        }
     }
     $serialized = $Plan | ConvertTo-Json -Depth 30 -Compress
     if (Test-OperationSerializedSensitiveValue $serialized) { $findings.Add((New-OperationFinding "sensitive_value_present" "error" "$" "Plan contains a sensitive value.")) | Out-Null }
@@ -1859,6 +1881,7 @@ $script:NativeInvocationTraceStages = @('listed', 'selected', 'injected', 'execu
 $script:NativeInvocationTraceSources = @('app_server', 'cli', 'native_host', 'fixture', 'unknown')
 $script:NativeInvocationTraceFreshness = @('fresh', 'stale', 'unknown')
 $script:NativeInvocationTraceTruthLevels = @('unknown', 'host_inventory_loaded', 'host_evaluation_partial', 'host_invocation_observed')
+$script:NativeInvocationTraceModes = @('native_events', 'self_report', 'read_heuristic')
 
 function Get-NativeInvocationTraceProperty($Object, [string[]]$Names) {
     foreach ($name in @($Names)) {
@@ -1907,6 +1930,9 @@ function New-NativeInvocationTrace {
         [Parameter(Mandatory = $true)][string]$Source,
         [Parameter(Mandatory = $true)][ValidateSet('fresh', 'stale', 'unknown')][string]$Freshness,
         [Parameter(Mandatory = $true)][string]$CapturedAt,
+        [ValidateSet('native_events', 'self_report', 'read_heuristic')][string]$InvocationMode = 'native_events',
+        [string]$EventsPath,
+        [string]$ReasoningEffort,
         [object[]]$Events = @()
     )
 
@@ -1926,7 +1952,7 @@ function New-NativeInvocationTrace {
             $kind = 'unknown'
         }
         $skillName = ([string](Get-NativeInvocationTraceProperty $event @('skill_name', 'name', 'skill', 'capability_name'))).Trim()
-        if ([string]::IsNullOrWhiteSpace($skillName)) { $findings.Add((New-OperationFinding 'event_skill_missing' 'error' ($path + '.skill_name') 'Invocation events require a skill name.')) | Out-Null }
+        if ([string]::IsNullOrWhiteSpace($skillName) -and $kind -ne 'abstained') { $findings.Add((New-OperationFinding 'event_skill_missing' 'error' ($path + '.skill_name') 'Non-abstention invocation events require a skill name.')) | Out-Null }
         $occurredAt = [string](Get-NativeInvocationTraceProperty $event @('occurred_at', 'timestamp', 'captured_at'))
         if (-not (Test-OperationRfc3339 $occurredAt)) { $findings.Add((New-OperationFinding 'event_timestamp_invalid' 'error' ($path + '.occurred_at') 'Invocation event occurred_at must be RFC3339.')) | Out-Null }
         $rawEventId = [string](Get-NativeInvocationTraceProperty $event @('event_id', 'id'))
@@ -1939,6 +1965,7 @@ function New-NativeInvocationTrace {
                 skill_name = $skillName
                 occurred_at = if ([string]::IsNullOrWhiteSpace($occurredAt)) { $null } else { $occurredAt }
                 correlation_id = New-NativeInvocationTraceRedactedId 'corr' $rawCorrelation
+                correlation_present = -not [string]::IsNullOrWhiteSpace($rawCorrelation)
                 reason = if ([string]::IsNullOrWhiteSpace($reason)) { $null } else { Protect-OperationSensitiveString $reason }
             }) | Out-Null
         $eventIndex++
@@ -1968,6 +1995,11 @@ function New-NativeInvocationTrace {
         $executionEvent = $eventArray[$executionIndex]
         if ([string]$executionEvent.kind -ne 'executed') { continue }
 
+        if (-not [bool]$executionEvent.correlation_present) {
+            $findings.Add((New-OperationFinding 'invocation_correlation_missing' 'error' '$.stages.executed' 'Execution cannot be promoted without an explicit correlation identifier.')) | Out-Null
+            $invocationChainInvalid = $true
+            continue
+        }
         $chainKey = Get-NativeInvocationTraceEventChainKey $executionEvent
         $sameChainInjections = @($eventArray | Where-Object { [string]$_.kind -eq 'injected' -and (Get-NativeInvocationTraceEventChainKey $_) -eq $chainKey })
         if ($sameChainInjections.Count -eq 0) {
@@ -1983,7 +2015,7 @@ function New-NativeInvocationTrace {
         $orderedInjectionObserved = $false
         for ($injectionIndex = 0; $injectionIndex -lt $executionIndex; $injectionIndex++) {
             $injectionEvent = $eventArray[$injectionIndex]
-            if ([string]$injectionEvent.kind -ne 'injected' -or (Get-NativeInvocationTraceEventChainKey $injectionEvent) -ne $chainKey) { continue }
+            if ([string]$injectionEvent.kind -ne 'injected' -or -not [bool]$injectionEvent.correlation_present -or (Get-NativeInvocationTraceEventChainKey $injectionEvent) -ne $chainKey) { continue }
             $injectionTime = [DateTimeOffset]::MinValue
             if ($executionTimeValid -and [DateTimeOffset]::TryParse([string]$injectionEvent.occurred_at, [ref]$injectionTime) -and $injectionTime -le $executionTime) {
                 $orderedInjectionObserved = $true
@@ -2016,10 +2048,14 @@ function New-NativeInvocationTrace {
         $status = 'unknown'
     }
     elseif ($validInvocationObserved) {
-        $truthLevel = if ($Freshness -eq 'fresh') { 'host_invocation_observed' } else { 'unknown' }
-        $status = if ($Freshness -eq 'fresh') { 'complete' } else { 'unknown' }
+        $promotable = ($Freshness -eq 'fresh' -and $InvocationMode -eq 'native_events')
+        $truthLevel = if ($promotable) { 'host_invocation_observed' } elseif ($Freshness -eq 'fresh') { 'host_evaluation_partial' } else { 'unknown' }
+        $status = if ($promotable) { 'complete' } elseif ($Freshness -eq 'fresh') { 'partial' } else { 'unknown' }
         $outcome = 'executed'
-        $invocationObservable = ($Freshness -eq 'fresh')
+        $invocationObservable = $promotable
+        if ($Freshness -eq 'fresh' -and -not $promotable) {
+            $findings.Add((New-OperationFinding 'invocation_mode_partial' 'warning' '$.invocation_mode' 'Self-report and read heuristics cannot promote execution to observed invocation.')) | Out-Null
+        }
     }
     elseif ($hasAbstained) {
         $outcome = 'abstained'
@@ -2056,6 +2092,9 @@ function New-NativeInvocationTrace {
         source = $Source
         freshness = $Freshness
         captured_at = $CapturedAt
+        invocation_mode = $InvocationMode
+        events_path = if ([string]::IsNullOrWhiteSpace($EventsPath)) { $null } else { $EventsPath }
+        reasoning_effort = if ([string]::IsNullOrWhiteSpace($ReasoningEffort)) { $null } else { $ReasoningEffort }
         correlation_id = $correlationSource
         status = $status
         truth_level = $truthLevel
@@ -2081,12 +2120,13 @@ function Test-NativeInvocationTraceContract {
     $findings = New-Object System.Collections.Generic.List[object]
     if ($null -eq $Trace) { return New-OperationValidationResult @((New-OperationFinding 'trace_missing' 'error' '$' 'Native invocation trace is required.')) }
     if ((Get-NativeInvocationTraceProperty $Trace @('schema_version')) -ne 1) { $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only NativeInvocationTrace schema version 1 is supported.')) | Out-Null }
-    foreach ($field in @('trace_id', 'surface', 'source', 'freshness', 'captured_at', 'truth_level', 'status', 'outcome')) {
+    foreach ($field in @('trace_id', 'surface', 'source', 'freshness', 'captured_at', 'truth_level', 'status', 'outcome', 'invocation_mode')) {
         if ([string]::IsNullOrWhiteSpace([string](Get-NativeInvocationTraceProperty $Trace @($field)))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Required trace field is missing.')) | Out-Null }
     }
     if ([string](Get-NativeInvocationTraceProperty $Trace @('source')) -notin @($script:NativeInvocationTraceSources)) { $findings.Add((New-OperationFinding 'trace_source_invalid' 'error' '$.source' 'Trace source is not supported.')) | Out-Null }
     if ([string](Get-NativeInvocationTraceProperty $Trace @('freshness')) -notin @($script:NativeInvocationTraceFreshness)) { $findings.Add((New-OperationFinding 'trace_freshness_invalid' 'error' '$.freshness' 'Trace freshness is not supported.')) | Out-Null }
     if ([string](Get-NativeInvocationTraceProperty $Trace @('truth_level')) -notin @($script:NativeInvocationTraceTruthLevels)) { $findings.Add((New-OperationFinding 'truth_level_invalid' 'error' '$.truth_level' 'Trace truth level is not supported.')) | Out-Null }
+    if ([string](Get-NativeInvocationTraceProperty $Trace @('invocation_mode')) -notin @($script:NativeInvocationTraceModes)) { $findings.Add((New-OperationFinding 'invocation_mode_invalid' 'error' '$.invocation_mode' 'Trace invocation mode is not supported.')) | Out-Null }
     if (-not (Test-OperationRfc3339 (Get-NativeInvocationTraceProperty $Trace @('captured_at')))) { $findings.Add((New-OperationFinding 'captured_at_invalid' 'error' '$.captured_at' 'Trace captured_at must be RFC3339.')) | Out-Null }
     if (-not (Test-OperationArray (Get-NativeInvocationTraceProperty $Trace @('events')))) { $findings.Add((New-OperationFinding 'events_type_invalid' 'error' '$.events' 'Trace events must be an array.')) | Out-Null }
     $stages = Get-NativeInvocationTraceProperty $Trace @('stages')
@@ -2099,6 +2139,7 @@ function Test-NativeInvocationTraceContract {
     if ((Get-NativeInvocationTraceProperty $Trace @('invocation_observable')) -eq $true -and (Get-NativeInvocationTraceProperty $Trace @('stages')).executed.observed -ne $true) { $findings.Add((New-OperationFinding 'invocation_promotion_invalid' 'error' '$.invocation_observable' 'Invocation cannot be observable without executed evidence.')) | Out-Null }
     if ([string](Get-NativeInvocationTraceProperty $Trace @('truth_level')) -eq 'host_invocation_observed') {
         if ((Get-NativeInvocationTraceProperty $stages @('injected')).observed -ne $true -or (Get-NativeInvocationTraceProperty $stages @('executed')).observed -ne $true) { $findings.Add((New-OperationFinding 'host_invocation_evidence_missing' 'error' '$.truth_level' 'host_invocation_observed requires injected and executed evidence.')) | Out-Null }
+        if ([string](Get-NativeInvocationTraceProperty $Trace @('freshness')) -ne 'fresh' -or [string](Get-NativeInvocationTraceProperty $Trace @('invocation_mode')) -ne 'native_events') { $findings.Add((New-OperationFinding 'host_invocation_promotion_invalid' 'error' '$.truth_level' 'Observed invocation requires fresh native events.')) | Out-Null }
     }
     foreach ($field in @('provider_calls', 'native_mutations', 'writes')) {
         $value = Get-NativeInvocationTraceProperty $Trace @($field)
@@ -2758,6 +2799,109 @@ function New-CapabilityInventory {
     }
 }
 
+function Get-CapabilitySurfaceFileHash([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+function Get-CapabilitySurfaceTextHash([string]$Text) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return (($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes([string]$Text)) | ForEach-Object { $_.ToString('x2') }) -join '') }
+    finally { $sha.Dispose() }
+}
+
+function Resolve-CapabilitySurfacePath([string]$Path, [string]$RepoRoot) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
+    $value = [Environment]::ExpandEnvironmentVariables($Path.Trim())
+    if ($value.StartsWith('~/') -or $value.StartsWith('~\')) { $value = Join-Path $HOME $value.Substring(2) }
+    if (-not [IO.Path]::IsPathRooted($value)) { $value = Join-Path $RepoRoot $value }
+    return [IO.Path]::GetFullPath($value)
+}
+
+function Get-CapabilitySurfaceSkillMetadata([string]$SkillPath, [string]$Owner, [string]$ProjectionState, [bool]$Resident) {
+    $text = if (Test-Path -LiteralPath $SkillPath -PathType Leaf) { [IO.File]::ReadAllText($SkillPath) } else { '' }
+    $name = Split-Path (Split-Path $SkillPath -Parent) -Leaf
+    $description = ''
+    if ($text -match '(?m)^name\s*:\s*["'']?([^\r\n"'']+)') { $name = $matches[1].Trim() }
+    if ($text -match '(?m)^description\s*:\s*["'']?([^\r\n"'']+)') { $description = $matches[1].Trim() }
+    return [pscustomobject][ordered]@{ name = $name; path = [IO.Path]::GetFullPath($SkillPath); entrypoint_hash = if ($text) { Get-CapabilitySurfaceFileHash $SkillPath } else { $null }; description_hash = if ($description) { Get-CapabilitySurfaceTextHash $description } else { $null }; owner = $Owner; resident = $Resident; projection_state = $ProjectionState }
+}
+
+function New-CapabilitySurfaceRecord([string]$Name, [string]$Authority, [string]$Source, [string]$Freshness, [string]$Coverage, [object[]]$Items) {
+    $ordered = @($Items | Sort-Object name, path)
+    $canonical = @($ordered | ForEach-Object { '{0}|{1}|{2}|{3}|{4}' -f $_.name, $_.entrypoint_hash, $_.description_hash, $_.owner, $_.projection_state }) -join "`n"
+    return [pscustomobject][ordered]@{ name = $Name; authority = $Authority; source = $Source; fingerprint = Get-CapabilitySurfaceTextHash $canonical; freshness = $Freshness; coverage = $Coverage; count = $ordered.Count; items = $ordered }
+}
+
+function New-SkillSurfaceView {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$RepoRoot, [Parameter(Mandatory = $true)]$Config, [string]$HostSnapshotPath, [string]$GeneratedAt = ([datetimeoffset]::UtcNow.ToString('o')))
+    $root = [IO.Path]::GetFullPath($RepoRoot)
+    $projection = $Config.skill_projection
+    $surfaces = [Collections.Generic.List[object]]::new()
+    $findings = [Collections.Generic.List[object]]::new()
+
+    $repoSupplyRoot = Join-Path $root 'agent'
+    $repoItems = if (Test-Path -LiteralPath $repoSupplyRoot) { @(Get-ChildItem -LiteralPath $repoSupplyRoot -Recurse -File -Filter 'SKILL.md' -Force | ForEach-Object { Get-CapabilitySurfaceSkillMetadata $_.FullName 'repo_generated' 'repo_supply' $false }) } else { @() }
+    $surfaces.Add((New-CapabilitySurfaceRecord 'repo_supply' 'repository_generated_supply' $repoSupplyRoot 'fresh' $(if ($repoItems.Count) { 'complete' } else { 'not_materialized' }) $repoItems)) | Out-Null
+
+    $projectionPath = Resolve-CapabilitySurfacePath ([string]$projection.manifest_path) $root
+    $projectionItems = @(); $projectionFreshness = 'unknown'; $projectionCoverage = 'not_observed'
+    if ($projectionPath -and (Test-Path -LiteralPath $projectionPath -PathType Leaf)) {
+        $manifest = [IO.File]::ReadAllText($projectionPath) | ConvertFrom-Json
+        $projectionItems = @($manifest.canonical | ForEach-Object { $path = [string]$_.path; $entry = if ($path -and (Test-Path -LiteralPath $path -PathType Leaf)) { $path } elseif ($path -and (Test-Path -LiteralPath (Join-Path $path 'SKILL.md'))) { Join-Path $path 'SKILL.md' } else { Join-Path $repoSupplyRoot ('{0}\SKILL.md' -f $_.name) }; Get-CapabilitySurfaceSkillMetadata $entry 'canonical_projection' 'canonical' $false })
+        $head = @(& git -C $root rev-parse HEAD 2>$null)
+        $projectionFreshness = if ($head.Count -and [string]$manifest.source_revision -eq ([string]$head[0]).Trim()) { 'fresh' } else { 'stale' }
+        $projectionCoverage = 'complete'
+    }
+    $surfaces.Add((New-CapabilitySurfaceRecord 'canonical_projection' 'projection_manifest' $projectionPath $projectionFreshness $projectionCoverage $projectionItems)) | Out-Null
+
+    $userRoot = Resolve-CapabilitySurfacePath ([string]$projection.user_skill_root) $root
+    $managedSource = Resolve-CapabilitySurfacePath ([string]$projection.managed_source_path) $root
+    $managedIncludes = @($projection.managed_link_includes | ForEach-Object { [string]$_ })
+    $userItems = [Collections.Generic.List[object]]::new()
+    if ($userRoot -and (Test-Path -LiteralPath $userRoot -PathType Container)) {
+        foreach ($directory in @(Get-ChildItem -LiteralPath $userRoot -Directory -Force)) {
+            $entry = Join-Path $directory.FullName 'SKILL.md'; if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) { continue }
+            $targetText = @($directory.Target | ForEach-Object { [string]$_ }) -join ';'
+            $state = if ($managedIncludes -contains $directory.Name) { 'managed_current' } elseif ($targetText -and $managedSource -and $targetText.StartsWith($managedSource, [StringComparison]::OrdinalIgnoreCase)) { 'managed_stale' } elseif ($targetText) { 'external_owned' } else { 'ownership_unknown' }
+            $owner = if ($state -in @('managed_current', 'managed_stale')) { 'skills_manager' } elseif ($state -eq 'external_owned') { 'external' } else { 'unknown' }
+            $userItems.Add((Get-CapabilitySurfaceSkillMetadata $entry $owner $state ($state -eq 'managed_current'))) | Out-Null
+        }
+    }
+    $surfaces.Add((New-CapabilitySurfaceRecord 'user_skill_root' 'filesystem_observation' $userRoot 'fresh' 'complete' $userItems.ToArray())) | Out-Null
+
+    $codexHome = if ($env:CODEX_HOME) { [IO.Path]::GetFullPath($env:CODEX_HOME) } else { Join-Path $HOME '.codex' }
+    $systemRoot = Join-Path $codexHome 'skills\.system'
+    $systemItems = if (Test-Path -LiteralPath $systemRoot) { @(Get-ChildItem -LiteralPath $systemRoot -Recurse -File -Filter 'SKILL.md' -Force | ForEach-Object { Get-CapabilitySurfaceSkillMetadata $_.FullName 'host_system' 'system' $true }) } else { @() }
+    $surfaces.Add((New-CapabilitySurfaceRecord 'system' 'host_filesystem' $systemRoot 'fresh' $(if ($systemItems.Count) { 'complete' } else { 'not_observed' }) $systemItems)) | Out-Null
+
+    $pluginRoot = Resolve-CapabilitySurfacePath ([string]$projection.external_skill_inventory.plugin_cache_path) $root
+    $pluginItems = if ($pluginRoot -and (Test-Path -LiteralPath $pluginRoot)) { @(Get-ChildItem -LiteralPath $pluginRoot -Recurse -File -Filter 'SKILL.md' -Force | ForEach-Object { Get-CapabilitySurfaceSkillMetadata $_.FullName 'plugin_cache' 'plugin_cache' $true }) } else { @() }
+    $surfaces.Add((New-CapabilitySurfaceRecord 'plugin_cache' 'host_plugin_cache' $pluginRoot 'fresh' $(if ($pluginItems.Count) { 'complete' } else { 'not_observed' }) $pluginItems)) | Out-Null
+
+    $hostItems = @(); $hostFreshness = 'unknown'; $hostCoverage = 'not_observed'; $hostSource = if ($HostSnapshotPath) { [IO.Path]::GetFullPath($HostSnapshotPath) } else { 'not_provided' }
+    if ($HostSnapshotPath) {
+        if (-not (Test-Path -LiteralPath $hostSource -PathType Leaf)) { throw ('Host snapshot not found: {0}' -f $hostSource) }
+        $snapshot = [IO.File]::ReadAllText($hostSource) | ConvertFrom-Json
+        $snapshotSkills = if ($null -ne $snapshot.skills) { @($snapshot.skills) } elseif ($null -ne $snapshot.visible_skills) { @($snapshot.visible_skills) } elseif ($null -ne $snapshot.data.skills) { @($snapshot.data.skills) } else { @() }
+        $hostItems = @($snapshotSkills | ForEach-Object { [pscustomobject][ordered]@{ name = [string]$_.name; path = [string]$_.path; entrypoint_hash = [string]$_.entrypoint_hash; description_hash = [string]$_.description_hash; owner = 'host_snapshot'; resident = $true; projection_state = 'host_visible' } })
+        $captured = [datetimeoffset]::MinValue
+        $hostFreshness = if ([datetimeoffset]::TryParse([string]$snapshot.captured_at, [ref]$captured) -and ([datetimeoffset]::UtcNow - $captured).TotalHours -ge 0 -and ([datetimeoffset]::UtcNow - $captured).TotalHours -le 24) { 'fresh' } else { 'stale' }
+        $hostCoverage = if ([string]$snapshot.coverage) { [string]$snapshot.coverage } else { 'partial' }
+        foreach ($item in $hostItems) { if ([string]::IsNullOrWhiteSpace($item.name) -or [string]::IsNullOrWhiteSpace($item.entrypoint_hash) -or [string]::IsNullOrWhiteSpace($item.description_hash)) { $findings.Add([pscustomobject]@{ code = 'host_skill_identity_incomplete'; severity = 'error'; surface = 'host_visible'; path = $item.path; message = 'Host-visible skills require name and entrypoint/description fingerprints.' }) | Out-Null } }
+    }
+    $surfaces.Add((New-CapabilitySurfaceRecord 'host_visible' 'host_snapshot' $hostSource $hostFreshness $hostCoverage $hostItems)) | Out-Null
+    foreach ($surface in $surfaces) {
+        foreach ($field in @('authority', 'source', 'fingerprint', 'freshness', 'coverage')) { if ([string]::IsNullOrWhiteSpace([string]$surface.$field)) { $findings.Add([pscustomobject]@{ code = 'surface_field_missing'; severity = 'error'; surface = $surface.name; path = $field; message = 'Skill surface identity is incomplete.' }) | Out-Null } }
+        foreach ($item in @($surface.items)) {
+            $identityValid = -not [string]::IsNullOrWhiteSpace([string]$item.name) -and -not [string]::IsNullOrWhiteSpace([string]$item.path) -and [string]$item.entrypoint_hash -match '^[a-f0-9]{64}$' -and [string]$item.description_hash -match '^[a-f0-9]{64}$' -and -not [string]::IsNullOrWhiteSpace([string]$item.owner) -and -not [string]::IsNullOrWhiteSpace([string]$item.projection_state) -and $item.resident -is [bool]
+            if (-not $identityValid) { $findings.Add([pscustomobject]@{ code = 'surface_skill_identity_incomplete'; severity = 'error'; surface = $surface.name; path = [string]$item.path; message = 'Skill surface items require name/path/entrypoint/description/owner/resident/projection identity.' }) | Out-Null }
+        }
+    }
+    return [pscustomobject][ordered]@{ schema_version = 1; view = 'SkillSurfaceView'; generated_at = $GeneratedAt; read_only = $true; pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); surfaces = $surfaces.ToArray(); surface_count = $surfaces.Count; stale_links = @($userItems | Where-Object projection_state -in @('managed_stale', 'external_owned', 'ownership_unknown')); findings = $findings.ToArray(); provider_calls = 0; native_mutations = 0; writes = 0; profile_changed = $false }
+}
+
 function ConvertTo-CapabilityDescriptorsFromSkillsConfig {
     param($Config, [string]$SourcePath = 'skills.json', [string]$SourceRevision = 'working-tree')
     $items = New-Object System.Collections.Generic.List[object]
@@ -2813,6 +2957,701 @@ function ConvertTo-CapabilityDescriptorsFromSkillsConfig {
         }
     }
     return $items.ToArray()
+}
+
+$script:SkillEvolutionRepoRoot = if ($PSScriptRoot -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot '..\..\skills.json'))) {
+    (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
+}
+elseif ($PSScriptRoot -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json'))) {
+    (Resolve-Path -LiteralPath $PSScriptRoot).Path
+}
+else { (Get-Location).Path }
+
+if (-not (Get-Command Get-OperationSha256 -ErrorAction SilentlyContinue)) {
+    . (Join-Path $script:SkillEvolutionRepoRoot 'src\Domain\OperationPlan.ps1')
+}
+if (-not (Get-Command New-OperationReceipt -ErrorAction SilentlyContinue)) {
+    . (Join-Path $script:SkillEvolutionRepoRoot 'src\Domain\Receipt.ps1')
+}
+
+$script:SkillEvolutionAllowedSignalTypes = @('missed_trigger', 'wrong_trigger', 'execution_failure', 'repeated_manual_work', 'obsolete_overlap', 'no_change')
+$script:SkillEvolutionAllowedReasoningEfforts = @('low', 'medium', 'high', 'xhigh')
+$script:SkillEvolutionAllowedReferenceExtensions = @('.md', '.txt', '.json', '.yaml', '.yml', '.csv', '.tsv')
+$script:SkillEvolutionForbiddenContentPattern = '(?im)(Invoke-WebRequest|Invoke-RestMethod|Start-BitsTransfer|\bcurl(?:\.exe)?\b|\bwget(?:\.exe)?\b|\bMCP\b|\.codex-plugin|plugin\.json|\bhooks?[/\\]|^\s*dependencies\s*:|scheduled\s+task|Register-ScheduledTask|New-Service|Set-ExecutionPolicy|chmod\s+\+x|\bnetwork\s+(?:access|request|call))'
+$script:SkillEvolutionForbiddenSignalFields = @('raw_prompt', 'credentials', 'business_data', 'full_session_transcript')
+$script:SkillEvolutionMinDescriptionCharacters = 24
+$script:SkillEvolutionMaxDescriptionCharacters = 384
+
+function Get-SkillEvolutionProperty($Object, [string]$Name) {
+    return Get-OperationObjectProperty $Object $Name
+}
+
+function Resolve-SkillEvolutionPath([string]$Path, [string]$BaseRoot) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
+    $candidate = $Path.Trim()
+    if (-not [System.IO.Path]::IsPathRooted($candidate)) { $candidate = Join-Path $BaseRoot $candidate }
+    return [System.IO.Path]::GetFullPath($candidate)
+}
+
+function ConvertTo-SkillEvolutionRelativePath([string]$RelativePath) {
+    if ([string]::IsNullOrWhiteSpace($RelativePath) -or [System.IO.Path]::IsPathRooted($RelativePath)) { return $null }
+    $anchor = Join-Path ([System.IO.Path]::GetTempPath()) 'skill-evolution-relative-anchor'
+    try {
+        $fullAnchor = [System.IO.Path]::GetFullPath($anchor)
+        $fullPath = [System.IO.Path]::GetFullPath((Join-Path $fullAnchor $RelativePath))
+        if (-not (Test-OperationPathWithinRoot $fullPath $fullAnchor) -or $fullPath -eq $fullAnchor) { return $null }
+        return [System.IO.Path]::GetRelativePath($fullAnchor, $fullPath).Replace('/', '\')
+    }
+    catch { return $null }
+}
+
+function Test-SkillEvolutionPathWithin([string]$Path, [string]$Root) {
+    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Root)) { return $false }
+    try { return Test-OperationPathWithinRoot ([System.IO.Path]::GetFullPath($Path)) ([System.IO.Path]::GetFullPath($Root)) }
+    catch { return $false }
+}
+
+function Assert-SkillEvolutionReportPath([string]$Path, [string]$RepoRoot, [switch]$AllowCandidateRoot) {
+    $full = [System.IO.Path]::GetFullPath($Path)
+    $reportsRoot = Join-Path ([System.IO.Path]::GetFullPath($RepoRoot)) 'reports\skill-evolution'
+    if (-not (Test-SkillEvolutionPathWithin $full $reportsRoot)) {
+        throw ('SkillEvolution report path must stay under {0}: {1}' -f $reportsRoot, $full)
+    }
+    return $full
+}
+
+function Get-SkillEvolutionFileHash([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    $stream = [System.IO.File]::OpenRead($Path)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { return (($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) -join '') }
+    finally { $sha.Dispose(); $stream.Dispose() }
+}
+
+function Get-SkillEvolutionJsonHash($Object) {
+    return Get-OperationSha256 ($Object | ConvertTo-Json -Depth 80 -Compress)
+}
+
+function Write-SkillEvolutionJsonAtomic([string]$Path, $Value) {
+    $json = $Value | ConvertTo-Json -Depth 80
+    if (Get-Command Write-Utf8FileAtomic -ErrorAction SilentlyContinue) {
+        Write-Utf8FileAtomic -Path $Path -Content $json
+        return
+    }
+    $parent = Split-Path -Parent $Path
+    if (-not (Test-Path -LiteralPath $parent -PathType Container)) { [System.IO.Directory]::CreateDirectory($parent) | Out-Null }
+    $temp = '{0}.tmp-{1}' -f $Path, ([guid]::NewGuid().ToString('N'))
+    try {
+        [System.IO.File]::WriteAllText($temp, $json, [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::Move($temp, $Path, $true)
+    }
+    finally { if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force } }
+}
+
+function Test-SkillEvolutionAllowedRelativePath([string]$RelativePath) {
+    $relative = ConvertTo-SkillEvolutionRelativePath $RelativePath
+    if ([string]::IsNullOrWhiteSpace($relative)) { return $false }
+    if ($relative -ieq 'SKILL.md' -or $relative -ieq 'agents\openai.yaml') { return $true }
+    if (-not $relative.StartsWith('references\', [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
+    return ([System.IO.Path]::GetExtension($relative).ToLowerInvariant() -in $script:SkillEvolutionAllowedReferenceExtensions)
+}
+
+function Read-SkillEvolutionMetadata([string]$SkillPath) {
+    if (-not (Test-Path -LiteralPath $SkillPath -PathType Leaf)) { return [pscustomobject]@{ valid = $false; name = $null; description = $null; text = '' } }
+    $text = [System.IO.File]::ReadAllText($SkillPath)
+    $frontmatter = [regex]::Match($text, '(?s)\A---\s*\r?\n(?<yaml>.*?)\r?\n---')
+    if (-not $frontmatter.Success) { return [pscustomobject]@{ valid = $false; name = $null; description = $null; text = $text } }
+    $yaml = $frontmatter.Groups['yaml'].Value
+    $nameMatch = [regex]::Match($yaml, '(?m)^name:\s*["'']?(?<value>[^\r\n"'']+)')
+    $descriptionMatch = [regex]::Match($yaml, '(?m)^description:\s*["'']?(?<value>[^\r\n]+)')
+    return [pscustomobject]@{
+        valid = ($nameMatch.Success -and $descriptionMatch.Success)
+        name = if ($nameMatch.Success) { $nameMatch.Groups['value'].Value.Trim() } else { $null }
+        description = if ($descriptionMatch.Success) { $descriptionMatch.Groups['value'].Value.Trim().Trim('"', "'") } else { $null }
+        text = $text
+    }
+}
+
+function Get-SkillEvolutionPackageState {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$CandidateDirectory)
+
+    $root = [System.IO.Path]::GetFullPath($CandidateDirectory)
+    $findings = [System.Collections.Generic.List[object]]::new()
+    $files = [System.Collections.Generic.List[object]]::new()
+    if (-not (Test-Path -LiteralPath $root -PathType Container)) {
+        $findings.Add((New-OperationFinding 'candidate_directory_missing' 'error' '$.candidate' 'Candidate directory does not exist.')) | Out-Null
+        return [pscustomobject]@{ root = $root; pass = $false; fingerprint = $null; files = @(); findings = $findings.ToArray() }
+    }
+    $rootItem = Get-Item -LiteralPath $root -Force
+    if (($rootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        $findings.Add((New-OperationFinding 'candidate_reparse_root' 'error' '$.candidate' 'Candidate root cannot be a junction or symbolic link.')) | Out-Null
+    }
+
+    foreach ($item in @(Get-ChildItem -LiteralPath $root -Recurse -Force -ErrorAction Stop)) {
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            $findings.Add((New-OperationFinding 'candidate_reparse_entry' 'error' $item.FullName 'Candidate package cannot contain junctions or symbolic links.')) | Out-Null
+            continue
+        }
+        if ($item.PSIsContainer) { continue }
+        $relative = ConvertTo-SkillEvolutionRelativePath ([System.IO.Path]::GetRelativePath($root, $item.FullName))
+        if ([string]::IsNullOrWhiteSpace($relative)) {
+            $findings.Add((New-OperationFinding 'candidate_path_escape' 'error' $item.FullName 'Candidate entry does not resolve to a contained relative path.')) | Out-Null
+            continue
+        }
+        if ($relative -in @('candidate.json', 'evaluation.json') -or $relative -like 'evaluation-*.json') { continue }
+        if (-not (Test-SkillEvolutionAllowedRelativePath $relative)) {
+            $findings.Add((New-OperationFinding 'candidate_path_forbidden' 'error' $relative 'MVP candidates may contain only SKILL.md, agents/openai.yaml, and non-executable references.')) | Out-Null
+            continue
+        }
+        $text = [System.IO.File]::ReadAllText($item.FullName)
+        if ($text -match $script:SkillEvolutionForbiddenContentPattern) {
+            $findings.Add((New-OperationFinding 'candidate_behavior_deferred' 'error' $relative 'Executable, hook, MCP, plugin, permission, network, or system-maintenance behavior requires separate admission.')) | Out-Null
+        }
+        $files.Add([pscustomobject][ordered]@{ path = $relative; hash = Get-SkillEvolutionFileHash $item.FullName; bytes = [int64]$item.Length }) | Out-Null
+    }
+    $skillPath = Join-Path $root 'SKILL.md'
+    $metadata = Read-SkillEvolutionMetadata $skillPath
+    if (-not (Test-Path -LiteralPath $skillPath -PathType Leaf)) {
+        $findings.Add((New-OperationFinding 'skill_entrypoint_missing' 'error' 'SKILL.md' 'Candidate must contain SKILL.md.')) | Out-Null
+    }
+    else {
+        $skillText = [string]$metadata.text
+        if (-not [bool]$metadata.valid) {
+            $findings.Add((New-OperationFinding 'skill_metadata_invalid' 'error' 'SKILL.md' 'Candidate SKILL.md requires YAML frontmatter with name and description.')) | Out-Null
+        }
+        elseif ([string]$metadata.name -notmatch '^[a-z0-9][a-z0-9-]{0,63}$') {
+            $findings.Add((New-OperationFinding 'skill_name_invalid' 'error' 'SKILL.md' 'Candidate skill name must use lowercase kebab-case and be at most 64 characters.')) | Out-Null
+        }
+        $descriptionLength = ([string]$metadata.description).Length
+        if ($descriptionLength -lt $script:SkillEvolutionMinDescriptionCharacters -or $descriptionLength -gt $script:SkillEvolutionMaxDescriptionCharacters) {
+            $findings.Add((New-OperationFinding 'skill_description_budget_invalid' 'error' 'SKILL.md' ('Candidate description must be {0}-{1} characters.' -f $script:SkillEvolutionMinDescriptionCharacters, $script:SkillEvolutionMaxDescriptionCharacters))) | Out-Null
+        }
+        if ($skillText.Length -gt 20000) {
+            $findings.Add((New-OperationFinding 'skill_metadata_budget_exceeded' 'error' 'SKILL.md' 'Candidate SKILL.md exceeds the 20000 character MVP budget.')) | Out-Null
+        }
+    }
+    $orderedFiles = @($files.ToArray() | Sort-Object path)
+    $canonical = @($orderedFiles | ForEach-Object { '{0}|{1}|{2}' -f $_.path.ToLowerInvariant(), $_.hash, $_.bytes }) -join "`n"
+    return [pscustomobject][ordered]@{
+        root = $root
+        pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0)
+        fingerprint = Get-OperationSha256 $canonical
+        files = $orderedFiles
+        metadata = [pscustomobject]@{ name = [string]$metadata.name; description = [string]$metadata.description; description_hash = Get-OperationSha256 ([string]$metadata.description) }
+        findings = @($findings.ToArray())
+    }
+}
+
+function Get-SkillEvolutionCatalogFingerprint([string]$RepoRoot) {
+    $root = [System.IO.Path]::GetFullPath($RepoRoot)
+    $entries = [System.Collections.Generic.List[string]]::new()
+    foreach ($relative in @('skills.json', 'skills.lock.json')) {
+        $path = Join-Path $root $relative
+        if (Test-Path -LiteralPath $path -PathType Leaf) { $entries.Add(('{0}|{1}' -f $relative, (Get-SkillEvolutionFileHash $path))) | Out-Null }
+    }
+    foreach ($catalogRootName in @('overrides', 'imports', 'vendor', 'agent')) {
+        $catalogRoot = Join-Path $root $catalogRootName
+        if (-not (Test-Path -LiteralPath $catalogRoot -PathType Container)) { continue }
+        foreach ($file in @(Get-ChildItem -LiteralPath $catalogRoot -Recurse -File -Filter 'SKILL.md' -Force -ErrorAction Stop | Sort-Object FullName)) {
+            if (($file.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+            $relative = [System.IO.Path]::GetRelativePath($root, $file.FullName).Replace('/', '\')
+            $entries.Add(('{0}|{1}' -f $relative.ToLowerInvariant(), (Get-SkillEvolutionFileHash $file.FullName))) | Out-Null
+        }
+    }
+    return Get-OperationSha256 ($entries.ToArray() -join "`n")
+}
+
+function Get-SkillEvolutionCatalogMetadata([string]$RepoRoot) {
+    $root = [System.IO.Path]::GetFullPath($RepoRoot)
+    $items = [System.Collections.Generic.List[object]]::new()
+    $seenPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($catalogRootName in @('overrides', 'agent')) {
+        $catalogRoot = Join-Path $root $catalogRootName
+        if (-not (Test-Path -LiteralPath $catalogRoot -PathType Container)) { continue }
+        foreach ($file in @(Get-ChildItem -LiteralPath $catalogRoot -Recurse -File -Filter 'SKILL.md' -Force -ErrorAction Stop)) {
+            if (-not $seenPaths.Add($file.FullName)) { continue }
+            $metadata = Read-SkillEvolutionMetadata $file.FullName
+            if (-not $metadata.valid) { continue }
+            $items.Add([pscustomobject]@{ name = [string]$metadata.name; description = [string]$metadata.description; description_hash = Get-OperationSha256 ([string]$metadata.description); path = $file.FullName }) | Out-Null
+        }
+    }
+    return $items.ToArray()
+}
+
+function Test-SkillEvolutionCatalogConflicts($CandidateState, $Manifest, [string]$RepoRoot) {
+    $findings = [System.Collections.Generic.List[object]]::new()
+    $skillName = [string]$Manifest.skill_name
+    if ([string]$CandidateState.metadata.name -ne $skillName) {
+        $findings.Add((New-OperationFinding 'candidate_skill_name_mismatch' 'error' 'SKILL.md' 'Candidate frontmatter name does not match candidate.json.')) | Out-Null
+    }
+    $catalog = @(Get-SkillEvolutionCatalogMetadata $RepoRoot)
+    if ([string]$Manifest.candidate_mode -ne 'existing' -and @($catalog | Where-Object { [string]$_.name -eq $skillName }).Count -gt 0) {
+        $findings.Add((New-OperationFinding 'catalog_skill_name_conflict' 'error' '$.skill_name' 'A new candidate cannot duplicate an existing catalog skill name.')) | Out-Null
+    }
+    foreach ($entry in @($catalog | Where-Object { [string]$_.name -ne $skillName -and [string]$_.description_hash -eq [string]$CandidateState.metadata.description_hash })) {
+        $findings.Add((New-OperationFinding 'catalog_trigger_description_conflict' 'error' 'SKILL.md' ('Candidate description exactly duplicates the trigger metadata for {0}.' -f $entry.name))) | Out-Null
+    }
+    return [pscustomobject]@{ pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); findings = @($findings.ToArray()) }
+}
+
+function Get-SkillEvolutionTargetState([string]$RepoRoot, [string]$SkillName) {
+    $target = Join-Path ([System.IO.Path]::GetFullPath($RepoRoot)) ('overrides\custom\{0}' -f $SkillName)
+    if (-not (Test-Path -LiteralPath $target -PathType Container)) {
+        return [pscustomobject]@{ path = $target; exists = $false; fingerprint = Get-OperationSha256 ''; files = @(); findings = @() }
+    }
+    $state = Get-SkillEvolutionPackageState $target
+    if ([string]$state.metadata.name -ne $SkillName) {
+        $state.findings = @($state.findings) + @((New-OperationFinding 'target_skill_name_mismatch' 'error' 'SKILL.md' 'Existing target frontmatter name does not match its lifecycle identity.'))
+        $state.pass = $false
+    }
+    return [pscustomobject]@{ path = $target; exists = $true; fingerprint = $state.fingerprint; files = @($state.files); findings = @($state.findings); pass = $state.pass }
+}
+
+function Test-SkillEvolutionAdmission {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$Pilot, [Parameter(Mandatory = $true)][string[]]$SignalIds, [string]$SkillName)
+
+    $findings = [System.Collections.Generic.List[object]]::new()
+    $selected = [System.Collections.Generic.List[object]]::new()
+    $ids = @($SignalIds | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Select-Object -Unique)
+    foreach ($id in $ids) {
+        $matches = @($Pilot.samples | Where-Object { [string]$_.sample_id -eq $id })
+        if ($matches.Count -ne 1) { $findings.Add((New-OperationFinding 'signal_not_found' 'error' $id 'Each signal ID must resolve to exactly one pilot sample.')) | Out-Null; continue }
+        $sample = $matches[0]
+        if ((Get-SkillEvolutionProperty $sample 'countable') -ne $true -or (Get-SkillEvolutionProperty $sample 'synthetic') -eq $true -or (Get-SkillEvolutionProperty $sample 'self_referential') -eq $true) {
+            $findings.Add((New-OperationFinding 'signal_not_real_task' 'error' $id 'Synthetic, self-referential, or non-countable samples cannot admit a candidate.')) | Out-Null
+            continue
+        }
+        $signal = Get-SkillEvolutionProperty $sample 'skill_signal'
+        if ($null -eq $signal) { $findings.Add((New-OperationFinding 'skill_signal_missing' 'error' $id 'Selected sample has no skill_signal v1.')) | Out-Null; continue }
+        foreach ($forbiddenField in $script:SkillEvolutionForbiddenSignalFields) {
+            if ((Test-OperationObjectProperty $sample $forbiddenField) -or (Test-OperationObjectProperty $signal $forbiddenField)) {
+                $findings.Add((New-OperationFinding 'signal_sensitive_field_forbidden' 'error' $id ('Skill signal contains forbidden field: {0}.' -f $forbiddenField))) | Out-Null
+            }
+        }
+        $selected.Add([pscustomobject]@{ sample = $sample; signal = $signal }) | Out-Null
+    }
+    $actionable = @($selected | Where-Object { [string]$_.signal.signal_type -ne 'no_change' })
+    $signatures = @($actionable | ForEach-Object { [string]$_.signal.issue_signature } | Where-Object { $_ } | Sort-Object -Unique)
+    $tasks = @($actionable | ForEach-Object { [string]$_.sample.task_id } | Where-Object { $_ } | Sort-Object -Unique)
+    if ($actionable.Count -lt 2 -or $tasks.Count -lt 2 -or $signatures.Count -ne 1) {
+        $findings.Add((New-OperationFinding 'independent_signal_threshold_not_met' 'error' '$.signals' 'Admission requires two independent real tasks with the same issue signature.')) | Out-Null
+    }
+    if (@($selected | Where-Object { $_.signal.negative_case -eq $true -or [string]$_.signal.control_case -in @('negative', 'no_skill') }).Count -lt 1) {
+        $findings.Add((New-OperationFinding 'negative_case_missing' 'error' '$.signals' 'Admission requires at least one negative or no-skill case.')) | Out-Null
+    }
+    foreach ($entry in @($selected)) {
+        $signal = $entry.signal
+        if ([string]$signal.signal_type -notin $script:SkillEvolutionAllowedSignalTypes) { $findings.Add((New-OperationFinding 'signal_type_invalid' 'error' '$.signal_type' 'Signal type is not supported.')) | Out-Null }
+        foreach ($field in @('surface', 'target_skill', 'issue_signature', 'evidence_link', 'baseline', 'native_equivalent', 'disposition')) {
+            if ([string]::IsNullOrWhiteSpace([string](Get-SkillEvolutionProperty $signal $field))) { $findings.Add((New-OperationFinding 'admission_field_missing' 'error' ('$.{0}' -f $field) 'Admission evidence is incomplete.')) | Out-Null }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($SkillName) -and [string]$signal.target_skill -ne $SkillName) { $findings.Add((New-OperationFinding 'signal_target_mismatch' 'error' '$.target_skill' 'Selected signals must target the requested skill lifecycle identity.')) | Out-Null }
+        if ([string]$signal.signal_type -ne 'no_change') {
+            if (-not [string]::IsNullOrWhiteSpace([string]$signal.native_equivalent) -and [string]$signal.native_equivalent -notin @('none', 'not_available')) { $findings.Add((New-OperationFinding 'native_equivalent_present' 'error' '$.native_equivalent' 'Existing native coverage blocks candidate admission.')) | Out-Null }
+            foreach ($field in @('consumer', 'net_benefit_metric', 'rollback_condition', 'retirement_condition')) {
+                if ([string]::IsNullOrWhiteSpace([string](Get-SkillEvolutionProperty $signal $field))) { $findings.Add((New-OperationFinding 'admission_field_missing' 'error' ('$.{0}' -f $field) 'Admission evidence is incomplete.')) | Out-Null }
+            }
+            if ((Get-SkillEvolutionProperty $signal 'workflow_stable') -ne $true) { $findings.Add((New-OperationFinding 'workflow_not_stable' 'error' '$.workflow_stable' 'Workflow must be stable and repeatable.')) | Out-Null }
+        }
+    }
+    return [pscustomobject][ordered]@{
+        pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0)
+        issue_signature = if ($signatures.Count -eq 1) { $signatures[0] } else { $null }
+        signal_ids = $ids
+        independent_task_count = $tasks.Count
+        selected = @($selected.ToArray())
+        actionable_signal_count = $actionable.Count
+        findings = @($findings.ToArray())
+    }
+}
+
+function Invoke-SkillEvolutionPrepare {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Pilot,
+        [Parameter(Mandatory = $true)][string[]]$SignalIds,
+        [Parameter(Mandatory = $true)][string]$SkillName,
+        [Parameter(Mandatory = $true)][ValidateSet('existing', 'new')][string]$CandidateMode,
+        [Parameter(Mandatory = $true)][string]$OutRoot,
+        [string]$RepoRoot = $script:SkillEvolutionRepoRoot
+    )
+    if ($SkillName -notmatch '^[a-z0-9][a-z0-9-]{0,63}$') { throw 'Skill name must use lowercase kebab-case and be at most 64 characters.' }
+    $admission = Test-SkillEvolutionAdmission -Pilot $Pilot -SignalIds $SignalIds -SkillName $SkillName
+    if (-not $admission.pass) { return [pscustomobject]@{ schema_version = 1; command = 'skill-evolution-prepare'; pass = $false; status = 'admission_rejected'; admission = $admission; active_writes = 0; report_writes = 0; provider_calls = 0; host_writes = 0 } }
+
+    $out = Assert-SkillEvolutionReportPath $OutRoot $RepoRoot
+    $runId = 'se-{0}-{1}' -f (Get-Date -Format 'yyyyMMdd-HHmmss-fff'), (Get-OperationSha256 (($SignalIds -join '|') + $SkillName)).Substring(0, 8)
+    $candidateDir = Join-Path $out ('{0}\candidate\{1}' -f $runId, $SkillName)
+    [System.IO.Directory]::CreateDirectory($candidateDir) | Out-Null
+    $baselinePath = $null
+    if ($CandidateMode -eq 'existing') {
+        foreach ($source in @((Join-Path $RepoRoot ('overrides\custom\{0}' -f $SkillName)), (Join-Path $RepoRoot ('agent\{0}' -f $SkillName)))) {
+            if (Test-Path -LiteralPath $source -PathType Container) { $baselinePath = $source; break }
+        }
+        if ([string]::IsNullOrWhiteSpace($baselinePath)) { throw ('Existing skill not found: {0}' -f $SkillName) }
+        foreach ($file in @(Get-ChildItem -LiteralPath $baselinePath -Recurse -File -Force)) {
+            $relative = [System.IO.Path]::GetRelativePath($baselinePath, $file.FullName)
+            if (-not (Test-SkillEvolutionAllowedRelativePath $relative)) { continue }
+            $destination = Join-Path $candidateDir $relative
+            [System.IO.Directory]::CreateDirectory((Split-Path -Parent $destination)) | Out-Null
+            [System.IO.File]::Copy($file.FullName, $destination, $true)
+        }
+    }
+    else {
+        $template = "---`nname: $SkillName`ndescription: Candidate skill admitted from real-task signals; refine the trigger boundary before evaluation.`n---`n`n# $SkillName`n`nUse only for the admitted issue signature. Keep negative boundaries explicit.`n"
+        [System.IO.File]::WriteAllText((Join-Path $candidateDir 'SKILL.md'), $template, [System.Text.UTF8Encoding]::new($false))
+    }
+    $state = Get-SkillEvolutionPackageState $candidateDir
+    if ([string]$state.metadata.name -ne $SkillName) {
+        $state.findings = @($state.findings) + @((New-OperationFinding 'candidate_skill_name_mismatch' 'error' 'SKILL.md' 'Prepared candidate frontmatter name does not match the requested skill.'))
+        $state.pass = $false
+    }
+    $targetState = Get-SkillEvolutionTargetState $RepoRoot $SkillName
+    $manifest = [pscustomobject][ordered]@{
+        schema_version = 1
+        candidate_id = $runId
+        skill_name = $SkillName
+        candidate_mode = $CandidateMode
+        status = 'prepared'
+        prepared_at = [datetimeoffset]::UtcNow.ToString('o')
+        issue_signature = $admission.issue_signature
+        signal_ids = @($admission.signal_ids)
+        source_pilot_hash = Get-SkillEvolutionJsonHash $Pilot
+        candidate_directory = $candidateDir
+        baseline_path = $baselinePath
+        baseline_fingerprint = $targetState.fingerprint
+        initial_candidate_fingerprint = $state.fingerprint
+        allowed_paths = @($state.files.path)
+        creator_handoff = 'Use the host skill-creator skill inside this isolated candidate directory; do not write active sources or host roots.'
+        active_writes = 0
+        report_writes = 2
+        provider_calls = 0
+        host_writes = 0
+    }
+    Write-SkillEvolutionJsonAtomic (Join-Path $candidateDir 'candidate.json') $manifest
+    $receiptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $candidateDir)) 'prepare-receipt.json'
+    Write-SkillEvolutionJsonAtomic $receiptPath ([pscustomobject]@{ schema_version = 1; command = 'skill-evolution-prepare'; pass = $state.pass; candidate = $manifest; admission = $admission; findings = @($state.findings); active_writes = 0; report_writes = 2; provider_calls = 0; host_writes = 0 })
+    return [pscustomobject]@{ schema_version = 1; command = 'skill-evolution-prepare'; pass = $state.pass; status = 'prepared'; candidate_directory = $candidateDir; candidate_manifest = (Join-Path $candidateDir 'candidate.json'); receipt_path = $receiptPath; candidate_fingerprint = $state.fingerprint; admission = $admission; findings = @($state.findings); active_writes = 0; report_writes = 2; provider_calls = 0; host_writes = 0 }
+}
+
+function Invoke-SkillEvolutionEvaluate {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$CandidateDirectory,
+        [Parameter(Mandatory = $true)]$Corpus,
+        [object[]]$CaseResults = @(),
+        [switch]$Execute,
+        [string]$Model = 'gpt-5.6-sol',
+        [ValidateSet('low', 'medium', 'high', 'xhigh')][string]$ReasoningEffort = 'medium',
+        [string]$RepoRoot = $script:SkillEvolutionRepoRoot
+    )
+    if (-not (Test-SkillEvolutionPathWithin $CandidateDirectory (Join-Path ([System.IO.Path]::GetFullPath($RepoRoot)) 'reports\skill-evolution'))) { throw 'Candidate directory must remain under reports/skill-evolution.' }
+    $state = Get-SkillEvolutionPackageState $CandidateDirectory
+    $findings = [System.Collections.Generic.List[object]]::new()
+    foreach ($finding in @($state.findings)) { $findings.Add($finding) | Out-Null }
+    $manifestPath = Join-Path $state.root 'candidate.json'
+    $manifest = if (Test-Path -LiteralPath $manifestPath) { [System.IO.File]::ReadAllText($manifestPath) | ConvertFrom-Json } else { $null }
+    if ($null -eq $manifest) { $findings.Add((New-OperationFinding 'candidate_manifest_missing' 'error' 'candidate.json' 'Prepared candidate manifest is required.')) | Out-Null }
+    $skillName = [string]$manifest.skill_name
+    if ([int]$manifest.schema_version -ne 1 -or [string]::IsNullOrWhiteSpace($skillName) -or [string]$manifest.candidate_mode -notin @('existing', 'new')) {
+        $findings.Add((New-OperationFinding 'candidate_manifest_invalid' 'error' 'candidate.json' 'Candidate manifest identity and mode are required.')) | Out-Null
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$manifest.candidate_directory) -and [System.IO.Path]::GetFullPath([string]$manifest.candidate_directory) -ne $state.root) {
+        $findings.Add((New-OperationFinding 'candidate_manifest_path_mismatch' 'error' 'candidate.json' 'Candidate manifest does not bind the evaluated directory.')) | Out-Null
+    }
+    $catalogConflicts = Test-SkillEvolutionCatalogConflicts $state $manifest $RepoRoot
+    foreach ($finding in @($catalogConflicts.findings)) { $findings.Add($finding) | Out-Null }
+    $cases = @($Corpus.cases)
+    $positive = @($cases | Where-Object { [string]$_.kind -eq 'positive' })
+    $negative = @($cases | Where-Object { [string]$_.kind -in @('negative', 'no_skill') })
+    $baselineControls = @($cases | Where-Object { [string]$_.kind -eq 'baseline' })
+    if ($positive.Count -lt 2) { $findings.Add((New-OperationFinding 'positive_case_threshold_not_met' 'error' '$.corpus.cases' 'At least two positive cases are required.')) | Out-Null }
+    if ($negative.Count -lt 1) { $findings.Add((New-OperationFinding 'negative_case_missing' 'error' '$.corpus.cases' 'At least one negative or no-skill case is required.')) | Out-Null }
+    if ($baselineControls.Count -lt 1) { $findings.Add((New-OperationFinding 'no_skill_baseline_missing' 'error' '$.corpus.cases' 'At least one no-skill baseline case is required.')) | Out-Null }
+    $caseIds = @($cases | ForEach-Object { [string]$_.id })
+    if (@($caseIds | Where-Object { $_ } | Sort-Object -Unique).Count -ne $cases.Count) { $findings.Add((New-OperationFinding 'corpus_case_id_invalid' 'error' '$.corpus.cases' 'Corpus case IDs must be present and unique.')) | Out-Null }
+    foreach ($metric in @('success_count', 'false_trigger_count', 'tool_rounds', 'side_effects')) {
+        if ($null -eq (Get-SkillEvolutionProperty $Corpus.baseline_metrics $metric)) { $findings.Add((New-OperationFinding 'baseline_metric_missing' 'error' ('$.corpus.baseline_metrics.{0}' -f $metric) 'Baseline metrics are required for promotion comparison.')) | Out-Null }
+    }
+    if ($Execute -and @($CaseResults).Count -ne $cases.Count) { $findings.Add((New-OperationFinding 'forward_test_result_count_invalid' 'error' '$.results' 'Execute evaluation requires one result for every corpus case.')) | Out-Null }
+    $resultIds = @($CaseResults | ForEach-Object { [string]$_.case_id })
+    if ($Execute -and (($resultIds | Sort-Object -Unique).Count -ne $cases.Count -or @($resultIds | Where-Object { $caseIds -notcontains $_ }).Count -gt 0)) {
+        $findings.Add((New-OperationFinding 'forward_test_result_identity_invalid' 'error' '$.results' 'Forward-test result IDs must exactly match the corpus.')) | Out-Null
+    }
+    $resultIndex = @{}
+    foreach ($result in @($CaseResults)) { $resultIndex[[string]$result.case_id] = $result }
+    $positivePass = 0; $controlPass = 0; $successCount = 0; $falseTriggers = 0; $toolRounds = 0; $sideEffects = 0
+    if ($Execute) {
+        foreach ($case in $cases) {
+            $result = $resultIndex[[string]$case.id]
+            if ($null -eq $result) { continue }
+            $receiptValid = [int]$result.exit_code -eq 0 -and [bool]$result.parse_ok -and [string]$result.model -eq $Model -and [string]$result.reasoning_effort -eq $ReasoningEffort
+            foreach ($metric in @('duration_ms', 'input_tokens', 'output_tokens', 'tool_rounds', 'side_effects')) {
+                if ($null -eq (Get-SkillEvolutionProperty $result $metric) -or [int64](Get-SkillEvolutionProperty $result $metric) -lt 0) { $receiptValid = $false }
+            }
+            if (-not $receiptValid) {
+                $findings.Add((New-OperationFinding 'forward_test_receipt_invalid' 'error' ([string]$case.id) 'Forward-test result lacks a successful parseable exact-model receipt.')) | Out-Null
+                continue
+            }
+            $toolRounds += [int]$result.tool_rounds
+            $sideEffects += [int]$result.side_effects
+            $kind = [string]$case.kind
+            $selected = [string]$result.selected_skill
+            $applies = [bool]$result.applicable
+            $satisfied = [bool]$result.task_satisfied
+            $passed = if ($kind -eq 'positive') { $applies -and $satisfied -and $selected -eq $skillName } else { -not $applies -and [string]::IsNullOrWhiteSpace($selected) }
+            if ($kind -eq 'positive' -and $passed) { $positivePass++; $successCount++ }
+            elseif ($kind -ne 'positive' -and $passed) { $controlPass++ }
+            if ($kind -ne 'positive' -and ($applies -or -not [string]::IsNullOrWhiteSpace($selected))) { $falseTriggers++ }
+            if (-not $passed) { $findings.Add((New-OperationFinding 'forward_test_case_failed' 'error' ([string]$case.id) 'Forward-test outcome did not satisfy the case contract.')) | Out-Null }
+        }
+    }
+    $baseline = $Corpus.baseline_metrics
+    $noRegression = $Execute -and $falseTriggers -le [int]$baseline.false_trigger_count -and $toolRounds -le [int]$baseline.tool_rounds -and $sideEffects -le [int]$baseline.side_effects
+    $targetFailureFixed = $Execute -and $positivePass -eq $positive.Count -and $positive.Count -ge 2
+    $metricImproved = $Execute -and ($successCount -gt [int]$baseline.success_count -or $falseTriggers -lt [int]$baseline.false_trigger_count -or $toolRounds -lt [int]$baseline.tool_rounds -or $sideEffects -lt [int]$baseline.side_effects)
+    if ($Execute -and -not $noRegression) { $findings.Add((New-OperationFinding 'baseline_regression' 'error' '$.metrics' 'Candidate adds false triggers, tool rounds, or side effects compared with baseline.')) | Out-Null }
+    if ($Execute -and -not ($targetFailureFixed -or $metricImproved)) { $findings.Add((New-OperationFinding 'net_benefit_not_demonstrated' 'error' '$.metrics' 'Candidate must fix the target failure or improve a declared metric.')) | Out-Null }
+    $targetState = Get-SkillEvolutionTargetState $RepoRoot $skillName
+    if ($null -ne $manifest -and [string]$manifest.baseline_fingerprint -ne [string]$targetState.fingerprint) {
+        $findings.Add((New-OperationFinding 'candidate_baseline_drift' 'error' 'candidate.json' 'Active baseline changed after candidate preparation.')) | Out-Null
+    }
+    $staticPass = (@($findings | Where-Object severity -eq 'error').Count -eq 0)
+    $promotionEligible = $Execute -and $staticPass -and $positivePass -eq $positive.Count -and $controlPass -eq ($negative.Count + $baselineControls.Count) -and $noRegression -and ($targetFailureFixed -or $metricImproved)
+    return [pscustomobject][ordered]@{
+        schema_version = 1
+        evaluation_id = 'eval-{0}' -f $state.fingerprint.Substring(0, 16)
+        evaluated_at = [datetimeoffset]::UtcNow.ToString('o')
+        truth_boundary = if ($Execute) { 'isolated_forward_test_not_host_invocation' } else { 'static_candidate_validation' }
+        execute = [bool]$Execute
+        model = $Model
+        reasoning_effort = $ReasoningEffort
+        pass = $staticPass
+        promotion_eligible = $promotionEligible
+        candidate_directory = $state.root
+        candidate_fingerprint = $state.fingerprint
+        baseline_fingerprint = $targetState.fingerprint
+        catalog_fingerprint = Get-SkillEvolutionCatalogFingerprint $RepoRoot
+        corpus_fingerprint = Get-SkillEvolutionJsonHash $Corpus
+        skill_name = $skillName
+        allowed_paths = @($state.files.path)
+        metrics = [pscustomobject]@{ positive_passed = $positivePass; positive_total = $positive.Count; controls_passed = $controlPass; controls_total = ($negative.Count + $baselineControls.Count); success_count = $successCount; false_trigger_count = $falseTriggers; tool_rounds = $toolRounds; side_effects = $sideEffects; target_failure_fixed = $targetFailureFixed; metric_improved = $metricImproved; no_regression = $noRegression }
+        case_results = @($CaseResults)
+        findings = @($findings.ToArray())
+        active_writes = 0
+        report_writes = 0
+        provider_calls = if ($Execute) { $cases.Count } else { 0 }
+        host_writes = 0
+    }
+}
+
+function Test-SkillEvolutionEvaluationReceipt($Evaluation, $CandidateState, $TargetState, [string]$CatalogFingerprint) {
+    $findings = [System.Collections.Generic.List[object]]::new()
+    if ([int]$Evaluation.schema_version -ne 1 -or -not [bool]$Evaluation.execute -or -not [bool]$Evaluation.pass -or -not [bool]$Evaluation.promotion_eligible) {
+        $findings.Add((New-OperationFinding 'evaluation_not_promotion_eligible' 'error' '$.evaluation' 'Evaluation must be an executed, passing, promotion-eligible receipt.')) | Out-Null
+    }
+    if ([string]$Evaluation.truth_boundary -ne 'isolated_forward_test_not_host_invocation') { $findings.Add((New-OperationFinding 'evaluation_truth_boundary_invalid' 'error' '$.truth_boundary' 'Promotion requires an isolated forward-test receipt.')) | Out-Null }
+    if ([string]$Evaluation.candidate_fingerprint -ne [string]$CandidateState.fingerprint -or [string]$Evaluation.baseline_fingerprint -ne [string]$TargetState.fingerprint -or [string]$Evaluation.catalog_fingerprint -ne $CatalogFingerprint) {
+        $findings.Add((New-OperationFinding 'evaluation_fingerprint_mismatch' 'error' '$.evaluation' 'Evaluation does not bind the exact-current candidate, baseline, and catalog.')) | Out-Null
+    }
+    $metrics = $Evaluation.metrics
+    $metricsPass = [int]$metrics.positive_total -ge 2 -and [int]$metrics.positive_passed -eq [int]$metrics.positive_total -and [int]$metrics.controls_total -ge 2 -and [int]$metrics.controls_passed -eq [int]$metrics.controls_total -and [bool]$metrics.no_regression -and ([bool]$metrics.target_failure_fixed -or [bool]$metrics.metric_improved)
+    if (-not $metricsPass) { $findings.Add((New-OperationFinding 'evaluation_metrics_invalid' 'error' '$.metrics' 'Evaluation metrics do not satisfy the promotion gate.')) | Out-Null }
+    $allowed = @($Evaluation.allowed_paths | ForEach-Object { ConvertTo-SkillEvolutionRelativePath ([string]$_) } | Where-Object { $_ } | Sort-Object -Unique)
+    $candidateAllowed = @($CandidateState.files.path | ForEach-Object { ConvertTo-SkillEvolutionRelativePath ([string]$_) } | Where-Object { $_ } | Sort-Object -Unique)
+    if (($allowed -join '|').ToLowerInvariant() -ne ($candidateAllowed -join '|').ToLowerInvariant()) { $findings.Add((New-OperationFinding 'evaluation_allowed_paths_mismatch' 'error' '$.allowed_paths' 'Evaluation allowed_paths do not match the candidate package.')) | Out-Null }
+    if ([string]$Evaluation.reasoning_effort -notin $script:SkillEvolutionAllowedReasoningEfforts -or [string]::IsNullOrWhiteSpace([string]$Evaluation.model)) { $findings.Add((New-OperationFinding 'evaluation_model_effort_invalid' 'error' '$.model' 'Evaluation model and reasoning effort must be explicit.')) | Out-Null }
+    if (@($Evaluation.case_results).Count -lt 4 -or @($Evaluation.case_results | Where-Object { [int]$_.exit_code -ne 0 -or -not [bool]$_.parse_ok }).Count -gt 0) {
+        $findings.Add((New-OperationFinding 'evaluation_case_receipts_invalid' 'error' '$.case_results' 'Promotion requires at least four successful parseable forward-test receipts.')) | Out-Null
+    }
+    return [pscustomobject]@{ pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); findings = @($findings.ToArray()) }
+}
+
+function Test-SkillEvolutionReview {
+    param($Review, $Evaluation, [string]$EvaluationReceiptHash, [string[]]$AllowedPaths)
+    $findings = [System.Collections.Generic.List[object]]::new()
+    foreach ($field in @('candidate_fingerprint', 'baseline_fingerprint', 'reviewer', 'decision', 'reviewed_at', 'expires_at', 'evaluation_receipt_hash')) {
+        if ([string]::IsNullOrWhiteSpace([string](Get-SkillEvolutionProperty $Review $field))) { $findings.Add((New-OperationFinding 'review_field_missing' 'error' ('$.{0}' -f $field) 'Reviewed change-set field is required.')) | Out-Null }
+    }
+    if ([string]$Review.decision -ne 'approve') { $findings.Add((New-OperationFinding 'review_not_approved' 'error' '$.decision' 'Review decision must be approve.')) | Out-Null }
+    if ([string]$Review.candidate_fingerprint -ne [string]$Evaluation.candidate_fingerprint -or [string]$Review.baseline_fingerprint -ne [string]$Evaluation.baseline_fingerprint) { $findings.Add((New-OperationFinding 'review_fingerprint_mismatch' 'error' '$.candidate_fingerprint' 'Review does not bind the evaluated candidate and baseline.')) | Out-Null }
+    if ([string]$Review.evaluation_receipt_hash -ne $EvaluationReceiptHash) { $findings.Add((New-OperationFinding 'review_evaluation_hash_mismatch' 'error' '$.evaluation_receipt_hash' 'Review does not bind the current evaluation receipt.')) | Out-Null }
+    $reviewedAt = [datetimeoffset]::MinValue; $expiresAt = [datetimeoffset]::MinValue
+    if (-not [datetimeoffset]::TryParse([string]$Review.reviewed_at, [ref]$reviewedAt) -or -not [datetimeoffset]::TryParse([string]$Review.expires_at, [ref]$expiresAt)) { $findings.Add((New-OperationFinding 'review_timestamp_invalid' 'error' '$.expires_at' 'Review timestamps must be valid RFC3339 values.')) | Out-Null }
+    elseif ($expiresAt -le [datetimeoffset]::UtcNow -or $expiresAt -le $reviewedAt -or $reviewedAt -gt [datetimeoffset]::UtcNow.AddMinutes(5)) { $findings.Add((New-OperationFinding 'review_expired' 'error' '$.expires_at' 'Reviewed change-set is expired or has an invalid future timestamp.')) | Out-Null }
+    $reviewPaths = @($Review.allowed_paths | ForEach-Object { ConvertTo-SkillEvolutionRelativePath ([string]$_) } | Where-Object { $_ } | Sort-Object -Unique)
+    $candidatePaths = @($AllowedPaths | ForEach-Object { ConvertTo-SkillEvolutionRelativePath ([string]$_) } | Where-Object { $_ } | Sort-Object -Unique)
+    if ($reviewPaths.Count -ne @($Review.allowed_paths).Count -or $candidatePaths.Count -ne @($AllowedPaths).Count) { $findings.Add((New-OperationFinding 'review_allowed_path_invalid' 'error' '$.allowed_paths' 'Review paths must be unique contained relative paths.')) | Out-Null }
+    if (($reviewPaths -join '|').ToLowerInvariant() -ne ($candidatePaths -join '|').ToLowerInvariant()) { $findings.Add((New-OperationFinding 'review_allowed_paths_mismatch' 'error' '$.allowed_paths' 'Review allowed_paths must exactly match the evaluated candidate package.')) | Out-Null }
+    return [pscustomobject]@{ pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); findings = @($findings.ToArray()) }
+}
+
+function New-SkillEvolutionPlan {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$CandidateDirectory,
+        [Parameter(Mandatory = $true)]$Evaluation,
+        [Parameter(Mandatory = $true)][string]$EvaluationPath,
+        [Parameter(Mandatory = $true)]$Review,
+        [Parameter(Mandatory = $true)][string]$ReviewPath,
+        [string]$RepoRoot = $script:SkillEvolutionRepoRoot
+    )
+    if (-not (Test-SkillEvolutionPathWithin $CandidateDirectory (Join-Path ([System.IO.Path]::GetFullPath($RepoRoot)) 'reports\skill-evolution'))) { throw 'Candidate directory must remain under reports/skill-evolution.' }
+    $evaluationFull = Assert-SkillEvolutionReportPath $EvaluationPath $RepoRoot
+    $reviewFull = Assert-SkillEvolutionReportPath $ReviewPath $RepoRoot
+    $state = Get-SkillEvolutionPackageState $CandidateDirectory
+    if (-not $state.pass -or $state.fingerprint -ne [string]$Evaluation.candidate_fingerprint) { throw 'Candidate drifted after evaluation.' }
+    $targetState = Get-SkillEvolutionTargetState $RepoRoot ([string]$Evaluation.skill_name)
+    $catalogFingerprint = Get-SkillEvolutionCatalogFingerprint $RepoRoot
+    $evaluationValidation = Test-SkillEvolutionEvaluationReceipt $Evaluation $state $targetState $catalogFingerprint
+    if (-not $evaluationValidation.pass) { throw ('Evaluation is invalid: {0}' -f (@($evaluationValidation.findings.code) -join ',')) }
+    if ([string]$Evaluation.skill_name -ne [string]$state.metadata.name) { throw 'Evaluation skill identity does not match candidate frontmatter.' }
+    $evaluationHash = Get-SkillEvolutionFileHash $evaluationFull
+    $reviewHash = Get-SkillEvolutionFileHash $reviewFull
+    $reviewValidation = Test-SkillEvolutionReview $Review $Evaluation $evaluationHash @($state.files.path)
+    if (-not $reviewValidation.pass) { throw ('Reviewed change-set is invalid: {0}' -f (@($reviewValidation.findings.code) -join ',')) }
+    $target = $targetState.path
+    $operation = New-OperationPlan -OperationId ('skill-lifecycle-{0}' -f $state.fingerprint.Substring(0, 16)) -Domain skill_lifecycle -Mode apply -CreatedAt ([datetimeoffset]::UtcNow.ToString('o')) -SourceRevision $catalogFingerprint -Targets @([pscustomobject]@{ target_ref = [string]$Evaluation.skill_name; path = $target; before_hash = if ($targetState.exists) { $targetState.fingerprint } else { $null }; desired_hash = $state.fingerprint; owner = 'skills-manager' }) -Actions @([pscustomobject]@{ type = if ($targetState.exists) { 'update' } else { 'create' }; target_ref = [string]$Evaluation.skill_name; summary = 'Promote reviewed skill candidate into overrides/custom without projection.'; risk = 'medium'; metadata = [pscustomobject]@{ allowed_paths = @($state.files.path) } }) -Preconditions @('candidate_exact_current', 'evaluation_exact_current', 'review_exact_current', 'baseline_exact_current', 'catalog_exact_current') -Verification @('target package hash equals desired hash', 'skills.json/agent/user root/host config remain untouched') -Rollback @('restore only this promotion receipt package')
+    $operation | Add-Member -NotePropertyName lifecycle -NotePropertyValue ([pscustomobject][ordered]@{ skill_name = [string]$Evaluation.skill_name; candidate_directory = $state.root; candidate_fingerprint = $state.fingerprint; baseline_fingerprint = $targetState.fingerprint; baseline_existed = [bool]$targetState.exists; catalog_fingerprint = $catalogFingerprint; evaluation_path = $evaluationFull; evaluation_hash = $evaluationHash; review_path = $reviewFull; review_hash = $reviewHash; review_expires_at = [string]$Review.expires_at; allowed_paths = @($state.files.path); projection_disposition = 'cold_catalog_only'; host_mutation = $false })
+    return $operation
+}
+
+function Copy-SkillEvolutionPackage([string]$Source, [string]$Destination, [string[]]$AllowedPaths) {
+    $sourceRoot = [System.IO.Path]::GetFullPath($Source)
+    $destinationRoot = [System.IO.Path]::GetFullPath($Destination)
+    if (Test-Path -LiteralPath $destinationRoot) { throw ('SkillEvolution destination already exists: {0}' -f $destinationRoot) }
+    [System.IO.Directory]::CreateDirectory($destinationRoot) | Out-Null
+    foreach ($relative in $AllowedPaths) {
+        $normalized = ConvertTo-SkillEvolutionRelativePath $relative
+        if ([string]::IsNullOrWhiteSpace($normalized) -or -not (Test-SkillEvolutionAllowedRelativePath $normalized)) { throw ('Forbidden candidate path: {0}' -f $relative) }
+        $sourcePath = [System.IO.Path]::GetFullPath((Join-Path $sourceRoot $normalized))
+        $destinationPath = [System.IO.Path]::GetFullPath((Join-Path $destinationRoot $normalized))
+        if (-not (Test-SkillEvolutionPathWithin $sourcePath $sourceRoot) -or -not (Test-SkillEvolutionPathWithin $destinationPath $destinationRoot)) { throw ('Candidate path escaped its package root: {0}' -f $relative) }
+        if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw ('Candidate source file is missing: {0}' -f $normalized) }
+        $sourceItem = Get-Item -LiteralPath $sourcePath -Force
+        if (($sourceItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw ('Candidate source file is a reparse point: {0}' -f $normalized) }
+        [System.IO.Directory]::CreateDirectory((Split-Path -Parent $destinationPath)) | Out-Null
+        [System.IO.File]::Copy($sourcePath, $destinationPath, $true)
+    }
+}
+
+function Invoke-SkillEvolutionApply {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$Plan, [Parameter(Mandatory = $true)][string]$Token, [Parameter(Mandatory = $true)][string]$ReceiptPath, [string]$RepoRoot = $script:SkillEvolutionRepoRoot)
+    if ($Token -cne 'PROMOTE_SKILL_CANDIDATE') { throw 'Promotion requires PROMOTE_SKILL_CANDIDATE.' }
+    $contract = Test-OperationPlanContract $Plan
+    if (-not $contract.pass -or [string]$Plan.domain -ne 'skill_lifecycle') { throw 'Skill lifecycle plan contract is invalid.' }
+    $life = $Plan.lifecycle
+    $skillName = [string]$life.skill_name
+    if ($skillName -notmatch '^[a-z0-9][a-z0-9-]{0,63}$' -or @($Plan.targets).Count -ne 1 -or @($Plan.actions).Count -ne 1 -or [string]$Plan.mode -ne 'apply') { throw 'Skill lifecycle plan shape is invalid.' }
+    $expectedTarget = Join-Path ([System.IO.Path]::GetFullPath($RepoRoot)) ('overrides\custom\{0}' -f $skillName)
+    $target = [System.IO.Path]::GetFullPath([string]$Plan.targets[0].path)
+    if ($target -ne [System.IO.Path]::GetFullPath($expectedTarget) -or -not (Test-OperationPathWithinRoot $target (Join-Path $RepoRoot 'overrides\custom'))) { throw 'Plan target escaped overrides/custom.' }
+    $beforeHashMatches = if ([bool]$life.baseline_existed) { [string]$Plan.targets[0].before_hash -eq [string]$life.baseline_fingerprint } else { $null -eq $Plan.targets[0].before_hash }
+    if ([string]$Plan.targets[0].desired_hash -ne [string]$life.candidate_fingerprint -or -not $beforeHashMatches -or [string]$Plan.targets[0].owner -ne 'skills-manager') { throw 'Plan target hashes or ownership do not match the lifecycle binding.' }
+    if (-not (Test-SkillEvolutionPathWithin ([string]$life.candidate_directory) (Join-Path ([System.IO.Path]::GetFullPath($RepoRoot)) 'reports\skill-evolution'))) { throw 'Candidate directory escaped reports/skill-evolution.' }
+    $candidateState = Get-SkillEvolutionPackageState ([string]$life.candidate_directory)
+    $targetState = Get-SkillEvolutionTargetState $RepoRoot $skillName
+    if (-not $candidateState.pass -or $candidateState.fingerprint -ne [string]$life.candidate_fingerprint -or [string]$candidateState.metadata.name -ne $skillName) { throw 'Candidate drifted before apply.' }
+    if ($targetState.fingerprint -ne [string]$life.baseline_fingerprint) { throw 'Baseline drifted before apply.' }
+    $candidatePaths = @($candidateState.files.path | ForEach-Object { ConvertTo-SkillEvolutionRelativePath ([string]$_) } | Sort-Object -Unique)
+    $planPaths = @($life.allowed_paths | ForEach-Object { ConvertTo-SkillEvolutionRelativePath ([string]$_) } | Where-Object { $_ } | Sort-Object -Unique)
+    $actionPaths = @($Plan.actions[0].metadata.allowed_paths | ForEach-Object { ConvertTo-SkillEvolutionRelativePath ([string]$_) } | Where-Object { $_ } | Sort-Object -Unique)
+    if ($planPaths.Count -ne @($life.allowed_paths).Count -or ($planPaths -join '|').ToLowerInvariant() -ne ($candidatePaths -join '|').ToLowerInvariant() -or ($actionPaths -join '|').ToLowerInvariant() -ne ($candidatePaths -join '|').ToLowerInvariant()) { throw 'Plan allowed_paths do not exactly match the candidate package.' }
+    $catalogFingerprint = Get-SkillEvolutionCatalogFingerprint $RepoRoot
+    if ($catalogFingerprint -ne [string]$life.catalog_fingerprint -or [string]$Plan.source_revision -ne $catalogFingerprint) { throw 'Catalog drifted before apply.' }
+    $evaluationFull = Assert-SkillEvolutionReportPath ([string]$life.evaluation_path) $RepoRoot
+    $reviewFull = Assert-SkillEvolutionReportPath ([string]$life.review_path) $RepoRoot
+    if ((Get-SkillEvolutionFileHash $evaluationFull) -ne [string]$life.evaluation_hash) { throw 'Evaluation receipt drifted before apply.' }
+    if ((Get-SkillEvolutionFileHash $reviewFull) -ne [string]$life.review_hash) { throw 'Reviewed change-set drifted before apply.' }
+    try { $evaluation = [System.IO.File]::ReadAllText($evaluationFull) | ConvertFrom-Json; $review = [System.IO.File]::ReadAllText($reviewFull) | ConvertFrom-Json }
+    catch { throw ('Evaluation or review is invalid JSON: {0}' -f $_.Exception.Message) }
+    $evaluationValidation = Test-SkillEvolutionEvaluationReceipt $evaluation $candidateState $targetState $catalogFingerprint
+    if (-not $evaluationValidation.pass -or [string]$evaluation.skill_name -ne $skillName) { throw ('Evaluation receipt is invalid: {0}' -f (@($evaluationValidation.findings.code) -join ',')) }
+    $reviewValidation = Test-SkillEvolutionReview $review $evaluation ([string]$life.evaluation_hash) $candidatePaths
+    if (-not $reviewValidation.pass) { throw ('Reviewed change-set is invalid: {0}' -f (@($reviewValidation.findings.code) -join ',')) }
+
+    $receiptFull = Assert-SkillEvolutionReportPath $ReceiptPath $RepoRoot
+    if (Test-Path -LiteralPath $receiptFull) { throw ('Promotion receipt already exists: {0}' -f $receiptFull) }
+    $runRoot = Split-Path -Parent $receiptFull
+    $backupRoot = Join-Path $runRoot ('backup\{0}' -f $skillName)
+    if (Test-Path -LiteralPath $backupRoot) { throw ('Promotion backup already exists: {0}' -f $backupRoot) }
+    $targetParent = Split-Path -Parent $target
+    [System.IO.Directory]::CreateDirectory($targetParent) | Out-Null
+    if ($targetState.exists) { Copy-SkillEvolutionPackage $target $backupRoot @($targetState.files.path) }
+    $stage = Join-Path $targetParent ('.{0}.stage-{1}' -f $skillName, ([guid]::NewGuid().ToString('N')))
+    $old = Join-Path $targetParent ('.{0}.old-{1}' -f $skillName, ([guid]::NewGuid().ToString('N')))
+    Copy-SkillEvolutionPackage ([string]$life.candidate_directory) $stage @($life.allowed_paths)
+    $started = [datetimeoffset]::UtcNow.ToString('o')
+    try {
+        if ($targetState.exists) { Move-Item -LiteralPath $target -Destination $old }
+        Move-Item -LiteralPath $stage -Destination $target
+        $after = Get-SkillEvolutionPackageState $target
+        if (-not $after.pass -or $after.fingerprint -ne [string]$life.candidate_fingerprint -or [string]$after.metadata.name -ne $skillName) { throw 'Promoted target hash does not match the candidate.' }
+        $completed = [datetimeoffset]::UtcNow.ToString('o')
+        $receipt = New-OperationReceipt -OperationId ([string]$Plan.operation_id) -Status applied -StartedAt $started -CompletedAt $completed -Actions @([pscustomobject]@{ action_id = [string]$Plan.actions[0].action_id; status = 'applied'; target_ref = $skillName; path = $target; before_hash = $life.baseline_fingerprint; after_hash = $after.fingerprint; files = @($after.files) }) -Backups @([pscustomobject]@{ path = if ($targetState.exists) { $backupRoot } else { $null }; before_existed = [bool]$targetState.exists; before_hash = $life.baseline_fingerprint; files = @($targetState.files) }) -Verification ([pscustomobject]@{ static_validated = 'pass'; repo_gates_passed = 'not_run'; host_loaded = 'not_run'; live_accepted = 'not_run' }) -Rollback @('exact package rollback only; fail closed on target drift')
+        $receipt | Add-Member -NotePropertyName lifecycle -NotePropertyValue ([pscustomobject][ordered]@{ skill_name = $skillName; target = $target; candidate_fingerprint = $life.candidate_fingerprint; before_fingerprint = $life.baseline_fingerprint; after_fingerprint = $after.fingerprint; backup_root = if ($targetState.exists) { $backupRoot } else { $null }; before_existed = [bool]$targetState.exists; plan_hash = Get-SkillEvolutionJsonHash $Plan; evaluation_hash = $life.evaluation_hash; review_hash = $life.review_hash; active_writes = 1; host_writes = 0; provider_calls = 0; projection_changed = $false; skills_config_changed = $false; generated_agent_changed = $false })
+        Write-SkillEvolutionJsonAtomic $receiptFull $receipt
+        if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Recurse -Force }
+        return $receipt
+    }
+    catch {
+        if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+        if (Test-Path -LiteralPath $old) { Move-Item -LiteralPath $old -Destination $target }
+        if (Test-Path -LiteralPath $backupRoot) { Remove-Item -LiteralPath $backupRoot -Recurse -Force }
+        throw
+    }
+    finally { if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force } }
+}
+
+function Invoke-SkillEvolutionRollback {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$Receipt, [Parameter(Mandatory = $true)][string]$Token, [string]$OutPath, [string]$RepoRoot = $script:SkillEvolutionRepoRoot)
+    if ($Token -cne 'ROLLBACK_SKILL_PROMOTION') { throw 'Rollback requires ROLLBACK_SKILL_PROMOTION.' }
+    if ([string]$Receipt.status -ne 'applied' -or $null -eq $Receipt.lifecycle) { throw 'Only an applied skill promotion receipt can be rolled back.' }
+    $life = $Receipt.lifecycle
+    $skillName = [string]$life.skill_name
+    if ($skillName -notmatch '^[a-z0-9][a-z0-9-]{0,63}$') { throw 'Rollback receipt skill identity is invalid.' }
+    $target = [System.IO.Path]::GetFullPath([string]$life.target)
+    $allowedRoot = Join-Path ([System.IO.Path]::GetFullPath($RepoRoot)) 'overrides\custom'
+    $expectedTarget = [System.IO.Path]::GetFullPath((Join-Path $allowedRoot $skillName))
+    if ($target -ne $expectedTarget -or -not (Test-OperationPathWithinRoot $target $allowedRoot)) { throw 'Rollback target escaped overrides/custom.' }
+    $current = Get-SkillEvolutionPackageState $target
+    if (-not $current.pass -or $current.fingerprint -ne [string]$life.after_fingerprint -or [string]$current.metadata.name -ne $skillName) { throw 'Promotion target drifted after apply; rollback is fail closed.' }
+    $targetParent = Split-Path -Parent $target
+    $restoreStage = Join-Path $targetParent ('.{0}.rollback-{1}' -f $skillName, ([guid]::NewGuid().ToString('N')))
+    $promotedOld = Join-Path $targetParent ('.{0}.promoted-{1}' -f $skillName, ([guid]::NewGuid().ToString('N')))
+    if ([bool]$life.before_existed) {
+        if (-not (Test-SkillEvolutionPathWithin ([string]$life.backup_root) (Join-Path ([System.IO.Path]::GetFullPath($RepoRoot)) 'reports\skill-evolution'))) { throw 'Promotion backup escaped reports/skill-evolution.' }
+        $backup = Get-SkillEvolutionPackageState ([string]$life.backup_root)
+        if (-not $backup.pass -or $backup.fingerprint -ne [string]$life.before_fingerprint) { throw 'Promotion backup is missing or drifted.' }
+        Copy-SkillEvolutionPackage ([string]$life.backup_root) $restoreStage @($backup.files.path)
+    }
+    $started = [datetimeoffset]::UtcNow.ToString('o')
+    try {
+        Move-Item -LiteralPath $target -Destination $promotedOld
+        if ([bool]$life.before_existed) { Move-Item -LiteralPath $restoreStage -Destination $target }
+        $after = if ([bool]$life.before_existed) { Get-SkillEvolutionPackageState $target } else { $null }
+        if ([bool]$life.before_existed -and (-not $after.pass -or $after.fingerprint -ne [string]$life.before_fingerprint)) { throw 'Rollback restoration hash mismatch.' }
+        if (-not [bool]$life.before_existed -and (Test-Path -LiteralPath $target)) { throw 'Rollback failed to remove the newly promoted package.' }
+        $rolled = New-OperationReceipt -OperationId ([string]$Receipt.operation_id) -Status rolled_back -StartedAt $started -CompletedAt ([datetimeoffset]::UtcNow.ToString('o')) -Actions @([pscustomobject]@{ action_id = 'skill-promotion-rollback'; status = 'rolled_back'; target_ref = $skillName; path = $target; restored_hash = if ($after) { $after.fingerprint } else { Get-OperationSha256 '' } }) -Verification ([pscustomobject]@{ static_validated = 'pass'; repo_gates_passed = 'not_run'; host_loaded = 'not_run'; live_accepted = 'not_run' }) -Rollback @('promotion receipt consumed without changing host projection')
+        $rolled | Add-Member -NotePropertyName lifecycle -NotePropertyValue ([pscustomobject]@{ skill_name = $skillName; target = $target; restored = $true; active_writes = 1; host_writes = 0; provider_calls = 0; projection_changed = $false })
+        if (-not [string]::IsNullOrWhiteSpace($OutPath)) {
+            $outFull = Assert-SkillEvolutionReportPath $OutPath $RepoRoot
+            if (Test-Path -LiteralPath $outFull) { throw ('Rollback receipt already exists: {0}' -f $outFull) }
+            Write-SkillEvolutionJsonAtomic $outFull $rolled
+        }
+        Remove-Item -LiteralPath $promotedOld -Recurse -Force
+        return $rolled
+    }
+    catch {
+        if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+        if (Test-Path -LiteralPath $promotedOld) { Move-Item -LiteralPath $promotedOld -Destination $target }
+        throw
+    }
+    finally { if (Test-Path -LiteralPath $restoreStage) { Remove-Item -LiteralPath $restoreStage -Recurse -Force } }
 }
 
 function Get-HostCapabilityCandidate {
@@ -4751,6 +5590,12 @@ function Resolve-NativeInvocationEventKind($Event) {
     }
 }
 
+function ConvertTo-NativeInvocationRfc3339($Value) {
+    if ($Value -is [datetimeoffset]) { return $Value.ToString('o') }
+    if ($Value -is [datetime]) { return ([datetimeoffset]$Value).ToString('o') }
+    return [string]$Value
+}
+
 function ConvertTo-NativeInvocationTrace {
     [CmdletBinding()]
     param(
@@ -4759,7 +5604,10 @@ function ConvertTo-NativeInvocationTrace {
         [Parameter(Mandatory = $true)][string]$Surface,
         [Parameter(Mandatory = $true)][string]$Source,
         [Parameter(Mandatory = $true)][ValidateSet('fresh', 'stale', 'unknown')][string]$Freshness,
-        [Parameter(Mandatory = $true)][string]$CapturedAt
+        [Parameter(Mandatory = $true)]$CapturedAt,
+        [ValidateSet('native_events', 'self_report', 'read_heuristic')][string]$InvocationMode = 'native_events',
+        [string]$EventsPath,
+        [string]$ReasoningEffort
     )
 
     $normalized = New-Object System.Collections.Generic.List[object]
@@ -4771,12 +5619,12 @@ function ConvertTo-NativeInvocationTrace {
                 event_id = [string](Get-NativeInvocationAdapterProperty $event @('event_id', 'id'))
                 kind = Resolve-NativeInvocationEventKind $event
                 skill_name = $name
-                occurred_at = [string](Get-NativeInvocationAdapterProperty $event @('occurred_at', 'timestamp', 'captured_at'))
+                occurred_at = ConvertTo-NativeInvocationRfc3339 (Get-NativeInvocationAdapterProperty $event @('occurred_at', 'timestamp', 'captured_at'))
                 correlation_id = [string](Get-NativeInvocationAdapterProperty $event @('correlation_id', 'correlation', 'turn_id', 'thread_id'))
                 reason = [string](Get-NativeInvocationAdapterProperty $event @('reason', 'abstention_reason'))
             }) | Out-Null
     }
-    return New-NativeInvocationTrace -TraceId $TraceId -Surface $Surface -Source $Source -Freshness $Freshness -CapturedAt $CapturedAt -Events $normalized.ToArray()
+    return New-NativeInvocationTrace -TraceId $TraceId -Surface $Surface -Source $Source -Freshness $Freshness -CapturedAt (ConvertTo-NativeInvocationRfc3339 $CapturedAt) -InvocationMode $InvocationMode -EventsPath $EventsPath -ReasoningEffort $ReasoningEffort -Events $normalized.ToArray()
 }
 
 function New-NativeInvocationTraceFromHostEvents {
@@ -4787,9 +5635,12 @@ function New-NativeInvocationTraceFromHostEvents {
         [Parameter(Mandatory = $true)][string]$Surface,
         [Parameter(Mandatory = $true)][string]$Source,
         [Parameter(Mandatory = $true)][ValidateSet('fresh', 'stale', 'unknown')][string]$Freshness,
-        [Parameter(Mandatory = $true)][string]$CapturedAt
+        [Parameter(Mandatory = $true)]$CapturedAt,
+        [ValidateSet('native_events', 'self_report', 'read_heuristic')][string]$InvocationMode = 'native_events',
+        [string]$EventsPath,
+        [string]$ReasoningEffort
     )
-    return ConvertTo-NativeInvocationTrace -Events $Events -TraceId $TraceId -Surface $Surface -Source $Source -Freshness $Freshness -CapturedAt $CapturedAt
+    return ConvertTo-NativeInvocationTrace -Events $Events -TraceId $TraceId -Surface $Surface -Source $Source -Freshness $Freshness -CapturedAt $CapturedAt -InvocationMode $InvocationMode -EventsPath $EventsPath -ReasoningEffort $ReasoningEffort
 }
 
 $appServerSkillDispatchAdapterRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
@@ -16680,12 +17531,14 @@ function New-McpSyncOperationPlanResult {
 }
 
 function Parse-ReadOnlyCapabilityOptions([object[]]$Tokens) {
-    $result = [ordered]@{ json = $false; out_path = $null }
+    $result = [ordered]@{ json = $false; out_path = $null; view = $null; host_snapshot = $null }
     for ($i = 0; $i -lt @($Tokens).Count; $i++) {
         $token = [string]$Tokens[$i]
         switch ($token.ToLowerInvariant()) {
             '--json' { $result.json = $true }
             '--out' { if ($i + 1 -ge @($Tokens).Count) { throw '--out requires a report file path.' }; $i++; $result.out_path = [string]$Tokens[$i] }
+            '--view' { if ($i + 1 -ge @($Tokens).Count) { throw '--view requires a view name.' }; $i++; $result.view = [string]$Tokens[$i] }
+            '--host-snapshot' { if ($i + 1 -ge @($Tokens).Count) { throw '--host-snapshot requires a snapshot file path.' }; $i++; $result.host_snapshot = [string]$Tokens[$i] }
             default { throw ('Unknown capability-inventory option: {0}' -f $token) }
         }
     }
@@ -16710,6 +17563,15 @@ function Invoke-CapabilityInventoryCommand([object[]]$Tokens = @()) {
     $options = Parse-ReadOnlyCapabilityOptions $Tokens
     $configRaw = [System.IO.File]::ReadAllText($CfgPath) -replace '(?m)^\s*//.*$', ''
     $config = $configRaw | ConvertFrom-Json
+    if (-not [string]::IsNullOrWhiteSpace([string]$options.view)) {
+        if ([string]$options.view -ne 'skill-surfaces') { throw ('Unknown capability inventory view: {0}' -f $options.view) }
+        $view = New-SkillSurfaceView -RepoRoot $Root -Config $config -HostSnapshotPath ([string]$options.host_snapshot)
+        if (-not [string]::IsNullOrWhiteSpace([string]$options.out_path)) { $view.writes = 1 }
+        $surfaceEnvelope = [pscustomobject][ordered]@{ schema_version = 1; command = 'capability-inventory'; view = 'skill-surfaces'; pass = [bool]$view.pass; truth_boundary = 'read_only_skill_surface_snapshot'; data = $view }
+        $surfaceJson = $surfaceEnvelope | ConvertTo-Json -Depth 40 -Compress
+        if (-not [string]::IsNullOrWhiteSpace([string]$options.out_path)) { Write-Utf8FileAtomic -Path ([System.IO.Path]::GetFullPath([string]$options.out_path)) -Content $surfaceJson }
+        return [pscustomobject]@{ exit_code = $(if ($surfaceEnvelope.pass) { 0 } else { 1 }); output = $(if ($options.json) { $surfaceJson } else { 'Skill surfaces: surfaces={0}, findings={1}' -f $view.surface_count, @($view.findings).Count }); json = [bool]$options.json; envelope = $surfaceEnvelope }
+    }
     $descriptors = @(ConvertTo-CapabilityDescriptorsFromSkillsConfig $config $CfgPath 'working-tree')
     $descriptors += @(Get-ReferenceCapabilityDescriptors (Join-Path $Root 'references\reference-shelf.manifest.json'))
     $inventory = New-CapabilityInventory $descriptors
@@ -25112,6 +25974,192 @@ function Sync-ConfiguredSkillProjection($cfg, [string]$verifiedBuildSignature = 
     return (Sync-CodexSkillProjection $cfg.skill_projection $verifiedBuildSignature $promotionContext)
 }
 
+function Parse-SkillEvolutionOptions([object[]]$Tokens) {
+    if (@($Tokens).Count -lt 1) { throw 'skill-evolution requires prepare, evaluate, plan, apply, or rollback.' }
+    $result = [ordered]@{ command = ([string]$Tokens[0]).ToLowerInvariant(); flags = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase); values = @{} }
+    for ($index = 1; $index -lt @($Tokens).Count; $index++) {
+        $token = [string]$Tokens[$index]
+        if (-not $token.StartsWith('--')) { throw ('Unexpected skill-evolution argument: {0}' -f $token) }
+        $name = $token.ToLowerInvariant()
+        if ($name -in @('--json', '--execute')) { $result.flags.Add($name) | Out-Null; continue }
+        if ($index + 1 -ge @($Tokens).Count) { throw ('{0} requires a value.' -f $token) }
+        $index++
+        if (-not $result.values.ContainsKey($name)) { $result.values[$name] = [System.Collections.Generic.List[string]]::new() }
+        $result.values[$name].Add([string]$Tokens[$index]) | Out-Null
+    }
+    return [pscustomobject]$result
+}
+
+function Get-SkillEvolutionOption($Options, [string]$Name, [switch]$Required, [switch]$Multiple) {
+    $key = $Name.ToLowerInvariant()
+    $values = if ($Options.values.ContainsKey($key)) { @($Options.values[$key].ToArray()) } else { @() }
+    if ($Required -and $values.Count -eq 0) { throw ('Missing required option: {0}' -f $Name) }
+    if (-not $Multiple -and $values.Count -gt 1) { throw ('Option may be specified only once: {0}' -f $Name) }
+    if ($Multiple) { return $values }
+    return $(if ($values.Count -gt 0) { $values[0] } else { $null })
+}
+
+function Read-SkillEvolutionJson([string]$Path, [string]$Label) {
+    $full = [System.IO.Path]::GetFullPath($Path)
+    if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { throw ('{0} not found: {1}' -f $Label, $full) }
+    try { return [System.IO.File]::ReadAllText($full) | ConvertFrom-Json }
+    catch { throw ('{0} is not valid JSON: {1}' -f $Label, $_.Exception.Message) }
+}
+
+function Get-SkillEvolutionCandidateContext([string]$CandidateDirectory) {
+    $state = Get-SkillEvolutionPackageState $CandidateDirectory
+    if (-not $state.pass) { throw ('Candidate package failed static validation: {0}' -f (@($state.findings.code) -join ',')) }
+    $parts = [System.Collections.Generic.List[string]]::new()
+    foreach ($file in @($state.files)) {
+        $content = [System.IO.File]::ReadAllText((Join-Path $state.root ([string]$file.path)))
+        $parts.Add(("## {0}`n{1}" -f $file.path, $content)) | Out-Null
+    }
+    return [pscustomobject]@{ state = $state; text = ($parts.ToArray() -join "`n`n") }
+}
+
+function ConvertFrom-SkillEvolutionAgentJson([string]$Text) {
+    $value = $Text.Trim()
+    if ($value -match '(?s)^```(?:json)?\s*(.*?)\s*```$') { $value = $matches[1] }
+    try { return $value | ConvertFrom-Json }
+    catch { return $null }
+}
+
+function Invoke-SkillEvolutionForwardTests {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$CandidateDirectory,
+        [Parameter(Mandatory = $true)]$Corpus,
+        [Parameter(Mandatory = $true)][string]$Model,
+        [Parameter(Mandatory = $true)][string]$ReasoningEffort
+    )
+    if (-not (Get-Command codex -ErrorAction SilentlyContinue)) { throw 'codex CLI is unavailable; execute evaluation is platform_na.' }
+    $context = Get-SkillEvolutionCandidateContext $CandidateDirectory
+    $manifest = Read-SkillEvolutionJson (Join-Path $context.state.root 'candidate.json') 'candidate manifest'
+    $runRoot = Join-Path $context.state.root ('forward-test-{0}' -f (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
+    $workspace = Join-Path $runRoot 'isolated-workspace'
+    [System.IO.Directory]::CreateDirectory($workspace) | Out-Null
+    $results = [System.Collections.Generic.List[object]]::new()
+    foreach ($case in @($Corpus.cases)) {
+        $caseId = [string]$case.id
+        if ($caseId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw ('Unsafe forward-test case ID: {0}' -f $caseId) }
+        $prompt = @"
+This is an isolated read-only candidate-skill replay. Do not modify files, use network access, delegate, or mutate host configuration. The candidate below is not installed or projected. Decide whether its documented trigger applies to the request; if it applies, follow the candidate instructions far enough to judge whether the task can be satisfied without external writes. This is evaluation evidence, not host invocation evidence.
+
+Return only JSON with these fields:
+{"applicable":true|false,"task_satisfied":true|false,"selected_skill":"$($manifest.skill_name)"|null,"reason":"short redacted reason"}
+
+Candidate package:
+$($context.text)
+
+Case kind: $([string]$case.kind)
+User request:
+$([string]$case.request)
+"@
+        $timer = [System.Diagnostics.Stopwatch]::StartNew()
+        $raw = @(& codex exec --ephemeral --json --sandbox read-only --model $Model -C $workspace --skip-git-repo-check -c ('model_reasoning_effort="{0}"' -f $ReasoningEffort) $prompt 2>&1)
+        $exitCode = $LASTEXITCODE
+        $timer.Stop()
+        $events = @($raw | ForEach-Object { try { $_ | ConvertFrom-Json } catch { $null } } | Where-Object { $null -ne $_ })
+        $message = $events | Where-Object { $_.type -eq 'item.completed' -and $_.item.type -eq 'agent_message' } | Select-Object -Last 1
+        $parsed = ConvertFrom-SkillEvolutionAgentJson ([string]$message.item.text)
+        $commands = @($events | Where-Object { $_.type -eq 'item.completed' -and $_.item.type -eq 'command_execution' } | ForEach-Object { [string]$_.item.command })
+        $sideEffects = @($commands | Where-Object { $_ -match '(?i)(Set-Content|Out-File|Remove-Item|Move-Item|Copy-Item|New-Item|git\s+(?:add|commit|push)|Invoke-WebRequest|Invoke-RestMethod|curl|wget|Start-Process)' }).Count
+        $usage = $events | Where-Object type -eq 'turn.completed' | Select-Object -Last 1
+        $rawPath = Join-Path $runRoot ('{0}.jsonl' -f $caseId)
+        [System.IO.File]::WriteAllLines($rawPath, @($raw | ForEach-Object { [string]$_ }), [System.Text.UTF8Encoding]::new($false))
+        $results.Add([pscustomobject][ordered]@{
+            case_id = $caseId
+            exit_code = $exitCode
+            parse_ok = ($null -ne $parsed)
+            applicable = if ($parsed) { [bool]$parsed.applicable } else { $false }
+            task_satisfied = if ($parsed) { [bool]$parsed.task_satisfied } else { $false }
+            selected_skill = if ($parsed) { [string]$parsed.selected_skill } else { $null }
+            reason = if ($parsed) { Protect-OperationSensitiveString ([string]$parsed.reason) } else { 'unparseable host result' }
+            tool_rounds = $commands.Count
+            side_effects = $sideEffects
+            duration_ms = $timer.ElapsedMilliseconds
+            input_tokens = [int]$usage.usage.input_tokens
+            output_tokens = [int]$usage.usage.output_tokens
+            model = $Model
+            reasoning_effort = $ReasoningEffort
+            raw_receipt = $rawPath
+        }) | Out-Null
+    }
+    return [pscustomobject]@{ run_root = $runRoot; results = $results.ToArray(); provider_calls = @($Corpus.cases).Count; host_writes = 0; active_writes = 0; report_writes = @($Corpus.cases).Count }
+}
+
+function Invoke-SkillEvolutionCommand([object[]]$Tokens = @()) {
+    $options = Parse-SkillEvolutionOptions $Tokens
+    $json = $options.flags.Contains('--json')
+    $command = [string]$options.command
+    $data = $null
+    switch ($command) {
+        'prepare' {
+            $signals = @(Get-SkillEvolutionOption $options '--signal' -Required -Multiple)
+            $skill = Get-SkillEvolutionOption $options '--skill'
+            $newSkill = Get-SkillEvolutionOption $options '--new-skill'
+            if (([string]::IsNullOrWhiteSpace($skill) -and [string]::IsNullOrWhiteSpace($newSkill)) -or (-not [string]::IsNullOrWhiteSpace($skill) -and -not [string]::IsNullOrWhiteSpace($newSkill))) { throw 'prepare requires exactly one of --skill or --new-skill.' }
+            $out = Resolve-SkillEvolutionPath (Get-SkillEvolutionOption $options '--out' -Required) $Root
+            $pilotPath = Get-SkillEvolutionOption $options '--pilot'
+            if ([string]::IsNullOrWhiteSpace($pilotPath)) { $pilotPath = Join-Path $Root 'tasks\skills-manager-vnext-lean-delivery-pilot.json' }
+            $pilot = Read-SkillEvolutionJson $pilotPath 'lean delivery pilot'
+            $data = Invoke-SkillEvolutionPrepare -Pilot $pilot -SignalIds $signals -SkillName $(if ($skill) { $skill } else { $newSkill }) -CandidateMode $(if ($skill) { 'existing' } else { 'new' }) -OutRoot $out -RepoRoot $Root
+        }
+        'evaluate' {
+            $candidate = Resolve-SkillEvolutionPath (Get-SkillEvolutionOption $options '--candidate' -Required) $Root
+            if (-not (Test-SkillEvolutionPathWithin $candidate (Join-Path ([IO.Path]::GetFullPath($Root)) 'reports\skill-evolution'))) { throw 'Candidate must remain under reports/skill-evolution.' }
+            $corpusPath = Resolve-SkillEvolutionPath (Get-SkillEvolutionOption $options '--corpus' -Required) $Root
+            $corpus = Read-SkillEvolutionJson $corpusPath 'skill evolution corpus'
+            $model = Get-SkillEvolutionOption $options '--model'
+            if ([string]::IsNullOrWhiteSpace($model)) { $model = 'gpt-5.6-sol' }
+            $effort = Get-SkillEvolutionOption $options '--reasoning-effort'
+            if ([string]::IsNullOrWhiteSpace($effort)) { $effort = 'medium' }
+            if ($effort -notin $script:SkillEvolutionAllowedReasoningEfforts) { throw ('Unsupported reasoning effort: {0}' -f $effort) }
+            $execute = $options.flags.Contains('--execute')
+            $forward = if ($execute) { Invoke-SkillEvolutionForwardTests -CandidateDirectory $candidate -Corpus $corpus -Model $model -ReasoningEffort $effort } else { [pscustomobject]@{ results = @(); provider_calls = 0; report_writes = 0 } }
+            $data = Invoke-SkillEvolutionEvaluate -CandidateDirectory $candidate -Corpus $corpus -CaseResults @($forward.results) -Execute:$execute -Model $model -ReasoningEffort $effort -RepoRoot $Root
+            $out = Get-SkillEvolutionOption $options '--out'
+            if ([string]::IsNullOrWhiteSpace($out)) { $out = Join-Path $candidate 'evaluation.json' }
+            $outFull = Assert-SkillEvolutionReportPath (Resolve-SkillEvolutionPath $out $Root) $Root
+            $data.report_writes = [int]$forward.report_writes + 1
+            Write-SkillEvolutionJsonAtomic $outFull $data
+            $data | Add-Member -NotePropertyName receipt_path -NotePropertyValue $outFull
+        }
+        'plan' {
+            $candidate = Resolve-SkillEvolutionPath (Get-SkillEvolutionOption $options '--candidate' -Required) $Root
+            $evaluationPath = Resolve-SkillEvolutionPath (Get-SkillEvolutionOption $options '--evaluation' -Required) $Root
+            $reviewPath = Resolve-SkillEvolutionPath (Get-SkillEvolutionOption $options '--review' -Required) $Root
+            $out = Resolve-SkillEvolutionPath (Get-SkillEvolutionOption $options '--out' -Required) $Root
+            $evaluation = Read-SkillEvolutionJson $evaluationPath 'evaluation receipt'
+            $review = Read-SkillEvolutionJson $reviewPath 'reviewed change-set'
+            $data = New-SkillEvolutionPlan -CandidateDirectory $candidate -Evaluation $evaluation -EvaluationPath $evaluationPath -Review $review -ReviewPath $reviewPath -RepoRoot $Root
+            $outFull = Assert-SkillEvolutionReportPath $out $Root
+            Write-SkillEvolutionJsonAtomic $outFull $data
+            $data | Add-Member -NotePropertyName plan_path -NotePropertyValue $outFull
+        }
+        'apply' {
+            $planPath = Resolve-SkillEvolutionPath (Get-SkillEvolutionOption $options '--plan' -Required) $Root
+            $token = Get-SkillEvolutionOption $options '--token' -Required
+            $out = Resolve-SkillEvolutionPath (Get-SkillEvolutionOption $options '--out' -Required) $Root
+            $plan = Read-SkillEvolutionJson $planPath 'skill evolution plan'
+            $data = Invoke-SkillEvolutionApply -Plan $plan -Token $token -ReceiptPath $out -RepoRoot $Root
+        }
+        'rollback' {
+            $receiptPath = Resolve-SkillEvolutionPath (Get-SkillEvolutionOption $options '--receipt' -Required) $Root
+            $token = Get-SkillEvolutionOption $options '--token' -Required
+            $out = Get-SkillEvolutionOption $options '--out'
+            if (-not [string]::IsNullOrWhiteSpace($out)) { $out = Resolve-SkillEvolutionPath $out $Root }
+            $receipt = Read-SkillEvolutionJson $receiptPath 'promotion receipt'
+            $data = Invoke-SkillEvolutionRollback -Receipt $receipt -Token $token -OutPath $out -RepoRoot $Root
+        }
+        default { throw ('Unknown skill-evolution command: {0}' -f $command) }
+    }
+    $pass = if ($null -ne (Get-SkillEvolutionProperty $data 'pass')) { [bool]$data.pass } elseif ([string]$data.status -in @('failed', 'partial')) { $false } else { $true }
+    $envelope = [pscustomobject][ordered]@{ schema_version = 1; command = ('skill-evolution-{0}' -f $command); pass = $pass; truth_boundary = if ($command -eq 'evaluate' -and $options.flags.Contains('--execute')) { 'isolated_forward_test_not_host_invocation' } else { 'repo_controlled_skill_lifecycle' }; data = $data }
+    $output = if ($json) { $envelope | ConvertTo-Json -Depth 80 -Compress } else { 'skill-evolution {0}: pass={1}' -f $command, $pass }
+    return [pscustomobject]@{ exit_code = $(if ($pass) { 0 } else { 2 }); output = $output; json = $json; envelope = $envelope }
+}
+
 function Get-WorkflowCatalog {
     $doctorStrictStep = [pscustomobject]@{
         id = "doctor_strict"
@@ -25840,6 +26888,7 @@ Skills 管理器（中文菜单）
   - `add`/`npx` 未指定 `--skill` 时只新增技能库，不会安装整库技能
   - `应用` 默认只 dry-run；只有 `--apply --yes` 才真正写入
   - `构建生效` 写入仓库外宿主目录前要求 clean Git commit；仅在明确接受风险时使用 `-AllowUnverifiedHostProjection`，receipt 会标记为 unverified override
+  - `skill-evolution` 的 prepare/evaluate 默认不调用 provider、不写宿主；晋级必须经过 reviewed change-set 和显式 token
 
 常用命令：
   .\skills.ps1 发现
@@ -25890,7 +26939,16 @@ Plugin（P3 repo/fixture-only）：
 
 技能投影：
   .\skills.ps1 构建生效
+  .\skills.ps1 capability-inventory --view skill-surfaces [--host-snapshot <snapshot.json>] --json
   .\scripts\verify-native-skill-metadata.ps1 -Json
+
+受控技能进化：
+  .\skills.ps1 skill-evolution prepare --signal <sample-id>... (--skill <name> | --new-skill <name>) --out <run-root> --json
+  .\skills.ps1 skill-evolution evaluate --candidate <candidate-dir> --corpus <cases.json> [--execute] --model gpt-5.6-sol --reasoning-effort medium --json
+  .\skills.ps1 skill-evolution plan --candidate <candidate-dir> --evaluation <receipt.json> --review <reviewed-change-set.json> --out <plan.json> --json
+  .\skills.ps1 skill-evolution apply --plan <plan.json> --token PROMOTE_SKILL_CANDIDATE --out <receipt.json> --json
+  .\skills.ps1 skill-evolution rollback --receipt <receipt.json> --token ROLLBACK_SKILL_PROMOTION --json
+  只晋级 `SKILL.md`、`agents/openai.yaml` 和非执行型 references；不自动构建、投影、写用户技能根或修改宿主配置。
 
 目标仓审查：
   .\skills.ps1 审查目标 需求设置
@@ -26281,6 +27339,8 @@ if ($MyInvocation.InvocationName -ne '.') {
             "audit-targets" { Invoke-AuditTargetsCommand (Merge-FilterAndArgs $Filter $args) }
             "能力清单" { $result = Invoke-CapabilityInventoryCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
             "capability-inventory" { $result = Invoke-CapabilityInventoryCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
+            "skill-evolution" { $result = Invoke-SkillEvolutionCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
+            "技能进化" { $result = Invoke-SkillEvolutionCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
             "plugin-inventory" { $result = Invoke-PluginInventoryCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
             "plugin-lint" { $result = Invoke-PluginLintCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }
             "plugin-export" { $result = Invoke-PluginExportCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output }; if ($result.exit_code -ne 0) { exit $result.exit_code } }

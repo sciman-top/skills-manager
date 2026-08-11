@@ -19,6 +19,7 @@ $Files = @(
     "Domain/RuleResponsibility.ps1",
     "Domain/RulePatchPlan.ps1",
     "Application/CapabilityInventory.ps1",
+    "Application/SkillEvolution.ps1",
     "Application/HostCapabilityResolution.ps1",
     "Application/SkillCatalogCompiler.ps1",
     "Application/SkillEligibilityPolicy.ps1",
@@ -62,6 +63,7 @@ $Files = @(
     "Commands/AuditTargets.Workflow.ps1",
     "Commands/AuditTargets.Args.ps1",
     "Commands/SkillProjection.ps1",
+    "Commands/SkillEvolution.ps1",
     "Commands/Workflow.ps1",
     "Commands/Utils.ps1",
     "Main.ps1"

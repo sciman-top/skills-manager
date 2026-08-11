@@ -2,6 +2,7 @@ $script:NativeInvocationTraceStages = @('listed', 'selected', 'injected', 'execu
 $script:NativeInvocationTraceSources = @('app_server', 'cli', 'native_host', 'fixture', 'unknown')
 $script:NativeInvocationTraceFreshness = @('fresh', 'stale', 'unknown')
 $script:NativeInvocationTraceTruthLevels = @('unknown', 'host_inventory_loaded', 'host_evaluation_partial', 'host_invocation_observed')
+$script:NativeInvocationTraceModes = @('native_events', 'self_report', 'read_heuristic')
 
 function Get-NativeInvocationTraceProperty($Object, [string[]]$Names) {
     foreach ($name in @($Names)) {
@@ -50,6 +51,9 @@ function New-NativeInvocationTrace {
         [Parameter(Mandatory = $true)][string]$Source,
         [Parameter(Mandatory = $true)][ValidateSet('fresh', 'stale', 'unknown')][string]$Freshness,
         [Parameter(Mandatory = $true)][string]$CapturedAt,
+        [ValidateSet('native_events', 'self_report', 'read_heuristic')][string]$InvocationMode = 'native_events',
+        [string]$EventsPath,
+        [string]$ReasoningEffort,
         [object[]]$Events = @()
     )
 
@@ -69,7 +73,7 @@ function New-NativeInvocationTrace {
             $kind = 'unknown'
         }
         $skillName = ([string](Get-NativeInvocationTraceProperty $event @('skill_name', 'name', 'skill', 'capability_name'))).Trim()
-        if ([string]::IsNullOrWhiteSpace($skillName)) { $findings.Add((New-OperationFinding 'event_skill_missing' 'error' ($path + '.skill_name') 'Invocation events require a skill name.')) | Out-Null }
+        if ([string]::IsNullOrWhiteSpace($skillName) -and $kind -ne 'abstained') { $findings.Add((New-OperationFinding 'event_skill_missing' 'error' ($path + '.skill_name') 'Non-abstention invocation events require a skill name.')) | Out-Null }
         $occurredAt = [string](Get-NativeInvocationTraceProperty $event @('occurred_at', 'timestamp', 'captured_at'))
         if (-not (Test-OperationRfc3339 $occurredAt)) { $findings.Add((New-OperationFinding 'event_timestamp_invalid' 'error' ($path + '.occurred_at') 'Invocation event occurred_at must be RFC3339.')) | Out-Null }
         $rawEventId = [string](Get-NativeInvocationTraceProperty $event @('event_id', 'id'))
@@ -82,6 +86,7 @@ function New-NativeInvocationTrace {
                 skill_name = $skillName
                 occurred_at = if ([string]::IsNullOrWhiteSpace($occurredAt)) { $null } else { $occurredAt }
                 correlation_id = New-NativeInvocationTraceRedactedId 'corr' $rawCorrelation
+                correlation_present = -not [string]::IsNullOrWhiteSpace($rawCorrelation)
                 reason = if ([string]::IsNullOrWhiteSpace($reason)) { $null } else { Protect-OperationSensitiveString $reason }
             }) | Out-Null
         $eventIndex++
@@ -111,6 +116,11 @@ function New-NativeInvocationTrace {
         $executionEvent = $eventArray[$executionIndex]
         if ([string]$executionEvent.kind -ne 'executed') { continue }
 
+        if (-not [bool]$executionEvent.correlation_present) {
+            $findings.Add((New-OperationFinding 'invocation_correlation_missing' 'error' '$.stages.executed' 'Execution cannot be promoted without an explicit correlation identifier.')) | Out-Null
+            $invocationChainInvalid = $true
+            continue
+        }
         $chainKey = Get-NativeInvocationTraceEventChainKey $executionEvent
         $sameChainInjections = @($eventArray | Where-Object { [string]$_.kind -eq 'injected' -and (Get-NativeInvocationTraceEventChainKey $_) -eq $chainKey })
         if ($sameChainInjections.Count -eq 0) {
@@ -126,7 +136,7 @@ function New-NativeInvocationTrace {
         $orderedInjectionObserved = $false
         for ($injectionIndex = 0; $injectionIndex -lt $executionIndex; $injectionIndex++) {
             $injectionEvent = $eventArray[$injectionIndex]
-            if ([string]$injectionEvent.kind -ne 'injected' -or (Get-NativeInvocationTraceEventChainKey $injectionEvent) -ne $chainKey) { continue }
+            if ([string]$injectionEvent.kind -ne 'injected' -or -not [bool]$injectionEvent.correlation_present -or (Get-NativeInvocationTraceEventChainKey $injectionEvent) -ne $chainKey) { continue }
             $injectionTime = [DateTimeOffset]::MinValue
             if ($executionTimeValid -and [DateTimeOffset]::TryParse([string]$injectionEvent.occurred_at, [ref]$injectionTime) -and $injectionTime -le $executionTime) {
                 $orderedInjectionObserved = $true
@@ -159,10 +169,14 @@ function New-NativeInvocationTrace {
         $status = 'unknown'
     }
     elseif ($validInvocationObserved) {
-        $truthLevel = if ($Freshness -eq 'fresh') { 'host_invocation_observed' } else { 'unknown' }
-        $status = if ($Freshness -eq 'fresh') { 'complete' } else { 'unknown' }
+        $promotable = ($Freshness -eq 'fresh' -and $InvocationMode -eq 'native_events')
+        $truthLevel = if ($promotable) { 'host_invocation_observed' } elseif ($Freshness -eq 'fresh') { 'host_evaluation_partial' } else { 'unknown' }
+        $status = if ($promotable) { 'complete' } elseif ($Freshness -eq 'fresh') { 'partial' } else { 'unknown' }
         $outcome = 'executed'
-        $invocationObservable = ($Freshness -eq 'fresh')
+        $invocationObservable = $promotable
+        if ($Freshness -eq 'fresh' -and -not $promotable) {
+            $findings.Add((New-OperationFinding 'invocation_mode_partial' 'warning' '$.invocation_mode' 'Self-report and read heuristics cannot promote execution to observed invocation.')) | Out-Null
+        }
     }
     elseif ($hasAbstained) {
         $outcome = 'abstained'
@@ -199,6 +213,9 @@ function New-NativeInvocationTrace {
         source = $Source
         freshness = $Freshness
         captured_at = $CapturedAt
+        invocation_mode = $InvocationMode
+        events_path = if ([string]::IsNullOrWhiteSpace($EventsPath)) { $null } else { $EventsPath }
+        reasoning_effort = if ([string]::IsNullOrWhiteSpace($ReasoningEffort)) { $null } else { $ReasoningEffort }
         correlation_id = $correlationSource
         status = $status
         truth_level = $truthLevel
@@ -224,12 +241,13 @@ function Test-NativeInvocationTraceContract {
     $findings = New-Object System.Collections.Generic.List[object]
     if ($null -eq $Trace) { return New-OperationValidationResult @((New-OperationFinding 'trace_missing' 'error' '$' 'Native invocation trace is required.')) }
     if ((Get-NativeInvocationTraceProperty $Trace @('schema_version')) -ne 1) { $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only NativeInvocationTrace schema version 1 is supported.')) | Out-Null }
-    foreach ($field in @('trace_id', 'surface', 'source', 'freshness', 'captured_at', 'truth_level', 'status', 'outcome')) {
+    foreach ($field in @('trace_id', 'surface', 'source', 'freshness', 'captured_at', 'truth_level', 'status', 'outcome', 'invocation_mode')) {
         if ([string]::IsNullOrWhiteSpace([string](Get-NativeInvocationTraceProperty $Trace @($field)))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Required trace field is missing.')) | Out-Null }
     }
     if ([string](Get-NativeInvocationTraceProperty $Trace @('source')) -notin @($script:NativeInvocationTraceSources)) { $findings.Add((New-OperationFinding 'trace_source_invalid' 'error' '$.source' 'Trace source is not supported.')) | Out-Null }
     if ([string](Get-NativeInvocationTraceProperty $Trace @('freshness')) -notin @($script:NativeInvocationTraceFreshness)) { $findings.Add((New-OperationFinding 'trace_freshness_invalid' 'error' '$.freshness' 'Trace freshness is not supported.')) | Out-Null }
     if ([string](Get-NativeInvocationTraceProperty $Trace @('truth_level')) -notin @($script:NativeInvocationTraceTruthLevels)) { $findings.Add((New-OperationFinding 'truth_level_invalid' 'error' '$.truth_level' 'Trace truth level is not supported.')) | Out-Null }
+    if ([string](Get-NativeInvocationTraceProperty $Trace @('invocation_mode')) -notin @($script:NativeInvocationTraceModes)) { $findings.Add((New-OperationFinding 'invocation_mode_invalid' 'error' '$.invocation_mode' 'Trace invocation mode is not supported.')) | Out-Null }
     if (-not (Test-OperationRfc3339 (Get-NativeInvocationTraceProperty $Trace @('captured_at')))) { $findings.Add((New-OperationFinding 'captured_at_invalid' 'error' '$.captured_at' 'Trace captured_at must be RFC3339.')) | Out-Null }
     if (-not (Test-OperationArray (Get-NativeInvocationTraceProperty $Trace @('events')))) { $findings.Add((New-OperationFinding 'events_type_invalid' 'error' '$.events' 'Trace events must be an array.')) | Out-Null }
     $stages = Get-NativeInvocationTraceProperty $Trace @('stages')
@@ -242,6 +260,7 @@ function Test-NativeInvocationTraceContract {
     if ((Get-NativeInvocationTraceProperty $Trace @('invocation_observable')) -eq $true -and (Get-NativeInvocationTraceProperty $Trace @('stages')).executed.observed -ne $true) { $findings.Add((New-OperationFinding 'invocation_promotion_invalid' 'error' '$.invocation_observable' 'Invocation cannot be observable without executed evidence.')) | Out-Null }
     if ([string](Get-NativeInvocationTraceProperty $Trace @('truth_level')) -eq 'host_invocation_observed') {
         if ((Get-NativeInvocationTraceProperty $stages @('injected')).observed -ne $true -or (Get-NativeInvocationTraceProperty $stages @('executed')).observed -ne $true) { $findings.Add((New-OperationFinding 'host_invocation_evidence_missing' 'error' '$.truth_level' 'host_invocation_observed requires injected and executed evidence.')) | Out-Null }
+        if ([string](Get-NativeInvocationTraceProperty $Trace @('freshness')) -ne 'fresh' -or [string](Get-NativeInvocationTraceProperty $Trace @('invocation_mode')) -ne 'native_events') { $findings.Add((New-OperationFinding 'host_invocation_promotion_invalid' 'error' '$.truth_level' 'Observed invocation requires fresh native events.')) | Out-Null }
     }
     foreach ($field in @('provider_calls', 'native_mutations', 'writes')) {
         $value = Get-NativeInvocationTraceProperty $Trace @($field)

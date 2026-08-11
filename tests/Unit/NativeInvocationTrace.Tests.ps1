@@ -141,4 +141,33 @@ Describe 'Native invocation trace' {
         @($trace.findings | Where-Object code -eq 'unknown_event_type').Count | Should Be 1
         (Test-NativeInvocationTraceContract $trace).pass | Should Be $false
     }
+
+    It 'keeps self-report and file-read heuristics at partial truth' {
+        $events = @((New-TraceEvent 'injected' -EventId 'evt-injected'), (New-TraceEvent 'executed' -EventId 'evt-executed'))
+        foreach ($mode in @('self_report', 'read_heuristic')) {
+            $trace = New-NativeInvocationTrace -TraceId ('trace-' + $mode) -Surface 'cli' -Source 'cli' -Freshness 'fresh' -CapturedAt '2026-08-07T06:00:01Z' -InvocationMode $mode -Events $events
+            $trace.truth_level | Should Be 'host_evaluation_partial'
+            $trace.invocation_observable | Should Be $false
+            @($trace.findings.code) | Should -Contain 'invocation_mode_partial'
+            (Test-NativeInvocationTraceContract $trace).pass | Should Be $true
+        }
+    }
+
+    It 'does not promote stale native events' {
+        $events = @((New-TraceEvent 'injected' -EventId 'evt-injected'), (New-TraceEvent 'executed' -EventId 'evt-executed'))
+        $trace = New-NativeInvocationTrace -TraceId 'trace-stale' -Surface 'cli' -Source 'cli' -Freshness 'stale' -CapturedAt '2026-08-07T06:00:01Z' -InvocationMode native_events -Events $events
+        $trace.truth_level | Should Be 'unknown'
+        $trace.invocation_observable | Should Be $false
+    }
+
+    It 'requires an explicit correlation on both injected and executed events' {
+        $events = @(
+            [pscustomobject]@{ event_id = 'evt-injected'; kind = 'injected'; skill_name = 'skill-a'; occurred_at = '2026-08-07T06:00:01Z'; correlation_id = '' }
+            [pscustomobject]@{ event_id = 'evt-executed'; kind = 'executed'; skill_name = 'skill-a'; occurred_at = '2026-08-07T06:00:02Z'; correlation_id = '' }
+        )
+        $trace = New-NativeInvocationTrace -TraceId 'trace-no-correlation' -Surface 'app_server' -Source 'native_host' -Freshness 'fresh' -CapturedAt '2026-08-07T06:00:03Z' -InvocationMode native_events -Events $events
+        $trace.truth_level | Should Be 'unknown'
+        @($trace.findings.code) | Should -Contain 'invocation_correlation_missing'
+        (Test-NativeInvocationTraceContract $trace).pass | Should Be $false
+    }
 }

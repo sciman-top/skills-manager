@@ -63,7 +63,7 @@ Describe 'vNext product planning contract' {
         $result.exit_code | Should Be 0
         $parsed.pass | Should Be $true
         $parsed.finding_count | Should Be 0
-        $parsed.task_count | Should Be 12
+        $parsed.task_count | Should Be 15
         $parsed.current_phase | Should Be $currentPhase
         $parsed.historical_mode | Should Be $false
         $parsed.truth_level | Should Be 'host_evaluation_partial'

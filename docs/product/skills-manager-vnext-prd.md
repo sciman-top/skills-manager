@@ -256,7 +256,7 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 - `FR-LDL-003`：进入实现前最多提出三项会改变方案或验收的高价值澄清；其余可逆细节采用显式假设继续。相同 `issue_id` 连续失败两次后停止局部补丁，回到 baseline/slice 重新规划，方向变化或风险越界时询问用户。
 - `FR-LDL-004`：产品、项目、业务、UX、架构、前端、后端、移动、测试、安全、发布和运维只作为按需责任 lens；主 Agent 对端到端结果负责，不默认实例化固定角色团队或制造角色接力文档。
 - `FR-LDL-005`：为 maintenance pilot 轻量记录 TTFV、返工、人工打断、非产品 artifact、门禁耗时和 live acceptance 转化；指标仅 observe，不建立遥测服务，不以语义评分或未经 baseline 的阈值阻断交付。
-- `FR-LDL-006`：重复工作先成为 `skill_candidate`，经代表任务 replay、失败样本修订、shadow、有限 canary 和 reviewed promotion 后才进入稳定 skill；持续记录触发精度、净收益、适用边界和退役条件，宿主原生能力覆盖或模型进步消除缺口时应合并、降级或 retire。
+- `FR-LDL-006`：重复工作先成为 `skill_candidate`，经代表任务 replay、失败样本修订、shadow、有限 canary 和 reviewed promotion 后才进入稳定 skill；持续记录触发精度、净收益、适用边界和退役条件，宿主原生能力覆盖或模型进步消除缺口时应合并、降级或 retire。当前落地为 M1 `skill_signal v1` + ignored 隔离 candidate + exact-current evaluation/review + 显式 `PROMOTE_SKILL_CANDIDATE`；候选生成和验证可自动化，晋级不会自动发生。
 - `FR-LDL-007`：M1 pilot 只登记达到证据停止点的真实任务；synthetic、候选和当前 pilot/规划维护自身不得计入 10 个样本。优先使用近期可比 native-only 历史任务或交替匹配任务作 baseline；无可比项时只做描述性报告，不要求重复执行同一任务，也不宣称因果收益。
 
 ### 6.11 Engineered agent workflow and tool adoption
@@ -271,8 +271,8 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 - `FR-EWF-008`：工具候选必须记录 `source/revision/license/trust / problem_evidence / native_equivalent / real_consumers / disposition / integration_mode / data_auth_write_boundary / evaluation / maintenance_cost / retirement_trigger / truth_level`；缺任一安全或真值字段时保持 `defer`。
 - `FR-EWF-009`：`AGENTS.md` 承接稳定仓库约定，skill 承接重复 workflow，plugin 承接可安装组合，MCP/connector 承接实时外部数据/动作，hook/script/CI 承接机械 enforcement，Git/worktree 承接版本与写入隔离；不得用一个 surface 替代所有层。
 - `FR-EWF-010`：知识库/代码图/理解工具只有在至少两个独立真实任务证明 repo-native `rg`、符号/测试/文档与宿主上下文不足，且语言覆盖、隐私、索引 freshness、资源、供应链和卸载/重建路径均可验证时，才进入 read-only canary；它们不成为源码、任务或验收真源。
-- `FR-EWF-011`：skill 优化只借鉴 `real sample -> replay -> shadow -> bounded canary -> reviewed promotion -> retain/revise/retire`；不得把领域研究系统的自动蒸馏、provider/embedding/solver 依赖直接解释为通用 workflow 自动升级能力。
-- `FR-EWF-012`：M1 pilot 在既有 10 个真实样本中同时观察 coordination mode、shared-write policy、tool disposition、external context adapter 和 skill lifecycle action；本 maintenance 切片自身不计数，也不为观察字段建设 daemon 或 telemetry。
+- `FR-EWF-011`：skill 优化只借鉴 `real sample -> replay -> shadow -> bounded canary -> reviewed promotion -> retain/revise/retire`；不得把领域研究系统的自动蒸馏、provider/embedding/solver 依赖直接解释为通用 workflow 自动升级能力。当前 MVP 只允许 `SKILL.md`、`agents/openai.yaml` 和非执行型 references，脚本、hook、MCP、plugin、权限和网络行为 defer 到新的 admission。
+- `FR-EWF-012`：M1 pilot 在既有 10 个真实样本中同时观察 coordination mode、shared-write policy、tool disposition、external context adapter 和 skill lifecycle action；本 maintenance 切片自身不计数，也不为观察字段建设 daemon 或 telemetry。pilot 当前为 `collecting`，不足 10 类真实样本时只能报告 `pilot_collecting`。
 - `FR-EWF-013`：长链路任务的分解、DAG、Plan/Goal 状态和完成回执由宿主原生能力拥有；本仓 task manifest 仅描述本产品自己的实现工作，不升级为通用 `TaskGraph` runtime 或跨项目治理合同。
 - `FR-EWF-014`：模型、reasoning effort、fallback 和可用性由用户与宿主根据当前 surface 决定；本仓不维护模型档位、proposal validator、Radar 或外部榜单决策链。
 - `FR-EWF-015`：任务需要子 Agent/worktree 时直接使用宿主原生控制面；本仓不规定固定角色、固定模型三档或仓库级并发配额。
@@ -309,6 +309,12 @@ CURRENT_PHASE_TRUTH_SOURCE: tasks/skills-manager-vnext-phase6.tasks.json
 2026-08-08 的 P6-012 repo-side closeout 与 `1097/1097` full 结果是 point-in-time 历史证据。P6-001 至 P6-012 的仓库侧切片、staged removal、source/config/生成链和 compatibility verifier 已落盘；当前任务计数、runtime migration、truth ladder、full authority 与最新 evidence 只从上述 manifest 读取。
 
 当前仓库侧 compatibility boundary 为：legacy `SkillRouting` source 及其自测已删除，`技能配置`/`skill-profile` dispatch 已退役；profile compatibility view 仅为 `read_only`、`reachability_authority=none`，独立 verifier 只读取配置并报告 migration compatibility 状态。P5 profile advisor、resident dispatcher 与 cold-load 描述保留为历史或迁移契约，不是普通请求的当前语义选择 owner。
+
+本轮 P6 增量实现 `SkillSurfaceView v1`：`capability-inventory --view skill-surfaces --json` 只读汇总 `repo_supply`、`canonical_projection`、`user_skill_root`、`system`、`plugin_cache` 和可选 `host_visible` snapshot。每个 surface 携带 authority/source/fingerprint/freshness/coverage/count，skill item 携带 entrypoint/description fingerprint 和 ownership；`managed_stale`、`external_owned`、`ownership_unknown` 只产生分类，不授权删除。
+
+本轮同时扩展现有 `NativeInvocationTrace` 和 evaluator 的 `-Mode invocation`。正式晋级要求 fresh、同 skill、同 correlation 的 native `injected -> executed` 事件；self-report、`Get-Content SKILL.md`、输出中的 `selected_skills` 和 stale events 只能是 `host_evaluation_partial`。正式 corpus 固定包含 debug、completion verification、PowerShell custom、no-skill negative 和 explicit router fallback 五类，仍不等价于业务 live acceptance。
+
+M1 `lean_delivery_pilot` 当前为 `collecting`，候选准备落在 ignored `reports/skill-evolution` 隔离目录；只有两项独立真实信号、负向/no-skill 控制、无 native equivalent、稳定消费者和净收益/回滚/退役字段齐备时才可进入 replay/evaluate。apply 复用 `OperationPlan` 的 `skill_lifecycle` domain，只接受 reviewed change-set、exact-current hashes 和 `PROMOTE_SKILL_CANDIDATE`，默认不构建、不投影、不写用户技能根或宿主配置。
 
 fresh inventory、host evaluation、injected/executed invocation 与业务 acceptance 是独立层级；它们只能由对应证据晋级，不能由 metadata visibility、focused tests 或 planning verifier 推导。tracked manifest 不复制 `passed|stale` 运行态：当前 full 是否有效只由 `reports/quality-gates/current.json` 指向的 immutable full receipt 及 exact-current-source 校验决定。
 

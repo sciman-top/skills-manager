@@ -3,8 +3,12 @@ param(
     [string]$CorpusPath,
     [string]$OutputRoot,
     [string[]]$CaseId,
-    [ValidateSet('selection', 'cold_load', 'all')][string]$Mode = 'all',
+    [ValidateSet('selection', 'cold_load', 'invocation', 'all')][string]$Mode = 'all',
     [string]$Model = 'gpt-5.6-sol',
+    [ValidateSet('native_events', 'self_report', 'read_heuristic')][string]$InvocationMode = 'native_events',
+    [string]$EventsPath,
+    [string]$ProjectionPath,
+    [ValidateSet('low', 'medium', 'high', 'xhigh')][string]$ReasoningEffort = 'medium',
     [switch]$Execute,
     [switch]$Json
 )
@@ -15,7 +19,13 @@ if ([string]::IsNullOrWhiteSpace($CorpusPath)) { $CorpusPath = Join-Path $repoRo
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) { $OutputRoot = Join-Path $repoRoot 'reports\host-skill-selection-acceptance' }
 $schemaPath = Join-Path $repoRoot 'config\codex-skill-profile-benchmark-output.schema.json'
 $configPath = Join-Path $repoRoot 'skills.json'
-$projectionPath = Join-Path $repoRoot 'reports\skill-projection\current.json'
+if ([string]::IsNullOrWhiteSpace($ProjectionPath)) { $ProjectionPath = Join-Path $repoRoot 'reports\skill-projection\current.json' }
+$operationPath = Join-Path $repoRoot 'src\Domain\OperationPlan.ps1'
+$tracePath = Join-Path $repoRoot 'src\Domain\NativeInvocationTrace.ps1'
+$traceAdapterPath = Join-Path $repoRoot 'src\Infrastructure\NativeInvocationTraceAdapters.ps1'
+if (Test-Path -LiteralPath $operationPath) { . $operationPath }
+if (Test-Path -LiteralPath $tracePath) { . $tracePath }
+if (Test-Path -LiteralPath $traceAdapterPath) { . $traceAdapterPath }
 
 function Get-NormalizedStringArray($Value) {
     return @($Value | ForEach-Object { @(([string]$_) -split ',') } | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
@@ -165,8 +175,113 @@ $($Case.request)
     }
 }
 
+function Invoke-FormalInvocationAcceptance($Corpus, [string]$InputEventsPath, [bool]$ExecuteEvents) {
+    $formalCases = @($Corpus.invocation_cases)
+    if ($formalCases.Count -ne [int]$Corpus.invocation_case_count -or $formalCases.Count -lt 5) { throw 'formal invocation corpus count is invalid' }
+    $requiredCategories = @('debug_positive', 'completion_verification_positive', 'powershell_custom_positive', 'no_skill_negative', 'explicit_router_fallback')
+    foreach ($category in $requiredCategories) {
+        if (@($formalCases | Where-Object category -eq $category).Count -ne 1) { throw ('formal invocation corpus must contain exactly one {0} case' -f $category) }
+    }
+    $plan = [ordered]@{
+        schema_version = 1
+        evaluation_id = [string]$Corpus.evaluation_id
+        valid = $true
+        execute = $ExecuteEvents
+        mode = 'invocation'
+        invocation_mode = $InvocationMode
+        events_path = $InputEventsPath
+        model = $Model
+        reasoning_effort = $ReasoningEffort
+        formal_case_count = $formalCases.Count
+        case_ids = @($formalCases.id)
+        provider_calls = 0
+        host_writes = 0
+        truth_level = 'host_evaluation_partial'
+    }
+    if (-not $ExecuteEvents) { return [pscustomobject]@{ pass = $true; plan_only = $true; output = [pscustomobject]$plan } }
+    if ([string]::IsNullOrWhiteSpace($InputEventsPath)) { throw 'Mode invocation with -Execute requires -EventsPath.' }
+    $fullEventsPath = [IO.Path]::GetFullPath($InputEventsPath)
+    if (-not (Test-Path -LiteralPath $fullEventsPath -PathType Leaf)) { throw ('host events file not found: {0}' -f $fullEventsPath) }
+    $receiptSet = Get-Content -LiteralPath $fullEventsPath -Raw | ConvertFrom-Json
+    if ([int]$receiptSet.schema_version -ne 1 -or [string]$receiptSet.authority -ne 'native_host_events') { throw 'host events receipt must be schema v1 with authority=native_host_events' }
+    $catalogFingerprint = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $findings = [Collections.Generic.List[object]]::new()
+    if ([string]$receiptSet.catalog_fingerprint -ne $catalogFingerprint) { $findings.Add([pscustomobject]@{ code = 'catalog_fingerprint_mismatch'; severity = 'error'; message = 'Host events are not bound to the exact-current skills catalog.' }) | Out-Null }
+    $projectionFull = [IO.Path]::GetFullPath($ProjectionPath)
+    $projection = $null
+    if (-not (Test-Path -LiteralPath $projectionFull -PathType Leaf)) {
+        $findings.Add([pscustomobject]@{ code = 'projection_snapshot_missing'; severity = 'error'; message = 'Exact-current projection snapshot is required for invocation acceptance.' }) | Out-Null
+    }
+    else {
+        try { $projection = Get-Content -LiteralPath $projectionFull -Raw | ConvertFrom-Json } catch { $findings.Add([pscustomobject]@{ code = 'projection_snapshot_invalid'; severity = 'error'; message = $_.Exception.Message }) | Out-Null }
+    }
+    $projectionFingerprint = if ($null -ne $projection) { [string]$projection.projection_fingerprint } else { '' }
+    $projectionCaptured = [datetimeoffset]::MinValue
+    $projectionFresh = $null -ne $projection -and $projectionFingerprint -match '^[a-f0-9]{64}$' -and @($projection.canonical).Count -gt 0 -and [datetimeoffset]::TryParse([string]$projection.generated_at, [ref]$projectionCaptured) -and ([datetimeoffset]::UtcNow - $projectionCaptured).TotalHours -ge 0 -and ([datetimeoffset]::UtcNow - $projectionCaptured).TotalHours -le 24
+    if (-not $projectionFresh) { $findings.Add([pscustomobject]@{ code = 'projection_snapshot_not_fresh_complete'; severity = 'error'; message = 'Projection snapshot must be fresh, complete, and fingerprinted.' }) | Out-Null }
+    if ([string]$receiptSet.projection_fingerprint -ne $projectionFingerprint) { $findings.Add([pscustomobject]@{ code = 'projection_fingerprint_mismatch'; severity = 'error'; message = 'Host events are not bound to the exact-current projection snapshot.' }) | Out-Null }
+    if ([string]$receiptSet.model -ne $Model -or [string]$receiptSet.reasoning_effort -ne $ReasoningEffort) { $findings.Add([pscustomobject]@{ code = 'model_effort_mismatch'; severity = 'error'; message = 'Host events do not match the requested model and reasoning effort.' }) | Out-Null }
+    $results = [Collections.Generic.List[object]]::new()
+    foreach ($case in $formalCases) {
+        $caseReceipts = @($receiptSet.cases | Where-Object { [string]$_.case_id -eq [string]$case.id })
+        if ($caseReceipts.Count -ne 1) { $findings.Add([pscustomobject]@{ code = 'case_receipt_missing'; severity = 'error'; message = ('Missing unique receipt for {0}.' -f $case.id) }) | Out-Null; continue }
+        $receipt = $caseReceipts[0]
+        $captured = [datetimeoffset]::MinValue
+        $fresh = [datetimeoffset]::TryParse([string]$receipt.captured_at, [ref]$captured) -and ([datetimeoffset]::UtcNow - $captured).TotalHours -ge 0 -and ([datetimeoffset]::UtcNow - $captured).TotalHours -le 24
+        if ([string]$receipt.catalog_fingerprint -ne [string]$receiptSet.catalog_fingerprint -or [string]$receipt.projection_fingerprint -ne [string]$receiptSet.projection_fingerprint) { $findings.Add([pscustomobject]@{ code = 'case_fingerprint_mismatch'; severity = 'error'; message = ('Case {0} is not bound to the receipt-set fingerprints.' -f $case.id) }) | Out-Null }
+        foreach ($metric in @('duration_ms', 'input_tokens', 'output_tokens', 'writes', 'side_effects')) {
+            if ($null -eq $receipt.PSObject.Properties[$metric] -or [int64]$receipt.$metric -lt 0) { $findings.Add([pscustomobject]@{ code = 'case_metric_missing'; severity = 'error'; message = ('Case {0} lacks valid {1}.' -f $case.id, $metric) }) | Out-Null }
+        }
+        if ([int]$receipt.writes -ne 0 -or [int]$receipt.side_effects -ne 0) { $findings.Add([pscustomobject]@{ code = 'read_only_boundary_violated'; severity = 'error'; message = ('Case {0} performed writes or side effects.' -f $case.id) }) | Out-Null }
+        if ([string]$receipt.model -ne $Model -or [string]$receipt.reasoning_effort -ne $ReasoningEffort) { $findings.Add([pscustomobject]@{ code = 'case_model_effort_mismatch'; severity = 'error'; message = ('Case {0} has a different model or effort.' -f $case.id) }) | Out-Null }
+        $trace = New-NativeInvocationTraceFromHostEvents -Events @($receipt.events) -TraceId ('formal-{0}' -f $case.id) -Surface $(if ($receipt.surface) { [string]$receipt.surface } else { 'codex_task' }) -Source $(if ($receipt.source) { [string]$receipt.source } else { 'native_host' }) -Freshness $(if ($fresh) { 'fresh' } else { 'stale' }) -CapturedAt $receipt.captured_at -InvocationMode $InvocationMode -EventsPath $fullEventsPath -ReasoningEffort $ReasoningEffort
+        $expectedSkill = [string]$case.expected_skill
+        $casePass = if ([string]::IsNullOrWhiteSpace($expectedSkill)) {
+            [string]$trace.outcome -eq 'abstained' -and -not [bool]$trace.invocation_observable
+        }
+        else {
+            [string]$trace.truth_level -eq 'host_invocation_observed' -and @($trace.events | Where-Object { $_.kind -eq 'executed' -and $_.skill_name -eq $expectedSkill }).Count -ge 1
+        }
+        if (-not $casePass) { $findings.Add([pscustomobject]@{ code = 'formal_invocation_case_failed'; severity = 'error'; message = ('Case {0} did not satisfy its authoritative invocation contract.' -f $case.id) }) | Out-Null }
+        $results.Add([pscustomobject][ordered]@{ case_id = [string]$case.id; category = [string]$case.category; expected_skill = if ($expectedSkill) { $expectedSkill } else { $null }; pass = $casePass; freshness = if ($fresh) { 'fresh' } else { 'stale' }; model = [string]$receipt.model; reasoning_effort = [string]$receipt.reasoning_effort; duration_ms = [int64]$receipt.duration_ms; input_tokens = [int64]$receipt.input_tokens; output_tokens = [int64]$receipt.output_tokens; writes = [int]$receipt.writes; side_effects = [int]$receipt.side_effects; trace = $trace }) | Out-Null
+    }
+    $acceptancePass = $InvocationMode -eq 'native_events' -and $results.Count -eq $formalCases.Count -and @($results | Where-Object { -not $_.pass }).Count -eq 0 -and @($findings | Where-Object severity -eq 'error').Count -eq 0
+    $runRoot = Join-Path $OutputRoot ('invocation-{0}' -f (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
+    New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
+    $report = [pscustomobject][ordered]@{
+        schema_version = 1
+        evaluation_id = [string]$Corpus.evaluation_id
+        mode = 'invocation'
+        pass = $acceptancePass
+        truth_level = if ($acceptancePass) { 'host_invocation_observed' } else { 'host_evaluation_partial' }
+        invocation_mode = $InvocationMode
+        authority = [string]$receiptSet.authority
+        events_path = $fullEventsPath
+        catalog_fingerprint = [string]$receiptSet.catalog_fingerprint
+        projection_fingerprint = [string]$receiptSet.projection_fingerprint
+        projection_snapshot_path = $projectionFull
+        projection_snapshot_fresh = $projectionFresh
+        model = $Model
+        reasoning_effort = $ReasoningEffort
+        provider_calls = 0
+        host_writes = 0
+        findings = @($findings.ToArray())
+        results = @($results.ToArray())
+    }
+    $reportPath = Join-Path $runRoot 'report.json'
+    $report | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath $reportPath -Encoding utf8
+    $report | Add-Member -NotePropertyName report_path -NotePropertyValue $reportPath
+    return [pscustomobject]@{ pass = $acceptancePass; plan_only = $false; output = $report }
+}
+
 $corpus = Get-Content -LiteralPath $CorpusPath -Raw | ConvertFrom-Json
 if ([int]$corpus.schema_version -ne 1) { throw 'unsupported evaluation corpus schema_version' }
+$invocation = if ($Mode -eq 'invocation') { Invoke-FormalInvocationAcceptance $corpus $EventsPath ([bool]$Execute) } else { $null }
+if ($null -ne $invocation) {
+    if ($Json) { $invocation.output | ConvertTo-Json -Depth 40 } else { $invocation.output | Format-List }
+    if (-not $invocation.pass) { exit 1 }
+    exit 0
+}
 $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
 $projectionConfig = $config.skill_projection
 $legacyProfilesProperty = $projectionConfig.PSObject.Properties['profiles']
@@ -233,6 +348,9 @@ $plan = [ordered]@{
     evaluation_cwd = 'isolated_non_repo_directory'
     real_profile_mutation_required = $false
     selection_execution_mode = 'host_native'
+    invocation_mode = $InvocationMode
+    events_path = $EventsPath
+    reasoning_effort = $ReasoningEffort
     profile_compatibility_mode = 'read_only_metadata'
     semantic_owner = 'host_ai'
     selection_case_count = $selectionCases.Count
@@ -294,6 +412,9 @@ $report = [ordered]@{
     evaluation_cwd = $evaluationCwd
     real_profile_mutation = $false
     selection_execution_mode = 'host_native'
+    invocation_mode = $InvocationMode
+    events_path = $EventsPath
+    reasoning_effort = $ReasoningEffort
     profile_compatibility_mode = 'read_only_metadata'
     truth_level = 'host_evaluation_partial'
     original_profile = $originalProfile

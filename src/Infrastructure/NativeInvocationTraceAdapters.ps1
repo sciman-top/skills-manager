@@ -27,6 +27,12 @@ function Resolve-NativeInvocationEventKind($Event) {
     }
 }
 
+function ConvertTo-NativeInvocationRfc3339($Value) {
+    if ($Value -is [datetimeoffset]) { return $Value.ToString('o') }
+    if ($Value -is [datetime]) { return ([datetimeoffset]$Value).ToString('o') }
+    return [string]$Value
+}
+
 function ConvertTo-NativeInvocationTrace {
     [CmdletBinding()]
     param(
@@ -35,7 +41,10 @@ function ConvertTo-NativeInvocationTrace {
         [Parameter(Mandatory = $true)][string]$Surface,
         [Parameter(Mandatory = $true)][string]$Source,
         [Parameter(Mandatory = $true)][ValidateSet('fresh', 'stale', 'unknown')][string]$Freshness,
-        [Parameter(Mandatory = $true)][string]$CapturedAt
+        [Parameter(Mandatory = $true)]$CapturedAt,
+        [ValidateSet('native_events', 'self_report', 'read_heuristic')][string]$InvocationMode = 'native_events',
+        [string]$EventsPath,
+        [string]$ReasoningEffort
     )
 
     $normalized = New-Object System.Collections.Generic.List[object]
@@ -47,12 +56,12 @@ function ConvertTo-NativeInvocationTrace {
                 event_id = [string](Get-NativeInvocationAdapterProperty $event @('event_id', 'id'))
                 kind = Resolve-NativeInvocationEventKind $event
                 skill_name = $name
-                occurred_at = [string](Get-NativeInvocationAdapterProperty $event @('occurred_at', 'timestamp', 'captured_at'))
+                occurred_at = ConvertTo-NativeInvocationRfc3339 (Get-NativeInvocationAdapterProperty $event @('occurred_at', 'timestamp', 'captured_at'))
                 correlation_id = [string](Get-NativeInvocationAdapterProperty $event @('correlation_id', 'correlation', 'turn_id', 'thread_id'))
                 reason = [string](Get-NativeInvocationAdapterProperty $event @('reason', 'abstention_reason'))
             }) | Out-Null
     }
-    return New-NativeInvocationTrace -TraceId $TraceId -Surface $Surface -Source $Source -Freshness $Freshness -CapturedAt $CapturedAt -Events $normalized.ToArray()
+    return New-NativeInvocationTrace -TraceId $TraceId -Surface $Surface -Source $Source -Freshness $Freshness -CapturedAt (ConvertTo-NativeInvocationRfc3339 $CapturedAt) -InvocationMode $InvocationMode -EventsPath $EventsPath -ReasoningEffort $ReasoningEffort -Events $normalized.ToArray()
 }
 
 function New-NativeInvocationTraceFromHostEvents {
@@ -63,7 +72,10 @@ function New-NativeInvocationTraceFromHostEvents {
         [Parameter(Mandatory = $true)][string]$Surface,
         [Parameter(Mandatory = $true)][string]$Source,
         [Parameter(Mandatory = $true)][ValidateSet('fresh', 'stale', 'unknown')][string]$Freshness,
-        [Parameter(Mandatory = $true)][string]$CapturedAt
+        [Parameter(Mandatory = $true)]$CapturedAt,
+        [ValidateSet('native_events', 'self_report', 'read_heuristic')][string]$InvocationMode = 'native_events',
+        [string]$EventsPath,
+        [string]$ReasoningEffort
     )
-    return ConvertTo-NativeInvocationTrace -Events $Events -TraceId $TraceId -Surface $Surface -Source $Source -Freshness $Freshness -CapturedAt $CapturedAt
+    return ConvertTo-NativeInvocationTrace -Events $Events -TraceId $TraceId -Surface $Surface -Source $Source -Freshness $Freshness -CapturedAt $CapturedAt -InvocationMode $InvocationMode -EventsPath $EventsPath -ReasoningEffort $ReasoningEffort
 }

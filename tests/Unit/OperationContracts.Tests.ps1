@@ -57,6 +57,18 @@ Describe 'OperationPlan and Receipt v1 contracts' {
         }
     }
 
+    It 'requires the domain-specific lifecycle binding for skill promotion plans' {
+        $plan = New-OperationPlan -OperationId 'skill-lifecycle-fixture' -Domain skill_lifecycle -Mode apply -CreatedAt '2026-08-01T08:00:00Z' -SourceRevision $hashA -Targets @([pscustomobject]@{ target_ref = 'demo-skill'; path = 'C:\repo\overrides\custom\demo-skill'; before_hash = $null; desired_hash = $hashB; owner = 'skills-manager' }) -Actions @([pscustomobject]@{ type = 'create'; target_ref = 'demo-skill'; summary = 'Promote candidate'; risk = 'medium'; metadata = [pscustomobject]@{ allowed_paths = @('SKILL.md') } })
+        $missing = Test-OperationPlanContract $plan
+        $missing.pass | Should Be $false
+        @($missing.findings.code) | Should Contain 'skill_lifecycle_missing'
+
+        $plan | Add-Member -NotePropertyName lifecycle -NotePropertyValue ([pscustomobject]@{ skill_name = 'demo-skill'; candidate_directory = 'C:\repo\reports\skill-evolution\candidate\demo-skill'; candidate_fingerprint = $hashB; baseline_fingerprint = $hashA; catalog_fingerprint = $hashA; evaluation_path = 'C:\repo\reports\skill-evolution\evaluation.json'; evaluation_hash = $hashA; review_path = 'C:\repo\reports\skill-evolution\review.json'; review_hash = $hashB; review_expires_at = '2026-08-02T08:00:00Z'; allowed_paths = @('SKILL.md'); projection_disposition = 'cold_catalog_only'; host_mutation = $false })
+        (Test-OperationPlanContract $plan).pass | Should Be $true
+        $plan.lifecycle.allowed_paths = @('SKILL.md', 'references\..\..\skills.json')
+        @((Test-OperationPlanContract $plan).findings.code) | Should Contain 'skill_lifecycle_paths_invalid'
+    }
+
     It 'produces stable action ids and target ordering when input enumeration is reordered' {
         $targets = @(
             [pscustomobject]@{ target_ref = 'target-b'; path = 'C:\repo\b.json'; before_hash = $hashA; desired_hash = $hashB; owner = 'adapter' },

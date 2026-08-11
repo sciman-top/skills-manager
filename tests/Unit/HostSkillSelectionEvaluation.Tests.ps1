@@ -147,4 +147,57 @@ Describe 'Host skill selection effectiveness evaluation' {
         $LASTEXITCODE | Should Not Be 0
         ($raw -join "`n") | Should Match 'no evaluation cases selected'
     }
+
+    It 'defines the five-case formal invocation corpus without executing a provider' {
+        $raw = & pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -Mode invocation -ReasoningEffort medium -Json
+        $LASTEXITCODE | Should Be 0
+        $plan = ($raw -join "`n") | ConvertFrom-Json
+        $plan.formal_case_count | Should Be 5
+        @($plan.case_ids).Count | Should Be 5
+        $plan.provider_calls | Should Be 0
+        $plan.host_writes | Should Be 0
+        $plan.truth_level | Should Be 'host_evaluation_partial'
+    }
+
+    It 'promotes only a fresh authoritative five-case invocation receipt' {
+        $fixture = Join-Path ([IO.Path]::GetTempPath()) ('host-invocation-' + [guid]::NewGuid().ToString('N'))
+        try {
+            New-Item -ItemType Directory -Force -Path $fixture | Out-Null
+            $catalogHash = (Get-FileHash -LiteralPath (Join-Path $repoRoot 'skills.json') -Algorithm SHA256).Hash.ToLowerInvariant()
+            $corpus = Get-Content -LiteralPath (Join-Path $repoRoot 'config\host-skill-selection-evaluation.json') -Raw | ConvertFrom-Json
+            $capturedAt = [datetimeoffset]::UtcNow.ToString('o')
+            $projectionPath = Join-Path $fixture 'projection.json'
+            [IO.File]::WriteAllText($projectionPath, (([pscustomobject]@{ schema_version = 2; generated_at = $capturedAt; projection_fingerprint = ('c' * 64); canonical = @([pscustomobject]@{ name = 'fixture-skill'; content_hash = ('d' * 64) }) }) | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
+            $receipts = @($corpus.invocation_cases | ForEach-Object {
+                $expected = [string]$_.expected_skill
+                $events = if ([string]::IsNullOrWhiteSpace($expected)) {
+                    @([pscustomobject]@{ event_id = 'abstain'; kind = 'abstained'; skill_name = ''; occurred_at = $capturedAt; correlation_id = 'corr-control'; reason = 'no_skill' })
+                }
+                else {
+                    @([pscustomobject]@{ event_id = 'inject'; kind = 'injected'; skill_name = $expected; occurred_at = $capturedAt; correlation_id = ('corr-' + $_.id) }, [pscustomobject]@{ event_id = 'execute'; kind = 'executed'; skill_name = $expected; occurred_at = $capturedAt; correlation_id = ('corr-' + $_.id) })
+                }
+                [pscustomobject]@{ case_id = [string]$_.id; catalog_fingerprint = $catalogHash; projection_fingerprint = ('c' * 64); model = 'gpt-5.6-sol'; reasoning_effort = 'medium'; captured_at = $capturedAt; duration_ms = 1; input_tokens = 1; output_tokens = 1; writes = 0; side_effects = 0; surface = 'codex_task'; source = 'native_host'; events = $events }
+            })
+            $eventsPath = Join-Path $fixture 'events.json'
+            [IO.File]::WriteAllText($eventsPath, (([pscustomobject]@{ schema_version = 1; authority = 'native_host_events'; catalog_fingerprint = $catalogHash; projection_fingerprint = ('c' * 64); model = 'gpt-5.6-sol'; reasoning_effort = 'medium'; cases = $receipts }) | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
+            $raw = & pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -Mode invocation -EventsPath $eventsPath -ProjectionPath $projectionPath -OutputRoot $fixture -Model gpt-5.6-sol -ReasoningEffort medium -Execute -Json
+            $LASTEXITCODE | Should Be 0
+            $report = ($raw -join "`n") | ConvertFrom-Json
+            $report.pass | Should Be $true
+            $report.truth_level | Should Be 'host_invocation_observed'
+            @($report.results | Where-Object pass).Count | Should Be 5
+
+            $weakRaw = & pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -Mode invocation -InvocationMode self_report -EventsPath $eventsPath -ProjectionPath $projectionPath -OutputRoot $fixture -Model gpt-5.6-sol -ReasoningEffort medium -Execute -Json 2>&1
+            $LASTEXITCODE | Should Not Be 0
+            $weakReport = ($weakRaw -join "`n") | ConvertFrom-Json
+            $weakReport.truth_level | Should Be 'host_evaluation_partial'
+
+            [IO.File]::WriteAllText($projectionPath, (([pscustomobject]@{ schema_version = 2; generated_at = $capturedAt; projection_fingerprint = ('e' * 64); canonical = @([pscustomobject]@{ name = 'fixture-skill'; content_hash = ('d' * 64) }) }) | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
+            $staleRaw = & pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -Mode invocation -EventsPath $eventsPath -ProjectionPath $projectionPath -OutputRoot $fixture -Model gpt-5.6-sol -ReasoningEffort medium -Execute -Json 2>&1
+            $LASTEXITCODE | Should Not Be 0
+            $staleReport = ($staleRaw -join "`n") | ConvertFrom-Json
+            @($staleReport.findings.code) | Should Contain 'projection_fingerprint_mismatch'
+        }
+        finally { if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
+    }
 }
