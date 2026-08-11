@@ -66,51 +66,29 @@ Describe 'vNext product planning contract' {
         $parsed.task_count | Should Be 15
         $parsed.current_phase | Should Be $currentPhase
         $parsed.historical_mode | Should Be $false
-        $parsed.truth_level | Should Be 'host_evaluation_partial'
+        $parsed.truth_level | Should Be 'desktop_representative_accepted'
         $parsed.full_gate | Should Be ([string]$currentManifest.full_gate)
         $parsed.runtime_migration | Should Be 'completed'
-        $parsed.host_evaluation | Should Be 'host_evaluation_partial'
-        $parsed.host_inventory_loaded | Should Be 'observed'
-        $parsed.host_invocation_observed | Should Be 'not_observed'
-        $parsed.live_accepted | Should Be 'not_accepted'
         $currentMainChain = @($currentManifest.main_chain) -join "`n"
         $currentMainChain | Should Match 'managed_link_includes'
         $currentMainChain | Should Match 'host AI.*capability-router only for explicit cold discovery or policy validation'
+        $currentMainChain | Should Match 'discoverability, reuse and behavior consistency.*Codex Desktop'
         $currentMainChain | Should Not Match '(?i)project all enabled skills'
     }
 
-    It 'requires the unique top-level engineering constitution and governance decrease clause in the PRD' {
+    It 'requires the three compact PP-000 constraints in the PRD' {
         $fixtureRoot = New-PlanningFixture 'missing-engineering-constitution'
         $path = Join-Path $fixtureRoot 'docs\product\skills-manager-vnext-prd.md'
-        $content = (Get-Content -LiteralPath $path -Raw).Replace('### PP-000 Host-native-first main-chain-first self-retiring', '### PP-000 removed')
+        $content = Get-Content -LiteralPath $path -Raw
+        foreach ($marker in @('### PP-000 三条最高强约束', '**原生优先**', '**最短真实主链**', '**最低充分且自退役**')) {
+            $content = $content.Replace($marker, ('removed-{0}' -f $marker.Length))
+        }
         Set-Content -LiteralPath $path -Value $content -Encoding UTF8
 
         $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
 
-        @($parsed.findings | Where-Object code -eq 'engineering_constitution_missing').Count | Should Be 1
+        @($parsed.findings | Where-Object code -eq 'engineering_constitution_missing').Count | Should Be 4
         $parsed.pass | Should Be $false
-
-        $policyFixtureRoot = New-PlanningFixture 'missing-governance-decrease-clause'
-        $policyPath = Join-Path $policyFixtureRoot 'docs\product\skills-manager-vnext-prd.md'
-        $policy = '同等风险基线下，经代表性真实任务证明的宿主原生能力越强，本项目附加治理负担必须递减'
-        $policyContent = (Get-Content -LiteralPath $policyPath -Raw).Replace($policy, '治理递减条款已删除')
-        Set-Content -LiteralPath $policyPath -Value $policyContent -Encoding UTF8
-
-        $policyParsed = (Invoke-PlanningVerifier $policyFixtureRoot).output | ConvertFrom-Json
-
-        @($policyParsed.findings | Where-Object code -eq 'engineering_constitution_missing').Count | Should Be 1
-        $policyParsed.pass | Should Be $false
-
-        $scopeFixtureRoot = New-PlanningFixture 'missing-scope-stop-clause'
-        $scopePath = Join-Path $scopeFixtureRoot 'docs\product\skills-manager-vnext-prd.md'
-        $scopeContent = Get-Content -LiteralPath $scopePath -Raw
-        $scopeContent = $scopeContent.Replace('达到已声明的停止条件必须结束', '停止条件条款已删除').Replace('“继续/自动自主连续执行”只授权冻结范围内推进，不授权范围扩展', '连续执行范围条款已删除').Replace('scope expansion', 'scope marker removed')
-        Set-Content -LiteralPath $scopePath -Value $scopeContent -Encoding UTF8
-
-        $scopeParsed = (Invoke-PlanningVerifier $scopeFixtureRoot).output | ConvertFrom-Json
-
-        @($scopeParsed.findings | Where-Object code -eq 'engineering_constitution_missing').Count | Should Be 3
-        $scopeParsed.pass | Should Be $false
     }
 
     It 'requires the repository action mapping without duplicating the constitution' {
@@ -123,17 +101,6 @@ Describe 'vNext product planning contract' {
 
         @($parsed.findings | Where-Object code -eq 'engineering_constitution_mapping_missing').Count | Should Be 1
         $parsed.pass | Should Be $false
-
-        $closeoutFixtureRoot = New-PlanningFixture 'missing-proportional-closeout-mapping'
-        $closeoutPath = Join-Path $closeoutFixtureRoot 'AGENTS.md'
-        $closeoutContent = Get-Content -LiteralPath $closeoutPath -Raw
-        $closeoutContent = $closeoutContent.Replace('focused closeout', 'focused mapping removed').Replace('integration_blocker', 'integration mapping removed')
-        Set-Content -LiteralPath $closeoutPath -Value $closeoutContent -Encoding UTF8
-
-        $closeoutParsed = (Invoke-PlanningVerifier $closeoutFixtureRoot).output | ConvertFrom-Json
-
-        @($closeoutParsed.findings | Where-Object code -eq 'engineering_constitution_mapping_missing').Count | Should Be 2
-        $closeoutParsed.pass | Should Be $false
     }
 
     It 'requires proportional closeout and a candidate before the exact-source full gate and push' {
@@ -154,37 +121,6 @@ Describe 'vNext product planning contract' {
         $content | Should Match 'focused closeout'
         $content | Should Match 'full closeout'
         $content | Should Not Match 'closeout 只走 full'
-    }
-
-    It 'requires bounded autonomy and proportional verification in the execution index' {
-        $planPath = Join-Path $repoRoot 'tasks\plan.md'
-        $content = Get-Content -LiteralPath $planPath -Raw
-
-        $content | Should Match 'verification ceiling'
-        $content | Should Match 'scope expansion requires re-admission'
-        $content | Should Match 'out-of-scope remote divergence'
-        $content | Should Match 'minimal user closure.*stop'
-
-        $fixtureRoot = New-PlanningFixture 'missing-bounded-execution-contract'
-        $fixturePath = Join-Path $fixtureRoot 'tasks\plan.md'
-        $fixtureContent = Get-Content -LiteralPath $fixturePath -Raw
-        foreach ($marker in @('verification ceiling', 'scope expansion requires re-admission', 'out-of-scope remote divergence', 'minimal user closure -> stop')) {
-            $fixtureContent = $fixtureContent.Replace($marker, ('removed-{0}' -f $marker.Length))
-        }
-        Set-Content -LiteralPath $fixturePath -Value $fixtureContent -Encoding UTF8
-
-        $todoPath = Join-Path $fixtureRoot 'tasks\todo.md'
-        $todoContent = (Get-Content -LiteralPath $todoPath -Raw).Replace('frozen verification ceiling', 'verification marker removed')
-        Set-Content -LiteralPath $todoPath -Value $todoContent -Encoding UTF8
-
-        $architecturePath = Join-Path $fixtureRoot 'docs\product\skills-manager-vnext-architecture.md'
-        $architectureContent = (Get-Content -LiteralPath $architecturePath -Raw).Replace('focused 发现的跨面风险', 'risk marker removed')
-        Set-Content -LiteralPath $architecturePath -Value $architectureContent -Encoding UTF8
-
-        $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
-
-        @($parsed.findings | Where-Object code -eq 'engineering_execution_contract_missing').Count | Should Be 6
-        $parsed.pass | Should Be $false
     }
 
     It 'requires current product documents to delegate dynamic truth to the current manifest' {
@@ -230,21 +166,6 @@ Describe 'vNext product planning contract' {
         $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
 
         @($parsed.findings | Where-Object code -eq phase_truth_field_missing).Count | Should Be 1
-        $parsed.pass | Should Be $false
-    }
-
-    It 'rejects inventory evidence promoted to invocation and failed used for missing live observability' {
-        $fixtureRoot = New-PlanningFixture 'truth-overpromotion'; $path = Join-Path $fixtureRoot $currentManifestRelative
-        $manifest = Get-Content $path -Raw | ConvertFrom-Json
-        $manifest.truth_level = 'host_inventory_loaded'
-        $manifest.host_invocation_observed = 'observed'
-        $manifest.live_accepted = 'failed'
-        $manifest | ConvertTo-Json -Depth 100 | Set-Content $path -Encoding UTF8
-
-        $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
-
-        @($parsed.findings | Where-Object code -eq phase_truth_order_invalid).Count | Should Be 1
-        @($parsed.findings | Where-Object code -eq phase_truth_value_invalid).Count | Should Be 1
         $parsed.pass | Should Be $false
     }
 

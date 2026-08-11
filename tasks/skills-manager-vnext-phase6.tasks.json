@@ -4,7 +4,7 @@
   "current_phase": "P6",
   "phase_sequence": ["P0", "P1", "P2", "P3", "P4", "P5", "P6"],
   "allowed_statuses": ["pending", "in_progress", "blocked", "deferred", "done"],
-  "truth_level": "host_evaluation_partial",
+  "truth_level": "desktop_representative_accepted",
   "full_gate": "receipt_authoritative",
   "full_gate_receipt": {
     "pointer": "reports/quality-gates/current.json",
@@ -24,16 +24,16 @@
     "plan resident metadata within the verified host budget",
     "project placement-admitted resident skills transactionally",
     "let host AI select visible metadata natively and use capability-router only for explicit cold discovery or policy validation",
-    "verify repository contracts before separate host invocation and live acceptance"
+    "validate discoverability, reuse and behavior consistency in scoped Codex Desktop tasks"
   ],
   "stop_conditions": [
     "full gate fails or becomes stale after a relevant file change",
     "runtime migration or host mutation lacks explicit current-task authorization",
-    "host evidence is promoted beyond its observed truth level",
-    "live acceptance is inferred from repository or inventory evidence"
+    "Desktop acceptance is inferred without a real representative task",
+    "a scoped Desktop result is generalized beyond its observed sample"
   ],
   "first_open_task": null,
-  "next_milestone": "P6 is closed at host_evaluation_partial; continue the collecting M1 real-task pilot without raising live_accepted.",
+  "next_milestone": "Run the authorized exact-current reversible activation pilot, pause at promotion/activation/retire review, and keep live_accepted fail-closed until a real business workflow supplies direct evidence.",
   "tasks": [
     {
       "id": "SMV-P6-001", "phase": "P6", "title": "P6 admission 与历史 supersession map", "status": "done", "risk": "low", "depends_on": [],

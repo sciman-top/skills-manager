@@ -29,8 +29,6 @@ $Files = @(
     "Application/NativeSkillProjectionCoordinator.ps1",
     "Infrastructure/HostCapabilityAdapters.ps1",
     "Infrastructure/NativeInvocationTraceAdapters.ps1",
-    "Infrastructure/AppServerSkillDispatchAdapter.ps1",
-    "Application/StrictSkillDispatch.ps1",
     "Application/PluginDistribution.ps1",
     "Application/RuleDiscovery.ps1",
     "Application/RuleDiagnostics.ps1",

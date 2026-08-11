@@ -8,7 +8,7 @@
 
 - Structured manifests own task IDs, dependencies, write sets, mutable status, counts, evidence, stop conditions, and next milestones.
 - This file is navigation only. It intentionally does not copy task rows, checkboxes, counts, runtime status, or acceptance claims.
-- Resolve repository verification, host loading, invocation, and live acceptance from their separate evidence fields; never infer a higher truth level from a lower one.
+- Resolve repository verification from the current receipt and Desktop acceptance from scoped real tasks; neither substitutes for the other.
 
 ## Active truth sources
 
@@ -38,7 +38,7 @@
 4. `scope expansion requires re-admission`: expanding direction, authority, write set, verification ceiling, external effects, files, abstractions, governance, worktrees, or agents requires evidence of an independent current-task failure; otherwise skip, defer, or route it separately.
 5. Close out through one proportional path: focused verification for non-runtime rules/docs/tests/verifiers/scripts/config, or the receipt-aware full gate for runtime, security, data/migration, public-contract, dependency/package, release, or discovered cross-surface risk.
 6. `minimal user closure -> stop`: once the frozen stop condition and minimum verification are met, stop; do not continue merely because adjacent work exists.
-7. A full-gate receipt, when required, is repository evidence only; host and live acceptance remain separate.
+7. A full-gate receipt is repository evidence only; Desktop discoverability, reuse and behavior consistency require a real representative task.
 
 ## Failure routing
 

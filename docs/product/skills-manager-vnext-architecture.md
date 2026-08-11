@@ -819,7 +819,7 @@ host evaluation 同时记录 cumulative input、cached/uncached input、cache ra
 
 理由：这三个缺口都会造成错误静默降级、候选丢失或把 disabled/needs-auth 误写成可自动使用，属于确定性正确性问题而不是语义 ranking。修复集中在现有 seam，caller 无需学习新 schema major；本地同 prompt 输出投影将 discovery JSON 从 21,470 bytes 降至 9,133 bytes、policy JSON 从 22,933 bytes 降至 1,284 bytes，但只声明返回体积下降，不外推为端到端 token 等比例下降。
 
-仍不可消除：宿主模型语义选择具有概率性、fresh task 固定上下文会重放、当前宿主没有稳定 skill-body invocation trace，且 profile/config 写入不能安全地无授权热切换。这些边界只能通过 representative replay、current snapshot、明确 truth ladder 和 retire trigger 缓解，不能由本仓伪装成确定性或 live acceptance。
+仍不可消除：宿主模型语义选择具有概率性、fresh task 固定上下文会重放，且 profile/config 写入不能安全地无授权热切换。这些边界通过有范围的 Desktop representative task、current snapshot 和 retire trigger 缓解；本仓不再用自定义 invocation trace 伪装确定性。
 
 ### `ADR-SMV-023 Portable catalog decouples cold discovery from profiles and repository state`
 
@@ -851,7 +851,7 @@ host evaluation 同时记录 cumulative input、cached/uncached input、cache ra
 
 理由：官方 Codex skill contract 采用 progressive disclosure，初始 metadata 列表受 8,000 字符/2% context budget 限制并可能省略技能；skill description 的 implicit invocation 是宿主模型选择，不是 middleware 强制调用。原来的 fallback-only router 因而可能在看不到 cold skill 时永远不进入 discovery；原脚本的 no-hint current-profile 过滤还会让 portable catalog 在无 manifest/config 的普通 cwd 得到 0 candidate。resident dispatcher + complete catalog 解除信息循环，同时不把 111 个技能粗暴塞入初始 prompt。
 
-边界：仓库可以确定性地生成完整 catalog、返回 cold-load policy 和证明零写入，但不能把宿主模型是否调用 skill metadata 伪装成硬保证。若未来需要每个请求必经路由，必须由宿主 pre-model middleware/app-server 提供注入和 invocation trace；在官方 surface 未提供该能力前，本仓只承诺 `repo_verified + host_prompt_contract_verified`。
+边界：仓库可以确定性地生成完整 catalog、返回 cold-load policy 和证明零写入，但不能把宿主模型是否调用 skill metadata 伪装成硬保证。真实效果只用有范围的 Desktop 代表性任务验收；本仓不实现每请求 middleware、注入协议或调用遥测。
 
 ### `ADR-SMV-031 Host AI owns semantic skill selection`
 
@@ -883,11 +883,11 @@ host evaluation 同时记录 cumulative input、cached/uncached input、cache ra
 
 理由：宿主选择的稳定输入是 metadata；metadata 质量可被确定性 lint 和代表 replay 改善，又不会建立第二模型或长期索引。
 
-### `ADR-SMV-036 Invocation trace defines truth level`
+### `ADR-SMV-036 Historical custom invocation trace retired`
 
-决定：统一 `NativeInvocationTrace` 状态为 listed、selected、injected、executed、abstained，缺少宿主事件时保持 partial/unknown。visibility、prompt presence 和 selection 都不能推断 full body execution。
+当前决定：删除无真实 caller 的 `NativeInvocationTrace` 及其 CLI/App Server 事件阶梯。宿主验收改为 Codex Desktop 真实任务中的可发现性、可复用性和行为一致性；CLI JSONL 只作可选诊断，不是产品验收接口。
 
-理由：过去 fresh prompt/projection 证据被迫依赖间接推断。显式 truth ladder 防止 repo reachability 被误报为自动调用或 live acceptance。
+理由：官方宿主定义显式/隐式 skill invocation，但不承诺本仓自定义的 injected/executed 事件。继续维护不可由真实宿主填充的 trace 只会形成第二套遥测治理，且不能提高用户结果可信度。
 
 ### `ADR-SMV-037 Retire profile reachability through versioned migration`
 
@@ -895,11 +895,11 @@ host evaluation 同时记录 cumulative input、cached/uncached input、cache ra
 
 理由：profile 既不能热加载当前任务，也不应成为全局技能全集的可达性门；继续维护它只会让用户在新任务前选 profile，并复制宿主 native selection。
 
-### `ADR-SMV-038 Strict App Server dispatch is opt-in fallback`
+### `ADR-SMV-038 Historical strict App Server dispatch retired`
 
-决定：只有明确 strict/fallback 请求才允许 `pre-turn dispatch -> bounded candidates -> host adjudication -> supported type=skill injection -> trace`。普通请求不进入，候选必须先过共享 eligibility policy，缺宿主裁决或 surface 支持即 fail-closed/platform_na。
+当前决定：删除没有命令入口、生产 caller 或仓外消费者的 strict App Server dispatch、skill injection adapter 和专用测试。显式调用直接使用宿主原生技能入口；显式 cold discovery 仅负责读取 portable catalog 后把语义选择交回宿主。
 
-理由：pre-turn middleware 可提供更强的强制与 trace，但若默认覆盖所有请求会重新建立第二套路由和额外 token/延迟。窄 fallback 保留必要控制而不破坏 host-native 主链。
+理由：即使保持 opt-in，该 Module 仍复制宿主调用协议并要求自定义 receipt/trace，删除后复杂度不会转移到任何真实 caller；继续保留不符合原生优先和自退役约束。
 
 ### `ADR-SMV-039 Reference portfolio is reversible evidence, not accumulated runtime`
 

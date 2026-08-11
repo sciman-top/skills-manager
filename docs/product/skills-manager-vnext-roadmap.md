@@ -339,8 +339,8 @@ P6 的历史目标是让宿主 AI 重新成为唯一语义选择 owner，并完�
 | --- | --- | --- |
 | Contract | P6-001–P6-003 | admission、snapshot schema、官方 adapter 和 unknown/fallback truth 可验证 |
 | Core | P6-004–P6-006 | compiler/policy 无第二语义路由；当时的全 enabled native projection 无遗漏（历史迁移 gate） |
-| Evidence | P6-007–P6-009 | metadata corpus 与 invocation trace 继续可验证；native/legacy shadow 仅保留 point-in-time manifest/evidence，比较器在 removal gate 后退役 |
-| Migration | P6-010–P6-011 | profile reachability 退役；strict dispatch 保持 opt-in |
+| Evidence | P6-007–P6-009 | metadata corpus 保留；历史 invocation trace 与 native/legacy shadow 只保留 point-in-time manifest/evidence，当前实现均已退役 |
+| Migration | P6-010–P6-011 | profile reachability 退役；历史 strict dispatch 后因无真实 caller/消费者退役 |
 | Closeout | P6-012 | staged removal、fresh host evidence、唯一 full gate 和 rollback receipt |
 
 当前 P6 closeout 状态只从 manifest 及其 `latest_evidence` 读取。仓库侧 staged removal 已应用到 source/config/generation seam；legacy router source 只保留 compatibility-only 读取，profile compatibility view 为 read-only 且不拥有 reachability authority。2026-08-08 的 full/test 结果保留为 point-in-time evidence；任何后续 executable/config/generated/fixture 变化都会使该 full receipt 失效，不得把历史结果冒充当前 gate。
@@ -395,7 +395,7 @@ M2 correction 的最终目标流为：`visible skill/native tool -> host-native 
 
 2026-08-04 follow-up：canonical skill name/path/description delta 已在 projection seam 生成 ignored reconciliation signal，profile-only/no-op 不触发；宿主可在产生变化的同一任务边界接续 advisor，但 proposal/canary/apply 边界不变。cold-load 成本已拆分 cached/uncached/tool rounds；两个真实 A/B 证明强行合并工具回合会增加延迟并降低稳定性，故已回退，只保留成本观测和 focused replay 策略。
 
-同日 natural-limit hardening：未知 domain 不再回退 default；候选截断可见并要求 refine；current host snapshot 可覆盖静态 skill/MCP availability，disabled/needs-auth 进入 activation/auth boundary。确定性自然语言 corpus 从 27 扩到 30 并全部通过；host-facing JSON 投影显著缩小，但宿主语义波动、固定上下文重放和缺少完整 invocation trace 仍是外部边界，不授权新 runtime 或静默 profile mutation。
+同日 natural-limit hardening：未知 domain 不再回退 default；候选截断可见并要求 refine；current host snapshot 可覆盖静态 skill/MCP availability，disabled/needs-auth 进入 activation/auth boundary。确定性自然语言 corpus 从 27 扩到 30 并全部通过；host-facing JSON 投影显著缩小。2026-08-11 后验修正不再把缺少 invocation trace 当作待补能力，改用有范围的 Desktop 代表性任务观察宿主语义波动，同时仍不授权新 runtime 或静默 profile mutation。
 
 同日 portable-catalog correction：projection 将完整 canonical cold inventory 生成到 router 相邻 catalog，普通目标仓不再依赖本仓 manifest/config/policy 或 profile membership 才能发现候选；专用 cross-repo regression test 增加 repo 外 CWD probe，corpus verifier 不消费 ignored deployment state。本 correction 仍是既有 M2/P5-local follow-up，不新增 task/track，不改变 selection 32/32、cold-load 8/8 的历史 `host_evaluation_partial` 边界。
 

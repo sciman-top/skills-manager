@@ -1,6 +1,6 @@
 # Host-Native Skill Lifecycle Domain Model
 
-**status**: `P6 repo_verified; host_evaluation_partial`
+**status**: `P6 repo_verified; Desktop representative workflow accepted`
 **owner**: `skills-manager-vnext / HostNativeSkillLifecycle`
 
 ## Ubiquitous language
@@ -17,8 +17,7 @@
 | `NativeMetadataPlan` | Token-aware plan with enabled/kept/omitted/truncated/headroom evidence | An applied projection |
 | `NativeSkillProjectionReceipt` | Atomic apply/rollback evidence for a metadata/body projection | Proof the host selected the skill |
 | `HostSkillAdjudication` | Host AI decision to select or abstain based on the full request | Script-owned keyword match |
-| `NativeInvocationTrace` | Observable listed/selected/injected/executed/abstained lifecycle events | Inference from visibility alone |
-| `StrictDispatchRequest` | Explicit opt-in request for bounded pre-turn dispatch | Default path for ordinary requests |
+| `DesktopRepresentativeAcceptance` | Scoped observations that skills are discoverable, reusable and behaviorally consistent in real Desktop tasks | CLI telemetry or a universal correctness claim |
 | `ProfileCompatibilityView` | Read-only migration representation of legacy membership | Reachability or semantic routing boundary |
 
 ## Aggregate boundaries
@@ -35,9 +34,9 @@ Consumes a `HostCapabilitySnapshot`, canonical inventory, deterministic placemen
 
 Owns explicit plan/apply tokens, expected hashes, atomic writes, receipts and rollback. It cannot assert selection or invocation.
 
-### `InvocationEvidence`
+### `DesktopAcceptance`
 
-Normalizes host-observable events and truth levels. Missing events remain unknown/partial; evidence cannot relax eligibility or authorize actions.
+Records only the minimum facts from representative Desktop tasks: which skill was visible, reused and how its behavior matched the task contract. It is not a runtime Module, telemetry adapter or automatic gate.
 
 ## Invariants
 
@@ -45,10 +44,10 @@ Normalizes host-observable events and truth levels. Missing events remain unknow
 2. `SkillEligibilityDecision=deny` cannot be overridden by host semantic confidence.
 3. A known-context successful `NativeMetadataPlan` satisfies `enabled_total == kept_total`, `omitted=0` and `truncated=false` for the placement-admitted resident set.
 4. `source=config_fallback` cannot be reported as current runtime truth.
-5. Listed, selected, injected and executed are distinct states.
-6. Strict dispatch requires explicit opt-in and host adjudication.
+5. Desktop acceptance checks discoverability, reuse and behavior consistency through real tasks and always states its sample scope.
+6. CLI/App Server telemetry is diagnostic only and cannot block or manufacture Desktop acceptance.
 7. Only explicit placement configuration can change the resident discovery set; profile compatibility data cannot change it, and non-resident skills remain in the portable cold catalog.
-8. Planning, projection, host loading and live acceptance are separate truth levels.
+8. Repository verification and Desktop representative acceptance remain separate claims.
 
 ## Context relationships
 
@@ -59,13 +58,12 @@ HostCapabilitySnapshot -------------------^
 SkillInventory + Eligibility + Snapshot
   -> HostDiscoveryPlan
   -> ProjectionTransaction
-  -> host-native adjudication/injection
-  -> InvocationEvidence
+  -> host-native selection and skill use
+  -> DesktopAcceptance
 
 SkillInventory -> PortableColdCatalog -> explicit cold discovery -> eligibility
 
 ProfileCompatibilityView -> migration/reporting only
-StrictDispatchRequest -> HostDiscoveryPlan subset -> host adjudication -> optional injection
 ```
 
 ## Lifecycle states
@@ -74,9 +72,7 @@ StrictDispatchRequest -> HostDiscoveryPlan subset -> host adjudication -> option
 discovered -> canonical -> eligible -> planned -> projected
                                       -> blocked
 
-projected -> listed -> selected -> injected -> executed
-                    -> abstained
-                    -> partial/unknown (when host evidence is missing)
+projected -> Desktop-discoverable -> reused in a real task -> representative behavior accepted
 ```
 
-State advancement always requires evidence from the owning context. Repository projection tests cannot advance an item past `projected`.
+Repository projection tests cannot establish Desktop acceptance. A representative Desktop result proves only its stated sample and must not be generalized to every task or model.

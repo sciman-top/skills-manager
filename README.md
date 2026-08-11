@@ -40,7 +40,7 @@
 - [Phase 1 历史任务 manifest](tasks/skills-manager-vnext-phase1.tasks.json)
 - [Phase 0 历史任务 manifest](tasks/skills-manager-vnext-phase0.tasks.json)
 
-vNext 当前动态真值由 P6 manifest 管理；当前仓库实现已完成 P6 host-native lifecycle reset 的 repo-side 收口，最高证据层仍是 `host_evaluation_partial`。完整 native inventory、宿主选择、完整 skill body injection、执行与业务 `live_accepted` 必须分别取证，不能由 repo gate 或可见性推断。P0-P5 计数只作为历史仓库契约保留；plugin/MCP 安装、OAuth、host/profile/session 写入和重启仍不在本次自动边界。
+vNext 当前动态真值由 P6 manifest 管理；当前仓库实现已完成 P6 host-native lifecycle reset 的 repo-side 收口，并完成一次有明确样本范围的 Codex Desktop 代表性验收。Desktop 验收只看技能可发现性、可复用性和行为一致性，不依赖 CLI injected/executed 遥测，也不外推为所有任务或模型的普遍保证。P0-P5 计数只作为历史仓库契约保留；plugin/MCP 安装、OAuth、host/profile/session 写入和重启仍不在本次自动边界。
 
 本项目仅支持 PowerShell 7 (`pwsh`)；PowerShell 7.6 LTS 是推荐基线。Windows PowerShell 5.1 不再提供安装 fallback、CI 或 smoke 支持，缺少 `pwsh` 时入口 fail-closed。迁移、编码与回滚边界见 [`docs/runbooks/powershell-runtime-compatibility.md`](docs/runbooks/powershell-runtime-compatibility.md)。
 
@@ -271,7 +271,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\plan-skill-profile-recon
 
 profile reconciliation 脚本现在只承担迁移期的只读/回滚兼容职责，不再由 `skills.ps1` dispatch，也不改变 native reachability。旧 profile 字段必须先进入 `profile_compatibility` read-only view；`scripts/verify-skill-routing.ps1` 只报告 compatibility-only 状态，不能作为 quality gate 或语义 selector。canonical inventory 变化只写 `host_refresh_needed` signal，动作是 `fresh_session_or_host_handoff`；它不含 advisor command，也不恢复 profile planner。
 
-native projection 先按 `managed_link_includes` 做确定性 placement admission，再由 host snapshot、eligibility 和 token-aware metadata planner 验证常驻集合无静默遗漏；profile membership 不能改变该集合。未常驻技能仍在 portable catalog 中，可经 explicit-only cold discovery 读取。host evaluation 区分 listed、selected、injected、executed 和 abstained；selection/body invocation 不可观测时仍保持 partial，不构成 `host_loaded` 或 `live_accepted`。
+native projection 先按 `managed_link_includes` 做确定性 placement admission，再由 host snapshot、eligibility 和 token-aware metadata planner 验证常驻集合无静默遗漏；profile membership 不能改变该集合。未常驻技能仍在 portable catalog 中，可经 explicit-only cold discovery 读取。真实宿主验收在 Desktop 任务中检查发现、复用和行为结果；CLI/App Server 事件只作诊断，不形成第二套调用真源。
 
 历史 proposal/canary 接口仅保留用于读取旧 receipt 和回滚审计；P6 staged removal 后不再提供普通请求的 profile apply/热切换路径：
 
@@ -289,7 +289,7 @@ P4/P5 的 lexical selector、task model 和 ranking 是历史 repo_verified 实�
 
 技能初始列表由宿主 native metadata surface 决定；当前 USER-scope 只投影 `managed_link_includes` 中的最小集合。native metadata 预算和 `enabled_total == kept_total` / `omitted=0` invariant 只约束这个 placement-admitted 集合；完整 capability catalog 不因此删除或复制。
 
-旧 profile A/B benchmark 已随 profile 热切换退役；不再保留只能校验历史 profile 语料、但无法执行当前主链的操作入口。需要显式评估宿主原生 selection/cold-load 时，使用现有 opt-in `scripts/evaluate-host-skill-selection.ps1`；该评估不切换 profile，结果仍只属于 `host_evaluation_partial`，不替代 skill-body trace、代码质量或 live acceptance。
+旧 profile A/B benchmark 已随 profile 热切换退役；不再保留只能校验历史 profile 语料、但无法执行当前主链的操作入口。`scripts/evaluate-host-skill-selection.ps1` 仅保留为可选诊断，不切换 profile，也不替代真实 Desktop 任务的发现、复用和行为验收。
 
 设计访谈统一使用 `grill-with-docs`：在 CLI/IDE 中可显式输入 `$grill-with-docs`，在 Work/Codex 桌面端可从技能选择器指定，也可由模型仅在“grill/设计质询/把方案磨清楚”等明确语义下隐式调用。它不会因为普通实现或重构请求自动启动；完成访谈后只有用户确认的持久决策才写入 `CONTEXT.md`、词汇表或 ADR。`grilling` 与 `domain-modeling` 作为 `default` 的完整依赖闭包保留，防止主技能可见但运行依赖缺失；只有在直接进行决策树访谈或领域建模时才单独调用。
 

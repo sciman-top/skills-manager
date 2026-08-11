@@ -40,7 +40,7 @@ It will not become an agent runtime, plugin marketplace, provider/model/auth/ses
 - [Historical Phase 1 task manifest](tasks/skills-manager-vnext-phase1.tasks.json)
 - [Historical Phase 0 task manifest](tasks/skills-manager-vnext-phase0.tasks.json)
 
-The P6 manifest is the current dynamic truth source. The repository implementation has closed out the P6 host-native lifecycle reset on the repo side, while its highest evidence level remains `host_evaluation_partial`. Complete native inventory, host selection, full skill-body injection, execution, and business `live_accepted` each require separate evidence and cannot be inferred from a repo gate or visibility. P0-P5 counts remain historical contract truth; plugin/MCP installation, OAuth, host/profile/session writes, and restart remain outside the automatic boundary.
+The P6 manifest is the current dynamic truth source. The repository implementation has closed out the P6 host-native lifecycle reset and completed one explicitly scoped representative Codex Desktop acceptance workflow. Desktop acceptance evaluates discoverability, reuse, and behavioral consistency; it does not depend on CLI injected/executed telemetry and is not a universal claim across every task or model. P0-P5 counts remain historical contract truth; plugin/MCP installation, OAuth, host/profile/session writes, and restart remain outside the automatic boundary.
 
 PowerShell 7 (`pwsh`) is the only supported runtime; PowerShell 7.6 LTS is the recommended baseline. Windows PowerShell 5.1 has no installer fallback, CI job, or smoke-support path, and entry points fail closed when `pwsh` is missing. See [`docs/runbooks/powershell-runtime-compatibility.md`](docs/runbooks/powershell-runtime-compatibility.md) for migration, encoding, and rollback boundaries.
 
@@ -52,7 +52,7 @@ The resident `capability-router` is now a compatibility fallback, not a lexical 
 
 Skill profile data is now migration-only. `skills.ps1 skill-profile` has been removed from the runtime entrypoint; legacy fields are retained under `skill_projection.profile_compatibility` with `status=read_only` and `reachability_authority=none`. `scripts/plan-skill-profile-reconciliation.ps1 -Json` remains a compatibility report, while `scripts/verify-skill-routing.ps1 -Json` is compatibility-only and is not a quality gate or semantic selector. No current request may hot-switch a profile or mutate host/session state.
 
-Native projection compiles all eligible enabled skills and uses the host snapshot plus deterministic eligibility/metadata planning; profile membership cannot omit a native skill. Host evaluation separates listed, selected, injected, executed and abstained states. The current fresh CLI probe is `host_evaluation_partial` because selection and body invocation are not observable; it does not establish `host_loaded` or `live_accepted`.
+Native projection compiles the canonical inventory, admits the bounded resident set, and uses the host snapshot plus deterministic eligibility/metadata planning; profile membership cannot control reachability. Real host acceptance is evaluated through representative Desktop tasks for discovery, reuse, and behavior. CLI/App Server events are optional diagnostics, not a second invocation truth source.
 
 Phase 1 read-only entry points (no file writes without `--out`):
 
