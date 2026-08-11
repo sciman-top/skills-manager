@@ -73,5 +73,47 @@
     "A candidate may be prepared only after its admission gate passes; reviewed promotion still requires an exact-current evaluation receipt, reviewed change-set, and explicit token.",
     "Until all ten required real-task categories are represented, report pilot_collecting and do not claim that controlled skill evolution has demonstrated system-level benefit."
   ],
-  "samples": []
+  "samples": [
+    {
+      "sample_id": "real-20260811-custom-powerpoint-accessibility-001",
+      "task_id": "pptx-accessibility-audit-person-courseware-20260811",
+      "category": "capability_selection",
+      "countable": true,
+      "synthetic": false,
+      "self_referential": false,
+      "evidence_link": "reports/skill-evolution/pilot-20260811-141301/business-workflow/business-workflow-receipt.json",
+      "coordination_mode": "serial",
+      "shared_write_set_policy": "read_only_input_derived_reports",
+      "tool_dispositions": [
+        "custom-powerpoint-accessibility",
+        "LibreOffice",
+        "pdftoppm",
+        "OOXML_read_only_parser",
+        "visual_review"
+      ],
+      "context_adapter": "desktop_first_authorized_pilot",
+      "skill_lifecycle_action": "activation_observed",
+      "host_selection_observed": false,
+      "host_invocation_observed": false,
+      "business_workflow_status": "needs_fixes",
+      "skill_signal": {
+        "schema_version": 1,
+        "signal_type": "no_change",
+        "surface": "user_skill_root",
+        "target_skill": "custom-powerpoint-accessibility",
+        "issue_signature": "real_pptx_accessibility_audit_completed_with_native_checker_gap",
+        "evidence_link": "reports/skill-evolution/pilot-20260811-141301/business-workflow/business-workflow-receipt.json",
+        "baseline": "existing_projected_skill_and_native_presentation_workflow",
+        "native_equivalent": "not_available",
+        "disposition": "retain_and_collect",
+        "negative_case": false,
+        "control_case": "not_run",
+        "workflow_stable": false,
+        "consumer": "courseware_accessibility_review",
+        "net_benefit_metric": "audit_coverage",
+        "rollback_condition": "restore_the_exact_prior_managed_projection_receipt",
+        "retirement_condition": "native_host_capability_provides_equivalent_accessibility_audit_and_evidence"
+      }
+    }
+  ]
 }
