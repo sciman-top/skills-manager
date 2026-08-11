@@ -1274,6 +1274,21 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             (Get-AuditInstalledSnapshotStaleness $stale $live).external_skill_stale | Should Be $true
             (Get-AuditInstalledSnapshotStaleness $legacy $live).is_stale | Should Be $false
         }
+
+        It "does not treat a live fallback host health gap as historical snapshot drift" {
+            $live = [pscustomobject]@{
+                fingerprint = "skills"
+                mcp_fingerprint = "mcp"
+                external_skill_fingerprint = "external"
+                host_projection = [pscustomobject]@{ status = "available"; fingerprint = "host"; stale_count = 1; broken_count = 0 }
+            }
+            $fallback = New-AuditInstalledSnapshotFallbackState $live "C:\missing\installed-skills.json"
+
+            $result = Get-AuditInstalledSnapshotStaleness $fallback $live
+
+            $result.is_stale | Should Be $false
+            $result.host_projection_stale | Should Be $false
+        }
     }
 
     Context "Recommendations" {

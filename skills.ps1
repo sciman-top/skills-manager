@@ -21108,8 +21108,9 @@ function Get-AuditInstalledSnapshotStaleness($snapshotState, $liveState) {
     $hostStale = $false
     if ($snapshotState.PSObject.Properties.Match('host_projection').Count -gt 0 -and $null -ne $snapshotState.host_projection -and $liveState.PSObject.Properties.Match('host_projection').Count -gt 0) {
         $snapshotHost = $snapshotState.host_projection; $liveHost = $liveState.host_projection
+        $isLiveFallback = [string]$snapshotState.snapshot_kind -eq 'legacy_live_fallback'
         if ([string]$snapshotHost.status -eq 'available' -and [string]$liveHost.status -eq 'available') {
-            $hostStale = ([string]$snapshotHost.fingerprint -ne [string]$liveHost.fingerprint -or [int]$liveHost.stale_count -gt 0 -or [int]$liveHost.broken_count -gt 0)
+            $hostStale = ([string]$snapshotHost.fingerprint -ne [string]$liveHost.fingerprint -or (-not $isLiveFallback -and ([int]$liveHost.stale_count -gt 0 -or [int]$liveHost.broken_count -gt 0)))
         }
     }
     return [pscustomobject]([ordered]@{
