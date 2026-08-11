@@ -95,13 +95,15 @@ Focused evidence for this slice:
 - `verify-vnext-planning`: 15 tasks done, 0 open;
 - `check-generated-sync -AllowDirtyWorktree`: generated `skills.ps1` matched current `src`.
 
-The final full command for this tracked source is:
+The pre-commit candidate source passed a forced dirty-worktree full run as `qgr-20260811-055452-770d65f1` with 15/15 gates and 997/997 tests. Because committing changes the Git revision bound into the source fingerprint, that candidate receipt is not reused as the final commit receipt.
+
+The final clean-commit command for this tracked source is:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree -ForceFresh
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full -ForceFresh
 ```
 
-Its authoritative exact-current result is the stable `reports/quality-gates/current.json` pointer generated after this evidence section was added. No `skill-evolution project`, host mutation, restart, or live business workflow was executed in this automation hardening slice.
+Its authoritative exact-current result is the stable `reports/quality-gates/current.json` pointer generated on the final clean commit after this evidence section was added. No `skill-evolution project`, host mutation, restart, or live business workflow was executed in this automation hardening slice.
 
 ## Final truth
 
