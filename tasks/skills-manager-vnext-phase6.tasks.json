@@ -4,7 +4,7 @@
   "current_phase": "P6",
   "phase_sequence": ["P0", "P1", "P2", "P3", "P4", "P5", "P6"],
   "allowed_statuses": ["pending", "in_progress", "blocked", "deferred", "done"],
-  "truth_level": "host_evaluation_partial",
+  "truth_level": "desktop_representative_accepted",
   "full_gate": "receipt_authoritative",
   "full_gate_receipt": {
     "pointer": "reports/quality-gates/current.json",
@@ -13,27 +13,23 @@
     "source_binding": "exact_current_source"
   },
   "runtime_migration": "completed",
-  "host_inventory_loaded": "observed",
-  "host_evaluation": "host_evaluation_partial",
-  "host_invocation_observed": "not_observed",
-  "live_accepted": "not_accepted",
-  "latest_evidence": "docs/change-evidence/20260809-p6-deep-audit-remediation.md",
+  "latest_evidence": "docs/change-evidence/20260811-desktop-native-acceptance-and-governance-compression.md",
   "main_chain": [
     "compile the complete canonical skill catalog",
     "admit only managed_link_includes into the resident projection",
     "plan resident metadata within the verified host budget",
     "project placement-admitted resident skills transactionally",
     "let host AI select visible metadata natively and use capability-router only for explicit cold discovery or policy validation",
-    "verify repository contracts before separate host invocation and live acceptance"
+    "validate discoverability, reuse and behavior consistency in scoped Codex Desktop tasks"
   ],
   "stop_conditions": [
     "full gate fails or becomes stale after a relevant file change",
     "runtime migration or host mutation lacks explicit current-task authorization",
-    "host evidence is promoted beyond its observed truth level",
-    "live acceptance is inferred from repository or inventory evidence"
+    "Desktop acceptance is inferred without a real representative task",
+    "a scoped Desktop result is generalized beyond its observed sample"
   ],
   "first_open_task": null,
-  "next_milestone": "Keep live acceptance not accepted until native injection/execution plus a real business workflow are observed; treat external host inventory count changes independently from the complete managed projection.",
+  "next_milestone": "Reopen only when repeated real Desktop tasks expose a discoverability, reuse or behavior-consistency failure; do not add telemetry for its own sake.",
   "tasks": [
     {
       "id": "SMV-P6-001", "phase": "P6", "title": "P6 admission 与历史 supersession map", "status": "done", "risk": "low", "depends_on": [],

@@ -71,11 +71,13 @@ North Star：在不复制宿主原生推理、编码和运行能力的前提下�
 
 ## 5. 产品原则
 
-### PP-000 Host-native-first main-chain-first self-retiring
+### PP-000 三条最高强约束
 
-在授权、安全、数据、兼容、供应链和真值边界内，本项目最大化宿主 AI 原生能力并优先交付最短真实主链；无真实重复、稳定协议、已证实风险或量化热点，不新增抽象、治理或优化层。本条优先解释“继续、完成、closeout”：完成是冻结范围内的最小充分验收闭环，达到已声明的停止条件必须结束；“仍可继续做”不等于“必须继续做”。“继续/自动自主连续执行”只授权冻结范围内推进，不授权范围扩展；具体执行表示：仅在已冻结的用户目标、授权边界、`admission_scope`、`exact_write_set`、`verification ceiling` 和 `stop_condition` 内持续执行，完成该最小闭环即停止；任何新文件/模块/抽象/治理/证据、扩大 write set、升级 full、创建 worktree/子代理、吸收范围外远端/并发改动、修改宿主或产生外部副作用都是 `scope expansion`，必须先证明其防止当前任务内的独立现实失败并重新 admission；证明不足则跳过、降级、保持分支或报告独立阻断。在这些边界不变的同等风险基线下，经代表性真实任务证明的宿主原生能力越强，本项目附加治理负担必须递减；模型名称、版本升级、单次成功或模型自评本身都不是删减门禁的充分证据。本项目仅补宿主原生能力的真实缺口；当原生能力覆盖、功能重叠、消费者消失或维护成本超过净收益时，相关能力必须依据可复核证据进入弱化或退役处置，有兼容义务时先转为 `compatibility-only/deprecated`，义务结束后最终 `retired`。门禁、审计、字段、证据、skill 和流程必须覆盖独立失败模式并保持正净收益；否则合并、降级、转为兼容层或退役。仅仅缺少遥测或使用记录不能单独证明消费者消失。不得为执行本条款建立第二套治理或运行控制面。
+1. **原生优先**：宿主 AI 已能完成的事直接复用；只有当前真实失败证明宿主存在缺口时，才新增仓库能力。
+2. **最短真实主链**：冻结目标、非目标、写集、最低验证和停止条件，先交付最短端到端闭环；不能直接防止当前失败的扩范围一律不做。
+3. **最低充分且自退役**：只验证当前独立风险，达到停止条件立即结束；没有真实消费者、独立失败模式或正净收益的抽象、遥测、门禁和治理必须合并、降级或退役。
 
-本条是 `PP-001` 至 `PP-013` 的优先级解释，不复制或替代其具体契约。所有原则仅通过一次最小执行转译进入动作：用现有 `user_outcome/admission_scope` 表达触发与边界，`reuse_decision/main_chain_checkpoint` 表达默认动作，`authority/exact_write_set` 表达禁止越界，`verification/stop_condition` 表达最低充分验证与停止；方向、风险、授权、写集、验证上限或外部副作用扩大时重新 admission。简单任务可在进度更新中等价声明，不新增 schema、registry、verifier 或 evidence。
+授权、安全、数据、兼容和不可逆风险仍是硬边界。不得为执行上述三条约束建立第二套治理或运行控制面；`PP-001` 至 `PP-013` 只提供细节，不得反向扩大 PP-000。
 
 ### `PP-001 Official-first`
 
@@ -296,10 +298,10 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 - `FR-HNS-006`：metadata planner 使用宿主有效 token ceiling；已知上下文默认 ceiling 为 `floor(context_window * 0.02)` 或宿主更严格值，headroom 可配置，禁止用固定字符数伪装 token 真值。
 - `FR-HNS-007`：Codex USER-scope 只投影 `managed_link_includes` 明确准入的最小常驻集合；该集合中的 eligible enabled skill 必须满足 `enabled_total == kept_total`、`truncated=false`、`omitted=0`。未准入项不得从 canonical inventory/portable catalog 删除，可由 explicit-only cold discovery 读取。
 - `FR-HNS-008`：metadata 质量以 concise description lint 和 direct/indirect/negative/ambiguous/no-skill corpus 验证；修复选择错误时优先改 metadata，不增加第二套 semantic router。
-- `FR-HNS-009`：提供 `NativeInvocationTrace`，区分 listed、selected、injected、executed 和 abstained；不可观测层保持 partial/unknown。
+- `FR-HNS-009`：宿主验收以 Codex Desktop 真实任务中的可发现性、可复用性和行为一致性为主；CLI/App Server 遥测只作可选诊断，不是调用或验收前置条件，也不得据此建立自有遥测服务。
 - `FR-HNS-010`：legacy router/profile 只能在 zero-write shadow 中与 native path 对比，shadow 结果不得改变当前执行或覆盖宿主选择。
 - `FR-HNS-011`：profile、active_profile、current_profile、reconciliation 和 canary 从可达性主链退役；迁移期可兼容读取，但必须有 versioned migration、round-trip 和 rollback receipt。
-- `FR-HNS-012`：strict dispatch 仅允许显式 opt-in；采用 pre-turn bounded candidates、宿主裁决、支持时的 App Server `type=skill` 注入和 trace，普通请求不得默认进入。
+- `FR-HNS-012`：历史 strict App Server dispatch 因无真实 caller/消费者且宿主原生显式调用已覆盖而退役；普通请求和显式技能调用都由宿主原生路径负责，不恢复 pre-turn middleware。
 - `FR-HNS-013`：legacy runtime 的 staged removal 是已完成的历史迁移，不因常驻 placement 收窄而恢复；P5/P6 文档和 evidence 保持历史真值，当前只保留 versioned compatibility/rollback seam。
 
 ### 6.14 P6 当前实现与验收边界
@@ -310,7 +312,7 @@ CURRENT_PHASE_TRUTH_SOURCE: tasks/skills-manager-vnext-phase6.tasks.json
 
 当前仓库侧 compatibility boundary 为：legacy `SkillRouting` source 及其自测已删除，`技能配置`/`skill-profile` dispatch 已退役；profile compatibility view 仅为 `read_only`、`reachability_authority=none`，独立 verifier 只读取配置并报告 migration compatibility 状态。P5 profile advisor、resident dispatcher 与 cold-load 描述保留为历史或迁移契约，不是普通请求的当前语义选择 owner。
 
-fresh inventory、host evaluation、injected/executed invocation 与业务 acceptance 是独立层级；它们只能由对应证据晋级，不能由 metadata visibility、focused tests 或 planning verifier 推导。tracked manifest 不复制 `passed|stale` 运行态：当前 full 是否有效只由 `reports/quality-gates/current.json` 指向的 immutable full receipt 及 exact-current-source 校验决定。
+仓库验证与 Desktop 代表性验收分开呈现：前者由门禁证明，后者只看真实 Desktop 任务中的可发现、可复用和行为一致性，并明确样本范围，不外推为所有任务或模型版本的普遍保证。tracked manifest 不复制 `passed|stale` 运行态：当前 full 是否有效只由 `reports/quality-gates/current.json` 指向的 immutable full receipt 及 exact-current-source 校验决定。
 
 ## 7. 非功能需求
 
@@ -350,11 +352,11 @@ fresh inventory、host evaluation、injected/executed invocation 与业务 accep
 - `NFR-HNS-004`：常驻 metadata budget 溢出列出 exact offenders 和 compaction result；不得静默增大 ceiling、切 profile 或丢弃 placement-admitted skill。扩大常驻集合必须有真实高频消费者和预算证据，完整 catalog 不作为常驻预算的借口。
 - `NFR-HNS-005`：projection apply 需要显式 token、expected hash、atomic replace、receipt 和 drift-safe rollback；plan 保持 zero-write。
 - `NFR-HNS-006`：activation corpus 只评估 metadata/host behavior，不得成为脚本 semantic selector 或权限门禁。
-- `NFR-HNS-007`：invocation trace redaction-first、correlated、freshness-aware；visibility 不得升级为 full skill body execution。
+- `NFR-HNS-007`：Desktop 验收只记录完成任务所需的最低事实和样本边界；不采集独立调用遥测，不把技能可见性单独写成行为成功。
 - `NFR-HNS-008`：退役裁决阶段的 shadow comparison 必须 writes=0、不调用第二模型、不把 partial trace 当作输赢依据；P6 removal gate 完成后删除比较器和专用测试，仅保留历史 manifest/evidence。
 - `NFR-HNS-009`：profile migration 兼容读取旧 schema，且旧数据可 round-trip 恢复；当前 task 不热切换 active profile。
-- `NFR-HNS-010`：strict fallback 与 native main path 复用同一 eligibility policy，候选集有界，缺宿主裁决或 injection 支持时 fail-closed/platform_na。
-- `NFR-HNS-011`：P6 真值阶梯固定为 `planning_contract -> implemented -> repo_verified -> host_inventory_loaded -> host_evaluation_partial -> host_invocation_observed -> live_accepted`，不得越级；inventory 不得冒充 invocation。
+- `NFR-HNS-010`：strict dispatch 保持退役；显式 cold discovery 只能读取 portable catalog 并把最终语义选择交还宿主，不生成注入协议或调用 receipt。
+- `NFR-HNS-011`：当前产品只区分 `repo_verified` 与有明确样本范围的 `desktop_representative_accepted`；不得把任一代表性结果外推为普遍正确性。
 
 ## 8. 产品级验收
 
@@ -366,7 +368,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 4. MCP、skill projection 和 rule apply 使用一致的 plan/freshness/receipt 语义。
 5. 任一 apply 中断后能恢复本次切片，不覆盖无关用户修改。
 6. 官方插件或系统技能已覆盖的能力不会被重复安装为默认自维护副本。
-7. fresh native probe 与 repo-side gate 分开呈现；未执行 live workflow 时保持 `not_verified`。
+7. repo-side gate 与 Desktop 代表性验收分开呈现；Desktop 只验证可发现性、可复用性和行为一致性，并明确样本范围。
 8. AI 能按 task manifest 执行当前 Phase，不需要从多份文档猜测 write set、依赖或完成条件。
 9. AI 软件交付任务能先给出 Product Baseline、当前 delivery mode、单一主链和 Slice Contract，并在 checkpoint 前保持 write set 与停止条件稳定。
 10. 同类失败两次、方向证据变化、授权越界或 live/生产动作出现时会停止并重新规划或询问；普通低风险实现不会因固定角色审批而中断。
@@ -419,7 +421,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - Phase 5 增加 task understanding、capability DAG、session reuse planning 和只读 host snapshot；仍不接管执行、安装、认证、审批、profile 或 session mutation。
 - P5 maintenance correction、profile reconciliation advisor、hierarchical cold-load 与 profile optimization canary 保留为历史结果或 P6 迁移/兼容证据，不再代表当前 reachability 主链。
 - P6 已将 profile reachability authority 退役；旧 canary `Apply`/`Accept` 固定返回 `deprecated` 且零写入，当前只保留显式 versioned migration/rollback 和只读兼容报告。
-- 当前主链是 `canonical inventory -> managed_link_includes placement -> eligible resident metadata -> host AI native selection -> full skill injection -> invocation trace`；未常驻能力保留在 portable catalog，只由 explicit cold discovery/fallback 读取。profile、第二 semantic router 和 mandatory router preflight 均不在主链。
+- 当前主链是 `canonical inventory -> managed_link_includes placement -> eligible resident metadata -> host AI native selection -> Desktop representative task`；未常驻能力保留在 portable catalog，只由 explicit cold discovery 读取。profile、第二 semantic router、mandatory router preflight 和自有调用遥测均不在主链。
 - P5 后的 `maintenance_design` 已建立 Lean Delivery advisory 规划契约；M1 registry 当前为 `deferred (0/10)`，因为没有 active owner/collection task，只有显式建立两者后才恢复。它不是新 Phase，也不证明 pilot 已执行、完成或产生业务效果。
 - `maintenance_design` M0.2 只补强 host-owned coordination、single-writer write-set admission、Git freshness/CAS 语义、tool disposition 和 context-adapter admission；不引入 coordinator/lease runtime，也不安装 Trellis、AGOS、GBrain、CodeGraphContext、Understand Anything 或 OptSkills。
 - `maintenance_design` M0.3 的 TaskGraph/model policy 是历史 planning truth；后续通用 advisory runtime 因无外部消费者且与宿主原生能力重叠已退役。独立 TC1 shadow PoC 也已因无消费者和净收益证据退役；Radar automation 已删除，旧 Luna/Terra/Radar 记录只作为历史 receipt。
@@ -481,7 +483,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - `DEC-PROD-010`：社区 workflow、知识库、代码图和自动 skill 学习均先进入证据化 disposition；当前候选只采纳协议启发，不安装运行时，M1 真实任务证据决定后续 retain/adapt/retire。
 - `DEC-PROD-011`：宿主 AI 独立拥有任务语义、DAG、串并行、模型档位和 spawn/wait/integration；skills-manager 不再提供通用编排建议或 admission，只保留自身产品领域的确定性安全合同。
 - `DEC-PROD-012`：当前 shell runtime 强制收敛为 PS7-only，以删除 5.1/7 双运行时解析、quoting、encoding 和测试分支；这是支持面迁移，不是 typed-core 生产迁移。历史 typed-core PoC 已因真实收益不足、兼容/SDK 成本和无消费者退役；未来只有新的独立失败和 reviewed 净收益证据才能重新准入一个可删除 seam。
-- `DEC-PROD-013`：P6 正式采用 host-native skill lifecycle reset；profile/router/cold-load 不再是技能可达性或语义选择主链，完整 native discovery、确定性 eligibility 和 invocation trace 成为新边界。
+- `DEC-PROD-013`：P6 正式采用 host-native skill lifecycle reset；profile/router/cold-load 不再是技能可达性或语义选择主链。2026-08-11 后验修正又退役了无消费者的 invocation trace/strict dispatch，当前边界是确定性 inventory/eligibility 加有范围的 Desktop 真实任务验收。
 
 以下选择有意延迟到有真实代码/宿主证据的任务，不允许 AI 在更早任务中猜定：
 

@@ -85,6 +85,7 @@
 | `repo_verified` | 仓库侧静态/测试验证通过 | 不等于宿主加载或 live acceptance |
 | `host_loaded` | fresh native probe 证明宿主加载 | 不等于用户/生产验收 |
 | `live_accepted` | 明确的真实工作流或人工验收已完成 | 可以，必须附证据范围 |
+| `desktop_representative_accepted` | Desktop 真实任务已证明发现、复用和行为一致性 | 可以，但只限所列样本 |
 
 ## 5. 当前基线
 
@@ -92,10 +93,10 @@ CURRENT_PHASE_TRUTH_SOURCE: tasks/skills-manager-vnext-phase6.tasks.json
 
 - 当前 Phase 是 P6 `Host-Native Skill Lifecycle Reset`。任务计数、runtime migration、truth ladder、full gate 和最新 evidence 只从上述 manifest 及其 `latest_evidence` 读取；本索引不复制这些易漂移字段。
 - P6-012 的仓库侧 removal 已落盘并重建生成 bundle：legacy `SkillRouting` source 及其自测已删除，`skill-profile`/`技能配置` dispatch 已移除，profile compatibility view 保留为 `read_only` 且 `reachability_authority=none`；独立 `verify-skill-routing.ps1` 只报告 migration compatibility 状态。
-- fresh host inventory、host evaluation、host invocation 和 live acceptance 是彼此独立的证据层；inventory 可见性不得升级为 selection、完整 body injection、execution 或业务验收。
-- 任一 full receipt 只绑定其运行期间稳定的 repo source；后续 executable/config/generated/fixture 变化会使它失效。即使 full 通过，也只证明 repo-side build/test/contracts，不证明真实技能 invocation 或业务 live acceptance。
+- 当前宿主验收主链是 Desktop 真实任务中的可发现性、可复用性和行为一致性；CLI/App Server 遥测只作可选诊断，不是晋级前置。
+- 任一 full receipt 只绑定其运行期间稳定的 repo source；后续 executable/config/generated/fixture 变化会使它失效。即使 full 通过，也只证明 repo-side build/test/contracts，不证明 Desktop 代表性行为。
 - P5 profile advisor、resident dispatcher、hierarchical cold-load 与相关架构描述保留为历史结果或 P6 迁移/兼容契约，不再表示当前普通请求的 runtime reachability 主链。
-- 目标主链是 `canonical inventory -> managed_link_includes placement -> eligible resident metadata -> host AI native selection -> full skill injection -> invocation trace`；portable catalog 保留非驻留能力，cold discovery 与 strict App Server dispatch 仅为显式 opt-in fallback。
+- 目标主链是 `canonical inventory -> managed_link_includes placement -> eligible resident metadata -> host AI native selection -> Desktop representative task`；portable catalog 保留非驻留能力，cold discovery 仅为显式 fallback，strict App Server dispatch 已退役。
 - 当前 `model_context_window=272000` 的配置样本对应官方 2% ceiling 约 5440 tokens，但 P6 不把单个 TOML 值当运行真值；最终由 `HostCapabilitySnapshot` 按 surface/thread/turn 解析并以完整无 omission 验收。
 
 历史基线（截至 2026-08-05）：

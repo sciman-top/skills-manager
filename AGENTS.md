@@ -24,13 +24,9 @@
 - 当前工作树可能含用户 audit/MCP 与第三方 import 更新；先用 `git diff` 分界，不回退、不重排、不纳入本次回滚。
 - Pester、Python、GitHub 或宿主工具缺失时按 N/A 留痕，不为纯规则改动擅自安装或升级依赖。
 ### B.1 AI 编码范围与复杂度
-- `TOP_LEVEL_ENGINEERING_PRINCIPLE: PP-000` 正文仅在 PRD；上级/授权/安全边界内裁决项目默认冲突。用现有 manifest/TaskGraph 或进度更新冻结 `goal/non-goals/reuse/scope/write set/verification/stop`，不建第二控制面。
-- 写入前冻结范围；先通最薄主链，仅前置安全/数据/不可逆阻断。“继续/自动自主连续执行”仅推进到 stop。范围外文件/模块/抽象/治理/证据、write set/full/worktree/子代理、远端/并发吸收、宿主/外部副作用均为 `scope expansion`；仅防止当前独立失败时 re-admit，否则 skip/defer/block。
-- 新抽象只允许消除至少两个真实重复、隔离已证实风险、匹配稳定外部协议或降低量化热点；否则优先直接实现、删除或延后。
-- 同等风险仅由代表性真实任务证据触发治理递减；模型版本/单次成功/模型自评不构成删门禁证据。gate/audit 须覆盖独立失败模式且净收益>0，否则合并/降级/退役。
-- 每项风险用最低充分层级证明：迭代跑受影响 test/contract，共享写入/config/generated seam 才升 quick；closeout 在 focused/full 中选一条，相关源码变化才重跑。
-- 同一逻辑切片默认一份 evidence；不按 task 机械增加 evidence/schema/fixture/wrapper/空模块。
-- skill/description 变化：宿主消费 `host_handoff`，可 no-op；profile proposal/canary 不再 apply，仅 legacy config 的显式 versioned migration 或 receipt rollback 可写，且不热切 active。
+- `TOP_LEVEL_ENGINEERING_PRINCIPLE: PP-000` 只有三条：`原生优先`（只补当前真实宿主缺口）、`最短真实主链`（冻结目标/写集/最低验证/停止条件，不能防止当前失败的扩范围不做）、`最低充分且自退役`（达到 stop 即结束，无消费者、独立失败或正净收益的抽象/遥测/门禁/治理必须退役）。不得建立第二控制面。
+- 安全、数据、兼容、不可逆和授权边界前置；其余风险只跑覆盖当前独立失败模式的最低充分验证。共享 source/config/generated seam 才升级 build/quick，closeout 在 focused/full 中只选一条。
+- Desktop 宿主验收只看真实任务中的技能可发现性、可复用性和行为一致性；CLI/App Server 遥测只作诊断，不是验收主链。单次代表性结果必须标明范围，不外推为普遍正确。
 - 宿主 AI 先按可见 skill/tool 元数据选最小集合；`capability-router` 仅作显式跨目录 fallback/policy validation，不是启动前置或 implicit invocation。profile 只负责只读兼容、预算与预热。
 ### B.2 参考依据与外置源码
 - 参考真源：`references/reference-shelf.manifest.json`/`docs/EXTERNAL_REFERENCE_REPO_TIERS.md`；联动仅限 `D:\CODE\external\skills-manager-references` 的 manifest checkout，`D:\CODE\external` 根、共享/兄弟/runtime/import 不联动。
