@@ -34,6 +34,8 @@ function Test-SkillProfile([string]$Profile, [string[]]$Expected, [string[]]$Abs
     $manifest = Get-ProjectionManifest
     if ([string]$manifest.active_profile -ne $Profile) { throw "$Profile manifest active profile mismatch: $($manifest.active_profile)" }
     $projectedNames = @($manifest.skills | ForEach-Object { [string]$_.name })
+    if ($promptText -notmatch [regex]::Escape("- capability-router:")) { throw "$Profile missing resident capability-router" }
+    if (@($manifest.resident_names) -notcontains "capability-router") { throw "$Profile manifest missing resident capability-router" }
     foreach ($name in $Expected) {
         if ($promptText -notmatch [regex]::Escape("- ${name}:")) { throw "$Profile missing $name" }
     }
@@ -82,9 +84,9 @@ try {
         "using-git-worktrees"
     ) @("grill-with-docs", "grilling")
     Test-SkillProfile "engineering" @(
-        "research",
         "domain-modeling",
-        "codebase-design"
+        "grill-with-docs",
+        "draft-spec"
     ) @("using-superpowers") @(
         "grill-with-docs",
         "draft-spec",
@@ -158,13 +160,8 @@ try {
         "security-and-hardening"
     ) @("using-superpowers")
     Test-SkillProfile "default" @(
-        "custom-windows-wpf-teacher-app",
-        "custom-teacher-courseware-ppt",
-        "custom-creator-publishing",
-        "custom-junior-physics-animation",
-        "domain-modeling",
-        "grill-with-docs",
-        "grilling",
+        "systematic-debugging",
+        "verification-before-completion",
         "chrome:control-chrome",
         "computer-use:computer-use"
     ) @(
@@ -172,7 +169,9 @@ try {
         "research",
         "brainstorming",
         "planning-and-task-breakdown",
-        "dispatching-parallel-agents"
+        "dispatching-parallel-agents",
+        "grill-with-docs",
+        "custom-junior-physics-animation"
     )
 
     $configuredProfiles = @($config.skill_projection.profiles.PSObject.Properties.Name | Sort-Object)

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "cases": [
+    { "id": "direct-grill", "category": "direct", "query": "请用 grill-with-docs 质询这个设计方案", "expected": [{ "kind": "skill", "name": "grill-with-docs", "action": "load_skill" }], "forbidden": [], "expect_abstain": false },
+    { "id": "negative-implementation", "category": "negative", "query": "更新 PRD 和 spec，然后彻底重构并自动自主连续实现", "expected": [{ "kind": "skill", "name": "spec-driven-development", "action": "load_skill" }], "forbidden": [{ "kind": "skill", "name": "draft-spec" }, { "kind": "skill", "name": "grill-with-docs" }, { "kind": "skill", "name": "to-spec" }, { "kind": "mcp", "name": "playwright" }], "expect_abstain": false },
+    { "id": "official-openai-docs", "category": "cross-kind", "query": "查询 OpenAI 官方开发文档中关于 Codex skills 的说明", "expected": [{ "kind": "mcp", "name": "openaiDeveloperDocs", "action": "use_available_mcp" }], "forbidden": [], "expect_abstain": false },
+    { "id": "disabled-browser-mcp", "category": "activation", "query": "用 Playwright 自动化浏览器测试这个网页", "expected": [{ "kind": "mcp", "name": "playwright", "action": "request_mcp_activation" }], "forbidden": [], "expect_abstain": false },
+    { "id": "weak-continuation", "category": "ambiguous", "query": "你好，请继续", "expected": [], "forbidden": [], "expect_abstain": true },
+    { "id": "dotnet-diagnosis", "category": "indirect", "query": "诊断 WPF .NET 启动失败", "expected": [{ "kind": "skill", "name": "debug:dotnet", "action": "load_skill" }], "forbidden": [], "expect_abstain": false },
+    { "id": "physics-animation", "category": "cross-domain", "query": "制作一个初中物理动画仿真", "expected": [{ "kind": "skill", "name": "custom-junior-physics-animation", "action": "load_skill" }], "forbidden": [], "expect_abstain": false },
+    { "id": "operator-skill", "category": "side-effect", "query": "使用 to-spec 把这个 spec 发布到 tracker", "expected": [{ "kind": "skill", "name": "to-spec", "action": "load_skill_with_approval" }], "forbidden": [], "expect_abstain": false },
+    { "id": "available-plugin-read", "category": "runtime-snapshot", "query": "用 gmail 总结今天的未读邮件", "snapshot_path": "tests/fixtures/capability-routing/runtime-capabilities.json", "expected": [{ "kind": "plugin", "name": "gmail", "action": "use_available_capability" }], "forbidden": [], "expect_abstain": false },
+    { "id": "available-plugin-write", "category": "side-effect", "query": "用 stripe 创建退款", "snapshot_path": "tests/fixtures/capability-routing/runtime-capabilities.json", "expected": [{ "kind": "plugin", "name": "stripe", "action": "request_approval" }], "forbidden": [], "expect_abstain": false },
+    { "id": "capability-architecture-meta", "category": "meta-architecture", "query": "评估当前统一 capability selector、skills、MCP、plugin、app、connector、native tools 自动无感切换架构是否存在更优工程终态", "expected_task": { "task_type": "architecture_assessment", "domain": "capability_orchestration", "goal": "evaluate_global_optimum" }, "expected": [], "forbidden": [{ "kind": "skill", "name": "custom-windows-wpf-teacher-app" }, { "kind": "skill", "name": "mcp-builder" }, { "kind": "skill", "name": "mcp-cli" }], "expect_abstain": false }
+  ]
+}

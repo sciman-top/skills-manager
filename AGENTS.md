@@ -1,13 +1,13 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
 **全局规则复核**: 9.61
-**最后更新**: 2026-08-02
+**最后更新**: 2026-08-03
 
 ## 1. 当前落点与目标归宿
 - 当前落点：`skills.ps1` 是统一入口，`skills.json` 是 vendor、mapping、target、sync 与 MCP 的单一配置源。
 - 目标归宿：演进为 local-first AI capability curator 与 rule advisor；复用官方 skills/plugins/MCP/规则 surface，不替代宿主 runtime、auth、权限、会话或插件目录。
-- 当前规划真源：`docs/product/`、当前 P3 spec、`tasks/skills-manager-vnext-phase3.tasks.json`；P0/P1/P2 历史由独立 manifest/closeout evidence 保留，设计态能力不得写成已实现。
-- 当前 Phase 收口：P3 7/7 `repo_verified`。P1/P2 follow-through 已实现工作区规则全域审查，以及 reviewed global/project multi-target plan、全量预检、逐目标 apply、receipt resume 和单目标 rollback；真实规则变更仍须用户提供 reviewed change-set 与显式 token。plugin install、provider/auth/model/sandbox、native host mutation 与无审阅批量覆盖仍不在边界。P4 entry decision 为 `not_started/deferred`，未创建 P4 manifest。
+- 当前规划真源：`docs/product/`、当前 P5 spec、`tasks/skills-manager-vnext-phase5.tasks.json`；P0-P4 历史由独立 manifest/closeout evidence 保留，设计态能力不得写成已实现。
+- 当前 Phase：P5 6/6 `repo_verified`；字段级 runtime truth、MCP protocol defaults、复合工具风险、动态 host identity coverage、source/runtime 双证据与 ordered full gate 均已通过。P4 6/6 历史真源继续保留；plugin/MCP install、OAuth、provider/auth/model/sandbox/session mutation、native host mutation 与 live acceptance 仍不在边界。
 
 ## A. 仓库事实与模块边界
 - `build.ps1` 从 `src/*` 生成根 `skills.ps1`；`agent/` 与 `vendor/` 是生成或缓存目录，`agent/` 禁止手改。
@@ -30,6 +30,7 @@
 - 开发迭代只运行受影响测试和相关 contract；共享写入/config/generated seam 才升级 quick；full 只在 phase/commit/release closeout 跑一次，文件变化后才重跑。
 - 测试覆盖真实输入形状和关键失败模式，不机械叠加 unit/fixture/E2E 全组合；一个风险由最低充分层级证明。
 - 同一逻辑切片默认共用一份 change evidence；禁止按 task 机械增 evidence、schema、fixture、wrapper 或空模块。
+- `agent/` 未物化的 clean/linked worktree 只可声称 source contract；package/runtime integrity 必须由物化后的 verifier、fresh host snapshot 或 native probe 补证，不得复制外置资产制造假绿。
 
 ### B.2 参考依据与外置源码
 - 路由真源为 `references/reference-shelf.manifest.json` 与 `docs/EXTERNAL_REFERENCE_REPO_TIERS.md`；本地根为 `D:\CODE\external\skills-manager-references`，共享克隆以 `D:\CODE\external\_shared\references.manifest.json` 为准。

@@ -2,8 +2,8 @@
 
 **program_id**: `skills-manager-vnext`
 **status**: accepted-direction
-**implementation_status**: phase-3-plugin-distribution-repo-verified
-**最后更新**: 2026-08-02
+**implementation_status**: phase-5-adaptive-capability-fabric-repo-verified
+**最后更新**: 2026-08-03
 
 ## 1. 产品结论
 
@@ -139,8 +139,27 @@ Capability、RuleDocument、Profile、OperationPlan 和 Receipt 使用独立模�
 - `FR-MCP-003`：凭据只能以引用或环境要求出现；receipt、日志和进程参数必须 redaction-first。
 - `FR-MCP-004`：优先使用宿主 connector/plugin 或 native MCP CLI；只有不存在原生入口时才使用受管配置段。
 - `FR-MCP-005`：服务可启动、工具可列出、真实工具调用和业务验收是不同验证层级。
+- `FR-MCP-006`：任务内选择必须区分 `available | needs_activation | unknown`；未启用、未连接或未认证的 MCP 只能生成 activation plan，不得静默切换 profile、写配置或启动服务。
 
-### 6.6 Operation plan and receipt
+### 6.6 Unified capability selection
+
+- `FR-SEL-001`：以统一 selector 选择 skill、MCP、plugin/app/connector 和 native tool，但保留每种能力的 path、availability、auth、side-effect 与宿主字段。
+- `FR-SEL-002`：显式能力名优先；非显式匹配必须先应用 required/excluded intent 和 negative trigger，再进入 metadata ranking。
+- `FR-SEL-003`：弱证据必须 abstain；profile 只作为预热包和 active preference，不再决定能力是否可达。
+- `FR-SEL-004`：active/cold read-only skill 输出 `use_active_skill | load_skill`；operator skill 输出 `load_skill_with_approval`；读取必须受 declared root containment 保护。
+- `FR-SEL-005`：已可用、已认证、当前任务可调用且不需要审批的 read-only/external-read 能力可自动使用；write/destructive/unknown 或 needs_activation 必须输出 approval/activation plan。`openWorldHint=true` 只描述开放世界交互，不把已证明的只读工具自动升级为写入，但不得绕过宿主网络、来源或确认策略。
+- `FR-SEL-006`：建立 direct、indirect、negative、ambiguous、cross-domain 和 cross-kind golden corpus，机械验证 expected/forbidden selection、abstain 和 side-effect violations。
+- `FR-SEL-007`：selector 全程只读，不切 profile、不创建任务、不重启宿主、不调用 provider，也不保存或推断 OAuth/token/session 状态。
+- `FR-SEL-008`：selector 必须先生成结构化 task type、domain、goal、operations、requested kinds、risk 和 confidence；architecture/meta task 不得仅凭能力名关键词选择 builder/operator。
+- `FR-SEL-009`：多阶段任务输出最小有序 capability DAG；只创建当前任务有证据需要的阶段，不机械填满 workflow。
+- `FR-SEL-010`：caller-provided session snapshot 只用于 compatible reuse/load/release planning；profile 只输出 `apply=false` preheat recommendation。
+- `FR-SEL-011`：Codex host snapshot 优先来自稳定只读 App Server RPC；包含 source/captured_at/freshness/availability/callable/access/auth evidence，陈旧事实 fail-closed，单来源失败可 truthful partial。
+- `FR-SEL-012`：skill、MCP、app/connector 与 tool 进入同一 descriptor；current snapshot 逐字段优先决定 availability/auth/callability/freshness，静态 manifest/config 保留受 containment 保护的 path、policy、role/group 与 profile reachability，不允许先到的静态键遮蔽实时状态。
+- `FR-SEL-013`：opaque app id 不作为唯一检索键；runtimeName、displayName、aliases 与 tool metadata 参与检索。tool-level side_effect/auth/approval 以 MCP protocol annotations 为输入，但 annotations 只是 hint：`readOnlyHint` 缺省按 `false`、`destructiveHint` 缺省按 `true`、`openWorldHint` 缺省按 `true` fail-closed；显式 `readOnlyHint=false` 不得再被名称启发式降级成只读。保守 metadata 只用于非协议 display summary，AI 只能收窄或弃权。
+- `FR-SEL-014`：每个 current host snapshot 动态生成 inventory coverage audit，并对每个 descriptor 执行 identity selection probe；全部 snapshot capability 必须进入统一 inventory，missing/shadowed 分开计数，未向当前任务暴露的 MCP 保持 activation_required，手写 golden corpus 不得替代动态覆盖。
+- `FR-SEL-015`：复合请求必须按 read/write/destructive 操作类别选择所需工具并聚合最高风险；“读取后发送/修改/删除”不能因读取工具得分更高而漏掉写步骤，任一 write/destructive/unknown 子步骤都使整体请求进入审批或 fail-closed。
+
+### 6.7 Operation plan and receipt
 
 - `FR-OPS-001`：所有写操作共享 versioned `OperationPlan` envelope。
 - `FR-OPS-002`：plan 至少包含 operation_id、domain、target、before_hash、desired_hash、actions、risk、preconditions、verification 和 rollback。
@@ -149,7 +168,7 @@ Capability、RuleDocument、Profile、OperationPlan 和 Receipt 使用独立模�
 - `FR-OPS-005`：跨多个文件的写入应使用 staging/atomic replace 或可恢复事务目录；失败只回滚本次切片。
 - `FR-OPS-006`：dry-run、applied、repo_verified、host_loaded 和 live_accepted 使用不同状态，不允许自动晋级。
 
-### 6.7 AI-executable planning
+### 6.8 AI-executable planning
 
 - `FR-AIE-001`：当前实现 Phase 必须提供机器可读 task manifest。
 - `FR-AIE-002`：每个任务必须声明 ID、状态、风险、依赖、requirement IDs、write set、步骤、测试、验证、回滚和 done_when。
@@ -157,7 +176,7 @@ Capability、RuleDocument、Profile、OperationPlan 和 Receipt 使用独立模�
 - `FR-AIE-004`：任务不得把 `agent/`、`vendor/` 或运行态 report 作为源码 write set。
 - `FR-AIE-005`：planning verifier 必须检查 PRD requirement、架构决策、路线 Phase、spec、plan 和 todo 的交叉引用。
 
-### 6.8 Evidence and reporting
+### 6.9 Evidence and reporting
 
 - `FR-EVD-001`：报告必须包含 source revision、命令、exit code、关键输出、风险、N/A、回滚和工作树边界。
 - `FR-EVD-002`：外部参考必须记录采纳、适配或拒绝决定，不继承其仓库指令。
@@ -212,6 +231,8 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - Phase 1 只增加 read-only inventory/rules advisor，不新增规则写入。
 - Phase 2 才引入显式 apply；必须保留现有命令兼容和 feature flag/observe 窗口。
 - Phase 3 才评估 personal plugin lint/export，不创建公共 marketplace。
+- Phase 4 只增加统一 capability selection 和 activation planning；宿主仍拥有 MCP/plugin/tool runtime、认证、权限、approval 和 session。
+- Phase 5 增加 task understanding、capability DAG、session reuse planning、字段级只读 host truth merge、工具级策略与动态覆盖审计；仍不接管执行、安装、认证、审批、profile 或 session mutation。
 - GUI、daemon、远端协作、数据库和 domain core 重写均为 conditional，不进入当前承诺。
 
 ## 11. 官方与社区依据

@@ -222,6 +222,9 @@ foreach ($group in $duplicateGroups) {
 
 $skillNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
 foreach ($skill in $skills) { $skillNames.Add([string]$skill.name) | Out-Null }
+$materializationStatus = if (@($skills).Count -gt 0) { "materialized" } else { "source_only" }
+$declaredSkillNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+$inactiveDependencyCount = 0
 
 $dependencyCount = 0
 if (-not (Test-Path -LiteralPath $DependencyContractPath -PathType Leaf)) {
@@ -236,6 +239,38 @@ else {
         $config = Get-Content -Raw -LiteralPath $ConfigPath | ConvertFrom-Json
         $dependencies = @($contract.dependencies)
         $dependencyCount = $dependencies.Count
+
+        foreach ($mapping in @($config.mappings)) {
+            $declaredName = ([string]$mapping.to).Trim()
+            if (-not [string]::IsNullOrWhiteSpace($declaredName)) { $declaredSkillNames.Add($declaredName) | Out-Null }
+        }
+        if ($null -ne $config.skill_projection) {
+            foreach ($residentName in @($config.skill_projection.resident_names)) {
+                $declaredName = ([string]$residentName).Trim()
+                if (-not [string]::IsNullOrWhiteSpace($declaredName)) { $declaredSkillNames.Add($declaredName) | Out-Null }
+            }
+            if ($null -ne $config.skill_projection.profiles) {
+                foreach ($profileProperty in @($config.skill_projection.profiles.PSObject.Properties)) {
+                    foreach ($enabledName in @($profileProperty.Value.enabled_names)) {
+                        $declaredName = ([string]$enabledName).Trim()
+                        if (-not [string]::IsNullOrWhiteSpace($declaredName)) { $declaredSkillNames.Add($declaredName) | Out-Null }
+                    }
+                }
+            }
+        }
+        $configRoot = Split-Path -Parent ([IO.Path]::GetFullPath($ConfigPath))
+        $overrideRoot = Join-Path $configRoot "overrides"
+        if (Test-Path -LiteralPath $overrideRoot -PathType Container) {
+            foreach ($overrideDirectory in (Get-ChildItem -LiteralPath $overrideRoot -Directory)) {
+                $overrideSkillPath = Join-Path $overrideDirectory.FullName "SKILL.md"
+                if (-not (Test-Path -LiteralPath $overrideSkillPath -PathType Leaf)) { continue }
+                $declaredName = Get-SkillFrontmatterValue (Get-Content -Raw -LiteralPath $overrideSkillPath) "name"
+                if (-not [string]::IsNullOrWhiteSpace($declaredName)) { $declaredSkillNames.Add($declaredName) | Out-Null }
+            }
+        }
+        if ($materializationStatus -eq "source_only") {
+            Add-IntegrityFinding $warnings "agent_runtime_not_materialized" "" "agent/ has no generated skill packages; validated tracked source declarations and profile dependency closure instead. Recovery: run 构建生效, then rerun this verifier for package/resource integrity." $AgentRoot
+        }
 
         $configuredMcpServers = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
         foreach ($server in @($config.mcp_servers)) {
@@ -255,14 +290,28 @@ else {
                 Add-IntegrityFinding $errors "invalid_dependency_entry" "" "dependency entry has no skill name" $DependencyContractPath
                 continue
             }
-            if (-not $skillNames.Contains($caller)) {
-                Add-IntegrityFinding $errors "missing_declared_skill" $caller "dependency contract caller is not installed" $DependencyContractPath
+            $callerInstalled = $skillNames.Contains($caller)
+            $callerDeclared = $declaredSkillNames.Contains($caller)
+            if (-not $callerInstalled -and -not $callerDeclared) {
+                $inactiveDependencyCount++
+                Add-IntegrityFinding $warnings "inactive_dependency_caller" $caller "dependency contract entry is conditional because the caller is neither materialized nor declared by current config/overrides" $DependencyContractPath
+                continue
+            }
+            if (-not $callerInstalled -and $materializationStatus -eq "materialized") {
+                Add-IntegrityFinding $errors "missing_declared_skill" $caller "current source/config declares the dependency caller but the materialized agent output omits it" $DependencyContractPath
                 continue
             }
 
+            $availableNames = if ($callerInstalled) { $skillNames } else { $declaredSkillNames }
+
             foreach ($requiredName in $requiredNames) {
-                if (-not $skillNames.Contains($requiredName)) {
-                    Add-IntegrityFinding $errors "missing_required_skill" $caller ("required skill is not installed: {0}" -f $requiredName) $DependencyContractPath
+                if (-not $availableNames.Contains($requiredName)) {
+                    if ($callerInstalled) {
+                        Add-IntegrityFinding $errors "missing_required_skill" $caller ("required skill is not installed: {0}" -f $requiredName) $DependencyContractPath
+                    }
+                    else {
+                        Add-IntegrityFinding $errors "missing_declared_dependency" $caller ("required skill is not declared by current config/overrides: {0}" -f $requiredName) $DependencyContractPath
+                    }
                 }
             }
 
@@ -274,7 +323,7 @@ else {
                 }
                 if (-not $enabled.Contains($caller)) { continue }
                 foreach ($requiredName in $requiredNames) {
-                    if ($skillNames.Contains($requiredName) -and -not $enabled.Contains($requiredName)) {
+                    if ($availableNames.Contains($requiredName) -and -not $enabled.Contains($requiredName)) {
                         Add-IntegrityFinding $errors "profile_missing_dependency" $caller ("profile '{0}' omits required skill: {1}" -f $profileProperty.Name, $requiredName) $ConfigPath
                     }
                 }
@@ -292,11 +341,14 @@ $report = [pscustomobject][ordered]@{
     schema_version = 1
     generated_at = [DateTime]::UtcNow.ToString("o")
     ok = ($errors.Count -eq 0)
+    materialization_status = $materializationStatus
     skill_count = @($skills).Count
     checks = [pscustomobject][ordered]@{
         package_entrypoints = @($skills).Count
+        declared_source_skills = $declaredSkillNames.Count
         duplicate_name_groups = $duplicateGroups.Count
         dependency_entries = $dependencyCount
+        inactive_dependency_entries = $inactiveDependencyCount
         openai_manifests = $openAiManifestCount
         openai_tool_dependencies = $openAiToolDependencyCount
     }
@@ -317,7 +369,12 @@ if ($Json) {
     Write-Output $serialized
 }
 elseif ($report.ok) {
-    Write-Host ("skill integrity verified: {0} skills" -f $report.skill_count)
+    if ($materializationStatus -eq "source_only") {
+        Write-Host ("skill integrity source contract verified: declared={0}, agent=not_materialized" -f $declaredSkillNames.Count)
+    }
+    else {
+        Write-Host ("skill integrity verified: {0} skills" -f $report.skill_count)
+    }
 }
 else {
     Write-Host ("skill integrity failed: {0} error(s)" -f $errors.Count) -ForegroundColor Red

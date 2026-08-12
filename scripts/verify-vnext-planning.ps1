@@ -127,7 +127,7 @@ $requiredMarkers = [ordered]@{
     index = @('## 2. 文档职责', '## 4. 状态词汇', 'planning verifier')
     prd = @('## 6. 功能需求', '## 7. 非功能需求', '## 8. 产品级验收', 'implementation_status', 'common | platform_delta | project_action')
     architecture = @('## 3. Bounded contexts', '## 5. OperationPlan contract', '## 10. 技术栈决策', '## 14. 反过度设计守卫', 'RuleResponsibility')
-    roadmap = @('## 3. P0 Foundation and contracts', '## 4. P1 Read-only inventory and rule advisor', '## 7. P4 Conditional scale surfaces')
+    roadmap = @('## 3. P0 Foundation and contracts', '## 4. P1 Read-only inventory and rule advisor', '## 7. P4 Unified capability selection and activation planning', '## 8. P5 Adaptive Capability Fabric')
     spec = @('## 3. Phase boundary', '## 10. Task design', '## 12. Ordered verification', '## 14. Done definition')
 }
 

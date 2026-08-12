@@ -21,7 +21,8 @@ Describe "Skill projection" {
 
             $defaultNames = @($config.skill_projection.profiles.default.enabled_names)
             $config.skill_projection.profiles.default.budget_limit_chars | Should Be 8000
-            $defaultNames.Count | Should Be 9
+            $defaultNames.Count | Should Be 2
+            @($config.skill_projection.resident_names) | Should Be @("capability-router")
             foreach ($workflowName in @("research", "brainstorming", "planning-and-task-breakdown", "git-workflow-and-versioning", "incremental-implementation")) {
                 ($defaultNames -contains $workflowName) | Should Be $false
             }
@@ -73,14 +74,26 @@ Describe "Skill projection" {
             $grillPolicy | Should Match "allow_implicit_invocation:\s*true"
 
             foreach ($explicitName in @("improve-codebase-architecture", "to-spec", "to-tickets")) {
-                $source = Get-ChildItem -LiteralPath (Join-Path $repoRoot "imports") -Recurse -Filter "SKILL.md" -File |
-                    Where-Object { (Get-ContentUtf8 $_.FullName) -match ("(?m)^name:\s*" + [regex]::Escape($explicitName) + "\s*$") } |
-                    Select-Object -First 1
-                ($null -ne $source) | Should Be $true
-                (Get-ContentUtf8 $source.FullName) | Should Match "disable-model-invocation:\s*true"
-                $agentMetadata = Join-Path $source.Directory.FullName "agents\openai.yaml"
-                (Test-Path -LiteralPath $agentMetadata -PathType Leaf) | Should Be $true
-                (Get-ContentUtf8 $agentMetadata) | Should Match "allow_implicit_invocation:\s*false"
+                $member = @($engineeringFlow.members | Where-Object name -eq $explicitName)
+                $member.Count | Should Be 1
+                @($member[0].required_intents).Count | Should Be 1
+                @($config.mappings | Where-Object to -eq $explicitName).Count | Should Be 1
+            }
+
+            # imports/ is an ignored runtime materialization layer and is absent in a
+            # normal Git worktree. Verify upstream metadata only when materialized;
+            # the tracked routing policy above remains the hermetic safety contract.
+            $materializedExplicit = @(Get-ChildItem -LiteralPath (Join-Path $repoRoot "imports") -Recurse -Filter "SKILL.md" -File -ErrorAction SilentlyContinue |
+                Where-Object { (Get-ContentUtf8 $_.FullName) -match "(?m)^name:\s*(improve-codebase-architecture|to-spec|to-tickets)\s*$" })
+            if ($materializedExplicit.Count -gt 0) {
+                foreach ($explicitName in @("improve-codebase-architecture", "to-spec", "to-tickets")) {
+                    $source = @($materializedExplicit | Where-Object { (Get-ContentUtf8 $_.FullName) -match ("(?m)^name:\s*" + [regex]::Escape($explicitName) + "\s*$") } | Select-Object -First 1)
+                    $source.Count | Should Be 1
+                    (Get-ContentUtf8 $source[0].FullName) | Should Match "disable-model-invocation:\s*true"
+                    $agentMetadata = Join-Path $source[0].Directory.FullName "agents\openai.yaml"
+                    (Test-Path -LiteralPath $agentMetadata -PathType Leaf) | Should Be $true
+                    (Get-ContentUtf8 $agentMetadata) | Should Match "allow_implicit_invocation:\s*false"
+                }
             }
 
             $setupSkill = Get-ContentUtf8 (Join-Path $repoRoot "overrides\setup-matt-pocock-skills\SKILL.md")
@@ -151,6 +164,40 @@ Describe "Skill projection" {
     }
 
     Context "New-SkillProjectionPlan" {
+        It "Unions resident skills into every profile without repeating them in profile config" {
+            $root = Join-Path $TestDrive "resident-profile"
+            New-ProjectionSkill $root "router" "router" | Out-Null
+            New-ProjectionSkill $root "worker" "worker" | Out-Null
+            $cfg = [pscustomobject]@{
+                enabled = $true
+                active_profile = "default"
+                resident_names = @("router")
+                profiles = [pscustomobject]@{
+                    default = [pscustomobject]@{ enabled_names = @("worker") }
+                    narrow = [pscustomobject]@{ enabled_names = @() }
+                }
+                sources = @([pscustomobject]@{ id = "fixture"; path = $root; priority = 1; platforms = @("codex") })
+            }
+
+            $plan = New-SkillProjectionPlan $cfg
+
+            @($plan.active_names | Sort-Object) -join "," | Should Be "router,worker"
+            @($plan.resident_names) | Should Be @("router")
+            ($plan.profile_budgets | Where-Object profile -eq "narrow").active_skill_count | Should Be 1
+        }
+
+        It "Rejects unknown resident skills" {
+            $root = Join-Path $TestDrive "unknown-resident"
+            New-ProjectionSkill $root "worker" "worker" | Out-Null
+            $cfg = [pscustomobject]@{
+                enabled = $true
+                resident_names = @("missing")
+                sources = @([pscustomobject]@{ id = "fixture"; path = $root; priority = 1; platforms = @("codex") })
+            }
+
+            { New-SkillProjectionPlan $cfg } | Should Throw
+        }
+
         It "Keeps the higher-priority path for same-content duplicates" {
             $managed = Join-Path $TestDrive "managed-same"
             $legacy = Join-Path $TestDrive "legacy-same"

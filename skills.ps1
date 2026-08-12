@@ -5413,6 +5413,14 @@ function Assert-Cfg($cfg) {
             $dupManagedLinkExcludes = @(Get-DuplicateValues ($projection.managed_link_excludes | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() }))
             Need ($dupManagedLinkExcludes.Count -eq 0) ("skill_projection.managed_link_excludes 重复：{0}" -f ($dupManagedLinkExcludes -join ", "))
         }
+        if ($projection.PSObject.Properties.Match("resident_names").Count -gt 0 -and $null -ne $projection.resident_names) {
+            Need (Assert-IsArray $projection.resident_names) "skill_projection.resident_names 必须是数组"
+            foreach ($residentName in @($projection.resident_names)) {
+                Need (-not [string]::IsNullOrWhiteSpace([string]$residentName)) "skill_projection.resident_names 不能包含空字符串"
+            }
+            $dupResidentNames = @(Get-DuplicateValues ($projection.resident_names | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() }))
+            Need ($dupResidentNames.Count -eq 0) ("skill_projection.resident_names 重复：{0}" -f ($dupResidentNames -join ", "))
+        }
         if ($projection.PSObject.Properties.Match("aliases").Count -gt 0 -and $null -ne $projection.aliases) {
             Need (Assert-IsArray $projection.aliases) "skill_projection.aliases 必须是数组"
             foreach ($alias in @($projection.aliases)) {
@@ -8280,7 +8288,7 @@ function Get-ElapsedMs($sw) {
     return [int][math]::Round([double]$sw.Elapsed.TotalMilliseconds, 0)
 }
 function Get-AgentBuildCacheAlgorithmVersion {
-    return "agent-build-v20260504.2"
+    return "agent-build-v20260803.3"
 }
 function Get-AgentBuildMetricName([bool]$cacheHit) {
     if ($cacheHit) { return "build_agent_cache_hit" }
@@ -8494,6 +8502,7 @@ function Set-AgentBuildStateCache($cache, $cfg) {
         $cache["__agent_build_algorithm"] = (Get-AgentBuildCacheAlgorithmVersion)
         $cache["__agent_build_signature"] = [string]$state.signature
         $cache["__agent_build_output_count"] = @($state.outputs).Count
+        $cache["__agent_build_output_fingerprint"] = Get-DirectoryFingerprint $AgentDir
         $cache["__agent_build_saved_at"] = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
         return $state
     }
@@ -8510,6 +8519,7 @@ function Test-AgentBuildCacheHit($cfg) {
     $cache = Load-BuildCache
     $algorithm = [string]$cache["__agent_build_algorithm"]
     $signature = [string]$cache["__agent_build_signature"]
+    $outputFingerprint = [string]$cache["__agent_build_output_fingerprint"]
     if ($algorithm -ne (Get-AgentBuildCacheAlgorithmVersion)) {
         return [pscustomobject]@{ hit = $false; reason = "algorithm-mismatch"; state = $null }
     }
@@ -8542,6 +8552,12 @@ function Test-AgentBuildCacheHit($cfg) {
             if (-not $expectedTopLevels.Contains([string]$dir.Name)) {
                 return [pscustomobject]@{ hit = $false; reason = ("unexpected-output:{0}" -f $dir.Name); state = $state }
             }
+        }
+        if ([string]::IsNullOrWhiteSpace($outputFingerprint)) {
+            return [pscustomobject]@{ hit = $false; reason = "output-fingerprint-missing"; state = $state }
+        }
+        if ((Get-DirectoryFingerprint $AgentDir) -ne $outputFingerprint) {
+            return [pscustomobject]@{ hit = $false; reason = "output-fingerprint-mismatch"; state = $state }
         }
         return [pscustomobject]@{ hit = $true; reason = "cache-hit"; state = $state }
     }
@@ -8578,15 +8594,33 @@ function Start-BuildTransaction {
     $txnId = [Guid]::NewGuid().ToString("N").Substring(0, 10)
     $path = Join-Path $txnRoot ("build-{0}" -f $txnId)
     $backupAgent = Join-Path $path "agent.backup"
+    $buildCachePath = Get-BuildCachePath
+    $backupBuildCache = Join-Path $path "build-cache.backup.json"
     $state = [ordered]@{
         path = $path
         backup_agent = $backupAgent
         has_backup_agent = $false
+        build_cache_path = $buildCachePath
+        backup_build_cache = $backupBuildCache
+        had_build_cache = $false
+        has_backup_build_cache = $false
+        build_cache_backup_error = $null
         backup_error = $null
     }
     if ($DryRun) { return [pscustomobject]$state }
     EnsureDir $txnRoot
     EnsureDir $path
+    if (Test-Path -LiteralPath $buildCachePath -PathType Leaf) {
+        $state.had_build_cache = $true
+        try {
+            Copy-Item -LiteralPath $buildCachePath -Destination $backupBuildCache -Force
+            $state.has_backup_build_cache = $true
+        }
+        catch {
+            $state.build_cache_backup_error = $_.Exception.Message
+            Log ("构建缓存无法备份；若事务回滚，将删除缓存并强制下次重建：{0}" -f $_.Exception.Message) "WARN"
+        }
+    }
     if (Test-Path $AgentDir) {
         try {
             Invoke-MoveItem $AgentDir $backupAgent
@@ -8608,6 +8642,14 @@ function Rollback-BuildTransaction($txn) {
         if ($txn.has_backup_agent -and (Test-Path $txn.backup_agent)) {
             Invoke-MoveItem $txn.backup_agent $AgentDir
             Write-Host "已回滚 agent/ 到构建前状态。" -ForegroundColor Yellow
+        }
+        if ($txn.had_build_cache -and $txn.has_backup_build_cache -and (Test-Path -LiteralPath $txn.backup_build_cache -PathType Leaf)) {
+            Copy-Item -LiteralPath $txn.backup_build_cache -Destination $txn.build_cache_path -Force
+            Write-Host "已回滚构建缓存到构建前状态。" -ForegroundColor Yellow
+        }
+        elseif (Test-Path -LiteralPath $txn.build_cache_path -PathType Leaf) {
+            Invoke-RemoveItemWithRetry $txn.build_cache_path -IgnoreFailure -SilentIgnore | Out-Null
+            Write-Host "已清除本次构建缓存，下一次将强制重建。" -ForegroundColor Yellow
         }
     }
     finally {
@@ -19251,7 +19293,7 @@ function Get-SkillRoutingPolicy([string]$path) {
     catch {
         throw ("skill routing policy JSON parse failed: {0}" -f $_.Exception.Message)
     }
-    Need ([int]$policy.schema_version -eq 1) 'skill routing policy only supports schema_version=1'
+    Need ([int]$policy.schema_version -in @(1, 2)) 'skill routing policy only supports schema_version=1 or 2'
     $mode = ([string]$policy.mode).Trim().ToLowerInvariant()
     Need ($mode -eq 'observe' -or $mode -eq 'enforce') ("skill routing policy mode only supports observe/enforce: {0}" -f $mode)
     $policy.mode = $mode
@@ -19776,6 +19818,15 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
     $profileBudgets = New-Object System.Collections.Generic.List[object]
     $profileNamesBySkill = @{}
     $profileRoutingEnabled = $false
+    $residentNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if ($projectionCfg.PSObject.Properties.Match("resident_names").Count -gt 0 -and $null -ne $projectionCfg.resident_names) {
+        foreach ($rawName in @($projectionCfg.resident_names)) {
+            $name = ([string]$rawName).Trim()
+            Need (-not [string]::IsNullOrWhiteSpace($name)) "skill_projection.resident_names 不得包含空值"
+            Need ($canonicalByName.ContainsKey($name)) ("skill_projection resident_names 引用了不存在的技能：{0}" -f $name)
+            $residentNames.Add($name) | Out-Null
+        }
+    }
     if ($projectionCfg.PSObject.Properties.Match("profiles").Count -gt 0 -and $null -ne $projectionCfg.profiles) {
         $profileRoutingEnabled = $true
         $activeProfile = ([string]$projectionCfg.active_profile).Trim()
@@ -19800,6 +19851,7 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
                 }
                 $profileNamesBySkill[$name].Add($profileName) | Out-Null
             }
+            foreach ($residentName in @($residentNames)) { $enabledNames.Add($residentName) | Out-Null }
 
             $profileMetadataChars = 0
             $profileActiveSkillCount = 0
@@ -19838,7 +19890,7 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
         foreach ($entry in @($canonical.ToArray())) {
             $entryName = [string]$entry.name
             if ([bool]$entry.is_system -or $aliases.ContainsKey($entryName)) { continue }
-            if ($profileNamesBySkill.ContainsKey($entryName)) {
+            if ($residentNames.Contains($entryName) -or $profileNamesBySkill.ContainsKey($entryName)) {
                 $profileRoutedNames.Add($entryName) | Out-Null
             }
             else {
@@ -19906,6 +19958,7 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
         enabled = $true
         conflict_policy = "system_then_priority_then_source_order"
         active_profile = $activeProfile
+        resident_names = @($residentNames | Sort-Object)
         skills = @($all.ToArray() | Sort-Object name, @{ Expression = "priority"; Descending = $true }, path)
         canonical = @($canonical.ToArray() | Sort-Object name)
         active = @($active.ToArray() | Sort-Object name)
@@ -20062,6 +20115,7 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
                 generated_at = (Get-Date).ToString("o")
                 conflict_policy = [string]$plan.conflict_policy
                 active_profile = [string]$plan.active_profile
+                resident_names = @($plan.resident_names)
                 source_count = @($projectionCfg.sources).Count
                 skill_entry_count = @($plan.skills).Count
                 unique_name_count = @($plan.unique_names).Count

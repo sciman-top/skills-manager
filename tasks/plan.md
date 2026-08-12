@@ -1,50 +1,41 @@
-# Implementation Plan: skills-manager vNext Phase 3
+# Implementation Plan: skills-manager vNext Phase 5
 
 **program_id**: `skills-manager-vnext`
-**current_phase**: `P3`
-**task_truth**: `tasks/skills-manager-vnext-phase3.tasks.json`
-**status**: complete
+**current_phase**: `P5`
+**task_truth**: `tasks/skills-manager-vnext-phase5.tasks.json`
+**status**: repo_verified (6/6)
 
 ## 1. Goal
 
-实现只读 plugin inventory、manifest/supply-chain lint、单一 fixture-only Codex skills-only exporter 与分层 eval；安装、认证、marketplace mutation、provider 和 host write 保持禁用。
-
-Post-closeout follow-through：增加 `rule-estate-audit`，从工作区直属 Git 根生成 Codex/Claude 联合规则审计；在显式 reviewed change-set、全量预检和 apply token 下，支持全局用户规则与多个直属目标仓的 plan/apply/resume/per-target rollback。2026-08-02 已执行用户授权的 11 文件 rollout 与 Codex 9/9 fresh-process load probe；Claude load 为 `platform_na`，live acceptance 仍是独立动作。
+实现 Adaptive Capability Fabric：结构化理解任务、检索与策略判决、组合最小 capability DAG、复用会话能力、消费宿主实时只读快照，并由宿主原生执行。
 
 ## 2. Execution contract
 
-- 当前 task 只以 P3 manifest 为真源；P0/P1/P2 作为历史 manifest/evidence 保留。
-- 每个 slice 按 `build -> targeted test -> contract/invariant -> full` 收口。
-- inventory/lint/eval 默认 zero-write；exporter 必须 fixture marker + exact root + explicit token。
-- 只支持有当前官方 docs/help/fixture 的 Codex skills-only plugin shape。
-- P4 只由独立 evidence gate 决定，不因 P3 代码完成自动启动。
-- Rule Estate 写路径只管理精确的 `AGENTS.md` / `CLAUDE.md`，默认排除 `external`、`文档`；不管理 provider/auth/model/sandbox、plugin/native host，也不自动 commit/push 目标仓。
+- decision plane 统一，skills/MCP/apps/plugins/tools runtime 不统一。
+- schema v3 保留 v2 consumer fields；stale/unknown/side-effect fail-closed。
+- session/profile 只输出 plan/recommendation，`writes_performed=false`。
+- proven App Server read methods only；partial source failure observable；display-only metadata 不授权调用。
+- current runtime fields 覆盖静态 availability/auth/callability/freshness；静态 path/policy/profile reachability 保留。
+- MCP annotations 按协议缺省值 fail-closed；复合工具请求聚合最高 side effect。
+- clean worktree 验证 tracked source/policy closure；materialized agent 或 live snapshot 独立证明 runtime/package truth。
 
 ## 3. Ordered work
 
 | Order | Task | Slice | Exit checkpoint |
 | ---: | --- | --- | --- |
-| 1 | `SMV-P3-001` | planning + entry evidence | P3=7 tasks，官方 surface 与两个 workflow 已证明 |
-| 2 | `SMV-P3-002` | inventory adapter | 三 scope 保持，zero side effects |
-| 3 | `SMV-P3-003` | manifest lint | shape/source/version/license/path fail-closed |
-| 4 | `SMV-P3-004` | bounded exporter | fixture-only two-skill exact round-trip |
-| 5 | `SMV-P3-005` | layered eval | static/behavior blocking，model optional |
-| 6 | `SMV-P3-006` | CLI + acceptance | four JSON commands，generated/compat guards |
-| 7 | `SMV-P3-007` | closeout + P4 gate | P3 repo closeout，P4 decision machine truth |
+| 1 | `SMV-P5-001` | planning truth | P5 scope and official boundary |
+| 2 | `SMV-P5-002` | task model + DAG | meta-query and coding graph green |
+| 3 | `SMV-P5-003` | session + snapshot | live read-only multi-kind snapshot |
+| 4 | `SMV-P5-004` | skill/corpus/docs | current truth and compatibility aligned |
+| 5 | `SMV-P5-005` | closeout | ordered full gates and truth boundary |
+| 6 | `SMV-P5-006` | runtime truth + tool policy | protocol defaults, compound risk, 137 identity probes, source/runtime gates, ordered full closeout |
 
 ## 4. Verification order
 
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1
-pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run.ps1
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-vnext-planning.ps1
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-vnext-phase4-entry-gate.ps1
-pwsh -NoProfile -ExecutionPolicy Bypass -File skills.ps1 doctor --strict --threshold-ms 8000
-python scripts/verify-dependency-baseline.py --target-repo-root . --require-target-repo-baseline
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-host-capability-matrix.ps1
-pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree
-```
+Use Phase 5 spec `## 12. Ordered verification`; full runs once after current files stabilize.
 
-## 5. Phase completion rule
+## 5. Completion rule
 
-七个 P3 task 全部 done，fixture inventory/lint/export/eval、P4 decision verifier 与 full gate 通过。P3 plugin 能力最高仅 `repo_verified`；未执行 plugin install/load 或 live workflow。独立的 Rule Estate follow-through 已达到 Codex `host_loaded=9/9`，不得外推为 P3 plugin 或 `live_accepted`。
+Six tasks done, current golden/fresh/live read-only probes, dynamic full-inventory/tool audit and full gate pass, zero writes/unsafe-tool auto-use. Repo, host discovery, task callability and live acceptance remain separate.
+
+Phase 5 当前为 6/6 `repo_verified`。当前宿主只读 snapshot 是 `host_discovered`/runtime inventory 证据；只有 profile/tool exposure 另行证明 `callable`，认证业务动作与 `live_accepted` 未执行。

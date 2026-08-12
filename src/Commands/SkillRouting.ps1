@@ -169,7 +169,7 @@ function Get-SkillRoutingPolicy([string]$path) {
     catch {
         throw ("skill routing policy JSON parse failed: {0}" -f $_.Exception.Message)
     }
-    Need ([int]$policy.schema_version -eq 1) 'skill routing policy only supports schema_version=1'
+    Need ([int]$policy.schema_version -in @(1, 2)) 'skill routing policy only supports schema_version=1 or 2'
     $mode = ([string]$policy.mode).Trim().ToLowerInvariant()
     Need ($mode -eq 'observe' -or $mode -eq 'enforce') ("skill routing policy mode only supports observe/enforce: {0}" -f $mode)
     $policy.mode = $mode

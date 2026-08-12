@@ -2,7 +2,7 @@
 
 **program_id**: `skills-manager-vnext`
 **roadmap_version**: 1
-**最后更新**: 2026-08-02
+**最后更新**: 2026-08-03
 
 ## 1. 状态总览
 
@@ -12,7 +12,8 @@
 | `P1` | Read-only inventory and rule advisor | `complete` | 9/9 tasks repo_verified；host_loaded/live_accepted 未执行 |
 | `P2` | Transactional explicit apply | `complete` | 7/7 repo_verified；follow-through 增加 reviewed global/project multi-target saga，真实 apply 仍需独立 review/token |
 | `P3` | Plugin-aware distribution and evaluation | `complete` | 7/7 tasks repo_verified；fixture-first，host/live 未执行 |
-| `P4` | Conditional scale surfaces | `conditional` | entry decision=`not_started/deferred`；未创建 manifest |
+| `P4` | Unified capability selection and activation planning | `complete` | 6/6 tasks `repo_verified`；16-profile fresh prompt probe 已通过，host runtime activation/live acceptance 未执行 |
+| `P5` | Adaptive Capability Fabric | `complete` | 6/6 `repo_verified`；runtime truth/tool policy 动态验收与 full gate 通过，business live acceptance 未执行 |
 
 状态只可在相应 exit gate 有当前证据后更新。Phase 文档完成不等于 Phase 实现完成。
 
@@ -24,7 +25,7 @@ P0 contracts and seams
      -> P2 safe write protocol
         -> P3 packaging/evaluation
 
-P4 requires independent product evidence and does not follow automatically.
+P4 started from repeated real routing failures and unified selection. P5 starts from a current meta-task false positive and adds task understanding, composition and read-only host truth without taking over runtime execution.
 ```
 
 禁止绕过：
@@ -216,9 +217,45 @@ P4 requires independent product evidence and does not follow automatically.
 - 未创建公共 marketplace、账号系统或 connector runtime。
 - 安装后使用 fresh session 验证 bundled skill/tool 可见性；业务效果另行验收。
 
-## 7. P4 Conditional scale surfaces
+## 7. P4 Unified capability selection and activation planning
 
-以下能力没有当前承诺，只在触发条件满足后建立独立 PRD/spec：
+### 7.1 目标
+
+把 profile-independent skill cold loading 扩展为 intent-aware unified selector；为 skill、MCP 和 caller-provided plugin/app/native-tool snapshots 输出统一 availability、side-effect 和 activation plan，同时保持 zero-write 和 host-owned runtime。
+
+### 7.2 当前最大合理切片
+
+- explicit name + required/excluded intent + metadata ranking + abstain。
+- skill active/cold-load adapter。
+- MCP active profile available/needs_activation adapter。
+- plugin/app/connector/native tool caller snapshot adapter。
+- direct/indirect/negative/ambiguous/cross-kind golden verifier。
+- resident skill、8000 字符预算、fresh process/task 和 full gate closeout。
+
+### 7.3 非目标
+
+- 不切换 skill/MCP profile，不写 host config，不重启或创建新任务。
+- 不安装/启停 plugin/MCP，不处理 OAuth/token，不接管 approval。
+- 不调用 provider 做每次 routing，不建立 embedding database、daemon 或 team service。
+- 不把 repo corpus 结果写成所有自然语言、host_loaded 或 live_accepted。
+
+### 7.4 Entry evidence
+
+- 两个不同完整请求均把 implementation/architecture assessment 错误路由到 review-only/interview-only skills。
+- 用户明确要求推进统一无感选择主链并授权更新产品与实施真源。
+- schema v2 selector 的首批 4 个失败用例已完成 red→green。
+
+### 7.5 Exit gate
+
+- P4 6/6 tasks done，planning/entry verifier 0 finding。
+- golden corpus expected/forbidden/abstain 全部通过，side-effect violations=0。
+- full Unit/E2E、doctor、dependency/host/planning 和 full quality gate 通过。
+- 真实只读 prompt replay 证明 implementation 不再选择 draft/grill，available/disabled MCP 输出正确 plan。
+- profile/config/plugin/MCP runtime 未被 selector 修改；host/live 独立记录。
+
+### 7.6 后续 conditional scale surfaces
+
+以下能力仍没有当前承诺，只在独立触发条件满足后建立新 Phase/spec：
 
 | 候选 | 触发条件 | 默认决定 |
 | --- | --- | --- |
@@ -229,7 +266,37 @@ P4 requires independent product evidence and does not follow automatically.
 | team/remote control | 存在明确多用户/RBAC/审计需求和运营边界 | 不建设 |
 | public marketplace | 有独立供应链、审核、发布和支持能力 | 依赖官方目录，不自建 |
 
-## 8. 风险登记
+## 8. P5 Adaptive Capability Fabric
+
+### 8.1 目标
+
+把 P4 selector 演进为统一决策平面：理解任务、检索和策略判决、组合最小 capability DAG、复用兼容 session capability，并读取宿主当前可用性；所有执行仍走宿主原生 surface。
+
+### 8.2 当前最大合理切片
+
+- schema v3 structured task model 和 P4 field compatibility。
+- architecture/meta mismatch guard 与 inspect/implement/verify DAG。
+- session hysteresis 和 recommendation-only profile preheat。
+- Codex App Server `skills/list`、`app/installed`、`app/list`、`app/read(includeTools=true)`、`mcpServerStatus/list` read-only adapter；可选 metadata RPC 失败时以 source coverage 留痕，不改变 runtime truth。
+- 统一 descriptor 字段级 merge、App runtime/display/alias 检索、tool-level side-effect/auth/approval fail-closed 与 current snapshot 动态覆盖审计。
+- stale/inaccessible/not-callable/auth/partial source semantics。
+- golden、fresh-process、live read-only probe 和 full closeout。
+
+### 8.3 非目标
+
+不调用 provider 做日常 route，不建立 embedding DB/daemon/control plane；不安装 plugin/MCP、不 OAuth、不写 config/profile/session/thread，不把 ChatGPT web 与本机 Codex 当成共享 runtime。
+
+### 8.4 Entry evidence
+
+真实全局架构查询被 P4 关键词 selector 错选 Windows/MCP construction capability；当前官方手册与 `codex-cli 0.145.0` 已证明稳定 read-only App Server seam。
+
+### 8.5 Exit gate
+
+P5 6/6 task、schema compatibility、golden、fresh query、live read-only multi-kind snapshot、dynamic inventory/tool audit、ordered repository gates 和 full quality 全部通过；zero writes/side-effect violations；repo/host/live truth 分离。
+
+2026-08-03 final repo closeout：P5 6/6 exit gate 已满足。runtime-truth hardening 已完成 MCP protocol-default policy、复合工具最高风险聚合、137/137 identity probes、300-tool audit，以及 clean/linked worktree source/runtime 双证据修复；targeted、full tests、contracts、dynamic audit、quick 与 full quality 均已通过。当前 `app/list` 与 display-only `app/read` 均因外部目录 403 标记 `runtime_complete_catalog_partial`；已安装 App 的 callable 来自 `app/installed`，工具策略来自成功的 `mcpServerStatus/list`，两者都不升级为 business `live_accepted`。
+
+## 9. 风险登记
 
 | Risk ID | 风险 | Phase | 守卫 |
 | --- | --- | --- | --- |
@@ -242,7 +309,7 @@ P4 requires independent product evidence and does not follow automatically.
 | `RISK-007` | repo pass 被写成 live accepted | 全部 | verification level enum + evidence review |
 | `RISK-008` | 任务清单过早细化后腐化 | P1+ | 只为 current Phase 建 manifest |
 
-## 9. 路线维护
+## 10. 路线维护
 
 - Phase 进入实施前：刷新官方语义、reference revisions、当前代码 seam 和 baseline gate。
 - Phase 进入实施时：创建该 Phase 的 detailed spec 和 task manifest；更新 `current_phase`。

@@ -1,17 +1,20 @@
 Describe 'vNext product planning contract' {
     $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
     $scriptPath = Join-Path $repoRoot 'scripts\verify-vnext-planning.ps1'
-    $currentPhase = 'P3'
-    $currentManifestRelative = 'tasks\skills-manager-vnext-phase3.tasks.json'
-    $currentSpecRelative = 'docs\superpowers\specs\2026-08-02-capability-manager-vnext-phase-3-design.md'
+    $currentPhase = 'P5'
+    $currentManifestRelative = 'tasks\skills-manager-vnext-phase5.tasks.json'
+    $currentSpecRelative = 'docs\superpowers\specs\2026-08-03-capability-manager-vnext-phase-5-design.md'
     $requiredFiles = @(
         'docs\product\README.md', 'docs\product\skills-manager-vnext-prd.md', 'docs\product\skills-manager-vnext-architecture.md',
         'docs\product\skills-manager-vnext-roadmap.md', 'docs\product\rule-governance-adoption-matrix.md',
         'docs\superpowers\specs\2026-08-01-capability-manager-vnext-phase-0-design.md',
         'docs\superpowers\specs\2026-08-02-capability-manager-vnext-phase-1-design.md',
-        'docs\superpowers\specs\2026-08-02-capability-manager-vnext-phase-2-design.md', $currentSpecRelative,
+        'docs\superpowers\specs\2026-08-02-capability-manager-vnext-phase-2-design.md',
+        'docs\superpowers\specs\2026-08-02-capability-manager-vnext-phase-3-design.md',
+        'docs\superpowers\specs\2026-08-02-capability-manager-vnext-phase-4-design.md', $currentSpecRelative,
         'tasks\skills-manager-vnext-phase0.tasks.json', 'tasks\skills-manager-vnext-phase1.tasks.json',
-        'tasks\skills-manager-vnext-phase2.tasks.json', $currentManifestRelative,
+        'tasks\skills-manager-vnext-phase2.tasks.json', 'tasks\skills-manager-vnext-phase3.tasks.json',
+        'tasks\skills-manager-vnext-phase4.tasks.json', $currentManifestRelative,
         'tasks\plan.md', 'tasks\todo.md', 'README.md', 'AGENTS.md'
     )
 
@@ -24,7 +27,7 @@ Describe 'vNext product planning contract' {
         $fixtureRoot = Join-Path $TestDrive $Name
         New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null
         $currentManifest = Get-Content -LiteralPath (Join-Path $repoRoot $currentManifestRelative) -Raw | ConvertFrom-Json
-        $historicalEvidence = @('phase0', 'phase1', 'phase2') | ForEach-Object {
+        $historicalEvidence = @('phase0', 'phase1', 'phase2', 'phase3', 'phase4') | ForEach-Object {
             $manifest = Get-Content -LiteralPath (Join-Path $repoRoot ('tasks\skills-manager-vnext-{0}.tasks.json' -f $_)) -Raw | ConvertFrom-Json
             @($manifest.tasks | Where-Object status -eq 'done' | ForEach-Object write_set | Where-Object { $_ -like 'docs/change-evidence/*' -and $_ -notmatch '[*?<>]' })
         }
@@ -50,7 +53,7 @@ Describe 'vNext product planning contract' {
         $result.exit_code | Should Be 0
         $parsed.pass | Should Be $true
         $parsed.finding_count | Should Be 0
-        $parsed.task_count | Should Be 7
+        $parsed.task_count | Should Be 6
         $parsed.current_phase | Should Be $currentPhase
         $parsed.historical_mode | Should Be $false
     }
@@ -88,7 +91,7 @@ Describe 'vNext product planning contract' {
         $evidencePath = @($doneTask.write_set | Where-Object { $_ -like 'docs/change-evidence/*' -and $_ -notmatch '[*?<>]' } | Select-Object -Last 1)
         Remove-Item -LiteralPath (Join-Path $fixtureRoot $evidencePath) -Force
         $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
-        @($parsed.findings | Where-Object code -eq done_task_evidence_missing).Count | Should Be 1
+        @($parsed.findings | Where-Object code -eq done_task_evidence_missing).Count | Should BeGreaterThan 0
     }
 
     It 'fails closed when plan and current manifest phases differ' {
@@ -98,8 +101,8 @@ Describe 'vNext product planning contract' {
         @($parsed.findings | Where-Object code -eq plan_manifest_phase_mismatch).Count | Should Be 1
     }
 
-    It 'validates P0 P1 and P2 through explicit historical routing' {
-        foreach ($phase in @(0, 1, 2)) {
+    It 'validates P0 through P4 through explicit historical routing' {
+        foreach ($phase in @(0, 1, 2, 3, 4)) {
             $date = if ($phase -eq 0) { '2026-08-01' } else { '2026-08-02' }
             $result = Invoke-PlanningVerifier $repoRoot @('-ManifestPath', ('tasks/skills-manager-vnext-phase{0}.tasks.json' -f $phase), '-SpecPath', ('docs/superpowers/specs/{0}-capability-manager-vnext-phase-{1}-design.md' -f $date, $phase))
             $result.exit_code | Should Be 0

@@ -3,42 +3,42 @@
   "program_id": "skills-manager-vnext",
   "phase": "P4",
   "evaluated_at": "2026-08-02T17:02:26+08:00",
-  "decision": "not_started",
-  "status": "deferred",
-  "all_required_met": false,
-  "p4_manifest_path": null,
+  "decision": "started",
+  "status": "in_progress",
+  "all_required_met": true,
+  "p4_manifest_path": "tasks/skills-manager-vnext-phase4.tasks.json",
   "gates": [
     {
       "id": "independent_product_evidence",
       "required": true,
-      "state": "not_met",
-      "evidence": ["docs/change-evidence/20260802-vnext-phase3-acceptance.md"],
-      "reason": "Only repo and fixture evidence exists; host load and live workflow acceptance are not_run.",
-      "recovery_condition": "Record an independent real workflow or user acceptance artifact for a named P4 surface."
+      "state": "met",
+      "evidence": ["docs/change-evidence/20260802-vnext-phase4-unified-capability-routing.md"],
+      "reason": "Two real requests reproduced false-positive routing after cold loading, and the user explicitly authorized the unified routing main chain.",
+      "recovery_condition": "Re-evaluate if real routing evidence is withdrawn or no longer reproducible."
     },
     {
       "id": "repeated_adoption",
       "required": true,
-      "state": "not_met",
-      "evidence": ["docs/change-evidence/20260802-vnext-phase3-plugin-export.md"],
-      "reason": "The new P3 CLI/exporter has one repository acceptance run and no repeated cross-session adoption evidence.",
-      "recovery_condition": "Show repeated use across at least two independent real workflows or consumers with dated evidence."
+      "state": "met",
+      "evidence": ["docs/change-evidence/20260802-capability-router-seamless-routing.md", "docs/change-evidence/20260802-vnext-phase4-unified-capability-routing.md"],
+      "reason": "The profile reachability failure and the subsequent precision failure occurred in separate real routing passes with different complete requests.",
+      "recovery_condition": "Return to observe-only if repeated prompt replay no longer reproduces the documented behavior."
     },
     {
       "id": "explicit_scale_surface_and_audience",
       "required": true,
-      "state": "not_met",
-      "evidence": ["docs/product/skills-manager-vnext-roadmap.md"],
-      "reason": "No GUI daemon database team control or public marketplace candidate has a named user and validated distribution need.",
-      "recovery_condition": "Select one P4 candidate with a named audience, problem evidence, non-goals and acceptance criteria."
+      "state": "met",
+      "evidence": ["docs/superpowers/specs/2026-08-02-capability-manager-vnext-phase-4-design.md"],
+      "reason": "The selected surface is unified capability selection and activation planning for the current Windows-first Codex user, not a GUI, daemon, database or marketplace.",
+      "recovery_condition": "Create a new entry decision before expanding to persistence, multi-user service or public distribution."
     },
     {
       "id": "safety_and_operating_boundary",
       "required": true,
       "state": "met",
-      "evidence": ["docs/change-evidence/20260802-vnext-phase3-plugin-lint.md", "docs/change-evidence/20260802-vnext-phase3-plugin-export.md"],
-      "reason": "Current repo implementation is fixture-first, bounded, zero-provider and keeps host/live truth separate.",
-      "recovery_condition": "Re-evaluate if a future P4 surface introduces persistence, multi-user state or external mutation."
+      "evidence": ["docs/superpowers/specs/2026-08-02-capability-manager-vnext-phase-4-design.md", "docs/change-evidence/20260802-vnext-phase4-unified-capability-routing.md"],
+      "reason": "The selector is zero-write; unavailable, authenticated, write or destructive capabilities require an activation or approval plan owned by the host.",
+      "recovery_condition": "Re-evaluate before adding runtime mutation, persistence, provider calls or authentication handling."
     }
   ]
 }

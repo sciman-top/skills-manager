@@ -1836,7 +1836,7 @@ function Get-ElapsedMs($sw) {
     return [int][math]::Round([double]$sw.Elapsed.TotalMilliseconds, 0)
 }
 function Get-AgentBuildCacheAlgorithmVersion {
-    return "agent-build-v20260504.2"
+    return "agent-build-v20260803.3"
 }
 function Get-AgentBuildMetricName([bool]$cacheHit) {
     if ($cacheHit) { return "build_agent_cache_hit" }
@@ -2050,6 +2050,7 @@ function Set-AgentBuildStateCache($cache, $cfg) {
         $cache["__agent_build_algorithm"] = (Get-AgentBuildCacheAlgorithmVersion)
         $cache["__agent_build_signature"] = [string]$state.signature
         $cache["__agent_build_output_count"] = @($state.outputs).Count
+        $cache["__agent_build_output_fingerprint"] = Get-DirectoryFingerprint $AgentDir
         $cache["__agent_build_saved_at"] = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
         return $state
     }
@@ -2066,6 +2067,7 @@ function Test-AgentBuildCacheHit($cfg) {
     $cache = Load-BuildCache
     $algorithm = [string]$cache["__agent_build_algorithm"]
     $signature = [string]$cache["__agent_build_signature"]
+    $outputFingerprint = [string]$cache["__agent_build_output_fingerprint"]
     if ($algorithm -ne (Get-AgentBuildCacheAlgorithmVersion)) {
         return [pscustomobject]@{ hit = $false; reason = "algorithm-mismatch"; state = $null }
     }
@@ -2098,6 +2100,12 @@ function Test-AgentBuildCacheHit($cfg) {
             if (-not $expectedTopLevels.Contains([string]$dir.Name)) {
                 return [pscustomobject]@{ hit = $false; reason = ("unexpected-output:{0}" -f $dir.Name); state = $state }
             }
+        }
+        if ([string]::IsNullOrWhiteSpace($outputFingerprint)) {
+            return [pscustomobject]@{ hit = $false; reason = "output-fingerprint-missing"; state = $state }
+        }
+        if ((Get-DirectoryFingerprint $AgentDir) -ne $outputFingerprint) {
+            return [pscustomobject]@{ hit = $false; reason = "output-fingerprint-mismatch"; state = $state }
         }
         return [pscustomobject]@{ hit = $true; reason = "cache-hit"; state = $state }
     }
@@ -2134,15 +2142,33 @@ function Start-BuildTransaction {
     $txnId = [Guid]::NewGuid().ToString("N").Substring(0, 10)
     $path = Join-Path $txnRoot ("build-{0}" -f $txnId)
     $backupAgent = Join-Path $path "agent.backup"
+    $buildCachePath = Get-BuildCachePath
+    $backupBuildCache = Join-Path $path "build-cache.backup.json"
     $state = [ordered]@{
         path = $path
         backup_agent = $backupAgent
         has_backup_agent = $false
+        build_cache_path = $buildCachePath
+        backup_build_cache = $backupBuildCache
+        had_build_cache = $false
+        has_backup_build_cache = $false
+        build_cache_backup_error = $null
         backup_error = $null
     }
     if ($DryRun) { return [pscustomobject]$state }
     EnsureDir $txnRoot
     EnsureDir $path
+    if (Test-Path -LiteralPath $buildCachePath -PathType Leaf) {
+        $state.had_build_cache = $true
+        try {
+            Copy-Item -LiteralPath $buildCachePath -Destination $backupBuildCache -Force
+            $state.has_backup_build_cache = $true
+        }
+        catch {
+            $state.build_cache_backup_error = $_.Exception.Message
+            Log ("构建缓存无法备份；若事务回滚，将删除缓存并强制下次重建：{0}" -f $_.Exception.Message) "WARN"
+        }
+    }
     if (Test-Path $AgentDir) {
         try {
             Invoke-MoveItem $AgentDir $backupAgent
@@ -2164,6 +2190,14 @@ function Rollback-BuildTransaction($txn) {
         if ($txn.has_backup_agent -and (Test-Path $txn.backup_agent)) {
             Invoke-MoveItem $txn.backup_agent $AgentDir
             Write-Host "已回滚 agent/ 到构建前状态。" -ForegroundColor Yellow
+        }
+        if ($txn.had_build_cache -and $txn.has_backup_build_cache -and (Test-Path -LiteralPath $txn.backup_build_cache -PathType Leaf)) {
+            Copy-Item -LiteralPath $txn.backup_build_cache -Destination $txn.build_cache_path -Force
+            Write-Host "已回滚构建缓存到构建前状态。" -ForegroundColor Yellow
+        }
+        elseif (Test-Path -LiteralPath $txn.build_cache_path -PathType Leaf) {
+            Invoke-RemoveItemWithRetry $txn.build_cache_path -IgnoreFailure -SilentIgnore | Out-Null
+            Write-Host "已清除本次构建缓存，下一次将强制重建。" -ForegroundColor Yellow
         }
     }
     finally {

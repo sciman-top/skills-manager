@@ -117,6 +117,59 @@ name: demo
         @($result.Report.errors | Where-Object code -eq "missing_required_skill").Count | Should Be 1
     }
 
+    It "validates declared source closure when generated agent output is not materialized" {
+        $fixture = New-IntegrityFixture "source-only-closure" "" @(
+            @{ skill = "composite"; requires = @("dependency") }
+        )
+        Remove-Item -LiteralPath $fixture.AgentRoot -Recurse -Force
+        New-Item -ItemType Directory -Path $fixture.AgentRoot -Force | Out-Null
+        $config = Get-Content -Raw $fixture.ConfigPath | ConvertFrom-Json
+        $config | Add-Member -NotePropertyName mappings -NotePropertyValue @(
+            [pscustomobject]@{ from = "composite-source"; to = "composite" },
+            [pscustomobject]@{ from = "dependency-source"; to = "dependency" }
+        )
+        $config.skill_projection.profiles.default.enabled_names = @("composite", "dependency")
+        $config | ConvertTo-Json -Depth 8 | Set-Content -Path $fixture.ConfigPath -Encoding UTF8
+
+        $result = Invoke-IntegrityFixture $fixture
+
+        $result.ExitCode | Should Be 0
+        $result.Report.ok | Should Be $true
+        $result.Report.materialization_status | Should Be "source_only"
+        @($result.Report.warnings | Where-Object code -eq "agent_runtime_not_materialized").Count | Should Be 1
+    }
+
+    It "fails source-only closure when a declared caller requires an undeclared skill" {
+        $fixture = New-IntegrityFixture "source-only-missing-dependency" "" @(
+            @{ skill = "composite"; requires = @("missing-dependency") }
+        )
+        Remove-Item -LiteralPath $fixture.AgentRoot -Recurse -Force
+        New-Item -ItemType Directory -Path $fixture.AgentRoot -Force | Out-Null
+        $config = Get-Content -Raw $fixture.ConfigPath | ConvertFrom-Json
+        $config | Add-Member -NotePropertyName mappings -NotePropertyValue @(
+            [pscustomobject]@{ from = "composite-source"; to = "composite" }
+        )
+        $config.skill_projection.profiles.default.enabled_names = @("composite")
+        $config | ConvertTo-Json -Depth 8 | Set-Content -Path $fixture.ConfigPath -Encoding UTF8
+
+        $result = Invoke-IntegrityFixture $fixture
+
+        $result.ExitCode | Should Be 1
+        @($result.Report.errors | Where-Object code -eq "missing_declared_dependency").Count | Should Be 1
+    }
+
+    It "treats an inactive dependency-contract caller as conditional" {
+        $fixture = New-IntegrityFixture "inactive-caller" "" @(
+            @{ skill = "optional-workflow"; requires = @("optional-dependency") }
+        )
+
+        $result = Invoke-IntegrityFixture $fixture
+
+        $result.ExitCode | Should Be 0
+        $result.Report.ok | Should Be $true
+        @($result.Report.warnings | Where-Object code -eq "inactive_dependency_caller").Count | Should Be 1
+    }
+
     It "fails when a profile enables a caller without its required skill" {
         $fixture = New-IntegrityFixture "profile-gap" "" @(
             @{ skill = "demo"; requires = @("required-skill") }

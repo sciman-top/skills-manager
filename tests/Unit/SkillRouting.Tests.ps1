@@ -8,9 +8,9 @@ function New-RoutingSkillEntry([string]$root, [string]$name, [string]$descriptio
     return [pscustomobject]@{ name = $name; description = $description; path = $path; is_system = $false }
 }
 
-function New-RoutingPolicyFile([string]$path, $groups, $rules = @(), $conflicts = @()) {
+function New-RoutingPolicyFile([string]$path, $groups, $rules = @(), $conflicts = @(), [int]$schemaVersion = 1) {
     $policy = [ordered]@{
-        schema_version = 1
+        schema_version = $schemaVersion
         mode = 'observe'
         trigger_rules = @($rules)
         groups = @($groups)
@@ -20,6 +20,69 @@ function New-RoutingPolicyFile([string]$path, $groups, $rules = @(), $conflicts 
 }
 
 Describe 'Skill routing governance' {
+    It 'verifies tracked routing declarations when generated agent output is not materialized' {
+        $configPath = Join-Path $TestDrive 'source-only-skills.json'
+        $policyPath = Join-Path $TestDrive 'source-only-policy.json'
+        $emptyUserRoot = Join-Path $TestDrive 'empty-user-root'
+        New-Item -ItemType Directory -Path $emptyUserRoot -Force | Out-Null
+        New-RoutingPolicyFile $policyPath @(
+            [ordered]@{
+                id = 'source-flow'
+                purpose = 'source-only fixture'
+                router = 'router'
+                selection_policy = 'router then worker'
+                members = @(
+                    [ordered]@{ name = 'router'; role = 'router'; activation = 'entry' }
+                    [ordered]@{ name = 'worker'; role = 'workflow'; activation = 'implementation' }
+                )
+                external_members = @()
+            }
+        )
+        $fixtureConfig = [ordered]@{
+            schema_version = 1
+            vendors = @()
+            mappings = @(
+                [ordered]@{ vendor = 'fixture'; from = 'router-source'; to = 'router' }
+                [ordered]@{ vendor = 'fixture'; from = 'worker-source'; to = 'worker' }
+            )
+            imports = @()
+            targets = @()
+            mcp_servers = @()
+            skill_projection = [ordered]@{
+                enabled = $true
+                active_profile = 'default'
+                user_skill_root = $emptyUserRoot
+                routing_policy_path = $policyPath
+                external_skill_inventory = [ordered]@{ enabled = $false }
+                resident_names = @('router')
+                profiles = [ordered]@{ default = [ordered]@{ enabled_names = @('worker') } }
+            }
+        }
+        Set-ContentUtf8 $configPath ($fixtureConfig | ConvertTo-Json -Depth 12)
+
+        $scriptPath = Join-Path $PSScriptRoot '..\..\scripts\verify-skill-routing.ps1'
+        $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -ConfigPath $configPath -PolicyPath $policyPath -Json 2>&1)
+        $exitCode = $LASTEXITCODE
+        $report = ($output -join "`n") | ConvertFrom-Json
+
+        $report.error | Should BeNullOrEmpty
+        $exitCode | Should Be 0
+        $report.ok | Should Be $true
+        $report.materialization_status | Should Be 'source_only'
+        $report.source_declared_skill_count | Should Be 2
+        $report.active_skill_count | Should Be 2
+    }
+
+    It 'Accepts routing policy schema v2 and rejects unknown future versions' {
+        $v2 = Join-Path $TestDrive 'policy-v2.json'
+        New-RoutingPolicyFile $v2 @() @() @() 2
+        (Get-SkillRoutingPolicy $v2).schema_version | Should Be 2
+
+        $future = Join-Path $TestDrive 'policy-v3.json'
+        New-RoutingPolicyFile $future @() @() @() 3
+        { Get-SkillRoutingPolicy $future } | Should Throw
+    }
+
     It 'Reads only enabled plugin ids from Codex TOML' {
         $config = Join-Path $TestDrive 'config.toml'
         Set-ContentUtf8 $config @'

@@ -31,14 +31,18 @@ It will not become an agent runtime, plugin marketplace, provider/model/auth/ses
 - [vNext architecture](docs/product/skills-manager-vnext-architecture.md)
 - [vNext roadmap](docs/product/skills-manager-vnext-roadmap.md)
 - [Rule-governance adoption matrix](docs/product/rule-governance-adoption-matrix.md)
-- [Current Phase 3 task manifest](tasks/skills-manager-vnext-phase3.tasks.json)
+- [Current Phase 5 task manifest](tasks/skills-manager-vnext-phase5.tasks.json)
+- [Historical Phase 4 task manifest](tasks/skills-manager-vnext-phase4.tasks.json)
+- [Historical Phase 3 task manifest](tasks/skills-manager-vnext-phase3.tasks.json)
 - [Historical Phase 2 task manifest](tasks/skills-manager-vnext-phase2.tasks.json)
 - [Historical Phase 1 task manifest](tasks/skills-manager-vnext-phase1.tasks.json)
 - [Historical Phase 0 task manifest](tasks/skills-manager-vnext-phase0.tasks.json)
 
-vNext Phases 0, 1, 2, and 3 have passed repository-side acceptance (P0/P1: 9/9 each; P2/P3: 7/7 each). P3 provides a read-only inventory adapter, personal manifest lint, one fixture-only Codex skills-only exporter, and layered evaluation. The P4 entry decision is `not_started/deferred`, and no P4 manifest exists. Plugin install, marketplace mutation, host/profile changes, provider calls, and native mutations remain forbidden; Codex fresh-process rule loading is verified across all 9 targets, Claude has no provider-free prompt renderer, and `live_accepted` remains `not_run`.
+vNext P0-P5 have passed repository-side acceptance (P0/P1: 9/9 each; P2/P3: 7/7 each; P4/P5: 6/6 each). P5 evolves the selector into an Adaptive Capability Fabric: schema v3 understands task type/domain/goal/operations, builds a minimal capability DAG, reuses compatible session capabilities, emits an `apply=false` profile-preheat recommendation, and consumes a current read-only Codex App Server skill/app/MCP snapshot. Current runtime availability/auth/callability/freshness override static discovery fields, while static metadata retains path, policy, and profile reachability. Plugin/MCP installation, OAuth, host/profile/session writes, restart, and live acceptance remain out of scope.
 
 PowerShell 7 (`pwsh`) is the primary development, CI, and full-gate runtime. Windows PowerShell 5.1 is limited to the installer fallback, generated-script parse, and plain-object/selected-fixture smoke. See [`docs/runbooks/powershell-runtime-compatibility.md`](docs/runbooks/powershell-runtime-compatibility.md) for boundaries and removal gates.
+
+The resident `capability-router` now emits schema v3 task, retrieval, unified-inventory, capability-graph, host-snapshot, session, preheat, selection, and activation plans while preserving P4 consumer fields. Opaque apps are searchable by runtime/display names and aliases. Missing MCP annotations use fail-closed protocol defaults (`readOnlyHint=false`, `destructiveHint=true`, `openWorldHint=true`); explicit non-read-only tools cannot be downgraded by name heuristics, and compound requests aggregate the highest side effect across required read/write/destructive steps. Run `scripts/verify-capability-routing.ps1` for the deterministic golden corpus, add `-HostSnapshotPath <snapshot>` for per-capability identity and full-inventory/tool coverage, and use `scripts/get-codex-app-server-capability-snapshot.ps1` for a live read-only Codex snapshot. Discovered MCP servers that are not exposed to the current task remain activation-required.
 
 Phase 1 read-only entry points (no file writes without `--out`):
 
@@ -355,6 +359,8 @@ Meaning:
 
 - `quick`: `build -> repo-hygiene -> generated-sync -> skill-integrity -> skill-routing -> dependency-baseline -> skills-config-contract -> planning-contract -> doctor-json-contract`
 - `full`: `quick + tests`
+
+When `agent/` is materialized, `skill-integrity` and `skill-routing` enforce package/resource/installed closure. In portable, CI, or linked worktrees without generated output, they report `materialization_status=source_only`, validate tracked config/override/policy and profile closure, and list inactive or policy-only members. Source-only evidence does not prove package or host runtime state; rebuild with `构建生效` and rerun, or use a fresh host snapshot/native probe, to recover that evidence layer.
 
 Run the planning contract independently with:
 
