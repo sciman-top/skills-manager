@@ -1,6 +1,6 @@
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'State')]
 param(
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $true, ParameterSetName = 'State')]
     [ValidateSet(
         'running',
         'resume_eligible',
@@ -20,6 +20,9 @@ param(
         'soft_guard_only'
     )]
     [string]$State,
+
+    [Parameter(Mandatory = $true, ParameterSetName = 'Turns')]
+    [string]$TurnsJson,
 
     [ValidateSet('supervisor_monitor_only', 'conditional_recovery')]
     [string]$OperatingMode = 'conditional_recovery',
@@ -54,6 +57,77 @@ param(
 )
 
 Set-StrictMode -Version Latest
+
+function Get-WatchTurnText {
+    param([AllowNull()][object]$Turn)
+    $parts = [Collections.Generic.List[string]]::new()
+    foreach ($item in @($Turn.items)) {
+        if ($null -eq $item) { continue }
+        if ($item.PSObject.Properties.Match('content').Count -gt 0) {
+            foreach ($content in @($item.content)) {
+                if ($null -ne $content -and $content.PSObject.Properties.Match('text').Count -gt 0) { $parts.Add([string]$content.text) | Out-Null }
+            }
+        }
+        if ($item.PSObject.Properties.Match('text').Count -gt 0) { $parts.Add([string]$item.text) | Out-Null }
+    }
+    return [string]::Join("`n", $parts.ToArray())
+}
+
+function Test-WatchHeartbeatTurn {
+    param([AllowNull()][object]$Turn)
+    return ((Get-WatchTurnText $Turn) -match '(?s)^\s*<heartbeat>\s*<automation_id>[^<]+</automation_id>.*?<instructions>.*?watch-interrupted-task:(?:v1|fleet:v1)\b')
+}
+
+function Test-WatchFinalAnswer {
+    param([AllowNull()][object]$Turn)
+    foreach ($item in @($Turn.items)) {
+        if ($null -ne $item -and $item.PSObject.Properties.Match('phase').Count -gt 0 -and [string]$item.phase -ceq 'final_answer') { return $true }
+    }
+    return $false
+}
+
+function Test-WatchContinuationEvidence {
+    param([AllowNull()][object]$Turn)
+    foreach ($item in @($Turn.items)) {
+        if ($null -eq $item) { continue }
+        if ([string]$item.type -in @('contextCompaction', 'reasoning', 'toolCall', 'customToolCall', 'functionCall', 'fileChange')) { return $true }
+        if ([string]$item.type -ceq 'agentMessage' -and $item.PSObject.Properties.Match('phase').Count -gt 0 -and [string]$item.phase -ceq 'commentary') { return $true }
+    }
+    return $false
+}
+
+if ($PSCmdlet.ParameterSetName -ceq 'Turns') {
+    $parsed = $TurnsJson | ConvertFrom-Json -Depth 64
+    $turns = if ($parsed.PSObject.Properties.Match('turns').Count -gt 0) { @($parsed.turns) } else { @($parsed) }
+    $businessTurns = @($turns | Where-Object { -not (Test-WatchHeartbeatTurn $_) })
+    $turnResult = [ordered]@{ schema_version=1; state='natural_pause'; reason_code='no_business_turn'; latest_business_turn_id=''; no_active_turn=$true; task_stopped=$true; recovery_pending=$false; has_final_answer=$false }
+    if ($businessTurns.Count -gt 0) {
+        $latest = @($businessTurns | Sort-Object { if ($_.PSObject.Properties.Match('startedAt').Count -gt 0) { [int64]$_.startedAt } else { 0 } } -Descending)[0]
+        $turnResult.latest_business_turn_id = [string]$latest.id
+        $status = [string]$latest.status
+        $errorText = if ($null -ne $latest.error) { [string]($latest.error | ConvertTo-Json -Compress -Depth 16) } else { '' }
+        $hasFinal = Test-WatchFinalAnswer $latest
+        $turnResult.has_final_answer = $hasFinal
+        $transientPattern = '(?i)(?:\b408\b|\b429\b|\b502\b|\b503\b|\b504\b|too many requests|rate.?limit|timeout|timed out|connection (?:reset|refused)|dns|sse|stream|transport|host continuation)'
+        if ($status -ceq 'inProgress') {
+            $turnResult.state='running'; $turnResult.reason_code='business_turn_in_progress'; $turnResult.no_active_turn=$false; $turnResult.task_stopped=$false
+        }
+        elseif ($errorText -match $transientPattern) {
+            $turnResult.state='resume_eligible'; $turnResult.reason_code='transient_business_turn_failure'; $turnResult.task_stopped=$false; $turnResult.recovery_pending=$true
+        }
+        elseif ($hasFinal) {
+            $turnResult.state='complete'; $turnResult.reason_code='business_final_answer_completed'
+        }
+        elseif (Test-WatchContinuationEvidence $latest) {
+            $turnResult.state='continuation_gap'; $turnResult.reason_code='business_turn_ended_without_final'; $turnResult.task_stopped=$false; $turnResult.recovery_pending=$true
+        }
+        else {
+            $turnResult.state='stopped'; $turnResult.reason_code='business_turn_stably_stopped_without_recovery_evidence'
+        }
+    }
+    [pscustomobject]$turnResult | ConvertTo-Json -Compress -Depth 8
+    return
+}
 
 $result = [ordered]@{
     state = $State

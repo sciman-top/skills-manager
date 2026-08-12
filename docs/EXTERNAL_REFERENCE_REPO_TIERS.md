@@ -151,6 +151,12 @@ These sources are useful, but they should not be part of the default persistent 
 
 These repositories were checked through GitHub's public metadata and selected files. They are recorded in the manifest as `conditional-not-cloned`; no repository was cloned or installed as a result of popularity alone.
 
+### 7.2 Watch runtime rearchitecture reference set
+
+The 2026-08-07 watch-runtime workstream adds a bounded, manifest-controlled source set under `conditional/watch-runtime/`. The set exists to replace the failed heartbeat/prompt-supervisor architecture with Cockpit readiness, deterministic durable recovery, native Codex Goal integration, terminal cleanup, and fleet shutdown. Its reviewed revisions, licenses, and adopt/adapt/reject decisions are recorded in `docs/change-evidence/20260807-watch-runtime-reference-review.md`.
+
+Cloned state does not promote these repositories into the default refresh set. `openai/codex` remains the official core source; `codex-watchdog`, Polly, Temporal .NET, Hangfire, Quartz.NET, Uptime Kuma, and the MCP C# SDK remain conditional read-only comparison material. No upstream dependency, service, scheduler, daemon, installer, or script is adopted merely because its checkout exists.
+
 | Repo / revision | License | What was useful | Decision |
 | --- | --- | --- | --- |
 | `anthropics/k12-teacher-skills@7c03c83d` | Apache-2.0 | Subject-specific references, prerequisite detection, exit-ticket guidance, differentiation, and single-source document consistency | Compare only when courseware work is active; do not import its Word/Knowledge Graph pipeline |

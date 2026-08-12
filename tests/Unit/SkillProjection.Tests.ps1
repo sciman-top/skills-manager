@@ -96,7 +96,7 @@ Describe "Skill projection" {
                 "grill-with-docs",
                 "grilling"
             )
-            @($config.skill_projection.resident_names) | Should Be @("capability-router", "watch-interrupted-task")
+            @($config.skill_projection.resident_names) | Should Be @("capability-router")
             foreach ($workflowName in @("research", "brainstorming", "planning-and-task-breakdown", "git-workflow-and-versioning", "incremental-implementation")) {
                 ($defaultNames -contains $workflowName) | Should Be $false
             }

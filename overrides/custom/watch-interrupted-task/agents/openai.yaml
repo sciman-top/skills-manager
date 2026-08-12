@@ -1,4 +1,4 @@
 interface:
-  display_name: "任务连续性守夜"
-  short_description: "自动恢复中断任务并在稳定停止后清理守夜"
-  default_prompt: "Use $watch-interrupted-task to recover this task from verified checkpoints and retire its watch after a proved stable stop."
+  display_name: "旧守夜退役入口"
+  short_description: "仅清理旧 heartbeat；不再创建或恢复守夜"
+  default_prompt: "Report that heartbeat watch v1 is retired. Only inspect or remove a residual matching automation when the user directly requests cleanup; never create, arm, resume, or update a watch."
