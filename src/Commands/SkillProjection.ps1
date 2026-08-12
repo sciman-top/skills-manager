@@ -722,6 +722,7 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
 
     $budgetLimitChars = if ($projectionCfg.PSObject.Properties.Match("budget_limit_chars").Count -gt 0) { [int]$projectionCfg.budget_limit_chars } else { 8000 }
     $externalReserveChars = if ($projectionCfg.PSObject.Properties.Match("external_metadata_reserve_chars").Count -gt 0) { [int]$projectionCfg.external_metadata_reserve_chars } else { 0 }
+    $budgetWarningThresholdPercent = 90
     Need ($budgetLimitChars -gt 0) "skill_projection.budget_limit_chars 必须大于 0"
     Need ($externalReserveChars -ge 0) "skill_projection.external_metadata_reserve_chars 不能小于 0"
     $externalInventory = Get-CodexExternalSkillInventory $projectionCfg
@@ -779,6 +780,8 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
                 $profileActiveSkillCount++
             }
             $profileEstimatedChars = $profileMetadataChars + $effectiveExternalMetadataChars
+            $profileBudgetPass = $profileEstimatedChars -le $profileBudgetLimitChars
+            $profileBudgetWarning = $profileBudgetPass -and (($profileEstimatedChars * 100) -ge ($profileBudgetLimitChars * $budgetWarningThresholdPercent))
             $profileBudgets.Add([pscustomobject]([ordered]@{
                         profile = $profileName
                         enabled_name_count = $enabledNames.Count
@@ -790,7 +793,9 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
                         effective_external_metadata_chars = $effectiveExternalMetadataChars
                         estimated_metadata_chars = $profileEstimatedChars
                         budget_limit_chars = $profileBudgetLimitChars
-                        budget_pass = ($profileEstimatedChars -le $profileBudgetLimitChars)
+                        budget_warning_threshold_percent = $budgetWarningThresholdPercent
+                        budget_warning = $profileBudgetWarning
+                        budget_pass = $profileBudgetPass
                     })) | Out-Null
 
             if ([string]::Equals($profileName, $activeProfile, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -866,7 +871,10 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
         $skillMetadataChars += ([string]$entry.name).Length + ([string]$entry.description).Length
     }
     $estimatedMetadataChars = $skillMetadataChars + $effectiveExternalMetadataChars
+    $budgetPass = $estimatedMetadataChars -le $activeEffectiveBudgetLimitChars
+    $budgetWarning = $budgetPass -and (($estimatedMetadataChars * 100) -ge ($activeEffectiveBudgetLimitChars * $budgetWarningThresholdPercent))
     $allProfilesBudgetPass = @($profileBudgets.ToArray() | Where-Object { -not [bool]$_.budget_pass }).Count -eq 0
+    $allProfilesBudgetWarning = @($profileBudgets.ToArray() | Where-Object { [bool]$_.budget_warning }).Count -gt 0
     $routingReport = New-SkillProjectionCompatibilityReport
 
     return [pscustomobject]([ordered]@{
@@ -895,7 +903,10 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
         estimated_metadata_chars = $estimatedMetadataChars
         budget_limit_chars = $budgetLimitChars
         effective_budget_limit_chars = $activeEffectiveBudgetLimitChars
-        budget_pass = ($estimatedMetadataChars -le $activeEffectiveBudgetLimitChars)
+        budget_warning_threshold_percent = $budgetWarningThresholdPercent
+        budget_warning = $budgetWarning
+        budget_pass = $budgetPass
+        all_profiles_budget_warning = $allProfilesBudgetWarning
         all_profiles_budget_pass = $allProfilesBudgetPass
         profile_budgets = @($profileBudgets.ToArray())
         external_skills = @($externalInventory.skills)
@@ -1007,6 +1018,25 @@ function Invoke-HostProjectionGitText([string]$repositoryPath, [string[]]$gitArg
     return $text
 }
 
+function Get-CurrentFullQualityGatePromotionReceipt([string]$repositoryPath) {
+    $verifierPath = Join-Path $repositoryPath 'scripts\quality\verify-current-quality-gate.ps1'
+    Need (Test-Path -LiteralPath $verifierPath -PathType Leaf) '正式宿主投影缺少 exact-current full gate verifier'
+    $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $verifierPath -RepoRoot $repositoryPath -RequiredProfile full -RequiredStatus passed -Json 2>&1)
+    $exitCode = $LASTEXITCODE
+    $text = ($output | ForEach-Object { [string]$_ }) -join "`n"
+    $result = $null
+    try { $result = $text | ConvertFrom-Json }
+    catch { throw ("正式宿主投影无法解析 exact-current full gate verifier 输出：{0}" -f $_.Exception.Message) }
+    Need ($exitCode -eq 0 -and $null -ne $result -and [bool]$result.pass) '正式宿主投影要求 exact-current full/passed quality gate receipt'
+    Need ([string]$result.pointer.profile -eq 'full' -and [string]$result.pointer.status -eq 'passed') '正式宿主投影的 quality gate pointer 不是 full/passed'
+    Need (-not [string]::IsNullOrWhiteSpace([string]$result.pointer.receipt_path)) '正式宿主投影的 quality gate receipt path 为空'
+    return [pscustomobject]@{
+        status = 'passed'
+        path = [string]$result.pointer.receipt_path
+        source_revision = [string]$result.receipt.source_end.head
+    }
+}
+
 function Get-HostProjectionPromotionContext($cfg, [switch]$AllowUnverified) {
     $requiresPromotion = Test-ConfiguredHostProjection $cfg
     if (-not $requiresPromotion) {
@@ -1044,14 +1074,24 @@ function Get-HostProjectionPromotionContext($cfg, [switch]$AllowUnverified) {
         throw "正式宿主投影要求 clean Git commit；当前工作树存在未提交或未跟踪改动。请先完成门禁并提交，或仅在明确接受风险时使用 -AllowUnverifiedHostProjection。"
     }
 
+    $gateReceipt = if ($AllowUnverified) {
+        [pscustomobject]@{ status = 'unverified_override'; path = ''; source_revision = '' }
+    }
+    else {
+        Get-CurrentFullQualityGatePromotionReceipt $Root
+    }
+    if (-not $AllowUnverified) {
+        Need ([string]::Equals([string]$gateReceipt.source_revision, $sourceRevision, [StringComparison]::OrdinalIgnoreCase)) '正式宿主投影的 full gate receipt 未绑定当前 source revision'
+    }
+
     return [pscustomobject]([ordered]@{
             required = $true
             source_revision = $sourceRevision
             source_worktree_dirty = [bool]$sourceDirty
             source_git_state = $gitState
             promotion_mode = if ($sourceDirty -or $gitState -ne "clean") { "unverified_override" } else { "verified_clean_commit" }
-            gate_receipt_status = "not_provided"
-            gate_receipt_path = ""
+            gate_receipt_status = [string]$gateReceipt.status
+            gate_receipt_path = [string]$gateReceipt.path
         })
 }
 
@@ -1347,6 +1387,9 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBu
             $oversizedProfiles = @($plan.profile_budgets | Where-Object { -not [bool]$_.budget_pass } | ForEach-Object { "{0}={1}/{2}" -f $_.profile, $_.estimated_metadata_chars, $_.budget_limit_chars })
             Need ([bool]$plan.all_profiles_budget_pass) ("技能 profile 描述预算超限：{0}" -f ($oversizedProfiles -join ", "))
         }
+        if ([bool]$plan.budget_warning) {
+            Log ("技能描述预算接近上限：estimated={0}, limit={1}, threshold={2}%" -f [int]$plan.estimated_metadata_chars, [int]$plan.effective_budget_limit_chars, [int]$plan.budget_warning_threshold_percent) "WARN" -NoHost
+        }
         Need (-not [bool]$plan.routing_report.blocking) "技能路由策略存在 enforce 模式阻断项"
     }
 
@@ -1404,7 +1447,10 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBu
                 estimated_metadata_chars = [int]$plan.estimated_metadata_chars
                 budget_limit_chars = [int]$plan.budget_limit_chars
                 effective_budget_limit_chars = [int]$plan.effective_budget_limit_chars
+                budget_warning_threshold_percent = [int]$plan.budget_warning_threshold_percent
+                budget_warning = [bool]$plan.budget_warning
                 budget_pass = [bool]$plan.budget_pass
+                all_profiles_budget_warning = [bool]$plan.all_profiles_budget_warning
                 all_profiles_budget_pass = [bool]$plan.all_profiles_budget_pass
                 profile_budgets = @($plan.profile_budgets)
                 external_skills = @($plan.external_skills)

@@ -16,6 +16,7 @@ Describe 'vNext product planning contract' {
         'tasks\skills-manager-vnext-phase0.tasks.json', 'tasks\skills-manager-vnext-phase1.tasks.json',
         'tasks\skills-manager-vnext-phase2.tasks.json', 'tasks\skills-manager-vnext-phase3.tasks.json',
         'tasks\skills-manager-vnext-phase4.tasks.json', 'tasks\skills-manager-vnext-phase5.tasks.json', $currentManifestRelative,
+        'tasks\skills-manager-vnext-agent-workflow-advisory.tasks.json',
         'tasks\plan.md', 'tasks\todo.md', 'README.md', 'AGENTS.md', 'config\vnext-phase4-entry-gate.json'
     )
 
@@ -74,6 +75,19 @@ Describe 'vNext product planning contract' {
         $currentMainChain | Should Match 'host AI.*capability-router only for explicit cold discovery or policy validation'
         $currentMainChain | Should Match 'discoverability, reuse and behavior consistency.*Codex Desktop'
         $currentMainChain | Should Not Match '(?i)project all enabled skills'
+    }
+
+    It 'rejects an active truth label on the retired agent workflow manifest' {
+        $fixtureRoot = New-PlanningFixture 'retired-agent-workflow-truth'
+        $path = Join-Path $fixtureRoot 'tasks\skills-manager-vnext-agent-workflow-advisory.tasks.json'
+        $manifest = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        $manifest.track_status = 'repo_verified'
+        $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
+
+        $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
+
+        @($parsed.findings | Where-Object code -eq 'retired_agent_workflow_truth_invalid').Count | Should Be 1
+        $parsed.pass | Should Be $false
     }
 
     It 'requires the three compact PP-000 constraints in the PRD' {

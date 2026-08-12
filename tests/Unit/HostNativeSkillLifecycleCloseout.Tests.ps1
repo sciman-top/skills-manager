@@ -151,6 +151,8 @@ Describe 'P6 host-native skill lifecycle closeout' {
         $included.Count | Should BeGreaterThan 0
         $included.Count | Should BeLessThan $generatedSkillCount
         $included | Should Contain 'capability-router'
+        $included | Should Contain 'agent-skills-2-skills-code-review-and-quality'
+        (Get-CloseoutRepoText 'agent/agent-skills-2-skills-code-review-and-quality/SKILL.md') | Should Match '(?m)^name:\s*code-review-and-quality\s*$'
         $included | Should Contain 'superpowers-skills-systematic-debugging'
         $included | Should Contain 'superpowers-skills-verification-before-completion'
         $included | Should Not Contain 'superpowers-skills-test-driven-development'

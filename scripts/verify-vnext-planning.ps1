@@ -138,6 +138,29 @@ if (-not (Test-Path -LiteralPath $adoptionMatrixPath -PathType Leaf)) {
     Add-PlanningFinding ([ref]$findings) 'missing_required_file' 'docs/product/rule-governance-adoption-matrix.md' 'Missing rule-governance adoption matrix.'
 }
 
+$retiredAgentManifestRelativePath = 'tasks/skills-manager-vnext-agent-workflow-advisory.tasks.json'
+$retiredAgentManifestText = Get-RequiredText $root $retiredAgentManifestRelativePath ([ref]$findings)
+if (-not [string]::IsNullOrWhiteSpace($retiredAgentManifestText)) {
+    try {
+        $retiredAgentManifest = $retiredAgentManifestText | ConvertFrom-Json
+        foreach ($contract in @(
+                @{ field = 'track_status'; value = 'retired_historical_repo_verified' },
+                @{ field = 'truth_boundary'; value = 'historical_repo_evidence_only' },
+                @{ field = 'runtime_scheduler_status'; value = 'not_introduced' },
+                @{ field = 'radar_fetch_status'; value = 'retired' },
+                @{ field = 'live_acceptance_status'; value = 'not_run' }
+            )) {
+            if ([string]$retiredAgentManifest.($contract.field) -ne [string]$contract.value) {
+                Add-PlanningFinding ([ref]$findings) 'retired_agent_workflow_truth_invalid' $retiredAgentManifestRelativePath `
+                    ('Retired agent workflow {0} must be {1}, found {2}.' -f $contract.field, $contract.value, [string]$retiredAgentManifest.($contract.field))
+            }
+        }
+    }
+    catch {
+        Add-PlanningFinding ([ref]$findings) 'retired_agent_workflow_manifest_parse_failed' $retiredAgentManifestRelativePath $_.Exception.Message
+    }
+}
+
 $manifest = $null
 if (-not [string]::IsNullOrWhiteSpace($content['manifest'])) {
     try {

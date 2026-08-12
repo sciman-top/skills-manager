@@ -20,6 +20,9 @@ Describe "Skill projection" {
                 & git -C $repo -c user.name=fixture -c user.email=fixture@example.invalid commit -q -m initial
                 $script:Root = $repo
                 $cfg = [pscustomobject]@{ targets = @([pscustomobject]@{ path = (Join-Path $TestDrive "host-clean") }) }
+                Mock Get-CurrentFullQualityGatePromotionReceipt {
+                    [pscustomobject]@{ status = 'passed'; path = 'receipt.json'; source_revision = (& git -C $script:Root rev-parse HEAD) }
+                }
 
                 $result = Get-HostProjectionPromotionContext $cfg
 
@@ -28,6 +31,8 @@ Describe "Skill projection" {
                 $result.source_git_state | Should Be "clean"
                 $result.promotion_mode | Should Be "verified_clean_commit"
                 $result.source_revision | Should Match '^[0-9a-f]{40}$'
+                $result.gate_receipt_status | Should Be 'passed'
+                $result.gate_receipt_path | Should Be 'receipt.json'
             }
             finally {
                 $script:Root = $oldRoot
@@ -52,6 +57,7 @@ Describe "Skill projection" {
                 $override.source_worktree_dirty | Should Be $true
                 $override.source_git_state | Should Be "dirty"
                 $override.promotion_mode | Should Be "unverified_override"
+                $override.gate_receipt_status | Should Be "unverified_override"
             }
             finally {
                 $script:Root = $oldRoot
@@ -171,6 +177,26 @@ Describe "Skill projection" {
 
             @($config.skill_projection.aliases | Where-Object name -eq "to-prd")[0].replacement | Should Be "draft-spec"
             @($config.skill_projection.aliases | Where-Object name -eq "to-issues")[0].replacement | Should Be "draft-tickets"
+        }
+
+        It "Blocks a clean formal projection when the full gate receipt is unavailable" {
+            $oldRoot = $script:Root
+            try {
+                $repo = Join-Path $TestDrive "promotion-gate-missing"
+                New-Item -ItemType Directory -Path $repo -Force | Out-Null
+                & git -C $repo init -q
+                Set-Content -LiteralPath (Join-Path $repo "tracked.txt") -Value "clean" -Encoding UTF8
+                & git -C $repo add tracked.txt
+                & git -C $repo -c user.name=fixture -c user.email=fixture@example.invalid commit -q -m initial
+                $script:Root = $repo
+                $cfg = [pscustomobject]@{ targets = @([pscustomobject]@{ path = (Join-Path $TestDrive "host-gate-missing") }) }
+                Mock Get-CurrentFullQualityGatePromotionReceipt { throw 'quality_gate_current_source_stale' }
+
+                { Get-HostProjectionPromotionContext $cfg } | Should Throw
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
         }
     }
 
@@ -561,7 +587,26 @@ Describe "Skill projection" {
 
             $plan.skill_metadata_chars | Should Be 95
             $plan.estimated_metadata_chars | Should Be 105
+            $plan.budget_warning | Should Be $false
             $plan.budget_pass | Should Be $false
+        }
+
+        It "Warns at ninety percent without failing the metadata budget" {
+            $root = Join-Path $TestDrive "budget-warning"
+            New-ProjectionSkill $root "large" "large" ("x" * 85) | Out-Null
+            $cfg = [pscustomobject]@{
+                enabled = $true
+                budget_limit_chars = 100
+                external_metadata_reserve_chars = 0
+                sources = @([pscustomobject]@{ id = "managed"; path = $root; priority = 200; platforms = @("codex") })
+            }
+
+            $plan = New-SkillProjectionPlan $cfg
+
+            $plan.estimated_metadata_chars | Should Be 90
+            $plan.budget_warning_threshold_percent | Should Be 90
+            $plan.budget_warning | Should Be $true
+            $plan.budget_pass | Should Be $true
         }
 
         It "Reports every profile budget even when the active profile passes" {
@@ -585,6 +630,7 @@ Describe "Skill projection" {
             @($plan.profile_budgets).Count | Should Be 2
             ($plan.profile_budgets | Where-Object profile -eq "default").budget_pass | Should Be $true
             ($plan.profile_budgets | Where-Object profile -eq "oversized").budget_pass | Should Be $false
+            $plan.all_profiles_budget_warning | Should Be $false
             $plan.all_profiles_budget_pass | Should Be $false
             $plan.budget_pass | Should Be $true
         }
