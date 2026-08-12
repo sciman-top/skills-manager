@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "program_id": "skills-manager-vnext",
+  "current_phase": "P4",
+  "phase_sequence": ["P0", "P1", "P2", "P3", "P4"],
+  "allowed_statuses": ["pending", "in_progress", "blocked", "deferred", "done"],
+  "tasks": [
+    {
+      "id": "SMV-P4-001", "phase": "P4", "title": "建立 P4 entry 与规划真源", "status": "done", "risk": "low", "depends_on": [],
+      "requirement_ids": ["FR-SEL-001", "FR-SEL-007", "FR-AIE-001"], "architecture_decision_ids": ["ADR-SMV-004", "ADR-SMV-007", "ADR-SMV-010"],
+      "goal": "把重复误路由和用户明确授权转为 P4 spec、manifest、plan、todo 与 entry decision。",
+      "preconditions": ["P3 7/7 repo_verified", "存在两次真实误路由", "用户明确授权实现"],
+      "write_set": ["config/vnext-phase4-entry-gate.json", "docs/superpowers/specs/2026-08-02-capability-manager-vnext-phase-4-design.md", "tasks/skills-manager-vnext-phase4.tasks.json", "tasks/plan.md", "tasks/todo.md", "docs/product/**", "docs/change-evidence/20260802-vnext-phase4-unified-capability-routing.md"],
+      "implementation_steps": ["记录独立问题证据", "定义安全边界", "切换 current phase", "建立机器可验证 entry"],
+      "tests": ["planning current P4", "started gate requires all evidence", "historical manifests remain valid"],
+      "verification": ["scripts/verify-vnext-planning.ps1", "scripts/verify-vnext-phase4-entry-gate.ps1"],
+      "rollback": ["恢复 P3 current phase 和 deferred decision"],
+      "done_when": ["P4 manifest 可解析", "entry all_required_met=true", "边界不接管 host runtime"],
+      "out_of_scope": ["静默 host mutation", "provider/model/session runtime"]
+    },
+    {
+      "id": "SMV-P4-002", "phase": "P4", "title": "实现 intent-aware selector v2", "status": "done", "risk": "medium", "depends_on": ["SMV-P4-001"],
+      "requirement_ids": ["FR-SEL-001", "FR-SEL-002", "FR-SEL-003"], "architecture_decision_ids": ["ADR-SMV-001", "ADR-SMV-010"],
+      "goal": "用显式名称、required/excluded intent、metadata ranking 和 abstain 修复正向关键词误路由。",
+      "preconditions": ["误路由可稳定复现", "现有 path containment 保留"],
+      "write_set": ["overrides/capability-router/scripts/route-capability.ps1", "config/skill-routing-policy.json", "tests/Unit/CapabilityRouter.Tests.ps1", "docs/change-evidence/20260802-vnext-phase4-unified-capability-routing.md"],
+      "implementation_steps": ["新增失败用例", "识别互斥意图", "先过滤再排序", "保持 v1 consumer fields"],
+      "tests": ["implementation excludes draft/grill", "explicit skill still routes", "weak match abstains"],
+      "verification": ["Invoke-Pester tests/Unit/CapabilityRouter.Tests.ps1"],
+      "rollback": ["恢复 schema v1 selector 和 policy"],
+      "done_when": ["negative regression green", "zero writes", "path escape rejected"],
+      "out_of_scope": ["每次路由调用 provider", "embedding database"]
+    },
+    {
+      "id": "SMV-P4-003", "phase": "P4", "title": "实现统一 activation adapters", "status": "done", "risk": "medium", "depends_on": ["SMV-P4-002"],
+      "requirement_ids": ["FR-SEL-004", "FR-SEL-005", "FR-MCP-006"], "architecture_decision_ids": ["ADR-SMV-004", "ADR-SMV-010"],
+      "goal": "统一输出 skill、MCP 与 caller snapshot capability 的 availability、side effect 和 activation plan。",
+      "preconditions": ["selector v2 contract stable", "MCP active profile 可只读解析"],
+      "write_set": ["overrides/capability-router/scripts/route-capability.ps1", "config/skill-routing-policy.json", "tests/Unit/CapabilityRouter.Tests.ps1", "docs/change-evidence/20260802-vnext-phase4-unified-capability-routing.md"],
+      "implementation_steps": ["读取 active MCP profile", "映射 available/needs_activation", "消费可选 runtime snapshot", "生成 allow/approval/activation plan"],
+      "tests": ["available read-only MCP auto allowed", "disabled MCP no mutation", "unknown/write capability requires gate"],
+      "verification": ["Invoke-Pester tests/Unit/CapabilityRouter.Tests.ps1"],
+      "rollback": ["移除非 skill adapters，保留冷加载"],
+      "done_when": ["all kinds share plan envelope", "OAuth/install/profile unchanged"],
+      "out_of_scope": ["启动 MCP server", "安装 plugin", "OAuth"]
+    },
+    {
+      "id": "SMV-P4-004", "phase": "P4", "title": "建立 golden routing verifier", "status": "done", "risk": "low", "depends_on": ["SMV-P4-003"],
+      "requirement_ids": ["FR-SEL-006", "FR-EVD-001"], "architecture_decision_ids": ["ADR-SMV-007", "ADR-SMV-010"],
+      "goal": "用 direct/indirect/negative/ambiguous/cross-kind 语料机械验证 expected、forbidden、abstain 和 side-effect 守卫。",
+      "preconditions": ["selector output deterministic", "真实误路由进入 corpus"],
+      "write_set": ["config/capability-routing-golden.json", "scripts/verify-capability-routing.ps1", "tests/Unit/CapabilityRoutingVerifier.Tests.ps1", "docs/change-evidence/20260802-vnext-phase4-unified-capability-routing.md"],
+      "implementation_steps": ["定义 corpus schema", "运行 router", "聚合 precision counters", "发现违规 exit 2"],
+      "tests": ["valid corpus passes", "wrong expected fails", "forbidden activation fails"],
+      "verification": ["scripts/verify-capability-routing.ps1", "Invoke-Pester tests/Unit/CapabilityRoutingVerifier.Tests.ps1"],
+      "rollback": ["移除 verifier/corpus/tests"],
+      "done_when": ["negative precision 100% on declared corpus", "side-effect violations=0"],
+      "out_of_scope": ["在线 LLM eval", "将 corpus 指标外推到所有自然语言"]
+    },
+    {
+      "id": "SMV-P4-005", "phase": "P4", "title": "集成 resident skill 与文档契约", "status": "done", "risk": "medium", "depends_on": ["SMV-P4-004"],
+      "requirement_ids": ["FR-SEL-001", "FR-PRO-005", "NFR-COMP-001"], "architecture_decision_ids": ["ADR-SMV-002", "ADR-SMV-010"],
+      "goal": "更新 capability-router 使用协议、生成投影和中英文 operator 文档，修复 10000/8000 漂移。",
+      "preconditions": ["selector/verifier stable", "profile budget 8000 retained"],
+      "write_set": ["overrides/capability-router/SKILL.md", "README.md", "README.en.md", "AGENTS.md", "docs/product/README.md", "skills.ps1", "docs/change-evidence/20260802-vnext-phase4-unified-capability-routing.md"],
+      "implementation_steps": ["更新 skill activation instructions", "修复预算口径", "build generated outputs", "验证 profile projection"],
+      "tests": ["skill quick_validate", "generated sync", "all profiles budget"],
+      "verification": ["build.ps1", "scripts/verify-codex-skill-profiles.ps1"],
+      "rollback": ["恢复 P3 docs 和原 skill contract，重新 build"],
+      "done_when": ["initial budget single truth=8000", "router fresh-visible", "cold skill remains reachable"],
+      "out_of_scope": ["重启 Codex", "删除用户技能根"]
+    },
+    {
+      "id": "SMV-P4-006", "phase": "P4", "title": "P4 acceptance 与 closeout", "status": "done", "risk": "medium", "depends_on": ["SMV-P4-005"],
+      "requirement_ids": ["FR-SEL-006", "FR-EVD-003", "NFR-TRU-001"], "architecture_decision_ids": ["ADR-SMV-007", "ADR-SMV-010"],
+      "goal": "按固定顺序运行 build/test/contracts/full 和真实只读路由探针，收口 repo truth。",
+      "preconditions": ["前五个 task done", "工作树边界已记录"],
+      "write_set": ["tasks/skills-manager-vnext-phase4.tasks.json", "tasks/plan.md", "tasks/todo.md", "docs/product/skills-manager-vnext-roadmap.md", "docs/change-evidence/20260802-vnext-phase4-unified-capability-routing.md"],
+      "implementation_steps": ["运行 ordered gates", "复测真实误路由", "记录 profile/config hash", "更新 phase truth"],
+      "tests": ["full Unit/E2E", "planning/entry/router verifier", "doctor/full quality"],
+      "verification": ["tests/run.ps1", "scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree"],
+      "rollback": ["恢复 in_progress truth，不撤销已验证前置切片"],
+      "done_when": ["6/6 done", "all ordered gates pass", "host/live boundary explicit"],
+      "out_of_scope": ["commit/push", "live business acceptance"]
+    }
+  ]
+}
