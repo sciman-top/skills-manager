@@ -21,6 +21,28 @@ function Resolve-NativeSkillProjectionPath {
     return [IO.Path]::GetFullPath($resolved)
 }
 
+function Test-NativeSkillProjectionPathWithinRoot {
+    param([string]$Path, [string]$Root)
+    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Root)) { return $false }
+    $candidate = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+    $boundary = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+    return [string]::Equals($candidate, $boundary, [StringComparison]::OrdinalIgnoreCase) -or $candidate.StartsWith(($boundary + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Assert-NativeSkillProjectionPathHasNoReparseAncestor {
+    param([string]$Path, [string]$AllowedRoot)
+    $root = [IO.Path]::GetFullPath($AllowedRoot).TrimEnd('\', '/')
+    $cursor = [IO.Path]::GetFullPath($Path)
+    while (Test-NativeSkillProjectionPathWithinRoot $cursor $root) {
+        if (Test-Path -LiteralPath $cursor) {
+            $item = Get-Item -LiteralPath $cursor -Force
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Native projection path crosses a reparse point: $cursor" }
+        }
+        if ([string]::Equals($cursor.TrimEnd('\', '/'), $root, [StringComparison]::OrdinalIgnoreCase)) { break }
+        $cursor = Split-Path $cursor -Parent
+    }
+}
+
 function Get-NativeSkillProjectionSettings {
     param([Parameter(Mandatory = $true)]$Config)
 
@@ -31,11 +53,18 @@ function Get-NativeSkillProjectionSettings {
     $owner = ([string](Get-NativeSkillProjectionProperty $settings @('owner'))).Trim()
     $targetRoot = Resolve-NativeSkillProjectionPath ([string](Get-NativeSkillProjectionProperty $settings @('target_root', 'user_skill_root')))
     $receiptPath = Resolve-NativeSkillProjectionPath ([string](Get-NativeSkillProjectionProperty $settings @('receipt_path')))
+    $userSkillRoot = Resolve-NativeSkillProjectionPath ([string](Get-NativeSkillProjectionProperty $skillProjection @('user_skill_root')))
+    $receiptRoot = [IO.Path]::GetFullPath((Join-Path $skillProjectionApplicationRepoRoot 'reports\skill-projection'))
     $notificationMethod = ([string](Get-NativeSkillProjectionProperty $settings @('notification_method'))).Trim()
     $notificationMode = ([string](Get-NativeSkillProjectionProperty $settings @('notification_mode'))).Trim()
     if ([string]::IsNullOrWhiteSpace($owner)) { throw 'skill_projection.native_projection.owner is required.' }
     if ([string]::IsNullOrWhiteSpace($targetRoot)) { throw 'skill_projection.native_projection.target_root is required.' }
     if ([string]::IsNullOrWhiteSpace($receiptPath)) { throw 'skill_projection.native_projection.receipt_path is required.' }
+    if ([string]::IsNullOrWhiteSpace($userSkillRoot)) { throw 'skill_projection.user_skill_root is required for native projection.' }
+    if (-not [string]::Equals($targetRoot.TrimEnd('\', '/'), $userSkillRoot.TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { throw 'skill_projection.native_projection.target_root must equal skill_projection.user_skill_root.' }
+    if ([string]::Equals($targetRoot.TrimEnd('\', '/'), [IO.Path]::GetPathRoot($targetRoot).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { throw 'skill_projection.native_projection.target_root must not be a filesystem root.' }
+    if (-not (Test-NativeSkillProjectionPathWithinRoot $receiptPath $receiptRoot) -or [string]::Equals($receiptPath.TrimEnd('\', '/'), $receiptRoot.TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { throw 'skill_projection.native_projection.receipt_path must be a file under reports/skill-projection.' }
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path $receiptPath -Parent) $receiptRoot
     if ([string]::IsNullOrWhiteSpace($notificationMethod)) { $notificationMethod = 'skills/changed' }
     if ([string]::IsNullOrWhiteSpace($notificationMode)) { $notificationMode = 'plan_only' }
     return [pscustomobject][ordered]@{

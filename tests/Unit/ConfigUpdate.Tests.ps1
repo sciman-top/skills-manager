@@ -158,6 +158,38 @@ Describe "Config And Update Enhancements" {
             { Assert-Cfg $invalidHashtable } | Should Throw
         }
 
+        It "Validates native projection target and receipt containment" {
+            $valid = @'
+{
+  "vendors": [], "targets": [], "mappings": [], "imports": [],
+  "mcp_servers": [], "mcp_targets": [], "sync_mode": "link",
+  "skill_projection": {
+    "sources": [], "user_skill_root": "~/.agents/skills",
+    "native_projection": {
+      "enabled": true, "owner": "skills-manager", "target_root": "~/.agents/skills",
+      "receipt_path": "reports/skill-projection/native-receipt.json"
+    }
+  }
+}
+'@ | ConvertFrom-Json
+            @(Get-CfgContractErrors $valid).Count | Should Be 0
+            { Assert-Cfg $valid } | Should Not Throw
+
+            $invalid = $valid | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+            $invalid.skill_projection.native_projection.target_root = 'C:\'
+            $invalid.skill_projection.native_projection.receipt_path = 'C:\native-receipt.json'
+            $errors = @(Get-CfgContractErrors $invalid) -join "`n"
+            $errors | Should Match 'target_root 必须等于'
+            $errors | Should Match 'receipt_path 必须位于'
+            { Assert-Cfg $invalid } | Should Throw
+
+            $volumeRoot = $valid | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+            $volumeRoot.skill_projection.user_skill_root = 'C:\'
+            $volumeRoot.skill_projection.native_projection.target_root = 'C:\'
+            (@(Get-CfgContractErrors $volumeRoot) -join "`n") | Should Match '不能是文件系统根目录'
+            { Assert-Cfg $volumeRoot } | Should Throw
+        }
+
         It "Validates per-profile metadata budgets against the global ceiling" {
             $valid = @'
 {

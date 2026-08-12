@@ -52,10 +52,14 @@ Set-Content -LiteralPath $marker -Value 'executed' -Encoding UTF8
                     schema_version = 3
                     quality_gate_run_id = $runId
                     quality_gate_source_start = $source
+                    stages = @(
+                        [ordered]@{ stage = 'unit'; files = @([ordered]@{ path = 'Unit.Tests.ps1'; test_count = 1; status = 'passed' }) },
+                        [ordered]@{ stage = 'e2e'; files = @([ordered]@{ path = 'E2E.Tests.ps1'; test_count = 1; status = 'passed' }) }
+                    )
                 } | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
         $receiptRoot = Join-Path $fixtureRoot 'reports\quality-gates'
         $written = Write-QualityGateImmutableReceipt -ReceiptRoot $receiptRoot -RunId $runId -Profile full -Status passed `
-            -SourceStart $source -SourceEnd $source -GateResults @([pscustomobject]@{ name = 'fixture'; passed = $true; elapsed_ms = 1 }) `
+            -SourceStart $source -SourceEnd $source -GateResults @(Get-QualityGateRequiredRoster full | ForEach-Object { [pscustomobject]@{ name = $_; passed = $true; elapsed_ms = 1 } }) `
             -TimingReportPath $timingPath
         $runner = Join-Path $qualityRoot 'run-local-quality-gates.ps1'
         $markerPath = Join-Path $fixtureRoot 'reports\forced-fresh-build.marker'

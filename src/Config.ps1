@@ -412,6 +412,19 @@ function Get-CfgContractErrors($cfg) {
                 }
             }
         }
+        $nativeProjection = Get-CfgObjectProperty $skillProjection "native_projection"
+        if ($null -ne $nativeProjection) {
+            foreach ($fieldName in @('owner', 'target_root', 'receipt_path')) {
+                if ([string]::IsNullOrWhiteSpace([string](Get-CfgObjectProperty $nativeProjection $fieldName))) { $errors.Add(("skill_projection.native_projection.{0} 不能为空" -f $fieldName)) | Out-Null }
+            }
+            if ((Get-CfgObjectProperty $nativeProjection 'enabled') -isnot [bool]) { $errors.Add('skill_projection.native_projection.enabled 必须是布尔值') | Out-Null }
+            if (-not [string]::Equals(([string](Get-CfgObjectProperty $nativeProjection 'target_root')).TrimEnd('\', '/'), ([string](Get-CfgObjectProperty $skillProjection 'user_skill_root')).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { $errors.Add('skill_projection.native_projection.target_root 必须等于 skill_projection.user_skill_root') | Out-Null }
+            $nativeTargetText = [string](Get-CfgObjectProperty $nativeProjection 'target_root')
+            $nativeTargetResolved = if ($nativeTargetText.StartsWith('~')) { $nativeTargetText -replace '^~', [Environment]::GetFolderPath('UserProfile') } elseif ([IO.Path]::IsPathRooted($nativeTargetText)) { $nativeTargetText } else { Join-Path $Root $nativeTargetText }
+            $nativeTargetFull = [IO.Path]::GetFullPath($nativeTargetResolved).TrimEnd('\', '/')
+            if ([string]::Equals($nativeTargetFull, [IO.Path]::GetPathRoot($nativeTargetFull).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { $errors.Add('skill_projection.native_projection.target_root 不能是文件系统根目录') | Out-Null }
+            if ([string](Get-CfgObjectProperty $nativeProjection 'receipt_path') -notmatch '^reports[\\/]skill-projection[\\/][^\\/]+\.json$') { $errors.Add('skill_projection.native_projection.receipt_path 必须位于 reports/skill-projection 且为直接子级 JSON 文件') | Out-Null }
+        }
         $projectionSources = Get-CfgObjectProperty $skillProjection "sources"
         if (-not (Assert-IsArray $projectionSources)) {
             $errors.Add("skill_projection.sources 必须是数组") | Out-Null
@@ -1058,6 +1071,17 @@ function Assert-Cfg($cfg) {
             if (Test-CfgObjectProperty $externalInventory "plugin_cache_path") {
                 Need (-not [string]::IsNullOrWhiteSpace([string](Get-CfgObjectProperty $externalInventory "plugin_cache_path"))) "skill_projection.external_skill_inventory.plugin_cache_path 不能为空"
             }
+        }
+        if ($projection.PSObject.Properties.Match('native_projection').Count -gt 0 -and $null -ne $projection.native_projection) {
+            $nativeProjection = $projection.native_projection
+            Need ($nativeProjection.enabled -is [bool]) 'skill_projection.native_projection.enabled 必须是布尔值'
+            foreach ($fieldName in @('owner', 'target_root', 'receipt_path')) { Need (-not [string]::IsNullOrWhiteSpace([string](Get-CfgObjectProperty $nativeProjection $fieldName))) ("skill_projection.native_projection.{0} 不能为空" -f $fieldName) }
+            Need ([string]::Equals(([string]$nativeProjection.target_root).TrimEnd('\', '/'), ([string]$projection.user_skill_root).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) 'skill_projection.native_projection.target_root 必须等于 skill_projection.user_skill_root'
+            $nativeTargetText = [string]$nativeProjection.target_root
+            $nativeTargetResolved = if ($nativeTargetText.StartsWith('~')) { $nativeTargetText -replace '^~', [Environment]::GetFolderPath('UserProfile') } elseif ([IO.Path]::IsPathRooted($nativeTargetText)) { $nativeTargetText } else { Join-Path $Root $nativeTargetText }
+            $nativeTargetFull = [IO.Path]::GetFullPath($nativeTargetResolved).TrimEnd('\', '/')
+            Need (-not [string]::Equals($nativeTargetFull, [IO.Path]::GetPathRoot($nativeTargetFull).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) 'skill_projection.native_projection.target_root 不能是文件系统根目录'
+            Need ([string]$nativeProjection.receipt_path -match '^reports[\\/]skill-projection[\\/][^\\/]+\.json$') 'skill_projection.native_projection.receipt_path 必须位于 reports/skill-projection 且为直接子级 JSON 文件'
         }
         Need ($projection.PSObject.Properties.Match("sources").Count -gt 0 -and (Assert-IsArray $projection.sources)) "skill_projection.sources 必须是数组"
         foreach ($source in @($projection.sources)) {

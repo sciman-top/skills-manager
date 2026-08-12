@@ -118,6 +118,7 @@
         "manifest_path": { "type": "string" },
         "managed_source_path": { "type": "string" },
         "user_skill_root": { "type": "string" },
+        "native_projection": { "$ref": "#/$defs/nativeProjection" },
         "routing_policy_path": { "type": "string", "minLength": 1 },
         "managed_link_includes": { "$ref": "#/$defs/stringArray" },
         "managed_link_excludes": { "$ref": "#/$defs/stringArray" },
@@ -172,6 +173,21 @@
             }
           }
         }
+      }
+    },
+    "nativeProjection": {
+      "type": "object",
+      "required": ["enabled", "owner", "target_root", "receipt_path"],
+      "additionalProperties": true,
+      "properties": {
+        "schema_version": { "type": "integer", "const": 1 },
+        "enabled": { "type": "boolean" },
+        "owner": { "$ref": "#/$defs/nonEmptyString" },
+        "target_root": { "$ref": "#/$defs/nonEmptyString" },
+        "receipt_path": { "type": "string", "pattern": "^reports[\\\\/]skill-projection[\\\\/][^\\\\/]+\\.json$" },
+        "apply_requires_token": { "type": "boolean" },
+        "notification_method": { "$ref": "#/$defs/nonEmptyString" },
+        "notification_mode": { "type": "string", "enum": ["plan_only"] }
       }
     }
   },

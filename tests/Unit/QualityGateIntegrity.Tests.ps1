@@ -27,9 +27,16 @@ function Write-QualityGateTimingFixture($Fixture, [string]$RunId, $Source) {
         quality_gate_run_id = $RunId
         quality_gate_source_start = $Source
         suite_elapsed_ms = 10
-        stages = @()
+        stages = @(
+            [ordered]@{ stage = 'unit'; files = @([ordered]@{ path = 'Unit.Tests.ps1'; elapsed_ms = 5; test_count = 1; status = 'passed' }); cases = @() },
+            [ordered]@{ stage = 'e2e'; files = @([ordered]@{ path = 'E2E.Tests.ps1'; elapsed_ms = 5; test_count = 1; status = 'passed' }); cases = @() }
+        )
     }
     [IO.File]::WriteAllText($Fixture.timing_path, ($timing | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
+}
+
+function New-QualityGateRows([string]$Profile = 'full') {
+    return @(Get-QualityGateRequiredRoster $Profile | ForEach-Object { [pscustomobject]@{ name = $_; passed = $true; elapsed_ms = 1 } })
 }
 
 Describe 'Quality gate receipt integrity' {
@@ -146,15 +153,20 @@ Describe 'Quality gate receipt integrity' {
         (Test-Path -LiteralPath (Join-Path $fixture.receipt_root 'current.json')) | Should Be $false
     }
 
+    It 'rejects a passed receipt with a truncated gate roster' {
+        $fixture = New-QualityGateIntegrityFixture 'truncated-roster'
+        $source = Get-QualityGateSourceFingerprint -RepoRoot $fixture.root
+
+        { Write-QualityGateImmutableReceipt -ReceiptRoot $fixture.receipt_root -RunId 'qgr-truncated' -Profile quick -Status passed -SourceStart $source -SourceEnd $source -GateResults @([pscustomobject]@{ name='build'; passed=$true; elapsed_ms=1 }) } | Should Throw
+        (Test-Path -LiteralPath (Join-Path $fixture.receipt_root 'current.json')) | Should Be $false
+    }
+
     It 'rejects a rehashed current receipt whose passed status contradicts its gate rows' {
         $fixture = New-QualityGateIntegrityFixture 'current-rehashed-contradiction'
         $runId = 'qgr-rehashed-contradiction'
         $source = Get-QualityGateSourceFingerprint -RepoRoot $fixture.root
         Write-QualityGateTimingFixture $fixture $runId $source
-        $written = Write-QualityGateImmutableReceipt -ReceiptRoot $fixture.receipt_root -RunId $runId -Profile full -Status passed -SourceStart $source -SourceEnd $source -GateResults @(
-            [pscustomobject]@{ name='build'; passed=$true; elapsed_ms=1 },
-            [pscustomobject]@{ name='tests'; passed=$true; elapsed_ms=9 }
-        ) -TimingReportPath $fixture.timing_path
+        $written = Write-QualityGateImmutableReceipt -ReceiptRoot $fixture.receipt_root -RunId $runId -Profile full -Status passed -SourceStart $source -SourceEnd $source -GateResults (New-QualityGateRows full) -TimingReportPath $fixture.timing_path
 
         $receipt = Get-Content -LiteralPath $written.receipt_path -Raw | ConvertFrom-Json
         $receipt.gates[0].passed = $false
@@ -175,10 +187,7 @@ Describe 'Quality gate receipt integrity' {
         $source = Get-QualityGateSourceFingerprint -RepoRoot $fixture.root
         Write-QualityGateTimingFixture $fixture $runId $source
         $timingBytes = [IO.File]::ReadAllBytes($fixture.timing_path)
-        $written = Write-QualityGateImmutableReceipt -ReceiptRoot $fixture.receipt_root -RunId $runId -Profile full -Status passed -SourceStart $source -SourceEnd $source -GateResults @(
-            [pscustomobject]@{ name='build'; passed=$true; elapsed_ms=1 },
-            [pscustomobject]@{ name='tests'; passed=$true; elapsed_ms=9 }
-        ) -TimingReportPath $fixture.timing_path
+        $written = Write-QualityGateImmutableReceipt -ReceiptRoot $fixture.receipt_root -RunId $runId -Profile full -Status passed -SourceStart $source -SourceEnd $source -GateResults (New-QualityGateRows full) -TimingReportPath $fixture.timing_path
 
         $valid = Test-QualityGateCurrentReceipt -ReceiptRoot $fixture.receipt_root -RepoRoot $fixture.root -RequiredProfile full -RequiredStatus passed
         $valid.pass | Should Be $true

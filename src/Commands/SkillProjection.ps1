@@ -574,7 +574,9 @@ function Sync-CapabilityRouterCatalog($projectionCfg) {
     }
 }
 
-function Sync-CodexManagedSkillLinks($projectionCfg) {
+function Sync-CodexManagedSkillLinks {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$projectionCfg)
     Need ($null -ne $projectionCfg) "skill_projection 配置为空"
     Need ($projectionCfg.PSObject.Properties.Match("managed_source_path").Count -gt 0) "skill_projection 缺少 managed_source_path"
     Need ($projectionCfg.PSObject.Properties.Match("user_skill_root").Count -gt 0) "skill_projection 缺少 user_skill_root"
@@ -1004,6 +1006,11 @@ function Test-ConfiguredHostProjection($cfg) {
         if (-not [string]::IsNullOrWhiteSpace($candidate) -and -not (Is-PathInsideOrEqual $candidate $repoRoot)) {
             return $true
         }
+    }
+    if ($projectionCfg.PSObject.Properties.Match("native_projection").Count -gt 0 -and $null -ne $projectionCfg.native_projection -and
+        $projectionCfg.native_projection.PSObject.Properties.Match("target_root").Count -gt 0) {
+        $nativeTarget = Resolve-SkillProjectionPath ([string]$projectionCfg.native_projection.target_root)
+        if (-not [string]::IsNullOrWhiteSpace($nativeTarget) -and -not (Is-PathInsideOrEqual $nativeTarget $repoRoot)) { return $true }
     }
     return $false
 }

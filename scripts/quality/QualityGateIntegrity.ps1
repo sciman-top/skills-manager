@@ -147,8 +147,14 @@ function Assert-QualityGateSourceFingerprint {
     return $binding
 }
 
+function Get-QualityGateRequiredRoster([string]$Profile) {
+    $common = @('build', 'repo-hygiene', 'generated-sync', 'workspace-lock-parity', 'skill-integrity', 'reference-governance', 'override-activation-corpus', 'native-skill-metadata', 'dependency-baseline', 'skills-config-contract', 'host-capability-contract', 'planning-contract', 'powershell-runtime-policy', 'doctor-json-contract')
+    if ($Profile -eq 'full') { return @('build', 'tests') + $common[1..($common.Count - 1)] }
+    return $common
+}
+
 function Assert-QualityGateResults {
-    param([object[]]$GateResults, [string]$Status)
+    param([object[]]$GateResults, [string]$Status, [string]$Profile)
 
     $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $failed = [Collections.Generic.List[string]]::new()
@@ -162,13 +168,19 @@ function Assert-QualityGateResults {
     if ($Status -eq 'passed' -and (@($GateResults).Count -eq 0 -or $failed.Count -gt 0)) {
         throw ("A passed quality receipt requires non-empty all-passing gates. failed={0}" -f ($failed -join ','))
     }
+    if ($Status -eq 'passed') {
+        $actual = @($GateResults | ForEach-Object { ([string](Get-QualityGateObjectProperty $_ 'name')).Trim() })
+        $required = @(Get-QualityGateRequiredRoster $Profile)
+        if (($actual -join "`n") -ne ($required -join "`n")) { throw ("A passed {0} receipt requires the exact gate roster. expected={1}; actual={2}" -f $Profile, ($required -join ','), ($actual -join ',')) }
+    }
 }
 
 function Get-QualityGateTimingBinding {
     param(
         [Parameter(Mandatory = $true)][string]$TimingReportPath,
         [Parameter(Mandatory = $true)][string]$RunId,
-        [Parameter(Mandatory = $true)]$SourceStart
+        [Parameter(Mandatory = $true)]$SourceStart,
+        [switch]$RequireAllPassing
     )
 
     $path = [IO.Path]::GetFullPath($TimingReportPath)
@@ -182,6 +194,16 @@ function Get-QualityGateTimingBinding {
     $timingSource = Get-QualityGateObjectProperty $timing 'quality_gate_source_start'
     if ($null -eq $timingSource -or -not [string]::Equals((Get-QualityGateSourceBindingSha256 $timingSource), (Get-QualityGateSourceBindingSha256 $SourceStart), [StringComparison]::Ordinal)) {
         throw 'Quality gate timing report source binding does not match.'
+    }
+    if ($RequireAllPassing) {
+        $stages = @((Get-QualityGateObjectProperty $timing 'stages'))
+        foreach ($stageName in @('unit', 'e2e')) {
+            $stage = @($stages | Where-Object { [string](Get-QualityGateObjectProperty $_ 'stage') -eq $stageName })
+            if ($stage.Count -ne 1) { throw ("Quality gate timing report requires exactly one {0} stage." -f $stageName) }
+            $files = @((Get-QualityGateObjectProperty $stage[0] 'files'))
+            if ($files.Count -eq 0 -or [int](($files | Measure-Object -Property test_count -Sum).Sum) -le 0) { throw ("Quality gate timing report {0} stage must contain tests." -f $stageName) }
+            if (@($files | Where-Object { [string](Get-QualityGateObjectProperty $_ 'status') -ne 'passed' }).Count -gt 0) { throw ("Quality gate timing report {0} stage contains a non-passing file." -f $stageName) }
+        }
     }
     return [ordered]@{
         status = 'bound'
@@ -235,7 +257,7 @@ function Assert-QualityGateCurrentReceiptSemantics {
     if ($status -eq 'passed' -and -not [bool]$actualComparison.pass) { throw 'Passed receipt contains source drift.' }
     if ($status -eq 'source_drift' -and [bool]$actualComparison.pass) { throw 'source_drift receipt contains no source drift.' }
 
-    Assert-QualityGateResults -GateResults @((Get-QualityGateObjectProperty $Receipt 'gates')) -Status $status
+    Assert-QualityGateResults -GateResults @((Get-QualityGateObjectProperty $Receipt 'gates')) -Status $status -Profile $profile
     if ($status -eq 'passed' -and -not [string]::IsNullOrWhiteSpace([string](Get-QualityGateObjectProperty $Receipt 'error_message'))) {
         throw 'Passed receipt contains an error message.'
     }
@@ -250,7 +272,7 @@ function Assert-QualityGateCurrentReceiptSemantics {
     if ($profile -eq 'full' -and $status -eq 'passed' -and $null -eq $timing) { throw 'Passed full receipt has no timing binding.' }
     if ($null -ne $timing) {
         $actualTiming = Get-QualityGateTimingBinding -TimingReportPath ([string](Get-QualityGateObjectProperty $timing 'path')) `
-            -RunId ([string](Get-QualityGateObjectProperty $Receipt 'run_id')) -SourceStart $sourceStart
+            -RunId ([string](Get-QualityGateObjectProperty $Receipt 'run_id')) -SourceStart $sourceStart -RequireAllPassing:($profile -eq 'full' -and $status -eq 'passed')
         $pointerTiming = Get-QualityGateObjectProperty $Pointer 'test_timing'
         foreach ($field in @('status', 'run_id', 'path', 'sha256', 'source_binding_sha256')) {
             $actualValue = [string]$actualTiming[$field]
@@ -305,7 +327,7 @@ function Write-QualityGateImmutableReceipt {
     $sourceEndBinding = Assert-QualityGateSourceFingerprint $SourceEnd 'source_end'
     if (-not [string]::Equals([string]$sourceStartBinding.repo_root, [string]$sourceEndBinding.repo_root, [StringComparison]::OrdinalIgnoreCase)) { throw 'Quality gate source roots do not match.' }
     $comparison = Compare-QualityGateSourceFingerprint -Start $SourceStart -End $SourceEnd
-    Assert-QualityGateResults -GateResults @($GateResults) -Status $Status
+    Assert-QualityGateResults -GateResults @($GateResults) -Status $Status -Profile $Profile
     $started = [DateTimeOffset]::MinValue
     $completed = [DateTimeOffset]::MinValue
     if (-not [DateTimeOffset]::TryParse($StartedAt, [ref]$started) -or -not [DateTimeOffset]::TryParse($CompletedAt, [ref]$completed) -or $completed -lt $started) { throw 'Quality gate receipt timestamps are invalid.' }
@@ -313,7 +335,7 @@ function Write-QualityGateImmutableReceipt {
     if ($Status -eq 'passed' -and -not [string]::IsNullOrWhiteSpace($ErrorMessage)) { throw 'A passed quality receipt cannot contain an error message.' }
     if ($Status -eq 'source_drift' -and [bool]$comparison.pass) { throw 'source_drift status requires an observed source change.' }
     if ($Profile -eq 'full' -and $Status -eq 'passed' -and [string]::IsNullOrWhiteSpace($TimingReportPath)) { throw 'A passed full quality receipt requires a bound timing report.' }
-    $timingBinding = if ([string]::IsNullOrWhiteSpace($TimingReportPath)) { $null } else { Get-QualityGateTimingBinding -TimingReportPath $TimingReportPath -RunId $RunId -SourceStart $SourceStart }
+    $timingBinding = if ([string]::IsNullOrWhiteSpace($TimingReportPath)) { $null } else { Get-QualityGateTimingBinding -TimingReportPath $TimingReportPath -RunId $RunId -SourceStart $SourceStart -RequireAllPassing:($Profile -eq 'full' -and $Status -eq 'passed') }
     $receipt = [ordered]@{
         schema_version = 2
         receipt_type = 'quality_gate_run'

@@ -126,7 +126,12 @@ function Get-NativeSkillProjectionReceiptPath {
 
     $path = if ([string]::IsNullOrWhiteSpace($ReceiptPath)) { [string]$Plan.receipt_path } else { $ReceiptPath }
     if ([string]::IsNullOrWhiteSpace($path)) { throw 'Projection receipt path is required.' }
-    return [IO.Path]::GetFullPath($path)
+    $path = [IO.Path]::GetFullPath($path)
+    if (-not [string]::Equals($path, [IO.Path]::GetFullPath([string]$Plan.receipt_path), [StringComparison]::OrdinalIgnoreCase)) { throw 'Native projection receipt override must equal the path authorized by the plan.' }
+    $receiptRoot = [IO.Path]::GetFullPath((Join-Path $nativeSkillProjectionRepoRoot 'reports\skill-projection'))
+    if (-not (Test-NativeSkillProjectionPathWithinRoot $path $receiptRoot) -or [string]::Equals($path.TrimEnd('\', '/'), $receiptRoot.TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { throw 'Native projection receipt must be a file under reports/skill-projection.' }
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path $path -Parent) $receiptRoot
+    return $path
 }
 
 function Apply-NativeSkillProjection {

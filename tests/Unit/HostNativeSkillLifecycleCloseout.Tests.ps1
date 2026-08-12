@@ -192,7 +192,7 @@ Describe 'P6 host-native skill lifecycle closeout' {
     It 'keeps compatibility profile data from excluding any eligible native projection entry' {
         $sourceRoot = Join-Path $TestDrive 'p6-closeout-source'
         $targetRoot = Join-Path $TestDrive 'p6-closeout-target'
-        $receiptPath = Join-Path $TestDrive 'p6-closeout-receipt.json'
+        $receiptPath = Join-Path $repoRoot 'reports\skill-projection\test-p6-closeout-receipt.json'
         $first = New-CloseoutSkillEntry -Root $sourceRoot -Name 'formerly-profile-excluded'
         $second = New-CloseoutSkillEntry -Root $sourceRoot -Name 'ordinary-native-skill'
         $compatibility = [pscustomobject][ordered]@{
@@ -209,6 +209,7 @@ Describe 'P6 host-native skill lifecycle closeout' {
         $metadata = Plan-NativeMetadata -Inventory $catalog -Snapshot (New-CloseoutSnapshot)
         $config = [pscustomobject][ordered]@{
             skill_projection = [pscustomobject][ordered]@{
+                user_skill_root = $targetRoot
                 native_projection = [pscustomobject][ordered]@{
                     enabled = $true
                     owner = 'skills-manager'

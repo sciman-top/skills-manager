@@ -53,7 +53,7 @@ function New-P6ProjectionFixture {
     $suffix = [guid]::NewGuid().ToString('N')
     $sourceRoot = Join-Path $TestDrive ('p6-native-source-{0}' -f $suffix)
     $targetRoot = Join-Path $TestDrive ('p6-native-target-{0}' -f $suffix)
-    $receiptPath = Join-Path $TestDrive ('p6-native-receipt-{0}.json' -f $suffix)
+    $receiptPath = Join-Path $repoRoot ('reports\skill-projection\test-p6-native-receipt-{0}.json' -f $suffix)
     $profileOnly = New-P6ProjectionSkill $sourceRoot 'profile-only' 'profile-only' 'Formerly profile-excluded capability.'
     $resident = New-P6ProjectionSkill $sourceRoot 'resident' 'resident' 'Resident capability.'
     $disabled = New-P6ProjectionSkill $sourceRoot 'disabled' 'disabled' 'Disabled capability.' $false
@@ -69,6 +69,7 @@ function New-P6ProjectionFixture {
     $metadata = Plan-NativeMetadata -Inventory $catalog -Snapshot (New-P6ProjectionSnapshot)
     $config = [pscustomobject]@{
         skill_projection = [pscustomobject]@{
+            user_skill_root = $targetRoot
             native_projection = [pscustomobject]@{
                 enabled = $true
                 owner = 'skills-manager'
@@ -90,6 +91,23 @@ function New-P6ProjectionFixture {
 }
 
 Describe 'P6 native skill projection plan and transaction' {
+    AfterEach {
+        Get-ChildItem -LiteralPath (Join-Path $repoRoot 'reports\skill-projection') -Filter 'test-*.json' -File -ErrorAction SilentlyContinue | Remove-Item -Force
+    }
+
+    It 'rejects native targets that differ from the configured user root' {
+        $fixture = New-P6ProjectionFixture
+        $fixture.config.skill_projection.user_skill_root = Join-Path $TestDrive 'different-user-root'
+
+        { New-NativeSkillProjectionPlan -Catalog $fixture.catalog -Eligibility $fixture.eligibility -MetadataPlan $fixture.metadata -Config $fixture.config } | Should Throw
+    }
+
+    It 'rejects receipt paths outside the repository managed receipt root' {
+        $fixture = New-P6ProjectionFixture
+        $fixture.config.skill_projection.native_projection.receipt_path = Join-Path $TestDrive 'escaped-receipt.json'
+
+        { New-NativeSkillProjectionPlan -Catalog $fixture.catalog -Eligibility $fixture.eligibility -MetadataPlan $fixture.metadata -Config $fixture.config } | Should Throw
+    }
     It 'builds a complete runtime plan from managed top-level skill packages' {
         (Get-Command New-NativeSkillProjectionRuntimePlan -ErrorAction SilentlyContinue) | Should Not BeNullOrEmpty
         $fixture = New-P6ProjectionFixture
@@ -129,7 +147,7 @@ Describe 'P6 native skill projection plan and transaction' {
         $catalog = Compile-SkillCatalog -Entries @([pscustomobject]@{ name = $skill.Name; description = 'Debug .NET applications.'; path = $skill.path; source_root = $sourceRoot; enabled = $true; availability = 'available'; freshness = 'fresh'; side_effect = 'read_only'; load_side_effect = 'read_only' })
         $eligibility = @($catalog.entries | ForEach-Object { Evaluate-SkillEligibility -Skill $_ -Surface 'native_discovery' -AllowedRoots @($sourceRoot) })
         $metadata = Plan-NativeMetadata -Inventory $catalog -Snapshot (New-P6ProjectionSnapshot)
-        $config = [pscustomobject]@{ skill_projection = [pscustomobject]@{ native_projection = [pscustomobject]@{ enabled = $true; owner = 'skills-manager'; target_root = $targetRoot; receipt_path = (Join-Path $TestDrive 'namespaced-receipt.json'); notification_method = 'skills/changed' } } }
+        $config = [pscustomobject]@{ skill_projection = [pscustomobject]@{ user_skill_root = $targetRoot; native_projection = [pscustomobject]@{ enabled = $true; owner = 'skills-manager'; target_root = $targetRoot; receipt_path = (Join-Path $repoRoot 'reports\skill-projection\test-namespaced-receipt.json'); notification_method = 'skills/changed' } } }
 
         $plan = New-NativeSkillProjectionPlan -Catalog $catalog -Eligibility $eligibility -MetadataPlan $metadata -Config $config
 
@@ -183,7 +201,7 @@ Describe 'P6 native skill projection plan and transaction' {
                 metadata_budget = [pscustomobject]@{ value = 60; source = 'app_server'; freshness = 'fresh' }
             } }
         $metadata = Plan-NativeMetadata -Inventory $catalog -Snapshot $snapshot
-        $config = [pscustomobject]@{ skill_projection = [pscustomobject]@{ native_projection = [pscustomobject]@{ enabled = $true; owner = 'skills-manager'; target_root = $targetRoot; receipt_path = (Join-Path $TestDrive 'plan-only-receipt.json'); notification_method = 'skills/changed' } } }
+        $config = [pscustomobject]@{ skill_projection = [pscustomobject]@{ user_skill_root = $targetRoot; native_projection = [pscustomobject]@{ enabled = $true; owner = 'skills-manager'; target_root = $targetRoot; receipt_path = (Join-Path $repoRoot 'reports\skill-projection\test-plan-only-receipt.json'); notification_method = 'skills/changed' } } }
 
         $metadata.pass | Should Be $true
         $metadata.compaction.applied | Should Be $true

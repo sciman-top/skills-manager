@@ -179,6 +179,25 @@ Describe "Skill projection" {
             @($config.skill_projection.aliases | Where-Object name -eq "to-issues")[0].replacement | Should Be "draft-tickets"
         }
 
+        It "Requires Git promotion for an external native projection target" {
+            $oldRoot = $script:Root
+            try {
+                $script:Root = Join-Path $TestDrive 'promotion-native-local-repo'
+                New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
+                $external = Join-Path $TestDrive 'external-native-target'
+                $cfg = [pscustomobject]@{
+                    targets = @()
+                    skill_projection = [pscustomobject]@{
+                        user_skill_root = (Join-Path $script:Root 'local-user-root')
+                        native_projection = [pscustomobject]@{ target_root = $external }
+                    }
+                }
+
+                Test-ConfiguredHostProjection $cfg | Should Be $true
+            }
+            finally { $script:Root = $oldRoot }
+        }
+
         It "Blocks a clean formal projection when the full gate receipt is unavailable" {
             $oldRoot = $script:Root
             try {
@@ -201,6 +220,11 @@ Describe "Skill projection" {
     }
 
     Context "Sync-CodexManagedSkillLinks" {
+        It "Rejects unknown parameters before creating links" {
+            $cfg = [pscustomobject]@{ managed_source_path = (Join-Path $TestDrive 'missing-managed'); user_skill_root = (Join-Path $TestDrive 'unknown-parameter-root') }
+            { Sync-CodexManagedSkillLinks -projectionCfg $cfg -DryRun } | Should Throw
+            Test-Path -LiteralPath $cfg.user_skill_root | Should Be $false
+        }
         It "Projects managed skills into the standard user root and preserves .system" {
             $oldDryRun = $script:DryRun
             try {

@@ -5010,6 +5010,28 @@ function Resolve-NativeSkillProjectionPath {
     return [IO.Path]::GetFullPath($resolved)
 }
 
+function Test-NativeSkillProjectionPathWithinRoot {
+    param([string]$Path, [string]$Root)
+    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Root)) { return $false }
+    $candidate = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+    $boundary = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+    return [string]::Equals($candidate, $boundary, [StringComparison]::OrdinalIgnoreCase) -or $candidate.StartsWith(($boundary + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Assert-NativeSkillProjectionPathHasNoReparseAncestor {
+    param([string]$Path, [string]$AllowedRoot)
+    $root = [IO.Path]::GetFullPath($AllowedRoot).TrimEnd('\', '/')
+    $cursor = [IO.Path]::GetFullPath($Path)
+    while (Test-NativeSkillProjectionPathWithinRoot $cursor $root) {
+        if (Test-Path -LiteralPath $cursor) {
+            $item = Get-Item -LiteralPath $cursor -Force
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Native projection path crosses a reparse point: $cursor" }
+        }
+        if ([string]::Equals($cursor.TrimEnd('\', '/'), $root, [StringComparison]::OrdinalIgnoreCase)) { break }
+        $cursor = Split-Path $cursor -Parent
+    }
+}
+
 function Get-NativeSkillProjectionSettings {
     param([Parameter(Mandatory = $true)]$Config)
 
@@ -5020,11 +5042,18 @@ function Get-NativeSkillProjectionSettings {
     $owner = ([string](Get-NativeSkillProjectionProperty $settings @('owner'))).Trim()
     $targetRoot = Resolve-NativeSkillProjectionPath ([string](Get-NativeSkillProjectionProperty $settings @('target_root', 'user_skill_root')))
     $receiptPath = Resolve-NativeSkillProjectionPath ([string](Get-NativeSkillProjectionProperty $settings @('receipt_path')))
+    $userSkillRoot = Resolve-NativeSkillProjectionPath ([string](Get-NativeSkillProjectionProperty $skillProjection @('user_skill_root')))
+    $receiptRoot = [IO.Path]::GetFullPath((Join-Path $skillProjectionApplicationRepoRoot 'reports\skill-projection'))
     $notificationMethod = ([string](Get-NativeSkillProjectionProperty $settings @('notification_method'))).Trim()
     $notificationMode = ([string](Get-NativeSkillProjectionProperty $settings @('notification_mode'))).Trim()
     if ([string]::IsNullOrWhiteSpace($owner)) { throw 'skill_projection.native_projection.owner is required.' }
     if ([string]::IsNullOrWhiteSpace($targetRoot)) { throw 'skill_projection.native_projection.target_root is required.' }
     if ([string]::IsNullOrWhiteSpace($receiptPath)) { throw 'skill_projection.native_projection.receipt_path is required.' }
+    if ([string]::IsNullOrWhiteSpace($userSkillRoot)) { throw 'skill_projection.user_skill_root is required for native projection.' }
+    if (-not [string]::Equals($targetRoot.TrimEnd('\', '/'), $userSkillRoot.TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { throw 'skill_projection.native_projection.target_root must equal skill_projection.user_skill_root.' }
+    if ([string]::Equals($targetRoot.TrimEnd('\', '/'), [IO.Path]::GetPathRoot($targetRoot).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { throw 'skill_projection.native_projection.target_root must not be a filesystem root.' }
+    if (-not (Test-NativeSkillProjectionPathWithinRoot $receiptPath $receiptRoot) -or [string]::Equals($receiptPath.TrimEnd('\', '/'), $receiptRoot.TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { throw 'skill_projection.native_projection.receipt_path must be a file under reports/skill-projection.' }
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path $receiptPath -Parent) $receiptRoot
     if ([string]::IsNullOrWhiteSpace($notificationMethod)) { $notificationMethod = 'skills/changed' }
     if ([string]::IsNullOrWhiteSpace($notificationMode)) { $notificationMode = 'plan_only' }
     return [pscustomobject][ordered]@{
@@ -5458,7 +5487,12 @@ function Get-NativeSkillProjectionReceiptPath {
 
     $path = if ([string]::IsNullOrWhiteSpace($ReceiptPath)) { [string]$Plan.receipt_path } else { $ReceiptPath }
     if ([string]::IsNullOrWhiteSpace($path)) { throw 'Projection receipt path is required.' }
-    return [IO.Path]::GetFullPath($path)
+    $path = [IO.Path]::GetFullPath($path)
+    if (-not [string]::Equals($path, [IO.Path]::GetFullPath([string]$Plan.receipt_path), [StringComparison]::OrdinalIgnoreCase)) { throw 'Native projection receipt override must equal the path authorized by the plan.' }
+    $receiptRoot = [IO.Path]::GetFullPath((Join-Path $nativeSkillProjectionRepoRoot 'reports\skill-projection'))
+    if (-not (Test-NativeSkillProjectionPathWithinRoot $path $receiptRoot) -or [string]::Equals($path.TrimEnd('\', '/'), $receiptRoot.TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { throw 'Native projection receipt must be a file under reports/skill-projection.' }
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path $path -Parent) $receiptRoot
+    return $path
 }
 
 function Apply-NativeSkillProjection {
@@ -9559,6 +9593,19 @@ function Get-CfgContractErrors($cfg) {
                 }
             }
         }
+        $nativeProjection = Get-CfgObjectProperty $skillProjection "native_projection"
+        if ($null -ne $nativeProjection) {
+            foreach ($fieldName in @('owner', 'target_root', 'receipt_path')) {
+                if ([string]::IsNullOrWhiteSpace([string](Get-CfgObjectProperty $nativeProjection $fieldName))) { $errors.Add(("skill_projection.native_projection.{0} 不能为空" -f $fieldName)) | Out-Null }
+            }
+            if ((Get-CfgObjectProperty $nativeProjection 'enabled') -isnot [bool]) { $errors.Add('skill_projection.native_projection.enabled 必须是布尔值') | Out-Null }
+            if (-not [string]::Equals(([string](Get-CfgObjectProperty $nativeProjection 'target_root')).TrimEnd('\', '/'), ([string](Get-CfgObjectProperty $skillProjection 'user_skill_root')).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { $errors.Add('skill_projection.native_projection.target_root 必须等于 skill_projection.user_skill_root') | Out-Null }
+            $nativeTargetText = [string](Get-CfgObjectProperty $nativeProjection 'target_root')
+            $nativeTargetResolved = if ($nativeTargetText.StartsWith('~')) { $nativeTargetText -replace '^~', [Environment]::GetFolderPath('UserProfile') } elseif ([IO.Path]::IsPathRooted($nativeTargetText)) { $nativeTargetText } else { Join-Path $Root $nativeTargetText }
+            $nativeTargetFull = [IO.Path]::GetFullPath($nativeTargetResolved).TrimEnd('\', '/')
+            if ([string]::Equals($nativeTargetFull, [IO.Path]::GetPathRoot($nativeTargetFull).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { $errors.Add('skill_projection.native_projection.target_root 不能是文件系统根目录') | Out-Null }
+            if ([string](Get-CfgObjectProperty $nativeProjection 'receipt_path') -notmatch '^reports[\\/]skill-projection[\\/][^\\/]+\.json$') { $errors.Add('skill_projection.native_projection.receipt_path 必须位于 reports/skill-projection 且为直接子级 JSON 文件') | Out-Null }
+        }
         $projectionSources = Get-CfgObjectProperty $skillProjection "sources"
         if (-not (Assert-IsArray $projectionSources)) {
             $errors.Add("skill_projection.sources 必须是数组") | Out-Null
@@ -10205,6 +10252,17 @@ function Assert-Cfg($cfg) {
             if (Test-CfgObjectProperty $externalInventory "plugin_cache_path") {
                 Need (-not [string]::IsNullOrWhiteSpace([string](Get-CfgObjectProperty $externalInventory "plugin_cache_path"))) "skill_projection.external_skill_inventory.plugin_cache_path 不能为空"
             }
+        }
+        if ($projection.PSObject.Properties.Match('native_projection').Count -gt 0 -and $null -ne $projection.native_projection) {
+            $nativeProjection = $projection.native_projection
+            Need ($nativeProjection.enabled -is [bool]) 'skill_projection.native_projection.enabled 必须是布尔值'
+            foreach ($fieldName in @('owner', 'target_root', 'receipt_path')) { Need (-not [string]::IsNullOrWhiteSpace([string](Get-CfgObjectProperty $nativeProjection $fieldName))) ("skill_projection.native_projection.{0} 不能为空" -f $fieldName) }
+            Need ([string]::Equals(([string]$nativeProjection.target_root).TrimEnd('\', '/'), ([string]$projection.user_skill_root).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) 'skill_projection.native_projection.target_root 必须等于 skill_projection.user_skill_root'
+            $nativeTargetText = [string]$nativeProjection.target_root
+            $nativeTargetResolved = if ($nativeTargetText.StartsWith('~')) { $nativeTargetText -replace '^~', [Environment]::GetFolderPath('UserProfile') } elseif ([IO.Path]::IsPathRooted($nativeTargetText)) { $nativeTargetText } else { Join-Path $Root $nativeTargetText }
+            $nativeTargetFull = [IO.Path]::GetFullPath($nativeTargetResolved).TrimEnd('\', '/')
+            Need (-not [string]::Equals($nativeTargetFull, [IO.Path]::GetPathRoot($nativeTargetFull).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) 'skill_projection.native_projection.target_root 不能是文件系统根目录'
+            Need ([string]$nativeProjection.receipt_path -match '^reports[\\/]skill-projection[\\/][^\\/]+\.json$') 'skill_projection.native_projection.receipt_path 必须位于 reports/skill-projection 且为直接子级 JSON 文件'
         }
         Need ($projection.PSObject.Properties.Match("sources").Count -gt 0 -and (Assert-IsArray $projection.sources)) "skill_projection.sources 必须是数组"
         foreach ($source in @($projection.sources)) {
@@ -25041,7 +25099,9 @@ function Sync-CapabilityRouterCatalog($projectionCfg) {
     }
 }
 
-function Sync-CodexManagedSkillLinks($projectionCfg) {
+function Sync-CodexManagedSkillLinks {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$projectionCfg)
     Need ($null -ne $projectionCfg) "skill_projection 配置为空"
     Need ($projectionCfg.PSObject.Properties.Match("managed_source_path").Count -gt 0) "skill_projection 缺少 managed_source_path"
     Need ($projectionCfg.PSObject.Properties.Match("user_skill_root").Count -gt 0) "skill_projection 缺少 user_skill_root"
@@ -25471,6 +25531,11 @@ function Test-ConfiguredHostProjection($cfg) {
         if (-not [string]::IsNullOrWhiteSpace($candidate) -and -not (Is-PathInsideOrEqual $candidate $repoRoot)) {
             return $true
         }
+    }
+    if ($projectionCfg.PSObject.Properties.Match("native_projection").Count -gt 0 -and $null -ne $projectionCfg.native_projection -and
+        $projectionCfg.native_projection.PSObject.Properties.Match("target_root").Count -gt 0) {
+        $nativeTarget = Resolve-SkillProjectionPath ([string]$projectionCfg.native_projection.target_root)
+        if (-not [string]::IsNullOrWhiteSpace($nativeTarget) -and -not (Is-PathInsideOrEqual $nativeTarget $repoRoot)) { return $true }
     }
     return $false
 }
