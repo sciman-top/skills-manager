@@ -3,13 +3,17 @@
 **program_id**: `skills-manager-vnext`
 **architecture_version**: 1
 **status**: accepted-direction
-**最后更新**: 2026-08-09
+**最后更新**: 2026-08-12
 
 ## 1. 架构结论
 
 当前实现继续采用“PowerShell 7 模块化单体 + build-time 单文件 bundle + 文件型 versioned contracts + host adapters”。曾评估的“versioned protocol + 可选 C#/.NET typed core + PowerShell thin compatibility shell”只保留为历史决策；TC0/TC1 `OperationPlan/Receipt v1` shadow PoC 已因零消费者、无可比返工净收益和持续 SDK/full-gate 成本退役，现有 PowerShell 仍是唯一运行真源。
 
 本项目位于宿主和能力来源之间，负责本地 inventory、选择、plan、显式 apply 和 evidence；宿主继续负责 agent execution、auth、permission、session、plugin/connector runtime 和 native loading。
+
+### 1.1 默认协作面与架构边界
+
+默认协作面为 ChatGPT Desktop App（含 Codex/Work 交互面），用于需求澄清、设计、交互式编码、审查和用户决策；Codex CLI 用于脚本化、批量、CI、机器可读执行和终端恢复；Claude Code 用于 Claude 特有能力或独立复核。这个个人工作流顺序只决定协作入口，不参与技术栈、领域模型或核心架构选型；任务形态、当前可用性和宿主原生能力可以覆盖默认顺序。核心逻辑保持 host-neutral，宿主差异收敛在 `Host adapters` 等边缘 seam，不建立按 Desktop、CLI 或 Claude 分叉的第二实现。
 
 ```text
 Official directories / Git / local inputs / host inventory

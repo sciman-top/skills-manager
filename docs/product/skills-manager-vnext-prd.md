@@ -3,7 +3,7 @@
 **program_id**: `skills-manager-vnext`
 **status**: accepted-direction
 **implementation_status**: phase-6-host-native-lifecycle-repo-verified-host-evaluation-partial
-**最后更新**: 2026-08-09
+**最后更新**: 2026-08-12
 
 ## 1. 产品结论
 
@@ -14,6 +14,10 @@
 North Star：在不复制宿主原生推理、编码和运行能力的前提下，最大化 verified value、correctness 和 user outcome，同时最小化 user attention、wall-clock latency、provider/model spend、token/context、retry、coordination/integration、maintenance cost 与不可逆失败风险；任何辅助功能都必须证明相对 native baseline 的 Pareto 净收益，并始终可绕过、可回滚、可替换、可删除。
 
 它不是 AI coding runtime，不执行或接管 agent loop，不提供运行时模型路由、账号、认证、权限、会话、云任务、插件商店或中央跨仓治理服务。允许生成由宿主拥有、可审查、可绕过、可回滚的模型/推理强度建议、custom-agent 配置草案、fallback/escalation 策略和评估证据，但不得静默修改 active session、provider、auth 或宿主配置。
+
+### 默认协作面与宿主中立边界
+
+个人默认以 ChatGPT Desktop App（含 Codex/Work 交互面）承接需求澄清、产品/架构设计、交互式编码、审查和用户决策；Codex CLI 承接脚本化、批量、CI、机器可读执行和终端恢复；Claude Code 用于 Claude 特有能力、独立复核或前两者不可用时补位。该顺序只是默认协作面偏好，不是产品功能、强制路由或验收门禁，也不改变产品需求、repo truth、技术栈、领域模型、核心架构、任务范围或停止条件。任务形态和宿主当时可用的原生能力优先于个人默认顺序；宿主特定逻辑只能位于边缘适配层，产品核心和领域合同必须保持 host-neutral，不能形成 Desktop-only、CLI-only 或 Claude-only 第二实现。
 
 ## 2. 背景与问题
 

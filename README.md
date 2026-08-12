@@ -26,6 +26,10 @@
 
 它不会成为 agent runtime、插件商店、provider/model/auth/session 管理器、中央目标仓 registry 或跨仓规则同步服务。规则能力默认 advisory-first，宿主加载和 live acceptance 必须由各自 native/真实工作流证据证明。
 
+### 默认协作面
+
+个人默认使用 ChatGPT Desktop App（含 Codex/Work 交互面）完成需求澄清、设计、交互式编码、审查和用户决策；Codex CLI 用于脚本化、批量、CI、机器可读执行和终端恢复；Claude Code 用于 Claude 特有能力或独立复核。这个顺序只影响协作入口，不是强制路由，也不决定技术栈或核心架构；任务形态和宿主原生能力优先，产品核心保持宿主中立。
+
 - [产品文档索引](docs/product/README.md)
 - [vNext PRD](docs/product/skills-manager-vnext-prd.md)
 - [vNext 架构](docs/product/skills-manager-vnext-architecture.md)

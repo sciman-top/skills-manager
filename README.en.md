@@ -26,6 +26,10 @@ The repository now has an executable planning contract for evolving into a Windo
 
 It will not become an agent runtime, plugin marketplace, provider/model/auth/session manager, central target-repository registry, or cross-repository rule synchronizer. Rule capabilities remain advisory-first, and host loading or live acceptance require separate native or real-workflow evidence.
 
+### Default collaboration surface
+
+The personal default is ChatGPT Desktop App (including its Codex/Work interaction surface) for requirement clarification, product and architecture design, interactive coding, review, and user decisions; Codex CLI for scripted, batch, CI, machine-readable, and terminal-recovery work; and Claude Code for Claude-specific capabilities or independent review. This is a collaboration preference, not a mandatory router or gate, and it does not choose the product technology stack or core architecture. Task shape and currently available host-native capability take precedence; the product core remains host-neutral.
+
 - [Product documentation index](docs/product/README.md)
 - [vNext PRD](docs/product/skills-manager-vnext-prd.md)
 - [vNext architecture](docs/product/skills-manager-vnext-architecture.md)
