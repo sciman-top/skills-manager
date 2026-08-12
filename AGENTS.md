@@ -38,7 +38,7 @@
 - 多层门禁适用时固定顺序：`build -> test -> contract/invariant -> hotspot`。
 - 迭代：规则/文档/注释跑 `git diff --check` + 受影响 verifier/test；test/verifier/script/config/CI 跑受影响 test/contract；source/generated/共享 config seam 才 build/quick。
 - focused closeout：未触发 runtime/安全/数据/迁移/公开契约/dependency/package/release 风险时，沿用受影响验证，不生成 full receipt。
-- full closeout：上述风险或 focused 发现跨面风险时，只运行一次 `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full -ReuseCurrentReceipt`；仅复用 exact-current/同 dirty-policy 的 passed receipt，重跑用 `-ForceFresh`。
+- full closeout：上述风险或 focused 发现跨面风险时，先以 `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/quality/run-local-quality-gates.ps1 -Profile full -ReuseCurrentReceipt` 做 reuse-only 检查；exact-current/同 dirty-policy miss 时快速失败，只有明确需要 fresh full 才改用 `-ForceFresh`，并且只运行一次。
 - live 补充探针：仅当 release/host health 验收需要真实网络时，在 full 之后单独运行一次 `pwsh -NoProfile -ExecutionPolicy Bypass -File skills.ps1 doctor --strict --threshold-ms 8000`；它不替代 full，也不触发宿主写入。
 - 脏工作树可显式加 `-AllowDirtyWorktree` 并列明既有改动；该开关不允许忽略本任务生成漂移。
 - build、generated-sync、dependency、doctor 或 Pester 任一失败即阻断；不得手改生成物绕过。

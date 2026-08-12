@@ -1,6 +1,7 @@
 ﻿param(
     [switch]$StrictNoGit,
-    [switch]$AllowDirtyWorktree
+    [switch]$AllowDirtyWorktree,
+    [switch]$InitialBuildCompleted
 )
 $ErrorActionPreference = "Stop"
 
@@ -33,11 +34,19 @@ try {
     if (Test-Path -LiteralPath ".\skills.ps1" -PathType Leaf) {
         $beforeHash = (Get-FileHash -Algorithm SHA256 -LiteralPath ".\skills.ps1").Hash
     }
-    .\build.ps1
-    if (-not (Test-Path -LiteralPath ".\skills.ps1" -PathType Leaf)) {
-        throw "generated_output_missing: build.ps1 did not produce skills.ps1."
+    if ($InitialBuildCompleted) {
+        if (-not (Test-Path -LiteralPath ".\skills.ps1" -PathType Leaf)) {
+            throw "generated_output_missing: the completed initial build did not produce skills.ps1."
+        }
+        $firstBuildHash = (Get-FileHash -Algorithm SHA256 -LiteralPath ".\skills.ps1").Hash
     }
-    $firstBuildHash = (Get-FileHash -Algorithm SHA256 -LiteralPath ".\skills.ps1").Hash
+    else {
+        .\build.ps1
+        if (-not (Test-Path -LiteralPath ".\skills.ps1" -PathType Leaf)) {
+            throw "generated_output_missing: build.ps1 did not produce skills.ps1."
+        }
+        $firstBuildHash = (Get-FileHash -Algorithm SHA256 -LiteralPath ".\skills.ps1").Hash
+    }
 
     .\build.ps1
     if (-not (Test-Path -LiteralPath ".\skills.ps1" -PathType Leaf)) {

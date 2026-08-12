@@ -1,6 +1,16 @@
 $ErrorActionPreference = "Stop"
 
 Describe "Generated sync script" {
+    It "allows a preceding gate build to serve as the first idempotency sample" {
+        $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+        $gate = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\quality\run-local-quality-gates.ps1') -Raw
+        $sync = Get-Content -LiteralPath (Join-Path $repoRoot 'tests\check-generated-sync.ps1') -Raw
+
+        $gate | Should Match 'check-generated-sync\.ps1[^\r\n]+-InitialBuildCompleted'
+        $sync | Should Match '\$InitialBuildCompleted'
+        $sync | Should Match 'if \(\$InitialBuildCompleted\)'
+    }
+
     It "Uses a content diff instead of porcelain metadata for change detection" {
         $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
         $scriptPath = Join-Path $repoRoot "tests\check-generated-sync.ps1"

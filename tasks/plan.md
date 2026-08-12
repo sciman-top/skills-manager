@@ -16,7 +16,7 @@
 | --- | --- |
 | Current P6 lifecycle | `tasks/skills-manager-vnext-phase6.tasks.json` |
 | Lean delivery maintenance | `tasks/skills-manager-vnext-maintenance-design.tasks.json` |
-| Lean delivery pilot (collecting) | `tasks/skills-manager-vnext-lean-delivery-pilot.json` |
+| Lean delivery pilot (status owned by manifest) | `tasks/skills-manager-vnext-lean-delivery-pilot.json` |
 | PowerShell 7 migration | `tasks/skills-manager-vnext-powershell7-migration.tasks.json` |
 | Native-first routing correction | `tasks/skills-manager-vnext-capability-routing-correction.tasks.json` |
 | Capability discovery redesign | `tasks/skills-manager-vnext-capability-discovery-redesign.tasks.json` |

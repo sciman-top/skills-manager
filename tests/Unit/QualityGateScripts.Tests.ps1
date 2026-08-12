@@ -21,7 +21,7 @@ Describe "Quality gate scripts" {
         }
     }
 
-    It "reuses only an exact current full receipt unless a fresh run is forced" {
+    It "reuses only an exact current full receipt and never turns a reuse miss into a fresh run" {
         $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
         $integrityPath = Join-Path $root 'scripts\quality\QualityGateIntegrity.ps1'
         . $integrityPath
@@ -76,12 +76,12 @@ Set-Content -LiteralPath $marker -Value 'executed' -Encoding UTF8
         $dirtyMismatchOutput = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $runner -Profile full -ReuseCurrentReceipt -AllowDirtyWorktree 2>&1)
         $dirtyMismatchExit = $LASTEXITCODE
 
-        $dirtyMismatchExit | Should Not Be 0
+        $dirtyMismatchExit | Should Be 76
         ($dirtyMismatchOutput -join "`n") | Should Match 'quality_gate_receipt_reuse_miss=quality_gate_allow_dirty_worktree_mismatch'
-        Test-Path -LiteralPath $markerPath | Should Be $true
+        ($dirtyMismatchOutput -join "`n") | Should Match 'action=rerun_with_force_fresh'
+        Test-Path -LiteralPath $markerPath | Should Be $false
 
         Write-QualityGateJsonAtomic -Path (Join-Path $receiptRoot 'current.json') -Value $written.pointer
-        Remove-Item -LiteralPath $markerPath -Force
         $freshOutput = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $runner -Profile full -ForceFresh 2>&1)
         $freshExit = $LASTEXITCODE
 
@@ -89,9 +89,9 @@ Set-Content -LiteralPath $marker -Value 'executed' -Encoding UTF8
         ($freshOutput -join "`n") | Should Not Match 'quality_gate_receipt_reused='
         Test-Path -LiteralPath $markerPath | Should Be $true
 
-        $conflictOutput = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $runner -Profile full -ReuseCurrentReceipt -ForceFresh 2>&1)
-        $LASTEXITCODE | Should Not Be 0
-        ($conflictOutput -join "`n") | Should Match 'mutually exclusive'
+        $runnerText = Get-Content -LiteralPath $runner -Raw
+        $runnerText | Should Match '\$ReuseCurrentReceipt -and \$ForceFresh'
+        $runnerText | Should Match 'mutually exclusive'
     }
 
     It "Keeps full-gate execution in build, test, then contract order with timings" {
@@ -603,6 +603,8 @@ Describe 'fixture unit' {
             $raw | Should Match ([regex]::Escape($literal))
         }
         $raw | Should Not Match 'agent-workflow-advisory|verify-agent-workflow-advisory\.ps1'
+        $raw | Should Match 'check-generated-sync\.ps1 -AllowDirtyWorktree -InitialBuildCompleted'
+        $raw | Should Match 'check-generated-sync\.ps1 -StrictNoGit -InitialBuildCompleted'
     }
 
     It "keeps retired auxiliary control planes out of active runtime surfaces" {

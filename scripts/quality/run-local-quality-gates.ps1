@@ -76,7 +76,8 @@ try {
         else {
             @($current.findings | ForEach-Object { $_.code } | Sort-Object -Unique) -join ','
         }
-        Write-Host ('quality_gate_receipt_reuse_miss={0}; action=run_fresh' -f $reuseMissCodes)
+        [Console]::Error.WriteLine(('quality_gate_receipt_reuse_miss={0}; action=rerun_with_force_fresh' -f $reuseMissCodes))
+        exit 76
     }
     $runId = 'qgr-{0}-{1}' -f ([DateTimeOffset]::UtcNow.ToString('yyyyMMdd-HHmmss')), ([guid]::NewGuid().ToString('N').Substring(0, 8))
     $timingReportPath = Join-Path $root ('reports\test-timings\{0}.json' -f $runId)
@@ -96,10 +97,10 @@ try {
             }
             Invoke-QualityGate 'repo-hygiene' { & .\scripts\quality\check-repo-hygiene.ps1 -ReportUntrackedRuntimeArtifacts }
             if ($AllowDirtyWorktree) {
-                Invoke-QualityGate 'generated-sync' { & .\tests\check-generated-sync.ps1 -AllowDirtyWorktree }
+                Invoke-QualityGate 'generated-sync' { & .\tests\check-generated-sync.ps1 -AllowDirtyWorktree -InitialBuildCompleted }
             }
             else {
-                Invoke-QualityGate 'generated-sync' { & .\tests\check-generated-sync.ps1 -StrictNoGit }
+                Invoke-QualityGate 'generated-sync' { & .\tests\check-generated-sync.ps1 -StrictNoGit -InitialBuildCompleted }
             }
             Invoke-QualityGate 'workspace-lock-parity' { & .\skills.ps1 verify-lock }
             Invoke-QualityGate 'skill-integrity' { & .\scripts\verify-skill-integrity.ps1 }

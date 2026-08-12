@@ -278,7 +278,7 @@ PowerShell 7 是当前 Windows-first 的唯一受支持入口、运行真源和�
 - `FR-EWF-009`：`AGENTS.md` 承接稳定仓库约定，skill 承接重复 workflow，plugin 承接可安装组合，MCP/connector 承接实时外部数据/动作，hook/script/CI 承接机械 enforcement，Git/worktree 承接版本与写入隔离；不得用一个 surface 替代所有层。
 - `FR-EWF-010`：知识库/代码图/理解工具只有在至少两个独立真实任务证明 repo-native `rg`、符号/测试/文档与宿主上下文不足，且语言覆盖、隐私、索引 freshness、资源、供应链和卸载/重建路径均可验证时，才进入 read-only canary；它们不成为源码、任务或验收真源。
 - `FR-EWF-011`：skill 优化只借鉴 `real sample -> replay -> shadow -> bounded canary -> reviewed promotion -> retain/revise/retire`；不得把领域研究系统的自动蒸馏、provider/embedding/solver 依赖直接解释为通用 workflow 自动升级能力。当前 MVP 只允许 `SKILL.md`、`agents/openai.yaml` 和非执行型 references，脚本、hook、MCP、plugin、权限和网络行为 defer 到新的 admission。
-- `FR-EWF-012`：M1 pilot 在既有 10 个真实样本中同时观察 coordination mode、shared-write policy、tool disposition、external context adapter 和 skill lifecycle action；本 maintenance 切片自身不计数，也不为观察字段建设 daemon 或 telemetry。pilot 当前为 `collecting`，不足 10 类真实样本时只能报告 `pilot_collecting`。
+- `FR-EWF-012`：M1 pilot 在既有 10 个真实样本中同时观察 coordination mode、shared-write policy、tool disposition、external context adapter 和 skill lifecycle action；本 maintenance 切片自身不计数，也不为观察字段建设 daemon 或 telemetry。当前状态只从 `tasks/skills-manager-vnext-lean-delivery-pilot.json` 读取；处于 `collecting` 时，不足 10 类真实样本只能报告 `pilot_collecting`。
 - `FR-EWF-013`：长链路任务的分解、DAG、Plan/Goal 状态和完成回执由宿主原生能力拥有；本仓 task manifest 仅描述本产品自己的实现工作，不升级为通用 `TaskGraph` runtime 或跨项目治理合同。
 - `FR-EWF-014`：模型、reasoning effort、fallback 和可用性由用户与宿主根据当前 surface 决定；本仓不维护模型档位、proposal validator、Radar 或外部榜单决策链。
 - `FR-EWF-015`：任务需要子 Agent/worktree 时直接使用宿主原生控制面；本仓不规定固定角色、固定模型三档或仓库级并发配额。
@@ -320,7 +320,7 @@ CURRENT_PHASE_TRUTH_SOURCE: tasks/skills-manager-vnext-phase6.tasks.json
 
 本轮同时扩展现有 `NativeInvocationTrace` 和 evaluator 的 `-Mode invocation`。正式晋级要求 fresh、同 skill、同 correlation 的 native `injected -> executed` 事件；self-report、`Get-Content SKILL.md`、输出中的 `selected_skills` 和 stale events 只能是 `host_evaluation_partial`。正式 corpus 固定包含 debug、completion verification、PowerShell custom、no-skill negative 和 explicit router fallback 五类，仍不等价于业务 live acceptance。
 
-M1 `lean_delivery_pilot` 当前为 `collecting`，候选准备落在 ignored `reports/skill-evolution` 隔离目录；只有两项独立真实信号、负向/no-skill 控制、无 native equivalent、稳定消费者和净收益/回滚/退役字段齐备时才可进入 replay/evaluate。apply 复用 `OperationPlan` 的 `skill_lifecycle` domain，只接受 reviewed change-set、exact-current hashes 和 `PROMOTE_SKILL_CANDIDATE`，默认不构建、不投影、不写用户技能根或宿主配置。
+M1 `lean_delivery_pilot` 的当前状态、owner、样本和恢复条件只从 `tasks/skills-manager-vnext-lean-delivery-pilot.json` 读取；候选准备落在 ignored `reports/skill-evolution` 隔离目录。只有两项独立真实信号、负向/no-skill 控制、无 native equivalent、稳定消费者和净收益/回滚/退役字段齐备时才可进入 replay/evaluate。apply 复用 `OperationPlan` 的 `skill_lifecycle` domain，只接受 reviewed change-set、exact-current hashes 和 `PROMOTE_SKILL_CANDIDATE`，默认不构建、不投影、不写用户技能根或宿主配置。
 
 fresh inventory、host evaluation、injected/executed invocation 与业务 acceptance 是独立层级；它们只能由对应证据晋级，不能由 metadata visibility、focused tests 或 planning verifier 推导。tracked manifest 不复制 `passed|stale` 运行态：当前 full 是否有效只由 `reports/quality-gates/current.json` 指向的 immutable full receipt 及 exact-current-source 校验决定。
 
@@ -437,7 +437,7 @@ vNext 不能以“所有 Phase 代码已写完”作为单一验收。每个 Pha
 - P5 maintenance correction、profile reconciliation advisor、hierarchical cold-load 与 profile optimization canary 保留为历史结果或 P6 迁移/兼容证据，不再代表当前 reachability 主链。
 - P6 已将 profile reachability authority 退役；旧 canary `Apply`/`Accept` 固定返回 `deprecated` 且零写入，当前只保留显式 versioned migration/rollback 和只读兼容报告。
 - 当前主链是 `canonical inventory -> managed_link_includes placement -> eligible resident metadata -> host AI native selection -> Desktop representative task`；未常驻能力保留在 portable catalog，只由 explicit cold discovery 读取。profile、第二 semantic router、mandatory router preflight 和自有调用遥测均不在主链。
-- P5 后的 `maintenance_design` 已建立 Lean Delivery advisory 规划契约；M1 registry 当前为 `deferred (0/10)`，因为没有 active owner/collection task，只有显式建立两者后才恢复。它不是新 Phase，也不证明 pilot 已执行、完成或产生业务效果。
+- P5 后的 `maintenance_design` 已建立 Lean Delivery advisory 规划契约；M1 registry 的动态状态、owner 与样本计数只由 `tasks/skills-manager-vnext-lean-delivery-pilot.json` 持有。它不是新 Phase，状态存在不证明 pilot 已完成或产生业务效果。
 - `maintenance_design` M0.2 只补强 host-owned coordination、single-writer write-set admission、Git freshness/CAS 语义、tool disposition 和 context-adapter admission；不引入 coordinator/lease runtime，也不安装 Trellis、AGOS、GBrain、CodeGraphContext、Understand Anything 或 OptSkills。
 - `maintenance_design` M0.3 的 TaskGraph/model policy 是历史 planning truth；后续通用 advisory runtime 因无外部消费者且与宿主原生能力重叠已退役。独立 TC1 shadow PoC 也已因无消费者和净收益证据退役；Radar automation 已删除，旧 Luna/Terra/Radar 记录只作为历史 receipt。
 - GUI、daemon、远端协作、数据库和 domain core 重写均为 conditional，不进入当前承诺。

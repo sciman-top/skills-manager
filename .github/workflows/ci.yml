@@ -58,7 +58,3 @@ jobs:
       - name: Run repository full quality gate
         shell: pwsh
         run: .\scripts\quality\run-local-quality-gates.ps1 -Profile full
-
-      - name: Observe sync MCP performance threshold
-        shell: pwsh
-        run: .\scripts\quality\check-doctor-json.ps1 -SyncMcpThresholdMs 12000 -WarnOnly

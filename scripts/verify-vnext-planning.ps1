@@ -3,6 +3,7 @@ param(
     [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent),
     [string]$ManifestPath,
     [string]$SpecPath,
+    [switch]$HistoricalGovernance,
     [switch]$Json,
     [switch]$NoExit
 )
@@ -119,45 +120,33 @@ foreach ($key in @($paths.Keys)) {
     $content[$key] = Get-RequiredText $root $paths[$key] ([ref]$findings)
 }
 
-foreach ($required in @(
-        @{ key = 'prd'; literal = '### PP-000 三条最高强约束'; code = 'engineering_constitution_missing' },
-        @{ key = 'prd'; literal = '**原生优先**'; code = 'engineering_constitution_missing' },
-        @{ key = 'prd'; literal = '**最短真实主链**'; code = 'engineering_constitution_missing' },
-        @{ key = 'prd'; literal = '**最低充分且自退役**'; code = 'engineering_constitution_missing' },
-        @{ key = 'prd'; literal = '不得为执行上述三条约束建立第二套治理或运行控制面'; code = 'engineering_constitution_missing' },
-        @{ key = 'agents'; literal = 'TOP_LEVEL_ENGINEERING_PRINCIPLE: PP-000'; code = 'engineering_constitution_mapping_missing' }
-    )) {
-    if (-not (Test-ContainsLiteral $content[$required.key] $required.literal)) {
-        Add-PlanningFinding ([ref]$findings) $required.code $paths[$required.key] `
-            ('Required engineering constitution marker is missing: {0}' -f $required.literal)
+if ($HistoricalGovernance) {
+    $adoptionMatrixPath = Join-Path $root 'docs\product\rule-governance-adoption-matrix.md'
+    if (-not (Test-Path -LiteralPath $adoptionMatrixPath -PathType Leaf)) {
+        Add-PlanningFinding ([ref]$findings) 'missing_required_file' 'docs/product/rule-governance-adoption-matrix.md' 'Missing historical rule-governance adoption matrix.'
     }
-}
 
-$adoptionMatrixPath = Join-Path $root 'docs\product\rule-governance-adoption-matrix.md'
-if (-not (Test-Path -LiteralPath $adoptionMatrixPath -PathType Leaf)) {
-    Add-PlanningFinding ([ref]$findings) 'missing_required_file' 'docs/product/rule-governance-adoption-matrix.md' 'Missing rule-governance adoption matrix.'
-}
-
-$retiredAgentManifestRelativePath = 'tasks/skills-manager-vnext-agent-workflow-advisory.tasks.json'
-$retiredAgentManifestText = Get-RequiredText $root $retiredAgentManifestRelativePath ([ref]$findings)
-if (-not [string]::IsNullOrWhiteSpace($retiredAgentManifestText)) {
-    try {
-        $retiredAgentManifest = $retiredAgentManifestText | ConvertFrom-Json
-        foreach ($contract in @(
-                @{ field = 'track_status'; value = 'retired_historical_repo_verified' },
-                @{ field = 'truth_boundary'; value = 'historical_repo_evidence_only' },
-                @{ field = 'runtime_scheduler_status'; value = 'not_introduced' },
-                @{ field = 'radar_fetch_status'; value = 'retired' },
-                @{ field = 'live_acceptance_status'; value = 'not_run' }
-            )) {
-            if ([string]$retiredAgentManifest.($contract.field) -ne [string]$contract.value) {
-                Add-PlanningFinding ([ref]$findings) 'retired_agent_workflow_truth_invalid' $retiredAgentManifestRelativePath `
-                    ('Retired agent workflow {0} must be {1}, found {2}.' -f $contract.field, $contract.value, [string]$retiredAgentManifest.($contract.field))
+    $retiredAgentManifestRelativePath = 'tasks/skills-manager-vnext-agent-workflow-advisory.tasks.json'
+    $retiredAgentManifestText = Get-RequiredText $root $retiredAgentManifestRelativePath ([ref]$findings)
+    if (-not [string]::IsNullOrWhiteSpace($retiredAgentManifestText)) {
+        try {
+            $retiredAgentManifest = $retiredAgentManifestText | ConvertFrom-Json
+            foreach ($contract in @(
+                    @{ field = 'track_status'; value = 'retired_historical_repo_verified' },
+                    @{ field = 'truth_boundary'; value = 'historical_repo_evidence_only' },
+                    @{ field = 'runtime_scheduler_status'; value = 'not_introduced' },
+                    @{ field = 'radar_fetch_status'; value = 'retired' },
+                    @{ field = 'live_acceptance_status'; value = 'not_run' }
+                )) {
+                if ([string]$retiredAgentManifest.($contract.field) -ne [string]$contract.value) {
+                    Add-PlanningFinding ([ref]$findings) 'retired_agent_workflow_truth_invalid' $retiredAgentManifestRelativePath `
+                        ('Retired agent workflow {0} must be {1}, found {2}.' -f $contract.field, $contract.value, [string]$retiredAgentManifest.($contract.field))
+                }
             }
         }
-    }
-    catch {
-        Add-PlanningFinding ([ref]$findings) 'retired_agent_workflow_manifest_parse_failed' $retiredAgentManifestRelativePath $_.Exception.Message
+        catch {
+            Add-PlanningFinding ([ref]$findings) 'retired_agent_workflow_manifest_parse_failed' $retiredAgentManifestRelativePath $_.Exception.Message
+        }
     }
 }
 

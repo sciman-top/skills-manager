@@ -20,10 +20,11 @@ Describe 'vNext product planning contract' {
         'tasks\plan.md', 'tasks\todo.md', 'README.md', 'AGENTS.md', 'config\vnext-phase4-entry-gate.json'
     )
 
-    function Invoke-PlanningVerifier([string]$Root, [string]$ManifestPath = '', [string]$SpecPath = '', [switch]$External) {
+    function Invoke-PlanningVerifier([string]$Root, [string]$ManifestPath = '', [string]$SpecPath = '', [switch]$External, [switch]$HistoricalGovernance) {
         $params = @{ RepoRoot = $Root; Json = $true }
         if (-not [string]::IsNullOrWhiteSpace($ManifestPath)) { $params.ManifestPath = $ManifestPath }
         if (-not [string]::IsNullOrWhiteSpace($SpecPath)) { $params.SpecPath = $SpecPath }
+        if ($HistoricalGovernance) { $params.HistoricalGovernance = $true }
         $output = if ($External) {
             @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -RepoRoot $Root -Json 2>&1)
         }
@@ -77,20 +78,23 @@ Describe 'vNext product planning contract' {
         $currentMainChain | Should Not Match '(?i)project all enabled skills'
     }
 
-    It 'rejects an active truth label on the retired agent workflow manifest' {
+    It 'keeps retired agent workflow history out of the default contract and available explicitly' {
         $fixtureRoot = New-PlanningFixture 'retired-agent-workflow-truth'
         $path = Join-Path $fixtureRoot 'tasks\skills-manager-vnext-agent-workflow-advisory.tasks.json'
         $manifest = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
         $manifest.track_status = 'repo_verified'
         $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
 
-        $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
+        $default = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
+        $historical = (Invoke-PlanningVerifier $fixtureRoot -HistoricalGovernance).output | ConvertFrom-Json
 
-        @($parsed.findings | Where-Object code -eq 'retired_agent_workflow_truth_invalid').Count | Should Be 1
-        $parsed.pass | Should Be $false
+        @($default.findings | Where-Object code -eq 'retired_agent_workflow_truth_invalid').Count | Should Be 0
+        $default.pass | Should Be $true
+        @($historical.findings | Where-Object code -eq 'retired_agent_workflow_truth_invalid').Count | Should Be 1
+        $historical.pass | Should Be $false
     }
 
-    It 'requires the three compact PP-000 constraints in the PRD' {
+    It 'does not make current planning depend on exact PP-000 prose' {
         $fixtureRoot = New-PlanningFixture 'missing-engineering-constitution'
         $path = Join-Path $fixtureRoot 'docs\product\skills-manager-vnext-prd.md'
         $content = Get-Content -LiteralPath $path -Raw
@@ -101,11 +105,11 @@ Describe 'vNext product planning contract' {
 
         $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
 
-        @($parsed.findings | Where-Object code -eq 'engineering_constitution_missing').Count | Should Be 4
-        $parsed.pass | Should Be $false
+        @($parsed.findings | Where-Object code -eq 'engineering_constitution_missing').Count | Should Be 0
+        $parsed.pass | Should Be $true
     }
 
-    It 'requires the repository action mapping without duplicating the constitution' {
+    It 'does not make current planning depend on an AGENTS prose marker' {
         $fixtureRoot = New-PlanningFixture 'missing-engineering-constitution-mapping'
         $path = Join-Path $fixtureRoot 'AGENTS.md'
         $content = (Get-Content -LiteralPath $path -Raw).Replace('TOP_LEVEL_ENGINEERING_PRINCIPLE: PP-000', 'TOP_LEVEL_ENGINEERING_PRINCIPLE: missing')
@@ -113,8 +117,8 @@ Describe 'vNext product planning contract' {
 
         $parsed = (Invoke-PlanningVerifier $fixtureRoot).output | ConvertFrom-Json
 
-        @($parsed.findings | Where-Object code -eq 'engineering_constitution_mapping_missing').Count | Should Be 1
-        $parsed.pass | Should Be $false
+        @($parsed.findings | Where-Object code -eq 'engineering_constitution_mapping_missing').Count | Should Be 0
+        $parsed.pass | Should Be $true
     }
 
     It 'requires proportional closeout and a candidate before the exact-source full gate and push' {
