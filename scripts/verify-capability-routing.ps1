@@ -26,14 +26,6 @@ if ([int]$corpus.schema_version -ne 2 -or [string]$corpus.decision_owner -ne 'ho
     throw 'Routing corpus must use schema_version=2, decision_owner=host_ai, and contain cases.'
 }
 $config = Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json
-$profileSource = $config.skill_projection.profiles
-$activeProfile = [string]$config.skill_projection.active_profile
-$profileSourceKind = 'legacy_runtime'
-if ($null -eq $profileSource -and $null -ne $config.skill_projection.profile_compatibility) {
-    $profileSource = $config.skill_projection.profile_compatibility.profiles
-    $activeProfile = [string]$config.skill_projection.profile_compatibility.active_profile
-    $profileSourceKind = 'read_only_compatibility'
-}
 $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('skills-manager-routing-contract-{0}' -f [Guid]::NewGuid().ToString('N'))
 $manifestFile = Join-Path $fixtureRoot 'manifest.json'
 $findings = [Collections.Generic.List[object]]::new()
@@ -53,10 +45,6 @@ function Add-InventoryNames([Collections.Generic.HashSet[string]]$Set, $Values) 
 # The routing corpus is an expectation source, never an existence source. Build the
 # portable inventory from tracked configuration declarations before synthesizing files.
 $availableSkillNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-Add-InventoryNames $availableSkillNames $config.skill_projection.resident_names
-foreach ($property in @($profileSource.PSObject.Properties)) {
-    Add-InventoryNames $availableSkillNames $property.Value.enabled_names
-}
 foreach ($property in @($config.skill_projection.discovery_catalog.domain_memberships.PSObject.Properties)) {
     Add-InventoryNames $availableSkillNames $property.Value
 }
@@ -134,17 +122,9 @@ function New-RoutingContractManifest {
         $entries.Add([pscustomobject]@{ name = $name; path = $skillPath; source_root = $fixtureRoot }) | Out-Null
     }
 
-    $activeNames = @()
-    $activeProperty = @($profileSource.PSObject.Properties | Where-Object Name -eq $activeProfile | Select-Object -First 1)
-    if ($activeProperty.Count -eq 1) { $activeNames = @($activeProperty[0].Value.enabled_names) }
-    $active = @($entries | Where-Object { [string]$_.name -in $activeNames })
     [ordered]@{
         schema_version = 2
-        active_profile = $activeProfile
-        profile_source = $profileSourceKind
-        profile_reachability_authority = 'none'
-        resident_names = @($config.skill_projection.resident_names)
-        active = $active
+        active = @($entries.ToArray())
         canonical = @($entries.ToArray())
     } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestFile -Encoding UTF8
 }

@@ -277,15 +277,6 @@ function Test-AuditRemovalDependencyClosure {
                     $aliasIndex++
                 }
             }
-            if ($projection.PSObject.Properties.Match("resident_names").Count -gt 0) {
-                $residentIndex = 0
-                foreach ($residentName in @($projection.resident_names)) {
-                    if ([string]::Equals([string]$residentName, $name, [System.StringComparison]::OrdinalIgnoreCase)) {
-                        $references.Add([pscustomobject]([ordered]@{ file = "skills.json"; path = "$.skill_projection.resident_names[$residentIndex]" })) | Out-Null
-                    }
-                    $residentIndex++
-                }
-            }
             if ($projection.PSObject.Properties.Match("discovery_catalog").Count -gt 0 -and $null -ne $projection.discovery_catalog) {
                 Add-AuditExactJsonValueReferences $projection.discovery_catalog $name '$.skill_projection.discovery_catalog' "skills.json" $references
             }

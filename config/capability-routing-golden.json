@@ -9,7 +9,7 @@
       "query": "请设计一个 local-first 的 AI 软件交付系统工程终态，说明模块边界、数据流和演进路线，先只讨论设计，不改代码",
       "profile_hints": ["engineering"],
       "expected_candidates": [{"kind": "skill", "name": "codebase-design"}, {"kind": "skill", "name": "domain-modeling"}],
-      "host_selected": [{"kind": "skill", "name": "codebase-design", "action": "load_skill"}],
+      "host_selected": [{"kind": "skill", "name": "codebase-design", "action": "use_active_skill"}],
       "forbidden_candidates": [{"kind": "skill", "name": "debug:dotnet"}]
     },
     {
@@ -18,7 +18,7 @@
       "query": "我要做 Windows-first 的 WPF 教师工具，支持触控、双屏、PDF 和本地数据，请给出工程终态",
       "profile_hints": ["dotnet"],
       "expected_candidates": [{"kind": "skill", "name": "custom-windows-wpf-teacher-app"}],
-      "host_selected": [{"kind": "skill", "name": "custom-windows-wpf-teacher-app", "action": "load_skill"}]
+      "host_selected": [{"kind": "skill", "name": "custom-windows-wpf-teacher-app", "action": "use_active_skill"}]
     },
     {
       "id": "architecture-api",
@@ -26,7 +26,7 @@
       "query": "设计前后端之间稳定的 REST API、错误模型、版本兼容和模块接口",
       "profile_hints": ["coding"],
       "expected_candidates": [{"kind": "skill", "name": "api-and-interface-design"}],
-      "host_selected": [{"kind": "skill", "name": "api-and-interface-design", "action": "load_skill"}]
+      "host_selected": [{"kind": "skill", "name": "api-and-interface-design", "action": "use_active_skill"}]
     },
     {
       "id": "product-discovery",
@@ -34,7 +34,7 @@
       "query": "我只有一个模糊产品想法，请先和我讨论用户、痛点、定位和最小可行功能",
       "profile_hints": ["engineering"],
       "expected_candidates": [{"kind": "skill", "name": "idea-refine"}],
-      "host_selected": [{"kind": "skill", "name": "idea-refine", "action": "load_skill"}]
+      "host_selected": [{"kind": "skill", "name": "idea-refine", "action": "use_active_skill"}]
     },
     {
       "id": "requirements-draft",
@@ -42,7 +42,7 @@
       "query": "把需求梳理清楚，最多问我三个高价值问题，然后形成 PRD 草案，仅供审阅",
       "profile_hints": ["engineering"],
       "expected_candidates": [{"kind": "skill", "name": "draft-spec"}],
-      "host_selected": [{"kind": "skill", "name": "draft-spec", "action": "load_skill"}]
+      "host_selected": [{"kind": "skill", "name": "draft-spec", "action": "use_active_skill"}]
     },
     {
       "id": "plan-only",
@@ -50,7 +50,7 @@
       "query": "根据已经批准的 spec 制定可执行开发计划和任务清单，但本轮不要执行",
       "profile_hints": ["engineering"],
       "expected_candidates": [{"kind": "skill", "name": "draft-spec"}],
-      "host_selected": [{"kind": "skill", "name": "draft-spec", "action": "load_skill"}],
+      "host_selected": [{"kind": "skill", "name": "draft-spec", "action": "use_active_skill"}],
       "forbidden_candidates": [{"kind": "skill", "name": "executing-plans"}]
     },
     {
@@ -77,7 +77,7 @@
       "query": "诊断 WPF .NET 应用依赖注入导致的启动失败",
       "profile_hints": ["dotnet"],
       "expected_candidates": [{"kind": "skill", "name": "debug:dotnet"}],
-      "host_selected": [{"kind": "skill", "name": "debug:dotnet", "action": "load_skill"}]
+      "host_selected": [{"kind": "skill", "name": "debug:dotnet", "action": "use_active_skill"}]
     },
     {
       "id": "python-debug",
@@ -85,7 +85,7 @@
       "query": "Python 服务的 pytest 间歇失败，请先复现和定位根因；不要使用 debug:dotnet",
       "profile_hints": ["python"],
       "expected_candidates": [{"kind": "skill", "name": "systematic-debugging"}, {"kind": "skill", "name": "python-testing-patterns"}],
-      "host_selected": [{"kind": "skill", "name": "python-testing-patterns", "action": "load_skill"}],
+      "host_selected": [{"kind": "skill", "name": "python-testing-patterns", "action": "use_active_skill"}],
       "forbidden_candidates": [{"kind": "skill", "name": "debug:dotnet"}]
     },
     {
@@ -94,7 +94,7 @@
       "query": "审查刚才的改动，确认是否有遗漏、回归、复杂度和安全问题",
       "profile_hints": ["review"],
       "expected_candidates": [{"kind": "skill", "name": "code-review-and-quality"}, {"kind": "skill", "name": "security-and-hardening"}],
-      "host_selected": [{"kind": "skill", "name": "code-review-and-quality", "action": "load_skill"}]
+      "host_selected": [{"kind": "skill", "name": "code-review-and-quality", "action": "use_active_skill"}]
     },
     {
       "id": "security-negative-write",
@@ -102,7 +102,7 @@
       "query": "检查登录、会话、用户输入和第三方回调是否存在安全漏洞，不要改代码",
       "profile_hints": ["coding"],
       "expected_candidates": [{"kind": "skill", "name": "security-and-hardening"}],
-      "host_selected": [{"kind": "skill", "name": "security-and-hardening", "action": "load_skill"}]
+      "host_selected": [{"kind": "skill", "name": "security-and-hardening", "action": "use_active_skill"}]
     },
     {
       "id": "official-docs",
@@ -126,7 +126,7 @@
       "query": "设计一个有明确视觉风格、排版和响应式布局的产品落地页",
       "profile_hints": ["design"],
       "expected_candidates": [{"kind": "skill", "name": "frontend-design"}],
-      "host_selected": [{"kind": "skill", "name": "frontend-design", "action": "load_skill"}]
+      "host_selected": [{"kind": "skill", "name": "frontend-design", "action": "use_active_skill"}]
     },
     {
       "id": "database-design",
@@ -134,7 +134,7 @@
       "query": "设计 Supabase Postgres 的表结构、RLS 策略和查询索引",
       "profile_hints": ["database"],
       "expected_candidates": [{"kind": "skill", "name": "supabase-postgres-best-practices"}, {"kind": "skill", "name": "security-and-hardening"}],
-      "host_selected": [{"kind": "skill", "name": "supabase-postgres-best-practices", "action": "load_skill"}]
+      "host_selected": [{"kind": "skill", "name": "supabase-postgres-best-practices", "action": "use_active_skill"}]
     },
     {
       "id": "physics-animation",
@@ -142,7 +142,7 @@
       "query": "制作一个初中物理的交互式抛体运动动画仿真",
       "profile_hints": ["physics"],
       "expected_candidates": [{"kind": "skill", "name": "custom-junior-physics-animation"}],
-      "host_selected": [{"kind": "skill", "name": "custom-junior-physics-animation", "action": "load_skill"}]
+      "host_selected": [{"kind": "skill", "name": "custom-junior-physics-animation", "action": "use_active_skill"}]
     },
     {
       "id": "browser-testing",
@@ -150,7 +150,7 @@
       "query": "用 Playwright 验证本地网页的登录、表单提交和截图",
       "profile_hints": ["browser"],
       "expected_candidates": [{"kind": "skill", "name": "playwright"}],
-      "host_selected": [{"kind": "skill", "name": "playwright", "action": "load_skill"}]
+      "host_selected": [{"kind": "skill", "name": "playwright", "action": "use_active_skill"}]
     },
     {
       "id": "negative-no-skill",
@@ -185,7 +185,7 @@
       "query": "请使用 $codebase-design 帮我设计模块接口",
       "profile_hints": [],
       "expected_candidates": [{"kind": "skill", "name": "codebase-design"}],
-      "host_selected": [{"kind": "skill", "name": "codebase-design", "action": "load_skill"}]
+      "host_selected": [{"kind": "skill", "name": "codebase-design", "action": "use_active_skill"}]
     },
     {
       "id": "mcp-read",
@@ -219,7 +219,7 @@
       "query": "接口延迟从 100ms 变成 2s，请定位性能瓶颈并给出最低风险优化",
       "profile_hints": ["database"],
       "expected_candidates": [{"kind": "skill", "name": "performance-optimization"}],
-      "host_selected": [{"kind": "skill", "name": "performance-optimization", "action": "load_skill"}]
+      "host_selected": [{"kind": "skill", "name": "performance-optimization", "action": "use_active_skill"}]
     },
     {
       "id": "unknown-domain-fail-closed",

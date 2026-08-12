@@ -22,9 +22,7 @@ Describe 'Native-first capability discovery and policy' {
         $manifestPath = Join-Path $TestDrive 'manifest.json'
         [ordered]@{
             schema_version = 2
-            active_profile = 'default'
-            resident_names = @('capability-router')
-            active = @($systematic)
+            active = @($debug, $systematic, $architecture, $physics, $grill, $tdd, $publisher)
             canonical = @($debug, $systematic, $architecture, $physics, $grill, $tdd, $publisher)
         } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
@@ -53,14 +51,15 @@ Describe 'Native-first capability discovery and policy' {
         $configPath = Join-Path $TestDrive 'skills.json'
         [ordered]@{
             skill_projection = [ordered]@{
-                active_profile = 'default'
-                profiles = [ordered]@{
-                    default = [ordered]@{ purpose = 'General debugging and completion verification.'; enabled_names = @('systematic-debugging') }
-                    engineering = [ordered]@{ purpose = 'Architecture, product specification, and delivery planning.'; enabled_names = @('codebase-design', 'grill-with-docs', 'to-spec') }
-                    dotnet = [ordered]@{ purpose = '.NET implementation and diagnosis.'; enabled_names = @('debug:dotnet', 'systematic-debugging') }
-                    python = [ordered]@{ purpose = 'Python implementation and diagnosis.'; enabled_names = @('systematic-debugging') }
-                    physics = [ordered]@{ purpose = 'Interactive physics teaching experiences.'; enabled_names = @('custom-junior-physics-animation') }
-                    strict = [ordered]@{ purpose = 'Strict engineering workflows.'; enabled_names = @('test-driven-development', 'systematic-debugging') }
+                discovery_catalog = [ordered]@{
+                    domain_memberships = [ordered]@{
+                        default = @('systematic-debugging')
+                        engineering = @('codebase-design', 'grill-with-docs', 'to-spec')
+                        dotnet = @('debug:dotnet', 'systematic-debugging')
+                        python = @('systematic-debugging')
+                        physics = @('custom-junior-physics-animation')
+                        strict = @('test-driven-development', 'systematic-debugging')
+                    }
                 }
             }
             mcp_servers = @(
@@ -125,10 +124,10 @@ Describe 'Native-first capability discovery and policy' {
 
         $LASTEXITCODE | Should Be 0
         $result = ($raw -join "`n") | ConvertFrom-Json
-        @($result.retrieval.profile_hints) | Should Be @('engineering', 'physics')
+        @($result.retrieval.domain_hints) | Should Be @('engineering', 'physics')
         @($result.retrieval.candidates.name) | Should Contain 'codebase-design'
         @($result.retrieval.candidates.name) | Should Contain 'custom-junior-physics-animation'
-        @($result.excluded | Where-Object { $_.kind -eq 'profile' -and $_.reason -eq 'unknown_profile' }).Count | Should Be 0
+        @($result.excluded | Where-Object reason -eq 'unknown_domain').Count | Should Be 0
     }
 
     It 'Uses host-selected discovery domains without requiring an active profile switch' {
@@ -138,7 +137,6 @@ Describe 'Native-first capability discovery and policy' {
         @($result.retrieval.candidates.name) | Should Contain 'codebase-design'
         @($result.retrieval.candidates.name) | Should Contain 'custom-junior-physics-animation'
         @($result.retrieval.candidates | Where-Object name -eq 'codebase-design')[0].domains | Should Contain 'engineering'
-        $result.current_profile | Should Be 'default'
         $result.writes_performed | Should Be $false
     }
 
@@ -146,7 +144,6 @@ Describe 'Native-first capability discovery and policy' {
         $result = Invoke-TestRouter '设计清晰的模块边界和稳定接口'
 
         $result.automatic_dispatch.scope | Should Be 'all_catalog_skills'
-        $result.automatic_dispatch.profile_switch_required | Should Be $false
         $result.retrieval.strategy | Should Be 'global_catalog_discovery'
         @($result.retrieval.candidates.name) | Should Contain 'codebase-design'
         @($result.retrieval.candidates.name) | Should Contain 'debug:dotnet'
@@ -159,7 +156,7 @@ Describe 'Native-first capability discovery and policy' {
 
         @($result.selected.name) | Should Be @('codebase-design')
         $result.selection_mode | Should Be 'host_selected'
-        $result.activation_plan[0].action | Should Be 'load_skill'
+        $result.activation_plan[0].action | Should Be 'use_active_skill'
         $result.activation_plan[0].auto_allowed | Should Be $true
     }
 
@@ -168,7 +165,7 @@ Describe 'Native-first capability discovery and policy' {
 
         @($result.selected.name) | Should Be @('grill-with-docs')
         $result.selection_mode | Should Be 'explicit'
-        $result.activation_plan[0].action | Should Be 'load_skill'
+        $result.activation_plan[0].action | Should Be 'use_active_skill'
     }
 
     It 'Does not treat an unsigiled capability name inside a negation as an explicit selection' {
@@ -202,7 +199,7 @@ Describe 'Native-first capability discovery and policy' {
     It 'Keeps operator skills behind approval' {
         $result = Invoke-TestRouter '把批准的 spec 发布到 tracker' @{ ProfileHint = @('engineering'); Candidate = @('skill|to-spec') }
 
-        $result.activation_plan[0].action | Should Be 'load_skill'
+        $result.activation_plan[0].action | Should Be 'use_active_skill'
         $result.activation_plan[0].load_allowed | Should Be $true
         $result.activation_plan[0].load_side_effect | Should Be 'read_only'
         $result.activation_plan[0].workflow_side_effect | Should Be 'controlled_write'
@@ -358,7 +355,7 @@ Describe 'Native-first capability discovery and policy' {
 
         @($result.selected.name) | Should Be @('codebase-design')
         $result.selection_mode | Should Be 'explicit'
-        $result.activation_plan[0].action | Should Be 'load_skill'
+        $result.activation_plan[0].action | Should Be 'use_active_skill'
         @($result.excluded | Where-Object { $_.name -eq 'missing-domain' -and $_.reason -eq 'unknown_domain' }).Count | Should Be 1
     }
 
@@ -412,8 +409,6 @@ Describe 'Native-first capability discovery and policy' {
         @($result.session_plan.reuse.name) | Should Not Contain 'debug:dotnet'
         @($result.session_plan.load.name) | Should Contain 'debug:dotnet'
         $result.session_snapshot.status | Should Be 'legacy_unverified'
-        $result.preheat_recommendation.profile | Should Be 'dotnet'
-        $result.preheat_recommendation.apply | Should Be $false
         $result.writes_performed | Should Be $false
     }
 

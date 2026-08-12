@@ -306,19 +306,6 @@ else {
                 }
             }
 
-            if ($null -eq $config.skill_projection -or $null -eq $config.skill_projection.profiles) { continue }
-            foreach ($profileProperty in @($config.skill_projection.profiles.PSObject.Properties)) {
-                $enabled = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-                foreach ($enabledName in @($profileProperty.Value.enabled_names)) {
-                    $enabled.Add(([string]$enabledName).Trim()) | Out-Null
-                }
-                if (-not $enabled.Contains($caller)) { continue }
-                foreach ($requiredName in $requiredNames) {
-                    if ($availableSkillNames.Contains($requiredName) -and -not $enabled.Contains($requiredName)) {
-                        Add-IntegrityFinding $errors "profile_missing_dependency" $caller ("profile '{0}' omits required skill: {1}" -f $profileProperty.Name, $requiredName) $ConfigPath
-                    }
-                }
-            }
         }
     }
     catch {

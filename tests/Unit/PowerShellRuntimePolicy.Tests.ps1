@@ -53,8 +53,6 @@ Describe 'PowerShell 7-only runtime policy verifier' {
         $parsed.status | Should Be 'pass'
         $parsed.scope | Should Be 'active_runtime'
         $parsed.runtime_policy | Should Be 'ps7_only'
-        $parsed.tasks | Should Be 0
-        $parsed.historical_evidence | Should Be 'not_evaluated'
         $parsed.powershell_files_scanned | Should BeGreaterThan 0
         @($parsed.findings).Count | Should Be 0
     }

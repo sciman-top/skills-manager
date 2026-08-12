@@ -52,8 +52,7 @@ function Test-DeniedPortablePath([string]$RelativePath) {
     $deniedPatterns = @(
         "^build\.log(?:\.\d+)?$",
         "^acl-backup-git-.*\.txt$",
-        "^\.build-cache\.json$",
-        "^docs/change-evidence/\d{8}-audit-runtime-.*\.md$"
+        "^\.build-cache\.json$"
     )
     foreach ($pattern in $deniedPatterns) {
         if ($rel -match $pattern) {
@@ -117,7 +116,7 @@ function Get-PortableFileSet([string]$RootPath) {
         Add-PortableFile $files $RootPath $file
     }
 
-    foreach ($dir in @(".github", "config", "src", "tests", "overrides", "scripts\quality", "scripts\release", "docs\governance", "docs\plans", "docs\runbooks", "docs\superpowers")) {
+    foreach ($dir in @(".github", "config", "src", "tests", "overrides", "scripts\quality", "scripts\release", "docs\runbooks")) {
         Add-PortableDirectory $files $RootPath $dir
     }
 
@@ -133,8 +132,6 @@ function Get-PortableFileSet([string]$RootPath) {
         ".governed-ai\dependency-baseline.json",
         ".governed-ai\quick-test-slice.prompt.md",
         ".governed-ai\quick-test-slice.recommendation.json",
-        "docs\governed-runtime-batch-validation.md",
-        "docs\change-evidence\template.md",
         "references\README.md",
         "references\reference-shelf.manifest.json",
         "references\updates\README.md"

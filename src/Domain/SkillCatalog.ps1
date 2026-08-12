@@ -25,7 +25,6 @@ function Get-SkillCatalogStringArray {
 
 function Get-SkillCatalogForbiddenSemanticFieldNames {
     return @(
-        'active_profile', 'current_profile', 'profile_excluded', 'profile_reachability',
         'semantic_score', 'semantic_rank', 'semantic_confidence', 'query_match',
         'selected_by_router', 'router_selected', 'ranking', 'rank', 'confidence'
     )

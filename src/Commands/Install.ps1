@@ -2495,9 +2495,6 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, [string]$Ver
             if ($projectionResult -and -not [bool]$projectionResult.skipped) {
                 $plan = $projectionResult.plan
                 Log ("技能投影已生成：entries={0}, unique={1}, disabled={2}, conflicts={3}, persisted={4}" -f @($plan.skills).Count, @($plan.unique_names).Count, @($plan.disabled).Count, @($plan.conflicts).Count, [bool]$projectionResult.persisted)
-                if ([bool]$projectionResult.reconciliation.signal_updated) {
-                    Log ("技能清单已变化，宿主应在任务边界刷新或新建会话并核验加载：{0}" -f [string]$projectionResult.reconciliation.signal_path) "WARN"
-                }
             }
         }
         catch {

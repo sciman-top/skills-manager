@@ -498,20 +498,6 @@ function Get-CfgContractErrors($cfg) {
                 if ([string]::IsNullOrWhiteSpace($replacement)) { $errors.Add(("skill_projection alias 缺少 replacement：{0}" -f $aliasName)) | Out-Null }
             }
         }
-        $profiles = Get-CfgObjectProperty $skillProjection "profiles"
-        if ($null -ne $profiles) {
-            $activeProfile = [string](Get-CfgObjectProperty $skillProjection "active_profile")
-            if ([string]::IsNullOrWhiteSpace($activeProfile)) { $errors.Add("skill_projection 配置 profiles 时必须声明 active_profile") | Out-Null }
-            $globalBudgetLimit = if (Test-CfgObjectProperty $skillProjection "budget_limit_chars") { [int](Get-CfgObjectProperty $skillProjection "budget_limit_chars") } else { 8000 }
-            foreach ($profileProperty in @($profiles.PSObject.Properties)) {
-                if (-not (Test-CfgArrayProperty $profileProperty.Value "enabled_names")) { $errors.Add(("skill_projection profile.enabled_names 必须是数组：{0}" -f $profileProperty.Name)) | Out-Null }
-                if (Test-CfgObjectProperty $profileProperty.Value "budget_limit_chars") {
-                    $profileBudgetLimit = [int](Get-CfgObjectProperty $profileProperty.Value "budget_limit_chars")
-                    if ($profileBudgetLimit -le 0) { $errors.Add(("skill_projection profile.budget_limit_chars 必须大于 0：{0}" -f $profileProperty.Name)) | Out-Null }
-                    elseif ($profileBudgetLimit -gt $globalBudgetLimit) { $errors.Add(("skill_projection profile.budget_limit_chars 不能超过全局上限：{0}" -f $profileProperty.Name)) | Out-Null }
-                }
-            }
-        }
     }
 
     $mcpProfiles = Get-CfgObjectProperty $cfg "mcp_profiles"
@@ -1111,14 +1097,6 @@ function Assert-Cfg($cfg) {
             $managedLinkConflicts = @($normalizedManagedLinkIncludes | Where-Object { $normalizedManagedLinkExcludes -contains $_ } | Sort-Object -Unique)
             Need ($managedLinkConflicts.Count -eq 0) ("skill_projection managed link include/exclude 冲突：{0}" -f ($managedLinkConflicts -join ", "))
         }
-        if ($projection.PSObject.Properties.Match("resident_names").Count -gt 0 -and $null -ne $projection.resident_names) {
-            Need (Assert-IsArray $projection.resident_names) "skill_projection.resident_names 必须是数组"
-            foreach ($residentName in @($projection.resident_names)) {
-                Need (-not [string]::IsNullOrWhiteSpace([string]$residentName)) "skill_projection.resident_names 不能包含空字符串"
-            }
-            $dupResidentNames = @(Get-DuplicateValues ($projection.resident_names | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() }))
-            Need ($dupResidentNames.Count -eq 0) ("skill_projection.resident_names 重复：{0}" -f ($dupResidentNames -join ", "))
-        }
         if ($projection.PSObject.Properties.Match("aliases").Count -gt 0 -and $null -ne $projection.aliases) {
             Need (Assert-IsArray $projection.aliases) "skill_projection.aliases 必须是数组"
             foreach ($alias in @($projection.aliases)) {
@@ -1127,19 +1105,6 @@ function Assert-Cfg($cfg) {
             }
             $dupAliases = @(Get-DuplicateValues ($projection.aliases | ForEach-Object { ([string]$_.name).ToLowerInvariant() }))
             Need ($dupAliases.Count -eq 0) ("skill_projection alias 重复：{0}" -f ($dupAliases -join ", "))
-        }
-        if ($projection.PSObject.Properties.Match("profiles").Count -gt 0 -and $null -ne $projection.profiles) {
-            Need (-not [string]::IsNullOrWhiteSpace([string]$projection.active_profile)) "skill_projection 配置 profiles 时必须声明 active_profile"
-            Need ($projection.profiles.PSObject.Properties.Match([string]$projection.active_profile).Count -gt 0) ("skill_projection active_profile 不存在：{0}" -f [string]$projection.active_profile)
-            foreach ($profileProperty in @($projection.profiles.PSObject.Properties)) {
-                Need (Test-CfgArrayProperty $profileProperty.Value "enabled_names") ("skill_projection profile.enabled_names 必须是数组：{0}" -f $profileProperty.Name)
-                if ($profileProperty.Value.PSObject.Properties.Match("budget_limit_chars").Count -gt 0) {
-                    $profileBudgetLimit = [int]$profileProperty.Value.budget_limit_chars
-                    $globalBudgetLimit = if ($projection.PSObject.Properties.Match("budget_limit_chars").Count -gt 0) { [int]$projection.budget_limit_chars } else { 8000 }
-                    Need ($profileBudgetLimit -gt 0) ("skill_projection profile.budget_limit_chars 必须大于 0：{0}" -f $profileProperty.Name)
-                    Need ($profileBudgetLimit -le $globalBudgetLimit) ("skill_projection profile.budget_limit_chars 不能超过全局上限：{0}" -f $profileProperty.Name)
-                }
-            }
         }
         if ($projection.PSObject.Properties.Match("budget_limit_chars").Count -gt 0) {
             Need ([int]$projection.budget_limit_chars -gt 0) "skill_projection.budget_limit_chars 必须大于 0"

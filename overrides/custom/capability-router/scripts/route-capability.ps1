@@ -473,34 +473,25 @@ if ($snapshotFile) {
     }
 }
 
-$profiles = @{}
-$profileCatalog = [Collections.Generic.List[object]]::new()
-$configuredProfiles = if ($null -ne $config) { $config.skill_projection.profiles } else { $null }
-$configuredActiveProfile = if ($null -ne $config) { [string]$config.skill_projection.active_profile } else { '' }
-if ($null -eq $configuredProfiles -and $null -ne $config -and $null -ne $config.skill_projection.profile_compatibility) {
-    $configuredProfiles = $config.skill_projection.profile_compatibility.profiles
-    $configuredActiveProfile = [string]$config.skill_projection.profile_compatibility.active_profile
-}
-$currentProfile = if ($null -ne $manifest) { [string]$manifest.active_profile } else { $configuredActiveProfile }
+$domains = @{}
+$domainCatalog = [Collections.Generic.List[object]]::new()
 if ($null -ne $catalog) {
     foreach ($domain in @($catalog.domains)) {
         $set = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         foreach ($name in @(Get-StringArray $domain.skill_names)) {
             if (-not $catalogStaleNames.Contains($name)) { $set.Add($name) | Out-Null }
         }
-        $profiles[[string]$domain.name] = $set
-        $profileCatalog.Add([pscustomobject]@{ name = [string]$domain.name; purpose = [string]$domain.purpose; enabled_name_count = $set.Count; active = $false }) | Out-Null
+        $domains[[string]$domain.name] = $set
+        $domainCatalog.Add([pscustomobject]@{ name = [string]$domain.name; purpose = [string]$domain.purpose; enabled_name_count = $set.Count }) | Out-Null
     }
 }
-elseif ($null -ne $configuredProfiles) {
-    foreach ($property in @($configuredProfiles.PSObject.Properties)) {
-        $names = @(Get-StringArray $property.Value.enabled_names)
+elseif ($null -ne $config -and $null -ne $config.skill_projection.discovery_catalog.domain_memberships) {
+    foreach ($property in @($config.skill_projection.discovery_catalog.domain_memberships.PSObject.Properties)) {
+        $names = @(Get-StringArray $property.Value)
         $set = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         foreach ($name in $names) { $set.Add($name) | Out-Null }
-        $profiles[$property.Name] = $set
-        $purpose = if ($property.Value.PSObject.Properties.Match('purpose').Count -gt 0) { [string]$property.Value.purpose } else { '' }
-        if ([string]::IsNullOrWhiteSpace($purpose)) { $purpose = ("Capabilities grouped under the '{0}' compatibility domain." -f $property.Name) }
-        $profileCatalog.Add([pscustomobject]@{ name = $property.Name; purpose = $purpose; enabled_name_count = $set.Count; active = ($property.Name -eq $currentProfile) }) | Out-Null
+        $domains[$property.Name] = $set
+        $domainCatalog.Add([pscustomobject]@{ name = $property.Name; purpose = ("Capabilities grouped under the '{0}' discovery domain." -f $property.Name); enabled_name_count = $set.Count }) | Out-Null
     }
 }
 
@@ -508,7 +499,7 @@ $validHints = [Collections.Generic.List[string]]::new()
 $requestedDomainHints = @(Get-ProfileHintArray @($DomainHint + $ProfileHint))
 $hasRequestedDomainHints = $requestedDomainHints.Count -gt 0
 foreach ($hint in $requestedDomainHints) {
-    if ($profiles.ContainsKey($hint)) { $validHints.Add($hint) | Out-Null }
+    if ($domains.ContainsKey($hint)) { $validHints.Add($hint) | Out-Null }
     else {
         $legacyOnly = @($DomainHint).Count -eq 0 -and @($ProfileHint).Count -gt 0
         $excludedResults.Add([pscustomobject]@{ kind = if ($legacyOnly) { 'profile' } else { 'domain' }; name = $hint; reason = if ($legacyOnly) { 'unknown_profile' } else { 'unknown_domain' } }) | Out-Null
@@ -539,11 +530,11 @@ function Convert-ToPublicEntry($Entry) {
     $role = if ($operatorRule.Count -gt 0) { 'operator' } elseif ($primaryRule.Count -gt 0) { [string]$primaryRule[0].role } else { '' }
     $sideEffect = if ($role -eq 'operator') { 'controlled_write' } else { [string]$Entry.side_effect }
     $loadSideEffect = if ($Entry.PSObject.Properties.Match('load_side_effect').Count -gt 0) { [string]$Entry.load_side_effect } else { 'read_only' }
-    $domains = if ([string]$Entry.kind -eq 'skill') { @($profiles.Keys | Where-Object { $profiles[$_].Contains([string]$Entry.name) } | Sort-Object) } else { @() }
+    $entryDomains = if ([string]$Entry.kind -eq 'skill') { @($domains.Keys | Where-Object { $domains[$_].Contains([string]$Entry.name) } | Sort-Object) } else { @() }
     return [pscustomobject]@{
         kind = [string]$Entry.kind; name = [string]$Entry.name; description = [string]$Entry.description
         path = [string]$Entry.path; active = [bool]$Entry.active; availability = [string]$Entry.availability
-        domains = @($domains)
+        domains = @($entryDomains)
         load_side_effect = $loadSideEffect; side_effect = $sideEffect; role = $role
         groups = @($rules.group | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique)
         routing_rules = @($rules)
@@ -589,7 +580,7 @@ foreach ($entry in $entries) {
             $include = $true
         }
         else {
-            foreach ($hint in $validHints) { if ($profiles[$hint].Contains([string]$entry.name)) { $include = $true; break } }
+            foreach ($hint in $validHints) { if ($domains[$hint].Contains([string]$entry.name)) { $include = $true; break } }
         }
     }
     elseif ($entry.kind -eq 'mcp') {
@@ -749,7 +740,6 @@ foreach ($item in $selected) {
 $selectionMode = 'discovery'
 if ($selected.Count -gt 0) { $selectionMode = if ($explicitRefs.Count -gt 0 -and @($Candidate).Count -eq 0) { 'explicit' } else { 'host_selected' } }
 elseif ($discovery.Count -eq 0) { $selectionMode = 'abstain' }
-$profileRecommendation = if ($validHints.Count -gt 0) { $validHints[0] } else { $currentProfile }
 $taskModel = [ordered]@{
     task_type = 'host_adjudicated'
     domain = 'host_adjudicated'
@@ -901,17 +891,13 @@ if (-not $catalogPolicyCacheHit -and $null -ne $CatalogPolicyCache -and -not [st
     catalog = [ordered]@{ status = $catalogStatus; fingerprint = $catalogFingerprint; path = $catalogFile }
     policy_path = $policyFile
     config_path = $configFile
-    current_profile = $currentProfile
     current_mcp_profile = $currentMcpProfile
     discovery_architecture = 'global_catalog_then_policy_v1'
     automatic_dispatch = [ordered]@{
         requested = ([bool]$AutoDiscover -or $globalCatalogDiscovery)
         scope = if ($globalCatalogDiscovery) { 'all_catalog_skills' } else { 'explicit_domains' }
-        profile_switch_required = $false
-        profile_mutation_allowed = $false
     }
-    discovery_domains = @($profileCatalog | Sort-Object name)
-    profile_catalog = @($profileCatalog | Sort-Object name)
+    discovery_domains = @($domainCatalog | Sort-Object name)
     host_snapshot = [ordered]@{
         status = $snapshotStatus
         reason = $snapshotReason
@@ -926,7 +912,6 @@ if (-not $catalogPolicyCacheHit -and $null -ne $CatalogPolicyCache -and -not [st
         strategy = if ($globalCatalogDiscovery) { 'global_catalog_discovery' } else { 'hierarchical_domain_discovery' }
         scope = if ($globalCatalogDiscovery) { 'all_catalog_skills' } else { 'domain_hints' }
         domain_hints = @($validHints)
-        profile_hints = @($validHints)
         candidate_count = $discovery.Count
         available_candidate_count = $availableCandidateCount
         truncated = $candidateTruncated
@@ -936,7 +921,6 @@ if (-not $catalogPolicyCacheHit -and $null -ne $CatalogPolicyCache -and -not [st
     capability_graph = $capabilityGraph
     session_snapshot = [ordered]@{ status = $sessionStatus; reason = $sessionReason; session_id = $sessionSnapshotIdentity; captured_at = $sessionCapturedAt; path = $sessionFile }
     session_plan = [ordered]@{ reuse = @($reuse); load = @($load); release = @(); state_update = [ordered]@{ semantic_owner = 'host_ai'; reuse_verified = ($sessionStatus -eq 'current') } }
-    preheat_recommendation = [ordered]@{ profile = $profileRecommendation; add = @($load); remove = @(); apply = $false }
     selection_mode = $selectionMode
     selected = @($selected)
     activation_plan = @($activationPlan)

@@ -1,1311 +1,152 @@
 . $PSScriptRoot\..\..\skills.ps1
 
-function New-ProjectionSkill([string]$root, [string]$dir, [string]$name, [string]$description = "fixture") {
-    $skillDir = Join-Path $root $dir
-    New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
-    Set-ContentUtf8 (Join-Path $skillDir "SKILL.md") ("---`nname: {0}`ndescription: {1}`n---`n" -f $name, $description)
-    return $skillDir
+function New-ProjectionSkill([string]$RootPath, [string]$Folder, [string]$Name, [string]$Description = 'fixture') {
+    $dir = Join-Path $RootPath $Folder
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    Set-ContentUtf8 (Join-Path $dir 'SKILL.md') ("---`nname: {0}`ndescription: {1}`n---`n" -f $Name, $Description)
+    return $dir
 }
 
-Describe "Skill projection" {
-    Context "Host projection promotion boundary" {
-        It "Allows a clean committed source revision for an external host target" {
-            $oldRoot = $script:Root
-            try {
-                $repo = Join-Path $TestDrive "promotion-clean"
-                New-Item -ItemType Directory -Path $repo -Force | Out-Null
-                & git -C $repo init -q
-                Set-Content -LiteralPath (Join-Path $repo "tracked.txt") -Value "clean" -Encoding UTF8
-                & git -C $repo add tracked.txt
-                & git -C $repo -c user.name=fixture -c user.email=fixture@example.invalid commit -q -m initial
-                $script:Root = $repo
-                $cfg = [pscustomobject]@{ targets = @([pscustomobject]@{ path = (Join-Path $TestDrive "host-clean") }) }
-                Mock Get-CurrentFullQualityGatePromotionReceipt {
-                    [pscustomobject]@{ status = 'passed'; path = 'receipt.json'; source_revision = (& git -C $script:Root rev-parse HEAD) }
-                }
+Describe 'Skill projection' {
+    It 'selects one canonical path and records a real content conflict' {
+        $high = Join-Path $TestDrive 'high'
+        $low = Join-Path $TestDrive 'low'
+        New-ProjectionSkill $high 'shared' 'shared' 'new' | Out-Null
+        New-ProjectionSkill $low 'shared' 'shared' 'old' | Out-Null
+        $plan = New-SkillProjectionPlan ([pscustomobject]@{
+                sources = @(
+                    [pscustomobject]@{ id = 'high'; path = $high; priority = 20; platforms = @('codex') }
+                    [pscustomobject]@{ id = 'low'; path = $low; priority = 10; platforms = @('codex') }
+                )
+            })
 
-                $result = Get-HostProjectionPromotionContext $cfg
-
-                $result.required | Should Be $true
-                $result.source_worktree_dirty | Should Be $false
-                $result.source_git_state | Should Be "clean"
-                $result.promotion_mode | Should Be "verified_clean_commit"
-                $result.source_revision | Should Match '^[0-9a-f]{40}$'
-                $result.gate_receipt_status | Should Be 'passed'
-                $result.gate_receipt_path | Should Be 'receipt.json'
-            }
-            finally {
-                $script:Root = $oldRoot
-            }
-        }
-
-        It "Blocks dirty source projection unless the explicit override is supplied" {
-            $oldRoot = $script:Root
-            try {
-                $repo = Join-Path $TestDrive "promotion-dirty"
-                New-Item -ItemType Directory -Path $repo -Force | Out-Null
-                & git -C $repo init -q
-                Set-Content -LiteralPath (Join-Path $repo "tracked.txt") -Value "before" -Encoding UTF8
-                & git -C $repo add tracked.txt
-                & git -C $repo -c user.name=fixture -c user.email=fixture@example.invalid commit -q -m initial
-                Set-Content -LiteralPath (Join-Path $repo "tracked.txt") -Value "after" -Encoding UTF8
-                $script:Root = $repo
-                $cfg = [pscustomobject]@{ targets = @([pscustomobject]@{ path = (Join-Path $TestDrive "host-dirty") }) }
-
-                { Get-HostProjectionPromotionContext $cfg } | Should Throw
-                $override = Get-HostProjectionPromotionContext $cfg -AllowUnverified
-                $override.source_worktree_dirty | Should Be $true
-                $override.source_git_state | Should Be "dirty"
-                $override.promotion_mode | Should Be "unverified_override"
-                $override.gate_receipt_status | Should Be "unverified_override"
-            }
-            finally {
-                $script:Root = $oldRoot
-            }
-        }
-
-        It "Does not require Git promotion for repository-local fixture targets" {
-            $oldRoot = $script:Root
-            try {
-                $script:Root = Join-Path $TestDrive "promotion-local"
-                New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
-                $cfg = [pscustomobject]@{ targets = @([pscustomobject]@{ path = (Join-Path $script:Root "out") }) }
-
-                $result = Get-HostProjectionPromotionContext $cfg
-
-                $result.required | Should Be $false
-                $result.promotion_mode | Should Be "local_only"
-            }
-            finally {
-                $script:Root = $oldRoot
-            }
-        }
+        @($plan.canonical).Count | Should Be 1
+        $plan.canonical[0].source_id | Should Be 'high'
+        $plan.disabled[0].decision | Should Be 'conflict_priority_winner'
+        @($plan.conflicts).Count | Should Be 1
     }
 
-    Context "Repository GPT-5.6 profile compatibility view" {
-        It "Keeps migrated routine profile data read-only and free from the mandatory Superpowers bootstrap" {
-            $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
-            $config = Get-ContentUtf8 (Join-Path $repoRoot "skills.json") | ConvertFrom-Json
-            $compatibility = $config.skill_projection.profile_compatibility
-            $compatibility.status | Should Be "read_only"
-            $compatibility.reachability_authority | Should Be "none"
-            $routineProfiles = @("default", "coding", "engineering", "python", "mcp", "review", "dotnet")
+    It 'keeps every canonical skill active except an explicit alias' {
+        $root = Join-Path $TestDrive 'alias'
+        New-ProjectionSkill $root 'social' 'social' | Out-Null
+        New-ProjectionSkill $root 'social-content' 'social-content' | Out-Null
+        New-ProjectionSkill $root 'cold' 'cold' | Out-Null
+        $plan = New-SkillProjectionPlan ([pscustomobject]@{
+                aliases = @([pscustomobject]@{ name = 'social-content'; replacement = 'social' })
+                sources = @([pscustomobject]@{ id = 'source'; path = $root; priority = 1; platforms = @('codex') })
+            })
 
-            foreach ($profileName in $routineProfiles) {
-                $enabledNames = @($compatibility.profiles.$profileName.enabled_names)
-                ($enabledNames -contains "using-superpowers") | Should Be $false
-            }
-
-            $defaultNames = @($compatibility.profiles.default.enabled_names)
-            $compatibility.profiles.default.budget_limit_chars | Should Be 8000
-            $defaultNames | Should Be @(
-                "systematic-debugging",
-                "verification-before-completion",
-                "domain-modeling",
-                "grill-with-docs",
-                "grilling"
-            )
-            @($config.skill_projection.resident_names) | Should Be @()
-            foreach ($workflowName in @("research", "brainstorming", "planning-and-task-breakdown", "git-workflow-and-versioning", "incremental-implementation")) {
-                ($defaultNames -contains $workflowName) | Should Be $false
-            }
-
-            $codingNames = @($compatibility.profiles.coding.enabled_names)
-            $compatibility.profiles.coding.budget_limit_chars | Should Be 7500
-            $codingNames | Should Be @(
-                "systematic-debugging",
-                "verification-before-completion",
-                "incremental-implementation",
-                "code-review-and-quality",
-                "api-and-interface-design",
-                "security-and-hardening"
-            )
-            foreach ($workflowName in @("brainstorming", "writing-plans", "executing-plans", "test-driven-development", "finishing-a-development-branch", "dispatching-parallel-agents", "subagent-driven-development", "requesting-code-review", "using-git-worktrees")) {
-                ($codingNames -contains $workflowName) | Should Be $false
-            }
-        }
-
-        It "Keeps the strict profile evidence-focused and removes the mandatory router" {
-            $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
-            $config = Get-ContentUtf8 (Join-Path $repoRoot "skills.json") | ConvertFrom-Json
-            $strictNames = @($config.skill_projection.profile_compatibility.profiles."coding-strict".enabled_names)
-            foreach ($workflowName in @("systematic-debugging", "test-driven-development", "verification-before-completion", "code-review-and-quality", "domain-modeling", "grill-with-docs", "grilling")) {
-                ($strictNames -contains $workflowName) | Should Be $true
-            }
-            foreach ($workflowName in @("using-superpowers", "brainstorming", "writing-plans", "executing-plans", "dispatching-parallel-agents", "subagent-driven-development", "using-git-worktrees")) {
-                ($strictNames -contains $workflowName) | Should Be $false
-            }
-
-            $routingPolicy = Get-ContentUtf8 (Join-Path $repoRoot "config\skill-routing-policy.json") | ConvertFrom-Json
-            $developmentFlow = @($routingPolicy.groups | Where-Object id -eq "development-flow")[0]
-            $developmentFlow.router | Should Be ""
-            $developmentFlow.selection_policy | Should Match "native"
-            (@($developmentFlow.members | Where-Object name -eq "using-superpowers").Count) | Should Be 0
-        }
-
-        It "Keeps engineering planning narrow after retiring tracker and scan workflow chains" {
-            $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
-            $config = Get-ContentUtf8 (Join-Path $repoRoot "skills.json") | ConvertFrom-Json
-            $engineeringNames = @($config.skill_projection.profile_compatibility.profiles.engineering.enabled_names)
-            $engineeringNames | Should Be @(
-                "codebase-design",
-                "idea-refine",
-                "spec-driven-development",
-                "planning-and-task-breakdown",
-                "research",
-                "domain-modeling",
-                "draft-spec"
-            )
-            ($engineeringNames -contains "draft-tickets") | Should Be $false
-
-            $policy = Get-ContentUtf8 (Join-Path $repoRoot "config\skill-routing-policy.json") | ConvertFrom-Json
-            $engineeringFlow = @($policy.groups | Where-Object id -eq "engineering-design-and-delivery")[0]
-            @($engineeringFlow.members | Where-Object name -eq "draft-spec").Count | Should Be 1
-            @($engineeringFlow.members | Where-Object name -eq "draft-tickets").Count | Should Be 1
-            $engineeringFlow.selection_policy | Should Match "draft-spec"
-            $engineeringFlow.selection_policy | Should Match "host"
-
-            $grillSkill = Get-ContentUtf8 (Join-Path $repoRoot "overrides\patches\grill-with-docs\SKILL.md")
-            $grillSkill | Should Not Match "disable-model-invocation:\s*true"
-            $grillPolicy = Get-ContentUtf8 (Join-Path $repoRoot "overrides\patches\grill-with-docs\agents\openai.yaml")
-            $grillPolicy | Should Match "allow_implicit_invocation:\s*true"
-
-            foreach ($retiredName in @("setup-matt-pocock-skills", "to-spec", "to-tickets", "improve-codebase-architecture")) {
-                @($config.imports | Where-Object { ([string]$_.skill -replace '^.*[\\/]', '') -eq $retiredName }).Count | Should Be 0
-                @($engineeringFlow.members | Where-Object name -eq $retiredName).Count | Should Be 0
-            }
-
-            @($config.skill_projection.aliases | Where-Object name -eq "to-prd")[0].replacement | Should Be "draft-spec"
-            @($config.skill_projection.aliases | Where-Object name -eq "to-issues")[0].replacement | Should Be "draft-tickets"
-        }
-
-        It "Requires Git promotion for an external native projection target" {
-            $oldRoot = $script:Root
-            try {
-                $script:Root = Join-Path $TestDrive 'promotion-native-local-repo'
-                New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
-                $external = Join-Path $TestDrive 'external-native-target'
-                $cfg = [pscustomobject]@{
-                    targets = @()
-                    skill_projection = [pscustomobject]@{
-                        user_skill_root = (Join-Path $script:Root 'local-user-root')
-                        native_projection = [pscustomobject]@{ target_root = $external }
-                    }
-                }
-
-                Test-ConfiguredHostProjection $cfg | Should Be $true
-            }
-            finally { $script:Root = $oldRoot }
-        }
-
-        It "Blocks a clean formal projection when the full gate receipt is unavailable" {
-            $oldRoot = $script:Root
-            try {
-                $repo = Join-Path $TestDrive "promotion-gate-missing"
-                New-Item -ItemType Directory -Path $repo -Force | Out-Null
-                & git -C $repo init -q
-                Set-Content -LiteralPath (Join-Path $repo "tracked.txt") -Value "clean" -Encoding UTF8
-                & git -C $repo add tracked.txt
-                & git -C $repo -c user.name=fixture -c user.email=fixture@example.invalid commit -q -m initial
-                $script:Root = $repo
-                $cfg = [pscustomobject]@{ targets = @([pscustomobject]@{ path = (Join-Path $TestDrive "host-gate-missing") }) }
-                Mock Get-CurrentFullQualityGatePromotionReceipt { throw 'quality_gate_current_source_stale' }
-
-                { Get-HostProjectionPromotionContext $cfg } | Should Throw
-            }
-            finally {
-                $script:Root = $oldRoot
-            }
-        }
+        @($plan.active.name | Sort-Object) | Should Be @('cold', 'social')
+        @($plan.disabled | Where-Object decision -eq 'alias_replaced').name | Should Be 'social-content'
     }
 
-    Context "Sync-CodexManagedSkillLinks" {
-        It "Rejects unknown parameters before creating links" {
-            $cfg = [pscustomobject]@{ managed_source_path = (Join-Path $TestDrive 'missing-managed'); user_skill_root = (Join-Path $TestDrive 'unknown-parameter-root') }
-            { Sync-CodexManagedSkillLinks -projectionCfg $cfg -DryRun } | Should Throw
-            Test-Path -LiteralPath $cfg.user_skill_root | Should Be $false
-        }
-        It "Projects managed skills into the standard user root and preserves .system" {
-            $oldDryRun = $script:DryRun
-            try {
-                $script:DryRun = $false
-                $managed = Join-Path $TestDrive "managed-links"
-                $userRoot = Join-Path $TestDrive "agents-skills"
-                New-ProjectionSkill $managed "demo" "demo" | Out-Null
-                New-Item -ItemType Directory -Path (Join-Path $managed "resource-only") -Force | Out-Null
-                New-ProjectionSkill (Join-Path $userRoot ".system") "system" "system" | Out-Null
-                $cfg = [pscustomobject]@{
-                    managed_source_path = $managed
-                    user_skill_root = $userRoot
-                }
-
-                $result = Sync-CodexManagedSkillLinks $cfg
-
-                $result.managed_link_count | Should Be 1
-                (Is-ReparsePoint (Join-Path $userRoot "demo")) | Should Be $true
-                (Test-Path -LiteralPath (Join-Path $userRoot "resource-only")) | Should Be $false
-                (Get-ReparsePointTargetFullPath (Join-Path $userRoot "demo")) | Should Be ([System.IO.Path]::GetFullPath((Join-Path $managed "demo")))
-                (Test-Path -LiteralPath (Join-Path $userRoot ".system\system\SKILL.md") -PathType Leaf) | Should Be $true
-            }
-            finally {
-                $script:DryRun = $oldDryRun
-            }
-        }
-
-        It "Excludes exact managed directories from Codex links without removing the source" {
-            $oldDryRun = $script:DryRun
-            try {
-                $script:DryRun = $false
-                $managed = Join-Path $TestDrive "managed-link-excludes"
-                $userRoot = Join-Path $TestDrive "agents-skills-excludes"
-                $keepDir = New-ProjectionSkill $managed "keep" "keep"
-                $excludeDir = New-ProjectionSkill $managed "exclude" "exclude"
-                $initialCfg = [pscustomobject]@{
-                    managed_source_path = $managed
-                    user_skill_root = $userRoot
-                }
-                Sync-CodexManagedSkillLinks $initialCfg | Out-Null
-                $cfg = [pscustomobject]@{
-                    managed_source_path = $managed
-                    user_skill_root = $userRoot
-                    managed_link_excludes = @("exclude")
-                }
-
-                $result = Sync-CodexManagedSkillLinks $cfg
-
-                $result.managed_link_count | Should Be 1
-                $result.stale_link_count | Should Be 1
-                (Is-ReparsePoint (Join-Path $userRoot "keep")) | Should Be $true
-                (Test-Path -LiteralPath (Join-Path $userRoot "exclude")) | Should Be $false
-                (Test-Path -LiteralPath (Join-Path $excludeDir "SKILL.md") -PathType Leaf) | Should Be $true
-                (Test-Path -LiteralPath (Join-Path $keepDir "SKILL.md") -PathType Leaf) | Should Be $true
-            }
-            finally {
-                $script:DryRun = $oldDryRun
-            }
-        }
-
-        It "Projects only explicitly included managed directories and removes stale managed links" {
-            $oldDryRun = $script:DryRun
-            try {
-                $script:DryRun = $false
-                $managed = Join-Path $TestDrive "managed-link-includes"
-                $userRoot = Join-Path $TestDrive "agents-skills-includes"
-                $coreDir = New-ProjectionSkill $managed "core" "core"
-                $coldDir = New-ProjectionSkill $managed "cold" "cold"
-                Sync-CodexManagedSkillLinks ([pscustomobject]@{ managed_source_path = $managed; user_skill_root = $userRoot }) | Out-Null
-
-                $result = Sync-CodexManagedSkillLinks ([pscustomobject]@{
-                        managed_source_path = $managed
-                        user_skill_root = $userRoot
-                        managed_link_includes = @("core")
-                    })
-
-                $result.managed_link_count | Should Be 1
-                $result.stale_link_count | Should Be 1
-                (Get-ReparsePointTargetFullPath (Join-Path $userRoot "core")) | Should Be ([IO.Path]::GetFullPath($coreDir))
-                (Test-Path -LiteralPath (Join-Path $userRoot "cold")) | Should Be $false
-                (Test-Path -LiteralPath (Join-Path $coldDir "SKILL.md") -PathType Leaf) | Should Be $true
-                { Sync-CodexManagedSkillLinks ([pscustomobject]@{ managed_source_path = $managed; user_skill_root = $userRoot; managed_link_includes = @("missing") }) } | Should Throw
-            }
-            finally {
-                $script:DryRun = $oldDryRun
-            }
-        }
-    }
-
-    Context "Capability-router catalog projection" {
-        It "builds a portable cold-discovery catalog without changing profile budgets" {
-            $oldDryRun = $script:DryRun
-            try {
-                $script:DryRun = $false
-                $managed = Join-Path $TestDrive "catalog-managed"
-                New-ProjectionSkill $managed "capability-router" "capability-router" "Portable cold discovery." | Out-Null
-                New-ProjectionSkill $managed "codebase-design" "codebase-design" "Design module boundaries." | Out-Null
-                New-ProjectionSkill $managed "unrouted-tool" "unrouted-tool" "Perform an uncommon cold workflow." | Out-Null
-                $policyPath = Join-Path $TestDrive "catalog-policy.json"
-                [ordered]@{
-                    groups = @(
-                        [ordered]@{ id = "engineering"; purpose = "Engineering"; selection_policy = "host decides"; members = @([ordered]@{ name = "codebase-design"; role = "reference"; activation = "architecture design"; negative_activation = "" }) },
-                        [ordered]@{ id = "review"; purpose = "Review"; selection_policy = "host decides"; members = @([ordered]@{ name = "codebase-design"; role = "workflow"; activation = "architecture review"; negative_activation = "" }) }
-                    )
-                    capabilities = @()
-                } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $policyPath -Encoding UTF8
-                $cfg = [pscustomobject]@{
-                    managed_source_path = $managed
-                    routing_policy_path = $policyPath
-                    profiles = [pscustomobject]@{
-                        engineering = [pscustomobject]@{ purpose = "Architecture and planning."; enabled_names = @("codebase-design") }
-                    }
-                    discovery_catalog = [pscustomobject]@{
-                        fallback_domain = "other"
-                        fallback_purpose = "Other installed cold skills."
-                        domain_memberships = [pscustomobject]@{ engineering = @("unrouted-tool") }
-                    }
-                }
-
-                $first = Sync-CapabilityRouterCatalog $cfg
-                $second = Sync-CapabilityRouterCatalog $cfg
-                $catalog = Get-ContentUtf8 $first.path | ConvertFrom-Json
-                $initialFingerprint = [string]$catalog.catalog_fingerprint
-
-                $first.changed | Should Be $true
-                $second.changed | Should Be $false
-                $catalog.schema_version | Should Be 1
-                $catalog.catalog_fingerprint | Should Match '^[0-9a-f]{64}$'
-                @($catalog.domains | Where-Object name -eq "engineering")[0].skill_names | Should Contain "unrouted-tool"
-                $design = @($catalog.skills | Where-Object name -eq "codebase-design")[0]
-                @($design.routing_rules).Count | Should Be 2
-                $design.relative_path | Should Be "..\codebase-design\SKILL.md"
-                $design.load_side_effect | Should Be "read_only"
-                $design.entrypoint_sha256 | Should Be (Get-FileContentHash (Join-Path $managed 'codebase-design\SKILL.md'))
-                ([IO.Path]::IsPathRooted([string]$design.relative_path)) | Should Be $false
-
-                Add-Content -LiteralPath (Join-Path $managed 'codebase-design\SKILL.md') -Encoding UTF8 -Value "`n# Changed body"
-                $third = Sync-CapabilityRouterCatalog $cfg
-                $updatedCatalog = Get-ContentUtf8 $third.path | ConvertFrom-Json
-                $updatedDesign = @($updatedCatalog.skills | Where-Object name -eq "codebase-design")[0]
-
-                $third.changed | Should Be $true
-                $updatedDesign.entrypoint_sha256 | Should Not Be $design.entrypoint_sha256
-                $updatedCatalog.catalog_fingerprint | Should Not Be $initialFingerprint
-            }
-            finally {
-                $script:DryRun = $oldDryRun
-            }
-        }
-    }
-
-    Context "New-SkillProjectionPlan" {
-        It "Unions resident skills into every profile without repeating them in profile config" {
-            $root = Join-Path $TestDrive "resident-profile"
-            New-ProjectionSkill $root "router" "router" | Out-Null
-            New-ProjectionSkill $root "worker" "worker" | Out-Null
-            $cfg = [pscustomobject]@{
-                enabled = $true
-                active_profile = "default"
-                resident_names = @("router")
-                profiles = [pscustomobject]@{
-                    default = [pscustomobject]@{ enabled_names = @("worker") }
-                    narrow = [pscustomobject]@{ enabled_names = @() }
-                }
-                sources = @([pscustomobject]@{ id = "fixture"; path = $root; priority = 1; platforms = @("codex") })
-            }
-
-            $plan = New-SkillProjectionPlan $cfg
-
-            @($plan.active_names | Sort-Object) -join "," | Should Be "router,worker"
-            @($plan.resident_names) | Should Be @("router")
-            ($plan.profile_budgets | Where-Object profile -eq "narrow").active_skill_count | Should Be 1
-        }
-
-        It "Rejects unknown resident skills" {
-            $root = Join-Path $TestDrive "unknown-resident"
-            New-ProjectionSkill $root "worker" "worker" | Out-Null
-            $cfg = [pscustomobject]@{
-                enabled = $true
-                resident_names = @("missing")
-                sources = @([pscustomobject]@{ id = "fixture"; path = $root; priority = 1; platforms = @("codex") })
-            }
-
-            { New-SkillProjectionPlan $cfg } | Should Throw
-        }
-
-        It "Keeps the higher-priority path for same-content duplicates" {
-            $managed = Join-Path $TestDrive "managed-same"
-            $legacy = Join-Path $TestDrive "legacy-same"
-            New-ProjectionSkill $managed "shared" "shared-skill" | Out-Null
-            New-ProjectionSkill $legacy "shared-copy" "shared-skill" | Out-Null
-
-            $cfg = [pscustomobject]@{
-                enabled = $true
-                sources = @(
-                    [pscustomobject]@{ id = "managed"; path = $managed; priority = 200; platforms = @("codex") }
-                    [pscustomobject]@{ id = "legacy"; path = $legacy; priority = 100; platforms = @("codex") }
-                )
-            }
-
-            $plan = New-SkillProjectionPlan $cfg
-
-            @($plan.skills).Count | Should Be 2
-            @($plan.disabled).Count | Should Be 1
-            $plan.disabled[0].source_id | Should Be "legacy"
-            $plan.disabled[0].decision | Should Be "duplicate_same_content"
-            @($plan.unique_names).Count | Should Be 1
-        }
-
-        It "Keeps the higher-priority path and records different-content conflicts" {
-            $managed = Join-Path $TestDrive "managed-conflict"
-            $legacy = Join-Path $TestDrive "legacy-conflict"
-            New-ProjectionSkill $managed "shared" "shared-skill" "managed version" | Out-Null
-            New-ProjectionSkill $legacy "shared-copy" "shared-skill" "legacy version" | Out-Null
-
-            $cfg = [pscustomobject]@{
-                enabled = $true
-                sources = @(
-                    [pscustomobject]@{ id = "managed"; path = $managed; priority = 200; platforms = @("codex") }
-                    [pscustomobject]@{ id = "legacy"; path = $legacy; priority = 100; platforms = @("codex") }
-                )
-            }
-
-            $plan = New-SkillProjectionPlan $cfg
-
-            @($plan.conflicts).Count | Should Be 1
-            $plan.conflicts[0].name | Should Be "shared-skill"
-            $plan.disabled[0].source_id | Should Be "legacy"
-            $plan.disabled[0].decision | Should Be "conflict_priority_winner"
-        }
-
-        It "Leaves skills that only exist in a lower-priority source enabled" {
-            $managed = Join-Path $TestDrive "managed-unique"
-            $legacy = Join-Path $TestDrive "legacy-unique"
-            New-ProjectionSkill $managed "managed-only" "managed-only" | Out-Null
-            New-ProjectionSkill $legacy "legacy-only" "legacy-only" | Out-Null
-
-            $cfg = [pscustomobject]@{
-                enabled = $true
-                sources = @(
-                    [pscustomobject]@{ id = "managed"; path = $managed; priority = 200; platforms = @("codex") }
-                    [pscustomobject]@{ id = "legacy"; path = $legacy; priority = 100; platforms = @("codex") }
-                )
-            }
-
-            $plan = New-SkillProjectionPlan $cfg
-
-            @($plan.disabled).Count | Should Be 0
-            @($plan.unique_names | Sort-Object) -join "," | Should Be "legacy-only,managed-only"
-        }
-
-        It "Prefers the .system copy inside the same root" {
-            $root = Join-Path $TestDrive "managed-system"
-            New-ProjectionSkill $root "ordinary" "openai-docs" "ordinary" | Out-Null
-            New-ProjectionSkill (Join-Path $root ".system") "openai-docs" "openai-docs" "system" | Out-Null
-
-            $cfg = [pscustomobject]@{
-                enabled = $true
-                sources = @([pscustomobject]@{ id = "managed"; path = $root; priority = 200; platforms = @("codex") })
-            }
-
-            $plan = New-SkillProjectionPlan $cfg
-
-            @($plan.disabled).Count | Should Be 1
-            $plan.disabled[0].path | Should Match "ordinary\\SKILL\.md$"
-            $plan.canonical[0].path | Should Match "\.system\\openai-docs\\SKILL\.md$"
-        }
-
-        It "Disables migrated aliases and points them at the replacement" {
-            $managed = Join-Path $TestDrive "managed-alias"
-            $legacy = Join-Path $TestDrive "legacy-alias"
-            New-ProjectionSkill $managed "social" "social" "current" | Out-Null
-            New-ProjectionSkill $legacy "social-content" "social-content" "legacy" | Out-Null
-
-            $cfg = [pscustomobject]@{
-                enabled = $true
-                aliases = @([pscustomobject]@{ name = "social-content"; replacement = "social" })
-                sources = @(
-                    [pscustomobject]@{ id = "managed"; path = $managed; priority = 200; platforms = @("codex") }
-                    [pscustomobject]@{ id = "legacy"; path = $legacy; priority = 100; platforms = @("codex") }
-                )
-            }
-
-            $plan = New-SkillProjectionPlan $cfg
-
-            @($plan.active).Count | Should Be 1
-            $plan.active[0].name | Should Be "social"
-            $alias = @($plan.disabled | Where-Object decision -eq "alias_replaced")[0]
-            $alias.name | Should Be "social-content"
-            $alias.replacement | Should Be "social"
-            $alias.canonical_path | Should Match "social\\SKILL\.md$"
-        }
-
-        It "Keeps aliases dormant when neither side is resident" {
-            $managed = Join-Path $TestDrive "managed-dormant-alias"
-            New-ProjectionSkill $managed "core" "core" "resident" | Out-Null
-
-            $plan = New-SkillProjectionPlan ([pscustomobject]@{
-                    enabled = $true
-                    aliases = @([pscustomobject]@{ name = "social-content"; replacement = "social" })
-                    sources = @([pscustomobject]@{ id = "managed"; path = $managed; priority = 200; platforms = @("codex") })
-                })
-
-            @($plan.active).Count | Should Be 1
-            $plan.active[0].name | Should Be "core"
-            @($plan.disabled | Where-Object decision -eq "alias_replaced").Count | Should Be 0
-        }
-
-        It "Rejects a projected alias whose replacement is absent" {
-            $managed = Join-Path $TestDrive "managed-broken-alias"
-            New-ProjectionSkill $managed "social-content" "social-content" "legacy" | Out-Null
-
-            { New-SkillProjectionPlan ([pscustomobject]@{
-                        enabled = $true
-                        aliases = @([pscustomobject]@{ name = "social-content"; replacement = "social" })
-                        sources = @([pscustomobject]@{ id = "managed"; path = $managed; priority = 200; platforms = @("codex") })
-                    }) } | Should Throw
-        }
-
-        It "Keeps system skills and only profile-enabled canonical skills active" {
-            $root = Join-Path $TestDrive "profile"
-            New-ProjectionSkill $root "always" "always" | Out-Null
-            New-ProjectionSkill $root "optional" "optional" | Out-Null
-            New-ProjectionSkill (Join-Path $root ".system") "system" "system" | Out-Null
-            $cfg = [pscustomobject]@{
-                enabled = $true
-                active_profile = "default"
-                profiles = [pscustomobject]@{
-                    default = [pscustomobject]@{ enabled_names = @("always") }
-                }
-                sources = @([pscustomobject]@{ id = "managed"; path = $root; priority = 200; platforms = @("codex") })
-            }
-
-            $plan = New-SkillProjectionPlan $cfg
-
-            @($plan.active | ForEach-Object name | Sort-Object) -join "," | Should Be "always,system"
-            @($plan.disabled | Where-Object decision -eq "profile_excluded" | ForEach-Object name) | Should Be @("optional")
-            $plan.active_profile | Should Be "default"
-        }
-
-        It "Distinguishes skills routed through another profile from unrouted skills" {
-            $root = Join-Path $TestDrive "profile-reachability"
-            New-ProjectionSkill $root "active" "active" | Out-Null
-            New-ProjectionSkill $root "elsewhere" "elsewhere" | Out-Null
-            New-ProjectionSkill $root "orphan" "orphan" | Out-Null
-            New-ProjectionSkill (Join-Path $root ".system") "system" "system" | Out-Null
-            $cfg = [pscustomobject]@{
-                enabled = $true
-                active_profile = "default"
-                profiles = [pscustomobject]@{
-                    default = [pscustomobject]@{ enabled_names = @("active") }
-                    coding = [pscustomobject]@{ enabled_names = @("active", "elsewhere") }
-                }
-                sources = @([pscustomobject]@{ id = "managed"; path = $root; priority = 200; platforms = @("codex") })
-            }
-
-            $plan = New-SkillProjectionPlan $cfg
-
-            $elsewhere = @($plan.disabled | Where-Object name -eq "elsewhere")[0]
-            $elsewhere.decision | Should Be "profile_excluded"
-            $elsewhere.profile_reachability | Should Be "routed_elsewhere"
-            @($elsewhere.available_profiles) | Should Be @("coding")
-            $orphan = @($plan.disabled | Where-Object name -eq "orphan")[0]
-            $orphan.decision | Should Be "profile_excluded"
-            $orphan.profile_reachability | Should Be "unrouted"
-            @($orphan.available_profiles).Count | Should Be 0
-            @($plan.profile_routed_names) | Should Be @("active", "elsewhere")
-            @($plan.unrouted_names) | Should Be @("orphan")
-            $plan.profile_routed_name_count | Should Be 2
-            $plan.unrouted_name_count | Should Be 1
-        }
-
-        It "Includes the external reserve in the metadata budget verdict" {
-            $root = Join-Path $TestDrive "budget"
-            New-ProjectionSkill $root "large" "large" ("x" * 90) | Out-Null
-            $cfg = [pscustomobject]@{
-                enabled = $true
-                budget_limit_chars = 100
-                external_metadata_reserve_chars = 10
-                sources = @([pscustomobject]@{ id = "managed"; path = $root; priority = 200; platforms = @("codex") })
-            }
-
-            $plan = New-SkillProjectionPlan $cfg
-
-            $plan.skill_metadata_chars | Should Be 95
-            $plan.estimated_metadata_chars | Should Be 105
-            $plan.budget_warning | Should Be $false
-            $plan.budget_pass | Should Be $false
-        }
-
-        It "Warns at ninety percent without failing the metadata budget" {
-            $root = Join-Path $TestDrive "budget-warning"
-            New-ProjectionSkill $root "large" "large" ("x" * 85) | Out-Null
-            $cfg = [pscustomobject]@{
-                enabled = $true
-                budget_limit_chars = 100
+    It 'uses one global metadata budget' {
+        $root = Join-Path $TestDrive 'budget'
+        New-ProjectionSkill $root 'large' 'large' ('x' * 80) | Out-Null
+        $plan = New-SkillProjectionPlan ([pscustomobject]@{
+                budget_limit_chars = 20
                 external_metadata_reserve_chars = 0
-                sources = @([pscustomobject]@{ id = "managed"; path = $root; priority = 200; platforms = @("codex") })
-            }
+                sources = @([pscustomobject]@{ id = 'source'; path = $root; priority = 1; platforms = @('codex') })
+            })
 
-            $plan = New-SkillProjectionPlan $cfg
-
-            $plan.estimated_metadata_chars | Should Be 90
-            $plan.budget_warning_threshold_percent | Should Be 90
-            $plan.budget_warning | Should Be $true
-            $plan.budget_pass | Should Be $true
-        }
-
-        It "Reports every profile budget even when the active profile passes" {
-            $root = Join-Path $TestDrive "all-profile-budgets"
-            New-ProjectionSkill $root "small" "small" "small" | Out-Null
-            New-ProjectionSkill $root "large" "large" ("x" * 90) | Out-Null
-            $cfg = [pscustomobject]@{
-                enabled = $true
-                active_profile = "default"
-                budget_limit_chars = 100
-                external_metadata_reserve_chars = 0
-                profiles = [pscustomobject]@{
-                    default = [pscustomobject]@{ enabled_names = @("small") }
-                    oversized = [pscustomobject]@{ enabled_names = @("small", "large") }
-                }
-                sources = @([pscustomobject]@{ id = "managed"; path = $root; priority = 200; platforms = @("codex") })
-            }
-
-            $plan = New-SkillProjectionPlan $cfg
-
-            @($plan.profile_budgets).Count | Should Be 2
-            ($plan.profile_budgets | Where-Object profile -eq "default").budget_pass | Should Be $true
-            ($plan.profile_budgets | Where-Object profile -eq "oversized").budget_pass | Should Be $false
-            $plan.all_profiles_budget_warning | Should Be $false
-            $plan.all_profiles_budget_pass | Should Be $false
-            $plan.budget_pass | Should Be $true
-        }
-
-        It "Enforces a lower per-profile budget without weakening the global ceiling" {
-            $root = Join-Path $TestDrive "profile-specific-budget"
-            New-ProjectionSkill $root "large" "large" ("x" * 96) | Out-Null
-            $cfg = [pscustomobject]@{
-                enabled = $true
-                active_profile = "default"
-                budget_limit_chars = 200
-                external_metadata_reserve_chars = 0
-                profiles = [pscustomobject]@{
-                    default = [pscustomobject]@{ enabled_names = @("large"); budget_limit_chars = 100 }
-                }
-                sources = @([pscustomobject]@{ id = "managed"; path = $root; priority = 200; platforms = @("codex") })
-            }
-
-            $plan = New-SkillProjectionPlan $cfg
-            $profileBudget = @($plan.profile_budgets)[0]
-
-            $plan.budget_limit_chars | Should Be 200
-            $plan.effective_budget_limit_chars | Should Be 100
-            $plan.budget_pass | Should Be $false
-            $profileBudget.budget_limit_chars | Should Be 100
-            $profileBudget.budget_pass | Should Be $false
-        }
-
-        It "Rejects a per-profile budget above the global ceiling" {
-            $root = Join-Path $TestDrive "profile-budget-above-global"
-            New-ProjectionSkill $root "small" "small" "small" | Out-Null
-            $cfg = [pscustomobject]@{
-                enabled = $true
-                active_profile = "default"
-                budget_limit_chars = 100
-                profiles = [pscustomobject]@{
-                    default = [pscustomobject]@{ enabled_names = @("small"); budget_limit_chars = 101 }
-                }
-                sources = @([pscustomobject]@{ id = "managed"; path = $root; priority = 200; platforms = @("codex") })
-            }
-
-            { New-SkillProjectionPlan $cfg } | Should Throw
-        }
+        $plan.budget_pass | Should Be $false
+        $plan.effective_budget_limit_chars | Should Be 20
+        $plan.PSObject.Properties.Match('profile_budgets').Count | Should Be 0
     }
 
-    Context "Package hash cache" {
-        It "Classifies managed cache hits as hot even when system skills still require full hashes" {
-            $hot = [pscustomobject]@{ cache_valid = $true; cache_hits = 110; cache_misses = 0; full_hash_count = 5 }
-            $miss = [pscustomobject]@{ cache_valid = $true; cache_hits = 109; cache_misses = 1; full_hash_count = 6 }
-            $invalid = [pscustomobject]@{ cache_valid = $false; cache_hits = 0; cache_misses = 0; full_hash_count = 115 }
-
-            (Test-SkillProjectionManagedCacheHotPath $hot) | Should Be $true
-            (Test-SkillProjectionManagedCacheHotPath $miss) | Should Be $false
-            (Test-SkillProjectionManagedCacheHotPath $invalid) | Should Be $false
-        }
-
-        It "Rejects malformed hashes when loading cache entries" {
-            $managedRoot = Join-Path $TestDrive "package-cache-malformed-managed"
-            $manifestPath = Join-Path $TestDrive "package-cache-malformed.json"
-            EnsureDir $managedRoot
-            Set-ContentUtf8 $manifestPath ([ordered]@{
-                    schema_version = 2
-                    package_hash_cache_schema = 1
-                    agent_build_signature = "sig-1"
-                    skills = @([ordered]@{
-                            skill_dir = (Join-Path $TestDrive "package-cache-malformed-user\demo")
-                            content_hash = ("a" * 64)
-                            package_hash = "not-a-sha256"
-                            package_fingerprint = ("b" * 64)
-                        })
-                } | ConvertTo-Json -Depth 10)
-            $cfg = [pscustomobject]@{ managed_source_path = $managedRoot }
-
-            $context = New-SkillProjectionPackageHashContext $cfg "sig-1" $manifestPath
-
-            $context.cache_valid | Should Be $true
-            $context.cache_entries.Count | Should Be 0
-        }
-
-        It "Reuses a package hash only for an unchanged managed Junction" {
-            $oldDryRun = $script:DryRun
-            try {
-                $script:DryRun = $false
-                $managedRoot = Join-Path $TestDrive "package-cache-managed"
-                $userRoot = Join-Path $TestDrive "package-cache-user"
-                $skillDir = New-ProjectionSkill $managedRoot "demo" "demo"
-                Set-ContentUtf8 (Join-Path $skillDir "asset.txt") "asset"
-                EnsureDir $userRoot
-                $linkDir = Join-Path $userRoot "demo"
-                New-Junction $linkDir $skillDir
-
-                $contentHash = Get-FileContentHash (Join-Path $linkDir "SKILL.md")
-                $packageHash = Get-SkillPackageContentHash $linkDir
-                $fingerprint = Get-DirectoryFingerprint $skillDir
-                $manifestPath = Join-Path $TestDrive "package-cache-hit.json"
-                Set-ContentUtf8 $manifestPath ([ordered]@{
-                        schema_version = 2
-                        package_hash_cache_schema = 1
-                        agent_build_signature = "sig-1"
-                        skills = @([ordered]@{
-                                skill_dir = $linkDir
-                                content_hash = $contentHash
-                                package_hash = $packageHash
-                                package_fingerprint = $fingerprint
-                            })
-                    } | ConvertTo-Json -Depth 10)
-                $cfg = [pscustomobject]@{
-                    managed_source_path = $managedRoot
-                    user_skill_root = $userRoot
-                }
-                $source = [pscustomobject]@{ id = "managed"; path = $userRoot; priority = 200; platforms = @("codex") }
-
-                $context = New-SkillProjectionPackageHashContext $cfg "sig-1" $manifestPath
-                Mock Get-SkillPackageContentHash { throw "full package hash should not run on a valid cache hit" }
-                $entries = @(Get-SkillProjectionSourceEntries $source 0 $context)
-
-                $entries.Count | Should Be 1
-                $entries[0].package_hash | Should Be $packageHash
-                $entries[0].package_fingerprint | Should Be $fingerprint
-                $context.cache_hits | Should Be 1
-                $context.cache_misses | Should Be 0
-                $context.full_hash_count | Should Be 0
-            }
-            finally {
-                $script:DryRun = $oldDryRun
-            }
-        }
-
-        It "Falls back to a full package hash when nested package metadata changes" {
-            $oldDryRun = $script:DryRun
-            try {
-                $script:DryRun = $false
-                $managedRoot = Join-Path $TestDrive "package-cache-stale-managed"
-                $userRoot = Join-Path $TestDrive "package-cache-stale-user"
-                $skillDir = New-ProjectionSkill $managedRoot "demo" "demo"
-                $assetPath = Join-Path $skillDir "asset.txt"
-                Set-ContentUtf8 $assetPath "before"
-                EnsureDir $userRoot
-                $linkDir = Join-Path $userRoot "demo"
-                New-Junction $linkDir $skillDir
-
-                $contentHash = Get-FileContentHash (Join-Path $linkDir "SKILL.md")
-                $fingerprint = Get-DirectoryFingerprint $skillDir
-                $manifestPath = Join-Path $TestDrive "package-cache-stale.json"
-                Set-ContentUtf8 $manifestPath ([ordered]@{
-                        schema_version = 2
-                        package_hash_cache_schema = 1
-                        agent_build_signature = "sig-1"
-                        skills = @([ordered]@{
-                                skill_dir = $linkDir
-                                content_hash = $contentHash
-                                package_hash = "stale-hash"
-                                package_fingerprint = $fingerprint
-                            })
-                    } | ConvertTo-Json -Depth 10)
-                Set-ContentUtf8 $assetPath "after-with-different-size"
-                $cfg = [pscustomobject]@{
-                    managed_source_path = $managedRoot
-                    user_skill_root = $userRoot
-                }
-                $source = [pscustomobject]@{ id = "managed"; path = $userRoot; priority = 200; platforms = @("codex") }
-
-                $context = New-SkillProjectionPackageHashContext $cfg "sig-1" $manifestPath
-                Mock Get-SkillPackageContentHash { "fresh-hash" }
-                $entries = @(Get-SkillProjectionSourceEntries $source 0 $context)
-
-                $entries[0].package_hash | Should Be "fresh-hash"
-                $context.cache_hits | Should Be 0
-                $context.cache_misses | Should Be 1
-                $context.full_hash_count | Should Be 1
-                Assert-MockCalled Get-SkillPackageContentHash -Times 1 -Exactly -Scope It
-            }
-            finally {
-                $script:DryRun = $oldDryRun
-            }
-        }
-
-        It "Falls back when the cached SKILL content hash does not match" {
-            $oldDryRun = $script:DryRun
-            try {
-                $script:DryRun = $false
-                $managedRoot = Join-Path $TestDrive "package-cache-content-managed"
-                $userRoot = Join-Path $TestDrive "package-cache-content-user"
-                $skillDir = New-ProjectionSkill $managedRoot "demo" "demo"
-                EnsureDir $userRoot
-                $linkDir = Join-Path $userRoot "demo"
-                New-Junction $linkDir $skillDir
-                $manifestPath = Join-Path $TestDrive "package-cache-content.json"
-                Set-ContentUtf8 $manifestPath ([ordered]@{
-                        schema_version = 2
-                        package_hash_cache_schema = 1
-                        agent_build_signature = "sig-1"
-                        skills = @([ordered]@{
-                                skill_dir = $linkDir
-                                content_hash = "wrong-content-hash"
-                                package_hash = "stale-hash"
-                                package_fingerprint = (Get-DirectoryFingerprint $skillDir)
-                            })
-                    } | ConvertTo-Json -Depth 10)
-                $cfg = [pscustomobject]@{
-                    managed_source_path = $managedRoot
-                    user_skill_root = $userRoot
-                }
-                $source = [pscustomobject]@{ id = "managed"; path = $userRoot; priority = 200; platforms = @("codex") }
-
-                $context = New-SkillProjectionPackageHashContext $cfg "sig-1" $manifestPath
-                Mock Get-SkillPackageContentHash { "fresh-content-hash" }
-                $entries = @(Get-SkillProjectionSourceEntries $source 0 $context)
-
-                $entries[0].package_hash | Should Be "fresh-content-hash"
-                $context.cache_misses | Should Be 1
-                Assert-MockCalled Get-SkillPackageContentHash -Times 1 -Exactly -Scope It
-            }
-            finally {
-                $script:DryRun = $oldDryRun
-            }
-        }
-    }
-
-    Context "Build-CodexSkillsProjectionToml" {
-        It "Replaces only the managed block and preserves user config" {
-            $existing = @'
+    It 'replaces only the managed TOML block' {
+        $existing = @'
 model = "gpt-5.6-sol"
-
 # BEGIN skills-manager:skills-projection
 [[skills.config]]
 path = "C:\\old\\SKILL.md"
 enabled = false
 # END skills-manager:skills-projection
-
-[windows]
-sandbox = "elevated"
-'@
-            $disabled = @([pscustomobject]@{ path = "C:\new\SKILL.md" })
-
-            $toml = Build-CodexSkillsProjectionToml $existing $disabled
-
-            $toml | Should Match 'model = "gpt-5\.6-sol"'
-            $toml | Should Match '\[windows\]'
-            $toml | Should Not Match 'C:\\\\old'
-            $toml | Should Match 'C:\\\\new\\\\SKILL\.md'
-            ([regex]::Matches($toml, 'BEGIN skills-manager:skills-projection')).Count | Should Be 1
-        }
-
-        It "Preserves foreign TOML tables moved inside the managed markers" {
-            $existing = @'
-model_provider = "codex_local_access"
-
-# BEGIN skills-manager:skills-projection
-[[skills.config]]
-path = "C:\\old\\SKILL.md"
-enabled = false
-
-[model_providers]
-
-[model_providers.codex_local_access]
-name = "Codex Local Access"
-base_url = "http://127.0.0.1:8045/v1"
-
 [features]
 unified_exec = true
-# END skills-manager:skills-projection
 '@
-            $disabled = @([pscustomobject]@{ path = "C:\new\SKILL.md" })
+        $toml = Build-CodexSkillsProjectionToml $existing @([pscustomobject]@{ path = 'C:\new\SKILL.md' })
 
-            $toml = Build-CodexSkillsProjectionToml $existing $disabled
-
-            $toml | Should Not Match 'C:\\\\old'
-            $toml | Should Match '\[model_providers\.codex_local_access\]'
-            $toml | Should Match 'base_url = "http://127\.0\.0\.1:8045/v1"'
-            $toml | Should Match '\[features\]'
-            $toml | Should Match 'unified_exec = true'
-            ([regex]::Matches($toml, 'BEGIN skills-manager:skills-projection')).Count | Should Be 1
-            $toml.IndexOf('[features]') | Should BeLessThan $toml.IndexOf('# BEGIN skills-manager:skills-projection')
-        }
+        $toml | Should Match 'model = "gpt-5\.6-sol"'
+        $toml | Should Match '\[features\]'
+        $toml | Should Not Match 'C:\\\\old'
+        $toml | Should Match ([regex]::Escape('C:\\new\\SKILL.md'))
+        ([regex]::Matches($toml, 'BEGIN skills-manager:skills-projection')).Count | Should Be 1
     }
 
-    Context "Sync-CodexSkillProjection aggregate transaction" {
-        It "Rolls back catalog, native projection, managed links, config, and manifest when the aggregate sync fails" {
-            $oldDryRun = $script:DryRun
-            try {
-                $script:DryRun = $false
-                $managedRoot = Join-Path $TestDrive "transaction-managed"
-                $userRoot = Join-Path $TestDrive "transaction-user"
-                $configPath = Join-Path $TestDrive "transaction-codex\config.toml"
-                $manifestPath = Join-Path $TestDrive "transaction-reports\projection.json"
-                $receiptPath = Join-Path $TestDrive "transaction-reports\native-receipt.json"
-                $routerDir = New-ProjectionSkill $managedRoot "capability-router" "capability-router"
-                $demoDir = New-ProjectionSkill $managedRoot "demo" "demo"
-                $retiredDir = New-ProjectionSkill $managedRoot "retired" "retired"
-                EnsureDir $userRoot
-                New-Junction (Join-Path $userRoot "retired") $retiredDir
-                $catalogPath = Join-Path $routerDir "catalog.json"
-                Set-ContentUtf8 $catalogPath "catalog-before"
-                Set-ContentUtf8 $configPath @'
-model = "fixture"
+    It 'projects only explicitly included managed skills' {
+        $oldDryRun = $script:DryRun
+        try {
+            $script:DryRun = $false
+            $managed = Join-Path $TestDrive 'managed'
+            $target = Join-Path $TestDrive 'target'
+            $keep = New-ProjectionSkill $managed 'keep' 'keep'
+            New-ProjectionSkill $managed 'cold' 'cold' | Out-Null
+            $result = Sync-CodexManagedSkillLinks ([pscustomobject]@{
+                    managed_source_path = $managed
+                    user_skill_root = $target
+                    managed_link_includes = @('keep')
+                })
 
-# BEGIN skills-manager:skills-projection
-[[skills.config]]
-path = "C:\\old\\SKILL.md"
-enabled = false
-# END skills-manager:skills-projection
-'@
-                Set-ContentUtf8 $manifestPath "manifest-before"
-                $projection = [pscustomobject]@{
-                    enabled = $true
-                    managed_source_path = $managedRoot
-                    user_skill_root = $userRoot
-                    managed_link_excludes = @("retired")
-                    codex_config_path = $configPath
-                    manifest_path = $manifestPath
-                    native_projection = [pscustomobject]@{
-                        enabled = $true
-                        owner = "skills-manager-test"
-                        target_root = $userRoot
-                        receipt_path = $receiptPath
-                        apply_requires_token = $true
-                        notification_method = "skills/changed"
-                        notification_mode = "plan_only"
-                    }
-                    sources = @([pscustomobject]@{ id = "managed"; path = $userRoot; priority = 200; platforms = @("codex") })
-                }
-
-                Mock Set-ContentUtf8 { throw "injected manifest write failure" } -ParameterFilter {
-                    [string]::Equals([IO.Path]::GetFullPath($path), [IO.Path]::GetFullPath($manifestPath), [StringComparison]::OrdinalIgnoreCase)
-                }
-
-                { Sync-CodexSkillProjection $projection } | Should Throw
-
-                (Get-ContentUtf8 $catalogPath) | Should Be "catalog-before"
-                (Get-ContentUtf8 $configPath) | Should Match 'C:\\\\old\\\\SKILL\.md'
-                (Get-ContentUtf8 $manifestPath) | Should Be "manifest-before"
-                (Test-Path -LiteralPath $receiptPath) | Should Be $false
-                (Test-Path -LiteralPath (Join-Path $userRoot "capability-router")) | Should Be $false
-                (Test-Path -LiteralPath (Join-Path $userRoot "demo")) | Should Be $false
-                (Is-ReparsePoint (Join-Path $userRoot "retired")) | Should Be $true
-                (Get-ReparsePointTargetFullPath (Join-Path $userRoot "retired")) | Should Be ([IO.Path]::GetFullPath($retiredDir))
-                (Test-Path -LiteralPath (Join-Path $demoDir "SKILL.md") -PathType Leaf) | Should Be $true
-            }
-            finally {
-                $script:DryRun = $oldDryRun
-            }
+            $result.managed_link_count | Should Be 1
+            (Get-ReparsePointTargetFullPath (Join-Path $target 'keep')) | Should Be ([IO.Path]::GetFullPath($keep))
+            Test-Path -LiteralPath (Join-Path $target 'cold') | Should Be $false
         }
+        finally { $script:DryRun = $oldDryRun }
     }
 
-    Context "Sync-CodexSkillProjection" {
-        It "Signals canonical inventory changes but ignores profile-only and no-op syncs" {
-            $oldDryRun = $script:DryRun
-            try {
-                $script:DryRun = $false
-                $source = Join-Path $TestDrive "reconciliation-source"
-                New-ProjectionSkill $source "alpha" "alpha" "first" | Out-Null
-                $configPath = Join-Path $TestDrive "reconciliation-codex\config.toml"
-                $manifestPath = Join-Path $TestDrive "reconciliation-reports\projection.json"
-                $signalPath = Join-Path $TestDrive "reconciliation-reports\pending.json"
-                $projection = [pscustomobject]@{
-                    enabled = $true
-                    active_profile = "default"
-                    profiles = [pscustomobject]@{
-                        default = [pscustomobject]@{ enabled_names = @("alpha") }
-                        coding = [pscustomobject]@{ enabled_names = @("alpha") }
-                    }
+    It 'does not write config or manifest during dry-run' {
+        $oldDryRun = $script:DryRun
+        try {
+            $script:DryRun = $true
+            $root = Join-Path $TestDrive 'dry-source'
+            New-ProjectionSkill $root 'demo' 'demo' | Out-Null
+            $configPath = Join-Path $TestDrive 'dry\config.toml'
+            $manifestPath = Join-Path $TestDrive 'dry\manifest.json'
+            $result = Sync-CodexSkillProjection ([pscustomobject]@{
                     codex_config_path = $configPath
                     manifest_path = $manifestPath
-                    reconciliation_signal_path = $signalPath
-                    sources = @([pscustomobject]@{ id = "managed"; path = $source; priority = 200; platforms = @("codex") })
-                }
+                    sources = @([pscustomobject]@{ id = 'source'; path = $root; priority = 1; platforms = @('codex') })
+                })
 
-                $initial = Sync-CodexSkillProjection $projection
-                $initial.reconciliation.status | Should Be "host_refresh_needed"
-                $initial.reconciliation.next_action | Should Be "fresh_session_or_host_handoff"
-                $initial.reconciliation.advisor_command | Should BeNullOrEmpty
-                $initial.reconciliation.added_names | Should Be @("alpha")
-                (Test-Path -LiteralPath $signalPath -PathType Leaf) | Should Be $true
-                $persistedSignal = Get-ContentUtf8 $signalPath | ConvertFrom-Json
-                $persistedSignal.status | Should Be "host_refresh_needed"
-                $persistedSignal.next_action | Should Be "fresh_session_or_host_handoff"
-                $persistedSignal.advisor_command | Should BeNullOrEmpty
-                $persistedSignal.PSObject.Properties.Match("signal_updated").Count | Should Be 0
-
-                Remove-Item -LiteralPath $signalPath -Force
-                $noOp = Sync-CodexSkillProjection $projection
-                $noOp.reconciliation.status | Should Be "not_needed"
-                (Test-Path -LiteralPath $signalPath) | Should Be $false
-
-                $projection.active_profile = "coding"
-                $profileOnly = Sync-CodexSkillProjection $projection
-                $profileOnly.reconciliation.status | Should Be "not_needed"
-                (Test-Path -LiteralPath $signalPath) | Should Be $false
-
-                New-ProjectionSkill $source "alpha" "alpha" "updated" | Out-Null
-                New-ProjectionSkill $source "beta" "beta" "second" | Out-Null
-                $metadataAndAdd = Sync-CodexSkillProjection $projection
-                $metadataAndAdd.reconciliation.status | Should Be "host_refresh_needed"
-                $metadataAndAdd.reconciliation.added_names | Should Be @("beta")
-                $metadataAndAdd.reconciliation.metadata_changed_names | Should Be @("alpha")
-
-                Remove-Item -LiteralPath (Join-Path $source "beta") -Recurse -Force
-                $removed = Sync-CodexSkillProjection $projection
-                $removed.reconciliation.removed_names | Should Be @("beta")
-            }
-            finally {
-                $script:DryRun = $oldDryRun
-            }
+            $result.persisted | Should Be $false
+            Test-Path -LiteralPath $configPath | Should Be $false
+            Test-Path -LiteralPath $manifestPath | Should Be $false
         }
-
-        It "Persists profile reachability summary in the manifest" {
-            $oldDryRun = $script:DryRun
-            try {
-                $script:DryRun = $false
-                $root = Join-Path $TestDrive "sync-profile-reachability"
-                New-ProjectionSkill $root "active" "active" | Out-Null
-                New-ProjectionSkill $root "elsewhere" "elsewhere" | Out-Null
-                New-ProjectionSkill $root "orphan" "orphan" | Out-Null
-                $configPath = Join-Path $TestDrive "sync-profile-reachability-codex\config.toml"
-                $manifestPath = Join-Path $TestDrive "sync-profile-reachability-reports\projection.json"
-                $projection = [pscustomobject]@{
-                    enabled = $true
-                    active_profile = "default"
-                    profiles = [pscustomobject]@{
-                        default = [pscustomobject]@{ enabled_names = @("active") }
-                        coding = [pscustomobject]@{ enabled_names = @("active", "elsewhere") }
-                    }
-                    codex_config_path = $configPath
-                    manifest_path = $manifestPath
-                    sources = @([pscustomobject]@{ id = "managed"; path = $root; priority = 200; platforms = @("codex") })
-                }
-
-                Sync-CodexSkillProjection $projection | Out-Null
-                $manifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
-
-                $manifest.profile_routed_name_count | Should Be 2
-                $manifest.unrouted_name_count | Should Be 1
-                @($manifest.profile_routed_names) | Should Be @("active", "elsewhere")
-                @($manifest.unrouted_names) | Should Be @("orphan")
-            }
-            finally {
-                $script:DryRun = $oldDryRun
-            }
-        }
-
-        It "Persists package cache metadata and reuses it on the next verified sync" {
-            $oldDryRun = $script:DryRun
-            try {
-                $script:DryRun = $false
-                $managedRoot = Join-Path $TestDrive "sync-cache-managed"
-                $userRoot = Join-Path $TestDrive "sync-cache-user"
-                New-ProjectionSkill $managedRoot "demo" "demo" | Out-Null
-                $configPath = Join-Path $TestDrive "sync-cache-codex\config.toml"
-                $manifestPath = Join-Path $TestDrive "sync-cache-reports\projection.json"
-                $projection = [pscustomobject]@{
-                    enabled = $true
-                    managed_source_path = $managedRoot
-                    user_skill_root = $userRoot
-                    codex_config_path = $configPath
-                    manifest_path = $manifestPath
-                    sources = @([pscustomobject]@{ id = "managed"; path = $userRoot; priority = 200; platforms = @("codex") })
-                }
-
-                $promotion = [pscustomobject]@{
-                    source_revision = "0123456789012345678901234567890123456789"
-                    source_worktree_dirty = $false
-                    source_git_state = "clean"
-                    promotion_mode = "verified_clean_commit"
-                    gate_receipt_status = "not_provided"
-                    gate_receipt_path = ""
-                }
-                $cold = Sync-CodexSkillProjection $projection "sig-1" $promotion
-                $coldManifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
-                $coldHash = [string]$cold.plan.skills[0].package_hash
-
-                $coldManifest.package_hash_cache_schema | Should Be 1
-                $coldManifest.agent_build_signature | Should Be "sig-1"
-                $coldManifest.source_revision | Should Be "0123456789012345678901234567890123456789"
-                $coldManifest.source_worktree_dirty | Should Be $false
-                $coldManifest.promotion_mode | Should Be "verified_clean_commit"
-                $coldManifest.gate_receipt.status | Should Be "not_provided"
-                $promotedAt = [string]$coldManifest.promoted_at
-                [string]::IsNullOrWhiteSpace([string]$coldManifest.skills[0].package_fingerprint) | Should Be $false
-
-                $hot = Sync-CodexSkillProjection $projection "sig-1"
-                $hotManifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
-
-                $hot.plan.skills[0].package_hash | Should Be $coldHash
-                $hot.package_hash_cache.cache_hits | Should Be 1
-                $hot.package_hash_cache.cache_misses | Should Be 0
-                $hot.package_hash_cache.full_hash_count | Should Be 0
-                $hotManifest.source_revision | Should Be "0123456789012345678901234567890123456789"
-                $hotManifest.promotion_mode | Should Be "verified_clean_commit"
-                $hotManifest.promoted_at | Should Be $promotedAt
-            }
-            finally {
-                $script:DryRun = $oldDryRun
-            }
-        }
-
-        It "invalidates inherited promotion provenance when the projected skill content changes" {
-            $oldDryRun = $script:DryRun
-            try {
-                $script:DryRun = $false
-                $managedRoot = Join-Path $TestDrive "projection-provenance-managed"
-                $userRoot = Join-Path $TestDrive "projection-provenance-user"
-                $skillDir = New-ProjectionSkill $managedRoot "demo" "demo" "before"
-                $configPath = Join-Path $TestDrive "projection-provenance-codex\config.toml"
-                $manifestPath = Join-Path $TestDrive "projection-provenance-reports\projection.json"
-                $projection = [pscustomobject]@{
-                    enabled = $true
-                    managed_source_path = $managedRoot
-                    user_skill_root = $userRoot
-                    codex_config_path = $configPath
-                    manifest_path = $manifestPath
-                    sources = @([pscustomobject]@{ id = "managed"; path = $userRoot; priority = 200; platforms = @("codex") })
-                }
-                $promotion = [pscustomobject]@{
-                    source_revision = "0123456789012345678901234567890123456789"
-                    source_worktree_dirty = $false
-                    source_git_state = "clean"
-                    promotion_mode = "verified_clean_commit"
-                    gate_receipt_status = "passed"
-                    gate_receipt_path = "receipt.json"
-                }
-
-                Sync-CodexSkillProjection $projection "sig-provenance" $promotion | Out-Null
-                $before = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
-                $before.promotion_mode | Should Be "verified_clean_commit"
-                $before.projection_fingerprint | Should Match '^[0-9a-f]{64}$'
-
-                Set-ContentUtf8 (Join-Path $skillDir "SKILL.md") "---`nname: demo`ndescription: after`n---`n"
-                Sync-CodexSkillProjection $projection "sig-provenance" | Out-Null
-                $after = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
-
-                $after.projection_fingerprint | Should Not Be $before.projection_fingerprint
-                $after.promotion_mode | Should Be "stale"
-                $after.source_revision | Should Be ""
-                $after.source_git_state | Should Be "not_evaluated_after_projection_change"
-                $after.gate_receipt.status | Should Be "stale"
-            }
-            finally {
-                $script:DryRun = $oldDryRun
-            }
-        }
-
-        It "Fails closed when an inactive profile exceeds the metadata budget" {
-            $oldDryRun = $script:DryRun
-            try {
-                $profileRoot = Join-Path $TestDrive "inactive-profile-budget"
-                New-ProjectionSkill $profileRoot "small" "small" "small" | Out-Null
-                New-ProjectionSkill $profileRoot "large" "large" ("x" * 90) | Out-Null
-                $script:DryRun = $true
-                $projection = [pscustomobject]@{
-                    enabled = $true
-                    active_profile = "default"
-                    budget_limit_chars = 100
-                    external_metadata_reserve_chars = 0
-                    profiles = [pscustomobject]@{
-                        default = [pscustomobject]@{ enabled_names = @("small") }
-                        oversized = [pscustomobject]@{ enabled_names = @("small", "large") }
-                    }
-                    sources = @([pscustomobject]@{ id = "managed"; path = $profileRoot; priority = 200; platforms = @("codex") })
-                }
-
-                (Test-Path -LiteralPath (Join-Path $profileRoot "small\SKILL.md") -PathType Leaf) | Should Be $true
-                @((Get-SkillProjectionSourceEntries $projection.sources[0] 0) | ForEach-Object name | Sort-Object) -join "," | Should Be "large,small"
-                $preflightPlan = New-SkillProjectionPlan $projection
-                @($preflightPlan.canonical).Count | Should Be 2
-                { Sync-CodexSkillProjection $projection } | Should Throw
-            }
-            finally {
-                $script:DryRun = $oldDryRun
-            }
-        }
-
-        It "Does not write config or manifest during dry-run" {
-            $oldDryRun = $script:DryRun
-            try {
-                $script:DryRun = $true
-                $source = Join-Path $TestDrive "dry-source"
-                New-ProjectionSkill $source "a" "same" "a" | Out-Null
-                New-ProjectionSkill $source "b" "same" "b" | Out-Null
-                $configPath = Join-Path $TestDrive "codex\config.toml"
-                $manifestPath = Join-Path $TestDrive "reports\projection.json"
-                $projection = [pscustomobject]@{
-                    enabled = $true
-                    codex_config_path = $configPath
-                    manifest_path = $manifestPath
-                    sources = @([pscustomobject]@{ id = "managed"; path = $source; priority = 200; platforms = @("codex") })
-                }
-
-                $result = Sync-CodexSkillProjection $projection
-
-                $result.success | Should Be $true
-                $result.persisted | Should Be $false
-                (Test-Path -LiteralPath $configPath) | Should Be $false
-                (Test-Path -LiteralPath $manifestPath) | Should Be $false
-            }
-            finally {
-                $script:DryRun = $oldDryRun
-            }
-        }
-
-        It "Removes the managed block and refreshes the manifest when projection is disabled" {
-            $oldDryRun = $script:DryRun
-            try {
-                $script:DryRun = $false
-                $configPath = Join-Path $TestDrive "disabled\config.toml"
-                $manifestPath = Join-Path $TestDrive "disabled\projection.json"
-                EnsureDir (Split-Path $configPath -Parent)
-                Set-ContentUtf8 $configPath @'
-model = "gpt-5.6-sol"
-
-# BEGIN skills-manager:skills-projection
-[[skills.config]]
-path = "C:\\old\\SKILL.md"
-enabled = false
-# END skills-manager:skills-projection
-'@
-                $projection = [pscustomobject]@{
-                    enabled = $false
-                    codex_config_path = $configPath
-                    manifest_path = $manifestPath
-                }
-
-                $result = Sync-CodexSkillProjection $projection
-                $config = Get-ContentUtf8 $configPath
-                $manifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
-
-                $result.success | Should Be $true
-                $result.persisted | Should Be $true
-                $result.changed | Should Be $true
-                $config | Should Match 'model = "gpt-5\.6-sol"'
-                $config | Should Not Match 'skills-manager:skills-projection'
-                $manifest.enabled | Should Be $false
-                $manifest.disabled_path_count | Should Be 0
-            }
-            finally {
-                $script:DryRun = $oldDryRun
-            }
-        }
+        finally { $script:DryRun = $oldDryRun }
     }
 
-    Context "P6 native projection configuration boundary" {
-        It "declares an explicit tokenized plan-only native projection surface" {
-            $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
-            $config = Get-ContentUtf8 (Join-Path $repoRoot "skills.json") | ConvertFrom-Json
-            $native = $config.skill_projection.native_projection
+    It 'rolls back links, config, catalog, and manifest after an aggregate write failure' {
+        $oldDryRun = $script:DryRun
+        try {
+            $script:DryRun = $false
+            $managed = Join-Path $TestDrive 'rollback-managed'
+            $target = Join-Path $TestDrive 'rollback-target'
+            $router = New-ProjectionSkill $managed 'capability-router' 'capability-router'
+            New-ProjectionSkill $managed 'demo' 'demo' | Out-Null
+            $configPath = Join-Path $TestDrive 'rollback\config.toml'
+            $manifestPath = Join-Path $TestDrive 'rollback\manifest.json'
+            $catalogPath = Join-Path $router 'catalog.json'
+            Set-ContentUtf8 $catalogPath 'catalog-before'
+            Set-ContentUtf8 $configPath 'model = "fixture"'
+            Set-ContentUtf8 $manifestPath 'manifest-before'
+            $projection = [pscustomobject]@{
+                managed_source_path = $managed
+                user_skill_root = $target
+                codex_config_path = $configPath
+                manifest_path = $manifestPath
+                sources = @([pscustomobject]@{ id = 'managed'; path = $target; priority = 1; platforms = @('codex') })
+            }
+            Mock Set-ContentUtf8 { throw 'injected manifest write failure' } -ParameterFilter {
+                [string]::Equals([IO.Path]::GetFullPath($path), [IO.Path]::GetFullPath($manifestPath), [StringComparison]::OrdinalIgnoreCase)
+            }
 
-            $native.enabled | Should Be $true
-            $native.owner | Should Be "skills-manager"
-            $native.apply_requires_token | Should Be $true
-            $native.notification_method | Should Be "skills/changed"
-            $native.notification_mode | Should Be "plan_only"
+            { Sync-CodexSkillProjection $projection } | Should Throw
+            Get-ContentUtf8 $catalogPath | Should Be 'catalog-before'
+            Get-ContentUtf8 $configPath | Should Be 'model = "fixture"'
+            Get-ContentUtf8 $manifestPath | Should Be 'manifest-before'
+            Test-Path -LiteralPath (Join-Path $target 'demo') | Should Be $false
         }
+        finally { $script:DryRun = $oldDryRun }
     }
 }

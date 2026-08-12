@@ -109,12 +109,12 @@ Set-Content -LiteralPath $marker -Value 'executed' -Encoding UTF8
         $raw | Should Match 'total_elapsed_ms'
     }
 
-    It "uses the general planning contract without a retired P6-specific gate" {
+    It "keeps completed planning contracts out of the active gate" {
         $root = Join-Path $PSScriptRoot "..\.."
         $scriptPath = Join-Path $root "scripts\quality\run-local-quality-gates.ps1"
         $raw = Get-Content -LiteralPath $scriptPath -Raw
 
-        $raw | Should Match "Invoke-QualityGate 'planning-contract'"
+        $raw | Should Not Match "planning-contract|verify-vnext-planning"
         $raw | Should Not Match "Invoke-QualityGate 'host-native-lifecycle-planning'"
         Test-Path -LiteralPath (Join-Path $root 'scripts\verify-host-native-skill-lifecycle-planning.ps1') | Should Be $false
         Test-Path -LiteralPath (Join-Path $root 'scripts\verify-lean-ai-delivery-planning.ps1') | Should Be $false
@@ -511,7 +511,6 @@ Describe 'fixture unit' {
     It "keeps fixture-heavy verifiers composable while retaining CLI exit behavior" {
         $root = Join-Path $PSScriptRoot "..\.."
         $contracts = @(
-            @{ Script = 'scripts\verify-vnext-planning.ps1'; Test = 'tests\Unit\ProductPlanning.Tests.ps1' },
             @{ Script = 'scripts\verify-skill-integrity.ps1'; Test = 'tests\Unit\SkillIntegrityScript.Tests.ps1' },
             @{ Script = 'scripts\verify-skills-config.ps1'; Test = 'tests\Unit\ConfigSchema.Tests.ps1' }
         )
@@ -539,30 +538,21 @@ Describe 'fixture unit' {
         $doctorText | Should Match 'Test-DoctorGitHubConnection'
     }
 
-    It "keeps audit runtime receipts out of curated change evidence" {
+    It "keeps audit runtime receipts under ignored reports" {
         $root = Join-Path $PSScriptRoot "..\.."
         $bundleText = Get-Content -LiteralPath (Join-Path $root 'src\Commands\AuditTargets.Bundle.ps1') -Raw
         $applyText = Get-Content -LiteralPath (Join-Path $root 'src\Commands\AuditTargets.Apply.ps1') -Raw
-        $hygieneText = Get-Content -LiteralPath (Join-Path $root 'scripts\quality\check-repo-hygiene.ps1') -Raw
-
         $bundleText | Should Match 'runtime-evidence-'
         $applyText | Should Match 'runtime-evidence-'
         $bundleText | Should Not Match 'Join-Path \$script:Root "docs\\change-evidence"'
         $applyText | Should Not Match 'Join-Path \$script:Root "docs\\change-evidence"'
-        $hygieneText | Should Match '\^docs/change-evidence/\\d\{8\}-audit-runtime-'
-        @(Get-ChildItem -LiteralPath (Join-Path $root 'docs\change-evidence') -File -Filter '*-audit-runtime-*.md').Count | Should Be 0
-        Test-Path -LiteralPath (Join-Path $root 'docs\archive\change-evidence\README.md') | Should Be $true
+        $bundleText | Should Match '\$dir = \$reportRoot'
+        $applyText | Should Match '\$dir = \$reportRoot'
     }
 
-    It "keeps the retired routing verifier compatibility-only" {
+    It "removes the retired routing verifier" {
         $root = Join-Path $PSScriptRoot "..\.."
-        $routingVerifier = Get-Content -LiteralPath (Join-Path $root 'scripts\verify-skill-routing.ps1') -Raw
-
-        $routingVerifier | Should Match 'skill-routing-compatibility'
-        $routingVerifier | Should Match 'compatibility_only'
-        $routingVerifier | Should Match 'profile_reachability_authority'
-        $routingVerifier | Should Not Match 'Get-SkillRoutingLocalInventory'
-        $routingVerifier | Should Not Match 'New-SkillRoutingReport'
+        Test-Path -LiteralPath (Join-Path $root 'scripts\verify-skill-routing.ps1') | Should Be $false
     }
 
     It "owns the complete quality-gate stage sequence and verifier wiring centrally" {
@@ -585,7 +575,6 @@ Describe 'fixture unit' {
             'dependency-baseline',
             'skills-config-contract',
             'host-capability-contract',
-            'planning-contract',
             'powershell-runtime-policy',
             'doctor-json-contract'
         )
@@ -597,7 +586,6 @@ Describe 'fixture unit' {
                 'verify-native-skill-metadata.ps1',
                 'verify-skills-config.ps1 -Mode enforce',
                 'verify-host-capability-matrix.ps1',
-                'verify-vnext-planning.ps1',
                 'verify-powershell-runtime-policy.ps1'
             )) {
             $raw | Should Match ([regex]::Escape($literal))
@@ -661,7 +649,7 @@ Describe 'fixture unit' {
         Test-Path -LiteralPath (Join-Path $root '.gitlab-ci.yml') | Should Be $false
     }
 
-    It "Reports untracked runtime artifacts without failing by default" {
+    It "ignores arbitrary historical evidence paths" {
         if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
             Write-Host "git not found, skipping repository hygiene runtime artifact test."
             return
@@ -688,8 +676,7 @@ Describe 'fixture unit' {
             $exitCode = $LASTEXITCODE
 
             $exitCode | Should Be 0
-            (($output -join "`n") | Should Match "untracked runtime artifacts")
-            (($output -join "`n") | Should Match "20260427-audit-runtime-dry-run-r-dry-123456\.md")
+            (($output -join "`n") | Should Match "Repository hygiene check passed")
         }
         finally {
             Pop-Location
@@ -727,7 +714,7 @@ Describe 'fixture unit' {
         }
     }
 
-    It "Evaluates tracked hygiene violations against worktree deletions without requiring staging" {
+    It "does not maintain a special tracked historical-evidence rule" {
         if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
             Write-Host "git not found, skipping repository hygiene worktree deletion test."
             return
@@ -748,7 +735,7 @@ Describe 'fixture unit' {
             git commit -m "fixture with legacy receipt" | Out-Null
 
             $null = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
-            $LASTEXITCODE | Should Be 1
+            $LASTEXITCODE | Should Be 0
 
             Remove-Item -LiteralPath $receipt
             $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)

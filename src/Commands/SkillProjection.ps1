@@ -11,23 +11,6 @@ function Resolve-SkillProjectionPath([string]$path) {
     return [System.IO.Path]::GetFullPath($resolved)
 }
 
-function New-SkillProjectionCompatibilityReport {
-    return [pscustomobject]([ordered]@{
-            schema_version = 1
-            enabled = $false
-            mode = 'compatibility_only'
-            policy_path = ''
-            group_count = 0
-            active_group_count = 0
-            finding_count = 0
-            blocking = $false
-            semantic_selection_applied = $false
-            profile_reachability_authority = 'none'
-            groups = @()
-            findings = @()
-        })
-}
-
 function Get-CodexEnabledPluginIds([string]$configPath) {
     if ([string]::IsNullOrWhiteSpace($configPath) -or -not (Test-Path -LiteralPath $configPath -PathType Leaf)) { return @() }
 
@@ -316,79 +299,6 @@ function Test-SkillProjectionManagedCacheHotPath($packageHashContext) {
         [int]$packageHashContext.cache_misses -eq 0)
 }
 
-function Get-SkillCanonicalInventorySnapshot($entries) {
-    $items = @($entries | ForEach-Object {
-            [ordered]@{
-                name = [string]$_.name
-                path = [string]$_.path
-                description = [string]$_.description
-            }
-        } | Sort-Object name, path)
-    $json = $items | ConvertTo-Json -Depth 5 -Compress
-    return [pscustomobject]@{
-        fingerprint = Get-StringSha256 ([string]$json)
-        items = $items
-    }
-}
-
-function Resolve-SkillProfileReconciliationSignalPath($projectionCfg, [string]$manifestPath) {
-    if ($projectionCfg.PSObject.Properties.Match("reconciliation_signal_path").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$projectionCfg.reconciliation_signal_path)) {
-        return (Resolve-SkillProjectionPath ([string]$projectionCfg.reconciliation_signal_path))
-    }
-    $manifestDir = Split-Path $manifestPath -Parent
-    if ([string]::Equals((Split-Path $manifestDir -Leaf), "skill-projection", [System.StringComparison]::OrdinalIgnoreCase)) {
-        return (Join-Path (Split-Path $manifestDir -Parent) "skill-profile-reconciliation\pending.json")
-    }
-    return (Join-Path $manifestDir "skill-profile-reconciliation-pending.json")
-}
-
-function New-SkillProfileReconciliationSignal($projectionCfg, [string]$manifestPath, $currentPlan) {
-    $previousCanonical = @()
-    if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
-        try {
-            $previousManifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
-            $previousCanonical = @($previousManifest.canonical)
-        }
-        catch {
-            $previousCanonical = @()
-        }
-    }
-    $before = Get-SkillCanonicalInventorySnapshot $previousCanonical
-    $after = Get-SkillCanonicalInventorySnapshot @($currentPlan.canonical)
-    $beforeByName = @{}
-    $afterByName = @{}
-    foreach ($entry in @($before.items)) { $beforeByName[[string]$entry.name] = $entry }
-    foreach ($entry in @($after.items)) { $afterByName[[string]$entry.name] = $entry }
-    $added = @($afterByName.Keys | Where-Object { -not $beforeByName.ContainsKey($_) } | Sort-Object)
-    $removed = @($beforeByName.Keys | Where-Object { -not $afterByName.ContainsKey($_) } | Sort-Object)
-    $metadataChanged = @($afterByName.Keys | Where-Object {
-            $beforeByName.ContainsKey($_) -and
-            (-not [string]::Equals([string]$beforeByName[$_].path, [string]$afterByName[$_].path, [System.StringComparison]::OrdinalIgnoreCase) -or
-                -not [string]::Equals([string]$beforeByName[$_].description, [string]$afterByName[$_].description, [System.StringComparison]::Ordinal))
-        } | Sort-Object)
-    $signalPath = Resolve-SkillProfileReconciliationSignalPath $projectionCfg $manifestPath
-    $changed = ($added.Count + $removed.Count + $metadataChanged.Count) -gt 0
-    $skillsConfigPath = Join-Path $Root "skills.json"
-    return [pscustomobject]([ordered]@{
-            schema_version = 1
-            status = if ($changed) { "host_refresh_needed" } else { "not_needed" }
-            reason = if ($changed) { "canonical_inventory_changed" } else { "canonical_inventory_unchanged" }
-            added_names = $added
-            removed_names = $removed
-            metadata_changed_names = $metadataChanged
-            before_fingerprint = [string]$before.fingerprint
-            after_fingerprint = [string]$after.fingerprint
-            config_sha256 = if (Test-Path -LiteralPath $skillsConfigPath -PathType Leaf) { Get-FileContentHash $skillsConfigPath } else { "" }
-            next_action = if ($changed) { "fresh_session_or_host_handoff" } else { "none" }
-            advisor_command = ""
-            active_profile = [string]$currentPlan.active_profile
-            profile_names = @($currentPlan.profile_budgets | ForEach-Object { [string]$_.profile } | Sort-Object -Unique)
-            unrouted_names = @($currentPlan.unrouted_names)
-            writes_profile_config = $false
-            signal_path = $signalPath
-        })
-}
-
 function Get-SkillProjectionSourceEntries($source, [int]$sourceOrder, $packageHashContext = $null) {
     $id = [string]$source.id
     $rootPath = Resolve-SkillProjectionPath ([string]$source.path)
@@ -459,15 +369,6 @@ function New-CapabilityRouterCatalogDocument($projectionCfg) {
 
     $domainPurpose = [ordered]@{}
     $membership = @{}
-    if ($projectionCfg.PSObject.Properties.Match('profiles').Count -gt 0 -and $null -ne $projectionCfg.profiles) {
-        foreach ($property in @($projectionCfg.profiles.PSObject.Properties | Sort-Object Name)) {
-            $domainName = [string]$property.Name
-            $purpose = if ($property.Value.PSObject.Properties.Match('purpose').Count -gt 0) { [string]$property.Value.purpose } else { '' }
-            $domainPurpose[$domainName] = $purpose
-            foreach ($skillName in @($property.Value.enabled_names)) { Add-CapabilityCatalogMembership $membership ([string]$skillName) $domainName }
-        }
-    }
-
     $fallbackDomain = 'other'
     $fallbackPurpose = 'Installed cold skills not assigned to a narrower domain; inspect only when no specific domain covers the request.'
     if ($projectionCfg.PSObject.Properties.Match('discovery_catalog').Count -gt 0 -and $null -ne $projectionCfg.discovery_catalog) {
@@ -637,7 +538,7 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
     Need ($null -ne $projectionCfg) "skill_projection 配置为空"
     $enabled = -not ($projectionCfg.PSObject.Properties.Match("enabled").Count -gt 0) -or [bool]$projectionCfg.enabled
     if (-not $enabled) {
-        return [pscustomobject]@{ schema_version = 2; enabled = $false; skills = @(); canonical = @(); active = @(); disabled = @(); conflicts = @(); unique_names = @(); active_names = @(); duplicate_name_groups = 0; profile_routed_name_count = 0; unrouted_name_count = 0; profile_routed_names = @(); unrouted_names = @(); external_skills = @(); external_inventory_warnings = @(); routing_report = (New-SkillProjectionCompatibilityReport) }
+        return [pscustomobject]@{ schema_version = 2; enabled = $false; skills = @(); canonical = @(); active = @(); disabled = @(); conflicts = @(); unique_names = @(); active_names = @(); duplicate_name_groups = 0; external_skills = @(); external_inventory_warnings = @() }
     }
 
     Need ($projectionCfg.PSObject.Properties.Match("sources").Count -gt 0 -and $null -ne $projectionCfg.sources) "skill_projection 缺少 sources"
@@ -731,97 +632,6 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
     $externalSkillMetadataChars = [int]$externalInventory.metadata_chars
     $effectiveExternalMetadataChars = [Math]::Max($externalReserveChars, $externalSkillMetadataChars)
 
-    $activeProfile = ""
-    $activeEffectiveBudgetLimitChars = $budgetLimitChars
-    $profileEnabledNames = $null
-    $profileBudgets = New-Object System.Collections.Generic.List[object]
-    $profileNamesBySkill = @{}
-    $profileRoutingEnabled = $false
-    $residentNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    if ($projectionCfg.PSObject.Properties.Match("resident_names").Count -gt 0 -and $null -ne $projectionCfg.resident_names) {
-        foreach ($rawName in @($projectionCfg.resident_names)) {
-            $name = ([string]$rawName).Trim()
-            Need (-not [string]::IsNullOrWhiteSpace($name)) "skill_projection.resident_names 不得包含空值"
-            Need ($canonicalByName.ContainsKey($name)) ("skill_projection resident_names 引用了不存在的技能：{0}" -f $name)
-            $residentNames.Add($name) | Out-Null
-        }
-    }
-    if ($projectionCfg.PSObject.Properties.Match("profiles").Count -gt 0 -and $null -ne $projectionCfg.profiles) {
-        $profileRoutingEnabled = $true
-        $activeProfile = ([string]$projectionCfg.active_profile).Trim()
-        Need (-not [string]::IsNullOrWhiteSpace($activeProfile)) "skill_projection 配置 profiles 时必须声明 active_profile"
-        $profileProperty = @($projectionCfg.profiles.PSObject.Properties | Where-Object { [string]::Equals($_.Name, $activeProfile, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1)
-        Need ($profileProperty.Count -eq 1) ("skill_projection active_profile 不存在：{0}" -f $activeProfile)
-        foreach ($property in @($projectionCfg.profiles.PSObject.Properties | Sort-Object Name)) {
-            $profileName = [string]$property.Name
-            $profile = $property.Value
-            Need ($null -ne $profile -and $profile.PSObject.Properties.Match("enabled_names").Count -gt 0) ("skill_projection profile 缺少 enabled_names：{0}" -f $profileName)
-            $profileBudgetLimitChars = if ($profile.PSObject.Properties.Match("budget_limit_chars").Count -gt 0) { [int]$profile.budget_limit_chars } else { $budgetLimitChars }
-            Need ($profileBudgetLimitChars -gt 0) ("skill_projection profile.budget_limit_chars 必须大于 0：{0}" -f $profileName)
-            Need ($profileBudgetLimitChars -le $budgetLimitChars) ("skill_projection profile.budget_limit_chars 不能超过全局上限：{0}" -f $profileName)
-            $enabledNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-            foreach ($rawName in @($profile.enabled_names)) {
-                $name = ([string]$rawName).Trim()
-                Need (-not [string]::IsNullOrWhiteSpace($name)) ("skill_projection profile enabled_names 不得包含空值：{0}" -f $profileName)
-                Need ($canonicalByName.ContainsKey($name)) ("skill_projection profile 引用了不存在的技能：{0}/{1}" -f $profileName, $name)
-                $enabledNames.Add($name) | Out-Null
-                if (-not $profileNamesBySkill.ContainsKey($name)) {
-                    $profileNamesBySkill[$name] = New-Object System.Collections.Generic.List[string]
-                }
-                $profileNamesBySkill[$name].Add($profileName) | Out-Null
-            }
-            foreach ($residentName in @($residentNames)) { $enabledNames.Add($residentName) | Out-Null }
-
-            $profileMetadataChars = 0
-            $profileActiveSkillCount = 0
-            foreach ($entry in @($canonical.ToArray())) {
-                $entryName = [string]$entry.name
-                if ($aliases.ContainsKey($entryName)) { continue }
-                if (-not [bool]$entry.is_system -and -not $enabledNames.Contains($entryName)) { continue }
-                $profileMetadataChars += $entryName.Length + ([string]$entry.description).Length
-                $profileActiveSkillCount++
-            }
-            $profileEstimatedChars = $profileMetadataChars + $effectiveExternalMetadataChars
-            $profileBudgetPass = $profileEstimatedChars -le $profileBudgetLimitChars
-            $profileBudgetWarning = $profileBudgetPass -and (($profileEstimatedChars * 100) -ge ($profileBudgetLimitChars * $budgetWarningThresholdPercent))
-            $profileBudgets.Add([pscustomobject]([ordered]@{
-                        profile = $profileName
-                        enabled_name_count = $enabledNames.Count
-                        active_skill_count = $profileActiveSkillCount
-                        skill_metadata_chars = $profileMetadataChars
-                        external_metadata_reserve_chars = $externalReserveChars
-                        external_skill_count = [int]$externalInventory.skill_count
-                        external_skill_metadata_chars = $externalSkillMetadataChars
-                        effective_external_metadata_chars = $effectiveExternalMetadataChars
-                        estimated_metadata_chars = $profileEstimatedChars
-                        budget_limit_chars = $profileBudgetLimitChars
-                        budget_warning_threshold_percent = $budgetWarningThresholdPercent
-                        budget_warning = $profileBudgetWarning
-                        budget_pass = $profileBudgetPass
-                    })) | Out-Null
-
-            if ([string]::Equals($profileName, $activeProfile, [System.StringComparison]::OrdinalIgnoreCase)) {
-                $profileEnabledNames = $enabledNames
-                $activeEffectiveBudgetLimitChars = $profileBudgetLimitChars
-            }
-        }
-    }
-
-    $profileRoutedNames = New-Object System.Collections.Generic.List[string]
-    $unroutedNames = New-Object System.Collections.Generic.List[string]
-    if ($profileRoutingEnabled) {
-        foreach ($entry in @($canonical.ToArray())) {
-            $entryName = [string]$entry.name
-            if ([bool]$entry.is_system -or $aliases.ContainsKey($entryName)) { continue }
-            if ($residentNames.Contains($entryName) -or $profileNamesBySkill.ContainsKey($entryName)) {
-                $profileRoutedNames.Add($entryName) | Out-Null
-            }
-            else {
-                $unroutedNames.Add($entryName) | Out-Null
-            }
-        }
-    }
-
     $active = New-Object System.Collections.Generic.List[object]
     foreach ($entry in @($canonical.ToArray() | Sort-Object name)) {
         $name = [string]$entry.name
@@ -843,28 +653,6 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
                     })) | Out-Null
             continue
         }
-        if ($null -ne $profileEnabledNames -and -not [bool]$entry.is_system -and -not $profileEnabledNames.Contains($name)) {
-            $availableProfiles = if ($profileNamesBySkill.ContainsKey($name)) {
-                @($profileNamesBySkill[$name].ToArray() | Sort-Object)
-            }
-            else { @() }
-            $disabled.Add([pscustomobject]([ordered]@{
-                        name = $name
-                        path = [string]$entry.path
-                        source_id = [string]$entry.source_id
-                        source_root = [string]$entry.source_root
-                        content_hash = [string]$entry.content_hash
-                        package_hash = [string]$entry.package_hash
-                        target_platforms = @($entry.target_platforms)
-                        canonical_path = [string]$entry.path
-                        canonical_source_id = [string]$entry.source_id
-                        active_profile = $activeProfile
-                        profile_reachability = if ($availableProfiles.Count -gt 0) { "routed_elsewhere" } else { "unrouted" }
-                        available_profiles = @($availableProfiles)
-                        decision = "profile_excluded"
-                    })) | Out-Null
-            continue
-        }
         $active.Add($entry) | Out-Null
     }
 
@@ -873,18 +661,13 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
         $skillMetadataChars += ([string]$entry.name).Length + ([string]$entry.description).Length
     }
     $estimatedMetadataChars = $skillMetadataChars + $effectiveExternalMetadataChars
-    $budgetPass = $estimatedMetadataChars -le $activeEffectiveBudgetLimitChars
-    $budgetWarning = $budgetPass -and (($estimatedMetadataChars * 100) -ge ($activeEffectiveBudgetLimitChars * $budgetWarningThresholdPercent))
-    $allProfilesBudgetPass = @($profileBudgets.ToArray() | Where-Object { -not [bool]$_.budget_pass }).Count -eq 0
-    $allProfilesBudgetWarning = @($profileBudgets.ToArray() | Where-Object { [bool]$_.budget_warning }).Count -gt 0
-    $routingReport = New-SkillProjectionCompatibilityReport
+    $budgetPass = $estimatedMetadataChars -le $budgetLimitChars
+    $budgetWarning = $budgetPass -and (($estimatedMetadataChars * 100) -ge ($budgetLimitChars * $budgetWarningThresholdPercent))
 
     return [pscustomobject]([ordered]@{
         schema_version = 2
         enabled = $true
         conflict_policy = "system_then_priority_then_source_order"
-        active_profile = $activeProfile
-        resident_names = @($residentNames | Sort-Object)
         skills = @($all.ToArray() | Sort-Object name, @{ Expression = "priority"; Descending = $true }, path)
         canonical = @($canonical.ToArray() | Sort-Object name)
         active = @($active.ToArray() | Sort-Object name)
@@ -893,10 +676,6 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
         unique_names = @($canonical.ToArray() | ForEach-Object { [string]$_.name } | Sort-Object)
         active_names = @($active.ToArray() | ForEach-Object { [string]$_.name } | Sort-Object)
         duplicate_name_groups = $duplicateGroups
-        profile_routed_name_count = $profileRoutedNames.Count
-        unrouted_name_count = $unroutedNames.Count
-        profile_routed_names = @($profileRoutedNames.ToArray() | Sort-Object)
-        unrouted_names = @($unroutedNames.ToArray() | Sort-Object)
         skill_metadata_chars = $skillMetadataChars
         external_metadata_reserve_chars = $externalReserveChars
         external_skill_count = [int]$externalInventory.skill_count
@@ -904,16 +683,12 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
         effective_external_metadata_chars = $effectiveExternalMetadataChars
         estimated_metadata_chars = $estimatedMetadataChars
         budget_limit_chars = $budgetLimitChars
-        effective_budget_limit_chars = $activeEffectiveBudgetLimitChars
+        effective_budget_limit_chars = $budgetLimitChars
         budget_warning_threshold_percent = $budgetWarningThresholdPercent
         budget_warning = $budgetWarning
         budget_pass = $budgetPass
-        all_profiles_budget_warning = $allProfilesBudgetWarning
-        all_profiles_budget_pass = $allProfilesBudgetPass
-        profile_budgets = @($profileBudgets.ToArray())
         external_skills = @($externalInventory.skills)
         external_inventory_warnings = @($externalInventory.warnings)
-        routing_report = $routingReport
     })
 }
 
@@ -1298,8 +1073,6 @@ function New-CodexSkillProjectionTransaction($projectionCfg, [string]$ConfigPath
     $filePaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $filePaths.Add([IO.Path]::GetFullPath($ConfigPath)) | Out-Null
     $filePaths.Add([IO.Path]::GetFullPath($ManifestPath)) | Out-Null
-    $filePaths.Add([IO.Path]::GetFullPath((Resolve-SkillProfileReconciliationSignalPath $projectionCfg $ManifestPath))) | Out-Null
-
     $managedRoot = ''
     if ($projectionCfg.PSObject.Properties.Match('managed_source_path').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$projectionCfg.managed_source_path)) {
         $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
@@ -1371,7 +1144,6 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBu
     $planTimer = [System.Diagnostics.Stopwatch]::StartNew()
     try { $plan = New-SkillProjectionPlan $projectionCfg $packageHashContext }
     finally { $planTimer.Stop() }
-    $reconciliation = New-SkillProfileReconciliationSignal $projectionCfg $manifestPath $plan
     $managedCacheHotPath = Test-SkillProjectionManagedCacheHotPath $packageHashContext
     $hashMetric = if ($managedCacheHotPath) { "projection_package_hash_cache_hit" } else { "projection_package_hash_full" }
     Log ("性能埋点：{0}" -f $hashMetric) "INFO" -NoHost -Data ([ordered]@{
@@ -1390,14 +1162,11 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBu
         })
     if ([bool]$plan.enabled) {
         if (-not $nativeProjectionAuthoritative) {
-            Need ([bool]$plan.budget_pass) ("技能描述预算超限：estimated={0}, limit={1}, profile={2}" -f [int]$plan.estimated_metadata_chars, [int]$plan.effective_budget_limit_chars, [string]$plan.active_profile)
-            $oversizedProfiles = @($plan.profile_budgets | Where-Object { -not [bool]$_.budget_pass } | ForEach-Object { "{0}={1}/{2}" -f $_.profile, $_.estimated_metadata_chars, $_.budget_limit_chars })
-            Need ([bool]$plan.all_profiles_budget_pass) ("技能 profile 描述预算超限：{0}" -f ($oversizedProfiles -join ", "))
+            Need ([bool]$plan.budget_pass) ("技能描述预算超限：estimated={0}, limit={1}" -f [int]$plan.estimated_metadata_chars, [int]$plan.effective_budget_limit_chars)
         }
         if ([bool]$plan.budget_warning) {
             Log ("技能描述预算接近上限：estimated={0}, limit={1}, threshold={2}%" -f [int]$plan.estimated_metadata_chars, [int]$plan.effective_budget_limit_chars, [int]$plan.budget_warning_threshold_percent) "WARN" -NoHost
         }
-        Need (-not [bool]$plan.routing_report.blocking) "技能路由策略存在 enforce 模式阻断项"
     }
 
     $existing = if (Test-Path -LiteralPath $configPath -PathType Leaf) { Get-ContentUtf8 $configPath } else { "" }
@@ -1433,17 +1202,11 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBu
                 enabled = [bool]$plan.enabled
                 generated_at = (Get-Date).ToString("o")
                 conflict_policy = [string]$plan.conflict_policy
-                active_profile = [string]$plan.active_profile
-                resident_names = @($plan.resident_names)
                 source_count = @($projectionCfg.sources).Count
                 skill_entry_count = @($plan.skills).Count
                 unique_name_count = @($plan.unique_names).Count
                 active_name_count = @($plan.active_names).Count
                 duplicate_name_groups = [int]$plan.duplicate_name_groups
-                profile_routed_name_count = [int]$plan.profile_routed_name_count
-                unrouted_name_count = [int]$plan.unrouted_name_count
-                profile_routed_names = @($plan.profile_routed_names)
-                unrouted_names = @($plan.unrouted_names)
                 disabled_path_count = @($plan.disabled).Count
                 conflict_count = @($plan.conflicts).Count
                 skill_metadata_chars = [int]$plan.skill_metadata_chars
@@ -1457,12 +1220,8 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBu
                 budget_warning_threshold_percent = [int]$plan.budget_warning_threshold_percent
                 budget_warning = [bool]$plan.budget_warning
                 budget_pass = [bool]$plan.budget_pass
-                all_profiles_budget_warning = [bool]$plan.all_profiles_budget_warning
-                all_profiles_budget_pass = [bool]$plan.all_profiles_budget_pass
-                profile_budgets = @($plan.profile_budgets)
                 external_skills = @($plan.external_skills)
                 external_inventory_warnings = @($plan.external_inventory_warnings)
-                routing_report = $plan.routing_report
                 skills = @($plan.skills)
                 canonical = @($plan.canonical)
                 active = @($plan.active)
@@ -1488,15 +1247,6 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBu
                 } }
             }
             Set-ContentUtf8 $manifestPath ($manifest | ConvertTo-Json -Depth 20)
-            if ([string]$reconciliation.status -eq "host_refresh_needed") {
-                try {
-                    Set-ContentUtf8 ([string]$reconciliation.signal_path) ($reconciliation | ConvertTo-Json -Depth 8)
-                    $reconciliation | Add-Member -NotePropertyName signal_updated -NotePropertyValue $true -Force
-                }
-                catch {
-                    Log ("host refresh signal 写入失败，不阻断技能投影：{0}" -f $_.Exception.Message) "WARN"
-                }
-            }
             return [pscustomobject]@{ backup_path = if ($null -eq $writtenBackupPath) { "" } else { [string]$writtenBackupPath } }
         } @{ command = "技能投影"; changed = $changed } -NoHost
         $backupPath = [string]$writeResult.backup_path
@@ -1512,7 +1262,6 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBu
         managed_link_projection = $linkProjection
         capability_catalog_projection = $catalogProjection
         native_projection = if (-not $nativeProjectionAuthoritative) { $null } else { [pscustomobject]@{ plan = $nativeProjectionPlan; apply = $nativeProjectionApply } }
-        reconciliation = $reconciliation
         package_hash_cache = [pscustomobject]@{
             cache_valid = [bool]$packageHashContext.cache_valid
             cache_hits = [int]$packageHashContext.cache_hits
@@ -1555,36 +1304,6 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
             throw ("Skill projection sync failed and aggregate rollback was incomplete. original={0}; rollback={1}" -f $failure.Exception.Message, ($rollbackErrors -join ' | '))
         }
         throw $failure
-    }
-}
-
-function Copy-SkillProjectionConfig($projectionCfg) {
-    Need ($null -ne $projectionCfg) "skill_projection 配置为空"
-    return (($projectionCfg | ConvertTo-Json -Depth 50) | ConvertFrom-Json)
-}
-
-function New-SkillProfileReconciliationPlan($projectionCfg, [string]$configSha256, $proposal = $null, [int]$maxChanges = 50) {
-    return [pscustomobject][ordered]@{
-        schema_version = 1
-        command = "plan-skill-profile-reconciliation"
-        decision_owner = "host_ai"
-        semantic_routing_performed = $false
-        status = "deprecated"
-        pass = $false
-        apply_allowed = $false
-        writes_performed = $false
-        current = $null
-        actions = @()
-        proposed = $null
-        overlaps = @()
-        finding_count = 1
-        findings = @([pscustomobject][ordered]@{
-            code = "profile_reconciliation_retired"
-            message = "Profile reconciliation proposals are retired; use the read-only compatibility view and explicit versioned migration or receipt rollback."
-            blocking = $true
-            skill = ""
-            profile = ""
-        })
     }
 }
 
