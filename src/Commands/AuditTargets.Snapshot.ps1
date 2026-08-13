@@ -1,65 +1,3 @@
-function ConvertFrom-AuditYamlBlockScalar($lines, [int]$startIndex, [int]$parentIndent, [string]$indicator) {
-    $rawBlock = New-Object System.Collections.Generic.List[string]
-    $contentIndent = [int]::MaxValue
-    for ($index = $startIndex; $index -lt @($lines).Count; $index++) {
-        $line = [string]$lines[$index]
-        if ($line -match "^\s*---\s*$") { break }
-        if ([string]::IsNullOrWhiteSpace($line)) {
-            $rawBlock.Add("") | Out-Null
-            continue
-        }
-
-        $indent = ([regex]::Match($line, "^\s*")).Value.Length
-        if ($indent -le $parentIndent) { break }
-        if ($indent -lt $contentIndent) { $contentIndent = $indent }
-        $rawBlock.Add($line) | Out-Null
-    }
-
-    if ($rawBlock.Count -eq 0 -or $contentIndent -eq [int]::MaxValue) { return "" }
-    $dedented = @($rawBlock | ForEach-Object {
-            if ([string]::IsNullOrWhiteSpace([string]$_)) { "" }
-            else { ([string]$_).Substring([Math]::Min($contentIndent, ([string]$_).Length)) }
-        })
-    $text = $dedented -join "`n"
-    if ($indicator.StartsWith(">", [System.StringComparison]::Ordinal)) {
-        $text = [regex]::Replace($text, "(?<!\n)\n(?!\n)", " ")
-    }
-    return $text.TrimEnd("`r", "`n")
-}
-
-function Get-SkillMetadataFromFile([string]$skillFile) {
-    $meta = [ordered]@{
-        declared_name = ""
-        description = ""
-        trigger_summary = ""
-    }
-    if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) {
-        return [pscustomobject]$meta
-    }
-
-    $lines = @(Get-Content -LiteralPath $skillFile -TotalCount 120 -ErrorAction SilentlyContinue)
-    for ($index = 0; $index -lt $lines.Count; $index++) {
-        $line = [string]$lines[$index]
-        if ([string]::IsNullOrWhiteSpace($meta.declared_name) -and $line -match "^\s*name:\s*(.+?)\s*$") {
-            $meta.declared_name = $Matches[1].Trim().Trim("'`"")
-        }
-        if ([string]::IsNullOrWhiteSpace($meta.description) -and $line -match "^\s*description:\s*(.+?)\s*$") {
-            $descriptionValue = $Matches[1].Trim().Trim("'`"")
-            if ($descriptionValue -match "^[>|][+-]?$") {
-                $parentIndent = ([regex]::Match($line, "^\s*")).Value.Length
-                $meta.description = ConvertFrom-AuditYamlBlockScalar $lines ($index + 1) $parentIndent $descriptionValue
-            }
-            else {
-                $meta.description = $descriptionValue
-            }
-        }
-        if ([string]::IsNullOrWhiteSpace($meta.trigger_summary) -and $line -match "(?i)trigger|use when|when to use|使用场景") {
-            $meta.trigger_summary = $line.Trim()
-        }
-    }
-    return [pscustomobject]$meta
-}
-
 function Resolve-InstalledSkillLocalPath($cfg, $mapping) {
     if ($null -eq $mapping) { return "" }
     $vendor = [string]$mapping.vendor
@@ -96,7 +34,7 @@ function Get-InstalledSkillFacts($cfg = $null) {
         if (-not $seen.Add(("{0}|{1}" -f $vendor, $from))) { continue }
         $localPath = Resolve-InstalledSkillLocalPath $cfg $m
         $skillFile = Join-Path $localPath "SKILL.md"
-        $meta = Get-SkillMetadataFromFile $skillFile
+        $meta = Read-SkillMetadata $skillFile -Observation
         $contentHash = [string](Get-FileContentHash $skillFile)
 
         $repo = ""
@@ -142,7 +80,7 @@ function Get-InstalledSkillFacts($cfg = $null) {
         $localPath = [string]$override.full
         $skillFile = Join-Path $localPath "SKILL.md"
         if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { continue }
-        $meta = Get-SkillMetadataFromFile $skillFile
+        $meta = Read-SkillMetadata $skillFile -Observation
         $contentHash = [string](Get-FileContentHash $skillFile)
         $facts += [pscustomobject]([ordered]@{
             name = if ([string]::IsNullOrWhiteSpace($meta.declared_name)) { $from } else { $meta.declared_name }
@@ -173,7 +111,7 @@ function Get-AuditExternalSkillFacts($cfg = $null) {
     $userSkillRoot = Resolve-SkillProjectionPath $userSkillRootRaw
     foreach ($item in @(Get-SkillProjectionFiles $userSkillRoot | Where-Object is_system)) {
         $skillFile = [string]$item.file
-        $meta = Get-SkillMetadataFromFile $skillFile
+        $meta = Read-SkillMetadata $skillFile -Observation
         $name = [string]$meta.declared_name
         if ([string]::IsNullOrWhiteSpace($name) -or -not $seen.Add(('system::{0}' -f $name))) { continue }
         $facts.Add([pscustomobject]([ordered]@{

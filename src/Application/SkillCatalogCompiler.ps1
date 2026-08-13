@@ -20,14 +20,6 @@ function Get-SkillCatalogCompilerTextHash([string]$Text) {
     finally { $sha.Dispose() }
 }
 
-function Read-SkillCatalogCompilerMetadata {
-    param([Parameter(Mandatory = $true)][string]$Path)
-
-    $metadata = Read-SkillMetadata $Path -Observation
-    $reason = @($metadata.findings | Where-Object severity -eq 'error' | Select-Object -First 1 -ExpandProperty code)
-    return [pscustomobject]@{ valid = [bool]$metadata.valid; reason = if ($reason.Count) { [string]$reason[0] } else { '' }; name = [string]$metadata.name; description = [string]$metadata.description; text = [string]$metadata.text }
-}
-
 function ConvertTo-SkillCatalogCompilerEntry {
     param(
         [Parameter(Mandatory = $true)]$InputEntry,
@@ -49,10 +41,11 @@ function ConvertTo-SkillCatalogCompilerEntry {
     $metadata = $null
     $text = ''
     if (-not [string]::IsNullOrWhiteSpace($path) -and (Test-Path -LiteralPath $path -PathType Leaf)) {
-        $metadata = Read-SkillCatalogCompilerMetadata $path
+        $metadata = Read-SkillMetadata $path -Observation
         $text = [string]$metadata.text
         if (-not [bool]$metadata.valid) {
-            if ($null -ne $Findings) { $Findings.Add((New-OperationFinding 'skill_metadata_invalid' 'error' $path ([string]$metadata.reason))) | Out-Null }
+            $reason = @($metadata.findings | Where-Object severity -eq 'error' | Select-Object -First 1 -ExpandProperty code)
+            if ($null -ne $Findings) { $Findings.Add((New-OperationFinding 'skill_metadata_invalid' 'error' $path $(if ($reason.Count) { [string]$reason[0] } else { 'skill_metadata_invalid' }))) | Out-Null }
             return $null
         }
     }

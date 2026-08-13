@@ -149,6 +149,84 @@ function Get-CodexPluginSkillInventory {
     return [pscustomobject]$result
 }
 
+function Get-CodexMcpObservation {
+    [CmdletBinding()]
+    param()
+
+    $result = [ordered]@{ authority = 'codex_mcp_list_json'; freshness = 'unknown'; coverage = 'platform_na'; servers = @(); warnings = @() }
+    try { $payload = Invoke-CodexCliJson -Arguments @('mcp', 'list', '--json') }
+    catch {
+        $result.warnings = @([pscustomobject][ordered]@{ code = 'codex_mcp_observation_unavailable'; subject = 'codex mcp list --json'; message = $_.Exception.Message })
+        return [pscustomobject]$result
+    }
+    $servers = @($payload)
+    if ($null -eq $payload -or @($servers | Where-Object { $null -eq $_.PSObject.Properties['name'] -or $null -eq $_.PSObject.Properties['enabled'] }).Count -gt 0) {
+        $result.warnings = @([pscustomobject][ordered]@{ code = 'codex_mcp_observation_contract_invalid'; subject = 'root'; message = 'Codex MCP inventory JSON must contain server objects with name and enabled fields.' })
+        return [pscustomobject]$result
+    }
+    $result.freshness = 'fresh'; $result.coverage = 'complete'
+    $result.servers = @($servers | Sort-Object name | ForEach-Object {
+            [pscustomobject][ordered]@{
+                name = [string]$_.name
+                enabled = [bool]$_.enabled
+                disabled_reason = [string]$_.disabled_reason
+                auth_status = [string]$_.auth_status
+                transport_type = [string]$_.transport.type
+            }
+        })
+    return [pscustomobject]$result
+}
+
+function Get-CodexDoctorObservation {
+    [CmdletBinding()]
+    param()
+
+    $result = [ordered]@{ authority = 'codex_doctor_json'; freshness = 'unknown'; coverage = 'platform_na'; schema_version = 0; codex_version = ''; overall_status = 'unknown'; checks = @(); warnings = @() }
+    try { $payload = Invoke-CodexCliJson -Arguments @('doctor', '--json') }
+    catch {
+        $result.warnings = @([pscustomobject][ordered]@{ code = 'codex_doctor_observation_unavailable'; subject = 'codex doctor --json'; message = $_.Exception.Message })
+        return [pscustomobject]$result
+    }
+    if ($null -eq $payload -or $null -eq $payload.PSObject.Properties['schemaVersion'] -or $null -eq $payload.PSObject.Properties['checks']) {
+        $result.warnings = @([pscustomobject][ordered]@{ code = 'codex_doctor_observation_contract_invalid'; subject = 'schemaVersion/checks'; message = 'Codex doctor JSON is missing required fields.' })
+        return [pscustomobject]$result
+    }
+    $result.freshness = 'fresh'; $result.coverage = 'complete'; $result.schema_version = [int]$payload.schemaVersion
+    $result.codex_version = [string]$payload.codexVersion; $result.overall_status = [string]$payload.overallStatus
+    $checks = if ($payload.checks -is [array]) { @($payload.checks) } else { @($payload.checks.PSObject.Properties | ForEach-Object Value) }
+    $result.checks = @($checks | Sort-Object id | ForEach-Object {
+            $check = $_
+            [pscustomobject][ordered]@{ id = [string]$check.id; category = [string]$check.category; status = [string]$check.status; summary = [string]$check.summary }
+        })
+    return [pscustomobject]$result
+}
+
+function Get-CodexHostObservation {
+    [CmdletBinding()]
+    param($PluginInventory = $null, [object[]]$ExpectedMcpServers = @())
+
+    if ($null -eq $PluginInventory) { $PluginInventory = Get-CodexPluginSkillInventory }
+    $mcp = Get-CodexMcpObservation
+    $doctor = Get-CodexDoctorObservation
+    $expected = @($ExpectedMcpServers | ForEach-Object { [string]$_.name } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+    $observed = @($mcp.servers | ForEach-Object { [string]$_.name } | Sort-Object -Unique)
+    return [pscustomobject][ordered]@{
+        schema_version = 1
+        truth_boundary = 'read_only_cli_observation_not_host_loaded'
+        generated_at = [DateTimeOffset]::UtcNow.ToString('o')
+        plugins = [pscustomobject][ordered]@{ authority = [string]$PluginInventory.authority; freshness = [string]$PluginInventory.freshness; coverage = [string]$PluginInventory.coverage; enabled_plugin_ids = @($PluginInventory.enabled_plugin_ids); skill_count = [int]$PluginInventory.skill_count; warnings = @($PluginInventory.warnings) }
+        mcp = $mcp
+        doctor = $doctor
+        configured_mcp_names = $expected
+        observed_mcp_names = $observed
+        configured_not_observed = @($expected | Where-Object { $_ -notin $observed })
+        observed_not_configured = @($observed | Where-Object { $_ -notin $expected })
+        provider_calls = 0
+        native_mutations = 0
+        writes = 0
+    }
+}
+
 function ConvertFrom-SkillMetadataScalar {
     param([string]$Value)
     $valueText = $Value.Trim()
@@ -164,7 +242,7 @@ function Read-SkillMetadata {
 
     $fullPath = [IO.Path]::GetFullPath($Path)
     $text = if (Test-Path -LiteralPath $fullPath -PathType Leaf) { [IO.File]::ReadAllText($fullPath) } else { '' }
-    $result = [ordered]@{ valid = $false; path = $fullPath; text = $text; name = ''; declared_name = ''; description = ''; fields = [ordered]@{}; findings = @() }
+    $result = [ordered]@{ valid = $false; path = $fullPath; text = $text; name = ''; declared_name = ''; description = ''; trigger_summary = ''; fields = [ordered]@{}; findings = @() }
     $frontmatter = [regex]::Match($text, '\A(?:\uFEFF)?---[ \t]*\r?\n(?<body>.*?)(?:\r?\n)---[ \t]*(?:\r?\n|\z)', [Text.RegularExpressions.RegexOptions]::Singleline)
     if (-not $frontmatter.Success) {
         $result.findings = @([pscustomobject]@{ code='frontmatter_missing'; severity='error'; field=''; message='SKILL.md requires YAML frontmatter.' })
@@ -177,9 +255,17 @@ function Read-SkillMetadata {
         if ($line -notmatch '^(?<key>[A-Za-z][A-Za-z0-9-]*):(?:[ \t]*(?<value>.*))?$') { continue }
         $key = [string]$Matches.key; $raw = [string]$Matches.value
         if ($raw -in @('|','>','|-','>-','|+','>+')) {
-            $parts = [Collections.Generic.List[string]]::new()
-            while ($index + 1 -lt $lines.Count -and [string]$lines[$index + 1] -match '^[ \t]+') { $index++; $parts.Add(([string]$lines[$index]).Trim()) | Out-Null }
-            $fields[$key] = if ($raw.StartsWith('>')) { ($parts -join ' ') } else { ($parts -join "`n") }
+            $rawParts = [Collections.Generic.List[string]]::new(); $contentIndent = [int]::MaxValue
+            while ($index + 1 -lt $lines.Count) {
+                $candidate = [string]$lines[$index + 1]
+                if (-not [string]::IsNullOrWhiteSpace($candidate) -and $candidate -notmatch '^[ \t]+') { break }
+                $index++; $rawParts.Add($candidate) | Out-Null
+                if (-not [string]::IsNullOrWhiteSpace($candidate)) { $contentIndent = [Math]::Min($contentIndent, ([regex]::Match($candidate, '^[ \t]+')).Value.Length) }
+            }
+            $parts = @($rawParts | ForEach-Object { if ([string]::IsNullOrWhiteSpace([string]$_)) { '' } else { ([string]$_).Substring([Math]::Min($contentIndent, ([string]$_).Length)) } })
+            $value = $parts -join "`n"
+            if ($raw.StartsWith('>')) { $value = [regex]::Replace($value, '(?<!\n)\n(?!\n)', ' ') }
+            $fields[$key] = $value.TrimEnd("`r", "`n")
         }
         else { $fields[$key] = ConvertFrom-SkillMetadataScalar $raw }
     }
@@ -194,7 +280,10 @@ function Read-SkillMetadata {
     foreach ($key in $fields.Keys) { if ($key -notin $allowed) { $findings.Add([pscustomobject]@{ code='field_unknown'; severity='warning'; field=$key; message=('Unknown top-level skill metadata field: {0}' -f $key) }) | Out-Null } }
     if ($Observation) { foreach ($finding in $findings) { if ([string]$finding.severity -eq 'error' -and [string]$finding.code -notin @('name_required','description_required')) { $finding.severity = 'warning' } } }
     $result.valid = @($findings | Where-Object severity -eq 'error').Count -eq 0
-    $result.name = $name; $result.declared_name = $name; $result.description = $description; $result.fields = $fields; $result.findings = @($findings.ToArray())
+    $triggerLine = @($text -split '\r?\n' | Where-Object { $_ -match '(?i)trigger|use when|when to use|使用场景' } | Select-Object -First 1)
+    $result.name = $name; $result.declared_name = $name; $result.description = $description
+    $result.trigger_summary = if ($triggerLine.Count) { ([string]$triggerLine[0]).Trim() } else { $description }
+    $result.fields = $fields; $result.findings = @($findings.ToArray())
     return [pscustomobject]$result
 }
 
@@ -2258,6 +2347,8 @@ function New-SkillSurfaceView {
     $pluginItems = @($pluginInventory.skills | ForEach-Object { Get-CapabilitySurfaceSkillMetadata ([string]$_.path) 'codex_plugin' 'installed_enabled_plugin' $true })
     $surfaces.Add((New-CapabilitySurfaceRecord 'plugins' 'codex_plugin_list_json' 'codex plugin list --json' ([string]$pluginInventory.freshness) ([string]$pluginInventory.coverage) $pluginItems)) | Out-Null
     foreach ($warning in @($pluginInventory.warnings)) { $findings.Add([pscustomobject]@{ code = [string]$warning.code; severity = 'warning'; surface = 'plugins'; path = [string]$warning.subject; message = [string]$warning.message }) | Out-Null }
+    $hostObservation = Get-CodexHostObservation -PluginInventory $pluginInventory -ExpectedMcpServers @($Config.mcp_servers)
+    foreach ($warning in @($hostObservation.mcp.warnings) + @($hostObservation.doctor.warnings)) { $findings.Add([pscustomobject]@{ code = [string]$warning.code; severity = 'warning'; surface = 'host_observation'; path = [string]$warning.subject; message = [string]$warning.message }) | Out-Null }
 
     $hostItems = @(); $hostFreshness = 'unknown'; $hostCoverage = 'not_observed'; $hostSource = if ($HostSnapshotPath) { [IO.Path]::GetFullPath($HostSnapshotPath) } else { 'not_provided' }
     if ($HostSnapshotPath) {
@@ -2278,7 +2369,7 @@ function New-SkillSurfaceView {
             if (-not $identityValid) { $findings.Add([pscustomobject]@{ code = 'surface_skill_identity_incomplete'; severity = 'error'; surface = $surface.name; path = [string]$item.path; message = 'Skill surface items require name/path/entrypoint/description/owner/resident/projection identity.' }) | Out-Null }
         }
     }
-    return [pscustomobject][ordered]@{ schema_version = 1; view = 'SkillSurfaceView'; generated_at = $GeneratedAt; read_only = $true; pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); surfaces = $surfaces.ToArray(); surface_count = $surfaces.Count; stale_links = @($userItems | Where-Object projection_state -in @('managed_stale', 'external_owned', 'ownership_unknown')); findings = $findings.ToArray(); provider_calls = 0; native_mutations = 0; writes = 0 }
+    return [pscustomobject][ordered]@{ schema_version = 1; view = 'SkillSurfaceView'; generated_at = $GeneratedAt; read_only = $true; pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); surfaces = $surfaces.ToArray(); surface_count = $surfaces.Count; host_observation = $hostObservation; stale_links = @($userItems | Where-Object projection_state -in @('managed_stale', 'external_owned', 'ownership_unknown')); findings = $findings.ToArray(); provider_calls = 0; native_mutations = 0; writes = 0 }
 }
 
 $skillCatalogCompilerRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
@@ -2303,14 +2394,6 @@ function Get-SkillCatalogCompilerTextHash([string]$Text) {
     finally { $sha.Dispose() }
 }
 
-function Read-SkillCatalogCompilerMetadata {
-    param([Parameter(Mandatory = $true)][string]$Path)
-
-    $metadata = Read-SkillMetadata $Path -Observation
-    $reason = @($metadata.findings | Where-Object severity -eq 'error' | Select-Object -First 1 -ExpandProperty code)
-    return [pscustomobject]@{ valid = [bool]$metadata.valid; reason = if ($reason.Count) { [string]$reason[0] } else { '' }; name = [string]$metadata.name; description = [string]$metadata.description; text = [string]$metadata.text }
-}
-
 function ConvertTo-SkillCatalogCompilerEntry {
     param(
         [Parameter(Mandatory = $true)]$InputEntry,
@@ -2332,10 +2415,11 @@ function ConvertTo-SkillCatalogCompilerEntry {
     $metadata = $null
     $text = ''
     if (-not [string]::IsNullOrWhiteSpace($path) -and (Test-Path -LiteralPath $path -PathType Leaf)) {
-        $metadata = Read-SkillCatalogCompilerMetadata $path
+        $metadata = Read-SkillMetadata $path -Observation
         $text = [string]$metadata.text
         if (-not [bool]$metadata.valid) {
-            if ($null -ne $Findings) { $Findings.Add((New-OperationFinding 'skill_metadata_invalid' 'error' $path ([string]$metadata.reason))) | Out-Null }
+            $reason = @($metadata.findings | Where-Object severity -eq 'error' | Select-Object -First 1 -ExpandProperty code)
+            if ($null -ne $Findings) { $Findings.Add((New-OperationFinding 'skill_metadata_invalid' 'error' $path $(if ($reason.Count) { [string]$reason[0] } else { 'skill_metadata_invalid' }))) | Out-Null }
             return $null
         }
     }
@@ -16286,68 +16370,6 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
     })
 }
 
-function ConvertFrom-AuditYamlBlockScalar($lines, [int]$startIndex, [int]$parentIndent, [string]$indicator) {
-    $rawBlock = New-Object System.Collections.Generic.List[string]
-    $contentIndent = [int]::MaxValue
-    for ($index = $startIndex; $index -lt @($lines).Count; $index++) {
-        $line = [string]$lines[$index]
-        if ($line -match "^\s*---\s*$") { break }
-        if ([string]::IsNullOrWhiteSpace($line)) {
-            $rawBlock.Add("") | Out-Null
-            continue
-        }
-
-        $indent = ([regex]::Match($line, "^\s*")).Value.Length
-        if ($indent -le $parentIndent) { break }
-        if ($indent -lt $contentIndent) { $contentIndent = $indent }
-        $rawBlock.Add($line) | Out-Null
-    }
-
-    if ($rawBlock.Count -eq 0 -or $contentIndent -eq [int]::MaxValue) { return "" }
-    $dedented = @($rawBlock | ForEach-Object {
-            if ([string]::IsNullOrWhiteSpace([string]$_)) { "" }
-            else { ([string]$_).Substring([Math]::Min($contentIndent, ([string]$_).Length)) }
-        })
-    $text = $dedented -join "`n"
-    if ($indicator.StartsWith(">", [System.StringComparison]::Ordinal)) {
-        $text = [regex]::Replace($text, "(?<!\n)\n(?!\n)", " ")
-    }
-    return $text.TrimEnd("`r", "`n")
-}
-
-function Get-SkillMetadataFromFile([string]$skillFile) {
-    $meta = [ordered]@{
-        declared_name = ""
-        description = ""
-        trigger_summary = ""
-    }
-    if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) {
-        return [pscustomobject]$meta
-    }
-
-    $lines = @(Get-Content -LiteralPath $skillFile -TotalCount 120 -ErrorAction SilentlyContinue)
-    for ($index = 0; $index -lt $lines.Count; $index++) {
-        $line = [string]$lines[$index]
-        if ([string]::IsNullOrWhiteSpace($meta.declared_name) -and $line -match "^\s*name:\s*(.+?)\s*$") {
-            $meta.declared_name = $Matches[1].Trim().Trim("'`"")
-        }
-        if ([string]::IsNullOrWhiteSpace($meta.description) -and $line -match "^\s*description:\s*(.+?)\s*$") {
-            $descriptionValue = $Matches[1].Trim().Trim("'`"")
-            if ($descriptionValue -match "^[>|][+-]?$") {
-                $parentIndent = ([regex]::Match($line, "^\s*")).Value.Length
-                $meta.description = ConvertFrom-AuditYamlBlockScalar $lines ($index + 1) $parentIndent $descriptionValue
-            }
-            else {
-                $meta.description = $descriptionValue
-            }
-        }
-        if ([string]::IsNullOrWhiteSpace($meta.trigger_summary) -and $line -match "(?i)trigger|use when|when to use|使用场景") {
-            $meta.trigger_summary = $line.Trim()
-        }
-    }
-    return [pscustomobject]$meta
-}
-
 function Resolve-InstalledSkillLocalPath($cfg, $mapping) {
     if ($null -eq $mapping) { return "" }
     $vendor = [string]$mapping.vendor
@@ -16384,7 +16406,7 @@ function Get-InstalledSkillFacts($cfg = $null) {
         if (-not $seen.Add(("{0}|{1}" -f $vendor, $from))) { continue }
         $localPath = Resolve-InstalledSkillLocalPath $cfg $m
         $skillFile = Join-Path $localPath "SKILL.md"
-        $meta = Get-SkillMetadataFromFile $skillFile
+        $meta = Read-SkillMetadata $skillFile -Observation
         $contentHash = [string](Get-FileContentHash $skillFile)
 
         $repo = ""
@@ -16430,7 +16452,7 @@ function Get-InstalledSkillFacts($cfg = $null) {
         $localPath = [string]$override.full
         $skillFile = Join-Path $localPath "SKILL.md"
         if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { continue }
-        $meta = Get-SkillMetadataFromFile $skillFile
+        $meta = Read-SkillMetadata $skillFile -Observation
         $contentHash = [string](Get-FileContentHash $skillFile)
         $facts += [pscustomobject]([ordered]@{
             name = if ([string]::IsNullOrWhiteSpace($meta.declared_name)) { $from } else { $meta.declared_name }
@@ -16461,7 +16483,7 @@ function Get-AuditExternalSkillFacts($cfg = $null) {
     $userSkillRoot = Resolve-SkillProjectionPath $userSkillRootRaw
     foreach ($item in @(Get-SkillProjectionFiles $userSkillRoot | Where-Object is_system)) {
         $skillFile = [string]$item.file
-        $meta = Get-SkillMetadataFromFile $skillFile
+        $meta = Read-SkillMetadata $skillFile -Observation
         $name = [string]$meta.declared_name
         if ([string]::IsNullOrWhiteSpace($name) -or -not $seen.Add(('system::{0}' -f $name))) { continue }
         $facts.Add([pscustomobject]([ordered]@{
@@ -20228,7 +20250,7 @@ function Get-SkillProjectionSourceEntries($source, [int]$sourceOrder) {
     $entries = New-Object System.Collections.Generic.List[object]
 
     foreach ($item in @(Get-SkillProjectionFiles $rootPath)) {
-        $meta = Get-SkillMetadataFromFile ([string]$item.file)
+        $meta = Read-SkillMetadata ([string]$item.file) -Observation
         $declaredName = ([string]$meta.declared_name).Trim()
         if ([string]::IsNullOrWhiteSpace($declaredName)) {
             $declaredName = Split-Path ([string]$item.dir) -Leaf
@@ -20332,7 +20354,7 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
     $skills = New-Object System.Collections.Generic.List[object]
     $actualNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($item in @(Get-SkillProjectionFiles $managedRoot)) {
-        $meta = Get-SkillMetadataFromFile ([string]$item.file)
+        $meta = Read-SkillMetadata ([string]$item.file) -Observation
         $name = ([string]$meta.declared_name).Trim()
         if ([string]::IsNullOrWhiteSpace($name)) { $name = Split-Path ([string]$item.dir) -Leaf }
         if (-not $actualNames.Add($name)) { continue }

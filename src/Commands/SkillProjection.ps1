@@ -72,7 +72,7 @@ function Get-SkillProjectionSourceEntries($source, [int]$sourceOrder) {
     $entries = New-Object System.Collections.Generic.List[object]
 
     foreach ($item in @(Get-SkillProjectionFiles $rootPath)) {
-        $meta = Get-SkillMetadataFromFile ([string]$item.file)
+        $meta = Read-SkillMetadata ([string]$item.file) -Observation
         $declaredName = ([string]$meta.declared_name).Trim()
         if ([string]::IsNullOrWhiteSpace($declaredName)) {
             $declaredName = Split-Path ([string]$item.dir) -Leaf
@@ -176,7 +176,7 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
     $skills = New-Object System.Collections.Generic.List[object]
     $actualNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($item in @(Get-SkillProjectionFiles $managedRoot)) {
-        $meta = Get-SkillMetadataFromFile ([string]$item.file)
+        $meta = Read-SkillMetadata ([string]$item.file) -Observation
         $name = ([string]$meta.declared_name).Trim()
         if ([string]::IsNullOrWhiteSpace($name)) { $name = Split-Path ([string]$item.dir) -Leaf }
         if (-not $actualNames.Add($name)) { continue }

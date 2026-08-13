@@ -13,7 +13,7 @@ function Read-SkillMetadata {
 
     $fullPath = [IO.Path]::GetFullPath($Path)
     $text = if (Test-Path -LiteralPath $fullPath -PathType Leaf) { [IO.File]::ReadAllText($fullPath) } else { '' }
-    $result = [ordered]@{ valid = $false; path = $fullPath; text = $text; name = ''; declared_name = ''; description = ''; fields = [ordered]@{}; findings = @() }
+    $result = [ordered]@{ valid = $false; path = $fullPath; text = $text; name = ''; declared_name = ''; description = ''; trigger_summary = ''; fields = [ordered]@{}; findings = @() }
     $frontmatter = [regex]::Match($text, '\A(?:\uFEFF)?---[ \t]*\r?\n(?<body>.*?)(?:\r?\n)---[ \t]*(?:\r?\n|\z)', [Text.RegularExpressions.RegexOptions]::Singleline)
     if (-not $frontmatter.Success) {
         $result.findings = @([pscustomobject]@{ code='frontmatter_missing'; severity='error'; field=''; message='SKILL.md requires YAML frontmatter.' })
@@ -26,9 +26,17 @@ function Read-SkillMetadata {
         if ($line -notmatch '^(?<key>[A-Za-z][A-Za-z0-9-]*):(?:[ \t]*(?<value>.*))?$') { continue }
         $key = [string]$Matches.key; $raw = [string]$Matches.value
         if ($raw -in @('|','>','|-','>-','|+','>+')) {
-            $parts = [Collections.Generic.List[string]]::new()
-            while ($index + 1 -lt $lines.Count -and [string]$lines[$index + 1] -match '^[ \t]+') { $index++; $parts.Add(([string]$lines[$index]).Trim()) | Out-Null }
-            $fields[$key] = if ($raw.StartsWith('>')) { ($parts -join ' ') } else { ($parts -join "`n") }
+            $rawParts = [Collections.Generic.List[string]]::new(); $contentIndent = [int]::MaxValue
+            while ($index + 1 -lt $lines.Count) {
+                $candidate = [string]$lines[$index + 1]
+                if (-not [string]::IsNullOrWhiteSpace($candidate) -and $candidate -notmatch '^[ \t]+') { break }
+                $index++; $rawParts.Add($candidate) | Out-Null
+                if (-not [string]::IsNullOrWhiteSpace($candidate)) { $contentIndent = [Math]::Min($contentIndent, ([regex]::Match($candidate, '^[ \t]+')).Value.Length) }
+            }
+            $parts = @($rawParts | ForEach-Object { if ([string]::IsNullOrWhiteSpace([string]$_)) { '' } else { ([string]$_).Substring([Math]::Min($contentIndent, ([string]$_).Length)) } })
+            $value = $parts -join "`n"
+            if ($raw.StartsWith('>')) { $value = [regex]::Replace($value, '(?<!\n)\n(?!\n)', ' ') }
+            $fields[$key] = $value.TrimEnd("`r", "`n")
         }
         else { $fields[$key] = ConvertFrom-SkillMetadataScalar $raw }
     }
@@ -43,6 +51,9 @@ function Read-SkillMetadata {
     foreach ($key in $fields.Keys) { if ($key -notin $allowed) { $findings.Add([pscustomobject]@{ code='field_unknown'; severity='warning'; field=$key; message=('Unknown top-level skill metadata field: {0}' -f $key) }) | Out-Null } }
     if ($Observation) { foreach ($finding in $findings) { if ([string]$finding.severity -eq 'error' -and [string]$finding.code -notin @('name_required','description_required')) { $finding.severity = 'warning' } } }
     $result.valid = @($findings | Where-Object severity -eq 'error').Count -eq 0
-    $result.name = $name; $result.declared_name = $name; $result.description = $description; $result.fields = $fields; $result.findings = @($findings.ToArray())
+    $triggerLine = @($text -split '\r?\n' | Where-Object { $_ -match '(?i)trigger|use when|when to use|使用场景' } | Select-Object -First 1)
+    $result.name = $name; $result.declared_name = $name; $result.description = $description
+    $result.trigger_summary = if ($triggerLine.Count) { ([string]$triggerLine[0]).Trim() } else { $description }
+    $result.fields = $fields; $result.findings = @($findings.ToArray())
     return [pscustomobject]$result
 }

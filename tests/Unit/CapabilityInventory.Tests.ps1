@@ -21,6 +21,8 @@ Describe 'Read-only skill surface inventory' {
             $view = New-SkillSurfaceView -RepoRoot $fixture -Config $config -HostSnapshotPath $snapshotPath
             $view.pass | Should -BeTrue
             $view.surface_count | Should -Be 6
+            $view.host_observation.truth_boundary | Should -Be 'read_only_cli_observation_not_host_loaded'
+            $view.host_observation.writes | Should -Be 0
             @($view.surfaces.name) | Should -Be @('repo_supply', 'canonical_projection', 'user_skill_root', 'system', 'plugins', 'host_visible')
             foreach ($surface in $view.surfaces) { $surface.authority | Should -Not -BeNullOrEmpty; $surface.source | Should -Not -BeNullOrEmpty; $surface.fingerprint | Should -Match '^[a-f0-9]{64}$'; $surface.freshness | Should -Not -BeNullOrEmpty; $surface.coverage | Should -Not -BeNullOrEmpty }
             @($view.stale_links.projection_state) | Should -Contain 'managed_stale'

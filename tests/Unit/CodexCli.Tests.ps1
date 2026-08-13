@@ -24,3 +24,30 @@ Describe 'Codex CLI plugin inventory' {
         @($result.warnings.code) | Should -Contain 'codex_plugin_inventory_unavailable'
     }
 }
+
+Describe 'Codex CLI host observation' {
+    It 'returns redacted MCP and doctor facts without claiming host load' {
+        Mock Invoke-CodexCliJson {
+            param([string[]]$Arguments)
+            if ($Arguments[0] -eq 'mcp') { return @([pscustomobject]@{ name='docs'; enabled=$true; disabled_reason=$null; auth_status='unsupported'; transport=[pscustomobject]@{ type='stdio'; command='secret-command'; env=[pscustomobject]@{ TOKEN='secret' } } }) }
+            if ($Arguments[0] -eq 'doctor') { return [pscustomobject]@{ schemaVersion=1; codexVersion='1.2.3'; overallStatus='ok'; checks=@([pscustomobject]@{ id='config.load'; category='config'; status='ok'; summary='loaded'; details=[pscustomobject]@{ secret='hidden' } }) } }
+            throw 'unexpected command'
+        }
+        $plugins = [pscustomobject]@{ authority='fixture'; freshness='fresh'; coverage='complete'; enabled_plugin_ids=@('demo@market'); skill_count=1; warnings=@() }
+        $result = Get-CodexHostObservation -PluginInventory $plugins -ExpectedMcpServers @([pscustomobject]@{ name='docs' }, [pscustomobject]@{ name='missing' })
+
+        $result.truth_boundary | Should -Be 'read_only_cli_observation_not_host_loaded'
+        @($result.configured_not_observed) | Should -Be @('missing')
+        $result.mcp.servers[0].PSObject.Properties.Name | Should -Not -Contain 'transport'
+        $result.doctor.checks[0].PSObject.Properties.Name | Should -Not -Contain 'details'
+        $result.provider_calls | Should -Be 0
+        $result.native_mutations | Should -Be 0
+        $result.writes | Should -Be 0
+    }
+
+    It 'keeps unavailable MCP and doctor commands as platform_na observations' {
+        Mock Invoke-CodexCliJson { throw 'unavailable' }
+        (Get-CodexMcpObservation).coverage | Should -Be 'platform_na'
+        (Get-CodexDoctorObservation).coverage | Should -Be 'platform_na'
+    }
+}

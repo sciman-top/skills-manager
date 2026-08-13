@@ -30,6 +30,8 @@
 
 MCP config mutation、host projection、live readiness 是三个不同状态。仓库保存环境变量名，不保存 credential value。
 
+只读宿主观察通过 Codex CLI 的公开 JSON 面读取 `plugin list`、`mcp list` 与 `doctor`。适配器只保留插件标识/数量、MCP 名称与启用/认证/transport 类型、doctor 的 schema/version/status/check 摘要；不读取插件 cache 私有结构，不保留 MCP command/env/header 或 doctor details，也不把观察结果提升为 `host_loaded`。
+
 ### Target audit
 
 - Interface：`审查目标 扫描/预检/应用确认/应用`
@@ -100,6 +102,8 @@ Tracked docs 只写稳定合同，不保存动态 task count、阶段状态或�
 6. truthful status when rollback fails
 
 宿主目录、MCP、跨仓 rule estate 和 release 是不同授权域，不互相推导授权。
+
+Tag release 在 checksum 与 ZIP 内 manifest 之外，为三个发布资产签发 GitHub OIDC build provenance attestation。它只证明资产摘要与仓库/workflow/tag 构建来源，不能证明宿主加载或业务验收。
 
 ## 5. 构建与验证
 

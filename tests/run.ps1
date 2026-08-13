@@ -25,6 +25,14 @@ $result = Invoke-Pester -Configuration $configuration 3>$null 4>$null 5>$null 6>
 $stopwatch.Stop()
 if (-not $result -or [int]$result.TotalCount -le 0) { throw 'Test discovery returned zero tests.' }
 Write-Host ("Tests: total={0} passed={1} failed={2} skipped={3} duration={4:n1}s" -f [int]$result.TotalCount, [int]$result.PassedCount, [int]$result.FailedCount, [int]$result.SkippedCount, $stopwatch.Elapsed.TotalSeconds)
+if ([int]$result.FailedContainersCount -gt 0) {
+    foreach ($container in @($result.FailedContainers)) {
+        Write-Host ("CONTAINER FAILED: {0}" -f [string]$container.Item)
+        if ($container.ErrorRecord) { Write-Host ([string]$container.ErrorRecord) }
+    }
+    $global:LASTEXITCODE = 1
+    throw ("Pester container failures: {0}" -f $result.FailedContainersCount)
+}
 if ([int]$result.FailedCount -gt 0) {
     $failedTests = if ($result.PSObject.Properties.Match('Failed').Count -gt 0) {
         @($result.Failed)

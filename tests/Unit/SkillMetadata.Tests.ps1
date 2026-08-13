@@ -13,6 +13,16 @@ Describe 'Skill metadata' {
         $metadata.description | Should -Be 'First line second line'
     }
 
+    It 'preserves literal paragraphs and folded paragraph boundaries' {
+        $literalPath = Join-Path $TestDrive 'literal.md'
+        "---`nname: literal-skill`ndescription: |`n  First line`n`n  Second paragraph`n---`n" | Set-Content -LiteralPath $literalPath
+        (Read-SkillMetadata $literalPath).description | Should -Be "First line`n`nSecond paragraph"
+
+        $foldedPath = Join-Path $TestDrive 'folded.md'
+        "---`nname: folded-skill`ndescription: >`n  First line`n  continues`n`n  Second paragraph`n---`n" | Set-Content -LiteralPath $foldedPath
+        (Read-SkillMetadata $foldedPath).description | Should -Be "First line continues`n`nSecond paragraph"
+    }
+
     It 'enforces Agent Skills identity limits and reports unknown fields as warnings' {
         $path = Join-Path $TestDrive 'invalid.md'
         "---`nname: Bad--Name`ndescription: fixture`nunknown: value`n---`n" | Set-Content -LiteralPath $path

@@ -58,4 +58,20 @@ Describe 'Noisy failing fixture' {
         $text | Should -Not -Match 'fixture-noise-marker'
         @($output).Count | Should -BeLessThan 10
     }
+
+    It 'fails when one test container cannot be parsed even if another container passes' {
+        $fixture = New-RunnerFixture 'container-fail' @'
+Describe 'Broken fixture' {
+    It 'cannot be discovered' {
+}
+'@
+
+        $output = @(& pwsh -NoProfile -File $runnerPath -UnitTestPath $fixture.unit -E2ETestPath $fixture.e2e *>&1)
+        $exitCode = $LASTEXITCODE
+        $text = $output -join "`n"
+
+        $exitCode | Should -Not -Be 0
+        $text | Should -Match 'CONTAINER FAILED:'
+        $text | Should -Match 'Pester container failures: 1'
+    }
 }

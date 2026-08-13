@@ -40,7 +40,7 @@ skills-manager-2026.08.13-SHA256SUMS.txt
 
 ## Tag 自动发布
 
-CI 对 `v*` tag 在 full gate 通过后生成两个 ZIP 和 checksum，并创建 GitHub Release。建议版本使用 `vYYYY.MM.DD`，同日修订追加 `.N`。
+CI 对 `v*` tag 在 full gate 通过后生成两个 ZIP 和 checksum，为三个资产签发 GitHub artifact build provenance attestation，再创建 GitHub Release。attestation 通过 GitHub OIDC 把资产摘要绑定到当前仓库、workflow 与 tag 构建；它补充而不替代 ZIP 内 `RELEASE-MANIFEST.json` 和 `SHA256SUMS.txt`。建议版本使用 `vYYYY.MM.DD`，同日修订追加 `.N`。
 
 发布顺序：
 
@@ -49,9 +49,9 @@ CI 对 `v*` tag 在 full gate 通过后生成两个 ZIP 和 checksum，并创建
 3. 在本地实际构建并抽查两个 ZIP。
 4. 确认 MIT `LICENSE` 已进入制品，检查 `THIRD-PARTY-NOTICES.json`，并复核第三方来源、所有 `unknown_review_required`、许可证与 release notes。
 5. 创建并推送 annotated tag，例如 `git tag -a v2026.08.13 -m "v2026.08.13"`、`git push origin v2026.08.13`。
-6. 等待 GitHub Actions 成功，再从 Release 页面下载制品复核 SHA-256 与安装烟测。
+6. 等待 GitHub Actions 成功，再使用 `gh attestation verify <asset> --repo sciman-top/skills-manager` 验证三个资产的 provenance，并从 Release 页面下载制品复核 SHA-256 与安装烟测。
 
-GitHub Actions 成功只证明 `repo_verified` 与制品生成成功；至少还要在干净 Windows 用户环境中验证一次 `setup.cmd`，并用全新 Codex/Claude 会话验证 `host_loaded`。真实任务效果属于另一个 `live_accepted` 层级。
+GitHub Actions 与 attestation 成功只证明 `repo_verified`、制品生成和构建来源；不证明技能已被宿主加载。至少还要在干净 Windows 用户环境中验证一次 `setup.cmd`，并用全新 Codex/Claude 会话验证 `host_loaded`。真实任务效果属于另一个 `live_accepted` 层级。
 
 ## 回滚
 

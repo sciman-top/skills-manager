@@ -1069,9 +1069,9 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             Set-ContentUtf8 $foldedPath "---`nname: folded-skill`ndescription: >-`n  Use when a folded`n  description spans lines.`n---`nBody."
             Set-ContentUtf8 $inlinePath "---`nname: inline-skill`ndescription: Inline description.`n---`nBody."
 
-            $literal = Get-SkillMetadataFromFile $literalPath
-            $folded = Get-SkillMetadataFromFile $foldedPath
-            $inline = Get-SkillMetadataFromFile $inlinePath
+            $literal = Read-SkillMetadata $literalPath -Observation
+            $folded = Read-SkillMetadata $foldedPath -Observation
+            $inline = Read-SkillMetadata $inlinePath -Observation
 
             $literal.description | Should -Be "Trigger when a literal block is needed.`n`nPreserve the paragraph boundary."
             $folded.description | Should -Be "Use when a folded description spans lines."

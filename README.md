@@ -122,6 +122,8 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 capability-inventory --view skill-surfaces --json
 ```
 
+该命令还会读取 `codex plugin list --json`、`codex mcp list --json` 与 `codex doctor --json`，只保留脱敏的只读 host observation。它可对比仓库声明与 CLI 当前观察，但不证明技能已经 `host_loaded` 或完成真实调用。
+
 ## 外置参考仓
 
 `references/reference-shelf.manifest.json` 只登记当前使用的 core/secondary 参考集，owned root 为 `D:\CODE\external\skills-manager-references`。刷新不会自动采纳、安装或执行外部内容，也不会联动修改 `skills.json`。

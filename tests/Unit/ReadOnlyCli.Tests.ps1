@@ -52,6 +52,7 @@ Describe 'Read-only capability and rule CLI' {
         $parsed.command | Should -Be 'capability-inventory'
         $parsed.data.writes | Should -Be 0
         $parsed.data.provider_calls | Should -Be 0
+        $parsed.data.host_observation.truth_boundary | Should -Be 'read_only_cli_observation_not_host_loaded'
         $parsed.view | Should -Be 'skill-surfaces'
         $parsed.data.surface_count | Should -Be 6
         (Get-FileHash -LiteralPath $CfgPath -Algorithm SHA256).Hash | Should -Be $before
