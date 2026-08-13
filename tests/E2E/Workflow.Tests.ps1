@@ -114,6 +114,65 @@ description: demo skill
             (Test-Path (Join-Path $root "out\skills")) | Should -Be $false
         }
 
+        It "does not inspect incomplete agent staging for native projection during dry-run" {
+            $oldDryRun = $DryRun
+            try {
+                $DryRun = $true
+                $cfg = [pscustomobject]@{
+                    targets = @()
+                    sync_mode = "link"
+                }
+
+                Mock Sync-ConfiguredSkillProjection { throw "must not run against dry-run staging" }
+
+                $failures = @(应用到ClaudeCodex $cfg -SkipPreflight)
+
+                $failures.Count | Should -Be 0
+                Should -Invoke Sync-ConfiguredSkillProjection -Times 0 -Exactly
+            }
+            finally {
+                $DryRun = $oldDryRun
+            }
+        }
+
+        It "does not require a clean-commit promotion context during build dry-run" {
+            $oldDryRun = $DryRun
+            try {
+                $DryRun = $true
+                $cfg = [pscustomobject]@{
+                    vendors = @()
+                    targets = @()
+                    mappings = @()
+                    imports = @()
+                    mcp_servers = @()
+                    mcp_targets = @()
+                    update_force = $false
+                    sync_mode = "link"
+                }
+
+                Mock Preflight {}
+                Mock LoadCfg { $cfg }
+                Mock Optimize-Imports {}
+                Mock Write-BuildSummary {}
+                Mock Start-BuildTransaction { [pscustomobject]@{ path = ''; has_backup_agent = $false } }
+                Mock Start-DryRunMirrorCollect {}
+                Mock Stop-DryRunMirrorCollect {}
+                Mock Write-DryRunMirrorSummary {}
+                Mock 构建Agent { @() }
+                Mock Get-HostProjectionPromotionContext { throw "must not require clean commit during dry-run" }
+                Mock 应用到ClaudeCodex { @() }
+                Mock Complete-BuildTransaction {}
+
+                构建生效
+
+                Should -Invoke Get-HostProjectionPromotionContext -Times 0 -Exactly
+                Should -Invoke 应用到ClaudeCodex -Times 1 -Exactly
+            }
+            finally {
+                $DryRun = $oldDryRun
+            }
+        }
+
         It "Fails closed and rolls back when agent build reports failures" {
             $root = Join-Path $TestDrive "ws-build-failure"
             New-Item -ItemType Directory -Path $root -Force | Out-Null

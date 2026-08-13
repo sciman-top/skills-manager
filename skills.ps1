@@ -10077,16 +10077,21 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionCo
                     $failures.Add(("target:{0} => {1}" -f $t.path, $_.Exception.Message)) | Out-Null
                 }
         }
-        try {
-            $projectionResult = Sync-ConfiguredSkillProjection $cfg $PromotionContext
-            if ($projectionResult -and -not [bool]$projectionResult.skipped) {
-                $plan = $projectionResult.plan
-                Log ("技能投影已生成：entries={0}, unique={1}, disabled={2}, conflicts={3}, persisted={4}" -f @($plan.skills).Count, @($plan.unique_names).Count, @($plan.disabled).Count, @($plan.conflicts).Count, [bool]$projectionResult.persisted)
-            }
+        if ($DryRun) {
+            Log "DRYRUN：native skill projection 依赖完整 agent/ staging，已跳过投影规划；正式构建将在映射物化后事务性生成并应用。"
         }
-        catch {
-            Write-Host ("❌ 同步技能投影失败：{0}" -f $_.Exception.Message) -ForegroundColor Red
-            $failures.Add(("skill-projection => {0}" -f $_.Exception.Message)) | Out-Null
+        else {
+            try {
+                $projectionResult = Sync-ConfiguredSkillProjection $cfg $PromotionContext
+                if ($projectionResult -and -not [bool]$projectionResult.skipped) {
+                    $plan = $projectionResult.plan
+                    Log ("技能投影已生成：entries={0}, unique={1}, disabled={2}, conflicts={3}, persisted={4}" -f @($plan.skills).Count, @($plan.unique_names).Count, @($plan.disabled).Count, @($plan.conflicts).Count, [bool]$projectionResult.persisted)
+                }
+            }
+            catch {
+                Write-Host ("❌ 同步技能投影失败：{0}" -f $_.Exception.Message) -ForegroundColor Red
+                $failures.Add(("skill-projection => {0}" -f $_.Exception.Message)) | Out-Null
+            }
         }
         return $failures.ToArray()
     })
@@ -10143,6 +10148,10 @@ function 构建生效(
             }
             elseif ($SkipHostProjection) {
                 Log "已按显式请求跳过宿主目标与 native skill projection；仅保留 agent/ 构建产物。"
+            }
+            elseif ($DryRun) {
+                $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight
+                if ($syncFailures) { $failures += $syncFailures }
             }
             else {
                 $promotionContext = $null
