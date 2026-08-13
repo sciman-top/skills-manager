@@ -1,5 +1,8 @@
 name: CI
 
+permissions:
+  contents: write
+
 on:
   push:
     branches:
@@ -58,3 +61,19 @@ jobs:
       - name: Run repository full quality gate
         shell: pwsh
         run: .\scripts\quality\run-local-quality-gates.ps1 -Profile full
+
+      - name: Build release packages
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: .\scripts\release\build-release.ps1 -Version '${{ github.ref_name }}'
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = @(Get-ChildItem -LiteralPath artifacts -File | Where-Object { $_.Name -match '\.(zip|txt)$' })
+          if ($assets.Count -ne 3) { throw "Expected 3 release assets, found $($assets.Count)." }
+          gh release create '${{ github.ref_name }}' @($assets.FullName) --verify-tag --generate-notes --title '${{ github.ref_name }}'
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed with exit code $LASTEXITCODE" }

@@ -32,6 +32,10 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-qualit
 
 Run the full gate once after inputs are frozen. `构建生效`, `同步MCP`, host projection, live doctor, commit, and push are separate actions; do not include them implicitly in a repository-only change.
 
+## Release tooling
+
+`scripts/release/build-release.ps1` is the single release-package entrypoint. It creates bootstrap and portable ZIPs plus a SHA-256 list under ignored `artifacts/`. Do not hand-assemble or upload a package containing `.git`, runtime reports, credentials, host configuration, or plugin caches. Follow [docs/RELEASING.md](docs/RELEASING.md); public distribution additionally requires an owner-approved license.
+
 ## Documentation and evidence
 
 - Update only the document that owns the changed stable contract.

@@ -1,6 +1,8 @@
 # skills-manager
 
-Windows-first、local-first 的 PowerShell 7 技能与 MCP 管理器。它把多个来源的技能收敛到一个版本化配置，生成可移植技能目录，并提供目标仓审查、规则审查和受控投影。
+Windows-first、local-first 的 PowerShell 7 技能与 MCP 管理器。它把分散在多个仓库的 AI 技能收敛到一份版本化配置，锁定来源、生成可移植技能目录，并安全投影给 Codex/Claude 等宿主。
+
+适合希望在多台 Windows 电脑上复用同一套技能、审计目标仓规则、统一管理 MCP 清单，同时又不愿把模型、账号和运行时交给另一层框架的个人或团队。
 
 本项目不做第二套 AI runtime：不选择模型，不管理 provider/auth/session，不接管 Codex/Claude 的语义路由，也不直接维护插件缓存。仓库测试只证明 `repo_verified`；宿主新会话加载和真实业务验收必须分别验证。
 
@@ -8,12 +10,26 @@ Windows-first、local-first 的 PowerShell 7 技能与 MCP 管理器。它把多
 
 要求 PowerShell 7 (`pwsh`) 和 Git。Windows PowerShell 5.1 不受支持。
 
+### 推荐：Release 一键安装
+
+从 [GitHub Releases](https://github.com/sciman-top/skills-manager/releases) 下载 `bootstrap.zip`，解压后运行：
+
+```powershell
+.\setup.cmd
+```
+
+需要离线或 U 盘绿色运行时下载 `portable.zip`，解压后运行 `skills.cmd`；它不会自动写宿主目录。两种包的选择、SHA-256 校验和迁移步骤见 [安装、绿色运行与迁移](docs/INSTALLATION_AND_MIGRATION.md)。
+
+### 从源码使用
+
 ```powershell
 pwsh -NoProfile -File .\skills.ps1 help
 pwsh -NoProfile -File .\skills.ps1 发现
 pwsh -NoProfile -File .\skills.ps1 安装
 pwsh -NoProfile -File .\skills.ps1 doctor --strict
 ```
+
+也可直接运行 `skills.cmd` 打开交互菜单。新手通常只需“浏览技能 → 选择安装 → 重建并同步 → doctor”。
 
 交互菜单按“高频动作直达 + 领域子菜单”组织：
 
@@ -131,4 +147,10 @@ git diff --check
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree
 ```
 
-产品边界见 [docs/product/README.md](docs/product/README.md)，贡献规则见 [CONTRIBUTING.md](CONTRIBUTING.md)，PowerShell 支持边界见 [docs/runbooks/powershell-runtime-compatibility.md](docs/runbooks/powershell-runtime-compatibility.md)。
+一键发布包：
+
+```powershell
+pwsh -NoProfile -File .\scripts\release\build-release.ps1 -Version 2026.08.13
+```
+
+发布者须先阅读 [发布指南](docs/RELEASING.md)，尤其是许可证和 clean-machine 验收边界。产品边界见 [docs/product/README.md](docs/product/README.md)，贡献规则见 [CONTRIBUTING.md](CONTRIBUTING.md)，PowerShell 支持边界见 [docs/runbooks/powershell-runtime-compatibility.md](docs/runbooks/powershell-runtime-compatibility.md)。

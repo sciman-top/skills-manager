@@ -34,11 +34,11 @@ function Assert-PowerShell7 {
 
 Assert-PowerShell7
 
-function Assert-Environment([string]$RootPath, [bool]$NeedsGit) {
+function Assert-Environment([string]$RootPath, [bool]$NeedsGit, [bool]$NeedsBuildSource) {
     if (-not (Test-Path -LiteralPath (Join-Path $RootPath "skills.ps1") -PathType Leaf)) {
         throw "缺少入口脚本 skills.ps1。"
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $RootPath "build.ps1") -PathType Leaf)) {
+    if ($NeedsBuildSource -and -not (Test-Path -LiteralPath (Join-Path $RootPath "build.ps1") -PathType Leaf)) {
         throw "缺少构建脚本 build.ps1。"
     }
     if ($NeedsGit -and -not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -66,18 +66,18 @@ $buildPath = Join-Path $rootPath "build.ps1"
 $entryPath = Join-Path $rootPath "skills.ps1"
 $lockPath = Join-Path $rootPath "skills.lock.json"
 $needsGit = ($Mode -eq "CurrentUser" -and (Test-Path -LiteralPath $lockPath -PathType Leaf) -and -not $SkipRebuildLocked)
+$needsBuildSource = ($Mode -eq "PortableOnly" -or -not (Test-Path -LiteralPath $lockPath -PathType Leaf) -or $SkipRebuildLocked)
 
 if (-not $SkipEnvironmentCheck) {
-    Assert-Environment $rootPath $needsGit
+    Assert-Environment $rootPath $needsGit $needsBuildSource
 }
-
-Invoke-PowerShellFile "build" $buildPath
 
 if ($Mode -eq "CurrentUser") {
     if ((Test-Path -LiteralPath $lockPath -PathType Leaf) -and -not $SkipRebuildLocked) {
         Invoke-PowerShellFile "rebuild locked sources" $entryPath @("更新", "-Locked")
     }
     else {
+        Invoke-PowerShellFile "build" $buildPath
         Invoke-PowerShellFile "build and apply" $entryPath @("构建生效")
     }
 
@@ -85,8 +85,11 @@ if ($Mode -eq "CurrentUser") {
         Invoke-PowerShellFile "sync MCP" $entryPath @("同步MCP")
     }
 }
-elseif ($SyncMcp) {
-    Write-Host "PortableOnly 模式不会写入 MCP 或 skills 目标目录，已忽略 -SyncMcp。"
+else {
+    Invoke-PowerShellFile "build" $buildPath
+    if ($SyncMcp) {
+        Write-Host "PortableOnly 模式不会写入 MCP 或 skills 目标目录，已忽略 -SyncMcp。"
+    }
 }
 
 Invoke-PowerShellFile "doctor" $entryPath @("doctor", "--strict")

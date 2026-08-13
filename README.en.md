@@ -1,6 +1,8 @@
 # skills-manager
 
-A Windows-first, local-first PowerShell 7 manager for skills and MCP servers. It consolidates skill sources into one versioned configuration, builds portable skill directories, and provides target-repository audit, rule audit, and controlled native projection.
+A Windows-first, local-first PowerShell 7 manager for AI skills and MCP servers. It consolidates scattered sources into one versioned configuration, pins revisions, builds portable skill directories, and safely projects them to hosts such as Codex and Claude.
+
+It is aimed at individuals and teams that want the same skill set across Windows machines, auditable repository rules, and a shared MCP inventory without handing model, account, or runtime ownership to another framework.
 
 This repository is not a second AI runtime. It does not select models, own provider/auth/session state, replace host semantic routing, or manage plugin caches. Repository verification proves only `repo_verified`; host loading and live business acceptance remain separate checks.
 
@@ -8,12 +10,26 @@ This repository is not a second AI runtime. It does not select models, own provi
 
 PowerShell 7 (`pwsh`) and Git are required. Windows PowerShell 5.1 is unsupported.
 
+### Recommended: one-step Release install
+
+Download `bootstrap.zip` from [GitHub Releases](https://github.com/sciman-top/skills-manager/releases), extract it, and run:
+
+```powershell
+.\setup.cmd
+```
+
+For offline or USB-style green use, download `portable.zip`, extract it, and run `skills.cmd`. It does not write host directories automatically. See the [installation and migration guide](docs/INSTALLATION_AND_MIGRATION.md) for package selection, checksums, and migration boundaries.
+
+### From source
+
 ```powershell
 pwsh -NoProfile -File .\skills.ps1 help
 pwsh -NoProfile -File .\skills.ps1 发现
 pwsh -NoProfile -File .\skills.ps1 安装
 pwsh -NoProfile -File .\skills.ps1 doctor --strict
 ```
+
+You can also run `skills.cmd` to open the interactive menu.
 
 The interactive menu uses direct frequent actions plus domain submenus.
 
@@ -104,3 +120,11 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-qualit
 ```
 
 See [docs/product/README.md](docs/product/README.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [docs/runbooks/powershell-runtime-compatibility.md](docs/runbooks/powershell-runtime-compatibility.md).
+
+Build both release packages with:
+
+```powershell
+pwsh -NoProfile -File .\scripts\release\build-release.ps1 -Version 2026.08.13
+```
+
+Maintainers should read [the release guide](docs/RELEASING.md), especially the license and clean-machine acceptance requirements.

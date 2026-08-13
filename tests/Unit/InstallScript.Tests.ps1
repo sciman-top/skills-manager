@@ -34,7 +34,7 @@ exit 0
         $LASTEXITCODE | Should Be 0
 
         $calls = Get-Content -LiteralPath (Join-Path $workspace "calls.log")
-        ($calls -join "|") | Should Be "build|skills 更新 -Locked|skills 同步MCP|skills doctor --strict"
+        ($calls -join "|") | Should Be "skills 更新 -Locked|skills 同步MCP|skills doctor --strict"
     }
 
     It "Supports portable-only validation without applying skills or MCP configuration" {
