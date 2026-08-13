@@ -1700,6 +1700,10 @@ function Get-SkillCatalogForbiddenSemanticFieldNames {
     )
 }
 
+function Get-SkillCatalogDecisionFieldNames {
+    return @('key', 'disposition', 'reason', 'kept_path', 'source_paths')
+}
+
 function New-SkillCatalogEntry {
     [CmdletBinding()]
     param(
@@ -1814,7 +1818,25 @@ function Test-SkillCatalogContract {
         }
         $index++
     }
+    $allowedDecisionFields = @(Get-SkillCatalogDecisionFieldNames | ForEach-Object { $_.ToLowerInvariant() })
+    $decisionIndex = 0
     foreach ($decision in @((Get-SkillCatalogProperty $Catalog @('decisions')))) {
+        $path = '$.decisions[{0}]' -f $decisionIndex
+        if ($null -eq $decision) {
+            $findings.Add((New-OperationFinding 'decision_invalid' 'error' $path 'Catalog decision must be an object.')) | Out-Null
+            $decisionIndex++
+            continue
+        }
+        $properties = if ($decision -is [System.Collections.IDictionary]) {
+            @($decision.Keys | ForEach-Object { [pscustomobject]@{ Name = [string]$_ } })
+        }
+        else { @($decision.PSObject.Properties) }
+        foreach ($property in $properties) {
+            if ($allowedDecisionFields -notcontains $property.Name.ToLowerInvariant()) {
+                $findings.Add((New-OperationFinding 'decision_field_forbidden' 'error' ($path + '.' + $property.Name) 'Catalog decisions only record canonical duplicate disposition; semantic or runtime fields are forbidden.')) | Out-Null
+            }
+        }
+        $decisionIndex++
     }
     return New-OperationValidationResult $findings.ToArray()
 }
@@ -6334,11 +6356,21 @@ function Get-CfgVersionedContractReport($cfg) {
         observations = @($versionInfo.observations)
     }
 }
+function Get-CfgForbiddenHostRuntimeFieldNames {
+    return @('model', 'model_provider', 'provider', 'auth', 'session', 'orchestrator', 'daemon', 'agent_runtime')
+}
+
 function Get-CfgContractErrors($cfg) {
     $errors = New-Object System.Collections.Generic.List[string]
     if ($null -eq $cfg) {
         $errors.Add("skills.json 为空或无法解析为对象") | Out-Null
         return @($errors.ToArray())
+    }
+
+    foreach ($fieldName in @(Get-CfgForbiddenHostRuntimeFieldNames)) {
+        if (Test-CfgObjectProperty $cfg $fieldName) {
+            $errors.Add(("skills.json 顶层字段属于宿主 runtime 职责，禁止配置：{0}" -f $fieldName)) | Out-Null
+        }
     }
 
     $vendors = Get-CfgArrayField $cfg "vendors" $true $errors
@@ -6957,6 +6989,9 @@ function Optimize-Imports($cfg) {
 }
 
 function Assert-Cfg($cfg) {
+    foreach ($fieldName in @(Get-CfgForbiddenHostRuntimeFieldNames)) {
+        Need (-not (Test-CfgObjectProperty $cfg $fieldName)) ("skills.json 顶层字段属于宿主 runtime 职责，禁止配置：{0}" -f $fieldName)
+    }
     Need (Assert-IsArray $cfg.vendors) "skills.json 的 vendors 必须是数组"
     Need (Assert-IsArray $cfg.targets) "skills.json 的 targets 必须是数组"
     Need (Assert-IsArray $cfg.mappings) "skills.json 的 mappings 必须是数组"

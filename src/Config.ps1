@@ -372,11 +372,21 @@ function Get-CfgVersionedContractReport($cfg) {
         observations = @($versionInfo.observations)
     }
 }
+function Get-CfgForbiddenHostRuntimeFieldNames {
+    return @('model', 'model_provider', 'provider', 'auth', 'session', 'orchestrator', 'daemon', 'agent_runtime')
+}
+
 function Get-CfgContractErrors($cfg) {
     $errors = New-Object System.Collections.Generic.List[string]
     if ($null -eq $cfg) {
         $errors.Add("skills.json 为空或无法解析为对象") | Out-Null
         return @($errors.ToArray())
+    }
+
+    foreach ($fieldName in @(Get-CfgForbiddenHostRuntimeFieldNames)) {
+        if (Test-CfgObjectProperty $cfg $fieldName) {
+            $errors.Add(("skills.json 顶层字段属于宿主 runtime 职责，禁止配置：{0}" -f $fieldName)) | Out-Null
+        }
     }
 
     $vendors = Get-CfgArrayField $cfg "vendors" $true $errors
@@ -995,6 +1005,9 @@ function Optimize-Imports($cfg) {
 }
 
 function Assert-Cfg($cfg) {
+    foreach ($fieldName in @(Get-CfgForbiddenHostRuntimeFieldNames)) {
+        Need (-not (Test-CfgObjectProperty $cfg $fieldName)) ("skills.json 顶层字段属于宿主 runtime 职责，禁止配置：{0}" -f $fieldName)
+    }
     Need (Assert-IsArray $cfg.vendors) "skills.json 的 vendors 必须是数组"
     Need (Assert-IsArray $cfg.targets) "skills.json 的 targets 必须是数组"
     Need (Assert-IsArray $cfg.mappings) "skills.json 的 mappings 必须是数组"

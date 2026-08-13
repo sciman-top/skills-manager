@@ -92,6 +92,33 @@ Describe "Config And Update Enhancements" {
     }
 
     Context "Config contract validation" {
+        It "Rejects host runtime ownership fields while preserving compatible extensions" {
+            $cfg = [pscustomobject]@{
+                vendors = @()
+                targets = @()
+                mappings = @()
+                imports = @()
+                mcp_servers = @()
+                mcp_targets = @()
+                sync_mode = "link"
+                note = "compatible extension"
+                model = "forbidden-fixture"
+                orchestrator = [pscustomobject]@{ enabled = $true }
+            }
+
+            $errors = @(Get-CfgContractErrors $cfg) -join "`n"
+
+            $errors | Should Match "宿主 runtime 职责.*model"
+            $errors | Should Match "宿主 runtime 职责.*orchestrator"
+            $errors | Should Not Match "note"
+            { Assert-Cfg $cfg } | Should Throw
+
+            $cfg.PSObject.Properties.Remove('model')
+            $cfg.PSObject.Properties.Remove('orchestrator')
+            @(Get-CfgContractErrors $cfg).Count | Should Be 0
+            { Assert-Cfg $cfg } | Should Not Throw
+        }
+
         It "Preserves a single-item skill projection sources array" {
             $cfg = @'
 {

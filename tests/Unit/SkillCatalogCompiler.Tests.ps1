@@ -53,4 +53,25 @@ Describe 'Skill catalog compiler' {
         $catalog.semantic_selection_applied | Should Be $false
         (Test-SkillCatalogContract $catalog).pass | Should Be $true
     }
+
+    It 'rejects semantic or runtime fields in catalog decisions' {
+        $catalog = New-SkillCatalog -GeneratedAt '2026-08-07T05:00:00Z' -Decisions @(
+            [pscustomobject]@{
+                key = 'alpha'
+                disposition = 'duplicate'
+                reason = 'canonical_identity_deduplicated'
+                kept_path = 'D:\fixture\alpha\SKILL.md'
+                source_paths = @('D:\fixture\alpha\SKILL.md')
+                semantic_score = 1.0
+                selected_by_router = $true
+            }
+        )
+
+        $result = Test-SkillCatalogContract $catalog
+
+        $result.pass | Should Be $false
+        @($result.findings | Where-Object code -eq 'decision_field_forbidden').Count | Should Be 2
+        (@($result.findings.path) -join "`n") | Should Match '\$\.decisions\[0\]\.semantic_score'
+        (@($result.findings.path) -join "`n") | Should Match '\$\.decisions\[0\]\.selected_by_router'
+    }
 }

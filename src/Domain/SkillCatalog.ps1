@@ -30,6 +30,10 @@ function Get-SkillCatalogForbiddenSemanticFieldNames {
     )
 }
 
+function Get-SkillCatalogDecisionFieldNames {
+    return @('key', 'disposition', 'reason', 'kept_path', 'source_paths')
+}
+
 function New-SkillCatalogEntry {
     [CmdletBinding()]
     param(
@@ -144,7 +148,25 @@ function Test-SkillCatalogContract {
         }
         $index++
     }
+    $allowedDecisionFields = @(Get-SkillCatalogDecisionFieldNames | ForEach-Object { $_.ToLowerInvariant() })
+    $decisionIndex = 0
     foreach ($decision in @((Get-SkillCatalogProperty $Catalog @('decisions')))) {
+        $path = '$.decisions[{0}]' -f $decisionIndex
+        if ($null -eq $decision) {
+            $findings.Add((New-OperationFinding 'decision_invalid' 'error' $path 'Catalog decision must be an object.')) | Out-Null
+            $decisionIndex++
+            continue
+        }
+        $properties = if ($decision -is [System.Collections.IDictionary]) {
+            @($decision.Keys | ForEach-Object { [pscustomobject]@{ Name = [string]$_ } })
+        }
+        else { @($decision.PSObject.Properties) }
+        foreach ($property in $properties) {
+            if ($allowedDecisionFields -notcontains $property.Name.ToLowerInvariant()) {
+                $findings.Add((New-OperationFinding 'decision_field_forbidden' 'error' ($path + '.' + $property.Name) 'Catalog decisions only record canonical duplicate disposition; semantic or runtime fields are forbidden.')) | Out-Null
+            }
+        }
+        $decisionIndex++
     }
     return New-OperationValidationResult $findings.ToArray()
 }
