@@ -1,15 +1,17 @@
-. $PSScriptRoot\..\..\skills.ps1
+BeforeAll {
+    . $PSScriptRoot\..\..\skills.ps1
 
+}
 Describe "Git lock recovery" {
     Context "Get-GitLockPathFromOutputLine" {
         It "Extracts index.lock path from git stderr line" {
             $line = "fatal: Unable to create 'E:/repo/.git/index.lock': File exists."
-            Get-GitLockPathFromOutputLine $line | Should Be "E:/repo/.git/index.lock"
+            Get-GitLockPathFromOutputLine $line | Should -Be "E:/repo/.git/index.lock"
         }
 
         It "Extracts index.lock path from unlink stderr line" {
             $line = "warning: unable to unlink 'E:/repo/.git/index.lock': Invalid argument"
-            Get-GitLockPathFromOutputLine $line | Should Be "E:/repo/.git/index.lock"
+            Get-GitLockPathFromOutputLine $line | Should -Be "E:/repo/.git/index.lock"
         }
     }
 
@@ -25,8 +27,8 @@ Describe "Git lock recovery" {
 
             $repaired = Repair-StaleGitLockFromOutput $repo @("fatal: Unable to create '$lockPath': File exists.")
 
-            $repaired | Should Be $true
-            (Test-Path $lockPath) | Should Be $false
+            $repaired | Should -Be $true
+            (Test-Path $lockPath) | Should -Be $false
         }
 
         It "Does not remove lock when a Git process exists" {
@@ -40,8 +42,8 @@ Describe "Git lock recovery" {
 
             $repaired = Repair-StaleGitLockFromOutput $repo @("fatal: Unable to create '$lockPath': File exists.")
 
-            $repaired | Should Be $false
-            (Test-Path $lockPath) | Should Be $true
+            $repaired | Should -Be $false
+            (Test-Path $lockPath) | Should -Be $true
         }
 
         It "Rejects stderr lock paths outside the current repository Git admin directory" {
@@ -63,8 +65,8 @@ Describe "Git lock recovery" {
                 Pop-Location
             }
 
-            $repaired | Should Be $false
-            (Test-Path -LiteralPath $outsideLock -PathType Leaf) | Should Be $true
+            $repaired | Should -Be $false
+            (Test-Path -LiteralPath $outsideLock -PathType Leaf) | Should -Be $true
         }
 
         It "Does not attempt removal when a Git process is still running" {
@@ -79,9 +81,9 @@ Describe "Git lock recovery" {
 
             $repaired = Repair-StaleGitLockFromOutput $repo @("fatal: Unable to create '$lockPath': File exists.")
 
-            $repaired | Should Be $false
-            Assert-MockCalled Remove-GitLockFile -Times 0
-            (Test-Path $lockPath) | Should Be $true
+            $repaired | Should -Be $false
+            Should -Invoke Remove-GitLockFile -Times 0
+            (Test-Path $lockPath) | Should -Be $true
         }
     }
 
@@ -107,9 +109,9 @@ Describe "Git lock recovery" {
                 Pop-Location
             }
 
-            $script:calls[0] | Should Be "merge --abort"
-            $script:calls[1] | Should Be "reset --hard"
-            $script:calls[2] | Should Be "clean -ffdx"
+            $script:calls[0] | Should -Be "merge --abort"
+            $script:calls[1] | Should -Be "reset --hard"
+            $script:calls[2] | Should -Be "clean -ffdx"
         }
 
         It "Removes stale repo index.lock before git reset and clean" {
@@ -130,9 +132,9 @@ Describe "Git lock recovery" {
                 Pop-Location
             }
 
-            (Test-Path $lockPath) | Should Be $false
-            Assert-MockCalled Invoke-Git -Times 1 -ParameterFilter { $GitArgs[0] -eq "reset" -and $GitArgs[1] -eq "--hard" }
-            Assert-MockCalled Invoke-Git -Times 1 -ParameterFilter { $GitArgs[0] -eq "clean" -and $GitArgs[1] -eq "-ffdx" }
+            (Test-Path $lockPath) | Should -Be $false
+            Should -Invoke Invoke-Git -Times 1 -ParameterFilter { $GitArgs[0] -eq "reset" -and $GitArgs[1] -eq "--hard" }
+            Should -Invoke Invoke-Git -Times 1 -ParameterFilter { $GitArgs[0] -eq "clean" -and $GitArgs[1] -eq "-ffdx" }
         }
 
         It "Retries git clean after repairing permission denied paths" {
@@ -165,8 +167,8 @@ Describe "Git lock recovery" {
                 Pop-Location
             }
 
-            $script:cleanCalls | Should Be 2
-            (Test-Path -LiteralPath $staleDir) | Should Be $false
+            $script:cleanCalls | Should -Be 2
+            (Test-Path -LiteralPath $staleDir) | Should -Be $false
         }
     }
 
@@ -186,9 +188,9 @@ Describe "Git lock recovery" {
             $msg = "git 失败：git clean -ffdx；详情：warning: failed to remove inside/: Permission denied | warning: failed to remove ../outside/: Permission denied"
             $repaired = Repair-GitCleanPermissionDenied $repo $msg
 
-            $repaired | Should Be $true
-            (Test-Path -LiteralPath $inside) | Should Be $false
-            (Test-Path -LiteralPath (Join-Path $outside "keep.txt")) | Should Be $true
+            $repaired | Should -Be $true
+            (Test-Path -LiteralPath $inside) | Should -Be $false
+            (Test-Path -LiteralPath (Join-Path $outside "keep.txt")) | Should -Be $true
         }
 
         It "Summarizes all permission denied paths instead of only the last two lines" {
@@ -199,7 +201,7 @@ Describe "Git lock recovery" {
                 "fatal: some clean paths could not be removed"
             )
 
-            $summary | Should Be "warning: failed to remove path-a/: Permission denied | warning: failed to remove path-b/: Permission denied | warning: failed to remove path-c/: Permission denied"
+            $summary | Should -Be "warning: failed to remove path-a/: Permission denied | warning: failed to remove path-b/: Permission denied | warning: failed to remove path-c/: Permission denied"
         }
     }
 
@@ -216,11 +218,11 @@ Describe "Git lock recovery" {
                 "skills/parent/keep"
             )
 
-            $candidates | Should Contain "skills/old"
-            $candidates | Should Contain "skills/parent/old"
-            $candidates | Should Contain "src"
-            $candidates | Should Not Contain "skills"
-            $candidates | Should Not Contain "skills/parent"
+            $candidates | Should -Contain "skills/old"
+            $candidates | Should -Contain "skills/parent/old"
+            $candidates | Should -Contain "src"
+            $candidates | Should -Not -Contain "skills"
+            $candidates | Should -Not -Contain "skills/parent"
         }
 
         It "Removes read-only directory shells outside the next sparse set" {
@@ -249,8 +251,8 @@ Describe "Git lock recovery" {
                 Pop-Location
             }
 
-            (Test-Path -LiteralPath $oldRoot) | Should Be $false
-            (Test-Path -LiteralPath $keepDir) | Should Be $true
+            (Test-Path -LiteralPath $oldRoot) | Should -Be $false
+            (Test-Path -LiteralPath $keepDir) | Should -Be $true
         }
 
         It "Repairs sparse-checkout remove warnings returned with exit code zero" {
@@ -264,8 +266,8 @@ Describe "Git lock recovery" {
                 "warning: failed to remove directory 'skills/old/'"
             )
 
-            $repaired | Should Be $true
-            (Test-Path -LiteralPath $staleDir) | Should Be $false
+            $repaired | Should -Be $true
+            (Test-Path -LiteralPath $staleDir) | Should -Be $false
         }
     }
 
@@ -284,8 +286,8 @@ Describe "Git lock recovery" {
                 "fatal: Could not write new index file."
             )
 
-            $repaired | Should Be $true
-            (Test-Path $lockPath) | Should Be $false
+            $repaired | Should -Be $true
+            (Test-Path $lockPath) | Should -Be $false
         }
     }
 }

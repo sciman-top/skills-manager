@@ -1,40 +1,51 @@
-$repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
-. (Join-Path $repoRoot 'skills.ps1')
+BeforeAll {
+    $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
+    . (Join-Path $repoRoot 'skills.ps1')
 
-function Set-TestWorkspace([string]$root) {
-    $script:Root = $root
-    $script:CfgPath = Join-Path $root "skills.json"
-    $script:LogPath = Join-Path $root "build.log"
-    $script:VendorDir = Join-Path $root "vendor"
-    $script:AgentDir = Join-Path $root "agent"
-    $script:OverridesDir = Join-Path $root "overrides"
-    $script:ManualDir = Join-Path $root "manual"
-    $script:ImportDir = Join-Path $root "imports"
-    $script:DryRun = $false
-    $global:Root = $script:Root
-    $global:CfgPath = $script:CfgPath
-    $global:LogPath = $script:LogPath
-    $global:VendorDir = $script:VendorDir
-    $global:AgentDir = $script:AgentDir
-    $global:OverridesDir = $script:OverridesDir
-    $global:ManualDir = $script:ManualDir
-    $global:ImportDir = $script:ImportDir
-    $global:DryRun = $false
-    EnsureDir $script:VendorDir
-    EnsureDir $script:AgentDir
-    EnsureDir $script:OverridesDir
-    EnsureDir $script:ManualDir
-    EnsureDir $script:ImportDir
+    $script:originalWorkspaceState = @{}
+    foreach ($name in @('Root', 'CfgPath', 'LogPath', 'VendorDir', 'AgentDir', 'OverridesDir', 'ManualDir', 'ImportDir', 'DryRun')) {
+        $script:originalWorkspaceState[$name] = Get-Variable -Name $name -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    }
+
+    function Set-TestWorkspace([string]$root) {
+        $values = @{
+            Root = $root
+            CfgPath = Join-Path $root "skills.json"
+            LogPath = Join-Path $root "build.log"
+            VendorDir = Join-Path $root "vendor"
+            AgentDir = Join-Path $root "agent"
+            OverridesDir = Join-Path $root "overrides"
+            ManualDir = Join-Path $root "manual"
+            ImportDir = Join-Path $root "imports"
+            DryRun = $false
+        }
+        foreach ($entry in $values.GetEnumerator()) {
+            Set-Variable -Name $entry.Key -Scope 1 -Value $entry.Value
+            Set-Variable -Name $entry.Key -Scope Script -Value $entry.Value
+            Set-Variable -Name $entry.Key -Scope Global -Value $entry.Value
+        }
+        EnsureDir $VendorDir
+        EnsureDir $AgentDir
+        EnsureDir $OverridesDir
+        EnsureDir $ManualDir
+        EnsureDir $ImportDir
+    }
+
 }
-
+AfterAll {
+    foreach ($entry in $script:originalWorkspaceState.GetEnumerator()) {
+        Set-Variable -Name $entry.Key -Scope Global -Value $entry.Value
+        Set-Variable -Name $entry.Key -Scope Script -Value $entry.Value
+    }
+}
 Describe "E2E Workflows" {
     Context "CLI process contract" {
         It "Clears stale native exit state after a successful command" {
             $entry = (Join-Path $repoRoot "skills.ps1").Replace("'", "''")
             $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -Command "`$global:LASTEXITCODE = 128; & '$entry' help; exit `$LASTEXITCODE" 2>&1)
 
-            $LASTEXITCODE | Should Be 0
-            ($output -join "`n") | Should Match "skills\.ps1"
+            $LASTEXITCODE | Should -Be 0
+            ($output -join "`n") | Should -Match "skills\.ps1"
         }
     }
 
@@ -44,7 +55,7 @@ Describe "E2E Workflows" {
             New-Item -ItemType Directory -Path $root -Force | Out-Null
             Set-TestWorkspace $root
 
-            $skillDir = Join-Path $script:VendorDir "demo\skills\hello"
+            $skillDir = Join-Path $VendorDir "demo\skills\hello"
             New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
             Set-Content -Path (Join-Path $skillDir "SKILL.md") -Value @'
 ---
@@ -67,8 +78,8 @@ description: demo skill
 
             构建生效
 
-            (Test-Path (Join-Path $script:AgentDir "demo-hello\SKILL.md")) | Should Be $true
-            (Test-Path (Join-Path $root "out\skills\demo-hello\SKILL.md")) | Should Be $true
+            (Test-Path (Join-Path $AgentDir "demo-hello\SKILL.md")) | Should -Be $true
+            (Test-Path (Join-Path $root "out\skills\demo-hello\SKILL.md")) | Should -Be $true
         }
 
         It "Builds agent without writing host targets when projection is explicitly skipped" {
@@ -76,7 +87,7 @@ description: demo skill
             New-Item -ItemType Directory -Path $root -Force | Out-Null
             Set-TestWorkspace $root
 
-            $skillDir = Join-Path $script:VendorDir "demo\skills\hello"
+            $skillDir = Join-Path $VendorDir "demo\skills\hello"
             New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
             Set-Content -Path (Join-Path $skillDir "SKILL.md") -Value @'
 ---
@@ -99,8 +110,8 @@ description: demo skill
 
             构建生效 -SkipHostProjection
 
-            (Test-Path (Join-Path $script:AgentDir "demo-hello\SKILL.md")) | Should Be $true
-            (Test-Path (Join-Path $root "out\skills")) | Should Be $false
+            (Test-Path (Join-Path $AgentDir "demo-hello\SKILL.md")) | Should -Be $true
+            (Test-Path (Join-Path $root "out\skills")) | Should -Be $false
         }
 
         It "Fails closed and rolls back when agent build reports failures" {
@@ -138,13 +149,13 @@ description: demo skill
             }
             catch {
                 $thrown = $true
-                $_.Exception.Message | Should Match "构建生效失败"
+                $_.Exception.Message | Should -Match "构建生效失败"
             }
 
-            $thrown | Should Be $true
-            Assert-MockCalled Rollback-BuildTransaction -Times 1 -Exactly
-            Assert-MockCalled Complete-BuildTransaction -Times 0 -Exactly
-            Assert-MockCalled 应用到ClaudeCodex -Times 0 -Exactly
+            $thrown | Should -Be $true
+            Should -Invoke Rollback-BuildTransaction -Times 1 -Exactly
+            Should -Invoke Complete-BuildTransaction -Times 0 -Exactly
+            Should -Invoke 应用到ClaudeCodex -Times 0 -Exactly
         }
     }
 
@@ -173,17 +184,16 @@ description: demo skill
 
             更新
 
-            Assert-MockCalled 更新Imports -Times 0 -Exactly
-            Assert-MockCalled 更新Vendor -Times 0 -Exactly
-            Assert-MockCalled 构建生效 -Times 0 -Exactly
+            Should -Invoke 更新Imports -Times 0 -Exactly
+            Should -Invoke 更新Vendor -Times 0 -Exactly
+            Should -Invoke 构建生效 -Times 0 -Exactly
         }
 
         It "Applies lock snapshot directly when -Locked is enabled" {
-            $oldLocked = $script:Locked
-            $oldSkipHostProjection = $script:SkipHostProjection
+            $oldLocked = $Locked
+            $oldSkipHostProjection = $SkipHostProjection
             try {
-                $script:Locked = $true
-                $script:SkipHostProjection = $true
+                . (Join-Path $repoRoot 'skills.ps1') -Locked -SkipHostProjection
                 Mock LoadCfg {
                     [pscustomobject]@{
                         vendors = @()
@@ -206,15 +216,15 @@ description: demo skill
 
                 更新
 
-                Assert-MockCalled Apply-LockToWorkspace -Times 1 -Exactly
-                Assert-MockCalled 构建生效 -Times 1 -Exactly
-                Assert-MockCalled 构建生效 -Times 1 -Exactly -ParameterFilter { [bool]$SkipHostProjection }
-                Assert-MockCalled 更新Imports -Times 0 -Exactly
-                Assert-MockCalled 更新Vendor -Times 0 -Exactly
+                Should -Invoke Apply-LockToWorkspace -Times 1 -Exactly -Scope It
+                Should -Invoke 构建生效 -Times 1 -Exactly -Scope It
+                Should -Invoke 构建生效 -Times 1 -Exactly -Scope It -ParameterFilter { [bool]$SkipHostProjection }
+                Should -Invoke 更新Imports -Times 0 -Exactly -Scope It
+                Should -Invoke 更新Vendor -Times 0 -Exactly -Scope It
             }
             finally {
-                $script:Locked = $oldLocked
-                $script:SkipHostProjection = $oldSkipHostProjection
+                $Locked = $oldLocked
+                $SkipHostProjection = $oldSkipHostProjection
             }
         }
     }
@@ -251,12 +261,12 @@ description: demo skill
             $context = Get-McpSyncPlanningContext
             $plan = New-McpSyncOperationPlanResult -DesiredState $context.desired_state -CreatedAt '2026-08-01T08:00:00Z' -SourceRevision ('f' * 64)
             $plannedPaths = @($plan.operation_plan.targets.path | Sort-Object)
-            foreach ($path in $plannedPaths) { (Test-Path -LiteralPath $path) | Should Be $false }
+            foreach ($path in $plannedPaths) { (Test-Path -LiteralPath $path) | Should -Be $false }
 
             同步MCP
 
-            foreach ($path in $plannedPaths) { (Test-Path -LiteralPath $path -PathType Leaf) | Should Be $true }
-            (@($context.desired_state.path | Sort-Object) -join ',') | Should Be ($plannedPaths -join ',')
+            foreach ($path in $plannedPaths) { (Test-Path -LiteralPath $path -PathType Leaf) | Should -Be $true }
+            (@($context.desired_state.path | Sort-Object) -join ',') | Should -Be ($plannedPaths -join ',')
         }
 
         It "Writes mcp files for codex and project trae when trae target exists" {
@@ -290,10 +300,10 @@ description: demo skill
             同步MCP
 
             $codexMcpPath = Join-Path $root ".codex\.mcp.json"
-            (Test-Path $codexMcpPath) | Should Be $true
-            (Get-Content -Raw -Path $codexMcpPath) | Should Match '"fetch"'
-            (Test-Path (Join-Path $root ".codex\config.toml")) | Should Be $true
-            (Test-Path (Join-Path $root ".trae\mcp.json")) | Should Be $true
+            (Test-Path $codexMcpPath) | Should -Be $true
+            (Get-Content -Raw -Path $codexMcpPath) | Should -Match '"fetch"'
+            (Test-Path (Join-Path $root ".codex\config.toml")) | Should -Be $true
+            (Test-Path (Join-Path $root ".trae\mcp.json")) | Should -Be $true
         }
 
         It "Does not write project trae when trae target is absent" {
@@ -323,8 +333,8 @@ description: demo skill
 
             同步MCP
 
-            (Test-Path (Join-Path $root ".codex\config.toml")) | Should Be $true
-            (Test-Path (Join-Path $root ".trae\mcp.json")) | Should Be $false
+            (Test-Path (Join-Path $root ".codex\config.toml")) | Should -Be $true
+            (Test-Path (Join-Path $root ".trae\mcp.json")) | Should -Be $false
         }
     }
 
@@ -333,9 +343,9 @@ description: demo skill
             $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') capability-inventory --json 2>&1)
             $parsed = ($output -join "`n") | ConvertFrom-Json
 
-            @($output).Count | Should Be 1
-            $parsed.command | Should Be 'capability-inventory'
-            $parsed.data.writes | Should Be 0
+            @($output).Count | Should -Be 1
+            $parsed.command | Should -Be 'capability-inventory'
+            $parsed.data.writes | Should -Be 0
         }
 
         It "emits one rule audit JSON envelope without mutation" {
@@ -343,12 +353,12 @@ description: demo skill
             $exitCode = $LASTEXITCODE
             $parsed = ($output -join "`n") | ConvertFrom-Json
 
-            $exitCode | Should Be 0
-            @($output).Count | Should Be 1
-            $parsed.command | Should Be 'rule-audit'
-            $parsed.writes | Should Be 0
-            $parsed.provider_calls | Should Be 0
-            $parsed.native_mutations | Should Be 0
+            $exitCode | Should -Be 0
+            @($output).Count | Should -Be 1
+            $parsed.command | Should -Be 'rule-audit'
+            $parsed.writes | Should -Be 0
+            $parsed.provider_calls | Should -Be 0
+            $parsed.native_mutations | Should -Be 0
         }
     }
 
@@ -364,10 +374,10 @@ description: demo skill
             $applyOutput = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') rule-apply --plan $plan --fixture-root $root --token APPLY_RULE_PATCH --json 2>&1)
             $applyExit = $LASTEXITCODE; $applyJson = ($applyOutput -join "`n") | ConvertFrom-Json
 
-            $planExit | Should Be 0; @($planOutput).Count | Should Be 1; $planJson.command | Should Be 'rule-plan'
-            $applyExit | Should Be 0; @($applyOutput).Count | Should Be 1; $applyJson.command | Should Be 'rule-apply'
-            $applyJson.result.receipt.verification.host_loaded | Should Be 'not_run'
-            [IO.File]::ReadAllText($target) | Should Be 'after'
+            $planExit | Should -Be 0; @($planOutput).Count | Should -Be 1; $planJson.command | Should -Be 'rule-plan'
+            $applyExit | Should -Be 0; @($applyOutput).Count | Should -Be 1; $applyJson.command | Should -Be 'rule-apply'
+            $applyJson.result.receipt.verification.host_loaded | Should -Be 'not_run'
+            [IO.File]::ReadAllText($target) | Should -Be 'after'
         }
 
         It "returns exit 2 and preserves the target when apply is blocked" {
@@ -380,8 +390,8 @@ description: demo skill
             $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') rule-apply --plan $plan --fixture-root $root --token WRONG --json 2>&1)
             $exitCode = $LASTEXITCODE; $parsed = ($output -join "`n") | ConvertFrom-Json
 
-            $exitCode | Should Be 2; @($output).Count | Should Be 1; $parsed.result.status | Should Be 'blocked'
-            [IO.File]::ReadAllText($target) | Should Be 'before'
+            $exitCode | Should -Be 2; @($output).Count | Should -Be 1; $parsed.result.status | Should -Be 'blocked'
+            [IO.File]::ReadAllText($target) | Should -Be 'before'
         }
     }
 
@@ -409,12 +419,12 @@ description: demo skill
             $repoAction=@($applyJson.result.receipt.actions|Where-Object target_scope -eq 'repository')[0]
             $rollbackOutput=@(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') rule-estate-rollback --receipt $receiptPath --action-id $repoAction.action_id @rootArgs --token ROLLBACK_RULE_ESTATE_PATCH --json 2>&1);$rollbackExit=$LASTEXITCODE;$rollbackJson=($rollbackOutput -join "`n")|ConvertFrom-Json
 
-            $planExit|Should Be 0;@($planOutput).Count|Should Be 1;$planJson.command|Should Be 'rule-estate-plan'
-            $applyExit|Should Be 0;@($applyOutput).Count|Should Be 1;$applyJson.command|Should Be 'rule-estate-apply';$applyJson.result.writes|Should Be 2
-            $rollbackExit|Should Be 0;@($rollbackOutput).Count|Should Be 1;$rollbackJson.command|Should Be 'rule-estate-rollback'
-            [IO.File]::ReadAllText((Join-Path $repo 'AGENTS.md'))|Should Be '# repo before'
-            [IO.File]::ReadAllText((Join-Path $codex 'AGENTS.md'))|Should Be '# global after'
-            $applyJson.truth_boundary|Should Be 'filesystem_applied_not_host_loaded'
+            $planExit| Should -Be 0;@($planOutput).Count| Should -Be 1;$planJson.command| Should -Be 'rule-estate-plan'
+            $applyExit| Should -Be 0;@($applyOutput).Count| Should -Be 1;$applyJson.command| Should -Be 'rule-estate-apply';$applyJson.result.writes| Should -Be 2
+            $rollbackExit| Should -Be 0;@($rollbackOutput).Count| Should -Be 1;$rollbackJson.command| Should -Be 'rule-estate-rollback'
+            [IO.File]::ReadAllText((Join-Path $repo 'AGENTS.md'))| Should -Be '# repo before'
+            [IO.File]::ReadAllText((Join-Path $codex 'AGENTS.md'))| Should -Be '# global after'
+            $applyJson.truth_boundary| Should -Be 'filesystem_applied_not_host_loaded'
         }
     }
 
@@ -423,17 +433,17 @@ description: demo skill
             $root = Join-Path $TestDrive "ws-invalid-config"
             New-Item -ItemType Directory -Path $root -Force | Out-Null
             Set-TestWorkspace $root
-            Set-Content -Path $script:CfgPath -Value '{"targets":[],"mappings":[],"imports":[]}' -NoNewline
+            Set-Content -Path $CfgPath -Value '{"targets":[],"mappings":[],"imports":[]}' -NoNewline
 
             $thrown = $false
             try { LoadCfg | Out-Null } catch { $thrown = $true }
-            $thrown | Should Be $true
+            $thrown | Should -Be $true
         }
 
         It "Reports failure when target path is drive root" {
             $cfg = [pscustomobject]@{ targets = @([pscustomobject]@{ path = "C:\" }); sync_mode = "sync" }
             $failures = 应用到ClaudeCodex $cfg -SkipPreflight
-            ($failures.Count -gt 0) | Should Be $true
+            ($failures.Count -gt 0) | Should -Be $true
         }
 
         It "Collects vendor update failure when git command throws" {
@@ -441,7 +451,7 @@ description: demo skill
             New-Item -ItemType Directory -Path $root -Force | Out-Null
             Set-TestWorkspace $root
 
-            $vendorPath = Join-Path $script:VendorDir "demo"
+            $vendorPath = Join-Path $VendorDir "demo"
             New-Item -ItemType Directory -Path $vendorPath -Force | Out-Null
 
             $cfg = [pscustomobject]@{
@@ -461,7 +471,7 @@ description: demo skill
             Mock Get-GitHeadBranch { "main" }
 
             $failures = 更新Vendor $cfg -SkipPreflight
-            ($failures.Count -gt 0) | Should Be $true
+            ($failures.Count -gt 0) | Should -Be $true
         }
     }
 }

@@ -1,7 +1,10 @@
-. $PSScriptRoot\..\..\skills.ps1
+BeforeAll {
+    . $PSScriptRoot\..\..\skills.ps1
 
+}
 Describe "Menu structure" {
-    function Get-FunctionBody {
+    BeforeAll {
+function Get-FunctionBody {
         param(
             [string]$Text,
             [string]$FunctionName
@@ -33,8 +36,7 @@ Describe "Menu structure" {
 
         throw "Failed to extract function body for $FunctionName"
     }
-
-    function Assert-MenuRouting {
+function Assert-MenuRouting {
         param(
             [string]$MenuBody,
             [hashtable]$ExpectedRoutes,
@@ -44,16 +46,17 @@ Describe "Menu structure" {
         $previousIndex = -1
         foreach ($label in $ExpectedLabels) {
             $idx = $MenuBody.IndexOf($label)
-            $idx | Should BeGreaterThan -1
-            $idx | Should BeGreaterThan $previousIndex
+            $idx | Should -BeGreaterThan -1
+            $idx | Should -BeGreaterThan $previousIndex
             $previousIndex = $idx
         }
 
         foreach ($entry in $ExpectedRoutes.GetEnumerator()) {
             $pattern = ('"{0}"\s*\{{\s*{1}\s*\}}' -f $entry.Key, [regex]::Escape([string]$entry.Value))
-            $MenuBody | Should Match $pattern
+            $MenuBody | Should -Match $pattern
         }
     }
+}
 
     It "Keeps the top-level menu skeleton and submenu routing" {
         $raw = Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\..\src\Commands\Utils.ps1") -Raw
@@ -102,8 +105,8 @@ Describe "Menu structure" {
             "function 目标仓管理菜单"
             "function 审查高级菜单"
         ) | ForEach-Object {
-            $raw | Should Match $_
-            $generated | Should Match $_
+            $raw | Should -Match $_
+            $generated | Should -Match $_
         }
 
         $mcpBody = Get-FunctionBody $raw "MCP菜单"
@@ -159,7 +162,7 @@ Describe "Menu structure" {
             "10) 高级设置"
             "0) 返回"
         ) | ForEach-Object {
-            $auditBody | Should Match ([regex]::Escape($_))
+            $auditBody | Should -Match ([regex]::Escape($_))
         }
 
         $targetAdminBody = Get-FunctionBody $raw "目标仓管理菜单"
@@ -170,7 +173,7 @@ Describe "Menu structure" {
             "4) 删除目标仓"
             "0) 返回"
         ) | ForEach-Object {
-            $targetAdminBody | Should Match ([regex]::Escape($_))
+            $targetAdminBody | Should -Match ([regex]::Escape($_))
         }
 
         $advancedAuditBody = Get-FunctionBody $raw "审查高级菜单"
@@ -182,7 +185,7 @@ Describe "Menu structure" {
             "5) 直接执行建议（高级）"
             "0) 返回"
         ) | ForEach-Object {
-            $advancedAuditBody | Should Match ([regex]::Escape($_))
+            $advancedAuditBody | Should -Match ([regex]::Escape($_))
         }
     }
 
@@ -203,7 +206,7 @@ Describe "Menu structure" {
             '重建并同步：根据 `skills.json` 重建 `agent/` 并同步到 `targets`'
             '只有 `--apply --yes` 才真正写入'
         ) | ForEach-Object {
-            $helpBody | Should Match ([regex]::Escape($_))
+            $helpBody | Should -Match ([regex]::Escape($_))
         }
     }
 
@@ -223,7 +226,7 @@ Describe "Menu structure" {
             '技能库管理'
             '更多'
         ) | ForEach-Object {
-            $readme | Should Match ([regex]::Escape($_))
+            $readme | Should -Match ([regex]::Escape($_))
         }
 
         @(
@@ -239,7 +242,7 @@ Describe "Menu structure" {
             'More'
             'The `Target Repo Audit` submenu follows the workflow'
         ) | ForEach-Object {
-            $readmeEn | Should Match ([regex]::Escape($_))
+            $readmeEn | Should -Match ([regex]::Escape($_))
         }
     }
 }

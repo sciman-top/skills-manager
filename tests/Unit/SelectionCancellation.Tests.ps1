@@ -1,10 +1,12 @@
-. $PSScriptRoot\..\..\skills.ps1
+BeforeAll {
+    . $PSScriptRoot\..\..\skills.ps1
 
+}
 Describe "Selection Cancellation" {
     It "Treats blank menu input as 0 so non-interactive menus exit" {
         Mock Read-HostSafe { "" }
 
-        Read-MenuChoice "请选择" | Should Be "0"
+        Read-MenuChoice "请选择" | Should -Be "0"
     }
 
     It "Marks input 0 as canceled in Read-SelectionIndices" {
@@ -12,8 +14,8 @@ Describe "Selection Cancellation" {
 
         $result = Read-SelectionIndices "请选择" 3 "invalid"
 
-        $result.canceled | Should Be $true
-        $result.indices.Count | Should Be 0
+        $result.canceled | Should -Be $true
+        $result.indices.Count | Should -Be 0
     }
 
     It "Does not build when install selection is canceled with 0" {
@@ -57,6 +59,6 @@ Describe "Selection Cancellation" {
 
         安装
 
-        Assert-MockCalled 构建生效 -Times 0 -Exactly
+        Should -Invoke 构建生效 -Times 0 -Exactly
     }
 }

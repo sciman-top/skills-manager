@@ -28,11 +28,11 @@ jobs:
       - name: Install pinned Pester test runtime
         shell: pwsh
         run: |
-          $packageUri = 'https://www.powershellgallery.com/api/v2/package/Pester/4.10.1'
-          $expectedSha256 = '898210e1a30c52cd46ba317c2278a9324345214213aa2f7d6b7dfa7b98f37ac9'
-          $packagePath = Join-Path $env:RUNNER_TEMP 'Pester.4.10.1.nupkg'
+          $packageUri = 'https://www.powershellgallery.com/api/v2/package/Pester/6.1.0'
+          $expectedSha256 = '0207a75ea09f81b27c1ded44898b2bb3c845bafa02045bd64a39e26a53ca41b4'
+          $packagePath = Join-Path $env:RUNNER_TEMP 'Pester.6.1.0.nupkg'
           $moduleBase = Join-Path $env:RUNNER_TEMP 'verified-modules'
-          $moduleRoot = Join-Path $moduleBase 'Pester\4.10.1'
+          $moduleRoot = Join-Path $moduleBase 'Pester\6.1.0'
 
           Invoke-WebRequest -Uri $packageUri -OutFile $packagePath -UseBasicParsing
           $actualSha256 = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -47,8 +47,8 @@ jobs:
           [System.IO.Compression.ZipFile]::ExtractToDirectory($packagePath, $moduleRoot)
           $manifest = Join-Path $moduleRoot 'Pester.psd1'
           Import-Module -Name $manifest -Force
-          if ((Get-Module Pester).Version -ne [version]'4.10.1') {
-            throw 'Verified Pester 4.10.1 did not load.'
+          if ((Get-Module Pester).Version -ne [version]'6.1.0') {
+            throw 'Verified Pester 6.1.0 did not load.'
           }
 
                 "PSModulePath=$moduleBase$([System.IO.Path]::PathSeparator)$env:PSModulePath" |

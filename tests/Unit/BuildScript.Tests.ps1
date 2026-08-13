@@ -1,5 +1,7 @@
-$ErrorActionPreference = "Stop"
+BeforeAll {
+    $ErrorActionPreference = "Stop"
 
+}
 Describe "Build script" {
     It "Concatenates source files without injecting separator spaces" {
         $workspace = Join-Path $TestDrive "build-script"
@@ -33,8 +35,9 @@ Describe "Build script" {
         & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $workspace "build.ps1") | Out-Null
 
         $actual = [System.IO.File]::ReadAllText((Join-Path $workspace "skills.ps1"))
-        $expected = (($files | ForEach-Object { $contents[$_] + "`r`n" }) -join "")
+        $expected = (($files | ForEach-Object { $contents[$_] + "
+" }) -join "")
 
-        $actual | Should Be $expected
+        $actual | Should -Be $expected
     }
 }

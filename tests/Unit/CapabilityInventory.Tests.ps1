@@ -1,7 +1,9 @@
-$repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
-. (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1')
-. (Join-Path $repoRoot 'src\Application\CapabilityInventory.ps1')
+BeforeAll {
+    $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
+    . (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1')
+    . (Join-Path $repoRoot 'src\Application\CapabilityInventory.ps1')
 
+}
 Describe 'Read-only skill surface inventory' {
     It 'reports six explained skill surfaces even when their counts differ' {
         $fixture = Join-Path ([IO.Path]::GetTempPath()) ('skill-surfaces-' + [guid]::NewGuid().ToString('N'))

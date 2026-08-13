@@ -1,15 +1,17 @@
-$repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
-. (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1')
+BeforeAll {
+    $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
+    . (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1')
 
-$catalogDomainPath = Join-Path $repoRoot 'src\Domain\SkillCatalog.ps1'
-$catalogCompilerPath = Join-Path $repoRoot 'src\Application\SkillCatalogCompiler.ps1'
-if (Test-Path -LiteralPath $catalogDomainPath -PathType Leaf) { . $catalogDomainPath }
-if (Test-Path -LiteralPath $catalogCompilerPath -PathType Leaf) { . $catalogCompilerPath }
+    $catalogDomainPath = Join-Path $repoRoot 'src\Domain\SkillCatalog.ps1'
+    $catalogCompilerPath = Join-Path $repoRoot 'src\Application\SkillCatalogCompiler.ps1'
+    if (Test-Path -LiteralPath $catalogDomainPath -PathType Leaf) { . $catalogDomainPath }
+    if (Test-Path -LiteralPath $catalogCompilerPath -PathType Leaf) { . $catalogCompilerPath }
 
+}
 Describe 'Skill catalog compiler' {
     It 'compiles every managed root deterministically' {
         $compiler = Get-Command Compile-SkillCatalog -ErrorAction SilentlyContinue
-        $compiler | Should Not BeNullOrEmpty
+        $compiler | Should -Not -BeNullOrEmpty
         if ($null -eq $compiler) { return }
 
         $rootA = Join-Path $TestDrive 'root-a'
@@ -25,19 +27,19 @@ Describe 'Skill catalog compiler' {
 
         $catalog = Compile-SkillCatalog -Roots @($rootA, $rootB) -GeneratedAt '2026-08-07T05:00:00Z'
 
-        $catalog.schema_version | Should Be 1
-        @($catalog.entries).Count | Should Be 2
-        @($catalog.entries | ForEach-Object name) | Should Be @('alpha-skill', 'beta-skill')
-        $catalog.semantic_selection_applied | Should Be $false
-        $catalog.decision_owner | Should Be 'host_ai'
-        $catalog.provider_calls | Should Be 0
-        $catalog.writes | Should Be 0
-        (Test-SkillCatalogContract $catalog).pass | Should Be $true
+        $catalog.schema_version | Should -Be 1
+        @($catalog.entries).Count | Should -Be 2
+        @($catalog.entries | ForEach-Object name) | Should -Be @('alpha-skill', 'beta-skill')
+        $catalog.semantic_selection_applied | Should -Be $false
+        $catalog.decision_owner | Should -Be 'host_ai'
+        $catalog.provider_calls | Should -Be 0
+        $catalog.writes | Should -Be 0
+        (Test-SkillCatalogContract $catalog).pass | Should -Be $true
     }
 
     It 'keeps duplicate canonical identities deterministic without silently omitting a root' {
         $compiler = Get-Command Compile-SkillCatalog -ErrorAction SilentlyContinue
-        $compiler | Should Not BeNullOrEmpty
+        $compiler | Should -Not -BeNullOrEmpty
         if ($null -eq $compiler) { return }
 
         $entries = @(
@@ -47,11 +49,11 @@ Describe 'Skill catalog compiler' {
 
         $catalog = Compile-SkillCatalog -Entries $entries -GeneratedAt '2026-08-07T05:00:00Z'
 
-        @($catalog.entries).Count | Should Be 1
-        $catalog.entries[0].path | Should Be 'D:\fixture\one\SKILL.md'
-        @($catalog.decisions | Where-Object disposition -eq 'duplicate').Count | Should Be 1
-        $catalog.semantic_selection_applied | Should Be $false
-        (Test-SkillCatalogContract $catalog).pass | Should Be $true
+        @($catalog.entries).Count | Should -Be 1
+        $catalog.entries[0].path | Should -Be 'D:\fixture\one\SKILL.md'
+        @($catalog.decisions | Where-Object disposition -eq 'duplicate').Count | Should -Be 1
+        $catalog.semantic_selection_applied | Should -Be $false
+        (Test-SkillCatalogContract $catalog).pass | Should -Be $true
     }
 
     It 'rejects semantic or runtime fields in catalog decisions' {
@@ -69,9 +71,9 @@ Describe 'Skill catalog compiler' {
 
         $result = Test-SkillCatalogContract $catalog
 
-        $result.pass | Should Be $false
-        @($result.findings | Where-Object code -eq 'decision_field_forbidden').Count | Should Be 2
-        (@($result.findings.path) -join "`n") | Should Match '\$\.decisions\[0\]\.semantic_score'
-        (@($result.findings.path) -join "`n") | Should Match '\$\.decisions\[0\]\.selected_by_router'
+        $result.pass | Should -Be $false
+        @($result.findings | Where-Object code -eq 'decision_field_forbidden').Count | Should -Be 2
+        (@($result.findings.path) -join "`n") | Should -Match '\$\.decisions\[0\]\.semantic_score'
+        (@($result.findings.path) -join "`n") | Should -Match '\$\.decisions\[0\]\.selected_by_router'
     }
 }

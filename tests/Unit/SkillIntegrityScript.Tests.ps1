@@ -1,7 +1,7 @@
 Describe "Skill integrity verifier" {
-    $scriptPath = Join-Path $PSScriptRoot "..\..\scripts\verify-skill-integrity.ps1"
-
-    function New-IntegrityFixture([string]$name, [string]$body, [object[]]$dependencies = @()) {
+    BeforeAll {
+$scriptPath = Join-Path $PSScriptRoot "..\..\scripts\verify-skill-integrity.ps1"
+function New-IntegrityFixture([string]$name, [string]$body, [object[]]$dependencies = @()) {
         $root = Join-Path $TestDrive $name
         $agentRoot = Join-Path $root "agent"
         $skillRoot = Join-Path $agentRoot "demo"
@@ -32,8 +32,7 @@ $body
             ReportPath = (Join-Path $root "report.json")
         }
     }
-
-    function Invoke-IntegrityFixture($fixture) {
+function Invoke-IntegrityFixture($fixture) {
         $output = @(& $scriptPath `
                 -AgentRoot $fixture.AgentRoot `
                 -ConfigPath $fixture.ConfigPath `
@@ -46,8 +45,7 @@ $body
             Report = if (Test-Path $fixture.ReportPath) { Get-Content -Raw $fixture.ReportPath | ConvertFrom-Json } else { $null }
         }
     }
-
-    function Add-IntegrityFixtureSkill($fixture, [string]$directory, [string]$name, [string]$body = "") {
+function Add-IntegrityFixtureSkill($fixture, [string]$directory, [string]$name, [string]$body = "") {
         $skillRoot = Join-Path $fixture.AgentRoot $directory
         New-Item -ItemType Directory -Path $skillRoot -Force | Out-Null
         @"
@@ -59,21 +57,21 @@ $body
 "@ | Set-Content -Path (Join-Path $skillRoot "SKILL.md") -Encoding UTF8
         return $skillRoot
     }
-
-    function Set-IntegrityFixtureOpenAiYaml($fixture, [string]$content) {
+function Set-IntegrityFixtureOpenAiYaml($fixture, [string]$content) {
         $agentsRoot = Join-Path (Join-Path $fixture.AgentRoot "demo") "agents"
         New-Item -ItemType Directory -Path $agentsRoot -Force | Out-Null
         $content | Set-Content -Path (Join-Path $agentsRoot "openai.yaml") -Encoding UTF8
     }
+}
 
     It "fails when a skill entrypoint references a missing local file" {
         $fixture = New-IntegrityFixture "broken-link" "Read [missing](references/missing.md)."
 
         $result = Invoke-IntegrityFixture $fixture
 
-        $result.ExitCode | Should Be 1
-        $result.Report | Should Not BeNullOrEmpty
-        @($result.Report.errors | Where-Object code -eq "broken_relative_link").Count | Should Be 1
+        $result.ExitCode | Should -Be 1
+        $result.Report | Should -Not -BeNullOrEmpty
+        @($result.Report.errors | Where-Object code -eq "broken_relative_link").Count | Should -Be 1
     }
 
     It "fails when a skill name appears outside YAML frontmatter" {
@@ -86,8 +84,8 @@ name: demo
 
         $result = Invoke-IntegrityFixture $fixture
 
-        $result.ExitCode | Should Be 1
-        @($result.Report.errors | Where-Object code -eq "missing_skill_name").Count | Should Be 1
+        $result.ExitCode | Should -Be 1
+        @($result.Report.errors | Where-Object code -eq "missing_skill_name").Count | Should -Be 1
     }
 
     It "fails when an entrypoint resource escapes the agent root" {
@@ -96,8 +94,8 @@ name: demo
 
         $result = Invoke-IntegrityFixture $fixture
 
-        $result.ExitCode | Should Be 1
-        @($result.Report.errors | Where-Object code -eq "relative_link_outside_agent_root").Count | Should Be 1
+        $result.ExitCode | Should -Be 1
+        @($result.Report.errors | Where-Object code -eq "relative_link_outside_agent_root").Count | Should -Be 1
     }
 
     It "fails when a declared required skill is not installed" {
@@ -107,8 +105,8 @@ name: demo
 
         $result = Invoke-IntegrityFixture $fixture
 
-        $result.ExitCode | Should Be 1
-        @($result.Report.errors | Where-Object code -eq "missing_required_skill").Count | Should Be 1
+        $result.ExitCode | Should -Be 1
+        @($result.Report.errors | Where-Object code -eq "missing_required_skill").Count | Should -Be 1
     }
 
     It "validates dependency closure from tracked portable declarations when imported packages are not materialized" {
@@ -129,8 +127,8 @@ name: demo
 
         $result = Invoke-IntegrityFixture $fixture
 
-        $result.ExitCode | Should Be 0
-        @($result.Report.errors).Count | Should Be 0
+        $result.ExitCode | Should -Be 0
+        @($result.Report.errors).Count | Should -Be 0
     }
 
     It "fails when OpenAI metadata references a missing icon" {
@@ -142,8 +140,8 @@ interface:
 
         $result = Invoke-IntegrityFixture $fixture
 
-        $result.ExitCode | Should Be 1
-        @($result.Report.errors | Where-Object code -eq "broken_openai_resource").Count | Should Be 1
+        $result.ExitCode | Should -Be 1
+        @($result.Report.errors | Where-Object code -eq "broken_openai_resource").Count | Should -Be 1
     }
 
     It "fails when an OpenAI icon escapes the skill directory" {
@@ -156,8 +154,8 @@ interface:
 
         $result = Invoke-IntegrityFixture $fixture
 
-        $result.ExitCode | Should Be 1
-        @($result.Report.errors | Where-Object code -eq "openai_resource_outside_skill").Count | Should Be 1
+        $result.ExitCode | Should -Be 1
+        @($result.Report.errors | Where-Object code -eq "openai_resource_outside_skill").Count | Should -Be 1
     }
 
     It "fails when OpenAI metadata requires an unconfigured MCP server" {
@@ -171,8 +169,8 @@ dependencies:
 
         $result = Invoke-IntegrityFixture $fixture
 
-        $result.ExitCode | Should Be 1
-        @($result.Report.errors | Where-Object code -eq "missing_required_mcp").Count | Should Be 1
+        $result.ExitCode | Should -Be 1
+        @($result.Report.errors | Where-Object code -eq "missing_required_mcp").Count | Should -Be 1
     }
 
     It "passes for valid resources and a complete dependency closure" {
@@ -185,9 +183,9 @@ dependencies:
         "guide" | Set-Content -Path (Join-Path $referenceRoot "guide.md") -Encoding UTF8
         $result = Invoke-IntegrityFixture $fixture
 
-        $result.ExitCode | Should Be 0
-        $result.Report.ok | Should Be $true
-        @($result.Report.errors).Count | Should Be 0
+        $result.ExitCode | Should -Be 0
+        $result.Report.ok | Should -Be $true
+        @($result.Report.errors).Count | Should -Be 0
     }
 
     It "runs with explicit fixture paths under PowerShell 7" {
@@ -201,7 +199,7 @@ dependencies:
                 -Json 2>&1)
         $exitCode = $LASTEXITCODE
 
-        $exitCode | Should Be 0
-        ($output -join "`n") | Should Match '"ok":\s*true'
+        $exitCode | Should -Be 0
+        ($output -join "`n") | Should -Match '"ok":\s*true'
     }
 }

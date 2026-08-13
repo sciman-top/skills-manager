@@ -1,26 +1,28 @@
-. $PSScriptRoot\..\..\skills.ps1
+BeforeAll {
+    . $PSScriptRoot\..\..\skills.ps1
 
+}
 Describe "Doctor Enhancements" {
     Context "Parse-DoctorArgs" {
         It "Parses json/fix options" {
             $opts = Parse-DoctorArgs @("--json", "--fix")
-            $opts.json | Should Be $true
-            $opts.fix | Should Be $true
+            $opts.json | Should -Be $true
+            $opts.fix | Should -Be $true
         }
 
         It "Parses strict and dry-run-fix options" {
             $opts = Parse-DoctorArgs @("--strict", "--dry-run-fix")
-            $opts.strict | Should Be $true
-            $opts.dry_run_fix | Should Be $true
+            $opts.strict | Should -Be $true
+            $opts.dry_run_fix | Should -Be $true
         }
 
         It "Allows offline contract only for non-mutating JSON checks" {
             $opts = Parse-DoctorArgs @("--json", "--offline-contract")
-            $opts.offline_contract | Should Be $true
+            $opts.offline_contract | Should -Be $true
 
-            { Parse-DoctorArgs @("--offline-contract") | Out-Null } | Should Throw
-            { Parse-DoctorArgs @("--json", "--offline-contract", "--strict") | Out-Null } | Should Throw
-            { Parse-DoctorArgs @("--json", "--offline-contract", "--fix") | Out-Null } | Should Throw
+            { Parse-DoctorArgs @("--offline-contract") | Out-Null } | Should -Throw
+            { Parse-DoctorArgs @("--json", "--offline-contract", "--strict") | Out-Null } | Should -Throw
+            { Parse-DoctorArgs @("--json", "--offline-contract", "--fix") | Out-Null } | Should -Throw
         }
 
         It "Rejects unknown option" {
@@ -31,7 +33,7 @@ Describe "Doctor Enhancements" {
             catch {
                 $thrown = $true
             }
-            $thrown | Should Be $true
+            $thrown | Should -Be $true
         }
     }
 
@@ -53,11 +55,11 @@ Describe "Doctor Enhancements" {
             }
 
             $result = Apply-DoctorFixes $cfg
-            $result.changed | Should Be $true
-            $result.applied.Count | Should Be 2
-            @($cfg.targets).Count | Should Be 2
-            @($cfg.mappings).Count | Should Be 1
-            $cfg.mappings[0].vendor | Should Be "vendor-a"
+            $result.changed | Should -Be $true
+            $result.applied.Count | Should -Be 2
+            @($cfg.targets).Count | Should -Be 2
+            @($cfg.mappings).Count | Should -Be 1
+            $cfg.mappings[0].vendor | Should -Be "vendor-a"
         }
 
         It "Returns preview without mutating config when preview mode is enabled" {
@@ -75,9 +77,9 @@ Describe "Doctor Enhancements" {
             }
 
             $result = Apply-DoctorFixes $cfg -Preview
-            $result.changed | Should Be $true
-            @($cfg.targets).Count | Should Be 2
-            @($cfg.mappings).Count | Should Be 1
+            $result.changed | Should -Be $true
+            @($cfg.targets).Count | Should -Be 2
+            @($cfg.mappings).Count | Should -Be 1
         }
     }
 
@@ -98,8 +100,8 @@ Describe "Doctor Enhancements" {
             }
 
             $risks = Get-DoctorConfigRisks $cfg
-            ($risks | Where-Object { $_ -like "*targets.path*" }).Count | Should Be 1
-            ($risks | Where-Object { $_ -like "*mappings.to*" }).Count | Should Be 1
+            ($risks | Where-Object { $_ -like "*targets.path*" }).Count | Should -Be 1
+            ($risks | Where-Object { $_ -like "*mappings.to*" }).Count | Should -Be 1
         }
 
         It "Detects mapping referencing missing vendor" {
@@ -114,7 +116,7 @@ Describe "Doctor Enhancements" {
             }
 
             $risks = Get-DoctorConfigRisks $cfg
-            ($risks | Where-Object { $_ -like "*不存在的 vendor*" }).Count | Should Be 1
+            ($risks | Where-Object { $_ -like "*不存在的 vendor*" }).Count | Should -Be 1
         }
     }
 

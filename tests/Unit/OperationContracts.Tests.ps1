@@ -1,13 +1,15 @@
-$repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
-. (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1')
-. (Join-Path $repoRoot 'src\Domain\Receipt.ps1')
+BeforeAll {
+    $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
+    . (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1')
+    . (Join-Path $repoRoot 'src\Domain\Receipt.ps1')
 
+}
 Describe 'OperationPlan and Receipt v1 contracts' {
-    $fixtureRoot = Join-Path $repoRoot 'tests\fixtures\operation-contracts'
-    $hashA = 'a' * 64
-    $hashB = 'b' * 64
-
-    function New-TestPlan([object[]]$Targets, [object[]]$Actions) {
+    BeforeAll {
+$fixtureRoot = Join-Path $repoRoot 'tests\fixtures\operation-contracts'
+$hashA = 'a' * 64
+$hashB = 'b' * 64
+function New-TestPlan([object[]]$Targets, [object[]]$Actions) {
         return New-OperationPlan `
             -OperationId 'op-test-001' `
             -Domain 'mcp' `
@@ -17,13 +19,14 @@ Describe 'OperationPlan and Receipt v1 contracts' {
             -Targets $Targets `
             -Actions $Actions
     }
+}
 
     It 'accepts the valid plan and receipt fixtures' {
         $plan = Get-Content -LiteralPath (Join-Path $fixtureRoot 'valid-plan.json') -Raw | ConvertFrom-Json
         $receipt = Get-Content -LiteralPath (Join-Path $fixtureRoot 'valid-receipt.json') -Raw | ConvertFrom-Json
 
-        (Test-OperationPlanContract $plan).pass | Should Be $true
-        (Test-OperationReceiptContract $receipt).pass | Should Be $true
+        (Test-OperationPlanContract $plan).pass | Should -Be $true
+        (Test-OperationReceiptContract $receipt).pass | Should -Be $true
     }
 
     It 'fails closed with structured findings for invalid fixtures' {
@@ -32,18 +35,18 @@ Describe 'OperationPlan and Receipt v1 contracts' {
         $planResult = Test-OperationPlanContract $plan
         $receiptResult = Test-OperationReceiptContract $receipt
 
-        $planResult.pass | Should Be $false
-        @($planResult.findings | Where-Object code -eq 'created_at_invalid').Count | Should Be 1
-        @($planResult.findings | Where-Object code -eq 'action_target_unknown').Count | Should Be 1
-        @($planResult.findings | Where-Object code -eq 'sensitive_value_present').Count | Should Be 1
-        $receiptResult.pass | Should Be $false
-        @($receiptResult.findings | Where-Object code -eq 'timestamp_invalid').Count | Should Be 2
-        @($receiptResult.findings | Where-Object code -eq 'verification_state_invalid').Count | Should Be 1
+        $planResult.pass | Should -Be $false
+        @($planResult.findings | Where-Object code -eq 'created_at_invalid').Count | Should -Be 1
+        @($planResult.findings | Where-Object code -eq 'action_target_unknown').Count | Should -Be 1
+        @($planResult.findings | Where-Object code -eq 'sensitive_value_present').Count | Should -Be 1
+        $receiptResult.pass | Should -Be $false
+        @($receiptResult.findings | Where-Object code -eq 'timestamp_invalid').Count | Should -Be 2
+        @($receiptResult.findings | Where-Object code -eq 'verification_state_invalid').Count | Should -Be 1
         foreach ($finding in @($planResult.findings) + @($receiptResult.findings)) {
-            [string]::IsNullOrWhiteSpace([string]$finding.code) | Should Be $false
-            [string]::IsNullOrWhiteSpace([string]$finding.severity) | Should Be $false
-            [string]::IsNullOrWhiteSpace([string]$finding.path) | Should Be $false
-            [string]::IsNullOrWhiteSpace([string]$finding.message) | Should Be $false
+            [string]::IsNullOrWhiteSpace([string]$finding.code) | Should -Be $false
+            [string]::IsNullOrWhiteSpace([string]$finding.severity) | Should -Be $false
+            [string]::IsNullOrWhiteSpace([string]$finding.path) | Should -Be $false
+            [string]::IsNullOrWhiteSpace([string]$finding.message) | Should -Be $false
         }
     }
 
@@ -60,9 +63,9 @@ Describe 'OperationPlan and Receipt v1 contracts' {
         $first = New-TestPlan $targets $actions
         $second = New-TestPlan @($targets[1], $targets[0]) @($actions[1], $actions[0])
 
-        (@($first.actions.action_id) -join ',') | Should Be (@($second.actions.action_id) -join ',')
-        (@($first.targets.target_ref) -join ',') | Should Be 'target-a,target-b'
-        ($first | ConvertTo-Json -Depth 20 -Compress) | Should Be ($second | ConvertTo-Json -Depth 20 -Compress)
+        (@($first.actions.action_id) -join ',') | Should -Be (@($second.actions.action_id) -join ',')
+        (@($first.targets.target_ref) -join ',') | Should -Be 'target-a,target-b'
+        ($first | ConvertTo-Json -Depth 20 -Compress) | Should -Be ($second | ConvertTo-Json -Depth 20 -Compress)
     }
 
     It 'does not mutate constructor input objects' {
@@ -72,7 +75,7 @@ Describe 'OperationPlan and Receipt v1 contracts' {
 
         $null = New-TestPlan @($target) @($action)
 
-        (@($target, $action) | ConvertTo-Json -Depth 20 -Compress) | Should Be $before
+        (@($target, $action) | ConvertTo-Json -Depth 20 -Compress) | Should -Be $before
     }
 
     It 'detects out-of-root owner hash creation and source revision drift' {
@@ -92,25 +95,25 @@ Describe 'OperationPlan and Receipt v1 contracts' {
 
         $result = Test-OperationPlanFreshness -Plan $plan -CurrentTargets $current -AuthorizedRoots @('C:\repo') -CurrentSourceRevision 'rev-2'
 
-        $result.pass | Should Be $false
+        $result.pass | Should -Be $false
         foreach ($code in @('target_out_of_root', 'target_owner_changed', 'target_hash_stale', 'target_created_since_plan', 'source_revision_stale')) {
-            @($result.findings | Where-Object code -eq $code).Count | Should Be 1
+            @($result.findings | Where-Object code -eq $code).Count | Should -Be 1
         }
-        (Test-OperationPathWithinRoot 'C:\repo2\file.json' 'C:\repo') | Should Be $false
-        (Test-OperationPathWithinRoot 'C:\repo\sub\..\file.json' 'C:\repo') | Should Be $true
-        (Test-OperationPathWithinRoot 'C:\repo\..\outside\file.json' 'C:\repo') | Should Be $false
+        (Test-OperationPathWithinRoot 'C:\repo2\file.json' 'C:\repo') | Should -Be $false
+        (Test-OperationPathWithinRoot 'C:\repo\sub\..\file.json' 'C:\repo') | Should -Be $true
+        (Test-OperationPathWithinRoot 'C:\repo\..\outside\file.json' 'C:\repo') | Should -Be $false
     }
 
     It 'updates only the explicitly requested verification level' {
         $repoPass = Merge-OperationVerificationState -Current $null -Level repo_gates_passed -State pass
-        $repoPass.repo_gates_passed | Should Be 'pass'
-        $repoPass.host_loaded | Should Be 'not_run'
-        $repoPass.live_accepted | Should Be 'not_run'
+        $repoPass.repo_gates_passed | Should -Be 'pass'
+        $repoPass.host_loaded | Should -Be 'not_run'
+        $repoPass.live_accepted | Should -Be 'not_run'
 
         $hostFail = Merge-OperationVerificationState -Current $repoPass -Level host_loaded -State fail
-        $hostFail.repo_gates_passed | Should Be 'pass'
-        $hostFail.host_loaded | Should Be 'fail'
-        $hostFail.live_accepted | Should Be 'not_run'
+        $hostFail.repo_gates_passed | Should -Be 'pass'
+        $hostFail.host_loaded | Should -Be 'fail'
+        $hostFail.live_accepted | Should -Be 'not_run'
     }
 
     It 'redacts tokens url credentials connection strings env headers and argv during construction' {
@@ -131,17 +134,17 @@ Describe 'OperationPlan and Receipt v1 contracts' {
         $serialized = @($plan, $receipt) | ConvertTo-Json -Depth 30 -Compress
 
         foreach ($secret in @('fixture-token-value', 'fixture-bearer-value', 'fixture-user', 'fixture-pass', 'fixture-query-value', 'fixture-db-password', 'fixture-npgsql-password', 'fixture-env-value', 'fixture-env-secret', 'fixture-header-value', 'fixture-header-secret', 'fixture-argv-secret', 'sk-fixture12345678')) {
-            $serialized | Should Not Match ([regex]::Escape($secret))
+            $serialized | Should -Not -Match ([regex]::Escape($secret))
         }
-        $serialized | Should Match '<redacted>'
-        (Test-OperationPlanContract $plan).pass | Should Be $true
-        (Test-OperationReceiptContract $receipt).pass | Should Be $true
+        $serialized | Should -Match '<redacted>'
+        (Test-OperationPlanContract $plan).pass | Should -Be $true
+        (Test-OperationReceiptContract $receipt).pass | Should -Be $true
     }
 
     It 'keeps domain modules free of IO environment clock and terminal side effects' {
         $source = (Get-Content -LiteralPath (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1') -Raw) + "`n" + (Get-Content -LiteralPath (Join-Path $repoRoot 'src\Domain\Receipt.ps1') -Raw)
-        $source | Should Not Match '(?im)^\s*(Get-Content|Set-Content|Add-Content|Remove-Item|Copy-Item|Move-Item|Test-Path|Resolve-Path|Get-Date|Write-Host|Write-Output|Start-Process|Invoke-WebRequest|exit)\b'
-        $source | Should Not Match '(?i)\$env:'
+        $source | Should -Not -Match '(?im)^\s*(Get-Content|Set-Content|Add-Content|Remove-Item|Copy-Item|Move-Item|Test-Path|Resolve-Path|Get-Date|Write-Host|Write-Output|Start-Process|Invoke-WebRequest|exit)\b'
+        $source | Should -Not -Match '(?i)\$env:'
     }
 
     It 'parses and constructs plain objects in the PowerShell 7 runtime' {
@@ -153,8 +156,8 @@ Describe 'OperationPlan and Receipt v1 contracts' {
         $exitCode = $LASTEXITCODE
         $result = ($output -join "`n") | ConvertFrom-Json
 
-        $exitCode | Should Be 0
-        $result.plan | Should Be 1
-        $result.receipt | Should Be 1
+        $exitCode | Should -Be 0
+        $result.plan | Should -Be 1
+        $result.receipt | Should -Be 1
     }
 }

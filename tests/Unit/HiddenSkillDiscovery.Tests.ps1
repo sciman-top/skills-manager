@@ -1,5 +1,7 @@
-. $PSScriptRoot\..\..\skills.ps1
+BeforeAll {
+    . $PSScriptRoot\..\..\skills.ps1
 
+}
 Describe "Hidden skill discovery" {
     It "Discovers skill markers under hidden directories" {
         $root = Join-Path $env:TEMP ("skills-manager-hidden-test-" + [Guid]::NewGuid().ToString("N"))
@@ -33,8 +35,8 @@ description: demo
                     $itemSummary)
             }
 
-            (((Get-Item -LiteralPath $curated -Force).Attributes -band [System.IO.FileAttributes]::Hidden) -ne 0) | Should Be $true
-            $matchingItems.Count | Should Be 1
+            (((Get-Item -LiteralPath $curated -Force).Attributes -band [System.IO.FileAttributes]::Hidden) -ne 0) | Should -Be $true
+            $matchingItems.Count | Should -Be 1
         }
         finally {
             if (Test-Path -LiteralPath $root) {
@@ -66,7 +68,7 @@ description: demo
             $script:SkillListCache = @{}
             $items = @(Get-SkillsUnder $aliasedBase "skills")
 
-            @($items | Where-Object { $_.from -eq ".curated\demo-skill" }).Count | Should Be 1
+            @($items | Where-Object { $_.from -eq ".curated\demo-skill" }).Count | Should -Be 1
         }
         finally {
             if (Test-Path -LiteralPath $root) {

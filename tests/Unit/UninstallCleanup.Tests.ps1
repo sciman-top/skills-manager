@@ -1,63 +1,65 @@
-. $PSScriptRoot\..\..\skills.ps1
+BeforeAll {
+    . $PSScriptRoot\..\..\skills.ps1
 
+}
 Describe "Uninstall cleanup" {
     It "ignores empty override directories" {
-        $oldOverridesDir = $script:OverridesDir
+        $oldOverridesDir = $OverridesDir
         try {
-            $script:OverridesDir = Join-Path $TestDrive "overrides"
-            $empty = Join-Path $script:OverridesDir "empty"
-            $populated = Join-Path $script:OverridesDir "populated"
+            $OverridesDir = Join-Path $TestDrive "overrides"
+            $empty = Join-Path $OverridesDir "empty"
+            $populated = Join-Path $OverridesDir "populated"
             New-Item -ItemType Directory -Path $empty, $populated -Force | Out-Null
             Set-Content -LiteralPath (Join-Path $populated "SKILL.md") -Value "fixture"
 
             $names = @(Get-OverridesDirs | ForEach-Object Name)
 
-            $names | Should Contain "populated"
-            $names | Should Not Contain "empty"
+            $names | Should -Contain "populated"
+            $names | Should -Not -Contain "empty"
         }
         finally {
-            $script:OverridesDir = $oldOverridesDir
+            $OverridesDir = $oldOverridesDir
         }
     }
 
     It "discovers categorized overrides by stable output name while preserving legacy flat inputs" {
-        $oldOverridesDir = $script:OverridesDir
+        $oldOverridesDir = $OverridesDir
         try {
-            $script:OverridesDir = Join-Path $TestDrive "categorized-overrides"
+            $OverridesDir = Join-Path $TestDrive "categorized-overrides"
             $fixtures = @(
                 [pscustomobject]@{ category = "custom"; name = "custom-demo"; file = "SKILL.md" },
                 [pscustomobject]@{ category = "patches"; name = "patched-demo"; file = "SKILL.md" },
                 [pscustomobject]@{ category = "resources"; name = "resource-demo"; file = "bridge.md" }
             )
             foreach ($fixture in $fixtures) {
-                $directory = Join-Path $script:OverridesDir (Join-Path $fixture.category $fixture.name)
+                $directory = Join-Path $OverridesDir (Join-Path $fixture.category $fixture.name)
                 New-Item -ItemType Directory -Path $directory -Force | Out-Null
                 Set-Content -LiteralPath (Join-Path $directory $fixture.file) -Value "fixture"
             }
-            $legacyDirectory = Join-Path $script:OverridesDir "legacy-demo"
+            $legacyDirectory = Join-Path $OverridesDir "legacy-demo"
             New-Item -ItemType Directory -Path $legacyDirectory -Force | Out-Null
             Set-Content -LiteralPath (Join-Path $legacyDirectory "SKILL.md") -Value "fixture"
 
             $items = @(Get-OverridesDirs | Sort-Object Name)
 
-            @($items | ForEach-Object Name) | Should Be @("custom-demo", "legacy-demo", "patched-demo", "resource-demo")
-            @($items | Where-Object Name -eq "custom-demo")[0].override_category | Should Be "custom"
-            @($items | Where-Object Name -eq "patched-demo")[0].override_category | Should Be "patches"
-            @($items | Where-Object Name -eq "resource-demo")[0].override_category | Should Be "resources"
-            @($items | Where-Object Name -eq "legacy-demo")[0].override_category | Should Be "legacy"
-            @($items | Where-Object Name -eq "custom-demo")[0].FullName | Should Be (Join-Path $script:OverridesDir "custom\custom-demo")
+            @($items | ForEach-Object Name) | Should -Be @("custom-demo", "legacy-demo", "patched-demo", "resource-demo")
+            @($items | Where-Object Name -eq "custom-demo")[0].override_category | Should -Be "custom"
+            @($items | Where-Object Name -eq "patched-demo")[0].override_category | Should -Be "patches"
+            @($items | Where-Object Name -eq "resource-demo")[0].override_category | Should -Be "resources"
+            @($items | Where-Object Name -eq "legacy-demo")[0].override_category | Should -Be "legacy"
+            @($items | Where-Object Name -eq "custom-demo")[0].FullName | Should -Be (Join-Path $OverridesDir "custom\custom-demo")
         }
         finally {
-            $script:OverridesDir = $oldOverridesDir
+            $OverridesDir = $oldOverridesDir
         }
     }
 
     It "fails closed when categorized overrides reuse the same output name" {
-        $oldOverridesDir = $script:OverridesDir
+        $oldOverridesDir = $OverridesDir
         try {
-            $script:OverridesDir = Join-Path $TestDrive "duplicate-overrides"
+            $OverridesDir = Join-Path $TestDrive "duplicate-overrides"
             foreach ($category in @("custom", "patches")) {
-                $directory = Join-Path $script:OverridesDir (Join-Path $category "duplicate-demo")
+                $directory = Join-Path $OverridesDir (Join-Path $category "duplicate-demo")
                 New-Item -ItemType Directory -Path $directory -Force | Out-Null
                 Set-Content -LiteralPath (Join-Path $directory "SKILL.md") -Value "fixture"
             }
@@ -69,30 +71,30 @@ Describe "Uninstall cleanup" {
             catch {
                 $failureMessage = $_.Exception.Message
             }
-            $failureMessage | Should Match "duplicate-demo"
+            $failureMessage | Should -Match "duplicate-demo"
         }
         finally {
-            $script:OverridesDir = $oldOverridesDir
+            $OverridesDir = $oldOverridesDir
         }
     }
 
     It "backs up a categorized override by stable output name and preserves its category" {
-        $oldOverridesDir = $script:OverridesDir
+        $oldOverridesDir = $OverridesDir
         try {
-            $script:OverridesDir = Join-Path $TestDrive "backup-overrides"
-            $source = Join-Path $script:OverridesDir "custom\custom-demo"
+            $OverridesDir = Join-Path $TestDrive "backup-overrides"
+            $source = Join-Path $OverridesDir "custom\custom-demo"
             New-Item -ItemType Directory -Path $source -Force | Out-Null
             Set-Content -LiteralPath (Join-Path $source "SKILL.md") -Value "fixture"
 
             $backup = Backup-OverrideDir "custom-demo"
 
-            (Test-Path -LiteralPath $source) | Should Be $false
-            (Test-Path -LiteralPath $backup -PathType Container) | Should Be $true
-            (Split-Path (Split-Path $backup -Parent) -Leaf) | Should Be "custom"
-            (Split-Path $backup -Leaf) | Should Match '^custom-demo\.bak\.'
+            (Test-Path -LiteralPath $source) | Should -Be $false
+            (Test-Path -LiteralPath $backup -PathType Container) | Should -Be $true
+            (Split-Path (Split-Path $backup -Parent) -Leaf) | Should -Be "custom"
+            (Split-Path $backup -Leaf) | Should -Match '^custom-demo\.bak\.'
         }
         finally {
-            $script:OverridesDir = $oldOverridesDir
+            $OverridesDir = $oldOverridesDir
         }
     }
 
@@ -157,9 +159,9 @@ Describe "Uninstall cleanup" {
 
         卸载
 
-        @($cfg.mappings).Count | Should Be 0
-        @($cfg.imports).Count | Should Be 0
-        Assert-MockCalled 构建生效 -Times 1 -Exactly -Scope It
+        @($cfg.mappings).Count | Should -Be 0
+        @($cfg.imports).Count | Should -Be 0
+        Should -Invoke 构建生效 -Times 1 -Exactly -Scope It
     }
 
     It "Removes a skill non-interactively by leaf name" {
@@ -205,9 +207,9 @@ Describe "Uninstall cleanup" {
 
         卸载 @("ui-ux-pro-max", "--yes")
 
-        @($cfg.mappings).Count | Should Be 0
-        @($cfg.imports).Count | Should Be 0
-        Assert-MockCalled 构建生效 -Times 1 -Exactly -Scope It
+        @($cfg.mappings).Count | Should -Be 0
+        @($cfg.imports).Count | Should -Be 0
+        Should -Invoke 构建生效 -Times 1 -Exactly -Scope It
     }
 
     It "Get-InstalledSet excludes unmapped manual imports and keeps mapped/overrides only" {
@@ -235,11 +237,11 @@ Describe "Uninstall cleanup" {
 
         $installed = Get-InstalledSet $cfg $manualItems $overrideItems
 
-        $installed.Count | Should Be 3
-        $installed.Contains("manual|mapped-manual") | Should Be $true
-        $installed.Contains("manual|legacy-manual") | Should Be $false
-        $installed.Contains("manual|unmapped-manual") | Should Be $false
-        $installed.Contains("overrides|custom-windows-encoding-guard") | Should Be $true
+        $installed.Count | Should -Be 3
+        $installed.Contains("manual|mapped-manual") | Should -Be $true
+        $installed.Contains("manual|legacy-manual") | Should -Be $false
+        $installed.Contains("manual|unmapped-manual") | Should -Be $false
+        $installed.Contains("overrides|custom-windows-encoding-guard") | Should -Be $true
     }
 
     It "Uninstall candidate calculation does not duplicate overrides" {
@@ -261,6 +263,6 @@ Describe "Uninstall cleanup" {
         $list = Filter-Skills $all ""
         $onlyInstalled = Hide-VendorRootSkills ($list | Where-Object { $installedSet.Contains("$($_.vendor)|$($_.from)") })
 
-        @($onlyInstalled).Count | Should Be 1
+        @($onlyInstalled).Count | Should -Be 1
     }
 }

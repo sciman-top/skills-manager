@@ -1,53 +1,64 @@
-. $PSScriptRoot\..\..\skills.ps1
+BeforeAll {
+    . $PSScriptRoot\..\..\skills.ps1
 
-function Set-AuditTestWorkspace([string]$root) {
-    $script:Root = $root
-    $script:CfgPath = Join-Path $root "skills.json"
-    $script:LogPath = Join-Path $root "build.log"
-    $script:VendorDir = Join-Path $root "vendor"
-    $script:AgentDir = Join-Path $root "agent"
-    $script:OverridesDir = Join-Path $root "overrides"
-    $script:ManualDir = Join-Path $root "manual"
-    $script:ImportDir = Join-Path $root "imports"
-    $script:DryRun = $false
-    $global:Root = $script:Root
-    $global:CfgPath = $script:CfgPath
-    $global:LogPath = $script:LogPath
-    $global:VendorDir = $script:VendorDir
-    $global:AgentDir = $script:AgentDir
-    $global:OverridesDir = $script:OverridesDir
-    $global:ManualDir = $script:ManualDir
-    $global:ImportDir = $script:ImportDir
-    $global:DryRun = $false
-    EnsureDir $script:VendorDir
-    EnsureDir $script:AgentDir
-    EnsureDir $script:OverridesDir
-    EnsureDir $script:ManualDir
-    EnsureDir $script:ImportDir
-}
-
-function New-AuditValidatedWorkflowReceiptFixture([string]$RecommendationsPath) {
-    $resolved = [IO.Path]::GetFullPath($RecommendationsPath)
-    $state = Get-AuditWorkflowInputState $resolved
-    $receipt = [pscustomobject][ordered]@{
-        schema_version = 1
-        workflow = 'recommendations_validate_dry_run'
-        generated_at = [datetimeoffset]::UtcNow.ToString('o')
-        success = $true
-        persisted = $false
-        recommendations_path = $resolved
-        recommendations_sha256 = Get-FileContentHash $resolved
-        stages = [pscustomobject]@{
-            recommendations_validation = [pscustomobject]@{ status = 'passed' }
-            preflight = [pscustomobject]@{ status = 'passed' }
-            dry_run = [pscustomobject]@{ status = 'passed' }
-            input_stability = [pscustomobject]@{ status = 'passed' }
-        }
-        input_stability = [pscustomobject]@{ matched = $true; after_dry_run = $state }
+    $script:originalWorkspaceState = @{}
+    foreach ($name in @('Root', 'CfgPath', 'LogPath', 'VendorDir', 'AgentDir', 'OverridesDir', 'ManualDir', 'ImportDir', 'DryRun')) {
+        $script:originalWorkspaceState[$name] = Get-Variable -Name $name -Scope Global -ValueOnly -ErrorAction SilentlyContinue
     }
-    Write-AuditJsonFile (Get-AuditWorkflowReportPath $resolved) $receipt
-}
 
+    function Set-AuditTestWorkspace([string]$root) {
+        $values = @{
+            Root = $root
+            CfgPath = Join-Path $root "skills.json"
+            LogPath = Join-Path $root "build.log"
+            VendorDir = Join-Path $root "vendor"
+            AgentDir = Join-Path $root "agent"
+            OverridesDir = Join-Path $root "overrides"
+            ManualDir = Join-Path $root "manual"
+            ImportDir = Join-Path $root "imports"
+            DryRun = $false
+        }
+        foreach ($entry in $values.GetEnumerator()) {
+            Set-Variable -Name $entry.Key -Scope 1 -Value $entry.Value
+            Set-Variable -Name $entry.Key -Scope Script -Value $entry.Value
+            Set-Variable -Name $entry.Key -Scope Global -Value $entry.Value
+        }
+        EnsureDir $VendorDir
+        EnsureDir $AgentDir
+        EnsureDir $OverridesDir
+        EnsureDir $ManualDir
+        EnsureDir $ImportDir
+    }
+
+    function New-AuditValidatedWorkflowReceiptFixture([string]$RecommendationsPath) {
+        $resolved = [IO.Path]::GetFullPath($RecommendationsPath)
+        $state = Get-AuditWorkflowInputState $resolved
+        $receipt = [pscustomobject][ordered]@{
+            schema_version = 1
+            workflow = 'recommendations_validate_dry_run'
+            generated_at = [datetimeoffset]::UtcNow.ToString('o')
+            success = $true
+            persisted = $false
+            recommendations_path = $resolved
+            recommendations_sha256 = Get-FileContentHash $resolved
+            stages = [pscustomobject]@{
+                recommendations_validation = [pscustomobject]@{ status = 'passed' }
+                preflight = [pscustomobject]@{ status = 'passed' }
+                dry_run = [pscustomobject]@{ status = 'passed' }
+                input_stability = [pscustomobject]@{ status = 'passed' }
+            }
+            input_stability = [pscustomobject]@{ matched = $true; after_dry_run = $state }
+        }
+        Write-AuditJsonFile (Get-AuditWorkflowReportPath $resolved) $receipt
+    }
+
+}
+AfterAll {
+    foreach ($entry in $script:originalWorkspaceState.GetEnumerator()) {
+        Set-Variable -Name $entry.Key -Scope Global -Value $entry.Value
+        Set-Variable -Name $entry.Key -Scope Script -Value $entry.Value
+    }
+}
 Describe "Skill Audit E2E" {
     Context "Audit bundle" {
         It "Emits outer AI prompt file in the audit bundle" {
@@ -77,13 +88,13 @@ Describe "Skill Audit E2E" {
             $result = Invoke-AuditTargetsScan -Target "demo"
             $promptPath = Join-Path $result.path "outer-ai-prompt.md"
 
-            (Test-Path -LiteralPath $promptPath) | Should Be $true
+            (Test-Path -LiteralPath $promptPath) | Should -Be $true
             $prompt = Get-Content -LiteralPath $promptPath -Raw
-            $prompt | Should Match "Required Execution Sequence"
-            $prompt | Should Match "单目标扫描"
-            $prompt | Should Match "repo-scan.json"
-            $prompt | Should Match "Blocking Conditions"
-            $prompt | Should Match "无新增建议"
+            $prompt | Should -Match "Required Execution Sequence"
+            $prompt | Should -Match "单目标扫描"
+            $prompt | Should -Match "repo-scan.json"
+            $prompt | Should -Match "Blocking Conditions"
+            $prompt | Should -Match "无新增建议"
         }
     }
 
@@ -188,17 +199,17 @@ Describe "Skill Audit E2E" {
             $report = Invoke-AuditRecommendationsApply -RecommendationsPath $recommendationsPath -Apply -Yes -AddSelection "2" -RemoveSelection "1"
             $saved = LoadCfg
 
-            $report.success | Should Be $true
-            (Test-Path (Join-Path $root "apply-report.json")) | Should Be $true
-            $report.persisted | Should Be $true
-            $report.changed_counts.add_installed | Should Be 1
-            $report.changed_counts.remove_removed | Should Be 1
-            @($saved.imports).Count | Should Be 1
-            @($saved.mappings).Count | Should Be 1
-            $saved.mappings[0].to | Should Be "demo-skill-2"
-            $report.removal_candidates[0].status | Should Be "removed"
-            Assert-MockCalled 构建生效 -Times 1 -Exactly
-            Assert-MockCalled Invoke-Doctor -Times 1 -Exactly
+            $report.success | Should -Be $true
+            (Test-Path (Join-Path $root "apply-report.json")) | Should -Be $true
+            $report.persisted | Should -Be $true
+            $report.changed_counts.add_installed | Should -Be 1
+            $report.changed_counts.remove_removed | Should -Be 1
+            @($saved.imports).Count | Should -Be 1
+            @($saved.mappings).Count | Should -Be 1
+            $saved.mappings[0].to | Should -Be "demo-skill-2"
+            $report.removal_candidates[0].status | Should -Be "removed"
+            Should -Invoke 构建生效 -Times 1 -Exactly
+            Should -Invoke Invoke-Doctor -Times 1 -Exactly
         }
 
         It "Applies selected MCP add/remove recommendations" {
@@ -288,18 +299,18 @@ Describe "Skill Audit E2E" {
             $report = Invoke-AuditRecommendationsApply -RecommendationsPath $recommendationsPath -Apply -Yes -McpAddSelection "1" -McpRemoveSelection "1"
             $saved = LoadCfg
 
-            $report.success | Should Be $true
-            $report.persisted | Should Be $true
-            $report.changed_counts.add_installed | Should Be 0
-            $report.changed_counts.mcp_add_added | Should Be 1
-            $report.changed_counts.mcp_remove_removed | Should Be 1
-            @($saved.mcp_servers).Count | Should Be 1
-            $saved.mcp_servers[0].name | Should Be "context7"
-            @($saved.mcp_profiles.profiles.default.enabled).Count | Should Be 0
-            $saved.mcp_profiles.profiles.default.enabled_tools.PSObject.Properties.Match("legacy-fetch").Count | Should Be 0
-            Assert-MockCalled 同步MCP -Times 1 -Exactly -Scope It
-            Assert-MockCalled 构建生效 -Times 0 -Exactly -Scope It
-            Assert-MockCalled Invoke-Doctor -Times 1 -Exactly -Scope It
+            $report.success | Should -Be $true
+            $report.persisted | Should -Be $true
+            $report.changed_counts.add_installed | Should -Be 0
+            $report.changed_counts.mcp_add_added | Should -Be 1
+            $report.changed_counts.mcp_remove_removed | Should -Be 1
+            @($saved.mcp_servers).Count | Should -Be 1
+            $saved.mcp_servers[0].name | Should -Be "context7"
+            @($saved.mcp_profiles.profiles.default.enabled).Count | Should -Be 0
+            $saved.mcp_profiles.profiles.default.enabled_tools.PSObject.Properties.Match("legacy-fetch").Count | Should -Be 0
+            Should -Invoke 同步MCP -Times 1 -Exactly -Scope It
+            Should -Invoke 构建生效 -Times 0 -Exactly -Scope It
+            Should -Invoke Invoke-Doctor -Times 1 -Exactly -Scope It
         }
     }
 }

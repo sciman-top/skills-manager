@@ -1,11 +1,13 @@
 Describe 'Portable capability-router cold discovery' {
-    function Get-TestSha256([string]$Value) {
+    BeforeAll {
+function Get-TestSha256([string]$Value) {
         $sha = [Security.Cryptography.SHA256]::Create()
         try {
             return (($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Value)) | ForEach-Object { $_.ToString('x2') }) -join '')
         }
         finally { $sha.Dispose() }
     }
+}
 
     BeforeEach {
         $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -68,21 +70,21 @@ description: >-
             Pop-Location
         }
 
-        $domains.catalog_path | Should Match 'capability-router[\\/]catalog\.json$'
-        $domains.catalog.status | Should Be 'current'
-        @($domains.discovery_domains.name) | Should Contain 'engineering'
-        $domains.automatic_dispatch.scope | Should Be 'all_catalog_skills'
-        $domains.retrieval.strategy | Should Be 'global_catalog_discovery'
-        @($domains.retrieval.candidates.name) | Should Contain 'codebase-design'
-        @($candidates.retrieval.candidates.name) | Should Contain 'codebase-design'
+        $domains.catalog_path | Should -Match 'capability-router[\\/]catalog\.json$'
+        $domains.catalog.status | Should -Be 'current'
+        @($domains.discovery_domains.name) | Should -Contain 'engineering'
+        $domains.automatic_dispatch.scope | Should -Be 'all_catalog_skills'
+        $domains.retrieval.strategy | Should -Be 'global_catalog_discovery'
+        @($domains.retrieval.candidates.name) | Should -Contain 'codebase-design'
+        @($candidates.retrieval.candidates.name) | Should -Contain 'codebase-design'
         $candidate = @($candidates.retrieval.candidates | Where-Object name -eq 'codebase-design')[0]
-        $candidate.path | Should Be (Join-Path $portableRoot 'codebase-design\SKILL.md')
-        $candidate.description | Should Be 'Design module boundaries, stable interfaces, and an evidence-based target architecture.'
-        $candidate.load_side_effect | Should Be 'read_only'
-        $candidates.manifest_path | Should BeNullOrEmpty
-        $candidates.config_path | Should BeNullOrEmpty
-        $candidates.policy_path | Should BeNullOrEmpty
-        $candidates.writes_performed | Should Be $false
+        $candidate.path | Should -Be (Join-Path $portableRoot 'codebase-design\SKILL.md')
+        $candidate.description | Should -Be 'Design module boundaries, stable interfaces, and an evidence-based target architecture.'
+        $candidate.load_side_effect | Should -Be 'read_only'
+        $candidates.manifest_path | Should -BeNullOrEmpty
+        $candidates.config_path | Should -BeNullOrEmpty
+        $candidates.policy_path | Should -BeNullOrEmpty
+        $candidates.writes_performed | Should -Be $false
     }
 
     It 'prefers the neutral discovery catalog and keeps the legacy router catalog as fallback' {
@@ -96,8 +98,8 @@ description: >-
 
         $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File $script:routerScript -Query '设计模块边界' | ConvertFrom-Json
 
-        $result.catalog_path | Should Match '\.skills-manager[\\/]catalog\.json$'
-        @($result.retrieval.candidates.name) | Should Contain 'codebase-design'
+        $result.catalog_path | Should -Match '\.skills-manager[\\/]catalog\.json$'
+        @($result.retrieval.candidates.name) | Should -Contain 'codebase-design'
     }
 
     It 'resolves cold skills through the router junction when siblings are not resident' {
@@ -109,10 +111,10 @@ description: >-
         $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $residentRouter 'scripts\route-capability.ps1') `
             -Query '设计模块边界和工程终态' -DomainHint engineering | ConvertFrom-Json
 
-        (Test-Path -LiteralPath (Join-Path $residentRoot 'codebase-design')) | Should Be $false
-        $result.catalog.status | Should Be 'current'
+        (Test-Path -LiteralPath (Join-Path $residentRoot 'codebase-design')) | Should -Be $false
+        $result.catalog.status | Should -Be 'current'
         $candidate = @($result.retrieval.candidates | Where-Object name -eq 'codebase-design')[0]
-        $candidate.path | Should Be (Join-Path $portableRoot 'codebase-design\SKILL.md')
+        $candidate.path | Should -Be (Join-Path $portableRoot 'codebase-design\SKILL.md')
     }
 
     It 'excludes a cold skill when its entrypoint no longer matches the catalog hash' {
@@ -121,9 +123,9 @@ description: >-
         $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File $script:routerScript `
             -Query '设计模块边界和工程终态' -DomainHint engineering -Candidate 'skill|codebase-design' | ConvertFrom-Json
 
-        $result.catalog.status | Should Be 'stale'
-        @($result.retrieval.candidates.name) | Should Not Contain 'codebase-design'
-        @($result.selected.name) | Should Not Contain 'codebase-design'
-        @($result.excluded | Where-Object { $_.name -eq 'codebase-design' -and $_.reason -eq 'catalog_stale' }).Count | Should Be 1
+        $result.catalog.status | Should -Be 'stale'
+        @($result.retrieval.candidates.name) | Should -Not -Contain 'codebase-design'
+        @($result.selected.name) | Should -Not -Contain 'codebase-design'
+        @($result.excluded | Where-Object { $_.name -eq 'codebase-design' -and $_.reason -eq 'catalog_stale' }).Count | Should -Be 1
     }
 }

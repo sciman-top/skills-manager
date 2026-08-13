@@ -1,5 +1,7 @@
-. $PSScriptRoot\..\..\skills.ps1
+BeforeAll {
+    . $PSScriptRoot\..\..\skills.ps1
 
+}
 Describe "Set-ContentUtf8" {
     It "Overwrites read-only files" {
         $path = Join-Path $TestDrive "readonly.txt"
@@ -8,8 +10,8 @@ Describe "Set-ContentUtf8" {
 
         Set-ContentUtf8 $path "new"
 
-        (Get-Content -Raw $path) | Should Be "new"
-        (Get-Item $path).IsReadOnly | Should Be $false
+        (Get-Content -Raw $path) | Should -Be "new"
+        (Get-Item $path).IsReadOnly | Should -Be $false
     }
 
     It "Overwrites hidden files" {
@@ -20,7 +22,7 @@ Describe "Set-ContentUtf8" {
 
         Set-ContentUtf8 $path "new"
 
-        (Get-Content -Raw $path) | Should Be "new"
-        ((Get-Item $path).Attributes -band [System.IO.FileAttributes]::Hidden) | Should Be 0
+        (Get-Content -Raw $path) | Should -Be "new"
+        ((Get-Item $path).Attributes -band [System.IO.FileAttributes]::Hidden) | Should -Be 0
     }
 }

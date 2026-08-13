@@ -1,25 +1,31 @@
-. $PSScriptRoot\..\..\skills.ps1
+BeforeAll {
+    . $PSScriptRoot\..\..\skills.ps1
+    $script:Root = $Root
+    $script:CfgPath = $CfgPath
+    $script:ImportDir = $ImportDir
+    $script:OverridesDir = $OverridesDir
 
-function New-TestAuditGitRepository([string]$Path) {
-    New-Item -ItemType Directory -Path $Path -Force | Out-Null
-    Push-Location $Path
-    try {
-        git init --quiet
-        git config user.email "audit-tests@example.com"
-        git config user.name "Audit Tests"
-        Set-ContentUtf8 (Join-Path $Path "README.md") "# Audit target"
-        git add README.md
-        git commit --quiet -m "initial"
+    function New-TestAuditGitRepository([string]$Path) {
+        New-Item -ItemType Directory -Path $Path -Force | Out-Null
+        Push-Location $Path
+        try {
+            git init --quiet
+            git config user.email "audit-tests@example.com"
+            git config user.name "Audit Tests"
+            Set-ContentUtf8 (Join-Path $Path "README.md") "# Audit target"
+            git add README.md
+            git commit --quiet -m "initial"
+        }
+        finally {
+            Pop-Location
+        }
     }
-    finally {
-        Pop-Location
+
+    function New-TestAuditRecommendation([string]$Path, [string]$RunId = "r-hardening") {
+        Set-ContentUtf8 $Path ('{"schema_version":2,"run_id":"' + $RunId + '","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}')
     }
-}
 
-function New-TestAuditRecommendation([string]$Path, [string]$RunId = "r-hardening") {
-    Set-ContentUtf8 $Path ('{"schema_version":2,"run_id":"' + $RunId + '","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}')
 }
-
 Describe "Audit target hardening" {
     It "Preserves ordered-dictionary target names in decision insights" {
         $scan = [pscustomobject]@{
@@ -39,7 +45,7 @@ Describe "Audit target hardening" {
 
         $insights = New-AuditDecisionInsights $null @($scan) @() @() "target-repo"
 
-        $insights.targets[0].target | Should Be "ordered-target"
+        $insights.targets[0].target | Should -Be "ordered-target"
     }
 
     It "Captures target worktree fingerprints and detects status drift" {
@@ -57,11 +63,11 @@ Describe "Audit target hardening" {
         $liveAfter = Get-AuditTargetRepoLiveState $snapshot
         $stale = Get-AuditTargetRepoStaleness $snapshot $liveAfter
 
-        $snapshot.targets[0].status_fingerprint | Should Not BeNullOrEmpty
-        $fresh.is_stale | Should Be $false
-        $stale.is_stale | Should Be $true
-        @($stale.drifted_targets).Count | Should Be 1
-        $stale.drifted_targets[0].changes | Should Contain "worktree"
+        $snapshot.targets[0].status_fingerprint | Should -Not -BeNullOrEmpty
+        $fresh.is_stale | Should -Be $false
+        $stale.is_stale | Should -Be $true
+        @($stale.drifted_targets).Count | Should -Be 1
+        $stale.drifted_targets[0].changes | Should -Contain "worktree"
     }
 
     It "Detects content drift when dirty paths and status codes stay unchanged" {
@@ -80,10 +86,10 @@ Describe "Audit target hardening" {
         $liveAfter = Get-AuditTargetRepoLiveState $snapshot
         $staleness = Get-AuditTargetRepoStaleness $snapshot $liveAfter
 
-        $snapshot.targets[0].status_count | Should Be $liveAfter.targets[0].status_count
-        $snapshot.targets[0].status_fingerprint | Should Not Be $liveAfter.targets[0].status_fingerprint
-        $staleness.is_stale | Should Be $true
-        $staleness.drifted_targets[0].changes | Should Contain "worktree"
+        $snapshot.targets[0].status_count | Should -Be $liveAfter.targets[0].status_count
+        $snapshot.targets[0].status_fingerprint | Should -Not -Be $liveAfter.targets[0].status_fingerprint
+        $staleness.is_stale | Should -Be $true
+        $staleness.drifted_targets[0].changes | Should -Contain "worktree"
     }
 
     It "Preflight rejects a target repository that drifted after scan" {
@@ -105,15 +111,15 @@ Describe "Audit target hardening" {
         }
         catch {
             $thrown = $true
-            $_.Exception.Message | Should Match "target_repo_drift"
+            $_.Exception.Message | Should -Match "target_repo_drift"
         }
 
         $report = Get-ContentUtf8 (Join-Path $runDir "preflight-report.json") | ConvertFrom-Json
-        $thrown | Should Be $true
-        $report.success | Should Be $false
-        $report.error_code | Should Be "target_repo_drift"
-        $report.target_staleness.is_stale | Should Be $true
-        $report.target_staleness.drifted_targets[0].changes | Should Contain "worktree"
+        $thrown | Should -Be $true
+        $report.success | Should -Be $false
+        $report.error_code | Should -Be "target_repo_drift"
+        $report.target_staleness.is_stale | Should -Be $true
+        $report.target_staleness.drifted_targets[0].changes | Should -Contain "worktree"
     }
 
     It "Discovers PowerShell entrypoints and documented Python gates" {
@@ -131,13 +137,13 @@ Describe "Audit target hardening" {
 
         $scan = New-AuditRepoScan "powershell-repo" $repo $repo
 
-        $scan.detected.languages | Should Contain "powershell"
-        $scan.detected.languages | Should Contain "python"
-        $scan.detected.build_commands | Should Contain "pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1"
-        $scan.detected.test_commands | Should Contain "pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run.ps1"
-        $scan.detected.build_commands | Should Contain "python -m py_compile app.py test_app.py"
-        $scan.detected.test_commands | Should Contain "uv run --project ./runtime python -m pytest"
-        $scan.detected.test_commands | Should Contain "python -m unittest test_app.py"
+        $scan.detected.languages | Should -Contain "powershell"
+        $scan.detected.languages | Should -Contain "python"
+        $scan.detected.build_commands | Should -Contain "pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1"
+        $scan.detected.test_commands | Should -Contain "pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run.ps1"
+        $scan.detected.build_commands | Should -Contain "python -m py_compile app.py test_app.py"
+        $scan.detected.test_commands | Should -Contain "uv run --project ./runtime python -m pytest"
+        $scan.detected.test_commands | Should -Contain "python -m unittest test_app.py"
     }
 
     It "Writes a structured preflight report for invalid recommendations" {
@@ -156,11 +162,11 @@ Describe "Audit target hardening" {
 
         $reportPath = Join-Path $runDir "preflight-report.json"
         $report = Get-ContentUtf8 $reportPath | ConvertFrom-Json
-        $thrown | Should Be $true
-        (Test-Path -LiteralPath $reportPath) | Should Be $true
-        $report.success | Should Be $false
-        $report.error_code | Should Be "invalid_recommendations"
-        ($report.issues -join " ") | Should Match "routing.router"
+        $thrown | Should -Be $true
+        (Test-Path -LiteralPath $reportPath) | Should -Be $true
+        $report.success | Should -Be $false
+        $report.error_code | Should -Be "invalid_recommendations"
+        ($report.issues -join " ") | Should -Match "routing.router"
     }
 
     It "Allows host AI to own overlap selection without pretending it is a skill router" {
@@ -169,15 +175,15 @@ Describe "Audit target hardening" {
 
         $rec = Load-AuditRecommendations $recPath
 
-        $rec.overlap_findings[0].routing.decision_owner | Should Be "host_ai"
-        $rec.overlap_findings[0].routing.router | Should BeNullOrEmpty
+        $rec.overlap_findings[0].routing.decision_owner | Should -Be "host_ai"
+        $rec.overlap_findings[0].routing.router | Should -BeNullOrEmpty
     }
 
     It "Rejects a host-native fallback router that is not a declared router member" {
         $recPath = Join-Path $TestDrive "host-native-invalid-fallback.json"
         Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-host-native-invalid","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[{"name":"native-selection","reason_user_profile":"u","reason_target_repo":"t","sources":["https://example.com"],"note":"host selects","routing":{"decision_owner":"host_ai","fallback_router":"missing","selection_policy":"use the narrowest matching skill","members":[{"name":"alpha","role":"executor"},{"name":"beta","role":"validator"}]}}],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
 
-        { Load-AuditRecommendations $recPath | Out-Null } | Should Throw
+        { Load-AuditRecommendations $recPath | Out-Null } | Should -Throw
     }
 
     It "Finds exact reverse references before a skill removal mutates configuration" {
@@ -197,16 +203,16 @@ Describe "Audit target hardening" {
 
         $check = Test-AuditRemovalDependencyClosure -Config $cfg -RemovalCandidates $removals -RepositoryRoot $repo
 
-        $check.ok | Should Be $false
-        $check.blocked[0].name | Should Be "retired-skill"
-        $check.blocked[0].original_index | Should Be 3
-        $check.blocked[0].references[0].path | Should Be '$.skill_projection.aliases[0].replacement'
-        $check.blocked[0].references[1].file | Should Be "config/skill-dependency-closure.json"
-        $check.blocked[0].references[1].path | Should Be '$.dependencies[0].requires[0]'
-        @($check.blocked[0].references).Count | Should Be 2
+        $check.ok | Should -Be $false
+        $check.blocked[0].name | Should -Be "retired-skill"
+        $check.blocked[0].original_index | Should -Be 3
+        $check.blocked[0].references[0].path | Should -Be '$.skill_projection.aliases[0].replacement'
+        $check.blocked[0].references[1].file | Should -Be "config/skill-dependency-closure.json"
+        $check.blocked[0].references[1].path | Should -Be '$.dependencies[0].requires[0]'
+        @($check.blocked[0].references).Count | Should -Be 2
 
         $substringOnly = Test-AuditRemovalDependencyClosure -Config $cfg -RemovalCandidates @([pscustomobject]@{ name = "retired" }) -RepositoryRoot $repo
-        $substringOnly.ok | Should Be $true
+        $substringOnly.ok | Should -Be $true
     }
 
     It "Reports removal dependency blockers from preflight" {
@@ -227,12 +233,12 @@ Describe "Audit target hardening" {
             }
         }
 
-        { Invoke-AuditRecommendationsPreflight -RecommendationsPath $recPath | Out-Null } | Should Throw
+        { Invoke-AuditRecommendationsPreflight -RecommendationsPath $recPath | Out-Null } | Should -Throw
 
         $report = Get-ContentUtf8 (Join-Path $runDir "preflight-report.json") | ConvertFrom-Json
-        $report.success | Should Be $false
-        $report.error_code | Should Be "removal_dependency_blocked"
-        $report.removal_dependency_check.blocked[0].name | Should Be "retired-skill"
+        $report.success | Should -Be $false
+        $report.error_code | Should -Be "removal_dependency_blocked"
+        $report.removal_dependency_check.blocked[0].name | Should -Be "retired-skill"
     }
 
     It "Scopes host projection health to the admitted resident set" {
@@ -256,10 +262,10 @@ Describe "Audit target hardening" {
 
         $state = Get-AuditHostProjectionState $cfg
 
-        $state.status | Should Be "available"
-        $state.managed_count | Should Be 1
-        $state.broken_count | Should Be 0
-        $state.stale_count | Should Be 0
+        $state.status | Should -Be "available"
+        $state.managed_count | Should -Be 1
+        $state.broken_count | Should -Be 0
+        $state.stale_count | Should -Be 0
     }
 
     It "Makes dry-run summaries self-contained and keeps category-specific empty reasons" {
@@ -287,13 +293,13 @@ Describe "Audit target hardening" {
                 mcp_removal_candidates = @()
             }) $plan
 
-        $summary.mode | Should Be "dry_run"
-        $summary.success | Should Be $true
-        $summary.persisted | Should Be $false
-        $categories[0].empty_reason | Should Be "no skill gap"
-        $categories[1].empty_reason | Should Be "no removable skill"
-        $categories[2].empty_reason | Should Be "no MCP gap"
-        $categories[3].empty_reason | Should Be "no removable MCP"
+        $summary.mode | Should -Be "dry_run"
+        $summary.success | Should -Be $true
+        $summary.persisted | Should -Be $false
+        $categories[0].empty_reason | Should -Be "no skill gap"
+        $categories[1].empty_reason | Should -Be "no removable skill"
+        $categories[2].empty_reason | Should -Be "no MCP gap"
+        $categories[3].empty_reason | Should -Be "no removable MCP"
     }
 
     It "Stops validated dry-run when a target repository changes during preflight" {
@@ -320,15 +326,15 @@ Describe "Audit target hardening" {
         }
         catch {
             $thrown = $true
-            $_.Exception.Message | Should Match "target_repo_drift"
+            $_.Exception.Message | Should -Match "target_repo_drift"
         }
 
         $saved = Get-ContentUtf8 (Get-AuditWorkflowReportPath $recPath) | ConvertFrom-Json
-        $thrown | Should Be $true
-        $saved.failed_stage | Should Be "input_stability"
-        $saved.error_code | Should Be "target_repo_drift"
-        $saved.input_stability.preflight_target_repos_matched | Should Be $false
-        $saved.next_command | Should Match "审查目标 扫描"
-        Assert-MockCalled Invoke-AuditRecommendationsApply -Times 0 -Exactly -Scope It
+        $thrown | Should -Be $true
+        $saved.failed_stage | Should -Be "input_stability"
+        $saved.error_code | Should -Be "target_repo_drift"
+        $saved.input_stability.preflight_target_repos_matched | Should -Be $false
+        $saved.next_command | Should -Match "审查目标 扫描"
+        Should -Invoke Invoke-AuditRecommendationsApply -Times 0 -Exactly -Scope It
     }
 }

@@ -40,11 +40,11 @@ Describe 'reference refresh remote provenance safety' {
         $result = & $script:refreshScript -ManifestPath $manifestPath -ReferencesRoot $referencesRoot -OutputDirectory $outputDirectory -RepoNames victim -FetchOnly
         $record = @($result.results)[0]
 
-        $record.status | Should Be 'origin-identity-mismatch'
-        $record.origin_matches_manifest | Should Be $false
-        [System.IO.Path]::GetFullPath([string]$record.declared_upstream) | Should Be ([System.IO.Path]::GetFullPath($declaredRemote))
-        [System.IO.Path]::GetFullPath([string]$record.actual_origin) | Should Be ([System.IO.Path]::GetFullPath($attackerRemote))
-        $record.remote_refs_current | Should Be $false
+        $record.status | Should -Be 'origin-identity-mismatch'
+        $record.origin_matches_manifest | Should -Be $false
+        [System.IO.Path]::GetFullPath([string]$record.declared_upstream) | Should -Be ([System.IO.Path]::GetFullPath($declaredRemote))
+        [System.IO.Path]::GetFullPath([string]$record.actual_origin) | Should -Be ([System.IO.Path]::GetFullPath($attackerRemote))
+        $record.remote_refs_current | Should -Be $false
     }
 
     It 'records the verified actual origin on a successful fetch-only refresh' {
@@ -74,10 +74,10 @@ Describe 'reference refresh remote provenance safety' {
         $result = & $script:refreshScript -ManifestPath $manifestPath -ReferencesRoot $referencesRoot -OutputDirectory $outputDirectory -RepoNames matching -FetchOnly
         $record = @($result.results)[0]
 
-        $record.status | Should Be 'fetch-only'
-        $record.origin_matches_manifest | Should Be $true
-        [System.IO.Path]::GetFullPath([string]$record.actual_origin) | Should Be ([System.IO.Path]::GetFullPath($remote))
-        $record.remote_refs_current | Should Be $true
+        $record.status | Should -Be 'fetch-only'
+        $record.origin_matches_manifest | Should -Be $true
+        [System.IO.Path]::GetFullPath([string]$record.actual_origin) | Should -Be ([System.IO.Path]::GetFullPath($remote))
+        $record.remote_refs_current | Should -Be $true
     }
 
     It 'rejects an unknown tier before touching any checkout' {
@@ -89,7 +89,7 @@ Describe 'reference refresh remote provenance safety' {
             repos = @()
         } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
-        { & $script:refreshScript -ManifestPath $manifestPath -OutputDirectory (Join-Path $TestDrive 'unknown-tier-reports') -Tier obsolete -FetchOnly } | Should Throw 'Unsupported reference tier: obsolete'
+        { & $script:refreshScript -ManifestPath $manifestPath -OutputDirectory (Join-Path $TestDrive 'unknown-tier-reports') -Tier obsolete -FetchOnly } | Should -Throw 'Unsupported reference tier: obsolete'
     }
 
 }

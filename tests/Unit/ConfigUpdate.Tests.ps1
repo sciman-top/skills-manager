@@ -1,12 +1,17 @@
-. $PSScriptRoot\..\..\skills.ps1
+BeforeAll {
+    . $PSScriptRoot\..\..\skills.ps1
 
+}
 Describe "Config And Update Enhancements" {
+    BeforeEach {
+        . $PSScriptRoot\..\..\skills.ps1
+    }
     Context "UTF-8 config reads" {
         It "Loads skills.json through Get-ContentUtf8 instead of legacy Get-Content -Raw" {
-            $oldCfgPath = $script:CfgPath
+            $oldCfgPath = $CfgPath
             try {
-                $script:CfgPath = Join-Path $TestDrive "skills.json"
-                Set-ContentUtf8 $script:CfgPath @'
+                $CfgPath = Join-Path $TestDrive "skills.json"
+                Set-ContentUtf8 $CfgPath @'
 {
   "vendors": [{"name":"demo","repo":"https://example.com/demo.git"}],
   "targets": [{"path":"~/.codex/skills"}],
@@ -23,20 +28,20 @@ Describe "Config And Update Enhancements" {
 
                 $cfg = LoadCfg
 
-                [string]$cfg.note | Should Be "中文配置"
-                [string]$cfg.vendors[0].name | Should Be "demo"
+                [string]$cfg.note | Should -Be "中文配置"
+                [string]$cfg.vendors[0].name | Should -Be "demo"
             }
             finally {
-                $script:CfgPath = $oldCfgPath
+                $CfgPath = $oldCfgPath
             }
         }
 
         It "Loads lock files through Get-ContentUtf8 instead of legacy Get-Content -Raw" {
-            $oldRoot = $script:Root
+            $oldRoot = $Root
             try {
-                $script:Root = Join-Path $TestDrive "lock-root"
-                New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
-                $lockPath = Join-Path $script:Root "skills.lock.json"
+                $Root = Join-Path $TestDrive "lock-root"
+                New-Item -ItemType Directory -Path $Root -Force | Out-Null
+                $lockPath = Join-Path $Root "skills.lock.json"
                 Set-ContentUtf8 $lockPath @'
 {
   "version": 1,
@@ -50,11 +55,11 @@ Describe "Config And Update Enhancements" {
 
                 $lock = Load-LockData
 
-                [string]$lock.note | Should Be "中文锁文件"
-                [int]$lock.version | Should Be 1
+                [string]$lock.note | Should -Be "中文锁文件"
+                [int]$lock.version | Should -Be 1
             }
             finally {
-                $script:Root = $oldRoot
+                $Root = $oldRoot
             }
         }
     }
@@ -86,8 +91,8 @@ Describe "Config And Update Enhancements" {
             }
 
             $lines = Get-CfgChangeSummaryLines $oldRaw $newCfg
-            ($lines -join "`n") | Should Match "vendors: 1 -> 2"
-            ($lines -join "`n") | Should Match "mappings: 0 -> 1"
+            ($lines -join "`n") | Should -Match "vendors: 1 -> 2"
+            ($lines -join "`n") | Should -Match "mappings: 0 -> 1"
         }
     }
 
@@ -108,15 +113,15 @@ Describe "Config And Update Enhancements" {
 
             $errors = @(Get-CfgContractErrors $cfg) -join "`n"
 
-            $errors | Should Match "宿主 runtime 职责.*model"
-            $errors | Should Match "宿主 runtime 职责.*orchestrator"
-            $errors | Should Not Match "note"
-            { Assert-Cfg $cfg } | Should Throw
+            $errors | Should -Match "宿主 runtime 职责.*model"
+            $errors | Should -Match "宿主 runtime 职责.*orchestrator"
+            $errors | Should -Not -Match "note"
+            { Assert-Cfg $cfg } | Should -Throw
 
             $cfg.PSObject.Properties.Remove('model')
             $cfg.PSObject.Properties.Remove('orchestrator')
-            @(Get-CfgContractErrors $cfg).Count | Should Be 0
-            { Assert-Cfg $cfg } | Should Not Throw
+            @(Get-CfgContractErrors $cfg).Count | Should -Be 0
+            { Assert-Cfg $cfg } | Should -Not -Throw
         }
 
         It "Preserves a single-item skill projection sources array" {
@@ -140,8 +145,8 @@ Describe "Config And Update Enhancements" {
 '@ | ConvertFrom-Json
 
             $sources = Get-CfgObjectProperty $cfg.skill_projection "sources"
-            (Assert-IsArray $sources) | Should Be $true
-            @(Get-CfgContractErrors $cfg).Count | Should Be 0
+            (Assert-IsArray $sources) | Should -Be $true
+            @(Get-CfgContractErrors $cfg).Count | Should -Be 0
         }
 
         It "Validates routing policy and external inventory settings" {
@@ -156,8 +161,8 @@ Describe "Config And Update Enhancements" {
   }
 }
 '@ | ConvertFrom-Json
-            @(Get-CfgContractErrors $valid).Count | Should Be 0
-            { Assert-Cfg $valid } | Should Not Throw
+            @(Get-CfgContractErrors $valid).Count | Should -Be 0
+            { Assert-Cfg $valid } | Should -Not -Throw
 
             $invalid = @'
 {
@@ -171,18 +176,18 @@ Describe "Config And Update Enhancements" {
 }
 '@ | ConvertFrom-Json
             $errors = @(Get-CfgContractErrors $invalid) -join "`n"
-            $errors | Should Match "routing_policy_path 不能为空"
-            $errors | Should Match "external_skill_inventory.enabled 必须是布尔值"
-            $errors | Should Match "external_skill_inventory.plugin_cache_path 不能为空"
-            { Assert-Cfg $invalid } | Should Throw
+            $errors | Should -Match "routing_policy_path 不能为空"
+            $errors | Should -Match "external_skill_inventory.enabled 必须是布尔值"
+            $errors | Should -Match "external_skill_inventory.plugin_cache_path 不能为空"
+            { Assert-Cfg $invalid } | Should -Throw
 
             $invalidHashtable = $valid.PSObject.Copy()
             $invalidHashtable.skill_projection = $valid.skill_projection.PSObject.Copy()
             $invalidHashtable.skill_projection.external_skill_inventory = @{ enabled = "true"; plugin_cache_path = " " }
             $hashtableErrors = @(Get-CfgContractErrors $invalidHashtable) -join "`n"
-            $hashtableErrors | Should Match "external_skill_inventory.enabled 必须是布尔值"
-            $hashtableErrors | Should Match "external_skill_inventory.plugin_cache_path 不能为空"
-            { Assert-Cfg $invalidHashtable } | Should Throw
+            $hashtableErrors | Should -Match "external_skill_inventory.enabled 必须是布尔值"
+            $hashtableErrors | Should -Match "external_skill_inventory.plugin_cache_path 不能为空"
+            { Assert-Cfg $invalidHashtable } | Should -Throw
         }
 
         It "Validates native projection target and receipt containment" {
@@ -199,22 +204,22 @@ Describe "Config And Update Enhancements" {
   }
 }
 '@ | ConvertFrom-Json
-            @(Get-CfgContractErrors $valid).Count | Should Be 0
-            { Assert-Cfg $valid } | Should Not Throw
+            @(Get-CfgContractErrors $valid).Count | Should -Be 0
+            { Assert-Cfg $valid } | Should -Not -Throw
 
             $invalid = $valid | ConvertTo-Json -Depth 10 | ConvertFrom-Json
             $invalid.skill_projection.native_projection.target_root = 'C:\'
             $invalid.skill_projection.native_projection.receipt_path = 'C:\native-receipt.json'
             $errors = @(Get-CfgContractErrors $invalid) -join "`n"
-            $errors | Should Match 'target_root 必须等于'
-            $errors | Should Match 'receipt_path 必须位于'
-            { Assert-Cfg $invalid } | Should Throw
+            $errors | Should -Match 'target_root 必须等于'
+            $errors | Should -Match 'receipt_path 必须位于'
+            { Assert-Cfg $invalid } | Should -Throw
 
             $volumeRoot = $valid | ConvertTo-Json -Depth 10 | ConvertFrom-Json
             $volumeRoot.skill_projection.user_skill_root = 'C:\'
             $volumeRoot.skill_projection.native_projection.target_root = 'C:\'
-            (@(Get-CfgContractErrors $volumeRoot) -join "`n") | Should Match '不能是文件系统根目录'
-            { Assert-Cfg $volumeRoot } | Should Throw
+            (@(Get-CfgContractErrors $volumeRoot) -join "`n") | Should -Match '不能是文件系统根目录'
+            { Assert-Cfg $volumeRoot } | Should -Throw
         }
 
         It "Validates managed Codex link placement" {
@@ -235,37 +240,37 @@ Describe "Config And Update Enhancements" {
   }
 }
 '@ | ConvertFrom-Json
-            @(Get-CfgContractErrors $valid).Count | Should Be 0
-            { Assert-Cfg $valid } | Should Not Throw
+            @(Get-CfgContractErrors $valid).Count | Should -Be 0
+            { Assert-Cfg $valid } | Should -Not -Throw
 
             $notArray = $valid.PSObject.Copy()
             $notArray.skill_projection = $valid.skill_projection.PSObject.Copy()
             $notArray.skill_projection.managed_link_excludes = "one-skill"
-            (@(Get-CfgContractErrors $notArray) -join "`n") | Should Match "managed_link_excludes 必须是数组"
-            { Assert-Cfg $notArray } | Should Throw
+            (@(Get-CfgContractErrors $notArray) -join "`n") | Should -Match "managed_link_excludes 必须是数组"
+            { Assert-Cfg $notArray } | Should -Throw
 
             $invalidItems = $valid.PSObject.Copy()
             $invalidItems.skill_projection = $valid.skill_projection.PSObject.Copy()
             $invalidItems.skill_projection.managed_link_excludes = @(" ", "Skill-A", "skill-a")
             $errors = @(Get-CfgContractErrors $invalidItems) -join "`n"
-            $errors | Should Match "managed_link_excludes 不能包含空字符串"
-            $errors | Should Match "managed_link_excludes 重复"
-            { Assert-Cfg $invalidItems } | Should Throw
+            $errors | Should -Match "managed_link_excludes 不能包含空字符串"
+            $errors | Should -Match "managed_link_excludes 重复"
+            { Assert-Cfg $invalidItems } | Should -Throw
 
             $invalidIncludes = $valid.PSObject.Copy()
             $invalidIncludes.skill_projection = $valid.skill_projection.PSObject.Copy()
             $invalidIncludes.skill_projection.managed_link_includes = @(" ", "Skill-A", "skill-a")
             $errors = @(Get-CfgContractErrors $invalidIncludes) -join "`n"
-            $errors | Should Match "managed_link_includes 不能包含空字符串"
-            $errors | Should Match "managed_link_includes 重复"
-            { Assert-Cfg $invalidIncludes } | Should Throw
+            $errors | Should -Match "managed_link_includes 不能包含空字符串"
+            $errors | Should -Match "managed_link_includes 重复"
+            { Assert-Cfg $invalidIncludes } | Should -Throw
 
             $conflict = $valid.PSObject.Copy()
             $conflict.skill_projection = $valid.skill_projection.PSObject.Copy()
             $conflict.skill_projection.managed_link_includes = @("Skill-A")
             $conflict.skill_projection.managed_link_excludes = @("skill-a")
-            (@(Get-CfgContractErrors $conflict) -join "`n") | Should Match "include/exclude 冲突"
-            { Assert-Cfg $conflict } | Should Throw
+            (@(Get-CfgContractErrors $conflict) -join "`n") | Should -Match "include/exclude 冲突"
+            { Assert-Cfg $conflict } | Should -Throw
         }
 
         It "Collects contract errors without mutating config shape" {
@@ -289,11 +294,11 @@ Describe "Config And Update Enhancements" {
             $errors = @(Get-CfgContractErrors $cfg)
             $joined = $errors -join "`n"
 
-            $joined | Should Match "mapping.from 非法"
-            $joined | Should Match "mcp_server.transport 仅支持 stdio/sse/http：bad-server"
-            $joined | Should Match "sync_mode 仅支持 link 或 sync"
-            $joined | Should Match "mapping 引用了不存在的 vendor：missing-vendor"
-            $cfg.PSObject.Properties.Match("mcp_targets").Count | Should Be 0
+            $joined | Should -Match "mapping.from 非法"
+            $joined | Should -Match "mcp_server.transport 仅支持 stdio/sse/http：bad-server"
+            $joined | Should -Match "sync_mode 仅支持 link 或 sync"
+            $joined | Should -Match "mapping 引用了不存在的 vendor：missing-vendor"
+            $cfg.PSObject.Properties.Match("mcp_targets").Count | Should -Be 0
         }
 
         It "Rejects MCP profiles that reference missing servers" {
@@ -322,10 +327,10 @@ Describe "Config And Update Enhancements" {
             }
 
             $errors = @(Get-CfgContractErrors $cfg) -join "`n"
-            $errors | Should Match "MCP profile 引用了不存在的服务：default/missing-server"
-            $errors | Should Match "MCP profile enabled_tools 引用了不存在的服务：default/also-missing"
-            $errors | Should Match "MCP profile.enabled 必须是数组：empty"
-            { Assert-Cfg $cfg } | Should Throw
+            $errors | Should -Match "MCP profile 引用了不存在的服务：default/missing-server"
+            $errors | Should -Match "MCP profile enabled_tools 引用了不存在的服务：default/also-missing"
+            $errors | Should -Match "MCP profile.enabled 必须是数组：empty"
+            { Assert-Cfg $cfg } | Should -Throw
         }
 
         It "Treats overrides as a reserved mapping vendor in config contracts" {
@@ -342,8 +347,8 @@ Describe "Config And Update Enhancements" {
             }
 
             $errors = @(Get-CfgContractErrors $cfg)
-            ($errors | Where-Object { $_ -like "*不存在的 vendor*" }).Count | Should Be 0
-            { Assert-Cfg $cfg } | Should Not Throw
+            ($errors | Where-Object { $_ -like "*不存在的 vendor*" }).Count | Should -Be 0
+            { Assert-Cfg $cfg } | Should -Not -Throw
         }
     }
 
@@ -378,10 +383,10 @@ Describe "Config And Update Enhancements" {
 
             Fix-Cfg $cfg ([ref]$changed) ([ref]$dirMigrations)
 
-            $changed | Should Be $true
-            @($cfg.imports).Count | Should Be 1
-            $cfg.imports[0].name | Should Be "superpowers"
-            @($cfg.mappings).Count | Should Be 0
+            $changed | Should -Be $true
+            @($cfg.imports).Count | Should -Be 1
+            $cfg.imports[0].name | Should -Be "superpowers"
+            @($cfg.mappings).Count | Should -Be 0
         }
 
         It "Does not recreate mapping for previously removed vendor skill" {
@@ -414,9 +419,9 @@ Describe "Config And Update Enhancements" {
 
             Fix-Cfg $cfg ([ref]$changed) ([ref]$dirMigrations)
 
-            @($cfg.imports).Count | Should Be 1
-            $cfg.imports[0].skill | Should Be "skills\theme-factory"
-            @($cfg.mappings).Count | Should Be 0
+            @($cfg.imports).Count | Should -Be 1
+            $cfg.imports[0].skill | Should -Be "skills\theme-factory"
+            @($cfg.mappings).Count | Should -Be 0
         }
 
         It "Prunes vendor root mapping and root import automatically" {
@@ -460,11 +465,11 @@ Describe "Config And Update Enhancements" {
 
             Fix-Cfg $cfg ([ref]$changed) ([ref]$dirMigrations)
 
-            $changed | Should Be $true
-            (@($cfg.mappings | Where-Object { $_.from -eq "." })).Count | Should Be 0
-            (@($cfg.mappings | Where-Object { $_.from -eq "skills\accessibility" })).Count | Should Be 1
-            (@($cfg.imports | Where-Object { $_.mode -eq "vendor" -and $_.skill -eq "." })).Count | Should Be 0
-            (@($cfg.imports | Where-Object { $_.mode -eq "vendor" -and $_.skill -eq "skills\accessibility" })).Count | Should Be 1
+            $changed | Should -Be $true
+            (@($cfg.mappings | Where-Object { $_.from -eq "." })).Count | Should -Be 0
+            (@($cfg.mappings | Where-Object { $_.from -eq "skills\accessibility" })).Count | Should -Be 1
+            (@($cfg.imports | Where-Object { $_.mode -eq "vendor" -and $_.skill -eq "." })).Count | Should -Be 0
+            (@($cfg.imports | Where-Object { $_.mode -eq "vendor" -and $_.skill -eq "skills\accessibility" })).Count | Should -Be 1
         }
     }
 
@@ -480,8 +485,8 @@ Describe "Config And Update Enhancements" {
                 )
             }
 
-            Get-UpdateRepoCount $cfg | Should Be 2
-            Get-UpdateParallelism $cfg | Should Be 2
+            Get-UpdateRepoCount $cfg | Should -Be 2
+            Get-UpdateParallelism $cfg | Should -Be 2
         }
 
         It "Falls back to 1 when update_parallelism is invalid" {
@@ -491,7 +496,7 @@ Describe "Config And Update Enhancements" {
                 imports = @()
             }
 
-            Get-UpdateParallelism $cfg | Should Be 1
+            Get-UpdateParallelism $cfg | Should -Be 1
         }
 
         It "Keeps explicit update_parallelism when valid" {
@@ -501,20 +506,20 @@ Describe "Config And Update Enhancements" {
                 imports = @()
             }
 
-            Get-UpdateParallelism $cfg | Should Be 4
+            Get-UpdateParallelism $cfg | Should -Be 4
         }
 
         It "Clamps parallel prefetch timeout from environment" {
             $oldTimeout = $env:SKILLS_UPDATE_PREFETCH_TIMEOUT_SECONDS
             try {
                 $env:SKILLS_UPDATE_PREFETCH_TIMEOUT_SECONDS = "1"
-                Get-UpdatePrefetchTimeoutSeconds | Should Be 1
+                Get-UpdatePrefetchTimeoutSeconds | Should -Be 1
 
                 $env:SKILLS_UPDATE_PREFETCH_TIMEOUT_SECONDS = "9999"
-                Get-UpdatePrefetchTimeoutSeconds | Should Be 1800
+                Get-UpdatePrefetchTimeoutSeconds | Should -Be 1800
 
                 $env:SKILLS_UPDATE_PREFETCH_TIMEOUT_SECONDS = "45"
-                Get-UpdatePrefetchTimeoutSeconds | Should Be 45
+                Get-UpdatePrefetchTimeoutSeconds | Should -Be 45
             }
             finally {
                 $env:SKILLS_UPDATE_PREFETCH_TIMEOUT_SECONDS = $oldTimeout
@@ -524,13 +529,13 @@ Describe "Config And Update Enhancements" {
 
     Context "Update fast no-op" {
         It "Allows fast no-op only when every planned source is clean and unchanged" {
-            $oldVendorDir = $script:VendorDir
-            $oldImportDir = $script:ImportDir
+            $oldVendorDir = $VendorDir
+            $oldImportDir = $ImportDir
             try {
-                $script:VendorDir = Join-Path $TestDrive "vendor-fast-noop"
-                $script:ImportDir = Join-Path $TestDrive "imports-fast-noop"
-                $vendorPath = Join-Path $script:VendorDir "demo-vendor"
-                $importPath = Join-Path $script:ImportDir "demo-import"
+                $VendorDir = Join-Path $TestDrive "vendor-fast-noop"
+                $ImportDir = Join-Path $TestDrive "imports-fast-noop"
+                $vendorPath = Join-Path $VendorDir "demo-vendor"
+                $importPath = Join-Path $ImportDir "demo-import"
                 New-Item -ItemType Directory -Path $vendorPath -Force | Out-Null
                 New-Item -ItemType Directory -Path $importPath -Force | Out-Null
                 Set-Content -Path (Join-Path $importPath "SKILL.md") -Value "---`nname: demo-import`ndescription: x`n---"
@@ -548,19 +553,19 @@ Describe "Config And Update Enhancements" {
                 Mock Test-IsGitRepoRoot { $false } -ParameterFilter { $path -eq $importPath }
                 Mock Invoke-GitCapture { "" } -ParameterFilter { $GitArgs[0] -eq "status" }
 
-                (Test-UpdateCanFastNoop $cfg $items) | Should Be $true
+                (Test-UpdateCanFastNoop $cfg $items) | Should -Be $true
             }
             finally {
-                $script:VendorDir = $oldVendorDir
-                $script:ImportDir = $oldImportDir
+                $VendorDir = $oldVendorDir
+                $ImportDir = $oldImportDir
             }
         }
 
         It "Rejects fast no-op when a git cache has local changes" {
-            $oldVendorDir = $script:VendorDir
+            $oldVendorDir = $VendorDir
             try {
-                $script:VendorDir = Join-Path $TestDrive "vendor-fast-noop-dirty"
-                $vendorPath = Join-Path $script:VendorDir "demo-vendor"
+                $VendorDir = Join-Path $TestDrive "vendor-fast-noop-dirty"
+                $vendorPath = Join-Path $VendorDir "demo-vendor"
                 New-Item -ItemType Directory -Path $vendorPath -Force | Out-Null
 
                 $cfg = [pscustomobject]@{
@@ -572,18 +577,18 @@ Describe "Config And Update Enhancements" {
                 Mock Test-IsGitRepoRoot { $true } -ParameterFilter { $path -eq $vendorPath }
                 Mock Invoke-GitCapture { " M SKILL.md" } -ParameterFilter { $GitArgs[0] -eq "status" }
 
-                (Test-UpdateCanFastNoop $cfg $items) | Should Be $false
+                (Test-UpdateCanFastNoop $cfg $items) | Should -Be $false
             }
             finally {
-                $script:VendorDir = $oldVendorDir
+                $VendorDir = $oldVendorDir
             }
         }
 
         It "Rejects fast no-op when a git cache only has ignored residue" {
-            $oldVendorDir = $script:VendorDir
+            $oldVendorDir = $VendorDir
             try {
-                $script:VendorDir = Join-Path $TestDrive "vendor-fast-noop-ignored"
-                $vendorPath = Join-Path $script:VendorDir "demo-vendor"
+                $VendorDir = Join-Path $TestDrive "vendor-fast-noop-ignored"
+                $vendorPath = Join-Path $VendorDir "demo-vendor"
                 New-Item -ItemType Directory -Path $vendorPath -Force | Out-Null
 
                 $cfg = [pscustomobject]@{
@@ -595,13 +600,13 @@ Describe "Config And Update Enhancements" {
                 Mock Test-IsGitRepoRoot { $true } -ParameterFilter { $path -eq $vendorPath }
                 Mock Invoke-GitCapture { "!! old-output/" } -ParameterFilter { $GitArgs[0] -eq "status" -and $GitArgs -contains "--ignored" }
 
-                (Test-UpdateCanFastNoop $cfg $items) | Should Be $false
-                Assert-MockCalled Invoke-GitCapture -Times 1 -Exactly -Scope It -ParameterFilter {
+                (Test-UpdateCanFastNoop $cfg $items) | Should -Be $false
+                Should -Invoke Invoke-GitCapture -Times 1 -Exactly -Scope It -ParameterFilter {
                     $GitArgs[0] -eq "status" -and $GitArgs -contains "--ignored"
                 }
             }
             finally {
-                $script:VendorDir = $oldVendorDir
+                $VendorDir = $oldVendorDir
             }
         }
     }
@@ -619,14 +624,14 @@ Describe "Config And Update Enhancements" {
             }
 
             $isRepoRoot = Test-IsGitRepoRoot $candidate
-            $isRepoRoot | Should Be $false
+            $isRepoRoot | Should -Be $false
         }
 
         It "Skips non-git manual import caches in update_force dirty detection" {
-            $oldImportDir = $script:ImportDir
+            $oldImportDir = $ImportDir
             try {
-                $script:ImportDir = Join-Path $TestDrive "imports"
-                $cache = Join-Path $script:ImportDir "openpyxl"
+                $ImportDir = Join-Path $TestDrive "imports"
+                $cache = Join-Path $ImportDir "openpyxl"
                 New-Item -ItemType Directory -Path $cache -Force | Out-Null
 
                 $cfg = [pscustomobject]@{
@@ -645,20 +650,20 @@ Describe "Config And Update Enhancements" {
                 $skip = @{}
                 $ok = Confirm-UpdateForce $cfg ([ref]$skip)
 
-                $ok | Should Be $true
-                $skip.Count | Should Be 0
-                Assert-MockCalled Has-GitChanges -Times 0 -Exactly
+                $ok | Should -Be $true
+                $skip.Count | Should -Be 0
+                Should -Invoke Has-GitChanges -Times 0 -Exactly
             }
             finally {
-                $script:ImportDir = $oldImportDir
+                $ImportDir = $oldImportDir
             }
         }
 
         It "Does not preserve merge-in-progress manual imports as local dirty changes" {
-            $oldImportDir = $script:ImportDir
+            $oldImportDir = $ImportDir
             try {
-                $script:ImportDir = Join-Path $TestDrive "imports-merge-state"
-                $cache = Join-Path $script:ImportDir "mcp-cli"
+                $ImportDir = Join-Path $TestDrive "imports-merge-state"
+                $cache = Join-Path $ImportDir "mcp-cli"
                 New-Item -ItemType Directory -Path $cache -Force | Out-Null
 
                 $cfg = [pscustomobject]@{
@@ -678,20 +683,20 @@ Describe "Config And Update Enhancements" {
                 $skip = @{}
                 $ok = Confirm-UpdateForce $cfg ([ref]$skip)
 
-                $ok | Should Be $true
-                $skip.Count | Should Be 0
-                Assert-MockCalled Has-GitChanges -Times 0 -Exactly
+                $ok | Should -Be $true
+                $skip.Count | Should -Be 0
+                Should -Invoke Has-GitChanges -Times 0 -Exactly
             }
             finally {
-                $script:ImportDir = $oldImportDir
+                $ImportDir = $oldImportDir
             }
         }
 
         It "Skips non-git caches during parallel prefetch" {
-            $oldImportDir = $script:ImportDir
+            $oldImportDir = $ImportDir
             try {
-                $script:ImportDir = Join-Path $TestDrive "imports-prefetch"
-                $cache = Join-Path $script:ImportDir "openpyxl"
+                $ImportDir = Join-Path $TestDrive "imports-prefetch"
+                $cache = Join-Path $ImportDir "openpyxl"
                 New-Item -ItemType Directory -Path $cache -Force | Out-Null
 
                 $cfg = [pscustomobject]@{
@@ -709,20 +714,20 @@ Describe "Config And Update Enhancements" {
 
                 Invoke-ParallelGitPrefetch $cfg 2
 
-                Assert-MockCalled Start-Job -Times 0 -Exactly
+                Should -Invoke Start-Job -Times 0 -Exactly
             }
             finally {
-                $script:ImportDir = $oldImportDir
+                $ImportDir = $oldImportDir
             }
         }
 
         It "Stops and cleans up timed-out parallel prefetch jobs" {
-            $oldVendorDir = $script:VendorDir
+            $oldVendorDir = $VendorDir
             $oldTimeout = $env:SKILLS_UPDATE_PREFETCH_TIMEOUT_SECONDS
             try {
                 $env:SKILLS_UPDATE_PREFETCH_TIMEOUT_SECONDS = "1"
-                $script:VendorDir = Join-Path $TestDrive "vendor-prefetch-timeout"
-                $vendorPath = Join-Path $script:VendorDir "demo"
+                $VendorDir = Join-Path $TestDrive "vendor-prefetch-timeout"
+                $vendorPath = Join-Path $VendorDir "demo"
                 New-Item -ItemType Directory -Path $vendorPath -Force | Out-Null
 
                 $cfg = [pscustomobject]@{
@@ -738,14 +743,14 @@ Describe "Config And Update Enhancements" {
                 Mock Remove-Job {}
                 Mock Receive-Job { throw "Receive-Job should not be called for timed-out jobs." }
 
-                Invoke-ParallelGitPrefetch $cfg 2 | Should Be $false
+                Invoke-ParallelGitPrefetch $cfg 2 | Should -Be $false
 
-                Assert-MockCalled Stop-Job -Times 1 -Exactly -Scope It
-                Assert-MockCalled Remove-Job -Times 1 -Exactly -Scope It
-                Assert-MockCalled Receive-Job -Times 0 -Exactly -Scope It
+                Should -Invoke Stop-Job -Times 1 -Exactly -Scope It
+                Should -Invoke Remove-Job -Times 1 -Exactly -Scope It
+                Should -Invoke Receive-Job -Times 0 -Exactly -Scope It
             }
             finally {
-                $script:VendorDir = $oldVendorDir
+                $VendorDir = $oldVendorDir
                 $env:SKILLS_UPDATE_PREFETCH_TIMEOUT_SECONDS = $oldTimeout
             }
         }
@@ -767,15 +772,15 @@ Describe "Config And Update Enhancements" {
             }
 
             $ok = Confirm-UpdateForce $cfg ([ref]$skip)
-            $ok | Should Be $true
-            $skip.ContainsKey("vendor|demo") | Should Be $true
+            $ok | Should -Be $true
+            $skip.ContainsKey("vendor|demo") | Should -Be $true
         }
 
         It "Skips hard reset for vendor entries listed in skip map" {
-            $oldVendorDir = $script:VendorDir
+            $oldVendorDir = $VendorDir
             try {
-                $script:VendorDir = Join-Path $TestDrive "vendor"
-                New-Item -ItemType Directory -Path (Join-Path $script:VendorDir "demo") -Force | Out-Null
+                $VendorDir = Join-Path $TestDrive "vendor"
+                New-Item -ItemType Directory -Path (Join-Path $VendorDir "demo") -Force | Out-Null
 
                 $cfg = [pscustomobject]@{
                     vendors = @([pscustomobject]@{ name = "demo"; ref = "main" })
@@ -792,11 +797,11 @@ Describe "Config And Update Enhancements" {
                 Mock Get-GitHeadBranch { "main" }
 
                 更新Vendor $cfg -SkipPreflight -SkipForceClean $skip | Out-Null
-                $script:cleanCalls.Count | Should Be 1
-                [bool]$script:cleanCalls[0] | Should Be $false
+                $script:cleanCalls.Count | Should -Be 1
+                [bool]$script:cleanCalls[0] | Should -Be $false
             }
             finally {
-                $script:VendorDir = $oldVendorDir
+                $VendorDir = $oldVendorDir
             }
         }
     }
@@ -814,8 +819,8 @@ Describe "Config And Update Enhancements" {
                 $thrown = $true
             }
 
-            $thrown | Should Be $false
-            $resolved | Should Be $null
+            $thrown | Should -Be $false
+            $resolved | Should -Be $null
         }
 
         It "Prefers exact branch refs over ambiguous ls-remote suffix matches" {
@@ -831,9 +836,9 @@ Describe "Config And Update Enhancements" {
                 return $null
             }
 
-            Resolve-RemoteCommit "https://github.com/example/ambiguous.git" "main" | Should Be "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-            Assert-MockCalled Invoke-GitCapture -ParameterFilter { $GitArgs[-1] -eq "refs/heads/main" } -Times 1 -Exactly -Scope It
-            Assert-MockCalled Invoke-GitCapture -ParameterFilter { $GitArgs[-1] -eq "main" } -Times 0 -Exactly -Scope It
+            Resolve-RemoteCommit "https://github.com/example/ambiguous.git" "main" | Should -Be "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            Should -Invoke Invoke-GitCapture -ParameterFilter { $GitArgs[-1] -eq "refs/heads/main" } -Times 1 -Exactly -Scope It
+            Should -Invoke Invoke-GitCapture -ParameterFilter { $GitArgs[-1] -eq "main" } -Times 0 -Exactly -Scope It
         }
 
         It "Returns local zip hash for archive-based update sources" {
@@ -842,7 +847,7 @@ Describe "Config And Update Enhancements" {
 
             $resolved = Resolve-RemoteCommit $zip "main"
 
-            $resolved | Should Be ("zip:{0}" -f (Get-FileContentHash $zip))
+            $resolved | Should -Be ("zip:{0}" -f (Get-FileContentHash $zip))
         }
 
         It "Does not read parent repository HEAD for non-git import caches" {
@@ -852,8 +857,8 @@ Describe "Config And Update Enhancements" {
             Mock Test-IsGitRepoRoot { $false } -ParameterFilter { $path -eq $cache }
             Mock Invoke-GitCapture { throw "Invoke-GitCapture should not be called for a non-git cache." }
 
-            Get-CurrentRepoCommit $cache | Should Be $null
-            Assert-MockCalled Invoke-GitCapture -Times 0 -Exactly -Scope It
+            Get-CurrentRepoCommit $cache | Should -Be $null
+            Should -Invoke Invoke-GitCapture -Times 0 -Exactly -Scope It
         }
 
         It "Reads source metadata for non-git import caches" {
@@ -863,7 +868,7 @@ Describe "Config And Update Enhancements" {
 
             Mock Test-IsGitRepoRoot { $false } -ParameterFilter { $path -eq $cache }
 
-            Get-CurrentRepoCommit $cache | Should Be "abc123"
+            Get-CurrentRepoCommit $cache | Should -Be "abc123"
         }
 
         It "Caches repeated remote commit lookups for identical repo and ref" {
@@ -873,18 +878,18 @@ Describe "Config And Update Enhancements" {
             $first = Resolve-RemoteCommitCached "https://github.com/example/demo.git" "main" $cache
             $second = Resolve-RemoteCommitCached "https://github.com/example/demo.git" "main" $cache
 
-            $first | Should Be "abc123"
-            $second | Should Be "abc123"
-            Assert-MockCalled Resolve-RemoteCommit -Times 1 -Exactly
+            $first | Should -Be "abc123"
+            $second | Should -Be "abc123"
+            Should -Invoke Resolve-RemoteCommit -Times 1 -Exactly
         }
 
         It "Reuses cached remote target across repeated imports from the same repo" {
-            $oldImportDir = $script:ImportDir
+            $oldImportDir = $ImportDir
             try {
-                $script:ImportDir = Join-Path $TestDrive "imports-plan-cache"
-                New-Item -ItemType Directory -Path $script:ImportDir -Force | Out-Null
+                $ImportDir = Join-Path $TestDrive "imports-plan-cache"
+                New-Item -ItemType Directory -Path $ImportDir -Force | Out-Null
                 foreach ($name in @("skill-a", "skill-b")) {
-                    $cachePath = Join-Path $script:ImportDir $name
+                    $cachePath = Join-Path $ImportDir $name
                     New-Item -ItemType Directory -Path (Join-Path $cachePath ".git") -Force | Out-Null
                 }
 
@@ -901,20 +906,20 @@ Describe "Config And Update Enhancements" {
 
                 $items = @(Get-UpdatePlanItems $cfg)
 
-                $items.Count | Should Be 2
-                ($items | Where-Object { $_.target -eq "remote-sha" }).Count | Should Be 2
-                Assert-MockCalled Resolve-RemoteCommit -Times 1 -Exactly -Scope It
+                $items.Count | Should -Be 2
+                ($items | Where-Object { $_.target -eq "remote-sha" }).Count | Should -Be 2
+                Should -Invoke Resolve-RemoteCommit -Times 1 -Exactly -Scope It
             }
             finally {
-                $script:ImportDir = $oldImportDir
+                $ImportDir = $oldImportDir
             }
         }
 
         It "Uses local prefetched remote refs for plan targets when available" {
-            $oldVendorDir = $script:VendorDir
+            $oldVendorDir = $VendorDir
             try {
-                $script:VendorDir = Join-Path $TestDrive "vendor-local-ref-plan"
-                $vendorPath = Join-Path $script:VendorDir "demo"
+                $VendorDir = Join-Path $TestDrive "vendor-local-ref-plan"
+                $vendorPath = Join-Path $VendorDir "demo"
                 New-Item -ItemType Directory -Path $vendorPath -Force | Out-Null
 
                 $cfg = [pscustomobject]@{
@@ -935,23 +940,23 @@ Describe "Config And Update Enhancements" {
 
                 $items = @(Get-UpdatePlanItems $cfg -PreferLocalRefs)
 
-                $items.Count | Should Be 1
-                $items[0].target | Should Be "1111111111111111111111111111111111111111"
-                Assert-MockCalled Resolve-RemoteCommit -Times 0 -Exactly -Scope It
+                $items.Count | Should -Be 1
+                $items[0].target | Should -Be "1111111111111111111111111111111111111111"
+                Should -Invoke Resolve-RemoteCommit -Times 0 -Exactly -Scope It
             }
             finally {
-                $script:VendorDir = $oldVendorDir
+                $VendorDir = $oldVendorDir
             }
         }
 
         It "Runs plan mode without mutating workspace" {
-            $oldPlan = $script:Plan
-            $oldLocked = $script:Locked
-            $oldUpgrade = $script:Upgrade
+            $oldPlan = $Plan
+            $oldLocked = $Locked
+            $oldUpgrade = $Upgrade
             try {
-                $script:Plan = $true
-                $script:Locked = $false
-                $script:Upgrade = $false
+                $Plan = $true
+                $Locked = $false
+                $Upgrade = $false
                 Mock LoadCfg {
                     [pscustomobject]@{
                         vendors = @()
@@ -970,26 +975,26 @@ Describe "Config And Update Enhancements" {
                 Mock 更新Vendor { @() }
                 Mock 构建生效 {}
                 更新
-                Assert-MockCalled Show-UpdatePlan -Times 1 -Exactly
-                Assert-MockCalled 更新Imports -Times 0 -Exactly
-                Assert-MockCalled 更新Vendor -Times 0 -Exactly
-                Assert-MockCalled 构建生效 -Times 0 -Exactly
+                Should -Invoke Show-UpdatePlan -Times 1 -Exactly
+                Should -Invoke 更新Imports -Times 0 -Exactly
+                Should -Invoke 更新Vendor -Times 0 -Exactly
+                Should -Invoke 构建生效 -Times 0 -Exactly
             }
             finally {
-                $script:Plan = $oldPlan
-                $script:Locked = $oldLocked
-                $script:Upgrade = $oldUpgrade
+                $Plan = $oldPlan
+                $Locked = $oldLocked
+                $Upgrade = $oldUpgrade
             }
         }
 
         It "Refreshes lock file after successful upgrade" {
-            $oldPlan = $script:Plan
-            $oldLocked = $script:Locked
-            $oldUpgrade = $script:Upgrade
+            $oldPlan = $Plan
+            $oldLocked = $Locked
+            $oldUpgrade = $Upgrade
             try {
-                $script:Plan = $false
-                $script:Locked = $false
-                $script:Upgrade = $true
+                $Plan = $false
+                $Locked = $false
+                $Upgrade = $true
                 Mock LoadCfg {
                     [pscustomobject]@{
                         vendors = @()
@@ -1008,23 +1013,23 @@ Describe "Config And Update Enhancements" {
                 Mock 构建生效 {}
                 Mock Save-LockData {}
                 更新
-                Assert-MockCalled Save-LockData -Times 1 -Exactly
+                Should -Invoke Save-LockData -Times 1 -Exactly
             }
             finally {
-                $script:Plan = $oldPlan
-                $script:Locked = $oldLocked
-                $script:Upgrade = $oldUpgrade
+                $Plan = $oldPlan
+                $Locked = $oldLocked
+                $Upgrade = $oldUpgrade
             }
         }
 
         It "Falls back to per-source fetch when parallel prefetch fails" {
-            $oldPlan = $script:Plan
-            $oldLocked = $script:Locked
-            $oldUpgrade = $script:Upgrade
+            $oldPlan = $Plan
+            $oldLocked = $Locked
+            $oldUpgrade = $Upgrade
             try {
-                $script:Plan = $false
-                $script:Locked = $false
-                $script:Upgrade = $false
+                $Plan = $false
+                $Locked = $false
+                $Upgrade = $false
 
                 $cfg = [pscustomobject]@{
                     vendors = @([pscustomobject]@{ name = "vendor-a"; repo = "https://example.com/a.git"; ref = "main" })
@@ -1062,30 +1067,30 @@ Describe "Config And Update Enhancements" {
 
                 更新
 
-                Assert-MockCalled 更新Imports -Times 1 -Exactly -Scope It
-                Assert-MockCalled 更新Vendor -Times 1 -Exactly -Scope It
-                $script:importSkipFetchValues.Count | Should Be 1
-                $script:vendorSkipFetchValues.Count | Should Be 1
-                $script:importSkipFetchValues[0] | Should Be $false
-                $script:vendorSkipFetchValues[0] | Should Be $false
+                Should -Invoke 更新Imports -Times 1 -Exactly -Scope It
+                Should -Invoke 更新Vendor -Times 1 -Exactly -Scope It
+                $script:importSkipFetchValues.Count | Should -Be 1
+                $script:vendorSkipFetchValues.Count | Should -Be 1
+                $script:importSkipFetchValues[0] | Should -Be $false
+                $script:vendorSkipFetchValues[0] | Should -Be $false
             }
             finally {
-                $script:Plan = $oldPlan
-                $script:Locked = $oldLocked
-                $script:Upgrade = $oldUpgrade
+                $Plan = $oldPlan
+                $Locked = $oldLocked
+                $Upgrade = $oldUpgrade
                 Remove-Variable -Scope Script -Name importSkipFetchValues -ErrorAction SilentlyContinue
                 Remove-Variable -Scope Script -Name vendorSkipFetchValues -ErrorAction SilentlyContinue
             }
         }
 
         It "Skips per-source fetch only after successful parallel prefetch" {
-            $oldPlan = $script:Plan
-            $oldLocked = $script:Locked
-            $oldUpgrade = $script:Upgrade
+            $oldPlan = $Plan
+            $oldLocked = $Locked
+            $oldUpgrade = $Upgrade
             try {
-                $script:Plan = $false
-                $script:Locked = $false
-                $script:Upgrade = $false
+                $Plan = $false
+                $Locked = $false
+                $Upgrade = $false
 
                 $cfg = [pscustomobject]@{
                     vendors = @([pscustomobject]@{ name = "vendor-a"; repo = "https://example.com/a.git"; ref = "main" })
@@ -1123,17 +1128,17 @@ Describe "Config And Update Enhancements" {
 
                 更新
 
-                Assert-MockCalled 更新Imports -Times 1 -Exactly -Scope It
-                Assert-MockCalled 更新Vendor -Times 1 -Exactly -Scope It
-                $script:importSkipFetchValues.Count | Should Be 1
-                $script:vendorSkipFetchValues.Count | Should Be 1
-                $script:importSkipFetchValues[0] | Should Be $true
-                $script:vendorSkipFetchValues[0] | Should Be $true
+                Should -Invoke 更新Imports -Times 1 -Exactly -Scope It
+                Should -Invoke 更新Vendor -Times 1 -Exactly -Scope It
+                $script:importSkipFetchValues.Count | Should -Be 1
+                $script:vendorSkipFetchValues.Count | Should -Be 1
+                $script:importSkipFetchValues[0] | Should -Be $true
+                $script:vendorSkipFetchValues[0] | Should -Be $true
             }
             finally {
-                $script:Plan = $oldPlan
-                $script:Locked = $oldLocked
-                $script:Upgrade = $oldUpgrade
+                $Plan = $oldPlan
+                $Locked = $oldLocked
+                $Upgrade = $oldUpgrade
                 Remove-Variable -Scope Script -Name importSkipFetchValues -ErrorAction SilentlyContinue
                 Remove-Variable -Scope Script -Name vendorSkipFetchValues -ErrorAction SilentlyContinue
             }
@@ -1146,15 +1151,15 @@ Describe "Config And Update Enhancements" {
         }
 
         It "Rewrites outdated manual import skill path to resolved candidate during update" {
-            $oldImportDir = $script:ImportDir
-            $oldCfgPath = $script:CfgPath
+            $oldImportDir = $ImportDir
+            $oldCfgPath = $CfgPath
             try {
-                $script:ImportDir = Join-Path $TestDrive "imports"
-                $script:CfgPath = Join-Path $TestDrive "skills.json"
-                New-Item -ItemType Directory -Path $script:ImportDir -Force | Out-Null
-                Set-Content -Path $script:CfgPath -Value '{"imports":[]}'
+                $ImportDir = Join-Path $TestDrive "imports"
+                $CfgPath = Join-Path $TestDrive "skills.json"
+                New-Item -ItemType Directory -Path $ImportDir -Force | Out-Null
+                Set-Content -Path $CfgPath -Value '{"imports":[]}'
 
-                $cache = Join-Path $script:ImportDir "storyboard-creation"
+                $cache = Join-Path $ImportDir "storyboard-creation"
                 $actual = Join-Path $cache "guides\video\storyboard-creation"
                 New-Item -ItemType Directory -Path $actual -Force | Out-Null
                 Set-Content -Path (Join-Path $actual "SKILL.md") -Value "---`nname: storyboard-creation`ndescription: x`n---"
@@ -1178,11 +1183,11 @@ Describe "Config And Update Enhancements" {
 
                 更新Imports $cfg -SkipPreflight | Out-Null
 
-                $cfg.imports[0].skill | Should Be "guides\video\storyboard-creation"
+                $cfg.imports[0].skill | Should -Be "guides\video\storyboard-creation"
             }
             finally {
-                $script:ImportDir = $oldImportDir
-                $script:CfgPath = $oldCfgPath
+                $ImportDir = $oldImportDir
+                $CfgPath = $oldCfgPath
             }
         }
 
@@ -1219,14 +1224,14 @@ Describe "Config And Update Enhancements" {
 
             更新Imports $cfg -SkipPreflight -SkipFetch | Out-Null
 
-            $script:ensureRepoArgs | Should Not BeNullOrEmpty
-            $script:ensureRepoArgs.path | Should Match "social-content$"
-            $script:ensureRepoArgs.repo | Should Be "https://github.com/example/social-content.git"
-            $script:ensureRepoArgs.ref | Should Be "main"
-            ([string]::IsNullOrWhiteSpace([string]$script:ensureRepoArgs.sparsePath)) | Should Be $true
-            $script:ensureRepoArgs.forceClean | Should Be $false
-            $script:ensureRepoArgs.confirmClean | Should Be $false
-            $script:ensureRepoArgs.doFetch | Should Be $false
+            $script:ensureRepoArgs | Should -Not -BeNullOrEmpty
+            $script:ensureRepoArgs.path | Should -Match "social-content$"
+            $script:ensureRepoArgs.repo | Should -Be "https://github.com/example/social-content.git"
+            $script:ensureRepoArgs.ref | Should -Be "main"
+            ([string]::IsNullOrWhiteSpace([string]$script:ensureRepoArgs.sparsePath)) | Should -Be $true
+            $script:ensureRepoArgs.forceClean | Should -Be $false
+            $script:ensureRepoArgs.confirmClean | Should -Be $false
+            $script:ensureRepoArgs.doFetch | Should -Be $false
         }
 
         It "Falls back to sparse checkout when Windows invalid path blocks pull" {
@@ -1267,12 +1272,12 @@ Describe "Config And Update Enhancements" {
 
             $failures = 更新Imports $cfg -SkipPreflight -SkipFetch
 
-            @($failures).Count | Should Be 0
-            $script:ensureRepoCalls.Count | Should Be 2
-            ([string]::IsNullOrWhiteSpace([string]$script:ensureRepoCalls[0].sparsePath)) | Should Be $true
-            $script:ensureRepoCalls[1].sparsePath | Should Be ".claude/skills/data/office/openpyxl"
-            $cfg.imports[0].sparse | Should Be $true
-            Assert-MockCalled SaveCfgSafe -Times 1 -Exactly
+            @($failures).Count | Should -Be 0
+            $script:ensureRepoCalls.Count | Should -Be 2
+            ([string]::IsNullOrWhiteSpace([string]$script:ensureRepoCalls[0].sparsePath)) | Should -Be $true
+            $script:ensureRepoCalls[1].sparsePath | Should -Be ".claude/skills/data/office/openpyxl"
+            $cfg.imports[0].sparse | Should -Be $true
+            Should -Invoke SaveCfgSafe -Times 1 -Exactly
         }
 
         It "Falls back to git archive when sparse checkout still fails on invalid path repos" {
@@ -1301,9 +1306,9 @@ Describe "Config And Update Enhancements" {
 
             $failures = 更新Imports $cfg -SkipPreflight -SkipFetch
 
-            @($failures).Count | Should Be 0
-            Assert-MockCalled Ensure-RepoFromGitArchive -Times 1 -Exactly -Scope It
-            Assert-MockCalled Ensure-RepoFromGitHubTreeSnapshot -Times 0 -Exactly -Scope It
+            @($failures).Count | Should -Be 0
+            Should -Invoke Ensure-RepoFromGitArchive -Times 1 -Exactly -Scope It
+            Should -Invoke Ensure-RepoFromGitHubTreeSnapshot -Times 0 -Exactly -Scope It
         }
 
         It "Falls back to GitHub tree snapshot when git archive fallback fails" {
@@ -1332,9 +1337,9 @@ Describe "Config And Update Enhancements" {
 
             $failures = 更新Imports $cfg -SkipPreflight -SkipFetch
 
-            @($failures).Count | Should Be 0
-            Assert-MockCalled Ensure-RepoFromGitArchive -Times 1 -Exactly -Scope It
-            Assert-MockCalled Ensure-RepoFromGitHubTreeSnapshot -Times 1 -Exactly -Scope It
+            @($failures).Count | Should -Be 0
+            Should -Invoke Ensure-RepoFromGitArchive -Times 1 -Exactly -Scope It
+            Should -Invoke Ensure-RepoFromGitHubTreeSnapshot -Times 1 -Exactly -Scope It
         }
 
         It "Falls back to git archive when sparse repo update succeeds but target skill is still missing" {
@@ -1366,17 +1371,17 @@ Describe "Config And Update Enhancements" {
 
             $failures = 更新Imports $cfg -SkipPreflight -SkipFetch
 
-            @($failures).Count | Should Be 0
-            Assert-MockCalled Ensure-RepoFromGitArchive -Times 1 -Exactly -Scope It
-            Assert-MockCalled Ensure-RepoFromGitHubTreeSnapshot -Times 0 -Exactly -Scope It
+            @($failures).Count | Should -Be 0
+            Should -Invoke Ensure-RepoFromGitArchive -Times 1 -Exactly -Scope It
+            Should -Invoke Ensure-RepoFromGitHubTreeSnapshot -Times 0 -Exactly -Scope It
             Remove-Variable -Scope Script -Name archiveFallbackUsed -ErrorAction SilentlyContinue
         }
 
         It "Falls back to existing cached import when git index lock blocks update" {
-            $oldImportDir = $script:ImportDir
+            $oldImportDir = $ImportDir
             try {
-                $script:ImportDir = Join-Path $TestDrive "imports-lock"
-                $cache = Join-Path $script:ImportDir "social-content"
+                $ImportDir = Join-Path $TestDrive "imports-lock"
+                $cache = Join-Path $ImportDir "social-content"
                 $gitDir = Join-Path $cache ".git"
                 New-Item -ItemType Directory -Path $gitDir -Force | Out-Null
                 Set-Content -Path (Join-Path $gitDir "index.lock") -Value "stale"
@@ -1402,10 +1407,10 @@ Describe "Config And Update Enhancements" {
 
                 $failures = 更新Imports $cfg -SkipPreflight -SkipFetch
 
-                @($failures).Count | Should Be 0
+                @($failures).Count | Should -Be 0
             }
             finally {
-                $script:ImportDir = $oldImportDir
+                $ImportDir = $oldImportDir
             }
         }
     }

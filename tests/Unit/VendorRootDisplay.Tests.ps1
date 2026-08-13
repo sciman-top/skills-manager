@@ -1,5 +1,7 @@
-. $PSScriptRoot\..\..\skills.ps1
+BeforeAll {
+    . $PSScriptRoot\..\..\skills.ps1
 
+}
 Describe "Vendor root display filtering" {
     It "Hides vendor root when child skills exist in same list" {
         $items = @(
@@ -10,8 +12,8 @@ Describe "Vendor root display filtering" {
 
         $filtered = Hide-VendorRootSkills $items
 
-        @($filtered).Count | Should Be 2
-        (@($filtered) | Where-Object { $_.from -eq "." }).Count | Should Be 0
+        @($filtered).Count | Should -Be 2
+        (@($filtered) | Where-Object { $_.from -eq "." }).Count | Should -Be 0
     }
 
     It "Keeps vendor root when no child skill exists for that vendor" {
@@ -21,8 +23,8 @@ Describe "Vendor root display filtering" {
 
         $filtered = Hide-VendorRootSkills $items
 
-        @($filtered).Count | Should Be 1
-        @($filtered)[0].from | Should Be "."
+        @($filtered).Count | Should -Be 1
+        @($filtered)[0].from | Should -Be "."
     }
 
     It "Does not hide root of other vendor" {
@@ -34,24 +36,22 @@ Describe "Vendor root display filtering" {
 
         $filtered = Hide-VendorRootSkills $items
 
-        (@($filtered) | Where-Object { $_.vendor -eq "a" -and $_.from -eq "." }).Count | Should Be 1
-        (@($filtered) | Where-Object { $_.vendor -eq "b" -and $_.from -eq "." }).Count | Should Be 0
+        (@($filtered) | Where-Object { $_.vendor -eq "a" -and $_.from -eq "." }).Count | Should -Be 1
+        (@($filtered) | Where-Object { $_.vendor -eq "b" -and $_.from -eq "." }).Count | Should -Be 0
     }
 
     It "Includes override skills in discovery aggregation" {
         $root = Join-Path $TestDrive "ws-discover"
         New-Item -ItemType Directory -Path $root -Force | Out-Null
 
-        $oldRoot = $script:Root
-        $oldOverridesDir = $script:OverridesDir
+        $oldRoot = $Root
+        $oldOverridesDir = $OverridesDir
         $oldGlobalRoot = $global:Root
         $oldGlobalOverridesDir = $global:OverridesDir
         try {
-            $script:Root = $root
-            $script:OverridesDir = Join-Path $root "overrides"
-            $global:Root = $script:Root
-            $global:OverridesDir = $script:OverridesDir
-            New-Item -ItemType Directory -Path $script:OverridesDir -Force | Out-Null
+            $Root = $root
+            $OverridesDir = Join-Path $root "overrides"
+            New-Item -ItemType Directory -Path $OverridesDir -Force | Out-Null
 
             Mock LoadCfg {
                 [pscustomobject]@{
@@ -76,12 +76,12 @@ Describe "Vendor root display filtering" {
 
             $items = 收集Skills ""
 
-            @($items).Count | Should Be 1
-            (@($items) | Where-Object { $_.vendor -eq "overrides" -and $_.from -eq "custom-windows-encoding-guard" }).Count | Should Be 1
+            @($items).Count | Should -Be 1
+            (@($items) | Where-Object { $_.vendor -eq "overrides" -and $_.from -eq "custom-windows-encoding-guard" }).Count | Should -Be 1
         }
         finally {
-            $script:Root = $oldRoot
-            $script:OverridesDir = $oldOverridesDir
+            $Root = $oldRoot
+            $OverridesDir = $oldOverridesDir
             $global:Root = $oldGlobalRoot
             $global:OverridesDir = $oldGlobalOverridesDir
         }

@@ -1,14 +1,18 @@
-$repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
-. (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1')
-. (Join-Path $repoRoot 'src\Domain\RuleDocument.ps1')
-. (Join-Path $repoRoot 'src\Application\RuleDiagnostics.ps1')
+BeforeAll {
+    $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
+    . (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1')
+    . (Join-Path $repoRoot 'src\Domain\RuleDocument.ps1')
+    . (Join-Path $repoRoot 'src\Application\RuleDiagnostics.ps1')
 
+}
 Describe 'Deterministic rule diagnostics' {
-    function New-TestDocument([string]$Path, [string]$Scope = 'repo') {
+    BeforeAll {
+function New-TestDocument([string]$Path, [string]$Scope = 'repo') {
         $bytes = [System.IO.File]::ReadAllBytes($Path)
         $sha = [System.Security.Cryptography.SHA256]::Create(); try { $hash = (($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') }) -join '') } finally { $sha.Dispose() }
         return New-RuleDocument -Host codex -Scope $Scope -Responsibility $(if ($Scope -eq 'global') { 'common' } else { 'project_action' }) -Path $Path -Owner repo -ContentHash $hash -ByteSize $bytes.Length -DiscoveryState observed -SourceOfTruth fixture
     }
+}
 
     It 'emits stable budget and wrapper findings without executing commands' {
         $path = Join-Path $TestDrive 'CLAUDE.md'; Set-Content -LiteralPath $path -Value "wrong`nline2`nline3" -Encoding UTF8
@@ -18,12 +22,12 @@ Describe 'Deterministic rule diagnostics' {
         $first = Invoke-RuleDiagnostics $discovery $profile
         $second = Invoke-RuleDiagnostics $discovery $profile
 
-        @($first.findings.code) | Should Contain 'byte_budget_exceeded'
-        @($first.findings.code) | Should Contain 'line_budget_exceeded'
-        @($first.findings.code) | Should Contain 'wrapper_first_line_mismatch'
-        (@($first.findings.finding_id) -join ',') | Should Be (@($second.findings.finding_id) -join ',')
-        $first.blocking_count | Should Be 1
-        $first.commands_executed | Should Be 0
+        @($first.findings.code) | Should -Contain 'byte_budget_exceeded'
+        @($first.findings.code) | Should -Contain 'line_budget_exceeded'
+        @($first.findings.code) | Should -Contain 'wrapper_first_line_mismatch'
+        (@($first.findings.finding_id) -join ',') | Should -Be (@($second.findings.finding_id) -join ',')
+        $first.blocking_count | Should -Be 1
+        $first.commands_executed | Should -Be 0
     }
 
     It 'detects exact duplicate documents and scope leakage' {
@@ -31,16 +35,16 @@ Describe 'Deterministic rule diagnostics' {
         $discovery = [pscustomobject]@{ documents = @((New-TestDocument $a global), (New-TestDocument $b global)) }
         $result = Invoke-RuleDiagnostics $discovery ([pscustomobject]@{ max_bytes = 1000; max_lines = 100; blocking_codes = @() })
 
-        @($result.findings | Where-Object code -eq exact_duplicate_document).Count | Should Be 2
-        @($result.findings | Where-Object code -eq global_repo_private_path).Count | Should Be 2
+        @($result.findings | Where-Object code -eq exact_duplicate_document).Count | Should -Be 2
+        @($result.findings | Where-Object code -eq global_repo_private_path).Count | Should -Be 2
     }
 
     It 'detects prose-only deterministic enforcement claims' {
         $path = Join-Path $TestDrive 'enforcement.md'; Set-Content $path '[deterministic-enforcement] must block' -Encoding UTF8
         $result = Invoke-RuleDiagnostics ([pscustomobject]@{ documents = @((New-TestDocument $path)) }) ([pscustomobject]@{ blocking_codes = @('prose_only_enforcement') })
 
-        @($result.findings | Where-Object code -eq prose_only_enforcement).Count | Should Be 1
-        $result.blocking_count | Should Be 1
+        @($result.findings | Where-Object code -eq prose_only_enforcement).Count | Should -Be 1
+        $result.blocking_count | Should -Be 1
     }
 
     It 'applies separate global and project budgets in one discovery chain' {
@@ -52,7 +56,7 @@ Describe 'Deterministic rule diagnostics' {
 
         $result = Invoke-RuleDiagnostics $discovery $profile
 
-        @($result.findings | Where-Object path -eq $globalPath).Count | Should Be 0
-        @($result.findings | Where-Object path -eq $projectPath).Count | Should Be 2
+        @($result.findings | Where-Object path -eq $globalPath).Count | Should -Be 0
+        @($result.findings | Where-Object path -eq $projectPath).Count | Should -Be 2
     }
 }
