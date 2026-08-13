@@ -39,7 +39,10 @@ function Get-TrackedReleaseFiles {
     $roots = @('config', 'overrides', 'src')
     $tracked = @(& git -C $repoRoot ls-files -- @roots)
     if ($LASTEXITCODE -ne 0) { throw 'git ls-files failed while collecting release inputs.' }
-    return @($tracked | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    return @($tracked | Where-Object {
+            -not [string]::IsNullOrWhiteSpace($_) -and
+            (Test-Path -LiteralPath (Join-Path $repoRoot $_) -PathType Leaf)
+        })
 }
 
 function Get-SkillFrontmatterLicense([string]$SkillPath) {

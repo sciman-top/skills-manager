@@ -255,7 +255,6 @@ function Test-AuditRemovalDependencyClosure {
     $checkedFiles = @(
         "skills.json",
         "config/skill-dependency-closure.json",
-        "config/skill-routing-policy.json",
         "overrides/patches/provenance.json"
     )
     $candidateIndex = 0

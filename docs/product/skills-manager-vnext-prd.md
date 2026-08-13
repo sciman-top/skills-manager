@@ -25,7 +25,7 @@
 - MCP install/uninstall/profile/sync
 - target audit bundle、recommendations preflight/dry-run/apply
 - rule audit、single-repo patch、rule-estate transaction
-- canonical skill inventory、metadata planning、native projection
+- canonical skill inventory、native projection（metadata budget 与 description 截断复用宿主原生能力）
 - explicit `capability-router` cold discovery/policy validation
 - core/secondary reference shelf refresh
 - build、focused tests、contract/invariant checks、risk-triggered full gate
@@ -84,7 +84,7 @@
 
 - `FR-PRJ-001`：canonical inventory 对 source、alias、enabled、dependency 和 placement 做确定性归一化。
 - `FR-PRJ-002`：native projection 只投影 `managed_link_includes`，保持 managed/external ownership 分离。
-- `FR-PRJ-003`：metadata planner 遵守预算、不得截断 eligible entry，并报告 omission/conflict。
+- `FR-PRJ-003`：本仓不得复制宿主 metadata budget/description compaction；投影保留全部 eligible entry，并报告真实 conflict。
 - `FR-PRJ-004`：普通语义选择归宿主；router 只接受 `DomainHint` 和宿主选择，禁止 lexical ranking、profile switch 与 host mutation。
 - `FR-PRJ-005`：inventory/corpus 只能证明候选与 policy contract，不证明宿主真实 invocation。
 

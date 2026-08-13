@@ -197,7 +197,6 @@ Describe "Audit target hardening" {
             }
         }
         Set-ContentUtf8 (Join-Path $repo "config\skill-dependency-closure.json") '{"dependencies":[{"skill":"consumer","requires":["retired-skill"],"note":"retired-skill-extra"}]}'
-        Set-ContentUtf8 (Join-Path $repo "config\skill-routing-policy.json") '{"groups":[]}'
         Set-ContentUtf8 (Join-Path $repo "overrides\patches\provenance.json") '{"patches":[]}'
         $removals = @([pscustomobject]@{ name = "retired-skill"; original_index = 3 })
 

@@ -20,9 +20,6 @@
     "managed_link_excludes": [
       "anthropics-skills-skills-skill-creator"
     ],
-    "budget_limit_chars": 8000,
-    "external_metadata_reserve_chars": 3500,
-    "routing_policy_path": "config/skill-routing-policy.json",
     "external_skill_inventory": {
       "enabled": true,
       "plugin_cache_path": "~/.codex/plugins/cache"

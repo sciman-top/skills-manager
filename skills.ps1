@@ -2430,415 +2430,6 @@ function Test-SkillEligibilityResultContract {
     return New-OperationValidationResult $findings.ToArray()
 }
 
-$nativeMetadataPlannerRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
-if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) { . (Join-Path $nativeMetadataPlannerRepoRoot 'src\Domain\OperationPlan.ps1') }
-
-function Get-NativeMetadataPlannerProperty {
-    param($Object, [string[]]$Names)
-
-    foreach ($name in @($Names)) {
-        if (Test-OperationObjectProperty $Object $name) { return Get-OperationObjectProperty $Object $name }
-    }
-    return $null
-}
-
-function Get-DefaultNativeMetadataPolicy {
-    return [pscustomobject][ordered]@{
-        schema_version = 1
-        context_ratio = 0.02
-        headroom_ratio = 0.20
-        unknown_context_character_ceiling = 8000
-        estimated_tokens_per_utf8_byte = 0.25
-        max_compacted_description_characters = 160
-        min_compacted_description_characters = 24
-    }
-}
-
-function Get-NativeMetadataPolicyValue {
-    param($Policy, [string]$Name, $Default)
-
-    $value = Get-NativeMetadataPlannerProperty $Policy @($Name)
-    if ($null -eq $value) { return $Default }
-    return $value
-}
-
-function Get-NativeMetadataSnapshotFact {
-    param($Snapshot, [string]$Name)
-
-    $capabilities = Get-NativeMetadataPlannerProperty $Snapshot @('capabilities')
-    $raw = Get-NativeMetadataPlannerProperty $capabilities @($Name)
-    if ($null -eq $raw) {
-        return [pscustomobject]@{ value = $null; source = 'unknown_fallback'; freshness = 'unknown'; unknown_reason = ('{0}_missing' -f $Name) }
-    }
-    if (Test-OperationObjectProperty $raw 'value') {
-        return [pscustomobject]@{
-            value = Get-OperationObjectProperty $raw 'value'
-            source = [string]$(if (Test-OperationObjectProperty $raw 'source') { Get-OperationObjectProperty $raw 'source' } else { 'unknown_fallback' })
-            freshness = [string]$(if (Test-OperationObjectProperty $raw 'freshness') { Get-OperationObjectProperty $raw 'freshness' } else { 'unknown' })
-            unknown_reason = [string]$(if (Test-OperationObjectProperty $raw 'unknown_reason') { Get-OperationObjectProperty $raw 'unknown_reason' } else { '' })
-        }
-    }
-    return [pscustomobject]@{ value = $raw; source = 'unknown_fallback'; freshness = 'unknown'; unknown_reason = ('{0}_unwrapped' -f $Name) }
-}
-
-function ConvertTo-NativeMetadataPositiveInteger {
-    param($Value, [bool]$AllowZero = $false)
-
-    $number = 0L
-    if ($null -eq $Value -or -not [long]::TryParse([string]$Value, [ref]$number)) { return $null }
-    if ($AllowZero) {
-        if ($number -lt 0) { return $null }
-    }
-    elseif ($number -le 0) { return $null }
-    return [long]$number
-}
-
-function ConvertTo-NativeMetadataRatio {
-    param($Value, [double]$Default)
-
-    $number = 0.0
-    if ($null -eq $Value -or -not [double]::TryParse([string]$Value, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$number)) { return $Default }
-    if ($number -lt 0.0 -or $number -ge 1.0) { return $Default }
-    return $number
-}
-
-function Get-NativeMetadataInventoryEntries {
-    param($Inventory)
-
-    if ($null -eq $Inventory) { return @() }
-    $rawEntries = if (Test-OperationObjectProperty $Inventory 'entries') {
-        Get-OperationObjectProperty $Inventory 'entries'
-    }
-    elseif (Test-OperationObjectProperty $Inventory 'skills') {
-        Get-OperationObjectProperty $Inventory 'skills'
-    }
-    else { $Inventory }
-
-    return @($rawEntries | Where-Object {
-            $null -ne $_ -and
-            ((-not (Test-OperationObjectProperty $_ 'enabled')) -or [bool](Get-OperationObjectProperty $_ 'enabled'))
-        } | Sort-Object @{ Expression = { ([string](Get-NativeMetadataPlannerProperty $_ @('name', 'id'))).ToLowerInvariant() } }, path)
-}
-
-function Compress-NativeMetadataDescription {
-    param(
-        [string]$Description,
-        [int]$MaximumCharacters,
-        [int]$MinimumCharacters
-    )
-
-    $normalized = ([regex]::Replace([string]$Description, '\s+', ' ')).Trim()
-    if ($normalized.Length -le $MaximumCharacters) { return $normalized }
-    $limit = [Math]::Max(3, $MaximumCharacters)
-    $prefixLength = [Math]::Max(1, $limit - 1)
-    $prefix = $normalized.Substring(0, [Math]::Min($prefixLength, $normalized.Length)).TrimEnd()
-    if ($prefix.Length -lt [Math]::Min($MinimumCharacters, $prefix.Length)) { return $normalized.Substring(0, [Math]::Min($limit, $normalized.Length)).TrimEnd() }
-    return ($prefix + '…')
-}
-
-function Get-NativeMetadataCost {
-    param(
-        $Entry,
-        [string]$Description,
-        [double]$TokensPerUtf8Byte
-    )
-
-    $name = [string](Get-NativeMetadataPlannerProperty $Entry @('name', 'id'))
-    $path = [string](Get-NativeMetadataPlannerProperty $Entry @('path'))
-    $payload = ('{0}`n{1}`n{2}' -f $name, $Description, $path)
-    $characterCount = [Text.Encoding]::UTF8.GetByteCount($payload)
-    $provided = Get-NativeMetadataPlannerProperty $Entry @('token_estimate', 'estimated_tokens', 'tokens')
-    $providedNumber = ConvertTo-NativeMetadataPositiveInteger $provided $true
-    if ($null -ne $providedNumber) {
-        return [pscustomobject]@{ character_count = [long]$characterCount; token_estimate = [long]$providedNumber; token_estimate_source = 'provided' }
-    }
-    $estimated = [long][Math]::Ceiling($characterCount * $TokensPerUtf8Byte)
-    return [pscustomobject]@{ character_count = [long]$characterCount; token_estimate = [long]$estimated; token_estimate_source = 'utf8_byte_estimate' }
-}
-
-function ConvertTo-NativeMetadataItem {
-    param(
-        $Entry,
-        [double]$TokensPerUtf8Byte,
-        [int]$MaximumDescriptionCharacters,
-        [int]$MinimumDescriptionCharacters,
-        [bool]$Compact
-    )
-
-    $name = [string](Get-NativeMetadataPlannerProperty $Entry @('name', 'id'))
-    $description = [string](Get-NativeMetadataPlannerProperty $Entry @('description'))
-    $finalDescription = if ($Compact) { Compress-NativeMetadataDescription $description $MaximumDescriptionCharacters $MinimumDescriptionCharacters } else { $description }
-    $cost = Get-NativeMetadataCost $Entry $finalDescription $TokensPerUtf8Byte
-    return [pscustomobject][ordered]@{
-        kind = [string]$(if (Test-OperationObjectProperty $Entry 'kind') { Get-OperationObjectProperty $Entry 'kind' } else { 'skill' })
-        name = $name
-        planned_description = $finalDescription
-        path = [string](Get-NativeMetadataPlannerProperty $Entry @('path'))
-        content_hash = Get-NativeMetadataPlannerProperty $Entry @('content_hash', 'entrypoint_sha256')
-        metadata_hash = Get-NativeMetadataPlannerProperty $Entry @('metadata_hash')
-        character_count = $cost.character_count
-        token_estimate = $cost.token_estimate
-        token_estimate_source = $cost.token_estimate_source
-        compacted = ($finalDescription -ne $description)
-    }
-}
-
-function Get-NativeMetadataMeasuredCost {
-    param($Items, [string]$Mode)
-
-    if ($Mode -eq 'tokens') { return [long]((@($Items | ForEach-Object { [long]$_.token_estimate } | Measure-Object -Sum).Sum)) }
-    return [long]((@($Items | ForEach-Object { [long]$_.character_count } | Measure-Object -Sum).Sum))
-}
-
-function Plan-NativeMetadata {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]$Inventory,
-        [Parameter(Mandatory = $true)]$Snapshot,
-        $Policy = $null
-    )
-
-    if ($null -eq $Policy) { $Policy = Get-DefaultNativeMetadataPolicy }
-    $contextRatio = ConvertTo-NativeMetadataRatio (Get-NativeMetadataPolicyValue $Policy 'context_ratio' 0.02) 0.02
-    $headroomRatio = ConvertTo-NativeMetadataRatio (Get-NativeMetadataPolicyValue $Policy 'headroom_ratio' 0.20) 0.20
-    $tokensPerByte = [double](Get-NativeMetadataPolicyValue $Policy 'estimated_tokens_per_utf8_byte' 0.25)
-    if ($tokensPerByte -le 0) { $tokensPerByte = 0.25 }
-    $fallbackCharacters = [int](Get-NativeMetadataPolicyValue $Policy 'unknown_context_character_ceiling' 8000)
-    if ($fallbackCharacters -le 0) { $fallbackCharacters = 8000 }
-    $maxDescriptionCharacters = [int](Get-NativeMetadataPolicyValue $Policy 'max_compacted_description_characters' 160)
-    if ($maxDescriptionCharacters -le 0) { $maxDescriptionCharacters = 160 }
-    $minDescriptionCharacters = [int](Get-NativeMetadataPolicyValue $Policy 'min_compacted_description_characters' 24)
-    if ($minDescriptionCharacters -le 0) { $minDescriptionCharacters = 24 }
-    $minDescriptionCharacters = [Math]::Min($minDescriptionCharacters, $maxDescriptionCharacters)
-
-    $contextFact = Get-NativeMetadataSnapshotFact $Snapshot 'context_window'
-    $metadataBudgetFact = Get-NativeMetadataSnapshotFact $Snapshot 'metadata_budget'
-    $contextValue = if ([string]$contextFact.freshness -eq 'fresh') { ConvertTo-NativeMetadataPositiveInteger $contextFact.value $false } else { $null }
-    $hostBudget = if ([string]$metadataBudgetFact.freshness -eq 'fresh') { ConvertTo-NativeMetadataPositiveInteger $metadataBudgetFact.value $true } else { $null }
-    $mode = 'character_fallback'
-    $budgetSource = 'unknown_fallback'
-    $formula = 'unknown_context_character_fallback'
-    $tokenCeiling = $null
-    $characterCeiling = [long]$fallbackCharacters
-    $hostCeilingApplied = $false
-
-    if ($null -ne $contextValue) {
-        $tokenCeiling = [long][Math]::Floor($contextValue * $contextRatio)
-        $mode = 'tokens'
-        $budgetSource = [string]$contextFact.source
-        $formula = 'floor(context_window * context_ratio)'
-        if ($null -ne $hostBudget -and $hostBudget -lt $tokenCeiling) {
-            $tokenCeiling = [long]$hostBudget
-            $budgetSource = [string]$metadataBudgetFact.source
-            $formula = 'min(floor(context_window * context_ratio), host_metadata_budget)'
-            $hostCeilingApplied = $true
-        }
-    }
-    elseif ($null -ne $hostBudget) {
-        $mode = 'tokens'
-        $tokenCeiling = [long]$hostBudget
-        $budgetSource = [string]$metadataBudgetFact.source
-        $formula = 'host_metadata_budget_without_context_window'
-        $hostCeilingApplied = $true
-    }
-
-    $headroom = if ($mode -eq 'tokens') { [long][Math]::Floor($tokenCeiling * $headroomRatio) } else { [long][Math]::Floor($characterCeiling * $headroomRatio) }
-    $usableTokens = if ($mode -eq 'tokens') { [long][Math]::Max(0, $tokenCeiling - $headroom) } else { $null }
-    $usableCharacters = if ($mode -eq 'character_fallback') { [long][Math]::Max(0, $characterCeiling - $headroom) } else { $null }
-    $usableCost = if ($mode -eq 'tokens') { $usableTokens } else { $usableCharacters }
-
-    $enabledEntries = @(Get-NativeMetadataInventoryEntries $Inventory)
-    $rawItems = @($enabledEntries | ForEach-Object { ConvertTo-NativeMetadataItem $_ $tokensPerByte $maxDescriptionCharacters $minDescriptionCharacters $false })
-    $rawCost = Get-NativeMetadataMeasuredCost $rawItems $mode
-    $compactionAttempted = $rawCost -gt $usableCost
-    $finalItems = $rawItems
-    $compactionChanged = @()
-    $finalDescriptionCharacters = $maxDescriptionCharacters
-    if ($compactionAttempted) {
-        $finalItems = @($enabledEntries | ForEach-Object { ConvertTo-NativeMetadataItem $_ $tokensPerByte $maxDescriptionCharacters $minDescriptionCharacters $true })
-        $compactedCost = Get-NativeMetadataMeasuredCost $finalItems $mode
-        if ($compactedCost -gt $usableCost -and $minDescriptionCharacters -lt $maxDescriptionCharacters) {
-            $minimumItems = @($enabledEntries | ForEach-Object { ConvertTo-NativeMetadataItem $_ $tokensPerByte $minDescriptionCharacters $minDescriptionCharacters $true })
-            $minimumCost = Get-NativeMetadataMeasuredCost $minimumItems $mode
-            if ($minimumCost -le $usableCost) {
-                $bestItems = $minimumItems
-                $bestLimit = $minDescriptionCharacters
-                $low = $minDescriptionCharacters + 1
-                $high = $maxDescriptionCharacters - 1
-                while ($low -le $high) {
-                    $mid = [int][Math]::Floor(($low + $high) / 2)
-                    $candidateItems = @($enabledEntries | ForEach-Object { ConvertTo-NativeMetadataItem $_ $tokensPerByte $mid $minDescriptionCharacters $true })
-                    $candidateCost = Get-NativeMetadataMeasuredCost $candidateItems $mode
-                    if ($candidateCost -le $usableCost) {
-                        $bestItems = $candidateItems
-                        $bestLimit = $mid
-                        $low = $mid + 1
-                    }
-                    else { $high = $mid - 1 }
-                }
-                $finalItems = $bestItems
-                $finalDescriptionCharacters = $bestLimit
-            }
-            else {
-                $finalItems = $minimumItems
-                $finalDescriptionCharacters = $minDescriptionCharacters
-            }
-        }
-        $compactionChanged = @($finalItems | Where-Object compacted | ForEach-Object name)
-    }
-    $finalCost = Get-NativeMetadataMeasuredCost $finalItems $mode
-    $budgetFit = $finalCost -le $usableCost
-    $enabledNames = @($enabledEntries | ForEach-Object { [string](Get-NativeMetadataPlannerProperty $_ @('name', 'id')) })
-    $keptItems = @($finalItems)
-    $keptNames = @($keptItems | ForEach-Object name)
-    $omittedNames = @()
-    $offenders = if ($budgetFit) { @() } else {
-        @($finalItems | ForEach-Object {
-                [pscustomobject][ordered]@{
-                    name = [string]$_.name
-                    required = if ($mode -eq 'tokens') { [long]$_.token_estimate } else { [long]$_.character_count }
-                    token_estimate = [long]$_.token_estimate
-                    character_count = [long]$_.character_count
-                    token_estimate_source = [string]$_.token_estimate_source
-                }
-            })
-    }
-    $totalTokens = [long]((@($finalItems | ForEach-Object { [long]$_.token_estimate } | Measure-Object -Sum).Sum))
-    $totalCharacters = [long]((@($finalItems | ForEach-Object { [long]$_.character_count } | Measure-Object -Sum).Sum))
-    $identity = [ordered]@{
-        mode = $mode
-        token_ceiling = $tokenCeiling
-        character_ceiling = $characterCeiling
-        usable_cost = $usableCost
-        entries = @($finalItems | ForEach-Object { [ordered]@{ name = $_.name; token_estimate = $_.token_estimate; character_count = $_.character_count; planned_description = $_.planned_description } })
-    }
-    $planId = 'nmp-{0}' -f (Get-OperationSha256 ($identity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)
-    $findings = New-Object System.Collections.Generic.List[object]
-    if (-not $budgetFit) { $findings.Add((New-OperationFinding 'metadata_budget_overflow' 'warning' '$.metadata' 'Enabled metadata exceeds the observed budget after deterministic compaction; junction projection remains complete because metadata is advisory.')) | Out-Null }
-
-    return [pscustomobject][ordered]@{
-        schema_version = 1
-        plan_id = $planId
-        projection_effect = 'plan_only'
-        pass_scope = 'advisory_planning_contract'
-        pass = $true
-        status = 'ready'
-        block_reason = $null
-        budget_fit = $budgetFit
-        budget = [ordered]@{
-            mode = $mode
-            unit = if ($mode -eq 'tokens') { 'tokens' } else { 'characters' }
-            source = $budgetSource
-            formula = $formula
-            context_window = $contextValue
-            context_window_source = [string]$contextFact.source
-            context_window_freshness = [string]$contextFact.freshness
-            metadata_budget = $hostBudget
-            metadata_budget_source = [string]$metadataBudgetFact.source
-            metadata_budget_freshness = [string]$metadataBudgetFact.freshness
-            host_budget_status = if ($null -ne $hostBudget) { 'observed' } else { 'unknown' }
-            host_budget_pass = if ($null -ne $hostBudget) { ($totalTokens -le [long][Math]::Max(0, [Math]::Floor($hostBudget * (1.0 - $headroomRatio)))) } else { $null }
-            host_ceiling_applied = $hostCeilingApplied
-            context_ratio = $contextRatio
-            headroom_ratio = $headroomRatio
-            headroom = $headroom
-            token_ceiling = $tokenCeiling
-            ceiling_tokens = $tokenCeiling
-            character_ceiling = if ($mode -eq 'character_fallback') { $characterCeiling } else { $null }
-            usable_tokens = $usableTokens
-            usable_characters = $usableCharacters
-            provenance = [ordered]@{
-                context_window_source = [string]$contextFact.source
-                metadata_budget_source = [string]$metadataBudgetFact.source
-                unknown_reason = if ($mode -eq 'character_fallback') { if ([string]::IsNullOrWhiteSpace([string]$contextFact.unknown_reason)) { 'context_window_unknown' } else { [string]$contextFact.unknown_reason } } else { $null }
-            }
-        }
-        measurement = [ordered]@{
-            unit = if ($mode -eq 'tokens') { 'tokens' } else { 'characters' }
-            token_estimate_used = ($mode -eq 'tokens')
-            estimator = if ($mode -eq 'tokens') { 'provided_or_utf8_byte_estimate' } else { 'not_used_for_budget' }
-            character_count_is_not_token_count = $true
-        }
-        enabled = [object[]]@($enabledNames)
-        kept = [object[]]@($keptNames)
-        omitted = [object[]]@($omittedNames)
-        metadata = [object[]]@($keptItems)
-        enabled_total = $enabledEntries.Count
-        kept_total = $keptItems.Count
-        omitted_total = $omittedNames.Count
-        disabled_total = @($Inventory.entries | Where-Object { (Test-OperationObjectProperty $_ 'enabled') -and -not [bool](Get-OperationObjectProperty $_ 'enabled') }).Count
-        truncated = $false
-        token_estimate = if ($mode -eq 'tokens') { $totalTokens } else { $null }
-        estimated_token_total = $totalTokens
-        character_count = $totalCharacters
-        compaction = [ordered]@{
-            attempted = $compactionAttempted
-            applied = ($compactionChanged.Count -gt 0)
-            changed_names = @($compactionChanged)
-            before_cost = $rawCost
-            after_cost = $finalCost
-            maximum_description_characters = $maxDescriptionCharacters
-            final_maximum_description_characters = $finalDescriptionCharacters
-            minimum_description_characters = $minDescriptionCharacters
-        }
-        overflow = [ordered]@{
-            offenders = [object[]]@($offenders)
-            required = if ($budgetFit) { 0 } else { $finalCost }
-            available = $usableCost
-            unit = if ($mode -eq 'tokens') { 'tokens' } else { 'characters' }
-        }
-        findings = [object[]]@($findings.ToArray())
-        decision_owner = 'deterministic_planner'
-        semantic_selection_applied = $false
-        provider_calls = 0
-        native_mutations = 0
-        writes = 0
-    }
-}
-
-function Test-NativeMetadataPlanContract {
-    param($Plan)
-
-    $findings = New-Object System.Collections.Generic.List[object]
-    if ($null -eq $Plan) { return New-OperationValidationResult @((New-OperationFinding 'metadata_plan_missing' 'error' '$' 'Native metadata plan is required.')) }
-    if ((Get-OperationObjectProperty $Plan 'schema_version') -ne 1) { $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only NativeMetadataPlan schema version 1 is supported.')) | Out-Null }
-    if ([string](Get-OperationObjectProperty $Plan 'plan_id') -notmatch '^nmp-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'plan_id_invalid' 'error' '$.plan_id' 'Metadata plan id must be deterministic.')) | Out-Null }
-    if ([string](Get-OperationObjectProperty $Plan 'projection_effect') -ne 'plan_only') { $findings.Add((New-OperationFinding 'projection_effect_invalid' 'error' '$.projection_effect' 'Metadata descriptions are advisory plan-only values.')) | Out-Null }
-    if ([string](Get-OperationObjectProperty $Plan 'pass_scope') -ne 'advisory_planning_contract') { $findings.Add((New-OperationFinding 'pass_scope_invalid' 'error' '$.pass_scope' 'Metadata plan pass cannot claim host materialization or host budget acceptance.')) | Out-Null }
-    if ([string](Get-OperationObjectProperty $Plan 'decision_owner') -ne 'deterministic_planner') { $findings.Add((New-OperationFinding 'decision_owner_invalid' 'error' '$.decision_owner' 'Metadata planning is deterministic and cannot own semantic selection.')) | Out-Null }
-    foreach ($field in @('semantic_selection_applied')) {
-        if ((Get-OperationObjectProperty $Plan $field) -ne $false) { $findings.Add((New-OperationFinding 'semantic_boundary_breached' 'error' ('$.{0}' -f $field) 'Metadata planner cannot apply semantic selection or profile filtering.')) | Out-Null }
-    }
-    foreach ($field in @('provider_calls', 'native_mutations', 'writes')) {
-        if ([long](Get-OperationObjectProperty $Plan $field) -ne 0) { $findings.Add((New-OperationFinding 'side_effect_forbidden' 'error' ('$.{0}' -f $field) 'Metadata planning must be zero-side-effect.')) | Out-Null }
-    }
-    foreach ($field in @('enabled', 'kept', 'omitted', 'metadata', 'findings')) {
-        if (-not (Test-OperationArray (Get-OperationObjectProperty $Plan $field))) { $findings.Add((New-OperationFinding 'array_field_invalid' 'error' ('$.{0}' -f $field) 'Metadata plan arrays are required.')) | Out-Null }
-    }
-    foreach ($item in @((Get-OperationObjectProperty $Plan 'metadata'))) {
-        if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $item 'planned_description'))) { $findings.Add((New-OperationFinding 'planned_description_missing' 'error' '$.metadata' 'Each retained item requires an advisory planned_description.')) | Out-Null }
-        if (Test-OperationObjectProperty $item 'description') { $findings.Add((New-OperationFinding 'materialization_claim_forbidden' 'error' '$.metadata.description' 'Generic description would imply the advisory value was materialized.')) | Out-Null }
-    }
-    $enabledTotal = [int](Get-OperationObjectProperty $Plan 'enabled_total')
-    $keptTotal = [int](Get-OperationObjectProperty $Plan 'kept_total')
-    $omittedTotal = [int](Get-OperationObjectProperty $Plan 'omitted_total')
-    if ($enabledTotal -ne @((Get-OperationObjectProperty $Plan 'enabled')).Count) { $findings.Add((New-OperationFinding 'enabled_count_invalid' 'error' '$.enabled_total' 'enabled_total must match enabled names.')) | Out-Null }
-    if ($keptTotal -ne @((Get-OperationObjectProperty $Plan 'kept')).Count) { $findings.Add((New-OperationFinding 'kept_count_invalid' 'error' '$.kept_total' 'kept_total must match kept names.')) | Out-Null }
-    if ($omittedTotal -ne @((Get-OperationObjectProperty $Plan 'omitted')).Count) { $findings.Add((New-OperationFinding 'omitted_count_invalid' 'error' '$.omitted_total' 'omitted_total must match omitted names.')) | Out-Null }
-    $pass = [bool](Get-OperationObjectProperty $Plan 'pass')
-    if ($pass -and ($keptTotal -ne $enabledTotal -or $omittedTotal -ne 0 -or (Get-OperationObjectProperty $Plan 'truncated') -ne $false)) { $findings.Add((New-OperationFinding 'complete_projection_invalid' 'error' '$' 'A passing plan must keep every enabled item without truncation.')) | Out-Null }
-    if (-not (Test-OperationObjectProperty $Plan 'budget_fit')) { $findings.Add((New-OperationFinding 'budget_fit_missing' 'error' '$.budget_fit' 'Advisory budget fit must be explicit.')) | Out-Null }
-    $budget = Get-OperationObjectProperty $Plan 'budget'
-    $mode = [string](Get-OperationObjectProperty $budget 'mode')
-    if ($mode -notin @('tokens', 'character_fallback')) { $findings.Add((New-OperationFinding 'budget_mode_invalid' 'error' '$.budget.mode' 'Budget mode is invalid.')) | Out-Null }
-    $hostBudgetStatus = [string](Get-OperationObjectProperty $budget 'host_budget_status')
-    if ($hostBudgetStatus -notin @('observed', 'unknown')) { $findings.Add((New-OperationFinding 'host_budget_status_invalid' 'error' '$.budget.host_budget_status' 'Host metadata budget status must be explicit.')) | Out-Null }
-    if ($hostBudgetStatus -eq 'unknown' -and $null -ne (Get-OperationObjectProperty $budget 'host_budget_pass')) { $findings.Add((New-OperationFinding 'unknown_host_budget_pass_forbidden' 'error' '$.budget.host_budget_pass' 'Unknown host metadata budget cannot be reported as pass or fail.')) | Out-Null }
-    $measurement = Get-OperationObjectProperty $Plan 'measurement'
-    if ([string](Get-OperationObjectProperty $measurement 'unit') -ne $(if ($mode -eq 'tokens') { 'tokens' } else { 'characters' })) { $findings.Add((New-OperationFinding 'measurement_unit_invalid' 'error' '$.measurement.unit' 'Measurement unit must match budget mode.')) | Out-Null }
-    return New-OperationValidationResult $findings.ToArray()
-}
-
 $skillProjectionApplicationRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
 if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionApplicationRepoRoot 'src\Domain\OperationPlan.ps1') }
 if ($null -eq (Get-Command Get-SkillCatalogProperty -ErrorAction SilentlyContinue)) { . (Join-Path $skillProjectionApplicationRepoRoot 'src\Domain\SkillCatalog.ps1') }
@@ -2919,17 +2510,6 @@ function Get-NativeSkillProjectionSettings {
     }
 }
 
-function Get-NativeSkillProjectionMetadataByName {
-    param($MetadataPlan)
-
-    $result = @{}
-    foreach ($item in @(Get-NativeSkillProjectionProperty $MetadataPlan @('metadata'))) {
-        $name = ([string](Get-NativeSkillProjectionProperty $item @('name', 'id'))).Trim()
-        if (-not [string]::IsNullOrWhiteSpace($name)) { $result[$name] = $item }
-    }
-    return $result
-}
-
 function Get-NativeSkillProjectionEligibilityByName {
     param([object[]]$Eligibility)
 
@@ -2945,7 +2525,6 @@ function New-NativeSkillProjectionBlockedPlan {
     param(
         $Settings,
         $Catalog,
-        $MetadataPlan,
         [string[]]$EnabledNames,
         [object[]]$Findings
     )
@@ -2954,8 +2533,6 @@ function New-NativeSkillProjectionBlockedPlan {
         status = 'blocked'
         target_root = [string]$Settings.target_root
         catalog_id = [string](Get-NativeSkillProjectionProperty $Catalog @('catalog_id'))
-        metadata_plan_id = [string](Get-NativeSkillProjectionProperty $MetadataPlan @('plan_id'))
-        metadata_projection_effect = 'plan_only'
         enabled = @($EnabledNames | Sort-Object)
         findings = @($Findings | ForEach-Object { [ordered]@{ code = [string]$_.code; path = [string]$_.path; message = [string]$_.message } })
     }
@@ -2971,8 +2548,6 @@ function New-NativeSkillProjectionBlockedPlan {
         apply_requires_token = [bool]$Settings.apply_requires_token
         apply_token = ''
         catalog_id = [string](Get-NativeSkillProjectionProperty $Catalog @('catalog_id'))
-        metadata_plan_id = [string](Get-NativeSkillProjectionProperty $MetadataPlan @('plan_id'))
-        metadata_projection_effect = 'plan_only'
         enabled = [object[]]@($EnabledNames | Sort-Object)
         kept = [object[]]@()
         omitted = [object[]]@($EnabledNames | Sort-Object)
@@ -3003,13 +2578,12 @@ function New-NativeSkillProjectionPlan {
     param(
         [Parameter(Mandatory = $true)]$Catalog,
         [Parameter(Mandatory = $true)][object[]]$Eligibility,
-        [Parameter(Mandatory = $true)]$MetadataPlan,
         [Parameter(Mandatory = $true)]$Config
     )
 
     $settings = Get-NativeSkillProjectionSettings $Config
     if (-not $settings.enabled) {
-        return New-NativeSkillProjectionBlockedPlan $settings $Catalog $MetadataPlan @() @((New-OperationFinding 'native_projection_disabled' 'error' '$.skill_projection.native_projection.enabled' 'Native projection is disabled.'))
+        return New-NativeSkillProjectionBlockedPlan $settings $Catalog @() @((New-OperationFinding 'native_projection_disabled' 'error' '$.skill_projection.native_projection.enabled' 'Native projection is disabled.'))
     }
     $entries = @(Get-NativeSkillProjectionProperty $Catalog @('entries'))
     $eligibilityByName = Get-NativeSkillProjectionEligibilityByName $Eligibility
@@ -3029,19 +2603,12 @@ function New-NativeSkillProjectionPlan {
         }
     }
 
-    $metadataByName = Get-NativeSkillProjectionMetadataByName $MetadataPlan
     $findings = New-Object System.Collections.Generic.List[object]
     $rows = New-Object System.Collections.Generic.List[object]
     $targetLeaves = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($entry in @($eligibleEntries.ToArray() | Sort-Object name)) {
         $name = ([string](Get-NativeSkillProjectionProperty $entry @('name', 'id'))).Trim()
-        $metadata = if ($metadataByName.ContainsKey($name)) { $metadataByName[$name] } else { $null }
-        if ($null -eq $metadata) {
-            $findings.Add((New-OperationFinding 'metadata_missing' 'error' ('$.metadata[{0}]' -f $name) 'Every eligible enabled skill must have native metadata.')) | Out-Null
-            continue
-        }
-        $sourcePath = [string](Get-NativeSkillProjectionProperty $metadata @('path'))
-        if ([string]::IsNullOrWhiteSpace($sourcePath)) { $sourcePath = [string](Get-NativeSkillProjectionProperty $entry @('path')) }
+        $sourcePath = [string](Get-NativeSkillProjectionProperty $entry @('path'))
         $sourcePath = if ([string]::IsNullOrWhiteSpace($sourcePath)) { '' } else { [IO.Path]::GetFullPath($sourcePath) }
         $sourceRoot = [string](Get-NativeSkillProjectionProperty $entry @('source_root'))
         if (-not [string]::IsNullOrWhiteSpace($sourceRoot)) { $sourceRoot = [IO.Path]::GetFullPath($sourceRoot) }
@@ -3053,10 +2620,8 @@ function New-NativeSkillProjectionPlan {
             $findings.Add((New-OperationFinding 'source_path_outside_root' 'error' ('$.skills[{0}].source_path' -f $name) 'Native projection source path is outside its declared source root.')) | Out-Null
             continue
         }
-        $contentHash = ([string](Get-NativeSkillProjectionProperty $metadata @('content_hash'))).Trim().ToLowerInvariant()
-        if ([string]::IsNullOrWhiteSpace($contentHash)) { $contentHash = ([string](Get-NativeSkillProjectionProperty $entry @('content_hash'))).Trim().ToLowerInvariant() }
-        $metadataHash = ([string](Get-NativeSkillProjectionProperty $metadata @('metadata_hash'))).Trim().ToLowerInvariant()
-        if ([string]::IsNullOrWhiteSpace($metadataHash)) { $metadataHash = ([string](Get-NativeSkillProjectionProperty $entry @('metadata_hash'))).Trim().ToLowerInvariant() }
+        $contentHash = ([string](Get-NativeSkillProjectionProperty $entry @('content_hash'))).Trim().ToLowerInvariant()
+        $metadataHash = ([string](Get-NativeSkillProjectionProperty $entry @('metadata_hash'))).Trim().ToLowerInvariant()
         if ($contentHash -notmatch '^[0-9a-f]{64}$') { $findings.Add((New-OperationFinding 'content_hash_missing' 'error' ('$.skills[{0}].content_hash' -f $name) 'Native projection requires a SHA-256 content hash.')) | Out-Null }
         if ($metadataHash -notmatch '^[0-9a-f]{64}$') { $findings.Add((New-OperationFinding 'metadata_hash_missing' 'error' ('$.skills[{0}].metadata_hash' -f $name) 'Native projection requires a SHA-256 metadata hash.')) | Out-Null }
         $sourceDirectory = [IO.Path]::GetDirectoryName($sourcePath)
@@ -3071,8 +2636,6 @@ function New-NativeSkillProjectionPlan {
         }
         $targetDirectory = Join-Path $settings.target_root $targetLeaf
         $targetPath = Join-Path $targetDirectory 'SKILL.md'
-        $plannedDescription = [string](Get-NativeSkillProjectionProperty $metadata @('planned_description'))
-        $observedSourceDescription = [string](Get-NativeSkillProjectionProperty $entry @('description'))
         $rows.Add([pscustomobject][ordered]@{
                 kind = 'skill'
                 name = $name
@@ -3084,30 +2647,17 @@ function New-NativeSkillProjectionPlan {
                 target_path = $targetPath
                 content_hash = $contentHash
                 metadata_hash = $metadataHash
-                metadata = [ordered]@{
-                    kind = 'skill'
-                    name = $name
-                    projection_effect = 'plan_only'
-                    materialization = 'source_package_junction'
-                    planned_description = $plannedDescription
-                    observed_source_description = $observedSourceDescription
-                    path = $sourcePath
-                    content_hash = $contentHash
-                    metadata_hash = $metadataHash
-                }
             }) | Out-Null
     }
 
     $enabledNamesSorted = @($enabledNames.ToArray() | Sort-Object)
-    if ($findings.Count -gt 0) { return New-NativeSkillProjectionBlockedPlan $settings $Catalog $MetadataPlan $enabledNamesSorted $findings.ToArray() }
+    if ($findings.Count -gt 0) { return New-NativeSkillProjectionBlockedPlan $settings $Catalog $enabledNamesSorted $findings.ToArray() }
 
     $skillRows = @($rows.ToArray() | Sort-Object name)
     $identity = [ordered]@{
         target_root = [string]$settings.target_root
         owner = [string]$settings.owner
         catalog_id = [string](Get-NativeSkillProjectionProperty $Catalog @('catalog_id'))
-        metadata_plan_id = [string](Get-NativeSkillProjectionProperty $MetadataPlan @('plan_id'))
-        metadata_projection_effect = 'plan_only'
         skills = @($skillRows | ForEach-Object { [ordered]@{ name = $_.name; source_path = $_.source_path; target_path = $_.target_path; content_hash = $_.content_hash; metadata_hash = $_.metadata_hash } })
     }
     $planId = 'nsp-{0}' -f (Get-OperationSha256 ($identity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)
@@ -3136,8 +2686,6 @@ function New-NativeSkillProjectionPlan {
         apply_requires_token = [bool]$settings.apply_requires_token
         apply_token = $applyToken
         catalog_id = [string](Get-NativeSkillProjectionProperty $Catalog @('catalog_id'))
-        metadata_plan_id = [string](Get-NativeSkillProjectionProperty $MetadataPlan @('plan_id'))
-        metadata_projection_effect = 'plan_only'
         enabled = [object[]]$enabledNamesSorted
         kept = [object[]]@($skillRows | ForEach-Object name)
         omitted = [object[]]@()
@@ -3172,7 +2720,6 @@ function Test-NativeSkillProjectionPlanContract {
     if ([string](Get-NativeSkillProjectionProperty $Plan @('plan_id')) -notmatch '^nsp-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'plan_id_invalid' 'error' '$.plan_id' 'Projection plan id is invalid.')) | Out-Null }
     if ([string](Get-NativeSkillProjectionProperty $Plan @('status')) -notin @('ready', 'blocked')) { $findings.Add((New-OperationFinding 'status_invalid' 'error' '$.status' 'Projection plan status is invalid.')) | Out-Null }
     foreach ($field in @('owner', 'target_root', 'receipt_path')) { if ([string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $Plan @($field)))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Projection plan field is required.')) | Out-Null } }
-    if ([string](Get-NativeSkillProjectionProperty $Plan @('metadata_projection_effect')) -ne 'plan_only') { $findings.Add((New-OperationFinding 'metadata_projection_effect_invalid' 'error' '$.metadata_projection_effect' 'Junction projection cannot claim advisory metadata materialization.')) | Out-Null }
     foreach ($field in @('enabled', 'kept', 'omitted', 'skills', 'actions', 'findings')) { if (-not (Test-OperationArray (Get-OperationObjectProperty $Plan $field))) { $findings.Add((New-OperationFinding 'array_field_invalid' 'error' ('$.{0}' -f $field) 'Projection plan field must be an array.')) | Out-Null } }
     $enabled = @((Get-NativeSkillProjectionProperty $Plan @('enabled')))
     $kept = @((Get-NativeSkillProjectionProperty $Plan @('kept')))
@@ -3192,15 +2739,6 @@ function Test-NativeSkillProjectionPlanContract {
     foreach ($skill in @((Get-NativeSkillProjectionProperty $Plan @('skills')))) {
         foreach ($field in @('name', 'source_path', 'target_path', 'content_hash', 'metadata_hash')) { if ([string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $skill @($field)))) { $findings.Add((New-OperationFinding 'skill_field_missing' 'error' '$.skills' ('Projected skill field is missing: {0}' -f $field))) | Out-Null } }
         if ([string](Get-NativeSkillProjectionProperty $skill @('content_hash')) -notmatch '^[0-9a-f]{64}$' -or [string](Get-NativeSkillProjectionProperty $skill @('metadata_hash')) -notmatch '^[0-9a-f]{64}$') { $findings.Add((New-OperationFinding 'skill_hash_invalid' 'error' '$.skills' 'Projected skill hashes must be SHA-256.')) | Out-Null }
-        $metadata = Get-NativeSkillProjectionProperty $skill @('metadata')
-        if ([string](Get-NativeSkillProjectionProperty $metadata @('name')) -ne [string](Get-NativeSkillProjectionProperty $skill @('name')) -or
-            [string](Get-NativeSkillProjectionProperty $metadata @('projection_effect')) -ne 'plan_only' -or
-            [string](Get-NativeSkillProjectionProperty $metadata @('materialization')) -ne 'source_package_junction' -or
-            [string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $metadata @('planned_description'))) -or
-            [string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $metadata @('observed_source_description'))) -or
-            (Test-OperationObjectProperty $metadata 'description')) {
-            $findings.Add((New-OperationFinding 'skill_metadata_invalid' 'error' '$.skills.metadata' 'Projection metadata must separate advisory planned text from the source package description materialized by the junction.')) | Out-Null
-        }
     }
     return New-OperationValidationResult $findings.ToArray()
 }
@@ -3489,8 +3027,6 @@ function New-NativeSkillProjectionRuntimePlan {
     param(
         [Parameter(Mandatory = $true)][string]$ManagedRoot,
         [Parameter(Mandatory = $true)]$Config,
-        [Parameter(Mandatory = $true)]$Snapshot,
-        $Policy = $null,
         [string[]]$IncludedNames = @(),
         [string[]]$ExcludedNames = @(),
         [string]$GeneratedAt = ([DateTimeOffset]::UtcNow.ToString('o'))
@@ -3542,12 +3078,7 @@ function New-NativeSkillProjectionRuntimePlan {
     $eligibility = @($catalog.entries | ForEach-Object {
             Evaluate-SkillEligibility -Skill $_ -Surface 'native_discovery' -AllowedRoots @($root) -AvailableDependencies $availableNames
         })
-    $metadata = Plan-NativeMetadata -Inventory $catalog -Snapshot $Snapshot -Policy $Policy
-    $metadataContract = Test-NativeMetadataPlanContract $metadata
-    if (-not [bool]$metadataContract.pass) {
-        throw ('Native metadata plan contract failed: {0}' -f (@($metadataContract.findings | ForEach-Object code) -join ', '))
-    }
-    $plan = New-NativeSkillProjectionPlan -Catalog $catalog -Eligibility $eligibility -MetadataPlan $metadata -Config $Config
+    $plan = New-NativeSkillProjectionPlan -Catalog $catalog -Eligibility $eligibility -Config $Config
     $planContract = Test-NativeSkillProjectionPlanContract $plan
     if (-not [bool]$planContract.pass) {
         throw ('Native projection plan contract failed: {0}' -f (@($planContract.findings | ForEach-Object code) -join ', '))
@@ -4435,15 +3966,6 @@ function Test-RuleEstateReviewContract($Review, [string]$ReviewRoot) {
         $findings.Add((New-RuleEstateFinding 'review_authority_invalid' '$.reviewed_by_type' 'AI self-review is not apply authority; use a human review or registered policy.')) | Out-Null
     }
     if ([string]::IsNullOrWhiteSpace([string](Get-RuleEstateProperty $Review 'reviewed_by'))) { $findings.Add((New-RuleEstateFinding 'reviewer_missing' '$.reviewed_by' 'Reviewer identity is required.')) | Out-Null }
-    $authorizationRelative = [string](Get-RuleEstateProperty $Review 'authorization_receipt')
-    if ([string]::IsNullOrWhiteSpace($authorizationRelative)) {
-        $findings.Add((New-RuleEstateFinding 'authorization_receipt_missing' '$.authorization_receipt' 'An independently issued authorization receipt is required.')) | Out-Null
-    }
-    else {
-        $authorizationPath = [IO.Path]::GetFullPath((Join-Path $ReviewRoot $authorizationRelative))
-        if (-not (Test-RuleDiscoveryPathWithin $authorizationPath $ReviewRoot) -or -not [IO.File]::Exists($authorizationPath)) { $findings.Add((New-RuleEstateFinding 'authorization_receipt_invalid' '$.authorization_receipt' 'Authorization receipt must exist below the reviewed change-set directory.')) | Out-Null }
-        elseif (Test-RuleEstateReparsePath $authorizationPath $ReviewRoot) { $findings.Add((New-RuleEstateFinding 'authorization_receipt_reparse_forbidden' '$.authorization_receipt' 'Authorization receipts reached through reparse points are not accepted.')) | Out-Null }
-    }
     $changes = @(Get-RuleEstateProperty $Review 'changes')
     if ($changes.Count -eq 0) { $findings.Add((New-RuleEstateFinding 'review_changes_empty' '$.changes' 'At least one reviewed change is required.')) | Out-Null }
     if ($changes.Count -gt 128) { $findings.Add((New-RuleEstateFinding 'review_changes_limit' '$.changes' 'Reviewed change-set exceeds the 128 action safety limit.')) | Out-Null }
@@ -4463,31 +3985,6 @@ function Test-RuleEstateReviewContract($Review, [string]$ReviewRoot) {
         elseif (Test-RuleEstateReparsePath $desiredPath $ReviewRoot) { $findings.Add((New-RuleEstateFinding 'desired_file_reparse_forbidden' "$base.desired_file" 'Desired files reached through reparse points are not accepted.')) | Out-Null }
     }
     return [pscustomobject]@{ pass=($findings.Count -eq 0); findings=@($findings.ToArray()) }
-}
-
-function Get-RuleEstateAuthorizationReceipt {
-    param($Review,[string]$ReviewPath,[string]$WorkspaceRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot)
-    $reviewRoot=[IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($ReviewPath));$relative=[string](Get-RuleEstateProperty $Review 'authorization_receipt')
-    if([string]::IsNullOrWhiteSpace($relative)){throw 'Independent authorization receipt is required.'}
-    $path=[IO.Path]::GetFullPath((Join-Path $reviewRoot $relative))
-    if(-not (Test-RuleDiscoveryPathWithin $path $reviewRoot) -or -not [IO.File]::Exists($path) -or (Test-RuleEstateReparsePath $path $reviewRoot)){throw 'Independent authorization receipt path is invalid.'}
-    try{$raw=[IO.File]::ReadAllText($path);$receipt=$raw|ConvertFrom-Json}catch{throw ('Independent authorization receipt is invalid JSON: {0}' -f $_.Exception.Message)}
-    if((Get-RuleEstateProperty $receipt 'schema_version') -ne 1 -or [string](Get-RuleEstateProperty $receipt 'domain') -ne 'rule_estate_authorization' -or [string](Get-RuleEstateProperty $receipt 'decision') -ne 'approved'){throw 'Independent authorization receipt is not an approved v1 rule estate receipt.'}
-    $authorizationId=[string](Get-RuleEstateProperty $receipt 'authorization_id')
-    if($authorizationId -notmatch '^rule-estate-auth-[a-f0-9]{32}$'){throw 'Independent authorization receipt identity is invalid.'}
-    if([string](Get-RuleEstateProperty $receipt 'issued_by') -ne [string](Get-RuleEstateProperty $Review 'reviewed_by') -or [string](Get-RuleEstateProperty $receipt 'issued_by_type') -ne [string](Get-RuleEstateProperty $Review 'reviewed_by_type') -or [string](Get-RuleEstateProperty $receipt 'authorization_source') -ne [string](Get-RuleEstateProperty $Review 'authorization_source')){throw 'Independent authorization receipt reviewer identity does not match the review.'}
-    $reviewHash=Get-OperationSha256 ([IO.File]::ReadAllText([IO.Path]::GetFullPath($ReviewPath)))
-    if([string](Get-RuleEstateProperty $receipt 'review_sha256') -ne $reviewHash){throw 'Independent authorization receipt review hash does not match.'}
-    $workspace=[IO.Path]::GetFullPath($WorkspaceRoot);$codex=[IO.Path]::GetFullPath($CodexUserRoot);$claude=[IO.Path]::GetFullPath($ClaudeUserRoot)
-    try{$receiptWorkspace=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $receipt 'workspace_root'));$receiptCodex=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $receipt 'codex_user_root'));$receiptClaude=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $receipt 'claude_user_root'))}catch{throw 'Independent authorization receipt roots are invalid.'}
-    if($receiptWorkspace -ne $workspace -or $receiptCodex -ne $codex -or $receiptClaude -ne $claude){throw 'Independent authorization receipt roots do not match the requested roots.'}
-    if([int](Get-RuleEstateProperty $receipt 'approved_action_count') -ne @((Get-RuleEstateProperty $Review 'changes')).Count){throw 'Independent authorization receipt action count does not match the review.'}
-    $issued=[datetimeoffset]::MinValue;$expires=[datetimeoffset]::MinValue
-    if(-not [datetimeoffset]::TryParse([string](Get-RuleEstateProperty $receipt 'issued_at'),[ref]$issued) -or -not [datetimeoffset]::TryParse([string](Get-RuleEstateProperty $receipt 'expires_at'),[ref]$expires) -or $expires -le $issued){throw 'Independent authorization receipt validity window is invalid.'}
-    if($expires -le [datetimeoffset]::UtcNow){throw 'Independent authorization receipt has expired.'}
-    $applyToken=[string](Get-RuleEstateProperty $receipt 'apply_token')
-    if($applyToken -cnotmatch '^APPLY_RULE_ESTATE_PATCH_[A-F0-9]{16}$'){throw 'Independent authorization receipt apply token is invalid.'}
-    return [pscustomobject][ordered]@{path=$path;content_hash=Get-OperationSha256 $raw;authorization_id=$authorizationId;issued_by=[string](Get-RuleEstateProperty $receipt 'issued_by');issued_by_type=[string](Get-RuleEstateProperty $receipt 'issued_by_type');authorization_source=[string](Get-RuleEstateProperty $receipt 'authorization_source');issued_at=$issued.ToString('o');expires_at=$expires.ToString('o');review_sha256=$reviewHash;approved_action_count=[int](Get-RuleEstateProperty $receipt 'approved_action_count');apply_token=$applyToken}
 }
 
 function Get-RuleEstateTargetSetSnapshot([string]$WorkspaceRoot, [string[]]$ExcludeNames=@('external','文档')) {
@@ -4513,7 +4010,6 @@ function New-RuleEstatePlan {
     $workspace = Assert-RuleEstateSafeRoot $WorkspaceRoot 'workspace'
     $codex = Assert-RuleEstateSafeRoot $CodexUserRoot 'Codex user'
     $claude = Assert-RuleEstateSafeRoot $ClaudeUserRoot 'Claude user'
-    $authorization = Get-RuleEstateAuthorizationReceipt -Review $review -ReviewPath $reviewFile -WorkspaceRoot $workspace -CodexUserRoot $codex -ClaudeUserRoot $claude
     $inventory = Get-RuleEstateTargets -WorkspaceRoot $workspace -ExcludeNames $ExcludeNames
     $repoByName = @{}
     foreach ($target in @($inventory.targets)) { $repoByName[[string]$target.name] = [string]$target.path }
@@ -4556,14 +4052,15 @@ function New-RuleEstatePlan {
         }) | Out-Null
     }
     $targetSet = Get-RuleEstateTargetSetSnapshot $workspace $ExcludeNames
-    $planSeed = '{0}|{1}|{2}' -f $workspace,$targetSet.hash,(@($actions | ForEach-Object action_id) -join '|')
+    $reviewHash = Get-OperationSha256 ([IO.File]::ReadAllText($reviewFile))
+    $planSeed = '{0}|{1}|{2}|{3}|{4}|{5}' -f $reviewHash,$workspace,$codex,$claude,$targetSet.hash,(@($actions | ForEach-Object action_id) -join '|')
+    $requiredToken = 'APPLY_RULE_ESTATE_PATCH_{0}' -f (Get-OperationSha256 $planSeed).Substring(0,16).ToUpperInvariant()
     return [pscustomobject][ordered]@{
         schema_version=1; operation_id=('rule-estate-{0}' -f (Get-OperationSha256 $planSeed).Substring(0,16)); domain='rule_estate'; mode='plan'
         generated_at=[datetimeoffset]::UtcNow.ToString('o'); workspace_root=$workspace; exclude_names=@($ExcludeNames); codex_user_root=$codex; claude_user_root=$claude
-        review=[pscustomobject]@{ path=$reviewFile; content_hash=Get-OperationSha256 ([IO.File]::ReadAllText($reviewFile)); reviewed_by=[string](Get-RuleEstateProperty $review 'reviewed_by'); reviewed_by_type=[string](Get-RuleEstateProperty $review 'reviewed_by_type'); authorization_source=[string](Get-RuleEstateProperty $review 'authorization_source') }
-        authorization=$authorization
+        review=[pscustomobject]@{ path=$reviewFile; content_hash=$reviewHash; reviewed_by=[string](Get-RuleEstateProperty $review 'reviewed_by'); reviewed_by_type=[string](Get-RuleEstateProperty $review 'reviewed_by_type'); authorization_source=[string](Get-RuleEstateProperty $review 'authorization_source') }
         target_set=$targetSet; actions=@($actions.ToArray()); execution='preflight_all_then_apply_one_by_one_fail_fast'
-        apply=[pscustomobject]@{ required_token=[string]$authorization.apply_token; dirty_worktree='observe_preserve_unrelated'; target_file_freshness='fail_closed'; target_set_drift='fail_closed'; rollback_scope='per_target' }
+        apply=[pscustomobject]@{ required_token=$requiredToken; confirmation='plan_bound_explicit'; dirty_worktree='observe_preserve_unrelated'; target_file_freshness='fail_closed'; target_set_drift='fail_closed'; rollback_scope='per_target' }
         verification=[pscustomobject]@{ repo_verified='not_run'; host_loaded='not_run'; live_accepted='not_run' }
         provider_calls=0; native_mutations=0
     }
@@ -4595,15 +4092,6 @@ function Test-RuleEstateApplyPreflight {
     if(-not [IO.File]::Exists($reviewPath) -or (Get-OperationSha256 ([IO.File]::ReadAllText($reviewPath))) -ne [string](Get-RuleEstateProperty $review 'content_hash')){$findings.Add((New-RuleEstateFinding 'review_stale' '$.review' 'Reviewed change-set changed or disappeared after planning.'))|Out-Null}
     else {
         try{$reviewDocument=[IO.File]::ReadAllText($reviewPath)|ConvertFrom-Json;$reviewValidation=Test-RuleEstateReviewContract $reviewDocument ([IO.Path]::GetDirectoryName($reviewPath));if(-not $reviewValidation.pass){throw ((@($reviewValidation.findings.code))-join ',')}}catch{$findings.Add((New-RuleEstateFinding 'review_stale' '$.review' ('Reviewed change-set is no longer valid: {0}' -f $_.Exception.Message)))|Out-Null}
-    }
-    $authorization=Get-RuleEstateProperty $Plan 'authorization';$authorizationPath=[string](Get-RuleEstateProperty $authorization 'path');$expires=[datetimeoffset]::MinValue
-    if([string]::IsNullOrWhiteSpace($authorizationPath) -or -not [IO.File]::Exists($authorizationPath) -or (Get-OperationSha256 ([IO.File]::ReadAllText($authorizationPath))) -ne [string](Get-RuleEstateProperty $authorization 'content_hash')){$findings.Add((New-RuleEstateFinding 'authorization_receipt_stale' '$.authorization' 'Authorization receipt changed or disappeared after planning.'))|Out-Null}
-    elseif(-not [datetimeoffset]::TryParse([string](Get-RuleEstateProperty $authorization 'expires_at'),[ref]$expires) -or $expires -le [datetimeoffset]::UtcNow){$findings.Add((New-RuleEstateFinding 'authorization_receipt_expired' '$.authorization.expires_at' 'Authorization receipt is expired or invalid.'))|Out-Null}
-    elseif($null -ne $reviewDocument){
-        try {
-            $freshAuthorization=Get-RuleEstateAuthorizationReceipt -Review $reviewDocument -ReviewPath $reviewPath -WorkspaceRoot $workspace -CodexUserRoot $codex -ClaudeUserRoot $claude
-            if([string]$freshAuthorization.content_hash -ne [string](Get-RuleEstateProperty $authorization 'content_hash') -or [string]$freshAuthorization.authorization_id -ne [string](Get-RuleEstateProperty $authorization 'authorization_id') -or [string]$freshAuthorization.apply_token -ne [string](Get-RuleEstateProperty (Get-RuleEstateProperty $Plan 'apply') 'required_token')){throw 'authorization fields differ from the independently issued receipt'}
-        } catch {$findings.Add((New-RuleEstateFinding 'authorization_receipt_invalid' '$.authorization' $_.Exception.Message))|Out-Null}
     }
     if($null -ne $reviewDocument){
         $actions=@(Get-RuleEstateProperty $Plan 'actions');$changes=@(Get-RuleEstateProperty $reviewDocument 'changes')
@@ -4641,7 +4129,7 @@ function Write-RuleEstateReceipt([string]$Path, $Receipt) {
 function Invoke-RuleEstateApply {
     param($Plan,[string]$WorkspaceRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[string]$Token,[string]$ReceiptPath,[string]$ResumeReceiptPath=$null,[string]$TestFailBeforeActionId=$null,[scriptblock]$TestHookAfterLocksAcquired=$null)
     $expectedToken=[string](Get-RuleEstateProperty (Get-RuleEstateProperty $Plan 'apply') 'required_token')
-    if ([string]::IsNullOrWhiteSpace($expectedToken) -or $Token -cne $expectedToken) { return [pscustomobject]@{ pass=$false; status='blocked'; findings=@((New-RuleEstateFinding 'apply_token_invalid' '$.apply.required_token' 'Explicit estate apply token does not match the independent authorization receipt.')); writes=0; receipt=$null } }
+    if ([string]::IsNullOrWhiteSpace($expectedToken) -or $Token -cne $expectedToken) { return [pscustomobject]@{ pass=$false; status='blocked'; findings=@((New-RuleEstateFinding 'apply_token_invalid' '$.apply.required_token' 'Explicit estate apply token does not match this exact plan.')); writes=0; receipt=$null } }
     $receiptFile=[IO.Path]::GetFullPath($ReceiptPath); $existing=$null
     if (-not [string]::IsNullOrWhiteSpace($ResumeReceiptPath)) {
         $resumeFile=[IO.Path]::GetFullPath($ResumeReceiptPath)
@@ -6383,10 +5871,6 @@ function Get-CfgContractErrors($cfg) {
         if ($null -ne $projectionEnabled -and $projectionEnabled -isnot [bool]) {
             $errors.Add("skill_projection.enabled 必须是布尔值") | Out-Null
         }
-        $routingPolicyPath = [string](Get-CfgObjectProperty $skillProjection "routing_policy_path")
-        if ((Test-CfgObjectProperty $skillProjection "routing_policy_path") -and [string]::IsNullOrWhiteSpace($routingPolicyPath)) {
-            $errors.Add("skill_projection.routing_policy_path 不能为空") | Out-Null
-        }
         $externalInventory = Get-CfgObjectProperty $skillProjection "external_skill_inventory"
         if ($null -ne $externalInventory) {
             if ($externalInventory -isnot [pscustomobject] -and $externalInventory -isnot [System.Collections.IDictionary]) {
@@ -7039,9 +6523,6 @@ function Assert-Cfg($cfg) {
         if ($projection.PSObject.Properties.Match("enabled").Count -gt 0) {
             Need ($projection.enabled -is [bool]) "skill_projection.enabled 必须是布尔值"
         }
-        if ($projection.PSObject.Properties.Match("routing_policy_path").Count -gt 0) {
-            Need (-not [string]::IsNullOrWhiteSpace([string]$projection.routing_policy_path)) "skill_projection.routing_policy_path 不能为空"
-        }
         if ($projection.PSObject.Properties.Match("external_skill_inventory").Count -gt 0 -and $null -ne $projection.external_skill_inventory) {
             $externalInventory = $projection.external_skill_inventory
             Need ($externalInventory -is [pscustomobject] -or $externalInventory -is [System.Collections.IDictionary]) "skill_projection.external_skill_inventory 必须是对象"
@@ -7099,12 +6580,6 @@ function Assert-Cfg($cfg) {
             }
             $dupAliases = @(Get-DuplicateValues ($projection.aliases | ForEach-Object { ([string]$_.name).ToLowerInvariant() }))
             Need ($dupAliases.Count -eq 0) ("skill_projection alias 重复：{0}" -f ($dupAliases -join ", "))
-        }
-        if ($projection.PSObject.Properties.Match("budget_limit_chars").Count -gt 0) {
-            Need ([int]$projection.budget_limit_chars -gt 0) "skill_projection.budget_limit_chars 必须大于 0"
-        }
-        if ($projection.PSObject.Properties.Match("external_metadata_reserve_chars").Count -gt 0) {
-            Need ([int]$projection.external_metadata_reserve_chars -ge 0) "skill_projection.external_metadata_reserve_chars 不能小于 0"
         }
     }
 
@@ -13985,10 +13460,6 @@ function Get-RuleEstateReviewControlInputs([string]$ReviewPath) {
     if(-not [IO.File]::Exists($reviewFile)){return @($inputs.ToArray())}
     try{$review=[IO.File]::ReadAllText($reviewFile)|ConvertFrom-Json}catch{return @($inputs.ToArray())}
     $reviewRoot=[IO.Path]::GetDirectoryName($reviewFile)
-    $authorization=[string](Get-RuleEstateProperty $review 'authorization_receipt')
-    if(-not [string]::IsNullOrWhiteSpace($authorization)){
-        try{$inputs.Add([IO.Path]::GetFullPath((Join-Path $reviewRoot $authorization)))|Out-Null}catch{}
-    }
     foreach($change in @(Get-RuleEstateProperty $review 'changes')){
         $desired=[string](Get-RuleEstateProperty $change 'desired_file')
         if([string]::IsNullOrWhiteSpace($desired)){continue}
@@ -14001,8 +13472,6 @@ function Get-RuleEstatePlanControlInputs($Plan) {
     $inputs=New-Object System.Collections.Generic.List[string]
     $review=Get-RuleEstateProperty $Plan 'review';$reviewPath=[string](Get-RuleEstateProperty $review 'path')
     foreach($path in @(Get-RuleEstateReviewControlInputs $reviewPath)){if(-not [string]::IsNullOrWhiteSpace($path)){$inputs.Add($path)|Out-Null}}
-    $authorizationPath=[string](Get-RuleEstateProperty (Get-RuleEstateProperty $Plan 'authorization') 'path')
-    if(-not [string]::IsNullOrWhiteSpace($authorizationPath)){$inputs.Add([IO.Path]::GetFullPath($authorizationPath))|Out-Null}
     foreach($action in @(Get-RuleEstateProperty $Plan 'actions')){
         $targetPath=[string](Get-RuleEstateProperty $action 'target_path')
         if(-not [string]::IsNullOrWhiteSpace($targetPath)){$inputs.Add([IO.Path]::GetFullPath($targetPath))|Out-Null}
@@ -17654,7 +17123,6 @@ function Test-AuditRemovalDependencyClosure {
     $checkedFiles = @(
         "skills.json",
         "config/skill-dependency-closure.json",
-        "config/skill-routing-policy.json",
         "overrides/patches/provenance.json"
     )
     $candidateIndex = 0
@@ -20835,12 +20303,6 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
     $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
     Need (Test-Path -LiteralPath $managedRoot -PathType Container) ("受管技能源不存在：{0}" -f $managedRoot)
 
-    $policy = $null
-    if ($projectionCfg.PSObject.Properties.Match('routing_policy_path').Count -gt 0) {
-        $policyPath = Resolve-SkillProjectionPath ([string]$projectionCfg.routing_policy_path)
-        if (Test-Path -LiteralPath $policyPath -PathType Leaf) { $policy = Get-ContentUtf8 $policyPath | ConvertFrom-Json }
-    }
-
     $domainPurpose = [ordered]@{}
     $membership = @{}
     $fallbackDomain = 'other'
@@ -20911,14 +20373,13 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
         $domainRows.Add([ordered]@{ name = $fallbackDomain; purpose = $fallbackPurpose; skill_names = $fallbackNames }) | Out-Null
     }
 
-    $capabilities = if ($null -ne $policy) { @($policy.capabilities | Sort-Object kind, name) } else { @() }
     $catalog = [ordered]@{
         schema_version = 1
         decision_owner = 'host_ai'
         semantic_routing_performed = $false
         domains = @($domainRows.ToArray() | Sort-Object name)
         skills = @($skills.ToArray() | Sort-Object name)
-        capabilities = $capabilities
+        capabilities = @()
     }
     $catalog.catalog_fingerprint = Get-CapabilityCatalogTextSha256 ($catalog | ConvertTo-Json -Depth 20 -Compress)
     return $catalog
@@ -21097,14 +20558,8 @@ function New-SkillProjectionPlan($projectionCfg) {
         }
     }
 
-    $budgetLimitChars = if ($projectionCfg.PSObject.Properties.Match("budget_limit_chars").Count -gt 0) { [int]$projectionCfg.budget_limit_chars } else { 8000 }
-    $externalReserveChars = if ($projectionCfg.PSObject.Properties.Match("external_metadata_reserve_chars").Count -gt 0) { [int]$projectionCfg.external_metadata_reserve_chars } else { 0 }
-    $budgetWarningThresholdPercent = 90
-    Need ($budgetLimitChars -gt 0) "skill_projection.budget_limit_chars 必须大于 0"
-    Need ($externalReserveChars -ge 0) "skill_projection.external_metadata_reserve_chars 不能小于 0"
     $externalInventory = Get-CodexExternalSkillInventory $projectionCfg
     $externalSkillMetadataChars = [int]$externalInventory.metadata_chars
-    $effectiveExternalMetadataChars = [Math]::Max($externalReserveChars, $externalSkillMetadataChars)
 
     $active = New-Object System.Collections.Generic.List[object]
     foreach ($entry in @($canonical.ToArray() | Sort-Object name)) {
@@ -21134,9 +20589,7 @@ function New-SkillProjectionPlan($projectionCfg) {
     foreach ($entry in @($active.ToArray())) {
         $skillMetadataChars += ([string]$entry.name).Length + ([string]$entry.description).Length
     }
-    $estimatedMetadataChars = $skillMetadataChars + $effectiveExternalMetadataChars
-    $budgetPass = $estimatedMetadataChars -le $budgetLimitChars
-    $budgetWarning = $budgetPass -and (($estimatedMetadataChars * 100) -ge ($budgetLimitChars * $budgetWarningThresholdPercent))
+    $estimatedMetadataChars = $skillMetadataChars + $externalSkillMetadataChars
 
     return [pscustomobject]([ordered]@{
         schema_version = 2
@@ -21151,16 +20604,9 @@ function New-SkillProjectionPlan($projectionCfg) {
         active_names = @($active.ToArray() | ForEach-Object { [string]$_.name } | Sort-Object)
         duplicate_name_groups = $duplicateGroups
         skill_metadata_chars = $skillMetadataChars
-        external_metadata_reserve_chars = $externalReserveChars
         external_skill_count = [int]$externalInventory.skill_count
         external_skill_metadata_chars = $externalSkillMetadataChars
-        effective_external_metadata_chars = $effectiveExternalMetadataChars
         estimated_metadata_chars = $estimatedMetadataChars
-        budget_limit_chars = $budgetLimitChars
-        effective_budget_limit_chars = $budgetLimitChars
-        budget_warning_threshold_percent = $budgetWarningThresholdPercent
-        budget_warning = $budgetWarning
-        budget_pass = $budgetPass
         external_skills = @($externalInventory.skills)
         external_inventory_warnings = @($externalInventory.warnings)
     })
@@ -21557,12 +21003,7 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
         $includedNames = @((Get-CfgObjectProperty $projectionCfg 'managed_link_includes') | ForEach-Object { [string]$_ })
         $excludedNames = @((Get-CfgObjectProperty $projectionCfg 'managed_link_excludes') | ForEach-Object { [string]$_ })
         $capturedAt = [DateTimeOffset]::UtcNow.ToString('o')
-        # The repository cannot prove live host capabilities. Use the planner's
-        # conservative fallback instead of maintaining a synthetic host snapshot.
-        $snapshot = [pscustomobject]@{ capabilities = [pscustomobject]@{} }
-        $policyPath = Join-Path $Root 'config\native-skill-metadata-policy.json'
-        $policy = if (Test-Path -LiteralPath $policyPath -PathType Leaf) { Get-ContentUtf8 $policyPath | ConvertFrom-Json } else { Get-DefaultNativeMetadataPolicy }
-        $nativeProjectionPlan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $managedRoot -Config ([pscustomobject]@{ skill_projection = $projectionCfg }) -Snapshot $snapshot -Policy $policy -IncludedNames $includedNames -ExcludedNames $excludedNames -GeneratedAt $capturedAt
+        $nativeProjectionPlan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $managedRoot -Config ([pscustomobject]@{ skill_projection = $projectionCfg }) -IncludedNames $includedNames -ExcludedNames $excludedNames -GeneratedAt $capturedAt
         Need ([string]$nativeProjectionPlan.status -eq 'ready' -and [bool]$nativeProjectionPlan.pass) ("native skill projection blocked: enabled={0}, kept={1}, omitted={2}" -f [int]$nativeProjectionPlan.enabled_total, [int]$nativeProjectionPlan.kept_total, [int]$nativeProjectionPlan.omitted_total)
         $nativeProjectionAuthoritative = $true
         if ($DryRun) {
@@ -21578,12 +21019,6 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
     }
     $plan = New-SkillProjectionPlan $projectionCfg
     if ([bool]$plan.enabled) {
-        if (-not $nativeProjectionAuthoritative) {
-            Need ([bool]$plan.budget_pass) ("技能描述预算超限：estimated={0}, limit={1}" -f [int]$plan.estimated_metadata_chars, [int]$plan.effective_budget_limit_chars)
-        }
-        if ([bool]$plan.budget_warning) {
-            Log ("技能描述预算接近上限：estimated={0}, limit={1}, threshold={2}%" -f [int]$plan.estimated_metadata_chars, [int]$plan.effective_budget_limit_chars, [int]$plan.budget_warning_threshold_percent) "WARN" -NoHost
-        }
     }
 
     $existing = if (Test-Path -LiteralPath $configPath -PathType Leaf) { Get-ContentUtf8 $configPath } else { "" }
@@ -21621,16 +21056,9 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
                 disabled_path_count = @($plan.disabled).Count
                 conflict_count = @($plan.conflicts).Count
                 skill_metadata_chars = [int]$plan.skill_metadata_chars
-                external_metadata_reserve_chars = [int]$plan.external_metadata_reserve_chars
                 external_skill_count = [int]$plan.external_skill_count
                 external_skill_metadata_chars = [int]$plan.external_skill_metadata_chars
-                effective_external_metadata_chars = [int]$plan.effective_external_metadata_chars
                 estimated_metadata_chars = [int]$plan.estimated_metadata_chars
-                budget_limit_chars = [int]$plan.budget_limit_chars
-                effective_budget_limit_chars = [int]$plan.effective_budget_limit_chars
-                budget_warning_threshold_percent = [int]$plan.budget_warning_threshold_percent
-                budget_warning = [bool]$plan.budget_warning
-                budget_pass = [bool]$plan.budget_pass
                 external_skills = @($plan.external_skills)
                 external_inventory_warnings = @($plan.external_inventory_warnings)
                 skills = @($plan.skills)
@@ -22482,9 +21910,9 @@ MCP：
   .\skills.ps1 rule-estate-audit --workspace-root D:\CODE [--out <report.json>] --json
   全域审查自动发现工作区直属 Git 仓；默认排除 external 与文档。可选 --registry 只比较外部快照 drift，不改变目标集合；仅显式 --out 写报告。
   .\skills.ps1 rule-estate-plan --review <reviewed-change-set.json> --workspace-root D:\CODE --out <plan.json> --json
-  .\skills.ps1 rule-estate-apply --plan <plan.json> --workspace-root D:\CODE --token APPLY_RULE_ESTATE_PATCH --out <receipt.json> --json
+  .\skills.ps1 rule-estate-apply --plan <plan.json> --workspace-root D:\CODE --token <plan.apply.required_token> --out <receipt.json> --json
   .\skills.ps1 rule-estate-rollback --receipt <receipt.json> --action-id <id> --workspace-root D:\CODE --token ROLLBACK_RULE_ESTATE_PATCH --json
-  全域写入只接受 reviewed change-set，执行全量预检、逐目标 receipt、fail-fast、resume 和单目标 rollback；不自动 commit/push。
+  全域写入只接受 reviewed change-set；plan 生成绑定当前 review/roots/actions 的确认 token，apply 执行全量预检、逐目标 receipt、fail-fast、resume 和单目标 rollback；不自动 commit/push。
 
 技能投影：
   .\skills.ps1 构建生效

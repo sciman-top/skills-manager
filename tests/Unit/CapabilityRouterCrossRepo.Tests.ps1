@@ -73,17 +73,15 @@ description: >-
         $domains.catalog_path | Should -Match 'capability-router[\\/]catalog\.json$'
         $domains.catalog.status | Should -Be 'current'
         @($domains.discovery_domains.name) | Should -Contain 'engineering'
-        $domains.automatic_dispatch.scope | Should -Be 'all_catalog_skills'
-        $domains.retrieval.strategy | Should -Be 'global_catalog_discovery'
+        $domains.decision_owner | Should -Be 'host_ai'
+        $domains.semantic_routing_performed | Should -Be $false
+        $domains.retrieval.strategy | Should -Be 'catalog_discovery'
         @($domains.retrieval.candidates.name) | Should -Contain 'codebase-design'
         @($candidates.retrieval.candidates.name) | Should -Contain 'codebase-design'
         $candidate = @($candidates.retrieval.candidates | Where-Object name -eq 'codebase-design')[0]
         $candidate.path | Should -Be (Join-Path $portableRoot 'codebase-design\SKILL.md')
         $candidate.description | Should -Be 'Design module boundaries, stable interfaces, and an evidence-based target architecture.'
         $candidate.load_side_effect | Should -Be 'read_only'
-        $candidates.manifest_path | Should -BeNullOrEmpty
-        $candidates.config_path | Should -BeNullOrEmpty
-        $candidates.policy_path | Should -BeNullOrEmpty
         $candidates.writes_performed | Should -Be $false
     }
 

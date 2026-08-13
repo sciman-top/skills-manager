@@ -3,8 +3,6 @@ function New-NativeSkillProjectionRuntimePlan {
     param(
         [Parameter(Mandatory = $true)][string]$ManagedRoot,
         [Parameter(Mandatory = $true)]$Config,
-        [Parameter(Mandatory = $true)]$Snapshot,
-        $Policy = $null,
         [string[]]$IncludedNames = @(),
         [string[]]$ExcludedNames = @(),
         [string]$GeneratedAt = ([DateTimeOffset]::UtcNow.ToString('o'))
@@ -56,12 +54,7 @@ function New-NativeSkillProjectionRuntimePlan {
     $eligibility = @($catalog.entries | ForEach-Object {
             Evaluate-SkillEligibility -Skill $_ -Surface 'native_discovery' -AllowedRoots @($root) -AvailableDependencies $availableNames
         })
-    $metadata = Plan-NativeMetadata -Inventory $catalog -Snapshot $Snapshot -Policy $Policy
-    $metadataContract = Test-NativeMetadataPlanContract $metadata
-    if (-not [bool]$metadataContract.pass) {
-        throw ('Native metadata plan contract failed: {0}' -f (@($metadataContract.findings | ForEach-Object code) -join ', '))
-    }
-    $plan = New-NativeSkillProjectionPlan -Catalog $catalog -Eligibility $eligibility -MetadataPlan $metadata -Config $Config
+    $plan = New-NativeSkillProjectionPlan -Catalog $catalog -Eligibility $eligibility -Config $Config
     $planContract = Test-NativeSkillProjectionPlanContract $plan
     if (-not [bool]$planContract.pass) {
         throw ('Native projection plan contract failed: {0}' -f (@($planContract.findings | ForEach-Object code) -join ', '))

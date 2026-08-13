@@ -256,12 +256,6 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
     $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
     Need (Test-Path -LiteralPath $managedRoot -PathType Container) ("受管技能源不存在：{0}" -f $managedRoot)
 
-    $policy = $null
-    if ($projectionCfg.PSObject.Properties.Match('routing_policy_path').Count -gt 0) {
-        $policyPath = Resolve-SkillProjectionPath ([string]$projectionCfg.routing_policy_path)
-        if (Test-Path -LiteralPath $policyPath -PathType Leaf) { $policy = Get-ContentUtf8 $policyPath | ConvertFrom-Json }
-    }
-
     $domainPurpose = [ordered]@{}
     $membership = @{}
     $fallbackDomain = 'other'
@@ -332,14 +326,13 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
         $domainRows.Add([ordered]@{ name = $fallbackDomain; purpose = $fallbackPurpose; skill_names = $fallbackNames }) | Out-Null
     }
 
-    $capabilities = if ($null -ne $policy) { @($policy.capabilities | Sort-Object kind, name) } else { @() }
     $catalog = [ordered]@{
         schema_version = 1
         decision_owner = 'host_ai'
         semantic_routing_performed = $false
         domains = @($domainRows.ToArray() | Sort-Object name)
         skills = @($skills.ToArray() | Sort-Object name)
-        capabilities = $capabilities
+        capabilities = @()
     }
     $catalog.catalog_fingerprint = Get-CapabilityCatalogTextSha256 ($catalog | ConvertTo-Json -Depth 20 -Compress)
     return $catalog
@@ -518,14 +511,8 @@ function New-SkillProjectionPlan($projectionCfg) {
         }
     }
 
-    $budgetLimitChars = if ($projectionCfg.PSObject.Properties.Match("budget_limit_chars").Count -gt 0) { [int]$projectionCfg.budget_limit_chars } else { 8000 }
-    $externalReserveChars = if ($projectionCfg.PSObject.Properties.Match("external_metadata_reserve_chars").Count -gt 0) { [int]$projectionCfg.external_metadata_reserve_chars } else { 0 }
-    $budgetWarningThresholdPercent = 90
-    Need ($budgetLimitChars -gt 0) "skill_projection.budget_limit_chars 必须大于 0"
-    Need ($externalReserveChars -ge 0) "skill_projection.external_metadata_reserve_chars 不能小于 0"
     $externalInventory = Get-CodexExternalSkillInventory $projectionCfg
     $externalSkillMetadataChars = [int]$externalInventory.metadata_chars
-    $effectiveExternalMetadataChars = [Math]::Max($externalReserveChars, $externalSkillMetadataChars)
 
     $active = New-Object System.Collections.Generic.List[object]
     foreach ($entry in @($canonical.ToArray() | Sort-Object name)) {
@@ -555,9 +542,7 @@ function New-SkillProjectionPlan($projectionCfg) {
     foreach ($entry in @($active.ToArray())) {
         $skillMetadataChars += ([string]$entry.name).Length + ([string]$entry.description).Length
     }
-    $estimatedMetadataChars = $skillMetadataChars + $effectiveExternalMetadataChars
-    $budgetPass = $estimatedMetadataChars -le $budgetLimitChars
-    $budgetWarning = $budgetPass -and (($estimatedMetadataChars * 100) -ge ($budgetLimitChars * $budgetWarningThresholdPercent))
+    $estimatedMetadataChars = $skillMetadataChars + $externalSkillMetadataChars
 
     return [pscustomobject]([ordered]@{
         schema_version = 2
@@ -572,16 +557,9 @@ function New-SkillProjectionPlan($projectionCfg) {
         active_names = @($active.ToArray() | ForEach-Object { [string]$_.name } | Sort-Object)
         duplicate_name_groups = $duplicateGroups
         skill_metadata_chars = $skillMetadataChars
-        external_metadata_reserve_chars = $externalReserveChars
         external_skill_count = [int]$externalInventory.skill_count
         external_skill_metadata_chars = $externalSkillMetadataChars
-        effective_external_metadata_chars = $effectiveExternalMetadataChars
         estimated_metadata_chars = $estimatedMetadataChars
-        budget_limit_chars = $budgetLimitChars
-        effective_budget_limit_chars = $budgetLimitChars
-        budget_warning_threshold_percent = $budgetWarningThresholdPercent
-        budget_warning = $budgetWarning
-        budget_pass = $budgetPass
         external_skills = @($externalInventory.skills)
         external_inventory_warnings = @($externalInventory.warnings)
     })
@@ -978,12 +956,7 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
         $includedNames = @((Get-CfgObjectProperty $projectionCfg 'managed_link_includes') | ForEach-Object { [string]$_ })
         $excludedNames = @((Get-CfgObjectProperty $projectionCfg 'managed_link_excludes') | ForEach-Object { [string]$_ })
         $capturedAt = [DateTimeOffset]::UtcNow.ToString('o')
-        # The repository cannot prove live host capabilities. Use the planner's
-        # conservative fallback instead of maintaining a synthetic host snapshot.
-        $snapshot = [pscustomobject]@{ capabilities = [pscustomobject]@{} }
-        $policyPath = Join-Path $Root 'config\native-skill-metadata-policy.json'
-        $policy = if (Test-Path -LiteralPath $policyPath -PathType Leaf) { Get-ContentUtf8 $policyPath | ConvertFrom-Json } else { Get-DefaultNativeMetadataPolicy }
-        $nativeProjectionPlan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $managedRoot -Config ([pscustomobject]@{ skill_projection = $projectionCfg }) -Snapshot $snapshot -Policy $policy -IncludedNames $includedNames -ExcludedNames $excludedNames -GeneratedAt $capturedAt
+        $nativeProjectionPlan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $managedRoot -Config ([pscustomobject]@{ skill_projection = $projectionCfg }) -IncludedNames $includedNames -ExcludedNames $excludedNames -GeneratedAt $capturedAt
         Need ([string]$nativeProjectionPlan.status -eq 'ready' -and [bool]$nativeProjectionPlan.pass) ("native skill projection blocked: enabled={0}, kept={1}, omitted={2}" -f [int]$nativeProjectionPlan.enabled_total, [int]$nativeProjectionPlan.kept_total, [int]$nativeProjectionPlan.omitted_total)
         $nativeProjectionAuthoritative = $true
         if ($DryRun) {
@@ -999,12 +972,6 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
     }
     $plan = New-SkillProjectionPlan $projectionCfg
     if ([bool]$plan.enabled) {
-        if (-not $nativeProjectionAuthoritative) {
-            Need ([bool]$plan.budget_pass) ("技能描述预算超限：estimated={0}, limit={1}" -f [int]$plan.estimated_metadata_chars, [int]$plan.effective_budget_limit_chars)
-        }
-        if ([bool]$plan.budget_warning) {
-            Log ("技能描述预算接近上限：estimated={0}, limit={1}, threshold={2}%" -f [int]$plan.estimated_metadata_chars, [int]$plan.effective_budget_limit_chars, [int]$plan.budget_warning_threshold_percent) "WARN" -NoHost
-        }
     }
 
     $existing = if (Test-Path -LiteralPath $configPath -PathType Leaf) { Get-ContentUtf8 $configPath } else { "" }
@@ -1042,16 +1009,9 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
                 disabled_path_count = @($plan.disabled).Count
                 conflict_count = @($plan.conflicts).Count
                 skill_metadata_chars = [int]$plan.skill_metadata_chars
-                external_metadata_reserve_chars = [int]$plan.external_metadata_reserve_chars
                 external_skill_count = [int]$plan.external_skill_count
                 external_skill_metadata_chars = [int]$plan.external_skill_metadata_chars
-                effective_external_metadata_chars = [int]$plan.effective_external_metadata_chars
                 estimated_metadata_chars = [int]$plan.estimated_metadata_chars
-                budget_limit_chars = [int]$plan.budget_limit_chars
-                effective_budget_limit_chars = [int]$plan.effective_budget_limit_chars
-                budget_warning_threshold_percent = [int]$plan.budget_warning_threshold_percent
-                budget_warning = [bool]$plan.budget_warning
-                budget_pass = [bool]$plan.budget_pass
                 external_skills = @($plan.external_skills)
                 external_inventory_warnings = @($plan.external_inventory_warnings)
                 skills = @($plan.skills)

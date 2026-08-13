@@ -87,10 +87,6 @@ function Get-RuleEstateReviewControlInputs([string]$ReviewPath) {
     if(-not [IO.File]::Exists($reviewFile)){return @($inputs.ToArray())}
     try{$review=[IO.File]::ReadAllText($reviewFile)|ConvertFrom-Json}catch{return @($inputs.ToArray())}
     $reviewRoot=[IO.Path]::GetDirectoryName($reviewFile)
-    $authorization=[string](Get-RuleEstateProperty $review 'authorization_receipt')
-    if(-not [string]::IsNullOrWhiteSpace($authorization)){
-        try{$inputs.Add([IO.Path]::GetFullPath((Join-Path $reviewRoot $authorization)))|Out-Null}catch{}
-    }
     foreach($change in @(Get-RuleEstateProperty $review 'changes')){
         $desired=[string](Get-RuleEstateProperty $change 'desired_file')
         if([string]::IsNullOrWhiteSpace($desired)){continue}
@@ -103,8 +99,6 @@ function Get-RuleEstatePlanControlInputs($Plan) {
     $inputs=New-Object System.Collections.Generic.List[string]
     $review=Get-RuleEstateProperty $Plan 'review';$reviewPath=[string](Get-RuleEstateProperty $review 'path')
     foreach($path in @(Get-RuleEstateReviewControlInputs $reviewPath)){if(-not [string]::IsNullOrWhiteSpace($path)){$inputs.Add($path)|Out-Null}}
-    $authorizationPath=[string](Get-RuleEstateProperty (Get-RuleEstateProperty $Plan 'authorization') 'path')
-    if(-not [string]::IsNullOrWhiteSpace($authorizationPath)){$inputs.Add([IO.Path]::GetFullPath($authorizationPath))|Out-Null}
     foreach($action in @(Get-RuleEstateProperty $Plan 'actions')){
         $targetPath=[string](Get-RuleEstateProperty $action 'target_path')
         if(-not [string]::IsNullOrWhiteSpace($targetPath)){$inputs.Add([IO.Path]::GetFullPath($targetPath))|Out-Null}

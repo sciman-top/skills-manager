@@ -7,11 +7,14 @@ Describe 'GitHub CI workflow supply-chain contract' {
     It 'pins checkout and the Pester package bytes and bounds job runtime' {
         $script:workflow | Should -Match 'timeout-minutes:\s*20'
         $script:workflow | Should -Match 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
-        $script:workflow | Should -Match 'Pester/6\.1\.0'
-        $script:workflow | Should -Match '0207a75ea09f81b27c1ded44898b2bb3c845bafa02045bd64a39e26a53ca41b4'
-        $script:workflow | Should -Match 'Get-FileHash[^\r\n]+SHA256'
-        $script:workflow | Should -Match 'GITHUB_ENV'
-        $script:workflow | Should -Match '(?s)Rebuild locked skill sources.*skills\.ps1 更新 -Locked -SkipHostProjection.*Run repository full quality gate'
+        $script:workflow | Should -Match 'ensure-test-runtime\.ps1 -CacheRoot \$env:RUNNER_TEMP -ExportToGitHubEnv'
+        $bootstrap = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\quality\ensure-test-runtime.ps1') -Raw
+        $bootstrap | Should -Match 'Pester/\$version'
+        $bootstrap | Should -Match '0207a75ea09f81b27c1ded44898b2bb3c845bafa02045bd64a39e26a53ca41b4'
+        $bootstrap | Should -Match 'Get-FileHash[^\r\n]+SHA256'
+        $bootstrap | Should -Match '(?s)Get-FileHash.*ExtractToDirectory.*Move-Item -LiteralPath \$extractRoot -Destination \$moduleRoot'
+        $bootstrap | Should -Match 'PESTER_610_MANIFEST'
+        $script:workflow | Should -Match '(?s)Rebuild locked skill sources.*skills\.ps1 更新 -Locked -SkipHostProjection.*Run repository proportional quality gate'
         $script:workflow | Should -Not -Match 'SkipPublisherCheck'
     }
 
@@ -19,9 +22,10 @@ Describe 'GitHub CI workflow supply-chain contract' {
         $script:workflow | Should -Match '(?ms)^on:\s*\r?\n\s+push:\s*\r?\n\s+branches:\s*\r?\n\s+- main\s*\r?\n\s+tags:\s*\r?\n\s+- ''\*''\s*\r?\n\s+pull_request:\s*$'
     }
 
-    It 'runs the repository gate once in clean CI' {
-        $script:workflow | Should -Match '(?s)- name: Run repository full quality gate\s+shell: pwsh\s+run: \.\\scripts\\quality\\run-local-quality-gates\.ps1 -Profile full'
-        $script:workflow | Should -Not -Match '(?s)- name: Run repository full quality gate\s+shell: pwsh\s+env:'
+    It 'runs full for PR and tags, and quick for the post-merge main push' {
+        $script:workflow | Should -Match "github\.event_name.*pull_request.*refs/tags/.*full.*quick"
+        $script:workflow | Should -Match 'run-local-quality-gates\.ps1 -Profile \$profile'
+        @([regex]::Matches($script:workflow, 'run-local-quality-gates\.ps1')).Count | Should -Be 1
     }
 
     It 'keeps tests read-only and grants release write access only to the tag job' {

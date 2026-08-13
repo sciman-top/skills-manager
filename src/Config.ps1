@@ -402,10 +402,6 @@ function Get-CfgContractErrors($cfg) {
         if ($null -ne $projectionEnabled -and $projectionEnabled -isnot [bool]) {
             $errors.Add("skill_projection.enabled 必须是布尔值") | Out-Null
         }
-        $routingPolicyPath = [string](Get-CfgObjectProperty $skillProjection "routing_policy_path")
-        if ((Test-CfgObjectProperty $skillProjection "routing_policy_path") -and [string]::IsNullOrWhiteSpace($routingPolicyPath)) {
-            $errors.Add("skill_projection.routing_policy_path 不能为空") | Out-Null
-        }
         $externalInventory = Get-CfgObjectProperty $skillProjection "external_skill_inventory"
         if ($null -ne $externalInventory) {
             if ($externalInventory -isnot [pscustomobject] -and $externalInventory -isnot [System.Collections.IDictionary]) {
@@ -1058,9 +1054,6 @@ function Assert-Cfg($cfg) {
         if ($projection.PSObject.Properties.Match("enabled").Count -gt 0) {
             Need ($projection.enabled -is [bool]) "skill_projection.enabled 必须是布尔值"
         }
-        if ($projection.PSObject.Properties.Match("routing_policy_path").Count -gt 0) {
-            Need (-not [string]::IsNullOrWhiteSpace([string]$projection.routing_policy_path)) "skill_projection.routing_policy_path 不能为空"
-        }
         if ($projection.PSObject.Properties.Match("external_skill_inventory").Count -gt 0 -and $null -ne $projection.external_skill_inventory) {
             $externalInventory = $projection.external_skill_inventory
             Need ($externalInventory -is [pscustomobject] -or $externalInventory -is [System.Collections.IDictionary]) "skill_projection.external_skill_inventory 必须是对象"
@@ -1118,12 +1111,6 @@ function Assert-Cfg($cfg) {
             }
             $dupAliases = @(Get-DuplicateValues ($projection.aliases | ForEach-Object { ([string]$_.name).ToLowerInvariant() }))
             Need ($dupAliases.Count -eq 0) ("skill_projection alias 重复：{0}" -f ($dupAliases -join ", "))
-        }
-        if ($projection.PSObject.Properties.Match("budget_limit_chars").Count -gt 0) {
-            Need ([int]$projection.budget_limit_chars -gt 0) "skill_projection.budget_limit_chars 必须大于 0"
-        }
-        if ($projection.PSObject.Properties.Match("external_metadata_reserve_chars").Count -gt 0) {
-            Need ([int]$projection.external_metadata_reserve_chars -ge 0) "skill_projection.external_metadata_reserve_chars 不能小于 0"
         }
     }
 

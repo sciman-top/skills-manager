@@ -25,42 +25,19 @@ jobs:
           if ($PSVersionTable.PSVersion.Major -lt 7) { throw "PowerShell 7+ is required for authoritative gates." }
           $PSVersionTable.PSVersion.ToString()
 
-      - name: Install pinned Pester test runtime
+      - name: Ensure pinned Pester test runtime
         shell: pwsh
-        run: |
-          $packageUri = 'https://www.powershellgallery.com/api/v2/package/Pester/6.1.0'
-          $expectedSha256 = '0207a75ea09f81b27c1ded44898b2bb3c845bafa02045bd64a39e26a53ca41b4'
-          $packagePath = Join-Path $env:RUNNER_TEMP 'Pester.6.1.0.nupkg'
-          $moduleBase = Join-Path $env:RUNNER_TEMP 'verified-modules'
-          $moduleRoot = Join-Path $moduleBase 'Pester\6.1.0'
-
-          Invoke-WebRequest -Uri $packageUri -OutFile $packagePath -UseBasicParsing
-          $actualSha256 = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actualSha256 -cne $expectedSha256) {
-            throw "Pester package hash mismatch: expected=$expectedSha256 actual=$actualSha256"
-          }
-          if (Test-Path -LiteralPath $moduleRoot) {
-            throw "Refusing to overwrite an existing module path: $moduleRoot"
-          }
-
-          $null = New-Item -ItemType Directory -Path $moduleRoot -Force
-          [System.IO.Compression.ZipFile]::ExtractToDirectory($packagePath, $moduleRoot)
-          $manifest = Join-Path $moduleRoot 'Pester.psd1'
-          Import-Module -Name $manifest -Force
-          if ((Get-Module Pester).Version -ne [version]'6.1.0') {
-            throw 'Verified Pester 6.1.0 did not load.'
-          }
-
-                "PSModulePath=$moduleBase$([System.IO.Path]::PathSeparator)$env:PSModulePath" |
-                  Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+        run: .\scripts\quality\ensure-test-runtime.ps1 -CacheRoot $env:RUNNER_TEMP -ExportToGitHubEnv
 
       - name: Rebuild locked skill sources
         shell: pwsh
         run: .\skills.ps1 更新 -Locked -SkipHostProjection
 
-      - name: Run repository full quality gate
+      - name: Run repository proportional quality gate
         shell: pwsh
-        run: .\scripts\quality\run-local-quality-gates.ps1 -Profile full
+        run: |
+          $profile = if ('${{ github.event_name }}' -eq 'pull_request' -or '${{ github.ref }}'.StartsWith('refs/tags/')) { 'full' } else { 'quick' }
+          .\scripts\quality\run-local-quality-gates.ps1 -Profile $profile
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

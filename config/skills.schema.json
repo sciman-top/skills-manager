@@ -119,11 +119,8 @@
         "managed_source_path": { "type": "string" },
         "user_skill_root": { "type": "string" },
         "native_projection": { "$ref": "#/$defs/nativeProjection" },
-        "routing_policy_path": { "type": "string", "minLength": 1 },
         "managed_link_includes": { "$ref": "#/$defs/stringArray" },
         "managed_link_excludes": { "$ref": "#/$defs/stringArray" },
-        "budget_limit_chars": { "type": "integer", "minimum": 1 },
-        "external_metadata_reserve_chars": { "type": "integer", "minimum": 0 },
         "external_skill_inventory": {
           "type": "object",
           "additionalProperties": true,

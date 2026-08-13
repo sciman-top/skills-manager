@@ -59,13 +59,13 @@ Recommendations 是数据，不是授权。apply 重新读取 current config 与
 
 ### Skill projection
 
-- Interface：canonical inventory、metadata plan、projection plan/apply、`capability-inventory`
-- Implementation：`src/Domain/SkillCatalog.ps1`、`src/Application/Skill*`、`NativeMetadataPlanner.ps1`、`src/Commands/SkillProjection.ps1`
+- Interface：canonical inventory、projection plan/apply、`capability-inventory`
+- Implementation：`src/Domain/SkillCatalog.ps1`、`src/Application/Skill*`、`src/Commands/SkillProjection.ps1`。宿主原生负责 description 截断与 metadata budget；本仓只管理 eligibility、路径、投影、ownership 与回滚。
 - Runtime outputs：`reports/skill-projection/*.json` 与受管 user skill links
 
-Canonical inventory 统一来源与 alias；eligibility 处理 enabled/dependency/placement；metadata planner 处理宿主预算；projection transaction 只管理 owner 标记的 links，外部 skill 永不被当作受管资产删除。
+Canonical inventory 统一来源与 alias；eligibility 处理 enabled/dependency/placement；宿主原生处理 metadata budget 与 description 截断；projection transaction 只管理 owner 标记的 links，外部 skill 永不被当作受管资产删除。
 
-`capability-router` 是显式 fallback adapter。它从 portable catalog 或显式 manifest/config 读取候选，按 `DomainHint` 限定集合，并对宿主提供的 Candidate 做确定性 containment、availability、side-effect 和 approval 校验。语义选择始终属于宿主。
+`capability-router` 是显式 fallback adapter。它从 portable catalog 读取候选，按 `DomainHint` 限定集合，并对宿主提供的 Candidate 做确定性 existence、containment、entrypoint hash、availability 与 side-effect disclosure 校验。它不维护 session、preheat、activation plan 或 MCP/plugin 编排；语义选择始终属于宿主。
 
 ### Reference shelf
 

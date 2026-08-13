@@ -53,7 +53,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 - `mappings`：安装白名单与输出名
 - `targets`：生成技能的目标目录
 - `mcp_servers` / `mcp_profiles` / `mcp_targets`：MCP 清单与同步目标
-- `skill_projection`：技能来源、别名、domain catalog、metadata budget 和 native placement
+- `skill_projection`：技能来源、别名、domain catalog 和 native placement；metadata budget 与 description 截断由宿主原生处理
 
 `skills.lock.json` 锁定已解析来源。`src/` 是 CLI 源码，`build.ps1` 生成根 `skills.ps1`；`overrides/{custom,patches,resources}` 生成 `agent/`。不要手改 `skills.ps1`、`agent/`、`vendor/` 或运行态 `reports/`。
 
@@ -109,10 +109,10 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 rule-apply --plan <plan.json> --repo-root <repo> --token APPLY_RULE_REPO_PATCH --json
 .\skills.ps1 rule-estate-audit --workspace-root D:\CODE --json
 .\skills.ps1 rule-estate-plan --review <reviewed-change-set.json> --workspace-root D:\CODE --out <plan.json> --json
-.\skills.ps1 rule-estate-apply --plan <plan.json> --workspace-root D:\CODE --token APPLY_RULE_ESTATE_PATCH --json
+.\skills.ps1 rule-estate-apply --plan <plan.json> --workspace-root D:\CODE --token <plan.apply.required_token> --json
 ```
 
-审查默认只读。单仓和全域写入都要求 reviewed input、精确根目录、before hash、显式 token、receipt 与回滚入口；全域事务逐目标 fail-fast，不承诺跨仓原子性。
+审查默认只读。全域 plan 从 reviewed input、精确 roots、target set 与 actions 生成 plan-bound 显式确认 token；apply 仍校验 before hash、路径、锁与 TOCTOU，并保留 receipt、resume 和逐目标回滚。全域事务逐目标 fail-fast，不承诺跨仓原子性。
 
 ### 技能投影与 fallback
 
@@ -138,12 +138,14 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 ```powershell
 pwsh -NoProfile -File .\build.ps1
+pwsh -NoProfile -File .\tests\run.ps1
 pwsh -NoProfile -File .\scripts\verify-skill-integrity.ps1
 pwsh -NoProfile -File .\scripts\verify-skills-config.ps1 -Mode enforce
 git diff --check
 ```
 
 按风险选择 closeout：普通切片跑受影响测试；runtime、安全、数据、迁移、公开契约、依赖或打包变更才跑一次 full gate。
+测试入口会在 ignored `reports/test-runtime/` 中按固定 SHA-256 准备 Pester 6.1.0，不要求全局安装模块；CI 复用同一 bootstrap。
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree

@@ -20,9 +20,12 @@ Contributions may change code, tests, documentation, gates, release tooling, ski
 
 ```powershell
 pwsh -NoProfile -File .\build.ps1
+pwsh -NoProfile -File .\tests\run.ps1
 pwsh -NoProfile -File .\scripts\verify-skill-integrity.ps1
 pwsh -NoProfile -File .\scripts\verify-skills-config.ps1 -Mode enforce
 ```
+
+`tests/run.ps1` uses the repository bootstrap to fetch hash-pinned Pester 6.1.0 into ignored `reports/test-runtime/`; do not install or mutate a global PowerShell module for this repository.
 
 For a risk-triggered full closeout:
 

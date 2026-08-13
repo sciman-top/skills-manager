@@ -42,18 +42,16 @@ Describe 'Skill projection' {
         @($plan.disabled | Where-Object decision -eq 'alias_replaced').name | Should -Be 'social-content'
     }
 
-    It 'uses one global metadata budget' {
+    It 'reports inventory size without enforcing a second host metadata budget' {
         $root = Join-Path $TestDrive 'budget'
         New-ProjectionSkill $root 'large' 'large' ('x' * 80) | Out-Null
         $plan = New-SkillProjectionPlan ([pscustomobject]@{
-                budget_limit_chars = 20
-                external_metadata_reserve_chars = 0
                 sources = @([pscustomobject]@{ id = 'source'; path = $root; priority = 1; platforms = @('codex') })
             })
 
-        $plan.budget_pass | Should -Be $false
-        $plan.effective_budget_limit_chars | Should -Be 20
-        $plan.PSObject.Properties.Match('profile_budgets').Count | Should -Be 0
+        $plan.estimated_metadata_chars | Should -BeGreaterThan 80
+        $plan.PSObject.Properties.Match('budget_pass').Count | Should -Be 0
+        $plan.PSObject.Properties.Match('budget_limit_chars').Count | Should -Be 0
     }
 
     It 'replaces only the managed TOML block' {

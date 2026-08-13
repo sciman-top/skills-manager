@@ -17,7 +17,6 @@ $Files = @(
     "Application/CapabilityInventory.ps1",
     "Application/SkillCatalogCompiler.ps1",
     "Application/SkillEligibilityPolicy.ps1",
-    "Application/NativeMetadataPlanner.ps1",
     "Application/SkillProjection.ps1",
     "Application/NativeSkillProjection.ps1",
     "Application/NativeSkillProjectionCoordinator.ps1",
