@@ -116,17 +116,17 @@ unified_exec = true
         finally { $script:DryRun = $oldDryRun }
     }
 
-    It 'rolls back links, config, catalog, and manifest after an aggregate write failure' {
+    It 'rolls back links, config, neutral catalog, and manifest after an aggregate write failure' {
         $oldDryRun = $script:DryRun
         try {
             $script:DryRun = $false
             $managed = Join-Path $TestDrive 'rollback-managed'
             $target = Join-Path $TestDrive 'rollback-target'
-            $router = New-ProjectionSkill $managed 'capability-router' 'capability-router'
+            New-ProjectionSkill $managed 'capability-router' 'capability-router' | Out-Null
             New-ProjectionSkill $managed 'demo' 'demo' | Out-Null
             $configPath = Join-Path $TestDrive 'rollback\config.toml'
             $manifestPath = Join-Path $TestDrive 'rollback\manifest.json'
-            $catalogPath = Join-Path $router 'catalog.json'
+            $catalogPath = Join-Path $managed '.skills-manager\catalog.json'
             Set-ContentUtf8 $catalogPath 'catalog-before'
             Set-ContentUtf8 $configPath 'model = "fixture"'
             Set-ContentUtf8 $manifestPath 'manifest-before'
@@ -136,6 +136,7 @@ unified_exec = true
                 codex_config_path = $configPath
                 manifest_path = $manifestPath
                 sources = @([pscustomobject]@{ id = 'managed'; path = $target; priority = 1; platforms = @('codex') })
+                discovery_catalog = [pscustomobject]@{ catalog_path = $catalogPath }
             }
             Mock Set-ContentUtf8 { throw 'injected manifest write failure' } -ParameterFilter {
                 [string]::Equals([IO.Path]::GetFullPath($path), [IO.Path]::GetFullPath($manifestPath), [StringComparison]::OrdinalIgnoreCase)

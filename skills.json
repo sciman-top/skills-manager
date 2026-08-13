@@ -52,6 +52,7 @@
       }
     ],
     "discovery_catalog": {
+      "catalog_path": "agent/.skills-manager/catalog.json",
       "fallback_domain": "other",
       "fallback_purpose": "Installed cold skills not assigned to a narrower domain; inspect only when no specific domain covers the request.",
       "domain_memberships": {
@@ -173,11 +174,6 @@
     },
     {
       "ref": "main",
-      "name": "skills",
-      "repo": "https://github.com/openai/skills.git"
-    },
-    {
-      "ref": "main",
       "name": "agent-skills",
       "repo": "https://github.com/vercel-labs/agent-skills.git"
     },
@@ -242,26 +238,6 @@
       "from": "skills\\verification-before-completion",
       "to": "superpowers-skills-verification-before-completion",
       "vendor": "superpowers"
-    },
-    {
-      "from": "skills\\.curated\\playwright",
-      "to": "skills-skills-.curated-playwright",
-      "vendor": "skills"
-    },
-    {
-      "from": "skills\\.curated\\screenshot",
-      "to": "skills-skills-.curated-screenshot",
-      "vendor": "skills"
-    },
-    {
-      "from": "skills\\.curated\\security-best-practices",
-      "to": "skills-skills-.curated-security-best-practices",
-      "vendor": "skills"
-    },
-    {
-      "from": "skills\\.curated\\transcribe",
-      "to": "skills-skills-.curated-transcribe",
-      "vendor": "skills"
     },
     {
       "from": "skills\\test-driven-development",

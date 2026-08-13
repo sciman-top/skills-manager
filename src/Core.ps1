@@ -1083,7 +1083,7 @@ function Resolve-AddTokensFromAnyFormat([string[]]$tokens) {
         if ($target -match "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$") {
             return ,@(@($target) + @($rest | Select-Object -Skip 1))
         }
-        return ,@(@("https://github.com/openai/skills.git", "--skill", ("skills/.curated/{0}" -f $target)) + @($rest | Select-Object -Skip 1))
+        throw '$skill-installer 的 bare skill name 已退役；请提供 owner/repo 或完整 GitHub tree URL，以便锁定真实来源。'
     }
 
     $treeTokens = Convert-GitHubTreeUrlToAddTokens $first

@@ -770,11 +770,8 @@ Describe "Core Functions" {
             }
         }
 
-        It 'Resolves $skill-installer bare curated skill name' {
-            $tokens = Resolve-AddTokensFromAnyFormat @('$skill-installer', "gh-address-comments")
-            $tokens[0] | Should Be "https://github.com/openai/skills.git"
-            $tokens[1] | Should Be "--skill"
-            $tokens[2] | Should Be "skills/.curated/gh-address-comments"
+        It 'rejects $skill-installer bare names without inventing a deprecated source' {
+            { Resolve-AddTokensFromAnyFormat @('$skill-installer', "gh-address-comments") } | Should Throw
         }
     }
 

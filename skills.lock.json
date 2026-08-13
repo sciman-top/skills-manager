@@ -33,12 +33,6 @@
       "commit": "7868cb9251fad80a73d26e488a5ad5f6c4a9f335"
     },
     {
-      "name": "skills",
-      "repo": "https://github.com/openai/skills.git",
-      "ref": "main",
-      "commit": "49f948faa9258a0c61caceaf225e179651397431"
-    },
-    {
       "name": "skills-2",
       "repo": "https://github.com/remotion-dev/skills.git",
       "ref": "main",

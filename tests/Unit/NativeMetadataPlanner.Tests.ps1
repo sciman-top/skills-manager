@@ -131,7 +131,7 @@ Describe 'Native metadata planner' {
         $result.compaction.after_cost | Should Not BeGreaterThan $result.budget.usable_tokens
     }
 
-    It 'fails closed with exact offenders when compaction cannot fit every enabled item' {
+    It 'reports exact budget offenders without truncating advisory metadata' {
         $planner = Get-Command Plan-NativeMetadata -ErrorAction SilentlyContinue
         $planner | Should Not BeNullOrEmpty
         if ($null -eq $planner) { return }
@@ -143,13 +143,15 @@ Describe 'Native metadata planner' {
             ) }
         $result = Plan-NativeMetadata -Inventory $inventory -Snapshot (New-TestMetadataSnapshot 100 $null) -Policy (New-TestMetadataPolicy)
 
-        $result.pass | Should Be $false
-        $result.truncated | Should Be $true
-        $result.block_reason | Should Be 'metadata_budget_overflow'
+        $result.pass | Should Be $true
+        $result.status | Should Be 'ready'
+        $result.budget_fit | Should Be $false
+        $result.truncated | Should Be $false
+        $result.block_reason | Should Be $null
         $result.enabled_total | Should Be 2
-        $result.kept_total | Should Be 0
-        $result.omitted_total | Should Be 2
-        @($result.omitted) | Should Be @('overflow-a', 'overflow-b')
+        $result.kept_total | Should Be 2
+        $result.omitted_total | Should Be 0
+        @($result.kept) | Should Be @('overflow-a', 'overflow-b')
         @($result.overflow.offenders.name) | Should Be @('overflow-a', 'overflow-b')
         $result.compaction.attempted | Should Be $true
         (Test-NativeMetadataPlanContract $result).pass | Should Be $true

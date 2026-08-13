@@ -1,7 +1,7 @@
 name: CI
 
 permissions:
-  contents: write
+  contents: read
 
 on:
   push:
@@ -62,13 +62,26 @@ jobs:
         shell: pwsh
         run: .\scripts\quality\run-local-quality-gates.ps1 -Profile full
 
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Rebuild locked skill sources
+        shell: pwsh
+        run: .\skills.ps1 更新 -Locked -SkipHostProjection
+
       - name: Build release packages
-        if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         run: .\scripts\release\build-release.ps1 -Version '${{ github.ref_name }}'
 
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}

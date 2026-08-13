@@ -170,10 +170,6 @@ function New-NativeSkillProjectionPlan {
     if (-not $settings.enabled) {
         return New-NativeSkillProjectionBlockedPlan $settings $Catalog $MetadataPlan @() @((New-OperationFinding 'native_projection_disabled' 'error' '$.skill_projection.native_projection.enabled' 'Native projection is disabled.'))
     }
-    if (-not [bool](Get-NativeSkillProjectionProperty $MetadataPlan @('pass'))) {
-        return New-NativeSkillProjectionBlockedPlan $settings $Catalog $MetadataPlan @((Get-NativeSkillProjectionProperty $MetadataPlan @('enabled'))) @((New-OperationFinding 'metadata_plan_blocked' 'error' '$.metadata_plan' 'Native metadata plan is blocked; projection cannot omit enabled metadata.'))
-    }
-
     $entries = @(Get-NativeSkillProjectionProperty $Catalog @('entries'))
     $eligibilityByName = Get-NativeSkillProjectionEligibilityByName $Eligibility
     $entryByName = @{}

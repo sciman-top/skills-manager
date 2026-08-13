@@ -34,7 +34,11 @@ function Find-Catalog {
     if ($explicit) { return $explicit }
     $fromEnv = Resolve-ExistingFile $env:SKILLS_MANAGER_CAPABILITY_CATALOG
     if ($fromEnv) { return $fromEnv }
-    return (Resolve-ExistingFile (Join-Path (Split-Path $PSScriptRoot -Parent) 'catalog.json'))
+    $routerRoot = Split-Path $PSScriptRoot -Parent
+    $managedRoot = Split-Path $routerRoot -Parent
+    $neutral = Resolve-ExistingFile (Join-Path $managedRoot '.skills-manager\catalog.json')
+    if ($neutral) { return $neutral }
+    return (Resolve-ExistingFile (Join-Path $routerRoot 'catalog.json'))
 }
 
 function Find-Manifest {

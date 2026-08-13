@@ -218,6 +218,19 @@ Describe 'Native skill projection plan and transaction' {
         $materialized | Should Not Match ([regex]::Escape([string]$plan.skills[0].metadata.planned_description) + '\r?\n---')
     }
 
+    It 'keeps the complete junction plan when advisory metadata exceeds its observed budget' {
+        $fixture = New-ProjectionFixture
+        $fixture.metadata = Plan-NativeMetadata -Inventory $fixture.catalog -Snapshot (New-ProjectionSnapshot -ContextWindow 100)
+
+        $fixture.metadata.budget_fit | Should Be $false
+        $plan = New-NativeSkillProjectionPlan -Catalog $fixture.catalog -Eligibility $fixture.eligibility -MetadataPlan $fixture.metadata -Config $fixture.config
+
+        $plan.status | Should Be 'ready'
+        $plan.kept_total | Should Be $plan.enabled_total
+        $plan.omitted_total | Should Be 0
+        (Test-NativeSkillProjectionPlanContract $plan).pass | Should Be $true
+    }
+
     It 'requires the explicit apply token and rolls back a partial apply atomically' {
         $fixture = New-ProjectionFixture
         $plan = New-NativeSkillProjectionPlan -Catalog $fixture.catalog -Eligibility $fixture.eligibility -MetadataPlan $fixture.metadata -Config $fixture.config

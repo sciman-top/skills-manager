@@ -255,12 +255,12 @@ function Plan-NativeMetadata {
         $compactionChanged = @($finalItems | Where-Object compacted | ForEach-Object name)
     }
     $finalCost = Get-NativeMetadataMeasuredCost $finalItems $mode
-    $pass = $finalCost -le $usableCost
+    $budgetFit = $finalCost -le $usableCost
     $enabledNames = @($enabledEntries | ForEach-Object { [string](Get-NativeMetadataPlannerProperty $_ @('name', 'id')) })
-    $keptItems = if ($pass) { @($finalItems) } else { @() }
+    $keptItems = @($finalItems)
     $keptNames = @($keptItems | ForEach-Object name)
-    $omittedNames = if ($pass) { @() } else { @($enabledNames) }
-    $offenders = if ($pass) { @() } else {
+    $omittedNames = @()
+    $offenders = if ($budgetFit) { @() } else {
         @($finalItems | ForEach-Object {
                 [pscustomobject][ordered]@{
                     name = [string]$_.name
@@ -282,16 +282,17 @@ function Plan-NativeMetadata {
     }
     $planId = 'nmp-{0}' -f (Get-OperationSha256 ($identity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)
     $findings = New-Object System.Collections.Generic.List[object]
-    if (-not $pass) { $findings.Add((New-OperationFinding 'metadata_budget_overflow' 'error' '$.metadata' 'All enabled metadata could not fit after deterministic compaction.')) | Out-Null }
+    if (-not $budgetFit) { $findings.Add((New-OperationFinding 'metadata_budget_overflow' 'warning' '$.metadata' 'Enabled metadata exceeds the observed budget after deterministic compaction; junction projection remains complete because metadata is advisory.')) | Out-Null }
 
     return [pscustomobject][ordered]@{
         schema_version = 1
         plan_id = $planId
         projection_effect = 'plan_only'
         pass_scope = 'advisory_planning_contract'
-        pass = $pass
-        status = if ($pass) { 'ready' } else { 'blocked' }
-        block_reason = if ($pass) { $null } else { 'metadata_budget_overflow' }
+        pass = $true
+        status = 'ready'
+        block_reason = $null
+        budget_fit = $budgetFit
         budget = [ordered]@{
             mode = $mode
             unit = if ($mode -eq 'tokens') { 'tokens' } else { 'characters' }
@@ -334,7 +335,7 @@ function Plan-NativeMetadata {
         kept_total = $keptItems.Count
         omitted_total = $omittedNames.Count
         disabled_total = @($Inventory.entries | Where-Object { (Test-OperationObjectProperty $_ 'enabled') -and -not [bool](Get-OperationObjectProperty $_ 'enabled') }).Count
-        truncated = (-not $pass)
+        truncated = $false
         token_estimate = if ($mode -eq 'tokens') { $totalTokens } else { $null }
         estimated_token_total = $totalTokens
         character_count = $totalCharacters
@@ -350,7 +351,7 @@ function Plan-NativeMetadata {
         }
         overflow = [ordered]@{
             offenders = [object[]]@($offenders)
-            required = if ($pass) { 0 } else { $finalCost }
+            required = if ($budgetFit) { 0 } else { $finalCost }
             available = $usableCost
             unit = if ($mode -eq 'tokens') { 'tokens' } else { 'characters' }
         }
@@ -394,7 +395,7 @@ function Test-NativeMetadataPlanContract {
     if ($omittedTotal -ne @((Get-OperationObjectProperty $Plan 'omitted')).Count) { $findings.Add((New-OperationFinding 'omitted_count_invalid' 'error' '$.omitted_total' 'omitted_total must match omitted names.')) | Out-Null }
     $pass = [bool](Get-OperationObjectProperty $Plan 'pass')
     if ($pass -and ($keptTotal -ne $enabledTotal -or $omittedTotal -ne 0 -or (Get-OperationObjectProperty $Plan 'truncated') -ne $false)) { $findings.Add((New-OperationFinding 'complete_projection_invalid' 'error' '$' 'A passing plan must keep every enabled item without truncation.')) | Out-Null }
-    if (-not $pass -and ($omittedTotal -eq 0 -or (Get-OperationObjectProperty $Plan 'truncated') -ne $true)) { $findings.Add((New-OperationFinding 'blocked_projection_invalid' 'error' '$' 'A blocked plan must expose explicit omission and truncation.')) | Out-Null }
+    if (-not (Test-OperationObjectProperty $Plan 'budget_fit')) { $findings.Add((New-OperationFinding 'budget_fit_missing' 'error' '$.budget_fit' 'Advisory budget fit must be explicit.')) | Out-Null }
     $budget = Get-OperationObjectProperty $Plan 'budget'
     $mode = [string](Get-OperationObjectProperty $budget 'mode')
     if ($mode -notin @('tokens', 'character_fallback')) { $findings.Add((New-OperationFinding 'budget_mode_invalid' 'error' '$.budget.mode' 'Budget mode is invalid.')) | Out-Null }

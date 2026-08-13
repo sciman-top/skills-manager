@@ -1683,40 +1683,6 @@ function Get-AuditInstalledStateKeywords($installedSkills, $installedMcpServers)
     return (Merge-AuditKeywordSets ($sets.ToArray()) 240)
 }
 
-function Get-AuditKeywordHitDetails([string]$text, [string[]]$keywords, [int]$MaxHits = 6) {
-    $hits = New-Object System.Collections.Generic.List[string]
-    $source = if ([string]::IsNullOrWhiteSpace($text)) { "" } else { $text.ToLowerInvariant() }
-    foreach ($keyword in @(Convert-AuditStringArray $keywords)) {
-        $needle = [string]$keyword
-        if ([string]::IsNullOrWhiteSpace($needle)) { continue }
-        if ($source.Contains($needle.ToLowerInvariant())) {
-            $hits.Add($needle) | Out-Null
-            if ($hits.Count -ge $MaxHits) { break }
-        }
-    }
-    return @($hits)
-}
-
-function Get-AuditInstalledSkillFitSummary($installedSkills, [string[]]$userKeywords, [string[]]$repoKeywords) {
-    $rows = @()
-    foreach ($item in @($installedSkills)) {
-        $text = ("{0} {1} {2}" -f [string]$item.name, [string]$item.description, [string]$item.trigger_summary)
-        $userHits = Get-AuditKeywordHitDetails $text $userKeywords 8
-        $repoHits = Get-AuditKeywordHitDetails $text $repoKeywords 8
-        $rows += [pscustomobject]([ordered]@{
-                name = [string]$item.name
-                vendor = [string]$item.vendor
-                from = [string]$item.from
-                score = @($userHits).Count * 2 + @($repoHits).Count
-                user_hit_count = @($userHits).Count
-                repo_hit_count = @($repoHits).Count
-                user_hits = @($userHits)
-                repo_hits = @($repoHits)
-            })
-    }
-    return @($rows | Sort-Object -Property @{ Expression = { [int]$_.score }; Descending = $true }, @{ Expression = { [int]$_.user_hit_count }; Descending = $true }, @{ Expression = { [string]$_.name } })
-}
-
 function Get-AuditMissingPreferredAgents($cfg, $installedSkills) {
     if ($null -eq $cfg -or $cfg.PSObject.Properties.Match("user_profile").Count -eq 0 -or $null -eq $cfg.user_profile) { return @() }
     if (-not (Test-AuditObjectLike $cfg.user_profile.structured)) { return @() }
@@ -1770,9 +1736,6 @@ function New-AuditDecisionInsights($cfg, $scans, $installedSkills, $installedMcp
         $repoKeywords = @(Merge-AuditKeywordSets @($repoKeywordSets | ForEach-Object { $_.keywords }) 220)
     }
     $installedKeywords = @(Get-AuditInstalledStateKeywords $installedSkills $installedMcpServers)
-    $fitRows = @(Get-AuditInstalledSkillFitSummary $installedSkills $userKeywords $repoKeywords)
-    $topFit = @($fitRows | Select-Object -First 20)
-    $lowFit = @($fitRows | Where-Object { [int]$_.score -le 1 } | Select-Object -First 20)
     $profileOnlyContext = @(Merge-AuditKeywordSets @($userKeywords, $installedKeywords) 180)
     return [pscustomobject]([ordered]@{
             schema_version = 1
@@ -1792,9 +1755,7 @@ function New-AuditDecisionInsights($cfg, $scans, $installedSkills, $installedMcp
                 profile_only_context = @($profileOnlyContext)
             }
             targets = @($repoKeywordSets)
-            fit = [ordered]@{
-                top_installed_skill_matches = @($topFit)
-                low_fit_installed_skills = @($lowFit)
+            explicit_preferences = [ordered]@{
                 missing_preferred_agents = @(Get-AuditMissingPreferredAgents $cfg $installedSkills)
             }
             decision_checklist = @(

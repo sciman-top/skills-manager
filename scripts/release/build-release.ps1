@@ -42,6 +42,82 @@ function Get-TrackedReleaseFiles {
     return @($tracked | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 }
 
+function Get-SkillFrontmatterLicense([string]$SkillPath) {
+    $entrypoint = Join-Path $SkillPath 'SKILL.md'
+    if (-not (Test-Path -LiteralPath $entrypoint -PathType Leaf)) { return '' }
+    $text = Get-Content -LiteralPath $entrypoint -Raw -Encoding utf8
+    $frontmatter = [regex]::Match($text, '(?s)\A---\s*\r?\n(?<yaml>.*?)\r?\n---')
+    if (-not $frontmatter.Success) { return '' }
+    $match = [regex]::Match($frontmatter.Groups['yaml'].Value, '(?m)^license:\s*["'']?(?<value>[^\r\n"'']+)')
+    return $(if ($match.Success) { $match.Groups['value'].Value.Trim() } else { '' })
+}
+
+function Get-PortableThirdPartyNotices([string]$AgentRoot) {
+    $config = Get-Content -LiteralPath (Join-Path $repoRoot 'skills.json') -Raw -Encoding utf8 | ConvertFrom-Json
+    $lock = Get-Content -LiteralPath (Join-Path $repoRoot 'skills.lock.json') -Raw -Encoding utf8 | ConvertFrom-Json
+    $mappings = @{}
+    foreach ($mapping in @($config.mappings)) { $mappings[[string]$mapping.to] = $mapping }
+    $vendors = @{}
+    foreach ($vendor in @($lock.vendors)) { $vendors[[string]$vendor.name] = $vendor }
+    $imports = @{}
+    foreach ($import in @($lock.imports)) { $imports[[string]$import.name] = $import }
+
+    $entries = New-Object Collections.Generic.List[object]
+    foreach ($directory in @(Get-ChildItem -LiteralPath $AgentRoot -Directory -Force | Sort-Object Name)) {
+        if (-not (Test-Path -LiteralPath (Join-Path $directory.FullName 'SKILL.md') -PathType Leaf)) { continue }
+        $mapping = if ($mappings.ContainsKey($directory.Name)) { $mappings[$directory.Name] } else { $null }
+        $source = $null
+        $overrideRelativePath = @(
+            ('overrides/custom/{0}' -f $directory.Name),
+            ('overrides/patches/{0}' -f $directory.Name),
+            ('overrides/resources/{0}' -f $directory.Name),
+            ('overrides/{0}' -f $directory.Name)
+        ) | Where-Object { Test-Path -LiteralPath (Join-Path $repoRoot $_) -PathType Container } | Select-Object -First 1
+        $sourceKind = if ($overrideRelativePath) { 'repository_local' } else { 'unknown_unmapped' }
+        $sourcePath = if ($overrideRelativePath) { [string]$overrideRelativePath } else { $null }
+        if ($null -ne $mapping -and [string]$mapping.vendor -eq 'manual') {
+            $source = $imports[[string]$mapping.from]
+            $sourceKind = 'import'
+            $sourcePath = [string]$source.skill
+        }
+        elseif ($null -ne $mapping -and [string]$mapping.vendor -ne 'overrides') {
+            $source = $vendors[[string]$mapping.vendor]
+            $sourceKind = 'vendor'
+            $sourcePath = [string]$mapping.from
+        }
+        $licenseFiles = @(Get-ChildItem -LiteralPath $directory.FullName -Recurse -File | Where-Object { $_.Name -match '^(LICENSE|LICENCE|COPYING|NOTICE)(\..*)?$' } | Sort-Object FullName | ForEach-Object {
+                [IO.Path]::GetRelativePath($directory.FullName, $_.FullName).Replace('\', '/')
+            })
+        $declaredLicense = Get-SkillFrontmatterLicense $directory.FullName
+        $files = @(Get-ChildItem -LiteralPath $directory.FullName -Recurse -File | Sort-Object FullName | ForEach-Object {
+                '{0}:{1}' -f [IO.Path]::GetRelativePath($directory.FullName, $_.FullName).Replace('\', '/'), (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            })
+        $contentHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes(($files -join "`n")))).ToLowerInvariant()
+        $entries.Add([ordered]@{
+                skill = $directory.Name
+                source_kind = $sourceKind
+                upstream_repo = if ($null -eq $source) { $null } else { [string]$source.repo }
+                upstream_commit = if ($null -eq $source) { $null } else { [string]$source.commit }
+                source_path = if ($null -eq $sourcePath) { $null } else { $sourcePath.Replace('\', '/') }
+                declared_license = if ([string]::IsNullOrWhiteSpace($declaredLicense)) { $null } else { $declaredLicense }
+                license_files = $licenseFiles
+                license_status = if (-not [string]::IsNullOrWhiteSpace($declaredLicense) -or $licenseFiles.Count -gt 0) { 'observed' } else { 'unknown_review_required' }
+                content_sha256 = $contentHash
+            }) | Out-Null
+    }
+    return [ordered]@{
+        schema_version = 1
+        scope = 'portable_agent_skills'
+        policy = 'unknown licenses are explicit review findings and do not block the initial provenance migration'
+        skills = @($entries.ToArray())
+        summary = [ordered]@{
+            total = $entries.Count
+            observed_license = @($entries | Where-Object license_status -eq 'observed').Count
+            unknown_license = @($entries | Where-Object license_status -eq 'unknown_review_required').Count
+        }
+    }
+}
+
 function New-ReleasePackage([string]$Kind) {
     $slug = "skills-manager-$Version-$($Kind.ToLowerInvariant())"
     $packageRoot = Join-Path $workRoot $slug
@@ -65,6 +141,9 @@ function New-ReleasePackage([string]$Kind) {
             throw 'Portable package requires a built agent directory. Run build.ps1 first.'
         }
         Copy-Item -LiteralPath $agentSource -Destination (Join-Path $packageRoot 'agent') -Recurse -Force
+        Get-PortableThirdPartyNotices (Join-Path $packageRoot 'agent') |
+            ConvertTo-Json -Depth 8 |
+            Set-Content -LiteralPath (Join-Path $packageRoot 'THIRD-PARTY-NOTICES.json') -Encoding utf8
     }
 
     $commit = (& git -C $repoRoot rev-parse HEAD).Trim()

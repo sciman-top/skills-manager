@@ -774,6 +774,8 @@ Describe "Audit Targets" {
             $insights.keywords.target_repo | Should Contain "dotnet build"
             $insights.keywords.target_repo | Should Contain "ClassroomToolkit.sln"
             $insights.keywords.target_repo | Should Contain "git_dirty"
+            $insights.PSObject.Properties.Name | Should Not Contain 'fit'
+            @($insights.explicit_preferences.Keys) | Should Contain 'missing_preferred_agents'
         }
 
         It "Includes target repo facts in decision insight keywords when detected uses ordered dictionaries" {

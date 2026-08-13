@@ -22,4 +22,12 @@ Describe 'GitHub CI workflow supply-chain contract' {
         $script:workflow | Should Match '(?s)- name: Run repository full quality gate\s+shell: pwsh\s+run: \.\\scripts\\quality\\run-local-quality-gates\.ps1 -Profile full'
         $script:workflow | Should Not Match '(?s)- name: Run repository full quality gate\s+shell: pwsh\s+env:'
     }
+
+    It 'keeps tests read-only and grants release write access only to the tag job' {
+        $script:workflow | Should Match '(?ms)^permissions:\s*\r?\n\s+contents:\s*read\s*$'
+        $script:workflow | Should Match '(?ms)^  release:\s*\r?\n\s+if: startsWith\(github\.ref, ''refs/tags/v''\)\s*\r?\n\s+needs: test'
+        $script:workflow | Should Match '(?ms)^  release:.*?permissions:\s*\r?\n\s+contents:\s*write'
+        $script:workflow | Should Match '(?s)  release:.*?- name: Rebuild locked skill sources\s+shell: pwsh\s+run: \.\\skills\.ps1 更新 -Locked -SkipHostProjection\s+- name: Build release packages'
+        @([regex]::Matches($script:workflow, '(?m)^\s+contents:\s*write\s*$')).Count | Should Be 1
+    }
 }

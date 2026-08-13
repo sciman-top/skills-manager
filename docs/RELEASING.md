@@ -29,6 +29,8 @@ skills-manager-2026.08.13-SHA256SUMS.txt
 
 脚本只收集明确的 tracked runtime/config/docs 输入；不会打包 `.git/`、`reports/`、`.txn/`、凭据或用户宿主目录。每个 ZIP 内还有 `RELEASE-MANIFEST.json`，记录 commit、要求、文件大小和逐文件 SHA-256。
 
+`portable` 额外包含 `THIRD-PARTY-NOTICES.json`。它按技能记录 vendor/import/local 来源、锁定 commit、源路径、包内容 SHA-256、frontmatter license 与随技能复制的 `LICENSE`/`COPYING`/`NOTICE` 文件。`unknown_review_required` 是发布前必须人工处理的明确 finding；首次 provenance 迁移期间只报告而不自动阻断，不能据此声称许可证已验收。
+
 只构建一种包：
 
 ```powershell
@@ -45,7 +47,7 @@ CI 对 `v*` tag 在 full gate 通过后生成两个 ZIP 和 checksum，并创建
 1. 确认 `main` 干净且与 `origin/main` 一致。
 2. 运行 full gate；检查 `build.ps1` 未产生生成物漂移。
 3. 在本地实际构建并抽查两个 ZIP。
-4. 确认 MIT `LICENSE` 已进入制品，并复核第三方来源、许可证与 release notes。
+4. 确认 MIT `LICENSE` 已进入制品，检查 `THIRD-PARTY-NOTICES.json`，并复核第三方来源、所有 `unknown_review_required`、许可证与 release notes。
 5. 创建并推送 annotated tag，例如 `git tag -a v2026.08.13 -m "v2026.08.13"`、`git push origin v2026.08.13`。
 6. 等待 GitHub Actions 成功，再从 Release 页面下载制品复核 SHA-256 与安装烟测。
 

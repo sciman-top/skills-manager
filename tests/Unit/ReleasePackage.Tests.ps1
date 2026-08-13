@@ -33,6 +33,7 @@ Describe 'Release packaging' {
         $portableRoot = Join-Path $extract 'portable\skills-manager-test.1-portable'
         $bootstrapManifest = Get-Content -LiteralPath (Join-Path $bootstrapRoot 'RELEASE-MANIFEST.json') -Raw | ConvertFrom-Json
         $portableManifest = Get-Content -LiteralPath (Join-Path $portableRoot 'RELEASE-MANIFEST.json') -Raw | ConvertFrom-Json
+        $notices = Get-Content -LiteralPath (Join-Path $portableRoot 'THIRD-PARTY-NOTICES.json') -Raw | ConvertFrom-Json
 
         $bootstrapManifest.package | Should Be 'bootstrap'
         $bootstrapManifest.includes_prebuilt_agent | Should Be $false
@@ -44,5 +45,14 @@ Describe 'Release packaging' {
         $portableManifest.includes_prebuilt_agent | Should Be $true
         Test-Path -LiteralPath (Join-Path $portableRoot 'agent') | Should Be $true
         Test-Path -LiteralPath (Join-Path $portableRoot 'LICENSE') | Should Be $true
+        $notices.scope | Should Be 'portable_agent_skills'
+        $notices.summary.total | Should BeGreaterThan 0
+        @($notices.skills).Count | Should Be $notices.summary.total
+        @($notices.skills | Where-Object { [string]$_.content_sha256 -notmatch '^[0-9a-f]{64}$' }).Count | Should Be 0
+        @($notices.skills | Where-Object source_kind -eq 'vendor').Count | Should BeGreaterThan 0
+        @($notices.skills | Where-Object source_kind -eq 'import').Count | Should BeGreaterThan 0
+        @($notices.skills | Where-Object source_kind -eq 'unknown_unmapped').Count | Should Be 0
+        @($notices.skills | Where-Object license_status -eq 'unknown_review_required').Count | Should Be $notices.summary.unknown_license
+        Test-Path -LiteralPath (Join-Path $bootstrapRoot 'THIRD-PARTY-NOTICES.json') | Should Be $false
     }
 }

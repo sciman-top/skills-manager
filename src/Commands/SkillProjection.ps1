@@ -234,14 +234,27 @@ function Get-CapabilityCatalogTextSha256([string]$Value) {
     finally { $sha.Dispose() }
 }
 
-function New-CapabilityRouterCatalogDocument($projectionCfg) {
+function Get-SkillDiscoveryCatalogPath($projectionCfg) {
+    Need ($null -ne $projectionCfg) 'skill_projection 配置为空'
+    $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
+    $configuredPath = ''
+    if ($projectionCfg.PSObject.Properties.Match('discovery_catalog').Count -gt 0 -and $null -ne $projectionCfg.discovery_catalog -and
+        $projectionCfg.discovery_catalog.PSObject.Properties.Match('catalog_path').Count -gt 0) {
+        $configuredPath = [string]$projectionCfg.discovery_catalog.catalog_path
+    }
+    $catalogPath = if ([string]::IsNullOrWhiteSpace($configuredPath)) {
+        Join-Path $managedRoot '.skills-manager\catalog.json'
+    }
+    else { Resolve-SkillProjectionPath $configuredPath }
+    Need (Is-PathInsideOrEqual $catalogPath $managedRoot) 'skill_projection.discovery_catalog.catalog_path 必须位于 managed_source_path 内'
+    return [IO.Path]::GetFullPath($catalogPath)
+}
+
+function New-SkillDiscoveryCatalogDocument($projectionCfg) {
     Need ($null -ne $projectionCfg) 'skill_projection 配置为空'
     Need ($projectionCfg.PSObject.Properties.Match('managed_source_path').Count -gt 0) 'skill_projection 缺少 managed_source_path'
     $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
     Need (Test-Path -LiteralPath $managedRoot -PathType Container) ("受管技能源不存在：{0}" -f $managedRoot)
-
-    $routerDir = Join-Path $managedRoot 'capability-router'
-    Need (Test-Path -LiteralPath (Join-Path $routerDir 'SKILL.md') -PathType Leaf) '受管技能源缺少 capability-router'
 
     $policy = $null
     if ($projectionCfg.PSObject.Properties.Match('routing_policy_path').Count -gt 0) {
@@ -290,17 +303,17 @@ function New-CapabilityRouterCatalogDocument($projectionCfg) {
         $meta = Get-SkillMetadataFromFile ([string]$item.file)
         $name = ([string]$meta.declared_name).Trim()
         if ([string]::IsNullOrWhiteSpace($name)) { $name = Split-Path ([string]$item.dir) -Leaf }
-        if ([string]::Equals($name, 'capability-router', [System.StringComparison]::OrdinalIgnoreCase) -or -not $actualNames.Add($name)) { continue }
+        if (-not $actualNames.Add($name)) { continue }
         if (-not $membership.ContainsKey($name) -or $membership[$name].Count -eq 0) {
             Add-CapabilityCatalogMembership $membership $name $fallbackDomain
         }
         $relativeWithinManaged = ([string]$item.file).Substring($managedRoot.TrimEnd('\', '/').Length).TrimStart('\', '/')
-        $relativeFromRouter = ('..\{0}' -f $relativeWithinManaged)
+        $relativeFromCatalog = ('..\{0}' -f $relativeWithinManaged)
         $rules = if ($rulesByName.ContainsKey($name)) { @($rulesByName[$name].ToArray() | Sort-Object group, role) } else { @() }
         $skills.Add([ordered]@{
                 name = $name
                 description = [string]$meta.description
-                relative_path = $relativeFromRouter
+                relative_path = $relativeFromCatalog
                 entrypoint_sha256 = Get-FileContentHash ([string]$item.file)
                 domains = @($membership[$name] | Sort-Object)
                 load_side_effect = 'read_only'
@@ -332,16 +345,16 @@ function New-CapabilityRouterCatalogDocument($projectionCfg) {
     return $catalog
 }
 
-function Sync-CapabilityRouterCatalog($projectionCfg) {
+function New-CapabilityRouterCatalogDocument($projectionCfg) {
+    return New-SkillDiscoveryCatalogDocument $projectionCfg
+}
+
+function Sync-SkillDiscoveryCatalog($projectionCfg) {
     if ($null -eq $projectionCfg -or $projectionCfg.PSObject.Properties.Match('managed_source_path').Count -eq 0) {
         return [pscustomobject]@{ enabled = $false; reason = 'not_configured'; changed = $false; persisted = $false; path = ''; skill_count = 0; domain_count = 0 }
     }
-    $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
-    $catalogPath = Join-Path $managedRoot 'capability-router\catalog.json'
-    if (-not (Test-Path -LiteralPath (Join-Path $managedRoot 'capability-router\SKILL.md') -PathType Leaf)) {
-        return [pscustomobject]@{ enabled = $false; reason = 'router_missing'; changed = $false; persisted = $false; path = $catalogPath; skill_count = 0; domain_count = 0 }
-    }
-    $catalog = New-CapabilityRouterCatalogDocument $projectionCfg
+    $catalogPath = Get-SkillDiscoveryCatalogPath $projectionCfg
+    $catalog = New-SkillDiscoveryCatalogDocument $projectionCfg
     $desired = $catalog | ConvertTo-Json -Depth 20
     $existing = if (Test-Path -LiteralPath $catalogPath -PathType Leaf) { Get-ContentUtf8 $catalogPath } else { '' }
     $changed = -not [string]::Equals($existing.TrimEnd("`r", "`n"), $desired.TrimEnd("`r", "`n"), [System.StringComparison]::Ordinal)
@@ -726,6 +739,10 @@ function Get-HostProjectionPromotionContext($cfg, [switch]$AllowUnverified) {
         })
 }
 
+function Sync-CapabilityRouterCatalog($projectionCfg) {
+    return Sync-SkillDiscoveryCatalog $projectionCfg
+}
+
 function Get-SkillProjectionPlanFingerprint($Plan, $NativeProjectionPlan = $null) {
     $identity = [ordered]@{
         enabled = [bool]$Plan.enabled
@@ -916,7 +933,7 @@ function New-CodexSkillProjectionTransaction($projectionCfg, [string]$ConfigPath
     $managedRoot = ''
     if ($projectionCfg.PSObject.Properties.Match('managed_source_path').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$projectionCfg.managed_source_path)) {
         $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
-        $filePaths.Add([IO.Path]::GetFullPath((Join-Path $managedRoot 'capability-router\catalog.json'))) | Out-Null
+        $filePaths.Add((Get-SkillDiscoveryCatalogPath $projectionCfg)) | Out-Null
     }
     $nativeSettings = Get-CfgObjectProperty $projectionCfg 'native_projection'
     if ($null -ne $nativeSettings -and -not [string]::IsNullOrWhiteSpace([string](Get-CfgObjectProperty $nativeSettings 'receipt_path'))) {
@@ -951,7 +968,7 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
     $manifestRaw = if ($projectionCfg.PSObject.Properties.Match("manifest_path").Count -gt 0) { [string]$projectionCfg.manifest_path } else { "reports/skill-projection/current.json" }
     $configPath = Resolve-SkillProjectionPath $configRaw
     $manifestPath = Resolve-SkillProjectionPath $manifestRaw
-    $catalogProjection = Sync-CapabilityRouterCatalog $projectionCfg
+    $catalogProjection = Sync-SkillDiscoveryCatalog $projectionCfg
     $nativeProjectionPlan = $null
     $nativeProjectionApply = $null
     $nativeProjectionAuthoritative = $false

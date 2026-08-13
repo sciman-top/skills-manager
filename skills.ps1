@@ -1177,7 +1177,7 @@ function Resolve-AddTokensFromAnyFormat([string[]]$tokens) {
         if ($target -match "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$") {
             return ,@(@($target) + @($rest | Select-Object -Skip 1))
         }
-        return ,@(@("https://github.com/openai/skills.git", "--skill", ("skills/.curated/{0}" -f $target)) + @($rest | Select-Object -Skip 1))
+        throw '$skill-installer 的 bare skill name 已退役；请提供 owner/repo 或完整 GitHub tree URL，以便锁定真实来源。'
     }
 
     $treeTokens = Convert-GitHubTreeUrlToAddTokens $first
@@ -2687,12 +2687,12 @@ function Plan-NativeMetadata {
         $compactionChanged = @($finalItems | Where-Object compacted | ForEach-Object name)
     }
     $finalCost = Get-NativeMetadataMeasuredCost $finalItems $mode
-    $pass = $finalCost -le $usableCost
+    $budgetFit = $finalCost -le $usableCost
     $enabledNames = @($enabledEntries | ForEach-Object { [string](Get-NativeMetadataPlannerProperty $_ @('name', 'id')) })
-    $keptItems = if ($pass) { @($finalItems) } else { @() }
+    $keptItems = @($finalItems)
     $keptNames = @($keptItems | ForEach-Object name)
-    $omittedNames = if ($pass) { @() } else { @($enabledNames) }
-    $offenders = if ($pass) { @() } else {
+    $omittedNames = @()
+    $offenders = if ($budgetFit) { @() } else {
         @($finalItems | ForEach-Object {
                 [pscustomobject][ordered]@{
                     name = [string]$_.name
@@ -2714,16 +2714,17 @@ function Plan-NativeMetadata {
     }
     $planId = 'nmp-{0}' -f (Get-OperationSha256 ($identity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)
     $findings = New-Object System.Collections.Generic.List[object]
-    if (-not $pass) { $findings.Add((New-OperationFinding 'metadata_budget_overflow' 'error' '$.metadata' 'All enabled metadata could not fit after deterministic compaction.')) | Out-Null }
+    if (-not $budgetFit) { $findings.Add((New-OperationFinding 'metadata_budget_overflow' 'warning' '$.metadata' 'Enabled metadata exceeds the observed budget after deterministic compaction; junction projection remains complete because metadata is advisory.')) | Out-Null }
 
     return [pscustomobject][ordered]@{
         schema_version = 1
         plan_id = $planId
         projection_effect = 'plan_only'
         pass_scope = 'advisory_planning_contract'
-        pass = $pass
-        status = if ($pass) { 'ready' } else { 'blocked' }
-        block_reason = if ($pass) { $null } else { 'metadata_budget_overflow' }
+        pass = $true
+        status = 'ready'
+        block_reason = $null
+        budget_fit = $budgetFit
         budget = [ordered]@{
             mode = $mode
             unit = if ($mode -eq 'tokens') { 'tokens' } else { 'characters' }
@@ -2766,7 +2767,7 @@ function Plan-NativeMetadata {
         kept_total = $keptItems.Count
         omitted_total = $omittedNames.Count
         disabled_total = @($Inventory.entries | Where-Object { (Test-OperationObjectProperty $_ 'enabled') -and -not [bool](Get-OperationObjectProperty $_ 'enabled') }).Count
-        truncated = (-not $pass)
+        truncated = $false
         token_estimate = if ($mode -eq 'tokens') { $totalTokens } else { $null }
         estimated_token_total = $totalTokens
         character_count = $totalCharacters
@@ -2782,7 +2783,7 @@ function Plan-NativeMetadata {
         }
         overflow = [ordered]@{
             offenders = [object[]]@($offenders)
-            required = if ($pass) { 0 } else { $finalCost }
+            required = if ($budgetFit) { 0 } else { $finalCost }
             available = $usableCost
             unit = if ($mode -eq 'tokens') { 'tokens' } else { 'characters' }
         }
@@ -2826,7 +2827,7 @@ function Test-NativeMetadataPlanContract {
     if ($omittedTotal -ne @((Get-OperationObjectProperty $Plan 'omitted')).Count) { $findings.Add((New-OperationFinding 'omitted_count_invalid' 'error' '$.omitted_total' 'omitted_total must match omitted names.')) | Out-Null }
     $pass = [bool](Get-OperationObjectProperty $Plan 'pass')
     if ($pass -and ($keptTotal -ne $enabledTotal -or $omittedTotal -ne 0 -or (Get-OperationObjectProperty $Plan 'truncated') -ne $false)) { $findings.Add((New-OperationFinding 'complete_projection_invalid' 'error' '$' 'A passing plan must keep every enabled item without truncation.')) | Out-Null }
-    if (-not $pass -and ($omittedTotal -eq 0 -or (Get-OperationObjectProperty $Plan 'truncated') -ne $true)) { $findings.Add((New-OperationFinding 'blocked_projection_invalid' 'error' '$' 'A blocked plan must expose explicit omission and truncation.')) | Out-Null }
+    if (-not (Test-OperationObjectProperty $Plan 'budget_fit')) { $findings.Add((New-OperationFinding 'budget_fit_missing' 'error' '$.budget_fit' 'Advisory budget fit must be explicit.')) | Out-Null }
     $budget = Get-OperationObjectProperty $Plan 'budget'
     $mode = [string](Get-OperationObjectProperty $budget 'mode')
     if ($mode -notin @('tokens', 'character_fallback')) { $findings.Add((New-OperationFinding 'budget_mode_invalid' 'error' '$.budget.mode' 'Budget mode is invalid.')) | Out-Null }
@@ -3010,10 +3011,6 @@ function New-NativeSkillProjectionPlan {
     if (-not $settings.enabled) {
         return New-NativeSkillProjectionBlockedPlan $settings $Catalog $MetadataPlan @() @((New-OperationFinding 'native_projection_disabled' 'error' '$.skill_projection.native_projection.enabled' 'Native projection is disabled.'))
     }
-    if (-not [bool](Get-NativeSkillProjectionProperty $MetadataPlan @('pass'))) {
-        return New-NativeSkillProjectionBlockedPlan $settings $Catalog $MetadataPlan @((Get-NativeSkillProjectionProperty $MetadataPlan @('enabled'))) @((New-OperationFinding 'metadata_plan_blocked' 'error' '$.metadata_plan' 'Native metadata plan is blocked; projection cannot omit enabled metadata.'))
-    }
-
     $entries = @(Get-NativeSkillProjectionProperty $Catalog @('entries'))
     $eligibilityByName = Get-NativeSkillProjectionEligibilityByName $Eligibility
     $entryByName = @{}
@@ -15796,40 +15793,6 @@ function Get-AuditInstalledStateKeywords($installedSkills, $installedMcpServers)
     return (Merge-AuditKeywordSets ($sets.ToArray()) 240)
 }
 
-function Get-AuditKeywordHitDetails([string]$text, [string[]]$keywords, [int]$MaxHits = 6) {
-    $hits = New-Object System.Collections.Generic.List[string]
-    $source = if ([string]::IsNullOrWhiteSpace($text)) { "" } else { $text.ToLowerInvariant() }
-    foreach ($keyword in @(Convert-AuditStringArray $keywords)) {
-        $needle = [string]$keyword
-        if ([string]::IsNullOrWhiteSpace($needle)) { continue }
-        if ($source.Contains($needle.ToLowerInvariant())) {
-            $hits.Add($needle) | Out-Null
-            if ($hits.Count -ge $MaxHits) { break }
-        }
-    }
-    return @($hits)
-}
-
-function Get-AuditInstalledSkillFitSummary($installedSkills, [string[]]$userKeywords, [string[]]$repoKeywords) {
-    $rows = @()
-    foreach ($item in @($installedSkills)) {
-        $text = ("{0} {1} {2}" -f [string]$item.name, [string]$item.description, [string]$item.trigger_summary)
-        $userHits = Get-AuditKeywordHitDetails $text $userKeywords 8
-        $repoHits = Get-AuditKeywordHitDetails $text $repoKeywords 8
-        $rows += [pscustomobject]([ordered]@{
-                name = [string]$item.name
-                vendor = [string]$item.vendor
-                from = [string]$item.from
-                score = @($userHits).Count * 2 + @($repoHits).Count
-                user_hit_count = @($userHits).Count
-                repo_hit_count = @($repoHits).Count
-                user_hits = @($userHits)
-                repo_hits = @($repoHits)
-            })
-    }
-    return @($rows | Sort-Object -Property @{ Expression = { [int]$_.score }; Descending = $true }, @{ Expression = { [int]$_.user_hit_count }; Descending = $true }, @{ Expression = { [string]$_.name } })
-}
-
 function Get-AuditMissingPreferredAgents($cfg, $installedSkills) {
     if ($null -eq $cfg -or $cfg.PSObject.Properties.Match("user_profile").Count -eq 0 -or $null -eq $cfg.user_profile) { return @() }
     if (-not (Test-AuditObjectLike $cfg.user_profile.structured)) { return @() }
@@ -15883,9 +15846,6 @@ function New-AuditDecisionInsights($cfg, $scans, $installedSkills, $installedMcp
         $repoKeywords = @(Merge-AuditKeywordSets @($repoKeywordSets | ForEach-Object { $_.keywords }) 220)
     }
     $installedKeywords = @(Get-AuditInstalledStateKeywords $installedSkills $installedMcpServers)
-    $fitRows = @(Get-AuditInstalledSkillFitSummary $installedSkills $userKeywords $repoKeywords)
-    $topFit = @($fitRows | Select-Object -First 20)
-    $lowFit = @($fitRows | Where-Object { [int]$_.score -le 1 } | Select-Object -First 20)
     $profileOnlyContext = @(Merge-AuditKeywordSets @($userKeywords, $installedKeywords) 180)
     return [pscustomobject]([ordered]@{
             schema_version = 1
@@ -15905,9 +15865,7 @@ function New-AuditDecisionInsights($cfg, $scans, $installedSkills, $installedMcp
                 profile_only_context = @($profileOnlyContext)
             }
             targets = @($repoKeywordSets)
-            fit = [ordered]@{
-                top_installed_skill_matches = @($topFit)
-                low_fit_installed_skills = @($lowFit)
+            explicit_preferences = [ordered]@{
                 missing_preferred_agents = @(Get-AuditMissingPreferredAgents $cfg $installedSkills)
             }
             decision_checklist = @(
@@ -20846,14 +20804,27 @@ function Get-CapabilityCatalogTextSha256([string]$Value) {
     finally { $sha.Dispose() }
 }
 
-function New-CapabilityRouterCatalogDocument($projectionCfg) {
+function Get-SkillDiscoveryCatalogPath($projectionCfg) {
+    Need ($null -ne $projectionCfg) 'skill_projection 配置为空'
+    $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
+    $configuredPath = ''
+    if ($projectionCfg.PSObject.Properties.Match('discovery_catalog').Count -gt 0 -and $null -ne $projectionCfg.discovery_catalog -and
+        $projectionCfg.discovery_catalog.PSObject.Properties.Match('catalog_path').Count -gt 0) {
+        $configuredPath = [string]$projectionCfg.discovery_catalog.catalog_path
+    }
+    $catalogPath = if ([string]::IsNullOrWhiteSpace($configuredPath)) {
+        Join-Path $managedRoot '.skills-manager\catalog.json'
+    }
+    else { Resolve-SkillProjectionPath $configuredPath }
+    Need (Is-PathInsideOrEqual $catalogPath $managedRoot) 'skill_projection.discovery_catalog.catalog_path 必须位于 managed_source_path 内'
+    return [IO.Path]::GetFullPath($catalogPath)
+}
+
+function New-SkillDiscoveryCatalogDocument($projectionCfg) {
     Need ($null -ne $projectionCfg) 'skill_projection 配置为空'
     Need ($projectionCfg.PSObject.Properties.Match('managed_source_path').Count -gt 0) 'skill_projection 缺少 managed_source_path'
     $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
     Need (Test-Path -LiteralPath $managedRoot -PathType Container) ("受管技能源不存在：{0}" -f $managedRoot)
-
-    $routerDir = Join-Path $managedRoot 'capability-router'
-    Need (Test-Path -LiteralPath (Join-Path $routerDir 'SKILL.md') -PathType Leaf) '受管技能源缺少 capability-router'
 
     $policy = $null
     if ($projectionCfg.PSObject.Properties.Match('routing_policy_path').Count -gt 0) {
@@ -20902,17 +20873,17 @@ function New-CapabilityRouterCatalogDocument($projectionCfg) {
         $meta = Get-SkillMetadataFromFile ([string]$item.file)
         $name = ([string]$meta.declared_name).Trim()
         if ([string]::IsNullOrWhiteSpace($name)) { $name = Split-Path ([string]$item.dir) -Leaf }
-        if ([string]::Equals($name, 'capability-router', [System.StringComparison]::OrdinalIgnoreCase) -or -not $actualNames.Add($name)) { continue }
+        if (-not $actualNames.Add($name)) { continue }
         if (-not $membership.ContainsKey($name) -or $membership[$name].Count -eq 0) {
             Add-CapabilityCatalogMembership $membership $name $fallbackDomain
         }
         $relativeWithinManaged = ([string]$item.file).Substring($managedRoot.TrimEnd('\', '/').Length).TrimStart('\', '/')
-        $relativeFromRouter = ('..\{0}' -f $relativeWithinManaged)
+        $relativeFromCatalog = ('..\{0}' -f $relativeWithinManaged)
         $rules = if ($rulesByName.ContainsKey($name)) { @($rulesByName[$name].ToArray() | Sort-Object group, role) } else { @() }
         $skills.Add([ordered]@{
                 name = $name
                 description = [string]$meta.description
-                relative_path = $relativeFromRouter
+                relative_path = $relativeFromCatalog
                 entrypoint_sha256 = Get-FileContentHash ([string]$item.file)
                 domains = @($membership[$name] | Sort-Object)
                 load_side_effect = 'read_only'
@@ -20944,16 +20915,16 @@ function New-CapabilityRouterCatalogDocument($projectionCfg) {
     return $catalog
 }
 
-function Sync-CapabilityRouterCatalog($projectionCfg) {
+function New-CapabilityRouterCatalogDocument($projectionCfg) {
+    return New-SkillDiscoveryCatalogDocument $projectionCfg
+}
+
+function Sync-SkillDiscoveryCatalog($projectionCfg) {
     if ($null -eq $projectionCfg -or $projectionCfg.PSObject.Properties.Match('managed_source_path').Count -eq 0) {
         return [pscustomobject]@{ enabled = $false; reason = 'not_configured'; changed = $false; persisted = $false; path = ''; skill_count = 0; domain_count = 0 }
     }
-    $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
-    $catalogPath = Join-Path $managedRoot 'capability-router\catalog.json'
-    if (-not (Test-Path -LiteralPath (Join-Path $managedRoot 'capability-router\SKILL.md') -PathType Leaf)) {
-        return [pscustomobject]@{ enabled = $false; reason = 'router_missing'; changed = $false; persisted = $false; path = $catalogPath; skill_count = 0; domain_count = 0 }
-    }
-    $catalog = New-CapabilityRouterCatalogDocument $projectionCfg
+    $catalogPath = Get-SkillDiscoveryCatalogPath $projectionCfg
+    $catalog = New-SkillDiscoveryCatalogDocument $projectionCfg
     $desired = $catalog | ConvertTo-Json -Depth 20
     $existing = if (Test-Path -LiteralPath $catalogPath -PathType Leaf) { Get-ContentUtf8 $catalogPath } else { '' }
     $changed = -not [string]::Equals($existing.TrimEnd("`r", "`n"), $desired.TrimEnd("`r", "`n"), [System.StringComparison]::Ordinal)
@@ -21338,6 +21309,10 @@ function Get-HostProjectionPromotionContext($cfg, [switch]$AllowUnverified) {
         })
 }
 
+function Sync-CapabilityRouterCatalog($projectionCfg) {
+    return Sync-SkillDiscoveryCatalog $projectionCfg
+}
+
 function Get-SkillProjectionPlanFingerprint($Plan, $NativeProjectionPlan = $null) {
     $identity = [ordered]@{
         enabled = [bool]$Plan.enabled
@@ -21528,7 +21503,7 @@ function New-CodexSkillProjectionTransaction($projectionCfg, [string]$ConfigPath
     $managedRoot = ''
     if ($projectionCfg.PSObject.Properties.Match('managed_source_path').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$projectionCfg.managed_source_path)) {
         $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
-        $filePaths.Add([IO.Path]::GetFullPath((Join-Path $managedRoot 'capability-router\catalog.json'))) | Out-Null
+        $filePaths.Add((Get-SkillDiscoveryCatalogPath $projectionCfg)) | Out-Null
     }
     $nativeSettings = Get-CfgObjectProperty $projectionCfg 'native_projection'
     if ($null -ne $nativeSettings -and -not [string]::IsNullOrWhiteSpace([string](Get-CfgObjectProperty $nativeSettings 'receipt_path'))) {
@@ -21563,7 +21538,7 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
     $manifestRaw = if ($projectionCfg.PSObject.Properties.Match("manifest_path").Count -gt 0) { [string]$projectionCfg.manifest_path } else { "reports/skill-projection/current.json" }
     $configPath = Resolve-SkillProjectionPath $configRaw
     $manifestPath = Resolve-SkillProjectionPath $manifestRaw
-    $catalogProjection = Sync-CapabilityRouterCatalog $projectionCfg
+    $catalogProjection = Sync-SkillDiscoveryCatalog $projectionCfg
     $nativeProjectionPlan = $null
     $nativeProjectionApply = $null
     $nativeProjectionAuthoritative = $false

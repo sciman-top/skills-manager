@@ -85,6 +85,21 @@ description: >-
         $candidates.writes_performed | Should Be $false
     }
 
+    It 'prefers the neutral discovery catalog and keeps the legacy router catalog as fallback' {
+        $neutralRoot = Join-Path $portableRoot '.skills-manager'
+        New-Item -ItemType Directory -Path $neutralRoot -Force | Out-Null
+        $neutralCatalog = Get-Content -LiteralPath (Join-Path $routerRoot 'catalog.json') -Raw | ConvertFrom-Json
+        $neutralCatalog.skills[0].relative_path = '..\codebase-design\SKILL.md'
+        $neutralCatalog.catalog_fingerprint = Get-TestSha256 ($neutralCatalog | Select-Object -Property * -ExcludeProperty catalog_fingerprint | ConvertTo-Json -Depth 20 -Compress)
+        $neutralCatalog | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $neutralRoot 'catalog.json') -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $routerRoot 'catalog.json') -Encoding UTF8 -Value '{"schema_version":1,"skills":[]}'
+
+        $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File $script:routerScript -Query '设计模块边界' | ConvertFrom-Json
+
+        $result.catalog_path | Should Match '\.skills-manager[\\/]catalog\.json$'
+        @($result.retrieval.candidates.name) | Should Contain 'codebase-design'
+    }
+
     It 'resolves cold skills through the router junction when siblings are not resident' {
         $residentRoot = Join-Path $TestDrive 'resident-skills'
         New-Item -ItemType Directory -Path $residentRoot -Force | Out-Null
