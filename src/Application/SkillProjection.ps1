@@ -55,8 +55,6 @@ function Get-NativeSkillProjectionSettings {
     $receiptPath = Resolve-NativeSkillProjectionPath ([string](Get-NativeSkillProjectionProperty $settings @('receipt_path')))
     $userSkillRoot = Resolve-NativeSkillProjectionPath ([string](Get-NativeSkillProjectionProperty $skillProjection @('user_skill_root')))
     $receiptRoot = [IO.Path]::GetFullPath((Join-Path $skillProjectionApplicationRepoRoot 'reports\skill-projection'))
-    $notificationMethod = ([string](Get-NativeSkillProjectionProperty $settings @('notification_method'))).Trim()
-    $notificationMode = ([string](Get-NativeSkillProjectionProperty $settings @('notification_mode'))).Trim()
     if ([string]::IsNullOrWhiteSpace($owner)) { throw 'skill_projection.native_projection.owner is required.' }
     if ([string]::IsNullOrWhiteSpace($targetRoot)) { throw 'skill_projection.native_projection.target_root is required.' }
     if ([string]::IsNullOrWhiteSpace($receiptPath)) { throw 'skill_projection.native_projection.receipt_path is required.' }
@@ -65,16 +63,12 @@ function Get-NativeSkillProjectionSettings {
     if ([string]::Equals($targetRoot.TrimEnd('\', '/'), [IO.Path]::GetPathRoot($targetRoot).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { throw 'skill_projection.native_projection.target_root must not be a filesystem root.' }
     if (-not (Test-NativeSkillProjectionPathWithinRoot $receiptPath $receiptRoot) -or [string]::Equals($receiptPath.TrimEnd('\', '/'), $receiptRoot.TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { throw 'skill_projection.native_projection.receipt_path must be a file under reports/skill-projection.' }
     Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path $receiptPath -Parent) $receiptRoot
-    if ([string]::IsNullOrWhiteSpace($notificationMethod)) { $notificationMethod = 'skills/changed' }
-    if ([string]::IsNullOrWhiteSpace($notificationMode)) { $notificationMode = 'plan_only' }
     return [pscustomobject][ordered]@{
         enabled = $enabled
         owner = $owner
         target_root = $targetRoot
         receipt_path = $receiptPath
         apply_requires_token = if (Test-OperationObjectProperty $settings 'apply_requires_token') { [bool](Get-OperationObjectProperty $settings 'apply_requires_token') } else { $true }
-        notification_method = $notificationMethod
-        notification_mode = $notificationMode
     }
 }
 
@@ -121,18 +115,12 @@ function New-NativeSkillProjectionBlockedPlan {
         omitted = [object[]]@($EnabledNames | Sort-Object)
         skills = [object[]]@()
         actions = [object[]]@()
+        removals = [object[]]@()
         enabled_total = @($EnabledNames).Count
         kept_total = 0
         omitted_total = @($EnabledNames).Count
         truncated = $true
         findings = [object[]]@($Findings)
-        notification = [ordered]@{
-            method = [string]$Settings.notification_method
-            mode = [string]$Settings.notification_mode
-            status = 'blocked'
-            changed_names = @()
-            host_mutation = $false
-        }
         decision_owner = 'deterministic_projection'
         semantic_selection_applied = $false
         provider_calls = 0
@@ -222,11 +210,34 @@ function New-NativeSkillProjectionPlan {
     if ($findings.Count -gt 0) { return New-NativeSkillProjectionBlockedPlan $settings $Catalog $enabledNamesSorted $findings.ToArray() }
 
     $skillRows = @($rows.ToArray() | Sort-Object name)
+    $desiredTargets = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $managedRoots = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($skill in $skillRows) {
+        $desiredTargets.Add(([IO.Path]::GetFullPath([string]$skill.target_directory).TrimEnd('\', '/'))) | Out-Null
+        if (-not [string]::IsNullOrWhiteSpace([string]$skill.source_root)) { $managedRoots.Add(([IO.Path]::GetFullPath([string]$skill.source_root).TrimEnd('\', '/'))) | Out-Null }
+    }
+    $removalRows = [Collections.Generic.List[object]]::new()
+    if (Test-Path -LiteralPath $settings.target_root -PathType Container) {
+        foreach ($entry in @(Get-ChildItem -LiteralPath $settings.target_root -Directory -Force -ErrorAction SilentlyContinue | Sort-Object Name)) {
+            $targetDirectory = [IO.Path]::GetFullPath($entry.FullName).TrimEnd('\', '/')
+            if ($desiredTargets.Contains($targetDirectory) -or -not [bool]($entry.Attributes -band [IO.FileAttributes]::ReparsePoint)) { continue }
+            $linkTargetProperty = $entry.PSObject.Properties['Target']
+            $linkTarget = if ($null -eq $linkTargetProperty) { '' } else { @($linkTargetProperty.Value)[0] }
+            if ([string]::IsNullOrWhiteSpace([string]$linkTarget)) { continue }
+            $linkTarget = [IO.Path]::GetFullPath([string]$linkTarget).TrimEnd('\', '/')
+            $owned = $false
+            foreach ($managedRoot in $managedRoots) {
+                if ($linkTarget.StartsWith(($managedRoot + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)) { $owned = $true; break }
+            }
+            if ($owned) { $removalRows.Add([pscustomobject][ordered]@{ name = $entry.Name; target_directory = $targetDirectory; previous_link_target = $linkTarget }) | Out-Null }
+        }
+    }
     $identity = [ordered]@{
         target_root = [string]$settings.target_root
         owner = [string]$settings.owner
         catalog_id = [string](Get-NativeSkillProjectionProperty $Catalog @('catalog_id'))
         skills = @($skillRows | ForEach-Object { [ordered]@{ name = $_.name; source_path = $_.source_path; target_path = $_.target_path; content_hash = $_.content_hash; metadata_hash = $_.metadata_hash } })
+        removals = @($removalRows.ToArray() | ForEach-Object { [ordered]@{ name = $_.name; target_directory = $_.target_directory; previous_link_target = $_.previous_link_target } })
     }
     $planId = 'nsp-{0}' -f (Get-OperationSha256 ($identity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)
     $applyToken = 'nsp-token-{0}' -f (Get-OperationSha256 ('{0}|apply' -f $planId)).Substring(0, 16)
@@ -240,6 +251,15 @@ function New-NativeSkillProjectionPlan {
                 target_path = $_.target_path
                 expected_content_hash = $_.content_hash
                 metadata_materialization = 'source_package_junction'
+                risk = 'explicit_native_root_write'
+            }
+        }) + @($removalRows.ToArray() | ForEach-Object {
+            [ordered]@{
+                action_id = 'nspa-{0}' -f (Get-OperationSha256 ('{0}|remove|{1}' -f $planId, $_.name)).Substring(0, 16)
+                type = 'remove_owned_junction'
+                name = $_.name
+                target_directory = $_.target_directory
+                previous_link_target = $_.previous_link_target
                 risk = 'explicit_native_root_write'
             }
         })
@@ -259,18 +279,12 @@ function New-NativeSkillProjectionPlan {
         omitted = [object[]]@()
         skills = [object[]]$skillRows
         actions = [object[]]$actions
+        removals = [object[]]@($removalRows.ToArray())
         enabled_total = $enabledNamesSorted.Count
         kept_total = $skillRows.Count
         omitted_total = 0
         truncated = $false
         findings = [object[]]@()
-        notification = [ordered]@{
-            method = [string]$settings.notification_method
-            mode = [string]$settings.notification_mode
-            status = 'planned_only'
-            changed_names = @($skillRows | ForEach-Object name)
-            host_mutation = $false
-        }
         decision_owner = 'deterministic_projection'
         semantic_selection_applied = $false
         provider_calls = 0
@@ -288,7 +302,7 @@ function Test-NativeSkillProjectionPlanContract {
     if ([string](Get-NativeSkillProjectionProperty $Plan @('plan_id')) -notmatch '^nsp-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'plan_id_invalid' 'error' '$.plan_id' 'Projection plan id is invalid.')) | Out-Null }
     if ([string](Get-NativeSkillProjectionProperty $Plan @('status')) -notin @('ready', 'blocked')) { $findings.Add((New-OperationFinding 'status_invalid' 'error' '$.status' 'Projection plan status is invalid.')) | Out-Null }
     foreach ($field in @('owner', 'target_root', 'receipt_path')) { if ([string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $Plan @($field)))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Projection plan field is required.')) | Out-Null } }
-    foreach ($field in @('enabled', 'kept', 'omitted', 'skills', 'actions', 'findings')) { if (-not (Test-OperationArray (Get-OperationObjectProperty $Plan $field))) { $findings.Add((New-OperationFinding 'array_field_invalid' 'error' ('$.{0}' -f $field) 'Projection plan field must be an array.')) | Out-Null } }
+    foreach ($field in @('enabled', 'kept', 'omitted', 'skills', 'actions', 'removals', 'findings')) { if (-not (Test-OperationArray (Get-OperationObjectProperty $Plan $field))) { $findings.Add((New-OperationFinding 'array_field_invalid' 'error' ('$.{0}' -f $field) 'Projection plan field must be an array.')) | Out-Null } }
     $enabled = @((Get-NativeSkillProjectionProperty $Plan @('enabled')))
     $kept = @((Get-NativeSkillProjectionProperty $Plan @('kept')))
     $omitted = @((Get-NativeSkillProjectionProperty $Plan @('omitted')))
@@ -301,9 +315,6 @@ function Test-NativeSkillProjectionPlanContract {
     }
     if ((Get-NativeSkillProjectionProperty $Plan @('semantic_selection_applied')) -ne $false) { $findings.Add((New-OperationFinding 'semantic_boundary_breached' 'error' '$' 'Projection cannot apply semantic selection.')) | Out-Null }
     foreach ($field in @('provider_calls', 'native_mutations', 'writes')) { if ([long](Get-NativeSkillProjectionProperty $Plan @($field)) -ne 0) { $findings.Add((New-OperationFinding 'side_effect_forbidden' 'error' ('$.{0}' -f $field) 'Planning must not mutate the native surface.')) | Out-Null } }
-    $notification = Get-NativeSkillProjectionProperty $Plan @('notification')
-    if ([string](Get-NativeSkillProjectionProperty $notification @('method')) -ne 'skills/changed') { $findings.Add((New-OperationFinding 'notification_method_invalid' 'error' '$.notification.method' 'Native projection uses the skills/changed notification plan.')) | Out-Null }
-    if ([string](Get-NativeSkillProjectionProperty $notification @('status')) -notin @('planned_only', 'blocked')) { $findings.Add((New-OperationFinding 'notification_status_invalid' 'error' '$.notification.status' 'Notification must remain a plan-only or blocked action.')) | Out-Null }
     foreach ($skill in @((Get-NativeSkillProjectionProperty $Plan @('skills')))) {
         foreach ($field in @('name', 'source_path', 'target_path', 'content_hash', 'metadata_hash')) { if ([string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $skill @($field)))) { $findings.Add((New-OperationFinding 'skill_field_missing' 'error' '$.skills' ('Projected skill field is missing: {0}' -f $field))) | Out-Null } }
         if ([string](Get-NativeSkillProjectionProperty $skill @('content_hash')) -notmatch '^[0-9a-f]{64}$' -or [string](Get-NativeSkillProjectionProperty $skill @('metadata_hash')) -notmatch '^[0-9a-f]{64}$') { $findings.Add((New-OperationFinding 'skill_hash_invalid' 'error' '$.skills' 'Projected skill hashes must be SHA-256.')) | Out-Null }

@@ -1,3 +1,7 @@
+$capabilityInventoryRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
+if ($null -eq (Get-Command Get-CodexPluginSkillInventory -ErrorAction SilentlyContinue)) { . (Join-Path $capabilityInventoryRepoRoot 'src\Infrastructure\CodexCli.ps1') }
+if ($null -eq (Get-Command Read-SkillMetadata -ErrorAction SilentlyContinue)) { . (Join-Path $capabilityInventoryRepoRoot 'src\Domain\SkillMetadata.ps1') }
+
 function Get-CapabilitySurfaceFileHash([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -16,11 +20,10 @@ function Resolve-CapabilitySurfacePath([string]$Path, [string]$RepoRoot) {
 }
 
 function Get-CapabilitySurfaceSkillMetadata([string]$SkillPath, [string]$Owner, [string]$ProjectionState, [bool]$Resident) {
-    $text = if (Test-Path -LiteralPath $SkillPath -PathType Leaf) { [IO.File]::ReadAllText($SkillPath) } else { '' }
-    $name = Split-Path (Split-Path $SkillPath -Parent) -Leaf
-    $description = ''
-    if ($text -match '(?m)^name\s*:\s*["'']?([^\r\n"'']+)') { $name = $matches[1].Trim() }
-    if ($text -match '(?m)^description\s*:\s*["'']?([^\r\n"'']+)') { $description = $matches[1].Trim() }
+    $metadata = Read-SkillMetadata $SkillPath -Observation
+    $text = [string]$metadata.text
+    $name = if ([string]::IsNullOrWhiteSpace([string]$metadata.name)) { Split-Path (Split-Path $SkillPath -Parent) -Leaf } else { [string]$metadata.name }
+    $description = [string]$metadata.description
     return [pscustomobject][ordered]@{ name = $name; path = [IO.Path]::GetFullPath($SkillPath); entrypoint_hash = if ($text) { Get-CapabilitySurfaceFileHash $SkillPath } else { $null }; description_hash = if ($description) { Get-CapabilitySurfaceTextHash $description } else { $null }; owner = $Owner; resident = $Resident; projection_state = $ProjectionState }
 }
 
@@ -73,9 +76,10 @@ function New-SkillSurfaceView {
     $systemItems = if (Test-Path -LiteralPath $systemRoot) { @(Get-ChildItem -LiteralPath $systemRoot -Recurse -File -Filter 'SKILL.md' -Force | ForEach-Object { Get-CapabilitySurfaceSkillMetadata $_.FullName 'host_system' 'system' $true }) } else { @() }
     $surfaces.Add((New-CapabilitySurfaceRecord 'system' 'host_filesystem' $systemRoot 'fresh' $(if ($systemItems.Count) { 'complete' } else { 'not_observed' }) $systemItems)) | Out-Null
 
-    $pluginRoot = Resolve-CapabilitySurfacePath ([string]$projection.external_skill_inventory.plugin_cache_path) $root
-    $pluginItems = if ($pluginRoot -and (Test-Path -LiteralPath $pluginRoot)) { @(Get-ChildItem -LiteralPath $pluginRoot -Recurse -File -Filter 'SKILL.md' -Force | ForEach-Object { Get-CapabilitySurfaceSkillMetadata $_.FullName 'plugin_cache' 'plugin_cache' $true }) } else { @() }
-    $surfaces.Add((New-CapabilitySurfaceRecord 'plugin_cache' 'host_plugin_cache' $pluginRoot 'fresh' $(if ($pluginItems.Count) { 'complete' } else { 'not_observed' }) $pluginItems)) | Out-Null
+    $pluginInventory = Get-CodexPluginSkillInventory
+    $pluginItems = @($pluginInventory.skills | ForEach-Object { Get-CapabilitySurfaceSkillMetadata ([string]$_.path) 'codex_plugin' 'installed_enabled_plugin' $true })
+    $surfaces.Add((New-CapabilitySurfaceRecord 'plugins' 'codex_plugin_list_json' 'codex plugin list --json' ([string]$pluginInventory.freshness) ([string]$pluginInventory.coverage) $pluginItems)) | Out-Null
+    foreach ($warning in @($pluginInventory.warnings)) { $findings.Add([pscustomobject]@{ code = [string]$warning.code; severity = 'warning'; surface = 'plugins'; path = [string]$warning.subject; message = [string]$warning.message }) | Out-Null }
 
     $hostItems = @(); $hostFreshness = 'unknown'; $hostCoverage = 'not_observed'; $hostSource = if ($HostSnapshotPath) { [IO.Path]::GetFullPath($HostSnapshotPath) } else { 'not_provided' }
     if ($HostSnapshotPath) {

@@ -74,27 +74,6 @@ unified_exec = true
         ([regex]::Matches($toml, 'BEGIN skills-manager:skills-projection')).Count | Should -Be 1
     }
 
-    It 'projects only explicitly included managed skills' {
-        $oldDryRun = $DryRun
-        try {
-            $DryRun = $false
-            $managed = Join-Path $TestDrive 'managed'
-            $target = Join-Path $TestDrive 'target'
-            $keep = New-ProjectionSkill $managed 'keep' 'keep'
-            New-ProjectionSkill $managed 'cold' 'cold' | Out-Null
-            $result = Sync-CodexManagedSkillLinks ([pscustomobject]@{
-                    managed_source_path = $managed
-                    user_skill_root = $target
-                    managed_link_includes = @('keep')
-                })
-
-            $result.managed_link_count | Should -Be 1
-            (Get-ReparsePointTargetFullPath (Join-Path $target 'keep')) | Should -Be ([IO.Path]::GetFullPath($keep))
-            Test-Path -LiteralPath (Join-Path $target 'cold') | Should -Be $false
-        }
-        finally { $DryRun = $oldDryRun }
-    }
-
     It 'does not write config or manifest during dry-run' {
         $oldDryRun = $DryRun
         try {

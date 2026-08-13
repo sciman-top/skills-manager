@@ -412,10 +412,6 @@ function Get-CfgContractErrors($cfg) {
                 if ($null -ne $externalInventoryEnabled -and $externalInventoryEnabled -isnot [bool]) {
                     $errors.Add("skill_projection.external_skill_inventory.enabled 必须是布尔值") | Out-Null
                 }
-                $pluginCachePath = [string](Get-CfgObjectProperty $externalInventory "plugin_cache_path")
-                if ((Test-CfgObjectProperty $externalInventory "plugin_cache_path") -and [string]::IsNullOrWhiteSpace($pluginCachePath)) {
-                    $errors.Add("skill_projection.external_skill_inventory.plugin_cache_path 不能为空") | Out-Null
-                }
             }
         }
         $nativeProjection = Get-CfgObjectProperty $skillProjection "native_projection"
@@ -1059,9 +1055,6 @@ function Assert-Cfg($cfg) {
             Need ($externalInventory -is [pscustomobject] -or $externalInventory -is [System.Collections.IDictionary]) "skill_projection.external_skill_inventory 必须是对象"
             if (Test-CfgObjectProperty $externalInventory "enabled") {
                 Need ((Get-CfgObjectProperty $externalInventory "enabled") -is [bool]) "skill_projection.external_skill_inventory.enabled 必须是布尔值"
-            }
-            if (Test-CfgObjectProperty $externalInventory "plugin_cache_path") {
-                Need (-not [string]::IsNullOrWhiteSpace([string](Get-CfgObjectProperty $externalInventory "plugin_cache_path"))) "skill_projection.external_skill_inventory.plugin_cache_path 不能为空"
             }
         }
         if ($projection.PSObject.Properties.Match('native_projection').Count -gt 0 -and $null -ne $projection.native_projection) {

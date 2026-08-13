@@ -150,9 +150,11 @@ function Apply-NativeSkillProjection {
     $targetRoot = [IO.Path]::GetFullPath([string]$Plan.target_root)
     Ensure-NativeSkillProjectionDirectory $targetRoot
     $receiptFile = Get-NativeSkillProjectionReceiptPath $Plan $ReceiptPath
-    $before = @($Plan.skills | Sort-Object target_directory | ForEach-Object { Get-NativeSkillProjectionTargetState ([string]$_.target_directory) })
+    $affectedDirectories = @(@($Plan.skills | ForEach-Object { [string]$_.target_directory }) + @($Plan.removals | ForEach-Object { [string]$_.target_directory }) | Sort-Object -Unique)
+    $before = @($affectedDirectories | ForEach-Object { Get-NativeSkillProjectionTargetState $_ })
     $changedNames = New-Object System.Collections.Generic.List[string]
     $createdDirectories = New-Object System.Collections.Generic.List[string]
+    $removedDirectories = New-Object System.Collections.Generic.List[object]
     $temporaryPaths = New-Object System.Collections.Generic.List[string]
     try {
         foreach ($skill in @($Plan.skills | Sort-Object name)) {
@@ -176,11 +178,21 @@ function Apply-NativeSkillProjection {
             $changedNames.Add([string]$skill.name) | Out-Null
         }
 
-        $after = @($Plan.skills | Sort-Object target_directory | ForEach-Object { Get-NativeSkillProjectionTargetState ([string]$_.target_directory) })
-        foreach ($index in 0..([Math]::Max(0, $after.Count - 1))) {
-            if ($after.Count -eq 0) { break }
-            $skill = @($Plan.skills | Sort-Object target_directory)[$index]
-            if (-not [string]::Equals([string]$after[$index].content_hash, [string]$skill.content_hash, [StringComparison]::OrdinalIgnoreCase)) { throw ('Projection target hash verification failed: {0}' -f $skill.name) }
+        foreach ($removal in @($Plan.removals | Sort-Object name)) {
+            $targetDirectory = [IO.Path]::GetFullPath([string]$removal.target_directory)
+            if (-not (Test-OperationPathWithinRoot $targetDirectory $targetRoot)) { throw ('Projection removal escaped the owned root: {0}' -f $targetDirectory) }
+            $current = Get-NativeSkillProjectionTargetState $targetDirectory
+            if (-not [bool]$current.exists) { continue }
+            if ([string]$current.kind -ne 'junction' -or -not [string]::Equals([string]$current.link_target, [string]$removal.previous_link_target, [StringComparison]::OrdinalIgnoreCase)) { throw ('Projection stale target drifted: {0}' -f $targetDirectory) }
+            $removedDirectories.Add($current) | Out-Null
+            Remove-NativeSkillProjectionPath $targetDirectory
+            $changedNames.Add([string]$removal.name) | Out-Null
+        }
+
+        $after = @($affectedDirectories | ForEach-Object { Get-NativeSkillProjectionTargetState $_ })
+        foreach ($skill in @($Plan.skills)) {
+            $state = @($after | Where-Object directory_path -eq ([IO.Path]::GetFullPath([string]$skill.target_directory).TrimEnd('\', '/')))[0]
+            if ($null -eq $state -or -not [string]::Equals([string]$state.content_hash, [string]$skill.content_hash, [StringComparison]::OrdinalIgnoreCase)) { throw ('Projection target hash verification failed: {0}' -f $skill.name) }
         }
         $receiptIdentity = [ordered]@{ plan_id = [string]$Plan.plan_id; target_root = $targetRoot; changed_names = @($changedNames.ToArray()) }
         $receiptId = 'nsr-{0}' -f (Get-OperationSha256 ($receiptIdentity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)
@@ -196,18 +208,12 @@ function Apply-NativeSkillProjection {
             before = [object[]]$before
             after = [object[]]$after
             changed_names = [object[]]@($changedNames.ToArray() | Sort-Object)
-            notification = [ordered]@{
-                method = [string]$Plan.notification.method
-                mode = [string]$Plan.notification.mode
-                status = 'not_sent'
-                plan_status = [string]$Plan.notification.status
-                changed_names = [object[]]@($changedNames.ToArray() | Sort-Object)
-                host_mutation = $false
-            }
+            added_names = [object[]]@($createdDirectories | ForEach-Object { Split-Path $_ -Leaf } | Sort-Object)
+            removed_names = [object[]]@($removedDirectories | ForEach-Object { Split-Path ([string]$_.directory_path) -Leaf } | Sort-Object)
             rollback = [ordered]@{ status = 'available'; guard = 'target_state_must_match_after'; drift_safe = $true }
             provider_calls = 0
-            native_mutations = $createdDirectories.Count
-            writes = $createdDirectories.Count
+            native_mutations = $createdDirectories.Count + $removedDirectories.Count
+            writes = $createdDirectories.Count + $removedDirectories.Count
         }
         if (Test-NativeSkillProjectionReceiptContract $receipt | Select-Object -ExpandProperty pass) { Write-NativeSkillProjectionJsonAtomic $receiptFile $receipt } else { throw 'Generated native projection receipt failed its contract.' }
         return [pscustomobject][ordered]@{
@@ -216,13 +222,15 @@ function Apply-NativeSkillProjection {
             plan_id = [string]$Plan.plan_id
             receipt_path = $receiptFile
             changed_names = [object[]]@($changedNames.ToArray() | Sort-Object)
-            notification = $receipt.notification
             receipt = $receipt
         }
     }
     catch {
         foreach ($temporaryPath in @($temporaryPaths.ToArray())) { Remove-NativeSkillProjectionPath $temporaryPath }
         foreach ($directory in @($createdDirectories.ToArray() | Sort-Object -Descending)) { Remove-NativeSkillProjectionPath $directory }
+        foreach ($state in @($removedDirectories.ToArray())) {
+            if (-not (Test-Path -LiteralPath ([string]$state.directory_path))) { New-NativeSkillProjectionJunction ([string]$state.directory_path) ([string]$state.link_target) }
+        }
         throw
     }
 }
@@ -236,10 +244,8 @@ function Test-NativeSkillProjectionReceiptContract {
     if ([string](Get-OperationObjectProperty $Receipt 'receipt_id') -notmatch '^nsr-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'receipt_id_invalid' 'error' '$.receipt_id' 'Receipt id is invalid.')) | Out-Null }
     if ([string](Get-OperationObjectProperty $Receipt 'status') -notin @('applied', 'rolled_back')) { $findings.Add((New-OperationFinding 'status_invalid' 'error' '$.status' 'Receipt status is invalid.')) | Out-Null }
     foreach ($field in @('owner', 'plan_id', 'target_root', 'receipt_path')) { if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Receipt $field))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Receipt field is required.')) | Out-Null } }
-    foreach ($field in @('before', 'after', 'changed_names')) { if (-not (Test-OperationArray (Get-OperationObjectProperty $Receipt $field))) { $findings.Add((New-OperationFinding 'array_field_invalid' 'error' ('$.{0}' -f $field) 'Receipt field must be an array.')) | Out-Null } }
+    foreach ($field in @('before', 'after', 'changed_names', 'added_names', 'removed_names')) { if (-not (Test-OperationArray (Get-OperationObjectProperty $Receipt $field))) { $findings.Add((New-OperationFinding 'array_field_invalid' 'error' ('$.{0}' -f $field) 'Receipt field must be an array.')) | Out-Null } }
     if ([long](Get-OperationObjectProperty $Receipt 'provider_calls') -ne 0) { $findings.Add((New-OperationFinding 'provider_calls_forbidden' 'error' '$.provider_calls' 'Projection cannot call a provider.')) | Out-Null }
-    $notification = Get-OperationObjectProperty $Receipt 'notification'
-    if ([string](Get-OperationObjectProperty $notification 'method') -ne 'skills/changed') { $findings.Add((New-OperationFinding 'notification_method_invalid' 'error' '$.notification.method' 'Receipt notification method is invalid.')) | Out-Null }
     $rollback = Get-OperationObjectProperty $Receipt 'rollback'
     if ((Get-OperationObjectProperty $rollback 'drift_safe') -ne $true) { $findings.Add((New-OperationFinding 'rollback_guard_invalid' 'error' '$.rollback.drift_safe' 'Receipt rollback must be drift-safe.')) | Out-Null }
     return New-OperationValidationResult $findings.ToArray()

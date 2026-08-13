@@ -1,0 +1,24 @@
+BeforeAll {
+    $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
+    . (Join-Path $repoRoot 'src\Domain\SkillMetadata.ps1')
+}
+
+Describe 'Skill metadata' {
+    It 'reads quoted scalars and folded block descriptions' {
+        $path = Join-Path $TestDrive 'SKILL.md'
+        "---`nname: 'demo-skill'`ndescription: >`n  First line`n  second line`ncompatibility: pwsh 7`n---`n" | Set-Content -LiteralPath $path
+        $metadata = Read-SkillMetadata $path
+        $metadata.valid | Should -BeTrue
+        $metadata.name | Should -Be 'demo-skill'
+        $metadata.description | Should -Be 'First line second line'
+    }
+
+    It 'enforces Agent Skills identity limits and reports unknown fields as warnings' {
+        $path = Join-Path $TestDrive 'invalid.md'
+        "---`nname: Bad--Name`ndescription: fixture`nunknown: value`n---`n" | Set-Content -LiteralPath $path
+        $metadata = Read-SkillMetadata $path
+        $metadata.valid | Should -BeFalse
+        @($metadata.findings.code) | Should -Contain 'name_invalid'
+        @($metadata.findings.code) | Should -Contain 'field_unknown'
+    }
+}

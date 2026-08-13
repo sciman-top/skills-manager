@@ -156,7 +156,7 @@ Describe "Config And Update Enhancements" {
   "mcp_servers": [], "mcp_targets": [], "sync_mode": "link",
   "skill_projection": {
     "sources": [],
-    "external_skill_inventory": { "enabled": true, "plugin_cache_path": "~/.codex/plugins/cache" }
+    "external_skill_inventory": { "enabled": true }
   }
 }
 '@ | ConvertFrom-Json
@@ -169,21 +169,19 @@ Describe "Config And Update Enhancements" {
   "mcp_servers": [], "mcp_targets": [], "sync_mode": "link",
   "skill_projection": {
     "sources": [],
-    "external_skill_inventory": { "enabled": "true", "plugin_cache_path": " " }
+    "external_skill_inventory": { "enabled": "true" }
   }
 }
 '@ | ConvertFrom-Json
             $errors = @(Get-CfgContractErrors $invalid) -join "`n"
             $errors | Should -Match "external_skill_inventory.enabled 必须是布尔值"
-            $errors | Should -Match "external_skill_inventory.plugin_cache_path 不能为空"
             { Assert-Cfg $invalid } | Should -Throw
 
             $invalidHashtable = $valid.PSObject.Copy()
             $invalidHashtable.skill_projection = $valid.skill_projection.PSObject.Copy()
-            $invalidHashtable.skill_projection.external_skill_inventory = @{ enabled = "true"; plugin_cache_path = " " }
+            $invalidHashtable.skill_projection.external_skill_inventory = @{ enabled = "true" }
             $hashtableErrors = @(Get-CfgContractErrors $invalidHashtable) -join "`n"
             $hashtableErrors | Should -Match "external_skill_inventory.enabled 必须是布尔值"
-            $hashtableErrors | Should -Match "external_skill_inventory.plugin_cache_path 不能为空"
             { Assert-Cfg $invalidHashtable } | Should -Throw
         }
 

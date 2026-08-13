@@ -16,23 +16,10 @@ else {
     Split-Path -Parent $MyInvocation.MyCommand.Path
 }
 $repoRoot = Split-Path $resolvedScriptRoot -Parent
+. (Join-Path $repoRoot 'src\Domain\SkillMetadata.ps1')
 if ([string]::IsNullOrWhiteSpace($AgentRoot)) { $AgentRoot = Join-Path $repoRoot "agent" }
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) { $ConfigPath = Join-Path $repoRoot "skills.json" }
 if ([string]::IsNullOrWhiteSpace($DependencyContractPath)) { $DependencyContractPath = Join-Path $repoRoot "config\skill-dependency-closure.json" }
-
-function Get-SkillFrontmatterValue([string]$content, [string]$key) {
-    $frontmatterMatch = [regex]::Match(
-        $content,
-        '\A(?:\uFEFF)?---[ \t]*\r?\n(?<body>.*?)(?:\r?\n)---[ \t]*(?:\r?\n|\z)',
-        [System.Text.RegularExpressions.RegexOptions]::Singleline
-    )
-    if (-not $frontmatterMatch.Success) { return "" }
-    $frontmatter = $frontmatterMatch.Groups['body'].Value
-    $pattern = ('(?m)^{0}:\s*["'']?([^\r\n"'']+)["'']?\s*$' -f [regex]::Escape($key))
-    $match = [regex]::Match($frontmatter, $pattern)
-    if (-not $match.Success) { return "" }
-    return $match.Groups[1].Value.Trim()
-}
 
 function Test-PathWithinRoot([string]$path, [string]$root) {
     $fullPath = [IO.Path]::GetFullPath($path)
@@ -140,9 +127,14 @@ else {
         if (-not (Test-Path -LiteralPath $skillFile -PathType Leaf)) { continue }
 
         $content = Get-Content -Raw -LiteralPath $skillFile
-        $name = Get-SkillFrontmatterValue $content "name"
-        if ([string]::IsNullOrWhiteSpace($name)) {
-            Add-IntegrityFinding $errors "missing_skill_name" $directory.Name "SKILL.md frontmatter has no name" $skillFile
+        $metadata = Read-SkillMetadata $skillFile -Observation
+        $name = [string]$metadata.name
+        foreach ($finding in @($metadata.findings | Where-Object severity -eq 'error')) {
+            $code = if ([string]$finding.code -in @('frontmatter_missing','name_required')) { 'missing_skill_name' } else { [string]$finding.code }
+            Add-IntegrityFinding $errors $code $directory.Name ([string]$finding.message) $skillFile
+        }
+        foreach ($finding in @($metadata.findings | Where-Object severity -eq 'warning')) { Add-IntegrityFinding $warnings ([string]$finding.code) $directory.Name ([string]$finding.message) $skillFile }
+        if (-not [bool]$metadata.valid) {
             continue
         }
 
@@ -226,6 +218,13 @@ else {
                     }) | Out-Null
             }
         }
+    }
+}
+
+foreach ($ownedRoot in @((Join-Path $repoRoot 'overrides\custom'), (Join-Path $repoRoot 'overrides\patches'))) {
+    foreach ($skillFile in @(Get-ChildItem -LiteralPath $ownedRoot -Recurse -File -Filter 'SKILL.md' -ErrorAction SilentlyContinue)) {
+        $metadata = Read-SkillMetadata $skillFile.FullName
+        foreach ($finding in @($metadata.findings | Where-Object severity -eq 'error')) { Add-IntegrityFinding $errors ([string]$finding.code) ([string]$metadata.name) ([string]$finding.message) $skillFile.FullName }
     }
 }
 

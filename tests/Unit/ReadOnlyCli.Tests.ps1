@@ -32,7 +32,7 @@ Describe 'Read-only capability and rule CLI' {
                 managed_source_path = 'agent'
                 user_skill_root = 'user-skills'
                 managed_link_includes = @()
-                external_skill_inventory = [pscustomobject]@{ plugin_cache_path = 'plugin-cache' }
+                external_skill_inventory = [pscustomobject]@{ enabled = $true }
             }
         }
         $capabilityCfgPath = Join-Path $capabilityRoot 'skills.json'

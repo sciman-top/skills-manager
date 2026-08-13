@@ -1256,13 +1256,12 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
         It "Captures system and enabled plugin skills as read-only external facts" {
             $userRoot = Join-Path $TestDrive "external-user-skills"
             $systemDir = Join-Path $userRoot ".system\system-demo"
-            $pluginCache = Join-Path $TestDrive "external-plugin-cache"
-            $pluginDir = Join-Path $pluginCache "market\demo\1.0.0\skills\plugin-demo"
-            $codexConfig = Join-Path $TestDrive "external-config.toml"
+            $pluginRoot = Join-Path $TestDrive "external-plugin"
+            $pluginDir = Join-Path $pluginRoot "skills\plugin-demo"
             New-Item -ItemType Directory -Path $systemDir, $pluginDir -Force | Out-Null
             Set-ContentUtf8 (Join-Path $systemDir "SKILL.md") "---`nname: system-demo`ndescription: System demo.`n---`n"
             Set-ContentUtf8 (Join-Path $pluginDir "SKILL.md") "---`nname: plugin-demo`ndescription: Plugin demo.`n---`n"
-            Set-ContentUtf8 $codexConfig "[plugins.`"demo@market`"]`nenabled = true`n"
+            Mock Invoke-CodexCliJson { [pscustomobject]@{ installed = @([pscustomobject]@{ pluginId='demo@market'; name='demo'; marketplaceName='market'; version='1.0.0'; installed=$true; enabled=$true; source=[pscustomobject]@{ path=$pluginRoot } }) } }
             $cfg = [pscustomobject]@{
                 vendors = @()
                 imports = @()
@@ -1270,8 +1269,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 mcp_servers = @()
                 skill_projection = [pscustomobject]@{
                     user_skill_root = $userRoot
-                    codex_config_path = $codexConfig
-                    external_skill_inventory = [pscustomobject]@{ enabled = $true; plugin_cache_path = $pluginCache }
+                    external_skill_inventory = [pscustomobject]@{ enabled = $true }
                 }
             }
 

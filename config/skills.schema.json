@@ -125,8 +125,7 @@
           "type": "object",
           "additionalProperties": true,
           "properties": {
-            "enabled": { "type": "boolean" },
-            "plugin_cache_path": { "type": "string", "minLength": 1 }
+            "enabled": { "type": "boolean" }
           }
         },
         "sources": {
@@ -167,9 +166,7 @@
         "owner": { "$ref": "#/$defs/nonEmptyString" },
         "target_root": { "$ref": "#/$defs/nonEmptyString" },
         "receipt_path": { "type": "string", "pattern": "^reports[\\\\/]skill-projection[\\\\/][^\\\\/]+\\.json$" },
-        "apply_requires_token": { "type": "boolean" },
-        "notification_method": { "$ref": "#/$defs/nonEmptyString" },
-        "notification_mode": { "type": "string", "enum": ["plan_only"] }
+        "apply_requires_token": { "type": "boolean" }
       }
     }
   },

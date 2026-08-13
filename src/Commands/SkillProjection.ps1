@@ -11,139 +11,21 @@ function Resolve-SkillProjectionPath([string]$path) {
     return [System.IO.Path]::GetFullPath($resolved)
 }
 
-function Get-CodexEnabledPluginIds([string]$configPath) {
-    if ([string]::IsNullOrWhiteSpace($configPath) -or -not (Test-Path -LiteralPath $configPath -PathType Leaf)) { return @() }
-
-    $content = Get-ContentUtf8 $configPath
-    $pattern = '(?ms)^\s*\[plugins\.(?:"(?<quoted>[^"]+)"|(?<bare>[^\]\r\n]+))\]\s*\r?\n(?<body>.*?)(?=^\s*\[|\z)'
-    $ids = New-Object System.Collections.Generic.List[string]
-    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-    $tableRegex = [regex]::new($pattern, [System.Text.RegularExpressions.RegexOptions]::None, [TimeSpan]::FromSeconds(1))
-    $enabledRegex = [regex]::new('^\s*enabled\s*=\s*true\s*(?:#.*)?$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::Multiline, [TimeSpan]::FromSeconds(1))
-    foreach ($match in $tableRegex.Matches($content)) {
-        $body = [string]$match.Groups['body'].Value
-        if (-not $enabledRegex.IsMatch($body)) { continue }
-        $id = if ($match.Groups['quoted'].Success) { [string]$match.Groups['quoted'].Value } else { [string]$match.Groups['bare'].Value }
-        $id = $id.Trim()
-        if (-not [string]::IsNullOrWhiteSpace($id) -and $seen.Add($id)) { $ids.Add($id) | Out-Null }
-    }
-    return @($ids.ToArray() | Sort-Object)
-}
-
 function Add-SkillExternalInventoryWarning($warnings, [string]$code, [string]$subject, [string]$message) {
     $warnings.Add([pscustomobject][ordered]@{ code = $code; subject = $subject; message = $message }) | Out-Null
 }
 
 function Get-CodexExternalSkillInventory($projectionCfg) {
-    $result = [ordered]@{
-        enabled = $false
-        config_path = ''
-        plugin_cache_path = ''
-        cache_selection = 'newest_usable_version_by_mtime'
-        enabled_plugin_ids = @()
-        plugin_count = 0
-        skill_count = 0
-        metadata_chars = 0
-        skills = @()
-        warnings = @()
-    }
-    if ($null -eq $projectionCfg) { return [pscustomobject]$result }
+    $disabled = [pscustomobject]@{ enabled = $false; authority = 'codex_plugin_list_json'; freshness = 'unknown'; coverage = 'not_configured'; enabled_plugin_ids = @(); plugin_count = 0; skill_count = 0; metadata_chars = 0; skills = @(); warnings = @() }
+    if ($null -eq $projectionCfg) { return $disabled }
     $inventoryCfg = Get-CfgObjectProperty $projectionCfg 'external_skill_inventory'
-    if ($null -eq $inventoryCfg) { return [pscustomobject]$result }
+    if ($null -eq $inventoryCfg) { return $disabled }
     $enabledRaw = Get-CfgObjectProperty $inventoryCfg 'enabled'
     $enabled = ($null -eq $enabledRaw) -or [bool]$enabledRaw
-    $result.enabled = $enabled
-    if (-not $enabled) { return [pscustomobject]$result }
-
-    $configRawValue = Get-CfgObjectProperty $projectionCfg 'codex_config_path'
-    $cacheRawValue = Get-CfgObjectProperty $inventoryCfg 'plugin_cache_path'
-    $configRaw = if ([string]::IsNullOrWhiteSpace([string]$configRawValue)) { '~/.codex/config.toml' } else { [string]$configRawValue }
-    $cacheRaw = if ([string]::IsNullOrWhiteSpace([string]$cacheRawValue)) { '~/.codex/plugins/cache' } else { [string]$cacheRawValue }
-    $configPath = Resolve-SkillProjectionPath $configRaw
-    $cachePath = Resolve-SkillProjectionPath $cacheRaw
-    $result.config_path = $configPath
-    $result.plugin_cache_path = $cachePath
-    $warnings = New-Object System.Collections.Generic.List[object]
-    $skills = New-Object System.Collections.Generic.List[object]
-
-    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
-        Add-SkillExternalInventoryWarning $warnings 'codex_config_missing' $configPath 'Codex config is unavailable; external plugin skills were not inventoried.'
-        $result.warnings = @($warnings.ToArray())
-        return [pscustomobject]$result
-    }
-
-    $pluginIds = @(Get-CodexEnabledPluginIds $configPath)
-    $result.enabled_plugin_ids = @($pluginIds)
-    if (-not (Test-Path -LiteralPath $cachePath -PathType Container)) {
-        Add-SkillExternalInventoryWarning $warnings 'plugin_cache_missing' $cachePath 'Codex plugin cache is unavailable; enabled plugins could not be resolved to skill metadata.'
-        $result.plugin_count = $pluginIds.Count
-        $result.warnings = @($warnings.ToArray())
-        return [pscustomobject]$result
-    }
-
-    foreach ($pluginId in $pluginIds) {
-        $separator = $pluginId.LastIndexOf('@')
-        if ($separator -le 0 -or $separator -ge ($pluginId.Length - 1)) {
-            Add-SkillExternalInventoryWarning $warnings 'invalid_plugin_id' $pluginId 'Expected enabled plugin id in name@marketplace form.'
-            continue
-        }
-        $pluginName = $pluginId.Substring(0, $separator)
-        $marketplace = $pluginId.Substring($separator + 1)
-        $safeSegmentPattern = '^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9_-])?$'
-        if ($pluginName -notmatch $safeSegmentPattern -or $marketplace -notmatch $safeSegmentPattern) {
-            Add-SkillExternalInventoryWarning $warnings 'unsafe_plugin_id' $pluginId 'Plugin id contains a path segment and was not resolved against the cache.'
-            continue
-        }
-        $pluginRoot = Join-Path (Join-Path $cachePath $marketplace) $pluginName
-        if (-not (Test-Path -LiteralPath $pluginRoot -PathType Container)) {
-            Add-SkillExternalInventoryWarning $warnings 'enabled_plugin_cache_missing' $pluginId ("No cache directory was found at {0}." -f $pluginRoot)
-            continue
-        }
-
-        $selectedVersion = $null
-        $selectedSkillFiles = @()
-        foreach ($versionDir in @(Get-ChildItem -LiteralPath $pluginRoot -Directory -ErrorAction SilentlyContinue | Sort-Object @{ Expression = 'LastWriteTimeUtc'; Descending = $true }, @{ Expression = 'Name'; Descending = $true })) {
-            $skillsRoot = Join-Path $versionDir.FullName 'skills'
-            if (-not (Test-Path -LiteralPath $skillsRoot -PathType Container)) { continue }
-            $candidateFiles = @(Get-ChildItem -LiteralPath $skillsRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-                    $skillFile = Join-Path $_.FullName 'SKILL.md'
-                    if (Test-Path -LiteralPath $skillFile -PathType Leaf) { Get-Item -LiteralPath $skillFile }
-                })
-            if ($candidateFiles.Count -eq 0) { continue }
-            $selectedVersion = $versionDir
-            $selectedSkillFiles = @($candidateFiles)
-            break
-        }
-        if ($null -eq $selectedVersion) {
-            Add-SkillExternalInventoryWarning $warnings 'enabled_plugin_skills_missing' $pluginId 'The newest usable plugin cache has no direct skills/*/SKILL.md entries.'
-            continue
-        }
-
-        foreach ($skillFile in @($selectedSkillFiles | Sort-Object FullName)) {
-            $meta = Get-SkillMetadataFromFile $skillFile.FullName
-            $name = if ([string]::IsNullOrWhiteSpace([string]$meta.declared_name)) { $skillFile.Directory.Name } else { [string]$meta.declared_name }
-            $description = [string]$meta.description
-            $skills.Add([pscustomobject][ordered]@{
-                    plugin_id = $pluginId
-                    plugin_name = $pluginName
-                    marketplace = $marketplace
-                    cache_version = [string]$selectedVersion.Name
-                    name = $name
-                    qualified_name = ("{0}::{1}" -f $pluginId, $name)
-                    description = $description
-                    path = $skillFile.FullName
-                }) | Out-Null
-        }
-    }
-
-    $metadataChars = 0
-    foreach ($skill in @($skills.ToArray())) { $metadataChars += ([string]$skill.name).Length + ([string]$skill.description).Length }
-    $result.plugin_count = $pluginIds.Count
-    $result.skill_count = $skills.Count
-    $result.metadata_chars = $metadataChars
-    $result.skills = @($skills.ToArray() | Sort-Object plugin_id, name)
-    $result.warnings = @($warnings.ToArray())
-    return [pscustomobject]$result
+    if (-not $enabled) { $disabled.coverage = 'disabled'; return $disabled }
+    $result = Get-CodexPluginSkillInventory
+    $result | Add-Member -NotePropertyName enabled -NotePropertyValue $true
+    return $result
 }
 
 function Get-SkillProjectionFiles([string]$rootPath) {
@@ -360,65 +242,6 @@ function Sync-SkillDiscoveryCatalog($projectionCfg) {
         path = $catalogPath
         skill_count = @($catalog.skills).Count
         domain_count = @($catalog.domains).Count
-    }
-}
-
-function Sync-CodexManagedSkillLinks {
-    [CmdletBinding()]
-    param([Parameter(Mandatory = $true)]$projectionCfg)
-    Need ($null -ne $projectionCfg) "skill_projection 配置为空"
-    Need ($projectionCfg.PSObject.Properties.Match("managed_source_path").Count -gt 0) "skill_projection 缺少 managed_source_path"
-    Need ($projectionCfg.PSObject.Properties.Match("user_skill_root").Count -gt 0) "skill_projection 缺少 user_skill_root"
-    $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
-    $userRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.user_skill_root)
-    Need (Test-Path -LiteralPath $managedRoot -PathType Container) ("受管技能源不存在：{0}" -f $managedRoot)
-    Need (-not [string]::Equals($managedRoot, $userRoot, [System.StringComparison]::OrdinalIgnoreCase)) "受管技能源不能与用户投影根相同"
-
-    EnsureDir $userRoot
-    $excluded = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    if ($projectionCfg.PSObject.Properties.Match("managed_link_excludes").Count -gt 0 -and $null -ne $projectionCfg.managed_link_excludes) {
-        foreach ($name in @($projectionCfg.managed_link_excludes)) {
-            $excluded.Add(([string]$name).Trim()) | Out-Null
-        }
-    }
-    $included = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    if ($projectionCfg.PSObject.Properties.Match("managed_link_includes").Count -gt 0 -and $null -ne $projectionCfg.managed_link_includes) {
-        foreach ($name in @($projectionCfg.managed_link_includes)) {
-            $included.Add(([string]$name).Trim()) | Out-Null
-        }
-    }
-    $useIncludeFilter = $included.Count -gt 0
-    $desired = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($dir in @(Get-ChildItem -LiteralPath $managedRoot -Directory -Force | Where-Object Name -ne ".system" | Sort-Object Name)) {
-        if ($excluded.Contains($dir.Name) -or ($useIncludeFilter -and -not $included.Contains($dir.Name))) { continue }
-        # Only generated skill packages with an entrypoint belong in the host
-        # skill root.  Override-only directories (for example a resource or
-        # agent policy directory without SKILL.md) must remain in agent/ but
-        # must not become loadable host junctions.
-        if (-not (Test-Path -LiteralPath (Join-Path $dir.FullName "SKILL.md") -PathType Leaf)) { continue }
-        $linkPath = Join-Path $userRoot $dir.Name
-        New-Junction $linkPath $dir.FullName -QuietIfUnchanged
-        $desired.Add($dir.Name) | Out-Null
-    }
-    $missingIncludedPackages = @($included | Where-Object { -not $desired.Contains($_) } | Sort-Object)
-    Need ($missingIncludedPackages.Count -eq 0) ("managed_link_includes 中的技能包不存在或缺少 SKILL.md：{0}" -f ($missingIncludedPackages -join ", "))
-
-    $staleRemoved = 0
-    foreach ($entry in @(Get-ChildItem -LiteralPath $userRoot -Directory -Force -ErrorAction SilentlyContinue | Where-Object Name -ne ".system")) {
-        if ($desired.Contains($entry.Name) -or -not (Is-ReparsePoint $entry.FullName)) { continue }
-        $target = Get-ReparsePointTargetFullPath $entry.FullName
-        $managedPrefix = $managedRoot.TrimEnd("\") + "\"
-        if (-not [string]::IsNullOrWhiteSpace($target) -and $target.StartsWith($managedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-            Invoke-RemoveItem $entry.FullName -Recurse
-            $staleRemoved++
-        }
-    }
-
-    return [pscustomobject]@{
-        managed_source_path = $managedRoot
-        user_skill_root = $userRoot
-        managed_link_count = $desired.Count
-        stale_link_count = $staleRemoved
     }
 }
 
@@ -966,13 +789,7 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
             $nativeProjectionApply = Apply-NativeSkillProjection -Plan $nativeProjectionPlan -ApplyToken ([string]$nativeProjectionPlan.apply_token)
         }
     }
-    $linkProjection = $null
-    if ($projectionCfg.PSObject.Properties.Match("managed_source_path").Count -gt 0 -or $projectionCfg.PSObject.Properties.Match("user_skill_root").Count -gt 0) {
-        $linkProjection = Sync-CodexManagedSkillLinks $projectionCfg
-    }
     $plan = New-SkillProjectionPlan $projectionCfg
-    if ([bool]$plan.enabled) {
-    }
 
     $existing = if (Test-Path -LiteralPath $configPath -PathType Leaf) { Get-ContentUtf8 $configPath } else { "" }
     $desired = Build-CodexSkillsProjectionToml $existing @($plan.disabled)
@@ -1029,13 +846,6 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
                     kept_total = [int]$nativeProjectionPlan.kept_total
                     omitted_total = [int]$nativeProjectionPlan.omitted_total
                     truncated = [bool]$nativeProjectionPlan.truncated
-                    notification = $nativeProjectionApply.notification
-                } }
-                managed_link_projection = if ($null -eq $linkProjection) { $null } else { [ordered]@{
-                    managed_source_path = [string]$linkProjection.managed_source_path
-                    user_skill_root = [string]$linkProjection.user_skill_root
-                    managed_link_count = [int]$linkProjection.managed_link_count
-                    stale_link_count = [int]$linkProjection.stale_link_count
                 } }
             }
             Set-ContentUtf8 $manifestPath ($manifest | ConvertTo-Json -Depth 20)
@@ -1051,7 +861,6 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
         config_path = $configPath
         manifest_path = $manifestPath
         backup_path = if ($null -eq $backupPath) { "" } else { [string]$backupPath }
-        managed_link_projection = $linkProjection
         capability_catalog_projection = $catalogProjection
         native_projection = if (-not $nativeProjectionAuthoritative) { $null } else { [pscustomobject]@{ plan = $nativeProjectionPlan; apply = $nativeProjectionApply } }
         plan = $plan

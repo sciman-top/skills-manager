@@ -1,6 +1,7 @@
 $skillCatalogCompilerRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
 if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) { . (Join-Path $skillCatalogCompilerRepoRoot 'src\Domain\OperationPlan.ps1') }
 if ($null -eq (Get-Command New-SkillCatalog -ErrorAction SilentlyContinue)) { . (Join-Path $skillCatalogCompilerRepoRoot 'src\Domain\SkillCatalog.ps1') }
+if ($null -eq (Get-Command Read-SkillMetadata -ErrorAction SilentlyContinue)) { . (Join-Path $skillCatalogCompilerRepoRoot 'src\Domain\SkillMetadata.ps1') }
 
 function Test-SkillCatalogCompilerContained {
     param([string]$Path, [string]$Root)
@@ -22,21 +23,9 @@ function Get-SkillCatalogCompilerTextHash([string]$Text) {
 function Read-SkillCatalogCompilerMetadata {
     param([Parameter(Mandatory = $true)][string]$Path)
 
-    $text = [IO.File]::ReadAllText($Path)
-    $frontmatter = [regex]::Match($text, '(?s)\A---\s*\r?\n(?<yaml>.*?)\r?\n---')
-    if (-not $frontmatter.Success) { return [pscustomobject]@{ valid = $false; reason = 'frontmatter_missing'; text = $text } }
-    $yaml = $frontmatter.Groups['yaml'].Value
-    $nameMatch = [regex]::Match($yaml, '(?m)^name:\s*["'']?(?<value>[^\r\n"'']+)')
-    $descriptionMatch = [regex]::Match($yaml, '(?m)^description:\s*["'']?(?<value>[^\r\n]+)')
-    if (-not $nameMatch.Success -or -not $descriptionMatch.Success) {
-        return [pscustomobject]@{ valid = $false; reason = 'frontmatter_identity_missing'; text = $text }
-    }
-    return [pscustomobject]@{
-        valid = $true
-        name = $nameMatch.Groups['value'].Value.Trim()
-        description = $descriptionMatch.Groups['value'].Value.Trim().Trim('"', "'")
-        text = $text
-    }
+    $metadata = Read-SkillMetadata $Path -Observation
+    $reason = @($metadata.findings | Where-Object severity -eq 'error' | Select-Object -First 1 -ExpandProperty code)
+    return [pscustomobject]@{ valid = [bool]$metadata.valid; reason = if ($reason.Count) { [string]$reason[0] } else { '' }; name = [string]$metadata.name; description = [string]$metadata.description; text = [string]$metadata.text }
 }
 
 function ConvertTo-SkillCatalogCompilerEntry {

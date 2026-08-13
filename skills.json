@@ -21,8 +21,7 @@
       "anthropics-skills-skills-skill-creator"
     ],
     "external_skill_inventory": {
-      "enabled": true,
-      "plugin_cache_path": "~/.codex/plugins/cache"
+      "enabled": true
     },
     "native_projection": {
       "schema_version": 1,
@@ -30,9 +29,7 @@
       "owner": "skills-manager",
       "target_root": "~/.agents/skills",
       "apply_requires_token": true,
-      "receipt_path": "reports/skill-projection/native-receipt.json",
-      "notification_method": "skills/changed",
-      "notification_mode": "plan_only"
+      "receipt_path": "reports/skill-projection/native-receipt.json"
     },
     "aliases": [
       {

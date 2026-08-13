@@ -92,6 +92,112 @@ function Write-Utf8FileAtomic {
     Write-BytesAtomic -Path $Path -Bytes $bytes -MaxAttempts $MaxAttempts -DelayMs $DelayMs
 }
 
+function Invoke-CodexCliJson {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+
+    $command = Get-Command codex -ErrorAction SilentlyContinue
+    if ($null -eq $command) { throw 'codex_cli_unavailable' }
+    $output = @(& $command.Source @Arguments 2>&1)
+    if ($LASTEXITCODE -ne 0) { throw ('codex_cli_failed: {0}' -f ($output -join "`n")) }
+    try { return (($output -join "`n") | ConvertFrom-Json -Depth 50) }
+    catch { throw ('codex_cli_json_invalid: {0}' -f $_.Exception.Message) }
+}
+
+function Get-CodexPluginSkillInventory {
+    [CmdletBinding()]
+    param()
+
+    $result = [ordered]@{ authority = 'codex_plugin_list_json'; freshness = 'unknown'; coverage = 'platform_na'; plugin_count = 0; skill_count = 0; metadata_chars = 0; enabled_plugin_ids = @(); skills = @(); warnings = @() }
+    try { $payload = Invoke-CodexCliJson -Arguments @('plugin', 'list', '--json') }
+    catch {
+        $result.warnings = @([pscustomobject][ordered]@{ code = 'codex_plugin_inventory_unavailable'; subject = 'codex plugin list --json'; message = $_.Exception.Message })
+        return [pscustomobject]$result
+    }
+    if ($null -eq $payload -or $null -eq $payload.PSObject.Properties['installed']) {
+        $result.warnings = @([pscustomobject][ordered]@{ code = 'codex_plugin_inventory_contract_invalid'; subject = 'installed'; message = 'Codex plugin inventory JSON does not contain the installed collection.' })
+        return [pscustomobject]$result
+    }
+    $skills = [Collections.Generic.List[object]]::new()
+    $warnings = [Collections.Generic.List[object]]::new()
+    $plugins = @($payload.installed | Where-Object { $_.installed -eq $true -and $_.enabled -eq $true } | Sort-Object pluginId)
+    foreach ($plugin in $plugins) {
+        $pluginId = [string]$plugin.pluginId
+        $sourcePath = [string]$plugin.source.path
+        if ([string]::IsNullOrWhiteSpace($sourcePath) -or -not (Test-Path -LiteralPath $sourcePath -PathType Container)) {
+            $warnings.Add([pscustomobject][ordered]@{ code = 'enabled_plugin_source_missing'; subject = $pluginId; message = ('Enabled plugin source is unavailable: {0}' -f $sourcePath) }) | Out-Null
+            continue
+        }
+        foreach ($skillFile in @(Get-ChildItem -LiteralPath (Join-Path $sourcePath 'skills') -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                    $candidate = Join-Path $_.FullName 'SKILL.md'
+                    if (Test-Path -LiteralPath $candidate -PathType Leaf) { Get-Item -LiteralPath $candidate }
+                } | Sort-Object FullName)) {
+            if ($null -eq (Get-Command Read-SkillMetadata -ErrorAction SilentlyContinue)) {
+                $repoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json')) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
+                . (Join-Path $repoRoot 'src\Domain\SkillMetadata.ps1')
+            }
+            $metadata = Read-SkillMetadata $skillFile.FullName -Observation
+            $name = if ([string]::IsNullOrWhiteSpace([string]$metadata.name)) { $skillFile.Directory.Name } else { [string]$metadata.name }
+            $description = [string]$metadata.description
+            $skills.Add([pscustomobject][ordered]@{ plugin_id = $pluginId; plugin_name = [string]$plugin.name; marketplace = [string]$plugin.marketplaceName; version = [string]$plugin.version; name = $name; qualified_name = ('{0}::{1}' -f $pluginId, $name); description = $description; path = $skillFile.FullName }) | Out-Null
+        }
+    }
+    $ordered = @($skills.ToArray() | Sort-Object plugin_id, name, path)
+    $result.freshness = 'fresh'; $result.coverage = 'complete'; $result.plugin_count = $plugins.Count; $result.skill_count = $ordered.Count
+    foreach ($skill in $ordered) { $result.metadata_chars += ([string]$skill.name).Length + ([string]$skill.description).Length }
+    $result.enabled_plugin_ids = @($plugins | ForEach-Object { [string]$_.pluginId }); $result.skills = $ordered; $result.warnings = @($warnings.ToArray())
+    return [pscustomobject]$result
+}
+
+function ConvertFrom-SkillMetadataScalar {
+    param([string]$Value)
+    $valueText = $Value.Trim()
+    if ($valueText.Length -ge 2 -and (($valueText.StartsWith('"') -and $valueText.EndsWith('"')) -or ($valueText.StartsWith("'") -and $valueText.EndsWith("'")))) {
+        return $valueText.Substring(1, $valueText.Length - 2)
+    }
+    return $valueText
+}
+
+function Read-SkillMetadata {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Path, [switch]$Observation)
+
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $text = if (Test-Path -LiteralPath $fullPath -PathType Leaf) { [IO.File]::ReadAllText($fullPath) } else { '' }
+    $result = [ordered]@{ valid = $false; path = $fullPath; text = $text; name = ''; declared_name = ''; description = ''; fields = [ordered]@{}; findings = @() }
+    $frontmatter = [regex]::Match($text, '\A(?:\uFEFF)?---[ \t]*\r?\n(?<body>.*?)(?:\r?\n)---[ \t]*(?:\r?\n|\z)', [Text.RegularExpressions.RegexOptions]::Singleline)
+    if (-not $frontmatter.Success) {
+        $result.findings = @([pscustomobject]@{ code='frontmatter_missing'; severity='error'; field=''; message='SKILL.md requires YAML frontmatter.' })
+        return [pscustomobject]$result
+    }
+    $lines = @($frontmatter.Groups['body'].Value -split '\r?\n')
+    $fields = [ordered]@{}
+    for ($index = 0; $index -lt $lines.Count; $index++) {
+        $line = [string]$lines[$index]
+        if ($line -notmatch '^(?<key>[A-Za-z][A-Za-z0-9-]*):(?:[ \t]*(?<value>.*))?$') { continue }
+        $key = [string]$Matches.key; $raw = [string]$Matches.value
+        if ($raw -in @('|','>','|-','>-','|+','>+')) {
+            $parts = [Collections.Generic.List[string]]::new()
+            while ($index + 1 -lt $lines.Count -and [string]$lines[$index + 1] -match '^[ \t]+') { $index++; $parts.Add(([string]$lines[$index]).Trim()) | Out-Null }
+            $fields[$key] = if ($raw.StartsWith('>')) { ($parts -join ' ') } else { ($parts -join "`n") }
+        }
+        else { $fields[$key] = ConvertFrom-SkillMetadataScalar $raw }
+    }
+    $name = [string]$fields['name']; $description = [string]$fields['description']
+    $findings = [Collections.Generic.List[object]]::new()
+    if ([string]::IsNullOrWhiteSpace($name)) { $findings.Add([pscustomobject]@{ code='name_required'; severity='error'; field='name'; message='Skill name is required.' }) | Out-Null }
+    elseif ($name.Length -gt 64 -or $name -notmatch '^[a-z0-9]+(?:-[a-z0-9]+)*$') { $findings.Add([pscustomobject]@{ code='name_invalid'; severity='error'; field='name'; message='Skill name must be at most 64 lowercase alphanumeric/hyphen characters without edge or repeated hyphens.' }) | Out-Null }
+    if ([string]::IsNullOrWhiteSpace($description)) { $findings.Add([pscustomobject]@{ code='description_required'; severity='error'; field='description'; message='Skill description is required.' }) | Out-Null }
+    elseif ($description.Length -gt 1024) { $findings.Add([pscustomobject]@{ code='description_too_long'; severity='error'; field='description'; message='Skill description exceeds 1024 characters.' }) | Out-Null }
+    if ($fields.Contains('compatibility') -and ([string]$fields['compatibility']).Length -gt 500) { $findings.Add([pscustomobject]@{ code='compatibility_too_long'; severity='error'; field='compatibility'; message='Skill compatibility exceeds 500 characters.' }) | Out-Null }
+    $allowed = @('name','description','license','allowed-tools','metadata','compatibility')
+    foreach ($key in $fields.Keys) { if ($key -notin $allowed) { $findings.Add([pscustomobject]@{ code='field_unknown'; severity='warning'; field=$key; message=('Unknown top-level skill metadata field: {0}' -f $key) }) | Out-Null } }
+    if ($Observation) { foreach ($finding in $findings) { if ([string]$finding.severity -eq 'error' -and [string]$finding.code -notin @('name_required','description_required')) { $finding.severity = 'warning' } } }
+    $result.valid = @($findings | Where-Object severity -eq 'error').Count -eq 0
+    $result.name = $name; $result.declared_name = $name; $result.description = $description; $result.fields = $fields; $result.findings = @($findings.ToArray())
+    return [pscustomobject]$result
+}
+
 $Root = (Resolve-Path ".").Path
 $CfgPath = Join-Path $Root "skills.json"
 $LogPath = Join-Path $Root "build.log"
@@ -2070,6 +2176,10 @@ function Test-RulePatchPlanContract($Plan) {
     return New-OperationValidationResult $findings.ToArray()
 }
 
+$capabilityInventoryRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
+if ($null -eq (Get-Command Get-CodexPluginSkillInventory -ErrorAction SilentlyContinue)) { . (Join-Path $capabilityInventoryRepoRoot 'src\Infrastructure\CodexCli.ps1') }
+if ($null -eq (Get-Command Read-SkillMetadata -ErrorAction SilentlyContinue)) { . (Join-Path $capabilityInventoryRepoRoot 'src\Domain\SkillMetadata.ps1') }
+
 function Get-CapabilitySurfaceFileHash([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -2088,11 +2198,10 @@ function Resolve-CapabilitySurfacePath([string]$Path, [string]$RepoRoot) {
 }
 
 function Get-CapabilitySurfaceSkillMetadata([string]$SkillPath, [string]$Owner, [string]$ProjectionState, [bool]$Resident) {
-    $text = if (Test-Path -LiteralPath $SkillPath -PathType Leaf) { [IO.File]::ReadAllText($SkillPath) } else { '' }
-    $name = Split-Path (Split-Path $SkillPath -Parent) -Leaf
-    $description = ''
-    if ($text -match '(?m)^name\s*:\s*["'']?([^\r\n"'']+)') { $name = $matches[1].Trim() }
-    if ($text -match '(?m)^description\s*:\s*["'']?([^\r\n"'']+)') { $description = $matches[1].Trim() }
+    $metadata = Read-SkillMetadata $SkillPath -Observation
+    $text = [string]$metadata.text
+    $name = if ([string]::IsNullOrWhiteSpace([string]$metadata.name)) { Split-Path (Split-Path $SkillPath -Parent) -Leaf } else { [string]$metadata.name }
+    $description = [string]$metadata.description
     return [pscustomobject][ordered]@{ name = $name; path = [IO.Path]::GetFullPath($SkillPath); entrypoint_hash = if ($text) { Get-CapabilitySurfaceFileHash $SkillPath } else { $null }; description_hash = if ($description) { Get-CapabilitySurfaceTextHash $description } else { $null }; owner = $Owner; resident = $Resident; projection_state = $ProjectionState }
 }
 
@@ -2145,9 +2254,10 @@ function New-SkillSurfaceView {
     $systemItems = if (Test-Path -LiteralPath $systemRoot) { @(Get-ChildItem -LiteralPath $systemRoot -Recurse -File -Filter 'SKILL.md' -Force | ForEach-Object { Get-CapabilitySurfaceSkillMetadata $_.FullName 'host_system' 'system' $true }) } else { @() }
     $surfaces.Add((New-CapabilitySurfaceRecord 'system' 'host_filesystem' $systemRoot 'fresh' $(if ($systemItems.Count) { 'complete' } else { 'not_observed' }) $systemItems)) | Out-Null
 
-    $pluginRoot = Resolve-CapabilitySurfacePath ([string]$projection.external_skill_inventory.plugin_cache_path) $root
-    $pluginItems = if ($pluginRoot -and (Test-Path -LiteralPath $pluginRoot)) { @(Get-ChildItem -LiteralPath $pluginRoot -Recurse -File -Filter 'SKILL.md' -Force | ForEach-Object { Get-CapabilitySurfaceSkillMetadata $_.FullName 'plugin_cache' 'plugin_cache' $true }) } else { @() }
-    $surfaces.Add((New-CapabilitySurfaceRecord 'plugin_cache' 'host_plugin_cache' $pluginRoot 'fresh' $(if ($pluginItems.Count) { 'complete' } else { 'not_observed' }) $pluginItems)) | Out-Null
+    $pluginInventory = Get-CodexPluginSkillInventory
+    $pluginItems = @($pluginInventory.skills | ForEach-Object { Get-CapabilitySurfaceSkillMetadata ([string]$_.path) 'codex_plugin' 'installed_enabled_plugin' $true })
+    $surfaces.Add((New-CapabilitySurfaceRecord 'plugins' 'codex_plugin_list_json' 'codex plugin list --json' ([string]$pluginInventory.freshness) ([string]$pluginInventory.coverage) $pluginItems)) | Out-Null
+    foreach ($warning in @($pluginInventory.warnings)) { $findings.Add([pscustomobject]@{ code = [string]$warning.code; severity = 'warning'; surface = 'plugins'; path = [string]$warning.subject; message = [string]$warning.message }) | Out-Null }
 
     $hostItems = @(); $hostFreshness = 'unknown'; $hostCoverage = 'not_observed'; $hostSource = if ($HostSnapshotPath) { [IO.Path]::GetFullPath($HostSnapshotPath) } else { 'not_provided' }
     if ($HostSnapshotPath) {
@@ -2174,6 +2284,7 @@ function New-SkillSurfaceView {
 $skillCatalogCompilerRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
 if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) { . (Join-Path $skillCatalogCompilerRepoRoot 'src\Domain\OperationPlan.ps1') }
 if ($null -eq (Get-Command New-SkillCatalog -ErrorAction SilentlyContinue)) { . (Join-Path $skillCatalogCompilerRepoRoot 'src\Domain\SkillCatalog.ps1') }
+if ($null -eq (Get-Command Read-SkillMetadata -ErrorAction SilentlyContinue)) { . (Join-Path $skillCatalogCompilerRepoRoot 'src\Domain\SkillMetadata.ps1') }
 
 function Test-SkillCatalogCompilerContained {
     param([string]$Path, [string]$Root)
@@ -2195,21 +2306,9 @@ function Get-SkillCatalogCompilerTextHash([string]$Text) {
 function Read-SkillCatalogCompilerMetadata {
     param([Parameter(Mandatory = $true)][string]$Path)
 
-    $text = [IO.File]::ReadAllText($Path)
-    $frontmatter = [regex]::Match($text, '(?s)\A---\s*\r?\n(?<yaml>.*?)\r?\n---')
-    if (-not $frontmatter.Success) { return [pscustomobject]@{ valid = $false; reason = 'frontmatter_missing'; text = $text } }
-    $yaml = $frontmatter.Groups['yaml'].Value
-    $nameMatch = [regex]::Match($yaml, '(?m)^name:\s*["'']?(?<value>[^\r\n"'']+)')
-    $descriptionMatch = [regex]::Match($yaml, '(?m)^description:\s*["'']?(?<value>[^\r\n]+)')
-    if (-not $nameMatch.Success -or -not $descriptionMatch.Success) {
-        return [pscustomobject]@{ valid = $false; reason = 'frontmatter_identity_missing'; text = $text }
-    }
-    return [pscustomobject]@{
-        valid = $true
-        name = $nameMatch.Groups['value'].Value.Trim()
-        description = $descriptionMatch.Groups['value'].Value.Trim().Trim('"', "'")
-        text = $text
-    }
+    $metadata = Read-SkillMetadata $Path -Observation
+    $reason = @($metadata.findings | Where-Object severity -eq 'error' | Select-Object -First 1 -ExpandProperty code)
+    return [pscustomobject]@{ valid = [bool]$metadata.valid; reason = if ($reason.Count) { [string]$reason[0] } else { '' }; name = [string]$metadata.name; description = [string]$metadata.description; text = [string]$metadata.text }
 }
 
 function ConvertTo-SkillCatalogCompilerEntry {
@@ -2487,8 +2586,6 @@ function Get-NativeSkillProjectionSettings {
     $receiptPath = Resolve-NativeSkillProjectionPath ([string](Get-NativeSkillProjectionProperty $settings @('receipt_path')))
     $userSkillRoot = Resolve-NativeSkillProjectionPath ([string](Get-NativeSkillProjectionProperty $skillProjection @('user_skill_root')))
     $receiptRoot = [IO.Path]::GetFullPath((Join-Path $skillProjectionApplicationRepoRoot 'reports\skill-projection'))
-    $notificationMethod = ([string](Get-NativeSkillProjectionProperty $settings @('notification_method'))).Trim()
-    $notificationMode = ([string](Get-NativeSkillProjectionProperty $settings @('notification_mode'))).Trim()
     if ([string]::IsNullOrWhiteSpace($owner)) { throw 'skill_projection.native_projection.owner is required.' }
     if ([string]::IsNullOrWhiteSpace($targetRoot)) { throw 'skill_projection.native_projection.target_root is required.' }
     if ([string]::IsNullOrWhiteSpace($receiptPath)) { throw 'skill_projection.native_projection.receipt_path is required.' }
@@ -2497,16 +2594,12 @@ function Get-NativeSkillProjectionSettings {
     if ([string]::Equals($targetRoot.TrimEnd('\', '/'), [IO.Path]::GetPathRoot($targetRoot).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { throw 'skill_projection.native_projection.target_root must not be a filesystem root.' }
     if (-not (Test-NativeSkillProjectionPathWithinRoot $receiptPath $receiptRoot) -or [string]::Equals($receiptPath.TrimEnd('\', '/'), $receiptRoot.TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { throw 'skill_projection.native_projection.receipt_path must be a file under reports/skill-projection.' }
     Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path $receiptPath -Parent) $receiptRoot
-    if ([string]::IsNullOrWhiteSpace($notificationMethod)) { $notificationMethod = 'skills/changed' }
-    if ([string]::IsNullOrWhiteSpace($notificationMode)) { $notificationMode = 'plan_only' }
     return [pscustomobject][ordered]@{
         enabled = $enabled
         owner = $owner
         target_root = $targetRoot
         receipt_path = $receiptPath
         apply_requires_token = if (Test-OperationObjectProperty $settings 'apply_requires_token') { [bool](Get-OperationObjectProperty $settings 'apply_requires_token') } else { $true }
-        notification_method = $notificationMethod
-        notification_mode = $notificationMode
     }
 }
 
@@ -2553,18 +2646,12 @@ function New-NativeSkillProjectionBlockedPlan {
         omitted = [object[]]@($EnabledNames | Sort-Object)
         skills = [object[]]@()
         actions = [object[]]@()
+        removals = [object[]]@()
         enabled_total = @($EnabledNames).Count
         kept_total = 0
         omitted_total = @($EnabledNames).Count
         truncated = $true
         findings = [object[]]@($Findings)
-        notification = [ordered]@{
-            method = [string]$Settings.notification_method
-            mode = [string]$Settings.notification_mode
-            status = 'blocked'
-            changed_names = @()
-            host_mutation = $false
-        }
         decision_owner = 'deterministic_projection'
         semantic_selection_applied = $false
         provider_calls = 0
@@ -2654,11 +2741,34 @@ function New-NativeSkillProjectionPlan {
     if ($findings.Count -gt 0) { return New-NativeSkillProjectionBlockedPlan $settings $Catalog $enabledNamesSorted $findings.ToArray() }
 
     $skillRows = @($rows.ToArray() | Sort-Object name)
+    $desiredTargets = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $managedRoots = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($skill in $skillRows) {
+        $desiredTargets.Add(([IO.Path]::GetFullPath([string]$skill.target_directory).TrimEnd('\', '/'))) | Out-Null
+        if (-not [string]::IsNullOrWhiteSpace([string]$skill.source_root)) { $managedRoots.Add(([IO.Path]::GetFullPath([string]$skill.source_root).TrimEnd('\', '/'))) | Out-Null }
+    }
+    $removalRows = [Collections.Generic.List[object]]::new()
+    if (Test-Path -LiteralPath $settings.target_root -PathType Container) {
+        foreach ($entry in @(Get-ChildItem -LiteralPath $settings.target_root -Directory -Force -ErrorAction SilentlyContinue | Sort-Object Name)) {
+            $targetDirectory = [IO.Path]::GetFullPath($entry.FullName).TrimEnd('\', '/')
+            if ($desiredTargets.Contains($targetDirectory) -or -not [bool]($entry.Attributes -band [IO.FileAttributes]::ReparsePoint)) { continue }
+            $linkTargetProperty = $entry.PSObject.Properties['Target']
+            $linkTarget = if ($null -eq $linkTargetProperty) { '' } else { @($linkTargetProperty.Value)[0] }
+            if ([string]::IsNullOrWhiteSpace([string]$linkTarget)) { continue }
+            $linkTarget = [IO.Path]::GetFullPath([string]$linkTarget).TrimEnd('\', '/')
+            $owned = $false
+            foreach ($managedRoot in $managedRoots) {
+                if ($linkTarget.StartsWith(($managedRoot + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)) { $owned = $true; break }
+            }
+            if ($owned) { $removalRows.Add([pscustomobject][ordered]@{ name = $entry.Name; target_directory = $targetDirectory; previous_link_target = $linkTarget }) | Out-Null }
+        }
+    }
     $identity = [ordered]@{
         target_root = [string]$settings.target_root
         owner = [string]$settings.owner
         catalog_id = [string](Get-NativeSkillProjectionProperty $Catalog @('catalog_id'))
         skills = @($skillRows | ForEach-Object { [ordered]@{ name = $_.name; source_path = $_.source_path; target_path = $_.target_path; content_hash = $_.content_hash; metadata_hash = $_.metadata_hash } })
+        removals = @($removalRows.ToArray() | ForEach-Object { [ordered]@{ name = $_.name; target_directory = $_.target_directory; previous_link_target = $_.previous_link_target } })
     }
     $planId = 'nsp-{0}' -f (Get-OperationSha256 ($identity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)
     $applyToken = 'nsp-token-{0}' -f (Get-OperationSha256 ('{0}|apply' -f $planId)).Substring(0, 16)
@@ -2672,6 +2782,15 @@ function New-NativeSkillProjectionPlan {
                 target_path = $_.target_path
                 expected_content_hash = $_.content_hash
                 metadata_materialization = 'source_package_junction'
+                risk = 'explicit_native_root_write'
+            }
+        }) + @($removalRows.ToArray() | ForEach-Object {
+            [ordered]@{
+                action_id = 'nspa-{0}' -f (Get-OperationSha256 ('{0}|remove|{1}' -f $planId, $_.name)).Substring(0, 16)
+                type = 'remove_owned_junction'
+                name = $_.name
+                target_directory = $_.target_directory
+                previous_link_target = $_.previous_link_target
                 risk = 'explicit_native_root_write'
             }
         })
@@ -2691,18 +2810,12 @@ function New-NativeSkillProjectionPlan {
         omitted = [object[]]@()
         skills = [object[]]$skillRows
         actions = [object[]]$actions
+        removals = [object[]]@($removalRows.ToArray())
         enabled_total = $enabledNamesSorted.Count
         kept_total = $skillRows.Count
         omitted_total = 0
         truncated = $false
         findings = [object[]]@()
-        notification = [ordered]@{
-            method = [string]$settings.notification_method
-            mode = [string]$settings.notification_mode
-            status = 'planned_only'
-            changed_names = @($skillRows | ForEach-Object name)
-            host_mutation = $false
-        }
         decision_owner = 'deterministic_projection'
         semantic_selection_applied = $false
         provider_calls = 0
@@ -2720,7 +2833,7 @@ function Test-NativeSkillProjectionPlanContract {
     if ([string](Get-NativeSkillProjectionProperty $Plan @('plan_id')) -notmatch '^nsp-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'plan_id_invalid' 'error' '$.plan_id' 'Projection plan id is invalid.')) | Out-Null }
     if ([string](Get-NativeSkillProjectionProperty $Plan @('status')) -notin @('ready', 'blocked')) { $findings.Add((New-OperationFinding 'status_invalid' 'error' '$.status' 'Projection plan status is invalid.')) | Out-Null }
     foreach ($field in @('owner', 'target_root', 'receipt_path')) { if ([string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $Plan @($field)))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Projection plan field is required.')) | Out-Null } }
-    foreach ($field in @('enabled', 'kept', 'omitted', 'skills', 'actions', 'findings')) { if (-not (Test-OperationArray (Get-OperationObjectProperty $Plan $field))) { $findings.Add((New-OperationFinding 'array_field_invalid' 'error' ('$.{0}' -f $field) 'Projection plan field must be an array.')) | Out-Null } }
+    foreach ($field in @('enabled', 'kept', 'omitted', 'skills', 'actions', 'removals', 'findings')) { if (-not (Test-OperationArray (Get-OperationObjectProperty $Plan $field))) { $findings.Add((New-OperationFinding 'array_field_invalid' 'error' ('$.{0}' -f $field) 'Projection plan field must be an array.')) | Out-Null } }
     $enabled = @((Get-NativeSkillProjectionProperty $Plan @('enabled')))
     $kept = @((Get-NativeSkillProjectionProperty $Plan @('kept')))
     $omitted = @((Get-NativeSkillProjectionProperty $Plan @('omitted')))
@@ -2733,9 +2846,6 @@ function Test-NativeSkillProjectionPlanContract {
     }
     if ((Get-NativeSkillProjectionProperty $Plan @('semantic_selection_applied')) -ne $false) { $findings.Add((New-OperationFinding 'semantic_boundary_breached' 'error' '$' 'Projection cannot apply semantic selection.')) | Out-Null }
     foreach ($field in @('provider_calls', 'native_mutations', 'writes')) { if ([long](Get-NativeSkillProjectionProperty $Plan @($field)) -ne 0) { $findings.Add((New-OperationFinding 'side_effect_forbidden' 'error' ('$.{0}' -f $field) 'Planning must not mutate the native surface.')) | Out-Null } }
-    $notification = Get-NativeSkillProjectionProperty $Plan @('notification')
-    if ([string](Get-NativeSkillProjectionProperty $notification @('method')) -ne 'skills/changed') { $findings.Add((New-OperationFinding 'notification_method_invalid' 'error' '$.notification.method' 'Native projection uses the skills/changed notification plan.')) | Out-Null }
-    if ([string](Get-NativeSkillProjectionProperty $notification @('status')) -notin @('planned_only', 'blocked')) { $findings.Add((New-OperationFinding 'notification_status_invalid' 'error' '$.notification.status' 'Notification must remain a plan-only or blocked action.')) | Out-Null }
     foreach ($skill in @((Get-NativeSkillProjectionProperty $Plan @('skills')))) {
         foreach ($field in @('name', 'source_path', 'target_path', 'content_hash', 'metadata_hash')) { if ([string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $skill @($field)))) { $findings.Add((New-OperationFinding 'skill_field_missing' 'error' '$.skills' ('Projected skill field is missing: {0}' -f $field))) | Out-Null } }
         if ([string](Get-NativeSkillProjectionProperty $skill @('content_hash')) -notmatch '^[0-9a-f]{64}$' -or [string](Get-NativeSkillProjectionProperty $skill @('metadata_hash')) -notmatch '^[0-9a-f]{64}$') { $findings.Add((New-OperationFinding 'skill_hash_invalid' 'error' '$.skills' 'Projected skill hashes must be SHA-256.')) | Out-Null }
@@ -2895,9 +3005,11 @@ function Apply-NativeSkillProjection {
     $targetRoot = [IO.Path]::GetFullPath([string]$Plan.target_root)
     Ensure-NativeSkillProjectionDirectory $targetRoot
     $receiptFile = Get-NativeSkillProjectionReceiptPath $Plan $ReceiptPath
-    $before = @($Plan.skills | Sort-Object target_directory | ForEach-Object { Get-NativeSkillProjectionTargetState ([string]$_.target_directory) })
+    $affectedDirectories = @(@($Plan.skills | ForEach-Object { [string]$_.target_directory }) + @($Plan.removals | ForEach-Object { [string]$_.target_directory }) | Sort-Object -Unique)
+    $before = @($affectedDirectories | ForEach-Object { Get-NativeSkillProjectionTargetState $_ })
     $changedNames = New-Object System.Collections.Generic.List[string]
     $createdDirectories = New-Object System.Collections.Generic.List[string]
+    $removedDirectories = New-Object System.Collections.Generic.List[object]
     $temporaryPaths = New-Object System.Collections.Generic.List[string]
     try {
         foreach ($skill in @($Plan.skills | Sort-Object name)) {
@@ -2921,11 +3033,21 @@ function Apply-NativeSkillProjection {
             $changedNames.Add([string]$skill.name) | Out-Null
         }
 
-        $after = @($Plan.skills | Sort-Object target_directory | ForEach-Object { Get-NativeSkillProjectionTargetState ([string]$_.target_directory) })
-        foreach ($index in 0..([Math]::Max(0, $after.Count - 1))) {
-            if ($after.Count -eq 0) { break }
-            $skill = @($Plan.skills | Sort-Object target_directory)[$index]
-            if (-not [string]::Equals([string]$after[$index].content_hash, [string]$skill.content_hash, [StringComparison]::OrdinalIgnoreCase)) { throw ('Projection target hash verification failed: {0}' -f $skill.name) }
+        foreach ($removal in @($Plan.removals | Sort-Object name)) {
+            $targetDirectory = [IO.Path]::GetFullPath([string]$removal.target_directory)
+            if (-not (Test-OperationPathWithinRoot $targetDirectory $targetRoot)) { throw ('Projection removal escaped the owned root: {0}' -f $targetDirectory) }
+            $current = Get-NativeSkillProjectionTargetState $targetDirectory
+            if (-not [bool]$current.exists) { continue }
+            if ([string]$current.kind -ne 'junction' -or -not [string]::Equals([string]$current.link_target, [string]$removal.previous_link_target, [StringComparison]::OrdinalIgnoreCase)) { throw ('Projection stale target drifted: {0}' -f $targetDirectory) }
+            $removedDirectories.Add($current) | Out-Null
+            Remove-NativeSkillProjectionPath $targetDirectory
+            $changedNames.Add([string]$removal.name) | Out-Null
+        }
+
+        $after = @($affectedDirectories | ForEach-Object { Get-NativeSkillProjectionTargetState $_ })
+        foreach ($skill in @($Plan.skills)) {
+            $state = @($after | Where-Object directory_path -eq ([IO.Path]::GetFullPath([string]$skill.target_directory).TrimEnd('\', '/')))[0]
+            if ($null -eq $state -or -not [string]::Equals([string]$state.content_hash, [string]$skill.content_hash, [StringComparison]::OrdinalIgnoreCase)) { throw ('Projection target hash verification failed: {0}' -f $skill.name) }
         }
         $receiptIdentity = [ordered]@{ plan_id = [string]$Plan.plan_id; target_root = $targetRoot; changed_names = @($changedNames.ToArray()) }
         $receiptId = 'nsr-{0}' -f (Get-OperationSha256 ($receiptIdentity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)
@@ -2941,18 +3063,12 @@ function Apply-NativeSkillProjection {
             before = [object[]]$before
             after = [object[]]$after
             changed_names = [object[]]@($changedNames.ToArray() | Sort-Object)
-            notification = [ordered]@{
-                method = [string]$Plan.notification.method
-                mode = [string]$Plan.notification.mode
-                status = 'not_sent'
-                plan_status = [string]$Plan.notification.status
-                changed_names = [object[]]@($changedNames.ToArray() | Sort-Object)
-                host_mutation = $false
-            }
+            added_names = [object[]]@($createdDirectories | ForEach-Object { Split-Path $_ -Leaf } | Sort-Object)
+            removed_names = [object[]]@($removedDirectories | ForEach-Object { Split-Path ([string]$_.directory_path) -Leaf } | Sort-Object)
             rollback = [ordered]@{ status = 'available'; guard = 'target_state_must_match_after'; drift_safe = $true }
             provider_calls = 0
-            native_mutations = $createdDirectories.Count
-            writes = $createdDirectories.Count
+            native_mutations = $createdDirectories.Count + $removedDirectories.Count
+            writes = $createdDirectories.Count + $removedDirectories.Count
         }
         if (Test-NativeSkillProjectionReceiptContract $receipt | Select-Object -ExpandProperty pass) { Write-NativeSkillProjectionJsonAtomic $receiptFile $receipt } else { throw 'Generated native projection receipt failed its contract.' }
         return [pscustomobject][ordered]@{
@@ -2961,13 +3077,15 @@ function Apply-NativeSkillProjection {
             plan_id = [string]$Plan.plan_id
             receipt_path = $receiptFile
             changed_names = [object[]]@($changedNames.ToArray() | Sort-Object)
-            notification = $receipt.notification
             receipt = $receipt
         }
     }
     catch {
         foreach ($temporaryPath in @($temporaryPaths.ToArray())) { Remove-NativeSkillProjectionPath $temporaryPath }
         foreach ($directory in @($createdDirectories.ToArray() | Sort-Object -Descending)) { Remove-NativeSkillProjectionPath $directory }
+        foreach ($state in @($removedDirectories.ToArray())) {
+            if (-not (Test-Path -LiteralPath ([string]$state.directory_path))) { New-NativeSkillProjectionJunction ([string]$state.directory_path) ([string]$state.link_target) }
+        }
         throw
     }
 }
@@ -2981,10 +3099,8 @@ function Test-NativeSkillProjectionReceiptContract {
     if ([string](Get-OperationObjectProperty $Receipt 'receipt_id') -notmatch '^nsr-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'receipt_id_invalid' 'error' '$.receipt_id' 'Receipt id is invalid.')) | Out-Null }
     if ([string](Get-OperationObjectProperty $Receipt 'status') -notin @('applied', 'rolled_back')) { $findings.Add((New-OperationFinding 'status_invalid' 'error' '$.status' 'Receipt status is invalid.')) | Out-Null }
     foreach ($field in @('owner', 'plan_id', 'target_root', 'receipt_path')) { if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Receipt $field))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Receipt field is required.')) | Out-Null } }
-    foreach ($field in @('before', 'after', 'changed_names')) { if (-not (Test-OperationArray (Get-OperationObjectProperty $Receipt $field))) { $findings.Add((New-OperationFinding 'array_field_invalid' 'error' ('$.{0}' -f $field) 'Receipt field must be an array.')) | Out-Null } }
+    foreach ($field in @('before', 'after', 'changed_names', 'added_names', 'removed_names')) { if (-not (Test-OperationArray (Get-OperationObjectProperty $Receipt $field))) { $findings.Add((New-OperationFinding 'array_field_invalid' 'error' ('$.{0}' -f $field) 'Receipt field must be an array.')) | Out-Null } }
     if ([long](Get-OperationObjectProperty $Receipt 'provider_calls') -ne 0) { $findings.Add((New-OperationFinding 'provider_calls_forbidden' 'error' '$.provider_calls' 'Projection cannot call a provider.')) | Out-Null }
-    $notification = Get-OperationObjectProperty $Receipt 'notification'
-    if ([string](Get-OperationObjectProperty $notification 'method') -ne 'skills/changed') { $findings.Add((New-OperationFinding 'notification_method_invalid' 'error' '$.notification.method' 'Receipt notification method is invalid.')) | Out-Null }
     $rollback = Get-OperationObjectProperty $Receipt 'rollback'
     if ((Get-OperationObjectProperty $rollback 'drift_safe') -ne $true) { $findings.Add((New-OperationFinding 'rollback_guard_invalid' 'error' '$.rollback.drift_safe' 'Receipt rollback must be drift-safe.')) | Out-Null }
     return New-OperationValidationResult $findings.ToArray()
@@ -5881,10 +5997,6 @@ function Get-CfgContractErrors($cfg) {
                 if ($null -ne $externalInventoryEnabled -and $externalInventoryEnabled -isnot [bool]) {
                     $errors.Add("skill_projection.external_skill_inventory.enabled 必须是布尔值") | Out-Null
                 }
-                $pluginCachePath = [string](Get-CfgObjectProperty $externalInventory "plugin_cache_path")
-                if ((Test-CfgObjectProperty $externalInventory "plugin_cache_path") -and [string]::IsNullOrWhiteSpace($pluginCachePath)) {
-                    $errors.Add("skill_projection.external_skill_inventory.plugin_cache_path 不能为空") | Out-Null
-                }
             }
         }
         $nativeProjection = Get-CfgObjectProperty $skillProjection "native_projection"
@@ -6528,9 +6640,6 @@ function Assert-Cfg($cfg) {
             Need ($externalInventory -is [pscustomobject] -or $externalInventory -is [System.Collections.IDictionary]) "skill_projection.external_skill_inventory 必须是对象"
             if (Test-CfgObjectProperty $externalInventory "enabled") {
                 Need ((Get-CfgObjectProperty $externalInventory "enabled") -is [bool]) "skill_projection.external_skill_inventory.enabled 必须是布尔值"
-            }
-            if (Test-CfgObjectProperty $externalInventory "plugin_cache_path") {
-                Need (-not [string]::IsNullOrWhiteSpace([string](Get-CfgObjectProperty $externalInventory "plugin_cache_path"))) "skill_projection.external_skill_inventory.plugin_cache_path 不能为空"
             }
         }
         if ($projection.PSObject.Properties.Match('native_projection').Count -gt 0 -and $null -ne $projection.native_projection) {
@@ -20058,139 +20167,21 @@ function Resolve-SkillProjectionPath([string]$path) {
     return [System.IO.Path]::GetFullPath($resolved)
 }
 
-function Get-CodexEnabledPluginIds([string]$configPath) {
-    if ([string]::IsNullOrWhiteSpace($configPath) -or -not (Test-Path -LiteralPath $configPath -PathType Leaf)) { return @() }
-
-    $content = Get-ContentUtf8 $configPath
-    $pattern = '(?ms)^\s*\[plugins\.(?:"(?<quoted>[^"]+)"|(?<bare>[^\]\r\n]+))\]\s*\r?\n(?<body>.*?)(?=^\s*\[|\z)'
-    $ids = New-Object System.Collections.Generic.List[string]
-    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-    $tableRegex = [regex]::new($pattern, [System.Text.RegularExpressions.RegexOptions]::None, [TimeSpan]::FromSeconds(1))
-    $enabledRegex = [regex]::new('^\s*enabled\s*=\s*true\s*(?:#.*)?$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::Multiline, [TimeSpan]::FromSeconds(1))
-    foreach ($match in $tableRegex.Matches($content)) {
-        $body = [string]$match.Groups['body'].Value
-        if (-not $enabledRegex.IsMatch($body)) { continue }
-        $id = if ($match.Groups['quoted'].Success) { [string]$match.Groups['quoted'].Value } else { [string]$match.Groups['bare'].Value }
-        $id = $id.Trim()
-        if (-not [string]::IsNullOrWhiteSpace($id) -and $seen.Add($id)) { $ids.Add($id) | Out-Null }
-    }
-    return @($ids.ToArray() | Sort-Object)
-}
-
 function Add-SkillExternalInventoryWarning($warnings, [string]$code, [string]$subject, [string]$message) {
     $warnings.Add([pscustomobject][ordered]@{ code = $code; subject = $subject; message = $message }) | Out-Null
 }
 
 function Get-CodexExternalSkillInventory($projectionCfg) {
-    $result = [ordered]@{
-        enabled = $false
-        config_path = ''
-        plugin_cache_path = ''
-        cache_selection = 'newest_usable_version_by_mtime'
-        enabled_plugin_ids = @()
-        plugin_count = 0
-        skill_count = 0
-        metadata_chars = 0
-        skills = @()
-        warnings = @()
-    }
-    if ($null -eq $projectionCfg) { return [pscustomobject]$result }
+    $disabled = [pscustomobject]@{ enabled = $false; authority = 'codex_plugin_list_json'; freshness = 'unknown'; coverage = 'not_configured'; enabled_plugin_ids = @(); plugin_count = 0; skill_count = 0; metadata_chars = 0; skills = @(); warnings = @() }
+    if ($null -eq $projectionCfg) { return $disabled }
     $inventoryCfg = Get-CfgObjectProperty $projectionCfg 'external_skill_inventory'
-    if ($null -eq $inventoryCfg) { return [pscustomobject]$result }
+    if ($null -eq $inventoryCfg) { return $disabled }
     $enabledRaw = Get-CfgObjectProperty $inventoryCfg 'enabled'
     $enabled = ($null -eq $enabledRaw) -or [bool]$enabledRaw
-    $result.enabled = $enabled
-    if (-not $enabled) { return [pscustomobject]$result }
-
-    $configRawValue = Get-CfgObjectProperty $projectionCfg 'codex_config_path'
-    $cacheRawValue = Get-CfgObjectProperty $inventoryCfg 'plugin_cache_path'
-    $configRaw = if ([string]::IsNullOrWhiteSpace([string]$configRawValue)) { '~/.codex/config.toml' } else { [string]$configRawValue }
-    $cacheRaw = if ([string]::IsNullOrWhiteSpace([string]$cacheRawValue)) { '~/.codex/plugins/cache' } else { [string]$cacheRawValue }
-    $configPath = Resolve-SkillProjectionPath $configRaw
-    $cachePath = Resolve-SkillProjectionPath $cacheRaw
-    $result.config_path = $configPath
-    $result.plugin_cache_path = $cachePath
-    $warnings = New-Object System.Collections.Generic.List[object]
-    $skills = New-Object System.Collections.Generic.List[object]
-
-    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
-        Add-SkillExternalInventoryWarning $warnings 'codex_config_missing' $configPath 'Codex config is unavailable; external plugin skills were not inventoried.'
-        $result.warnings = @($warnings.ToArray())
-        return [pscustomobject]$result
-    }
-
-    $pluginIds = @(Get-CodexEnabledPluginIds $configPath)
-    $result.enabled_plugin_ids = @($pluginIds)
-    if (-not (Test-Path -LiteralPath $cachePath -PathType Container)) {
-        Add-SkillExternalInventoryWarning $warnings 'plugin_cache_missing' $cachePath 'Codex plugin cache is unavailable; enabled plugins could not be resolved to skill metadata.'
-        $result.plugin_count = $pluginIds.Count
-        $result.warnings = @($warnings.ToArray())
-        return [pscustomobject]$result
-    }
-
-    foreach ($pluginId in $pluginIds) {
-        $separator = $pluginId.LastIndexOf('@')
-        if ($separator -le 0 -or $separator -ge ($pluginId.Length - 1)) {
-            Add-SkillExternalInventoryWarning $warnings 'invalid_plugin_id' $pluginId 'Expected enabled plugin id in name@marketplace form.'
-            continue
-        }
-        $pluginName = $pluginId.Substring(0, $separator)
-        $marketplace = $pluginId.Substring($separator + 1)
-        $safeSegmentPattern = '^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9_-])?$'
-        if ($pluginName -notmatch $safeSegmentPattern -or $marketplace -notmatch $safeSegmentPattern) {
-            Add-SkillExternalInventoryWarning $warnings 'unsafe_plugin_id' $pluginId 'Plugin id contains a path segment and was not resolved against the cache.'
-            continue
-        }
-        $pluginRoot = Join-Path (Join-Path $cachePath $marketplace) $pluginName
-        if (-not (Test-Path -LiteralPath $pluginRoot -PathType Container)) {
-            Add-SkillExternalInventoryWarning $warnings 'enabled_plugin_cache_missing' $pluginId ("No cache directory was found at {0}." -f $pluginRoot)
-            continue
-        }
-
-        $selectedVersion = $null
-        $selectedSkillFiles = @()
-        foreach ($versionDir in @(Get-ChildItem -LiteralPath $pluginRoot -Directory -ErrorAction SilentlyContinue | Sort-Object @{ Expression = 'LastWriteTimeUtc'; Descending = $true }, @{ Expression = 'Name'; Descending = $true })) {
-            $skillsRoot = Join-Path $versionDir.FullName 'skills'
-            if (-not (Test-Path -LiteralPath $skillsRoot -PathType Container)) { continue }
-            $candidateFiles = @(Get-ChildItem -LiteralPath $skillsRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-                    $skillFile = Join-Path $_.FullName 'SKILL.md'
-                    if (Test-Path -LiteralPath $skillFile -PathType Leaf) { Get-Item -LiteralPath $skillFile }
-                })
-            if ($candidateFiles.Count -eq 0) { continue }
-            $selectedVersion = $versionDir
-            $selectedSkillFiles = @($candidateFiles)
-            break
-        }
-        if ($null -eq $selectedVersion) {
-            Add-SkillExternalInventoryWarning $warnings 'enabled_plugin_skills_missing' $pluginId 'The newest usable plugin cache has no direct skills/*/SKILL.md entries.'
-            continue
-        }
-
-        foreach ($skillFile in @($selectedSkillFiles | Sort-Object FullName)) {
-            $meta = Get-SkillMetadataFromFile $skillFile.FullName
-            $name = if ([string]::IsNullOrWhiteSpace([string]$meta.declared_name)) { $skillFile.Directory.Name } else { [string]$meta.declared_name }
-            $description = [string]$meta.description
-            $skills.Add([pscustomobject][ordered]@{
-                    plugin_id = $pluginId
-                    plugin_name = $pluginName
-                    marketplace = $marketplace
-                    cache_version = [string]$selectedVersion.Name
-                    name = $name
-                    qualified_name = ("{0}::{1}" -f $pluginId, $name)
-                    description = $description
-                    path = $skillFile.FullName
-                }) | Out-Null
-        }
-    }
-
-    $metadataChars = 0
-    foreach ($skill in @($skills.ToArray())) { $metadataChars += ([string]$skill.name).Length + ([string]$skill.description).Length }
-    $result.plugin_count = $pluginIds.Count
-    $result.skill_count = $skills.Count
-    $result.metadata_chars = $metadataChars
-    $result.skills = @($skills.ToArray() | Sort-Object plugin_id, name)
-    $result.warnings = @($warnings.ToArray())
-    return [pscustomobject]$result
+    if (-not $enabled) { $disabled.coverage = 'disabled'; return $disabled }
+    $result = Get-CodexPluginSkillInventory
+    $result | Add-Member -NotePropertyName enabled -NotePropertyValue $true
+    return $result
 }
 
 function Get-SkillProjectionFiles([string]$rootPath) {
@@ -20407,65 +20398,6 @@ function Sync-SkillDiscoveryCatalog($projectionCfg) {
         path = $catalogPath
         skill_count = @($catalog.skills).Count
         domain_count = @($catalog.domains).Count
-    }
-}
-
-function Sync-CodexManagedSkillLinks {
-    [CmdletBinding()]
-    param([Parameter(Mandatory = $true)]$projectionCfg)
-    Need ($null -ne $projectionCfg) "skill_projection 配置为空"
-    Need ($projectionCfg.PSObject.Properties.Match("managed_source_path").Count -gt 0) "skill_projection 缺少 managed_source_path"
-    Need ($projectionCfg.PSObject.Properties.Match("user_skill_root").Count -gt 0) "skill_projection 缺少 user_skill_root"
-    $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
-    $userRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.user_skill_root)
-    Need (Test-Path -LiteralPath $managedRoot -PathType Container) ("受管技能源不存在：{0}" -f $managedRoot)
-    Need (-not [string]::Equals($managedRoot, $userRoot, [System.StringComparison]::OrdinalIgnoreCase)) "受管技能源不能与用户投影根相同"
-
-    EnsureDir $userRoot
-    $excluded = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    if ($projectionCfg.PSObject.Properties.Match("managed_link_excludes").Count -gt 0 -and $null -ne $projectionCfg.managed_link_excludes) {
-        foreach ($name in @($projectionCfg.managed_link_excludes)) {
-            $excluded.Add(([string]$name).Trim()) | Out-Null
-        }
-    }
-    $included = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    if ($projectionCfg.PSObject.Properties.Match("managed_link_includes").Count -gt 0 -and $null -ne $projectionCfg.managed_link_includes) {
-        foreach ($name in @($projectionCfg.managed_link_includes)) {
-            $included.Add(([string]$name).Trim()) | Out-Null
-        }
-    }
-    $useIncludeFilter = $included.Count -gt 0
-    $desired = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($dir in @(Get-ChildItem -LiteralPath $managedRoot -Directory -Force | Where-Object Name -ne ".system" | Sort-Object Name)) {
-        if ($excluded.Contains($dir.Name) -or ($useIncludeFilter -and -not $included.Contains($dir.Name))) { continue }
-        # Only generated skill packages with an entrypoint belong in the host
-        # skill root.  Override-only directories (for example a resource or
-        # agent policy directory without SKILL.md) must remain in agent/ but
-        # must not become loadable host junctions.
-        if (-not (Test-Path -LiteralPath (Join-Path $dir.FullName "SKILL.md") -PathType Leaf)) { continue }
-        $linkPath = Join-Path $userRoot $dir.Name
-        New-Junction $linkPath $dir.FullName -QuietIfUnchanged
-        $desired.Add($dir.Name) | Out-Null
-    }
-    $missingIncludedPackages = @($included | Where-Object { -not $desired.Contains($_) } | Sort-Object)
-    Need ($missingIncludedPackages.Count -eq 0) ("managed_link_includes 中的技能包不存在或缺少 SKILL.md：{0}" -f ($missingIncludedPackages -join ", "))
-
-    $staleRemoved = 0
-    foreach ($entry in @(Get-ChildItem -LiteralPath $userRoot -Directory -Force -ErrorAction SilentlyContinue | Where-Object Name -ne ".system")) {
-        if ($desired.Contains($entry.Name) -or -not (Is-ReparsePoint $entry.FullName)) { continue }
-        $target = Get-ReparsePointTargetFullPath $entry.FullName
-        $managedPrefix = $managedRoot.TrimEnd("\") + "\"
-        if (-not [string]::IsNullOrWhiteSpace($target) -and $target.StartsWith($managedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-            Invoke-RemoveItem $entry.FullName -Recurse
-            $staleRemoved++
-        }
-    }
-
-    return [pscustomobject]@{
-        managed_source_path = $managedRoot
-        user_skill_root = $userRoot
-        managed_link_count = $desired.Count
-        stale_link_count = $staleRemoved
     }
 }
 
@@ -21013,13 +20945,7 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
             $nativeProjectionApply = Apply-NativeSkillProjection -Plan $nativeProjectionPlan -ApplyToken ([string]$nativeProjectionPlan.apply_token)
         }
     }
-    $linkProjection = $null
-    if ($projectionCfg.PSObject.Properties.Match("managed_source_path").Count -gt 0 -or $projectionCfg.PSObject.Properties.Match("user_skill_root").Count -gt 0) {
-        $linkProjection = Sync-CodexManagedSkillLinks $projectionCfg
-    }
     $plan = New-SkillProjectionPlan $projectionCfg
-    if ([bool]$plan.enabled) {
-    }
 
     $existing = if (Test-Path -LiteralPath $configPath -PathType Leaf) { Get-ContentUtf8 $configPath } else { "" }
     $desired = Build-CodexSkillsProjectionToml $existing @($plan.disabled)
@@ -21076,13 +21002,6 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
                     kept_total = [int]$nativeProjectionPlan.kept_total
                     omitted_total = [int]$nativeProjectionPlan.omitted_total
                     truncated = [bool]$nativeProjectionPlan.truncated
-                    notification = $nativeProjectionApply.notification
-                } }
-                managed_link_projection = if ($null -eq $linkProjection) { $null } else { [ordered]@{
-                    managed_source_path = [string]$linkProjection.managed_source_path
-                    user_skill_root = [string]$linkProjection.user_skill_root
-                    managed_link_count = [int]$linkProjection.managed_link_count
-                    stale_link_count = [int]$linkProjection.stale_link_count
                 } }
             }
             Set-ContentUtf8 $manifestPath ($manifest | ConvertTo-Json -Depth 20)
@@ -21098,7 +21017,6 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
         config_path = $configPath
         manifest_path = $manifestPath
         backup_path = if ($null -eq $backupPath) { "" } else { [string]$backupPath }
-        managed_link_projection = $linkProjection
         capability_catalog_projection = $catalogProjection
         native_projection = if (-not $nativeProjectionAuthoritative) { $null } else { [pscustomobject]@{ plan = $nativeProjectionPlan; apply = $nativeProjectionApply } }
         plan = $plan

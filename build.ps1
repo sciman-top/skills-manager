@@ -7,6 +7,8 @@ $Dist = Join-Path $Root "skills.ps1"
 $Files = @(
     "Version.ps1",
     "Infrastructure/AtomicFile.ps1",
+    "Infrastructure/CodexCli.ps1",
+    "Domain/SkillMetadata.ps1",
     "Core.ps1",
     "Domain/OperationPlan.ps1",
     "Domain/SkillCatalog.ps1",
