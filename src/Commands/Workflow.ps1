@@ -2,9 +2,9 @@ function Get-WorkflowCatalog {
     $doctorStrictStep = [pscustomobject]@{
         id = "doctor_strict"
         title = "严格健康检查（doctor --strict）"
-        command = "doctor --strict --threshold-ms 8000"
+        command = "doctor --strict"
         action = {
-            $report = Invoke-Doctor @("--strict", "--threshold-ms", "8000")
+            $report = Invoke-Doctor @("--strict")
             if ($report -and $report.PSObject.Properties.Match("pass").Count -gt 0 -and -not [bool]$report.pass) {
                 throw "doctor --strict failed"
             }
@@ -321,7 +321,7 @@ function Invoke-Workflow([string[]]$tokens = @()) {
         }
     }
 
-    return (Invoke-WithMetric "workflow_run" {
+    return (& {
         $results = New-Object System.Collections.Generic.List[object]
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         $index = 0
@@ -356,5 +356,5 @@ function Invoke-Workflow([string[]]$tokens = @()) {
             results = @($resultArray)
             total_ms = [int]$sw.ElapsedMilliseconds
         }
-    } @{ command = "一键工作流"; profile = [string]$workflow.key } -NoHost)
+    })
 }

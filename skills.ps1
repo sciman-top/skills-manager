@@ -277,38 +277,6 @@ function Log([string]$msg, [string]$Level = "INFO", [switch]$NoHost, [object]$Da
     }
     Write-LogRecord $lvl $safeMessage $safeData
 }
-function Invoke-WithMetric(
-    [string]$Metric,
-    [scriptblock]$Action,
-    [hashtable]$Data = $null,
-    [switch]$NoHost
-) {
-    Need (-not [string]::IsNullOrWhiteSpace($Metric)) "metric 不能为空"
-    Need ($null -ne $Action) "Action 不能为空"
-
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    $ok = $false
-    try {
-        $result = & $Action
-        $ok = $true
-        return $result
-    }
-    finally {
-        $sw.Stop()
-        $payload = [ordered]@{
-            metric = $Metric
-            duration_ms = [int]$sw.ElapsedMilliseconds
-            success = $ok
-        }
-        if ($Data) {
-            foreach ($k in $Data.Keys) {
-                $payload[$k] = $Data[$k]
-            }
-        }
-        Log ("性能埋点：{0}" -f $Metric) "INFO" -NoHost:$NoHost $payload
-    }
-}
-
 function Invoke-RemoveItem([string]$path, [switch]$Recurse) {
     if (-not (Test-PathEntry $path)) { return }
     $recurseFlag = if ($Recurse) { "-Recurse " } else { "" }
@@ -643,20 +611,6 @@ function Preflight {
     EnsureDir $AgentDir
     EnsureDir $OverridesDir
     EnsureDir $ImportDir
-}
-function Invoke-PrebuildCheck([switch]$Strict) {
-    $scriptPath = Join-Path $Root "scripts\prebuild-check.ps1"
-    if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
-        Log ("未找到预检脚本，跳过：{0}" -f $scriptPath) "WARN"
-        return
-    }
-    $args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $scriptPath)
-    if ($Strict) { $args += "-Strict" }
-    Log ("执行预检脚本：{0}" -f $scriptPath)
-    & (Resolve-PowerShellExecutable) @args
-    if ($LASTEXITCODE -ne 0) {
-        throw ("预检失败（exit={0}）：请先修复后再执行构建/更新。" -f $LASTEXITCODE)
-    }
 }
 function RoboMirror([string]$src, [string]$dst) {
     EnsureDir $dst
@@ -1714,147 +1668,6 @@ function Test-OperationPlanFreshness {
     return New-OperationValidationResult $findings.ToArray()
 }
 
-function Copy-HostCapabilitySnapshotValue($Value) {
-    if ($null -eq $Value) { return $null }
-    if ($Value -is [System.Collections.IDictionary]) {
-        $copy = [ordered]@{}
-        foreach ($key in @($Value.Keys)) { $copy[[string]$key] = Copy-HostCapabilitySnapshotValue $Value[$key] }
-        return [pscustomobject]$copy
-    }
-    if ($Value -is [pscustomobject]) {
-        $copy = [ordered]@{}
-        foreach ($property in @($Value.PSObject.Properties)) { $copy[$property.Name] = Copy-HostCapabilitySnapshotValue $property.Value }
-        return [pscustomobject]$copy
-    }
-    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
-        return @($Value | ForEach-Object { Copy-HostCapabilitySnapshotValue $_ })
-    }
-    return $Value
-}
-
-function Get-HostCapabilitySnapshotSourcePrecedence {
-    return @('turn_override', 'thread_runtime', 'config_layered', 'model_catalog', 'unknown_fallback')
-}
-
-function Get-HostCapabilitySnapshotCapabilityNames {
-    return @('model', 'context_window', 'metadata_budget', 'skills_inventory')
-}
-
-function New-HostCapabilityFact {
-    param(
-        [Parameter(Mandatory = $true)][string]$Name,
-        $Value,
-        [Parameter(Mandatory = $true)][string]$Source,
-        [string]$CapturedAt,
-        [ValidateSet('fresh', 'stale', 'unknown')][string]$Freshness = 'unknown',
-        [string]$UnknownReason
-    )
-
-    return [pscustomobject][ordered]@{
-        name = $Name
-        value = Copy-HostCapabilitySnapshotValue $Value
-        source = $Source
-        captured_at = if ([string]::IsNullOrWhiteSpace($CapturedAt)) { $null } else { $CapturedAt }
-        freshness = $Freshness
-        unknown_reason = if ([string]::IsNullOrWhiteSpace($UnknownReason)) { $null } else { $UnknownReason.Trim() }
-    }
-}
-
-function New-HostCapabilitySnapshot {
-    param(
-        [Parameter(Mandatory = $true)][string]$Surface,
-        [Parameter(Mandatory = $true)][string]$CapturedAt,
-        [string]$ThreadId,
-        [string]$TurnId,
-        [Parameter(Mandatory = $true)]$Capabilities,
-        [string[]]$SourcePrecedence = (Get-HostCapabilitySnapshotSourcePrecedence),
-        [string[]]$UnknownReasons = @()
-    )
-
-    $normalizedCapabilities = [ordered]@{}
-    foreach ($name in Get-HostCapabilitySnapshotCapabilityNames) {
-        $fact = Get-OperationObjectProperty $Capabilities $name
-        $normalizedCapabilities[$name] = $fact
-    }
-
-    $identity = [ordered]@{
-        surface = $Surface.Trim()
-        thread_id = if ([string]::IsNullOrWhiteSpace($ThreadId)) { $null } else { $ThreadId.Trim() }
-        turn_id = if ([string]::IsNullOrWhiteSpace($TurnId)) { $null } else { $TurnId.Trim() }
-        captured_at = $CapturedAt
-        capabilities = $normalizedCapabilities
-        source_precedence = @($SourcePrecedence)
-    }
-    $snapshotId = 'hcs-{0}' -f (Get-OperationSha256 ($identity | ConvertTo-Json -Depth 30 -Compress)).Substring(0, 16)
-
-    return [pscustomobject][ordered]@{
-        schema_version = 1
-        snapshot_id = $snapshotId
-        surface = $identity.surface
-        thread_id = $identity.thread_id
-        turn_id = $identity.turn_id
-        captured_at = $CapturedAt
-        source_precedence = @($SourcePrecedence)
-        capabilities = [pscustomobject]$normalizedCapabilities
-        unknown_reasons = @($UnknownReasons | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | ForEach-Object { [string]$_ } | Sort-Object -Unique)
-    }
-}
-
-function Test-HostCapabilitySnapshotContract {
-    param([Parameter(Mandatory = $false)]$Snapshot)
-
-    $findings = New-Object System.Collections.Generic.List[object]
-    if ($null -eq $Snapshot) {
-        return New-OperationValidationResult @((New-OperationFinding 'host_snapshot_missing' 'error' '$' 'Host capability snapshot is required.'))
-    }
-    if ((Get-OperationObjectProperty $Snapshot 'schema_version') -ne 1) { $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only HostCapabilitySnapshot schema version 1 is supported.')) | Out-Null }
-    foreach ($field in @('snapshot_id', 'surface', 'captured_at')) {
-        if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Snapshot $field))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Required snapshot field is missing.')) | Out-Null }
-    }
-    if ([string](Get-OperationObjectProperty $Snapshot 'snapshot_id') -notmatch '^hcs-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'snapshot_id_invalid' 'error' '$.snapshot_id' 'Snapshot id must be a deterministic hcs hash.')) | Out-Null }
-    if (-not (Test-OperationRfc3339 (Get-OperationObjectProperty $Snapshot 'captured_at'))) { $findings.Add((New-OperationFinding 'captured_at_invalid' 'error' '$.captured_at' 'Snapshot captured_at must be RFC3339.')) | Out-Null }
-
-    $expectedPrecedence = @(Get-HostCapabilitySnapshotSourcePrecedence)
-    $actualPrecedence = @((Get-OperationObjectProperty $Snapshot 'source_precedence') | ForEach-Object { [string]$_ })
-    if (-not (Test-OperationArray (Get-OperationObjectProperty $Snapshot 'source_precedence')) -or ($actualPrecedence -join '|') -ne ($expectedPrecedence -join '|')) {
-        $findings.Add((New-OperationFinding 'source_precedence_invalid' 'error' '$.source_precedence' 'Snapshot source precedence must be turn, thread, config, catalog, then unknown fallback.')) | Out-Null
-    }
-
-    $capabilities = Get-OperationObjectProperty $Snapshot 'capabilities'
-    if ($null -eq $capabilities) {
-        $findings.Add((New-OperationFinding 'capabilities_missing' 'error' '$.capabilities' 'Snapshot capabilities are required.')) | Out-Null
-    }
-    else {
-        foreach ($name in Get-HostCapabilitySnapshotCapabilityNames) {
-            $path = '$.capabilities.{0}' -f $name
-            $fact = Get-OperationObjectProperty $capabilities $name
-            if ($null -eq $fact) { $findings.Add((New-OperationFinding 'capability_fact_missing' 'error' $path 'Every capability fact is required.')); continue }
-            foreach ($field in @('source', 'freshness')) {
-                if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $fact $field))) { $findings.Add((New-OperationFinding 'fact_field_missing' 'error' ($path + '.' + $field) 'Capability fact field is required.')) | Out-Null }
-            }
-            if ([string](Get-OperationObjectProperty $fact 'source') -notin $expectedPrecedence) { $findings.Add((New-OperationFinding 'fact_source_invalid' 'error' ($path + '.source') 'Capability fact source is not in the declared precedence.')) | Out-Null }
-            if ([string](Get-OperationObjectProperty $fact 'freshness') -notin @('fresh', 'stale', 'unknown')) { $findings.Add((New-OperationFinding 'fact_freshness_invalid' 'error' ($path + '.freshness') 'Capability fact freshness is invalid.')) | Out-Null }
-            $factCapturedAt = Get-OperationObjectProperty $fact 'captured_at'
-            if ($null -ne $factCapturedAt -and -not (Test-OperationRfc3339 $factCapturedAt)) { $findings.Add((New-OperationFinding 'fact_captured_at_invalid' 'error' ($path + '.captured_at') 'Capability fact captured_at must be RFC3339 when present.')) | Out-Null }
-            $unknownReason = [string](Get-OperationObjectProperty $fact 'unknown_reason')
-            if ([string](Get-OperationObjectProperty $fact 'freshness') -eq 'unknown' -and [string]::IsNullOrWhiteSpace($unknownReason)) { $findings.Add((New-OperationFinding 'unknown_reason_missing' 'error' ($path + '.unknown_reason') 'Unknown facts must expose an unknown reason.')) | Out-Null }
-            $value = Get-OperationObjectProperty $fact 'value'
-            if ($name -eq 'context_window' -and $null -ne $value) {
-                $number = 0L
-                if (-not [long]::TryParse([string]$value, [ref]$number) -or $number -le 0) { $findings.Add((New-OperationFinding 'context_window_invalid' 'error' ($path + '.value') 'Context window must be a positive integer when known.')) | Out-Null }
-            }
-            if ($name -eq 'metadata_budget' -and $null -ne $value) {
-                $number = 0L
-                if (-not [long]::TryParse([string]$value, [ref]$number) -or $number -lt 0) { $findings.Add((New-OperationFinding 'metadata_budget_invalid' 'error' ($path + '.value') 'Metadata budget must be a non-negative integer when known.')) | Out-Null }
-            }
-            if ($name -eq 'skills_inventory' -and $null -ne $value -and -not (Test-OperationArray $value)) { $findings.Add((New-OperationFinding 'skills_inventory_invalid' 'error' ($path + '.value') 'Skills inventory must be an array when known.')) | Out-Null }
-            if ($name -eq 'model' -and $null -ne $value -and [string]::IsNullOrWhiteSpace([string]$value)) { $findings.Add((New-OperationFinding 'model_invalid' 'error' ($path + '.value') 'Model must be non-empty when known.')) | Out-Null }
-        }
-    }
-    if (-not (Test-OperationArray (Get-OperationObjectProperty $Snapshot 'unknown_reasons'))) { $findings.Add((New-OperationFinding 'unknown_reasons_invalid' 'error' '$.unknown_reasons' 'unknown_reasons must be an array.')) | Out-Null }
-    return New-OperationValidationResult $findings.ToArray()
-}
-
 if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) {
     $operationPlanPath = Join-Path (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path 'src\Domain\OperationPlan.ps1'
     . $operationPlanPath
@@ -2334,123 +2147,6 @@ function New-SkillSurfaceView {
         }
     }
     return [pscustomobject][ordered]@{ schema_version = 1; view = 'SkillSurfaceView'; generated_at = $GeneratedAt; read_only = $true; pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); surfaces = $surfaces.ToArray(); surface_count = $surfaces.Count; stale_links = @($userItems | Where-Object projection_state -in @('managed_stale', 'external_owned', 'ownership_unknown')); findings = $findings.ToArray(); provider_calls = 0; native_mutations = 0; writes = 0 }
-}
-
-function Get-HostCapabilityCandidate {
-    param(
-        $Payload,
-        [Parameter(Mandatory = $true)][string]$Name,
-        [Parameter(Mandatory = $true)][string]$Source
-    )
-
-    if ($null -eq $Payload -or -not (Test-OperationObjectProperty $Payload $Name)) {
-        return [pscustomobject]@{ present = $false; source = $Source; value = $null; captured_at = $null; freshness = 'unknown'; unknown_reason = $null }
-    }
-
-    $raw = Get-OperationObjectProperty $Payload $Name
-    $value = $raw
-    $capturedAt = $null
-    $freshness = 'unknown'
-    $unknownReason = $null
-    if ($null -ne $raw -and (Test-OperationObjectProperty $raw 'value')) {
-        $value = Get-OperationObjectProperty $raw 'value'
-        $capturedAt = [string](Get-OperationObjectProperty $raw 'captured_at')
-        $freshness = [string](Get-OperationObjectProperty $raw 'freshness')
-        $unknownReason = [string](Get-OperationObjectProperty $raw 'unknown_reason')
-    }
-    if ($freshness -notin @('fresh', 'stale', 'unknown')) { $freshness = 'unknown' }
-    if ($Source -eq 'unknown_fallback' -and [string]::IsNullOrWhiteSpace($unknownReason) -and $freshness -eq 'unknown') { $unknownReason = '{0}_unknown' -f $Name }
-    return [pscustomobject]@{
-        present = $true
-        source = $Source
-        value = $value
-        captured_at = if ([string]::IsNullOrWhiteSpace($capturedAt)) { $null } else { $capturedAt }
-        freshness = $freshness
-        unknown_reason = if ([string]::IsNullOrWhiteSpace($unknownReason)) { $null } else { $unknownReason.Trim() }
-    }
-}
-
-function Test-HostCapabilityCandidateValue {
-    param([Parameter(Mandatory = $true)][string]$Name, $Value)
-
-    if ($Name -eq 'model') {
-        if ($null -eq $Value) { return $false }
-        if ($Value -is [pscustomobject] -or $Value -is [System.Collections.IDictionary]) { return @($Value.PSObject.Properties).Count -gt 0 -or @($Value.Keys).Count -gt 0 }
-        return -not [string]::IsNullOrWhiteSpace([string]$Value)
-    }
-    if ($Name -eq 'context_window') {
-        $number = 0L
-        return $null -ne $Value -and [long]::TryParse([string]$Value, [ref]$number) -and $number -gt 0
-    }
-    if ($Name -eq 'metadata_budget') {
-        $number = 0L
-        return $null -ne $Value -and [long]::TryParse([string]$Value, [ref]$number) -and $number -ge 0
-    }
-    if ($Name -eq 'skills_inventory') { return $null -ne $Value -and (Test-OperationArray $Value) }
-    return $false
-}
-
-function Resolve-HostCapabilityFact {
-    param(
-        [Parameter(Mandatory = $true)][string]$Name,
-        [object[]]$Sources = @(),
-        $UnknownFallback,
-        [System.Collections.Generic.List[string]]$UnknownReasons
-    )
-
-    foreach ($source in @($Sources)) {
-        $candidate = Get-HostCapabilityCandidate -Payload (Get-OperationObjectProperty $source 'payload') -Name $Name -Source ([string](Get-OperationObjectProperty $source 'source'))
-        if (-not [bool]$candidate.present) { continue }
-        if (Test-HostCapabilityCandidateValue -Name $Name -Value $candidate.value) {
-            return New-HostCapabilityFact -Name $Name -Value $candidate.value -Source $candidate.source -CapturedAt $candidate.captured_at -Freshness $candidate.freshness -UnknownReason $candidate.unknown_reason
-        }
-        if (-not [string]::IsNullOrWhiteSpace([string]$candidate.unknown_reason) -and $null -ne $UnknownReasons) { $UnknownReasons.Add(('{0}:{1}' -f $candidate.source, $candidate.unknown_reason)) | Out-Null }
-    }
-
-    $fallback = Get-HostCapabilityCandidate -Payload $UnknownFallback -Name $Name -Source 'unknown_fallback'
-    if (Test-HostCapabilityCandidateValue -Name $Name -Value $fallback.value) {
-        return New-HostCapabilityFact -Name $Name -Value $fallback.value -Source 'unknown_fallback' -CapturedAt $fallback.captured_at -Freshness 'unknown' -UnknownReason $fallback.unknown_reason
-    }
-    $reason = if ([string]::IsNullOrWhiteSpace([string]$fallback.unknown_reason)) { '{0}_unknown' -f $Name } else { [string]$fallback.unknown_reason }
-    if ($null -ne $UnknownReasons) { $UnknownReasons.Add($reason) | Out-Null }
-    return New-HostCapabilityFact -Name $Name -Value $null -Source 'unknown_fallback' -CapturedAt $fallback.captured_at -Freshness 'unknown' -UnknownReason $reason
-}
-
-function Resolve-HostCapabilitySnapshot {
-    param(
-        [Parameter(Mandatory = $true)][string]$Surface,
-        [Parameter(Mandatory = $true)][string]$CapturedAt,
-        [string]$ThreadId,
-        [string]$TurnId,
-        $TurnOverride,
-        $ThreadRuntime,
-        $ConfigLayered,
-        $ModelCatalog,
-        $UnknownFallback
-    )
-
-    if ($null -eq $UnknownFallback) {
-        $UnknownFallback = [pscustomobject]@{
-            model = [pscustomobject]@{ value = $null; freshness = 'unknown'; unknown_reason = 'effective_model_unknown' }
-            context_window = [pscustomobject]@{ value = $null; freshness = 'unknown'; unknown_reason = 'context_window_unknown' }
-            metadata_budget = [pscustomobject]@{ value = $null; freshness = 'unknown'; unknown_reason = 'metadata_budget_unknown' }
-            skills_inventory = [pscustomobject]@{ value = $null; freshness = 'unknown'; unknown_reason = 'skills_inventory_unknown' }
-        }
-    }
-
-    $sources = @(
-        [pscustomobject]@{ source = 'turn_override'; payload = $TurnOverride },
-        [pscustomobject]@{ source = 'thread_runtime'; payload = $ThreadRuntime },
-        [pscustomobject]@{ source = 'config_layered'; payload = $ConfigLayered },
-        [pscustomobject]@{ source = 'model_catalog'; payload = $ModelCatalog }
-    )
-    $unknownReasons = New-Object System.Collections.Generic.List[string]
-    $capabilities = [ordered]@{}
-    foreach ($name in Get-HostCapabilitySnapshotCapabilityNames) {
-        $capabilities[$name] = Resolve-HostCapabilityFact -Name $name -Sources $sources -UnknownFallback $UnknownFallback -UnknownReasons $unknownReasons
-    }
-
-    return New-HostCapabilitySnapshot -Surface $Surface -ThreadId $ThreadId -TurnId $TurnId -CapturedAt $CapturedAt -Capabilities $capabilities -UnknownReasons $unknownReasons.ToArray()
 }
 
 $skillCatalogCompilerRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
@@ -3838,425 +3534,6 @@ function New-NativeSkillProjectionRuntimePlan {
         throw ('Native projection plan contract failed: {0}' -f (@($planContract.findings | ForEach-Object code) -join ', '))
     }
     return $plan
-}
-
-$hostCapabilityAdaptersRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
-
-if ($null -eq (Get-Command Get-OperationObjectProperty -ErrorAction SilentlyContinue)) {
-    . (Join-Path $hostCapabilityAdaptersRepoRoot 'src\Domain\OperationPlan.ps1')
-}
-if ($null -eq (Get-Command New-HostCapabilitySnapshot -ErrorAction SilentlyContinue)) {
-    . (Join-Path $hostCapabilityAdaptersRepoRoot 'src\Domain\HostCapabilitySnapshot.ps1')
-}
-if ($null -eq (Get-Command Resolve-HostCapabilitySnapshot -ErrorAction SilentlyContinue)) {
-    . (Join-Path $hostCapabilityAdaptersRepoRoot 'src\Application\HostCapabilityResolution.ps1')
-}
-
-function Get-HostCapabilityAdapterProperty {
-    param(
-        $Object,
-        [string[]]$Names
-    )
-
-    foreach ($name in @($Names)) {
-        if (Test-OperationObjectProperty $Object $name) {
-            return Get-OperationObjectProperty $Object $name
-        }
-    }
-    return $null
-}
-
-function Get-HostCapabilityAdapterResponseBody {
-    param($Response)
-
-    if ($null -eq $Response) { return $null }
-    if (Test-OperationObjectProperty $Response 'result') {
-        return Get-OperationObjectProperty $Response 'result'
-    }
-    return $Response
-}
-
-function Get-HostCapabilityAdapterResponseError {
-    param(
-        $Response,
-        [Parameter(Mandatory = $true)][string]$Method
-    )
-
-    if ($null -eq $Response -or -not (Test-OperationObjectProperty $Response 'error')) { return $null }
-    $error = Get-OperationObjectProperty $Response 'error'
-    $message = if ($error -is [string]) { [string]$error } else { [string](Get-HostCapabilityAdapterProperty $error @('message', 'detail', 'code')) }
-    if ([string]::IsNullOrWhiteSpace($message)) { $message = 'App Server returned an error without a diagnostic message.' }
-    $message = Protect-OperationSensitiveString (($message -replace '\s+', ' ').Trim())
-    if ($message.Length -gt 240) { $message = $message.Substring(0, 240) }
-    return [pscustomobject][ordered]@{ method = $Method; message = $message }
-}
-
-function Get-HostCapabilityAdapterRows {
-    param($Response, [string[]]$CollectionNames)
-
-    $body = Get-HostCapabilityAdapterResponseBody $Response
-    foreach ($name in @($CollectionNames)) {
-        if (Test-OperationObjectProperty $body $name) {
-            $value = Get-OperationObjectProperty $body $name
-            if ($null -eq $value) { return @() }
-            return @($value)
-        }
-    }
-    if ($null -eq $body) { return @() }
-    if (Test-OperationArray $body) { return @($body) }
-    return @($body)
-}
-
-function New-HostCapabilityAdapterCandidate {
-    param(
-        $Value,
-        [Parameter(Mandatory = $true)][string]$CapturedAt,
-        [string]$UnknownReason
-    )
-
-    return [pscustomobject][ordered]@{
-        value = $Value
-        captured_at = $CapturedAt
-        freshness = if ($null -eq $Value) { 'unknown' } else { 'fresh' }
-        unknown_reason = if ($null -eq $Value) { $UnknownReason } else { $null }
-    }
-}
-
-function Add-HostCapabilityAdapterMetadata {
-    param(
-        [Parameter(Mandatory = $true)]$Snapshot,
-        [Parameter(Mandatory = $true)][string]$Adapter,
-        [Parameter(Mandatory = $true)][string]$Source,
-        [Parameter(Mandatory = $true)][string]$Status,
-        $Coverage = [pscustomobject]@{},
-        [object[]]$Errors = @()
-    )
-
-    $Snapshot | Add-Member -NotePropertyName adapter -NotePropertyValue $Adapter
-    $Snapshot | Add-Member -NotePropertyName source -NotePropertyValue $Source
-    $Snapshot | Add-Member -NotePropertyName adapter_source -NotePropertyValue $Source
-    $Snapshot | Add-Member -NotePropertyName status -NotePropertyValue $Status
-    $Snapshot | Add-Member -NotePropertyName coverage -NotePropertyValue $Coverage
-    $Snapshot | Add-Member -NotePropertyName errors -NotePropertyValue @($Errors)
-    $Snapshot | Add-Member -NotePropertyName read_only -NotePropertyValue $true
-    $Snapshot | Add-Member -NotePropertyName provider_calls -NotePropertyValue 0
-    $Snapshot | Add-Member -NotePropertyName writes -NotePropertyValue 0
-    $Snapshot | Add-Member -NotePropertyName native_mutations -NotePropertyValue 0
-    return $Snapshot
-}
-
-function New-HostCapabilityUnknownAdapterSnapshot {
-    param(
-        [Parameter(Mandatory = $true)][string]$Adapter,
-        [Parameter(Mandatory = $true)][string]$Source,
-        [Parameter(Mandatory = $true)][string]$Surface,
-        [Parameter(Mandatory = $true)][string]$CapturedAt,
-        [Parameter(Mandatory = $true)][string]$Status,
-        [string]$UnknownReason,
-        [switch]$PlatformNa
-    )
-
-    $fallback = [pscustomobject]@{
-        model = [pscustomobject]@{ value = $null; freshness = 'unknown'; unknown_reason = if ($UnknownReason) { $UnknownReason } else { 'effective_model_unknown' } }
-        context_window = [pscustomobject]@{ value = $null; freshness = 'unknown'; unknown_reason = 'context_window_unknown' }
-        metadata_budget = [pscustomobject]@{ value = $null; freshness = 'unknown'; unknown_reason = 'metadata_budget_unknown' }
-        skills_inventory = [pscustomobject]@{ value = $null; freshness = 'unknown'; unknown_reason = 'skills_inventory_unknown' }
-    }
-    $snapshot = Resolve-HostCapabilitySnapshot -Surface $Surface -CapturedAt $CapturedAt -UnknownFallback $fallback
-    if (-not [string]::IsNullOrWhiteSpace($UnknownReason)) {
-        $snapshot.unknown_reasons = @($snapshot.unknown_reasons + $UnknownReason | Sort-Object -Unique)
-    }
-    $result = Add-HostCapabilityAdapterMetadata -Snapshot $snapshot -Adapter $Adapter -Source $Source -Status $Status
-    $result | Add-Member -NotePropertyName platform_na -NotePropertyValue ([bool]$PlatformNa)
-    return $result
-}
-
-function Test-HostCapabilityAdapterContract {
-    param($Snapshot)
-
-    $findings = New-Object System.Collections.Generic.List[object]
-    $baseResult = Test-HostCapabilitySnapshotContract $Snapshot
-    foreach ($finding in @($baseResult.findings)) { $findings.Add($finding) | Out-Null }
-    if ($null -eq $Snapshot) { return New-OperationValidationResult $findings.ToArray() }
-
-    $adapter = [string](Get-OperationObjectProperty $Snapshot 'adapter')
-    $source = [string](Get-OperationObjectProperty $Snapshot 'source')
-    $status = [string](Get-OperationObjectProperty $Snapshot 'status')
-    if ($adapter -notin @('app_server', 'cli', 'offline_config')) { $findings.Add((New-OperationFinding 'adapter_invalid' 'error' '$.adapter' 'Adapter must be app_server, cli or offline_config.')) | Out-Null }
-    if ($source -notin @('app_server', 'cli', 'config_fallback')) { $findings.Add((New-OperationFinding 'adapter_source_invalid' 'error' '$.source' 'Adapter source is not supported.')) | Out-Null }
-    if ($status -notin @('complete', 'partial', 'platform_na', 'unknown')) { $findings.Add((New-OperationFinding 'adapter_status_invalid' 'error' '$.status' 'Adapter status is not supported.')) | Out-Null }
-    if ($null -eq (Get-OperationObjectProperty $Snapshot 'coverage')) { $findings.Add((New-OperationFinding 'adapter_coverage_missing' 'error' '$.coverage' 'Adapter coverage is required.')) | Out-Null }
-    if ((Get-OperationObjectProperty $Snapshot 'read_only') -ne $true) { $findings.Add((New-OperationFinding 'adapter_read_only_required' 'error' '$.read_only' 'Adapters must declare read_only=true.')) | Out-Null }
-    foreach ($field in @('provider_calls', 'writes', 'native_mutations')) {
-        $value = Get-OperationObjectProperty $Snapshot $field
-        $number = 0L
-        if ($null -eq $value -or -not [long]::TryParse([string]$value, [ref]$number) -or $number -ne 0) {
-            $code = 'adapter_{0}_forbidden' -f $field
-            $findings.Add((New-OperationFinding $code 'error' ('$.{0}' -f $field) ('Adapter {0} must remain zero.' -f $field))) | Out-Null
-        }
-    }
-    if ($source -eq 'config_fallback') {
-        foreach ($name in Get-HostCapabilitySnapshotCapabilityNames) {
-            $fact = Get-OperationObjectProperty (Get-OperationObjectProperty $Snapshot 'capabilities') $name
-            if ([string](Get-OperationObjectProperty $fact 'source') -eq 'config_fallback') {
-                $findings.Add((New-OperationFinding 'adapter_fallback_fact_source_invalid' 'error' ('$.capabilities.{0}.source' -f $name) 'Config fallback must remain visible at adapter level and cannot become a runtime fact source.')) | Out-Null
-            }
-        }
-    }
-    $serialized = $Snapshot | ConvertTo-Json -Depth 40 -Compress
-    if (Test-OperationSerializedSensitiveValue $serialized) { $findings.Add((New-OperationFinding 'adapter_sensitive_value_present' 'error' '$' 'Adapter output contains an unredacted sensitive value.')) | Out-Null }
-    return New-OperationValidationResult $findings.ToArray()
-}
-
-function New-HostCapabilitySnapshotFromCli {
-    [CmdletBinding()]
-    param(
-        $PromptInput,
-        [string]$Surface = 'cli',
-        [Parameter(Mandatory = $true)][string]$CapturedAt,
-        [string]$ThreadId,
-        [string]$TurnId,
-        [bool]$ExecutableAvailable = $true,
-        [string]$UnavailableReason = 'cli_unavailable_platform_na'
-    )
-
-    if (-not $ExecutableAvailable) {
-        return New-HostCapabilityUnknownAdapterSnapshot -Adapter 'cli' -Source 'cli' -Surface $Surface -CapturedAt $CapturedAt -Status 'platform_na' -UnknownReason $UnavailableReason -PlatformNa
-    }
-
-    $inputValue = $PromptInput
-    $errors = New-Object System.Collections.Generic.List[object]
-    if ($inputValue -is [string]) {
-        try { $inputValue = $inputValue | ConvertFrom-Json -ErrorAction Stop }
-        catch { $errors.Add([pscustomobject]@{ code = 'cli_prompt_input_invalid_json'; message = 'CLI prompt-input was not valid JSON; text parsing continued.' }) | Out-Null }
-    }
-
-    $model = Get-HostCapabilityAdapterProperty $inputValue @('model', 'model_id', 'modelId')
-    $contextWindow = Get-HostCapabilityAdapterProperty $inputValue @('context_window', 'model_context_window', 'contextWindow', 'modelContextWindow')
-    $metadataBudget = Get-HostCapabilityAdapterProperty $inputValue @('metadata_budget', 'metadataBudget', 'skill_metadata_budget', 'skillMetadataBudget')
-    $directSkills = Get-HostCapabilityAdapterProperty $inputValue @('skills_inventory', 'skills')
-    $skillRows = @()
-    if ($null -ne $directSkills) {
-        $skillRows = @(Get-HostCapabilityAdapterRows $directSkills @('data', 'skills'))
-    }
-
-    $texts = New-Object System.Collections.Generic.List[string]
-    function Add-HostCapabilityCliText($Value) {
-        if ($null -eq $Value) { return }
-        if ($Value -is [string]) { $texts.Add([string]$Value) | Out-Null; return }
-        if (Test-OperationArray $Value) {
-            foreach ($item in @($Value)) { Add-HostCapabilityCliText $item }
-            return
-        }
-        $content = Get-HostCapabilityAdapterProperty $Value @('content')
-        if ($null -ne $content) { Add-HostCapabilityCliText $content }
-        $text = Get-HostCapabilityAdapterProperty $Value @('text')
-        if ($null -ne $text) { Add-HostCapabilityCliText $text }
-    }
-    Add-HostCapabilityCliText $inputValue
-    $combinedText = $texts -join "`n"
-    if ($skillRows.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($combinedText)) {
-        $sectionMatch = [regex]::Match($combinedText, '(?ms)###\s*Available skills\s*(?<section>.*?)(?:\r?\n###|\z)')
-        if ($sectionMatch.Success) {
-            foreach ($line in ($sectionMatch.Groups['section'].Value -split "`r?`n")) {
-                $itemMatch = [regex]::Match($line, '^\s*-\s+(?<name>[A-Za-z0-9][A-Za-z0-9_.:-]*):\s*(?<description>.+?)\s*$')
-                if ($itemMatch.Success) {
-                    $skillRows += [pscustomobject][ordered]@{
-                        name = $itemMatch.Groups['name'].Value
-                        description = $itemMatch.Groups['description'].Value.Trim()
-                        enabled = $true
-                        availability = 'available'
-                    }
-                }
-            }
-        }
-    }
-
-    $inventory = @($skillRows | ForEach-Object {
-        $name = [string](Get-HostCapabilityAdapterProperty $_ @('name', 'id', 'skill'))
-        if ([string]::IsNullOrWhiteSpace($name)) { return }
-        [pscustomobject][ordered]@{
-            name = $name
-            description = [string](Get-HostCapabilityAdapterProperty $_ @('description', 'summary'))
-            enabled = if (Test-OperationObjectProperty $_ 'enabled') { [bool](Get-OperationObjectProperty $_ 'enabled') } else { $true }
-            availability = if (Test-OperationObjectProperty $_ 'availability') { [string](Get-OperationObjectProperty $_ 'availability') } else { 'available' }
-        }
-    })
-    $runtime = [pscustomobject]@{
-        model = New-HostCapabilityAdapterCandidate $model $CapturedAt 'cli_model_unknown'
-        context_window = New-HostCapabilityAdapterCandidate $contextWindow $CapturedAt 'cli_context_window_unknown'
-        metadata_budget = New-HostCapabilityAdapterCandidate $metadataBudget $CapturedAt 'cli_metadata_budget_unknown'
-        skills_inventory = New-HostCapabilityAdapterCandidate $inventory $CapturedAt 'cli_skills_inventory_unknown'
-    }
-    $snapshot = Resolve-HostCapabilitySnapshot -Surface $Surface -ThreadId $ThreadId -TurnId $TurnId -CapturedAt $CapturedAt -ThreadRuntime $runtime
-    if ($inventory.Count -gt 0) { $snapshot.capabilities.skills_inventory.value = @($inventory) }
-    $coverage = [pscustomobject][ordered]@{
-        prompt_input = $null -ne $PromptInput
-        model = $null -ne $model
-        context_window = $null -ne $contextWindow
-        metadata_budget = $null -ne $metadataBudget
-        skills_inventory = $inventory.Count -gt 0
-    }
-    $known = @($snapshot.capabilities.PSObject.Properties | Where-Object { $_.Value.freshness -ne 'fresh' }).Count -eq 0
-    $status = if ($known) { 'complete' } else { 'partial' }
-    $result = Add-HostCapabilityAdapterMetadata -Snapshot $snapshot -Adapter 'cli' -Source 'cli' -Status $status -Coverage $coverage -Errors $errors.ToArray()
-    $result | Add-Member -NotePropertyName platform_na -NotePropertyValue $false
-    return $result
-}
-
-function ConvertFrom-HostCapabilityConfigScalar {
-    param([string]$RawValue)
-
-    $value = ([string]$RawValue).Trim()
-    if ($value -match '^"(?<quoted>.*)"$' -or $value -match "^'(?<quoted>.*)'$") { return $Matches['quoted'] }
-    if ($value -match '^(?<number>\d+)$') { return [long]$Matches['number'] }
-    if ($value -match '^(?i:true|false)$') { return [bool]::Parse($value) }
-    return $value
-}
-
-function New-HostCapabilitySnapshotFromConfigFallback {
-    [CmdletBinding()]
-    param(
-        [string]$ConfigText = '',
-        [string]$ConfigPath = '',
-        [string]$Surface = 'offline',
-        [Parameter(Mandatory = $true)][string]$CapturedAt,
-        [string]$ThreadId,
-        [string]$TurnId
-    )
-
-    if ([string]::IsNullOrWhiteSpace($ConfigText) -and -not [string]::IsNullOrWhiteSpace($ConfigPath)) {
-        if (Test-Path -LiteralPath $ConfigPath -PathType Leaf) {
-            $ConfigText = [IO.File]::ReadAllText([IO.Path]::GetFullPath($ConfigPath))
-        }
-    }
-
-    $values = [ordered]@{}
-    $secretCount = 0
-    foreach ($line in @(([string]$ConfigText) -split "`r?`n")) {
-        $match = [regex]::Match($line, '^\s*(?<key>[A-Za-z0-9_.-]+)\s*=\s*(?<value>.*?)\s*(?:#.*)?$')
-        if (-not $match.Success) { continue }
-        $key = $match.Groups['key'].Value
-        $rawValue = $match.Groups['value'].Value.Trim()
-        if (Test-OperationSensitiveKey $key -or $key -match '(?i)(token|secret|password|api[-_]?key|authorization)') {
-            $secretCount++
-            continue
-        }
-        if ($key -in @('model', 'model_id', 'model_context_window', 'context_window', 'metadata_budget', 'skill_metadata_budget')) {
-            $values[$key] = ConvertFrom-HostCapabilityConfigScalar $rawValue
-        }
-    }
-
-    $model = if ($values.Contains('model')) { $values['model'] } elseif ($values.Contains('model_id')) { $values['model_id'] } else { $null }
-    $contextWindow = if ($values.Contains('model_context_window')) { $values['model_context_window'] } elseif ($values.Contains('context_window')) { $values['context_window'] } else { $null }
-    $metadataBudget = if ($values.Contains('metadata_budget')) { $values['metadata_budget'] } elseif ($values.Contains('skill_metadata_budget')) { $values['skill_metadata_budget'] } else { $null }
-    $configPayload = [pscustomobject]@{
-        model = New-HostCapabilityAdapterCandidate $model $CapturedAt 'config_fallback_model_unknown'
-        context_window = New-HostCapabilityAdapterCandidate $contextWindow $CapturedAt 'config_fallback_context_window_unknown'
-        metadata_budget = New-HostCapabilityAdapterCandidate $metadataBudget $CapturedAt 'config_fallback_metadata_budget_unknown'
-        skills_inventory = New-HostCapabilityAdapterCandidate $null $CapturedAt 'config_fallback_skills_inventory_unknown'
-    }
-    $snapshot = Resolve-HostCapabilitySnapshot -Surface $Surface -ThreadId $ThreadId -TurnId $TurnId -CapturedAt $CapturedAt -ConfigLayered $configPayload
-    $known = @($snapshot.capabilities.PSObject.Properties | Where-Object { $_.Value.freshness -ne 'fresh' }).Count -eq 0
-    $status = if ($known) { 'complete' } else { 'partial' }
-    $coverage = [pscustomobject][ordered]@{
-        config_text = -not [string]::IsNullOrWhiteSpace($ConfigText)
-        config_path = -not [string]::IsNullOrWhiteSpace($ConfigPath)
-        model = $null -ne $model
-        context_window = $null -ne $contextWindow
-        metadata_budget = $null -ne $metadataBudget
-        skills_inventory = $false
-    }
-    $result = Add-HostCapabilityAdapterMetadata -Snapshot $snapshot -Adapter 'offline_config' -Source 'config_fallback' -Status $status -Coverage $coverage
-    $result | Add-Member -NotePropertyName platform_na -NotePropertyValue $false
-    $result | Add-Member -NotePropertyName redaction -NotePropertyValue ([pscustomobject][ordered]@{ applied = $secretCount -gt 0; secret_count = $secretCount; marker = '<redacted>' })
-    return $result
-}
-
-function New-HostCapabilitySnapshotFromAppServer {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]$Responses,
-        [string]$Surface = 'app_server',
-        [Parameter(Mandatory = $true)][string]$CapturedAt,
-        [string]$ThreadId,
-        [string]$TurnId
-    )
-
-    $configResponse = Get-HostCapabilityAdapterProperty $Responses @('config_read', 'config/read')
-    $modelResponse = Get-HostCapabilityAdapterProperty $Responses @('model_list', 'model/list')
-    $providerResponse = Get-HostCapabilityAdapterProperty $Responses @('model_provider_capabilities_read', 'modelProvider/capabilities/read')
-    $skillsResponse = Get-HostCapabilityAdapterProperty $Responses @('skills_list', 'skills/list')
-
-    $config = Get-HostCapabilityAdapterResponseBody $configResponse
-    if ($null -ne $config -and (Test-OperationObjectProperty $config 'config')) {
-        $config = Get-OperationObjectProperty $config 'config'
-    }
-    $modelRows = Get-HostCapabilityAdapterRows $modelResponse @('data', 'models')
-    $provider = Get-HostCapabilityAdapterResponseBody $providerResponse
-    if ($null -ne $provider -and (Test-OperationObjectProperty $provider 'capabilities')) {
-        $provider = Get-OperationObjectProperty $provider 'capabilities'
-    }
-    $skillEntries = Get-HostCapabilityAdapterRows $skillsResponse @('data', 'skills')
-    $skillsRows = @($skillEntries | ForEach-Object {
-        if (Test-OperationObjectProperty $_ 'skills') {
-            foreach ($skill in @((Get-OperationObjectProperty $_ 'skills'))) { $skill }
-        }
-        else { $_ }
-    })
-    $errors = New-Object System.Collections.Generic.List[object]
-    foreach ($entry in @(
-        [pscustomobject]@{ method = 'config/read'; response = $configResponse },
-        [pscustomobject]@{ method = 'model/list'; response = $modelResponse },
-        [pscustomobject]@{ method = 'modelProvider/capabilities/read'; response = $providerResponse },
-        [pscustomobject]@{ method = 'skills/list'; response = $skillsResponse }
-    )) {
-        $error = Get-HostCapabilityAdapterResponseError $entry.response $entry.method
-        if ($null -ne $error) { $errors.Add($error) | Out-Null }
-    }
-
-    $model = Get-HostCapabilityAdapterProperty $config @('model', 'model_id', 'modelId')
-    $effectiveModelRow = $null
-    if ($null -ne $model) {
-        $matchingModels = @($modelRows | Where-Object {
-                $catalogModel = Get-HostCapabilityAdapterProperty $_ @('id', 'name', 'model', 'model_id', 'modelId')
-                -not [string]::IsNullOrWhiteSpace([string]$catalogModel) -and [string]::Equals([string]$catalogModel, [string]$model, [StringComparison]::OrdinalIgnoreCase)
-            } | Select-Object -First 1)
-        if ($matchingModels.Count -gt 0) { $effectiveModelRow = $matchingModels[0] }
-    }
-    $contextWindow = Get-HostCapabilityAdapterProperty $config @('context_window', 'model_context_window', 'modelContextWindow')
-    if ($null -eq $contextWindow -and $null -ne $effectiveModelRow) { $contextWindow = Get-HostCapabilityAdapterProperty $effectiveModelRow @('context_window', 'model_context_window', 'contextWindow', 'modelContextWindow') }
-    $metadataBudget = Get-HostCapabilityAdapterProperty $provider @('metadata_budget', 'metadataBudget', 'skill_metadata_budget', 'skillMetadataBudget')
-
-    $inventory = @($skillsRows | ForEach-Object {
-        $name = [string](Get-HostCapabilityAdapterProperty $_ @('name', 'id', 'skill'))
-        if ([string]::IsNullOrWhiteSpace($name)) { return }
-        [pscustomobject][ordered]@{
-            name = $name
-            description = [string](Get-HostCapabilityAdapterProperty $_ @('description', 'summary'))
-            enabled = if (Test-OperationObjectProperty $_ 'enabled') { [bool](Get-OperationObjectProperty $_ 'enabled') } else { $true }
-            availability = if (Test-OperationObjectProperty $_ 'availability') { [string](Get-OperationObjectProperty $_ 'availability') } else { 'available' }
-        }
-    })
-
-    $runtime = [pscustomobject]@{
-        model = New-HostCapabilityAdapterCandidate $model $CapturedAt 'app_server_model_unknown'
-        context_window = New-HostCapabilityAdapterCandidate $contextWindow $CapturedAt 'app_server_context_window_unknown'
-        metadata_budget = New-HostCapabilityAdapterCandidate $metadataBudget $CapturedAt 'app_server_metadata_budget_unknown'
-        skills_inventory = New-HostCapabilityAdapterCandidate $inventory $CapturedAt 'app_server_skills_inventory_unknown'
-    }
-    $snapshot = Resolve-HostCapabilitySnapshot -Surface $Surface -ThreadId $ThreadId -TurnId $TurnId -CapturedAt $CapturedAt -ThreadRuntime $runtime
-    $coverage = [pscustomobject][ordered]@{
-        config_read = ($null -ne $configResponse -and $null -eq (Get-HostCapabilityAdapterResponseError $configResponse 'config/read'))
-        model_list = ($null -ne $modelResponse -and $null -eq (Get-HostCapabilityAdapterResponseError $modelResponse 'model/list'))
-        model_provider_capabilities_read = ($null -ne $providerResponse -and $null -eq (Get-HostCapabilityAdapterResponseError $providerResponse 'modelProvider/capabilities/read'))
-        skills_list = ($null -ne $skillsResponse -and $null -eq (Get-HostCapabilityAdapterResponseError $skillsResponse 'skills/list'))
-    }
-    $complete = @($coverage.PSObject.Properties | Where-Object { -not [bool]$_.Value }).Count -eq 0
-    $known = @($snapshot.capabilities.PSObject.Properties | Where-Object { $_.Value.freshness -ne 'fresh' }).Count -eq 0
-    $status = if ($complete -and $known -and $errors.Count -eq 0) { 'complete' } else { 'partial' }
-    if ($inventory.Count -gt 0) { $snapshot.capabilities.skills_inventory.value = @($inventory) }
-    return Add-HostCapabilityAdapterMetadata -Snapshot $snapshot -Adapter 'app_server' -Source 'app_server' -Status $status -Coverage $coverage -Errors $errors.ToArray()
 }
 
 function Get-RuleFileSha256([string]$Path) {
@@ -8209,49 +7486,6 @@ function 锁定 {
     Write-Host ("锁定摘要：vendors={0}, imports={1}" -f @($lock.vendors).Count, @($lock.imports).Count)
 }
 
-function Get-PerfSummaryFromLogLines([string[]]$lines, [int]$RecentPerMetric = 3) {
-    $events = New-Object System.Collections.Generic.List[object]
-    if ($null -eq $lines) { return @() }
-    foreach ($line in $lines) {
-        if ([string]::IsNullOrWhiteSpace($line)) { continue }
-        try {
-            $record = $line | ConvertFrom-Json
-        }
-        catch { continue }
-        if ($null -eq $record -or $null -eq $record.data) { continue }
-        if (-not $record.data.PSObject.Properties.Match("metric").Count) { continue }
-        if (-not $record.data.PSObject.Properties.Match("duration_ms").Count) { continue }
-        $metric = [string]$record.data.metric
-        if ([string]::IsNullOrWhiteSpace($metric)) { continue }
-        $duration = 0
-        try { $duration = [int]$record.data.duration_ms } catch { continue }
-        if ($duration -lt 0) { continue }
-        $events.Add([pscustomobject]@{
-            metric = $metric
-            duration_ms = $duration
-            ts = [string]$record.ts
-        }) | Out-Null
-    }
-    if ($events.Count -eq 0) { return @() }
-
-    $summary = New-Object System.Collections.Generic.List[object]
-    $groups = $events | Group-Object metric
-    foreach ($g in $groups) {
-        $recent = $g.Group | Select-Object -Last $RecentPerMetric
-        if ($recent.Count -eq 0) { continue }
-        $avg = [math]::Round((($recent | Measure-Object -Property duration_ms -Average).Average), 0)
-        $last = ($recent | Select-Object -Last 1)
-        $summary.Add([pscustomobject]@{
-            metric = $g.Name
-            samples = @($recent).Count
-            avg_ms = [int]$avg
-            last_ms = [int]$last.duration_ms
-            last_ts = [string]$last.ts
-        }) | Out-Null
-    }
-    return ($summary | Sort-Object metric)
-}
-
 function Get-DoctorGitVersion([switch]$NoHostLog) {
     if ($DryRun -or $NoHostLog) {
         $gitOut = & git version 2>$null
@@ -8288,9 +7522,7 @@ function Parse-DoctorArgs([string[]]$tokens) {
         fix = $false
         dry_run_fix = $false
         strict = $false
-        strict_perf = $false
         offline_contract = $false
-        threshold_ms = 5000
     }
     if ($null -eq $tokens) { return [pscustomobject]$opts }
 
@@ -8304,24 +7536,13 @@ function Parse-DoctorArgs([string[]]$tokens) {
             "--fix" { $opts.fix = $true; continue }
             "--dry-run-fix" { $opts.dry_run_fix = $true; continue }
             "--strict" { $opts.strict = $true; continue }
-            "--strict-perf" { $opts.strict_perf = $true; continue }
             "--offline-contract" { $opts.offline_contract = $true; continue }
-            "--threshold-ms" {
-                Need ($i + 1 -lt $tokens.Count) "参数缺少值：--threshold-ms"
-                $raw = [string]$tokens[++$i]
-                $n = 0
-                Need ([int]::TryParse($raw, [ref]$n)) ("--threshold-ms 必须是整数：{0}" -f $raw)
-                Need ($n -gt 0) "--threshold-ms 必须大于 0"
-                $opts.threshold_ms = $n
-                continue
-            }
             default { throw ("未知 doctor 参数：{0}" -f $t) }
         }
     }
     if ($opts.offline_contract) {
         Need $opts.json "--offline-contract 仅用于 doctor --json 结构契约"
         Need (-not $opts.strict) "--offline-contract 不能与 --strict 组合"
-        Need (-not $opts.strict_perf) "--offline-contract 不能与 --strict-perf 组合"
         Need (-not $opts.fix -and -not $opts.dry_run_fix) "--offline-contract 不能与配置修复参数组合"
     }
     return [pscustomobject]$opts
@@ -8380,77 +7601,6 @@ function Apply-DoctorFixes($cfg, [switch]$Preview) {
 
     $result.applied = @($result.applied)
     return [pscustomobject]$result
-}
-
-function Get-PerfThresholdMs([string]$Metric, [int]$DefaultThresholdMs = 5000) {
-    if ([string]::IsNullOrWhiteSpace($Metric)) { return $DefaultThresholdMs }
-
-    $metricKey = $Metric.Trim().ToLowerInvariant()
-    switch ($metricKey) {
-        "discover" { return 5000 }
-        "build_agent" { return 8000 }
-        "build_agent_cache_hit" { return 1000 }
-        "build_agent_full" { return 20000 }
-        "build_agent_cache_check" { return 10000 }
-        "projection_package_hash_cache_hit" { return 3000 }
-        "projection_package_hash_full" { return 20000 }
-        "projection_plan_cached" { return 5000 }
-        "projection_plan_full" { return 20000 }
-        "apply_targets" { return 5000 }
-        # Includes prebuild checks + full build/apply flow; realistic baseline in this repo is ~180s.
-        "build_apply_total" { return 240000 }
-        "sync_mcp" { return 10000 }
-        # Update flow is network-heavy but should still surface regressions in doctor warnings.
-        "update_vendor" { return 60000 }
-        "update_imports" { return 180000 }
-        "update_total" { return 240000 }
-        # One-click workflows may include target-repo audit scans; keep this stricter than update_total but above normal audit smoke time.
-        "workflow_run" { return 30000 }
-        default { return $DefaultThresholdMs }
-    }
-}
-
-function Add-PerfThresholdMetadata($summary, [int]$DefaultThresholdMs = 5000) {
-    $annotated = @()
-    if ($null -eq $summary) { return @() }
-
-    foreach ($p in @($summary)) {
-        if ($null -eq $p) { continue }
-        $metricName = ""
-        try { $metricName = [string]$p.metric } catch { $metricName = "" }
-        $metricThreshold = Get-PerfThresholdMs $metricName $DefaultThresholdMs
-
-        $item = [ordered]@{}
-        foreach ($prop in $p.PSObject.Properties) {
-            $item[$prop.Name] = $prop.Value
-        }
-        $item.effective_threshold_ms = $metricThreshold
-        $item.anomaly_check_enabled = ($null -ne $metricThreshold)
-        $annotated += [pscustomobject]$item
-    }
-
-    return @($annotated)
-}
-
-function Get-PerfAnomalyItems($summary, [int]$WarnThresholdMs = 5000, [int]$MinSamples = 3) {
-    $items = @()
-    if ($null -eq $summary) { return @() }
-    foreach ($p in $summary) {
-        if ($null -eq $p) { continue }
-        $last = 0
-        $avg = 0
-        $samples = 0
-        try { $last = [int]$p.last_ms } catch { continue }
-        try { $avg = [int]$p.avg_ms } catch { continue }
-        try { $samples = [int]$p.samples } catch { $samples = 0 }
-        if ($samples -lt $MinSamples) { continue }
-        $metricThreshold = Get-PerfThresholdMs ([string]$p.metric) $WarnThresholdMs
-        if ($null -eq $metricThreshold) { continue }
-        if ($last -gt $metricThreshold -or $avg -gt $metricThreshold) {
-            $items += ("{0}: last={1}ms avg={2}ms threshold={3}ms" -f [string]$p.metric, $last, $avg, $metricThreshold)
-        }
-    }
-    return ,@($items)
 }
 
 function Test-DoctorGitHubConnection {
@@ -8543,15 +7693,9 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     $report = [ordered]@{
         pass = $true
         strict = [bool]$opts.strict
-        strict_perf = [bool]$opts.strict_perf
         offline_contract = [bool]$opts.offline_contract
         checks = [ordered]@{}
         risks = @()
-        performance = [ordered]@{
-            threshold_ms = [int]$opts.threshold_ms
-            summary = @()
-            anomalies = @()
-        }
         summary = [ordered]@{
             errors = @()
             warnings = @()
@@ -8752,36 +7896,6 @@ function Invoke-Doctor([string[]]$tokens = @()) {
         }
     }
 
-    # 8. Performance Summary
-    try {
-        if (Test-Path $LogPath) {
-            $lines = Get-Content $LogPath -Tail 5000 -ErrorAction SilentlyContinue
-            $perf = Get-PerfSummaryFromLogLines $lines 3
-            $report.performance.summary = @(Add-PerfThresholdMetadata $perf $opts.threshold_ms)
-            if ($perf.Count -gt 0) {
-                if (-not $opts.json) {
-                    Write-Host "最近性能摘要（最近 3 次）："
-                    foreach ($p in $report.performance.summary) {
-                        Write-Host ("   - {0}: last={1}ms avg={2}ms samples={3}" -f $p.metric, $p.last_ms, $p.avg_ms, $p.samples)
-                    }
-                }
-                $anomalies = Get-PerfAnomalyItems $report.performance.summary $opts.threshold_ms
-                $report.performance.anomalies = @($anomalies)
-                if ($anomalies.Count -gt 0) {
-                    if (-not $opts.json) {
-                        Write-Host ("⚠️ 性能异常（阈值 {0}ms，{1} 项）：" -f $opts.threshold_ms, $anomalies.Count) -ForegroundColor Yellow
-                        foreach ($a in $anomalies) {
-                            Write-Host ("   - {0}" -f $a) -ForegroundColor Yellow
-                        }
-                    }
-                }
-            }
-        }
-    }
-    catch {
-        if (-not $opts.json) { Write-Host "⚠️ 性能摘要读取失败（已忽略）" -ForegroundColor Yellow }
-    }
-
     $report.pass = $pass
     if (-not $report.checks.git.ok) { $report.summary.errors += "git_unavailable" }
     if (-not $report.checks.robocopy.ok) { $report.summary.errors += "robocopy_unavailable" }
@@ -8794,9 +7908,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     if ($report.checks.network -and -not $report.checks.network.ok) { $report.summary.errors += "network_unavailable" }
     if ($report.checks.long_paths.value -eq 0) { $report.summary.warnings += "long_paths_off" }
     if (@($report.risks).Count -gt 0) { $report.summary.warnings += "config_risks_present" }
-    if (@($report.performance.anomalies).Count -gt 0) { $report.summary.warnings += "perf_anomalies_present" }
-
-    if ($opts.strict -and (@($report.risks).Count -gt 0 -or ([bool]$opts.strict_perf -and @($report.performance.anomalies).Count -gt 0))) {
+    if ($opts.strict -and @($report.risks).Count -gt 0) {
         $report.pass = $false
     }
     $report.summary.error_count = @($report.summary.errors).Count
@@ -8805,10 +7917,6 @@ function Invoke-Doctor([string[]]$tokens = @()) {
         Write-Host ($report | ConvertTo-Json -Depth 30)
         return [pscustomobject]$report
     }
-    if ($opts.strict -and -not $opts.strict_perf -and @($report.performance.anomalies).Count -gt 0) {
-        Write-Host "提示：性能异常仅告警，不影响 --strict 结果。使用 --strict-perf 可将其纳入阻断。" -ForegroundColor Yellow
-    }
-
     Write-Host ""
     if ($report.pass) {
         Write-Host "Your system is ready for skills-manager." -ForegroundColor Green
@@ -10452,30 +9560,23 @@ function 选择 {
 
 
 function 发现 {
-    Invoke-WithMetric "discover" {
-        Preflight
-        $cfg = LoadCfg
-        $manualItems = 收集ManualSkills $cfg
-        $f = $Filter
-        if ([string]::IsNullOrWhiteSpace($f)) {
-            $f = Read-Host "可选：关键词过滤（空格=AND，或 /regex/）"
-        }
-        $all = 收集Skills "" $cfg $manualItems
-        Need ($all.Count -gt 0) "未发现任何 skills。请先【新增技能库】。"
-        $list = Hide-VendorRootSkills (Filter-Skills $all $f)
-        if ($list.Count -eq 0) {
-            Write-Host "未发现匹配项。"
-            return
-        }
-        $installed = Get-InstalledSet $cfg $manualItems
-        Write-ItemsInColumns $list { param($idx, $item)
-            $mark = if ($installed.Contains("$($item.vendor)|$($item.from)")) { "*" } else { " " }
-            $displayVendor = Get-DisplayVendor $item
-            $leaf = Split-Path $item.from -Leaf
-            if ($item.from -eq ".") { $leaf = $displayVendor }
-            return ("{0,3}) [{1}] [{2}] {3}" -f $idx, $mark, $displayVendor, $leaf)
-        }
-    } @{ command = "发现" } -NoHost
+    Preflight
+    $cfg = LoadCfg
+    $manualItems = 收集ManualSkills $cfg
+    $f = $Filter
+    if ([string]::IsNullOrWhiteSpace($f)) { $f = Read-Host "可选：关键词过滤（空格=AND，或 /regex/）" }
+    $all = 收集Skills "" $cfg $manualItems
+    Need ($all.Count -gt 0) "未发现任何 skills。请先【新增技能库】。"
+    $list = Hide-VendorRootSkills (Filter-Skills $all $f)
+    if ($list.Count -eq 0) { Write-Host "未发现匹配项。"; return }
+    $installed = Get-InstalledSet $cfg $manualItems
+    Write-ItemsInColumns $list { param($idx, $item)
+        $mark = if ($installed.Contains("$($item.vendor)|$($item.from)")) { "*" } else { " " }
+        $displayVendor = Get-DisplayVendor $item
+        $leaf = Split-Path $item.from -Leaf
+        if ($item.from -eq ".") { $leaf = $displayVendor }
+        return ("{0,3}) [{1}] [{2}] {3}" -f $idx, $mark, $displayVendor, $leaf)
+    }
 }
 
 function 清空Agent目录 {
@@ -10490,46 +9591,6 @@ function Resolve-SourceBase([string]$vendorName, $cfg) {
     $v = $cfg.vendors | Where-Object { $_.name -eq $vendorName } | Select-Object -First 1
     if (-not $v) { throw "白名单引用了不存在的 vendor：$vendorName" }
     return (VendorPath $v.name)
-}
-
-function Get-BuildCachePath {
-    return (Join-Path $Root ".build-cache.json")
-}
-
-function ConvertTo-Hashtable($obj) {
-    $table = @{}
-    if ($null -eq $obj) { return $table }
-    if ($obj -is [hashtable]) { return $obj }
-    if ($obj -is [pscustomobject]) {
-        foreach ($p in $obj.PSObject.Properties) { $table[[string]$p.Name] = $p.Value }
-    }
-    return $table
-}
-
-function Load-BuildCache {
-    $path = Get-BuildCachePath
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return @{} }
-    try {
-        $raw = Get-Content -LiteralPath $path -Raw
-        if ([string]::IsNullOrWhiteSpace($raw)) { return @{} }
-        $obj = $raw | ConvertFrom-Json
-        return (ConvertTo-Hashtable $obj)
-    }
-    catch {
-        Log ("构建缓存读取失败，已忽略并重建：{0}" -f $_.Exception.Message) "WARN"
-        return @{}
-    }
-}
-
-function Save-BuildCache($cache) {
-    if ($DryRun) { return }
-    try {
-        $json = $cache | ConvertTo-Json -Depth 20
-        Set-ContentUtf8 (Get-BuildCachePath) $json
-    }
-    catch {
-        Log ("构建缓存保存失败（已忽略）：{0}" -f $_.Exception.Message) "WARN"
-    }
 }
 
 function Get-DirectoryFingerprint([string]$dir) {
@@ -10586,64 +9647,6 @@ function Get-DirectoryFingerprint([string]$dir) {
     }
 }
 
-function Mirror-SkillWithCache(
-    [string]$src,
-    [string]$dst,
-    [string]$cacheKey,
-    [hashtable]$oldCache,
-    [hashtable]$newCache,
-    $stats,
-    [hashtable]$fingerprintCache = $null,
-    [switch]$ForceMirror
-) {
-    if ($null -eq $fingerprintCache) { $fingerprintCache = @{} }
-    if ($null -ne $stats -and $stats.PSObject.Properties.Match("fp_cache_hit").Count -eq 0) {
-        $stats | Add-Member -NotePropertyName fp_cache_hit -NotePropertyValue 0
-    }
-    if ($null -ne $stats -and $stats.PSObject.Properties.Match("fp_cache_miss").Count -eq 0) {
-        $stats | Add-Member -NotePropertyName fp_cache_miss -NotePropertyValue 0
-    }
-    $dstExists = (Test-Path -LiteralPath $dst -PathType Container)
-    if (-not $dstExists) {
-        # The destination is guaranteed to be rebuilt in this pass, so fingerprint
-        # calculation cannot lead to a cache skip. Mirror directly to reduce build cost.
-        RoboMirror $src $dst
-        $expanded = Expand-RelativeSkillPlaceholders $dst
-        if ($expanded -gt 0) {
-            Log ("已展开相对路径 SKILL 占位文件：{0} 项 [{1}]" -f $expanded, $cacheKey)
-        }
-        $stats.mirrored++
-        return
-    }
-    $srcKey = [System.IO.Path]::GetFullPath($src).ToLowerInvariant()
-    if ($fingerprintCache.ContainsKey($srcKey)) {
-        $fp = [string]$fingerprintCache[$srcKey]
-        if ($null -ne $stats) { $stats.fp_cache_hit++ }
-    }
-    else {
-        $fp = Get-DirectoryFingerprint $src
-        $fingerprintCache[$srcKey] = $fp
-        if ($null -ne $stats) { $stats.fp_cache_miss++ }
-    }
-    $newCache[$cacheKey] = $fp
-    $old = if ($oldCache.ContainsKey($cacheKey)) { [string]$oldCache[$cacheKey] } else { "" }
-    if ($dstExists -and -not $ForceMirror -and $old -eq $fp) {
-        $expanded = Expand-RelativeSkillPlaceholders $dst
-        if ($expanded -gt 0) {
-            Log ("命中构建缓存后补展开相对路径 SKILL 占位文件：{0} 项 [{1}]" -f $expanded, $cacheKey)
-        }
-        $stats.skipped++
-        Log ("命中构建缓存，跳过复制：{0}" -f $cacheKey)
-        return
-    }
-    RoboMirror $src $dst
-     $expanded = Expand-RelativeSkillPlaceholders $dst
-    if ($expanded -gt 0) {
-        Log ("已展开相对路径 SKILL 占位文件：{0} 项 [{1}]" -f $expanded, $cacheKey)
-    }
-    $stats.mirrored++
-}
-
 function Get-SkillNameConflictBuckets([string]$agentRoot) {
     $nameToPaths = @{}
     foreach ($skillFile in (Get-ChildItem $agentRoot -Recurse -Filter "SKILL.md" -File -ErrorAction SilentlyContinue)) {
@@ -10684,21 +9687,6 @@ function Test-SkillNameSystemOverrideAllowed([string[]]$paths) {
         else { $hasNonSystemPath = $true }
     }
     return ($hasSystemPath -and $hasNonSystemPath)
-}
-function Should-SkipBuildPostScan($stats) {
-    if ($null -eq $stats) { return $false }
-    return (($stats.mirrored -eq 0) -and (-not [bool]$stats.reused))
-}
-function Get-ElapsedMs($sw) {
-    if ($null -eq $sw) { return 0 }
-    return [int][math]::Round([double]$sw.Elapsed.TotalMilliseconds, 0)
-}
-function Get-AgentBuildCacheAlgorithmVersion {
-    return "agent-build-v20260803.3"
-}
-function Get-AgentBuildMetricName([bool]$cacheHit) {
-    if ($cacheHit) { return "build_agent_cache_hit" }
-    return "build_agent_full"
 }
 function Get-StringSha256([string]$text) {
     if ($null -eq $text) { $text = "" }
@@ -10783,12 +9771,10 @@ function Resolve-AgentMappingForAgent($cfg, $mapping, [hashtable]$context) {
         vendor = $vendor
         from = $from
         to = $to
-        out_rel = $outRel
         src = [string]$src
         src_full = $srcFull
         src_key = $srcFull.ToLowerInvariant()
         dst = $dst
-        cache_key = ("mapping|{0}|{1}|{2}" -f $vendor, $from, $to)
     }
 }
 function Test-ResolvedAgentMappingSkillDir($resolved, [hashtable]$context) {
@@ -10810,223 +9796,20 @@ function Get-ResolvedAgentMappingInvalidReason($resolved) {
     if (-not (Test-Path -LiteralPath $src -PathType Container)) { return "源目录不存在" }
     return "缺少标记文件"
 }
-function Get-AgentBuildState($cfg) {
-    $records = New-Object System.Collections.Generic.List[object]
-    $outputs = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    $resolveContext = New-AgentMappingResolveContext
-    $fingerprintCache = @{}
-    $index = 0
-
-    foreach ($m in @($cfg.mappings)) {
-        $resolved = Resolve-AgentMappingForAgent $cfg $m $resolveContext
-        if ($null -eq $resolved) { continue }
-        if (-not [bool]$resolved.sync) {
-            $records.Add([ordered]@{
-                    index = $index
-                    kind = "mapping"
-                    sync = $false
-                    vendor = [string]$resolved.vendor
-                    from = [string]$resolved.from
-                    to = [string]$resolved.to
-                }) | Out-Null
-            $index++
-            continue
-        }
-
-        if (-not [bool]$resolved.source_valid) {
-            return [pscustomobject]@{ can_skip = $false; reason = [string]$resolved.reason; signature = $null; outputs = @() }
-        }
-        if (-not (Test-ResolvedAgentMappingSkillDir $resolved $resolveContext)) {
-            $reason = Get-ResolvedAgentMappingInvalidReason $resolved
-            return [pscustomobject]@{ can_skip = $false; reason = ("{0}: {1}" -f $reason, [string]$resolved.src_full); signature = $null; outputs = @() }
-        }
-        $srcKey = [string]$resolved.src_key
-        if ($fingerprintCache.ContainsKey($srcKey)) {
-            $fp = [string]$fingerprintCache[$srcKey]
-        }
-        else {
-            $fp = Get-DirectoryFingerprint ([string]$resolved.src_full)
-            $fingerprintCache[$srcKey] = $fp
-        }
-        $outRel = [string]$resolved.out_rel
-        $outputs.Add($outRel) | Out-Null
-        $records.Add([ordered]@{
-                index = $index
-                kind = "mapping"
-                sync = $true
-                vendor = [string]$resolved.vendor
-                from = [string]$resolved.from
-                to = $outRel
-                source = $srcKey
-                fingerprint = $fp
-            }) | Out-Null
-        $index++
-    }
-
-    foreach ($d in (Get-OverridesDirs | Sort-Object Name)) {
-        $srcFull = [System.IO.Path]::GetFullPath($d.FullName)
-        $srcKey = $srcFull.ToLowerInvariant()
-        if ($fingerprintCache.ContainsKey($srcKey)) {
-            $fp = [string]$fingerprintCache[$srcKey]
-        }
-        else {
-            $fp = Get-DirectoryFingerprint $srcFull
-            $fingerprintCache[$srcKey] = $fp
-        }
-        $outputs.Add([string]$d.Name) | Out-Null
-        $records.Add([ordered]@{
-                index = $index
-                kind = "override"
-                name = [string]$d.Name
-                to = [string]$d.Name
-                source = $srcKey
-                fingerprint = $fp
-            }) | Out-Null
-        $index++
-    }
-
-    $recordList = $records.ToArray()
-    $outputList = @($outputs | Sort-Object)
-    $payload = [ordered]@{
-        schema = 1
-        algorithm = (Get-AgentBuildCacheAlgorithmVersion)
-        records = $recordList
-        outputs = $outputList
-    }
-    $json = $payload | ConvertTo-Json -Depth 30 -Compress
-    return [pscustomobject]@{
-        can_skip = $true
-        reason = "ok"
-        signature = (Get-StringSha256 $json)
-        outputs = $outputList
-    }
-}
-function Set-AgentBuildStateCache($cache, $cfg) {
-    try {
-        $state = Get-AgentBuildState $cfg
-        if (-not $state.can_skip) { return $state }
-        $cache["__agent_build_algorithm"] = (Get-AgentBuildCacheAlgorithmVersion)
-        $cache["__agent_build_signature"] = [string]$state.signature
-        $cache["__agent_build_output_count"] = @($state.outputs).Count
-        $cache["__agent_build_output_fingerprint"] = Get-DirectoryFingerprint $AgentDir
-        $cache["__agent_build_saved_at"] = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-        return $state
-    }
-    catch {
-        Log ("构建快路径状态写入失败，已忽略：{0}" -f $_.Exception.Message) "WARN"
-        return [pscustomobject]@{ can_skip = $false; reason = $_.Exception.Message; signature = $null; outputs = @() }
-    }
-}
-function Test-AgentBuildCacheHit($cfg) {
-    if ($DryRun) { return [pscustomobject]@{ hit = $false; reason = "dry-run"; state = $null } }
-    if (-not (Test-Path -LiteralPath $AgentDir -PathType Container)) {
-        return [pscustomobject]@{ hit = $false; reason = "agent-missing"; state = $null }
-    }
-    $cache = Load-BuildCache
-    $algorithm = [string]$cache["__agent_build_algorithm"]
-    $signature = [string]$cache["__agent_build_signature"]
-    $outputFingerprint = [string]$cache["__agent_build_output_fingerprint"]
-    if ($algorithm -ne (Get-AgentBuildCacheAlgorithmVersion)) {
-        return [pscustomobject]@{ hit = $false; reason = "algorithm-mismatch"; state = $null }
-    }
-    if ([string]::IsNullOrWhiteSpace($signature)) {
-        return [pscustomobject]@{ hit = $false; reason = "signature-missing"; state = $null }
-    }
-    try {
-        $state = Get-AgentBuildState $cfg
-        if (-not $state.can_skip) {
-            return [pscustomobject]@{ hit = $false; reason = $state.reason; state = $state }
-        }
-        if ([string]$state.signature -ne $signature) {
-            return [pscustomobject]@{ hit = $false; reason = "signature-mismatch"; state = $state }
-        }
-        foreach ($rel in @($state.outputs)) {
-            $outPath = Join-Path $AgentDir $rel
-            if (-not (Test-Path -LiteralPath $outPath -PathType Container)) {
-                return [pscustomobject]@{ hit = $false; reason = ("output-missing:{0}" -f $rel); state = $state }
-            }
-        }
-        $expectedTopLevels = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-        foreach ($rel in @($state.outputs)) {
-            $normalized = Normalize-SkillPath ([string]$rel)
-            $topLevel = @($normalized -split "\\", 2)[0]
-            if (-not [string]::IsNullOrWhiteSpace($topLevel) -and $topLevel -ne ".") {
-                $expectedTopLevels.Add($topLevel) | Out-Null
-            }
-        }
-        foreach ($dir in @(Get-ChildItem -LiteralPath $AgentDir -Directory -Force | Sort-Object Name)) {
-            if (-not $expectedTopLevels.Contains([string]$dir.Name)) {
-                return [pscustomobject]@{ hit = $false; reason = ("unexpected-output:{0}" -f $dir.Name); state = $state }
-            }
-        }
-        if ([string]::IsNullOrWhiteSpace($outputFingerprint)) {
-            return [pscustomobject]@{ hit = $false; reason = "output-fingerprint-missing"; state = $state }
-        }
-        if ((Get-DirectoryFingerprint $AgentDir) -ne $outputFingerprint) {
-            return [pscustomobject]@{ hit = $false; reason = "output-fingerprint-mismatch"; state = $state }
-        }
-        return [pscustomobject]@{ hit = $true; reason = "cache-hit"; state = $state }
-    }
-    catch {
-        return [pscustomobject]@{ hit = $false; reason = $_.Exception.Message; state = $null }
-    }
-}
-function Invoke-AgentBuildCacheHit($cacheHit) {
-    return (Invoke-WithMetric (Get-AgentBuildMetricName $true) {
-        $state = $cacheHit.state
-        $signature = [string]$state.signature
-        $shortSignature = if ($signature.Length -gt 12) { $signature.Substring(0, 12) } else { $signature }
-        Log ("构建 Agent 输入未变化，跳过重建：outputs={0}, signature={1}" -f @($state.outputs).Count, $shortSignature)
-        return @()
-    } @{ command = "构建Agent"; cache_hit = $true } -NoHost)
-}
-function Get-DuplicateMappingSourceGroups($cfg) {
-    $groups = @{}
-    if ($null -eq $cfg -or $null -eq $cfg.mappings) { return @() }
-    foreach ($m in @($cfg.mappings)) {
-        if ($null -eq $m) { continue }
-        if (-not (Should-SyncMappingToAgent $m)) { continue }
-        $key = ("{0}|{1}" -f [string]$m.vendor, [string]$m.from).ToLowerInvariant()
-        if (-not $groups.ContainsKey($key)) {
-            $groups[$key] = New-Object System.Collections.Generic.List[object]
-        }
-        $groups[$key].Add($m) | Out-Null
-    }
-    return @($groups.GetEnumerator() | Where-Object { $_.Value.Count -gt 1 })
-}
-
 function Start-BuildTransaction {
     $txnRoot = Join-Path $Root ".txn"
     $txnId = [Guid]::NewGuid().ToString("N").Substring(0, 10)
     $path = Join-Path $txnRoot ("build-{0}" -f $txnId)
     $backupAgent = Join-Path $path "agent.backup"
-    $buildCachePath = Get-BuildCachePath
-    $backupBuildCache = Join-Path $path "build-cache.backup.json"
     $state = [ordered]@{
         path = $path
         backup_agent = $backupAgent
         has_backup_agent = $false
-        build_cache_path = $buildCachePath
-        backup_build_cache = $backupBuildCache
-        had_build_cache = $false
-        has_backup_build_cache = $false
-        build_cache_backup_error = $null
         backup_error = $null
     }
     if ($DryRun) { return [pscustomobject]$state }
     EnsureDir $txnRoot
     EnsureDir $path
-    if (Test-Path -LiteralPath $buildCachePath -PathType Leaf) {
-        $state.had_build_cache = $true
-        try {
-            Copy-Item -LiteralPath $buildCachePath -Destination $backupBuildCache -Force
-            $state.has_backup_build_cache = $true
-        }
-        catch {
-            $state.build_cache_backup_error = $_.Exception.Message
-            Log ("构建缓存无法备份；若事务回滚，将删除缓存并强制下次重建：{0}" -f $_.Exception.Message) "WARN"
-        }
-    }
     if (Test-Path $AgentDir) {
         try {
             Invoke-MoveItem $AgentDir $backupAgent
@@ -11049,14 +9832,6 @@ function Rollback-BuildTransaction($txn) {
             Invoke-MoveItem $txn.backup_agent $AgentDir
             Write-Host "已回滚 agent/ 到构建前状态。" -ForegroundColor Yellow
         }
-        if ($txn.had_build_cache -and $txn.has_backup_build_cache -and (Test-Path -LiteralPath $txn.backup_build_cache -PathType Leaf)) {
-            Copy-Item -LiteralPath $txn.backup_build_cache -Destination $txn.build_cache_path -Force
-            Write-Host "已回滚构建缓存到构建前状态。" -ForegroundColor Yellow
-        }
-        elseif (Test-Path -LiteralPath $txn.build_cache_path -PathType Leaf) {
-            Invoke-RemoveItemWithRetry $txn.build_cache_path -IgnoreFailure -SilentIgnore | Out-Null
-            Write-Host "已清除本次构建缓存，下一次将强制重建。" -ForegroundColor Yellow
-        }
     }
     finally {
         if (Test-Path $txn.path) { Invoke-RemoveItemWithRetry $txn.path -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
@@ -11069,7 +9844,7 @@ function Complete-BuildTransaction($txn) {
 }
 
 function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
-    return (Invoke-WithMetric (Get-AgentBuildMetricName $false) {
+    return (& {
         if (-not $SkipPreflight) { Preflight }
         if ($null -eq $cfg) { $cfg = LoadCfg }
         Log "开始构建 Agent..."
@@ -11089,13 +9864,9 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
         if ($null -ne $Txn -and $Txn.PSObject.Properties.Match("backup_error").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($Txn.backup_error)) {
             $failures.Add(("build-txn:agent-backup => {0}" -f $Txn.backup_error)) | Out-Null
         }
-        $stats = [pscustomobject]@{ mirrored = 0; skipped = 0; reused = $reusedExistingAgent }
-        $oldCache = if ($DryRun) { @{} } else { Load-BuildCache }
-        $newCache = @{}
-        $fingerprintCache = @{}
+        $stats = [pscustomobject]@{ mirrored = 0; reused = $reusedExistingAgent }
         $resolveContext = New-AgentMappingResolveContext
 
-        $swMapping = [System.Diagnostics.Stopwatch]::StartNew()
         foreach ($m in $cfg.mappings) {
             try {
                 $resolved = Resolve-AgentMappingForAgent $cfg $m $resolveContext
@@ -11127,7 +9898,10 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
                         }) | Out-Null
                     continue
                 }
-                Mirror-SkillWithCache ([string]$resolved.src_full) ([string]$resolved.dst) ([string]$resolved.cache_key) $oldCache $newCache $stats $fingerprintCache
+                RoboMirror ([string]$resolved.src_full) ([string]$resolved.dst)
+                $expanded = Expand-RelativeSkillPlaceholders ([string]$resolved.dst)
+                if ($expanded -gt 0) { Log ("已展开相对路径 SKILL 占位文件：{0} 项" -f $expanded) }
+                $stats.mirrored++
             }
             catch {
                 Write-Host ("❌ 处理技能失败 [{0}/{1}]: {2}" -f $m.vendor, $m.from, $_.Exception.Message) -ForegroundColor Red
@@ -11146,19 +9920,14 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
                 Log ("检测到 {0} 个 manual imports 未映射；按白名单策略不会进入 agent（可通过【安装】写入 mapping 后生效）。" -f $unmappedManual.Count) "WARN"
             }
         }
-        $swMapping.Stop()
-        $stats | Add-Member -NotePropertyName phase_ms_mapping -NotePropertyValue (Get-ElapsedMs $swMapping) -Force
-
         # overrides 覆盖层（可选）：同名目录将覆盖 agent 中对应技能
-        $swOverrides = [System.Diagnostics.Stopwatch]::StartNew()
         foreach ($d in (Get-OverridesDirs)) {
             try {
                 $dst = Join-Path $AgentDir $d.Name
-                $cacheKey = ("override|{0}" -f $d.Name)
-                # A clean agent build recreates mapping destinations before this
-                # phase. Never let a stale override cache entry skip the
-                # replacement that must win over that freshly mirrored output.
-                Mirror-SkillWithCache $d.FullName $dst $cacheKey $oldCache $newCache $stats $fingerprintCache -ForceMirror
+                RoboMirror $d.FullName $dst
+                $expanded = Expand-RelativeSkillPlaceholders $dst
+                if ($expanded -gt 0) { Log ("已展开相对路径 SKILL 占位文件：{0} 项" -f $expanded) }
+                $stats.mirrored++
                 Log ("应用覆盖层: {0}" -f $d.Name)
             }
             catch {
@@ -11166,80 +9935,47 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
                 $failures.Add(("override:{0} => {1}" -f $d.Name, $_.Exception.Message)) | Out-Null
             }
         }
-        $swOverrides.Stop()
-        $stats | Add-Member -NotePropertyName phase_ms_overrides -NotePropertyValue (Get-ElapsedMs $swOverrides) -Force
-
-        $swPostScan = [System.Diagnostics.Stopwatch]::StartNew()
         $removedVendorRoots = Remove-VendorRootMappingOutputsFromAgent $cfg
         if ($removedVendorRoots -gt 0) {
             Log ("已剔除 {0} 个 vendor 根映射目录（不参与同步）。" -f $removedVendorRoots)
         }
 
-        if (Should-SkipBuildPostScan $stats) {
-            Log "增量构建无新复制内容，跳过 SKILL.md 归一化/清理与冲突扫描。"
+        $normalizedSkillMd = Normalize-SkillMarkdownFiles $AgentDir
+        if ($normalizedSkillMd.normalized -gt 0) {
+            Log ("已归一化 SKILL.md 编码（移除 UTF-8 BOM）：{0} 项" -f $normalizedSkillMd.normalized)
         }
-        else {
-            $normalizedSkillMd = Normalize-SkillMarkdownFiles $AgentDir
-            if ($normalizedSkillMd.normalized -gt 0) {
-                Log ("已归一化 SKILL.md 编码（移除 UTF-8 BOM）：{0} 项" -f $normalizedSkillMd.normalized)
+        if ($normalizedSkillMd.failed -gt 0) {
+            foreach ($path in $normalizedSkillMd.failed_paths) {
+                $failures.Add(("build-skill-md-normalize:{0}" -f $path)) | Out-Null
             }
-            if ($normalizedSkillMd.failed -gt 0) {
-                foreach ($path in $normalizedSkillMd.failed_paths) {
-                    $failures.Add(("build-skill-md-normalize:{0}" -f $path)) | Out-Null
-                }
-            }
+        }
 
-            $invalidSkillCleanup = Remove-InvalidSkillMarkdownFiles $AgentDir
-            if ($invalidSkillCleanup.removed -gt 0) {
-                Log ("已清理无效 SKILL.md（缺少 YAML frontmatter）：{0} 项" -f $invalidSkillCleanup.removed) "WARN"
+        $invalidSkillCleanup = Remove-InvalidSkillMarkdownFiles $AgentDir
+        if ($invalidSkillCleanup.removed -gt 0) {
+            Log ("已清理无效 SKILL.md（缺少 YAML frontmatter）：{0} 项" -f $invalidSkillCleanup.removed) "WARN"
+        }
+        if ($invalidSkillCleanup.failed -gt 0) {
+            foreach ($path in $invalidSkillCleanup.failed_paths) {
+                $failures.Add(("build-invalid-skill-md-cleanup:{0}" -f $path)) | Out-Null
             }
-            if ($invalidSkillCleanup.failed -gt 0) {
-                foreach ($path in $invalidSkillCleanup.failed_paths) {
-                    $failures.Add(("build-invalid-skill-md-cleanup:{0}" -f $path)) | Out-Null
-                }
-            }
+        }
 
-            $nameToPaths = Get-SkillNameConflictBuckets $AgentDir
-            foreach ($name in $nameToPaths.Keys | Sort-Object) {
-                $paths = @($nameToPaths[$name])
-                if ($paths.Count -le 1) { continue }
-                if (Test-SkillNameDuplicateContentAllowed $paths) {
-                    Log ("检测到同名同内容技能别名，已跳过冲突：{0}" -f $name)
-                    continue
-                }
-                if (Test-SkillNameSystemOverrideAllowed $paths) {
-                    Log ("检测到系统技能与普通技能同名，已保留系统技能优先：{0}" -f $name)
-                    continue
-                }
-                Write-Host ("❌ 技能名冲突：{0}" -f $name) -ForegroundColor Red
-                foreach ($p in $paths) {
-                    Write-Host ("   - {0}" -f $p) -ForegroundColor Red
-                }
-                $failures.Add(("skill-name-conflict:{0} => {1}" -f $name, ($paths -join " | "))) | Out-Null
+        $nameToPaths = Get-SkillNameConflictBuckets $AgentDir
+        foreach ($name in $nameToPaths.Keys | Sort-Object) {
+            $paths = @($nameToPaths[$name])
+            if ($paths.Count -le 1) { continue }
+            if (Test-SkillNameDuplicateContentAllowed $paths) {
+                Log ("检测到同名同内容技能别名，已跳过冲突：{0}" -f $name)
+                continue
             }
-        }
-        $swPostScan.Stop()
-        $stats | Add-Member -NotePropertyName phase_ms_postscan -NotePropertyValue (Get-ElapsedMs $swPostScan) -Force
-
-        if (-not $DryRun) {
-            if ($failures.Count -eq 0 -and -not $stats.reused) {
-                Set-AgentBuildStateCache $newCache $cfg | Out-Null
+            if (Test-SkillNameSystemOverrideAllowed $paths) {
+                Log ("检测到系统技能与普通技能同名，已保留系统技能优先：{0}" -f $name)
+                continue
             }
-            Save-BuildCache $newCache
+            Write-Host ("❌ 技能名冲突：{0}" -f $name) -ForegroundColor Red
+            foreach ($p in $paths) { Write-Host ("   - {0}" -f $p) -ForegroundColor Red }
+            $failures.Add(("skill-name-conflict:{0} => {1}" -f $name, ($paths -join " | "))) | Out-Null
         }
-        if ($stats.skipped -gt 0) {
-            Log ("增量构建：复用缓存 {0} 项，实际复制 {1} 项。" -f $stats.skipped, $stats.mirrored)
-        }
-        if (($stats.fp_cache_hit -gt 0) -or ($stats.fp_cache_miss -gt 0)) {
-            $fpTotal = [double]($stats.fp_cache_hit + $stats.fp_cache_miss)
-            $hitRate = if ($fpTotal -le 0) { 0.0 } else { [math]::Round((100.0 * [double]$stats.fp_cache_hit / $fpTotal), 1) }
-            Log ("目录指纹缓存：hit={0}, miss={1}, hit_rate={2}%" -f $stats.fp_cache_hit, $stats.fp_cache_miss, $hitRate)
-        }
-        $dupGroups = @(Get-DuplicateMappingSourceGroups $cfg)
-        if ($dupGroups.Count -gt 0) {
-            Log ("检测到重复源目录映射组：{0}（建议合并配置以提升构建命中率）" -f $dupGroups.Count) "WARN"
-        }
-        Log ("构建阶段耗时：mapping={0}ms, overrides={1}ms, postscan={2}ms" -f $stats.phase_ms_mapping, $stats.phase_ms_overrides, $stats.phase_ms_postscan)
         if ($stats.reused) {
             Log "本次构建未能清空旧 agent/，已按目录增量覆盖；若仍有陈旧技能残留，可在释放相关文件占用后重试。"
             Write-Host "❌ 检测到在旧 agent/ 上增量覆盖构建，已升级为失败。" -ForegroundColor Red
@@ -11262,7 +9998,7 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
         $count = @((Get-ChildItem -LiteralPath $AgentDir -Directory -ErrorAction SilentlyContinue)).Count
         Log ("构建完成：agent/ (共 {0} 项技能)" -f $count)
         return $failures.ToArray()
-    } @{ command = "构建Agent" } -NoHost)
+    })
 }
 
 function Resolve-TargetDir([string]$path) {
@@ -11280,16 +10016,15 @@ function Resolve-TargetDir([string]$path) {
     return (Join-Path $Root $path)
 }
 
-function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, [string]$VerifiedAgentBuildSignature = "", $PromotionContext = $null) {
-    return (Invoke-WithMetric "apply_targets" {
+function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionContext = $null) {
+    return (& {
         if (-not $SkipPreflight) { Preflight }
         if ($null -eq $cfg) { $cfg = LoadCfg }
         $mode = $cfg.sync_mode
         if ([string]::IsNullOrWhiteSpace($mode)) { $mode = "link" }
         $failures = New-Object System.Collections.Generic.List[string]
 
-        Invoke-WithMetric "apply_target_links" {
-            foreach ($t in $cfg.targets) {
+        foreach ($t in $cfg.targets) {
                 try {
                     $target = Resolve-TargetDir $t.path
                     if (-not $target) { continue }
@@ -11309,10 +10044,9 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, [string]$Ver
                     Write-Host ("❌ 同步目标失败 [{0}]: {1}" -f $t.path, $_.Exception.Message) -ForegroundColor Red
                     $failures.Add(("target:{0} => {1}" -f $t.path, $_.Exception.Message)) | Out-Null
                 }
-            }
-        } @{ command = "应用到ClaudeCodex"; target_count = @($cfg.targets).Count } -NoHost | Out-Null
+        }
         try {
-            $projectionResult = Sync-ConfiguredSkillProjection $cfg $VerifiedAgentBuildSignature $PromotionContext
+            $projectionResult = Sync-ConfiguredSkillProjection $cfg $PromotionContext
             if ($projectionResult -and -not [bool]$projectionResult.skipped) {
                 $plan = $projectionResult.plan
                 Log ("技能投影已生成：entries={0}, unique={1}, disabled={2}, conflicts={3}, persisted={4}" -f @($plan.skills).Count, @($plan.unique_names).Count, @($plan.disabled).Count, @($plan.conflicts).Count, [bool]$projectionResult.persisted)
@@ -11323,7 +10057,7 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, [string]$Ver
             $failures.Add(("skill-projection => {0}" -f $_.Exception.Message)) | Out-Null
         }
         return $failures.ToArray()
-    } @{ command = "应用到ClaudeCodex" } -NoHost)
+    })
 }
 function Write-FailureSummary([string]$title, [string[]]$failures, [string]$detailHint = "") {
     if ($null -eq $failures -or $failures.Count -eq 0) { return }
@@ -11344,9 +10078,8 @@ function 构建生效(
     [switch]$AllowUnverifiedProjection = $AllowUnverifiedHostProjection,
     [switch]$SkipHostProjection
 ) {
-    Invoke-WithMetric "build_apply_total" {
+    & {
         Preflight
-        Invoke-PrebuildCheck
         $cfg = LoadCfg
         if ($Locked) {
             Ensure-LockedState $cfg | Out-Null
@@ -11366,21 +10099,11 @@ function 构建生效(
 
         Write-BuildSummary $cfg
         Log "=== 启动构建生效流程 ==="
-        $agentBuildCacheHit = Invoke-WithMetric "build_agent_cache_check" {
-            Test-AgentBuildCacheHit $cfg
-        } @{ command = "构建Agent" } -NoHost
-        if (-not $agentBuildCacheHit.hit) {
-            $txn = Start-BuildTransaction
-        }
+        $txn = Start-BuildTransaction
         Start-DryRunMirrorCollect
         try {
             $failures = @()
-            if ($agentBuildCacheHit.hit) {
-                $buildFailures = Invoke-AgentBuildCacheHit $agentBuildCacheHit
-            }
-            else {
-                $buildFailures = 构建Agent $cfg -SkipPreflight -Txn $txn
-            }
+            $buildFailures = 构建Agent $cfg -SkipPreflight -Txn $txn
             if ($buildFailures) { $failures += $buildFailures }
             if ($buildFailures -and @($buildFailures).Count -gt 0) {
                 Log "检测到构建失败，已跳过同步阶段。" "WARN"
@@ -11390,12 +10113,6 @@ function 构建生效(
                 Log "已按显式请求跳过宿主目标与 native skill projection；仅保留 agent/ 构建产物。"
             }
             else {
-                $verifiedAgentBuildSignature = if ($agentBuildCacheHit.hit) {
-                    [string]$agentBuildCacheHit.state.signature
-                }
-                else {
-                    [string](Load-BuildCache)["__agent_build_signature"]
-                }
                 $promotionContext = $null
                 try {
                     $promotionContext = Get-HostProjectionPromotionContext $cfg -AllowUnverified:$AllowUnverifiedProjection
@@ -11407,7 +10124,7 @@ function 构建生效(
                     Write-Host "⚠️ agent/ staging 已保留，但未写入任何仓库外宿主目标。提交并验证当前 revision 后可重新执行构建生效。" -ForegroundColor Yellow
                 }
                 if (@($failures).Count -eq 0) {
-                    $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight -VerifiedAgentBuildSignature $verifiedAgentBuildSignature -PromotionContext $promotionContext
+                    $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight -PromotionContext $promotionContext
                     if ($syncFailures) { $failures += $syncFailures }
                 }
             }
@@ -11429,7 +10146,7 @@ function 构建生效(
         if (@($failures).Count -gt 0) {
             throw ("构建生效失败（{0} 项）：{1}" -f @($failures).Count, [string]@($failures)[0])
         }
-    } @{ command = "构建生效" } -NoHost
+    }
 }
 
 function 命令导入安装 {
@@ -11920,7 +10637,7 @@ function Show-UpdatePlan($cfg) {
 }
 
 function 更新Vendor($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $null, [switch]$SkipFetch) {
-    return (Invoke-WithMetric "update_vendor" {
+    return (& {
         if (-not $SkipPreflight) { Preflight }
         if ($null -eq $cfg) { $cfg = LoadCfg }
         $failures = New-Object System.Collections.Generic.List[string]
@@ -11977,11 +10694,11 @@ function 更新Vendor($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $n
         }
         Clear-SkillsCache
         return $failures.ToArray()
-    } @{ command = "更新Vendor" } -NoHost)
+    })
 }
 
 function 更新Imports($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $null, [switch]$SkipFetch) {
-    return (Invoke-WithMetric "update_imports" {
+    return (& {
         if (-not $SkipPreflight) { Preflight }
         if ($null -eq $cfg) { $cfg = LoadCfg }
         $cfgRaw = if (Test-Path $CfgPath) { Get-Content $CfgPath -Raw } else { "" }
@@ -12112,16 +10829,15 @@ function 更新Imports($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $
         }
         Clear-SkillsCache
         return $failures.ToArray()
-    } @{ command = "更新Imports" } -NoHost)
+    })
 }
 
 function 更新 {
-    Invoke-WithMetric "update_total" {
+    & {
         $cfg = LoadCfg
         if ($Locked -and ($Plan -or $Upgrade)) {
             throw "-Locked 不能与 -Plan 或 -Upgrade 同时使用。"
         }
-        Invoke-PrebuildCheck
         if ($Plan) {
             Preflight
             Show-UpdatePlan $cfg | Out-Null
@@ -12167,7 +10883,7 @@ function 更新 {
         else {
             Write-Host "更新完成。若某 CLI 未立即识别新技能，重启该 CLI 会话即可。"
         }
-    } @{ command = "更新" } -NoHost
+    }
 }
 
 function Parse-KeyValueToken([string]$token, [string]$flagName) {
@@ -14838,7 +13554,7 @@ function Invoke-McpManagedTargetTransaction([object[]]$DesiredState,[string]$Exp
 }
 
 function 同步MCP {
-    Invoke-WithMetric "sync_mcp" {
+    & {
         $script:SkipNativeMcpForSession = $false
         $context = Get-McpSyncPlanningContext
         if (-not $DryRun) {
@@ -14870,7 +13586,7 @@ function 同步MCP {
             throw
         }
         if (@($context.servers).Count -eq 0) { Write-Host "提示：当前 mcp_servers 为空，已将各目标写为空配置。" }
-    } @{ command = "同步MCP" } -NoHost
+    }
 }
 
 function Get-McpSyncManagedTargetSpecs {
@@ -18937,8 +17653,6 @@ function Test-AuditRemovalDependencyClosure {
         "skills.json",
         "config/skill-dependency-closure.json",
         "config/skill-routing-policy.json",
-        "config/override-skill-activation-corpus.json",
-        "config/capability-routing-golden.json",
         "overrides/patches/provenance.json"
     )
     $candidateIndex = 0
@@ -21164,7 +19878,7 @@ function Invoke-AuditRecommendationsApply {
             构建生效
         }
         if ($hasSkillChanges -or $hasMcpChanges) {
-            $doctorResult = Invoke-Doctor @("--strict", "--threshold-ms", "8000")
+            $doctorResult = Invoke-Doctor @("--strict")
             if ($doctorResult -and $doctorResult.PSObject.Properties.Match("pass").Count -gt 0 -and -not [bool]$doctorResult.pass) {
                 $report.success = $false
                 $report.items = @($plan.items)
@@ -22045,124 +20759,7 @@ function Get-SkillPackageContentHash([string]$skillDir) {
     return (Get-StringSha256 ($parts.ToArray() -join "`n"))
 }
 
-function Get-SkillProjectionPackageHashCacheSchemaVersion {
-    return 1
-}
-
-function Test-SkillProjectionSha256([string]$value) {
-    return (-not [string]::IsNullOrWhiteSpace($value) -and $value -match '^[0-9a-fA-F]{64}$')
-}
-
-function New-SkillProjectionPackageHashContext($projectionCfg, [string]$verifiedBuildSignature, [string]$manifestPath) {
-    $context = [pscustomobject]([ordered]@{
-        cache_schema = Get-SkillProjectionPackageHashCacheSchemaVersion
-        verified_build_signature = $verifiedBuildSignature
-        managed_root = ""
-        cache_valid = $false
-        cache_entries = @{}
-        cache_hits = 0
-        cache_misses = 0
-        full_hash_count = 0
-        fingerprint_ms = 0
-        full_hash_ms = 0
-    })
-    if ($null -eq $projectionCfg -or [string]::IsNullOrWhiteSpace($verifiedBuildSignature)) { return $context }
-    if ($projectionCfg.PSObject.Properties.Match("managed_source_path").Count -eq 0) { return $context }
-
-    $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
-    if ([string]::IsNullOrWhiteSpace($managedRoot) -or -not (Test-Path -LiteralPath $managedRoot -PathType Container)) { return $context }
-    $context.managed_root = $managedRoot
-    if ([string]::IsNullOrWhiteSpace($manifestPath) -or -not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return $context }
-
-    try {
-        $manifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
-        if ($null -eq $manifest) { return $context }
-        if ($manifest.PSObject.Properties.Match("package_hash_cache_schema").Count -eq 0 -or [int]$manifest.package_hash_cache_schema -ne $context.cache_schema) { return $context }
-        if ($manifest.PSObject.Properties.Match("agent_build_signature").Count -eq 0 -or [string]$manifest.agent_build_signature -ne $verifiedBuildSignature) { return $context }
-
-        $entries = @{}
-        foreach ($entry in @($manifest.skills)) {
-            if ($null -eq $entry) { continue }
-            $skillDir = [string]$entry.skill_dir
-            $packageHash = [string]$entry.package_hash
-            $packageFingerprint = [string]$entry.package_fingerprint
-            $contentHash = [string]$entry.content_hash
-            if ([string]::IsNullOrWhiteSpace($skillDir) -or [string]::IsNullOrWhiteSpace($packageHash) -or [string]::IsNullOrWhiteSpace($packageFingerprint) -or [string]::IsNullOrWhiteSpace($contentHash)) { continue }
-            if (-not (Test-SkillProjectionSha256 $packageHash) -or -not (Test-SkillProjectionSha256 $packageFingerprint) -or -not (Test-SkillProjectionSha256 $contentHash)) { continue }
-            $key = [System.IO.Path]::GetFullPath($skillDir).ToLowerInvariant()
-            $entries[$key] = [pscustomobject]@{
-                package_hash = $packageHash
-                package_fingerprint = $packageFingerprint
-                content_hash = $contentHash
-            }
-        }
-        $context.cache_entries = $entries
-        $context.cache_valid = $true
-    }
-    catch {
-        Log ("技能投影哈希缓存读取失败，已回退完整计算：{0}" -f $_.Exception.Message) "WARN"
-    }
-    return $context
-}
-
-function Get-SkillProjectionPackageHash([string]$skillDir, [string]$contentHash, $packageHashContext) {
-    $fullSkillDir = [System.IO.Path]::GetFullPath($skillDir)
-    $cacheKey = $fullSkillDir.ToLowerInvariant()
-    $managedTarget = ""
-    $packageFingerprint = ""
-    $isManaged = $false
-
-    if ($null -ne $packageHashContext -and -not [string]::IsNullOrWhiteSpace([string]$packageHashContext.managed_root) -and (Is-ReparsePoint $fullSkillDir)) {
-        $target = Get-ReparsePointTargetFullPath $fullSkillDir
-        if (-not [string]::IsNullOrWhiteSpace($target) -and (Is-PathInsideOrEqual $target ([string]$packageHashContext.managed_root))) {
-            $managedTarget = [System.IO.Path]::GetFullPath($target)
-            $isManaged = $true
-            $fingerprintTimer = [System.Diagnostics.Stopwatch]::StartNew()
-            try { $packageFingerprint = Get-DirectoryFingerprint $managedTarget }
-            finally {
-                $fingerprintTimer.Stop()
-                $packageHashContext.fingerprint_ms += [int]$fingerprintTimer.ElapsedMilliseconds
-            }
-        }
-    }
-
-    if ($isManaged -and [bool]$packageHashContext.cache_valid -and $packageHashContext.cache_entries.ContainsKey($cacheKey)) {
-        $cached = $packageHashContext.cache_entries[$cacheKey]
-        if ([string]$cached.package_fingerprint -eq $packageFingerprint -and [string]$cached.content_hash -eq $contentHash) {
-            $packageHashContext.cache_hits++
-            return [pscustomobject]@{
-                package_hash = [string]$cached.package_hash
-                package_fingerprint = $packageFingerprint
-                cache_hit = $true
-            }
-        }
-    }
-
-    if ($isManaged) { $packageHashContext.cache_misses++ }
-    $hashTimer = [System.Diagnostics.Stopwatch]::StartNew()
-    try { $packageHash = Get-SkillPackageContentHash $fullSkillDir }
-    finally {
-        $hashTimer.Stop()
-        if ($null -ne $packageHashContext) {
-            $packageHashContext.full_hash_count++
-            $packageHashContext.full_hash_ms += [int]$hashTimer.ElapsedMilliseconds
-        }
-    }
-    return [pscustomobject]@{
-        package_hash = [string]$packageHash
-        package_fingerprint = $packageFingerprint
-        cache_hit = $false
-    }
-}
-
-function Test-SkillProjectionManagedCacheHotPath($packageHashContext) {
-    if ($null -eq $packageHashContext) { return $false }
-    return ([bool]$packageHashContext.cache_valid -and
-        [int]$packageHashContext.cache_hits -gt 0 -and
-        [int]$packageHashContext.cache_misses -eq 0)
-}
-
-function Get-SkillProjectionSourceEntries($source, [int]$sourceOrder, $packageHashContext = $null) {
+function Get-SkillProjectionSourceEntries($source, [int]$sourceOrder) {
     $id = [string]$source.id
     $rootPath = Resolve-SkillProjectionPath ([string]$source.path)
     $priority = if ($source.PSObject.Properties.Match("priority").Count -gt 0) { [int]$source.priority } else { 0 }
@@ -22178,7 +20775,7 @@ function Get-SkillProjectionSourceEntries($source, [int]$sourceOrder, $packageHa
         $effectivePriority = $priority
         if ([bool]$item.is_system) { $effectivePriority += 100000 }
         $contentHash = [string](Get-FileContentHash ([string]$item.file))
-        $packageHashResult = Get-SkillProjectionPackageHash ([string]$item.dir) $contentHash $packageHashContext
+        $packageHash = Get-SkillPackageContentHash ([string]$item.dir)
         $entries.Add([pscustomobject]([ordered]@{
                     name = $declaredName
                     description = [string]$meta.description
@@ -22190,8 +20787,7 @@ function Get-SkillProjectionSourceEntries($source, [int]$sourceOrder, $packageHa
                     path = [System.IO.Path]::GetFullPath([string]$item.file)
                     skill_dir = [System.IO.Path]::GetFullPath([string]$item.dir)
                     content_hash = $contentHash
-                    package_hash = [string]$packageHashResult.package_hash
-                    package_fingerprint = [string]$packageHashResult.package_fingerprint
+                    package_hash = [string]$packageHash
                     target_platforms = @($platforms)
                 })) | Out-Null
     }
@@ -22397,7 +20993,7 @@ function Sync-CodexManagedSkillLinks {
     }
 }
 
-function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
+function New-SkillProjectionPlan($projectionCfg) {
     Need ($null -ne $projectionCfg) "skill_projection 配置为空"
     $enabled = -not ($projectionCfg.PSObject.Properties.Match("enabled").Count -gt 0) -or [bool]$projectionCfg.enabled
     if (-not $enabled) {
@@ -22411,7 +21007,7 @@ function New-SkillProjectionPlan($projectionCfg, $packageHashContext = $null) {
         Need ($null -ne $source) "skill_projection.sources 不能包含空值"
         Need (-not [string]::IsNullOrWhiteSpace([string]$source.id)) "skill_projection source 缺少 id"
         Need (-not [string]::IsNullOrWhiteSpace([string]$source.path)) ("skill_projection source 缺少 path：{0}" -f [string]$source.id)
-        foreach ($entry in @(Get-SkillProjectionSourceEntries $source $sourceOrder $packageHashContext)) {
+        foreach ($entry in @(Get-SkillProjectionSourceEntries $source $sourceOrder)) {
             $all.Add($entry) | Out-Null
         }
         $sourceOrder++
@@ -22663,25 +21259,6 @@ function Invoke-HostProjectionGitText([string]$repositoryPath, [string[]]$gitArg
     return $text
 }
 
-function Get-CurrentFullQualityGatePromotionReceipt([string]$repositoryPath) {
-    $verifierPath = Join-Path $repositoryPath 'scripts\quality\verify-current-quality-gate.ps1'
-    Need (Test-Path -LiteralPath $verifierPath -PathType Leaf) '正式宿主投影缺少 exact-current full gate verifier'
-    $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $verifierPath -RepoRoot $repositoryPath -RequiredProfile full -RequiredStatus passed -Json 2>&1)
-    $exitCode = $LASTEXITCODE
-    $text = ($output | ForEach-Object { [string]$_ }) -join "`n"
-    $result = $null
-    try { $result = $text | ConvertFrom-Json }
-    catch { throw ("正式宿主投影无法解析 exact-current full gate verifier 输出：{0}" -f $_.Exception.Message) }
-    Need ($exitCode -eq 0 -and $null -ne $result -and [bool]$result.pass) '正式宿主投影要求 exact-current full/passed quality gate receipt'
-    Need ([string]$result.pointer.profile -eq 'full' -and [string]$result.pointer.status -eq 'passed') '正式宿主投影的 quality gate pointer 不是 full/passed'
-    Need (-not [string]::IsNullOrWhiteSpace([string]$result.pointer.receipt_path)) '正式宿主投影的 quality gate receipt path 为空'
-    return [pscustomobject]@{
-        status = 'passed'
-        path = [string]$result.pointer.receipt_path
-        source_revision = [string]$result.receipt.source_end.head
-    }
-}
-
 function Get-HostProjectionPromotionContext($cfg, [switch]$AllowUnverified) {
     $requiresPromotion = Test-ConfiguredHostProjection $cfg
     if (-not $requiresPromotion) {
@@ -22691,8 +21268,6 @@ function Get-HostProjectionPromotionContext($cfg, [switch]$AllowUnverified) {
                 source_worktree_dirty = $false
                 source_git_state = "not_checked_local_only"
                 promotion_mode = "local_only"
-                gate_receipt_status = "not_provided"
-                gate_receipt_path = ""
             })
     }
 
@@ -22719,24 +21294,12 @@ function Get-HostProjectionPromotionContext($cfg, [switch]$AllowUnverified) {
         throw "正式宿主投影要求 clean Git commit；当前工作树存在未提交或未跟踪改动。请先完成门禁并提交，或仅在明确接受风险时使用 -AllowUnverifiedHostProjection。"
     }
 
-    $gateReceipt = if ($AllowUnverified) {
-        [pscustomobject]@{ status = 'unverified_override'; path = ''; source_revision = '' }
-    }
-    else {
-        Get-CurrentFullQualityGatePromotionReceipt $Root
-    }
-    if (-not $AllowUnverified) {
-        Need ([string]::Equals([string]$gateReceipt.source_revision, $sourceRevision, [StringComparison]::OrdinalIgnoreCase)) '正式宿主投影的 full gate receipt 未绑定当前 source revision'
-    }
-
     return [pscustomobject]([ordered]@{
             required = $true
             source_revision = $sourceRevision
             source_worktree_dirty = [bool]$sourceDirty
             source_git_state = $gitState
             promotion_mode = if ($sourceDirty -or $gitState -ne "clean") { "unverified_override" } else { "verified_clean_commit" }
-            gate_receipt_status = [string]$gateReceipt.status
-            gate_receipt_path = [string]$gateReceipt.path
         })
 }
 
@@ -22768,8 +21331,6 @@ function Get-SkillProjectionPromotionRecord([string]$manifestPath, $promotionCon
             promotion_mode = [string]$promotionContext.promotion_mode
             promoted_at = (Get-Date).ToString("o")
             provenance_status = "current"
-            gate_receipt_status = [string]$promotionContext.gate_receipt_status
-            gate_receipt_path = [string]$promotionContext.gate_receipt_path
         }
     }
 
@@ -22786,11 +21347,8 @@ function Get-SkillProjectionPromotionRecord([string]$manifestPath, $promotionCon
                         promotion_mode = "stale"
                         promoted_at = ""
                         provenance_status = "stale"
-                        gate_receipt_status = "stale"
-                        gate_receipt_path = ""
                     }
                 }
-                $existingGateReceipt = if ($existingManifest.PSObject.Properties.Match("gate_receipt").Count -gt 0) { $existingManifest.gate_receipt } else { $null }
                 return [pscustomobject]@{
                     source_revision = [string]$existingManifest.source_revision
                     source_worktree_dirty = [bool]$existingManifest.source_worktree_dirty
@@ -22798,8 +21356,6 @@ function Get-SkillProjectionPromotionRecord([string]$manifestPath, $promotionCon
                     promotion_mode = [string]$existingManifest.promotion_mode
                     promoted_at = [string]$existingManifest.promoted_at
                     provenance_status = "current"
-                    gate_receipt_status = if ($null -ne $existingGateReceipt) { [string]$existingGateReceipt.status } else { "not_provided" }
-                    gate_receipt_path = if ($null -ne $existingGateReceipt) { [string]$existingGateReceipt.path } else { "" }
                 }
             }
         }
@@ -22815,8 +21371,6 @@ function Get-SkillProjectionPromotionRecord([string]$manifestPath, $promotionCon
         promotion_mode = "not_evaluated"
         promoted_at = ""
         provenance_status = "not_evaluated"
-        gate_receipt_status = "not_provided"
-        gate_receipt_path = ""
     }
 }
 
@@ -22969,12 +21523,12 @@ function New-CodexSkillProjectionTransaction($projectionCfg, [string]$ConfigPath
     }
 }
 
-function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBuildSignature = "", $promotionContext = $null, $transaction = $null) {
+function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext = $null, $transaction = $null) {
     $configRaw = if ($projectionCfg.PSObject.Properties.Match("codex_config_path").Count -gt 0) { [string]$projectionCfg.codex_config_path } else { "~/.codex/config.toml" }
     $manifestRaw = if ($projectionCfg.PSObject.Properties.Match("manifest_path").Count -gt 0) { [string]$projectionCfg.manifest_path } else { "reports/skill-projection/current.json" }
     $configPath = Resolve-SkillProjectionPath $configRaw
     $manifestPath = Resolve-SkillProjectionPath $manifestRaw
-    $catalogProjection = Invoke-WithMetric 'projection_capability_catalog' { Sync-CapabilityRouterCatalog $projectionCfg } @{ command = '技能投影' } -NoHost
+    $catalogProjection = Sync-CapabilityRouterCatalog $projectionCfg
     $nativeProjectionPlan = $null
     $nativeProjectionApply = $null
     $nativeProjectionAuthoritative = $false
@@ -22984,7 +21538,9 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBu
         $includedNames = @((Get-CfgObjectProperty $projectionCfg 'managed_link_includes') | ForEach-Object { [string]$_ })
         $excludedNames = @((Get-CfgObjectProperty $projectionCfg 'managed_link_excludes') | ForEach-Object { [string]$_ })
         $capturedAt = [DateTimeOffset]::UtcNow.ToString('o')
-        $snapshot = New-HostCapabilitySnapshotFromConfigFallback -ConfigPath $configPath -Surface 'cli' -CapturedAt $capturedAt
+        # The repository cannot prove live host capabilities. Use the planner's
+        # conservative fallback instead of maintaining a synthetic host snapshot.
+        $snapshot = [pscustomobject]@{ capabilities = [pscustomobject]@{} }
         $policyPath = Join-Path $Root 'config\native-skill-metadata-policy.json'
         $policy = if (Test-Path -LiteralPath $policyPath -PathType Leaf) { Get-ContentUtf8 $policyPath | ConvertFrom-Json } else { Get-DefaultNativeMetadataPolicy }
         $nativeProjectionPlan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $managedRoot -Config ([pscustomobject]@{ skill_projection = $projectionCfg }) -Snapshot $snapshot -Policy $policy -IncludedNames $includedNames -ExcludedNames $excludedNames -GeneratedAt $capturedAt
@@ -22994,35 +21550,14 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBu
             $nativeProjectionApply = [pscustomobject]@{ status = 'planned'; receipt_id = ''; receipt_path = [string]$nativeProjectionPlan.receipt_path; changed_names = @(); receipt = $null }
         }
         else {
-            $nativeProjectionApply = Invoke-WithMetric 'native_projection_apply' {
-                Apply-NativeSkillProjection -Plan $nativeProjectionPlan -ApplyToken ([string]$nativeProjectionPlan.apply_token)
-            } @{ command = '技能投影'; enabled_total = [int]$nativeProjectionPlan.enabled_total } -NoHost
+            $nativeProjectionApply = Apply-NativeSkillProjection -Plan $nativeProjectionPlan -ApplyToken ([string]$nativeProjectionPlan.apply_token)
         }
     }
     $linkProjection = $null
     if ($projectionCfg.PSObject.Properties.Match("managed_source_path").Count -gt 0 -or $projectionCfg.PSObject.Properties.Match("user_skill_root").Count -gt 0) {
-        $linkProjection = Invoke-WithMetric "projection_link_reconcile" { Sync-CodexManagedSkillLinks $projectionCfg } @{ command = "技能投影" } -NoHost
+        $linkProjection = Sync-CodexManagedSkillLinks $projectionCfg
     }
-    $packageHashContext = New-SkillProjectionPackageHashContext $projectionCfg $verifiedBuildSignature $manifestPath
-    $planTimer = [System.Diagnostics.Stopwatch]::StartNew()
-    try { $plan = New-SkillProjectionPlan $projectionCfg $packageHashContext }
-    finally { $planTimer.Stop() }
-    $managedCacheHotPath = Test-SkillProjectionManagedCacheHotPath $packageHashContext
-    $hashMetric = if ($managedCacheHotPath) { "projection_package_hash_cache_hit" } else { "projection_package_hash_full" }
-    Log ("性能埋点：{0}" -f $hashMetric) "INFO" -NoHost -Data ([ordered]@{
-            metric = $hashMetric
-            duration_ms = [int]($packageHashContext.fingerprint_ms + $packageHashContext.full_hash_ms)
-            success = $true
-            cache_hits = [int]$packageHashContext.cache_hits
-            cache_misses = [int]$packageHashContext.cache_misses
-            full_hash_count = [int]$packageHashContext.full_hash_count
-        })
-    $planMetric = if ($managedCacheHotPath) { "projection_plan_cached" } else { "projection_plan_full" }
-    Log ("性能埋点：{0}" -f $planMetric) "INFO" -NoHost -Data ([ordered]@{
-            metric = $planMetric
-            duration_ms = [int]$planTimer.ElapsedMilliseconds
-            success = $true
-        })
+    $plan = New-SkillProjectionPlan $projectionCfg
     if ([bool]$plan.enabled) {
         if (-not $nativeProjectionAuthoritative) {
             Need ([bool]$plan.budget_pass) ("技能描述预算超限：estimated={0}, limit={1}" -f [int]$plan.estimated_metadata_chars, [int]$plan.effective_budget_limit_chars)
@@ -23033,12 +21568,12 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBu
     }
 
     $existing = if (Test-Path -LiteralPath $configPath -PathType Leaf) { Get-ContentUtf8 $configPath } else { "" }
-    $desired = Invoke-WithMetric "projection_render" { Build-CodexSkillsProjectionToml $existing @($plan.disabled) } @{ command = "技能投影" } -NoHost
+    $desired = Build-CodexSkillsProjectionToml $existing @($plan.disabled)
     $changed = -not [string]::Equals($existing, $desired, [System.StringComparison]::Ordinal)
     $backupPath = $null
 
     if (-not $DryRun) {
-        $writeResult = Invoke-WithMetric "projection_write" {
+        $writeResult = & {
             $writtenBackupPath = $null
             if ($changed) {
                 $writtenBackupPath = Backup-CodexSkillProjectionConfig $configPath
@@ -23049,8 +21584,6 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBu
             $promotion = Get-SkillProjectionPromotionRecord $manifestPath $promotionContext $projectionFingerprint
             $manifest = [ordered]@{
                 schema_version = 2
-                package_hash_cache_schema = Get-SkillProjectionPackageHashCacheSchemaVersion
-                agent_build_signature = $verifiedBuildSignature
                 projection_fingerprint = $projectionFingerprint
                 source_revision = [string]$promotion.source_revision
                 source_worktree_dirty = [bool]$promotion.source_worktree_dirty
@@ -23058,10 +21591,6 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBu
                 promotion_mode = [string]$promotion.promotion_mode
                 promoted_at = [string]$promotion.promoted_at
                 provenance_status = [string]$promotion.provenance_status
-                gate_receipt = [ordered]@{
-                    status = [string]$promotion.gate_receipt_status
-                    path = [string]$promotion.gate_receipt_path
-                }
                 enabled = [bool]$plan.enabled
                 generated_at = (Get-Date).ToString("o")
                 conflict_policy = [string]$plan.conflict_policy
@@ -23111,7 +21640,7 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBu
             }
             Set-ContentUtf8 $manifestPath ($manifest | ConvertTo-Json -Depth 20)
             return [pscustomobject]@{ backup_path = if ($null -eq $writtenBackupPath) { "" } else { [string]$writtenBackupPath } }
-        } @{ command = "技能投影"; changed = $changed } -NoHost
+        }
         $backupPath = [string]$writeResult.backup_path
     }
 
@@ -23125,26 +21654,18 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, [string]$verifiedBu
         managed_link_projection = $linkProjection
         capability_catalog_projection = $catalogProjection
         native_projection = if (-not $nativeProjectionAuthoritative) { $null } else { [pscustomobject]@{ plan = $nativeProjectionPlan; apply = $nativeProjectionApply } }
-        package_hash_cache = [pscustomobject]@{
-            cache_valid = [bool]$packageHashContext.cache_valid
-            cache_hits = [int]$packageHashContext.cache_hits
-            cache_misses = [int]$packageHashContext.cache_misses
-            full_hash_count = [int]$packageHashContext.full_hash_count
-            fingerprint_ms = [int]$packageHashContext.fingerprint_ms
-            full_hash_ms = [int]$packageHashContext.full_hash_ms
-        }
         plan = $plan
     }
 }
 
-function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignature = "", $promotionContext = $null) {
-    if ($DryRun) { return Invoke-CodexSkillProjectionSyncCore $projectionCfg $verifiedBuildSignature $promotionContext }
+function Sync-CodexSkillProjection($projectionCfg, $promotionContext = $null) {
+    if ($DryRun) { return Invoke-CodexSkillProjectionSyncCore $projectionCfg $promotionContext }
 
     $configRaw = if ($projectionCfg.PSObject.Properties.Match('codex_config_path').Count -gt 0) { [string]$projectionCfg.codex_config_path } else { '~/.codex/config.toml' }
     $manifestRaw = if ($projectionCfg.PSObject.Properties.Match('manifest_path').Count -gt 0) { [string]$projectionCfg.manifest_path } else { 'reports/skill-projection/current.json' }
     $transaction = New-CodexSkillProjectionTransaction $projectionCfg (Resolve-SkillProjectionPath $configRaw) (Resolve-SkillProjectionPath $manifestRaw)
     try {
-        $result = Invoke-CodexSkillProjectionSyncCore $projectionCfg $verifiedBuildSignature $promotionContext $transaction
+        $result = Invoke-CodexSkillProjectionSyncCore $projectionCfg $promotionContext $transaction
         $result | Add-Member -NotePropertyName transaction_status -NotePropertyValue 'committed' -Force
         return $result
     }
@@ -23170,20 +21691,20 @@ function Sync-CodexSkillProjection($projectionCfg, [string]$verifiedBuildSignatu
     }
 }
 
-function Sync-ConfiguredSkillProjection($cfg, [string]$verifiedBuildSignature = "", $promotionContext = $null) {
+function Sync-ConfiguredSkillProjection($cfg, $promotionContext = $null) {
     if ($null -eq $cfg -or $cfg.PSObject.Properties.Match("skill_projection").Count -eq 0 -or $null -eq $cfg.skill_projection) {
         return [pscustomobject]@{ success = $true; persisted = $false; skipped = $true; plan = $null }
     }
-    return (Sync-CodexSkillProjection $cfg.skill_projection $verifiedBuildSignature $promotionContext)
+    return (Sync-CodexSkillProjection $cfg.skill_projection $promotionContext)
 }
 
 function Get-WorkflowCatalog {
     $doctorStrictStep = [pscustomobject]@{
         id = "doctor_strict"
         title = "严格健康检查（doctor --strict）"
-        command = "doctor --strict --threshold-ms 8000"
+        command = "doctor --strict"
         action = {
-            $report = Invoke-Doctor @("--strict", "--threshold-ms", "8000")
+            $report = Invoke-Doctor @("--strict")
             if ($report -and $report.PSObject.Properties.Match("pass").Count -gt 0 -and -not [bool]$report.pass) {
                 throw "doctor --strict failed"
             }
@@ -23500,7 +22021,7 @@ function Invoke-Workflow([string[]]$tokens = @()) {
         }
     }
 
-    return (Invoke-WithMetric "workflow_run" {
+    return (& {
         $results = New-Object System.Collections.Generic.List[object]
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         $index = 0
@@ -23535,7 +22056,7 @@ function Invoke-Workflow([string[]]$tokens = @()) {
             results = @($resultArray)
             total_ms = [int]$sw.ElapsedMilliseconds
         }
-    } @{ command = "一键工作流"; profile = [string]$workflow.key } -NoHost)
+    })
 }
 
 function 打开配置 {
@@ -23949,7 +22470,6 @@ MCP：
 技能投影：
   .\skills.ps1 构建生效
   .\skills.ps1 capability-inventory --view skill-surfaces [--host-snapshot <snapshot.json>] --json
-  .\scripts\verify-native-skill-metadata.ps1 -Json
 
 目标仓审查：
   .\skills.ps1 审查目标 需求设置
@@ -23972,7 +22492,7 @@ MCP：
   .\skills.ps1 解除关联
   .\skills.ps1 清理备份
   .\skills.ps1 自动更新设置
-  .\skills.ps1 doctor [--json] [--offline-contract] [--fix] [--dry-run-fix] [--strict] [--strict-perf] [--threshold-ms <ms>]
+  .\skills.ps1 doctor [--json] [--offline-contract] [--fix] [--dry-run-fix] [--strict]
   pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-skill-integrity.ps1 [-ReportPath <file>]
 
 通用参数：

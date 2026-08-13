@@ -40,4 +40,4 @@ Non-empty flat directories such as `overrides/<leaf>/` remain readable during th
 - Validate every changed `SKILL.md` with the repository's skill-creator-compatible validation and keep `agents/openai.yaml` aligned when present.
 - Record every `patches/<leaf>` source, fixed revisions, license, and local delta in `patches/provenance.json`.
 - Keep a named repository consumer for every `resources/<leaf>` bridge; a resource bridge without a consumer is a deletion candidate.
-- Run `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-override-skill-activation.ps1` for the maintained non-watch activation corpus and `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-skill-integrity.ps1` for the projected estate. The corpus is a deterministic expectation check, not live host-selection acceptance.
+- Run `pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/verify-skill-integrity.ps1` for the projected estate.

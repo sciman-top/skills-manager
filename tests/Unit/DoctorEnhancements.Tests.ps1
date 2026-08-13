@@ -2,11 +2,10 @@
 
 Describe "Doctor Enhancements" {
     Context "Parse-DoctorArgs" {
-        It "Parses json/fix/threshold options" {
-            $opts = Parse-DoctorArgs @("--json", "--fix", "--threshold-ms", "1200")
+        It "Parses json/fix options" {
+            $opts = Parse-DoctorArgs @("--json", "--fix")
             $opts.json | Should Be $true
             $opts.fix | Should Be $true
-            $opts.threshold_ms | Should Be 1200
         }
 
         It "Parses strict and dry-run-fix options" {
@@ -119,57 +118,4 @@ Describe "Doctor Enhancements" {
         }
     }
 
-    Context "Get-PerfAnomalyItems" {
-        It "Returns anomaly items when last or avg exceeds threshold" {
-            $summary = @(
-                [pscustomobject]@{ metric = "custom_metric"; last_ms = 1200; avg_ms = 900; samples = 3 },
-                [pscustomobject]@{ metric = "sync_mcp"; last_ms = 200; avg_ms = 150; samples = 3 }
-            )
-            $items = Get-PerfAnomalyItems $summary 1000
-            $items.Count | Should Be 1
-            $items[0] | Should Match "custom_metric"
-        }
-
-        It "Does not flag values exactly equal to the threshold" {
-            $summary = @(
-                [pscustomobject]@{ metric = "custom_metric"; last_ms = 1000; avg_ms = 1000; samples = 3 }
-            )
-
-            $items = Get-PerfAnomalyItems $summary 1000
-
-            $items.Count | Should Be 0
-        }
-
-        It "Uses metric-specific thresholds for build metrics" {
-            $summary = @(
-                [pscustomobject]@{ metric = "build_agent"; last_ms = 6500; avg_ms = 6200; samples = 3 },
-                [pscustomobject]@{ metric = "build_agent_cache_check"; last_ms = 9000; avg_ms = 8500; samples = 3 },
-                [pscustomobject]@{ metric = "build_apply_total"; last_ms = 18000; avg_ms = 17500; samples = 3 }
-            )
-
-            $items = Get-PerfAnomalyItems $summary 5000
-
-            $items.Count | Should Be 0
-        }
-
-        It "Flags update metrics when their metric-specific thresholds are exceeded" {
-            $summary = @(
-                [pscustomobject]@{ metric = "update_imports"; last_ms = 120000; avg_ms = 100000; samples = 3 },
-                [pscustomobject]@{ metric = "update_total"; last_ms = 600000; avg_ms = 450000; samples = 3 }
-            )
-
-            $items = Get-PerfAnomalyItems $summary 5000
-
-            $items.Count | Should Be 1
-            $items[0] | Should Match "update_total"
-        }
-
-        It "Ignores high latency when samples are insufficient" {
-            $summary = @(
-                [pscustomobject]@{ metric = "update_imports"; last_ms = 82000; avg_ms = 82000; samples = 1 }
-            )
-            $items = Get-PerfAnomalyItems $summary 1000
-            $items.Count | Should Be 0
-        }
-    }
 }

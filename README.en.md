@@ -12,7 +12,7 @@ PowerShell 7 (`pwsh`) and Git are required. Windows PowerShell 5.1 is unsupporte
 pwsh -NoProfile -File .\skills.ps1 help
 pwsh -NoProfile -File .\skills.ps1 发现
 pwsh -NoProfile -File .\skills.ps1 安装
-pwsh -NoProfile -File .\skills.ps1 doctor --strict --threshold-ms 8000
+pwsh -NoProfile -File .\skills.ps1 doctor --strict
 ```
 
 The interactive menu uses direct frequent actions plus domain submenus.
@@ -74,8 +74,6 @@ Host-native metadata is the normal selection surface. `capability-router` is an 
 
 ```powershell
 .\skills.ps1 capability-inventory --view skill-surfaces --json
-pwsh -NoProfile -File .\scripts\verify-capability-routing.ps1 -Json
-pwsh -NoProfile -File .\scripts\verify-native-skill-metadata.ps1 -Json
 ```
 
 ## Reference shelf
@@ -94,7 +92,6 @@ Candidates without a current consumer are rediscovered when needed instead of be
 
 ```powershell
 pwsh -NoProfile -File .\build.ps1
-pwsh -NoProfile -File .\tests\check-generated-sync.ps1 -AllowDirtyWorktree
 pwsh -NoProfile -File .\scripts\verify-skill-integrity.ps1
 pwsh -NoProfile -File .\scripts\verify-skills-config.ps1 -Mode enforce
 git diff --check
@@ -103,9 +100,7 @@ git diff --check
 Use affected tests for ordinary changes. Runtime, security, data, migration, public-contract, dependency, or packaging changes justify one full gate:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full -ReuseCurrentReceipt
-# If no exact-current receipt exists and a fresh full run is required:
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full -ForceFresh -AllowDirtyWorktree
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree
 ```
 
 See [docs/product/README.md](docs/product/README.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [docs/runbooks/powershell-runtime-compatibility.md](docs/runbooks/powershell-runtime-compatibility.md).

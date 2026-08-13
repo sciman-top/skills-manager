@@ -28,7 +28,7 @@
 - canonical skill inventory、metadata planning、native projection
 - explicit `capability-router` cold discovery/policy validation
 - core/secondary reference shelf refresh
-- build、focused tests、contract verifier、full quality gate
+- build、focused tests、contract/invariant checks、risk-triggered full gate
 
 ### 不包含
 
@@ -66,10 +66,10 @@
 
 ### 5.3 目标仓审查
 
-- `FR-AUD-001`：扫描同时读取用户需求、目标仓事实、已安装 skills/MCP 与外部宿主能力快照。
+- `FR-AUD-001`：扫描同时读取用户需求、目标仓事实与已安装 skills/MCP；宿主状态不在仓库内猜测。
 - `FR-AUD-002`：bundle 位于 `reports/skill-audit/<run-id>/`，包含 machine-readable recommendations 模板与 prompt。
 - `FR-AUD-003`：recommendations 必须经过 schema/source/staleness/preflight/dry-run；只有 `--apply --yes` 写入。
-- `FR-AUD-004`：应用使用 exact-current snapshot、选择清单、补偿和 runtime receipt；失败 truthful。
+- `FR-AUD-004`：应用重新读取当前配置并校验输入快照、选择清单和补偿；失败 truthful。
 - `FR-AUD-005`：runtime evidence 与 recommendations 同目录，不写 tracked docs。
 
 ### 5.4 规则治理
@@ -101,7 +101,7 @@
 - local-first；除显式 source refresh、MCP 或 live probe 外不依赖网络。
 - secret-redaction-first；日志和 receipt 不写 token、header value 或环境 secret。
 - 所有写路径有 containment、freshness、授权、rollback 或 compensation。
-- generated sync、dependency、schema、reference、runtime policy 任一失败即阻断。
+- generated sync、config、reference 或公开契约任一失败即阻断；其他检查按当前风险触发。
 - 不新增只有一个 adapter 的 seam；不为历史兼容保留无 caller interface。
 
 ## 7. 验收
@@ -111,7 +111,7 @@ Repository closeout 至少满足：
 1. `build.ps1` 成功且生成物同步。
 2. 受影响 Pester/verifier 通过。
 3. `git diff --check` 通过。
-4. 若触发 runtime/安全/数据/迁移/公开契约/依赖/打包风险，一次 exact-current full gate 通过。
+4. 若触发 runtime/安全/数据/迁移/公开契约/依赖/打包风险，在输入冻结后运行一次 full gate。
 5. 报告删除量、保留主链和未验证边界。
 
 `host_loaded` 需要新宿主会话/投影事实；`live_accepted` 需要真实用户工作流。二者不属于 repository tests 的自动结论。

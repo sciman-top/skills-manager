@@ -120,7 +120,6 @@ description: demo skill
             }
 
             Mock Preflight {}
-            Mock Invoke-PrebuildCheck {}
             Mock LoadCfg { $cfg }
             Mock Start-BuildTransaction { [pscustomobject]@{ path = (Join-Path $root ".txn\build-test"); has_backup_agent = $false } }
             Mock Optimize-Imports {}

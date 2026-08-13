@@ -12,7 +12,7 @@ Windows-first、local-first 的 PowerShell 7 技能与 MCP 管理器。它把多
 pwsh -NoProfile -File .\skills.ps1 help
 pwsh -NoProfile -File .\skills.ps1 发现
 pwsh -NoProfile -File .\skills.ps1 安装
-pwsh -NoProfile -File .\skills.ps1 doctor --strict --threshold-ms 8000
+pwsh -NoProfile -File .\skills.ps1 doctor --strict
 ```
 
 交互菜单按“高频动作直达 + 领域子菜单”组织：
@@ -102,8 +102,6 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict --threshold-ms 8000
 
 ```powershell
 .\skills.ps1 capability-inventory --view skill-surfaces --json
-pwsh -NoProfile -File .\scripts\verify-capability-routing.ps1 -Json
-pwsh -NoProfile -File .\scripts\verify-native-skill-metadata.ps1 -Json
 ```
 
 ## 外置参考仓
@@ -122,7 +120,6 @@ pwsh -NoProfile -File .\scripts\verify-native-skill-metadata.ps1 -Json
 
 ```powershell
 pwsh -NoProfile -File .\build.ps1
-pwsh -NoProfile -File .\tests\check-generated-sync.ps1 -AllowDirtyWorktree
 pwsh -NoProfile -File .\scripts\verify-skill-integrity.ps1
 pwsh -NoProfile -File .\scripts\verify-skills-config.ps1 -Mode enforce
 git diff --check
@@ -131,9 +128,7 @@ git diff --check
 按风险选择 closeout：普通切片跑受影响测试；runtime、安全、数据、迁移、公开契约、依赖或打包变更才跑一次 full gate。
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full -ReuseCurrentReceipt
-# exact-current receipt 不存在且确需新 full 时：
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full -ForceFresh -AllowDirtyWorktree
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree
 ```
 
 产品边界见 [docs/product/README.md](docs/product/README.md)，贡献规则见 [CONTRIBUTING.md](CONTRIBUTING.md)，PowerShell 支持边界见 [docs/runbooks/powershell-runtime-compatibility.md](docs/runbooks/powershell-runtime-compatibility.md)。

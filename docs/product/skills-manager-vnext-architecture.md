@@ -93,7 +93,7 @@ Tracked docs 只写稳定合同，不保存动态 task count、阶段状态或�
 所有写路径至少包含：
 
 1. exact authorized root/path containment
-2. before hash 或 source fingerprint
+2. before hash for each mutable target
 3. explicit token/flag（中高风险）
 4. atomic replace 或逐 action receipt
 5. rollback/compensation
@@ -107,10 +107,10 @@ Tracked docs 只写稳定合同，不保存动态 task count、阶段状态或�
 
 - build：生成 bundle 与 agent tree
 - test：受影响 Pester/E2E
-- contract：generated sync、config、dependency、reference、runtime policy、doctor JSON
+- contract：committed generated bundle、config、reference 与公开契约
 - hotspot：仅在真实性能/安全/发布风险存在时执行
 
-full gate 集中拥有 stage roster、source fingerprint、immutable receipt 和 test timing。普通改动不重复 full；exact-current receipt 可复用。
+full gate 仅顺序执行一次 build、tests、committed generated bundle、lock、skill integrity 和 config contract。普通改动使用受影响验证，不重复 full。
 
 ## 6. 删除原则
 

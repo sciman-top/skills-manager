@@ -1,46 +1,3 @@
-function Get-PerfSummaryFromLogLines([string[]]$lines, [int]$RecentPerMetric = 3) {
-    $events = New-Object System.Collections.Generic.List[object]
-    if ($null -eq $lines) { return @() }
-    foreach ($line in $lines) {
-        if ([string]::IsNullOrWhiteSpace($line)) { continue }
-        try {
-            $record = $line | ConvertFrom-Json
-        }
-        catch { continue }
-        if ($null -eq $record -or $null -eq $record.data) { continue }
-        if (-not $record.data.PSObject.Properties.Match("metric").Count) { continue }
-        if (-not $record.data.PSObject.Properties.Match("duration_ms").Count) { continue }
-        $metric = [string]$record.data.metric
-        if ([string]::IsNullOrWhiteSpace($metric)) { continue }
-        $duration = 0
-        try { $duration = [int]$record.data.duration_ms } catch { continue }
-        if ($duration -lt 0) { continue }
-        $events.Add([pscustomobject]@{
-            metric = $metric
-            duration_ms = $duration
-            ts = [string]$record.ts
-        }) | Out-Null
-    }
-    if ($events.Count -eq 0) { return @() }
-
-    $summary = New-Object System.Collections.Generic.List[object]
-    $groups = $events | Group-Object metric
-    foreach ($g in $groups) {
-        $recent = $g.Group | Select-Object -Last $RecentPerMetric
-        if ($recent.Count -eq 0) { continue }
-        $avg = [math]::Round((($recent | Measure-Object -Property duration_ms -Average).Average), 0)
-        $last = ($recent | Select-Object -Last 1)
-        $summary.Add([pscustomobject]@{
-            metric = $g.Name
-            samples = @($recent).Count
-            avg_ms = [int]$avg
-            last_ms = [int]$last.duration_ms
-            last_ts = [string]$last.ts
-        }) | Out-Null
-    }
-    return ($summary | Sort-Object metric)
-}
-
 function Get-DoctorGitVersion([switch]$NoHostLog) {
     if ($DryRun -or $NoHostLog) {
         $gitOut = & git version 2>$null
@@ -77,9 +34,7 @@ function Parse-DoctorArgs([string[]]$tokens) {
         fix = $false
         dry_run_fix = $false
         strict = $false
-        strict_perf = $false
         offline_contract = $false
-        threshold_ms = 5000
     }
     if ($null -eq $tokens) { return [pscustomobject]$opts }
 
@@ -93,24 +48,13 @@ function Parse-DoctorArgs([string[]]$tokens) {
             "--fix" { $opts.fix = $true; continue }
             "--dry-run-fix" { $opts.dry_run_fix = $true; continue }
             "--strict" { $opts.strict = $true; continue }
-            "--strict-perf" { $opts.strict_perf = $true; continue }
             "--offline-contract" { $opts.offline_contract = $true; continue }
-            "--threshold-ms" {
-                Need ($i + 1 -lt $tokens.Count) "参数缺少值：--threshold-ms"
-                $raw = [string]$tokens[++$i]
-                $n = 0
-                Need ([int]::TryParse($raw, [ref]$n)) ("--threshold-ms 必须是整数：{0}" -f $raw)
-                Need ($n -gt 0) "--threshold-ms 必须大于 0"
-                $opts.threshold_ms = $n
-                continue
-            }
             default { throw ("未知 doctor 参数：{0}" -f $t) }
         }
     }
     if ($opts.offline_contract) {
         Need $opts.json "--offline-contract 仅用于 doctor --json 结构契约"
         Need (-not $opts.strict) "--offline-contract 不能与 --strict 组合"
-        Need (-not $opts.strict_perf) "--offline-contract 不能与 --strict-perf 组合"
         Need (-not $opts.fix -and -not $opts.dry_run_fix) "--offline-contract 不能与配置修复参数组合"
     }
     return [pscustomobject]$opts
@@ -169,77 +113,6 @@ function Apply-DoctorFixes($cfg, [switch]$Preview) {
 
     $result.applied = @($result.applied)
     return [pscustomobject]$result
-}
-
-function Get-PerfThresholdMs([string]$Metric, [int]$DefaultThresholdMs = 5000) {
-    if ([string]::IsNullOrWhiteSpace($Metric)) { return $DefaultThresholdMs }
-
-    $metricKey = $Metric.Trim().ToLowerInvariant()
-    switch ($metricKey) {
-        "discover" { return 5000 }
-        "build_agent" { return 8000 }
-        "build_agent_cache_hit" { return 1000 }
-        "build_agent_full" { return 20000 }
-        "build_agent_cache_check" { return 10000 }
-        "projection_package_hash_cache_hit" { return 3000 }
-        "projection_package_hash_full" { return 20000 }
-        "projection_plan_cached" { return 5000 }
-        "projection_plan_full" { return 20000 }
-        "apply_targets" { return 5000 }
-        # Includes prebuild checks + full build/apply flow; realistic baseline in this repo is ~180s.
-        "build_apply_total" { return 240000 }
-        "sync_mcp" { return 10000 }
-        # Update flow is network-heavy but should still surface regressions in doctor warnings.
-        "update_vendor" { return 60000 }
-        "update_imports" { return 180000 }
-        "update_total" { return 240000 }
-        # One-click workflows may include target-repo audit scans; keep this stricter than update_total but above normal audit smoke time.
-        "workflow_run" { return 30000 }
-        default { return $DefaultThresholdMs }
-    }
-}
-
-function Add-PerfThresholdMetadata($summary, [int]$DefaultThresholdMs = 5000) {
-    $annotated = @()
-    if ($null -eq $summary) { return @() }
-
-    foreach ($p in @($summary)) {
-        if ($null -eq $p) { continue }
-        $metricName = ""
-        try { $metricName = [string]$p.metric } catch { $metricName = "" }
-        $metricThreshold = Get-PerfThresholdMs $metricName $DefaultThresholdMs
-
-        $item = [ordered]@{}
-        foreach ($prop in $p.PSObject.Properties) {
-            $item[$prop.Name] = $prop.Value
-        }
-        $item.effective_threshold_ms = $metricThreshold
-        $item.anomaly_check_enabled = ($null -ne $metricThreshold)
-        $annotated += [pscustomobject]$item
-    }
-
-    return @($annotated)
-}
-
-function Get-PerfAnomalyItems($summary, [int]$WarnThresholdMs = 5000, [int]$MinSamples = 3) {
-    $items = @()
-    if ($null -eq $summary) { return @() }
-    foreach ($p in $summary) {
-        if ($null -eq $p) { continue }
-        $last = 0
-        $avg = 0
-        $samples = 0
-        try { $last = [int]$p.last_ms } catch { continue }
-        try { $avg = [int]$p.avg_ms } catch { continue }
-        try { $samples = [int]$p.samples } catch { $samples = 0 }
-        if ($samples -lt $MinSamples) { continue }
-        $metricThreshold = Get-PerfThresholdMs ([string]$p.metric) $WarnThresholdMs
-        if ($null -eq $metricThreshold) { continue }
-        if ($last -gt $metricThreshold -or $avg -gt $metricThreshold) {
-            $items += ("{0}: last={1}ms avg={2}ms threshold={3}ms" -f [string]$p.metric, $last, $avg, $metricThreshold)
-        }
-    }
-    return ,@($items)
 }
 
 function Test-DoctorGitHubConnection {
@@ -332,15 +205,9 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     $report = [ordered]@{
         pass = $true
         strict = [bool]$opts.strict
-        strict_perf = [bool]$opts.strict_perf
         offline_contract = [bool]$opts.offline_contract
         checks = [ordered]@{}
         risks = @()
-        performance = [ordered]@{
-            threshold_ms = [int]$opts.threshold_ms
-            summary = @()
-            anomalies = @()
-        }
         summary = [ordered]@{
             errors = @()
             warnings = @()
@@ -541,36 +408,6 @@ function Invoke-Doctor([string[]]$tokens = @()) {
         }
     }
 
-    # 8. Performance Summary
-    try {
-        if (Test-Path $LogPath) {
-            $lines = Get-Content $LogPath -Tail 5000 -ErrorAction SilentlyContinue
-            $perf = Get-PerfSummaryFromLogLines $lines 3
-            $report.performance.summary = @(Add-PerfThresholdMetadata $perf $opts.threshold_ms)
-            if ($perf.Count -gt 0) {
-                if (-not $opts.json) {
-                    Write-Host "最近性能摘要（最近 3 次）："
-                    foreach ($p in $report.performance.summary) {
-                        Write-Host ("   - {0}: last={1}ms avg={2}ms samples={3}" -f $p.metric, $p.last_ms, $p.avg_ms, $p.samples)
-                    }
-                }
-                $anomalies = Get-PerfAnomalyItems $report.performance.summary $opts.threshold_ms
-                $report.performance.anomalies = @($anomalies)
-                if ($anomalies.Count -gt 0) {
-                    if (-not $opts.json) {
-                        Write-Host ("⚠️ 性能异常（阈值 {0}ms，{1} 项）：" -f $opts.threshold_ms, $anomalies.Count) -ForegroundColor Yellow
-                        foreach ($a in $anomalies) {
-                            Write-Host ("   - {0}" -f $a) -ForegroundColor Yellow
-                        }
-                    }
-                }
-            }
-        }
-    }
-    catch {
-        if (-not $opts.json) { Write-Host "⚠️ 性能摘要读取失败（已忽略）" -ForegroundColor Yellow }
-    }
-
     $report.pass = $pass
     if (-not $report.checks.git.ok) { $report.summary.errors += "git_unavailable" }
     if (-not $report.checks.robocopy.ok) { $report.summary.errors += "robocopy_unavailable" }
@@ -583,9 +420,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     if ($report.checks.network -and -not $report.checks.network.ok) { $report.summary.errors += "network_unavailable" }
     if ($report.checks.long_paths.value -eq 0) { $report.summary.warnings += "long_paths_off" }
     if (@($report.risks).Count -gt 0) { $report.summary.warnings += "config_risks_present" }
-    if (@($report.performance.anomalies).Count -gt 0) { $report.summary.warnings += "perf_anomalies_present" }
-
-    if ($opts.strict -and (@($report.risks).Count -gt 0 -or ([bool]$opts.strict_perf -and @($report.performance.anomalies).Count -gt 0))) {
+    if ($opts.strict -and @($report.risks).Count -gt 0) {
         $report.pass = $false
     }
     $report.summary.error_count = @($report.summary.errors).Count
@@ -594,10 +429,6 @@ function Invoke-Doctor([string[]]$tokens = @()) {
         Write-Host ($report | ConvertTo-Json -Depth 30)
         return [pscustomobject]$report
     }
-    if ($opts.strict -and -not $opts.strict_perf -and @($report.performance.anomalies).Count -gt 0) {
-        Write-Host "提示：性能异常仅告警，不影响 --strict 结果。使用 --strict-perf 可将其纳入阻断。" -ForegroundColor Yellow
-    }
-
     Write-Host ""
     if ($report.pass) {
         Write-Host "Your system is ready for skills-manager." -ForegroundColor Green

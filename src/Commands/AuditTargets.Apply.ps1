@@ -1300,7 +1300,7 @@ function Invoke-AuditRecommendationsApply {
             构建生效
         }
         if ($hasSkillChanges -or $hasMcpChanges) {
-            $doctorResult = Invoke-Doctor @("--strict", "--threshold-ms", "8000")
+            $doctorResult = Invoke-Doctor @("--strict")
             if ($doctorResult -and $doctorResult.PSObject.Properties.Match("pass").Count -gt 0 -and -not [bool]$doctorResult.pass) {
                 $report.success = $false
                 $report.items = @($plan.items)

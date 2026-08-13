@@ -1011,7 +1011,6 @@ Describe "Config And Update Enhancements" {
                 }
 
                 Mock LoadCfg { $cfg }
-                Mock Invoke-PrebuildCheck {}
                 Mock Confirm-UpdateForce { $true }
                 Mock Skip-IfDryRun { $false }
                 Mock Preflight {}
@@ -1073,7 +1072,6 @@ Describe "Config And Update Enhancements" {
                 }
 
                 Mock LoadCfg { $cfg }
-                Mock Invoke-PrebuildCheck {}
                 Mock Confirm-UpdateForce { $true }
                 Mock Skip-IfDryRun { $false }
                 Mock Preflight {}

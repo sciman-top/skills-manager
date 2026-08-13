@@ -256,8 +256,6 @@ function Test-AuditRemovalDependencyClosure {
         "skills.json",
         "config/skill-dependency-closure.json",
         "config/skill-routing-policy.json",
-        "config/override-skill-activation-corpus.json",
-        "config/capability-routing-golden.json",
         "overrides/patches/provenance.json"
     )
     $candidateIndex = 0

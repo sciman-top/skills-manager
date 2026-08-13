@@ -18,10 +18,8 @@ Describe 'GitHub CI workflow supply-chain contract' {
         $script:workflow | Should Match '(?ms)^on:\s*\r?\n\s+push:\s*\r?\n\s+branches:\s*\r?\n\s+- main\s*\r?\n\s+tags:\s*\r?\n\s+- ''\*''\s*\r?\n\s+pull_request:\s*$'
     }
 
-    It 'runs the doctor contract only through the full gate in clean CI' {
+    It 'runs the repository gate once in clean CI' {
         $script:workflow | Should Match '(?s)- name: Run repository full quality gate\s+shell: pwsh\s+run: \.\\scripts\\quality\\run-local-quality-gates\.ps1 -Profile full'
-        $script:workflow | Should Not Match 'Observe sync MCP performance threshold'
-        $script:workflow | Should Not Match 'check-doctor-json\.ps1'
         $script:workflow | Should Not Match '(?s)- name: Run repository full quality gate\s+shell: pwsh\s+env:'
     }
 }

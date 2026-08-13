@@ -3,10 +3,10 @@ set -eu
 
 staged="$(git diff --cached --name-only --diff-filter=ACMR)"
 
-block_pattern='^(\.txn/|build\.log$|\.build-cache\.json$)'
+block_pattern='^(\.txn/|build\.log$)'
 blocked="$(printf '%s\n' "$staged" | grep -E "$block_pattern" || true)"
 if [ -n "$blocked" ]; then
-  echo "[pre-commit] blocked: temporary artifacts are staged (.txn/, build.log, .build-cache.json)." >&2
+  echo "[pre-commit] blocked: temporary artifacts are staged (.txn/, build.log)." >&2
   echo "[pre-commit] matched staged paths:" >&2
   printf '%s\n' "$blocked" >&2
   echo "[pre-commit] run the following to unstage:" >&2

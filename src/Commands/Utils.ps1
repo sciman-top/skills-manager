@@ -409,7 +409,6 @@ MCP：
 技能投影：
   .\skills.ps1 构建生效
   .\skills.ps1 capability-inventory --view skill-surfaces [--host-snapshot <snapshot.json>] --json
-  .\scripts\verify-native-skill-metadata.ps1 -Json
 
 目标仓审查：
   .\skills.ps1 审查目标 需求设置
@@ -432,7 +431,7 @@ MCP：
   .\skills.ps1 解除关联
   .\skills.ps1 清理备份
   .\skills.ps1 自动更新设置
-  .\skills.ps1 doctor [--json] [--offline-contract] [--fix] [--dry-run-fix] [--strict] [--strict-perf] [--threshold-ms <ms>]
+  .\skills.ps1 doctor [--json] [--offline-contract] [--fix] [--dry-run-fix] [--strict]
   pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-skill-integrity.ps1 [-ReportPath <file>]
 
 通用参数：

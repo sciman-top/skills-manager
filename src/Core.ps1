@@ -183,38 +183,6 @@ function Log([string]$msg, [string]$Level = "INFO", [switch]$NoHost, [object]$Da
     }
     Write-LogRecord $lvl $safeMessage $safeData
 }
-function Invoke-WithMetric(
-    [string]$Metric,
-    [scriptblock]$Action,
-    [hashtable]$Data = $null,
-    [switch]$NoHost
-) {
-    Need (-not [string]::IsNullOrWhiteSpace($Metric)) "metric 不能为空"
-    Need ($null -ne $Action) "Action 不能为空"
-
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    $ok = $false
-    try {
-        $result = & $Action
-        $ok = $true
-        return $result
-    }
-    finally {
-        $sw.Stop()
-        $payload = [ordered]@{
-            metric = $Metric
-            duration_ms = [int]$sw.ElapsedMilliseconds
-            success = $ok
-        }
-        if ($Data) {
-            foreach ($k in $Data.Keys) {
-                $payload[$k] = $Data[$k]
-            }
-        }
-        Log ("性能埋点：{0}" -f $Metric) "INFO" -NoHost:$NoHost $payload
-    }
-}
-
 function Invoke-RemoveItem([string]$path, [switch]$Recurse) {
     if (-not (Test-PathEntry $path)) { return }
     $recurseFlag = if ($Recurse) { "-Recurse " } else { "" }
@@ -549,20 +517,6 @@ function Preflight {
     EnsureDir $AgentDir
     EnsureDir $OverridesDir
     EnsureDir $ImportDir
-}
-function Invoke-PrebuildCheck([switch]$Strict) {
-    $scriptPath = Join-Path $Root "scripts\prebuild-check.ps1"
-    if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
-        Log ("未找到预检脚本，跳过：{0}" -f $scriptPath) "WARN"
-        return
-    }
-    $args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $scriptPath)
-    if ($Strict) { $args += "-Strict" }
-    Log ("执行预检脚本：{0}" -f $scriptPath)
-    & (Resolve-PowerShellExecutable) @args
-    if ($LASTEXITCODE -ne 0) {
-        throw ("预检失败（exit={0}）：请先修复后再执行构建/更新。" -f $LASTEXITCODE)
-    }
 }
 function RoboMirror([string]$src, [string]$dst) {
     EnsureDir $dst

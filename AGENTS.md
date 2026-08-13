@@ -25,10 +25,10 @@
 
 ## C. 门禁、证据与回滚
 - 多层适用时顺序固定为 `build -> test -> contract/invariant -> hotspot`，只跑覆盖当前失败面的最低充分层。
-- 文档/规则：`git diff --check` + 受影响 verifier/test。source/config/generated seam：先 `build.ps1`，再 generated sync 与受影响测试。
+- 文档/规则：`git diff --check` + 受影响 verifier/test。source/config/generated seam：运行一次 `build.ps1`，再跑受影响测试；clean closeout 核对 `skills.ps1` 无漂移。
 - focused closeout 沿用受影响验证；runtime、安全、数据、迁移、公开契约、依赖、打包或跨面风险才运行一次 full gate。
-- full：先 `scripts/quality/run-local-quality-gates.ps1 -Profile full -ReuseCurrentReceipt`；exact-current miss 时本任务只用一次 `-ForceFresh`。脏树需显式 `-AllowDirtyWorktree`。
-- live doctor 只在 release/host health 明确需要时另跑 `skills.ps1 doctor --strict --threshold-ms 8000`；不替代 full，也不证明 `host_loaded`。
+- full：只在 runtime、安全、数据、迁移、公开契约、依赖、打包或跨面风险时运行一次 `scripts/quality/run-local-quality-gates.ps1 -Profile full`；脏树需显式 `-AllowDirtyWorktree`。
+- live doctor 只在 release/host health 明确需要时另跑 `skills.ps1 doctor --strict`；不替代 full，也不证明 `host_loaded`。
 - 失败按原路径 focused 重验；回滚只撤本次切片，不覆盖无关 import、audit/MCP 或用户资产。
 
 ## D. Global Rule -> Repo Action
@@ -38,4 +38,4 @@
 - `R7`：保持 config/lock/generated/MCP/audit contract；`R8`：依据、diff、验证和回滚可追溯。
 - `S1`：最短真实 CLI 主链；`S2`：状态只在 config/runtime receipt；`S3`：研究达到可逆决定即停。
 - `S4`：`references/reference-shelf.manifest.json` 只保留当前 reference set；`S5`：`scripts/verify-reference-governance.ps1` 与 `src/Application/RuleEstate.ps1` fail closed。
-- `E4`：doctor/full receipt；`E5`：config/lock/reference provenance；`E6`：config/receipt 变化保留兼容与回滚。
+- `E4`：focused/full verification output；`E5`：config/lock/reference provenance；`E6`：config/receipt 变化保留兼容与回滚。

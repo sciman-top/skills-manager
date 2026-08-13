@@ -12,7 +12,7 @@ Windows PowerShell 5.1 is not supported by this project.
 
 | Runtime | Project status | Required evidence |
 | --- | --- | --- |
-| PowerShell 7.0+ (`pwsh`, PowerShell 7.6 LTS recommended) | Supported | build, generated sync, full Pester/E2E, contracts, doctor, dependency and full quality gates |
+| PowerShell 7.0+ (`pwsh`, PowerShell 7.6 LTS recommended) | Supported | build, generated sync, Pester/E2E and risk-triggered quality gates |
 | Windows PowerShell 5.1 (`powershell.exe`) | Not supported | no CI job, no installer fallback, no compatibility smoke, and no supported execution path |
 
 This is a project support decision, not a claim that Microsoft has stopped supporting Windows PowerShell 5.1. Microsoft documents 5.1 as a Windows support channel, while PowerShell 7 follows the .NET support lifecycle. The project chooses one supported runtime to reduce parser, quoting, encoding, process-invocation, and AI-generated-script variability.
@@ -60,8 +60,7 @@ The canonical order remains `build -> test -> contract/invariant -> hotspot`:
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\tests\run.ps1
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\skills.ps1 doctor --strict --threshold-ms 8000
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile quick
 ```
 
 Repository verification proves `repo_verified`. It does not prove that a new shell session loaded changed files or that a live MCP/skill workflow was accepted.

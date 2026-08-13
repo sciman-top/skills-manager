@@ -1631,30 +1631,23 @@ function 选择 {
 
 
 function 发现 {
-    Invoke-WithMetric "discover" {
-        Preflight
-        $cfg = LoadCfg
-        $manualItems = 收集ManualSkills $cfg
-        $f = $Filter
-        if ([string]::IsNullOrWhiteSpace($f)) {
-            $f = Read-Host "可选：关键词过滤（空格=AND，或 /regex/）"
-        }
-        $all = 收集Skills "" $cfg $manualItems
-        Need ($all.Count -gt 0) "未发现任何 skills。请先【新增技能库】。"
-        $list = Hide-VendorRootSkills (Filter-Skills $all $f)
-        if ($list.Count -eq 0) {
-            Write-Host "未发现匹配项。"
-            return
-        }
-        $installed = Get-InstalledSet $cfg $manualItems
-        Write-ItemsInColumns $list { param($idx, $item)
-            $mark = if ($installed.Contains("$($item.vendor)|$($item.from)")) { "*" } else { " " }
-            $displayVendor = Get-DisplayVendor $item
-            $leaf = Split-Path $item.from -Leaf
-            if ($item.from -eq ".") { $leaf = $displayVendor }
-            return ("{0,3}) [{1}] [{2}] {3}" -f $idx, $mark, $displayVendor, $leaf)
-        }
-    } @{ command = "发现" } -NoHost
+    Preflight
+    $cfg = LoadCfg
+    $manualItems = 收集ManualSkills $cfg
+    $f = $Filter
+    if ([string]::IsNullOrWhiteSpace($f)) { $f = Read-Host "可选：关键词过滤（空格=AND，或 /regex/）" }
+    $all = 收集Skills "" $cfg $manualItems
+    Need ($all.Count -gt 0) "未发现任何 skills。请先【新增技能库】。"
+    $list = Hide-VendorRootSkills (Filter-Skills $all $f)
+    if ($list.Count -eq 0) { Write-Host "未发现匹配项。"; return }
+    $installed = Get-InstalledSet $cfg $manualItems
+    Write-ItemsInColumns $list { param($idx, $item)
+        $mark = if ($installed.Contains("$($item.vendor)|$($item.from)")) { "*" } else { " " }
+        $displayVendor = Get-DisplayVendor $item
+        $leaf = Split-Path $item.from -Leaf
+        if ($item.from -eq ".") { $leaf = $displayVendor }
+        return ("{0,3}) [{1}] [{2}] {3}" -f $idx, $mark, $displayVendor, $leaf)
+    }
 }
 
 function 清空Agent目录 {
@@ -1669,46 +1662,6 @@ function Resolve-SourceBase([string]$vendorName, $cfg) {
     $v = $cfg.vendors | Where-Object { $_.name -eq $vendorName } | Select-Object -First 1
     if (-not $v) { throw "白名单引用了不存在的 vendor：$vendorName" }
     return (VendorPath $v.name)
-}
-
-function Get-BuildCachePath {
-    return (Join-Path $Root ".build-cache.json")
-}
-
-function ConvertTo-Hashtable($obj) {
-    $table = @{}
-    if ($null -eq $obj) { return $table }
-    if ($obj -is [hashtable]) { return $obj }
-    if ($obj -is [pscustomobject]) {
-        foreach ($p in $obj.PSObject.Properties) { $table[[string]$p.Name] = $p.Value }
-    }
-    return $table
-}
-
-function Load-BuildCache {
-    $path = Get-BuildCachePath
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return @{} }
-    try {
-        $raw = Get-Content -LiteralPath $path -Raw
-        if ([string]::IsNullOrWhiteSpace($raw)) { return @{} }
-        $obj = $raw | ConvertFrom-Json
-        return (ConvertTo-Hashtable $obj)
-    }
-    catch {
-        Log ("构建缓存读取失败，已忽略并重建：{0}" -f $_.Exception.Message) "WARN"
-        return @{}
-    }
-}
-
-function Save-BuildCache($cache) {
-    if ($DryRun) { return }
-    try {
-        $json = $cache | ConvertTo-Json -Depth 20
-        Set-ContentUtf8 (Get-BuildCachePath) $json
-    }
-    catch {
-        Log ("构建缓存保存失败（已忽略）：{0}" -f $_.Exception.Message) "WARN"
-    }
 }
 
 function Get-DirectoryFingerprint([string]$dir) {
@@ -1765,64 +1718,6 @@ function Get-DirectoryFingerprint([string]$dir) {
     }
 }
 
-function Mirror-SkillWithCache(
-    [string]$src,
-    [string]$dst,
-    [string]$cacheKey,
-    [hashtable]$oldCache,
-    [hashtable]$newCache,
-    $stats,
-    [hashtable]$fingerprintCache = $null,
-    [switch]$ForceMirror
-) {
-    if ($null -eq $fingerprintCache) { $fingerprintCache = @{} }
-    if ($null -ne $stats -and $stats.PSObject.Properties.Match("fp_cache_hit").Count -eq 0) {
-        $stats | Add-Member -NotePropertyName fp_cache_hit -NotePropertyValue 0
-    }
-    if ($null -ne $stats -and $stats.PSObject.Properties.Match("fp_cache_miss").Count -eq 0) {
-        $stats | Add-Member -NotePropertyName fp_cache_miss -NotePropertyValue 0
-    }
-    $dstExists = (Test-Path -LiteralPath $dst -PathType Container)
-    if (-not $dstExists) {
-        # The destination is guaranteed to be rebuilt in this pass, so fingerprint
-        # calculation cannot lead to a cache skip. Mirror directly to reduce build cost.
-        RoboMirror $src $dst
-        $expanded = Expand-RelativeSkillPlaceholders $dst
-        if ($expanded -gt 0) {
-            Log ("已展开相对路径 SKILL 占位文件：{0} 项 [{1}]" -f $expanded, $cacheKey)
-        }
-        $stats.mirrored++
-        return
-    }
-    $srcKey = [System.IO.Path]::GetFullPath($src).ToLowerInvariant()
-    if ($fingerprintCache.ContainsKey($srcKey)) {
-        $fp = [string]$fingerprintCache[$srcKey]
-        if ($null -ne $stats) { $stats.fp_cache_hit++ }
-    }
-    else {
-        $fp = Get-DirectoryFingerprint $src
-        $fingerprintCache[$srcKey] = $fp
-        if ($null -ne $stats) { $stats.fp_cache_miss++ }
-    }
-    $newCache[$cacheKey] = $fp
-    $old = if ($oldCache.ContainsKey($cacheKey)) { [string]$oldCache[$cacheKey] } else { "" }
-    if ($dstExists -and -not $ForceMirror -and $old -eq $fp) {
-        $expanded = Expand-RelativeSkillPlaceholders $dst
-        if ($expanded -gt 0) {
-            Log ("命中构建缓存后补展开相对路径 SKILL 占位文件：{0} 项 [{1}]" -f $expanded, $cacheKey)
-        }
-        $stats.skipped++
-        Log ("命中构建缓存，跳过复制：{0}" -f $cacheKey)
-        return
-    }
-    RoboMirror $src $dst
-     $expanded = Expand-RelativeSkillPlaceholders $dst
-    if ($expanded -gt 0) {
-        Log ("已展开相对路径 SKILL 占位文件：{0} 项 [{1}]" -f $expanded, $cacheKey)
-    }
-    $stats.mirrored++
-}
-
 function Get-SkillNameConflictBuckets([string]$agentRoot) {
     $nameToPaths = @{}
     foreach ($skillFile in (Get-ChildItem $agentRoot -Recurse -Filter "SKILL.md" -File -ErrorAction SilentlyContinue)) {
@@ -1863,21 +1758,6 @@ function Test-SkillNameSystemOverrideAllowed([string[]]$paths) {
         else { $hasNonSystemPath = $true }
     }
     return ($hasSystemPath -and $hasNonSystemPath)
-}
-function Should-SkipBuildPostScan($stats) {
-    if ($null -eq $stats) { return $false }
-    return (($stats.mirrored -eq 0) -and (-not [bool]$stats.reused))
-}
-function Get-ElapsedMs($sw) {
-    if ($null -eq $sw) { return 0 }
-    return [int][math]::Round([double]$sw.Elapsed.TotalMilliseconds, 0)
-}
-function Get-AgentBuildCacheAlgorithmVersion {
-    return "agent-build-v20260803.3"
-}
-function Get-AgentBuildMetricName([bool]$cacheHit) {
-    if ($cacheHit) { return "build_agent_cache_hit" }
-    return "build_agent_full"
 }
 function Get-StringSha256([string]$text) {
     if ($null -eq $text) { $text = "" }
@@ -1962,12 +1842,10 @@ function Resolve-AgentMappingForAgent($cfg, $mapping, [hashtable]$context) {
         vendor = $vendor
         from = $from
         to = $to
-        out_rel = $outRel
         src = [string]$src
         src_full = $srcFull
         src_key = $srcFull.ToLowerInvariant()
         dst = $dst
-        cache_key = ("mapping|{0}|{1}|{2}" -f $vendor, $from, $to)
     }
 }
 function Test-ResolvedAgentMappingSkillDir($resolved, [hashtable]$context) {
@@ -1989,223 +1867,20 @@ function Get-ResolvedAgentMappingInvalidReason($resolved) {
     if (-not (Test-Path -LiteralPath $src -PathType Container)) { return "源目录不存在" }
     return "缺少标记文件"
 }
-function Get-AgentBuildState($cfg) {
-    $records = New-Object System.Collections.Generic.List[object]
-    $outputs = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    $resolveContext = New-AgentMappingResolveContext
-    $fingerprintCache = @{}
-    $index = 0
-
-    foreach ($m in @($cfg.mappings)) {
-        $resolved = Resolve-AgentMappingForAgent $cfg $m $resolveContext
-        if ($null -eq $resolved) { continue }
-        if (-not [bool]$resolved.sync) {
-            $records.Add([ordered]@{
-                    index = $index
-                    kind = "mapping"
-                    sync = $false
-                    vendor = [string]$resolved.vendor
-                    from = [string]$resolved.from
-                    to = [string]$resolved.to
-                }) | Out-Null
-            $index++
-            continue
-        }
-
-        if (-not [bool]$resolved.source_valid) {
-            return [pscustomobject]@{ can_skip = $false; reason = [string]$resolved.reason; signature = $null; outputs = @() }
-        }
-        if (-not (Test-ResolvedAgentMappingSkillDir $resolved $resolveContext)) {
-            $reason = Get-ResolvedAgentMappingInvalidReason $resolved
-            return [pscustomobject]@{ can_skip = $false; reason = ("{0}: {1}" -f $reason, [string]$resolved.src_full); signature = $null; outputs = @() }
-        }
-        $srcKey = [string]$resolved.src_key
-        if ($fingerprintCache.ContainsKey($srcKey)) {
-            $fp = [string]$fingerprintCache[$srcKey]
-        }
-        else {
-            $fp = Get-DirectoryFingerprint ([string]$resolved.src_full)
-            $fingerprintCache[$srcKey] = $fp
-        }
-        $outRel = [string]$resolved.out_rel
-        $outputs.Add($outRel) | Out-Null
-        $records.Add([ordered]@{
-                index = $index
-                kind = "mapping"
-                sync = $true
-                vendor = [string]$resolved.vendor
-                from = [string]$resolved.from
-                to = $outRel
-                source = $srcKey
-                fingerprint = $fp
-            }) | Out-Null
-        $index++
-    }
-
-    foreach ($d in (Get-OverridesDirs | Sort-Object Name)) {
-        $srcFull = [System.IO.Path]::GetFullPath($d.FullName)
-        $srcKey = $srcFull.ToLowerInvariant()
-        if ($fingerprintCache.ContainsKey($srcKey)) {
-            $fp = [string]$fingerprintCache[$srcKey]
-        }
-        else {
-            $fp = Get-DirectoryFingerprint $srcFull
-            $fingerprintCache[$srcKey] = $fp
-        }
-        $outputs.Add([string]$d.Name) | Out-Null
-        $records.Add([ordered]@{
-                index = $index
-                kind = "override"
-                name = [string]$d.Name
-                to = [string]$d.Name
-                source = $srcKey
-                fingerprint = $fp
-            }) | Out-Null
-        $index++
-    }
-
-    $recordList = $records.ToArray()
-    $outputList = @($outputs | Sort-Object)
-    $payload = [ordered]@{
-        schema = 1
-        algorithm = (Get-AgentBuildCacheAlgorithmVersion)
-        records = $recordList
-        outputs = $outputList
-    }
-    $json = $payload | ConvertTo-Json -Depth 30 -Compress
-    return [pscustomobject]@{
-        can_skip = $true
-        reason = "ok"
-        signature = (Get-StringSha256 $json)
-        outputs = $outputList
-    }
-}
-function Set-AgentBuildStateCache($cache, $cfg) {
-    try {
-        $state = Get-AgentBuildState $cfg
-        if (-not $state.can_skip) { return $state }
-        $cache["__agent_build_algorithm"] = (Get-AgentBuildCacheAlgorithmVersion)
-        $cache["__agent_build_signature"] = [string]$state.signature
-        $cache["__agent_build_output_count"] = @($state.outputs).Count
-        $cache["__agent_build_output_fingerprint"] = Get-DirectoryFingerprint $AgentDir
-        $cache["__agent_build_saved_at"] = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-        return $state
-    }
-    catch {
-        Log ("构建快路径状态写入失败，已忽略：{0}" -f $_.Exception.Message) "WARN"
-        return [pscustomobject]@{ can_skip = $false; reason = $_.Exception.Message; signature = $null; outputs = @() }
-    }
-}
-function Test-AgentBuildCacheHit($cfg) {
-    if ($DryRun) { return [pscustomobject]@{ hit = $false; reason = "dry-run"; state = $null } }
-    if (-not (Test-Path -LiteralPath $AgentDir -PathType Container)) {
-        return [pscustomobject]@{ hit = $false; reason = "agent-missing"; state = $null }
-    }
-    $cache = Load-BuildCache
-    $algorithm = [string]$cache["__agent_build_algorithm"]
-    $signature = [string]$cache["__agent_build_signature"]
-    $outputFingerprint = [string]$cache["__agent_build_output_fingerprint"]
-    if ($algorithm -ne (Get-AgentBuildCacheAlgorithmVersion)) {
-        return [pscustomobject]@{ hit = $false; reason = "algorithm-mismatch"; state = $null }
-    }
-    if ([string]::IsNullOrWhiteSpace($signature)) {
-        return [pscustomobject]@{ hit = $false; reason = "signature-missing"; state = $null }
-    }
-    try {
-        $state = Get-AgentBuildState $cfg
-        if (-not $state.can_skip) {
-            return [pscustomobject]@{ hit = $false; reason = $state.reason; state = $state }
-        }
-        if ([string]$state.signature -ne $signature) {
-            return [pscustomobject]@{ hit = $false; reason = "signature-mismatch"; state = $state }
-        }
-        foreach ($rel in @($state.outputs)) {
-            $outPath = Join-Path $AgentDir $rel
-            if (-not (Test-Path -LiteralPath $outPath -PathType Container)) {
-                return [pscustomobject]@{ hit = $false; reason = ("output-missing:{0}" -f $rel); state = $state }
-            }
-        }
-        $expectedTopLevels = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-        foreach ($rel in @($state.outputs)) {
-            $normalized = Normalize-SkillPath ([string]$rel)
-            $topLevel = @($normalized -split "\\", 2)[0]
-            if (-not [string]::IsNullOrWhiteSpace($topLevel) -and $topLevel -ne ".") {
-                $expectedTopLevels.Add($topLevel) | Out-Null
-            }
-        }
-        foreach ($dir in @(Get-ChildItem -LiteralPath $AgentDir -Directory -Force | Sort-Object Name)) {
-            if (-not $expectedTopLevels.Contains([string]$dir.Name)) {
-                return [pscustomobject]@{ hit = $false; reason = ("unexpected-output:{0}" -f $dir.Name); state = $state }
-            }
-        }
-        if ([string]::IsNullOrWhiteSpace($outputFingerprint)) {
-            return [pscustomobject]@{ hit = $false; reason = "output-fingerprint-missing"; state = $state }
-        }
-        if ((Get-DirectoryFingerprint $AgentDir) -ne $outputFingerprint) {
-            return [pscustomobject]@{ hit = $false; reason = "output-fingerprint-mismatch"; state = $state }
-        }
-        return [pscustomobject]@{ hit = $true; reason = "cache-hit"; state = $state }
-    }
-    catch {
-        return [pscustomobject]@{ hit = $false; reason = $_.Exception.Message; state = $null }
-    }
-}
-function Invoke-AgentBuildCacheHit($cacheHit) {
-    return (Invoke-WithMetric (Get-AgentBuildMetricName $true) {
-        $state = $cacheHit.state
-        $signature = [string]$state.signature
-        $shortSignature = if ($signature.Length -gt 12) { $signature.Substring(0, 12) } else { $signature }
-        Log ("构建 Agent 输入未变化，跳过重建：outputs={0}, signature={1}" -f @($state.outputs).Count, $shortSignature)
-        return @()
-    } @{ command = "构建Agent"; cache_hit = $true } -NoHost)
-}
-function Get-DuplicateMappingSourceGroups($cfg) {
-    $groups = @{}
-    if ($null -eq $cfg -or $null -eq $cfg.mappings) { return @() }
-    foreach ($m in @($cfg.mappings)) {
-        if ($null -eq $m) { continue }
-        if (-not (Should-SyncMappingToAgent $m)) { continue }
-        $key = ("{0}|{1}" -f [string]$m.vendor, [string]$m.from).ToLowerInvariant()
-        if (-not $groups.ContainsKey($key)) {
-            $groups[$key] = New-Object System.Collections.Generic.List[object]
-        }
-        $groups[$key].Add($m) | Out-Null
-    }
-    return @($groups.GetEnumerator() | Where-Object { $_.Value.Count -gt 1 })
-}
-
 function Start-BuildTransaction {
     $txnRoot = Join-Path $Root ".txn"
     $txnId = [Guid]::NewGuid().ToString("N").Substring(0, 10)
     $path = Join-Path $txnRoot ("build-{0}" -f $txnId)
     $backupAgent = Join-Path $path "agent.backup"
-    $buildCachePath = Get-BuildCachePath
-    $backupBuildCache = Join-Path $path "build-cache.backup.json"
     $state = [ordered]@{
         path = $path
         backup_agent = $backupAgent
         has_backup_agent = $false
-        build_cache_path = $buildCachePath
-        backup_build_cache = $backupBuildCache
-        had_build_cache = $false
-        has_backup_build_cache = $false
-        build_cache_backup_error = $null
         backup_error = $null
     }
     if ($DryRun) { return [pscustomobject]$state }
     EnsureDir $txnRoot
     EnsureDir $path
-    if (Test-Path -LiteralPath $buildCachePath -PathType Leaf) {
-        $state.had_build_cache = $true
-        try {
-            Copy-Item -LiteralPath $buildCachePath -Destination $backupBuildCache -Force
-            $state.has_backup_build_cache = $true
-        }
-        catch {
-            $state.build_cache_backup_error = $_.Exception.Message
-            Log ("构建缓存无法备份；若事务回滚，将删除缓存并强制下次重建：{0}" -f $_.Exception.Message) "WARN"
-        }
-    }
     if (Test-Path $AgentDir) {
         try {
             Invoke-MoveItem $AgentDir $backupAgent
@@ -2228,14 +1903,6 @@ function Rollback-BuildTransaction($txn) {
             Invoke-MoveItem $txn.backup_agent $AgentDir
             Write-Host "已回滚 agent/ 到构建前状态。" -ForegroundColor Yellow
         }
-        if ($txn.had_build_cache -and $txn.has_backup_build_cache -and (Test-Path -LiteralPath $txn.backup_build_cache -PathType Leaf)) {
-            Copy-Item -LiteralPath $txn.backup_build_cache -Destination $txn.build_cache_path -Force
-            Write-Host "已回滚构建缓存到构建前状态。" -ForegroundColor Yellow
-        }
-        elseif (Test-Path -LiteralPath $txn.build_cache_path -PathType Leaf) {
-            Invoke-RemoveItemWithRetry $txn.build_cache_path -IgnoreFailure -SilentIgnore | Out-Null
-            Write-Host "已清除本次构建缓存，下一次将强制重建。" -ForegroundColor Yellow
-        }
     }
     finally {
         if (Test-Path $txn.path) { Invoke-RemoveItemWithRetry $txn.path -Recurse -IgnoreFailure -SilentIgnore | Out-Null }
@@ -2248,7 +1915,7 @@ function Complete-BuildTransaction($txn) {
 }
 
 function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
-    return (Invoke-WithMetric (Get-AgentBuildMetricName $false) {
+    return (& {
         if (-not $SkipPreflight) { Preflight }
         if ($null -eq $cfg) { $cfg = LoadCfg }
         Log "开始构建 Agent..."
@@ -2268,13 +1935,9 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
         if ($null -ne $Txn -and $Txn.PSObject.Properties.Match("backup_error").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($Txn.backup_error)) {
             $failures.Add(("build-txn:agent-backup => {0}" -f $Txn.backup_error)) | Out-Null
         }
-        $stats = [pscustomobject]@{ mirrored = 0; skipped = 0; reused = $reusedExistingAgent }
-        $oldCache = if ($DryRun) { @{} } else { Load-BuildCache }
-        $newCache = @{}
-        $fingerprintCache = @{}
+        $stats = [pscustomobject]@{ mirrored = 0; reused = $reusedExistingAgent }
         $resolveContext = New-AgentMappingResolveContext
 
-        $swMapping = [System.Diagnostics.Stopwatch]::StartNew()
         foreach ($m in $cfg.mappings) {
             try {
                 $resolved = Resolve-AgentMappingForAgent $cfg $m $resolveContext
@@ -2306,7 +1969,10 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
                         }) | Out-Null
                     continue
                 }
-                Mirror-SkillWithCache ([string]$resolved.src_full) ([string]$resolved.dst) ([string]$resolved.cache_key) $oldCache $newCache $stats $fingerprintCache
+                RoboMirror ([string]$resolved.src_full) ([string]$resolved.dst)
+                $expanded = Expand-RelativeSkillPlaceholders ([string]$resolved.dst)
+                if ($expanded -gt 0) { Log ("已展开相对路径 SKILL 占位文件：{0} 项" -f $expanded) }
+                $stats.mirrored++
             }
             catch {
                 Write-Host ("❌ 处理技能失败 [{0}/{1}]: {2}" -f $m.vendor, $m.from, $_.Exception.Message) -ForegroundColor Red
@@ -2325,19 +1991,14 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
                 Log ("检测到 {0} 个 manual imports 未映射；按白名单策略不会进入 agent（可通过【安装】写入 mapping 后生效）。" -f $unmappedManual.Count) "WARN"
             }
         }
-        $swMapping.Stop()
-        $stats | Add-Member -NotePropertyName phase_ms_mapping -NotePropertyValue (Get-ElapsedMs $swMapping) -Force
-
         # overrides 覆盖层（可选）：同名目录将覆盖 agent 中对应技能
-        $swOverrides = [System.Diagnostics.Stopwatch]::StartNew()
         foreach ($d in (Get-OverridesDirs)) {
             try {
                 $dst = Join-Path $AgentDir $d.Name
-                $cacheKey = ("override|{0}" -f $d.Name)
-                # A clean agent build recreates mapping destinations before this
-                # phase. Never let a stale override cache entry skip the
-                # replacement that must win over that freshly mirrored output.
-                Mirror-SkillWithCache $d.FullName $dst $cacheKey $oldCache $newCache $stats $fingerprintCache -ForceMirror
+                RoboMirror $d.FullName $dst
+                $expanded = Expand-RelativeSkillPlaceholders $dst
+                if ($expanded -gt 0) { Log ("已展开相对路径 SKILL 占位文件：{0} 项" -f $expanded) }
+                $stats.mirrored++
                 Log ("应用覆盖层: {0}" -f $d.Name)
             }
             catch {
@@ -2345,80 +2006,47 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
                 $failures.Add(("override:{0} => {1}" -f $d.Name, $_.Exception.Message)) | Out-Null
             }
         }
-        $swOverrides.Stop()
-        $stats | Add-Member -NotePropertyName phase_ms_overrides -NotePropertyValue (Get-ElapsedMs $swOverrides) -Force
-
-        $swPostScan = [System.Diagnostics.Stopwatch]::StartNew()
         $removedVendorRoots = Remove-VendorRootMappingOutputsFromAgent $cfg
         if ($removedVendorRoots -gt 0) {
             Log ("已剔除 {0} 个 vendor 根映射目录（不参与同步）。" -f $removedVendorRoots)
         }
 
-        if (Should-SkipBuildPostScan $stats) {
-            Log "增量构建无新复制内容，跳过 SKILL.md 归一化/清理与冲突扫描。"
+        $normalizedSkillMd = Normalize-SkillMarkdownFiles $AgentDir
+        if ($normalizedSkillMd.normalized -gt 0) {
+            Log ("已归一化 SKILL.md 编码（移除 UTF-8 BOM）：{0} 项" -f $normalizedSkillMd.normalized)
         }
-        else {
-            $normalizedSkillMd = Normalize-SkillMarkdownFiles $AgentDir
-            if ($normalizedSkillMd.normalized -gt 0) {
-                Log ("已归一化 SKILL.md 编码（移除 UTF-8 BOM）：{0} 项" -f $normalizedSkillMd.normalized)
+        if ($normalizedSkillMd.failed -gt 0) {
+            foreach ($path in $normalizedSkillMd.failed_paths) {
+                $failures.Add(("build-skill-md-normalize:{0}" -f $path)) | Out-Null
             }
-            if ($normalizedSkillMd.failed -gt 0) {
-                foreach ($path in $normalizedSkillMd.failed_paths) {
-                    $failures.Add(("build-skill-md-normalize:{0}" -f $path)) | Out-Null
-                }
-            }
+        }
 
-            $invalidSkillCleanup = Remove-InvalidSkillMarkdownFiles $AgentDir
-            if ($invalidSkillCleanup.removed -gt 0) {
-                Log ("已清理无效 SKILL.md（缺少 YAML frontmatter）：{0} 项" -f $invalidSkillCleanup.removed) "WARN"
+        $invalidSkillCleanup = Remove-InvalidSkillMarkdownFiles $AgentDir
+        if ($invalidSkillCleanup.removed -gt 0) {
+            Log ("已清理无效 SKILL.md（缺少 YAML frontmatter）：{0} 项" -f $invalidSkillCleanup.removed) "WARN"
+        }
+        if ($invalidSkillCleanup.failed -gt 0) {
+            foreach ($path in $invalidSkillCleanup.failed_paths) {
+                $failures.Add(("build-invalid-skill-md-cleanup:{0}" -f $path)) | Out-Null
             }
-            if ($invalidSkillCleanup.failed -gt 0) {
-                foreach ($path in $invalidSkillCleanup.failed_paths) {
-                    $failures.Add(("build-invalid-skill-md-cleanup:{0}" -f $path)) | Out-Null
-                }
-            }
+        }
 
-            $nameToPaths = Get-SkillNameConflictBuckets $AgentDir
-            foreach ($name in $nameToPaths.Keys | Sort-Object) {
-                $paths = @($nameToPaths[$name])
-                if ($paths.Count -le 1) { continue }
-                if (Test-SkillNameDuplicateContentAllowed $paths) {
-                    Log ("检测到同名同内容技能别名，已跳过冲突：{0}" -f $name)
-                    continue
-                }
-                if (Test-SkillNameSystemOverrideAllowed $paths) {
-                    Log ("检测到系统技能与普通技能同名，已保留系统技能优先：{0}" -f $name)
-                    continue
-                }
-                Write-Host ("❌ 技能名冲突：{0}" -f $name) -ForegroundColor Red
-                foreach ($p in $paths) {
-                    Write-Host ("   - {0}" -f $p) -ForegroundColor Red
-                }
-                $failures.Add(("skill-name-conflict:{0} => {1}" -f $name, ($paths -join " | "))) | Out-Null
+        $nameToPaths = Get-SkillNameConflictBuckets $AgentDir
+        foreach ($name in $nameToPaths.Keys | Sort-Object) {
+            $paths = @($nameToPaths[$name])
+            if ($paths.Count -le 1) { continue }
+            if (Test-SkillNameDuplicateContentAllowed $paths) {
+                Log ("检测到同名同内容技能别名，已跳过冲突：{0}" -f $name)
+                continue
             }
-        }
-        $swPostScan.Stop()
-        $stats | Add-Member -NotePropertyName phase_ms_postscan -NotePropertyValue (Get-ElapsedMs $swPostScan) -Force
-
-        if (-not $DryRun) {
-            if ($failures.Count -eq 0 -and -not $stats.reused) {
-                Set-AgentBuildStateCache $newCache $cfg | Out-Null
+            if (Test-SkillNameSystemOverrideAllowed $paths) {
+                Log ("检测到系统技能与普通技能同名，已保留系统技能优先：{0}" -f $name)
+                continue
             }
-            Save-BuildCache $newCache
+            Write-Host ("❌ 技能名冲突：{0}" -f $name) -ForegroundColor Red
+            foreach ($p in $paths) { Write-Host ("   - {0}" -f $p) -ForegroundColor Red }
+            $failures.Add(("skill-name-conflict:{0} => {1}" -f $name, ($paths -join " | "))) | Out-Null
         }
-        if ($stats.skipped -gt 0) {
-            Log ("增量构建：复用缓存 {0} 项，实际复制 {1} 项。" -f $stats.skipped, $stats.mirrored)
-        }
-        if (($stats.fp_cache_hit -gt 0) -or ($stats.fp_cache_miss -gt 0)) {
-            $fpTotal = [double]($stats.fp_cache_hit + $stats.fp_cache_miss)
-            $hitRate = if ($fpTotal -le 0) { 0.0 } else { [math]::Round((100.0 * [double]$stats.fp_cache_hit / $fpTotal), 1) }
-            Log ("目录指纹缓存：hit={0}, miss={1}, hit_rate={2}%" -f $stats.fp_cache_hit, $stats.fp_cache_miss, $hitRate)
-        }
-        $dupGroups = @(Get-DuplicateMappingSourceGroups $cfg)
-        if ($dupGroups.Count -gt 0) {
-            Log ("检测到重复源目录映射组：{0}（建议合并配置以提升构建命中率）" -f $dupGroups.Count) "WARN"
-        }
-        Log ("构建阶段耗时：mapping={0}ms, overrides={1}ms, postscan={2}ms" -f $stats.phase_ms_mapping, $stats.phase_ms_overrides, $stats.phase_ms_postscan)
         if ($stats.reused) {
             Log "本次构建未能清空旧 agent/，已按目录增量覆盖；若仍有陈旧技能残留，可在释放相关文件占用后重试。"
             Write-Host "❌ 检测到在旧 agent/ 上增量覆盖构建，已升级为失败。" -ForegroundColor Red
@@ -2441,7 +2069,7 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
         $count = @((Get-ChildItem -LiteralPath $AgentDir -Directory -ErrorAction SilentlyContinue)).Count
         Log ("构建完成：agent/ (共 {0} 项技能)" -f $count)
         return $failures.ToArray()
-    } @{ command = "构建Agent" } -NoHost)
+    })
 }
 
 function Resolve-TargetDir([string]$path) {
@@ -2459,16 +2087,15 @@ function Resolve-TargetDir([string]$path) {
     return (Join-Path $Root $path)
 }
 
-function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, [string]$VerifiedAgentBuildSignature = "", $PromotionContext = $null) {
-    return (Invoke-WithMetric "apply_targets" {
+function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionContext = $null) {
+    return (& {
         if (-not $SkipPreflight) { Preflight }
         if ($null -eq $cfg) { $cfg = LoadCfg }
         $mode = $cfg.sync_mode
         if ([string]::IsNullOrWhiteSpace($mode)) { $mode = "link" }
         $failures = New-Object System.Collections.Generic.List[string]
 
-        Invoke-WithMetric "apply_target_links" {
-            foreach ($t in $cfg.targets) {
+        foreach ($t in $cfg.targets) {
                 try {
                     $target = Resolve-TargetDir $t.path
                     if (-not $target) { continue }
@@ -2488,10 +2115,9 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, [string]$Ver
                     Write-Host ("❌ 同步目标失败 [{0}]: {1}" -f $t.path, $_.Exception.Message) -ForegroundColor Red
                     $failures.Add(("target:{0} => {1}" -f $t.path, $_.Exception.Message)) | Out-Null
                 }
-            }
-        } @{ command = "应用到ClaudeCodex"; target_count = @($cfg.targets).Count } -NoHost | Out-Null
+        }
         try {
-            $projectionResult = Sync-ConfiguredSkillProjection $cfg $VerifiedAgentBuildSignature $PromotionContext
+            $projectionResult = Sync-ConfiguredSkillProjection $cfg $PromotionContext
             if ($projectionResult -and -not [bool]$projectionResult.skipped) {
                 $plan = $projectionResult.plan
                 Log ("技能投影已生成：entries={0}, unique={1}, disabled={2}, conflicts={3}, persisted={4}" -f @($plan.skills).Count, @($plan.unique_names).Count, @($plan.disabled).Count, @($plan.conflicts).Count, [bool]$projectionResult.persisted)
@@ -2502,7 +2128,7 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, [string]$Ver
             $failures.Add(("skill-projection => {0}" -f $_.Exception.Message)) | Out-Null
         }
         return $failures.ToArray()
-    } @{ command = "应用到ClaudeCodex" } -NoHost)
+    })
 }
 function Write-FailureSummary([string]$title, [string[]]$failures, [string]$detailHint = "") {
     if ($null -eq $failures -or $failures.Count -eq 0) { return }
@@ -2523,9 +2149,8 @@ function 构建生效(
     [switch]$AllowUnverifiedProjection = $AllowUnverifiedHostProjection,
     [switch]$SkipHostProjection
 ) {
-    Invoke-WithMetric "build_apply_total" {
+    & {
         Preflight
-        Invoke-PrebuildCheck
         $cfg = LoadCfg
         if ($Locked) {
             Ensure-LockedState $cfg | Out-Null
@@ -2545,21 +2170,11 @@ function 构建生效(
 
         Write-BuildSummary $cfg
         Log "=== 启动构建生效流程 ==="
-        $agentBuildCacheHit = Invoke-WithMetric "build_agent_cache_check" {
-            Test-AgentBuildCacheHit $cfg
-        } @{ command = "构建Agent" } -NoHost
-        if (-not $agentBuildCacheHit.hit) {
-            $txn = Start-BuildTransaction
-        }
+        $txn = Start-BuildTransaction
         Start-DryRunMirrorCollect
         try {
             $failures = @()
-            if ($agentBuildCacheHit.hit) {
-                $buildFailures = Invoke-AgentBuildCacheHit $agentBuildCacheHit
-            }
-            else {
-                $buildFailures = 构建Agent $cfg -SkipPreflight -Txn $txn
-            }
+            $buildFailures = 构建Agent $cfg -SkipPreflight -Txn $txn
             if ($buildFailures) { $failures += $buildFailures }
             if ($buildFailures -and @($buildFailures).Count -gt 0) {
                 Log "检测到构建失败，已跳过同步阶段。" "WARN"
@@ -2569,12 +2184,6 @@ function 构建生效(
                 Log "已按显式请求跳过宿主目标与 native skill projection；仅保留 agent/ 构建产物。"
             }
             else {
-                $verifiedAgentBuildSignature = if ($agentBuildCacheHit.hit) {
-                    [string]$agentBuildCacheHit.state.signature
-                }
-                else {
-                    [string](Load-BuildCache)["__agent_build_signature"]
-                }
                 $promotionContext = $null
                 try {
                     $promotionContext = Get-HostProjectionPromotionContext $cfg -AllowUnverified:$AllowUnverifiedProjection
@@ -2586,7 +2195,7 @@ function 构建生效(
                     Write-Host "⚠️ agent/ staging 已保留，但未写入任何仓库外宿主目标。提交并验证当前 revision 后可重新执行构建生效。" -ForegroundColor Yellow
                 }
                 if (@($failures).Count -eq 0) {
-                    $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight -VerifiedAgentBuildSignature $verifiedAgentBuildSignature -PromotionContext $promotionContext
+                    $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight -PromotionContext $promotionContext
                     if ($syncFailures) { $failures += $syncFailures }
                 }
             }
@@ -2608,7 +2217,7 @@ function 构建生效(
         if (@($failures).Count -gt 0) {
             throw ("构建生效失败（{0} 项）：{1}" -f @($failures).Count, [string]@($failures)[0])
         }
-    } @{ command = "构建生效" } -NoHost
+    }
 }
 
 function 命令导入安装 {

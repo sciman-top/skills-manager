@@ -6,8 +6,7 @@ param(
     [string]$Root = $PSScriptRoot,
     [switch]$SyncMcp,
     [switch]$SkipEnvironmentCheck,
-    [switch]$SkipRebuildLocked,
-    [int]$DoctorThresholdMs = 8000
+    [switch]$SkipRebuildLocked
 )
 
 $ErrorActionPreference = "Stop"
@@ -90,6 +89,6 @@ elseif ($SyncMcp) {
     Write-Host "PortableOnly 模式不会写入 MCP 或 skills 目标目录，已忽略 -SyncMcp。"
 }
 
-Invoke-PowerShellFile "doctor" $entryPath @("doctor", "--strict", "--threshold-ms", [string]$DoctorThresholdMs)
+Invoke-PowerShellFile "doctor" $entryPath @("doctor", "--strict")
 
 Write-Host ("skills-manager install completed: {0}" -f $Mode)

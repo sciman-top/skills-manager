@@ -20,18 +20,17 @@ Contributions may change code, tests, documentation, gates, release tooling, ski
 
 ```powershell
 pwsh -NoProfile -File .\build.ps1
-pwsh -NoProfile -File .\tests\check-generated-sync.ps1 -AllowDirtyWorktree
 pwsh -NoProfile -File .\scripts\verify-skill-integrity.ps1
 pwsh -NoProfile -File .\scripts\verify-skills-config.ps1 -Mode enforce
 ```
 
-For an exact-current full closeout:
+For a risk-triggered full closeout:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full -ReuseCurrentReceipt
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree
 ```
 
-If reuse misses and a new full run is justified, use `-ForceFresh` once. `构建生效`, `同步MCP`, host projection, live doctor, commit, and push are separate actions; do not include them implicitly in a repository-only change.
+Run the full gate once after inputs are frozen. `构建生效`, `同步MCP`, host projection, live doctor, commit, and push are separate actions; do not include them implicitly in a repository-only change.
 
 ## Documentation and evidence
 

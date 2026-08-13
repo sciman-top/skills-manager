@@ -2666,7 +2666,7 @@ function Invoke-McpManagedTargetTransaction([object[]]$DesiredState,[string]$Exp
 }
 
 function 同步MCP {
-    Invoke-WithMetric "sync_mcp" {
+    & {
         $script:SkipNativeMcpForSession = $false
         $context = Get-McpSyncPlanningContext
         if (-not $DryRun) {
@@ -2698,5 +2698,5 @@ function 同步MCP {
             throw
         }
         if (@($context.servers).Count -eq 0) { Write-Host "提示：当前 mcp_servers 为空，已将各目标写为空配置。" }
-    } @{ command = "同步MCP" } -NoHost
+    }
 }

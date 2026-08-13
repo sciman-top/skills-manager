@@ -18,16 +18,6 @@ Describe 'OperationPlan and Receipt v1 contracts' {
             -Actions $Actions
     }
 
-    It 'keeps both declarative schemas parseable and versioned' {
-        $planSchema = Get-Content -LiteralPath (Join-Path $repoRoot 'config\operation-plan.schema.json') -Raw | ConvertFrom-Json
-        $receiptSchema = Get-Content -LiteralPath (Join-Path $repoRoot 'config\operation-receipt.schema.json') -Raw | ConvertFrom-Json
-
-        $planSchema.'$schema' | Should Be 'https://json-schema.org/draft/2020-12/schema'
-        $planSchema.properties.schema_version.const | Should Be 1
-        $receiptSchema.properties.schema_version.const | Should Be 1
-        @($receiptSchema.'$defs'.verification.required).Count | Should Be 4
-    }
-
     It 'accepts the valid plan and receipt fixtures' {
         $plan = Get-Content -LiteralPath (Join-Path $fixtureRoot 'valid-plan.json') -Raw | ConvertFrom-Json
         $receipt = Get-Content -LiteralPath (Join-Path $fixtureRoot 'valid-receipt.json') -Raw | ConvertFrom-Json

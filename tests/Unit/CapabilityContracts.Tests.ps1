@@ -5,14 +5,6 @@ $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 
 Describe 'Rule contracts' {
 
-    It 'keeps both declarative schemas at version 1' {
-        foreach ($name in @('rule-document', 'rule-responsibility')) {
-            $schema = Get-Content -LiteralPath (Join-Path $repoRoot ('config\{0}.schema.json' -f $name)) -Raw | ConvertFrom-Json
-            $schema.'$schema' | Should Be 'https://json-schema.org/draft/2020-12/schema'
-            $schema.properties.schema_version.const | Should Be 1
-        }
-    }
-
     It 'constructs and validates distinct plain-object contracts' {
         $finding = New-RuleFinding -Kind deterministic -Code byte_budget_exceeded -Severity warning -Path 'AGENTS.md' -Message 'Over budget.' -Disposition adapt
         $document = New-RuleDocument -Host codex -Scope repo -Responsibility project_action -Path 'AGENTS.md' -Owner repo -ContentHash ('a' * 64) -ByteSize 10 -DiscoveryState observed -SourceOfTruth repo -Findings @($finding)

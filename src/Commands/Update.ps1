@@ -418,7 +418,7 @@ function Show-UpdatePlan($cfg) {
 }
 
 function 更新Vendor($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $null, [switch]$SkipFetch) {
-    return (Invoke-WithMetric "update_vendor" {
+    return (& {
         if (-not $SkipPreflight) { Preflight }
         if ($null -eq $cfg) { $cfg = LoadCfg }
         $failures = New-Object System.Collections.Generic.List[string]
@@ -475,11 +475,11 @@ function 更新Vendor($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $n
         }
         Clear-SkillsCache
         return $failures.ToArray()
-    } @{ command = "更新Vendor" } -NoHost)
+    })
 }
 
 function 更新Imports($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $null, [switch]$SkipFetch) {
-    return (Invoke-WithMetric "update_imports" {
+    return (& {
         if (-not $SkipPreflight) { Preflight }
         if ($null -eq $cfg) { $cfg = LoadCfg }
         $cfgRaw = if (Test-Path $CfgPath) { Get-Content $CfgPath -Raw } else { "" }
@@ -610,16 +610,15 @@ function 更新Imports($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $
         }
         Clear-SkillsCache
         return $failures.ToArray()
-    } @{ command = "更新Imports" } -NoHost)
+    })
 }
 
 function 更新 {
-    Invoke-WithMetric "update_total" {
+    & {
         $cfg = LoadCfg
         if ($Locked -and ($Plan -or $Upgrade)) {
             throw "-Locked 不能与 -Plan 或 -Upgrade 同时使用。"
         }
-        Invoke-PrebuildCheck
         if ($Plan) {
             Preflight
             Show-UpdatePlan $cfg | Out-Null
@@ -665,5 +664,5 @@ function 更新 {
         else {
             Write-Host "更新完成。若某 CLI 未立即识别新技能，重启该 CLI 会话即可。"
         }
-    } @{ command = "更新" } -NoHost
+    }
 }
