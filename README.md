@@ -6,6 +6,8 @@ Windows-first、local-first 的 PowerShell 7 技能与 MCP 管理器。它把分
 
 本项目不做第二套 AI runtime：不选择模型，不管理 provider/auth/session，不接管 Codex/Claude 的语义路由，也不直接维护插件缓存。仓库测试只证明 `repo_verified`；宿主新会话加载和真实业务验收必须分别验证。
 
+本项目采用 [MIT License](LICENSE)。第三方技能与依赖仍各自遵循其原始许可证。
+
 ## 快速开始
 
 要求 PowerShell 7 (`pwsh`) 和 Git。Windows PowerShell 5.1 不受支持。
@@ -153,4 +155,4 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-qualit
 pwsh -NoProfile -File .\scripts\release\build-release.ps1 -Version 2026.08.13
 ```
 
-发布者须先阅读 [发布指南](docs/RELEASING.md)，尤其是许可证和 clean-machine 验收边界。产品边界见 [docs/product/README.md](docs/product/README.md)，贡献规则见 [CONTRIBUTING.md](CONTRIBUTING.md)，PowerShell 支持边界见 [docs/runbooks/powershell-runtime-compatibility.md](docs/runbooks/powershell-runtime-compatibility.md)。
+发布者须先阅读 [发布指南](docs/RELEASING.md)，尤其是第三方来源和 clean-machine 验收边界。产品边界见 [docs/product/README.md](docs/product/README.md)，贡献规则见 [CONTRIBUTING.md](CONTRIBUTING.md)，PowerShell 支持边界见 [docs/runbooks/powershell-runtime-compatibility.md](docs/runbooks/powershell-runtime-compatibility.md)。

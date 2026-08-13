@@ -6,6 +6,8 @@ It is aimed at individuals and teams that want the same skill set across Windows
 
 This repository is not a second AI runtime. It does not select models, own provider/auth/session state, replace host semantic routing, or manage plugin caches. Repository verification proves only `repo_verified`; host loading and live business acceptance remain separate checks.
 
+This project is licensed under the [MIT License](LICENSE). Third-party skills and dependencies remain subject to their original licenses.
+
 ## Quick start
 
 PowerShell 7 (`pwsh`) and Git are required. Windows PowerShell 5.1 is unsupported.
@@ -127,4 +129,4 @@ Build both release packages with:
 pwsh -NoProfile -File .\scripts\release\build-release.ps1 -Version 2026.08.13
 ```
 
-Maintainers should read [the release guide](docs/RELEASING.md), especially the license and clean-machine acceptance requirements.
+Maintainers should read [the release guide](docs/RELEASING.md), especially the third-party provenance and clean-machine acceptance requirements.

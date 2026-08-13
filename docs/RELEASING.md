@@ -8,7 +8,7 @@
 - `portable` 是完整绿色包：内置当前构建好的 `agent/`，适合离线、演示和机器迁移。
 - 源码归 Git tag；ZIP 是便利交付物，不替代仓库历史。
 
-公开向第三方发布前，仓库所有者必须添加并确认适当的 `LICENSE`。当前缺少许可证时，可以做内部/私有制品，但不应把“GitHub 可见”误写成已授予再分发权。
+项目自身代码采用根目录 [MIT License](../LICENSE)。发布包必须包含该文件；引入的第三方技能、源码和依赖仍保留各自许可证，MIT 不会覆盖或重许可第三方内容。
 
 ## 本地一键打包
 
@@ -45,7 +45,7 @@ CI 对 `v*` tag 在 full gate 通过后生成两个 ZIP 和 checksum，并创建
 1. 确认 `main` 干净且与 `origin/main` 一致。
 2. 运行 full gate；检查 `build.ps1` 未产生生成物漂移。
 3. 在本地实际构建并抽查两个 ZIP。
-4. 确认许可证、第三方来源与 release notes。
+4. 确认 MIT `LICENSE` 已进入制品，并复核第三方来源、许可证与 release notes。
 5. 创建并推送 annotated tag，例如 `git tag -a v2026.08.13 -m "v2026.08.13"`、`git push origin v2026.08.13`。
 6. 等待 GitHub Actions 成功，再从 Release 页面下载制品复核 SHA-256 与安装烟测。
 

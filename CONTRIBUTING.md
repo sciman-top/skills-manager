@@ -34,7 +34,7 @@ Run the full gate once after inputs are frozen. `构建生效`, `同步MCP`, hos
 
 ## Release tooling
 
-`scripts/release/build-release.ps1` is the single release-package entrypoint. It creates bootstrap and portable ZIPs plus a SHA-256 list under ignored `artifacts/`. Do not hand-assemble or upload a package containing `.git`, runtime reports, credentials, host configuration, or plugin caches. Follow [docs/RELEASING.md](docs/RELEASING.md); public distribution additionally requires an owner-approved license.
+`scripts/release/build-release.ps1` is the single release-package entrypoint. It creates bootstrap and portable ZIPs plus a SHA-256 list under ignored `artifacts/`. Do not hand-assemble or upload a package containing `.git`, runtime reports, credentials, host configuration, or plugin caches. Follow [docs/RELEASING.md](docs/RELEASING.md); every public package must include the repository MIT `LICENSE` while preserving third-party license obligations.
 
 ## Documentation and evidence
 

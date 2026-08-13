@@ -50,7 +50,7 @@ function New-ReleasePackage([string]$Kind) {
     New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
 
     $rootFiles = @(
-        'README.md', 'README.en.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'SECURITY.md',
+        'README.md', 'README.en.md', 'LICENSE', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'SECURITY.md',
         'build.ps1', 'install.ps1', 'setup.cmd', 'skills.cmd', 'skills.json', 'skills.lock.json', 'skills.ps1',
         'docs\INSTALLATION_AND_MIGRATION.md', 'docs\RELEASING.md'
     )

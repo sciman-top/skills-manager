@@ -37,10 +37,12 @@ Describe 'Release packaging' {
         $bootstrapManifest.package | Should Be 'bootstrap'
         $bootstrapManifest.includes_prebuilt_agent | Should Be $false
         Test-Path -LiteralPath (Join-Path $bootstrapRoot 'setup.cmd') | Should Be $true
+        Test-Path -LiteralPath (Join-Path $bootstrapRoot 'LICENSE') | Should Be $true
         Test-Path -LiteralPath (Join-Path $bootstrapRoot 'reports') | Should Be $false
         Test-Path -LiteralPath (Join-Path $bootstrapRoot '.git') | Should Be $false
         $portableManifest.package | Should Be 'portable'
         $portableManifest.includes_prebuilt_agent | Should Be $true
         Test-Path -LiteralPath (Join-Path $portableRoot 'agent') | Should Be $true
+        Test-Path -LiteralPath (Join-Path $portableRoot 'LICENSE') | Should Be $true
     }
 }
