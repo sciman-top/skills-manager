@@ -1,132 +1,18 @@
 # skills-manager
 
-[English](README.en.md) | 中文
+Windows-first、local-first 的 PowerShell 7 技能与 MCP 管理器。它把多个来源的技能收敛到一个版本化配置，生成可移植技能目录，并提供目标仓审查、规则审查和受控投影。
 
-`skills-manager` 是一个 Windows 优先的 PowerShell 管理器，用来把多来源 AI agent skills 汇总到统一工作区，生成稳定产物，并同步到 Claude、Codex、Gemini、Trae 等本地 CLI。
-
-它适合这些场景：
-
-- 同时维护多个 agent 的 skills 目录，不想分别手工拷贝。
-- 需要混用整库 vendor、定向 import、本地 override 三种来源。
-- 希望把可手改输入层和不可手改生成层明确分开。
-- 需要把 MCP 清单、目标仓审查包、portable 发布和新机安装纳入同一套脚本入口。
-
-## 当前状态与边界
-
-- 单一命令入口：`skills.ps1`
-- 单一配置真源：`skills.json`
-- 源码入口：`src/`；运行 `./build.ps1` 生成根目录 `skills.ps1`
-- 默认 skills 同步目标：`~/.claude/skills`、`~/.codex/skills`、`~/.gemini/skills`、`~/.gemini/antigravity/skills/`、`~/.trae/skills/`
-- MCP 托管真源：`skills.json` 的 `mcp_servers`；落地产物由 `.\skills.ps1 同步MCP` 生成
-- 非 MCP 宿主设置不在本仓托管边界内，例如 Codex `windows.sandbox`、approval/model/context，Claude/Gemini 的 auth/provider/model/context/sandbox
-
-## 产品方向（vNext）
-
-本项目将按已落盘的 vNext 规划，演进为 Windows-first、local-first 的 AI capability curator 与 rule advisor：继续管理 skills/MCP，并增加官方 plugin awareness、统一但不扁平化的 capability inventory、全局/项目规则只读诊断，以及经过 plan/diff/显式 apply/receipt 保护的受管写入。
-
-它不会成为 agent runtime、插件商店、provider/model/auth/session 管理器、中央目标仓 registry 或跨仓规则同步服务。规则能力默认 advisory-first，宿主加载和 live acceptance 必须由各自 native/真实工作流证据证明。
-
-### 默认协作面
-
-个人默认使用 ChatGPT Desktop App（含 Codex/Work 交互面）完成需求澄清、设计、交互式编码、审查和用户决策；Codex CLI 用于脚本化、批量、CI、机器可读执行和终端恢复；Claude Code 用于 Claude 特有能力或独立复核。这个顺序只影响协作入口，不是强制路由，也不决定技术栈或核心架构；任务形态和宿主原生能力优先，产品核心保持宿主中立。
-
-- [产品文档索引](docs/product/README.md)
-- [vNext PRD](docs/product/skills-manager-vnext-prd.md)
-- [vNext 架构](docs/product/skills-manager-vnext-architecture.md)
-- [vNext 路线图](docs/product/skills-manager-vnext-roadmap.md)
-- [规则治理参考采纳矩阵](docs/product/rule-governance-adoption-matrix.md)
-- [当前 Phase 6 任务 manifest](tasks/skills-manager-vnext-phase6.tasks.json)
-- [历史 Agent workflow advisory spec](docs/superpowers/specs/2026-08-05-agent-workflow-advisory-runtime.md) / [历史 manifest](tasks/skills-manager-vnext-agent-workflow-advisory.tasks.json)
-- [历史 Phase 5 任务 manifest](tasks/skills-manager-vnext-phase5.tasks.json)
-- [历史 Phase 4 任务 manifest](tasks/skills-manager-vnext-phase4.tasks.json)
-- [历史 Phase 3 任务 manifest](tasks/skills-manager-vnext-phase3.tasks.json)
-- [Phase 2 历史任务 manifest](tasks/skills-manager-vnext-phase2.tasks.json)
-- [Phase 1 历史任务 manifest](tasks/skills-manager-vnext-phase1.tasks.json)
-- [Phase 0 历史任务 manifest](tasks/skills-manager-vnext-phase0.tasks.json)
-
-vNext 当前动态真值由 P6 manifest 管理；当前仓库实现已完成 P6 host-native lifecycle reset 的 repo-side 收口，并完成一次有明确样本范围的 Codex Desktop 代表性验收。Desktop 验收只看技能可发现性、可复用性和行为一致性，不依赖 CLI injected/executed 遥测，也不外推为所有任务或模型的普遍保证。P0-P5 计数只作为历史仓库契约保留；plugin/MCP 安装、OAuth、host/profile/session 写入和重启仍不在本次自动边界。
-
-本项目仅支持 PowerShell 7 (`pwsh`)；PowerShell 7.6 LTS 是推荐基线。Windows PowerShell 5.1 不再提供安装 fallback、CI 或 smoke 支持，缺少 `pwsh` 时入口 fail-closed。迁移、编码与回滚边界见 [`docs/runbooks/powershell-runtime-compatibility.md`](docs/runbooks/powershell-runtime-compatibility.md)。
-
-PowerShell 7 仍是当前唯一运行真源。新领域逻辑先收敛为窄、纯、versioned JSON/protocol seam；只有当前失败无法用更简单方式修复，且真实消费者、对比收益、分发与回滚证据同时成立时，才重新评估 typed implementation。2026-08-05 的 C#/.NET TC1 `shadow_only` PoC 虽完成固定 corpus parity，但始终零生产/仓外消费者、未证明 AI 返工净收益，并持续引入 SDK pin 与 full-gate 成本，现已删除实现/verifier/test；其 spec/manifest/evidence 仅作历史记录。
-
-长链路任务分解、模型选择、子 Agent/worktree 编排、失败恢复和集成继续完全由宿主 AI 原生能力负责。仓库曾实现的通用 TaskGraph/model-policy advisory 没有发现本仓外消费者，且与宿主 Plan/Goal/subagent 控制面重叠，现已从 build、CLI、默认 gate 和当前测试面退役；历史 spec/manifest/evidence 仅用于追溯。本项目只为自身 capability/rule/projection 领域提供必要的 plan/receipt/rollback 合同，不再建立通用 AI 工程编排或第二治理面。
-
-Phase 1 的只读入口（未指定 `--out` 时不写文件）：
-
-```powershell
-.\skills.ps1 capability-inventory --json
-.\skills.ps1 rule-audit --repo . --host codex --json
-.\skills.ps1 rule-estate-audit --workspace-root D:\CODE --json
-```
-
-`rule-estate-audit` 默认排除 `external` 与 `文档`，动态发现直属 Git 仓，并分别报告 textual mapping 与 semantic gap；grouped、未知或重复映射均不视为语义通过。审计还验证 Codex/Claude 全局 `1/A/B/C/D` 结构、A/C/D parity、B delta、release/硬预算，以及项目 `1/A/B/C/D`、Claude wrapper、逐项 R/S/E 映射、N/A 证据与有效期、Git baseline/upstream 真值及 S5 具体文件引用。可选 `--registry <snapshot.json>` 只比较动态发现结果与外部快照的 drift，不改变目标集合，也不是中央真源。根规则只保存稳定规范/入口，易变 task/gate/host/live 状态从 manifest/spec/evidence fresh read。`--out <report.json>` 只在显式 workspace root 内写一个报告，不得穿过 reparse/junction 或覆盖输入；plan/apply 同界。
-
-经人工或登记策略审阅的全局/项目规则 change-set 可进入受控多目标流程：
-
-```powershell
-.\skills.ps1 rule-estate-plan --review <reviewed-change-set.json> --workspace-root D:\CODE --out <estate-plan.json> --json
-.\skills.ps1 rule-estate-apply --plan <estate-plan.json> --workspace-root D:\CODE --token APPLY_RULE_ESTATE_PATCH --out <estate-receipt.json> --json
-.\skills.ps1 rule-estate-rollback --receipt <estate-receipt.json> --action-id <action-id> --workspace-root D:\CODE --token ROLLBACK_RULE_ESTATE_PATCH --json
-```
-
-该流程先全量预检，再逐目标原子写入并持久化 receipt；失败立即停止，已完成目标不自动回滚，可从 receipt resume 或单独 rollback。默认拒绝 AI 自声明 reviewed、目标规则 stale hash、目标集合漂移、锁冲突和越界文件；仓内无关 dirty paths 只记录并原样保留，不修改 provider/auth/model/sandbox/plugin/native host 配置，也不自动 commit/push。
-
-P2 事务入口支持 fixture、单仓和 reviewed rule-estate 三种显式授权域：
-
-```powershell
-.\skills.ps1 rule-plan --target <fixture-rule> --desired-file <reviewed-file> --fixture-root <fixture-root> --json --out <fixture-plan.json>
-.\skills.ps1 rule-apply --plan <fixture-plan.json> --fixture-root <fixture-root> --token APPLY_RULE_PATCH --json
-.\skills.ps1 rule-plan --target <repo-rule> --desired-file <reviewed-file> --repo-root <git-root> [--allow-create] --json --out <repo-plan.json>
-.\skills.ps1 rule-apply --plan <repo-plan.json> --repo-root <git-root> --token APPLY_RULE_REPO_PATCH --json
-```
-
-单仓模式只允许精确 Git 根内的 `AGENTS.md`、`AGENTS.override.md` 或 `CLAUDE.md`，并执行 hash freshness、reparse、原子写入和回滚守卫；全域模式另以 reviewed change-set 和更严格的根文件 allowlist 管理全局用户规则及多个目标仓。
-
-P3 plugin-aware 命令中，inventory/lint/eval 为只读；export 仍严格 fixture-only：
-
-```powershell
-.\skills.ps1 plugin-inventory --official <snapshot.json> [--personal <snapshot.json>] [--workspace <snapshot.json>] --json
-.\skills.ps1 plugin-lint --path <plugin-root> --json
-.\skills.ps1 plugin-export --candidate <candidate.json> --fixture-root <fixture-root> --out <new-folder> --token EXPORT_PLUGIN_FIXTURE --json
-.\skills.ps1 plugin-eval --path <plugin-root> --json
-```
-
-本阶段只支持已验证的 Codex skills-only package。命令不会安装/启停 plugin、修改 marketplace/host profile、调用 provider，model snapshot 也不作为 deterministic blocker。
-
-## 路径与编辑策略
-
-| 路径 / 键 | 作用 | 编辑策略 |
-| --- | --- | --- |
-| `skills.json` | 单一配置真源，托管 `vendors / mappings / imports / targets / sync_mode / mcp_servers` | 直接修改；用 `scripts/verify-skills-config.ps1 -Mode enforce` 做只读校验 |
-| `config/skills.schema.json` | `skills.json` v1 结构、兼容与敏感信息输出策略 | 版本化维护；缺少 `schema_version` 按 legacy v1 observation 读取 |
-| `config/host-capability-matrix.json` | 宿主 surface、所有权、activation 与最高自动验证层级的只读合同 | 用 `scripts/verify-host-capability-matrix.ps1` 校验；不得写成 live inventory |
-| `src/` | 源模块 | 在这里改逻辑，再运行 `./build.ps1` |
-| `skills.ps1` | 生成后的入口脚本 | 不手改；由 `build.ps1` 生成 |
-| `vendor/` | 上游整库缓存 | 不手改；通过 `更新` 或锁文件重建 |
-| `imports/` | 定向导入来源落地层 | 仅作为输入层维护，不把它当生成产物修补 |
-| `overrides/` | 已审阅的本地输入层 | `custom/` 放本仓自定义能力，`patches/` 放上游替换/补丁，`resources/` 放无 `SKILL.md` 的资源桥；根级只放具名单文件 override |
-| `agent/` | 生成产物与同步源 | 不手改；通过 `构建生效` 重建 |
-| `reports/skill-audit/<run-id>/ai-brief.md` | 审查运行包摘要 | 运行态产物，不手改 |
-| `reports/skill-audit/<run-id>/outer-ai-prompt.md` | 外层 AI 执行提示词 | 运行态产物；改默认提示词请改 `src/Commands/AuditTargets.ps1` 或 `overrides/audit-outer-ai-prompt.md` |
-
-分类目录的叶子名仍是稳定输出名：`overrides/<category>/<leaf>` 会生成 `agent/<leaf>`。旧的 `overrides/<leaf>` 扁平目录只在迁移窗口内兼容读取；新内容不得继续放入扁平目录，跨分类同名会阻断构建。详见 [overrides/README.md](overrides/README.md)。
+本项目不做第二套 AI runtime：不选择模型，不管理 provider/auth/session，不接管 Codex/Claude 的语义路由，也不直接维护插件缓存。仓库测试只证明 `repo_verified`；宿主新会话加载和真实业务验收必须分别验证。
 
 ## 快速开始
 
-首次使用建议直接进入交互菜单：
+要求 PowerShell 7 (`pwsh`) 和 Git。Windows PowerShell 5.1 不受支持。
 
 ```powershell
-.\skills.ps1
-```
-
-最小上手路径：
-
-```powershell
-.\skills.ps1 发现
-.\skills.ps1 安装
-.\skills.ps1 构建生效
-.\skills.ps1 doctor --strict --threshold-ms 8000
+pwsh -NoProfile -File .\skills.ps1 help
+pwsh -NoProfile -File .\skills.ps1 发现
+pwsh -NoProfile -File .\skills.ps1 安装
+pwsh -NoProfile -File .\skills.ps1 doctor --strict --threshold-ms 8000
 ```
 
 交互菜单按“高频动作直达 + 领域子菜单”组织：
@@ -134,7 +20,6 @@ P3 plugin-aware 命令中，inventory/lint/eval 为只读；export 仍严格 fix
 - 浏览技能
 - 选择安装
 - 粘贴命令导入
-- 卸载技能
 - 重建并同步（CLI 命令仍为 `构建生效`）
 - 更新上游（CLI 命令仍为 `更新`）
 - 目标仓审查
@@ -142,348 +27,113 @@ P3 plugin-aware 命令中，inventory/lint/eval 为只读；export 仍严格 fix
 - 技能库管理
 - 更多
 
-## 一键工作流
+## 配置真源
 
-```powershell
-.\skills.ps1 一键 --list
-.\skills.ps1 一键 新手
-.\skills.ps1 一键 维护 --continue-on-error
-.\skills.ps1 一键 审查 --no-prompt
-.\skills.ps1 workflow all --no-prompt
-```
+`skills.json` 管理：
 
-当前内置场景：
+- `vendors` / `imports`：技能来源
+- `mappings`：安装白名单与输出名
+- `targets`：生成技能的目标目录
+- `mcp_servers` / `mcp_profiles` / `mcp_targets`：MCP 清单与同步目标
+- `skill_projection`：技能来源、别名、domain catalog、metadata budget 和 native placement
 
-- `新手` / `quickstart` / `start` / `onboarding`
-  浏览技能 -> 选择安装 -> 重建并同步 -> `doctor --strict --threshold-ms 8000`
-- `维护` / `maintenance` / `maintain`
-  更新上游 -> 重建并同步 -> 同步 MCP -> `doctor --strict --threshold-ms 8000`
-- `审查` / `audit`
-  查看需求 -> 目标仓列表 -> 生成审查包 -> 查看最近状态
-- `全流程` / `all` / `full`
-  更新上游 -> 浏览技能 -> 重建并同步 -> 同步 MCP -> `doctor --strict --threshold-ms 8000`
-
-未指定场景且传入 `--no-prompt` 时，默认执行 `all`。
+`skills.lock.json` 锁定已解析来源。`src/` 是 CLI 源码，`build.ps1` 生成根 `skills.ps1`；`overrides/{custom,patches,resources}` 生成 `agent/`。不要手改 `skills.ps1`、`agent/`、`vendor/` 或运行态 `reports/`。
 
 ## 常用命令
 
-### 发现、导入、安装、卸载
+### 技能
 
 ```powershell
 .\skills.ps1 发现
 .\skills.ps1 安装
-.\skills.ps1 命令导入安装
-.\skills.ps1 add <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]
-.\skills.ps1 npx "skills add <repo> --skill <name>"
-.\skills.ps1 卸载 [<skill-name>|<index>|all] [--yes] [--filter <keyword>]
-.\skills.ps1 清理无效映射 [--yes] [--no-build]
-```
-
-说明：
-
-- `add` 未指定 `--skill` 时，只登记技能库，不会安装整库技能。
-- 指定 `--skill` 时，默认按 `manual` 导入到 `imports/`；传 `--mode vendor` 可改为 vendor 管理。
-- `命令导入安装` 支持连续粘贴多条 `add` / `npx skills add` / `npx add-skill` 命令；行尾用 `\` 可续行。
-- `卸载` 不带参数时进入交互选择；传技能名、序号或 `all` 时可配合 `--yes` 非交互执行。
-- `清理无效映射` 的英文别名是 `prune-invalid-mappings`。
-
-### 构建、更新、锁定、维护
-
-```powershell
-.\skills.ps1 构建生效
+.\skills.ps1 卸载 <name> --yes
+.\skills.ps1 add <repo> --skill <path>
+.\skills.ps1 锁定
+.\skills.ps1 verify-lock
 .\skills.ps1 更新 -Plan
 .\skills.ps1 更新 -Upgrade
-.\skills.ps1 锁定
-.\skills.ps1 新增技能库
-.\skills.ps1 删除技能库
-.\skills.ps1 自动更新设置
-.\skills.ps1 解除关联
-.\skills.ps1 清理备份
-.\skills.ps1 doctor [--json] [--fix] [--dry-run-fix] [--strict] [--strict-perf] [--threshold-ms <ms>]
+.\skills.ps1 构建生效
 ```
 
-说明：
+`构建生效` 会重建并写入宿主目标，属于外部投影动作。仅需仓库内同步时运行 `build.ps1`；不要用 `构建生效` 代替普通构建验证。
 
-- 只想把当前配置重新输出到 `agent/` 和目标目录时，用 `构建生效`。
-- `构建生效` 在写入仓库外的宿主技能/config 目录前要求当前技能源是 clean Git commit，并在 projection manifest 记录 source revision、dirty 状态和 promotion mode。`-AllowUnverifiedHostProjection` 只用于明确接受风险的例外，manifest 会如实标记 `unverified_override`，不会伪装成已通过 full gate。
-- CI 或隔离构建只需物化锁定来源和生成 `agent/`、不应写宿主目标时，使用 `更新 -Locked -SkipHostProjection`；该开关跳过 configured targets 与 native skill projection，不弱化正常宿主投影的 fail-closed。
-- 需要拉取上游新内容时，用 `更新`；`-Plan` 只看预览，`-Upgrade` 会更新后刷新 `skills.lock.json`。
-- `锁定` 会生成或刷新 `skills.lock.json`，给后续 `更新 -Locked` 和 portable 安装重放使用。
-- `doctor --strict` 在校验不通过时会返回非零退出码，适合作为脚本门禁。
-
-### ChatGPT Desktop 优先的受控技能进化
-
-ChatGPT Desktop 是首选操作面；用户不需要运行 CLI、复制 token 或手工拼接 plan。候选满足真实任务 admission 后，宿主 AI 自动调用 `prepare`，使用 `skill-creator` 在隔离目录编写候选，并执行静态/forward evaluation。通过后 CLI 产出 `interaction.kind=question` 的 `review_request`，Desktop 在当前任务向用户提问并进入 `Needs input`；是否出现系统级弹窗由 Desktop 的 **Settings → Notifications** 中 permission/question notification 开关决定，仓库不会修改该设置。
-
-生命周期分两次可理解的授权：
-
-1. 包晋级：批准后自动原子写入 `overrides/custom/<skill>` 并执行 `构建生效 -SkipHostProjection`；随后自动发起活跃覆盖审核。
-2. 启用/刷新/退役：批准后自动 stage `managed_link_includes`、cold build，由宿主完成精确 Git 收口；正式 `project` 只在 clean commit 和 exact-current full gate 后写受管用户技能根/Codex 配置。
-
-用户在 Desktop 里审核候选晋级时可回复“批准”“拒绝并保留”或“拒绝并删除”；审核启用、刷新或退役时只显示“批准 / 拒绝（保持冷态）”。普通候选拒绝不晋级、不构建、不投影，候选默认保留 7 天以便审计；“拒绝并删除”同时构成独立删除授权，只清理尚未晋级的 `reports/skill-evolution/**` candidate。activation 拒绝保持当前冷 catalog 状态且不提供删除选项；退役只退出活跃覆盖并重新投影，源码继续留在冷 catalog 以支持回滚。
-
-CLI 仍作为宿主内部确定性执行器和故障恢复面，完整命令可见 `skills.ps1 帮助`。自动化不建立后台 daemon，也不会监控或保存所有 Desktop 会话；它从已记录且满足 admission 的脱敏真实任务信号开始。
-
-### MCP 管理
+### MCP
 
 ```powershell
-.\skills.ps1 安装MCP context7 -- npx -y @upstash/context7-mcp@3.2.3
-.\skills.ps1 卸载MCP context7
-.\skills.ps1 同步MCP
-.\skills.ps1 mcp-sync --plan --json
-.\skills.ps1 mcp-sync --plan --json --out .\reports\mcp-plan.json
+.\skills.ps1 安装MCP <name> -- <command> [args...]
+.\skills.ps1 安装MCP <name> --transport http --url <url>
+.\skills.ps1 卸载MCP <name>
 .\skills.ps1 MCP配置 列表
-.\skills.ps1 MCP配置 使用 coding
+.\skills.ps1 MCP配置 使用 default
+.\skills.ps1 同步MCP
 ```
 
-说明：
-
-- `安装MCP` / `卸载MCP` 会更新 `skills.json`，随后自动执行一次 `同步MCP`。
-- `同步MCP` 会把 MCP 服务清单写入目标根目录 `.mcp.json`、Gemini/Trae 配置以及 Codex `config.toml` 的 `[mcp_servers.*]` 段。
-- `mcp-sync --plan --json` 复用 apply 的 desired-state calculation，输出确定性、脱敏的 `OperationPlan v1`；plan 不写 MCP 目标、不调用 native add/remove，也不修改 active profile。只有显式 `--out` 会写指定的 plan 文件。
-- 未传 `--plan` 的 `同步MCP` / `mcp-sync` 保持原有 apply 行为；旧 `-DryRun` 人类可读预演语义也保持兼容。
-- `skills.json.mcp_profiles` 是用途 profile 真源；`MCP配置 使用 <name>` 会持久化 active profile 并同步。Codex 保留完整服务清单，通过 `enabled` / `enabled_tools` 启停和收窄工具面；Claude/Gemini/Trae 只接收当前 profile 启用的服务。
-- 默认 profile 仅启用 `microsoft-learn` 与 `openaiDeveloperDocs`；`coding`、`codebase`、`browser`、`database` 等 profile 按任务启用其他服务。切换不会卸载 MCP，`node_repl` 等宿主自有服务不会被同步器删除。GitHub 语义操作优先使用宿主 GitHub app/`gh`，本地文件读写使用 Codex 原生工具，因此不再托管重复的 `github` 与 `filesystem` MCP。
-- `postgres` MCP 预检要求 `POSTGRES_CONNECTION_STRING` 为 `postgresql://...`；若检测到 Npgsql/ADO 风格 key-value 连接串，会自动转换并写回 User scope。
-- 本机 weekly task `skills-manager-weekly-update-friday-2000` 的顺序是 `更新 -> 同步MCP`，所以 MCP 启动环境修复必须落在真源链上，不能只改 live `~/.codex/config.toml`。
-
-### Codex 技能去重投影
-
-`skills.json.skill_projection` 管理用户技能根、受管逐技能 Junction 与 Codex 路径级开关。`构建生效` 先把 `managed_source_path` 下的技能逐目录投影到标准 `user_skill_root`，保留 `.system`，再扫描配置中的 sources，以声明的技能名称分组，并按以下顺序选主：
-
-1. `.system` 技能；
-2. source `priority`；
-3. source 声明顺序与规范化路径。
-
-非主副本不会被删除或移动，而是写入 `~/.codex/config.toml` 的受管块，以 `[[skills.config]]` + `enabled = false` 精确停用。完整的来源、内容哈希、包哈希、选主结果和冲突记录写入 `reports/skill-projection/current.json`。配置发生变化时，原文件先备份到 `~/.codex/config-backups/config.toml.skills-projection.<timestamp>.bak`。
-
-`skill_projection.managed_link_includes` 按受管包目录名定义 Codex USER-scope 的最小常驻集合；未列入的技能仍保留在完整 `agent/` catalog，可由 explicit-only `capability-router` 冷发现。`managed_link_excludes` 继续用于同名冲突，include/exclude 重叠会被配置门禁拒绝。Claude 指向 `agent/` 的根 Junction 不受 USER-scope 收窄影响。
-
-`skill_projection.aliases` 记录旧名称到替代项的迁移，不把近似能力重新复制成默认技能；`.system` 技能始终保留。native projection 只把 placement-admitted 的 `managed_link_includes` 交给宿主原生 discovery，profile 不再是 reachability filter；历史 profile 数据只保留在 `profile_compatibility` read-only view，`reachability_authority=none`。完整 canonical inventory 仍进入 portable catalog，`budget_limit_chars` 和 host snapshot/token-aware planner 约束常驻 metadata。
-
-旧投影 manifest 的 profile 字段仅用于迁移/历史兼容报告；native projection 不得产生 profile reachability 排除。常用命令：
-
-GPT-5.6 日常路径优先使用 Codex 原生 Plan、Goal、Review、skill 语义匹配和 agent 控制。`default` 保留故障诊断、完成验证，以及 `grill-with-docs` 所需的聚焦设计访谈依赖闭包；`coding` 增加增量实现、评审、API 与安全能力；`engineering` 面向产品澄清、spec、计划、领域/模块设计和官方研究。固定的 Superpowers 全流程不再进入 native discovery；`coding-strict` 只保留显式 strict TDD 的窄入口。普通实现、配置、文档和生成物不机械触发 TDD、全套测试、CI 或多代理。`research` 只有在当前 primary-source 事实可能改变决定时触发，默认只读且不会自动写研究文件。profile 是只读兼容/预热视图，当前任务不会热加载 profile 变更；vendor checkout 仍可保留为参考，不等于生成 projection。
-
-PPT 路由保持职责单一：`custom-teacher-courseware-ppt` 决定课堂课件结构，Presentations 创建或编辑 PPTX，`powerpoint-automation` 只操作 live PowerPoint/COM，`custom-powerpoint-accessibility` 在内容稳定后验证标题、替代文本、阅读顺序、表格、链接、字幕、对比度与动画。可访问性验证不能由截图单独判定；无法检查阅读顺序或辅助技术行为时必须标记为 `not_verified`。
-
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-native-skill-metadata.ps1 -Json
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-skill-routing.ps1 -Json
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\plan-skill-profile-reconciliation.ps1 -Json
-```
-
-profile reconciliation 脚本现在只承担迁移期的只读/回滚兼容职责，不再由 `skills.ps1` dispatch，也不改变 native reachability。旧 profile 字段必须先进入 `profile_compatibility` read-only view；`scripts/verify-skill-routing.ps1` 只报告 compatibility-only 状态，不能作为 quality gate 或语义 selector。canonical inventory 变化只写 `host_refresh_needed` signal，动作是 `fresh_session_or_host_handoff`；它不含 advisor command，也不恢复 profile planner。
-
-native projection 先按 `managed_link_includes` 做确定性 placement admission，再由 host snapshot、eligibility 和 token-aware metadata planner 验证常驻集合无静默遗漏；profile membership 不能改变该集合。未常驻技能仍在 portable catalog 中，可经 explicit-only cold discovery 读取。真实宿主验收在 Desktop 任务中检查发现、复用和行为结果；CLI/App Server 事件只作诊断，不形成第二套调用真源。
-
-历史 proposal/canary 接口仅保留用于读取旧 receipt 和回滚审计；P6 staged removal 后不再提供普通请求的 profile apply/热切换路径：
-
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\manage-skill-profile-reconciliation.ps1 -Mode Plan -ProposalPath .\proposal.json -Json
-```
-
-迁移 receipt/backup 仍位于忽略的 `reports/skill-profile-reconciliation/`；任何宿主、provider、session 或 live profile mutation 都不属于本任务。
-
-`capability-router` 保留为 USER-scope 中 explicit-only 的兼容/fallback 入口，但不是每个请求的 mandatory middleware。宿主 AI 先根据完整请求、对话和常驻 native metadata 原生选择；只有显式 cold discovery 或兼容性审查才读取 router catalog。router 解析自身 Junction 真目标后读取完整 `agent/`，因此冷技能无需成为 USER sibling Junction。旧 `watch-interrupted-task` 已移除；watch-runtime 的参考与产品所有权位于 `D:\CODE\codex-watch-runtime\docs\reference-basis.md`，本仓不再维护其重复 reference portfolio。
-
-P4/P5 的 lexical selector、task model 和 ranking 是历史 repo_verified 实现；真实中文场景回放证明它们不能代表路由实效，已在 maintenance correction 中退役为 `decision_owner=host_ai`、`semantic_routing_performed=false` 的 discovery/policy contract。`scripts/verify-capability-routing.ps1` 使用 direct、indirect、negative、多阶段、架构、调试、评审、跨领域和 side-effect 自然语言 corpus，分别验证候选可达性、宿主标注选择后的 policy 与零自动语义选择；它仍不把 repo corpus 外推为 live acceptance。
-
-`scripts/get-codex-app-server-capability-snapshot.ps1` 只调用稳定只读 App Server RPC；陈旧、不可访问、不可调用和认证缺失事实 fail-closed，单来源故障报告 `partial`。session/profile 输出只是 `apply=false` 的计划或预热建议，不会静默切换宿主状态。
-
-技能初始列表由宿主 native metadata surface 决定；当前 USER-scope 只投影 `managed_link_includes` 中的最小集合。native metadata 预算和 `enabled_total == kept_total` / `omitted=0` invariant 只约束这个 placement-admitted 集合；完整 capability catalog 不因此删除或复制。
-
-旧 profile A/B benchmark 已随 profile 热切换退役；不再保留只能校验历史 profile 语料、但无法执行当前主链的操作入口。`scripts/evaluate-host-skill-selection.ps1` 仅保留为可选诊断，不切换 profile，也不替代真实 Desktop 任务的发现、复用和行为验收。
-
-设计访谈统一使用 `grill-with-docs`：在 CLI/IDE 中可显式输入 `$grill-with-docs`，在 Work/Codex 桌面端可从技能选择器指定，也可由模型仅在“grill/设计质询/把方案磨清楚”等明确语义下隐式调用。它不会因为普通实现或重构请求自动启动；完成访谈后只有用户确认的持久决策才写入 `CONTEXT.md`、词汇表或 ADR。`grilling` 与 `domain-modeling` 作为 `default` 的完整依赖闭包保留，防止主技能可见但运行依赖缺失；只有在直接进行决策树访谈或领域建模时才单独调用。
-
-工程能力优先使用 `draft-spec` 和 `draft-tickets` 生成本地、可审阅的输出；它们不调用 tracker，也不建立外部阻塞关系。`setup-matt-pocock-skills`、`to-spec`、`to-tickets` 和 `improve-codebase-architecture` 已退役，旧别名 `to-prd` / `to-issues` 仅路由到轻量草稿技能；外部发布由宿主工具在单独授权后执行，不再由常驻工作流 skill 接管。`profile_compatibility` 只保留历史只读元数据，不是启用或删除入口。
-
-`-DryRun` 只生成内存计划，不写配置或 manifest。Codex 在新任务加载初始技能列表；当前已运行任务不会热更新该列表。常驻 router 可以在当前任务读取磁盘上的冷技能，实现能力层无缝切换，但不能把 profile 变更伪装成热加载。投影后仍应以 fresh process/task 复核初始列表，不应通过删除 `.agents/skills` 强制生效。
-
-`$HOME/.agents/skills` 是当前标准用户技能根，根目录及其 `.system` 子目录不能整体删除。受管技能以 Junction 形式存在于该根，`$HOME/.codex/skills` 不再是受管 target；Codex 仍可能自动创建其中的 `.system` 兼容目录。历史普通目录应先退役到带哈希清单的归档，脚本会保留受管 Junction：
-
-```powershell
-# 默认仅预演并生成 reports/skill-retirement/<run-id>/manifest.json
-pwsh -NoProfile -File .\scripts\retire-agents-user-skills.ps1
-
-# 核对目录数、文件数、字节数后再迁移；始终保留 .system
-pwsh -NoProfile -File .\scripts\retire-agents-user-skills.ps1 -Apply
-```
-
-退役归档不是立即删除项。至少用新任务验收普通编码、PPT/文档、Claude Junction 和 `.NET` + `microsoft-code-reference` 四条路径，并确认没有配置引用归档后，才可在保留一个回滚窗口后物理删除对应的 `~/.agents/retired/skills-user-<run-id>`。回滚时按 manifest 逐项把 `archive_path` 移回 `source_path`，发现同名目标时必须停止。
+本仓只管理 MCP server 清单和目标配置段。模型、provider、auth、context 与 sandbox 不属于 `skills.json`。
 
 ### 目标仓审查
 
 ```powershell
-.\skills.ps1 审查目标 初始化
-.\skills.ps1 审查目标 需求设置
-.\skills.ps1 审查目标 需求查看
-.\skills.ps1 审查目标 需求结构化 --profile reports\profile.json
-.\skills.ps1 审查目标 添加 my-repo ..\my-repo
-.\skills.ps1 审查目标 修改 my-repo ..\my-repo
-.\skills.ps1 审查目标 删除 my-repo
 .\skills.ps1 审查目标 列表
-.\skills.ps1 审查目标 目标列表
-.\skills.ps1 审查目标 扫描 --target my-repo
-.\skills.ps1 审查目标 发现新技能 --query "repo governance and agent workflows"
-.\skills.ps1 审查目标 预检 --run-id <run-id>
-.\skills.ps1 审查目标 应用确认 --recommendations reports\skill-audit\<run-id>\recommendations.json
-.\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json
-.\skills.ps1 审查目标 应用 --recommendations reports\skill-audit\<run-id>\recommendations.json --apply --yes --add-indexes "1,3" --remove-indexes "2" --mcp-add-indexes "1" --mcp-remove-indexes "2"
-.\skills.ps1 审查目标 状态
+.\skills.ps1 审查目标 添加 <name> <path>
+.\skills.ps1 审查目标 扫描 --target <name>
+.\skills.ps1 审查目标 预检 --recommendations <file>
+.\skills.ps1 审查目标 应用确认 --recommendations <file>
+.\skills.ps1 审查目标 应用 --recommendations <file> --apply --yes
 ```
 
-关键规则：
+扫描产物位于 ignored `reports/skill-audit/<run-id>/`。`recommendations.json` 必须经过 preflight 和 dry-run；只有显式 `--apply --yes` 才写配置。runtime evidence 与 recommendations 同目录，不进入 tracked 文档。
 
-- `发现新技能` 是 profile-only 模式：生成同样的审查包，但不生成 `repo-scan.json`。
-- 正式审查必须同时依赖两层上下文：全局用户画像 + 目标仓事实。
-- `应用` 默认只做 dry-run；只有同时传 `--apply --yes` 才真正落盘。
-- `应用确认` 是单入口两阶段流程：先 dry-run，再要求确认口令 `APPLY <run-id>`。
-- dry-run 模式下必须显式确认 `我知道未落盘`；非交互场景可传 `--dry-run-ack "我知道未落盘"`。
-- `应用` / `应用确认` 会校验同目录 `installed-skills.json` 与当前 live state 是否 stale；仅在明确接受风险时，才用 `--allow-stale-snapshot` 和 `--stale-ack "<token>"` 跳过阻断。
-- `--out` 指向已存在且非空目录时默认阻断；确需复用时显式传 `--force`。
-
-如果外层 AI 具备工作区执行能力，优先把本次 run 目录的 `outer-ai-prompt.md` 交给它，而不是只给 `ai-brief.md`。
-
-## English aliases
-
-当前英文别名主要覆盖适合脚本化的命令面：
-
-| 中文入口 | 英文别名 |
-| --- | --- |
-| `帮助` | `help`, `--help`, `-h` |
-| `doctor` | `doctor` |
-| `审查目标` | `audit-targets` |
-| `一键` | `workflow` |
-| `安装MCP` | `mcp-install` |
-| `卸载MCP` | `mcp-uninstall` |
-| `同步MCP` | `mcp-sync` |
-| `MCP配置` | `mcp-profile` |
-| `清理无效映射` | `prune-invalid-mappings` |
-| `add` | `add` |
-| `npx` | `npx` |
-
-以下高频中文命令目前仍无英文别名：`发现`、`安装`、`构建生效`、`更新`、`锁定`、`新增技能库`、`删除技能库`、`自动更新设置`、`解除关联`、`清理备份`。
-
-## 同步模式
-
-`skills.json` 通过 `sync_mode` 控制 skills 目录同步方式：
-
-- `link`：Windows 默认推荐；使用 junction 指向 `agent/`
-- `sync`：使用 `robocopy /MIR` 镜像 `agent/`
-
-本地迭代优先 `link`。受限环境无法创建链接时再切换到 `sync`。如需把 MCP 同步目标和 skills 同步目标拆开，可在 `skills.json` 里补 `mcp_targets`。
-
-## 发布与新机迁移
-
-推荐发布可重建的 portable 包，而不是直接复制整个工作目录：
+### 规则审查
 
 ```powershell
-.\scripts\release\pack-portable.ps1 -Version vX.Y.Z
+.\skills.ps1 rule-audit --repo <repo-root> --host codex --json
+.\skills.ps1 rule-plan --target <AGENTS.md> --desired-file <reviewed.md> --repo-root <repo> --out <plan.json> --json
+.\skills.ps1 rule-apply --plan <plan.json> --repo-root <repo> --token APPLY_RULE_REPO_PATCH --json
+.\skills.ps1 rule-estate-audit --workspace-root D:\CODE --json
+.\skills.ps1 rule-estate-plan --review <reviewed-change-set.json> --workspace-root D:\CODE --out <plan.json> --json
+.\skills.ps1 rule-estate-apply --plan <plan.json> --workspace-root D:\CODE --token APPLY_RULE_ESTATE_PATCH --json
 ```
 
-常用附加参数：
+审查默认只读。单仓和全域写入都要求 reviewed input、精确根目录、before hash、显式 token、receipt 与回滚入口；全域事务逐目标 fail-fast，不承诺跨仓原子性。
+
+### 技能投影与 fallback
+
+宿主原生 metadata 是普通请求的首选选择面。`capability-router` 只在显式 cold discovery 或 policy validation 时使用；它接受 `DomainHint`，返回候选并校验宿主选择，不执行语义排序、不切换 profile、不写宿主状态。
 
 ```powershell
-.\scripts\release\pack-portable.ps1 -Version vX.Y.Z -AllowDirtyWorktree
-.\scripts\release\pack-portable.ps1 -Version vX.Y.Z -SkipVerification
+.\skills.ps1 capability-inventory --view skill-surfaces --json
+pwsh -NoProfile -File .\scripts\verify-capability-routing.ps1 -Json
+pwsh -NoProfile -File .\scripts\verify-native-skill-metadata.ps1 -Json
 ```
 
-portable 包包含可迁移源码与配置，例如 `skills.ps1`、`skills.cmd`、`install.ps1`、`skills.json`、`skills.lock.json`、`src/`、`scripts/`、`tests/`、`overrides/` 和治理文档；不会包含 `agent/`、`vendor/`、`imports/`、`reports/`、`.codex/`、`.claude/`、`.gemini/`、`.trae/`、日志、缓存、发布输出和审查运行态证据。
+## 外置参考仓
 
-新电脑解压后：
+`references/reference-shelf.manifest.json` 只登记当前使用的 core/secondary 参考集，owned root 为 `D:\CODE\external\skills-manager-references`。刷新不会自动采纳、安装或执行外部内容，也不会联动修改 `skills.json`。
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Mode CurrentUser
+.\scripts\refresh-reference-repos.ps1 -FetchOnly -SkipDirtyRepos
+.\scripts\refresh-reference-repos.ps1 -Tier secondary -CloneMissing -FetchOnly -SkipDirtyRepos
+.\scripts\verify-reference-governance.ps1
 ```
 
-默认行为：
+没有当前消费者的候选不进入 manifest；需要时重新研究和登记，不保留永久候选池。
 
-1. 运行 `build.ps1`
-2. 若存在 `skills.lock.json` 且未传 `-SkipRebuildLocked`，执行 `.\skills.ps1 更新 -Locked`
-3. 否则执行 `.\skills.ps1 构建生效`
-4. 若传 `-SyncMcp`，执行 `.\skills.ps1 同步MCP`
-5. 最后执行 `.\skills.ps1 doctor --strict --threshold-ms 8000`
-
-常用模式：
+## 开发与验证
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Mode CurrentUser -SyncMcp
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Mode PortableOnly
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Mode CurrentUser -DoctorThresholdMs 12000
+pwsh -NoProfile -File .\build.ps1
+pwsh -NoProfile -File .\tests\check-generated-sync.ps1 -AllowDirtyWorktree
+pwsh -NoProfile -File .\scripts\verify-skill-integrity.ps1
+pwsh -NoProfile -File .\scripts\verify-skills-config.ps1 -Mode enforce
+git diff --check
 ```
 
-说明：
-
-- `PortableOnly` 只做 `build + doctor`，不会写用户 skills 目录，也会忽略 `-SyncMcp`。
-- 安装器和 `skills.cmd` 只解析 `pwsh`；Windows PowerShell 5.1 不受支持，也没有隐藏 fallback。
-- `-SkipEnvironmentCheck` 适合受控测试夹具，不建议日常安装使用。
-- 若要在新电脑上同步 MCP，先准备本机 token、数据库连接串等宿主环境，再执行 `-SyncMcp`。
-
-## 本地门禁
-
-开发与收口使用比例门禁，不把所有命令固定串行执行：规则、文档和注释优先运行 `git diff --check` 与受影响 verifier/test；test、verifier、script、config 或 CI 变化运行受影响 contract；只有 source、generated 或共享 config seam 变化才提升到 `quick`。未触发 runtime、安全、数据/迁移、公开契约、依赖/包或 release 风险时使用 focused closeout；触发这些风险，或 focused 暴露跨面风险时，才运行一次 `full`。
-
-仓库提供本地 / CI 同款质量门禁入口：
+按风险选择 closeout：普通切片跑受影响测试；runtime、安全、数据、迁移、公开契约、依赖或打包变更才跑一次 full gate。
 
 ```powershell
-./scripts/quality/run-local-quality-gates.ps1 -Profile quick
-./scripts/quality/run-local-quality-gates.ps1 -Profile full -ReuseCurrentReceipt
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full -ReuseCurrentReceipt
+# exact-current receipt 不存在且确需新 full 时：
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full -ForceFresh -AllowDirtyWorktree
 ```
 
-含义：
-
-- `quick`：执行 build 与确定性仓库 contracts，不运行完整 Pester suite。
-- `full`：按 `build -> tests -> contracts` 执行完整仓库门禁。
-- `-ReuseCurrentReceipt`：仅在 source fingerprint、`full/passed` 状态与 dirty-worktree policy 都精确匹配时复用 immutable receipt；不匹配时快速失败，不会隐式执行 fresh full。
-- `-ForceFresh`：显式忽略可复用 receipt 并重新执行；与 `-ReuseCurrentReceipt` 互斥。脏工作树仍需另加 `-AllowDirtyWorktree`。
-
-`./skills.ps1 发现` 与 `./skills.ps1 构建生效` 是产品发现/投影工作流，不是每次代码修改的固定质量门禁；其中 `构建生效` 会写入生成目录和受管宿主目标，只在该工作流进入当前授权范围时执行。真实网络或宿主健康验收需要时，才在 full 之后单独运行一次 `./skills.ps1 doctor --strict --threshold-ms 8000`；它不替代 full。
-
-规划合同也可单独执行：
-
-```powershell
-./scripts/verify-vnext-planning.ps1
-./scripts/verify-vnext-planning.ps1 -Json
-```
-
-该 verifier 从 `tasks/plan.md` 的 `current_phase` 选择当前 spec/manifest，也可用 `-SpecPath`/`-ManifestPath` 验证历史 Phase。它只证明规划文件的机器一致性，不证明产品代码、宿主加载或 live acceptance。
-
-## MCP 与门禁环境变量
-
-- `POSTGRES_CONNECTION_STRING`：postgres MCP 的连接串；推荐 `postgresql://...`
-- `SKILLS_MCP_VERIFY_GEMINI_CLI=1|true|yes|on`：启用 Gemini CLI 实机校验（默认关闭）
-- `SKILLS_MCP_VERIFY_LIST_TIMEOUT_SECONDS`：统一设置 `mcp list` 校验超时（秒）
-- `SKILLS_MCP_VERIFY_LIST_TIMEOUT_SECONDS_<CLI>`：按 CLI 覆盖超时（例如 `_CLAUDE` / `_CODEX` / `_GEMINI`）
-- `SKILLS_MCP_NATIVE_TIMEOUT_SECONDS`：原生 `claude mcp add/remove` 超时（秒）
-- `SKILLS_MCP_VERIFY_ATTEMPTS`、`SKILLS_MCP_VERIFY_INTERVAL_SECONDS`：跨 CLI MCP 校验重试次数与重试间隔（秒）
-- `SKILLS_SYNC_MCP_THRESHOLD_MS`：`check-doctor-json.ps1` 中 `sync_mcp` 性能阈值（毫秒）；clean CI 没有历史样本，因此 full gate 只验证 doctor JSON 契约，只有具备真实样本的专用性能门禁才运行阈值观察或阻断
-- 测试套件使用 Pester `4.10.1` 语法；CI 精确安装该版本，`tests/run.ps1` 会在版本缺失时 fail-closed
-
-## 仓库卫生
-
-不要提交本地 agent 状态、日志、缓存或临时产物，包括：
-
-- `.claude/`、`.codex/`、`.gemini/`、`.trae/`、`.txn/`
-- `agent/`、`artifacts/`、`reports/*.log`
-- `imports/_debug_*`、`imports/_probe_*`、`imports/_tree_*`、`imports/*.zip`
-- 审查运行态证据位于已忽略的 `reports/skill-audit/<run-id>/runtime-evidence-*.md`；115 份旧 runtime receipts 已原样移入 [`docs/archive/change-evidence/`](docs/archive/change-evidence/README.md)，不得重新放入活跃 `docs/change-evidence/`
-- 备份与临时文件，例如 `build.log*`、`acl-backup-git-*.txt`、`.tmp_*`
-
-边界说明：
-
-- 仓库根的 `AGENTS.md`、`CLAUDE.md`、`GEMINI.md` 是受版本管理的项目规则文档，不属于“本地垃圾文件”。
-- 不要把宿主目录中的本地规则副本、导入快照里的临时规则文件，或下游工具自动生成的 host-local 配置混进提交。
-
-## 相关文档
-
-- [Product direction and planning contract](docs/product/README.md)
-- [Contributing](CONTRIBUTING.md)
-- [Security Policy](SECURITY.md)
-- [Code of Conduct](CODE_OF_CONDUCT.md)
-- [overrides README](overrides/README.md)
-
-## License
-
-MIT
+产品边界见 [docs/product/README.md](docs/product/README.md)，贡献规则见 [CONTRIBUTING.md](CONTRIBUTING.md)，PowerShell 支持边界见 [docs/runbooks/powershell-runtime-compatibility.md](docs/runbooks/powershell-runtime-compatibility.md)。

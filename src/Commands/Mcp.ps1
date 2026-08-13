@@ -884,29 +884,6 @@ function Ensure-CodexMcpNodeCacheWrapper([string]$codexRoot) {
     Write-Utf8FileAtomic -Path $postgresWrapperPath -Content (Get-CodexMcpPostgresEnvWrapperContent)
 }
 
-function Convert-McpMapToOrderedMap($mapLike) {
-    $map = [ordered]@{}
-    if ($null -eq $mapLike) { return $map }
-
-    if ($mapLike -is [hashtable] -or $mapLike -is [System.Collections.IDictionary]) {
-        foreach ($k in $mapLike.Keys) {
-            $name = [string]$k
-            if ([string]::IsNullOrWhiteSpace($name)) { continue }
-            $map[$name] = $mapLike[$k]
-        }
-        return $map
-    }
-
-    if ($mapLike -is [pscustomobject]) {
-        foreach ($p in $mapLike.PSObject.Properties) {
-            $name = [string]$p.Name
-            if ([string]::IsNullOrWhiteSpace($name)) { continue }
-            $map[$name] = $p.Value
-        }
-    }
-    return $map
-}
-
 function Build-GenericMcpPayload([string]$existingContent, $servers) {
     $base = [ordered]@{}
     if (-not [string]::IsNullOrWhiteSpace($existingContent)) {

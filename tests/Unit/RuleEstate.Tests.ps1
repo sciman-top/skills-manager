@@ -1,7 +1,6 @@
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $repoRoot 'src\Infrastructure\AtomicFile.ps1')
 . (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1')
-. (Join-Path $repoRoot 'src\Domain\CapabilityDescriptor.ps1')
 . (Join-Path $repoRoot 'src\Domain\RuleDocument.ps1')
 . (Join-Path $repoRoot 'src\Domain\RuleResponsibility.ps1')
 . (Join-Path $repoRoot 'src\Domain\RulePatchPlan.ps1')
@@ -135,12 +134,12 @@ verify drift
         $parsed.report.structural_pass | Should Be $false
     }
 
-    It 'uses durable repository evidence instead of a retired machine path as current reference basis' {
+    It 'uses official references without machine-local paths' {
         $f = New-RuleEstateFixture
 
         $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
 
-        @($report.reference_basis | Where-Object source -eq 'docs/product/rule-governance-adoption-matrix.md').Count | Should Be 1
+        @($report.reference_basis | Where-Object authority -eq 'official').Count | Should Be 2
         @($report.reference_basis | Where-Object source -match '^[A-Za-z]:\\').Count | Should Be 0
     }
 

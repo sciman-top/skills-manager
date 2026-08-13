@@ -16,12 +16,6 @@ $body
 
         $configPath = Join-Path $root "skills.json"
         @{
-            skill_projection = @{
-                active_profile = "default"
-                profiles = @{
-                    default = @{ enabled_names = @("demo") }
-                }
-            }
             mcp_servers = @()
         } | ConvertTo-Json -Depth 8 | Set-Content -Path $configPath -Encoding UTF8
 
@@ -119,32 +113,6 @@ name: demo
         @($result.Report.errors | Where-Object code -eq "missing_required_skill").Count | Should Be 1
     }
 
-    It "does not let a profile reference self-prove an undeclared dependency" {
-        $fixture = New-IntegrityFixture "profile-is-not-inventory" "" @(
-            @{ skill = "demo"; requires = @("required-skill") }
-        )
-        $config = Get-Content -Raw $fixture.ConfigPath | ConvertFrom-Json
-        $config.skill_projection.profiles.default.enabled_names = @("demo", "required-skill")
-        $config | ConvertTo-Json -Depth 8 | Set-Content -Path $fixture.ConfigPath -Encoding UTF8
-
-        $result = Invoke-IntegrityFixture $fixture
-
-        $result.ExitCode | Should Be 1
-        @($result.Report.errors | Where-Object code -eq "missing_required_skill").Count | Should Be 1
-    }
-
-    It "fails when a profile enables a caller without its required skill" {
-        $fixture = New-IntegrityFixture "profile-gap" "" @(
-            @{ skill = "demo"; requires = @("required-skill") }
-        )
-        Add-IntegrityFixtureSkill $fixture "required" "required-skill" | Out-Null
-
-        $result = Invoke-IntegrityFixture $fixture
-
-        $result.ExitCode | Should Be 1
-        @($result.Report.errors | Where-Object code -eq "profile_missing_dependency").Count | Should Be 1
-    }
-
     It "validates dependency closure from tracked portable declarations when imported packages are not materialized" {
         $fixture = New-IntegrityFixture "clean-portable-inventory" "" @(
             @{ skill = "imported-caller"; requires = @("mapped-required") },
@@ -158,13 +126,6 @@ name: demo
         $config | Add-Member -NotePropertyName mappings -NotePropertyValue @(
             @{ vendor = "fixture"; from = "skills\mapped-caller"; to = "fixture-mapped-caller" },
             @{ vendor = "fixture"; from = "skills\mapped-required"; to = "fixture-mapped-required" }
-        )
-        $config.skill_projection.profiles.default.enabled_names = @(
-            "demo",
-            "imported-caller",
-            "mapped-required",
-            "mapped-caller",
-            "imported-required"
         )
         $config | ConvertTo-Json -Depth 8 | Set-Content -Path $fixture.ConfigPath -Encoding UTF8
 
@@ -233,7 +194,7 @@ description: fixture
         @($result.Report.errors | Where-Object code -eq "misplaced_codex_user_skill").Count | Should Be 1
     }
 
-    It "passes for valid resources and a complete profile closure" {
+    It "passes for valid resources and a complete dependency closure" {
         $fixture = New-IntegrityFixture "valid" "Read [guide](references/guide.md)." @(
             @{ skill = "demo"; requires = @("required-skill") }
         )
@@ -241,10 +202,6 @@ description: fixture
         $referenceRoot = Join-Path (Join-Path $fixture.AgentRoot "demo") "references"
         New-Item -ItemType Directory -Path $referenceRoot -Force | Out-Null
         "guide" | Set-Content -Path (Join-Path $referenceRoot "guide.md") -Encoding UTF8
-        $config = Get-Content -Raw $fixture.ConfigPath | ConvertFrom-Json
-        $config.skill_projection.profiles.default.enabled_names = @("demo", "required-skill")
-        $config | ConvertTo-Json -Depth 8 | Set-Content -Path $fixture.ConfigPath -Encoding UTF8
-
         $result = Invoke-IntegrityFixture $fixture
 
         $result.ExitCode | Should Be 0

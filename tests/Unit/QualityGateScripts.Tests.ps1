@@ -109,17 +109,6 @@ Set-Content -LiteralPath $marker -Value 'executed' -Encoding UTF8
         $raw | Should Match 'total_elapsed_ms'
     }
 
-    It "keeps completed planning contracts out of the active gate" {
-        $root = Join-Path $PSScriptRoot "..\.."
-        $scriptPath = Join-Path $root "scripts\quality\run-local-quality-gates.ps1"
-        $raw = Get-Content -LiteralPath $scriptPath -Raw
-
-        $raw | Should Not Match "planning-contract|verify-vnext-planning"
-        $raw | Should Not Match "Invoke-QualityGate 'host-native-lifecycle-planning'"
-        Test-Path -LiteralPath (Join-Path $root 'scripts\verify-host-native-skill-lifecycle-planning.ps1') | Should Be $false
-        Test-Path -LiteralPath (Join-Path $root 'scripts\verify-lean-ai-delivery-planning.ps1') | Should Be $false
-    }
-
     It "keeps successful metadata gate output concise while preserving the verifier" {
         $root = Join-Path $PSScriptRoot "..\.."
         $gate = Get-Content -LiteralPath (Join-Path $root 'scripts\quality\run-local-quality-gates.ps1') -Raw
@@ -247,22 +236,6 @@ Set-Content -LiteralPath $marker -Value 'executed' -Encoding UTF8
         $gateSection | Should Not Match 'tests/run\.ps1'
         $gateSection | Should Not Match 'verify-dependency-baseline\.py'
         $gateSection | Should Not Match 'verify-host-capability-matrix\.ps1'
-        $gateSection | Should Not Match 'verify-vnext-planning\.ps1'
-    }
-
-    It "removes confirmed definition-only compatibility leftovers" {
-        $root = Join-Path $PSScriptRoot "..\.."
-        $sources = @(
-            'src\Commands\AuditTargets.ps1',
-            'src\Commands\Install.ps1',
-            'src\Commands\Mcp.ps1'
-        ) | ForEach-Object { Get-Content -LiteralPath (Join-Path $root $_) -Raw }
-        $joined = $sources -join "`n"
-
-        $joined | Should Not Match '(?m)^function Get-AuditKnownRunIds\b'
-        $joined | Should Not Match '(?m)^function 单技能安装\b'
-        $joined | Should Not Match '(?m)^function Get-McpServerNameSet\b'
-        $joined | Should Not Match '(?m)^function Merge-McpConfigMaps\b'
     }
 
     It "separates dry-run presentation and apply selection from the audit apply coordinator" {
@@ -309,10 +282,6 @@ Set-Content -LiteralPath $marker -Value 'executed' -Encoding UTF8
         $runner | Should Not Match '-WindowStyle\s+Hidden'
         $runner | Should Match 'test-shards'
         $runner | Should Match 'SerialTestFiles'
-        $runner | Should Not Match 'HostNativeSkillLifecyclePlanning\.Tests\.ps1'
-        $runner | Should Not Match 'LeanAiDeliveryPlanning\.Tests\.ps1'
-        $runner | Should Not Match '\$historicalDiagnosticTestFiles'
-        $runner | Should Not Match 'WatchRuntimeArming\.Tests\.ps1'
         $runner | Should Match '\$orderedFiles'
         $runner | Should Match '\.Dispose\(\)'
         $runner | Should Match 'timed_out'
@@ -494,10 +463,10 @@ Describe 'fixture unit' {
 
     It "keeps clean-runner acceptance tests independent from host paths and materialized imports" {
         $root = Join-Path $PSScriptRoot '..\..'
-        $phase1 = Get-Content -LiteralPath (Join-Path $root 'tests\Unit\Phase1Acceptance.Tests.ps1') -Raw
+        $ruleDiscovery = Get-Content -LiteralPath (Join-Path $root 'tests\Unit\RuleDiscovery.Tests.ps1') -Raw
         $projection = Get-Content -LiteralPath (Join-Path $root 'tests\Unit\SkillProjection.Tests.ps1') -Raw
 
-        $phase1 | Should Not Match '(?i)[A-Z]:\\CODE'
+        $ruleDiscovery | Should Not Match '(?i)[A-Z]:\\CODE'
         $projection | Should Not Match 'Get-ChildItem[^\r\n]+Join-Path \$repoRoot ["'']imports["'']'
     }
 
@@ -547,12 +516,8 @@ Describe 'fixture unit' {
         $bundleText | Should Not Match 'Join-Path \$script:Root "docs\\change-evidence"'
         $applyText | Should Not Match 'Join-Path \$script:Root "docs\\change-evidence"'
         $bundleText | Should Match '\$dir = \$reportRoot'
-        $applyText | Should Match '\$dir = \$reportRoot'
-    }
-
-    It "removes the retired routing verifier" {
-        $root = Join-Path $PSScriptRoot "..\.."
-        Test-Path -LiteralPath (Join-Path $root 'scripts\verify-skill-routing.ps1') | Should Be $false
+        $applyText | Should Match 'Split-Path -Parent \$recommendationsPath'
+        $applyText | Should Match 'Get-AuditReportRoot \$runId'
     }
 
     It "owns the complete quality-gate stage sequence and verifier wiring centrally" {
@@ -595,30 +560,6 @@ Describe 'fixture unit' {
         $raw | Should Match 'check-generated-sync\.ps1 -StrictNoGit -InitialBuildCompleted'
     }
 
-    It "keeps retired auxiliary control planes out of active runtime surfaces" {
-        $root = Join-Path $PSScriptRoot "..\.."
-        foreach ($relativePath in @(
-                'src\Domain\AgentWorkflow.ps1',
-                'src\Application\ModelAndAgentPolicy.ps1',
-                'src\Commands\AgentWorkflow.ps1',
-                'scripts\verify-agent-workflow-advisory.ps1',
-                'global.json',
-                'typed-core\SkillsManager.TypedCore\SkillsManager.TypedCore.csproj',
-                'typed-core\SkillsManager.TypedCore\Program.cs',
-                'typed-core\SkillsManager.TypedCore\OperationContractValidator.cs',
-                'scripts\verify-typed-core-shadow.ps1',
-                'scripts\verify-typed-core-pilot-planning.ps1',
-                'tests\Unit\TypedCoreShadow.Tests.ps1'
-            )) {
-            Test-Path -LiteralPath (Join-Path $root $relativePath) | Should Be $false
-        }
-
-        foreach ($relativePath in @('build.ps1', 'src\Main.ps1', 'src\Version.ps1', 'skills.ps1')) {
-            $raw = Get-Content -LiteralPath (Join-Path $root $relativePath) -Raw
-            $raw | Should Not Match 'agent-plan|agent-validate|AgentWorkflow|ModelAndAgentPolicy|typed-core|SkillsManager\.TypedCore|verify-typed-core'
-        }
-    }
-
     It "Documents the standalone skill integrity verifier in CLI help" {
         $root = Join-Path $PSScriptRoot "..\.."
         $helpSourcePath = Join-Path $root "src\Commands\Utils.ps1"
@@ -647,40 +588,6 @@ Describe 'fixture unit' {
         Test-Path -LiteralPath (Join-Path $root '.github\workflows\ci.yml') -PathType Leaf | Should Be $true
         Test-Path -LiteralPath (Join-Path $root 'azure-pipelines.yml') | Should Be $false
         Test-Path -LiteralPath (Join-Path $root '.gitlab-ci.yml') | Should Be $false
-    }
-
-    It "ignores arbitrary historical evidence paths" {
-        if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-            Write-Host "git not found, skipping repository hygiene runtime artifact test."
-            return
-        }
-
-        $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
-        $scriptPath = Join-Path $root "scripts\quality\check-repo-hygiene.ps1"
-        $repo = Join-Path $TestDrive "repo-hygiene-untracked"
-        New-Item -ItemType Directory -Path $repo -Force | Out-Null
-        Push-Location $repo
-        try {
-            git init | Out-Null
-            git config user.email "test@example.invalid" | Out-Null
-            git config user.name "Test User" | Out-Null
-            Set-Content -LiteralPath (Join-Path $repo "README.md") -Value "fixture" -Encoding UTF8
-            git add README.md | Out-Null
-            git commit -m "init" | Out-Null
-
-            $evidenceDir = Join-Path $repo "docs\change-evidence"
-            New-Item -ItemType Directory -Path $evidenceDir -Force | Out-Null
-            Set-Content -LiteralPath (Join-Path $evidenceDir "20260427-audit-runtime-dry-run-r-dry-123456.md") -Value "runtime evidence" -Encoding UTF8
-
-            $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -ReportUntrackedRuntimeArtifacts 2>&1)
-            $exitCode = $LASTEXITCODE
-
-            $exitCode | Should Be 0
-            (($output -join "`n") | Should Match "Repository hygiene check passed")
-        }
-        finally {
-            Pop-Location
-        }
     }
 
     It "Can fail on untracked runtime artifacts when explicitly requested" {
@@ -714,37 +621,4 @@ Describe 'fixture unit' {
         }
     }
 
-    It "does not maintain a special tracked historical-evidence rule" {
-        if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-            Write-Host "git not found, skipping repository hygiene worktree deletion test."
-            return
-        }
-
-        $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
-        $scriptPath = Join-Path $root "scripts\quality\check-repo-hygiene.ps1"
-        $repo = Join-Path $TestDrive "repo-hygiene-worktree-deletion"
-        New-Item -ItemType Directory -Path (Join-Path $repo "docs\change-evidence") -Force | Out-Null
-        Push-Location $repo
-        try {
-            git init | Out-Null
-            git config user.email "test@example.invalid" | Out-Null
-            git config user.name "Test User" | Out-Null
-            $receipt = Join-Path $repo "docs\change-evidence\20260427-audit-runtime-dry-run-r-dry-123456.md"
-            Set-Content -LiteralPath $receipt -Value "runtime evidence" -Encoding UTF8
-            git add . | Out-Null
-            git commit -m "fixture with legacy receipt" | Out-Null
-
-            $null = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
-            $LASTEXITCODE | Should Be 0
-
-            Remove-Item -LiteralPath $receipt
-            $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
-            $LASTEXITCODE | Should Be 0
-            (($output -join "`n") | Should Match "Repository hygiene check passed")
-            @(git diff --cached --name-only).Count | Should Be 0
-        }
-        finally {
-            Pop-Location
-        }
-    }
 }

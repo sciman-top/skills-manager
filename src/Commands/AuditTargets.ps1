@@ -1422,8 +1422,6 @@ function Get-AuditGitInfo([string]$resolvedPath) {
         dirty = $false
         status_count = 0
         status_fingerprint = ""
-        automatic_evidence_count = 0
-        automatic_evidence_fingerprint = ""
     }
     if (-not (Test-Path -LiteralPath $resolvedPath -PathType Container)) { return [pscustomobject]$info }
 
@@ -1439,22 +1437,12 @@ function Get-AuditGitInfo([string]$resolvedPath) {
             $status = @(& git status --porcelain 2>$null)
             if ($LASTEXITCODE -eq 0) {
                 $statusLines = @($status | ForEach-Object { [string]$_ })
-                $automaticEvidencePattern = '(?i)^.{2}\s+"?docs[\\/]change-evidence[\\/]\d{8}-audit-runtime-[^"\\/\r\n]+\.md"?$'
-                $automaticEvidencePathPattern = '(?i)^docs[\\/]change-evidence[\\/]\d{8}-audit-runtime-[^"\\/\r\n]+\.md$'
-                $automaticEvidenceLines = @($statusLines | Where-Object { $_ -match $automaticEvidencePattern })
-                $productStatusLines = @($statusLines | Where-Object { $_ -notmatch $automaticEvidencePattern })
                 $changedPaths = @(Get-AuditGitChangedPaths)
-                $automaticEvidencePaths = @($changedPaths | Where-Object { $_ -match $automaticEvidencePathPattern })
-                $productPaths = @($changedPaths | Where-Object { $_ -notmatch $automaticEvidencePathPattern })
-                $productStatePairs = @($productStatusLines | ForEach-Object { "status|" + [string]$_ })
-                $productStatePairs += @(Get-AuditGitPathStatePairs $productPaths)
-                $automaticEvidencePairs = @($automaticEvidenceLines | ForEach-Object { "status|" + [string]$_ })
-                $automaticEvidencePairs += @(Get-AuditGitPathStatePairs $automaticEvidencePaths)
-                $info.dirty = ($productStatusLines.Count -gt 0)
-                $info.status_count = $productStatusLines.Count
-                $info.status_fingerprint = Get-AuditFingerprintFromVendorFromPairs $productStatePairs $true
-                $info.automatic_evidence_count = $automaticEvidenceLines.Count
-                $info.automatic_evidence_fingerprint = Get-AuditFingerprintFromVendorFromPairs $automaticEvidencePairs $true
+                $statePairs = @($statusLines | ForEach-Object { "status|" + [string]$_ })
+                $statePairs += @(Get-AuditGitPathStatePairs $changedPaths)
+                $info.dirty = ($statusLines.Count -gt 0)
+                $info.status_count = $statusLines.Count
+                $info.status_fingerprint = Get-AuditFingerprintFromVendorFromPairs $statePairs $true
             }
         }
     }

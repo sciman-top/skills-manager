@@ -1793,7 +1793,6 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 $summaryRaw = Get-ContentUtf8 (Get-AuditDryRunSummaryPath $path)
                 $summaryRaw | Should Match '"source_observations":\s*\[\]'
                 @(Get-ChildItem -LiteralPath $script:Root -Filter "runtime-evidence-*-dry-run-r-dry-*.md" -File).Count | Should Be 1
-                Test-Path -LiteralPath (Join-Path $script:Root "docs\change-evidence") | Should Be $false
             }
             finally {
                 $script:Root = $oldRoot

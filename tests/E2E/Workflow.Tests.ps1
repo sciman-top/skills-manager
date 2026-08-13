@@ -329,7 +329,7 @@ description: demo skill
         }
     }
 
-    Context "Phase 1 read-only CLI" {
+    Context "Read-only CLI" {
         It "emits one capability inventory JSON envelope" {
             $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') capability-inventory --json 2>&1)
             $parsed = ($output -join "`n") | ConvertFrom-Json
@@ -353,7 +353,7 @@ description: demo skill
         }
     }
 
-    Context "Phase 2 fixture-only rule patch CLI" {
+    Context "Fixture-only rule patch CLI" {
         It "plans and applies through the generated entry point with one JSON envelope" {
             $root = Join-Path $TestDrive 'rule-cli-success'; New-Item -ItemType Directory -Path $root -Force | Out-Null
             [IO.File]::WriteAllText((Join-Path $root '.skills-manager-fixture'), 'fixture')

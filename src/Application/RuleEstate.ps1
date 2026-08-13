@@ -533,8 +533,7 @@ function Invoke-RuleEstateAudit {
         semantic_coverage_pass = $semanticCoveragePass; enforcement_verified = $enforcementVerified
         reference_basis = @(
             [pscustomobject]@{ authority = 'official'; source = 'https://learn.chatgpt.com/docs/agent-configuration/agents-md'; disposition = 'adopt'; use = 'Codex global/project/nested discovery and precedence' },
-            [pscustomobject]@{ authority = 'official'; source = 'https://learn.chatgpt.com/docs/agent-configuration/rules'; disposition = 'adopt'; use = 'Separate prose guidance from deterministic command policy' },
-            [pscustomobject]@{ authority = 'repository_evidence'; source = 'docs/product/rule-governance-adoption-matrix.md'; disposition = 'adapt'; use = 'Pinned provenance for the common/platform_delta/project_action responsibility model; referenced runtime remains retired' }
+            [pscustomobject]@{ authority = 'official'; source = 'https://learn.chatgpt.com/docs/agent-configuration/rules'; disposition = 'adopt'; use = 'Separate prose guidance from deterministic command policy' }
         )
         writes = 0; provider_calls = 0; native_mutations = 0; host_loaded = 'not_run'; live_accepted = 'not_run'
     }

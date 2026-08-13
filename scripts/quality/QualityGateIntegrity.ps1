@@ -148,7 +148,7 @@ function Assert-QualityGateSourceFingerprint {
 }
 
 function Get-QualityGateRequiredRoster([string]$Profile) {
-    $common = @('build', 'repo-hygiene', 'generated-sync', 'workspace-lock-parity', 'skill-integrity', 'reference-governance', 'override-activation-corpus', 'native-skill-metadata', 'dependency-baseline', 'skills-config-contract', 'host-capability-contract', 'planning-contract', 'powershell-runtime-policy', 'doctor-json-contract')
+    $common = @('build', 'repo-hygiene', 'generated-sync', 'workspace-lock-parity', 'skill-integrity', 'reference-governance', 'override-activation-corpus', 'native-skill-metadata', 'dependency-baseline', 'skills-config-contract', 'host-capability-contract', 'powershell-runtime-policy', 'doctor-json-contract')
     if ($Profile -eq 'full') { return @('build', 'tests') + $common[1..($common.Count - 1)] }
     return $common
 }

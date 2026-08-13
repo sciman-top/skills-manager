@@ -94,25 +94,11 @@ function ConvertTo-SkillCatalogCompilerEntry {
     return New-SkillCatalogEntry -Name $name -Description $description -Path $path -SourceRoot $sourceRoot -ContentHash $contentHash -MetadataHash $metadataHash -Enabled $enabled -Availability $availability -Freshness $freshness -LoadSideEffect ([string]$(if ([string]::IsNullOrWhiteSpace([string](Get-SkillCatalogProperty $InputEntry @('load_side_effect')))) { 'read_only' } else { Get-SkillCatalogProperty $InputEntry @('load_side_effect') })) -SideEffect ([string]$(if ([string]::IsNullOrWhiteSpace([string](Get-SkillCatalogProperty $InputEntry @('side_effect')))) { 'read_only' } else { Get-SkillCatalogProperty $InputEntry @('side_effect') })) -Dependencies @(Get-SkillCatalogProperty $InputEntry @('dependencies')) -Surfaces @(Get-SkillCatalogProperty $InputEntry @('surfaces')) -Provenance $provenance
 }
 
-function Get-SkillCatalogCompilerProjectionEntry {
-    param($Projection, [string]$Name)
-
-    if ($null -eq $Projection) { return $null }
-    foreach ($field in @('entries', 'skills', 'canonical')) {
-        $items = Get-SkillCatalogProperty $Projection @($field)
-        foreach ($item in @($items)) {
-            if ([string]::Equals([string](Get-SkillCatalogProperty $item @('name', 'id')), $Name, [StringComparison]::OrdinalIgnoreCase)) { return $item }
-        }
-    }
-    return $null
-}
-
 function Compile-SkillCatalog {
     [CmdletBinding()]
     param(
         [string[]]$Roots = @(),
         [object[]]$Entries = @(),
-        $Projection = $null,
         [string]$GeneratedAt = ([DateTimeOffset]::UtcNow.ToString('o'))
     )
 

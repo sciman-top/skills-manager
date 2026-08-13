@@ -37,7 +37,6 @@ Describe 'Skill eligibility policy' {
         @($result.findings | Where-Object code -eq 'approval_required').Count | Should Be 1
         $result.decision_owner | Should Be 'deterministic_policy'
         $result.semantic_selection_performed | Should Be $false
-        $result.profile_filter_applied | Should Be $false
         $result.provider_calls | Should Be 0
         $result.writes | Should Be 0
         (Test-SkillEligibilityResultContract $result).pass | Should Be $true
@@ -66,7 +65,6 @@ Describe 'Skill eligibility policy' {
         $result.decision | Should Be 'allow'
         $result.eligible | Should Be $true
         @($result.findings).Count | Should Be 0
-        $result.profile_filter_applied | Should Be $false
         (Test-SkillEligibilityResultContract $result).pass | Should Be $true
     }
 }

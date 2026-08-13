@@ -57,8 +57,6 @@ function Get-AuditTargetRepoSnapshotState([string]$recommendationDir) {
                 status_count = if ($null -eq $statusCountValue) { -1 } else { [int]$statusCountValue }
                 status_fingerprint = $statusFingerprint
                 worktree_fingerprint_available = (-not [string]::IsNullOrWhiteSpace($statusFingerprint))
-                automatic_evidence_count = [int](Get-CfgObjectProperty $gitData "automatic_evidence_count")
-                automatic_evidence_fingerprint = [string](Get-CfgObjectProperty $gitData "automatic_evidence_fingerprint")
             })
     }
     return [pscustomobject]([ordered]@{
@@ -86,8 +84,6 @@ function Get-AuditTargetRepoLiveState($snapshotState) {
                 status_count = [int]$git.status_count
                 status_fingerprint = [string]$git.status_fingerprint
                 worktree_fingerprint_available = $true
-                automatic_evidence_count = [int]$git.automatic_evidence_count
-                automatic_evidence_fingerprint = [string]$git.automatic_evidence_fingerprint
             })
     }
     return [pscustomobject]([ordered]@{

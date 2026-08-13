@@ -189,7 +189,7 @@ function Test-OperationPlanContract($Plan) {
         if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Plan $field))) { $findings.Add((New-OperationFinding "required_field_missing" "error" ("$.{0}" -f $field) "Required field is missing.")) | Out-Null }
     }
     if (-not (Test-OperationRfc3339 (Get-OperationObjectProperty $Plan "created_at"))) { $findings.Add((New-OperationFinding "created_at_invalid" "error" "$.created_at" "Created time must be RFC3339.")) | Out-Null }
-    if ([string](Get-OperationObjectProperty $Plan "domain") -notin @("mcp", "skill_projection", "rules", "plugin", "skill_lifecycle")) { $findings.Add((New-OperationFinding "domain_invalid" "error" "$.domain" "Domain is not supported.")) | Out-Null }
+    if ([string](Get-OperationObjectProperty $Plan "domain") -ne "mcp") { $findings.Add((New-OperationFinding "domain_invalid" "error" "$.domain" "Domain is not supported.")) | Out-Null }
     if ([string](Get-OperationObjectProperty $Plan "mode") -notin @("dry_run", "apply")) { $findings.Add((New-OperationFinding "mode_invalid" "error" "$.mode" "Mode is not supported.")) | Out-Null }
     $targets = Get-OperationObjectProperty $Plan "targets"
     $actions = Get-OperationObjectProperty $Plan "actions"
@@ -220,46 +220,6 @@ function Test-OperationPlanContract($Plan) {
         if ([string](Get-OperationObjectProperty $action "type") -notin @("create", "update", "delete", "native_command")) { $findings.Add((New-OperationFinding "action_type_invalid" "error" ("$.actions[{0}].type" -f $i) "Action type is not supported.")) | Out-Null }
         if ([string](Get-OperationObjectProperty $action "risk") -notin @("low", "medium", "high")) { $findings.Add((New-OperationFinding "risk_invalid" "error" ("$.actions[{0}].risk" -f $i) "Risk is not supported.")) | Out-Null }
         if (-not $targetRefs.Contains([string](Get-OperationObjectProperty $action "target_ref"))) { $findings.Add((New-OperationFinding "action_target_unknown" "error" ("$.actions[{0}].target_ref" -f $i) "Action target is not declared.")) | Out-Null }
-    }
-    if ([string](Get-OperationObjectProperty $Plan "domain") -eq 'skill_lifecycle') {
-        $lifecycle = Get-OperationObjectProperty $Plan 'lifecycle'
-        if ($null -eq $lifecycle) { $findings.Add((New-OperationFinding 'skill_lifecycle_missing' 'error' '$.lifecycle' 'Skill lifecycle plans require a lifecycle binding.')) | Out-Null }
-        else {
-            $operationKind = [string](Get-OperationObjectProperty $lifecycle 'operation_kind')
-            if ([string]::IsNullOrWhiteSpace($operationKind)) { $operationKind = 'promotion' }
-            $requiredFields = if ($operationKind -eq 'promotion') {
-                @('skill_name', 'candidate_directory', 'candidate_fingerprint', 'baseline_fingerprint', 'catalog_fingerprint', 'evaluation_path', 'evaluation_hash', 'review_path', 'review_hash', 'review_expires_at', 'projection_disposition')
-            }
-            elseif ($operationKind -eq 'activation') {
-                @('skill_name', 'activation_action', 'package_fingerprint', 'catalog_fingerprint', 'config_path', 'config_before_hash', 'config_after_hash', 'request_path', 'request_hash', 'review_path', 'review_hash', 'review_expires_at', 'projection_disposition', 'projection_token')
-            }
-            else {
-                $findings.Add((New-OperationFinding 'skill_lifecycle_kind_invalid' 'error' '$.lifecycle.operation_kind' 'Skill lifecycle operation_kind must be promotion or activation.')) | Out-Null
-                @('skill_name')
-            }
-            foreach ($field in $requiredFields) {
-                if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $lifecycle $field))) { $findings.Add((New-OperationFinding 'skill_lifecycle_field_missing' 'error' ('$.lifecycle.{0}' -f $field) 'Skill lifecycle binding field is required.')) | Out-Null }
-            }
-            if ([string](Get-OperationObjectProperty $lifecycle 'skill_name') -notmatch '^[a-z0-9][a-z0-9-]{0,63}$') { $findings.Add((New-OperationFinding 'skill_lifecycle_name_invalid' 'error' '$.lifecycle.skill_name' 'Skill lifecycle name must be lowercase kebab-case.')) | Out-Null }
-            $hashFields = if ($operationKind -eq 'activation') { @('package_fingerprint', 'catalog_fingerprint', 'config_before_hash', 'config_after_hash', 'request_hash', 'review_hash') } else { @('candidate_fingerprint', 'baseline_fingerprint', 'catalog_fingerprint', 'evaluation_hash', 'review_hash') }
-            foreach ($hashField in $hashFields) {
-                if ([string](Get-OperationObjectProperty $lifecycle $hashField) -notmatch '^[a-fA-F0-9]{64}$') { $findings.Add((New-OperationFinding 'skill_lifecycle_hash_invalid' 'error' ('$.lifecycle.{0}' -f $hashField) 'Skill lifecycle hashes must be SHA-256 values.')) | Out-Null }
-            }
-            if (-not (Test-OperationRfc3339 (Get-OperationObjectProperty $lifecycle 'review_expires_at'))) { $findings.Add((New-OperationFinding 'skill_lifecycle_expiry_invalid' 'error' '$.lifecycle.review_expires_at' 'Review expiry must be RFC3339.')) | Out-Null }
-            if ($operationKind -eq 'promotion' -and ((Get-OperationObjectProperty $lifecycle 'host_mutation') -ne $false -or [string](Get-OperationObjectProperty $lifecycle 'projection_disposition') -ne 'cold_catalog_only')) { $findings.Add((New-OperationFinding 'skill_lifecycle_boundary_invalid' 'error' '$.lifecycle' 'Skill lifecycle promotion cannot mutate host projection.')) | Out-Null }
-            if ($operationKind -eq 'activation') {
-                if ([string](Get-OperationObjectProperty $lifecycle 'activation_action') -notin @('enable', 'refresh', 'retire') -or (Get-OperationObjectProperty $lifecycle 'host_mutation') -ne $true -or [string](Get-OperationObjectProperty $lifecycle 'projection_disposition') -ne 'staged_then_project_after_clean_gate' -or [string](Get-OperationObjectProperty $lifecycle 'projection_token') -ne 'PROJECT_SKILL_TO_HOST') { $findings.Add((New-OperationFinding 'skill_activation_boundary_invalid' 'error' '$.lifecycle' 'Skill activation must stage an allowed action and bind later controlled projection.')) | Out-Null }
-                $desiredIncludes = Get-OperationObjectProperty $lifecycle 'desired_managed_link_includes'
-                if (-not (Test-OperationArray $desiredIncludes) -or @($desiredIncludes).Count -lt 1 -or @($desiredIncludes | ForEach-Object { ([string]$_).ToLowerInvariant() } | Sort-Object -Unique).Count -ne @($desiredIncludes).Count) { $findings.Add((New-OperationFinding 'skill_activation_includes_invalid' 'error' '$.lifecycle.desired_managed_link_includes' 'Activation desired includes must be a non-empty unique array.')) | Out-Null }
-            }
-            $allowedPaths = Get-OperationObjectProperty $lifecycle 'allowed_paths'
-            if (-not (Test-OperationArray $allowedPaths) -or @($allowedPaths).Count -lt 1) { $findings.Add((New-OperationFinding 'skill_lifecycle_paths_invalid' 'error' '$.lifecycle.allowed_paths' 'Skill lifecycle allowed_paths must be a non-empty array.')) | Out-Null }
-            else {
-                $normalizedPaths = @($allowedPaths | ForEach-Object { ([string]$_).Replace('/', '\') })
-                if (@($normalizedPaths | Sort-Object -Unique).Count -ne $normalizedPaths.Count -or @($normalizedPaths | Where-Object { [System.IO.Path]::IsPathRooted($_) -or $_ -match '(^|\\)\.\.(\\|$)' }).Count -gt 0) { $findings.Add((New-OperationFinding 'skill_lifecycle_paths_invalid' 'error' '$.lifecycle.allowed_paths' 'Skill lifecycle paths must be unique contained relative paths.')) | Out-Null }
-            }
-            if (@($targets).Count -ne 1 -or @($actions).Count -ne 1 -or [string](Get-OperationObjectProperty $Plan 'mode') -ne 'apply') { $findings.Add((New-OperationFinding 'skill_lifecycle_shape_invalid' 'error' '$' 'Skill lifecycle operations require one target, one action, and apply mode.')) | Out-Null }
-        }
     }
     $serialized = $Plan | ConvertTo-Json -Depth 30 -Compress
     if (Test-OperationSerializedSensitiveValue $serialized) { $findings.Add((New-OperationFinding "sensitive_value_present" "error" "$" "Plan contains a sensitive value.")) | Out-Null }

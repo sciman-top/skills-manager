@@ -357,7 +357,6 @@ function Plan-NativeMetadata {
         findings = [object[]]@($findings.ToArray())
         decision_owner = 'deterministic_planner'
         semantic_selection_applied = $false
-        profile_filter_applied = $false
         provider_calls = 0
         native_mutations = 0
         writes = 0
@@ -374,7 +373,7 @@ function Test-NativeMetadataPlanContract {
     if ([string](Get-OperationObjectProperty $Plan 'projection_effect') -ne 'plan_only') { $findings.Add((New-OperationFinding 'projection_effect_invalid' 'error' '$.projection_effect' 'Metadata descriptions are advisory plan-only values.')) | Out-Null }
     if ([string](Get-OperationObjectProperty $Plan 'pass_scope') -ne 'advisory_planning_contract') { $findings.Add((New-OperationFinding 'pass_scope_invalid' 'error' '$.pass_scope' 'Metadata plan pass cannot claim host materialization or host budget acceptance.')) | Out-Null }
     if ([string](Get-OperationObjectProperty $Plan 'decision_owner') -ne 'deterministic_planner') { $findings.Add((New-OperationFinding 'decision_owner_invalid' 'error' '$.decision_owner' 'Metadata planning is deterministic and cannot own semantic selection.')) | Out-Null }
-    foreach ($field in @('semantic_selection_applied', 'profile_filter_applied')) {
+    foreach ($field in @('semantic_selection_applied')) {
         if ((Get-OperationObjectProperty $Plan $field) -ne $false) { $findings.Add((New-OperationFinding 'semantic_boundary_breached' 'error' ('$.{0}' -f $field) 'Metadata planner cannot apply semantic selection or profile filtering.')) | Out-Null }
     }
     foreach ($field in @('provider_calls', 'native_mutations', 'writes')) {

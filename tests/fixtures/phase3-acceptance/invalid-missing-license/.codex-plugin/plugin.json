@@ -1,7 +1,0 @@
-{
-  "name": "missing-license",
-  "version": "1.0.0",
-  "description": "Invalid distribution fixture.",
-  "repository": "https://example.invalid/missing-license",
-  "skills": "./skills/"
-}

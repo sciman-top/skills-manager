@@ -1,8 +1,0 @@
-{
-  "name": "teacher-workflows",
-  "version": "0.1.0",
-  "description": "Fixture workflows for junior classroom courseware and physics animation.",
-  "repository": "https://example.invalid/teacher-workflows",
-  "license": "LicenseRef-Proprietary",
-  "skills": "./skills/"
-}

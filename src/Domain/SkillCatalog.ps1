@@ -97,7 +97,6 @@ function New-SkillCatalog {
         decisions = [object[]]@($Decisions)
         findings = [object[]]@($Findings)
         complete = $Complete
-        profile_filter_applied = $false
         semantic_selection_applied = $false
         semantic_routing_performed = $false
         decision_owner = 'host_ai'
@@ -119,8 +118,8 @@ function Test-SkillCatalogContract {
     if ([string](Get-SkillCatalogProperty $Catalog @('catalog_id')) -notmatch '^sc-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'catalog_id_invalid' 'error' '$.catalog_id' 'Catalog id must be deterministic.')) | Out-Null }
     if (-not (Test-OperationRfc3339 (Get-SkillCatalogProperty $Catalog @('generated_at')))) { $findings.Add((New-OperationFinding 'generated_at_invalid' 'error' '$.generated_at' 'Catalog generated_at must be RFC3339.')) | Out-Null }
     if ([string](Get-SkillCatalogProperty $Catalog @('decision_owner')) -ne 'host_ai') { $findings.Add((New-OperationFinding 'decision_owner_invalid' 'error' '$.decision_owner' 'Semantic decision ownership must remain host_ai.')) | Out-Null }
-    foreach ($field in @('profile_filter_applied', 'semantic_selection_applied', 'semantic_routing_performed')) {
-        if ((Get-SkillCatalogProperty $Catalog @($field)) -ne $false) { $findings.Add((New-OperationFinding 'semantic_boundary_breached' 'error' ('$.{0}' -f $field) 'Catalog core cannot apply profile or semantic selection.')) | Out-Null }
+    foreach ($field in @('semantic_selection_applied', 'semantic_routing_performed')) {
+        if ((Get-SkillCatalogProperty $Catalog @($field)) -ne $false) { $findings.Add((New-OperationFinding 'semantic_boundary_breached' 'error' ('$.{0}' -f $field) 'Catalog core cannot apply semantic selection.')) | Out-Null }
     }
     foreach ($field in @('provider_calls', 'native_mutations', 'writes')) {
         if ([long](Get-SkillCatalogProperty $Catalog @($field)) -ne 0) { $findings.Add((New-OperationFinding 'side_effect_forbidden' 'error' ('$.{0}' -f $field) 'Catalog compilation must be zero-side-effect.')) | Out-Null }
@@ -146,7 +145,6 @@ function Test-SkillCatalogContract {
         $index++
     }
     foreach ($decision in @((Get-SkillCatalogProperty $Catalog @('decisions')))) {
-        if ([string](Get-SkillCatalogProperty $decision @('disposition')) -eq 'profile_excluded') { $findings.Add((New-OperationFinding 'profile_exclusion_forbidden' 'error' '$.decisions' 'Profile exclusion cannot be a catalog disposition.')) | Out-Null }
     }
     return New-OperationValidationResult $findings.ToArray()
 }

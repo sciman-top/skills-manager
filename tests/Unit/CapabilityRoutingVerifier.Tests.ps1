@@ -31,8 +31,6 @@ Describe 'Native-first capability routing verifier' {
         $result.data.semantic_auto_selection_count | Should Be 0
         $result.data.negative_constraint_violation_count | Should Be 0
         $result.data.side_effect_violation_count | Should Be 0
-        $result.data.catalog_policy_cache_hit_count | Should BeGreaterThan 0
-        $result.data.catalog_policy_cache_hit_count | Should BeLessThan $result.data.router_call_count
         $result.data.writes_performed | Should Be $false
     }
 
@@ -47,7 +45,7 @@ Describe 'Native-first capability routing verifier' {
         $inventedExplicitSkill = Copy-RoutingCase $sourceCorpus.cases[0]
         $inventedExplicitSkill.id = 'invented-explicit-skill'
         $inventedExplicitSkill.query = '请使用 $definitely-nonexistent-routing-skill'
-        $inventedExplicitSkill.profile_hints = @()
+        $inventedExplicitSkill.domain_hints = @()
         $inventedExplicitSkill.expected_candidates = @([pscustomobject]@{ kind = 'skill'; name = 'definitely-nonexistent-routing-skill' })
         $inventedExplicitSkill.host_selected = @([pscustomobject]@{ kind = 'skill'; name = 'definitely-nonexistent-routing-skill'; action = 'load_skill' })
         $inventedExplicitSkill.forbidden_candidates = @()

@@ -45,8 +45,6 @@ exit 0
         New-TestFile (Join-Path $workspace "tests\run.ps1")
         New-TestFile (Join-Path $workspace "overrides\custom\custom-demo\SKILL.md")
         New-TestFile (Join-Path $workspace "docs\runbooks\migration.md")
-        New-TestFile (Join-Path $workspace "docs\change-evidence\template.md")
-        New-TestFile (Join-Path $workspace "docs\change-evidence\20260530-audit-runtime-test.md")
         New-TestFile (Join-Path $workspace "references\README.md")
         New-TestFile (Join-Path $workspace "references\reference-shelf.manifest.json") "{}"
         New-TestFile (Join-Path $workspace "references\updates\README.md")
@@ -72,7 +70,6 @@ exit 0
         Test-Path -LiteralPath (Join-Path $expanded "src\Core.ps1") | Should Be $true
         Test-Path -LiteralPath (Join-Path $expanded "config\skill-routing-policy.json") | Should Be $true
         Test-Path -LiteralPath (Join-Path $expanded "scripts\release\pack-portable.ps1") | Should Be $true
-        Test-Path -LiteralPath (Join-Path $expanded "docs\change-evidence\template.md") | Should Be $true
         Test-Path -LiteralPath (Join-Path $expanded "references\README.md") | Should Be $true
         Test-Path -LiteralPath (Join-Path $expanded "references\reference-shelf.manifest.json") | Should Be $true
         Test-Path -LiteralPath (Join-Path $expanded "references\updates\README.md") | Should Be $true
@@ -84,7 +81,6 @@ exit 0
         Test-Path -LiteralPath (Join-Path $expanded "reports") | Should Be $false
         Test-Path -LiteralPath (Join-Path $expanded "build.log") | Should Be $false
         Test-Path -LiteralPath (Join-Path $expanded ".build-cache.json") | Should Be $false
-        Test-Path -LiteralPath (Join-Path $expanded "docs\change-evidence\20260530-audit-runtime-test.md") | Should Be $false
 
         $manifest = Get-Content -LiteralPath (Join-Path $expanded "PORTABLE-MANIFEST.json") -Raw | ConvertFrom-Json
         @($manifest.included_files) -contains "skills.json" | Should Be $true

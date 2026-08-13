@@ -72,7 +72,6 @@ description: >-
         $domains.catalog.status | Should Be 'current'
         @($domains.discovery_domains.name) | Should Contain 'engineering'
         $domains.automatic_dispatch.scope | Should Be 'all_catalog_skills'
-        $domains.automatic_dispatch.profile_switch_required | Should Be $false
         $domains.retrieval.strategy | Should Be 'global_catalog_discovery'
         @($domains.retrieval.candidates.name) | Should Contain 'codebase-design'
         @($candidates.retrieval.candidates.name) | Should Contain 'codebase-design'

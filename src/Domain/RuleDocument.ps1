@@ -13,7 +13,7 @@ function New-RuleFinding {
     )
     $identity = '{0}|{1}|{2}|{3}|{4}' -f $Kind, $Code.ToLowerInvariant(), $Path.ToLowerInvariant(), $Line, $Message
     return [pscustomobject][ordered]@{
-        finding_id = 'finding-{0}' -f (Get-CapabilityContractHash $identity).Substring(0, 16)
+        finding_id = 'finding-{0}' -f (Get-OperationSha256 $identity).Substring(0, 16)
         kind = $Kind; code = $Code; severity = $Severity; path = $Path
         line = if ($null -eq $Line) { $null } else { [int]$Line }
         message = $Message; evidence = @($Evidence); confidence = $Confidence
@@ -35,7 +35,7 @@ function New-RuleDocument {
     )
     $identity = '{0}|{1}|{2}' -f $HostName.ToLowerInvariant(), $Scope, $Path.ToLowerInvariant()
     return [pscustomobject][ordered]@{
-        schema_version = 1; id = 'rule-{0}' -f (Get-CapabilityContractHash $identity).Substring(0, 16)
+        schema_version = 1; id = 'rule-{0}' -f (Get-OperationSha256 $identity).Substring(0, 16)
         host = $HostName.ToLowerInvariant(); scope = $Scope; responsibility = $Responsibility; path = $Path; owner = $Owner
         content_hash = if ([string]::IsNullOrWhiteSpace($ContentHash)) { $null } else { $ContentHash.ToLowerInvariant() }
         byte_size = $ByteSize; precedence = if ($null -eq $Precedence) { $null } else { [int]$Precedence }

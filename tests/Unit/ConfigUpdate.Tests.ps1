@@ -190,33 +190,6 @@ Describe "Config And Update Enhancements" {
             { Assert-Cfg $volumeRoot } | Should Throw
         }
 
-        It "Validates per-profile metadata budgets against the global ceiling" {
-            $valid = @'
-{
-  "vendors": [], "targets": [], "mappings": [], "imports": [],
-  "mcp_servers": [], "mcp_targets": [], "sync_mode": "link",
-  "skill_projection": {
-    "active_profile": "default",
-    "budget_limit_chars": 10000,
-    "profiles": {
-      "default": { "enabled_names": [], "budget_limit_chars": 7500 }
-    },
-    "sources": []
-  }
-}
-'@ | ConvertFrom-Json
-            @(Get-CfgContractErrors $valid).Count | Should Be 0
-            { Assert-Cfg $valid } | Should Not Throw
-
-            $invalid = $valid.PSObject.Copy()
-            $invalid.skill_projection = $valid.skill_projection.PSObject.Copy()
-            $invalid.skill_projection.profiles = $valid.skill_projection.profiles.PSObject.Copy()
-            $invalid.skill_projection.profiles.default = [pscustomobject]@{ enabled_names = @(); budget_limit_chars = 10001 }
-            $errors = @(Get-CfgContractErrors $invalid) -join "`n"
-            $errors | Should Match "profile.budget_limit_chars 不能超过全局上限"
-            { Assert-Cfg $invalid } | Should Throw
-        }
-
         It "Validates managed Codex link placement" {
             $valid = @'
 {

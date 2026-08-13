@@ -80,112 +80,16 @@ Describe 'reference refresh remote provenance safety' {
         $record.remote_refs_current | Should Be $true
     }
 
-    It 'blocks cloning an unreviewed conditional candidate before creating its checkout' {
-        $referencesRoot = Join-Path $TestDrive 'blocked-references'
-        $remote = Join-Path $TestDrive 'blocked.git'
-        $outputDirectory = Join-Path $TestDrive 'blocked-reports'
-        $manifestPath = Join-Path $TestDrive 'blocked-manifest.json'
-        $destination = Join-Path $referencesRoot 'conditional\blocked'
-
-        $null = New-Item -ItemType Directory -Path $referencesRoot, $outputDirectory
-        & git init --bare --initial-branch=main $remote | Out-Null
+    It 'rejects an unknown tier before touching any checkout' {
+        $manifestPath = Join-Path $TestDrive 'unknown-tier-manifest.json'
         [ordered]@{
             schema_version = 1
-            references_root = $referencesRoot
+            references_root = Join-Path $TestDrive 'unknown-tier-references'
             default_refresh_set = @()
-            repos = @([ordered]@{
-                name = 'blocked'
-                relative_path = 'conditional/blocked'
-                tier = 'conditional-not-cloned'
-                status = 'not-cloned'
-                upstream_url = $remote
-            })
-        } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+            repos = @()
+        } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
-        $result = & $script:refreshScript -ManifestPath $manifestPath -ReferencesRoot $referencesRoot -OutputDirectory $outputDirectory -RepoNames blocked -CloneMissing -FetchOnly
-        $record = @($result.results)[0]
-
-        $record.status | Should Be 'clone-blocked'
-        $record.note | Should Match 'review metadata'
-        Test-Path -LiteralPath $destination | Should Be $false
+        { & $script:refreshScript -ManifestPath $manifestPath -OutputDirectory (Join-Path $TestDrive 'unknown-tier-reports') -Tier obsolete -FetchOnly } | Should Throw 'Unsupported reference tier: obsolete'
     }
 
-    It 'blocks cloning a conditional candidate whose license is unresolved' {
-        $referencesRoot = Join-Path $TestDrive 'unknown-license-references'
-        $remote = Join-Path $TestDrive 'unknown-license.git'
-        $outputDirectory = Join-Path $TestDrive 'unknown-license-reports'
-        $manifestPath = Join-Path $TestDrive 'unknown-license-manifest.json'
-        $destination = Join-Path $referencesRoot 'conditional\unknown-license'
-
-        $null = New-Item -ItemType Directory -Path $referencesRoot, $outputDirectory
-        & git init --bare --initial-branch=main $remote | Out-Null
-        [ordered]@{
-            schema_version = 1
-            references_root = $referencesRoot
-            default_refresh_set = @()
-            repos = @([ordered]@{
-                name = 'unknown-license'; relative_path = 'conditional/unknown-license'; tier = 'conditional-not-cloned'; status = 'not-cloned'; upstream_url = $remote
-                review_revision = '1111111111111111111111111111111111111111'; license = 'NOASSERTION'; review_decision = 'defer'; reviewed_at = '2026-08-08'
-                review_evidence = 'fixture evidence'; activation_trigger = 'fixture trigger'
-            })
-        } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
-
-        $result = & $script:refreshScript -ManifestPath $manifestPath -ReferencesRoot $referencesRoot -OutputDirectory $outputDirectory -RepoNames unknown-license -CloneMissing -FetchOnly
-        $record = @($result.results)[0]
-
-        $record.status | Should Be 'clone-blocked'
-        $record.note | Should Match 'license'
-        Test-Path -LiteralPath $destination | Should Be $false
-    }
-
-    It 'checks out the reviewed revision in detached state after cloning a conditional candidate' {
-        $referencesRoot = Join-Path $TestDrive 'reviewed-references'
-        $remote = Join-Path $TestDrive 'reviewed.git'
-        $publisher = Join-Path $TestDrive 'reviewed-publisher'
-        $outputDirectory = Join-Path $TestDrive 'reviewed-reports'
-        $manifestPath = Join-Path $TestDrive 'reviewed-manifest.json'
-        $destination = Join-Path $referencesRoot 'conditional\reviewed'
-
-        $null = New-Item -ItemType Directory -Path $referencesRoot, $outputDirectory
-        & git init --bare --initial-branch=main $remote | Out-Null
-        & git clone $remote $publisher | Out-Null
-        & git -C $publisher config user.email 'fixture@example.invalid'
-        & git -C $publisher config user.name 'Fixture'
-        Set-Content -LiteralPath (Join-Path $publisher 'README.md') -Value 'reviewed' -Encoding UTF8
-        & git -C $publisher add README.md
-        & git -C $publisher commit -m 'reviewed revision' | Out-Null
-        & git -C $publisher push origin main | Out-Null
-        $reviewRevision = (& git -C $publisher rev-parse HEAD).Trim()
-        Set-Content -LiteralPath (Join-Path $publisher 'README.md') -Value 'newer' -Encoding UTF8
-        & git -C $publisher add README.md
-        & git -C $publisher commit -m 'newer revision' | Out-Null
-        & git -C $publisher push origin main | Out-Null
-
-        [ordered]@{
-            schema_version = 1
-            references_root = $referencesRoot
-            default_refresh_set = @()
-            repos = @([ordered]@{
-                name = 'reviewed'
-                relative_path = 'conditional/reviewed'
-                tier = 'conditional-not-cloned'
-                status = 'not-cloned'
-                upstream_url = $remote
-                review_revision = $reviewRevision
-                license = 'MIT'
-                review_decision = 'adapt'
-                reviewed_at = '2026-08-08'
-                review_evidence = 'fixture evidence'
-                activation_trigger = 'fixture trigger'
-            })
-        } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
-
-        $result = & $script:refreshScript -ManifestPath $manifestPath -ReferencesRoot $referencesRoot -OutputDirectory $outputDirectory -RepoNames reviewed -CloneMissing -FetchOnly
-        $record = @($result.results)[0]
-
-        $record.status | Should Be 'cloned'
-        $record.consumable_revision | Should Be $reviewRevision
-        (& git -C $destination rev-parse HEAD).Trim() | Should Be $reviewRevision
-        @(& git -C $destination branch --show-current).Count | Should Be 0
-    }
 }

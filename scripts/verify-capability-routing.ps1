@@ -137,9 +137,7 @@ $policyPassed = 0
 $negativeConstraintViolations = 0
 $semanticAutoSelections = 0
 $routerMetadataCache = @{}
-$routerCatalogPolicyCache = @{}
 $routerCallCount = 0
-$catalogPolicyCacheHitCount = 0
 
 function Get-CapabilityRef($Item) {
     return ('{0}|{1}' -f ([string]$Item.kind).ToLowerInvariant(), [string]$Item.name)
@@ -147,17 +145,15 @@ function Get-CapabilityRef($Item) {
 
 function Invoke-RouterCase($Case, [string[]]$Candidate = @()) {
     $script:routerCallCount++
-    $cacheCountBefore = $routerCatalogPolicyCache.Count
     $routerArgs = @{
         Query = [string]$Case.query
         ManifestPath = $manifestFile
         PolicyPath = $policyFile
         ConfigPath = $configFile
-        DomainHint = @($Case.profile_hints | ForEach-Object { [string]$_ })
+        DomainHint = @($Case.domain_hints | ForEach-Object { [string]$_ })
         Candidate = @($Candidate)
         ExcludeCapability = @($Case.host_exclude | ForEach-Object { Get-CapabilityRef $_ })
         MetadataCache = $routerMetadataCache
-        CatalogPolicyCache = $routerCatalogPolicyCache
     }
     if (-not [string]::IsNullOrWhiteSpace([string]$Case.snapshot_path)) {
         $snapshotSourcePath = Resolve-RepoFile ([string]$Case.snapshot_path)
@@ -172,7 +168,6 @@ function Invoke-RouterCase($Case, [string[]]$Candidate = @()) {
     }
     $global:LASTEXITCODE = 0
     $raw = @(& $routerFile @routerArgs 2>&1)
-    if ($routerCatalogPolicyCache.Count -eq $cacheCountBefore -and $cacheCountBefore -gt 0) { $script:catalogPolicyCacheHitCount++ }
     if ($LASTEXITCODE -ne 0) { return [pscustomobject]@{ error = ($raw -join "`n"); data = $null } }
     try { return [pscustomobject]@{ error = ''; data = (($raw -join "`n") | ConvertFrom-Json) } }
     catch { return [pscustomobject]@{ error = $_.Exception.Message; data = $null } }
@@ -295,7 +290,6 @@ $resultEnvelope = [ordered]@{
     finding_count = $findings.Count
     side_effect_violation_count = @($findings | Where-Object code -eq 'side_effect_violation').Count
     router_call_count = $routerCallCount
-    catalog_policy_cache_hit_count = $catalogPolicyCacheHitCount
     writes_performed = $false
     findings = @($findings.ToArray())
 }

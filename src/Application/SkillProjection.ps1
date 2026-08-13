@@ -151,7 +151,6 @@ function New-NativeSkillProjectionBlockedPlan {
         }
         decision_owner = 'deterministic_projection'
         semantic_selection_applied = $false
-        profile_filter_applied = $false
         provider_calls = 0
         native_mutations = 0
         writes = 0
@@ -321,7 +320,6 @@ function New-NativeSkillProjectionPlan {
         }
         decision_owner = 'deterministic_projection'
         semantic_selection_applied = $false
-        profile_filter_applied = $false
         provider_calls = 0
         native_mutations = 0
         writes = 0
@@ -349,7 +347,7 @@ function Test-NativeSkillProjectionPlanContract {
         if ([bool](Get-NativeSkillProjectionProperty $Plan @('pass')) -ne $true -or $kept.Count -ne $enabled.Count -or $omitted.Count -ne 0 -or (Get-NativeSkillProjectionProperty $Plan @('truncated')) -ne $false) { $findings.Add((New-OperationFinding 'complete_projection_invalid' 'error' '$' 'A ready plan must retain every eligible enabled skill.')) | Out-Null }
         if ([string](Get-NativeSkillProjectionProperty $Plan @('apply_token')) -notmatch '^nsp-token-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'apply_token_invalid' 'error' '$.apply_token' 'Ready plans require an explicit apply token.')) | Out-Null }
     }
-    if ((Get-NativeSkillProjectionProperty $Plan @('semantic_selection_applied')) -ne $false -or (Get-NativeSkillProjectionProperty $Plan @('profile_filter_applied')) -ne $false) { $findings.Add((New-OperationFinding 'semantic_boundary_breached' 'error' '$' 'Projection cannot apply semantic or profile reachability filtering.')) | Out-Null }
+    if ((Get-NativeSkillProjectionProperty $Plan @('semantic_selection_applied')) -ne $false) { $findings.Add((New-OperationFinding 'semantic_boundary_breached' 'error' '$' 'Projection cannot apply semantic selection.')) | Out-Null }
     foreach ($field in @('provider_calls', 'native_mutations', 'writes')) { if ([long](Get-NativeSkillProjectionProperty $Plan @($field)) -ne 0) { $findings.Add((New-OperationFinding 'side_effect_forbidden' 'error' ('$.{0}' -f $field) 'Planning must not mutate the native surface.')) | Out-Null } }
     $notification = Get-NativeSkillProjectionProperty $Plan @('notification')
     if ([string](Get-NativeSkillProjectionProperty $notification @('method')) -ne 'skills/changed') { $findings.Add((New-OperationFinding 'notification_method_invalid' 'error' '$.notification.method' 'Native projection uses the skills/changed notification plan.')) | Out-Null }

@@ -86,52 +86,6 @@ Describe "Audit target hardening" {
         $staleness.drifted_targets[0].changes | Should Contain "worktree"
     }
 
-    It "Reports audit runtime evidence separately without treating it as target drift" {
-        $repo = Join-Path $TestDrive "automatic-evidence-repo"
-        New-TestAuditGitRepository $repo
-        New-Item -ItemType Directory -Path (Join-Path $repo "docs\change-evidence") -Force | Out-Null
-        Set-ContentUtf8 (Join-Path $repo "docs\change-evidence\.gitkeep") ""
-        Push-Location $repo
-        try {
-            git add docs/change-evidence/.gitkeep
-            git commit --quiet -m "track evidence directory"
-        }
-        finally {
-            Pop-Location
-        }
-        $runDir = Join-Path $TestDrive "automatic-evidence-run"
-        New-Item -ItemType Directory -Path $runDir -Force | Out-Null
-        Write-AuditJsonFile (Join-Path $runDir "repo-scan.json") (New-AuditRepoScan "automatic-evidence" $repo $repo)
-        $snapshot = Get-AuditTargetRepoSnapshotState $runDir
-        Set-ContentUtf8 (Join-Path $repo "docs\change-evidence\20260714-audit-runtime-dry-run-r-test-120000.md") "generated"
-
-        $live = Get-AuditTargetRepoLiveState $snapshot
-        $staleness = Get-AuditTargetRepoStaleness $snapshot $live
-
-        $staleness.is_stale | Should Be $false
-        $live.targets[0].automatic_evidence_count | Should Be 1
-        $live.targets[0].automatic_evidence_fingerprint | Should Not BeNullOrEmpty
-    }
-
-    It "Does not exempt nested product paths that resemble audit runtime evidence" {
-        $repo = Join-Path $TestDrive "nested-evidence-lookalike-repo"
-        New-TestAuditGitRepository $repo
-        $runDir = Join-Path $TestDrive "nested-evidence-lookalike-run"
-        New-Item -ItemType Directory -Path $runDir -Force | Out-Null
-        Write-AuditJsonFile (Join-Path $runDir "repo-scan.json") (New-AuditRepoScan "nested-evidence-lookalike" $repo $repo)
-        $snapshot = Get-AuditTargetRepoSnapshotState $runDir
-        $lookalike = Join-Path $repo "src\docs\change-evidence\20260714-audit-runtime-product-120000.md"
-        New-Item -ItemType Directory -Path (Split-Path -Parent $lookalike) -Force | Out-Null
-        Set-ContentUtf8 $lookalike "product input"
-
-        $live = Get-AuditTargetRepoLiveState $snapshot
-        $staleness = Get-AuditTargetRepoStaleness $snapshot $live
-
-        $staleness.is_stale | Should Be $true
-        $live.targets[0].status_count | Should Be 1
-        $live.targets[0].automatic_evidence_count | Should Be 0
-    }
-
     It "Preflight rejects a target repository that drifted after scan" {
         $repo = Join-Path $TestDrive "preflight-target-repo"
         New-TestAuditGitRepository $repo
@@ -232,7 +186,6 @@ Describe "Audit target hardening" {
         New-Item -ItemType Directory -Path (Join-Path $repo "overrides\patches") -Force | Out-Null
         $cfg = [pscustomobject]@{
             skill_projection = [pscustomobject]@{
-                resident_names = @()
                 aliases = @([pscustomobject]@{ name = "legacy"; replacement = "retired-skill" })
                 discovery_catalog = [pscustomobject]@{ domain_memberships = [pscustomobject]@{} }
             }

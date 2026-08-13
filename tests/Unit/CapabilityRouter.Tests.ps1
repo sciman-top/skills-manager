@@ -80,7 +80,7 @@ Describe 'Native-first capability discovery and policy' {
     }
 
     It 'Makes the host AI the only semantic decision owner' {
-        $result = Invoke-TestRouter '分析当前仓库架构是否模块化，但不要修改文件' @{ ProfileHint = @('engineering') }
+        $result = Invoke-TestRouter '分析当前仓库架构是否模块化，但不要修改文件' @{ DomainHint = @('engineering') }
 
         $result.schema_version | Should Be 3
         $result.decision_owner | Should Be 'host_ai'
@@ -95,8 +95,8 @@ Describe 'Native-first capability discovery and policy' {
     }
 
     It 'Returns the same profile candidate pool for equivalent Chinese and English requests' {
-        $zh = Invoke-TestRouter '设计清晰的模块边界和稳定接口' @{ ProfileHint = @('engineering') }
-        $en = Invoke-TestRouter 'Design clear module boundaries and stable interfaces' @{ ProfileHint = @('engineering') }
+        $zh = Invoke-TestRouter '设计清晰的模块边界和稳定接口' @{ DomainHint = @('engineering') }
+        $en = Invoke-TestRouter 'Design clear module boundaries and stable interfaces' @{ DomainHint = @('engineering') }
 
         @($zh.retrieval.candidates.name | Sort-Object) | Should Be @($en.retrieval.candidates.name | Sort-Object)
         @($zh.selected).Count | Should Be 0
@@ -116,11 +116,11 @@ Describe 'Native-first capability discovery and policy' {
         $cache.Count | Should BeGreaterThan 1
     }
 
-    It 'Normalizes comma-separated profile hints from an external PowerShell process' {
+    It 'Normalizes comma-separated domain hints from an external PowerShell process' {
         $raw = & pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath `
             -Query '设计软件工程终态和交互界面' `
             -ManifestPath $manifestPath -PolicyPath $policyPath -ConfigPath $configPath `
-            -ProfileHint 'engineering,physics'
+            -DomainHint 'engineering,physics'
 
         $LASTEXITCODE | Should Be 0
         $result = ($raw -join "`n") | ConvertFrom-Json
@@ -152,7 +152,7 @@ Describe 'Native-first capability discovery and policy' {
     }
 
     It 'Applies deterministic policy only after the host supplies a capability' {
-        $result = Invoke-TestRouter '设计清晰的模块边界和稳定接口' @{ ProfileHint = @('engineering'); Candidate = @('skill|codebase-design') }
+        $result = Invoke-TestRouter '设计清晰的模块边界和稳定接口' @{ DomainHint = @('engineering'); Candidate = @('skill|codebase-design') }
 
         @($result.selected.name) | Should Be @('codebase-design')
         $result.selection_mode | Should Be 'host_selected'
@@ -169,7 +169,7 @@ Describe 'Native-first capability discovery and policy' {
     }
 
     It 'Does not treat an unsigiled capability name inside a negation as an explicit selection' {
-        $result = Invoke-TestRouter '这个 Python CLI 崩溃了，请定位根因；不要使用 debug:dotnet' @{ ProfileHint = @('python') }
+        $result = Invoke-TestRouter '这个 Python CLI 崩溃了，请定位根因；不要使用 debug:dotnet' @{ DomainHint = @('python') }
 
         @($result.selected).Count | Should Be 0
         @($result.retrieval.candidates.name) | Should Not Contain 'debug:dotnet'
@@ -177,7 +177,7 @@ Describe 'Native-first capability discovery and policy' {
     }
 
     It 'Does not infer dotnet from a generic debugging request' {
-        $result = Invoke-TestRouter '这个项目启动不了，请查明根因并修好' @{ ProfileHint = @('default') }
+        $result = Invoke-TestRouter '这个项目启动不了，请查明根因并修好' @{ DomainHint = @('default') }
 
         @($result.retrieval.candidates.name) | Should Contain 'systematic-debugging'
         @($result.retrieval.candidates.name) | Should Not Contain 'debug:dotnet'
@@ -186,7 +186,7 @@ Describe 'Native-first capability discovery and policy' {
 
     It 'Filters host-declared negative constraints before policy selection' {
         $result = Invoke-TestRouter '不要用 test-driven-development，只解释失败原因' @{
-            ProfileHint = @('strict')
+            DomainHint = @('strict')
             Candidate = @('skill|test-driven-development', 'skill|systematic-debugging')
             ExcludeCapability = @('skill|test-driven-development')
         }
@@ -197,7 +197,7 @@ Describe 'Native-first capability discovery and policy' {
     }
 
     It 'Keeps operator skills behind approval' {
-        $result = Invoke-TestRouter '把批准的 spec 发布到 tracker' @{ ProfileHint = @('engineering'); Candidate = @('skill|to-spec') }
+        $result = Invoke-TestRouter '把批准的 spec 发布到 tracker' @{ DomainHint = @('engineering'); Candidate = @('skill|to-spec') }
 
         $result.activation_plan[0].action | Should Be 'use_active_skill'
         $result.activation_plan[0].load_allowed | Should Be $true
@@ -221,7 +221,7 @@ Describe 'Native-first capability discovery and policy' {
         New-Item -ItemType Directory -Path $outside -Force | Out-Null
         $escaped = Set-RouterTestSkill $outside 'escaped' 'escaped-skill' 'Escaped unique capability.'
         $malicious = Join-Path $TestDrive 'malicious.json'
-        [ordered]@{ schema_version = 2; active_profile = 'default'; active = @(); canonical = @([ordered]@{ name = $escaped.name; path = $escaped.path; source_root = $skillRoot }) } |
+        [ordered]@{ schema_version = 2; active = @(); canonical = @([ordered]@{ name = $escaped.name; path = $escaped.path; source_root = $skillRoot }) } |
             ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $malicious -Encoding UTF8
 
         $result = & $scriptPath -Query 'escaped unique capability' -ManifestPath $malicious -Candidate @('skill|escaped-skill') | ConvertFrom-Json
@@ -404,7 +404,7 @@ Describe 'Native-first capability discovery and policy' {
         [ordered]@{ schema_version = 1; task_domain = 'legacy-value'; loaded = @([ordered]@{ kind = 'skill'; name = 'debug:dotnet' }) } |
             ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $sessionPath -Encoding UTF8
 
-        $result = Invoke-TestRouter '继续诊断 WPF .NET 启动失败' @{ ProfileHint = @('dotnet'); Candidate = @('skill|debug:dotnet'); SessionSnapshotPath = $sessionPath }
+        $result = Invoke-TestRouter '继续诊断 WPF .NET 启动失败' @{ DomainHint = @('dotnet'); Candidate = @('skill|debug:dotnet'); SessionSnapshotPath = $sessionPath }
 
         @($result.session_plan.reuse.name) | Should Not Contain 'debug:dotnet'
         @($result.session_plan.load.name) | Should Contain 'debug:dotnet'
@@ -427,13 +427,13 @@ Describe 'Native-first capability discovery and policy' {
         } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $sessionPath -Encoding UTF8
 
         $current = Invoke-TestRouter '继续诊断 WPF .NET 启动失败' @{
-            ProfileHint = @('dotnet')
+            DomainHint = @('dotnet')
             Candidate = @('skill|debug:dotnet')
             SessionSnapshotPath = $sessionPath
             SessionIdentity = 'session-a'
         }
         $foreign = Invoke-TestRouter '继续诊断 WPF .NET 启动失败' @{
-            ProfileHint = @('dotnet')
+            DomainHint = @('dotnet')
             Candidate = @('skill|debug:dotnet')
             SessionSnapshotPath = $sessionPath
             SessionIdentity = 'session-b'
@@ -442,7 +442,7 @@ Describe 'Native-first capability discovery and policy' {
         $staleSnapshot.loaded[0].entrypoint_sha256 = ('0' * 64)
         $staleSnapshot | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $sessionPath -Encoding UTF8
         $stale = Invoke-TestRouter '继续诊断 WPF .NET 启动失败' @{
-            ProfileHint = @('dotnet')
+            DomainHint = @('dotnet')
             Candidate = @('skill|debug:dotnet')
             SessionSnapshotPath = $sessionPath
             SessionIdentity = 'session-a'

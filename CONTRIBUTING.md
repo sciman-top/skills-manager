@@ -2,63 +2,49 @@
 
 ## Scope
 
-- Issues: bugs, feature requests, workflow friction, documentation drift
-- Pull requests: code, tests, docs, gates, release tooling, and evidence updates
+Contributions may change code, tests, documentation, gates, release tooling, skills, MCP configuration, target audit, or rule audit. Keep one coherent user/operator outcome per change.
 
-## Development Loop
+## Sources of truth
 
-1. Edit the real source of truth for the change.
-2. Regenerate derived artifacts when needed.
-3. Run verification in the documented order.
-4. Update docs and evidence for any user-visible, workflow-visible, or contract-visible change.
+- Edit `src/`, then run `build.ps1` to regenerate `skills.ps1`.
+- Edit `skills.json` for sources, mappings, targets, MCP, and projection.
+- Put local skills in `overrides/{custom,patches,resources}`; do not patch `vendor/`, `imports/`, generated `agent/`, or runtime `reports/` directly.
+- Change audit prompt defaults in `src/Commands/AuditTargets*.ps1` or `overrides/audit-outer-ai-prompt.md`, never in a generated run directory.
 
-## Source of Truth Rules
+## Development loop
 
-- Edit `src/` for script behavior, then run `./build.ps1` to regenerate `skills.ps1`.
-- Edit `skills.json` for source libraries, mappings, targets, sync mode, and MCP inventory.
-- Put local customizations in `overrides/`; do not patch `vendor/` or generated `agent/` output directly.
-- Treat `reports/skill-audit/<run-id>/ai-brief.md` and `outer-ai-prompt.md` as runtime artifacts. If the default audit prompt must change, update `src/Commands/AuditTargets.ps1` or `overrides/audit-outer-ai-prompt.md`.
-
-## Required Verification
-
-Run the project hard gates in this exact order:
+1. Freeze the intended behavior, exact write set, minimum verification, and stop condition.
+2. Edit the real source and regenerate affected artifacts.
+3. Run `git diff --check` plus the affected test or verifier.
+4. Use a full gate only for runtime, security, data, migration, public-contract, dependency, packaging, release, or cross-surface risk.
 
 ```powershell
-./build.ps1
-./skills.ps1 发现
-./skills.ps1 doctor --strict --threshold-ms 8000
-./skills.ps1 构建生效
+pwsh -NoProfile -File .\build.ps1
+pwsh -NoProfile -File .\tests\check-generated-sync.ps1 -AllowDirtyWorktree
+pwsh -NoProfile -File .\scripts\verify-skill-integrity.ps1
+pwsh -NoProfile -File .\scripts\verify-skills-config.ps1 -Mode enforce
 ```
 
-Additional quality gates are available when you need local/CI parity:
+For an exact-current full closeout:
 
 ```powershell
-./scripts/quality/run-local-quality-gates.ps1 -Profile quick
-./scripts/quality/run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full -ReuseCurrentReceipt
 ```
 
-Profiles:
+If reuse misses and a new full run is justified, use `-ForceFresh` once. `构建生效`, `同步MCP`, host projection, live doctor, commit, and push are separate actions; do not include them implicitly in a repository-only change.
 
-- `quick`: `build -> repo-hygiene -> generated-sync -> dependency-baseline -> doctor-json-contract`
-- `full`: `quick + tests`
+## Documentation and evidence
 
-## Documentation and Evidence Expectations
+- Update only the document that owns the changed stable contract.
+- Do not create task manifests, ADRs, archives, or tracked change-evidence for ordinary work.
+- Git diff plus actual verification output is the default evidence.
+- Runtime receipts belong under ignored `reports/`, next to the workflow that produced them.
+- Add durable evidence only when an external release/compliance contract explicitly requires it.
 
-- Update `README.md` and `README.en.md` whenever command surface, boundaries, install flow, release flow, or hygiene rules change.
-- Add or update a `docs/change-evidence/YYYYMMDD-topic.md` entry when the change affects workflow, contracts, release packaging, governance, or user guidance.
-- Keep examples aligned with actual help output and current scripts.
+## Pull request checklist
 
-## PR Checklist
-
-- Explain the user or operator problem being solved.
-- Summarize the smallest intended scope of the change.
-- Include the verification commands you actually ran and the result.
-- Mention docs, migration, release, or MCP behavior changes when relevant.
-- Call out any N/A gates or skipped verification explicitly, with reason and fallback evidence.
-
-## Scope Discipline
-
-- Do not edit generated `skills.ps1` or `agent/` output by hand.
-- Do not commit local agent state, logs, caches, or temporary artifacts.
-- Root `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` are tracked project documents; host-local copies and imported temporary rule snapshots are not.
-- Keep changes focused. Separate behavior changes, refactors, and doc-only cleanup when possible.
+- State the real problem and smallest intended scope.
+- List the verification actually run and its result.
+- Call out migration, release, MCP, or host behavior changes.
+- Report skipped/N/A verification with reason and alternative evidence.
+- Preserve unrelated user/concurrent changes and describe the rollback for this slice only.

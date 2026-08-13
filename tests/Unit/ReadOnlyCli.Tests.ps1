@@ -1,7 +1,6 @@
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $repoRoot 'src\Infrastructure\AtomicFile.ps1')
 . (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1')
-. (Join-Path $repoRoot 'src\Domain\CapabilityDescriptor.ps1')
 . (Join-Path $repoRoot 'src\Domain\RuleDocument.ps1')
 . (Join-Path $repoRoot 'src\Domain\RuleResponsibility.ps1')
 . (Join-Path $repoRoot 'src\Application\CapabilityInventory.ps1')
@@ -21,7 +20,7 @@ Describe 'Read-only capability and rule CLI' {
         }
     }
 
-    It 'returns one parseable capability JSON envelope with no write by default' {
+    It 'returns one parseable skill-surface JSON envelope with no write by default' {
         $before = (Get-FileHash -LiteralPath $script:CfgPath -Algorithm SHA256).Hash
         $result = Invoke-CapabilityInventoryCommand @('--json')
         $parsed = $result.output | ConvertFrom-Json
@@ -30,13 +29,14 @@ Describe 'Read-only capability and rule CLI' {
         $parsed.command | Should Be 'capability-inventory'
         $parsed.data.writes | Should Be 0
         $parsed.data.provider_calls | Should Be 0
-        @($parsed.data.descriptors | Where-Object truth_origin -eq runtime).Count | Should BeGreaterThan 0
+        $parsed.view | Should Be 'skill-surfaces'
+        $parsed.data.surface_count | Should Be 6
         (Get-FileHash -LiteralPath $script:CfgPath -Algorithm SHA256).Hash | Should Be $before
     }
 
     It 'writes exactly the explicit capability report path' {
         $out = Join-Path $TestDrive 'capability.json'
-        $result = Invoke-CapabilityInventoryCommand @('--json', '--out', $out)
+        $result = Invoke-CapabilityInventoryCommand @('--view', 'skill-surfaces', '--json', '--out', $out)
 
         Test-Path -LiteralPath $out | Should Be $true
         (Get-Content -LiteralPath $out -Raw | ConvertFrom-Json).data.writes | Should Be 1

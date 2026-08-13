@@ -2,8 +2,7 @@ function Write-AuditBundleEvidence([string]$mode, [string]$runId, [string]$repor
     try {
         $date = Get-Date -Format "yyyyMMdd"
         $time = Get-Date -Format "HHmmss"
-        # Runtime receipts belong to the ignored audit bundle, not the curated
-        # repository change-evidence ledger.
+        # Runtime receipts stay beside the ignored audit bundle.
         $dir = $reportRoot
         EnsureDir $dir
         $safeMode = if ([string]::IsNullOrWhiteSpace($mode)) { "scan" } else { ([regex]::Replace($mode.ToLowerInvariant(), "[^a-z0-9_-]", "-")) }

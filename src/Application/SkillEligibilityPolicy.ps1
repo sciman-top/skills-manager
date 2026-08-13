@@ -83,7 +83,6 @@ function Evaluate-SkillEligibility {
         findings = [object[]]@($findings.ToArray())
         decision_owner = 'deterministic_policy'
         semantic_selection_performed = $false
-        profile_filter_applied = $false
         provider_calls = 0
         native_mutations = 0
         writes = 0
@@ -98,7 +97,7 @@ function Test-SkillEligibilityResultContract {
     if ((Get-OperationObjectProperty $Result 'schema_version') -ne 1) { $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only eligibility schema version 1 is supported.')) | Out-Null }
     if ([string](Get-OperationObjectProperty $Result 'decision') -notin @('allow', 'deny', 'needs_activation')) { $findings.Add((New-OperationFinding 'decision_invalid' 'error' '$.decision' 'Eligibility decision is invalid.')) | Out-Null }
     if ([string](Get-OperationObjectProperty $Result 'decision_owner') -ne 'deterministic_policy') { $findings.Add((New-OperationFinding 'decision_owner_invalid' 'error' '$.decision_owner' 'Eligibility decision owner is invalid.')) | Out-Null }
-    if ((Get-OperationObjectProperty $Result 'semantic_selection_performed') -ne $false -or (Get-OperationObjectProperty $Result 'profile_filter_applied') -ne $false) { $findings.Add((New-OperationFinding 'semantic_boundary_breached' 'error' '$' 'Eligibility policy cannot perform semantic selection or profile filtering.')) | Out-Null }
+    if ((Get-OperationObjectProperty $Result 'semantic_selection_performed') -ne $false) { $findings.Add((New-OperationFinding 'semantic_boundary_breached' 'error' '$' 'Eligibility policy cannot perform semantic selection.')) | Out-Null }
     $expectedEligible = ([string](Get-OperationObjectProperty $Result 'decision') -eq 'allow')
     if ((Get-OperationObjectProperty $Result 'eligible') -ne $expectedEligible) { $findings.Add((New-OperationFinding 'eligible_flag_invalid' 'error' '$.eligible' 'Eligible flag must match the deterministic decision.')) | Out-Null }
     if (-not (Test-OperationArray (Get-OperationObjectProperty $Result 'findings'))) { $findings.Add((New-OperationFinding 'findings_type_invalid' 'error' '$.findings' 'Eligibility findings must be an array.')) | Out-Null }

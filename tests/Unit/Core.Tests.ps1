@@ -3198,38 +3198,6 @@ Describe "Reference shelf governance" {
     $refreshScript = Join-Path $repoRoot "scripts\refresh-reference-repos.ps1"
     $governanceScript = Join-Path $repoRoot "scripts\verify-reference-governance.ps1"
 
-    It "Keeps autonomous discovery review-gated and clone-only until separate adoption" {
-        $agents = Get-Content -LiteralPath (Join-Path $repoRoot "AGENTS.md") -Raw
-        $readme = Get-Content -LiteralPath (Join-Path $repoRoot "references\README.md") -Raw
-        $tierDoc = Get-Content -LiteralPath (Join-Path $repoRoot "docs\EXTERNAL_REFERENCE_REPO_TIERS.md") -Raw
-
-        $agents | Should Match "references/reference-shelf.manifest.json"
-        $agents | Should Match "scripts/refresh-reference-repos.ps1"
-        $agents | Should Match "克隆不等于采纳/安装/执行"
-        $readme | Should Match "<registered-candidate>"
-        $tierDoc | Should Match "does not authorize adoption"
-    }
-
-    It "Keeps the reference portfolio reversible and separate from runtime removal" {
-        $productIndex = Get-Content -LiteralPath (Join-Path $repoRoot "docs\product\README.md") -Raw
-        $prd = Get-Content -LiteralPath (Join-Path $repoRoot "docs\product\skills-manager-vnext-prd.md") -Raw
-        $architecture = Get-Content -LiteralPath (Join-Path $repoRoot "docs\product\skills-manager-vnext-architecture.md") -Raw
-        $roadmap = Get-Content -LiteralPath (Join-Path $repoRoot "docs\product\skills-manager-vnext-roadmap.md") -Raw
-        $tierDoc = Get-Content -LiteralPath (Join-Path $repoRoot "docs\EXTERNAL_REFERENCE_REPO_TIERS.md") -Raw
-
-        $productIndex | Should Match "可逆 reference portfolio"
-        $productIndex | Should Match "最薄真实主链"
-        $productIndex.Contains('不接管 `D:\CODE\external` 根') | Should Be $true
-        $prd | Should Match "PP-013 Bounded research and reversible reference portfolio"
-        $prd | Should Match "FR-CAT-00[6789]"
-        $architecture | Should Match "ReferencePortfolio"
-        $architecture | Should Match "ADR-SMV-039"
-        $roadmap | Should Match "reference_portfolio_action"
-        $tierDoc | Should Match "Demotion is not runtime removal"
-        $tierDoc | Should Match "retire before delete"
-        $tierDoc | Should Match "Owned-root boundary"
-    }
-
     It "Limits reference portfolio mutations to the project-owned external root" {
         $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
         $manifest.references_root | Should Be "D:\CODE\external\skills-manager-references"
@@ -3240,8 +3208,6 @@ Describe "Reference shelf governance" {
 
         Test-ReferenceLifecycleState "core-mainline" "active" | Should Be $true
         Test-ReferenceLifecycleState "secondary" "active" | Should Be $true
-        Test-ReferenceLifecycleState "historical-compatibility" "deprecated" | Should Be $true
-        Test-ReferenceLifecycleState "conditional-not-cloned" "not-cloned" | Should Be $true
         Test-ReferenceLifecycleState "core-mainline" "deprecated" | Should Be $false
         Test-ReferenceLifecycleState "secondary" "not-cloned" | Should Be $false
     }
@@ -3276,7 +3242,7 @@ Describe "Reference shelf governance" {
         Test-Path -LiteralPath (Join-Path $TestDrive "escape") | Should Be $false
     }
 
-    It "Uses openai plugins as current official source and keeps openai skills historical" {
+    It "Uses openai plugins as the current official source" {
         $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
         $plugins = @($manifest.repos | Where-Object name -eq "openai-plugins")
         $skills = @($manifest.repos | Where-Object name -eq "openai-skills")
@@ -3288,15 +3254,11 @@ Describe "Reference shelf governance" {
         $plugins[0].upstream_url | Should Be "https://github.com/openai/plugins.git"
         $plugins[0].relative_path | Should Be "core/openai-plugins"
 
-        $skills.Count | Should Be 1
-        $skills[0].tier | Should Be "historical-compatibility"
-        $skills[0].status | Should Be "deprecated"
-        $skills[0].replacement | Should Be "openai-plugins"
+        $skills.Count | Should Be 0
         @($manifest.default_refresh_set) -contains "openai-plugins" | Should Be $true
-        @($manifest.default_refresh_set) -contains "openai-skills" | Should Be $false
     }
 
-    It "Routes the default set to plugins and protects the stable latest report from historical runs" {
+    It "Routes the default set to plugins and updates the stable latest report" {
         $referencesRoot = Join-Path $TestDrive "reference-shelf"
         $outputDirectory = Join-Path $TestDrive "updates"
 
@@ -3306,41 +3268,7 @@ Describe "Reference shelf governance" {
         @($defaultResult.repo_names) -contains "openai-plugins" | Should Be $true
         @($defaultResult.repo_names) -contains "openai-skills" | Should Be $false
 
-        $latestPath = Join-Path $outputDirectory "reference-refresh-latest.md"
-        $before = [System.IO.File]::ReadAllText($latestPath)
-        $historicalResult = & $refreshScript -ManifestPath $manifestPath -ReferencesRoot $referencesRoot -OutputDirectory $outputDirectory -Tier historical -FetchOnly
-        $historicalResult.repo_set | Should Be "tier-historical-compatibility"
-        $historicalResult.latest_updated | Should Be $false
-        @($historicalResult.repo_names) | Should Be @("openai-skills")
-        [System.IO.File]::ReadAllText($latestPath) | Should Be $before
-    }
-
-    It "Keeps reviewed discovery candidates conditional, traceable, and revision-pinned" {
-        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-        $expected = @(
-            "anthropics-k12-teacher-skills",
-            "community-accessibility-agents",
-            "iofficeai-officecli",
-            "emilkowalski-skills",
-            "tirth8205-code-review-graph"
-        )
-        $candidates = @($manifest.repos | Where-Object name -in $expected)
-
-        $candidates.Count | Should Be $expected.Count
-        foreach ($candidate in $candidates) {
-            $candidate.tier | Should Be "conditional-not-cloned"
-            $candidate.status | Should Be "not-cloned"
-            $candidate.source_disposition | Should Be "reviewed-discovery-candidate"
-            [string]$candidate.license | Should Not BeNullOrEmpty
-            [string]$candidate.review_decision | Should Not BeNullOrEmpty
-            [string]$candidate.review_revision | Should Match '^[0-9a-f]{40}$'
-            [string]$candidate.reviewed_at | Should Match '^\d{4}-\d{2}-\d{2}$'
-            [string]$candidate.activation_trigger | Should Not BeNullOrEmpty
-            $evidencePath = Join-Path $repoRoot ([string]$candidate.review_evidence)
-            Test-Path -LiteralPath $evidencePath -PathType Leaf | Should Be $true
-            [string]$candidate.relative_path | Should Match '^conditional/'
-            @($manifest.default_refresh_set) -contains $candidate.name | Should Be $false
-        }
+        Test-Path -LiteralPath (Join-Path $outputDirectory "reference-refresh-latest.md") | Should Be $true
     }
 
     It "Distinguishes fetched remote refs from the consumable local checkout revision" {

@@ -1,6 +1,5 @@
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1')
-. (Join-Path $repoRoot 'src\Domain\CapabilityDescriptor.ps1')
 . (Join-Path $repoRoot 'src\Domain\RuleDocument.ps1')
 . (Join-Path $repoRoot 'src\Application\RuleDiagnostics.ps1')
 

@@ -365,8 +365,6 @@ Skills 管理器（中文菜单）
   - `add`/`npx` 未指定 `--skill` 时只新增技能库，不会安装整库技能
   - `应用` 默认只 dry-run；只有 `--apply --yes` 才真正写入
   - `构建生效` 写入仓库外宿主目录前要求 clean Git commit；仅在明确接受风险时使用 `-AllowUnverifiedHostProjection`，receipt 会标记为 unverified override
-  - ChatGPT Desktop 是 `skill-evolution` 首选交互面；宿主自动执行安全步骤，遇到 question review_request 时通知并等待自然语言批准/拒绝，用户无需输入 token 或操作 CLI
-  - `skill-evolution` 的 prepare/evaluate 默认不调用 provider、不写宿主；`--execute` 才运行隔离评估，晋级、活跃覆盖和正式投影分别受 exact-current review/receipt 约束
 
 常用命令：
   .\skills.ps1 发现
@@ -399,13 +397,6 @@ MCP：
   .\skills.ps1 MCP配置 列表
   .\skills.ps1 MCP配置 使用 default|coding|dotnet|browser|database|off
 
-Plugin（P3 repo/fixture-only）：
-  .\skills.ps1 plugin-inventory --official <snapshot.json> [--personal <snapshot.json>] [--workspace <snapshot.json>] --json
-  .\skills.ps1 plugin-lint --path <plugin-root> --json
-  .\skills.ps1 plugin-export --candidate <candidate.json> --fixture-root <root> --out <new-folder> --token EXPORT_PLUGIN_FIXTURE --json
-  .\skills.ps1 plugin-eval --path <plugin-root> --json
-  不执行 plugin install、marketplace mutation、provider call 或 host/profile 写入。
-
 规则治理：
   .\skills.ps1 rule-audit --repo <repo-root> [--user-root <path>] [--host codex|claude] --json
   .\skills.ps1 rule-estate-audit --workspace-root D:\CODE [--out <report.json>] --json
@@ -419,19 +410,6 @@ Plugin（P3 repo/fixture-only）：
   .\skills.ps1 构建生效
   .\skills.ps1 capability-inventory --view skill-surfaces [--host-snapshot <snapshot.json>] --json
   .\scripts\verify-native-skill-metadata.ps1 -Json
-
-受控技能进化：
-  .\skills.ps1 skill-evolution prepare --signal <sample-id>... (--skill <name> | --new-skill <name>) --out <run-root> --json
-  .\skills.ps1 skill-evolution evaluate --candidate <candidate-dir> --corpus <cases.json> [--execute] --model gpt-5.6-sol --reasoning-effort medium --json
-  .\skills.ps1 skill-evolution request --skill <name> --action auto|enable|refresh|retire [--promotion-receipt <receipt.json>] --out <request.json> --json
-  .\skills.ps1 skill-evolution decide --request <request.json> --decision approve|reject|reject_delete --reviewer <id> --token <host-token> --out <run-root> --json
-  .\skills.ps1 skill-evolution plan --candidate <candidate-dir> --evaluation <receipt.json> --review <reviewed-change-set.json> --out <plan.json> --json
-  .\skills.ps1 skill-evolution apply --plan <plan.json> --token PROMOTE_SKILL_CANDIDATE --out <receipt.json> --json
-  .\skills.ps1 skill-evolution project --receipt <activation-receipt.json> --decision <decision.json> --token PROJECT_SKILL_TO_HOST --out <receipt.json> --json
-  .\skills.ps1 skill-evolution cleanup --decision <rejection.json> --token DELETE_REJECTED_SKILL_CANDIDATE --out <receipt.json> --json
-  .\skills.ps1 skill-evolution rollback --receipt <receipt.json> --token ROLLBACK_SKILL_PROMOTION|ROLLBACK_SKILL_ACTIVATION --json
-  Desktop 主路径会自动调用上述命令：批准包晋级后自动 cold build；批准启用/刷新/退役后先 staged build，待宿主自动完成 clean commit 与 exact-current full gate，再正式投影。普通拒绝保留 7 天；只有明确“拒绝并删除”才清理隔离 candidate。
-  MVP 仍只晋级 `SKILL.md`、`agents/openai.yaml` 和非执行型 references；脚本、hook、MCP、plugin、权限、网络和系统维护逻辑继续 defer。
 
 目标仓审查：
   .\skills.ps1 审查目标 需求设置
@@ -456,7 +434,6 @@ Plugin（P3 repo/fixture-only）：
   .\skills.ps1 自动更新设置
   .\skills.ps1 doctor [--json] [--offline-contract] [--fix] [--dry-run-fix] [--strict] [--strict-perf] [--threshold-ms <ms>]
   pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-skill-integrity.ps1 [-ReportPath <file>]
-  pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-skill-routing.ps1 [-ReportPath <file>] [-Json]
 
 通用参数：
   -DryRun：仅预演（跳过写入/删除/同步/拉取）

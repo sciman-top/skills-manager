@@ -1,8 +1,0 @@
-{
-  "name": "path-escape",
-  "version": "1.0.0",
-  "description": "Invalid path fixture.",
-  "repository": "https://example.invalid/path-escape",
-  "license": "MIT",
-  "skills": "./../outside"
-}
