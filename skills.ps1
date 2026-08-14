@@ -1,6 +1,6 @@
 ﻿#requires -Version 7.0
 param(
-    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "锁定", "生成锁文件", "验证锁定", "verify-lock", "清理无效映射", "打开配置", "解除关联", "清理备份", "自动更新设置", "帮助", "help", "--help", "-h", "doctor", "add", "npx", "安装MCP", "卸载MCP", "同步MCP", "MCP配置", "mcp-profile", "mcp-install", "mcp-uninstall", "mcp-sync", "审查目标", "audit-targets", "能力清单", "capability-inventory", "规则审查", "rule-audit", "规则全域审查", "rule-estate-audit", "规则全域计划", "rule-estate-plan", "规则全域应用", "rule-estate-apply", "规则全域回滚", "rule-estate-rollback", "规则计划", "rule-plan", "规则应用", "rule-apply", "一键", "workflow", "prune-invalid-mappings")]
+    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "锁定", "生成锁文件", "验证锁定", "verify-lock", "清理无效映射", "打开配置", "解除关联", "清理备份", "自动更新设置", "帮助", "help", "--help", "-h", "doctor", "add", "npx", "安装MCP", "卸载MCP", "同步MCP", "MCP配置", "mcp-profile", "mcp-install", "mcp-uninstall", "mcp-sync", "审查目标", "audit-targets", "能力清单", "capability-inventory", "规则审查", "rule-audit", "规则全域审查", "rule-estate-audit", "规则全域计划", "rule-estate-plan", "规则全域应用", "rule-estate-apply", "规则全域回滚", "rule-estate-rollback", "全局规则检查", "global-rules-check", "全局规则计划", "global-rules-plan", "全局规则应用", "global-rules-apply", "全局规则回滚", "global-rules-rollback", "规则计划", "rule-plan", "规则应用", "rule-apply", "一键", "workflow", "prune-invalid-mappings")]
     [string]$Cmd = "menu",
     [string]$Filter = "",
     [switch]$DryRun,
@@ -4404,6 +4404,158 @@ function Invoke-RuleEstateRollback {
     if([string](Get-RuleEstateProperty $action 'operation') -eq 'create'){[IO.File]::Delete($target)}else{Write-BytesAtomic -Path $target -Bytes $backupBytes}
     $action.status='rolled_back';$action | Add-Member -NotePropertyName rolled_back_at -NotePropertyValue ([datetimeoffset]::UtcNow.ToString('o')) -Force;Write-RuleEstateReceipt $receiptFile $receipt
     return [pscustomobject]@{pass=$true;status='rolled_back';findings=@();writes=1;action_id=$ActionId}
+}
+
+function Assert-GlobalRuleProjectionRoot([string]$Path,[string]$Label) {
+    $resolved=[IO.Path]::GetFullPath($Path).TrimEnd('\','/');$drive=[IO.Path]::GetPathRoot($resolved).TrimEnd('\','/')
+    if($resolved.Equals($drive,[StringComparison]::OrdinalIgnoreCase)){throw ('Drive roots are not valid {0} roots.' -f $Label)}
+    if(-not [IO.Directory]::Exists($resolved)){throw ('{0} root does not exist: {1}' -f $Label,$resolved)}
+    return $resolved
+}
+
+function Test-GlobalRuleProjectionReparsePath([string]$Path,[string]$Root) {
+    $cursor=[IO.Path]::GetFullPath($Path);$boundary=[IO.Path]::GetFullPath($Root).TrimEnd('\','/')
+    while($true){
+        if(([IO.File]::Exists($cursor)-or[IO.Directory]::Exists($cursor))-and(([IO.File]::GetAttributes($cursor)-band[IO.FileAttributes]::ReparsePoint)-ne0)){return $true}
+        if($cursor.TrimEnd('\','/').Equals($boundary,[StringComparison]::OrdinalIgnoreCase)){break}
+        $parent=[IO.Directory]::GetParent($cursor);if($null-eq$parent){break};$cursor=$parent.FullName
+    }
+    return $false
+}
+
+function Get-GlobalRuleProjectionEntries {
+    param(
+        [Parameter(Mandatory=$true)][string]$RepoRoot,
+        [Parameter(Mandatory=$true)][string]$CodexUserRoot,
+        [Parameter(Mandatory=$true)][string]$ClaudeUserRoot
+    )
+    $repo=Assert-GlobalRuleProjectionRoot $RepoRoot 'repository';$codex=Assert-GlobalRuleProjectionRoot $CodexUserRoot 'Codex user';$claude=Assert-GlobalRuleProjectionRoot $ClaudeUserRoot 'Claude user'
+    return @(
+        [pscustomobject][ordered]@{ id='codex'; source_path=(Join-Path $repo 'rules\global\codex\AGENTS.md'); target_path=(Join-Path $codex 'AGENTS.md');root=$codex }
+        [pscustomobject][ordered]@{ id='claude'; source_path=(Join-Path $repo 'rules\global\claude\CLAUDE.md'); target_path=(Join-Path $claude 'CLAUDE.md');root=$claude }
+    )
+}
+
+function Get-GlobalRuleFileFacts([string]$Path) {
+    if(-not [IO.File]::Exists($Path)){return [pscustomobject]@{exists=$false;path=$Path}}
+    $bytes=[IO.File]::ReadAllBytes($Path);$text=(New-Object Text.UTF8Encoding($false,$true)).GetString($bytes)
+    $versionMatch=[regex]::Match($text,'(?m)^\*\*版本\*\*:\s*([0-9][0-9A-Za-z_.-]*)\s*$')
+    return [pscustomobject][ordered]@{
+        exists=$true;path=[IO.Path]::GetFullPath($Path);bytes=$bytes.Length;lines=($text -split "`r?`n").Count
+        bom=($bytes.Length -ge 3 -and $bytes[0]-eq 0xEF -and $bytes[1]-eq 0xBB -and $bytes[2]-eq 0xBF)
+        version=$(if($versionMatch.Success){$versionMatch.Groups[1].Value}else{$null});text=$text
+        hash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+    }
+}
+
+function Get-GlobalRuleCommonSections([string]$Text) {
+    $normalized=$Text.Replace("`r`n","`n")
+    $aStart=$normalized.IndexOf('## A.');$bStart=$normalized.IndexOf('## B.');$cStart=$normalized.IndexOf('## C.')
+    if($aStart -lt 0 -or $bStart -le $aStart -or $cStart -le $bStart){return $null}
+    return [pscustomobject]@{ a=$normalized.Substring($aStart,$bStart-$aStart); cd=$normalized.Substring($cStart) }
+}
+
+function Test-GlobalRuleSourceFamily {
+    param([Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot)
+    $findings=New-Object Collections.Generic.List[object]
+    $entries=Get-GlobalRuleProjectionEntries $RepoRoot $CodexUserRoot $ClaudeUserRoot
+    $facts=@{}
+    foreach($entry in $entries){
+        if(Test-GlobalRuleProjectionReparsePath $entry.source_path ([IO.Path]::GetFullPath($RepoRoot))){$findings.Add([pscustomobject]@{code='source_reparse_forbidden';path=$entry.source_path;message='Global rule sources must not cross reparse points.'})|Out-Null}
+        if(Test-GlobalRuleProjectionReparsePath $entry.target_path $entry.root){$findings.Add([pscustomobject]@{code='target_reparse_forbidden';path=$entry.target_path;message='Global rule targets must be ordinary files below the user root.'})|Out-Null}
+        try{$fact=Get-GlobalRuleFileFacts $entry.source_path}catch{$findings.Add([pscustomobject]@{code='source_encoding_invalid';path=$entry.source_path;message=$_.Exception.Message})|Out-Null;continue}
+        $facts[$entry.id]=$fact
+        if(-not $fact.exists){$findings.Add([pscustomobject]@{code='source_missing';path=$entry.source_path;message='Global rule source is missing.'})|Out-Null;continue}
+        if($fact.bom){$findings.Add([pscustomobject]@{code='source_bom_forbidden';path=$entry.source_path;message='Global rules must be UTF-8 without BOM.'})|Out-Null}
+        if($fact.bytes -gt 16384){$findings.Add([pscustomobject]@{code='source_byte_budget_exceeded';path=$entry.source_path;message='Global rule exceeds 16 KiB.'})|Out-Null}
+        if($fact.lines -gt 130){$findings.Add([pscustomobject]@{code='source_line_budget_exceeded';path=$entry.source_path;message='Global rule exceeds 130 lines.'})|Out-Null}
+        if([string]::IsNullOrWhiteSpace([string]$fact.version)){$findings.Add([pscustomobject]@{code='source_version_missing';path=$entry.source_path;message='Global rule version is missing.'})|Out-Null}
+    }
+    if($facts.ContainsKey('codex') -and $facts.ContainsKey('claude') -and $facts.codex.exists -and $facts.claude.exists){
+        if($facts.codex.version -ne $facts.claude.version){$findings.Add([pscustomobject]@{code='source_version_mismatch';path='$';message='Codex and Claude global rule versions differ.'})|Out-Null}
+        $codexCommon=Get-GlobalRuleCommonSections $facts.codex.text;$claudeCommon=Get-GlobalRuleCommonSections $facts.claude.text
+        if($null -eq $codexCommon -or $null -eq $claudeCommon){$findings.Add([pscustomobject]@{code='source_structure_invalid';path='$';message='Global rules require A, B, and C sections.'})|Out-Null}
+        elseif($codexCommon.a -cne $claudeCommon.a -or $codexCommon.cd -cne $claudeCommon.cd){$findings.Add([pscustomobject]@{code='source_common_sections_drift';path='$';message='Codex and Claude A/C/D common sections must be byte-equivalent after newline normalization.'})|Out-Null}
+    }
+    return [pscustomobject][ordered]@{pass=($findings.Count -eq 0);findings=@($findings.ToArray());entries=$entries;facts=$facts}
+}
+
+function New-GlobalRuleProjectionPlan {
+    param([Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot)
+    $validation=Test-GlobalRuleSourceFamily $RepoRoot $CodexUserRoot $ClaudeUserRoot
+    if(-not $validation.pass){throw ('Global rule sources are invalid: {0}' -f (@($validation.findings.code)-join ', '))}
+    $actions=foreach($entry in $validation.entries){
+        $source=$validation.facts[$entry.id];$target=Get-GlobalRuleFileFacts $entry.target_path
+        [pscustomobject][ordered]@{
+            id=$entry.id;source_path=[IO.Path]::GetFullPath($entry.source_path);target_path=[IO.Path]::GetFullPath($entry.target_path)
+            source_hash=$source.hash;before_exists=[bool]$target.exists;before_hash=$(if($target.exists){$target.hash}else{Get-OperationSha256 ''})
+            operation=$(if(-not $target.exists){'create'}elseif($source.hash -eq $target.hash){'unchanged'}else{'update'})
+        }
+    }
+    $seed=(@($actions|ForEach-Object{"$($_.id)|$($_.source_hash)|$($_.before_hash)|$($_.target_path)"})-join "`n")
+    $operationId='global-rules-{0}' -f (Get-OperationSha256 $seed).Substring(0,16)
+    return [pscustomobject][ordered]@{
+        schema_version=1;domain='global_rule_projection';operation_id=$operationId;generated_at=[datetimeoffset]::UtcNow.ToString('o')
+        repo_root=[IO.Path]::GetFullPath($RepoRoot);codex_user_root=[IO.Path]::GetFullPath($CodexUserRoot);claude_user_root=[IO.Path]::GetFullPath($ClaudeUserRoot)
+        actions=@($actions);apply=[pscustomobject]@{required_token=('APPLY_GLOBAL_RULES_{0}' -f (Get-OperationSha256 $operationId).Substring(0,16).ToUpperInvariant());freshness='source_and_target_hash';rollback='receipt_bound'}
+        truth_boundary='planned_not_applied';provider_calls=0;native_mutations=0
+    }
+}
+
+function Test-GlobalRulePlanFreshness($Plan) {
+    $findings=New-Object Collections.Generic.List[object]
+    if($null -eq $Plan -or $Plan.schema_version -ne 1 -or $Plan.domain -ne 'global_rule_projection'){$findings.Add([pscustomobject]@{code='plan_invalid';path='$'})|Out-Null;return [pscustomobject]@{pass=$false;findings=@($findings)}}
+    $fresh=Test-GlobalRuleSourceFamily $Plan.repo_root $Plan.codex_user_root $Plan.claude_user_root
+    foreach($finding in @($fresh.findings)){$findings.Add($finding)|Out-Null}
+    foreach($action in @($Plan.actions)){
+        $source=Get-GlobalRuleFileFacts ([string]$action.source_path);$target=Get-GlobalRuleFileFacts ([string]$action.target_path)
+        $targetHash=if($target.exists){$target.hash}else{Get-OperationSha256 ''}
+        if(-not $source.exists -or $source.hash -ne [string]$action.source_hash){$findings.Add([pscustomobject]@{code='source_hash_stale';path=$action.source_path})|Out-Null}
+        if($targetHash -ne [string]$action.before_hash -or [bool]$target.exists -ne [bool]$action.before_exists){$findings.Add([pscustomobject]@{code='target_hash_stale';path=$action.target_path})|Out-Null}
+    }
+    return [pscustomobject]@{pass=($findings.Count -eq 0);findings=@($findings.ToArray())}
+}
+
+function Invoke-GlobalRuleProjectionApply {
+    param($Plan,[Parameter(Mandatory=$true)][string]$Token,[Parameter(Mandatory=$true)][string]$BackupRoot,[Parameter(Mandatory=$true)][string]$ReceiptPath)
+    if($Token -cne [string]$Plan.apply.required_token){throw 'Global rule projection token does not match the plan.'}
+    $freshness=Test-GlobalRulePlanFreshness $Plan;if(-not $freshness.pass){throw ('Global rule projection plan is stale: {0}' -f (@($freshness.findings.code)-join ', '))}
+    $backupBase=Join-Path ([IO.Path]::GetFullPath($BackupRoot)) ([string]$Plan.operation_id);[IO.Directory]::CreateDirectory($backupBase)|Out-Null
+    $completed=New-Object Collections.Generic.List[object]
+    try{
+        foreach($action in @($Plan.actions|Where-Object operation -ne 'unchanged')){
+            $backup=$null
+            if([bool]$action.before_exists){$backup=Join-Path $backupBase ("{0}-{1}.bak" -f $action.id,([string]$action.before_hash).Substring(0,12));Write-BytesAtomic -Path $backup -Bytes ([IO.File]::ReadAllBytes([string]$action.target_path))}
+            Write-BytesAtomic -Path ([string]$action.target_path) -Bytes ([IO.File]::ReadAllBytes([string]$action.source_path))
+            $completed.Add([pscustomobject][ordered]@{id=$action.id;target_path=$action.target_path;before_exists=[bool]$action.before_exists;before_hash=$action.before_hash;desired_hash=$action.source_hash;backup_path=$backup})|Out-Null
+        }
+    }catch{
+        $reverse=@($completed.ToArray());[array]::Reverse($reverse)
+        foreach($done in $reverse){if($done.before_exists){Write-BytesAtomic -Path $done.target_path -Bytes ([IO.File]::ReadAllBytes($done.backup_path))}elseif([IO.File]::Exists($done.target_path)){Remove-Item -LiteralPath $done.target_path -Force}}
+        throw
+    }
+    $receipt=[pscustomobject][ordered]@{schema_version=1;domain='global_rule_projection';operation_id=$Plan.operation_id;status='applied';applied_at=[datetimeoffset]::UtcNow.ToString('o');writes=$completed.Count;actions=@($completed.ToArray());rollback=[pscustomobject]@{required_token='ROLLBACK_GLOBAL_RULES'};truth_boundary='filesystem_applied_not_host_loaded'}
+    Write-Utf8FileAtomic -Path $ReceiptPath -Content ($receipt|ConvertTo-Json -Depth 20 -Compress)
+    return $receipt
+}
+
+function Test-GlobalRuleProjection {
+    param([Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot)
+    $source=Test-GlobalRuleSourceFamily $RepoRoot $CodexUserRoot $ClaudeUserRoot;$findings=New-Object Collections.Generic.List[object]
+    foreach($finding in @($source.findings)){$findings.Add($finding)|Out-Null}
+    if($source.pass){foreach($entry in $source.entries){$target=Get-GlobalRuleFileFacts $entry.target_path;if(-not $target.exists){$findings.Add([pscustomobject]@{code='target_missing';path=$entry.target_path})|Out-Null}elseif($target.hash -ne $source.facts[$entry.id].hash){$findings.Add([pscustomobject]@{code='target_source_drift';path=$entry.target_path})|Out-Null}}}
+    return [pscustomobject][ordered]@{pass=($findings.Count -eq 0);findings=@($findings.ToArray());truth_boundary=$(if($findings.Count -eq 0){'filesystem_projected_not_host_loaded'}else{'projection_not_verified'})}
+}
+
+function Invoke-GlobalRuleProjectionRollback {
+    param([Parameter(Mandatory=$true)][string]$ReceiptPath,[Parameter(Mandatory=$true)][string]$Token)
+    if($Token -cne 'ROLLBACK_GLOBAL_RULES'){throw 'Global rule rollback token is invalid.'}
+    $receipt=[IO.File]::ReadAllText([IO.Path]::GetFullPath($ReceiptPath))|ConvertFrom-Json
+    if($receipt.domain -ne 'global_rule_projection' -or $receipt.status -ne 'applied'){throw 'Global rule receipt is invalid.'}
+    foreach($action in @($receipt.actions)){if((Get-GlobalRuleFileFacts $action.target_path).hash -ne [string]$action.desired_hash){throw ('Global rule target drift blocks rollback: {0}' -f $action.target_path)}}
+    $reverse=@($receipt.actions);[array]::Reverse($reverse)
+    foreach($action in $reverse){if([bool]$action.before_exists){if(-not [IO.File]::Exists([string]$action.backup_path)){throw ('Global rule backup is missing: {0}' -f $action.backup_path)};Write-BytesAtomic -Path $action.target_path -Bytes ([IO.File]::ReadAllBytes([string]$action.backup_path))}elseif([IO.File]::Exists([string]$action.target_path)){Remove-Item -LiteralPath $action.target_path -Force}}
+    return [pscustomobject]@{pass=$true;status='rolled_back';writes=@($receipt.actions).Count;truth_boundary='filesystem_rolled_back'}
 }
 
 function New-RulePatchGuardFinding([string]$Code, [string]$Path, [string]$Message) {
@@ -13701,6 +13853,42 @@ function Invoke-RuleEstateRollbackCommand([object[]]$Tokens=@()){
     return [pscustomobject]@{exit_code=$exit;json=[bool]$options.json;output=$(if($options.json){$json}else{'Rule estate rollback: status={0}' -f $result.status});envelope=$envelope}
 }
 
+function Parse-GlobalRuleOptions([object[]]$Tokens,[ValidateSet('check','plan','apply','rollback')][string]$Mode) {
+    $userProfile=[Environment]::GetFolderPath('UserProfile')
+    $result=[ordered]@{repo_root=$Root;codex_user_root=(Join-Path $userProfile '.codex');claude_user_root=(Join-Path $userProfile '.claude');plan=$null;receipt=$null;token=$null;out_path=$null;json=$false}
+    for($i=0;$i -lt @($Tokens).Count;$i++){
+        $token=[string]$Tokens[$i]
+        if($token -eq '--json'){$result.json=$true;continue}
+        if($token -notin @('--repo-root','--codex-user-root','--claude-user-root','--plan','--receipt','--token','--out')){throw ('Unknown global-rules-{0} option: {1}' -f $Mode,$token)}
+        if($i+1 -ge @($Tokens).Count){throw ('{0} requires a value.' -f $token)};$i++;$value=[string]$Tokens[$i]
+        switch($token){'--repo-root'{$result.repo_root=$value};'--codex-user-root'{$result.codex_user_root=$value};'--claude-user-root'{$result.claude_user_root=$value};'--plan'{$result.plan=$value};'--receipt'{$result.receipt=$value};'--token'{$result.token=$value};'--out'{$result.out_path=$value}}
+    }
+    if($Mode -eq 'plan' -and [string]::IsNullOrWhiteSpace($result.out_path)){throw 'global-rules-plan requires --out.'}
+    if($Mode -eq 'apply' -and (@($result.plan,$result.token,$result.out_path)|Where-Object {[string]::IsNullOrWhiteSpace(([string]$_))}).Count -gt 0){throw 'global-rules-apply requires --plan, --token, and --out.'}
+    if($Mode -eq 'rollback' -and (@($result.receipt,$result.token)|Where-Object {[string]::IsNullOrWhiteSpace(([string]$_))}).Count -gt 0){throw 'global-rules-rollback requires --receipt and --token.'}
+    return [pscustomobject]$result
+}
+
+function Resolve-GlobalRuleControlOutput([string]$Path,[string]$RepoRoot) {
+    $resolved=[IO.Path]::GetFullPath($Path);$repo=[IO.Path]::GetFullPath($RepoRoot)
+    if(-not (Test-RuleDiscoveryPathWithin $resolved $repo)){throw 'Global rule plan and receipt outputs must stay inside the repository.'}
+    if(Test-RuleEstateReparsePath $resolved $repo){throw 'Global rule control outputs must not cross reparse points.'}
+    return $resolved
+}
+
+function Invoke-GlobalRuleCommand([ValidateSet('check','plan','apply','rollback')][string]$Mode,[object[]]$Tokens=@()) {
+    $options=Parse-GlobalRuleOptions $Tokens $Mode
+    switch($Mode){
+        'check'{$result=Test-GlobalRuleProjection $options.repo_root $options.codex_user_root $options.claude_user_root;$exit=if($result.pass){0}else{2};$envelope=[pscustomobject][ordered]@{schema_version=1;command='global-rules-check';pass=$result.pass;exit_code=$exit;result=$result;writes=0;provider_calls=0;native_mutations=0}}
+        'plan'{$plan=New-GlobalRuleProjectionPlan $options.repo_root $options.codex_user_root $options.claude_user_root;$out=Resolve-GlobalRuleControlOutput $options.out_path $options.repo_root;$envelope=[pscustomobject][ordered]@{schema_version=1;command='global-rules-plan';pass=$true;exit_code=0;plan=$plan;writes=1;host_writes=0;provider_calls=0;native_mutations=0};Write-Utf8FileAtomic -Path $out -Content ($envelope|ConvertTo-Json -Depth 20 -Compress);$exit=0}
+        'apply'{$planPath=[IO.Path]::GetFullPath($options.plan);if(-not [IO.File]::Exists($planPath)){throw 'Global rule plan does not exist.'};$document=[IO.File]::ReadAllText($planPath)|ConvertFrom-Json;$plan=if($document.command -eq 'global-rules-plan'){$document.plan}else{$document};$out=Resolve-GlobalRuleControlOutput $options.out_path $options.repo_root;$backupRoot=Join-Path ([IO.Path]::GetFullPath($options.repo_root)) 'reports\global-rule-projection\backups';$receipt=Invoke-GlobalRuleProjectionApply $plan $options.token $backupRoot $out;$envelope=[pscustomobject][ordered]@{schema_version=1;command='global-rules-apply';pass=$true;exit_code=0;receipt=$receipt;provider_calls=0;native_mutations=0};$exit=0}
+        'rollback'{$result=Invoke-GlobalRuleProjectionRollback $options.receipt $options.token;$envelope=[pscustomobject][ordered]@{schema_version=1;command='global-rules-rollback';pass=$result.pass;exit_code=0;result=$result;provider_calls=0;native_mutations=0};$exit=0}
+    }
+    $json=$envelope|ConvertTo-Json -Depth 30 -Compress
+    $summary=switch($Mode){'check'{'Global rules check: pass={0}, findings={1}' -f $envelope.pass,@($envelope.result.findings).Count};'plan'{'Global rules plan: actions={0}, token={1}' -f @($envelope.plan.actions).Count,$envelope.plan.apply.required_token};'apply'{'Global rules apply: writes={0}, boundary={1}' -f $envelope.receipt.writes,$envelope.receipt.truth_boundary};'rollback'{'Global rules rollback: writes={0}' -f $envelope.result.writes}}
+    return [pscustomobject]@{exit_code=$exit;json=[bool]$options.json;output=$(if($options.json){$json}else{$summary});envelope=$envelope}
+}
+
 function Parse-RulePatchCliOptions([object[]]$Tokens, [ValidateSet('plan', 'apply')][string]$Mode) {
     $result = [ordered]@{ target=$null; desired_file=$null; fixture_root=$null; repo_root=$null; allow_create=$false; plan_path=$null; token=$null; out_path=$null; json=$false }
     for($i=0;$i -lt @($Tokens).Count;$i++) {
@@ -21853,6 +22041,10 @@ MCP：
   .\skills.ps1 rule-estate-apply --plan <plan.json> --workspace-root D:\CODE --token <plan.apply.required_token> --out <receipt.json> --json
   .\skills.ps1 rule-estate-rollback --receipt <receipt.json> --action-id <id> --workspace-root D:\CODE --token ROLLBACK_RULE_ESTATE_PATCH --json
   全域写入只接受 reviewed change-set；plan 生成绑定当前 review/roots/actions 的确认 token，apply 执行全量预检、逐目标 receipt、fail-fast、resume 和单目标 rollback；不自动 commit/push。
+  .\skills.ps1 global-rules-plan --out .\reports\global-rule-projection\plan.json --json
+  .\skills.ps1 global-rules-apply --plan <plan.json> --token <plan.apply.required_token> --out <receipt.json> --json
+  .\skills.ps1 global-rules-check --json
+  全局规则以 rules/global 为唯一源；投影只写用户 AGENTS.md/CLAUDE.md，保留备份与 receipt，不证明宿主已加载。
 
 技能投影：
   .\skills.ps1 构建生效
@@ -22256,6 +22448,14 @@ if ($MyInvocation.InvocationName -ne '.') {
             "rule-estate-apply" { $tokens=Merge-FilterAndArgs $Filter $args;if($Plan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleEstateApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "规则全域回滚" { $result=Invoke-RuleEstateRollbackCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "rule-estate-rollback" { $result=Invoke-RuleEstateRollbackCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            "全局规则检查" { $result=Invoke-GlobalRuleCommand check (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            "global-rules-check" { $result=Invoke-GlobalRuleCommand check (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            "全局规则计划" { $result=Invoke-GlobalRuleCommand plan (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            "global-rules-plan" { $result=Invoke-GlobalRuleCommand plan (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            "全局规则应用" { $tokens=Merge-FilterAndArgs $Filter $args;if($Plan){$tokens=@('--plan')+@($tokens)};$result=Invoke-GlobalRuleCommand apply $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            "global-rules-apply" { $tokens=Merge-FilterAndArgs $Filter $args;if($Plan){$tokens=@('--plan')+@($tokens)};$result=Invoke-GlobalRuleCommand apply $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            "全局规则回滚" { $result=Invoke-GlobalRuleCommand rollback (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
+            "global-rules-rollback" { $result=Invoke-GlobalRuleCommand rollback (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "规则计划" { $result=Invoke-RulePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "rule-plan" { $result=Invoke-RulePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "规则应用" { $tokens=Merge-FilterAndArgs $Filter $args;if($Plan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }

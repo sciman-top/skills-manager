@@ -112,6 +112,14 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 rule-estate-apply --plan <plan.json> --workspace-root D:\CODE --token <plan.apply.required_token> --json
 ```
 
+全局 Codex/Claude 规则以 `rules/global/` 为唯一源，通过计划绑定、备份和 receipt 投影到用户目录：
+
+```powershell
+.\skills.ps1 global-rules-plan --out .\reports\global-rule-projection\plan.json --json
+.\skills.ps1 global-rules-apply --plan .\reports\global-rule-projection\plan.json --token <plan.apply.required_token> --out .\reports\global-rule-projection\receipt.json --json
+.\skills.ps1 global-rules-check --json
+```
+
 审查默认只读。全域 plan 从 reviewed input、精确 roots、target set 与 actions 生成 plan-bound 显式确认 token；apply 仍校验 before hash、路径、锁与 TOCTOU，并保留 receipt、resume 和逐目标回滚。全域事务逐目标 fail-fast，不承诺跨仓原子性。
 
 ### 技能投影与 fallback

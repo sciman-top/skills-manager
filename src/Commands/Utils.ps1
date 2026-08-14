@@ -405,6 +405,10 @@ MCP：
   .\skills.ps1 rule-estate-apply --plan <plan.json> --workspace-root D:\CODE --token <plan.apply.required_token> --out <receipt.json> --json
   .\skills.ps1 rule-estate-rollback --receipt <receipt.json> --action-id <id> --workspace-root D:\CODE --token ROLLBACK_RULE_ESTATE_PATCH --json
   全域写入只接受 reviewed change-set；plan 生成绑定当前 review/roots/actions 的确认 token，apply 执行全量预检、逐目标 receipt、fail-fast、resume 和单目标 rollback；不自动 commit/push。
+  .\skills.ps1 global-rules-plan --out .\reports\global-rule-projection\plan.json --json
+  .\skills.ps1 global-rules-apply --plan <plan.json> --token <plan.apply.required_token> --out <receipt.json> --json
+  .\skills.ps1 global-rules-check --json
+  全局规则以 rules/global 为唯一源；投影只写用户 AGENTS.md/CLAUDE.md，保留备份与 receipt，不证明宿主已加载。
 
 技能投影：
   .\skills.ps1 构建生效
