@@ -1,8 +1,10 @@
 function Parse-RuleEstateAuditOptions([object[]]$Tokens) {
     $userHome = [Environment]::GetFolderPath('UserProfile')
+    $codexRoot = if (-not [string]::IsNullOrWhiteSpace($env:CODEX_HOME)) { $env:CODEX_HOME } else { Join-Path $userHome '.codex' }
+    $claudeRoot = if (-not [string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $userHome '.claude' }
     $result = [ordered]@{
         workspace_root = $null; exclude_names = @('external', '文档'); registry_path = $null
-        codex_user_root = (Join-Path $userHome '.codex'); claude_user_root = (Join-Path $userHome '.claude')
+        codex_user_root = $codexRoot; claude_user_root = $claudeRoot
         max_targets = 64; out_path = $null; json = $false
     }
     for ($i = 0; $i -lt @($Tokens).Count; $i++) {
@@ -58,7 +60,9 @@ function Invoke-RuleEstateAuditCommand([object[]]$Tokens = @()) {
 
 function Parse-RuleEstateMutationOptions([object[]]$Tokens, [ValidateSet('plan','apply','rollback')][string]$Mode) {
     $userHome=[Environment]::GetFolderPath('UserProfile')
-    $result=[ordered]@{review=$null;plan=$null;workspace_root=$null;codex_user_root=(Join-Path $userHome '.codex');claude_user_root=(Join-Path $userHome '.claude');exclude_names=@('external','文档');token=$null;out_path=$null;resume=$null;receipt=$null;action_id=$null;json=$false}
+    $codexRoot=if(-not[string]::IsNullOrWhiteSpace($env:CODEX_HOME)){$env:CODEX_HOME}else{Join-Path $userHome '.codex'}
+    $claudeRoot=if(-not[string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)){$env:CLAUDE_CONFIG_DIR}else{Join-Path $userHome '.claude'}
+    $result=[ordered]@{review=$null;plan=$null;workspace_root=$null;codex_user_root=$codexRoot;claude_user_root=$claudeRoot;exclude_names=@('external','文档');token=$null;out_path=$null;resume=$null;receipt=$null;action_id=$null;json=$false}
     for($i=0;$i -lt @($Tokens).Count;$i++){
         $token=[string]$Tokens[$i]
         if($token -eq '--json'){$result.json=$true;continue}

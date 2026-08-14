@@ -4122,7 +4122,9 @@ function Invoke-RuleEstateAudit {
         semantic_coverage_pass = $semanticCoveragePass; enforcement_verified = $enforcementVerified
         reference_basis = @(
             [pscustomobject]@{ authority = 'official'; source = 'https://learn.chatgpt.com/docs/agent-configuration/agents-md'; disposition = 'adopt'; use = 'Codex global/project/nested discovery and precedence' },
-            [pscustomobject]@{ authority = 'official'; source = 'https://learn.chatgpt.com/docs/agent-configuration/rules'; disposition = 'adopt'; use = 'Separate prose guidance from deterministic command policy' }
+            [pscustomobject]@{ authority = 'official'; source = 'https://learn.chatgpt.com/docs/agent-configuration/rules'; disposition = 'adopt'; use = 'Separate prose guidance from deterministic command policy' },
+            [pscustomobject]@{ authority = 'official'; source = 'https://code.claude.com/docs/en/memory'; disposition = 'adopt'; use = 'Claude user/project rules, imports, load order and context boundary' },
+            [pscustomobject]@{ authority = 'community_standard'; source = 'https://agents.md/'; disposition = 'adapt'; use = 'Portable project instruction structure and nested repository guidance' }
         )
         writes = 0; provider_calls = 0; native_mutations = 0; host_loaded = 'not_run'; live_accepted = 'not_run'
     }
@@ -13863,9 +13865,11 @@ function Invoke-RuleAuditCommand([object[]]$Tokens = @()) {
 
 function Parse-RuleEstateAuditOptions([object[]]$Tokens) {
     $userHome = [Environment]::GetFolderPath('UserProfile')
+    $codexRoot = if (-not [string]::IsNullOrWhiteSpace($env:CODEX_HOME)) { $env:CODEX_HOME } else { Join-Path $userHome '.codex' }
+    $claudeRoot = if (-not [string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $userHome '.claude' }
     $result = [ordered]@{
         workspace_root = $null; exclude_names = @('external', '文档'); registry_path = $null
-        codex_user_root = (Join-Path $userHome '.codex'); claude_user_root = (Join-Path $userHome '.claude')
+        codex_user_root = $codexRoot; claude_user_root = $claudeRoot
         max_targets = 64; out_path = $null; json = $false
     }
     for ($i = 0; $i -lt @($Tokens).Count; $i++) {
@@ -13921,7 +13925,9 @@ function Invoke-RuleEstateAuditCommand([object[]]$Tokens = @()) {
 
 function Parse-RuleEstateMutationOptions([object[]]$Tokens, [ValidateSet('plan','apply','rollback')][string]$Mode) {
     $userHome=[Environment]::GetFolderPath('UserProfile')
-    $result=[ordered]@{review=$null;plan=$null;workspace_root=$null;codex_user_root=(Join-Path $userHome '.codex');claude_user_root=(Join-Path $userHome '.claude');exclude_names=@('external','文档');token=$null;out_path=$null;resume=$null;receipt=$null;action_id=$null;json=$false}
+    $codexRoot=if(-not[string]::IsNullOrWhiteSpace($env:CODEX_HOME)){$env:CODEX_HOME}else{Join-Path $userHome '.codex'}
+    $claudeRoot=if(-not[string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)){$env:CLAUDE_CONFIG_DIR}else{Join-Path $userHome '.claude'}
+    $result=[ordered]@{review=$null;plan=$null;workspace_root=$null;codex_user_root=$codexRoot;claude_user_root=$claudeRoot;exclude_names=@('external','文档');token=$null;out_path=$null;resume=$null;receipt=$null;action_id=$null;json=$false}
     for($i=0;$i -lt @($Tokens).Count;$i++){
         $token=[string]$Tokens[$i]
         if($token -eq '--json'){$result.json=$true;continue}
@@ -14001,12 +14007,13 @@ function Invoke-RuleEstateRollbackCommand([object[]]$Tokens=@()){
 function Parse-GlobalRuleOptions([object[]]$Tokens,[ValidateSet('check','plan','apply','rollback')][string]$Mode) {
     $userProfile=[Environment]::GetFolderPath('UserProfile')
     $codexFromEnv=-not[string]::IsNullOrWhiteSpace($env:CODEX_HOME)
+    $claudeFromEnv=-not[string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)
     $result=[ordered]@{
         repo_root=$Root
         codex_user_root=$(if($codexFromEnv){$env:CODEX_HOME}else{Join-Path $userProfile '.codex'})
         codex_user_root_source=$(if($codexFromEnv){'CODEX_HOME'}else{'default'})
-        claude_user_root=(Join-Path $userProfile '.claude')
-        claude_user_root_source='default'
+        claude_user_root=$(if($claudeFromEnv){$env:CLAUDE_CONFIG_DIR}else{Join-Path $userProfile '.claude'})
+        claude_user_root_source=$(if($claudeFromEnv){'CLAUDE_CONFIG_DIR'}else{'default'})
         plan=$null;receipt=$null;token=$null;out_path=$null;json=$false;resume=$false
     }
     for($i=0;$i-lt@($Tokens).Count;$i++){

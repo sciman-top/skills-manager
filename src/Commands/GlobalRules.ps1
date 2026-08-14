@@ -1,12 +1,13 @@
 function Parse-GlobalRuleOptions([object[]]$Tokens,[ValidateSet('check','plan','apply','rollback')][string]$Mode) {
     $userProfile=[Environment]::GetFolderPath('UserProfile')
     $codexFromEnv=-not[string]::IsNullOrWhiteSpace($env:CODEX_HOME)
+    $claudeFromEnv=-not[string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)
     $result=[ordered]@{
         repo_root=$Root
         codex_user_root=$(if($codexFromEnv){$env:CODEX_HOME}else{Join-Path $userProfile '.codex'})
         codex_user_root_source=$(if($codexFromEnv){'CODEX_HOME'}else{'default'})
-        claude_user_root=(Join-Path $userProfile '.claude')
-        claude_user_root_source='default'
+        claude_user_root=$(if($claudeFromEnv){$env:CLAUDE_CONFIG_DIR}else{Join-Path $userProfile '.claude'})
+        claude_user_root_source=$(if($claudeFromEnv){'CLAUDE_CONFIG_DIR'}else{'default'})
         plan=$null;receipt=$null;token=$null;out_path=$null;json=$false;resume=$false
     }
     for($i=0;$i-lt@($Tokens).Count;$i++){

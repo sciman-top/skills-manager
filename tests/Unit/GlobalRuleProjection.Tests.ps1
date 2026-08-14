@@ -30,7 +30,7 @@ Describe 'Global rule source contract' {
     It 'validates the tracked source family, shared A/C/D sections, and budgets' {
         $result=Test-GlobalRuleSourceFamily $fixture $codex $claude
         $result.pass|Should -BeTrue
-        $result.facts.codex.version|Should -Be '9.75'
+        $result.facts.codex.version|Should -Be '9.76'
         $result.facts.claude.bytes|Should -BeLessOrEqual 16384
         @($result.observations).Count|Should -Be 0
     }
@@ -175,13 +175,15 @@ Describe 'Global rule CLI boundaries' {
         Copy-GlobalRuleFixture $fixture $codex $claude
     }
 
-    It 'uses CODEX_HOME unless an explicit root overrides it' {
-        $old=$env:CODEX_HOME
+    It 'uses active Codex and Claude profile roots unless explicit roots override them' {
+        $oldCodex=$env:CODEX_HOME;$oldClaude=$env:CLAUDE_CONFIG_DIR
         try{
-            $env:CODEX_HOME=$codex
+            $env:CODEX_HOME=$codex;$env:CLAUDE_CONFIG_DIR=$claude
             $parsed=Parse-GlobalRuleOptions @() check;$parsed.codex_user_root|Should -Be $codex;$parsed.codex_user_root_source|Should -Be 'CODEX_HOME'
+            $parsed.claude_user_root|Should -Be $claude;$parsed.claude_user_root_source|Should -Be 'CLAUDE_CONFIG_DIR'
             $parsed=Parse-GlobalRuleOptions @('--codex-user-root',$claude) check;$parsed.codex_user_root|Should -Be $claude;$parsed.codex_user_root_source|Should -Be 'cli'
-        }finally{$env:CODEX_HOME=$old}
+            $parsed=Parse-GlobalRuleOptions @('--claude-user-root',$codex) check;$parsed.claude_user_root|Should -Be $codex;$parsed.claude_user_root_source|Should -Be 'cli'
+        }finally{$env:CODEX_HOME=$oldCodex;$env:CLAUDE_CONFIG_DIR=$oldClaude}
     }
 
     It 'rejects control outputs outside the dedicated reports directory' {

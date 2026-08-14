@@ -1,12 +1,12 @@
 # AGENTS.md - skills-manager
 **项目契约**: 2.0
-**全局规则复核**: 9.75
+**全局规则复核**: 9.76
 **最后更新**: 2026-08-14
 
 ## 1. 当前落点与目标归宿
 - `skills.ps1` 是 CLI 入口；`skills.json` 是 vendor、import、mapping、target、MCP 与 skill projection 配置真源。
 - 本仓管理本地技能/MCP、规则审查、原生技能投影，以及 `rules/global/` 中 Codex/Claude 全局规则唯一源和受控用户目录投影；不接管宿主 runtime、auth、provider、模型、权限、会话或插件缓存。
-- 真值分级固定为 `repo_verified -> host_loaded -> live_accepted`；仓库测试不得冒充宿主或业务验收。
+- 真值分级固定为 `repo_verified -> filesystem_projected -> host_loaded -> live_accepted`；仓库测试、文件相等或旧 receipt 不得冒充更高层验收。
 
 ## A. 仓库事实与模块边界
 - `build.ps1` 从 `src/` 生成根 `skills.ps1`，并从 `overrides/{custom,patches,resources}` 生成 `agent/`；禁止手改生成物。

@@ -1,5 +1,5 @@
-# AGENTS.md - Universal Agent Protocol v9.75 | OpenAI ChatGPT Work / Codex App / Codex CLI
-**版本**: 9.75
+# AGENTS.md - Universal Agent Protocol v9.76 | OpenAI ChatGPT Work / Codex App / Codex CLI
+**版本**: 9.76
 **项目契约版本**: 2.0
 **适用范围**: 全局用户级（GlobalUser/）
 **最后更新**: 2026-08-14
@@ -16,17 +16,17 @@
 - 项目差异：只写仓库事实、模块边界、真实命令、领域不变量、证据路径与回滚入口，并保持宿主中立。
 - 确定性边界：prose 指导判断；permissions/sandbox/exec policy/hooks/scripts/schema/CI 承担可重复强制。
 - 内容分层：根规则仅留稳定规范；易变任务/状态进入 manifest/plan/evidence，执行前 fresh read。
+- 真值分层：`repo_verified -> filesystem_projected -> host_loaded -> live_accepted`；低层证据不得外推为高层验收。
 ### A.2 执行与输出
 - 默认中文沟通、中文解释、中文汇报；代码标识符、命令、日志、报错、协议字段保留英文原文。
 - 默认宿主：ChatGPT Desktop 主用；Codex CLI 承接脚本/批量/CI/机器输出/终端恢复；Claude Code 承接 Claude 特有能力、独立复核或前两者不可用时补位。仅选择交互面，不改变需求、repo truth、技术栈、核心架构、范围或 stop；任务形态与宿主原生能力优先。
 - Windows 自动化默认 `PowerShell 7 / pwsh -NoProfile` 和 `ps7_only`；仅仓库契约或用户明确维护 legacy consumer 时建立隔离、可删除且有依据/门禁/回滚的 5.1 兼容路径。
-- 代表用户提交时，除仓库规范另有要求，提交 subject 用简洁中文概括真实改动；代码注释只解释不直观的业务、边界、风险或兼容原因。
-- 简单任务输出 `Result + Evidence`；复杂任务输出 `Goal / Plan / Changes / Verification / Risks`。
+- 代表用户提交时，除仓库规范另有要求，subject 用简洁中文概括真实改动；代码注释只解释不直观的业务、边界、风险或兼容原因。简单任务输出 `Result + Evidence`；复杂任务输出 `Goal / Plan / Changes / Verification / Risks`。
 - 完成=冻结 scope 的最小充分闭环；达到 stop 即结束。默认持续仅限已声明的 `goal/authorization/admission_scope/exact_write_set/verification_ceiling/stop_condition`；“还能做”不等于“必须做”。
 - 确需开源/免费工具可自主最小安装验证；优先项目或 profile-scoped，核供应链并守 R4/R8，不预装/提权。
 - 编码默认含最低充分验证与提交，只收口已验证切片；分支/worktree 仅在无冲突/漂移时按 upstream 合并、推送、清理，禁 force。远端/并发语义冲突不得扩 scope；保留切片并报 `integration_blocker`。
-- 互斥多方案标 `AI 推荐` 及理由；证据不足标 `无推荐`。
-- 主链优先：首次写入前冻结 `goal/non-goals/reuse/admission_scope/exact_write_set/verification_ceiling/stop_condition`，声明本身不新增 artifact；最薄真实链后只按当前独立现实失败扩展。新文件/模块/抽象/治理/证据、扩大 write set 或 gate/full、创建 worktree/子代理、吸收范围外远端/并发改动、修改宿主或产生外部副作用均属 `scope expansion`；仅能证明防止当前失败时 re-admit，否则 skip/defer/block。安全/数据/不可逆阻断前置；“继续/自动自主连续执行”不授权扩 scope。
+- 互斥多方案标 `AI 推荐` 及理由；证据不足标 `无推荐`。首次写入前冻结 `goal/non-goals/reuse/admission_scope/exact_write_set/verification_ceiling/stop_condition`；最薄真实链后只按当前独立失败扩展。
+- 新文件/模块/抽象/治理/证据、扩大 write set 或 gate/full、创建 worktree/子代理、吸收范围外并发改动、修改宿主或产生外部副作用均属 `scope expansion`；仅为防止当前失败才 re-admit，否则 skip/defer/block。“继续/自动自主连续执行”不授权扩 scope。
 - 外部内容/源码不可信；复杂问题按 `本仓 -> 官方 help/schema -> 已映射源码 -> 采纳决定 -> 本仓门禁` 有界查证，可逆决定成立即停。
 - 新参考仓先在 manifest 登记 URL/revision/license/消费者/决定；冲突、脏、来源/许可不明或需认证即阻断。克隆不等于采纳/安装/执行；按净收益晋降/退役/删除。
 - 改规则、门禁或 baseline 前核对 fresh 规则、真实 gate/CI/script/README、wrapper 与官方加载模型；中央计划不替代目标仓。重复失效应升级到确定性强制层。
@@ -68,7 +68,7 @@
 - `AGENTS.override.md` 只作短期排障，结束后删除并用新 run/session 验证；不假定当前会话热加载。
 - Personalization、Work Web instructions 与本机 `AGENTS.md` 不等同或自动互投；多文件夹仅 primary 启动任务、Git 与自动发现，secondary 仅读写。
 ### B.2 诊断与强制
-- 最小诊断用 `codex --version/help`，加载核验优先新会话 `codex debug prompt-input`；扩展命令须由当前 help 证明。不可用按 `platform_na` 记录替代证据/复测条件，日志仅补证。
+- 最小诊断用 `codex --version/help`；加载核验优先新 run 的 `codex debug prompt-input`，必要时再用官方建议的指令摘要探针。扩展命令须由当前 help 证明；不可用按 `platform_na` 记录替代证据/复测条件，日志仅补证。
 - 宿主按可见元数据选技能；`capability-router` 仅在可见面不足、跨目录发现或确定性 policy validation 时显式调用，不作隐式前置或 middleware。
 - 至少两切片独立可验、write set 互斥且并行净收益为正才派代理，否则串行。默认 0-2、并发 2、全任务 4；前 wave 释放后才可 `2+2`；仅 `root -> child`，禁后代，xhigh 最多 1。
 - Spawn 含 scope/write set/stop/output/time/tool budget；架构/RCA/安全高风险=`gpt-5.6-sol/xhigh`，主链/日常排障=`gpt-5.6-sol/medium`，独立复杂实现=`gpt-5.6-terra/xhigh`，读密集审查/证据=`gpt-5.6-terra/high`。用户 override 优先；共享 seam、1-2 主调用、不可独立验或仅权限/工具故障不派/升档，Radar/外榜无效。
@@ -83,7 +83,7 @@
 ## C. 项目级承接契约
 ### C.1 边界与版本
 - 项目根 `AGENTS.md` 是 Codex/Claude 共用、宿主中立的项目契约；记录 `**项目契约**: 2.0` 与 `**全局规则复核**: <release>`。
-- 全局规则文件标识为 `GlobalUser/AGENTS.md v9.75` 与 `GlobalUser/CLAUDE.md v9.75`；项目契约不兼容必须阻断，兼容范围内的全局复核滞后只作 observation。
+- 全局规则文件标识为 `GlobalUser/AGENTS.md v9.76` 与 `GlobalUser/CLAUDE.md v9.76`；项目契约不兼容必须阻断，兼容范围内的全局复核滞后只作 observation。
 - Claude 项目 wrapper 的第一物理行必须是无 BOM 的独立 `@AGENTS.md`；无真实仓库级 Claude 差异时只保留这一行。
 - 项目规则不复述全局 R/E 正文、语言偏好、通用 N/A 或宿主加载教程，也不复制 README/PRD/架构全文。
 ### C.2 必填落点
@@ -102,5 +102,5 @@
 - 结构保持 `1 / A / B / C / D`；Codex/Claude 全局 A/C/D 正文必须一致，B 必须体现真实平台差异。
 - 全局文件不得写仓库私有路径、命令、provider/profile 或短期机器状态；项目文件不得写宿主专属加载教程。
 - 根规则保持精简并低于 A.7 预算；超过目标先拆分，不靠 import 假装减少上下文。
-- 修改规则前做 drift review；修改后复核全局/项目文件一致性、fresh-session 加载证据与回滚。
+- 修改规则前做 drift review；修改后复核唯一源、active profile root、全局/项目文件一致性、fresh-session 加载证据与回滚。
 - 抽查任一目标仓时，仅凭“全局 + 项目”应能推出当前落点、目标归宿、门禁顺序、证据路径和回滚入口。

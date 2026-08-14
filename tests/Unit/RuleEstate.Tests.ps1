@@ -143,8 +143,26 @@ verify drift
 
         $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
 
-        @($report.reference_basis | Where-Object authority -eq 'official').Count | Should -Be 2
+        @($report.reference_basis | Where-Object authority -eq 'official').Count | Should -Be 3
+        @($report.reference_basis | Where-Object source -eq 'https://agents.md/').Count | Should -Be 1
         @($report.reference_basis | Where-Object source -match '^[A-Za-z]:\\').Count | Should -Be 0
+    }
+
+    It 'uses active Codex and Claude profile roots for audit and mutation defaults' {
+        $f = New-RuleEstateFixture
+        $oldCodex = $env:CODEX_HOME; $oldClaude = $env:CLAUDE_CONFIG_DIR
+        try {
+            $env:CODEX_HOME = $f.codex; $env:CLAUDE_CONFIG_DIR = $f.claude
+            $audit = Parse-RuleEstateAuditOptions @('--workspace-root',$f.workspace)
+            $plan = Parse-RuleEstateMutationOptions @('--review','review.json','--workspace-root',$f.workspace,'--out','plan.json') plan
+            $audit.codex_user_root | Should -Be $f.codex
+            $audit.claude_user_root | Should -Be $f.claude
+            $plan.codex_user_root | Should -Be $f.codex
+            $plan.claude_user_root | Should -Be $f.claude
+        }
+        finally {
+            $env:CODEX_HOME = $oldCodex; $env:CLAUDE_CONFIG_DIR = $oldClaude
+        }
     }
 
     It 'skips an empty Codex override and reads the first non-empty global rule' {
