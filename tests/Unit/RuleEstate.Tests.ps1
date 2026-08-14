@@ -298,6 +298,15 @@ verify drift
         @($parsed.report.findings | Where-Object code -eq 'enforcement_reference_missing').Count | Should -BeGreaterThan 0
     }
 
+    It 'does not treat slash-separated destination categories as an enforcement path' {
+        $f = New-RuleEstateFixture
+        $checks = @(Get-RuleEstateEnforcementChecks -RepoRoot (Join-Path $f.workspace 'repo-a') -ActionMatches @(
+            [pscustomobject]@{ action = 'choose `src/config/overrides/rules/docs` as the destination category' }
+        ))
+
+        $checks | Should -BeNullOrEmpty
+    }
+
     It 'requires S5 to map to a concrete deterministic enforcement reference' {
         $f = New-RuleEstateFixture
         $agents = Join-Path $f.workspace 'repo-a\AGENTS.md'

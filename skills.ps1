@@ -3944,7 +3944,7 @@ function Get-RuleEstateEnforcementChecks([string]$RepoRoot, [object[]]$ActionMat
     foreach ($actionMatch in @($ActionMatches)) {
         foreach ($match in @([regex]::Matches([string]$actionMatch.action, '`(?<value>[^`\r\n]+)`'))) {
             $value = ([string]$match.Groups['value'].Value).Trim()
-            if ($value -match '\s' -or $value -notmatch '(?i)(?:^|[\\/])(?:scripts?|hooks?|config|ci)(?:[\\/]|$)|\.(?:ps1|py|json|ya?ml|toml)$') { continue }
+            if ($value -match '\s' -or $value -notmatch '(?i)^(?:scripts?|hooks?|config|ci)(?:[\\/]|$)|\.(?:ps1|py|json|ya?ml|toml)$') { continue }
             try {
                 $resolved = if ([System.IO.Path]::IsPathRooted($value)) { [System.IO.Path]::GetFullPath($value) } else { [System.IO.Path]::GetFullPath((Join-Path $RepoRoot $value)) }
                 $contained = Test-RuleDiscoveryPathWithin $resolved $RepoRoot
