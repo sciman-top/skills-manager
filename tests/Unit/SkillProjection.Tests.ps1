@@ -54,6 +54,29 @@ Describe 'Skill projection' {
         $plan.PSObject.Properties.Match('budget_limit_chars').Count | Should -Be 0
     }
 
+    It 'keeps projection fingerprints stable across native execution ids' {
+        $root = Join-Path $TestDrive 'fingerprint'
+        $skillDir = New-ProjectionSkill $root 'demo' 'demo'
+        $plan = New-SkillProjectionPlan ([pscustomobject]@{
+                sources = @([pscustomobject]@{ id = 'source'; path = $root; priority = 1; platforms = @('codex') })
+            })
+        $targetRoot = Join-Path $TestDrive 'native-target'
+        $nativeSkill = [pscustomobject]@{
+            name = 'demo'; source_path = (Join-Path $skillDir 'SKILL.md'); target_path = (Join-Path $targetRoot 'demo\SKILL.md')
+            content_hash = 'content-a'; metadata_hash = 'metadata-a'
+        }
+        $first = [pscustomobject]@{ plan_id = 'nsp-first'; target_root = $targetRoot; skills = @($nativeSkill); removals = @() }
+        $secondSkill = [pscustomobject]@{
+            name = 'demo'; source_path = (Join-Path $skillDir 'SKILL.md'); target_path = (Join-Path $targetRoot 'demo\SKILL.md')
+            content_hash = 'content-a'; metadata_hash = 'metadata-a'
+        }
+        $second = [pscustomobject]@{ plan_id = 'nsp-second'; target_root = $targetRoot; skills = @($secondSkill); removals = @() }
+
+        (Get-SkillProjectionPlanFingerprint $plan $first) | Should -Be (Get-SkillProjectionPlanFingerprint $plan $second)
+        $second.skills[0].content_hash = 'content-b'
+        (Get-SkillProjectionPlanFingerprint $plan $first) | Should -Not -Be (Get-SkillProjectionPlanFingerprint $plan $second)
+    }
+
     It 'replaces only the managed TOML block' {
         $existing = @'
 model = "gpt-5.6-sol"

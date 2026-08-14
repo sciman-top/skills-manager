@@ -558,7 +558,27 @@ function Get-SkillProjectionPlanFingerprint($Plan, $NativeProjectionPlan = $null
         disabled = @($Plan.disabled | Sort-Object name, path | ForEach-Object {
                 [ordered]@{ name = [string]$_.name; path = [IO.Path]::GetFullPath([string]$_.path); decision = [string]$_.decision }
             })
-        native_plan_id = if ($null -eq $NativeProjectionPlan) { '' } else { [string]$NativeProjectionPlan.plan_id }
+        native = if ($null -eq $NativeProjectionPlan) { $null } else {
+            [ordered]@{
+                target_root = [IO.Path]::GetFullPath([string]$NativeProjectionPlan.target_root)
+                skills = @($NativeProjectionPlan.skills | Sort-Object name, target_path | ForEach-Object {
+                        [ordered]@{
+                            name = [string]$_.name
+                            source_path = [IO.Path]::GetFullPath([string]$_.source_path)
+                            target_path = [IO.Path]::GetFullPath([string]$_.target_path)
+                            content_hash = [string]$_.content_hash
+                            metadata_hash = [string]$_.metadata_hash
+                        }
+                    })
+                removals = @($NativeProjectionPlan.removals | Sort-Object name, target_directory | ForEach-Object {
+                        [ordered]@{
+                            name = [string]$_.name
+                            target_directory = [IO.Path]::GetFullPath([string]$_.target_directory)
+                            previous_link_target = [string]$_.previous_link_target
+                        }
+                    })
+            }
+        }
     }
     return Get-StringSha256 ($identity | ConvertTo-Json -Depth 12 -Compress)
 }
