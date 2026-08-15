@@ -20,10 +20,7 @@
         "baoyu-post-to-wechat",
         "custom-junior-physics-animation",
         "frontend-design",
-        "manim-composer",
-        "dispatching-parallel-agents",
-        "subagent-driven-development",
-        "using-git-worktrees"
+        "manim-composer"
       ],
       "tech_stack": [
         "Windows",
@@ -64,8 +61,10 @@
         "优先选择可直接落地的自动化方案",
         "优先支持中文内容创作与发布链路",
         "优先强调可视化呈现与课堂演示效果",
-        "优先补齐多代理编排、隔离工作树和跨仓审查能力",
-        "功能重叠时保留分层清晰、边界明确、验证闭环更强的技能"
+        "优先让宿主 AI 直接完成任务，只在真实能力缺口出现时调用一个窄技能",
+        "优先交付最短真实主链，使用覆盖当前失败面的最低充分验证，达到 stop 即结束",
+        "只有至少两个可独立验证且 write set 互斥的切片才考虑多代理或隔离工作树",
+        "功能重叠时优先宿主原生能力；外加技能必须提供明确、不可替代的增量价值"
       ]
     },
     "last_structured_at": "07/06/2026 12:00:00",

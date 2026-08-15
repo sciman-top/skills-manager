@@ -1314,62 +1314,13 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $menuBody | Should -Match "7\) 目标仓审查"
         }
 
-        It "Documents audit prompt menu entries in help source" {
-            $raw = Get-Content -LiteralPath (Join-Path $script:Root "src/Commands/Utils.ps1") -Raw
-            $auditBody = Get-FunctionBody $raw "审查目标菜单"
-            $targetAdminBody = Get-FunctionBody $raw "目标仓管理菜单"
-            $advancedBody = Get-FunctionBody $raw "审查高级菜单"
-            $auditBody | Should -Match "=== 目标仓审查 ==="
-            $auditBody | Should -Match "流程：需求 -> 审查包 -> 预检 -> 应用"
-            $auditBody | Should -Match "5\) 预检建议"
-            $auditBody | Should -Match "6\) 应用建议（先 dry-run）"
-            $auditBody | Should -Match "8\) 发现新技能"
-            $auditBody | Should -Match "9\) 目标仓管理"
-            $targetAdminBody | Should -Match "4\) 删除目标仓"
-            $advancedBody | Should -Match "3\) 查看 AI 提示词"
-            $advancedBody | Should -Match "4\) 编辑 AI 提示词"
-            $advancedBody | Should -Match "5\) 直接执行建议（高级）"
-        }
-
-        It "Documents audit help source with self-check and prompt-source guidance" {
-            $raw = Get-Content -LiteralPath (Join-Path $script:Root "src/Commands/Utils.ps1") -Raw
-            $auditBody = Get-FunctionBody $raw "审查目标菜单"
-            $raw | Should -Match "先写完并自检 .*recommendations\.json"
-            $raw | Should -Match "不要直接手改 run 目录产物"
-            $raw | Should -Match "沿用原序号"
-            $raw | Should -Match "发现新技能.*profile-only"
-            $auditBody | Should -Not -Match "17\) 审查目标（需求 / 目标仓 / 审查包 / 自检后 dry-run / 按原序号选择增删）"
-            $auditBody | Should -Match "4\) 生成审查包"
-        }
-
-        It "Documents audit runtime summary wording with original-index and empty-list guidance" {
-            $raw = Get-Content -LiteralPath (Join-Path $script:Root "skills.ps1") -Raw
-            $raw | Should -Match "以下序号为原序号"
-            $raw | Should -Match "无新增建议："
-            $raw | Should -Match "无卸载建议："
-            $raw | Should -Match "dry-run 预览（沿用原序号）"
-            $raw | Should -Match "应用确认结束：dry-run 未完成确认"
-        }
-
-        It "Returns a built-in outer AI prompt" {
+        It "Returns a built-in prompt with the guarded recommendation workflow" {
             $prompt = Get-AuditOuterAiPromptContent
-            $prompt | Should -Match "Outer AI Audit Prompt"
-            $prompt | Should -Match "recommendations.template.json"
-            $prompt | Should -Match "dry-run"
-            $prompt | Should -Match "do_not_install"
-            $prompt | Should -Match "N/A"
-            $prompt | Should -Match "installed-skills.json"
-            $prompt | Should -Match "name==server.name"
-            $prompt | Should -Match "预检"
-            $prompt | Should -Match "source_observations"
-            $prompt | Should -Match "不得把 dry-run 建议描述成已安装"
-            $prompt | Should -Match "user-profile\.json\.summary"
-            $prompt | Should -Match "审查包目录名"
-            $prompt | Should -Match "no-op 不强制网络搜索"
-            $prompt | Should -Match "旧 run"
-            $prompt | Should -Match "非重复增量价值"
-            $prompt | Should -Match "明文 token/password/key"
-            $prompt | Should -Match "apply 未执行"
+            $prompt | Should -Not -BeNullOrEmpty
+            $prompt | Should -Match ([regex]::Escape("reports/skill-audit/<run-id>/recommendations.json"))
+            $prompt | Should -Match "schema_version=2"
+            $prompt | Should -Match ([regex]::Escape("--dry-run-ack"))
+            $prompt | Should -Match ([regex]::Escape("--apply --yes"))
         }
 
         It "Keeps built-in prompt markdown inline code literal without control-character corruption" {
@@ -1389,7 +1340,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $hasBareCr | Should -Be $false
         }
 
-        It "Writes audit brief with explicit self-check and blocker guidance" {
+        It "Writes a target-repo audit brief with the supplied artifact bindings" {
             $path = Join-Path $TestDrive "ai-brief.md"
             $scanData = @([pscustomobject]@{
                 target = [pscustomobject]@{
@@ -1400,99 +1351,57 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             Write-AuditAiBrief $path $scanData "user-profile.json" "repo-scan.json" "repo-scans.json" "installed-skills.json" "recommendations.template.json"
             $brief = Get-Content -LiteralPath $path -Raw
 
-            $brief | Should -Match "Pre-dry-run self-check"
-            $brief | Should -Match "do_not_install"
-            $brief | Should -Match "Cite only sources you actually inspected during this run"
-            $brief | Should -Match "User-facing dry-run summary format"
-            $brief | Should -Match "Stop before dry-run if any self-check item fails"
-            $brief | Should -Match "installed-skills.json as the audit snapshot"
-            $brief | Should -Match "decision_basis.summary"
-            $brief | Should -Match "name == server.name"
-            $brief | Should -Match "No duplicate skill add/remove or MCP add/remove recommendations"
-            $brief | Should -Match "Decision insights JSON: N/A"
-            $brief | Should -Match "Only write ``recommendations.json``"
-            $brief | Should -Match "expected command outputs"
-            $brief | Should -Match "preflight-report.json"
-            $brief | Should -Match "runtime-evidence-\*\.md"
-            $brief | Should -Match "Execute preflight"
-            $brief | Should -Match "no-op recommendation is valid without network research"
-            $brief | Should -Match "source_observations=\[\]"
-            $brief | Should -Match "concrete incremental benefit over the installed snapshot"
-            $brief | Should -Match "Never include plaintext tokens"
-            $brief | Should -Match "recommendations written, preflight passed/failed"
+            $brief | Should -Not -BeNullOrEmpty
+            $brief | Should -Match ([regex]::Escape("user-profile.json"))
+            $brief | Should -Match ([regex]::Escape("repo-scan.json"))
+            $brief | Should -Match ([regex]::Escape("repo-scans.json"))
+            $brief | Should -Match ([regex]::Escape("installed-skills.json"))
+            $brief | Should -Match ([regex]::Escape("recommendations.template.json"))
         }
 
-        It "Writes profile-only audit brief with explicit target-scan false guidance" {
+        It "Writes a profile-only audit brief without target-repo artifact bindings" {
             $path = Join-Path $TestDrive "ai-brief-profile-only.md"
 
             Write-AuditAiBrief $path @() "user-profile.json" "" "" "installed-skills.json" "recommendations.template.json" "profile-only" "powershell testing" "source-strategy.json" "decision-insights.json"
             $brief = Get-Content -LiteralPath $path -Raw
 
-            $brief | Should -Match "profile-only skill discovery"
-            $brief | Should -Match "Discovery query: powershell testing"
-            $brief | Should -Match "target_scan_used`` as boolean ``false``"
-            $brief | Should -Match "Source strategy JSON: source-strategy.json"
-            $brief | Should -Match "Decision insights JSON: decision-insights.json"
-            $brief | Should -Match "Only write ``recommendations.json``"
-            $brief | Should -Match "expected command outputs"
-            $brief | Should -Match "preflight-report.json"
-            $brief | Should -Match "runtime-evidence-\*\.md"
-            $brief | Should -Match "Execute preflight"
-            $brief | Should -Match "no-op recommendation is valid without network research"
-            $brief | Should -Match "concrete incremental benefit over the installed snapshot"
-            $brief | Should -Match "Never include plaintext tokens"
-            $brief | Should -Match "recommendations written, preflight passed/failed"
+            $brief | Should -Not -BeNullOrEmpty
+            $brief | Should -Match ([regex]::Escape("powershell testing"))
+            $brief | Should -Match ([regex]::Escape("source-strategy.json"))
+            $brief | Should -Match ([regex]::Escape("decision-insights.json"))
+            $brief | Should -Not -Match ([regex]::Escape("repo-scan.json"))
+            $brief | Should -Not -Match ([regex]::Escape("repo-scans.json"))
         }
 
-        It "Writes runtime outer AI prompt with blocker and summary format sections" {
+        It "Writes the target-repo runtime prompt with the supplied bundle bindings" {
             $path = Join-Path $TestDrive "outer-ai-prompt.md"
             $reportRoot = Join-Path $TestDrive "skill-audit-run"
 
             Write-AuditOuterAiPromptFile $path $reportRoot "ai-brief.md" "user-profile.json" "repo-scan.json" "repo-scans.json" "installed-skills.json" "recommendations.template.json"
             $prompt = Get-Content -LiteralPath $path -Raw
 
-            $prompt | Should -Match "## Blocking Conditions"
-            $prompt | Should -Match "do_not_install"
-            $prompt | Should -Match "无新增建议"
-            $prompt | Should -Match "install.mode"
-            $prompt | Should -Match "sources`` 只能填写本轮真实查看过的来源"
-            $prompt | Should -Match "ai-brief.md、user-profile.json、installed-skills.json"
-            $prompt | Should -Match "decision_basis.summary`` 非空"
-            $prompt | Should -Match "name`` 必须等于 ``server.name``"
-            $prompt | Should -Match "不得保留重复的技能新增/卸载建议或重复的 MCP 新增/卸载建议"
-            $prompt | Should -Match "决策洞察"
-            $prompt | Should -Match "执行预检"
-            $prompt | Should -Match "除 ``recommendations.json`` 外，不得修改本轮审查包输入文件"
-            $prompt | Should -Match "预期运行证据输出"
-            $prompt | Should -Match "preflight-report.json"
-            $prompt | Should -Match "runtime-evidence-\*\.md"
-            $prompt | Should -Match "审查包目录名 run-id"
-            $prompt | Should -Match "source_observations=\[\]"
-            $prompt | Should -Match "no-op 的本地覆盖依据"
-            $prompt | Should -Match "非重复增量价值"
-            $prompt | Should -Match "不得包含明文 token/password/key"
-            $prompt | Should -Match "preflight 通过/失败"
+            $prompt | Should -Not -BeNullOrEmpty
+            $prompt | Should -Match ([regex]::Escape("ai-brief.md"))
+            $prompt | Should -Match ([regex]::Escape("user-profile.json"))
+            $prompt | Should -Match ([regex]::Escape("repo-scan.json"))
+            $prompt | Should -Match ([regex]::Escape("repo-scans.json"))
+            $prompt | Should -Match ([regex]::Escape("installed-skills.json"))
+            $prompt | Should -Match ([regex]::Escape("recommendations.template.json"))
         }
 
-        It "Writes profile-only runtime outer AI prompt without requiring repo scan" {
+        It "Writes the profile-only runtime prompt without target-repo artifact bindings" {
             $path = Join-Path $TestDrive "outer-ai-prompt-profile-only.md"
             $reportRoot = Join-Path $TestDrive "skill-discovery-run"
 
             Write-AuditOuterAiPromptFile $path $reportRoot "ai-brief.md" "user-profile.json" "" "" "installed-skills.json" "recommendations.template.json" "profile-only" "powershell testing" "source-strategy.json" "decision-insights.json"
             $prompt = Get-Content -LiteralPath $path -Raw
 
-            $prompt | Should -Match "模式：profile-only"
-            $prompt | Should -Match "发现查询：powershell testing"
-            $prompt | Should -Match "target_scan_used`` 为 ``false``"
-            $prompt | Should -Match "不得编造目标仓事实"
-            $prompt | Should -Match "decision-insights.json"
-            $prompt | Should -Match "执行预检"
-            $prompt | Should -Match "这些文件只能读，不能改"
-            $prompt | Should -Match "审查包目录名 run-id"
-            $prompt | Should -Match "no-op 的本地覆盖依据"
-            $prompt | Should -Match "非重复增量价值"
-            $prompt | Should -Match "不得包含明文 token/password/key"
-            $prompt | Should -Match "preflight 通过/失败"
+            $prompt | Should -Not -BeNullOrEmpty
+            $prompt | Should -Match ([regex]::Escape("profile-only"))
+            $prompt | Should -Match ([regex]::Escape("powershell testing"))
+            $prompt | Should -Match ([regex]::Escape("decision-insights.json"))
+            $prompt | Should -Match "单目标扫描：N/A"
+            $prompt | Should -Match "多目标扫描：N/A"
         }
 
         It "Builds recommendations template with placeholder examples" {

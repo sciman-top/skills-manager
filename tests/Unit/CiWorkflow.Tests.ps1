@@ -12,7 +12,10 @@ Describe 'GitHub CI workflow supply-chain contract' {
         $bootstrap | Should -Match 'Pester/\$version'
         $bootstrap | Should -Match '0207a75ea09f81b27c1ded44898b2bb3c845bafa02045bd64a39e26a53ca41b4'
         $bootstrap | Should -Match 'Get-FileHash[^\r\n]+SHA256'
-        $bootstrap | Should -Match '(?s)Get-FileHash.*ExtractToDirectory.*Move-Item -LiteralPath \$extractRoot -Destination \$moduleRoot'
+        $bootstrap | Should -Match '(?s)Get-FileHash.*ExtractToDirectory.*\[IO\.Directory\]::Move\(\$extractRoot, \$moduleRoot\)'
+        $bootstrap | Should -Match '\$moduleRoot = Join-Path \$moduleParent \("\{0\}-\{1\}" -f \$version, \$expectedSha256\)'
+        $bootstrap | Should -Not -Match '(?m)^\$moduleRoot[^\r\n]+NewGuid'
+        $bootstrap | Should -Match '(?m)^\s*\$extractRoot[^\r\n]+NewGuid'
         $bootstrap | Should -Match 'PESTER_610_MANIFEST'
         $script:workflow | Should -Match '(?s)Rebuild locked skill sources.*skills\.ps1 更新 -Locked -SkipHostProjection.*Run repository proportional quality gate'
         $script:workflow | Should -Not -Match 'SkipPublisherCheck'
@@ -22,10 +25,25 @@ Describe 'GitHub CI workflow supply-chain contract' {
         $script:workflow | Should -Match '(?ms)^on:\s*\r?\n\s+push:\s*\r?\n\s+branches:\s*\r?\n\s+- main\s*\r?\n\s+tags:\s*\r?\n\s+- ''\*''\s*\r?\n\s+pull_request:\s*$'
     }
 
-    It 'runs full for PR and tags, and quick for the post-merge main push' {
-        $script:workflow | Should -Match "github\.event_name.*pull_request.*refs/tags/.*full.*quick"
-        $script:workflow | Should -Match 'run-local-quality-gates\.ps1 -Profile \$profile'
+    It 'runs quick by default, full for tags or risk paths, and fails closed when the diff is unavailable' {
+        $script:workflow | Should -Match "\`$profile = 'quick'"
+        $script:workflow | Should -Match 'github\.ref.*refs/tags/'
+        $script:workflow | Should -Match 'github\.event_name.*pull_request'
+        $script:workflow | Should -Match 'git diff --name-only \$baseSha HEAD'
+        $script:workflow | Should -Match 'CI_GATE_PROFILE=\$profile'
+        $script:workflow | Should -Match 'run-local-quality-gates\.ps1 -Profile \$env:CI_GATE_PROFILE'
+        $script:workflow | Should -Not -Match "pull_request' -or .*\{ 'full' \}"
         @([regex]::Matches($script:workflow, 'run-local-quality-gates\.ps1')).Count | Should -Be 1
+
+        $riskMatch = [regex]::Match($script:workflow, '\$riskPath = ''([^'']+)''')
+        $riskMatch.Success | Should -Be $true
+        $riskPath = [regex]::new($riskMatch.Groups[1].Value)
+        foreach ($path in @('src/Core.ps1', 'tests/Unit/Core.Tests.ps1', 'rules/global/codex/AGENTS.md', '.github/workflows/ci.yml', 'scripts/quality/run-local-quality-gates.ps1', 'skills.json', 'audit-targets.json')) {
+            $riskPath.IsMatch($path) | Should -Be $true
+        }
+        foreach ($path in @('README.md', 'CONTRIBUTING.md', 'docs/product/README.md')) {
+            $riskPath.IsMatch($path) | Should -Be $false
+        }
     }
 
     It 'keeps tests read-only and grants release write access only to the tag job' {

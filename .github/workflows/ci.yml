@@ -18,6 +18,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
 
       - name: Verify PowerShell 7 runtime
         shell: pwsh
@@ -29,15 +31,48 @@ jobs:
         shell: pwsh
         run: .\scripts\quality\ensure-test-runtime.ps1 -CacheRoot $env:RUNNER_TEMP -ExportToGitHubEnv
 
+      - name: Select proportional quality gate profile
+        shell: pwsh
+        run: |
+          $profile = 'quick'
+          if ('${{ github.ref }}'.StartsWith('refs/tags/')) {
+            $profile = 'full'
+          }
+          else {
+            $baseSha = if ('${{ github.event_name }}' -eq 'pull_request') { '${{ github.event.pull_request.base.sha }}' } else { '${{ github.event.before }}' }
+            if ([string]::IsNullOrWhiteSpace($baseSha) -or $baseSha -match '^0+$') {
+              $profile = 'full'
+            }
+            else {
+              & git cat-file -e ($baseSha + '^{commit}') 2>$null
+              if ($LASTEXITCODE -ne 0) {
+                & git fetch --no-tags --depth=1 origin $baseSha
+              }
+              if ($LASTEXITCODE -ne 0) {
+                $profile = 'full'
+              }
+              else {
+                $changed = @(& git diff --name-only $baseSha HEAD --)
+                if ($LASTEXITCODE -ne 0) {
+                  $profile = 'full'
+                }
+                else {
+                  $riskPath = '^(src/|tests/|rules/|overrides/|vendor/|imports/|references/reference-shelf\.manifest\.json$|\.github/workflows/|scripts/(quality/|release/|hooks/|verify-)|build\.ps1$|install\.ps1$|skills\.json$|skills\.lock\.json$|audit-targets\.json$)'
+                  if (@($changed | Where-Object { $_ -match $riskPath }).Count -gt 0) { $profile = 'full' }
+                }
+              }
+            }
+          }
+          "CI_GATE_PROFILE=$profile" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Selected CI quality gate profile: $profile"
+
       - name: Rebuild locked skill sources
         shell: pwsh
         run: .\skills.ps1 更新 -Locked -SkipHostProjection
 
       - name: Run repository proportional quality gate
         shell: pwsh
-        run: |
-          $profile = if ('${{ github.event_name }}' -eq 'pull_request' -or '${{ github.ref }}'.StartsWith('refs/tags/')) { 'full' } else { 'quick' }
-          .\scripts\quality\run-local-quality-gates.ps1 -Profile $profile
+        run: .\scripts\quality\run-local-quality-gates.ps1 -Profile $env:CI_GATE_PROFILE
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
