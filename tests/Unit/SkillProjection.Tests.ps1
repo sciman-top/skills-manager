@@ -118,6 +118,28 @@ unified_exec = true
         finally { $DryRun = $oldDryRun }
     }
 
+    It 'projects the neutral catalog beside the portable capability router' {
+        $oldDryRun = $DryRun
+        try {
+            $DryRun = $false
+            $managed = Join-Path $TestDrive 'portable-catalog-managed'
+            New-ProjectionSkill $managed 'capability-router' 'capability-router' | Out-Null
+            New-ProjectionSkill $managed 'demo' 'demo' | Out-Null
+            $catalogPath = Join-Path $managed '.skills-manager\catalog.json'
+            $projection = [pscustomobject]@{ managed_source_path = $managed; discovery_catalog = [pscustomobject]@{ catalog_path = $catalogPath } }
+
+            $result = Sync-SkillDiscoveryCatalog $projection
+            $portablePath = Join-Path $managed 'capability-router\catalog.json'
+
+            $result.changed | Should -BeTrue
+            $result.portable_path | Should -Be ([IO.Path]::GetFullPath($portablePath))
+            Test-Path -LiteralPath $catalogPath -PathType Leaf | Should -BeTrue
+            Test-Path -LiteralPath $portablePath -PathType Leaf | Should -BeTrue
+            (Get-ContentUtf8 $portablePath) | Should -Be (Get-ContentUtf8 $catalogPath)
+        }
+        finally { $DryRun = $oldDryRun }
+    }
+
     It 'rolls back links, config, neutral catalog, and manifest after an aggregate write failure' {
         $oldDryRun = $DryRun
         try {
@@ -146,6 +168,7 @@ unified_exec = true
 
             { Sync-CodexSkillProjection $projection } | Should -Throw
             Get-ContentUtf8 $catalogPath | Should -Be 'catalog-before'
+            Test-Path -LiteralPath (Join-Path $managed 'capability-router\catalog.json') | Should -BeFalse
             Get-ContentUtf8 $configPath | Should -Be 'model = "fixture"'
             Get-ContentUtf8 $manifestPath | Should -Be 'manifest-before'
             Test-Path -LiteralPath (Join-Path $target 'demo') | Should -Be $false

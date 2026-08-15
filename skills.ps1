@@ -20225,6 +20225,14 @@ function Get-SkillDiscoveryCatalogPath($projectionCfg) {
     return [IO.Path]::GetFullPath($catalogPath)
 }
 
+function Get-SkillDiscoveryPortableCatalogPath($projectionCfg) {
+    Need ($null -ne $projectionCfg) 'skill_projection 配置为空'
+    $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
+    $routerRoot = Join-Path $managedRoot 'capability-router'
+    if (-not (Test-Path -LiteralPath (Join-Path $routerRoot 'SKILL.md') -PathType Leaf)) { return '' }
+    return [IO.Path]::GetFullPath((Join-Path $routerRoot 'catalog.json'))
+}
+
 function New-SkillDiscoveryCatalogDocument($projectionCfg) {
     Need ($null -ne $projectionCfg) 'skill_projection 配置为空'
     Need ($projectionCfg.PSObject.Properties.Match('managed_source_path').Count -gt 0) 'skill_projection 缺少 managed_source_path'
@@ -20322,17 +20330,24 @@ function Sync-SkillDiscoveryCatalog($projectionCfg) {
         return [pscustomobject]@{ enabled = $false; reason = 'not_configured'; changed = $false; persisted = $false; path = ''; skill_count = 0; domain_count = 0 }
     }
     $catalogPath = Get-SkillDiscoveryCatalogPath $projectionCfg
+    $portableCatalogPath = Get-SkillDiscoveryPortableCatalogPath $projectionCfg
     $catalog = New-SkillDiscoveryCatalogDocument $projectionCfg
     $desired = $catalog | ConvertTo-Json -Depth 20
     $existing = if (Test-Path -LiteralPath $catalogPath -PathType Leaf) { Get-ContentUtf8 $catalogPath } else { '' }
-    $changed = -not [string]::Equals($existing.TrimEnd("`r", "`n"), $desired.TrimEnd("`r", "`n"), [System.StringComparison]::Ordinal)
-    if ($changed -and -not $DryRun) { Set-ContentUtf8 $catalogPath $desired }
+    $primaryChanged = -not [string]::Equals($existing.TrimEnd("`r", "`n"), $desired.TrimEnd("`r", "`n"), [System.StringComparison]::Ordinal)
+    $portableExisting = if (-not [string]::IsNullOrWhiteSpace($portableCatalogPath) -and (Test-Path -LiteralPath $portableCatalogPath -PathType Leaf)) { Get-ContentUtf8 $portableCatalogPath } else { '' }
+    $portableChanged = -not [string]::IsNullOrWhiteSpace($portableCatalogPath) -and -not [string]::Equals($portableExisting.TrimEnd("`r", "`n"), $desired.TrimEnd("`r", "`n"), [System.StringComparison]::Ordinal)
+    if (-not $DryRun) {
+        if ($primaryChanged) { Set-ContentUtf8 $catalogPath $desired }
+        if ($portableChanged) { Set-ContentUtf8 $portableCatalogPath $desired }
+    }
     return [pscustomobject]@{
         enabled = $true
         reason = 'ok'
-        changed = $changed
+        changed = ($primaryChanged -or $portableChanged)
         persisted = (-not $DryRun)
         path = $catalogPath
+        portable_path = $portableCatalogPath
         skill_count = @($catalog.skills).Count
         domain_count = @($catalog.domains).Count
     }
@@ -20666,6 +20681,8 @@ function New-CodexSkillProjectionTransaction($projectionCfg, [string]$ConfigPath
     if ($projectionCfg.PSObject.Properties.Match('managed_source_path').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$projectionCfg.managed_source_path)) {
         $managedRoot = Resolve-SkillProjectionPath ([string]$projectionCfg.managed_source_path)
         $filePaths.Add((Get-SkillDiscoveryCatalogPath $projectionCfg)) | Out-Null
+        $portableCatalogPath = Get-SkillDiscoveryPortableCatalogPath $projectionCfg
+        if (-not [string]::IsNullOrWhiteSpace($portableCatalogPath)) { $filePaths.Add($portableCatalogPath) | Out-Null }
     }
     $nativeSettings = Get-CfgObjectProperty $projectionCfg 'native_projection'
     if ($null -ne $nativeSettings -and -not [string]::IsNullOrWhiteSpace([string](Get-CfgObjectProperty $nativeSettings 'receipt_path'))) {
