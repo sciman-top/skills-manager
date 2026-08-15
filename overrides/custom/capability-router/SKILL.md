@@ -1,6 +1,6 @@
 ---
 name: capability-router
-description: Read-only cold discovery and deterministic validation for local skills. Invoke explicitly only when host-native visible metadata is insufficient, cross-directory discovery is needed, or a host-selected candidate needs containment/availability validation. Host AI owns semantic selection.
+description: Read-only cold discovery and deterministic validation for local skills. Use only when host-native visible metadata is insufficient, cross-directory discovery is needed, or a host-selected candidate needs containment/availability validation. Host AI owns semantic selection; do not use as a normal preflight.
 ---
 
 # Capability router

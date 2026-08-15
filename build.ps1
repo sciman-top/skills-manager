@@ -16,6 +16,7 @@ $Files = @(
     "Domain/RuleDocument.ps1",
     "Domain/RuleResponsibility.ps1",
     "Domain/RulePatchPlan.ps1",
+    "Application/SkillProjectionPlanning.ps1",
     "Application/CapabilityInventory.ps1",
     "Application/SkillCatalogCompiler.ps1",
     "Application/SkillEligibilityPolicy.ps1",

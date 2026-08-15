@@ -26,7 +26,7 @@
 - target audit 三文件 bundle、recommendations preflight/dry-run/apply
 - rule audit、single-repo patch、rule-estate transaction
 - canonical skill inventory、native projection（metadata budget 与 description 截断复用宿主原生能力）
-- explicit `capability-router` cold discovery/policy validation
+- host-selected `capability-router` cold discovery/policy validation when visible metadata is insufficient
 - 按任务显式启用的可选 core/secondary reference shelf refresh/verify
 - build、focused tests、contract/invariant checks、risk-triggered full gate
 

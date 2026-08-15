@@ -4,6 +4,28 @@ BeforeAll {
     . (Join-Path $repoRoot 'src\Infrastructure\CodexCli.ps1')
     . (Join-Path $repoRoot 'src\Application\CapabilityInventory.ps1')
 
+    function Write-CapabilityProjectionManifestFixture($ProjectionConfig, [string]$Path) {
+        $plan = New-SkillProjectionPlan $ProjectionConfig $repoRoot -OmitExternalInventory
+        $manifest = [ordered]@{
+            schema_version = 2
+            projection_fingerprint = Get-SkillProjectionPlanFingerprint $plan
+            source_revision = ('0' * 40)
+            enabled = [bool]$plan.enabled
+            source_count = @($ProjectionConfig.sources).Count
+            skill_entry_count = @($plan.skills).Count
+            unique_name_count = @($plan.unique_names).Count
+            active_name_count = @($plan.active_names).Count
+            duplicate_name_groups = [int]$plan.duplicate_name_groups
+            disabled_path_count = @($plan.disabled).Count
+            conflict_count = @($plan.conflicts).Count
+            skills = @($plan.skills)
+            canonical = @($plan.canonical)
+            active = @($plan.active)
+            disabled = @($plan.disabled)
+            conflicts = @($plan.conflicts)
+        }
+        [IO.File]::WriteAllText($Path, ($manifest | ConvertTo-Json -Depth 12), [Text.UTF8Encoding]::new($false))
+    }
 }
 Describe 'Read-only skill surface inventory' {
     It 'reports six explained skill surfaces even when their counts differ' {
@@ -58,19 +80,88 @@ Describe 'Read-only skill surface inventory' {
             $assetPath = Join-Path $skillRoot 'asset.txt'
             [IO.File]::WriteAllText($skillPath, "---`nname: demo`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false))
             [IO.File]::WriteAllText($assetPath, 'asset-v1', [Text.UTF8Encoding]::new($false))
-            $manifest = [pscustomobject]@{ source_revision = ('0' * 40); canonical = @([pscustomobject]@{ name = 'demo'; path = $skillPath; content_hash = Get-CapabilitySurfaceFileHash $skillPath; package_hash = Get-CapabilitySurfacePackageHash $skillPath }) }
-            [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
-            $config = [pscustomobject]@{ skill_projection = [pscustomobject]@{ manifest_path = $manifestPath; managed_source_path = 'agent'; user_skill_root = 'user'; managed_link_includes = @(); external_skill_inventory = [pscustomobject]@{ enabled = $true } }; mcp_servers = @() }
+            $projection = [pscustomobject]@{ manifest_path = $manifestPath; managed_source_path = 'agent'; user_skill_root = 'user'; managed_link_includes = @(); sources = @([pscustomobject]@{ id = 'fixture'; path = (Split-Path $skillRoot -Parent); priority = 1; platforms = @('codex') }); external_skill_inventory = [pscustomobject]@{ enabled = $true } }
+            $config = [pscustomobject]@{ skill_projection = $projection; mcp_servers = @() }
+            Write-CapabilityProjectionManifestFixture $projection $manifestPath
             Mock Get-CodexPluginSkillInventory { [pscustomobject]@{ authority = 'fixture'; freshness = 'fresh'; coverage = 'complete'; skills = @(); warnings = @() } }
             Mock Get-CodexHostObservation { [pscustomobject]@{ mcp = [pscustomobject]@{ warnings = @() }; doctor = [pscustomobject]@{ warnings = @() } } }
 
-            ((New-SkillSurfaceView -RepoRoot $fixture -Config $config).surfaces | Where-Object name -eq 'canonical_projection').freshness | Should -Be 'fresh'
+            $freshView = New-SkillSurfaceView -RepoRoot $fixture -Config $config
+            ($freshView.surfaces | Where-Object name -eq 'canonical_projection').freshness | Should -Be 'fresh'
+            $freshView.pass | Should -BeTrue
             [IO.File]::WriteAllText($assetPath, 'asset-v2', [Text.UTF8Encoding]::new($false))
-            ((New-SkillSurfaceView -RepoRoot $fixture -Config $config).surfaces | Where-Object name -eq 'canonical_projection').freshness | Should -Be 'stale'
+            $assetStaleView = New-SkillSurfaceView -RepoRoot $fixture -Config $config
+            ($assetStaleView.surfaces | Where-Object name -eq 'canonical_projection').freshness | Should -Be 'stale'
+            $assetStaleView.pass | Should -BeFalse
+            @($assetStaleView.findings.code) | Should -Contain 'projection_manifest_stale'
             [IO.File]::WriteAllText($assetPath, 'asset-v1', [Text.UTF8Encoding]::new($false))
             [IO.File]::WriteAllText($skillPath, "---`nname: demo`ndescription: changed`n---`n", [Text.UTF8Encoding]::new($false))
-            ((New-SkillSurfaceView -RepoRoot $fixture -Config $config).surfaces | Where-Object name -eq 'canonical_projection').freshness | Should -Be 'stale'
+            $skillStaleView = New-SkillSurfaceView -RepoRoot $fixture -Config $config
+            ($skillStaleView.surfaces | Where-Object name -eq 'canonical_projection').freshness | Should -Be 'stale'
+            $skillStaleView.pass | Should -BeFalse
         }
         finally { $env:CODEX_HOME = $oldCodexHome; if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
+    }
+
+    It 'fails closed when the current source inventory adds a skill absent from the manifest' {
+        $fixture = Join-Path ([IO.Path]::GetTempPath()) ('skill-surfaces-' + [guid]::NewGuid().ToString('N'))
+        try {
+            $sourceRoot = Join-Path $fixture 'source'; $demoRoot = Join-Path $sourceRoot 'demo'; $manifestPath = Join-Path $fixture 'reports\current.json'
+            New-Item -ItemType Directory -Force -Path $demoRoot, (Split-Path $manifestPath -Parent) | Out-Null
+            [IO.File]::WriteAllText((Join-Path $demoRoot 'SKILL.md'), "---`nname: demo`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false))
+            $projection = [pscustomobject]@{ manifest_path = $manifestPath; managed_source_path = 'agent'; user_skill_root = 'user'; managed_link_includes = @(); sources = @([pscustomobject]@{ id = 'fixture'; path = $sourceRoot; priority = 1; platforms = @('codex') }) }
+            Write-CapabilityProjectionManifestFixture $projection $manifestPath
+            $newRoot = Join-Path $sourceRoot 'new-skill'; New-Item -ItemType Directory -Force -Path $newRoot | Out-Null
+            [IO.File]::WriteAllText((Join-Path $newRoot 'SKILL.md'), "---`nname: new-skill`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false))
+            Mock Get-CodexPluginSkillInventory { [pscustomobject]@{ authority = 'fixture'; freshness = 'fresh'; coverage = 'complete'; skills = @(); warnings = @() } }
+            Mock Get-CodexHostObservation { [pscustomobject]@{ mcp = [pscustomobject]@{ warnings = @() }; doctor = [pscustomobject]@{ warnings = @() } } }
+
+            $view = New-SkillSurfaceView -RepoRoot $fixture -Config ([pscustomobject]@{ skill_projection = $projection; mcp_servers = @() })
+            ($view.surfaces | Where-Object name -eq 'canonical_projection').freshness | Should -Be 'stale'
+            $view.pass | Should -BeFalse
+            @($view.findings.code) | Should -Contain 'projection_manifest_stale'
+        }
+        finally { if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
+    }
+
+    It 'rejects an invalid manifest contract instead of vacuously reporting fresh' {
+        $fixture = Join-Path ([IO.Path]::GetTempPath()) ('skill-surfaces-' + [guid]::NewGuid().ToString('N'))
+        try {
+            $manifestPath = Join-Path $fixture 'reports\current.json'; New-Item -ItemType Directory -Force -Path (Split-Path $manifestPath -Parent) | Out-Null
+            [IO.File]::WriteAllText($manifestPath, '{"canonical":[]}', [Text.UTF8Encoding]::new($false))
+            $projection = [pscustomobject]@{ manifest_path = $manifestPath; managed_source_path = 'agent'; user_skill_root = 'user'; managed_link_includes = @(); sources = @() }
+            Mock Get-CodexPluginSkillInventory { [pscustomobject]@{ authority = 'fixture'; freshness = 'fresh'; coverage = 'complete'; skills = @(); warnings = @() } }
+            Mock Get-CodexHostObservation { [pscustomobject]@{ mcp = [pscustomobject]@{ warnings = @() }; doctor = [pscustomobject]@{ warnings = @() } } }
+
+            $view = New-SkillSurfaceView -RepoRoot $fixture -Config ([pscustomobject]@{ skill_projection = $projection; mcp_servers = @() })
+            $surface = $view.surfaces | Where-Object name -eq 'canonical_projection'
+            $surface.freshness | Should -Be 'invalid'
+            $surface.coverage | Should -Be 'invalid'
+            $view.pass | Should -BeFalse
+            @($view.findings.code) | Should -Contain 'projection_manifest_field_missing'
+        }
+        finally { if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
+    }
+
+    It 'rejects manifest skill paths outside the currently configured source roots' {
+        $fixture = Join-Path ([IO.Path]::GetTempPath()) ('skill-surfaces-' + [guid]::NewGuid().ToString('N'))
+        try {
+            $sourceRoot = Join-Path $fixture 'source'; $skillRoot = Join-Path $sourceRoot 'demo'; $outsideRoot = Join-Path $fixture 'outside'; $manifestPath = Join-Path $fixture 'reports\current.json'
+            New-Item -ItemType Directory -Force -Path $skillRoot, $outsideRoot, (Split-Path $manifestPath -Parent) | Out-Null
+            $skillPath = Join-Path $skillRoot 'SKILL.md'; $outsidePath = Join-Path $outsideRoot 'SKILL.md'
+            [IO.File]::WriteAllText($skillPath, "---`nname: demo`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false)); [IO.File]::WriteAllText($outsidePath, "---`nname: outside`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false))
+            $projection = [pscustomobject]@{ manifest_path = $manifestPath; managed_source_path = 'agent'; user_skill_root = 'user'; managed_link_includes = @(); sources = @([pscustomobject]@{ id = 'fixture'; path = $sourceRoot; priority = 1; platforms = @('codex') }) }
+            Write-CapabilityProjectionManifestFixture $projection $manifestPath
+            $manifest = [IO.File]::ReadAllText($manifestPath) | ConvertFrom-Json; $manifest.skills[0].path = $outsidePath; $manifest.canonical[0].path = $outsidePath; $manifest.active[0].path = $outsidePath
+            [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 12), [Text.UTF8Encoding]::new($false))
+            Mock Get-CodexPluginSkillInventory { [pscustomobject]@{ authority = 'fixture'; freshness = 'fresh'; coverage = 'complete'; skills = @(); warnings = @() } }
+            Mock Get-CodexHostObservation { [pscustomobject]@{ mcp = [pscustomobject]@{ warnings = @() }; doctor = [pscustomobject]@{ warnings = @() } } }
+
+            $view = New-SkillSurfaceView -RepoRoot $fixture -Config ([pscustomobject]@{ skill_projection = $projection; mcp_servers = @() })
+            ($view.surfaces | Where-Object name -eq 'canonical_projection').freshness | Should -Be 'invalid'
+            $view.pass | Should -BeFalse
+            @($view.findings.code) | Should -Contain 'projection_manifest_path_outside_source'
+        }
+        finally { if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
     }
 }

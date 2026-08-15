@@ -71,6 +71,19 @@ Describe 'Read-only capability and rule CLI' {
         @((Get-ChildItem -LiteralPath $TestDrive -File)).Count | Should -Be 1
     }
 
+    It 'returns exit 1 when the skill surface view fails closed' {
+        $script:Root = $capabilityRoot
+        $script:CfgPath = $capabilityCfgPath
+        $Root = $script:Root
+        $CfgPath = $script:CfgPath
+        Mock New-SkillSurfaceView { [pscustomobject]@{ pass = $false; surface_count = 1; findings = @([pscustomobject]@{ code = 'projection_manifest_stale' }); writes = 0 } }
+
+        $result = Invoke-CapabilityInventoryCommand @('--json')
+
+        $result.exit_code | Should -Be 1
+        ($result.output | ConvertFrom-Json).pass | Should -BeFalse
+    }
+
     It 'returns one rule-audit envelope and preserves the scanned rule hash' {
         $repo = Join-Path $TestDrive 'repo'; New-Item -ItemType Directory -Path $repo -Force | Out-Null; Set-Content -LiteralPath (Join-Path $repo 'AGENTS.md') -Value '# fixture' -Encoding UTF8
         $before = (Get-FileHash -LiteralPath (Join-Path $repo 'AGENTS.md') -Algorithm SHA256).Hash

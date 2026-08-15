@@ -1,6 +1,7 @@
 $capabilityInventoryRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
 if ($null -eq (Get-Command Get-CodexPluginSkillInventory -ErrorAction SilentlyContinue)) { . (Join-Path $capabilityInventoryRepoRoot 'src\Infrastructure\CodexCli.ps1') }
 if ($null -eq (Get-Command Read-SkillMetadata -ErrorAction SilentlyContinue)) { . (Join-Path $capabilityInventoryRepoRoot 'src\Domain\SkillMetadata.ps1') }
+if ($null -eq (Get-Command Test-SkillProjectionManifestCurrent -ErrorAction SilentlyContinue)) { . (Join-Path $capabilityInventoryRepoRoot 'src\Application\SkillProjectionPlanning.ps1') }
 
 function Get-CapabilitySurfaceFileHash([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
@@ -58,22 +59,27 @@ function New-SkillSurfaceView {
     $projectionPath = Resolve-CapabilitySurfacePath ([string]$projection.manifest_path) $root
     $projectionItems = @(); $projectionFreshness = 'unknown'; $projectionCoverage = 'not_observed'
     if ($projectionPath -and (Test-Path -LiteralPath $projectionPath -PathType Leaf)) {
-        $manifest = [IO.File]::ReadAllText($projectionPath) | ConvertFrom-Json
-        $canonicalEntries = @($manifest.canonical)
-        $projectionItems = @($canonicalEntries | ForEach-Object { $path = Resolve-CapabilitySurfacePath ([string]$_.path) $root; $entry = if ($path -and (Test-Path -LiteralPath $path -PathType Leaf)) { $path } elseif ($path -and (Test-Path -LiteralPath (Join-Path $path 'SKILL.md') -PathType Leaf)) { Join-Path $path 'SKILL.md' } else { Join-Path $repoSupplyRoot ('{0}\SKILL.md' -f $_.name) }; Get-CapabilitySurfaceSkillMetadata $entry 'canonical_projection' 'canonical' $false })
-        $projectionContentMatches = $true
-        foreach ($canonicalEntry in $canonicalEntries) {
-            $path = Resolve-CapabilitySurfacePath ([string]$canonicalEntry.path) $root
-            $entry = if ($path -and (Test-Path -LiteralPath $path -PathType Leaf)) { $path } elseif ($path -and (Test-Path -LiteralPath (Join-Path $path 'SKILL.md') -PathType Leaf)) { Join-Path $path 'SKILL.md' } else { $null }
-            if ($null -eq $entry -or
-                -not [string]::Equals((Get-CapabilitySurfaceFileHash $entry), [string]$canonicalEntry.content_hash, [StringComparison]::OrdinalIgnoreCase) -or
-                -not [string]::Equals((Get-CapabilitySurfacePackageHash $entry), [string]$canonicalEntry.package_hash, [StringComparison]::OrdinalIgnoreCase)) {
-                $projectionContentMatches = $false
-                break
+        try {
+            $manifest = [IO.File]::ReadAllText($projectionPath) | ConvertFrom-Json
+            $validation = Test-SkillProjectionManifestCurrent $manifest $projection $root
+            $projectionFreshness = [string]$validation.freshness
+            $projectionCoverage = [string]$validation.coverage
+            foreach ($finding in @($validation.findings)) {
+                $findings.Add([pscustomobject]@{ code = [string]$finding.code; severity = [string]$finding.severity; surface = 'canonical_projection'; path = [string]$finding.path; message = [string]$finding.message }) | Out-Null
+            }
+            if ($projectionCoverage -ne 'invalid') {
+                $sourceRoots = @($projection.sources | ForEach-Object { Resolve-SkillProjectionPath ([string]$_.path) $root })
+                $projectionItems = @($manifest.canonical | ForEach-Object {
+                        $entry = Resolve-CapabilitySurfacePath ([string]$_.path) $root
+                        $authorized = $entry -and @($sourceRoots | Where-Object { Test-SkillProjectionPathWithinRoot $entry $_ }).Count -gt 0
+                        if ($authorized -and (Test-Path -LiteralPath $entry -PathType Leaf)) { Get-CapabilitySurfaceSkillMetadata $entry 'canonical_projection' 'canonical' $false }
+                    })
             }
         }
-        $projectionFreshness = if ($projectionContentMatches) { 'fresh' } else { 'stale' }
-        $projectionCoverage = 'complete'
+        catch {
+            $projectionFreshness = 'invalid'; $projectionCoverage = 'invalid'
+            $findings.Add([pscustomobject]@{ code = 'projection_manifest_parse_invalid'; severity = 'error'; surface = 'canonical_projection'; path = $projectionPath; message = $_.Exception.Message }) | Out-Null
+        }
     }
     $surfaces.Add((New-CapabilitySurfaceRecord 'canonical_projection' 'projection_manifest' $projectionPath $projectionFreshness $projectionCoverage $projectionItems)) | Out-Null
 

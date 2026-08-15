@@ -67,7 +67,7 @@ user profile + repo scan + installed inventory
 
 Canonical inventory 统一来源与 alias；eligibility 处理 enabled/dependency/placement；宿主原生处理 metadata budget 与 description 截断；projection transaction 只管理 owner 标记的 links，外部 skill 永不被当作受管资产删除。
 
-`capability-router` 是显式 fallback adapter。它从 portable catalog 读取候选，按 `DomainHint` 限定集合，并对宿主提供的 Candidate 做确定性 existence、containment、entrypoint hash、availability 与 side-effect disclosure 校验。它不维护 session、preheat、activation plan 或 MCP/plugin 编排；语义选择始终属于宿主。
+`capability-router` 是宿主按需选择的 fallback adapter，仅在可见 metadata 不足或需要确定性 policy validation 时适用。它从 portable catalog 读取候选，按 `DomainHint` 限定集合，并对宿主提供的 Candidate 做确定性 existence、containment、entrypoint hash、availability 与 side-effect disclosure 校验。它不作普通请求前置，不维护 session、preheat、activation plan 或 MCP/plugin 编排；语义选择始终属于宿主。
 
 ### Reference shelf
 

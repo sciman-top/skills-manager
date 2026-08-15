@@ -1,6 +1,6 @@
 interface:
   display_name: "Capability Router"
   short_description: "Validate host-selected skill metadata against local policy"
-  default_prompt: "Use $capability-router only for an explicit deterministic fallback or policy validation; keep host AI semantic selection and negative constraints authoritative, and never switch profiles or mutate host state."
+  default_prompt: "Use $capability-router only when visible metadata is insufficient or deterministic policy validation is required; keep host AI semantic selection and negative constraints authoritative, and never use it as middleware, switch profiles, or mutate host state."
 policy:
-  allow_implicit_invocation: false
+  allow_implicit_invocation: true

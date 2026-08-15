@@ -128,7 +128,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 ### 技能投影与 fallback
 
-宿主原生 metadata 是普通请求的首选选择面。`capability-router` 只在显式 cold discovery 或 policy validation 时使用；它接受 `DomainHint`，返回候选并校验宿主选择，不执行语义排序、不切换 profile、不写宿主状态。
+宿主原生 metadata 是普通请求的首选选择面。`capability-router` 允许宿主在可见 metadata 不足时按需选择，用于 cold discovery 或 policy validation；它接受 `DomainHint`，返回候选并校验宿主选择，不作普通请求前置，不执行语义排序、不切换 profile、不写宿主状态。
 
 ```powershell
 .\skills.ps1 capability-inventory --view skill-surfaces --json

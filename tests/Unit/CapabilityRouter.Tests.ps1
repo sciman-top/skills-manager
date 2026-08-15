@@ -36,4 +36,14 @@ Describe 'Capability router fallback' {
         $excluded=& pwsh -NoProfile -File $router -Query 'design' -CatalogPath $catalog -ExcludeCapability 'skill|codebase-design'|ConvertFrom-Json
         @($excluded.retrieval.candidates).Count|Should -Be 0
     }
+
+    It 'is implicit-eligible only as a narrow cold-discovery fallback' {
+        $metadata = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'overrides\custom\capability-router\agents\openai.yaml')
+        $skill = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'overrides\custom\capability-router\SKILL.md')
+
+        $metadata | Should -Match 'allow_implicit_invocation:\s*true'
+        $metadata | Should -Match 'visible metadata is insufficient'
+        $metadata | Should -Match 'never use it as middleware'
+        $skill | Should -Match 'do not use as a normal preflight'
+    }
 }
