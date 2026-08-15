@@ -71,6 +71,7 @@
 - 最小诊断用 `codex --version/help`；加载核验优先新 run 的 `codex debug prompt-input`，必要时再用官方建议的指令摘要探针。扩展命令须由当前 help 证明；不可用按 `platform_na` 记录替代证据/复测条件，日志仅补证。
 - 宿主按可见元数据选技能；`capability-router` 仅在可见面不足、跨目录发现或确定性 policy validation 时显式调用，不作隐式前置或 middleware。
 - 仅当至少两个切片可独立验证、write set 互斥且并行净收益为正时派代理；否则串行。委派只声明完成该切片所需的 scope、write set、proof 与 stop，不建立固定模型矩阵、代理层级或 wave 治理。
+- 指定非默认 `agent_type` 时，`fork_turns` 只允许 `"none"` 或正整数字符串，禁止 `"all"`；仅观察到 `started`、有效 child thread id 与终态 `completed` 才可报告子代理成功。spawn 失败可由主代理串行接管，但必须记录 `fallback=serial`。
 - `AGENTS.md` 不是权限系统；可重复强制归 config/hooks/scripts/CI，项目层仅在 trusted repo 生效。non-managed hook 按哈希 review/trust，变化后重信任；fresh session 只证明默认路径，specialized tools 可绕过。
 - `.codex/rules/*.rules` 仍为 experimental；按精确前缀建模，以 `match/not_match` 和当前 `codex execpolicy check` 实测，禁过宽 allowlist。
 - Work Web 不继承本机 sandbox/approval，各 managed/workspace 层不混；never/full-access/bypass 不取消 R4/R8，仅用于明确授权或外部隔离。

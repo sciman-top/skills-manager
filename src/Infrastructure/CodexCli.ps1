@@ -1,13 +1,21 @@
 function Invoke-CodexCliJson {
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [switch]$AllowNonZeroExitWithJson
+    )
 
     $command = Get-Command codex -ErrorAction SilentlyContinue
     if ($null -eq $command) { throw 'codex_cli_unavailable' }
     $output = @(& $command.Source @Arguments 2>&1)
-    if ($LASTEXITCODE -ne 0) { throw ('codex_cli_failed: {0}' -f ($output -join "`n")) }
-    try { return (($output -join "`n") | ConvertFrom-Json -Depth 50) }
-    catch { throw ('codex_cli_json_invalid: {0}' -f $_.Exception.Message) }
+    $exitCode = $LASTEXITCODE
+    try { $payload = (($output -join "`n") | ConvertFrom-Json -Depth 50) }
+    catch {
+        if ($exitCode -ne 0) { throw ('codex_cli_failed: {0}' -f ($output -join "`n")) }
+        throw ('codex_cli_json_invalid: {0}' -f $_.Exception.Message)
+    }
+    if ($exitCode -ne 0 -and -not $AllowNonZeroExitWithJson) { throw ('codex_cli_failed: {0}' -f ($output -join "`n")) }
+    return $payload
 }
 
 function Get-CodexPluginSkillInventory {
@@ -88,7 +96,7 @@ function Get-CodexDoctorObservation {
     param()
 
     $result = [ordered]@{ authority = 'codex_doctor_json'; freshness = 'unknown'; coverage = 'platform_na'; schema_version = 0; codex_version = ''; overall_status = 'unknown'; checks = @(); warnings = @() }
-    try { $payload = Invoke-CodexCliJson -Arguments @('doctor', '--json') }
+    try { $payload = Invoke-CodexCliJson -Arguments @('doctor', '--json') -AllowNonZeroExitWithJson }
     catch {
         $result.warnings = @([pscustomobject][ordered]@{ code = 'codex_doctor_observation_unavailable'; subject = 'codex doctor --json'; message = $_.Exception.Message })
         return [pscustomobject]$result

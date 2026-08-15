@@ -11,6 +11,16 @@ function Get-CapabilitySurfaceTextHash([string]$Text) {
     try { return (($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes([string]$Text)) | ForEach-Object { $_.ToString('x2') }) -join '') }
     finally { $sha.Dispose() }
 }
+function Get-CapabilitySurfacePackageHash([string]$SkillPath) {
+    $skillDirectory = if (Test-Path -LiteralPath $SkillPath -PathType Leaf) { Split-Path $SkillPath -Parent } elseif (Test-Path -LiteralPath $SkillPath -PathType Container) { $SkillPath } else { return $null }
+    $base = [IO.Path]::GetFullPath($skillDirectory).TrimEnd("\", "/")
+    $parts = [Collections.Generic.List[string]]::new()
+    foreach ($file in @(Get-ChildItem -LiteralPath $base -Recurse -File -Force -ErrorAction SilentlyContinue | Sort-Object FullName)) {
+        $relative = $file.FullName.Substring($base.Length).TrimStart("\", "/").Replace("\", "/")
+        $parts.Add(('{0}|{1}' -f $relative, (Get-CapabilitySurfaceFileHash $file.FullName))) | Out-Null
+    }
+    return Get-CapabilitySurfaceTextHash ($parts.ToArray() -join "`n")
+}
 function Resolve-CapabilitySurfacePath([string]$Path, [string]$RepoRoot) {
     if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
     $value = [Environment]::ExpandEnvironmentVariables($Path.Trim())
@@ -49,9 +59,20 @@ function New-SkillSurfaceView {
     $projectionItems = @(); $projectionFreshness = 'unknown'; $projectionCoverage = 'not_observed'
     if ($projectionPath -and (Test-Path -LiteralPath $projectionPath -PathType Leaf)) {
         $manifest = [IO.File]::ReadAllText($projectionPath) | ConvertFrom-Json
-        $projectionItems = @($manifest.canonical | ForEach-Object { $path = [string]$_.path; $entry = if ($path -and (Test-Path -LiteralPath $path -PathType Leaf)) { $path } elseif ($path -and (Test-Path -LiteralPath (Join-Path $path 'SKILL.md'))) { Join-Path $path 'SKILL.md' } else { Join-Path $repoSupplyRoot ('{0}\SKILL.md' -f $_.name) }; Get-CapabilitySurfaceSkillMetadata $entry 'canonical_projection' 'canonical' $false })
-        $head = @(& git -C $root rev-parse HEAD 2>$null)
-        $projectionFreshness = if ($head.Count -and [string]$manifest.source_revision -eq ([string]$head[0]).Trim()) { 'fresh' } else { 'stale' }
+        $canonicalEntries = @($manifest.canonical)
+        $projectionItems = @($canonicalEntries | ForEach-Object { $path = Resolve-CapabilitySurfacePath ([string]$_.path) $root; $entry = if ($path -and (Test-Path -LiteralPath $path -PathType Leaf)) { $path } elseif ($path -and (Test-Path -LiteralPath (Join-Path $path 'SKILL.md') -PathType Leaf)) { Join-Path $path 'SKILL.md' } else { Join-Path $repoSupplyRoot ('{0}\SKILL.md' -f $_.name) }; Get-CapabilitySurfaceSkillMetadata $entry 'canonical_projection' 'canonical' $false })
+        $projectionContentMatches = $true
+        foreach ($canonicalEntry in $canonicalEntries) {
+            $path = Resolve-CapabilitySurfacePath ([string]$canonicalEntry.path) $root
+            $entry = if ($path -and (Test-Path -LiteralPath $path -PathType Leaf)) { $path } elseif ($path -and (Test-Path -LiteralPath (Join-Path $path 'SKILL.md') -PathType Leaf)) { Join-Path $path 'SKILL.md' } else { $null }
+            if ($null -eq $entry -or
+                -not [string]::Equals((Get-CapabilitySurfaceFileHash $entry), [string]$canonicalEntry.content_hash, [StringComparison]::OrdinalIgnoreCase) -or
+                -not [string]::Equals((Get-CapabilitySurfacePackageHash $entry), [string]$canonicalEntry.package_hash, [StringComparison]::OrdinalIgnoreCase)) {
+                $projectionContentMatches = $false
+                break
+            }
+        }
+        $projectionFreshness = if ($projectionContentMatches) { 'fresh' } else { 'stale' }
         $projectionCoverage = 'complete'
     }
     $surfaces.Add((New-CapabilitySurfaceRecord 'canonical_projection' 'projection_manifest' $projectionPath $projectionFreshness $projectionCoverage $projectionItems)) | Out-Null

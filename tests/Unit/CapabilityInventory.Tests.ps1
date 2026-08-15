@@ -45,4 +45,32 @@ Describe 'Read-only skill surface inventory' {
         }
         finally { if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
     }
+
+    It 'uses canonical content identity instead of unrelated Git revisions for projection freshness' {
+        $fixture = Join-Path ([IO.Path]::GetTempPath()) ('skill-surfaces-' + [guid]::NewGuid().ToString('N'))
+        $oldCodexHome = $env:CODEX_HOME
+        try {
+            $skillRoot = Join-Path $fixture 'canonical\demo'
+            $manifestPath = Join-Path $fixture 'reports\current.json'
+            $env:CODEX_HOME = Join-Path $fixture 'codex'
+            New-Item -ItemType Directory -Force -Path $skillRoot, (Split-Path $manifestPath -Parent) | Out-Null
+            $skillPath = Join-Path $skillRoot 'SKILL.md'
+            $assetPath = Join-Path $skillRoot 'asset.txt'
+            [IO.File]::WriteAllText($skillPath, "---`nname: demo`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false))
+            [IO.File]::WriteAllText($assetPath, 'asset-v1', [Text.UTF8Encoding]::new($false))
+            $manifest = [pscustomobject]@{ source_revision = ('0' * 40); canonical = @([pscustomobject]@{ name = 'demo'; path = $skillPath; content_hash = Get-CapabilitySurfaceFileHash $skillPath; package_hash = Get-CapabilitySurfacePackageHash $skillPath }) }
+            [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+            $config = [pscustomobject]@{ skill_projection = [pscustomobject]@{ manifest_path = $manifestPath; managed_source_path = 'agent'; user_skill_root = 'user'; managed_link_includes = @(); external_skill_inventory = [pscustomobject]@{ enabled = $true } }; mcp_servers = @() }
+            Mock Get-CodexPluginSkillInventory { [pscustomobject]@{ authority = 'fixture'; freshness = 'fresh'; coverage = 'complete'; skills = @(); warnings = @() } }
+            Mock Get-CodexHostObservation { [pscustomobject]@{ mcp = [pscustomobject]@{ warnings = @() }; doctor = [pscustomobject]@{ warnings = @() } } }
+
+            ((New-SkillSurfaceView -RepoRoot $fixture -Config $config).surfaces | Where-Object name -eq 'canonical_projection').freshness | Should -Be 'fresh'
+            [IO.File]::WriteAllText($assetPath, 'asset-v2', [Text.UTF8Encoding]::new($false))
+            ((New-SkillSurfaceView -RepoRoot $fixture -Config $config).surfaces | Where-Object name -eq 'canonical_projection').freshness | Should -Be 'stale'
+            [IO.File]::WriteAllText($assetPath, 'asset-v1', [Text.UTF8Encoding]::new($false))
+            [IO.File]::WriteAllText($skillPath, "---`nname: demo`ndescription: changed`n---`n", [Text.UTF8Encoding]::new($false))
+            ((New-SkillSurfaceView -RepoRoot $fixture -Config $config).surfaces | Where-Object name -eq 'canonical_projection').freshness | Should -Be 'stale'
+        }
+        finally { $env:CODEX_HOME = $oldCodexHome; if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
+    }
 }
