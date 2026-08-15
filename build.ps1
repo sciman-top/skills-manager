@@ -37,7 +37,6 @@ $Files = @(
     "Commands/Install.ps1",
     "Commands/Update.ps1",
     "Commands/Mcp.ps1",
-    "Application/McpPlanning.ps1",
     "Commands/Capability.ps1",
     "Commands/RuleAudit.ps1",
     "Commands/RuleEstate.ps1",

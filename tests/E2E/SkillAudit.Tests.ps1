@@ -49,7 +49,27 @@ BeforeAll {
             }
             input_stability = [pscustomobject]@{ matched = $true; after_dry_run = $state }
         }
-        Write-AuditJsonFile (Get-AuditWorkflowReportPath $resolved) $receipt
+        Write-AuditReceiptSection $resolved "workflow" $receipt | Out-Null
+    }
+
+    function New-E2EAuditSnapshot([string]$Path, [string]$RunId) {
+        $live = Get-AuditLiveInstalledState
+        $profile = [pscustomobject]@{
+            raw_text = "audit e2e"; summary = "audit e2e"; last_structured_at = (Get-Date).ToString("o"); structured_by = "test"
+            structured = [pscustomobject]@{ primary_work_types=@("audit"); preferred_agents=@(); tech_stack=@("powershell"); common_tasks=@("review"); constraints=@("safe"); avoidances=@(); decision_preferences=@("evidence-first") }
+        }
+        $installedState = [pscustomobject]@{
+            snapshot_kind = "audit_input"; captured_at = (Get-Date).ToString("o")
+            live_fingerprint = [string]$live.fingerprint
+            live_external_skill_fingerprint = if ($live.PSObject.Properties.Match("external_skill_fingerprint").Count -gt 0) { [string]$live.external_skill_fingerprint } else { "" }
+            live_mcp_fingerprint = if ($live.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$live.mcp_fingerprint } else { "" }
+            skills=@(); external_skills=@(); mcp_servers=@(); host_projection=$null
+        }
+        Write-AuditJsonFile $Path ([pscustomobject]@{
+            schema_version=1; run_id=$RunId; mode="target-repo"; prompt_contract_version=(Get-AuditPromptContractVersion)
+            user_profile=$profile; installed_state=$installedState; target_scans=@(); source_strategy=[pscustomobject]@{ mode="target-repo"; sources=@(); evidence_policy=$null; decision_quality_policy=$null }
+            decision_insights=[pscustomobject]@{ mode="target-repo"; keywords=[pscustomobject]@{ user_profile=@("audit"); target_repo=@("repo"); profile_only_context=@("audit"); installed_state=@("skills") } }
+        })
     }
 
 }
@@ -61,7 +81,7 @@ AfterAll {
 }
 Describe "Skill Audit E2E" {
     Context "Audit bundle" {
-        It "Emits outer AI prompt file in the audit bundle" {
+        It "Emits exactly snapshot recommendations and receipt files" {
             $root = Join-Path $TestDrive "ws-skill-audit-bundle"
             New-Item -ItemType Directory -Path $root -Force | Out-Null
             Set-AuditTestWorkspace $root
@@ -86,15 +106,16 @@ Describe "Skill Audit E2E" {
             Mock Get-InstalledSkillFacts { @() }
 
             $result = Invoke-AuditTargetsScan -Target "demo"
-            $promptPath = Join-Path $result.path "outer-ai-prompt.md"
+            @((Get-ChildItem -LiteralPath $result.path -File).Name | Sort-Object) -join ',' | Should -Be 'receipt.json,recommendations.json,snapshot.json'
+            $snapshot = Get-ContentUtf8 (Join-Path $result.path "snapshot.json") | ConvertFrom-Json
+            $recommendations = Get-ContentUtf8 (Join-Path $result.path "recommendations.json") | ConvertFrom-Json
+            $receipt = Get-ContentUtf8 (Join-Path $result.path "receipt.json") | ConvertFrom-Json
 
-            (Test-Path -LiteralPath $promptPath) | Should -Be $true
-            $prompt = Get-Content -LiteralPath $promptPath -Raw
-            $prompt | Should -Match "Required Execution Sequence"
-            $prompt | Should -Match "单目标扫描"
-            $prompt | Should -Match "repo-scan.json"
-            $prompt | Should -Match "Blocking Conditions"
-            $prompt | Should -Match "无新增建议"
+            $snapshot.run_id | Should -Be $result.run_id
+            @($snapshot.target_scans).Count | Should -Be 1
+            $recommendations.run_id | Should -Be $result.run_id
+            $receipt.scan.success | Should -Be $true
+            $receipt.persisted | Should -Be $false
         }
     }
 
@@ -191,6 +212,7 @@ Describe "Skill Audit E2E" {
                 do_not_install = @()
             }
             Set-ContentUtf8 $recommendationsPath ($recommendations | ConvertTo-Json -Depth 20)
+            New-E2EAuditSnapshot (Join-Path $root "snapshot.json") "r1"
             New-AuditValidatedWorkflowReceiptFixture $recommendationsPath
 
             Mock 构建生效 {}
@@ -200,7 +222,8 @@ Describe "Skill Audit E2E" {
             $saved = LoadCfg
 
             $report.success | Should -Be $true
-            (Test-Path (Join-Path $root "apply-report.json")) | Should -Be $true
+            (Test-Path (Join-Path $root "receipt.json")) | Should -Be $true
+            (Get-ContentUtf8 (Join-Path $root "receipt.json") | ConvertFrom-Json).apply.persisted | Should -Be $true
             $report.persisted | Should -Be $true
             $report.changed_counts.add_installed | Should -Be 1
             $report.changed_counts.remove_removed | Should -Be 1
@@ -290,6 +313,7 @@ Describe "Skill Audit E2E" {
                 )
             }
             Set-ContentUtf8 $recommendationsPath ($recommendations | ConvertTo-Json -Depth 20)
+            New-E2EAuditSnapshot (Join-Path $root "snapshot.json") "r-mcp"
             New-AuditValidatedWorkflowReceiptFixture $recommendationsPath
 
             Mock 同步MCP {}

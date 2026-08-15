@@ -25,6 +25,52 @@ BeforeAll {
         Set-ContentUtf8 $Path ('{"schema_version":2,"run_id":"' + $RunId + '","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}')
     }
 
+    function New-TestHardeningAuditSnapshot {
+        param(
+            [string]$Path,
+            [string]$RunId = "r-hardening",
+            [object[]]$Scans = @()
+        )
+        $live = Get-AuditLiveInstalledState
+        $installedState = [pscustomobject]@{
+            snapshot_kind = "audit_input"
+            captured_at = (Get-Date).ToString("o")
+            live_fingerprint = [string]$live.fingerprint
+            live_external_skill_fingerprint = if ($live.PSObject.Properties.Match("external_skill_fingerprint").Count -gt 0) { [string]$live.external_skill_fingerprint } else { "" }
+            live_mcp_fingerprint = if ($live.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$live.mcp_fingerprint } else { "" }
+            skills = @()
+            external_skills = @()
+            mcp_servers = @()
+            host_projection = if ($live.PSObject.Properties.Match("host_projection").Count -gt 0) { $live.host_projection } else { $null }
+        }
+        $profile = [pscustomobject]@{
+            raw_text = "audit hardening"
+            summary = "audit hardening"
+            last_structured_at = (Get-Date).ToString("o")
+            structured_by = "test"
+            structured = [pscustomobject]@{
+                primary_work_types = @("audit")
+                preferred_agents = @()
+                tech_stack = @("powershell")
+                common_tasks = @("review")
+                constraints = @("safe")
+                avoidances = @()
+                decision_preferences = @("evidence-first")
+            }
+        }
+        Write-AuditJsonFile $Path ([pscustomobject]@{
+            schema_version = 1
+            run_id = $RunId
+            mode = "target-repo"
+            prompt_contract_version = Get-AuditPromptContractVersion
+            user_profile = $profile
+            installed_state = $installedState
+            target_scans = @($Scans)
+            source_strategy = [pscustomobject]@{ mode="target-repo"; sources=@(); evidence_policy=$null; decision_quality_policy=$null }
+            decision_insights = [pscustomobject]@{ mode="target-repo"; keywords=[pscustomobject]@{ user_profile=@("audit"); target_repo=@("repo"); profile_only_context=@("audit"); installed_state=@("skills") } }
+        })
+    }
+
 }
 Describe "Audit target hardening" {
     It "Preserves ordered-dictionary target names in decision insights" {
@@ -54,7 +100,7 @@ Describe "Audit target hardening" {
         $runDir = Join-Path $TestDrive "target-state-run"
         New-Item -ItemType Directory -Path $runDir -Force | Out-Null
         $scan = New-AuditRepoScan "target-state" $repo $repo
-        Write-AuditJsonFile (Join-Path $runDir "repo-scan.json") $scan
+        New-TestHardeningAuditSnapshot (Join-Path $runDir "snapshot.json") "r-target-state" @($scan)
 
         $snapshot = Get-AuditTargetRepoSnapshotState $runDir
         $liveBefore = Get-AuditTargetRepoLiveState $snapshot
@@ -77,7 +123,8 @@ Describe "Audit target hardening" {
         Set-ContentUtf8 (Join-Path $repo "untracked.txt") "first untracked content"
         $runDir = Join-Path $TestDrive "same-status-content-drift-run"
         New-Item -ItemType Directory -Path $runDir -Force | Out-Null
-        Write-AuditJsonFile (Join-Path $runDir "repo-scan.json") (New-AuditRepoScan "same-status-content-drift" $repo $repo)
+        $scan = New-AuditRepoScan "same-status-content-drift" $repo $repo
+        New-TestHardeningAuditSnapshot (Join-Path $runDir "snapshot.json") "r-same-status-content-drift" @($scan)
 
         $snapshot = Get-AuditTargetRepoSnapshotState $runDir
         $liveBefore = Get-AuditTargetRepoLiveState $snapshot
@@ -99,10 +146,8 @@ Describe "Audit target hardening" {
         New-Item -ItemType Directory -Path $runDir -Force | Out-Null
         $recPath = Join-Path $runDir "recommendations.json"
         New-TestAuditRecommendation $recPath "r-preflight-target-drift"
-        Write-AuditJsonFile (Join-Path $runDir "repo-scan.json") (New-AuditRepoScan "preflight-target" $repo $repo)
-        $live = Get-AuditLiveInstalledState
-        Set-ContentUtf8 (Join-Path $runDir "installed-skills.json") ('{"schema_version":1,"skills":[],"mcp_servers":[],"live_fingerprint":"' + [string]$live.fingerprint + '","live_external_skill_fingerprint":"' + [string]$live.external_skill_fingerprint + '","live_mcp_fingerprint":"' + [string]$live.mcp_fingerprint + '"}')
-        Set-ContentUtf8 (Join-Path $runDir "audit-meta.json") ('{"schema_version":1,"run_id":"r-preflight-target-drift","mode":"target-repo","prompt_contract_version":"' + (Get-AuditPromptContractVersion) + '"}')
+        $scan = New-AuditRepoScan "preflight-target" $repo $repo
+        New-TestHardeningAuditSnapshot (Join-Path $runDir "snapshot.json") "r-preflight-target-drift" @($scan)
         Set-ContentUtf8 (Join-Path $repo "changed-after-scan.txt") "changed"
 
         $thrown = $false
@@ -114,7 +159,7 @@ Describe "Audit target hardening" {
             $_.Exception.Message | Should -Match "target_repo_drift"
         }
 
-        $report = Get-ContentUtf8 (Join-Path $runDir "preflight-report.json") | ConvertFrom-Json
+        $report = (Get-ContentUtf8 (Join-Path $runDir "receipt.json") | ConvertFrom-Json).preflight
         $thrown | Should -Be $true
         $report.success | Should -Be $false
         $report.error_code | Should -Be "target_repo_drift"
@@ -151,6 +196,7 @@ Describe "Audit target hardening" {
         New-Item -ItemType Directory -Path $runDir -Force | Out-Null
         $recPath = Join-Path $runDir "recommendations.json"
         Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-invalid","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[{"name":"routing","reason_user_profile":"u","reason_target_repo":"t","sources":["https://example.com"],"note":"invalid","routing":{"router":"missing","selection_policy":"router first","members":[{"name":"actual","role":"router"},{"name":"executor","role":"executor"}]}}],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+        New-TestHardeningAuditSnapshot (Join-Path $runDir "snapshot.json") "r-invalid"
 
         $thrown = $false
         try {
@@ -160,8 +206,8 @@ Describe "Audit target hardening" {
             $thrown = $true
         }
 
-        $reportPath = Join-Path $runDir "preflight-report.json"
-        $report = Get-ContentUtf8 $reportPath | ConvertFrom-Json
+        $reportPath = Join-Path $runDir "receipt.json"
+        $report = (Get-ContentUtf8 $reportPath | ConvertFrom-Json).preflight
         $thrown | Should -Be $true
         (Test-Path -LiteralPath $reportPath) | Should -Be $true
         $report.success | Should -Be $false
@@ -219,7 +265,7 @@ Describe "Audit target hardening" {
         New-Item -ItemType Directory -Path $runDir -Force | Out-Null
         $recPath = Join-Path $runDir "recommendations.json"
         Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-removal-blocked","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[{"name":"retired-skill","reason_user_profile":"u","reason_target_repo":"t","sources":["https://example.com"],"installed":{"vendor":"manual","from":"retired-skill"}}],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
-        Set-ContentUtf8 (Join-Path $runDir "audit-meta.json") ('{"schema_version":1,"run_id":"r-removal-blocked","mode":"target-repo","prompt_contract_version":"' + (Get-AuditPromptContractVersion) + '"}')
+        New-TestHardeningAuditSnapshot (Join-Path $runDir "snapshot.json") "r-removal-blocked"
         Mock Test-AuditRemovalDependencyClosure {
             [pscustomobject]@{
                 ok = $false
@@ -234,7 +280,7 @@ Describe "Audit target hardening" {
 
         { Invoke-AuditRecommendationsPreflight -RecommendationsPath $recPath | Out-Null } | Should -Throw
 
-        $report = Get-ContentUtf8 (Join-Path $runDir "preflight-report.json") | ConvertFrom-Json
+        $report = (Get-ContentUtf8 (Join-Path $runDir "receipt.json") | ConvertFrom-Json).preflight
         $report.success | Should -Be $false
         $report.error_code | Should -Be "removal_dependency_blocked"
         $report.removal_dependency_check.blocked[0].name | Should -Be "retired-skill"
@@ -308,7 +354,8 @@ Describe "Audit target hardening" {
         New-Item -ItemType Directory -Path $runDir -Force | Out-Null
         $recPath = Join-Path $runDir "recommendations.json"
         New-TestAuditRecommendation $recPath "r-workflow-target-drift"
-        Write-AuditJsonFile (Join-Path $runDir "repo-scan.json") (New-AuditRepoScan "workflow-target" $repo $repo)
+        $scan = New-AuditRepoScan "workflow-target" $repo $repo
+        New-TestHardeningAuditSnapshot (Join-Path $runDir "snapshot.json") "r-workflow-target-drift" @($scan)
 
         Mock Invoke-AuditRecommendationsPreflight {
             Set-ContentUtf8 (Join-Path $repo "changed-during-preflight.txt") "changed"
@@ -328,7 +375,7 @@ Describe "Audit target hardening" {
             $_.Exception.Message | Should -Match "target_repo_drift"
         }
 
-        $saved = Get-ContentUtf8 (Get-AuditWorkflowReportPath $recPath) | ConvertFrom-Json
+        $saved = (Get-ContentUtf8 (Get-AuditWorkflowReportPath $recPath) | ConvertFrom-Json).workflow
         $thrown | Should -Be $true
         $saved.failed_stage | Should -Be "input_stability"
         $saved.error_code | Should -Be "target_repo_drift"

@@ -2,13 +2,15 @@
 
 ## Boundary
 
-`references/reference-shelf.manifest.json` is the inventory source. The only owned checkout root is:
+The shelf is an optional read-only development cache. It is outside the runtime architecture and is not a prerequisite for ordinary build, test, update, projection, or closeout. `skills.json` remains the runtime source of truth.
+
+`references/reference-shelf.manifest.json` is the inventory source only for an explicitly invoked refresh or verify. The only owned checkout root is:
 
 ```text
 D:\CODE\external\skills-manager-references
 ```
 
-The repository does not own `D:\CODE\external` as a whole and never mutates sibling projects or runtime imports through reference refresh.
+The repository does not own `D:\CODE\external` as a whole and never mutates sibling projects or runtime imports through reference refresh. A missing checkout or stale shelf blocks source comparison for that task only.
 
 ## Tiers
 
@@ -25,7 +27,7 @@ pwsh -NoProfile -File .\scripts\refresh-reference-repos.ps1 -Tier secondary -Clo
 pwsh -NoProfile -File .\scripts\verify-reference-governance.ps1
 ```
 
-Before network operations, refresh verifies manifest containment, repository identity, actual `origin`, and dirty state. Default refresh updates `references/updates/reference-refresh-latest.md`; custom/tier runs create a dated runtime report without replacing the stable pointer.
+Before network operations, refresh verifies manifest containment, repository identity, actual `origin`, and dirty state. Default refresh updates `references/updates/reference-refresh-latest.md`; custom/tier runs create a dated runtime report without replacing the stable pointer. These reports are reference-workflow receipts, not product health or release gates.
 
 Clone/fetch/fast-forward only authorizes read-only comparison. It does not authorize dependency installation, script execution, skill/MCP adoption, runtime activation, host mutation, or deletion from `skills.json`.
 

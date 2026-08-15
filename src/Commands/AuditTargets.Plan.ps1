@@ -604,9 +604,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
 }
 
 function Get-AuditApplyReportPath([string]$recommendationsPath) {
-    $dir = Split-Path $recommendationsPath -Parent
-    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
-    return (Join-Path $dir "apply-report.json")
+    return (Get-AuditReceiptPath $recommendationsPath)
 }
 
 function Get-AuditItemsStatusCount($items, [string]$status) {

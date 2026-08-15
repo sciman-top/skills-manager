@@ -122,10 +122,15 @@ function New-TestDesiredState([string]$Root, [bool]$ExistingMatches = $false) {
         }
     }
 
-    It 'keeps the Application planner free of IO native environment terminal and global-state calls' {
-        $source = Get-Content -LiteralPath (Join-Path $repoRoot 'src\Application\McpPlanning.ps1') -Raw
-        $source | Should -Not -Match '(?im)^\s*(Get-Content|Set-Content|Set-ContentUtf8|Add-Content|Remove-Item|Copy-Item|Move-Item|Test-Path|Resolve-Path|SaveCfg|Write-Host|Write-Output|Invoke-Native\w*)\b'
-        $source | Should -Not -Match '(?i)\$(env|script):'
+    It 'keeps MCP planning behind the command interface without a standalone pass-through layer' {
+        $source = Get-Content -LiteralPath (Join-Path $repoRoot 'src\Commands\Mcp.ps1') -Raw
+        $buildSource = Get-Content -LiteralPath (Join-Path $repoRoot 'build.ps1') -Raw
+
+        $source | Should -Match 'function Get-McpSyncManagedTargetSpecs'
+        $source | Should -Match 'function New-McpSyncDesiredState'
+        $source | Should -Match 'function New-McpSyncOperationPlanResult'
+        Test-Path -LiteralPath (Join-Path $repoRoot 'src\Application\McpPlanning.ps1') | Should -Be $false
+        $buildSource | Should -Not -Match 'Application/McpPlanning\.ps1'
     }
 
     It 'parses MCP plan options without claiming global doctor JSON arguments' {

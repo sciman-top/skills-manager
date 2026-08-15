@@ -1,7 +1,5 @@
 function Get-AuditWorkflowReportPath([string]$recommendationsPath) {
-    $dir = Split-Path $recommendationsPath -Parent
-    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
-    return (Join-Path $dir "workflow-report.json")
+    return (Get-AuditReceiptPath $recommendationsPath)
 }
 
 function Get-AuditWorkflowInputState([string]$recommendationsPath) {
@@ -9,14 +7,7 @@ function Get-AuditWorkflowInputState([string]$recommendationsPath) {
     if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
     $inputs = @(
         [pscustomobject]@{ name = "recommendations.json"; path = $recommendationsPath },
-        [pscustomobject]@{ name = "installed-skills.json"; path = (Join-Path $dir "installed-skills.json") },
-        [pscustomobject]@{ name = "audit-meta.json"; path = (Join-Path $dir "audit-meta.json") },
-        [pscustomobject]@{ name = "outer-ai-prompt.md"; path = (Join-Path $dir "outer-ai-prompt.md") },
-        [pscustomobject]@{ name = "user-profile.json"; path = (Join-Path $dir "user-profile.json") },
-        [pscustomobject]@{ name = "source-strategy.json"; path = (Join-Path $dir "source-strategy.json") },
-        [pscustomobject]@{ name = "decision-insights.json"; path = (Join-Path $dir "decision-insights.json") },
-        [pscustomobject]@{ name = "repo-scan.json"; path = (Join-Path $dir "repo-scan.json") },
-        [pscustomobject]@{ name = "repo-scans.json"; path = (Join-Path $dir "repo-scans.json") }
+        [pscustomobject]@{ name = "snapshot.json"; path = (Join-Path $dir "snapshot.json") }
     )
     $files = @()
     $pairs = @()
@@ -114,7 +105,7 @@ function Get-AuditWorkflowErrorCode([string]$stage, [string]$message) {
 
 function Get-AuditWorkflowNextCommand([string]$errorCode, [string]$recommendationsPath) {
     if ($errorCode -eq "recommendations_missing") {
-        return ("先按同目录 outer-ai-prompt.md 生成 recommendations.json，再运行：.\skills.ps1 审查目标 校验预演 --recommendations `"{0}`" --dry-run-ack `"{1}`"" -f $recommendationsPath, (Get-AuditDryRunAckToken))
+        return ("先读取同目录 snapshot.json 并完成 recommendations.json，再运行：.\skills.ps1 审查目标 校验预演 --recommendations `"{0}`" --dry-run-ack `"{1}`"" -f $recommendationsPath, (Get-AuditDryRunAckToken))
     }
     if ($errorCode -eq "stale_snapshot" -or $errorCode -eq "prompt_contract_mismatch" -or $errorCode -eq "live_state_changed" -or $errorCode -eq "target_repo_drift") {
         return ".\skills.ps1 审查目标 扫描"
@@ -165,10 +156,7 @@ function Invoke-AuditRecommendationsValidateDryRun {
             matched = $false
         })
         reports = [pscustomobject]([ordered]@{
-            preflight = (Join-Path $recommendationDir "preflight-report.json")
-            dry_run_summary = (Get-AuditDryRunSummaryPath $resolvedRecommendations)
-            apply = (Get-AuditApplyReportPath $resolvedRecommendations)
-            workflow = $workflowPath
+            receipt = $workflowPath
         })
         changed_counts = New-AuditChangedCounts @() @()
         categories = @()
@@ -248,7 +236,7 @@ function Invoke-AuditRecommendationsValidateDryRun {
         $report.removal_candidates = @($dryRunReport.removal_candidates)
         $report.mcp_items = @($dryRunReport.mcp_items)
         $report.mcp_removal_candidates = @($dryRunReport.mcp_removal_candidates)
-        Write-AuditJsonFile $workflowPath ([pscustomobject]$report)
+        Write-AuditReceiptSection $resolvedRecommendations "workflow" ([pscustomobject]$report) | Out-Null
         Write-Host ("校验预演报告：{0}" -f $workflowPath) -ForegroundColor Cyan
         Write-Host "校验预演通过：preflight 与 dry-run 已按序完成，persisted=false。" -ForegroundColor Green
         return [pscustomobject]$report
@@ -267,7 +255,7 @@ function Invoke-AuditRecommendationsValidateDryRun {
         elseif ($currentStage -eq "dry_run") { $report.stages.dry_run.status = "failed" }
         else { $report.stages.input_stability.status = "failed" }
         if (Test-Path -LiteralPath $recommendationDir -PathType Container) {
-            Write-AuditJsonFile $workflowPath ([pscustomobject]$report)
+            Write-AuditReceiptSection $resolvedRecommendations "workflow" ([pscustomobject]$report) | Out-Null
             Write-Host ("校验预演报告：{0}" -f $workflowPath) -ForegroundColor Cyan
         }
         throw

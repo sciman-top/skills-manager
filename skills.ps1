@@ -13319,6 +13319,198 @@ function 卸载MCP([string[]]$tokens = @()) {
     同步MCP
 }
 
+function Get-McpSyncManagedTargetSpecs {
+    param(
+        $Roots = @(),
+        $CandidatePaths = @(),
+        [Parameter(Mandatory = $true)][string]$RepoRoot
+    )
+
+    $specs = New-Object System.Collections.Generic.List[object]
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $flatRoots = New-Object System.Collections.Generic.List[string]
+    foreach ($entry in @($Roots)) {
+        foreach ($value in @($entry)) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$value)) { $flatRoots.Add([string]$value) | Out-Null }
+        }
+    }
+
+    function Add-McpTargetSpec([string]$Path, [string]$Kind, [string]$Root) {
+        if ([string]::IsNullOrWhiteSpace($Path)) { return }
+        $key = Normalize-OperationPathKey $Path
+        if (-not $seen.Add($key)) { return }
+        $specs.Add([pscustomobject][ordered]@{
+                path = $Path
+                kind = $Kind
+                root = $Root
+            }) | Out-Null
+    }
+
+    foreach ($root in @($flatRoots.ToArray() | Sort-Object)) {
+        Add-McpTargetSpec (Join-Path $root '.mcp.json') 'generic_json' $root
+    }
+    foreach ($root in @($flatRoots.ToArray() | Where-Object { (Split-Path ([string]$_) -Leaf).Equals('.gemini', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)) {
+        Add-McpTargetSpec (Join-Path $root 'settings.json') 'gemini_settings' $root
+    }
+    foreach ($root in @(Resolve-GeminiAntigravityRootsFromCandidates $CandidatePaths | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object)) {
+        Add-McpTargetSpec (Join-Path $root 'settings.json') 'gemini_antigravity_settings' $root
+    }
+    foreach ($root in @($flatRoots.ToArray() | Where-Object { (Split-Path ([string]$_) -Leaf).Equals('.codex', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)) {
+        Add-McpTargetSpec (Join-Path $root 'config.toml') 'codex_toml' $root
+    }
+    $traeRoots = @($flatRoots.ToArray() | Where-Object { (Split-Path ([string]$_) -Leaf).Equals('.trae', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)
+    foreach ($root in $traeRoots) {
+        Add-McpTargetSpec (Join-Path $root 'mcp.json') 'trae_json' $root
+    }
+    if ($traeRoots.Count -gt 0) {
+        Add-McpTargetSpec (Get-TraeProjectMcpConfigPath $RepoRoot) 'trae_project_json' $RepoRoot
+    }
+
+    return @($specs.ToArray())
+}
+
+function Get-McpExistingStateValue($ExistingStates, [string]$Path) {
+    if ($null -eq $ExistingStates) {
+        return [pscustomobject]@{ exists = $false; content = '' }
+    }
+    $key = Normalize-OperationPathKey $Path
+    if ($ExistingStates -is [System.Collections.IDictionary] -and $ExistingStates.Contains($key)) {
+        return $ExistingStates[$key]
+    }
+    if ($ExistingStates -is [pscustomobject]) {
+        $property = @($ExistingStates.PSObject.Properties | Where-Object { $_.Name -eq $key } | Select-Object -First 1)
+        if ($property.Count -eq 1) { return $property[0].Value }
+    }
+    return [pscustomobject]@{ exists = $false; content = '' }
+}
+
+function New-McpSyncDesiredState {
+    param(
+        [object[]]$Specs = @(),
+        [object[]]$Servers = @(),
+        [object[]]$ActiveServers = @(),
+        [string[]]$ProfileDisabledNames = @(),
+        [string[]]$PruneNames = @(),
+        $ExistingStates = $null
+    )
+
+    $desired = New-Object System.Collections.Generic.List[object]
+    foreach ($spec in @($Specs)) {
+        $path = [string]$spec.path
+        $state = Get-McpExistingStateValue $ExistingStates $path
+        $existing = if ($null -eq $state -or $null -eq $state.content) { '' } else { [string]$state.content }
+        $content = $null
+
+        switch ([string]$spec.kind) {
+            'generic_json' {
+                $payload = Build-GenericMcpPayload $existing $ActiveServers
+                $payload = Remove-McpServersFromPayload $payload @($PruneNames + $ProfileDisabledNames)
+                $content = $payload | ConvertTo-Json -Depth 100
+            }
+            'gemini_settings' {
+                $payload = Build-GeminiSettingsPayload $existing $ActiveServers
+                $payload = Remove-McpServersFromPayload $payload $ProfileDisabledNames
+                $content = $payload | ConvertTo-Json -Depth 100
+            }
+            'gemini_antigravity_settings' {
+                $payload = Build-GeminiSettingsPayload $existing $ActiveServers
+                $payload = Remove-McpServersFromPayload $payload $ProfileDisabledNames
+                $content = $payload | ConvertTo-Json -Depth 100
+            }
+            'codex_toml' {
+                $content = Build-CodexConfigToml $existing $Servers
+            }
+            'trae_json' {
+                $payload = Build-GenericMcpPayload $existing $ActiveServers
+                $payload = Remove-McpServersFromPayload $payload $ProfileDisabledNames
+                $content = $payload | ConvertTo-Json -Depth 100
+            }
+            'trae_project_json' {
+                $payload = Build-GenericMcpPayload $existing $ActiveServers
+                $payload = Remove-McpServersFromPayload $payload $ProfileDisabledNames
+                $content = $payload | ConvertTo-Json -Depth 100
+            }
+            default { throw ('Unsupported MCP managed target kind: {0}' -f [string]$spec.kind) }
+        }
+
+        $beforeHash = if ([bool]$state.exists) { Get-OperationSha256 $existing } else { $null }
+        $desiredHash = Get-OperationSha256 ([string]$content)
+        $desired.Add([pscustomobject][ordered]@{
+                target_ref = 'mcp-target-{0}' -f (Get-OperationSha256 (Normalize-OperationPathKey $path)).Substring(0, 16)
+                path = $path
+                kind = [string]$spec.kind
+                root = [string]$spec.root
+                owner = 'skills-manager:mcp:{0}' -f [string]$spec.kind
+                existed = [bool]$state.exists
+                before_hash = $beforeHash
+                desired_hash = $desiredHash
+                changed = ($beforeHash -ne $desiredHash)
+                desired_content = [string]$content
+            }) | Out-Null
+    }
+    return @($desired.ToArray() | Sort-Object target_ref)
+}
+
+function New-McpSyncOperationPlanResult {
+    param(
+        [object[]]$DesiredState = @(),
+        [Parameter(Mandatory = $true)][string]$CreatedAt,
+        [string]$SourceRevision
+    )
+
+    $targets = New-Object System.Collections.Generic.List[object]
+    $actions = New-Object System.Collections.Generic.List[object]
+    foreach ($target in @($DesiredState)) {
+        $targets.Add([pscustomobject][ordered]@{
+                target_ref = [string]$target.target_ref
+                path = [string]$target.path
+                before_hash = $target.before_hash
+                desired_hash = [string]$target.desired_hash
+                owner = [string]$target.owner
+            }) | Out-Null
+        if ([bool]$target.changed) {
+            $verb = if ([bool]$target.existed) { 'Update' } else { 'Create' }
+            $actions.Add([pscustomobject][ordered]@{
+                    type = if ([bool]$target.existed) { 'update' } else { 'create' }
+                    target_ref = [string]$target.target_ref
+                    summary = ('{0} managed MCP target ({1})' -f $verb, [string]$target.kind)
+                    risk = 'medium'
+                    metadata = [pscustomobject]@{ target_kind = [string]$target.kind }
+                }) | Out-Null
+        }
+    }
+
+    $orderedTargets = @($targets.ToArray() | Sort-Object target_ref)
+    $orderedActions = @($actions.ToArray() | Sort-Object target_ref, type)
+    $fingerprint = Get-OperationSha256 (($orderedTargets | ConvertTo-Json -Depth 20 -Compress) + '|' + [string]$SourceRevision)
+    $plan = New-OperationPlan `
+        -OperationId ('mcp-sync-{0}' -f $fingerprint.Substring(0, 16)) `
+        -Domain 'mcp' `
+        -Mode 'dry_run' `
+        -CreatedAt $CreatedAt `
+        -SourceRevision $SourceRevision `
+        -Targets $orderedTargets `
+        -Actions $orderedActions `
+        -Preconditions @('skills.json contract valid', 'managed target roots resolved') `
+        -Verification @('repo target hashes only; host loading and live acceptance are not claimed') `
+        -Rollback @('plan mode performs no managed target or native mutation')
+
+    return [pscustomobject][ordered]@{
+        schema_version = 1
+        kind = 'mcp_sync_plan'
+        operation_plan = $plan
+        summary = [pscustomobject][ordered]@{
+            managed_target_count = @($DesiredState).Count
+            changed_target_count = @($DesiredState | Where-Object changed).Count
+            unchanged_target_count = @($DesiredState | Where-Object { -not [bool]$_.changed }).Count
+            native_mutation_planned = $false
+            profile_changed = $false
+            host_loaded = 'not_run'
+            live_accepted = 'not_run'
+        }
+    }
+}
+
 function Load-McpPlanConfigReadOnly {
     Need (Test-Path -LiteralPath $CfgPath -PathType Leaf) "缺少配置文件：$CfgPath"
     $raw = Get-ContentUtf8 $CfgPath
@@ -13594,198 +13786,6 @@ function 同步MCP {
             throw
         }
         if (@($context.servers).Count -eq 0) { Write-Host "提示：当前 mcp_servers 为空，已将各目标写为空配置。" }
-    }
-}
-
-function Get-McpSyncManagedTargetSpecs {
-    param(
-        $Roots = @(),
-        $CandidatePaths = @(),
-        [Parameter(Mandatory = $true)][string]$RepoRoot
-    )
-
-    $specs = New-Object System.Collections.Generic.List[object]
-    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-    $flatRoots = New-Object System.Collections.Generic.List[string]
-    foreach ($entry in @($Roots)) {
-        foreach ($value in @($entry)) {
-            if (-not [string]::IsNullOrWhiteSpace([string]$value)) { $flatRoots.Add([string]$value) | Out-Null }
-        }
-    }
-
-    function Add-McpTargetSpec([string]$Path, [string]$Kind, [string]$Root) {
-        if ([string]::IsNullOrWhiteSpace($Path)) { return }
-        $key = Normalize-OperationPathKey $Path
-        if (-not $seen.Add($key)) { return }
-        $specs.Add([pscustomobject][ordered]@{
-                path = $Path
-                kind = $Kind
-                root = $Root
-            }) | Out-Null
-    }
-
-    foreach ($root in @($flatRoots.ToArray() | Sort-Object)) {
-        Add-McpTargetSpec (Join-Path $root '.mcp.json') 'generic_json' $root
-    }
-    foreach ($root in @($flatRoots.ToArray() | Where-Object { (Split-Path ([string]$_) -Leaf).Equals('.gemini', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)) {
-        Add-McpTargetSpec (Join-Path $root 'settings.json') 'gemini_settings' $root
-    }
-    foreach ($root in @(Resolve-GeminiAntigravityRootsFromCandidates $CandidatePaths | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object)) {
-        Add-McpTargetSpec (Join-Path $root 'settings.json') 'gemini_antigravity_settings' $root
-    }
-    foreach ($root in @($flatRoots.ToArray() | Where-Object { (Split-Path ([string]$_) -Leaf).Equals('.codex', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)) {
-        Add-McpTargetSpec (Join-Path $root 'config.toml') 'codex_toml' $root
-    }
-    $traeRoots = @($flatRoots.ToArray() | Where-Object { (Split-Path ([string]$_) -Leaf).Equals('.trae', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)
-    foreach ($root in $traeRoots) {
-        Add-McpTargetSpec (Join-Path $root 'mcp.json') 'trae_json' $root
-    }
-    if ($traeRoots.Count -gt 0) {
-        Add-McpTargetSpec (Get-TraeProjectMcpConfigPath $RepoRoot) 'trae_project_json' $RepoRoot
-    }
-
-    return @($specs.ToArray())
-}
-
-function Get-McpExistingStateValue($ExistingStates, [string]$Path) {
-    if ($null -eq $ExistingStates) {
-        return [pscustomobject]@{ exists = $false; content = '' }
-    }
-    $key = Normalize-OperationPathKey $Path
-    if ($ExistingStates -is [System.Collections.IDictionary] -and $ExistingStates.Contains($key)) {
-        return $ExistingStates[$key]
-    }
-    if ($ExistingStates -is [pscustomobject]) {
-        $property = @($ExistingStates.PSObject.Properties | Where-Object { $_.Name -eq $key } | Select-Object -First 1)
-        if ($property.Count -eq 1) { return $property[0].Value }
-    }
-    return [pscustomobject]@{ exists = $false; content = '' }
-}
-
-function New-McpSyncDesiredState {
-    param(
-        [object[]]$Specs = @(),
-        [object[]]$Servers = @(),
-        [object[]]$ActiveServers = @(),
-        [string[]]$ProfileDisabledNames = @(),
-        [string[]]$PruneNames = @(),
-        $ExistingStates = $null
-    )
-
-    $desired = New-Object System.Collections.Generic.List[object]
-    foreach ($spec in @($Specs)) {
-        $path = [string]$spec.path
-        $state = Get-McpExistingStateValue $ExistingStates $path
-        $existing = if ($null -eq $state -or $null -eq $state.content) { '' } else { [string]$state.content }
-        $content = $null
-
-        switch ([string]$spec.kind) {
-            'generic_json' {
-                $payload = Build-GenericMcpPayload $existing $ActiveServers
-                $payload = Remove-McpServersFromPayload $payload @($PruneNames + $ProfileDisabledNames)
-                $content = $payload | ConvertTo-Json -Depth 100
-            }
-            'gemini_settings' {
-                $payload = Build-GeminiSettingsPayload $existing $ActiveServers
-                $payload = Remove-McpServersFromPayload $payload $ProfileDisabledNames
-                $content = $payload | ConvertTo-Json -Depth 100
-            }
-            'gemini_antigravity_settings' {
-                $payload = Build-GeminiSettingsPayload $existing $ActiveServers
-                $payload = Remove-McpServersFromPayload $payload $ProfileDisabledNames
-                $content = $payload | ConvertTo-Json -Depth 100
-            }
-            'codex_toml' {
-                $content = Build-CodexConfigToml $existing $Servers
-            }
-            'trae_json' {
-                $payload = Build-GenericMcpPayload $existing $ActiveServers
-                $payload = Remove-McpServersFromPayload $payload $ProfileDisabledNames
-                $content = $payload | ConvertTo-Json -Depth 100
-            }
-            'trae_project_json' {
-                $payload = Build-GenericMcpPayload $existing $ActiveServers
-                $payload = Remove-McpServersFromPayload $payload $ProfileDisabledNames
-                $content = $payload | ConvertTo-Json -Depth 100
-            }
-            default { throw ('Unsupported MCP managed target kind: {0}' -f [string]$spec.kind) }
-        }
-
-        $beforeHash = if ([bool]$state.exists) { Get-OperationSha256 $existing } else { $null }
-        $desiredHash = Get-OperationSha256 ([string]$content)
-        $desired.Add([pscustomobject][ordered]@{
-                target_ref = 'mcp-target-{0}' -f (Get-OperationSha256 (Normalize-OperationPathKey $path)).Substring(0, 16)
-                path = $path
-                kind = [string]$spec.kind
-                root = [string]$spec.root
-                owner = 'skills-manager:mcp:{0}' -f [string]$spec.kind
-                existed = [bool]$state.exists
-                before_hash = $beforeHash
-                desired_hash = $desiredHash
-                changed = ($beforeHash -ne $desiredHash)
-                desired_content = [string]$content
-            }) | Out-Null
-    }
-    return @($desired.ToArray() | Sort-Object target_ref)
-}
-
-function New-McpSyncOperationPlanResult {
-    param(
-        [object[]]$DesiredState = @(),
-        [Parameter(Mandatory = $true)][string]$CreatedAt,
-        [string]$SourceRevision
-    )
-
-    $targets = New-Object System.Collections.Generic.List[object]
-    $actions = New-Object System.Collections.Generic.List[object]
-    foreach ($target in @($DesiredState)) {
-        $targets.Add([pscustomobject][ordered]@{
-                target_ref = [string]$target.target_ref
-                path = [string]$target.path
-                before_hash = $target.before_hash
-                desired_hash = [string]$target.desired_hash
-                owner = [string]$target.owner
-            }) | Out-Null
-        if ([bool]$target.changed) {
-            $verb = if ([bool]$target.existed) { 'Update' } else { 'Create' }
-            $actions.Add([pscustomobject][ordered]@{
-                    type = if ([bool]$target.existed) { 'update' } else { 'create' }
-                    target_ref = [string]$target.target_ref
-                    summary = ('{0} managed MCP target ({1})' -f $verb, [string]$target.kind)
-                    risk = 'medium'
-                    metadata = [pscustomobject]@{ target_kind = [string]$target.kind }
-                }) | Out-Null
-        }
-    }
-
-    $orderedTargets = @($targets.ToArray() | Sort-Object target_ref)
-    $orderedActions = @($actions.ToArray() | Sort-Object target_ref, type)
-    $fingerprint = Get-OperationSha256 (($orderedTargets | ConvertTo-Json -Depth 20 -Compress) + '|' + [string]$SourceRevision)
-    $plan = New-OperationPlan `
-        -OperationId ('mcp-sync-{0}' -f $fingerprint.Substring(0, 16)) `
-        -Domain 'mcp' `
-        -Mode 'dry_run' `
-        -CreatedAt $CreatedAt `
-        -SourceRevision $SourceRevision `
-        -Targets $orderedTargets `
-        -Actions $orderedActions `
-        -Preconditions @('skills.json contract valid', 'managed target roots resolved') `
-        -Verification @('repo target hashes only; host loading and live acceptance are not claimed') `
-        -Rollback @('plan mode performs no managed target or native mutation')
-
-    return [pscustomobject][ordered]@{
-        schema_version = 1
-        kind = 'mcp_sync_plan'
-        operation_plan = $plan
-        summary = [pscustomobject][ordered]@{
-            managed_target_count = @($DesiredState).Count
-            changed_target_count = @($DesiredState | Where-Object changed).Count
-            unchanged_target_count = @($DesiredState | Where-Object { -not [bool]$_.changed }).Count
-            native_mutation_planned = $false
-            profile_changed = $false
-            host_loaded = 'not_run'
-            live_accepted = 'not_run'
-        }
     }
 }
 
@@ -14196,61 +14196,18 @@ function Get-AuditOuterAiPromptOverridePath {
 
 function Get-DefaultAuditOuterAiPrompt {
     return @"
-# Outer AI Audit Prompt (Short / Codex + Claude)
+# Audit Recommendations Workflow
 
-目标：基于当前审查包生成可预检的 recommendations.json；预检通过后只执行 dry-run。未经明确确认，不得 apply。
+目标：基于一个当前 run 的 ``snapshot.json`` 完成 ``recommendations.json``，再执行预检与 dry-run；未经明确确认不得 apply。
 
-0) 写入边界
-- 只允许写/更新 ``reports/skill-audit/<run-id>/recommendations.json``；画像缺失时可写 ``reports/skill-audit/user-profile.structured.json``。
-- 不得修改 ``outer-ai-prompt.md``、``ai-brief.md``、``user-profile.json``、``installed-skills.json``、``source-strategy.json``、``decision-insights.json``、``recommendations.template.json``、``repo-scan.json`` / ``repo-scans.json``。
-- 不得把 dry-run 建议描述成已安装、已卸载或已落盘。
-
-1) run-id
-- 如果当前提示词已列出审查包目录和文件路径，以该运行包为准。
-- ``<run-id>`` 只用于命令路径占位；写 recommendations 前必须已有扫描/发现运行包，执行预检或 dry-run 前必须已写出 recommendations.json。
-- 路径中的 ``<run-id>`` 指审查包目录名；若 audit-meta.json 内部 run_id 不同，不要把两者混用，命令路径必须继续使用目录名。
-- 若无可用运行包：立即停止并报告：先执行 ``.\skills.ps1 审查目标 扫描`` 或 ``.\skills.ps1 审查目标 发现新技能``。
-
-2) 画像预检查（只在本轮输入显示画像不完整时执行）
-- 检查 ``reports/skill-audit/user-profile.json.summary`` 是否非空；或检查 ``reports/skill-audit/user-profile.structured.json`` 中 ``summary`` 非空且 ``structured`` 完整。
-- 若 summary 为空或 structured 不完整：补全 ``reports/skill-audit/user-profile.structured.json``（schema 不变，summary 非空，structured_by="outer-ai"），然后执行：
-  ``.\skills.ps1 审查目标 需求结构化 --profile "reports\skill-audit\user-profile.structured.json"``
-- 导入后复查；失败最多重试 1 次，再失败立即停止。
-
-3) 只读输入（必须真实读取）
-- outer-ai-prompt.md、ai-brief.md、user-profile.json、installed-skills.json（仅输入快照；skills 为受管技能，external_skills 为只读 system/plugin 能力）、source-strategy.json、decision-insights.json、recommendations.template.json
-- repo-scan.json / repo-scans.json：存在才读；N/A/profile-only 不得臆造仓库事实。
-- source-strategy.json 中的 evidence_policy / decision_quality_policy 是硬约束；decision-insights.json 是 keyword_trace 的可选关键词来源。
-- 不得复用旧 run 的 recommendations.json、旧提示词或聊天记忆作为本轮结论；旧内容只能作为待核线索，最终必须回到本轮输入和本轮来源。
-
-4) 产出 recommendations.json
-- 路径：``reports/skill-audit/<run-id>/recommendations.json``
-- ``schema_version=2``；不得保留 ``<...>``；``decision_basis.summary`` 非空
-- 每条新增/卸载（skills/MCP）必须有：``reason_user_profile``、``reason_target_repo``、``sources``（仅本轮真实来源）
-- 每条新增/卸载（skills/MCP）建议必须有匹配的 ``source_observations``；若策略要求，``sources`` 数量、http 来源和 observation 必须达标
-- 每条新增/卸载（skills/MCP）建议应包含 ``keyword_trace.user_profile`` / ``keyword_trace.target_repo_or_context`` / ``keyword_trace.installed_state``（与 decision-insights 对齐）
-- 每条变更建议都要说明相对 installed-skills.json / mcp_servers 的非重复增量价值，或给出具体卸载理由；重复、泛化、证据弱则留空或放入 ``do_not_install``
-- MCP server/env 不得包含明文 token/password/key；需要凭据时只写环境变量名或占位说明，并用 sources / source_observations 说明依据
-- MCP 新增写 ``mcp_new_servers`` 且 ``name==server.name``；MCP 卸载写 ``mcp_removal_candidates``
-- ``overlap_findings`` 仅报告；宿主原生选择用 ``routing.decision_owner=host_ai / selection_policy / members(name,role)``，只有真实 skill fallback 才写 ``fallback_router``；旧 ``routing.router`` 继续兼容；``external_skills`` 不得写成可自动卸载项；``do_not_install`` 仅记录当前不应安装项；证据不足留空
-- 若四类新增/卸载建议均为空，可输出有效 no-op；no-op 不强制网络搜索，``source_observations=[]`` 合法，但必须在 ``decision_basis.summary`` 或 ``empty_recommendation_reasons`` 中说明本地覆盖依据。
-
-5) 自检、预检、dry-run
-- 自检：JSON/schema/双理由/sources/source_observations/keyword_trace/无占位符/无重复建议
-- 预检：
-  ``.\skills.ps1 审查目标 预检 --recommendations "reports\skill-audit\<run-id>\recommendations.json"``
-- 若预检失败（如 stale_snapshot、prompt_contract_mismatch、insufficient_source_coverage、insufficient_decision_quality、user_profile_invalid、removal_dependency_blocked），停止并报告阻断项；删除项须先清理报告给出的精确反向引用，不要绕过。
-- dry-run：
-  ``.\skills.ps1 审查目标 应用 --recommendations "reports\skill-audit\<run-id>\recommendations.json" --dry-run-ack "我知道未落盘"``
-- 自检、预检或 dry-run 失败即停止并报告阻断项
-
-6) 汇报格式（按 dry-run 原序号，不重排）
-- 新增建议 / 卸载建议 / MCP 新增建议 / MCP 卸载建议
-- 每项：序号、名称、reason_user_profile、reason_target_repo、sources
-- 空类必须写“无该类建议”，并给 1 句原因
-- 最后明确状态：recommendations 已写出；预检通过/失败；dry-run 通过/失败；apply 未执行（除非用户已明确确认）
-
-安全约束：未收到明确确认，不执行 ``--apply --yes``；不得把建议写成已生效。
+1. 只读 ``reports/skill-audit/<run-id>/snapshot.json``。它聚合用户画像、已安装技能/MCP、目标仓扫描、来源策略、决策关键词与 prompt contract；不得修改。
+2. 只编辑同目录 ``recommendations.json``：保持 schema v2，删除全部 ``<...>`` 示例占位符；每条新增/卸载建议必须有双理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。
+3. 不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。证据不足时保留空类别或 ``do_not_install``，不要强行推荐。
+4. 执行：
+   ``.\skills.ps1 审查目标 预检 --recommendations "reports\skill-audit\<run-id>\recommendations.json"``
+5. 预检通过后执行：
+   ``.\skills.ps1 审查目标 校验预演 --recommendations "reports\skill-audit\<run-id>\recommendations.json" --dry-run-ack "我知道未落盘"``
+6. 从 ``receipt.json`` 汇报四类结果、``persisted=false`` 与 truth boundary；任一失败即停止。只有用户明确授权后才可执行 ``--apply --yes``。
 "@
 }
 
@@ -14843,7 +14800,7 @@ function Get-AuditRunId {
 }
 
 function Get-AuditPromptContractVersion {
-    return "audit-prompt-v20260810.1"
+    return "audit-prompt-v20260815.1"
 }
 
 function Get-AuditReportRoot([string]$runId) {
@@ -14899,9 +14856,8 @@ function Get-AuditRunCandidateBuckets([string[]]$RequiredFiles = @()) {
             continue
         }
 
-        $snapshotPath = Join-Path $dir.FullName "installed-skills.json"
-        $metaPath = Join-Path $dir.FullName "audit-meta.json"
-        $canCheckStale = (Test-Path -LiteralPath $snapshotPath -PathType Leaf) -and (Test-Path -LiteralPath $metaPath -PathType Leaf)
+        $snapshotPath = Join-Path $dir.FullName "snapshot.json"
+        $canCheckStale = Test-Path -LiteralPath $snapshotPath -PathType Leaf
         if (-not $canCheckStale) {
             $result.unknown.Add([string]$dir.Name) | Out-Null
             continue
@@ -14937,11 +14893,11 @@ function Get-AuditRunCandidateBuckets([string[]]$RequiredFiles = @()) {
         }
 
         try {
-            $metaRaw = Get-ContentUtf8 $metaPath
-            if (-not [string]::IsNullOrWhiteSpace($metaRaw)) {
-                $meta = $metaRaw | ConvertFrom-Json
-                if ($meta.PSObject.Properties.Match("prompt_contract_version").Count -gt 0) {
-                    $runPromptVersion = ([string]$meta.prompt_contract_version).Trim()
+            $snapshotRaw = Get-ContentUtf8 $snapshotPath
+            if (-not [string]::IsNullOrWhiteSpace($snapshotRaw)) {
+                $snapshot = $snapshotRaw | ConvertFrom-Json
+                if ($snapshot.PSObject.Properties.Match("prompt_contract_version").Count -gt 0) {
+                    $runPromptVersion = ([string]$snapshot.prompt_contract_version).Trim()
                     if (-not [string]::IsNullOrWhiteSpace($runPromptVersion) -and [string]$runPromptVersion -ne [string]$currentPromptVersion) {
                         $isStale = $true
                     }
@@ -15948,344 +15904,62 @@ function Write-AuditJsonFile([string]$path, $data) {
     Set-ContentUtf8 $path ($data | ConvertTo-Json -Depth 40)
 }
 
-function Write-AuditAiBrief([string]$path, $scanData, [string]$userProfilePath, [string]$repoScanPath, [string]$repoScansPath, [string]$installedSkillsPath, [string]$templatePath, [string]$Mode = "target-repo", [string]$Query = "", [string]$SourceStrategyPath = "", [string]$DecisionInsightsPath = "") {
-    $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
-    $targetNames = @($scanData | ForEach-Object { $_.target.name })
-    if ([string]::IsNullOrWhiteSpace($repoScanPath)) { $repoScanPath = "N/A" }
-    if ([string]::IsNullOrWhiteSpace($repoScansPath)) { $repoScansPath = "N/A" }
-    if ([string]::IsNullOrWhiteSpace($SourceStrategyPath)) { $SourceStrategyPath = "N/A" }
-    if ([string]::IsNullOrWhiteSpace($DecisionInsightsPath)) { $DecisionInsightsPath = "N/A" }
-    $recommendationsPath = Join-Path (Split-Path $path -Parent) "recommendations.json"
-
-    if ($normalizedMode -eq "profile-only") {
-        $queryText = if ([string]::IsNullOrWhiteSpace($Query)) { "N/A" } else { $Query }
-        $content = @"
-# Skill Audit Brief
-
-Run ID: $(Split-Path (Split-Path $path -Parent) -Leaf)
-Mode: profile-only skill discovery
-Targets: N/A
-Discovery query: $queryText
-
-Use the generated user profile JSON, installed-skills snapshot JSON, and source strategy JSON to decide:
-
-- Which installed skills should be kept for the user's long-term workflow.
-- Which installed skills should be proposed for removal because they no longer fit.
-- Which installed MCP servers should be kept or removed.
-- Which missing skills are strongly justified without binding the decision to a target repository.
-- Which missing MCP servers are strongly justified without binding the decision to a target repository.
-
-External research is intentionally performed by the outer AI agent. Search official documentation, MCP provider documentation, security/permission notes, strong community projects, best practices, https://skills.sh/, GitHub Trending, and the find-skills workflow.
-
-Primary output file (must be valid JSON, no prose):
-
-$templatePath
-
-Scan inputs:
-- Single-target scan JSON: N/A
-- Multi-target scans JSON: N/A
-- Source strategy JSON: $SourceStrategyPath
-- Decision insights JSON: $DecisionInsightsPath
-
-Rules:
-
-- Profile-only mode has no target repo scan; do not fabricate repository facts.
-- Only write ``recommendations.json`` in this run directory. Do not modify generated input files, snapshots, prompts, briefs, templates, source strategy, decision insights, or repo scan files.
-- The audit commands may automatically write runtime evidence such as ``preflight-report.json``, ``dry-run-summary.json``, ``apply-report.json``, and ``runtime-evidence-*.md`` in this run directory; treat those as expected command outputs, not files for the outer AI agent to hand-edit.
-- All decisions must be based on user-profile.json, installed-skills.json (audit snapshot, not live source of truth), source-strategy.json, and real external research. Treat ``skills`` as managed install/removal candidates and ``external_skills`` as read-only system/plugin capability context.
-- decision-insights.json provides machine-readable keyword anchors; every add/remove skill or MCP recommendation should keep ``keyword_trace.user_profile`` + ``keyword_trace.target_repo_or_context`` + ``keyword_trace.installed_state`` aligned to it.
-- Treat source-strategy.json ``evidence_policy`` and ``decision_quality_policy`` as hard constraints.
-- Use ``reason_target_repo`` to explain the current installed-skill inventory / profile-only context; do not claim target repository evidence.
-- If any required local input is missing, unreadable, or empty, stop and report the blocker instead of guessing.
-- Network research is authorized within this audit workflow, but installation still requires --apply --yes.
-- Replace every template placeholder wrapped in `<...>` or delete the example entry entirely; do not leave placeholder values in the final file.
-- Keep ``recommendation_mode`` as ``profile-only``.
-- Keep ``decision_basis.user_profile_used`` and ``decision_basis.source_strategy_used`` as boolean ``true``; keep ``decision_basis.target_scan_used`` as boolean ``false``; provide a non-empty ``decision_basis.summary``.
-- Record ``source_observations`` for researched candidates; every selected skill/MCP add/remove recommendation must have a matching observation with real sources and matching candidate_type/name/decision.
-- Every selected recommendation must provide a concrete incremental benefit over the installed snapshot, or a specific removal rationale; omit generic, duplicate, or weakly sourced items.
-- Skill installs require ``reason_user_profile``, ``reason_target_repo``, source links, confidence, repo, skill path, ref, and mode.
-- Skill removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and the exact installed ``vendor``/``from`` pair.
-- MCP installs must include ``reason_user_profile``, ``reason_target_repo``, sources, confidence, a valid ``server`` payload, and provider/security evidence when available.
-- MCP removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and ``installed.name``.
-- For removals, copy exact installed identifiers from installed-skills.json; do not normalize or guess vendor/from/name.
-- Never include plaintext tokens, passwords, API keys, or private credentials in MCP server payloads; use environment variable names/placeholders only when source-backed.
-- Skill ``install.mode`` must stay ``manual`` or ``vendor``; ``confidence`` must stay ``low``, ``medium``, or ``high``.
-- MCP ``server.transport`` must stay ``stdio``/``sse``/``http``; ``stdio`` requires ``command``; ``sse/http`` requires ``url``.
-- Each add/remove recommendation must keep both reasons concise and user-readable.
-- If either reason field is missing on any recommendation, treat the run as incomplete and stop before dry-run summary.
-- Overlap findings are report-only; include structured router/member roles when overlap exists, and do not recommend automatic uninstall of external system/plugin skills.
-- Use ``do_not_install`` for researched options that should stay out of the repo right now.
-- Prefer high-reputation sources and avoid weak duplicate skills.
-- Cover the built-in default sources and record the actual sources you used; GitHub Trending is discovery evidence only, never sufficient by itself.
-- Keep recommendations machine-readable JSON matching the template.
-- The template already includes placeholder example items. Replace placeholder values or delete the example entries you do not need; do not invent a different schema.
-- Cite only sources you actually inspected during this run. Do not fabricate source links, source observations, or source conclusions.
-- If evidence is insufficient, leave the category empty and explain briefly instead of forcing low-quality recommendations.
-- If all add/remove categories are empty, a no-op recommendation is valid without network research; ``source_observations=[]`` is allowed when there are no selected add/remove items and the local coverage basis is explained.
-- After dry-run, show numbered skill add/remove and MCP add/remove lists with one-line reasons per item (``reason_user_profile`` + ``reason_target_repo``).
-- After dry-run, report commands run plus the explicit state: recommendations written, preflight passed/failed, dry-run passed/failed, apply not run unless explicitly confirmed.
-- If a list is empty, explicitly output "no <category> recommendations" with a brief reason.
-- Keep dry-run numbering stable; do not renumber or reorder indexes in the user-facing summary.
-
-Pre-dry-run self-check:
-
-- recommendations.json parses as JSON and keeps ``schema_version = 2``.
-- ``recommendation_mode`` is ``profile-only``.
-- ``decision_basis.user_profile_used`` and ``decision_basis.source_strategy_used`` are ``true``.
-- ``decision_basis.target_scan_used`` is ``false``.
-- No remaining placeholder values wrapped in `<...>`.
-- Each skill/MCP add/remove item has both reasons plus at least one real source.
-- Each selected skill/MCP add/remove item has a matching ``source_observations`` entry with real sources.
-- Each skill/MCP add/remove item keeps non-empty ``keyword_trace`` arrays (user_profile / target_repo_or_context / installed_state).
-- Each selected recommendation has non-duplicative incremental value over installed-skills.json / mcp_servers, or a specific removal rationale.
-- No MCP server payload contains plaintext credentials.
-- No duplicate skill add/remove or MCP add/remove recommendations remain in the final file.
-- Stop before dry-run if any self-check item fails.
-
-Execution order:
-
-1) Read all local inputs
-2) Write ``recommendations.json`` from ``recommendations.template.json`` to ``$recommendationsPath``
-3) Run the self-check and stop if any item fails
-4) Execute preflight: ``.\skills.ps1 审查目标 预检 --recommendations "$recommendationsPath"``
-5) Execute dry-run
-6) Summarize dry-run with original indexes and one-line dual-reason entries
-7) Wait for explicit user confirmation before apply
-
-User-facing dry-run summary format:
-
-- add: ``[index] <skill-name> | user: <reason_user_profile> | context: <reason_target_repo>``
-- remove: ``[index] <skill-name> | user: <reason_user_profile> | context: <reason_target_repo>``
-- mcp-add: ``[index] <mcp-name> | user: <reason_user_profile> | context: <reason_target_repo>``
-- mcp-remove: ``[index] <mcp-name> | user: <reason_user_profile> | context: <reason_target_repo>``
-- empty category: ``no add recommendations: <brief reason>`` / ``no removal recommendations: <brief reason>`` / ``no mcp-add recommendations: <brief reason>`` / ``no mcp-remove recommendations: <brief reason>``
-
-User profile JSON: $userProfilePath
-Installed skills JSON: $installedSkillsPath
-Source strategy JSON: $SourceStrategyPath
-Decision insights JSON: $DecisionInsightsPath
-"@
-        Set-ContentUtf8 $path $content
-        return
-    }
-
-    $content = @"
-# Skill Audit Brief
-
-Run ID: $(Split-Path (Split-Path $path -Parent) -Leaf)
-Targets: $($targetNames -join ", ")
-
-Use the generated user profile JSON, repo scan JSON, and installed-skills snapshot JSON to decide:
-
-- Which installed skills should be kept for each target repository.
-- Which installed skills should be proposed for removal.
-- Which installed MCP servers should be kept for each target repository.
-- Which installed MCP servers should be proposed for removal.
-- Which missing skills are strongly justified for these targets.
-- Which missing MCP servers are strongly justified for these targets.
-
-External research is intentionally performed by the outer AI agent. Search official documentation, MCP provider documentation, security/permission notes, strong community projects, best practices, https://skills.sh/, GitHub Trending, and the find-skills workflow.
-
-Primary output file (must be valid JSON, no prose):
-
-$templatePath
-
-Scan inputs:
-- Single-target scan JSON: $repoScanPath
-- Multi-target scans JSON: $repoScansPath
-- Source strategy JSON: $SourceStrategyPath
-- Decision insights JSON: $DecisionInsightsPath
-
-Rules:
-
-- All decisions must be based on BOTH user-profile.json and target repo scan facts, and must use installed-skills.json as the audit snapshot for currently installed skills and MCP servers. Treat ``skills`` as managed install/removal candidates and ``external_skills`` as read-only system/plugin capability context.
-- Only write ``recommendations.json`` in this run directory. Do not modify generated input files, snapshots, prompts, briefs, templates, source strategy, decision insights, or repo scan files.
-- The audit commands may automatically write runtime evidence such as ``preflight-report.json``, ``dry-run-summary.json``, ``apply-report.json``, and ``runtime-evidence-*.md`` in this run directory; treat those as expected command outputs, not files for the outer AI agent to hand-edit.
-- Use source-strategy.json to cover the built-in source set and explain source tradeoffs.
-- decision-insights.json provides machine-readable keyword anchors; every add/remove skill or MCP recommendation should keep ``keyword_trace.user_profile`` + ``keyword_trace.target_repo_or_context`` + ``keyword_trace.installed_state`` aligned to it.
-- Treat source-strategy.json ``evidence_policy`` and ``decision_quality_policy`` as hard constraints.
-- Treat any scan path shown as ``N/A`` as "not provided"; do not infer hidden content from it.
-- If any required local input is missing, unreadable, or empty, stop and report the blocker instead of guessing.
-- Network research is authorized within this audit workflow, but installation still requires --apply --yes.
-- Replace every template placeholder wrapped in `<...>` or delete the example entry entirely; do not leave placeholder values in the final file.
-- Keep ``decision_basis.user_profile_used``, ``decision_basis.target_scan_used``, and ``decision_basis.source_strategy_used`` as boolean ``true``, and provide a non-empty ``decision_basis.summary``.
-- Record ``source_observations`` for researched candidates; every selected skill/MCP add/remove recommendation must have a matching observation with real sources and matching candidate_type/name/decision.
-- Every selected recommendation must provide a concrete incremental benefit over the installed snapshot, or a specific removal rationale; omit generic, duplicate, or weakly sourced items.
-- Skill installs require ``reason_user_profile``, ``reason_target_repo``, source links, confidence, repo, skill path, ref, and mode.
-- Skill removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and the exact installed ``vendor``/``from`` pair.
-- MCP installs must include ``reason_user_profile``, ``reason_target_repo``, sources, confidence, a valid ``server`` payload, and provider/security evidence when available.
-- MCP removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and ``installed.name``.
-- For removals, copy exact installed identifiers from installed-skills.json; do not normalize or guess vendor/from/name.
-- Never include plaintext tokens, passwords, API keys, or private credentials in MCP server payloads; use environment variable names/placeholders only when source-backed.
-- Skill ``install.mode`` must stay ``manual`` or ``vendor``; ``confidence`` must stay ``low``, ``medium``, or ``high``.
-- MCP ``server.transport`` must stay ``stdio``/``sse``/``http``; ``stdio`` requires ``command``; ``sse/http`` requires ``url``.
-- Each add/remove recommendation must keep both reasons concise and user-readable.
-- If either reason field is missing on any recommendation, treat the run as incomplete and stop before dry-run summary.
-- Overlap findings are report-only; include structured router/member roles when overlap exists, and do not recommend automatic uninstall of external system/plugin skills.
-- Use ``do_not_install`` for researched options that should stay out of the repo right now.
-- Prefer high-reputation sources and avoid weak duplicate skills.
-- Cover the built-in default sources and record the actual sources you used; GitHub Trending is discovery evidence only, never sufficient by itself.
-- Keep recommendations machine-readable JSON matching the template.
-- The template already includes placeholder example items. Replace placeholder values or delete the example entries you do not need; do not invent a different schema.
-- Cite only sources you actually inspected during this run. Do not fabricate repository facts, source links, source observations, or source conclusions.
-- If evidence is insufficient, leave the category empty and explain briefly instead of forcing low-quality recommendations.
-- If all add/remove categories are empty, a no-op recommendation is valid without network research; ``source_observations=[]`` is allowed when there are no selected add/remove items and the local coverage basis is explained.
-- After dry-run, show numbered skill add/remove and MCP add/remove lists with one-line reasons per item (``reason_user_profile`` + ``reason_target_repo``).
-- After dry-run, report commands run plus the explicit state: recommendations written, preflight passed/failed, dry-run passed/failed, apply not run unless explicitly confirmed.
-- If a list is empty, explicitly output "no <category> recommendations" with a brief reason.
-- Keep dry-run numbering stable; do not renumber or reorder indexes in the user-facing summary.
-
-Pre-dry-run self-check:
-
-- recommendations.json parses as JSON and keeps ``schema_version = 2``.
-- ``decision_basis`` keeps all required boolean flags at ``true``.
-- ``decision_basis.summary`` is non-empty.
-- No remaining placeholder values wrapped in `<...>`.
-- Each skill/MCP add/remove item has both reasons plus at least one real source.
-- Each selected skill/MCP add/remove item has a matching ``source_observations`` entry with real sources.
-- Each skill/MCP add/remove item keeps non-empty ``keyword_trace`` arrays (user_profile / target_repo_or_context / installed_state).
-- Each MCP add item keeps ``name == server.name``.
-- Each selected recommendation has non-duplicative incremental value over installed-skills.json / mcp_servers, or a specific removal rationale.
-- No MCP server payload contains plaintext credentials.
-- No duplicate skill add/remove or MCP add/remove recommendations remain in the final file.
-- Stop before dry-run if any self-check item fails.
-
-Execution order:
-
-1) Read all local inputs
-2) Write ``recommendations.json`` from ``recommendations.template.json`` to ``$recommendationsPath``
-3) Run the self-check and stop if any item fails
-4) Execute preflight: ``.\skills.ps1 审查目标 预检 --recommendations "$recommendationsPath"``
-5) Execute dry-run
-6) Summarize dry-run with original indexes and one-line dual-reason entries
-7) Wait for explicit user confirmation before apply
-
-User-facing dry-run summary format:
-
-- add: ``[index] <skill-name> | user: <reason_user_profile> | repo: <reason_target_repo>``
-- remove: ``[index] <skill-name> | user: <reason_user_profile> | repo: <reason_target_repo>``
-- mcp-add: ``[index] <mcp-name> | user: <reason_user_profile> | repo: <reason_target_repo>``
-- mcp-remove: ``[index] <mcp-name> | user: <reason_user_profile> | repo: <reason_target_repo>``
-- empty category: `no add recommendations: <brief reason>` / `no removal recommendations: <brief reason>` / `no mcp-add recommendations: <brief reason>` / `no mcp-remove recommendations: <brief reason>`
-
-User profile JSON: $userProfilePath
-Installed skills JSON: $installedSkillsPath
-Source strategy JSON: $SourceStrategyPath
-Decision insights JSON: $DecisionInsightsPath
-"@
-    Set-ContentUtf8 $path $content
+function Get-AuditSnapshotPath([string]$recommendationsPath) {
+    $dir = Split-Path $recommendationsPath -Parent
+    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
+    return (Join-Path $dir "snapshot.json")
 }
 
-function Write-AuditOuterAiPromptFile([string]$path, [string]$reportRoot, [string]$briefPath, [string]$userProfilePath, [string]$repoScanPath, [string]$repoScansPath, [string]$installedSkillsPath, [string]$templatePath, [string]$Mode = "target-repo", [string]$Query = "", [string]$SourceStrategyPath = "", [string]$DecisionInsightsPath = "") {
-    $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
-    if ([string]::IsNullOrWhiteSpace($repoScanPath)) { $repoScanPath = "N/A" }
-    if ([string]::IsNullOrWhiteSpace($repoScansPath)) { $repoScansPath = "N/A" }
-    if ([string]::IsNullOrWhiteSpace($SourceStrategyPath)) { $SourceStrategyPath = "N/A" }
-    if ([string]::IsNullOrWhiteSpace($DecisionInsightsPath)) { $DecisionInsightsPath = "N/A" }
-    $queryText = if ([string]::IsNullOrWhiteSpace($Query)) { "N/A" } else { $Query }
-    $inputReadStep = if ($normalizedMode -eq "profile-only") {
-        "1. 阅读 ai-brief.md、user-profile.json、installed-skills.json、source-strategy.json、decision-insights.json；repo-scan 输入为 N/A 时代表本轮不绑定目标仓；这些文件只能读，不能改。"
-    }
-    else {
-        "1. 阅读 ai-brief.md、user-profile.json、installed-skills.json，并按存在文件读取 repo-scan.json / repo-scans.json，同时读取 source-strategy.json 与 decision-insights.json；这些文件只能读，不能改。"
-    }
-    $basisCheckStep = if ($normalizedMode -eq "profile-only") {
-        "   - recommendations.json 与模板字段同构，``recommendation_mode = profile-only``，``decision_basis.user_profile_used`` / ``decision_basis.source_strategy_used`` 为 ``true``，``decision_basis.target_scan_used`` 为 ``false``，且 ``decision_basis.summary`` 非空"
-    }
-    else {
-        "   - recommendations.json 与模板字段同构，``decision_basis`` 三个布尔字段都为 ``true``，且 ``decision_basis.summary`` 非空"
-    }
-    $modeBlocking = if ($normalizedMode -eq "profile-only") {
-        '- 本轮是 profile-only；不得编造目标仓事实，``reason_target_repo`` 必须解释当前已安装技能 / profile-only 场景依据'
-    }
-    else {
-        "- 若 ``repo-scan.json`` / ``repo-scans.json`` 路径显示为 ``N/A``，表示该输入未提供，不可臆造其内容"
-    }
-    $content = @"
-$(Get-AuditOuterAiPromptContent)
-
----
-
-## Current Audit Run Files
-
-- 审查包目录：$reportRoot
-- 审查包目录名 run-id：$(Split-Path $reportRoot -Leaf)
-- audit-meta.json 内部 run_id 可作为元数据参考；命令路径和 ``<run-id>`` 占位符解析以审查包目录名为准
-- Prompt-Contract-Version: $(Get-AuditPromptContractVersion)
-- 模式：$normalizedMode
-- 发现查询：$queryText
-- 任务说明：$briefPath
-- 用户画像：$userProfilePath
-- 单目标扫描：$repoScanPath
-- 多目标扫描：$repoScansPath
-- 已安装技能与 MCP：$installedSkillsPath
-- 来源策略：$SourceStrategyPath
-- 决策洞察：$DecisionInsightsPath
-- 推荐模板：$templatePath
-
-## Required Execution Sequence
-
-$inputReadStep
-2. 按 recommendations.template.json schema v2 写出 recommendations.json
-3. 先做自检（全部通过后再 dry-run）：
-   - recommendations.json 可解析为 JSON，且 ``schema_version = 2``
-$basisCheckStep
-   - 不保留模板占位符 ``<...>`` 或未替换的示例值
-   - 每条技能/MCP 新增或卸载建议都包含 ``reason_user_profile`` + ``reason_target_repo`` + 至少 1 个真实 ``sources``
-   - 每条技能/MCP 新增或卸载建议都有匹配的 ``source_observations`` 记录，且 observation 也包含真实 ``sources``
-   - 每条技能/MCP 新增或卸载建议都包含非空 ``keyword_trace.user_profile`` / ``keyword_trace.target_repo_or_context`` / ``keyword_trace.installed_state``
-   - 每条被选中的建议都能说明相对 installed-skills.json / mcp_servers 的非重复增量价值，或给出具体卸载理由
-   - MCP server payload 不得包含明文 token/password/key；需要凭据时只能写安全的环境变量名或占位说明
-   - 技能新增建议的 ``install.mode`` 只能是 ``manual`` 或 ``vendor``，``confidence`` 只能是 ``low`` / ``medium`` / ``high``
-   - MCP 新增建议必须包含合法 ``server``（``transport``=``stdio``/``sse``/``http``；``stdio`` 要有 ``command``，``sse/http`` 要有 ``url``），且 ``name`` 必须等于 ``server.name``
-   - 不得保留重复的技能新增/卸载建议或重复的 MCP 新增/卸载建议
-4. 执行预检；失败即停止，不得绕过：
-   .\skills.ps1 审查目标 预检 --recommendations "$([System.IO.Path]::Combine($reportRoot, 'recommendations.json'))"
-5. 执行 dry-run：
-   .\skills.ps1 审查目标 应用 --recommendations "$([System.IO.Path]::Combine($reportRoot, 'recommendations.json'))" --dry-run-ack "我知道未落盘"
-6. 根据 dry-run 结果，向用户列出“技能新增/卸载建议 + MCP 新增/卸载建议”及序号
-7. 等待用户确认后，再执行：
-   .\skills.ps1 审查目标 应用 --recommendations "$([System.IO.Path]::Combine($reportRoot, 'recommendations.json'))" --apply --yes
-
-## Output Contract
-
-- ``recommendations.json`` 必须与模板 schema 一致
-- 除 ``recommendations.json`` 外，不得修改本轮审查包输入文件、快照、提示词、brief、模板、来源策略、决策洞察或 repo scan
-- 预检、dry-run、apply 命令在本轮审查包目录自动生成的 ``preflight-report.json``、``dry-run-summary.json``、``apply-report.json`` 和 ``runtime-evidence-*.md`` 属于预期运行证据输出；外层 AI 不应手写或手改这些文件
-- 技能与 MCP 的新增/卸载建议都必须保留双依据和来源，且每项理由要简短可读
-- 每条变更建议必须能解释相对已安装技能/MCP 快照的非重复增量价值，或给出可验证的卸载理由
-- ``source_observations`` 必须记录本轮调研过的候选项；被选中的新增/卸载项必须能在其中找到对应 candidate_type/name/decision；若四类新增/卸载建议均为空，允许 ``source_observations=[]``，但必须说明 no-op 的本地覆盖依据
-- 若 ``source-strategy.decision_quality_policy`` 开启，``keyword_trace`` 必须满足最小命中与关键词归属校验
-- 若任一建议缺少 ``reason_user_profile`` 或 ``reason_target_repo``，视为未完成，不得进入下一步
-- 若证据不足，允许不推荐；不得“猜测式”新增/卸载
-- 目标仓模式下，新增/卸载技能或 MCP 的判断必须同时参考用户画像、目标仓事实、已安装技能/MCP 快照、来源策略
-- MCP server payload 不得写入明文凭据；需要凭据时只能使用安全的环境变量名或占位说明，并且必须有来源依据
-- ``overlap_findings`` 仅用于报告重叠，``do_not_install`` 用于记录“已研究但当前不应安装”的技能或 MCP
-- ``sources`` 只能填写本轮真实查看过的来源；不得伪造仓库事实或来源结论
-- MCP 新增建议里 ``name`` 与 ``server.name`` 必须一致；任一类别不得出现重复建议
-- 如果你继续执行 dry-run，请在总结里按 dry-run 原序号列出“技能新增/卸载建议 + MCP 新增/卸载建议”
-- 每条建议必须同时展示两条简短理由（用户需求 + 目标仓/场景）
-- 某一类为空时，必须显式写“无该类建议”并给 1 句简短原因
-- 最后明确执行状态：recommendations 已写出；preflight 通过/失败；dry-run 通过/失败；apply 未执行（除非用户已明确确认）
-- 未经用户明确确认，不得执行 --apply --yes
-
-## Blocking Conditions
-
-- 任一必需输入文件缺失、为空或不可读时，立即停止并汇报阻断项
-$modeBlocking
-- 若自检或预检失败、仍有 ``<...>`` 占位符、或来源并非本轮真实查看结果，必须先修正再继续
-
-## User Summary Format
-
-- 新增建议：``[序号] <skill-name> | 用户需求：<reason_user_profile> | 目标仓/场景：<reason_target_repo>``
-- 卸载建议：``[序号] <skill-name> | 用户需求：<reason_user_profile> | 目标仓/场景：<reason_target_repo>``
-- MCP 新增建议：``[序号] <mcp-name> | 用户需求：<reason_user_profile> | 目标仓/场景：<reason_target_repo>``
-- MCP 卸载建议：``[序号] <mcp-name> | 用户需求：<reason_user_profile> | 目标仓/场景：<reason_target_repo>``
-- 空列表：``无新增建议：<简短原因>`` / ``无卸载建议：<简短原因>`` / ``无 MCP 新增建议：<简短原因>`` / ``无 MCP 卸载建议：<简短原因>``
-"@
-    Set-ContentUtf8 $path $content
+function Get-AuditReceiptPath([string]$recommendationsPath) {
+    $dir = Split-Path $recommendationsPath -Parent
+    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
+    return (Join-Path $dir "receipt.json")
 }
 
+function Read-AuditSnapshot([string]$recommendationDir) {
+    if ([string]::IsNullOrWhiteSpace($recommendationDir)) { $recommendationDir = "." }
+    $path = Join-Path $recommendationDir "snapshot.json"
+    Need (Test-Path -LiteralPath $path -PathType Leaf) ("缺少 snapshot.json：{0}" -f $path)
+    try { $snapshot = Get-ContentUtf8 $path | ConvertFrom-Json }
+    catch { throw ("snapshot.json 解析失败：{0}" -f $_.Exception.Message) }
+    Need ($null -ne $snapshot -and [int]$snapshot.schema_version -eq 1) ("snapshot.json schema_version 无效：{0}" -f $path)
+    return $snapshot
+}
+
+function Write-AuditReceiptSection([string]$recommendationsPath, [string]$section, $data) {
+    $path = Get-AuditReceiptPath $recommendationsPath
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        try { $receipt = Get-ContentUtf8 $path | ConvertFrom-Json }
+        catch { throw ("receipt.json 解析失败：{0}" -f $_.Exception.Message) }
+    }
+    else {
+        $receipt = [pscustomobject]([ordered]@{
+            schema_version = 1
+            run_id = Split-Path (Split-Path $recommendationsPath -Parent) -Leaf
+            mode = "audit"
+            created_at = (Get-Date).ToString("o")
+            updated_at = $null
+            success = $false
+            persisted = $false
+            truth_boundary = "receipt_created_not_applied"
+        })
+    }
+    if ($receipt.PSObject.Properties.Match($section).Count -eq 0) {
+        $receipt | Add-Member -NotePropertyName $section -NotePropertyValue $data
+    }
+    else { $receipt.$section = $data }
+    $receipt | Add-Member -NotePropertyName updated_at -NotePropertyValue ((Get-Date).ToString("o")) -Force
+    if ($null -ne $data) {
+        if ($data.PSObject.Properties.Match("run_id").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$data.run_id)) { $receipt | Add-Member -NotePropertyName run_id -NotePropertyValue ([string]$data.run_id) -Force }
+        if ($data.PSObject.Properties.Match("mode").Count -gt 0) { $receipt | Add-Member -NotePropertyName mode -NotePropertyValue ([string]$data.mode) -Force }
+        if ($data.PSObject.Properties.Match("success").Count -gt 0) { $receipt | Add-Member -NotePropertyName success -NotePropertyValue ([bool]$data.success) -Force }
+        if ($data.PSObject.Properties.Match("persisted").Count -gt 0) { $receipt | Add-Member -NotePropertyName persisted -NotePropertyValue ([bool]$data.persisted) -Force }
+    }
+    $truthBoundary = if ([bool]$receipt.persisted) { "filesystem_changes_persisted_not_host_loaded" } elseif ($section -eq "scan") { "repo_snapshot_created_not_reviewed_not_applied" } else { "repo_verified_not_applied" }
+    $receipt | Add-Member -NotePropertyName truth_boundary -NotePropertyValue $truthBoundary -Force
+    Write-AuditJsonFile $path $receipt
+    return $path
+}
 
 
 function Get-AuditSourceStrategyOverridePath {
@@ -16474,7 +16148,7 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
                 "Every add/remove recommendation must cite sources inspected in this run.",
                 "Do not fabricate repository facts, source links, or source conclusions.",
                 "Record source_observations for researched candidates so selected, rejected, and removed items remain auditable.",
-                "Every change recommendation should include keyword_trace (user_profile / target_repo_or_context / installed_state) and keep these values aligned with decision-insights.json.",
+                "Every change recommendation should include keyword_trace (user_profile / target_repo_or_context / installed_state) and keep these values aligned with snapshot.json decision_insights.",
                 "For MCP recommendations, prefer provider documentation and security/permission notes over popularity signals.",
                 "For profile-only mode, explain reason_target_repo as installed-skill inventory / profile-only context, not as a target repository claim."
             )
@@ -16517,67 +16191,27 @@ function Assert-AuditBundleFileContent([string]$path, [string]$label) {
     Need ($null -ne $data) ("审查包 JSON 为空对象：{0} -> {1}" -f $label, $path)
 
     switch ($label) {
-        "user-profile.json" {
-            Need (Test-AuditJsonProperty $data "raw_text") ("user-profile 缺少 raw_text：{0}" -f $path)
-            Need (-not [string]::IsNullOrWhiteSpace([string]$data.raw_text)) ("user-profile.raw_text 不能为空：{0}" -f $path)
-            Need (Test-AuditJsonProperty $data "summary") ("user-profile 缺少 summary：{0}" -f $path)
-            Need (-not [string]::IsNullOrWhiteSpace([string]$data.summary)) ("user-profile.summary 不能为空：{0}" -f $path)
-            Need (Test-AuditJsonProperty $data "structured") ("user-profile 缺少 structured：{0}" -f $path)
-            Need (Test-AuditStructuredProfileComplete $data.structured) ("user-profile.structured 不完整：{0}" -f $path)
-            Need (Test-AuditJsonProperty $data "last_structured_at") ("user-profile 缺少 last_structured_at：{0}" -f $path)
-            Need (Test-AuditTimestampString ([string]$data.last_structured_at)) ("user-profile.last_structured_at 无效：{0}" -f $path)
-        }
-        "installed-skills.json" {
-            Need (Test-AuditJsonProperty $data "skills") ("installed-skills 缺少 skills：{0}" -f $path)
-            Need (Assert-IsArray $data.skills) ("installed-skills.skills 必须为数组：{0}" -f $path)
-            if (Test-AuditJsonProperty $data "external_skills") {
-                Need (Assert-IsArray $data.external_skills) ("installed-skills.external_skills 必须为数组：{0}" -f $path)
+        "snapshot.json" {
+            Need ([int]$data.schema_version -eq 1) ("snapshot schema_version 必须为 1：{0}" -f $path)
+            foreach ($field in @("run_id", "mode", "prompt_contract_version", "user_profile", "installed_state", "target_scans", "source_strategy", "decision_insights")) {
+                Need (Test-AuditJsonProperty $data $field) ("snapshot 缺少 {0}：{1}" -f $field, $path)
             }
-            if (Test-AuditJsonProperty $data "mcp_servers") {
-                Need (Assert-IsArray $data.mcp_servers) ("installed-skills.mcp_servers 必须为数组：{0}" -f $path)
-            }
-            if (Test-AuditJsonProperty $data "snapshot_kind") {
-                Need ([string]$data.snapshot_kind -eq "audit_input") ("installed-skills.snapshot_kind 必须为 audit_input：{0}" -f $path)
-            }
+            Need (Assert-IsArray $data.target_scans) ("snapshot.target_scans 必须为数组：{0}" -f $path)
+            Need (Test-AuditJsonProperty $data.installed_state "skills") ("snapshot.installed_state 缺少 skills：{0}" -f $path)
+            Need (Assert-IsArray $data.installed_state.skills) ("snapshot.installed_state.skills 必须为数组：{0}" -f $path)
+            Need (Assert-IsArray $data.installed_state.external_skills) ("snapshot.installed_state.external_skills 必须为数组：{0}" -f $path)
+            Need (Assert-IsArray $data.installed_state.mcp_servers) ("snapshot.installed_state.mcp_servers 必须为数组：{0}" -f $path)
+            Need (-not [string]::IsNullOrWhiteSpace([string]$data.user_profile.summary)) ("snapshot.user_profile.summary 不能为空：{0}" -f $path)
+            Need (Test-AuditStructuredProfileComplete $data.user_profile.structured) ("snapshot.user_profile.structured 不完整：{0}" -f $path)
         }
-        "source-strategy.json" {
-            Need (Test-AuditJsonProperty $data "mode") ("source-strategy 缺少 mode：{0}" -f $path)
-            Need (Test-AuditJsonProperty $data "sources") ("source-strategy 缺少 sources：{0}" -f $path)
-            Need (Assert-IsArray $data.sources) ("source-strategy.sources 必须为数组：{0}" -f $path)
-            Need (@($data.sources).Count -gt 0) ("source-strategy.sources 不能为空：{0}" -f $path)
-            if (Test-AuditJsonProperty $data "evidence_policy" -and $null -ne $data.evidence_policy) {
-                Need (Test-AuditJsonProperty $data.evidence_policy "min_unique_sources_for_changes") ("source-strategy.evidence_policy 缺少 min_unique_sources_for_changes：{0}" -f $path)
-                Need ([int]$data.evidence_policy.min_unique_sources_for_changes -ge 1) ("source-strategy.evidence_policy.min_unique_sources_for_changes 必须 >= 1：{0}" -f $path)
-            }
-            if (Test-AuditJsonProperty $data "decision_quality_policy" -and $null -ne $data.decision_quality_policy) {
-                Need (Test-AuditJsonProperty $data.decision_quality_policy "require_keyword_trace_for_changes") ("source-strategy.decision_quality_policy 缺少 require_keyword_trace_for_changes：{0}" -f $path)
-                Need (Test-AuditJsonProperty $data.decision_quality_policy "require_keyword_trace_membership") ("source-strategy.decision_quality_policy 缺少 require_keyword_trace_membership：{0}" -f $path)
-                Need (Test-AuditJsonProperty $data.decision_quality_policy "min_user_profile_keywords_per_change") ("source-strategy.decision_quality_policy 缺少 min_user_profile_keywords_per_change：{0}" -f $path)
-                Need (Test-AuditJsonProperty $data.decision_quality_policy "min_target_repo_keywords_per_change") ("source-strategy.decision_quality_policy 缺少 min_target_repo_keywords_per_change：{0}" -f $path)
-                Need (Test-AuditJsonProperty $data.decision_quality_policy "min_installed_state_keywords_per_change") ("source-strategy.decision_quality_policy 缺少 min_installed_state_keywords_per_change：{0}" -f $path)
-            }
+        "recommendations.json" {
+            Need ([int]$data.schema_version -eq 2) ("recommendations schema_version 必须为 2：{0}" -f $path)
+            Need (Test-AuditJsonProperty $data "decision_basis") ("recommendations 缺少 decision_basis：{0}" -f $path)
         }
-        "recommendations.template.json" {
-            Need (Test-AuditJsonProperty $data "schema_version") ("recommendations.template 缺少 schema_version：{0}" -f $path)
-            Need ([int]$data.schema_version -eq 2) ("recommendations.template schema_version 必须为 2：{0}" -f $path)
-            Need (Test-AuditJsonProperty $data "decision_basis") ("recommendations.template 缺少 decision_basis：{0}" -f $path)
-        }
-        "repo-scan.json" {
-            Need (Test-AuditJsonProperty $data "target") ("repo-scan 缺少 target：{0}" -f $path)
-            Need (Test-AuditJsonProperty $data "detected") ("repo-scan 缺少 detected：{0}" -f $path)
-        }
-        "repo-scans.json" {
-            Need (Test-AuditJsonProperty $data "scans") ("repo-scans 缺少 scans：{0}" -f $path)
-            Need (Assert-IsArray $data.scans) ("repo-scans.scans 必须为数组：{0}" -f $path)
-            Need (@($data.scans).Count -gt 0) ("repo-scans.scans 不能为空：{0}" -f $path)
-        }
-        "decision-insights.json" {
-            Need (Test-AuditJsonProperty $data "mode") ("decision-insights 缺少 mode：{0}" -f $path)
-            Need (Test-AuditJsonProperty $data "keywords") ("decision-insights 缺少 keywords：{0}" -f $path)
-            Need (Test-AuditJsonProperty $data.keywords "user_profile") ("decision-insights.keywords 缺少 user_profile：{0}" -f $path)
-            Need (Test-AuditJsonProperty $data.keywords "installed_state") ("decision-insights.keywords 缺少 installed_state：{0}" -f $path)
-            Need (Assert-IsArray $data.keywords.user_profile) ("decision-insights.keywords.user_profile 必须为数组：{0}" -f $path)
-            Need (Assert-IsArray $data.keywords.installed_state) ("decision-insights.keywords.installed_state 必须为数组：{0}" -f $path)
+        "receipt.json" {
+            Need ([int]$data.schema_version -eq 1) ("receipt schema_version 必须为 1：{0}" -f $path)
+            Need (Test-AuditJsonProperty $data "persisted") ("receipt 缺少 persisted：{0}" -f $path)
+            Need (Test-AuditJsonProperty $data "truth_boundary") ("receipt 缺少 truth_boundary：{0}" -f $path)
         }
     }
 }
@@ -16604,7 +16238,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
             "Replace placeholder values wrapped in <> before using this file.",
             "Delete example entries that are not needed, but keep the schema shape unchanged.",
             "Record source_observations for every researched candidate; selected add/remove candidates must have matching observations.",
-            "For every add/remove skill or MCP recommendation, keep keyword_trace aligned with decision-insights.json.",
+            "For every add/remove skill or MCP recommendation, keep keyword_trace aligned with snapshot.json decision_insights.",
             "This is profile-only skill discovery: reason_target_repo means installed-skill inventory / profile-only context, not target repository facts."
         )
     }
@@ -16613,7 +16247,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
             "Replace placeholder values wrapped in <> before using this file.",
             "Delete example entries that are not needed, but keep the schema shape unchanged.",
             "Record source_observations for every researched candidate; selected add/remove candidates must have matching observations.",
-            "For every add/remove skill or MCP recommendation, keep keyword_trace aligned with decision-insights.json.",
+            "For every add/remove skill or MCP recommendation, keep keyword_trace aligned with snapshot.json decision_insights.",
             "All install/remove decisions must cite both user-profile and target-repo reasons."
         )
     }
@@ -17141,27 +16775,29 @@ function New-AuditInstalledFactsFallbackCfg {
 }
 
 function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
-    Need (-not [string]::IsNullOrWhiteSpace($snapshotPath)) "installed-skills 快照路径不能为空"
-    Need (Test-Path -LiteralPath $snapshotPath -PathType Leaf) ("缺少 installed-skills 快照：{0}" -f $snapshotPath)
+    Need (-not [string]::IsNullOrWhiteSpace($snapshotPath)) "snapshot 路径不能为空"
+    Need (Test-Path -LiteralPath $snapshotPath -PathType Leaf) ("缺少 snapshot.json：{0}" -f $snapshotPath)
     try {
         $raw = Get-ContentUtf8 $snapshotPath
-        Need (-not [string]::IsNullOrWhiteSpace($raw)) ("installed-skills 快照为空：{0}" -f $snapshotPath)
+        Need (-not [string]::IsNullOrWhiteSpace($raw)) ("snapshot.json 为空：{0}" -f $snapshotPath)
         $data = $raw | ConvertFrom-Json
     }
     catch {
-        throw ("installed-skills 快照解析失败：{0}" -f $_.Exception.Message)
+        throw ("snapshot.json 解析失败：{0}" -f $_.Exception.Message)
     }
-    Need (Test-AuditJsonProperty $data "skills") ("installed-skills 快照缺少 skills：{0}" -f $snapshotPath)
-    Need (Assert-IsArray $data.skills) ("installed-skills.skills 必须为数组：{0}" -f $snapshotPath)
+    Need (Test-AuditJsonProperty $data "installed_state") ("snapshot.json 缺少 installed_state：{0}" -f $snapshotPath)
+    $data = $data.installed_state
+    Need (Test-AuditJsonProperty $data "skills") ("snapshot.installed_state 缺少 skills：{0}" -f $snapshotPath)
+    Need (Assert-IsArray $data.skills) ("snapshot.installed_state.skills 必须为数组：{0}" -f $snapshotPath)
     $skills = @($data.skills)
     $externalSkills = @()
     if (Test-AuditJsonProperty $data 'external_skills' -and $null -ne $data.external_skills) {
-        Need (Assert-IsArray $data.external_skills) ("installed-skills.external_skills 必须为数组：{0}" -f $snapshotPath)
+        Need (Assert-IsArray $data.external_skills) ("snapshot.installed_state.external_skills 必须为数组：{0}" -f $snapshotPath)
         $externalSkills = @($data.external_skills)
     }
     $mcpServers = @()
     if (Test-AuditJsonProperty $data "mcp_servers" -and $null -ne $data.mcp_servers) {
-        Need (Assert-IsArray $data.mcp_servers) ("installed-skills.mcp_servers 必须为数组：{0}" -f $snapshotPath)
+        Need (Assert-IsArray $data.mcp_servers) ("snapshot.installed_state.mcp_servers 必须为数组：{0}" -f $snapshotPath)
         $mcpServers = @($data.mcp_servers)
     }
     $fingerprint = ""
@@ -17204,21 +16840,6 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
     })
 }
 
-function New-AuditInstalledSnapshotFallbackState($liveState, [string]$snapshotPath) {
-    return [pscustomobject]([ordered]@{
-        path = $snapshotPath
-        snapshot_kind = "legacy_live_fallback"
-        captured_at = [string]$liveState.captured_at
-        skill_count = [int]$liveState.skill_count
-        fingerprint = [string]$liveState.fingerprint
-        external_skill_count = if ($liveState.PSObject.Properties.Match('external_skill_count').Count -gt 0) { [int]$liveState.external_skill_count } else { 0 }
-        external_skill_fingerprint = if ($liveState.PSObject.Properties.Match('external_skill_fingerprint').Count -gt 0) { [string]$liveState.external_skill_fingerprint } else { '' }
-        mcp_server_count = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
-        mcp_fingerprint = if ($liveState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$liveState.mcp_fingerprint } else { "" }
-        host_projection = if ($liveState.PSObject.Properties.Match('host_projection').Count -gt 0) { $liveState.host_projection } else { $null }
-    })
-}
-
 function Get-AuditInstalledSnapshotStaleness($snapshotState, $liveState) {
     $skillStale = ([string]$snapshotState.fingerprint -ne [string]$liveState.fingerprint)
     $mcpStale = $false
@@ -17232,9 +16853,8 @@ function Get-AuditInstalledSnapshotStaleness($snapshotState, $liveState) {
     $hostStale = $false
     if ($snapshotState.PSObject.Properties.Match('host_projection').Count -gt 0 -and $null -ne $snapshotState.host_projection -and $liveState.PSObject.Properties.Match('host_projection').Count -gt 0) {
         $snapshotHost = $snapshotState.host_projection; $liveHost = $liveState.host_projection
-        $isLiveFallback = [string]$snapshotState.snapshot_kind -eq 'legacy_live_fallback'
         if ([string]$snapshotHost.status -eq 'available' -and [string]$liveHost.status -eq 'available') {
-            $hostStale = ([string]$snapshotHost.fingerprint -ne [string]$liveHost.fingerprint -or (-not $isLiveFallback -and ([int]$liveHost.stale_count -gt 0 -or [int]$liveHost.broken_count -gt 0)))
+            $hostStale = ([string]$snapshotHost.fingerprint -ne [string]$liveHost.fingerprint -or [int]$liveHost.stale_count -gt 0 -or [int]$liveHost.broken_count -gt 0)
         }
     }
     return [pscustomobject]([ordered]@{
@@ -17248,17 +16868,8 @@ function Get-AuditInstalledSnapshotStaleness($snapshotState, $liveState) {
 
 function Get-AuditTargetRepoScans([string]$recommendationDir) {
     if ([string]::IsNullOrWhiteSpace($recommendationDir)) { $recommendationDir = "." }
-    $singlePath = Join-Path $recommendationDir "repo-scan.json"
-    if (Test-Path -LiteralPath $singlePath -PathType Leaf) {
-        try { return @((Get-ContentUtf8 $singlePath | ConvertFrom-Json)) }
-        catch { throw ("repo-scan JSON 解析失败：{0}" -f $_.Exception.Message) }
-    }
-
-    $multiPath = Join-Path $recommendationDir "repo-scans.json"
-    if (-not (Test-Path -LiteralPath $multiPath -PathType Leaf)) { return @() }
-    try { $bundle = Get-ContentUtf8 $multiPath | ConvertFrom-Json }
-    catch { throw ("repo-scans JSON 解析失败：{0}" -f $_.Exception.Message) }
-    $scans = Get-CfgObjectProperty $bundle "scans"
+    $snapshot = Read-AuditSnapshot $recommendationDir
+    $scans = Get-CfgObjectProperty $snapshot "target_scans"
     if ($null -eq $scans) { return @() }
     return @($scans)
 }
@@ -17308,7 +16919,7 @@ function Get-AuditTargetRepoSnapshotState([string]$recommendationDir) {
             })
     }
     return [pscustomobject]([ordered]@{
-            captured_from = "repo_scan"
+            captured_from = "snapshot.json"
             target_count = @($targets).Count
             fingerprint = Get-AuditTargetRepoStateFingerprint $targets
             targets = @($targets)
@@ -17998,9 +17609,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
 }
 
 function Get-AuditApplyReportPath([string]$recommendationsPath) {
-    $dir = Split-Path $recommendationsPath -Parent
-    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
-    return (Join-Path $dir "apply-report.json")
+    return (Get-AuditReceiptPath $recommendationsPath)
 }
 
 function Get-AuditItemsStatusCount($items, [string]$status) {
@@ -18227,50 +17836,130 @@ function Ensure-AuditNewManualImportsMapped($beforeCfg) {
     return $changed
 }
 
-function Write-AuditBundleEvidence([string]$mode, [string]$runId, [string]$reportRoot, [string[]]$targets, [string[]]$commands = @()) {
+function New-AuditInstalledStateSnapshot([string]$context) {
     try {
-        $date = Get-Date -Format "yyyyMMdd"
-        $time = Get-Date -Format "HHmmss"
-        # Runtime receipts stay beside the ignored audit bundle.
-        $dir = $reportRoot
-        EnsureDir $dir
-        $safeMode = if ([string]::IsNullOrWhiteSpace($mode)) { "scan" } else { ([regex]::Replace($mode.ToLowerInvariant(), "[^a-z0-9_-]", "-")) }
-        $safeRun = if ([string]::IsNullOrWhiteSpace($runId)) { "no-runid" } else { ([regex]::Replace($runId, "[^a-zA-Z0-9_-]", "-")) }
-        $path = Join-Path $dir ("runtime-evidence-{0}-{1}-{2}-{3}.md" -f $date, $safeMode, $safeRun, $time)
-        $commandText = if (@($commands).Count -gt 0) { (@($commands) | ForEach-Object { "- `"$_`"" }) -join "`r`n" } else { "- 无" }
-        $targetText = if (@($targets).Count -gt 0) { (@($targets) | ForEach-Object { "- " + [string]$_ }) -join "`r`n" } else { "- 无" }
-        $content = @"
-# Audit Runtime Evidence
-
-- mode: $mode
-- run_id: $runId
-- report_root: $reportRoot
-- timestamp: $(Get-Date -Format "o")
-
-## Commands
-$commandText
-
-## Targets
-$targetText
-
-## Rollback
-- 删除本次生成目录：`"$reportRoot`"
-"@
-        Set-ContentUtf8 $path $content
-        return $path
+        try { $liveCfg = LoadCfg }
+        catch {
+            Log ("{0}读取 skills.json 失败，已回退为空安装快照：{1}" -f $context, $_.Exception.Message) "WARN"
+            $liveCfg = New-AuditInstalledFactsFallbackCfg
+        }
+        $installedSkills = @(Get-InstalledSkillFacts $liveCfg)
+        $externalSkills = @(Get-AuditExternalSkillFacts $liveCfg)
+        $installedMcpServers = @(Get-AuditMcpServerFacts $liveCfg)
+        $liveState = Get-AuditLiveInstalledState $liveCfg
+        return [pscustomobject]([ordered]@{
+            snapshot_kind = "audit_input"
+            source_of_truth = "live_mappings"
+            captured_at = (Get-Date).ToString("o")
+            live_skill_count = [int]$liveState.skill_count
+            live_fingerprint = [string]$liveState.fingerprint
+            live_external_skill_count = if ($liveState.PSObject.Properties.Match('external_skill_count').Count -gt 0) { [int]$liveState.external_skill_count } else { 0 }
+            live_external_skill_fingerprint = if ($liveState.PSObject.Properties.Match('external_skill_fingerprint').Count -gt 0) { [string]$liveState.external_skill_fingerprint } else { '' }
+            live_mcp_server_count = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
+            live_mcp_fingerprint = if ($liveState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$liveState.mcp_fingerprint } else { "" }
+            host_projection = if ($liveState.PSObject.Properties.Match('host_projection').Count -gt 0) { $liveState.host_projection } else { $null }
+            skills = @($installedSkills)
+            external_skills = @($externalSkills)
+            mcp_servers = @($installedMcpServers)
+        })
     }
-    catch {
-        Log ("写入审查包证据失败：{0}" -f $_.Exception.Message) "WARN"
-        return ""
+    catch { throw ("生成安装状态快照失败：{0}" -f $_.Exception.Message) }
+}
+
+function Write-AuditThreeFileBundle {
+    param(
+        [string]$ReportRoot,
+        [string]$RunId,
+        [string]$Mode,
+        [string]$Query,
+        $Config,
+        [object[]]$Scans
+    )
+    $installedState = New-AuditInstalledStateSnapshot $(if ($Mode -eq "profile-only") { "新技能发现" } else { "审查包生成时" })
+    $sourceStrategy = New-AuditSourceStrategy $Mode $Query
+    $decisionInsights = New-AuditDecisionInsights $Config $Scans @($installedState.skills + $installedState.external_skills) $installedState.mcp_servers $Mode
+    $target = if (@($Scans).Count -eq 1) { [string]$Scans[0].target.name } elseif ($Mode -eq "profile-only") { "profile-only" } else { "*" }
+    $snapshotPath = Join-Path $ReportRoot "snapshot.json"
+    $recommendationsPath = Join-Path $ReportRoot "recommendations.json"
+    $receiptPath = Join-Path $ReportRoot "receipt.json"
+    $snapshot = [pscustomobject]([ordered]@{
+        schema_version = 1
+        snapshot_kind = "audit_input"
+        run_id = $RunId
+        mode = $Mode
+        query = [string]$Query
+        generated_at = (Get-Date).ToString("o")
+        prompt_contract_version = Get-AuditPromptContractVersion
+        user_profile = Get-AuditUserProfileOutput $Config
+        installed_state = $installedState
+        target_scans = @($Scans)
+        source_strategy = $sourceStrategy
+        decision_insights = $decisionInsights
+        write_contract = [pscustomobject]@{
+            editable_file = "recommendations.json"
+            immutable_files = @("snapshot.json", "receipt.json")
+            next_command = (".\skills.ps1 审查目标 校验预演 --recommendations `"{0}`" --dry-run-ack `"{1}`"" -f $recommendationsPath, (Get-AuditDryRunAckToken))
+        }
+        truth_boundary = "repo_snapshot_not_host_loaded"
+    })
+    $recommendations = New-AuditRecommendationsTemplate $RunId $target $Mode $Query
+    Write-AuditJsonFile $snapshotPath $snapshot
+    Write-AuditJsonFile $recommendationsPath $recommendations
+    $receipt = [pscustomobject]([ordered]@{
+        schema_version = 1
+        run_id = $RunId
+        mode = $Mode
+        created_at = (Get-Date).ToString("o")
+        updated_at = (Get-Date).ToString("o")
+        success = $true
+        persisted = $false
+        truth_boundary = "repo_snapshot_created_not_reviewed_not_applied"
+        scan = [pscustomobject]@{
+            success = $true
+            snapshot_sha256 = Get-FileContentHash $snapshotPath
+            recommendations_template_sha256 = Get-FileContentHash $recommendationsPath
+            target_count = @($Scans).Count
+        }
+        preflight = $null
+        dry_run = $null
+        workflow = $null
+        apply = $null
+    })
+    Write-AuditJsonFile $receiptPath $receipt
+
+    $required = @(
+        [pscustomobject]@{ label = "snapshot.json"; path = $snapshotPath },
+        [pscustomobject]@{ label = "recommendations.json"; path = $recommendationsPath },
+        [pscustomobject]@{ label = "receipt.json"; path = $receiptPath }
+    )
+    Assert-AuditBundleRequiredFiles $required
+    Write-Host ("审查包已生成：{0}" -f $ReportRoot) -ForegroundColor Green
+    Write-Host "运行包固定为三个文件：" -ForegroundColor Cyan
+    foreach ($item in $required) { Write-Host ("- {0}: {1}" -f $item.label, $item.path) }
+    Write-Host "下一步：只读 snapshot.json，完成 recommendations.json，再执行校验预演；receipt.json 由命令维护。" -ForegroundColor Yellow
+    return [pscustomobject]@{
+        run_id = $RunId
+        path = $ReportRoot
+        mode = $Mode
+        query = [string]$Query
+        scans = @($Scans)
+        files = @($required | ForEach-Object { [string]$_.path })
     }
 }
 
+function Resolve-AuditBundleOutputDirectory([string]$OutDir, [string]$RunId, [switch]$Force) {
+    $reportRoot = if ([string]::IsNullOrWhiteSpace($OutDir)) { Get-AuditReportRoot $RunId } else { Resolve-AuditTargetPath $OutDir }
+    if (-not [string]::IsNullOrWhiteSpace($OutDir) -and (Test-Path -LiteralPath $reportRoot -PathType Container) -and -not $Force) {
+        if (@(Get-ChildItem -LiteralPath $reportRoot -Force -ErrorAction SilentlyContinue).Count -gt 0) {
+            throw ("--out 目录已存在且非空，请使用新的 run-id 目录，或显式追加 --force：{0}" -f $reportRoot)
+        }
+    }
+    EnsureDir $reportRoot
+    return $reportRoot
+}
+
 function Invoke-AuditTargetsScan {
-    param(
-        [string]$Target,
-        [string]$OutDir,
-        [switch]$Force
-    )
+    param([string]$Target, [string]$OutDir, [switch]$Force)
     $cfg = Ensure-AuditUserProfilePrecheck
     Assert-AuditUserProfileReady $cfg
     $targets = @($cfg.targets)
@@ -18279,297 +17968,25 @@ function Invoke-AuditTargetsScan {
         Need ($targets.Count -gt 0) ("未找到目标仓：{0}" -f $Target)
     }
     else {
-        $targets = @($targets | Where-Object {
-                if ($_.PSObject.Properties.Match("enabled").Count -eq 0) { return $true }
-                return [bool]$_.enabled
-            })
+        $targets = @($targets | Where-Object { $_.PSObject.Properties.Match("enabled").Count -eq 0 -or [bool]$_.enabled })
     }
     Need ($targets.Count -gt 0) "没有可扫描的目标仓。"
-
     $runId = Get-AuditRunId
-    $reportRoot = if ([string]::IsNullOrWhiteSpace($OutDir)) {
-        Get-AuditReportRoot $runId
-    }
-    else {
-        Resolve-AuditTargetPath $OutDir
-    }
-    if (-not [string]::IsNullOrWhiteSpace($OutDir) -and (Test-Path -LiteralPath $reportRoot -PathType Container) -and -not $Force) {
-        $existing = @(Get-ChildItem -LiteralPath $reportRoot -Force -ErrorAction SilentlyContinue)
-        if ($existing.Count -gt 0) {
-            throw ("--out 目录已存在且非空，请使用新的 run-id 目录，或显式追加 --force：{0}" -f $reportRoot)
-        }
-    }
-    EnsureDir $reportRoot
-
-    $userProfilePath = Join-Path $reportRoot "user-profile.json"
-    Write-AuditJsonFile $userProfilePath (Get-AuditUserProfileOutput $cfg)
-
-    $scans = @()
-    foreach ($t in $targets) {
-        $resolved = Resolve-AuditTargetPath ([string]$t.path)
-        $scans += New-AuditRepoScan ([string]$t.name) $resolved ([string]$t.path)
-    }
-
-    $repoScanPath = ""
-    $repoScansPath = ""
-    if ($scans.Count -eq 1) {
-        $repoScanPath = Join-Path $reportRoot "repo-scan.json"
-        Write-AuditJsonFile $repoScanPath $scans[0]
-    }
-    else {
-        $repoScansPath = Join-Path $reportRoot "repo-scans.json"
-        Write-AuditJsonFile $repoScansPath ([pscustomobject]@{ schema_version = 1; run_id = $runId; scans = @($scans) })
-    }
-
-    $installedPath = Join-Path $reportRoot "installed-skills.json"
-    $installedSkills = @()
-    $externalSkills = @()
-    $installedMcpServers = @()
-    try {
-        try {
-            $liveCfg = LoadCfg
-        }
-        catch {
-            Log ("审查包生成时读取 skills.json 失败，已回退为空安装快照：{0}" -f $_.Exception.Message) "WARN"
-            $liveCfg = New-AuditInstalledFactsFallbackCfg
-        }
-        $installedSkills = @(Get-InstalledSkillFacts $liveCfg)
-        $externalSkills = @(Get-AuditExternalSkillFacts $liveCfg)
-        $installedMcpServers = @(Get-AuditMcpServerFacts $liveCfg)
-    }
-    catch {
-        throw ("生成 installed-skills.json 失败：{0}" -f $_.Exception.Message)
-    }
-    $liveState = Get-AuditLiveInstalledState $liveCfg
-    Write-AuditJsonFile $installedPath ([pscustomobject]@{
-            schema_version = 1
-            snapshot_kind = "audit_input"
-            source_of_truth = "live_mappings"
-            captured_at = (Get-Date).ToString("o")
-            live_skill_count = [int]$liveState.skill_count
-            live_fingerprint = [string]$liveState.fingerprint
-            live_external_skill_count = if ($liveState.PSObject.Properties.Match('external_skill_count').Count -gt 0) { [int]$liveState.external_skill_count } else { 0 }
-            live_external_skill_fingerprint = if ($liveState.PSObject.Properties.Match('external_skill_fingerprint').Count -gt 0) { [string]$liveState.external_skill_fingerprint } else { '' }
-            live_mcp_server_count = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
-            live_mcp_fingerprint = if ($liveState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$liveState.mcp_fingerprint } else { "" }
-            host_projection = if ($liveState.PSObject.Properties.Match('host_projection').Count -gt 0) { $liveState.host_projection } else { $null }
-            skills = @($installedSkills)
-            external_skills = @($externalSkills)
-            mcp_servers = @($installedMcpServers)
-        })
-
-    $sourceStrategyPath = Join-Path $reportRoot "source-strategy.json"
-    Write-AuditJsonFile $sourceStrategyPath (New-AuditSourceStrategy "target-repo" "")
-    $decisionInsightsPath = Join-Path $reportRoot "decision-insights.json"
-    Write-AuditJsonFile $decisionInsightsPath (New-AuditDecisionInsights $cfg $scans @($installedSkills + $externalSkills) $installedMcpServers "target-repo")
-
-    $templatePath = Join-Path $reportRoot "recommendations.template.json"
-    $templateTarget = if ($scans.Count -eq 1) { [string]$scans[0].target.name } else { "*" }
-    Write-AuditJsonFile $templatePath (New-AuditRecommendationsTemplate $runId $templateTarget "target-repo")
-
-    $briefPath = Join-Path $reportRoot "ai-brief.md"
-    Write-AuditAiBrief $briefPath $scans $userProfilePath $repoScanPath $repoScansPath $installedPath $templatePath "target-repo" "" $sourceStrategyPath $decisionInsightsPath
-    $outerAiPromptPath = Join-Path $reportRoot "outer-ai-prompt.md"
-    Write-AuditOuterAiPromptFile $outerAiPromptPath $reportRoot $briefPath $userProfilePath $repoScanPath $repoScansPath $installedPath $templatePath "target-repo" "" $sourceStrategyPath $decisionInsightsPath
-    $auditMetaPath = Join-Path $reportRoot "audit-meta.json"
-    Write-AuditJsonFile $auditMetaPath ([pscustomobject]@{
-            schema_version = 1
-            run_id = [string]$runId
-            mode = "target-repo"
-            prompt_contract_version = (Get-AuditPromptContractVersion)
-            generated_at = (Get-Date).ToString("o")
-        })
-
-    $requiredFiles = New-Object System.Collections.Generic.List[object]
-    $requiredFiles.Add([pscustomobject]@{ label = "user-profile.json"; path = $userProfilePath }) | Out-Null
-    if ($scans.Count -eq 1) {
-        $requiredFiles.Add([pscustomobject]@{ label = "repo-scan.json"; path = $repoScanPath }) | Out-Null
-    }
-    else {
-        $requiredFiles.Add([pscustomobject]@{ label = "repo-scans.json"; path = $repoScansPath }) | Out-Null
-    }
-    $requiredFiles.Add([pscustomobject]@{ label = "installed-skills.json"; path = $installedPath }) | Out-Null
-    $requiredFiles.Add([pscustomobject]@{ label = "source-strategy.json"; path = $sourceStrategyPath }) | Out-Null
-    $requiredFiles.Add([pscustomobject]@{ label = "decision-insights.json"; path = $decisionInsightsPath }) | Out-Null
-    $requiredFiles.Add([pscustomobject]@{ label = "recommendations.template.json"; path = $templatePath }) | Out-Null
-    $requiredFiles.Add([pscustomobject]@{ label = "ai-brief.md"; path = $briefPath }) | Out-Null
-    $requiredFiles.Add([pscustomobject]@{ label = "outer-ai-prompt.md"; path = $outerAiPromptPath }) | Out-Null
-    $requiredFiles.Add([pscustomobject]@{ label = "audit-meta.json"; path = $auditMetaPath }) | Out-Null
-    if ($DryRun) {
-        Write-Host ("DRYRUN：将生成审查包：{0}" -f $reportRoot) -ForegroundColor Yellow
-        Write-Host "DRYRUN 关键产物预览：" -ForegroundColor Yellow
-        foreach ($item in @($requiredFiles.ToArray())) {
-            Write-Host ("- {0}: {1}" -f [string]$item.label, [string]$item.path)
-        }
-        return [pscustomobject]@{
-            run_id = $runId
-            path = $reportRoot
-            scans = @($scans)
-            dry_run = $true
-        }
-    }
-    Assert-AuditBundleRequiredFiles ($requiredFiles.ToArray())
-    Write-Host ("审查包已生成：{0}" -f $reportRoot) -ForegroundColor Green
-    Write-Host "关键产物：" -ForegroundColor Cyan
-    Write-Host ("- user-profile.json: {0}" -f $userProfilePath)
-    if ($scans.Count -eq 1) {
-        Write-Host ("- repo-scan.json: {0}" -f $repoScanPath)
-    }
-    else {
-        Write-Host ("- repo-scans.json: {0}" -f $repoScansPath)
-    }
-    Write-Host ("- installed-skills.json: {0}" -f $installedPath)
-    Write-Host ("- source-strategy.json: {0}" -f $sourceStrategyPath)
-    Write-Host ("- decision-insights.json: {0}" -f $decisionInsightsPath)
-    Write-Host ("- ai-brief.md: {0}" -f $briefPath)
-    Write-Host ("- outer-ai-prompt.md: {0}" -f $outerAiPromptPath)
-    Write-Host ("- audit-meta.json: {0}" -f $auditMetaPath)
-    Write-Host ("- recommendations.template.json: {0}" -f $templatePath)
-    Write-Host "下一步：把 outer-ai-prompt.md 交给 AI；AI 应先填写并自检 recommendations.json，再执行 dry-run，并按原序号列出技能与 MCP 的新增/卸载清单。" -ForegroundColor Yellow
-    $evidencePath = Write-AuditBundleEvidence "scan" $runId $reportRoot @($scans | ForEach-Object { [string]$_.target.name }) @(".\\skills.ps1 审查目标 扫描")
-    if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
-        Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
-    }
-    return [pscustomobject]@{
-        run_id = $runId
-        path = $reportRoot
-        scans = @($scans)
-    }
+    $reportRoot = Resolve-AuditBundleOutputDirectory $OutDir $runId -Force:$Force
+    $scans = @($targets | ForEach-Object {
+        $resolved = Resolve-AuditTargetPath ([string]$_.path)
+        New-AuditRepoScan ([string]$_.name) $resolved ([string]$_.path)
+    })
+    return Write-AuditThreeFileBundle $reportRoot $runId "target-repo" "" $cfg $scans
 }
 
 function Invoke-AuditSkillDiscovery {
-    param(
-        [string]$Query,
-        [string]$OutDir,
-        [switch]$Force
-    )
+    param([string]$Query, [string]$OutDir, [switch]$Force)
     $cfg = Ensure-AuditUserProfilePrecheck
     Assert-AuditUserProfileReady $cfg
-
     $runId = Get-AuditRunId
-    $reportRoot = if ([string]::IsNullOrWhiteSpace($OutDir)) {
-        Get-AuditReportRoot $runId
-    }
-    else {
-        Resolve-AuditTargetPath $OutDir
-    }
-    if (-not [string]::IsNullOrWhiteSpace($OutDir) -and (Test-Path -LiteralPath $reportRoot -PathType Container) -and -not $Force) {
-        $existing = @(Get-ChildItem -LiteralPath $reportRoot -Force -ErrorAction SilentlyContinue)
-        if ($existing.Count -gt 0) {
-            throw ("--out 目录已存在且非空，请使用新的 run-id 目录，或显式追加 --force：{0}" -f $reportRoot)
-        }
-    }
-    EnsureDir $reportRoot
-
-    $userProfilePath = Join-Path $reportRoot "user-profile.json"
-    Write-AuditJsonFile $userProfilePath (Get-AuditUserProfileOutput $cfg)
-
-    $installedPath = Join-Path $reportRoot "installed-skills.json"
-    $installedSkills = @()
-    $externalSkills = @()
-    $installedMcpServers = @()
-    try {
-        try {
-            $liveCfg = LoadCfg
-        }
-        catch {
-            Log ("新技能发现生成时读取 skills.json 失败，已回退为空安装快照：{0}" -f $_.Exception.Message) "WARN"
-            $liveCfg = New-AuditInstalledFactsFallbackCfg
-        }
-        $installedSkills = @(Get-InstalledSkillFacts $liveCfg)
-        $externalSkills = @(Get-AuditExternalSkillFacts $liveCfg)
-        $installedMcpServers = @(Get-AuditMcpServerFacts $liveCfg)
-    }
-    catch {
-        throw ("生成 installed-skills.json 失败：{0}" -f $_.Exception.Message)
-    }
-    $liveState = Get-AuditLiveInstalledState $liveCfg
-    Write-AuditJsonFile $installedPath ([pscustomobject]@{
-            schema_version = 1
-            snapshot_kind = "audit_input"
-            source_of_truth = "live_mappings"
-            captured_at = (Get-Date).ToString("o")
-            live_skill_count = [int]$liveState.skill_count
-            live_fingerprint = [string]$liveState.fingerprint
-            live_external_skill_count = if ($liveState.PSObject.Properties.Match('external_skill_count').Count -gt 0) { [int]$liveState.external_skill_count } else { 0 }
-            live_external_skill_fingerprint = if ($liveState.PSObject.Properties.Match('external_skill_fingerprint').Count -gt 0) { [string]$liveState.external_skill_fingerprint } else { '' }
-            live_mcp_server_count = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
-            live_mcp_fingerprint = if ($liveState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$liveState.mcp_fingerprint } else { "" }
-            host_projection = if ($liveState.PSObject.Properties.Match('host_projection').Count -gt 0) { $liveState.host_projection } else { $null }
-            skills = @($installedSkills)
-            external_skills = @($externalSkills)
-            mcp_servers = @($installedMcpServers)
-        })
-
-    $sourceStrategyPath = Join-Path $reportRoot "source-strategy.json"
-    Write-AuditJsonFile $sourceStrategyPath (New-AuditSourceStrategy "profile-only" $Query)
-    $decisionInsightsPath = Join-Path $reportRoot "decision-insights.json"
-    Write-AuditJsonFile $decisionInsightsPath (New-AuditDecisionInsights $cfg @() @($installedSkills + $externalSkills) $installedMcpServers "profile-only")
-
-    $templatePath = Join-Path $reportRoot "recommendations.template.json"
-    Write-AuditJsonFile $templatePath (New-AuditRecommendationsTemplate $runId "profile-only" "profile-only" $Query)
-
-    $briefPath = Join-Path $reportRoot "ai-brief.md"
-    Write-AuditAiBrief $briefPath @() $userProfilePath "" "" $installedPath $templatePath "profile-only" $Query $sourceStrategyPath $decisionInsightsPath
-    $outerAiPromptPath = Join-Path $reportRoot "outer-ai-prompt.md"
-    Write-AuditOuterAiPromptFile $outerAiPromptPath $reportRoot $briefPath $userProfilePath "" "" $installedPath $templatePath "profile-only" $Query $sourceStrategyPath $decisionInsightsPath
-    $auditMetaPath = Join-Path $reportRoot "audit-meta.json"
-    Write-AuditJsonFile $auditMetaPath ([pscustomobject]@{
-            schema_version = 1
-            run_id = [string]$runId
-            mode = "profile-only"
-            prompt_contract_version = (Get-AuditPromptContractVersion)
-            generated_at = (Get-Date).ToString("o")
-        })
-
-    $requiredFiles = New-Object System.Collections.Generic.List[object]
-    $requiredFiles.Add([pscustomobject]@{ label = "user-profile.json"; path = $userProfilePath }) | Out-Null
-    $requiredFiles.Add([pscustomobject]@{ label = "installed-skills.json"; path = $installedPath }) | Out-Null
-    $requiredFiles.Add([pscustomobject]@{ label = "source-strategy.json"; path = $sourceStrategyPath }) | Out-Null
-    $requiredFiles.Add([pscustomobject]@{ label = "decision-insights.json"; path = $decisionInsightsPath }) | Out-Null
-    $requiredFiles.Add([pscustomobject]@{ label = "recommendations.template.json"; path = $templatePath }) | Out-Null
-    $requiredFiles.Add([pscustomobject]@{ label = "ai-brief.md"; path = $briefPath }) | Out-Null
-    $requiredFiles.Add([pscustomobject]@{ label = "outer-ai-prompt.md"; path = $outerAiPromptPath }) | Out-Null
-    $requiredFiles.Add([pscustomobject]@{ label = "audit-meta.json"; path = $auditMetaPath }) | Out-Null
-    if ($DryRun) {
-        Write-Host ("DRYRUN：将生成新技能发现包：{0}" -f $reportRoot) -ForegroundColor Yellow
-        Write-Host "DRYRUN 关键产物预览：" -ForegroundColor Yellow
-        foreach ($item in @($requiredFiles.ToArray())) {
-            Write-Host ("- {0}: {1}" -f [string]$item.label, [string]$item.path)
-        }
-        return [pscustomobject]@{
-            run_id = $runId
-            path = $reportRoot
-            mode = "profile-only"
-            query = [string]$Query
-            scans = @()
-            dry_run = $true
-        }
-    }
-    Assert-AuditBundleRequiredFiles ($requiredFiles.ToArray())
-
-    Write-Host ("新技能发现包已生成：{0}" -f $reportRoot) -ForegroundColor Green
-    Write-Host "关键产物：" -ForegroundColor Cyan
-    Write-Host ("- user-profile.json: {0}" -f $userProfilePath)
-    Write-Host ("- installed-skills.json: {0}" -f $installedPath)
-    Write-Host ("- source-strategy.json: {0}" -f $sourceStrategyPath)
-    Write-Host ("- decision-insights.json: {0}" -f $decisionInsightsPath)
-    Write-Host ("- ai-brief.md: {0}" -f $briefPath)
-    Write-Host ("- outer-ai-prompt.md: {0}" -f $outerAiPromptPath)
-    Write-Host ("- audit-meta.json: {0}" -f $auditMetaPath)
-    Write-Host ("- recommendations.template.json: {0}" -f $templatePath)
-    Write-Host "下一步：把 outer-ai-prompt.md 交给 AI；AI 应先填写并自检 recommendations.json，再执行 dry-run，并按原序号列出技能与 MCP 的新增/卸载清单。" -ForegroundColor Yellow
-    $evidencePath = Write-AuditBundleEvidence "discover-skills" $runId $reportRoot @("profile-only")
-    if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
-        Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
-    }
-    return [pscustomobject]@{
-        run_id = $runId
-        path = $reportRoot
-        mode = "profile-only"
-        query = [string]$Query
-        scans = @()
-    }
+    $reportRoot = Resolve-AuditBundleOutputDirectory $OutDir $runId -Force:$Force
+    return Write-AuditThreeFileBundle $reportRoot $runId "profile-only" $Query $cfg @()
 }
 
 function Get-AuditPersistedChangeTotal($counts) {
@@ -18584,9 +18001,7 @@ function Get-AuditPersistedChangeTotal($counts) {
 }
 
 function Get-AuditDryRunSummaryPath([string]$recommendationsPath) {
-    $dir = Split-Path $recommendationsPath -Parent
-    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
-    return (Join-Path $dir "dry-run-summary.json")
+    return (Get-AuditReceiptPath $recommendationsPath)
 }
 
 function ConvertTo-AuditJsonArray($value) {
@@ -18697,7 +18112,7 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
 }
 
 function Get-AuditSourceEvidencePolicy([string]$recommendationDir) {
-    $path = Join-Path $recommendationDir "source-strategy.json"
+    $path = Join-Path $recommendationDir "snapshot.json"
     $policy = [ordered]@{
         enabled = $false
         source_strategy_path = $path
@@ -18705,15 +18120,9 @@ function Get-AuditSourceEvidencePolicy([string]$recommendationDir) {
         require_http_source_for_changes = $false
         require_source_observations_for_changes = $false
     }
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-        return [pscustomobject]$policy
-    }
     try {
-        $raw = Get-ContentUtf8 $path
-        if ([string]::IsNullOrWhiteSpace($raw)) {
-            return [pscustomobject]$policy
-        }
-        $data = $raw | ConvertFrom-Json
+        $snapshot = Read-AuditSnapshot $recommendationDir
+        $data = $snapshot.source_strategy
         if ($data.PSObject.Properties.Match("evidence_policy").Count -eq 0 -or $null -eq $data.evidence_policy) {
             return [pscustomobject]$policy
         }
@@ -18777,7 +18186,7 @@ function Test-AuditRecommendationSourceCoveragePolicy($rec, $policy) {
 }
 
 function Get-AuditDecisionQualityPolicy([string]$recommendationDir) {
-    $path = Join-Path $recommendationDir "source-strategy.json"
+    $path = Join-Path $recommendationDir "snapshot.json"
     $policy = [ordered]@{
         enabled = $false
         source_strategy_path = $path
@@ -18788,13 +18197,9 @@ function Get-AuditDecisionQualityPolicy([string]$recommendationDir) {
         min_target_repo_keywords_per_change = 0
         min_installed_state_keywords_per_change = 0
     }
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-        return [pscustomobject]$policy
-    }
     try {
-        $raw = Get-ContentUtf8 $path
-        if ([string]::IsNullOrWhiteSpace($raw)) { return [pscustomobject]$policy }
-        $data = $raw | ConvertFrom-Json
+        $snapshot = Read-AuditSnapshot $recommendationDir
+        $data = $snapshot.source_strategy
         if ($data.PSObject.Properties.Match("mode").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$data.mode)) {
             $policy.mode = ([string]$data.mode).Trim().ToLowerInvariant()
         }
@@ -18832,7 +18237,7 @@ function Get-AuditDecisionQualityPolicy([string]$recommendationDir) {
 }
 
 function Get-AuditDecisionInsights([string]$recommendationDir) {
-    $path = Join-Path $recommendationDir "decision-insights.json"
+    $path = Join-Path $recommendationDir "snapshot.json"
     $result = [ordered]@{
         exists = $false
         path = $path
@@ -18844,13 +18249,9 @@ function Get-AuditDecisionInsights([string]$recommendationDir) {
             installed_state = @()
         }
     }
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-        return [pscustomobject]$result
-    }
     try {
-        $raw = Get-ContentUtf8 $path
-        if ([string]::IsNullOrWhiteSpace($raw)) { return [pscustomobject]$result }
-        $data = $raw | ConvertFrom-Json
+        $snapshot = Read-AuditSnapshot $recommendationDir
+        $data = $snapshot.decision_insights
         $result.exists = $true
         if ($data.PSObject.Properties.Match("mode").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$data.mode)) {
             $result.mode = ([string]$data.mode).Trim().ToLowerInvariant()
@@ -18917,7 +18318,7 @@ function Test-AuditRecommendationDecisionQualityPolicy($rec, $policy, $decisionI
     foreach ($token in @($targetTokens)) { $null = $targetSet.Add($token) }
     foreach ($token in @(Normalize-AuditStringArray $decisionInsights.keywords.installed_state)) { $null = $installedSet.Add($token) }
     if ([bool]$policy.require_keyword_trace_membership -and -not [bool]$decisionInsights.exists) {
-        $issues.Add("insufficient_decision_quality：decision-insights.json 缺失或不可读，无法校验 keyword_trace 归属。") | Out-Null
+        $issues.Add("insufficient_decision_quality：snapshot.json decision_insights 缺失或不可读，无法校验 keyword_trace 归属。") | Out-Null
     }
 
     $uniqueUser = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
@@ -18991,54 +18392,9 @@ function Test-AuditRecommendationDecisionQualityPolicy($rec, $policy, $decisionI
         })
 }
 
-function Write-AuditRuntimeEvidence([string]$mode, [string]$recommendationsPath, $report, [string[]]$commands = @()) {
-    try {
-        $date = Get-Date -Format "yyyyMMdd"
-        $time = Get-Date -Format "HHmmss"
-        $runId = if ($null -ne $report -and $report.PSObject.Properties.Match("run_id").Count -gt 0) { [string]$report.run_id } else { "" }
-        # Keep machine-run receipts beside recommendations and apply reports.
-        $dir = Split-Path -Parent $recommendationsPath
-        if ([string]::IsNullOrWhiteSpace([string]$dir)) {
-            $dir = Get-AuditReportRoot $runId
-        }
-        EnsureDir $dir
-        $safeMode = if ([string]::IsNullOrWhiteSpace($mode)) { "unknown" } else { ([regex]::Replace($mode.ToLowerInvariant(), "[^a-z0-9_-]", "-")) }
-        $safeRun = if ([string]::IsNullOrWhiteSpace($runId)) { "no-runid" } else { ([regex]::Replace($runId, "[^a-zA-Z0-9_-]", "-")) }
-        $path = Join-Path $dir ("runtime-evidence-{0}-{1}-{2}-{3}.md" -f $date, $safeMode, $safeRun, $time)
-        $changedCountsJson = if ($null -ne $report -and $report.PSObject.Properties.Match("changed_counts").Count -gt 0) { ($report.changed_counts | ConvertTo-Json -Depth 10 -Compress) } else { "{}" }
-        $rollbackText = if ($null -ne $report -and $report.PSObject.Properties.Match("rollback").Count -gt 0 -and @($report.rollback).Count -gt 0) {
-            (@($report.rollback) | ForEach-Object { "- " + [string]$_ }) -join "`r`n"
-        }
-        else {
-            "- 无"
-        }
-        $commandText = if (@($commands).Count -gt 0) { (@($commands) | ForEach-Object { "- `"$_`"" }) -join "`r`n" } else { "- 无" }
-        $content = @"
-# Audit Runtime Evidence
-
-- mode: $mode
-- run_id: $runId
-- recommendations: $recommendationsPath
-- success: $([bool]$report.success)
-- persisted: $([bool]$report.persisted)
-- timestamp: $(Get-Date -Format "o")
-
-## Commands
-$commandText
-
-## Key Output
-- changed_counts: $changedCountsJson
-
-## Rollback
-$rollbackText
-"@
-        Set-ContentUtf8 $path $content
-        return $path
-    }
-    catch {
-        Log ("写入审查运行证据失败：{0}" -f $_.Exception.Message) "WARN"
-        return ""
-    }
+function Write-AuditApplyStageReceipt([string]$recommendationsPath, $report) {
+    $section = if ([string]$report.mode -eq "dry_run") { "dry_run" } else { "apply" }
+    return (Write-AuditReceiptSection $recommendationsPath $section ([pscustomobject]$report))
 }
 
 function Apply-AuditMcpSelections($selectedAddItems, $selectedRemoveItems) {
@@ -19113,70 +18469,34 @@ function Apply-AuditMcpSelections($selectedAddItems, $selectedRemoveItems) {
 
 function Resolve-AuditRecommendationsPathForPreflight([string]$RecommendationsPath, [string]$RunId) {
     if (-not [string]::IsNullOrWhiteSpace($RecommendationsPath)) {
-        $resolvedInputPath = Resolve-AuditPathRunIdPlaceholder $RecommendationsPath "--recommendations" @("recommendations.json", "installed-skills.json", "audit-meta.json")
+        $resolvedInputPath = Resolve-AuditPathRunIdPlaceholder $RecommendationsPath "--recommendations" @("snapshot.json", "recommendations.json", "receipt.json")
         return (Resolve-AuditTargetPath $resolvedInputPath)
     }
     Need (-not [string]::IsNullOrWhiteSpace($RunId)) "预检至少需要 --run-id 或 --recommendations 其一"
-    $resolvedRunId = Resolve-AuditRunIdInput $RunId "--run-id" @("installed-skills.json", "audit-meta.json", "recommendations.template.json")
+    $resolvedRunId = Resolve-AuditRunIdInput $RunId "--run-id" @("snapshot.json", "recommendations.json", "receipt.json")
     return (Join-Path (Get-AuditReportRoot $resolvedRunId) "recommendations.json")
 }
 
 function Get-AuditRunPromptContractVersion([string]$recommendationDir) {
-    $metaPath = Join-Path $recommendationDir "audit-meta.json"
-    if (Test-Path -LiteralPath $metaPath -PathType Leaf) {
-        try {
-            $metaRaw = Get-ContentUtf8 $metaPath
-            if (-not [string]::IsNullOrWhiteSpace($metaRaw)) {
-                $meta = $metaRaw | ConvertFrom-Json
-                if ($meta.PSObject.Properties.Match("prompt_contract_version").Count -gt 0) {
-                    $version = ([string]$meta.prompt_contract_version).Trim()
-                    if (-not [string]::IsNullOrWhiteSpace($version)) {
-                        return $version
-                    }
-                }
-            }
-        }
-        catch {
-            # Fallback to outer-ai-prompt.md parser
-        }
-    }
-    $promptPath = Join-Path $recommendationDir "outer-ai-prompt.md"
-    if (Test-Path -LiteralPath $promptPath -PathType Leaf) {
-        $promptRaw = Get-ContentUtf8 $promptPath
-        if (-not [string]::IsNullOrWhiteSpace($promptRaw)) {
-            $match = [regex]::Match($promptRaw, "(?m)^\s*Prompt-Contract-Version:\s*(?<version>\S+)\s*$")
-            if ($match.Success) {
-                return ([string]$match.Groups["version"].Value).Trim()
-            }
-        }
-    }
-    return ""
+    try { return ([string](Read-AuditSnapshot $recommendationDir).prompt_contract_version).Trim() }
+    catch { return "" }
 }
 
 function Test-AuditUserProfilePreflight([string]$recommendationDir) {
-    $path = Join-Path $recommendationDir "user-profile.json"
+    $path = Join-Path $recommendationDir "snapshot.json"
     $issues = New-Object System.Collections.Generic.List[string]
-    $exists = Test-Path -LiteralPath $path -PathType Leaf
-    if (-not $exists) {
-        return [pscustomobject]@{
-            path = $path
-            exists = $false
-            ok = $true
-            skipped = $true
-            skipped_reason = "missing_optional_user_profile"
-            issues = @($issues)
-        }
-    }
-
     try {
-        Assert-AuditBundleFileContent $path "user-profile.json"
+        $snapshot = Read-AuditSnapshot $recommendationDir
+        Need ($null -ne $snapshot.user_profile) ("snapshot.user_profile 缺失：{0}" -f $path)
+        Need (-not [string]::IsNullOrWhiteSpace([string]$snapshot.user_profile.summary)) ("snapshot.user_profile.summary 不能为空：{0}" -f $path)
+        Need (Test-AuditStructuredProfileComplete $snapshot.user_profile.structured) ("snapshot.user_profile.structured 不完整：{0}" -f $path)
     }
     catch {
         $issues.Add([string]$_.Exception.Message) | Out-Null
     }
     return [pscustomobject]@{
         path = $path
-        exists = $true
+        exists = (Test-Path -LiteralPath $path -PathType Leaf)
         ok = ($issues.Count -eq 0)
         skipped = $false
         skipped_reason = ""
@@ -19185,21 +18505,10 @@ function Test-AuditUserProfilePreflight([string]$recommendationDir) {
 }
 
 function Get-AuditPreflightRunIdFromBundle([string]$recommendationDir, [string]$fallbackRunId) {
-    $metaPath = Join-Path $recommendationDir "audit-meta.json"
-    if (Test-Path -LiteralPath $metaPath -PathType Leaf) {
-        try {
-            $metaRaw = Get-ContentUtf8 $metaPath
-            if (-not [string]::IsNullOrWhiteSpace($metaRaw)) {
-                $meta = $metaRaw | ConvertFrom-Json
-                if ($meta.PSObject.Properties.Match("run_id").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$meta.run_id)) {
-                    return [string]$meta.run_id
-                }
-            }
-        }
-        catch {
-            # Keep preflight usable even when the report later records the exact parse issue.
-        }
-    }
+    try {
+        $runId = [string](Read-AuditSnapshot $recommendationDir).run_id
+        if (-not [string]::IsNullOrWhiteSpace($runId)) { return $runId }
+    } catch { }
     if (-not [string]::IsNullOrWhiteSpace($fallbackRunId) -and [string]$fallbackRunId -ne "<run-id>") {
         return [string]$fallbackRunId
     }
@@ -19221,14 +18530,13 @@ function Invoke-AuditRecommendationsPreflight {
         try { $rec = Load-AuditRecommendations $resolvedRecommendations }
         catch { $recommendationValidationIssue = "invalid_recommendations：{0}" -f [string]$_.Exception.Message }
     }
-    $snapshotPath = Join-Path $recommendationDir "installed-skills.json"
-    $liveState = Get-AuditLiveInstalledState
-    if (Test-Path -LiteralPath $snapshotPath -PathType Leaf) {
-        $snapshotState = Get-AuditInstalledSnapshotState $snapshotPath
-    }
     else {
-        $snapshotState = New-AuditInstalledSnapshotFallbackState $liveState $snapshotPath
+        $recommendationValidationIssue = "recommendations_missing：recommendations.json 不存在：{0}" -f $resolvedRecommendations
     }
+    $snapshotPath = Join-Path $recommendationDir "snapshot.json"
+    Need (Test-Path -LiteralPath $snapshotPath -PathType Leaf) ("缺少 snapshot.json：{0}" -f $snapshotPath)
+    $liveState = Get-AuditLiveInstalledState
+    $snapshotState = Get-AuditInstalledSnapshotState $snapshotPath
     $snapshotStaleness = Get-AuditInstalledSnapshotStaleness $snapshotState $liveState
     $isSnapshotStale = [bool]$snapshotStaleness.is_stale
 
@@ -19314,11 +18622,11 @@ function Invoke-AuditRecommendationsPreflight {
 
     $report = [ordered]@{
         schema_version = 1
-        preflight_mode = if ($recommendationsExists) { "recommendations" } else { "bundle" }
+        preflight_mode = "recommendations"
         run_id = if ($null -ne $rec) { [string]$rec.run_id } else { Get-AuditPreflightRunIdFromBundle $recommendationDir $RunId }
         target = if ($null -ne $rec) { [string]$rec.target } else { "" }
         success = ($issues.Count -eq 0)
-        error_code = if (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) { "invalid_recommendations" } elseif ([bool]$targetStaleness.is_stale) { "target_repo_drift" } elseif ($isSnapshotStale) { "stale_snapshot" } elseif (-not $promptVersionMatched) { "prompt_contract_mismatch" } elseif (-not $sourceCoveragePassed) { "insufficient_source_coverage" } elseif (-not $decisionQualityPassed) { "insufficient_decision_quality" } elseif (-not [bool]$userProfileCheck.ok) { "user_profile_invalid" } elseif (-not [bool]$removalDependencyCheck.ok) { "removal_dependency_blocked" } else { "" }
+        error_code = if (-not $recommendationsExists) { "recommendations_missing" } elseif (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) { "invalid_recommendations" } elseif ([bool]$targetStaleness.is_stale) { "target_repo_drift" } elseif ($isSnapshotStale) { "stale_snapshot" } elseif (-not $promptVersionMatched) { "prompt_contract_mismatch" } elseif (-not $sourceCoveragePassed) { "insufficient_source_coverage" } elseif (-not $decisionQualityPassed) { "insufficient_decision_quality" } elseif (-not [bool]$userProfileCheck.ok) { "user_profile_invalid" } elseif (-not [bool]$removalDependencyCheck.ok) { "removal_dependency_blocked" } else { "" }
         recommendations_path = $resolvedRecommendations
         recommendations_exists = $recommendationsExists
         prompt_contract = [ordered]@{
@@ -19341,8 +18649,7 @@ function Invoke-AuditRecommendationsPreflight {
         removal_dependency_check = $removalDependencyCheck
         issues = @($issues)
     }
-    $reportPath = Join-Path $recommendationDir "preflight-report.json"
-    Write-AuditJsonFile $reportPath ([pscustomobject]$report)
+    $reportPath = Write-AuditReceiptSection $resolvedRecommendations "preflight" ([pscustomobject]$report)
 
     Write-Host ("预检报告：{0}" -f $reportPath) -ForegroundColor Cyan
     if ($issues.Count -eq 0) {
@@ -19398,21 +18705,17 @@ function Complete-AuditRecommendationsDryRun {
             $Report["dry_run_ack_expected"] = $ackToken
             $Report["dry_run_ack_received"] = [string]$ackInput
             $Report.changed_counts = New-AuditChangedCounts $Plan.items $Plan.removal_candidates $Plan.mcp_items $Plan.mcp_removal_candidates
-            Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$Report)
-            $evidencePath = Write-AuditRuntimeEvidence "dry-run-canceled" $RecommendationsPath ([pscustomobject]$Report) @(".\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`"")
-            if (-not [string]::IsNullOrWhiteSpace($evidencePath)) { Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan }
+            Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$Report) | Out-Null
             return [pscustomobject]$Report
         }
         $Report["dry_run_acknowledged"] = $true
     }
     $dryRunSummaryPath = Get-AuditDryRunSummaryPath $RecommendationsPath
     $dryRunSummary = New-AuditDryRunSummary $Plan $RecommendationsPath
-    Write-AuditJsonFile $dryRunSummaryPath $dryRunSummary
+    $Report["summary"] = $dryRunSummary
     $Report["dry_run_summary_path"] = $dryRunSummaryPath
     Write-Host ("dry-run 机器可读摘要：{0}" -f $dryRunSummaryPath) -ForegroundColor Cyan
-    Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$Report)
-    $evidencePath = Write-AuditRuntimeEvidence "dry-run" $RecommendationsPath ([pscustomobject]$Report) @(".\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`" --dry-run-ack `"$([string]$DryRunAck)`"")
-    if (-not [string]::IsNullOrWhiteSpace($evidencePath)) { Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan }
+    Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$Report) | Out-Null
     return [pscustomobject]$Report
 }
 
@@ -19448,8 +18751,12 @@ function Test-AuditApplyWorkflowReceipt([string]$RecommendationsPath) {
     if (-not (Test-Path -LiteralPath $workflowPath -PathType Leaf)) {
         return [pscustomobject]@{ pass=$false; code='validated_dry_run_required'; message='Apply requires a successful 校验预演 workflow receipt.'; path=$workflowPath }
     }
-    try { $receipt = Get-ContentUtf8 $workflowPath | ConvertFrom-Json }
+    try {
+        $container = Get-ContentUtf8 $workflowPath | ConvertFrom-Json
+        $receipt = $container.workflow
+    }
     catch { return [pscustomobject]@{ pass=$false; code='validated_dry_run_invalid'; message=('Workflow receipt is invalid JSON: {0}' -f $_.Exception.Message); path=$workflowPath } }
+    if ($null -eq $receipt) { return [pscustomobject]@{ pass=$false; code='validated_dry_run_incomplete'; message='receipt.json does not contain a workflow section.'; path=$workflowPath } }
     $shapeValid = $receipt.schema_version -eq 1 -and [string]$receipt.workflow -eq 'recommendations_validate_dry_run' -and [bool]$receipt.success -and -not [bool]$receipt.persisted -and [string]$receipt.stages.preflight.status -eq 'passed' -and [string]$receipt.stages.dry_run.status -eq 'passed' -and [string]$receipt.stages.input_stability.status -eq 'passed' -and [bool]$receipt.input_stability.matched
     if (-not $shapeValid) { return [pscustomobject]@{ pass=$false; code='validated_dry_run_incomplete'; message='Workflow receipt does not prove preflight, dry-run, and stable inputs.'; path=$workflowPath } }
     if ([IO.Path]::GetFullPath([string]$receipt.recommendations_path) -ne $resolved -or [string]$receipt.recommendations_sha256 -ne [string](Get-FileContentHash $resolved)) {
@@ -19532,6 +18839,8 @@ function Invoke-AuditRecommendationsApply {
         $workflowReceipt = Test-AuditApplyWorkflowReceipt $RecommendationsPath
         if (-not [bool]$workflowReceipt.pass) { throw ('{0}：{1}' -f [string]$workflowReceipt.code,[string]$workflowReceipt.message) }
     }
+    $snapshotPath = Join-Path $recommendationDir "snapshot.json"
+    Need (Test-Path -LiteralPath $snapshotPath -PathType Leaf) ("缺少 snapshot.json：{0}" -f $snapshotPath)
     $sourcePolicy = Get-AuditSourceEvidencePolicy $recommendationDir
     $sourceCoverageCheck = Test-AuditRecommendationSourceCoveragePolicy $rec $sourcePolicy
     $decisionQualityPolicy = Get-AuditDecisionQualityPolicy $recommendationDir
@@ -19563,12 +18872,7 @@ function Invoke-AuditRecommendationsApply {
             source_observations = @($rec.source_observations)
             rollback = @()
         }
-        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$sourceReport)
-        $evidenceMode = if ($Apply) { "apply-blocked" } else { "dry-run-blocked" }
-        $evidencePath = Write-AuditRuntimeEvidence $evidenceMode $RecommendationsPath ([pscustomobject]$sourceReport) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`"")
-        if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
-            Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
-        }
+        Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$sourceReport) | Out-Null
         throw $sourceMessage
     }
     if (-not [bool]$decisionQualityCheck.pass) {
@@ -19597,23 +18901,11 @@ function Invoke-AuditRecommendationsApply {
             source_observations = @($rec.source_observations)
             rollback = @()
         }
-        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$qualityReport)
-        $evidenceMode = if ($Apply) { "apply-blocked" } else { "dry-run-blocked" }
-        $evidencePath = Write-AuditRuntimeEvidence $evidenceMode $RecommendationsPath ([pscustomobject]$qualityReport) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`"")
-        if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
-            Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
-        }
+        Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$qualityReport) | Out-Null
         throw $qualityMessage
     }
-    $snapshotPath = Join-Path $recommendationDir "installed-skills.json"
     $liveState = Get-AuditLiveInstalledState
-    if (Test-Path -LiteralPath $snapshotPath -PathType Leaf) {
-        $snapshotState = Get-AuditInstalledSnapshotState $snapshotPath
-    }
-    else {
-        Log ("recommendations 同目录缺少 installed-skills.json，已回退为 live state 快照：{0}" -f $snapshotPath) "WARN"
-        $snapshotState = New-AuditInstalledSnapshotFallbackState $liveState $snapshotPath
-    }
+    $snapshotState = Get-AuditInstalledSnapshotState $snapshotPath
     $snapshotStaleness = Get-AuditInstalledSnapshotStaleness $snapshotState $liveState
     $isSnapshotStale = [bool]$snapshotStaleness.is_stale
     if ($isSnapshotStale -and -not $AllowStaleSnapshot) {
@@ -19645,7 +18937,7 @@ function Invoke-AuditRecommendationsApply {
             source_observations = @($rec.source_observations)
             rollback = @()
         }
-        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$staleReport)
+        Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$staleReport) | Out-Null
         throw $staleMessage
     }
     if ($isSnapshotStale -and $AllowStaleSnapshot) {
@@ -19699,7 +18991,7 @@ function Invoke-AuditRecommendationsApply {
                 stale_ack_expected = $staleAckToken
                 stale_ack_received = ""
             }
-            Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$staleReport)
+            Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$staleReport) | Out-Null
             throw $hint
         }
         if ([string]::IsNullOrWhiteSpace($staleAckInput) -or $staleAckInput.Trim() -ne $staleAckToken) {
@@ -19735,7 +19027,7 @@ function Invoke-AuditRecommendationsApply {
                 stale_ack_expected = $staleAckToken
                 stale_ack_received = [string]$staleAckInput
             }
-            Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$staleReport)
+            Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$staleReport) | Out-Null
             throw "二次确认失败：未通过过期快照确认。"
         }
     }
@@ -19783,7 +19075,7 @@ function Invoke-AuditRecommendationsApply {
         $report["canceled"] = $true
         $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
         $report.persisted = $false
-        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+        Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$report) | Out-Null
         return [pscustomobject]$report
     }
     $selectedAdd = $selections.add
@@ -19818,7 +19110,7 @@ function Invoke-AuditRecommendationsApply {
                 $report.items = @($plan.items)
                 $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
                 $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
-                Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+                Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$report) | Out-Null
                 throw
             }
         }
@@ -19862,7 +19154,7 @@ function Invoke-AuditRecommendationsApply {
                 $report.mcp_removal_candidates = @($plan.mcp_removal_candidates)
                 $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
                 $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
-                Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+                Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$report) | Out-Null
                 throw
             }
         }
@@ -19883,7 +19175,7 @@ function Invoke-AuditRecommendationsApply {
                 $report.mcp_removal_candidates = @($plan.mcp_removal_candidates)
                 $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
                 $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
-                Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+                Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$report) | Out-Null
                 throw "doctor --strict failed after applying recommendations"
             }
         }
@@ -19894,11 +19186,7 @@ function Invoke-AuditRecommendationsApply {
         $report.mcp_removal_candidates = @($plan.mcp_removal_candidates)
         $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
         $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
-        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
-        $evidencePath = Write-AuditRuntimeEvidence "apply" $RecommendationsPath ([pscustomobject]$report) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`" --apply --yes")
-        if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
-            Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
-        }
+        Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$report) | Out-Null
         return [pscustomobject]$report
     }
     catch {
@@ -19914,11 +19202,7 @@ function Invoke-AuditRecommendationsApply {
         $report.mcp_removal_candidates = @($plan.mcp_removal_candidates)
         $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
         $report.persisted = if([string]$report.compensation.status -eq 'restored'){$false}else{((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)}
-        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
-        $evidencePath = Write-AuditRuntimeEvidence "apply-failed" $RecommendationsPath ([pscustomobject]$report) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`" --apply --yes")
-        if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
-            Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
-        }
+        Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$report) | Out-Null
         if([string]$report.compensation.status -eq 'failed'){throw ('{0}; compensation_failed:{1}' -f $originalFailure.Exception.Message,(@($report.compensation.errors)-join '|'))}
         throw $originalFailure
     }
@@ -19991,21 +19275,26 @@ function Invoke-AuditRecommendationsTwoStageApply {
 function Get-AuditLatestApplyReportPath {
     $auditRoot = Join-Path $script:Root "reports\skill-audit"
     if (-not (Test-Path -LiteralPath $auditRoot -PathType Container)) { return $null }
-    $candidates = @(Get-ChildItem -Path $auditRoot -Recurse -File -Filter "apply-report.json" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
-    if ($candidates.Count -eq 0) { return $null }
-    return [string]$candidates[0].FullName
+    foreach ($candidate in @(Get-ChildItem -Path $auditRoot -Recurse -File -Filter "receipt.json" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)) {
+        try {
+            $receipt = Get-ContentUtf8 $candidate.FullName | ConvertFrom-Json
+            if ($null -ne $receipt.apply -or $null -ne $receipt.dry_run -or $null -ne $receipt.workflow) { return [string]$candidate.FullName }
+        } catch { }
+    }
+    return $null
 }
 
 function Show-AuditLatestStatus {
     $path = Get-AuditLatestApplyReportPath
     if ([string]::IsNullOrWhiteSpace($path)) {
-        Write-Host "未找到 apply-report.json。请先执行：审查目标 应用确认 或 审查目标 应用。" -ForegroundColor Yellow
+        Write-Host "未找到含 dry-run/apply 状态的 receipt.json。请先执行：审查目标 校验预演 或 审查目标 应用。" -ForegroundColor Yellow
         return
     }
     try {
         $raw = Get-ContentUtf8 $path
         Need (-not [string]::IsNullOrWhiteSpace($raw)) ("状态文件为空：{0}" -f $path)
-        $report = $raw | ConvertFrom-Json
+        $receipt = $raw | ConvertFrom-Json
+        $report = if ($null -ne $receipt.apply) { $receipt.apply } elseif ($null -ne $receipt.dry_run) { $receipt.dry_run } else { $receipt.workflow }
     }
     catch {
         throw ("读取状态文件失败：{0}" -f $_.Exception.Message)
@@ -20030,9 +19319,7 @@ function Show-AuditLatestStatus {
 }
 
 function Get-AuditWorkflowReportPath([string]$recommendationsPath) {
-    $dir = Split-Path $recommendationsPath -Parent
-    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
-    return (Join-Path $dir "workflow-report.json")
+    return (Get-AuditReceiptPath $recommendationsPath)
 }
 
 function Get-AuditWorkflowInputState([string]$recommendationsPath) {
@@ -20040,14 +19327,7 @@ function Get-AuditWorkflowInputState([string]$recommendationsPath) {
     if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
     $inputs = @(
         [pscustomobject]@{ name = "recommendations.json"; path = $recommendationsPath },
-        [pscustomobject]@{ name = "installed-skills.json"; path = (Join-Path $dir "installed-skills.json") },
-        [pscustomobject]@{ name = "audit-meta.json"; path = (Join-Path $dir "audit-meta.json") },
-        [pscustomobject]@{ name = "outer-ai-prompt.md"; path = (Join-Path $dir "outer-ai-prompt.md") },
-        [pscustomobject]@{ name = "user-profile.json"; path = (Join-Path $dir "user-profile.json") },
-        [pscustomobject]@{ name = "source-strategy.json"; path = (Join-Path $dir "source-strategy.json") },
-        [pscustomobject]@{ name = "decision-insights.json"; path = (Join-Path $dir "decision-insights.json") },
-        [pscustomobject]@{ name = "repo-scan.json"; path = (Join-Path $dir "repo-scan.json") },
-        [pscustomobject]@{ name = "repo-scans.json"; path = (Join-Path $dir "repo-scans.json") }
+        [pscustomobject]@{ name = "snapshot.json"; path = (Join-Path $dir "snapshot.json") }
     )
     $files = @()
     $pairs = @()
@@ -20145,7 +19425,7 @@ function Get-AuditWorkflowErrorCode([string]$stage, [string]$message) {
 
 function Get-AuditWorkflowNextCommand([string]$errorCode, [string]$recommendationsPath) {
     if ($errorCode -eq "recommendations_missing") {
-        return ("先按同目录 outer-ai-prompt.md 生成 recommendations.json，再运行：.\skills.ps1 审查目标 校验预演 --recommendations `"{0}`" --dry-run-ack `"{1}`"" -f $recommendationsPath, (Get-AuditDryRunAckToken))
+        return ("先读取同目录 snapshot.json 并完成 recommendations.json，再运行：.\skills.ps1 审查目标 校验预演 --recommendations `"{0}`" --dry-run-ack `"{1}`"" -f $recommendationsPath, (Get-AuditDryRunAckToken))
     }
     if ($errorCode -eq "stale_snapshot" -or $errorCode -eq "prompt_contract_mismatch" -or $errorCode -eq "live_state_changed" -or $errorCode -eq "target_repo_drift") {
         return ".\skills.ps1 审查目标 扫描"
@@ -20196,10 +19476,7 @@ function Invoke-AuditRecommendationsValidateDryRun {
             matched = $false
         })
         reports = [pscustomobject]([ordered]@{
-            preflight = (Join-Path $recommendationDir "preflight-report.json")
-            dry_run_summary = (Get-AuditDryRunSummaryPath $resolvedRecommendations)
-            apply = (Get-AuditApplyReportPath $resolvedRecommendations)
-            workflow = $workflowPath
+            receipt = $workflowPath
         })
         changed_counts = New-AuditChangedCounts @() @()
         categories = @()
@@ -20279,7 +19556,7 @@ function Invoke-AuditRecommendationsValidateDryRun {
         $report.removal_candidates = @($dryRunReport.removal_candidates)
         $report.mcp_items = @($dryRunReport.mcp_items)
         $report.mcp_removal_candidates = @($dryRunReport.mcp_removal_candidates)
-        Write-AuditJsonFile $workflowPath ([pscustomobject]$report)
+        Write-AuditReceiptSection $resolvedRecommendations "workflow" ([pscustomobject]$report) | Out-Null
         Write-Host ("校验预演报告：{0}" -f $workflowPath) -ForegroundColor Cyan
         Write-Host "校验预演通过：preflight 与 dry-run 已按序完成，persisted=false。" -ForegroundColor Green
         return [pscustomobject]$report
@@ -20298,7 +19575,7 @@ function Invoke-AuditRecommendationsValidateDryRun {
         elseif ($currentStage -eq "dry_run") { $report.stages.dry_run.status = "failed" }
         else { $report.stages.input_stability.status = "failed" }
         if (Test-Path -LiteralPath $recommendationDir -PathType Container) {
-            Write-AuditJsonFile $workflowPath ([pscustomobject]$report)
+            Write-AuditReceiptSection $resolvedRecommendations "workflow" ([pscustomobject]$report) | Out-Null
             Write-Host ("校验预演报告：{0}" -f $workflowPath) -ForegroundColor Cyan
         }
         throw
@@ -20391,7 +19668,7 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             }
             "--run-id" {
                 Need ($i + 1 -lt $items.Count) "--run-id 缺少值"
-                $result.run_id = Resolve-AuditRunIdInput ([string]$items[++$i]) "--run-id" @("recommendations.json", "installed-skills.json", "audit-meta.json")
+                $result.run_id = Resolve-AuditRunIdInput ([string]$items[++$i]) "--run-id" @("snapshot.json", "recommendations.json", "receipt.json")
                 continue
             }
             "--profile" {
@@ -20414,7 +19691,7 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             }
             "--recommendations" {
                 Need ($i + 1 -lt $items.Count) "--recommendations 缺少值"
-                $result.recommendations = Resolve-AuditPathRunIdPlaceholder ([string]$items[++$i]) "--recommendations" @("recommendations.json", "installed-skills.json", "audit-meta.json")
+                $result.recommendations = Resolve-AuditPathRunIdPlaceholder ([string]$items[++$i]) "--recommendations" @("snapshot.json", "recommendations.json", "receipt.json")
                 continue
             }
             "--dry-run-ack" {
@@ -22200,7 +21477,7 @@ Skills 管理器（中文菜单）
   1) 接入来源：新增技能库，或用 add/npx 导入单个技能
   2) 安装技能：浏览技能 -> 选择安装/粘贴命令导入 -> 重建并同步
   3) 日常维护：更新上游 -> 重建并同步 -> doctor --strict
-  4) 目标仓审查：查看需求 -> 生成审查包 -> 预检建议 -> 应用建议
+  4) 目标仓审查：查看需求 -> 生成三文件审查包 -> 预检/校验预演 -> 显式应用
 
 菜单地图：
   - 主菜单：浏览技能、选择安装、粘贴命令导入、卸载技能、重建并同步、更新上游
@@ -22216,7 +21493,7 @@ Skills 管理器（中文菜单）
   - 卸载技能：从 `mappings` 移除，必要时清理导入目录和备份
   - 重建并同步：根据 `skills.json` 重建 `agent/` 并同步到 `targets`
   - 更新上游：拉取 `vendor/`、`imports/` 后重建并同步
-  - 目标仓审查：生成审查包，先 dry-run，再按确认口令落盘
+  - 目标仓审查：生成 snapshot/recommendations/receipt，先 dry-run，再按确认口令落盘
   - MCP 服务：维护 `skills.json` 中的 `mcp_servers` 并同步到目标 CLI
   - 技能库管理：维护来源、锁文件和配置
   - 一键工作流：按场景执行组合流程；支持 `--list`、`--no-prompt`、`--continue-on-error`
@@ -22335,21 +21612,21 @@ MCP/门禁环境变量：
 
 目标仓审查：
   - 用户基本需求是全局长期上下文；目标仓是项目级上下文。外层 AI 必须同时基于两者判断技能保留、卸载与新增。
-  - `发现新技能` 是不绑定目标仓的 profile-only 模式，复用同一套审查包、提示词、recommendations.json、dry-run/apply 流程。
+  - `发现新技能` 是不绑定目标仓的 profile-only 模式，复用同一套三文件审查包和 preflight/dry-run/apply 流程。
   - 启动审查流程后，外层 AI 可以在本次流程内自主联网研究；联网不等于自动安装。
   - 设置用户基本需求后会自动进入结构化导入流程；回车使用默认路径 `reports\skill-audit\user-profile.structured.json`，不存在时会自动生成草稿文件。
-  - 已内置“外层 AI 审查提示词”；生成审查包时会输出运行态 `outer-ai-prompt.md`，优先把它交给外层 AI，而不是只交 `ai-brief.md`。
-  - 运行态 `ai-brief.md` / `outer-ai-prompt.md` 属于审查包产物；如需改默认提示词，请改 `src/Commands/AuditTargets.ps1` 或 `overrides/audit-outer-ai-prompt.md`，不要直接手改 run 目录产物。
-  - 外层 AI 应先写完并自检 `recommendations.json`（schema、占位符、双理由、真实来源），再进入 dry-run。
+  - 每个 run 固定只有三个文件：不可编辑的 `snapshot.json`、唯一允许 AI 编辑的 `recommendations.json`、命令维护的 `receipt.json`；不得新增旁路报告或 markdown evidence。
+  - 内置提示词只定义工作流，prompt contract version 已写入 `snapshot.json`；如需改默认提示词，请改 `src/Commands/AuditTargets.ps1` 或 `overrides/audit-outer-ai-prompt.md`。
+  - 外层 AI 应先写完并自检 `recommendations.json`（schema、占位符、双理由、真实来源），再进入 preflight/dry-run；不得修改 snapshot 或 receipt。
   - `应用确认` 是单入口两阶段流程：先 dry-run，再要求输入确认口令 `APPLY <run-id>` 才执行落盘。
   - `应用` 默认只做 dry-run，且需显式确认口令 `我知道未落盘`；只有 `--apply --yes` 才会真正执行选中的新增/卸载。
   - 建议先执行 `预检`：会提前检查 `stale_snapshot` 与提示词契约版本，避免“先研究后阻断”。
-  - `应用`/`应用确认` 会校验同目录 `installed-skills.json` 快照与当前 live mappings、MCP、system/plugin 外部能力指纹；旧快照没有外部能力字段时保持兼容，新快照漂移会触发 stale_snapshot。
+  - `应用`/`应用确认` 会校验同目录 `snapshot.json` 与当前 live mappings、MCP、system/plugin 外部能力指纹；snapshot 缺失直接阻断，指纹漂移触发 stale_snapshot。
   - 仅在你明确接受风险时可加 `--allow-stale-snapshot` 跳过该阻断（报告会标记 stale 风险）。
   - 使用 `--allow-stale-snapshot` 时会触发红色警告并要求二次确认口令；非交互环境请用 `--stale-ack "<token>"` 提前传入。
   - `--out` 若指向已存在且非空目录，默认阻断，防止覆盖旧审查包；如确需复用，显式追加 `--force`。
   - `--run-id` / `--recommendations` 里出现 `<run-id>` 时会自动解析为最近可用 run；若无可用 run 才阻断并给出提示。
-  - `状态` 可查看最近一次 `apply-report.json` 的 `mode/success/persisted/changed_counts`。
+  - `状态` 从最近一次 `receipt.json` 的 workflow/dry_run/apply section 显示 `mode/success/persisted/changed_counts`。
   - 执行前会分别列出“技能新增/卸载”和“MCP 新增/卸载”四份带序号清单；dry-run 后向用户汇报时必须沿用原序号，并同时展示用户需求 / 目标仓两条简短依据。
   - `--add-indexes` / `--remove-indexes` 作用于技能清单；`--mcp-add-indexes` / `--mcp-remove-indexes` 作用于 MCP 清单；四份清单独立编号。
 

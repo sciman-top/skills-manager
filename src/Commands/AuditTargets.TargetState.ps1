@@ -1,16 +1,7 @@
 function Get-AuditTargetRepoScans([string]$recommendationDir) {
     if ([string]::IsNullOrWhiteSpace($recommendationDir)) { $recommendationDir = "." }
-    $singlePath = Join-Path $recommendationDir "repo-scan.json"
-    if (Test-Path -LiteralPath $singlePath -PathType Leaf) {
-        try { return @((Get-ContentUtf8 $singlePath | ConvertFrom-Json)) }
-        catch { throw ("repo-scan JSON 解析失败：{0}" -f $_.Exception.Message) }
-    }
-
-    $multiPath = Join-Path $recommendationDir "repo-scans.json"
-    if (-not (Test-Path -LiteralPath $multiPath -PathType Leaf)) { return @() }
-    try { $bundle = Get-ContentUtf8 $multiPath | ConvertFrom-Json }
-    catch { throw ("repo-scans JSON 解析失败：{0}" -f $_.Exception.Message) }
-    $scans = Get-CfgObjectProperty $bundle "scans"
+    $snapshot = Read-AuditSnapshot $recommendationDir
+    $scans = Get-CfgObjectProperty $snapshot "target_scans"
     if ($null -eq $scans) { return @() }
     return @($scans)
 }
@@ -60,7 +51,7 @@ function Get-AuditTargetRepoSnapshotState([string]$recommendationDir) {
             })
     }
     return [pscustomobject]([ordered]@{
-            captured_from = "repo_scan"
+            captured_from = "snapshot.json"
             target_count = @($targets).Count
             fingerprint = Get-AuditTargetRepoStateFingerprint $targets
             targets = @($targets)

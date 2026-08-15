@@ -184,7 +184,7 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
                 "Every add/remove recommendation must cite sources inspected in this run.",
                 "Do not fabricate repository facts, source links, or source conclusions.",
                 "Record source_observations for researched candidates so selected, rejected, and removed items remain auditable.",
-                "Every change recommendation should include keyword_trace (user_profile / target_repo_or_context / installed_state) and keep these values aligned with decision-insights.json.",
+                "Every change recommendation should include keyword_trace (user_profile / target_repo_or_context / installed_state) and keep these values aligned with snapshot.json decision_insights.",
                 "For MCP recommendations, prefer provider documentation and security/permission notes over popularity signals.",
                 "For profile-only mode, explain reason_target_repo as installed-skill inventory / profile-only context, not as a target repository claim."
             )
@@ -227,67 +227,27 @@ function Assert-AuditBundleFileContent([string]$path, [string]$label) {
     Need ($null -ne $data) ("审查包 JSON 为空对象：{0} -> {1}" -f $label, $path)
 
     switch ($label) {
-        "user-profile.json" {
-            Need (Test-AuditJsonProperty $data "raw_text") ("user-profile 缺少 raw_text：{0}" -f $path)
-            Need (-not [string]::IsNullOrWhiteSpace([string]$data.raw_text)) ("user-profile.raw_text 不能为空：{0}" -f $path)
-            Need (Test-AuditJsonProperty $data "summary") ("user-profile 缺少 summary：{0}" -f $path)
-            Need (-not [string]::IsNullOrWhiteSpace([string]$data.summary)) ("user-profile.summary 不能为空：{0}" -f $path)
-            Need (Test-AuditJsonProperty $data "structured") ("user-profile 缺少 structured：{0}" -f $path)
-            Need (Test-AuditStructuredProfileComplete $data.structured) ("user-profile.structured 不完整：{0}" -f $path)
-            Need (Test-AuditJsonProperty $data "last_structured_at") ("user-profile 缺少 last_structured_at：{0}" -f $path)
-            Need (Test-AuditTimestampString ([string]$data.last_structured_at)) ("user-profile.last_structured_at 无效：{0}" -f $path)
-        }
-        "installed-skills.json" {
-            Need (Test-AuditJsonProperty $data "skills") ("installed-skills 缺少 skills：{0}" -f $path)
-            Need (Assert-IsArray $data.skills) ("installed-skills.skills 必须为数组：{0}" -f $path)
-            if (Test-AuditJsonProperty $data "external_skills") {
-                Need (Assert-IsArray $data.external_skills) ("installed-skills.external_skills 必须为数组：{0}" -f $path)
+        "snapshot.json" {
+            Need ([int]$data.schema_version -eq 1) ("snapshot schema_version 必须为 1：{0}" -f $path)
+            foreach ($field in @("run_id", "mode", "prompt_contract_version", "user_profile", "installed_state", "target_scans", "source_strategy", "decision_insights")) {
+                Need (Test-AuditJsonProperty $data $field) ("snapshot 缺少 {0}：{1}" -f $field, $path)
             }
-            if (Test-AuditJsonProperty $data "mcp_servers") {
-                Need (Assert-IsArray $data.mcp_servers) ("installed-skills.mcp_servers 必须为数组：{0}" -f $path)
-            }
-            if (Test-AuditJsonProperty $data "snapshot_kind") {
-                Need ([string]$data.snapshot_kind -eq "audit_input") ("installed-skills.snapshot_kind 必须为 audit_input：{0}" -f $path)
-            }
+            Need (Assert-IsArray $data.target_scans) ("snapshot.target_scans 必须为数组：{0}" -f $path)
+            Need (Test-AuditJsonProperty $data.installed_state "skills") ("snapshot.installed_state 缺少 skills：{0}" -f $path)
+            Need (Assert-IsArray $data.installed_state.skills) ("snapshot.installed_state.skills 必须为数组：{0}" -f $path)
+            Need (Assert-IsArray $data.installed_state.external_skills) ("snapshot.installed_state.external_skills 必须为数组：{0}" -f $path)
+            Need (Assert-IsArray $data.installed_state.mcp_servers) ("snapshot.installed_state.mcp_servers 必须为数组：{0}" -f $path)
+            Need (-not [string]::IsNullOrWhiteSpace([string]$data.user_profile.summary)) ("snapshot.user_profile.summary 不能为空：{0}" -f $path)
+            Need (Test-AuditStructuredProfileComplete $data.user_profile.structured) ("snapshot.user_profile.structured 不完整：{0}" -f $path)
         }
-        "source-strategy.json" {
-            Need (Test-AuditJsonProperty $data "mode") ("source-strategy 缺少 mode：{0}" -f $path)
-            Need (Test-AuditJsonProperty $data "sources") ("source-strategy 缺少 sources：{0}" -f $path)
-            Need (Assert-IsArray $data.sources) ("source-strategy.sources 必须为数组：{0}" -f $path)
-            Need (@($data.sources).Count -gt 0) ("source-strategy.sources 不能为空：{0}" -f $path)
-            if (Test-AuditJsonProperty $data "evidence_policy" -and $null -ne $data.evidence_policy) {
-                Need (Test-AuditJsonProperty $data.evidence_policy "min_unique_sources_for_changes") ("source-strategy.evidence_policy 缺少 min_unique_sources_for_changes：{0}" -f $path)
-                Need ([int]$data.evidence_policy.min_unique_sources_for_changes -ge 1) ("source-strategy.evidence_policy.min_unique_sources_for_changes 必须 >= 1：{0}" -f $path)
-            }
-            if (Test-AuditJsonProperty $data "decision_quality_policy" -and $null -ne $data.decision_quality_policy) {
-                Need (Test-AuditJsonProperty $data.decision_quality_policy "require_keyword_trace_for_changes") ("source-strategy.decision_quality_policy 缺少 require_keyword_trace_for_changes：{0}" -f $path)
-                Need (Test-AuditJsonProperty $data.decision_quality_policy "require_keyword_trace_membership") ("source-strategy.decision_quality_policy 缺少 require_keyword_trace_membership：{0}" -f $path)
-                Need (Test-AuditJsonProperty $data.decision_quality_policy "min_user_profile_keywords_per_change") ("source-strategy.decision_quality_policy 缺少 min_user_profile_keywords_per_change：{0}" -f $path)
-                Need (Test-AuditJsonProperty $data.decision_quality_policy "min_target_repo_keywords_per_change") ("source-strategy.decision_quality_policy 缺少 min_target_repo_keywords_per_change：{0}" -f $path)
-                Need (Test-AuditJsonProperty $data.decision_quality_policy "min_installed_state_keywords_per_change") ("source-strategy.decision_quality_policy 缺少 min_installed_state_keywords_per_change：{0}" -f $path)
-            }
+        "recommendations.json" {
+            Need ([int]$data.schema_version -eq 2) ("recommendations schema_version 必须为 2：{0}" -f $path)
+            Need (Test-AuditJsonProperty $data "decision_basis") ("recommendations 缺少 decision_basis：{0}" -f $path)
         }
-        "recommendations.template.json" {
-            Need (Test-AuditJsonProperty $data "schema_version") ("recommendations.template 缺少 schema_version：{0}" -f $path)
-            Need ([int]$data.schema_version -eq 2) ("recommendations.template schema_version 必须为 2：{0}" -f $path)
-            Need (Test-AuditJsonProperty $data "decision_basis") ("recommendations.template 缺少 decision_basis：{0}" -f $path)
-        }
-        "repo-scan.json" {
-            Need (Test-AuditJsonProperty $data "target") ("repo-scan 缺少 target：{0}" -f $path)
-            Need (Test-AuditJsonProperty $data "detected") ("repo-scan 缺少 detected：{0}" -f $path)
-        }
-        "repo-scans.json" {
-            Need (Test-AuditJsonProperty $data "scans") ("repo-scans 缺少 scans：{0}" -f $path)
-            Need (Assert-IsArray $data.scans) ("repo-scans.scans 必须为数组：{0}" -f $path)
-            Need (@($data.scans).Count -gt 0) ("repo-scans.scans 不能为空：{0}" -f $path)
-        }
-        "decision-insights.json" {
-            Need (Test-AuditJsonProperty $data "mode") ("decision-insights 缺少 mode：{0}" -f $path)
-            Need (Test-AuditJsonProperty $data "keywords") ("decision-insights 缺少 keywords：{0}" -f $path)
-            Need (Test-AuditJsonProperty $data.keywords "user_profile") ("decision-insights.keywords 缺少 user_profile：{0}" -f $path)
-            Need (Test-AuditJsonProperty $data.keywords "installed_state") ("decision-insights.keywords 缺少 installed_state：{0}" -f $path)
-            Need (Assert-IsArray $data.keywords.user_profile) ("decision-insights.keywords.user_profile 必须为数组：{0}" -f $path)
-            Need (Assert-IsArray $data.keywords.installed_state) ("decision-insights.keywords.installed_state 必须为数组：{0}" -f $path)
+        "receipt.json" {
+            Need ([int]$data.schema_version -eq 1) ("receipt schema_version 必须为 1：{0}" -f $path)
+            Need (Test-AuditJsonProperty $data "persisted") ("receipt 缺少 persisted：{0}" -f $path)
+            Need (Test-AuditJsonProperty $data "truth_boundary") ("receipt 缺少 truth_boundary：{0}" -f $path)
         }
     }
 }
@@ -314,7 +274,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
             "Replace placeholder values wrapped in <> before using this file.",
             "Delete example entries that are not needed, but keep the schema shape unchanged.",
             "Record source_observations for every researched candidate; selected add/remove candidates must have matching observations.",
-            "For every add/remove skill or MCP recommendation, keep keyword_trace aligned with decision-insights.json.",
+            "For every add/remove skill or MCP recommendation, keep keyword_trace aligned with snapshot.json decision_insights.",
             "This is profile-only skill discovery: reason_target_repo means installed-skill inventory / profile-only context, not target repository facts."
         )
     }
@@ -323,7 +283,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
             "Replace placeholder values wrapped in <> before using this file.",
             "Delete example entries that are not needed, but keep the schema shape unchanged.",
             "Record source_observations for every researched candidate; selected add/remove candidates must have matching observations.",
-            "For every add/remove skill or MCP recommendation, keep keyword_trace aligned with decision-insights.json.",
+            "For every add/remove skill or MCP recommendation, keep keyword_trace aligned with snapshot.json decision_insights.",
             "All install/remove decisions must cite both user-profile and target-repo reasons."
         )
     }

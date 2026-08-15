@@ -63,7 +63,34 @@ BeforeAll {
             }
             input_stability = [pscustomobject]@{ matched = $true; after_dry_run = $state }
         }
-        Write-AuditJsonFile (Get-AuditWorkflowReportPath $resolved) $receipt
+        Write-AuditReceiptSection $resolved "workflow" $receipt | Out-Null
+    }
+
+    function New-TestAuditSnapshot {
+        param(
+            [string]$Path,
+            [string]$RunId = "r-test",
+            $InstalledState = $null,
+            [object[]]$Scans = @(),
+            $SourceStrategy = $null,
+            $DecisionInsights = $null,
+            [string]$PromptVersion = (Get-AuditPromptContractVersion)
+        )
+        if ($null -eq $InstalledState) {
+            $live = Get-AuditLiveInstalledState
+            $InstalledState = [pscustomobject]@{
+                snapshot_kind = "audit_input"; captured_at = (Get-Date).ToString("o")
+                live_fingerprint = [string]$live.fingerprint; live_external_skill_fingerprint = [string]$live.external_skill_fingerprint; live_mcp_fingerprint = [string]$live.mcp_fingerprint
+                skills = @(); external_skills = @(); mcp_servers = @(); host_projection = $null
+            }
+        }
+        if ($null -eq $SourceStrategy) { $SourceStrategy = [pscustomobject]@{ mode="target-repo"; sources=@(); evidence_policy=$null; decision_quality_policy=$null } }
+        if ($null -eq $DecisionInsights) { $DecisionInsights = [pscustomobject]@{ mode="target-repo"; keywords=[pscustomobject]@{ user_profile=@("audit"); target_repo=@("repo"); profile_only_context=@("audit"); installed_state=@("skills") } } }
+        $profile = [pscustomobject]@{
+            raw_text="audit workflow"; summary="audit workflow"; last_structured_at=(Get-Date).ToString("o"); structured_by="test"
+            structured=[pscustomobject]@{ primary_work_types=@("audit"); preferred_agents=@(); tech_stack=@("powershell"); common_tasks=@("review"); constraints=@("safe"); avoidances=@(); decision_preferences=@("evidence-first") }
+        }
+        Write-AuditJsonFile $Path ([pscustomobject]@{ schema_version=1; run_id=$RunId; mode="target-repo"; prompt_contract_version=$PromptVersion; user_profile=$profile; installed_state=$InstalledState; target_scans=@($Scans); source_strategy=$SourceStrategy; decision_insights=$DecisionInsights })
     }
 
 }
@@ -325,10 +352,9 @@ Describe "Audit Targets" {
                 $promptVersion = Get-AuditPromptContractVersion
                 Set-ContentUtf8 (Join-Path $runOld "recommendations.json") '{}'
                 Set-ContentUtf8 (Join-Path $runNew "recommendations.json") '{}'
-                Set-ContentUtf8 (Join-Path $runOld "installed-skills.json") ('{"schema_version":1,"skills":[],"mcp_servers":[],"live_fingerprint":"' + [string]$live.fingerprint + '","live_mcp_fingerprint":"' + [string]$live.mcp_fingerprint + '"}')
-                Set-ContentUtf8 (Join-Path $runNew "installed-skills.json") ('{"schema_version":1,"skills":[],"mcp_servers":[],"live_fingerprint":"' + [string]$live.fingerprint + '","live_mcp_fingerprint":"' + [string]$live.mcp_fingerprint + '"}')
-                Set-ContentUtf8 (Join-Path $runOld "audit-meta.json") ('{"schema_version":1,"prompt_contract_version":"' + $promptVersion + '"}')
-                Set-ContentUtf8 (Join-Path $runNew "audit-meta.json") ('{"schema_version":1,"prompt_contract_version":"' + $promptVersion + '"}')
+                New-TestAuditSnapshot (Join-Path $runOld "snapshot.json") "r-old"
+                New-TestAuditSnapshot (Join-Path $runNew "snapshot.json") "r-new"
+                foreach($dir in @($runOld,$runNew)){Set-ContentUtf8 (Join-Path $dir "receipt.json") '{"schema_version":1,"persisted":false,"truth_boundary":"test"}'}
                 (Get-Item $runOld).LastWriteTimeUtc = [datetime]"2026-01-01T00:00:00Z"
                 (Get-Item $runNew).LastWriteTimeUtc = [datetime]"2026-01-02T00:00:00Z"
 
@@ -357,12 +383,11 @@ Describe "Audit Targets" {
                 $promptVersion = Get-AuditPromptContractVersion
 
                 Set-ContentUtf8 (Join-Path $runFresh "recommendations.json") '{}'
-                Set-ContentUtf8 (Join-Path $runFresh "installed-skills.json") ('{"schema_version":1,"skills":[],"mcp_servers":[],"live_fingerprint":"' + [string]$live.fingerprint + '","live_mcp_fingerprint":"' + [string]$live.mcp_fingerprint + '"}')
-                Set-ContentUtf8 (Join-Path $runFresh "audit-meta.json") ('{"schema_version":1,"prompt_contract_version":"' + $promptVersion + '"}')
+                New-TestAuditSnapshot (Join-Path $runFresh "snapshot.json") "r-fresh"
 
                 Set-ContentUtf8 (Join-Path $runStale "recommendations.json") '{}'
-                Set-ContentUtf8 (Join-Path $runStale "installed-skills.json") '{"schema_version":1,"skills":[],"mcp_servers":[],"live_fingerprint":"deadbeef","live_mcp_fingerprint":"deadbeef"}'
-                Set-ContentUtf8 (Join-Path $runStale "audit-meta.json") ('{"schema_version":1,"prompt_contract_version":"' + $promptVersion + '"}')
+                $staleState=[pscustomobject]@{snapshot_kind="audit_input";captured_at=(Get-Date).ToString("o");live_fingerprint="deadbeef";live_external_skill_fingerprint="unit-empty-external-skills";live_mcp_fingerprint="deadbeef";skills=@();external_skills=@();mcp_servers=@();host_projection=$null}
+                New-TestAuditSnapshot (Join-Path $runStale "snapshot.json") "r-stale" $staleState
 
                 (Get-Item $runFresh).LastWriteTimeUtc = [datetime]"2026-01-01T00:00:00Z"
                 (Get-Item $runStale).LastWriteTimeUtc = [datetime]"2026-01-02T00:00:00Z"
@@ -385,8 +410,8 @@ Describe "Audit Targets" {
 
                 $promptVersion = Get-AuditPromptContractVersion
                 Set-ContentUtf8 (Join-Path $runStale "recommendations.json") '{}'
-                Set-ContentUtf8 (Join-Path $runStale "installed-skills.json") '{"schema_version":1,"skills":[],"mcp_servers":[],"live_fingerprint":"deadbeef","live_mcp_fingerprint":"deadbeef"}'
-                Set-ContentUtf8 (Join-Path $runStale "audit-meta.json") ('{"schema_version":1,"prompt_contract_version":"' + $promptVersion + '"}')
+                $staleState=[pscustomobject]@{snapshot_kind="audit_input";captured_at=(Get-Date).ToString("o");live_fingerprint="deadbeef";live_external_skill_fingerprint="unit-empty-external-skills";live_mcp_fingerprint="deadbeef";skills=@();external_skills=@();mcp_servers=@();host_projection=$null}
+                New-TestAuditSnapshot (Join-Path $runStale "snapshot.json") "r-stale" $staleState
 
                 $thrown = $false
                 try {
@@ -413,11 +438,11 @@ Describe "Audit Targets" {
                 $run = Join-Path $auditRoot "r-missing-meta"
                 New-Item -ItemType Directory -Path $run -Force | Out-Null
                 Set-ContentUtf8 (Join-Path $run "recommendations.json") '{}'
-                Set-ContentUtf8 (Join-Path $run "installed-skills.json") '{"schema_version":1,"skills":[],"mcp_servers":[]}'
+                New-TestAuditSnapshot (Join-Path $run "snapshot.json") "r-missing-receipt"
 
                 $thrown = $false
                 try {
-                    Resolve-AuditPathRunIdPlaceholder "reports/skill-audit/<run-id>/recommendations.json" "--recommendations" @("recommendations.json", "installed-skills.json", "audit-meta.json") | Out-Null
+                    Resolve-AuditPathRunIdPlaceholder "reports/skill-audit/<run-id>/recommendations.json" "--recommendations" @("snapshot.json", "recommendations.json", "receipt.json") | Out-Null
                 }
                 catch {
                     $thrown = $true
@@ -671,7 +696,7 @@ Describe "Audit Targets" {
                 }
                 catch {
                     $thrown = $true
-                    $_.Exception.Message | Should -Match "installed-skills.json"
+                    $_.Exception.Message | Should -Match "安装状态快照"
                 }
                 $thrown | Should -Be $true
             }
@@ -680,7 +705,7 @@ Describe "Audit Targets" {
             }
         }
 
-        It "Generates a profile-only discovery bundle without repo scan files" {
+        It "Generates a profile-only discovery bundle with exactly three files" {
             $oldRoot = $script:Root
             try {
                 $script:Root = Join-Path $TestDrive "ws-discover-skills"
@@ -719,28 +744,17 @@ Describe "Audit Targets" {
                 $result = Invoke-AuditSkillDiscovery -Query "powershell testing" -OutDir $out
 
                 $result.mode | Should -Be "profile-only"
-                Test-Path (Join-Path $out "user-profile.json") | Should -Be $true
-                Test-Path (Join-Path $out "installed-skills.json") | Should -Be $true
-                Test-Path (Join-Path $out "source-strategy.json") | Should -Be $true
-                Test-Path (Join-Path $out "decision-insights.json") | Should -Be $true
-                Test-Path (Join-Path $out "recommendations.template.json") | Should -Be $true
-                Test-Path (Join-Path $out "ai-brief.md") | Should -Be $true
-                Test-Path (Join-Path $out "outer-ai-prompt.md") | Should -Be $true
-                Test-Path (Join-Path $out "audit-meta.json") | Should -Be $true
-                Test-Path (Join-Path $out "repo-scan.json") | Should -Be $false
-                Test-Path (Join-Path $out "repo-scans.json") | Should -Be $false
-
-                $template = Get-ContentUtf8 (Join-Path $out "recommendations.template.json") | ConvertFrom-Json
+                @((Get-ChildItem -LiteralPath $out -File).Name | Sort-Object) -join ',' | Should -Be 'receipt.json,recommendations.json,snapshot.json'
+                $template = Get-ContentUtf8 (Join-Path $out "recommendations.json") | ConvertFrom-Json
                 $template.recommendation_mode | Should -Be "profile-only"
                 $template.decision_basis.target_scan_used | Should -Be $false
-
-                $meta = Get-ContentUtf8 (Join-Path $out "audit-meta.json") | ConvertFrom-Json
-                $meta.mode | Should -Be "profile-only"
-                $meta.prompt_contract_version | Should -Be (Get-AuditPromptContractVersion)
-
-                $brief = Get-Content -LiteralPath (Join-Path $out "ai-brief.md") -Raw
-                $brief | Should -Match "profile-only skill discovery"
-                $brief | Should -Match "target_scan_used`` as boolean ``false``"
+                $snapshot = Get-ContentUtf8 (Join-Path $out "snapshot.json") | ConvertFrom-Json
+                $snapshot.mode | Should -Be "profile-only"
+                $snapshot.prompt_contract_version | Should -Be (Get-AuditPromptContractVersion)
+                @($snapshot.target_scans).Count | Should -Be 0
+                $receipt = Get-ContentUtf8 (Join-Path $out "receipt.json") | ConvertFrom-Json
+                $receipt.persisted | Should -BeFalse
+                $receipt.truth_boundary | Should -Be "repo_snapshot_created_not_reviewed_not_applied"
             }
             finally {
                 $script:Root = $oldRoot
@@ -830,38 +844,68 @@ Describe "Audit Targets" {
             $insights.keywords.target_repo | Should -Contain "design_package_only"
         }
 
+        It "Updates receipt sections without overwriting earlier phase results" {
+            $runDir = Join-Path $TestDrive "receipt-sections"
+            New-Item -ItemType Directory -Path $runDir -Force | Out-Null
+            $recommendationsPath = Join-Path $runDir "recommendations.json"
+            Write-AuditJsonFile $recommendationsPath (New-AuditRecommendationsTemplate "r-receipt-sections" "demo")
+            Write-AuditJsonFile (Join-Path $runDir "receipt.json") ([pscustomobject]@{
+                schema_version = 1
+                run_id = "r-receipt-sections"
+                success = $true
+                persisted = $false
+                scan = [pscustomobject]@{ success = $true; snapshot_sha256 = "abc" }
+                preflight = $null
+                dry_run = $null
+                workflow = $null
+                apply = $null
+            })
+
+            Write-AuditReceiptSection $recommendationsPath "preflight" ([ordered]@{ run_id="r-receipt-sections"; mode="preflight"; success=$true; persisted=$false }) | Out-Null
+            Write-AuditReceiptSection $recommendationsPath "dry_run" ([pscustomobject]@{ run_id="r-receipt-sections"; mode="dry_run"; success=$false; persisted=$false; error_code="blocked" }) | Out-Null
+
+            $receipt = Get-ContentUtf8 (Join-Path $runDir "receipt.json") | ConvertFrom-Json
+            $receipt.scan.snapshot_sha256 | Should -Be "abc"
+            $receipt.preflight.success | Should -Be $true
+            $receipt.dry_run.error_code | Should -Be "blocked"
+            $receipt.workflow | Should -BeNullOrEmpty
+            $receipt.apply | Should -BeNullOrEmpty
+            $receipt.persisted | Should -Be $false
+            $receipt.truth_boundary | Should -Be "repo_verified_not_applied"
+        }
+
         It "Fails when a required audit bundle file is missing" {
-            $presentPath = Join-Path $TestDrive "audit-present.md"
-            Set-ContentUtf8 $presentPath "ok"
-            $missingPath = Join-Path $TestDrive "outer-ai-prompt.md"
+            $presentPath = Join-Path $TestDrive "recommendations.json"
+            Write-AuditJsonFile $presentPath (New-AuditRecommendationsTemplate "r" "demo")
+            $missingPath = Join-Path $TestDrive "snapshot.json"
 
             $thrown = $false
             try {
                 Assert-AuditBundleRequiredFiles @(
-                    [pscustomobject]@{ label = "ai-brief.md"; path = $presentPath }
-                    [pscustomobject]@{ label = "outer-ai-prompt.md"; path = $missingPath }
+                    [pscustomobject]@{ label = "recommendations.json"; path = $presentPath }
+                    [pscustomobject]@{ label = "snapshot.json"; path = $missingPath }
                 )
             }
             catch {
                 $thrown = $true
-                $_.Exception.Message | Should -Match "outer-ai-prompt.md"
+                $_.Exception.Message | Should -Match "snapshot.json"
             }
             $thrown | Should -Be $true
         }
 
         It "Fails when required audit JSON exists but misses required fields" {
-            $invalidProfile = Join-Path $TestDrive "user-profile.json"
-            Set-ContentUtf8 $invalidProfile '{"schema_version":1,"summary":"missing raw text"}'
+            $invalidProfile = Join-Path $TestDrive "snapshot.json"
+            Set-ContentUtf8 $invalidProfile '{"schema_version":1,"run_id":"r"}'
 
             $thrown = $false
             try {
                 Assert-AuditBundleRequiredFiles @(
-                    [pscustomobject]@{ label = "user-profile.json"; path = $invalidProfile }
+                    [pscustomobject]@{ label = "snapshot.json"; path = $invalidProfile }
                 )
             }
             catch {
                 $thrown = $true
-                $_.Exception.Message | Should -Match "raw_text"
+                $_.Exception.Message | Should -Match "snapshot 缺少"
             }
             $thrown | Should -Be $true
         }
@@ -1291,19 +1335,10 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             (Get-AuditInstalledSnapshotStaleness $legacy $live).is_stale | Should -Be $false
         }
 
-        It "does not treat a live fallback host health gap as historical snapshot drift" {
-            $live = [pscustomobject]@{
-                fingerprint = "skills"
-                mcp_fingerprint = "mcp"
-                external_skill_fingerprint = "external"
-                host_projection = [pscustomobject]@{ status = "available"; fingerprint = "host"; stale_count = 1; broken_count = 0 }
-            }
-            $fallback = New-AuditInstalledSnapshotFallbackState $live "C:\missing\installed-skills.json"
+        It "Rejects a missing snapshot instead of substituting live state" {
+            $path = Join-Path $TestDrive "missing-snapshot.json"
 
-            $result = Get-AuditInstalledSnapshotStaleness $fallback $live
-
-            $result.is_stale | Should -Be $false
-            $result.host_projection_stale | Should -Be $false
+            { Get-AuditInstalledSnapshotState $path | Out-Null } | Should -Throw "*缺少 snapshot.json*"
         }
     }
 
@@ -1317,91 +1352,11 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
         It "Returns a built-in prompt with the guarded recommendation workflow" {
             $prompt = Get-AuditOuterAiPromptContent
             $prompt | Should -Not -BeNullOrEmpty
-            $prompt | Should -Match ([regex]::Escape("reports/skill-audit/<run-id>/recommendations.json"))
-            $prompt | Should -Match "schema_version=2"
+            $prompt | Should -Match 'reports[\\/]skill-audit[\\/]<run-id>[\\/]recommendations\.json'
+            $prompt | Should -Match "snapshot.json"
+            $prompt | Should -Match "recommendations.json"
             $prompt | Should -Match ([regex]::Escape("--dry-run-ack"))
             $prompt | Should -Match ([regex]::Escape("--apply --yes"))
-        }
-
-        It "Keeps built-in prompt markdown inline code literal without control-character corruption" {
-            $prompt = Get-AuditOuterAiPromptContent
-            $prompt | Should -Match '`reason_user_profile`'
-            $prompt | Should -Match '`reason_target_repo`'
-            $prompt | Should -Match "reports/skill-audit/<run-id>/recommendations.json"
-            ($prompt.IndexOf([char]11) -lt 0) | Should -Be $true
-            $hasBareCr = $false
-            for ($i = 0; $i -lt $prompt.Length; $i++) {
-                if ($prompt[$i] -ne [char]13) { continue }
-                if ($i + 1 -ge $prompt.Length -or $prompt[$i + 1] -ne [char]10) {
-                    $hasBareCr = $true
-                    break
-                }
-            }
-            $hasBareCr | Should -Be $false
-        }
-
-        It "Writes a target-repo audit brief with the supplied artifact bindings" {
-            $path = Join-Path $TestDrive "ai-brief.md"
-            $scanData = @([pscustomobject]@{
-                target = [pscustomobject]@{
-                    name = "demo"
-                }
-            })
-
-            Write-AuditAiBrief $path $scanData "user-profile.json" "repo-scan.json" "repo-scans.json" "installed-skills.json" "recommendations.template.json"
-            $brief = Get-Content -LiteralPath $path -Raw
-
-            $brief | Should -Not -BeNullOrEmpty
-            $brief | Should -Match ([regex]::Escape("user-profile.json"))
-            $brief | Should -Match ([regex]::Escape("repo-scan.json"))
-            $brief | Should -Match ([regex]::Escape("repo-scans.json"))
-            $brief | Should -Match ([regex]::Escape("installed-skills.json"))
-            $brief | Should -Match ([regex]::Escape("recommendations.template.json"))
-        }
-
-        It "Writes a profile-only audit brief without target-repo artifact bindings" {
-            $path = Join-Path $TestDrive "ai-brief-profile-only.md"
-
-            Write-AuditAiBrief $path @() "user-profile.json" "" "" "installed-skills.json" "recommendations.template.json" "profile-only" "powershell testing" "source-strategy.json" "decision-insights.json"
-            $brief = Get-Content -LiteralPath $path -Raw
-
-            $brief | Should -Not -BeNullOrEmpty
-            $brief | Should -Match ([regex]::Escape("powershell testing"))
-            $brief | Should -Match ([regex]::Escape("source-strategy.json"))
-            $brief | Should -Match ([regex]::Escape("decision-insights.json"))
-            $brief | Should -Not -Match ([regex]::Escape("repo-scan.json"))
-            $brief | Should -Not -Match ([regex]::Escape("repo-scans.json"))
-        }
-
-        It "Writes the target-repo runtime prompt with the supplied bundle bindings" {
-            $path = Join-Path $TestDrive "outer-ai-prompt.md"
-            $reportRoot = Join-Path $TestDrive "skill-audit-run"
-
-            Write-AuditOuterAiPromptFile $path $reportRoot "ai-brief.md" "user-profile.json" "repo-scan.json" "repo-scans.json" "installed-skills.json" "recommendations.template.json"
-            $prompt = Get-Content -LiteralPath $path -Raw
-
-            $prompt | Should -Not -BeNullOrEmpty
-            $prompt | Should -Match ([regex]::Escape("ai-brief.md"))
-            $prompt | Should -Match ([regex]::Escape("user-profile.json"))
-            $prompt | Should -Match ([regex]::Escape("repo-scan.json"))
-            $prompt | Should -Match ([regex]::Escape("repo-scans.json"))
-            $prompt | Should -Match ([regex]::Escape("installed-skills.json"))
-            $prompt | Should -Match ([regex]::Escape("recommendations.template.json"))
-        }
-
-        It "Writes the profile-only runtime prompt without target-repo artifact bindings" {
-            $path = Join-Path $TestDrive "outer-ai-prompt-profile-only.md"
-            $reportRoot = Join-Path $TestDrive "skill-discovery-run"
-
-            Write-AuditOuterAiPromptFile $path $reportRoot "ai-brief.md" "user-profile.json" "" "" "installed-skills.json" "recommendations.template.json" "profile-only" "powershell testing" "source-strategy.json" "decision-insights.json"
-            $prompt = Get-Content -LiteralPath $path -Raw
-
-            $prompt | Should -Not -BeNullOrEmpty
-            $prompt | Should -Match ([regex]::Escape("profile-only"))
-            $prompt | Should -Match ([regex]::Escape("powershell testing"))
-            $prompt | Should -Match ([regex]::Escape("decision-insights.json"))
-            $prompt | Should -Match "单目标扫描：N/A"
-            $prompt | Should -Match "多目标扫描：N/A"
         }
 
         It "Builds recommendations template with placeholder examples" {
@@ -1705,6 +1660,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 New-Item -ItemType Directory -Path $script:Root -Force | Out-Null
                 $path = Join-Path $script:Root "recommendations-dryrun-ack.json"
                 Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-dry","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"t","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["local"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
+                New-TestAuditSnapshot (Join-Path $script:Root "snapshot.json") "r-dry"
 
                 $report = Invoke-AuditRecommendationsApply -RecommendationsPath $path -DryRunAck "我知道未落盘"
 
@@ -1717,7 +1673,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 Test-Path -LiteralPath (Get-AuditDryRunSummaryPath $path) | Should -Be $true
                 $summaryRaw = Get-ContentUtf8 (Get-AuditDryRunSummaryPath $path)
                 $summaryRaw | Should -Match '"source_observations":\s*\[\]'
-                @(Get-ChildItem -LiteralPath $script:Root -Filter "runtime-evidence-*-dry-run-r-dry-*.md" -File).Count | Should -Be 1
+                @(Get-ChildItem -LiteralPath $script:Root -File).Name | Should -Not -Match '^runtime-evidence-'
             }
             finally {
                 $script:Root = $oldRoot
@@ -1790,6 +1746,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
 
                 $path = Join-Path $script:Root "recommendations-apply-yes.json"
                 Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-apply","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"t","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["local"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[{"name":"playwright","reason_user_profile":"u","reason_target_repo":"t","confidence":"medium","sources":["local"],"server":{"name":"playwright","transport":"stdio","command":"npx","args":["@playwright/mcp@latest"]}}],"mcp_removal_candidates":[]}'
+                New-TestAuditSnapshot (Join-Path $script:Root "snapshot.json") "r-apply"
 
                 Mock Add-ImportFromArgs { return $true }
                 Mock Ensure-AuditNewManualImportsMapped { return $true }
@@ -1821,7 +1778,8 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 $script:Root = $root
                 $path = Join-Path $root "recommendations.json"
                 Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-source","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"t","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["local-only"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
-                Set-ContentUtf8 (Join-Path $root "source-strategy.json") '{"schema_version":1,"mode":"target-repo","query":"","sources":[{"id":"official-docs"}],"evidence_policy":{"min_unique_sources_for_changes":2,"require_http_source_for_changes":true}}'
+                $strategy=[pscustomobject]@{mode="target-repo";sources=@([pscustomobject]@{id="official-docs"});evidence_policy=[pscustomobject]@{min_unique_sources_for_changes=2;require_http_source_for_changes=$true}}
+                New-TestAuditSnapshot (Join-Path $root "snapshot.json") "r-source" $null @() $strategy
 
                 $thrown = $false
                 try {
@@ -1833,7 +1791,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 }
                 $thrown | Should -Be $true
 
-                $report = Get-ContentUtf8 (Get-AuditApplyReportPath $path) | ConvertFrom-Json
+                $report = (Get-ContentUtf8 (Get-AuditApplyReportPath $path) | ConvertFrom-Json).dry_run
                 $report.error_code | Should -Be "insufficient_source_coverage"
             }
             finally {
@@ -1849,7 +1807,8 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 $script:Root = $root
                 $path = Join-Path $root "recommendations.json"
                 Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-source-observation","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"source_observations":[],"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"t","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["https://example.com/a"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
-                Set-ContentUtf8 (Join-Path $root "source-strategy.json") '{"schema_version":1,"mode":"target-repo","query":"","sources":[{"id":"official-docs"}],"evidence_policy":{"min_unique_sources_for_changes":1,"require_http_source_for_changes":true,"require_source_observations_for_changes":true}}'
+                $strategy=[pscustomobject]@{mode="target-repo";sources=@([pscustomobject]@{id="official-docs"});evidence_policy=[pscustomobject]@{min_unique_sources_for_changes=1;require_http_source_for_changes=$true;require_source_observations_for_changes=$true}}
+                New-TestAuditSnapshot (Join-Path $root "snapshot.json") "r-source-observation" $null @() $strategy
 
                 $thrown = $false
                 try {
@@ -1861,7 +1820,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 }
                 $thrown | Should -Be $true
 
-                $report = Get-ContentUtf8 (Get-AuditApplyReportPath $path) | ConvertFrom-Json
+                $report = (Get-ContentUtf8 (Get-AuditApplyReportPath $path) | ConvertFrom-Json).dry_run
                 $report.error_code | Should -Be "insufficient_source_coverage"
                 $report.source_coverage.items_with_source_observation | Should -Be 0
             }
@@ -1878,8 +1837,9 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 $script:Root = $root
                 $path = Join-Path $root "recommendations.json"
                 Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-quality","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"t","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["https://example.com/a"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
-                Set-ContentUtf8 (Join-Path $root "source-strategy.json") '{"schema_version":1,"mode":"target-repo","query":"","sources":[{"id":"official-docs"}],"evidence_policy":{"min_unique_sources_for_changes":1,"require_http_source_for_changes":true},"decision_quality_policy":{"require_keyword_trace_for_changes":true,"require_keyword_trace_membership":true,"min_user_profile_keywords_per_change":1,"min_target_repo_keywords_per_change":1,"min_installed_state_keywords_per_change":1}}'
-                Set-ContentUtf8 (Join-Path $root "decision-insights.json") '{"schema_version":1,"mode":"target-repo","keywords":{"user_profile":["ppt"],"target_repo":["react"],"installed_state":["codex"],"profile_only_context":["ppt","codex"]}}'
+                $strategy=[pscustomobject]@{mode="target-repo";sources=@([pscustomobject]@{id="official-docs"});evidence_policy=[pscustomobject]@{min_unique_sources_for_changes=1;require_http_source_for_changes=$true};decision_quality_policy=[pscustomobject]@{require_keyword_trace_for_changes=$true;require_keyword_trace_membership=$true;min_user_profile_keywords_per_change=1;min_target_repo_keywords_per_change=1;min_installed_state_keywords_per_change=1}}
+                $insights=[pscustomobject]@{mode="target-repo";keywords=[pscustomobject]@{user_profile=@("ppt");target_repo=@("react");installed_state=@("codex");profile_only_context=@("ppt","codex")}}
+                New-TestAuditSnapshot (Join-Path $root "snapshot.json") "r-quality" $null @() $strategy $insights
 
                 $thrown = $false
                 try {
@@ -1891,7 +1851,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 }
                 $thrown | Should -Be $true
 
-                $report = Get-ContentUtf8 (Get-AuditApplyReportPath $path) | ConvertFrom-Json
+                $report = (Get-ContentUtf8 (Get-AuditApplyReportPath $path) | ConvertFrom-Json).dry_run
                 $report.error_code | Should -Be "insufficient_decision_quality"
             }
             finally {
@@ -1907,15 +1867,13 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $recPath = Join-Path $runDir "recommendations.json"
             Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-preflight-ok","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
 
-            $live = Get-AuditLiveInstalledState
-            Set-ContentUtf8 (Join-Path $runDir "installed-skills.json") ('{"schema_version":1,"skills":[],"mcp_servers":[],"live_fingerprint":"' + [string]$live.fingerprint + '","live_mcp_fingerprint":"' + [string]$live.mcp_fingerprint + '"}')
-            Set-ContentUtf8 (Join-Path $runDir "audit-meta.json") ('{"schema_version":1,"run_id":"r-preflight-ok","mode":"target-repo","prompt_contract_version":"' + (Get-AuditPromptContractVersion) + '"}')
-            Set-ContentUtf8 (Join-Path $runDir "outer-ai-prompt.md") ("Prompt-Contract-Version: " + (Get-AuditPromptContractVersion))
+            New-TestAuditSnapshot (Join-Path $runDir "snapshot.json") $runId
 
             $report = Invoke-AuditRecommendationsPreflight -RecommendationsPath $recPath
+            $receipt = Get-ContentUtf8 (Join-Path $runDir "receipt.json") | ConvertFrom-Json
             $report.success | Should -Be $true
             $report.prompt_contract.matched | Should -Be $true
-            (Test-Path (Join-Path $runDir "preflight-report.json")) | Should -Be $true
+            $receipt.preflight.success | Should -Be $true
         }
 
         It "Preflight blocks stale snapshot before dry-run" {
@@ -1925,9 +1883,12 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
 
             $recPath = Join-Path $runDir "recommendations.json"
             Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-preflight-stale","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
-            Set-ContentUtf8 (Join-Path $runDir "installed-skills.json") '{"schema_version":1,"skills":[],"mcp_servers":[],"live_fingerprint":"deadbeef","live_mcp_fingerprint":"deadbeef"}'
-            Set-ContentUtf8 (Join-Path $runDir "audit-meta.json") ('{"schema_version":1,"run_id":"r-preflight-stale","mode":"target-repo","prompt_contract_version":"' + (Get-AuditPromptContractVersion) + '"}')
-            Set-ContentUtf8 (Join-Path $runDir "outer-ai-prompt.md") ("Prompt-Contract-Version: " + (Get-AuditPromptContractVersion))
+            $installedState = [pscustomobject]@{
+                snapshot_kind = "audit_input"; captured_at = (Get-Date).ToString("o")
+                live_fingerprint = "deadbeef"; live_external_skill_fingerprint = "unit-empty-external-skills"; live_mcp_fingerprint = "deadbeef"
+                skills = @(); external_skills = @(); mcp_servers = @(); host_projection = $null
+            }
+            New-TestAuditSnapshot (Join-Path $runDir "snapshot.json") $runId $installedState
 
             $thrown = $false
             try {
@@ -1938,10 +1899,11 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 $_.Exception.Message | Should -Match "stale_snapshot"
             }
             $thrown | Should -Be $true
-            (Test-Path (Join-Path $runDir "preflight-report.json")) | Should -Be $true
+            $receipt = Get-ContentUtf8 (Join-Path $runDir "receipt.json") | ConvertFrom-Json
+            $receipt.preflight.error_code | Should -Be "stale_snapshot"
         }
 
-        It "Preflight by run-id passes bundle checks before recommendations exist" {
+        It "Preflight by run-id reads the complete three-file bundle" {
             $oldRoot = $script:Root
             try {
                 $script:Root = Join-Path $TestDrive "ws-preflight-bundle"
@@ -1949,19 +1911,17 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 $runDir = Join-Path $script:Root (Join-Path "reports\skill-audit" $runId)
                 New-Item -ItemType Directory -Path $runDir -Force | Out-Null
 
-                $live = Get-AuditLiveInstalledState
-                Set-ContentUtf8 (Join-Path $runDir "installed-skills.json") ('{"schema_version":1,"skills":[],"mcp_servers":[],"live_fingerprint":"' + [string]$live.fingerprint + '","live_mcp_fingerprint":"' + [string]$live.mcp_fingerprint + '"}')
-                Set-ContentUtf8 (Join-Path $runDir "audit-meta.json") ('{"schema_version":1,"run_id":"' + $runId + '","mode":"target-repo","prompt_contract_version":"' + (Get-AuditPromptContractVersion) + '"}')
-                Set-ContentUtf8 (Join-Path $runDir "outer-ai-prompt.md") ("Prompt-Contract-Version: " + (Get-AuditPromptContractVersion))
-                Set-ContentUtf8 (Join-Path $runDir "recommendations.template.json") '{"schema_version":2,"run_id":"r-preflight-bundle","target":"*","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"template"}}'
+                New-TestAuditSnapshot (Join-Path $runDir "snapshot.json") $runId
+                Set-ContentUtf8 (Join-Path $runDir "recommendations.json") '{"schema_version":2,"run_id":"r-preflight-bundle","target":"*","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"no changes"},"source_observations":[],"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[],"empty_recommendation_reasons":["new_skills: no gap","removal_candidates: no removal","mcp_new_servers: no gap","mcp_removal_candidates: no removal"]}'
+                Write-AuditJsonFile (Join-Path $runDir "receipt.json") ([pscustomobject]@{ schema_version=1; run_id=$runId; success=$true; persisted=$false })
 
                 $report = Invoke-AuditRecommendationsPreflight -RunId $runId
 
                 $report.success | Should -Be $true
-                $report.preflight_mode | Should -Be "bundle"
-                $report.recommendations_exists | Should -Be $false
+                $report.preflight_mode | Should -Be "recommendations"
+                $report.recommendations_exists | Should -Be $true
                 $report.run_id | Should -Be $runId
-                (Test-Path -LiteralPath (Join-Path $runDir "preflight-report.json")) | Should -Be $true
+                (Get-ContentUtf8 (Join-Path $runDir "receipt.json") | ConvertFrom-Json).preflight.success | Should -Be $true
             }
             finally {
                 $script:Root = $oldRoot
@@ -1977,16 +1937,12 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 $runNew = Join-Path $auditRoot "r-new"
                 New-Item -ItemType Directory -Path $runOld -Force | Out-Null
                 New-Item -ItemType Directory -Path $runNew -Force | Out-Null
-                $live = Get-AuditLiveInstalledState
-                $promptVersion = Get-AuditPromptContractVersion
-                Set-ContentUtf8 (Join-Path $runOld "recommendations.json") '{}'
-                Set-ContentUtf8 (Join-Path $runNew "recommendations.json") '{}'
-                Set-ContentUtf8 (Join-Path $runOld "installed-skills.json") ('{"schema_version":1,"skills":[],"mcp_servers":[],"live_fingerprint":"' + [string]$live.fingerprint + '","live_mcp_fingerprint":"' + [string]$live.mcp_fingerprint + '"}')
-                Set-ContentUtf8 (Join-Path $runNew "installed-skills.json") ('{"schema_version":1,"skills":[],"mcp_servers":[],"live_fingerprint":"' + [string]$live.fingerprint + '","live_mcp_fingerprint":"' + [string]$live.mcp_fingerprint + '"}')
-                Set-ContentUtf8 (Join-Path $runOld "audit-meta.json") ('{"schema_version":1,"prompt_contract_version":"' + $promptVersion + '"}')
-                Set-ContentUtf8 (Join-Path $runNew "audit-meta.json") ('{"schema_version":1,"prompt_contract_version":"' + $promptVersion + '"}')
-                Set-ContentUtf8 (Join-Path $runOld "recommendations.template.json") '{"schema_version":2,"run_id":"r-old","target":"*"}'
-                Set-ContentUtf8 (Join-Path $runNew "recommendations.template.json") '{"schema_version":2,"run_id":"r-new","target":"*"}'
+                New-TestAuditSnapshot (Join-Path $runOld "snapshot.json") "r-old"
+                New-TestAuditSnapshot (Join-Path $runNew "snapshot.json") "r-new"
+                Write-AuditJsonFile (Join-Path $runOld "recommendations.json") (New-AuditRecommendationsTemplate "r-old" "*")
+                Write-AuditJsonFile (Join-Path $runNew "recommendations.json") (New-AuditRecommendationsTemplate "r-new" "*")
+                Write-AuditJsonFile (Join-Path $runOld "receipt.json") ([pscustomobject]@{ schema_version=1; run_id="r-old" })
+                Write-AuditJsonFile (Join-Path $runNew "receipt.json") ([pscustomobject]@{ schema_version=1; run_id="r-new" })
                 (Get-Item $runOld).LastWriteTimeUtc = [datetime]"2026-01-01T00:00:00Z"
                 (Get-Item $runNew).LastWriteTimeUtc = [datetime]"2026-01-02T00:00:00Z"
 
@@ -2009,6 +1965,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 Initialize-AuditTargetsConfig | Out-Null
                 $path = Join-Path $script:Root "recommendations.json"
                 Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-receipt","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+                New-TestAuditSnapshot (Join-Path $script:Root "snapshot.json") "r-receipt"
 
                 $thrown = $false
                 try { Invoke-AuditRecommendationsApply -RecommendationsPath $path -Apply -Yes | Out-Null }
@@ -2031,6 +1988,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 Set-ContentUtf8 $script:CfgPath $initial
                 $path = Join-Path $script:Root "recommendations.json"
                 Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-transaction","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"t","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["local"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[{"name":"playwright","reason_user_profile":"u","reason_target_repo":"t","confidence":"medium","sources":["local"],"server":{"name":"playwright","transport":"stdio","command":"npx","args":["@playwright/mcp@latest"]}}],"mcp_removal_candidates":[]}'
+                New-TestAuditSnapshot (Join-Path $script:Root "snapshot.json") "r-transaction"
                 New-AuditValidatedWorkflowReceiptFixture $path
 
                 Mock LoadCfg { return [pscustomobject]@{ imports=@(); mappings=@(); vendors=@(); mcp_servers=@() } }
@@ -2048,7 +2006,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 (Get-ContentUtf8 $script:CfgPath) | Should -Be $initial
                 Should -Invoke 构建生效 -Times 1 -Exactly -Scope It
                 Should -Invoke 同步MCP -Times 1 -Exactly -Scope It
-                $saved = Get-ContentUtf8 (Get-AuditApplyReportPath $path) | ConvertFrom-Json
+                $saved = (Get-ContentUtf8 (Get-AuditApplyReportPath $path) | ConvertFrom-Json).apply
                 $saved.persisted | Should -Be $false
                 $saved.compensation.status | Should -Be 'restored'
                 $saved.items[0].status | Should -Be 'rolled_back'
@@ -2086,6 +2044,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             New-Item -ItemType Directory -Path $runDir -Force | Out-Null
             $recPath = Join-Path $runDir "recommendations.json"
             Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-validate-dry-run","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+            New-TestAuditSnapshot (Join-Path $runDir "snapshot.json") "r-validate-dry-run"
 
             Mock Invoke-AuditRecommendationsPreflight {
                 return [pscustomobject]@{
@@ -2107,12 +2066,12 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                     removal_candidates = @()
                     mcp_items = @()
                     mcp_removal_candidates = @()
-                    dry_run_summary_path = (Join-Path $runDir "dry-run-summary.json")
+                    dry_run_summary_path = (Join-Path $runDir "receipt.json")
                 }
             }
 
             $result = Invoke-AuditRecommendationsValidateDryRun -RecommendationsPath $recPath -DryRunAck "我知道未落盘"
-            $saved = Get-ContentUtf8 (Get-AuditWorkflowReportPath $recPath) | ConvertFrom-Json
+            $saved = (Get-ContentUtf8 (Get-AuditWorkflowReportPath $recPath) | ConvertFrom-Json).workflow
 
             $result.success | Should -Be $true
             $result.persisted | Should -Be $false
@@ -2138,6 +2097,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             New-Item -ItemType Directory -Path $runDir -Force | Out-Null
             $recPath = Join-Path $runDir "recommendations.json"
             Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-validate-preflight-failed","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+            New-TestAuditSnapshot (Join-Path $runDir "snapshot.json") "r-validate-preflight-failed"
 
             Mock Invoke-AuditRecommendationsPreflight { throw "预检失败：prompt_contract_mismatch" }
             Mock Invoke-AuditRecommendationsApply { throw "dry-run must not execute" }
@@ -2151,7 +2111,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 $_.Exception.Message | Should -Match "prompt_contract_mismatch"
             }
 
-            $saved = Get-ContentUtf8 (Get-AuditWorkflowReportPath $recPath) | ConvertFrom-Json
+            $saved = (Get-ContentUtf8 (Get-AuditWorkflowReportPath $recPath) | ConvertFrom-Json).workflow
             $thrown | Should -Be $true
             $saved.success | Should -Be $false
             $saved.persisted | Should -Be $false
@@ -2175,11 +2135,11 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 $_.Exception.Message | Should -Match "recommendations_missing"
             }
 
-            $saved = Get-ContentUtf8 (Get-AuditWorkflowReportPath $recPath) | ConvertFrom-Json
+            $saved = (Get-ContentUtf8 (Get-AuditWorkflowReportPath $recPath) | ConvertFrom-Json).workflow
             $thrown | Should -Be $true
             $saved.error_code | Should -Be "recommendations_missing"
             $saved.failed_stage | Should -Be "recommendations_validation"
-            $saved.next_command | Should -Match "outer-ai-prompt.md"
+            $saved.next_command | Should -Match "snapshot.json"
             $saved.stages.preflight.status | Should -Be "not_run"
             $saved.stages.dry_run.status | Should -Be "not_run"
         }
@@ -2189,9 +2149,12 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             New-Item -ItemType Directory -Path $runDir -Force | Out-Null
             $recPath = Join-Path $runDir "recommendations.json"
             Set-ContentUtf8 $recPath '{"schema_version":2,"run_id":"r-workflow-input-changed","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+            New-TestAuditSnapshot (Join-Path $runDir "snapshot.json") "r-workflow-input-changed"
 
             Mock Invoke-AuditRecommendationsPreflight {
-                Set-ContentUtf8 (Join-Path $runDir "source-strategy.json") '{"changed":true}'
+                $snapshot = Get-ContentUtf8 (Join-Path $runDir "snapshot.json") | ConvertFrom-Json
+                $snapshot | Add-Member -NotePropertyName test_mutation -NotePropertyValue $true -Force
+                Write-AuditJsonFile (Join-Path $runDir "snapshot.json") $snapshot
                 return [pscustomobject]@{
                     success = $true
                     run_id = "r-workflow-input-changed"
@@ -2209,7 +2172,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 $_.Exception.Message | Should -Match "workflow_input_changed"
             }
 
-            $saved = Get-ContentUtf8 (Get-AuditWorkflowReportPath $recPath) | ConvertFrom-Json
+            $saved = (Get-ContentUtf8 (Get-AuditWorkflowReportPath $recPath) | ConvertFrom-Json).workflow
             $thrown | Should -Be $true
             $saved.error_code | Should -Be "workflow_input_changed"
             $saved.failed_stage | Should -Be "input_stability"

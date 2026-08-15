@@ -42,14 +42,14 @@ MCP config mutation、host projection、live readiness 是三个不同状态。�
 
 ```text
 user profile + repo scan + installed inventory
-  -> audit bundle + recommendations template
+  -> immutable snapshot.json + editable recommendations.json + machine receipt.json
   -> reviewed recommendations.json
   -> preflight + dry-run + input fingerprint
   -> explicit apply
-  -> config/source mutation + compensation + runtime receipt
+  -> config/source mutation + compensation + receipt section update
 ```
 
-Recommendations 是数据，不是授权。apply 重新读取 current config 与 snapshot，发现 drift 即阻断。
+`snapshot.json` 聚合审查输入且不可编辑；`recommendations.json` 是唯一 AI 决策文件；`receipt.json` 聚合 phase/result/rollback/truth。Recommendations 是数据，不是授权。apply 重新读取 current config 与 snapshot，snapshot 缺失或发现 drift 即阻断。
 
 ### Rule governance
 
@@ -71,11 +71,12 @@ Canonical inventory 统一来源与 alias；eligibility 处理 enabled/dependenc
 
 ### Reference shelf
 
+- Role：主架构之外、按任务显式启用的可选只读开发缓存
 - Interface：`references/reference-shelf.manifest.json` 与 `scripts/refresh-reference-repos.ps1`
 - Verification：`scripts/verify-reference-governance.ps1`
 - Owned root：`D:\CODE\external\skills-manager-references`
 
-manifest 只有 core/secondary active set。refresh 对已有 checkout 先验证 origin identity 和 dirty state；clone/fetch/pull 不改变 runtime config。候选 backlog 不持久化。
+`skills.json` 保持 runtime 真源；普通 build/test/update/projection 不读取 shelf。manifest 只有 core/secondary active set，只在显式 refresh/verify 中适用。refresh 对已有 checkout 先验证 origin identity 和 dirty state；clone/fetch/pull 不改变 runtime config。候选 backlog 不持久化。
 
 ## 3. 真值与状态
 
@@ -84,7 +85,7 @@ manifest 只有 core/secondary active set。refresh 对已有 checkout 先验证
 | 配置 | `skills.json` / lock | 仓库期望 |
 | 生成 | `skills.ps1` / `agent/` | source 与 generated 一致 |
 | audit/projection/quality | ignored `reports/` | 一次运行的 receipt |
-| reference | manifest + checkout Git state | 当前参考集合与 revision |
+| reference（显式可选） | manifest + checkout Git state | 当前参考集合与 revision；不证明产品主链健康 |
 | host | 宿主配置/可见 inventory/新会话 | `host_loaded` |
 | business | 真实用户任务 | `live_accepted` |
 
@@ -111,7 +112,7 @@ Tag release 在 checksum 与 ZIP 内 manifest 之外，为三个发布资产签�
 
 - build：生成 bundle 与 agent tree
 - test：受影响 Pester/E2E
-- contract：committed generated bundle、config、reference 与公开契约
+- contract：committed generated bundle、config 与公开契约；reference contract 仅由显式 reference verify 触发
 - hotspot：仅在真实性能/安全/发布风险存在时执行
 
 full gate 仅顺序执行一次 build、tests、committed generated bundle、lock、skill integrity 和 config contract。普通改动使用受影响验证，不重复 full。

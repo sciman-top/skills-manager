@@ -337,7 +337,7 @@ Skills 管理器（中文菜单）
   1) 接入来源：新增技能库，或用 add/npx 导入单个技能
   2) 安装技能：浏览技能 -> 选择安装/粘贴命令导入 -> 重建并同步
   3) 日常维护：更新上游 -> 重建并同步 -> doctor --strict
-  4) 目标仓审查：查看需求 -> 生成审查包 -> 预检建议 -> 应用建议
+  4) 目标仓审查：查看需求 -> 生成三文件审查包 -> 预检/校验预演 -> 显式应用
 
 菜单地图：
   - 主菜单：浏览技能、选择安装、粘贴命令导入、卸载技能、重建并同步、更新上游
@@ -353,7 +353,7 @@ Skills 管理器（中文菜单）
   - 卸载技能：从 `mappings` 移除，必要时清理导入目录和备份
   - 重建并同步：根据 `skills.json` 重建 `agent/` 并同步到 `targets`
   - 更新上游：拉取 `vendor/`、`imports/` 后重建并同步
-  - 目标仓审查：生成审查包，先 dry-run，再按确认口令落盘
+  - 目标仓审查：生成 snapshot/recommendations/receipt，先 dry-run，再按确认口令落盘
   - MCP 服务：维护 `skills.json` 中的 `mcp_servers` 并同步到目标 CLI
   - 技能库管理：维护来源、锁文件和配置
   - 一键工作流：按场景执行组合流程；支持 `--list`、`--no-prompt`、`--continue-on-error`
@@ -472,21 +472,21 @@ MCP/门禁环境变量：
 
 目标仓审查：
   - 用户基本需求是全局长期上下文；目标仓是项目级上下文。外层 AI 必须同时基于两者判断技能保留、卸载与新增。
-  - `发现新技能` 是不绑定目标仓的 profile-only 模式，复用同一套审查包、提示词、recommendations.json、dry-run/apply 流程。
+  - `发现新技能` 是不绑定目标仓的 profile-only 模式，复用同一套三文件审查包和 preflight/dry-run/apply 流程。
   - 启动审查流程后，外层 AI 可以在本次流程内自主联网研究；联网不等于自动安装。
   - 设置用户基本需求后会自动进入结构化导入流程；回车使用默认路径 `reports\skill-audit\user-profile.structured.json`，不存在时会自动生成草稿文件。
-  - 已内置“外层 AI 审查提示词”；生成审查包时会输出运行态 `outer-ai-prompt.md`，优先把它交给外层 AI，而不是只交 `ai-brief.md`。
-  - 运行态 `ai-brief.md` / `outer-ai-prompt.md` 属于审查包产物；如需改默认提示词，请改 `src/Commands/AuditTargets.ps1` 或 `overrides/audit-outer-ai-prompt.md`，不要直接手改 run 目录产物。
-  - 外层 AI 应先写完并自检 `recommendations.json`（schema、占位符、双理由、真实来源），再进入 dry-run。
+  - 每个 run 固定只有三个文件：不可编辑的 `snapshot.json`、唯一允许 AI 编辑的 `recommendations.json`、命令维护的 `receipt.json`；不得新增旁路报告或 markdown evidence。
+  - 内置提示词只定义工作流，prompt contract version 已写入 `snapshot.json`；如需改默认提示词，请改 `src/Commands/AuditTargets.ps1` 或 `overrides/audit-outer-ai-prompt.md`。
+  - 外层 AI 应先写完并自检 `recommendations.json`（schema、占位符、双理由、真实来源），再进入 preflight/dry-run；不得修改 snapshot 或 receipt。
   - `应用确认` 是单入口两阶段流程：先 dry-run，再要求输入确认口令 `APPLY <run-id>` 才执行落盘。
   - `应用` 默认只做 dry-run，且需显式确认口令 `我知道未落盘`；只有 `--apply --yes` 才会真正执行选中的新增/卸载。
   - 建议先执行 `预检`：会提前检查 `stale_snapshot` 与提示词契约版本，避免“先研究后阻断”。
-  - `应用`/`应用确认` 会校验同目录 `installed-skills.json` 快照与当前 live mappings、MCP、system/plugin 外部能力指纹；旧快照没有外部能力字段时保持兼容，新快照漂移会触发 stale_snapshot。
+  - `应用`/`应用确认` 会校验同目录 `snapshot.json` 与当前 live mappings、MCP、system/plugin 外部能力指纹；snapshot 缺失直接阻断，指纹漂移触发 stale_snapshot。
   - 仅在你明确接受风险时可加 `--allow-stale-snapshot` 跳过该阻断（报告会标记 stale 风险）。
   - 使用 `--allow-stale-snapshot` 时会触发红色警告并要求二次确认口令；非交互环境请用 `--stale-ack "<token>"` 提前传入。
   - `--out` 若指向已存在且非空目录，默认阻断，防止覆盖旧审查包；如确需复用，显式追加 `--force`。
   - `--run-id` / `--recommendations` 里出现 `<run-id>` 时会自动解析为最近可用 run；若无可用 run 才阻断并给出提示。
-  - `状态` 可查看最近一次 `apply-report.json` 的 `mode/success/persisted/changed_counts`。
+  - `状态` 从最近一次 `receipt.json` 的 workflow/dry_run/apply section 显示 `mode/success/persisted/changed_counts`。
   - 执行前会分别列出“技能新增/卸载”和“MCP 新增/卸载”四份带序号清单；dry-run 后向用户汇报时必须沿用原序号，并同时展示用户需求 / 目标仓两条简短依据。
   - `--add-indexes` / `--remove-indexes` 作用于技能清单；`--mcp-add-indexes` / `--mcp-remove-indexes` 作用于 MCP 清单；四份清单独立编号。
 

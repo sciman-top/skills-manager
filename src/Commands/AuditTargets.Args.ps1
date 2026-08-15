@@ -84,7 +84,7 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             }
             "--run-id" {
                 Need ($i + 1 -lt $items.Count) "--run-id 缺少值"
-                $result.run_id = Resolve-AuditRunIdInput ([string]$items[++$i]) "--run-id" @("recommendations.json", "installed-skills.json", "audit-meta.json")
+                $result.run_id = Resolve-AuditRunIdInput ([string]$items[++$i]) "--run-id" @("snapshot.json", "recommendations.json", "receipt.json")
                 continue
             }
             "--profile" {
@@ -107,7 +107,7 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
             }
             "--recommendations" {
                 Need ($i + 1 -lt $items.Count) "--recommendations 缺少值"
-                $result.recommendations = Resolve-AuditPathRunIdPlaceholder ([string]$items[++$i]) "--recommendations" @("recommendations.json", "installed-skills.json", "audit-meta.json")
+                $result.recommendations = Resolve-AuditPathRunIdPlaceholder ([string]$items[++$i]) "--recommendations" @("snapshot.json", "recommendations.json", "receipt.json")
                 continue
             }
             "--dry-run-ack" {

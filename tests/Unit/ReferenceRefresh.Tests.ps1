@@ -70,6 +70,23 @@ $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 $refreshScript = Join-Path $repoRoot 'scripts\refresh-reference-repos.ps1'
 }
 
+Describe 'Optional reference shelf boundary' {
+    It 'does not wire the shelf into ordinary build update projection or quality entrypoints' {
+        $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
+        $ordinaryEntrypoints = @(
+            'build.ps1',
+            'scripts\quality\run-local-quality-gates.ps1',
+            'src\Commands\Update.ps1',
+            'src\Commands\SkillProjection.ps1'
+        )
+
+        foreach ($relativePath in $ordinaryEntrypoints) {
+            $raw = Get-Content -LiteralPath (Join-Path $repoRoot $relativePath) -Raw
+            $raw | Should -Not -Match 'reference-shelf|refresh-reference-repos|verify-reference-governance'
+        }
+    }
+}
+
     It 'fetches when the existing clone origin exactly matches the manifest upstream' {
         $fixture = New-ReferenceRefreshFixture -Root (Join-Path $TestDrive 'matching')
         $manifestPath = Join-Path $TestDrive 'matching-manifest.json'

@@ -10,9 +10,7 @@ function Get-AuditPersistedChangeTotal($counts) {
 }
 
 function Get-AuditDryRunSummaryPath([string]$recommendationsPath) {
-    $dir = Split-Path $recommendationsPath -Parent
-    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
-    return (Join-Path $dir "dry-run-summary.json")
+    return (Get-AuditReceiptPath $recommendationsPath)
 }
 
 function ConvertTo-AuditJsonArray($value) {
@@ -123,7 +121,7 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
 }
 
 function Get-AuditSourceEvidencePolicy([string]$recommendationDir) {
-    $path = Join-Path $recommendationDir "source-strategy.json"
+    $path = Join-Path $recommendationDir "snapshot.json"
     $policy = [ordered]@{
         enabled = $false
         source_strategy_path = $path
@@ -131,15 +129,9 @@ function Get-AuditSourceEvidencePolicy([string]$recommendationDir) {
         require_http_source_for_changes = $false
         require_source_observations_for_changes = $false
     }
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-        return [pscustomobject]$policy
-    }
     try {
-        $raw = Get-ContentUtf8 $path
-        if ([string]::IsNullOrWhiteSpace($raw)) {
-            return [pscustomobject]$policy
-        }
-        $data = $raw | ConvertFrom-Json
+        $snapshot = Read-AuditSnapshot $recommendationDir
+        $data = $snapshot.source_strategy
         if ($data.PSObject.Properties.Match("evidence_policy").Count -eq 0 -or $null -eq $data.evidence_policy) {
             return [pscustomobject]$policy
         }
@@ -203,7 +195,7 @@ function Test-AuditRecommendationSourceCoveragePolicy($rec, $policy) {
 }
 
 function Get-AuditDecisionQualityPolicy([string]$recommendationDir) {
-    $path = Join-Path $recommendationDir "source-strategy.json"
+    $path = Join-Path $recommendationDir "snapshot.json"
     $policy = [ordered]@{
         enabled = $false
         source_strategy_path = $path
@@ -214,13 +206,9 @@ function Get-AuditDecisionQualityPolicy([string]$recommendationDir) {
         min_target_repo_keywords_per_change = 0
         min_installed_state_keywords_per_change = 0
     }
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-        return [pscustomobject]$policy
-    }
     try {
-        $raw = Get-ContentUtf8 $path
-        if ([string]::IsNullOrWhiteSpace($raw)) { return [pscustomobject]$policy }
-        $data = $raw | ConvertFrom-Json
+        $snapshot = Read-AuditSnapshot $recommendationDir
+        $data = $snapshot.source_strategy
         if ($data.PSObject.Properties.Match("mode").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$data.mode)) {
             $policy.mode = ([string]$data.mode).Trim().ToLowerInvariant()
         }
@@ -258,7 +246,7 @@ function Get-AuditDecisionQualityPolicy([string]$recommendationDir) {
 }
 
 function Get-AuditDecisionInsights([string]$recommendationDir) {
-    $path = Join-Path $recommendationDir "decision-insights.json"
+    $path = Join-Path $recommendationDir "snapshot.json"
     $result = [ordered]@{
         exists = $false
         path = $path
@@ -270,13 +258,9 @@ function Get-AuditDecisionInsights([string]$recommendationDir) {
             installed_state = @()
         }
     }
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-        return [pscustomobject]$result
-    }
     try {
-        $raw = Get-ContentUtf8 $path
-        if ([string]::IsNullOrWhiteSpace($raw)) { return [pscustomobject]$result }
-        $data = $raw | ConvertFrom-Json
+        $snapshot = Read-AuditSnapshot $recommendationDir
+        $data = $snapshot.decision_insights
         $result.exists = $true
         if ($data.PSObject.Properties.Match("mode").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$data.mode)) {
             $result.mode = ([string]$data.mode).Trim().ToLowerInvariant()
@@ -343,7 +327,7 @@ function Test-AuditRecommendationDecisionQualityPolicy($rec, $policy, $decisionI
     foreach ($token in @($targetTokens)) { $null = $targetSet.Add($token) }
     foreach ($token in @(Normalize-AuditStringArray $decisionInsights.keywords.installed_state)) { $null = $installedSet.Add($token) }
     if ([bool]$policy.require_keyword_trace_membership -and -not [bool]$decisionInsights.exists) {
-        $issues.Add("insufficient_decision_quality：decision-insights.json 缺失或不可读，无法校验 keyword_trace 归属。") | Out-Null
+        $issues.Add("insufficient_decision_quality：snapshot.json decision_insights 缺失或不可读，无法校验 keyword_trace 归属。") | Out-Null
     }
 
     $uniqueUser = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
@@ -417,54 +401,9 @@ function Test-AuditRecommendationDecisionQualityPolicy($rec, $policy, $decisionI
         })
 }
 
-function Write-AuditRuntimeEvidence([string]$mode, [string]$recommendationsPath, $report, [string[]]$commands = @()) {
-    try {
-        $date = Get-Date -Format "yyyyMMdd"
-        $time = Get-Date -Format "HHmmss"
-        $runId = if ($null -ne $report -and $report.PSObject.Properties.Match("run_id").Count -gt 0) { [string]$report.run_id } else { "" }
-        # Keep machine-run receipts beside recommendations and apply reports.
-        $dir = Split-Path -Parent $recommendationsPath
-        if ([string]::IsNullOrWhiteSpace([string]$dir)) {
-            $dir = Get-AuditReportRoot $runId
-        }
-        EnsureDir $dir
-        $safeMode = if ([string]::IsNullOrWhiteSpace($mode)) { "unknown" } else { ([regex]::Replace($mode.ToLowerInvariant(), "[^a-z0-9_-]", "-")) }
-        $safeRun = if ([string]::IsNullOrWhiteSpace($runId)) { "no-runid" } else { ([regex]::Replace($runId, "[^a-zA-Z0-9_-]", "-")) }
-        $path = Join-Path $dir ("runtime-evidence-{0}-{1}-{2}-{3}.md" -f $date, $safeMode, $safeRun, $time)
-        $changedCountsJson = if ($null -ne $report -and $report.PSObject.Properties.Match("changed_counts").Count -gt 0) { ($report.changed_counts | ConvertTo-Json -Depth 10 -Compress) } else { "{}" }
-        $rollbackText = if ($null -ne $report -and $report.PSObject.Properties.Match("rollback").Count -gt 0 -and @($report.rollback).Count -gt 0) {
-            (@($report.rollback) | ForEach-Object { "- " + [string]$_ }) -join "`r`n"
-        }
-        else {
-            "- 无"
-        }
-        $commandText = if (@($commands).Count -gt 0) { (@($commands) | ForEach-Object { "- `"$_`"" }) -join "`r`n" } else { "- 无" }
-        $content = @"
-# Audit Runtime Evidence
-
-- mode: $mode
-- run_id: $runId
-- recommendations: $recommendationsPath
-- success: $([bool]$report.success)
-- persisted: $([bool]$report.persisted)
-- timestamp: $(Get-Date -Format "o")
-
-## Commands
-$commandText
-
-## Key Output
-- changed_counts: $changedCountsJson
-
-## Rollback
-$rollbackText
-"@
-        Set-ContentUtf8 $path $content
-        return $path
-    }
-    catch {
-        Log ("写入审查运行证据失败：{0}" -f $_.Exception.Message) "WARN"
-        return ""
-    }
+function Write-AuditApplyStageReceipt([string]$recommendationsPath, $report) {
+    $section = if ([string]$report.mode -eq "dry_run") { "dry_run" } else { "apply" }
+    return (Write-AuditReceiptSection $recommendationsPath $section ([pscustomobject]$report))
 }
 
 function Apply-AuditMcpSelections($selectedAddItems, $selectedRemoveItems) {
@@ -539,70 +478,34 @@ function Apply-AuditMcpSelections($selectedAddItems, $selectedRemoveItems) {
 
 function Resolve-AuditRecommendationsPathForPreflight([string]$RecommendationsPath, [string]$RunId) {
     if (-not [string]::IsNullOrWhiteSpace($RecommendationsPath)) {
-        $resolvedInputPath = Resolve-AuditPathRunIdPlaceholder $RecommendationsPath "--recommendations" @("recommendations.json", "installed-skills.json", "audit-meta.json")
+        $resolvedInputPath = Resolve-AuditPathRunIdPlaceholder $RecommendationsPath "--recommendations" @("snapshot.json", "recommendations.json", "receipt.json")
         return (Resolve-AuditTargetPath $resolvedInputPath)
     }
     Need (-not [string]::IsNullOrWhiteSpace($RunId)) "预检至少需要 --run-id 或 --recommendations 其一"
-    $resolvedRunId = Resolve-AuditRunIdInput $RunId "--run-id" @("installed-skills.json", "audit-meta.json", "recommendations.template.json")
+    $resolvedRunId = Resolve-AuditRunIdInput $RunId "--run-id" @("snapshot.json", "recommendations.json", "receipt.json")
     return (Join-Path (Get-AuditReportRoot $resolvedRunId) "recommendations.json")
 }
 
 function Get-AuditRunPromptContractVersion([string]$recommendationDir) {
-    $metaPath = Join-Path $recommendationDir "audit-meta.json"
-    if (Test-Path -LiteralPath $metaPath -PathType Leaf) {
-        try {
-            $metaRaw = Get-ContentUtf8 $metaPath
-            if (-not [string]::IsNullOrWhiteSpace($metaRaw)) {
-                $meta = $metaRaw | ConvertFrom-Json
-                if ($meta.PSObject.Properties.Match("prompt_contract_version").Count -gt 0) {
-                    $version = ([string]$meta.prompt_contract_version).Trim()
-                    if (-not [string]::IsNullOrWhiteSpace($version)) {
-                        return $version
-                    }
-                }
-            }
-        }
-        catch {
-            # Fallback to outer-ai-prompt.md parser
-        }
-    }
-    $promptPath = Join-Path $recommendationDir "outer-ai-prompt.md"
-    if (Test-Path -LiteralPath $promptPath -PathType Leaf) {
-        $promptRaw = Get-ContentUtf8 $promptPath
-        if (-not [string]::IsNullOrWhiteSpace($promptRaw)) {
-            $match = [regex]::Match($promptRaw, "(?m)^\s*Prompt-Contract-Version:\s*(?<version>\S+)\s*$")
-            if ($match.Success) {
-                return ([string]$match.Groups["version"].Value).Trim()
-            }
-        }
-    }
-    return ""
+    try { return ([string](Read-AuditSnapshot $recommendationDir).prompt_contract_version).Trim() }
+    catch { return "" }
 }
 
 function Test-AuditUserProfilePreflight([string]$recommendationDir) {
-    $path = Join-Path $recommendationDir "user-profile.json"
+    $path = Join-Path $recommendationDir "snapshot.json"
     $issues = New-Object System.Collections.Generic.List[string]
-    $exists = Test-Path -LiteralPath $path -PathType Leaf
-    if (-not $exists) {
-        return [pscustomobject]@{
-            path = $path
-            exists = $false
-            ok = $true
-            skipped = $true
-            skipped_reason = "missing_optional_user_profile"
-            issues = @($issues)
-        }
-    }
-
     try {
-        Assert-AuditBundleFileContent $path "user-profile.json"
+        $snapshot = Read-AuditSnapshot $recommendationDir
+        Need ($null -ne $snapshot.user_profile) ("snapshot.user_profile 缺失：{0}" -f $path)
+        Need (-not [string]::IsNullOrWhiteSpace([string]$snapshot.user_profile.summary)) ("snapshot.user_profile.summary 不能为空：{0}" -f $path)
+        Need (Test-AuditStructuredProfileComplete $snapshot.user_profile.structured) ("snapshot.user_profile.structured 不完整：{0}" -f $path)
     }
     catch {
         $issues.Add([string]$_.Exception.Message) | Out-Null
     }
     return [pscustomobject]@{
         path = $path
-        exists = $true
+        exists = (Test-Path -LiteralPath $path -PathType Leaf)
         ok = ($issues.Count -eq 0)
         skipped = $false
         skipped_reason = ""
@@ -611,21 +514,10 @@ function Test-AuditUserProfilePreflight([string]$recommendationDir) {
 }
 
 function Get-AuditPreflightRunIdFromBundle([string]$recommendationDir, [string]$fallbackRunId) {
-    $metaPath = Join-Path $recommendationDir "audit-meta.json"
-    if (Test-Path -LiteralPath $metaPath -PathType Leaf) {
-        try {
-            $metaRaw = Get-ContentUtf8 $metaPath
-            if (-not [string]::IsNullOrWhiteSpace($metaRaw)) {
-                $meta = $metaRaw | ConvertFrom-Json
-                if ($meta.PSObject.Properties.Match("run_id").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$meta.run_id)) {
-                    return [string]$meta.run_id
-                }
-            }
-        }
-        catch {
-            # Keep preflight usable even when the report later records the exact parse issue.
-        }
-    }
+    try {
+        $runId = [string](Read-AuditSnapshot $recommendationDir).run_id
+        if (-not [string]::IsNullOrWhiteSpace($runId)) { return $runId }
+    } catch { }
     if (-not [string]::IsNullOrWhiteSpace($fallbackRunId) -and [string]$fallbackRunId -ne "<run-id>") {
         return [string]$fallbackRunId
     }
@@ -647,14 +539,13 @@ function Invoke-AuditRecommendationsPreflight {
         try { $rec = Load-AuditRecommendations $resolvedRecommendations }
         catch { $recommendationValidationIssue = "invalid_recommendations：{0}" -f [string]$_.Exception.Message }
     }
-    $snapshotPath = Join-Path $recommendationDir "installed-skills.json"
-    $liveState = Get-AuditLiveInstalledState
-    if (Test-Path -LiteralPath $snapshotPath -PathType Leaf) {
-        $snapshotState = Get-AuditInstalledSnapshotState $snapshotPath
-    }
     else {
-        $snapshotState = New-AuditInstalledSnapshotFallbackState $liveState $snapshotPath
+        $recommendationValidationIssue = "recommendations_missing：recommendations.json 不存在：{0}" -f $resolvedRecommendations
     }
+    $snapshotPath = Join-Path $recommendationDir "snapshot.json"
+    Need (Test-Path -LiteralPath $snapshotPath -PathType Leaf) ("缺少 snapshot.json：{0}" -f $snapshotPath)
+    $liveState = Get-AuditLiveInstalledState
+    $snapshotState = Get-AuditInstalledSnapshotState $snapshotPath
     $snapshotStaleness = Get-AuditInstalledSnapshotStaleness $snapshotState $liveState
     $isSnapshotStale = [bool]$snapshotStaleness.is_stale
 
@@ -740,11 +631,11 @@ function Invoke-AuditRecommendationsPreflight {
 
     $report = [ordered]@{
         schema_version = 1
-        preflight_mode = if ($recommendationsExists) { "recommendations" } else { "bundle" }
+        preflight_mode = "recommendations"
         run_id = if ($null -ne $rec) { [string]$rec.run_id } else { Get-AuditPreflightRunIdFromBundle $recommendationDir $RunId }
         target = if ($null -ne $rec) { [string]$rec.target } else { "" }
         success = ($issues.Count -eq 0)
-        error_code = if (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) { "invalid_recommendations" } elseif ([bool]$targetStaleness.is_stale) { "target_repo_drift" } elseif ($isSnapshotStale) { "stale_snapshot" } elseif (-not $promptVersionMatched) { "prompt_contract_mismatch" } elseif (-not $sourceCoveragePassed) { "insufficient_source_coverage" } elseif (-not $decisionQualityPassed) { "insufficient_decision_quality" } elseif (-not [bool]$userProfileCheck.ok) { "user_profile_invalid" } elseif (-not [bool]$removalDependencyCheck.ok) { "removal_dependency_blocked" } else { "" }
+        error_code = if (-not $recommendationsExists) { "recommendations_missing" } elseif (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) { "invalid_recommendations" } elseif ([bool]$targetStaleness.is_stale) { "target_repo_drift" } elseif ($isSnapshotStale) { "stale_snapshot" } elseif (-not $promptVersionMatched) { "prompt_contract_mismatch" } elseif (-not $sourceCoveragePassed) { "insufficient_source_coverage" } elseif (-not $decisionQualityPassed) { "insufficient_decision_quality" } elseif (-not [bool]$userProfileCheck.ok) { "user_profile_invalid" } elseif (-not [bool]$removalDependencyCheck.ok) { "removal_dependency_blocked" } else { "" }
         recommendations_path = $resolvedRecommendations
         recommendations_exists = $recommendationsExists
         prompt_contract = [ordered]@{
@@ -767,8 +658,7 @@ function Invoke-AuditRecommendationsPreflight {
         removal_dependency_check = $removalDependencyCheck
         issues = @($issues)
     }
-    $reportPath = Join-Path $recommendationDir "preflight-report.json"
-    Write-AuditJsonFile $reportPath ([pscustomobject]$report)
+    $reportPath = Write-AuditReceiptSection $resolvedRecommendations "preflight" ([pscustomobject]$report)
 
     Write-Host ("预检报告：{0}" -f $reportPath) -ForegroundColor Cyan
     if ($issues.Count -eq 0) {
@@ -824,21 +714,17 @@ function Complete-AuditRecommendationsDryRun {
             $Report["dry_run_ack_expected"] = $ackToken
             $Report["dry_run_ack_received"] = [string]$ackInput
             $Report.changed_counts = New-AuditChangedCounts $Plan.items $Plan.removal_candidates $Plan.mcp_items $Plan.mcp_removal_candidates
-            Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$Report)
-            $evidencePath = Write-AuditRuntimeEvidence "dry-run-canceled" $RecommendationsPath ([pscustomobject]$Report) @(".\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`"")
-            if (-not [string]::IsNullOrWhiteSpace($evidencePath)) { Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan }
+            Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$Report) | Out-Null
             return [pscustomobject]$Report
         }
         $Report["dry_run_acknowledged"] = $true
     }
     $dryRunSummaryPath = Get-AuditDryRunSummaryPath $RecommendationsPath
     $dryRunSummary = New-AuditDryRunSummary $Plan $RecommendationsPath
-    Write-AuditJsonFile $dryRunSummaryPath $dryRunSummary
+    $Report["summary"] = $dryRunSummary
     $Report["dry_run_summary_path"] = $dryRunSummaryPath
     Write-Host ("dry-run 机器可读摘要：{0}" -f $dryRunSummaryPath) -ForegroundColor Cyan
-    Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$Report)
-    $evidencePath = Write-AuditRuntimeEvidence "dry-run" $RecommendationsPath ([pscustomobject]$Report) @(".\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`" --dry-run-ack `"$([string]$DryRunAck)`"")
-    if (-not [string]::IsNullOrWhiteSpace($evidencePath)) { Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan }
+    Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$Report) | Out-Null
     return [pscustomobject]$Report
 }
 
@@ -874,8 +760,12 @@ function Test-AuditApplyWorkflowReceipt([string]$RecommendationsPath) {
     if (-not (Test-Path -LiteralPath $workflowPath -PathType Leaf)) {
         return [pscustomobject]@{ pass=$false; code='validated_dry_run_required'; message='Apply requires a successful 校验预演 workflow receipt.'; path=$workflowPath }
     }
-    try { $receipt = Get-ContentUtf8 $workflowPath | ConvertFrom-Json }
+    try {
+        $container = Get-ContentUtf8 $workflowPath | ConvertFrom-Json
+        $receipt = $container.workflow
+    }
     catch { return [pscustomobject]@{ pass=$false; code='validated_dry_run_invalid'; message=('Workflow receipt is invalid JSON: {0}' -f $_.Exception.Message); path=$workflowPath } }
+    if ($null -eq $receipt) { return [pscustomobject]@{ pass=$false; code='validated_dry_run_incomplete'; message='receipt.json does not contain a workflow section.'; path=$workflowPath } }
     $shapeValid = $receipt.schema_version -eq 1 -and [string]$receipt.workflow -eq 'recommendations_validate_dry_run' -and [bool]$receipt.success -and -not [bool]$receipt.persisted -and [string]$receipt.stages.preflight.status -eq 'passed' -and [string]$receipt.stages.dry_run.status -eq 'passed' -and [string]$receipt.stages.input_stability.status -eq 'passed' -and [bool]$receipt.input_stability.matched
     if (-not $shapeValid) { return [pscustomobject]@{ pass=$false; code='validated_dry_run_incomplete'; message='Workflow receipt does not prove preflight, dry-run, and stable inputs.'; path=$workflowPath } }
     if ([IO.Path]::GetFullPath([string]$receipt.recommendations_path) -ne $resolved -or [string]$receipt.recommendations_sha256 -ne [string](Get-FileContentHash $resolved)) {
@@ -958,6 +848,8 @@ function Invoke-AuditRecommendationsApply {
         $workflowReceipt = Test-AuditApplyWorkflowReceipt $RecommendationsPath
         if (-not [bool]$workflowReceipt.pass) { throw ('{0}：{1}' -f [string]$workflowReceipt.code,[string]$workflowReceipt.message) }
     }
+    $snapshotPath = Join-Path $recommendationDir "snapshot.json"
+    Need (Test-Path -LiteralPath $snapshotPath -PathType Leaf) ("缺少 snapshot.json：{0}" -f $snapshotPath)
     $sourcePolicy = Get-AuditSourceEvidencePolicy $recommendationDir
     $sourceCoverageCheck = Test-AuditRecommendationSourceCoveragePolicy $rec $sourcePolicy
     $decisionQualityPolicy = Get-AuditDecisionQualityPolicy $recommendationDir
@@ -989,12 +881,7 @@ function Invoke-AuditRecommendationsApply {
             source_observations = @($rec.source_observations)
             rollback = @()
         }
-        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$sourceReport)
-        $evidenceMode = if ($Apply) { "apply-blocked" } else { "dry-run-blocked" }
-        $evidencePath = Write-AuditRuntimeEvidence $evidenceMode $RecommendationsPath ([pscustomobject]$sourceReport) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`"")
-        if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
-            Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
-        }
+        Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$sourceReport) | Out-Null
         throw $sourceMessage
     }
     if (-not [bool]$decisionQualityCheck.pass) {
@@ -1023,23 +910,11 @@ function Invoke-AuditRecommendationsApply {
             source_observations = @($rec.source_observations)
             rollback = @()
         }
-        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$qualityReport)
-        $evidenceMode = if ($Apply) { "apply-blocked" } else { "dry-run-blocked" }
-        $evidencePath = Write-AuditRuntimeEvidence $evidenceMode $RecommendationsPath ([pscustomobject]$qualityReport) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`"")
-        if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
-            Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
-        }
+        Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$qualityReport) | Out-Null
         throw $qualityMessage
     }
-    $snapshotPath = Join-Path $recommendationDir "installed-skills.json"
     $liveState = Get-AuditLiveInstalledState
-    if (Test-Path -LiteralPath $snapshotPath -PathType Leaf) {
-        $snapshotState = Get-AuditInstalledSnapshotState $snapshotPath
-    }
-    else {
-        Log ("recommendations 同目录缺少 installed-skills.json，已回退为 live state 快照：{0}" -f $snapshotPath) "WARN"
-        $snapshotState = New-AuditInstalledSnapshotFallbackState $liveState $snapshotPath
-    }
+    $snapshotState = Get-AuditInstalledSnapshotState $snapshotPath
     $snapshotStaleness = Get-AuditInstalledSnapshotStaleness $snapshotState $liveState
     $isSnapshotStale = [bool]$snapshotStaleness.is_stale
     if ($isSnapshotStale -and -not $AllowStaleSnapshot) {
@@ -1071,7 +946,7 @@ function Invoke-AuditRecommendationsApply {
             source_observations = @($rec.source_observations)
             rollback = @()
         }
-        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$staleReport)
+        Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$staleReport) | Out-Null
         throw $staleMessage
     }
     if ($isSnapshotStale -and $AllowStaleSnapshot) {
@@ -1125,7 +1000,7 @@ function Invoke-AuditRecommendationsApply {
                 stale_ack_expected = $staleAckToken
                 stale_ack_received = ""
             }
-            Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$staleReport)
+            Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$staleReport) | Out-Null
             throw $hint
         }
         if ([string]::IsNullOrWhiteSpace($staleAckInput) -or $staleAckInput.Trim() -ne $staleAckToken) {
@@ -1161,7 +1036,7 @@ function Invoke-AuditRecommendationsApply {
                 stale_ack_expected = $staleAckToken
                 stale_ack_received = [string]$staleAckInput
             }
-            Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$staleReport)
+            Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$staleReport) | Out-Null
             throw "二次确认失败：未通过过期快照确认。"
         }
     }
@@ -1209,7 +1084,7 @@ function Invoke-AuditRecommendationsApply {
         $report["canceled"] = $true
         $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
         $report.persisted = $false
-        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+        Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$report) | Out-Null
         return [pscustomobject]$report
     }
     $selectedAdd = $selections.add
@@ -1244,7 +1119,7 @@ function Invoke-AuditRecommendationsApply {
                 $report.items = @($plan.items)
                 $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
                 $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
-                Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+                Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$report) | Out-Null
                 throw
             }
         }
@@ -1288,7 +1163,7 @@ function Invoke-AuditRecommendationsApply {
                 $report.mcp_removal_candidates = @($plan.mcp_removal_candidates)
                 $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
                 $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
-                Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+                Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$report) | Out-Null
                 throw
             }
         }
@@ -1309,7 +1184,7 @@ function Invoke-AuditRecommendationsApply {
                 $report.mcp_removal_candidates = @($plan.mcp_removal_candidates)
                 $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
                 $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
-                Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
+                Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$report) | Out-Null
                 throw "doctor --strict failed after applying recommendations"
             }
         }
@@ -1320,11 +1195,7 @@ function Invoke-AuditRecommendationsApply {
         $report.mcp_removal_candidates = @($plan.mcp_removal_candidates)
         $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
         $report.persisted = ((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)
-        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
-        $evidencePath = Write-AuditRuntimeEvidence "apply" $RecommendationsPath ([pscustomobject]$report) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`" --apply --yes")
-        if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
-            Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
-        }
+        Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$report) | Out-Null
         return [pscustomobject]$report
     }
     catch {
@@ -1340,11 +1211,7 @@ function Invoke-AuditRecommendationsApply {
         $report.mcp_removal_candidates = @($plan.mcp_removal_candidates)
         $report.changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
         $report.persisted = if([string]$report.compensation.status -eq 'restored'){$false}else{((Get-AuditPersistedChangeTotal $report.changed_counts) -gt 0)}
-        Write-AuditJsonFile (Get-AuditApplyReportPath $RecommendationsPath) ([pscustomobject]$report)
-        $evidencePath = Write-AuditRuntimeEvidence "apply-failed" $RecommendationsPath ([pscustomobject]$report) @(".\\skills.ps1 审查目标 应用 --recommendations `"$RecommendationsPath`" --apply --yes")
-        if (-not [string]::IsNullOrWhiteSpace($evidencePath)) {
-            Write-Host ("审查运行证据：{0}" -f $evidencePath) -ForegroundColor Cyan
-        }
+        Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$report) | Out-Null
         if([string]$report.compensation.status -eq 'failed'){throw ('{0}; compensation_failed:{1}' -f $originalFailure.Exception.Message,(@($report.compensation.errors)-join '|'))}
         throw $originalFailure
     }
@@ -1417,21 +1284,26 @@ function Invoke-AuditRecommendationsTwoStageApply {
 function Get-AuditLatestApplyReportPath {
     $auditRoot = Join-Path $script:Root "reports\skill-audit"
     if (-not (Test-Path -LiteralPath $auditRoot -PathType Container)) { return $null }
-    $candidates = @(Get-ChildItem -Path $auditRoot -Recurse -File -Filter "apply-report.json" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
-    if ($candidates.Count -eq 0) { return $null }
-    return [string]$candidates[0].FullName
+    foreach ($candidate in @(Get-ChildItem -Path $auditRoot -Recurse -File -Filter "receipt.json" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)) {
+        try {
+            $receipt = Get-ContentUtf8 $candidate.FullName | ConvertFrom-Json
+            if ($null -ne $receipt.apply -or $null -ne $receipt.dry_run -or $null -ne $receipt.workflow) { return [string]$candidate.FullName }
+        } catch { }
+    }
+    return $null
 }
 
 function Show-AuditLatestStatus {
     $path = Get-AuditLatestApplyReportPath
     if ([string]::IsNullOrWhiteSpace($path)) {
-        Write-Host "未找到 apply-report.json。请先执行：审查目标 应用确认 或 审查目标 应用。" -ForegroundColor Yellow
+        Write-Host "未找到含 dry-run/apply 状态的 receipt.json。请先执行：审查目标 校验预演 或 审查目标 应用。" -ForegroundColor Yellow
         return
     }
     try {
         $raw = Get-ContentUtf8 $path
         Need (-not [string]::IsNullOrWhiteSpace($raw)) ("状态文件为空：{0}" -f $path)
-        $report = $raw | ConvertFrom-Json
+        $receipt = $raw | ConvertFrom-Json
+        $report = if ($null -ne $receipt.apply) { $receipt.apply } elseif ($null -ne $receipt.dry_run) { $receipt.dry_run } else { $receipt.workflow }
     }
     catch {
         throw ("读取状态文件失败：{0}" -f $_.Exception.Message)

@@ -57,7 +57,7 @@ jobs:
                   $profile = 'full'
                 }
                 else {
-                  $riskPath = '^(src/|tests/|rules/|overrides/|vendor/|imports/|references/reference-shelf\.manifest\.json$|\.github/workflows/|scripts/(quality/|release/|hooks/|verify-)|build\.ps1$|install\.ps1$|skills\.json$|skills\.lock\.json$|audit-targets\.json$)'
+                  $riskPath = '^(src/|tests/|rules/|overrides/|vendor/|imports/|\.github/workflows/|scripts/(quality/|release/|hooks/|verify-)|build\.ps1$|install\.ps1$|skills\.json$|skills\.lock\.json$|audit-targets\.json$)'
                   if (@($changed | Where-Object { $_ -match $riskPath }).Count -gt 0) { $profile = 'full' }
                 }
               }

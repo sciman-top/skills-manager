@@ -374,27 +374,29 @@ function New-AuditInstalledFactsFallbackCfg {
 }
 
 function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
-    Need (-not [string]::IsNullOrWhiteSpace($snapshotPath)) "installed-skills 快照路径不能为空"
-    Need (Test-Path -LiteralPath $snapshotPath -PathType Leaf) ("缺少 installed-skills 快照：{0}" -f $snapshotPath)
+    Need (-not [string]::IsNullOrWhiteSpace($snapshotPath)) "snapshot 路径不能为空"
+    Need (Test-Path -LiteralPath $snapshotPath -PathType Leaf) ("缺少 snapshot.json：{0}" -f $snapshotPath)
     try {
         $raw = Get-ContentUtf8 $snapshotPath
-        Need (-not [string]::IsNullOrWhiteSpace($raw)) ("installed-skills 快照为空：{0}" -f $snapshotPath)
+        Need (-not [string]::IsNullOrWhiteSpace($raw)) ("snapshot.json 为空：{0}" -f $snapshotPath)
         $data = $raw | ConvertFrom-Json
     }
     catch {
-        throw ("installed-skills 快照解析失败：{0}" -f $_.Exception.Message)
+        throw ("snapshot.json 解析失败：{0}" -f $_.Exception.Message)
     }
-    Need (Test-AuditJsonProperty $data "skills") ("installed-skills 快照缺少 skills：{0}" -f $snapshotPath)
-    Need (Assert-IsArray $data.skills) ("installed-skills.skills 必须为数组：{0}" -f $snapshotPath)
+    Need (Test-AuditJsonProperty $data "installed_state") ("snapshot.json 缺少 installed_state：{0}" -f $snapshotPath)
+    $data = $data.installed_state
+    Need (Test-AuditJsonProperty $data "skills") ("snapshot.installed_state 缺少 skills：{0}" -f $snapshotPath)
+    Need (Assert-IsArray $data.skills) ("snapshot.installed_state.skills 必须为数组：{0}" -f $snapshotPath)
     $skills = @($data.skills)
     $externalSkills = @()
     if (Test-AuditJsonProperty $data 'external_skills' -and $null -ne $data.external_skills) {
-        Need (Assert-IsArray $data.external_skills) ("installed-skills.external_skills 必须为数组：{0}" -f $snapshotPath)
+        Need (Assert-IsArray $data.external_skills) ("snapshot.installed_state.external_skills 必须为数组：{0}" -f $snapshotPath)
         $externalSkills = @($data.external_skills)
     }
     $mcpServers = @()
     if (Test-AuditJsonProperty $data "mcp_servers" -and $null -ne $data.mcp_servers) {
-        Need (Assert-IsArray $data.mcp_servers) ("installed-skills.mcp_servers 必须为数组：{0}" -f $snapshotPath)
+        Need (Assert-IsArray $data.mcp_servers) ("snapshot.installed_state.mcp_servers 必须为数组：{0}" -f $snapshotPath)
         $mcpServers = @($data.mcp_servers)
     }
     $fingerprint = ""
@@ -437,21 +439,6 @@ function Get-AuditInstalledSnapshotState([string]$snapshotPath) {
     })
 }
 
-function New-AuditInstalledSnapshotFallbackState($liveState, [string]$snapshotPath) {
-    return [pscustomobject]([ordered]@{
-        path = $snapshotPath
-        snapshot_kind = "legacy_live_fallback"
-        captured_at = [string]$liveState.captured_at
-        skill_count = [int]$liveState.skill_count
-        fingerprint = [string]$liveState.fingerprint
-        external_skill_count = if ($liveState.PSObject.Properties.Match('external_skill_count').Count -gt 0) { [int]$liveState.external_skill_count } else { 0 }
-        external_skill_fingerprint = if ($liveState.PSObject.Properties.Match('external_skill_fingerprint').Count -gt 0) { [string]$liveState.external_skill_fingerprint } else { '' }
-        mcp_server_count = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
-        mcp_fingerprint = if ($liveState.PSObject.Properties.Match("mcp_fingerprint").Count -gt 0) { [string]$liveState.mcp_fingerprint } else { "" }
-        host_projection = if ($liveState.PSObject.Properties.Match('host_projection').Count -gt 0) { $liveState.host_projection } else { $null }
-    })
-}
-
 function Get-AuditInstalledSnapshotStaleness($snapshotState, $liveState) {
     $skillStale = ([string]$snapshotState.fingerprint -ne [string]$liveState.fingerprint)
     $mcpStale = $false
@@ -465,9 +452,8 @@ function Get-AuditInstalledSnapshotStaleness($snapshotState, $liveState) {
     $hostStale = $false
     if ($snapshotState.PSObject.Properties.Match('host_projection').Count -gt 0 -and $null -ne $snapshotState.host_projection -and $liveState.PSObject.Properties.Match('host_projection').Count -gt 0) {
         $snapshotHost = $snapshotState.host_projection; $liveHost = $liveState.host_projection
-        $isLiveFallback = [string]$snapshotState.snapshot_kind -eq 'legacy_live_fallback'
         if ([string]$snapshotHost.status -eq 'available' -and [string]$liveHost.status -eq 'available') {
-            $hostStale = ([string]$snapshotHost.fingerprint -ne [string]$liveHost.fingerprint -or (-not $isLiveFallback -and ([int]$liveHost.stale_count -gt 0 -or [int]$liveHost.broken_count -gt 0)))
+            $hostStale = ([string]$snapshotHost.fingerprint -ne [string]$liveHost.fingerprint -or [int]$liveHost.stale_count -gt 0 -or [int]$liveHost.broken_count -gt 0)
         }
     }
     return [pscustomobject]([ordered]@{

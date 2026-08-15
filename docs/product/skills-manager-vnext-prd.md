@@ -23,11 +23,11 @@
 - `skills.json` / `skills.lock.json` 配置与锁定
 - vendor/import/mapping/target 构建
 - MCP install/uninstall/profile/sync
-- target audit bundle、recommendations preflight/dry-run/apply
+- target audit 三文件 bundle、recommendations preflight/dry-run/apply
 - rule audit、single-repo patch、rule-estate transaction
 - canonical skill inventory、native projection（metadata budget 与 description 截断复用宿主原生能力）
 - explicit `capability-router` cold discovery/policy validation
-- core/secondary reference shelf refresh
+- 按任务显式启用的可选 core/secondary reference shelf refresh/verify
 - build、focused tests、contract/invariant checks、risk-triggered full gate
 
 ### 不包含
@@ -67,10 +67,10 @@
 ### 5.3 目标仓审查
 
 - `FR-AUD-001`：扫描同时读取用户需求、目标仓事实与已安装 skills/MCP；宿主状态不在仓库内猜测。
-- `FR-AUD-002`：bundle 位于 `reports/skill-audit/<run-id>/`，包含 machine-readable recommendations 模板与 prompt。
+- `FR-AUD-002`：bundle 位于 `reports/skill-audit/<run-id>/` 且固定为三个文件：不可变输入 `snapshot.json`、唯一 AI 可编辑文件 `recommendations.json`、机器维护记录 `receipt.json`。
 - `FR-AUD-003`：recommendations 必须经过 schema/source/staleness/preflight/dry-run；只有 `--apply --yes` 写入。
 - `FR-AUD-004`：应用重新读取当前配置并校验输入快照、选择清单和补偿；失败 truthful。
-- `FR-AUD-005`：runtime evidence 与 recommendations 同目录，不写 tracked docs。
+- `FR-AUD-005`：preflight、dry-run、workflow、apply 与 compensation 只更新 `receipt.json` 对应 section；不得生成第四个报告或 markdown evidence 文件。
 
 ### 5.4 规则治理
 
@@ -90,10 +90,11 @@
 
 ### 5.6 Reference shelf
 
-- `FR-REF-001`：manifest owned root 固定为 `D:\CODE\external\skills-manager-references`。
-- `FR-REF-002`：manifest 只保留 active core/secondary repo，name/path 唯一，default set 只引用 core。
-- `FR-REF-003`：refresh 校验 origin、dirty 状态和 containment，只做 fetch/fast-forward/clone。
-- `FR-REF-004`：refresh 不授权采纳、安装、执行或 runtime import 删除；无消费者候选需要时重新发现。
+- `FR-REF-001`：reference shelf 是可选只读开发缓存；`skills.json` 是 runtime 真源，外置 checkout 缺失或未刷新不得阻断普通 build/test/update/projection。
+- `FR-REF-002`：manifest 只在显式 refresh/verify 中适用，owned root 固定为 `D:\CODE\external\skills-manager-references`。
+- `FR-REF-003`：manifest 只保留 active core/secondary repo，name/path 唯一，default set 只引用 core。
+- `FR-REF-004`：refresh 校验 origin、dirty 状态和 containment，只做 fetch/fast-forward/clone。
+- `FR-REF-005`：refresh/verify 失败只阻断该参考工作流，不授权采纳、安装、执行或 runtime import 删除；无消费者候选需要时重新发现。
 
 ## 6. 非功能需求
 
@@ -101,7 +102,7 @@
 - local-first；除显式 source refresh、MCP 或 live probe 外不依赖网络。
 - secret-redaction-first；日志和 receipt 不写 token、header value 或环境 secret。
 - 所有写路径有 containment、freshness、授权、rollback 或 compensation。
-- generated sync、config、reference 或公开契约任一失败即阻断；其他检查按当前风险触发。
+- generated sync、config 或公开契约失败即阻断；reference 只在显式 refresh/verify 时 fail closed，其他检查按当前风险触发。
 - 不新增只有一个 adapter 的 seam；不为历史兼容保留无 caller interface。
 
 ## 7. 验收

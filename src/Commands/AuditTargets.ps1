@@ -20,61 +20,18 @@ function Get-AuditOuterAiPromptOverridePath {
 
 function Get-DefaultAuditOuterAiPrompt {
     return @"
-# Outer AI Audit Prompt (Short / Codex + Claude)
+# Audit Recommendations Workflow
 
-目标：基于当前审查包生成可预检的 recommendations.json；预检通过后只执行 dry-run。未经明确确认，不得 apply。
+目标：基于一个当前 run 的 ``snapshot.json`` 完成 ``recommendations.json``，再执行预检与 dry-run；未经明确确认不得 apply。
 
-0) 写入边界
-- 只允许写/更新 ``reports/skill-audit/<run-id>/recommendations.json``；画像缺失时可写 ``reports/skill-audit/user-profile.structured.json``。
-- 不得修改 ``outer-ai-prompt.md``、``ai-brief.md``、``user-profile.json``、``installed-skills.json``、``source-strategy.json``、``decision-insights.json``、``recommendations.template.json``、``repo-scan.json`` / ``repo-scans.json``。
-- 不得把 dry-run 建议描述成已安装、已卸载或已落盘。
-
-1) run-id
-- 如果当前提示词已列出审查包目录和文件路径，以该运行包为准。
-- ``<run-id>`` 只用于命令路径占位；写 recommendations 前必须已有扫描/发现运行包，执行预检或 dry-run 前必须已写出 recommendations.json。
-- 路径中的 ``<run-id>`` 指审查包目录名；若 audit-meta.json 内部 run_id 不同，不要把两者混用，命令路径必须继续使用目录名。
-- 若无可用运行包：立即停止并报告：先执行 ``.\skills.ps1 审查目标 扫描`` 或 ``.\skills.ps1 审查目标 发现新技能``。
-
-2) 画像预检查（只在本轮输入显示画像不完整时执行）
-- 检查 ``reports/skill-audit/user-profile.json.summary`` 是否非空；或检查 ``reports/skill-audit/user-profile.structured.json`` 中 ``summary`` 非空且 ``structured`` 完整。
-- 若 summary 为空或 structured 不完整：补全 ``reports/skill-audit/user-profile.structured.json``（schema 不变，summary 非空，structured_by="outer-ai"），然后执行：
-  ``.\skills.ps1 审查目标 需求结构化 --profile "reports\skill-audit\user-profile.structured.json"``
-- 导入后复查；失败最多重试 1 次，再失败立即停止。
-
-3) 只读输入（必须真实读取）
-- outer-ai-prompt.md、ai-brief.md、user-profile.json、installed-skills.json（仅输入快照；skills 为受管技能，external_skills 为只读 system/plugin 能力）、source-strategy.json、decision-insights.json、recommendations.template.json
-- repo-scan.json / repo-scans.json：存在才读；N/A/profile-only 不得臆造仓库事实。
-- source-strategy.json 中的 evidence_policy / decision_quality_policy 是硬约束；decision-insights.json 是 keyword_trace 的可选关键词来源。
-- 不得复用旧 run 的 recommendations.json、旧提示词或聊天记忆作为本轮结论；旧内容只能作为待核线索，最终必须回到本轮输入和本轮来源。
-
-4) 产出 recommendations.json
-- 路径：``reports/skill-audit/<run-id>/recommendations.json``
-- ``schema_version=2``；不得保留 ``<...>``；``decision_basis.summary`` 非空
-- 每条新增/卸载（skills/MCP）必须有：``reason_user_profile``、``reason_target_repo``、``sources``（仅本轮真实来源）
-- 每条新增/卸载（skills/MCP）建议必须有匹配的 ``source_observations``；若策略要求，``sources`` 数量、http 来源和 observation 必须达标
-- 每条新增/卸载（skills/MCP）建议应包含 ``keyword_trace.user_profile`` / ``keyword_trace.target_repo_or_context`` / ``keyword_trace.installed_state``（与 decision-insights 对齐）
-- 每条变更建议都要说明相对 installed-skills.json / mcp_servers 的非重复增量价值，或给出具体卸载理由；重复、泛化、证据弱则留空或放入 ``do_not_install``
-- MCP server/env 不得包含明文 token/password/key；需要凭据时只写环境变量名或占位说明，并用 sources / source_observations 说明依据
-- MCP 新增写 ``mcp_new_servers`` 且 ``name==server.name``；MCP 卸载写 ``mcp_removal_candidates``
-- ``overlap_findings`` 仅报告；宿主原生选择用 ``routing.decision_owner=host_ai / selection_policy / members(name,role)``，只有真实 skill fallback 才写 ``fallback_router``；旧 ``routing.router`` 继续兼容；``external_skills`` 不得写成可自动卸载项；``do_not_install`` 仅记录当前不应安装项；证据不足留空
-- 若四类新增/卸载建议均为空，可输出有效 no-op；no-op 不强制网络搜索，``source_observations=[]`` 合法，但必须在 ``decision_basis.summary`` 或 ``empty_recommendation_reasons`` 中说明本地覆盖依据。
-
-5) 自检、预检、dry-run
-- 自检：JSON/schema/双理由/sources/source_observations/keyword_trace/无占位符/无重复建议
-- 预检：
-  ``.\skills.ps1 审查目标 预检 --recommendations "reports\skill-audit\<run-id>\recommendations.json"``
-- 若预检失败（如 stale_snapshot、prompt_contract_mismatch、insufficient_source_coverage、insufficient_decision_quality、user_profile_invalid、removal_dependency_blocked），停止并报告阻断项；删除项须先清理报告给出的精确反向引用，不要绕过。
-- dry-run：
-  ``.\skills.ps1 审查目标 应用 --recommendations "reports\skill-audit\<run-id>\recommendations.json" --dry-run-ack "我知道未落盘"``
-- 自检、预检或 dry-run 失败即停止并报告阻断项
-
-6) 汇报格式（按 dry-run 原序号，不重排）
-- 新增建议 / 卸载建议 / MCP 新增建议 / MCP 卸载建议
-- 每项：序号、名称、reason_user_profile、reason_target_repo、sources
-- 空类必须写“无该类建议”，并给 1 句原因
-- 最后明确状态：recommendations 已写出；预检通过/失败；dry-run 通过/失败；apply 未执行（除非用户已明确确认）
-
-安全约束：未收到明确确认，不执行 ``--apply --yes``；不得把建议写成已生效。
+1. 只读 ``reports/skill-audit/<run-id>/snapshot.json``。它聚合用户画像、已安装技能/MCP、目标仓扫描、来源策略、决策关键词与 prompt contract；不得修改。
+2. 只编辑同目录 ``recommendations.json``：保持 schema v2，删除全部 ``<...>`` 示例占位符；每条新增/卸载建议必须有双理由、真实来源、匹配的 ``source_observations`` 与符合 snapshot policy 的 ``keyword_trace``。
+3. 不得把 external/system/plugin skills 当作可自动卸载项；MCP payload 不得包含明文凭据。证据不足时保留空类别或 ``do_not_install``，不要强行推荐。
+4. 执行：
+   ``.\skills.ps1 审查目标 预检 --recommendations "reports\skill-audit\<run-id>\recommendations.json"``
+5. 预检通过后执行：
+   ``.\skills.ps1 审查目标 校验预演 --recommendations "reports\skill-audit\<run-id>\recommendations.json" --dry-run-ack "我知道未落盘"``
+6. 从 ``receipt.json`` 汇报四类结果、``persisted=false`` 与 truth boundary；任一失败即停止。只有用户明确授权后才可执行 ``--apply --yes``。
 "@
 }
 
@@ -667,7 +624,7 @@ function Get-AuditRunId {
 }
 
 function Get-AuditPromptContractVersion {
-    return "audit-prompt-v20260810.1"
+    return "audit-prompt-v20260815.1"
 }
 
 function Get-AuditReportRoot([string]$runId) {
@@ -723,9 +680,8 @@ function Get-AuditRunCandidateBuckets([string[]]$RequiredFiles = @()) {
             continue
         }
 
-        $snapshotPath = Join-Path $dir.FullName "installed-skills.json"
-        $metaPath = Join-Path $dir.FullName "audit-meta.json"
-        $canCheckStale = (Test-Path -LiteralPath $snapshotPath -PathType Leaf) -and (Test-Path -LiteralPath $metaPath -PathType Leaf)
+        $snapshotPath = Join-Path $dir.FullName "snapshot.json"
+        $canCheckStale = Test-Path -LiteralPath $snapshotPath -PathType Leaf
         if (-not $canCheckStale) {
             $result.unknown.Add([string]$dir.Name) | Out-Null
             continue
@@ -761,11 +717,11 @@ function Get-AuditRunCandidateBuckets([string[]]$RequiredFiles = @()) {
         }
 
         try {
-            $metaRaw = Get-ContentUtf8 $metaPath
-            if (-not [string]::IsNullOrWhiteSpace($metaRaw)) {
-                $meta = $metaRaw | ConvertFrom-Json
-                if ($meta.PSObject.Properties.Match("prompt_contract_version").Count -gt 0) {
-                    $runPromptVersion = ([string]$meta.prompt_contract_version).Trim()
+            $snapshotRaw = Get-ContentUtf8 $snapshotPath
+            if (-not [string]::IsNullOrWhiteSpace($snapshotRaw)) {
+                $snapshot = $snapshotRaw | ConvertFrom-Json
+                if ($snapshot.PSObject.Properties.Match("prompt_contract_version").Count -gt 0) {
+                    $runPromptVersion = ([string]$snapshot.prompt_contract_version).Trim()
                     if (-not [string]::IsNullOrWhiteSpace($runPromptVersion) -and [string]$runPromptVersion -ne [string]$currentPromptVersion) {
                         $isStale = $true
                     }
@@ -1772,342 +1728,60 @@ function Write-AuditJsonFile([string]$path, $data) {
     Set-ContentUtf8 $path ($data | ConvertTo-Json -Depth 40)
 }
 
-function Write-AuditAiBrief([string]$path, $scanData, [string]$userProfilePath, [string]$repoScanPath, [string]$repoScansPath, [string]$installedSkillsPath, [string]$templatePath, [string]$Mode = "target-repo", [string]$Query = "", [string]$SourceStrategyPath = "", [string]$DecisionInsightsPath = "") {
-    $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
-    $targetNames = @($scanData | ForEach-Object { $_.target.name })
-    if ([string]::IsNullOrWhiteSpace($repoScanPath)) { $repoScanPath = "N/A" }
-    if ([string]::IsNullOrWhiteSpace($repoScansPath)) { $repoScansPath = "N/A" }
-    if ([string]::IsNullOrWhiteSpace($SourceStrategyPath)) { $SourceStrategyPath = "N/A" }
-    if ([string]::IsNullOrWhiteSpace($DecisionInsightsPath)) { $DecisionInsightsPath = "N/A" }
-    $recommendationsPath = Join-Path (Split-Path $path -Parent) "recommendations.json"
-
-    if ($normalizedMode -eq "profile-only") {
-        $queryText = if ([string]::IsNullOrWhiteSpace($Query)) { "N/A" } else { $Query }
-        $content = @"
-# Skill Audit Brief
-
-Run ID: $(Split-Path (Split-Path $path -Parent) -Leaf)
-Mode: profile-only skill discovery
-Targets: N/A
-Discovery query: $queryText
-
-Use the generated user profile JSON, installed-skills snapshot JSON, and source strategy JSON to decide:
-
-- Which installed skills should be kept for the user's long-term workflow.
-- Which installed skills should be proposed for removal because they no longer fit.
-- Which installed MCP servers should be kept or removed.
-- Which missing skills are strongly justified without binding the decision to a target repository.
-- Which missing MCP servers are strongly justified without binding the decision to a target repository.
-
-External research is intentionally performed by the outer AI agent. Search official documentation, MCP provider documentation, security/permission notes, strong community projects, best practices, https://skills.sh/, GitHub Trending, and the find-skills workflow.
-
-Primary output file (must be valid JSON, no prose):
-
-$templatePath
-
-Scan inputs:
-- Single-target scan JSON: N/A
-- Multi-target scans JSON: N/A
-- Source strategy JSON: $SourceStrategyPath
-- Decision insights JSON: $DecisionInsightsPath
-
-Rules:
-
-- Profile-only mode has no target repo scan; do not fabricate repository facts.
-- Only write ``recommendations.json`` in this run directory. Do not modify generated input files, snapshots, prompts, briefs, templates, source strategy, decision insights, or repo scan files.
-- The audit commands may automatically write runtime evidence such as ``preflight-report.json``, ``dry-run-summary.json``, ``apply-report.json``, and ``runtime-evidence-*.md`` in this run directory; treat those as expected command outputs, not files for the outer AI agent to hand-edit.
-- All decisions must be based on user-profile.json, installed-skills.json (audit snapshot, not live source of truth), source-strategy.json, and real external research. Treat ``skills`` as managed install/removal candidates and ``external_skills`` as read-only system/plugin capability context.
-- decision-insights.json provides machine-readable keyword anchors; every add/remove skill or MCP recommendation should keep ``keyword_trace.user_profile`` + ``keyword_trace.target_repo_or_context`` + ``keyword_trace.installed_state`` aligned to it.
-- Treat source-strategy.json ``evidence_policy`` and ``decision_quality_policy`` as hard constraints.
-- Use ``reason_target_repo`` to explain the current installed-skill inventory / profile-only context; do not claim target repository evidence.
-- If any required local input is missing, unreadable, or empty, stop and report the blocker instead of guessing.
-- Network research is authorized within this audit workflow, but installation still requires --apply --yes.
-- Replace every template placeholder wrapped in `<...>` or delete the example entry entirely; do not leave placeholder values in the final file.
-- Keep ``recommendation_mode`` as ``profile-only``.
-- Keep ``decision_basis.user_profile_used`` and ``decision_basis.source_strategy_used`` as boolean ``true``; keep ``decision_basis.target_scan_used`` as boolean ``false``; provide a non-empty ``decision_basis.summary``.
-- Record ``source_observations`` for researched candidates; every selected skill/MCP add/remove recommendation must have a matching observation with real sources and matching candidate_type/name/decision.
-- Every selected recommendation must provide a concrete incremental benefit over the installed snapshot, or a specific removal rationale; omit generic, duplicate, or weakly sourced items.
-- Skill installs require ``reason_user_profile``, ``reason_target_repo``, source links, confidence, repo, skill path, ref, and mode.
-- Skill removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and the exact installed ``vendor``/``from`` pair.
-- MCP installs must include ``reason_user_profile``, ``reason_target_repo``, sources, confidence, a valid ``server`` payload, and provider/security evidence when available.
-- MCP removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and ``installed.name``.
-- For removals, copy exact installed identifiers from installed-skills.json; do not normalize or guess vendor/from/name.
-- Never include plaintext tokens, passwords, API keys, or private credentials in MCP server payloads; use environment variable names/placeholders only when source-backed.
-- Skill ``install.mode`` must stay ``manual`` or ``vendor``; ``confidence`` must stay ``low``, ``medium``, or ``high``.
-- MCP ``server.transport`` must stay ``stdio``/``sse``/``http``; ``stdio`` requires ``command``; ``sse/http`` requires ``url``.
-- Each add/remove recommendation must keep both reasons concise and user-readable.
-- If either reason field is missing on any recommendation, treat the run as incomplete and stop before dry-run summary.
-- Overlap findings are report-only; include structured router/member roles when overlap exists, and do not recommend automatic uninstall of external system/plugin skills.
-- Use ``do_not_install`` for researched options that should stay out of the repo right now.
-- Prefer high-reputation sources and avoid weak duplicate skills.
-- Cover the built-in default sources and record the actual sources you used; GitHub Trending is discovery evidence only, never sufficient by itself.
-- Keep recommendations machine-readable JSON matching the template.
-- The template already includes placeholder example items. Replace placeholder values or delete the example entries you do not need; do not invent a different schema.
-- Cite only sources you actually inspected during this run. Do not fabricate source links, source observations, or source conclusions.
-- If evidence is insufficient, leave the category empty and explain briefly instead of forcing low-quality recommendations.
-- If all add/remove categories are empty, a no-op recommendation is valid without network research; ``source_observations=[]`` is allowed when there are no selected add/remove items and the local coverage basis is explained.
-- After dry-run, show numbered skill add/remove and MCP add/remove lists with one-line reasons per item (``reason_user_profile`` + ``reason_target_repo``).
-- After dry-run, report commands run plus the explicit state: recommendations written, preflight passed/failed, dry-run passed/failed, apply not run unless explicitly confirmed.
-- If a list is empty, explicitly output "no <category> recommendations" with a brief reason.
-- Keep dry-run numbering stable; do not renumber or reorder indexes in the user-facing summary.
-
-Pre-dry-run self-check:
-
-- recommendations.json parses as JSON and keeps ``schema_version = 2``.
-- ``recommendation_mode`` is ``profile-only``.
-- ``decision_basis.user_profile_used`` and ``decision_basis.source_strategy_used`` are ``true``.
-- ``decision_basis.target_scan_used`` is ``false``.
-- No remaining placeholder values wrapped in `<...>`.
-- Each skill/MCP add/remove item has both reasons plus at least one real source.
-- Each selected skill/MCP add/remove item has a matching ``source_observations`` entry with real sources.
-- Each skill/MCP add/remove item keeps non-empty ``keyword_trace`` arrays (user_profile / target_repo_or_context / installed_state).
-- Each selected recommendation has non-duplicative incremental value over installed-skills.json / mcp_servers, or a specific removal rationale.
-- No MCP server payload contains plaintext credentials.
-- No duplicate skill add/remove or MCP add/remove recommendations remain in the final file.
-- Stop before dry-run if any self-check item fails.
-
-Execution order:
-
-1) Read all local inputs
-2) Write ``recommendations.json`` from ``recommendations.template.json`` to ``$recommendationsPath``
-3) Run the self-check and stop if any item fails
-4) Execute preflight: ``.\skills.ps1 审查目标 预检 --recommendations "$recommendationsPath"``
-5) Execute dry-run
-6) Summarize dry-run with original indexes and one-line dual-reason entries
-7) Wait for explicit user confirmation before apply
-
-User-facing dry-run summary format:
-
-- add: ``[index] <skill-name> | user: <reason_user_profile> | context: <reason_target_repo>``
-- remove: ``[index] <skill-name> | user: <reason_user_profile> | context: <reason_target_repo>``
-- mcp-add: ``[index] <mcp-name> | user: <reason_user_profile> | context: <reason_target_repo>``
-- mcp-remove: ``[index] <mcp-name> | user: <reason_user_profile> | context: <reason_target_repo>``
-- empty category: ``no add recommendations: <brief reason>`` / ``no removal recommendations: <brief reason>`` / ``no mcp-add recommendations: <brief reason>`` / ``no mcp-remove recommendations: <brief reason>``
-
-User profile JSON: $userProfilePath
-Installed skills JSON: $installedSkillsPath
-Source strategy JSON: $SourceStrategyPath
-Decision insights JSON: $DecisionInsightsPath
-"@
-        Set-ContentUtf8 $path $content
-        return
-    }
-
-    $content = @"
-# Skill Audit Brief
-
-Run ID: $(Split-Path (Split-Path $path -Parent) -Leaf)
-Targets: $($targetNames -join ", ")
-
-Use the generated user profile JSON, repo scan JSON, and installed-skills snapshot JSON to decide:
-
-- Which installed skills should be kept for each target repository.
-- Which installed skills should be proposed for removal.
-- Which installed MCP servers should be kept for each target repository.
-- Which installed MCP servers should be proposed for removal.
-- Which missing skills are strongly justified for these targets.
-- Which missing MCP servers are strongly justified for these targets.
-
-External research is intentionally performed by the outer AI agent. Search official documentation, MCP provider documentation, security/permission notes, strong community projects, best practices, https://skills.sh/, GitHub Trending, and the find-skills workflow.
-
-Primary output file (must be valid JSON, no prose):
-
-$templatePath
-
-Scan inputs:
-- Single-target scan JSON: $repoScanPath
-- Multi-target scans JSON: $repoScansPath
-- Source strategy JSON: $SourceStrategyPath
-- Decision insights JSON: $DecisionInsightsPath
-
-Rules:
-
-- All decisions must be based on BOTH user-profile.json and target repo scan facts, and must use installed-skills.json as the audit snapshot for currently installed skills and MCP servers. Treat ``skills`` as managed install/removal candidates and ``external_skills`` as read-only system/plugin capability context.
-- Only write ``recommendations.json`` in this run directory. Do not modify generated input files, snapshots, prompts, briefs, templates, source strategy, decision insights, or repo scan files.
-- The audit commands may automatically write runtime evidence such as ``preflight-report.json``, ``dry-run-summary.json``, ``apply-report.json``, and ``runtime-evidence-*.md`` in this run directory; treat those as expected command outputs, not files for the outer AI agent to hand-edit.
-- Use source-strategy.json to cover the built-in source set and explain source tradeoffs.
-- decision-insights.json provides machine-readable keyword anchors; every add/remove skill or MCP recommendation should keep ``keyword_trace.user_profile`` + ``keyword_trace.target_repo_or_context`` + ``keyword_trace.installed_state`` aligned to it.
-- Treat source-strategy.json ``evidence_policy`` and ``decision_quality_policy`` as hard constraints.
-- Treat any scan path shown as ``N/A`` as "not provided"; do not infer hidden content from it.
-- If any required local input is missing, unreadable, or empty, stop and report the blocker instead of guessing.
-- Network research is authorized within this audit workflow, but installation still requires --apply --yes.
-- Replace every template placeholder wrapped in `<...>` or delete the example entry entirely; do not leave placeholder values in the final file.
-- Keep ``decision_basis.user_profile_used``, ``decision_basis.target_scan_used``, and ``decision_basis.source_strategy_used`` as boolean ``true``, and provide a non-empty ``decision_basis.summary``.
-- Record ``source_observations`` for researched candidates; every selected skill/MCP add/remove recommendation must have a matching observation with real sources and matching candidate_type/name/decision.
-- Every selected recommendation must provide a concrete incremental benefit over the installed snapshot, or a specific removal rationale; omit generic, duplicate, or weakly sourced items.
-- Skill installs require ``reason_user_profile``, ``reason_target_repo``, source links, confidence, repo, skill path, ref, and mode.
-- Skill removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and the exact installed ``vendor``/``from`` pair.
-- MCP installs must include ``reason_user_profile``, ``reason_target_repo``, sources, confidence, a valid ``server`` payload, and provider/security evidence when available.
-- MCP removals must include ``reason_user_profile``, ``reason_target_repo``, sources, and ``installed.name``.
-- For removals, copy exact installed identifiers from installed-skills.json; do not normalize or guess vendor/from/name.
-- Never include plaintext tokens, passwords, API keys, or private credentials in MCP server payloads; use environment variable names/placeholders only when source-backed.
-- Skill ``install.mode`` must stay ``manual`` or ``vendor``; ``confidence`` must stay ``low``, ``medium``, or ``high``.
-- MCP ``server.transport`` must stay ``stdio``/``sse``/``http``; ``stdio`` requires ``command``; ``sse/http`` requires ``url``.
-- Each add/remove recommendation must keep both reasons concise and user-readable.
-- If either reason field is missing on any recommendation, treat the run as incomplete and stop before dry-run summary.
-- Overlap findings are report-only; include structured router/member roles when overlap exists, and do not recommend automatic uninstall of external system/plugin skills.
-- Use ``do_not_install`` for researched options that should stay out of the repo right now.
-- Prefer high-reputation sources and avoid weak duplicate skills.
-- Cover the built-in default sources and record the actual sources you used; GitHub Trending is discovery evidence only, never sufficient by itself.
-- Keep recommendations machine-readable JSON matching the template.
-- The template already includes placeholder example items. Replace placeholder values or delete the example entries you do not need; do not invent a different schema.
-- Cite only sources you actually inspected during this run. Do not fabricate repository facts, source links, source observations, or source conclusions.
-- If evidence is insufficient, leave the category empty and explain briefly instead of forcing low-quality recommendations.
-- If all add/remove categories are empty, a no-op recommendation is valid without network research; ``source_observations=[]`` is allowed when there are no selected add/remove items and the local coverage basis is explained.
-- After dry-run, show numbered skill add/remove and MCP add/remove lists with one-line reasons per item (``reason_user_profile`` + ``reason_target_repo``).
-- After dry-run, report commands run plus the explicit state: recommendations written, preflight passed/failed, dry-run passed/failed, apply not run unless explicitly confirmed.
-- If a list is empty, explicitly output "no <category> recommendations" with a brief reason.
-- Keep dry-run numbering stable; do not renumber or reorder indexes in the user-facing summary.
-
-Pre-dry-run self-check:
-
-- recommendations.json parses as JSON and keeps ``schema_version = 2``.
-- ``decision_basis`` keeps all required boolean flags at ``true``.
-- ``decision_basis.summary`` is non-empty.
-- No remaining placeholder values wrapped in `<...>`.
-- Each skill/MCP add/remove item has both reasons plus at least one real source.
-- Each selected skill/MCP add/remove item has a matching ``source_observations`` entry with real sources.
-- Each skill/MCP add/remove item keeps non-empty ``keyword_trace`` arrays (user_profile / target_repo_or_context / installed_state).
-- Each MCP add item keeps ``name == server.name``.
-- Each selected recommendation has non-duplicative incremental value over installed-skills.json / mcp_servers, or a specific removal rationale.
-- No MCP server payload contains plaintext credentials.
-- No duplicate skill add/remove or MCP add/remove recommendations remain in the final file.
-- Stop before dry-run if any self-check item fails.
-
-Execution order:
-
-1) Read all local inputs
-2) Write ``recommendations.json`` from ``recommendations.template.json`` to ``$recommendationsPath``
-3) Run the self-check and stop if any item fails
-4) Execute preflight: ``.\skills.ps1 审查目标 预检 --recommendations "$recommendationsPath"``
-5) Execute dry-run
-6) Summarize dry-run with original indexes and one-line dual-reason entries
-7) Wait for explicit user confirmation before apply
-
-User-facing dry-run summary format:
-
-- add: ``[index] <skill-name> | user: <reason_user_profile> | repo: <reason_target_repo>``
-- remove: ``[index] <skill-name> | user: <reason_user_profile> | repo: <reason_target_repo>``
-- mcp-add: ``[index] <mcp-name> | user: <reason_user_profile> | repo: <reason_target_repo>``
-- mcp-remove: ``[index] <mcp-name> | user: <reason_user_profile> | repo: <reason_target_repo>``
-- empty category: `no add recommendations: <brief reason>` / `no removal recommendations: <brief reason>` / `no mcp-add recommendations: <brief reason>` / `no mcp-remove recommendations: <brief reason>`
-
-User profile JSON: $userProfilePath
-Installed skills JSON: $installedSkillsPath
-Source strategy JSON: $SourceStrategyPath
-Decision insights JSON: $DecisionInsightsPath
-"@
-    Set-ContentUtf8 $path $content
+function Get-AuditSnapshotPath([string]$recommendationsPath) {
+    $dir = Split-Path $recommendationsPath -Parent
+    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
+    return (Join-Path $dir "snapshot.json")
 }
 
-function Write-AuditOuterAiPromptFile([string]$path, [string]$reportRoot, [string]$briefPath, [string]$userProfilePath, [string]$repoScanPath, [string]$repoScansPath, [string]$installedSkillsPath, [string]$templatePath, [string]$Mode = "target-repo", [string]$Query = "", [string]$SourceStrategyPath = "", [string]$DecisionInsightsPath = "") {
-    $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "target-repo" } else { $Mode.ToLowerInvariant() }
-    if ([string]::IsNullOrWhiteSpace($repoScanPath)) { $repoScanPath = "N/A" }
-    if ([string]::IsNullOrWhiteSpace($repoScansPath)) { $repoScansPath = "N/A" }
-    if ([string]::IsNullOrWhiteSpace($SourceStrategyPath)) { $SourceStrategyPath = "N/A" }
-    if ([string]::IsNullOrWhiteSpace($DecisionInsightsPath)) { $DecisionInsightsPath = "N/A" }
-    $queryText = if ([string]::IsNullOrWhiteSpace($Query)) { "N/A" } else { $Query }
-    $inputReadStep = if ($normalizedMode -eq "profile-only") {
-        "1. 阅读 ai-brief.md、user-profile.json、installed-skills.json、source-strategy.json、decision-insights.json；repo-scan 输入为 N/A 时代表本轮不绑定目标仓；这些文件只能读，不能改。"
-    }
-    else {
-        "1. 阅读 ai-brief.md、user-profile.json、installed-skills.json，并按存在文件读取 repo-scan.json / repo-scans.json，同时读取 source-strategy.json 与 decision-insights.json；这些文件只能读，不能改。"
-    }
-    $basisCheckStep = if ($normalizedMode -eq "profile-only") {
-        "   - recommendations.json 与模板字段同构，``recommendation_mode = profile-only``，``decision_basis.user_profile_used`` / ``decision_basis.source_strategy_used`` 为 ``true``，``decision_basis.target_scan_used`` 为 ``false``，且 ``decision_basis.summary`` 非空"
-    }
-    else {
-        "   - recommendations.json 与模板字段同构，``decision_basis`` 三个布尔字段都为 ``true``，且 ``decision_basis.summary`` 非空"
-    }
-    $modeBlocking = if ($normalizedMode -eq "profile-only") {
-        '- 本轮是 profile-only；不得编造目标仓事实，``reason_target_repo`` 必须解释当前已安装技能 / profile-only 场景依据'
-    }
-    else {
-        "- 若 ``repo-scan.json`` / ``repo-scans.json`` 路径显示为 ``N/A``，表示该输入未提供，不可臆造其内容"
-    }
-    $content = @"
-$(Get-AuditOuterAiPromptContent)
-
----
-
-## Current Audit Run Files
-
-- 审查包目录：$reportRoot
-- 审查包目录名 run-id：$(Split-Path $reportRoot -Leaf)
-- audit-meta.json 内部 run_id 可作为元数据参考；命令路径和 ``<run-id>`` 占位符解析以审查包目录名为准
-- Prompt-Contract-Version: $(Get-AuditPromptContractVersion)
-- 模式：$normalizedMode
-- 发现查询：$queryText
-- 任务说明：$briefPath
-- 用户画像：$userProfilePath
-- 单目标扫描：$repoScanPath
-- 多目标扫描：$repoScansPath
-- 已安装技能与 MCP：$installedSkillsPath
-- 来源策略：$SourceStrategyPath
-- 决策洞察：$DecisionInsightsPath
-- 推荐模板：$templatePath
-
-## Required Execution Sequence
-
-$inputReadStep
-2. 按 recommendations.template.json schema v2 写出 recommendations.json
-3. 先做自检（全部通过后再 dry-run）：
-   - recommendations.json 可解析为 JSON，且 ``schema_version = 2``
-$basisCheckStep
-   - 不保留模板占位符 ``<...>`` 或未替换的示例值
-   - 每条技能/MCP 新增或卸载建议都包含 ``reason_user_profile`` + ``reason_target_repo`` + 至少 1 个真实 ``sources``
-   - 每条技能/MCP 新增或卸载建议都有匹配的 ``source_observations`` 记录，且 observation 也包含真实 ``sources``
-   - 每条技能/MCP 新增或卸载建议都包含非空 ``keyword_trace.user_profile`` / ``keyword_trace.target_repo_or_context`` / ``keyword_trace.installed_state``
-   - 每条被选中的建议都能说明相对 installed-skills.json / mcp_servers 的非重复增量价值，或给出具体卸载理由
-   - MCP server payload 不得包含明文 token/password/key；需要凭据时只能写安全的环境变量名或占位说明
-   - 技能新增建议的 ``install.mode`` 只能是 ``manual`` 或 ``vendor``，``confidence`` 只能是 ``low`` / ``medium`` / ``high``
-   - MCP 新增建议必须包含合法 ``server``（``transport``=``stdio``/``sse``/``http``；``stdio`` 要有 ``command``，``sse/http`` 要有 ``url``），且 ``name`` 必须等于 ``server.name``
-   - 不得保留重复的技能新增/卸载建议或重复的 MCP 新增/卸载建议
-4. 执行预检；失败即停止，不得绕过：
-   .\skills.ps1 审查目标 预检 --recommendations "$([System.IO.Path]::Combine($reportRoot, 'recommendations.json'))"
-5. 执行 dry-run：
-   .\skills.ps1 审查目标 应用 --recommendations "$([System.IO.Path]::Combine($reportRoot, 'recommendations.json'))" --dry-run-ack "我知道未落盘"
-6. 根据 dry-run 结果，向用户列出“技能新增/卸载建议 + MCP 新增/卸载建议”及序号
-7. 等待用户确认后，再执行：
-   .\skills.ps1 审查目标 应用 --recommendations "$([System.IO.Path]::Combine($reportRoot, 'recommendations.json'))" --apply --yes
-
-## Output Contract
-
-- ``recommendations.json`` 必须与模板 schema 一致
-- 除 ``recommendations.json`` 外，不得修改本轮审查包输入文件、快照、提示词、brief、模板、来源策略、决策洞察或 repo scan
-- 预检、dry-run、apply 命令在本轮审查包目录自动生成的 ``preflight-report.json``、``dry-run-summary.json``、``apply-report.json`` 和 ``runtime-evidence-*.md`` 属于预期运行证据输出；外层 AI 不应手写或手改这些文件
-- 技能与 MCP 的新增/卸载建议都必须保留双依据和来源，且每项理由要简短可读
-- 每条变更建议必须能解释相对已安装技能/MCP 快照的非重复增量价值，或给出可验证的卸载理由
-- ``source_observations`` 必须记录本轮调研过的候选项；被选中的新增/卸载项必须能在其中找到对应 candidate_type/name/decision；若四类新增/卸载建议均为空，允许 ``source_observations=[]``，但必须说明 no-op 的本地覆盖依据
-- 若 ``source-strategy.decision_quality_policy`` 开启，``keyword_trace`` 必须满足最小命中与关键词归属校验
-- 若任一建议缺少 ``reason_user_profile`` 或 ``reason_target_repo``，视为未完成，不得进入下一步
-- 若证据不足，允许不推荐；不得“猜测式”新增/卸载
-- 目标仓模式下，新增/卸载技能或 MCP 的判断必须同时参考用户画像、目标仓事实、已安装技能/MCP 快照、来源策略
-- MCP server payload 不得写入明文凭据；需要凭据时只能使用安全的环境变量名或占位说明，并且必须有来源依据
-- ``overlap_findings`` 仅用于报告重叠，``do_not_install`` 用于记录“已研究但当前不应安装”的技能或 MCP
-- ``sources`` 只能填写本轮真实查看过的来源；不得伪造仓库事实或来源结论
-- MCP 新增建议里 ``name`` 与 ``server.name`` 必须一致；任一类别不得出现重复建议
-- 如果你继续执行 dry-run，请在总结里按 dry-run 原序号列出“技能新增/卸载建议 + MCP 新增/卸载建议”
-- 每条建议必须同时展示两条简短理由（用户需求 + 目标仓/场景）
-- 某一类为空时，必须显式写“无该类建议”并给 1 句简短原因
-- 最后明确执行状态：recommendations 已写出；preflight 通过/失败；dry-run 通过/失败；apply 未执行（除非用户已明确确认）
-- 未经用户明确确认，不得执行 --apply --yes
-
-## Blocking Conditions
-
-- 任一必需输入文件缺失、为空或不可读时，立即停止并汇报阻断项
-$modeBlocking
-- 若自检或预检失败、仍有 ``<...>`` 占位符、或来源并非本轮真实查看结果，必须先修正再继续
-
-## User Summary Format
-
-- 新增建议：``[序号] <skill-name> | 用户需求：<reason_user_profile> | 目标仓/场景：<reason_target_repo>``
-- 卸载建议：``[序号] <skill-name> | 用户需求：<reason_user_profile> | 目标仓/场景：<reason_target_repo>``
-- MCP 新增建议：``[序号] <mcp-name> | 用户需求：<reason_user_profile> | 目标仓/场景：<reason_target_repo>``
-- MCP 卸载建议：``[序号] <mcp-name> | 用户需求：<reason_user_profile> | 目标仓/场景：<reason_target_repo>``
-- 空列表：``无新增建议：<简短原因>`` / ``无卸载建议：<简短原因>`` / ``无 MCP 新增建议：<简短原因>`` / ``无 MCP 卸载建议：<简短原因>``
-"@
-    Set-ContentUtf8 $path $content
+function Get-AuditReceiptPath([string]$recommendationsPath) {
+    $dir = Split-Path $recommendationsPath -Parent
+    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
+    return (Join-Path $dir "receipt.json")
 }
 
+function Read-AuditSnapshot([string]$recommendationDir) {
+    if ([string]::IsNullOrWhiteSpace($recommendationDir)) { $recommendationDir = "." }
+    $path = Join-Path $recommendationDir "snapshot.json"
+    Need (Test-Path -LiteralPath $path -PathType Leaf) ("缺少 snapshot.json：{0}" -f $path)
+    try { $snapshot = Get-ContentUtf8 $path | ConvertFrom-Json }
+    catch { throw ("snapshot.json 解析失败：{0}" -f $_.Exception.Message) }
+    Need ($null -ne $snapshot -and [int]$snapshot.schema_version -eq 1) ("snapshot.json schema_version 无效：{0}" -f $path)
+    return $snapshot
+}
+
+function Write-AuditReceiptSection([string]$recommendationsPath, [string]$section, $data) {
+    $path = Get-AuditReceiptPath $recommendationsPath
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        try { $receipt = Get-ContentUtf8 $path | ConvertFrom-Json }
+        catch { throw ("receipt.json 解析失败：{0}" -f $_.Exception.Message) }
+    }
+    else {
+        $receipt = [pscustomobject]([ordered]@{
+            schema_version = 1
+            run_id = Split-Path (Split-Path $recommendationsPath -Parent) -Leaf
+            mode = "audit"
+            created_at = (Get-Date).ToString("o")
+            updated_at = $null
+            success = $false
+            persisted = $false
+            truth_boundary = "receipt_created_not_applied"
+        })
+    }
+    if ($receipt.PSObject.Properties.Match($section).Count -eq 0) {
+        $receipt | Add-Member -NotePropertyName $section -NotePropertyValue $data
+    }
+    else { $receipt.$section = $data }
+    $receipt | Add-Member -NotePropertyName updated_at -NotePropertyValue ((Get-Date).ToString("o")) -Force
+    if ($null -ne $data) {
+        if ($data.PSObject.Properties.Match("run_id").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$data.run_id)) { $receipt | Add-Member -NotePropertyName run_id -NotePropertyValue ([string]$data.run_id) -Force }
+        if ($data.PSObject.Properties.Match("mode").Count -gt 0) { $receipt | Add-Member -NotePropertyName mode -NotePropertyValue ([string]$data.mode) -Force }
+        if ($data.PSObject.Properties.Match("success").Count -gt 0) { $receipt | Add-Member -NotePropertyName success -NotePropertyValue ([bool]$data.success) -Force }
+        if ($data.PSObject.Properties.Match("persisted").Count -gt 0) { $receipt | Add-Member -NotePropertyName persisted -NotePropertyValue ([bool]$data.persisted) -Force }
+    }
+    $truthBoundary = if ([bool]$receipt.persisted) { "filesystem_changes_persisted_not_host_loaded" } elseif ($section -eq "scan") { "repo_snapshot_created_not_reviewed_not_applied" } else { "repo_verified_not_applied" }
+    $receipt | Add-Member -NotePropertyName truth_boundary -NotePropertyValue $truthBoundary -Force
+    Write-AuditJsonFile $path $receipt
+    return $path
+}
 

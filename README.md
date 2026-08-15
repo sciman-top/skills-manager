@@ -99,7 +99,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 审查目标 应用 --recommendations <file> --apply --yes
 ```
 
-扫描产物位于 ignored `reports/skill-audit/<run-id>/`。`recommendations.json` 必须经过 preflight 和 dry-run；只有显式 `--apply --yes` 才写配置。runtime evidence 与 recommendations 同目录，不进入 tracked 文档。
+扫描产物位于 ignored `reports/skill-audit/<run-id>/`，每个 run 固定只有三个文件：`snapshot.json` 是不可变审查输入，`recommendations.json` 是唯一允许 AI 编辑的决策文件，`receipt.json` 是命令维护的阶段、结果、补偿/回滚与 truth-boundary 记录。`recommendations.json` 必须经过 preflight 和 dry-run；只有显式 `--apply --yes` 才写配置。缺少 snapshot 直接阻断，不生成第四个报告或 evidence 文件。
 
 ### 规则审查
 
@@ -138,7 +138,9 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 ## 外置参考仓
 
-`references/reference-shelf.manifest.json` 只登记当前使用的 core/secondary 参考集，owned root 为 `D:\CODE\external\skills-manager-references`。刷新不会自动采纳、安装或执行外部内容，也不会联动修改 `skills.json`。
+外置参考棚只是按任务显式启用的只读开发缓存，不是产品运行时、普通编码主链或质量门禁。`skills.json` 始终是 runtime 真源；即使外置 checkout 不存在或没有刷新，普通 build、test、update 和 projection 也应继续工作。
+
+需要源码对比时，`references/reference-shelf.manifest.json` 才登记本次可用的 core/secondary 集合，owned root 为 `D:\CODE\external\skills-manager-references`。以下命令只在显式 refresh/verify 工作流中运行：
 
 ```powershell
 .\scripts\refresh-reference-repos.ps1 -FetchOnly -SkipDirtyRepos
@@ -146,7 +148,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\scripts\verify-reference-governance.ps1
 ```
 
-没有当前消费者的候选不进入 manifest；需要时重新研究和登记，不保留永久候选池。
+refresh/verify 失败只阻断该次参考研究，不外推为产品主链失败。刷新不会自动采纳、安装或执行外部内容，也不会联动修改 `skills.json`；没有当前消费者的候选不进入 manifest。
 
 ## 开发与验证
 

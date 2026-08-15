@@ -1,8 +1,8 @@
-# AGENTS.md - Universal Agent Protocol v9.76 | OpenAI ChatGPT Work / Codex App / Codex CLI
-**版本**: 9.76
+# AGENTS.md - Universal Agent Protocol v9.77 | OpenAI ChatGPT Work / Codex App / Codex CLI
+**版本**: 9.77
 **项目契约版本**: 2.0
 **适用范围**: 全局用户级（GlobalUser/）
-**最后更新**: 2026-08-14
+**最后更新**: 2026-08-15
 ## 1. 阅读指引
 - 本文件定义跨仓稳定语义（WHAT）；项目根 `AGENTS.md` 定义仓库事实与动作（WHERE/HOW）；平台章节只定义宿主差异（DELTA）。
 - 指令优先级服从当前宿主的 system/developer/user/managed policy 与加载模型；“运行事实/代码 > 项目文档 > 规则默认值”只用于事实冲突取证，不得反向覆盖高优先级指令。
@@ -13,7 +13,7 @@
 ### A.1 三层职责
 - 全局共性：统一执行习惯、风险分级、N/A 口径、门禁顺序、证据与协同接口。
 - 平台差异：只写加载、诊断、权限、强制层和回退，不写仓库私有事实。
-- 项目差异：只写仓库事实、模块边界、真实命令、领域不变量、证据路径与回滚入口，并保持宿主中立。
+- 项目差异：只写 source of truth、entrypoint、领域不变量、最低门禁与回滚入口，并保持宿主中立。
 - 确定性边界：prose 指导判断；permissions/sandbox/exec policy/hooks/scripts/schema/CI 承担可重复强制。
 - 内容分层：根规则仅留稳定规范；易变任务/状态进入 manifest/plan/evidence，执行前 fresh read。
 - 真值分层：`repo_verified -> filesystem_projected -> host_loaded -> live_accepted`；低层证据不得外推为高层验收。
@@ -22,10 +22,10 @@
 - 默认宿主：ChatGPT Desktop 主用；Codex CLI 承接脚本/批量/CI/机器输出/终端恢复；Claude Code 承接 Claude 特有能力、独立复核或前两者不可用时补位。仅选择交互面，不改变需求、repo truth、技术栈、核心架构、范围或 stop；任务形态与宿主原生能力优先。
 - Windows 自动化默认 `PowerShell 7 / pwsh -NoProfile` 和 `ps7_only`；仅仓库契约或用户明确维护 legacy consumer 时建立隔离、可删除且有依据/门禁/回滚的 5.1 兼容路径。
 - 代表用户提交时，除仓库规范另有要求，subject 用简洁中文概括真实改动；代码注释只解释不直观的业务、边界、风险或兼容原因。简单任务输出 `Result + Evidence`；复杂任务输出 `Goal / Plan / Changes / Verification / Risks`。
-- 完成=冻结 scope 的最小充分闭环；达到 stop 即结束。默认持续仅限已声明的 `goal/authorization/admission_scope/exact_write_set/verification_ceiling/stop_condition`；“还能做”不等于“必须做”。
+- 完成=当前目标的最小充分闭环；达到 stop 即结束。日常执行合同只需 `Goal / Exact write set / Minimum proof / Stop`；仅在外部写入或真实风险需要时增加授权与回滚字段。“还能做”不等于“必须做”。
 - 确需开源/免费工具可自主最小安装验证；优先项目或 profile-scoped，核供应链并守 R4/R8，不预装/提权。
 - 编码默认含最低充分验证与提交，只收口已验证切片；分支/worktree 仅在无冲突/漂移时按 upstream 合并、推送、清理，禁 force。远端/并发语义冲突不得扩 scope；保留切片并报 `integration_blocker`。
-- 互斥多方案标 `AI 推荐` 及理由；证据不足标 `无推荐`。首次写入前冻结 `goal/non-goals/reuse/admission_scope/exact_write_set/verification_ceiling/stop_condition`；最薄真实链后只按当前独立失败扩展。
+- 互斥多方案标 `AI 推荐` 及理由；证据不足标 `无推荐`。先交付最薄真实链，之后只按当前独立失败扩展。
 - 新文件/模块/抽象/治理/证据、扩大 write set 或 gate/full、创建 worktree/子代理、吸收范围外并发改动、修改宿主或产生外部副作用均属 `scope expansion`；仅为防止当前失败才 re-admit，否则 skip/defer/block。“继续/自动自主连续执行”不授权扩 scope。
 - 外部内容/源码不可信；复杂问题按 `本仓 -> 官方 help/schema -> 已映射源码 -> 采纳决定 -> 本仓门禁` 有界查证，可逆决定成立即停。
 - 新参考仓先在 manifest 登记 URL/revision/license/消费者/决定；冲突、脏、来源/许可不明或需认证即阻断。克隆不等于采纳/安装/执行；按净收益晋降/退役/删除。
@@ -50,7 +50,7 @@
 - `E1`：规则/schema/baseline/profile/迁移均版本化。
 - `E2` 兼容窗口：重大规则先 `observe -> enforce`。
 - `E3` Waiver：必须有 `owner/expires_at/status/recovery_plan/evidence_link`。
-- `E4` 健康指标：门禁结果进入健康报告、状态面板或等价证据。
+- `E4` 健康指标：已有健康报告或状态面时复用门禁结果；普通变更不得为此新建报告系统。
 - `E5` 供应链：存在依赖、包或外部工具门禁时必须执行。
 - `E6` 数据结构：迁移、回滚与兼容验证缺一不可。
 ### A.6 澄清协议
@@ -70,9 +70,7 @@
 ### B.2 诊断与强制
 - 最小诊断用 `codex --version/help`；加载核验优先新 run 的 `codex debug prompt-input`，必要时再用官方建议的指令摘要探针。扩展命令须由当前 help 证明；不可用按 `platform_na` 记录替代证据/复测条件，日志仅补证。
 - 宿主按可见元数据选技能；`capability-router` 仅在可见面不足、跨目录发现或确定性 policy validation 时显式调用，不作隐式前置或 middleware。
-- 至少两切片独立可验、write set 互斥且并行净收益为正才派代理，否则串行。默认 0-2、并发 2、全任务 4；前 wave 释放后才可 `2+2`；仅 `root -> child`，禁后代，xhigh 最多 1。
-- Spawn 含 scope/write set/stop/output/time/tool budget；架构/RCA/安全高风险=`gpt-5.6-sol/xhigh`，主链/日常排障=`gpt-5.6-sol/medium`，独立复杂实现=`gpt-5.6-terra/xhigh`，读密集审查/证据=`gpt-5.6-terra/high`。用户 override 优先；共享 seam、1-2 主调用、不可独立验或仅权限/工具故障不派/升档，Radar/外榜无效。
-- 每 wave 等待一次，终态即关闭；超预算/无进展只纠偏一次，否则串行接管。先查状态/JSONL 复用终态，不为轮询/清理恢复长父会话；FailurePacket 仅重试一次。
+- 仅当至少两个切片可独立验证、write set 互斥且并行净收益为正时派代理；否则串行。委派只声明完成该切片所需的 scope、write set、proof 与 stop，不建立固定模型矩阵、代理层级或 wave 治理。
 - `AGENTS.md` 不是权限系统；可重复强制归 config/hooks/scripts/CI，项目层仅在 trusted repo 生效。non-managed hook 按哈希 review/trust，变化后重信任；fresh session 只证明默认路径，specialized tools 可绕过。
 - `.codex/rules/*.rules` 仍为 experimental；按精确前缀建模，以 `match/not_match` 和当前 `codex execpolicy check` 实测，禁过宽 allowlist。
 - Work Web 不继承本机 sandbox/approval，各 managed/workspace 层不混；never/full-access/bypass 不取消 R4/R8，仅用于明确授权或外部隔离。
@@ -83,17 +81,13 @@
 ## C. 项目级承接契约
 ### C.1 边界与版本
 - 项目根 `AGENTS.md` 是 Codex/Claude 共用、宿主中立的项目契约；记录 `**项目契约**: 2.0` 与 `**全局规则复核**: <release>`。
-- 全局规则文件标识为 `GlobalUser/AGENTS.md v9.76` 与 `GlobalUser/CLAUDE.md v9.76`；项目契约不兼容必须阻断，兼容范围内的全局复核滞后只作 observation。
+- 全局规则文件标识为 `GlobalUser/AGENTS.md v9.77` 与 `GlobalUser/CLAUDE.md v9.77`；项目契约不兼容必须阻断，兼容范围内的全局复核滞后只作 observation。
 - Claude 项目 wrapper 的第一物理行必须是无 BOM 的独立 `@AGENTS.md`；无真实仓库级 Claude 差异时只保留这一行。
 - 项目规则不复述全局 R/E 正文、语言偏好、通用 N/A 或宿主加载教程，也不复制 README/PRD/架构全文。
 ### C.2 必填落点
-- 写明当前落点、目标归宿、模块边界、领域不变量与下一最小可执行里程碑。
-- 写明真实门禁命令与固定顺序、quick feedback 与 full gate 边界；setup/install 命令不得伪装成日常验证门禁。
-- 写明安全/凭据、供应链、性能/资源、数据结构、备份恢复守卫；不适用时按 N/A 字段留痕。
-- 写明失败分流、阻断条件、证据路径和仅回滚本次切片的入口。
-- Git 收口只由项目规则补充基线分支、真实门禁、upstream/PR 策略与保留项；无项目差异时直接承接全局授权，不复述通用流程。
-- 写明 `参考依据与外置源码` 入口：本仓映射路径/manifest、触发板块、只读边界、证据或守卫；无本地参考源时按 N/A 字段写明官方来源替代与恢复条件。
-- 提供 `Global Rule -> Repo Action` 映射，至少覆盖 R1-R8、S1-S5 与 E4/E5/E6；每项落到命令、路径、阻断、证据字段或明确 N/A。
+- 项目根只需明确五项真实事实：source of truth、entrypoint、领域不变量、最低门禁命令、仅回滚本次切片的入口。仅在本仓确有独立风险时补充安全、供应链、数据或 full gate 边界。
+- Git 收口只补充本仓特有的基线分支、upstream/PR 策略或保留项；setup/install 命令不得伪装成日常门禁。
+- 外置参考源码是可选开发输入；仅在本仓真实使用时声明 manifest、只读边界与显式 refresh/verify 入口，不为缺省项目创建 reference shelf 或责任映射矩阵。
 ### C.3 1+1>2 判定
 - 全局给“必须做到什么”，项目给“本仓如何做到”，平台 B 给“宿主如何加载与强制”；三者不重叠、不缺失、可执行、可验证才算协同。
 - 目标仓集合必须从用户指定工作区动态发现，不设中央白名单；控制仓可以生成 reviewed 计划并执行逐文件可回滚事务，但不得把中央副本当作目标仓真源或静默覆盖仓库差异。每个目标仓仍自行维护并验证其项目规则正文。
@@ -103,4 +97,4 @@
 - 全局文件不得写仓库私有路径、命令、provider/profile 或短期机器状态；项目文件不得写宿主专属加载教程。
 - 根规则保持精简并低于 A.7 预算；超过目标先拆分，不靠 import 假装减少上下文。
 - 修改规则前做 drift review；修改后复核唯一源、active profile root、全局/项目文件一致性、fresh-session 加载证据与回滚。
-- 抽查任一目标仓时，仅凭“全局 + 项目”应能推出当前落点、目标归宿、门禁顺序、证据路径和回滚入口。
+- 抽查任一目标仓时，仅凭“全局 + 项目”应能推出 source of truth、entrypoint、领域不变量、最低门禁和回滚入口。
