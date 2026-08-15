@@ -33,6 +33,7 @@ Describe 'Global rule source contract' {
         $result.facts.codex.version|Should -Be '9.76'
         $result.facts.claude.bytes|Should -BeLessOrEqual 16384
         @($result.observations).Count|Should -Be 0
+        (@(git -C $repoRoot check-attr eol -- rules/global/codex/AGENTS.md rules/global/claude/CLAUDE.md)-join"`n")|Should -Match 'eol: lf'
     }
 
     It 'requires the 1 section' {
