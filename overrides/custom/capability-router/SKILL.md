@@ -23,16 +23,18 @@ If the catalog is large, narrow it with one or two known domain names via `-Doma
 Validate a host-selected candidate before loading it:
 
 ```powershell
-$result = pwsh -NoProfile -File <skill-dir>/scripts/route-capability.ps1 -Query '<complete request>' -Candidate 'skill|codebase-design' | ConvertFrom-Json
-$result.validation
+$result = pwsh -NoProfile -File <skill-dir>/scripts/route-capability.ps1 -Query '<complete request>' -AutoDiscover -Candidate 'skill|codebase-design' | ConvertFrom-Json
+$result.load_validation
+$result.execution_authorization
 ```
 
-Validation checks only existence, catalog-root containment, catalog entrypoint hash, availability, and disclosed side effect. A passing result authorizes reading that `SKILL.md`; it never authorizes the workflow's writes or external effects.
+Load validation checks only catalog schema/fingerprint, catalog-root containment, entrypoint hash, and availability. A passing `load_validation` authorizes reading that `SKILL.md` only. `execution_authorization.status` is always `not_granted`; the host must separately review the selected skill's declared workflow side effect and apply ordinary approval, sandbox, MCP, and external-write controls.
 
 ## Boundaries
 
 - Do not invoke when a visible native skill/tool already matches.
 - Do not rank semantics, switch profiles, preheat capabilities, manage sessions, or edit host/plugin/MCP/config state.
 - Treat stale, missing, or escaping paths as unavailable.
+- Treat malformed catalogs, unsupported schemas, duplicate identities, unknown domains, dangling memberships, and invalid hashes as structured fail-closed results.
 - If discovery fails and the task is otherwise clear, continue with native reasoning.
 - `decision_owner=host_ai`, `semantic_routing_performed=false`, and all router operations remain read-only.

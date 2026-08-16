@@ -104,8 +104,13 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
                 entrypoint_sha256 = Get-FileContentHash ([string]$item.file)
                 domains = @($membership[$name] | Sort-Object)
                 load_side_effect = 'read_only'
+                side_effect = 'unknown'
                 routing_rules = @($rules)
             }) | Out-Null
+    }
+
+    foreach ($configuredName in @($membership.Keys | Sort-Object)) {
+        Need ($actualNames.Contains([string]$configuredName)) ("skill_projection.discovery_catalog.domain_memberships 引用了不存在的 canonical skill：{0}" -f $configuredName)
     }
 
     $domainRows = New-Object System.Collections.Generic.List[object]

@@ -79,6 +79,19 @@ function Invoke-ConfigVerifier([string]$ConfigPath, [string]$Mode = 'enforce', [
         $serialized | Should -Not -Match '\.\./escape'
     }
 
+    It 'fails closed when a discovery domain references a non-canonical skill' {
+        $config = Get-Content -LiteralPath (Join-Path $repoRoot 'skills.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        $config.skill_projection.discovery_catalog.domain_memberships.engineering += 'missing-canonical-skill'
+        $configPath = Join-Path $TestDrive 'dangling-domain-membership.json'
+        $config | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $configPath -Encoding UTF8
+
+        $run = Invoke-ConfigVerifier $configPath
+
+        $run.exit_code | Should -Be 1
+        $run.result.valid | Should -Be $false
+        @($run.result.findings | Where-Object code -eq 'discovery_membership_unknown').Count | Should -Be 1
+    }
+
     It 'keeps the declarative schema parseable and documents compatibility and secret policy' {
         $schema = Get-Content -LiteralPath (Join-Path $repoRoot 'config\skills.schema.json') -Raw | ConvertFrom-Json
         $schema.'$schema' | Should -Be 'https://json-schema.org/draft/2020-12/schema'

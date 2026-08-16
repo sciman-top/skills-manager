@@ -136,8 +136,25 @@ unified_exec = true
             Test-Path -LiteralPath $catalogPath -PathType Leaf | Should -BeTrue
             Test-Path -LiteralPath $portablePath -PathType Leaf | Should -BeTrue
             (Get-ContentUtf8 $portablePath) | Should -Be (Get-ContentUtf8 $catalogPath)
+            $catalog = Get-ContentUtf8 $catalogPath | ConvertFrom-Json
+            $catalog.skills[0].load_side_effect | Should -Be 'read_only'
+            $catalog.skills[0].side_effect | Should -Be 'unknown'
+            $catalog.catalog_fingerprint | Should -Match '^[0-9a-f]{64}$'
         }
         finally { $DryRun = $oldDryRun }
+    }
+
+    It 'rejects a discovery domain membership that is absent from the canonical inventory' {
+        $managed = Join-Path $TestDrive 'dangling-membership-managed'
+        New-ProjectionSkill $managed 'demo' 'demo' | Out-Null
+        $projection = [pscustomobject]@{
+            managed_source_path = $managed
+            discovery_catalog = [pscustomobject]@{
+                domain_memberships = [pscustomobject]@{ engineering = @('demo', 'missing-canonical-skill') }
+            }
+        }
+
+        { New-SkillDiscoveryCatalogDocument $projection } | Should -Throw '*missing-canonical-skill*'
     }
 
     It 'rolls back links, config, neutral catalog, and manifest after an aggregate write failure' {

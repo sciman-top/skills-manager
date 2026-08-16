@@ -52,10 +52,8 @@
       "domain_memberships": {
         "browser": [
           "agent-browser",
-          "playwright",
           "playwright-best-practices",
           "webapp-testing",
-          "screenshot",
           "research"
         ],
         "engineering": [
@@ -67,7 +65,6 @@
           "draft-spec",
           "draft-tickets",
           "idea-refine",
-          "planning-and-task-breakdown",
           "prompt-engineering-patterns"
         ],
         "content": [
@@ -90,7 +87,6 @@
           "debugging-and-error-recovery",
           "error-handling-patterns",
           "security-and-hardening",
-          "security-best-practices",
           "shipping-and-launch",
           "systematic-debugging",
           "verification-before-completion",
@@ -138,9 +134,6 @@
         ],
         "physics": [
           "custom-junior-physics-animation"
-        ],
-        "video": [
-          "transcribe"
         ]
       }
     },

@@ -47,7 +47,9 @@ description: >-
                     description = 'Design module boundaries, stable interfaces, and an evidence-based target architecture.'
                     relative_path = '..\codebase-design\SKILL.md'
                     entrypoint_sha256 = (Get-FileHash -LiteralPath (Join-Path $targetRoot 'SKILL.md') -Algorithm SHA256).Hash.ToLowerInvariant()
+                    domains = @('engineering')
                     load_side_effect = 'read_only'
+                    side_effect = 'unknown'
                     routing_rules = @()
                 }
             )
@@ -63,8 +65,8 @@ description: >-
     It 'discovers domains and cold skills without a skills-manager repository manifest' {
         Push-Location $script:unrelatedCwd
         try {
-            $domains = & pwsh -NoProfile -ExecutionPolicy Bypass -File $script:routerScript -Query '设计模块边界和工程终态' | ConvertFrom-Json
-            $candidates = & pwsh -NoProfile -ExecutionPolicy Bypass -File $script:routerScript -Query '设计模块边界和工程终态' -DomainHint engineering | ConvertFrom-Json
+            $domains = & pwsh -NoProfile -ExecutionPolicy Bypass -File $script:routerScript -Query '设计模块边界和工程终态' -AutoDiscover | ConvertFrom-Json
+            $candidates = & pwsh -NoProfile -ExecutionPolicy Bypass -File $script:routerScript -Query '设计模块边界和工程终态' -AutoDiscover -DomainHint engineering | ConvertFrom-Json
         }
         finally {
             Pop-Location
@@ -94,7 +96,7 @@ description: >-
         $neutralCatalog | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $neutralRoot 'catalog.json') -Encoding UTF8
         Set-Content -LiteralPath (Join-Path $routerRoot 'catalog.json') -Encoding UTF8 -Value '{"schema_version":1,"skills":[]}'
 
-        $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File $script:routerScript -Query '设计模块边界' | ConvertFrom-Json
+        $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File $script:routerScript -Query '设计模块边界' -AutoDiscover | ConvertFrom-Json
 
         $result.catalog_path | Should -Match '\.skills-manager[\\/]catalog\.json$'
         @($result.retrieval.candidates.name) | Should -Contain 'codebase-design'
@@ -107,7 +109,7 @@ description: >-
         New-Item -ItemType Junction -Path $residentRouter -Target $routerRoot | Out-Null
 
         $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $residentRouter 'scripts\route-capability.ps1') `
-            -Query '设计模块边界和工程终态' -DomainHint engineering | ConvertFrom-Json
+            -Query '设计模块边界和工程终态' -AutoDiscover -DomainHint engineering | ConvertFrom-Json
 
         (Test-Path -LiteralPath (Join-Path $residentRoot 'codebase-design')) | Should -Be $false
         $result.catalog.status | Should -Be 'current'
@@ -119,11 +121,19 @@ description: >-
         Add-Content -LiteralPath (Join-Path $targetRoot 'SKILL.md') -Encoding UTF8 -Value "`n# Drift after catalog projection"
 
         $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File $script:routerScript `
-            -Query '设计模块边界和工程终态' -DomainHint engineering -Candidate 'skill|codebase-design' | ConvertFrom-Json
+            -Query '设计模块边界和工程终态' -AutoDiscover -DomainHint engineering -Candidate 'skill|codebase-design' | ConvertFrom-Json
 
         $result.catalog.status | Should -Be 'stale'
         @($result.retrieval.candidates.name) | Should -Not -Contain 'codebase-design'
         @($result.selected.name) | Should -Not -Contain 'codebase-design'
         @($result.excluded | Where-Object { $_.name -eq 'codebase-design' -and $_.reason -eq 'catalog_stale' }).Count | Should -Be 1
+    }
+
+    It 'requires explicit auto-discovery when no catalog path or environment override is supplied' {
+        $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File $script:routerScript -Query '设计模块边界' | ConvertFrom-Json
+
+        $result.catalog.status | Should -Be 'invalid'
+        @($result.catalog.findings.code) | Should -Contain 'catalog_path_required'
+        @($result.retrieval.candidates).Count | Should -Be 0
     }
 }

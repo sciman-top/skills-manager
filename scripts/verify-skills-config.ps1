@@ -66,6 +66,35 @@ else {
         foreach ($observation in @($contract.observations)) { $observations.Add($observation) | Out-Null }
         foreach ($errorText in @($contract.errors)) { $findings.Add((ConvertTo-SafeContractFinding ([string]$errorText))) | Out-Null }
 
+        if ($cfg.PSObject.Properties.Match('skill_projection').Count -gt 0 -and $null -ne $cfg.skill_projection -and
+            $cfg.skill_projection.PSObject.Properties.Match('managed_source_path').Count -gt 0 -and
+            $cfg.skill_projection.PSObject.Properties.Match('discovery_catalog').Count -gt 0 -and $null -ne $cfg.skill_projection.discovery_catalog -and
+            $cfg.skill_projection.discovery_catalog.PSObject.Properties.Match('domain_memberships').Count -gt 0) {
+            . (Join-Path $repoRoot 'src\Domain\SkillMetadata.ps1')
+            $managedSource = [string]$cfg.skill_projection.managed_source_path
+            if ($managedSource.StartsWith('~')) { $managedSource = $managedSource -replace '^~', [Environment]::GetFolderPath('UserProfile') }
+            if (-not [IO.Path]::IsPathRooted($managedSource)) { $managedSource = Join-Path $repoRoot $managedSource }
+            $managedSource = [IO.Path]::GetFullPath($managedSource)
+            if (Test-Path -LiteralPath $managedSource -PathType Container) {
+                $canonicalNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+                foreach ($directory in @(Get-ChildItem -LiteralPath $managedSource -Directory -Force | Sort-Object Name)) {
+                    $skillPath = Join-Path $directory.FullName 'SKILL.md'
+                    if (-not (Test-Path -LiteralPath $skillPath -PathType Leaf)) { continue }
+                    $metadata = Read-SkillMetadata -Path $skillPath -Observation
+                    $canonicalName = ([string]$metadata.declared_name).Trim()
+                    if ([string]::IsNullOrWhiteSpace($canonicalName)) { $canonicalName = $directory.Name }
+                    $canonicalNames.Add($canonicalName) | Out-Null
+                }
+                foreach ($domain in @($cfg.skill_projection.discovery_catalog.domain_memberships.PSObject.Properties)) {
+                    foreach ($skillName in @($domain.Value)) {
+                        if (-not $canonicalNames.Contains([string]$skillName)) {
+                            $findings.Add((New-SafeFinding 'discovery_membership_unknown' ("$.skill_projection.discovery_catalog.domain_memberships.{0}" -f $domain.Name) 'Discovery domain references a skill absent from the managed canonical inventory.')) | Out-Null
+                        }
+                    }
+                }
+            }
+        }
+
         $rootConfigPath = [System.IO.Path]::GetFullPath((Join-Path $repoRoot 'skills.json'))
         $currentConfigPath = [System.IO.Path]::GetFullPath($ConfigPath)
         $declaredVersionRequired = $RequireDeclaredSchemaVersion -or
