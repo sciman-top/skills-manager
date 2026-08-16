@@ -29,6 +29,21 @@ function Test-Within([string]$Path, [string]$Root) {
         $full.StartsWith(($boundary + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)
 }
 
+function Test-ReparsePathWithinRoot([string]$Path, [string]$Root) {
+    $boundary = [IO.Path]::GetFullPath($Root)
+    $full = [IO.Path]::GetFullPath($Path)
+    if (-not (Test-Within $full $boundary)) { return $true }
+    $relative = [IO.Path]::GetRelativePath($boundary, $full)
+    $currentPath = $boundary
+    foreach ($segment in @($relative -split '[\\/]+' | Where-Object { $_ -and $_ -ne '.' })) {
+        $currentPath = Join-Path $currentPath $segment
+        $item = Get-Item -LiteralPath $currentPath -Force -ErrorAction SilentlyContinue
+        if ($null -eq $item) { return $false }
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $true }
+    }
+    return $false
+}
+
 function Test-ObjectProperty($Object, [string]$Name) {
     return $null -ne $Object -and $Object.PSObject.Properties.Match($Name).Count -gt 0
 }
@@ -183,6 +198,9 @@ if ($null -ne $catalog) {
                     $resolvedPath = [IO.Path]::GetFullPath((Join-Path $catalogRoot ([string]$skill.relative_path)))
                     if (-not (Test-Within $resolvedPath $managedRoot)) {
                         $catalogFindings.Add((New-RouterFinding 'skill_path_outside_root' ($pathPrefix + '.relative_path') 'Skill entrypoint must stay inside the managed skill root.')) | Out-Null
+                    }
+                    elseif (Test-ReparsePathWithinRoot $resolvedPath $managedRoot) {
+                        $catalogFindings.Add((New-RouterFinding 'skill_path_reparse_point' ($pathPrefix + '.relative_path') 'Skill entrypoint must not traverse a reparse point inside the managed skill root.')) | Out-Null
                     }
                 }
                 catch { $catalogFindings.Add((New-RouterFinding 'skill_path_invalid' ($pathPrefix + '.relative_path') 'Skill entrypoint path is invalid.')) | Out-Null }

@@ -43,7 +43,7 @@ Describe 'Capability router fallback' {
     }
 
     It 'discovers contained candidates without semantic ranking or writes' {
-        $result=& pwsh -NoProfile -File $router -Query 'design' -CatalogPath $catalog -DomainHint engineering|ConvertFrom-Json
+        $result=& $router -Query 'design' -CatalogPath $catalog -DomainHint engineering|ConvertFrom-Json
         @($result.retrieval.candidates.name)|Should -Be @('codebase-design')
         $result.decision_owner|Should -Be 'host_ai'
         $result.semantic_routing_performed|Should -Be $false
@@ -53,7 +53,7 @@ Describe 'Capability router fallback' {
     }
 
     It 'validates an exact candidate and reports disclosed side effects' {
-        $result=& pwsh -NoProfile -File $router -Query 'design' -CatalogPath $catalog -Candidate 'skill|codebase-design'|ConvertFrom-Json
+        $result=& $router -Query 'design' -CatalogPath $catalog -Candidate 'skill|codebase-design'|ConvertFrom-Json
         $result.validation.pass|Should -Be $true
         $result.validation.scope|Should -Be 'skill_entrypoint_load_only'
         $result.load_validation.pass|Should -Be $true
@@ -65,12 +65,12 @@ Describe 'Capability router fallback' {
 
     It 'fails closed on catalog drift and explicit exclusion' {
         Add-Content $skillPath '# drift'
-        $stale=& pwsh -NoProfile -File $router -Query 'design' -CatalogPath $catalog -Candidate 'skill|codebase-design'|ConvertFrom-Json
+        $stale=& $router -Query 'design' -CatalogPath $catalog -Candidate 'skill|codebase-design'|ConvertFrom-Json
         $stale.validation.pass|Should -Be $false
         @($stale.excluded.reason)|Should -Contain 'catalog_stale'
 
         $fresh=Get-Content $catalog -Raw|ConvertFrom-Json;$fresh.skills[0].entrypoint_sha256=(Get-FileHash $skillPath -Algorithm SHA256).Hash.ToLowerInvariant();Write-TestCatalog $fresh $catalog
-        $excluded=& pwsh -NoProfile -File $router -Query 'design' -CatalogPath $catalog -ExcludeCapability 'skill|codebase-design'|ConvertFrom-Json
+        $excluded=& $router -Query 'design' -CatalogPath $catalog -ExcludeCapability 'skill|codebase-design'|ConvertFrom-Json
         @($excluded.retrieval.candidates).Count|Should -Be 0
     }
 
@@ -84,7 +84,7 @@ Describe 'Capability router fallback' {
             else { $document.skills[0].entrypoint_sha256 = $value }
             Write-TestCatalog $document $catalog
 
-            $result = & pwsh -NoProfile -File $router -Query 'design' -CatalogPath $catalog -Candidate 'skill|codebase-design' | ConvertFrom-Json
+            $result = & $router -Query 'design' -CatalogPath $catalog -Candidate 'skill|codebase-design' | ConvertFrom-Json
 
             $result.catalog.status | Should -Be 'invalid'
             $result.load_validation.pass | Should -Be $false
@@ -97,7 +97,7 @@ Describe 'Capability router fallback' {
         $document.catalog_fingerprint = ('0' * 64)
         $document | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $catalog -Encoding UTF8
 
-        $result = & pwsh -NoProfile -File $router -Query 'design' -CatalogPath $catalog | ConvertFrom-Json
+        $result = & $router -Query 'design' -CatalogPath $catalog | ConvertFrom-Json
 
         $result.catalog.status | Should -Be 'invalid'
         @($result.catalog.findings.code) | Should -Contain 'catalog_fingerprint_mismatch'
@@ -110,7 +110,7 @@ Describe 'Capability router fallback' {
             $document.skills[0].side_effect = $sideEffect
             Write-TestCatalog $document $catalog
 
-            $result = & pwsh -NoProfile -File $router -Query 'design' -CatalogPath $catalog -Candidate 'skill|codebase-design' | ConvertFrom-Json
+            $result = & $router -Query 'design' -CatalogPath $catalog -Candidate 'skill|codebase-design' | ConvertFrom-Json
 
             $result.load_validation.pass | Should -Be $true
             $result.selected[0].side_effect | Should -Be $sideEffect
@@ -121,25 +121,25 @@ Describe 'Capability router fallback' {
 
     It 'returns structured failures for malformed JSON and schema mismatch' {
         Set-Content -LiteralPath $catalog -Encoding UTF8 -Value '{not-json'
-        $malformed = & pwsh -NoProfile -File $router -Query 'design' -CatalogPath $catalog | ConvertFrom-Json
+        $malformed = & $router -Query 'design' -CatalogPath $catalog | ConvertFrom-Json
         $malformed.catalog.status | Should -Be 'invalid'
         @($malformed.catalog.findings.code) | Should -Contain 'catalog_json_invalid'
 
         $document = [pscustomobject][ordered]@{schema_version=999;decision_owner='host_ai';semantic_routing_performed=$false;domains=@();skills=@();capabilities=@()}
         Write-TestCatalog $document $catalog
-        $schema = & pwsh -NoProfile -File $router -Query 'design' -CatalogPath $catalog | ConvertFrom-Json
+        $schema = & $router -Query 'design' -CatalogPath $catalog | ConvertFrom-Json
         $schema.catalog.status | Should -Be 'invalid'
         @($schema.catalog.findings.code) | Should -Contain 'catalog_schema_unsupported'
 
         $document.schema_version = '1'
         Write-TestCatalog $document $catalog
-        $typedSchema = & pwsh -NoProfile -File $router -Query 'design' -CatalogPath $catalog | ConvertFrom-Json
+        $typedSchema = & $router -Query 'design' -CatalogPath $catalog | ConvertFrom-Json
         $typedSchema.catalog.status | Should -Be 'invalid'
         @($typedSchema.catalog.findings.code) | Should -Contain 'catalog_schema_unsupported'
     }
 
     It 'does not report a load-validation pass until a candidate is selected' {
-        $result = & pwsh -NoProfile -File $router -Query 'design' -CatalogPath $catalog | ConvertFrom-Json
+        $result = & $router -Query 'design' -CatalogPath $catalog | ConvertFrom-Json
 
         $result.catalog.status | Should -Be 'current'
         @($result.retrieval.candidates.name) | Should -Contain 'codebase-design'
@@ -148,7 +148,7 @@ Describe 'Capability router fallback' {
     }
 
     It 'fails a request with an unknown domain or duplicate requested candidate' {
-        $domain = & pwsh -NoProfile -File $router -Query 'design' -CatalogPath $catalog -DomainHint missing-domain | ConvertFrom-Json
+        $domain = & $router -Query 'design' -CatalogPath $catalog -DomainHint missing-domain | ConvertFrom-Json
         $domain.load_validation.pass | Should -Be $false
         @($domain.excluded.reason) | Should -Contain 'unknown_domain'
 
@@ -162,7 +162,7 @@ Describe 'Capability router fallback' {
         $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
         $document.skills = @($document.skills[0], $document.skills[0])
         Write-TestCatalog $document $catalog
-        $duplicate = & pwsh -NoProfile -File $router -Query 'design' -CatalogPath $catalog | ConvertFrom-Json
+        $duplicate = & $router -Query 'design' -CatalogPath $catalog | ConvertFrom-Json
         $duplicate.catalog.status | Should -Be 'invalid'
         @($duplicate.catalog.findings.code) | Should -Contain 'skill_name_duplicate'
 
@@ -175,9 +175,28 @@ Describe 'Capability router fallback' {
         $document.skills[0].relative_path = '..\..\outside\SKILL.md'
         $document.skills[0].entrypoint_sha256 = (Get-FileHash -LiteralPath $outsidePath -Algorithm SHA256).Hash.ToLowerInvariant()
         Write-TestCatalog $document $catalog
-        $escape = & pwsh -NoProfile -File $router -Query 'design' -CatalogPath $catalog | ConvertFrom-Json
+        $escape = & $router -Query 'design' -CatalogPath $catalog | ConvertFrom-Json
         $escape.catalog.status | Should -Be 'invalid'
         @($escape.catalog.findings.code) | Should -Contain 'skill_path_outside_root'
+    }
+
+    It 'fails the whole catalog when an entrypoint traverses a junction' {
+        $outsideRoot = Join-Path $TestDrive 'junction-target'
+        New-Item -ItemType Directory -Path $outsideRoot -Force | Out-Null
+        $outsidePath = Join-Path $outsideRoot 'SKILL.md'
+        Set-Content -LiteralPath $outsidePath -Encoding UTF8 -Value 'outside'
+        New-Item -ItemType Junction -Path (Join-Path $root 'junction-skill') -Target $outsideRoot | Out-Null
+        $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
+        $document.skills += [pscustomobject][ordered]@{name='junction-skill';description='outside';relative_path='..\junction-skill\SKILL.md';entrypoint_sha256=(Get-FileHash -LiteralPath $outsidePath -Algorithm SHA256).Hash.ToLowerInvariant();domains=@('engineering');load_side_effect='read_only';side_effect='read_only';routing_rules=@()}
+        $document.domains[0].skill_names += 'junction-skill'
+        Write-TestCatalog $document $catalog
+
+        $result = & $router -Query 'design' -CatalogPath $catalog -Candidate 'skill|junction-skill' | ConvertFrom-Json
+
+        $result.catalog.status | Should -Be 'invalid'
+        $result.load_validation.pass | Should -Be $false
+        @($result.catalog.findings.code) | Should -Contain 'skill_path_reparse_point'
+        @($result.selected).Count | Should -Be 0
     }
 
     It 'reports candidate truncation without authorizing execution' {
@@ -190,7 +209,7 @@ Describe 'Capability router fallback' {
         $document.domains[0].skill_names += 'systematic-debugging'
         Write-TestCatalog $document $catalog
 
-        $result = & pwsh -NoProfile -File $router -Query 'engineering' -CatalogPath $catalog -MaxCandidates 1 | ConvertFrom-Json
+        $result = & $router -Query 'engineering' -CatalogPath $catalog -MaxCandidates 1 | ConvertFrom-Json
 
         $result.retrieval.truncated | Should -Be $true
         @($result.retrieval.candidates).Count | Should -Be 1

@@ -2984,6 +2984,30 @@ command = "npx"
             }
         }
 
+        It "Reads a shared vendor repository HEAD once per lock snapshot" {
+            $oldVendorDir = $VendorDir
+            try {
+                $VendorDir = Join-Path $TestDrive "vendor-lock-head-cache"
+                New-Item -ItemType Directory -Path (Join-Path $VendorDir "demo") -Force | Out-Null
+                $cfg = [pscustomobject]@{
+                    vendors = @([pscustomobject]@{ name = "demo"; repo = "https://example.com/demo.git"; ref = "main" })
+                    imports = @(
+                        [pscustomobject]@{ name = "demo"; mode = "vendor"; repo = "https://example.com/demo.git"; ref = "main"; skill = "skills/a"; sparse = $true },
+                        [pscustomobject]@{ name = "demo"; mode = "vendor"; repo = "https://example.com/demo.git"; ref = "main"; skill = "skills/b"; sparse = $true }
+                    )
+                }
+                Mock Invoke-GitCapture { "abc123" } -ParameterFilter { $GitArgs[0] -eq "rev-parse" -and $GitArgs[1] -eq "HEAD" }
+
+                $lock = New-LockData $cfg
+                Assert-LockMatchesWorkspace $cfg ([pscustomobject]$lock)
+
+                Should -Invoke Invoke-GitCapture -Times 2 -Exactly -ParameterFilter { $GitArgs[0] -eq "rev-parse" -and $GitArgs[1] -eq "HEAD" }
+            }
+            finally {
+                $VendorDir = $oldVendorDir
+            }
+        }
+
         It "Writes lock metadata for local zip imports" {
             $oldRoot = $Root
             $oldCfgPath = $CfgPath

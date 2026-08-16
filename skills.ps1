@@ -7522,9 +7522,13 @@ function Get-ImportLockWorkspaceFingerprint([string]$repoPath) {
     return (Get-DirectoryFingerprint $repoPath)
 }
 
-function Get-RepoHeadCommit([string]$repoPath) {
+function Get-RepoHeadCommit([string]$repoPath, [hashtable]$HeadCache = $null) {
     Need (-not [string]::IsNullOrWhiteSpace($repoPath)) "repoPath 不能为空"
     Need (Test-Path -LiteralPath $repoPath) ("仓库目录不存在：{0}" -f $repoPath)
+    $cacheKey = [IO.Path]::GetFullPath($repoPath).TrimEnd('\', '/')
+    if ($null -ne $HeadCache -and $HeadCache.ContainsKey($cacheKey)) {
+        return [string]$HeadCache[$cacheKey]
+    }
     Push-Location $repoPath
     try {
         if ($DryRun) {
@@ -7544,6 +7548,7 @@ function Get-RepoHeadCommit([string]$repoPath) {
             $head = Invoke-GitCapture @("rev-parse", "HEAD")
         }
         Need (-not [string]::IsNullOrWhiteSpace($head)) ("无法读取仓库 HEAD：{0}" -f $repoPath)
+        if ($null -ne $HeadCache) { $HeadCache[$cacheKey] = $head }
         return $head
     }
     finally { Pop-Location }
@@ -7568,6 +7573,7 @@ function Get-VendorSparsePaths($cfg, [string]$vendorName) {
 
 function New-LockData($cfg) {
     if ($null -eq $cfg) { $cfg = LoadCfg }
+    $repoHeadCache = @{}
     $vendors = @()
     foreach ($v in @($cfg.vendors | Sort-Object name)) {
         $path = VendorPath $v.name
@@ -7576,7 +7582,7 @@ function New-LockData($cfg) {
             name = [string]($v.name)
             repo = [string]($v.repo)
             ref = if ([string]::IsNullOrWhiteSpace([string]($v.ref))) { "main" } else { [string]($v.ref) }
-            commit = Get-RepoHeadCommit $path
+            commit = Get-RepoHeadCommit $path $repoHeadCache
         }
     }
 
@@ -7600,7 +7606,7 @@ function New-LockData($cfg) {
             $importEntry.workspace_fingerprint = Get-ImportLockWorkspaceFingerprint $repoPath
         }
         else {
-            $importEntry.commit = Get-RepoHeadCommit $repoPath
+            $importEntry.commit = Get-RepoHeadCommit $repoPath $repoHeadCache
         }
         $imports += $importEntry
     }
@@ -7721,9 +7727,10 @@ function Assert-LockMatchesCfg($cfg, $lock) {
 }
 
 function Assert-LockMatchesWorkspace($cfg, $lock) {
+    $repoHeadCache = @{}
     foreach ($v in @($lock.vendors)) {
         $path = VendorPath ([string]($v.name))
-        $actual = Get-RepoHeadCommit $path
+        $actual = Get-RepoHeadCommit $path $repoHeadCache
         Need ($actual -eq [string]($v.commit)) ("vendor 提交不匹配：{0}（lock={1}, actual={2}）" -f [string]($v.name), [string]($v.commit), [string]$actual)
     }
     foreach ($i in @($lock.imports)) {
@@ -7743,7 +7750,7 @@ function Assert-LockMatchesWorkspace($cfg, $lock) {
             continue
         }
 
-        $actual = Get-RepoHeadCommit $path
+        $actual = Get-RepoHeadCommit $path $repoHeadCache
         Need ($actual -eq [string]($i.commit)) ("import 提交不匹配：{0}/{1}（lock={2}, actual={3}）" -f $mode, [string]($i.name), [string]($i.commit), [string]$actual)
     }
 }
@@ -20188,10 +20195,6 @@ function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
     }
 }
 
-function Add-SkillExternalInventoryWarning($warnings, [string]$code, [string]$subject, [string]$message) {
-    $warnings.Add([pscustomobject][ordered]@{ code = $code; subject = $subject; message = $message }) | Out-Null
-}
-
 function Add-CapabilityCatalogMembership([hashtable]$Membership, [string]$SkillName, [string]$DomainName) {
     if ([string]::IsNullOrWhiteSpace($SkillName) -or [string]::IsNullOrWhiteSpace($DomainName)) { return }
     if (-not $Membership.ContainsKey($SkillName)) {
@@ -20256,24 +20259,6 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
         }
     }
 
-    $rulesByName = @{}
-    if ($null -ne $policy) {
-        foreach ($group in @($policy.groups)) {
-            foreach ($member in @($group.members)) {
-                $name = [string]$member.name
-                if ([string]::IsNullOrWhiteSpace($name)) { continue }
-                if (-not $rulesByName.ContainsKey($name)) { $rulesByName[$name] = New-Object System.Collections.Generic.List[object] }
-                $rulesByName[$name].Add([ordered]@{
-                        group = [string]$group.id
-                        role = [string]$member.role
-                        activation = [string]$member.activation
-                        negative_activation = [string]$member.negative_activation
-                        context = ('{0} {1}' -f [string]$group.purpose, [string]$group.selection_policy).Trim()
-                    }) | Out-Null
-            }
-        }
-    }
-
     $skills = New-Object System.Collections.Generic.List[object]
     $actualNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($item in @(Get-SkillProjectionFiles $managedRoot)) {
@@ -20286,7 +20271,6 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
         }
         $relativeWithinManaged = ([string]$item.file).Substring($managedRoot.TrimEnd('\', '/').Length).TrimStart('\', '/')
         $relativeFromCatalog = ('..\{0}' -f $relativeWithinManaged)
-        $rules = if ($rulesByName.ContainsKey($name)) { @($rulesByName[$name].ToArray() | Sort-Object group, role) } else { @() }
         $skills.Add([ordered]@{
                 name = $name
                 description = [string]$meta.description
@@ -20295,7 +20279,7 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
                 domains = @($membership[$name] | Sort-Object)
                 load_side_effect = 'read_only'
                 side_effect = 'unknown'
-                routing_rules = @($rules)
+                routing_rules = @()
             }) | Out-Null
     }
 
@@ -20324,10 +20308,6 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
     }
     $catalog.catalog_fingerprint = Get-CapabilityCatalogTextSha256 ($catalog | ConvertTo-Json -Depth 20 -Compress)
     return $catalog
-}
-
-function New-CapabilityRouterCatalogDocument($projectionCfg) {
-    return New-SkillDiscoveryCatalogDocument $projectionCfg
 }
 
 function Sync-SkillDiscoveryCatalog($projectionCfg) {
@@ -20508,10 +20488,6 @@ function Get-HostProjectionPromotionContext($cfg, [switch]$AllowUnverified) {
             source_git_state = $gitState
             promotion_mode = if ($sourceDirty -or $gitState -ne "clean") { "unverified_override" } else { "verified_clean_commit" }
         })
-}
-
-function Sync-CapabilityRouterCatalog($projectionCfg) {
-    return Sync-SkillDiscoveryCatalog $projectionCfg
 }
 
 function Get-SkillProjectionPromotionRecord([string]$manifestPath, $promotionContext = $null, [string]$projectionFingerprint = '') {

@@ -1214,9 +1214,13 @@ function Get-ImportLockWorkspaceFingerprint([string]$repoPath) {
     return (Get-DirectoryFingerprint $repoPath)
 }
 
-function Get-RepoHeadCommit([string]$repoPath) {
+function Get-RepoHeadCommit([string]$repoPath, [hashtable]$HeadCache = $null) {
     Need (-not [string]::IsNullOrWhiteSpace($repoPath)) "repoPath 不能为空"
     Need (Test-Path -LiteralPath $repoPath) ("仓库目录不存在：{0}" -f $repoPath)
+    $cacheKey = [IO.Path]::GetFullPath($repoPath).TrimEnd('\', '/')
+    if ($null -ne $HeadCache -and $HeadCache.ContainsKey($cacheKey)) {
+        return [string]$HeadCache[$cacheKey]
+    }
     Push-Location $repoPath
     try {
         if ($DryRun) {
@@ -1236,6 +1240,7 @@ function Get-RepoHeadCommit([string]$repoPath) {
             $head = Invoke-GitCapture @("rev-parse", "HEAD")
         }
         Need (-not [string]::IsNullOrWhiteSpace($head)) ("无法读取仓库 HEAD：{0}" -f $repoPath)
+        if ($null -ne $HeadCache) { $HeadCache[$cacheKey] = $head }
         return $head
     }
     finally { Pop-Location }
@@ -1260,6 +1265,7 @@ function Get-VendorSparsePaths($cfg, [string]$vendorName) {
 
 function New-LockData($cfg) {
     if ($null -eq $cfg) { $cfg = LoadCfg }
+    $repoHeadCache = @{}
     $vendors = @()
     foreach ($v in @($cfg.vendors | Sort-Object name)) {
         $path = VendorPath $v.name
@@ -1268,7 +1274,7 @@ function New-LockData($cfg) {
             name = [string]($v.name)
             repo = [string]($v.repo)
             ref = if ([string]::IsNullOrWhiteSpace([string]($v.ref))) { "main" } else { [string]($v.ref) }
-            commit = Get-RepoHeadCommit $path
+            commit = Get-RepoHeadCommit $path $repoHeadCache
         }
     }
 
@@ -1292,7 +1298,7 @@ function New-LockData($cfg) {
             $importEntry.workspace_fingerprint = Get-ImportLockWorkspaceFingerprint $repoPath
         }
         else {
-            $importEntry.commit = Get-RepoHeadCommit $repoPath
+            $importEntry.commit = Get-RepoHeadCommit $repoPath $repoHeadCache
         }
         $imports += $importEntry
     }
@@ -1413,9 +1419,10 @@ function Assert-LockMatchesCfg($cfg, $lock) {
 }
 
 function Assert-LockMatchesWorkspace($cfg, $lock) {
+    $repoHeadCache = @{}
     foreach ($v in @($lock.vendors)) {
         $path = VendorPath ([string]($v.name))
-        $actual = Get-RepoHeadCommit $path
+        $actual = Get-RepoHeadCommit $path $repoHeadCache
         Need ($actual -eq [string]($v.commit)) ("vendor 提交不匹配：{0}（lock={1}, actual={2}）" -f [string]($v.name), [string]($v.commit), [string]$actual)
     }
     foreach ($i in @($lock.imports)) {
@@ -1435,7 +1442,7 @@ function Assert-LockMatchesWorkspace($cfg, $lock) {
             continue
         }
 
-        $actual = Get-RepoHeadCommit $path
+        $actual = Get-RepoHeadCommit $path $repoHeadCache
         Need ($actual -eq [string]($i.commit)) ("import 提交不匹配：{0}/{1}（lock={2}, actual={3}）" -f $mode, [string]($i.name), [string]($i.commit), [string]$actual)
     }
 }

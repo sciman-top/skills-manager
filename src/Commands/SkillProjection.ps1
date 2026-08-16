@@ -1,7 +1,3 @@
-function Add-SkillExternalInventoryWarning($warnings, [string]$code, [string]$subject, [string]$message) {
-    $warnings.Add([pscustomobject][ordered]@{ code = $code; subject = $subject; message = $message }) | Out-Null
-}
-
 function Add-CapabilityCatalogMembership([hashtable]$Membership, [string]$SkillName, [string]$DomainName) {
     if ([string]::IsNullOrWhiteSpace($SkillName) -or [string]::IsNullOrWhiteSpace($DomainName)) { return }
     if (-not $Membership.ContainsKey($SkillName)) {
@@ -66,24 +62,6 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
         }
     }
 
-    $rulesByName = @{}
-    if ($null -ne $policy) {
-        foreach ($group in @($policy.groups)) {
-            foreach ($member in @($group.members)) {
-                $name = [string]$member.name
-                if ([string]::IsNullOrWhiteSpace($name)) { continue }
-                if (-not $rulesByName.ContainsKey($name)) { $rulesByName[$name] = New-Object System.Collections.Generic.List[object] }
-                $rulesByName[$name].Add([ordered]@{
-                        group = [string]$group.id
-                        role = [string]$member.role
-                        activation = [string]$member.activation
-                        negative_activation = [string]$member.negative_activation
-                        context = ('{0} {1}' -f [string]$group.purpose, [string]$group.selection_policy).Trim()
-                    }) | Out-Null
-            }
-        }
-    }
-
     $skills = New-Object System.Collections.Generic.List[object]
     $actualNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($item in @(Get-SkillProjectionFiles $managedRoot)) {
@@ -96,7 +74,6 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
         }
         $relativeWithinManaged = ([string]$item.file).Substring($managedRoot.TrimEnd('\', '/').Length).TrimStart('\', '/')
         $relativeFromCatalog = ('..\{0}' -f $relativeWithinManaged)
-        $rules = if ($rulesByName.ContainsKey($name)) { @($rulesByName[$name].ToArray() | Sort-Object group, role) } else { @() }
         $skills.Add([ordered]@{
                 name = $name
                 description = [string]$meta.description
@@ -105,7 +82,7 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
                 domains = @($membership[$name] | Sort-Object)
                 load_side_effect = 'read_only'
                 side_effect = 'unknown'
-                routing_rules = @($rules)
+                routing_rules = @()
             }) | Out-Null
     }
 
@@ -134,10 +111,6 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
     }
     $catalog.catalog_fingerprint = Get-CapabilityCatalogTextSha256 ($catalog | ConvertTo-Json -Depth 20 -Compress)
     return $catalog
-}
-
-function New-CapabilityRouterCatalogDocument($projectionCfg) {
-    return New-SkillDiscoveryCatalogDocument $projectionCfg
 }
 
 function Sync-SkillDiscoveryCatalog($projectionCfg) {
@@ -318,10 +291,6 @@ function Get-HostProjectionPromotionContext($cfg, [switch]$AllowUnverified) {
             source_git_state = $gitState
             promotion_mode = if ($sourceDirty -or $gitState -ne "clean") { "unverified_override" } else { "verified_clean_commit" }
         })
-}
-
-function Sync-CapabilityRouterCatalog($projectionCfg) {
-    return Sync-SkillDiscoveryCatalog $projectionCfg
 }
 
 function Get-SkillProjectionPromotionRecord([string]$manifestPath, $promotionContext = $null, [string]$projectionFingerprint = '') {

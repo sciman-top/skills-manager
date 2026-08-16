@@ -125,6 +125,14 @@ unified_exec = true
             $managed = Join-Path $TestDrive 'portable-catalog-managed'
             New-ProjectionSkill $managed 'capability-router' 'capability-router' | Out-Null
             New-ProjectionSkill $managed 'demo' 'demo' | Out-Null
+            $policy = [pscustomobject]@{
+                groups = @([pscustomobject]@{
+                        id = 'ambient-policy'
+                        purpose = 'must not leak'
+                        selection_policy = 'must not leak'
+                        members = @([pscustomobject]@{ name = 'demo'; role = 'ambient'; activation = 'ambient'; negative_activation = 'ambient' })
+                    })
+            }
             $catalogPath = Join-Path $managed '.skills-manager\catalog.json'
             $projection = [pscustomobject]@{ managed_source_path = $managed; discovery_catalog = [pscustomobject]@{ catalog_path = $catalogPath } }
 
@@ -139,6 +147,7 @@ unified_exec = true
             $catalog = Get-ContentUtf8 $catalogPath | ConvertFrom-Json
             $catalog.skills[0].load_side_effect | Should -Be 'read_only'
             $catalog.skills[0].side_effect | Should -Be 'unknown'
+            @($catalog.skills | Where-Object name -eq 'demo')[0].routing_rules.Count | Should -Be 0
             $catalog.catalog_fingerprint | Should -Match '^[0-9a-f]{64}$'
         }
         finally { $DryRun = $oldDryRun }
