@@ -49,7 +49,7 @@ Get-FileHash .\skills-manager-<version>-bootstrap.zip -Algorithm SHA256
 推荐迁移配置意图，不复制宿主缓存或目录链接：
 
 1. 在旧电脑备份自己修改过的 `skills.json`、`skills.lock.json` 和 `overrides/`。
-2. 若没有定制，直接在新电脑使用相同版本的官方 Release，无需搬运 `vendor/`、`agent/`、`reports/`、`.txn/` 或宿主 plugin cache。
+2. 若没有定制，直接在新电脑使用相同版本的官方 Release，无需搬运 `vendor/`、`imports/`、`agent/`、`reports/`、`.txn/` 或宿主 plugin cache。
 3. 若有定制，把上述文件覆盖到新解压目录；先审查差异和其中是否有凭据，再运行 `setup.cmd`。
 4. MCP 清单可随 `skills.json` 迁移，但 token、登录态和环境变量应通过各宿主/系统重新配置，不能打进发布包。
 5. 在新电脑开启一个全新宿主会话验证技能是否加载。`doctor --strict` 只证明仓库与本机基础环境健康，不等于 `host_loaded` 或 `live_accepted`。

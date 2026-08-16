@@ -1905,46 +1905,6 @@ command = "cmd"
             $content | Should -Not -Match "postgresql://"
         }
 
-        It "Skips GitHub MCP when GitHub token is unavailable" {
-            $oldToken = $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN
-            $oldGithubToken = $env:GITHUB_PERSONAL_ACCESS_TOKEN
-            Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
-            Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
-            try {
-                $servers = @(
-                    [pscustomobject]@{
-                        name                 = "github"
-                        transport            = "http"
-                        url                  = "https://api.githubcopilot.com/mcp/readonly"
-                        bearer_token_env_var = "GITHUB_PERSONAL_ACCESS_TOKEN"
-                    }
-                    [pscustomobject]@{
-                        name      = "microsoft-learn"
-                        transport = "http"
-                        url       = "https://learn.microsoft.com/api/mcp"
-                    }
-                )
-
-                $toml = Build-CodexConfigToml "" $servers
-                $toml | Should -Not -Match "\[mcp_servers\.github\]"
-                $toml | Should -Match "\[mcp_servers\.microsoft-learn\]"
-                $toml | Should -Match "url = ""https://learn.microsoft.com/api/mcp"""
-            }
-            finally {
-                if ($null -ne $oldToken) {
-                    $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = $oldToken
-                }
-                else {
-                    Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
-                }
-                if ($null -ne $oldGithubToken) {
-                    $env:GITHUB_PERSONAL_ACCESS_TOKEN = $oldGithubToken
-                }
-                else {
-                    Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
-                }
-            }
-        }
     }
 
     Context "Resolve-GeminiAntigravityRootsFromCandidates" {

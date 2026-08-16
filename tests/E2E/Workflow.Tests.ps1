@@ -399,8 +399,24 @@ description: demo skill
 
     Context "Read-only CLI" {
         It "emits one capability inventory JSON envelope" {
-            $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') capability-inventory --json 2>&1)
-            $parsed = ($output -join "`n") | ConvertFrom-Json
+            $fixtureBin = Join-Path $TestDrive 'codex-fixture-bin'
+            New-Item -ItemType Directory -Path $fixtureBin -Force | Out-Null
+            [IO.File]::WriteAllText((Join-Path $fixtureBin 'codex.cmd'), @'
+@echo off
+if /I "%~1"=="plugin" echo {"installed":[]}
+if /I "%~1"=="mcp" echo []
+if /I "%~1"=="doctor" echo {"schemaVersion":1,"codexVersion":"fixture","overallStatus":"ok","checks":[]}
+exit /b 0
+'@, [Text.UTF8Encoding]::new($false))
+            $oldPath = $env:PATH
+            try {
+                $env:PATH = $fixtureBin + [IO.Path]::PathSeparator + $oldPath
+                $output = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'skills.ps1') capability-inventory --json 2>&1)
+                $parsed = ($output -join "`n") | ConvertFrom-Json
+            }
+            finally {
+                $env:PATH = $oldPath
+            }
 
             @($output).Count | Should -Be 1
             $parsed.command | Should -Be 'capability-inventory'

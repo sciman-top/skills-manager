@@ -250,9 +250,9 @@ else {
         $dependencies = @($contract.dependencies)
         $dependencyCount = $dependencies.Count
 
-        # agent/ is generated from both tracked sources and locally materialized gitlinks.
-        # A clean checkout intentionally lacks the latter, so dependency existence must use
-        # tracked source declarations as well as any materialized package frontmatter. Profile,
+        # agent/ is generated from tracked config/override declarations plus locally materialized imports.
+        # A clean checkout intentionally lacks materialized imports, so dependency existence must use
+        # tracked declarations as well as any materialized package frontmatter. Profile,
         # catalog and alias references are consumers and must never self-prove existence.
         $availableSkillNames = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
         Add-IntegritySkillNames $availableSkillNames $skillNames

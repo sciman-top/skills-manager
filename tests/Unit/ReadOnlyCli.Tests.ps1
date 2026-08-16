@@ -37,6 +37,27 @@ Describe 'Read-only capability and rule CLI' {
         }
         $capabilityCfgPath = Join-Path $capabilityRoot 'skills.json'
         [IO.File]::WriteAllText($capabilityCfgPath, ($capabilityConfig | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
+        Mock Get-CodexPluginSkillInventory {
+            [pscustomobject]@{
+                authority          = 'fixture'
+                freshness          = 'fresh'
+                coverage           = 'complete'
+                enabled_plugin_ids = @()
+                skill_count        = 0
+                skills             = @()
+                warnings           = @()
+            }
+        }
+        Mock Get-CodexHostObservation {
+            [pscustomobject]@{
+                truth_boundary  = 'read_only_cli_observation_not_host_loaded'
+                mcp             = [pscustomobject]@{ warnings = @() }
+                doctor          = [pscustomobject]@{ warnings = @() }
+                provider_calls  = 0
+                native_mutations = 0
+                writes          = 0
+            }
+        }
     }
 
     It 'returns one parseable skill-surface JSON envelope with no write by default' {
@@ -69,6 +90,18 @@ Describe 'Read-only capability and rule CLI' {
         Test-Path -LiteralPath $out | Should -Be $true
         (Get-Content -LiteralPath $out -Raw | ConvertFrom-Json).data.writes | Should -Be 1
         @((Get-ChildItem -LiteralPath $TestDrive -File)).Count | Should -Be 1
+    }
+
+    It 'refuses to overwrite an inventory input through report out' {
+        $script:Root = $capabilityRoot
+        $script:CfgPath = $capabilityCfgPath
+        $Root = $script:Root
+        $CfgPath = $script:CfgPath
+        $before = (Get-FileHash -LiteralPath $CfgPath -Algorithm SHA256).Hash
+
+        { Invoke-CapabilityInventoryCommand @('--json', '--out', $CfgPath) } | Should -Throw '*cannot overwrite a capability inventory input*'
+
+        (Get-FileHash -LiteralPath $CfgPath -Algorithm SHA256).Hash | Should -Be $before
     }
 
     It 'returns exit 1 when the skill surface view fails closed' {

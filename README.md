@@ -55,7 +55,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 - `mcp_servers` / `mcp_profiles` / `mcp_targets`：MCP 清单与同步目标
 - `skill_projection`：技能来源、别名、domain catalog 和 native placement；metadata budget 与 description 截断由宿主原生处理
 
-`skills.lock.json` 锁定已解析来源。`src/` 是 CLI 源码，`build.ps1` 生成根 `skills.ps1`；`overrides/{custom,patches,resources}` 生成 `agent/`。不要手改 `skills.ps1`、`agent/`、`vendor/` 或运行态 `reports/`。
+`skills.lock.json` 锁定已解析来源。`src/` 是 CLI 源码，`build.ps1` 生成根 `skills.ps1`；`overrides/{custom,patches,resources}` 生成 `agent/`。`vendor/` 与 `imports/` 都是可由配置和锁文件重建的本地物化目录；不要手改 `skills.ps1`、`agent/`、`vendor/`、`imports/` 或运行态 `reports/`。
 
 ## 常用命令
 

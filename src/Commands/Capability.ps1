@@ -22,6 +22,25 @@ function Invoke-CapabilityInventoryCommand([object[]]$Tokens = @()) {
     if (-not [string]::IsNullOrWhiteSpace([string]$options.out_path)) { $view.writes = 1 }
     $envelope = [pscustomobject][ordered]@{ schema_version = 1; command = 'capability-inventory'; view = 'skill-surfaces'; pass = [bool]$view.pass; truth_boundary = 'read_only_skill_surface_snapshot'; data = $view }
     $json = $envelope | ConvertTo-Json -Depth 40 -Compress
-    if (-not [string]::IsNullOrWhiteSpace([string]$options.out_path)) { Write-Utf8FileAtomic -Path ([System.IO.Path]::GetFullPath([string]$options.out_path)) -Content $json }
+    if (-not [string]::IsNullOrWhiteSpace([string]$options.out_path)) {
+        $outPath = [System.IO.Path]::GetFullPath([string]$options.out_path)
+        $protectedInputs = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        $protectedInputs.Add([System.IO.Path]::GetFullPath($CfgPath)) | Out-Null
+        if (-not [string]::IsNullOrWhiteSpace([string]$options.host_snapshot)) {
+            $protectedInputs.Add([System.IO.Path]::GetFullPath([string]$options.host_snapshot)) | Out-Null
+        }
+        foreach ($surface in @($view.surfaces)) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$surface.source) -and (Test-Path -LiteralPath ([string]$surface.source) -PathType Leaf)) {
+                $protectedInputs.Add([System.IO.Path]::GetFullPath([string]$surface.source)) | Out-Null
+            }
+            foreach ($item in @($surface.items)) {
+                if (-not [string]::IsNullOrWhiteSpace([string]$item.path) -and (Test-Path -LiteralPath ([string]$item.path) -PathType Leaf)) {
+                    $protectedInputs.Add([System.IO.Path]::GetFullPath([string]$item.path)) | Out-Null
+                }
+            }
+        }
+        if ($protectedInputs.Contains($outPath)) { throw '--out cannot overwrite a capability inventory input.' }
+        Write-Utf8FileAtomic -Path $outPath -Content $json
+    }
     return [pscustomobject]@{ exit_code = $(if ($envelope.pass) { 0 } else { 1 }); output = $(if ($options.json) { $json } else { 'Skill surfaces: surfaces={0}, findings={1}' -f $view.surface_count, @($view.findings).Count }); json = [bool]$options.json; envelope = $envelope }
 }
