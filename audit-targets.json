@@ -86,6 +86,13 @@
       "notes": ""
     },
     {
+      "name": "codex-watch-runtime",
+      "path": "D:\\CODE\\codex-watch-runtime",
+      "enabled": true,
+      "tags": [],
+      "notes": ""
+    },
+    {
       "name": "skills-manager",
       "path": "D:\\CODE\\skills-manager",
       "enabled": true,
