@@ -225,30 +225,3 @@ function Test-OperationPlanContract($Plan) {
     if (Test-OperationSerializedSensitiveValue $serialized) { $findings.Add((New-OperationFinding "sensitive_value_present" "error" "$" "Plan contains a sensitive value.")) | Out-Null }
     return New-OperationValidationResult $findings.ToArray()
 }
-function Test-OperationPlanFreshness {
-    param(
-        [Parameter(Mandatory = $true)]$Plan,
-        [object[]]$CurrentTargets = @(),
-        [string[]]$AuthorizedRoots = @(),
-        [string]$CurrentSourceRevision
-    )
-    $findings = New-Object System.Collections.Generic.List[object]
-    $currentIndex = @{}
-    foreach ($state in @($CurrentTargets)) { $currentIndex[([string](Get-OperationObjectProperty $state "target_ref")).ToLowerInvariant()] = $state }
-    foreach ($target in @((Get-OperationObjectProperty $Plan "targets"))) {
-        $targetRef = [string](Get-OperationObjectProperty $target "target_ref")
-        $path = [string](Get-OperationObjectProperty $target "path")
-        if (-not @($AuthorizedRoots | Where-Object { Test-OperationPathWithinRoot $path $_ }).Count) { $findings.Add((New-OperationFinding "target_out_of_root" "error" ("$.targets[{0}]" -f $targetRef) "Target is outside authorized roots.")) | Out-Null }
-        $key = $targetRef.ToLowerInvariant()
-        if (-not $currentIndex.ContainsKey($key)) { $findings.Add((New-OperationFinding "target_state_missing" "error" ("$.targets[{0}]" -f $targetRef) "Current target state is missing.")) | Out-Null; continue }
-        $state = $currentIndex[$key]
-        if ([string](Get-OperationObjectProperty $state "owner") -ne [string](Get-OperationObjectProperty $target "owner")) { $findings.Add((New-OperationFinding "target_owner_changed" "error" ("$.targets[{0}].owner" -f $targetRef) "Target owner changed.")) | Out-Null }
-        $beforeHash = Get-OperationObjectProperty $target "before_hash"
-        $exists = [bool](Get-OperationObjectProperty $state "exists")
-        if ($null -eq $beforeHash -and $exists) { $findings.Add((New-OperationFinding "target_created_since_plan" "error" ("$.targets[{0}].before_hash" -f $targetRef) "Target now exists.")) | Out-Null }
-        elseif ($null -ne $beforeHash -and (-not $exists -or [string](Get-OperationObjectProperty $state "current_hash") -ne [string]$beforeHash)) { $findings.Add((New-OperationFinding "target_hash_stale" "error" ("$.targets[{0}].before_hash" -f $targetRef) "Target hash changed.")) | Out-Null }
-    }
-    $sourceRevision = [string](Get-OperationObjectProperty $Plan "source_revision")
-    if (-not [string]::IsNullOrWhiteSpace($sourceRevision) -and $sourceRevision -ne $CurrentSourceRevision) { $findings.Add((New-OperationFinding "source_revision_stale" "error" "$.source_revision" "Source revision changed.")) | Out-Null }
-    return New-OperationValidationResult $findings.ToArray()
-}

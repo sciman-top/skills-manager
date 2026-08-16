@@ -28,20 +28,6 @@ Describe 'Skill projection' {
         @($plan.conflicts).Count | Should -Be 1
     }
 
-    It 'keeps every canonical skill active except an explicit alias' {
-        $root = Join-Path $TestDrive 'alias'
-        New-ProjectionSkill $root 'social' 'social' | Out-Null
-        New-ProjectionSkill $root 'social-content' 'social-content' | Out-Null
-        New-ProjectionSkill $root 'cold' 'cold' | Out-Null
-        $plan = New-SkillProjectionPlan ([pscustomobject]@{
-                aliases = @([pscustomobject]@{ name = 'social-content'; replacement = 'social' })
-                sources = @([pscustomobject]@{ id = 'source'; path = $root; priority = 1; platforms = @('codex') })
-            })
-
-        @($plan.active.name | Sort-Object) | Should -Be @('cold', 'social')
-        @($plan.disabled | Where-Object decision -eq 'alias_replaced').name | Should -Be 'social-content'
-    }
-
     It 'reports inventory size without enforcing a second host metadata budget' {
         $root = Join-Path $TestDrive 'budget'
         New-ProjectionSkill $root 'large' 'large' ('x' * 80) | Out-Null

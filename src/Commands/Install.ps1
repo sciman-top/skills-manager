@@ -1759,18 +1759,6 @@ function Test-SkillNameSystemOverrideAllowed([string[]]$paths) {
     }
     return ($hasSystemPath -and $hasNonSystemPath)
 }
-function Get-StringSha256([string]$text) {
-    if ($null -eq $text) { $text = "" }
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes($text)
-        $hash = $sha.ComputeHash($bytes)
-        return ([System.BitConverter]::ToString($hash) -replace "-", "").ToLowerInvariant()
-    }
-    finally {
-        $sha.Dispose()
-    }
-}
 function New-AgentMappingResolveContext {
     return @{
         vendor_base = @{}

@@ -238,7 +238,6 @@ Describe "Audit target hardening" {
         New-Item -ItemType Directory -Path (Join-Path $repo "overrides\patches") -Force | Out-Null
         $cfg = [pscustomobject]@{
             skill_projection = [pscustomobject]@{
-                aliases = @([pscustomobject]@{ name = "legacy"; replacement = "retired-skill" })
                 discovery_catalog = [pscustomobject]@{ domain_memberships = [pscustomobject]@{} }
             }
         }
@@ -251,10 +250,9 @@ Describe "Audit target hardening" {
         $check.ok | Should -Be $false
         $check.blocked[0].name | Should -Be "retired-skill"
         $check.blocked[0].original_index | Should -Be 3
-        $check.blocked[0].references[0].path | Should -Be '$.skill_projection.aliases[0].replacement'
-        $check.blocked[0].references[1].file | Should -Be "config/skill-dependency-closure.json"
-        $check.blocked[0].references[1].path | Should -Be '$.dependencies[0].requires[0]'
-        @($check.blocked[0].references).Count | Should -Be 2
+        $check.blocked[0].references[0].file | Should -Be "config/skill-dependency-closure.json"
+        $check.blocked[0].references[0].path | Should -Be '$.dependencies[0].requires[0]'
+        @($check.blocked[0].references).Count | Should -Be 1
 
         $substringOnly = Test-AuditRemovalDependencyClosure -Config $cfg -RemovalCandidates @([pscustomobject]@{ name = "retired" }) -RepositoryRoot $repo
         $substringOnly.ok | Should -Be $true
@@ -272,9 +270,9 @@ Describe "Audit target hardening" {
                 blocked = @([pscustomobject]@{
                         name = "retired-skill"
                         original_index = 1
-                        references = @([pscustomobject]@{ file = "skills.json"; path = '$.skill_projection.aliases[0].replacement' })
+                        references = @([pscustomobject]@{ file = "config/skill-dependency-closure.json"; path = '$.dependencies[0].requires[0]' })
                     })
-                issues = @('removal_dependency_blocked：1) retired-skill <- skills.json$.skill_projection.aliases[0].replacement')
+                issues = @('removal_dependency_blocked：1) retired-skill <- config/skill-dependency-closure.json$.dependencies[0].requires[0]')
             }
         }
 

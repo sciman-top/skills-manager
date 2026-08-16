@@ -1112,19 +1112,6 @@ function Resolve-AddTokensFromAnyFormat([string[]]$tokens) {
 
     return $null
 }
-function Try-ParseAddLikeInput([string]$line) {
-    if ([string]::IsNullOrWhiteSpace($line)) { return $null }
-    $tokens = Split-Args $line
-    $resolved = Resolve-AddTokensFromAnyFormat $tokens
-    if ($resolved) { $tokens = $resolved }
-    else { $tokens = Get-AddTokensFromCommandLineTokens $tokens }
-    $parsed = Parse-AddArgs $tokens
-    return [pscustomobject]@{
-        repo = $parsed.repo
-        ref = $parsed.ref
-        skills = @($parsed.skills)
-    }
-}
 function Resolve-UniqueVendorName($cfg, [string]$vendorName, [string]$repo, [bool]$AllowExistingSameRepo = $false) {
     $baseName = Normalize-NameWithNotice $vendorName "vendor 名称"
     $identityKey = Get-RepoIdentityKey $repo

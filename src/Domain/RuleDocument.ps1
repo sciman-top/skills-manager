@@ -11,6 +11,7 @@ function New-RuleFinding {
         [ValidateSet('adopt', 'adapt', 'reject', 'defer')][string]$Disposition = 'defer',
         [switch]$Blocking
     )
+    if ($Kind -eq 'semantic' -and $Blocking) { throw 'Semantic findings cannot block.' }
     $identity = '{0}|{1}|{2}|{3}|{4}' -f $Kind, $Code.ToLowerInvariant(), $Path.ToLowerInvariant(), $Line, $Message
     return [pscustomobject][ordered]@{
         finding_id = 'finding-{0}' -f (Get-OperationSha256 $identity).Substring(0, 16)
@@ -33,6 +34,7 @@ function New-RuleDocument {
         [object[]]$Findings = @(), [object[]]$Evidence = @(),
         [ValidateSet('not_verified', 'static_validated', 'repo_verified', 'host_loaded', 'live_accepted')][string]$VerificationState = 'not_verified'
     )
+    if (-not [string]::IsNullOrWhiteSpace($ContentHash) -and $ContentHash -notmatch '^[a-fA-F0-9]{64}$') { throw 'Content hash must be SHA-256 or empty.' }
     $identity = '{0}|{1}|{2}' -f $HostName.ToLowerInvariant(), $Scope, $Path.ToLowerInvariant()
     return [pscustomobject][ordered]@{
         schema_version = 1; id = 'rule-{0}' -f (Get-OperationSha256 $identity).Substring(0, 16)
@@ -43,22 +45,4 @@ function New-RuleDocument {
         findings = @($Findings | Sort-Object finding_id); evidence = @($Evidence | Sort-Object { $_ | ConvertTo-Json -Depth 10 -Compress })
         verification_state = $VerificationState
     }
-}
-
-function Test-RuleDocumentContract($Document) {
-    $findings = New-Object System.Collections.Generic.List[object]
-    if ($null -eq $Document) { return New-OperationValidationResult @((New-OperationFinding 'rule_document_missing' 'error' '$' 'Rule document is required.')) }
-    if ((Get-OperationObjectProperty $Document 'schema_version') -ne 1) { $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only schema version 1 is supported.')) | Out-Null }
-    foreach ($field in @('id', 'host', 'scope', 'responsibility', 'path', 'owner', 'discovery_state', 'source_of_truth', 'verification_state')) { if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Document $field))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Required field is missing.')) | Out-Null } }
-    if ([string](Get-OperationObjectProperty $Document 'scope') -notin @('global', 'repo', 'subtree', 'override')) { $findings.Add((New-OperationFinding 'scope_invalid' 'error' '$.scope' 'Scope is invalid.')) | Out-Null }
-    if ([string](Get-OperationObjectProperty $Document 'responsibility') -notin @('common', 'platform_delta', 'project_action', 'deterministic_enforcement', 'task_local')) { $findings.Add((New-OperationFinding 'responsibility_invalid' 'error' '$.responsibility' 'Responsibility is invalid.')) | Out-Null }
-    if ([string](Get-OperationObjectProperty $Document 'discovery_state') -notin @('observed', 'inferred', 'unknown')) { $findings.Add((New-OperationFinding 'discovery_state_invalid' 'error' '$.discovery_state' 'Discovery state is invalid.')) | Out-Null }
-    $hash = Get-OperationObjectProperty $Document 'content_hash'; if ($null -ne $hash -and [string]$hash -notmatch '^[a-fA-F0-9]{64}$') { $findings.Add((New-OperationFinding 'content_hash_invalid' 'error' '$.content_hash' 'Content hash must be SHA-256 or null.')) | Out-Null }
-    $documentFindings = Get-OperationObjectProperty $Document 'findings'
-    if (-not (Test-OperationArray $documentFindings)) { $findings.Add((New-OperationFinding 'array_type_invalid' 'error' '$.findings' 'Findings must be an array.')) | Out-Null; $documentFindings = @() }
-    foreach ($item in @($documentFindings)) {
-        if ([string](Get-OperationObjectProperty $item 'kind') -notin @('deterministic', 'semantic')) { $findings.Add((New-OperationFinding 'finding_kind_invalid' 'error' '$.findings' 'Finding kind is invalid.')) | Out-Null }
-        if ([bool](Get-OperationObjectProperty $item 'blocking') -and [string](Get-OperationObjectProperty $item 'kind') -ne 'deterministic') { $findings.Add((New-OperationFinding 'semantic_finding_cannot_block' 'error' '$.findings' 'Semantic findings are recommendation-only.')) | Out-Null }
-    }
-    return New-OperationValidationResult $findings.ToArray()
 }

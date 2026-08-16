@@ -21,28 +21,32 @@ function New-TestPlan([object[]]$Targets, [object[]]$Actions) {
     }
 }
 
-    It 'accepts the valid plan and receipt fixtures' {
+    It 'accepts the valid plan fixture and constructs a receipt' {
         $plan = Get-Content -LiteralPath (Join-Path $fixtureRoot 'valid-plan.json') -Raw | ConvertFrom-Json
-        $receipt = Get-Content -LiteralPath (Join-Path $fixtureRoot 'valid-receipt.json') -Raw | ConvertFrom-Json
+        $receipt = New-OperationReceipt -OperationId 'op-test-001' -Status dry_run -StartedAt '2026-08-01T08:00:00Z' -CompletedAt '2026-08-01T08:00:01Z'
 
         (Test-OperationPlanContract $plan).pass | Should -Be $true
-        (Test-OperationReceiptContract $receipt).pass | Should -Be $true
+        $receipt.schema_version | Should -Be 1
+        $receipt.status | Should -Be 'dry_run'
     }
 
-    It 'fails closed with structured findings for invalid fixtures' {
+    It 'rejects invalid receipt timestamps at construction time' {
+        { New-OperationReceipt -OperationId 'op-test-001' -Status dry_run -StartedAt 'not-a-timestamp' -CompletedAt '2026-08-01T08:00:01Z' } | Should -Throw '*RFC3339*'
+    }
+
+    It 'rejects invalid receipt status at parameter binding' {
+        { New-OperationReceipt -OperationId 'op-test-001' -Status unknown -StartedAt '2026-08-01T08:00:00Z' -CompletedAt '2026-08-01T08:00:01Z' } | Should -Throw
+    }
+
+    It 'fails closed with structured findings for an invalid plan fixture' {
         $plan = Get-Content -LiteralPath (Join-Path $fixtureRoot 'invalid-plan.json') -Raw | ConvertFrom-Json
-        $receipt = Get-Content -LiteralPath (Join-Path $fixtureRoot 'invalid-receipt.json') -Raw | ConvertFrom-Json
         $planResult = Test-OperationPlanContract $plan
-        $receiptResult = Test-OperationReceiptContract $receipt
 
         $planResult.pass | Should -Be $false
         @($planResult.findings | Where-Object code -eq 'created_at_invalid').Count | Should -Be 1
         @($planResult.findings | Where-Object code -eq 'action_target_unknown').Count | Should -Be 1
         @($planResult.findings | Where-Object code -eq 'sensitive_value_present').Count | Should -Be 1
-        $receiptResult.pass | Should -Be $false
-        @($receiptResult.findings | Where-Object code -eq 'timestamp_invalid').Count | Should -Be 2
-        @($receiptResult.findings | Where-Object code -eq 'verification_state_invalid').Count | Should -Be 1
-        foreach ($finding in @($planResult.findings) + @($receiptResult.findings)) {
+        foreach ($finding in @($planResult.findings)) {
             [string]::IsNullOrWhiteSpace([string]$finding.code) | Should -Be $false
             [string]::IsNullOrWhiteSpace([string]$finding.severity) | Should -Be $false
             [string]::IsNullOrWhiteSpace([string]$finding.path) | Should -Be $false
@@ -78,42 +82,10 @@ function New-TestPlan([object[]]$Targets, [object[]]$Actions) {
         (@($target, $action) | ConvertTo-Json -Depth 20 -Compress) | Should -Be $before
     }
 
-    It 'detects out-of-root owner hash creation and source revision drift' {
-        $targets = @(
-            [pscustomobject]@{ target_ref = 'existing'; path = 'C:\repo\config.json'; before_hash = $hashA; desired_hash = $hashB; owner = 'adapter-a' },
-            [pscustomobject]@{ target_ref = 'new'; path = 'C:\outside\new.json'; before_hash = $null; desired_hash = $hashB; owner = 'adapter-a' }
-        )
-        $actions = @(
-            [pscustomobject]@{ type = 'update'; target_ref = 'existing'; summary = 'Update existing'; risk = 'low' },
-            [pscustomobject]@{ type = 'create'; target_ref = 'new'; summary = 'Create new'; risk = 'low' }
-        )
-        $plan = New-TestPlan $targets $actions
-        $current = @(
-            [pscustomobject]@{ target_ref = 'existing'; exists = $true; current_hash = $hashB; owner = 'adapter-b' },
-            [pscustomobject]@{ target_ref = 'new'; exists = $true; current_hash = $hashA; owner = 'adapter-a' }
-        )
-
-        $result = Test-OperationPlanFreshness -Plan $plan -CurrentTargets $current -AuthorizedRoots @('C:\repo') -CurrentSourceRevision 'rev-2'
-
-        $result.pass | Should -Be $false
-        foreach ($code in @('target_out_of_root', 'target_owner_changed', 'target_hash_stale', 'target_created_since_plan', 'source_revision_stale')) {
-            @($result.findings | Where-Object code -eq $code).Count | Should -Be 1
-        }
+    It 'keeps path containment segment aware' {
         (Test-OperationPathWithinRoot 'C:\repo2\file.json' 'C:\repo') | Should -Be $false
         (Test-OperationPathWithinRoot 'C:\repo\sub\..\file.json' 'C:\repo') | Should -Be $true
         (Test-OperationPathWithinRoot 'C:\repo\..\outside\file.json' 'C:\repo') | Should -Be $false
-    }
-
-    It 'updates only the explicitly requested verification level' {
-        $repoPass = Merge-OperationVerificationState -Current $null -Level repo_gates_passed -State pass
-        $repoPass.repo_gates_passed | Should -Be 'pass'
-        $repoPass.host_loaded | Should -Be 'not_run'
-        $repoPass.live_accepted | Should -Be 'not_run'
-
-        $hostFail = Merge-OperationVerificationState -Current $repoPass -Level host_loaded -State fail
-        $hostFail.repo_gates_passed | Should -Be 'pass'
-        $hostFail.host_loaded | Should -Be 'fail'
-        $hostFail.live_accepted | Should -Be 'not_run'
     }
 
     It 'redacts tokens url credentials connection strings env headers and argv during construction' {
@@ -138,7 +110,8 @@ function New-TestPlan([object[]]$Targets, [object[]]$Actions) {
         }
         $serialized | Should -Match '<redacted>'
         (Test-OperationPlanContract $plan).pass | Should -Be $true
-        (Test-OperationReceiptContract $receipt).pass | Should -Be $true
+        $receipt.schema_version | Should -Be 1
+        $receipt.verification.host_loaded | Should -Be 'not_run'
     }
 
     It 'keeps domain modules free of IO environment clock and terminal side effects' {

@@ -23,7 +23,8 @@ function New-ExecutorFixture([string]$Name) {
     It 'atomically applies desired content and returns a truthful receipt' {
         $f=New-ExecutorFixture success; $result=Invoke-RulePatchApply $f.plan $f.root APPLY_RULE_PATCH
         $result.pass | Should -Be $true; [System.IO.File]::ReadAllText($f.path) | Should -Be 'after'; [System.IO.File]::ReadAllText($f.other) | Should -Be 'untouched'
-        (Test-OperationReceiptContract $result.receipt).pass | Should -Be $true
+        $result.receipt.schema_version | Should -Be 1
+        $result.receipt.status | Should -Be 'applied'
         $result.receipt.verification.static_validated | Should -Be 'pass'; $result.receipt.verification.host_loaded | Should -Be 'not_run'; $result.receipt.verification.live_accepted | Should -Be 'not_run'
     }
 
@@ -35,7 +36,8 @@ function New-ExecutorFixture([string]$Name) {
     It 'restores exact before content after a post-replace failure' {
         $f=New-ExecutorFixture rollback; $result=Invoke-RulePatchApply $f.plan $f.root APPLY_RULE_PATCH -TestFaultPoint after_replace
         $result.status | Should -Be 'rolled_back'; $result.rollback | Should -Be 'restored'; [System.IO.File]::ReadAllText($f.path) | Should -Be 'before'
-        (Test-OperationReceiptContract $result.receipt).pass | Should -Be $true
+        $result.receipt.schema_version | Should -Be 1
+        $result.receipt.status | Should -Be 'rolled_back'
     }
 
     It 'restores the exact original bytes including a UTF-8 BOM' {

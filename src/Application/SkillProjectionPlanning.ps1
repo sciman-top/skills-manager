@@ -165,29 +165,8 @@ function New-SkillProjectionPlan($ProjectionConfig, [string]$RepoRoot = '', [swi
             $disabled.Add([pscustomobject][ordered]@{ name = [string]$loser.name; path = [string]$loser.path; source_id = [string]$loser.source_id; source_root = [string]$loser.source_root; content_hash = [string]$loser.content_hash; package_hash = [string]$loser.package_hash; target_platforms = @($loser.target_platforms); canonical_path = [string]$winner.path; canonical_source_id = [string]$winner.source_id; decision = if ($isConflict) { 'conflict_priority_winner' } else { 'duplicate_same_content' } }) | Out-Null
         }
     }
-    $canonicalByName = @{}
-    foreach ($entry in @($canonical.ToArray())) { $canonicalByName[[string]$entry.name] = $entry }
-    $aliases = @{}
-    $aliasEntries = Get-SkillProjectionObjectProperty $ProjectionConfig 'aliases'
-    foreach ($alias in @($aliasEntries)) {
-        if ($null -eq $alias) { continue }
-        $aliasName = ([string](Get-SkillProjectionObjectProperty $alias 'name')).Trim()
-        $replacement = ([string](Get-SkillProjectionObjectProperty $alias 'replacement')).Trim()
-        Need (-not [string]::IsNullOrWhiteSpace($aliasName)) 'skill_projection alias 缺少 name'
-        Need (-not [string]::IsNullOrWhiteSpace($replacement)) ('skill_projection alias replacement 不存在：{0}' -f $aliasName)
-        Need (-not [string]::Equals($aliasName, $replacement, [StringComparison]::OrdinalIgnoreCase)) ('skill_projection alias 不能指向自身：{0}' -f $aliasName)
-        Need (-not $aliases.ContainsKey($aliasName)) ('skill_projection alias 重复：{0}' -f $aliasName)
-        if ($canonicalByName.ContainsKey($aliasName)) { Need ($canonicalByName.ContainsKey($replacement)) ('skill_projection alias replacement 不存在：{0} -> {1}' -f $aliasName, $replacement) }
-        $aliases[$aliasName] = $replacement
-    }
     $active = [Collections.Generic.List[object]]::new()
     foreach ($entry in @($canonical.ToArray() | Sort-Object name)) {
-        $name = [string]$entry.name
-        if ($aliases.ContainsKey($name)) {
-            $replacementEntry = $canonicalByName[[string]$aliases[$name]]
-            $disabled.Add([pscustomobject][ordered]@{ name = $name; path = [string]$entry.path; source_id = [string]$entry.source_id; source_root = [string]$entry.source_root; content_hash = [string]$entry.content_hash; package_hash = [string]$entry.package_hash; target_platforms = @($entry.target_platforms); canonical_path = [string]$replacementEntry.path; canonical_source_id = [string]$replacementEntry.source_id; replacement = [string]$aliases[$name]; decision = 'alias_replaced' }) | Out-Null
-            continue
-        }
         $active.Add($entry) | Out-Null
     }
     $externalInventory = if ($OmitExternalInventory) { [pscustomobject]@{ skill_count = 0; metadata_chars = 0; skills = @(); warnings = @() } } else { Get-CodexExternalSkillInventory $ProjectionConfig }

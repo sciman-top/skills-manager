@@ -88,21 +88,3 @@ function Evaluate-SkillEligibility {
         writes = 0
     }
 }
-
-function Test-SkillEligibilityResultContract {
-    param($Result)
-
-    $findings = New-Object System.Collections.Generic.List[object]
-    if ($null -eq $Result) { return New-OperationValidationResult @((New-OperationFinding 'eligibility_result_missing' 'error' '$' 'Eligibility result is required.')) }
-    if ((Get-OperationObjectProperty $Result 'schema_version') -ne 1) { $findings.Add((New-OperationFinding 'schema_version_invalid' 'error' '$.schema_version' 'Only eligibility schema version 1 is supported.')) | Out-Null }
-    if ([string](Get-OperationObjectProperty $Result 'decision') -notin @('allow', 'deny', 'needs_activation')) { $findings.Add((New-OperationFinding 'decision_invalid' 'error' '$.decision' 'Eligibility decision is invalid.')) | Out-Null }
-    if ([string](Get-OperationObjectProperty $Result 'decision_owner') -ne 'deterministic_policy') { $findings.Add((New-OperationFinding 'decision_owner_invalid' 'error' '$.decision_owner' 'Eligibility decision owner is invalid.')) | Out-Null }
-    if ((Get-OperationObjectProperty $Result 'semantic_selection_performed') -ne $false) { $findings.Add((New-OperationFinding 'semantic_boundary_breached' 'error' '$' 'Eligibility policy cannot perform semantic selection.')) | Out-Null }
-    $expectedEligible = ([string](Get-OperationObjectProperty $Result 'decision') -eq 'allow')
-    if ((Get-OperationObjectProperty $Result 'eligible') -ne $expectedEligible) { $findings.Add((New-OperationFinding 'eligible_flag_invalid' 'error' '$.eligible' 'Eligible flag must match the deterministic decision.')) | Out-Null }
-    if (-not (Test-OperationArray (Get-OperationObjectProperty $Result 'findings'))) { $findings.Add((New-OperationFinding 'findings_type_invalid' 'error' '$.findings' 'Eligibility findings must be an array.')) | Out-Null }
-    foreach ($field in @('provider_calls', 'native_mutations', 'writes')) {
-        if ([long](Get-OperationObjectProperty $Result $field) -ne 0) { $findings.Add((New-OperationFinding 'side_effect_forbidden' 'error' ('$.{0}' -f $field) 'Eligibility policy must be zero-side-effect.')) | Out-Null }
-    }
-    return New-OperationValidationResult $findings.ToArray()
-}

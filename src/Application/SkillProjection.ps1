@@ -68,7 +68,6 @@ function Get-NativeSkillProjectionSettings {
         owner = $owner
         target_root = $targetRoot
         receipt_path = $receiptPath
-        apply_requires_token = if (Test-OperationObjectProperty $settings 'apply_requires_token') { [bool](Get-OperationObjectProperty $settings 'apply_requires_token') } else { $true }
     }
 }
 
@@ -107,8 +106,6 @@ function New-NativeSkillProjectionBlockedPlan {
         owner = [string]$Settings.owner
         target_root = [string]$Settings.target_root
         receipt_path = [string]$Settings.receipt_path
-        apply_requires_token = [bool]$Settings.apply_requires_token
-        apply_token = ''
         catalog_id = [string](Get-NativeSkillProjectionProperty $Catalog @('catalog_id'))
         enabled = [object[]]@($EnabledNames | Sort-Object)
         kept = [object[]]@()
@@ -240,7 +237,6 @@ function New-NativeSkillProjectionPlan {
         removals = @($removalRows.ToArray() | ForEach-Object { [ordered]@{ name = $_.name; target_directory = $_.target_directory; previous_link_target = $_.previous_link_target } })
     }
     $planId = 'nsp-{0}' -f (Get-OperationSha256 ($identity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)
-    $applyToken = 'nsp-token-{0}' -f (Get-OperationSha256 ('{0}|apply' -f $planId)).Substring(0, 16)
     $actions = @($skillRows | ForEach-Object {
             [ordered]@{
                 action_id = 'nspa-{0}' -f (Get-OperationSha256 ('{0}|{1}' -f $planId, $_.name)).Substring(0, 16)
@@ -271,8 +267,6 @@ function New-NativeSkillProjectionPlan {
         owner = [string]$settings.owner
         target_root = [string]$settings.target_root
         receipt_path = [string]$settings.receipt_path
-        apply_requires_token = [bool]$settings.apply_requires_token
-        apply_token = $applyToken
         catalog_id = [string](Get-NativeSkillProjectionProperty $Catalog @('catalog_id'))
         enabled = [object[]]$enabledNamesSorted
         kept = [object[]]@($skillRows | ForEach-Object name)
@@ -311,7 +305,6 @@ function Test-NativeSkillProjectionPlanContract {
     if ([int](Get-NativeSkillProjectionProperty $Plan @('omitted_total')) -ne $omitted.Count) { $findings.Add((New-OperationFinding 'omitted_count_invalid' 'error' '$.omitted_total' 'omitted_total must match omitted names.')) | Out-Null }
     if ((Get-NativeSkillProjectionProperty $Plan @('status')) -eq 'ready') {
         if ([bool](Get-NativeSkillProjectionProperty $Plan @('pass')) -ne $true -or $kept.Count -ne $enabled.Count -or $omitted.Count -ne 0 -or (Get-NativeSkillProjectionProperty $Plan @('truncated')) -ne $false) { $findings.Add((New-OperationFinding 'complete_projection_invalid' 'error' '$' 'A ready plan must retain every eligible enabled skill.')) | Out-Null }
-        if ([string](Get-NativeSkillProjectionProperty $Plan @('apply_token')) -notmatch '^nsp-token-[a-f0-9]{16}$') { $findings.Add((New-OperationFinding 'apply_token_invalid' 'error' '$.apply_token' 'Ready plans require an explicit apply token.')) | Out-Null }
     }
     if ((Get-NativeSkillProjectionProperty $Plan @('semantic_selection_applied')) -ne $false) { $findings.Add((New-OperationFinding 'semantic_boundary_breached' 'error' '$' 'Projection cannot apply semantic selection.')) | Out-Null }
     foreach ($field in @('provider_calls', 'native_mutations', 'writes')) { if ([long](Get-NativeSkillProjectionProperty $Plan @($field)) -ne 0) { $findings.Add((New-OperationFinding 'side_effect_forbidden' 'error' ('$.{0}' -f $field) 'Planning must not mutate the native surface.')) | Out-Null } }

@@ -41,7 +41,6 @@ Describe 'Skill eligibility policy' {
         $result.semantic_selection_performed | Should -Be $false
         $result.provider_calls | Should -Be 0
         $result.writes | Should -Be 0
-        (Test-SkillEligibilityResultContract $result).pass | Should -Be $true
     }
 
     It 'allows a contained fresh read-only skill without consulting profile state' {
@@ -67,6 +66,5 @@ Describe 'Skill eligibility policy' {
         $result.decision | Should -Be 'allow'
         $result.eligible | Should -Be $true
         @($result.findings).Count | Should -Be 0
-        (Test-SkillEligibilityResultContract $result).pass | Should -Be $true
     }
 }

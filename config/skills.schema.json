@@ -141,18 +141,6 @@
               "platforms": { "$ref": "#/$defs/stringArray" }
             }
           }
-        },
-        "aliases": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["name", "replacement"],
-            "additionalProperties": false,
-            "properties": {
-              "name": { "$ref": "#/$defs/nonEmptyString" },
-              "replacement": { "$ref": "#/$defs/nonEmptyString" }
-            }
-          }
         }
       }
     },
@@ -165,8 +153,7 @@
         "enabled": { "type": "boolean" },
         "owner": { "$ref": "#/$defs/nonEmptyString" },
         "target_root": { "$ref": "#/$defs/nonEmptyString" },
-        "receipt_path": { "type": "string", "pattern": "^reports[\\\\/]skill-projection[\\\\/][^\\\\/]+\\.json$" },
-        "apply_requires_token": { "type": "boolean" }
+        "receipt_path": { "type": "string", "pattern": "^reports[\\\\/]skill-projection[\\\\/][^\\\\/]+\\.json$" }
       }
     }
   },

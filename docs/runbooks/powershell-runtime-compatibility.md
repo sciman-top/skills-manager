@@ -55,12 +55,18 @@ The migration is reversible at the repository/release level, not by keeping a hi
 
 ## Verification
 
-The canonical order remains `build -> test -> contract/invariant -> hotspot`:
+Select one proportional repository verification path. For an ordinary change:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\tests\run.ps1
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile quick
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tests\run.ps1 -TestPath .\tests\Unit\CapabilityInventory.Tests.ps1
+git diff --check
+```
+
+For runtime, packaging, public-contract, or cross-surface risk, freeze inputs and run the full gate once without pre-running its internal commands:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree
 ```
 
 Repository verification proves `repo_verified`. It does not prove that a new shell session loaded changed files or that a live MCP/skill workflow was accepted.

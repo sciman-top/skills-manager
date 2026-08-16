@@ -31,16 +31,15 @@ Describe 'Native skill projection' {
         $plan.status | Should -Be 'ready'
         $plan.kept_total | Should -Be 2
         @($plan.PSObject.Properties.Name) | Should -Not -Contain 'metadata_plan_id'
+        @($plan.PSObject.Properties.Name) | Should -Not -Contain 'apply_token'
         @($plan.skills | ForEach-Object name) | Should -Be @('enabled','resident')
         (Test-NativeSkillProjectionPlanContract $plan).pass | Should -Be $true
 
-        $applied = Apply-NativeSkillProjection -Plan $plan -ApplyToken $plan.apply_token -ReceiptPath $f.receipt
+        $applied = Apply-NativeSkillProjection -Plan $plan -ReceiptPath $f.receipt
         $applied.status | Should -Be 'applied'
         Test-Path -LiteralPath (Join-Path $f.target 'enabled\SKILL.md') | Should -Be $true
         (Test-NativeSkillProjectionReceiptContract $applied.receipt).pass | Should -Be $true
-
-        $rolledBack = Rollback-NativeSkillProjection -ReceiptPath $f.receipt
-        $rolledBack.status | Should -Be 'rolled_back'
+        @($applied.receipt.PSObject.Properties.Name) | Should -Not -Contain 'rollback'
     }
 
     It 'keeps include filtering and target containment fail closed' {
@@ -53,12 +52,11 @@ Describe 'Native skill projection' {
         { New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config } | Should -Throw
     }
 
-    It 'requires the plan token and rolls back a partial apply' {
+    It 'rolls back a partial apply when a source drifts' {
         $f = New-ProjectionFixture
         $plan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config
-        { Apply-NativeSkillProjection -Plan $plan -ApplyToken 'wrong' -ReceiptPath $f.receipt } | Should -Throw
         Remove-Item -LiteralPath (Join-Path $f.source 'resident\SKILL.md') -Force
-        { Apply-NativeSkillProjection -Plan $plan -ApplyToken $plan.apply_token -ReceiptPath $f.receipt } | Should -Throw
+        { Apply-NativeSkillProjection -Plan $plan -ReceiptPath $f.receipt } | Should -Throw
         Test-Path -LiteralPath (Join-Path $f.target 'enabled') | Should -Be $false
     }
 
@@ -74,15 +72,12 @@ Describe 'Native skill projection' {
 
         $plan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config -ExcludedNames @('stale')
         @($plan.removals.name) | Should -Be @('stale')
-        $applied = Apply-NativeSkillProjection -Plan $plan -ApplyToken $plan.apply_token -ReceiptPath $f.receipt
+        $applied = Apply-NativeSkillProjection -Plan $plan -ReceiptPath $f.receipt
         Test-Path -LiteralPath (Join-Path $f.target 'stale') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $f.target 'external') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $f.target 'ordinary') | Should -BeTrue
         @($applied.receipt.removed_names) | Should -Be @('stale')
         @($applied.receipt.added_names | Sort-Object) | Should -Be @('enabled','resident')
-
-        Rollback-NativeSkillProjection -ReceiptPath $f.receipt | Out-Null
-        Test-Path -LiteralPath (Join-Path $f.target 'stale') | Should -BeTrue
     }
 
     It 'plans stale removal without writing during dry-run planning' {

@@ -518,7 +518,7 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
             $nativeProjectionApply = [pscustomobject]@{ status = 'planned'; receipt_id = ''; receipt_path = [string]$nativeProjectionPlan.receipt_path; changed_names = @(); receipt = $null }
         }
         else {
-            $nativeProjectionApply = Apply-NativeSkillProjection -Plan $nativeProjectionPlan -ApplyToken ([string]$nativeProjectionPlan.apply_token)
+            $nativeProjectionApply = Apply-NativeSkillProjection -Plan $nativeProjectionPlan
         }
     }
     $plan = New-SkillProjectionPlan $projectionCfg

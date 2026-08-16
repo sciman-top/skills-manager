@@ -15,25 +15,26 @@ Contributions may change code, tests, documentation, gates, release tooling, ski
 
 1. Freeze the intended behavior, exact write set, minimum verification, and stop condition.
 2. Edit the real source and regenerate affected artifacts.
-3. Run `git diff --check` plus the affected test or verifier.
-4. Use a full gate only for runtime, security, data, migration, public-contract, dependency, packaging, release, or cross-surface risk.
+3. Select one proportional closeout path below.
+
+For an ordinary change, run build, the affected test, any applicable affected verifier, and diff check:
 
 ```powershell
 pwsh -NoProfile -File .\build.ps1
-pwsh -NoProfile -File .\tests\run.ps1
-pwsh -NoProfile -File .\scripts\verify-skill-integrity.ps1
-pwsh -NoProfile -File .\scripts\verify-skills-config.ps1 -Mode enforce
+pwsh -NoProfile -File .\tests\run.ps1 -TestPath .\tests\Unit\CapabilityInventory.Tests.ps1
+# Run the applicable affected verifier here when the change has one.
+git diff --check
 ```
 
 `tests/run.ps1` uses the repository bootstrap to fetch hash-pinned Pester 6.1.0 into ignored `reports/test-runtime/`; do not install or mutate a global PowerShell module for this repository.
 
-For a risk-triggered full closeout:
+For runtime, security, data, migration, public-contract, dependency, packaging, release, or cross-surface risk, run only the full closeout after inputs are frozen; do not pre-run the commands it contains:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree
 ```
 
-Run the full gate once after inputs are frozen. `构建生效`, `同步MCP`, host projection, live doctor, commit, and push are separate actions; do not include them implicitly in a repository-only change.
+`构建生效`, `同步MCP`, host projection, live doctor, commit, and push are separate actions; do not include them implicitly in a repository-only change.
 
 ## Release tooling
 

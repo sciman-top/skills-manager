@@ -138,8 +138,7 @@ Describe "Config And Update Enhancements" {
     "enabled": true,
     "sources": [
       { "id": "agents-user", "path": "~/.agents/skills" }
-    ],
-    "aliases": []
+    ]
   }
 }
 '@ | ConvertFrom-Json
@@ -229,7 +228,6 @@ Describe "Config And Update Enhancements" {
   "sync_mode": "link",
   "skill_projection": {
     "sources": [],
-    "aliases": [],
     "managed_link_includes": ["capability-router", "systematic-debugging"],
     "managed_link_excludes": ["anthropics-skills-skills-skill-creator"]
   }

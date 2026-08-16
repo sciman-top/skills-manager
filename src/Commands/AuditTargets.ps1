@@ -1728,12 +1728,6 @@ function Write-AuditJsonFile([string]$path, $data) {
     Set-ContentUtf8 $path ($data | ConvertTo-Json -Depth 40)
 }
 
-function Get-AuditSnapshotPath([string]$recommendationsPath) {
-    $dir = Split-Path $recommendationsPath -Parent
-    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }
-    return (Join-Path $dir "snapshot.json")
-}
-
 function Get-AuditReceiptPath([string]$recommendationsPath) {
     $dir = Split-Path $recommendationsPath -Parent
     if ([string]::IsNullOrWhiteSpace($dir)) { $dir = "." }

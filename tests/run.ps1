@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$UnitTestPath = (Join-Path $PSScriptRoot 'Unit'),
-    [string]$E2ETestPath = (Join-Path $PSScriptRoot 'E2E')
+    [string]$E2ETestPath = (Join-Path $PSScriptRoot 'E2E'),
+    [Alias('Path')][string]$TestPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -9,9 +10,10 @@ $bootstrap = Join-Path $PSScriptRoot '..\scripts\quality\ensure-test-runtime.ps1
 $manifest = & $bootstrap
 Import-Module -Name $manifest -Force | Out-Null
 
-$paths = @($UnitTestPath, $E2ETestPath)
+$paths = if ([string]::IsNullOrWhiteSpace($TestPath)) { @($UnitTestPath, $E2ETestPath) } else { @($TestPath) }
 foreach ($path in $paths) {
-    if (@(Get-ChildItem -LiteralPath $path -Recurse -Filter '*.Tests.ps1' -File).Count -eq 0) {
+    $testFiles = if (Test-Path -LiteralPath $path -PathType Leaf) { @(Get-Item -LiteralPath $path | Where-Object Name -Like '*.Tests.ps1') } else { @(Get-ChildItem -LiteralPath $path -Recurse -Filter '*.Tests.ps1' -File) }
+    if ($testFiles.Count -eq 0) {
         throw ("Test discovery returned zero files: {0}" -f $path)
     }
 }

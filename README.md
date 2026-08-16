@@ -53,7 +53,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 - `mappings`：安装白名单与输出名
 - `targets`：生成技能的目标目录
 - `mcp_servers` / `mcp_profiles` / `mcp_targets`：MCP 清单与同步目标
-- `skill_projection`：技能来源、别名、domain catalog 和 native placement；metadata budget 与 description 截断由宿主原生处理
+- `skill_projection`：技能来源、domain catalog 和 native placement；metadata budget 与 description 截断由宿主原生处理
 
 `skills.lock.json` 锁定已解析来源。`src/` 是 CLI 源码，`build.ps1` 生成根 `skills.ps1`；`overrides/{custom,patches,resources}` 生成 `agent/`。`vendor/` 与 `imports/` 都是可由配置和锁文件重建的本地物化目录；不要手改 `skills.ps1`、`agent/`、`vendor/`、`imports/` 或运行态 `reports/`。
 
@@ -152,20 +152,23 @@ refresh/verify 失败只阻断该次参考研究，不外推为产品主链失�
 
 ## 开发与验证
 
+按风险选择一个 closeout 入口。普通变更运行 build、受影响测试、适用的受影响 verifier 和 diff check：
+
 ```powershell
 pwsh -NoProfile -File .\build.ps1
-pwsh -NoProfile -File .\tests\run.ps1
-pwsh -NoProfile -File .\scripts\verify-skill-integrity.ps1
+pwsh -NoProfile -File .\tests\run.ps1 -TestPath .\tests\Unit\CapabilityInventory.Tests.ps1
+# 仅在适用时运行对应的受影响 verifier，例如：
 pwsh -NoProfile -File .\scripts\verify-skills-config.ps1 -Mode enforce
 git diff --check
 ```
 
-按风险选择 closeout：普通切片跑受影响测试；runtime、安全、数据、迁移、公开契约、依赖或打包变更才跑一次 full gate。
-测试入口会在 ignored `reports/test-runtime/` 中按固定 SHA-256 准备 Pester 6.1.0，不要求全局安装模块；CI 复用同一 bootstrap。
+runtime、安全、数据、迁移、公开契约、依赖、打包或跨面风险改动，在输入冻结后只运行一次 full gate；不要预先重复执行其内部命令：
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-quality-gates.ps1 -Profile full -AllowDirtyWorktree
 ```
+
+测试入口会在 ignored `reports/test-runtime/` 中按固定 SHA-256 准备 Pester 6.1.0，不要求全局安装模块；CI 复用同一 bootstrap。
 
 一键发布包：
 

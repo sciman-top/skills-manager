@@ -68,6 +68,26 @@ Describe 'Read-only skill surface inventory' {
         finally { if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
     }
 
+    It 'reports a missing user skill root as not observed and not materialized' {
+        $fixture = Join-Path ([IO.Path]::GetTempPath()) ('skill-surfaces-' + [guid]::NewGuid().ToString('N'))
+        $oldCodexHome = $env:CODEX_HOME
+        try {
+            New-Item -ItemType Directory -Force -Path $fixture | Out-Null
+            $env:CODEX_HOME = Join-Path $fixture 'codex'
+            Mock Get-CodexPluginSkillInventory { [pscustomobject]@{ authority = 'fixture'; freshness = 'fresh'; coverage = 'complete'; skills = @(); warnings = @() } }
+            Mock Get-CodexHostObservation { [pscustomobject]@{ mcp = [pscustomobject]@{ warnings = @() }; doctor = [pscustomobject]@{ warnings = @() } } }
+            $config = [pscustomobject]@{ skill_projection = [pscustomobject]@{ manifest_path = 'reports/current.json'; managed_source_path = 'agent'; user_skill_root = 'missing-user-skills'; managed_link_includes = @(); sources = @() }; mcp_servers = @() }
+
+            $view = New-SkillSurfaceView -RepoRoot $fixture -Config $config
+            $surface = $view.surfaces | Where-Object name -eq 'user_skill_root'
+
+            $surface.count | Should -Be 0
+            $surface.freshness | Should -Be 'not_observed'
+            $surface.coverage | Should -Be 'not_materialized'
+        }
+        finally { $env:CODEX_HOME = $oldCodexHome; if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
+    }
+
     It 'uses canonical content identity instead of unrelated Git revisions for projection freshness' {
         $fixture = Join-Path ([IO.Path]::GetTempPath()) ('skill-surfaces-' + [guid]::NewGuid().ToString('N'))
         $oldCodexHome = $env:CODEX_HOME

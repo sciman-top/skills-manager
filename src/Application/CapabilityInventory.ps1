@@ -12,16 +12,6 @@ function Get-CapabilitySurfaceTextHash([string]$Text) {
     try { return (($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes([string]$Text)) | ForEach-Object { $_.ToString('x2') }) -join '') }
     finally { $sha.Dispose() }
 }
-function Get-CapabilitySurfacePackageHash([string]$SkillPath) {
-    $skillDirectory = if (Test-Path -LiteralPath $SkillPath -PathType Leaf) { Split-Path $SkillPath -Parent } elseif (Test-Path -LiteralPath $SkillPath -PathType Container) { $SkillPath } else { return $null }
-    $base = [IO.Path]::GetFullPath($skillDirectory).TrimEnd("\", "/")
-    $parts = [Collections.Generic.List[string]]::new()
-    foreach ($file in @(Get-ChildItem -LiteralPath $base -Recurse -File -Force -ErrorAction SilentlyContinue | Sort-Object FullName)) {
-        $relative = $file.FullName.Substring($base.Length).TrimStart("\", "/").Replace("\", "/")
-        $parts.Add(('{0}|{1}' -f $relative, (Get-CapabilitySurfaceFileHash $file.FullName))) | Out-Null
-    }
-    return Get-CapabilitySurfaceTextHash ($parts.ToArray() -join "`n")
-}
 function Resolve-CapabilitySurfacePath([string]$Path, [string]$RepoRoot) {
     if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
     $value = [Environment]::ExpandEnvironmentVariables($Path.Trim())
@@ -87,7 +77,8 @@ function New-SkillSurfaceView {
     $managedSource = Resolve-CapabilitySurfacePath ([string]$projection.managed_source_path) $root
     $managedIncludes = @($projection.managed_link_includes | ForEach-Object { [string]$_ })
     $userItems = [Collections.Generic.List[object]]::new()
-    if ($userRoot -and (Test-Path -LiteralPath $userRoot -PathType Container)) {
+    $userRootExists = $userRoot -and (Test-Path -LiteralPath $userRoot -PathType Container)
+    if ($userRootExists) {
         foreach ($directory in @(Get-ChildItem -LiteralPath $userRoot -Directory -Force)) {
             $entry = Join-Path $directory.FullName 'SKILL.md'; if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) { continue }
             $targetText = @($directory.Target | ForEach-Object { [string]$_ }) -join ';'
@@ -96,7 +87,7 @@ function New-SkillSurfaceView {
             $userItems.Add((Get-CapabilitySurfaceSkillMetadata $entry $owner $state ($state -eq 'managed_current'))) | Out-Null
         }
     }
-    $surfaces.Add((New-CapabilitySurfaceRecord 'user_skill_root' 'filesystem_observation' $userRoot 'fresh' 'complete' $userItems.ToArray())) | Out-Null
+    $surfaces.Add((New-CapabilitySurfaceRecord 'user_skill_root' 'filesystem_observation' $userRoot $(if ($userRootExists) { 'fresh' } else { 'not_observed' }) $(if ($userRootExists) { 'complete' } else { 'not_materialized' }) $userItems.ToArray())) | Out-Null
 
     $codexHome = if ($env:CODEX_HOME) { [IO.Path]::GetFullPath($env:CODEX_HOME) } else { Join-Path $HOME '.codex' }
     $systemRoot = Join-Path $codexHome 'skills\.system'

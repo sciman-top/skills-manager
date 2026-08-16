@@ -265,15 +265,6 @@ function Test-AuditRemovalDependencyClosure {
         $references = New-Object System.Collections.Generic.List[object]
         if ($null -ne $Config -and $Config.PSObject.Properties.Match("skill_projection").Count -gt 0 -and $null -ne $Config.skill_projection) {
             $projection = $Config.skill_projection
-            if ($projection.PSObject.Properties.Match("aliases").Count -gt 0) {
-                $aliasIndex = 0
-                foreach ($alias in @($projection.aliases)) {
-                    if ($null -ne $alias -and [string]::Equals([string]$alias.replacement, $name, [System.StringComparison]::OrdinalIgnoreCase)) {
-                        $references.Add([pscustomobject]([ordered]@{ file = "skills.json"; path = "$.skill_projection.aliases[$aliasIndex].replacement" })) | Out-Null
-                    }
-                    $aliasIndex++
-                }
-            }
             if ($projection.PSObject.Properties.Match("discovery_catalog").Count -gt 0 -and $null -ne $projection.discovery_catalog) {
                 Add-AuditExactJsonValueReferences $projection.discovery_catalog $name '$.skill_projection.discovery_catalog' "skills.json" $references
             }
@@ -601,10 +592,6 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
         mcp_removal_candidates = @($mcpRemovals)
         empty_recommendation_reasons = ConvertTo-AuditJsonArray $recommendations.empty_recommendation_reasons
     })
-}
-
-function Get-AuditApplyReportPath([string]$recommendationsPath) {
-    return (Get-AuditReceiptPath $recommendationsPath)
 }
 
 function Get-AuditItemsStatusCount($items, [string]$status) {

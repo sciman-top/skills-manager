@@ -488,18 +488,6 @@ function Get-CfgContractErrors($cfg) {
                 }
             }
         }
-        $aliases = Get-CfgObjectProperty $skillProjection "aliases"
-        if ($null -ne $aliases -and -not (Assert-IsArray $aliases)) {
-            $errors.Add("skill_projection.aliases 必须是数组") | Out-Null
-        }
-        if ($null -ne $aliases) {
-            foreach ($alias in @($aliases)) {
-                $aliasName = [string](Get-CfgObjectProperty $alias "name")
-                $replacement = [string](Get-CfgObjectProperty $alias "replacement")
-                if ([string]::IsNullOrWhiteSpace($aliasName)) { $errors.Add("skill_projection alias 缺少 name") | Out-Null }
-                if ([string]::IsNullOrWhiteSpace($replacement)) { $errors.Add(("skill_projection alias 缺少 replacement：{0}" -f $aliasName)) | Out-Null }
-            }
-        }
     }
 
     $mcpProfiles = Get-CfgObjectProperty $cfg "mcp_profiles"
@@ -1095,15 +1083,6 @@ function Assert-Cfg($cfg) {
             $normalizedManagedLinkExcludes = @($projection.managed_link_excludes | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() })
             $managedLinkConflicts = @($normalizedManagedLinkIncludes | Where-Object { $normalizedManagedLinkExcludes -contains $_ } | Sort-Object -Unique)
             Need ($managedLinkConflicts.Count -eq 0) ("skill_projection managed link include/exclude 冲突：{0}" -f ($managedLinkConflicts -join ", "))
-        }
-        if ($projection.PSObject.Properties.Match("aliases").Count -gt 0 -and $null -ne $projection.aliases) {
-            Need (Assert-IsArray $projection.aliases) "skill_projection.aliases 必须是数组"
-            foreach ($alias in @($projection.aliases)) {
-                Need (-not [string]::IsNullOrWhiteSpace([string]$alias.name)) "skill_projection alias 缺少 name"
-                Need (-not [string]::IsNullOrWhiteSpace([string]$alias.replacement)) ("skill_projection alias 缺少 replacement：{0}" -f [string]$alias.name)
-            }
-            $dupAliases = @(Get-DuplicateValues ($projection.aliases | ForEach-Object { ([string]$_.name).ToLowerInvariant() }))
-            Need ($dupAliases.Count -eq 0) ("skill_projection alias 重复：{0}" -f ($dupAliases -join ", "))
         }
     }
 

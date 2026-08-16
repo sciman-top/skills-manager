@@ -276,16 +276,6 @@ function Normalize-McpServiceNameWithFallback([string]$name, [string]$fallbackSe
     return $null
 }
 
-function Parse-McpStdioCommandLine([string]$name, [string]$commandLine) {
-    $tokens = Split-Args $commandLine
-    $tokens = Normalize-McpProcessArgs @($tokens)
-    Need ($tokens.Count -gt 0) ("MCP 服务命令不能为空：{0}" -f $name)
-    return [pscustomobject]@{
-        command = [string]$tokens[0]
-        args = if ($tokens.Count -gt 1) { @($tokens[1..($tokens.Count - 1)]) } else { @() }
-    }
-}
-
 function Parse-McpInstallArgs([string[]]$tokens) {
     Need ($tokens -and $tokens.Count -gt 0) "缺少 MCP 服务参数。示例：安装MCP context7 --cmd npx -- -y @upstash/context7-mcp"
     $result = [ordered]@{

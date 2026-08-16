@@ -68,17 +68,6 @@ function Remove-NativeSkillProjectionPath {
     else { Remove-Item -LiteralPath $Path -Recurse -Force }
 }
 
-function Test-NativeSkillProjectionStateEqual {
-    param($Expected, $Actual)
-
-    if ([bool]$Expected.exists -ne [bool]$Actual.exists) { return $false }
-    if (-not [bool]$Expected.exists) { return $true }
-    if ([string]$Expected.kind -ne [string]$Actual.kind) { return $false }
-    if (-not [string]::IsNullOrWhiteSpace([string]$Expected.link_target) -and -not [string]::Equals([string]$Expected.link_target, [string]$Actual.link_target, [StringComparison]::OrdinalIgnoreCase)) { return $false }
-    if (-not [string]::IsNullOrWhiteSpace([string]$Expected.content_hash) -and -not [string]::Equals([string]$Expected.content_hash, [string]$Actual.content_hash, [StringComparison]::OrdinalIgnoreCase)) { return $false }
-    return $true
-}
-
 function Write-NativeSkillProjectionJsonAtomic {
     param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)]$Value)
 
@@ -105,22 +94,6 @@ function New-NativeSkillProjectionJunction {
     New-Item -ItemType Junction -Path $LinkPath -Target $TargetPath | Out-Null
 }
 
-function Restore-NativeSkillProjectionBeforeState {
-    param([object[]]$Before, [string]$TargetRoot)
-
-    foreach ($state in @($Before | Sort-Object directory_path)) {
-        $directory = [IO.Path]::GetFullPath([string]$state.directory_path)
-        if (-not (Test-OperationPathWithinRoot $directory $TargetRoot)) { throw 'Projection rollback target escaped the owned root.' }
-        if (-not [bool]$state.exists) {
-            Remove-NativeSkillProjectionPath $directory
-            continue
-        }
-        if ([string]$state.kind -ne 'junction' -or [string]::IsNullOrWhiteSpace([string]$state.link_target)) { throw ('Unsupported pre-transaction target state: {0}' -f $directory) }
-        Remove-NativeSkillProjectionPath $directory
-        New-NativeSkillProjectionJunction $directory ([string]$state.link_target)
-    }
-}
-
 function Get-NativeSkillProjectionReceiptPath {
     param($Plan, [string]$ReceiptPath)
 
@@ -138,14 +111,12 @@ function Apply-NativeSkillProjection {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]$Plan,
-        [Parameter(Mandatory = $true)][string]$ApplyToken,
         [string]$ReceiptPath = ''
     )
 
     $contract = Test-NativeSkillProjectionPlanContract $Plan
     if (-not [bool]$contract.pass) { throw ('Projection plan contract failed: {0}' -f (@($contract.findings | ForEach-Object code) -join ', ')) }
     if ([string]$Plan.status -ne 'ready' -or -not [bool]$Plan.pass) { throw 'Only a ready native projection plan can be applied.' }
-    if ([bool]$Plan.apply_requires_token -and -not [string]::Equals($ApplyToken, [string]$Plan.apply_token, [StringComparison]::Ordinal)) { throw 'Native projection apply token is invalid.' }
 
     $targetRoot = [IO.Path]::GetFullPath([string]$Plan.target_root)
     Ensure-NativeSkillProjectionDirectory $targetRoot
@@ -210,7 +181,6 @@ function Apply-NativeSkillProjection {
             changed_names = [object[]]@($changedNames.ToArray() | Sort-Object)
             added_names = [object[]]@($createdDirectories | ForEach-Object { Split-Path $_ -Leaf } | Sort-Object)
             removed_names = [object[]]@($removedDirectories | ForEach-Object { Split-Path ([string]$_.directory_path) -Leaf } | Sort-Object)
-            rollback = [ordered]@{ status = 'available'; guard = 'target_state_must_match_after'; drift_safe = $true }
             provider_calls = 0
             native_mutations = $createdDirectories.Count + $removedDirectories.Count
             writes = $createdDirectories.Count + $removedDirectories.Count
@@ -246,39 +216,5 @@ function Test-NativeSkillProjectionReceiptContract {
     foreach ($field in @('owner', 'plan_id', 'target_root', 'receipt_path')) { if ([string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $Receipt $field))) { $findings.Add((New-OperationFinding 'required_field_missing' 'error' ('$.{0}' -f $field) 'Receipt field is required.')) | Out-Null } }
     foreach ($field in @('before', 'after', 'changed_names', 'added_names', 'removed_names')) { if (-not (Test-OperationArray (Get-OperationObjectProperty $Receipt $field))) { $findings.Add((New-OperationFinding 'array_field_invalid' 'error' ('$.{0}' -f $field) 'Receipt field must be an array.')) | Out-Null } }
     if ([long](Get-OperationObjectProperty $Receipt 'provider_calls') -ne 0) { $findings.Add((New-OperationFinding 'provider_calls_forbidden' 'error' '$.provider_calls' 'Projection cannot call a provider.')) | Out-Null }
-    $rollback = Get-OperationObjectProperty $Receipt 'rollback'
-    if ((Get-OperationObjectProperty $rollback 'drift_safe') -ne $true) { $findings.Add((New-OperationFinding 'rollback_guard_invalid' 'error' '$.rollback.drift_safe' 'Receipt rollback must be drift-safe.')) | Out-Null }
     return New-OperationValidationResult $findings.ToArray()
-}
-
-function Rollback-NativeSkillProjection {
-    [CmdletBinding()]
-    param(
-        $Receipt = $null,
-        [string]$ReceiptPath = ''
-    )
-
-    if ($null -eq $Receipt) {
-        if ([string]::IsNullOrWhiteSpace($ReceiptPath) -or -not (Test-Path -LiteralPath $ReceiptPath -PathType Leaf)) { throw 'Projection receipt was not found.' }
-        $Receipt = Get-Content -LiteralPath $ReceiptPath -Raw | ConvertFrom-Json
-    }
-    $contract = Test-NativeSkillProjectionReceiptContract $Receipt
-    if (-not [bool]$contract.pass) { throw ('Projection receipt contract failed: {0}' -f (@($contract.findings | ForEach-Object code) -join ', ')) }
-    if ([string]$Receipt.status -eq 'rolled_back') { return $Receipt }
-    $targetRoot = [IO.Path]::GetFullPath([string]$Receipt.target_root)
-    foreach ($expected in @($Receipt.after)) {
-        $actual = Get-NativeSkillProjectionTargetState ([string]$expected.directory_path)
-        if (-not (Test-NativeSkillProjectionStateEqual $expected $actual)) { throw ('rollback_drift_detected: {0}' -f [string]$expected.directory_path) }
-    }
-    try {
-        Restore-NativeSkillProjectionBeforeState -Before @($Receipt.before) -TargetRoot $targetRoot
-    }
-    catch { throw }
-    $Receipt.status = 'rolled_back'
-    $rolledBackAt = [DateTimeOffset]::UtcNow.ToString('o')
-    if ($null -ne $Receipt.PSObject.Properties['rolled_back_at']) { $Receipt.rolled_back_at = $rolledBackAt }
-    else { $Receipt | Add-Member -NotePropertyName rolled_back_at -NotePropertyValue $rolledBackAt }
-    $Receipt.rollback.status = 'rolled_back'
-    if (-not [string]::IsNullOrWhiteSpace($ReceiptPath)) { Write-NativeSkillProjectionJsonAtomic ([IO.Path]::GetFullPath($ReceiptPath)) $Receipt }
-    return $Receipt
 }

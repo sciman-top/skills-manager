@@ -1791,7 +1791,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 }
                 $thrown | Should -Be $true
 
-                $report = (Get-ContentUtf8 (Get-AuditApplyReportPath $path) | ConvertFrom-Json).dry_run
+                $report = (Get-ContentUtf8 (Get-AuditReceiptPath $path) | ConvertFrom-Json).dry_run
                 $report.error_code | Should -Be "insufficient_source_coverage"
             }
             finally {
@@ -1820,7 +1820,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 }
                 $thrown | Should -Be $true
 
-                $report = (Get-ContentUtf8 (Get-AuditApplyReportPath $path) | ConvertFrom-Json).dry_run
+                $report = (Get-ContentUtf8 (Get-AuditReceiptPath $path) | ConvertFrom-Json).dry_run
                 $report.error_code | Should -Be "insufficient_source_coverage"
                 $report.source_coverage.items_with_source_observation | Should -Be 0
             }
@@ -1851,7 +1851,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 }
                 $thrown | Should -Be $true
 
-                $report = (Get-ContentUtf8 (Get-AuditApplyReportPath $path) | ConvertFrom-Json).dry_run
+                $report = (Get-ContentUtf8 (Get-AuditReceiptPath $path) | ConvertFrom-Json).dry_run
                 $report.error_code | Should -Be "insufficient_decision_quality"
             }
             finally {
@@ -2006,7 +2006,7 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 (Get-ContentUtf8 $script:CfgPath) | Should -Be $initial
                 Should -Invoke 构建生效 -Times 1 -Exactly -Scope It
                 Should -Invoke 同步MCP -Times 1 -Exactly -Scope It
-                $saved = (Get-ContentUtf8 (Get-AuditApplyReportPath $path) | ConvertFrom-Json).apply
+                $saved = (Get-ContentUtf8 (Get-AuditReceiptPath $path) | ConvertFrom-Json).apply
                 $saved.persisted | Should -Be $false
                 $saved.compensation.status | Should -Be 'restored'
                 $saved.items[0].status | Should -Be 'rolled_back'

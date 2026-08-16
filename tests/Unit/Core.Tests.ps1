@@ -780,28 +780,7 @@ Describe "Core Functions" {
         }
     }
 
-    Context "Try-ParseAddLikeInput / Looks-LikeRepoInput" {
-        It "Parses npx command line and extracts repo/ref" {
-            $parsed = Try-ParseAddLikeInput 'npx skills add vercel-labs/agent-skills --ref main'
-            $parsed | Should -Not -Be $null
-            $parsed.repo | Should -Be "vercel-labs/agent-skills"
-            $parsed.ref | Should -Be "main"
-        }
-
-        It "Parses npx command line with repo@skill syntax" {
-            $parsed = Try-ParseAddLikeInput 'npx skills add geekjourneyx/md2wechat-lite@md2wechat-lite'
-            $parsed | Should -Not -Be $null
-            $parsed.repo | Should -Be "geekjourneyx/md2wechat-lite"
-            $parsed.skills.Count | Should -Be 1
-            $parsed.skills[0] | Should -Be "md2wechat-lite"
-        }
-
-        It "Parses plugin install shorthand alias command" {
-            $parsed = Try-ParseAddLikeInput '/plugin install claude-mem'
-            $parsed | Should -Not -Be $null
-            $parsed.repo | Should -Be "thedotmack/claude-mem"
-        }
-
+    Context "Looks-LikeRepoInput" {
         It "Returns false for non-repo short name" {
             (Looks-LikeRepoInput "agent-skills") | Should -Be $false
         }
@@ -1105,16 +1084,6 @@ Describe "Core Functions" {
                 $_.Exception.Message | Should -Match "环境变量名"
             }
             $thrown | Should -Be $true
-        }
-    }
-
-    Context "Parse-McpStdioCommandLine" {
-        It "Normalizes accidental --arg wrappers in interactive stdio command line" {
-            $parsed = Parse-McpStdioCommandLine "fetch" "npx --arg -y --arg @upstash/context7-mcp"
-            $parsed.command | Should -Be "npx"
-            $parsed.args.Count | Should -Be 2
-            $parsed.args[0] | Should -Be "-y"
-            $parsed.args[1] | Should -Be "@upstash/context7-mcp"
         }
     }
 

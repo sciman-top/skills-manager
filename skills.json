@@ -28,23 +28,8 @@
       "enabled": true,
       "owner": "skills-manager",
       "target_root": "~/.agents/skills",
-      "apply_requires_token": true,
       "receipt_path": "reports/skill-projection/native-receipt.json"
     },
-    "aliases": [
-      {
-        "name": "social-content",
-        "replacement": "social"
-      },
-      {
-        "name": "to-prd",
-        "replacement": "draft-spec"
-      },
-      {
-        "name": "to-issues",
-        "replacement": "draft-tickets"
-      }
-    ],
     "discovery_catalog": {
       "catalog_path": "agent/.skills-manager/catalog.json",
       "fallback_domain": "other",

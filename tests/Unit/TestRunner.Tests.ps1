@@ -28,12 +28,12 @@ Describe 'Noisy fixture' {
 }
 '@
 
-        $output = @(& pwsh -NoProfile -File $runnerPath -UnitTestPath $fixture.unit -E2ETestPath $fixture.e2e *>&1)
+        $output = @(& pwsh -NoProfile -File $runnerPath -TestPath (Join-Path $fixture.unit 'Fixture.Tests.ps1') *>&1)
         $exitCode = $LASTEXITCODE
 
         $exitCode | Should -Be 0
         @($output).Count | Should -Be 1
-        [string]$output[0] | Should -Match '^Tests: total=2 passed=2 failed=0 skipped=0 duration=[0-9.]+s$'
+        [string]$output[0] | Should -Match '^Tests: total=1 passed=1 failed=0 skipped=0 duration=[0-9.]+s$'
         ($output -join "`n") | Should -Not -Match 'fixture-noise-marker'
     }
 
