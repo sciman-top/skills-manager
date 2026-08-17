@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-08-14T12:35:24.6394109Z",
+  "generated_at": "2026-08-17T16:37:41.4047887Z",
   "vendors": [
     {
       "name": "agent-skills",
@@ -31,12 +31,6 @@
       "repo": "https://github.com/coreyhaines31/marketingskills.git",
       "ref": "main",
       "commit": "7868cb9251fad80a73d26e488a5ad5f6c4a9f335"
-    },
-    {
-      "name": "skills-2",
-      "repo": "https://github.com/remotion-dev/skills.git",
-      "ref": "main",
-      "commit": "2a204c9b71f7a98997128759cbd2ab557b197fd3"
     },
     {
       "name": "superpowers",
@@ -110,15 +104,6 @@
       "commit": "391a2701dd948f94f56a39f7533f8eea9a859c87"
     },
     {
-      "name": "d3-viz",
-      "mode": "manual",
-      "repo": "https://github.com/jarmen423/skills.git",
-      "ref": "main",
-      "skill": "downloaded-skills\\design-frontend\\d3-viz",
-      "sparse": true,
-      "commit": "985837fd4cda660ba0e8be39ce62e1662b411d3d"
-    },
-    {
       "name": "data-visualization",
       "mode": "manual",
       "repo": "https://github.com/anthropics/knowledge-work-plugins.git",
@@ -126,15 +111,6 @@
       "skill": "data\\skills\\data-visualization",
       "sparse": false,
       "commit": "ba3b76599cf23d928d421912b9b9477151fbace0"
-    },
-    {
-      "name": "debug-dotnet",
-      "mode": "manual",
-      "repo": "https://github.com/snakeo/claude-debug-and-refactor-skills-plugin.git",
-      "ref": "master",
-      "skill": "plugins\\debug-and-refactor\\skills\\debug-dotnet",
-      "sparse": false,
-      "commit": "e2e79df88e7fad81f1c6c4eddfe8ddfaa1c0d4cd"
     },
     {
       "name": "domain-modeling",
@@ -326,15 +302,6 @@
       "commit": "8b78b531ab965735c5dc74f6f7a219e1e37326df"
     },
     {
-      "name": "skills-2",
-      "mode": "vendor",
-      "repo": "https://github.com/remotion-dev/skills.git",
-      "ref": "main",
-      "skill": "skills\\remotion-best-practices",
-      "sparse": false,
-      "commit": "2a204c9b71f7a98997128759cbd2ab557b197fd3"
-    },
-    {
       "name": "slidev",
       "mode": "manual",
       "repo": "https://github.com/slidevjs/slidev.git",
@@ -342,15 +309,6 @@
       "skill": "skills\\slidev",
       "sparse": false,
       "commit": "1877b3014ecc8f256e8c4df799035252a1968fc2"
-    },
-    {
-      "name": "storyboard-creation",
-      "mode": "manual",
-      "repo": "https://github.com/inference-sh-6/skills.git",
-      "ref": "main",
-      "skill": "guides\\video\\storyboard-creation",
-      "sparse": false,
-      "commit": "becc25649700d5457772a00e5143e28ccf9e5afa"
     },
     {
       "name": "supabase-postgres-best-practices",

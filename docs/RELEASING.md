@@ -29,7 +29,7 @@ skills-manager-2026.08.13-SHA256SUMS.txt
 
 脚本只收集明确的 tracked runtime/config/docs 输入；不会打包 `.git/`、`reports/`、`.txn/`、凭据或用户宿主目录。每个 ZIP 内还有 `RELEASE-MANIFEST.json`，记录 commit、要求、文件大小和逐文件 SHA-256。
 
-`portable` 额外包含 `THIRD-PARTY-NOTICES.json`。它按技能记录 vendor/import/local 来源、锁定 commit、源路径、包内容 SHA-256、frontmatter license 与随技能复制的 `LICENSE`/`COPYING`/`NOTICE` 文件。`unknown_review_required` 是发布阻断 finding：只要存在一项，portable 构建即 fail closed。完成来源与许可证复核、把可分发的许可证证据随技能物化后，才能重新构建；不得用 tag、attestation 或人工口头确认绕过。
+`portable` 额外包含 `THIRD-PARTY-NOTICES.json` 和 `THIRD-PARTY-LICENSES/`。它按技能记录 vendor/import/local 来源、锁定 commit、源路径、包内容 SHA-256、frontmatter license 与包内许可证路径。构建器从锁定 commit 读取上游仓库根部的 `LICENSE`/`LICENCE`/`COPYING`/`NOTICE` 文件并集中物化；同一来源的多个技能共享一份许可证，本仓自有技能引用包根 MIT `LICENSE`。只有实际进入 ZIP 的文件才算许可证证据，工作树文件、README 标签或远端口头声明都不能替代它。`unknown_review_required` 是发布阻断 finding：只要存在一项，portable 构建即 fail closed。完成来源与许可证复核、把可分发的许可证证据随包物化后，才能重新构建；不得用 tag、attestation 或人工口头确认绕过。
 
 只构建一种包：
 

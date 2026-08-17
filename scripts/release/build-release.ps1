@@ -55,7 +55,92 @@ function Get-SkillFrontmatterLicense([string]$SkillPath) {
     return $(if ($match.Success) { $match.Groups['value'].Value.Trim() } else { '' })
 }
 
-function Get-PortableThirdPartyNotices([string]$AgentRoot) {
+function Export-GitBlob([string]$RepositoryRoot, [string]$ObjectSpec, [string]$Destination) {
+    $gitPath = (Get-Command git -ErrorAction Stop).Source
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $gitPath
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in @('-C', $RepositoryRoot, 'show', $ObjectSpec)) {
+        $startInfo.ArgumentList.Add($argument)
+    }
+
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    $output = $null
+    try {
+        if (-not $process.Start()) { throw "Unable to start git while exporting $ObjectSpec." }
+        $errorTask = $process.StandardError.ReadToEndAsync()
+        $output = [IO.File]::Create($Destination)
+        $process.StandardOutput.BaseStream.CopyTo($output)
+        $output.Dispose()
+        $output = $null
+        $process.WaitForExit()
+        $errorText = $errorTask.GetAwaiter().GetResult()
+        if ($process.ExitCode -ne 0) {
+            throw "Unable to export pinned git blob $ObjectSpec`: $errorText"
+        }
+    }
+    finally {
+        if ($null -ne $output) { $output.Dispose() }
+        $process.Dispose()
+    }
+}
+
+function Get-PinnedSourceLicenseFiles(
+    [string]$SourceKind,
+    [string]$SourceName,
+    [string]$Commit,
+    [string]$PackageRoot,
+    [hashtable]$Cache
+) {
+    if ([string]::IsNullOrWhiteSpace($SourceName) -or [string]::IsNullOrWhiteSpace($Commit)) { return @() }
+    $cacheKey = '{0}|{1}|{2}' -f $SourceKind, $SourceName, $Commit
+    if ($Cache.ContainsKey($cacheKey)) { return @($Cache[$cacheKey]) }
+
+    $sourceParent = if ($SourceKind -eq 'vendor') { 'vendor' } else { 'imports' }
+    $sourceRoot = Join-Path $repoRoot (Join-Path $sourceParent $SourceName)
+    if (-not (Test-Path -LiteralPath $sourceRoot -PathType Container)) {
+        $Cache[$cacheKey] = @()
+        return @()
+    }
+
+    & git -C $sourceRoot cat-file -e ("{0}^{{commit}}" -f $Commit) 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        $Cache[$cacheKey] = @()
+        return @()
+    }
+    $rootLicenseNames = @(& git -C $sourceRoot ls-tree --name-only $Commit | Where-Object {
+            $_ -match '^(LICENSE|LICENCE|COPYING|NOTICE)(\..*)?$'
+        } | Sort-Object -Unique)
+    if ($LASTEXITCODE -ne 0) { throw "Unable to inspect pinned license files for $SourceName at $Commit." }
+
+    $safeSourceName = [regex]::Replace($SourceName, '[^0-9A-Za-z._-]', '-')
+    $relativePaths = New-Object Collections.Generic.List[string]
+    foreach ($licenseName in $rootLicenseNames) {
+        $relativePath = ('THIRD-PARTY-LICENSES/{0}-{1}/{2}' -f $SourceKind, $safeSourceName, $licenseName).Replace('\', '/')
+        $destination = Join-Path $PackageRoot $relativePath
+        $parent = Split-Path -Parent $destination
+        if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+        $objectSpec = '{0}:{1}' -f $Commit, $licenseName
+        Export-GitBlob -RepositoryRoot $sourceRoot -ObjectSpec $objectSpec -Destination $destination
+        if (-not (Test-Path -LiteralPath $destination -PathType Leaf) -or (Get-Item -LiteralPath $destination).Length -le 0) {
+            throw "Unable to materialize pinned license file for $SourceName at $Commit`: $licenseName"
+        }
+        $expectedObject = (& git -C $sourceRoot rev-parse $objectSpec).Trim()
+        if ($LASTEXITCODE -ne 0) { throw "Unable to resolve pinned license blob for $SourceName at $Commit`: $licenseName" }
+        $actualObject = (& git -C $sourceRoot hash-object --no-filters $destination).Trim()
+        if ($LASTEXITCODE -ne 0 -or $actualObject -ne $expectedObject) {
+            throw "Pinned license blob changed while materializing $SourceName at $Commit`: $licenseName"
+        }
+        $relativePaths.Add($relativePath) | Out-Null
+    }
+    $Cache[$cacheKey] = @($relativePaths.ToArray())
+    return @($relativePaths.ToArray())
+}
+
+function Get-PortableThirdPartyNotices([string]$PackageRoot, [string]$AgentRoot) {
     $config = Get-Content -LiteralPath (Join-Path $repoRoot 'skills.json') -Raw -Encoding utf8 | ConvertFrom-Json
     $lock = Get-Content -LiteralPath (Join-Path $repoRoot 'skills.lock.json') -Raw -Encoding utf8 | ConvertFrom-Json
     $mappings = @{}
@@ -66,6 +151,7 @@ function Get-PortableThirdPartyNotices([string]$AgentRoot) {
     foreach ($import in @($lock.imports)) { $imports[[string]$import.name] = $import }
 
     $entries = New-Object Collections.Generic.List[object]
+    $licenseCache = @{}
     foreach ($directory in @(Get-ChildItem -LiteralPath $AgentRoot -Directory -Force | Sort-Object Name)) {
         if (-not (Test-Path -LiteralPath (Join-Path $directory.FullName 'SKILL.md') -PathType Leaf)) { continue }
         $mapping = if ($mappings.ContainsKey($directory.Name)) { $mappings[$directory.Name] } else { $null }
@@ -78,19 +164,34 @@ function Get-PortableThirdPartyNotices([string]$AgentRoot) {
         ) | Where-Object { Test-Path -LiteralPath (Join-Path $repoRoot $_) -PathType Container } | Select-Object -First 1
         $sourceKind = if ($overrideRelativePath) { 'repository_local' } else { 'unknown_unmapped' }
         $sourcePath = if ($overrideRelativePath) { [string]$overrideRelativePath } else { $null }
+        $sourceName = $null
         if ($null -ne $mapping -and [string]$mapping.vendor -eq 'manual') {
             $source = $imports[[string]$mapping.from]
             $sourceKind = 'import'
+            $sourceName = [string]$mapping.from
             $sourcePath = [string]$source.skill
         }
         elseif ($null -ne $mapping -and [string]$mapping.vendor -ne 'overrides') {
             $source = $vendors[[string]$mapping.vendor]
             $sourceKind = 'vendor'
+            $sourceName = [string]$mapping.vendor
             $sourcePath = [string]$mapping.from
         }
         $licenseFiles = @(Get-ChildItem -LiteralPath $directory.FullName -Recurse -File | Where-Object { $_.Name -match '^(LICENSE|LICENCE|COPYING|NOTICE)(\..*)?$' } | Sort-Object FullName | ForEach-Object {
-                [IO.Path]::GetRelativePath($directory.FullName, $_.FullName).Replace('\', '/')
+                [IO.Path]::GetRelativePath($PackageRoot, $_.FullName).Replace('\', '/')
             })
+        if ($overrideRelativePath -and (Test-Path -LiteralPath (Join-Path $PackageRoot 'LICENSE') -PathType Leaf)) {
+            $licenseFiles += 'LICENSE'
+        }
+        if ($null -ne $source) {
+            $licenseFiles += @(Get-PinnedSourceLicenseFiles `
+                    -SourceKind $sourceKind `
+                    -SourceName $sourceName `
+                    -Commit ([string]$source.commit) `
+                    -PackageRoot $PackageRoot `
+                    -Cache $licenseCache)
+        }
+        $licenseFiles = @($licenseFiles | Sort-Object -Unique)
         $declaredLicense = Get-SkillFrontmatterLicense $directory.FullName
         $files = @(Get-ChildItem -LiteralPath $directory.FullName -Recurse -File | Sort-Object FullName | ForEach-Object {
                 '{0}:{1}' -f [IO.Path]::GetRelativePath($directory.FullName, $_.FullName).Replace('\', '/'), (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -144,7 +245,7 @@ function New-ReleasePackage([string]$Kind) {
             throw 'Portable package requires a built agent directory. Run build.ps1 first.'
         }
         Copy-Item -LiteralPath $agentSource -Destination (Join-Path $packageRoot 'agent') -Recurse -Force
-        $notices = Get-PortableThirdPartyNotices (Join-Path $packageRoot 'agent')
+        $notices = Get-PortableThirdPartyNotices $packageRoot (Join-Path $packageRoot 'agent')
         $unknown = @($notices.skills | Where-Object license_status -eq 'unknown_review_required')
         if ($unknown.Count -gt 0) {
             $names = @($unknown | ForEach-Object skill | Sort-Object)

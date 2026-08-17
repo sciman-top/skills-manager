@@ -87,7 +87,6 @@
           "verification-before-completion"
         ],
         "design": [
-          "d3-viz",
           "data-visualization",
           "frontend-design",
           "vercel-react-best-practices",
@@ -95,7 +94,6 @@
         ],
         "dotnet": [
           "custom-windows-wpf-teacher-app",
-          "debug:dotnet",
           "microsoft-docs",
           "systematic-debugging",
           "windows-desktop-e2e"
@@ -160,11 +158,6 @@
       "repo": "https://github.com/addyosmani/agent-skills.git"
     },
     {
-      "repo": "https://github.com/remotion-dev/skills.git",
-      "name": "skills-2",
-      "ref": "main"
-    },
-    {
       "repo": "https://github.com/coreyhaines31/marketingskills.git",
       "ref": "main",
       "name": "marketingskills"
@@ -184,11 +177,6 @@
     {
       "to": "anthropics-skills-xlsx",
       "from": "skills\\xlsx",
-      "vendor": "anthropics-skills"
-    },
-    {
-      "from": "skills\\doc-coauthoring",
-      "to": "anthropics-skills-skills-doc-coauthoring",
       "vendor": "anthropics-skills"
     },
     {
@@ -255,11 +243,6 @@
       "from": "skills\\pdf",
       "to": "anthropics-skills-skills-pdf",
       "vendor": "anthropics-skills"
-    },
-    {
-      "vendor": "agent-skills",
-      "from": "skills\\web-design-guidelines",
-      "to": "agent-skills-skills-web-design-guidelines"
     },
     {
       "from": "skills\\api-and-interface-design",
@@ -372,21 +355,6 @@
       "vendor": "manual"
     },
     {
-      "from": "debug-dotnet",
-      "to": "debug-dotnet",
-      "vendor": "manual"
-    },
-    {
-      "from": "d3-viz",
-      "to": "d3-viz",
-      "vendor": "manual"
-    },
-    {
-      "from": "storyboard-creation",
-      "to": "storyboard-creation",
-      "vendor": "manual"
-    },
-    {
       "from": "data-visualization",
       "to": "data-visualization",
       "vendor": "manual"
@@ -470,11 +438,6 @@
       "from": "skills\\copywriting",
       "vendor": "marketingskills",
       "to": "marketingskills-skills-copywriting"
-    },
-    {
-      "vendor": "skills-2",
-      "to": "skills-2-skills-remotion",
-      "from": "skills\\remotion-best-practices"
     },
     {
       "from": "skills\\react-best-practices",
@@ -634,30 +597,6 @@
       "mode": "manual"
     },
     {
-      "name": "debug-dotnet",
-      "skill": "plugins\\debug-and-refactor\\skills\\debug-dotnet",
-      "sparse": false,
-      "repo": "https://github.com/snakeo/claude-debug-and-refactor-skills-plugin.git",
-      "ref": "master",
-      "mode": "manual"
-    },
-    {
-      "name": "d3-viz",
-      "skill": "downloaded-skills\\design-frontend\\d3-viz",
-      "sparse": true,
-      "repo": "https://github.com/jarmen423/skills.git",
-      "ref": "main",
-      "mode": "manual"
-    },
-    {
-      "name": "storyboard-creation",
-      "skill": "guides\\video\\storyboard-creation",
-      "sparse": false,
-      "repo": "https://github.com/inference-sh-6/skills.git",
-      "ref": "main",
-      "mode": "manual"
-    },
-    {
       "name": "data-visualization",
       "skill": "data\\skills\\data-visualization",
       "sparse": false,
@@ -744,14 +683,6 @@
       "mode": "vendor",
       "ref": "main",
       "name": "marketingskills"
-    },
-    {
-      "skill": "skills\\remotion-best-practices",
-      "repo": "https://github.com/remotion-dev/skills.git",
-      "sparse": false,
-      "ref": "main",
-      "mode": "vendor",
-      "name": "skills-2"
     },
     {
       "sparse": false,
