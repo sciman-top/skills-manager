@@ -83,7 +83,7 @@
 ### 5.5 投影与发现
 
 - `FR-PRJ-001`：canonical inventory 对 source、enabled、dependency 和 placement 做确定性归一化。
-- `FR-PRJ-002`：native projection 只投影 `managed_link_includes`，保持 managed/external ownership 分离。
+- `FR-PRJ-002`：native projection 只投影 `managed_link_includes`，以完整 package hash 绑定 plan/apply，并仅按当前 managed root 或上一份受验证 receipt 清理历史受管 link，保持 managed/external ownership 分离。
 - `FR-PRJ-003`：本仓不得复制宿主 metadata budget/description compaction；投影保留全部 eligible entry，并报告真实 conflict。
 - `FR-PRJ-004`：普通语义选择归宿主；router 只接受 `DomainHint` 和宿主选择，禁止 lexical ranking、profile switch 与 host mutation。
 - `FR-PRJ-005`：inventory/corpus 只能证明候选与 policy contract，不证明宿主真实 invocation。

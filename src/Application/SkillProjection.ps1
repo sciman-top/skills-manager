@@ -29,6 +29,20 @@ function Test-NativeSkillProjectionPathWithinRoot {
     return [string]::Equals($candidate, $boundary, [StringComparison]::OrdinalIgnoreCase) -or $candidate.StartsWith(($boundary + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)
 }
 
+function Get-NativeSkillProjectionPackageHash {
+    param([string]$SkillDirectory)
+
+    if ([string]::IsNullOrWhiteSpace($SkillDirectory) -or -not (Test-Path -LiteralPath $SkillDirectory -PathType Container)) { return '' }
+    $base = [IO.Path]::GetFullPath($SkillDirectory).TrimEnd('\', '/')
+    $parts = [Collections.Generic.List[string]]::new()
+    foreach ($file in @(Get-ChildItem -LiteralPath $base -Recurse -File -Force -ErrorAction Stop | Sort-Object FullName)) {
+        $relative = $file.FullName.Substring($base.Length).TrimStart('\', '/').Replace('\', '/')
+        $hash = ([string](Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash).ToLowerInvariant()
+        $parts.Add(('{0}|{1}' -f $relative, $hash)) | Out-Null
+    }
+    return Get-OperationSha256 ($parts.ToArray() -join "`n")
+}
+
 function Assert-NativeSkillProjectionPathHasNoReparseAncestor {
     param([string]$Path, [string]$AllowedRoot)
     $root = [IO.Path]::GetFullPath($AllowedRoot).TrimEnd('\', '/')
@@ -69,6 +83,31 @@ function Get-NativeSkillProjectionSettings {
         target_root = $targetRoot
         receipt_path = $receiptPath
     }
+}
+
+function Get-NativeSkillProjectionReceiptOwnedLinks {
+    param($Settings)
+
+    $owned = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $receiptPath = [string]$Settings.receipt_path
+    if ([string]::IsNullOrWhiteSpace($receiptPath) -or -not (Test-Path -LiteralPath $receiptPath -PathType Leaf)) { return $owned }
+    try { $receipt = [IO.File]::ReadAllText($receiptPath) | ConvertFrom-Json }
+    catch { throw ('Native projection ownership receipt is invalid: {0}' -f $receiptPath) }
+    if ([int]$receipt.schema_version -ne 1 -or [string]$receipt.status -ne 'applied') { return $owned }
+    if ([string]$receipt.receipt_id -notmatch '^nsr-[a-f0-9]{16}$' -or [string]$receipt.plan_id -notmatch '^nsp-[a-f0-9]{16}$') { return $owned }
+    if (-not [string]::Equals([string]$receipt.owner, [string]$Settings.owner, [StringComparison]::Ordinal)) { return $owned }
+    if ([string]::IsNullOrWhiteSpace([string]$receipt.target_root)) { return $owned }
+    if (-not [string]::Equals(([IO.Path]::GetFullPath([string]$receipt.target_root).TrimEnd('\', '/')), ([IO.Path]::GetFullPath([string]$Settings.target_root).TrimEnd('\', '/')), [StringComparison]::OrdinalIgnoreCase)) { return $owned }
+    foreach ($state in @($receipt.after)) {
+        if ($null -eq $state -or -not [bool]$state.exists -or [string]$state.kind -ne 'junction') { continue }
+        if ([string]::IsNullOrWhiteSpace([string]$state.directory_path) -or [string]::IsNullOrWhiteSpace([string]$state.link_target)) { continue }
+        $directoryPath = [IO.Path]::GetFullPath([string]$state.directory_path).TrimEnd('\', '/')
+        $linkTarget = [IO.Path]::GetFullPath([string]$state.link_target).TrimEnd('\', '/')
+        if ((Test-NativeSkillProjectionPathWithinRoot $directoryPath ([string]$Settings.target_root)) -and -not [string]::IsNullOrWhiteSpace($linkTarget)) {
+            $owned[$directoryPath] = $linkTarget
+        }
+    }
+    return $owned
 }
 
 function Get-NativeSkillProjectionEligibilityByName {
@@ -178,6 +217,8 @@ function New-NativeSkillProjectionPlan {
         if ($contentHash -notmatch '^[0-9a-f]{64}$') { $findings.Add((New-OperationFinding 'content_hash_missing' 'error' ('$.skills[{0}].content_hash' -f $name) 'Native projection requires a SHA-256 content hash.')) | Out-Null }
         if ($metadataHash -notmatch '^[0-9a-f]{64}$') { $findings.Add((New-OperationFinding 'metadata_hash_missing' 'error' ('$.skills[{0}].metadata_hash' -f $name) 'Native projection requires a SHA-256 metadata hash.')) | Out-Null }
         $sourceDirectory = [IO.Path]::GetDirectoryName($sourcePath)
+        $packageHash = Get-NativeSkillProjectionPackageHash $sourceDirectory
+        if ($packageHash -notmatch '^[0-9a-f]{64}$') { $findings.Add((New-OperationFinding 'package_hash_missing' 'error' ('$.skills[{0}].package_hash' -f $name) 'Native projection requires a SHA-256 package hash.')) | Out-Null }
         $targetLeaf = [IO.Path]::GetFileName($sourceDirectory.TrimEnd('\', '/'))
         if ([string]::IsNullOrWhiteSpace($targetLeaf) -or $targetLeaf -in @('.', '..') -or $targetLeaf.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0) {
             $findings.Add((New-OperationFinding 'target_leaf_unsafe' 'error' ('$.entries[{0}].path' -f $name) 'The managed package directory leaf is unsafe for native projection.')) | Out-Null
@@ -200,6 +241,7 @@ function New-NativeSkillProjectionPlan {
                 target_path = $targetPath
                 content_hash = $contentHash
                 metadata_hash = $metadataHash
+                package_hash = $packageHash
             }) | Out-Null
     }
 
@@ -214,6 +256,7 @@ function New-NativeSkillProjectionPlan {
         if (-not [string]::IsNullOrWhiteSpace([string]$skill.source_root)) { $managedRoots.Add(([IO.Path]::GetFullPath([string]$skill.source_root).TrimEnd('\', '/'))) | Out-Null }
     }
     $removalRows = [Collections.Generic.List[object]]::new()
+    $receiptOwnedLinks = Get-NativeSkillProjectionReceiptOwnedLinks $settings
     if (Test-Path -LiteralPath $settings.target_root -PathType Container) {
         foreach ($entry in @(Get-ChildItem -LiteralPath $settings.target_root -Directory -Force -ErrorAction SilentlyContinue | Sort-Object Name)) {
             $targetDirectory = [IO.Path]::GetFullPath($entry.FullName).TrimEnd('\', '/')
@@ -226,6 +269,7 @@ function New-NativeSkillProjectionPlan {
             foreach ($managedRoot in $managedRoots) {
                 if ($linkTarget.StartsWith(($managedRoot + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)) { $owned = $true; break }
             }
+            if (-not $owned -and $receiptOwnedLinks.ContainsKey($targetDirectory) -and [string]::Equals($receiptOwnedLinks[$targetDirectory], $linkTarget, [StringComparison]::OrdinalIgnoreCase)) { $owned = $true }
             if ($owned) { $removalRows.Add([pscustomobject][ordered]@{ name = $entry.Name; target_directory = $targetDirectory; previous_link_target = $linkTarget }) | Out-Null }
         }
     }
@@ -233,7 +277,7 @@ function New-NativeSkillProjectionPlan {
         target_root = [string]$settings.target_root
         owner = [string]$settings.owner
         catalog_id = [string](Get-NativeSkillProjectionProperty $Catalog @('catalog_id'))
-        skills = @($skillRows | ForEach-Object { [ordered]@{ name = $_.name; source_path = $_.source_path; target_path = $_.target_path; content_hash = $_.content_hash; metadata_hash = $_.metadata_hash } })
+        skills = @($skillRows | ForEach-Object { [ordered]@{ name = $_.name; source_path = $_.source_path; target_path = $_.target_path; content_hash = $_.content_hash; metadata_hash = $_.metadata_hash; package_hash = $_.package_hash } })
         removals = @($removalRows.ToArray() | ForEach-Object { [ordered]@{ name = $_.name; target_directory = $_.target_directory; previous_link_target = $_.previous_link_target } })
     }
     $planId = 'nsp-{0}' -f (Get-OperationSha256 ($identity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)
@@ -246,6 +290,7 @@ function New-NativeSkillProjectionPlan {
                 target_directory = $_.target_directory
                 target_path = $_.target_path
                 expected_content_hash = $_.content_hash
+                expected_package_hash = $_.package_hash
                 metadata_materialization = 'source_package_junction'
                 risk = 'explicit_native_root_write'
             }
@@ -309,8 +354,8 @@ function Test-NativeSkillProjectionPlanContract {
     if ((Get-NativeSkillProjectionProperty $Plan @('semantic_selection_applied')) -ne $false) { $findings.Add((New-OperationFinding 'semantic_boundary_breached' 'error' '$' 'Projection cannot apply semantic selection.')) | Out-Null }
     foreach ($field in @('provider_calls', 'native_mutations', 'writes')) { if ([long](Get-NativeSkillProjectionProperty $Plan @($field)) -ne 0) { $findings.Add((New-OperationFinding 'side_effect_forbidden' 'error' ('$.{0}' -f $field) 'Planning must not mutate the native surface.')) | Out-Null } }
     foreach ($skill in @((Get-NativeSkillProjectionProperty $Plan @('skills')))) {
-        foreach ($field in @('name', 'source_path', 'target_path', 'content_hash', 'metadata_hash')) { if ([string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $skill @($field)))) { $findings.Add((New-OperationFinding 'skill_field_missing' 'error' '$.skills' ('Projected skill field is missing: {0}' -f $field))) | Out-Null } }
-        if ([string](Get-NativeSkillProjectionProperty $skill @('content_hash')) -notmatch '^[0-9a-f]{64}$' -or [string](Get-NativeSkillProjectionProperty $skill @('metadata_hash')) -notmatch '^[0-9a-f]{64}$') { $findings.Add((New-OperationFinding 'skill_hash_invalid' 'error' '$.skills' 'Projected skill hashes must be SHA-256.')) | Out-Null }
+        foreach ($field in @('name', 'source_path', 'target_path', 'content_hash', 'metadata_hash', 'package_hash')) { if ([string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $skill @($field)))) { $findings.Add((New-OperationFinding 'skill_field_missing' 'error' '$.skills' ('Projected skill field is missing: {0}' -f $field))) | Out-Null } }
+        if ([string](Get-NativeSkillProjectionProperty $skill @('content_hash')) -notmatch '^[0-9a-f]{64}$' -or [string](Get-NativeSkillProjectionProperty $skill @('metadata_hash')) -notmatch '^[0-9a-f]{64}$' -or [string](Get-NativeSkillProjectionProperty $skill @('package_hash')) -notmatch '^[0-9a-f]{64}$') { $findings.Add((New-OperationFinding 'skill_hash_invalid' 'error' '$.skills' 'Projected skill hashes must be SHA-256.')) | Out-Null }
     }
     return New-OperationValidationResult $findings.ToArray()
 }

@@ -33,9 +33,10 @@ Describe 'Read-only skill surface inventory' {
         $oldCodexHome = $env:CODEX_HOME
         try {
             $agentRoot = Join-Path $fixture 'agent'; $userRoot = Join-Path $fixture 'user-skills'; $pluginRoot = Join-Path $fixture 'plugin'; $env:CODEX_HOME = Join-Path $fixture 'codex'
-            foreach ($path in @((Join-Path $agentRoot 'managed-stale'), (Join-Path $userRoot 'managed-current'), (Join-Path $userRoot 'unknown-skill'), (Join-Path $env:CODEX_HOME 'skills\.system\system-skill'), (Join-Path $pluginRoot 'skills\plugin-skill'))) { New-Item -ItemType Directory -Force -Path $path | Out-Null }
-            foreach ($path in @((Join-Path $agentRoot 'managed-stale\SKILL.md'), (Join-Path $userRoot 'managed-current\SKILL.md'), (Join-Path $userRoot 'unknown-skill\SKILL.md'), (Join-Path $env:CODEX_HOME 'skills\.system\system-skill\SKILL.md'), (Join-Path $pluginRoot 'skills\plugin-skill\SKILL.md'))) { [IO.File]::WriteAllText($path, "---`nname: $([IO.Path]::GetFileName((Split-Path $path -Parent)))`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false)) }
+            foreach ($path in @((Join-Path $agentRoot 'managed-stale'), (Join-Path $agentRoot 'managed-current'), (Join-Path $userRoot 'unknown-skill'), (Join-Path $env:CODEX_HOME 'skills\.system\system-skill'), (Join-Path $pluginRoot 'skills\plugin-skill'))) { New-Item -ItemType Directory -Force -Path $path | Out-Null }
+            foreach ($path in @((Join-Path $agentRoot 'managed-stale\SKILL.md'), (Join-Path $agentRoot 'managed-current\SKILL.md'), (Join-Path $userRoot 'unknown-skill\SKILL.md'), (Join-Path $env:CODEX_HOME 'skills\.system\system-skill\SKILL.md'), (Join-Path $pluginRoot 'skills\plugin-skill\SKILL.md'))) { [IO.File]::WriteAllText($path, "---`nname: $([IO.Path]::GetFileName((Split-Path $path -Parent)))`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false)) }
             Mock Invoke-CodexCliJson { [pscustomobject]@{ installed = @([pscustomobject]@{ pluginId='plugin@fixture'; name='plugin'; marketplaceName='fixture'; version='1'; installed=$true; enabled=$true; source=[pscustomobject]@{ path=$pluginRoot } }) } }
+            New-Item -ItemType Junction -Path (Join-Path $userRoot 'managed-current') -Target (Join-Path $agentRoot 'managed-current') -Force | Out-Null
             New-Item -ItemType Junction -Path (Join-Path $userRoot 'managed-stale') -Target (Join-Path $agentRoot 'managed-stale') -Force | Out-Null
             $externalRoot = Join-Path $fixture 'external\external-skill'; New-Item -ItemType Directory -Force -Path $externalRoot | Out-Null; [IO.File]::WriteAllText((Join-Path $externalRoot 'SKILL.md'), "---`nname: external-skill`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false)); New-Item -ItemType Junction -Path (Join-Path $userRoot 'external-skill') -Target $externalRoot -Force | Out-Null
             $snapshotPath = Join-Path $fixture 'host.json'; [IO.File]::WriteAllText($snapshotPath, (([pscustomobject]@{ captured_at = [datetimeoffset]::UtcNow.ToString('o'); coverage = 'complete'; skills = @([pscustomobject]@{ name = 'host-only'; path = 'host://skill'; entrypoint_hash = ('a' * 64); description_hash = ('b' * 64) }) }) | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
@@ -183,5 +184,37 @@ Describe 'Read-only skill surface inventory' {
             @($view.findings.code) | Should -Contain 'projection_manifest_path_outside_source'
         }
         finally { if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
+    }
+
+    It 'fails closed when a managed include is an ordinary directory' {
+        $fixture = Join-Path ([IO.Path]::GetTempPath()) ('skill-surfaces-' + [guid]::NewGuid().ToString('N'))
+        $oldCodexHome = $env:CODEX_HOME
+        try {
+            $env:CODEX_HOME = Join-Path $fixture 'codex'
+            $ordinary = Join-Path $fixture 'user\managed-current'
+            $prefixSource = Join-Path $fixture 'agent-other\prefix-skill'
+            New-Item -ItemType Directory -Path $ordinary -Force | Out-Null
+            New-Item -ItemType Directory -Path $prefixSource -Force | Out-Null
+            [IO.File]::WriteAllText((Join-Path $ordinary 'SKILL.md'), "---`nname: managed-current`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false))
+            [IO.File]::WriteAllText((Join-Path $prefixSource 'SKILL.md'), "---`nname: prefix-skill`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false))
+            New-Item -ItemType Junction -Path (Join-Path $fixture 'user\prefix-skill') -Target $prefixSource | Out-Null
+            Mock Invoke-CodexCliJson { [pscustomobject]@{ installed = @() } }
+            $config = [pscustomobject]@{ skill_projection = [pscustomobject]@{ manifest_path = 'missing.json'; managed_source_path = 'agent'; user_skill_root = (Join-Path $fixture 'user'); managed_link_includes = @('managed-current') }; mcp_servers = @() }
+
+            $view = New-SkillSurfaceView -RepoRoot $fixture -Config $config
+            $record = @($view.surfaces | Where-Object name -eq 'user_skill_root')[0].items[0]
+            $prefixRecord = @(@($view.surfaces | Where-Object name -eq 'user_skill_root')[0].items | Where-Object name -eq 'prefix-skill')[0]
+
+            $view.pass | Should -BeFalse
+            $record.projection_state | Should -Be 'ownership_drift'
+            $record.owner | Should -Be 'unknown'
+            $record.resident | Should -BeFalse
+            @($view.findings.code) | Should -Contain 'managed_link_ownership_drift'
+            $prefixRecord.projection_state | Should -Be 'external_owned'
+        }
+        finally {
+            $env:CODEX_HOME = $oldCodexHome
+            if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force }
+        }
     }
 }

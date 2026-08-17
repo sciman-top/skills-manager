@@ -2481,6 +2481,25 @@ function Resolve-CapabilitySurfacePath([string]$Path, [string]$RepoRoot) {
     return [IO.Path]::GetFullPath($value)
 }
 
+function Test-CapabilitySurfacePathWithinRoot([string]$Path, [string]$Root) {
+    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Root)) { return $false }
+    $candidate = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+    $boundary = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+    return [string]::Equals($candidate, $boundary, [StringComparison]::OrdinalIgnoreCase) -or
+        $candidate.StartsWith(($boundary + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Resolve-CapabilitySurfaceLinkTarget($Directory) {
+    if ($null -eq $Directory -or -not [bool]($Directory.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return '' }
+    $targetProperty = $Directory.PSObject.Properties['Target']
+    if ($null -eq $targetProperty) { return '' }
+    $target = @($targetProperty.Value | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
+    if ($target.Count -eq 0) { return '' }
+    $value = [string]$target[0]
+    if (-not [IO.Path]::IsPathRooted($value)) { $value = Join-Path $Directory.Parent.FullName $value }
+    return [IO.Path]::GetFullPath($value).TrimEnd('\', '/')
+}
+
 function Get-CapabilitySurfaceSkillMetadata([string]$SkillPath, [string]$Owner, [string]$ProjectionState, [bool]$Resident) {
     $metadata = Read-SkillMetadata $SkillPath -Observation
     $text = [string]$metadata.text
@@ -2542,10 +2561,17 @@ function New-SkillSurfaceView {
     if ($userRootExists) {
         foreach ($directory in @(Get-ChildItem -LiteralPath $userRoot -Directory -Force)) {
             $entry = Join-Path $directory.FullName 'SKILL.md'; if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) { continue }
-            $targetText = @($directory.Target | ForEach-Object { [string]$_ }) -join ';'
-            $state = if ($managedIncludes -contains $directory.Name) { 'managed_current' } elseif ($targetText -and $managedSource -and $targetText.StartsWith($managedSource, [StringComparison]::OrdinalIgnoreCase)) { 'managed_stale' } elseif ($targetText) { 'external_owned' } else { 'ownership_unknown' }
+            $isReparse = [bool]($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)
+            $targetText = Resolve-CapabilitySurfaceLinkTarget $directory
+            $managedExpected = if ($managedSource) { Join-Path $managedSource $directory.Name } else { '' }
+            $managedName = $managedIncludes -contains $directory.Name
+            $managedTargetMatches = $isReparse -and $targetText -and $managedExpected -and [string]::Equals($targetText, ([IO.Path]::GetFullPath($managedExpected).TrimEnd('\', '/')), [StringComparison]::OrdinalIgnoreCase)
+            $state = if ($managedName -and $managedTargetMatches) { 'managed_current' } elseif ($managedName) { 'ownership_drift' } elseif ($isReparse -and $targetText -and $managedSource -and (Test-CapabilitySurfacePathWithinRoot $targetText $managedSource)) { 'managed_stale' } elseif ($isReparse -and $targetText) { 'external_owned' } else { 'ownership_unknown' }
             $owner = if ($state -in @('managed_current', 'managed_stale')) { 'skills_manager' } elseif ($state -eq 'external_owned') { 'external' } else { 'unknown' }
             $userItems.Add((Get-CapabilitySurfaceSkillMetadata $entry $owner $state ($state -eq 'managed_current'))) | Out-Null
+            if ($state -eq 'ownership_drift') {
+                $findings.Add([pscustomobject]@{ code = 'managed_link_ownership_drift'; severity = 'error'; surface = 'user_skill_root'; path = $directory.FullName; message = 'Managed skill name is not a junction to its expected managed source directory.' }) | Out-Null
+            }
         }
     }
     $surfaces.Add((New-CapabilitySurfaceRecord 'user_skill_root' 'filesystem_observation' $userRoot $(if ($userRootExists) { 'fresh' } else { 'not_observed' }) $(if ($userRootExists) { 'complete' } else { 'not_materialized' }) $userItems.ToArray())) | Out-Null
@@ -2581,7 +2607,7 @@ function New-SkillSurfaceView {
             if (-not $identityValid) { $findings.Add([pscustomobject]@{ code = 'surface_skill_identity_incomplete'; severity = 'error'; surface = $surface.name; path = [string]$item.path; message = 'Skill surface items require name/path/entrypoint/description/owner/resident/projection identity.' }) | Out-Null }
         }
     }
-    return [pscustomobject][ordered]@{ schema_version = 1; view = 'SkillSurfaceView'; generated_at = $GeneratedAt; read_only = $true; pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); surfaces = $surfaces.ToArray(); surface_count = $surfaces.Count; host_observation = $hostObservation; stale_links = @($userItems | Where-Object projection_state -in @('managed_stale', 'external_owned', 'ownership_unknown')); findings = $findings.ToArray(); provider_calls = 0; native_mutations = 0; writes = 0 }
+    return [pscustomobject][ordered]@{ schema_version = 1; view = 'SkillSurfaceView'; generated_at = $GeneratedAt; read_only = $true; pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); surfaces = $surfaces.ToArray(); surface_count = $surfaces.Count; host_observation = $hostObservation; stale_links = @($userItems | Where-Object projection_state -in @('managed_stale', 'external_owned', 'ownership_unknown', 'ownership_drift')); findings = $findings.ToArray(); provider_calls = 0; native_mutations = 0; writes = 0 }
 }
 
 $skillCatalogCompilerRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
@@ -2838,6 +2864,20 @@ function Test-NativeSkillProjectionPathWithinRoot {
     return [string]::Equals($candidate, $boundary, [StringComparison]::OrdinalIgnoreCase) -or $candidate.StartsWith(($boundary + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)
 }
 
+function Get-NativeSkillProjectionPackageHash {
+    param([string]$SkillDirectory)
+
+    if ([string]::IsNullOrWhiteSpace($SkillDirectory) -or -not (Test-Path -LiteralPath $SkillDirectory -PathType Container)) { return '' }
+    $base = [IO.Path]::GetFullPath($SkillDirectory).TrimEnd('\', '/')
+    $parts = [Collections.Generic.List[string]]::new()
+    foreach ($file in @(Get-ChildItem -LiteralPath $base -Recurse -File -Force -ErrorAction Stop | Sort-Object FullName)) {
+        $relative = $file.FullName.Substring($base.Length).TrimStart('\', '/').Replace('\', '/')
+        $hash = ([string](Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash).ToLowerInvariant()
+        $parts.Add(('{0}|{1}' -f $relative, $hash)) | Out-Null
+    }
+    return Get-OperationSha256 ($parts.ToArray() -join "`n")
+}
+
 function Assert-NativeSkillProjectionPathHasNoReparseAncestor {
     param([string]$Path, [string]$AllowedRoot)
     $root = [IO.Path]::GetFullPath($AllowedRoot).TrimEnd('\', '/')
@@ -2878,6 +2918,31 @@ function Get-NativeSkillProjectionSettings {
         target_root = $targetRoot
         receipt_path = $receiptPath
     }
+}
+
+function Get-NativeSkillProjectionReceiptOwnedLinks {
+    param($Settings)
+
+    $owned = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $receiptPath = [string]$Settings.receipt_path
+    if ([string]::IsNullOrWhiteSpace($receiptPath) -or -not (Test-Path -LiteralPath $receiptPath -PathType Leaf)) { return $owned }
+    try { $receipt = [IO.File]::ReadAllText($receiptPath) | ConvertFrom-Json }
+    catch { throw ('Native projection ownership receipt is invalid: {0}' -f $receiptPath) }
+    if ([int]$receipt.schema_version -ne 1 -or [string]$receipt.status -ne 'applied') { return $owned }
+    if ([string]$receipt.receipt_id -notmatch '^nsr-[a-f0-9]{16}$' -or [string]$receipt.plan_id -notmatch '^nsp-[a-f0-9]{16}$') { return $owned }
+    if (-not [string]::Equals([string]$receipt.owner, [string]$Settings.owner, [StringComparison]::Ordinal)) { return $owned }
+    if ([string]::IsNullOrWhiteSpace([string]$receipt.target_root)) { return $owned }
+    if (-not [string]::Equals(([IO.Path]::GetFullPath([string]$receipt.target_root).TrimEnd('\', '/')), ([IO.Path]::GetFullPath([string]$Settings.target_root).TrimEnd('\', '/')), [StringComparison]::OrdinalIgnoreCase)) { return $owned }
+    foreach ($state in @($receipt.after)) {
+        if ($null -eq $state -or -not [bool]$state.exists -or [string]$state.kind -ne 'junction') { continue }
+        if ([string]::IsNullOrWhiteSpace([string]$state.directory_path) -or [string]::IsNullOrWhiteSpace([string]$state.link_target)) { continue }
+        $directoryPath = [IO.Path]::GetFullPath([string]$state.directory_path).TrimEnd('\', '/')
+        $linkTarget = [IO.Path]::GetFullPath([string]$state.link_target).TrimEnd('\', '/')
+        if ((Test-NativeSkillProjectionPathWithinRoot $directoryPath ([string]$Settings.target_root)) -and -not [string]::IsNullOrWhiteSpace($linkTarget)) {
+            $owned[$directoryPath] = $linkTarget
+        }
+    }
+    return $owned
 }
 
 function Get-NativeSkillProjectionEligibilityByName {
@@ -2987,6 +3052,8 @@ function New-NativeSkillProjectionPlan {
         if ($contentHash -notmatch '^[0-9a-f]{64}$') { $findings.Add((New-OperationFinding 'content_hash_missing' 'error' ('$.skills[{0}].content_hash' -f $name) 'Native projection requires a SHA-256 content hash.')) | Out-Null }
         if ($metadataHash -notmatch '^[0-9a-f]{64}$') { $findings.Add((New-OperationFinding 'metadata_hash_missing' 'error' ('$.skills[{0}].metadata_hash' -f $name) 'Native projection requires a SHA-256 metadata hash.')) | Out-Null }
         $sourceDirectory = [IO.Path]::GetDirectoryName($sourcePath)
+        $packageHash = Get-NativeSkillProjectionPackageHash $sourceDirectory
+        if ($packageHash -notmatch '^[0-9a-f]{64}$') { $findings.Add((New-OperationFinding 'package_hash_missing' 'error' ('$.skills[{0}].package_hash' -f $name) 'Native projection requires a SHA-256 package hash.')) | Out-Null }
         $targetLeaf = [IO.Path]::GetFileName($sourceDirectory.TrimEnd('\', '/'))
         if ([string]::IsNullOrWhiteSpace($targetLeaf) -or $targetLeaf -in @('.', '..') -or $targetLeaf.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0) {
             $findings.Add((New-OperationFinding 'target_leaf_unsafe' 'error' ('$.entries[{0}].path' -f $name) 'The managed package directory leaf is unsafe for native projection.')) | Out-Null
@@ -3009,6 +3076,7 @@ function New-NativeSkillProjectionPlan {
                 target_path = $targetPath
                 content_hash = $contentHash
                 metadata_hash = $metadataHash
+                package_hash = $packageHash
             }) | Out-Null
     }
 
@@ -3023,6 +3091,7 @@ function New-NativeSkillProjectionPlan {
         if (-not [string]::IsNullOrWhiteSpace([string]$skill.source_root)) { $managedRoots.Add(([IO.Path]::GetFullPath([string]$skill.source_root).TrimEnd('\', '/'))) | Out-Null }
     }
     $removalRows = [Collections.Generic.List[object]]::new()
+    $receiptOwnedLinks = Get-NativeSkillProjectionReceiptOwnedLinks $settings
     if (Test-Path -LiteralPath $settings.target_root -PathType Container) {
         foreach ($entry in @(Get-ChildItem -LiteralPath $settings.target_root -Directory -Force -ErrorAction SilentlyContinue | Sort-Object Name)) {
             $targetDirectory = [IO.Path]::GetFullPath($entry.FullName).TrimEnd('\', '/')
@@ -3035,6 +3104,7 @@ function New-NativeSkillProjectionPlan {
             foreach ($managedRoot in $managedRoots) {
                 if ($linkTarget.StartsWith(($managedRoot + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)) { $owned = $true; break }
             }
+            if (-not $owned -and $receiptOwnedLinks.ContainsKey($targetDirectory) -and [string]::Equals($receiptOwnedLinks[$targetDirectory], $linkTarget, [StringComparison]::OrdinalIgnoreCase)) { $owned = $true }
             if ($owned) { $removalRows.Add([pscustomobject][ordered]@{ name = $entry.Name; target_directory = $targetDirectory; previous_link_target = $linkTarget }) | Out-Null }
         }
     }
@@ -3042,7 +3112,7 @@ function New-NativeSkillProjectionPlan {
         target_root = [string]$settings.target_root
         owner = [string]$settings.owner
         catalog_id = [string](Get-NativeSkillProjectionProperty $Catalog @('catalog_id'))
-        skills = @($skillRows | ForEach-Object { [ordered]@{ name = $_.name; source_path = $_.source_path; target_path = $_.target_path; content_hash = $_.content_hash; metadata_hash = $_.metadata_hash } })
+        skills = @($skillRows | ForEach-Object { [ordered]@{ name = $_.name; source_path = $_.source_path; target_path = $_.target_path; content_hash = $_.content_hash; metadata_hash = $_.metadata_hash; package_hash = $_.package_hash } })
         removals = @($removalRows.ToArray() | ForEach-Object { [ordered]@{ name = $_.name; target_directory = $_.target_directory; previous_link_target = $_.previous_link_target } })
     }
     $planId = 'nsp-{0}' -f (Get-OperationSha256 ($identity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)
@@ -3055,6 +3125,7 @@ function New-NativeSkillProjectionPlan {
                 target_directory = $_.target_directory
                 target_path = $_.target_path
                 expected_content_hash = $_.content_hash
+                expected_package_hash = $_.package_hash
                 metadata_materialization = 'source_package_junction'
                 risk = 'explicit_native_root_write'
             }
@@ -3118,8 +3189,8 @@ function Test-NativeSkillProjectionPlanContract {
     if ((Get-NativeSkillProjectionProperty $Plan @('semantic_selection_applied')) -ne $false) { $findings.Add((New-OperationFinding 'semantic_boundary_breached' 'error' '$' 'Projection cannot apply semantic selection.')) | Out-Null }
     foreach ($field in @('provider_calls', 'native_mutations', 'writes')) { if ([long](Get-NativeSkillProjectionProperty $Plan @($field)) -ne 0) { $findings.Add((New-OperationFinding 'side_effect_forbidden' 'error' ('$.{0}' -f $field) 'Planning must not mutate the native surface.')) | Out-Null } }
     foreach ($skill in @((Get-NativeSkillProjectionProperty $Plan @('skills')))) {
-        foreach ($field in @('name', 'source_path', 'target_path', 'content_hash', 'metadata_hash')) { if ([string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $skill @($field)))) { $findings.Add((New-OperationFinding 'skill_field_missing' 'error' '$.skills' ('Projected skill field is missing: {0}' -f $field))) | Out-Null } }
-        if ([string](Get-NativeSkillProjectionProperty $skill @('content_hash')) -notmatch '^[0-9a-f]{64}$' -or [string](Get-NativeSkillProjectionProperty $skill @('metadata_hash')) -notmatch '^[0-9a-f]{64}$') { $findings.Add((New-OperationFinding 'skill_hash_invalid' 'error' '$.skills' 'Projected skill hashes must be SHA-256.')) | Out-Null }
+        foreach ($field in @('name', 'source_path', 'target_path', 'content_hash', 'metadata_hash', 'package_hash')) { if ([string]::IsNullOrWhiteSpace([string](Get-NativeSkillProjectionProperty $skill @($field)))) { $findings.Add((New-OperationFinding 'skill_field_missing' 'error' '$.skills' ('Projected skill field is missing: {0}' -f $field))) | Out-Null } }
+        if ([string](Get-NativeSkillProjectionProperty $skill @('content_hash')) -notmatch '^[0-9a-f]{64}$' -or [string](Get-NativeSkillProjectionProperty $skill @('metadata_hash')) -notmatch '^[0-9a-f]{64}$' -or [string](Get-NativeSkillProjectionProperty $skill @('package_hash')) -notmatch '^[0-9a-f]{64}$') { $findings.Add((New-OperationFinding 'skill_hash_invalid' 'error' '$.skills' 'Projected skill hashes must be SHA-256.')) | Out-Null }
     }
     return New-OperationValidationResult $findings.ToArray()
 }
@@ -3165,6 +3236,7 @@ function Get-NativeSkillProjectionTargetState {
             skill_path = $skillPath
             link_target = ''
             content_hash = ''
+            package_hash = ''
         }
     }
     $item = Get-Item -LiteralPath $directory -Force
@@ -3176,6 +3248,7 @@ function Get-NativeSkillProjectionTargetState {
         skill_path = $skillPath
         link_target = if ($isReparse) { Get-NativeSkillProjectionLinkTarget $directory } else { '' }
         content_hash = Get-NativeSkillProjectionFileHash $skillPath
+        package_hash = Get-NativeSkillProjectionPackageHash $directory
     }
 }
 
@@ -3260,10 +3333,11 @@ function Apply-NativeSkillProjection {
             $targetDirectory = [IO.Path]::GetFullPath([string]$skill.target_directory)
             if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw ('Projection source drifted: {0}' -f $sourcePath) }
             if (-not [string]::Equals((Get-NativeSkillProjectionFileHash $sourcePath), [string]$skill.content_hash, [StringComparison]::OrdinalIgnoreCase)) { throw ('Projection source hash drifted: {0}' -f $sourcePath) }
+            if (-not [string]::Equals((Get-NativeSkillProjectionPackageHash $sourceDirectory), [string]$skill.package_hash, [StringComparison]::OrdinalIgnoreCase)) { throw ('Projection package hash drifted: {0}' -f $sourceDirectory) }
             if (-not (Test-OperationPathWithinRoot $targetDirectory $targetRoot)) { throw ('Projection target escaped the owned root: {0}' -f $targetDirectory) }
             $current = Get-NativeSkillProjectionTargetState $targetDirectory
             if ([bool]$current.exists) {
-                if ([string]$current.kind -eq 'junction' -and [string]::Equals([string]$current.link_target, $sourceDirectory, [StringComparison]::OrdinalIgnoreCase) -and [string]::Equals([string]$current.content_hash, [string]$skill.content_hash, [StringComparison]::OrdinalIgnoreCase)) { continue }
+                if ([string]$current.kind -eq 'junction' -and [string]::Equals([string]$current.link_target, $sourceDirectory, [StringComparison]::OrdinalIgnoreCase) -and [string]::Equals([string]$current.content_hash, [string]$skill.content_hash, [StringComparison]::OrdinalIgnoreCase) -and [string]::Equals([string]$current.package_hash, [string]$skill.package_hash, [StringComparison]::OrdinalIgnoreCase)) { continue }
                 throw ('Projection target conflict or drift: {0}' -f $targetDirectory)
             }
             $temporaryPath = Join-Path $targetRoot ('.skills-manager-native-projection-{0}' -f ([guid]::NewGuid().ToString('N')))
@@ -3289,7 +3363,7 @@ function Apply-NativeSkillProjection {
         $after = @($affectedDirectories | ForEach-Object { Get-NativeSkillProjectionTargetState $_ })
         foreach ($skill in @($Plan.skills)) {
             $state = @($after | Where-Object directory_path -eq ([IO.Path]::GetFullPath([string]$skill.target_directory).TrimEnd('\', '/')))[0]
-            if ($null -eq $state -or -not [string]::Equals([string]$state.content_hash, [string]$skill.content_hash, [StringComparison]::OrdinalIgnoreCase)) { throw ('Projection target hash verification failed: {0}' -f $skill.name) }
+            if ($null -eq $state -or -not [string]::Equals([string]$state.content_hash, [string]$skill.content_hash, [StringComparison]::OrdinalIgnoreCase) -or -not [string]::Equals([string]$state.package_hash, [string]$skill.package_hash, [StringComparison]::OrdinalIgnoreCase)) { throw ('Projection target hash verification failed: {0}' -f $skill.name) }
         }
         $receiptIdentity = [ordered]@{ plan_id = [string]$Plan.plan_id; target_root = $targetRoot; changed_names = @($changedNames.ToArray()) }
         $receiptId = 'nsr-{0}' -f (Get-OperationSha256 ($receiptIdentity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)
@@ -11809,8 +11883,26 @@ function resolveEnvironmentVariable(name) {
   return "";
 }
 
-const conn = resolveEnvironmentVariable("POSTGRES_CONNECTION_STRING");
-if (!conn || !conn.trim()) {
+function normalizePostgresConnectionString(raw) {
+  const value = (raw || "").trim();
+  if (/^postgres(?:ql)?:\/\//i.test(value)) return value;
+  const fields = new Map();
+  for (const part of value.split(";")) {
+    const separator = part.indexOf("=");
+    if (separator < 1) continue;
+    fields.set(part.slice(0, separator).trim().toLowerCase(), part.slice(separator + 1).trim());
+  }
+  const host = fields.get("host") || "";
+  const port = fields.get("port") || "";
+  const database = fields.get("database") || "";
+  const username = fields.get("username") || fields.get("user id") || fields.get("userid") || "";
+  const password = fields.get("password") || "";
+  if (![host, port, database, username, password].every(Boolean)) return "";
+  return `postgresql://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}/${encodeURIComponent(database)}`;
+}
+
+const conn = normalizePostgresConnectionString(resolveEnvironmentVariable("POSTGRES_CONNECTION_STRING"));
+if (!conn) {
   console.error("POSTGRES_CONNECTION_STRING is required for postgres MCP.");
   process.exit(64);
 }
@@ -12000,21 +12092,9 @@ function Has-McpServerByName($servers, [string]$name) {
     return $false
 }
 
-function Invoke-Gh([string[]]$GhArgs) {
-    Need ($GhArgs -and $GhArgs.Count -gt 0) "gh 参数不能为空"
-    $output = & gh @GhArgs 2>$null
-    if ($LASTEXITCODE -ne 0) { return $null }
-    return @($output | ForEach-Object { [string]$_ })
-}
-
 function Get-McpUserEnvironmentVariable([string]$name) {
     Need (-not [string]::IsNullOrWhiteSpace($name)) "环境变量名不能为空"
     return [System.Environment]::GetEnvironmentVariable($name, "User")
-}
-
-function Set-McpUserEnvironmentVariable([string]$name, [AllowNull()][string]$value) {
-    Need (-not [string]::IsNullOrWhiteSpace($name)) "环境变量名不能为空"
-    [System.Environment]::SetEnvironmentVariable($name, $value, "User")
 }
 
 function Get-EnvironmentVariableWithScope([string]$name, [string[]]$scopes = @("Process", "User", "Machine")) {
@@ -12103,10 +12183,11 @@ function Ensure-PostgresMcpEnvironment($servers) {
     $normalized = Convert-PostgresKeyValueConnectionStringToUrl $raw
     Need (-not [string]::IsNullOrWhiteSpace($normalized)) "检测到 postgres MCP，但 POSTGRES_CONNECTION_STRING 不是可用的 postgresql:// URL，也无法从 Host=...;Port=...;Database=...;Username=...;Password=... 形态转换。"
 
+    # Keep normalization process-scoped. The wrapper also normalizes User/Machine
+    # values at invocation time, so sync never persists a database credential.
     $env:POSTGRES_CONNECTION_STRING = $normalized
-    if ($raw -ne $normalized -or [string]$resolved.scope -ne "User") {
-        Set-McpUserEnvironmentVariable "POSTGRES_CONNECTION_STRING" $normalized
-        Log ("Postgres MCP 连接串已归一化到 User scope：source_scope={0}, shape=postgres-url" -f [string]$resolved.scope) "INFO"
+    if ($raw -ne $normalized -or [string]$resolved.scope -ne "Process") {
+        Log ("Postgres MCP 连接串仅注入当前同步进程：source_scope={0}, shape=postgres-url" -f [string]$resolved.scope) "INFO"
     }
 }
 
@@ -12128,36 +12209,25 @@ function Ensure-GhAuthForGithubMcp($servers) {
     }
     if (-not $requiresAuthentication) { return }
 
-    if (-not (Get-Command "gh" -ErrorAction SilentlyContinue)) {
-        throw "检测到 github MCP，但未找到 gh 命令。请先安装并登录 GitHub CLI（gh auth login）。"
+    $githubResolved = Get-EnvironmentVariableWithScope "GITHUB_PERSONAL_ACCESS_TOKEN"
+    $codexResolved = Get-EnvironmentVariableWithScope "CODEX_GITHUB_PERSONAL_ACCESS_TOKEN"
+    $githubToken = if ($null -eq $githubResolved) { "" } else { [string]$githubResolved.value }
+    $codexToken = if ($null -eq $codexResolved) { "" } else { [string]$codexResolved.value }
+    if (-not [string]::IsNullOrWhiteSpace($githubToken) -and
+        -not [string]::IsNullOrWhiteSpace($codexToken) -and
+        $githubToken -cne $codexToken) {
+        throw "检测到 GitHub MCP，但 GITHUB_PERSONAL_ACCESS_TOKEN 与 CODEX_GITHUB_PERSONAL_ACCESS_TOKEN 不一致；请由操作者统一配置。"
     }
-
-    $tokenLines = Invoke-Gh @("auth", "token")
-    $token = if ($tokenLines) { (($tokenLines -join "`n").Trim()) } else { "" }
+    $token = if (-not [string]::IsNullOrWhiteSpace($codexToken)) { $codexToken } else { $githubToken }
     if ([string]::IsNullOrWhiteSpace($token)) {
-        throw "检测到 github MCP，但 gh 未登录或无法读取 token。请先执行 gh auth login。"
+        throw "检测到 github MCP，但未发现已由操作者配置的 token 环境变量。请设置 GITHUB_PERSONAL_ACCESS_TOKEN 或 CODEX_GITHUB_PERSONAL_ACCESS_TOKEN；不会从 gh credential store 自动复制凭据。"
     }
 
-    $userLines = Invoke-Gh @("api", "user", "--jq", ".login")
-    $username = if ($userLines) { (($userLines -join "`n").Trim()) } else { "" }
-    if ([string]::IsNullOrWhiteSpace($username)) {
-        throw "检测到 github MCP，但 gh 登录态校验失败（gh api user）。请重新执行 gh auth login。"
-    }
-
-    # gh auth 路线：同步阶段临时注入 token，供各客户端配置写入与 native 注册使用。
+    # Hydrate only this sync process. User/Machine values remain untouched.
     $env:GITHUB_PERSONAL_ACCESS_TOKEN = $token
     $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = $token
-    $existingGithubToken = Get-McpUserEnvironmentVariable "GITHUB_PERSONAL_ACCESS_TOKEN"
-    if ([string]::IsNullOrWhiteSpace($existingGithubToken) -or $existingGithubToken -ne $token) {
-        Set-McpUserEnvironmentVariable "GITHUB_PERSONAL_ACCESS_TOKEN" $token
-        Log "GitHub MCP 已同步 gh token 到 User scope 的 GITHUB_PERSONAL_ACCESS_TOKEN。" "INFO"
-    }
-    $existingCodexToken = Get-McpUserEnvironmentVariable "CODEX_GITHUB_PERSONAL_ACCESS_TOKEN"
-    if ([string]::IsNullOrWhiteSpace($existingCodexToken) -or $existingCodexToken -ne $token) {
-        Set-McpUserEnvironmentVariable "CODEX_GITHUB_PERSONAL_ACCESS_TOKEN" $token
-        Log "GitHub MCP 已同步 gh token 到 User scope 的 CODEX_GITHUB_PERSONAL_ACCESS_TOKEN。" "INFO"
-    }
-    Log ("GitHub MCP gh 认证预检通过：{0}" -f $username) "INFO"
+    $sourceScope = if ($null -ne $codexResolved) { [string]$codexResolved.scope } elseif ($null -ne $githubResolved) { [string]$githubResolved.scope } else { "Process" }
+    Log ("GitHub MCP 凭据预检通过：source_scope={0}，仅注入当前同步进程。" -f $sourceScope) "INFO"
 }
 
 function Resolve-ExternalCommandInvocation([string]$command, [string[]]$commandArgs = @()) {
@@ -12869,42 +12939,6 @@ function ConvertTo-TomlBasicValue($value) {
     return ('"{0}"' -f $text)
 }
 
-function Set-TomlTopLevelScalar([string[]]$lines, [string]$key, [string]$rawValue) {
-    $safeLines = @($lines)
-    $out = New-Object System.Collections.Generic.List[string]
-    $found = $false
-    $inserted = $false
-
-    foreach ($line in $safeLines) {
-        if (-not $inserted -and $line -match '^\s*\[[^\]]+\]\s*$') {
-            if (-not $found) {
-                $out.Add(("{0} = {1}" -f $key, $rawValue)) | Out-Null
-            }
-            $inserted = $true
-        }
-
-        if (-not $inserted -and $line -match ("^\s*" + [regex]::Escape($key) + "\s*=")) {
-            $out.Add(("{0} = {1}" -f $key, $rawValue)) | Out-Null
-            $found = $true
-            continue
-        }
-
-        $out.Add($line) | Out-Null
-    }
-
-    if (-not $inserted -and -not $found) {
-        $out.Add(("{0} = {1}" -f $key, $rawValue)) | Out-Null
-    }
-
-    return [string[]]$out.ToArray()
-}
-
-function Apply-CodexPermissionDefaults([string[]]$lines) {
-    $updated = Set-TomlTopLevelScalar @($lines) "sandbox_mode" '"workspace-write"'
-    $updated = Set-TomlTopLevelScalar @($updated) "approval_policy" '"never"'
-    return [string[]]@($updated | ForEach-Object { [string]$_ })
-}
-
 function Build-CodexConfigToml([string]$existingToml, $servers) {
     $lines = @()
     if (-not [string]::IsNullOrWhiteSpace($existingToml)) {
@@ -12994,7 +13028,9 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
     }
 
     $output = New-Object System.Collections.Generic.List[string]
-    $output.AddRange([string[]](Apply-CodexPermissionDefaults @([string[]]$kept.ToArray())))
+    # MCP sync owns only MCP sections. Preserve host-owned model, approval,
+    # sandbox, feature, and every other non-MCP setting byte-for-byte.
+    $output.AddRange([string[]]$kept.ToArray())
 
     if ($managedNames.Count -gt 0) {
         if ($output.Count -gt 0) { $output.Add("") | Out-Null }
@@ -18904,8 +18940,6 @@ function Invoke-AuditRecommendationsApply {
         [string]$McpAddSelection,
         [string]$McpRemoveSelection,
         [string]$DryRunAck,
-        [string]$StaleAck,
-        [switch]$AllowStaleSnapshot,
         [bool]$RequireDryRunAck = $true,
         [switch]$Apply,
         [switch]$Yes
@@ -18995,7 +19029,7 @@ function Invoke-AuditRecommendationsApply {
     $snapshotState = Get-AuditInstalledSnapshotState $snapshotPath
     $snapshotStaleness = Get-AuditInstalledSnapshotStaleness $snapshotState $liveState
     $isSnapshotStale = [bool]$snapshotStaleness.is_stale
-    if ($isSnapshotStale -and -not $AllowStaleSnapshot) {
+    if ($isSnapshotStale) {
         $staleMessage = "审查快照与当前生效配置不一致（stale_snapshot）。请先运行：.\skills.ps1 审查目标 扫描 重新生成 run 后再应用 recommendations。"
         $staleReport = [ordered]@{
             schema_version = 2
@@ -19027,97 +19061,6 @@ function Invoke-AuditRecommendationsApply {
         Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$staleReport) | Out-Null
         throw $staleMessage
     }
-    if ($isSnapshotStale -and $AllowStaleSnapshot) {
-        $staleAckToken = Get-AuditStaleSnapshotAckToken ([string]$rec.run_id)
-        Write-Host ""
-        Write-Host "WARNING: 当前正在使用过期审查快照（stale_snapshot）继续执行。" -ForegroundColor Red
-        Write-Host ("WARNING: live={0}, snapshot={1}" -f [int]$liveState.skill_count, [int]$snapshotState.skill_count) -ForegroundColor Red
-        if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0 -or $snapshotState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) {
-            $liveMcp = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
-            $snapshotMcp = if ($snapshotState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$snapshotState.mcp_server_count } else { 0 }
-            Write-Host ("WARNING: mcp live={0}, snapshot={1}" -f $liveMcp, $snapshotMcp) -ForegroundColor Red
-        }
-        $staleAckInput = ""
-        if (-not [string]::IsNullOrWhiteSpace($StaleAck)) {
-            $staleAckInput = [string]$StaleAck
-        }
-        elseif (-not [Console]::IsInputRedirected) {
-            $staleAckInput = Read-HostSafe ("请输入二次确认口令 `"{0}`"（回车取消）" -f $staleAckToken)
-        }
-        else {
-            $hint = ("当前为非交互环境。请追加参数：--stale-ack `"{0}`"" -f $staleAckToken)
-            $staleReport = [ordered]@{
-                schema_version = 2
-                run_id = [string]$rec.run_id
-                target = [string]$rec.target
-                mode = if ($Apply) { "apply" } else { "dry_run" }
-                success = $false
-                persisted = $false
-                error_code = "stale_snapshot_ack_required"
-                error_message = $hint
-                source_evidence_policy = $sourcePolicy
-                source_coverage = $sourceCoverageCheck.coverage
-                decision_quality_policy = $decisionQualityPolicy
-                decision_quality = $decisionQualityCheck.coverage
-                decision_insights = $decisionInsights
-                snapshot_state = $snapshotState
-                live_state = $liveState
-                snapshot_staleness = $snapshotStaleness
-                changed_counts = New-AuditChangedCounts @() @()
-                items = @()
-                removal_candidates = @()
-                mcp_items = @()
-                mcp_removal_candidates = @()
-                overlap_findings = @()
-                do_not_install = @()
-                source_observations = @($rec.source_observations)
-                rollback = @()
-                allow_stale_snapshot = $true
-                stale_snapshot_detected = $true
-                stale_acknowledged = $false
-                stale_ack_expected = $staleAckToken
-                stale_ack_received = ""
-            }
-            Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$staleReport) | Out-Null
-            throw $hint
-        }
-        if ([string]::IsNullOrWhiteSpace($staleAckInput) -or $staleAckInput.Trim() -ne $staleAckToken) {
-            $staleReport = [ordered]@{
-                schema_version = 2
-                run_id = [string]$rec.run_id
-                target = [string]$rec.target
-                mode = if ($Apply) { "apply" } else { "dry_run" }
-                success = $false
-                persisted = $false
-                error_code = "stale_snapshot_ack_mismatch"
-                error_message = "二次确认口令不匹配，已取消执行。"
-                source_evidence_policy = $sourcePolicy
-                source_coverage = $sourceCoverageCheck.coverage
-                decision_quality_policy = $decisionQualityPolicy
-                decision_quality = $decisionQualityCheck.coverage
-                decision_insights = $decisionInsights
-                snapshot_state = $snapshotState
-                live_state = $liveState
-                snapshot_staleness = $snapshotStaleness
-                changed_counts = New-AuditChangedCounts @() @()
-                items = @()
-                removal_candidates = @()
-                mcp_items = @()
-                mcp_removal_candidates = @()
-                overlap_findings = @()
-                do_not_install = @()
-                source_observations = @($rec.source_observations)
-                rollback = @()
-                allow_stale_snapshot = $true
-                stale_snapshot_detected = $true
-                stale_acknowledged = $false
-                stale_ack_expected = $staleAckToken
-                stale_ack_received = [string]$staleAckInput
-            }
-            Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$staleReport) | Out-Null
-            throw "二次确认失败：未通过过期快照确认。"
-        }
-    }
     $plan = New-AuditInstallPlan $rec
     $report = [ordered]@{
         schema_version = 2
@@ -19132,9 +19075,9 @@ function Invoke-AuditRecommendationsApply {
         decision_quality_policy = $decisionQualityPolicy
         decision_quality = $decisionQualityCheck.coverage
         decision_insights = $decisionInsights
-        allow_stale_snapshot = [bool]$AllowStaleSnapshot
+        allow_stale_snapshot = $false
         stale_snapshot_detected = [bool]$isSnapshotStale
-        stale_acknowledged = if ($isSnapshotStale -and $AllowStaleSnapshot) { $true } else { $false }
+        stale_acknowledged = $false
         changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
         snapshot_state = $snapshotState
         live_state = $liveState
@@ -19304,11 +19247,6 @@ function Get-AuditDryRunAckToken {
     return "我知道未落盘"
 }
 
-function Get-AuditStaleSnapshotAckToken([string]$runId) {
-    if ([string]::IsNullOrWhiteSpace($runId)) { return "我确认使用过期快照" }
-    return ("我确认使用过期快照 {0}" -f $runId)
-}
-
 function Invoke-AuditRecommendationsTwoStageApply {
     param(
         [string]$RecommendationsPath,
@@ -19316,16 +19254,9 @@ function Invoke-AuditRecommendationsTwoStageApply {
         [string]$RemoveSelection,
         [string]$McpAddSelection,
         [string]$McpRemoveSelection,
-        [string]$DryRunAck,
-        [string]$StaleAck,
-        [switch]$AllowStaleSnapshot
+        [string]$DryRunAck
     )
-    if ($AllowStaleSnapshot) {
-        $dryRunReport = Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -McpAddSelection $McpAddSelection -McpRemoveSelection $McpRemoveSelection -DryRunAck $DryRunAck -StaleAck $StaleAck -AllowStaleSnapshot -RequireDryRunAck $true
-    }
-    else {
-        $dryRunReport = Invoke-AuditRecommendationsValidateDryRun -RecommendationsPath $RecommendationsPath -DryRunAck $DryRunAck
-    }
+    $dryRunReport = Invoke-AuditRecommendationsValidateDryRun -RecommendationsPath $RecommendationsPath -DryRunAck $DryRunAck
     if ($dryRunReport.PSObject.Properties.Match("success").Count -gt 0 -and -not [bool]$dryRunReport.success) {
         Write-Host "应用确认结束：dry-run 未完成确认，未执行落盘。" -ForegroundColor Yellow
         return $dryRunReport
@@ -19356,7 +19287,7 @@ function Invoke-AuditRecommendationsTwoStageApply {
             received_confirmation = [string]$confirmation
         })
     }
-    return (Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -McpAddSelection $McpAddSelection -McpRemoveSelection $McpRemoveSelection -StaleAck $StaleAck -AllowStaleSnapshot:$AllowStaleSnapshot -Apply -Yes)
+    return (Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -McpAddSelection $McpAddSelection -McpRemoveSelection $McpRemoveSelection -Apply -Yes)
 }
 
 function Get-AuditLatestApplyReportPath {
@@ -19681,8 +19612,6 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
         query = $null
         recommendations = $null
         dry_run_ack = $null
-        stale_ack = $null
-        allow_stale_snapshot = $false
         force = $false
         add_selection = $null
         remove_selection = $null
@@ -19786,15 +19715,6 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
                 $result.dry_run_ack = [string]$items[++$i]
                 continue
             }
-            "--stale-ack" {
-                Need ($i + 1 -lt $items.Count) "--stale-ack 缺少值"
-                $result.stale_ack = [string]$items[++$i]
-                continue
-            }
-            "--allow-stale-snapshot" {
-                $result.allow_stale_snapshot = $true
-                continue
-            }
             "--force" {
                 $result.force = $true
                 continue
@@ -19851,6 +19771,9 @@ function Parse-AuditTargetsArgs([string[]]$tokens) {
     elseif ($result.action -eq "remove") {
         Need ($positional.Count -ge 1) "删除目标仓需要 name"
         $result.name = [string]$positional[0]
+    }
+    elseif ($positional.Count -gt 0) {
+        throw ("未知参数：{0}" -f ($positional -join " "))
     }
     return [pscustomobject]$result
 }
@@ -19923,13 +19846,13 @@ function Invoke-AuditTargetsCommand([string[]]$tokens = @()) {
         "validate_dry_run" { Invoke-AuditRecommendationsValidateDryRun -RecommendationsPath $opts.recommendations -RunId $opts.run_id -DryRunAck $opts.dry_run_ack | Out-Null }
         "scan" { Invoke-AuditTargetsScan -Target $opts.target -OutDir $opts.out -Force:$opts.force | Out-Null }
         "discover_skills" { Invoke-AuditSkillDiscovery -Query $opts.query -OutDir $opts.out -Force:$opts.force | Out-Null }
-        "apply_flow" { Invoke-AuditRecommendationsTwoStageApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -McpAddSelection $opts.mcp_add_selection -McpRemoveSelection $opts.mcp_remove_selection -DryRunAck $opts.dry_run_ack -StaleAck $opts.stale_ack -AllowStaleSnapshot:$opts.allow_stale_snapshot | Out-Null }
+        "apply_flow" { Invoke-AuditRecommendationsTwoStageApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -McpAddSelection $opts.mcp_add_selection -McpRemoveSelection $opts.mcp_remove_selection -DryRunAck $opts.dry_run_ack | Out-Null }
         "apply" {
-            if (-not $opts.apply -and -not $opts.allow_stale_snapshot) {
+            if (-not $opts.apply) {
                 Invoke-AuditRecommendationsValidateDryRun -RecommendationsPath $opts.recommendations -RunId $opts.run_id -DryRunAck $opts.dry_run_ack | Out-Null
             }
             else {
-                Invoke-AuditRecommendationsApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -McpAddSelection $opts.mcp_add_selection -McpRemoveSelection $opts.mcp_remove_selection -DryRunAck $opts.dry_run_ack -StaleAck $opts.stale_ack -AllowStaleSnapshot:$opts.allow_stale_snapshot -RequireDryRunAck (-not $opts.apply) -Apply:$opts.apply -Yes:$opts.yes | Out-Null
+                Invoke-AuditRecommendationsApply -RecommendationsPath $opts.recommendations -AddSelection $opts.add_selection -RemoveSelection $opts.remove_selection -McpAddSelection $opts.mcp_add_selection -McpRemoveSelection $opts.mcp_remove_selection -DryRunAck $opts.dry_run_ack -RequireDryRunAck (-not $opts.apply) -Apply:$opts.apply -Yes:$opts.yes | Out-Null
             }
         }
     }
@@ -21365,9 +21288,9 @@ MCP：
   .\skills.ps1 审查目标 发现新技能 [--query <text>] [--out <dir>] [--force]
   .\skills.ps1 审查目标 预检 --run-id <run-id>
   .\skills.ps1 审查目标 预检 --recommendations <file>
-  .\skills.ps1 审查目标 应用确认 --recommendations <file> [--allow-stale-snapshot] [--stale-ack "<token>"]
-  .\skills.ps1 审查目标 应用 --recommendations <file> [--dry-run-ack "我知道未落盘"] [--allow-stale-snapshot] [--stale-ack "<token>"]
-  .\skills.ps1 审查目标 应用 --recommendations <file> --apply --yes [--add-indexes "1,3"] [--remove-indexes "2"] [--mcp-add-indexes "1"] [--mcp-remove-indexes "2"] [--allow-stale-snapshot] [--stale-ack "<token>"]
+  .\skills.ps1 审查目标 应用确认 --recommendations <file>
+  .\skills.ps1 审查目标 应用 --recommendations <file> [--dry-run-ack "我知道未落盘"]
+  .\skills.ps1 审查目标 应用 --recommendations <file> --apply --yes [--add-indexes "1,3"] [--remove-indexes "2"] [--mcp-add-indexes "1"] [--mcp-remove-indexes "2"]
   .\skills.ps1 审查目标 状态
 
 维护：
@@ -21421,8 +21344,7 @@ MCP/门禁环境变量：
   - `应用` 默认只做 dry-run，且需显式确认口令 `我知道未落盘`；只有 `--apply --yes` 才会真正执行选中的新增/卸载。
   - 建议先执行 `预检`：会提前检查 `stale_snapshot` 与提示词契约版本，避免“先研究后阻断”。
   - `应用`/`应用确认` 会校验同目录 `snapshot.json` 与当前 live mappings、MCP、system/plugin 外部能力指纹；snapshot 缺失直接阻断，指纹漂移触发 stale_snapshot。
-  - 仅在你明确接受风险时可加 `--allow-stale-snapshot` 跳过该阻断（报告会标记 stale 风险）。
-  - 使用 `--allow-stale-snapshot` 时会触发红色警告并要求二次确认口令；非交互环境请用 `--stale-ack "<token>"` 提前传入。
+  - `stale_snapshot` 始终 fail closed；不存在确认口令或参数绕过。必须重新执行扫描并使用 fresh run。
   - `--out` 若指向已存在且非空目录，默认阻断，防止覆盖旧审查包；如确需复用，显式追加 `--force`。
   - `--run-id` / `--recommendations` 里出现 `<run-id>` 时会自动解析为最近可用 run；若无可用 run 才阻断并给出提示。
   - `状态` 从最近一次 `receipt.json` 的 workflow/dry_run/apply section 显示 `mode/success/persisted/changed_counts`。

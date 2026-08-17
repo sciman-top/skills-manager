@@ -39,6 +39,7 @@ function Get-NativeSkillProjectionTargetState {
             skill_path = $skillPath
             link_target = ''
             content_hash = ''
+            package_hash = ''
         }
     }
     $item = Get-Item -LiteralPath $directory -Force
@@ -50,6 +51,7 @@ function Get-NativeSkillProjectionTargetState {
         skill_path = $skillPath
         link_target = if ($isReparse) { Get-NativeSkillProjectionLinkTarget $directory } else { '' }
         content_hash = Get-NativeSkillProjectionFileHash $skillPath
+        package_hash = Get-NativeSkillProjectionPackageHash $directory
     }
 }
 
@@ -134,10 +136,11 @@ function Apply-NativeSkillProjection {
             $targetDirectory = [IO.Path]::GetFullPath([string]$skill.target_directory)
             if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw ('Projection source drifted: {0}' -f $sourcePath) }
             if (-not [string]::Equals((Get-NativeSkillProjectionFileHash $sourcePath), [string]$skill.content_hash, [StringComparison]::OrdinalIgnoreCase)) { throw ('Projection source hash drifted: {0}' -f $sourcePath) }
+            if (-not [string]::Equals((Get-NativeSkillProjectionPackageHash $sourceDirectory), [string]$skill.package_hash, [StringComparison]::OrdinalIgnoreCase)) { throw ('Projection package hash drifted: {0}' -f $sourceDirectory) }
             if (-not (Test-OperationPathWithinRoot $targetDirectory $targetRoot)) { throw ('Projection target escaped the owned root: {0}' -f $targetDirectory) }
             $current = Get-NativeSkillProjectionTargetState $targetDirectory
             if ([bool]$current.exists) {
-                if ([string]$current.kind -eq 'junction' -and [string]::Equals([string]$current.link_target, $sourceDirectory, [StringComparison]::OrdinalIgnoreCase) -and [string]::Equals([string]$current.content_hash, [string]$skill.content_hash, [StringComparison]::OrdinalIgnoreCase)) { continue }
+                if ([string]$current.kind -eq 'junction' -and [string]::Equals([string]$current.link_target, $sourceDirectory, [StringComparison]::OrdinalIgnoreCase) -and [string]::Equals([string]$current.content_hash, [string]$skill.content_hash, [StringComparison]::OrdinalIgnoreCase) -and [string]::Equals([string]$current.package_hash, [string]$skill.package_hash, [StringComparison]::OrdinalIgnoreCase)) { continue }
                 throw ('Projection target conflict or drift: {0}' -f $targetDirectory)
             }
             $temporaryPath = Join-Path $targetRoot ('.skills-manager-native-projection-{0}' -f ([guid]::NewGuid().ToString('N')))
@@ -163,7 +166,7 @@ function Apply-NativeSkillProjection {
         $after = @($affectedDirectories | ForEach-Object { Get-NativeSkillProjectionTargetState $_ })
         foreach ($skill in @($Plan.skills)) {
             $state = @($after | Where-Object directory_path -eq ([IO.Path]::GetFullPath([string]$skill.target_directory).TrimEnd('\', '/')))[0]
-            if ($null -eq $state -or -not [string]::Equals([string]$state.content_hash, [string]$skill.content_hash, [StringComparison]::OrdinalIgnoreCase)) { throw ('Projection target hash verification failed: {0}' -f $skill.name) }
+            if ($null -eq $state -or -not [string]::Equals([string]$state.content_hash, [string]$skill.content_hash, [StringComparison]::OrdinalIgnoreCase) -or -not [string]::Equals([string]$state.package_hash, [string]$skill.package_hash, [StringComparison]::OrdinalIgnoreCase)) { throw ('Projection target hash verification failed: {0}' -f $skill.name) }
         }
         $receiptIdentity = [ordered]@{ plan_id = [string]$Plan.plan_id; target_root = $targetRoot; changed_names = @($changedNames.ToArray()) }
         $receiptId = 'nsr-{0}' -f (Get-OperationSha256 ($receiptIdentity | ConvertTo-Json -Depth 20 -Compress)).Substring(0, 16)

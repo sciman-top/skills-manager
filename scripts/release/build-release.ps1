@@ -111,7 +111,7 @@ function Get-PortableThirdPartyNotices([string]$AgentRoot) {
     return [ordered]@{
         schema_version = 1
         scope = 'portable_agent_skills'
-        policy = 'unknown licenses are explicit review findings and do not block the initial provenance migration'
+        policy = 'portable release fails closed until every skill has observed license evidence'
         skills = @($entries.ToArray())
         summary = [ordered]@{
             total = $entries.Count
@@ -144,7 +144,13 @@ function New-ReleasePackage([string]$Kind) {
             throw 'Portable package requires a built agent directory. Run build.ps1 first.'
         }
         Copy-Item -LiteralPath $agentSource -Destination (Join-Path $packageRoot 'agent') -Recurse -Force
-        Get-PortableThirdPartyNotices (Join-Path $packageRoot 'agent') |
+        $notices = Get-PortableThirdPartyNotices (Join-Path $packageRoot 'agent')
+        $unknown = @($notices.skills | Where-Object license_status -eq 'unknown_review_required')
+        if ($unknown.Count -gt 0) {
+            $names = @($unknown | ForEach-Object skill | Sort-Object)
+            throw ('Portable release blocked: {0} skills require license review: {1}' -f $unknown.Count, ($names -join ', '))
+        }
+        $notices |
             ConvertTo-Json -Depth 8 |
             Set-Content -LiteralPath (Join-Path $packageRoot 'THIRD-PARTY-NOTICES.json') -Encoding utf8
     }

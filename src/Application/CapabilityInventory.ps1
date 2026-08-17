@@ -20,6 +20,25 @@ function Resolve-CapabilitySurfacePath([string]$Path, [string]$RepoRoot) {
     return [IO.Path]::GetFullPath($value)
 }
 
+function Test-CapabilitySurfacePathWithinRoot([string]$Path, [string]$Root) {
+    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Root)) { return $false }
+    $candidate = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+    $boundary = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+    return [string]::Equals($candidate, $boundary, [StringComparison]::OrdinalIgnoreCase) -or
+        $candidate.StartsWith(($boundary + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Resolve-CapabilitySurfaceLinkTarget($Directory) {
+    if ($null -eq $Directory -or -not [bool]($Directory.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return '' }
+    $targetProperty = $Directory.PSObject.Properties['Target']
+    if ($null -eq $targetProperty) { return '' }
+    $target = @($targetProperty.Value | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
+    if ($target.Count -eq 0) { return '' }
+    $value = [string]$target[0]
+    if (-not [IO.Path]::IsPathRooted($value)) { $value = Join-Path $Directory.Parent.FullName $value }
+    return [IO.Path]::GetFullPath($value).TrimEnd('\', '/')
+}
+
 function Get-CapabilitySurfaceSkillMetadata([string]$SkillPath, [string]$Owner, [string]$ProjectionState, [bool]$Resident) {
     $metadata = Read-SkillMetadata $SkillPath -Observation
     $text = [string]$metadata.text
@@ -81,10 +100,17 @@ function New-SkillSurfaceView {
     if ($userRootExists) {
         foreach ($directory in @(Get-ChildItem -LiteralPath $userRoot -Directory -Force)) {
             $entry = Join-Path $directory.FullName 'SKILL.md'; if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) { continue }
-            $targetText = @($directory.Target | ForEach-Object { [string]$_ }) -join ';'
-            $state = if ($managedIncludes -contains $directory.Name) { 'managed_current' } elseif ($targetText -and $managedSource -and $targetText.StartsWith($managedSource, [StringComparison]::OrdinalIgnoreCase)) { 'managed_stale' } elseif ($targetText) { 'external_owned' } else { 'ownership_unknown' }
+            $isReparse = [bool]($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)
+            $targetText = Resolve-CapabilitySurfaceLinkTarget $directory
+            $managedExpected = if ($managedSource) { Join-Path $managedSource $directory.Name } else { '' }
+            $managedName = $managedIncludes -contains $directory.Name
+            $managedTargetMatches = $isReparse -and $targetText -and $managedExpected -and [string]::Equals($targetText, ([IO.Path]::GetFullPath($managedExpected).TrimEnd('\', '/')), [StringComparison]::OrdinalIgnoreCase)
+            $state = if ($managedName -and $managedTargetMatches) { 'managed_current' } elseif ($managedName) { 'ownership_drift' } elseif ($isReparse -and $targetText -and $managedSource -and (Test-CapabilitySurfacePathWithinRoot $targetText $managedSource)) { 'managed_stale' } elseif ($isReparse -and $targetText) { 'external_owned' } else { 'ownership_unknown' }
             $owner = if ($state -in @('managed_current', 'managed_stale')) { 'skills_manager' } elseif ($state -eq 'external_owned') { 'external' } else { 'unknown' }
             $userItems.Add((Get-CapabilitySurfaceSkillMetadata $entry $owner $state ($state -eq 'managed_current'))) | Out-Null
+            if ($state -eq 'ownership_drift') {
+                $findings.Add([pscustomobject]@{ code = 'managed_link_ownership_drift'; severity = 'error'; surface = 'user_skill_root'; path = $directory.FullName; message = 'Managed skill name is not a junction to its expected managed source directory.' }) | Out-Null
+            }
         }
     }
     $surfaces.Add((New-CapabilitySurfaceRecord 'user_skill_root' 'filesystem_observation' $userRoot $(if ($userRootExists) { 'fresh' } else { 'not_observed' }) $(if ($userRootExists) { 'complete' } else { 'not_materialized' }) $userItems.ToArray())) | Out-Null
@@ -120,5 +146,5 @@ function New-SkillSurfaceView {
             if (-not $identityValid) { $findings.Add([pscustomobject]@{ code = 'surface_skill_identity_incomplete'; severity = 'error'; surface = $surface.name; path = [string]$item.path; message = 'Skill surface items require name/path/entrypoint/description/owner/resident/projection identity.' }) | Out-Null }
         }
     }
-    return [pscustomobject][ordered]@{ schema_version = 1; view = 'SkillSurfaceView'; generated_at = $GeneratedAt; read_only = $true; pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); surfaces = $surfaces.ToArray(); surface_count = $surfaces.Count; host_observation = $hostObservation; stale_links = @($userItems | Where-Object projection_state -in @('managed_stale', 'external_owned', 'ownership_unknown')); findings = $findings.ToArray(); provider_calls = 0; native_mutations = 0; writes = 0 }
+    return [pscustomobject][ordered]@{ schema_version = 1; view = 'SkillSurfaceView'; generated_at = $GeneratedAt; read_only = $true; pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); surfaces = $surfaces.ToArray(); surface_count = $surfaces.Count; host_observation = $hostObservation; stale_links = @($userItems | Where-Object projection_state -in @('managed_stale', 'external_owned', 'ownership_unknown', 'ownership_drift')); findings = $findings.ToArray(); provider_calls = 0; native_mutations = 0; writes = 0 }
 }

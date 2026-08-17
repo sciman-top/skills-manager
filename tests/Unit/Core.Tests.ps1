@@ -1167,54 +1167,40 @@ Describe "Core Functions" {
 
     Context "Ensure-GhAuthForGithubMcp" {
         It "Skips GitHub authentication when the server is explicitly disabled" {
-            Mock Get-Command { throw "disabled GitHub must not probe gh" } -ParameterFilter { $Name -eq "gh" }
+            Mock Get-EnvironmentVariableWithScope { throw "disabled GitHub must not read credentials" }
 
             { Ensure-GhAuthForGithubMcp @([pscustomobject]@{ name = "github"; enabled = $false }) } | Should -Not -Throw
 
-            Should -Invoke Get-Command -Times 0 -Exactly -ParameterFilter { $Name -eq "gh" }
+            Should -Invoke Get-EnvironmentVariableWithScope -Times 0 -Exactly
         }
 
         It "Rejects non-boolean enabled before probing GitHub authentication" {
-            Mock Get-Command { throw "invalid GitHub config must not probe gh" } -ParameterFilter { $Name -eq "gh" }
+            Mock Get-EnvironmentVariableWithScope { throw "invalid GitHub config must not read credentials" }
 
             { Ensure-GhAuthForGithubMcp @([pscustomobject]@{ name = "github"; enabled = "false" }) } | Should -Throw "mcp_server.enabled 必须是布尔值：github"
 
-            Should -Invoke Get-Command -Times 0 -Exactly -ParameterFilter { $Name -eq "gh" }
+            Should -Invoke Get-EnvironmentVariableWithScope -Times 0 -Exactly
         }
 
-        It "Persists gh token to both GitHub MCP user env vars" {
+        It "Hydrates GitHub tokens only in the current sync process" {
             $oldProcessGithub = $env:GITHUB_PERSONAL_ACCESS_TOKEN
             $oldProcessCodex = $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN
-            $script:testUserEnvironment = @{
-                GITHUB_PERSONAL_ACCESS_TOKEN = "stale-user-token"
-                CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = $null
-            }
             try {
-                $env:GITHUB_PERSONAL_ACCESS_TOKEN = "stale-process-token"
+                Remove-Item Env:\GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
                 Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
-                Mock Get-McpUserEnvironmentVariable { return $script:testUserEnvironment[$name] }
-                Mock Set-McpUserEnvironmentVariable { $script:testUserEnvironment[$name] = $value }
-
-                Mock Get-Command { [pscustomobject]@{ Name = "gh"; Path = "C:\Program Files\GitHub CLI\gh.exe" } } -ParameterFilter { $Name -eq "gh" }
-                Mock Invoke-Gh {
-                    param([string[]]$GhArgs)
-                    if (@($GhArgs).Count -ge 2 -and $GhArgs[0] -eq "auth" -and $GhArgs[1] -eq "token") {
-                        return @("gho_unit_test_token")
+                Mock Get-EnvironmentVariableWithScope {
+                    if ($name -eq "GITHUB_PERSONAL_ACCESS_TOKEN") {
+                        return [pscustomobject]@{ name=$name; scope="User"; value="operator-supplied-token" }
                     }
-                    if (@($GhArgs).Count -ge 2 -and $GhArgs[0] -eq "api" -and $GhArgs[1] -eq "user") {
-                        return @("sciman-top")
-                    }
-                    throw ("Unexpected gh args: {0}" -f (@($GhArgs) -join " "))
+                    return $null
                 }
 
                 Ensure-GhAuthForGithubMcp @([pscustomobject]@{ name = "github" })
 
-                $env:GITHUB_PERSONAL_ACCESS_TOKEN | Should -Be "gho_unit_test_token"
-                $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN | Should -Be "gho_unit_test_token"
-                $script:testUserEnvironment.GITHUB_PERSONAL_ACCESS_TOKEN | Should -Be "gho_unit_test_token"
-                $script:testUserEnvironment.CODEX_GITHUB_PERSONAL_ACCESS_TOKEN | Should -Be "gho_unit_test_token"
-                Should -Invoke Invoke-Gh -Times 2 -Exactly
-                Should -Invoke Set-McpUserEnvironmentVariable -Times 2 -Exactly
+                $env:GITHUB_PERSONAL_ACCESS_TOKEN | Should -Be "operator-supplied-token"
+                $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN | Should -Be "operator-supplied-token"
+                Get-Command Set-McpUserEnvironmentVariable -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
+                Should -Invoke Get-EnvironmentVariableWithScope -Times 2 -Exactly
             }
             finally {
                 if ($null -ne $oldProcessGithub) {
@@ -1229,12 +1215,37 @@ Describe "Core Functions" {
                 else {
                     Remove-Item Env:\CODEX_GITHUB_PERSONAL_ACCESS_TOKEN -ErrorAction SilentlyContinue
                 }
-                Remove-Variable -Name testUserEnvironment -Scope Script -ErrorAction SilentlyContinue
             }
+        }
+
+        It "Rejects conflicting operator-supplied GitHub tokens" {
+            Mock Get-EnvironmentVariableWithScope {
+                [pscustomobject]@{ name=$name; scope="Process"; value=$(if ($name -eq "GITHUB_PERSONAL_ACCESS_TOKEN") { "one" } else { "two" }) }
+            }
+
+            { Ensure-GhAuthForGithubMcp @([pscustomobject]@{ name = "github" }) } | Should -Throw "*不一致*"
         }
     }
 
     Context "Build-CodexConfigToml" {
+        It "Preserves host-owned approval and sandbox settings" {
+            $existing = @'
+model = "gpt-5.6-luna"
+sandbox_mode = "danger-full-access"
+approval_policy = "on-request"
+
+[features]
+shell_tool = true
+'@
+
+            $toml = Build-CodexConfigToml $existing @()
+
+            $toml | Should -Match 'sandbox_mode = "danger-full-access"'
+            $toml | Should -Match 'approval_policy = "on-request"'
+            $toml | Should -Match '(?m)^\[features\]\r?$'
+            $toml | Should -Match '(?m)^shell_tool = true\r?$'
+        }
+
         It "Converts Postgres key-value connection strings to URL form" {
             $url = Convert-PostgresKeyValueConnectionStringToUrl "Host=127.0.0.1;Port=55432;Database=postgres;Username=mcp_user;Password=p@ ss;"
             $url | Should -Be "postgresql://mcp_user:p%40%20ss@127.0.0.1:55432/postgres"
@@ -1242,10 +1253,8 @@ Describe "Core Functions" {
 
         It "Normalizes Postgres MCP environment before sync writes config" {
             $oldProcess = $env:POSTGRES_CONNECTION_STRING
-            $script:persistedPostgresValue = $null
             try {
                 $env:POSTGRES_CONNECTION_STRING = "Host=127.0.0.1;Port=55432;Database=postgres;Username=mcp_user;Password=secret;"
-                Mock Set-McpUserEnvironmentVariable { $script:persistedPostgresValue = $value }
                 $servers = @(
                     [pscustomobject]@{
                         name      = "postgres"
@@ -1258,8 +1267,7 @@ Describe "Core Functions" {
                 Ensure-PostgresMcpEnvironment $servers
 
                 $env:POSTGRES_CONNECTION_STRING | Should -Be "postgresql://mcp_user:secret@127.0.0.1:55432/postgres"
-                $script:persistedPostgresValue | Should -Be "postgresql://mcp_user:secret@127.0.0.1:55432/postgres"
-                Should -Invoke Set-McpUserEnvironmentVariable -Times 1 -Exactly
+                Get-Command Set-McpUserEnvironmentVariable -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
             }
             finally {
                 if ($null -ne $oldProcess) {
@@ -1268,7 +1276,6 @@ Describe "Core Functions" {
                 else {
                     Remove-Item Env:\POSTGRES_CONNECTION_STRING -ErrorAction SilentlyContinue
                 }
-                Remove-Variable -Name persistedPostgresValue -Scope Script -ErrorAction SilentlyContinue
             }
         }
 
@@ -1871,7 +1878,8 @@ command = "cmd"
             $content | Should -Match '"Machine"'
             $content | Should -Match "inferUserHomeFromWrapperPath"
             $content | Should -Match "AppData"
-            $content | Should -Not -Match "postgresql://"
+            $content | Should -Match "normalizePostgresConnectionString"
+            $content | Should -Match "postgresql://"
         }
 
     }

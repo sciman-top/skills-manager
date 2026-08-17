@@ -65,7 +65,7 @@ user profile + repo scan + installed inventory
 - Implementation：`src/Domain/SkillCatalog.ps1`、`src/Application/Skill*`、`src/Commands/SkillProjection.ps1`。宿主原生负责 description 截断与 metadata budget；本仓只管理 eligibility、路径、投影、ownership 与回滚。
 - Runtime outputs：`reports/skill-projection/*.json` 与受管 user skill links
 
-Canonical inventory 统一来源；eligibility 处理 enabled/dependency/placement；宿主原生处理 metadata budget 与 description 截断；projection transaction 只管理 owner 标记的 links，外部 skill 永不被当作受管资产删除。
+Canonical inventory 统一来源；eligibility 处理 enabled/dependency/placement；宿主原生处理 metadata budget 与 description 截断；projection transaction 用完整 package hash 绑定 plan/apply/receipt，并只删除当前 managed root 或上一份受绑定 receipt 能证明 ownership 且 target 未漂移的 links，外部 skill 永不被当作受管资产删除。
 
 `capability-router` 是宿主按需选择的 fallback adapter，仅在可见 metadata 不足或需要确定性 policy validation 时适用。它从 portable catalog 读取候选，按 `DomainHint` 限定集合，并对宿主提供的 Candidate 做确定性 existence、containment、entrypoint hash、availability 与 side-effect disclosure 校验。它不作普通请求前置，不维护 session、preheat、activation plan 或 MCP/plugin 编排；语义选择始终属于宿主。
 

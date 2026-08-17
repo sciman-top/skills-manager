@@ -7,6 +7,7 @@ BeforeAll {
     . (Join-Path $repoRoot 'src\Application\SkillProjection.ps1')
     . (Join-Path $repoRoot 'src\Application\NativeSkillProjection.ps1')
     . (Join-Path $repoRoot 'src\Application\NativeSkillProjectionCoordinator.ps1')
+    $script:nativeProjectionReceipts = [Collections.Generic.List[string]]::new()
 
     function New-ProjectionFixture {
         $id = [guid]::NewGuid().ToString('N')
@@ -18,12 +19,20 @@ BeforeAll {
             "---`nname: $name`ndescription: $name capability.`n---`n# $name" | Set-Content -LiteralPath (Join-Path $root 'SKILL.md') -Encoding utf8
         }
         $receipt = Join-Path $repoRoot "reports\skill-projection\test-$id.json"
+        $script:nativeProjectionReceipts.Add($receipt) | Out-Null
         $config = [pscustomobject]@{ skill_projection = [pscustomobject]@{ user_skill_root=$target; native_projection=[pscustomobject]@{ enabled=$true; owner='skills-manager'; target_root=$target; receipt_path=$receipt } } }
         return [pscustomobject]@{ source=$source; target=$target; receipt=$receipt; config=$config }
     }
 }
 
 Describe 'Native skill projection' {
+    AfterEach {
+        foreach ($receipt in @($script:nativeProjectionReceipts.ToArray())) {
+            if ([IO.File]::Exists($receipt)) { [IO.File]::Delete($receipt) }
+        }
+        $script:nativeProjectionReceipts.Clear()
+    }
+
     It 'projects complete managed packages without a repository metadata budget planner' {
         $f = New-ProjectionFixture
         $plan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config
@@ -33,6 +42,7 @@ Describe 'Native skill projection' {
         @($plan.PSObject.Properties.Name) | Should -Not -Contain 'metadata_plan_id'
         @($plan.PSObject.Properties.Name) | Should -Not -Contain 'apply_token'
         @($plan.skills | ForEach-Object name) | Should -Be @('enabled','resident')
+        @($plan.skills | Where-Object { [string]$_.package_hash -notmatch '^[a-f0-9]{64}$' }).Count | Should -Be 0
         (Test-NativeSkillProjectionPlanContract $plan).pass | Should -Be $true
 
         $applied = Apply-NativeSkillProjection -Plan $plan -ReceiptPath $f.receipt
@@ -58,6 +68,20 @@ Describe 'Native skill projection' {
         Remove-Item -LiteralPath (Join-Path $f.source 'resident\SKILL.md') -Force
         { Apply-NativeSkillProjection -Plan $plan -ReceiptPath $f.receipt } | Should -Throw
         Test-Path -LiteralPath (Join-Path $f.target 'enabled') | Should -Be $false
+    }
+
+    It 'rejects package asset drift after planning' {
+        $f = New-ProjectionFixture
+        $scripts = Join-Path $f.source 'enabled\scripts'
+        New-Item -ItemType Directory -Path $scripts -Force | Out-Null
+        $asset = Join-Path $scripts 'tool.ps1'
+        [IO.File]::WriteAllText($asset, 'before', [Text.UTF8Encoding]::new($false))
+        $plan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config
+
+        [IO.File]::WriteAllText($asset, 'after', [Text.UTF8Encoding]::new($false))
+
+        { Apply-NativeSkillProjection -Plan $plan -ReceiptPath $f.receipt } | Should -Throw 'Projection package hash drifted*'
+        Test-Path -LiteralPath (Join-Path $f.target 'enabled') | Should -BeFalse
     }
 
     It 'plans and receipts stale owned junction removal while preserving external entries' {
@@ -91,5 +115,20 @@ Describe 'Native skill projection' {
         @($plan.removals.name) | Should -Be @('stale')
         Test-Path -LiteralPath $staleLink | Should -BeTrue
         $plan.writes | Should -Be 0
+    }
+
+    It 'uses the prior receipt to retire links from a previous managed root' {
+        $f = New-ProjectionFixture
+        $oldPlan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config
+        Apply-NativeSkillProjection -Plan $oldPlan -ReceiptPath $f.receipt | Out-Null
+        $newSource = Join-Path $TestDrive ('new-source-' + [guid]::NewGuid().ToString('N'))
+        $current = Join-Path $newSource 'current'
+        New-Item -ItemType Directory -Path $current -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $current 'SKILL.md'), "---`nname: current`ndescription: current capability.`n---`n", [Text.UTF8Encoding]::new($false))
+
+        $newPlan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $newSource -Config $f.config
+
+        @($newPlan.removals.name | Sort-Object) | Should -Be @('enabled', 'resident')
+        @($newPlan.removals.previous_link_target | Where-Object { $_ -notlike "$($f.source)*" }).Count | Should -Be 0
     }
 }

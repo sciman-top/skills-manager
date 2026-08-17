@@ -816,8 +816,26 @@ function resolveEnvironmentVariable(name) {
   return "";
 }
 
-const conn = resolveEnvironmentVariable("POSTGRES_CONNECTION_STRING");
-if (!conn || !conn.trim()) {
+function normalizePostgresConnectionString(raw) {
+  const value = (raw || "").trim();
+  if (/^postgres(?:ql)?:\/\//i.test(value)) return value;
+  const fields = new Map();
+  for (const part of value.split(";")) {
+    const separator = part.indexOf("=");
+    if (separator < 1) continue;
+    fields.set(part.slice(0, separator).trim().toLowerCase(), part.slice(separator + 1).trim());
+  }
+  const host = fields.get("host") || "";
+  const port = fields.get("port") || "";
+  const database = fields.get("database") || "";
+  const username = fields.get("username") || fields.get("user id") || fields.get("userid") || "";
+  const password = fields.get("password") || "";
+  if (![host, port, database, username, password].every(Boolean)) return "";
+  return `postgresql://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}/${encodeURIComponent(database)}`;
+}
+
+const conn = normalizePostgresConnectionString(resolveEnvironmentVariable("POSTGRES_CONNECTION_STRING"));
+if (!conn) {
   console.error("POSTGRES_CONNECTION_STRING is required for postgres MCP.");
   process.exit(64);
 }
@@ -1007,21 +1025,9 @@ function Has-McpServerByName($servers, [string]$name) {
     return $false
 }
 
-function Invoke-Gh([string[]]$GhArgs) {
-    Need ($GhArgs -and $GhArgs.Count -gt 0) "gh 参数不能为空"
-    $output = & gh @GhArgs 2>$null
-    if ($LASTEXITCODE -ne 0) { return $null }
-    return @($output | ForEach-Object { [string]$_ })
-}
-
 function Get-McpUserEnvironmentVariable([string]$name) {
     Need (-not [string]::IsNullOrWhiteSpace($name)) "环境变量名不能为空"
     return [System.Environment]::GetEnvironmentVariable($name, "User")
-}
-
-function Set-McpUserEnvironmentVariable([string]$name, [AllowNull()][string]$value) {
-    Need (-not [string]::IsNullOrWhiteSpace($name)) "环境变量名不能为空"
-    [System.Environment]::SetEnvironmentVariable($name, $value, "User")
 }
 
 function Get-EnvironmentVariableWithScope([string]$name, [string[]]$scopes = @("Process", "User", "Machine")) {
@@ -1110,10 +1116,11 @@ function Ensure-PostgresMcpEnvironment($servers) {
     $normalized = Convert-PostgresKeyValueConnectionStringToUrl $raw
     Need (-not [string]::IsNullOrWhiteSpace($normalized)) "检测到 postgres MCP，但 POSTGRES_CONNECTION_STRING 不是可用的 postgresql:// URL，也无法从 Host=...;Port=...;Database=...;Username=...;Password=... 形态转换。"
 
+    # Keep normalization process-scoped. The wrapper also normalizes User/Machine
+    # values at invocation time, so sync never persists a database credential.
     $env:POSTGRES_CONNECTION_STRING = $normalized
-    if ($raw -ne $normalized -or [string]$resolved.scope -ne "User") {
-        Set-McpUserEnvironmentVariable "POSTGRES_CONNECTION_STRING" $normalized
-        Log ("Postgres MCP 连接串已归一化到 User scope：source_scope={0}, shape=postgres-url" -f [string]$resolved.scope) "INFO"
+    if ($raw -ne $normalized -or [string]$resolved.scope -ne "Process") {
+        Log ("Postgres MCP 连接串仅注入当前同步进程：source_scope={0}, shape=postgres-url" -f [string]$resolved.scope) "INFO"
     }
 }
 
@@ -1135,36 +1142,25 @@ function Ensure-GhAuthForGithubMcp($servers) {
     }
     if (-not $requiresAuthentication) { return }
 
-    if (-not (Get-Command "gh" -ErrorAction SilentlyContinue)) {
-        throw "检测到 github MCP，但未找到 gh 命令。请先安装并登录 GitHub CLI（gh auth login）。"
+    $githubResolved = Get-EnvironmentVariableWithScope "GITHUB_PERSONAL_ACCESS_TOKEN"
+    $codexResolved = Get-EnvironmentVariableWithScope "CODEX_GITHUB_PERSONAL_ACCESS_TOKEN"
+    $githubToken = if ($null -eq $githubResolved) { "" } else { [string]$githubResolved.value }
+    $codexToken = if ($null -eq $codexResolved) { "" } else { [string]$codexResolved.value }
+    if (-not [string]::IsNullOrWhiteSpace($githubToken) -and
+        -not [string]::IsNullOrWhiteSpace($codexToken) -and
+        $githubToken -cne $codexToken) {
+        throw "检测到 GitHub MCP，但 GITHUB_PERSONAL_ACCESS_TOKEN 与 CODEX_GITHUB_PERSONAL_ACCESS_TOKEN 不一致；请由操作者统一配置。"
     }
-
-    $tokenLines = Invoke-Gh @("auth", "token")
-    $token = if ($tokenLines) { (($tokenLines -join "`n").Trim()) } else { "" }
+    $token = if (-not [string]::IsNullOrWhiteSpace($codexToken)) { $codexToken } else { $githubToken }
     if ([string]::IsNullOrWhiteSpace($token)) {
-        throw "检测到 github MCP，但 gh 未登录或无法读取 token。请先执行 gh auth login。"
+        throw "检测到 github MCP，但未发现已由操作者配置的 token 环境变量。请设置 GITHUB_PERSONAL_ACCESS_TOKEN 或 CODEX_GITHUB_PERSONAL_ACCESS_TOKEN；不会从 gh credential store 自动复制凭据。"
     }
 
-    $userLines = Invoke-Gh @("api", "user", "--jq", ".login")
-    $username = if ($userLines) { (($userLines -join "`n").Trim()) } else { "" }
-    if ([string]::IsNullOrWhiteSpace($username)) {
-        throw "检测到 github MCP，但 gh 登录态校验失败（gh api user）。请重新执行 gh auth login。"
-    }
-
-    # gh auth 路线：同步阶段临时注入 token，供各客户端配置写入与 native 注册使用。
+    # Hydrate only this sync process. User/Machine values remain untouched.
     $env:GITHUB_PERSONAL_ACCESS_TOKEN = $token
     $env:CODEX_GITHUB_PERSONAL_ACCESS_TOKEN = $token
-    $existingGithubToken = Get-McpUserEnvironmentVariable "GITHUB_PERSONAL_ACCESS_TOKEN"
-    if ([string]::IsNullOrWhiteSpace($existingGithubToken) -or $existingGithubToken -ne $token) {
-        Set-McpUserEnvironmentVariable "GITHUB_PERSONAL_ACCESS_TOKEN" $token
-        Log "GitHub MCP 已同步 gh token 到 User scope 的 GITHUB_PERSONAL_ACCESS_TOKEN。" "INFO"
-    }
-    $existingCodexToken = Get-McpUserEnvironmentVariable "CODEX_GITHUB_PERSONAL_ACCESS_TOKEN"
-    if ([string]::IsNullOrWhiteSpace($existingCodexToken) -or $existingCodexToken -ne $token) {
-        Set-McpUserEnvironmentVariable "CODEX_GITHUB_PERSONAL_ACCESS_TOKEN" $token
-        Log "GitHub MCP 已同步 gh token 到 User scope 的 CODEX_GITHUB_PERSONAL_ACCESS_TOKEN。" "INFO"
-    }
-    Log ("GitHub MCP gh 认证预检通过：{0}" -f $username) "INFO"
+    $sourceScope = if ($null -ne $codexResolved) { [string]$codexResolved.scope } elseif ($null -ne $githubResolved) { [string]$githubResolved.scope } else { "Process" }
+    Log ("GitHub MCP 凭据预检通过：source_scope={0}，仅注入当前同步进程。" -f $sourceScope) "INFO"
 }
 
 function Resolve-ExternalCommandInvocation([string]$command, [string[]]$commandArgs = @()) {
@@ -1876,42 +1872,6 @@ function ConvertTo-TomlBasicValue($value) {
     return ('"{0}"' -f $text)
 }
 
-function Set-TomlTopLevelScalar([string[]]$lines, [string]$key, [string]$rawValue) {
-    $safeLines = @($lines)
-    $out = New-Object System.Collections.Generic.List[string]
-    $found = $false
-    $inserted = $false
-
-    foreach ($line in $safeLines) {
-        if (-not $inserted -and $line -match '^\s*\[[^\]]+\]\s*$') {
-            if (-not $found) {
-                $out.Add(("{0} = {1}" -f $key, $rawValue)) | Out-Null
-            }
-            $inserted = $true
-        }
-
-        if (-not $inserted -and $line -match ("^\s*" + [regex]::Escape($key) + "\s*=")) {
-            $out.Add(("{0} = {1}" -f $key, $rawValue)) | Out-Null
-            $found = $true
-            continue
-        }
-
-        $out.Add($line) | Out-Null
-    }
-
-    if (-not $inserted -and -not $found) {
-        $out.Add(("{0} = {1}" -f $key, $rawValue)) | Out-Null
-    }
-
-    return [string[]]$out.ToArray()
-}
-
-function Apply-CodexPermissionDefaults([string[]]$lines) {
-    $updated = Set-TomlTopLevelScalar @($lines) "sandbox_mode" '"workspace-write"'
-    $updated = Set-TomlTopLevelScalar @($updated) "approval_policy" '"never"'
-    return [string[]]@($updated | ForEach-Object { [string]$_ })
-}
-
 function Build-CodexConfigToml([string]$existingToml, $servers) {
     $lines = @()
     if (-not [string]::IsNullOrWhiteSpace($existingToml)) {
@@ -2001,7 +1961,9 @@ function Build-CodexConfigToml([string]$existingToml, $servers) {
     }
 
     $output = New-Object System.Collections.Generic.List[string]
-    $output.AddRange([string[]](Apply-CodexPermissionDefaults @([string[]]$kept.ToArray())))
+    # MCP sync owns only MCP sections. Preserve host-owned model, approval,
+    # sandbox, feature, and every other non-MCP setting byte-for-byte.
+    $output.AddRange([string[]]$kept.ToArray())
 
     if ($managedNames.Count -gt 0) {
         if ($output.Count -gt 0) { $output.Add("") | Out-Null }

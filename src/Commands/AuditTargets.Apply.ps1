@@ -826,8 +826,6 @@ function Invoke-AuditRecommendationsApply {
         [string]$McpAddSelection,
         [string]$McpRemoveSelection,
         [string]$DryRunAck,
-        [string]$StaleAck,
-        [switch]$AllowStaleSnapshot,
         [bool]$RequireDryRunAck = $true,
         [switch]$Apply,
         [switch]$Yes
@@ -917,7 +915,7 @@ function Invoke-AuditRecommendationsApply {
     $snapshotState = Get-AuditInstalledSnapshotState $snapshotPath
     $snapshotStaleness = Get-AuditInstalledSnapshotStaleness $snapshotState $liveState
     $isSnapshotStale = [bool]$snapshotStaleness.is_stale
-    if ($isSnapshotStale -and -not $AllowStaleSnapshot) {
+    if ($isSnapshotStale) {
         $staleMessage = "审查快照与当前生效配置不一致（stale_snapshot）。请先运行：.\skills.ps1 审查目标 扫描 重新生成 run 后再应用 recommendations。"
         $staleReport = [ordered]@{
             schema_version = 2
@@ -949,97 +947,6 @@ function Invoke-AuditRecommendationsApply {
         Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$staleReport) | Out-Null
         throw $staleMessage
     }
-    if ($isSnapshotStale -and $AllowStaleSnapshot) {
-        $staleAckToken = Get-AuditStaleSnapshotAckToken ([string]$rec.run_id)
-        Write-Host ""
-        Write-Host "WARNING: 当前正在使用过期审查快照（stale_snapshot）继续执行。" -ForegroundColor Red
-        Write-Host ("WARNING: live={0}, snapshot={1}" -f [int]$liveState.skill_count, [int]$snapshotState.skill_count) -ForegroundColor Red
-        if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0 -or $snapshotState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) {
-            $liveMcp = if ($liveState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$liveState.mcp_server_count } else { 0 }
-            $snapshotMcp = if ($snapshotState.PSObject.Properties.Match("mcp_server_count").Count -gt 0) { [int]$snapshotState.mcp_server_count } else { 0 }
-            Write-Host ("WARNING: mcp live={0}, snapshot={1}" -f $liveMcp, $snapshotMcp) -ForegroundColor Red
-        }
-        $staleAckInput = ""
-        if (-not [string]::IsNullOrWhiteSpace($StaleAck)) {
-            $staleAckInput = [string]$StaleAck
-        }
-        elseif (-not [Console]::IsInputRedirected) {
-            $staleAckInput = Read-HostSafe ("请输入二次确认口令 `"{0}`"（回车取消）" -f $staleAckToken)
-        }
-        else {
-            $hint = ("当前为非交互环境。请追加参数：--stale-ack `"{0}`"" -f $staleAckToken)
-            $staleReport = [ordered]@{
-                schema_version = 2
-                run_id = [string]$rec.run_id
-                target = [string]$rec.target
-                mode = if ($Apply) { "apply" } else { "dry_run" }
-                success = $false
-                persisted = $false
-                error_code = "stale_snapshot_ack_required"
-                error_message = $hint
-                source_evidence_policy = $sourcePolicy
-                source_coverage = $sourceCoverageCheck.coverage
-                decision_quality_policy = $decisionQualityPolicy
-                decision_quality = $decisionQualityCheck.coverage
-                decision_insights = $decisionInsights
-                snapshot_state = $snapshotState
-                live_state = $liveState
-                snapshot_staleness = $snapshotStaleness
-                changed_counts = New-AuditChangedCounts @() @()
-                items = @()
-                removal_candidates = @()
-                mcp_items = @()
-                mcp_removal_candidates = @()
-                overlap_findings = @()
-                do_not_install = @()
-                source_observations = @($rec.source_observations)
-                rollback = @()
-                allow_stale_snapshot = $true
-                stale_snapshot_detected = $true
-                stale_acknowledged = $false
-                stale_ack_expected = $staleAckToken
-                stale_ack_received = ""
-            }
-            Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$staleReport) | Out-Null
-            throw $hint
-        }
-        if ([string]::IsNullOrWhiteSpace($staleAckInput) -or $staleAckInput.Trim() -ne $staleAckToken) {
-            $staleReport = [ordered]@{
-                schema_version = 2
-                run_id = [string]$rec.run_id
-                target = [string]$rec.target
-                mode = if ($Apply) { "apply" } else { "dry_run" }
-                success = $false
-                persisted = $false
-                error_code = "stale_snapshot_ack_mismatch"
-                error_message = "二次确认口令不匹配，已取消执行。"
-                source_evidence_policy = $sourcePolicy
-                source_coverage = $sourceCoverageCheck.coverage
-                decision_quality_policy = $decisionQualityPolicy
-                decision_quality = $decisionQualityCheck.coverage
-                decision_insights = $decisionInsights
-                snapshot_state = $snapshotState
-                live_state = $liveState
-                snapshot_staleness = $snapshotStaleness
-                changed_counts = New-AuditChangedCounts @() @()
-                items = @()
-                removal_candidates = @()
-                mcp_items = @()
-                mcp_removal_candidates = @()
-                overlap_findings = @()
-                do_not_install = @()
-                source_observations = @($rec.source_observations)
-                rollback = @()
-                allow_stale_snapshot = $true
-                stale_snapshot_detected = $true
-                stale_acknowledged = $false
-                stale_ack_expected = $staleAckToken
-                stale_ack_received = [string]$staleAckInput
-            }
-            Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$staleReport) | Out-Null
-            throw "二次确认失败：未通过过期快照确认。"
-        }
-    }
     $plan = New-AuditInstallPlan $rec
     $report = [ordered]@{
         schema_version = 2
@@ -1054,9 +961,9 @@ function Invoke-AuditRecommendationsApply {
         decision_quality_policy = $decisionQualityPolicy
         decision_quality = $decisionQualityCheck.coverage
         decision_insights = $decisionInsights
-        allow_stale_snapshot = [bool]$AllowStaleSnapshot
+        allow_stale_snapshot = $false
         stale_snapshot_detected = [bool]$isSnapshotStale
-        stale_acknowledged = if ($isSnapshotStale -and $AllowStaleSnapshot) { $true } else { $false }
+        stale_acknowledged = $false
         changed_counts = New-AuditChangedCounts $plan.items $plan.removal_candidates $plan.mcp_items $plan.mcp_removal_candidates
         snapshot_state = $snapshotState
         live_state = $liveState
@@ -1226,11 +1133,6 @@ function Get-AuditDryRunAckToken {
     return "我知道未落盘"
 }
 
-function Get-AuditStaleSnapshotAckToken([string]$runId) {
-    if ([string]::IsNullOrWhiteSpace($runId)) { return "我确认使用过期快照" }
-    return ("我确认使用过期快照 {0}" -f $runId)
-}
-
 function Invoke-AuditRecommendationsTwoStageApply {
     param(
         [string]$RecommendationsPath,
@@ -1238,16 +1140,9 @@ function Invoke-AuditRecommendationsTwoStageApply {
         [string]$RemoveSelection,
         [string]$McpAddSelection,
         [string]$McpRemoveSelection,
-        [string]$DryRunAck,
-        [string]$StaleAck,
-        [switch]$AllowStaleSnapshot
+        [string]$DryRunAck
     )
-    if ($AllowStaleSnapshot) {
-        $dryRunReport = Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -McpAddSelection $McpAddSelection -McpRemoveSelection $McpRemoveSelection -DryRunAck $DryRunAck -StaleAck $StaleAck -AllowStaleSnapshot -RequireDryRunAck $true
-    }
-    else {
-        $dryRunReport = Invoke-AuditRecommendationsValidateDryRun -RecommendationsPath $RecommendationsPath -DryRunAck $DryRunAck
-    }
+    $dryRunReport = Invoke-AuditRecommendationsValidateDryRun -RecommendationsPath $RecommendationsPath -DryRunAck $DryRunAck
     if ($dryRunReport.PSObject.Properties.Match("success").Count -gt 0 -and -not [bool]$dryRunReport.success) {
         Write-Host "应用确认结束：dry-run 未完成确认，未执行落盘。" -ForegroundColor Yellow
         return $dryRunReport
@@ -1278,7 +1173,7 @@ function Invoke-AuditRecommendationsTwoStageApply {
             received_confirmation = [string]$confirmation
         })
     }
-    return (Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -McpAddSelection $McpAddSelection -McpRemoveSelection $McpRemoveSelection -StaleAck $StaleAck -AllowStaleSnapshot:$AllowStaleSnapshot -Apply -Yes)
+    return (Invoke-AuditRecommendationsApply -RecommendationsPath $RecommendationsPath -AddSelection $AddSelection -RemoveSelection $RemoveSelection -McpAddSelection $McpAddSelection -McpRemoveSelection $McpRemoveSelection -Apply -Yes)
 }
 
 function Get-AuditLatestApplyReportPath {

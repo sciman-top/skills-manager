@@ -285,6 +285,8 @@ Describe "Audit Targets" {
             $apply.recommendations | Should -Be "r.json"
             $apply.apply | Should -Be $true
             $apply.yes | Should -Be $true
+            { Parse-AuditTargetsArgs @("apply", "--recommendations", "r.json", "--allow-stale-snapshot") } | Should -Throw "未知参数*"
+            { Parse-AuditTargetsArgs @("apply", "--recommendations", "r.json", "--stale-ack", "legacy") } | Should -Throw "未知参数*"
 
             $status = Parse-AuditTargetsArgs @("status")
             $status.action | Should -Be "status"
@@ -1793,6 +1795,33 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
 
                 $report = (Get-ContentUtf8 (Get-AuditReceiptPath $path) | ConvertFrom-Json).dry_run
                 $report.error_code | Should -Be "insufficient_source_coverage"
+            }
+            finally {
+                $script:Root = $oldRoot
+            }
+        }
+
+        It "Blocks dry-run on a stale snapshot without an override path" {
+            $oldRoot = $script:Root
+            try {
+                $root = Join-Path $TestDrive "ws-stale-apply-block"
+                New-Item -ItemType Directory -Path $root -Force | Out-Null
+                $script:Root = $root
+                $path = Join-Path $root "recommendations.json"
+                Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-stale-apply","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+                $installedState = [pscustomobject]@{
+                    snapshot_kind = "audit_input"; captured_at = (Get-Date).ToString("o")
+                    live_fingerprint = "deadbeef"; live_external_skill_fingerprint = "unit-empty-external-skills"; live_mcp_fingerprint = "deadbeef"
+                    skills = @(); external_skills = @(); mcp_servers = @(); host_projection = $null
+                }
+                New-TestAuditSnapshot (Join-Path $root "snapshot.json") "r-stale-apply" $installedState
+
+                { Invoke-AuditRecommendationsApply -RecommendationsPath $path -DryRunAck "我知道未落盘" } | Should -Throw "*stale_snapshot*"
+
+                $report = (Get-ContentUtf8 (Get-AuditReceiptPath $path) | ConvertFrom-Json).dry_run
+                $report.error_code | Should -Be "stale_snapshot"
+                $report.persisted | Should -BeFalse
+                $report.allow_stale_snapshot | Should -BeNullOrEmpty
             }
             finally {
                 $script:Root = $oldRoot

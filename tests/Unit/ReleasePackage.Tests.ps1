@@ -15,27 +15,21 @@ Describe 'Release packaging' {
         Test-Path -LiteralPath (Join-Path $repoRoot 'docs\RELEASING.md') | Should -Be $true
     }
 
-    It 'builds self-describing bootstrap and portable archives without runtime state' {
+    It 'builds a self-describing bootstrap archive without runtime state' {
         $output = Join-Path $TestDrive 'release-output'
         $script = Join-Path $repoRoot 'scripts\release\build-release.ps1'
 
-        & pwsh -NoProfile -ExecutionPolicy Bypass -File $script -Version 'test.1' -OutputDirectory $output | Out-Null
+        & pwsh -NoProfile -ExecutionPolicy Bypass -File $script -Version 'test.1' -Package Bootstrap -OutputDirectory $output | Out-Null
         $LASTEXITCODE | Should -Be 0
 
         $bootstrap = Join-Path $output 'skills-manager-test.1-bootstrap.zip'
-        $portable = Join-Path $output 'skills-manager-test.1-portable.zip'
         Test-Path -LiteralPath $bootstrap | Should -Be $true
-        Test-Path -LiteralPath $portable | Should -Be $true
         Test-Path -LiteralPath (Join-Path $output 'skills-manager-test.1-SHA256SUMS.txt') | Should -Be $true
 
         $extract = Join-Path $TestDrive 'extracted'
         Expand-Archive -LiteralPath $bootstrap -DestinationPath (Join-Path $extract 'bootstrap')
-        Expand-Archive -LiteralPath $portable -DestinationPath (Join-Path $extract 'portable')
         $bootstrapRoot = Join-Path $extract 'bootstrap\skills-manager-test.1-bootstrap'
-        $portableRoot = Join-Path $extract 'portable\skills-manager-test.1-portable'
         $bootstrapManifest = Get-Content -LiteralPath (Join-Path $bootstrapRoot 'RELEASE-MANIFEST.json') -Raw | ConvertFrom-Json
-        $portableManifest = Get-Content -LiteralPath (Join-Path $portableRoot 'RELEASE-MANIFEST.json') -Raw | ConvertFrom-Json
-        $notices = Get-Content -LiteralPath (Join-Path $portableRoot 'THIRD-PARTY-NOTICES.json') -Raw | ConvertFrom-Json
 
         $bootstrapManifest.package | Should -Be 'bootstrap'
         $bootstrapManifest.includes_prebuilt_agent | Should -Be $false
@@ -43,18 +37,17 @@ Describe 'Release packaging' {
         Test-Path -LiteralPath (Join-Path $bootstrapRoot 'LICENSE') | Should -Be $true
         Test-Path -LiteralPath (Join-Path $bootstrapRoot 'reports') | Should -Be $false
         Test-Path -LiteralPath (Join-Path $bootstrapRoot '.git') | Should -Be $false
-        $portableManifest.package | Should -Be 'portable'
-        $portableManifest.includes_prebuilt_agent | Should -Be $true
-        Test-Path -LiteralPath (Join-Path $portableRoot 'agent') | Should -Be $true
-        Test-Path -LiteralPath (Join-Path $portableRoot 'LICENSE') | Should -Be $true
-        $notices.scope | Should -Be 'portable_agent_skills'
-        $notices.summary.total | Should -BeGreaterThan 0
-        @($notices.skills).Count | Should -Be $notices.summary.total
-        @($notices.skills | Where-Object { [string]$_.content_sha256 -notmatch '^[0-9a-f]{64}$' }).Count | Should -Be 0
-        @($notices.skills | Where-Object source_kind -eq 'vendor').Count | Should -BeGreaterThan 0
-        @($notices.skills | Where-Object source_kind -eq 'import').Count | Should -BeGreaterThan 0
-        @($notices.skills | Where-Object source_kind -eq 'unknown_unmapped').Count | Should -Be 0
-        @($notices.skills | Where-Object license_status -eq 'unknown_review_required').Count | Should -Be $notices.summary.unknown_license
         Test-Path -LiteralPath (Join-Path $bootstrapRoot 'THIRD-PARTY-NOTICES.json') | Should -Be $false
+    }
+
+    It 'fails closed before creating a portable archive with unknown licenses' {
+        $output = Join-Path $TestDrive 'portable-blocked'
+        $script = Join-Path $repoRoot 'scripts\release\build-release.ps1'
+
+        $result = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $script -Version 'test.2' -Package Portable -OutputDirectory $output 2>&1)
+
+        $LASTEXITCODE | Should -Not -Be 0
+        $result -join "`n" | Should -Match 'Portable release blocked: \d+ skills require license review'
+        Test-Path -LiteralPath (Join-Path $output 'skills-manager-test.2-portable.zip') | Should -BeFalse
     }
 }
