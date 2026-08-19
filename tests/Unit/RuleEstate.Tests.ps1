@@ -47,16 +47,6 @@ Build, test, contract and hotspot evidence use the repository verifier; rollback
 
 - Git baseline=`main`; upstream=`none`; closeout=`local_only`.
 - `gate_na`: reason=`fixture has no configured Git remote`; alternative_verification=`git symbolic-ref --short HEAD`; evidence_link=`docs/change-evidence/rule-contract.md`; expires_at=`2099-12-31`; recovery_condition=`a remote is configured`.
-- `R1`: declare the repository destination; evidence=`AGENTS.md`; rollback=revert this slice.
-- `R2`: close the smallest executable step; evidence=`scripts/verify-contract.ps1`; rollback=revert this slice.
-- `E4`: publish health evidence; evidence=`scripts/verify-contract.ps1`; rollback=revert this slice.
-- `E5`: verify supply-chain inputs; evidence=`scripts/verify-contract.ps1`; rollback=revert this slice.
-- `E6`: verify migration and rollback; evidence=`scripts/verify-contract.ps1`; rollback=revert this slice.
-- `S1`: enforce stable semantics with `scripts/verify-contract.ps1`; evidence=`scripts/verify-contract.ps1`; rollback=revert this slice.
-- `S2`: enforce deterministic behavior with `scripts/verify-contract.ps1`; evidence=`scripts/verify-contract.ps1`; rollback=revert this slice.
-- `S3`: enforce project actions with `scripts/verify-contract.ps1`; evidence=`scripts/verify-contract.ps1`; rollback=revert this slice.
-- `S4`: enforce repository evidence with `scripts/verify-contract.ps1`; evidence=`scripts/verify-contract.ps1`; rollback=revert this slice.
-- `S5`: enforce bounded rollback with `scripts/verify-contract.ps1`; evidence=`scripts/verify-contract.ps1`; rollback=revert this slice.
 '@ | Set-Content -LiteralPath (Join-Path $path 'AGENTS.md') -Encoding UTF8
                 New-Item -ItemType Directory -Path (Join-Path $path 'scripts') -Force | Out-Null
                 Set-Content -LiteralPath (Join-Path $path 'scripts\verify-contract.ps1') -Value '# fixture' -Encoding UTF8
@@ -86,7 +76,7 @@ host delta
 
 ## C. Project contract
 
-Map R1-R2, E4/E5/E6, and S1-S5.
+Declare repository source, entrypoint, invariants, gates, and rollback.
 
 ## D. Maintenance
 
@@ -254,7 +244,7 @@ verify drift
         @($result.registry.unregistered_paths).Count | Should -Be 0
     }
 
-    It 'builds cross-host responsibility coverage and bounded patch candidates' {
+    It 'builds project contract fact coverage and bounded patch candidates' {
         $f = New-RuleEstateFixture
         Remove-Item -LiteralPath (Join-Path $f.workspace 'repo-b\CLAUDE.md')
         $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
@@ -262,32 +252,19 @@ verify drift
         $report.summary.target_count | Should -Be 2
         $report.inventory.registry.supplied | Should -Be $false
         @($report.findings.code) | Should -Not -Contain 'target_registry_drift'
-        $report.summary.covered_count | Should -BeGreaterThan 0
+        $report.summary.contract_fact_covered_count | Should -Be 10
         $report.summary.patch_candidate_count | Should -Be 1
         $report.patch_candidates[0].target_path | Should -Match 'repo-b\\CLAUDE\.md$'
-        foreach ($covered in @($report.targets[0].responsibility.coverage | Where-Object coverage -eq 'covered')) {
-            @($covered.project_actions | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count | Should -BeGreaterThan 0
-            @($covered.evidence | Where-Object { $null -ne $_ }).Count | Should -BeGreaterThan 0
-        }
         $report.writes | Should -Be 0
         $report.provider_calls | Should -Be 0
         $report.host_loaded | Should -Be 'not_run'
     }
 
-    It 'uses five required project facts when the legacy mapping set is empty' {
+    It 'uses five required project facts per target' {
         $f = New-RuleEstateFixture
-        foreach ($path in @((Join-Path $f.codex 'AGENTS.md'), (Join-Path $f.claude 'CLAUDE.md'))) {
-            $text = [regex]::Replace([IO.File]::ReadAllText($path), '(?ms)^## C\..*?(?=^## D\.)', "## C. Project contract`n`nDeclare repository facts.`n`n")
-            [IO.File]::WriteAllText($path, $text)
-        }
-        foreach ($path in @((Join-Path $f.workspace 'repo-a\AGENTS.md'), (Join-Path $f.workspace 'repo-b\AGENTS.md'))) {
-            $text = [regex]::Replace([IO.File]::ReadAllText($path), '(?m)^- `[RES]\d+`:.*(?:\r?\n|$)', '')
-            [IO.File]::WriteAllText($path, $text)
-        }
 
         $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
 
-        $report.summary.legacy_textual_mapping_expected_rows | Should -Be 0
         $report.summary.expected_coverage_rows | Should -Be 10
         $report.summary.contract_fact_covered_count | Should -Be 10
         $report.summary.contract_fact_gap_count | Should -Be 0
@@ -311,11 +288,8 @@ verify drift
     }
 
     It 'recognizes the tracked production global sources and project contract facts' {
-        $codexText = [IO.File]::ReadAllText((Join-Path $repoRoot 'rules\global\codex\AGENTS.md'))
-        $claudeText = [IO.File]::ReadAllText((Join-Path $repoRoot 'rules\global\claude\CLAUDE.md'))
         $facts = @(Get-RuleEstateProjectContractFacts (Join-Path $repoRoot 'AGENTS.md'))
 
-        @(Get-RuleEstateExpectedConstraintIds $codexText $claudeText).Count | Should -Be 0
         $facts.Count | Should -Be 5
         @($facts | Where-Object { -not $_.covered }).Count | Should -Be 0
         foreach ($fact in $facts) { @($fact.evidence).Count | Should -Be 1; $fact.evidence[0].line | Should -BeGreaterThan 0 }
@@ -331,130 +305,6 @@ verify drift
         $parsed.writes | Should -Be 1
         $parsed.report.writes | Should -Be 0
         Test-Path -LiteralPath $out | Should -Be $true
-    }
-
-    It 'fails the command when a global stable constraint has no repository action' {
-        $f = New-RuleEstateFixture
-        $agents = Join-Path $f.workspace 'repo-a\AGENTS.md'
-        $text = [regex]::Replace([IO.File]::ReadAllText($agents), '(?m)^- `S1`:.*(?:\r?\n|$)', '')
-        [IO.File]::WriteAllText($agents, $text)
-
-        $result = Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--json')
-        $parsed = $result.output | ConvertFrom-Json
-
-        $result.exit_code | Should -Be 2
-        $parsed.pass | Should -Be $false
-        $parsed.report.semantic_coverage_pass | Should -Be $false
-        @($parsed.report.findings | Where-Object { $_.code -eq 'global_repo_action_gap' -and $_.constraint_id -eq 'S1' }).Count | Should -Be 1
-    }
-
-    It 'fails deterministic enforcement verification when a mapped path is absent' {
-        $f = New-RuleEstateFixture
-        $agents = Join-Path $f.workspace 'repo-a\AGENTS.md'
-        $text = [IO.File]::ReadAllText($agents).Replace('`scripts/verify-contract.ps1`', '`scripts/missing-contract.ps1`')
-        [IO.File]::WriteAllText($agents, $text)
-
-        $result = Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--json')
-        $parsed = $result.output | ConvertFrom-Json
-
-        $result.exit_code | Should -Be 2
-        $parsed.pass | Should -Be $false
-        $parsed.report.enforcement_verified | Should -Be $false
-        @($parsed.report.findings | Where-Object code -eq 'enforcement_reference_missing').Count | Should -BeGreaterThan 0
-    }
-
-    It 'does not treat slash-separated destination categories as an enforcement path' {
-        $f = New-RuleEstateFixture
-        $checks = @(Get-RuleEstateEnforcementChecks -RepoRoot (Join-Path $f.workspace 'repo-a') -ActionMatches @(
-            [pscustomobject]@{ action = 'choose `src/config/overrides/rules/docs` as the destination category' }
-        ))
-
-        $checks | Should -BeNullOrEmpty
-    }
-
-    It 'requires S5 to map to a concrete deterministic enforcement reference' {
-        $f = New-RuleEstateFixture
-        $agents = Join-Path $f.workspace 'repo-a\AGENTS.md'
-        $text = [IO.File]::ReadAllText($agents).Replace('`scripts/verify-contract.ps1`', 'a repository gate')
-        [IO.File]::WriteAllText($agents, $text)
-
-        $result = Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--json')
-        $parsed = $result.output | ConvertFrom-Json
-
-        $result.exit_code | Should -Be 2
-        @($parsed.report.findings | Where-Object { $_.code -eq 'enforcement_reference_required' -and $_.constraint_id -eq 'S5' }).Count | Should -Be 1
-    }
-
-    It 'rejects an enforcement directory as a concrete S5 reference' {
-        $f = New-RuleEstateFixture
-        $agents = Join-Path $f.workspace 'repo-a\AGENTS.md'
-        $text = [IO.File]::ReadAllText($agents).Replace('`S5`: enforce bounded rollback with `scripts/verify-contract.ps1`', '`S5`: enforce bounded rollback with `scripts`')
-        [IO.File]::WriteAllText($agents, $text)
-
-        $result = Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--json')
-        $parsed = $result.output | ConvertFrom-Json
-
-        $result.exit_code | Should -Be 2
-        $parsed.report.enforcement_verified | Should -Be $false
-        @($parsed.report.findings | Where-Object code -eq 'enforcement_reference_not_file').Count | Should -Be 1
-    }
-
-    It 'does not leak a prior directory kind into an invalid enforcement path' {
-        $f = New-RuleEstateFixture
-        $invalidValue = 'scripts/' + [char]0 + '.ps1'
-        $actions = @(
-            [pscustomobject]@{ action = '`scripts`' },
-            [pscustomobject]@{ action = ('`' + $invalidValue + '`') }
-        )
-
-        $checks = @(Get-RuleEstateEnforcementChecks -RepoRoot (Join-Path $f.workspace 'repo-a') -ActionMatches $actions)
-        $invalid = @($checks | Where-Object kind -eq 'invalid')
-
-        $invalid.Count | Should -Be 1
-        $invalid[0].exists | Should -Be $false
-        $invalid[0].is_file | Should -Be $false
-        $invalid[0].is_directory | Should -Be $false
-    }
-
-    It 'reports grouped project mappings as textual coverage only' {
-        $f = New-RuleEstateFixture
-        $agents = Join-Path $f.workspace 'repo-a\AGENTS.md'
-        $text = [IO.File]::ReadAllText($agents)
-        $text = [regex]::Replace($text, '(?m)^- `R1`:.*\r?\n- `R2`:.*$', '- `R1-R2`: grouped action; evidence=`AGENTS.md`; rollback=revert this slice.')
-        [IO.File]::WriteAllText($agents, $text)
-
-        $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
-
-        @($report.findings | Where-Object code -eq 'project_mapping_grouped').Count | Should -Be 1
-        $report.semantic_coverage_pass | Should -Be $false
-        $report.summary.textual_mapping_covered_count | Should -BeGreaterThan 0
-        $report.summary.covered_count | Should -Be $report.summary.textual_mapping_covered_count
-        $report.summary.gap_count | Should -Be 0
-        $report.summary.semantic_gap_count | Should -Be 1
-    }
-
-    It 'rejects project constraint ids not declared by the global contract' {
-        $f = New-RuleEstateFixture
-        $agents = Join-Path $f.workspace 'repo-a\AGENTS.md'
-        [IO.File]::AppendAllText($agents, [Environment]::NewLine + '- `R9`: undeclared action; evidence=`AGENTS.md`; rollback=revert this slice.' + [Environment]::NewLine)
-
-        $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
-
-        @($report.findings | Where-Object { $_.code -eq 'project_mapping_unknown' -and $_.constraint_id -eq 'R9' }).Count | Should -Be 1
-        $report.semantic_coverage_pass | Should -Be $false
-    }
-
-    It 'rejects duplicate mappings for one global constraint' {
-        $f = New-RuleEstateFixture
-        $agents = Join-Path $f.workspace 'repo-a\AGENTS.md'
-        [IO.File]::AppendAllText($agents, [Environment]::NewLine + '- `R1`: duplicate action; evidence=`AGENTS.md`; rollback=revert this slice.' + [Environment]::NewLine)
-
-        $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
-        $actions = @(Get-RuleEstateProjectActions $agents | Where-Object constraint_id -eq 'R1')
-
-        $actions.Count | Should -Be 2
-        @($report.findings | Where-Object { $_.code -eq 'project_mapping_duplicate' -and $_.constraint_id -eq 'R1' }).Count | Should -Be 1
-        $report.semantic_coverage_pass | Should -Be $false
     }
 
     It 'reports incomplete and non-expiring N/A records' {
