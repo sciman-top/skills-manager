@@ -16,7 +16,9 @@
       "tier": "core-mainline",
       "status": "active",
       "upstream_url": "https://github.com/openai/codex.git",
-      "relative_path": "core/codex"
+      "relative_path": "core/codex",
+      "branch": "main",
+      "policy": "floating"
     },
     {
       "name": "openai-plugins",
@@ -25,21 +27,27 @@
       "source_disposition": "current-official",
       "license_policy": "per-plugin",
       "upstream_url": "https://github.com/openai/plugins.git",
-      "relative_path": "core/openai-plugins"
+      "relative_path": "core/openai-plugins",
+      "branch": "main",
+      "policy": "floating"
     },
     {
       "name": "anthropics-skills",
       "tier": "core-mainline",
       "status": "active",
       "upstream_url": "https://github.com/anthropics/skills.git",
-      "relative_path": "core/anthropics-skills"
+      "relative_path": "core/anthropics-skills",
+      "branch": "main",
+      "policy": "floating"
     },
     {
       "name": "gemini-cli",
       "tier": "core-mainline",
       "status": "active",
       "upstream_url": "https://github.com/google-gemini/gemini-cli.git",
-      "relative_path": "core/gemini-cli"
+      "relative_path": "core/gemini-cli",
+      "branch": "main",
+      "policy": "floating"
     },
     {
       "name": "agentskills",
@@ -47,14 +55,18 @@
       "status": "active",
       "source_disposition": "vendor-neutral-standard",
       "upstream_url": "https://github.com/agentskills/agentskills.git",
-      "relative_path": "core/agentskills"
+      "relative_path": "core/agentskills",
+      "branch": "main",
+      "policy": "floating"
     },
     {
       "name": "modelcontextprotocol",
       "tier": "core-mainline",
       "status": "active",
       "upstream_url": "https://github.com/modelcontextprotocol/modelcontextprotocol.git",
-      "relative_path": "core/modelcontextprotocol"
+      "relative_path": "core/modelcontextprotocol",
+      "branch": "main",
+      "policy": "floating"
     },
     {
       "name": "servers",
@@ -62,14 +74,91 @@
       "status": "active",
       "source_disposition": "official-examples-on-demand",
       "upstream_url": "https://github.com/modelcontextprotocol/servers.git",
-      "relative_path": "secondary/servers"
+      "relative_path": "secondary/servers",
+      "branch": "main",
+      "policy": "floating"
     },
     {
       "name": "registry",
       "tier": "core-mainline",
       "status": "active",
       "upstream_url": "https://github.com/modelcontextprotocol/registry.git",
-      "relative_path": "core/registry"
+      "relative_path": "core/registry",
+      "branch": "main",
+      "policy": "floating"
+    },
+    {
+      "name": "openai-skills",
+      "tier": "core-mainline",
+      "status": "active",
+      "source_disposition": "current-official",
+      "upstream_url": "https://github.com/openai/skills.git",
+      "relative_path": "core/openai-skills",
+      "branch": "main",
+      "policy": "floating"
+    },
+    {
+      "name": "hangfire",
+      "tier": "conditional",
+      "status": "active",
+      "upstream_url": "https://github.com/HangfireIO/Hangfire.git",
+      "relative_path": "conditional/watch-runtime/hangfire",
+      "branch": "main",
+      "policy": "floating"
+    },
+    {
+      "name": "mcp-csharp-sdk",
+      "tier": "conditional",
+      "status": "active",
+      "upstream_url": "https://github.com/modelcontextprotocol/csharp-sdk.git",
+      "relative_path": "conditional/watch-runtime/mcp-csharp-sdk",
+      "branch": "main",
+      "policy": "floating"
+    },
+    {
+      "name": "polly",
+      "tier": "conditional",
+      "status": "active",
+      "upstream_url": "https://github.com/App-vNext/Polly.git",
+      "relative_path": "conditional/watch-runtime/polly",
+      "branch": "main",
+      "policy": "floating"
+    },
+    {
+      "name": "quartznet",
+      "tier": "conditional",
+      "status": "active",
+      "upstream_url": "https://github.com/quartznet/quartznet.git",
+      "relative_path": "conditional/watch-runtime/quartznet",
+      "branch": "main",
+      "policy": "floating"
+    },
+    {
+      "name": "awesome-copilot",
+      "tier": "secondary",
+      "status": "active",
+      "upstream_url": "https://github.com/github/awesome-copilot.git",
+      "relative_path": "secondary/awesome-copilot",
+      "branch": "main",
+      "policy": "floating"
+    },
+    {
+      "name": "vercel-agent-skills",
+      "tier": "secondary",
+      "status": "active",
+      "upstream_url": "https://github.com/vercel-labs/agent-skills.git",
+      "relative_path": "secondary/vercel-agent-skills",
+      "branch": "main",
+      "policy": "floating"
+    },
+    {
+      "name": "wshobson-agents",
+      "tier": "secondary",
+      "status": "active",
+      "upstream_url": "https://github.com/wshobson/agents.git",
+      "relative_path": "secondary/wshobson-agents",
+      "branch": "main",
+      "policy": "floating"
     }
   ]
 }
