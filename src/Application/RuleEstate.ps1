@@ -180,7 +180,10 @@ function Invoke-RuleEstateGitQuery([string]$RepoRoot, [string[]]$Arguments) {
 function Get-RuleEstateGitProfileFindings([string]$ProjectText, [string]$AgentsPath) {
     $findings = New-Object System.Collections.Generic.List[object]
     $repoRoot = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($AgentsPath))
-    $profileLine = @($ProjectText -split "`r?`n" | Where-Object { $_ -match '(?i)Git\s+profile\s*:' } | Select-Object -First 1)
+    $profileLine = @($ProjectText -split "`r?`n" | Where-Object {
+            $_ -match '(?i)Git\s+profile\s*:' -or
+            ($_ -match '(?i)Git\s+baseline\s*=' -and $_ -match '(?i)upstream\s*=')
+        } | Select-Object -First 1)
     if ($profileLine.Count -eq 0) {
         $findings.Add([pscustomobject]@{ code = 'project_git_profile_missing'; severity = 'error'; path = $AgentsPath; disposition = 'adapt'; message = 'Project contract must declare Git profile baseline and upstream.' }) | Out-Null
         return @($findings.ToArray())

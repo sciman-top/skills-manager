@@ -45,7 +45,7 @@ Build, test, contract and hotspot evidence use the repository verifier; rollback
 
 ## D. Global Rule -> Repo Action
 
-- Git profile: baseline=`main`; upstream=`none`; closeout=`local_only`.
+- Git baseline=`main`; upstream=`none`; closeout=`local_only`.
 - `gate_na`: reason=`fixture has no configured Git remote`; alternative_verification=`git symbolic-ref --short HEAD`; evidence_link=`docs/change-evidence/rule-contract.md`; expires_at=`2099-12-31`; recovery_condition=`a remote is configured`.
 - `R1`: declare the repository destination; evidence=`AGENTS.md`; rollback=revert this slice.
 - `R2`: close the smallest executable step; evidence=`scripts/verify-contract.ps1`; rollback=revert this slice.
@@ -466,6 +466,17 @@ verify drift
         @($report.findings | Where-Object code -eq 'project_git_baseline_mismatch').Count | Should -Be 1
         @($report.findings | Where-Object code -eq 'project_git_upstream_mismatch').Count | Should -Be 1
         $report.structural_pass | Should -Be $false
+    }
+
+    It 'continues to accept the legacy Git profile label' {
+        $f = New-RuleEstateFixture
+        $agents = Join-Path $f.workspace 'repo-a\AGENTS.md'
+        $text = [IO.File]::ReadAllText($agents).Replace('Git baseline=', 'Git profile: baseline=')
+        [IO.File]::WriteAllText($agents, $text)
+
+        $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+
+        @($report.findings | Where-Object code -like 'project_git_*').Count | Should -Be 0
     }
 
     It 'rejects an audit output reached through a workspace junction' {
