@@ -4,12 +4,14 @@ This directory describes an optional, read-only development cache under `D:\CODE
 
 `reference-shelf.manifest.json` is consulted only when refresh or governance verification is invoked explicitly. A missing external checkout therefore means "reference unavailable for this research task", not "product unavailable".
 
-- `core-mainline`: `codex`, `openai-plugins`, `anthropics-skills`, `gemini-cli`, `agentskills`, `modelcontextprotocol`, `registry`
-- `secondary`: `servers`
+- `core-mainline`: `codex`, `openai-plugins`, `openai-skills`, `anthropics-skills`, `gemini-cli`, `agentskills`, `modelcontextprotocol`, `registry`
+- `secondary`: `servers`, `awesome-copilot`, `vercel-agent-skills`, `wshobson-agents`
+- `conditional`: `hangfire`, `mcp-csharp-sdk`, `polly`, `quartznet`（仅为 `watch-runtime` consumer 显式刷新）
 
 ```powershell
 .\scripts\refresh-reference-repos.ps1 -FetchOnly -SkipDirtyRepos
 .\scripts\refresh-reference-repos.ps1 -Tier secondary -CloneMissing -FetchOnly -SkipDirtyRepos
+.\scripts\refresh-reference-repos.ps1 -Tier conditional -CloneMissing -FetchOnly -SkipDirtyRepos
 .\scripts\verify-reference-governance.ps1
 ```
 

@@ -78,7 +78,7 @@ Canonical inventory 统一来源；eligibility 处理 enabled/dependency/placeme
 - Verification：`scripts/verify-reference-governance.ps1`
 - Owned root：`D:\CODE\external\skills-manager-references`
 
-`skills.json` 保持 runtime 真源；普通 build/test/update/projection 不读取 shelf。manifest 只有 core/secondary active set，只在显式 refresh/verify 中适用。refresh 对已有 checkout 先验证 origin identity 和 dirty state，并把单次结果写入 ignored `reports/reference-refresh/<run-id>/receipt.md`；clone/fetch/pull 不改变 runtime config。候选 backlog 与动态 latest 状态都不持久化。
+`skills.json` 保持 runtime 真源；普通 build/test/update/projection 不读取 shelf。manifest 只保留 active core/secondary/conditional set，其中 conditional 必须绑定明确 consumer 且不进入默认刷新；manifest 只在显式 refresh/verify 中适用。refresh 对已有 checkout 先验证 origin identity 和 dirty state，并把单次结果写入 ignored `reports/reference-refresh/<run-id>/receipt.md`；clone/fetch/pull 不改变 runtime config。候选 backlog 与动态 latest 状态都不持久化。
 
 ## 3. 真值与状态
 
@@ -127,7 +127,7 @@ Module 删除后若复杂度直接消失，而不在真实 caller 重现，则�
 - candidate/review/staging control plane
 - skill profile reconciliation/canary/runtime selector
 - phase/task/evidence archive 作为当前状态库
-- conditional reference candidate backlog
+- 无明确 consumer 的 conditional reference candidate backlog
 - typed shadow 双实现
 - 静态一键 workflow 与自动更新计划任务控制面
 

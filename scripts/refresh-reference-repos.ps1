@@ -206,6 +206,7 @@ function Normalize-TierNames {
                 "core" { "core-mainline"; break }
                 "core-mainline" { "core-mainline"; break }
                 "secondary" { "secondary"; break }
+                "conditional" { "conditional"; break }
                 "all" { "all"; break }
                 default { throw "Unsupported reference tier: $($segment.Trim())" }
             }

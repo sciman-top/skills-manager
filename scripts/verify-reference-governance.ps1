@@ -16,7 +16,7 @@ function Test-ContainedReferenceRelativePath([string]$Value) {
 }
 
 function Test-ReferenceLifecycleState([string]$Tier, [string]$Status) {
-    return ($Tier -eq 'core-mainline' -or $Tier -eq 'secondary') -and $Status -eq 'active'
+    return $Tier -in @('core-mainline', 'secondary', 'conditional') -and $Status -eq 'active'
 }
 
 try { $manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding UTF8 | ConvertFrom-Json }
@@ -39,6 +39,7 @@ foreach ($repo in @($manifest.repos)) {
     if (-not (Test-ReferenceLifecycleState ([string]$repo.tier) ([string]$repo.status))) { Add-Finding "invalid reference lifecycle: $name" }
     if ([string]$repo.tier -eq 'core-mainline' -and -not $relativePath.Replace('\', '/').StartsWith('core/', [StringComparison]::OrdinalIgnoreCase)) { Add-Finding "core repo must use core/: $name" }
     if ([string]$repo.tier -eq 'secondary' -and -not $relativePath.Replace('\', '/').StartsWith('secondary/', [StringComparison]::OrdinalIgnoreCase)) { Add-Finding "secondary repo must use secondary/: $name" }
+    if ([string]$repo.tier -eq 'conditional' -and -not $relativePath.Replace('\', '/').StartsWith('conditional/', [StringComparison]::OrdinalIgnoreCase)) { Add-Finding "conditional repo must use conditional/: $name" }
     if ([string]::IsNullOrWhiteSpace([string]$repo.upstream_url)) { Add-Finding "reference upstream_url is required: $name" }
     $byName[$name] = $repo
 }

@@ -3173,6 +3173,7 @@ $governanceScript = Join-Path $repoRoot "scripts\verify-reference-governance.ps1
 
         Test-ReferenceLifecycleState "core-mainline" "active" | Should -Be $true
         Test-ReferenceLifecycleState "secondary" "active" | Should -Be $true
+        Test-ReferenceLifecycleState "conditional" "active" | Should -Be $true
         Test-ReferenceLifecycleState "core-mainline" "deprecated" | Should -Be $false
         Test-ReferenceLifecycleState "secondary" "not-cloned" | Should -Be $false
     }
@@ -3207,7 +3208,7 @@ $governanceScript = Join-Path $repoRoot "scripts\verify-reference-governance.ps1
         Test-Path -LiteralPath (Join-Path $TestDrive "escape") | Should -Be $false
     }
 
-    It "Uses openai plugins as the current official source" {
+    It "Tracks official OpenAI plugin and skill sources without expanding the default set" {
         $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
         $plugins = @($manifest.repos | Where-Object name -eq "openai-plugins")
         $skills = @($manifest.repos | Where-Object name -eq "openai-skills")
@@ -3219,8 +3220,25 @@ $governanceScript = Join-Path $repoRoot "scripts\verify-reference-governance.ps1
         $plugins[0].upstream_url | Should -Be "https://github.com/openai/plugins.git"
         $plugins[0].relative_path | Should -Be "core/openai-plugins"
 
-        $skills.Count | Should -Be 0
+        $skills.Count | Should -Be 1
+        $skills[0].tier | Should -Be "core-mainline"
+        $skills[0].status | Should -Be "active"
+        $skills[0].source_disposition | Should -Be "current-official"
+        $skills[0].upstream_url | Should -Be "https://github.com/openai/skills.git"
+        $skills[0].relative_path | Should -Be "core/openai-skills"
         @($manifest.default_refresh_set) -contains "openai-plugins" | Should -Be $true
+        @($manifest.default_refresh_set) -contains "openai-skills" | Should -Be $false
+    }
+
+    It "Selects conditional references only when explicitly requested" {
+        $referencesRoot = Join-Path $TestDrive "conditional-reference-shelf"
+        $outputDirectory = Join-Path $TestDrive "conditional-updates"
+
+        $result = & $refreshScript -ManifestPath $manifestPath -ReferencesRoot $referencesRoot -OutputDirectory $outputDirectory -Tier conditional -FetchOnly
+
+        $result.repo_set | Should -Be "tier-conditional"
+        @($result.repo_names) | Should -Be @("hangfire", "mcp-csharp-sdk", "polly", "quartznet")
+        @($result.results | Where-Object status -ne "missing").Count | Should -Be 0
     }
 
     It "Routes the default set to plugins and writes a runtime receipt" {

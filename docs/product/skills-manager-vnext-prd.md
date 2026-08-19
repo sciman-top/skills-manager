@@ -94,7 +94,7 @@
 
 - `FR-REF-001`：reference shelf 是可选只读开发缓存；`skills.json` 是 runtime 真源，外置 checkout 缺失或未刷新不得阻断普通 build/test/update/projection。
 - `FR-REF-002`：manifest 只在显式 refresh/verify 中适用，owned root 固定为 `D:\CODE\external\skills-manager-references`。
-- `FR-REF-003`：manifest 只保留 active core/secondary repo，name/path 唯一，default set 只引用 core。
+- `FR-REF-003`：manifest 只保留 active core/secondary/conditional repo，name/path 唯一；conditional 必须有明确 consumer 且只显式刷新，default set 只引用 core。
 - `FR-REF-004`：refresh 校验 origin、dirty 状态和 containment，只做 fetch/fast-forward/clone。
 - `FR-REF-005`：refresh/verify 失败只阻断该参考工作流，不授权采纳、安装、执行或 runtime import 删除；无消费者候选需要时重新发现。
 - `FR-REF-006`：每次 refresh 写入 ignored `reports/reference-refresh/<run-id>/receipt.md`；Git 只跟踪 manifest 和稳定说明，不跟踪动态 latest 状态。
