@@ -40,9 +40,15 @@ Use this skill for practical classroom software on Windows machines.
 
 ## UI Checks
 
-- Touch targets must be large enough for classroom use.
+- Verify touch targets at the intended Windows scaling and classroom hardware; a desktop screenshot at 100% DPI is not sufficient touch evidence.
 - Avoid tiny toolbar-only affordances for core teaching actions.
 - Support presenter view, navigation/search/bookmarks, richer ink tools, and accessible labels where relevant.
+- Verify keyboard-only access, visible focus, high-contrast behavior, and meaningful UI Automation names for core teaching controls. Treat automated UIA inspection as structural evidence, not proof of a complete screen-reader experience.
+
+## Deliverable Boundary
+
+- For design work, return the classroom flow, product constraints, recovery/data contract, architecture seams, and acceptance probes that remain open.
+- For implementation work, modify the real repository entrypoint, keep domain/application logic outside WPF views and interop, and finish with the repository's focused build/test gate plus a UI or classroom-flow probe. Do not stop at a design sketch when working code was requested.
 
 ## Verification
 

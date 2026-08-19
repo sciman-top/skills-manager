@@ -1,6 +1,6 @@
 ---
 name: custom-creator-publishing
-description: Use when writing, polishing, formatting, illustrating, or repurposing Chinese long-form content for WeChat Official Account, Zhihu, blogs, teaching newsletters, or article-to-courseware workflows.
+description: "Use when Chinese long-form content needs a source-backed publishing workflow: draft or restructure the canonical Markdown, adapt it for WeChat Official Account, Zhihu, blogs, or teaching newsletters, plan visuals, or repurpose it into courseware. Do not use for a one-line copy edit, generic marketing-page copy, or a direct publication-only request."
 ---
 
 # Creator Publishing
@@ -9,19 +9,22 @@ Use this skill for Chinese article workflows where structure, credibility, image
 
 ## Workflow
 
-1. Clarify the platform: WeChat Official Account, Zhihu, blog, teaching handout, or multi-platform reuse.
+1. Identify the audience, platform, purpose, source material, and requested artifact. Ask only when a missing answer would materially change the result; otherwise state the assumption.
 2. Choose the article shape: explanation, opinion, tutorial, review, lesson reflection, product note, or case study.
-3. Build a source-backed outline before polishing prose. Mark facts that require current verification.
+3. Build a source-backed outline before polishing prose. Distinguish supplied facts, verified facts, opinions, and claims that still need current verification.
 4. Draft in Markdown as the canonical source. Keep headings, callouts, image placeholders, references, and publication notes explicit.
-5. For WeChat, plan title, subtitle, cover image, lead paragraph, section rhythm, pull quotes, and end CTA.
-6. For Zhihu, emphasize searchable question framing, concise claims, examples, and defensible reasoning.
-7. Treat actual publication, scheduling, account changes, and audience notifications as external writes. Draft and export locally by default. Publish only after the user explicitly authorizes the exact platform/account and final payload in the current task; verify the resulting receipt before retrying a failed submission.
+5. Adapt from the canonical draft instead of maintaining unrelated copies. For WeChat, shape the title, cover, lead, section rhythm, pull quotes, and end CTA. For Zhihu, emphasize searchable question framing, concise claims, examples, and defensible reasoning.
+6. Treat actual publication, scheduling, account changes, and audience notifications as external writes. Draft and export locally by default. Publish only after the user explicitly authorizes the exact platform, account, and final payload in the current task; verify the resulting receipt before retrying a failed submission.
 
-## Tool Priority
+## Conditional Capabilities
 
-- Writing and editing: `copywriting`, `copy-editing`, `content-strategy`, `baoyu-format-markdown`.
-- Images: `imagegen`, `baoyu-cover-image`, `baoyu-infographic`, `canvas-design`.
-- Conversion: use `markdown-converter` and platform-specific tools only after the Markdown source is clean.
+- Do not load every adjacent skill. Use an available writing, editing, or content-strategy skill only when that narrower task needs specialist guidance.
+- Use `imagegen` or an available cover/infographic capability only when the user requests actual visual assets; otherwise provide a concrete image brief and placeholder.
+- Use conversion or platform-specific tooling only after the canonical Markdown is stable.
+
+## Deliverable
+
+Return the requested draft or local artifact plus the assumptions/source gaps, platform-specific changes, and any visual asset list. Keep publication state explicit as `draft_only`, `authorized_not_sent`, or `published` with a receipt; never imply publication from a platform-ready draft.
 
 ## Verification
 

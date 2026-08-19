@@ -16,12 +16,18 @@ Use this skill when the goal is teaching a concept through motion or interaction
 
 ## Design Rules
 
-1. Establish the target grade, textbook/standard, lesson objective, and the misconception or phenomenon the visual should resolve.
+1. Establish the target grade, textbook/standard, lesson objective, and the misconception or phenomenon the visual should resolve. If the curriculum basis is not supplied, identify the assumption instead of inventing alignment.
 2. Use animation only when change over time, causality, or interaction adds teaching value; prefer a static annotated diagram for a state that does not need motion.
 3. Keep variables visible: value, unit, direction, and sign convention.
 4. Use color consistently, but never make color the only carrier of force/vector, path/ray, measured quantity, or result.
 5. Provide pause/replay/step controls for classroom pacing, plus a reduced-motion or static fallback.
 6. Use physically meaningful scales or clearly label schematic/not-to-scale scenes.
+
+## Deliverable Boundary
+
+- For a design request, return the teaching objective and misconception, medium decision, storyboard or interaction states, variables/units/scales, accessibility controls, physics assumptions, and verification plan.
+- For an implementation request, create or modify the requested artifact with the native presentation, browser, image, or video capability and run the relevant checks below. Do not stop at a storyboard when the user asked for a working artifact.
+- Keep narration, captions, teacher prompts, or a static fallback sufficient to preserve the teaching point when motion is unavailable.
 
 ## Physics Coverage
 
@@ -35,5 +41,5 @@ Use this skill when the goal is teaching a concept through motion or interaction
 - Check physics correctness before visual polish.
 - Verify claims, symbols, sign conventions, and expected observations against the named textbook/standard or another identified authoritative teaching source.
 - Run in desktop and classroom projector aspect ratios.
-- For web/SVG output, verify animation is nonblank, keyboard controls are reachable, focus is visible, motion can be paused, and Chinese labels fit.
+- For web/SVG output, verify the real entrypoint loads, the animation is nonblank, keyboard controls are reachable, focus is visible, motion can be paused, and Chinese labels fit.
 - Provide a short textual explanation or caption that preserves the teaching point when motion is unavailable.

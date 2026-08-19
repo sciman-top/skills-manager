@@ -15,6 +15,7 @@ Use this skill for durable Windows automation rather than one-off shell snippets
 4. Keep generated config writes idempotent and backup-aware.
 5. For scheduled tasks or startup helpers, use hidden wrappers when visible consoles would disturb the desktop.
 6. Use `pwsh` and PowerShell 7 syntax by default. Do not add a `powershell.exe` fallback unless the user explicitly asks to maintain an external Windows PowerShell 5.1 consumer.
+7. Invoke native tools directly when ordinary argument passing is sufficient. Check `$LASTEXITCODE` immediately; stderr alone is not failure. Use `Start-Process` only when the workflow needs process-level control such as a hidden window, redirected streams, credentials, or a different working directory, and use `-Wait -PassThru` when the exit code is evidence.
 
 ## Patterns
 
@@ -22,6 +23,7 @@ Use this skill for durable Windows automation rather than one-off shell snippets
 - For environment variables, distinguish Process/User/Machine scopes in logs.
 - For CLIs, capture `cmd`, `exit_code`, short key output, and timestamp.
 - For agent/MCP config, separate source of truth from generated projection files.
+- For file replacement, write and validate the candidate before an atomic replace when the target format or consumer makes partial writes risky.
 
 ## Verification
 
@@ -29,3 +31,4 @@ Use this skill for durable Windows automation rather than one-off shell snippets
 - Re-run the command after writes to prove idempotence.
 - Check encoding, path, native-process exit, and locked-file behavior under the supported PowerShell 7 runtime.
 - When an explicitly scoped external legacy consumer requires Windows PowerShell 5.1, isolate that compatibility path and verify it separately; do not weaken the primary PS7 contract.
+- Report changed paths, backup/rollback location, commands run, and the lowest truth layer actually verified. A successful source edit or scheduled-task definition is not proof that a new process or future trigger loaded it.

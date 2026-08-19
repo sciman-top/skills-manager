@@ -14,7 +14,8 @@ Audit accessibility after the deck content and layout are stable. This skill is 
 3. Audit every slide against the checklist below and classify findings as `blocker`, `major`, `minor`, or `verified`.
 4. Run PowerPoint's native Accessibility Checker when live PowerPoint is available. Preserve its warnings and errors as evidence; do not treat an empty checker result as proof of full accessibility.
 5. Render or preview the final deck and inspect visual contrast, clipping, captions, focus cues, and non-color communication.
-6. Report the inspected artifact, tools used, unresolved limitations, and the exact evidence supporting each verified claim.
+6. When live PowerPoint and the task scope permit, exercise the deck with a named screen reader such as Narrator and record the version and observed navigation. Keep this separate from the native checker result.
+7. Report the inspected artifact, tools used, unresolved limitations, and the exact evidence supporting each verified claim.
 
 ## Audit Checklist
 
@@ -25,11 +26,11 @@ Audit accessibility after the deck content and layout are stable. This skill is 
 - Verify reading order in the Selection Pane or an equivalent structure view. The sequence must make sense without visual position, including grouped objects and off-slide elements.
 - Use real tables with a header row. Avoid merged cells, blank spacer cells, and tables used only for layout when they impede navigation.
 - Use hyperlink text that describes the destination or action without surrounding context. Avoid bare URLs and repeated `click here` labels.
-- Provide synchronized captions for meaningful video and transcripts for audio or narration. Identify any media whose accessibility depends on external playback controls.
+- Provide synchronized captions for meaningful video and transcripts for audio or narration. Identify any media whose accessibility depends on external playback controls, and verify captions in the actual delivery format because media compression or video export can remove them.
 - When narration is present, inspect speaker notes or a separate transcript as a possible content fallback. Notes are not synchronized captions and cannot prove that a delivered video is accessible.
 - Check text and essential graphics for sufficient contrast. Never encode meaning by color alone; add labels, patterns, shapes, or text cues.
 - Remove non-essential animation, rapid flashing, and motion that obscures reading. Prefer simple, user-controlled sequences and a usable reduced-motion/static path.
-- Confirm that text remains readable at the intended classroom scale and that zoom, high contrast, or enlarged text does not hide critical content.
+- Treat 18 pt as the Microsoft baseline floor for ordinary slide text, not an automatic pass. Confirm that text remains readable at the intended classroom scale and that zoom, high contrast, or enlarged text does not hide critical content.
 - Run the native Accessibility Checker and triage every error, warning, and intelligent-service suggestion relevant to the deck.
 
 ## Evidence And Fail-Closed Rules
