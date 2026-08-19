@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-08-19T11:52:22.6851119Z",
+  "generated_at": "2026-08-19T14:00:54.1938714Z",
   "vendors": [
     {
       "name": "agent-skills",
@@ -110,7 +110,7 @@
       "ref": "main",
       "skill": "data\\skills\\data-visualization",
       "sparse": false,
-      "commit": "a573e7d00a1b12908d73a11a33c7d37b10617d37"
+      "commit": "fbddb2c33039a8ea11959683ec5f7989bc64cc8a"
     },
     {
       "name": "domain-modeling",
@@ -119,7 +119,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\domain-modeling",
       "sparse": true,
-      "commit": "1bb95954ef0d06ba4d64a9c267fb75f57c614a1f"
+      "commit": "885e2ca4d842d139e9aef4e48d366c63cb1b8013"
     },
     {
       "name": "dotnet-backend-patterns",
@@ -164,7 +164,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\grill-with-docs",
       "sparse": true,
-      "commit": "1bb95954ef0d06ba4d64a9c267fb75f57c614a1f"
+      "commit": "885e2ca4d842d139e9aef4e48d366c63cb1b8013"
     },
     {
       "name": "grilling",
@@ -173,7 +173,7 @@
       "ref": "main",
       "skill": "skills\\productivity\\grilling",
       "sparse": true,
-      "commit": "1bb95954ef0d06ba4d64a9c267fb75f57c614a1f"
+      "commit": "885e2ca4d842d139e9aef4e48d366c63cb1b8013"
     },
     {
       "name": "manim-composer",
@@ -299,7 +299,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\research",
       "sparse": true,
-      "commit": "1bb95954ef0d06ba4d64a9c267fb75f57c614a1f"
+      "commit": "885e2ca4d842d139e9aef4e48d366c63cb1b8013"
     },
     {
       "name": "slidev",
