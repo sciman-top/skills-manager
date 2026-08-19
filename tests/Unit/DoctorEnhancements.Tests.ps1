@@ -3,6 +3,29 @@ BeforeAll {
 
 }
 Describe "Doctor Enhancements" {
+    Context "Get-DoctorLegacyAutoUpdateTaskStatus" {
+        It "recognizes the managed current weekly runner" {
+            $runner = Join-Path $Root 'scripts\weekly-skills-update.ps1'
+            $task = [pscustomobject]@{ Actions = @([pscustomobject]@{ Arguments = ('-File "{0}"' -f $runner) }) }
+
+            $status = Get-DoctorAutoUpdateTaskClassification -Task $task -ExpectedRunner $runner
+
+            $status.state | Should -Be 'managed_current'
+            $status.action | Should -Be 'none'
+            $status.runner_exists | Should -BeTrue
+        }
+
+        It "marks the removed legacy runner as stale" {
+            $runner = Join-Path $Root 'scripts\weekly-skills-update.ps1'
+            $task = [pscustomobject]@{ Actions = @([pscustomobject]@{ Arguments = ('-File "{0}"' -f (Join-Path $Root 'scripts\weekly-auto-update.ps1')) }) }
+
+            $status = Get-DoctorAutoUpdateTaskClassification -Task $task -ExpectedRunner $runner
+
+            $status.state | Should -Be 'stale_legacy'
+            $status.action | Should -Be 'manual_repair_or_cleanup'
+        }
+    }
+
     Context "Parse-DoctorArgs" {
         It "Parses json/fix options" {
             $opts = Parse-DoctorArgs @("--json", "--fix")

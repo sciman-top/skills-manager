@@ -195,17 +195,29 @@ function Get-DoctorConfigRisks($cfg) {
     return @($risks)
 }
 
+function Get-DoctorAutoUpdateTaskClassification([object]$Task, [string]$ExpectedRunner) {
+    $arguments = (@($Task.Actions) | ForEach-Object { [string]$_.Arguments }) -join "`n"
+    $runnerExists = [IO.File]::Exists($ExpectedRunner)
+    $managed = $runnerExists -and $arguments.Contains($ExpectedRunner, [StringComparison]::OrdinalIgnoreCase)
+    $legacy = $arguments -match '(?i)weekly-auto-update\.ps1'
+    $state = if ($managed) { 'managed_current' } elseif ($legacy) { 'stale_legacy' } else { 'unknown_existing' }
+    $action = if ($managed) { 'none' } else { 'manual_repair_or_cleanup' }
+    return [pscustomobject][ordered]@{ state = $state; runner_exists = $runnerExists; action = $action }
+}
+
 function Get-DoctorLegacyAutoUpdateTaskStatus {
     $taskName = "skills-manager-weekly-update-friday-2000"
+    $expectedRunner = [IO.Path]::GetFullPath((Join-Path $Root 'scripts\weekly-skills-update.ps1'))
     if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) {
-        return [pscustomobject][ordered]@{ observed = $false; platform_na = $true; exists = $null; task_name = $taskName; action = "none" }
+        return [pscustomobject][ordered]@{ observed = $false; platform_na = $true; exists = $null; task_name = $taskName; state = 'not_observed'; runner_exists = $null; action = "none" }
     }
     try {
         $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
-        return [pscustomobject][ordered]@{ observed = $true; platform_na = $false; exists = ($null -ne $task); task_name = $taskName; action = "manual_cleanup_if_no_longer_needed" }
+        $classification = Get-DoctorAutoUpdateTaskClassification -Task $task -ExpectedRunner $expectedRunner
+        return [pscustomobject][ordered]@{ observed = $true; platform_na = $false; exists = ($null -ne $task); task_name = $taskName; state = $classification.state; runner_exists = $classification.runner_exists; action = $classification.action }
     }
     catch {
-        return [pscustomobject][ordered]@{ observed = $true; platform_na = $false; exists = $false; task_name = $taskName; action = "none" }
+        return [pscustomobject][ordered]@{ observed = $true; platform_na = $false; exists = $false; task_name = $taskName; state = 'absent'; runner_exists = (Test-Path -LiteralPath $expectedRunner -PathType Leaf); action = "none" }
     }
 }
 
@@ -434,7 +446,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     }
     if ($report.checks.network -and -not $report.checks.network.ok) { $report.summary.errors += "network_unavailable" }
     if ($report.checks.long_paths.value -eq 0) { $report.summary.warnings += "long_paths_off" }
-    if ($report.checks.legacy_auto_update_task.exists -eq $true) { $report.summary.warnings += "legacy_auto_update_task_manual_cleanup" }
+    if ($report.checks.legacy_auto_update_task.action -ne 'none') { $report.summary.warnings += "auto_update_task_manual_repair" }
     if (@($report.risks).Count -gt 0) { $report.summary.warnings += "config_risks_present" }
     if ($opts.strict -and @($report.risks).Count -gt 0) {
         $report.pass = $false
