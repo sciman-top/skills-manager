@@ -472,16 +472,17 @@ exit /b 0
 
     Context "Rule estate reviewed multi-target CLI" {
         It "plans applies and rolls back through the generated entry point" {
-            $workspace = Join-Path $TestDrive 'estate-cli-workspace'; $repo = Join-Path $workspace 'repo-a'; $reviewRoot = Join-Path $workspace 'review'
+            $workspace = Join-Path $TestDrive 'estate-cli-workspace'; $repo = Join-Path $workspace 'repo-a'; $repoB = Join-Path $workspace 'repo-b'; $reviewRoot = Join-Path $workspace 'review'
             $codex = Join-Path $TestDrive 'estate-cli-codex'; $claude = Join-Path $TestDrive 'estate-cli-claude'
-            foreach ($path in @($repo,$reviewRoot,$codex,$claude)) { New-Item -ItemType Directory -Path $path -Force | Out-Null }
-            git -C $repo init --quiet; git -C $repo config user.email fixture@example.invalid; git -C $repo config user.name fixture
+            foreach ($path in @($repo,$repoB,$reviewRoot,$codex,$claude)) { New-Item -ItemType Directory -Path $path -Force | Out-Null }
+            foreach ($targetRepo in @($repo,$repoB)) { git -C $targetRepo init --quiet; git -C $targetRepo config user.email fixture@example.invalid; git -C $targetRepo config user.name fixture }
             [IO.File]::WriteAllText((Join-Path $repo 'AGENTS.md'), '# repo before'); git -C $repo add AGENTS.md; git -C $repo commit -m init --quiet
+            [IO.File]::WriteAllText((Join-Path $repoB 'AGENTS.md'), '# repo-b before'); git -C $repoB add AGENTS.md; git -C $repoB commit -m init --quiet
             [IO.File]::WriteAllText((Join-Path $codex 'AGENTS.md'), '# global before'); [IO.File]::WriteAllText((Join-Path $claude 'CLAUDE.md'), '# claude')
-            [IO.File]::WriteAllText((Join-Path $reviewRoot 'repo.md'), '# repo after'); [IO.File]::WriteAllText((Join-Path $reviewRoot 'global.md'), '# global after')
+            [IO.File]::WriteAllText((Join-Path $reviewRoot 'repo.md'), '# repo after'); [IO.File]::WriteAllText((Join-Path $reviewRoot 'global.md'), '# repo-b after')
             $review = [pscustomobject]@{ schema_version=1; review_status='reviewed'; reviewed_by='fixture-owner'; reviewed_by_type='human'; authorization_source='user_supplied'; changes=@(
                 [pscustomobject]@{target_scope='repository';repository='repo-a';target_file='AGENTS.md';desired_file='repo.md';allow_create=$false;risk='medium';evidence_refs=@('e2e')},
-                [pscustomobject]@{target_scope='global_codex';target_file='AGENTS.md';desired_file='global.md';allow_create=$false;risk='high';evidence_refs=@('e2e')}
+                [pscustomobject]@{target_scope='repository';repository='repo-b';target_file='AGENTS.md';desired_file='global.md';allow_create=$false;risk='medium';evidence_refs=@('e2e')}
             ) }
             $reviewPath=Join-Path $reviewRoot 'review.json';$review|ConvertTo-Json -Depth 20|Set-Content -LiteralPath $reviewPath -Encoding UTF8
             $planPath=Join-Path $workspace 'plan.json';$receiptPath=Join-Path $workspace 'receipt.json'
@@ -497,7 +498,7 @@ exit /b 0
             $applyExit| Should -Be 0;@($applyOutput).Count| Should -Be 1;$applyJson.command| Should -Be 'rule-estate-apply';$applyJson.result.writes| Should -Be 2
             $rollbackExit| Should -Be 0;@($rollbackOutput).Count| Should -Be 1;$rollbackJson.command| Should -Be 'rule-estate-rollback'
             [IO.File]::ReadAllText((Join-Path $repo 'AGENTS.md'))| Should -Be '# repo before'
-            [IO.File]::ReadAllText((Join-Path $codex 'AGENTS.md'))| Should -Be '# global after'
+            [IO.File]::ReadAllText((Join-Path $repoB 'AGENTS.md'))| Should -Be '# repo-b after'
             $applyJson.truth_boundary| Should -Be 'filesystem_applied_not_host_loaded'
         }
     }

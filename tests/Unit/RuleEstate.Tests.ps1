@@ -29,7 +29,7 @@ function New-RuleEstateFixture {
 
 ## 1. Scope
 
-Fixture destination and smallest executable milestone.
+Fixture source of truth is AGENTS.md; skills.ps1 is the repository entrypoint.
 
 ## A. Repository facts
 
@@ -272,6 +272,53 @@ verify drift
         $report.writes | Should -Be 0
         $report.provider_calls | Should -Be 0
         $report.host_loaded | Should -Be 'not_run'
+    }
+
+    It 'uses five required project facts when the legacy mapping set is empty' {
+        $f = New-RuleEstateFixture
+        foreach ($path in @((Join-Path $f.codex 'AGENTS.md'), (Join-Path $f.claude 'CLAUDE.md'))) {
+            $text = [regex]::Replace([IO.File]::ReadAllText($path), '(?ms)^## C\..*?(?=^## D\.)', "## C. Project contract`n`nDeclare repository facts.`n`n")
+            [IO.File]::WriteAllText($path, $text)
+        }
+        foreach ($path in @((Join-Path $f.workspace 'repo-a\AGENTS.md'), (Join-Path $f.workspace 'repo-b\AGENTS.md'))) {
+            $text = [regex]::Replace([IO.File]::ReadAllText($path), '(?m)^- `[RES]\d+`:.*(?:\r?\n|$)', '')
+            [IO.File]::WriteAllText($path, $text)
+        }
+
+        $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+
+        $report.summary.legacy_textual_mapping_expected_rows | Should -Be 0
+        $report.summary.expected_coverage_rows | Should -Be 10
+        $report.summary.contract_fact_covered_count | Should -Be 10
+        $report.summary.contract_fact_gap_count | Should -Be 0
+        $report.semantic_coverage_pass | Should -Be $true
+        $report.coverage_kind | Should -Be 'required_project_facts_presence'
+    }
+
+    It 'fails closed when a required project fact is missing' {
+        $f = New-RuleEstateFixture
+        $agents = Join-Path $f.workspace 'repo-a\AGENTS.md'
+        $text = [IO.File]::ReadAllText($agents).Replace('Fixture source of truth is AGENTS.md; skills.ps1 is the repository entrypoint.', 'Fixture repository description.')
+        [IO.File]::WriteAllText($agents, $text)
+
+        $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        $repo = @($report.targets | Where-Object name -eq 'repo-a')[0]
+
+        @($repo.contract_facts | Where-Object id -eq 'source_of_truth')[0].covered | Should -Be $false
+        @($repo.contract_facts | Where-Object id -eq 'entrypoint')[0].covered | Should -Be $false
+        @($repo.findings | Where-Object code -eq 'project_contract_fact_missing').Count | Should -Be 2
+        $report.semantic_coverage_pass | Should -Be $false
+    }
+
+    It 'recognizes the tracked production global sources and project contract facts' {
+        $codexText = [IO.File]::ReadAllText((Join-Path $repoRoot 'rules\global\codex\AGENTS.md'))
+        $claudeText = [IO.File]::ReadAllText((Join-Path $repoRoot 'rules\global\claude\CLAUDE.md'))
+        $facts = @(Get-RuleEstateProjectContractFacts (Join-Path $repoRoot 'AGENTS.md'))
+
+        @(Get-RuleEstateExpectedConstraintIds $codexText $claudeText).Count | Should -Be 0
+        $facts.Count | Should -Be 5
+        @($facts | Where-Object { -not $_.covered }).Count | Should -Be 0
+        foreach ($fact in $facts) { @($fact.evidence).Count | Should -Be 1; $fact.evidence[0].line | Should -BeGreaterThan 0 }
     }
 
     It 'returns a single JSON envelope and only writes an explicit report' {

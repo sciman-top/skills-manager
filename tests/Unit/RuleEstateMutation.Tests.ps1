@@ -40,7 +40,7 @@ function New-EstateMutationFixture {
             authorization_source = 'user_supplied'
             changes = @(
                 [pscustomobject]@{ target_scope='repository'; repository='repo-a'; target_file='AGENTS.md'; desired_file='repo-a.desired.md'; allow_create=$false; risk='medium'; evidence_refs=@('fixture') },
-                [pscustomobject]@{ target_scope='global_codex'; target_file='AGENTS.md'; desired_file='global.desired.md'; allow_create=$false; risk='high'; evidence_refs=@('fixture') }
+                [pscustomobject]@{ target_scope='repository'; repository='repo-b'; target_file='AGENTS.md'; desired_file='global.desired.md'; allow_create=$false; risk='medium'; evidence_refs=@('fixture') }
             )
         }
         $reviewPath = Join-Path $reviewRoot 'review.json'
@@ -63,6 +63,19 @@ function New-EstateMutationFixture {
         @($validation.findings.code) | Should -Contain 'target_file_forbidden'
     }
 
+    It 'rejects global user-rule scopes and keeps the dedicated projection writer authoritative' {
+        $f = New-EstateMutationFixture
+        $review = [IO.File]::ReadAllText($f.review) | ConvertFrom-Json
+        $review.changes[0].target_scope = 'global_codex'
+        $review.changes[0].PSObject.Properties.Remove('repository')
+        $validation = Test-RuleEstateReviewContract $review ([IO.Path]::GetDirectoryName($f.review))
+
+        $validation.pass | Should -Be $false
+        @($validation.findings.code) | Should -Contain 'global_scope_forbidden'
+        $review | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $f.review -Encoding UTF8
+        { New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude } | Should -Throw
+    }
+
     It 'rejects desired files reached through a review-root junction' {
         $f = New-EstateMutationFixture
         $outside = Join-Path $TestDrive ('review-outside-' + [guid]::NewGuid().ToString('N'))
@@ -80,10 +93,10 @@ function New-EstateMutationFixture {
         @($validation.findings.code) | Should -Contain 'desired_file_reparse_forbidden'
     }
 
-    It 'plans exact global and discovered repository targets without mutation' {
+    It 'plans exact discovered repository targets without mutation' {
         $f = New-EstateMutationFixture
         $beforeRepo = [IO.File]::ReadAllText((Join-Path $f.repo_a 'AGENTS.md'))
-        $beforeGlobal = [IO.File]::ReadAllText((Join-Path $f.codex 'AGENTS.md'))
+        $beforeRepoB = [IO.File]::ReadAllText((Join-Path $f.repo_b 'AGENTS.md'))
         $plan = New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
 
         $plan.actions.Count | Should -Be 2
@@ -91,7 +104,7 @@ function New-EstateMutationFixture {
         $plan.apply.required_token | Should -Match '^APPLY_RULE_ESTATE_PATCH_[A-F0-9]{16}$'
         $plan.apply.confirmation | Should -Be 'plan_bound_explicit'
         [IO.File]::ReadAllText((Join-Path $f.repo_a 'AGENTS.md')) | Should -Be $beforeRepo
-        [IO.File]::ReadAllText((Join-Path $f.codex 'AGENTS.md')) | Should -Be $beforeGlobal
+        [IO.File]::ReadAllText((Join-Path $f.repo_b 'AGENTS.md')) | Should -Be $beforeRepoB
     }
 
     It 'allows unrelated dirty paths but fails closed on target drift, target-set drift, and locks' {
@@ -188,6 +201,24 @@ function New-EstateMutationFixture {
         [IO.File]::ReadAllText((Join-Path $f.repo_a 'AGENTS.md')) | Should -Match '# repo-a'
     }
 
+    It 'rejects a tampered plan or receipt that reintroduces a global scope' {
+        $f = New-EstateMutationFixture
+        $plan = New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+        $plan.actions[0].target_scope = 'global_codex'
+
+        $preflight = Test-RuleEstateApplyPreflight $plan $f.workspace $f.codex $f.claude
+        $preflight.pass | Should -Be $false
+        @($preflight.findings.code) | Should -Contain 'global_scope_forbidden'
+
+        $receiptPath = Join-Path $f.workspace 'global-scope-receipt.json'
+        $receipt = [pscustomobject]@{ workspace_root=$f.workspace; codex_user_root=$f.codex; claude_user_root=$f.claude; actions=@([pscustomobject]@{ action_id='estate-0000000000000000'; status='applied'; target_scope='global_codex'; target_path=(Join-Path $f.codex 'AGENTS.md'); authorized_root=$f.codex }) }
+        $receipt | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $receiptPath -Encoding UTF8
+        $rollback = Invoke-RuleEstateRollback -ReceiptPath $receiptPath -ActionId 'estate-0000000000000000' -Token 'ROLLBACK_RULE_ESTATE_PATCH' -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
+
+        $rollback.pass | Should -Be $false
+        @($rollback.findings.code) | Should -Contain 'global_scope_forbidden'
+    }
+
     It 'rejects rollback when the recorded backup has been modified' {
         $f = New-EstateMutationFixture
         $plan = New-RuleEstatePlan -ReviewPath $f.review -WorkspaceRoot $f.workspace -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
@@ -237,7 +268,7 @@ function New-EstateMutationFixture {
         $result.pass | Should -Be $false
         $result.writes | Should -Be 1
         [IO.File]::ReadAllText((Join-Path $f.repo_a 'AGENTS.md')) | Should -Match 'improved'
-        [IO.File]::ReadAllText((Join-Path $f.codex 'AGENTS.md')) | Should -Match 'global codex'
+        [IO.File]::ReadAllText((Join-Path $f.repo_b 'AGENTS.md')) | Should -Match 'repo-b'
         @($result.receipt.actions).Count | Should -Be 1
     }
 

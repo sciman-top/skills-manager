@@ -4169,6 +4169,35 @@ function Get-RuleEstateExpectedConstraintIds([string]$CodexGlobalText, [string]$
     return @($ids | Sort-Object)
 }
 
+function Get-RuleEstateProjectContractFacts([string]$AgentsPath) {
+    $definitions = [ordered]@{
+        source_of_truth = '(?i)(source\s+of\s+truth|真(?:源|值|相)|唯一.{0,16}真(?:源|值)|fresh\s+(?:read|query))'
+        entrypoint = '(?i)(entry\s*point|entrypoint|(?:用户|解决方案|CLI|主|真实)入口|主链|watchctl|skills\.ps1|run\.cmd|connect\.cmd|\.slnx?|cli\.py)'
+        domain_invariants = '(?i)(domain\s+(?:invariant|rule)|领域.{0,16}(?:不变量|规则)|不变量|invariant|兼容|必须|禁止|不得|fail\s+closed)'
+        minimum_gate = '(?i)(最低(?:充分)?门禁|最低层|fixed\s+order|门禁|gates?|build\s*[:：]|test\s*[:：]|verify|pytest|dotnet\s+(?:build|test)|npm\s+[^\r\n]*(?:test|validate)|python\s+-m)'
+        rollback_entrypoint = '(?i)(回滚|rollback|restore|备份|backup)'
+    }
+    $lines = if ([IO.File]::Exists($AgentsPath)) { @([IO.File]::ReadAllText($AgentsPath) -split "`r?`n") } else { @() }
+    $facts = New-Object System.Collections.Generic.List[object]
+    foreach ($entry in $definitions.GetEnumerator()) {
+        $id = [string]$entry.Key
+        $match = $null
+        for ($index = 0; $index -lt $lines.Count; $index++) {
+            $line = [string]$lines[$index]
+            if ([regex]::IsMatch($line, [string]$entry.Value)) {
+                $match = [pscustomobject][ordered]@{ path = $AgentsPath; line = $index + 1; text = $line.Trim() }
+                break
+            }
+        }
+        $facts.Add([pscustomobject][ordered]@{
+            id = $id
+            covered = ($null -ne $match)
+            evidence = if ($null -eq $match) { @() } else { @($match) }
+        }) | Out-Null
+    }
+    return @($facts.ToArray())
+}
+
 function Get-RuleEstateEnforcementChecks([string]$RepoRoot, [object[]]$ActionMatches) {
     $checks = New-Object System.Collections.Generic.List[object]
     foreach ($actionMatch in @($ActionMatches)) {
@@ -4244,6 +4273,7 @@ function Get-RuleEstateCoverage {
     $advisor | Add-Member -NotePropertyName grouped_mappings -NotePropertyValue @($groupedMappings)
     $advisor | Add-Member -NotePropertyName unknown_mappings -NotePropertyValue @($unknownMappings)
     $advisor | Add-Member -NotePropertyName duplicate_mappings -NotePropertyValue @($duplicateMappings)
+    $advisor | Add-Member -NotePropertyName expected_constraint_count -NotePropertyValue $expectedIds.Count
     $advisor | Add-Member -NotePropertyName coverage_kind -NotePropertyValue 'textual_mapping_coverage'
     return $advisor
 }
@@ -4257,6 +4287,7 @@ function New-RuleEstateTargetAudit {
     $claudeDiagnostics = Invoke-RuleDiagnostics $claudeDiscovery $scopeProfile
     $coverage = Get-RuleEstateCoverage $Target.agents_path $GlobalAlignment $CodexGlobalText $ClaudeGlobalText
     $projectText = if ([System.IO.File]::Exists([string]$Target.agents_path)) { [System.IO.File]::ReadAllText([string]$Target.agents_path) } else { '' }
+    $contractFacts = @(Get-RuleEstateProjectContractFacts $Target.agents_path)
     $globalRelease = Get-RuleEstateRelease $CodexGlobalText global
     $projectRelease = Get-RuleEstateRelease $projectText project
     $projectBytes = [System.Text.Encoding]::UTF8.GetByteCount($projectText)
@@ -4275,6 +4306,13 @@ function New-RuleEstateTargetAudit {
         foreach ($sectionName in @('1', 'A', 'B', 'C', 'D')) {
             if ([string]::IsNullOrWhiteSpace((Get-RuleEstateMarkdownSection $projectText $sectionName))) { $findings.Add([pscustomobject]@{ code = 'project_contract_section_missing'; severity = 'error'; path = $Target.agents_path; section = $sectionName; disposition = 'adapt'; message = ('Project contract section {0} is missing from the active profile.' -f $sectionName) }) | Out-Null }
         }
+    }
+    foreach ($fact in $contractFacts | Where-Object { -not $_.covered }) {
+        $findings.Add([pscustomobject][ordered]@{
+            code = 'project_contract_fact_missing'; severity = 'error'; path = $Target.agents_path
+            fact_id = [string]$fact.id; disposition = 'adapt'
+            message = ('Project contract fact is not declared in a deterministically recognizable form: {0}.' -f $fact.id)
+        }) | Out-Null
     }
     if ([bool]$Target.claude_exists) {
         $claudeBytes = [System.IO.File]::ReadAllBytes([string]$Target.claude_path)
@@ -4309,6 +4347,9 @@ function New-RuleEstateTargetAudit {
         codex = [pscustomobject][ordered]@{ documents = @($codexDiscovery.documents); findings = @($codexDiagnostics.findings); load_verification = 'not_run' }
         claude = [pscustomobject][ordered]@{ documents = @($claudeDiscovery.documents); findings = @($claudeDiagnostics.findings); load_verification = 'not_run' }
         responsibility = $coverage
+        contract_fact_coverage_kind = 'required_project_facts_presence'
+        contract_facts = @($contractFacts)
+        contract_fact_gap_count = @($contractFacts | Where-Object { -not $_.covered }).Count
         release = [pscustomobject][ordered]@{ global = $globalRelease; project_review = $projectRelease; aligned = (-not [string]::IsNullOrWhiteSpace($globalRelease) -and $projectRelease -eq $globalRelease) }
         budget = [pscustomobject][ordered]@{ bytes = $projectBytes; lines = $projectLines; max_bytes = 10240; max_lines = 80; byte_headroom = $projectByteHeadroom; line_headroom = $projectLineHeadroom; within_budget = $projectWithinBudget; low_headroom = $projectLowHeadroom }
         findings = @($findings.ToArray())
@@ -4330,11 +4371,12 @@ function Invoke-RuleEstateAudit {
     $findings = @($alignment.findings) + @($audits | ForEach-Object { $_.findings })
     if (-not $inventory.registry.in_sync) { $findings += [pscustomobject]@{ code = 'target_registry_drift'; severity = 'warning'; path = $inventory.workspace_root; disposition = 'adapt'; message = 'Configured audit targets differ from the discovered workspace Git roots.' } }
     $gapCount = @($audits | ForEach-Object { $_.responsibility.coverage } | Where-Object coverage -ne 'covered').Count
+    $contractFactGapCount = @($audits | ForEach-Object { $_.contract_facts } | Where-Object { -not $_.covered }).Count
     $enforcementCodes = @('enforcement_reference_missing', 'enforcement_reference_required', 'enforcement_reference_not_file')
     $mappingCodes = @('project_mapping_grouped', 'project_mapping_unknown', 'project_mapping_duplicate')
     $mappingIssueCount = @($findings | Where-Object code -in $mappingCodes).Count
     $structuralPass = @($findings | Where-Object severity -eq 'error' | Where-Object code -notin $enforcementCodes).Count -eq 0
-    $semanticCoveragePass = $gapCount -eq 0 -and $mappingIssueCount -eq 0
+    $semanticCoveragePass = $gapCount -eq 0 -and $mappingIssueCount -eq 0 -and $contractFactGapCount -eq 0
     $enforcementVerified = @($findings | Where-Object code -in $enforcementCodes).Count -eq 0
     return [pscustomobject][ordered]@{
         schema_version = 1; truth_boundary = 'workspace_static_audit'; generated_at = [datetimeoffset]::UtcNow.ToString('o')
@@ -4343,13 +4385,17 @@ function Invoke-RuleEstateAudit {
             target_count = $inventory.target_count; finding_count = @($findings).Count
             patch_candidate_count = @($audits | ForEach-Object { $_.patch_candidates }).Count
             textual_mapping_covered_count = @($audits | ForEach-Object { $_.responsibility.coverage } | Where-Object coverage -eq 'covered').Count
-            semantic_gap_count = $gapCount + $mappingIssueCount
+            semantic_gap_count = $gapCount + $mappingIssueCount + $contractFactGapCount
             covered_count = @($audits | ForEach-Object { $_.responsibility.coverage } | Where-Object coverage -eq 'covered').Count
             gap_count = $gapCount
+            contract_fact_covered_count = @($audits | ForEach-Object { $_.contract_facts } | Where-Object covered).Count
+            contract_fact_gap_count = $contractFactGapCount
+            expected_coverage_rows = @($audits | ForEach-Object { $_.contract_facts }).Count
+            legacy_textual_mapping_expected_rows = @($audits | ForEach-Object { $_.responsibility.coverage }).Count
         }
         findings = @($findings); patch_candidates = @($audits | ForEach-Object { $_.patch_candidates })
         command_succeeded = $true; structural_pass = $structuralPass; findings_present = (@($findings).Count -gt 0)
-        semantic_coverage_pass = $semanticCoveragePass; enforcement_verified = $enforcementVerified
+        coverage_kind = 'required_project_facts_presence'; semantic_coverage_pass = $semanticCoveragePass; enforcement_verified = $enforcementVerified
         reference_basis = @(
             [pscustomobject]@{ authority = 'official'; source = 'https://learn.chatgpt.com/docs/agent-configuration/agents-md'; disposition = 'adopt'; use = 'Codex global/project/nested discovery and precedence' },
             [pscustomobject]@{ authority = 'official'; source = 'https://learn.chatgpt.com/docs/agent-configuration/rules'; disposition = 'adopt'; use = 'Separate prose guidance from deterministic command policy' },
@@ -4404,9 +4450,10 @@ function Test-RuleEstateReviewContract($Review, [string]$ReviewRoot) {
     for ($i=0; $i -lt $changes.Count; $i++) {
         $change = $changes[$i]; $base = '$.changes[{0}]' -f $i
         $scope = [string](Get-RuleEstateProperty $change 'target_scope')
-        if ($scope -notin @('repository','global_codex','global_claude')) { $findings.Add((New-RuleEstateFinding 'target_scope_invalid' "$base.target_scope" 'Target scope is not managed by rule estate.')) | Out-Null }
+        if ($scope -in @('global_codex','global_claude')) { $findings.Add((New-RuleEstateFinding 'global_scope_forbidden' "$base.target_scope" 'Global user rules have a single write path through global-rules-plan/apply/rollback; rule-estate only writes repository rules.')) | Out-Null }
+        elseif ($scope -ne 'repository') { $findings.Add((New-RuleEstateFinding 'target_scope_invalid' "$base.target_scope" 'Only repository targets are managed by rule estate.')) | Out-Null }
         $file = [string](Get-RuleEstateProperty $change 'target_file')
-        $allowed = switch ($scope) { 'global_codex' { @('AGENTS.md') }; 'global_claude' { @('CLAUDE.md') }; default { @('AGENTS.md','CLAUDE.md') } }
+        $allowed = @('AGENTS.md','CLAUDE.md')
         if ($file -notin $allowed -or [IO.Path]::GetFileName($file) -cne $file) { $findings.Add((New-RuleEstateFinding 'target_file_forbidden' "$base.target_file" 'Only exact root rule filenames are accepted; provider, auth, model, sandbox and native host files are excluded.')) | Out-Null }
         if ($scope -eq 'repository' -and [string]::IsNullOrWhiteSpace([string](Get-RuleEstateProperty $change 'repository'))) { $findings.Add((New-RuleEstateFinding 'repository_missing' "$base.repository" 'Repository name is required.')) | Out-Null }
         if (-not [string]::IsNullOrWhiteSpace([string](Get-RuleEstateProperty $change 'risk')) -and [string](Get-RuleEstateProperty $change 'risk') -notin @('low','medium','high')) { $findings.Add((New-RuleEstateFinding 'risk_invalid' "$base.risk" 'Risk must be low, medium, or high.')) | Out-Null }
@@ -4449,15 +4496,9 @@ function New-RuleEstatePlan {
     $plannedTargets = @{}
     foreach ($change in @(Get-RuleEstateProperty $review 'changes')) {
         $scope = [string](Get-RuleEstateProperty $change 'target_scope')
-        $root = switch ($scope) {
-            'global_codex' { $codex }
-            'global_claude' { $claude }
-            default {
-                $name = [string](Get-RuleEstateProperty $change 'repository')
-                if (-not $repoByName.ContainsKey($name)) { throw ('Reviewed repository is not a current direct Git target: {0}' -f $name) }
-                [string]$repoByName[$name]
-            }
-        }
+        $name = [string](Get-RuleEstateProperty $change 'repository')
+        if (-not $repoByName.ContainsKey($name)) { throw ('Reviewed repository is not a current direct Git target: {0}' -f $name) }
+        $root = [string]$repoByName[$name]
         $targetPath = Join-Path $root ([string](Get-RuleEstateProperty $change 'target_file'))
         if(Test-RuleEstateReparsePath $targetPath $root){throw ('Reparse points are not accepted by rule estate: {0}' -f $targetPath)}
         $targetKey = [IO.Path]::GetFullPath($targetPath).ToLowerInvariant()
@@ -4532,7 +4573,7 @@ function Test-RuleEstateApplyPreflight {
         foreach($candidate in $actions){$candidatePath=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $candidate 'target_path')).ToLowerInvariant();if($actionByTarget.ContainsKey($candidatePath)){$actionByTarget[$candidatePath]=$null}else{$actionByTarget[$candidatePath]=$candidate}}
         foreach($change in $changes){
             $scope=[string](Get-RuleEstateProperty $change 'target_scope');$repository=[string](Get-RuleEstateProperty $change 'repository')
-            $expectedRoot=switch($scope){'global_codex'{$codex};'global_claude'{$claude};default{[IO.Path]::GetFullPath((Join-Path $workspace $repository))}}
+            $expectedRoot=[IO.Path]::GetFullPath((Join-Path $workspace $repository))
             if([string]::IsNullOrWhiteSpace($expectedRoot)){continue}
             $expectedTarget=[IO.Path]::GetFullPath((Join-Path $expectedRoot ([string](Get-RuleEstateProperty $change 'target_file'))));$desiredPath=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($reviewPath)) ([string](Get-RuleEstateProperty $change 'desired_file'))));$desired=[IO.File]::ReadAllText($desiredPath);$desiredHash=Get-OperationSha256 $desired;$identity='{0}|{1}|{2}' -f $scope,$expectedTarget.ToLowerInvariant(),$desiredHash;$expectedId='estate-{0}' -f (Get-OperationSha256 $identity).Substring(0,16)
             $boundAction=if($actionByTarget.ContainsKey($expectedTarget.ToLowerInvariant())){$actionByTarget[$expectedTarget.ToLowerInvariant()]}else{$null}
@@ -4542,9 +4583,10 @@ function Test-RuleEstateApplyPreflight {
     foreach ($action in @(Get-RuleEstateProperty $Plan 'actions')) {
         $id=[string](Get-RuleEstateProperty $action 'action_id'); $done=$id -in @($CompletedActionIds)
         $path=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'target_path')); $root=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'authorized_root')); $scope=[string](Get-RuleEstateProperty $action 'target_scope')
-        $expectedRoot = switch($scope){'global_codex'{$codex};'global_claude'{$claude};default{$root}}
-        $allowedName = switch($scope){'global_codex'{'AGENTS.md'};'global_claude'{'CLAUDE.md'};default{[IO.Path]::GetFileName($path)}}
-        if ($root -ne $expectedRoot -or -not (Test-RuleDiscoveryPathWithin $path $root) -or [IO.Path]::GetFileName($path) -cne $allowedName -or ($scope -eq 'repository' -and [IO.Path]::GetFileName($path) -notin @('AGENTS.md','CLAUDE.md'))) { $findings.Add((New-RuleEstateFinding 'target_out_of_scope' '$.actions' 'Plan target is outside the exact managed rule allowlist.')) | Out-Null }
+        $expectedRoot = $root
+        $allowedName = [IO.Path]::GetFileName($path)
+        if ($scope -ne 'repository') { $findings.Add((New-RuleEstateFinding 'global_scope_forbidden' '$.actions' 'Rule-estate plans may only contain repository targets; use global-rules-* for user-level rules.')) | Out-Null }
+        if ($root -ne $expectedRoot -or -not (Test-RuleDiscoveryPathWithin $path $root) -or [IO.Path]::GetFileName($path) -cne $allowedName -or [IO.Path]::GetFileName($path) -notin @('AGENTS.md','CLAUDE.md')) { $findings.Add((New-RuleEstateFinding 'target_out_of_scope' '$.actions' 'Plan target is outside the exact managed rule allowlist.')) | Out-Null }
         if(Test-RuleEstateReparsePath $path $root){$findings.Add((New-RuleEstateFinding 'target_reparse_forbidden' $path 'Reparse points are not accepted by rule estate.'))|Out-Null}
         $currentHash=Get-RuleEstateTextHashAtPath $path; $expectedHash=if($done){[string](Get-RuleEstateProperty $action 'desired_hash')}else{[string](Get-RuleEstateProperty $action 'before_hash')}
         if ($currentHash -ne $expectedHash) { $findings.Add((New-RuleEstateFinding 'target_hash_stale' $path 'Target content no longer matches the planned state.')) | Out-Null }
@@ -4623,10 +4665,11 @@ function Invoke-RuleEstateRollback {
     $action=@(Get-RuleEstateProperty $receipt 'actions'|Where-Object{[string](Get-RuleEstateProperty $_ 'action_id') -eq $ActionId})|Select-Object -First 1
     if($null -eq $action -or [string](Get-RuleEstateProperty $action 'status') -ne 'applied'){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_action_invalid' '$.actions' 'Action is not an applied receipt target.'));writes=0}}
     $target=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'target_path'));$root=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'authorized_root'));$scope=[string](Get-RuleEstateProperty $action 'target_scope')
-    $expectedRoot=switch($scope){'global_codex'{$codex};'global_claude'{$claude};'repository'{$root};default{''}}
-    $allowedName=switch($scope){'global_codex'{'AGENTS.md'};'global_claude'{'CLAUDE.md'};default{[IO.Path]::GetFileName($target)}}
+    if($scope -ne 'repository'){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'global_scope_forbidden' '$.actions' 'Rule-estate rollback only accepts repository actions; global user rules use global-rules-rollback.'));writes=0}}
+    $expectedRoot=if($scope -eq 'repository'){$root}else{''}
+    $allowedName=[IO.Path]::GetFileName($target)
     $repoValid=$scope -ne 'repository' -or (([IO.Directory]::GetParent($root)).FullName.TrimEnd('\','/') -eq $workspace.TrimEnd('\','/') -and ([IO.Directory]::Exists((Join-Path $root '.git')) -or [IO.File]::Exists((Join-Path $root '.git'))) -and [IO.Path]::GetFileName($target) -in @('AGENTS.md','CLAUDE.md'))
-    if([string]::IsNullOrWhiteSpace($expectedRoot) -or $root -ne $expectedRoot -or -not $repoValid -or -not (Test-RuleDiscoveryPathWithin $target $root) -or [IO.Path]::GetFileName($target) -cne $allowedName -or (Test-RuleEstateReparsePath $target $root)){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_target_out_of_scope' $target 'Receipt target is outside the exact managed rule allowlist.'));writes=0}}
+    if($scope -ne 'repository' -or [string]::IsNullOrWhiteSpace($expectedRoot) -or $root -ne $expectedRoot -or -not $repoValid -or -not (Test-RuleDiscoveryPathWithin $target $root) -or [IO.Path]::GetFileName($target) -cne $allowedName -or [IO.Path]::GetFileName($target) -notin @('AGENTS.md','CLAUDE.md') -or (Test-RuleEstateReparsePath $target $root)){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_target_out_of_scope' $target 'Receipt target is outside the exact repository rule allowlist.'));writes=0}}
     if((Get-RuleEstateTextHashAtPath $target) -ne [string](Get-RuleEstateProperty $action 'desired_hash')){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_target_stale' $target 'Target changed after apply.'));writes=0}}
     $operationId=[string](Get-RuleEstateProperty $receipt 'operation_id');if($operationId -notmatch '^rule-estate-[a-f0-9]{16}$' -or $ActionId -notmatch '^estate-[a-f0-9]{16}$'){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_identity_invalid' '$' 'Receipt operation or action identity is invalid.'));writes=0}}
     $expectedBackup=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($receiptFile)) ('.rule-estate-backups\{0}\{1}.bak' -f $operationId,$ActionId)));$backup=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'backup_path'))
@@ -20841,7 +20884,7 @@ MCP：
   .\skills.ps1 rule-estate-plan --review <reviewed-change-set.json> --workspace-root D:\CODE --out <plan.json> --json
   .\skills.ps1 rule-estate-apply --plan <plan.json> --workspace-root D:\CODE --token <plan.apply.required_token> --out <receipt.json> --json
   .\skills.ps1 rule-estate-rollback --receipt <receipt.json> --action-id <id> --workspace-root D:\CODE --token ROLLBACK_RULE_ESTATE_PATCH --json
-  全域写入只接受 reviewed change-set；plan 生成绑定当前 review/roots/actions 的确认 token，apply 执行全量预检、逐目标 receipt、fail-fast、resume 和单目标 rollback；不自动 commit/push。
+  全域写入只接受 reviewed change-set 中的直属 Git 仓库 AGENTS.md/CLAUDE.md；用户级 Codex/Claude 规则被拒绝，必须走 rules/global 的 global-rules-* 单写入入口。plan 生成绑定当前 review/roots/actions 的确认 token，apply 执行全量预检、逐目标 receipt、fail-fast、resume 和单目标 rollback；不自动 commit/push。
   .\skills.ps1 global-rules-plan --out .\reports\global-rule-projection\plan.json --json
   .\skills.ps1 global-rules-apply --plan <plan.json> --token <plan.apply.required_token> --out <receipt.json> --json
   .\skills.ps1 global-rules-check --json

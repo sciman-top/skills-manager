@@ -42,9 +42,10 @@ function Test-RuleEstateReviewContract($Review, [string]$ReviewRoot) {
     for ($i=0; $i -lt $changes.Count; $i++) {
         $change = $changes[$i]; $base = '$.changes[{0}]' -f $i
         $scope = [string](Get-RuleEstateProperty $change 'target_scope')
-        if ($scope -notin @('repository','global_codex','global_claude')) { $findings.Add((New-RuleEstateFinding 'target_scope_invalid' "$base.target_scope" 'Target scope is not managed by rule estate.')) | Out-Null }
+        if ($scope -in @('global_codex','global_claude')) { $findings.Add((New-RuleEstateFinding 'global_scope_forbidden' "$base.target_scope" 'Global user rules have a single write path through global-rules-plan/apply/rollback; rule-estate only writes repository rules.')) | Out-Null }
+        elseif ($scope -ne 'repository') { $findings.Add((New-RuleEstateFinding 'target_scope_invalid' "$base.target_scope" 'Only repository targets are managed by rule estate.')) | Out-Null }
         $file = [string](Get-RuleEstateProperty $change 'target_file')
-        $allowed = switch ($scope) { 'global_codex' { @('AGENTS.md') }; 'global_claude' { @('CLAUDE.md') }; default { @('AGENTS.md','CLAUDE.md') } }
+        $allowed = @('AGENTS.md','CLAUDE.md')
         if ($file -notin $allowed -or [IO.Path]::GetFileName($file) -cne $file) { $findings.Add((New-RuleEstateFinding 'target_file_forbidden' "$base.target_file" 'Only exact root rule filenames are accepted; provider, auth, model, sandbox and native host files are excluded.')) | Out-Null }
         if ($scope -eq 'repository' -and [string]::IsNullOrWhiteSpace([string](Get-RuleEstateProperty $change 'repository'))) { $findings.Add((New-RuleEstateFinding 'repository_missing' "$base.repository" 'Repository name is required.')) | Out-Null }
         if (-not [string]::IsNullOrWhiteSpace([string](Get-RuleEstateProperty $change 'risk')) -and [string](Get-RuleEstateProperty $change 'risk') -notin @('low','medium','high')) { $findings.Add((New-RuleEstateFinding 'risk_invalid' "$base.risk" 'Risk must be low, medium, or high.')) | Out-Null }
@@ -87,15 +88,9 @@ function New-RuleEstatePlan {
     $plannedTargets = @{}
     foreach ($change in @(Get-RuleEstateProperty $review 'changes')) {
         $scope = [string](Get-RuleEstateProperty $change 'target_scope')
-        $root = switch ($scope) {
-            'global_codex' { $codex }
-            'global_claude' { $claude }
-            default {
-                $name = [string](Get-RuleEstateProperty $change 'repository')
-                if (-not $repoByName.ContainsKey($name)) { throw ('Reviewed repository is not a current direct Git target: {0}' -f $name) }
-                [string]$repoByName[$name]
-            }
-        }
+        $name = [string](Get-RuleEstateProperty $change 'repository')
+        if (-not $repoByName.ContainsKey($name)) { throw ('Reviewed repository is not a current direct Git target: {0}' -f $name) }
+        $root = [string]$repoByName[$name]
         $targetPath = Join-Path $root ([string](Get-RuleEstateProperty $change 'target_file'))
         if(Test-RuleEstateReparsePath $targetPath $root){throw ('Reparse points are not accepted by rule estate: {0}' -f $targetPath)}
         $targetKey = [IO.Path]::GetFullPath($targetPath).ToLowerInvariant()
@@ -170,7 +165,7 @@ function Test-RuleEstateApplyPreflight {
         foreach($candidate in $actions){$candidatePath=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $candidate 'target_path')).ToLowerInvariant();if($actionByTarget.ContainsKey($candidatePath)){$actionByTarget[$candidatePath]=$null}else{$actionByTarget[$candidatePath]=$candidate}}
         foreach($change in $changes){
             $scope=[string](Get-RuleEstateProperty $change 'target_scope');$repository=[string](Get-RuleEstateProperty $change 'repository')
-            $expectedRoot=switch($scope){'global_codex'{$codex};'global_claude'{$claude};default{[IO.Path]::GetFullPath((Join-Path $workspace $repository))}}
+            $expectedRoot=[IO.Path]::GetFullPath((Join-Path $workspace $repository))
             if([string]::IsNullOrWhiteSpace($expectedRoot)){continue}
             $expectedTarget=[IO.Path]::GetFullPath((Join-Path $expectedRoot ([string](Get-RuleEstateProperty $change 'target_file'))));$desiredPath=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($reviewPath)) ([string](Get-RuleEstateProperty $change 'desired_file'))));$desired=[IO.File]::ReadAllText($desiredPath);$desiredHash=Get-OperationSha256 $desired;$identity='{0}|{1}|{2}' -f $scope,$expectedTarget.ToLowerInvariant(),$desiredHash;$expectedId='estate-{0}' -f (Get-OperationSha256 $identity).Substring(0,16)
             $boundAction=if($actionByTarget.ContainsKey($expectedTarget.ToLowerInvariant())){$actionByTarget[$expectedTarget.ToLowerInvariant()]}else{$null}
@@ -180,9 +175,10 @@ function Test-RuleEstateApplyPreflight {
     foreach ($action in @(Get-RuleEstateProperty $Plan 'actions')) {
         $id=[string](Get-RuleEstateProperty $action 'action_id'); $done=$id -in @($CompletedActionIds)
         $path=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'target_path')); $root=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'authorized_root')); $scope=[string](Get-RuleEstateProperty $action 'target_scope')
-        $expectedRoot = switch($scope){'global_codex'{$codex};'global_claude'{$claude};default{$root}}
-        $allowedName = switch($scope){'global_codex'{'AGENTS.md'};'global_claude'{'CLAUDE.md'};default{[IO.Path]::GetFileName($path)}}
-        if ($root -ne $expectedRoot -or -not (Test-RuleDiscoveryPathWithin $path $root) -or [IO.Path]::GetFileName($path) -cne $allowedName -or ($scope -eq 'repository' -and [IO.Path]::GetFileName($path) -notin @('AGENTS.md','CLAUDE.md'))) { $findings.Add((New-RuleEstateFinding 'target_out_of_scope' '$.actions' 'Plan target is outside the exact managed rule allowlist.')) | Out-Null }
+        $expectedRoot = $root
+        $allowedName = [IO.Path]::GetFileName($path)
+        if ($scope -ne 'repository') { $findings.Add((New-RuleEstateFinding 'global_scope_forbidden' '$.actions' 'Rule-estate plans may only contain repository targets; use global-rules-* for user-level rules.')) | Out-Null }
+        if ($root -ne $expectedRoot -or -not (Test-RuleDiscoveryPathWithin $path $root) -or [IO.Path]::GetFileName($path) -cne $allowedName -or [IO.Path]::GetFileName($path) -notin @('AGENTS.md','CLAUDE.md')) { $findings.Add((New-RuleEstateFinding 'target_out_of_scope' '$.actions' 'Plan target is outside the exact managed rule allowlist.')) | Out-Null }
         if(Test-RuleEstateReparsePath $path $root){$findings.Add((New-RuleEstateFinding 'target_reparse_forbidden' $path 'Reparse points are not accepted by rule estate.'))|Out-Null}
         $currentHash=Get-RuleEstateTextHashAtPath $path; $expectedHash=if($done){[string](Get-RuleEstateProperty $action 'desired_hash')}else{[string](Get-RuleEstateProperty $action 'before_hash')}
         if ($currentHash -ne $expectedHash) { $findings.Add((New-RuleEstateFinding 'target_hash_stale' $path 'Target content no longer matches the planned state.')) | Out-Null }
@@ -261,10 +257,11 @@ function Invoke-RuleEstateRollback {
     $action=@(Get-RuleEstateProperty $receipt 'actions'|Where-Object{[string](Get-RuleEstateProperty $_ 'action_id') -eq $ActionId})|Select-Object -First 1
     if($null -eq $action -or [string](Get-RuleEstateProperty $action 'status') -ne 'applied'){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_action_invalid' '$.actions' 'Action is not an applied receipt target.'));writes=0}}
     $target=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'target_path'));$root=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'authorized_root'));$scope=[string](Get-RuleEstateProperty $action 'target_scope')
-    $expectedRoot=switch($scope){'global_codex'{$codex};'global_claude'{$claude};'repository'{$root};default{''}}
-    $allowedName=switch($scope){'global_codex'{'AGENTS.md'};'global_claude'{'CLAUDE.md'};default{[IO.Path]::GetFileName($target)}}
+    if($scope -ne 'repository'){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'global_scope_forbidden' '$.actions' 'Rule-estate rollback only accepts repository actions; global user rules use global-rules-rollback.'));writes=0}}
+    $expectedRoot=if($scope -eq 'repository'){$root}else{''}
+    $allowedName=[IO.Path]::GetFileName($target)
     $repoValid=$scope -ne 'repository' -or (([IO.Directory]::GetParent($root)).FullName.TrimEnd('\','/') -eq $workspace.TrimEnd('\','/') -and ([IO.Directory]::Exists((Join-Path $root '.git')) -or [IO.File]::Exists((Join-Path $root '.git'))) -and [IO.Path]::GetFileName($target) -in @('AGENTS.md','CLAUDE.md'))
-    if([string]::IsNullOrWhiteSpace($expectedRoot) -or $root -ne $expectedRoot -or -not $repoValid -or -not (Test-RuleDiscoveryPathWithin $target $root) -or [IO.Path]::GetFileName($target) -cne $allowedName -or (Test-RuleEstateReparsePath $target $root)){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_target_out_of_scope' $target 'Receipt target is outside the exact managed rule allowlist.'));writes=0}}
+    if($scope -ne 'repository' -or [string]::IsNullOrWhiteSpace($expectedRoot) -or $root -ne $expectedRoot -or -not $repoValid -or -not (Test-RuleDiscoveryPathWithin $target $root) -or [IO.Path]::GetFileName($target) -cne $allowedName -or [IO.Path]::GetFileName($target) -notin @('AGENTS.md','CLAUDE.md') -or (Test-RuleEstateReparsePath $target $root)){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_target_out_of_scope' $target 'Receipt target is outside the exact repository rule allowlist.'));writes=0}}
     if((Get-RuleEstateTextHashAtPath $target) -ne [string](Get-RuleEstateProperty $action 'desired_hash')){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_target_stale' $target 'Target changed after apply.'));writes=0}}
     $operationId=[string](Get-RuleEstateProperty $receipt 'operation_id');if($operationId -notmatch '^rule-estate-[a-f0-9]{16}$' -or $ActionId -notmatch '^estate-[a-f0-9]{16}$'){return [pscustomobject]@{pass=$false;status='blocked';findings=@((New-RuleEstateFinding 'rollback_identity_invalid' '$' 'Receipt operation or action identity is invalid.'));writes=0}}
     $expectedBackup=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($receiptFile)) ('.rule-estate-backups\{0}\{1}.bak' -f $operationId,$ActionId)));$backup=[IO.Path]::GetFullPath([string](Get-RuleEstateProperty $action 'backup_path'))
