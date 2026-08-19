@@ -74,7 +74,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 构建生效
 ```
 
-`check-updates --json` 只报告每个来源的 `current/target/changed/source`，不 apply、不构建、不投影、不同步 MCP。`构建生效` 会重建并写入宿主目标，属于外部投影动作。仅需仓库内同步时运行 `build.ps1`；不要用 `构建生效` 代替普通构建验证。仓库不再创建或管理 Windows 自动更新计划任务；`doctor` 只读提示同名旧任务，清理由用户在宿主侧决定。
+`check-updates --json` 只报告每个来源的 `current/target/changed/source`，不 apply、不构建、不投影、不同步 MCP。`构建生效` 会重建并写入宿主目标，属于外部投影动作。仅需仓库内同步时运行 `build.ps1`；不要用 `构建生效` 代替普通构建验证。仓库不提供创建、更新或删除 Windows 自动更新计划任务的入口；现有同名任务属于宿主状态，`doctor` 只读报告，清理由用户在宿主侧决定。
 
 ### MCP
 
@@ -176,16 +176,5 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\quality\run-local-qualit
 ```powershell
 pwsh -NoProfile -File .\scripts\release\build-release.ps1 -Version 2026.08.13
 ```
-
-### 每周 skills-only 自动更新
-
-需要无人值守维护 skills 来源时，可注册每周五 20:00 的本机计划任务：
-
-```powershell
-pwsh -NoProfile -File .\scripts\register-weekly-skills-update.ps1
-pwsh -NoProfile -File .\scripts\weekly-skills-update.ps1 -DryRun
-```
-
-任务只执行 skills 来源检查、`更新 -Upgrade`、quick gate 和本地 lock 提交；不会同步 MCP，也不会 push。非 `main`、tracked 工作树不干净、并发运行或出现预期外 tracked 写入时均会阻断。
 
 发布者须先阅读 [发布指南](docs/RELEASING.md)，尤其是第三方来源和 clean-machine 验收边界。产品边界见 [docs/product/README.md](docs/product/README.md)，贡献规则见 [CONTRIBUTING.md](CONTRIBUTING.md)，PowerShell 支持边界见 [docs/runbooks/powershell-runtime-compatibility.md](docs/runbooks/powershell-runtime-compatibility.md)。

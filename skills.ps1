@@ -3930,7 +3930,7 @@ function Get-RuleEstateNaFindings([string]$ProjectText, [string]$AgentsPath) {
         if (-not [string]::IsNullOrWhiteSpace($evidence)) {
             $evidencePath = ($evidence -split '#', 2)[0].Trim()
             if ([string]::IsNullOrWhiteSpace($evidencePath) -or $evidencePath.EndsWith('/') -or $evidencePath.EndsWith('\') -or [System.IO.Path]::GetExtension($evidencePath) -notin @('.md','.json','.csv','.txt','.log')) { $invalid.Add('evidence_link_file') | Out-Null }
-            elseif ($invalid.Count -eq 0) {
+            else {
                 try {
                     $repoRoot = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($AgentsPath))
                     $resolvedEvidence = if ([System.IO.Path]::IsPathRooted($evidencePath)) { [System.IO.Path]::GetFullPath($evidencePath) } else { [System.IO.Path]::GetFullPath((Join-Path $repoRoot $evidencePath)) }
@@ -3948,18 +3948,6 @@ function Get-RuleEstateNaFindings([string]$ProjectText, [string]$AgentsPath) {
                         evidence_link = $evidence; resolved_path = ''; disposition = 'adapt'
                         message = 'N/A evidence_link could not be resolved inside the repository.'
                     }) | Out-Null
-                }
-            }
-            else {
-                try {
-                    $repoRoot = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($AgentsPath))
-                    $resolvedEvidence = if ([System.IO.Path]::IsPathRooted($evidencePath)) { [System.IO.Path]::GetFullPath($evidencePath) } else { [System.IO.Path]::GetFullPath((Join-Path $repoRoot $evidencePath)) }
-                    if (-not (Test-RuleDiscoveryPathWithin $resolvedEvidence $repoRoot) -or -not [System.IO.File]::Exists($resolvedEvidence)) {
-                        $findings.Add([pscustomobject][ordered]@{ code = 'project_na_evidence_missing'; severity = 'error'; path = $AgentsPath; line = $index + 1; evidence_link = $evidence; resolved_path = $resolvedEvidence; disposition = 'adapt'; message = 'N/A evidence_link must resolve to an existing repository file.' }) | Out-Null
-                    }
-                }
-                catch {
-                    $findings.Add([pscustomobject][ordered]@{ code = 'project_na_evidence_missing'; severity = 'error'; path = $AgentsPath; line = $index + 1; evidence_link = $evidence; resolved_path = ''; disposition = 'adapt'; message = 'N/A evidence_link could not be resolved inside the repository.' }) | Out-Null
                 }
             }
         }
@@ -16259,11 +16247,6 @@ function Get-AuditSourceStrategyOverridePath {
     return (Join-Path $script:Root "overrides\audit-source-strategy.json")
 }
 
-function Test-AuditMergeObjectLike($value) {
-    if ($null -eq $value) { return $false }
-    return ($value -is [pscustomobject]) -or ($value -is [hashtable]) -or ($value -is [System.Collections.IDictionary])
-}
-
 function Convert-AuditMergeValue($value) {
     if ($null -eq $value) { return $null }
     if ($value -is [System.Collections.IDictionary]) {
@@ -16310,17 +16293,17 @@ function Convert-AuditMergeToObject($value) {
 }
 
 function Merge-AuditHashtableDeep($base, $patch) {
-    if (-not (Test-AuditMergeObjectLike $base)) {
+    if (-not (Test-AuditObjectLike $base)) {
         return (Convert-AuditMergeValue $patch)
     }
-    if (-not (Test-AuditMergeObjectLike $patch)) {
+    if (-not (Test-AuditObjectLike $patch)) {
         return (Convert-AuditMergeValue $patch)
     }
     $baseMap = Convert-AuditMergeValue $base
     $patchMap = Convert-AuditMergeValue $patch
     foreach ($key in $patchMap.Keys) {
         $next = $patchMap[$key]
-        if ($baseMap.Contains($key) -and (Test-AuditMergeObjectLike $baseMap[$key]) -and (Test-AuditMergeObjectLike $next)) {
+        if ($baseMap.Contains($key) -and (Test-AuditObjectLike $baseMap[$key]) -and (Test-AuditObjectLike $next)) {
             $baseMap[$key] = Merge-AuditHashtableDeep $baseMap[$key] $next
         }
         else {
@@ -16346,15 +16329,15 @@ function Apply-AuditSourceStrategyOverride($strategy, [string]$mode) {
         Log ("audit-source-strategy override 解析失败，忽略覆盖：{0}" -f $_.Exception.Message) "WARN"
         return $strategy
     }
-    if (-not (Test-AuditMergeObjectLike $override)) {
+    if (-not (Test-AuditObjectLike $override)) {
         return $strategy
     }
 
     $patches = New-Object System.Collections.Generic.List[object]
-    if (Test-AuditJsonProperty $override "all" -and (Test-AuditMergeObjectLike $override.all)) {
+    if (Test-AuditJsonProperty $override "all" -and (Test-AuditObjectLike $override.all)) {
         $patches.Add($override.all) | Out-Null
     }
-    if (Test-AuditJsonProperty $override $mode -and (Test-AuditMergeObjectLike $override.$mode)) {
+    if (Test-AuditJsonProperty $override $mode -and (Test-AuditObjectLike $override.$mode)) {
         $patches.Add($override.$mode) | Out-Null
     }
     if ($patches.Count -eq 0) {

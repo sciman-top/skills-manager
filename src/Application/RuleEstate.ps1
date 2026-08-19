@@ -114,7 +114,7 @@ function Get-RuleEstateNaFindings([string]$ProjectText, [string]$AgentsPath) {
         if (-not [string]::IsNullOrWhiteSpace($evidence)) {
             $evidencePath = ($evidence -split '#', 2)[0].Trim()
             if ([string]::IsNullOrWhiteSpace($evidencePath) -or $evidencePath.EndsWith('/') -or $evidencePath.EndsWith('\') -or [System.IO.Path]::GetExtension($evidencePath) -notin @('.md','.json','.csv','.txt','.log')) { $invalid.Add('evidence_link_file') | Out-Null }
-            elseif ($invalid.Count -eq 0) {
+            else {
                 try {
                     $repoRoot = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($AgentsPath))
                     $resolvedEvidence = if ([System.IO.Path]::IsPathRooted($evidencePath)) { [System.IO.Path]::GetFullPath($evidencePath) } else { [System.IO.Path]::GetFullPath((Join-Path $repoRoot $evidencePath)) }
@@ -132,18 +132,6 @@ function Get-RuleEstateNaFindings([string]$ProjectText, [string]$AgentsPath) {
                         evidence_link = $evidence; resolved_path = ''; disposition = 'adapt'
                         message = 'N/A evidence_link could not be resolved inside the repository.'
                     }) | Out-Null
-                }
-            }
-            else {
-                try {
-                    $repoRoot = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($AgentsPath))
-                    $resolvedEvidence = if ([System.IO.Path]::IsPathRooted($evidencePath)) { [System.IO.Path]::GetFullPath($evidencePath) } else { [System.IO.Path]::GetFullPath((Join-Path $repoRoot $evidencePath)) }
-                    if (-not (Test-RuleDiscoveryPathWithin $resolvedEvidence $repoRoot) -or -not [System.IO.File]::Exists($resolvedEvidence)) {
-                        $findings.Add([pscustomobject][ordered]@{ code = 'project_na_evidence_missing'; severity = 'error'; path = $AgentsPath; line = $index + 1; evidence_link = $evidence; resolved_path = $resolvedEvidence; disposition = 'adapt'; message = 'N/A evidence_link must resolve to an existing repository file.' }) | Out-Null
-                    }
-                }
-                catch {
-                    $findings.Add([pscustomobject][ordered]@{ code = 'project_na_evidence_missing'; severity = 'error'; path = $AgentsPath; line = $index + 1; evidence_link = $evidence; resolved_path = ''; disposition = 'adapt'; message = 'N/A evidence_link could not be resolved inside the repository.' }) | Out-Null
                 }
             }
         }
