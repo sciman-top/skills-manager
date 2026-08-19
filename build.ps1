@@ -37,6 +37,7 @@ $Files = @(
     "Commands/Doctor.ps1",
     "Commands/Install.ps1",
     "Commands/Update.ps1",
+    "Commands/Mcp.ProfileAndSafety.ps1",
     "Commands/Mcp.ps1",
     "Commands/Capability.ps1",
     "Commands/RuleAudit.ps1",
@@ -53,7 +54,6 @@ $Files = @(
     "Commands/AuditTargets.Workflow.ps1",
     "Commands/AuditTargets.Args.ps1",
     "Commands/SkillProjection.ps1",
-    "Commands/Workflow.ps1",
     "Commands/Utils.ps1",
     "Main.ps1"
 )

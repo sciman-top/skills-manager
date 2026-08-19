@@ -33,8 +33,8 @@ Describe 'Read-only skill surface inventory' {
         $oldCodexHome = $env:CODEX_HOME
         try {
             $agentRoot = Join-Path $fixture 'agent'; $userRoot = Join-Path $fixture 'user-skills'; $pluginRoot = Join-Path $fixture 'plugin'; $env:CODEX_HOME = Join-Path $fixture 'codex'
-            foreach ($path in @((Join-Path $agentRoot 'managed-stale'), (Join-Path $agentRoot 'managed-current'), (Join-Path $userRoot 'unknown-skill'), (Join-Path $env:CODEX_HOME 'skills\.system\system-skill'), (Join-Path $pluginRoot 'skills\plugin-skill'))) { New-Item -ItemType Directory -Force -Path $path | Out-Null }
-            foreach ($path in @((Join-Path $agentRoot 'managed-stale\SKILL.md'), (Join-Path $agentRoot 'managed-current\SKILL.md'), (Join-Path $userRoot 'unknown-skill\SKILL.md'), (Join-Path $env:CODEX_HOME 'skills\.system\system-skill\SKILL.md'), (Join-Path $pluginRoot 'skills\plugin-skill\SKILL.md'))) { [IO.File]::WriteAllText($path, "---`nname: $([IO.Path]::GetFileName((Split-Path $path -Parent)))`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false)) }
+            foreach ($path in @((Join-Path $agentRoot 'managed-stale'), (Join-Path $agentRoot 'managed-current'), (Join-Path $userRoot 'unknown-skill'), (Join-Path $userRoot 'plugin-skill'), (Join-Path $env:CODEX_HOME 'skills\.system\system-skill'), (Join-Path $pluginRoot 'skills\plugin-skill'))) { New-Item -ItemType Directory -Force -Path $path | Out-Null }
+            foreach ($path in @((Join-Path $agentRoot 'managed-stale\SKILL.md'), (Join-Path $agentRoot 'managed-current\SKILL.md'), (Join-Path $userRoot 'unknown-skill\SKILL.md'), (Join-Path $userRoot 'plugin-skill\SKILL.md'), (Join-Path $env:CODEX_HOME 'skills\.system\system-skill\SKILL.md'), (Join-Path $pluginRoot 'skills\plugin-skill\SKILL.md'))) { [IO.File]::WriteAllText($path, "---`nname: $([IO.Path]::GetFileName((Split-Path $path -Parent)))`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false)) }
             Mock Invoke-CodexCliJson { [pscustomobject]@{ installed = @([pscustomobject]@{ pluginId='plugin@fixture'; name='plugin'; marketplaceName='fixture'; version='1'; installed=$true; enabled=$true; source=[pscustomobject]@{ path=$pluginRoot } }) } }
             New-Item -ItemType Junction -Path (Join-Path $userRoot 'managed-current') -Target (Join-Path $agentRoot 'managed-current') -Force | Out-Null
             New-Item -ItemType Junction -Path (Join-Path $userRoot 'managed-stale') -Target (Join-Path $agentRoot 'managed-stale') -Force | Out-Null
@@ -51,6 +51,12 @@ Describe 'Read-only skill surface inventory' {
             @($view.stale_links.projection_state) | Should -Contain 'managed_stale'
             @($view.stale_links.projection_state) | Should -Contain 'external_owned'
             @($view.stale_links.projection_state) | Should -Contain 'ownership_unknown'
+            @($view.findings.code) | Should -Contain 'plugin_native_source_preferred'
+            $preference = @($view.source_preferences | Where-Object name -eq 'plugin-skill')[0]
+            $preference.plugin_installed | Should -BeTrue
+            $preference.standalone_duplicate | Should -BeTrue
+            $preference.native_source_preferred | Should -BeTrue
+            $preference.action | Should -Be 'report_only_do_not_import_duplicate'
         }
         finally { $env:CODEX_HOME = $oldCodexHome; if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force } }
     }

@@ -68,12 +68,13 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 add <repo> --skill <path>
 .\skills.ps1 锁定
 .\skills.ps1 verify-lock
+.\skills.ps1 check-updates --json
 .\skills.ps1 更新 -Plan
 .\skills.ps1 更新 -Upgrade
 .\skills.ps1 构建生效
 ```
 
-`构建生效` 会重建并写入宿主目标，属于外部投影动作。仅需仓库内同步时运行 `build.ps1`；不要用 `构建生效` 代替普通构建验证。
+`check-updates --json` 只报告每个来源的 `current/target/changed/source`，不 apply、不构建、不投影、不同步 MCP。`构建生效` 会重建并写入宿主目标，属于外部投影动作。仅需仓库内同步时运行 `build.ps1`；不要用 `构建生效` 代替普通构建验证。仓库不再创建或管理 Windows 自动更新计划任务；`doctor` 只读提示同名旧任务，清理由用户在宿主侧决定。
 
 ### MCP
 
@@ -134,7 +135,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 capability-inventory --view skill-surfaces --json
 ```
 
-该命令还会读取 `codex plugin list --json`、`codex mcp list --json` 与 `codex doctor --json`，只保留脱敏的只读 host observation。它可对比仓库声明与 CLI 当前观察，但不证明技能已经 `host_loaded` 或完成真实调用。
+该命令还会读取 `codex plugin list --json`、`codex mcp list --json` 与 `codex doctor --json`，只保留脱敏的只读 host observation。若 enabled plugin 与 standalone/system skill 同名，会输出 `plugin_native_source_preferred` 和 report-only source preference；它不会安装、卸载或启用插件，也不读写 plugin cache。该观察不证明技能已经 `host_loaded` 或完成真实调用；公开 CLI 不可用时按 `platform_na`/not observed 报告。
 
 ## 外置参考仓
 
@@ -148,7 +149,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\scripts\verify-reference-governance.ps1
 ```
 
-refresh/verify 失败只阻断该次参考研究，不外推为产品主链失败。刷新不会自动采纳、安装或执行外部内容，也不会联动修改 `skills.json`；没有当前消费者的候选不进入 manifest。
+refresh/verify 失败只阻断该次参考研究，不外推为产品主链失败。每次 refresh 写入 ignored `reports/reference-refresh/<run-id>/receipt.md`，不在 Git 中维护动态 latest 状态。刷新不会自动采纳、安装或执行外部内容，也不会联动修改 `skills.json`；没有当前消费者的候选不进入 manifest。
 
 ## 开发与验证
 

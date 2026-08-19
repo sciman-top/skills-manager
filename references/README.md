@@ -15,4 +15,4 @@ This directory describes an optional, read-only development cache under `D:\CODE
 
 Refresh verifies path containment, origin identity and dirty state. Failure blocks only that explicit refresh/verify run. It does not adopt, install, execute, activate, or remove runtime sources. Candidates without a current consumer are not kept in the manifest; rediscover them when needed.
 
-`updates/reference-refresh-latest.md` is the stable pointer for the latest default refresh. Dated refresh reports are runtime history and should not be accumulated in Git.
+Each refresh writes an ignored runtime receipt to `reports/reference-refresh/<run-id>/receipt.md`. The manifest and this documentation are stable repository truth; point-in-time refresh state is not tracked in Git.

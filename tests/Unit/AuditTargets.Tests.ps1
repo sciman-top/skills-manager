@@ -1447,12 +1447,13 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
 
         It "Validates and normalizes structured overlap routing" {
             $path = Join-Path $TestDrive "recommendations-overlap-routing.json"
-            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-overlap","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[{"name":"ppt stack","reason_user_profile":"courseware","reason_target_repo":"pptx output","sources":["https://example.com/ppt"],"note":"router plus executor","routing":{"router":"teacher-ppt","selection_policy":"router first","members":[{"name":"teacher-ppt","role":"ROUTER"},{"name":"presentations","role":"executor"}]}}],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
+            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-overlap","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[],"overlap_findings":[{"name":"ppt stack","reason_user_profile":"courseware","reason_target_repo":"pptx output","sources":["https://example.com/ppt"],"note":"router plus executor","source_preference":{"plugin_installed":true,"standalone_duplicate":true,"native_source_preferred":true,"action":"report_only_do_not_import_duplicate"},"routing":{"router":"teacher-ppt","selection_policy":"router first","members":[{"name":"teacher-ppt","role":"ROUTER"},{"name":"presentations","role":"executor"}]}}],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
 
             $rec = Load-AuditRecommendations $path
 
             $rec.overlap_findings[0].routing.members[0].role | Should -Be "router"
             @($rec.overlap_findings[0].sources).Count | Should -Be 1
+            $rec.overlap_findings[0].source_preference.native_source_preferred | Should -BeTrue
         }
 
         It "Rejects structured overlap routing when the declared router is not a router member" {

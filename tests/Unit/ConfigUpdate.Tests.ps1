@@ -898,6 +898,7 @@ Describe "Config And Update Enhancements" {
                 Mock Resolve-RemoteCommit { "remote-sha" }
 
                 $items = @(Get-UpdatePlanItems $cfg)
+                $items[0].source | Should -Be "https://github.com/example/shared.git"
 
                 $items.Count | Should -Be 2
                 ($items | Where-Object { $_.target -eq "remote-sha" }).Count | Should -Be 2
@@ -978,6 +979,23 @@ Describe "Config And Update Enhancements" {
                 $Locked = $oldLocked
                 $Upgrade = $oldUpgrade
             }
+        }
+
+        It "Returns a machine-readable read-only update check" {
+            Mock Preflight {}
+            Mock LoadCfg { [pscustomobject]@{ vendors = @(); imports = @() } }
+            Mock Get-UpdatePlanItems {
+                @([pscustomobject]@{ type = "vendor"; name = "demo"; source = "owner/demo"; ref = "main"; current = "old"; target = "new"; changed = $true })
+            }
+
+            $result = Invoke-CheckUpdatesCommand @("--json")
+            $payload = $result.output | ConvertFrom-Json
+
+            $result.json | Should -BeTrue
+            $payload.read_only | Should -BeTrue
+            $payload.changed | Should -Be 1
+            $payload.items[0].source | Should -Be "owner/demo"
+            Should -Invoke Preflight -Times 1 -Exactly
         }
 
         It "Refreshes lock file after successful upgrade" {

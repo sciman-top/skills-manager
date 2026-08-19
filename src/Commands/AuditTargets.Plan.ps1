@@ -176,6 +176,15 @@ function Assert-AuditOverlapFinding($item) {
     Need (-not [string]::IsNullOrWhiteSpace([string]$item.name)) "重叠发现缺少 name"
     Assert-AuditReasonPair $item "重叠发现"
     Need (-not [string]::IsNullOrWhiteSpace([string]$item.note)) ("重叠发现缺少 note：{0}" -f [string]$item.name)
+    if ($item.PSObject.Properties.Match("source_preference").Count -gt 0 -and $null -ne $item.source_preference) {
+        Need (Test-AuditObjectLike $item.source_preference) ("重叠发现 source_preference 必须是对象：{0}" -f [string]$item.name)
+        foreach ($field in @("plugin_installed", "standalone_duplicate", "native_source_preferred")) {
+            Need ($item.source_preference.PSObject.Properties.Match($field).Count -gt 0 -and $item.source_preference.$field -is [bool]) ("重叠发现 source_preference.{0} 必须是布尔值：{1}" -f $field, [string]$item.name)
+        }
+        Need ([bool]$item.source_preference.plugin_installed) ("重叠发现 source_preference.plugin_installed 必须为 true：{0}" -f [string]$item.name)
+        Need ([bool]$item.source_preference.native_source_preferred) ("重叠发现 source_preference.native_source_preferred 必须为 true：{0}" -f [string]$item.name)
+        Need ([string]$item.source_preference.action -eq "report_only_do_not_import_duplicate") ("重叠发现 source_preference.action 无效：{0}" -f [string]$item.name)
+    }
     if ($item.PSObject.Properties.Match("routing").Count -eq 0 -or $null -eq $item.routing) { return }
 
     Need (Test-AuditObjectLike $item.routing) ("重叠发现 routing 必须是对象：{0}" -f [string]$item.name)

@@ -4,13 +4,14 @@ param(
     [string]$ReferencesRoot,
     [string[]]$RepoNames,
     [string[]]$Tier,
-    [string]$OutputDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) "references\updates"),
+    [string]$OutputDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) "reports\reference-refresh"),
     [switch]$CloneMissing,
     [switch]$FetchOnly,
     [switch]$SkipDirtyRepos
 )
 
 $ErrorActionPreference = "Stop"
+$outputDirectoryExplicit = $PSBoundParameters.ContainsKey("OutputDirectory")
 
 function Invoke-GitText {
     param(
@@ -326,6 +327,11 @@ elseif (-not $RepoNames -or $RepoNames.Count -eq 0) {
     }
 }
 
+$timestamp = New-UtcTimestamp
+if (-not $outputDirectoryExplicit) {
+    $OutputDirectory = Join-Path $OutputDirectory $timestamp
+}
+
 if (-not (Test-Path -LiteralPath $ReferencesRoot)) {
     New-Item -ItemType Directory -Force -Path $ReferencesRoot | Out-Null
 }
@@ -350,10 +356,9 @@ elseif ($normalizedTierNames.Count -gt 0) {
 else {
     "custom"
 }
-$shouldUpdateLatest = ($repoNamesLabel -eq "core-default")
 $manifestRepoIndex = Get-ManifestRepoIndex -Manifest $manifest
 
-if ($shouldUpdateLatest) {
+if ($repoNamesLabel -eq "core-default") {
     foreach ($repoName in $RepoNames) {
         if (-not $manifestRepoIndex.ContainsKey($repoName)) {
             throw "default_refresh_set references unknown repo: $repoName"
@@ -365,9 +370,7 @@ if ($shouldUpdateLatest) {
     }
 }
 
-$timestamp = New-UtcTimestamp
-$reportPath = Join-Path $OutputDirectory ("reference-refresh-{0}.md" -f $timestamp)
-$latestReportPath = Join-Path $OutputDirectory "reference-refresh-latest.md"
+$reportPath = Join-Path $OutputDirectory "receipt.md"
 $results = [System.Collections.Generic.List[object]]::new()
 
 foreach ($repoName in $RepoNames) {
@@ -716,7 +719,6 @@ $lines.Add(('clone_missing：`' + ([bool]$CloneMissing).ToString().ToLowerInvari
 $lines.Add(('根目录：`' + $ReferencesRoot + '`'))
 $lines.Add(('manifest：`' + $ManifestPath + '`'))
 $lines.Add(('集合：`' + $repoNamesLabel + '`'))
-$lines.Add(('更新 latest：`' + $shouldUpdateLatest.ToString().ToLowerInvariant() + '`'))
 if ($normalizedTierNames.Count -gt 0) {
     $lines.Add(('tier 过滤：`' + (($normalizedTierNames -join ", ") -replace "\\", "/") + '`'))
 }
@@ -792,22 +794,12 @@ while ($lines.Count -gt 0 -and [string]::IsNullOrWhiteSpace([string]$lines[$line
     (($lines -join "`n") + "`n"),
     [System.Text.UTF8Encoding]::new($false)
 )
-if ($shouldUpdateLatest) {
-    [System.IO.File]::WriteAllText(
-        $latestReportPath,
-        (($lines -join "`n") + "`n"),
-        [System.Text.UTF8Encoding]::new($false)
-    )
-}
-
 [pscustomobject]@{
     manifest_path = $ManifestPath
     references_root = $ReferencesRoot
     output_path = $reportPath
-    latest_output_path = $latestReportPath
     repo_set = $repoNamesLabel
     tier_filter = $normalizedTierNames
-    latest_updated = [bool]$shouldUpdateLatest
     repo_names = $RepoNames
     clone_missing = [bool]$CloneMissing
     fetch_only = [bool]$FetchOnly

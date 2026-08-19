@@ -57,6 +57,7 @@
 - `FR-SKL-003`：update/lock/build 能检测 dirty source、revision drift、duplicate output 和 dependency gap。
 - `FR-SKL-004`：本地 override 只进入 `overrides/{custom,patches,resources}`，patch 记录 provenance。
 - `FR-SKL-005`：卸载只撤配置与受管输出，不删除未授权源码或宿主-owned assets。
+- `FR-SKL-006`：`check-updates --json` 只读报告 current/target/changed/source；仓库不创建、更新或删除宿主计划任务，不把 source update 与 MCP 同步自动串联。
 
 ### 5.2 MCP
 
@@ -87,6 +88,7 @@
 - `FR-PRJ-003`：本仓不得复制宿主 metadata budget/description compaction；投影保留全部 eligible entry，并报告真实 conflict。
 - `FR-PRJ-004`：普通语义选择归宿主；router 只接受 `DomainHint` 和宿主选择，禁止 lexical ranking、profile switch 与 host mutation。
 - `FR-PRJ-005`：inventory/corpus 只能证明候选与 policy contract，不证明宿主真实 invocation。
+- `FR-PRJ-006`：只读 inventory 使用公开 plugin CLI JSON 识别 plugin/system/standalone 同名能力，优先建议 native plugin source；finding 仅报告，不安装、卸载、启用 plugin 或读写 cache。
 
 ### 5.6 Reference shelf
 
@@ -95,6 +97,7 @@
 - `FR-REF-003`：manifest 只保留 active core/secondary repo，name/path 唯一，default set 只引用 core。
 - `FR-REF-004`：refresh 校验 origin、dirty 状态和 containment，只做 fetch/fast-forward/clone。
 - `FR-REF-005`：refresh/verify 失败只阻断该参考工作流，不授权采纳、安装、执行或 runtime import 删除；无消费者候选需要时重新发现。
+- `FR-REF-006`：每次 refresh 写入 ignored `reports/reference-refresh/<run-id>/receipt.md`；Git 只跟踪 manifest 和稳定说明，不跟踪动态 latest 状态。
 
 ## 6. 非功能需求
 

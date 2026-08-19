@@ -5,27 +5,35 @@
 
 if ($MyInvocation.InvocationName -ne '.') {
     try {
+        $deprecatedCommandAliases = @{
+            "发现技能" = "发现"
+            "从技能库选择安装" = "安装"
+            "卸载技能" = "卸载"
+            "构建并生效" = "构建生效"
+            "更新上游并重建" = "更新"
+            "生成锁文件" = "锁定"
+        }
+        if ($deprecatedCommandAliases.ContainsKey($Cmd)) {
+            $canonicalCmd = [string]$deprecatedCommandAliases[$Cmd]
+            Write-Warning ("命令别名 '{0}' 已弃用；请改用 '{1}'。" -f $Cmd, $canonicalCmd)
+            $Cmd = $canonicalCmd
+        }
         switch ($Cmd) {
             "menu" { 菜单 }
             "初始化" { 初始化 }
             "新增技能库" { 新增技能库 }
             "删除技能库" { 删除技能库 }
             "发现" { 发现 }
-            "发现技能" { 发现 }
             "命令导入安装" { 命令导入安装 }
             "add" { Add-ImportFromArgs (Merge-FilterAndArgs $Filter $args) }
             "npx" { Add-ImportFromArgs (Get-AddTokensFromNpx (Merge-FilterAndArgs $Filter $args)) }
             "安装" { 安装 }
-            "从技能库选择安装" { 安装 }
             "卸载" { 卸载 (Merge-FilterAndArgs $Filter $args) }
-            "卸载技能" { 卸载 (Merge-FilterAndArgs $Filter $args) }
             "选择" { 选择 }
             "构建生效" { 构建生效 -AllowUnverifiedProjection:$AllowUnverifiedHostProjection -SkipHostProjection:$SkipHostProjection }
-            "构建并生效" { 构建生效 -AllowUnverifiedProjection:$AllowUnverifiedHostProjection -SkipHostProjection:$SkipHostProjection }
             "更新" { 更新 }
-            "更新上游并重建" { 更新 }
+            "check-updates" { $result = Invoke-CheckUpdatesCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output } }
             "锁定" { 锁定 }
-            "生成锁文件" { 锁定 }
             "验证锁定" { 验证锁定 }
             "verify-lock" { 验证锁定 }
             "清理无效映射" { 清理无效映射 (Merge-FilterAndArgs $Filter $args) }
@@ -92,12 +100,9 @@ if ($MyInvocation.InvocationName -ne '.') {
             "rule-plan" { $result=Invoke-RulePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "规则应用" { $tokens=Merge-FilterAndArgs $Filter $args;if($Plan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "rule-apply" { $tokens=Merge-FilterAndArgs $Filter $args;if($Plan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "一键" { Invoke-Workflow (Merge-FilterAndArgs $Filter $args) }
-            "workflow" { Invoke-Workflow (Merge-FilterAndArgs $Filter $args) }
             "打开配置" { 打开配置 }
             "解除关联" { 解除关联 }
             "清理备份" { 清理备份 }
-            "自动更新设置" { 自动更新设置 }
             "帮助" { 帮助 }
             "help" { 帮助 }
             "--help" { 帮助 }

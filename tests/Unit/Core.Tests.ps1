@@ -3223,17 +3223,17 @@ $governanceScript = Join-Path $repoRoot "scripts\verify-reference-governance.ps1
         @($manifest.default_refresh_set) -contains "openai-plugins" | Should -Be $true
     }
 
-    It "Routes the default set to plugins and updates the stable latest report" {
+    It "Routes the default set to plugins and writes a runtime receipt" {
         $referencesRoot = Join-Path $TestDrive "reference-shelf"
         $outputDirectory = Join-Path $TestDrive "updates"
 
         $defaultResult = & $refreshScript -ManifestPath $manifestPath -ReferencesRoot $referencesRoot -OutputDirectory $outputDirectory -FetchOnly
         $defaultResult.repo_set | Should -Be "core-default"
-        $defaultResult.latest_updated | Should -Be $true
         @($defaultResult.repo_names) -contains "openai-plugins" | Should -Be $true
         @($defaultResult.repo_names) -contains "openai-skills" | Should -Be $false
 
-        Test-Path -LiteralPath (Join-Path $outputDirectory "reference-refresh-latest.md") | Should -Be $true
+        $defaultResult.output_path | Should -Be (Join-Path $outputDirectory "receipt.md")
+        Test-Path -LiteralPath $defaultResult.output_path | Should -Be $true
     }
 
     It "Distinguishes fetched remote refs from the consumable local checkout revision" {

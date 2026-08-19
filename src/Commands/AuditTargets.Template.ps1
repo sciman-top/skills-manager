@@ -357,6 +357,12 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
                 reason_target_repo = $targetReasonInstall
                 sources = @("<source-url-1>")
                 note = "<report-only observation; no automatic uninstall>"
+                source_preference = [ordered]@{
+                    plugin_installed = $true
+                    standalone_duplicate = $true
+                    native_source_preferred = $true
+                    action = "report_only_do_not_import_duplicate"
+                }
                 routing = [ordered]@{
                     decision_owner = "host_ai"
                     selection_policy = "<how to choose executors without invoking every overlapping skill>"

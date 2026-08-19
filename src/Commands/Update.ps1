@@ -328,6 +328,7 @@ function Get-UpdatePlanItems($cfg, [switch]$PreferLocalRefs) {
         $items += [pscustomobject]@{
             type = "vendor"
             name = [string]$v.name
+            source = [string]$v.repo
             ref = $ref
             current = if ([string]::IsNullOrWhiteSpace($current)) { "missing" } else { $current }
             target = if ([string]::IsNullOrWhiteSpace($remote)) { "unknown" } else { $remote }
@@ -345,6 +346,7 @@ function Get-UpdatePlanItems($cfg, [switch]$PreferLocalRefs) {
         $items += [pscustomobject]@{
             type = "import"
             name = $name
+            source = [string]$i.repo
             ref = $ref
             current = if ([string]::IsNullOrWhiteSpace($current)) { "missing" } else { $current }
             target = if ([string]::IsNullOrWhiteSpace($remote)) { "unknown" } else { $remote }
@@ -415,6 +417,56 @@ function Show-UpdatePlan($cfg) {
     }
     Write-Host ("计划摘要：total={0}, upgrade={1}, unchanged={2}" -f $items.Count, $changed.Count, ($items.Count - $changed.Count))
     return $items
+}
+
+function Invoke-CheckUpdatesCommand([string[]]$Tokens) {
+    $json = $false
+    foreach ($arg in @($Tokens)) {
+        $token = ([string]$arg).Trim().ToLowerInvariant()
+        if ([string]::IsNullOrWhiteSpace($token)) { continue }
+        if ($token -eq "--json") { $json = $true; continue }
+        throw ("check-updates 不支持参数：{0}" -f $arg)
+    }
+
+    $previousSuppressAllLogging = $script:SuppressAllLogging
+    $script:SuppressAllLogging = $true
+    try {
+        Preflight
+        $items = @(Get-UpdatePlanItems (LoadCfg))
+        $report = [pscustomobject][ordered]@{
+        schema_version = 1
+        command = "check-updates"
+        read_only = $true
+        total = $items.Count
+        changed = @($items | Where-Object { [bool]$_.changed }).Count
+        items = @($items | ForEach-Object {
+            [pscustomobject][ordered]@{
+                type = [string]$_.type
+                name = [string]$_.name
+                source = [string]$_.source
+                ref = [string]$_.ref
+                current = [string]$_.current
+                target = [string]$_.target
+                changed = [bool]$_.changed
+            }
+        })
+        }
+        if ($json) {
+            return [pscustomobject]@{ json = $true; output = ($report | ConvertTo-Json -Depth 5 -Compress); report = $report }
+        }
+
+        $lines = [Collections.Generic.List[string]]::new()
+        $lines.Add(("更新检查：total={0}, changed={1}" -f $report.total, $report.changed)) | Out-Null
+        foreach ($item in @($report.items)) {
+            $lines.Add(("[{0}] {1}/{2} source={3}" -f $(if ($item.changed) { "UPDATE" } else { "CURRENT" }), $item.type, $item.name, $item.source)) | Out-Null
+            $lines.Add(("  current={0}" -f $item.current)) | Out-Null
+            $lines.Add(("  target ={0}" -f $item.target)) | Out-Null
+        }
+        return [pscustomobject]@{ json = $false; output = ($lines -join [Environment]::NewLine); report = $report }
+    }
+    finally {
+        $script:SuppressAllLogging = $previousSuppressAllLogging
+    }
 }
 
 function 更新Vendor($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $null, [switch]$SkipFetch) {

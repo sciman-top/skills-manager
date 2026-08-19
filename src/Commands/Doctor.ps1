@@ -195,6 +195,20 @@ function Get-DoctorConfigRisks($cfg) {
     return @($risks)
 }
 
+function Get-DoctorLegacyAutoUpdateTaskStatus {
+    $taskName = "skills-manager-weekly-update-friday-2000"
+    if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) {
+        return [pscustomobject][ordered]@{ observed = $false; platform_na = $true; exists = $null; task_name = $taskName; action = "none" }
+    }
+    try {
+        $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+        return [pscustomobject][ordered]@{ observed = $true; platform_na = $false; exists = ($null -ne $task); task_name = $taskName; action = "manual_cleanup_if_no_longer_needed" }
+    }
+    catch {
+        return [pscustomobject][ordered]@{ observed = $true; platform_na = $false; exists = $false; task_name = $taskName; action = "none" }
+    }
+}
+
 function Invoke-Doctor([string[]]$tokens = @()) {
     $opts = Parse-DoctorArgs $tokens
     if (-not $opts.json) {
@@ -220,6 +234,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
             applied = @()
         }
     }
+    $report.checks.legacy_auto_update_task = Get-DoctorLegacyAutoUpdateTaskStatus
 
     # 1. System Checks
     try {
@@ -419,6 +434,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     }
     if ($report.checks.network -and -not $report.checks.network.ok) { $report.summary.errors += "network_unavailable" }
     if ($report.checks.long_paths.value -eq 0) { $report.summary.warnings += "long_paths_off" }
+    if ($report.checks.legacy_auto_update_task.exists -eq $true) { $report.summary.warnings += "legacy_auto_update_task_manual_cleanup" }
     if (@($report.risks).Count -gt 0) { $report.summary.warnings += "config_risks_present" }
     if ($opts.strict -and @($report.risks).Count -gt 0) {
         $report.pass = $false

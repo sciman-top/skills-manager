@@ -27,7 +27,7 @@ pwsh -NoProfile -File .\scripts\refresh-reference-repos.ps1 -Tier secondary -Clo
 pwsh -NoProfile -File .\scripts\verify-reference-governance.ps1
 ```
 
-Before network operations, refresh verifies manifest containment, repository identity, actual `origin`, and dirty state. Default refresh updates `references/updates/reference-refresh-latest.md`; custom/tier runs create a dated runtime report without replacing the stable pointer. These reports are reference-workflow receipts, not product health or release gates.
+Before network operations, refresh verifies manifest containment, repository identity, actual `origin`, and dirty state. Every run writes an ignored receipt under `reports/reference-refresh/<run-id>/receipt.md`; dynamic refresh state is not tracked in Git. These receipts are reference-workflow evidence, not product health or release gates.
 
 Clone/fetch/fast-forward only authorizes read-only comparison. It does not authorize dependency installation, script execution, skill/MCP adoption, runtime activation, host mutation, or deletion from `skills.json`.
 

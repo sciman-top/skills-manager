@@ -14,6 +14,8 @@
 
 `build.ps1` 按固定顺序拼接 source，生成根 `skills.ps1`。生成 bundle 是发布物，不是编辑 seam。
 
+帮助与菜单只展示 canonical commands。仍需兼容的少量历史名称集中在 CLI shell 的 compatibility map，调用时输出 deprecation warning；已无调用价值的 `一键/workflow` 与 `自动更新设置` 不保留 compatibility 路由。
+
 ### Config and source materialization
 
 - Interface：`skills.json`、`skills.lock.json`
@@ -25,12 +27,12 @@
 ### MCP
 
 - Interface：`安装MCP`、`卸载MCP`、`MCP配置`、`同步MCP`
-- Implementation：`src/Commands/Mcp.ps1`
+- Implementation：`src/Commands/Mcp.ProfileAndSafety.ps1`（profile、输入规范化与 secret 安全）和 `src/Commands/Mcp.ps1`（adapter、规划、事务与同步）
 - State：`skills.json.mcp_servers/mcp_profiles/mcp_targets`
 
 MCP config mutation、host projection、live readiness 是三个不同状态。仓库保存环境变量名，不保存 credential value。
 
-只读宿主观察通过 Codex CLI 的公开 JSON 面读取 `plugin list`、`mcp list` 与 `doctor`。适配器只保留插件标识/数量、MCP 名称与启用/认证/transport 类型、doctor 的 schema/version/status/check 摘要；不读取插件 cache 私有结构，不保留 MCP command/env/header 或 doctor details，也不把观察结果提升为 `host_loaded`。
+只读宿主观察通过 Codex CLI 的公开 JSON 面读取 `plugin list`、`mcp list` 与 `doctor`。适配器只保留插件标识/数量、MCP 名称与启用/认证/transport 类型、doctor 的 schema/version/status/check 摘要；plugin 与 standalone/system skill 同名时只生成 `native_source_preferred` finding。它不读取插件 cache 私有结构、不执行 plugin mutation、不保留 MCP command/env/header 或 doctor details，也不把观察结果提升为 `host_loaded`。
 
 ### Target audit
 
@@ -76,7 +78,7 @@ Canonical inventory 统一来源；eligibility 处理 enabled/dependency/placeme
 - Verification：`scripts/verify-reference-governance.ps1`
 - Owned root：`D:\CODE\external\skills-manager-references`
 
-`skills.json` 保持 runtime 真源；普通 build/test/update/projection 不读取 shelf。manifest 只有 core/secondary active set，只在显式 refresh/verify 中适用。refresh 对已有 checkout 先验证 origin identity 和 dirty state；clone/fetch/pull 不改变 runtime config。候选 backlog 不持久化。
+`skills.json` 保持 runtime 真源；普通 build/test/update/projection 不读取 shelf。manifest 只有 core/secondary active set，只在显式 refresh/verify 中适用。refresh 对已有 checkout 先验证 origin identity 和 dirty state，并把单次结果写入 ignored `reports/reference-refresh/<run-id>/receipt.md`；clone/fetch/pull 不改变 runtime config。候选 backlog 与动态 latest 状态都不持久化。
 
 ## 3. 真值与状态
 
@@ -127,5 +129,6 @@ Module 删除后若复杂度直接消失，而不在真实 caller 重现，则�
 - phase/task/evidence archive 作为当前状态库
 - conditional reference candidate backlog
 - typed shadow 双实现
+- 静态一键 workflow 与自动更新计划任务控制面
 
 只有新的真实失败、至少一个稳定消费者、现有 interface 无法承载、对比净收益和可回滚迁移同时成立时，才准入新 module 或 seam。

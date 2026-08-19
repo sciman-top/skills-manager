@@ -168,6 +168,7 @@ function Write-LogRecord([string]$Level, [string]$Message, [object]$Data) {
     catch {}
 }
 function Log([string]$msg, [string]$Level = "INFO", [switch]$NoHost, [object]$Data) {
+    if ($script:SuppressAllLogging) { return }
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $lvl = $Level.ToUpperInvariant()
     $safeMessage = Protect-SensitiveText $msg

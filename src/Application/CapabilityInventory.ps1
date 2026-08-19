@@ -124,6 +124,35 @@ function New-SkillSurfaceView {
     $pluginItems = @($pluginInventory.skills | ForEach-Object { Get-CapabilitySurfaceSkillMetadata ([string]$_.path) 'codex_plugin' 'installed_enabled_plugin' $true })
     $surfaces.Add((New-CapabilitySurfaceRecord 'plugins' 'codex_plugin_list_json' 'codex plugin list --json' ([string]$pluginInventory.freshness) ([string]$pluginInventory.coverage) $pluginItems)) | Out-Null
     foreach ($warning in @($pluginInventory.warnings)) { $findings.Add([pscustomobject]@{ code = [string]$warning.code; severity = 'warning'; surface = 'plugins'; path = [string]$warning.subject; message = [string]$warning.message }) | Out-Null }
+    $sourcePreferences = [Collections.Generic.List[object]]::new()
+    foreach ($pluginItem in $pluginItems) {
+        foreach ($surface in @($surfaces | Where-Object { $_.name -in @('repo_supply', 'canonical_projection', 'user_skill_root', 'system') })) {
+            foreach ($duplicate in @($surface.items | Where-Object { [string]::Equals([string]$_.name, [string]$pluginItem.name, [StringComparison]::OrdinalIgnoreCase) })) {
+                $preference = [pscustomobject][ordered]@{
+                    name = [string]$pluginItem.name
+                    plugin_installed = $true
+                    standalone_duplicate = ([string]$surface.name -ne 'system')
+                    system_duplicate = ([string]$surface.name -eq 'system')
+                    native_source_preferred = $true
+                    duplicate_surface = [string]$surface.name
+                    plugin_path = [string]$pluginItem.path
+                    duplicate_path = [string]$duplicate.path
+                    action = 'report_only_do_not_import_duplicate'
+                }
+                $sourcePreferences.Add($preference) | Out-Null
+                $findings.Add([pscustomobject]@{
+                    code = 'plugin_native_source_preferred'
+                    severity = 'warning'
+                    surface = [string]$surface.name
+                    path = [string]$duplicate.path
+                    message = ('Enabled plugin skill already provides {0}; prefer the native plugin source and do not import another standalone copy automatically.' -f [string]$pluginItem.name)
+                    plugin_installed = $true
+                    standalone_duplicate = [bool]$preference.standalone_duplicate
+                    native_source_preferred = $true
+                }) | Out-Null
+            }
+        }
+    }
     $hostObservation = Get-CodexHostObservation -PluginInventory $pluginInventory -ExpectedMcpServers @($Config.mcp_servers)
     foreach ($warning in @($hostObservation.mcp.warnings) + @($hostObservation.doctor.warnings)) { $findings.Add([pscustomobject]@{ code = [string]$warning.code; severity = 'warning'; surface = 'host_observation'; path = [string]$warning.subject; message = [string]$warning.message }) | Out-Null }
 
@@ -146,5 +175,5 @@ function New-SkillSurfaceView {
             if (-not $identityValid) { $findings.Add([pscustomobject]@{ code = 'surface_skill_identity_incomplete'; severity = 'error'; surface = $surface.name; path = [string]$item.path; message = 'Skill surface items require name/path/entrypoint/description/owner/resident/projection identity.' }) | Out-Null }
         }
     }
-    return [pscustomobject][ordered]@{ schema_version = 1; view = 'SkillSurfaceView'; generated_at = $GeneratedAt; read_only = $true; pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); surfaces = $surfaces.ToArray(); surface_count = $surfaces.Count; host_observation = $hostObservation; stale_links = @($userItems | Where-Object projection_state -in @('managed_stale', 'external_owned', 'ownership_unknown', 'ownership_drift')); findings = $findings.ToArray(); provider_calls = 0; native_mutations = 0; writes = 0 }
+    return [pscustomobject][ordered]@{ schema_version = 1; view = 'SkillSurfaceView'; generated_at = $GeneratedAt; read_only = $true; pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); surfaces = $surfaces.ToArray(); surface_count = $surfaces.Count; host_observation = $hostObservation; source_preferences = $sourcePreferences.ToArray(); stale_links = @($userItems | Where-Object projection_state -in @('managed_stale', 'external_owned', 'ownership_unknown', 'ownership_drift')); findings = $findings.ToArray(); provider_calls = 0; native_mutations = 0; writes = 0 }
 }

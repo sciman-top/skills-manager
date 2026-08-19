@@ -1,6 +1,6 @@
 ﻿#requires -Version 7.0
 param(
-    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "锁定", "生成锁文件", "验证锁定", "verify-lock", "清理无效映射", "打开配置", "解除关联", "清理备份", "自动更新设置", "帮助", "help", "--help", "-h", "doctor", "add", "npx", "安装MCP", "卸载MCP", "同步MCP", "MCP配置", "mcp-profile", "mcp-install", "mcp-uninstall", "mcp-sync", "审查目标", "audit-targets", "能力清单", "capability-inventory", "规则审查", "rule-audit", "规则全域审查", "rule-estate-audit", "规则全域计划", "rule-estate-plan", "规则全域应用", "rule-estate-apply", "规则全域回滚", "rule-estate-rollback", "全局规则检查", "global-rules-check", "全局规则计划", "global-rules-plan", "全局规则应用", "global-rules-apply", "全局规则回滚", "global-rules-rollback", "规则计划", "rule-plan", "规则应用", "rule-apply", "一键", "workflow", "prune-invalid-mappings")]
+    [ValidateSet("menu", "初始化", "新增技能库", "删除技能库", "发现", "发现技能", "命令导入安装", "安装", "从技能库选择安装", "卸载", "卸载技能", "选择", "构建生效", "构建并生效", "更新", "更新上游并重建", "check-updates", "锁定", "生成锁文件", "验证锁定", "verify-lock", "清理无效映射", "打开配置", "解除关联", "清理备份", "帮助", "help", "--help", "-h", "doctor", "add", "npx", "安装MCP", "卸载MCP", "同步MCP", "MCP配置", "mcp-profile", "mcp-install", "mcp-uninstall", "mcp-sync", "审查目标", "audit-targets", "能力清单", "capability-inventory", "规则审查", "rule-audit", "规则全域审查", "rule-estate-audit", "规则全域计划", "rule-estate-plan", "规则全域应用", "rule-estate-apply", "规则全域回滚", "rule-estate-rollback", "全局规则检查", "global-rules-check", "全局规则计划", "global-rules-plan", "全局规则应用", "global-rules-apply", "全局规则回滚", "global-rules-rollback", "规则计划", "rule-plan", "规则应用", "rule-apply", "prune-invalid-mappings")]
     [string]$Cmd = "menu",
     [string]$Filter = "",
     [switch]$DryRun,
@@ -465,6 +465,7 @@ function Write-LogRecord([string]$Level, [string]$Message, [object]$Data) {
     catch {}
 }
 function Log([string]$msg, [string]$Level = "INFO", [switch]$NoHost, [object]$Data) {
+    if ($script:SuppressAllLogging) { return }
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $lvl = $Level.ToUpperInvariant()
     $safeMessage = Protect-SensitiveText $msg
@@ -2585,6 +2586,35 @@ function New-SkillSurfaceView {
     $pluginItems = @($pluginInventory.skills | ForEach-Object { Get-CapabilitySurfaceSkillMetadata ([string]$_.path) 'codex_plugin' 'installed_enabled_plugin' $true })
     $surfaces.Add((New-CapabilitySurfaceRecord 'plugins' 'codex_plugin_list_json' 'codex plugin list --json' ([string]$pluginInventory.freshness) ([string]$pluginInventory.coverage) $pluginItems)) | Out-Null
     foreach ($warning in @($pluginInventory.warnings)) { $findings.Add([pscustomobject]@{ code = [string]$warning.code; severity = 'warning'; surface = 'plugins'; path = [string]$warning.subject; message = [string]$warning.message }) | Out-Null }
+    $sourcePreferences = [Collections.Generic.List[object]]::new()
+    foreach ($pluginItem in $pluginItems) {
+        foreach ($surface in @($surfaces | Where-Object { $_.name -in @('repo_supply', 'canonical_projection', 'user_skill_root', 'system') })) {
+            foreach ($duplicate in @($surface.items | Where-Object { [string]::Equals([string]$_.name, [string]$pluginItem.name, [StringComparison]::OrdinalIgnoreCase) })) {
+                $preference = [pscustomobject][ordered]@{
+                    name = [string]$pluginItem.name
+                    plugin_installed = $true
+                    standalone_duplicate = ([string]$surface.name -ne 'system')
+                    system_duplicate = ([string]$surface.name -eq 'system')
+                    native_source_preferred = $true
+                    duplicate_surface = [string]$surface.name
+                    plugin_path = [string]$pluginItem.path
+                    duplicate_path = [string]$duplicate.path
+                    action = 'report_only_do_not_import_duplicate'
+                }
+                $sourcePreferences.Add($preference) | Out-Null
+                $findings.Add([pscustomobject]@{
+                    code = 'plugin_native_source_preferred'
+                    severity = 'warning'
+                    surface = [string]$surface.name
+                    path = [string]$duplicate.path
+                    message = ('Enabled plugin skill already provides {0}; prefer the native plugin source and do not import another standalone copy automatically.' -f [string]$pluginItem.name)
+                    plugin_installed = $true
+                    standalone_duplicate = [bool]$preference.standalone_duplicate
+                    native_source_preferred = $true
+                }) | Out-Null
+            }
+        }
+    }
     $hostObservation = Get-CodexHostObservation -PluginInventory $pluginInventory -ExpectedMcpServers @($Config.mcp_servers)
     foreach ($warning in @($hostObservation.mcp.warnings) + @($hostObservation.doctor.warnings)) { $findings.Add([pscustomobject]@{ code = [string]$warning.code; severity = 'warning'; surface = 'host_observation'; path = [string]$warning.subject; message = [string]$warning.message }) | Out-Null }
 
@@ -2607,7 +2637,7 @@ function New-SkillSurfaceView {
             if (-not $identityValid) { $findings.Add([pscustomobject]@{ code = 'surface_skill_identity_incomplete'; severity = 'error'; surface = $surface.name; path = [string]$item.path; message = 'Skill surface items require name/path/entrypoint/description/owner/resident/projection identity.' }) | Out-Null }
         }
     }
-    return [pscustomobject][ordered]@{ schema_version = 1; view = 'SkillSurfaceView'; generated_at = $GeneratedAt; read_only = $true; pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); surfaces = $surfaces.ToArray(); surface_count = $surfaces.Count; host_observation = $hostObservation; stale_links = @($userItems | Where-Object projection_state -in @('managed_stale', 'external_owned', 'ownership_unknown', 'ownership_drift')); findings = $findings.ToArray(); provider_calls = 0; native_mutations = 0; writes = 0 }
+    return [pscustomobject][ordered]@{ schema_version = 1; view = 'SkillSurfaceView'; generated_at = $GeneratedAt; read_only = $true; pass = (@($findings | Where-Object severity -eq 'error').Count -eq 0); surfaces = $surfaces.ToArray(); surface_count = $surfaces.Count; host_observation = $hostObservation; source_preferences = $sourcePreferences.ToArray(); stale_links = @($userItems | Where-Object projection_state -in @('managed_stale', 'external_owned', 'ownership_unknown', 'ownership_drift')); findings = $findings.ToArray(); provider_calls = 0; native_mutations = 0; writes = 0 }
 }
 
 $skillCatalogCompilerRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
@@ -7865,6 +7895,20 @@ function Get-DoctorConfigRisks($cfg) {
     return @($risks)
 }
 
+function Get-DoctorLegacyAutoUpdateTaskStatus {
+    $taskName = "skills-manager-weekly-update-friday-2000"
+    if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) {
+        return [pscustomobject][ordered]@{ observed = $false; platform_na = $true; exists = $null; task_name = $taskName; action = "none" }
+    }
+    try {
+        $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+        return [pscustomobject][ordered]@{ observed = $true; platform_na = $false; exists = ($null -ne $task); task_name = $taskName; action = "manual_cleanup_if_no_longer_needed" }
+    }
+    catch {
+        return [pscustomobject][ordered]@{ observed = $true; platform_na = $false; exists = $false; task_name = $taskName; action = "none" }
+    }
+}
+
 function Invoke-Doctor([string[]]$tokens = @()) {
     $opts = Parse-DoctorArgs $tokens
     if (-not $opts.json) {
@@ -7890,6 +7934,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
             applied = @()
         }
     }
+    $report.checks.legacy_auto_update_task = Get-DoctorLegacyAutoUpdateTaskStatus
 
     # 1. System Checks
     try {
@@ -8089,6 +8134,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     }
     if ($report.checks.network -and -not $report.checks.network.ok) { $report.summary.errors += "network_unavailable" }
     if ($report.checks.long_paths.value -eq 0) { $report.summary.warnings += "long_paths_off" }
+    if ($report.checks.legacy_auto_update_task.exists -eq $true) { $report.summary.warnings += "legacy_auto_update_task_manual_cleanup" }
     if (@($report.risks).Count -gt 0) { $report.summary.warnings += "config_risks_present" }
     if ($opts.strict -and @($report.risks).Count -gt 0) {
         $report.pass = $false
@@ -10726,6 +10772,7 @@ function Get-UpdatePlanItems($cfg, [switch]$PreferLocalRefs) {
         $items += [pscustomobject]@{
             type = "vendor"
             name = [string]$v.name
+            source = [string]$v.repo
             ref = $ref
             current = if ([string]::IsNullOrWhiteSpace($current)) { "missing" } else { $current }
             target = if ([string]::IsNullOrWhiteSpace($remote)) { "unknown" } else { $remote }
@@ -10743,6 +10790,7 @@ function Get-UpdatePlanItems($cfg, [switch]$PreferLocalRefs) {
         $items += [pscustomobject]@{
             type = "import"
             name = $name
+            source = [string]$i.repo
             ref = $ref
             current = if ([string]::IsNullOrWhiteSpace($current)) { "missing" } else { $current }
             target = if ([string]::IsNullOrWhiteSpace($remote)) { "unknown" } else { $remote }
@@ -10813,6 +10861,56 @@ function Show-UpdatePlan($cfg) {
     }
     Write-Host ("计划摘要：total={0}, upgrade={1}, unchanged={2}" -f $items.Count, $changed.Count, ($items.Count - $changed.Count))
     return $items
+}
+
+function Invoke-CheckUpdatesCommand([string[]]$Tokens) {
+    $json = $false
+    foreach ($arg in @($Tokens)) {
+        $token = ([string]$arg).Trim().ToLowerInvariant()
+        if ([string]::IsNullOrWhiteSpace($token)) { continue }
+        if ($token -eq "--json") { $json = $true; continue }
+        throw ("check-updates 不支持参数：{0}" -f $arg)
+    }
+
+    $previousSuppressAllLogging = $script:SuppressAllLogging
+    $script:SuppressAllLogging = $true
+    try {
+        Preflight
+        $items = @(Get-UpdatePlanItems (LoadCfg))
+        $report = [pscustomobject][ordered]@{
+        schema_version = 1
+        command = "check-updates"
+        read_only = $true
+        total = $items.Count
+        changed = @($items | Where-Object { [bool]$_.changed }).Count
+        items = @($items | ForEach-Object {
+            [pscustomobject][ordered]@{
+                type = [string]$_.type
+                name = [string]$_.name
+                source = [string]$_.source
+                ref = [string]$_.ref
+                current = [string]$_.current
+                target = [string]$_.target
+                changed = [bool]$_.changed
+            }
+        })
+        }
+        if ($json) {
+            return [pscustomobject]@{ json = $true; output = ($report | ConvertTo-Json -Depth 5 -Compress); report = $report }
+        }
+
+        $lines = [Collections.Generic.List[string]]::new()
+        $lines.Add(("更新检查：total={0}, changed={1}" -f $report.total, $report.changed)) | Out-Null
+        foreach ($item in @($report.items)) {
+            $lines.Add(("[{0}] {1}/{2} source={3}" -f $(if ($item.changed) { "UPDATE" } else { "CURRENT" }), $item.type, $item.name, $item.source)) | Out-Null
+            $lines.Add(("  current={0}" -f $item.current)) | Out-Null
+            $lines.Add(("  target ={0}" -f $item.target)) | Out-Null
+        }
+        return [pscustomobject]@{ json = $false; output = ($lines -join [Environment]::NewLine); report = $report }
+    }
+    finally {
+        $script:SuppressAllLogging = $previousSuppressAllLogging
+    }
 }
 
 function 更新Vendor($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $null, [switch]$SkipFetch) {
@@ -11342,6 +11440,7 @@ function Normalize-McpServiceNameWithFallback([string]$name, [string]$fallbackSe
     Need $false ("MCP 服务名 无法规范化，请更换名称：{0}" -f $name)
     return $null
 }
+
 
 function Parse-McpInstallArgs([string[]]$tokens) {
     Need ($tokens -and $tokens.Count -gt 0) "缺少 MCP 服务参数。示例：安装MCP context7 --cmd npx -- -y @upstash/context7-mcp"
@@ -16457,6 +16556,12 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
                 reason_target_repo = $targetReasonInstall
                 sources = @("<source-url-1>")
                 note = "<report-only observation; no automatic uninstall>"
+                source_preference = [ordered]@{
+                    plugin_installed = $true
+                    standalone_duplicate = $true
+                    native_source_preferred = $true
+                    action = "report_only_do_not_import_duplicate"
+                }
                 routing = [ordered]@{
                     decision_owner = "host_ai"
                     selection_policy = "<how to choose executors without invoking every overlapping skill>"
@@ -17317,6 +17422,15 @@ function Assert-AuditOverlapFinding($item) {
     Need (-not [string]::IsNullOrWhiteSpace([string]$item.name)) "重叠发现缺少 name"
     Assert-AuditReasonPair $item "重叠发现"
     Need (-not [string]::IsNullOrWhiteSpace([string]$item.note)) ("重叠发现缺少 note：{0}" -f [string]$item.name)
+    if ($item.PSObject.Properties.Match("source_preference").Count -gt 0 -and $null -ne $item.source_preference) {
+        Need (Test-AuditObjectLike $item.source_preference) ("重叠发现 source_preference 必须是对象：{0}" -f [string]$item.name)
+        foreach ($field in @("plugin_installed", "standalone_duplicate", "native_source_preferred")) {
+            Need ($item.source_preference.PSObject.Properties.Match($field).Count -gt 0 -and $item.source_preference.$field -is [bool]) ("重叠发现 source_preference.{0} 必须是布尔值：{1}" -f $field, [string]$item.name)
+        }
+        Need ([bool]$item.source_preference.plugin_installed) ("重叠发现 source_preference.plugin_installed 必须为 true：{0}" -f [string]$item.name)
+        Need ([bool]$item.source_preference.native_source_preferred) ("重叠发现 source_preference.native_source_preferred 必须为 true：{0}" -f [string]$item.name)
+        Need ([string]$item.source_preference.action -eq "report_only_do_not_import_duplicate") ("重叠发现 source_preference.action 无效：{0}" -f [string]$item.name)
+    }
     if ($item.PSObject.Properties.Match("routing").Count -eq 0 -or $null -eq $item.routing) { return }
 
     Need (Test-AuditObjectLike $item.routing) ("重叠发现 routing 必须是对象：{0}" -f [string]$item.name)
@@ -20499,367 +20613,6 @@ function Sync-ConfiguredSkillProjection($cfg, $promotionContext = $null) {
     return (Sync-CodexSkillProjection $cfg.skill_projection $promotionContext)
 }
 
-function Get-WorkflowCatalog {
-    $doctorStrictStep = [pscustomobject]@{
-        id = "doctor_strict"
-        title = "严格健康检查（doctor --strict）"
-        command = "doctor --strict"
-        action = {
-            $report = Invoke-Doctor @("--strict")
-            if ($report -and $report.PSObject.Properties.Match("pass").Count -gt 0 -and -not [bool]$report.pass) {
-                throw "doctor --strict failed"
-            }
-        }
-    }
-
-    return [ordered]@{
-        quickstart = [pscustomobject]@{
-            key = "quickstart"
-            name = "新手"
-            description = "从浏览技能到安装、重建并同步、严格检查的一条龙流程。"
-            steps = @(
-                [pscustomobject]@{
-                    id = "discover"
-                    title = "浏览技能"
-                    command = "发现"
-                    action = { 发现 }
-                },
-                [pscustomobject]@{
-                    id = "install_interactive"
-                    title = "选择安装"
-                    command = "安装"
-                    action = { 安装 }
-                },
-                [pscustomobject]@{
-                    id = "build_apply"
-                    title = "重建并同步"
-                    command = "构建生效"
-                    action = { 构建生效 }
-                },
-                $doctorStrictStep
-            )
-        }
-        maintenance = [pscustomobject]@{
-            key = "maintenance"
-            name = "维护"
-            description = "适合日常维护：更新上游、重建并同步、同步 MCP、严格检查。"
-            steps = @(
-                [pscustomobject]@{
-                    id = "update"
-                    title = "更新上游"
-                    command = "更新"
-                    action = { 更新 }
-                },
-                [pscustomobject]@{
-                    id = "build_apply"
-                    title = "重建并同步"
-                    command = "构建生效"
-                    action = { 构建生效 }
-                },
-                [pscustomobject]@{
-                    id = "sync_mcp"
-                    title = "同步 MCP"
-                    command = "同步MCP"
-                    action = { 同步MCP }
-                },
-                $doctorStrictStep
-            )
-        }
-        audit = [pscustomobject]@{
-            key = "audit"
-            name = "审查"
-            description = "聚焦目标仓审查：查看需求、生成审查包、回看最近状态。"
-            steps = @(
-                [pscustomobject]@{
-                    id = "audit_profile_show"
-                    title = "查看需求"
-                    command = "审查目标 需求查看"
-                    action = { Invoke-AuditTargetsCommand @("profile-show") }
-                },
-                [pscustomobject]@{
-                    id = "audit_target_list"
-                    title = "目标仓列表"
-                    command = "审查目标 列出"
-                    action = { Invoke-AuditTargetsCommand @("list") }
-                },
-                [pscustomobject]@{
-                    id = "audit_scan"
-                    title = "生成审查包"
-                    command = "审查目标 扫描"
-                    action = { Invoke-AuditTargetsCommand @("scan") }
-                },
-                [pscustomobject]@{
-                    id = "audit_status"
-                    title = "查看最近状态"
-                    command = "审查目标 状态"
-                    action = { Invoke-AuditTargetsCommand @("status") }
-                }
-            )
-        }
-        all = [pscustomobject]@{
-            key = "all"
-            name = "全流程"
-            description = "通用一键巡检：更新上游、浏览技能、重建并同步、同步 MCP、严格检查。"
-            steps = @(
-                [pscustomobject]@{
-                    id = "update"
-                    title = "更新上游"
-                    command = "更新"
-                    action = { 更新 }
-                },
-                [pscustomobject]@{
-                    id = "discover"
-                    title = "浏览技能"
-                    command = "发现"
-                    action = { 发现 }
-                },
-                [pscustomobject]@{
-                    id = "build_apply"
-                    title = "重建并同步"
-                    command = "构建生效"
-                    action = { 构建生效 }
-                },
-                [pscustomobject]@{
-                    id = "sync_mcp"
-                    title = "同步 MCP"
-                    command = "同步MCP"
-                    action = { 同步MCP }
-                },
-                $doctorStrictStep
-            )
-        }
-    }
-}
-
-function Resolve-WorkflowProfileKey([string]$profile) {
-    if ([string]::IsNullOrWhiteSpace($profile)) { return $null }
-    $k = $profile.Trim().ToLowerInvariant()
-    switch ($k) {
-        "新手" { return "quickstart" }
-        "quickstart" { return "quickstart" }
-        "start" { return "quickstart" }
-        "onboarding" { return "quickstart" }
-        "维护" { return "maintenance" }
-        "maintenance" { return "maintenance" }
-        "maintain" { return "maintenance" }
-        "审查" { return "audit" }
-        "audit" { return "audit" }
-        "全流程" { return "all" }
-        "all" { return "all" }
-        "full" { return "all" }
-        default { return $null }
-    }
-}
-
-function Parse-WorkflowArgs([string[]]$tokens) {
-    $opts = [ordered]@{
-        profile = $null
-        list = $false
-        continue_on_error = $false
-        no_prompt = $false
-    }
-    if ($null -eq $tokens) { return [pscustomobject]$opts }
-
-    :tokenLoop for ($i = 0; $i -lt $tokens.Count; $i++) {
-        $token = [string]$tokens[$i]
-        if ([string]::IsNullOrWhiteSpace($token)) { continue }
-        $lower = $token.Trim().ToLowerInvariant()
-        switch ($lower) {
-            "--list" { $opts.list = $true; continue tokenLoop }
-            "-l" { $opts.list = $true; continue tokenLoop }
-            "--continue-on-error" { $opts.continue_on_error = $true; continue tokenLoop }
-            "--no-prompt" { $opts.no_prompt = $true; continue tokenLoop }
-            "--profile" {
-                Need ($i + 1 -lt $tokens.Count) "--profile 缺少值"
-                $rawProfile = [string]$tokens[++$i]
-                $resolved = Resolve-WorkflowProfileKey $rawProfile
-                Need (-not [string]::IsNullOrWhiteSpace($resolved)) ("未知工作流场景：{0}" -f $rawProfile)
-                $opts.profile = $resolved
-                continue tokenLoop
-            }
-        }
-
-        if ($token.StartsWith("-")) {
-            throw ("未知一键参数：{0}" -f $token)
-        }
-        if (-not [string]::IsNullOrWhiteSpace([string]$opts.profile)) {
-            throw ("重复的场景参数：{0}" -f $token)
-        }
-        $positional = Resolve-WorkflowProfileKey $token
-        Need (-not [string]::IsNullOrWhiteSpace($positional)) ("未知工作流场景：{0}" -f $token)
-        $opts.profile = $positional
-    }
-
-    return [pscustomobject]$opts
-}
-
-function Write-WorkflowCatalog($catalog) {
-    Write-Host "=== 一键工作流可用场景 ===" -ForegroundColor Cyan
-    foreach ($key in @("quickstart", "maintenance", "audit", "all")) {
-        if (-not $catalog.Contains($key)) { continue }
-        $w = $catalog[$key]
-        Write-Host ("- {0} ({1}): {2}" -f $w.name, $w.key, $w.description)
-    }
-    Write-Host ""
-    Write-Host "示例：" -ForegroundColor DarkGray
-    Write-Host ".\skills.ps1 一键 新手"
-    Write-Host ".\skills.ps1 一键 维护 --continue-on-error"
-    Write-Host ".\skills.ps1 一键 审查 --no-prompt"
-    Write-Host ".\skills.ps1 workflow all --no-prompt"
-}
-
-function Select-WorkflowProfileInteractively($catalog) {
-    while ($true) {
-        Write-Host ""
-        Write-Host "=== 选择一键工作流场景 ==="
-        Write-Host "1) 新手（浏览技能 -> 选择安装 -> 重建并同步 -> doctor --strict）"
-        Write-Host "2) 维护（更新上游 -> 重建并同步 -> 同步 MCP -> doctor --strict）"
-        Write-Host "3) 审查（查看需求 -> 目标仓列表 -> 生成审查包 -> 查看最近状态）"
-        Write-Host "4) 全流程（更新上游 -> 浏览技能 -> 重建并同步 -> 同步 MCP -> doctor --strict）"
-        Write-Host "0) 取消"
-        $choice = Read-MenuChoice "请选择（回车取消）"
-        switch ($choice) {
-            "1" { return "quickstart" }
-            "2" { return "maintenance" }
-            "3" { return "audit" }
-            "4" { return "all" }
-            "0" { return $null }
-            default { Write-Host "无效选择。" }
-        }
-    }
-}
-
-function Get-WorkflowPreviewLines($workflow) {
-    $lines = New-Object System.Collections.Generic.List[string]
-    $idx = 0
-    foreach ($step in @($workflow.steps)) {
-        $idx++
-        $line = ("{0,2}. {1}  [{2}]" -f $idx, [string]$step.title, [string]$step.command)
-        $lines.Add($line) | Out-Null
-    }
-    return $lines.ToArray()
-}
-
-function Invoke-WorkflowStep([int]$Index, [int]$Total, $Step) {
-    $title = [string]$Step.title
-    $command = [string]$Step.command
-    $id = [string]$Step.id
-    Write-Host ("[{0}/{1}] {2}" -f $Index, $Total, $title) -ForegroundColor Cyan
-    Write-Host ("  command: {0}" -f $command) -ForegroundColor DarkGray
-
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    $error = ""
-    $success = $false
-    try {
-        & $Step.action
-        $success = $true
-        Write-Host ("  ✅ 完成（{0} ms）" -f [int]$sw.ElapsedMilliseconds) -ForegroundColor Green
-    }
-    catch {
-        $error = $_.Exception.Message
-        Write-Host ("  ❌ 失败（{0} ms）：{1}" -f [int]$sw.ElapsedMilliseconds, $error) -ForegroundColor Red
-    }
-    finally {
-        $sw.Stop()
-    }
-
-    return [pscustomobject]@{
-        id = $id
-        title = $title
-        command = $command
-        success = $success
-        duration_ms = [int]$sw.ElapsedMilliseconds
-        error = $error
-    }
-}
-
-function Write-WorkflowResultSummary($workflow, $results, [int]$totalMs) {
-    $failed = @($results | Where-Object { -not [bool]$_.success })
-    $passed = @($results | Where-Object { [bool]$_.success })
-    Write-Host ""
-    Write-Host ("=== 一键工作流完成：{0} ===" -f [string]$workflow.name) -ForegroundColor Cyan
-    Write-Host ("总耗时：{0} ms" -f $totalMs)
-    Write-Host ("步骤：成功 {0} / 失败 {1}" -f $passed.Count, $failed.Count)
-    if ($failed.Count -gt 0) {
-        foreach ($item in $failed) {
-            Write-Host ("- 失败：{0} => {1}" -f [string]$item.command, [string]$item.error) -ForegroundColor Yellow
-        }
-    }
-}
-
-function Invoke-Workflow([string[]]$tokens = @()) {
-    $opts = Parse-WorkflowArgs $tokens
-    $catalog = Get-WorkflowCatalog
-
-    if ($opts.list) {
-        Write-WorkflowCatalog $catalog
-        return [pscustomobject]@{ pass = $true; listed = $true }
-    }
-
-    $profileKey = [string]$opts.profile
-    if ([string]::IsNullOrWhiteSpace($profileKey)) {
-        if ($opts.no_prompt) {
-            $profileKey = "all"
-            Write-Host "未指定场景且启用 --no-prompt，默认使用：全流程（all）"
-        }
-        else {
-            $profileKey = Select-WorkflowProfileInteractively $catalog
-            if ([string]::IsNullOrWhiteSpace($profileKey)) {
-                Write-Host "已取消一键工作流。"
-                return [pscustomobject]@{ pass = $false; canceled = $true }
-            }
-        }
-    }
-
-    Need ($catalog.Contains($profileKey)) ("未知工作流场景：{0}" -f $profileKey)
-    $workflow = $catalog[$profileKey]
-    $preview = @(Get-WorkflowPreviewLines $workflow)
-
-    if (-not $opts.no_prompt) {
-        if (-not (Confirm-WithSummary ("将执行一键工作流：{0}" -f [string]$workflow.name) $preview "确认继续执行？" "Y")) {
-            Write-Host "已取消一键工作流。"
-            return [pscustomobject]@{ pass = $false; canceled = $true }
-        }
-    }
-
-    return (& {
-        $results = New-Object System.Collections.Generic.List[object]
-        $sw = [System.Diagnostics.Stopwatch]::StartNew()
-        $index = 0
-        foreach ($step in @($workflow.steps)) {
-            $index++
-            $result = Invoke-WorkflowStep $index @($workflow.steps).Count $step
-            $results.Add($result) | Out-Null
-            if (-not [bool]$result.success -and -not [bool]$opts.continue_on_error) {
-                break
-            }
-        }
-        $sw.Stop()
-
-        $resultArray = $results.ToArray()
-        Write-WorkflowResultSummary $workflow $resultArray ([int]$sw.ElapsedMilliseconds)
-        $failed = @($resultArray | Where-Object { -not [bool]$_.success })
-        $pass = ($failed.Count -eq 0)
-        Log ("一键工作流执行完成：{0}（pass={1}）" -f [string]$workflow.key, $pass) "INFO" -Data @{
-            profile = [string]$workflow.key
-            pass = $pass
-            total_ms = [int]$sw.ElapsedMilliseconds
-            step_total = @($resultArray).Count
-            step_failed = $failed.Count
-        }
-        if (-not $pass -and -not [bool]$opts.continue_on_error) {
-            throw ("一键工作流失败：{0}" -f [string]$failed[0].error)
-        }
-        return [pscustomobject]@{
-            pass = $pass
-            profile = [string]$workflow.key
-            continue_on_error = [bool]$opts.continue_on_error
-            results = @($resultArray)
-            total_ms = [int]$sw.ElapsedMilliseconds
-        }
-    })
-}
-
 function 打开配置 {
     Need (Test-Path $CfgPath) "缺少配置文件：$CfgPath"
     if (Get-Command code -ErrorAction SilentlyContinue) {
@@ -20948,188 +20701,6 @@ function 清理备份 {
     }
     Write-Host "清理完成。"
 }
-function Get-自动更新任务名 {
-    return "skills-manager-weekly-update-friday-2000"
-}
-function Get-自动更新脚本路径 {
-    return (Join-Path $Root "scripts/weekly-auto-update.ps1")
-}
-function Get-自动更新默认模式 {
-    return "weekly"
-}
-function Get-自动更新默认时间 {
-    return "20:00"
-}
-function Get-自动更新默认星期 {
-    return "Friday"
-}
-function Get-自动更新星期别名映射 {
-    return [ordered]@{
-        "mon" = "Monday"; "monday" = "Monday"; "1" = "Monday"; "周一" = "Monday"; "星期一" = "Monday"
-        "tue" = "Tuesday"; "tues" = "Tuesday"; "tuesday" = "Tuesday"; "2" = "Tuesday"; "周二" = "Tuesday"; "星期二" = "Tuesday"
-        "wed" = "Wednesday"; "wednesday" = "Wednesday"; "3" = "Wednesday"; "周三" = "Wednesday"; "星期三" = "Wednesday"
-        "thu" = "Thursday"; "thur" = "Thursday"; "thurs" = "Thursday"; "thursday" = "Thursday"; "4" = "Thursday"; "周四" = "Thursday"; "星期四" = "Thursday"
-        "fri" = "Friday"; "friday" = "Friday"; "5" = "Friday"; "周五" = "Friday"; "星期五" = "Friday"
-        "sat" = "Saturday"; "saturday" = "Saturday"; "6" = "Saturday"; "周六" = "Saturday"; "星期六" = "Saturday"
-        "sun" = "Sunday"; "sunday" = "Sunday"; "7" = "Sunday"; "周日" = "Sunday"; "星期日" = "Sunday"; "周天" = "Sunday"; "星期天" = "Sunday"
-    }
-}
-function Normalize-自动更新模式([string]$mode) {
-    if ([string]::IsNullOrWhiteSpace($mode)) { return (Get-自动更新默认模式) }
-    $v = $mode.Trim().ToLowerInvariant()
-    if ($v -eq "daily" -or $v -eq "每天" -or $v -eq "每日") { return "daily" }
-    if ($v -eq "weekly" -or $v -eq "每周") { return "weekly" }
-    throw ("自动更新模式仅支持 daily 或 weekly：{0}" -f $mode)
-}
-function Normalize-自动更新时间([string]$at) {
-    $value = if ([string]::IsNullOrWhiteSpace($at)) { Get-自动更新默认时间 } else { $at.Trim() }
-    Need ($value -match "^\d{1,2}:\d{2}$") ("时间格式无效：{0}（请使用 HH:mm）" -f $value)
-    $parts = $value.Split(":")
-    $hour = [int]$parts[0]
-    $minute = [int]$parts[1]
-    Need ($hour -ge 0 -and $hour -le 23) ("小时无效：{0}（0-23）" -f $hour)
-    Need ($minute -ge 0 -and $minute -le 59) ("分钟无效：{0}（0-59）" -f $minute)
-    return ("{0:D2}:{1:D2}" -f $hour, $minute)
-}
-function Normalize-自动更新星期([string]$day) {
-    $raw = if ([string]::IsNullOrWhiteSpace($day)) { Get-自动更新默认星期 } else { $day.Trim() }
-    $key = $raw.ToLowerInvariant()
-    $map = Get-自动更新星期别名映射
-    if ($map.Contains($key)) { return [string]$map[$key] }
-    $allowed = @("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
-    foreach ($item in $allowed) {
-        if ($item.Equals($raw, [System.StringComparison]::OrdinalIgnoreCase)) { return $item }
-    }
-    throw ("星期无效：{0}（可用 Monday..Sunday / 周一..周日）" -f $day)
-}
-function Format-自动更新计划说明([string]$mode, [string]$at, [string]$dayOfWeek) {
-    if ($mode -eq "daily") {
-        return ("每天 {0}" -f $at)
-    }
-    return ("每周 {0} {1}" -f $dayOfWeek, $at)
-}
-function Get-自动更新任务描述([string]$mode, [string]$at, [string]$dayOfWeek) {
-    return ("skills-manager 自动执行 更新 + 同步 MCP | mode={0};at={1};day={2}" -f $mode, $at, $dayOfWeek)
-}
-function Parse-自动更新任务描述([string]$description) {
-    $result = [ordered]@{
-        found = $false
-        mode = (Get-自动更新默认模式)
-        at = (Get-自动更新默认时间)
-        day = (Get-自动更新默认星期)
-    }
-    if ([string]::IsNullOrWhiteSpace($description)) { return [pscustomobject]$result }
-    if ($description -notmatch "mode=([^;|]+)") { return [pscustomobject]$result }
-    $result.mode = Normalize-自动更新模式 $Matches[1]
-    if ($description -match "at=([^;|]+)") {
-        $result.at = Normalize-自动更新时间 $Matches[1]
-    }
-    if ($description -match "day=([^;|]+)") {
-        $result.day = Normalize-自动更新星期 $Matches[1]
-    }
-    $result.found = $true
-    return [pscustomobject]$result
-}
-function 获取自动更新任务 {
-    if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) { return $null }
-    try { return (Get-ScheduledTask -TaskName (Get-自动更新任务名) -ErrorAction Stop) }
-    catch { return $null }
-}
-function 查看自动更新状态 {
-    $taskName = Get-自动更新任务名
-    $task = 获取自动更新任务
-    if ($null -eq $task) {
-        Write-Host ("自动更新：未启用（任务名：{0}）" -f $taskName) -ForegroundColor Yellow
-        return
-    }
-
-    $info = $null
-    try { $info = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction Stop } catch {}
-    $state = [string]$task.State
-    $nextRun = "未知"
-    $lastRun = "未知"
-    if ($null -ne $info) {
-        if ($info.NextRunTime -and $info.NextRunTime -gt [datetime]::MinValue) { $nextRun = $info.NextRunTime.ToString("yyyy-MM-dd HH:mm:ss") }
-        if ($info.LastRunTime -and $info.LastRunTime -gt [datetime]::MinValue) { $lastRun = $info.LastRunTime.ToString("yyyy-MM-dd HH:mm:ss") }
-    }
-    $parsed = Parse-自动更新任务描述 ([string]$task.Description)
-    $schedule = if ($parsed.found) { Format-自动更新计划说明 ([string]$parsed.mode) ([string]$parsed.at) ([string]$parsed.day) } else { "（旧任务：计划信息未记录）" }
-    Write-Host ("自动更新：已启用（{0}，本机时间）" -f $schedule)
-    Write-Host ("任务名：{0}" -f $taskName)
-    Write-Host ("状态：{0}" -f $state)
-    Write-Host ("下次运行：{0}" -f $nextRun)
-    Write-Host ("上次运行：{0}" -f $lastRun)
-}
-function 启用自动更新([string]$Mode = "", [string]$At = "", [string]$DayOfWeek = "") {
-    $taskName = Get-自动更新任务名
-    $runnerPath = Get-自动更新脚本路径
-    Need (Test-Path $runnerPath) ("缺少自动更新脚本：{0}" -f $runnerPath)
-    Need (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue) "当前环境不支持 ScheduledTasks 模块。"
-    Need (Get-Command New-ScheduledTaskAction -ErrorAction SilentlyContinue) "当前环境不支持 ScheduledTasks 模块。"
-    $pwsh = Resolve-PowerShellExecutable
-
-    $modeNormalized = Normalize-自动更新模式 $Mode
-    $atNormalized = Normalize-自动更新时间 $At
-    $dayNormalized = if ($modeNormalized -eq "weekly") { Normalize-自动更新星期 $DayOfWeek } else { Get-自动更新默认星期 }
-
-    if (Skip-IfDryRun "启用自动更新计划任务") { return }
-
-    $args = ('-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $runnerPath)
-    $action = New-ScheduledTaskAction -Execute $pwsh -Argument $args -WorkingDirectory $Root
-    $trigger = if ($modeNormalized -eq "daily") {
-        New-ScheduledTaskTrigger -Daily -At $atNormalized
-    }
-    else {
-        New-ScheduledTaskTrigger -Weekly -DaysOfWeek $dayNormalized -At $atNormalized
-    }
-    $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
-    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-    $description = Get-自动更新任务描述 $modeNormalized $atNormalized $dayNormalized
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description $description -Force | Out-Null
-    Write-Host ("✅ 已启用自动更新：{0}（本机时间）。" -f (Format-自动更新计划说明 $modeNormalized $atNormalized $dayNormalized))
-    查看自动更新状态
-}
-function 禁用自动更新 {
-    $taskName = Get-自动更新任务名
-    if (Skip-IfDryRun "禁用自动更新计划任务") { return }
-    $task = 获取自动更新任务
-    if ($null -eq $task) {
-        Write-Host "自动更新任务不存在，无需禁用。"
-        return
-    }
-    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Stop
-    Write-Host "✅ 已禁用自动更新任务。"
-}
-function 自动更新设置 {
-    while ($true) {
-        Write-Host ""
-        Write-Host "=== 自动更新设置 ==="
-        Write-Host "目标：按计划自动执行【更新 + 同步 MCP】"
-        查看自动更新状态
-        Write-Host "1) 启用/更新计划（daily/weekly）"
-        Write-Host "2) 禁用"
-        Write-Host "3) 查看状态"
-        Write-Host "0) 返回"
-        $c = Read-MenuChoice "请选择（回车返回）"
-        switch ($c) {
-            "1" {
-                $modeInput = Read-HostSafe ("计划模式（daily/weekly，默认 {0}）" -f (Get-自动更新默认模式))
-                $atInput = Read-HostSafe ("执行时间（HH:mm，默认 {0}）" -f (Get-自动更新默认时间))
-                $modeNormalized = Normalize-自动更新模式 $modeInput
-                $dayInput = ""
-                if ($modeNormalized -eq "weekly") {
-                    $dayInput = Read-HostSafe ("每周几执行（Monday..Sunday 或 周一..周日，默认 {0}）" -f (Get-自动更新默认星期))
-                }
-                启用自动更新 -Mode $modeNormalized -At $atInput -DayOfWeek $dayInput
-            }
-            "2" { 禁用自动更新 }
-            "3" { 查看自动更新状态 }
-            "0" { return }
-            default { Write-Host "无效选择。" }
-        }
-    }
-}
-
 function MCP菜单 {
     while ($true) {
         Write-Host ""
@@ -21174,17 +20745,13 @@ function 更多菜单 {
     while ($true) {
         Write-Host ""
         Write-Host "=== 更多 ==="
-        Write-Host "1) 一键工作流"
-        Write-Host "2) 自动更新"
-        Write-Host "3) 解除目标目录关联"
-        Write-Host "4) 清理 .bak 备份"
+        Write-Host "1) 解除目标目录关联"
+        Write-Host "2) 清理 .bak 备份"
         Write-Host "0) 返回"
         $c = Read-MenuChoice "请选择（回车返回）"
         switch ($c) {
-            "1" { Invoke-Workflow @() }
-            "2" { 自动更新设置 }
-            "3" { 解除关联 }
-            "4" { 清理备份 }
+            "1" { 解除关联 }
+            "2" { 清理备份 }
             "0" { return }
             default { Write-Host "无效选择。" }
         }
@@ -21206,7 +20773,7 @@ Skills 管理器（中文菜单）
   - 目标仓审查：需求、目标仓、审查包、预检、应用、状态
   - MCP 服务：新增 MCP、卸载 MCP、同步配置
   - 技能库管理：新增/删除技能库、生成锁文件、打开 skills.json
-  - 更多：一键工作流、自动更新、解除目标目录关联、清理 .bak 备份
+  - 更多：解除目标目录关联、清理 .bak 备份
 
 主要功能说明：
   - 浏览技能：只列出当前来源中的可用技能，不改配置
@@ -21218,7 +20785,6 @@ Skills 管理器（中文菜单）
   - 目标仓审查：生成 snapshot/recommendations/receipt，先 dry-run，再按确认口令落盘
   - MCP 服务：维护 `skills.json` 中的 `mcp_servers` 并同步到目标 CLI
   - 技能库管理：维护来源、锁文件和配置
-  - 一键工作流：按场景执行组合流程；支持 `--list`、`--no-prompt`、`--continue-on-error`
 
 易混点：
   - 只想让本地配置重新输出：用“重建并同步”（CLI：`构建生效`）
@@ -21239,16 +20805,10 @@ Skills 管理器（中文菜单）
   .\skills.ps1 构建生效
   .\skills.ps1 构建生效 -AllowUnverifiedHostProjection
   .\skills.ps1 更新 -Plan
+  .\skills.ps1 check-updates --json
   .\skills.ps1 更新 -Upgrade
   .\skills.ps1 锁定
   .\skills.ps1 清理无效映射 [--yes] [--no-build]
-
-一键工作流：
-  .\skills.ps1 一键 --list
-  .\skills.ps1 一键 新手
-  .\skills.ps1 一键 维护 --continue-on-error
-  .\skills.ps1 一键 审查 --no-prompt
-  .\skills.ps1 workflow all --no-prompt
 
 MCP：
   .\skills.ps1 安装MCP <name> -- <command> [args...]          （推荐）
@@ -21296,7 +20856,6 @@ MCP：
 维护：
   .\skills.ps1 解除关联
   .\skills.ps1 清理备份
-  .\skills.ps1 自动更新设置
   .\skills.ps1 doctor [--json] [--offline-contract] [--fix] [--dry-run-fix] [--strict]
   pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-skill-integrity.ps1 [-ReportPath <file>]
 
@@ -21598,27 +21157,35 @@ function 菜单 {
 
 if ($MyInvocation.InvocationName -ne '.') {
     try {
+        $deprecatedCommandAliases = @{
+            "发现技能" = "发现"
+            "从技能库选择安装" = "安装"
+            "卸载技能" = "卸载"
+            "构建并生效" = "构建生效"
+            "更新上游并重建" = "更新"
+            "生成锁文件" = "锁定"
+        }
+        if ($deprecatedCommandAliases.ContainsKey($Cmd)) {
+            $canonicalCmd = [string]$deprecatedCommandAliases[$Cmd]
+            Write-Warning ("命令别名 '{0}' 已弃用；请改用 '{1}'。" -f $Cmd, $canonicalCmd)
+            $Cmd = $canonicalCmd
+        }
         switch ($Cmd) {
             "menu" { 菜单 }
             "初始化" { 初始化 }
             "新增技能库" { 新增技能库 }
             "删除技能库" { 删除技能库 }
             "发现" { 发现 }
-            "发现技能" { 发现 }
             "命令导入安装" { 命令导入安装 }
             "add" { Add-ImportFromArgs (Merge-FilterAndArgs $Filter $args) }
             "npx" { Add-ImportFromArgs (Get-AddTokensFromNpx (Merge-FilterAndArgs $Filter $args)) }
             "安装" { 安装 }
-            "从技能库选择安装" { 安装 }
             "卸载" { 卸载 (Merge-FilterAndArgs $Filter $args) }
-            "卸载技能" { 卸载 (Merge-FilterAndArgs $Filter $args) }
             "选择" { 选择 }
             "构建生效" { 构建生效 -AllowUnverifiedProjection:$AllowUnverifiedHostProjection -SkipHostProjection:$SkipHostProjection }
-            "构建并生效" { 构建生效 -AllowUnverifiedProjection:$AllowUnverifiedHostProjection -SkipHostProjection:$SkipHostProjection }
             "更新" { 更新 }
-            "更新上游并重建" { 更新 }
+            "check-updates" { $result = Invoke-CheckUpdatesCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output } }
             "锁定" { 锁定 }
-            "生成锁文件" { 锁定 }
             "验证锁定" { 验证锁定 }
             "verify-lock" { 验证锁定 }
             "清理无效映射" { 清理无效映射 (Merge-FilterAndArgs $Filter $args) }
@@ -21685,12 +21252,9 @@ if ($MyInvocation.InvocationName -ne '.') {
             "rule-plan" { $result=Invoke-RulePlanCommand (Merge-FilterAndArgs $Filter $args);if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "规则应用" { $tokens=Merge-FilterAndArgs $Filter $args;if($Plan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
             "rule-apply" { $tokens=Merge-FilterAndArgs $Filter $args;if($Plan){$tokens=@('--plan')+@($tokens)};$result=Invoke-RuleApplyCommand $tokens;if($result.json){Write-Output $result.output}else{Write-Host $result.output};if($result.exit_code -ne 0){exit $result.exit_code} }
-            "一键" { Invoke-Workflow (Merge-FilterAndArgs $Filter $args) }
-            "workflow" { Invoke-Workflow (Merge-FilterAndArgs $Filter $args) }
             "打开配置" { 打开配置 }
             "解除关联" { 解除关联 }
             "清理备份" { 清理备份 }
-            "自动更新设置" { 自动更新设置 }
             "帮助" { 帮助 }
             "help" { 帮助 }
             "--help" { 帮助 }

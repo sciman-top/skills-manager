@@ -134,16 +134,12 @@ function Assert-MenuRouting {
 
         $moreBody = Get-FunctionBody $raw "更多菜单"
         Assert-MenuRouting $moreBody (@{
-            "1" = "Invoke-Workflow @()"
-            "2" = "自动更新设置"
-            "3" = "解除关联"
-            "4" = "清理备份"
+            "1" = "解除关联"
+            "2" = "清理备份"
             "0" = "return"
         }) @(
-            "1) 一键工作流"
-            "2) 自动更新"
-            "3) 解除目标目录关联"
-            "4) 清理 .bak 备份"
+            "1) 解除目标目录关联"
+            "2) 清理 .bak 备份"
             "0) 返回"
         )
 
@@ -201,7 +197,7 @@ function Assert-MenuRouting {
             "菜单地图："
             "MCP 服务：新增 MCP、卸载 MCP、同步配置"
             "技能库管理：新增/删除技能库、生成锁文件、打开 skills.json"
-            "更多：一键工作流、自动更新、解除目标目录关联、清理 .bak 备份"
+            "更多：解除目标目录关联、清理 .bak 备份"
             "浏览技能：只列出当前来源中的可用技能，不改配置"
             '重建并同步：根据 `skills.json` 重建 `agent/` 并同步到 `targets`'
             '只有 `--apply --yes` 才真正写入'

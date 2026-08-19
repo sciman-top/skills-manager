@@ -58,6 +58,7 @@ The `Target Repo Audit` submenu follows the workflow: scan, preflight, dry-run, 
 .\skills.ps1 发现
 .\skills.ps1 安装
 .\skills.ps1 卸载 <name> --yes
+.\skills.ps1 check-updates --json
 .\skills.ps1 更新 -Plan
 .\skills.ps1 更新 -Upgrade
 .\skills.ps1 构建生效
@@ -84,7 +85,7 @@ The `Target Repo Audit` submenu follows the workflow: scan, preflight, dry-run, 
 
 Target-audit runtime bundles and receipts live under ignored `reports/skill-audit/<run-id>/`. Only explicit `--apply --yes` persists recommendations. Rule mutation additionally requires reviewed input, exact roots and hashes, a token, a receipt, and rollback data.
 
-`构建生效` writes projected output outside the repository. For repository-only generated synchronization, run `build.ps1` instead.
+`check-updates --json` reports only `current/target/changed/source`; it does not apply, build, project, or sync MCP. `构建生效` writes projected output outside the repository. For repository-only generated synchronization, run `build.ps1` instead. The repository no longer creates or manages Windows scheduled update tasks; `doctor` only reports a legacy task for manual host-side cleanup.
 
 ## Projection and explicit fallback
 
@@ -93,6 +94,8 @@ Host-native metadata is the normal selection surface. `capability-router` is an 
 ```powershell
 .\skills.ps1 capability-inventory --view skill-surfaces --json
 ```
+
+The inventory uses public Codex CLI JSON only. When an enabled plugin and a standalone/system skill share a name, it emits a report-only native-source preference. It never installs, removes, or enables plugins and never reads or writes plugin caches.
 
 ## Reference shelf
 
@@ -104,7 +107,7 @@ Host-native metadata is the normal selection surface. `capability-router` is an 
 .\scripts\verify-reference-governance.ps1
 ```
 
-Candidates without a current consumer are rediscovered when needed instead of being kept in a permanent backlog.
+Each refresh writes an ignored `reports/reference-refresh/<run-id>/receipt.md`; no dynamic latest state is tracked. Candidates without a current consumer are rediscovered when needed instead of being kept in a permanent backlog.
 
 ## Development and verification
 
