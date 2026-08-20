@@ -159,6 +159,36 @@
       "relative_path": "secondary/wshobson-agents",
       "branch": "main",
       "policy": "floating"
+    },
+    {
+      "name": "openspec",
+      "tier": "secondary",
+      "status": "active",
+      "source_disposition": "workflow-method-reference",
+      "upstream_url": "https://github.com/Fission-AI/OpenSpec.git",
+      "relative_path": "secondary/openspec",
+      "branch": "main",
+      "policy": "floating",
+      "reviewed_revision": "1ebddd17f40dde15dfd28289e4493c3cf05ee9df",
+      "license": "MIT",
+      "consumer": "host-native-first thin-loop workflow design",
+      "adoption_decision": "reference-only; borrow lightweight brownfield artifacts and non-rigid phase progression",
+      "retirement_trigger": "remove when thin-loop workflow design no longer has an active comparison need"
+    },
+    {
+      "name": "bmad-method",
+      "tier": "secondary",
+      "status": "active",
+      "source_disposition": "workflow-method-reference",
+      "upstream_url": "https://github.com/bmad-code-org/BMAD-METHOD.git",
+      "relative_path": "secondary/bmad-method",
+      "branch": "main",
+      "policy": "floating",
+      "reviewed_revision": "67d876f1c317a82123e429d0c078ff3c601a99a8",
+      "license": "MIT with trademark notice",
+      "consumer": "host-native-first thin-loop workflow design",
+      "adoption_decision": "reference-only; borrow right-sized process depth while rejecting fixed role and agent stacks",
+      "retirement_trigger": "remove when thin-loop workflow design no longer has an active comparison need"
     }
   ]
 }
