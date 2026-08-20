@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-08-19T14:00:54.1938714Z",
+  "generated_at": "2026-08-20T12:52:42.0481167Z",
   "vendors": [
     {
       "name": "agent-skills",
@@ -30,7 +30,7 @@
       "name": "marketingskills",
       "repo": "https://github.com/coreyhaines31/marketingskills.git",
       "ref": "main",
-      "commit": "7868cb9251fad80a73d26e488a5ad5f6c4a9f335"
+      "commit": "c6ea12834be62bdc4180a1385f6455cde84ae60c"
     },
     {
       "name": "superpowers",
@@ -110,7 +110,7 @@
       "ref": "main",
       "skill": "data\\skills\\data-visualization",
       "sparse": false,
-      "commit": "fbddb2c33039a8ea11959683ec5f7989bc64cc8a"
+      "commit": "6e2cf60a525763fcf54dfb4ce704a989f2b722c7"
     },
     {
       "name": "domain-modeling",
@@ -119,7 +119,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\domain-modeling",
       "sparse": true,
-      "commit": "885e2ca4d842d139e9aef4e48d366c63cb1b8013"
+      "commit": "0ab1b63a410a03d3627979a109c8695de27af954"
     },
     {
       "name": "dotnet-backend-patterns",
@@ -137,7 +137,7 @@
       "ref": "master",
       "skill": "drawio-diagram-forge",
       "sparse": false,
-      "commit": "c77cb97624387a400a92d40a1073dceb1ed32628"
+      "commit": "6359bfce96b6189138296840bdd5d72c9ee12d43"
     },
     {
       "name": "error-handling-patterns",
@@ -164,7 +164,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\grill-with-docs",
       "sparse": true,
-      "commit": "885e2ca4d842d139e9aef4e48d366c63cb1b8013"
+      "commit": "0ab1b63a410a03d3627979a109c8695de27af954"
     },
     {
       "name": "grilling",
@@ -173,7 +173,7 @@
       "ref": "main",
       "skill": "skills\\productivity\\grilling",
       "sparse": true,
-      "commit": "885e2ca4d842d139e9aef4e48d366c63cb1b8013"
+      "commit": "0ab1b63a410a03d3627979a109c8695de27af954"
     },
     {
       "name": "manim-composer",
@@ -209,7 +209,7 @@
       "ref": "main",
       "skill": "skills\\social",
       "sparse": false,
-      "commit": "7868cb9251fad80a73d26e488a5ad5f6c4a9f335"
+      "commit": "c6ea12834be62bdc4180a1385f6455cde84ae60c"
     },
     {
       "name": "mcp-cli",
@@ -245,7 +245,7 @@
       "ref": "main",
       "skill": "plugins\\modern-python\\skills\\modern-python",
       "sparse": false,
-      "commit": "07bce8a2c8ccc56c5b44b7067a04b8bf46128f05"
+      "commit": "9b2813356e9b9ef670dc1f4493a69e82c8e7f27e"
     },
     {
       "name": "playwright-best-practices",
@@ -263,7 +263,7 @@
       "ref": "master",
       "skill": "powerpoint-automation",
       "sparse": false,
-      "commit": "c77cb97624387a400a92d40a1073dceb1ed32628"
+      "commit": "6359bfce96b6189138296840bdd5d72c9ee12d43"
     },
     {
       "name": "prompt-engineering-patterns",
@@ -299,7 +299,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\research",
       "sparse": true,
-      "commit": "885e2ca4d842d139e9aef4e48d366c63cb1b8013"
+      "commit": "0ab1b63a410a03d3627979a109c8695de27af954"
     },
     {
       "name": "slidev",
@@ -353,7 +353,7 @@
       "ref": "main",
       "skill": "skills\\windows-desktop-e2e",
       "sparse": true,
-      "commit": "06c5e118c4d3e6c3b7f9445f973a2194c82de193"
+      "commit": "d8409a4b0813771235555e32e3d8046a73988bfa"
     }
   ]
 }
