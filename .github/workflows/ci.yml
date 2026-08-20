@@ -35,6 +35,8 @@ jobs:
         shell: pwsh
         run: |
           $profile = 'quick'
+          $docsOnly = $false
+          $baseSha = ''
           if ('${{ github.ref }}'.StartsWith('refs/tags/')) {
             $profile = 'full'
           }
@@ -58,21 +60,29 @@ jobs:
                 }
                 else {
                   $riskPath = '^(src/|tests/|rules/|overrides/|vendor/|imports/|\.github/workflows/|scripts/(quality/|release/|hooks/|verify-)|build\.ps1$|install\.ps1$|skills\.json$|skills\.lock\.json$|audit-targets\.json$)'
-                  if (@($changed | Where-Object { $_ -match $riskPath }).Count -gt 0) { $profile = 'full' }
+                  $docsOnlyPath = '^(README(?:\.zh-CN)?\.md$|CONTRIBUTING\.md$|docs/.*\.md$)'
+                  $docsOnly = (@($changed).Count -gt 0 -and @($changed | Where-Object { $_ -notmatch $docsOnlyPath }).Count -eq 0)
+                  if ($docsOnly) { $profile = 'docs' }
+                  elseif (@($changed | Where-Object { $_ -match $riskPath }).Count -gt 0) { $profile = 'full' }
                 }
               }
             }
           }
           "CI_GATE_PROFILE=$profile" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CI_DIFF_BASE_SHA=$baseSha" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "Selected CI quality gate profile: $profile"
+          Write-Host "Documentation-only diff: $docsOnly"
 
       - name: Rebuild locked skill sources
         shell: pwsh
-        run: .\skills.ps1 更新 -Locked -SkipHostProjection
+        run: |
+          if ($env:CI_GATE_PROFILE -ne 'docs') {
+            .\skills.ps1 更新 -Locked -SkipHostProjection
+          }
 
       - name: Run repository proportional quality gate
         shell: pwsh
-        run: .\scripts\quality\run-local-quality-gates.ps1 -Profile $env:CI_GATE_PROFILE
+        run: .\scripts\quality\run-local-quality-gates.ps1 -Profile $env:CI_GATE_PROFILE -DiffBase $env:CI_DIFF_BASE_SHA
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

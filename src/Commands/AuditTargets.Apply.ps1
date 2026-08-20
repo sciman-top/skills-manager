@@ -527,7 +527,8 @@ function Get-AuditPreflightRunIdFromBundle([string]$recommendationDir, [string]$
 function Invoke-AuditRecommendationsPreflight {
     param(
         [string]$RecommendationsPath,
-        [string]$RunId
+        [string]$RunId,
+        [object]$InitialWorkflowInputState = $null
     )
     $resolvedRecommendations = Resolve-AuditRecommendationsPathForPreflight $RecommendationsPath $RunId
     $recommendationDir = Split-Path -Parent $resolvedRecommendations
@@ -590,7 +591,12 @@ function Invoke-AuditRecommendationsPreflight {
     }
     $userProfileCheck = Test-AuditUserProfilePreflight $recommendationDir
     $targetSnapshotState = Get-AuditTargetRepoSnapshotState $recommendationDir
-    $targetLiveState = Get-AuditTargetRepoLiveState $targetSnapshotState
+    $targetLiveState = if ($null -ne $InitialWorkflowInputState -and $null -ne $InitialWorkflowInputState.target_repos) {
+        $InitialWorkflowInputState.target_repos
+    }
+    else {
+        Get-AuditTargetRepoLiveState $targetSnapshotState
+    }
     $targetStaleness = Get-AuditTargetRepoStaleness $targetSnapshotState $targetLiveState
     if ($null -ne $rec) {
         $removalDependencyCheck = Test-AuditRemovalDependencyClosure -Config (LoadCfg) -RemovalCandidates @($rec.removal_candidates) -RepositoryRoot $Root
@@ -826,6 +832,7 @@ function Invoke-AuditRecommendationsApply {
         [string]$McpAddSelection,
         [string]$McpRemoveSelection,
         [string]$DryRunAck,
+        [object]$PreflightReport = $null,
         [bool]$RequireDryRunAck = $true,
         [switch]$Apply,
         [switch]$Yes
@@ -849,10 +856,20 @@ function Invoke-AuditRecommendationsApply {
     $snapshotPath = Join-Path $recommendationDir "snapshot.json"
     Need (Test-Path -LiteralPath $snapshotPath -PathType Leaf) ("缺少 snapshot.json：{0}" -f $snapshotPath)
     $sourcePolicy = Get-AuditSourceEvidencePolicy $recommendationDir
-    $sourceCoverageCheck = Test-AuditRecommendationSourceCoveragePolicy $rec $sourcePolicy
     $decisionQualityPolicy = Get-AuditDecisionQualityPolicy $recommendationDir
-    $decisionInsights = Get-AuditDecisionInsights $recommendationDir
-    $decisionQualityCheck = Test-AuditRecommendationDecisionQualityPolicy $rec $decisionQualityPolicy $decisionInsights
+    $canReusePreflight = ($null -ne $PreflightReport -and [bool]$PreflightReport.success -and
+        $null -ne $PreflightReport.source_coverage -and $null -ne $PreflightReport.decision_quality -and
+        $null -ne $PreflightReport.snapshot_state -and $null -ne $PreflightReport.live_state)
+    if ($canReusePreflight) {
+        $sourceCoverageCheck = [pscustomobject]@{ pass = $true; issues = @(); coverage = $PreflightReport.source_coverage }
+        $decisionInsights = $PreflightReport.decision_insights
+        $decisionQualityCheck = [pscustomobject]@{ pass = $true; issues = @(); coverage = $PreflightReport.decision_quality }
+    }
+    else {
+        $sourceCoverageCheck = Test-AuditRecommendationSourceCoveragePolicy $rec $sourcePolicy
+        $decisionInsights = Get-AuditDecisionInsights $recommendationDir
+        $decisionQualityCheck = Test-AuditRecommendationDecisionQualityPolicy $rec $decisionQualityPolicy $decisionInsights
+    }
     if (-not [bool]$sourceCoverageCheck.pass) {
         $sourceMessage = ($sourceCoverageCheck.issues -join " | ")
         $sourceReport = [ordered]@{
@@ -911,9 +928,9 @@ function Invoke-AuditRecommendationsApply {
         Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$qualityReport) | Out-Null
         throw $qualityMessage
     }
-    $liveState = Get-AuditLiveInstalledState
-    $snapshotState = Get-AuditInstalledSnapshotState $snapshotPath
-    $snapshotStaleness = Get-AuditInstalledSnapshotStaleness $snapshotState $liveState
+    $liveState = if ($canReusePreflight) { $PreflightReport.live_state } else { Get-AuditLiveInstalledState }
+    $snapshotState = if ($canReusePreflight) { $PreflightReport.snapshot_state } else { Get-AuditInstalledSnapshotState $snapshotPath }
+    $snapshotStaleness = if ($canReusePreflight) { $PreflightReport.snapshot_staleness } else { Get-AuditInstalledSnapshotStaleness $snapshotState $liveState }
     $isSnapshotStale = [bool]$snapshotStaleness.is_stale
     if ($isSnapshotStale) {
         $staleMessage = "审查快照与当前生效配置不一致（stale_snapshot）。请先运行：.\skills.ps1 审查目标 扫描 重新生成 run 后再应用 recommendations。"

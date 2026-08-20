@@ -59,6 +59,21 @@ Describe 'Noisy failing fixture' {
         @($output).Count | Should -BeLessThan 10
     }
 
+    It 'filters a large test file by full test name' {
+        $fixture = New-RunnerFixture 'name-filter' @'
+Describe 'Filtered fixture' {
+    It 'chosen test' { $true | Should -Be $true }
+    It 'other test' { throw 'should not run' }
+}
+'@
+
+        $output = @(& pwsh -NoProfile -File $runnerPath -TestPath (Join-Path $fixture.unit 'Fixture.Tests.ps1') -TestName '*chosen test' *>&1)
+        $exitCode = $LASTEXITCODE
+
+        $exitCode | Should -Be 0
+        [string]$output[0] | Should -Match '^Tests: total=[0-9]+ passed=1 failed=0 skipped=0 duration=[0-9.]+s$'
+    }
+
     It 'fails when one test container cannot be parsed even if another container passes' {
         $fixture = New-RunnerFixture 'container-fail' @'
 Describe 'Broken fixture' {

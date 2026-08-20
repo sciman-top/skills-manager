@@ -179,7 +179,7 @@ function Invoke-AuditRecommendationsValidateDryRun {
         $report.stages.recommendations_validation.status = "passed"
 
         $currentStage = "preflight"
-        $preflightReport = Invoke-AuditRecommendationsPreflight -RecommendationsPath $resolvedRecommendations
+        $preflightReport = Invoke-AuditRecommendationsPreflight -RecommendationsPath $resolvedRecommendations -InitialWorkflowInputState $report.input_stability.before
         Need ([bool]$preflightReport.success) "preflight_failed：预检报告未通过"
         $report.stages.preflight.status = "passed"
 
@@ -196,7 +196,7 @@ function Invoke-AuditRecommendationsValidateDryRun {
         }
 
         $currentStage = "dry_run"
-        $dryRunReport = Invoke-AuditRecommendationsApply -RecommendationsPath $resolvedRecommendations -DryRunAck $DryRunAck -RequireDryRunAck $true
+        $dryRunReport = Invoke-AuditRecommendationsApply -RecommendationsPath $resolvedRecommendations -DryRunAck $DryRunAck -PreflightReport $preflightReport -RequireDryRunAck $true
         if (-not [bool]$dryRunReport.success) {
             throw "dry_run_not_confirmed：dry-run 未完成或确认口令不匹配。"
         }

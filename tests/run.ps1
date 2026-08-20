@@ -2,7 +2,10 @@
 param(
     [string]$UnitTestPath = (Join-Path $PSScriptRoot 'Unit'),
     [string]$E2ETestPath = (Join-Path $PSScriptRoot 'E2E'),
-    [Alias('Path')][string]$TestPath = ''
+    [Alias('Path')][string[]]$TestPath = @(),
+    [Alias('Name')][string[]]$TestName = @(),
+    [string[]]$Tag = @(),
+    [string[]]$ExcludeTag = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -10,7 +13,7 @@ $bootstrap = Join-Path $PSScriptRoot '..\scripts\quality\ensure-test-runtime.ps1
 $manifest = & $bootstrap
 Import-Module -Name $manifest -Force | Out-Null
 
-$paths = if ([string]::IsNullOrWhiteSpace($TestPath)) { @($UnitTestPath, $E2ETestPath) } else { @($TestPath) }
+$paths = if ($TestPath.Count -eq 0) { @($UnitTestPath, $E2ETestPath) } else { @($TestPath) }
 foreach ($path in $paths) {
     $testFiles = if (Test-Path -LiteralPath $path -PathType Leaf) { @(Get-Item -LiteralPath $path | Where-Object Name -Like '*.Tests.ps1') } else { @(Get-ChildItem -LiteralPath $path -Recurse -Filter '*.Tests.ps1' -File) }
     if ($testFiles.Count -eq 0) {
@@ -23,6 +26,9 @@ $configuration = New-PesterConfiguration
 $configuration.Run.Path = $paths
 $configuration.Run.PassThru = $true
 $configuration.Output.Verbosity = 'None'
+if ($TestName.Count -gt 0) { $configuration.Filter.FullName = $TestName }
+if ($Tag.Count -gt 0) { $configuration.Filter.Tag = $Tag }
+if ($ExcludeTag.Count -gt 0) { $configuration.Filter.ExcludeTag = $ExcludeTag }
 $result = Invoke-Pester -Configuration $configuration 3>$null 4>$null 5>$null 6>$null
 $stopwatch.Stop()
 if (-not $result -or [int]$result.TotalCount -le 0) { throw 'Test discovery returned zero tests.' }

@@ -1,8 +1,13 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('quick', 'full')]
+    [ValidateSet('docs', 'quick', 'focused', 'full')]
     [string]$Profile = 'quick',
-    [switch]$AllowDirtyWorktree
+    [switch]$AllowDirtyWorktree,
+    [string[]]$TestPath = @(),
+    [string[]]$TestName = @(),
+    [ValidateSet('lock', 'integrity', 'config', 'scheduler')]
+    [string[]]$Verifier = @(),
+    [string]$DiffBase = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,15 +48,53 @@ function Assert-HostSchedulerOwnershipContract {
 
 Push-Location $root
 try {
+    if ($Profile -eq 'docs') {
+        if ([string]::IsNullOrWhiteSpace($DiffBase)) {
+            Invoke-QualityGate 'diff-check' { & git diff --check }
+        }
+        else {
+            Invoke-QualityGate 'diff-check' { & git diff --check $DiffBase HEAD -- }
+        }
+        Write-Host 'Local quality gates passed (docs).'
+        return
+    }
+
     Invoke-QualityGate 'build' { & .\build.ps1 }
-    if ($Profile -eq 'full') { Invoke-QualityGate 'tests' { & .\tests\run.ps1 } }
+    if ($Profile -eq 'focused') {
+        if ($TestPath.Count -eq 0 -and $TestName.Count -eq 0) { throw 'Focused profile requires -TestPath or -TestName.' }
+        if ($TestPath.Count -gt 0 -and $TestName.Count -gt 0) {
+            Invoke-QualityGate 'focused-tests' { & .\tests\run.ps1 -TestPath $TestPath -TestName $TestName }
+        }
+        elseif ($TestPath.Count -gt 0) {
+            Invoke-QualityGate 'focused-tests' { & .\tests\run.ps1 -TestPath $TestPath }
+        }
+        else {
+            Invoke-QualityGate 'focused-tests' { & .\tests\run.ps1 -TestName $TestName }
+        }
+    }
+    elseif ($Profile -eq 'full') {
+        Invoke-QualityGate 'tests' { & .\tests\run.ps1 }
+    }
     if (-not $AllowDirtyWorktree) {
         Invoke-QualityGate 'generated-bundle-committed' { & git diff --quiet HEAD -- skills.ps1 }
     }
-    Invoke-QualityGate 'workspace-lock-parity' { & .\skills.ps1 verify-lock }
-    Invoke-QualityGate 'skill-integrity' { & .\scripts\verify-skill-integrity.ps1 }
-    Invoke-QualityGate 'skills-config-contract' { & .\scripts\verify-skills-config.ps1 -Mode enforce }
-    Invoke-QualityGate 'host-scheduler-ownership' { Assert-HostSchedulerOwnershipContract }
+    $selectedVerifiers = if ($Verifier.Count -gt 0) {
+        @($Verifier)
+    }
+    elseif ($Profile -eq 'focused') {
+        @()
+    }
+    else {
+        @('lock', 'integrity', 'config', 'scheduler')
+    }
+    foreach ($verifier in $selectedVerifiers) {
+        switch ($verifier) {
+            'lock' { Invoke-QualityGate 'workspace-lock-parity' { & .\skills.ps1 verify-lock } }
+            'integrity' { Invoke-QualityGate 'skill-integrity' { & .\scripts\verify-skill-integrity.ps1 } }
+            'config' { Invoke-QualityGate 'skills-config-contract' { & .\scripts\verify-skills-config.ps1 -Mode enforce } }
+            'scheduler' { Invoke-QualityGate 'host-scheduler-ownership' { Assert-HostSchedulerOwnershipContract } }
+        }
+    }
     Write-Host ("Local quality gates passed ({0})." -f $Profile)
 }
 finally {

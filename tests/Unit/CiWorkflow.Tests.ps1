@@ -46,6 +46,13 @@ Describe 'GitHub CI workflow supply-chain contract' {
         }
     }
 
+    It 'routes documentation-only changes to the docs profile' {
+        $script:workflow | Should -Match '\$profile = ''docs'''
+        $script:workflow | Should -Match 'DiffBase'
+        $script:workflow | Should -Match 'docsOnly'
+        $script:workflow | Should -Match 'CI_DIFF_BASE_SHA=\$baseSha'
+    }
+
     It 'keeps tests read-only and grants release write access only to the tag job' {
         $script:workflow | Should -Match '(?ms)^permissions:\s*\r?\n\s+contents:\s*read\s*$'
         $script:workflow | Should -Match '(?ms)^  release:\s*\r?\n\s+if: startsWith\(github\.ref, ''refs/tags/v''\)\s*\r?\n\s+needs: test'

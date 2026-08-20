@@ -153,7 +153,7 @@ refresh/verify 失败只阻断该次参考研究，不外推为产品主链失�
 
 ## 开发与验证
 
-按风险选择一个 closeout 入口。普通变更运行 build、受影响测试、适用的受影响 verifier 和 diff check：
+按风险选择一个 closeout 入口。普通变更运行 build、受影响测试、适用的受影响 verifier 和 diff check。测试入口支持 `-TestPath`、`-TestName` 和标签筛选，适合从大型测试文件中只运行受影响行为：
 
 ```powershell
 pwsh -NoProfile -File .\build.ps1
@@ -161,6 +161,13 @@ pwsh -NoProfile -File .\tests\run.ps1 -TestPath .\tests\Unit\CapabilityInventory
 # 仅在适用时运行对应的受影响 verifier，例如：
 pwsh -NoProfile -File .\scripts\verify-skills-config.ps1 -Mode enforce
 git diff --check
+```
+
+文档-only 变更只需运行 diff check；单个行为修复可使用 focused gate，避免误跑整套测试：
+
+```powershell
+pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile docs
+pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile focused -TestPath .\tests\Unit\Core.Tests.ps1 -TestName '*目标行为*' -Verifier config
 ```
 
 runtime、安全、数据、迁移、公开契约、依赖、打包或跨面风险改动，在输入冻结后只运行一次 full gate；不要预先重复执行其内部命令：
