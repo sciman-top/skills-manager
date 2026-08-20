@@ -198,10 +198,10 @@ function Get-DoctorConfigRisks($cfg) {
 function Get-DoctorAutoUpdateTaskClassification([object]$Task, [string]$ExpectedRunner) {
     $arguments = (@($Task.Actions) | ForEach-Object { [string]$_.Arguments }) -join "`n"
     $runnerExists = [IO.File]::Exists($ExpectedRunner)
-    $managed = $runnerExists -and $arguments.Contains($ExpectedRunner, [StringComparison]::OrdinalIgnoreCase)
+    $knownExternal = $runnerExists -and $arguments.Contains($ExpectedRunner, [StringComparison]::OrdinalIgnoreCase)
     $legacy = $arguments -match '(?i)weekly-auto-update\.ps1'
-    $state = if ($managed) { 'managed_current' } elseif ($legacy) { 'stale_legacy' } else { 'unknown_existing' }
-    $action = if ($managed) { 'none' } else { 'manual_repair_or_cleanup' }
+    $state = if ($knownExternal) { 'external_current' } elseif ($legacy) { 'stale_legacy' } else { 'unknown_existing' }
+    $action = if ($knownExternal) { 'none' } else { 'manual_repair_or_cleanup' }
     return [pscustomobject][ordered]@{ state = $state; runner_exists = $runnerExists; action = $action }
 }
 

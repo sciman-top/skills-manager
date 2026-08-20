@@ -4,13 +4,13 @@ BeforeAll {
 }
 Describe "Doctor Enhancements" {
     Context "Get-DoctorLegacyAutoUpdateTaskStatus" {
-        It "recognizes the managed current weekly runner" {
+        It "recognizes the current runner as externally scheduled" {
             $runner = Join-Path $Root 'scripts\weekly-skills-update.ps1'
             $task = [pscustomobject]@{ Actions = @([pscustomobject]@{ Arguments = ('-File "{0}"' -f $runner) }) }
 
             $status = Get-DoctorAutoUpdateTaskClassification -Task $task -ExpectedRunner $runner
 
-            $status.state | Should -Be 'managed_current'
+            $status.state | Should -Be 'external_current'
             $status.action | Should -Be 'none'
             $status.runner_exists | Should -BeTrue
         }

@@ -28,6 +28,7 @@
 - canonical skill inventory、native projection（metadata budget 与 description 截断复用宿主原生能力）
 - host-selected `capability-router` cold discovery/policy validation when visible metadata is insufficient
 - 按任务显式启用的可选 core/secondary reference shelf refresh/verify
+- 可由宿主/operator 调度的 skills-only maintenance runner
 - build、focused tests、contract/invariant checks、risk-triggered full gate
 
 ### 不包含
@@ -57,7 +58,7 @@
 - `FR-SKL-003`：update/lock/build 能检测 dirty source、revision drift、duplicate output 和 dependency gap。
 - `FR-SKL-004`：本地 override 只进入 `overrides/{custom,patches,resources}`，patch 记录 provenance。
 - `FR-SKL-005`：卸载只撤配置与受管输出，不删除未授权源码或宿主-owned assets。
-- `FR-SKL-006`：`check-updates --json` 只读报告 current/target/changed/source；仓库不创建、更新或删除宿主计划任务，不把 source update 与 MCP 同步自动串联。
+- `FR-SKL-006`：`check-updates --json` 只读报告 current/target/changed/source；仓库可提供可重复调用且 fail-closed 的 skills-only maintenance runner，但计划任务的创建、更新、删除、运行账户、触发频率与宿主验收由 host/operator 持有；runner 不同步 MCP、不 push。
 
 ### 5.2 MCP
 

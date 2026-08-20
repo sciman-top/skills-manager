@@ -74,7 +74,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 构建生效
 ```
 
-`check-updates --json` 只报告每个来源的 `current/target/changed/source`，不 apply、不构建、不投影、不同步 MCP。`构建生效` 会重建并写入宿主目标，属于外部投影动作。仅需仓库内同步时运行 `build.ps1`；不要用 `构建生效` 代替普通构建验证。仓库不提供创建、更新或删除 Windows 自动更新计划任务的入口；现有同名任务属于宿主状态，`doctor` 只读报告，清理由用户在宿主侧决定。
+`check-updates --json` 只报告每个来源的 `current/target/changed/source`，不 apply、不构建、不投影、不同步 MCP。`构建生效` 会重建并写入宿主目标，属于外部投影动作。仅需仓库内同步时运行 `build.ps1`；不要用 `构建生效` 代替普通构建验证。仓库保留 `scripts/weekly-skills-update.ps1` 作为可由宿主/operator 调度的 skills-only runner，但不提供创建、更新或删除 Windows 计划任务的入口；现有同名任务属于宿主状态，`doctor` 只读报告，清理由用户在宿主侧决定。
 
 ### MCP
 

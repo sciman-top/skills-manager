@@ -24,6 +24,8 @@
 
 配置 validator 负责 schema、path containment、duplicate name、mapping、MCP 与 projection invariants。source update 负责 revision/origin/dirty checks；build 只消费验证后的 source 和 override。
 
+`scripts/weekly-skills-update.ps1` 是外部调用 seam 上的 skills-only maintenance adapter：它复用 update 与 quick gate，并限制分支、并发和 tracked write set。Windows Task Scheduler 的注册、更新、删除、运行账户与触发频率属于 host/operator lifecycle，不是本仓 module。
+
 ### MCP
 
 - Interface：`安装MCP`、`卸载MCP`、`MCP配置`、`同步MCP`
@@ -114,7 +116,7 @@ Tag release 在 checksum 与 ZIP 内 manifest 之外，为三个发布资产签�
 
 - build：生成 bundle 与 agent tree
 - test：受影响 Pester/E2E
-- contract：committed generated bundle、config 与公开契约；reference contract 仅由显式 reference verify 触发
+- contract：committed generated bundle、config、host scheduler ownership 与公开契约；reference contract 仅由显式 reference verify 触发
 - hotspot：仅在真实性能/安全/发布风险存在时执行
 
 full gate 仅顺序执行一次 build、tests、committed generated bundle、lock、skill integrity 和 config contract。普通改动使用受影响验证，不重复 full。
@@ -129,6 +131,6 @@ Module 删除后若复杂度直接消失，而不在真实 caller 重现，则�
 - phase/task/evidence archive 作为当前状态库
 - 无明确 consumer 的 conditional reference candidate backlog
 - typed shadow 双实现
-- 静态一键 workflow 与自动更新计划任务控制面
+- 静态一键 workflow 与自动更新计划任务生命周期控制面
 
 只有新的真实失败、至少一个稳定消费者、现有 interface 无法承载、对比净收益和可回滚迁移同时成立时，才准入新 module 或 seam。
