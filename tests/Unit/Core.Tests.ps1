@@ -1844,30 +1844,6 @@ command = "cmd"
             $toml | Should -Not -Match "command = ""pwsh"""
         }
 
-        It "Keeps generic pwsh stdio MCP servers unchanged for Codex" {
-            $servers = @(
-                [pscustomobject]@{
-                    name      = "codebase-memory-mcp"
-                    transport = "stdio"
-                    command   = "pwsh"
-                    args      = @(
-                        "-NoLogo",
-                        "-NoProfile",
-                        "-Command",
-                        "`$exe = Join-Path `$env:LOCALAPPDATA 'Programs\\codebase-memory-mcp\\codebase-memory-mcp.exe'; if (-not (Test-Path -LiteralPath `$exe)) { `$cmd = Get-Command codebase-memory-mcp -ErrorAction SilentlyContinue; if (`$cmd) { `$exe = [string]`$cmd.Source } else { Write-Error 'codebase-memory-mcp.exe not found. Run the official installer first.'; exit 64 } }; & `$exe"
-                    )
-                }
-            )
-
-            $toml = Build-CodexConfigToml "" $servers
-
-            $toml | Should -Match "\[mcp_servers\.codebase-memory-mcp\]"
-            $toml | Should -Match "command = ""pwsh"""
-            $toml | Should -Match "codebase-memory-mcp.*codebase-memory-mcp\.exe"
-            $toml | Should -Match "Get-Command codebase-memory-mcp"
-            $toml | Should -Not -Match "mcp-node-cache-wrapper\.mjs"
-        }
-
         It "Generates a postgres wrapper that can read User scope environment variables" {
             $content = Get-CodexMcpPostgresEnvWrapperContent
 

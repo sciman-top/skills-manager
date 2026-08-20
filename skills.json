@@ -69,7 +69,6 @@
           "api-and-interface-design",
           "code-review-and-quality",
           "custom-powershell-windows-automation",
-          "debugging-and-error-recovery",
           "error-handling-patterns",
           "security-and-hardening",
           "shipping-and-launch",
@@ -104,7 +103,6 @@
         ],
         "review": [
           "code-review-and-quality",
-          "receiving-code-review",
           "security-and-hardening"
         ],
         "python": [
@@ -262,11 +260,6 @@
     {
       "from": "skills\\context-engineering",
       "to": "agent-skills-2-skills-context-engineering",
-      "vendor": "agent-skills-2"
-    },
-    {
-      "from": "skills\\debugging-and-error-recovery",
-      "to": "agent-skills-2-skills-debugging-and-error-recovery",
       "vendor": "agent-skills-2"
     },
     {
@@ -478,11 +471,6 @@
       "vendor": "manual",
       "from": "windows-desktop-e2e",
       "to": "windows-desktop-e2e"
-    },
-    {
-      "vendor": "superpowers",
-      "to": "superpowers-skills-receiving-code-review",
-      "from": "skills\\receiving-code-review"
     },
     {
       "from": "research",
@@ -799,7 +787,9 @@
   ],
   "targets": [
     {
-      "path": "~/.claude/skills"
+      "path": "~/.claude/skills",
+      "managed_link_only": true,
+      "receipt_path": "reports/skill-projection/claude-native-receipt.json"
     }
   ],
   "update_force": true,
@@ -862,18 +852,6 @@
         "@playwright/mcp@0.0.78",
         "--isolated"
       ]
-    },
-    {
-      "name": "codebase-memory-mcp",
-      "enabled": false,
-      "transport": "stdio",
-      "command": "pwsh",
-      "args": [
-        "-NoLogo",
-        "-NoProfile",
-        "-Command",
-        "$exe = Join-Path $env:LOCALAPPDATA 'Programs\\codebase-memory-mcp\\codebase-memory-mcp.exe'; if (-not (Test-Path -LiteralPath $exe)) { $cmd = Get-Command codebase-memory-mcp -ErrorAction SilentlyContinue; if ($cmd) { $exe = [string]$cmd.Source } else { Write-Error 'codebase-memory-mcp.exe not found. Run the official installer first.'; exit 64 } }; & $exe"
-      ]
     }
   ],
   "mcp_profiles": {
@@ -900,11 +878,6 @@
         "enabled": [
           "context7",
           "openaiDeveloperDocs"
-        ]
-      },
-      "codebase": {
-        "enabled": [
-          "codebase-memory-mcp"
         ]
       },
       "dotnet": {

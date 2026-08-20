@@ -135,6 +135,74 @@ description: demo skill
             }
         }
 
+        It "Migrates the Claude whole-root link to the managed skill allowlist" {
+            $root = Join-Path $TestDrive "ws-managed-link-target"
+            New-Item -ItemType Directory -Path $root -Force | Out-Null
+            Set-TestWorkspace $root
+            foreach ($name in @('resident-a', 'resident-b', 'cold-skill')) {
+                $skillRoot = Join-Path $AgentDir $name
+                New-Item -ItemType Directory -Path $skillRoot -Force | Out-Null
+                Set-Content -LiteralPath (Join-Path $skillRoot 'SKILL.md') -Value "---`nname: $name`ndescription: test skill`n---`n"
+            }
+            $target = Join-Path $root 'claude-skills'
+            New-Item -ItemType Junction -Path $target -Target $AgentDir | Out-Null
+            $receiptPath = Join-Path $repoRoot ("reports\skill-projection\test-claude-{0}.json" -f [guid]::NewGuid().ToString('N'))
+            $receiptRelative = [IO.Path]::GetRelativePath($repoRoot, $receiptPath)
+            $cfg = [pscustomobject]@{
+                targets = @([pscustomobject]@{ path = $target; managed_link_only = $true; receipt_path = $receiptRelative })
+                sync_mode = 'link'
+                skill_projection = [pscustomobject]@{
+                    managed_link_includes = @('resident-a', 'resident-b')
+                    managed_link_excludes = @()
+                }
+            }
+            try {
+                Mock Sync-ConfiguredSkillProjection { [pscustomobject]@{ skipped = $true } }
+
+                $failures = @(应用到ClaudeCodex $cfg -SkipPreflight)
+
+                $failures.Count | Should -Be 0
+                [bool]((Get-Item -LiteralPath $target -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) | Should -BeFalse
+                foreach ($name in @('resident-a', 'resident-b')) {
+                    $projected = Join-Path $target $name
+                    Test-Path -LiteralPath (Join-Path $projected 'SKILL.md') | Should -BeTrue
+                    [bool]((Get-Item -LiteralPath $projected -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) | Should -BeTrue
+                }
+                Test-Path -LiteralPath (Join-Path $target 'cold-skill') | Should -BeFalse
+                Should -Invoke Sync-ConfiguredSkillProjection -Times 1 -Exactly
+            }
+            finally {
+                if (Test-Path -LiteralPath $receiptPath) { Remove-Item -LiteralPath $receiptPath -Force }
+            }
+        }
+
+        It "Does not migrate a managed-link-only target during dry-run" {
+            $root = Join-Path $TestDrive "ws-managed-link-dry-run"
+            New-Item -ItemType Directory -Path $root -Force | Out-Null
+            Set-TestWorkspace $root
+            $skillRoot = Join-Path $AgentDir 'resident'
+            New-Item -ItemType Directory -Path $skillRoot -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $skillRoot 'SKILL.md') -Value "---`nname: resident`ndescription: test skill`n---`n"
+            $target = Join-Path $root 'claude-skills'
+            New-Item -ItemType Junction -Path $target -Target $AgentDir | Out-Null
+            $cfg = [pscustomobject]@{
+                targets = @([pscustomobject]@{ path = $target; managed_link_only = $true; receipt_path = 'reports/skill-projection/dry-run.json' })
+                sync_mode = 'link'
+                skill_projection = [pscustomobject]@{ managed_link_includes = @('resident'); managed_link_excludes = @() }
+            }
+            $oldDryRun = $DryRun
+            try {
+                $DryRun = $true
+
+                $failures = @(应用到ClaudeCodex $cfg -SkipPreflight)
+
+                $failures.Count | Should -Be 0
+                [bool]((Get-Item -LiteralPath $target -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) | Should -BeTrue
+                (Get-NativeSkillProjectionLinkTarget $target) | Should -Be ([IO.Path]::GetFullPath($AgentDir).TrimEnd('\', '/'))
+            }
+            finally { $DryRun = $oldDryRun }
+        }
+
         It "does not require a clean-commit promotion context during build dry-run" {
             $oldDryRun = $DryRun
             try {

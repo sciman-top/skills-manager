@@ -266,6 +266,28 @@ Describe "Config And Update Enhancements" {
             { Assert-Cfg $conflict } | Should -Throw
         }
 
+        It "Validates managed-link-only targets" {
+            $valid = @'
+{
+  "vendors": [], "targets": [{"path":"~/.claude/skills","managed_link_only":true,"receipt_path":"reports/skill-projection/claude.json"}],
+  "mappings": [], "imports": [], "mcp_servers": [], "mcp_targets": [], "sync_mode": "link",
+  "skill_projection": {"sources": [], "managed_link_includes": ["systematic-debugging"]}
+}
+'@ | ConvertFrom-Json
+            @(Get-CfgContractErrors $valid).Count | Should -Be 0
+            { Assert-Cfg $valid } | Should -Not -Throw
+
+            $sync = $valid | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+            $sync.sync_mode = 'sync'
+            (@(Get-CfgContractErrors $sync) -join "`n") | Should -Match '仅支持 sync_mode=link'
+            { Assert-Cfg $sync } | Should -Throw
+
+            $missingReceipt = $valid | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+            $missingReceipt.targets[0].receipt_path = '../outside.json'
+            (@(Get-CfgContractErrors $missingReceipt) -join "`n") | Should -Match 'target.receipt_path 必须位于'
+            { Assert-Cfg $missingReceipt } | Should -Throw
+        }
+
         It "Collects contract errors without mutating config shape" {
             $cfg = [pscustomobject]@{
                 vendors = @(

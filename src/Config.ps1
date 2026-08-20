@@ -396,6 +396,17 @@ function Get-CfgContractErrors($cfg) {
     $mcpServers = Get-CfgArrayField $cfg "mcp_servers" $false $errors
     $mcpTargets = Get-CfgArrayField $cfg "mcp_targets" $false $errors
 
+    foreach ($target in @($targets)) {
+        $managedLinkOnly = Get-CfgObjectProperty $target 'managed_link_only'
+        if ($null -eq $managedLinkOnly) { continue }
+        if ($managedLinkOnly -isnot [bool]) { $errors.Add('target.managed_link_only 必须是布尔值') | Out-Null; continue }
+        if (-not [bool]$managedLinkOnly) { continue }
+        if ([string](Get-CfgObjectProperty $cfg 'sync_mode') -ne 'link') { $errors.Add('managed_link_only target 仅支持 sync_mode=link') | Out-Null }
+        if ([string](Get-CfgObjectProperty $target 'receipt_path') -notmatch '^reports[\\/]skill-projection[\\/][^\\/]+\.json$') { $errors.Add('managed_link_only target.receipt_path 必须位于 reports/skill-projection 且为直接子级 JSON 文件') | Out-Null }
+        $includes = Get-CfgObjectProperty (Get-CfgObjectProperty $cfg 'skill_projection') 'managed_link_includes'
+        if (-not (Assert-IsArray $includes) -or @($includes).Count -eq 0) { $errors.Add('managed_link_only target 需要 skill_projection.managed_link_includes') | Out-Null }
+    }
+
     $skillProjection = Get-CfgObjectProperty $cfg "skill_projection"
     if ($null -ne $skillProjection) {
         $projectionEnabled = Get-CfgObjectProperty $skillProjection "enabled"
@@ -1000,6 +1011,14 @@ function Assert-Cfg($cfg) {
     }
     foreach ($t in $cfg.targets) {
         Need (-not [string]::IsNullOrWhiteSpace($t.path)) "target 缺少 path"
+        if (Test-CfgObjectProperty $t 'managed_link_only') {
+            Need ((Get-CfgObjectProperty $t 'managed_link_only') -is [bool]) 'target.managed_link_only 必须是布尔值'
+            if ([bool](Get-CfgObjectProperty $t 'managed_link_only')) {
+                Need ([string]$cfg.sync_mode -eq 'link') 'managed_link_only target 仅支持 sync_mode=link'
+                Need ([string](Get-CfgObjectProperty $t 'receipt_path') -match '^reports[\\/]skill-projection[\\/][^\\/]+\.json$') 'managed_link_only target.receipt_path 必须位于 reports/skill-projection 且为直接子级 JSON 文件'
+                Need ($null -ne $cfg.skill_projection -and (Assert-IsArray (Get-CfgObjectProperty $cfg.skill_projection 'managed_link_includes')) -and @((Get-CfgObjectProperty $cfg.skill_projection 'managed_link_includes')).Count -gt 0) 'managed_link_only target 需要 skill_projection.managed_link_includes'
+            }
+        }
     }
     foreach ($m in $cfg.mappings) {
         Need (-not [string]::IsNullOrWhiteSpace($m.vendor)) "mapping 缺少 vendor"

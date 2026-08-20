@@ -40,7 +40,11 @@
       "type": "object",
       "required": ["path"],
       "additionalProperties": true,
-      "properties": { "path": { "$ref": "#/$defs/nonEmptyString" } }
+      "properties": {
+        "path": { "$ref": "#/$defs/nonEmptyString" },
+        "managed_link_only": { "type": "boolean" },
+        "receipt_path": { "type": "string", "pattern": "^reports[\\\\/]skill-projection[\\\\/][^\\\\/]+\\.json$" }
+      }
     },
     "mapping": {
       "type": "object",

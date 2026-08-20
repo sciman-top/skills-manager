@@ -6495,6 +6495,17 @@ function Get-CfgContractErrors($cfg) {
     $mcpServers = Get-CfgArrayField $cfg "mcp_servers" $false $errors
     $mcpTargets = Get-CfgArrayField $cfg "mcp_targets" $false $errors
 
+    foreach ($target in @($targets)) {
+        $managedLinkOnly = Get-CfgObjectProperty $target 'managed_link_only'
+        if ($null -eq $managedLinkOnly) { continue }
+        if ($managedLinkOnly -isnot [bool]) { $errors.Add('target.managed_link_only 必须是布尔值') | Out-Null; continue }
+        if (-not [bool]$managedLinkOnly) { continue }
+        if ([string](Get-CfgObjectProperty $cfg 'sync_mode') -ne 'link') { $errors.Add('managed_link_only target 仅支持 sync_mode=link') | Out-Null }
+        if ([string](Get-CfgObjectProperty $target 'receipt_path') -notmatch '^reports[\\/]skill-projection[\\/][^\\/]+\.json$') { $errors.Add('managed_link_only target.receipt_path 必须位于 reports/skill-projection 且为直接子级 JSON 文件') | Out-Null }
+        $includes = Get-CfgObjectProperty (Get-CfgObjectProperty $cfg 'skill_projection') 'managed_link_includes'
+        if (-not (Assert-IsArray $includes) -or @($includes).Count -eq 0) { $errors.Add('managed_link_only target 需要 skill_projection.managed_link_includes') | Out-Null }
+    }
+
     $skillProjection = Get-CfgObjectProperty $cfg "skill_projection"
     if ($null -ne $skillProjection) {
         $projectionEnabled = Get-CfgObjectProperty $skillProjection "enabled"
@@ -7099,6 +7110,14 @@ function Assert-Cfg($cfg) {
     }
     foreach ($t in $cfg.targets) {
         Need (-not [string]::IsNullOrWhiteSpace($t.path)) "target 缺少 path"
+        if (Test-CfgObjectProperty $t 'managed_link_only') {
+            Need ((Get-CfgObjectProperty $t 'managed_link_only') -is [bool]) 'target.managed_link_only 必须是布尔值'
+            if ([bool](Get-CfgObjectProperty $t 'managed_link_only')) {
+                Need ([string]$cfg.sync_mode -eq 'link') 'managed_link_only target 仅支持 sync_mode=link'
+                Need ([string](Get-CfgObjectProperty $t 'receipt_path') -match '^reports[\\/]skill-projection[\\/][^\\/]+\.json$') 'managed_link_only target.receipt_path 必须位于 reports/skill-projection 且为直接子级 JSON 文件'
+                Need ($null -ne $cfg.skill_projection -and (Assert-IsArray (Get-CfgObjectProperty $cfg.skill_projection 'managed_link_includes')) -and @((Get-CfgObjectProperty $cfg.skill_projection 'managed_link_includes')).Count -gt 0) 'managed_link_only target 需要 skill_projection.managed_link_includes'
+            }
+        }
     }
     foreach ($m in $cfg.mappings) {
         Need (-not [string]::IsNullOrWhiteSpace($m.vendor)) "mapping 缺少 vendor"
@@ -10148,6 +10167,54 @@ function Resolve-TargetDir([string]$path) {
     return (Join-Path $Root $path)
 }
 
+function Sync-ManagedLinkOnlyTarget($cfg, $targetCfg, [string]$target) {
+    Need ([string]$cfg.sync_mode -eq 'link') 'managed_link_only target 仅支持 sync_mode=link'
+    Need ($null -ne $cfg.skill_projection) 'managed_link_only target 需要 skill_projection 配置'
+    $includedNames = @((Get-CfgObjectProperty $cfg.skill_projection 'managed_link_includes') | ForEach-Object { [string]$_ })
+    $excludedNames = @((Get-CfgObjectProperty $cfg.skill_projection 'managed_link_excludes') | ForEach-Object { [string]$_ })
+    Need ($includedNames.Count -gt 0) 'managed_link_only target 需要 skill_projection.managed_link_includes'
+    $receiptPath = [string](Get-CfgObjectProperty $targetCfg 'receipt_path')
+    Need ($receiptPath -match '^reports[\\/]skill-projection[\\/][^\\/]+\.json$') 'managed_link_only target.receipt_path 非法'
+
+    $managedRoot = [IO.Path]::GetFullPath($AgentDir).TrimEnd('\', '/')
+    $targetRoot = [IO.Path]::GetFullPath($target).TrimEnd('\', '/')
+    $migratedWholeRootLink = $false
+    if (Test-Path -LiteralPath $targetRoot -PathType Container) {
+        $targetItem = Get-Item -LiteralPath $targetRoot -Force
+        if ([bool]($targetItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            $currentLinkTarget = Get-NativeSkillProjectionLinkTarget $targetRoot
+            Need ([string]::Equals($currentLinkTarget, $managedRoot, [StringComparison]::OrdinalIgnoreCase)) ("managed_link_only 只允许迁移指向当前 agent/ 的整目录链接：{0}" -f $targetRoot)
+            Remove-Item -LiteralPath $targetRoot -Force
+            New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null
+            $migratedWholeRootLink = $true
+        }
+    }
+
+    try {
+        $projectionConfig = [pscustomobject]@{
+            skill_projection = [pscustomobject]@{
+                user_skill_root = $targetRoot
+                native_projection = [pscustomobject]@{
+                    enabled = $true
+                    owner = 'skills-manager-target'
+                    target_root = $targetRoot
+                    receipt_path = $receiptPath
+                }
+            }
+        }
+        $plan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $managedRoot -Config $projectionConfig -IncludedNames $includedNames -ExcludedNames $excludedNames
+        Need ([string]$plan.status -eq 'ready' -and [bool]$plan.pass) 'managed_link_only target 投影计划被阻断'
+        return Apply-NativeSkillProjection -Plan $plan
+    }
+    catch {
+        if ($migratedWholeRootLink) {
+            Remove-NativeSkillProjectionPath $targetRoot
+            New-Junction $targetRoot $managedRoot
+        }
+        throw
+    }
+}
+
 function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionContext = $null) {
     return (& {
         if (-not $SkipPreflight) { Preflight }
@@ -10162,7 +10229,14 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionCo
                     if (-not $target) { continue }
                     Assert-SafeTargetDir $target
 
-                    if ($mode -eq "sync") {
+                    if ($DryRun -and [bool](Get-CfgObjectProperty $t 'managed_link_only')) {
+                        Log ("DRYRUN：managed_link_only 目标需要先迁移整目录链接，已跳过写入：{0}" -f $t.path)
+                    }
+                    elseif ([bool](Get-CfgObjectProperty $t 'managed_link_only')) {
+                        $projection = Sync-ManagedLinkOnlyTarget $cfg $t $target
+                        Log ("已按白名单关联：{0}（skills={1}）" -f $t.path, @($projection.receipt.after | Where-Object exists).Count)
+                    }
+                    elseif ($mode -eq "sync") {
                         EnsureDir $target
                         RoboMirror $AgentDir $target
                         Log ("已同步（拷贝）：{0}" -f $t.path)
