@@ -35,4 +35,73 @@ Describe 'Skill metadata' {
         $observed = Read-SkillMetadata $path -Observation
         @($observed.findings | Where-Object { $_.code -eq 'field_unknown' -and $_.severity -eq 'warning' }).Count | Should -Be 1
     }
+
+    It 'preserves standard metadata maps and allowed-tools strings' {
+        $path = Join-Path $TestDrive 'standard-fields.md'
+        @'
+---
+name: standard-fields
+description: fixture
+license: Apache-2.0
+compatibility: Requires pwsh 7 and git
+metadata:
+  author: example-org
+  version: "1.0"
+allowed-tools: Bash(git:*) Read
+---
+'@ | Set-Content -LiteralPath $path
+
+        $metadata = Read-SkillMetadata $path
+
+        $metadata.valid | Should -BeTrue
+        $metadata.fields.metadata.author | Should -Be 'example-org'
+        $metadata.fields.metadata.version | Should -Be '1.0'
+        $metadata.fields.'allowed-tools' | Should -Be 'Bash(git:*) Read'
+        @($metadata.findings).Count | Should -Be 0
+    }
+
+    It 'validates optional field shape and nested non-standard metadata' {
+        $path = Join-Path $TestDrive 'invalid-standard-fields.md'
+        @'
+---
+name: invalid-standard-fields
+description: fixture
+compatibility:
+allowed-tools:
+metadata:
+  openclaw:
+    emoji: wrench
+---
+'@ | Set-Content -LiteralPath $path
+
+        $owned = Read-SkillMetadata $path
+        $owned.valid | Should -BeFalse
+        @($owned.findings.code) | Should -Contain 'compatibility_invalid'
+        @($owned.findings.code) | Should -Contain 'allowed_tools_invalid'
+        @($owned.findings.code) | Should -Contain 'metadata_value_invalid'
+
+        $observed = Read-SkillMetadata $path -Observation
+        $observed.valid | Should -BeTrue
+        @($observed.findings | Where-Object code -eq 'metadata_value_invalid').Count | Should -BeGreaterThan 0
+    }
+
+    It 'classifies known host and vendor extensions separately from unknown fields' {
+        $path = Join-Path $TestDrive 'extensions.md'
+        @'
+---
+name: extensions
+description: fixture
+version: 2.0.0
+user-invocable: true
+context: fork
+future-field: value
+---
+'@ | Set-Content -LiteralPath $path
+
+        $metadata = Read-SkillMetadata $path -Observation
+
+        @($metadata.findings | Where-Object code -eq 'field_vendor_extension').Count | Should -Be 1
+        @($metadata.findings | Where-Object code -eq 'field_host_extension').Count | Should -Be 2
+        @($metadata.findings | Where-Object code -eq 'field_unknown').Count | Should -Be 1
+    }
 }

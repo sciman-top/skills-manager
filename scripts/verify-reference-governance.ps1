@@ -19,6 +19,12 @@ function Test-ReferenceLifecycleState([string]$Tier, [string]$Status) {
     return $Tier -in @('core-mainline', 'secondary', 'conditional') -and $Status -eq 'active'
 }
 
+function Test-ConditionalReferenceContract($Repo) {
+    if ([string]$Repo.tier -ne 'conditional') { return $true }
+    return -not [string]::IsNullOrWhiteSpace([string]$Repo.consumer) -and
+        -not [string]::IsNullOrWhiteSpace([string]$Repo.retirement_trigger)
+}
+
 try { $manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding UTF8 | ConvertFrom-Json }
 catch { throw "reference shelf manifest cannot be parsed: $($_.Exception.Message)" }
 
@@ -41,6 +47,7 @@ foreach ($repo in @($manifest.repos)) {
     if ([string]$repo.tier -eq 'secondary' -and -not $relativePath.Replace('\', '/').StartsWith('secondary/', [StringComparison]::OrdinalIgnoreCase)) { Add-Finding "secondary repo must use secondary/: $name" }
     if ([string]$repo.tier -eq 'conditional' -and -not $relativePath.Replace('\', '/').StartsWith('conditional/', [StringComparison]::OrdinalIgnoreCase)) { Add-Finding "conditional repo must use conditional/: $name" }
     if ([string]::IsNullOrWhiteSpace([string]$repo.upstream_url)) { Add-Finding "reference upstream_url is required: $name" }
+    if (-not (Test-ConditionalReferenceContract $repo)) { Add-Finding "conditional reference requires consumer and retirement_trigger: $name" }
     $byName[$name] = $repo
 }
 

@@ -16,7 +16,7 @@ The repository does not own `D:\CODE\external` as a whole and never mutates sibl
 
 - `core-mainline`: first-party specifications and implementations used for frequent decisions; entries may be in `default_refresh_set`.
 - `secondary`: useful comparison implementations refreshed explicitly.
-- `conditional`: repositories with a named current consumer, refreshed only by explicit tier or repository selection.
+- `conditional`: repositories with a named current consumer and retirement trigger, refreshed only by explicit tier or repository selection.
 
 All manifest entries are `active`. A repository without a named current consumer is not retained as a candidate or historical record; rediscover and review it when a real task needs it.
 
@@ -35,6 +35,6 @@ Clone/fetch/fast-forward only authorizes read-only comparison. It does not autho
 
 ## Admission and removal
 
-Add a repository only when a current consumer needs source-level comparison and existing first-party references are insufficient. Record name, tier, URL and contained path; verify license and revision during the task. Promote to core only for repeated current use.
+Add a repository only when a current consumer needs source-level comparison and existing first-party references are insufficient. Record name, tier, URL, contained path, `consumer`, and `retirement_trigger`; verify license and revision during the task. Promote to core only for repeated current use.
 
 Removing a manifest entry does not delete an external checkout and does not remove a runtime source/import. Those are separate, explicitly authorized operations.

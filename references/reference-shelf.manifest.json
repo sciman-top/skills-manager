@@ -88,42 +88,6 @@
       "policy": "floating"
     },
     {
-      "name": "hangfire",
-      "tier": "conditional",
-      "status": "active",
-      "upstream_url": "https://github.com/HangfireIO/Hangfire.git",
-      "relative_path": "conditional/watch-runtime/hangfire",
-      "branch": "main",
-      "policy": "floating"
-    },
-    {
-      "name": "mcp-csharp-sdk",
-      "tier": "conditional",
-      "status": "active",
-      "upstream_url": "https://github.com/modelcontextprotocol/csharp-sdk.git",
-      "relative_path": "conditional/watch-runtime/mcp-csharp-sdk",
-      "branch": "main",
-      "policy": "floating"
-    },
-    {
-      "name": "polly",
-      "tier": "conditional",
-      "status": "active",
-      "upstream_url": "https://github.com/App-vNext/Polly.git",
-      "relative_path": "conditional/watch-runtime/polly",
-      "branch": "main",
-      "policy": "floating"
-    },
-    {
-      "name": "quartznet",
-      "tier": "conditional",
-      "status": "active",
-      "upstream_url": "https://github.com/quartznet/quartznet.git",
-      "relative_path": "conditional/watch-runtime/quartznet",
-      "branch": "main",
-      "policy": "floating"
-    },
-    {
       "name": "awesome-copilot",
       "tier": "secondary",
       "status": "active",

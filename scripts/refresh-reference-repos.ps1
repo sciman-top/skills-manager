@@ -292,6 +292,14 @@ if (-not $manifest) {
     throw "Manifest 不存在或无法解析：$ManifestPath"
 }
 
+foreach ($manifestRepo in @($manifest.repos)) {
+    if ([string]$manifestRepo.tier -eq 'conditional' -and
+        ([string]::IsNullOrWhiteSpace([string]$manifestRepo.consumer) -or
+         [string]::IsNullOrWhiteSpace([string]$manifestRepo.retirement_trigger))) {
+        throw ("conditional reference requires consumer and retirement_trigger: {0}" -f [string]$manifestRepo.name)
+    }
+}
+
 if ($RepoNames -and $RepoNames.Count -gt 0 -and $Tier -and $Tier.Count -gt 0) {
     throw "RepoNames 与 Tier 不能同时指定；请选择具体仓列表或 tier 过滤之一。"
 }

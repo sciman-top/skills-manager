@@ -62,9 +62,10 @@
 
 ### 5.2 MCP
 
-- `FR-MCP-001`：支持 stdio/http MCP 的安装、卸载、profile 选择与同步。
+- `FR-MCP-001`：支持 stdio/http MCP 的安装、卸载、profile 选择与同步；配置字段 `http` 表示 Streamable HTTP 兼容入口。
 - `FR-MCP-002`：配置只保存 secret 的环境变量名，不保存 secret 值。
 - `FR-MCP-003`：同步必须区分仓库配置写入、宿主投影和 live health；失败不得报告成功。
+- `FR-MCP-004`：doctor 必须报告 Streamable HTTP 语义，并对非 loopback 明文 HTTP 发出风险提示；URL 解析或配置检查不证明 live health、服务端 Origin 校验或认证已生效。
 
 ### 5.3 目标仓审查
 

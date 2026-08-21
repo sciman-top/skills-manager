@@ -185,6 +185,61 @@ dependencies:
         @($result.Report.errors | Where-Object code -eq "missing_required_mcp").Count | Should -Be 1
     }
 
+    It 'fails when OpenAI invocation policy is not boolean' {
+        $fixture = New-IntegrityFixture 'invalid-openai-policy' ''
+        Set-IntegrityFixtureOpenAiYaml $fixture @'
+policy:
+  allow_implicit_invocation: sometimes
+'@
+
+        $result = Invoke-IntegrityFixture $fixture
+
+        $result.ExitCode | Should -Be 1
+        @($result.Report.errors | Where-Object code -eq 'invalid_openai_invocation_policy').Count | Should -BeGreaterThan 0
+    }
+
+    It 'fails when an OpenAI MCP dependency uses a retired transport or invalid URL' {
+        $fixture = New-IntegrityFixture 'invalid-openai-mcp-transport' ''
+        $config = Get-Content -Raw $fixture.ConfigPath | ConvertFrom-Json
+        $config.mcp_servers = @([pscustomobject]@{ name = 'docs'; transport = 'http'; url = 'https://example.invalid/mcp' })
+        $config | ConvertTo-Json -Depth 8 | Set-Content -Path $fixture.ConfigPath -Encoding UTF8
+        Set-IntegrityFixtureOpenAiYaml $fixture @'
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "docs"
+      transport: "sse"
+      url: "relative/mcp"
+'@
+
+        $result = Invoke-IntegrityFixture $fixture
+
+        $result.ExitCode | Should -Be 1
+        @($result.Report.errors | Where-Object code -eq 'invalid_openai_mcp_transport').Count | Should -Be 1
+        @($result.Report.errors | Where-Object code -eq 'invalid_openai_mcp_url').Count | Should -Be 1
+    }
+
+    It 'accepts the official Streamable HTTP dependency shape' {
+        $fixture = New-IntegrityFixture 'valid-openai-mcp' ''
+        $config = Get-Content -Raw $fixture.ConfigPath | ConvertFrom-Json
+        $config.mcp_servers = @([pscustomobject]@{ name = 'docs'; transport = 'http'; url = 'https://example.invalid/mcp' })
+        $config | ConvertTo-Json -Depth 8 | Set-Content -Path $fixture.ConfigPath -Encoding UTF8
+        Set-IntegrityFixtureOpenAiYaml $fixture @'
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "docs"
+      description: "Docs server"
+      transport: "streamable_http"
+      url: "https://example.invalid/mcp"
+'@
+
+        $result = Invoke-IntegrityFixture $fixture
+
+        $result.ExitCode | Should -Be 0
+        @($result.Report.errors).Count | Should -Be 0
+    }
+
     It "passes for valid resources and a complete dependency closure" {
         $fixture = New-IntegrityFixture "valid" "Read [guide](references/guide.md)." @(
             @{ skill = "demo"; requires = @("required-skill") }

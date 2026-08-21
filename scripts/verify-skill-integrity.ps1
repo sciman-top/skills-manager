@@ -179,6 +179,17 @@ else {
         if (Test-Path -LiteralPath $openAiManifestPath -PathType Leaf) {
             $openAiManifestCount++
             $openAiContent = Get-Content -Raw -LiteralPath $openAiManifestPath
+            $policyScalar = [regex]::Match($openAiContent, '(?m)^policy:[ \t]*(?<value>[^#\r\n]+)[ \t]*$')
+            if ($policyScalar.Success -and -not [string]::IsNullOrWhiteSpace($policyScalar.Groups['value'].Value)) {
+                Add-IntegrityFinding $errors 'invalid_openai_invocation_policy' $name 'OpenAI policy must be a mapping.' $openAiManifestPath
+            }
+            $implicitInvocationValues = @([regex]::Matches($openAiContent, '(?m)^  allow_implicit_invocation:\s*(?<value>[^#\r\n]+?)\s*$'))
+            if ($implicitInvocationValues.Count -gt 1) {
+                Add-IntegrityFinding $errors 'invalid_openai_invocation_policy' $name 'OpenAI allow_implicit_invocation must be declared at most once.' $openAiManifestPath
+            }
+            elseif ($implicitInvocationValues.Count -eq 1 -and $implicitInvocationValues[0].Groups['value'].Value.Trim() -notin @('true', 'false')) {
+                Add-IntegrityFinding $errors 'invalid_openai_invocation_policy' $name 'OpenAI allow_implicit_invocation must be a YAML boolean.' $openAiManifestPath
+            }
             foreach ($match in [regex]::Matches($openAiContent, '(?m)^\s{2}icon_(?:small|large):\s*(["'']?)([^\r\n"'']+)\1\s*$')) {
                 $target = $match.Groups[2].Value.Trim()
                 if ($target -match '^(https?://|data:)') {
@@ -214,6 +225,22 @@ else {
                 if (-not [string]::Equals($type, "mcp", [System.StringComparison]::OrdinalIgnoreCase)) {
                     Add-IntegrityFinding $errors "unsupported_openai_tool_dependency" $name ("unsupported OpenAI tool dependency type: {0}" -f $type) $openAiManifestPath
                     continue
+                }
+                $dependencyTransport = ([string]$toolDependency.transport).Trim()
+                if (-not [string]::IsNullOrWhiteSpace($dependencyTransport) -and $dependencyTransport -notin @('stdio', 'streamable_http')) {
+                    Add-IntegrityFinding $errors 'invalid_openai_mcp_transport' $name ("OpenAI MCP dependency transport must be stdio or streamable_http: {0}" -f $dependencyTransport) $openAiManifestPath
+                }
+                $dependencyUrl = ([string]$toolDependency.url).Trim()
+                if (-not [string]::IsNullOrWhiteSpace($dependencyUrl)) {
+                    $parsedDependencyUrl = $null
+                    if (-not [Uri]::TryCreate($dependencyUrl, [UriKind]::Absolute, [ref]$parsedDependencyUrl) -or
+                        $parsedDependencyUrl.Scheme -notin @([Uri]::UriSchemeHttp, [Uri]::UriSchemeHttps) -or
+                        -not [string]::IsNullOrWhiteSpace($parsedDependencyUrl.UserInfo)) {
+                        Add-IntegrityFinding $errors 'invalid_openai_mcp_url' $name ("OpenAI MCP dependency URL must be an absolute http/https URL without credentials: {0}" -f $dependencyUrl) $openAiManifestPath
+                    }
+                }
+                elseif ([string]::Equals($dependencyTransport, 'streamable_http', [StringComparison]::Ordinal)) {
+                    Add-IntegrityFinding $errors 'invalid_openai_mcp_url' $name 'OpenAI streamable_http MCP dependency requires a URL.' $openAiManifestPath
                 }
                 $declaredMcpDependencies.Add([pscustomobject]@{
                         skill = $name

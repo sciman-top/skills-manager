@@ -145,6 +145,43 @@ function Test-DoctorGitHubConnection {
     return [pscustomobject]@{ ok = $false; method = "none"; detail = "github.com tcp, gh api, and git ls-remote probes failed" }
 }
 
+function Test-McpLoopbackHost([string]$HostName) {
+    if ([string]::IsNullOrWhiteSpace($HostName)) { return $false }
+    if ([string]::Equals($HostName, 'localhost', [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    $address = $null
+    if (-not [Net.IPAddress]::TryParse($HostName, [ref]$address)) { return $false }
+    return [Net.IPAddress]::IsLoopback($address)
+}
+
+function Get-McpTransportDiagnostics($cfg) {
+    $diagnostics = [Collections.Generic.List[object]]::new()
+    if ($null -eq $cfg -or $cfg.PSObject.Properties.Match('mcp_servers').Count -eq 0) { return @() }
+    foreach ($server in @($cfg.mcp_servers)) {
+        if ($null -eq $server -or -not [string]::Equals([string]$server.transport, 'http', [StringComparison]::OrdinalIgnoreCase)) { continue }
+        $name = ([string]$server.name).Trim()
+        $url = ([string]$server.url).Trim()
+        $parsed = $null
+        $valid = [Uri]::TryCreate($url, [UriKind]::Absolute, [ref]$parsed) -and $parsed.Scheme -in @([Uri]::UriSchemeHttp, [Uri]::UriSchemeHttps)
+        $loopback = $valid -and (Test-McpLoopbackHost $parsed.Host)
+        $security = if (-not $valid) { 'invalid_url' } elseif ($parsed.Scheme -eq [Uri]::UriSchemeHttps) { 'encrypted' } elseif ($loopback) { 'loopback_plaintext' } else { 'remote_plaintext' }
+        $authConfigured = $server.PSObject.Properties.Match('bearer_token_env_var').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.bearer_token_env_var)
+        if (-not $authConfigured -and $server.PSObject.Properties.Match('headers').Count -gt 0 -and $null -ne $server.headers) {
+            $authConfigured = @($server.headers.PSObject.Properties | Where-Object { $_.Name -match '^(?i:authorization|proxy-authorization)$' }).Count -gt 0
+        }
+        $diagnostics.Add([pscustomobject][ordered]@{
+                name = $name
+                configured_transport = 'http'
+                protocol = 'streamable_http'
+                url = $url
+                security = $security
+                loopback = $loopback
+                auth_configured = $authConfigured
+                warning_code = if ($security -eq 'remote_plaintext') { 'remote_plaintext_http' } else { '' }
+            }) | Out-Null
+    }
+    return @($diagnostics.ToArray())
+}
+
 function Get-DoctorConfigRisks($cfg) {
     $risks = @()
     if ($null -eq $cfg) { return @() }
@@ -189,6 +226,12 @@ function Get-DoctorConfigRisks($cfg) {
                 $to = if ($m.PSObject.Properties.Match("to").Count -gt 0) { [string]$m.to } else { "" }
                 $risks += ("mapping 引用了不存在的 vendor：{0} (from={1}, to={2})" -f $vendor, $from, $to)
             }
+        }
+    }
+
+    foreach ($diagnostic in @(Get-McpTransportDiagnostics $cfg)) {
+        if ([string]$diagnostic.warning_code -eq 'remote_plaintext_http') {
+            $risks += ("MCP {0} 使用非 loopback 明文 HTTP；Streamable HTTP 远端端点应使用 HTTPS：{1}" -f [string]$diagnostic.name, [string]$diagnostic.url)
         }
     }
 
@@ -355,6 +398,7 @@ function Invoke-Doctor([string[]]$tokens = @()) {
     # 6. Config Risk Scan
     try {
         if ($null -ne $cfgObj) {
+            $report.checks.mcp_transport = @(Get-McpTransportDiagnostics $cfgObj)
             $risks = Get-DoctorConfigRisks $cfgObj
             $report.risks = @($risks)
             if ($risks.Count -gt 0) {

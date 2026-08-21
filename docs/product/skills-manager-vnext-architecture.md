@@ -73,6 +73,10 @@ Canonical inventory 统一来源；eligibility 处理 enabled/dependency/placeme
 
 `capability-router` 是宿主按需选择的 fallback adapter，仅在可见 metadata 不足或需要确定性 policy validation 时适用。它从 portable catalog 读取候选，按 `DomainHint` 限定集合，并对宿主提供的 Candidate 做确定性 existence、containment、entrypoint hash、availability 与 side-effect disclosure 校验。它不作普通请求前置，不维护 session、preheat、activation plan 或 MCP/plugin 编排；语义选择始终属于宿主。
 
+### MCP transport diagnostics
+
+配置继续使用兼容字段 `transport=http`，运行语义统一标注为 `streamable_http`。doctor 只做脱敏的静态诊断：HTTPS 标为 encrypted，loopback HTTP 标为 local plaintext，非 loopback HTTP 输出风险；这些结果不证明远端服务可用、Origin 校验或认证已由服务端执行。
+
 ### Reference shelf
 
 - Role：主架构之外、按任务显式启用的可选只读开发缓存

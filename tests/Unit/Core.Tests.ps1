@@ -3159,6 +3159,15 @@ $governanceScript = Join-Path $repoRoot "scripts\verify-reference-governance.ps1
         Test-ReferenceLifecycleState "secondary" "not-cloned" | Should -Be $false
     }
 
+    It 'requires a named consumer and retirement trigger for conditional references' {
+        . $governanceScript
+
+        Test-ConditionalReferenceContract ([pscustomobject]@{ tier='conditional'; consumer='watch-runtime'; retirement_trigger='remove when unused' }) | Should -BeTrue
+        Test-ConditionalReferenceContract ([pscustomobject]@{ tier='conditional'; consumer=''; retirement_trigger='remove when unused' }) | Should -BeFalse
+        Test-ConditionalReferenceContract ([pscustomobject]@{ tier='conditional'; consumer='watch-runtime'; retirement_trigger='' }) | Should -BeFalse
+        Test-ConditionalReferenceContract ([pscustomobject]@{ tier='secondary' }) | Should -BeTrue
+    }
+
     It "Rejects rooted and traversal reference paths before normalization" {
         . $governanceScript
 
@@ -3206,14 +3215,36 @@ $governanceScript = Join-Path $repoRoot "scripts\verify-reference-governance.ps1
         @($manifest.default_refresh_set) -contains "openai-skills" | Should -Be $false
     }
 
-    It "Selects conditional references only when explicitly requested" {
+    It 'does not retain conditional references without a current consumer' {
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        @($manifest.repos | Where-Object tier -eq 'conditional').Count | Should -Be 0
+    }
+
+    It "Selects a governed conditional reference only when explicitly requested" {
         $referencesRoot = Join-Path $TestDrive "conditional-reference-shelf"
         $outputDirectory = Join-Path $TestDrive "conditional-updates"
+        $conditionalManifest = Join-Path $TestDrive 'conditional-manifest.json'
+        [ordered]@{
+            schema_version = 1
+            references_root = $referencesRoot
+            default_refresh_set = @()
+            repos = @([ordered]@{
+                    name = 'fixture-conditional'
+                    tier = 'conditional'
+                    status = 'active'
+                    upstream_url = 'https://example.invalid/fixture.git'
+                    relative_path = 'conditional/fixture/fixture-conditional'
+                    branch = 'main'
+                    policy = 'floating'
+                    consumer = 'fixture-current-consumer'
+                    retirement_trigger = 'remove when fixture consumer is retired'
+                })
+        } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $conditionalManifest -Encoding UTF8
 
-        $result = & $refreshScript -ManifestPath $manifestPath -ReferencesRoot $referencesRoot -OutputDirectory $outputDirectory -Tier conditional -FetchOnly
+        $result = & $refreshScript -ManifestPath $conditionalManifest -ReferencesRoot $referencesRoot -OutputDirectory $outputDirectory -Tier conditional -FetchOnly
 
         $result.repo_set | Should -Be "tier-conditional"
-        @($result.repo_names) | Should -Be @("hangfire", "mcp-csharp-sdk", "polly", "quartznet")
+        @($result.repo_names) | Should -Be @('fixture-conditional')
         @($result.results | Where-Object status -ne "missing").Count | Should -Be 0
     }
 

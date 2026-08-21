@@ -6,7 +6,7 @@ This directory describes an optional, read-only development cache under `D:\CODE
 
 - `core-mainline`: `codex`, `openai-plugins`, `anthropics-skills`, `gemini-cli`, `agentskills`, `modelcontextprotocol`, `registry`
 - `secondary`: `servers`, `awesome-copilot`, `vercel-agent-skills`, `wshobson-agents`；工作流设计比较按当前 consumer 额外保留 `openspec` 与 `bmad-method`
-- `conditional`: `hangfire`, `mcp-csharp-sdk`, `polly`, `quartznet`（仅为 `watch-runtime` consumer 显式刷新）
+- `conditional`: 仅登记同时具名 `consumer` 与 `retirement_trigger` 的当前参考；当前没有 active conditional entry。未来有真实 consumer 时重新登记并显式刷新。
 
 ```powershell
 .\scripts\refresh-reference-repos.ps1 -FetchOnly -SkipDirtyRepos

@@ -186,5 +186,6 @@ Describe "Doctor CLI behavior" {
         $parsed.offline_contract | Should -Be $true
         $parsed.checks.network.skipped | Should -Be $true
         $parsed.checks.network.reason | Should -Be "offline_contract"
+        @($parsed.checks.mcp_transport | Where-Object protocol -eq 'streamable_http').Count | Should -BeGreaterThan 0
     }
 }

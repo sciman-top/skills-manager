@@ -141,6 +141,28 @@ Describe "Doctor Enhancements" {
             $risks = Get-DoctorConfigRisks $cfg
             ($risks | Where-Object { $_ -like "*不存在的 vendor*" }).Count | Should -Be 1
         }
+
+        It 'classifies HTTP MCP endpoints as Streamable HTTP and warns only for remote plaintext' {
+            $cfg = [pscustomobject]@{
+                vendors = @()
+                targets = @()
+                mappings = @()
+                mcp_servers = @(
+                    [pscustomobject]@{ name = 'secure'; transport = 'http'; url = 'https://example.invalid/mcp'; bearer_token_env_var = 'MCP_TOKEN' },
+                    [pscustomobject]@{ name = 'local'; transport = 'http'; url = 'http://127.0.0.1:8080/mcp' },
+                    [pscustomobject]@{ name = 'remote-plain'; transport = 'http'; url = 'http://192.0.2.10/mcp' }
+                )
+            }
+
+            $diagnostics = @(Get-McpTransportDiagnostics $cfg)
+            $risks = @(Get-DoctorConfigRisks $cfg)
+
+            @($diagnostics | Where-Object protocol -eq 'streamable_http').Count | Should -Be 3
+            @($diagnostics | Where-Object security -eq 'encrypted').Count | Should -Be 1
+            @($diagnostics | Where-Object security -eq 'loopback_plaintext').Count | Should -Be 1
+            @($diagnostics | Where-Object warning_code -eq 'remote_plaintext_http').Count | Should -Be 1
+            @($risks | Where-Object { $_ -like '*remote-plain*明文 HTTP*' }).Count | Should -Be 1
+        }
     }
 
 }
