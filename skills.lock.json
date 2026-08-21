@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-08-20T12:52:42.0481167Z",
+  "generated_at": "2026-08-21T12:02:19.9465467Z",
   "vendors": [
     {
       "name": "agent-skills",
@@ -47,7 +47,7 @@
       "ref": "main",
       "skill": "skills\\agent-browser",
       "sparse": false,
-      "commit": "548b159b30eef119ccf6846c8bc807d0eaa3f6f8"
+      "commit": "b041bd4c9e71b0b1ea0727a9d9deb1e661615050"
     },
     {
       "name": "agent-skills",
@@ -110,7 +110,7 @@
       "ref": "main",
       "skill": "data\\skills\\data-visualization",
       "sparse": false,
-      "commit": "6e2cf60a525763fcf54dfb4ce704a989f2b722c7"
+      "commit": "5267cf7bff3031921d4474b8e8f86ad02d2b8f6d"
     },
     {
       "name": "domain-modeling",
@@ -119,7 +119,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\domain-modeling",
       "sparse": true,
-      "commit": "0ab1b63a410a03d3627979a109c8695de27af954"
+      "commit": "5b15a47f2d7150f545fbcacbfe381787fc0230dc"
     },
     {
       "name": "dotnet-backend-patterns",
@@ -164,7 +164,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\grill-with-docs",
       "sparse": true,
-      "commit": "0ab1b63a410a03d3627979a109c8695de27af954"
+      "commit": "5b15a47f2d7150f545fbcacbfe381787fc0230dc"
     },
     {
       "name": "grilling",
@@ -173,7 +173,7 @@
       "ref": "main",
       "skill": "skills\\productivity\\grilling",
       "sparse": true,
-      "commit": "0ab1b63a410a03d3627979a109c8695de27af954"
+      "commit": "5b15a47f2d7150f545fbcacbfe381787fc0230dc"
     },
     {
       "name": "manim-composer",
@@ -218,7 +218,7 @@
       "ref": "main",
       "skill": "skills\\mcp-cli",
       "sparse": true,
-      "commit": "318066d2213b510e89b500ed0d53506c54093ddc"
+      "commit": "83561bd7d8a46fcda0581aedabdf8eac7cb196b6"
     },
     {
       "name": "microsoft-code-reference",
@@ -245,7 +245,7 @@
       "ref": "main",
       "skill": "plugins\\modern-python\\skills\\modern-python",
       "sparse": false,
-      "commit": "9b2813356e9b9ef670dc1f4493a69e82c8e7f27e"
+      "commit": "7be90d6e55e6b5e1607b519e97d0019b32b2656a"
     },
     {
       "name": "playwright-best-practices",
@@ -299,7 +299,7 @@
       "ref": "main",
       "skill": "skills\\engineering\\research",
       "sparse": true,
-      "commit": "0ab1b63a410a03d3627979a109c8695de27af954"
+      "commit": "5b15a47f2d7150f545fbcacbfe381787fc0230dc"
     },
     {
       "name": "slidev",
