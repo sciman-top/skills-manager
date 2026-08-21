@@ -663,6 +663,8 @@ function 新增技能库 {
     $cfgRaw = ""
     if (Test-Path $CfgPath) { $cfgRaw = Get-Content $CfgPath -Raw }
     $tmp = Join-Path $VendorDir ("_tmp_" + $name)
+    $dst = VendorPath $name
+    $vendorPathCreated = $false
 
     try {
         if (Test-Path $tmp) { Invoke-RemoveItem $tmp -Recurse }
@@ -681,9 +683,9 @@ function 新增技能库 {
         $cfg.vendors += @{ name = $name; repo = $repo; ref = $ref }
         SaveCfgSafe $cfg $cfgRaw
 
-        $dst = VendorPath $name
         Need (-not (Test-Path $dst)) "vendor 已存在：$name"
         Invoke-MoveItem $tmp $dst
+        $vendorPathCreated = $true
 
         Write-Host "新增完成。"
         
@@ -697,9 +699,18 @@ function 新增技能库 {
         Clear-SkillsCache
     }
     catch {
-        if (Test-Path $tmp) { Invoke-RemoveItem $tmp -Recurse }
-        if (-not $DryRun -and $cfgRaw) { Set-ContentUtf8 $CfgPath $cfgRaw }
-        Write-Host ("❌ 操作失败: {0}" -f $_.Exception.Message) -ForegroundColor Red
+        $failure = $_
+        try {
+            if (Test-Path $tmp) { Invoke-RemoveItemWithRetry $tmp -Recurse -IgnoreFailure | Out-Null }
+            if ($vendorPathCreated -and (Test-Path $dst)) { Invoke-RemoveItemWithRetry $dst -Recurse -IgnoreFailure | Out-Null }
+            if (-not $DryRun -and $cfgRaw) { Set-ContentUtf8 $CfgPath $cfgRaw }
+            Clear-SkillsCache
+        }
+        catch {
+            Log ("新增技能库补偿失败：{0}" -f $_.Exception.Message) "ERROR"
+        }
+        Write-Host ("❌ 操作失败: {0}" -f $failure.Exception.Message) -ForegroundColor Red
+        throw $failure
     }
 }
 
@@ -726,6 +737,7 @@ function 删除技能库 {
 
     $cfgRaw = ""
     if (Test-Path $CfgPath) { $cfgRaw = Get-Content $CfgPath -Raw }
+    $createdManualPaths = [System.Collections.Generic.List[string]]::new()
     try {
         $removeNames = New-Object System.Collections.Generic.HashSet[string]
         foreach ($v in $toRemove) { $removeNames.Add($v.name) | Out-Null }
@@ -737,6 +749,9 @@ function 删除技能库 {
                 $result = Convert-InstalledVendorSkillsToManual $cfg $v
                 $totalConverted += [int]$result.converted
                 $totalSkipped += [int]$result.skipped
+                foreach ($createdPath in @($result.created_paths)) {
+                    $createdManualPaths.Add([string]$createdPath) | Out-Null
+                }
             }
             if ($totalConverted -gt 0 -or $totalSkipped -gt 0) {
                 Write-Host ("保留技能转换完成：converted={0}, skipped={1}" -f $totalConverted, $totalSkipped) -ForegroundColor Yellow
@@ -747,19 +762,37 @@ function 删除技能库 {
         $cfg.mappings = $cfg.mappings | Where-Object { -not $removeNames.Contains($_.vendor) }
         $cfg.imports = $cfg.imports | Where-Object { -not ($_.mode -eq "vendor" -and $removeNames.Contains($_.name)) }
         SaveCfgSafe $cfg $cfgRaw
-
-        foreach ($v in $toRemove) {
-            $path = VendorPath $v.name
-            if (Test-Path $path) { Invoke-RemoveItem $path -Recurse }
-        }
-        Write-Host ("已删除技能库：{0} 项。" -f $toRemove.Count)
         Clear-SkillsCache
         构建生效
     }
     catch {
+        $failure = $_
         if (-not $DryRun -and $cfgRaw) { Set-ContentUtf8 $CfgPath $cfgRaw }
-        Write-Host ("❌ 删除失败: {0}" -f $_.Exception.Message) -ForegroundColor Red
+        foreach ($createdPath in $createdManualPaths) {
+            Invoke-RemoveItemWithRetry $createdPath -Recurse -IgnoreFailure | Out-Null
+        }
+        Clear-SkillsCache
+        Write-Host ("❌ 删除失败: {0}" -f $failure.Exception.Message) -ForegroundColor Red
+        throw $failure
     }
+
+    $cleanupFailures = [System.Collections.Generic.List[string]]::new()
+    foreach ($v in $toRemove) {
+        $path = VendorPath $v.name
+        if (-not (Test-Path $path)) { continue }
+        try {
+            Invoke-RemoveItem $path -Recurse
+        }
+        catch {
+            $cleanupFailures.Add(("vendor/{0} => {1}" -f $v.name, $_.Exception.Message)) | Out-Null
+        }
+    }
+    Clear-SkillsCache
+    if ($cleanupFailures.Count -gt 0) {
+        Write-FailureSummary "技能库配置与构建已生效，但旧源目录清理失败" $cleanupFailures "保留目录不再受 skills.json 管理，可修复占用后手动删除。"
+        throw ("删除技能库的源目录清理失败（{0} 项）；已生效的配置不会回滚。" -f $cleanupFailures.Count)
+    }
+    Write-Host ("已删除技能库：{0} 项。" -f $toRemove.Count)
 }
 
 function Get-SkillsUnder([string]$base, [string]$vendorName) {
@@ -997,7 +1030,7 @@ function Convert-InstalledVendorSkillsToManual($cfg, $vendorItem) {
     $vendorPath = VendorPath $vendorName
     $vendorMappings = @($cfg.mappings | Where-Object { $_.vendor -eq $vendorName -and (Normalize-SkillPath ([string]$_.from)) -ne "." })
     if ($vendorMappings.Count -eq 0) {
-        return [pscustomobject]@{ converted = 0; skipped = 0 }
+        return [pscustomobject]@{ converted = 0; skipped = 0; created_paths = @() }
     }
 
     Need (Test-Path $vendorPath) ("转换失败：vendor 目录不存在：{0}" -f $vendorPath)
@@ -1006,42 +1039,53 @@ function Convert-InstalledVendorSkillsToManual($cfg, $vendorItem) {
 
     $converted = 0
     $skipped = 0
-    foreach ($m in $vendorMappings) {
-        $skillPath = Normalize-SkillPath ([string]$m.from)
-        $src = Join-Path $vendorPath $skillPath
-        if (-not (Test-IsSkillDir $src)) {
-            Write-Host ("⚠️ 保留技能时跳过（源不存在或无技能标记）：vendor={0}, from={1}" -f $vendorName, $skillPath) -ForegroundColor Yellow
-            $skipped++
-            continue
-        }
+    $createdPaths = [System.Collections.Generic.List[string]]::new()
+    try {
+        foreach ($m in $vendorMappings) {
+            $skillPath = Normalize-SkillPath ([string]$m.from)
+            $src = Join-Path $vendorPath $skillPath
+            if (-not (Test-IsSkillDir $src)) {
+                Write-Host ("⚠️ 保留技能时跳过（源不存在或无技能标记）：vendor={0}, from={1}" -f $vendorName, $skillPath) -ForegroundColor Yellow
+                $skipped++
+                continue
+            }
 
-        $baseName = Split-Path $skillPath -Leaf
-        if ([string]::IsNullOrWhiteSpace($baseName)) { $baseName = $vendorName }
-        $manualName = Get-UniqueManualImportName $cfg $baseName $reservedNames
-        $dst = Join-Path $ImportDir $manualName
-        Invoke-WithRetry { Copy-Item -LiteralPath $src -Destination $dst -Recurse -Force } 3 250
+            $baseName = Split-Path $skillPath -Leaf
+            if ([string]::IsNullOrWhiteSpace($baseName)) { $baseName = $vendorName }
+            $manualName = Get-UniqueManualImportName $cfg $baseName $reservedNames
+            $dst = Join-Path $ImportDir $manualName
+            $createdPaths.Add($dst) | Out-Null
+            Invoke-WithRetry { Copy-Item -LiteralPath $src -Destination $dst -Recurse -Force } 3 250
 
-        $manualImport = @{
-            name = $manualName
-            repo = $vendorRepo
-            ref = $vendorRef
-            skill = "."
-            mode = "manual"
-            sparse = $false
-        }
-        Upsert-Import $cfg $manualImport
+            $manualImport = @{
+                name = $manualName
+                repo = $vendorRepo
+                ref = $vendorRef
+                skill = "."
+                mode = "manual"
+                sparse = $false
+            }
+            Upsert-Import $cfg $manualImport
 
-        $cfg.mappings += @{
-            vendor = "manual"
-            from = $manualName
-            to = [string]$m.to
+            $cfg.mappings += @{
+                vendor = "manual"
+                from = $manualName
+                to = [string]$m.to
+            }
+            $converted++
         }
-        $converted++
+    }
+    catch {
+        $failure = $_
+        foreach ($createdPath in $createdPaths) {
+            Invoke-RemoveItemWithRetry $createdPath -Recurse -IgnoreFailure | Out-Null
+        }
+        throw $failure
     }
 
     # Remove old vendor mappings now that manual mappings are created.
     $cfg.mappings = @($cfg.mappings | Where-Object { [string]$_.vendor -ne $vendorName })
-    return [pscustomobject]@{ converted = $converted; skipped = $skipped }
+    return [pscustomobject]@{ converted = $converted; skipped = $skipped; created_paths = @($createdPaths.ToArray()) }
 }
 
 function Hide-VendorRootSkills($items) {
@@ -1677,60 +1721,6 @@ function Resolve-SourceBase([string]$vendorName, $cfg) {
     return (VendorPath $v.name)
 }
 
-function Get-DirectoryFingerprint([string]$dir) {
-    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return "missing" }
-    $input = ""
-    if ($null -ne [type]::GetType("System.IO.EnumerationOptions", $false)) {
-        $baseDir = [System.IO.Path]::GetFullPath($dir)
-        $baseWithSeparator = $baseDir
-        if (-not ($baseWithSeparator.EndsWith("\") -or $baseWithSeparator.EndsWith("/"))) {
-            $baseWithSeparator += [System.IO.Path]::DirectorySeparatorChar
-        }
-
-        $options = [System.IO.EnumerationOptions]::new()
-        $options.RecurseSubdirectories = $true
-        $options.IgnoreInaccessible = $true
-        $options.AttributesToSkip = [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
-
-        $files = [System.IO.Directory]::GetFiles($baseDir, "*", $options)
-        [array]::Sort($files, [System.StringComparer]::OrdinalIgnoreCase)
-
-        $parts = [System.Text.StringBuilder]::new()
-        $first = $true
-        foreach ($file in $files) {
-            $info = [System.IO.FileInfo]::new($file)
-            $rel = if ($file.StartsWith($baseWithSeparator, [System.StringComparison]::OrdinalIgnoreCase)) {
-                $file.Substring($baseWithSeparator.Length)
-            }
-            else {
-                $info.Name
-            }
-            if (-not $first) { [void]$parts.Append("`n") }
-            [void]$parts.AppendFormat("{0}|{1}|{2}", $rel, [string]$info.Length, [string]$info.LastWriteTimeUtc.Ticks)
-            $first = $false
-        }
-        $input = $parts.ToString()
-    }
-    else {
-        $files = Get-ChildItem -LiteralPath $dir -Recurse -File -ErrorAction SilentlyContinue | Sort-Object FullName
-        $parts = New-Object System.Collections.Generic.List[string]
-        foreach ($f in $files) {
-            $rel = $f.FullName.Substring($dir.Length).TrimStart("\")
-            $parts.Add(("{0}|{1}|{2}" -f $rel, [string]$f.Length, [string]$f.LastWriteTimeUtc.Ticks)) | Out-Null
-        }
-        $input = $parts -join "`n"
-    }
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes($input)
-        $hash = $sha.ComputeHash($bytes)
-        return ([System.BitConverter]::ToString($hash) -replace "-", "").ToLowerInvariant()
-    }
-    finally {
-        $sha.Dispose()
-    }
-}
-
 function Get-SkillNameConflictBuckets([string]$agentRoot) {
     $nameToPaths = @{}
     foreach ($skillFile in (Get-ChildItem $agentRoot -Recurse -Filter "SKILL.md" -File -ErrorAction SilentlyContinue)) {
@@ -2350,6 +2340,7 @@ function 命令导入安装 {
     }
 
     $successCount = 0
+    $failures = [System.Collections.Generic.List[string]]::new()
     foreach ($line in $commands) {
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
         $lineTrim = $line.Trim()
@@ -2363,6 +2354,7 @@ function 命令导入安装 {
         }
         catch {
             Write-Host ("❌ 解析失败（已跳过）：{0}" -f $_.Exception.Message) -ForegroundColor Red
+            $failures.Add($_.Exception.Message) | Out-Null
             if ($line -match "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@.+$") {
                 Write-Host "提示：你可能使用了 repo@skill 语法。可改为：npx ""skills add <repo> --skill <path>""" -ForegroundColor Yellow
             }
@@ -2372,5 +2364,9 @@ function 命令导入安装 {
         Write-Host ("多行导入完成：{0} 项。开始【构建生效】..." -f $successCount)
         Clear-SkillsCache
         构建生效
+    }
+    if ($failures.Count -gt 0) {
+        Write-FailureSummary "命令导入安装部分失败" $failures "成功项已完成构建，请修正失败命令后重试。"
+        throw ("命令导入安装失败（{0} 项）。" -f $failures.Count)
     }
 }

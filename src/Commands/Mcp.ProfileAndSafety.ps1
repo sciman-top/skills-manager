@@ -198,6 +198,16 @@ function Assert-McpKeyValueMapSafe($data, [string]$label) {
     }
 }
 
+function Assert-McpProcessHeaderSafe([string]$HeaderValue, [string]$Label) {
+    if ([string]::IsNullOrWhiteSpace($HeaderValue)) { return }
+    $match = [regex]::Match($HeaderValue, '^\s*(?<key>[^:=\s][^:=]*?)\s*[:=]\s*(?<value>.*)$')
+    if (-not $match.Success) { return }
+    $key = $match.Groups['key'].Value.Trim()
+    if (Test-McpSensitiveKeyName $key) {
+        Need (Test-McpEnvironmentTemplate $match.Groups['value'].Value) ("{0} 敏感 header 不得保存 literal value：{1}" -f $Label, $key)
+    }
+}
+
 function Assert-McpProcessArgsSafe([object[]]$ProcessArgs,[string]$Label='args') {
     $items=@($ProcessArgs|ForEach-Object{[string]$_})
     for($i=0;$i -lt $items.Count;$i++){
@@ -205,34 +215,35 @@ function Assert-McpProcessArgsSafe([object[]]$ProcessArgs,[string]$Label='args')
         Need ($item -notmatch '[\r\n]') ("{0} 不能包含换行。" -f $Label)
         Need ($item -notmatch '(?i)\b(?:https?|postgres(?:ql)?)://[^/@\s:]+:[^/@\s]+@') ("{0} 不允许内嵌 URL credential；请改用环境变量模板。" -f $Label)
         Need ($item -notmatch '(?i)\b(?:github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+)\b') ("{0} 不允许 literal access token；请改用环境变量模板。" -f $Label)
-        if($item -match '^(?i)(--?(?:access[-_]?key|api[-_]?key|authorization|password|passwd|secret|token))=(.*)$'){
-            Need (Test-McpEnvironmentTemplate ([string]$Matches[2])) ("{0} 敏感参数不得保存 literal value：{1}" -f $Label,$Matches[1])
-        }
-        elseif($item -match '^(?i)--?(?:access[-_]?key|api[-_]?key|authorization|password|passwd|secret|token)$'){
-            Need (($i+1) -lt $items.Count -and (Test-McpEnvironmentTemplate $items[$i+1])) ("{0} 敏感参数不得保存 literal value：{1}" -f $Label,$item)
-            $i++
-        }
-    }
-}
 
-function Normalize-McpProcessArgs([string[]]$processArgs) {
-    $normalized = New-Object System.Collections.Generic.List[string]
-    if ($null -eq $processArgs) { return @() }
-    for ($i = 0; $i -lt $processArgs.Count; $i++) {
-        $t = [string]$processArgs[$i]
-        if ($t -eq "--arg") {
-            if ($i + 1 -lt $processArgs.Count) {
-                $normalized.Add([string]$processArgs[++$i]) | Out-Null
+        if ([string]::Equals($item, '--header', [System.StringComparison]::OrdinalIgnoreCase) -or $item -ceq '-H') {
+            if (($i + 1) -lt $items.Count) { Assert-McpProcessHeaderSafe $items[$i + 1] $Label }
+            continue
+        }
+        if ($item -match '^(?i)--header=(?<header>.*)$') {
+            Assert-McpProcessHeaderSafe $Matches['header'] $Label
+            continue
+        }
+        if ($item.StartsWith('-H', [System.StringComparison]::Ordinal) -and $item.Length -gt 2) {
+            Assert-McpProcessHeaderSafe $item.Substring(2) $Label
+            continue
+        }
+
+        if ($item -match '^--?(?<name>[A-Za-z][A-Za-z0-9_-]*)=(?<value>.*)$') {
+            $flagName = [string]$Matches['name']
+            if (Test-McpSensitiveKeyName $flagName) {
+                Need (Test-McpEnvironmentTemplate ([string]$Matches['value'])) ("{0} 敏感参数不得保存 literal value：{1}" -f $Label, $flagName)
             }
             continue
         }
-        if ($t.ToLowerInvariant().StartsWith("--arg=")) {
-            $normalized.Add($t.Substring(6)) | Out-Null
-            continue
+        if ($item -match '^--?(?<name>[A-Za-z][A-Za-z0-9_-]*)$') {
+            $flagName = [string]$Matches['name']
+            if (Test-McpSensitiveKeyName $flagName) {
+                Need (($i + 1) -lt $items.Count -and (Test-McpEnvironmentTemplate $items[$i + 1])) ("{0} 敏感参数不得保存 literal value：{1}" -f $Label, $flagName)
+                $i++
+            }
         }
-        $normalized.Add($t) | Out-Null
     }
-    return $normalized.ToArray()
 }
 
 function Get-StableHashSuffix([string]$seed, [int]$len = 10) {
@@ -275,4 +286,3 @@ function Normalize-McpServiceNameWithFallback([string]$name, [string]$fallbackSe
     Need $false ("MCP 服务名 无法规范化，请更换名称：{0}" -f $name)
     return $null
 }
-

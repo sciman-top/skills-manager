@@ -110,27 +110,33 @@ function Read-SkillMetadata {
         }
         else {
             $fields[$key] = ConvertFrom-SkillMetadataScalar $raw
-            $fieldKinds[$key] = 'scalar'
+            $fieldKinds[$key] = if (Test-SkillMetadataStringScalar $raw) { 'string' } else { 'non_string_scalar' }
         }
     }
 
     $name = [string]$fields['name']
     $description = [string]$fields['description']
-    if ([string]::IsNullOrWhiteSpace($name)) { $findings.Add([pscustomobject]@{ code='name_required'; severity='error'; field='name'; message='Skill name is required.' }) | Out-Null }
+    if ($fields.Contains('name') -and [string]$fieldKinds['name'] -ne 'string') { $findings.Add([pscustomobject]@{ code='name_type_invalid'; severity='error'; field='name'; message='Skill name must be a string.' }) | Out-Null }
+    elseif ([string]::IsNullOrWhiteSpace($name)) { $findings.Add([pscustomobject]@{ code='name_required'; severity='error'; field='name'; message='Skill name is required.' }) | Out-Null }
     elseif ($name.Length -gt 64 -or $name -notmatch '^[a-z0-9]+(?:-[a-z0-9]+)*$') { $findings.Add([pscustomobject]@{ code='name_invalid'; severity='error'; field='name'; message='Skill name must be at most 64 lowercase alphanumeric/hyphen characters without edge or repeated hyphens.' }) | Out-Null }
-    if ([string]::IsNullOrWhiteSpace($description)) { $findings.Add([pscustomobject]@{ code='description_required'; severity='error'; field='description'; message='Skill description is required.' }) | Out-Null }
+    if ($fields.Contains('description') -and [string]$fieldKinds['description'] -ne 'string') { $findings.Add([pscustomobject]@{ code='description_type_invalid'; severity='error'; field='description'; message='Skill description must be a string.' }) | Out-Null }
+    elseif ([string]::IsNullOrWhiteSpace($description)) { $findings.Add([pscustomobject]@{ code='description_required'; severity='error'; field='description'; message='Skill description is required.' }) | Out-Null }
     elseif ($description.Length -gt 1024) { $findings.Add([pscustomobject]@{ code='description_too_long'; severity='error'; field='description'; message='Skill description exceeds 1024 characters.' }) | Out-Null }
 
-    if ($fields.Contains('license') -and [string]::IsNullOrWhiteSpace([string]$fields['license'])) {
-        $findings.Add([pscustomobject]@{ code='license_invalid'; severity='error'; field='license'; message='Skill license must be a non-empty string when provided.' }) | Out-Null
+    if ($fields.Contains('license')) {
+        if ([string]$fieldKinds['license'] -ne 'string' -or [string]::IsNullOrWhiteSpace([string]$fields['license'])) {
+            $findings.Add([pscustomobject]@{ code='license_invalid'; severity='error'; field='license'; message='Skill license must be a non-empty string when provided.' }) | Out-Null
+        }
     }
     if ($fields.Contains('compatibility')) {
         $compatibility = [string]$fields['compatibility']
-        if ([string]::IsNullOrWhiteSpace($compatibility)) { $findings.Add([pscustomobject]@{ code='compatibility_invalid'; severity='error'; field='compatibility'; message='Skill compatibility must be a non-empty string when provided.' }) | Out-Null }
+        if ([string]$fieldKinds['compatibility'] -ne 'string' -or [string]::IsNullOrWhiteSpace($compatibility)) { $findings.Add([pscustomobject]@{ code='compatibility_invalid'; severity='error'; field='compatibility'; message='Skill compatibility must be a non-empty string when provided.' }) | Out-Null }
         elseif ($compatibility.Length -gt 500) { $findings.Add([pscustomobject]@{ code='compatibility_too_long'; severity='error'; field='compatibility'; message='Skill compatibility exceeds 500 characters.' }) | Out-Null }
     }
-    if ($fields.Contains('allowed-tools') -and [string]::IsNullOrWhiteSpace([string]$fields['allowed-tools'])) {
-        $findings.Add([pscustomobject]@{ code='allowed_tools_invalid'; severity='error'; field='allowed-tools'; message='Skill allowed-tools must be a non-empty space-separated string when provided.' }) | Out-Null
+    if ($fields.Contains('allowed-tools')) {
+        if ([string]$fieldKinds['allowed-tools'] -ne 'string' -or [string]::IsNullOrWhiteSpace([string]$fields['allowed-tools'])) {
+            $findings.Add([pscustomobject]@{ code='allowed_tools_invalid'; severity='error'; field='allowed-tools'; message='Skill allowed-tools must be a non-empty space-separated string when provided.' }) | Out-Null
+        }
     }
     if ($fields.Contains('metadata') -and [string]$fieldKinds['metadata'] -ne 'map') {
         $findings.Add([pscustomobject]@{ code='metadata_invalid'; severity='error'; field='metadata'; message='Skill metadata must be a map from string keys to string values.' }) | Out-Null
@@ -159,7 +165,7 @@ function Read-SkillMetadata {
 
     if ($Observation) {
         foreach ($finding in $findings) {
-            if ([string]$finding.severity -eq 'error' -and [string]$finding.code -notin @('frontmatter_missing','name_required','description_required')) { $finding.severity = 'warning' }
+            if ([string]$finding.severity -eq 'error' -and [string]$finding.code -notin @('frontmatter_missing','name_required','description_required','name_type_invalid','description_type_invalid')) { $finding.severity = 'warning' }
         }
     }
     $result.valid = @($findings | Where-Object severity -eq 'error').Count -eq 0

@@ -85,6 +85,34 @@ metadata:
         @($observed.findings | Where-Object code -eq 'metadata_value_invalid').Count | Should -BeGreaterThan 0
     }
 
+    It 'rejects non-string YAML scalars for Agent Skills string fields' {
+        foreach ($case in @(
+                [pscustomobject]@{ field = 'name'; value = 'true'; code = 'name_type_invalid'; name = 'true' },
+                [pscustomobject]@{ field = 'description'; value = 'true'; code = 'description_type_invalid'; name = 'typed-fields' },
+                [pscustomobject]@{ field = 'license'; value = '123'; code = 'license_invalid'; name = 'typed-fields' },
+                [pscustomobject]@{ field = 'compatibility'; value = 'false'; code = 'compatibility_invalid'; name = 'typed-fields' },
+                [pscustomobject]@{ field = 'allowed-tools'; value = '[]'; code = 'allowed_tools_invalid'; name = 'typed-fields' }
+            )) {
+            $path = Join-Path $TestDrive ("{0}.md" -f $case.field)
+            $description = if ($case.field -eq 'description') { $case.value } else { 'fixture' }
+            $extra = if ($case.field -in @('name', 'description')) { '' } else { "`n$($case.field): $($case.value)" }
+            "---`nname: $($case.name)`ndescription: $description$extra`n---`n" | Set-Content -LiteralPath $path
+
+            $metadata = Read-SkillMetadata $path
+            $metadata.valid | Should -BeFalse
+            @($metadata.findings.code) | Should -Contain $case.code
+
+            if ($case.field -in @('name', 'description')) {
+                $observed = Read-SkillMetadata $path -Observation
+                @($observed.findings | Where-Object { $_.code -eq $case.code -and $_.severity -eq 'error' }).Count | Should -Be 1
+            }
+        }
+
+        $quotedPath = Join-Path $TestDrive 'quoted-scalars.md'
+        "---`nname: quoted-scalars`ndescription: 'true'`nlicense: '123'`nallowed-tools: '[]'`n---`n" | Set-Content -LiteralPath $quotedPath
+        (Read-SkillMetadata $quotedPath).valid | Should -BeTrue
+    }
+
     It 'classifies known host and vendor extensions separately from unknown fields' {
         $path = Join-Path $TestDrive 'extensions.md'
         @'

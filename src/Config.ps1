@@ -1241,10 +1241,26 @@ function Get-ImportLockSourceHash([string]$repo, [string]$sourceKind) {
     return (Get-FileContentHash $repo)
 }
 
-function Get-ImportLockWorkspaceFingerprint([string]$repoPath) {
+function Get-ImportLockWorkspaceFingerprint([string]$repoPath, [string]$algorithm = "sha256-tree-v2") {
     Need (-not [string]::IsNullOrWhiteSpace($repoPath)) "repoPath 不能为空"
     Need (Test-Path -LiteralPath $repoPath) ("锁定失败：缺少 import 缓存目录 {0}" -f $repoPath)
-    return (Get-DirectoryFingerprint $repoPath)
+    switch ($algorithm.Trim().ToLowerInvariant()) {
+        "metadata-tree-v1" { return (Get-LegacyDirectoryMetadataFingerprint $repoPath) }
+        "sha256-tree-v2" { return (Get-DirectoryFingerprint $repoPath) }
+        default { throw ("锁文件包含未知的 import 工作区指纹算法：{0}" -f $algorithm) }
+    }
+}
+
+function Assert-ImportLockWorkspaceFingerprint($lockEntry, [string]$repoPath, [string]$label) {
+    $expectedFingerprint = [string](Get-CfgObjectProperty $lockEntry "workspace_fingerprint")
+    Need (-not [string]::IsNullOrWhiteSpace($expectedFingerprint)) ("锁文件缺少 import 工作区指纹：{0}" -f $label)
+    $algorithm = [string](Get-CfgObjectProperty $lockEntry "workspace_fingerprint_algorithm")
+    if ([string]::IsNullOrWhiteSpace($algorithm)) {
+        $algorithm = "metadata-tree-v1"
+        Log ("锁文件仍使用旧版 import 工作区指纹，重新执行锁定可迁移：{0}" -f $label) "WARN"
+    }
+    $actualFingerprint = Get-ImportLockWorkspaceFingerprint $repoPath $algorithm
+    Need ($actualFingerprint -eq $expectedFingerprint) ("import 内容不匹配：{0}（algorithm={1}, lock={2}, actual={3}）" -f $label, $algorithm, $expectedFingerprint, $actualFingerprint)
 }
 
 function Get-RepoHeadCommit([string]$repoPath, [hashtable]$HeadCache = $null) {
@@ -1328,7 +1344,8 @@ function New-LockData($cfg) {
         if ($sourceKind -eq "local_zip") {
             $importEntry.source_kind = $sourceKind
             $importEntry.source_hash = Get-ImportLockSourceHash ([string]($i.repo)) $sourceKind
-            $importEntry.workspace_fingerprint = Get-ImportLockWorkspaceFingerprint $repoPath
+            $importEntry.workspace_fingerprint_algorithm = "sha256-tree-v2"
+            $importEntry.workspace_fingerprint = Get-ImportLockWorkspaceFingerprint $repoPath "sha256-tree-v2"
         }
         else {
             $importEntry.commit = Get-RepoHeadCommit $repoPath $repoHeadCache
@@ -1468,10 +1485,7 @@ function Assert-LockMatchesWorkspace($cfg, $lock) {
             $actualSourceHash = Get-ImportLockSourceHash ([string]($i.repo)) $sourceKind
             Need ($actualSourceHash -eq $expectedSourceHash) ("import 源文件不匹配：{0}/{1}（lock={2}, actual={3}）" -f $mode, [string]($i.name), $expectedSourceHash, $actualSourceHash)
 
-            $expectedFingerprint = [string](Get-CfgObjectProperty $i "workspace_fingerprint")
-            Need (-not [string]::IsNullOrWhiteSpace($expectedFingerprint)) ("锁文件缺少 import 工作区指纹：{0}/{1}" -f $mode, [string]($i.name))
-            $actualFingerprint = Get-ImportLockWorkspaceFingerprint $path
-            Need ($actualFingerprint -eq $expectedFingerprint) ("import 内容不匹配：{0}/{1}（lock={2}, actual={3}）" -f $mode, [string]($i.name), $expectedFingerprint, $actualFingerprint)
+            Assert-ImportLockWorkspaceFingerprint $i $path ("{0}/{1}" -f $mode, [string]($i.name))
             continue
         }
 
@@ -1536,10 +1550,7 @@ function Apply-LockToWorkspace($cfg, $lock) {
 
         Ensure-Repo $path $repo $ref $sparsePath $forceClean $false $true
         if ($sourceKind -eq "local_zip") {
-            $expectedFingerprint = [string](Get-CfgObjectProperty $i "workspace_fingerprint")
-            Need (-not [string]::IsNullOrWhiteSpace($expectedFingerprint)) ("锁文件缺少 import 工作区指纹：manual/{0}" -f $name)
-            $actualFingerprint = Get-ImportLockWorkspaceFingerprint $path
-            Need ($actualFingerprint -eq $expectedFingerprint) ("import 内容不匹配：manual/{0}（lock={1}, actual={2}）" -f $name, $expectedFingerprint, $actualFingerprint)
+            Assert-ImportLockWorkspaceFingerprint $i $path ("manual/{0}" -f $name)
             continue
         }
 

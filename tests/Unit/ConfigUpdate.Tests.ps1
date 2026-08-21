@@ -1056,6 +1056,73 @@ Describe "Config And Update Enhancements" {
             }
         }
 
+        It "Throws and leaves the lock untouched when a source update partially fails" {
+            $oldPlan = $Plan
+            $oldLocked = $Locked
+            $oldUpgrade = $Upgrade
+            try {
+                $Plan = $false
+                $Locked = $false
+                $Upgrade = $true
+                $cfg = [pscustomobject]@{
+                    vendors = @()
+                    targets = @()
+                    mappings = @()
+                    imports = @([pscustomobject]@{ name = "broken"; mode = "manual"; repo = "https://example.invalid/broken.git"; ref = "main"; skill = "." })
+                    mcp_servers = @()
+                    mcp_targets = @()
+                    update_force = $false
+                    sync_mode = "sync"
+                }
+                Mock LoadCfg { $cfg }
+                Mock Confirm-UpdateForce { $true }
+                Mock Skip-IfDryRun { $false }
+                Mock Preflight {}
+                Mock Get-UpdateParallelism { 1 }
+                Mock Get-UpdatePlanItems { @([pscustomobject]@{ type = "import"; name = "broken"; current = "old"; target = "new"; changed = $true }) }
+                Mock Test-UpdateCanFastNoop { $false }
+                Mock 更新Imports { @("import:broken => network failure") }
+                Mock 更新Vendor { @() }
+                Mock 构建生效 {}
+                Mock Save-LockData {}
+                Mock Write-FailureSummary {}
+
+                { 更新 } | Should -Throw '*更新失败*'
+
+                Should -Invoke 构建生效 -Times 1 -Exactly
+                Should -Invoke Save-LockData -Times 0 -Exactly
+                Should -Invoke Write-FailureSummary -Times 1 -Exactly
+            }
+            finally {
+                $Plan = $oldPlan
+                $Locked = $oldLocked
+                $Upgrade = $oldUpgrade
+            }
+        }
+
+        It "Reports a configured vendor with a missing workspace as a failure" {
+            $oldVendorDir = $VendorDir
+            try {
+                $VendorDir = Join-Path $TestDrive "missing-vendor-root"
+                New-Item -ItemType Directory -Path $VendorDir -Force | Out-Null
+                $cfg = [pscustomobject]@{
+                    vendors = @([pscustomobject]@{ name = "missing"; repo = "https://example.invalid/missing.git"; ref = "main" })
+                    imports = @()
+                    mappings = @()
+                    update_force = $false
+                }
+                Mock Clear-SkillsCache {}
+
+                $failures = @(更新Vendor $cfg -SkipPreflight)
+
+                $failures.Count | Should -Be 1
+                $failures[0] | Should -Match 'vendor:missing'
+            }
+            finally {
+                $VendorDir = $oldVendorDir
+            }
+        }
+
         It "Falls back to per-source fetch when parallel prefetch fails" {
             $oldPlan = $Plan
             $oldLocked = $Locked

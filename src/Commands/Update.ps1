@@ -479,8 +479,10 @@ function 更新Vendor($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $n
             try {
                 $path = VendorPath $v.name
                 if (-not (Test-Path $path)) {
-                    Write-Host ("❌ 未找到 vendor/{0} (跳过)" -f $v.name) -ForegroundColor Red
-                    continue 
+                    $message = ("未找到 vendor/{0}" -f $v.name)
+                    Write-Host ("❌ {0}" -f $message) -ForegroundColor Red
+                    $failures.Add(("vendor:{0} => {1}" -f $v.name, $message)) | Out-Null
+                    continue
                 }
                 if ([string]::IsNullOrWhiteSpace($v.ref)) { $v.ref = "main" }
 
@@ -712,6 +714,7 @@ function 更新 {
         }
         if ($failures.Count -gt 0) {
             Write-FailureSummary "更新部分失败" $failures "请查看上方错误并重试。"
+            throw ("更新失败（{0} 项）；成功项已完成构建，锁文件未刷新。" -f $failures.Count)
         }
         else {
             Write-Host "更新完成。若某 CLI 未立即识别新技能，重启该 CLI 会话即可。"

@@ -68,6 +68,10 @@ function Parse-McpInstallArgs([string[]]$tokens) {
             $result.args += $tokens[++$i]
             continue
         }
+        if ($key.StartsWith("--arg=")) {
+            $result.args += $t.Substring(6)
+            continue
+        }
         if ($key -eq "--env") {
             Need ($i + 1 -lt $tokens.Count) "参数缺少值：--env"
             $pair = Parse-KeyValueToken $tokens[++$i] "--env"
@@ -110,7 +114,6 @@ function Parse-McpInstallArgs([string[]]$tokens) {
 
     if ($result.transport -eq "stdio") {
         Assert-McpKeyValueMapSafe $result.env "--env"
-        $result.args = Normalize-McpProcessArgs @($result.args)
         Assert-McpProcessArgsSafe $result.args '--args'
         if ([string]::IsNullOrWhiteSpace($result.command) -and $result.args.Count -gt 0) {
             $result.command = [string]$result.args[0]

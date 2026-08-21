@@ -946,6 +946,16 @@ Describe "Core Functions" {
             $parsed.args[1] | Should -Be "@modelcontextprotocol/server-filesystem"
         }
 
+        It "Parses --arg=value wrappers but preserves every token after the separator" {
+            $wrapped = Parse-McpInstallArgs @("filesystem", "--cmd", "npx", "--arg=-y")
+            $wrapped.args | Should -Be @('-y')
+
+            $passthrough = Parse-McpInstallArgs @("filesystem", "--cmd", "npx", "--", "--arg", "--arg=child-value")
+            $passthrough.args.Count | Should -Be 2
+            $passthrough.args[0] | Should -Be '--arg'
+            $passthrough.args[1] | Should -Be '--arg=child-value'
+        }
+
         It "Supports command tail after -- without --cmd" {
             $parsed = Parse-McpInstallArgs @("fetch", "--", "npx", "-y", "@modelcontextprotocol/server-fetch")
             $parsed.command | Should -Be "npx"
@@ -1058,6 +1068,9 @@ Describe "Core Functions" {
             { Parse-McpInstallArgs @("query-secret", "--transport", "http", "--url", "https://example.invalid/mcp?api_key=literal") | Out-Null } | Should -Throw
             { Parse-McpInstallArgs @("arg-secret", "--cmd", "tool", "--", "--token", "literal-secret") | Out-Null } | Should -Throw
             { Parse-McpInstallArgs @("arg-url-secret", "--cmd", "tool", "--", "postgresql://user:password@example.invalid/db") | Out-Null } | Should -Throw
+            { Parse-McpInstallArgs @("curl-header-secret", "--cmd", "tool", "--", "--header", "Authorization: Bearer literal-secret") | Out-Null } | Should -Throw
+            { Parse-McpInstallArgs @("curl-short-header-secret", "--cmd", "tool", "--", "-H", "X-API-Key: literal-secret") | Out-Null } | Should -Throw
+            { Parse-McpInstallArgs @("curl-cookie-secret", "--cmd", "tool", "--", "--header=Cookie: session=literal-secret") | Out-Null } | Should -Throw
 
             $parsed = Parse-McpInstallArgs @("safe-secret", "--cmd", "tool", "--env", 'API_KEY=${UNIT_TEST_MCP_TOKEN}')
             [string]$parsed.env.API_KEY | Should -Be '${UNIT_TEST_MCP_TOKEN}'
@@ -1065,6 +1078,8 @@ Describe "Core Functions" {
             [string]$safeArg.args[1] | Should -Be '${UNIT_TEST_MCP_TOKEN}'
             $headerParsed = Parse-McpInstallArgs @("safe-header", "--transport", "http", "--url", "https://example.invalid/mcp", "--header", 'Authorization=Bearer ${UNIT_TEST_MCP_TOKEN}')
             [string]$headerParsed.headers.Authorization | Should -Be 'Bearer ${UNIT_TEST_MCP_TOKEN}'
+            $safeProcessHeader = Parse-McpInstallArgs @("safe-process-header", "--cmd", "tool", "--", "--header", 'Authorization: Bearer ${UNIT_TEST_MCP_TOKEN}', "--header", "Accept: application/json")
+            $safeProcessHeader.args.Count | Should -Be 4
         }
 
         It "Rejects remote MCP URLs that are not absolute http or https URLs" {
@@ -2719,6 +2734,7 @@ command = "npx"
                 $result = Convert-InstalledVendorSkillsToManual $cfg $vendorItem
 
                 $result.converted | Should -Be 1
+                @($result.created_paths).Count | Should -Be 1
                 @($cfg.mappings | Where-Object { $_.vendor -eq "demo-vendor" }).Count | Should -Be 0
                 @($cfg.imports | Where-Object { $_.mode -eq "manual" }).Count | Should -Be 1
                 $manualImport = @($cfg.imports | Where-Object { $_.mode -eq "manual" })[0]
@@ -2958,6 +2974,7 @@ command = "npx"
                 $lock = Save-LockData $cfg
                 [string]$lock.imports[0].source_kind | Should -Be "local_zip"
                 [string]$lock.imports[0].source_hash | Should -Not -BeNullOrEmpty
+                [string]$lock.imports[0].workspace_fingerprint_algorithm | Should -Be "sha256-tree-v2"
                 [string]$lock.imports[0].workspace_fingerprint | Should -Not -BeNullOrEmpty
                 ($lock.imports[0].PSObject.Properties.Match("commit").Count -gt 0) | Should -Be $false
             }
@@ -2967,6 +2984,56 @@ command = "npx"
                 $VendorDir = $oldVendorDir
                 $ImportDir = $oldImportDir
             }
+        }
+
+        It "Fingerprints local zip workspaces by content including hidden files" {
+            $cache = Join-Path $TestDrive "fingerprint-content"
+            New-Item -ItemType Directory -Path $cache -Force | Out-Null
+            $regular = Join-Path $cache "regular.txt"
+            Set-Content -LiteralPath $regular -Value "aaaa" -NoNewline
+            $originalTimestamp = (Get-Item -LiteralPath $regular).LastWriteTimeUtc
+            $before = Get-DirectoryFingerprint $cache
+
+            Set-Content -LiteralPath $regular -Value "bbbb" -NoNewline
+            (Get-Item -LiteralPath $regular).LastWriteTimeUtc = $originalTimestamp
+            $afterSameMetadata = Get-DirectoryFingerprint $cache
+            $afterSameMetadata | Should -Not -Be $before
+
+            $hidden = Join-Path $cache "hidden.txt"
+            Set-Content -LiteralPath $hidden -Value "hidden-a" -NoNewline
+            [System.IO.File]::SetAttributes($hidden, [System.IO.FileAttributes]::Hidden)
+            $withHidden = Get-DirectoryFingerprint $cache
+            Set-Content -LiteralPath $hidden -Value "hidden-b" -NoNewline
+            (Get-DirectoryFingerprint $cache) | Should -Not -Be $withHidden
+        }
+
+        It "Rejects reparse entries instead of fingerprinting content outside the workspace" {
+            if ($env:OS -ne "Windows_NT") { return }
+            $cache = Join-Path $TestDrive "fingerprint-reparse"
+            $outside = Join-Path $TestDrive "fingerprint-outside"
+            $link = Join-Path $cache "linked"
+            New-Item -ItemType Directory -Path $cache, $outside -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $outside "secret.txt") -Value "outside"
+            & cmd /c mklink /J "$link" "$outside" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "test mklink failed" }
+
+            { Get-DirectoryFingerprint $cache } | Should -Throw '*reparse*'
+        }
+
+        It "Reads legacy local zip fingerprints and rejects unknown algorithms" {
+            $cache = Join-Path $TestDrive "fingerprint-legacy"
+            New-Item -ItemType Directory -Path $cache -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $cache "SKILL.md") -Value "legacy"
+            $legacyEntry = [pscustomobject]@{
+                workspace_fingerprint = Get-LegacyDirectoryMetadataFingerprint $cache
+            }
+            { Assert-ImportLockWorkspaceFingerprint $legacyEntry $cache "manual/legacy" } | Should -Not -Throw
+
+            $unknownEntry = [pscustomobject]@{
+                workspace_fingerprint_algorithm = "unknown-v9"
+                workspace_fingerprint = "unused"
+            }
+            { Assert-ImportLockWorkspaceFingerprint $unknownEntry $cache "manual/unknown" } | Should -Throw '*未知*'
         }
 
         It "Detects local zip source drift in locked workspace" {
@@ -2995,6 +3062,7 @@ command = "npx"
                             sparse = $false
                             source_kind = "local_zip"
                             source_hash = Get-FileContentHash $zip
+                            workspace_fingerprint_algorithm = "sha256-tree-v2"
                             workspace_fingerprint = Get-DirectoryFingerprint $cache
                         })
                 }
@@ -3101,6 +3169,7 @@ command = "npx"
                             sparse = $false
                             source_kind = "local_zip"
                             source_hash = Get-FileContentHash $zip
+                            workspace_fingerprint_algorithm = "sha256-tree-v2"
                             workspace_fingerprint = Get-DirectoryFingerprint $cache
                         })
                 }

@@ -347,27 +347,33 @@ function Read-SkillMetadata {
         }
         else {
             $fields[$key] = ConvertFrom-SkillMetadataScalar $raw
-            $fieldKinds[$key] = 'scalar'
+            $fieldKinds[$key] = if (Test-SkillMetadataStringScalar $raw) { 'string' } else { 'non_string_scalar' }
         }
     }
 
     $name = [string]$fields['name']
     $description = [string]$fields['description']
-    if ([string]::IsNullOrWhiteSpace($name)) { $findings.Add([pscustomobject]@{ code='name_required'; severity='error'; field='name'; message='Skill name is required.' }) | Out-Null }
+    if ($fields.Contains('name') -and [string]$fieldKinds['name'] -ne 'string') { $findings.Add([pscustomobject]@{ code='name_type_invalid'; severity='error'; field='name'; message='Skill name must be a string.' }) | Out-Null }
+    elseif ([string]::IsNullOrWhiteSpace($name)) { $findings.Add([pscustomobject]@{ code='name_required'; severity='error'; field='name'; message='Skill name is required.' }) | Out-Null }
     elseif ($name.Length -gt 64 -or $name -notmatch '^[a-z0-9]+(?:-[a-z0-9]+)*$') { $findings.Add([pscustomobject]@{ code='name_invalid'; severity='error'; field='name'; message='Skill name must be at most 64 lowercase alphanumeric/hyphen characters without edge or repeated hyphens.' }) | Out-Null }
-    if ([string]::IsNullOrWhiteSpace($description)) { $findings.Add([pscustomobject]@{ code='description_required'; severity='error'; field='description'; message='Skill description is required.' }) | Out-Null }
+    if ($fields.Contains('description') -and [string]$fieldKinds['description'] -ne 'string') { $findings.Add([pscustomobject]@{ code='description_type_invalid'; severity='error'; field='description'; message='Skill description must be a string.' }) | Out-Null }
+    elseif ([string]::IsNullOrWhiteSpace($description)) { $findings.Add([pscustomobject]@{ code='description_required'; severity='error'; field='description'; message='Skill description is required.' }) | Out-Null }
     elseif ($description.Length -gt 1024) { $findings.Add([pscustomobject]@{ code='description_too_long'; severity='error'; field='description'; message='Skill description exceeds 1024 characters.' }) | Out-Null }
 
-    if ($fields.Contains('license') -and [string]::IsNullOrWhiteSpace([string]$fields['license'])) {
-        $findings.Add([pscustomobject]@{ code='license_invalid'; severity='error'; field='license'; message='Skill license must be a non-empty string when provided.' }) | Out-Null
+    if ($fields.Contains('license')) {
+        if ([string]$fieldKinds['license'] -ne 'string' -or [string]::IsNullOrWhiteSpace([string]$fields['license'])) {
+            $findings.Add([pscustomobject]@{ code='license_invalid'; severity='error'; field='license'; message='Skill license must be a non-empty string when provided.' }) | Out-Null
+        }
     }
     if ($fields.Contains('compatibility')) {
         $compatibility = [string]$fields['compatibility']
-        if ([string]::IsNullOrWhiteSpace($compatibility)) { $findings.Add([pscustomobject]@{ code='compatibility_invalid'; severity='error'; field='compatibility'; message='Skill compatibility must be a non-empty string when provided.' }) | Out-Null }
+        if ([string]$fieldKinds['compatibility'] -ne 'string' -or [string]::IsNullOrWhiteSpace($compatibility)) { $findings.Add([pscustomobject]@{ code='compatibility_invalid'; severity='error'; field='compatibility'; message='Skill compatibility must be a non-empty string when provided.' }) | Out-Null }
         elseif ($compatibility.Length -gt 500) { $findings.Add([pscustomobject]@{ code='compatibility_too_long'; severity='error'; field='compatibility'; message='Skill compatibility exceeds 500 characters.' }) | Out-Null }
     }
-    if ($fields.Contains('allowed-tools') -and [string]::IsNullOrWhiteSpace([string]$fields['allowed-tools'])) {
-        $findings.Add([pscustomobject]@{ code='allowed_tools_invalid'; severity='error'; field='allowed-tools'; message='Skill allowed-tools must be a non-empty space-separated string when provided.' }) | Out-Null
+    if ($fields.Contains('allowed-tools')) {
+        if ([string]$fieldKinds['allowed-tools'] -ne 'string' -or [string]::IsNullOrWhiteSpace([string]$fields['allowed-tools'])) {
+            $findings.Add([pscustomobject]@{ code='allowed_tools_invalid'; severity='error'; field='allowed-tools'; message='Skill allowed-tools must be a non-empty space-separated string when provided.' }) | Out-Null
+        }
     }
     if ($fields.Contains('metadata') -and [string]$fieldKinds['metadata'] -ne 'map') {
         $findings.Add([pscustomobject]@{ code='metadata_invalid'; severity='error'; field='metadata'; message='Skill metadata must be a map from string keys to string values.' }) | Out-Null
@@ -396,7 +402,7 @@ function Read-SkillMetadata {
 
     if ($Observation) {
         foreach ($finding in $findings) {
-            if ([string]$finding.severity -eq 'error' -and [string]$finding.code -notin @('frontmatter_missing','name_required','description_required')) { $finding.severity = 'warning' }
+            if ([string]$finding.severity -eq 'error' -and [string]$finding.code -notin @('frontmatter_missing','name_required','description_required','name_type_invalid','description_type_invalid')) { $finding.severity = 'warning' }
         }
     }
     $result.valid = @($findings | Where-Object severity -eq 'error').Count -eq 0
@@ -795,6 +801,103 @@ function Get-FileContentHash([string]$path) {
         finally {
             $stream.Dispose()
         }
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+function Get-LegacyDirectoryMetadataFingerprint([string]$dir) {
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return "missing" }
+    $baseDir = [System.IO.Path]::GetFullPath($dir)
+    $baseWithSeparator = $baseDir
+    if (-not ($baseWithSeparator.EndsWith("\") -or $baseWithSeparator.EndsWith("/"))) {
+        $baseWithSeparator += [System.IO.Path]::DirectorySeparatorChar
+    }
+
+    $options = [System.IO.EnumerationOptions]::new()
+    $options.RecurseSubdirectories = $true
+    $options.IgnoreInaccessible = $true
+    $options.AttributesToSkip = [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
+    $files = [System.IO.Directory]::GetFiles($baseDir, "*", $options)
+    [array]::Sort($files, [System.StringComparer]::OrdinalIgnoreCase)
+
+    $parts = [System.Text.StringBuilder]::new()
+    $first = $true
+    foreach ($file in $files) {
+        $info = [System.IO.FileInfo]::new($file)
+        $rel = if ($file.StartsWith($baseWithSeparator, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $file.Substring($baseWithSeparator.Length)
+        }
+        else {
+            $info.Name
+        }
+        if (-not $first) { [void]$parts.Append("`n") }
+        [void]$parts.AppendFormat("{0}|{1}|{2}", $rel, [string]$info.Length, [string]$info.LastWriteTimeUtc.Ticks)
+        $first = $false
+    }
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($parts.ToString())
+        $hash = $sha.ComputeHash($bytes)
+        return ([System.BitConverter]::ToString($hash) -replace "-", "").ToLowerInvariant()
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+function Get-DirectoryFingerprint([string]$dir) {
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return "missing" }
+    $baseDir = [System.IO.Path]::GetFullPath($dir)
+    $baseWithSeparator = $baseDir
+    if (-not ($baseWithSeparator.EndsWith("\") -or $baseWithSeparator.EndsWith("/"))) {
+        $baseWithSeparator += [System.IO.Path]::DirectorySeparatorChar
+    }
+
+    $files = [System.Collections.Generic.List[string]]::new()
+    $pending = [System.Collections.Generic.Stack[string]]::new()
+    $pending.Push($baseDir)
+    while ($pending.Count -gt 0) {
+        $current = $pending.Pop()
+        foreach ($entry in [System.IO.Directory]::GetFileSystemEntries($current)) {
+            $attributes = [System.IO.File]::GetAttributes($entry)
+            Need (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) ("目录指纹拒绝 reparse entry：{0}" -f $entry)
+            if (($attributes -band [System.IO.FileAttributes]::Directory) -ne 0) {
+                $pending.Push($entry)
+            }
+            else {
+                $files.Add($entry) | Out-Null
+            }
+        }
+    }
+    $orderedFiles = @($files.ToArray())
+    [array]::Sort($orderedFiles, [System.StringComparer]::OrdinalIgnoreCase)
+
+    $parts = [System.Text.StringBuilder]::new()
+    foreach ($file in $orderedFiles) {
+        $info = [System.IO.FileInfo]::new($file)
+        $relativePath = if ($file.StartsWith($baseWithSeparator, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $file.Substring($baseWithSeparator.Length)
+        }
+        else {
+            $info.Name
+        }
+        $relativePath = $relativePath.Replace([System.IO.Path]::DirectorySeparatorChar, '/')
+        $contentHash = Get-FileContentHash $file
+        Need (-not [string]::IsNullOrWhiteSpace($contentHash)) ("目录指纹无法读取文件：{0}" -f $file)
+        [void]$parts.Append($relativePath)
+        [void]$parts.Append([char]0)
+        [void]$parts.Append([string]$info.Length)
+        [void]$parts.Append([char]0)
+        [void]$parts.Append($contentHash)
+        [void]$parts.Append("`n")
+    }
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($parts.ToString())
+        $hash = $sha.ComputeHash($bytes)
+        return ([System.BitConverter]::ToString($hash) -replace "-", "").ToLowerInvariant()
     }
     finally {
         $sha.Dispose()
@@ -7551,10 +7654,26 @@ function Get-ImportLockSourceHash([string]$repo, [string]$sourceKind) {
     return (Get-FileContentHash $repo)
 }
 
-function Get-ImportLockWorkspaceFingerprint([string]$repoPath) {
+function Get-ImportLockWorkspaceFingerprint([string]$repoPath, [string]$algorithm = "sha256-tree-v2") {
     Need (-not [string]::IsNullOrWhiteSpace($repoPath)) "repoPath 不能为空"
     Need (Test-Path -LiteralPath $repoPath) ("锁定失败：缺少 import 缓存目录 {0}" -f $repoPath)
-    return (Get-DirectoryFingerprint $repoPath)
+    switch ($algorithm.Trim().ToLowerInvariant()) {
+        "metadata-tree-v1" { return (Get-LegacyDirectoryMetadataFingerprint $repoPath) }
+        "sha256-tree-v2" { return (Get-DirectoryFingerprint $repoPath) }
+        default { throw ("锁文件包含未知的 import 工作区指纹算法：{0}" -f $algorithm) }
+    }
+}
+
+function Assert-ImportLockWorkspaceFingerprint($lockEntry, [string]$repoPath, [string]$label) {
+    $expectedFingerprint = [string](Get-CfgObjectProperty $lockEntry "workspace_fingerprint")
+    Need (-not [string]::IsNullOrWhiteSpace($expectedFingerprint)) ("锁文件缺少 import 工作区指纹：{0}" -f $label)
+    $algorithm = [string](Get-CfgObjectProperty $lockEntry "workspace_fingerprint_algorithm")
+    if ([string]::IsNullOrWhiteSpace($algorithm)) {
+        $algorithm = "metadata-tree-v1"
+        Log ("锁文件仍使用旧版 import 工作区指纹，重新执行锁定可迁移：{0}" -f $label) "WARN"
+    }
+    $actualFingerprint = Get-ImportLockWorkspaceFingerprint $repoPath $algorithm
+    Need ($actualFingerprint -eq $expectedFingerprint) ("import 内容不匹配：{0}（algorithm={1}, lock={2}, actual={3}）" -f $label, $algorithm, $expectedFingerprint, $actualFingerprint)
 }
 
 function Get-RepoHeadCommit([string]$repoPath, [hashtable]$HeadCache = $null) {
@@ -7638,7 +7757,8 @@ function New-LockData($cfg) {
         if ($sourceKind -eq "local_zip") {
             $importEntry.source_kind = $sourceKind
             $importEntry.source_hash = Get-ImportLockSourceHash ([string]($i.repo)) $sourceKind
-            $importEntry.workspace_fingerprint = Get-ImportLockWorkspaceFingerprint $repoPath
+            $importEntry.workspace_fingerprint_algorithm = "sha256-tree-v2"
+            $importEntry.workspace_fingerprint = Get-ImportLockWorkspaceFingerprint $repoPath "sha256-tree-v2"
         }
         else {
             $importEntry.commit = Get-RepoHeadCommit $repoPath $repoHeadCache
@@ -7778,10 +7898,7 @@ function Assert-LockMatchesWorkspace($cfg, $lock) {
             $actualSourceHash = Get-ImportLockSourceHash ([string]($i.repo)) $sourceKind
             Need ($actualSourceHash -eq $expectedSourceHash) ("import 源文件不匹配：{0}/{1}（lock={2}, actual={3}）" -f $mode, [string]($i.name), $expectedSourceHash, $actualSourceHash)
 
-            $expectedFingerprint = [string](Get-CfgObjectProperty $i "workspace_fingerprint")
-            Need (-not [string]::IsNullOrWhiteSpace($expectedFingerprint)) ("锁文件缺少 import 工作区指纹：{0}/{1}" -f $mode, [string]($i.name))
-            $actualFingerprint = Get-ImportLockWorkspaceFingerprint $path
-            Need ($actualFingerprint -eq $expectedFingerprint) ("import 内容不匹配：{0}/{1}（lock={2}, actual={3}）" -f $mode, [string]($i.name), $expectedFingerprint, $actualFingerprint)
+            Assert-ImportLockWorkspaceFingerprint $i $path ("{0}/{1}" -f $mode, [string]($i.name))
             continue
         }
 
@@ -7846,10 +7963,7 @@ function Apply-LockToWorkspace($cfg, $lock) {
 
         Ensure-Repo $path $repo $ref $sparsePath $forceClean $false $true
         if ($sourceKind -eq "local_zip") {
-            $expectedFingerprint = [string](Get-CfgObjectProperty $i "workspace_fingerprint")
-            Need (-not [string]::IsNullOrWhiteSpace($expectedFingerprint)) ("锁文件缺少 import 工作区指纹：manual/{0}" -f $name)
-            $actualFingerprint = Get-ImportLockWorkspaceFingerprint $path
-            Need ($actualFingerprint -eq $expectedFingerprint) ("import 内容不匹配：manual/{0}（lock={1}, actual={2}）" -f $name, $expectedFingerprint, $actualFingerprint)
+            Assert-ImportLockWorkspaceFingerprint $i $path ("manual/{0}" -f $name)
             continue
         }
 
@@ -9045,6 +9159,8 @@ function 新增技能库 {
     $cfgRaw = ""
     if (Test-Path $CfgPath) { $cfgRaw = Get-Content $CfgPath -Raw }
     $tmp = Join-Path $VendorDir ("_tmp_" + $name)
+    $dst = VendorPath $name
+    $vendorPathCreated = $false
 
     try {
         if (Test-Path $tmp) { Invoke-RemoveItem $tmp -Recurse }
@@ -9063,9 +9179,9 @@ function 新增技能库 {
         $cfg.vendors += @{ name = $name; repo = $repo; ref = $ref }
         SaveCfgSafe $cfg $cfgRaw
 
-        $dst = VendorPath $name
         Need (-not (Test-Path $dst)) "vendor 已存在：$name"
         Invoke-MoveItem $tmp $dst
+        $vendorPathCreated = $true
 
         Write-Host "新增完成。"
         
@@ -9079,9 +9195,18 @@ function 新增技能库 {
         Clear-SkillsCache
     }
     catch {
-        if (Test-Path $tmp) { Invoke-RemoveItem $tmp -Recurse }
-        if (-not $DryRun -and $cfgRaw) { Set-ContentUtf8 $CfgPath $cfgRaw }
-        Write-Host ("❌ 操作失败: {0}" -f $_.Exception.Message) -ForegroundColor Red
+        $failure = $_
+        try {
+            if (Test-Path $tmp) { Invoke-RemoveItemWithRetry $tmp -Recurse -IgnoreFailure | Out-Null }
+            if ($vendorPathCreated -and (Test-Path $dst)) { Invoke-RemoveItemWithRetry $dst -Recurse -IgnoreFailure | Out-Null }
+            if (-not $DryRun -and $cfgRaw) { Set-ContentUtf8 $CfgPath $cfgRaw }
+            Clear-SkillsCache
+        }
+        catch {
+            Log ("新增技能库补偿失败：{0}" -f $_.Exception.Message) "ERROR"
+        }
+        Write-Host ("❌ 操作失败: {0}" -f $failure.Exception.Message) -ForegroundColor Red
+        throw $failure
     }
 }
 
@@ -9108,6 +9233,7 @@ function 删除技能库 {
 
     $cfgRaw = ""
     if (Test-Path $CfgPath) { $cfgRaw = Get-Content $CfgPath -Raw }
+    $createdManualPaths = [System.Collections.Generic.List[string]]::new()
     try {
         $removeNames = New-Object System.Collections.Generic.HashSet[string]
         foreach ($v in $toRemove) { $removeNames.Add($v.name) | Out-Null }
@@ -9119,6 +9245,9 @@ function 删除技能库 {
                 $result = Convert-InstalledVendorSkillsToManual $cfg $v
                 $totalConverted += [int]$result.converted
                 $totalSkipped += [int]$result.skipped
+                foreach ($createdPath in @($result.created_paths)) {
+                    $createdManualPaths.Add([string]$createdPath) | Out-Null
+                }
             }
             if ($totalConverted -gt 0 -or $totalSkipped -gt 0) {
                 Write-Host ("保留技能转换完成：converted={0}, skipped={1}" -f $totalConverted, $totalSkipped) -ForegroundColor Yellow
@@ -9129,19 +9258,37 @@ function 删除技能库 {
         $cfg.mappings = $cfg.mappings | Where-Object { -not $removeNames.Contains($_.vendor) }
         $cfg.imports = $cfg.imports | Where-Object { -not ($_.mode -eq "vendor" -and $removeNames.Contains($_.name)) }
         SaveCfgSafe $cfg $cfgRaw
-
-        foreach ($v in $toRemove) {
-            $path = VendorPath $v.name
-            if (Test-Path $path) { Invoke-RemoveItem $path -Recurse }
-        }
-        Write-Host ("已删除技能库：{0} 项。" -f $toRemove.Count)
         Clear-SkillsCache
         构建生效
     }
     catch {
+        $failure = $_
         if (-not $DryRun -and $cfgRaw) { Set-ContentUtf8 $CfgPath $cfgRaw }
-        Write-Host ("❌ 删除失败: {0}" -f $_.Exception.Message) -ForegroundColor Red
+        foreach ($createdPath in $createdManualPaths) {
+            Invoke-RemoveItemWithRetry $createdPath -Recurse -IgnoreFailure | Out-Null
+        }
+        Clear-SkillsCache
+        Write-Host ("❌ 删除失败: {0}" -f $failure.Exception.Message) -ForegroundColor Red
+        throw $failure
     }
+
+    $cleanupFailures = [System.Collections.Generic.List[string]]::new()
+    foreach ($v in $toRemove) {
+        $path = VendorPath $v.name
+        if (-not (Test-Path $path)) { continue }
+        try {
+            Invoke-RemoveItem $path -Recurse
+        }
+        catch {
+            $cleanupFailures.Add(("vendor/{0} => {1}" -f $v.name, $_.Exception.Message)) | Out-Null
+        }
+    }
+    Clear-SkillsCache
+    if ($cleanupFailures.Count -gt 0) {
+        Write-FailureSummary "技能库配置与构建已生效，但旧源目录清理失败" $cleanupFailures "保留目录不再受 skills.json 管理，可修复占用后手动删除。"
+        throw ("删除技能库的源目录清理失败（{0} 项）；已生效的配置不会回滚。" -f $cleanupFailures.Count)
+    }
+    Write-Host ("已删除技能库：{0} 项。" -f $toRemove.Count)
 }
 
 function Get-SkillsUnder([string]$base, [string]$vendorName) {
@@ -9379,7 +9526,7 @@ function Convert-InstalledVendorSkillsToManual($cfg, $vendorItem) {
     $vendorPath = VendorPath $vendorName
     $vendorMappings = @($cfg.mappings | Where-Object { $_.vendor -eq $vendorName -and (Normalize-SkillPath ([string]$_.from)) -ne "." })
     if ($vendorMappings.Count -eq 0) {
-        return [pscustomobject]@{ converted = 0; skipped = 0 }
+        return [pscustomobject]@{ converted = 0; skipped = 0; created_paths = @() }
     }
 
     Need (Test-Path $vendorPath) ("转换失败：vendor 目录不存在：{0}" -f $vendorPath)
@@ -9388,42 +9535,53 @@ function Convert-InstalledVendorSkillsToManual($cfg, $vendorItem) {
 
     $converted = 0
     $skipped = 0
-    foreach ($m in $vendorMappings) {
-        $skillPath = Normalize-SkillPath ([string]$m.from)
-        $src = Join-Path $vendorPath $skillPath
-        if (-not (Test-IsSkillDir $src)) {
-            Write-Host ("⚠️ 保留技能时跳过（源不存在或无技能标记）：vendor={0}, from={1}" -f $vendorName, $skillPath) -ForegroundColor Yellow
-            $skipped++
-            continue
-        }
+    $createdPaths = [System.Collections.Generic.List[string]]::new()
+    try {
+        foreach ($m in $vendorMappings) {
+            $skillPath = Normalize-SkillPath ([string]$m.from)
+            $src = Join-Path $vendorPath $skillPath
+            if (-not (Test-IsSkillDir $src)) {
+                Write-Host ("⚠️ 保留技能时跳过（源不存在或无技能标记）：vendor={0}, from={1}" -f $vendorName, $skillPath) -ForegroundColor Yellow
+                $skipped++
+                continue
+            }
 
-        $baseName = Split-Path $skillPath -Leaf
-        if ([string]::IsNullOrWhiteSpace($baseName)) { $baseName = $vendorName }
-        $manualName = Get-UniqueManualImportName $cfg $baseName $reservedNames
-        $dst = Join-Path $ImportDir $manualName
-        Invoke-WithRetry { Copy-Item -LiteralPath $src -Destination $dst -Recurse -Force } 3 250
+            $baseName = Split-Path $skillPath -Leaf
+            if ([string]::IsNullOrWhiteSpace($baseName)) { $baseName = $vendorName }
+            $manualName = Get-UniqueManualImportName $cfg $baseName $reservedNames
+            $dst = Join-Path $ImportDir $manualName
+            $createdPaths.Add($dst) | Out-Null
+            Invoke-WithRetry { Copy-Item -LiteralPath $src -Destination $dst -Recurse -Force } 3 250
 
-        $manualImport = @{
-            name = $manualName
-            repo = $vendorRepo
-            ref = $vendorRef
-            skill = "."
-            mode = "manual"
-            sparse = $false
-        }
-        Upsert-Import $cfg $manualImport
+            $manualImport = @{
+                name = $manualName
+                repo = $vendorRepo
+                ref = $vendorRef
+                skill = "."
+                mode = "manual"
+                sparse = $false
+            }
+            Upsert-Import $cfg $manualImport
 
-        $cfg.mappings += @{
-            vendor = "manual"
-            from = $manualName
-            to = [string]$m.to
+            $cfg.mappings += @{
+                vendor = "manual"
+                from = $manualName
+                to = [string]$m.to
+            }
+            $converted++
         }
-        $converted++
+    }
+    catch {
+        $failure = $_
+        foreach ($createdPath in $createdPaths) {
+            Invoke-RemoveItemWithRetry $createdPath -Recurse -IgnoreFailure | Out-Null
+        }
+        throw $failure
     }
 
     # Remove old vendor mappings now that manual mappings are created.
     $cfg.mappings = @($cfg.mappings | Where-Object { [string]$_.vendor -ne $vendorName })
-    return [pscustomobject]@{ converted = $converted; skipped = $skipped }
+    return [pscustomobject]@{ converted = $converted; skipped = $skipped; created_paths = @($createdPaths.ToArray()) }
 }
 
 function Hide-VendorRootSkills($items) {
@@ -10059,60 +10217,6 @@ function Resolve-SourceBase([string]$vendorName, $cfg) {
     return (VendorPath $v.name)
 }
 
-function Get-DirectoryFingerprint([string]$dir) {
-    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return "missing" }
-    $input = ""
-    if ($null -ne [type]::GetType("System.IO.EnumerationOptions", $false)) {
-        $baseDir = [System.IO.Path]::GetFullPath($dir)
-        $baseWithSeparator = $baseDir
-        if (-not ($baseWithSeparator.EndsWith("\") -or $baseWithSeparator.EndsWith("/"))) {
-            $baseWithSeparator += [System.IO.Path]::DirectorySeparatorChar
-        }
-
-        $options = [System.IO.EnumerationOptions]::new()
-        $options.RecurseSubdirectories = $true
-        $options.IgnoreInaccessible = $true
-        $options.AttributesToSkip = [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
-
-        $files = [System.IO.Directory]::GetFiles($baseDir, "*", $options)
-        [array]::Sort($files, [System.StringComparer]::OrdinalIgnoreCase)
-
-        $parts = [System.Text.StringBuilder]::new()
-        $first = $true
-        foreach ($file in $files) {
-            $info = [System.IO.FileInfo]::new($file)
-            $rel = if ($file.StartsWith($baseWithSeparator, [System.StringComparison]::OrdinalIgnoreCase)) {
-                $file.Substring($baseWithSeparator.Length)
-            }
-            else {
-                $info.Name
-            }
-            if (-not $first) { [void]$parts.Append("`n") }
-            [void]$parts.AppendFormat("{0}|{1}|{2}", $rel, [string]$info.Length, [string]$info.LastWriteTimeUtc.Ticks)
-            $first = $false
-        }
-        $input = $parts.ToString()
-    }
-    else {
-        $files = Get-ChildItem -LiteralPath $dir -Recurse -File -ErrorAction SilentlyContinue | Sort-Object FullName
-        $parts = New-Object System.Collections.Generic.List[string]
-        foreach ($f in $files) {
-            $rel = $f.FullName.Substring($dir.Length).TrimStart("\")
-            $parts.Add(("{0}|{1}|{2}" -f $rel, [string]$f.Length, [string]$f.LastWriteTimeUtc.Ticks)) | Out-Null
-        }
-        $input = $parts -join "`n"
-    }
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes($input)
-        $hash = $sha.ComputeHash($bytes)
-        return ([System.BitConverter]::ToString($hash) -replace "-", "").ToLowerInvariant()
-    }
-    finally {
-        $sha.Dispose()
-    }
-}
-
 function Get-SkillNameConflictBuckets([string]$agentRoot) {
     $nameToPaths = @{}
     foreach ($skillFile in (Get-ChildItem $agentRoot -Recurse -Filter "SKILL.md" -File -ErrorAction SilentlyContinue)) {
@@ -10732,6 +10836,7 @@ function 命令导入安装 {
     }
 
     $successCount = 0
+    $failures = [System.Collections.Generic.List[string]]::new()
     foreach ($line in $commands) {
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
         $lineTrim = $line.Trim()
@@ -10745,6 +10850,7 @@ function 命令导入安装 {
         }
         catch {
             Write-Host ("❌ 解析失败（已跳过）：{0}" -f $_.Exception.Message) -ForegroundColor Red
+            $failures.Add($_.Exception.Message) | Out-Null
             if ($line -match "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@.+$") {
                 Write-Host "提示：你可能使用了 repo@skill 语法。可改为：npx ""skills add <repo> --skill <path>""" -ForegroundColor Yellow
             }
@@ -10754,6 +10860,10 @@ function 命令导入安装 {
         Write-Host ("多行导入完成：{0} 项。开始【构建生效】..." -f $successCount)
         Clear-SkillsCache
         构建生效
+    }
+    if ($failures.Count -gt 0) {
+        Write-FailureSummary "命令导入安装部分失败" $failures "成功项已完成构建，请修正失败命令后重试。"
+        throw ("命令导入安装失败（{0} 项）。" -f $failures.Count)
     }
 }
 
@@ -11238,8 +11348,10 @@ function 更新Vendor($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $n
             try {
                 $path = VendorPath $v.name
                 if (-not (Test-Path $path)) {
-                    Write-Host ("❌ 未找到 vendor/{0} (跳过)" -f $v.name) -ForegroundColor Red
-                    continue 
+                    $message = ("未找到 vendor/{0}" -f $v.name)
+                    Write-Host ("❌ {0}" -f $message) -ForegroundColor Red
+                    $failures.Add(("vendor:{0} => {1}" -f $v.name, $message)) | Out-Null
+                    continue
                 }
                 if ([string]::IsNullOrWhiteSpace($v.ref)) { $v.ref = "main" }
 
@@ -11471,6 +11583,7 @@ function 更新 {
         }
         if ($failures.Count -gt 0) {
             Write-FailureSummary "更新部分失败" $failures "请查看上方错误并重试。"
+            throw ("更新失败（{0} 项）；成功项已完成构建，锁文件未刷新。" -f $failures.Count)
         }
         else {
             Write-Host "更新完成。若某 CLI 未立即识别新技能，重启该 CLI 会话即可。"
@@ -11678,6 +11791,16 @@ function Assert-McpKeyValueMapSafe($data, [string]$label) {
     }
 }
 
+function Assert-McpProcessHeaderSafe([string]$HeaderValue, [string]$Label) {
+    if ([string]::IsNullOrWhiteSpace($HeaderValue)) { return }
+    $match = [regex]::Match($HeaderValue, '^\s*(?<key>[^:=\s][^:=]*?)\s*[:=]\s*(?<value>.*)$')
+    if (-not $match.Success) { return }
+    $key = $match.Groups['key'].Value.Trim()
+    if (Test-McpSensitiveKeyName $key) {
+        Need (Test-McpEnvironmentTemplate $match.Groups['value'].Value) ("{0} 敏感 header 不得保存 literal value：{1}" -f $Label, $key)
+    }
+}
+
 function Assert-McpProcessArgsSafe([object[]]$ProcessArgs,[string]$Label='args') {
     $items=@($ProcessArgs|ForEach-Object{[string]$_})
     for($i=0;$i -lt $items.Count;$i++){
@@ -11685,34 +11808,35 @@ function Assert-McpProcessArgsSafe([object[]]$ProcessArgs,[string]$Label='args')
         Need ($item -notmatch '[\r\n]') ("{0} 不能包含换行。" -f $Label)
         Need ($item -notmatch '(?i)\b(?:https?|postgres(?:ql)?)://[^/@\s:]+:[^/@\s]+@') ("{0} 不允许内嵌 URL credential；请改用环境变量模板。" -f $Label)
         Need ($item -notmatch '(?i)\b(?:github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+)\b') ("{0} 不允许 literal access token；请改用环境变量模板。" -f $Label)
-        if($item -match '^(?i)(--?(?:access[-_]?key|api[-_]?key|authorization|password|passwd|secret|token))=(.*)$'){
-            Need (Test-McpEnvironmentTemplate ([string]$Matches[2])) ("{0} 敏感参数不得保存 literal value：{1}" -f $Label,$Matches[1])
-        }
-        elseif($item -match '^(?i)--?(?:access[-_]?key|api[-_]?key|authorization|password|passwd|secret|token)$'){
-            Need (($i+1) -lt $items.Count -and (Test-McpEnvironmentTemplate $items[$i+1])) ("{0} 敏感参数不得保存 literal value：{1}" -f $Label,$item)
-            $i++
-        }
-    }
-}
 
-function Normalize-McpProcessArgs([string[]]$processArgs) {
-    $normalized = New-Object System.Collections.Generic.List[string]
-    if ($null -eq $processArgs) { return @() }
-    for ($i = 0; $i -lt $processArgs.Count; $i++) {
-        $t = [string]$processArgs[$i]
-        if ($t -eq "--arg") {
-            if ($i + 1 -lt $processArgs.Count) {
-                $normalized.Add([string]$processArgs[++$i]) | Out-Null
+        if ([string]::Equals($item, '--header', [System.StringComparison]::OrdinalIgnoreCase) -or $item -ceq '-H') {
+            if (($i + 1) -lt $items.Count) { Assert-McpProcessHeaderSafe $items[$i + 1] $Label }
+            continue
+        }
+        if ($item -match '^(?i)--header=(?<header>.*)$') {
+            Assert-McpProcessHeaderSafe $Matches['header'] $Label
+            continue
+        }
+        if ($item.StartsWith('-H', [System.StringComparison]::Ordinal) -and $item.Length -gt 2) {
+            Assert-McpProcessHeaderSafe $item.Substring(2) $Label
+            continue
+        }
+
+        if ($item -match '^--?(?<name>[A-Za-z][A-Za-z0-9_-]*)=(?<value>.*)$') {
+            $flagName = [string]$Matches['name']
+            if (Test-McpSensitiveKeyName $flagName) {
+                Need (Test-McpEnvironmentTemplate ([string]$Matches['value'])) ("{0} 敏感参数不得保存 literal value：{1}" -f $Label, $flagName)
             }
             continue
         }
-        if ($t.ToLowerInvariant().StartsWith("--arg=")) {
-            $normalized.Add($t.Substring(6)) | Out-Null
-            continue
+        if ($item -match '^--?(?<name>[A-Za-z][A-Za-z0-9_-]*)$') {
+            $flagName = [string]$Matches['name']
+            if (Test-McpSensitiveKeyName $flagName) {
+                Need (($i + 1) -lt $items.Count -and (Test-McpEnvironmentTemplate $items[$i + 1])) ("{0} 敏感参数不得保存 literal value：{1}" -f $Label, $flagName)
+                $i++
+            }
         }
-        $normalized.Add($t) | Out-Null
     }
-    return $normalized.ToArray()
 }
 
 function Get-StableHashSuffix([string]$seed, [int]$len = 10) {
@@ -11755,7 +11879,6 @@ function Normalize-McpServiceNameWithFallback([string]$name, [string]$fallbackSe
     Need $false ("MCP 服务名 无法规范化，请更换名称：{0}" -f $name)
     return $null
 }
-
 
 function Parse-McpInstallArgs([string[]]$tokens) {
     Need ($tokens -and $tokens.Count -gt 0) "缺少 MCP 服务参数。示例：安装MCP context7 --cmd npx -- -y @upstash/context7-mcp"
@@ -11827,6 +11950,10 @@ function Parse-McpInstallArgs([string[]]$tokens) {
             $result.args += $tokens[++$i]
             continue
         }
+        if ($key.StartsWith("--arg=")) {
+            $result.args += $t.Substring(6)
+            continue
+        }
         if ($key -eq "--env") {
             Need ($i + 1 -lt $tokens.Count) "参数缺少值：--env"
             $pair = Parse-KeyValueToken $tokens[++$i] "--env"
@@ -11869,7 +11996,6 @@ function Parse-McpInstallArgs([string[]]$tokens) {
 
     if ($result.transport -eq "stdio") {
         Assert-McpKeyValueMapSafe $result.env "--env"
-        $result.args = Normalize-McpProcessArgs @($result.args)
         Assert-McpProcessArgsSafe $result.args '--args'
         if ([string]::IsNullOrWhiteSpace($result.command) -and $result.args.Count -gt 0) {
             $result.command = [string]$result.args[0]

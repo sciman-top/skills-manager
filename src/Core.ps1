@@ -387,6 +387,103 @@ function Get-FileContentHash([string]$path) {
         $sha.Dispose()
     }
 }
+function Get-LegacyDirectoryMetadataFingerprint([string]$dir) {
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return "missing" }
+    $baseDir = [System.IO.Path]::GetFullPath($dir)
+    $baseWithSeparator = $baseDir
+    if (-not ($baseWithSeparator.EndsWith("\") -or $baseWithSeparator.EndsWith("/"))) {
+        $baseWithSeparator += [System.IO.Path]::DirectorySeparatorChar
+    }
+
+    $options = [System.IO.EnumerationOptions]::new()
+    $options.RecurseSubdirectories = $true
+    $options.IgnoreInaccessible = $true
+    $options.AttributesToSkip = [System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System
+    $files = [System.IO.Directory]::GetFiles($baseDir, "*", $options)
+    [array]::Sort($files, [System.StringComparer]::OrdinalIgnoreCase)
+
+    $parts = [System.Text.StringBuilder]::new()
+    $first = $true
+    foreach ($file in $files) {
+        $info = [System.IO.FileInfo]::new($file)
+        $rel = if ($file.StartsWith($baseWithSeparator, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $file.Substring($baseWithSeparator.Length)
+        }
+        else {
+            $info.Name
+        }
+        if (-not $first) { [void]$parts.Append("`n") }
+        [void]$parts.AppendFormat("{0}|{1}|{2}", $rel, [string]$info.Length, [string]$info.LastWriteTimeUtc.Ticks)
+        $first = $false
+    }
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($parts.ToString())
+        $hash = $sha.ComputeHash($bytes)
+        return ([System.BitConverter]::ToString($hash) -replace "-", "").ToLowerInvariant()
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+function Get-DirectoryFingerprint([string]$dir) {
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return "missing" }
+    $baseDir = [System.IO.Path]::GetFullPath($dir)
+    $baseWithSeparator = $baseDir
+    if (-not ($baseWithSeparator.EndsWith("\") -or $baseWithSeparator.EndsWith("/"))) {
+        $baseWithSeparator += [System.IO.Path]::DirectorySeparatorChar
+    }
+
+    $files = [System.Collections.Generic.List[string]]::new()
+    $pending = [System.Collections.Generic.Stack[string]]::new()
+    $pending.Push($baseDir)
+    while ($pending.Count -gt 0) {
+        $current = $pending.Pop()
+        foreach ($entry in [System.IO.Directory]::GetFileSystemEntries($current)) {
+            $attributes = [System.IO.File]::GetAttributes($entry)
+            Need (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) ("目录指纹拒绝 reparse entry：{0}" -f $entry)
+            if (($attributes -band [System.IO.FileAttributes]::Directory) -ne 0) {
+                $pending.Push($entry)
+            }
+            else {
+                $files.Add($entry) | Out-Null
+            }
+        }
+    }
+    $orderedFiles = @($files.ToArray())
+    [array]::Sort($orderedFiles, [System.StringComparer]::OrdinalIgnoreCase)
+
+    $parts = [System.Text.StringBuilder]::new()
+    foreach ($file in $orderedFiles) {
+        $info = [System.IO.FileInfo]::new($file)
+        $relativePath = if ($file.StartsWith($baseWithSeparator, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $file.Substring($baseWithSeparator.Length)
+        }
+        else {
+            $info.Name
+        }
+        $relativePath = $relativePath.Replace([System.IO.Path]::DirectorySeparatorChar, '/')
+        $contentHash = Get-FileContentHash $file
+        Need (-not [string]::IsNullOrWhiteSpace($contentHash)) ("目录指纹无法读取文件：{0}" -f $file)
+        [void]$parts.Append($relativePath)
+        [void]$parts.Append([char]0)
+        [void]$parts.Append([string]$info.Length)
+        [void]$parts.Append([char]0)
+        [void]$parts.Append($contentHash)
+        [void]$parts.Append("`n")
+    }
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($parts.ToString())
+        $hash = $sha.ComputeHash($bytes)
+        return ([System.BitConverter]::ToString($hash) -replace "-", "").ToLowerInvariant()
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
 function Need($cond, [string]$msg) { if (-not $cond) { throw $msg } }
 function Resolve-PowerShellExecutable {
     $programFilesPwsh = if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {

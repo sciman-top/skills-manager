@@ -198,6 +198,32 @@ policy:
         @($result.Report.errors | Where-Object code -eq 'invalid_openai_invocation_policy').Count | Should -BeGreaterThan 0
     }
 
+    It 'fails when OpenAI invocation policy is placed under the wrong section' {
+        $fixture = New-IntegrityFixture 'wrong-section-openai-policy' ''
+        Set-IntegrityFixtureOpenAiYaml $fixture @'
+interface:
+  allow_implicit_invocation: true
+'@
+
+        $result = Invoke-IntegrityFixture $fixture
+
+        $result.ExitCode | Should -Be 1
+        @($result.Report.errors | Where-Object code -eq 'invalid_openai_invocation_policy').Count | Should -Be 1
+    }
+
+    It 'accepts a boolean invocation policy directly under policy' {
+        $fixture = New-IntegrityFixture 'valid-openai-policy' ''
+        Set-IntegrityFixtureOpenAiYaml $fixture @'
+policy:
+  allow_implicit_invocation: true
+'@
+
+        $result = Invoke-IntegrityFixture $fixture
+
+        $result.ExitCode | Should -Be 0
+        @($result.Report.errors).Count | Should -Be 0
+    }
+
     It 'fails when an OpenAI MCP dependency uses a retired transport or invalid URL' {
         $fixture = New-IntegrityFixture 'invalid-openai-mcp-transport' ''
         $config = Get-Content -Raw $fixture.ConfigPath | ConvertFrom-Json

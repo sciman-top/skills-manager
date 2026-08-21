@@ -62,6 +62,49 @@ function ConvertFrom-OpenAiYamlScalar([string]$value) {
     return $trimmed
 }
 
+function Get-OpenAiInvocationPolicyFindings([string[]]$lines) {
+    $findings = [System.Collections.Generic.List[string]]::new()
+    $policyCount = 0
+    $implicitInvocationCount = 0
+    $inPolicy = $false
+
+    foreach ($line in @($lines)) {
+        if ([string]::IsNullOrWhiteSpace($line) -or $line -match '^\s*#') { continue }
+
+        if ($line -match '^(?<key>[A-Za-z_][A-Za-z0-9_-]*):(?<value>.*)$') {
+            $inPolicy = $false
+            if ($Matches['key'] -ne 'policy') { continue }
+            $policyCount++
+            if ($policyCount -gt 1) {
+                $findings.Add('OpenAI policy must be declared at most once.') | Out-Null
+            }
+            $value = ([string]$Matches['value'] -replace '\s+#.*$', '').Trim()
+            if (-not [string]::IsNullOrWhiteSpace($value)) {
+                $findings.Add('OpenAI policy must be a block mapping.') | Out-Null
+                continue
+            }
+            $inPolicy = $true
+            continue
+        }
+
+        if ($line -notmatch '^(?<indent>[ \t]+)allow_implicit_invocation:(?<value>.*)$') { continue }
+        if (-not $inPolicy -or $Matches['indent'] -cne '  ') {
+            $findings.Add('OpenAI allow_implicit_invocation must be a direct child of policy.') | Out-Null
+            continue
+        }
+        $implicitInvocationCount++
+        if ($implicitInvocationCount -gt 1) {
+            $findings.Add('OpenAI allow_implicit_invocation must be declared at most once.') | Out-Null
+        }
+        $value = ([string]$Matches['value'] -replace '\s+#.*$', '').Trim()
+        if ($value -cnotin @('true', 'false')) {
+            $findings.Add('OpenAI allow_implicit_invocation must be a YAML boolean.') | Out-Null
+        }
+    }
+
+    return @($findings.ToArray())
+}
+
 function Get-OpenAiToolDependencyEntries([string[]]$lines) {
     $entries = New-Object System.Collections.Generic.List[object]
     $inDependencies = $false
@@ -179,16 +222,8 @@ else {
         if (Test-Path -LiteralPath $openAiManifestPath -PathType Leaf) {
             $openAiManifestCount++
             $openAiContent = Get-Content -Raw -LiteralPath $openAiManifestPath
-            $policyScalar = [regex]::Match($openAiContent, '(?m)^policy:[ \t]*(?<value>[^#\r\n]+)[ \t]*$')
-            if ($policyScalar.Success -and -not [string]::IsNullOrWhiteSpace($policyScalar.Groups['value'].Value)) {
-                Add-IntegrityFinding $errors 'invalid_openai_invocation_policy' $name 'OpenAI policy must be a mapping.' $openAiManifestPath
-            }
-            $implicitInvocationValues = @([regex]::Matches($openAiContent, '(?m)^  allow_implicit_invocation:\s*(?<value>[^#\r\n]+?)\s*$'))
-            if ($implicitInvocationValues.Count -gt 1) {
-                Add-IntegrityFinding $errors 'invalid_openai_invocation_policy' $name 'OpenAI allow_implicit_invocation must be declared at most once.' $openAiManifestPath
-            }
-            elseif ($implicitInvocationValues.Count -eq 1 -and $implicitInvocationValues[0].Groups['value'].Value.Trim() -notin @('true', 'false')) {
-                Add-IntegrityFinding $errors 'invalid_openai_invocation_policy' $name 'OpenAI allow_implicit_invocation must be a YAML boolean.' $openAiManifestPath
+            foreach ($policyFinding in @(Get-OpenAiInvocationPolicyFindings ($openAiContent -split '\r?\n'))) {
+                Add-IntegrityFinding $errors 'invalid_openai_invocation_policy' $name $policyFinding $openAiManifestPath
             }
             foreach ($match in [regex]::Matches($openAiContent, '(?m)^\s{2}icon_(?:small|large):\s*(["'']?)([^\r\n"'']+)\1\s*$')) {
                 $target = $match.Groups[2].Value.Trim()
