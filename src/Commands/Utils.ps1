@@ -219,7 +219,7 @@ MCP：
 
 技能投影：
   .\skills.ps1 构建生效
-  .\skills.ps1 capability-inventory --view skill-surfaces [--host-snapshot <snapshot.json>] --json
+  .\skills.ps1 capability-inventory --view skill-surfaces [--host-snapshot <snapshot.json>] [--host-probe] --json
 
 目标仓审查：
   .\skills.ps1 审查目标 需求设置

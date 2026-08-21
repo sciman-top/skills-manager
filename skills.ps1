@@ -114,9 +114,13 @@ function Invoke-CodexCliJson {
 
 function Get-CodexPluginSkillInventory {
     [CmdletBinding()]
-    param()
+    param([switch]$SkipProbe)
 
     $result = [ordered]@{ authority = 'codex_plugin_list_json'; freshness = 'unknown'; coverage = 'platform_na'; plugin_count = 0; skill_count = 0; metadata_chars = 0; enabled_plugin_ids = @(); skills = @(); warnings = @() }
+    if ($SkipProbe) {
+        $result.coverage = 'not_observed'
+        return [pscustomobject]$result
+    }
     try { $payload = Invoke-CodexCliJson -Arguments @('plugin', 'list', '--json') }
     catch {
         $result.warnings = @([pscustomobject][ordered]@{ code = 'codex_plugin_inventory_unavailable'; subject = 'codex plugin list --json'; message = $_.Exception.Message })
@@ -211,9 +215,28 @@ function Get-CodexDoctorObservation {
 
 function Get-CodexHostObservation {
     [CmdletBinding()]
-    param($PluginInventory = $null, [object[]]$ExpectedMcpServers = @())
+    param($PluginInventory = $null, [object[]]$ExpectedMcpServers = @(), [switch]$SkipProbe)
 
     if ($null -eq $PluginInventory) { $PluginInventory = Get-CodexPluginSkillInventory }
+    if ($SkipProbe) {
+        $expected = @($ExpectedMcpServers | ForEach-Object { [string]$_.name } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+        return [pscustomobject][ordered]@{
+            schema_version = 1
+            truth_boundary = 'read_only_cli_observation_not_host_loaded'
+            requested = $false
+            generated_at = [DateTimeOffset]::UtcNow.ToString('o')
+            plugins = [pscustomobject][ordered]@{ authority = [string]$PluginInventory.authority; freshness = [string]$PluginInventory.freshness; coverage = [string]$PluginInventory.coverage; enabled_plugin_ids = @($PluginInventory.enabled_plugin_ids); skill_count = [int]$PluginInventory.skill_count; warnings = @($PluginInventory.warnings) }
+            mcp = [pscustomobject][ordered]@{ authority = 'codex_mcp_list_json'; freshness = 'unknown'; coverage = 'not_observed'; servers = @(); warnings = @() }
+            doctor = [pscustomobject][ordered]@{ authority = 'codex_doctor_json'; freshness = 'unknown'; coverage = 'not_observed'; schema_version = 0; codex_version = ''; overall_status = 'unknown'; checks = @(); warnings = @() }
+            configured_mcp_names = $expected
+            observed_mcp_names = @()
+            configured_not_observed = $expected
+            observed_not_configured = @()
+            provider_calls = 0
+            native_mutations = 0
+            writes = 0
+        }
+    }
     $mcp = Get-CodexMcpObservation
     $doctor = Get-CodexDoctorObservation
     $expected = @($ExpectedMcpServers | ForEach-Object { [string]$_.name } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
@@ -221,6 +244,7 @@ function Get-CodexHostObservation {
     return [pscustomobject][ordered]@{
         schema_version = 1
         truth_boundary = 'read_only_cli_observation_not_host_loaded'
+        requested = $true
         generated_at = [DateTimeOffset]::UtcNow.ToString('o')
         plugins = [pscustomobject][ordered]@{ authority = [string]$PluginInventory.authority; freshness = [string]$PluginInventory.freshness; coverage = [string]$PluginInventory.coverage; enabled_plugin_ids = @($PluginInventory.enabled_plugin_ids); skill_count = [int]$PluginInventory.skill_count; warnings = @($PluginInventory.warnings) }
         mcp = $mcp
@@ -2830,7 +2854,7 @@ function New-CapabilitySurfaceRecord([string]$Name, [string]$Authority, [string]
 
 function New-SkillSurfaceView {
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)][string]$RepoRoot, [Parameter(Mandatory = $true)]$Config, [string]$HostSnapshotPath, [string]$GeneratedAt = ([datetimeoffset]::UtcNow.ToString('o')))
+    param([Parameter(Mandatory = $true)][string]$RepoRoot, [Parameter(Mandatory = $true)]$Config, [string]$HostSnapshotPath, [switch]$HostProbe, [string]$GeneratedAt = ([datetimeoffset]::UtcNow.ToString('o')))
     $root = [IO.Path]::GetFullPath($RepoRoot)
     $projection = $Config.skill_projection
     $surfaces = [Collections.Generic.List[object]]::new()
@@ -2895,7 +2919,7 @@ function New-SkillSurfaceView {
     $systemItems = if (Test-Path -LiteralPath $systemRoot) { @(Get-ChildItem -LiteralPath $systemRoot -Recurse -File -Filter 'SKILL.md' -Force | ForEach-Object { Get-CapabilitySurfaceSkillMetadata $_.FullName 'host_system' 'system' $true }) } else { @() }
     $surfaces.Add((New-CapabilitySurfaceRecord 'system' 'host_filesystem' $systemRoot 'fresh' $(if ($systemItems.Count) { 'complete' } else { 'not_observed' }) $systemItems)) | Out-Null
 
-    $pluginInventory = Get-CodexPluginSkillInventory
+    $pluginInventory = Get-CodexPluginSkillInventory -SkipProbe:(!$HostProbe)
     $pluginItems = @($pluginInventory.skills | ForEach-Object { Get-CapabilitySurfaceSkillMetadata ([string]$_.path) 'codex_plugin' 'installed_enabled_plugin' $true })
     $surfaces.Add((New-CapabilitySurfaceRecord 'plugins' 'codex_plugin_list_json' 'codex plugin list --json' ([string]$pluginInventory.freshness) ([string]$pluginInventory.coverage) $pluginItems)) | Out-Null
     foreach ($warning in @($pluginInventory.warnings)) { $findings.Add([pscustomobject]@{ code = [string]$warning.code; severity = 'warning'; surface = 'plugins'; path = [string]$warning.subject; message = [string]$warning.message }) | Out-Null }
@@ -2928,7 +2952,7 @@ function New-SkillSurfaceView {
             }
         }
     }
-    $hostObservation = Get-CodexHostObservation -PluginInventory $pluginInventory -ExpectedMcpServers @($Config.mcp_servers)
+    $hostObservation = Get-CodexHostObservation -PluginInventory $pluginInventory -ExpectedMcpServers @($Config.mcp_servers) -SkipProbe:(!$HostProbe)
     foreach ($warning in @($hostObservation.mcp.warnings) + @($hostObservation.doctor.warnings)) { $findings.Add([pscustomobject]@{ code = [string]$warning.code; severity = 'warning'; surface = 'host_observation'; path = [string]$warning.subject; message = [string]$warning.message }) | Out-Null }
 
     $hostItems = @(); $hostFreshness = 'unknown'; $hostCoverage = 'not_observed'; $hostSource = if ($HostSnapshotPath) { [IO.Path]::GetFullPath($HostSnapshotPath) } else { 'not_provided' }
@@ -14453,7 +14477,7 @@ function 同步MCP {
 }
 
 function Parse-ReadOnlyCapabilityOptions([object[]]$Tokens) {
-    $result = [ordered]@{ json = $false; out_path = $null; view = $null; host_snapshot = $null }
+    $result = [ordered]@{ json = $false; out_path = $null; view = $null; host_snapshot = $null; host_probe = $false }
     for ($i = 0; $i -lt @($Tokens).Count; $i++) {
         $token = [string]$Tokens[$i]
         switch ($token.ToLowerInvariant()) {
@@ -14461,6 +14485,7 @@ function Parse-ReadOnlyCapabilityOptions([object[]]$Tokens) {
             '--out' { if ($i + 1 -ge @($Tokens).Count) { throw '--out requires a report file path.' }; $i++; $result.out_path = [string]$Tokens[$i] }
             '--view' { if ($i + 1 -ge @($Tokens).Count) { throw '--view requires a view name.' }; $i++; $result.view = [string]$Tokens[$i] }
             '--host-snapshot' { if ($i + 1 -ge @($Tokens).Count) { throw '--host-snapshot requires a snapshot file path.' }; $i++; $result.host_snapshot = [string]$Tokens[$i] }
+            '--host-probe' { $result.host_probe = $true }
             default { throw ('Unknown capability-inventory option: {0}' -f $token) }
         }
     }
@@ -14472,7 +14497,7 @@ function Invoke-CapabilityInventoryCommand([object[]]$Tokens = @()) {
     $configRaw = [System.IO.File]::ReadAllText($CfgPath) -replace '(?m)^\s*//.*$', ''
     $config = $configRaw | ConvertFrom-Json
     if (-not [string]::IsNullOrWhiteSpace([string]$options.view) -and [string]$options.view -ne 'skill-surfaces') { throw ('Unknown capability inventory view: {0}' -f $options.view) }
-    $view = New-SkillSurfaceView -RepoRoot $Root -Config $config -HostSnapshotPath ([string]$options.host_snapshot)
+    $view = New-SkillSurfaceView -RepoRoot $Root -Config $config -HostSnapshotPath ([string]$options.host_snapshot) -HostProbe:([bool]$options.host_probe)
     if (-not [string]::IsNullOrWhiteSpace([string]$options.out_path)) { $view.writes = 1 }
     $envelope = [pscustomobject][ordered]@{ schema_version = 1; command = 'capability-inventory'; view = 'skill-surfaces'; pass = [bool]$view.pass; truth_boundary = 'read_only_skill_surface_snapshot'; data = $view }
     $json = $envelope | ConvertTo-Json -Depth 40 -Compress
@@ -16804,22 +16829,21 @@ function New-AuditSourceStrategy([string]$Mode = "target-repo", [string]$Query =
                 operational_cost = "Prefer skills that are easy to install, verify, and roll back."
             }
             evidence_policy = [ordered]@{
-                min_unique_sources_for_changes = 2
-                require_http_source_for_changes = $true
-                require_source_observations_for_changes = $true
+                min_unique_sources_for_changes = 0
+                require_http_source_for_changes = $false
+                require_source_observations_for_changes = $false
             }
             decision_quality_policy = [ordered]@{
-                require_keyword_trace_for_changes = $true
-                require_keyword_trace_membership = $true
-                min_user_profile_keywords_per_change = 1
-                min_target_repo_keywords_per_change = 1
-                min_installed_state_keywords_per_change = 1
+                require_keyword_trace_for_changes = $false
+                require_keyword_trace_membership = $false
+                min_user_profile_keywords_per_change = 0
+                min_target_repo_keywords_per_change = 0
+                min_installed_state_keywords_per_change = 0
             }
             required_evidence = @(
                 "Every add/remove recommendation must cite sources inspected in this run.",
                 "Do not fabricate repository facts, source links, or source conclusions.",
-                "Record source_observations for researched candidates so selected, rejected, and removed items remain auditable.",
-                "Every change recommendation should include keyword_trace (user_profile / target_repo_or_context / installed_state) and keep these values aligned with snapshot.json decision_insights.",
+                "Keep one or more real sources on each recommendation; local fixtures and local paths are valid when they are the actual input.",
                 "For MCP recommendations, prefer provider documentation and security/permission notes over popularity signals.",
                 "For profile-only mode, explain reason_target_repo as installed-skill inventory / profile-only context, not as a target repository claim."
             )
@@ -16908,8 +16932,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         @(
             "Replace placeholder values wrapped in <> before using this file.",
             "Delete example entries that are not needed, but keep the schema shape unchanged.",
-            "Record source_observations for every researched candidate; selected add/remove candidates must have matching observations.",
-            "For every add/remove skill or MCP recommendation, keep keyword_trace aligned with snapshot.json decision_insights.",
+            "Keep one or more real sources on each recommendation; local fixtures and local paths are valid when they are the actual input.",
             "This is profile-only skill discovery: reason_target_repo means installed-skill inventory / profile-only context, not target repository facts."
         )
     }
@@ -16917,8 +16940,7 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
         @(
             "Replace placeholder values wrapped in <> before using this file.",
             "Delete example entries that are not needed, but keep the schema shape unchanged.",
-            "Record source_observations for every researched candidate; selected add/remove candidates must have matching observations.",
-            "For every add/remove skill or MCP recommendation, keep keyword_trace aligned with snapshot.json decision_insights.",
+            "Keep one or more real sources on each recommendation; local fixtures and local paths are valid when they are the actual input.",
             "All install/remove decisions must cite both user-profile and target-repo reasons."
         )
     }
@@ -16946,24 +16968,6 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
             summary = $basisSummary
         }
         empty_recommendation_reasons = @("insufficient_reliable_evidence")
-        source_observations = @(
-            [ordered]@{
-                candidate_type = "skill"
-                name = "<candidate-name>"
-                decision = "add"
-                rationale = "<why this candidate was selected, rejected, kept, or removed>"
-                sources = @("<source-url-1>")
-                source_categories = @("official-docs", "skills.sh")
-            },
-            [ordered]@{
-                candidate_type = "mcp"
-                name = "<mcp-candidate-name>"
-                decision = "do_not_install"
-                rationale = "<why this MCP should not be installed now, including auth, permission, or maintenance concerns>"
-                sources = @("<source-url-1>")
-                source_categories = @("mcp-provider-docs", "security-and-permission-notes")
-            }
-        )
         new_skills = @(
             [ordered]@{
                 name = "<new-skill-name>"
@@ -16978,11 +16982,6 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
                 confidence = "medium"
                 sources = @("<source-url-1>")
                 source_categories = @("official-docs", "skills.sh")
-                keyword_trace = [ordered]@{
-                    user_profile = @("<keyword-from-user-profile>")
-                    target_repo_or_context = @($targetKeywordHint)
-                    installed_state = @("<keyword-from-installed-state>")
-                }
             }
         )
         overlap_findings = @(
@@ -17019,11 +17018,6 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
                     vendor = "<installed-vendor>"
                     from = "<installed-from>"
                 }
-                keyword_trace = [ordered]@{
-                    user_profile = @("<keyword-from-user-profile>")
-                    target_repo_or_context = @($targetKeywordHint)
-                    installed_state = @("<keyword-from-installed-state>")
-                }
             }
         )
         do_not_install = @(
@@ -17049,11 +17043,6 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
                     command = "<command>"
                     args = @("<arg1>")
                 }
-                keyword_trace = [ordered]@{
-                    user_profile = @("<keyword-from-user-profile>")
-                    target_repo_or_context = @($targetKeywordHint)
-                    installed_state = @("<keyword-from-installed-state>")
-                }
             }
         )
         mcp_removal_candidates = @(
@@ -17065,11 +17054,6 @@ function New-AuditRecommendationsTemplate([string]$runId, [string]$targetName, [
                 source_categories = @("official-docs")
                 installed = [ordered]@{
                     name = "<installed-mcp-name>"
-                }
-                keyword_trace = [ordered]@{
-                    user_profile = @("<keyword-from-user-profile>")
-                    target_repo_or_context = @($targetKeywordHint)
-                    installed_state = @("<keyword-from-installed-state>")
                 }
             }
         )
@@ -17709,60 +17693,6 @@ function Get-AuditRecommendationChangeItemCount($rec) {
     return @($rec.new_skills).Count + @($rec.removal_candidates).Count + @($rec.mcp_new_servers).Count + @($rec.mcp_removal_candidates).Count
 }
 
-function Normalize-AuditSourceObservationDecision([string]$decision) {
-    $text = ([string]$decision).Trim().ToLowerInvariant()
-    switch ($text) {
-        "install" { return "add" }
-        "selected" { return "add" }
-        "uninstall" { return "remove" }
-        "removed" { return "remove" }
-        "skip" { return "do_not_install" }
-        "reject" { return "do_not_install" }
-        "rejected" { return "do_not_install" }
-        "duplicate" { return "overlap" }
-        default { return $text }
-    }
-}
-
-function Assert-AuditSourceObservation($item) {
-    Need ($null -ne $item) "source_observations 项不能为空"
-    Need (-not [string]::IsNullOrWhiteSpace([string]$item.name)) "source_observations 缺少 name"
-    Need (-not [string]::IsNullOrWhiteSpace([string]$item.candidate_type)) ("source_observations 缺少 candidate_type：{0}" -f [string]$item.name)
-    $candidateType = ([string]$item.candidate_type).Trim().ToLowerInvariant()
-    Need ($candidateType -eq "skill" -or $candidateType -eq "mcp") ("source_observations.candidate_type 仅支持 skill/mcp：{0}" -f $candidateType)
-    $item.candidate_type = $candidateType
-
-    Need (-not [string]::IsNullOrWhiteSpace([string]$item.decision)) ("source_observations 缺少 decision：{0}" -f [string]$item.name)
-    $decision = Normalize-AuditSourceObservationDecision ([string]$item.decision)
-    Need (@("add", "remove", "keep", "do_not_install", "overlap", "ignore") -contains $decision) ("source_observations.decision 不支持：{0}" -f [string]$item.decision)
-    $item.decision = $decision
-
-    Need (-not [string]::IsNullOrWhiteSpace([string]$item.rationale)) ("source_observations 缺少 rationale：{0}" -f [string]$item.name)
-    Normalize-AuditSources $item "source_observations"
-    if ($item.PSObject.Properties.Match("source_categories").Count -eq 0 -or $null -eq $item.source_categories) {
-        $item | Add-Member -NotePropertyName source_categories -NotePropertyValue @() -Force
-    }
-    else {
-        $item.source_categories = @(Normalize-AuditStringArray $item.source_categories)
-    }
-}
-
-function Test-AuditHasSourceObservationForChange($rec, [string]$candidateType, [string]$decision, [string]$name) {
-    $normalizedType = ([string]$candidateType).Trim().ToLowerInvariant()
-    $normalizedDecision = Normalize-AuditSourceObservationDecision $decision
-    $normalizedName = ([string]$name).Trim()
-    foreach ($observation in @($rec.source_observations)) {
-        if ($null -eq $observation) { continue }
-        $obsType = ([string]$observation.candidate_type).Trim().ToLowerInvariant()
-        $obsDecision = Normalize-AuditSourceObservationDecision ([string]$observation.decision)
-        $obsName = ([string]$observation.name).Trim()
-        if ($obsType -eq $normalizedType -and $obsDecision -eq $normalizedDecision -and $obsName -eq $normalizedName -and @($observation.sources).Count -gt 0) {
-            return $true
-        }
-    }
-    return $false
-}
-
 function Get-AuditRecommendationSourceCoverage($rec) {
     $allSources = New-Object System.Collections.Generic.List[string]
     foreach ($collection in @($rec.new_skills, $rec.removal_candidates, $rec.mcp_new_servers, $rec.mcp_removal_candidates)) {
@@ -17773,34 +17703,10 @@ function Get-AuditRecommendationSourceCoverage($rec) {
         }
     }
     $uniqueSources = @(Normalize-AuditStringArray $allSources)
-    $httpSources = @($uniqueSources | Where-Object { [regex]::IsMatch([string]$_, "^(?i)https?://") })
-    $missingObservation = New-Object System.Collections.Generic.List[string]
-    $itemsWithObservation = 0
-    $changeGroups = @(
-        @{ type = "skill"; decision = "add"; items = @($rec.new_skills) },
-        @{ type = "skill"; decision = "remove"; items = @($rec.removal_candidates) },
-        @{ type = "mcp"; decision = "add"; items = @($rec.mcp_new_servers) },
-        @{ type = "mcp"; decision = "remove"; items = @($rec.mcp_removal_candidates) }
-    )
-    foreach ($group in @($changeGroups)) {
-        foreach ($item in @($group.items)) {
-            $itemName = [string]$item.name
-            if (Test-AuditHasSourceObservationForChange $rec ([string]$group.type) ([string]$group.decision) $itemName) {
-                $itemsWithObservation++
-            }
-            else {
-                $missingObservation.Add(("{0}:{1}:{2}" -f [string]$group.type, [string]$group.decision, $itemName)) | Out-Null
-            }
-        }
-    }
     return [pscustomobject]([ordered]@{
         total_change_items = Get-AuditRecommendationChangeItemCount $rec
         unique_sources = @($uniqueSources)
         unique_source_count = @($uniqueSources).Count
-        http_source_count = @($httpSources).Count
-        source_observation_count = @($rec.source_observations).Count
-        items_with_source_observation = $itemsWithObservation
-        change_items_missing_source_observation = @($missingObservation)
     })
 }
 
@@ -17820,27 +17726,6 @@ function Normalize-AuditSources($item, [string]$kind) {
     Need (@($item.sources).Count -gt 0) ("{0} 至少需要一个非空 source：{1}" -f $kind, [string]$item.name)
 }
 
-function Normalize-AuditKeywordTrace($item) {
-    $defaultTrace = [pscustomobject]([ordered]@{
-            user_profile = @()
-            target_repo_or_context = @()
-            installed_state = @()
-        })
-    if ($item.PSObject.Properties.Match("keyword_trace").Count -eq 0 -or $null -eq $item.keyword_trace) {
-        $item | Add-Member -NotePropertyName keyword_trace -NotePropertyValue $defaultTrace -Force
-        return
-    }
-    Need (Test-AuditObjectLike $item.keyword_trace) ("keyword_trace 必须是对象：{0}" -f [string]$item.name)
-    foreach ($field in @("user_profile", "target_repo_or_context", "installed_state")) {
-        if ($item.keyword_trace.PSObject.Properties.Match($field).Count -eq 0 -or $null -eq $item.keyword_trace.$field) {
-            $item.keyword_trace | Add-Member -NotePropertyName $field -NotePropertyValue @() -Force
-        }
-        else {
-            $item.keyword_trace.$field = @(Normalize-AuditStringArray $item.keyword_trace.$field)
-        }
-    }
-}
-
 function Assert-AuditRequiredBooleanTrue($value, [string]$fieldName) {
     Need ($value -is [bool]) ("{0} 必须是布尔值 true" -f $fieldName)
     Need ([bool]$value) ("{0} 必须为 true" -f $fieldName)
@@ -17850,7 +17735,6 @@ function Assert-AuditReasonPair($item, [string]$name) {
     Need (-not [string]::IsNullOrWhiteSpace([string]$item.reason_user_profile)) ("{0} 缺少 reason_user_profile：{1}" -f $name, [string]$item.name)
     Need (-not [string]::IsNullOrWhiteSpace([string]$item.reason_target_repo)) ("{0} 缺少 reason_target_repo：{1}" -f $name, [string]$item.name)
     Normalize-AuditSources $item $name
-    Normalize-AuditKeywordTrace $item
 }
 
 function Assert-AuditOverlapFinding($item) {
@@ -18115,12 +17999,6 @@ function Load-AuditRecommendations([string]$path) {
     Ensure-AuditArrayProperty $rec "mcp_new_servers"
     Ensure-AuditArrayProperty $rec "mcp_removal_candidates"
     Ensure-AuditArrayProperty $rec "empty_recommendation_reasons"
-    Ensure-AuditArrayProperty $rec "source_observations"
-
-    foreach ($item in @($rec.source_observations)) {
-        Assert-AuditSourceObservation $item
-    }
-
     $seenOverlapFindings = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($item in @($rec.overlap_findings)) {
         Assert-AuditOverlapFinding $item
@@ -18193,7 +18071,6 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             reason_target_repo = [string]$item.reason_target_repo
             confidence = [string]$item.confidence
             sources = @($item.sources)
-            keyword_trace = $item.keyword_trace
             tokens = @($tokens)
             status = "planned"
         })
@@ -18215,7 +18092,6 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             reason_user_profile = [string]$item.reason_user_profile
             reason_target_repo = [string]$item.reason_target_repo
             sources = @($item.sources)
-            keyword_trace = $item.keyword_trace
             matched_skill = $matched
             status = $status
         })
@@ -18243,7 +18119,6 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             reason_target_repo = [string]$item.reason_target_repo
             confidence = [string]$item.confidence
             sources = @($item.sources)
-            keyword_trace = $item.keyword_trace
             server = $server
             status = $status
         })
@@ -18264,7 +18139,6 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             reason_user_profile = [string]$item.reason_user_profile
             reason_target_repo = [string]$item.reason_target_repo
             sources = @($item.sources)
-            keyword_trace = $item.keyword_trace
             matched_server = $matched
             status = $status
         })
@@ -18274,7 +18148,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
         run_id = [string]$recommendations.run_id
         target = [string]$recommendations.target
         decision_basis = $recommendations.decision_basis
-        source_observations = ConvertTo-AuditJsonArray $recommendations.source_observations
+        source_observations = @(ConvertTo-AuditJsonArray $recommendations.source_observations)
         items = @($items)
         overlap_findings = @($recommendations.overlap_findings)
         removal_candidates = @($removals)
@@ -18686,7 +18560,7 @@ function ConvertTo-AuditJsonArray($value) {
             }
         }
     }
-    return ,($items.ToArray())
+    return @($items.ToArray())
 }
 
 function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
@@ -18770,7 +18644,7 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
         target = [string]$plan.target
         decision_basis_summary = [string]$plan.decision_basis.summary
         empty_recommendation_reasons = if ($plan.PSObject.Properties.Match("empty_recommendation_reasons").Count -gt 0) { ConvertTo-AuditJsonArray $plan.empty_recommendation_reasons } else { @() }
-        source_observations = if ($plan.PSObject.Properties.Match("source_observations").Count -gt 0) { ConvertTo-AuditJsonArray $plan.source_observations } else { @() }
+            source_observations = if ($plan.PSObject.Properties.Match("source_observations").Count -gt 0) { @(ConvertTo-AuditJsonArray $plan.source_observations) } else { @() }
         counts = [ordered]@{
             add = @($add).Count
             remove = @($remove).Count
@@ -18786,13 +18660,7 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
 
 function Get-AuditSourceEvidencePolicy([string]$recommendationDir) {
     $path = Join-Path $recommendationDir "snapshot.json"
-    $policy = [ordered]@{
-        enabled = $false
-        source_strategy_path = $path
-        min_unique_sources_for_changes = 0
-        require_http_source_for_changes = $false
-        require_source_observations_for_changes = $false
-    }
+    $policy = [ordered]@{ enabled = $false; source_strategy_path = $path; min_unique_sources_for_changes = 0; require_http_source_for_changes = $false; require_source_observations_for_changes = $false }
     try {
         $snapshot = Read-AuditSnapshot $recommendationDir
         $data = $snapshot.source_strategy
@@ -18860,16 +18728,7 @@ function Test-AuditRecommendationSourceCoveragePolicy($rec, $policy) {
 
 function Get-AuditDecisionQualityPolicy([string]$recommendationDir) {
     $path = Join-Path $recommendationDir "snapshot.json"
-    $policy = [ordered]@{
-        enabled = $false
-        source_strategy_path = $path
-        mode = "target-repo"
-        require_keyword_trace_for_changes = $false
-        require_keyword_trace_membership = $false
-        min_user_profile_keywords_per_change = 0
-        min_target_repo_keywords_per_change = 0
-        min_installed_state_keywords_per_change = 0
-    }
+    $policy = [ordered]@{ enabled = $false; source_strategy_path = $path; mode = "target-repo"; require_keyword_trace_for_changes = $false; require_keyword_trace_membership = $false; min_user_profile_keywords_per_change = 0; min_target_repo_keywords_per_change = 0; min_installed_state_keywords_per_change = 0 }
     try {
         $snapshot = Read-AuditSnapshot $recommendationDir
         $data = $snapshot.source_strategy
@@ -19557,7 +19416,7 @@ function Invoke-AuditRecommendationsApply {
             mcp_removal_candidates = @()
             overlap_findings = @()
             do_not_install = @()
-            source_observations = @($rec.source_observations)
+            source_observations = @(ConvertTo-AuditJsonArray $rec.source_observations)
             rollback = @()
         }
         Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$sourceReport) | Out-Null
@@ -19586,7 +19445,7 @@ function Invoke-AuditRecommendationsApply {
             mcp_removal_candidates = @()
             overlap_findings = @()
             do_not_install = @()
-            source_observations = @($rec.source_observations)
+            source_observations = @(ConvertTo-AuditJsonArray $rec.source_observations)
             rollback = @()
         }
         Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$qualityReport) | Out-Null
@@ -19622,7 +19481,7 @@ function Invoke-AuditRecommendationsApply {
             mcp_removal_candidates = @()
             overlap_findings = @()
             do_not_install = @()
-            source_observations = @($rec.source_observations)
+            source_observations = @(ConvertTo-AuditJsonArray $rec.source_observations)
             rollback = @()
         }
         Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$staleReport) | Out-Null
@@ -19655,7 +19514,7 @@ function Invoke-AuditRecommendationsApply {
         mcp_removal_candidates = @($plan.mcp_removal_candidates)
         overlap_findings = @($plan.overlap_findings)
         do_not_install = @($plan.do_not_install)
-        source_observations = @($plan.source_observations)
+        source_observations = @(ConvertTo-AuditJsonArray $plan.source_observations)
         rollback = @()
         compensation = [pscustomobject]@{ status='not_required'; config_restored=$false; skill_projection_attempted=$false; mcp_projection_attempted=$false; errors=@() }
     }
@@ -21287,7 +21146,7 @@ MCP：
 
 技能投影：
   .\skills.ps1 构建生效
-  .\skills.ps1 capability-inventory --view skill-surfaces [--host-snapshot <snapshot.json>] --json
+  .\skills.ps1 capability-inventory --view skill-surfaces [--host-snapshot <snapshot.json>] [--host-probe] --json
 
 目标仓审查：
   .\skills.ps1 审查目标 需求设置

@@ -55,7 +55,7 @@ function New-CapabilitySurfaceRecord([string]$Name, [string]$Authority, [string]
 
 function New-SkillSurfaceView {
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)][string]$RepoRoot, [Parameter(Mandatory = $true)]$Config, [string]$HostSnapshotPath, [string]$GeneratedAt = ([datetimeoffset]::UtcNow.ToString('o')))
+    param([Parameter(Mandatory = $true)][string]$RepoRoot, [Parameter(Mandatory = $true)]$Config, [string]$HostSnapshotPath, [switch]$HostProbe, [string]$GeneratedAt = ([datetimeoffset]::UtcNow.ToString('o')))
     $root = [IO.Path]::GetFullPath($RepoRoot)
     $projection = $Config.skill_projection
     $surfaces = [Collections.Generic.List[object]]::new()
@@ -120,7 +120,7 @@ function New-SkillSurfaceView {
     $systemItems = if (Test-Path -LiteralPath $systemRoot) { @(Get-ChildItem -LiteralPath $systemRoot -Recurse -File -Filter 'SKILL.md' -Force | ForEach-Object { Get-CapabilitySurfaceSkillMetadata $_.FullName 'host_system' 'system' $true }) } else { @() }
     $surfaces.Add((New-CapabilitySurfaceRecord 'system' 'host_filesystem' $systemRoot 'fresh' $(if ($systemItems.Count) { 'complete' } else { 'not_observed' }) $systemItems)) | Out-Null
 
-    $pluginInventory = Get-CodexPluginSkillInventory
+    $pluginInventory = Get-CodexPluginSkillInventory -SkipProbe:(!$HostProbe)
     $pluginItems = @($pluginInventory.skills | ForEach-Object { Get-CapabilitySurfaceSkillMetadata ([string]$_.path) 'codex_plugin' 'installed_enabled_plugin' $true })
     $surfaces.Add((New-CapabilitySurfaceRecord 'plugins' 'codex_plugin_list_json' 'codex plugin list --json' ([string]$pluginInventory.freshness) ([string]$pluginInventory.coverage) $pluginItems)) | Out-Null
     foreach ($warning in @($pluginInventory.warnings)) { $findings.Add([pscustomobject]@{ code = [string]$warning.code; severity = 'warning'; surface = 'plugins'; path = [string]$warning.subject; message = [string]$warning.message }) | Out-Null }
@@ -153,7 +153,7 @@ function New-SkillSurfaceView {
             }
         }
     }
-    $hostObservation = Get-CodexHostObservation -PluginInventory $pluginInventory -ExpectedMcpServers @($Config.mcp_servers)
+    $hostObservation = Get-CodexHostObservation -PluginInventory $pluginInventory -ExpectedMcpServers @($Config.mcp_servers) -SkipProbe:(!$HostProbe)
     foreach ($warning in @($hostObservation.mcp.warnings) + @($hostObservation.doctor.warnings)) { $findings.Add([pscustomobject]@{ code = [string]$warning.code; severity = 'warning'; surface = 'host_observation'; path = [string]$warning.subject; message = [string]$warning.message }) | Out-Null }
 
     $hostItems = @(); $hostFreshness = 'unknown'; $hostCoverage = 'not_observed'; $hostSource = if ($HostSnapshotPath) { [IO.Path]::GetFullPath($HostSnapshotPath) } else { 'not_provided' }

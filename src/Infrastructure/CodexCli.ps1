@@ -20,9 +20,13 @@ function Invoke-CodexCliJson {
 
 function Get-CodexPluginSkillInventory {
     [CmdletBinding()]
-    param()
+    param([switch]$SkipProbe)
 
     $result = [ordered]@{ authority = 'codex_plugin_list_json'; freshness = 'unknown'; coverage = 'platform_na'; plugin_count = 0; skill_count = 0; metadata_chars = 0; enabled_plugin_ids = @(); skills = @(); warnings = @() }
+    if ($SkipProbe) {
+        $result.coverage = 'not_observed'
+        return [pscustomobject]$result
+    }
     try { $payload = Invoke-CodexCliJson -Arguments @('plugin', 'list', '--json') }
     catch {
         $result.warnings = @([pscustomobject][ordered]@{ code = 'codex_plugin_inventory_unavailable'; subject = 'codex plugin list --json'; message = $_.Exception.Message })
@@ -117,9 +121,28 @@ function Get-CodexDoctorObservation {
 
 function Get-CodexHostObservation {
     [CmdletBinding()]
-    param($PluginInventory = $null, [object[]]$ExpectedMcpServers = @())
+    param($PluginInventory = $null, [object[]]$ExpectedMcpServers = @(), [switch]$SkipProbe)
 
     if ($null -eq $PluginInventory) { $PluginInventory = Get-CodexPluginSkillInventory }
+    if ($SkipProbe) {
+        $expected = @($ExpectedMcpServers | ForEach-Object { [string]$_.name } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+        return [pscustomobject][ordered]@{
+            schema_version = 1
+            truth_boundary = 'read_only_cli_observation_not_host_loaded'
+            requested = $false
+            generated_at = [DateTimeOffset]::UtcNow.ToString('o')
+            plugins = [pscustomobject][ordered]@{ authority = [string]$PluginInventory.authority; freshness = [string]$PluginInventory.freshness; coverage = [string]$PluginInventory.coverage; enabled_plugin_ids = @($PluginInventory.enabled_plugin_ids); skill_count = [int]$PluginInventory.skill_count; warnings = @($PluginInventory.warnings) }
+            mcp = [pscustomobject][ordered]@{ authority = 'codex_mcp_list_json'; freshness = 'unknown'; coverage = 'not_observed'; servers = @(); warnings = @() }
+            doctor = [pscustomobject][ordered]@{ authority = 'codex_doctor_json'; freshness = 'unknown'; coverage = 'not_observed'; schema_version = 0; codex_version = ''; overall_status = 'unknown'; checks = @(); warnings = @() }
+            configured_mcp_names = $expected
+            observed_mcp_names = @()
+            configured_not_observed = $expected
+            observed_not_configured = @()
+            provider_calls = 0
+            native_mutations = 0
+            writes = 0
+        }
+    }
     $mcp = Get-CodexMcpObservation
     $doctor = Get-CodexDoctorObservation
     $expected = @($ExpectedMcpServers | ForEach-Object { [string]$_.name } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
@@ -127,6 +150,7 @@ function Get-CodexHostObservation {
     return [pscustomobject][ordered]@{
         schema_version = 1
         truth_boundary = 'read_only_cli_observation_not_host_loaded'
+        requested = $true
         generated_at = [DateTimeOffset]::UtcNow.ToString('o')
         plugins = [pscustomobject][ordered]@{ authority = [string]$PluginInventory.authority; freshness = [string]$PluginInventory.freshness; coverage = [string]$PluginInventory.coverage; enabled_plugin_ids = @($PluginInventory.enabled_plugin_ids); skill_count = [int]$PluginInventory.skill_count; warnings = @($PluginInventory.warnings) }
         mcp = $mcp

@@ -41,7 +41,7 @@ Describe 'Read-only skill surface inventory' {
             $externalRoot = Join-Path $fixture 'external\external-skill'; New-Item -ItemType Directory -Force -Path $externalRoot | Out-Null; [IO.File]::WriteAllText((Join-Path $externalRoot 'SKILL.md'), "---`nname: external-skill`ndescription: fixture`n---`n", [Text.UTF8Encoding]::new($false)); New-Item -ItemType Junction -Path (Join-Path $userRoot 'external-skill') -Target $externalRoot -Force | Out-Null
             $snapshotPath = Join-Path $fixture 'host.json'; [IO.File]::WriteAllText($snapshotPath, (([pscustomobject]@{ captured_at = [datetimeoffset]::UtcNow.ToString('o'); coverage = 'complete'; skills = @([pscustomobject]@{ name = 'host-only'; path = 'host://skill'; entrypoint_hash = ('a' * 64); description_hash = ('b' * 64) }) }) | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
             $config = [pscustomobject]@{ skill_projection = [pscustomobject]@{ manifest_path = 'reports/current.json'; managed_source_path = 'agent'; user_skill_root = $userRoot; managed_link_includes = @('managed-current'); external_skill_inventory = [pscustomobject]@{ enabled = $true } } }
-            $view = New-SkillSurfaceView -RepoRoot $fixture -Config $config -HostSnapshotPath $snapshotPath
+            $view = New-SkillSurfaceView -RepoRoot $fixture -Config $config -HostSnapshotPath $snapshotPath -HostProbe
             $view.pass | Should -BeTrue
             $view.surface_count | Should -Be 6
             $view.host_observation.truth_boundary | Should -Be 'read_only_cli_observation_not_host_loaded'

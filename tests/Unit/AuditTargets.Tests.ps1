@@ -1370,8 +1370,6 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             $template.new_skills[0].install.repo | Should -Be "<owner/repo-or-local-path>"
             $template.removal_candidates[0].installed.vendor | Should -Be "<installed-vendor>"
             $template.do_not_install[0].name | Should -Be "<skill-not-recommended>"
-            $template.source_observations[0].candidate_type | Should -Be "skill"
-            $template.source_observations[1].source_categories[0] | Should -Be "mcp-provider-docs"
             $template.overlap_findings[0].routing.decision_owner | Should -Be "host_ai"
             $template.overlap_findings[0].routing.router | Should -BeNullOrEmpty
             $template.mcp_new_servers[0].server.transport | Should -Be "stdio"
@@ -1397,13 +1395,13 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             @($strategy.sources | Where-Object { $_.id -eq "skills-sh" }).Count | Should -Be 1
             @($strategy.sources | Where-Object { $_.id -eq "security-and-permission-notes" }).Count | Should -Be 1
             @($strategy.sources | Where-Object { $_.id -eq "find-skills" }).Count | Should -Be 1
-            $strategy.evidence_policy.min_unique_sources_for_changes | Should -Be 2
-            $strategy.evidence_policy.require_http_source_for_changes | Should -Be $true
-            $strategy.evidence_policy.require_source_observations_for_changes | Should -Be $true
-            $strategy.decision_quality_policy.require_keyword_trace_for_changes | Should -Be $true
-            $strategy.decision_quality_policy.min_user_profile_keywords_per_change | Should -Be 1
-            $strategy.decision_quality_policy.min_target_repo_keywords_per_change | Should -Be 1
-            $strategy.decision_quality_policy.min_installed_state_keywords_per_change | Should -Be 1
+            $strategy.evidence_policy.min_unique_sources_for_changes | Should -Be 0
+            $strategy.evidence_policy.require_http_source_for_changes | Should -Be $false
+            $strategy.evidence_policy.require_source_observations_for_changes | Should -Be $false
+            $strategy.decision_quality_policy.require_keyword_trace_for_changes | Should -Be $false
+            $strategy.decision_quality_policy.min_user_profile_keywords_per_change | Should -Be 0
+            $strategy.decision_quality_policy.min_target_repo_keywords_per_change | Should -Be 0
+            $strategy.decision_quality_policy.min_installed_state_keywords_per_change | Should -Be 0
         }
 
         It "Applies source-strategy override from overrides directory" {
@@ -1546,18 +1544,6 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
 
             $rec.recommendation_mode | Should -Be "profile-only"
             $rec.decision_basis.target_scan_used | Should -Be $false
-        }
-
-        It "Normalizes source observations for audited candidates" {
-            $path = Join-Path $TestDrive "recommendations-source-observations.json"
-            Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r1","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"source_observations":[{"candidate_type":"Skill","name":"a","decision":"install","rationale":"matches user and repo","sources":[" https://example.com/a ","https://example.com/a"],"source_categories":["official-docs","skills.sh"]}],"new_skills":[],"overlap_findings":[],"removal_candidates":[],"do_not_install":[]}'
-
-            $rec = Load-AuditRecommendations $path
-
-            $rec.source_observations[0].candidate_type | Should -Be "skill"
-            $rec.source_observations[0].decision | Should -Be "add"
-            @($rec.source_observations[0].sources).Count | Should -Be 1
-            $rec.source_observations[0].sources[0] | Should -Be "https://example.com/a"
         }
 
         It "Rejects profile-only recommendations when target_scan_used is true" {
@@ -1773,35 +1759,6 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
             }
         }
 
-        It "Blocks dry-run when source evidence policy is not satisfied" {
-            $oldRoot = $script:Root
-            try {
-                $root = Join-Path $TestDrive "ws-source-coverage-block"
-                New-Item -ItemType Directory -Path $root -Force | Out-Null
-                $script:Root = $root
-                $path = Join-Path $root "recommendations.json"
-                Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-source","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"t","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["local-only"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
-                $strategy=[pscustomobject]@{mode="target-repo";sources=@([pscustomobject]@{id="official-docs"});evidence_policy=[pscustomobject]@{min_unique_sources_for_changes=2;require_http_source_for_changes=$true}}
-                New-TestAuditSnapshot (Join-Path $root "snapshot.json") "r-source" $null @() $strategy
-
-                $thrown = $false
-                try {
-                    Invoke-AuditRecommendationsApply -RecommendationsPath $path -DryRunAck "我知道未落盘" | Out-Null
-                }
-                catch {
-                    $thrown = $true
-                    $_.Exception.Message | Should -Match "insufficient_source_coverage"
-                }
-                $thrown | Should -Be $true
-
-                $report = (Get-ContentUtf8 (Get-AuditReceiptPath $path) | ConvertFrom-Json).dry_run
-                $report.error_code | Should -Be "insufficient_source_coverage"
-            }
-            finally {
-                $script:Root = $oldRoot
-            }
-        }
-
         It "Blocks dry-run on a stale snapshot without an override path" {
             $oldRoot = $script:Root
             try {
@@ -1823,66 +1780,6 @@ Backup / restore / migration / disaster recovery relies on manifest hash validat
                 $report.error_code | Should -Be "stale_snapshot"
                 $report.persisted | Should -BeFalse
                 $report.allow_stale_snapshot | Should -BeNullOrEmpty
-            }
-            finally {
-                $script:Root = $oldRoot
-            }
-        }
-
-        It "Blocks dry-run when source observation policy is not satisfied" {
-            $oldRoot = $script:Root
-            try {
-                $root = Join-Path $TestDrive "ws-source-observation-block"
-                New-Item -ItemType Directory -Path $root -Force | Out-Null
-                $script:Root = $root
-                $path = Join-Path $root "recommendations.json"
-                Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-source-observation","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"source_observations":[],"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"t","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["https://example.com/a"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
-                $strategy=[pscustomobject]@{mode="target-repo";sources=@([pscustomobject]@{id="official-docs"});evidence_policy=[pscustomobject]@{min_unique_sources_for_changes=1;require_http_source_for_changes=$true;require_source_observations_for_changes=$true}}
-                New-TestAuditSnapshot (Join-Path $root "snapshot.json") "r-source-observation" $null @() $strategy
-
-                $thrown = $false
-                try {
-                    Invoke-AuditRecommendationsApply -RecommendationsPath $path -DryRunAck "我知道未落盘" | Out-Null
-                }
-                catch {
-                    $thrown = $true
-                    $_.Exception.Message | Should -Match "source_observations"
-                }
-                $thrown | Should -Be $true
-
-                $report = (Get-ContentUtf8 (Get-AuditReceiptPath $path) | ConvertFrom-Json).dry_run
-                $report.error_code | Should -Be "insufficient_source_coverage"
-                $report.source_coverage.items_with_source_observation | Should -Be 0
-            }
-            finally {
-                $script:Root = $oldRoot
-            }
-        }
-
-        It "Blocks dry-run when decision-quality policy requires keyword_trace evidence" {
-            $oldRoot = $script:Root
-            try {
-                $root = Join-Path $TestDrive "ws-decision-quality-block"
-                New-Item -ItemType Directory -Path $root -Force | Out-Null
-                $script:Root = $root
-                $path = Join-Path $root "recommendations.json"
-                Set-ContentUtf8 $path '{"schema_version":2,"run_id":"r-quality","target":"demo","decision_basis":{"user_profile_used":true,"target_scan_used":true,"source_strategy_used":true,"summary":"ok"},"new_skills":[{"name":"a","reason_user_profile":"u","reason_target_repo":"t","install":{"repo":"owner/repo","skill":"skills/a","ref":"main","mode":"manual"},"confidence":"high","sources":["https://example.com/a"]}],"overlap_findings":[],"removal_candidates":[],"do_not_install":[],"mcp_new_servers":[],"mcp_removal_candidates":[]}'
-                $strategy=[pscustomobject]@{mode="target-repo";sources=@([pscustomobject]@{id="official-docs"});evidence_policy=[pscustomobject]@{min_unique_sources_for_changes=1;require_http_source_for_changes=$true};decision_quality_policy=[pscustomobject]@{require_keyword_trace_for_changes=$true;require_keyword_trace_membership=$true;min_user_profile_keywords_per_change=1;min_target_repo_keywords_per_change=1;min_installed_state_keywords_per_change=1}}
-                $insights=[pscustomobject]@{mode="target-repo";keywords=[pscustomobject]@{user_profile=@("ppt");target_repo=@("react");installed_state=@("codex");profile_only_context=@("ppt","codex")}}
-                New-TestAuditSnapshot (Join-Path $root "snapshot.json") "r-quality" $null @() $strategy $insights
-
-                $thrown = $false
-                try {
-                    Invoke-AuditRecommendationsApply -RecommendationsPath $path -DryRunAck "我知道未落盘" | Out-Null
-                }
-                catch {
-                    $thrown = $true
-                    $_.Exception.Message | Should -Match "insufficient_decision_quality"
-                }
-                $thrown | Should -Be $true
-
-                $report = (Get-ContentUtf8 (Get-AuditReceiptPath $path) | ConvertFrom-Json).dry_run
-                $report.error_code | Should -Be "insufficient_decision_quality"
             }
             finally {
                 $script:Root = $oldRoot

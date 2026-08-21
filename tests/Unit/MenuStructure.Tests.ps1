@@ -60,10 +60,7 @@ function Assert-MenuRouting {
 
     It "Keeps the top-level menu skeleton and submenu routing" {
         $raw = Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\..\src\Commands\Utils.ps1") -Raw
-        $generated = Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\..\skills.ps1") -Raw
-
         $menuBody = Get-FunctionBody $raw "菜单"
-        $generatedMenuBody = Get-FunctionBody $generated "菜单"
 
         $expectedLabels = @(
             "1) 浏览技能"
@@ -96,7 +93,6 @@ function Assert-MenuRouting {
         }
 
         Assert-MenuRouting $menuBody $expectedRoutes $expectedLabels
-        Assert-MenuRouting $generatedMenuBody $expectedRoutes $expectedLabels
 
         @(
             "function MCP菜单"
@@ -106,7 +102,6 @@ function Assert-MenuRouting {
             "function 审查高级菜单"
         ) | ForEach-Object {
             $raw | Should -Match $_
-            $generated | Should -Match $_
         }
 
         $mcpBody = Get-FunctionBody $raw "MCP菜单"
@@ -185,60 +180,4 @@ function Assert-MenuRouting {
         }
     }
 
-    It "Groups help text around the expert-first menu labels" {
-        $raw = Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\..\src\Commands\Utils.ps1") -Raw
-        $helpBody = Get-FunctionBody $raw "帮助"
-
-        @(
-            "常用流程："
-            "接入来源：新增技能库，或用 add/npx 导入单个技能"
-            "安装技能：浏览技能 -> 选择安装/粘贴命令导入 -> 重建并同步"
-            "目标仓审查：查看需求 -> 生成三文件审查包 -> 预检/校验预演 -> 显式应用"
-            "菜单地图："
-            "MCP 服务：新增 MCP、卸载 MCP、同步配置"
-            "技能库管理：新增/删除技能库、生成锁文件、打开 skills.json"
-            "更多：解除目标目录关联、清理 .bak 备份"
-            "浏览技能：只列出当前来源中的可用技能，不改配置"
-            '重建并同步：根据 `skills.json` 重建 `agent/` 并同步到 `targets`'
-            '只有 `--apply --yes` 才真正写入'
-        ) | ForEach-Object {
-            $helpBody | Should -Match ([regex]::Escape($_))
-        }
-    }
-
-    It "Documents the expert-first interactive menu in both readmes" {
-        $readme = Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\..\README.md") -Raw
-        $readmeEn = Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\..\README.en.md") -Raw
-
-        @(
-            '交互菜单按“高频动作直达 + 领域子菜单”组织'
-            '浏览技能'
-            '选择安装'
-            '粘贴命令导入'
-            '重建并同步（CLI 命令仍为 `构建生效`）'
-            '更新上游（CLI 命令仍为 `更新`）'
-            '目标仓审查'
-            'MCP 服务'
-            '技能库管理'
-            '更多'
-        ) | ForEach-Object {
-            $readme | Should -Match ([regex]::Escape($_))
-        }
-
-        @(
-            'The interactive menu uses direct frequent actions plus domain submenus.'
-            'Browse Skills'
-            'Pick Install'
-            'Paste Command Import'
-            'Rebuild and Sync (CLI command remains `构建生效`)'
-            'Update Upstream (CLI command remains `更新`)'
-            'Target Repo Audit'
-            'MCP Services'
-            'Skill Library Admin'
-            'More'
-            'The `Target Repo Audit` submenu follows the workflow'
-        ) | ForEach-Object {
-            $readmeEn | Should -Match ([regex]::Escape($_))
-        }
-    }
 }

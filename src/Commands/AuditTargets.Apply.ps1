@@ -22,7 +22,7 @@ function ConvertTo-AuditJsonArray($value) {
             }
         }
     }
-    return ,($items.ToArray())
+    return @($items.ToArray())
 }
 
 function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
@@ -106,7 +106,7 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
         target = [string]$plan.target
         decision_basis_summary = [string]$plan.decision_basis.summary
         empty_recommendation_reasons = if ($plan.PSObject.Properties.Match("empty_recommendation_reasons").Count -gt 0) { ConvertTo-AuditJsonArray $plan.empty_recommendation_reasons } else { @() }
-        source_observations = if ($plan.PSObject.Properties.Match("source_observations").Count -gt 0) { ConvertTo-AuditJsonArray $plan.source_observations } else { @() }
+            source_observations = if ($plan.PSObject.Properties.Match("source_observations").Count -gt 0) { @(ConvertTo-AuditJsonArray $plan.source_observations) } else { @() }
         counts = [ordered]@{
             add = @($add).Count
             remove = @($remove).Count
@@ -122,13 +122,7 @@ function New-AuditDryRunSummary($plan, [string]$recommendationsPath) {
 
 function Get-AuditSourceEvidencePolicy([string]$recommendationDir) {
     $path = Join-Path $recommendationDir "snapshot.json"
-    $policy = [ordered]@{
-        enabled = $false
-        source_strategy_path = $path
-        min_unique_sources_for_changes = 0
-        require_http_source_for_changes = $false
-        require_source_observations_for_changes = $false
-    }
+    $policy = [ordered]@{ enabled = $false; source_strategy_path = $path; min_unique_sources_for_changes = 0; require_http_source_for_changes = $false; require_source_observations_for_changes = $false }
     try {
         $snapshot = Read-AuditSnapshot $recommendationDir
         $data = $snapshot.source_strategy
@@ -196,16 +190,7 @@ function Test-AuditRecommendationSourceCoveragePolicy($rec, $policy) {
 
 function Get-AuditDecisionQualityPolicy([string]$recommendationDir) {
     $path = Join-Path $recommendationDir "snapshot.json"
-    $policy = [ordered]@{
-        enabled = $false
-        source_strategy_path = $path
-        mode = "target-repo"
-        require_keyword_trace_for_changes = $false
-        require_keyword_trace_membership = $false
-        min_user_profile_keywords_per_change = 0
-        min_target_repo_keywords_per_change = 0
-        min_installed_state_keywords_per_change = 0
-    }
+    $policy = [ordered]@{ enabled = $false; source_strategy_path = $path; mode = "target-repo"; require_keyword_trace_for_changes = $false; require_keyword_trace_membership = $false; min_user_profile_keywords_per_change = 0; min_target_repo_keywords_per_change = 0; min_installed_state_keywords_per_change = 0 }
     try {
         $snapshot = Read-AuditSnapshot $recommendationDir
         $data = $snapshot.source_strategy
@@ -893,7 +878,7 @@ function Invoke-AuditRecommendationsApply {
             mcp_removal_candidates = @()
             overlap_findings = @()
             do_not_install = @()
-            source_observations = @($rec.source_observations)
+            source_observations = @(ConvertTo-AuditJsonArray $rec.source_observations)
             rollback = @()
         }
         Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$sourceReport) | Out-Null
@@ -922,7 +907,7 @@ function Invoke-AuditRecommendationsApply {
             mcp_removal_candidates = @()
             overlap_findings = @()
             do_not_install = @()
-            source_observations = @($rec.source_observations)
+            source_observations = @(ConvertTo-AuditJsonArray $rec.source_observations)
             rollback = @()
         }
         Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$qualityReport) | Out-Null
@@ -958,7 +943,7 @@ function Invoke-AuditRecommendationsApply {
             mcp_removal_candidates = @()
             overlap_findings = @()
             do_not_install = @()
-            source_observations = @($rec.source_observations)
+            source_observations = @(ConvertTo-AuditJsonArray $rec.source_observations)
             rollback = @()
         }
         Write-AuditApplyStageReceipt $RecommendationsPath ([pscustomobject]$staleReport) | Out-Null
@@ -991,7 +976,7 @@ function Invoke-AuditRecommendationsApply {
         mcp_removal_candidates = @($plan.mcp_removal_candidates)
         overlap_findings = @($plan.overlap_findings)
         do_not_install = @($plan.do_not_install)
-        source_observations = @($plan.source_observations)
+        source_observations = @(ConvertTo-AuditJsonArray $plan.source_observations)
         rollback = @()
         compensation = [pscustomobject]@{ status='not_required'; config_restored=$false; skill_projection_attempted=$false; mcp_projection_attempted=$false; errors=@() }
     }

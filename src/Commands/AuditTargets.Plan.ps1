@@ -27,60 +27,6 @@ function Get-AuditRecommendationChangeItemCount($rec) {
     return @($rec.new_skills).Count + @($rec.removal_candidates).Count + @($rec.mcp_new_servers).Count + @($rec.mcp_removal_candidates).Count
 }
 
-function Normalize-AuditSourceObservationDecision([string]$decision) {
-    $text = ([string]$decision).Trim().ToLowerInvariant()
-    switch ($text) {
-        "install" { return "add" }
-        "selected" { return "add" }
-        "uninstall" { return "remove" }
-        "removed" { return "remove" }
-        "skip" { return "do_not_install" }
-        "reject" { return "do_not_install" }
-        "rejected" { return "do_not_install" }
-        "duplicate" { return "overlap" }
-        default { return $text }
-    }
-}
-
-function Assert-AuditSourceObservation($item) {
-    Need ($null -ne $item) "source_observations 项不能为空"
-    Need (-not [string]::IsNullOrWhiteSpace([string]$item.name)) "source_observations 缺少 name"
-    Need (-not [string]::IsNullOrWhiteSpace([string]$item.candidate_type)) ("source_observations 缺少 candidate_type：{0}" -f [string]$item.name)
-    $candidateType = ([string]$item.candidate_type).Trim().ToLowerInvariant()
-    Need ($candidateType -eq "skill" -or $candidateType -eq "mcp") ("source_observations.candidate_type 仅支持 skill/mcp：{0}" -f $candidateType)
-    $item.candidate_type = $candidateType
-
-    Need (-not [string]::IsNullOrWhiteSpace([string]$item.decision)) ("source_observations 缺少 decision：{0}" -f [string]$item.name)
-    $decision = Normalize-AuditSourceObservationDecision ([string]$item.decision)
-    Need (@("add", "remove", "keep", "do_not_install", "overlap", "ignore") -contains $decision) ("source_observations.decision 不支持：{0}" -f [string]$item.decision)
-    $item.decision = $decision
-
-    Need (-not [string]::IsNullOrWhiteSpace([string]$item.rationale)) ("source_observations 缺少 rationale：{0}" -f [string]$item.name)
-    Normalize-AuditSources $item "source_observations"
-    if ($item.PSObject.Properties.Match("source_categories").Count -eq 0 -or $null -eq $item.source_categories) {
-        $item | Add-Member -NotePropertyName source_categories -NotePropertyValue @() -Force
-    }
-    else {
-        $item.source_categories = @(Normalize-AuditStringArray $item.source_categories)
-    }
-}
-
-function Test-AuditHasSourceObservationForChange($rec, [string]$candidateType, [string]$decision, [string]$name) {
-    $normalizedType = ([string]$candidateType).Trim().ToLowerInvariant()
-    $normalizedDecision = Normalize-AuditSourceObservationDecision $decision
-    $normalizedName = ([string]$name).Trim()
-    foreach ($observation in @($rec.source_observations)) {
-        if ($null -eq $observation) { continue }
-        $obsType = ([string]$observation.candidate_type).Trim().ToLowerInvariant()
-        $obsDecision = Normalize-AuditSourceObservationDecision ([string]$observation.decision)
-        $obsName = ([string]$observation.name).Trim()
-        if ($obsType -eq $normalizedType -and $obsDecision -eq $normalizedDecision -and $obsName -eq $normalizedName -and @($observation.sources).Count -gt 0) {
-            return $true
-        }
-    }
-    return $false
-}
-
 function Get-AuditRecommendationSourceCoverage($rec) {
     $allSources = New-Object System.Collections.Generic.List[string]
     foreach ($collection in @($rec.new_skills, $rec.removal_candidates, $rec.mcp_new_servers, $rec.mcp_removal_candidates)) {
@@ -91,34 +37,10 @@ function Get-AuditRecommendationSourceCoverage($rec) {
         }
     }
     $uniqueSources = @(Normalize-AuditStringArray $allSources)
-    $httpSources = @($uniqueSources | Where-Object { [regex]::IsMatch([string]$_, "^(?i)https?://") })
-    $missingObservation = New-Object System.Collections.Generic.List[string]
-    $itemsWithObservation = 0
-    $changeGroups = @(
-        @{ type = "skill"; decision = "add"; items = @($rec.new_skills) },
-        @{ type = "skill"; decision = "remove"; items = @($rec.removal_candidates) },
-        @{ type = "mcp"; decision = "add"; items = @($rec.mcp_new_servers) },
-        @{ type = "mcp"; decision = "remove"; items = @($rec.mcp_removal_candidates) }
-    )
-    foreach ($group in @($changeGroups)) {
-        foreach ($item in @($group.items)) {
-            $itemName = [string]$item.name
-            if (Test-AuditHasSourceObservationForChange $rec ([string]$group.type) ([string]$group.decision) $itemName) {
-                $itemsWithObservation++
-            }
-            else {
-                $missingObservation.Add(("{0}:{1}:{2}" -f [string]$group.type, [string]$group.decision, $itemName)) | Out-Null
-            }
-        }
-    }
     return [pscustomobject]([ordered]@{
         total_change_items = Get-AuditRecommendationChangeItemCount $rec
         unique_sources = @($uniqueSources)
         unique_source_count = @($uniqueSources).Count
-        http_source_count = @($httpSources).Count
-        source_observation_count = @($rec.source_observations).Count
-        items_with_source_observation = $itemsWithObservation
-        change_items_missing_source_observation = @($missingObservation)
     })
 }
 
@@ -138,27 +60,6 @@ function Normalize-AuditSources($item, [string]$kind) {
     Need (@($item.sources).Count -gt 0) ("{0} 至少需要一个非空 source：{1}" -f $kind, [string]$item.name)
 }
 
-function Normalize-AuditKeywordTrace($item) {
-    $defaultTrace = [pscustomobject]([ordered]@{
-            user_profile = @()
-            target_repo_or_context = @()
-            installed_state = @()
-        })
-    if ($item.PSObject.Properties.Match("keyword_trace").Count -eq 0 -or $null -eq $item.keyword_trace) {
-        $item | Add-Member -NotePropertyName keyword_trace -NotePropertyValue $defaultTrace -Force
-        return
-    }
-    Need (Test-AuditObjectLike $item.keyword_trace) ("keyword_trace 必须是对象：{0}" -f [string]$item.name)
-    foreach ($field in @("user_profile", "target_repo_or_context", "installed_state")) {
-        if ($item.keyword_trace.PSObject.Properties.Match($field).Count -eq 0 -or $null -eq $item.keyword_trace.$field) {
-            $item.keyword_trace | Add-Member -NotePropertyName $field -NotePropertyValue @() -Force
-        }
-        else {
-            $item.keyword_trace.$field = @(Normalize-AuditStringArray $item.keyword_trace.$field)
-        }
-    }
-}
-
 function Assert-AuditRequiredBooleanTrue($value, [string]$fieldName) {
     Need ($value -is [bool]) ("{0} 必须是布尔值 true" -f $fieldName)
     Need ([bool]$value) ("{0} 必须为 true" -f $fieldName)
@@ -168,7 +69,6 @@ function Assert-AuditReasonPair($item, [string]$name) {
     Need (-not [string]::IsNullOrWhiteSpace([string]$item.reason_user_profile)) ("{0} 缺少 reason_user_profile：{1}" -f $name, [string]$item.name)
     Need (-not [string]::IsNullOrWhiteSpace([string]$item.reason_target_repo)) ("{0} 缺少 reason_target_repo：{1}" -f $name, [string]$item.name)
     Normalize-AuditSources $item $name
-    Normalize-AuditKeywordTrace $item
 }
 
 function Assert-AuditOverlapFinding($item) {
@@ -433,12 +333,6 @@ function Load-AuditRecommendations([string]$path) {
     Ensure-AuditArrayProperty $rec "mcp_new_servers"
     Ensure-AuditArrayProperty $rec "mcp_removal_candidates"
     Ensure-AuditArrayProperty $rec "empty_recommendation_reasons"
-    Ensure-AuditArrayProperty $rec "source_observations"
-
-    foreach ($item in @($rec.source_observations)) {
-        Assert-AuditSourceObservation $item
-    }
-
     $seenOverlapFindings = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($item in @($rec.overlap_findings)) {
         Assert-AuditOverlapFinding $item
@@ -511,7 +405,6 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             reason_target_repo = [string]$item.reason_target_repo
             confidence = [string]$item.confidence
             sources = @($item.sources)
-            keyword_trace = $item.keyword_trace
             tokens = @($tokens)
             status = "planned"
         })
@@ -533,7 +426,6 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             reason_user_profile = [string]$item.reason_user_profile
             reason_target_repo = [string]$item.reason_target_repo
             sources = @($item.sources)
-            keyword_trace = $item.keyword_trace
             matched_skill = $matched
             status = $status
         })
@@ -561,7 +453,6 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             reason_target_repo = [string]$item.reason_target_repo
             confidence = [string]$item.confidence
             sources = @($item.sources)
-            keyword_trace = $item.keyword_trace
             server = $server
             status = $status
         })
@@ -582,7 +473,6 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
             reason_user_profile = [string]$item.reason_user_profile
             reason_target_repo = [string]$item.reason_target_repo
             sources = @($item.sources)
-            keyword_trace = $item.keyword_trace
             matched_server = $matched
             status = $status
         })
@@ -592,7 +482,7 @@ function New-AuditInstallPlan($recommendations, $cfg = $null) {
         run_id = [string]$recommendations.run_id
         target = [string]$recommendations.target
         decision_basis = $recommendations.decision_basis
-        source_observations = ConvertTo-AuditJsonArray $recommendations.source_observations
+        source_observations = @(ConvertTo-AuditJsonArray $recommendations.source_observations)
         items = @($items)
         overlap_findings = @($recommendations.overlap_findings)
         removal_candidates = @($removals)

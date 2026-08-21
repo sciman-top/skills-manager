@@ -25,23 +25,27 @@ Describe 'GitHub CI workflow supply-chain contract' {
         $script:workflow | Should -Match '(?ms)^on:\s*\r?\n\s+push:\s*\r?\n\s+branches:\s*\r?\n\s+- main\s*\r?\n\s+tags:\s*\r?\n\s+- ''\*''\s*\r?\n\s+pull_request:\s*$'
     }
 
-    It 'runs quick by default, full for tags or risk paths, and fails closed when the diff is unavailable' {
+    It 'runs focused smoke tests for ordinary PR source changes and full for integration or risk paths' {
         $script:workflow | Should -Match "\`$profile = 'quick'"
         $script:workflow | Should -Match 'github\.ref.*refs/tags/'
+        $script:workflow | Should -Match "github\.event_name.*-eq 'push'"
         $script:workflow | Should -Match 'github\.event_name.*pull_request'
         $script:workflow | Should -Match 'git diff --name-only \$baseSha HEAD'
         $script:workflow | Should -Match 'CI_GATE_PROFILE=\$profile'
-        $script:workflow | Should -Match 'run-local-quality-gates\.ps1 -Profile \$env:CI_GATE_PROFILE'
-        $script:workflow | Should -Not -Match "pull_request' -or .*\{ 'full' \}"
+        $script:workflow | Should -Match 'run-local-quality-gates\.ps1 @gateArgs'
+        $script:workflow | Should -Match '\$profile = ''focused'''
+        $script:workflow | Should -Match 'CI_FOCUSED_TEST_PATHS'
+        $script:workflow | Should -Match 'tests/Unit/CiWorkflow\.Tests\.ps1'
+        $script:workflow | Should -Match 'tests/E2E/'
         @([regex]::Matches($script:workflow, 'run-local-quality-gates\.ps1')).Count | Should -Be 1
 
         $riskMatch = [regex]::Match($script:workflow, '\$riskPath = ''([^'']+)''')
         $riskMatch.Success | Should -Be $true
         $riskPath = [regex]::new($riskMatch.Groups[1].Value)
-        foreach ($path in @('src/Core.ps1', 'tests/Unit/Core.Tests.ps1', 'rules/global/codex/AGENTS.md', '.github/workflows/ci.yml', 'scripts/quality/run-local-quality-gates.ps1', 'skills.json', 'audit-targets.json')) {
+        foreach ($path in @('tests/E2E/Workflow.Tests.ps1', 'rules/global/codex/AGENTS.md', '.github/workflows/ci.yml', 'scripts/quality/run-local-quality-gates.ps1', 'skills.json', 'audit-targets.json')) {
             $riskPath.IsMatch($path) | Should -Be $true
         }
-        foreach ($path in @('README.md', 'CONTRIBUTING.md', 'docs/product/README.md')) {
+        foreach ($path in @('src/Core.ps1', 'tests/Unit/Core.Tests.ps1', 'README.md', 'README.en.md', 'CONTRIBUTING.md', 'docs/product/README.md')) {
             $riskPath.IsMatch($path) | Should -Be $false
         }
     }

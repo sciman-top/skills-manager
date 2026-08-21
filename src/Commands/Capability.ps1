@@ -1,5 +1,5 @@
 function Parse-ReadOnlyCapabilityOptions([object[]]$Tokens) {
-    $result = [ordered]@{ json = $false; out_path = $null; view = $null; host_snapshot = $null }
+    $result = [ordered]@{ json = $false; out_path = $null; view = $null; host_snapshot = $null; host_probe = $false }
     for ($i = 0; $i -lt @($Tokens).Count; $i++) {
         $token = [string]$Tokens[$i]
         switch ($token.ToLowerInvariant()) {
@@ -7,6 +7,7 @@ function Parse-ReadOnlyCapabilityOptions([object[]]$Tokens) {
             '--out' { if ($i + 1 -ge @($Tokens).Count) { throw '--out requires a report file path.' }; $i++; $result.out_path = [string]$Tokens[$i] }
             '--view' { if ($i + 1 -ge @($Tokens).Count) { throw '--view requires a view name.' }; $i++; $result.view = [string]$Tokens[$i] }
             '--host-snapshot' { if ($i + 1 -ge @($Tokens).Count) { throw '--host-snapshot requires a snapshot file path.' }; $i++; $result.host_snapshot = [string]$Tokens[$i] }
+            '--host-probe' { $result.host_probe = $true }
             default { throw ('Unknown capability-inventory option: {0}' -f $token) }
         }
     }
@@ -18,7 +19,7 @@ function Invoke-CapabilityInventoryCommand([object[]]$Tokens = @()) {
     $configRaw = [System.IO.File]::ReadAllText($CfgPath) -replace '(?m)^\s*//.*$', ''
     $config = $configRaw | ConvertFrom-Json
     if (-not [string]::IsNullOrWhiteSpace([string]$options.view) -and [string]$options.view -ne 'skill-surfaces') { throw ('Unknown capability inventory view: {0}' -f $options.view) }
-    $view = New-SkillSurfaceView -RepoRoot $Root -Config $config -HostSnapshotPath ([string]$options.host_snapshot)
+    $view = New-SkillSurfaceView -RepoRoot $Root -Config $config -HostSnapshotPath ([string]$options.host_snapshot) -HostProbe:([bool]$options.host_probe)
     if (-not [string]::IsNullOrWhiteSpace([string]$options.out_path)) { $view.writes = 1 }
     $envelope = [pscustomobject][ordered]@{ schema_version = 1; command = 'capability-inventory'; view = 'skill-surfaces'; pass = [bool]$view.pass; truth_boundary = 'read_only_skill_surface_snapshot'; data = $view }
     $json = $envelope | ConvertTo-Json -Depth 40 -Compress
