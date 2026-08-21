@@ -117,6 +117,26 @@ Describe 'Native skill projection' {
         $plan.writes | Should -Be 0
     }
 
+    It 'removes an owned stale junction whose source directory no longer exists' {
+        $f = New-ProjectionFixture
+        New-Item -ItemType Directory -Path $f.target -Force | Out-Null
+        $staleSource = Join-Path $f.source 'legacy-name'
+        New-Item -ItemType Directory -Path $staleSource -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $staleSource 'SKILL.md'), "---`nname: legacy-name`ndescription: legacy capability.`n---`n", [Text.UTF8Encoding]::new($false))
+        $staleLink = Join-Path $f.target 'legacy-name'
+        New-Item -ItemType Junction -Path $staleLink -Target $staleSource | Out-Null
+        Remove-Item -LiteralPath $staleSource -Recurse -Force
+
+        $plan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config
+
+        @($plan.removals.name) | Should -Be @('legacy-name')
+        { Apply-NativeSkillProjection -Plan $plan -ReceiptPath $f.receipt } | Should -Not -Throw
+        Get-Item -LiteralPath $staleLink -Force -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
+        @('enabled', 'resident') | ForEach-Object {
+            Test-Path -LiteralPath (Join-Path $f.target "$_\SKILL.md") -PathType Leaf | Should -BeTrue
+        }
+    }
+
     It 'uses the prior receipt to retire links from a previous managed root' {
         $f = New-ProjectionFixture
         $oldPlan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config

@@ -31,7 +31,8 @@ function Get-NativeSkillProjectionTargetState {
 
     $directory = [IO.Path]::GetFullPath($DirectoryPath).TrimEnd('\', '/')
     $skillPath = Join-Path $directory 'SKILL.md'
-    if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
+    $item = Get-Item -LiteralPath $directory -Force -ErrorAction SilentlyContinue
+    if ($null -eq $item) {
         return [pscustomobject][ordered]@{
             exists = $false
             kind = 'missing'
@@ -42,16 +43,16 @@ function Get-NativeSkillProjectionTargetState {
             package_hash = ''
         }
     }
-    $item = Get-Item -LiteralPath $directory -Force
     $isReparse = [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+    $skillExists = Test-Path -LiteralPath $skillPath -PathType Leaf
     return [pscustomobject][ordered]@{
         exists = $true
         kind = if ($isReparse) { 'junction' } else { 'directory' }
         directory_path = $directory
         skill_path = $skillPath
         link_target = if ($isReparse) { Get-NativeSkillProjectionLinkTarget $directory } else { '' }
-        content_hash = Get-NativeSkillProjectionFileHash $skillPath
-        package_hash = Get-NativeSkillProjectionPackageHash $directory
+        content_hash = if ($skillExists) { Get-NativeSkillProjectionFileHash $skillPath } else { '' }
+        package_hash = if ($skillExists) { Get-NativeSkillProjectionPackageHash $directory } else { '' }
     }
 }
 
