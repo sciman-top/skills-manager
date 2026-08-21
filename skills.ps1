@@ -10076,15 +10076,16 @@ function Resolve-AgentMappingForAgent($cfg, $mapping, [hashtable]$context) {
         Need ([string]::Equals($to, $canonicalName, [StringComparison]::Ordinal)) `
             ("schema v2 要求 mapping.to 与 SKILL.md name 一致：{0} -> {1}" -f $to, $canonicalName)
     }
-    $dst = Join-Path $AgentDir $canonicalName
-    Need (Is-PathInsideOrEqual $dst $AgentDir) ("mapping.to 越界：{0}" -f $canonicalName)
+    $effectiveTargetName = if ([int]$versionInfo.effective_version -ge 2) { $canonicalName } else { $to }
+    $dst = Join-Path $AgentDir $effectiveTargetName
+    Need (Is-PathInsideOrEqual $dst $AgentDir) ("mapping.to 越界：{0}" -f $effectiveTargetName)
 
     return [pscustomobject]@{
         sync = $true
         source_valid = $true
         vendor = $vendor
         from = $from
-        to = $canonicalName
+        to = $effectiveTargetName
         configured_to = $to
         src = [string]$src
         src_full = $srcFull
@@ -17754,7 +17755,7 @@ function Assert-AuditMcpServerPayload($server, [string]$itemName) {
     else {
         "stdio"
     }
-    Need ($transport -eq "stdio" -or $transport -eq "sse" -or $transport -eq "http") ("MCP transport 仅支持 stdio/sse/http：{0}" -f $transport)
+    Need ($transport -eq "stdio" -or $transport -eq "http") ("MCP transport 仅支持 stdio/http；旧 SSE 已弃用：{0}" -f $transport)
     $server.transport = $transport
     if ($transport -eq "stdio") {
         Need ($server.PSObject.Properties.Match("command").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.command)) ("MCP stdio 缺少 command：{0}" -f $itemName)
@@ -19022,7 +19023,7 @@ function Invoke-AuditRecommendationsPreflight {
         run_id = if ($null -ne $rec) { [string]$rec.run_id } else { Get-AuditPreflightRunIdFromBundle $recommendationDir $RunId }
         target = if ($null -ne $rec) { [string]$rec.target } else { "" }
         success = ($issues.Count -eq 0)
-        error_code = if (-not $recommendationsExists) { "recommendations_missing" } elseif (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) { "invalid_recommendations" } elseif ([bool]$targetStaleness.is_stale) { "target_repo_drift" } elseif ($isSnapshotStale) { "stale_snapshot" } elseif (-not $promptVersionMatched) { "prompt_contract_mismatch" } elseif (-not $sourceCoveragePassed) { "insufficient_source_coverage" } elseif (-not $decisionQualityPassed) { "insufficient_decision_quality" } elseif (-not [bool]$userProfileCheck.ok) { "user_profile_invalid" } elseif (-not [bool]$removalDependencyCheck.ok) { "removal_dependency_blocked" } else { "" }
+        error_code = if (-not $recommendationsExists) { "recommendations_missing" } elseif (-not [string]::IsNullOrWhiteSpace($recommendationValidationIssue)) { "invalid_recommendations" } elseif ([bool]$targetStaleness.is_stale) { "target_repo_drift" } elseif (-not [bool]$removalDependencyCheck.ok) { "removal_dependency_blocked" } elseif ($isSnapshotStale) { "stale_snapshot" } elseif (-not $promptVersionMatched) { "prompt_contract_mismatch" } elseif (-not $sourceCoveragePassed) { "insufficient_source_coverage" } elseif (-not $decisionQualityPassed) { "insufficient_decision_quality" } elseif (-not [bool]$userProfileCheck.ok) { "user_profile_invalid" } else { "" }
         recommendations_path = $resolvedRecommendations
         recommendations_exists = $recommendationsExists
         prompt_contract = [ordered]@{

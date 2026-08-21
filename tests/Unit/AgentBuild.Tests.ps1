@@ -76,7 +76,7 @@ Describe "Agent build" {
         Should -Invoke Resolve-SourceBase -Times 1 -Exactly
     }
 
-    It 'uses the declared Agent Skills name as the output directory and fails closed for schema v2 drift' {
+    It 'preserves schema v1 mapping targets and fails closed for schema v2 drift' {
         $oldAgent = $AgentDir
         try {
             $source = Join-Path $TestDrive 'canonical-source'
@@ -89,8 +89,8 @@ Describe "Agent build" {
             Mock Resolve-ManualImportSkillPath { $source }
 
             $legacy = Resolve-AgentMappingForAgent $cfgV1 $mapping (New-AgentMappingResolveContext)
-            $legacy.to | Should -Be 'canonical-name'
-            Split-Path -Leaf $legacy.dst | Should -Be 'canonical-name'
+            $legacy.to | Should -Be 'legacy-name'
+            Split-Path -Leaf $legacy.dst | Should -Be 'legacy-name'
             { Resolve-AgentMappingForAgent $cfgV2 $mapping (New-AgentMappingResolveContext) } |
                 Should -Throw '*schema v2 要求 mapping.to 与 SKILL.md name 一致*'
         }

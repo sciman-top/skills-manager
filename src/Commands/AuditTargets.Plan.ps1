@@ -355,7 +355,7 @@ function Assert-AuditMcpServerPayload($server, [string]$itemName) {
     else {
         "stdio"
     }
-    Need ($transport -eq "stdio" -or $transport -eq "sse" -or $transport -eq "http") ("MCP transport 仅支持 stdio/sse/http：{0}" -f $transport)
+    Need ($transport -eq "stdio" -or $transport -eq "http") ("MCP transport 仅支持 stdio/http；旧 SSE 已弃用：{0}" -f $transport)
     $server.transport = $transport
     if ($transport -eq "stdio") {
         Need ($server.PSObject.Properties.Match("command").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$server.command)) ("MCP stdio 缺少 command：{0}" -f $itemName)

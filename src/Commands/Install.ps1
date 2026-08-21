@@ -1850,15 +1850,16 @@ function Resolve-AgentMappingForAgent($cfg, $mapping, [hashtable]$context) {
         Need ([string]::Equals($to, $canonicalName, [StringComparison]::Ordinal)) `
             ("schema v2 要求 mapping.to 与 SKILL.md name 一致：{0} -> {1}" -f $to, $canonicalName)
     }
-    $dst = Join-Path $AgentDir $canonicalName
-    Need (Is-PathInsideOrEqual $dst $AgentDir) ("mapping.to 越界：{0}" -f $canonicalName)
+    $effectiveTargetName = if ([int]$versionInfo.effective_version -ge 2) { $canonicalName } else { $to }
+    $dst = Join-Path $AgentDir $effectiveTargetName
+    Need (Is-PathInsideOrEqual $dst $AgentDir) ("mapping.to 越界：{0}" -f $effectiveTargetName)
 
     return [pscustomobject]@{
         sync = $true
         source_valid = $true
         vendor = $vendor
         from = $from
-        to = $canonicalName
+        to = $effectiveTargetName
         configured_to = $to
         src = [string]$src
         src_full = $srcFull

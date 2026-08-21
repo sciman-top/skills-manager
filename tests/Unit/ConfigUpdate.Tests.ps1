@@ -290,6 +290,7 @@ Describe "Config And Update Enhancements" {
 
         It "Collects contract errors without mutating config shape" {
             $cfg = [pscustomobject]@{
+                schema_version = 2
                 vendors = @(
                     [pscustomobject]@{ name = "vendor-a"; repo = "https://example.com/a.git" }
                 )
@@ -310,7 +311,7 @@ Describe "Config And Update Enhancements" {
             $joined = $errors -join "`n"
 
             $joined | Should -Match "mapping.from 非法"
-            $joined | Should -Match "mcp_server.transport 仅支持 stdio/sse/http：bad-server"
+            $joined | Should -Match "mcp_server.transport 仅支持 stdio/http：bad-server"
             $joined | Should -Match "sync_mode 仅支持 link 或 sync"
             $joined | Should -Match "mapping 引用了不存在的 vendor：missing-vendor"
             $cfg.PSObject.Properties.Match("mcp_targets").Count | Should -Be 0
