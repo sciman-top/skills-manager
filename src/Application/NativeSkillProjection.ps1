@@ -12,7 +12,7 @@ function Get-NativeSkillProjectionFileHash {
 function Get-NativeSkillProjectionLinkTarget {
     param([string]$Path)
 
-    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Container)) { return '' }
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
     try {
         $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
         if (-not [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return '' }
@@ -65,8 +65,8 @@ function Ensure-NativeSkillProjectionDirectory {
 function Remove-NativeSkillProjectionPath {
     param([Parameter(Mandatory = $true)][string]$Path)
 
-    if (-not (Test-Path -LiteralPath $Path)) { return }
-    $item = Get-Item -LiteralPath $Path -Force
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($null -eq $item) { return }
     if ([bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not $item.PSIsContainer) { Remove-Item -LiteralPath $Path -Force }
     else { Remove-Item -LiteralPath $Path -Recurse -Force }
 }
