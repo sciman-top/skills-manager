@@ -76,6 +76,27 @@ Describe "Agent build" {
         Should -Invoke Resolve-SourceBase -Times 1 -Exactly
     }
 
+    It 'uses the declared Agent Skills name as the output directory and fails closed for schema v2 drift' {
+        $oldAgent = $AgentDir
+        try {
+            $source = Join-Path $TestDrive 'canonical-source'
+            $AgentDir = Join-Path $TestDrive 'canonical-agent'
+            New-Item -ItemType Directory -Path $source -Force | Out-Null
+            Set-ContentUtf8 (Join-Path $source 'SKILL.md') "---`nname: canonical-name`ndescription: fixture`n---"
+            $cfgV1 = [pscustomobject]@{ schema_version = 1; vendors = @(); imports = @(); mappings = @() }
+            $cfgV2 = [pscustomobject]@{ schema_version = 2; vendors = @(); imports = @(); mappings = @() }
+            $mapping = [pscustomobject]@{ vendor = 'manual'; from = 'demo'; to = 'legacy-name' }
+            Mock Resolve-ManualImportSkillPath { $source }
+
+            $legacy = Resolve-AgentMappingForAgent $cfgV1 $mapping (New-AgentMappingResolveContext)
+            $legacy.to | Should -Be 'canonical-name'
+            Split-Path -Leaf $legacy.dst | Should -Be 'canonical-name'
+            { Resolve-AgentMappingForAgent $cfgV2 $mapping (New-AgentMappingResolveContext) } |
+                Should -Throw '*schema v2 要求 mapping.to 与 SKILL.md name 一致*'
+        }
+        finally { $AgentDir = $oldAgent }
+    }
+
     It "allows byte-identical skill aliases but rejects divergent duplicates" {
         $agent = Join-Path $TestDrive "agent"
         $a = Join-Path $agent "a\SKILL.md"

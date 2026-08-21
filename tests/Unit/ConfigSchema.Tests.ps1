@@ -24,17 +24,18 @@ function Invoke-ConfigVerifier([string]$ConfigPath, [string]$Mode = 'enforce', [
         $run.exit_code | Should -Be 0
         $run.result.valid | Should -Be $true
         $run.result.finding_count | Should -Be 0
+        $run.result.config_version | Should -Be 2
         $run.result.version_source | Should -Be 'declared'
         $before | Should -Be $after
         $run.result.config_sha256_before | Should -Be $run.result.config_sha256_after
     }
 
-    It 'accepts explicit schema v1 without legacy observations' {
+    It 'reads explicit schema v1 for migration with a deprecation observation' {
         $run = Invoke-ConfigVerifier (Join-Path $fixtureRoot 'known-good-v1.json')
         $run.exit_code | Should -Be 0
         $run.result.config_version | Should -Be 1
         $run.result.version_source | Should -Be 'declared'
-        $run.result.observation_count | Should -Be 0
+        @($run.result.observations | Where-Object code -eq 'legacy_schema_v1_deprecated').Count | Should -Be 1
     }
 
     It 'reads a missing version as legacy v1 with an observation' {
@@ -51,6 +52,33 @@ function Invoke-ConfigVerifier([string]$ConfigPath, [string]$Mode = 'enforce', [
         $run.exit_code | Should -Be 1
         $run.result.valid | Should -Be $false
         @($run.result.findings | Where-Object code -eq 'schema_version_required').Count | Should -Be 1
+    }
+
+    It 'keeps legacy SSE readable only in schema v1 and rejects it in schema v2' {
+        $base = [ordered]@{
+            sync_mode = 'link'
+            vendors = @()
+            targets = @()
+            mappings = @()
+            imports = @()
+            mcp_servers = @([ordered]@{ name = 'legacy'; transport = 'sse'; url = 'https://example.invalid/mcp' })
+            mcp_targets = @()
+        }
+        $v1 = Join-Path $TestDrive 'legacy-sse-v1.json'
+        $v2 = Join-Path $TestDrive 'legacy-sse-v2.json'
+        $v1Config = [ordered]@{ schema_version = 1 }
+        $v2Config = [ordered]@{ schema_version = 2 }
+        foreach ($key in $base.Keys) { $v1Config[$key] = $base[$key]; $v2Config[$key] = $base[$key] }
+        $v1Config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $v1 -Encoding utf8
+        $v2Config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $v2 -Encoding utf8
+
+        $legacy = Invoke-ConfigVerifier $v1
+        $current = Invoke-ConfigVerifier $v2
+
+        $legacy.exit_code | Should -Be 0
+        @($legacy.result.observations | Where-Object code -eq 'legacy_sse_transport_deprecated').Count | Should -Be 1
+        $current.exit_code | Should -Be 1
+        @($current.result.findings | Where-Object code -eq 'enum_invalid').Count | Should -Be 1
     }
 
     $invalidCases = @(
@@ -95,10 +123,13 @@ function Invoke-ConfigVerifier([string]$ConfigPath, [string]$Mode = 'enforce', [
     It 'keeps the declarative schema parseable and documents compatibility and secret policy' {
         $schema = Get-Content -LiteralPath (Join-Path $repoRoot 'config\skills.schema.json') -Raw | ConvertFrom-Json
         $schema.'$schema' | Should -Be 'https://json-schema.org/draft/2020-12/schema'
-        $schema.properties.schema_version.const | Should -Be 1
+        $schema.properties.schema_version.const | Should -Be 2
+        @($schema.'$defs'.mcpServer.properties.transport.enum) | Should -Not -Contain 'sse'
+        $schema.'$defs'.mapping.properties.to.pattern | Should -Be '^[a-z0-9]+(?:-[a-z0-9]+)*$'
         @($schema.'$defs'.skillProjection.properties.PSObject.Properties.Name) | Should -Not -Contain 'aliases'
         @($schema.'$defs'.nativeProjection.properties.PSObject.Properties.Name) | Should -Not -Contain 'apply_requires_token'
         $schema.'x-compatibility-policy'.missing_schema_version | Should -Be 'legacy-v1-observation'
+        $schema.'x-compatibility-policy'.declared_schema_v1 | Should -Be 'runtime-read-migration-only'
         $schema.'x-secret-policy'.validator_output | Should -Be 'code-path-message-only'
     }
 }

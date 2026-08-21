@@ -10,6 +10,7 @@ $Files = @(
     "Infrastructure/CodexCli.ps1",
     "Domain/SkillMetadata.ps1",
     "Core.ps1",
+    "Application/SkillSupply.ps1",
     "Domain/OperationPlan.ps1",
     "Domain/SkillCatalog.ps1",
     "Domain/Receipt.ps1",

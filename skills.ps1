@@ -285,7 +285,12 @@ function Read-SkillMetadata {
     elseif ($description.Length -gt 1024) { $findings.Add([pscustomobject]@{ code='description_too_long'; severity='error'; field='description'; message='Skill description exceeds 1024 characters.' }) | Out-Null }
     if ($fields.Contains('compatibility') -and ([string]$fields['compatibility']).Length -gt 500) { $findings.Add([pscustomobject]@{ code='compatibility_too_long'; severity='error'; field='compatibility'; message='Skill compatibility exceeds 500 characters.' }) | Out-Null }
     $allowed = @('name','description','license','allowed-tools','metadata','compatibility')
-    foreach ($key in $fields.Keys) { if ($key -notin $allowed) { $findings.Add([pscustomobject]@{ code='field_unknown'; severity='warning'; field=$key; message=('Unknown top-level skill metadata field: {0}' -f $key) }) | Out-Null } }
+    foreach ($key in $fields.Keys) {
+        if ($key -notin $allowed) {
+            $severity = if ($Observation) { 'warning' } else { 'error' }
+            $findings.Add([pscustomobject]@{ code='field_unknown'; severity=$severity; field=$key; message=('Unknown top-level skill metadata field: {0}' -f $key) }) | Out-Null
+        }
+    }
     if ($Observation) { foreach ($finding in $findings) { if ([string]$finding.severity -eq 'error' -and [string]$finding.code -notin @('name_required','description_required')) { $finding.severity = 'warning' } } }
     $result.valid = @($findings | Where-Object severity -eq 'error').Count -eq 0
     $triggerLine = @($text -split '\r?\n' | Where-Object { $_ -match '(?i)trigger|use when|when to use|使用场景' } | Select-Object -First 1)
@@ -1602,6 +1607,100 @@ function Merge-FilterAndArgs([string]$filter, [string[]]$tokens) {
         }
     }
     return $merged.ToArray()
+}
+
+function Test-SkillPackagePathInsideOrEqual {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Root
+    )
+
+    $fullPath = [IO.Path]::GetFullPath($Path).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $fullRoot = [IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    if ([string]::Equals($fullPath, $fullRoot, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    return $fullPath.StartsWith($fullRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Assert-SkillPackageSafe {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$ContainmentRoot,
+        [string]$Label = 'skill-package'
+    )
+
+    $packageFull = [IO.Path]::GetFullPath($Path)
+    $rootFull = [IO.Path]::GetFullPath($ContainmentRoot)
+    if (-not (Test-Path -LiteralPath $rootFull -PathType Container)) {
+        throw ("skill_package_unsafe:containment_root_missing:{0}" -f $Label)
+    }
+    if (-not (Test-SkillPackagePathInsideOrEqual -Path $packageFull -Root $rootFull)) {
+        throw ("skill_package_unsafe:path_escape:{0}" -f $Label)
+    }
+    if (-not (Test-Path -LiteralPath $packageFull -PathType Container)) {
+        throw ("skill_package_unsafe:package_missing:{0}" -f $Label)
+    }
+
+    $rootItem = Get-Item -LiteralPath $rootFull -Force -ErrorAction Stop
+    if ([bool]($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw ("skill_package_unsafe:reparse_point:{0}" -f $Label)
+    }
+
+    $relativePackage = [IO.Path]::GetRelativePath($rootFull, $packageFull)
+    $cursor = $rootFull
+    if ($relativePackage -ne '.') {
+        foreach ($segment in @($relativePackage -split '[\\/]' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+            $cursor = Join-Path $cursor $segment
+            $item = Get-Item -LiteralPath $cursor -Force -ErrorAction Stop
+            if ([bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                throw ("skill_package_unsafe:reparse_point:{0}" -f $Label)
+            }
+        }
+    }
+
+    $entryCount = 0
+    foreach ($entry in @(Get-ChildItem -LiteralPath $packageFull -Force -Recurse -ErrorAction Stop)) {
+        $entryCount++
+        if ([bool]($entry.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw ("skill_package_unsafe:reparse_point:{0}" -f $Label)
+        }
+        if (-not $entry.PSIsContainer -and $entry -isnot [IO.FileInfo]) {
+            throw ("skill_package_unsafe:special_file:{0}" -f $Label)
+        }
+    }
+
+    $trackedFileCount = 0
+    if (Get-Command git -ErrorAction SilentlyContinue) {
+        $gitRootOutput = @(& git -C $packageFull rev-parse --show-toplevel 2>$null)
+        if ($LASTEXITCODE -eq 0 -and $gitRootOutput.Count -gt 0) {
+            $gitRoot = [IO.Path]::GetFullPath(([string]$gitRootOutput[-1]).Trim())
+            if (Test-SkillPackagePathInsideOrEqual -Path $packageFull -Root $gitRoot) {
+                $gitRelative = [IO.Path]::GetRelativePath($gitRoot, $packageFull).Replace('\', '/')
+                $stageLines = @(& git -C $gitRoot ls-files --stage -- $gitRelative 2>$null)
+                if ($LASTEXITCODE -ne 0) {
+                    throw ("skill_package_unsafe:git_index_inspection_failed:{0}" -f $Label)
+                }
+                foreach ($line in $stageLines) {
+                    if ([string]::IsNullOrWhiteSpace([string]$line)) { continue }
+                    if ([string]$line -notmatch '^(?<mode>[0-9]{6})\s') {
+                        throw ("skill_package_unsafe:git_index_entry_invalid:{0}" -f $Label)
+                    }
+                    $trackedFileCount++
+                    if ($Matches.mode -notin @('100644', '100755')) {
+                        throw ("skill_package_unsafe:git_special_mode:{0}:{1}" -f $Label, $Matches.mode)
+                    }
+                }
+            }
+        }
+    }
+
+    return [pscustomobject][ordered]@{
+        safe = $true
+        path = $packageFull
+        containment_root = $rootFull
+        entry_count = $entryCount
+        tracked_file_count = $trackedFileCount
+    }
 }
 
 function New-OperationFinding([string]$Code, [string]$Severity, [string]$Path, [string]$Message) {
@@ -6394,7 +6493,7 @@ function Get-CfgArrayField($cfg, [string]$name, [bool]$required, [System.Collect
     $errors.Add(("skills.json 的 {0} 必须是数组" -f $name)) | Out-Null
     return @()
 }
-$script:SkillsConfigSchemaVersion = 1
+$script:SkillsConfigSchemaVersion = 2
 function Test-CfgIntegerValue($value) {
     return ($value -is [byte] -or $value -is [sbyte] -or
         $value -is [int16] -or $value -is [uint16] -or
@@ -6405,7 +6504,7 @@ function Get-CfgSchemaVersionInfo($cfg) {
     $errors = New-Object System.Collections.Generic.List[string]
     $observations = New-Object System.Collections.Generic.List[object]
     $declared = $false
-    $version = $script:SkillsConfigSchemaVersion
+    $version = 1
 
     if ($null -ne $cfg -and (Test-CfgObjectProperty $cfg "schema_version")) {
         $declared = $true
@@ -6416,8 +6515,8 @@ function Get-CfgSchemaVersionInfo($cfg) {
         }
         else {
             $version = [int64]$rawVersion
-            if ($version -ne $script:SkillsConfigSchemaVersion) {
-                $errors.Add(("不支持的 schema_version；当前仅支持 {0}" -f $script:SkillsConfigSchemaVersion)) | Out-Null
+            if ($version -notin @(1, $script:SkillsConfigSchemaVersion)) {
+                $errors.Add(("不支持的 schema_version；当前支持 1/{0}" -f $script:SkillsConfigSchemaVersion)) | Out-Null
             }
         }
     }
@@ -6444,26 +6543,40 @@ function Get-CfgVersionedContractReport($cfg) {
     foreach ($errorText in @($versionInfo.errors)) { $errors.Add([string]$errorText) | Out-Null }
 
     if ($versionInfo.declared -and $versionInfo.errors.Count -eq 0) {
+        if ([int]$versionInfo.effective_version -eq 1) {
+            $versionInfo.observations += [pscustomobject]@{
+                code = 'legacy_schema_v1_deprecated'
+                path = '$.schema_version'
+                message = 'Schema v1 remains readable for migration only; new repository configuration must use schema v2.'
+            }
+        }
         foreach ($fieldName in @("vendors", "targets", "mappings", "imports", "mcp_servers", "mcp_targets")) {
             if ((Test-CfgObjectProperty $cfg $fieldName) -and -not (Assert-IsArray (Get-CfgObjectProperty $cfg $fieldName))) {
-                $errors.Add(("schema v1 要求 {0} 为数组" -f $fieldName)) | Out-Null
+                $errors.Add(("schema v{0} 要求 {1} 为数组" -f $versionInfo.effective_version, $fieldName)) | Out-Null
             }
         }
         if ((Test-CfgObjectProperty $cfg "update_force") -and (Get-CfgObjectProperty $cfg "update_force") -isnot [bool]) {
-            $errors.Add("schema v1 要求 update_force 为布尔值") | Out-Null
+            $errors.Add(("schema v{0} 要求 update_force 为布尔值" -f $versionInfo.effective_version)) | Out-Null
         }
         if ((Test-CfgObjectProperty $cfg "sync_mode") -and (Get-CfgObjectProperty $cfg "sync_mode") -isnot [string]) {
-            $errors.Add("schema v1 要求 sync_mode 为字符串") | Out-Null
+            $errors.Add(("schema v{0} 要求 sync_mode 为字符串" -f $versionInfo.effective_version)) | Out-Null
         }
         foreach ($fieldName in @("skill_projection", "mcp_profiles")) {
             $fieldValue = Get-CfgObjectProperty $cfg $fieldName
             if ($null -ne $fieldValue -and $fieldValue -isnot [pscustomobject] -and $fieldValue -isnot [System.Collections.IDictionary]) {
-                $errors.Add(("schema v1 要求 {0} 为对象" -f $fieldName)) | Out-Null
+                $errors.Add(("schema v{0} 要求 {1} 为对象" -f $versionInfo.effective_version, $fieldName)) | Out-Null
+            }
+        }
+        if ([int]$versionInfo.effective_version -eq 1 -and @($cfg.mcp_servers | Where-Object { [string]$_.transport -eq 'sse' }).Count -gt 0) {
+            $versionInfo.observations += [pscustomobject]@{
+                code = 'legacy_sse_transport_deprecated'
+                path = '$.mcp_servers[].transport'
+                message = 'Legacy SSE is readable in schema v1 only and must be migrated to Streamable HTTP.'
             }
         }
     }
 
-    foreach ($errorText in @(Get-CfgContractErrors $cfg)) { $errors.Add([string]$errorText) | Out-Null }
+    foreach ($errorText in @(Get-CfgContractErrors $cfg ([int]$versionInfo.effective_version))) { $errors.Add([string]$errorText) | Out-Null }
     return [pscustomobject]@{
         schema = $versionInfo
         valid = ($errors.Count -eq 0)
@@ -6475,11 +6588,15 @@ function Get-CfgForbiddenHostRuntimeFieldNames {
     return @('model', 'model_provider', 'provider', 'auth', 'session', 'orchestrator', 'daemon', 'agent_runtime')
 }
 
-function Get-CfgContractErrors($cfg) {
+function Get-CfgContractErrors($cfg, [int]$SchemaVersion = 0) {
     $errors = New-Object System.Collections.Generic.List[string]
     if ($null -eq $cfg) {
         $errors.Add("skills.json 为空或无法解析为对象") | Out-Null
         return @($errors.ToArray())
+    }
+    if ($SchemaVersion -le 0) {
+        $versionInfo = Get-CfgSchemaVersionInfo $cfg
+        if ($versionInfo.errors.Count -eq 0) { $SchemaVersion = [int]$versionInfo.effective_version }
     }
 
     foreach ($fieldName in @(Get-CfgForbiddenHostRuntimeFieldNames)) {
@@ -6656,6 +6773,9 @@ function Get-CfgContractErrors($cfg) {
         if (-not [string]::IsNullOrWhiteSpace($to) -and -not (Test-SafeRelativePath $to)) {
             $errors.Add(("mapping.to 非法（仅允许相对路径，禁止 .. 与绝对路径）：{0}" -f $to)) | Out-Null
         }
+        elseif ($SchemaVersion -ge 2 -and $to -notmatch '^[a-z0-9]+(?:-[a-z0-9]+)*$') {
+            $errors.Add(("schema v2 要求 mapping.to 为 canonical skill name：{0}" -f $to)) | Out-Null
+        }
     }
 
     foreach ($i in $imports) {
@@ -6678,8 +6798,9 @@ function Get-CfgContractErrors($cfg) {
         $transport = [string](Get-CfgObjectProperty $s "transport")
         if ([string]::IsNullOrWhiteSpace($transport)) { $transport = "stdio" }
         if ([string]::IsNullOrWhiteSpace($name)) { $errors.Add("mcp_server 缺少 name") | Out-Null }
-        if ($transport -ne "stdio" -and $transport -ne "sse" -and $transport -ne "http") {
-            $errors.Add(("mcp_server.transport 仅支持 stdio/sse/http：{0}" -f $name)) | Out-Null
+        $allowedTransports = if ($SchemaVersion -ge 2) { @('stdio', 'http') } else { @('stdio', 'sse', 'http') }
+        if ($transport -notin $allowedTransports) {
+            $errors.Add(("mcp_server.transport 仅支持 {0}：{1}" -f ($allowedTransports -join '/'), $name)) | Out-Null
             continue
         }
         if ($transport -eq "stdio") {
@@ -7039,7 +7160,7 @@ function Migrate-ManualToVendor($cfg, [string]$vendorName, [string]$repo) {
         
         if (Test-IsSkillDir $src) {
             $targetSuffix = if ($skillPath -eq ".") { $vendorName } else { $skillPath }
-            $targetName = Make-TargetName $vendorName $targetSuffix
+            $targetName = Get-CanonicalSkillTargetName $src (Make-TargetName $vendorName $targetSuffix)
             Ensure-ImportVendorMapping $cfg $vendorName $skillPath $targetName
              
             # Add vendor-mode import
@@ -7095,6 +7216,12 @@ function Optimize-Imports($cfg) {
 }
 
 function Assert-Cfg($cfg) {
+    $versionInfo = Get-CfgSchemaVersionInfo $cfg
+    Need ($versionInfo.errors.Count -eq 0) (($versionInfo.errors | Select-Object -First 1) -join '')
+    $effectiveSchemaVersion = [int]$versionInfo.effective_version
+    if ($effectiveSchemaVersion -eq 1) {
+        Log 'skills.json schema v1 仅保留迁移读取兼容；新配置请使用 schema v2。' 'WARN'
+    }
     foreach ($fieldName in @(Get-CfgForbiddenHostRuntimeFieldNames)) {
         Need (-not (Test-CfgObjectProperty $cfg $fieldName)) ("skills.json 顶层字段属于宿主 runtime 职责，禁止配置：{0}" -f $fieldName)
     }
@@ -7125,6 +7252,9 @@ function Assert-Cfg($cfg) {
         Need (-not [string]::IsNullOrWhiteSpace($m.to)) "mapping 缺少 to"
         Need (Test-SafeRelativePath $m.from -AllowDot) ("mapping.from 非法（仅允许相对路径，禁止 .. 与绝对路径）：{0}" -f $m.from)
         Need (Test-SafeRelativePath $m.to) ("mapping.to 非法（仅允许相对路径，禁止 .. 与绝对路径）：{0}" -f $m.to)
+        if ($effectiveSchemaVersion -ge 2) {
+            Need ([string]$m.to -match '^[a-z0-9]+(?:-[a-z0-9]+)*$') ("schema v2 要求 mapping.to 为 canonical skill name：{0}" -f $m.to)
+        }
     }
     foreach ($i in $cfg.imports) {
         Need (-not [string]::IsNullOrWhiteSpace($i.name)) "import 缺少 name"
@@ -7135,7 +7265,11 @@ function Assert-Cfg($cfg) {
     foreach ($s in $cfg.mcp_servers) {
         Need (-not [string]::IsNullOrWhiteSpace($s.name)) "mcp_server 缺少 name"
         $transport = if ($s.PSObject.Properties.Match("transport").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$s.transport)) { [string]$s.transport } else { "stdio" }
-        Need (($transport -eq "stdio") -or ($transport -eq "sse") -or ($transport -eq "http")) ("mcp_server.transport 仅支持 stdio/sse/http：{0}" -f $s.name)
+        $allowedTransports = if ($effectiveSchemaVersion -ge 2) { @('stdio', 'http') } else { @('stdio', 'sse', 'http') }
+        Need ($transport -in $allowedTransports) ("mcp_server.transport 仅支持 {0}：{1}" -f ($allowedTransports -join '/'), $s.name)
+        if ($effectiveSchemaVersion -eq 1 -and $transport -eq 'sse') {
+            Log ("legacy SSE transport 已弃用，请迁移到 Streamable HTTP：{0}" -f $s.name) 'WARN'
+        }
         if ($transport -eq "stdio") {
             Need ($s.PSObject.Properties.Match("command").Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$s.command)) ("mcp_server(stdio) 缺少 command：{0}" -f $s.name)
         }
@@ -8400,6 +8534,18 @@ function Get-DeclaredSkillNameFromDir([string]$skillDir) {
     return $null
 }
 
+function Get-CanonicalSkillTargetName([string]$skillDir, [string]$fallbackName) {
+    $declaredName = Get-DeclaredSkillNameFromDir $skillDir
+    if ([string]::IsNullOrWhiteSpace($declaredName)) {
+        $fallback = Normalize-Name $fallbackName
+        Need (-not [string]::IsNullOrWhiteSpace($fallback)) ("技能目标名称无效：{0}" -f $fallbackName)
+        return $fallback
+    }
+    Need ($declaredName.Length -le 64 -and $declaredName -match '^[a-z0-9]+(?:-[a-z0-9]+)*$') `
+        ("SKILL.md name 不符合 Agent Skills 规范：{0}" -f $declaredName)
+    return $declaredName
+}
+
 function Get-AddImportPlanFromParsedArgs($parsed) {
     Need ($null -ne $parsed) "parsed add args 不能为空"
 
@@ -8561,7 +8707,8 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
 
                 $import = @{ name = $name; repo = $repo; ref = $ref; skill = $skillPath; mode = "manual"; sparse = $curSparse }
                 Upsert-Import $cfg $import
-                Ensure-ManualImportMapping $cfg $name $name
+                $targetName = Get-CanonicalSkillTargetName $src $name
+                Ensure-ManualImportMapping $cfg $name $targetName
             }
         }
         else {
@@ -8579,7 +8726,7 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
                     Need (Test-IsSkillDir $src) "未找到技能入口文件（SKILL.md/AGENTS.md/GEMINI.md/CLAUDE.md）：$src"
 
                     $targetSuffix = if ($skillPath -eq ".") { $vendorName } else { $skillPath }
-                    $targetName = Make-TargetName $vendorName $targetSuffix
+                    $targetName = Get-CanonicalSkillTargetName $src (Make-TargetName $vendorName $targetSuffix)
                     Ensure-ImportVendorMapping $cfg $vendorName $skillPath $targetName
                 }
 
@@ -9542,7 +9689,7 @@ function 安装 {
     foreach ($item in $selected) {
         $key = "$($item.vendor)|$($item.from)"
         if ($existing.Contains($key)) { continue }
-        $to = Make-TargetName $item.vendor $item.from
+        $to = Get-CanonicalSkillTargetName ([string]$item.full) (Make-TargetName $item.vendor $item.from)
 
         $newMappings += @{ vendor = $item.vendor; from = $item.from; to = $to }
         $existing.Add($key) | Out-Null
@@ -9878,6 +10025,7 @@ function Resolve-AgentMappingForAgent($cfg, $mapping, [hashtable]$context) {
     Need (Test-SafeRelativePath $to) ("非法 mapping.to：{0}" -f $to)
 
     $src = $null
+    $containmentRoot = $null
     if ($vendor -eq "manual") {
         $manualSourceCache = [hashtable]$context["manual_source"]
         if ($manualSourceCache.ContainsKey($from)) {
@@ -9897,6 +10045,14 @@ function Resolve-AgentMappingForAgent($cfg, $mapping, [hashtable]$context) {
                 to = $to
             }
         }
+        $import = @($cfg.imports | Where-Object { [string]$_.name -eq $from -and [string]$_.mode -eq 'manual' } | Select-Object -First 1)
+        $importRoot = if ($import.Count -eq 1) { Join-Path $ImportDir ([string]$import[0].name) } else { '' }
+        $containmentRoot = if (-not [string]::IsNullOrWhiteSpace($importRoot) -and (Is-PathInsideOrEqual $src $importRoot)) {
+            $importRoot
+        }
+        else {
+            $src
+        }
     }
     else {
         $vendorBaseCache = [hashtable]$context["vendor_base"]
@@ -9909,22 +10065,31 @@ function Resolve-AgentMappingForAgent($cfg, $mapping, [hashtable]$context) {
         }
         $src = Join-Path $base $from
         Need (Is-PathInsideOrEqual $src $base) ("mapping.from 越界：{0}" -f $from)
+        $containmentRoot = $base
     }
 
-    $dst = Join-Path $AgentDir $to
-    Need (Is-PathInsideOrEqual $dst $AgentDir) ("mapping.to 越界：{0}" -f $to)
-
     $srcFull = [System.IO.Path]::GetFullPath($src)
-    $outRel = Normalize-SkillPath $to
+    $canonicalName = Get-CanonicalSkillTargetName $srcFull $to
+    $versionInfo = Get-CfgSchemaVersionInfo $cfg
+    Need ($versionInfo.errors.Count -eq 0) (($versionInfo.errors | Select-Object -First 1) -join '')
+    if ([int]$versionInfo.effective_version -ge 2) {
+        Need ([string]::Equals($to, $canonicalName, [StringComparison]::Ordinal)) `
+            ("schema v2 要求 mapping.to 与 SKILL.md name 一致：{0} -> {1}" -f $to, $canonicalName)
+    }
+    $dst = Join-Path $AgentDir $canonicalName
+    Need (Is-PathInsideOrEqual $dst $AgentDir) ("mapping.to 越界：{0}" -f $canonicalName)
+
     return [pscustomobject]@{
         sync = $true
         source_valid = $true
         vendor = $vendor
         from = $from
-        to = $to
+        to = $canonicalName
+        configured_to = $to
         src = [string]$src
         src_full = $srcFull
         src_key = $srcFull.ToLowerInvariant()
+        containment_root = [IO.Path]::GetFullPath($containmentRoot)
         dst = $dst
     }
 }
@@ -10049,6 +10214,7 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
                         }) | Out-Null
                     continue
                 }
+                Assert-SkillPackageSafe -Path ([string]$resolved.src_full) -ContainmentRoot ([string]$resolved.containment_root) -Label ("mapping:{0}/{1}" -f [string]$resolved.vendor, [string]$resolved.from) | Out-Null
                 RoboMirror ([string]$resolved.src_full) ([string]$resolved.dst)
                 $expanded = Expand-RelativeSkillPlaceholders ([string]$resolved.dst)
                 if ($expanded -gt 0) { Log ("已展开相对路径 SKILL 占位文件：{0} 项" -f $expanded) }
@@ -10074,7 +10240,9 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
         # overrides 覆盖层（可选）：同名目录将覆盖 agent 中对应技能
         foreach ($d in (Get-OverridesDirs)) {
             try {
-                $dst = Join-Path $AgentDir $d.Name
+                Assert-SkillPackageSafe -Path $d.FullName -ContainmentRoot $OverridesDir -Label ("override:{0}" -f $d.Name) | Out-Null
+                $targetName = Get-CanonicalSkillTargetName $d.FullName $d.Name
+                $dst = Join-Path $AgentDir $targetName
                 RoboMirror $d.FullName $dst
                 $expanded = Expand-RelativeSkillPlaceholders $dst
                 if ($expanded -gt 0) { Log ("已展开相对路径 SKILL 占位文件：{0} 项" -f $expanded) }
@@ -11540,7 +11708,7 @@ function Parse-McpInstallArgs([string[]]$tokens) {
         $result.transport = $result.transport.Trim().ToLowerInvariant()
     }
     if ([string]::IsNullOrWhiteSpace($result.transport)) { $result.transport = "stdio" }
-    Need (($result.transport -eq "stdio") -or ($result.transport -eq "sse") -or ($result.transport -eq "http")) "transport 仅支持 stdio/sse/http"
+    Need (($result.transport -eq "stdio") -or ($result.transport -eq "http")) "transport 仅支持 stdio/http；旧 SSE 已弃用"
 
     if ($result.transport -eq "stdio") {
         Assert-McpKeyValueMapSafe $result.env "--env"
@@ -13389,10 +13557,10 @@ function 安装MCP([string[]]$tokens = @()) {
     }
     else {
         $name = Normalize-NameWithNotice (Read-HostSafe "MCP 服务名（如 context7）") "MCP 服务名"
-        $transport = Read-HostSafe "transport（stdio/sse/http，默认 stdio）"
+        $transport = Read-HostSafe "transport（stdio/http，默认 stdio）"
         if ([string]::IsNullOrWhiteSpace($transport)) { $transport = "stdio" }
         $transport = $transport.Trim().ToLowerInvariant()
-        if ($transport -ne "stdio" -and $transport -ne "sse" -and $transport -ne "http") {
+        if ($transport -ne "stdio" -and $transport -ne "http") {
             Write-Host "无效 transport，已使用默认值 stdio"
             $transport = "stdio"
         }

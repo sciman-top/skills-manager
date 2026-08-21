@@ -4,7 +4,7 @@ This directory describes an optional, read-only development cache under `D:\CODE
 
 `reference-shelf.manifest.json` is consulted only when refresh or governance verification is invoked explicitly. A missing external checkout therefore means "reference unavailable for this research task", not "product unavailable".
 
-- `core-mainline`: `codex`, `openai-plugins`, `openai-skills`, `anthropics-skills`, `gemini-cli`, `agentskills`, `modelcontextprotocol`, `registry`
+- `core-mainline`: `codex`, `openai-plugins`, `anthropics-skills`, `gemini-cli`, `agentskills`, `modelcontextprotocol`, `registry`
 - `secondary`: `servers`, `awesome-copilot`, `vercel-agent-skills`, `wshobson-agents`；工作流设计比较按当前 consumer 额外保留 `openspec` 与 `bmad-method`
 - `conditional`: `hangfire`, `mcp-csharp-sdk`, `polly`, `quartznet`（仅为 `watch-runtime` consumer 显式刷新）
 

@@ -66,6 +66,7 @@ foreach ($patch in @($provenance.patches)) {
     }
 }
 foreach ($directory in @(Get-ChildItem -LiteralPath (Join-Path $root 'overrides\patches') -Directory)) {
+    if (@(Get-ChildItem -LiteralPath $directory.FullName -Recurse -File -Force).Count -eq 0) { continue }
     if (-not $patchNames.Contains($directory.Name)) { Add-Finding "patch directory lacks provenance: $($directory.Name)" }
 }
 foreach ($name in $patchNames) {

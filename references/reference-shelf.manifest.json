@@ -88,16 +88,6 @@
       "policy": "floating"
     },
     {
-      "name": "openai-skills",
-      "tier": "core-mainline",
-      "status": "active",
-      "source_disposition": "current-official",
-      "upstream_url": "https://github.com/openai/skills.git",
-      "relative_path": "core/openai-skills",
-      "branch": "main",
-      "policy": "floating"
-    },
-    {
       "name": "hangfire",
       "tier": "conditional",
       "status": "active",

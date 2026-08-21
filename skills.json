@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "sync_mode": "link",
   "skill_projection": {
     "enabled": true,
@@ -10,15 +10,15 @@
     "managed_link_includes": [
       "capability-router",
       "codebase-design",
-      "agent-skills-2-skills-code-review-and-quality",
+      "code-review-and-quality",
       "custom-powerpoint-accessibility",
       "custom-powershell-windows-automation",
       "research",
-      "superpowers-skills-systematic-debugging",
-      "superpowers-skills-verification-before-completion"
+      "systematic-debugging",
+      "verification-before-completion"
     ],
     "managed_link_excludes": [
-      "anthropics-skills-skills-skill-creator"
+      "skill-creator"
     ],
     "external_skill_inventory": {
       "enabled": true
@@ -163,137 +163,137 @@
   ],
   "mappings": [
     {
-      "to": "anthropics-skills-docx",
+      "to": "docx",
       "from": "skills\\docx",
       "vendor": "anthropics-skills"
     },
     {
-      "to": "anthropics-skills-pptx",
+      "to": "pptx",
       "from": "skills\\pptx",
       "vendor": "anthropics-skills"
     },
     {
-      "to": "anthropics-skills-xlsx",
+      "to": "xlsx",
       "from": "skills\\xlsx",
       "vendor": "anthropics-skills"
     },
     {
       "from": "skills\\systematic-debugging",
-      "to": "superpowers-skills-systematic-debugging",
+      "to": "systematic-debugging",
       "vendor": "superpowers"
     },
     {
       "from": "skills\\canvas-design",
-      "to": "anthropics-skills-skills-canvas-design",
+      "to": "canvas-design",
       "vendor": "anthropics-skills"
     },
     {
       "from": "skills\\web-artifacts-builder",
-      "to": "anthropics-skills-skills-web-artifacts-builder",
+      "to": "web-artifacts-builder",
       "vendor": "anthropics-skills"
     },
     {
       "from": "skills\\verification-before-completion",
-      "to": "superpowers-skills-verification-before-completion",
+      "to": "verification-before-completion",
       "vendor": "superpowers"
     },
     {
       "from": "skills\\test-driven-development",
-      "to": "superpowers-skills-test-driven-development",
+      "to": "test-driven-development",
       "vendor": "superpowers"
     },
     {
       "from": "skills\\skill-creator",
-      "to": "anthropics-skills-skills-skill-creator",
+      "to": "skill-creator",
       "vendor": "anthropics-skills"
     },
     {
       "from": "skills\\baoyu-compress-image",
-      "to": "baoyu-skills-skills-baoyu-compress-image",
+      "to": "baoyu-compress-image",
       "vendor": "baoyu-skills"
     },
     {
       "from": "skills\\baoyu-cover-image",
-      "to": "baoyu-skills-skills-baoyu-cover-image",
+      "to": "baoyu-cover-image",
       "vendor": "baoyu-skills"
     },
     {
       "from": "skills\\baoyu-format-markdown",
-      "to": "baoyu-skills-skills-baoyu-format-markdown",
+      "to": "baoyu-format-markdown",
       "vendor": "baoyu-skills"
     },
     {
       "from": "skills\\baoyu-post-to-wechat",
-      "to": "baoyu-skills-skills-baoyu-post-to-wechat",
+      "to": "baoyu-post-to-wechat",
       "vendor": "baoyu-skills"
     },
     {
       "from": "skills\\frontend-design",
-      "to": "anthropics-skills-skills-frontend-design",
+      "to": "frontend-design",
       "vendor": "anthropics-skills"
     },
     {
       "from": "skills\\webapp-testing",
-      "to": "anthropics-skills-skills-webapp-testing",
+      "to": "webapp-testing",
       "vendor": "anthropics-skills"
     },
     {
       "from": "skills\\pdf",
-      "to": "anthropics-skills-skills-pdf",
+      "to": "pdf",
       "vendor": "anthropics-skills"
     },
     {
       "from": "skills\\api-and-interface-design",
-      "to": "agent-skills-2-skills-api-and-interface-design",
+      "to": "api-and-interface-design",
       "vendor": "agent-skills-2"
     },
     {
       "from": "skills\\code-review-and-quality",
-      "to": "agent-skills-2-skills-code-review-and-quality",
+      "to": "code-review-and-quality",
       "vendor": "agent-skills-2"
     },
     {
       "from": "skills\\code-simplification",
-      "to": "agent-skills-2-skills-code-simplification",
+      "to": "code-simplification",
       "vendor": "agent-skills-2"
     },
     {
       "from": "skills\\context-engineering",
-      "to": "agent-skills-2-skills-context-engineering",
+      "to": "context-engineering",
       "vendor": "agent-skills-2"
     },
     {
       "from": "skills\\deprecation-and-migration",
-      "to": "agent-skills-2-skills-deprecation-and-migration",
+      "to": "deprecation-and-migration",
       "vendor": "agent-skills-2"
     },
     {
       "from": "skills\\documentation-and-adrs",
-      "to": "agent-skills-2-skills-documentation-and-adrs",
+      "to": "documentation-and-adrs",
       "vendor": "agent-skills-2"
     },
     {
       "from": "skills\\security-and-hardening",
-      "to": "agent-skills-2-skills-security-and-hardening",
+      "to": "security-and-hardening",
       "vendor": "agent-skills-2"
     },
     {
-      "to": "baoyu-skills-skills-baoyu-slide-deck",
+      "to": "baoyu-slide-deck",
       "vendor": "baoyu-skills",
       "from": "skills\\baoyu-slide-deck"
     },
     {
-      "to": "baoyu-skills-skills-baoyu-article-illustrator",
+      "to": "baoyu-article-illustrator",
       "vendor": "baoyu-skills",
       "from": "skills\\baoyu-article-illustrator"
     },
     {
-      "to": "agent-skills-2-skills-frontend-ui-engineering",
+      "to": "frontend-ui-engineering",
       "vendor": "agent-skills-2",
       "from": "skills\\frontend-ui-engineering"
     },
     {
-      "to": "agent-skills-2-skills-performance-optimization",
+      "to": "performance-optimization",
       "vendor": "agent-skills-2",
       "from": "skills\\performance-optimization"
     },
@@ -394,48 +394,48 @@
     },
     {
       "from": "skills\\idea-refine",
-      "to": "agent-skills-2-skills-idea-refine",
+      "to": "idea-refine",
       "vendor": "agent-skills-2"
     },
     {
       "from": "skills\\shipping-and-launch",
-      "to": "agent-skills-2-skills-shipping-and-launch",
+      "to": "shipping-and-launch",
       "vendor": "agent-skills-2"
     },
     {
       "from": "skills\\mcp-builder",
-      "to": "anthropics-skills-skills-mcp-builder",
+      "to": "mcp-builder",
       "vendor": "anthropics-skills"
     },
     {
       "from": "skills\\baoyu-infographic",
-      "to": "baoyu-skills-skills-baoyu-infographic",
+      "to": "baoyu-infographic",
       "vendor": "baoyu-skills"
     },
     {
       "from": "skills\\baoyu-url-to-markdown",
-      "to": "baoyu-skills-skills-baoyu-url-to-markdown",
+      "to": "baoyu-url-to-markdown",
       "vendor": "baoyu-skills"
     },
     {
-      "to": "marketingskills-skills-copy-editing",
+      "to": "copy-editing",
       "vendor": "marketingskills",
       "from": "skills\\copy-editing"
     },
     {
-      "to": "marketingskills-skills-content-strategy",
+      "to": "content-strategy",
       "vendor": "marketingskills",
       "from": "skills\\content-strategy"
     },
     {
       "from": "skills\\copywriting",
       "vendor": "marketingskills",
-      "to": "marketingskills-skills-copywriting"
+      "to": "copywriting"
     },
     {
       "from": "skills\\react-best-practices",
       "vendor": "agent-skills",
-      "to": "agent-skills-skills-react-best-practices"
+      "to": "vercel-react-best-practices"
     },
     {
       "to": "supabase-postgres-best-practices",
@@ -460,7 +460,7 @@
     {
       "vendor": "marketingskills",
       "from": "skills\\social",
-      "to": "marketingskills-skills-social"
+      "to": "social"
     },
     {
       "vendor": "manual",

@@ -48,7 +48,12 @@ function Read-SkillMetadata {
     elseif ($description.Length -gt 1024) { $findings.Add([pscustomobject]@{ code='description_too_long'; severity='error'; field='description'; message='Skill description exceeds 1024 characters.' }) | Out-Null }
     if ($fields.Contains('compatibility') -and ([string]$fields['compatibility']).Length -gt 500) { $findings.Add([pscustomobject]@{ code='compatibility_too_long'; severity='error'; field='compatibility'; message='Skill compatibility exceeds 500 characters.' }) | Out-Null }
     $allowed = @('name','description','license','allowed-tools','metadata','compatibility')
-    foreach ($key in $fields.Keys) { if ($key -notin $allowed) { $findings.Add([pscustomobject]@{ code='field_unknown'; severity='warning'; field=$key; message=('Unknown top-level skill metadata field: {0}' -f $key) }) | Out-Null } }
+    foreach ($key in $fields.Keys) {
+        if ($key -notin $allowed) {
+            $severity = if ($Observation) { 'warning' } else { 'error' }
+            $findings.Add([pscustomobject]@{ code='field_unknown'; severity=$severity; field=$key; message=('Unknown top-level skill metadata field: {0}' -f $key) }) | Out-Null
+        }
+    }
     if ($Observation) { foreach ($finding in $findings) { if ([string]$finding.severity -eq 'error' -and [string]$finding.code -notin @('name_required','description_required')) { $finding.severity = 'warning' } } }
     $result.valid = @($findings | Where-Object severity -eq 'error').Count -eq 0
     $triggerLine = @($text -split '\r?\n' | Where-Object { $_ -match '(?i)trigger|use when|when to use|使用场景' } | Select-Object -First 1)

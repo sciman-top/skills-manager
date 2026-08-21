@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://skills-manager.local/schema/skills.v1.json",
+  "$id": "https://skills-manager.local/schema/skills.v2.json",
   "title": "skills-manager configuration",
   "description": "Versioned structural contract for skills.json. Runtime semantic invariants remain authoritative in src/Config.ps1.",
   "type": "object",
   "required": ["vendors", "targets"],
   "additionalProperties": true,
   "properties": {
-    "schema_version": { "type": "integer", "const": 1 },
+    "schema_version": { "type": "integer", "const": 2 },
     "sync_mode": { "type": "string", "enum": ["link", "sync"], "default": "link" },
     "update_force": { "type": "boolean", "default": true },
     "vendors": { "type": "array", "items": { "$ref": "#/$defs/vendor" } },
@@ -53,7 +53,7 @@
       "properties": {
         "vendor": { "$ref": "#/$defs/nonEmptyString" },
         "from": { "$ref": "#/$defs/nonEmptyString" },
-        "to": { "$ref": "#/$defs/nonEmptyString" }
+        "to": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" }
       }
     },
     "import": {
@@ -76,7 +76,7 @@
       "properties": {
         "name": { "$ref": "#/$defs/nonEmptyString" },
         "enabled": { "type": "boolean" },
-        "transport": { "type": "string", "enum": ["stdio", "sse", "http"], "default": "stdio" },
+        "transport": { "type": "string", "enum": ["stdio", "http"], "default": "stdio" },
         "command": { "type": "string" },
         "args": { "$ref": "#/$defs/stringArray" },
         "url": { "type": "string" },
@@ -87,7 +87,7 @@
         "startup_timeout_sec": { "type": "integer", "minimum": 1 }
       },
       "allOf": [{
-        "if": { "properties": { "transport": { "enum": ["sse", "http"] } }, "required": ["transport"] },
+        "if": { "properties": { "transport": { "const": "http" } }, "required": ["transport"] },
         "then": { "required": ["url"] },
         "else": { "required": ["command"] }
       }]
@@ -163,6 +163,8 @@
   },
   "x-compatibility-policy": {
     "missing_schema_version": "legacy-v1-observation",
+    "declared_schema_v1": "runtime-read-migration-only",
+    "legacy_sse": "schema-v1-read-only-deprecated",
     "unknown_properties": "preserved-for-backward-compatibility"
   },
   "x-secret-policy": {
