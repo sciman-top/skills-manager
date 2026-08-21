@@ -106,7 +106,7 @@ function Parse-McpInstallArgs([string[]]$tokens) {
         $result.transport = $result.transport.Trim().ToLowerInvariant()
     }
     if ([string]::IsNullOrWhiteSpace($result.transport)) { $result.transport = "stdio" }
-    Need (($result.transport -eq "stdio") -or ($result.transport -eq "sse") -or ($result.transport -eq "http")) "transport 仅支持 stdio/sse/http"
+    Need (($result.transport -eq "stdio") -or ($result.transport -eq "http")) "transport 仅支持 stdio/http；旧 SSE 已弃用"
 
     if ($result.transport -eq "stdio") {
         Assert-McpKeyValueMapSafe $result.env "--env"
@@ -1955,10 +1955,10 @@ function 安装MCP([string[]]$tokens = @()) {
     }
     else {
         $name = Normalize-NameWithNotice (Read-HostSafe "MCP 服务名（如 context7）") "MCP 服务名"
-        $transport = Read-HostSafe "transport（stdio/sse/http，默认 stdio）"
+        $transport = Read-HostSafe "transport（stdio/http，默认 stdio）"
         if ([string]::IsNullOrWhiteSpace($transport)) { $transport = "stdio" }
         $transport = $transport.Trim().ToLowerInvariant()
-        if ($transport -ne "stdio" -and $transport -ne "sse" -and $transport -ne "http") {
+        if ($transport -ne "stdio" -and $transport -ne "http") {
             Write-Host "无效 transport，已使用默认值 stdio"
             $transport = "stdio"
         }

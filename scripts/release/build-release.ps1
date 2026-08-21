@@ -11,6 +11,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+. (Join-Path $repoRoot 'src\Application\SkillSupply.ps1')
 $outputRoot = [IO.Path]::GetFullPath($OutputDirectory)
 $workRoot = Join-Path $outputRoot '.release-work'
 
@@ -243,6 +244,10 @@ function New-ReleasePackage([string]$Kind) {
         $agentSource = Join-Path $repoRoot 'agent'
         if (-not (Test-Path -LiteralPath $agentSource -PathType Container)) {
             throw 'Portable package requires a built agent directory. Run build.ps1 first.'
+        }
+        foreach ($skillDirectory in @(Get-ChildItem -LiteralPath $agentSource -Directory -Force)) {
+            if (-not (Test-Path -LiteralPath (Join-Path $skillDirectory.FullName 'SKILL.md') -PathType Leaf)) { continue }
+            Assert-SkillPackageSafe -Path $skillDirectory.FullName -ContainmentRoot $agentSource -Label ("portable:{0}" -f $skillDirectory.Name) | Out-Null
         }
         Copy-Item -LiteralPath $agentSource -Destination (Join-Path $packageRoot 'agent') -Recurse -Force
         $notices = Get-PortableThirdPartyNotices $packageRoot (Join-Path $packageRoot 'agent')

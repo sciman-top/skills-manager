@@ -308,6 +308,18 @@ function Get-DeclaredSkillNameFromDir([string]$skillDir) {
     return $null
 }
 
+function Get-CanonicalSkillTargetName([string]$skillDir, [string]$fallbackName) {
+    $declaredName = Get-DeclaredSkillNameFromDir $skillDir
+    if ([string]::IsNullOrWhiteSpace($declaredName)) {
+        $fallback = Normalize-Name $fallbackName
+        Need (-not [string]::IsNullOrWhiteSpace($fallback)) ("技能目标名称无效：{0}" -f $fallbackName)
+        return $fallback
+    }
+    Need ($declaredName.Length -le 64 -and $declaredName -match '^[a-z0-9]+(?:-[a-z0-9]+)*$') `
+        ("SKILL.md name 不符合 Agent Skills 规范：{0}" -f $declaredName)
+    return $declaredName
+}
+
 function Get-AddImportPlanFromParsedArgs($parsed) {
     Need ($null -ne $parsed) "parsed add args 不能为空"
 
@@ -469,7 +481,8 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
 
                 $import = @{ name = $name; repo = $repo; ref = $ref; skill = $skillPath; mode = "manual"; sparse = $curSparse }
                 Upsert-Import $cfg $import
-                Ensure-ManualImportMapping $cfg $name $name
+                $targetName = Get-CanonicalSkillTargetName $src $name
+                Ensure-ManualImportMapping $cfg $name $targetName
             }
         }
         else {
@@ -487,7 +500,7 @@ function Add-ImportFromArgs([string[]]$tokens, [switch]$NoBuild) {
                     Need (Test-IsSkillDir $src) "未找到技能入口文件（SKILL.md/AGENTS.md/GEMINI.md/CLAUDE.md）：$src"
 
                     $targetSuffix = if ($skillPath -eq ".") { $vendorName } else { $skillPath }
-                    $targetName = Make-TargetName $vendorName $targetSuffix
+                    $targetName = Get-CanonicalSkillTargetName $src (Make-TargetName $vendorName $targetSuffix)
                     Ensure-ImportVendorMapping $cfg $vendorName $skillPath $targetName
                 }
 
@@ -1450,7 +1463,7 @@ function 安装 {
     foreach ($item in $selected) {
         $key = "$($item.vendor)|$($item.from)"
         if ($existing.Contains($key)) { continue }
-        $to = Make-TargetName $item.vendor $item.from
+        $to = Get-CanonicalSkillTargetName ([string]$item.full) (Make-TargetName $item.vendor $item.from)
 
         $newMappings += @{ vendor = $item.vendor; from = $item.from; to = $to }
         $existing.Add($key) | Out-Null
@@ -1786,6 +1799,7 @@ function Resolve-AgentMappingForAgent($cfg, $mapping, [hashtable]$context) {
     Need (Test-SafeRelativePath $to) ("非法 mapping.to：{0}" -f $to)
 
     $src = $null
+    $containmentRoot = $null
     if ($vendor -eq "manual") {
         $manualSourceCache = [hashtable]$context["manual_source"]
         if ($manualSourceCache.ContainsKey($from)) {
@@ -1805,6 +1819,14 @@ function Resolve-AgentMappingForAgent($cfg, $mapping, [hashtable]$context) {
                 to = $to
             }
         }
+        $import = @($cfg.imports | Where-Object { [string]$_.name -eq $from -and [string]$_.mode -eq 'manual' } | Select-Object -First 1)
+        $importRoot = if ($import.Count -eq 1) { Join-Path $ImportDir ([string]$import[0].name) } else { '' }
+        $containmentRoot = if (-not [string]::IsNullOrWhiteSpace($importRoot) -and (Is-PathInsideOrEqual $src $importRoot)) {
+            $importRoot
+        }
+        else {
+            $src
+        }
     }
     else {
         $vendorBaseCache = [hashtable]$context["vendor_base"]
@@ -1817,22 +1839,31 @@ function Resolve-AgentMappingForAgent($cfg, $mapping, [hashtable]$context) {
         }
         $src = Join-Path $base $from
         Need (Is-PathInsideOrEqual $src $base) ("mapping.from 越界：{0}" -f $from)
+        $containmentRoot = $base
     }
 
-    $dst = Join-Path $AgentDir $to
-    Need (Is-PathInsideOrEqual $dst $AgentDir) ("mapping.to 越界：{0}" -f $to)
-
     $srcFull = [System.IO.Path]::GetFullPath($src)
-    $outRel = Normalize-SkillPath $to
+    $canonicalName = Get-CanonicalSkillTargetName $srcFull $to
+    $versionInfo = Get-CfgSchemaVersionInfo $cfg
+    Need ($versionInfo.errors.Count -eq 0) (($versionInfo.errors | Select-Object -First 1) -join '')
+    if ([int]$versionInfo.effective_version -ge 2) {
+        Need ([string]::Equals($to, $canonicalName, [StringComparison]::Ordinal)) `
+            ("schema v2 要求 mapping.to 与 SKILL.md name 一致：{0} -> {1}" -f $to, $canonicalName)
+    }
+    $dst = Join-Path $AgentDir $canonicalName
+    Need (Is-PathInsideOrEqual $dst $AgentDir) ("mapping.to 越界：{0}" -f $canonicalName)
+
     return [pscustomobject]@{
         sync = $true
         source_valid = $true
         vendor = $vendor
         from = $from
-        to = $to
+        to = $canonicalName
+        configured_to = $to
         src = [string]$src
         src_full = $srcFull
         src_key = $srcFull.ToLowerInvariant()
+        containment_root = [IO.Path]::GetFullPath($containmentRoot)
         dst = $dst
     }
 }
@@ -1957,6 +1988,7 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
                         }) | Out-Null
                     continue
                 }
+                Assert-SkillPackageSafe -Path ([string]$resolved.src_full) -ContainmentRoot ([string]$resolved.containment_root) -Label ("mapping:{0}/{1}" -f [string]$resolved.vendor, [string]$resolved.from) | Out-Null
                 RoboMirror ([string]$resolved.src_full) ([string]$resolved.dst)
                 $expanded = Expand-RelativeSkillPlaceholders ([string]$resolved.dst)
                 if ($expanded -gt 0) { Log ("已展开相对路径 SKILL 占位文件：{0} 项" -f $expanded) }
@@ -1982,7 +2014,9 @@ function 构建Agent($cfg = $null, [switch]$SkipPreflight, $Txn = $null) {
         # overrides 覆盖层（可选）：同名目录将覆盖 agent 中对应技能
         foreach ($d in (Get-OverridesDirs)) {
             try {
-                $dst = Join-Path $AgentDir $d.Name
+                Assert-SkillPackageSafe -Path $d.FullName -ContainmentRoot $OverridesDir -Label ("override:{0}" -f $d.Name) | Out-Null
+                $targetName = Get-CanonicalSkillTargetName $d.FullName $d.Name
+                $dst = Join-Path $AgentDir $targetName
                 RoboMirror $d.FullName $dst
                 $expanded = Expand-RelativeSkillPlaceholders $dst
                 if ($expanded -gt 0) { Log ("已展开相对路径 SKILL 占位文件：{0} 项" -f $expanded) }

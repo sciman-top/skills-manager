@@ -88,6 +88,18 @@ name: demo
         @($result.Report.errors | Where-Object code -eq "missing_skill_name").Count | Should -Be 1
     }
 
+    It 'fails when the package directory differs from the declared skill name' {
+        $fixture = New-IntegrityFixture 'directory-name-mismatch' ''
+        $skillFile = Join-Path (Join-Path $fixture.AgentRoot 'demo') 'SKILL.md'
+        (Get-Content -LiteralPath $skillFile -Raw).Replace('name: demo', 'name: canonical-demo') |
+            Set-Content -LiteralPath $skillFile -Encoding utf8
+
+        $result = Invoke-IntegrityFixture $fixture
+
+        $result.ExitCode | Should -Be 1
+        @($result.Report.errors | Where-Object code -eq 'skill_directory_name_mismatch').Count | Should -Be 1
+    }
+
     It "fails when an entrypoint resource escapes the agent root" {
         $fixture = New-IntegrityFixture "link-outside-agent-root" "Read [outside](../../outside.md)."
         "outside" | Set-Content -Path (Join-Path (Split-Path $fixture.AgentRoot -Parent) "outside.md") -Encoding UTF8
@@ -177,7 +189,7 @@ dependencies:
         $fixture = New-IntegrityFixture "valid" "Read [guide](references/guide.md)." @(
             @{ skill = "demo"; requires = @("required-skill") }
         )
-        $skillRoot = Add-IntegrityFixtureSkill $fixture "required" "required-skill"
+        $skillRoot = Add-IntegrityFixtureSkill $fixture "required-skill" "required-skill"
         $referenceRoot = Join-Path (Join-Path $fixture.AgentRoot "demo") "references"
         New-Item -ItemType Directory -Path $referenceRoot -Force | Out-Null
         "guide" | Set-Content -Path (Join-Path $referenceRoot "guide.md") -Encoding UTF8

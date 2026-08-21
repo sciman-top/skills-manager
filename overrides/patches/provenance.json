@@ -3,7 +3,7 @@
   "reviewed_at": "2026-08-16",
   "patches": [
     {
-      "name": "agent-skills-2-skills-code-review-and-quality",
+      "name": "code-review-and-quality",
       "upstream_repo": "https://github.com/addyosmani/agent-skills.git",
       "upstream_path": "skills/code-review-and-quality",
       "base_revision": "7829ffd90d973b6325f5f12f1b1226dcace74443",
@@ -30,7 +30,7 @@
       "local_delta_reason": "Preserve read-only discovery while adding a validated Windows npm-cache Node fallback for broken generated npx.cmd shims; installation remains a separate authorization boundary."
     },
     {
-      "name": "superpowers-skills-test-driven-development",
+      "name": "test-driven-development",
       "upstream_repo": "https://github.com/obra/superpowers.git",
       "upstream_path": "skills/test-driven-development",
       "base_revision": "44c9b2d6e889982ac18c27d05a19fefe335194e1",
@@ -39,7 +39,7 @@
       "local_delta_reason": "Narrow activation to explicit strict TDD or a task-level test-first contract, keep verification focused on the declared seam, and remove automatic full-suite, CI, coverage, and file-expansion pressure."
     },
     {
-      "name": "superpowers-skills-systematic-debugging",
+      "name": "systematic-debugging",
       "upstream_repo": "https://github.com/obra/superpowers.git",
       "upstream_path": "skills/systematic-debugging",
       "base_revision": "44c9b2d6e889982ac18c27d05a19fefe335194e1",
@@ -48,7 +48,7 @@
       "local_delta_reason": "Keep evidence-first root-cause analysis while bounding it to an observed failure, the cheapest discriminating evidence, and the repository's proportional verification ceiling."
     },
     {
-      "name": "superpowers-skills-verification-before-completion",
+      "name": "verification-before-completion",
       "upstream_repo": "https://github.com/obra/superpowers.git",
       "upstream_path": "skills/verification-before-completion",
       "base_revision": "44c9b2d6e889982ac18c27d05a19fefe335194e1",

@@ -137,6 +137,10 @@ else {
         if (-not [bool]$metadata.valid) {
             continue
         }
+        if (-not [string]::Equals($directory.Name, $name, [StringComparison]::Ordinal)) {
+            Add-IntegrityFinding $errors 'skill_directory_name_mismatch' $name `
+                ("skill directory must equal declared name: {0}" -f $directory.Name) $skillFile
+        }
 
         $skills += [pscustomobject]@{
             name = $name

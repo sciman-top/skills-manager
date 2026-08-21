@@ -57,7 +57,7 @@ Describe 'Release packaging' {
         $notices.summary.unknown_license | Should -Be 0
         $localSkill = $notices.skills | Where-Object skill -eq 'capability-router'
         @($localSkill.license_files) | Should -Contain 'LICENSE'
-        $vendorSkill = $notices.skills | Where-Object skill -eq 'agent-skills-2-skills-code-review-and-quality'
+        $vendorSkill = $notices.skills | Where-Object skill -eq 'code-review-and-quality'
         @($vendorSkill.license_files) | Should -Contain 'THIRD-PARTY-LICENSES/vendor-agent-skills-2/LICENSE'
         $sharedLicense = Join-Path $packageRoot 'THIRD-PARTY-LICENSES\vendor-agent-skills-2\LICENSE'
         Test-Path -LiteralPath $sharedLicense | Should -BeTrue
@@ -68,11 +68,13 @@ Describe 'Release packaging' {
     It 'fails closed before creating a portable archive with an unlicensed pinned source' {
         $fixtureRoot = Join-Path $TestDrive 'unlicensed-release-fixture'
         $fixtureScriptRoot = Join-Path $fixtureRoot 'scripts\release'
+        $fixtureApplicationRoot = Join-Path $fixtureRoot 'src\Application'
         $fixtureDocs = Join-Path $fixtureRoot 'docs'
         $fixtureAgent = Join-Path $fixtureRoot 'agent\unknown-skill'
         $fixtureVendor = Join-Path $fixtureRoot 'vendor\unlicensed'
-        New-Item -ItemType Directory -Path $fixtureScriptRoot, $fixtureDocs, $fixtureAgent, $fixtureVendor -Force | Out-Null
+        New-Item -ItemType Directory -Path $fixtureScriptRoot, $fixtureApplicationRoot, $fixtureDocs, $fixtureAgent, $fixtureVendor -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $repoRoot 'scripts\release\build-release.ps1') -Destination (Join-Path $fixtureScriptRoot 'build-release.ps1')
+        Copy-Item -LiteralPath (Join-Path $repoRoot 'src\Application\SkillSupply.ps1') -Destination (Join-Path $fixtureApplicationRoot 'SkillSupply.ps1')
 
         & git -C $fixtureVendor init --quiet
         & git -C $fixtureVendor config user.name 'Release Fixture'

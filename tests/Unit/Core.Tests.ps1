@@ -997,6 +997,11 @@ Describe "Core Functions" {
             $parsed.bearer_token_env_var | Should -Be "GITHUB_PERSONAL_ACCESS_TOKEN"
         }
 
+        It 'rejects new legacy SSE server definitions' {
+            { Parse-McpInstallArgs @('legacy', '--transport', 'sse', '--url', 'https://example.invalid/sse') } |
+                Should -Throw '*旧 SSE 已弃用*'
+        }
+
         It "enforces ZIP entry budgets before extraction" {
             $source = Join-Path $TestDrive "zip-budget-source"
             New-Item -ItemType Directory -Path $source -Force | Out-Null
@@ -3184,7 +3189,7 @@ $governanceScript = Join-Path $repoRoot "scripts\verify-reference-governance.ps1
         Test-Path -LiteralPath (Join-Path $TestDrive "escape") | Should -Be $false
     }
 
-    It "Tracks official OpenAI plugin and skill sources without expanding the default set" {
+    It "Tracks the current official OpenAI plugin source and retires the deprecated skills repository" {
         $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
         $plugins = @($manifest.repos | Where-Object name -eq "openai-plugins")
         $skills = @($manifest.repos | Where-Object name -eq "openai-skills")
@@ -3196,12 +3201,7 @@ $governanceScript = Join-Path $repoRoot "scripts\verify-reference-governance.ps1
         $plugins[0].upstream_url | Should -Be "https://github.com/openai/plugins.git"
         $plugins[0].relative_path | Should -Be "core/openai-plugins"
 
-        $skills.Count | Should -Be 1
-        $skills[0].tier | Should -Be "core-mainline"
-        $skills[0].status | Should -Be "active"
-        $skills[0].source_disposition | Should -Be "current-official"
-        $skills[0].upstream_url | Should -Be "https://github.com/openai/skills.git"
-        $skills[0].relative_path | Should -Be "core/openai-skills"
+        $skills.Count | Should -Be 0
         @($manifest.default_refresh_set) -contains "openai-plugins" | Should -Be $true
         @($manifest.default_refresh_set) -contains "openai-skills" | Should -Be $false
     }
