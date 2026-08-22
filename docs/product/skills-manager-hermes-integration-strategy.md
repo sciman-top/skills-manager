@@ -113,7 +113,7 @@ Hermes profile 虽然隔离其 config、session、memory、skills 与 Gateway st
 
 档位 A/B 的 POC 环境必须满足：
 
-1. 一份小型测试仓，例如 `D:\CODE\hermes-poc`，且只建立一个测试 worktree。
+1. 一份小型测试仓，例如 `D:\Archive\hermes-poc`，且只建立一个测试 worktree。
 2. 记录当前用户的 Codex config、MCP/plugin inventory 与受管技能 root 基线；档位 A 不改变它们，档位 B 在当前授权后才允许其发生预期变更。
 3. 没有生产 bot token、云凭据、服务器私钥或生产 MCP。
 4. 先不启用 Gateway、cron、Kanban 自动分派或自动 push；本地 POC merge 仅可使用 2.2 的显式 envelope，不能由“门禁通过”隐式触发。
@@ -149,7 +149,7 @@ hermes desktop
 ```yaml
 terminal:
   backend: local
-  cwd: 'D:\CODE\hermes-poc'
+  cwd: 'D:\Archive\hermes-poc'
   home_mode: auto
 
 skills:
