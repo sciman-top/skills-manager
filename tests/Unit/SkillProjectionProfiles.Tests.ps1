@@ -114,4 +114,46 @@ Describe 'Skill projection profiles' {
 
         (Get-SkillProjectionPlanFingerprint $plan $null $core) | Should -Not -Be (Get-SkillProjectionPlanFingerprint $plan $null $full)
     }
+
+    It 'validates a full-compatible manifest against its recorded profile instead of the default core profile' {
+        $source = Join-Path $TestDrive 'manifest-source'
+        $target = Join-Path $TestDrive 'manifest-target'
+        $receipt = Join-Path $repoRoot ('reports\skill-projection\manifest-{0}.json' -f ([guid]::NewGuid().ToString('N')))
+        foreach ($name in @('alpha', 'beta')) { New-ProfileFixtureSkill $source $name }
+        $projection = New-ProfileFixtureProjection $source $target $receipt
+        $projection | Add-Member -NotePropertyName sources -NotePropertyValue @([pscustomobject]@{ id = 'fixture'; path = $source; priority = 1; platforms = @('codex') })
+        $selection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName codex -RequestedProfile 'full-compatible'
+        $effective = New-SkillProjectionHostConfig -ProjectionConfig $projection -Selection $selection
+        $plan = New-SkillProjectionPlan $effective $repoRoot -OmitExternalInventory
+        $native = New-NativeSkillProjectionRuntimePlan -ManagedRoot $source -Config ([pscustomobject]@{ skill_projection = $effective }) -IncludedNames @($selection.included_names) -ExcludedNames @($selection.excluded_names)
+        $manifest = [pscustomobject]@{
+            schema_version = 2
+            projection_fingerprint = Get-SkillProjectionPlanFingerprint $plan $native $selection
+            enabled = [bool]$plan.enabled
+            source_count = 1
+            skill_entry_count = @($plan.skills).Count
+            unique_name_count = @($plan.unique_names).Count
+            active_name_count = @($plan.active_names).Count
+            duplicate_name_groups = [int]$plan.duplicate_name_groups
+            disabled_path_count = @($plan.disabled).Count
+            conflict_count = @($plan.conflicts).Count
+            skills = @($plan.skills)
+            canonical = @($plan.canonical)
+            active = @($plan.active)
+            disabled = @($plan.disabled)
+            conflicts = @($plan.conflicts)
+            projection_selection = [pscustomobject]@{
+                host = $selection.host
+                profile = $selection.profile
+                include_all = $selection.include_all
+                included_names = @($selection.included_names)
+                excluded_names = @($selection.excluded_names)
+            }
+        }
+
+        $validation = Test-SkillProjectionManifestCurrent $manifest $projection $repoRoot
+
+        $validation.pass | Should -BeTrue
+        $validation.freshness | Should -Be 'fresh'
+    }
 }

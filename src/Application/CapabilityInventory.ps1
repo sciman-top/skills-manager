@@ -1,6 +1,7 @@
 $capabilityInventoryRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
 if ($null -eq (Get-Command Get-CodexPluginSkillInventory -ErrorAction SilentlyContinue)) { . (Join-Path $capabilityInventoryRepoRoot 'src\Infrastructure\CodexCli.ps1') }
 if ($null -eq (Get-Command Read-SkillMetadata -ErrorAction SilentlyContinue)) { . (Join-Path $capabilityInventoryRepoRoot 'src\Domain\SkillMetadata.ps1') }
+if ($null -eq (Get-Command Get-SkillProjectionEffectiveSelection -ErrorAction SilentlyContinue)) { . (Join-Path $capabilityInventoryRepoRoot 'src\Application\SkillProjection.ps1') }
 if ($null -eq (Get-Command Test-SkillProjectionManifestCurrent -ErrorAction SilentlyContinue)) { . (Join-Path $capabilityInventoryRepoRoot 'src\Application\SkillProjectionPlanning.ps1') }
 
 function Get-CapabilitySurfaceFileHash([string]$Path) {
@@ -66,6 +67,7 @@ function New-SkillSurfaceView {
     $surfaces.Add((New-CapabilitySurfaceRecord 'repo_supply' 'repository_generated_supply' $repoSupplyRoot 'fresh' $(if ($repoItems.Count) { 'complete' } else { 'not_materialized' }) $repoItems)) | Out-Null
 
     $projectionPath = Resolve-CapabilitySurfacePath ([string]$projection.manifest_path) $root
+    $manifest = $null
     $projectionItems = @(); $projectionFreshness = 'unknown'; $projectionCoverage = 'not_observed'
     if ($projectionPath -and (Test-Path -LiteralPath $projectionPath -PathType Leaf)) {
         try {
@@ -94,7 +96,17 @@ function New-SkillSurfaceView {
 
     $userRoot = Resolve-CapabilitySurfacePath ([string]$projection.user_skill_root) $root
     $managedSource = Resolve-CapabilitySurfacePath ([string]$projection.managed_source_path) $root
-    $managedSelection = Get-SkillProjectionEffectiveSelection $projection 'codex'
+    $requestedProfile = ''
+    if ($null -ne $manifest -and (Test-OperationObjectProperty $manifest 'projection_selection')) {
+        $requestedProfile = [string](Get-OperationObjectProperty (Get-OperationObjectProperty $manifest 'projection_selection') 'profile')
+    }
+    try {
+        $managedSelection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName codex -RequestedProfile $requestedProfile
+    }
+    catch {
+        $managedSelection = Get-SkillProjectionEffectiveSelection $projection 'codex'
+        $findings.Add([pscustomobject]@{ code = 'user_projection_selection_invalid'; severity = 'error'; surface = 'user_skill_root'; path = $projectionPath; message = $_.Exception.Message }) | Out-Null
+    }
     $managedIncludes = @((Get-OperationObjectProperty $managedSelection 'included_names') | ForEach-Object { [string]$_ })
     $managedIncludeAll = [bool](Get-OperationObjectProperty $managedSelection 'include_all')
     $userItems = [Collections.Generic.List[object]]::new()
