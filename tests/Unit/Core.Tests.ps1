@@ -3284,9 +3284,20 @@ $governanceScript = Join-Path $repoRoot "scripts\verify-reference-governance.ps1
         @($manifest.default_refresh_set) -contains "openai-skills" | Should -Be $false
     }
 
-    It 'does not retain conditional references without a current consumer' {
+    It 'retains conditional references only for a named current consumer' {
+        . $governanceScript
         $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-        @($manifest.repos | Where-Object tier -eq 'conditional').Count | Should -Be 0
+        $conditional = @($manifest.repos | Where-Object tier -eq 'conditional')
+        foreach ($entry in $conditional) {
+            (Test-ConditionalReferenceContract $entry) | Should -BeTrue
+        }
+
+        $hermes = @($conditional | Where-Object name -eq 'hermes-agent')
+        $hermes.Count | Should -Be 1
+        $hermes[0].consumer | Should -Match 'HSM POC'
+        $hermes[0].license | Should -Be 'MIT'
+        $hermes[0].reviewed_revision | Should -Match '^[0-9a-f]{40}$'
+        @($manifest.default_refresh_set) | Should -Not -Contain 'hermes-agent'
     }
 
     It "Selects a governed conditional reference only when explicitly requested" {

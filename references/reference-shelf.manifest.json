@@ -143,6 +143,21 @@
       "consumer": "host-native-first thin-loop workflow design",
       "adoption_decision": "reference-only; borrow right-sized process depth while rejecting fixed role and agent stacks",
       "retirement_trigger": "remove when thin-loop workflow design no longer has an active comparison need"
+    },
+    {
+      "name": "hermes-agent",
+      "tier": "conditional",
+      "status": "active",
+      "source_disposition": "poc-maintenance-reference",
+      "upstream_url": "https://github.com/NousResearch/hermes-agent.git",
+      "relative_path": "conditional/hermes-agent",
+      "branch": "main",
+      "policy": "floating",
+      "reviewed_revision": "261a4efb90d7dbe4e71786861858f721b4ab730c",
+      "license": "MIT",
+      "consumer": "HSM POC Hermes app-server Windows launcher and configuration-migration maintenance",
+      "adoption_decision": "reference-only; use for source-level POC diagnosis and regression comparison, never auto-import runtime code or activate Hermes",
+      "retirement_trigger": "remove when the HSM POC no longer has a current Hermes source-maintenance need or an accepted upstream release removes the comparison need"
     }
   ]
 }

@@ -35,7 +35,7 @@ skills-manager（供给与治理侧车）
 | Codex 的定位 | 唯一代码执行 harness | Codex 在获分配的 worktree 内实现、测试、review；可在互斥 write set 下使用子代理。 |
 | skills-manager 的定位 | 技能与规则的受控供应链 | 不变成 task queue、agent runtime、知识库或自学习 daemon。 |
 | “自主学习/进化” | 受控技能演进，而非无界自修改 | 只能自动生成 proposal；review、admission、projection、host acceptance 分离。 |
-| Hermes 参考仓 | `conditional` 候选 | 只有 POC 产生真实消费者与维护收益后才登记/刷新。 |
+| Hermes 参考仓 | `conditional`、reference-only | HSM POC 已产生 Windows app-server 源码维护需求；登记 revision/license/consumer/retirement trigger，并且只在显式 refresh 时读取。 |
 
 OpenAI 官方将 Codex app-server 定位为深度客户端集成，并建议自动化/CI 使用 Codex SDK；因此 Hermes app-server runtime 只能先承担本地 POC 与交互式协作，不能直接成为无人监管的 CI/发布关键路径。见 [Codex App Server](https://developers.openai.com/codex/app-server)。
 
