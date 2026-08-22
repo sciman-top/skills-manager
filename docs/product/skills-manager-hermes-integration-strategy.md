@@ -44,7 +44,7 @@ OpenAI 官方将 Codex app-server 定位为深度客户端集成，并建议自�
 - `D:\CODE\hermes-poc` 的 HSM-POC-050 已在专用分支 `codex/hsm-poc-050` 提交为 `1a6bc1c`：Hermes 原生 `openai-codex` writer 仅在获分配 worktree 写入，另一个隔离会话完成 review，文档 gate 通过。
 - 这是 `repo_verified_on_branch`，不是主分支 merge、remote push、release、Hermes `codex_app_server` parity、fresh host loading 或 `live_accepted`。
 - HSM-DEC-060 判定现有 native projection 已覆盖受管 consumer 的 source/package hash、owner、target、receipt 与 rollback，因此不向 skills-manager 新增 Hermes adapter 或 consumer framework。
-- Codex Harness 对 POC project skill 的一次读取尝试解析到不存在的用户技能根且未形成 verdict。它是待独立复测的宿主加载问题，不足以把 project-owned candidate 自动提升到共享 root，也不足以推翻 `no_code_needed`。
+- Codex Harness 对 POC project skill 的一次读取尝试未形成 verdict：模型使用了与其 catalog 冲突的用户根。随后 fresh `codex debug prompt-input` 显示正确的 project-skill `r6` locator，因此这不是已证实的宿主加载问题；它同样不证明该 skill 已执行或 `host_loaded`。无论如何，都不足以把 project-owned candidate 自动提升到共享 root 或推翻 `no_code_needed`。
 
 ## 2. 所有权与禁止重叠
 

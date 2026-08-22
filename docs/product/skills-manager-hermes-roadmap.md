@@ -16,7 +16,7 @@
 | R6 | `proposal_validated` | 受控候选可在 project root 验证；admission/projection/host acceptance 仍需独立 owner 与后续证据 |
 | R7 | `not_eligible` | 没有多任务无碰撞、CI/人工收口或 release acceptance 的证据 |
 
-HSM-POC-050 中一次 Codex Harness read-only review 未形成 verdict：它将一个 project-owned POC skill 解析到不存在的用户技能根。该负例保留为宿主 `host_loaded` 调查项，不能自动触发全局 skill projection、consumer code 或宿主配置改动。
+HSM-POC-050 中一次 Codex Harness read-only review 未形成 verdict：该模型尝试了与其 skills catalog 冲突的用户根。随后 fresh `codex debug prompt-input` 已显示正确的 project-skill `r6` locator，故这不是已证实的宿主加载缺陷。它仍不构成该 skill 已成功执行或 `host_loaded`，更不能自动触发全局 skill projection、consumer code 或宿主配置改动。
 
 ## 1. 阶段总览
 
