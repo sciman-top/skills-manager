@@ -77,6 +77,20 @@ Describe 'Skill projection profiles' {
         @($plan.removals).Count | Should -Be 0
     }
 
+    It 'preserves the resolved host selection for downstream native projection' {
+        $source = Join-Path $TestDrive 'effective-source'
+        $target = Join-Path $TestDrive 'effective-target'
+        $receipt = Join-Path $repoRoot ('reports\skill-projection\effective-{0}.json' -f ([guid]::NewGuid().ToString('N')))
+        $projection = New-ProfileFixtureProjection $source $target $receipt
+        $selection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName zcode -RequestedProfile 'full-compatible'
+        $effective = New-SkillProjectionHostConfig -ProjectionConfig $projection -Selection $selection
+
+        $resolved = Get-SkillProjectionEffectiveSelection $effective zcode
+
+        $resolved.host | Should -Be 'zcode'
+        $resolved.profile | Should -Be 'full-compatible'
+    }
+
     It 'fails closed for an unknown profile and an include/exclude conflict' {
         $config = (Get-ContentUtf8 (Join-Path $repoRoot 'skills.json') | ConvertFrom-Json).skill_projection
         { Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName codex -RequestedProfile 'does-not-exist' } | Should -Throw '*不存在的 profile*'

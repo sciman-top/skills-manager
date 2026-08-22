@@ -472,8 +472,8 @@ function Get-SkillProjectionEffectiveSelection {
 
     $selection = Get-OperationObjectProperty $ProjectionConfig 'resolved_projection_selection'
     if ($null -ne $selection) {
-        $host = ([string](Get-OperationObjectProperty $selection 'host')).Trim().ToLowerInvariant()
-        if ($host -notin @('codex', 'claude', 'zcode')) { throw 'resolved_projection_selection.host 不受支持' }
+        $selectionHost = ([string](Get-OperationObjectProperty $selection 'host')).Trim().ToLowerInvariant()
+        if ($selectionHost -notin @('codex', 'claude', 'zcode')) { throw 'resolved_projection_selection.host 不受支持' }
         return $selection
     }
     return Resolve-SkillProjectionSelection -ProjectionConfig $ProjectionConfig -HostName $DefaultHost
