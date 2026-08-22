@@ -157,7 +157,7 @@ description: demo skill
             $receiptPath = Join-Path $repoRoot ("reports\skill-projection\test-claude-{0}.json" -f [guid]::NewGuid().ToString('N'))
             $receiptRelative = [IO.Path]::GetRelativePath($repoRoot, $receiptPath)
             $cfg = [pscustomobject]@{
-                targets = @([pscustomobject]@{ path = $target; managed_link_only = $true; receipt_path = $receiptRelative })
+                targets = @([pscustomobject]@{ path = $target; host = 'claude'; managed_link_only = $true; receipt_path = $receiptRelative })
                 sync_mode = 'link'
                 skill_projection = [pscustomobject]@{
                     managed_link_includes = @('resident-a', 'resident-b')
@@ -194,7 +194,7 @@ description: demo skill
             $target = Join-Path $root 'claude-skills'
             New-Item -ItemType Junction -Path $target -Target $AgentDir | Out-Null
             $cfg = [pscustomobject]@{
-                targets = @([pscustomobject]@{ path = $target; managed_link_only = $true; receipt_path = 'reports/skill-projection/dry-run.json' })
+                targets = @([pscustomobject]@{ path = $target; host = 'claude'; managed_link_only = $true; receipt_path = 'reports/skill-projection/dry-run.json' })
                 sync_mode = 'link'
                 skill_projection = [pscustomobject]@{ managed_link_includes = @('resident'); managed_link_excludes = @() }
             }
