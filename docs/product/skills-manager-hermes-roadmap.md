@@ -100,7 +100,7 @@
 1. `native_openai_codex` 首个任务使用无工具或 read-only；主 Codex config 不应被它修改。
 2. `codex_app_server` 启用前，备份并比较隔离环境的 Codex config；第一次任务保持 read-only 或逐操作审批。
 3. 只对确定的 POC worktree 逐步允许写入；一项任务只允许一个 Codex 主执行者，任何子代理要么只读，要么有互斥 write set。
-4. 不启动 Gateway/cron/Kanban 自动分派，不自动 merge/push。
+4. 不启动 Gateway/cron/Kanban 自动分派或自动 push。无共享宿主写入的 hash/inventory/marker/gate/receipt 可自动收集；缺 marker、显式 API 失败或 config/MCP/plugin/write-set 异常必须自动停止，不得重试或改配置。无 remote 的 POC 本地 merge 仅在 task brief 预先声明封闭 auto-merge envelope 时允许。
 
 ### 最低证明
 
@@ -111,6 +111,8 @@
 | gate | POC repo 最低 build/test/contract 检查通过 |
 | review | Codex/人工 review 分开报告；两者不互相替代 |
 | completion | Hermes 记录成功/失败/阻塞及 runtime path，不把结果直接当作 merge 决定或另一路径的验收 |
+
+自动 receipt 只能压缩人工收集证据的工作量，不能替代 shared-config 处置、认证/权限升级、共享技能准入、push/release 或 `live_accepted` 的人类决策。
 
 ### 停止/回滚
 
@@ -168,7 +170,7 @@ Rollback-ConsumerProjection
 4. containment、junction/reparse、special file、package safety 检查。
 5. 许可证、来源、revision、provenance、content hash。
 6. 受影响测试、负例、预期副作用。
-7. 独立 owner review。
+7. 独立 owner review（前六项的 schema/package/hash/test 检查与摘要可自动完成；自动验证只保留 `proposal`，不自称 review）。
 8. 显式 admission 到 source/config/lock。
 9. build/projection receipt。
 10. fresh host probe 与真实任务验收。
@@ -187,6 +189,6 @@ Rollback-ConsumerProjection
 - 显式任务租约和 worktree 分配；
 - 只读探索/测试/review 的 Codex 子代理；
 - CI 使用 Codex SDK 或现有 CI，而非以 app-server beta 作为唯一发布机制；
-- 人工批准 merge/release。
+- 仅在不满足预先声明的本地 POC auto-merge envelope 时人工批准 merge；任何 push/release 仍由人工批准。
 
 任何并行写入必须满足“互斥 write set + 独立 gate + 串行集成”。若无法满足，保持串行。

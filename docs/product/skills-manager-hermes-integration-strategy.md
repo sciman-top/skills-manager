@@ -48,7 +48,7 @@ OpenAI 官方将 Codex app-server 定位为深度客户端集成，并建议自�
 | Codex auth、plugins、sandbox、`~/.codex` | Codex operator | Hermes 在隔离 POC 中按其官方 runtime 使用 | skills-manager 迁移 MCP/plugin、写入 managed block、替代 Codex 认证 |
 | worktree | 单个 task owner | Codex 子代理仅在互斥 write set 下协作 | Hermes、另一个 Codex turn 或其他 framework 并行写同一 worktree |
 | 技能 source/lock/mapping/projection receipt | skills-manager | Hermes/Codex 只读消费 | Hermes 自动修改全局受管技能 root |
-| merge/release/live acceptance | CI + 人工 | Hermes/Codex 提供证据 | 自动 merge/push/release 取代人工决策 |
+| merge/release/live acceptance | CI + 人工 | Hermes/Codex 提供证据；符合封闭条件的本地 POC merge 可由预先声明的 policy 执行 | 自动 push/release 或将本地 receipt 解释为业务验收 |
 
 ### 2.1 单任务工作流
 
@@ -59,7 +59,8 @@ proposed
   -> implementing
   -> gate_passed | gate_failed
   -> review_passed | review_failed
-  -> human_approved
+  -> auto_merged (local POC envelope only)
+     | human_approved
   -> merged | rejected | rolled_back
 ```
 
@@ -67,6 +68,19 @@ proposed
 - `worktree_allocated` 前，不允许 Codex 执行写操作。
 - `gate_passed` 仅代表仓库门禁；不等于 merge、host loading 或线上验收。
 - 任何恢复逻辑都必须恢复同一个任务 owner，不能重新派发一个可能重叠写入的任务。
+- `auto_merged` 需要 task brief 显式声明 `allow_auto_local_merge=true`，并且仅限无 remote 的 POC 仓、唯一 worktree、固定 write set、无共享宿主差异、最低 gate 和独立 review 均通过、且 diff 不含凭据/生产配置/外部资产。它不授权 push、release 或 `live_accepted`。
+
+### 2.2 异常优先的自动执行合同
+
+为了减少人工重复查看日志，正常路径由 harness 自动形成 receipt，人工只处理 scope/权限升级或异常。该合同不要求新增 daemon、候选数据库或 skills-manager runtime；状态仅保存在现有 POC task brief/receipt 中。
+
+| 状态 | 可自动执行的工作 | 必须停止或转人工的条件 |
+| --- | --- | --- |
+| `auto_evidence` | 冻结并比较 hash、读取公开 inventory、运行 package/schema/test、运行固定 no-tool/read-only marker、检查 worktree/Gateway/cron 边界并汇总脱敏 receipt | 不写共享 `~/.codex`、`~/.hermes`、全局 skills root 或远端；profile-owned session/receipt 仅在 task brief 明确允许时可创建。 |
+| `auto_stop` | 记录最小失败类别、marker/exit/diagnostic、前后 hash 和 worktree 状态；不做补偿性探索 | 缺 marker、显式 provider/API 失败、超出 approved managed block 的 config/MCP/plugin 差异、write-set 越界、并发 writer 或无法解释的权限变化。不得自动重试、换账户/提供方、改 profile/config、回滚共享配置或启动/停止服务。 |
+| `human_decision` | 生成一个可比较的保留/窄回滚/拒绝升级摘要 | 共享配置差异的归因与处置、OAuth/权限/安装、共享技能 admission/projection、非 envelope merge、任意 push/release、以及 host/live acceptance。 |
+
+固定 marker 只能证明该次调用满足其 declared predicate；`auto_evidence` 和 `auto_stop` 都不证明 `host_loaded` 或 `live_accepted`。
 
 ## 3. Hermes Windows 隔离 POC
 
@@ -102,7 +116,7 @@ Hermes profile 虽然隔离其 config、session、memory、skills 与 Gateway st
 1. 一份小型测试仓，例如 `D:\CODE\hermes-poc`，且只建立一个测试 worktree。
 2. 记录当前用户的 Codex config、MCP/plugin inventory 与受管技能 root 基线；档位 A 不改变它们，档位 B 在当前授权后才允许其发生预期变更。
 3. 没有生产 bot token、云凭据、服务器私钥或生产 MCP。
-4. 先不启用 Gateway、cron、Kanban 自动分派、自动 merge/push。
+4. 先不启用 Gateway、cron、Kanban 自动分派或自动 push；本地 POC merge 仅可使用 2.2 的显式 envelope，不能由“门禁通过”隐式触发。
 5. 先不将 Hermes 指向主 `~/.agents/skills`。
 
 档位 C 额外要求：
@@ -203,8 +217,8 @@ rollback_entry
 | --- | --- |
 | 从失败、重复任务、人工反馈中识别技能缺口 | 不把观察写成生产技能或全局 memory 真值 |
 | 在项目级 `.agents/skills` 或 sandbox 草拟候选 | 不直接修改 `~/.agents/skills`、`agent/`、vendor/import 或宿主 cache |
-| 运行 schema、package safety、路径、内容 hash、受影响测试 | 不允许候选 AI 批准自身、绕过 license/provenance 或跳过 review |
-| 生成 proposal、diff、测试结果、风险与回滚建议 | 不允许自动 admission、自动 projection、自动 push/release |
+| 运行 schema、package safety、路径、内容 hash、受影响测试，并自动保留未准入 proposal | 不允许候选 AI 批准自身、绕过 license/provenance 或跳过 review |
+| 生成 proposal、diff、测试结果、风险与回滚建议 | 不允许自动 admission、自动 projection、自动 push/release；提升到共享范围时只请求独立 owner 的一次决定 |
 | 在显式 admission 后由 skills-manager 重建与投影 | host_loaded/live_accepted 必须用新会话和真实任务独立证明 |
 
 候选准入状态机：

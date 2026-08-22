@@ -18,6 +18,16 @@ Rollback scope
 Truth boundary
 ```
 
+每张任务卡还必须声明一个执行类别，避免让人工重复完成机械检查：
+
+| 执行类别 | 行为 |
+| --- | --- |
+| `auto_evidence` | 只自动运行无共享宿主写入的 preflight、hash/inventory 对比、package/schema/test、固定 no-tool/read-only marker、worktree/receipt 汇总。 |
+| `auto_stop` | 遇到 marker 缺失、显式 provider/API 失败、shared config/MCP/plugin 非预期差异、write-set 越界或并发 writer 时记录证据并停止；不重试、不换账户/提供方、不改配置、不回滚共享资产。 |
+| `human_decision` | 只用于共享配置的保留/窄回滚、认证/权限/安装、共享技能 admission/projection、非预授权 merge、push/release 与真实验收。 |
+
+`auto_evidence` 与 `auto_stop` 不能推导 `host_loaded` 或 `live_accepted`，也不得新建任务数据库、watcher 或常驻 daemon。
+
 | 授权域 | 典型资产 | 不能由其推导的授权 |
 | --- | --- | --- |
 | 仓库 | `src/`、tests、`skills.json`、tracked docs、generated `skills.ps1`/`agent/` | `~/.hermes`、`~/.codex`、安装软件、Gateway、Git push |
@@ -108,11 +118,11 @@ Truth boundary
 - **步骤**：
   1. 明确记录所选 runtime path，备份并 hash 当前 Codex config，读取公开 plugin/MCP inventory。
   2. 分别完成 `codex login` 与 Hermes `openai-codex` 授权；认证成功本身不证明 app-server 已启用。
-  3. `native_openai_codex`：运行一条无工具或 read-only Codex 任务，并核对主 config 与 POC worktree 未发生未授权变化。
-  4. `codex_app_server`：启用 runtime 后立即比较 config diff，确认 only expected managed block、MCP/plugin 描述与权限变化；首回合保持 read-only 或逐操作审批。
+  3. `native_openai_codex`：可作为 `auto_evidence` 运行一条固定、无工具或 read-only Codex 任务，并核对主 config 与 POC worktree 未发生未授权变化；marker 缺失或显式 provider/API 失败时立即 `auto_stop`。
+  4. `codex_app_server`：直接 process-scoped read-only probe 只有在当前 task brief 明确允许且预期不写共享 config 时才可 `auto_evidence`；启用 Hermes CLI runtime、managed-block migration 或任何 shared-config 写入仍是 `human_decision`。启用后立即比较 config diff，确认 only expected managed block、MCP/plugin 描述与权限变化；首回合保持 read-only 或逐操作审批。
   5. 只有所选路径的最低证明通过后，才允许 HSM-POC-050 的另行授权 write task；app-server 路径仍需先通过步骤 4 才能放开任何 workspace write。
 - **Minimum proof**：native 路径需要 profile/auth 状态、任务 marker/receipt、主 config 与 POC worktree 未变；app-server 路径还需要 app-server 已启用的直接证据、审查后的 config diff 与 POC worktree containment。两者都要求无自动 merge/push，且结果可回溯至 task brief。
-- **Stop condition**：主 config 出现 managed block 外的非预期改动、未批准 plugin/MCP migration、写入越过 worktree、或无法解释的权限变化。
+- **Stop condition**：主 config 出现 managed block 外的非预期改动、未批准 plugin/MCP migration、写入越过 worktree、或无法解释的权限变化时 `auto_stop`；只生成脱敏差异摘要，等待 `human_decision`，不得自动重试、换账户、修改/恢复 shared config。
 - **Rollback**：native 路径只移除本次 profile-owned credential/session state（若被拒绝）；app-server 路径用步骤 1 备份恢复本次 managed block/POC config，只回滚该任务 worktree；两者均不覆盖用户其他 Codex 配置。
 - **Truth boundary**：`native_openai_codex_verified` 不等于 `codex_app_server_verified`；任一一次 runtime POC 均不代表持续稳定、CI 适用、`host_loaded` 或主生产系统已接受。
 
@@ -122,13 +132,13 @@ Truth boundary
 - **前置**：HSM-POC-040 的已批准 runtime path 已完成其对应最低证明；若任务声称 `codex_app_server` 行为，必须使用已验证的 app-server 路径，不能复用 native 路径证据。
 - **Exact write set**：唯一获分配 worktree、Hermes POC task state、必要的 POC receipt。禁止主分支直接写入。
 - **步骤**：
-  1. ChatGPT Desktop 产出并由用户批准 task brief。
+  1. ChatGPT Desktop 产出 task brief；写任务需要当前授权或已声明的 standing policy。若希望减少人工 merge，brief 必须显式写入 `allow_auto_local_merge=true` 及其封闭条件。
   2. Hermes 创建/记录 task；明确 worktree owner 和 gate。
   3. Codex 完成实现；只在该 worktree 内调用有界子代理。
   4. 执行仓库最低 build/test/contract gate。
-  5. 独立进行 code review；由人工决定提交、合并或回滚。
-- **Minimum proof**：task state、Git diff、gate output、review result 和人工决策可关联；无写入碰撞。
-- **Stop condition**：任务重入、多个 writer、gate 未通过、review 未通过或 human decision 缺失。
+  5. 独立进行 code review；仅在无 remote 的 POC 仓、唯一 worktree、固定 write set、无 host 差异、无凭据/生产配置/外部资产、gate/review 均通过且 brief 显式允许时，自动本地 commit/merge 并记录 receipt；其余情况由人工决定提交、合并或回滚。
+- **Minimum proof**：task state、Git diff、gate output、review result，以及人工决定或满足封闭条件的 local merge receipt 可关联；无写入碰撞。
+- **Stop condition**：任务重入、多个 writer、gate/review 未通过、auto-merge envelope 不完整或出现 remote/push 请求时 `auto_stop` 并转 `human_decision`。
 - **Rollback**：仅撤销该 worktree/branch 的本次切片；任务标记 `rejected` 或 `rolled_back`。
 - **Truth boundary**：`repo_verified` 与人工的仓库级决定；除非实际业务任务验收，否则不标记 `live_accepted`。
 
@@ -137,7 +147,7 @@ Truth boundary
 - **Goal**：防止“成功运行 POC”被误解为“必须写 Hermes adapter”。
 - **输入**：HSM-POC-030/040/050 的受审查证据；HSM-POC-040 必须标明 runtime path，不能用 native 路径证据声明 app-server 差异。
 - **决策问题**：现有项目级技能与 native projection 是否已经满足 Hermes？若不满足，缺失的是 source/hash、target ownership、write policy、receipt 还是 rollback？
-- **输出**：`no_code_needed`、`document_only` 或 `add_minimal_consumer_contract`。
+- **输出**：`no_code_needed`、`document_only` 或 `add_minimal_consumer_contract`。当自动收集的受审查证据未显示可复现 contract 缺口时，可直接输出 `no_code_needed`；只有要求新增 consumer contract 时才进入 `human_decision`。
 - **Minimum proof**：每个 claimed gap 都能由一次可复现 POC 失败或重复人工成本证明。
 - **Stop condition**：差异只是假设、审美偏好或“未来可能需要”。
 - **Truth boundary**：设计决策，不是代码或宿主验收。
@@ -175,7 +185,7 @@ Truth boundary
 
 - **Goal**：验证 AI 可提出技能改进而不获得自动生产写权限。
 - **Exact write set**：一个 POC repo 的项目级 `.agents/skills/<candidate>/`，以及对应 Git diff/review；不写全局 root。
-- **步骤**：需求/失败证据 -> sandbox candidate -> package/schema/safety checks -> 独立 review -> 显式 admission 决策 -> 可选 projection -> fresh host probe -> real task acceptance。
+- **步骤**：需求/失败证据 -> sandbox candidate -> 自动 package/schema/safety checks 与 diff/receipt -> 独立 review -> 显式 admission 决策 -> 可选 projection -> fresh host probe -> real task acceptance。自动验证可把候选保持在 `proposal`，但不得把它标记为 `reviewed` 或 `admitted`。
 - **Minimum proof**：每个状态都有 owner、证据、下一步与回滚；AI author 与 admission approver 不同。
 - **Stop condition**：proposal 被自动复制到全局技能目录、自动进 lock、自动投影或自动发布。
 
@@ -205,7 +215,7 @@ Truth boundary
 
 ## 4. AI 执行提示模板
 
-任何后续 AI 在领取 HSM-* 任务时，应先输出以下内容并等待需要的授权域：
+任何后续 AI 在领取 HSM-* 任务时，应先输出以下内容，并仅在 `human_decision` 时等待相应授权域：
 
 ```text
 Task: HSM-XXX
@@ -217,6 +227,7 @@ Minimum verification:
 Stop condition:
 Rollback:
 Truth boundary after completion:
+Execution class: auto_evidence | auto_stop | human_decision
 ```
 
-当任务涉及 Hermes/Codex 宿主时，必须额外声明：当前 Windows 用户、profile、repo/worktree、是否启用 runtime、是否会改变 `~/.codex`、是否含生产凭据。任何未知项都使任务停在 `clarify_required`，而不是猜测或自动执行。
+当任务涉及 Hermes/Codex 宿主时，必须额外声明：当前 Windows 用户、profile、repo/worktree、是否启用 runtime、是否会改变 `~/.codex`、是否含生产凭据。未知项、shared-config 写入或 block 外差异一律为 `human_decision`；其余不写共享资产的固定检查可直接 `auto_evidence`，而不是为人工收集重复日志。

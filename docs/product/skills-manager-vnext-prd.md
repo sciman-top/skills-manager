@@ -113,11 +113,13 @@
 - `FR-HER-002`：consumer 默认只读；若 consumer 需要读取共享技能，必须先验证其进程没有对目标 root 的未授权写入能力，或由隔离用户/ACL/副本提供等效保护。目录存在、config 已写入或 inventory 可见都不证明宿主已加载。
 - `FR-HER-003`：Hermes 的 app-server/Codex runtime、MCP/plugin migration 与 `~/.codex/config.toml` 变更属于宿主授权域。skills-manager 不生成、不写入、不迁移该配置，只能在显式只读 probe 中报告观察结果与真值边界。
 - `FR-HER-004`：只有完成与拟议 consumer runtime 相匹配的隔离 POC、存在真实 consumer、且现有 native projection 无法承载所需差异时，才允许新增 consumer adapter。`native_openai_codex` 的 POC 证据不得证明 `codex_app_server` 的 host integration；只有一个假设 consumer 时，不创建泛化 host adapter framework。
+- `FR-HER-005`：受控协作可自动完成无共享宿主写入的 preflight、hash/inventory 对比、固定 marker 检查、package/schema/test 验证与 receipt 摘要；每次运行必须分类为 `auto_evidence`、`auto_stop` 或 `human_decision`。缺 marker、显式 provider/API 失败、共享 config/MCP/plugin 的非预期差异或 write-set 越界必须 `auto_stop`，不得自动重试、切换账户、改变 profile/config 或执行回滚。
 - `FR-EVO-001`：宿主 AI 可以在项目级 `.agents/skills` 或隔离 sandbox 草拟、修复和测试候选技能；候选必须以普通 Git change-set 或明确 source root 提交审核，不能直接写入全局受管 root。
 - `FR-EVO-002`：准入前必须验证 skill identity、path containment、reparse-point/special-file safety、来源/revision/license/provenance、内容 hash、受影响测试与兼容性。建议、扫描结果或 AI 自评不是准入授权。
 - `FR-EVO-003`：准入至少分为 `proposal -> reviewed -> admitted -> projected -> host_loaded -> live_accepted`。`reviewed` 与 `admitted` 必须有独立的人类或指定 owner 决策；AI 不能批准自己的候选。
 - `FR-EVO-004`：已准入技能仍遵循现有 `skills.json` / lock、build、projection receipt 与 rollback 规则。失败时只回滚本次候选的 source/mapping/projection，不删除 external-owned 或其他宿主资产。
 - `FR-EVO-005`：技能演进不新增长期候选数据库、自治 curator、hidden prompt memory 或自动发布链；动态 proposal/task state 属于 Hermes、目标仓 issue/PR 或 operator 工具，不是本仓 tracked runtime state。
+- `FR-EVO-006`：候选的 proposal、确定性验证与“保持未准入”可自动完成；只有从项目/sandbox 范围提升到共享 root、lock、projection、push/release 或 host probe 时才请求独立 owner 的单次决策。自动化不得把技术验证伪装成 `reviewed` 或 `admitted`。
 
 ## 6. 非功能需求
 

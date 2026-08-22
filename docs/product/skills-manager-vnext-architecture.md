@@ -81,6 +81,10 @@ Hermes 不是本仓的第六条运行主链，也不是本仓需要嵌入的 run
 
 `native_openai_codex` POC 与 `codex_app_server` POC 是两种不可互相替代的证据模式：前者不能证明后者的 host integration、managed block 或 MCP/plugin migration。两者都不能单独证明 `host_loaded`；每个拟议 consumer 必须以匹配的 runtime 路径、fresh host probe 和真实调用验收。
 
+为减少操作性人工，协作 harness 可以自动执行无共享宿主写入的证据收集，但这不是新的 Hermes/skills-manager runtime 或状态库。每次 POC 只将既有 task brief/receipt 分类为 `auto_evidence`、`auto_stop` 或 `human_decision`：前者仅收集基线 hash、公开 inventory、固定 marker、package/schema/test 结果和 worktree 状态；后者在缺 marker、显式 provider/API 失败、shared config/MCP/plugin 非预期差异、write-set 越界或无法归因的权限变化时停止而不重试。`human_decision` 只承接共享宿主配置的保留/窄回滚、认证/权限升级、共享技能准入、非预授权 merge/push/release 与真实业务验收。自动证据收集、自动停止或 Git receipt 均不证明 `host_loaded` 或 `live_accepted`。
+
+一个 task brief 可以预先声明 `allow_auto_local_merge=true`，但仅适用于无 remote 的 POC 仓：单一 worktree、固定 write set、无共享宿主差异、最低 gate 与独立 review 均通过、且 diff 不含凭据/生产配置/外部资产。满足该封闭条件时 harness 可在本地 commit/merge 并记录 receipt；任何条件不满足即回到 `human_decision`。这不允许自动 push、release 或改变 merge/release/live acceptance 的 owner。
+
 只有同时满足下列条件才允许实现独立 consumer seam：
 
 1. 一个与拟议 consumer runtime 匹配的隔离 POC 已证明 Hermes 对现有 native projection 有无法承载的稳定差异。
