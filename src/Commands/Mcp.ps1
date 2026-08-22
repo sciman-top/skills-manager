@@ -640,6 +640,30 @@ function Build-GenericMcpPayload([string]$existingContent, $servers) {
     return [pscustomobject]$base
 }
 
+function Build-ZCodeMcpPayload([string]$existingContent, $servers) {
+    $base = [ordered]@{}
+    if (-not [string]::IsNullOrWhiteSpace($existingContent)) {
+        try {
+            $parsed = $existingContent | ConvertFrom-Json
+            if ($null -ne $parsed) {
+                foreach ($property in $parsed.PSObject.Properties) { $base[[string]$property.Name] = $property.Value }
+            }
+        }
+        catch {
+            Log ("ZCode MCP JSON 解析失败，将使用最小配置重建：{0}" -f $_.Exception.Message) "WARN"
+        }
+    }
+
+    $mcp = [ordered]@{}
+    $existingMcp = if ($base.Contains('mcp')) { $base['mcp'] } else { $null }
+    if ($null -ne $existingMcp) {
+        foreach ($property in $existingMcp.PSObject.Properties) { $mcp[[string]$property.Name] = $property.Value }
+    }
+    $mcp['servers'] = Convert-McpServersToConfigMap $servers
+    $base['mcp'] = [pscustomobject]$mcp
+    return [pscustomobject]$base
+}
+
 function Get-NativeMcpKeyValueFlags($data, [string]$flagName, [string]$separator = "=") {
     $flags = @()
     if ($null -eq $data) { return $flags }
@@ -1765,6 +1789,15 @@ function Get-TraeProjectMcpConfigPath([string]$repoRoot) {
     return (Join-Path (Join-Path $repoRoot ".trae") "mcp.json")
 }
 
+function Get-ZCodeMcpConfigPath([string]$zcodeRoot) {
+    $root = [IO.Path]::GetFullPath($zcodeRoot).TrimEnd('\', '/')
+    $userRoot = [IO.Path]::GetFullPath((Join-Path ([Environment]::GetFolderPath('UserProfile')) '.zcode')).TrimEnd('\', '/')
+    if ($root.Equals($userRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        return (Join-Path $root 'cli\config.json')
+    }
+    return (Join-Path $root 'config.json')
+}
+
 function Get-McpTargetCandidatePaths($cfg) {
     $paths = New-Object System.Collections.Generic.List[string]
     if ($null -eq $cfg) { return @() }
@@ -1803,7 +1836,7 @@ function Resolve-McpTargetRootsFromCfg($cfg) {
         $norm = $path.Replace("/", "\")
         $lower = $norm.ToLowerInvariant()
 
-        $dotDirs = @(".claude", ".codex", ".gemini", ".trae")
+        $dotDirs = @(".claude", ".codex", ".gemini", ".trae", ".zcode")
         $matched = $false
         $bestIdx = -1
         $bestNeedleLen = 0
@@ -2127,7 +2160,7 @@ function Get-McpSyncManagedTargetSpecs {
             }) | Out-Null
     }
 
-    foreach ($root in @($flatRoots.ToArray() | Sort-Object)) {
+    foreach ($root in @($flatRoots.ToArray() | Where-Object { -not (Split-Path ([string]$_) -Leaf).Equals('.zcode', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)) {
         Add-McpTargetSpec (Join-Path $root '.mcp.json') 'generic_json' $root
     }
     foreach ($root in @($flatRoots.ToArray() | Where-Object { (Split-Path ([string]$_) -Leaf).Equals('.gemini', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)) {
@@ -2138,6 +2171,9 @@ function Get-McpSyncManagedTargetSpecs {
     }
     foreach ($root in @($flatRoots.ToArray() | Where-Object { (Split-Path ([string]$_) -Leaf).Equals('.codex', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)) {
         Add-McpTargetSpec (Join-Path $root 'config.toml') 'codex_toml' $root
+    }
+    foreach ($root in @($flatRoots.ToArray() | Where-Object { (Split-Path ([string]$_) -Leaf).Equals('.zcode', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)) {
+        Add-McpTargetSpec (Get-ZCodeMcpConfigPath $root) 'zcode_json' $root
     }
     $traeRoots = @($flatRoots.ToArray() | Where-Object { (Split-Path ([string]$_) -Leaf).Equals('.trae', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)
     foreach ($root in $traeRoots) {
@@ -2200,6 +2236,10 @@ function New-McpSyncDesiredState {
             }
             'codex_toml' {
                 $content = Build-CodexConfigToml $existing $Servers
+            }
+            'zcode_json' {
+                $payload = Build-ZCodeMcpPayload $existing $ActiveServers
+                $content = $payload | ConvertTo-Json -Depth 100
             }
             'trae_json' {
                 $payload = Build-GenericMcpPayload $existing $ActiveServers
@@ -2405,6 +2445,7 @@ function Write-McpDesiredTarget($target) {
         'gemini_settings' { Log ("已同步 Gemini MCP 配置：{0}" -f $path) }
         'gemini_antigravity_settings' { Log ("已同步 Gemini Antigravity MCP 配置：{0}" -f $path) }
         'codex_toml' { Log ("已同步 Codex MCP 配置：{0}" -f $path) }
+        'zcode_json' { Log ("已同步 ZCode MCP 配置：{0}" -f $path) }
         'trae_json' { Log ("已同步 Trae MCP 配置：{0}" -f $path) }
         'trae_project_json' { Log ("已同步项目级 Trae MCP 配置：{0}" -f $path) }
         default { Log ("已同步 MCP 配置：{0}" -f $path) }

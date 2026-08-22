@@ -6,17 +6,21 @@ BeforeAll {
     . (Join-Path $repoRoot 'src\Application\GlobalRuleProjection.ps1')
     . (Join-Path $repoRoot 'src\Commands\GlobalRules.ps1')
 
-    function Copy-GlobalRuleFixture([string]$Fixture,[string]$Codex,[string]$Claude) {
-        New-Item -ItemType Directory -Path (Join-Path $Fixture 'rules\global\codex'),(Join-Path $Fixture 'rules\global\claude'),$Codex,$Claude,(Join-Path $Fixture 'reports\global-rule-projection') -Force|Out-Null
+    function Copy-GlobalRuleFixture([string]$Fixture,[string]$Codex,[string]$Claude,[string]$ZCode = '') {
+        $dirs = @((Join-Path $Fixture 'rules\global\codex'),(Join-Path $Fixture 'rules\global\claude'),(Join-Path $Fixture 'rules\global\zcode'),$Codex,$Claude,(Join-Path $Fixture 'reports\global-rule-projection'))
+        if (-not [string]::IsNullOrWhiteSpace($ZCode)) { $dirs += $ZCode }
+        New-Item -ItemType Directory -Path $dirs -Force|Out-Null
         Copy-Item -LiteralPath (Join-Path $repoRoot 'rules\global\codex\AGENTS.md') -Destination (Join-Path $Fixture 'rules\global\codex\AGENTS.md')
         Copy-Item -LiteralPath (Join-Path $repoRoot 'rules\global\claude\CLAUDE.md') -Destination (Join-Path $Fixture 'rules\global\claude\CLAUDE.md')
+        Copy-Item -LiteralPath (Join-Path $repoRoot 'rules\global\zcode\AGENTS.md') -Destination (Join-Path $Fixture 'rules\global\zcode\AGENTS.md')
         Set-Content -LiteralPath (Join-Path $Codex 'AGENTS.md') -Value '# old codex' -Encoding utf8NoBOM -NoNewline
         Set-Content -LiteralPath (Join-Path $Claude 'CLAUDE.md') -Value '# old claude' -Encoding utf8NoBOM -NoNewline
+        if (-not [string]::IsNullOrWhiteSpace($ZCode)) { Set-Content -LiteralPath (Join-Path $ZCode 'AGENTS.md') -Value '# old zcode' -Encoding utf8NoBOM -NoNewline }
     }
 
-    function Invoke-TestApply($Plan,[string]$Fixture,[string]$Codex,[string]$Claude,[string]$Receipt,[switch]$Resume) {
+    function Invoke-TestApply($Plan,[string]$Fixture,[string]$Codex,[string]$Claude,[string]$Receipt,[switch]$Resume,[string]$ZCode = '') {
         $backupRoot=Join-Path $Fixture 'reports\global-rule-projection\backups'
-        return Invoke-GlobalRuleProjectionApply -Plan $Plan -Token $Plan.apply.required_token -BackupRoot $backupRoot -ReceiptPath $Receipt -RepoRoot $Fixture -CodexUserRoot $Codex -ClaudeUserRoot $Claude -Resume:$Resume
+        return Invoke-GlobalRuleProjectionApply -Plan $Plan -Token $Plan.apply.required_token -BackupRoot $backupRoot -ReceiptPath $Receipt -RepoRoot $Fixture -CodexUserRoot $Codex -ClaudeUserRoot $Claude -Resume:$Resume -ZCodeUserRoot $ZCode
     }
 }
 
@@ -32,6 +36,7 @@ Describe 'Global rule source contract' {
         $result.pass|Should -BeTrue
         $result.facts.codex.version|Should -Be '9.77'
         $result.facts.claude.bytes|Should -BeLessOrEqual 16384
+        $result.facts.zcode.version|Should -Be '9.77'
         @($result.observations).Count|Should -Be 0
         (@(git -C $repoRoot check-attr eol -- rules/global/codex/AGENTS.md rules/global/claude/CLAUDE.md)-join"`n")|Should -Match 'eol: lf'
     }
@@ -65,6 +70,19 @@ Describe 'Global rule source contract' {
 
     It 'rejects a drive root as a user projection root' {
         {New-GlobalRuleProjectionPlan $fixture ([IO.Path]::GetPathRoot($codex)) $claude}|Should -Throw '*Drive roots*'
+    }
+
+    It 'adds ZCode as a plan-bound action only when its user root is present' {
+        $zcode=Join-Path $TestDrive 'zcode';Copy-GlobalRuleFixture $fixture $codex $claude $zcode
+        $plan=New-GlobalRuleProjectionPlan $fixture $codex $claude $zcode
+
+        @($plan.actions.id | Sort-Object) | Should -Be @('claude','codex','zcode')
+        $receiptPath=Join-Path $fixture 'reports\global-rule-projection\zcode-receipt.json'
+        $receipt=Invoke-TestApply $plan $fixture $codex $claude $receiptPath -ZCode $zcode
+        $receipt.writes | Should -Be 3
+        [IO.File]::ReadAllText((Join-Path $zcode 'AGENTS.md')) | Should -Match 'ZCode 平台差异'
+        (Invoke-GlobalRuleProjectionRollback -ReceiptPath $receiptPath -Token $receipt.rollback.required_token -RepoRoot $fixture -CodexUserRoot $codex -ClaudeUserRoot $claude -BackupRoot (Join-Path $fixture 'reports\global-rule-projection\backups') -ZCodeUserRoot $zcode).pass | Should -BeTrue
+        [IO.File]::ReadAllText((Join-Path $zcode 'AGENTS.md')) | Should -Be '# old zcode'
     }
 }
 
@@ -184,7 +202,15 @@ Describe 'Global rule CLI boundaries' {
             $parsed.claude_user_root|Should -Be $claude;$parsed.claude_user_root_source|Should -Be 'CLAUDE_CONFIG_DIR'
             $parsed=Parse-GlobalRuleOptions @('--codex-user-root',$claude) check;$parsed.codex_user_root|Should -Be $claude;$parsed.codex_user_root_source|Should -Be 'cli'
             $parsed=Parse-GlobalRuleOptions @('--claude-user-root',$codex) check;$parsed.claude_user_root|Should -Be $codex;$parsed.claude_user_root_source|Should -Be 'cli'
+            $parsed=Parse-GlobalRuleOptions @('--zcode-user-root',$codex) check;$parsed.zcode_user_root|Should -Be $codex;$parsed.zcode_user_root_source|Should -Be 'cli'
         }finally{$env:CODEX_HOME=$oldCodex;$env:CLAUDE_CONFIG_DIR=$oldClaude}
+    }
+
+    It 'rejects a missing explicit ZCode root instead of treating it as disabled' {
+        $missing = Join-Path $TestDrive 'missing-zcode-root'
+        {
+            Invoke-GlobalRuleCommand check @('--repo-root',$fixture,'--codex-user-root',$codex,'--claude-user-root',$claude,'--zcode-user-root',$missing)
+        } | Should -Throw '*ZCode user root does not exist or is not a directory*'
     }
 
     It 'rejects control outputs outside the dedicated reports directory' {

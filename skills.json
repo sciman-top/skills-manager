@@ -791,6 +791,11 @@
       "path": "~/.claude/skills",
       "managed_link_only": true,
       "receipt_path": "reports/skill-projection/claude-native-receipt.json"
+    },
+    {
+      "path": "~/.zcode/skills",
+      "managed_link_only": true,
+      "receipt_path": "reports/skill-projection/zcode-native-receipt.json"
     }
   ],
   "update_force": true,

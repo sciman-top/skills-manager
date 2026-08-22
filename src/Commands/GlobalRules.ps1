@@ -8,18 +8,21 @@ function Parse-GlobalRuleOptions([object[]]$Tokens,[ValidateSet('check','plan','
         codex_user_root_source=$(if($codexFromEnv){'CODEX_HOME'}else{'default'})
         claude_user_root=$(if($claudeFromEnv){$env:CLAUDE_CONFIG_DIR}else{Join-Path $userProfile '.claude'})
         claude_user_root_source=$(if($claudeFromEnv){'CLAUDE_CONFIG_DIR'}else{'default'})
+        zcode_user_root=(Join-Path $userProfile '.zcode')
+        zcode_user_root_source='default'
         plan=$null;receipt=$null;token=$null;out_path=$null;json=$false;resume=$false
     }
     for($i=0;$i-lt@($Tokens).Count;$i++){
         $token=[string]$Tokens[$i]
         if($token-eq'--json'){$result.json=$true;continue}
         if($token-eq'--resume'){$result.resume=$true;continue}
-        if($token-notin@('--repo-root','--codex-user-root','--claude-user-root','--plan','--receipt','--token','--out')){throw('Unknown global-rules-{0} option: {1}'-f$Mode,$token)}
+        if($token-notin@('--repo-root','--codex-user-root','--claude-user-root','--zcode-user-root','--plan','--receipt','--token','--out')){throw('Unknown global-rules-{0} option: {1}'-f$Mode,$token)}
         if($i+1-ge@($Tokens).Count){throw('{0} requires a value.'-f$token)};$i++;$value=[string]$Tokens[$i]
         switch($token){
             '--repo-root'{$result.repo_root=$value}
             '--codex-user-root'{$result.codex_user_root=$value;$result.codex_user_root_source='cli'}
             '--claude-user-root'{$result.claude_user_root=$value;$result.claude_user_root_source='cli'}
+            '--zcode-user-root'{$result.zcode_user_root=$value;$result.zcode_user_root_source='cli'}
             '--plan'{$result.plan=$value}
             '--receipt'{$result.receipt=$value}
             '--token'{$result.token=$value}
@@ -42,6 +45,17 @@ function Resolve-GlobalRuleControlPath([string]$Path,[string]$RepoRoot,[switch]$
     return $resolved
 }
 
+function Resolve-OptionalZCodeGlobalRuleRoot($Options) {
+    $candidate = [string]$Options.zcode_user_root
+    if (Test-Path -LiteralPath $candidate -PathType Container) {
+        return [IO.Path]::GetFullPath($candidate)
+    }
+    if ($Options.zcode_user_root_source -eq 'cli') {
+        throw ('ZCode user root does not exist or is not a directory: {0}' -f $candidate)
+    }
+    return ''
+}
+
 function Get-GlobalRuleRootEnvelope($Options) {
     return [pscustomobject][ordered]@{
         repo_root=[IO.Path]::GetFullPath($Options.repo_root)
@@ -49,19 +63,22 @@ function Get-GlobalRuleRootEnvelope($Options) {
         codex_user_root_source=$Options.codex_user_root_source
         claude_user_root=[IO.Path]::GetFullPath($Options.claude_user_root)
         claude_user_root_source=$Options.claude_user_root_source
+        zcode_user_root=(Resolve-OptionalZCodeGlobalRuleRoot $Options)
+        zcode_user_root_source=$Options.zcode_user_root_source
     }
 }
 
 function Invoke-GlobalRuleCommand([ValidateSet('check','plan','apply','rollback')][string]$Mode,[object[]]$Tokens=@()) {
     $options=Parse-GlobalRuleOptions $Tokens $Mode;$roots=Get-GlobalRuleRootEnvelope $options
+    $zcodeRoot = [string]$roots.zcode_user_root
     switch($Mode){
         'check'{
-            $result=Test-GlobalRuleProjection $options.repo_root $options.codex_user_root $options.claude_user_root;$exit=if($result.pass){0}else{2}
+            $result=Test-GlobalRuleProjection $options.repo_root $options.codex_user_root $options.claude_user_root $zcodeRoot;$exit=if($result.pass){0}else{2}
             $envelope=[pscustomobject][ordered]@{schema_version=2;command='global-rules-check';pass=$result.pass;exit_code=$exit;roots=$roots;result=$result;writes=0;provider_calls=0;native_mutations=0}
         }
         'plan'{
             $out=Resolve-GlobalRuleControlPath $options.out_path $options.repo_root
-            $plan=New-GlobalRuleProjectionPlan $options.repo_root $options.codex_user_root $options.claude_user_root
+            $plan=New-GlobalRuleProjectionPlan $options.repo_root $options.codex_user_root $options.claude_user_root $zcodeRoot
             $envelope=[pscustomobject][ordered]@{schema_version=2;command='global-rules-plan';pass=$true;exit_code=0;roots=$roots;plan=$plan;writes=1;host_writes=0;provider_calls=0;native_mutations=0}
             Write-Utf8FileAtomic -Path $out -Content ($envelope|ConvertTo-Json -Depth 30 -Compress);$exit=0
         }
@@ -70,13 +87,13 @@ function Invoke-GlobalRuleCommand([ValidateSet('check','plan','apply','rollback'
             if(Test-GlobalRulePathEqual $planPath $out){throw 'Global rule apply receipt path must differ from the plan path.'}
             $document=[IO.File]::ReadAllText($planPath)|ConvertFrom-Json;$plan=if($document.command-eq'global-rules-plan'){$document.plan}else{$document}
             $backupRoot=Join-Path ([IO.Path]::GetFullPath($options.repo_root)) 'reports\global-rule-projection\backups'
-            $receipt=Invoke-GlobalRuleProjectionApply -Plan $plan -Token $options.token -BackupRoot $backupRoot -ReceiptPath $out -RepoRoot $options.repo_root -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -Resume:$options.resume
+            $receipt=Invoke-GlobalRuleProjectionApply -Plan $plan -Token $options.token -BackupRoot $backupRoot -ReceiptPath $out -RepoRoot $options.repo_root -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -Resume:$options.resume -ZCodeUserRoot $zcodeRoot
             $envelope=[pscustomobject][ordered]@{schema_version=2;command='global-rules-apply';pass=$true;exit_code=0;roots=$roots;receipt=$receipt;provider_calls=0;native_mutations=0};$exit=0
         }
         'rollback'{
             $receiptPath=Resolve-GlobalRuleControlPath $options.receipt $options.repo_root -MustExist
             $backupRoot=Join-Path ([IO.Path]::GetFullPath($options.repo_root)) 'reports\global-rule-projection\backups'
-            $result=Invoke-GlobalRuleProjectionRollback -ReceiptPath $receiptPath -Token $options.token -RepoRoot $options.repo_root -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -BackupRoot $backupRoot
+            $result=Invoke-GlobalRuleProjectionRollback -ReceiptPath $receiptPath -Token $options.token -RepoRoot $options.repo_root -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -BackupRoot $backupRoot -ZCodeUserRoot $zcodeRoot
             $envelope=[pscustomobject][ordered]@{schema_version=2;command='global-rules-rollback';pass=$result.pass;exit_code=0;roots=$roots;result=$result;provider_calls=0;native_mutations=0};$exit=0
         }
     }

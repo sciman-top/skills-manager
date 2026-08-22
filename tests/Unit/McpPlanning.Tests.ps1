@@ -50,6 +50,26 @@ function New-TestDesiredState([string]$Root, [bool]$ExistingMatches = $false) {
         @($withTrae | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.path) }).Count | Should -Be 0
     }
 
+    It 'uses the ZCode native config shape and does not create an undocumented sidecar' {
+        $root = Join-Path $TestDrive 'zcode-root'
+        $zcode = Join-Path $root '.zcode'
+        $server = New-TestMcpServer 'zcode-fixture'
+        $specs = @(Get-McpSyncManagedTargetSpecs -Roots @($zcode) -RepoRoot $root)
+        $desired = @(New-McpSyncDesiredState -Specs $specs -Servers @($server) -ActiveServers @($server))
+
+        @($specs.kind) | Should -Be @('zcode_json')
+        $desired[0].path | Should -Be (Join-Path $zcode 'config.json')
+        $payload = $desired[0].desired_content | ConvertFrom-Json
+        $payload.mcp.servers.'zcode-fixture'.command | Should -Be 'fixture-command'
+        $payload.mcp.servers.'zcode-fixture'.args[0] | Should -Be '--token'
+        $payload.PSObject.Properties.Name | Should -Not -Contain 'mcpServers'
+    }
+
+    It 'chooses cli/config.json for the documented ZCode user root' {
+        $userRoot = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.zcode'
+        (Get-ZCodeMcpConfigPath $userRoot) | Should -Be (Join-Path $userRoot 'cli\config.json')
+    }
+
     It 'produces stable targets actions ids and hashes across repeated plans' {
         $desired = New-TestDesiredState (Join-Path $TestDrive 'stable')
         $first = New-McpSyncOperationPlanResult -DesiredState $desired -CreatedAt $createdAt -SourceRevision $sourceRevision

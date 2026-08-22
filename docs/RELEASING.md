@@ -51,7 +51,7 @@ CI 对 `v*` tag 在 full gate 通过后生成两个 ZIP 和 checksum，为三个
 5. 创建并推送 annotated tag，例如 `git tag -a v2026.08.13 -m "v2026.08.13"`、`git push origin v2026.08.13`。
 6. 等待 GitHub Actions 成功，再使用 `gh attestation verify <asset> --repo sciman-top/skills-manager` 验证三个资产的 provenance，并从 Release 页面下载制品复核 SHA-256 与安装烟测。
 
-GitHub Actions 与 attestation 成功只证明 `repo_verified`、制品生成和构建来源；不证明技能已被宿主加载。至少还要在干净 Windows 用户环境中验证一次 `setup.cmd`，并用全新 Codex/Claude 会话验证 `host_loaded`。真实任务效果属于另一个 `live_accepted` 层级。
+GitHub Actions 与 attestation 成功只证明 `repo_verified`、制品生成和构建来源；不证明技能已被宿主加载。至少还要在干净 Windows 用户环境中验证一次 `setup.cmd`，并用全新 Codex/Claude/ZCode 会话验证 `host_loaded`。真实任务效果属于另一个 `live_accepted` 层级。
 
 ## 回滚
 

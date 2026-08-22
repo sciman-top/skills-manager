@@ -3876,7 +3876,7 @@ function Get-RuleDiscovery {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
         [string]$CurrentDirectory = $RepoRoot,
-        [Parameter(Mandatory = $true)][ValidateSet('codex', 'claude')][string]$HostName,
+        [Parameter(Mandatory = $true)][ValidateSet('codex', 'claude', 'zcode')][string]$HostName,
         [string]$UserRuleRoot,
         [string[]]$FallbackNames = @(),
         [int]$MaxCombinedBytes = 32768
@@ -3889,14 +3889,14 @@ function Get-RuleDiscovery {
     $precedence = 0
     if (-not [string]::IsNullOrWhiteSpace($UserRuleRoot)) {
         $user = [System.IO.Path]::GetFullPath($UserRuleRoot)
-        $globalNames = if ($HostName -eq 'codex') { @('AGENTS.override.md', 'AGENTS.md') } else { @('CLAUDE.md') }
+        $globalNames = if ($HostName -eq 'codex') { @('AGENTS.override.md', 'AGENTS.md') } elseif ($HostName -eq 'zcode') { @('AGENTS.md') } else { @('CLAUDE.md') }
         foreach ($name in $globalNames) {
             $path = Join-Path $user $name
             $exists = [System.IO.File]::Exists($path)
             $nonEmpty = $exists -and (Test-RuleDiscoveryNonEmptyFile $path)
             $reason = if (-not $exists) { 'absent' } elseif (-not $nonEmpty) { 'empty_candidate' } else { 'candidate' }
             $candidates.Add([pscustomobject]@{ path = $path; scope = 'global'; exists = $exists; selected = $false; reason = $reason }) | Out-Null
-            if ($nonEmpty) { $documents.Add((New-ObservedRuleDocument $path $HostName $(if ($name -match 'override') { 'override' } else { 'global' }) $precedence $(if ($HostName -eq 'codex') { 'common' } else { 'platform_delta' }))) | Out-Null; $candidates[$candidates.Count - 1].selected = $true; $candidates[$candidates.Count - 1].reason = 'first_non_empty_candidate'; $precedence++; break }
+            if ($nonEmpty) { $documents.Add((New-ObservedRuleDocument $path $HostName $(if ($name -match 'override') { 'override' } else { 'global' }) $precedence $(if ($HostName -eq 'claude') { 'platform_delta' } else { 'common' }))) | Out-Null; $candidates[$candidates.Count - 1].selected = $true; $candidates[$candidates.Count - 1].reason = 'first_non_empty_candidate'; $precedence++; break }
         }
     }
     $dirs = New-Object System.Collections.Generic.List[string]
@@ -3908,8 +3908,9 @@ function Get-RuleDiscovery {
         if ($null -eq $parent -or -not (Test-RuleDiscoveryPathWithin $parent.FullName $repo)) { throw 'Unable to construct a bounded repository rule chain.' }
         $cursor = $parent.FullName
     }
-    foreach ($dir in $dirs) {
-        $names = if ($HostName -eq 'codex') { @('AGENTS.override.md', 'AGENTS.md') + @($FallbackNames) } else { @('CLAUDE.md') }
+    $projectDirs = if ($HostName -eq 'zcode') { @($repo) } else { @($dirs) }
+    foreach ($dir in $projectDirs) {
+        $names = if ($HostName -eq 'codex') { @('AGENTS.override.md', 'AGENTS.md') + @($FallbackNames) } elseif ($HostName -eq 'zcode') { @('AGENTS.md') } else { @('CLAUDE.md') }
         $selected = $false
         foreach ($name in $names) {
             $path = Join-Path $dir $name
@@ -3919,9 +3920,9 @@ function Get-RuleDiscovery {
             $candidate = [pscustomobject]@{ path = $path; scope = $(if ($dir -eq $repo) { 'repo' } else { 'subtree' }); exists = $exists; selected = $false; reason = $reason }
             if ($nonEmpty -and -not $selected) {
                 $scope = if ($name -match 'override') { 'override' } elseif ($dir -eq $repo) { 'repo' } else { 'subtree' }
-                $document = New-ObservedRuleDocument $path $HostName $scope $precedence $(if ($HostName -eq 'codex') { 'project_action' } else { 'platform_delta' })
+                $document = New-ObservedRuleDocument $path $HostName $scope $precedence $(if ($HostName -eq 'claude') { 'platform_delta' } else { 'project_action' })
                 if ($HostName -eq 'claude') { $document.discovery_state = 'inferred'; $document.precedence = $null }
-                $documents.Add($document) | Out-Null; $candidate.selected = $true; $candidate.reason = $(if ($HostName -eq 'codex') { 'first_non_empty_candidate' } else { 'candidate_precedence_not_verified' }); $selected = $true; $precedence++
+                $documents.Add($document) | Out-Null; $candidate.selected = $true; $candidate.reason = $(if ($HostName -eq 'claude') { 'candidate_precedence_not_verified' } else { 'first_non_empty_candidate' }); $selected = $true; $precedence++
             }
             $candidates.Add($candidate) | Out-Null
         }
@@ -4897,6 +4898,7 @@ function Assert-GlobalRuleProjectionRoot([string]$Path, [string]$Label) {
 }
 
 function Test-GlobalRulePathEqual([string]$Left, [string]$Right) {
+    if([string]::IsNullOrWhiteSpace($Left)-or[string]::IsNullOrWhiteSpace($Right)){return [string]::IsNullOrWhiteSpace($Left)-and[string]::IsNullOrWhiteSpace($Right)}
     return [IO.Path]::GetFullPath($Left).TrimEnd('\','/').Equals([IO.Path]::GetFullPath($Right).TrimEnd('\','/'),[StringComparison]::OrdinalIgnoreCase)
 }
 
@@ -4914,14 +4916,29 @@ function Get-GlobalRuleProjectionEntries {
     param(
         [Parameter(Mandatory=$true)][string]$RepoRoot,
         [Parameter(Mandatory=$true)][string]$CodexUserRoot,
-        [Parameter(Mandatory=$true)][string]$ClaudeUserRoot
+        [Parameter(Mandatory=$true)][string]$ClaudeUserRoot,
+        [string]$ZCodeUserRoot = ''
     )
     $repo=Assert-GlobalRuleProjectionRoot $RepoRoot 'repository'
     $codex=Assert-GlobalRuleProjectionRoot $CodexUserRoot 'Codex user'
     $claude=Assert-GlobalRuleProjectionRoot $ClaudeUserRoot 'Claude user'
+    $entries = New-Object Collections.Generic.List[object]
+    $entries.Add([pscustomobject][ordered]@{id='codex';source_path=(Join-Path $repo 'rules\global\codex\AGENTS.md');target_path=(Join-Path $codex 'AGENTS.md');root=$codex})|Out-Null
+    $entries.Add([pscustomobject][ordered]@{id='claude';source_path=(Join-Path $repo 'rules\global\claude\CLAUDE.md');target_path=(Join-Path $claude 'CLAUDE.md');root=$claude})|Out-Null
+    if (-not [string]::IsNullOrWhiteSpace($ZCodeUserRoot)) {
+        $zcode=Assert-GlobalRuleProjectionRoot $ZCodeUserRoot 'ZCode user'
+        $entries.Add([pscustomobject][ordered]@{id='zcode';source_path=(Join-Path $repo 'rules\global\zcode\AGENTS.md');target_path=(Join-Path $zcode 'AGENTS.md');root=$zcode})|Out-Null
+    }
+    return @($entries.ToArray())
+}
+
+function Get-GlobalRuleSourceEntries {
+    param([Parameter(Mandatory=$true)][string]$RepoRoot)
+    $repo=Assert-GlobalRuleProjectionRoot $RepoRoot 'repository'
     return @(
-        [pscustomobject][ordered]@{id='codex';source_path=(Join-Path $repo 'rules\global\codex\AGENTS.md');target_path=(Join-Path $codex 'AGENTS.md');root=$codex}
-        [pscustomobject][ordered]@{id='claude';source_path=(Join-Path $repo 'rules\global\claude\CLAUDE.md');target_path=(Join-Path $claude 'CLAUDE.md');root=$claude}
+        [pscustomobject][ordered]@{id='codex';source_path=(Join-Path $repo 'rules\global\codex\AGENTS.md')}
+        [pscustomobject][ordered]@{id='claude';source_path=(Join-Path $repo 'rules\global\claude\CLAUDE.md')}
+        [pscustomobject][ordered]@{id='zcode';source_path=(Join-Path $repo 'rules\global\zcode\AGENTS.md')}
     )
 }
 
@@ -4953,12 +4970,12 @@ function Get-GlobalRuleSections([string]$Text) {
 }
 
 function Test-GlobalRuleSourceFamily {
-    param([Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot)
+    param([Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot,[string]$ZCodeUserRoot='')
     $findings=New-Object Collections.Generic.List[object];$observations=New-Object Collections.Generic.List[object]
-    $entries=Get-GlobalRuleProjectionEntries $RepoRoot $CodexUserRoot $ClaudeUserRoot;$facts=@{};$sections=@{}
-    foreach($entry in $entries){
+    $entries=Get-GlobalRuleProjectionEntries $RepoRoot $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot
+    $sourceEntries=Get-GlobalRuleSourceEntries $RepoRoot;$facts=@{};$sections=@{}
+    foreach($entry in $sourceEntries){
         if(Test-GlobalRuleProjectionReparsePath $entry.source_path ([IO.Path]::GetFullPath($RepoRoot))){$findings.Add((New-GlobalRuleFinding 'source_reparse_forbidden' $entry.source_path 'Global rule sources must not cross reparse points.'))|Out-Null}
-        if(Test-GlobalRuleProjectionReparsePath $entry.target_path $entry.root){$findings.Add((New-GlobalRuleFinding 'target_reparse_forbidden' $entry.target_path 'Global rule targets must be ordinary files below the user root.'))|Out-Null}
         try{$fact=Get-GlobalRuleFileFacts $entry.source_path}catch{$findings.Add((New-GlobalRuleFinding 'source_encoding_invalid' $entry.source_path $_.Exception.Message))|Out-Null;continue}
         $facts[$entry.id]=$fact
         if(-not $fact.exists){$findings.Add((New-GlobalRuleFinding 'source_missing' $entry.source_path 'Global rule source is missing.'))|Out-Null;continue}
@@ -4972,6 +4989,7 @@ function Test-GlobalRuleSourceFamily {
         $sections[$entry.id]=Get-GlobalRuleSections $fact.text
         if($null-eq$sections[$entry.id]){$findings.Add((New-GlobalRuleFinding 'source_structure_invalid' $entry.source_path 'Global rules require exactly one ordered 1/A/B/C/D section family.'))|Out-Null}
     }
+    foreach($entry in $entries){if(Test-GlobalRuleProjectionReparsePath $entry.target_path $entry.root){$findings.Add((New-GlobalRuleFinding 'target_reparse_forbidden' $entry.target_path 'Global rule targets must be ordinary files below the user root.'))|Out-Null}}
     if($facts.ContainsKey('codex')-and$facts.ContainsKey('claude')-and$facts.codex.exists-and$facts.claude.exists){
         if($facts.codex.version-ne$facts.claude.version){$findings.Add((New-GlobalRuleFinding 'source_version_mismatch' '$' 'Codex and Claude global rule versions differ.'))|Out-Null}
         $c=$sections['codex'];$h=$sections['claude']
@@ -4982,14 +5000,19 @@ function Test-GlobalRuleSourceFamily {
             if($c.a-cne$h.a-or$c.c-cne$h.c-or$c.d-cne$h.d){$findings.Add((New-GlobalRuleFinding 'source_common_sections_drift' '$' 'Codex and Claude A/C/D common sections must be byte-equivalent after newline normalization.'))|Out-Null}
         }
     }
-    return [pscustomobject][ordered]@{pass=($findings.Count-eq0);findings=@($findings.ToArray());observations=@($observations.ToArray());entries=$entries;facts=$facts}
+    if($facts.ContainsKey('zcode')-and$facts.zcode.exists-and$sections.ContainsKey('zcode')-and$null-ne$sections.zcode){
+        $zcodePlatformBody=[regex]::Replace($sections.zcode.b,'^[^\n]*\n?','').Trim()
+        if([string]::IsNullOrWhiteSpace($zcodePlatformBody)){$findings.Add((New-GlobalRuleFinding 'source_platform_section_empty' '$.B' 'ZCode B section must be non-empty.'))|Out-Null}
+    }
+    return [pscustomobject][ordered]@{pass=($findings.Count-eq0);findings=@($findings.ToArray());observations=@($observations.ToArray());entries=$entries;source_entries=$sourceEntries;facts=$facts}
 }
 
-function Get-GlobalRulePlanIdentity([string]$RepoRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[object[]]$Actions) {
+function Get-GlobalRulePlanIdentity([string]$RepoRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[object[]]$Actions,[string]$ZCodeUserRoot='') {
     $parts=New-Object Collections.Generic.List[string]
     $parts.Add([IO.Path]::GetFullPath($RepoRoot).ToLowerInvariant())|Out-Null
     $parts.Add([IO.Path]::GetFullPath($CodexUserRoot).ToLowerInvariant())|Out-Null
     $parts.Add([IO.Path]::GetFullPath($ClaudeUserRoot).ToLowerInvariant())|Out-Null
+    if(-not[string]::IsNullOrWhiteSpace($ZCodeUserRoot)){$parts.Add([IO.Path]::GetFullPath($ZCodeUserRoot).ToLowerInvariant())|Out-Null}
     foreach($action in @($Actions|Sort-Object id)){
         $parts.Add(('{0}|{1}|{2}|{3}|{4}|{5}|{6}' -f [string](Get-GlobalRuleProperty $action 'id'),([IO.Path]::GetFullPath([string](Get-GlobalRuleProperty $action 'source_path')).ToLowerInvariant()),([IO.Path]::GetFullPath([string](Get-GlobalRuleProperty $action 'target_path')).ToLowerInvariant()),[string](Get-GlobalRuleProperty $action 'source_hash'),[bool](Get-GlobalRuleProperty $action 'before_exists'),[string](Get-GlobalRuleProperty $action 'before_hash'),[string](Get-GlobalRuleProperty $action 'operation')))|Out-Null
     }
@@ -4998,28 +5021,31 @@ function Get-GlobalRulePlanIdentity([string]$RepoRoot,[string]$CodexUserRoot,[st
 }
 
 function New-GlobalRuleProjectionPlan {
-    param([Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot)
-    $validation=Test-GlobalRuleSourceFamily $RepoRoot $CodexUserRoot $ClaudeUserRoot
+    param([Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot,[string]$ZCodeUserRoot='')
+    $validation=Test-GlobalRuleSourceFamily $RepoRoot $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot
     if(-not$validation.pass){throw('Global rule sources are invalid: {0}'-f(@($validation.findings.code)-join', '))}
     $actions=foreach($entry in $validation.entries){
         $source=$validation.facts[$entry.id];$target=Get-GlobalRuleFileFacts $entry.target_path
         [pscustomobject][ordered]@{id=$entry.id;source_path=[IO.Path]::GetFullPath($entry.source_path);target_path=[IO.Path]::GetFullPath($entry.target_path);source_hash=$source.hash;before_exists=[bool]$target.exists;before_hash=$target.hash;operation=$(if(-not$target.exists){'create'}elseif($source.hash-eq$target.hash){'unchanged'}else{'update'})}
     }
     $repo=[IO.Path]::GetFullPath($RepoRoot);$codex=[IO.Path]::GetFullPath($CodexUserRoot);$claude=[IO.Path]::GetFullPath($ClaudeUserRoot)
-    $identity=Get-GlobalRulePlanIdentity $repo $codex $claude $actions
-    return [pscustomobject][ordered]@{schema_version=2;domain='global_rule_projection';operation_id=$identity.operation_id;plan_hash=$identity.plan_hash;generated_at=[datetimeoffset]::UtcNow.ToString('o');repo_root=$repo;codex_user_root=$codex;claude_user_root=$claude;actions=@($actions);apply=[pscustomobject]@{required_token=$identity.apply_token;freshness='canonical_sources_and_targets';resume='explicit';rollback='operation_bound_receipt'};observations=@($validation.observations);truth_boundary='planned_not_applied';provider_calls=0;native_mutations=0}
+    $zcode=$(if([string]::IsNullOrWhiteSpace($ZCodeUserRoot)){''}else{[IO.Path]::GetFullPath($ZCodeUserRoot)})
+    $identity=Get-GlobalRulePlanIdentity $repo $codex $claude $actions $zcode
+    return [pscustomobject][ordered]@{schema_version=2;domain='global_rule_projection';operation_id=$identity.operation_id;plan_hash=$identity.plan_hash;generated_at=[datetimeoffset]::UtcNow.ToString('o');repo_root=$repo;codex_user_root=$codex;claude_user_root=$claude;zcode_user_root=$zcode;actions=@($actions);apply=[pscustomobject]@{required_token=$identity.apply_token;freshness='canonical_sources_and_targets';resume='explicit';rollback='operation_bound_receipt'};observations=@($validation.observations);truth_boundary='planned_not_applied';provider_calls=0;native_mutations=0}
 }
 
 function Test-GlobalRulePlanBinding {
-    param($Plan,[string]$RepoRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[switch]$AllowAppliedTargets)
+    param($Plan,[string]$RepoRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[string]$ZCodeUserRoot='',[switch]$AllowAppliedTargets)
     $findings=New-Object Collections.Generic.List[object]
     if($null-eq$Plan-or(Get-GlobalRuleProperty $Plan 'schema_version')-ne2-or[string](Get-GlobalRuleProperty $Plan 'domain')-ne'global_rule_projection'){
         return [pscustomobject]@{pass=$false;findings=@((New-GlobalRuleFinding 'plan_schema_invalid' '$' 'Only global rule projection plan schema version 2 is supported; generate a new plan.'))}
     }
     $repo=[IO.Path]::GetFullPath($RepoRoot);$codex=[IO.Path]::GetFullPath($CodexUserRoot);$claude=[IO.Path]::GetFullPath($ClaudeUserRoot)
     foreach($pair in @(@('repo_root',$repo),@('codex_user_root',$codex),@('claude_user_root',$claude))){if(-not(Test-GlobalRulePathEqual ([string](Get-GlobalRuleProperty $Plan $pair[0])) $pair[1])){$findings.Add((New-GlobalRuleFinding 'authorization_root_mismatch' ('$.'+$pair[0]) 'CLI roots must exactly match the plan roots.'))|Out-Null}}
-    $canonical=Get-GlobalRuleProjectionEntries $repo $codex $claude;$actions=@(Get-GlobalRuleProperty $Plan 'actions')
-    if($actions.Count-ne2){$findings.Add((New-GlobalRuleFinding 'plan_action_set_invalid' '$.actions' 'Plan must contain exactly the canonical Codex and Claude actions.'))|Out-Null}
+    $zcode=$(if([string]::IsNullOrWhiteSpace($ZCodeUserRoot)){''}else{[IO.Path]::GetFullPath($ZCodeUserRoot)})
+    if(-not(Test-GlobalRulePathEqual ([string](Get-GlobalRuleProperty $Plan 'zcode_user_root')) $zcode)){$findings.Add((New-GlobalRuleFinding 'authorization_root_mismatch' '$.zcode_user_root' 'CLI ZCode root must exactly match the plan root.'))|Out-Null}
+    $canonical=Get-GlobalRuleProjectionEntries $repo $codex $claude $zcode;$actions=@(Get-GlobalRuleProperty $Plan 'actions')
+    if($actions.Count-ne$canonical.Count){$findings.Add((New-GlobalRuleFinding 'plan_action_set_invalid' '$.actions' 'Plan must contain exactly the canonical host actions.'))|Out-Null}
     $byId=@{};foreach($action in $actions){$id=[string](Get-GlobalRuleProperty $action 'id');if($byId.ContainsKey($id)){$byId[$id]=$null}else{$byId[$id]=$action}}
     foreach($entry in $canonical){
         $action=if($byId.ContainsKey($entry.id)){$byId[$entry.id]}else{$null}
@@ -5031,8 +5057,8 @@ function Test-GlobalRulePlanBinding {
         if($operation-ne$expectedOperation){$findings.Add((New-GlobalRuleFinding 'plan_operation_invalid' '$.actions' 'Plan operation does not match its bound hashes.'))|Out-Null}
         if(-not$AllowAppliedTargets){$target=Get-GlobalRuleFileFacts $entry.target_path;if($target.exists-ne$beforeExists-or$target.hash-ne$beforeHash){$findings.Add((New-GlobalRuleFinding 'target_hash_stale' $entry.target_path 'Global rule target changed after planning.'))|Out-Null}}
     }
-    if($actions.Count-eq2){
-        try{$identity=Get-GlobalRulePlanIdentity $repo $codex $claude $actions;if([string](Get-GlobalRuleProperty $Plan 'plan_hash')-cne$identity.plan_hash-or[string](Get-GlobalRuleProperty $Plan 'operation_id')-cne$identity.operation_id-or[string](Get-GlobalRuleProperty (Get-GlobalRuleProperty $Plan 'apply') 'required_token')-cne$identity.apply_token){$findings.Add((New-GlobalRuleFinding 'plan_identity_invalid' '$' 'Plan identity or token is not canonical.'))|Out-Null}}catch{$findings.Add((New-GlobalRuleFinding 'plan_identity_invalid' '$' $_.Exception.Message))|Out-Null}
+    if($actions.Count-eq$canonical.Count){
+        try{$identity=Get-GlobalRulePlanIdentity $repo $codex $claude $actions $zcode;if([string](Get-GlobalRuleProperty $Plan 'plan_hash')-cne$identity.plan_hash-or[string](Get-GlobalRuleProperty $Plan 'operation_id')-cne$identity.operation_id-or[string](Get-GlobalRuleProperty (Get-GlobalRuleProperty $Plan 'apply') 'required_token')-cne$identity.apply_token){$findings.Add((New-GlobalRuleFinding 'plan_identity_invalid' '$' 'Plan identity or token is not canonical.'))|Out-Null}}catch{$findings.Add((New-GlobalRuleFinding 'plan_identity_invalid' '$' $_.Exception.Message))|Out-Null}
     }
     return [pscustomobject]@{pass=($findings.Count-eq0);findings=@($findings.ToArray())}
 }
@@ -5043,17 +5069,17 @@ function Write-GlobalRuleReceipt([string]$Path,$Receipt) {
 }
 
 function Test-GlobalRuleReceiptBinding {
-    param($Receipt,$Plan,[string]$RepoRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[string]$BackupRoot)
+    param($Receipt,$Plan,[string]$RepoRoot,[string]$CodexUserRoot,[string]$ClaudeUserRoot,[string]$BackupRoot,[string]$ZCodeUserRoot='')
     $findings=New-Object Collections.Generic.List[object]
     if($null-eq$Receipt-or(Get-GlobalRuleProperty $Receipt 'schema_version')-ne2-or[string](Get-GlobalRuleProperty $Receipt 'domain')-ne'global_rule_projection'){
         return [pscustomobject]@{pass=$false;findings=@((New-GlobalRuleFinding 'receipt_schema_invalid' '$' 'Only global rule projection receipt schema version 2 is supported.'))}
     }
     if([string](Get-GlobalRuleProperty $Receipt 'operation_id')-cne[string](Get-GlobalRuleProperty $Plan 'operation_id')-or[string](Get-GlobalRuleProperty $Receipt 'plan_hash')-cne[string](Get-GlobalRuleProperty $Plan 'plan_hash')){$findings.Add((New-GlobalRuleFinding 'receipt_plan_mismatch' '$' 'Receipt is not bound to the supplied plan.'))|Out-Null}
-    $identity=Get-GlobalRulePlanIdentity $RepoRoot $CodexUserRoot $ClaudeUserRoot @(Get-GlobalRuleProperty $Plan 'actions')
+    $identity=Get-GlobalRulePlanIdentity $RepoRoot $CodexUserRoot $ClaudeUserRoot @(Get-GlobalRuleProperty $Plan 'actions') $ZCodeUserRoot
     if([string](Get-GlobalRuleProperty (Get-GlobalRuleProperty $Receipt 'rollback') 'required_token')-cne$identity.rollback_token){$findings.Add((New-GlobalRuleFinding 'receipt_rollback_token_invalid' '$.rollback.required_token' 'Receipt rollback token is not operation-bound.'))|Out-Null}
-    foreach($pair in @(@('repo_root',$RepoRoot),@('codex_user_root',$CodexUserRoot),@('claude_user_root',$ClaudeUserRoot))){if(-not(Test-GlobalRulePathEqual ([string](Get-GlobalRuleProperty $Receipt $pair[0])) $pair[1])){$findings.Add((New-GlobalRuleFinding 'receipt_root_mismatch' ('$.'+$pair[0]) 'Receipt roots do not match the authorized roots.'))|Out-Null}}
+    foreach($pair in @(@('repo_root',$RepoRoot),@('codex_user_root',$CodexUserRoot),@('claude_user_root',$ClaudeUserRoot),@('zcode_user_root',$ZCodeUserRoot))){if(-not(Test-GlobalRulePathEqual ([string](Get-GlobalRuleProperty $Receipt $pair[0])) $pair[1])){$findings.Add((New-GlobalRuleFinding 'receipt_root_mismatch' ('$.'+$pair[0]) 'Receipt roots do not match the authorized roots.'))|Out-Null}}
     $planActions=@(Get-GlobalRuleProperty $Plan 'actions');$receiptActions=@(Get-GlobalRuleProperty $Receipt 'actions')
-    if($receiptActions.Count-ne2){$findings.Add((New-GlobalRuleFinding 'receipt_action_set_invalid' '$.actions' 'Receipt must contain exactly two actions.'))|Out-Null}
+    if($receiptActions.Count-ne$planActions.Count){$findings.Add((New-GlobalRuleFinding 'receipt_action_set_invalid' '$.actions' 'Receipt must contain exactly the plan actions.'))|Out-Null}
     $receiptById=@{};foreach($item in $receiptActions){$id=[string](Get-GlobalRuleProperty $item 'id');if($receiptById.ContainsKey($id)){$receiptById[$id]=$null}else{$receiptById[$id]=$item}}
     foreach($action in $planActions){
         $id=[string](Get-GlobalRuleProperty $action 'id');$item=if($receiptById.ContainsKey($id)){$receiptById[$id]}else{$null}
@@ -5078,8 +5104,8 @@ function Test-GlobalRuleReceiptBinding {
 }
 
 function Invoke-GlobalRuleProjectionApply {
-    param($Plan,[Parameter(Mandatory=$true)][string]$Token,[Parameter(Mandatory=$true)][string]$BackupRoot,[Parameter(Mandatory=$true)][string]$ReceiptPath,[Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot,[switch]$Resume)
-    $binding=Test-GlobalRulePlanBinding $Plan $RepoRoot $CodexUserRoot $ClaudeUserRoot -AllowAppliedTargets:$Resume
+    param($Plan,[Parameter(Mandatory=$true)][string]$Token,[Parameter(Mandatory=$true)][string]$BackupRoot,[Parameter(Mandatory=$true)][string]$ReceiptPath,[Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot,[switch]$Resume,[string]$ZCodeUserRoot='')
+    $binding=Test-GlobalRulePlanBinding $Plan $RepoRoot $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot -AllowAppliedTargets:$Resume
     if(-not$binding.pass){throw('Global rule projection plan is invalid or stale: {0}'-f(@($binding.findings.code)-join', '))}
     if($Token-cne[string](Get-GlobalRuleProperty (Get-GlobalRuleProperty $Plan 'apply') 'required_token')){throw 'Global rule projection token does not match the plan.'}
     $receiptFile=[IO.Path]::GetFullPath($ReceiptPath);$exists=[IO.File]::Exists($receiptFile)
@@ -5088,15 +5114,15 @@ function Invoke-GlobalRuleProjectionApply {
     $backupBase=Join-Path ([IO.Path]::GetFullPath($BackupRoot)) ([string](Get-GlobalRuleProperty $Plan 'operation_id'))
     if($Resume){
         $receipt=[IO.File]::ReadAllText($receiptFile)|ConvertFrom-Json
-        $receiptBinding=Test-GlobalRuleReceiptBinding $receipt $Plan $RepoRoot $CodexUserRoot $ClaudeUserRoot $BackupRoot
+        $receiptBinding=Test-GlobalRuleReceiptBinding $receipt $Plan $RepoRoot $CodexUserRoot $ClaudeUserRoot $BackupRoot $ZCodeUserRoot
         if(-not$receiptBinding.pass){throw('Global rule receipt is invalid: {0}'-f(@($receiptBinding.findings.code)-join', '))}
         if([string](Get-GlobalRuleProperty $receipt 'status')-notin@('in_progress','recovery_required')){throw 'Global rule receipt is not resumable.'}
         if(@($receipt.actions|Where-Object {$_.status-eq'rolled_back'}).Count-gt0){throw 'Global rule receipt contains rolled-back actions and is not resumable for apply.'}
     }else{
         [IO.Directory]::CreateDirectory($backupBase)|Out-Null
         $receiptActions=foreach($action in @(Get-GlobalRuleProperty $Plan 'actions')){[pscustomobject][ordered]@{id=$action.id;source_path=$action.source_path;target_path=$action.target_path;source_hash=$action.source_hash;before_exists=[bool]$action.before_exists;before_hash=$action.before_hash;operation=$action.operation;status=$(if($action.operation-eq'unchanged'){'unchanged'}else{'pending'});backup_path=$null;backup_sha256=$null;backup_length=$null}}
-        $identity=Get-GlobalRulePlanIdentity $RepoRoot $CodexUserRoot $ClaudeUserRoot @(Get-GlobalRuleProperty $Plan 'actions')
-        $receipt=[pscustomobject][ordered]@{schema_version=2;domain='global_rule_projection';operation_id=$Plan.operation_id;plan_hash=$Plan.plan_hash;status='in_progress';started_at=[datetimeoffset]::UtcNow.ToString('o');updated_at=$null;completed_at=$null;repo_root=[IO.Path]::GetFullPath($RepoRoot);codex_user_root=[IO.Path]::GetFullPath($CodexUserRoot);claude_user_root=[IO.Path]::GetFullPath($ClaudeUserRoot);actions=@($receiptActions);writes=0;last_error=$null;rollback=[pscustomobject]@{required_token=$identity.rollback_token};truth_boundary='filesystem_apply_in_progress_not_host_loaded'}
+        $identity=Get-GlobalRulePlanIdentity $RepoRoot $CodexUserRoot $ClaudeUserRoot @(Get-GlobalRuleProperty $Plan 'actions') $ZCodeUserRoot
+        $receipt=[pscustomobject][ordered]@{schema_version=2;domain='global_rule_projection';operation_id=$Plan.operation_id;plan_hash=$Plan.plan_hash;status='in_progress';started_at=[datetimeoffset]::UtcNow.ToString('o');updated_at=$null;completed_at=$null;repo_root=[IO.Path]::GetFullPath($RepoRoot);codex_user_root=[IO.Path]::GetFullPath($CodexUserRoot);claude_user_root=[IO.Path]::GetFullPath($ClaudeUserRoot);zcode_user_root=$(if([string]::IsNullOrWhiteSpace($ZCodeUserRoot)){''}else{[IO.Path]::GetFullPath($ZCodeUserRoot)});actions=@($receiptActions);writes=0;last_error=$null;rollback=[pscustomobject]@{required_token=$identity.rollback_token};truth_boundary='filesystem_apply_in_progress_not_host_loaded'}
         Write-GlobalRuleReceipt $receiptFile $receipt
     }
     foreach($field in @('updated_at','completed_at','last_error','truth_boundary')){if($null-eq$receipt.PSObject.Properties[$field]){$receipt|Add-Member -NotePropertyName $field -NotePropertyValue $null}}
@@ -5132,23 +5158,23 @@ function Invoke-GlobalRuleProjectionApply {
 }
 
 function Test-GlobalRuleProjection {
-    param([Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot)
-    $source=Test-GlobalRuleSourceFamily $RepoRoot $CodexUserRoot $ClaudeUserRoot;$findings=New-Object Collections.Generic.List[object]
+    param([Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot,[string]$ZCodeUserRoot='')
+    $source=Test-GlobalRuleSourceFamily $RepoRoot $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot;$findings=New-Object Collections.Generic.List[object]
     foreach($finding in @($source.findings)){$findings.Add($finding)|Out-Null}
     if($source.pass){foreach($entry in $source.entries){$target=Get-GlobalRuleFileFacts $entry.target_path;if(-not$target.exists){$findings.Add((New-GlobalRuleFinding 'target_missing' $entry.target_path 'Projected global rule is missing.'))|Out-Null}elseif($target.hash-ne$source.facts[$entry.id].hash){$findings.Add((New-GlobalRuleFinding 'target_source_drift' $entry.target_path 'Projected global rule differs from its source.'))|Out-Null}}}
     return [pscustomobject][ordered]@{pass=($findings.Count-eq0);findings=@($findings.ToArray());observations=@($source.observations);truth_boundary=$(if($findings.Count-eq0){'filesystem_projected_not_host_loaded'}else{'projection_not_verified'})}
 }
 
 function Invoke-GlobalRuleProjectionRollback {
-    param([Parameter(Mandatory=$true)][string]$ReceiptPath,[Parameter(Mandatory=$true)][string]$Token,[Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot,[Parameter(Mandatory=$true)][string]$BackupRoot)
+    param([Parameter(Mandatory=$true)][string]$ReceiptPath,[Parameter(Mandatory=$true)][string]$Token,[Parameter(Mandatory=$true)][string]$RepoRoot,[Parameter(Mandatory=$true)][string]$CodexUserRoot,[Parameter(Mandatory=$true)][string]$ClaudeUserRoot,[Parameter(Mandatory=$true)][string]$BackupRoot,[string]$ZCodeUserRoot='')
     $receiptFile=[IO.Path]::GetFullPath($ReceiptPath);if(-not[IO.File]::Exists($receiptFile)){throw 'Global rule receipt does not exist.'}
     $receipt=[IO.File]::ReadAllText($receiptFile)|ConvertFrom-Json
     if((Get-GlobalRuleProperty $receipt 'schema_version')-ne2-or[string](Get-GlobalRuleProperty $receipt 'domain')-ne'global_rule_projection'){throw 'Only global rule projection receipt schema version 2 is supported; schema v1 receipts cannot be rolled back.'}
-    $plan=[pscustomobject]@{schema_version=2;domain='global_rule_projection';operation_id=$receipt.operation_id;plan_hash=$receipt.plan_hash;repo_root=$receipt.repo_root;codex_user_root=$receipt.codex_user_root;claude_user_root=$receipt.claude_user_root;actions=@($receipt.actions|ForEach-Object{[pscustomobject]@{id=$_.id;source_path=$_.source_path;target_path=$_.target_path;source_hash=$_.source_hash;before_exists=[bool]$_.before_exists;before_hash=$_.before_hash;operation=$_.operation}});apply=[pscustomobject]@{required_token=$null}}
-    $identity=Get-GlobalRulePlanIdentity $RepoRoot $CodexUserRoot $ClaudeUserRoot $plan.actions;$plan.apply.required_token=$identity.apply_token
-    $planBinding=Test-GlobalRulePlanBinding $plan $RepoRoot $CodexUserRoot $ClaudeUserRoot -AllowAppliedTargets
+    $plan=[pscustomobject]@{schema_version=2;domain='global_rule_projection';operation_id=$receipt.operation_id;plan_hash=$receipt.plan_hash;repo_root=$receipt.repo_root;codex_user_root=$receipt.codex_user_root;claude_user_root=$receipt.claude_user_root;zcode_user_root=$receipt.zcode_user_root;actions=@($receipt.actions|ForEach-Object{[pscustomobject]@{id=$_.id;source_path=$_.source_path;target_path=$_.target_path;source_hash=$_.source_hash;before_exists=[bool]$_.before_exists;before_hash=$_.before_hash;operation=$_.operation}});apply=[pscustomobject]@{required_token=$null}}
+    $identity=Get-GlobalRulePlanIdentity $RepoRoot $CodexUserRoot $ClaudeUserRoot $plan.actions $ZCodeUserRoot;$plan.apply.required_token=$identity.apply_token
+    $planBinding=Test-GlobalRulePlanBinding $plan $RepoRoot $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot -AllowAppliedTargets
     if(-not$planBinding.pass-or$plan.plan_hash-cne$identity.plan_hash-or$plan.operation_id-cne$identity.operation_id){throw('Global rule receipt canonical binding is invalid: {0}'-f(@($planBinding.findings.code)-join', '))}
-    $receiptBinding=Test-GlobalRuleReceiptBinding $receipt $plan $RepoRoot $CodexUserRoot $ClaudeUserRoot $BackupRoot
+    $receiptBinding=Test-GlobalRuleReceiptBinding $receipt $plan $RepoRoot $CodexUserRoot $ClaudeUserRoot $BackupRoot $ZCodeUserRoot
     if(-not$receiptBinding.pass){throw('Global rule receipt is invalid: {0}'-f(@($receiptBinding.findings.code)-join', '))}
     if($Token-cne[string]$receipt.rollback.required_token-or$Token-cne$identity.rollback_token){throw 'Global rule rollback token is invalid.'}
     if([string]$receipt.status-notin@('applied','rollback_in_progress')){throw 'Global rule receipt is not rollback eligible.'}
@@ -12556,6 +12582,30 @@ function Build-GenericMcpPayload([string]$existingContent, $servers) {
     return [pscustomobject]$base
 }
 
+function Build-ZCodeMcpPayload([string]$existingContent, $servers) {
+    $base = [ordered]@{}
+    if (-not [string]::IsNullOrWhiteSpace($existingContent)) {
+        try {
+            $parsed = $existingContent | ConvertFrom-Json
+            if ($null -ne $parsed) {
+                foreach ($property in $parsed.PSObject.Properties) { $base[[string]$property.Name] = $property.Value }
+            }
+        }
+        catch {
+            Log ("ZCode MCP JSON 解析失败，将使用最小配置重建：{0}" -f $_.Exception.Message) "WARN"
+        }
+    }
+
+    $mcp = [ordered]@{}
+    $existingMcp = if ($base.Contains('mcp')) { $base['mcp'] } else { $null }
+    if ($null -ne $existingMcp) {
+        foreach ($property in $existingMcp.PSObject.Properties) { $mcp[[string]$property.Name] = $property.Value }
+    }
+    $mcp['servers'] = Convert-McpServersToConfigMap $servers
+    $base['mcp'] = [pscustomobject]$mcp
+    return [pscustomobject]$base
+}
+
 function Get-NativeMcpKeyValueFlags($data, [string]$flagName, [string]$separator = "=") {
     $flags = @()
     if ($null -eq $data) { return $flags }
@@ -13681,6 +13731,15 @@ function Get-TraeProjectMcpConfigPath([string]$repoRoot) {
     return (Join-Path (Join-Path $repoRoot ".trae") "mcp.json")
 }
 
+function Get-ZCodeMcpConfigPath([string]$zcodeRoot) {
+    $root = [IO.Path]::GetFullPath($zcodeRoot).TrimEnd('\', '/')
+    $userRoot = [IO.Path]::GetFullPath((Join-Path ([Environment]::GetFolderPath('UserProfile')) '.zcode')).TrimEnd('\', '/')
+    if ($root.Equals($userRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        return (Join-Path $root 'cli\config.json')
+    }
+    return (Join-Path $root 'config.json')
+}
+
 function Get-McpTargetCandidatePaths($cfg) {
     $paths = New-Object System.Collections.Generic.List[string]
     if ($null -eq $cfg) { return @() }
@@ -13719,7 +13778,7 @@ function Resolve-McpTargetRootsFromCfg($cfg) {
         $norm = $path.Replace("/", "\")
         $lower = $norm.ToLowerInvariant()
 
-        $dotDirs = @(".claude", ".codex", ".gemini", ".trae")
+        $dotDirs = @(".claude", ".codex", ".gemini", ".trae", ".zcode")
         $matched = $false
         $bestIdx = -1
         $bestNeedleLen = 0
@@ -14043,7 +14102,7 @@ function Get-McpSyncManagedTargetSpecs {
             }) | Out-Null
     }
 
-    foreach ($root in @($flatRoots.ToArray() | Sort-Object)) {
+    foreach ($root in @($flatRoots.ToArray() | Where-Object { -not (Split-Path ([string]$_) -Leaf).Equals('.zcode', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)) {
         Add-McpTargetSpec (Join-Path $root '.mcp.json') 'generic_json' $root
     }
     foreach ($root in @($flatRoots.ToArray() | Where-Object { (Split-Path ([string]$_) -Leaf).Equals('.gemini', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)) {
@@ -14054,6 +14113,9 @@ function Get-McpSyncManagedTargetSpecs {
     }
     foreach ($root in @($flatRoots.ToArray() | Where-Object { (Split-Path ([string]$_) -Leaf).Equals('.codex', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)) {
         Add-McpTargetSpec (Join-Path $root 'config.toml') 'codex_toml' $root
+    }
+    foreach ($root in @($flatRoots.ToArray() | Where-Object { (Split-Path ([string]$_) -Leaf).Equals('.zcode', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)) {
+        Add-McpTargetSpec (Get-ZCodeMcpConfigPath $root) 'zcode_json' $root
     }
     $traeRoots = @($flatRoots.ToArray() | Where-Object { (Split-Path ([string]$_) -Leaf).Equals('.trae', [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object)
     foreach ($root in $traeRoots) {
@@ -14116,6 +14178,10 @@ function New-McpSyncDesiredState {
             }
             'codex_toml' {
                 $content = Build-CodexConfigToml $existing $Servers
+            }
+            'zcode_json' {
+                $payload = Build-ZCodeMcpPayload $existing $ActiveServers
+                $content = $payload | ConvertTo-Json -Depth 100
             }
             'trae_json' {
                 $payload = Build-GenericMcpPayload $existing $ActiveServers
@@ -14321,6 +14387,7 @@ function Write-McpDesiredTarget($target) {
         'gemini_settings' { Log ("已同步 Gemini MCP 配置：{0}" -f $path) }
         'gemini_antigravity_settings' { Log ("已同步 Gemini Antigravity MCP 配置：{0}" -f $path) }
         'codex_toml' { Log ("已同步 Codex MCP 配置：{0}" -f $path) }
+        'zcode_json' { Log ("已同步 ZCode MCP 配置：{0}" -f $path) }
         'trae_json' { Log ("已同步 Trae MCP 配置：{0}" -f $path) }
         'trae_project_json' { Log ("已同步项目级 Trae MCP 配置：{0}" -f $path) }
         default { Log ("已同步 MCP 配置：{0}" -f $path) }
@@ -14549,7 +14616,7 @@ function Parse-RuleAuditOptions([object[]]$Tokens) {
         }
     }
     if ([string]::IsNullOrWhiteSpace([string]$result.repo)) { throw '--repo is required.' }
-    if ([string]$result.host -notin @('codex', 'claude')) { throw '--host supports codex or claude.' }
+    if ([string]$result.host -notin @('codex', 'claude', 'zcode')) { throw '--host supports codex, claude, or zcode.' }
     if ([string]::IsNullOrWhiteSpace([string]$result.current_directory)) { $result.current_directory = $result.repo }
     return [pscustomobject]$result
 }
@@ -14731,18 +14798,21 @@ function Parse-GlobalRuleOptions([object[]]$Tokens,[ValidateSet('check','plan','
         codex_user_root_source=$(if($codexFromEnv){'CODEX_HOME'}else{'default'})
         claude_user_root=$(if($claudeFromEnv){$env:CLAUDE_CONFIG_DIR}else{Join-Path $userProfile '.claude'})
         claude_user_root_source=$(if($claudeFromEnv){'CLAUDE_CONFIG_DIR'}else{'default'})
+        zcode_user_root=(Join-Path $userProfile '.zcode')
+        zcode_user_root_source='default'
         plan=$null;receipt=$null;token=$null;out_path=$null;json=$false;resume=$false
     }
     for($i=0;$i-lt@($Tokens).Count;$i++){
         $token=[string]$Tokens[$i]
         if($token-eq'--json'){$result.json=$true;continue}
         if($token-eq'--resume'){$result.resume=$true;continue}
-        if($token-notin@('--repo-root','--codex-user-root','--claude-user-root','--plan','--receipt','--token','--out')){throw('Unknown global-rules-{0} option: {1}'-f$Mode,$token)}
+        if($token-notin@('--repo-root','--codex-user-root','--claude-user-root','--zcode-user-root','--plan','--receipt','--token','--out')){throw('Unknown global-rules-{0} option: {1}'-f$Mode,$token)}
         if($i+1-ge@($Tokens).Count){throw('{0} requires a value.'-f$token)};$i++;$value=[string]$Tokens[$i]
         switch($token){
             '--repo-root'{$result.repo_root=$value}
             '--codex-user-root'{$result.codex_user_root=$value;$result.codex_user_root_source='cli'}
             '--claude-user-root'{$result.claude_user_root=$value;$result.claude_user_root_source='cli'}
+            '--zcode-user-root'{$result.zcode_user_root=$value;$result.zcode_user_root_source='cli'}
             '--plan'{$result.plan=$value}
             '--receipt'{$result.receipt=$value}
             '--token'{$result.token=$value}
@@ -14765,6 +14835,17 @@ function Resolve-GlobalRuleControlPath([string]$Path,[string]$RepoRoot,[switch]$
     return $resolved
 }
 
+function Resolve-OptionalZCodeGlobalRuleRoot($Options) {
+    $candidate = [string]$Options.zcode_user_root
+    if (Test-Path -LiteralPath $candidate -PathType Container) {
+        return [IO.Path]::GetFullPath($candidate)
+    }
+    if ($Options.zcode_user_root_source -eq 'cli') {
+        throw ('ZCode user root does not exist or is not a directory: {0}' -f $candidate)
+    }
+    return ''
+}
+
 function Get-GlobalRuleRootEnvelope($Options) {
     return [pscustomobject][ordered]@{
         repo_root=[IO.Path]::GetFullPath($Options.repo_root)
@@ -14772,19 +14853,22 @@ function Get-GlobalRuleRootEnvelope($Options) {
         codex_user_root_source=$Options.codex_user_root_source
         claude_user_root=[IO.Path]::GetFullPath($Options.claude_user_root)
         claude_user_root_source=$Options.claude_user_root_source
+        zcode_user_root=(Resolve-OptionalZCodeGlobalRuleRoot $Options)
+        zcode_user_root_source=$Options.zcode_user_root_source
     }
 }
 
 function Invoke-GlobalRuleCommand([ValidateSet('check','plan','apply','rollback')][string]$Mode,[object[]]$Tokens=@()) {
     $options=Parse-GlobalRuleOptions $Tokens $Mode;$roots=Get-GlobalRuleRootEnvelope $options
+    $zcodeRoot = [string]$roots.zcode_user_root
     switch($Mode){
         'check'{
-            $result=Test-GlobalRuleProjection $options.repo_root $options.codex_user_root $options.claude_user_root;$exit=if($result.pass){0}else{2}
+            $result=Test-GlobalRuleProjection $options.repo_root $options.codex_user_root $options.claude_user_root $zcodeRoot;$exit=if($result.pass){0}else{2}
             $envelope=[pscustomobject][ordered]@{schema_version=2;command='global-rules-check';pass=$result.pass;exit_code=$exit;roots=$roots;result=$result;writes=0;provider_calls=0;native_mutations=0}
         }
         'plan'{
             $out=Resolve-GlobalRuleControlPath $options.out_path $options.repo_root
-            $plan=New-GlobalRuleProjectionPlan $options.repo_root $options.codex_user_root $options.claude_user_root
+            $plan=New-GlobalRuleProjectionPlan $options.repo_root $options.codex_user_root $options.claude_user_root $zcodeRoot
             $envelope=[pscustomobject][ordered]@{schema_version=2;command='global-rules-plan';pass=$true;exit_code=0;roots=$roots;plan=$plan;writes=1;host_writes=0;provider_calls=0;native_mutations=0}
             Write-Utf8FileAtomic -Path $out -Content ($envelope|ConvertTo-Json -Depth 30 -Compress);$exit=0
         }
@@ -14793,13 +14877,13 @@ function Invoke-GlobalRuleCommand([ValidateSet('check','plan','apply','rollback'
             if(Test-GlobalRulePathEqual $planPath $out){throw 'Global rule apply receipt path must differ from the plan path.'}
             $document=[IO.File]::ReadAllText($planPath)|ConvertFrom-Json;$plan=if($document.command-eq'global-rules-plan'){$document.plan}else{$document}
             $backupRoot=Join-Path ([IO.Path]::GetFullPath($options.repo_root)) 'reports\global-rule-projection\backups'
-            $receipt=Invoke-GlobalRuleProjectionApply -Plan $plan -Token $options.token -BackupRoot $backupRoot -ReceiptPath $out -RepoRoot $options.repo_root -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -Resume:$options.resume
+            $receipt=Invoke-GlobalRuleProjectionApply -Plan $plan -Token $options.token -BackupRoot $backupRoot -ReceiptPath $out -RepoRoot $options.repo_root -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -Resume:$options.resume -ZCodeUserRoot $zcodeRoot
             $envelope=[pscustomobject][ordered]@{schema_version=2;command='global-rules-apply';pass=$true;exit_code=0;roots=$roots;receipt=$receipt;provider_calls=0;native_mutations=0};$exit=0
         }
         'rollback'{
             $receiptPath=Resolve-GlobalRuleControlPath $options.receipt $options.repo_root -MustExist
             $backupRoot=Join-Path ([IO.Path]::GetFullPath($options.repo_root)) 'reports\global-rule-projection\backups'
-            $result=Invoke-GlobalRuleProjectionRollback -ReceiptPath $receiptPath -Token $options.token -RepoRoot $options.repo_root -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -BackupRoot $backupRoot
+            $result=Invoke-GlobalRuleProjectionRollback -ReceiptPath $receiptPath -Token $options.token -RepoRoot $options.repo_root -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -BackupRoot $backupRoot -ZCodeUserRoot $zcodeRoot
             $envelope=[pscustomobject][ordered]@{schema_version=2;command='global-rules-rollback';pass=$result.pass;exit_code=0;roots=$roots;result=$result;provider_calls=0;native_mutations=0};$exit=0
         }
     }

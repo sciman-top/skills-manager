@@ -73,6 +73,16 @@ function New-RuleFixture([string]$Name) {
         @($result.documents | Where-Object { $null -ne $_.precedence }).Count | Should -Be 1
     }
 
+    It 'models ZCode as user AGENTS plus the Workspace-root AGENTS only' {
+        $fixture = New-RuleFixture 'zcode'
+        $result = Get-RuleDiscovery -RepoRoot $fixture.repo -CurrentDirectory $fixture.sub -HostName zcode -UserRuleRoot $fixture.user
+
+        @($result.documents).Count | Should -Be 2
+        (@($result.documents.scope) -join ',') | Should -Be 'global,repo'
+        @($result.documents | Where-Object discovery_state -eq observed).Count | Should -Be 2
+        @($result.candidates | Where-Object { $_.path -match 'src\\feature\\AGENTS\.md$' }).Count | Should -Be 0
+    }
+
     It 'records budget truncation without claiming files were loaded' {
         $fixture = New-RuleFixture 'budget'
         $result = Get-RuleDiscovery -RepoRoot $fixture.repo -CurrentDirectory $fixture.sub -HostName codex -UserRuleRoot $fixture.user -MaxCombinedBytes 1

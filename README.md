@@ -1,10 +1,10 @@
 # skills-manager
 
-Windows-first、local-first 的 PowerShell 7 技能与 MCP 管理器。它把分散在多个仓库的 AI 技能收敛到一份版本化配置，锁定来源、生成可移植技能目录，并安全投影给 Codex/Claude 等宿主。
+Windows-first、local-first 的 PowerShell 7 技能与 MCP 管理器。它把分散在多个仓库的 AI 技能收敛到一份版本化配置，锁定来源、生成可移植技能目录，并安全投影给 Codex、Claude、ZCode 等宿主。
 
 适合希望在多台 Windows 电脑上复用同一套技能、审计目标仓规则、统一管理 MCP 清单，同时又不愿把模型、账号和运行时交给另一层框架的个人或团队。
 
-本项目不做第二套 AI runtime：不选择模型，不管理 provider/auth/session，不接管 Codex/Claude 的语义路由，也不直接维护插件缓存。仓库测试只证明 `repo_verified`；宿主新会话加载和真实业务验收必须分别验证。
+本项目不做第二套 AI runtime：不选择模型，不管理 provider/auth/session，不接管 Codex、Claude、ZCode 的语义路由，也不直接维护插件缓存。仓库测试只证明 `repo_verified`；宿主新会话加载和真实业务验收必须分别验证。
 
 本项目采用 [MIT License](LICENSE)。第三方技能与依赖仍各自遵循其原始许可证。
 
@@ -113,7 +113,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 rule-estate-apply --plan <plan.json> --workspace-root D:\CODE --token <plan.apply.required_token> --json
 ```
 
-全局 Codex/Claude 规则以 `rules/global/` 为唯一源，通过计划绑定、备份和 receipt 投影到用户目录：
+全局 Codex/Claude/ZCode 规则以 `rules/global/` 为唯一源，通过计划绑定、备份和 receipt 投影到用户目录：
 
 ```powershell
 .\skills.ps1 global-rules-plan --out .\reports\global-rule-projection\plan.json --json
@@ -123,9 +123,13 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 global-rules-rollback --receipt .\reports\global-rule-projection\receipt.json --token <receipt.rollback.required_token> --json
 ```
 
-投影事务使用 schema v2：apply 会从当前显式 roots 重新推导唯一的 Codex/Claude source-target action 集，并在任何用户规则写入前落盘 journal；中断后仅可用同一 plan、receipt、roots 和显式 `--resume` 续跑。plan/receipt 只能位于 `reports/global-rule-projection/`（`backups/` 保留给内部备份），schema v1 产物 fail closed，需重新执行 plan。默认 Codex 用户根优先使用 `CODEX_HOME`，未设置时使用 `~/.codex`；Claude 用户根优先使用 `CLAUDE_CONFIG_DIR`，未设置时使用 `~/.claude`；CLI 显式 root 优先级最高。文件相等只证明 `filesystem_projected`，fresh run/session 探针才可证明 `host_loaded`。
+投影事务使用 schema v2：apply 会从当前显式 roots 重新推导唯一的 Codex/Claude source-target action 集；若 `~/.zcode` 存在，或通过 `--zcode-user-root` 指定，则会一并加入 ZCode `AGENTS.md` action，并在任何用户规则写入前落盘 journal。中断后仅可用同一 plan、receipt、roots 和显式 `--resume` 续跑。plan/receipt 只能位于 `reports/global-rule-projection/`（`backups/` 保留给内部备份），schema v1 产物 fail closed，需重新执行 plan。默认 Codex 用户根优先使用 `CODEX_HOME`，未设置时使用 `~/.codex`；Claude 用户根优先使用 `CLAUDE_CONFIG_DIR`，未设置时使用 `~/.claude`；ZCode 默认根为 `~/.zcode`；CLI 显式 root 优先级最高。文件相等只证明 `filesystem_projected`，fresh run/session 探针才可证明 `host_loaded`。
 
-审查默认只读。全域 plan 仅接受动态发现的直属 Git 仓库规则文件，不接受用户级 Codex/Claude 规则；全局规则变更必须先修改 tracked `rules/global/` 源，再走专用 `global-rules-plan/apply/rollback/check` 投影。plan 从 reviewed input、精确 roots、target set 与 actions 生成 plan-bound 显式确认 token；apply 仍校验 before hash、路径、锁与 TOCTOU，并保留 receipt、resume 和逐目标回滚。全域事务逐目标 fail-fast，不承诺跨仓原子性。
+### ZCode
+
+ZCode 使用同一个项目根 `AGENTS.md`，不需要另建项目规则文件；它只读取用户级 `~/.zcode/AGENTS.md` 与当前 Workspace 根 `AGENTS.md`。`构建生效` 会把 managed allowlist 投影到 `~/.zcode/skills`；`同步MCP` 会将 `skills.json` 的当前 MCP profile 写入 ZCode 原生 `mcp.servers`：用户目标写入 `~/.zcode/cli/config.json`，工作区 `.zcode` 目标写入 `<workspace>/.zcode/config.json`。原生 `.zcode` MCP 优先于 `.agents/mcp.json`，因此本工具不会在 `.zcode` 下生成兼容 `.mcp.json`。这些均是显式宿主投影，不属于普通 build/test，也不证明 ZCode 已加载或真实调用。
+
+审查默认只读。全域 plan 仅接受动态发现的直属 Git 仓库规则文件，不接受用户级 Codex/Claude/ZCode 规则；全局规则变更必须先修改 tracked `rules/global/` 源，再走专用 `global-rules-plan/apply/rollback/check` 投影。plan 从 reviewed input、精确 roots、target set 与 actions 生成 plan-bound 显式确认 token；apply 仍校验 before hash、路径、锁与 TOCTOU，并保留 receipt、resume 和逐目标回滚。全域事务逐目标 fail-fast，不承诺跨仓原子性。
 
 ### 技能投影与 fallback
 
