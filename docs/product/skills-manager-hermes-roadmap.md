@@ -1,23 +1,8 @@
 # Hermes + Codex 协作路线图
 
-**状态**：`repo_phase_closed`（截至 2026-08-22，当前范围内 R0-R4 与条件参考工作已完成或确定性关闭；R5/R7 不具备前置条件，R6 仅保留独立 owner 准入门。fresh host probe、真实用户工作流和线下/现场验收按当前范围延后，未代表远端、发布、`host_loaded` 或 `live_accepted`）
+**文档角色**：稳定路线图；动态 HSM 阶段状态、运行模式、commit 与 receipt 位于对应 POC 仓的任务 brief/receipt，不在本文件保存。
 **基线**：现有 skills-manager 产品主链保持不变；本路线图不授权宿主改动。
 **路线图原则**：每一阶段只解锁下一阶段所需的最小风险，不以“自动化程度”替代可验证性。
-
-## 当前状态快照（2026-08-22）
-
-| 阶段 | 当前状态 | 证据边界 |
-| --- | --- | --- |
-| R0 | `completed` | 策略、PRD、架构、路线图与任务卡已落盘；不等于宿主已配置 |
-| R1/R2 | `completed` | 隔离 Hermes profile 和 POC repo 项目级技能 discovery 已验证；不等于共享 skill root 或业务效果 |
-| R3 | `repo_verified_local_merged` | `D:\CODE\hermes-poc` 的单 writer、独立 review 和 gate 由 `1a6bc1c` 产生并以 `ea87587` 本地合并；POC 无 remote，未 push、release 或 `live_accepted` |
-| R4 | `completed: no_code_needed` | 当前 native projection 已承载受管 consumer 所需的 hash/ownership/receipt/rollback；一次 project-skill host loading 负例不足以证明产品合同缺口 |
-| R5 | `not_eligible` | HSM-CODE-100/110/120 不执行，除非新的真实 consumer 需求重开 R4 |
-| R6 | `proposal_validated` | 受控候选可在 project root 验证；admission/projection/host acceptance 仍需独立 owner 与后续证据 |
-| R7 | `not_eligible` | 没有多任务无碰撞、CI/人工收口或 release acceptance 的证据 |
-| 外部/现场验收 | `deferred_by_current_scope` | 当前没有真实业务 consumer；可略过线下/现场验收。未来准入共享 root 时仍需独立 owner 的远程审查，不能由候选 AI 自批 |
-
-HSM-POC-050 中一次 Codex Harness read-only review 未形成 verdict：该模型尝试了与其 skills catalog 冲突的用户根。随后 fresh `codex debug prompt-input` 已显示正确的 project-skill `r6` locator，故这不是已证实的宿主加载缺陷。它仍不构成该 skill 已成功执行或 `host_loaded`，更不能自动触发全局 skill projection、consumer code 或宿主配置改动。
 
 ## 1. 阶段总览
 
@@ -106,25 +91,26 @@ HSM-POC-050 中一次 Codex Harness read-only review 未形成 verdict：该模�
 ### 进入条件
 
 - R2 通过。
-- 在档位 B（当前用户受控 POC）或档位 C（VM/第二账户）中分别完成 Codex login 与 Hermes `openai-codex` 授权。
+- 明确选择 `native_openai_codex` 或 `codex_app_server` 作为本轮 runtime path；两者的 evidence 不得互相替代。
+- 完成 Codex login 与 Hermes `openai-codex` 授权；若选择 `codex_app_server`，只在档位 B（当前用户受控 POC）或档位 C（VM/第二账户）中启用。
 - POC worktree 已分配、Git baseline 与最低门禁已记录。
 
 ### 执行边界
 
-1. 启用 Hermes Codex runtime 前，备份并比较隔离环境的 Codex config。
-2. 首个任务使用 read-only 或逐操作审批；只对确定的 POC worktree 逐步允许写入。
-3. 一项任务只允许一个 Codex 主执行者；任何子代理要么只读，要么有互斥 write set。
+1. `native_openai_codex` 首个任务使用无工具或 read-only；主 Codex config 不应被它修改。
+2. `codex_app_server` 启用前，备份并比较隔离环境的 Codex config；第一次任务保持 read-only 或逐操作审批。
+3. 只对确定的 POC worktree 逐步允许写入；一项任务只允许一个 Codex 主执行者，任何子代理要么只读，要么有互斥 write set。
 4. 不启动 Gateway/cron/Kanban 自动分派，不自动 merge/push。
 
 ### 最低证明
 
 | 证据 | 通过定义 |
 | --- | --- |
-| config diff | 只有预期 Hermes managed block 与 POC profile 变化 |
+| config diff | native 路径证明主 config 未被未授权修改；app-server 路径只允许预期 Hermes managed block、MCP/plugin 描述与 POC profile 变化 |
 | worktree diff | 所有代码写入均位于获分配 worktree |
 | gate | POC repo 最低 build/test/contract 检查通过 |
 | review | Codex/人工 review 分开报告；两者不互相替代 |
-| completion | Hermes 记录成功/失败/阻塞，不把结果直接当作 merge 决定 |
+| completion | Hermes 记录成功/失败/阻塞及 runtime path，不把结果直接当作 merge 决定或另一路径的验收 |
 
 ### 停止/回滚
 
@@ -141,7 +127,7 @@ R3 通过不等于必须改 skills-manager。只有出现下列可测差异，�
 
 若没有任何差异，决策为：**不编码**；Hermes 继续通过项目级技能或受控外部副本消费。
 
-当前 HSM-DEC-060 已作出该 `不编码` 决策。现有 POC 只证明 project-owned skill 与受控 worktree 的有限协作；它不授权将 POC 候选自动投影、合并到共享 root 或变成 Hermes runtime 依赖。
+若 reviewed R4 evidence 未显示上述可测差异，决策为 `no_code_needed`；现有 POC 无论使用何种 runtime path，都不授权将 project-owned candidate 自动投影、合并到共享 root 或变成 Hermes runtime 依赖。
 
 ## 7. R5：可选 consumer 实现
 

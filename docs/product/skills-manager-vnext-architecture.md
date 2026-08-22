@@ -79,11 +79,11 @@ Hermes 不是本仓的第六条运行主链，也不是本仓需要嵌入的 run
 
 在隔离 POC 未证明真实差异前，Hermes 只应消费项目级 `.agents/skills`，或消费经 ACL/独立用户保护的只读副本。现有 native projection 已能表达 source、package hash、managed/external ownership、receipt 和 rollback 时，不新增 consumer module。
 
-2026-08-22 的 HSM-DEC-060 已按该规则作出 `no_code_needed` 决策：一个分支级 Hermes→Codex 单任务 POC 没有发现上述 contract 字段的产品缺口。一次 Codex Harness review 未形成 verdict，但 fresh prompt-input 已显示正确的 project-skill locator；该非结论既不证明 `host_loaded`，也不得转化为 Hermes runtime bridge、共享 root 投影或 consumer adapter。
+`native_openai_codex` POC 与 `codex_app_server` POC 是两种不可互相替代的证据模式：前者不能证明后者的 host integration、managed block 或 MCP/plugin migration。两者都不能单独证明 `host_loaded`；每个拟议 consumer 必须以匹配的 runtime 路径、fresh host probe 和真实调用验收。
 
 只有同时满足下列条件才允许实现独立 consumer seam：
 
-1. 一个隔离 POC 已证明 Hermes 对现有 native projection 有无法承载的稳定差异。
+1. 一个与拟议 consumer runtime 匹配的隔离 POC 已证明 Hermes 对现有 native projection 有无法承载的稳定差异。
 2. 至少一个真实 consumer 和一个可复现的 caller/验收流程存在；差异不是未来猜测。
 3. 新 interface 可以保持为 `consumer_id + source fingerprint + target root + ownership/write policy + receipt + rollback`，且不泄露模型、会话、任务或权限语义。
 4. 配置、计划、应用、回滚与 host probe 都能单独验证；缺少任何一项时保持 `not_implemented`。

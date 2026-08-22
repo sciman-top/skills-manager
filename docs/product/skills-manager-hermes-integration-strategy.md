@@ -1,6 +1,6 @@
 # Hermes + Codex 受控协作策略
 
-**状态**：`repo_phase_closed`（截至 2026-08-22，HSM-POC-050 已本地合并，HSM-DEC-060=`no_code_needed`，当前可执行的参考与 POC 任务均已收口；fresh host probe、真实业务和线下/现场验收按当前范围延后，未代表主机或业务验收）
+**文档角色**：稳定的设计合同；动态 POC 状态、运行模式、commit 与 receipt 只保存在对应 POC 仓的任务 brief/receipt 中。
 **适用范围**：ChatGPT Desktop、Hermes、Codex Harness、skills-manager 的协作边界
 **不构成授权**：本文件不授权安装 Hermes、创建 profile/Gateway/cron、修改 `~/.codex` / `~/.hermes`、投影技能、创建 worktree、合并、推送或发布。
 
@@ -38,14 +38,6 @@ skills-manager（供给与治理侧车）
 | Hermes 参考仓 | `conditional`、reference-only | HSM POC 已产生 Windows app-server 源码维护需求；登记 revision/license/consumer/retirement trigger，并且只在显式 refresh 时读取。 |
 
 OpenAI 官方将 Codex app-server 定位为深度客户端集成，并建议自动化/CI 使用 Codex SDK；因此 Hermes app-server runtime 只能先承担本地 POC 与交互式协作，不能直接成为无人监管的 CI/发布关键路径。见 [Codex App Server](https://developers.openai.com/codex/app-server)。
-
-### 当前 POC 决策快照（2026-08-22）
-
-- `D:\CODE\hermes-poc` 的 HSM-POC-050 由专用 writer/review worktree 产出 `1a6bc1c`：Hermes 原生 `openai-codex` writer 仅在获分配 worktree 写入，另一个隔离会话完成 review，文档 gate 通过。它随后本地合并为 `ea87587`，临时 worktree/branch 已清理。
-- 这是 `repo_verified_local_merged`，不是 remote push、release、Hermes `codex_app_server` parity、fresh host loading 或 `live_accepted`；该 POC repo 未配置 remote。
-- HSM-DEC-060 判定现有 native projection 已覆盖受管 consumer 的 source/package hash、owner、target、receipt 与 rollback，因此不向 skills-manager 新增 Hermes adapter 或 consumer framework。
-- Codex Harness 对 POC project skill 的一次读取尝试未形成 verdict：模型使用了与其 catalog 冲突的用户根。随后 fresh `codex debug prompt-input` 显示正确的 project-skill `r6` locator，因此这不是已证实的宿主加载问题；它同样不证明该 skill 已执行或 `host_loaded`。无论如何，都不足以把 project-owned candidate 自动提升到共享 root 或推翻 `no_code_needed`。
-- 当前没有待交付的真实业务 consumer，因此本轮可略过线下/现场验收，状态为 `deferred_by_current_scope` 而非失败或遗漏。若未来将候选技能准入共享 root，仍须由独立 human/owner 远程审查其 Git diff、权限影响、验证与回滚，并显式决定 `reviewed` / `admitted`；这项职责不能由候选 AI 自行替代。
 
 ## 2. 所有权与禁止重叠
 
@@ -155,18 +147,25 @@ memory:
 
 档位 A 中，`home_mode: auto` 让 Hermes 进程沿用当前 Windows 用户的 CLI 配置，因此便利但不隔离；此档位不启用 Codex runtime。档位 B 中，使用前先备份/比较当前用户 Codex config；若需要更强的 CLI 配置隔离，必须单独初始化该 profile 所需的 Codex/Git/SSH 凭据。`config.yaml` 保存非敏感设置，`.env` 保存密钥。见 [Hermes Configuration](https://hermes-agent.nousresearch.com/docs/user-guide/configuration)。
 
-### 3.4 Codex runtime POC
+### 3.4 Codex runtime POC 的两条证据路径
 
-Hermes 的 `codex_app_server` runtime 是 opt-in beta。启用前在档位 B 或 C 环境完成：
+`native_openai_codex` 与 `codex_app_server` 必须作为两个独立 POC 路径记录，不能由同一个“runtime 成功”标签混写：
+
+| 路径 | 可证明的最小事实 | 不可证明的事实 |
+| --- | --- | --- |
+| `native_openai_codex` | 隔离 profile 的 OAuth/provider 路径和一项有界 Hermes→Codex task 的结果 | `codex_app_server` 已启动、Codex managed block、MCP/plugin migration、`host_loaded` |
+| `codex_app_server` | 经当前 host 授权后，app-server 的启动、精确 managed-block diff、MCP/plugin migration 边界与 POC worktree containment | 持续可用性、CI/release、业务验收或 `live_accepted` |
+
+两条路径都应先完成：
 
 ```powershell
 codex login
 hermes -p codex-poc auth add openai-codex
 ```
 
-然后备份并比较隔离环境的 Codex config，再通过 Hermes 的 Codex runtime 控件启用。该动作可能写入 Hermes managed block、注册 Hermes MCP callback、迁移 MCP/plugin 描述，并设置 workspace 写入权限；所有这些都必须只发生在隔离环境。见 [Hermes Codex App-Server Runtime](https://hermes-agent.nousresearch.com/docs/user-guide/features/codex-app-server-runtime)。
+这些认证前置不启用 app-server，也不证明其已加载。`native_openai_codex` 的首次任务保持无工具或逐操作审批，并应证明 POC profile 与主 Codex config 未出现未授权写入。只有要验证 `codex_app_server` 时，才在档位 B 或 C 中先备份并比较隔离环境的 Codex config，再通过 Hermes 的 runtime 控件启用它。该动作可能写入 Hermes managed block、注册 Hermes MCP callback、迁移 MCP/plugin 描述，并设置 workspace 写入权限；所有这些都必须只发生在隔离环境。见 [Hermes Codex App-Server Runtime](https://hermes-agent.nousresearch.com/docs/user-guide/features/codex-app-server-runtime)。
 
-第一次 runtime POC 使用 `:read-only` 或等效的逐操作审批策略；只在确认 worktree containment 和工具审批路径正确后，才对该 POC worktree 放开 workspace 写入。
+`codex_app_server` 的第一次任务使用 `:read-only` 或等效的逐操作审批策略；只在确认 worktree containment、managed-block diff 和工具审批路径正确后，才对该 POC worktree 放开 workspace 写入。
 
 ## 4. 技能消费策略
 
@@ -245,8 +244,8 @@ observed_need
 
 仅当下列证据同时成立，才能从设计进入代码或主机试点：
 
-1. 隔离 POC 证明 Hermes profile、项目级技能和一个 Codex task 的 write boundary。
-2. POC 前后对比证明主日常 `~/.codex`、主 `~/.agents/skills` 和生产凭据未变化。
+1. 隔离 POC 明确命名 `native_openai_codex` 或 `codex_app_server`，并证明 Hermes profile、项目级技能和一个 Codex task 的 write boundary。
+2. native 路径证明主日常 `~/.codex`、主 `~/.agents/skills` 和生产凭据未变化；app-server 路径还必须证明 config diff 只含获批准的 managed block 和迁移项。
 3. 真实需求显示现有 native projection 不能满足 Hermes 的消费差异。
 4. 提议的 consumer interface 可由 source hash、receipt、rollback 充分描述。
 5. 用户明确授权后续的仓库代码改动或宿主配置改动；二者是独立授权域。

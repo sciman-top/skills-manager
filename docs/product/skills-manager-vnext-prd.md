@@ -109,12 +109,10 @@
 
 本节定义产品目标，不表示当前已存在 Hermes runtime、Hermes host adapter 或自动学习实现。任何实现必须先完成 `docs/product/skills-manager-hermes-roadmap.md` 的 POC 退出条件。
 
-当前 HSM-DEC-060 的可审查结论为 `no_code_needed`：已完成的分支级 POC 没有显示现有 native projection 在 source/hash、owner、target、receipt 或 rollback 上的 contract 缺口。该结论不把 Hermes/Codex host loading、主分支 merge、发布或业务验收标为完成，也不阻止未来以新的真实 consumer 证据重开本节的条件实现门禁。
-
 - `FR-HER-001`：外部 AI consumer 的最小 contract 只描述 `consumer_id`、受管 source identity/hash、target root、ownership mode、read/write policy、projection receipt 与 rollback entry。它不得描述模型、会话、任务、提示词、工具调用或调度语义。
 - `FR-HER-002`：consumer 默认只读；若 consumer 需要读取共享技能，必须先验证其进程没有对目标 root 的未授权写入能力，或由隔离用户/ACL/副本提供等效保护。目录存在、config 已写入或 inventory 可见都不证明宿主已加载。
 - `FR-HER-003`：Hermes 的 app-server/Codex runtime、MCP/plugin migration 与 `~/.codex/config.toml` 变更属于宿主授权域。skills-manager 不生成、不写入、不迁移该配置，只能在显式只读 probe 中报告观察结果与真值边界。
-- `FR-HER-004`：只有完成隔离 POC、存在真实 consumer、且现有 native projection 无法承载所需差异时，才允许新增 consumer adapter。只有一个假设 consumer 时，不创建泛化 host adapter framework。
+- `FR-HER-004`：只有完成与拟议 consumer runtime 相匹配的隔离 POC、存在真实 consumer、且现有 native projection 无法承载所需差异时，才允许新增 consumer adapter。`native_openai_codex` 的 POC 证据不得证明 `codex_app_server` 的 host integration；只有一个假设 consumer 时，不创建泛化 host adapter framework。
 - `FR-EVO-001`：宿主 AI 可以在项目级 `.agents/skills` 或隔离 sandbox 草拟、修复和测试候选技能；候选必须以普通 Git change-set 或明确 source root 提交审核，不能直接写入全局受管 root。
 - `FR-EVO-002`：准入前必须验证 skill identity、path containment、reparse-point/special-file safety、来源/revision/license/provenance、内容 hash、受影响测试与兼容性。建议、扫描结果或 AI 自评不是准入授权。
 - `FR-EVO-003`：准入至少分为 `proposal -> reviewed -> admitted -> projected -> host_loaded -> live_accepted`。`reviewed` 与 `admitted` 必须有独立的人类或指定 owner 决策；AI 不能批准自己的候选。
