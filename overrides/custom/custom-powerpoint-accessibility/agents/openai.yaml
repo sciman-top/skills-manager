@@ -1,4 +1,6 @@
 interface:
   display_name: "PowerPoint Accessibility"
   short_description: "Audit classroom PowerPoint accessibility"
-  default_prompt: "Use $custom-powerpoint-accessibility to audit this classroom presentation for accessibility."
+  default_prompt: "Use $custom-powerpoint-accessibility only to audit or validate a PPT/PPTX for accessibility; do not use it to create slides, redesign layout, or perform format-only conversion."
+policy:
+  allow_implicit_invocation: true

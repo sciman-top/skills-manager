@@ -98,6 +98,7 @@
           "windows-desktop-e2e"
         ],
         "ppt": [
+          "custom-powerpoint-accessibility",
           "pptx",
           "slidev"
         ],

@@ -322,6 +322,29 @@ $loadValidation = [ordered]@{
     scope = 'skill_entrypoint_load_only'
     checks = @('catalog_schema', 'catalog_fingerprint', 'catalog_root_containment', 'entrypoint_hash', 'availability')
 }
+$routingReceiptInput = [ordered]@{
+    query_sha256 = Get-TextSha256 $Query
+    domain_hints = $domainNames
+    requested_candidates = $requestedNames
+    excluded_capabilities = $excludedNames
+    catalog_fingerprint = if ($null -ne $catalog) { [string]$catalog.catalog_fingerprint } else { '' }
+}
+$routingReceipt = [ordered]@{
+    schema_version = 1
+    receipt_id = ('crr-{0}' -f (Get-TextSha256 (($routingReceiptInput | ConvertTo-Json -Depth 10 -Compress))).Substring(0, 16))
+    decision_owner = 'host_ai'
+    semantic_routing_performed = $false
+    query_sha256 = [string]$routingReceiptInput.query_sha256
+    catalog_fingerprint = [string]$routingReceiptInput.catalog_fingerprint
+    selection_required = $requestedNames.Count -eq 0
+    requested_candidates = $requestedNames
+    validated_candidates = @($selectedRows | ForEach-Object { [string]$_.name })
+    status = if ($loadPass) { 'validated' } elseif ($catalogStatus -eq 'current' -and $requestValid) { 'candidates_returned' } else { 'blocked' }
+    truth_boundary = if ($loadPass) { 'candidate_load_validated' } elseif ($catalogStatus -eq 'current' -and $requestValid) { 'candidate_discovery_only' } else { 'candidate_discovery_blocked' }
+    writes_performed = $false
+    provider_calls = 0
+    native_mutations = 0
+}
 
 [pscustomobject][ordered]@{
     schema_version = 1
@@ -337,6 +360,7 @@ $loadValidation = [ordered]@{
     excluded = @($excluded.ToArray())
     load_validation = $loadValidation
     validation = $loadValidation
+    routing_receipt = $routingReceipt
     execution_authorization = [ordered]@{ status = 'not_granted'; requires_review = $requiresReview; reason = $authorizationReason }
     writes_performed = $false
     provider_calls = 0

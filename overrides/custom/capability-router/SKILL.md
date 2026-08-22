@@ -30,6 +30,8 @@ $result.execution_authorization
 
 Load validation checks only catalog schema/fingerprint, catalog-root containment, entrypoint hash, and availability. A passing `load_validation` authorizes reading that `SKILL.md` only. `execution_authorization.status` is always `not_granted`; the host must separately review the selected skill's declared workflow side effect and apply ordinary approval, sandbox, MCP, and external-write controls.
 
+Every response also includes a read-only `routing_receipt`. It contains a SHA-256 of the query rather than the raw request, catalog fingerprint, requested and validated candidate names, status, and `truth_boundary`. Use it to record `candidate_discovery_only`, `candidate_load_validated`, or `candidate_discovery_blocked`; it never proves host loading, invocation, model routing, or live acceptance.
+
 ## Boundaries
 
 - Do not invoke when a visible native skill/tool already matches.

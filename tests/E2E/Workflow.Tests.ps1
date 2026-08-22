@@ -105,12 +105,20 @@ description: demo skill
                 mcp_targets = @()
                 update_force = $false
                 sync_mode = "sync"
+                skill_projection = [pscustomobject]@{
+                    managed_source_path = "agent"
+                    sources = @()
+                    discovery_catalog = [pscustomobject]@{ catalog_path = "agent/.skills-manager/catalog.json" }
+                }
             }
             SaveCfg $cfg
 
             构建生效 -SkipHostProjection
 
             (Test-Path (Join-Path $AgentDir "demo-hello\SKILL.md")) | Should -Be $true
+            $catalogPath = Join-Path $AgentDir ".skills-manager\catalog.json"
+            (Test-Path -LiteralPath $catalogPath -PathType Leaf) | Should -Be $true
+            @((Get-Content -Raw -LiteralPath $catalogPath | ConvertFrom-Json).skills.name) | Should -Contain "hello"
             (Test-Path (Join-Path $root "out\skills")) | Should -Be $false
         }
 

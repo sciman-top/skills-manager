@@ -48,6 +48,11 @@ Describe 'Capability router fallback' {
         $result.decision_owner|Should -Be 'host_ai'
         $result.semantic_routing_performed|Should -Be $false
         $result.writes_performed|Should -Be $false
+        $result.routing_receipt.status | Should -Be 'candidates_returned'
+        $result.routing_receipt.truth_boundary | Should -Be 'candidate_discovery_only'
+        $result.routing_receipt.query_sha256 | Should -Match '^[a-f0-9]{64}$'
+        $result.routing_receipt.catalog_fingerprint | Should -Match '^[a-f0-9]{64}$'
+        $result.routing_receipt.writes_performed | Should -Be $false
         @($result.PSObject.Properties.Name)|Should -Not -Contain 'activation_plan'
         @($result.PSObject.Properties.Name)|Should -Not -Contain 'session_plan'
     }
@@ -61,6 +66,9 @@ Describe 'Capability router fallback' {
         $result.selected[0].load_side_effect|Should -Be 'read_only'
         $result.selected[0].side_effect|Should -Be 'read_only'
         $result.execution_authorization.status|Should -Be 'not_granted'
+        $result.routing_receipt.status | Should -Be 'validated'
+        $result.routing_receipt.truth_boundary | Should -Be 'candidate_load_validated'
+        @($result.routing_receipt.validated_candidates) | Should -Be @('codebase-design')
     }
 
     It 'fails closed on catalog drift and explicit exclusion' {
@@ -145,6 +153,7 @@ Describe 'Capability router fallback' {
         @($result.retrieval.candidates.name) | Should -Contain 'codebase-design'
         $result.load_validation.pass | Should -Be $false
         $result.execution_authorization.reason | Should -Be 'no_candidate_selected'
+        $result.routing_receipt.selection_required | Should -Be $true
     }
 
     It 'fails a request with an unknown domain or duplicate requested candidate' {
@@ -224,5 +233,15 @@ Describe 'Capability router fallback' {
         $metadata | Should -Match 'visible metadata is insufficient'
         $metadata | Should -Match 'never use it as middleware'
         $skill | Should -Match 'do not use as a normal preflight'
+        $skill | Should -Match 'routing_receipt'
+        $skill | Should -Match 'candidate_load_validated'
+    }
+
+    It 'does not echo the raw query in the routing receipt' {
+        $query = 'secret-marker-' + [guid]::NewGuid().ToString('N')
+        $result = & $router -Query $query -CatalogPath $catalog -DomainHint engineering | ConvertFrom-Json
+
+        ($result | ConvertTo-Json -Depth 20 -Compress) | Should -Not -Match $query
+        $result.routing_receipt.query_sha256 | Should -Be (Get-TestSha256 $query)
     }
 }

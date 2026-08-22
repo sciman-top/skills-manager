@@ -30,6 +30,33 @@ Subagent (general-purpose):
     git diff [BASE_SHA]..[HEAD_SHA]
     ```
 
+    ## Dispatch contract
+
+    The parent must provide a bounded task contract before this review starts:
+
+    - **Scope:** the exact question this reviewer owns.
+    - **Write set:** `read-only` unless the parent explicitly authorizes a separate fix task.
+    - **Dependencies:** which files, tests, or upstream decisions must be available first.
+    - **Recommended profile:** `sol_medium_worker`, `terra_high_worker`, `terra_xhigh_worker`, or `sol_xhigh_supervisor`, with one-sentence reasoning.
+    - **Minimum proof:** the smallest command or receipt that proves the review claim.
+    - **Stop:** the shared seam or condition at which the reviewer returns to the parent.
+
+    The reviewer must return evidence in this shape:
+
+    ```text
+    scope:
+    write_set:
+    recommended_profile:
+    actual_model: parent_observed_from_session_metadata
+    actual_reasoning_effort: parent_observed_from_session_metadata
+    changed_paths: []
+    verification:
+    fallback: none | serial | blocked
+    stop:
+    ```
+
+    The child must not treat a self-reported model, effort, or completion state as authoritative; the parent records those fields from host session metadata and the final receipt.
+
     ## Read-Only Review
 
     Your review is read-only on this checkout. Do not mutate the working tree, the index, HEAD, or branch state in any way. Use tools like `git show`, `git diff`, and `git log` to inspect history. If you need a working copy of a different revision, check it out into a separate temporary directory (e.g. `git worktree add /tmp/review-[SHA] [SHA]`) — never move HEAD on this checkout.

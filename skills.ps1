@@ -10774,7 +10774,17 @@ function 构建生效(
                 Write-Host "⚠️ 构建失败，未执行同步。请先修复上方错误后重试【构建生效】。" -ForegroundColor Yellow
             }
             elseif ($SkipHostProjection) {
-                Log "已按显式请求跳过宿主目标与 native skill projection；仅保留 agent/ 构建产物。"
+                try {
+                    $catalogProjection = Sync-SkillDiscoveryCatalog $cfg.skill_projection
+                    if ([bool]$catalogProjection.enabled) {
+                        Log ("已生成仓内 cold-discovery catalog：skills={0}，domains={1}" -f [int]$catalogProjection.skill_count, [int]$catalogProjection.domain_count)
+                    }
+                }
+                catch {
+                    $failures += ("capability-catalog => {0}" -f $_.Exception.Message)
+                    Log ("仓内 cold-discovery catalog 生成失败：{0}" -f $_.Exception.Message) "ERROR"
+                }
+                Log "已按显式请求跳过宿主目标与 native skill projection；保留 agent/ 与 cold-discovery catalog 构建产物。"
             }
             elseif ($DryRun) {
                 $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight

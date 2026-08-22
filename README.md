@@ -129,7 +129,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 ### 技能投影与 fallback
 
-宿主原生 metadata 是普通请求的首选选择面。`capability-router` 允许宿主在可见 metadata 不足时按需选择，用于 cold discovery 或 policy validation；它接受 `DomainHint`，返回候选并校验宿主选择，不作普通请求前置，不执行语义排序、不切换 profile、不写宿主状态。
+宿主原生 metadata 是普通请求的首选选择面。`capability-router` 允许宿主在可见 metadata 不足时按需选择，用于 cold discovery 或 policy validation；它接受 `DomainHint`，返回候选并校验宿主选择，不作普通请求前置，不执行语义排序、不切换 profile、不写宿主状态。输出中的 `routing_receipt` 只保存 query SHA-256、候选选择、catalog fingerprint、`truth_boundary` 和写入计数，不回显原始请求；它用于证明“候选发现/候选校验”边界，不等于宿主已加载或真实调用技能。
 
 Codex 与 Claude 默认只投影同一份小型 managed allowlist；其余已安装技能保留为 cold catalog，需要真实任务触发后再读取。这里的“可见”不代表每个请求都会加载或调用完整 `SKILL.md`。
 
