@@ -29,14 +29,18 @@
 - host-selected `capability-router` cold discovery/policy validation when visible metadata is insufficient
 - 按任务显式启用的可选 core/secondary reference shelf refresh/verify
 - 可由宿主/operator 调度的 skills-only maintenance runner
+- 通过隔离 POC 证明后，向 Hermes 一类外部宿主提供可选、只读优先的 skill consumer contract；该 contract 复用现有 source、package hash、projection receipt 与 rollback 语义，不接管其 runtime
+- 通过 reviewed Git change-set 准入的受控 skill evolution：宿主 AI 可以提出、草拟、测试技能候选；skills-manager 只负责确定性检查、显式准入、受控投影与回滚
 - build、focused tests、contract/invariant checks、risk-triggered full gate
 
 ### 不包含
 
 - 模型、provider、auth、context、sandbox、会话或权限管理
 - 宿主 semantic router、agent orchestrator、daemon、数据库或 Web UI
+- 宿主 AI 的无界自主学习、永久记忆、自动创建/修改/删除全局技能，或未经当前授权的自我升级
+- Hermes/Codex 的任务队列、Kanban 数据库、Gateway lifecycle、cron/消息平台配置、worktree 调度与分支合并
 - 插件打包/分发/安装控制面
-- skill candidate lifecycle/review/staging 控制面
+- 独立于 Git review/source admission 之外的 skill candidate lifecycle/review/staging 控制面或第二状态数据库
 - profile reconciliation/canary/hot-switch
 - 无当前消费者的 reference candidate backlog
 - tracked task/evidence/archive 作为第二状态数据库
@@ -101,12 +105,27 @@
 - `FR-REF-005`：refresh/verify 失败只阻断该参考工作流，不授权采纳、安装、执行或 runtime import 删除；无消费者候选需要时重新发现。
 - `FR-REF-006`：每次 refresh 写入 ignored `reports/reference-refresh/<run-id>/receipt.md`；Git 只跟踪 manifest 和稳定说明，不跟踪动态 latest 状态。
 
+### 5.7 外部 AI consumer 与受控技能演进（未来、POC 门禁）
+
+本节定义产品目标，不表示当前已存在 Hermes runtime、Hermes host adapter 或自动学习实现。任何实现必须先完成 `docs/product/skills-manager-hermes-roadmap.md` 的 POC 退出条件。
+
+- `FR-HER-001`：外部 AI consumer 的最小 contract 只描述 `consumer_id`、受管 source identity/hash、target root、ownership mode、read/write policy、projection receipt 与 rollback entry。它不得描述模型、会话、任务、提示词、工具调用或调度语义。
+- `FR-HER-002`：consumer 默认只读；若 consumer 需要读取共享技能，必须先验证其进程没有对目标 root 的未授权写入能力，或由隔离用户/ACL/副本提供等效保护。目录存在、config 已写入或 inventory 可见都不证明宿主已加载。
+- `FR-HER-003`：Hermes 的 app-server/Codex runtime、MCP/plugin migration 与 `~/.codex/config.toml` 变更属于宿主授权域。skills-manager 不生成、不写入、不迁移该配置，只能在显式只读 probe 中报告观察结果与真值边界。
+- `FR-HER-004`：只有完成隔离 POC、存在真实 consumer、且现有 native projection 无法承载所需差异时，才允许新增 consumer adapter。只有一个假设 consumer 时，不创建泛化 host adapter framework。
+- `FR-EVO-001`：宿主 AI 可以在项目级 `.agents/skills` 或隔离 sandbox 草拟、修复和测试候选技能；候选必须以普通 Git change-set 或明确 source root 提交审核，不能直接写入全局受管 root。
+- `FR-EVO-002`：准入前必须验证 skill identity、path containment、reparse-point/special-file safety、来源/revision/license/provenance、内容 hash、受影响测试与兼容性。建议、扫描结果或 AI 自评不是准入授权。
+- `FR-EVO-003`：准入至少分为 `proposal -> reviewed -> admitted -> projected -> host_loaded -> live_accepted`。`reviewed` 与 `admitted` 必须有独立的人类或指定 owner 决策；AI 不能批准自己的候选。
+- `FR-EVO-004`：已准入技能仍遵循现有 `skills.json` / lock、build、projection receipt 与 rollback 规则。失败时只回滚本次候选的 source/mapping/projection，不删除 external-owned 或其他宿主资产。
+- `FR-EVO-005`：技能演进不新增长期候选数据库、自治 curator、hidden prompt memory 或自动发布链；动态 proposal/task state 属于 Hermes、目标仓 issue/PR 或 operator 工具，不是本仓 tracked runtime state。
+
 ## 6. 非功能需求
 
 - PowerShell 7-only，UTF-8，Windows-first。
 - local-first；除显式 source refresh、MCP 或 live probe 外不依赖网络。
 - secret-redaction-first；日志和 receipt 不写 token、header value 或环境 secret。
 - 所有写路径有 containment、freshness、授权、rollback 或 compensation。
+- Hermes consumer 与 skill evolution 的任何宿主集成默认 fail closed：缺失 POC evidence、source/target hash、owner、write policy、review 或 rollback 时不得投影、更不得修改宿主配置。
 - generated sync、config 或公开契约失败即阻断；reference 只在显式 refresh/verify 时 fail closed，其他检查按当前风险触发。
 - 不新增只有一个 adapter 的 seam；不为历史兼容保留无 caller interface。
 
@@ -119,5 +138,11 @@ Repository closeout 至少满足：
 3. `git diff --check` 通过。
 4. 若触发 runtime/安全/数据/迁移/公开契约/依赖/打包风险，在输入冻结后运行一次 full gate。
 5. 报告删除量、保留主链和未验证边界。
+
+Hermes consumer / skill evolution 的实现 closeout 还必须满足：
+
+6. 每个实际 consumer 都有 source/target/owner/write-policy/hash/receipt/rollback 的可核对 contract；没有 consumer 时不得以“未来兼容”为理由扩展 runtime。
+7. 候选技能的 proposal、review、admission、projection 与宿主验收状态可区分；任何低层证据不得跳级为 `host_loaded` 或 `live_accepted`。
+8. 受控 POC 在隔离 profile 或等效环境中证明：只有指定 worktree 与受管测试 root 被写入，主 `~/.codex`、主 `~/.agents/skills` 和生产凭据没有被改变。
 
 `host_loaded` 需要新宿主会话/投影事实；`live_accepted` 需要真实用户工作流。二者不属于 repository tests 的自动结论。

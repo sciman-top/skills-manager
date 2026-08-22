@@ -73,6 +73,39 @@ Canonical inventory 统一来源；eligibility 处理 enabled/dependency/placeme
 
 `capability-router` 是宿主按需选择的 fallback adapter，仅在可见 metadata 不足或需要确定性 policy validation 时适用。它从 portable catalog 读取候选，按 `DomainHint` 限定集合，并对宿主提供的 Candidate 做确定性 existence、containment、entrypoint hash、availability 与 side-effect disclosure 校验。它不作普通请求前置，不维护 session、preheat、activation plan 或 MCP/plugin 编排；语义选择始终属于宿主。
 
+### Hermes consumer 与受控技能演进（未来、POC 门禁）
+
+Hermes 不是本仓的第六条运行主链，也不是本仓需要嵌入的 runtime。它是一个可能消费技能的外部宿主；目前不存在 `HermesAdapter`、Gateway controller、Kanban bridge 或任何对 `~/.hermes` / `~/.codex` 的写路径。
+
+在隔离 POC 未证明真实差异前，Hermes 只应消费项目级 `.agents/skills`，或消费经 ACL/独立用户保护的只读副本。现有 native projection 已能表达 source、package hash、managed/external ownership、receipt 和 rollback 时，不新增 consumer module。
+
+只有同时满足下列条件才允许实现独立 consumer seam：
+
+1. 一个隔离 POC 已证明 Hermes 对现有 native projection 有无法承载的稳定差异。
+2. 至少一个真实 consumer 和一个可复现的 caller/验收流程存在；差异不是未来猜测。
+3. 新 interface 可以保持为 `consumer_id + source fingerprint + target root + ownership/write policy + receipt + rollback`，且不泄露模型、会话、任务或权限语义。
+4. 配置、计划、应用、回滚与 host probe 都能单独验证；缺少任何一项时保持 `not_implemented`。
+
+若上述条件成立，consumer module 的 depth 应集中管理受管副本/链接、hash 绑定、ownership、原子替换、receipt 与 rollback；其 interface 不得演化为通用 agent orchestration framework。
+
+技能演进同样不是 daemon。正确的数据流是：
+
+```text
+observed need
+  -> project-local or sandbox candidate
+  -> deterministic package/schema/safety validation
+  -> reviewed Git change-set or reviewed source root
+  -> explicit admission into skills.json / lock / overrides
+  -> build + affected tests
+  -> optional projection receipt
+  -> fresh-host probe
+  -> real task acceptance
+```
+
+其中 `observed need` 可以来自 ChatGPT Desktop、Hermes、Codex、CI 或人工；但 candidate 仍是普通文件/Git change-set，review/admission 是人工或被明确指定的独立 owner 决策。任何 Agent 的自动反思、记忆或自评都只能生成 proposal，不能越过 admission。
+
+`Assert-SkillPackageSafe`、canonical identity、path containment、完整 package hash、受管 projection receipt 与 source/lock 是该链的确定性基础。不得为 proposal 新建第二任务数据库、长期 evidence archive、hidden memory store 或自动发布系统。
+
 ### MCP transport diagnostics
 
 配置继续使用兼容字段 `transport=http`，运行语义统一标注为 `streamable_http`。doctor 只做脱敏的静态诊断：HTTPS 标为 encrypted，loopback HTTP 标为 local plaintext，非 loopback HTTP 输出风险；这些结果不证明远端服务可用、Origin 校验或认证已由服务端执行。
@@ -94,6 +127,8 @@ Canonical inventory 统一来源；eligibility 处理 enabled/dependency/placeme
 | 生成 | `skills.ps1` / `agent/` | source 与 generated 一致 |
 | audit/projection/quality | ignored `reports/` | 一次运行的 receipt |
 | reference（显式可选） | manifest + checkout Git state | 当前参考集合与 revision；不证明产品主链健康 |
+| external consumer（未来） | reviewed consumer contract + projection receipt | 一次受管副本/链接的结果；不证明 Hermes/Codex 已加载或任务完成 |
+| skill evolution（未来） | reviewed Git change-set / source root + admission decision | 候选已审查或已准入；不证明投影、宿主加载或业务验收 |
 | host | 宿主配置/可见 inventory/新会话 | `host_loaded` |
 | business | 真实用户任务 | `live_accepted` |
 
@@ -130,11 +165,13 @@ full gate 仅顺序执行一次 build、tests、committed generated bundle、loc
 Module 删除后若复杂度直接消失，而不在真实 caller 重现，则该 module 是浅层控制面，应删除。当前禁止重新引入：
 
 - plugin fixture distribution CLI
-- candidate/review/staging control plane
+- 独立于 Git review/source admission 之外的 candidate/review/staging control plane 或第二状态数据库
 - skill profile reconciliation/canary/runtime selector
 - phase/task/evidence archive 作为当前状态库
 - 无明确 consumer 的 conditional reference candidate backlog
 - typed shadow 双实现
 - 静态一键 workflow 与自动更新计划任务生命周期控制面
+- Hermes/Codex runtime bridge、Gateway/cron/Kanban/task database、worktree lease manager 与自动 merge/push
+- 无审查的 self-learning curator、直接修改全局 skill root 的 agent、或把 memory/AI self-review 当作 admission
 
 只有新的真实失败、至少一个稳定消费者、现有 interface 无法承载、对比净收益和可回滚迁移同时成立时，才准入新 module 或 seam。
