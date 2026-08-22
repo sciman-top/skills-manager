@@ -1,6 +1,6 @@
 # Hermes + Codex 实施计划与任务清单
 
-**状态**：`in_progress`（POC 与 HSM-DEC-060 已有分支级证据；不代表 merge、push、release、host_loaded 或 live_accepted）
+**状态**：`repo_phase_closed`（截至 2026-08-22，当前范围内的 POC、参考仓与决策任务均已完成，或已以 `no_code_needed` / `not_eligible` 确定性关闭；fresh host probe、真实用户工作流和线下/现场验收按当前范围明确延后，不代表远端、发布、`host_loaded` 或 `live_accepted`）
 **执行原则**：每个任务都是独立授权单元；未满足前置条件时返回 `not_started` / `blocked`，不以“继续”自动扩大到主机配置、安装、合并或发布。
 **并发原则**：文档任务可与不重叠的代码任务并行；同一 repo/worktree、同一 Hermes profile、同一 Codex config 的写任务必须串行。
 
@@ -55,8 +55,9 @@ Truth boundary
 | Codex Harness review 非结论 | 一次 read-only review 未产生 verdict，模型尝试了与其 catalog 冲突的用户根；随后 fresh `codex debug prompt-input` 已显示正确的 project-skill `r6` locator | `not_obtained`；这不证明 host loading 缺失、consumer contract 缺失，也不授权改 skills-manager 或宿主 |
 | HSM-EVO-200 / 210 | 项目级 candidate 已完成 proposal/package safety；现有 admission/projection seam 足够 | `proposal_validated` / `no_code_needed`；独立人类 admission 仍是单独门禁 |
 | HSM-OBS-220 / REF-300 | 无公开稳定 machine-readable observer contract；Hermes 条件参考仓已登记并完成显式 refresh | `not_eligible` / `completed` |
+| 外部/人工验收门 | 当前没有需要启用共享技能、改动宿主或交付真实业务的 consumer | `deferred_by_current_scope`；可略过线下/现场验收。若未来要将 candidate 准入共享 root，仍需独立 owner 远程审查并作出 `reviewed` / `admitted` 决策；这不是物理现场要求 |
 
-所有表中 `completed` 或 `repo_verified_local_merged` 都只描述相应的仓库/POC 层；远端 push、发布、fresh host probe 与 `live_accepted` 仍是独立门禁。
+所有表中 `completed`、`repo_verified_local_merged` 或 `repo_phase_closed` 都只描述相应的仓库/POC 层；远端 push、发布、fresh host probe 与 `live_accepted` 仍是独立门禁。
 
 ## 3. 原子任务卡
 

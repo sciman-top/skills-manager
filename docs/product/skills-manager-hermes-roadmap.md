@@ -1,6 +1,6 @@
 # Hermes + Codex 协作路线图
 
-**状态**：`in_progress`（R3 有分支级 POC 证据，R4 已作出不编码决策；未代表 merge、push、host_loaded 或 live_accepted）
+**状态**：`repo_phase_closed`（截至 2026-08-22，当前范围内 R0-R4 与条件参考工作已完成或确定性关闭；R5/R7 不具备前置条件，R6 仅保留独立 owner 准入门。fresh host probe、真实用户工作流和线下/现场验收按当前范围延后，未代表远端、发布、`host_loaded` 或 `live_accepted`）
 **基线**：现有 skills-manager 产品主链保持不变；本路线图不授权宿主改动。
 **路线图原则**：每一阶段只解锁下一阶段所需的最小风险，不以“自动化程度”替代可验证性。
 
@@ -15,6 +15,7 @@
 | R5 | `not_eligible` | HSM-CODE-100/110/120 不执行，除非新的真实 consumer 需求重开 R4 |
 | R6 | `proposal_validated` | 受控候选可在 project root 验证；admission/projection/host acceptance 仍需独立 owner 与后续证据 |
 | R7 | `not_eligible` | 没有多任务无碰撞、CI/人工收口或 release acceptance 的证据 |
+| 外部/现场验收 | `deferred_by_current_scope` | 当前没有真实业务 consumer；可略过线下/现场验收。未来准入共享 root 时仍需独立 owner 的远程审查，不能由候选 AI 自批 |
 
 HSM-POC-050 中一次 Codex Harness read-only review 未形成 verdict：该模型尝试了与其 skills catalog 冲突的用户根。随后 fresh `codex debug prompt-input` 已显示正确的 project-skill `r6` locator，故这不是已证实的宿主加载缺陷。它仍不构成该 skill 已成功执行或 `host_loaded`，更不能自动触发全局 skill projection、consumer code 或宿主配置改动。
 
