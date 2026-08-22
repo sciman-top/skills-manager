@@ -115,6 +115,15 @@ Describe 'Skill projection profiles' {
         (Get-SkillProjectionPlanFingerprint $plan $null $core) | Should -Not -Be (Get-SkillProjectionPlanFingerprint $plan $null $full)
     }
 
+    It 'keeps the full-compatible TDD skill prompt-visible while retaining its explicit-use constraint' {
+        $metadata = Get-ContentUtf8 (Join-Path $repoRoot 'overrides\patches\test-driven-development\agents\openai.yaml')
+        $skill = Get-ContentUtf8 (Join-Path $repoRoot 'overrides\patches\test-driven-development\SKILL.md')
+
+        $metadata | Should -Match 'allow_implicit_invocation:\s*true'
+        $skill | Should -Match 'user explicitly requests strict TDD'
+        $skill | Should -Match 'Do not require TDD for routine implementation'
+    }
+
     It 'validates a full-compatible manifest against its recorded profile instead of the default core profile' {
         $source = Join-Path $TestDrive 'manifest-source'
         $target = Join-Path $TestDrive 'manifest-target'
