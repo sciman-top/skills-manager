@@ -220,6 +220,7 @@ MCP：
 技能投影：
   .\skills.ps1 构建生效
   .\skills.ps1 capability-inventory --view skill-surfaces [--host-snapshot <snapshot.json>] [--host-probe] --json
+  默认不调用宿主 CLI；仅 --host-probe 读取公开 Codex JSON，结果脱敏且不证明宿主已加载。
 
 目标仓审查：
   .\skills.ps1 审查目标 需求设置

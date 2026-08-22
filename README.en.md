@@ -92,10 +92,14 @@ Target-audit runtime bundles and receipts live under ignored `reports/skill-audi
 Host-native metadata is the normal selection surface. `capability-router` is an explicit cold-discovery or policy-validation fallback. It accepts `DomainHint`, returns candidates, and validates host selections; it does not rank semantically, switch profiles, or mutate host state.
 
 ```powershell
+# Default: read repository skill surfaces only; do not invoke the host CLI.
 .\skills.ps1 capability-inventory --view skill-surfaces --json
+
+# Opt in only when a current, read-only host observation is needed.
+.\skills.ps1 capability-inventory --view skill-surfaces --host-probe --json
 ```
 
-The inventory uses public Codex CLI JSON only. When an enabled plugin and a standalone/system skill share a name, it emits a report-only native-source preference. It never installs, removes, or enables plugins and never reads or writes plugin caches.
+By default the inventory returns repository and projected skill surfaces only. `--host-probe` opts into public Codex CLI JSON for plugins, MCP servers, and doctor facts; the result is redacted and read-only. When an enabled plugin and a standalone/system skill share a name, it emits a report-only native-source preference. It never installs, removes, or enables plugins, never reads or writes plugin caches, and does not prove host loading or actual skill invocation.
 
 ## Reference shelf
 

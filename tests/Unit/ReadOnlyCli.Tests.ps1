@@ -79,6 +79,11 @@ Describe 'Read-only capability and rule CLI' {
         (Get-FileHash -LiteralPath $CfgPath -Algorithm SHA256).Hash | Should -Be $before
     }
 
+    It 'parses host probing as an explicit opt-in' {
+        (Parse-ReadOnlyCapabilityOptions @('--json')).host_probe | Should -BeFalse
+        (Parse-ReadOnlyCapabilityOptions @('--host-probe', '--json')).host_probe | Should -BeTrue
+    }
+
     It 'writes exactly the explicit capability report path' {
         $script:Root = $capabilityRoot
         $script:CfgPath = $capabilityCfgPath

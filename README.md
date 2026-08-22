@@ -134,10 +134,14 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 Codex 与 Claude 默认只投影同一份小型 managed allowlist；其余已安装技能保留为 cold catalog，需要真实任务触发后再读取。这里的“可见”不代表每个请求都会加载或调用完整 `SKILL.md`。
 
 ```powershell
+# 默认只读取仓库侧技能面，不调用宿主 CLI
 .\skills.ps1 capability-inventory --view skill-surfaces --json
+
+# 需要当前宿主观测时才显式启用；只调用公开 JSON 命令，不写宿主状态
+.\skills.ps1 capability-inventory --view skill-surfaces --host-probe --json
 ```
 
-该命令还会读取 `codex plugin list --json`、`codex mcp list --json` 与 `codex doctor --json`，只保留脱敏的只读 host observation。若 enabled plugin 与 standalone/system skill 同名，会输出 `plugin_native_source_preferred` 和 report-only source preference；它不会安装、卸载或启用插件，也不读写 plugin cache。该观察不证明技能已经 `host_loaded` 或完成真实调用；公开 CLI 不可用时按 `platform_na`/not observed 报告。
+默认模式只生成仓库和已投影技能面的快照；只有显式 `--host-probe` 才会读取 `codex plugin list --json`、`codex mcp list --json` 与 `codex doctor --json`。host probe 只保留脱敏的只读 observation：若 enabled plugin 与 standalone/system skill 同名，会输出 `plugin_native_source_preferred` 和 report-only source preference；它不会安装、卸载或启用插件，也不读写 plugin cache。该观察不证明技能已经 `host_loaded` 或完成真实调用；公开 CLI 不可用时按 `platform_na`/not observed 报告。
 
 ## 外置参考仓
 
