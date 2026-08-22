@@ -2,15 +2,16 @@ function Parse-RuleEstateAuditOptions([object[]]$Tokens) {
     $userHome = [Environment]::GetFolderPath('UserProfile')
     $codexRoot = if (-not [string]::IsNullOrWhiteSpace($env:CODEX_HOME)) { $env:CODEX_HOME } else { Join-Path $userHome '.codex' }
     $claudeRoot = if (-not [string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $userHome '.claude' }
+    $zcodeRoot = Join-Path $userHome '.zcode'
     $result = [ordered]@{
-        workspace_root = $null; exclude_names = @('external', '文档'); registry_path = $null
-        codex_user_root = $codexRoot; claude_user_root = $claudeRoot
+        workspace_root = $null; exclude_names = @('external', 'docs', '文档'); registry_path = $null
+        codex_user_root = $codexRoot; claude_user_root = $claudeRoot; zcode_user_root = $zcodeRoot
         max_targets = 64; out_path = $null; json = $false
     }
     for ($i = 0; $i -lt @($Tokens).Count; $i++) {
         $token = [string]$Tokens[$i]
         if ($token -eq '--json') { $result.json = $true; continue }
-        if ($token -notin @('--workspace-root', '--exclude', '--registry', '--codex-user-root', '--claude-user-root', '--max-targets', '--out')) { throw ('Unknown rule-estate-audit option: {0}' -f $token) }
+        if ($token -notin @('--workspace-root', '--exclude', '--registry', '--codex-user-root', '--claude-user-root', '--zcode-user-root', '--max-targets', '--out')) { throw ('Unknown rule-estate-audit option: {0}' -f $token) }
         if ($i + 1 -ge @($Tokens).Count) { throw ('{0} requires a value.' -f $token) }
         $i++; $value = [string]$Tokens[$i]
         switch ($token) {
@@ -19,6 +20,7 @@ function Parse-RuleEstateAuditOptions([object[]]$Tokens) {
             '--registry' { $result.registry_path = $value }
             '--codex-user-root' { $result.codex_user_root = $value }
             '--claude-user-root' { $result.claude_user_root = $value }
+            '--zcode-user-root' { $result.zcode_user_root = $value }
             '--max-targets' { $result.max_targets = [int]$value }
             '--out' { $result.out_path = $value }
         }
@@ -36,7 +38,7 @@ function Invoke-RuleEstateAuditCommand([object[]]$Tokens = @()) {
         $registry = [System.IO.File]::ReadAllText($registryPath) | ConvertFrom-Json
         $registryTargets = @($registry.targets)
     }
-    $report = Invoke-RuleEstateAudit -WorkspaceRoot $options.workspace_root -ExcludeNames $options.exclude_names -RegistryTargets $registryTargets -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -MaxTargets $options.max_targets
+    $report = Invoke-RuleEstateAudit -WorkspaceRoot $options.workspace_root -ExcludeNames $options.exclude_names -RegistryTargets $registryTargets -CodexUserRoot $options.codex_user_root -ClaudeUserRoot $options.claude_user_root -ZCodeUserRoot $options.zcode_user_root -MaxTargets $options.max_targets
     $reportRequested = -not [string]::IsNullOrWhiteSpace([string]$options.out_path)
     $pass = [bool]$report.structural_pass -and [bool]$report.semantic_coverage_pass
     $exitCode = if ($pass) { 0 } else { 2 }
@@ -62,7 +64,7 @@ function Parse-RuleEstateMutationOptions([object[]]$Tokens, [ValidateSet('plan',
     $userHome=[Environment]::GetFolderPath('UserProfile')
     $codexRoot=if(-not[string]::IsNullOrWhiteSpace($env:CODEX_HOME)){$env:CODEX_HOME}else{Join-Path $userHome '.codex'}
     $claudeRoot=if(-not[string]::IsNullOrWhiteSpace($env:CLAUDE_CONFIG_DIR)){$env:CLAUDE_CONFIG_DIR}else{Join-Path $userHome '.claude'}
-    $result=[ordered]@{review=$null;plan=$null;workspace_root=$null;codex_user_root=$codexRoot;claude_user_root=$claudeRoot;exclude_names=@('external','文档');token=$null;out_path=$null;resume=$null;receipt=$null;action_id=$null;json=$false}
+    $result=[ordered]@{review=$null;plan=$null;workspace_root=$null;codex_user_root=$codexRoot;claude_user_root=$claudeRoot;exclude_names=@('external','docs','文档');token=$null;out_path=$null;resume=$null;receipt=$null;action_id=$null;json=$false}
     for($i=0;$i -lt @($Tokens).Count;$i++){
         $token=[string]$Tokens[$i]
         if($token -eq '--json'){$result.json=$true;continue}

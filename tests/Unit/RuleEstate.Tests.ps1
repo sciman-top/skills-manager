@@ -18,11 +18,11 @@ Describe 'Workspace rule estate audit' {
     BeforeAll {
 function New-RuleEstateFixture {
         $workspace = Join-Path $TestDrive ('workspace-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path $workspace -Force | Out-Null
-        foreach ($name in @('repo-a', 'repo-b', 'external', '文档')) {
+        foreach ($name in @('repo-a', 'repo-b', 'external', 'docs', '文档')) {
             $path = Join-Path $workspace $name; New-Item -ItemType Directory -Path $path -Force | Out-Null
             & git -C $path init -q -b main
             if ($LASTEXITCODE -ne 0) { throw ('git fixture initialization failed: {0}' -f $path) }
-            if ($name -notin @('external', '文档')) {
+            if ($name -notin @('external', 'docs', '文档')) {
                 @'
 # Project
 **全局规则复核**: 9.60
@@ -58,7 +58,7 @@ Build, test, contract and hotspot evidence use the repository verifier; rollback
             Set-Content -LiteralPath (Join-Path $workspace "$name\CLAUDE.md") -Value '@AGENTS.md' -Encoding UTF8
         }
         $fixtureId = [guid]::NewGuid().ToString('N')
-        $codex = Join-Path $TestDrive ('codex-' + $fixtureId); $claude = Join-Path $TestDrive ('claude-' + $fixtureId); New-Item -ItemType Directory -Path $codex,$claude -Force | Out-Null
+        $codex = Join-Path $TestDrive ('codex-' + $fixtureId); $claude = Join-Path $TestDrive ('claude-' + $fixtureId); $zcode = Join-Path $TestDrive ('zcode-' + $fixtureId); New-Item -ItemType Directory -Path $codex,$claude,$zcode -Force | Out-Null
         $common = @'
 **版本**: 9.60
 
@@ -84,7 +84,8 @@ verify drift
 '@
         Set-Content -LiteralPath (Join-Path $codex 'AGENTS.md') -Value ($common.Replace('host delta', 'codex host delta')) -Encoding UTF8
         Set-Content -LiteralPath (Join-Path $claude 'CLAUDE.md') -Value ($common.Replace('host delta', 'claude host delta')) -Encoding UTF8
-        return [pscustomobject]@{ workspace=$workspace; codex=$codex; claude=$claude }
+        Set-Content -LiteralPath (Join-Path $zcode 'AGENTS.md') -Value ($common.Replace('host delta', 'zcode host delta')) -Encoding UTF8
+        return [pscustomobject]@{ workspace=$workspace; codex=$codex; claude=$claude; zcode=$zcode }
     }
 }
 
@@ -96,6 +97,7 @@ verify drift
         $result.target_count | Should -Be 2
         @($result.targets.name) | Should -Contain 'repo-a'
         @($result.targets.name) | Should -Not -Contain 'external'
+        @($result.targets.name) | Should -Not -Contain 'docs'
         @($result.registry.unregistered_paths).Count | Should -Be 1
         @($result.registry.missing_paths).Count | Should -Be 1
         $result.registry.in_sync | Should -Be $false
@@ -114,13 +116,39 @@ verify drift
         @($result.findings).Count | Should -Be 0
     }
 
+    It 'includes configured ZCode global and Workspace-root rule surfaces without flattening platform deltas' {
+        $f = New-RuleEstateFixture
+        $result = Get-RuleEstateGlobalAlignment $f.codex $f.claude $f.zcode
+        $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','docs','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude -ZCodeUserRoot $f.zcode
+        $repo = @($report.targets | Where-Object name -eq 'repo-a')[0]
+
+        $result.zcode_configured | Should -Be $true
+        $result.zcode_global_rule_present | Should -Be $true
+        $result.zcode_delta_present | Should -Be $true
+        $result.releases.aligned | Should -Be $true
+        $repo.zcode.configuration_state | Should -Be 'configured'
+        @($repo.zcode.documents).Count | Should -Be 2
+        @($result.findings).Count | Should -Be 0
+    }
+
+    It 'fails closed when configured ZCode global release drifts' {
+        $f = New-RuleEstateFixture
+        $path = Join-Path $f.zcode 'AGENTS.md'
+        [IO.File]::WriteAllText($path, ([IO.File]::ReadAllText($path).Replace('**版本**: 9.60', '**版本**: 9.61')))
+
+        $result = Get-RuleEstateGlobalAlignment $f.codex $f.claude $f.zcode
+
+        @($result.findings.code) | Should -Contain 'global_release_mismatch'
+        $result.releases.aligned | Should -Be $false
+    }
+
     It 'fails when a global rule omits a required top-level contract section' {
         $f = New-RuleEstateFixture
         $codexPath = Join-Path $f.codex 'AGENTS.md'
         $text = [regex]::Replace([IO.File]::ReadAllText($codexPath), '(?ms)^## 1\..*?(?=^## A\.)', '')
         [IO.File]::WriteAllText($codexPath, $text)
 
-        $result = Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--json')
+        $result = Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--zcode-user-root',$f.zcode,'--json')
         $parsed = $result.output | ConvertFrom-Json
 
         $result.exit_code | Should -Be 2
@@ -133,7 +161,7 @@ verify drift
 
         $report = Invoke-RuleEstateAudit -WorkspaceRoot $f.workspace -ExcludeNames @('external','文档') -CodexUserRoot $f.codex -ClaudeUserRoot $f.claude
 
-        @($report.reference_basis | Where-Object authority -eq 'official').Count | Should -Be 3
+        @($report.reference_basis | Where-Object authority -eq 'official').Count | Should -Be 4
         @($report.reference_basis | Where-Object source -eq 'https://agents.md/').Count | Should -Be 1
         @($report.reference_basis | Where-Object source -match '^[A-Za-z]:\\').Count | Should -Be 0
     }
@@ -143,10 +171,11 @@ verify drift
         $oldCodex = $env:CODEX_HOME; $oldClaude = $env:CLAUDE_CONFIG_DIR
         try {
             $env:CODEX_HOME = $f.codex; $env:CLAUDE_CONFIG_DIR = $f.claude
-            $audit = Parse-RuleEstateAuditOptions @('--workspace-root',$f.workspace)
+            $audit = Parse-RuleEstateAuditOptions @('--workspace-root',$f.workspace,'--zcode-user-root',$f.zcode)
             $plan = Parse-RuleEstateMutationOptions @('--review','review.json','--workspace-root',$f.workspace,'--out','plan.json') plan
             $audit.codex_user_root | Should -Be $f.codex
             $audit.claude_user_root | Should -Be $f.claude
+            $audit.zcode_user_root | Should -Be $f.zcode
             $plan.codex_user_root | Should -Be $f.codex
             $plan.claude_user_root | Should -Be $f.claude
         }
@@ -187,7 +216,7 @@ verify drift
         [IO.File]::WriteAllText($claudePath, ([IO.File]::ReadAllText($claudePath).Replace('claude host delta', 'codex host delta')))
         [IO.File]::AppendAllText($codexPath, ('x' * 17000))
 
-        $result = Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--json')
+        $result = Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--zcode-user-root',$f.zcode,'--json')
         $parsed = $result.output | ConvertFrom-Json
 
         $result.exit_code | Should -Be 2
@@ -297,7 +326,7 @@ verify drift
 
     It 'returns a single JSON envelope and only writes an explicit report' {
         $f = New-RuleEstateFixture; $out = Join-Path $f.workspace 'estate.json'
-        $result = Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--out',$out,'--json')
+        $result = Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--zcode-user-root',$f.zcode,'--out',$out,'--json')
         $parsed = $result.output | ConvertFrom-Json
 
         $result.exit_code | Should -Be 0
@@ -385,7 +414,7 @@ verify drift
         if ($LASTEXITCODE -ne 0) { throw 'junction fixture creation failed' }
 
         $out = Join-Path $link 'estate.json'
-        { Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--out',$out,'--json') } | Should -Throw
+        { Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--zcode-user-root',$f.zcode,'--out',$out,'--json') } | Should -Throw
         Test-Path -LiteralPath (Join-Path $outside 'estate.json') | Should -Be $false
     }
 
@@ -395,7 +424,7 @@ verify drift
         $registryText = '{"targets":[]}'
         [IO.File]::WriteAllText($registryPath, $registryText)
 
-        { Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--registry',$registryPath,'--out',$registryPath,'--json') } | Should -Throw
+        { Invoke-RuleEstateAuditCommand @('--workspace-root',$f.workspace,'--codex-user-root',$f.codex,'--claude-user-root',$f.claude,'--zcode-user-root',$f.zcode,'--registry',$registryPath,'--out',$registryPath,'--json') } | Should -Throw
         [IO.File]::ReadAllText($registryPath) | Should -Be $registryText
     }
 

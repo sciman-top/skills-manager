@@ -15,7 +15,7 @@ function Get-RuleEstateNormalizedPath([string]$Path, [string]$BasePath = '') {
 function Get-RuleEstateTargets {
     param(
         [Parameter(Mandatory = $true)][string]$WorkspaceRoot,
-        [string[]]$ExcludeNames = @('external', '文档'),
+        [string[]]$ExcludeNames = @('external', 'docs', '文档'),
         [object[]]$RegistryTargets = @(),
         [int]$MaxTargets = 64
     )
@@ -23,7 +23,7 @@ function Get-RuleEstateTargets {
     if (-not [System.IO.Directory]::Exists($root)) { throw ('Workspace root does not exist: {0}' -f $root) }
     if ($MaxTargets -lt 1 -or $MaxTargets -gt 512) { throw 'MaxTargets must be between 1 and 512.' }
     $excluded = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($name in @($ExcludeNames)) { if (-not [string]::IsNullOrWhiteSpace($name)) { $excluded.Add($name.Trim()) | Out-Null } }
+    foreach ($name in @('external', 'docs', '文档') + @($ExcludeNames)) { if (-not [string]::IsNullOrWhiteSpace($name)) { $excluded.Add($name.Trim()) | Out-Null } }
     $targets = New-Object System.Collections.Generic.List[object]
     foreach ($directory in @([System.IO.Directory]::GetDirectories($root) | Sort-Object)) {
         $name = [System.IO.Path]::GetFileName($directory)
@@ -210,10 +210,10 @@ function Get-RuleEstateGitProfileFindings([string]$ProjectText, [string]$AgentsP
     return @($findings.ToArray())
 }
 
-function Get-RuleEstateGlobalDocument([string]$UserRoot, [ValidateSet('codex', 'claude')][string]$HostName) {
+function Get-RuleEstateGlobalDocument([string]$UserRoot, [ValidateSet('codex', 'claude', 'zcode')][string]$HostName) {
     if ([string]::IsNullOrWhiteSpace($UserRoot)) { return $null }
     $root = Get-RuleEstateNormalizedPath $UserRoot
-    $names = if ($HostName -eq 'codex') { @('AGENTS.override.md', 'AGENTS.md') } else { @('CLAUDE.md') }
+    $names = if ($HostName -eq 'codex') { @('AGENTS.override.md', 'AGENTS.md') } elseif ($HostName -eq 'zcode') { @('AGENTS.md') } else { @('CLAUDE.md') }
     foreach ($name in $names) {
         $path = Join-Path $root $name
         if ([System.IO.File]::Exists($path)) {
@@ -225,15 +225,24 @@ function Get-RuleEstateGlobalDocument([string]$UserRoot, [ValidateSet('codex', '
     return $null
 }
 
-function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUserRoot) {
+function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUserRoot, [string]$ZCodeUserRoot = '') {
     $codex = Get-RuleEstateGlobalDocument $CodexUserRoot codex
     $claude = Get-RuleEstateGlobalDocument $ClaudeUserRoot claude
+    $zcodeRoot = ''
+    $zcodeConfigured = $false
+    if (-not [string]::IsNullOrWhiteSpace($ZCodeUserRoot)) {
+        $zcodeRoot = Get-RuleEstateNormalizedPath $ZCodeUserRoot
+        $zcodeConfigured = [System.IO.Directory]::Exists($zcodeRoot)
+    }
+    $zcode = if ($zcodeConfigured) { Get-RuleEstateGlobalDocument $zcodeRoot zcode } else { $null }
     $sections = New-Object System.Collections.Generic.List[object]
     $findings = New-Object System.Collections.Generic.List[object]
-    foreach ($document in @(
+    $documents = @(
         [pscustomobject]@{ host = 'codex'; value = $codex },
         [pscustomobject]@{ host = 'claude'; value = $claude }
-    )) {
+    )
+    if ($zcodeConfigured) { $documents += [pscustomobject]@{ host = 'zcode'; value = $zcode } }
+    foreach ($document in $documents) {
         $text = if ($null -eq $document.value) { '' } else { [string]$document.value.text }
         if ([string]::IsNullOrWhiteSpace((Get-RuleEstateMarkdownSection $text '1'))) {
             $findings.Add([pscustomobject][ordered]@{ code = 'global_contract_section_missing'; severity = 'error'; host = [string]$document.host; section = '1'; path = if ($null -eq $document.value) { '' } else { [string]$document.value.path }; disposition = 'adapt'; message = 'Global rule contract section 1 is missing.' }) | Out-Null
@@ -257,12 +266,15 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
     }
     $codexDelta = if ($null -eq $codex) { '' } else { Get-RuleEstateMarkdownSection ([string]$codex.text) 'B' }
     $claudeDelta = if ($null -eq $claude) { '' } else { Get-RuleEstateMarkdownSection ([string]$claude.text) 'B' }
+    $zcodeDelta = if ($null -eq $zcode) { '' } else { Get-RuleEstateMarkdownSection ([string]$zcode.text) 'B' }
     if ([string]::IsNullOrWhiteSpace($codexDelta)) { $findings.Add([pscustomobject]@{ code = 'codex_platform_delta_missing'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'Codex global platform delta section B is missing.' }) | Out-Null }
     if ([string]::IsNullOrWhiteSpace($claudeDelta)) { $findings.Add([pscustomobject]@{ code = 'claude_platform_delta_missing'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'Claude global platform delta section B is missing.' }) | Out-Null }
+    if ($zcodeConfigured -and $null -eq $zcode) { $findings.Add([pscustomobject]@{ code = 'zcode_global_rule_missing'; severity = 'error'; path = (Join-Path $zcodeRoot 'AGENTS.md'); disposition = 'adapt'; message = 'Configured ZCode user root has no non-empty AGENTS.md global rule.' }) | Out-Null }
+    if ($zcodeConfigured -and [string]::IsNullOrWhiteSpace($zcodeDelta)) { $findings.Add([pscustomobject]@{ code = 'zcode_platform_delta_missing'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'ZCode global platform delta section B is missing.' }) | Out-Null }
     if (-not [string]::IsNullOrWhiteSpace($codexDelta) -and $codexDelta -ceq $claudeDelta) { $findings.Add([pscustomobject]@{ code = 'platform_delta_not_distinct'; severity = 'error'; section = 'B'; disposition = 'adapt'; message = 'Codex and Claude platform delta sections are identical; verify that host-specific loading and enforcement facts were not flattened.' }) | Out-Null }
 
     $budgets = New-Object System.Collections.Generic.List[object]
-    foreach ($document in @($codex, $claude)) {
+    foreach ($document in @($codex, $claude, $zcode)) {
         if ($null -eq $document) { continue }
         $text = [string]$document.text
         $byteCount = [System.Text.Encoding]::UTF8.GetByteCount($text)
@@ -283,17 +295,22 @@ function Get-RuleEstateGlobalAlignment([string]$CodexUserRoot, [string]$ClaudeUs
 
     $codexRelease = if ($null -eq $codex) { '' } else { Get-RuleEstateRelease ([string]$codex.text) global }
     $claudeRelease = if ($null -eq $claude) { '' } else { Get-RuleEstateRelease ([string]$claude.text) global }
-    $releaseAligned = -not [string]::IsNullOrWhiteSpace($codexRelease) -and $codexRelease -eq $claudeRelease
-    if (-not $releaseAligned) { $findings.Add([pscustomobject]@{ code = 'global_release_mismatch'; severity = 'error'; disposition = 'adapt'; expected = $codexRelease; observed = $claudeRelease; message = 'Codex and Claude global rule releases are absent or different.' }) | Out-Null }
+    $zcodeRelease = if ($null -eq $zcode) { '' } else { Get-RuleEstateRelease ([string]$zcode.text) global }
+    $releaseAligned = -not [string]::IsNullOrWhiteSpace($codexRelease) -and $codexRelease -eq $claudeRelease -and ((-not $zcodeConfigured) -or $codexRelease -eq $zcodeRelease)
+    if (-not $releaseAligned) { $findings.Add([pscustomobject]@{ code = 'global_release_mismatch'; severity = 'error'; disposition = 'adapt'; expected = $codexRelease; observed = [pscustomobject]@{ claude = $claudeRelease; zcode = $zcodeRelease; zcode_configured = $zcodeConfigured }; message = 'Codex, Claude, and configured ZCode global rule releases are absent or different.' }) | Out-Null }
     return [pscustomobject][ordered]@{
         codex_path = if ($null -eq $codex) { '' } else { [string]$codex.path }
         claude_path = if ($null -eq $claude) { '' } else { [string]$claude.path }
+        zcode_path = if ($null -eq $zcode) { if ($zcodeConfigured) { Join-Path $zcodeRoot 'AGENTS.md' } else { '' } } else { [string]$zcode.path }
+        zcode_configured = $zcodeConfigured
+        zcode_global_rule_present = ($null -ne $zcode)
         common_sections = @($sections.ToArray())
         common_aligned = (@($sections | Where-Object { -not $_.aligned }).Count -eq 0)
         codex_delta_present = -not [string]::IsNullOrWhiteSpace($codexDelta)
         claude_delta_present = -not [string]::IsNullOrWhiteSpace($claudeDelta)
+        zcode_delta_present = -not [string]::IsNullOrWhiteSpace($zcodeDelta)
         platform_deltas_distinct = (-not [string]::IsNullOrWhiteSpace($codexDelta) -and -not [string]::IsNullOrWhiteSpace($claudeDelta) -and $codexDelta -cne $claudeDelta)
-        releases = [pscustomobject][ordered]@{ codex = $codexRelease; claude = $claudeRelease; aligned = $releaseAligned }
+        releases = [pscustomobject][ordered]@{ codex = $codexRelease; claude = $claudeRelease; zcode = $zcodeRelease; zcode_configured = $zcodeConfigured; aligned = $releaseAligned }
         budgets = @($budgets.ToArray())
         findings = @($findings.ToArray())
     }
@@ -341,12 +358,15 @@ function Get-RuleEstateRelease([string]$Text, [ValidateSet('global', 'project')]
 }
 
 function New-RuleEstateTargetAudit {
-    param($Target, [string]$CodexUserRoot, [string]$ClaudeUserRoot, [string]$CodexGlobalText)
+    param($Target, [string]$CodexUserRoot, [string]$ClaudeUserRoot, [string]$CodexGlobalText, [string]$ZCodeUserRoot = '')
     $codexDiscovery = Get-RuleDiscovery -RepoRoot $Target.path -CurrentDirectory $Target.path -HostName codex -UserRuleRoot $CodexUserRoot
     $claudeDiscovery = Get-RuleDiscovery -RepoRoot $Target.path -CurrentDirectory $Target.path -HostName claude -UserRuleRoot $ClaudeUserRoot
+    $zcodeConfigured = -not [string]::IsNullOrWhiteSpace($ZCodeUserRoot) -and [System.IO.Directory]::Exists((Get-RuleEstateNormalizedPath $ZCodeUserRoot))
+    $zcodeDiscovery = if ($zcodeConfigured) { Get-RuleDiscovery -RepoRoot $Target.path -CurrentDirectory $Target.path -HostName zcode -UserRuleRoot $ZCodeUserRoot } else { $null }
     $scopeProfile = [pscustomobject]@{ max_bytes = 10240; max_lines = 80; global_max_bytes = 16384; global_max_lines = 130; project_max_bytes = 10240; project_max_lines = 80; blocking_codes = @('file_missing') }
     $codexDiagnostics = Invoke-RuleDiagnostics $codexDiscovery $scopeProfile
     $claudeDiagnostics = Invoke-RuleDiagnostics $claudeDiscovery $scopeProfile
+    $zcodeDiagnostics = if ($null -eq $zcodeDiscovery) { $null } else { Invoke-RuleDiagnostics $zcodeDiscovery $scopeProfile }
     $projectText = if ([System.IO.File]::Exists([string]$Target.agents_path)) { [System.IO.File]::ReadAllText([string]$Target.agents_path) } else { '' }
     $contractFacts = @(Get-RuleEstateProjectContractFacts $Target.agents_path)
     $globalRelease = Get-RuleEstateRelease $CodexGlobalText global
@@ -400,6 +420,7 @@ function New-RuleEstateTargetAudit {
         name = $Target.name; path = $Target.path
         codex = [pscustomobject][ordered]@{ documents = @($codexDiscovery.documents); findings = @($codexDiagnostics.findings); load_verification = 'not_run' }
         claude = [pscustomobject][ordered]@{ documents = @($claudeDiscovery.documents); findings = @($claudeDiagnostics.findings); load_verification = 'not_run' }
+        zcode = [pscustomobject][ordered]@{ configuration_state = $(if ($zcodeConfigured) { 'configured' } else { 'not_configured' }); documents = $(if ($null -eq $zcodeDiscovery) { @() } else { @($zcodeDiscovery.documents) }); findings = $(if ($null -eq $zcodeDiagnostics) { @() } else { @($zcodeDiagnostics.findings) }); load_verification = 'not_run' }
         contract_fact_coverage_kind = 'required_project_facts_presence'
         contract_facts = @($contractFacts)
         contract_fact_gap_count = @($contractFacts | Where-Object { -not $_.covered }).Count
@@ -412,13 +433,13 @@ function New-RuleEstateTargetAudit {
 }
 
 function Invoke-RuleEstateAudit {
-    param([string]$WorkspaceRoot, [string[]]$ExcludeNames, [object[]]$RegistryTargets = @(), [string]$CodexUserRoot, [string]$ClaudeUserRoot, [int]$MaxTargets = 64)
+    param([string]$WorkspaceRoot, [string[]]$ExcludeNames, [object[]]$RegistryTargets = @(), [string]$CodexUserRoot, [string]$ClaudeUserRoot, [string]$ZCodeUserRoot = '', [int]$MaxTargets = 64)
     $inventory = Get-RuleEstateTargets -WorkspaceRoot $WorkspaceRoot -ExcludeNames $ExcludeNames -RegistryTargets $RegistryTargets -MaxTargets $MaxTargets
-    $alignment = Get-RuleEstateGlobalAlignment $CodexUserRoot $ClaudeUserRoot
+    $alignment = Get-RuleEstateGlobalAlignment $CodexUserRoot $ClaudeUserRoot $ZCodeUserRoot
     $codexGlobal = Get-RuleEstateGlobalDocument $CodexUserRoot codex
     $codexText = if ($null -eq $codexGlobal) { '' } else { [string]$codexGlobal.text }
     $audits = New-Object System.Collections.Generic.List[object]
-    foreach ($target in @($inventory.targets)) { $audits.Add((New-RuleEstateTargetAudit $target $CodexUserRoot $ClaudeUserRoot $codexText)) | Out-Null }
+    foreach ($target in @($inventory.targets)) { $audits.Add((New-RuleEstateTargetAudit $target $CodexUserRoot $ClaudeUserRoot $codexText $ZCodeUserRoot)) | Out-Null }
     $findings = @($alignment.findings) + @($audits | ForEach-Object { $_.findings })
     if (-not $inventory.registry.in_sync) { $findings += [pscustomobject]@{ code = 'target_registry_drift'; severity = 'warning'; path = $inventory.workspace_root; disposition = 'adapt'; message = 'Configured audit targets differ from the discovered workspace Git roots.' } }
     $contractFactGapCount = @($audits | ForEach-Object { $_.contract_facts } | Where-Object { -not $_.covered }).Count
@@ -442,6 +463,7 @@ function Invoke-RuleEstateAudit {
             [pscustomobject]@{ authority = 'official'; source = 'https://learn.chatgpt.com/docs/agent-configuration/agents-md'; disposition = 'adopt'; use = 'Codex global/project/nested discovery and precedence' },
             [pscustomobject]@{ authority = 'official'; source = 'https://learn.chatgpt.com/docs/agent-configuration/rules'; disposition = 'adopt'; use = 'Separate prose guidance from deterministic command policy' },
             [pscustomobject]@{ authority = 'official'; source = 'https://code.claude.com/docs/en/memory'; disposition = 'adopt'; use = 'Claude user/project rules, imports, load order and context boundary' },
+            [pscustomobject]@{ authority = 'official'; source = 'https://zcode.z.ai/cn/docs/agents'; disposition = 'adopt'; use = 'ZCode user and Workspace-root AGENTS loading boundary' },
             [pscustomobject]@{ authority = 'community_standard'; source = 'https://agents.md/'; disposition = 'adapt'; use = 'Portable project instruction structure and nested repository guidance' }
         )
         writes = 0; provider_calls = 0; native_mutations = 0; host_loaded = 'not_run'; live_accepted = 'not_run'

@@ -110,8 +110,13 @@ function Test-GlobalRuleSourceFamily {
         if($null-eq$sections[$entry.id]){$findings.Add((New-GlobalRuleFinding 'source_structure_invalid' $entry.source_path 'Global rules require exactly one ordered 1/A/B/C/D section family.'))|Out-Null}
     }
     foreach($entry in $entries){if(Test-GlobalRuleProjectionReparsePath $entry.target_path $entry.root){$findings.Add((New-GlobalRuleFinding 'target_reparse_forbidden' $entry.target_path 'Global rule targets must be ordinary files below the user root.'))|Out-Null}}
+    $sourceFamilyIds=@('codex','claude','zcode')
+    $sourceFamilyPresent=@($sourceFamilyIds|Where-Object{$facts.ContainsKey($_)-and$facts[$_].exists})
+    if($sourceFamilyPresent.Count-eq$sourceFamilyIds.Count){
+        $sourceVersions=@($sourceFamilyIds|ForEach-Object{[string]$facts[$_].version}|Sort-Object -Unique)
+        if($sourceVersions.Count-ne1){$findings.Add((New-GlobalRuleFinding 'source_version_mismatch' '$' 'Codex, Claude, and ZCode global rule versions differ.'))|Out-Null}
+    }
     if($facts.ContainsKey('codex')-and$facts.ContainsKey('claude')-and$facts.codex.exists-and$facts.claude.exists){
-        if($facts.codex.version-ne$facts.claude.version){$findings.Add((New-GlobalRuleFinding 'source_version_mismatch' '$' 'Codex and Claude global rule versions differ.'))|Out-Null}
         $c=$sections['codex'];$h=$sections['claude']
         if($null-ne$c-and$null-ne$h){
             $codexPlatformBody=[regex]::Replace($c.b,'^[^\n]*\n?','').Trim();$claudePlatformBody=[regex]::Replace($h.b,'^[^\n]*\n?','').Trim()

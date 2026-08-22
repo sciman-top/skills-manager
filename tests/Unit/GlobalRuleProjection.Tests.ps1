@@ -38,7 +38,7 @@ Describe 'Global rule source contract' {
         $result.facts.claude.bytes|Should -BeLessOrEqual 16384
         $result.facts.zcode.version|Should -Be '9.77'
         @($result.observations).Count|Should -Be 0
-        (@(git -C $repoRoot check-attr eol -- rules/global/codex/AGENTS.md rules/global/claude/CLAUDE.md)-join"`n")|Should -Match 'eol: lf'
+        (@(git -C $repoRoot check-attr eol -- rules/global/codex/AGENTS.md rules/global/claude/CLAUDE.md rules/global/zcode/AGENTS.md)-join"`n")|Should -Match 'eol: lf'
     }
 
     It 'requires the 1 section' {
@@ -66,6 +66,11 @@ Describe 'Global rule source contract' {
     It 'rejects drift between common sections' {
         $path=Join-Path $fixture 'rules\global\claude\CLAUDE.md';$text=[IO.File]::ReadAllText($path).Replace('### A.1 三层职责','### A.1 漂移');[IO.File]::WriteAllText($path,$text)
         @((Test-GlobalRuleSourceFamily $fixture $codex $claude).findings.code)|Should -Contain 'source_common_sections_drift'
+    }
+
+    It 'rejects a ZCode global-rule version that differs from the shared release' {
+        $path=Join-Path $fixture 'rules\global\zcode\AGENTS.md';$text=[IO.File]::ReadAllText($path).Replace('**版本**: 9.77','**版本**: 9.78');[IO.File]::WriteAllText($path,$text)
+        @((Test-GlobalRuleSourceFamily $fixture $codex $claude).findings.code)|Should -Contain 'source_version_mismatch'
     }
 
     It 'rejects a drive root as a user projection root' {
