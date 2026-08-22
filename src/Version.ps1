@@ -7,6 +7,7 @@ param(
     [switch]$Locked,
     [switch]$Plan,
     [switch]$Upgrade,
+    [string]$SkillProfile = "",
     [switch]$AllowUnverifiedHostProjection,
     [switch]$SkipHostProjection
 )

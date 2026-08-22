@@ -20,6 +20,50 @@
     "managed_link_excludes": [
       "skill-creator"
     ],
+    "projection_profiles": {
+      "schema_version": 1,
+      "default_profile": "core",
+      "profiles": {
+        "core": {
+          "include": [
+            "capability-router",
+            "codebase-design",
+            "code-review-and-quality",
+            "custom-powerpoint-accessibility",
+            "custom-powershell-windows-automation",
+            "research",
+            "systematic-debugging",
+            "verification-before-completion"
+          ],
+          "exclude": []
+        },
+        "full-compatible": {
+          "include_all": true,
+          "exclude": []
+        }
+      },
+      "hosts": {
+        "codex": {
+          "default_profile": "core",
+          "exclude": [
+            "skill-creator",
+            "web-artifacts-builder"
+          ]
+        },
+        "claude": {
+          "default_profile": "core",
+          "exclude": []
+        },
+        "zcode": {
+          "default_profile": "core",
+          "exclude": [
+            "agent-browser",
+            "skill-creator",
+            "web-artifacts-builder"
+          ]
+        }
+      }
+    },
     "external_skill_inventory": {
       "enabled": true
     },
@@ -789,11 +833,13 @@
   "targets": [
     {
       "path": "~/.claude/skills",
+      "host": "claude",
       "managed_link_only": true,
       "receipt_path": "reports/skill-projection/claude-native-receipt.json"
     },
     {
       "path": "~/.zcode/skills",
+      "host": "zcode",
       "managed_link_only": true,
       "receipt_path": "reports/skill-projection/zcode-native-receipt.json"
     }

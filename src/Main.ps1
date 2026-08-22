@@ -30,7 +30,7 @@ if ($MyInvocation.InvocationName -ne '.') {
             "安装" { 安装 }
             "卸载" { 卸载 (Merge-FilterAndArgs $Filter $args) }
             "选择" { 选择 }
-            "构建生效" { 构建生效 -AllowUnverifiedProjection:$AllowUnverifiedHostProjection -SkipHostProjection:$SkipHostProjection }
+            "构建生效" { 构建生效 -SkillProfile $SkillProfile -AllowUnverifiedProjection:$AllowUnverifiedHostProjection -SkipHostProjection:$SkipHostProjection }
             "更新" { 更新 }
             "check-updates" { $result = Invoke-CheckUpdatesCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output } }
             "锁定" { 锁定 }

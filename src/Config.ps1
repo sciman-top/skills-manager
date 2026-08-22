@@ -413,6 +413,8 @@ function Get-CfgContractErrors($cfg, [int]$SchemaVersion = 0) {
     $imports = Get-CfgArrayField $cfg "imports" $false $errors
     $mcpServers = Get-CfgArrayField $cfg "mcp_servers" $false $errors
     $mcpTargets = Get-CfgArrayField $cfg "mcp_targets" $false $errors
+    $skillProjection = Get-CfgObjectProperty $cfg "skill_projection"
+    $usesProjectionProfiles = ($null -ne (Get-CfgObjectProperty $skillProjection 'projection_profiles'))
 
     foreach ($target in @($targets)) {
         $managedLinkOnly = Get-CfgObjectProperty $target 'managed_link_only'
@@ -421,11 +423,12 @@ function Get-CfgContractErrors($cfg, [int]$SchemaVersion = 0) {
         if (-not [bool]$managedLinkOnly) { continue }
         if ([string](Get-CfgObjectProperty $cfg 'sync_mode') -ne 'link') { $errors.Add('managed_link_only target 仅支持 sync_mode=link') | Out-Null }
         if ([string](Get-CfgObjectProperty $target 'receipt_path') -notmatch '^reports[\\/]skill-projection[\\/][^\\/]+\.json$') { $errors.Add('managed_link_only target.receipt_path 必须位于 reports/skill-projection 且为直接子级 JSON 文件') | Out-Null }
-        $includes = Get-CfgObjectProperty (Get-CfgObjectProperty $cfg 'skill_projection') 'managed_link_includes'
-        if (-not (Assert-IsArray $includes) -or @($includes).Count -eq 0) { $errors.Add('managed_link_only target 需要 skill_projection.managed_link_includes') | Out-Null }
+        if (-not $usesProjectionProfiles) {
+            $includes = Get-CfgObjectProperty $skillProjection 'managed_link_includes'
+            if (-not (Assert-IsArray $includes) -or @($includes).Count -eq 0) { $errors.Add('managed_link_only target 需要 skill_projection.managed_link_includes') | Out-Null }
+        }
     }
 
-    $skillProjection = Get-CfgObjectProperty $cfg "skill_projection"
     if ($null -ne $skillProjection) {
         $projectionEnabled = Get-CfgObjectProperty $skillProjection "enabled"
         if ($null -ne $projectionEnabled -and $projectionEnabled -isnot [bool]) {
@@ -516,6 +519,9 @@ function Get-CfgContractErrors($cfg, [int]$SchemaVersion = 0) {
                     $errors.Add(("skill_projection managed link include/exclude 冲突：{0}" -f ($conflictingLinks -join ", "))) | Out-Null
                 }
             }
+        }
+        foreach ($profileError in @(Get-SkillProjectionProfileContractErrors $skillProjection $targets)) {
+            $errors.Add([string]$profileError) | Out-Null
         }
     }
 

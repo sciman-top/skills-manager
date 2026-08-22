@@ -53,8 +53,13 @@ else {
     catch { $findings.Add((New-SafeFinding "schema_invalid_json" "$" "Configuration schema is not valid JSON.")) | Out-Null }
 
     try {
+        $operationPlanSource = Get-Content -LiteralPath (Join-Path $repoRoot "src\Domain\OperationPlan.ps1") -Raw -Encoding UTF8
+        $skillCatalogSource = Get-Content -LiteralPath (Join-Path $repoRoot "src\Domain\SkillCatalog.ps1") -Raw -Encoding UTF8
         $coreSource = Get-Content -LiteralPath (Join-Path $repoRoot "src\Core.ps1") -Raw -Encoding UTF8
         $configSource = Get-Content -LiteralPath (Join-Path $repoRoot "src\Config.ps1") -Raw -Encoding UTF8
+        . ([scriptblock]::Create($operationPlanSource))
+        . ([scriptblock]::Create($skillCatalogSource))
+        . (Join-Path $repoRoot "src\Application\SkillProjection.ps1")
         . ([scriptblock]::Create($coreSource))
         . ([scriptblock]::Create($configSource))
         $raw = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8

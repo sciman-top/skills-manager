@@ -7,6 +7,7 @@ param(
     [switch]$Locked,
     [switch]$Plan,
     [switch]$Upgrade,
+    [string]$SkillProfile = "",
     [switch]$AllowUnverifiedHostProjection,
     [switch]$SkipHostProjection
 )
@@ -2701,7 +2702,7 @@ function New-SkillProjectionPlan($ProjectionConfig, [string]$RepoRoot = '', [swi
     }
 }
 
-function Get-SkillProjectionPlanFingerprint($Plan, $NativeProjectionPlan = $null) {
+function Get-SkillProjectionPlanFingerprint($Plan, $NativeProjectionPlan = $null, $Selection = $null) {
     $identity = [ordered]@{
         enabled = [bool]$Plan.enabled
         canonical = @($Plan.canonical | Sort-Object name, path | ForEach-Object { [ordered]@{ name = [string]$_.name; path = [IO.Path]::GetFullPath([string]$_.path); content_hash = [string]$_.content_hash; package_hash = [string]$_.package_hash } })
@@ -2711,6 +2712,15 @@ function Get-SkillProjectionPlanFingerprint($Plan, $NativeProjectionPlan = $null
                 target_root = [IO.Path]::GetFullPath([string]$NativeProjectionPlan.target_root)
                 skills = @($NativeProjectionPlan.skills | Sort-Object name, target_path | ForEach-Object { [ordered]@{ name = [string]$_.name; source_path = [IO.Path]::GetFullPath([string]$_.source_path); target_path = [IO.Path]::GetFullPath([string]$_.target_path); content_hash = [string]$_.content_hash; metadata_hash = [string]$_.metadata_hash } })
                 removals = @($NativeProjectionPlan.removals | Sort-Object name, target_directory | ForEach-Object { [ordered]@{ name = [string]$_.name; target_directory = [IO.Path]::GetFullPath([string]$_.target_directory); previous_link_target = [string]$_.previous_link_target } })
+            }
+        }
+        selection = if ($null -eq $Selection) { $null } else {
+            [ordered]@{
+                host = [string](Get-SkillProjectionObjectProperty $Selection 'host')
+                profile = [string](Get-SkillProjectionObjectProperty $Selection 'profile')
+                include_all = [bool](Get-SkillProjectionObjectProperty $Selection 'include_all')
+                included_names = @((Get-SkillProjectionObjectProperty $Selection 'included_names') | ForEach-Object { [string]$_ } | Sort-Object)
+                excluded_names = @((Get-SkillProjectionObjectProperty $Selection 'excluded_names') | ForEach-Object { [string]$_ } | Sort-Object)
             }
         }
     }
@@ -2739,13 +2749,41 @@ function Test-SkillProjectionManifestCurrent($Manifest, $ProjectionConfig, [stri
     }
     if ($findings.Count -gt 0) { return [pscustomobject]@{ pass = $false; freshness = 'invalid'; coverage = 'invalid'; findings = $findings.ToArray(); plan = $null } }
 
+    $selection = $null
+    $selectionMismatch = $false
+    $effectiveProjectionConfig = $ProjectionConfig
+    try {
+        $selection = Get-SkillProjectionEffectiveSelection $ProjectionConfig 'codex'
+        if ([bool](Get-SkillProjectionObjectProperty $selection 'uses_profiles')) {
+            if (-not (Test-SkillProjectionObjectProperty $Manifest 'projection_selection')) {
+                Add-SkillProjectionManifestFinding $findings 'projection_manifest_field_missing' '$.projection_selection' 'Profiled projection manifests require a selection record.'
+            }
+            else {
+                $manifestSelection = Get-SkillProjectionObjectProperty $Manifest 'projection_selection'
+                foreach ($field in @('host', 'profile', 'include_all', 'included_names', 'excluded_names')) {
+                    if (-not (Test-SkillProjectionObjectProperty $manifestSelection $field)) { Add-SkillProjectionManifestFinding $findings 'projection_manifest_selection_invalid' ('$.projection_selection.{0}' -f $field) 'Projection selection field is required.' }
+                }
+                if ($findings.Count -eq 0) {
+                    $expectedSelection = Get-SkillProjectionPlanFingerprint ([pscustomobject]@{ enabled = $true; canonical = @(); disabled = @() }) $null $selection
+                    $actualSelection = Get-SkillProjectionPlanFingerprint ([pscustomobject]@{ enabled = $true; canonical = @(); disabled = @() }) $null $manifestSelection
+                    if ($expectedSelection -ne $actualSelection) { $selectionMismatch = $true }
+                }
+            }
+        }
+        $effectiveProjectionConfig = New-SkillProjectionHostConfig -ProjectionConfig $ProjectionConfig -Selection $selection
+    }
+    catch {
+        Add-SkillProjectionManifestFinding $findings 'projection_current_selection_invalid' '$.skill_projection.projection_profiles' $_.Exception.Message
+    }
+    if ($findings.Count -gt 0) { return [pscustomobject]@{ pass = $false; freshness = 'invalid'; coverage = 'invalid'; findings = $findings.ToArray(); plan = $null } }
+
     $skills = Get-SkillProjectionObjectProperty $Manifest 'skills'; $canonical = Get-SkillProjectionObjectProperty $Manifest 'canonical'
     $active = Get-SkillProjectionObjectProperty $Manifest 'active'; $disabled = Get-SkillProjectionObjectProperty $Manifest 'disabled'; $conflicts = Get-SkillProjectionObjectProperty $Manifest 'conflicts'
     $manifestCounts = [ordered]@{ skill_entry_count = $skills.Count; unique_name_count = $canonical.Count; active_name_count = $active.Count; disabled_path_count = $disabled.Count; conflict_count = $conflicts.Count }
     foreach ($name in $manifestCounts.Keys) {
         if ([int](Get-SkillProjectionObjectProperty $Manifest $name) -ne [int]$manifestCounts[$name]) { Add-SkillProjectionManifestFinding $findings 'projection_manifest_count_invalid' ('$.{0}' -f $name) 'Projection manifest count does not match its array.' }
     }
-    $configuredSources = Get-SkillProjectionObjectProperty $ProjectionConfig 'sources'
+    $configuredSources = Get-SkillProjectionObjectProperty $effectiveProjectionConfig 'sources'
     $sourceRoots = @($configuredSources | ForEach-Object { Resolve-SkillProjectionPath ([string](Get-SkillProjectionObjectProperty $_ 'path')) $RepoRoot })
     foreach ($collectionName in @('skills', 'canonical', 'active', 'disabled')) {
         $collection = Get-SkillProjectionObjectProperty $Manifest $collectionName
@@ -2763,7 +2801,7 @@ function Test-SkillProjectionManifestCurrent($Manifest, $ProjectionConfig, [stri
     }
     if ($findings.Count -gt 0) { return [pscustomobject]@{ pass = $false; freshness = 'invalid'; coverage = 'invalid'; findings = $findings.ToArray(); plan = $null } }
 
-    try { $plan = New-SkillProjectionPlan $ProjectionConfig $RepoRoot -OmitExternalInventory }
+    try { $plan = New-SkillProjectionPlan $effectiveProjectionConfig $RepoRoot -OmitExternalInventory }
     catch {
         Add-SkillProjectionManifestFinding $findings 'projection_current_plan_invalid' '$.skill_projection' $_.Exception.Message
         return [pscustomobject]@{ pass = $false; freshness = 'invalid'; coverage = 'invalid'; findings = $findings.ToArray(); plan = $null }
@@ -2773,25 +2811,25 @@ function Test-SkillProjectionManifestCurrent($Manifest, $ProjectionConfig, [stri
         skill_entry_count = @($plan.skills).Count; unique_name_count = @($plan.unique_names).Count; active_name_count = @($plan.active_names).Count
         duplicate_name_groups = [int]$plan.duplicate_name_groups; disabled_path_count = @($plan.disabled).Count; conflict_count = @($plan.conflicts).Count
     }
-    $stale = ([bool](Get-SkillProjectionObjectProperty $Manifest 'enabled') -ne [bool]$plan.enabled)
+    $stale = $selectionMismatch -or ([bool](Get-SkillProjectionObjectProperty $Manifest 'enabled') -ne [bool]$plan.enabled)
     foreach ($name in $expectedCounts.Keys) { if ([int](Get-SkillProjectionObjectProperty $Manifest $name) -ne [int]$expectedCounts[$name]) { $stale = $true } }
     $manifestPlan = [pscustomobject]@{ enabled = [bool](Get-SkillProjectionObjectProperty $Manifest 'enabled'); canonical = $canonical; disabled = $disabled }
-    if ((Get-SkillProjectionPlanFingerprint $manifestPlan) -ne (Get-SkillProjectionPlanFingerprint $plan)) { $stale = $true }
+    if ((Get-SkillProjectionPlanFingerprint $manifestPlan $null $selection) -ne (Get-SkillProjectionPlanFingerprint $plan $null $selection)) { $stale = $true }
 
     $nativePlan = $null
-    $nativeConfig = Get-SkillProjectionObjectProperty $ProjectionConfig 'native_projection'
+    $nativeConfig = Get-SkillProjectionObjectProperty $effectiveProjectionConfig 'native_projection'
     if ($null -ne $nativeConfig -and [bool](Get-SkillProjectionObjectProperty $nativeConfig 'enabled') -and $null -ne (Get-Command New-NativeSkillProjectionRuntimePlan -ErrorAction SilentlyContinue)) {
         try {
-            $managedRoot = Resolve-SkillProjectionPath ([string](Get-SkillProjectionObjectProperty $ProjectionConfig 'managed_source_path')) $RepoRoot
-            $includedEntries = Get-SkillProjectionObjectProperty $ProjectionConfig 'managed_link_includes'
-            $excludedEntries = Get-SkillProjectionObjectProperty $ProjectionConfig 'managed_link_excludes'
+            $managedRoot = Resolve-SkillProjectionPath ([string](Get-SkillProjectionObjectProperty $effectiveProjectionConfig 'managed_source_path')) $RepoRoot
+            $includedEntries = Get-SkillProjectionObjectProperty $effectiveProjectionConfig 'managed_link_includes'
+            $excludedEntries = Get-SkillProjectionObjectProperty $effectiveProjectionConfig 'managed_link_excludes'
             $included = @($includedEntries | ForEach-Object { [string]$_ })
             $excluded = @($excludedEntries | ForEach-Object { [string]$_ })
-            $nativePlan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $managedRoot -Config ([pscustomobject]@{ skill_projection = $ProjectionConfig }) -IncludedNames $included -ExcludedNames $excluded
+            $nativePlan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $managedRoot -Config ([pscustomobject]@{ skill_projection = $effectiveProjectionConfig }) -IncludedNames $included -ExcludedNames $excluded
         }
         catch { Add-SkillProjectionManifestFinding $findings 'projection_native_plan_invalid' '$.skill_projection.native_projection' $_.Exception.Message }
     }
-    if ($findings.Count -eq 0 -and $null -ne $nativePlan -and [string](Get-SkillProjectionObjectProperty $Manifest 'projection_fingerprint') -ne (Get-SkillProjectionPlanFingerprint $plan $nativePlan)) { $stale = $true }
+    if ($findings.Count -eq 0 -and $null -ne $nativePlan -and [string](Get-SkillProjectionObjectProperty $Manifest 'projection_fingerprint') -ne (Get-SkillProjectionPlanFingerprint $plan $nativePlan $selection)) { $stale = $true }
     if ($findings.Count -gt 0) { return [pscustomobject]@{ pass = $false; freshness = 'invalid'; coverage = 'invalid'; findings = $findings.ToArray(); plan = $plan } }
     if ($stale) { Add-SkillProjectionManifestFinding $findings 'projection_manifest_stale' '$' 'Projection manifest no longer matches the current configuration and source inventory.' }
     return [pscustomobject]@{ pass = (-not $stale); freshness = $(if ($stale) { 'stale' } else { 'fresh' }); coverage = 'complete'; findings = $findings.ToArray(); plan = $plan }
@@ -2893,7 +2931,9 @@ function New-SkillSurfaceView {
 
     $userRoot = Resolve-CapabilitySurfacePath ([string]$projection.user_skill_root) $root
     $managedSource = Resolve-CapabilitySurfacePath ([string]$projection.managed_source_path) $root
-    $managedIncludes = @($projection.managed_link_includes | ForEach-Object { [string]$_ })
+    $managedSelection = Get-SkillProjectionEffectiveSelection $projection 'codex'
+    $managedIncludes = @((Get-OperationObjectProperty $managedSelection 'included_names') | ForEach-Object { [string]$_ })
+    $managedIncludeAll = [bool](Get-OperationObjectProperty $managedSelection 'include_all')
     $userItems = [Collections.Generic.List[object]]::new()
     $userRootExists = $userRoot -and (Test-Path -LiteralPath $userRoot -PathType Container)
     if ($userRootExists) {
@@ -2902,7 +2942,7 @@ function New-SkillSurfaceView {
             $isReparse = [bool]($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)
             $targetText = Resolve-CapabilitySurfaceLinkTarget $directory
             $managedExpected = if ($managedSource) { Join-Path $managedSource $directory.Name } else { '' }
-            $managedName = $managedIncludes -contains $directory.Name
+            $managedName = $managedIncludeAll -or $managedIncludes -contains $directory.Name
             $managedTargetMatches = $isReparse -and $targetText -and $managedExpected -and [string]::Equals($targetText, ([IO.Path]::GetFullPath($managedExpected).TrimEnd('\', '/')), [StringComparison]::OrdinalIgnoreCase)
             $state = if ($managedName -and $managedTargetMatches) { 'managed_current' } elseif ($managedName) { 'ownership_drift' } elseif ($isReparse -and $targetText -and $managedSource -and (Test-CapabilitySurfacePathWithinRoot $targetText $managedSource)) { 'managed_stale' } elseif ($isReparse -and $targetText) { 'external_owned' } else { 'ownership_unknown' }
             $owner = if ($state -in @('managed_current', 'managed_stale')) { 'skills_manager' } elseif ($state -eq 'external_owned') { 'external' } else { 'unknown' }
@@ -3560,6 +3600,165 @@ function Test-NativeSkillProjectionPlanContract {
         if ([string](Get-NativeSkillProjectionProperty $skill @('content_hash')) -notmatch '^[0-9a-f]{64}$' -or [string](Get-NativeSkillProjectionProperty $skill @('metadata_hash')) -notmatch '^[0-9a-f]{64}$' -or [string](Get-NativeSkillProjectionProperty $skill @('package_hash')) -notmatch '^[0-9a-f]{64}$') { $findings.Add((New-OperationFinding 'skill_hash_invalid' 'error' '$.skills' 'Projected skill hashes must be SHA-256.')) | Out-Null }
     }
     return New-OperationValidationResult $findings.ToArray()
+}
+
+function Get-SkillProjectionProfileObjectNames($Object, [string]$FieldName) {
+    if ($Object -is [System.Collections.IDictionary]) { return @($Object.Keys | ForEach-Object { [string]$_ }) }
+    if ($Object -is [pscustomobject]) { return @($Object.PSObject.Properties | ForEach-Object { [string]$_.Name }) }
+    throw ("{0} 必须是对象" -f $FieldName)
+}
+
+function Get-SkillProjectionProfileNames($Values, [string]$FieldName) {
+    if ($null -eq $Values) { return @() }
+    if ($Values -is [string] -or $Values -isnot [System.Collections.IEnumerable]) { throw ("{0} 必须是数组" -f $FieldName) }
+
+    $names = [Collections.Generic.List[string]]::new()
+    foreach ($value in @($Values)) {
+        $name = ([string]$value).Trim().ToLowerInvariant()
+        if ([string]::IsNullOrWhiteSpace($name)) { throw ("{0} 不能包含空字符串" -f $FieldName) }
+        if ($name -notmatch '^[a-z0-9][a-z0-9-]*$') { throw ("{0} 包含非法技能名：{1}" -f $FieldName, $name) }
+        $names.Add($name) | Out-Null
+    }
+    $duplicates = @($names | Group-Object | Where-Object Count -gt 1 | ForEach-Object Name | Sort-Object)
+    if ($duplicates.Count -gt 0) { throw ("{0} 重复：{1}" -f $FieldName, ($duplicates -join ', ')) }
+    return @($names.ToArray())
+}
+
+function Get-SkillProjectionTargetHost($TargetConfig) {
+    $configuredHost = ([string](Get-OperationObjectProperty $TargetConfig 'host')).Trim().ToLowerInvariant()
+    if (-not [string]::IsNullOrWhiteSpace($configuredHost)) {
+        if ($configuredHost -notin @('codex', 'claude', 'zcode')) { throw ("managed_link_only target.host 不受支持：{0}" -f $configuredHost) }
+        return $configuredHost
+    }
+
+    $path = ([string](Get-OperationObjectProperty $TargetConfig 'path')).Trim().Replace('/', '\').TrimEnd('\')
+    if ($path -match '(?i)\\\.claude\\skills$') { return 'claude' }
+    if ($path -match '(?i)\\\.zcode\\skills$') { return 'zcode' }
+    throw ("managed_link_only target 缺少 host，且无法由 path 推导宿主：{0}" -f $path)
+}
+
+function Resolve-SkillProjectionSelection {
+    param(
+        [Parameter(Mandatory = $true)]$ProjectionConfig,
+        [Parameter(Mandatory = $true)][ValidateSet('codex', 'claude', 'zcode')][string]$HostName,
+        [string]$RequestedProfile = ''
+    )
+
+    $requested = $RequestedProfile.Trim().ToLowerInvariant()
+    $profilesConfig = Get-OperationObjectProperty $ProjectionConfig 'projection_profiles'
+    if ($null -eq $profilesConfig) {
+        if (-not [string]::IsNullOrWhiteSpace($requested)) { throw ("skill_projection 未配置 projection_profiles，不能选择 profile：{0}" -f $requested) }
+        return [pscustomobject][ordered]@{
+            host = $HostName
+            profile = 'legacy'
+            include_all = $false
+            included_names = @(Get-SkillProjectionProfileNames (Get-OperationObjectProperty $ProjectionConfig 'managed_link_includes') 'skill_projection.managed_link_includes')
+            excluded_names = @(Get-SkillProjectionProfileNames (Get-OperationObjectProperty $ProjectionConfig 'managed_link_excludes') 'skill_projection.managed_link_excludes')
+            uses_profiles = $false
+        }
+    }
+
+    $schemaVersion = Get-OperationObjectProperty $profilesConfig 'schema_version'
+    if ([string]$schemaVersion -ne '1') { throw 'skill_projection.projection_profiles.schema_version 必须为 1' }
+    $profiles = Get-OperationObjectProperty $profilesConfig 'profiles'
+    $profileNames = @(Get-SkillProjectionProfileObjectNames $profiles 'skill_projection.projection_profiles.profiles')
+    if ($profileNames.Count -eq 0) { throw 'skill_projection.projection_profiles.profiles 至少需要一个 profile' }
+    foreach ($profileName in $profileNames) {
+        if ($profileName -notmatch '^[a-z0-9][a-z0-9-]*$') { throw ("skill_projection.projection_profiles.profiles 包含非法 profile 名：{0}" -f $profileName) }
+    }
+
+    $hosts = Get-OperationObjectProperty $profilesConfig 'hosts'
+    if ($null -ne $hosts) {
+        foreach ($configuredHost in @(Get-SkillProjectionProfileObjectNames $hosts 'skill_projection.projection_profiles.hosts')) {
+            if ($configuredHost -notin @('codex', 'claude', 'zcode')) { throw ("skill_projection.projection_profiles.hosts 包含不受支持宿主：{0}" -f $configuredHost) }
+        }
+    }
+    $hostConfig = if ($null -eq $hosts) { $null } else { Get-OperationObjectProperty $hosts $HostName }
+    $defaultProfile = if (-not [string]::IsNullOrWhiteSpace($requested)) {
+        $requested
+    }
+    elseif ($null -ne $hostConfig -and -not [string]::IsNullOrWhiteSpace([string](Get-OperationObjectProperty $hostConfig 'default_profile'))) {
+        ([string](Get-OperationObjectProperty $hostConfig 'default_profile')).Trim().ToLowerInvariant()
+    }
+    else {
+        ([string](Get-OperationObjectProperty $profilesConfig 'default_profile')).Trim().ToLowerInvariant()
+    }
+    if ([string]::IsNullOrWhiteSpace($defaultProfile)) { throw ("skill_projection.projection_profiles 缺少 {0} 的 default_profile" -f $HostName) }
+    if ($defaultProfile -notin $profileNames) { throw ("skill_projection.projection_profiles 引用了不存在的 profile：{0}" -f $defaultProfile) }
+
+    $profile = Get-OperationObjectProperty $profiles $defaultProfile
+    if ($profile -isnot [pscustomobject] -and $profile -isnot [System.Collections.IDictionary]) { throw ("skill_projection.projection_profiles.profiles.{0} 必须是对象" -f $defaultProfile) }
+    $includeAllRaw = Get-OperationObjectProperty $profile 'include_all'
+    if ($null -ne $includeAllRaw -and $includeAllRaw -isnot [bool]) { throw ("skill_projection.projection_profiles.profiles.{0}.include_all 必须是布尔值" -f $defaultProfile) }
+    $includeAll = ($includeAllRaw -eq $true)
+    $included = @(Get-SkillProjectionProfileNames (Get-OperationObjectProperty $profile 'include') ("skill_projection.projection_profiles.profiles.{0}.include" -f $defaultProfile))
+    $excluded = @(Get-SkillProjectionProfileNames (Get-OperationObjectProperty $profile 'exclude') ("skill_projection.projection_profiles.profiles.{0}.exclude" -f $defaultProfile))
+    if ($includeAll -and $included.Count -gt 0) { throw ("skill_projection.projection_profiles.profiles.{0} 的 include_all=true 时 include 必须为空" -f $defaultProfile) }
+    if (-not $includeAll -and $included.Count -eq 0) { throw ("skill_projection.projection_profiles.profiles.{0} 必须提供 include 或 include_all=true" -f $defaultProfile) }
+    $profileConflicts = @($included | Where-Object { $excluded -contains $_ } | Sort-Object -Unique)
+    if ($profileConflicts.Count -gt 0) { throw ("skill_projection.projection_profiles.profiles.{0} include/exclude 冲突：{1}" -f $defaultProfile, ($profileConflicts -join ', ')) }
+
+    $hostExcludes = if ($null -eq $hostConfig) { @() } else { @(Get-SkillProjectionProfileNames (Get-OperationObjectProperty $hostConfig 'exclude') ("skill_projection.projection_profiles.hosts.{0}.exclude" -f $HostName)) }
+    return [pscustomobject][ordered]@{
+        host = $HostName
+        profile = $defaultProfile
+        include_all = $includeAll
+        included_names = @($included)
+        excluded_names = @($excluded + $hostExcludes | Sort-Object -Unique)
+        uses_profiles = $true
+    }
+}
+
+function Get-SkillProjectionEffectiveSelection {
+    param($ProjectionConfig, [ValidateSet('codex', 'claude', 'zcode')][string]$DefaultHost = 'codex')
+
+    $selection = Get-OperationObjectProperty $ProjectionConfig 'resolved_projection_selection'
+    if ($null -ne $selection) {
+        $host = ([string](Get-OperationObjectProperty $selection 'host')).Trim().ToLowerInvariant()
+        if ($host -notin @('codex', 'claude', 'zcode')) { throw 'resolved_projection_selection.host 不受支持' }
+        return $selection
+    }
+    return Resolve-SkillProjectionSelection -ProjectionConfig $ProjectionConfig -HostName $DefaultHost
+}
+
+function New-SkillProjectionHostConfig {
+    param(
+        [Parameter(Mandatory = $true)]$ProjectionConfig,
+        [Parameter(Mandatory = $true)]$Selection
+    )
+
+    $copy = [ordered]@{}
+    if ($ProjectionConfig -is [System.Collections.IDictionary]) {
+        foreach ($key in @($ProjectionConfig.Keys)) { $copy[[string]$key] = $ProjectionConfig[$key] }
+    }
+    else {
+        foreach ($property in @($ProjectionConfig.PSObject.Properties)) { $copy[[string]$property.Name] = $property.Value }
+    }
+    $copy['managed_link_includes'] = @((Get-OperationObjectProperty $Selection 'included_names') | ForEach-Object { [string]$_ })
+    $copy['managed_link_excludes'] = @((Get-OperationObjectProperty $Selection 'excluded_names') | ForEach-Object { [string]$_ })
+    $copy['resolved_projection_selection'] = $Selection
+    return [pscustomobject]$copy
+}
+
+function Get-SkillProjectionProfileContractErrors($ProjectionConfig, $Targets = @()) {
+    $profilesConfig = Get-OperationObjectProperty $ProjectionConfig 'projection_profiles'
+    if ($null -eq $profilesConfig) { return @() }
+
+    $errors = [Collections.Generic.List[string]]::new()
+    try {
+        $profiles = Get-OperationObjectProperty $profilesConfig 'profiles'
+        $profileNames = @(Get-SkillProjectionProfileObjectNames $profiles 'skill_projection.projection_profiles.profiles')
+        foreach ($projectionHost in @('codex', 'claude', 'zcode')) {
+            Resolve-SkillProjectionSelection -ProjectionConfig $ProjectionConfig -HostName $projectionHost | Out-Null
+            foreach ($profileName in $profileNames) { Resolve-SkillProjectionSelection -ProjectionConfig $ProjectionConfig -HostName $projectionHost -RequestedProfile $profileName | Out-Null }
+        }
+        foreach ($target in @($Targets | Where-Object { [bool](Get-OperationObjectProperty $_ 'managed_link_only') })) {
+            $targetHost = Get-SkillProjectionTargetHost $target
+            Resolve-SkillProjectionSelection -ProjectionConfig $ProjectionConfig -HostName $targetHost | Out-Null
+        }
+    }
+    catch { $errors.Add($_.Exception.Message) | Out-Null }
+    return @($errors.ToArray())
 }
 
 $nativeSkillProjectionRepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'skills.json') -PathType Leaf) { $PSScriptRoot } else { (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path }
@@ -6903,6 +7102,8 @@ function Get-CfgContractErrors($cfg, [int]$SchemaVersion = 0) {
     $imports = Get-CfgArrayField $cfg "imports" $false $errors
     $mcpServers = Get-CfgArrayField $cfg "mcp_servers" $false $errors
     $mcpTargets = Get-CfgArrayField $cfg "mcp_targets" $false $errors
+    $skillProjection = Get-CfgObjectProperty $cfg "skill_projection"
+    $usesProjectionProfiles = ($null -ne (Get-CfgObjectProperty $skillProjection 'projection_profiles'))
 
     foreach ($target in @($targets)) {
         $managedLinkOnly = Get-CfgObjectProperty $target 'managed_link_only'
@@ -6911,11 +7112,12 @@ function Get-CfgContractErrors($cfg, [int]$SchemaVersion = 0) {
         if (-not [bool]$managedLinkOnly) { continue }
         if ([string](Get-CfgObjectProperty $cfg 'sync_mode') -ne 'link') { $errors.Add('managed_link_only target 仅支持 sync_mode=link') | Out-Null }
         if ([string](Get-CfgObjectProperty $target 'receipt_path') -notmatch '^reports[\\/]skill-projection[\\/][^\\/]+\.json$') { $errors.Add('managed_link_only target.receipt_path 必须位于 reports/skill-projection 且为直接子级 JSON 文件') | Out-Null }
-        $includes = Get-CfgObjectProperty (Get-CfgObjectProperty $cfg 'skill_projection') 'managed_link_includes'
-        if (-not (Assert-IsArray $includes) -or @($includes).Count -eq 0) { $errors.Add('managed_link_only target 需要 skill_projection.managed_link_includes') | Out-Null }
+        if (-not $usesProjectionProfiles) {
+            $includes = Get-CfgObjectProperty $skillProjection 'managed_link_includes'
+            if (-not (Assert-IsArray $includes) -or @($includes).Count -eq 0) { $errors.Add('managed_link_only target 需要 skill_projection.managed_link_includes') | Out-Null }
+        }
     }
 
-    $skillProjection = Get-CfgObjectProperty $cfg "skill_projection"
     if ($null -ne $skillProjection) {
         $projectionEnabled = Get-CfgObjectProperty $skillProjection "enabled"
         if ($null -ne $projectionEnabled -and $projectionEnabled -isnot [bool]) {
@@ -7006,6 +7208,9 @@ function Get-CfgContractErrors($cfg, [int]$SchemaVersion = 0) {
                     $errors.Add(("skill_projection managed link include/exclude 冲突：{0}" -f ($conflictingLinks -join ", "))) | Out-Null
                 }
             }
+        }
+        foreach ($profileError in @(Get-SkillProjectionProfileContractErrors $skillProjection $targets)) {
+            $errors.Add([string]$profileError) | Out-Null
         }
     }
 
@@ -10676,9 +10881,12 @@ function Resolve-TargetDir([string]$path) {
 function Sync-ManagedLinkOnlyTarget($cfg, $targetCfg, [string]$target) {
     Need ([string]$cfg.sync_mode -eq 'link') 'managed_link_only target 仅支持 sync_mode=link'
     Need ($null -ne $cfg.skill_projection) 'managed_link_only target 需要 skill_projection 配置'
-    $includedNames = @((Get-CfgObjectProperty $cfg.skill_projection 'managed_link_includes') | ForEach-Object { [string]$_ })
-    $excludedNames = @((Get-CfgObjectProperty $cfg.skill_projection 'managed_link_excludes') | ForEach-Object { [string]$_ })
-    Need ($includedNames.Count -gt 0) 'managed_link_only target 需要 skill_projection.managed_link_includes'
+    $targetHost = Get-SkillProjectionTargetHost $targetCfg
+    $selection = Get-SkillProjectionEffectiveSelection $cfg.skill_projection $targetHost
+    $includedNames = @((Get-OperationObjectProperty $selection 'included_names') | ForEach-Object { [string]$_ })
+    $excludedNames = @((Get-OperationObjectProperty $selection 'excluded_names') | ForEach-Object { [string]$_ })
+    $includeAll = [bool](Get-OperationObjectProperty $selection 'include_all')
+    Need ($includeAll -or $includedNames.Count -gt 0) 'managed_link_only target 需要非空 profile include 或 include_all=true'
     $receiptPath = [string](Get-CfgObjectProperty $targetCfg 'receipt_path')
     Need ($receiptPath -match '^reports[\\/]skill-projection[\\/][^\\/]+\.json$') 'managed_link_only target.receipt_path 非法'
 
@@ -10721,7 +10929,7 @@ function Sync-ManagedLinkOnlyTarget($cfg, $targetCfg, [string]$target) {
     }
 }
 
-function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionContext = $null) {
+function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionContext = $null, [string]$SkillProfile = '') {
     return (& {
         if (-not $SkipPreflight) { Preflight }
         if ($null -eq $cfg) { $cfg = LoadCfg }
@@ -10736,11 +10944,17 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionCo
                     Assert-SafeTargetDir $target
 
                     if ($DryRun -and [bool](Get-CfgObjectProperty $t 'managed_link_only')) {
-                        Log ("DRYRUN：managed_link_only 目标需要先迁移整目录链接，已跳过写入：{0}" -f $t.path)
+                        $targetHost = Get-SkillProjectionTargetHost $t
+                        $selection = Resolve-SkillProjectionSelection -ProjectionConfig $cfg.skill_projection -HostName $targetHost -RequestedProfile $SkillProfile
+                        Log ("DRYRUN：managed_link_only 目标需要先迁移整目录链接，已跳过写入：{0}（host={1}, profile={2}, include_all={3}）" -f $t.path, $selection.host, $selection.profile, [bool]$selection.include_all)
                     }
                     elseif ([bool](Get-CfgObjectProperty $t 'managed_link_only')) {
-                        $projection = Sync-ManagedLinkOnlyTarget $cfg $t $target
-                        Log ("已按白名单关联：{0}（skills={1}）" -f $t.path, @($projection.receipt.after | Where-Object exists).Count)
+                        $targetHost = Get-SkillProjectionTargetHost $t
+                        $selection = Resolve-SkillProjectionSelection -ProjectionConfig $cfg.skill_projection -HostName $targetHost -RequestedProfile $SkillProfile
+                        $targetCfg = $cfg.PSObject.Copy()
+                        $targetCfg.skill_projection = New-SkillProjectionHostConfig -ProjectionConfig $cfg.skill_projection -Selection $selection
+                        $projection = Sync-ManagedLinkOnlyTarget $targetCfg $t $target
+                        Log ("已按 profile 关联：{0}（host={1}, profile={2}, skills={3}）" -f $t.path, $selection.host, $selection.profile, @($projection.receipt.after | Where-Object exists).Count)
                     }
                     elseif ($mode -eq "sync") {
                         EnsureDir $target
@@ -10762,10 +10976,11 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionCo
         }
         else {
             try {
-                $projectionResult = Sync-ConfiguredSkillProjection $cfg $PromotionContext
+                $projectionResult = Sync-ConfiguredSkillProjection $cfg $PromotionContext $SkillProfile
                 if ($projectionResult -and -not [bool]$projectionResult.skipped) {
                     $plan = $projectionResult.plan
-                    Log ("技能投影已生成：entries={0}, unique={1}, disabled={2}, conflicts={3}, persisted={4}" -f @($plan.skills).Count, @($plan.unique_names).Count, @($plan.disabled).Count, @($plan.conflicts).Count, [bool]$projectionResult.persisted)
+                    $selection = $projectionResult.selection
+                    Log ("技能投影已生成：host={0}, profile={1}, entries={2}, unique={3}, disabled={4}, conflicts={5}, persisted={6}" -f $selection.host, $selection.profile, @($plan.skills).Count, @($plan.unique_names).Count, @($plan.disabled).Count, @($plan.conflicts).Count, [bool]$projectionResult.persisted)
                 }
             }
             catch {
@@ -10792,6 +11007,7 @@ function Write-FailureSummary([string]$title, [string[]]$failures, [string]$deta
 }
 
 function 构建生效(
+    [string]$SkillProfile = '',
     [switch]$AllowUnverifiedProjection = $AllowUnverifiedHostProjection,
     [switch]$SkipHostProjection
 ) {
@@ -10840,7 +11056,7 @@ function 构建生效(
                 Log "已按显式请求跳过宿主目标与 native skill projection；保留 agent/ 与 cold-discovery catalog 构建产物。"
             }
             elseif ($DryRun) {
-                $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight
+                $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight -SkillProfile $SkillProfile
                 if ($syncFailures) { $failures += $syncFailures }
             }
             else {
@@ -10855,7 +11071,7 @@ function 构建生效(
                     Write-Host "⚠️ agent/ staging 已保留，但未写入任何仓库外宿主目标。提交并验证当前 revision 后可重新执行构建生效。" -ForegroundColor Yellow
                 }
                 if (@($failures).Count -eq 0) {
-                    $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight -PromotionContext $promotionContext
+                    $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight -PromotionContext $promotionContext -SkillProfile $SkillProfile
                     if ($syncFailures) { $failures += $syncFailures }
                 }
             }
@@ -20906,6 +21122,7 @@ function New-CodexSkillProjectionTransaction($projectionCfg, [string]$ConfigPath
 }
 
 function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext = $null, $transaction = $null) {
+    $selection = Get-SkillProjectionEffectiveSelection $projectionCfg 'codex'
     $configRaw = if ($projectionCfg.PSObject.Properties.Match("codex_config_path").Count -gt 0) { [string]$projectionCfg.codex_config_path } else { "~/.codex/config.toml" }
     $manifestRaw = if ($projectionCfg.PSObject.Properties.Match("manifest_path").Count -gt 0) { [string]$projectionCfg.manifest_path } else { "reports/skill-projection/current.json" }
     $configPath = Resolve-SkillProjectionPath $configRaw
@@ -20945,7 +21162,7 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
                 if ($null -ne $transaction) { $transaction.config_backup_path = if ($null -eq $writtenBackupPath) { '' } else { [string]$writtenBackupPath } }
                 Set-ContentUtf8 $configPath $desired
             }
-            $projectionFingerprint = Get-SkillProjectionPlanFingerprint $plan $nativeProjectionPlan
+            $projectionFingerprint = Get-SkillProjectionPlanFingerprint $plan $nativeProjectionPlan $selection
             $promotion = Get-SkillProjectionPromotionRecord $manifestPath $promotionContext $projectionFingerprint
             $manifest = [ordered]@{
                 schema_version = 2
@@ -20956,6 +21173,13 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
                 promotion_mode = [string]$promotion.promotion_mode
                 promoted_at = [string]$promotion.promoted_at
                 provenance_status = [string]$promotion.provenance_status
+                projection_selection = [ordered]@{
+                    host = [string](Get-OperationObjectProperty $selection 'host')
+                    profile = [string](Get-OperationObjectProperty $selection 'profile')
+                    include_all = [bool](Get-OperationObjectProperty $selection 'include_all')
+                    included_names = @((Get-OperationObjectProperty $selection 'included_names') | ForEach-Object { [string]$_ } | Sort-Object)
+                    excluded_names = @((Get-OperationObjectProperty $selection 'excluded_names') | ForEach-Object { [string]$_ } | Sort-Object)
+                }
                 enabled = [bool]$plan.enabled
                 generated_at = (Get-Date).ToString("o")
                 conflict_policy = [string]$plan.conflict_policy
@@ -21004,6 +21228,7 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
         backup_path = if ($null -eq $backupPath) { "" } else { [string]$backupPath }
         capability_catalog_projection = $catalogProjection
         native_projection = if (-not $nativeProjectionAuthoritative) { $null } else { [pscustomobject]@{ plan = $nativeProjectionPlan; apply = $nativeProjectionApply } }
+        selection = $selection
         plan = $plan
     }
 }
@@ -21041,11 +21266,13 @@ function Sync-CodexSkillProjection($projectionCfg, $promotionContext = $null) {
     }
 }
 
-function Sync-ConfiguredSkillProjection($cfg, $promotionContext = $null) {
+function Sync-ConfiguredSkillProjection($cfg, $promotionContext = $null, [string]$SkillProfile = '') {
     if ($null -eq $cfg -or $cfg.PSObject.Properties.Match("skill_projection").Count -eq 0 -or $null -eq $cfg.skill_projection) {
         return [pscustomobject]@{ success = $true; persisted = $false; skipped = $true; plan = $null }
     }
-    return (Sync-CodexSkillProjection $cfg.skill_projection $promotionContext)
+    $selection = Resolve-SkillProjectionSelection -ProjectionConfig $cfg.skill_projection -HostName codex -RequestedProfile $SkillProfile
+    $projectionCfg = New-SkillProjectionHostConfig -ProjectionConfig $cfg.skill_projection -Selection $selection
+    return (Sync-CodexSkillProjection $projectionCfg $promotionContext)
 }
 
 function 打开配置 {
@@ -21238,6 +21465,7 @@ Skills 管理器（中文菜单）
   .\skills.ps1 add <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]
   .\skills.ps1 npx "skills add <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]"
   .\skills.ps1 构建生效
+  .\skills.ps1 构建生效 -SkillProfile full-compatible
   .\skills.ps1 构建生效 -AllowUnverifiedHostProjection
   .\skills.ps1 更新 -Plan
   .\skills.ps1 check-updates --json
@@ -21269,6 +21497,8 @@ MCP：
 
 技能投影：
   .\skills.ps1 构建生效
+  .\skills.ps1 构建生效 -SkillProfile full-compatible
+  默认 profile=core（8 个通用治理技能）；full-compatible 显式投影所有当前允许的兼容技能，并按宿主排除特异技能。
   .\skills.ps1 capability-inventory --view skill-surfaces [--host-snapshot <snapshot.json>] [--host-probe] --json
   默认不调用宿主 CLI；仅 --host-probe 读取公开 Codex JSON，结果脱敏且不证明宿主已加载。
 
@@ -21618,7 +21848,7 @@ if ($MyInvocation.InvocationName -ne '.') {
             "安装" { 安装 }
             "卸载" { 卸载 (Merge-FilterAndArgs $Filter $args) }
             "选择" { 选择 }
-            "构建生效" { 构建生效 -AllowUnverifiedProjection:$AllowUnverifiedHostProjection -SkipHostProjection:$SkipHostProjection }
+            "构建生效" { 构建生效 -SkillProfile $SkillProfile -AllowUnverifiedProjection:$AllowUnverifiedHostProjection -SkipHostProjection:$SkipHostProjection }
             "更新" { 更新 }
             "check-updates" { $result = Invoke-CheckUpdatesCommand (Merge-FilterAndArgs $Filter $args); if ($result.json) { Write-Output $result.output } else { Write-Host $result.output } }
             "锁定" { 锁定 }

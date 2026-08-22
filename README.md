@@ -51,9 +51,9 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 - `vendors` / `imports`：技能来源
 - `mappings`：安装白名单与输出名
-- `targets`：生成技能的目标目录；`managed_link_only` target 仅按 `skill_projection.managed_link_includes` 建立逐技能链接
+- `targets`：生成技能的目标目录；`managed_link_only` target 按其 `host` 解析的 Skills profile 建立逐技能链接（旧配置可由路径推导宿主）
 - `mcp_servers` / `mcp_profiles` / `mcp_targets`：MCP 清单与同步目标
-- `skill_projection`：技能来源、domain catalog 和 native placement；metadata budget 与 description 截断由宿主原生处理
+- `skill_projection`：技能来源、domain catalog、native placement 与按宿主的 projection profiles；metadata budget 与 description 截断由宿主原生处理
 
 `skills.lock.json` 锁定已解析来源。`src/` 是 CLI 源码，`build.ps1` 生成根 `skills.ps1`；`overrides/{custom,patches,resources}` 生成 `agent/`。`vendor/` 与 `imports/` 都是可由配置和锁文件重建的本地物化目录；不要手改 `skills.ps1`、`agent/`、`vendor/`、`imports/` 或运行态 `reports/`。
 
@@ -72,9 +72,22 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 .\skills.ps1 更新 -Plan
 .\skills.ps1 更新 -Upgrade
 .\skills.ps1 构建生效
+.\skills.ps1 构建生效 -SkillProfile full-compatible
 ```
 
 `check-updates --json` 只报告每个来源的 `current/target/changed/source`，不 apply、不构建、不投影、不同步 MCP。`构建生效` 会重建并写入宿主目标，属于外部投影动作。仅需仓库内同步时运行 `build.ps1`；不要用 `构建生效` 代替普通构建验证。仓库保留 `scripts/weekly-skills-update.ps1` 作为可由宿主/operator 调度的 skills-only runner，但不提供创建、更新或删除 Windows 计划任务的入口；现有同名任务属于宿主状态，`doctor` 只读报告，清理由用户在宿主侧决定。
+
+### Skills 投影档位
+
+`agent/` 是受管技能的完整构建资产；它不等于每个宿主都应默认常驻的提示词元数据。当前配置以 `skill_projection.projection_profiles` 为唯一策略源（旧 `managed_link_*` 字段仅用于没有 profiles 的历史配置回退）：`构建生效` 未指定参数时，Codex、Claude、ZCode 均使用轻量 `core`（8 个通用治理技能）；显式传入 `-SkillProfile full-compatible` 才会将所有当前兼容技能投影到对应宿主。profile 解析 fail closed：未知 profile/host、重复或空技能名、profile 内 include/exclude 冲突、以及 `include_all=true` 同时列出 include 都会阻断投影。
+
+| 宿主 | `core` | `full-compatible` 的宿主适配 |
+| --- | --- | --- |
+| ChatGPT/Codex | 8 个通用治理技能 | 全量受管技能，排除 Claude 专属评测流程的 `skill-creator` 和 Claude Artifacts 的 `web-artifacts-builder` |
+| Claude | 8 个通用治理技能 | 全量受管技能 |
+| ZCode | 8 个通用治理技能 | 排除 `agent-browser`（外部 CLI stub）、`skill-creator`（Claude 专属评测流程）和 `web-artifacts-builder`（Claude Artifacts） |
+
+`full-compatible` 增加宿主初始元数据与自动触发竞争，尤其 ZCode 仍会把已启用 Skills 的元数据放入固定上下文预算；它是显式的能力面扩展，不是默认优化。投影成功仅证明 `filesystem_projected`。请用新会话或宿主原生 Skills 页面/探针确认 `host_loaded`；单个自然语言任务的命中不证明全部 Skills 的自动路由或业务效果。
 
 ### MCP
 
@@ -127,7 +140,7 @@ pwsh -NoProfile -File .\skills.ps1 doctor --strict
 
 ### ZCode
 
-ZCode 使用同一个项目根 `AGENTS.md`，不需要另建项目规则文件；它只读取用户级 `~/.zcode/AGENTS.md` 与当前 Workspace 根 `AGENTS.md`。`构建生效` 会把 managed allowlist 投影到 `~/.zcode/skills`；`同步MCP` 会将 `skills.json` 的当前 MCP profile 写入 ZCode 原生 `mcp.servers`：用户目标写入 `~/.zcode/cli/config.json`，工作区 `.zcode` 目标写入 `<workspace>/.zcode/config.json`。原生 `.zcode` MCP 优先于 `.agents/mcp.json`，因此本工具不会在 `.zcode` 下生成兼容 `.mcp.json`。这些均是显式宿主投影，不属于普通 build/test，也不证明 ZCode 已加载或真实调用。
+ZCode 使用同一个项目根 `AGENTS.md`，不需要另建项目规则文件；它只读取用户级 `~/.zcode/AGENTS.md` 与当前 Workspace 根 `AGENTS.md`。`构建生效` 会按 ZCode profile 把受管 Skills 投影到 `~/.zcode/skills`；`同步MCP` 会将 `skills.json` 的当前 MCP profile 写入 ZCode 原生 `mcp.servers`：用户目标写入 `~/.zcode/cli/config.json`，工作区 `.zcode` 目标写入 `<workspace>/.zcode/config.json`。原生 `.zcode` MCP 优先于 `.agents/mcp.json`，因此本工具不会在 `.zcode` 下生成兼容 `.mcp.json`。这些均是显式宿主投影，不属于普通 build/test，也不证明 ZCode 已加载或真实调用。
 
 审查默认只读。`rule-estate-audit` 默认排除 `external`、`docs` 与 `文档`，并在已配置的 ZCode 用户目录中同时呈现三宿主的静态加载面；ZCode 缺少受管用户规则会 fail closed。全域 plan 仅接受动态发现的直属 Git 仓库规则文件，不接受用户级 Codex/Claude/ZCode 规则；全局规则变更必须先修改 tracked `rules/global/` 源，再走专用 `global-rules-plan/apply/rollback/check` 投影。plan 从 reviewed input、精确 roots、target set 与 actions 生成 plan-bound 显式确认 token；apply 仍校验 before hash、路径、锁与 TOCTOU，并保留 receipt、resume 和逐目标回滚。全域事务逐目标 fail-fast，不承诺跨仓原子性。
 

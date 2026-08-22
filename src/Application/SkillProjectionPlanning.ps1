@@ -186,7 +186,7 @@ function New-SkillProjectionPlan($ProjectionConfig, [string]$RepoRoot = '', [swi
     }
 }
 
-function Get-SkillProjectionPlanFingerprint($Plan, $NativeProjectionPlan = $null) {
+function Get-SkillProjectionPlanFingerprint($Plan, $NativeProjectionPlan = $null, $Selection = $null) {
     $identity = [ordered]@{
         enabled = [bool]$Plan.enabled
         canonical = @($Plan.canonical | Sort-Object name, path | ForEach-Object { [ordered]@{ name = [string]$_.name; path = [IO.Path]::GetFullPath([string]$_.path); content_hash = [string]$_.content_hash; package_hash = [string]$_.package_hash } })
@@ -196,6 +196,15 @@ function Get-SkillProjectionPlanFingerprint($Plan, $NativeProjectionPlan = $null
                 target_root = [IO.Path]::GetFullPath([string]$NativeProjectionPlan.target_root)
                 skills = @($NativeProjectionPlan.skills | Sort-Object name, target_path | ForEach-Object { [ordered]@{ name = [string]$_.name; source_path = [IO.Path]::GetFullPath([string]$_.source_path); target_path = [IO.Path]::GetFullPath([string]$_.target_path); content_hash = [string]$_.content_hash; metadata_hash = [string]$_.metadata_hash } })
                 removals = @($NativeProjectionPlan.removals | Sort-Object name, target_directory | ForEach-Object { [ordered]@{ name = [string]$_.name; target_directory = [IO.Path]::GetFullPath([string]$_.target_directory); previous_link_target = [string]$_.previous_link_target } })
+            }
+        }
+        selection = if ($null -eq $Selection) { $null } else {
+            [ordered]@{
+                host = [string](Get-SkillProjectionObjectProperty $Selection 'host')
+                profile = [string](Get-SkillProjectionObjectProperty $Selection 'profile')
+                include_all = [bool](Get-SkillProjectionObjectProperty $Selection 'include_all')
+                included_names = @((Get-SkillProjectionObjectProperty $Selection 'included_names') | ForEach-Object { [string]$_ } | Sort-Object)
+                excluded_names = @((Get-SkillProjectionObjectProperty $Selection 'excluded_names') | ForEach-Object { [string]$_ } | Sort-Object)
             }
         }
     }
@@ -224,13 +233,41 @@ function Test-SkillProjectionManifestCurrent($Manifest, $ProjectionConfig, [stri
     }
     if ($findings.Count -gt 0) { return [pscustomobject]@{ pass = $false; freshness = 'invalid'; coverage = 'invalid'; findings = $findings.ToArray(); plan = $null } }
 
+    $selection = $null
+    $selectionMismatch = $false
+    $effectiveProjectionConfig = $ProjectionConfig
+    try {
+        $selection = Get-SkillProjectionEffectiveSelection $ProjectionConfig 'codex'
+        if ([bool](Get-SkillProjectionObjectProperty $selection 'uses_profiles')) {
+            if (-not (Test-SkillProjectionObjectProperty $Manifest 'projection_selection')) {
+                Add-SkillProjectionManifestFinding $findings 'projection_manifest_field_missing' '$.projection_selection' 'Profiled projection manifests require a selection record.'
+            }
+            else {
+                $manifestSelection = Get-SkillProjectionObjectProperty $Manifest 'projection_selection'
+                foreach ($field in @('host', 'profile', 'include_all', 'included_names', 'excluded_names')) {
+                    if (-not (Test-SkillProjectionObjectProperty $manifestSelection $field)) { Add-SkillProjectionManifestFinding $findings 'projection_manifest_selection_invalid' ('$.projection_selection.{0}' -f $field) 'Projection selection field is required.' }
+                }
+                if ($findings.Count -eq 0) {
+                    $expectedSelection = Get-SkillProjectionPlanFingerprint ([pscustomobject]@{ enabled = $true; canonical = @(); disabled = @() }) $null $selection
+                    $actualSelection = Get-SkillProjectionPlanFingerprint ([pscustomobject]@{ enabled = $true; canonical = @(); disabled = @() }) $null $manifestSelection
+                    if ($expectedSelection -ne $actualSelection) { $selectionMismatch = $true }
+                }
+            }
+        }
+        $effectiveProjectionConfig = New-SkillProjectionHostConfig -ProjectionConfig $ProjectionConfig -Selection $selection
+    }
+    catch {
+        Add-SkillProjectionManifestFinding $findings 'projection_current_selection_invalid' '$.skill_projection.projection_profiles' $_.Exception.Message
+    }
+    if ($findings.Count -gt 0) { return [pscustomobject]@{ pass = $false; freshness = 'invalid'; coverage = 'invalid'; findings = $findings.ToArray(); plan = $null } }
+
     $skills = Get-SkillProjectionObjectProperty $Manifest 'skills'; $canonical = Get-SkillProjectionObjectProperty $Manifest 'canonical'
     $active = Get-SkillProjectionObjectProperty $Manifest 'active'; $disabled = Get-SkillProjectionObjectProperty $Manifest 'disabled'; $conflicts = Get-SkillProjectionObjectProperty $Manifest 'conflicts'
     $manifestCounts = [ordered]@{ skill_entry_count = $skills.Count; unique_name_count = $canonical.Count; active_name_count = $active.Count; disabled_path_count = $disabled.Count; conflict_count = $conflicts.Count }
     foreach ($name in $manifestCounts.Keys) {
         if ([int](Get-SkillProjectionObjectProperty $Manifest $name) -ne [int]$manifestCounts[$name]) { Add-SkillProjectionManifestFinding $findings 'projection_manifest_count_invalid' ('$.{0}' -f $name) 'Projection manifest count does not match its array.' }
     }
-    $configuredSources = Get-SkillProjectionObjectProperty $ProjectionConfig 'sources'
+    $configuredSources = Get-SkillProjectionObjectProperty $effectiveProjectionConfig 'sources'
     $sourceRoots = @($configuredSources | ForEach-Object { Resolve-SkillProjectionPath ([string](Get-SkillProjectionObjectProperty $_ 'path')) $RepoRoot })
     foreach ($collectionName in @('skills', 'canonical', 'active', 'disabled')) {
         $collection = Get-SkillProjectionObjectProperty $Manifest $collectionName
@@ -248,7 +285,7 @@ function Test-SkillProjectionManifestCurrent($Manifest, $ProjectionConfig, [stri
     }
     if ($findings.Count -gt 0) { return [pscustomobject]@{ pass = $false; freshness = 'invalid'; coverage = 'invalid'; findings = $findings.ToArray(); plan = $null } }
 
-    try { $plan = New-SkillProjectionPlan $ProjectionConfig $RepoRoot -OmitExternalInventory }
+    try { $plan = New-SkillProjectionPlan $effectiveProjectionConfig $RepoRoot -OmitExternalInventory }
     catch {
         Add-SkillProjectionManifestFinding $findings 'projection_current_plan_invalid' '$.skill_projection' $_.Exception.Message
         return [pscustomobject]@{ pass = $false; freshness = 'invalid'; coverage = 'invalid'; findings = $findings.ToArray(); plan = $null }
@@ -258,25 +295,25 @@ function Test-SkillProjectionManifestCurrent($Manifest, $ProjectionConfig, [stri
         skill_entry_count = @($plan.skills).Count; unique_name_count = @($plan.unique_names).Count; active_name_count = @($plan.active_names).Count
         duplicate_name_groups = [int]$plan.duplicate_name_groups; disabled_path_count = @($plan.disabled).Count; conflict_count = @($plan.conflicts).Count
     }
-    $stale = ([bool](Get-SkillProjectionObjectProperty $Manifest 'enabled') -ne [bool]$plan.enabled)
+    $stale = $selectionMismatch -or ([bool](Get-SkillProjectionObjectProperty $Manifest 'enabled') -ne [bool]$plan.enabled)
     foreach ($name in $expectedCounts.Keys) { if ([int](Get-SkillProjectionObjectProperty $Manifest $name) -ne [int]$expectedCounts[$name]) { $stale = $true } }
     $manifestPlan = [pscustomobject]@{ enabled = [bool](Get-SkillProjectionObjectProperty $Manifest 'enabled'); canonical = $canonical; disabled = $disabled }
-    if ((Get-SkillProjectionPlanFingerprint $manifestPlan) -ne (Get-SkillProjectionPlanFingerprint $plan)) { $stale = $true }
+    if ((Get-SkillProjectionPlanFingerprint $manifestPlan $null $selection) -ne (Get-SkillProjectionPlanFingerprint $plan $null $selection)) { $stale = $true }
 
     $nativePlan = $null
-    $nativeConfig = Get-SkillProjectionObjectProperty $ProjectionConfig 'native_projection'
+    $nativeConfig = Get-SkillProjectionObjectProperty $effectiveProjectionConfig 'native_projection'
     if ($null -ne $nativeConfig -and [bool](Get-SkillProjectionObjectProperty $nativeConfig 'enabled') -and $null -ne (Get-Command New-NativeSkillProjectionRuntimePlan -ErrorAction SilentlyContinue)) {
         try {
-            $managedRoot = Resolve-SkillProjectionPath ([string](Get-SkillProjectionObjectProperty $ProjectionConfig 'managed_source_path')) $RepoRoot
-            $includedEntries = Get-SkillProjectionObjectProperty $ProjectionConfig 'managed_link_includes'
-            $excludedEntries = Get-SkillProjectionObjectProperty $ProjectionConfig 'managed_link_excludes'
+            $managedRoot = Resolve-SkillProjectionPath ([string](Get-SkillProjectionObjectProperty $effectiveProjectionConfig 'managed_source_path')) $RepoRoot
+            $includedEntries = Get-SkillProjectionObjectProperty $effectiveProjectionConfig 'managed_link_includes'
+            $excludedEntries = Get-SkillProjectionObjectProperty $effectiveProjectionConfig 'managed_link_excludes'
             $included = @($includedEntries | ForEach-Object { [string]$_ })
             $excluded = @($excludedEntries | ForEach-Object { [string]$_ })
-            $nativePlan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $managedRoot -Config ([pscustomobject]@{ skill_projection = $ProjectionConfig }) -IncludedNames $included -ExcludedNames $excluded
+            $nativePlan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $managedRoot -Config ([pscustomobject]@{ skill_projection = $effectiveProjectionConfig }) -IncludedNames $included -ExcludedNames $excluded
         }
         catch { Add-SkillProjectionManifestFinding $findings 'projection_native_plan_invalid' '$.skill_projection.native_projection' $_.Exception.Message }
     }
-    if ($findings.Count -eq 0 -and $null -ne $nativePlan -and [string](Get-SkillProjectionObjectProperty $Manifest 'projection_fingerprint') -ne (Get-SkillProjectionPlanFingerprint $plan $nativePlan)) { $stale = $true }
+    if ($findings.Count -eq 0 -and $null -ne $nativePlan -and [string](Get-SkillProjectionObjectProperty $Manifest 'projection_fingerprint') -ne (Get-SkillProjectionPlanFingerprint $plan $nativePlan $selection)) { $stale = $true }
     if ($findings.Count -gt 0) { return [pscustomobject]@{ pass = $false; freshness = 'invalid'; coverage = 'invalid'; findings = $findings.ToArray(); plan = $plan } }
     if ($stale) { Add-SkillProjectionManifestFinding $findings 'projection_manifest_stale' '$' 'Projection manifest no longer matches the current configuration and source inventory.' }
     return [pscustomobject]@{ pass = (-not $stale); freshness = $(if ($stale) { 'stale' } else { 'fresh' }); coverage = 'complete'; findings = $findings.ToArray(); plan = $plan }

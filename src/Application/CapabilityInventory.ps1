@@ -94,7 +94,9 @@ function New-SkillSurfaceView {
 
     $userRoot = Resolve-CapabilitySurfacePath ([string]$projection.user_skill_root) $root
     $managedSource = Resolve-CapabilitySurfacePath ([string]$projection.managed_source_path) $root
-    $managedIncludes = @($projection.managed_link_includes | ForEach-Object { [string]$_ })
+    $managedSelection = Get-SkillProjectionEffectiveSelection $projection 'codex'
+    $managedIncludes = @((Get-OperationObjectProperty $managedSelection 'included_names') | ForEach-Object { [string]$_ })
+    $managedIncludeAll = [bool](Get-OperationObjectProperty $managedSelection 'include_all')
     $userItems = [Collections.Generic.List[object]]::new()
     $userRootExists = $userRoot -and (Test-Path -LiteralPath $userRoot -PathType Container)
     if ($userRootExists) {
@@ -103,7 +105,7 @@ function New-SkillSurfaceView {
             $isReparse = [bool]($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)
             $targetText = Resolve-CapabilitySurfaceLinkTarget $directory
             $managedExpected = if ($managedSource) { Join-Path $managedSource $directory.Name } else { '' }
-            $managedName = $managedIncludes -contains $directory.Name
+            $managedName = $managedIncludeAll -or $managedIncludes -contains $directory.Name
             $managedTargetMatches = $isReparse -and $targetText -and $managedExpected -and [string]::Equals($targetText, ([IO.Path]::GetFullPath($managedExpected).TrimEnd('\', '/')), [StringComparison]::OrdinalIgnoreCase)
             $state = if ($managedName -and $managedTargetMatches) { 'managed_current' } elseif ($managedName) { 'ownership_drift' } elseif ($isReparse -and $targetText -and $managedSource -and (Test-CapabilitySurfacePathWithinRoot $targetText $managedSource)) { 'managed_stale' } elseif ($isReparse -and $targetText) { 'external_owned' } else { 'ownership_unknown' }
             $owner = if ($state -in @('managed_current', 'managed_stale')) { 'skills_manager' } elseif ($state -eq 'external_owned') { 'external' } else { 'unknown' }

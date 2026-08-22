@@ -42,6 +42,7 @@
       "additionalProperties": true,
       "properties": {
         "path": { "$ref": "#/$defs/nonEmptyString" },
+        "host": { "type": "string", "enum": ["codex", "claude", "zcode"] },
         "managed_link_only": { "type": "boolean" },
         "receipt_path": { "type": "string", "pattern": "^reports[\\\\/]skill-projection[\\\\/][^\\\\/]+\\.json$" }
       }
@@ -125,6 +126,7 @@
         "native_projection": { "$ref": "#/$defs/nativeProjection" },
         "managed_link_includes": { "$ref": "#/$defs/stringArray" },
         "managed_link_excludes": { "$ref": "#/$defs/stringArray" },
+        "projection_profiles": { "$ref": "#/$defs/projectionProfiles" },
         "external_skill_inventory": {
           "type": "object",
           "additionalProperties": true,
@@ -146,6 +148,46 @@
             }
           }
         }
+      }
+    },
+    "projectionProfiles": {
+      "type": "object",
+      "required": ["schema_version", "default_profile", "profiles"],
+      "additionalProperties": true,
+      "properties": {
+        "schema_version": { "type": "integer", "const": 1 },
+        "default_profile": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "profiles": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/projectionProfile" }
+        },
+        "hosts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "codex": { "$ref": "#/$defs/projectionHost" },
+            "claude": { "$ref": "#/$defs/projectionHost" },
+            "zcode": { "$ref": "#/$defs/projectionHost" }
+          }
+        }
+      }
+    },
+    "projectionProfile": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "include_all": { "type": "boolean" },
+        "include": { "$ref": "#/$defs/stringArray" },
+        "exclude": { "$ref": "#/$defs/stringArray" }
+      }
+    },
+    "projectionHost": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "default_profile": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "exclude": { "$ref": "#/$defs/stringArray" }
       }
     },
     "nativeProjection": {

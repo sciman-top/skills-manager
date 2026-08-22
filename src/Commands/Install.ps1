@@ -2103,9 +2103,12 @@ function Resolve-TargetDir([string]$path) {
 function Sync-ManagedLinkOnlyTarget($cfg, $targetCfg, [string]$target) {
     Need ([string]$cfg.sync_mode -eq 'link') 'managed_link_only target 仅支持 sync_mode=link'
     Need ($null -ne $cfg.skill_projection) 'managed_link_only target 需要 skill_projection 配置'
-    $includedNames = @((Get-CfgObjectProperty $cfg.skill_projection 'managed_link_includes') | ForEach-Object { [string]$_ })
-    $excludedNames = @((Get-CfgObjectProperty $cfg.skill_projection 'managed_link_excludes') | ForEach-Object { [string]$_ })
-    Need ($includedNames.Count -gt 0) 'managed_link_only target 需要 skill_projection.managed_link_includes'
+    $targetHost = Get-SkillProjectionTargetHost $targetCfg
+    $selection = Get-SkillProjectionEffectiveSelection $cfg.skill_projection $targetHost
+    $includedNames = @((Get-OperationObjectProperty $selection 'included_names') | ForEach-Object { [string]$_ })
+    $excludedNames = @((Get-OperationObjectProperty $selection 'excluded_names') | ForEach-Object { [string]$_ })
+    $includeAll = [bool](Get-OperationObjectProperty $selection 'include_all')
+    Need ($includeAll -or $includedNames.Count -gt 0) 'managed_link_only target 需要非空 profile include 或 include_all=true'
     $receiptPath = [string](Get-CfgObjectProperty $targetCfg 'receipt_path')
     Need ($receiptPath -match '^reports[\\/]skill-projection[\\/][^\\/]+\.json$') 'managed_link_only target.receipt_path 非法'
 
@@ -2148,7 +2151,7 @@ function Sync-ManagedLinkOnlyTarget($cfg, $targetCfg, [string]$target) {
     }
 }
 
-function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionContext = $null) {
+function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionContext = $null, [string]$SkillProfile = '') {
     return (& {
         if (-not $SkipPreflight) { Preflight }
         if ($null -eq $cfg) { $cfg = LoadCfg }
@@ -2163,11 +2166,17 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionCo
                     Assert-SafeTargetDir $target
 
                     if ($DryRun -and [bool](Get-CfgObjectProperty $t 'managed_link_only')) {
-                        Log ("DRYRUN：managed_link_only 目标需要先迁移整目录链接，已跳过写入：{0}" -f $t.path)
+                        $targetHost = Get-SkillProjectionTargetHost $t
+                        $selection = Resolve-SkillProjectionSelection -ProjectionConfig $cfg.skill_projection -HostName $targetHost -RequestedProfile $SkillProfile
+                        Log ("DRYRUN：managed_link_only 目标需要先迁移整目录链接，已跳过写入：{0}（host={1}, profile={2}, include_all={3}）" -f $t.path, $selection.host, $selection.profile, [bool]$selection.include_all)
                     }
                     elseif ([bool](Get-CfgObjectProperty $t 'managed_link_only')) {
-                        $projection = Sync-ManagedLinkOnlyTarget $cfg $t $target
-                        Log ("已按白名单关联：{0}（skills={1}）" -f $t.path, @($projection.receipt.after | Where-Object exists).Count)
+                        $targetHost = Get-SkillProjectionTargetHost $t
+                        $selection = Resolve-SkillProjectionSelection -ProjectionConfig $cfg.skill_projection -HostName $targetHost -RequestedProfile $SkillProfile
+                        $targetCfg = $cfg.PSObject.Copy()
+                        $targetCfg.skill_projection = New-SkillProjectionHostConfig -ProjectionConfig $cfg.skill_projection -Selection $selection
+                        $projection = Sync-ManagedLinkOnlyTarget $targetCfg $t $target
+                        Log ("已按 profile 关联：{0}（host={1}, profile={2}, skills={3}）" -f $t.path, $selection.host, $selection.profile, @($projection.receipt.after | Where-Object exists).Count)
                     }
                     elseif ($mode -eq "sync") {
                         EnsureDir $target
@@ -2189,10 +2198,11 @@ function 应用到ClaudeCodex($cfg = $null, [switch]$SkipPreflight, $PromotionCo
         }
         else {
             try {
-                $projectionResult = Sync-ConfiguredSkillProjection $cfg $PromotionContext
+                $projectionResult = Sync-ConfiguredSkillProjection $cfg $PromotionContext $SkillProfile
                 if ($projectionResult -and -not [bool]$projectionResult.skipped) {
                     $plan = $projectionResult.plan
-                    Log ("技能投影已生成：entries={0}, unique={1}, disabled={2}, conflicts={3}, persisted={4}" -f @($plan.skills).Count, @($plan.unique_names).Count, @($plan.disabled).Count, @($plan.conflicts).Count, [bool]$projectionResult.persisted)
+                    $selection = $projectionResult.selection
+                    Log ("技能投影已生成：host={0}, profile={1}, entries={2}, unique={3}, disabled={4}, conflicts={5}, persisted={6}" -f $selection.host, $selection.profile, @($plan.skills).Count, @($plan.unique_names).Count, @($plan.disabled).Count, @($plan.conflicts).Count, [bool]$projectionResult.persisted)
                 }
             }
             catch {
@@ -2219,6 +2229,7 @@ function Write-FailureSummary([string]$title, [string[]]$failures, [string]$deta
 }
 
 function 构建生效(
+    [string]$SkillProfile = '',
     [switch]$AllowUnverifiedProjection = $AllowUnverifiedHostProjection,
     [switch]$SkipHostProjection
 ) {
@@ -2267,7 +2278,7 @@ function 构建生效(
                 Log "已按显式请求跳过宿主目标与 native skill projection；保留 agent/ 与 cold-discovery catalog 构建产物。"
             }
             elseif ($DryRun) {
-                $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight
+                $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight -SkillProfile $SkillProfile
                 if ($syncFailures) { $failures += $syncFailures }
             }
             else {
@@ -2282,7 +2293,7 @@ function 构建生效(
                     Write-Host "⚠️ agent/ staging 已保留，但未写入任何仓库外宿主目标。提交并验证当前 revision 后可重新执行构建生效。" -ForegroundColor Yellow
                 }
                 if (@($failures).Count -eq 0) {
-                    $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight -PromotionContext $promotionContext
+                    $syncFailures = 应用到ClaudeCodex $cfg -SkipPreflight -PromotionContext $promotionContext -SkillProfile $SkillProfile
                     if ($syncFailures) { $failures += $syncFailures }
                 }
             }

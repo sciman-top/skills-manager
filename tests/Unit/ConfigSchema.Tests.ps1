@@ -126,6 +126,9 @@ function Invoke-ConfigVerifier([string]$ConfigPath, [string]$Mode = 'enforce', [
         $schema.properties.schema_version.const | Should -Be 2
         @($schema.'$defs'.mcpServer.properties.transport.enum) | Should -Not -Contain 'sse'
         $schema.'$defs'.mapping.properties.to.pattern | Should -Be '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+        @($schema.'$defs'.target.properties.host.enum) | Should -Be @('codex', 'claude', 'zcode')
+        $schema.'$defs'.skillProjection.properties.projection_profiles.'$ref' | Should -Be '#/$defs/projectionProfiles'
+        $schema.'$defs'.projectionProfiles.properties.schema_version.const | Should -Be 1
         @($schema.'$defs'.skillProjection.properties.PSObject.Properties.Name) | Should -Not -Contain 'aliases'
         @($schema.'$defs'.nativeProjection.properties.PSObject.Properties.Name) | Should -Not -Contain 'apply_requires_token'
         $schema.'x-compatibility-policy'.missing_schema_version | Should -Be 'legacy-v1-observation'

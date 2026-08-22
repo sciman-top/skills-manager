@@ -497,6 +497,7 @@ function New-CodexSkillProjectionTransaction($projectionCfg, [string]$ConfigPath
 }
 
 function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext = $null, $transaction = $null) {
+    $selection = Get-SkillProjectionEffectiveSelection $projectionCfg 'codex'
     $configRaw = if ($projectionCfg.PSObject.Properties.Match("codex_config_path").Count -gt 0) { [string]$projectionCfg.codex_config_path } else { "~/.codex/config.toml" }
     $manifestRaw = if ($projectionCfg.PSObject.Properties.Match("manifest_path").Count -gt 0) { [string]$projectionCfg.manifest_path } else { "reports/skill-projection/current.json" }
     $configPath = Resolve-SkillProjectionPath $configRaw
@@ -536,7 +537,7 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
                 if ($null -ne $transaction) { $transaction.config_backup_path = if ($null -eq $writtenBackupPath) { '' } else { [string]$writtenBackupPath } }
                 Set-ContentUtf8 $configPath $desired
             }
-            $projectionFingerprint = Get-SkillProjectionPlanFingerprint $plan $nativeProjectionPlan
+            $projectionFingerprint = Get-SkillProjectionPlanFingerprint $plan $nativeProjectionPlan $selection
             $promotion = Get-SkillProjectionPromotionRecord $manifestPath $promotionContext $projectionFingerprint
             $manifest = [ordered]@{
                 schema_version = 2
@@ -547,6 +548,13 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
                 promotion_mode = [string]$promotion.promotion_mode
                 promoted_at = [string]$promotion.promoted_at
                 provenance_status = [string]$promotion.provenance_status
+                projection_selection = [ordered]@{
+                    host = [string](Get-OperationObjectProperty $selection 'host')
+                    profile = [string](Get-OperationObjectProperty $selection 'profile')
+                    include_all = [bool](Get-OperationObjectProperty $selection 'include_all')
+                    included_names = @((Get-OperationObjectProperty $selection 'included_names') | ForEach-Object { [string]$_ } | Sort-Object)
+                    excluded_names = @((Get-OperationObjectProperty $selection 'excluded_names') | ForEach-Object { [string]$_ } | Sort-Object)
+                }
                 enabled = [bool]$plan.enabled
                 generated_at = (Get-Date).ToString("o")
                 conflict_policy = [string]$plan.conflict_policy
@@ -595,6 +603,7 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
         backup_path = if ($null -eq $backupPath) { "" } else { [string]$backupPath }
         capability_catalog_projection = $catalogProjection
         native_projection = if (-not $nativeProjectionAuthoritative) { $null } else { [pscustomobject]@{ plan = $nativeProjectionPlan; apply = $nativeProjectionApply } }
+        selection = $selection
         plan = $plan
     }
 }
@@ -632,9 +641,11 @@ function Sync-CodexSkillProjection($projectionCfg, $promotionContext = $null) {
     }
 }
 
-function Sync-ConfiguredSkillProjection($cfg, $promotionContext = $null) {
+function Sync-ConfiguredSkillProjection($cfg, $promotionContext = $null, [string]$SkillProfile = '') {
     if ($null -eq $cfg -or $cfg.PSObject.Properties.Match("skill_projection").Count -eq 0 -or $null -eq $cfg.skill_projection) {
         return [pscustomobject]@{ success = $true; persisted = $false; skipped = $true; plan = $null }
     }
-    return (Sync-CodexSkillProjection $cfg.skill_projection $promotionContext)
+    $selection = Resolve-SkillProjectionSelection -ProjectionConfig $cfg.skill_projection -HostName codex -RequestedProfile $SkillProfile
+    $projectionCfg = New-SkillProjectionHostConfig -ProjectionConfig $cfg.skill_projection -Selection $selection
+    return (Sync-CodexSkillProjection $projectionCfg $promotionContext)
 }

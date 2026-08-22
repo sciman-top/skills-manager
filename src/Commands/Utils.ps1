@@ -188,6 +188,7 @@ Skills 管理器（中文菜单）
   .\skills.ps1 add <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]
   .\skills.ps1 npx "skills add <repo> [--skill <name>] [--ref <branch/tag>] [--mode manual|vendor] [--sparse]"
   .\skills.ps1 构建生效
+  .\skills.ps1 构建生效 -SkillProfile full-compatible
   .\skills.ps1 构建生效 -AllowUnverifiedHostProjection
   .\skills.ps1 更新 -Plan
   .\skills.ps1 check-updates --json
@@ -219,6 +220,8 @@ MCP：
 
 技能投影：
   .\skills.ps1 构建生效
+  .\skills.ps1 构建生效 -SkillProfile full-compatible
+  默认 profile=core（8 个通用治理技能）；full-compatible 显式投影所有当前允许的兼容技能，并按宿主排除特异技能。
   .\skills.ps1 capability-inventory --view skill-surfaces [--host-snapshot <snapshot.json>] [--host-probe] --json
   默认不调用宿主 CLI；仅 --host-probe 读取公开 Codex JSON，结果脱敏且不证明宿主已加载。
 
