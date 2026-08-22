@@ -1,6 +1,6 @@
 # Hermes + Codex 受控协作策略
 
-**状态**：`active_poc_decision`（HSM-POC-050 已有分支级证据，HSM-DEC-060=`no_code_needed`；未代表主机或业务验收）
+**状态**：`active_poc_decision`（HSM-POC-050 已本地合并，HSM-DEC-060=`no_code_needed`；未代表主机或业务验收）
 **适用范围**：ChatGPT Desktop、Hermes、Codex Harness、skills-manager 的协作边界
 **不构成授权**：本文件不授权安装 Hermes、创建 profile/Gateway/cron、修改 `~/.codex` / `~/.hermes`、投影技能、创建 worktree、合并、推送或发布。
 
@@ -41,8 +41,8 @@ OpenAI 官方将 Codex app-server 定位为深度客户端集成，并建议自�
 
 ### 当前 POC 决策快照（2026-08-22）
 
-- `D:\CODE\hermes-poc` 的 HSM-POC-050 已在专用分支 `codex/hsm-poc-050` 提交为 `1a6bc1c`：Hermes 原生 `openai-codex` writer 仅在获分配 worktree 写入，另一个隔离会话完成 review，文档 gate 通过。
-- 这是 `repo_verified_on_branch`，不是主分支 merge、remote push、release、Hermes `codex_app_server` parity、fresh host loading 或 `live_accepted`。
+- `D:\CODE\hermes-poc` 的 HSM-POC-050 由专用 writer/review worktree 产出 `1a6bc1c`：Hermes 原生 `openai-codex` writer 仅在获分配 worktree 写入，另一个隔离会话完成 review，文档 gate 通过。它随后本地合并为 `ea87587`，临时 worktree/branch 已清理。
+- 这是 `repo_verified_local_merged`，不是 remote push、release、Hermes `codex_app_server` parity、fresh host loading 或 `live_accepted`；该 POC repo 未配置 remote。
 - HSM-DEC-060 判定现有 native projection 已覆盖受管 consumer 的 source/package hash、owner、target、receipt 与 rollback，因此不向 skills-manager 新增 Hermes adapter 或 consumer framework。
 - Codex Harness 对 POC project skill 的一次读取尝试未形成 verdict：模型使用了与其 catalog 冲突的用户根。随后 fresh `codex debug prompt-input` 显示正确的 project-skill `r6` locator，因此这不是已证实的宿主加载问题；它同样不证明该 skill 已执行或 `host_loaded`。无论如何，都不足以把 project-owned candidate 自动提升到共享 root 或推翻 `no_code_needed`。
 

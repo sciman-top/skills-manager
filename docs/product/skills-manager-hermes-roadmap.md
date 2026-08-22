@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | R0 | `completed` | 策略、PRD、架构、路线图与任务卡已落盘；不等于宿主已配置 |
 | R1/R2 | `completed` | 隔离 Hermes profile 和 POC repo 项目级技能 discovery 已验证；不等于共享 skill root 或业务效果 |
-| R3 | `repo_verified_on_branch` | `D:\CODE\hermes-poc` 的 `codex/hsm-poc-050` / `1a6bc1c` 完成单 writer、独立 review 和 gate；未 merge、push、release 或 `live_accepted` |
+| R3 | `repo_verified_local_merged` | `D:\CODE\hermes-poc` 的单 writer、独立 review 和 gate 由 `1a6bc1c` 产生并以 `ea87587` 本地合并；POC 无 remote，未 push、release 或 `live_accepted` |
 | R4 | `completed: no_code_needed` | 当前 native projection 已承载受管 consumer 所需的 hash/ownership/receipt/rollback；一次 project-skill host loading 负例不足以证明产品合同缺口 |
 | R5 | `not_eligible` | HSM-CODE-100/110/120 不执行，除非新的真实 consumer 需求重开 R4 |
 | R6 | `proposal_validated` | 受控候选可在 project root 验证；admission/projection/host acceptance 仍需独立 owner 与后续证据 |

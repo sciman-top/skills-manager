@@ -50,13 +50,13 @@ Truth boundary
 | --- | --- | --- |
 | HSM-DOC-001、POC-010/020/030 | 已落盘的策略、隔离 profile 与项目级 skill discovery 记录 | `completed`；不外推为宿主加载或业务验收 |
 | HSM-POC-040 | `codex-poc` 的原生 `openai-codex` OAuth 路径完成一次 `gpt-5.6-luna / xhigh` 无工具只读 marker turn | `runtime_verified`；不证明 app-server parity、持续可用性或 `live_accepted` |
-| HSM-POC-050 | `D:\CODE\hermes-poc` 的专用分支 `codex/hsm-poc-050`，提交 `1a6bc1c`；一个 Hermes writer、独立 review、精确 worktree 写集与文档 gate 均有 receipt | `repo_verified_on_branch`；未 merge、push、release 或业务验收 |
+| HSM-POC-050 | `D:\CODE\hermes-poc` 的专用 writer/review 结果 `1a6bc1c` 已本地合并为 `ea87587`；临时 worktree/branch 已清理，task/receipt 历史均从 main 可达 | `repo_verified_local_merged`；该 POC 无 remote，未 push、release 或业务验收 |
 | HSM-DEC-060 | 现有 native projection 已有 source/package hash、owner、target root、receipt、rollback、冲突/漂移 fail-closed；`tests/run.ps1` 下 `NativeSkillProjection.Tests.ps1` 为 `8/8` 通过 | `no_code_needed`；HSM-CODE-100/110/120 不具备前置条件 |
 | Codex Harness review 非结论 | 一次 read-only review 未产生 verdict，模型尝试了与其 catalog 冲突的用户根；随后 fresh `codex debug prompt-input` 已显示正确的 project-skill `r6` locator | `not_obtained`；这不证明 host loading 缺失、consumer contract 缺失，也不授权改 skills-manager 或宿主 |
 | HSM-EVO-200 / 210 | 项目级 candidate 已完成 proposal/package safety；现有 admission/projection seam 足够 | `proposal_validated` / `no_code_needed`；独立人类 admission 仍是单独门禁 |
 | HSM-OBS-220 / REF-300 | 无公开稳定 machine-readable observer contract；Hermes 条件参考仓已登记并完成显式 refresh | `not_eligible` / `completed` |
 
-所有表中 `completed` 或 `repo_verified_on_branch` 都只描述相应的仓库/POC 层；主分支 merge、远端 push、发布、fresh host probe 与 `live_accepted` 仍是独立门禁。
+所有表中 `completed` 或 `repo_verified_local_merged` 都只描述相应的仓库/POC 层；远端 push、发布、fresh host probe 与 `live_accepted` 仍是独立门禁。
 
 ## 3. 原子任务卡
 
@@ -157,7 +157,7 @@ Truth boundary
 
 #### 2026-08-22 决策记录：`no_code_needed`
 
-- HSM-POC-030/040/050 已证明 Hermes 能在隔离 profile、项目级 `.agents/skills` 与唯一 worktree 的边界内完成有限任务；POC-050 的目标维护记录与 receipt 位于独立分支 `1a6bc1c`，未 merge 或 push。
+- HSM-POC-030/040/050 已证明 Hermes 能在隔离 profile、项目级 `.agents/skills` 与唯一 worktree 的边界内完成有限任务；POC-050 的目标维护记录与 receipt 由 `1a6bc1c` 产生并本地合并为 `ea87587`。POC repo 没有 remote，因此未 push 或发布。
 - 当前 `skills.json` 的 `skill_projection.native_projection` 已为受管 user skill root 固定 `owner`、`target_root` 和 `receipt_path`；`New-NativeSkillProjectionPlan` 绑定 source/content/package hash，`Apply-NativeSkillProjection` 对 source/target drift、外部 ownership 与 partial apply fail closed 并补偿回滚。
 - POC-050 的 Codex Harness read-only review 没有形成 verdict。其首次工具调用尝试了与模型可见 skills catalog 冲突的用户根；随后 fresh `codex debug prompt-input` 显示正确的 project-skill `r6` locator。该非结论既不证明 project skill 缺失，也不证明 source/hash、target ownership、write policy、receipt 或 rollback 缺失，更没有显示重复人工成本。
 - 因此不创建 Hermes adapter、consumer registry、task state、runtime bridge 或新的 projection transaction。HSM-CODE-100、HSM-CODE-110、HSM-CODE-120 均标记为 `not_eligible`；恢复条件是一个真实、重复的 consumer 需求在现有 native projection 无法表达 `consumer_id + source fingerprint + target root + ownership/write policy + receipt + rollback` 时，再以新的受审查证据重新开启决策。
