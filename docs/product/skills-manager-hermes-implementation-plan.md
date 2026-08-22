@@ -1,6 +1,6 @@
 # Hermes + Codex 实施计划与任务清单
 
-**状态**：`planned`
+**状态**：`in_progress`（POC 与 HSM-DEC-060 已有分支级证据；不代表 merge、push、release、host_loaded 或 live_accepted）
 **执行原则**：每个任务都是独立授权单元；未满足前置条件时返回 `not_started` / `blocked`，不以“继续”自动扩大到主机配置、安装、合并或发布。
 **并发原则**：文档任务可与不重叠的代码任务并行；同一 repo/worktree、同一 Hermes profile、同一 Codex config 的写任务必须串行。
 
@@ -43,6 +43,20 @@ Truth boundary
 | HSM-EVO-210 | conditional code authorization | HSM-EVO-200 evidence | 增加最小 admission verifier | skills-manager maintainer | source/tests/config/generated seam |
 | HSM-OBS-220 | conditional code authorization | stable Hermes CLI contract | Hermes 只读 observer | skills-manager maintainer | source/tests/docs |
 | HSM-REF-300 | explicit reference refresh authorization | real consumer | Hermes reference shelf 准入 | maintainer | manifest + external checkout |
+
+### 2.1 当前执行状态（2026-08-22）
+
+| ID / 阶段 | 当前证据 | 状态与下一步 |
+| --- | --- | --- |
+| HSM-DOC-001、POC-010/020/030 | 已落盘的策略、隔离 profile 与项目级 skill discovery 记录 | `completed`；不外推为宿主加载或业务验收 |
+| HSM-POC-040 | `codex-poc` 的原生 `openai-codex` OAuth 路径完成一次 `gpt-5.6-luna / xhigh` 无工具只读 marker turn | `runtime_verified`；不证明 app-server parity、持续可用性或 `live_accepted` |
+| HSM-POC-050 | `D:\CODE\hermes-poc` 的专用分支 `codex/hsm-poc-050`，提交 `1a6bc1c`；一个 Hermes writer、独立 review、精确 worktree 写集与文档 gate 均有 receipt | `repo_verified_on_branch`；未 merge、push、release 或业务验收 |
+| HSM-DEC-060 | 现有 native projection 已有 source/package hash、owner、target root、receipt、rollback、冲突/漂移 fail-closed；`tests/run.ps1` 下 `NativeSkillProjection.Tests.ps1` 为 `8/8` 通过 | `no_code_needed`；HSM-CODE-100/110/120 不具备前置条件 |
+| Codex Harness review 负例 | 一次 read-only review 在加载 POC 项目 skill 时解析到不存在的用户技能根，未产生 verdict、未写入 worktree | `host_loaded_investigation_only`；它不证明 consumer contract 缺失，也不授权改 skills-manager 或宿主 |
+| HSM-EVO-200 / 210 | 项目级 candidate 已完成 proposal/package safety；现有 admission/projection seam 足够 | `proposal_validated` / `no_code_needed`；独立人类 admission 仍是单独门禁 |
+| HSM-OBS-220 / REF-300 | 无公开稳定 machine-readable observer contract；Hermes 条件参考仓已登记并完成显式 refresh | `not_eligible` / `completed` |
+
+所有表中 `completed` 或 `repo_verified_on_branch` 都只描述相应的仓库/POC 层；主分支 merge、远端 push、发布、fresh host probe 与 `live_accepted` 仍是独立门禁。
 
 ## 3. 原子任务卡
 
@@ -140,6 +154,13 @@ Truth boundary
 - **Minimum proof**：每个 claimed gap 都能由一次可复现 POC 失败或重复人工成本证明。
 - **Stop condition**：差异只是假设、审美偏好或“未来可能需要”。
 - **Truth boundary**：设计决策，不是代码或宿主验收。
+
+#### 2026-08-22 决策记录：`no_code_needed`
+
+- HSM-POC-030/040/050 已证明 Hermes 能在隔离 profile、项目级 `.agents/skills` 与唯一 worktree 的边界内完成有限任务；POC-050 的目标维护记录与 receipt 位于独立分支 `1a6bc1c`，未 merge 或 push。
+- 当前 `skills.json` 的 `skill_projection.native_projection` 已为受管 user skill root 固定 `owner`、`target_root` 和 `receipt_path`；`New-NativeSkillProjectionPlan` 绑定 source/content/package hash，`Apply-NativeSkillProjection` 对 source/target drift、外部 ownership 与 partial apply fail closed 并补偿回滚。
+- POC-050 的 Codex Harness review 负例只表明该次宿主会话未成功从项目根加载 `poc-readonly-protocol`。该 skill 是刻意只存在于 POC repo 的 project-owned candidate，不是一个应自动投影到 `~/.agents/skills` 的受管 consumer。它既没有证明 source/hash、target ownership、write policy、receipt 或 rollback 缺失，也没有显示重复人工成本。
+- 因此不创建 Hermes adapter、consumer registry、task state、runtime bridge 或新的 projection transaction。HSM-CODE-100、HSM-CODE-110、HSM-CODE-120 均标记为 `not_eligible`；恢复条件是一个真实、重复的 consumer 需求在现有 native projection 无法表达 `consumer_id + source fingerprint + target root + ownership/write policy + receipt + rollback` 时，再以新的受审查证据重新开启决策。
 
 ### HSM-CODE-100：最小 consumer contract（条件实现）
 

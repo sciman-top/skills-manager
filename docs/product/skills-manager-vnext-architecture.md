@@ -79,6 +79,8 @@ Hermes 不是本仓的第六条运行主链，也不是本仓需要嵌入的 run
 
 在隔离 POC 未证明真实差异前，Hermes 只应消费项目级 `.agents/skills`，或消费经 ACL/独立用户保护的只读副本。现有 native projection 已能表达 source、package hash、managed/external ownership、receipt 和 rollback 时，不新增 consumer module。
 
+2026-08-22 的 HSM-DEC-060 已按该规则作出 `no_code_needed` 决策：一个分支级 Hermes→Codex 单任务 POC 没有发现上述 contract 字段的产品缺口。一次 Codex Harness project-skill 加载失败属于尚未证明的宿主 `host_loaded` 问题，不得转化为 Hermes runtime bridge、共享 root 投影或 consumer adapter。
+
 只有同时满足下列条件才允许实现独立 consumer seam：
 
 1. 一个隔离 POC 已证明 Hermes 对现有 native projection 有无法承载的稳定差异。

@@ -1,8 +1,22 @@
 # Hermes + Codex 协作路线图
 
-**状态**：`proposed`
+**状态**：`in_progress`（R3 有分支级 POC 证据，R4 已作出不编码决策；未代表 merge、push、host_loaded 或 live_accepted）
 **基线**：现有 skills-manager 产品主链保持不变；本路线图不授权宿主改动。
 **路线图原则**：每一阶段只解锁下一阶段所需的最小风险，不以“自动化程度”替代可验证性。
+
+## 当前状态快照（2026-08-22）
+
+| 阶段 | 当前状态 | 证据边界 |
+| --- | --- | --- |
+| R0 | `completed` | 策略、PRD、架构、路线图与任务卡已落盘；不等于宿主已配置 |
+| R1/R2 | `completed` | 隔离 Hermes profile 和 POC repo 项目级技能 discovery 已验证；不等于共享 skill root 或业务效果 |
+| R3 | `repo_verified_on_branch` | `D:\CODE\hermes-poc` 的 `codex/hsm-poc-050` / `1a6bc1c` 完成单 writer、独立 review 和 gate；未 merge、push、release 或 `live_accepted` |
+| R4 | `completed: no_code_needed` | 当前 native projection 已承载受管 consumer 所需的 hash/ownership/receipt/rollback；一次 project-skill host loading 负例不足以证明产品合同缺口 |
+| R5 | `not_eligible` | HSM-CODE-100/110/120 不执行，除非新的真实 consumer 需求重开 R4 |
+| R6 | `proposal_validated` | 受控候选可在 project root 验证；admission/projection/host acceptance 仍需独立 owner 与后续证据 |
+| R7 | `not_eligible` | 没有多任务无碰撞、CI/人工收口或 release acceptance 的证据 |
+
+HSM-POC-050 中一次 Codex Harness read-only review 未形成 verdict：它将一个 project-owned POC skill 解析到不存在的用户技能根。该负例保留为宿主 `host_loaded` 调查项，不能自动触发全局 skill projection、consumer code 或宿主配置改动。
 
 ## 1. 阶段总览
 
@@ -125,6 +139,8 @@ R3 通过不等于必须改 skills-manager。只有出现下列可测差异，�
 3. 现有 projection receipt 无法表达该副本的 ownership 或 rollback。
 
 若没有任何差异，决策为：**不编码**；Hermes 继续通过项目级技能或受控外部副本消费。
+
+当前 HSM-DEC-060 已作出该 `不编码` 决策。现有 POC 只证明 project-owned skill 与受控 worktree 的有限协作；它不授权将 POC 候选自动投影、合并到共享 root 或变成 Hermes runtime 依赖。
 
 ## 7. R5：可选 consumer 实现
 

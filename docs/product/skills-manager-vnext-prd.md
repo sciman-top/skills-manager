@@ -109,6 +109,8 @@
 
 本节定义产品目标，不表示当前已存在 Hermes runtime、Hermes host adapter 或自动学习实现。任何实现必须先完成 `docs/product/skills-manager-hermes-roadmap.md` 的 POC 退出条件。
 
+当前 HSM-DEC-060 的可审查结论为 `no_code_needed`：已完成的分支级 POC 没有显示现有 native projection 在 source/hash、owner、target、receipt 或 rollback 上的 contract 缺口。该结论不把 Hermes/Codex host loading、主分支 merge、发布或业务验收标为完成，也不阻止未来以新的真实 consumer 证据重开本节的条件实现门禁。
+
 - `FR-HER-001`：外部 AI consumer 的最小 contract 只描述 `consumer_id`、受管 source identity/hash、target root、ownership mode、read/write policy、projection receipt 与 rollback entry。它不得描述模型、会话、任务、提示词、工具调用或调度语义。
 - `FR-HER-002`：consumer 默认只读；若 consumer 需要读取共享技能，必须先验证其进程没有对目标 root 的未授权写入能力，或由隔离用户/ACL/副本提供等效保护。目录存在、config 已写入或 inventory 可见都不证明宿主已加载。
 - `FR-HER-003`：Hermes 的 app-server/Codex runtime、MCP/plugin migration 与 `~/.codex/config.toml` 变更属于宿主授权域。skills-manager 不生成、不写入、不迁移该配置，只能在显式只读 probe 中报告观察结果与真值边界。
