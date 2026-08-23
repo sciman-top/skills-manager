@@ -4,6 +4,8 @@ skills-manager 是 local-first 的技能/MCP curator、目标仓审查器和规�
 
 - [PRD](skills-manager-vnext-prd.md)：用户、范围、功能、非功能和验收边界。
 - [Architecture](skills-manager-vnext-architecture.md)：模块、接口、数据流、真值与删除原则。
+- [Cold-skill routing roadmap](cold-skill-routing-roadmap.md)：冷目录发现、原生执行 bridge、host 验收与专项工件验收的阶段、依赖和退出条件。
+- [Cold-skill routing implementation plan](cold-skill-routing-implementation-plan.md)：可直接交给 AI 或工程师的 CSR-100 至 CSR-170 原子任务、接口、write set、验证和回滚。
 
 面向 Hermes + Codex 协作的受控演进计划分为三份互补文档：
 
@@ -20,6 +22,7 @@ skills-manager 是 local-first 的技能/MCP curator、目标仓审查器和规�
 - [Reviewed rule-estate change-set](rule-estate-reviewed-change-set.md)：多目标规则写入的唯一 reviewed input 格式。
 - [Reference shelf](../EXTERNAL_REFERENCE_REPO_TIERS.md)：外置参考仓的 owned-root 与刷新边界。
 - [Hardening implementation plan](skills-manager-hardening-implementation-plan.md)：2026-08 双独立审计五轮交叉评审收敛的 P0–P3 任务卡（共享 gate 分类器、schema v3 allowlist、单宿主静态 guard POC、规则减法实验、工作区清理与投影决策）。
+- [Cold-skill routing acceptance runbook](../runbooks/cold-skill-routing-acceptance.md)：host-specific 验收的输入、receipt 和停止条件；它不替代仓库测试。
 
 运行真值不写入本目录：
 

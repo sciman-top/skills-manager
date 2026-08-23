@@ -23,8 +23,19 @@
 | HSM-CLN-500 | P3 | 只读 | 无 | 工作区 ownership inventory（只产出清单，不删除） | AI | ignored reports 一份清单 |
 | HSM-CLN-510 | P3 | HSM-CLN-500 + 逐项人工确认 | CLN-500 | 逐项清理：`_commit_repo`、build.log、`.worktrees`、空 docs 树、`.gitignore` stale 条目等 | user 逐项 | 磁盘目录 + `.gitignore`（tracked） |
 | HSM-PRJ-600 | P3 | 用户确认 pdf 工作流 | 无 | 条件任务：codex profile 排除 standalone `pdf`（仅当原生 PDF 插件满足工作流） | user + AI | skills.json + tests |
+| HSM-PRJ-610 | P0 | 仓库授权；host 投影/验收另行授权 | 无 | 冷技能原生执行模型钉选与 receipt 真值修复；详见 [cold-routing implementation plan](cold-skill-routing-implementation-plan.md) | maintainer + AI | bridge templates + tests + docs；后续 `~/.codex/agents` 投影 |
 
 typed-core shadow PoC 已退役，当前不在 runtime、build 或支持边界内；runbook 保留退役事实。不得因本计划重新引入 typed shadow 双实现。
+
+### HSM-PRJ-610：冷技能原生执行与验收真值（P0）
+
+- **Goal**：消除受管 native bridge 隐式继承不可调度 Sol 默认值的风险，并让冷发现、闭包校验、host 加载与 native child 生命周期在 receipt 中不可混淆。
+- **Current evidence**：跨根 junction catalog 修复已在 `6e5e390d` 的 router focused tests 中证明；历史 `cold-capability-runner` Sol/medium 会话曾完成只读任务，另一个 `design-griller` Sol/medium 会话以 `503 auth_unavailable` 失败。两者证明的是历史诊断，不是当前 HEAD 或 Terra 钉选后的验收。
+- **Detailed contract**：使用 [cold-routing implementation plan](cold-skill-routing-implementation-plan.md) 的 CSR-100 至 CSR-170；它是本任务的唯一细化来源，避免在本文件复制第二套场景/receipt schema。
+- **Exact write set**：仅该计划列明的 bridge source templates、PRD/Architecture/README/runbook、scenario fixture、receipt verifier 与 Pester tests；不改 provider/auth/global subagent defaults，不改 `route-capability.ps1` junction 修复。
+- **Minimum verification**：CSR-100 至 CSR-140 的仓库门禁；host 投影后再进行 CSR-160 的 fresh Codex child 验收。ZCode 仅可作为 parent-mediated 证据。
+- **Stop condition / rollback**：沿用 CSR task 的精确 stop 与 rollback；任何 503、缺 child id、契约降格或未授权副作用均不得由 parent 模拟补足。
+- **Truth boundary**：仓库修复、投影、host 加载与 host-specific live acceptance 分层报告。
 
 ## 3. 原子任务卡
 

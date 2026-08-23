@@ -73,7 +73,9 @@ Canonical inventory 统一来源；eligibility 处理 enabled/dependency/placeme
 
 `capability-router` 是宿主按需选择的 fallback adapter，仅在可见 metadata 不足或需要确定性 policy validation 时适用。它从 portable catalog 读取候选，按 `DomainHint` 限定集合，并对宿主提供的 Candidate 做确定性 existence、containment、entrypoint hash、availability 与 side-effect disclosure 校验。它不作普通请求前置，不维护 session、preheat、activation plan 或 MCP/plugin 编排；语义选择始终属于宿主。
 
-可选 Codex native-agent bridge 是同一投影边界内的薄适配器：它只物化仓库 `agent/native-agent-bridge/` 中带 ownership marker 的 TOML 模板到固定 `~/.codex/agents`，不实现 agent runtime、队列、会话或模型路由。bridge-only 配置也必须进入 `Test-ConfiguredHostProjection` 的 host promotion 检查；写入前拒绝 reparse ancestor/target，写入后记录 source revision、promotion mode、模板 hash、备份与回滚信息。该能力的文件存在只证明 `filesystem_projected`，不证明 Codex fresh session 已加载或 live 任务接受。
+可选 Codex native-agent bridge 是同一投影边界内的薄适配器：它只物化仓库 `agent/native-agent-bridge/` 中带 ownership marker 的 TOML 模板到固定 `~/.codex/agents`，不实现 provider/auth、agent runtime、队列、会话或动态模型路由。模板可携带针对该受管角色的静态 `model` / `model_reasoning_effort`；这只是避免继承全局默认值的配置事实，不建立模型选择器、fallback 或调度策略。bridge-only 配置也必须进入 `Test-ConfiguredHostProjection` 的 host promotion 检查；写入前拒绝 reparse ancestor/target，写入后记录 source revision、promotion mode、模板 hash、备份与回滚信息。该能力的文件存在只证明 `filesystem_projected`，不证明 Codex fresh session 已加载或 live 任务接受。
+
+冷路由验收是两个独立 seam：`capability-router` 的 deterministic seam 只返回 `candidate_discovery_only` 或 `candidate_load_validated`；宿主执行 seam 必须单独观测 `host_visible`、host 对闭包 `SKILL.md` 的真实读取（若不可见则 `not_observable`）、native child 的 id/model/effort/lifecycle、授权副作用及用户结果。receipt 把 `expected`、`observed` 与 `assertion` 分离，避免用 `pass` 同时表示“事件发生”和“预期满足”。ZCode 没有 native custom-agent 机制时只能记录 `parent-mediated/not_supported`，不得升格为 Codex `host_specific_live_accepted`。
 
 ### Hermes consumer 与受控技能演进（未来、POC 门禁）
 

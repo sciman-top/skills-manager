@@ -96,7 +96,9 @@
 - `FR-PRJ-004`：普通语义选择归宿主；router 只接受 `DomainHint` 和宿主选择，禁止 lexical ranking、profile switch 与 host mutation。
 - `FR-PRJ-005`：inventory/corpus 只能证明候选与 policy contract，不证明宿主真实 invocation。
 - `FR-PRJ-006`：只读 inventory 使用公开 plugin CLI JSON 识别 plugin/system/standalone 同名能力，优先建议 native plugin source；finding 仅报告，不安装、卸载、启用 plugin 或读写 cache。
-- `FR-PRJ-007`：可选 Codex native-agent bridge 只把仓库受控模板投影到固定 `~/.codex/agents`；写入必须经过既有 host promotion（clean commit 或明确 unverified override）、模板 ownership/reparse 校验、receipt 与回滚。bridge 不负责 agent runtime、队列、会话、模型选择或跨宿主编排。
+- `FR-PRJ-007`：可选 Codex native-agent bridge 只把仓库受控模板投影到固定 `~/.codex/agents`；写入必须经过既有 host promotion（clean commit 或明确 unverified override）、模板 ownership/reparse 校验、receipt 与回滚。bridge 不负责 provider/auth、agent runtime、队列、会话、动态模型路由或跨宿主编排；但受管 custom-agent template 可以声明静态 `model` / `model_reasoning_effort`，以避免无意继承全局 subagent 默认值。每个静态钉选必须有 source-template 测试、投影 hash receipt 与 fresh Codex child 验收。
+- `FR-PRJ-008`：cold routing 的真值必须拆为 `host_visible`、`candidate_load_validated`、`skill_md_loading`、`native_child` 与 `host_specific_live_accepted`。router receipt 只能证明发现或精确闭包校验；ZCode 父任务代行、模板存在、投影成功、模型可列举或 AI 自述均不得证明 Codex native child 已启动或 `SKILL.md` 已加载。
+- `FR-PRJ-009`：冷路由验收保留一份 tracked 场景矩阵，覆盖用户批准的显式/隐式、可见直达、只发现、普通请求、target-bound、受控写与契约分流类型。隐式场景只声明允许结果集合与禁止行为，不用单个技能名充当 oracle；真实 live receipt 保持 ignored，并由确定性 verifier 校验，不新增长期运行状态库。
 
 ### 5.6 Reference shelf
 
