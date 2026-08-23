@@ -78,10 +78,14 @@ jobs:
       - name: Run repository proportional quality gate
         shell: pwsh
         run: |
-          $gateArgs = @('-Profile', $env:CI_GATE_PROFILE, '-DiffBase', $env:CI_DIFF_BASE_SHA)
+          # Hashtable splat: array splat passes elements positionally, so a
+          # literal '-Profile' token would land in the Profile parameter and
+          # fail ValidateSet (the regression that turned CI red).
+          $gateArgs = @{ Profile = $env:CI_GATE_PROFILE }
+          if (-not [string]::IsNullOrWhiteSpace($env:CI_DIFF_BASE_SHA)) { $gateArgs['DiffBase'] = $env:CI_DIFF_BASE_SHA }
           if ($env:CI_GATE_PROFILE -eq 'focused') {
-            $testPaths = @($env:CI_FOCUSED_TEST_PATHS | ConvertFrom-Json)
-            $gateArgs += @('-TestPath') + $testPaths + @('-Verifier', 'lock', 'integrity', 'config', 'scheduler')
+            $gateArgs['TestPath'] = @($env:CI_FOCUSED_TEST_PATHS | ConvertFrom-Json)
+            $gateArgs['Verifier'] = @('lock', 'integrity', 'config', 'scheduler')
           }
           .\scripts\quality\run-local-quality-gates.ps1 @gateArgs
 
