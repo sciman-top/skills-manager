@@ -34,7 +34,7 @@ jobs:
       - name: Select proportional quality gate profile
         shell: pwsh
         run: |
-          $profile = 'quick'
+          $profile = 'full'
           $docsOnly = $false
           $baseSha = ''
           $focusedTests = @()
@@ -55,28 +55,10 @@ jobs:
                 $profile = 'full'
               }
               else {
-                $changed = @(& git diff --name-only $baseSha HEAD --)
-                if ($LASTEXITCODE -ne 0) {
-                  $profile = 'full'
-                }
-                else {
-                  $riskPath = '^(tests/E2E/|rules/|overrides/|vendor/|imports/|\.github/workflows/|scripts/(quality/|release/|hooks/|verify-)|build\.ps1$|install\.ps1$|skills\.json$|skills\.lock\.json$|audit-targets\.json$)'
-                  $sourcePath = '^(src/|tests/Unit/)'
-                  $docsOnlyPath = '^(README(?:\.zh-CN|\.en)?\.md$|CONTRIBUTING\.md$|docs/.*\.md$)'
-                  $docsOnly = (@($changed).Count -gt 0 -and @($changed | Where-Object { $_ -notmatch $docsOnlyPath }).Count -eq 0)
-                  if ($docsOnly) { $profile = 'docs' }
-                  elseif (@($changed | Where-Object { $_ -match $riskPath }).Count -gt 0) { $profile = 'full' }
-                  elseif (@($changed | Where-Object { $_ -match $sourcePath }).Count -gt 0) {
-                    $profile = 'focused'
-                    $focusedTests = @(
-                      'tests/Unit/CiWorkflow.Tests.ps1'
-                      'tests/Unit/InfrastructureSeam.Tests.ps1'
-                      'tests/Unit/ReadOnlyCli.Tests.ps1'
-                      'tests/Unit/BuildScript.Tests.ps1'
-                      @($changed | Where-Object { $_ -match '^tests/Unit/.*\.Tests\.ps1$' })
-                    ) | Sort-Object -Unique
-                  }
-                }
+                $resolved = & .\scripts\quality\resolve-gate-profile.ps1 -BaseSha $baseSha -Mode ci -Json | ConvertFrom-Json
+                $profile = [string]$resolved.profile
+                $docsOnly = [bool]$resolved.docs_only
+                $focusedTests = @($resolved.focused_test_paths)
               }
             }
           }

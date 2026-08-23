@@ -26,20 +26,23 @@ Describe 'GitHub CI workflow supply-chain contract' {
     }
 
     It 'runs focused smoke tests for ordinary PR source changes and full for integration or risk paths' {
-        $script:workflow | Should -Match "\`$profile = 'quick'"
         $script:workflow | Should -Match 'github\.ref.*refs/tags/'
         $script:workflow | Should -Match "github\.event_name.*-eq 'push'"
         $script:workflow | Should -Match 'github\.event_name.*pull_request'
-        $script:workflow | Should -Match 'git diff --name-only \$baseSha HEAD'
+        $script:workflow | Should -Match 'resolve-gate-profile\.ps1 -BaseSha \$baseSha -Mode ci -Json'
         $script:workflow | Should -Match 'CI_GATE_PROFILE=\$profile'
         $script:workflow | Should -Match 'run-local-quality-gates\.ps1 @gateArgs'
-        $script:workflow | Should -Match '\$profile = ''focused'''
         $script:workflow | Should -Match 'CI_FOCUSED_TEST_PATHS'
-        $script:workflow | Should -Match 'tests/Unit/CiWorkflow\.Tests\.ps1'
-        $script:workflow | Should -Match 'tests/E2E/'
+        # The classifier must stay in the shared resolver; CI keeps no inline copy.
+        $script:workflow | Should -Not -Match 'git diff --name-only \$baseSha HEAD'
+        $script:workflow | Should -Not -Match '\$riskPath = '
+        $script:workflow | Should -Not -Match "\`$profile = '(quick|focused|docs)'"
         @([regex]::Matches($script:workflow, 'run-local-quality-gates\.ps1')).Count | Should -Be 1
 
-        $riskMatch = [regex]::Match($script:workflow, '\$riskPath = ''([^'']+)''')
+        $resolver = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\quality\resolve-gate-profile.ps1') -Raw
+        $resolver | Should -Match 'tests/Unit/CiWorkflow\.Tests\.ps1'
+        $resolver | Should -Match 'tests/E2E/'
+        $riskMatch = [regex]::Match($resolver, '\$riskPath = ''([^'']+)''')
         $riskMatch.Success | Should -Be $true
         $riskPath = [regex]::new($riskMatch.Groups[1].Value)
         foreach ($path in @('tests/E2E/Workflow.Tests.ps1', 'rules/global/codex/AGENTS.md', '.github/workflows/ci.yml', 'scripts/quality/run-local-quality-gates.ps1', 'skills.json', 'audit-targets.json')) {
@@ -51,7 +54,8 @@ Describe 'GitHub CI workflow supply-chain contract' {
     }
 
     It 'routes documentation-only changes to the docs profile' {
-        $script:workflow | Should -Match '\$profile = ''docs'''
+        $resolver = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\quality\resolve-gate-profile.ps1') -Raw
+        $resolver | Should -Match "Get-GateProfileResult 'docs'"
         $script:workflow | Should -Match 'DiffBase'
         $script:workflow | Should -Match 'docsOnly'
         $script:workflow | Should -Match 'CI_DIFF_BASE_SHA=\$baseSha'
