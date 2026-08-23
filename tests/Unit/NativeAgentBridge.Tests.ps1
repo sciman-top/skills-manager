@@ -1,12 +1,18 @@
 BeforeAll {
     $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
     . (Join-Path $repoRoot 'skills.ps1')
+
+    # CI checkouts convert text files to CRLF (core.autocrlf=true); anchored
+    # (?m)^...$ assertions must not see carriage returns.
+    function Get-BridgeTemplateText([string]$RelativePath) {
+        return (Get-ContentUtf8 (Join-Path $repoRoot $RelativePath)) -replace "`r", ''
+    }
 }
 
 Describe 'Native agent bridge' {
     It 'keeps each projected custom agent narrow, owned, and scoped to its job' {
         foreach ($name in @('design-griller', 'cold-capability-runner')) {
-            $template = Get-ContentUtf8 (Join-Path $repoRoot ("overrides\resources\native-agent-bridge\{0}.toml" -f $name))
+            $template = Get-BridgeTemplateText ("overrides\resources\native-agent-bridge\{0}.toml" -f $name)
 
             $template | Should -Match '(?m)^# skills-manager-native-agent-bridge: v1$'
             $template | Should -Match ("(?m)^name = `"{0}`"$" -f [regex]::Escape($name))
@@ -15,8 +21,8 @@ Describe 'Native agent bridge' {
             $template | Should -Match '(?m)^enabled = false$'
         }
 
-        (Get-ContentUtf8 (Join-Path $repoRoot 'overrides\resources\native-agent-bridge\design-griller.toml')) | Should -Match '(?m)^sandbox_mode = "read-only"$'
-        (Get-ContentUtf8 (Join-Path $repoRoot 'overrides\resources\native-agent-bridge\cold-capability-runner.toml')) | Should -Match '(?m)^sandbox_mode = "workspace-write"$'
+        (Get-BridgeTemplateText 'overrides\resources\native-agent-bridge\design-griller.toml') | Should -Match '(?m)^sandbox_mode = "read-only"$'
+        (Get-BridgeTemplateText 'overrides\resources\native-agent-bridge\cold-capability-runner.toml') | Should -Match '(?m)^sandbox_mode = "workspace-write"$'
     }
 
     It 'plans bridge projection without writing the host agent directory during dry run' {
@@ -50,9 +56,26 @@ Describe 'Native agent bridge' {
         }
     }
 
+    It 'treats a bridge-only host projection as requiring promotion' {
+        $previousRoot = $Root
+        try {
+            $Root = $TestDrive
+            $config = [pscustomobject]@{
+                targets = @()
+                skill_projection = [pscustomobject]@{
+                    native_agent_bridge = [pscustomobject]@{
+                        target_root = '~/.codex/agents'
+                    }
+                }
+            }
+            (Test-ConfiguredHostProjection $config) | Should -BeTrue
+        }
+        finally { $Root = $previousRoot }
+    }
+
     It 'keeps grill-me as an explicit core entry that delegates to the native griller' {
-        $skill = Get-ContentUtf8 (Join-Path $repoRoot 'overrides\patches\grill-me\SKILL.md')
-        $metadata = Get-ContentUtf8 (Join-Path $repoRoot 'overrides\patches\grill-me\agents\openai.yaml')
+        $skill = Get-BridgeTemplateText 'overrides\patches\grill-me\SKILL.md'
+        $metadata = Get-BridgeTemplateText 'overrides\patches\grill-me\agents\openai.yaml'
 
         $metadata | Should -Match 'allow_implicit_invocation:\s*false'
         $skill | Should -Match 'native `design-griller`'
@@ -63,7 +86,7 @@ Describe 'Native agent bridge' {
     }
 
     It 'requires an explicit bounded admission before a cold controlled-write skill can execute' {
-        $runner = Get-ContentUtf8 (Join-Path $repoRoot 'overrides\resources\native-agent-bridge\cold-capability-runner.toml')
+        $runner = Get-BridgeTemplateText 'overrides\resources\native-agent-bridge\cold-capability-runner.toml'
 
         $runner | Should -Match 'Validation authorizes reading, never execution'
         $runner | Should -Match 'user requested implementation'
