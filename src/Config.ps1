@@ -295,7 +295,7 @@ function Get-CfgArrayField($cfg, [string]$name, [bool]$required, [System.Collect
     $errors.Add(("skills.json 的 {0} 必须是数组" -f $name)) | Out-Null
     return @()
 }
-$script:SkillsConfigSchemaVersion = 2
+$script:SkillsConfigSchemaVersion = 3
 function Test-CfgIntegerValue($value) {
     return ($value -is [byte] -or $value -is [sbyte] -or
         $value -is [int16] -or $value -is [uint16] -or
@@ -317,8 +317,9 @@ function Get-CfgSchemaVersionInfo($cfg) {
         }
         else {
             $version = [int64]$rawVersion
-            if ($version -notin @(1, $script:SkillsConfigSchemaVersion)) {
-                $errors.Add(("不支持的 schema_version；当前支持 1/{0}" -f $script:SkillsConfigSchemaVersion)) | Out-Null
+            $allowedVersions = @(1, 2, $script:SkillsConfigSchemaVersion) | Sort-Object -Unique
+            if ($version -notin $allowedVersions) {
+                $errors.Add(("不支持的 schema_version；当前支持 {0}" -f ($allowedVersions -join '/'))) | Out-Null
             }
         }
     }
@@ -349,7 +350,14 @@ function Get-CfgVersionedContractReport($cfg) {
             $versionInfo.observations += [pscustomobject]@{
                 code = 'legacy_schema_v1_deprecated'
                 path = '$.schema_version'
-                message = 'Schema v1 remains readable for migration only; new repository configuration must use schema v2.'
+                message = 'Schema v1 remains readable for migration only; new repository configuration must use schema v3.'
+            }
+        }
+        elseif ([int]$versionInfo.effective_version -eq 2) {
+            $versionInfo.observations += [pscustomobject]@{
+                code = 'schema_v2_observe'
+                path = '$.schema_version'
+                message = 'Schema v2 remains readable for migration only; new repository configuration must use schema v3.'
             }
         }
         foreach ($fieldName in @("vendors", "targets", "mappings", "imports", "mcp_servers", "mcp_targets")) {
@@ -379,6 +387,9 @@ function Get-CfgVersionedContractReport($cfg) {
     }
 
     foreach ($errorText in @(Get-CfgContractErrors $cfg ([int]$versionInfo.effective_version))) { $errors.Add([string]$errorText) | Out-Null }
+    $topLevelFindings = Get-CfgTopLevelFieldContractFindings $cfg ([int]$versionInfo.effective_version)
+    foreach ($errorText in @($topLevelFindings.errors)) { $errors.Add([string]$errorText) | Out-Null }
+    foreach ($observation in @($topLevelFindings.observations)) { $versionInfo.observations += $observation }
     return [pscustomobject]@{
         schema = $versionInfo
         valid = ($errors.Count -eq 0)
@@ -388,6 +399,33 @@ function Get-CfgVersionedContractReport($cfg) {
 }
 function Get-CfgForbiddenHostRuntimeFieldNames {
     return @('model', 'model_provider', 'provider', 'auth', 'session', 'orchestrator', 'daemon', 'agent_runtime')
+}
+
+function Get-CfgTopLevelFieldAllowlist {
+    return @('schema_version', 'sync_mode', 'update_force', 'skill_projection', 'vendors', 'mappings', 'imports', 'targets', 'mcp_servers', 'mcp_profiles', 'mcp_targets')
+}
+
+function Get-CfgTopLevelFieldContractFindings($cfg, [int]$EffectiveVersion) {
+    $errors = New-Object System.Collections.Generic.List[string]
+    $observations = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $cfg) { return [pscustomobject]@{ errors = @(); observations = @() } }
+    $allowlist = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($fieldName in @(Get-CfgTopLevelFieldAllowlist)) { $allowlist.Add($fieldName) | Out-Null }
+    foreach ($property in @($cfg.PSObject.Properties)) {
+        if (-not $allowlist.Contains($property.Name)) {
+            if ($EffectiveVersion -ge 3) {
+                $errors.Add(("skills.json 顶层字段未被 schema v3 允许：{0}" -f $property.Name)) | Out-Null
+            }
+            else {
+                $observations.Add([pscustomobject]@{
+                    code = 'unknown_top_level_field_v2_observe'
+                    path = ('$.{0}' -f $property.Name)
+                    message = 'Unknown top-level field is read under schema v2 observe mode; migrate to the v3 allowlist.'
+                }) | Out-Null
+            }
+        }
+    }
+    return [pscustomobject]@{ errors = @($errors.ToArray()); observations = @($observations.ToArray()) }
 }
 
 function Get-CfgContractErrors($cfg, [int]$SchemaVersion = 0) {
@@ -1028,11 +1066,14 @@ function Assert-Cfg($cfg) {
     Need ($versionInfo.errors.Count -eq 0) (($versionInfo.errors | Select-Object -First 1) -join '')
     $effectiveSchemaVersion = [int]$versionInfo.effective_version
     if ($effectiveSchemaVersion -eq 1) {
-        Log 'skills.json schema v1 仅保留迁移读取兼容；新配置请使用 schema v2。' 'WARN'
+        Log 'skills.json schema v1 仅保留迁移读取兼容；新配置请使用 schema v3。' 'WARN'
     }
     foreach ($fieldName in @(Get-CfgForbiddenHostRuntimeFieldNames)) {
         Need (-not (Test-CfgObjectProperty $cfg $fieldName)) ("skills.json 顶层字段属于宿主 runtime 职责，禁止配置：{0}" -f $fieldName)
     }
+    $topLevelFindings = Get-CfgTopLevelFieldContractFindings $cfg $effectiveSchemaVersion
+    foreach ($observation in @($topLevelFindings.observations)) { Log $observation.message 'WARN' }
+    Need (@($topLevelFindings.errors).Count -eq 0) ([string]@($topLevelFindings.errors)[0])
     Need (Assert-IsArray $cfg.vendors) "skills.json 的 vendors 必须是数组"
     Need (Assert-IsArray $cfg.targets) "skills.json 的 targets 必须是数组"
     Need (Assert-IsArray $cfg.mappings) "skills.json 的 mappings 必须是数组"

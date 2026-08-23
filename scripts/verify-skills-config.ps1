@@ -20,6 +20,7 @@ function ConvertTo-SafeContractFinding([string]$message) {
     $path = "$"
     $code = "runtime_contract_error"
     if ($message -match "schema_version") { $path = "$.schema_version"; $code = "schema_version_invalid" }
+    elseif ($message -match "顶层字段未被 schema v3 允许") { $code = "unknown_top_level_field_v3" }
     elseif ($message -match "sync_mode") { $path = "$.sync_mode"; $code = "enum_invalid" }
     elseif ($message -match "mapping\.from") { $path = "$.mappings[].from"; $code = "unsafe_relative_path" }
     elseif ($message -match "mapping\.to") { $path = "$.mappings[].to"; $code = "unsafe_relative_path" }

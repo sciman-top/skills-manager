@@ -1,0 +1,11 @@
+{
+  "schema_version": 4,
+  "sync_mode": "link",
+  "update_force": false,
+  "vendors": [{ "name": "demo", "repo": "https://example.invalid/demo.git", "ref": "main" }],
+  "targets": [{ "path": "out/skills" }],
+  "mappings": [{ "vendor": "demo", "from": "skills/demo", "to": "demo" }],
+  "imports": [],
+  "mcp_servers": [],
+  "mcp_targets": []
+}

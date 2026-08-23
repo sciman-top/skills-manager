@@ -135,4 +135,48 @@ function Invoke-ConfigVerifier([string]$ConfigPath, [string]$Mode = 'enforce', [
         $schema.'x-compatibility-policy'.declared_schema_v1 | Should -Be 'runtime-read-migration-only'
         $schema.'x-secret-policy'.validator_output | Should -Be 'code-path-message-only'
     }
+
+    It 'accepts schema v3 with only allowlisted top-level fields' {
+        $run = Invoke-ConfigVerifier (Join-Path $fixtureRoot 'known-good-v3.json')
+        $run.exit_code | Should -Be 0
+        $run.result.valid | Should -Be $true
+        $run.result.finding_count | Should -Be 0
+        $run.result.config_version | Should -Be 3
+    }
+
+    It 'fails closed for a v3 config with an unknown top-level field' {
+        $run = Invoke-ConfigVerifier (Join-Path $fixtureRoot 'v3-unknown-top-level.json')
+        $run.result.valid | Should -Be $false
+        @($run.result.findings | Where-Object code -eq 'unknown_top_level_field_v3').Count | Should -Be 1
+    }
+
+    It 'observes a v2 unknown top-level field without failing' {
+        $run = Invoke-ConfigVerifier (Join-Path $fixtureRoot 'v2-unknown-top-level.json')
+        $run.exit_code | Should -Be 0
+        $run.result.valid | Should -Be $true
+        @($run.result.observations | Where-Object code -eq 'unknown_top_level_field_v2_observe').Count | Should -Be 1
+    }
+
+    It 'rejects a declared schema version beyond the supported range' {
+        $run = Invoke-ConfigVerifier (Join-Path $fixtureRoot 'v4-unsupported.json')
+        $run.result.valid | Should -Be $false
+        @($run.result.findings | Where-Object code -eq 'schema_version_invalid').Count | Should -Be 1
+    }
+
+    It 'enforces the v3 top-level allowlist through the Assert-Cfg CLI entrance' {
+        # Mirror the verifier's dot-source chain so Assert-Cfg runs with its
+        # real dependencies; the fixture must fail closed on the CLI path too,
+        # not only through the report-based verifier.
+        $operationPlanSource = Get-Content -LiteralPath (Join-Path $repoRoot 'src\Domain\OperationPlan.ps1') -Raw -Encoding UTF8
+        $skillCatalogSource = Get-Content -LiteralPath (Join-Path $repoRoot 'src\Domain\SkillCatalog.ps1') -Raw -Encoding UTF8
+        $coreSource = Get-Content -LiteralPath (Join-Path $repoRoot 'src\Core.ps1') -Raw -Encoding UTF8
+        $configSource = Get-Content -LiteralPath (Join-Path $repoRoot 'src\Config.ps1') -Raw -Encoding UTF8
+        . ([scriptblock]::Create($operationPlanSource))
+        . ([scriptblock]::Create($skillCatalogSource))
+        . (Join-Path $repoRoot 'src\Application\SkillProjection.ps1')
+        . ([scriptblock]::Create($coreSource))
+        . ([scriptblock]::Create($configSource))
+        $cfg = Get-Content -LiteralPath (Join-Path $fixtureRoot 'v3-unknown-top-level.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        { Assert-Cfg $cfg } | Should -Throw '*顶层字段未被 schema v3 允许*'
+    }
 }
