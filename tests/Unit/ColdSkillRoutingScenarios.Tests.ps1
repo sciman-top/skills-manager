@@ -182,4 +182,36 @@ Describe 'Cold skill routing scenario matrix' {
         $s30[0].request_verbatim | Should -Match '审问'
         $s30[0].request_verbatim | Should -Match '官方文档'
     }
+
+    It 'pins CSR-170 fresh-host probes to distinct positive and negative routing boundaries' {
+        $byId = @{}
+        foreach ($scenario in @($matrix.scenarios | Where-Object id -in @('S32-live-derived', 'S33-live-derived', 'S34-live-derived', 'S35-live-derived', 'S36-live-derived', 'S37-live-derived'))) {
+            $byId[$scenario.id] = $scenario
+        }
+
+        $byId.Keys.Count | Should -Be 6
+
+        $byId['S32-live-derived'].route_class | Should -Be 'cold_candidate'
+        $byId['S32-live-derived'].execution_contract | Should -Be 'multi_turn_user_decision'
+        $byId['S32-live-derived'].request_verbatim | Should -Match '一题一题'
+        $byId['S32-live-derived'].request_verbatim | Should -Match '官方与项目资料'
+
+        $byId['S33-live-derived'].route_class | Should -Be 'cold_candidate'
+        $byId['S33-live-derived'].execution_contract | Should -Be 'one_shot'
+        $byId['S33-live-derived'].request_verbatim | Should -Match '单轮只读'
+
+        $byId['S34-live-derived'].verification_mode | Should -Be 'contract_branching'
+        $byId['S34-live-derived'].execution_contract | Should -Be 'deferred_to_candidate'
+        $byId['S34-live-derived'].forbidden_events | Should -Contain 'fail_open_on_unknown_contract'
+
+        foreach ($id in @('S35-live-derived', 'S37-live-derived')) {
+            $byId[$id].route_class | Should -Be 'ordinary_no_skill'
+            $byId[$id].cold_discovery | Should -Be 'forbidden'
+            $byId[$id].forbidden_events | Should -Contain 'cold_discovery'
+        }
+
+        $byId['S36-live-derived'].route_class | Should -Be 'visible_direct'
+        $byId['S36-live-derived'].cold_discovery | Should -Be 'forbidden'
+        $byId['S36-live-derived'].execution_contract | Should -Be 'multi_turn_user_decision'
+    }
 }
