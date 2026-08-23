@@ -24,7 +24,7 @@ function Invoke-ConfigVerifier([string]$ConfigPath, [string]$Mode = 'enforce', [
         $run.exit_code | Should -Be 0
         $run.result.valid | Should -Be $true
         $run.result.finding_count | Should -Be 0
-        $run.result.config_version | Should -Be 2
+        $run.result.config_version | Should -Be 3
         $run.result.version_source | Should -Be 'declared'
         $before | Should -Be $after
         $run.result.config_sha256_before | Should -Be $run.result.config_sha256_after
@@ -123,7 +123,8 @@ function Invoke-ConfigVerifier([string]$ConfigPath, [string]$Mode = 'enforce', [
     It 'keeps the declarative schema parseable and documents compatibility and secret policy' {
         $schema = Get-Content -LiteralPath (Join-Path $repoRoot 'config\skills.schema.json') -Raw | ConvertFrom-Json
         $schema.'$schema' | Should -Be 'https://json-schema.org/draft/2020-12/schema'
-        $schema.properties.schema_version.const | Should -Be 2
+        $schema.properties.schema_version.const | Should -Be 3
+        $schema.additionalProperties | Should -Be $false
         @($schema.'$defs'.mcpServer.properties.transport.enum) | Should -Not -Contain 'sse'
         $schema.'$defs'.mapping.properties.to.pattern | Should -Be '^[a-z0-9]+(?:-[a-z0-9]+)*$'
         @($schema.'$defs'.target.properties.host.enum) | Should -Be @('codex', 'claude', 'zcode')
@@ -133,6 +134,8 @@ function Invoke-ConfigVerifier([string]$ConfigPath, [string]$Mode = 'enforce', [
         @($schema.'$defs'.nativeProjection.properties.PSObject.Properties.Name) | Should -Not -Contain 'apply_requires_token'
         $schema.'x-compatibility-policy'.missing_schema_version | Should -Be 'legacy-v1-observation'
         $schema.'x-compatibility-policy'.declared_schema_v1 | Should -Be 'runtime-read-migration-only'
+        $schema.'x-compatibility-policy'.declared_schema_v2 | Should -Be 'runtime-read-migration-only'
+        $schema.'x-compatibility-policy'.unknown_properties | Should -Be 'v3-fail-closed'
         $schema.'x-secret-policy'.validator_output | Should -Be 'code-path-message-only'
     }
 
