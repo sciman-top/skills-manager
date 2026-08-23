@@ -1,6 +1,7 @@
 ---
 name: grilling
 description: Stress-test an explicitly proposed plan, decision, or idea one high-leverage question at a time. Use only when the user asks to grill or challenge their thinking; do not use for ordinary implementation, debugging, or open-ended brainstorming.
+disable-model-invocation: true
 ---
 
 # Grilling

@@ -308,7 +308,7 @@ Describe 'Capability router fallback' {
         @($result.selected).Count | Should -Be 0
     }
 
-    It 'reports candidate truncation without authorizing execution' {
+    It 'requires a narrower domain instead of returning an alphabetical truncated candidate set' {
         $secondRoot = Join-Path $root 'systematic-debugging'
         New-Item -ItemType Directory -Path $secondRoot -Force | Out-Null
         $secondPath = Join-Path $secondRoot 'SKILL.md'
@@ -321,7 +321,12 @@ Describe 'Capability router fallback' {
         $result = & $router -Query 'engineering' -CatalogPath $catalog -MaxCandidates 1 | ConvertFrom-Json
 
         $result.retrieval.truncated | Should -Be $true
-        @($result.retrieval.candidates).Count | Should -Be 1
+        $result.retrieval.scope_required | Should -Be $true
+        $result.retrieval.candidate_count | Should -Be 2
+        @($result.retrieval.candidates).Count | Should -Be 0
+        $result.routing_receipt.status | Should -Be 'domain_hint_required'
+        $result.routing_receipt.truth_boundary | Should -Be 'candidate_discovery_blocked'
+        $result.execution_authorization.reason | Should -Be 'domain_hint_required'
         $result.execution_authorization.status | Should -Be 'not_granted'
     }
 

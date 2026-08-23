@@ -17,10 +17,11 @@ Use only in either of these cases:
   match for the complete request.
 
 The second case is a bounded fallback, not a blanket preflight. Pass the
-complete request and at most two host-chosen domain hints. The router retrieves
-descriptions; the host still makes the semantic choice from that small candidate
-set. For an explicitly named invisible skill, validate that exact candidate
-instead of declaring it unavailable before checking the cold catalog.
+complete request and one or two host-chosen domain hints whenever the request
+is not an exact invisible skill name. The router retrieves descriptions; the
+host still makes the semantic choice from that small candidate set. For an
+explicitly named invisible skill, validate that exact candidate instead of
+declaring it unavailable before checking the cold catalog.
 
 Do not pretend that ordinary language has a reliable binary “skill request”
 classifier. A quoted name, a discussion of a skill, or an ambiguous task is
@@ -32,11 +33,22 @@ The router's read-only retrieval is deliberately separated from semantic
 selection so a false positive cannot load or execute a cold skill.
 
 ```powershell
-$result = pwsh -NoProfile -File <skill-dir>/scripts/route-capability.ps1 -Query '<complete request>' -AutoDiscover | ConvertFrom-Json
+$domainHints = @('decision') # one or two functional domains, not task keywords
+$result = pwsh -NoProfile -File <skill-dir>/scripts/route-capability.ps1 -Query '<complete request>' -AutoDiscover -DomainHint $domainHints | ConvertFrom-Json
 $result.retrieval.candidates
 ```
 
-If the catalog is large, narrow it with one or two known domain names via `-DomainHint`. The host AI selects the smallest sufficient candidate set from names, descriptions and the complete user request.
+Use functional domains, not arbitrary task keywords: `decision`, `engineering`,
+`coding`, `frontend`, `writing`, `content`, `presentation`, `diagram`,
+`animation`, `mcp`, `dotnet`, `python`, `browser`, `database`, `review`, or
+`skill-management`. Existing specialist domains such as `ppt`, `physics`, and
+`coding-strict` remain available. The default maximum is 12. If the requested
+domains exceed that limit, the router returns `domain_hint_required` with no
+arbitrary alphabetical subset; do not retry as middleware. Refine the host's
+single discovery decision only when its original semantic conclusion supports
+a narrower domain; otherwise return to ordinary reasoning. The host AI selects
+the smallest sufficient candidate set from names, descriptions, and the
+complete user request.
 
 ## Deterministic validation
 

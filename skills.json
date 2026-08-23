@@ -98,7 +98,7 @@
     "discovery_catalog": {
       "catalog_path": "agent/.skills-manager/catalog.json",
       "fallback_domain": "other",
-      "fallback_purpose": "Installed cold skills not assigned to a narrower domain; inspect only when no specific domain covers the request.",
+      "fallback_purpose": "Unclassified cold skills. Do not rely on bounded implicit discovery until a narrower functional domain is assigned.",
       "side_effects": {
         "domain-modeling": "controlled_write",
         "grill-with-docs": "controlled_write",
@@ -157,8 +157,10 @@
         ],
         "coding": [
           "api-and-interface-design",
+          "code-simplification",
           "code-review-and-quality",
           "custom-powershell-windows-automation",
+          "deprecation-and-migration",
           "error-handling-patterns",
           "security-and-hardening",
           "shipping-and-launch",
@@ -176,6 +178,7 @@
           "verification-before-completion"
         ],
         "design": [
+          "canvas-design",
           "data-visualization",
           "frontend-design",
           "vercel-react-best-practices",
@@ -183,6 +186,8 @@
         ],
         "dotnet": [
           "custom-windows-wpf-teacher-app",
+          "dotnet-backend-patterns",
+          "microsoft-code-reference",
           "microsoft-docs",
           "systematic-debugging",
           "windows-desktop-e2e"
@@ -197,6 +202,9 @@
           "security-and-hardening"
         ],
         "python": [
+          "modern-python",
+          "python-performance-optimization",
+          "python-testing-patterns",
           "systematic-debugging"
         ],
         "database": [
@@ -206,6 +214,57 @@
         ],
         "physics": [
           "custom-junior-physics-animation"
+        ],
+        "animation": [
+          "custom-junior-physics-animation",
+          "manim-composer",
+          "manimce-best-practices",
+          "ui-animation"
+        ],
+        "decision": [
+          "documentation-and-adrs",
+          "domain-modeling",
+          "draft-spec",
+          "grill-me",
+          "grill-with-docs",
+          "grilling",
+          "idea-refine"
+        ],
+        "diagram": [
+          "data-visualization",
+          "drawio-diagram-forge"
+        ],
+        "frontend": [
+          "ant-design",
+          "frontend-design",
+          "frontend-ui-engineering",
+          "tailwind-design-system",
+          "ui-animation",
+          "vercel-react-best-practices",
+          "web-artifacts-builder"
+        ],
+        "mcp": [
+          "mcp-builder",
+          "mcp-cli"
+        ],
+        "presentation": [
+          "baoyu-slide-deck",
+          "custom-powerpoint-accessibility",
+          "custom-teacher-courseware-ppt",
+          "powerpoint-automation",
+          "pptx",
+          "slidev"
+        ],
+        "skill-management": [
+          "capability-router",
+          "skill-creator"
+        ],
+        "writing": [
+          "baoyu-format-markdown",
+          "content-strategy",
+          "copy-editing",
+          "copywriting",
+          "custom-creator-publishing"
         ]
       }
     },

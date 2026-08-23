@@ -174,6 +174,23 @@ unified_exec = true
         $grilling.dependencies.Count | Should -Be 0
     }
 
+    It 'keeps the current cold directory fully classified into bounded functional domains' {
+        $currentRepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
+        $config = Get-ContentUtf8 (Join-Path $currentRepoRoot 'skills.json') | ConvertFrom-Json
+        $catalog = New-SkillDiscoveryCatalogDocument $config.skill_projection
+        $fallbackDomain = [string]$config.skill_projection.discovery_catalog.fallback_domain
+        $unclassified = @($catalog.skills | Where-Object { @($_.domains) -contains $fallbackDomain })
+        $decision = @($catalog.domains | Where-Object name -eq 'decision')[0]
+
+        $unclassified | Should -BeNullOrEmpty
+        foreach ($domain in @($catalog.domains)) {
+            (@($domain.skill_names).Count -le 12) | Should -BeTrue
+        }
+        @($decision.skill_names) | Should -Contain 'grill-with-docs'
+        @($decision.skill_names) | Should -Contain 'grilling'
+        @($decision.skill_names) | Should -Contain 'grill-me'
+    }
+
     It 'fails closed when a declared cold workflow side effect lacks an execution contract' {
         $managed = Join-Path $TestDrive 'missing-contract-catalog-managed'
         New-ProjectionSkill $managed 'demo' 'demo' | Out-Null

@@ -104,6 +104,11 @@ Describe 'Native agent bridge' {
         $skill | Should -Match 'not a delegation receipt'
         $skill | Should -Match 'simulate a child question'
         $skill | Should -Match '(?s)Do not silently\s+fall back'
+
+        $grillingSkill = Get-BridgeTemplateText 'overrides\patches\grilling\SKILL.md'
+        $grillingMetadata = Get-BridgeTemplateText 'overrides\patches\grilling\agents\openai.yaml'
+        $grillingSkill | Should -Match 'disable-model-invocation:\s*true'
+        $grillingMetadata | Should -Match 'allow_implicit_invocation:\s*true'
     }
 
     It 'requires an explicit bounded admission before a cold controlled-write skill can execute' {

@@ -6,7 +6,7 @@ param(
     [string[]]$DomainHint = @(),
     [Alias('SelectedCapability')][string[]]$Candidate = @(),
     [string[]]$ExcludeCapability = @(),
-    [ValidateRange(1,256)][int]$MaxCandidates = 128,
+    [ValidateRange(1,256)][int]$MaxCandidates = 12,
     [switch]$AutoDiscover
 )
 
@@ -444,7 +444,19 @@ if ($catalogFindings.Count -eq 0 -and $null -ne $catalog) {
 
 $allRows = @($rows.ToArray())
 $truncated = $allRows.Count -gt $MaxCandidates
-$visible = @($allRows | Select-Object -First $MaxCandidates)
+# The router is a deterministic catalog reader, not a semantic ranker.  Returning
+# the first N names from an over-broad domain would silently bias the host toward
+# alphabetical order and can hide the relevant cold skill.  An exact candidate is
+# still safe to validate without a domain hint; discovery without one must stay
+# within the bounded candidate contract.
+$discoveryScopeRequired = $requestedNames.Count -eq 0 -and $truncated
+if ($discoveryScopeRequired) {
+    $excluded.Add([pscustomobject][ordered]@{ kind = 'request'; name = ''; reason = 'domain_hint_required'; candidate_count = $allRows.Count; max_candidates = $MaxCandidates }) | Out-Null
+}
+[object[]]$visible = @()
+if ($catalogStatus -eq 'current' -and $requestValid -and -not $discoveryScopeRequired) {
+    $visible = @($allRows | Select-Object -First $MaxCandidates)
+}
 if ($catalogStatus -eq 'current' -and $requestValid) {
     foreach ($name in $requestedNames) {
         if ($name -in $excludedNames) {
@@ -493,7 +505,8 @@ $loadPass = $rootSelectionPass -and $closurePass
 $effectiveExecutionContract = if ($loadPass) { Get-EffectiveExecutionContract $validatedClosureRows } else { New-HostAdmissionExecutionContract }
 $sideEffectRows = if ($loadPass) { $validatedClosureRows } else { $selectedRows }
 $requiresReview = @($sideEffectRows | Where-Object side_effect -ne 'read_only').Count -gt 0
-$authorizationReason = if ($selectedRows.Count -eq 0) { 'no_candidate_selected' }
+$authorizationReason = if ($discoveryScopeRequired) { 'domain_hint_required' }
+elseif ($selectedRows.Count -eq 0) { 'no_candidate_selected' }
 elseif ($effectiveExecutionContract.mode -eq 'host_admission_required') { 'execution_contract_requires_host_admission' }
 elseif ($effectiveExecutionContract.mode -eq 'parent_user_input') { 'execution_contract_requires_parent_user_input' }
 elseif ($effectiveExecutionContract.mode -eq 'multi_turn_user_decision') { 'execution_contract_requires_interactive_bridge' }
@@ -524,8 +537,8 @@ $routingReceipt = [ordered]@{
     validated_candidates = if ($loadPass) { @($selectedRows | ForEach-Object { [string]$_.name }) } else { @() }
     validated_closure = if ($loadPass) { @($validatedClosureRows | ForEach-Object { [string]$_.name }) } else { @() }
     execution_contract = $effectiveExecutionContract
-    status = if ($loadPass) { 'validated' } elseif ($catalogStatus -eq 'current' -and $requestValid) { 'candidates_returned' } else { 'blocked' }
-    truth_boundary = if ($loadPass) { 'candidate_load_validated' } elseif ($catalogStatus -eq 'current' -and $requestValid) { 'candidate_discovery_only' } else { 'candidate_discovery_blocked' }
+    status = if ($loadPass) { 'validated' } elseif ($catalogStatus -eq 'current' -and $requestValid -and $discoveryScopeRequired) { 'domain_hint_required' } elseif ($catalogStatus -eq 'current' -and $requestValid) { 'candidates_returned' } else { 'blocked' }
+    truth_boundary = if ($loadPass) { 'candidate_load_validated' } elseif ($catalogStatus -eq 'current' -and $requestValid -and -not $discoveryScopeRequired) { 'candidate_discovery_only' } else { 'candidate_discovery_blocked' }
     writes_performed = $false
     provider_calls = 0
     native_mutations = 0
@@ -540,7 +553,7 @@ $routingReceipt = [ordered]@{
     catalog_resolution = [ordered]@{ mode = [string]$resolution.mode; auto_discover_requested = [bool]$AutoDiscover }
     catalog = [ordered]@{ status = $catalogStatus; skill_count = $catalogSkillCount; findings = @($catalogFindings.ToArray()) }
     discovery_domains = if ($null -ne $catalog -and $catalogFindings.Count -eq 0) { @($catalog.domains | Select-Object name, purpose) } else { @() }
-    retrieval = [ordered]@{ strategy = 'catalog_discovery'; candidates = $visible; truncated = $truncated }
+    retrieval = [ordered]@{ strategy = 'catalog_discovery'; candidates = $visible; candidate_count = $allRows.Count; max_candidates = $MaxCandidates; truncated = $truncated; scope_required = $discoveryScopeRequired }
     selected = $selectedRows
     validated_closure = $validatedClosureRows
     execution_contract = $effectiveExecutionContract

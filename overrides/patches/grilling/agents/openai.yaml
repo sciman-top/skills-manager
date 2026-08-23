@@ -3,4 +3,7 @@ interface:
   short_description: "Stress-test a design one decision at a time"
   default_prompt: "Use $grilling to challenge this plan one high-leverage question at a time; do not implement until I confirm the understanding."
 policy:
-  allow_implicit_invocation: false
+  # Codex 0.149 omits false-policy skills from its model-visible metadata,
+  # including explicit `$grilling` requests in a full-compatible profile.
+  # Explicit-only semantics belong in SKILL.md's disable-model-invocation flag.
+  allow_implicit_invocation: true
