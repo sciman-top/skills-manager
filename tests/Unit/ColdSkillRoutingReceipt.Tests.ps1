@@ -101,6 +101,31 @@ Describe 'Cold skill routing receipt v2 verifier' {
         $recheck.Output | Should -Match 'findings=0'
     }
 
+    It 'preserves a legacy controlled-write record but refuses to invent the missing admission contract' {
+        $legacyCopy = Join-Path $TestDrive 'receipt.json'
+        Copy-Item -LiteralPath (Join-Path $fixturesRoot 'legacy-unverifiable-controlled-write.json') -Destination $legacyCopy
+        $beforeHash = ([string](Get-FileHash -LiteralPath $legacyCopy -Algorithm SHA256).Hash).ToLowerInvariant()
+        $outputPath = Join-Path $TestDrive 'receipt.v2.json'
+
+        $result = Invoke-ReceiptVerifier @('-ReceiptPath', $legacyCopy, '-AllowLegacyMigration', '-OutputPath', $outputPath)
+
+        $result.ExitCode | Should -Be 1
+        $result.Output | Should -Match 'migration written'
+        $result.Output | Should -Match 'E012_CONTROLLED_WRITE_INCOMPLETE'
+        ([string](Get-FileHash -LiteralPath $legacyCopy -Algorithm SHA256).Hash).ToLowerInvariant() | Should -Be $beforeHash
+
+        $migrated = Get-Content -LiteralPath $outputPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $migrated.migrated_from.legacy_receipt_path | Should -Be ([IO.Path]::GetFullPath($legacyCopy))
+        $migrated.migrated_from.legacy_receipt_sha256 | Should -Be $beforeHash
+        $migrated.records[0].observed.skill_md_loading | Should -Be 'not_observable'
+        $migrated.records[0].observed.native_child | Should -Be 'not_supported'
+        $migrated.records[0].assertion.achieved_boundary | Should -Not -Be 'host_specific_live_accepted'
+
+        $recheck = Invoke-ReceiptVerifier @('-ReceiptPath', $outputPath)
+        $recheck.ExitCode | Should -Be 1
+        $recheck.Output | Should -Match 'E012_CONTROLLED_WRITE_INCOMPLETE'
+    }
+
     It 'refuses to overwrite the legacy original during migration' {
         $legacyCopy = Join-Path $TestDrive 'receipt.json'
         Copy-Item -LiteralPath (Join-Path $fixturesRoot 'legacy-receipt.json') -Destination $legacyCopy

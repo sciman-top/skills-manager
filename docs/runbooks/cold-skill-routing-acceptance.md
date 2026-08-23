@@ -160,6 +160,8 @@ P0 是最小链路，不是 29 组场景的全量 live execution。每个场景�
 4. 若 legacy run 的 host 是 ZCode，native_child 写 not_supported 或 not_observable；assertion 最高为 candidate_load_validated 或 parent-mediated observation。
 5. 运行 receipt verifier。verifier 不允许迁移输出因“历史结论为 pass”而获得 live acceptance。
 
+若 legacy record 已知有写入，但未记录 exact write set、minimum proof、stop condition 和 actual writes，迁移仍会保留原件、输出带 hash 绑定的 v2 文件，并以 `E012_CONTROLLED_WRITE_INCOMPLETE` fail closed。不得补写或猜测这些 admission 字段来让历史记录通过；该 v2 输出仅用于定位缺口，不能作为验收收据。
+
 迁移由 verifier 执行（原件只读，输出为新文件）：
 
     pwsh -NoProfile -File .\scripts\quality\verify-cold-skill-routing-receipt.ps1 -ReceiptPath reports/cold-skill-eval/2026-08-23-cold-routing-p0/receipt.json -AllowLegacyMigration [-OutputPath <同目录 receipt.v2.json>]

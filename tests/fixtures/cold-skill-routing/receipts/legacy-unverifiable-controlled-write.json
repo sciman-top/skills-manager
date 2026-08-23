@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "run_id": "fixture-legacy-unverifiable-controlled-write",
+  "host": "zcode",
+  "scenarios": [
+    {
+      "scenario": "S7",
+      "request_verbatim": "受控写场景：本 run 的全部产出仅写入 reports/cold-skill-eval/2026-08-23-cold-routing-p0/",
+      "host_visible": "not_observable",
+      "implicit_candidate": "not_observable",
+      "cold_discovery_attempted": "not_observable",
+      "candidate_load_validated": "not_observable",
+      "skill_md_loaded": "not_observable",
+      "native_child_started": "not_observable",
+      "child_id_or_reason": "legacy record supplies no controlled-write admission",
+      "execution_contract": "none",
+      "side_effect_authorized": "controlled_write",
+      "writes_or_external_calls": [
+        "reports/cold-skill-eval/2026-08-23-cold-routing-p0/*"
+      ],
+      "truth_boundary": "live_accepted",
+      "live_result_accepted": "pass",
+      "evidence": {
+        "event_ref": "legacy output list without exact write-set admission"
+      }
+    }
+  ]
+}
