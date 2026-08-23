@@ -31,7 +31,7 @@
 - 可由宿主/operator 调度的 skills-only maintenance runner
 - 通过隔离 POC 证明后，向 Hermes 一类外部宿主提供可选、只读优先的 skill consumer contract；该 contract 复用现有 source、package hash、projection receipt 与 rollback 语义，不接管其 runtime
 - 通过 reviewed Git change-set 准入的受控 skill evolution：宿主 AI 可以提出、草拟、测试技能候选；skills-manager 只负责确定性检查、显式准入、受控投影与回滚
-- build、focused tests、contract/invariant checks、risk-triggered full gate；目标态（[HSM-GAT-100/110/120](skills-manager-hardening-implementation-plan.md) 完成后）CI 与本地门禁共用同一 gate profile 分类器（`Resolve-QualityGateProfile`），本地支持 `-Profile auto`，base 缺失、变更集不可读或 non-ignored untracked file 出现时 fail-safe 选择 full
+- build、focused tests、contract/invariant checks、risk-triggered full gate；CI 与本地门禁共用同一 gate profile 分类器（`Resolve-QualityGateProfile`），本地支持 `-Profile auto`，base 缺失、变更集不可读或 non-ignored untracked file 出现时 fail-safe 选择 full。该实现由 [HSM-GAT-100/110/120](skills-manager-hardening-implementation-plan.md) 落地，后续修改必须继续保持分类器单一权威副本
 
 ### 不包含
 
@@ -63,7 +63,7 @@
 - `FR-SKL-004`：本地 override 只进入 `overrides/{custom,patches,resources}`，patch 记录 provenance。
 - `FR-SKL-005`：卸载只撤配置与受管输出，不删除未授权源码或宿主-owned assets。
 - `FR-SKL-006`：`check-updates --json` 只读报告 current/target/changed/source；仓库可提供可重复调用且 fail-closed 的 skills-only maintenance runner，但计划任务的创建、更新、删除、运行账户、触发频率与宿主验收由 host/operator 持有；runner 不同步 MCP、不 push。
-- `FR-SKL-007`（目标态，当前实现仍为 v2）：`skills.json` schema v3 顶层为 allowlist，仅允许 `schema_version`、`sync_mode`、`update_force`、`skill_projection`、`vendors`、`mappings`、`imports`、`targets`、`mcp_servers`、`mcp_profiles`、`mcp_targets`；v3 下未知顶层字段 fail closed。v2 保持只读迁移兼容并仅输出 observation；v2 到 v3 的迁移必须一次性、可回滚并满足迁移/回滚/兼容三件套验证。落地任务见 [加固实施计划](skills-manager-hardening-implementation-plan.md) HSM-CFG-300/310。
+- `FR-SKL-007`（当前实现）：`skills.json` schema v3 顶层为 allowlist，仅允许 `schema_version`、`sync_mode`、`update_force`、`skill_projection`、`vendors`、`mappings`、`imports`、`targets`、`mcp_servers`、`mcp_profiles`、`mcp_targets`；v3 下未知顶层字段 fail closed。v2 保持只读迁移兼容并仅输出 observation；v2 到 v3 的迁移已按一次性、可回滚与迁移/回滚/兼容三件套验证完成。后续 schema 变更仍须遵守 [加固实施计划](skills-manager-hardening-implementation-plan.md) HSM-CFG-300/310 的兼容窗口与回滚合同。
 
 ### 5.2 MCP
 

@@ -37,7 +37,7 @@ function Get-NativeAgentBridgeTemplate($SourcePath, [string]$Name) {
     return $content
 }
 
-function Sync-NativeAgentBridge($Config) {
+function Sync-NativeAgentBridge($Config, $PromotionContext = $null) {
     $bridge = Get-NativeAgentBridgeValue (Get-NativeAgentBridgeValue $Config 'skill_projection') 'native_agent_bridge'
     if ($null -eq $bridge -or -not [bool](Get-NativeAgentBridgeValue $bridge 'enabled')) {
         return [pscustomobject]@{ enabled = $false; persisted = $false; changed_names = @(); receipt_path = ''; truth_boundary = 'not_configured' }
@@ -52,6 +52,12 @@ function Sync-NativeAgentBridge($Config) {
     if (-not [string]::Equals($targetRoot, $expectedTargetRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'native_agent_bridge.target_root must be ~/.codex/agents.' }
     $receiptRoot = Join-Path $Root 'reports\native-agent-bridge'
     if (-not (Test-NativeAgentBridgeWithin $receiptPath $receiptRoot) -or [string]::Equals($receiptPath, [IO.Path]::GetFullPath($receiptRoot), [StringComparison]::OrdinalIgnoreCase)) { throw 'native_agent_bridge.receipt_path must be a file under reports/native-agent-bridge/.' }
+    if (-not $DryRun -and ($null -eq $PromotionContext -or -not [bool](Get-NativeAgentBridgeValue $PromotionContext 'required'))) {
+        throw 'native_agent_bridge host write requires a verified host projection promotion context.'
+    }
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor $sourceRoot $managedRoot
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor $targetRoot ([Environment]::GetFolderPath('UserProfile'))
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path -Parent $receiptPath) $receiptRoot
 
     $names = @((Get-NativeAgentBridgeValue $bridge 'definitions') | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
     if ($names.Count -eq 0) { throw 'native_agent_bridge.definitions must not be empty.' }
@@ -75,12 +81,15 @@ function Sync-NativeAgentBridge($Config) {
     try {
         foreach ($definition in @($planned)) {
             $targetPath = [string]$definition.target_path
-            $existing = if (Test-Path -LiteralPath $targetPath -PathType Leaf) { Get-Content -LiteralPath $targetPath -Raw -Encoding UTF8 } else { $null }
+            $existingItem = if (Test-Path -LiteralPath $targetPath -PathType Leaf) { Get-Item -LiteralPath $targetPath -Force } else { $null }
+            if ($null -ne $existingItem -and ($existingItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw ("native agent target must not be a reparse point: {0}" -f $targetPath) }
+            $existing = if ($null -ne $existingItem) { Get-Content -LiteralPath $targetPath -Raw -Encoding UTF8 } else { $null }
             $before[$targetPath] = $existing
             if ($null -ne $existing -and $existing -notmatch '(?m)^# skills-manager-native-agent-bridge: v1\s*$') { throw ("native agent target is not owned by skills-manager: {0}" -f $targetPath) }
             if ($null -ne $existing -and [string]::Equals($existing, [string]$definition.content, [StringComparison]::Ordinal)) { continue }
             if ($null -ne $existing) {
                 $backupRoot = Join-Path $targetRoot 'skills-manager-backups'
+                Assert-NativeSkillProjectionPathHasNoReparseAncestor $backupRoot $targetRoot
                 if (-not (Test-Path -LiteralPath $backupRoot -PathType Container)) { New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null }
                 $backupPath = Join-Path $backupRoot ('{0}.{1}.toml' -f $definition.name, (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
                 Write-Utf8FileAtomic -Path $backupPath -Content $existing
@@ -89,6 +98,28 @@ function Sync-NativeAgentBridge($Config) {
             Write-Utf8FileAtomic -Path $targetPath -Content ([string]$definition.content)
             $changed.Add([string]$definition.name) | Out-Null
         }
+        $receipt = [ordered]@{
+            schema_version = 1
+            status = 'applied'
+            owner = [string](Get-NativeAgentBridgeValue $bridge 'owner')
+            applied_at = [DateTimeOffset]::UtcNow.ToString('o')
+            source_root = $sourceRoot
+            target_root = $targetRoot
+            source_revision = if ($null -ne $PromotionContext) { [string](Get-NativeAgentBridgeValue $PromotionContext 'source_revision') } else { '' }
+            source_worktree_dirty = if ($null -ne $PromotionContext) { [bool](Get-NativeAgentBridgeValue $PromotionContext 'source_worktree_dirty') } else { $false }
+            source_git_state = if ($null -ne $PromotionContext) { [string](Get-NativeAgentBridgeValue $PromotionContext 'source_git_state') } else { 'not_evaluated_dry_run' }
+            promotion_mode = if ($null -ne $PromotionContext) { [string](Get-NativeAgentBridgeValue $PromotionContext 'promotion_mode') } else { 'dry_run' }
+            changed_names = @($changed.ToArray() | Sort-Object)
+            backup_paths = @($backups.ToArray())
+            definitions = @($planned | ForEach-Object { [ordered]@{ name = $_.name; source_sha256 = $_.source_sha256; target_sha256 = Get-NativeAgentBridgeSha256 $_.target_path } })
+            provider_calls = 0
+            native_mutations = $changed.Count
+            writes = $changed.Count
+            truth_boundary = 'filesystem_projected'
+        }
+        $receiptDirectory = Split-Path -Parent $receiptPath
+        if (-not (Test-Path -LiteralPath $receiptDirectory -PathType Container)) { New-Item -ItemType Directory -Path $receiptDirectory -Force | Out-Null }
+        Write-Utf8FileAtomic -Path $receiptPath -Content ($receipt | ConvertTo-Json -Depth 12)
     }
     catch {
         $failure = $_
@@ -101,26 +132,9 @@ function Sync-NativeAgentBridge($Config) {
             }
             else { Write-Utf8FileAtomic -Path $targetPath -Content ([string]$previous) }
         }
+        foreach ($backupPath in @($backups.ToArray())) { Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue }
         throw $failure
     }
 
-    $receipt = [ordered]@{
-        schema_version = 1
-        status = 'applied'
-        owner = [string](Get-NativeAgentBridgeValue $bridge 'owner')
-        applied_at = [DateTimeOffset]::UtcNow.ToString('o')
-        source_root = $sourceRoot
-        target_root = $targetRoot
-        changed_names = @($changed.ToArray() | Sort-Object)
-        backup_paths = @($backups.ToArray())
-        definitions = @($planned | ForEach-Object { [ordered]@{ name = $_.name; source_sha256 = $_.source_sha256; target_sha256 = Get-NativeAgentBridgeSha256 $_.target_path } })
-        provider_calls = 0
-        native_mutations = $changed.Count
-        writes = $changed.Count
-        truth_boundary = 'filesystem_projected'
-    }
-    $receiptDirectory = Split-Path -Parent $receiptPath
-    if (-not (Test-Path -LiteralPath $receiptDirectory -PathType Container)) { New-Item -ItemType Directory -Path $receiptDirectory -Force | Out-Null }
-    Write-Utf8FileAtomic -Path $receiptPath -Content ($receipt | ConvertTo-Json -Depth 12)
     return [pscustomobject]@{ enabled = $true; persisted = $true; changed_names = @($changed.ToArray() | Sort-Object); receipt_path = $receiptPath; truth_boundary = 'filesystem_projected'; receipt = $receipt }
 }

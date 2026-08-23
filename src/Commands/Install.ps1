@@ -2299,7 +2299,7 @@ function 构建生效(
             }
             if (-not $SkipHostProjection -and @($failures).Count -eq 0) {
                 try {
-                    $bridgeProjection = Sync-NativeAgentBridge $cfg
+                    $bridgeProjection = Sync-NativeAgentBridge $cfg -PromotionContext $promotionContext
                     if ([bool]$bridgeProjection.enabled) {
                         Log ("原生子代理 bridge 已处理：definitions={0}，persisted={1}，truth_boundary={2}" -f (@($bridgeProjection.changed_names) -join ',', [bool]$bridgeProjection.persisted, [string]$bridgeProjection.truth_boundary))
                     }

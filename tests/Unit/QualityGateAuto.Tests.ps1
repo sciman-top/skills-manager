@@ -98,6 +98,7 @@ Describe 'Local quality gate -Profile auto routing' {
             $out = Invoke-TempGate $repo @{ Profile = 'auto'; DiffBase = $base }
             $LASTEXITCODE | Should -Be 0
             ($out | Out-String) | Should -Match 'Local quality gates passed \(docs\)'
+            ($out | Out-String) | Should -Match 'Gate diff-check elapsed=\d+\.\d{3}s'
         }
         finally { Pop-Location }
     }

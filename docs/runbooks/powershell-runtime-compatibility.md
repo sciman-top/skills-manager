@@ -42,7 +42,7 @@ The official migration guidance remains useful for users who need to move other 
 - CI and Azure Pipelines use `pwsh` only. There is no Windows PowerShell job or bounded 5.1 smoke.
 - The generated bundle keeps a deterministic UTF-8 BOM for Windows file detection. This is a release-encoding choice, not a 5.1 compatibility promise.
 - Pester fixtures and contract tests execute under PowerShell 7; tests must not silently skip because `powershell.exe` is absent.
-- PowerShell remains the current CLI/host adapter truth. The typed-core PoC remains shadow-only and does not expand this runtime decision into a production rewrite.
+- PowerShell remains the current CLI/host adapter truth. The typed-core shadow PoC was retired and is not part of the supported runtime or a production rewrite; any future reintroduction requires a separate evidence-backed product decision.
 
 ## Rollback and support handling
 

@@ -16,9 +16,16 @@ $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 
 function Invoke-QualityGate([string]$Name, [scriptblock]$Action) {
     Write-Host ("== {0} ==" -f $Name)
+    $stopwatch = [Diagnostics.Stopwatch]::StartNew()
     $global:LASTEXITCODE = 0
-    & $Action
-    if ($LASTEXITCODE -ne 0) { throw ("Quality gate failed: {0} (exit={1})" -f $Name, $LASTEXITCODE) }
+    try {
+        & $Action
+        if ($LASTEXITCODE -ne 0) { throw ("Quality gate failed: {0} (exit={1})" -f $Name, $LASTEXITCODE) }
+    }
+    finally {
+        $stopwatch.Stop()
+        Write-Host ("Gate {0} elapsed={1:N3}s" -f $Name, $stopwatch.Elapsed.TotalSeconds)
+    }
 }
 
 function Assert-HostSchedulerOwnershipContract {

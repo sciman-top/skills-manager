@@ -17,14 +17,14 @@
 | HSM-GAT-110 | P1 | HSM-GAT-100 合并 | GAT-100 | `run-local-quality-gates.ps1` 增加 `-Profile auto` | maintainer + AI | scripts/quality + tests/Unit + README + AGENTS.md |
 | HSM-GAT-120 | P1 | HSM-GAT-100 合并 | GAT-100（可与 110 并行） | `ci.yml` 改用共享分类器并迁移 `CiWorkflow.Tests.ps1` 断言 | maintainer + AI | .github/workflows + tests/Unit |
 | HSM-GRD-200 | P1 | 当前宿主授权 | 无 | 单宿主静态 guard 能力 POC（observe-only，不改 WatchRuntime） | operator + AI | 宿主观察 + ignored reports |
-| HSM-CFG-300 | P2 | 仓库授权 | 无 | `skills.json` schema v3 顶层 allowlist 支持（observe 模式，配置仍为 v2） | maintainer + AI | src/Config.ps1 + config/skills.schema.json + tests/fixtures |
+| HSM-CFG-300 | P2 | 仓库授权 | 无 | `skills.json` schema v3 顶层 allowlist 支持（observe 模式；迁移前配置为 v2） | maintainer + AI | src/Config.ps1 + config/skills.schema.json + tests/fixtures |
 | HSM-CFG-310 | P2 | HSM-CFG-300 合并 + 用户确认 | CFG-300 | `skills.json` 迁移到 v3（enforce）+ 一次 full gate | maintainer + user 确认 | skills.json + tests |
 | HSM-RUL-400 | P2 | 用户授权（规则投影） | 无 | 全局规则减法实验（代表性任务复测，无行数硬指标） | user + AI | rules/global + host projection（显式授权） |
 | HSM-CLN-500 | P3 | 只读 | 无 | 工作区 ownership inventory（只产出清单，不删除） | AI | ignored reports 一份清单 |
 | HSM-CLN-510 | P3 | HSM-CLN-500 + 逐项人工确认 | CLN-500 | 逐项清理：`_commit_repo`、build.log、`.worktrees`、空 docs 树、`.gitignore` stale 条目等 | user 逐项 | 磁盘目录 + `.gitignore`（tracked） |
 | HSM-PRJ-600 | P3 | 用户确认 pdf 工作流 | 无 | 条件任务：codex profile 排除 standalone `pdf`（仅当原生 PDF 插件满足工作流） | user + AI | skills.json + tests |
 
-typed-core 不设删除任务卡：`docs/runbooks/powershell-runtime-compatibility.md` 已登记其为 shadow-only PoC，是否保留属 owner 决策；若 CLN-500 inventory 后 owner 决定退役，再按该 runbook 同步删除登记句（docs gate）。
+typed-core shadow PoC 已退役，当前不在 runtime、build 或支持边界内；runbook 保留退役事实。不得因本计划重新引入 typed shadow 双实现。
 
 ## 3. 原子任务卡
 
@@ -80,7 +80,7 @@ param(
 - **分类正则（唯一权威副本迁入本脚本，逐字保留 CI 现值）**：
 
 ```powershell
-$riskPath     = '^(tests/E2E/|rules/|overrides/|vendor/|imports/|\.github/workflows/|scripts/(quality/|release/|hooks/|verify-)|build\.ps1$|install\.ps1$|skills\.json$|skills\.lock\.json$|audit-targets\.json$)'
+  $riskPath     = '^(tests/E2E/|rules/|overrides/|vendor/|imports/|\.github/workflows/|scripts/(quality/|release/|hooks/|verify-)|config/(skills\.schema\.json|skill-dependency-closure\.json)$|(?:AGENTS|CLAUDE|GEMINI)\.md$|build\.ps1$|install\.ps1$|skills\.json$|skills\.lock\.json$|audit-targets\.json$)'
 $sourcePath   = '^(src/|tests/Unit/)'
 $docsOnlyPath = '^(README(?:\.zh-CN|\.en)?\.md$|CONTRIBUTING\.md$|docs/.*\.md$)'
 $fixedFocusedTests = @(
@@ -91,7 +91,7 @@ $fixedFocusedTests = @(
 )
 ```
 
-- **测试用例（Pester，fixture 为 temp git repo：init -b main、config user、提交含 README.md/src/Core.ps1/tests/Unit/Core.Tests.ps1/skills.json/scripts/quality/x.ps1 的基线提交，每个 It 基于独立 temp repo 修改后以显式 `-BaseSha <基线>` 调用）**：矩阵 #1–#10 各一例；新增 non-ignored untracked `src/New.ps1` 与 `docs/new.md` 均应选 full；focused 组成断言（改 `tests/Unit/Foo.Tests.ps1` → 结果含 Foo + 4 固定项且无重复）；`-Mode ci` 与 `-Mode local` 的 diff 语义各一例（ci 不含未提交变更、local 含）；脚本内容自检（`riskPath` 正则与上述字面量一致，防止漂移）。
+- **测试用例（Pester，fixture 为 temp git repo：init -b main、config user、提交含 README.md/src/Core.ps1/tests/Unit/Core.Tests.ps1/skills.json/scripts/quality/x.ps1、根级 AGENTS/CLAUDE/GEMINI.md 与两个 config contract 文件的基线提交，每个 It 基于独立 temp repo 修改后以显式 `-BaseSha <基线>` 调用）**：矩阵 #1–#10 各一例；新增 non-ignored untracked `src/New.ps1` 与 `docs/new.md` 均应选 full；focused 组成断言（改 `tests/Unit/Foo.Tests.ps1` → 结果含 Foo + 4 固定项且无重复）；`-Mode ci` 与 `-Mode local` 的 diff 语义各一例（ci 不含未提交变更、local 含）；脚本内容自检（`riskPath` 正则与上述字面量一致，防止漂移）。
 - **Out-of-scope assets**：不改 `.github/workflows/ci.yml`、`run-local-quality-gates.ps1`、`src/`（不进 bundle）、既有测试。
 - **Minimum verification**：`build.ps1`（确认无生成漂移）+ `tests/run.ps1 -TestPath tests/Unit/ResolveGateProfile.Tests.ps1` + `git diff --check`。
 - **Stop condition**：需要 fetch 才能工作、需要读写状态、或与 CI 现行为出现语义差异（矩阵 #4 CI 现状即 quick，保持）。CI 模式不得扫描本地 untracked files；其任务提交内容已由 `<base>..<head>` 定义。
@@ -102,7 +102,7 @@ $fixedFocusedTests = @(
 ### HSM-GAT-110：本地门禁 `-Profile auto`
 
 - **Goal**：日常收口压缩为单命令，模型不再选择档位。
-- **Current evidence**：`run-local-quality-gates.ps1` param `-Profile` ValidateSet 为 `docs/quick/focused/full`；focused 强制要求 `-TestPath`/`-TestName`；已有 `-DiffBase` 参数未被 auto 语义复用。
+- **Current evidence**：`run-local-quality-gates.ps1` 已支持 `-Profile auto`，复用 GAT-100 的本地 resolver 结果；docs/focused/full 路由保持原语义，且每个 gate 仅向控制台输出 elapsed，不新增 receipt 或 telemetry 状态。
 - **Exact write set**：`scripts/quality/run-local-quality-gates.ps1`；`tests/Unit/` 对应测试（若无 gate 脚本专属测试文件则新增 `tests/Unit/QualityGateAuto.Tests.ps1`）；`README.md` "开发与验证"节新增一行 auto 用法；`AGENTS.md` C 节"最低门禁"新增一行 auto 入口。
 - **行为契约**：ValidateSet 增加 `'auto'`；auto 时调用 GAT-100 脚本（`-BaseSha $DiffBase`，空则脚本自推导，`-Mode local`），输出一行 `Gate profile auto -> {profile} (reason={reason}, base={base_sha})` 后按解析结果路由到既有 docs/focused（TestPath 由 `focused_test_paths` 供给，绕过 focused 的参数强制检查）/quick/full 分支；解析为 docs 时不得把 resolver 推导出的 base 传给 docs gate，必须保留 `DiffBase=''` 以运行 `git diff --check` 检查当前工作区。CI 的显式 `docs -DiffBase <base>` 行为不变；显式传参路径行为不变。
 - **README 行（建议文案）**：`pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile auto` — 按可解析基线与当前工作区（含 non-ignored untracked files）自动选档，无法判定时 fail-safe 选 full。
@@ -117,7 +117,7 @@ $fixedFocusedTests = @(
 ### HSM-GAT-120：CI 接入共享分类器
 
 - **Goal**：CI 与本地唯一分类器副本；删除 CI 内联正则。
-- **Current evidence**：`ci.yml` 步骤 "Select proportional quality gate profile" 内联分类；`tests/Unit/CiWorkflow.Tests.ps1` 以正则断言 ci.yml 内容（含从 ci.yml 提取 `$riskPath` 字面量并做路径命中测试）。
+- **Current evidence**：`ci.yml` 已调用共享 `scripts/quality/resolve-gate-profile.ps1`；历史内联分类及其路径断言已迁移到 resolver 内容/行为测试，避免 CI 与本地出现第二份正则。
 - **Exact write set**：`.github/workflows/ci.yml`（仅该步骤 body）；`tests/Unit/CiWorkflow.Tests.ps1`。
 - **行为契约**：保留 tag/push → full 短路、PR/push-before 的 baseSha 解析与 `git cat-file -e`/`fetch --depth=1` 前奏（fetch 留 CI）；随后以 `& .\scripts\quality\resolve-gate-profile.ps1 -BaseSha $baseSha -Mode ci -Json | ConvertFrom-Json` 取代内联分类；env 变量名与后续 step 消费方式不变（`CI_GATE_PROFILE`/`CI_DIFF_BASE_SHA`/`CI_FOCUSED_TEST_PATHS`）。
 - **CiWorkflow.Tests.ps1 断言迁移清单**：删除对 ci.yml 内 `$riskPath = '...'`、`git diff --name-only \$baseSha HEAD`、`docsOnly` 内联的断言；新增对 ci.yml 的"调用 resolve-gate-profile.ps1 且仅一次"断言；将 `$riskPath` 提取与路径命中/不命中两组断言迁至读取 `scripts/quality/resolve-gate-profile.ps1` 内容（`tests/Unit/CiWorkflow.Tests.ps1` 与 `ResolveGateProfile.Tests.ps1` 各自侧重点：前者保供应链契约，后者保行为矩阵）；`run-local-quality-gates\.ps1 @gateArgs` 与唯一调用次数断言保留。
@@ -131,8 +131,8 @@ $fixedFocusedTests = @(
 ### HSM-GRD-200：单宿主静态 guard 能力 POC（observe-only）
 
 - **Goal**：验证"会话内、调用前、静态路径规则阻断"在本机 Codex 的真实覆盖面与误杀率，为是否 enforce 提供证据；不构建通用 hook 平台。
-- **Current evidence**：本机 `~/.codex/config.toml` 已有 trusted+enabled 的用户级 `pre_tool_use` hook 与 `codex-watch-runtime` 插件 hook；当前 `codex --help` 也暴露 hook trust 旁路参数，故只能证明 hook 能力已启用，不能证明新 guard 的配置格式、工具覆盖或执行次序。其载荷属 WatchRuntime 最小权限控制面，不可改写或复用其受信逻辑。
-- **待验证问题（即验收清单）**：Q1 `apply_patch`、shell、code-mode 嵌套调用是否都被 pre_tool_use 路径覆盖；Q2 `skills.ps1`/`agent/` 的合法构建写入路径如何与"手改生成物"区分（放行规则）；Q3 静态规则候选（仅两类：生成物直改、`git push`）的精确匹配与例外，验证"新增治理文件"类规则误杀率后再考虑；Q4 fresh session 的实际执行证据（非仅有 hook 定义与 trust hash）。
+- **Current evidence**：`reports/host-guard-poc/2026-08-23/observations.md` 记录了单宿主 observe-only 条目的可行性与常驻部署；原 WatchRuntime 条目保持不变。Q1（shell/apply_patch 覆盖）与 Q4（两次 fresh exec）已有证据，但探针使用显式 trust-bypass，不能证明默认 trusted path；Q2/Q3 仍主要是设计层结论，未据此实施 enforce。
+- **待验证问题（剩余验收清单）**：默认 trusted path 是否加载新条目；生成物直改与合法 build 路径的静态正反例误杀率；是否出现真实 observe 命中。满足这些条件前不升级 enforce。
 - **Preflight**：先只读确认当前 Codex 版本、hook 配置的实际载体与 runner 语义，并以 `codex --strict-config --version` 记录 mutation 前后均可解析；若无法从当前 help 与现有受信 hook 精确确定新增 hook 的 script/config 路径，记录 `platform_na` 并结束，不猜测配置形状。
 - **Exact write set**：经当前授权后，仅允许在 preflight 已命名的独立 POC hook script、其唯一配置条目、仅供本卡回滚的同目录备份，以及 ignored `reports/host-guard-poc/<run-id>/observations.md` 写入；不得触碰既有 WatchRuntime hook 条目或其 trusted hash。报告只记录 redacted 配置语义、文件 hash、coverage 矩阵和误杀结论，不复制 config 内容、命令参数、环境变量或会话数据。
 - **Out-of-scope assets**：不改 WatchRuntime hook、不实施 enforce、不做动态 write-set（需会话状态系统，明确不做）、不做跨宿主推广。
@@ -201,7 +201,7 @@ $fixedFocusedTests = @(
 | `docs/{archive,change-evidence,governance,plans,research,superpowers}` | `rg -n 'docs/(archive|change-evidence|governance|plans|research|superpowers)' src scripts build.ps1 .github .gitignore` | 6 个零文件目录树；注意 `.gitignore` 的 `/docs/governance/merge-report.md` 为 stale 关联 |
 | `.gitignore` stale 条目 | `git check-ignore -v AGENTS.md CLAUDE.md GEMINI.md` | 三文件 tracked，ignore 无效且误导 |
 
-- **Out-of-scope assets**：`typed-core/`（runbook 登记，owner 决策）、`.txn/`（`src/Commands/Install.ps1:1881` 引用，不属清理）、`vendor/`、`imports/`、`agent/`、`reports/`。
+- **Out-of-scope assets**：`.txn/`（`src/Commands/Install.ps1:1881` 引用，不属清理）、`vendor/`、`imports/`、`agent/`、`reports/`。
 - **Minimum verification**：清单覆盖表中全部候选且每项有命令输出引用。
 - **Stop condition**：任何命令需要写操作或网络。
 - **Rollback**：无（只读）。
@@ -257,5 +257,5 @@ $fixedFocusedTests = @(
 - 不做动态 write-set hook（需要会话身份/授权/生命周期状态，等于第二治理系统）；"新增治理文件"静态规则在 GRD-200 证明误杀率前不实施；push 阻断优先由宿主审批与远端保护承担。
 - 规则减法不设行数 KPI（如 ≤60 行）、不做"一进一出"形式规则；以代表性任务复测为准。
 - 非交互终端（TERM=dumb）下 `codex doctor` 的 fail 不修（非本仓产品故障）。
-- `.txn/` 不清理（`src/Commands/Install.ps1:1881` 活引用）；`typed-core/` 不设删除卡（runbook 登记的 shadow-only PoC，退役由 owner 决策并同步该 runbook）。
+- `.txn/` 不清理（`src/Commands/Install.ps1:1881` 活引用）；typed-core 已退役，不得重新引入 shadow 双实现。
 - LOC 统计不作为任何裁剪决定依据（已知陷阱：物理行 vs 非空行两种计数语义在同 HEAD 可产生 6%–14% 差异；任何数字主张必须附 exact glob、计数语义与 commit SHA）。

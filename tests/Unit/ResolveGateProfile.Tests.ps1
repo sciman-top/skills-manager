@@ -12,7 +12,7 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
             if ($LASTEXITCODE -ne 0) { throw "git init failed for fixture" }
             & git -C $dir config user.email 'fixture@example.invalid'
             & git -C $dir config user.name 'Fixture'
-            New-Item -ItemType Directory -Path (Join-Path $dir 'docs'), (Join-Path $dir 'src'), (Join-Path $dir 'tests\Unit'), (Join-Path $dir 'scripts\quality') | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $dir 'docs'), (Join-Path $dir 'src'), (Join-Path $dir 'tests\Unit'), (Join-Path $dir 'scripts\quality'), (Join-Path $dir 'config') | Out-Null
             Set-Content -LiteralPath (Join-Path $dir 'README.md') -Value '# fixture'
             Set-Content -LiteralPath (Join-Path $dir 'docs\x.md') -Value 'doc'
             Set-Content -LiteralPath (Join-Path $dir 'src\Core.ps1') -Value '# source'
@@ -20,6 +20,11 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
             Set-Content -LiteralPath (Join-Path $dir 'skills.json') -Value '{}'
             Set-Content -LiteralPath (Join-Path $dir 'scripts\quality\x.ps1') -Value '# q'
             Set-Content -LiteralPath (Join-Path $dir 'scripts\weekly-skills-update.ps1') -Value '# w'
+            Set-Content -LiteralPath (Join-Path $dir 'AGENTS.md') -Value '# agents'
+            Set-Content -LiteralPath (Join-Path $dir 'CLAUDE.md') -Value '# claude'
+            Set-Content -LiteralPath (Join-Path $dir 'GEMINI.md') -Value '# gemini'
+            Set-Content -LiteralPath (Join-Path $dir 'config\skills.schema.json') -Value '{}'
+            Set-Content -LiteralPath (Join-Path $dir 'config\skill-dependency-closure.json') -Value '{}'
             & git -C $dir add -A
             & git -C $dir commit -m baseline *> $null
             if ($LASTEXITCODE -ne 0) { throw "fixture commit failed" }
@@ -74,6 +79,23 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
         $r = Invoke-Resolver $repo @{ BaseSha = $base }
         $r.result.profile | Should -Be 'full'
         $r.result.reason | Should -Be 'risk_path'
+    }
+
+    It 'classifies governance and integrity contract changes as full' {
+        foreach ($relativePath in @(
+            'AGENTS.md',
+            'CLAUDE.md',
+            'GEMINI.md',
+            'config/skills.schema.json',
+            'config/skill-dependency-closure.json'
+        )) {
+            $repo = New-ResolveGateFixture
+            $base = (& git -C $repo rev-parse HEAD).Trim()
+            Add-Content -LiteralPath (Join-Path $repo ($relativePath -replace '/', '\\')) -Value '# touched'
+            $r = Invoke-Resolver $repo @{ BaseSha = $base }
+            $r.result.profile | Should -Be 'full'
+            $r.result.reason | Should -Be 'risk_path'
+        }
     }
 
     It 'classifies src changes as focused with the fixed smoke tests' {
@@ -193,7 +215,7 @@ Describe 'Resolve-QualityGateProfile shared classifier' {
 
     It 'keeps the canonical classification regexes verbatim in the script' {
         $content = Get-Content -LiteralPath $script:resolverPath -Raw
-        $content | Should -Match ([regex]::Escape('^(tests/E2E/|rules/|overrides/|vendor/|imports/|\.github/workflows/|scripts/(quality/|release/|hooks/|verify-)|build\.ps1$|install\.ps1$|skills\.json$|skills\.lock\.json$|audit-targets\.json$)'))
+        $content | Should -Match ([regex]::Escape('^(tests/E2E/|rules/|overrides/|vendor/|imports/|\.github/workflows/|scripts/(quality/|release/|hooks/|verify-)|config/(skills\.schema\.json|skill-dependency-closure\.json)$|(?:AGENTS|CLAUDE|GEMINI)\.md$|build\.ps1$|install\.ps1$|skills\.json$|skills\.lock\.json$|audit-targets\.json$)'))
         $content | Should -Match ([regex]::Escape('^(src/|tests/Unit/)'))
         $content | Should -Match ([regex]::Escape('^(README(?:\.zh-CN|\.en)?\.md$|CONTRIBUTING\.md$|docs/.*\.md$)'))
         $content | Should -Match ([regex]::Escape('tests/Unit/CiWorkflow.Tests.ps1'))

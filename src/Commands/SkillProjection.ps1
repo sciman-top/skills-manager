@@ -236,6 +236,11 @@ function Test-ConfiguredHostProjection($cfg) {
         $nativeTarget = Resolve-SkillProjectionPath ([string]$projectionCfg.native_projection.target_root)
         if (-not [string]::IsNullOrWhiteSpace($nativeTarget) -and -not (Is-PathInsideOrEqual $nativeTarget $repoRoot)) { return $true }
     }
+    if ($projectionCfg.PSObject.Properties.Match("native_agent_bridge").Count -gt 0 -and $null -ne $projectionCfg.native_agent_bridge -and
+        $projectionCfg.native_agent_bridge.PSObject.Properties.Match("target_root").Count -gt 0) {
+        $nativeAgentTarget = Resolve-SkillProjectionPath ([string]$projectionCfg.native_agent_bridge.target_root)
+        if (-not [string]::IsNullOrWhiteSpace($nativeAgentTarget) -and -not (Is-PathInsideOrEqual $nativeAgentTarget $repoRoot)) { return $true }
+    }
     return $false
 }
 
