@@ -26,9 +26,6 @@ acl-backup-git-*.txt
 /imports/**/.venv/
 /imports/**/nohup.out
 /imports/**/.skills-manager-source.json
-/AGENTS.md
-/CLAUDE.md
-/GEMINI.md
 /.gitmessage.txt
 /.tmp_*
 
@@ -40,7 +37,6 @@ acl-backup-git-*.txt
 /imports/*.zip
 
 # ad hoc governance outputs
-/docs/governance/merge-report.md
 /scripts/governance/
 
 # Git worktrees (local fallback)
