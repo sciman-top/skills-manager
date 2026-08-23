@@ -1,0 +1,39 @@
+{
+  "schema_version": 2,
+  "run_id": "fixture-valid-live",
+  "scenario_id": "S01-explicit",
+  "request_verbatim": "请用 $grill-with-docs，结合相关官方和项目文档，逐轮审问这个方案。一次只问一个答案会改变方案的决策问题，不改文件。",
+  "expected": {
+    "route_class": "cold_candidate",
+    "cold_discovery": "required",
+    "execution_contract": "multi_turn_user_decision",
+    "native_child": "required"
+  },
+  "observed": {
+    "host_visible": "not_visible",
+    "cold_discovery": "observed",
+    "candidate_load_validation": "observed",
+    "skill_md_loading": "observed",
+    "native_child": "awaiting_user_answer",
+    "child_id_or_reason": "codex-child-7f3a",
+    "execution_surface": "codex",
+    "effective_execution_contract": {
+      "mode": "multi_turn_user_decision",
+      "native_agent": "design-griller",
+      "conversation_owner": "parent",
+      "stop_condition": "one_question_then_wait"
+    },
+    "model": "gpt-5.6-terra",
+    "model_reasoning_effort": "high",
+    "writes_or_external_calls": []
+  },
+  "assertion": {
+    "status": "pass",
+    "achieved_boundary": "host_specific_live_accepted",
+    "evidence_refs": [
+      "router: fixture candidate/closure/hash/contract validation receipt",
+      "child: codex-child-7f3a lifecycle event awaiting_user_answer after one decision question",
+      "host: codex session resolved template model gpt-5.6-terra effort high"
+    ]
+  }
+}

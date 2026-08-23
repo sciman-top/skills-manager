@@ -1,0 +1,27 @@
+{
+  "schema_version": 2,
+  "run_id": "fixture-invalid-scenario-unknown",
+  "scenario_id": "S99-bogus",
+  "request_verbatim": "这条请求不属于 tracked scenario matrix 的任何来源组。",
+  "expected": {
+    "route_class": "cold_candidate",
+    "cold_discovery": "conditional",
+    "execution_contract": "none",
+    "native_child": "conditional"
+  },
+  "observed": {
+    "host_visible": "not_visible",
+    "cold_discovery": "not_observed",
+    "candidate_load_validation": "not_observed",
+    "skill_md_loading": "not_observable",
+    "native_child": "not_observable",
+    "writes_or_external_calls": []
+  },
+  "assertion": {
+    "status": "not_observable",
+    "achieved_boundary": "repo_verified",
+    "evidence_refs": [
+      "fixture: synthetic unknown-scenario receipt"
+    ]
+  }
+}

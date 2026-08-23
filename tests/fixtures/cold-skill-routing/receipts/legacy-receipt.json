@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "run_id": "2026-08-23-cold-routing-p0-fixture",
+  "executed_at": "2026-08-23T21:49:31+08:00",
+  "host": "zcode",
+  "source_revision": "6e5e390d719e34f76ca2631a109507c06160e405",
+  "projection": {
+    "zcode_native_receipt": "reports/skill-projection/zcode-native-receipt.json (applied 2026-08-23 21:47:09, plan nsp-9de9b5b70c3f4394)",
+    "bridge_receipt": "reports/native-agent-bridge/current.json (applied 2026-08-23 21:47:14, rev 6e5e390d)",
+    "truth_boundary": "filesystem_projected"
+  },
+  "host_boundary_note": "native_agent_bridge 仅投影 ~/.codex/agents（Codex）。ZCode 无自定义原生子代理机制，native_child_started 一律 not_observable，conversation_owner=parent 的契约由父任务代行。",
+  "scenarios": [
+    {
+      "scenario": "S1",
+      "request_verbatim": "$grill-me 帮我审问 reports/cold-skill-eval/2026-08-23-cold-routing-p0/fixture-design-doc.md 这个方案",
+      "host_visible": "pass",
+      "implicit_candidate": "not_observable",
+      "cold_discovery_attempted": "pass",
+      "candidate_load_validated": "not_observable",
+      "skill_md_loaded": "not_observable",
+      "native_child_started": "not_observable",
+      "child_id_or_reason": "可见技能直用，无 child；本链交互腿由 S2 以冷路径覆盖",
+      "execution_contract": "visible/grill-me",
+      "side_effect_authorized": "none",
+      "writes_or_external_calls": [],
+      "truth_boundary": "host_loaded",
+      "live_result_accepted": "pass",
+      "evidence": { "event_ref": "本会话可用技能清单含 grill-me（宿主系统上下文）；无 router 事件", "observed_at": "2026-08-23T21:20:00+08:00", "output_sha256": null }
+    },
+    {
+      "scenario": "S2",
+      "request_verbatim": "用 grill-with-docs 技能，基于 reports/cold-skill-eval/2026-08-23-cold-routing-p0/fixture-design-doc.md 每轮一题审问",
+      "host_visible": "pass",
+      "implicit_candidate": "not_observable",
+      "cold_discovery_attempted": "pass",
+      "candidate_load_validated": "pass",
+      "skill_md_loaded": "pass",
+      "native_child_started": "not_observable",
+      "child_id_or_reason": "ZCode 无原生子代理机制；契约 conversation_owner=parent，父任务代行 design-griller 一题一轮",
+      "execution_contract": "multi_turn_user_decision/design-griller",
+      "side_effect_authorized": "none",
+      "writes_or_external_calls": [],
+      "truth_boundary": "live_accepted",
+      "live_result_accepted": "pass",
+      "evidence": { "event_ref": "s2-explicit-grill-with-docs.json；闭包 3 个 SKILL.md 已按 validation 只读加载；一题已转达并停等用户作答", "observed_at": "2026-08-23T21:49:31+08:00", "output_sha256": "ec2e64924ac68e05" }
+    },
+    {
+      "scenario": "S3",
+      "request_verbatim": "用 domain-modeling 技能只读审视 reports/cold-skill-eval/2026-08-23-cold-routing-p0/fixture-order-model.md 的领域模型",
+      "host_visible": "pass",
+      "implicit_candidate": "not_observable",
+      "cold_discovery_attempted": "pass",
+      "candidate_load_validated": "pass",
+      "skill_md_loaded": "pass",
+      "native_child_started": "not_observable",
+      "child_id_or_reason": "ZCode 无原生子代理机制；read_only admission 由父任务代行有界只读执行",
+      "execution_contract": "one_shot/cold-capability-runner",
+      "side_effect_authorized": "read_only",
+      "writes_or_external_calls": [],
+      "truth_boundary": "live_accepted",
+      "live_result_accepted": "pass",
+      "evidence": { "event_ref": "s3-explicit-domain-modeling.json + s3-readonly-review.md（无任何写入）", "observed_at": "2026-08-23T21:48:00+08:00", "output_sha256": "145a2b00ced319ae" }
+    }
+  ]
+}

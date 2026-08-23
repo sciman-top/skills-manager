@@ -1,0 +1,27 @@
+{
+  "schema_version": 2,
+  "run_id": "fixture-invalid-verbatim-mismatch",
+  "scenario_id": "S05-explicit",
+  "request_verbatim": "请用 $research 查一下资料，核实这个方案的能力边界（被改写的请求，不是矩阵原文）。",
+  "expected": {
+    "route_class": "visible_direct",
+    "cold_discovery": "forbidden",
+    "execution_contract": "none",
+    "native_child": "conditional"
+  },
+  "observed": {
+    "host_visible": "visible",
+    "cold_discovery": "not_observed",
+    "candidate_load_validation": "not_observed",
+    "skill_md_loading": "not_observable",
+    "native_child": "not_started",
+    "writes_or_external_calls": []
+  },
+  "assertion": {
+    "status": "pass",
+    "achieved_boundary": "host_loaded",
+    "evidence_refs": [
+      "host: fixture visible research direct event"
+    ]
+  }
+}

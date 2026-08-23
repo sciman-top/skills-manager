@@ -138,6 +138,16 @@ P0 是最小链路，不是 29 组场景的全量 live execution。每个场景�
 - 仅 router output 就将 skill_md_loading 记 observed。
 - ZCode parent-mediated 结果写 host_specific_live_accepted。
 
+### 4.1 Evidence 来源标签与 verifier
+
+每条 `assertion.evidence_refs` 必须带来源前缀 `router:`、`host:`、`child:`、`filesystem:` 或 `fixture:`。verifier 据此机械化区分证据层：router 事件永远不能写成 SKILL.md 加载或 native child 证据；`skill_md_loading=observed` 与 native child lifecycle 状态必须有 `host:`/`child:` 引用。
+
+本仓提供确定性 verifier：
+
+    pwsh -NoProfile -File .\scripts\quality\verify-cold-skill-routing-receipt.ps1 -ReceiptPath <receipt.v2.json> [-ScenarioMatrixPath <matrix.json>]
+
+非零退出时逐条输出稳定 finding code（`E001_SCHEMA_INVALID` … `E019_LEGACY_SCHEMA_REQUIRES_MIGRATION`，见脚本注释）。矩阵交叉核对包含 scenario id 存在性与 `request_verbatim` 逐字一致；verifier 常规模式只读。
+
 ## 5. Legacy receipt migration
 
 旧格式 receipt 保留为证据原件，尤其是 reports/cold-skill-eval/2026-08-23-cold-routing-p0/receipt.json。迁移必须创建同目录 receipt.v2.json，且不更改旧文件字节。
@@ -149,6 +159,12 @@ P0 是最小链路，不是 29 组场景的全量 live execution。每个场景�
 3. native child、SKILL.md loading、child id、model/effort 或 same-child continuity 未记录时，一律 not_observable。
 4. 若 legacy run 的 host 是 ZCode，native_child 写 not_supported 或 not_observable；assertion 最高为 candidate_load_validated 或 parent-mediated observation。
 5. 运行 receipt verifier。verifier 不允许迁移输出因“历史结论为 pass”而获得 live acceptance。
+
+迁移由 verifier 执行（原件只读，输出为新文件）：
+
+    pwsh -NoProfile -File .\scripts\quality\verify-cold-skill-routing-receipt.ps1 -ReceiptPath reports/cold-skill-eval/2026-08-23-cold-routing-p0/receipt.json -AllowLegacyMigration [-OutputPath <同目录 receipt.v2.json>]
+
+未带 `-AllowLegacyMigration` 时 legacy receipt 以 `E019` fail closed；`-OutputPath` 指向原件时以 `E017` 拒绝。迁移记录统一受 `E016` 约束：不得出现 lifecycle 状态、observed 加载或 live acceptance。
 
 迁移输出示例：
 

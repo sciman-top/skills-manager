@@ -1,0 +1,28 @@
+{
+  "schema_version": 2,
+  "run_id": "fixture-invalid-target-bound",
+  "scenario_id": "S16-explicit",
+  "request_verbatim": "请用 $spreadsheets:excel-live-control 操作当前打开的 Excel 工作簿，只修改我指定的工作表和单元格，完成后报告实际写入范围。",
+  "expected": {
+    "route_class": "target_bound",
+    "cold_discovery": "forbidden",
+    "execution_contract": "none",
+    "native_child": "conditional"
+  },
+  "observed": {
+    "host_visible": "not_visible",
+    "cold_discovery": "not_observed",
+    "candidate_load_validation": "not_observed",
+    "skill_md_loading": "not_observable",
+    "native_child": "not_started",
+    "target_object_present": "absent",
+    "writes_or_external_calls": []
+  },
+  "assertion": {
+    "status": "pass",
+    "achieved_boundary": "candidate_discovery_only",
+    "evidence_refs": [
+      "host: fixture session had no open Excel workbook"
+    ]
+  }
+}

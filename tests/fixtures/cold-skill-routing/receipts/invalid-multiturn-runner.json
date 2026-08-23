@@ -1,0 +1,38 @@
+{
+  "schema_version": 2,
+  "run_id": "fixture-invalid-multiturn-runner",
+  "scenario_id": "S01-explicit",
+  "request_verbatim": "请用 $grill-with-docs，结合相关官方和项目文档，逐轮审问这个方案。一次只问一个答案会改变方案的决策问题，不改文件。",
+  "expected": {
+    "route_class": "cold_candidate",
+    "cold_discovery": "required",
+    "execution_contract": "multi_turn_user_decision",
+    "native_child": "conditional"
+  },
+  "observed": {
+    "host_visible": "not_visible",
+    "cold_discovery": "observed",
+    "candidate_load_validation": "observed",
+    "skill_md_loading": "observed",
+    "native_child": "completed",
+    "child_id_or_reason": "codex-child-runner-01",
+    "execution_surface": "codex",
+    "effective_execution_contract": {
+      "mode": "multi_turn_user_decision",
+      "native_agent": "cold-capability-runner",
+      "conversation_owner": "runner",
+      "stop_condition": "parent_contract"
+    },
+    "model": "gpt-5.6-terra",
+    "model_reasoning_effort": "high",
+    "writes_or_external_calls": []
+  },
+  "assertion": {
+    "status": "pass",
+    "achieved_boundary": "candidate_load_validated",
+    "evidence_refs": [
+      "router: fixture candidate/closure/hash/contract validation receipt",
+      "child: codex-child-runner-01 completed with a one-shot summary of the interview"
+    ]
+  }
+}

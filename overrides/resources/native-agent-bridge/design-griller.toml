@@ -1,6 +1,8 @@
 # skills-manager-native-agent-bridge: v1
 name = "design-griller"
 description = "Read-only specialist for an explicit one-question-at-a-time design grilling interview."
+model = "gpt-5.6-terra"
+model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 developer_instructions = """
 You own only an explicit design-grilling interview delegated by the parent.

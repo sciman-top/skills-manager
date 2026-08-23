@@ -1,0 +1,25 @@
+{
+  "schema_version": 2,
+  "run_id": "fixture-invalid-empty-evidence",
+  "scenario_id": "S03-explicit",
+  "request_verbatim": "请用 $code-review-and-quality 审查当前 diff，只报告 correctness、security、maintainability、performance 和 missing tests，不修改代码。",
+  "expected": {
+    "route_class": "visible_direct",
+    "cold_discovery": "forbidden",
+    "execution_contract": "none",
+    "native_child": "conditional"
+  },
+  "observed": {
+    "host_visible": "visible",
+    "cold_discovery": "not_observed",
+    "candidate_load_validation": "not_observed",
+    "skill_md_loading": "not_observable",
+    "native_child": "not_started",
+    "writes_or_external_calls": []
+  },
+  "assertion": {
+    "status": "pass",
+    "achieved_boundary": "host_loaded",
+    "evidence_refs": []
+  }
+}

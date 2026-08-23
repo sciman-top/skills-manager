@@ -1,0 +1,27 @@
+{
+  "schema_version": 2,
+  "run_id": "fixture-invalid-forbidden-discovery",
+  "scenario_id": "S02-explicit",
+  "request_verbatim": "请用 $grill-me 审问这个架构方案。只把会改变方案的决策转交给设计审问子代理，一次只问一个问题，暂不修改文件。",
+  "expected": {
+    "route_class": "visible_direct",
+    "cold_discovery": "forbidden",
+    "execution_contract": "multi_turn_user_decision",
+    "native_child": "conditional"
+  },
+  "observed": {
+    "host_visible": "visible",
+    "cold_discovery": "observed",
+    "candidate_load_validation": "not_observed",
+    "skill_md_loading": "not_observable",
+    "native_child": "not_observable",
+    "writes_or_external_calls": []
+  },
+  "assertion": {
+    "status": "pass",
+    "achieved_boundary": "host_loaded",
+    "evidence_refs": [
+      "host: fixture visible grill-me direct event"
+    ]
+  }
+}

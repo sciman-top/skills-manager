@@ -1,0 +1,32 @@
+{
+  "schema_version": 2,
+  "run_id": "fixture-invalid-controlled-write",
+  "scenario_id": "S08-explicit",
+  "request_verbatim": "请用 $custom-powershell-windows-automation 修复这个 PowerShell 7 自动化问题，保留 ps7_only 约束，先检查现有脚本和验证入口。",
+  "expected": {
+    "route_class": "visible_direct",
+    "cold_discovery": "forbidden",
+    "execution_contract": "one_shot",
+    "native_child": "conditional"
+  },
+  "observed": {
+    "host_visible": "visible",
+    "cold_discovery": "not_observed",
+    "candidate_load_validation": "not_observed",
+    "skill_md_loading": "observed",
+    "native_child": "completed",
+    "child_id_or_reason": "codex-child-fix-09",
+    "execution_surface": "codex",
+    "writes_or_external_calls": [
+      "scripts/maintenance/fix-temp.ps1"
+    ]
+  },
+  "assertion": {
+    "status": "pass",
+    "achieved_boundary": "candidate_load_validated",
+    "evidence_refs": [
+      "host: fixture visible skill page load",
+      "child: codex-child-fix-09 completed the repair"
+    ]
+  }
+}

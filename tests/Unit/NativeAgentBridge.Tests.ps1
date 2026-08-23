@@ -7,6 +7,35 @@ BeforeAll {
     function Get-BridgeTemplateText([string]$RelativePath) {
         return (Get-ContentUtf8 (Join-Path $repoRoot $RelativePath)) -replace "`r", ''
     }
+
+    # CSR-110 static model pin oracle: both managed templates must carry exactly
+    # one gpt-5.6-terra/high pair between description and sandbox_mode, and no
+    # provider/auth/routing field may smuggle itself into the template.
+    function Get-BridgeModelPinViolations([string]$TemplateText) {
+        $violations = New-Object System.Collections.Generic.List[string]
+        $modelFields = [regex]::Matches($TemplateText, '(?m)^model\s*=\s*"([^"]*)"$')
+        $effortFields = [regex]::Matches($TemplateText, '(?m)^model_reasoning_effort\s*=\s*"([^"]*)"$')
+
+        if ($modelFields.Count -ne 1) { $violations.Add('model field count is not exactly one') }
+        elseif ($modelFields[0].Groups[1].Value -ne 'gpt-5.6-terra') { $violations.Add('model is not gpt-5.6-terra') }
+        if ($effortFields.Count -ne 1) { $violations.Add('model_reasoning_effort field count is not exactly one') }
+        elseif ($effortFields[0].Groups[1].Value -ne 'high') { $violations.Add('model_reasoning_effort is not high') }
+
+        if ($modelFields.Count -eq 1 -and $effortFields.Count -eq 1) {
+            $description = [regex]::Match($TemplateText, '(?m)^description\s*=')
+            $sandbox = [regex]::Match($TemplateText, '(?m)^sandbox_mode\s*=')
+            if (-not $description.Success -or -not $sandbox.Success -or
+                $modelFields[0].Index -lt $description.Index -or $modelFields[0].Index -gt $sandbox.Index -or
+                $effortFields[0].Index -lt $description.Index -or $effortFields[0].Index -gt $sandbox.Index) {
+                $violations.Add('model pin is not placed between description and sandbox_mode')
+            }
+        }
+
+        foreach ($forbidden in @('provider', 'model_provider', 'base_url', 'api_key', 'auth', 'secret', 'fallback', 'profile', 'session')) {
+            if ($TemplateText -match ('(?m)^{0}\s*=' -f $forbidden)) { $violations.Add(("forbidden template field present: {0}" -f $forbidden)) }
+        }
+        return @($violations)
+    }
 }
 
 Describe 'Native agent bridge' {
@@ -23,6 +52,33 @@ Describe 'Native agent bridge' {
 
         (Get-BridgeTemplateText 'overrides\resources\native-agent-bridge\design-griller.toml') | Should -Match '(?m)^sandbox_mode = "read-only"$'
         (Get-BridgeTemplateText 'overrides\resources\native-agent-bridge\cold-capability-runner.toml') | Should -Match '(?m)^sandbox_mode = "workspace-write"$'
+    }
+
+    It 'pins both managed bridge templates to exactly one static gpt-5.6-terra/high model pair' {
+        foreach ($name in @('design-griller', 'cold-capability-runner')) {
+            $template = Get-BridgeTemplateText ("overrides\resources\native-agent-bridge\{0}.toml" -f $name)
+            @(Get-BridgeModelPinViolations $template) | Should -Be @()
+        }
+    }
+
+    It 'fails closed when a managed template drops, duplicates, weakens, or smuggles the model pin' {
+        $template = Get-BridgeTemplateText 'overrides\resources\native-agent-bridge\design-griller.toml'
+        @(Get-BridgeModelPinViolations $template) | Should -Be @()
+
+        $mutations = [ordered]@{
+            missing_model = $template -replace '(?m)^model = "gpt-5\.6-terra"$', ''
+            missing_effort = $template -replace '(?m)^model_reasoning_effort = "high"$', ''
+            duplicate_model = $template -replace '(?m)^(model = "gpt-5\.6-terra")$', ('$1' + "`n" + '$1')
+            wrong_model = $template -replace 'gpt-5\.6-terra', 'gpt-5.6-sol'
+            wrong_effort = $template -replace '(?m)^(model_reasoning_effort = )"high"$', '$1"medium"'
+            forbidden_provider_field = $template -replace '(?m)^(model_reasoning_effort = "high")$', ('$1' + "`n" + 'provider = "smuggled"')
+            pin_after_sandbox = ($template -replace '(?m)^model = "gpt-5\.6-terra"$', '') -replace '(?m)^(sandbox_mode = "read-only")$', ('$1' + "`n" + 'model = "gpt-5.6-terra"')
+        }
+
+        foreach ($mutation in $mutations.GetEnumerator()) {
+            $violations = @(Get-BridgeModelPinViolations ([string]$mutation.Value))
+            @($violations).Count | Should -BeGreaterThan 0 -Because ("mutation '{0}' must be rejected by the pin oracle" -f $mutation.Key)
+        }
     }
 
     It 'plans bridge projection without writing the host agent directory during dry run' {
@@ -48,6 +104,9 @@ Describe 'Native agent bridge' {
             $result.truth_boundary | Should -Be 'planned'
             @($result.changed_names) | Should -Be @('cold-capability-runner', 'design-griller')
             @($result.definitions | ForEach-Object { $_.target_path }) | ForEach-Object { $_ | Should -Match ([regex]::Escape((Join-Path $HOME '.codex\agents'))) }
+            foreach ($definition in @($result.definitions)) {
+                $definition.source_sha256 | Should -Be (([string](Get-FileHash -LiteralPath (Join-Path $sourceRoot ($definition.name + '.toml')) -Algorithm SHA256).Hash).ToLowerInvariant())
+            }
         }
         finally {
             $Root = $previousRoot
