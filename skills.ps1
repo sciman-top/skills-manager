@@ -4114,6 +4114,52 @@ function Test-NativeAgentBridgeWithin([string]$Path, [string]$RootPath) {
     return $candidate.Equals($root, [StringComparison]::OrdinalIgnoreCase) -or $candidate.StartsWith(($root + [IO.Path]::DirectorySeparatorChar), [StringComparison]::OrdinalIgnoreCase)
 }
 
+function Get-NativeAgentBridgeBackupRoot([string]$TargetRoot) {
+    if ([string]::IsNullOrWhiteSpace($TargetRoot)) { throw 'native agent target root is required for backup placement.' }
+    $target = [IO.Path]::GetFullPath($TargetRoot)
+    $codexRoot = Split-Path -Parent $target
+    if ([string]::IsNullOrWhiteSpace($codexRoot)) { throw 'native agent backup root cannot be resolved.' }
+    $backupRoot = [IO.Path]::GetFullPath((Join-Path $codexRoot 'skills-manager-agent-backups'))
+    if (Test-NativeAgentBridgeWithin $backupRoot $target) { throw 'native agent backups must stay outside the host agent discovery root.' }
+    return $backupRoot
+}
+
+function Move-NativeAgentBridgeLegacyBackups([string]$TargetRoot, [string]$BackupRoot) {
+    $target = [IO.Path]::GetFullPath($TargetRoot)
+    $legacyRoot = Join-Path $target 'skills-manager-backups'
+    $destinationRoot = [IO.Path]::GetFullPath($BackupRoot)
+    $migrations = New-Object System.Collections.Generic.List[object]
+    if (-not (Test-Path -LiteralPath $legacyRoot)) { return @() }
+
+    $legacyItem = Get-Item -LiteralPath $legacyRoot -Force -ErrorAction Stop
+    if (-not $legacyItem.PSIsContainer -or [bool]($legacyItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw ('legacy native agent backup root is not a regular directory: {0}' -f $legacyRoot)
+    }
+    if (Test-NativeAgentBridgeWithin $destinationRoot $target) { throw 'native agent backup destination must stay outside the host agent discovery root.' }
+
+    foreach ($legacyFile in @(Get-ChildItem -LiteralPath $legacyRoot -File -Filter '*.toml' -Force | Sort-Object Name)) {
+        $content = Get-Content -LiteralPath $legacyFile.FullName -Raw -Encoding UTF8
+        if ($content -notmatch '(?m)^# skills-manager-native-agent-bridge: v1\s*$') { continue }
+        $nameMatch = [regex]::Match($content, '(?m)^name\s*=\s*"([^"]+)"\s*$')
+        if (-not $nameMatch.Success) { throw ('legacy native agent backup lacks a role name: {0}' -f $legacyFile.FullName) }
+        Get-NativeAgentBridgeTemplate $legacyFile.FullName $nameMatch.Groups[1].Value | Out-Null
+
+        if (-not (Test-Path -LiteralPath $destinationRoot -PathType Container)) { New-Item -ItemType Directory -Path $destinationRoot -Force | Out-Null }
+        $destinationPath = Join-Path $destinationRoot $legacyFile.Name
+        if (Test-Path -LiteralPath $destinationPath -PathType Leaf) {
+            if (-not [string]::Equals((Get-NativeAgentBridgeSha256 $legacyFile.FullName), (Get-NativeAgentBridgeSha256 $destinationPath), [StringComparison]::OrdinalIgnoreCase)) {
+                throw ('legacy native agent backup destination conflicts: {0}' -f $destinationPath)
+            }
+            Remove-Item -LiteralPath $legacyFile.FullName -Force
+        }
+        else { Move-Item -LiteralPath $legacyFile.FullName -Destination $destinationPath -ErrorAction Stop }
+        $migrations.Add([pscustomobject][ordered]@{ source_path = $legacyFile.FullName; destination_path = $destinationPath }) | Out-Null
+    }
+
+    if (@(Get-ChildItem -LiteralPath $legacyRoot -Force).Count -eq 0) { Remove-Item -LiteralPath $legacyRoot -Force }
+    return @($migrations.ToArray())
+}
+
 function Get-NativeAgentBridgeTemplate($SourcePath, [string]$Name) {
     $content = Get-Content -LiteralPath $SourcePath -Raw -Encoding UTF8
     if ($content -notmatch '(?m)^# skills-manager-native-agent-bridge: v1\s*$') { throw ("native agent template lacks ownership marker: {0}" -f $SourcePath) }
@@ -4137,6 +4183,8 @@ function Sync-NativeAgentBridge($Config, $PromotionContext = $null) {
     if (-not (Test-NativeAgentBridgeWithin $sourceRoot $managedRoot)) { throw 'native_agent_bridge.source_root must stay under generated agent/.' }
     $expectedTargetRoot = [IO.Path]::GetFullPath((Join-Path ([Environment]::GetFolderPath('UserProfile')) '.codex\agents'))
     if (-not [string]::Equals($targetRoot, $expectedTargetRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'native_agent_bridge.target_root must be ~/.codex/agents.' }
+    $backupRoot = Get-NativeAgentBridgeBackupRoot $targetRoot
+    $codexRoot = Split-Path -Parent $targetRoot
     $receiptRoot = Join-Path $Root 'reports\native-agent-bridge'
     if (-not (Test-NativeAgentBridgeWithin $receiptPath $receiptRoot) -or [string]::Equals($receiptPath, [IO.Path]::GetFullPath($receiptRoot), [StringComparison]::OrdinalIgnoreCase)) { throw 'native_agent_bridge.receipt_path must be a file under reports/native-agent-bridge/.' }
     if (-not $DryRun -and ($null -eq $PromotionContext -or -not [bool](Get-NativeAgentBridgeValue $PromotionContext 'required'))) {
@@ -4144,6 +4192,7 @@ function Sync-NativeAgentBridge($Config, $PromotionContext = $null) {
     }
     Assert-NativeSkillProjectionPathHasNoReparseAncestor $sourceRoot $managedRoot
     Assert-NativeSkillProjectionPathHasNoReparseAncestor $targetRoot ([Environment]::GetFolderPath('UserProfile'))
+    Assert-NativeSkillProjectionPathHasNoReparseAncestor $backupRoot $codexRoot
     Assert-NativeSkillProjectionPathHasNoReparseAncestor (Split-Path -Parent $receiptPath) $receiptRoot
 
     $names = @((Get-NativeAgentBridgeValue $bridge 'definitions') | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
@@ -4165,7 +4214,9 @@ function Sync-NativeAgentBridge($Config, $PromotionContext = $null) {
     $before = @{}
     $changed = New-Object System.Collections.Generic.List[string]
     $backups = New-Object System.Collections.Generic.List[string]
+    $legacyBackupMigrations = @()
     try {
+        $legacyBackupMigrations = @(Move-NativeAgentBridgeLegacyBackups $targetRoot $backupRoot)
         foreach ($definition in $planned.ToArray()) {
             $targetPath = [string]$definition.target_path
             $existingItem = if (Test-Path -LiteralPath $targetPath -PathType Leaf) { Get-Item -LiteralPath $targetPath -Force } else { $null }
@@ -4175,8 +4226,6 @@ function Sync-NativeAgentBridge($Config, $PromotionContext = $null) {
             if ($null -ne $existing -and $existing -notmatch '(?m)^# skills-manager-native-agent-bridge: v1\s*$') { throw ("native agent target is not owned by skills-manager: {0}" -f $targetPath) }
             if ($null -ne $existing -and [string]::Equals($existing, [string]$definition.content, [StringComparison]::Ordinal)) { continue }
             if ($null -ne $existing) {
-                $backupRoot = Join-Path $targetRoot 'skills-manager-backups'
-                Assert-NativeSkillProjectionPathHasNoReparseAncestor $backupRoot $targetRoot
                 if (-not (Test-Path -LiteralPath $backupRoot -PathType Container)) { New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null }
                 $backupPath = Join-Path $backupRoot ('{0}.{1}.toml' -f $definition.name, (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
                 Write-Utf8FileAtomic -Path $backupPath -Content $existing
@@ -4197,11 +4246,13 @@ function Sync-NativeAgentBridge($Config, $PromotionContext = $null) {
             source_git_state = if ($null -ne $PromotionContext) { [string](Get-NativeAgentBridgeValue $PromotionContext 'source_git_state') } else { 'not_evaluated_dry_run' }
             promotion_mode = if ($null -ne $PromotionContext) { [string](Get-NativeAgentBridgeValue $PromotionContext 'promotion_mode') } else { 'dry_run' }
             changed_names = @($changed.ToArray() | Sort-Object)
+            backup_root = $backupRoot
             backup_paths = @($backups.ToArray())
+            legacy_backup_migrations = @($legacyBackupMigrations)
             definitions = @($planned | ForEach-Object { [ordered]@{ name = $_.name; source_sha256 = $_.source_sha256; target_sha256 = Get-NativeAgentBridgeSha256 $_.target_path } })
             provider_calls = 0
-            native_mutations = $changed.Count
-            writes = $changed.Count
+            native_mutations = $changed.Count + $legacyBackupMigrations.Count
+            writes = $changed.Count + $legacyBackupMigrations.Count
             truth_boundary = 'filesystem_projected'
         }
         $receiptDirectory = Split-Path -Parent $receiptPath
@@ -4220,6 +4271,15 @@ function Sync-NativeAgentBridge($Config, $PromotionContext = $null) {
             else { Write-Utf8FileAtomic -Path $targetPath -Content ([string]$previous) }
         }
         foreach ($backupPath in @($backups.ToArray())) { Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue }
+        foreach ($migration in @($legacyBackupMigrations | Sort-Object destination_path -Descending)) {
+            $sourcePath = [string]$migration.source_path
+            $destinationPath = [string]$migration.destination_path
+            if ((Test-Path -LiteralPath $destinationPath -PathType Leaf) -and -not (Test-Path -LiteralPath $sourcePath)) {
+                $legacyRoot = Split-Path -Parent $sourcePath
+                if (-not (Test-Path -LiteralPath $legacyRoot -PathType Container)) { New-Item -ItemType Directory -Path $legacyRoot -Force | Out-Null }
+                Move-Item -LiteralPath $destinationPath -Destination $sourcePath -ErrorAction SilentlyContinue
+            }
+        }
         throw $failure
     }
 

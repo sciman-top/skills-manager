@@ -73,6 +73,24 @@ Describe 'Native agent bridge' {
         finally { $Root = $previousRoot }
     }
 
+    It 'keeps owned bridge backups outside the recursive host agent discovery root and migrates legacy copies' {
+        $targetRoot = Join-Path $TestDrive 'codex\agents'
+        $legacyRoot = Join-Path $targetRoot 'skills-manager-backups'
+        $newBackupRoot = Get-NativeAgentBridgeBackupRoot $targetRoot
+        New-Item -ItemType Directory -Path $legacyRoot -Force | Out-Null
+        $legacyBackup = Join-Path $legacyRoot 'design-griller.fixture.toml'
+        Copy-Item -LiteralPath (Join-Path $repoRoot 'overrides\resources\native-agent-bridge\design-griller.toml') -Destination $legacyBackup
+
+        Test-NativeAgentBridgeWithin $newBackupRoot $targetRoot | Should -BeFalse
+        $migrations = @(Move-NativeAgentBridgeLegacyBackups $targetRoot $newBackupRoot)
+
+        $migrations.Count | Should -Be 1
+        $migrations[0].source_path | Should -Be $legacyBackup
+        Test-Path -LiteralPath $legacyBackup | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $newBackupRoot 'design-griller.fixture.toml') | Should -BeTrue
+        Test-Path -LiteralPath $legacyRoot | Should -BeFalse
+    }
+
     It 'keeps grill-me as an explicit core entry that delegates to the native griller' {
         $skill = Get-BridgeTemplateText 'overrides\patches\grill-me\SKILL.md'
         $metadata = Get-BridgeTemplateText 'overrides\patches\grill-me\agents\openai.yaml'
