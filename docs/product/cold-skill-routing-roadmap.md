@@ -144,10 +144,14 @@ ZCode、模拟 parent、catalog reader 或测试 harness 无 native subagent 机
 | provider/auth 间歇故障 | R4 | 记录 host-specific 失败；不把模型枚举当健康检查 | 重试后把历史 child 当当前验收 |
 | junction/目录拓扑 | R0 | 窄规范化，其他形态 fail-closed | 广泛取消 reparse 防护 |
 | 29 场景范围膨胀 | R2/R5 | routing contract 与 artifact quality 分跑 | 把所有 Office 产物质量塞进 P0 |
+| “无第二语义路由器”为带阈值原则（2026-08-24 决策） | R0-R5 | 域数量 > 30、单域常驻候选 > 16、目录技能数 > 150，任一触及即重开“cold discovery 是否加检索前置”的决策；阈值仅触发重审，不自动改架构；三个数值为有依据的估计而非实测校准；行为触发器（隐式命中率/契约塌缩计数）待 CSR-R5 样本机制存在后再钉 | 无条件死扛；越限即自动切换架构；把未校准阈值当自动开关 |
+| 冷目录范围边界（2026-08-24 决策） | R0/R5 | “全冷目录可调度”指目录内全类型；imagegen 与 live-control 类不收编，判据是“受管且契约已声明 vs 宿主侧未管理且副作用 external”，不是“工件 vs 非工件”（docx/pdf/xlsx 在册而 imagegen 不在册即由此界产生）；单一类型出现真实高频复用证据时可单独决策纳入 | 按“是否工件”划界；无真实调用方即扩治理面 |
+| 架构结论声明档位（2026-08-24 决策） | 全阶段 | 分腿声明：deterministic 腿（发现/闭包/hash/契约/verifier）可声明“已实跑验证”，声明时必须附口径与证据位置；语义腿与 native 腿在 CSR-R4/R5 完成前只能声明“未验收/假设” | 总括式“最优方案已验证”；把已验证腿反向压成假设 |
+| 阈值越限看护 | R2 | 目录阈值当前仅为文档承诺；应下沉为 quality gate 的 catalog 阈值检查（域数、最大域候选数、技能数，超限即 fail），本决策记录本身不实现该机制 | 静默越限后无人重审；为记录阈值先建遥测 |
 
 ## 5. 明确不做
 
-- 不重新引入 profile 切换、全量 prewarm、router 意图排序、每请求预检、第二语义分类器或长期行为遥测库。
+- 不重新引入 profile 切换、全量 prewarm、router 意图排序、每请求预检或长期行为遥测库；第二语义分类器仅在 §4 记录的目录阈值被触及并重开决策、且新决策明示引入时方可进入。
 - 不为“可能的 portable 独立分发”新建第三份 catalog/skill 副本；除非出现真实调用方和独立一致性需求。
 - 不声称 78 个或全部冷技能已经 live accepted；每次只报告有 event evidence 的代表性任务。
 - 不把 ZCode 代行、AI 口头说明、router JSON、模板文件存在、config parse、HTTP 200、或历史 session 升格为 Codex fresh-session live acceptance。

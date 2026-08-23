@@ -777,6 +777,22 @@
       "side_effect_ceiling": "branch_dependent",
       "required_context": [],
       "verification_mode": "host_judgment"
+    },
+    {
+      "id": "S30-live-derived",
+      "source_index": 30,
+      "source_kind": "derived_test_case",
+      "derived_from": "2026-08-23 ZCode live session miss: compound implicit request (evidence grounding + interrogation verb) was answered one-shot via the visible research skill; the multi-turn contract collapsed",
+      "variant": "implicit",
+      "request_verbatim": "结合官方文档、社区优秀项目、最佳实践等，审问宿主 AI 语义理解 +\"原生子代理优先、全冷目录可调度、按精确技能闭包显式/受控加载\"（\"宿主语义选择 → 一次受控 cold discovery → router 精确闭包校验 → admission → contract 分流\"，拒绝全量预热、每请求 middleware、router 语义排序和第二分类器。）是最优方案？为什么？",
+      "route_class": "cold_candidate",
+      "cold_discovery": "conditional",
+      "allowed_candidate_names": [],
+      "forbidden_events": ["multi_turn_summary_substitution", "second_discovery", "writes"],
+      "execution_contract": "multi_turn_user_decision",
+      "side_effect_ceiling": "read_only",
+      "required_context": [],
+      "verification_mode": "host_judgment"
     }
   ]
 }

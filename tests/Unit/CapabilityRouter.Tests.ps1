@@ -351,6 +351,8 @@ Describe 'Capability router fallback' {
         $skill | Should -Match 'exact write set,\s+minimum proof, and stop condition'
         $skill | Should -Match 'reliable binary “skill request”'
         $skill | Should -Match 'high-confidence conclusion'
+        $skill | Should -Match 'Treat metadata as insufficient when a request combines an interactive workflow verb'
+        $metadata | Should -Match 'interview-style verb'
     }
 
     It 'does not echo the raw query in the routing receipt' {

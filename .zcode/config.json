@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "enabled": true,
+    "events": {
+      "UserPromptSubmit": [
+        {
+          "matcher": "审问|逐轮|一题|多轮|grill|interrogat|interview",
+          "hooks": [
+            {
+              "type": "process",
+              "command": "pwsh",
+              "args": [
+                "-NoProfile",
+                "-File",
+                "${ZCODE_PROJECT_DIR}/scripts/hooks/interaction-workflow-guard.ps1"
+              ],
+              "timeoutMs": 8000
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

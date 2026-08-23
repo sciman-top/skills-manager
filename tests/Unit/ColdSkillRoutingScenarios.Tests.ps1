@@ -34,12 +34,22 @@ Describe 'Cold skill routing scenario matrix' {
 
     It 'covers source groups 1..29 exactly once with unique scenario ids' {
         @($matrix.scenarios).Count | Should -BeGreaterThan 29
-        $indexes = @($matrix.scenarios | ForEach-Object { [int]$_.source_index } | Sort-Object -Unique)
+        $corpus = @($matrix.scenarios | Where-Object { [string]$_.source_kind -ne 'derived_test_case' })
+        $derived = @($matrix.scenarios | Where-Object { [string]$_.source_kind -eq 'derived_test_case' })
+        @($corpus).Count + @($derived).Count | Should -Be @($matrix.scenarios).Count
+        @($derived).Count | Should -BeGreaterThan 0 -Because 'at least the live-derived miss sample must stay tracked'
+
+        $indexes = @($corpus | ForEach-Object { [int]$_.source_index } | Sort-Object -Unique)
         $indexes.Count | Should -Be 29
         $indexes[0] | Should -Be 1
         $indexes[28] | Should -Be 29
         $missing = @(1..29 | Where-Object { $_ -notin $indexes })
         @($missing).Count | Should -Be 0
+
+        foreach ($entry in $derived) {
+            [int]$entry.source_index | Should -BeGreaterThan 29 -Because ("derived entry {0} must not masquerade as user corpus" -f $entry.id)
+            ([string]$entry.derived_from).Trim().Length | Should -BeGreaterThan 0 -Because ("derived entry {0} must record its origin" -f $entry.id)
+        }
 
         $ids = @($matrix.scenarios | ForEach-Object id)
         @($ids | Sort-Object -Unique).Count | Should -Be $ids.Count
@@ -158,5 +168,18 @@ Describe 'Cold skill routing scenario matrix' {
         foreach ($field in @('host_visible', 'implicit_candidate', 'cold_discovery_attempted', 'skill_md_loaded', 'native_child_started', 'side_effect_authorized', 'live_result_accepted')) {
             $scenario[0].request_verbatim | Should -Match ([regex]::Escape($field)) -Because ("group 26 must report the seven event fields verbatim, including {0}" -f $field)
         }
+    }
+
+    It 'keeps the live-derived compound interrogation sample as a non-collapsible multi-turn oracle' {
+        $s30 = @($matrix.scenarios | Where-Object id -eq 'S30-live-derived')
+        @($s30).Count | Should -Be 1
+        $s30[0].source_kind | Should -Be 'derived_test_case'
+        $s30[0].route_class | Should -Be 'cold_candidate'
+        $s30[0].cold_discovery | Should -Be 'conditional'
+        $s30[0].execution_contract | Should -Be 'multi_turn_user_decision'
+        $s30[0].forbidden_events | Should -Contain 'multi_turn_summary_substitution'
+        @($s30[0].allowed_candidate_names).Count | Should -Not -Be 1 -Because 'implicit compound request must not hard-pin a unique skill'
+        $s30[0].request_verbatim | Should -Match '审问'
+        $s30[0].request_verbatim | Should -Match '官方文档'
     }
 }

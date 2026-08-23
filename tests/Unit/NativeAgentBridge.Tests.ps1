@@ -164,6 +164,12 @@ Describe 'Native agent bridge' {
         $skill | Should -Match 'simulate a child question'
         $skill | Should -Match '(?s)Do not silently\s+fall back'
 
+        $skill | Should -Match 'still an interview'
+        $skill | Should -Match 'one-shot analysis, report, or summary with trailing questions'
+        $skill | Should -Match 'that collapse\s+is forbidden'
+        $skill | Should -Match 'route through cold discovery to `grill-with-docs`'
+        $skill | Should -Match 'gather evidence per question, never instead of asking it'
+
         $grillingSkill = Get-BridgeTemplateText 'overrides\patches\grilling\SKILL.md'
         $grillingMetadata = Get-BridgeTemplateText 'overrides\patches\grilling\agents\openai.yaml'
         $grillingSkill | Should -Match 'disable-model-invocation:\s*true'

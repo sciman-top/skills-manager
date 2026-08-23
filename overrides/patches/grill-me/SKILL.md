@@ -1,6 +1,6 @@
 ---
 name: grill-me
-description: Start an explicit, read-only design interview through the native design-griller subagent. Use only when the user explicitly asks to grill, challenge, or interrogate a proposed plan or decision; do not use for ordinary implementation, debugging, or brainstorming.
+description: Start an explicit, read-only design interview through the native design-griller subagent. Use only when the user explicitly asks to grill, challenge, or interrogate a proposed plan or decision - including compound requests that also ask for document or evidence grounding, which prefer cold-discovering grill-with-docs; do not use for ordinary implementation, debugging, or brainstorming.
 disable-model-invocation: true
 ---
 
@@ -8,6 +8,15 @@ disable-model-invocation: true
 
 This is the thin `core` entry for an explicit design interview. Do not perform
 the interview in the parent task and do not change a shared skill profile.
+
+A request that combines interrogation with evidence gathering (official docs,
+community projects, best practices) is still an interview. Never answer it with
+a one-shot analysis, report, or summary with trailing questions: that collapse
+is forbidden regardless of whether this skill or the cold `grill-with-docs`
+closure serves the request. When the interrogation must be grounded in external
+evidence, route through cold discovery to `grill-with-docs` (closure:
+grill-with-docs + domain-modeling + grilling) instead of spawning the plain
+design-griller; gather evidence per question, never instead of asking it.
 
 1. Use the host-native child-spawn tool to start the custom `design-griller`
    with the user's proposal, stated constraints, and exact request to grill it.
