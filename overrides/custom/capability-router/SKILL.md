@@ -32,6 +32,13 @@ capabilities are insufficient and a specialized workflow is materially needed.
 The router's read-only retrieval is deliberately separated from semantic
 selection so a false positive cannot load or execute a cold skill.
 
+A request that anchors on unstated content ("this plan", “这个方案”, “这个请求”)
+has no actionable target when neither the conversation nor the repository
+context supplies one. Stop and ask the user for the target (the
+`parent_user_input` branch) before any discovery, validation, or skill
+loading. Inventing a substitute task to route around the missing payload is
+fail-open on an unknown target, not routing.
+
 ```powershell
 $domainHints = @('decision') # one or two functional domains, not task keywords
 $result = pwsh -NoProfile -File <skill-dir>/scripts/route-capability.ps1 -Query '<complete request>' -AutoDiscover -DomainHint $domainHints | ConvertFrom-Json
