@@ -3,4 +3,8 @@ interface:
   short_description: "Run a read-only native design interview"
   default_prompt: "Use $grill-me to have design-griller challenge this proposal one decision at a time; do not modify files."
 policy:
-  allow_implicit_invocation: false
+  # Codex 0.149 omits false-policy skills from its model-visible metadata,
+  # which also makes an explicitly named `$grill-me` unavailable.  Keep this
+  # entry visible; its SKILL.md and description still restrict it to explicit
+  # design-interview requests.
+  allow_implicit_invocation: true

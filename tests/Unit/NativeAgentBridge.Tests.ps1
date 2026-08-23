@@ -91,11 +91,11 @@ Describe 'Native agent bridge' {
         Test-Path -LiteralPath $legacyRoot | Should -BeFalse
     }
 
-    It 'keeps grill-me as an explicit core entry that delegates to the native griller' {
+    It 'keeps grill-me prompt-visible as an explicit core entry that delegates to the native griller' {
         $skill = Get-BridgeTemplateText 'overrides\patches\grill-me\SKILL.md'
         $metadata = Get-BridgeTemplateText 'overrides\patches\grill-me\agents\openai.yaml'
 
-        $metadata | Should -Match 'allow_implicit_invocation:\s*false'
+        $metadata | Should -Match 'allow_implicit_invocation:\s*true'
         $skill | Should -Match 'native `design-griller`'
         $skill | Should -Match '(?s)Do not perform\s+the interview in the parent task'
         $skill | Should -Match 'do not change a shared skill profile'
