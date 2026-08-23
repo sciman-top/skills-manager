@@ -1,8 +1,9 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('docs', 'quick', 'focused', 'full')]
+    [ValidateSet('docs', 'quick', 'focused', 'full', 'auto')]
     [string]$Profile = 'quick',
     [switch]$AllowDirtyWorktree,
+    [switch]$ResolveOnly,
     [string[]]$TestPath = @(),
     [string[]]$TestName = @(),
     [ValidateSet('lock', 'integrity', 'config', 'scheduler')]
@@ -48,6 +49,20 @@ function Assert-HostSchedulerOwnershipContract {
 
 Push-Location $root
 try {
+    if ($Profile -eq 'auto') {
+        $resolverPath = Join-Path $root 'scripts\quality\resolve-gate-profile.ps1'
+        $resolverArgs = @{ Mode = 'local'; Json = $true }
+        if (-not [string]::IsNullOrWhiteSpace($DiffBase)) { $resolverArgs['BaseSha'] = $DiffBase }
+        $resolved = (& $resolverPath @resolverArgs) | ConvertFrom-Json
+        Write-Host ("Gate profile auto -> {0} (reason={1}, base={2})" -f $resolved.profile, $resolved.reason, $resolved.base_sha)
+        if ($ResolveOnly) { return }
+        $Profile = [string]$resolved.profile
+        if ($Profile -eq 'focused') { $TestPath = @($resolved.focused_test_paths) }
+        # The docs gate must check the current worktree; a resolver-derived base
+        # would narrow `git diff --check` to the committed range only.
+        if ($Profile -eq 'docs') { $DiffBase = '' }
+    }
+
     if ($Profile -eq 'docs') {
         if ([string]::IsNullOrWhiteSpace($DiffBase)) {
             Invoke-QualityGate 'diff-check' { & git diff --check }

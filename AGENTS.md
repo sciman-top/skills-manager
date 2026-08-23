@@ -23,6 +23,7 @@
 - 规则/文档不复制运行状态；Git diff、受影响测试和 ignored runtime receipt 是默认证据，不为普通变更新增 evidence/task/ADR。
 
 ## C. 最低门禁
+- 本地收口优先 `run-local-quality-gates.ps1 -Profile auto`（与 CI 共享分类器，含 non-ignored untracked fail-safe，无法判定时选 full）；显式档位仅用于复现或覆盖。
 - 多层适用时顺序为 `build -> test -> contract/invariant -> hotspot`，只跑覆盖当前独立失败的最低充分层。
 - 文档/规则运行 `git diff --check` 与受影响 verifier/test；source/config/generated seam 运行一次 `build.ps1` 后跑受影响测试，并核对 `skills.ps1` 无生成漂移。
 - 只有 runtime、安全、数据、迁移、公开契约、依赖、打包或跨面风险才运行一次 `scripts/quality/run-local-quality-gates.ps1 -Profile full`；脏树显式加 `-AllowDirtyWorktree`。

@@ -193,6 +193,12 @@ pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile doc
 pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile focused -TestPath .\tests\Unit\Core.Tests.ps1 -TestName '*目标行为*' -Verifier config
 ```
 
+本地收口优先使用 auto 档位：它与 CI 共享同一分类器（含 non-ignored untracked fail-safe），按可解析基线与当前工作区自动选档，无需人工选择 docs/focused/full：
+
+```powershell
+pwsh -NoProfile -File .\scripts\quality\run-local-quality-gates.ps1 -Profile auto
+```
+
 runtime、安全、数据、迁移、公开契约、依赖、打包或跨面风险改动，在输入冻结后只运行一次 full gate；不要预先重复执行其内部命令：
 
 ```powershell
