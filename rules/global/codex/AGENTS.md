@@ -2,7 +2,7 @@
 **版本**: 9.77
 **项目契约版本**: 2.0
 **适用范围**: 全局用户级（GlobalUser/）
-**最后更新**: 2026-08-15
+**最后更新**: 2026-08-23
 ## 1. 阅读指引
 - 本文件定义跨仓稳定语义（WHAT）；项目根 `AGENTS.md` 定义仓库事实与动作（WHERE/HOW）；平台章节只定义宿主差异（DELTA）。
 - 指令优先级服从当前宿主的 system/developer/user/managed policy 与加载模型；“运行事实/代码 > 项目文档 > 规则默认值”只用于事实冲突取证，不得反向覆盖高优先级指令。
@@ -72,7 +72,7 @@
 - 宿主按可见元数据选技能；`capability-router` 仅在可见面不足、跨目录发现或确定性 policy validation 时按需调用，不作普通请求的隐式前置或 middleware。
 - 仅当至少两个切片可独立验证、write set 互斥且并行净收益为正时派代理；否则串行。委派只声明完成该切片所需的 scope、write set、proof 与 stop，不建立固定模型矩阵、代理层级或 wave 治理。
 - 指定非默认 `agent_type` 时，`fork_turns` 只允许 `"none"` 或正整数字符串，禁止 `"all"`；仅观察到 `started`、有效 child thread id 与终态 `completed` 才可报告子代理成功。spawn 失败可由主代理串行接管，但必须记录 `fallback=serial`。
-- `AGENTS.md` 不是权限系统；可重复强制归 config/hooks/scripts/CI，项目层仅在 trusted repo 生效。non-managed hook 按哈希 review/trust，变化后重信任；fresh session 只证明默认路径，specialized tools 可绕过。
+- 项目层规则仅在 trusted repo 生效。non-managed hook 按哈希 review/trust，变化后重信任；fresh session 只证明默认路径，specialized tools 可绕过。
 - `.codex/rules/*.rules` 仍为 experimental；按精确前缀建模，以 `match/not_match` 和当前 `codex execpolicy check` 实测，禁过宽 allowlist。
 - Work Web 不继承本机 sandbox/approval，各 managed/workspace 层不混；never/full-access/bypass 不取消 R4/R8，仅用于明确授权或外部隔离。
 - 修改 auth/provider/MCP/权限前区分登录、权限、模型与代码；未经确认不得重启/停止/杀掉/拉起 Codex，只做投影、dry-run、探针与回滚证据。
