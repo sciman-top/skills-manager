@@ -252,10 +252,12 @@ if ($null -ne $catalog) {
             $dependencies = [System.Collections.Generic.List[string]]::new()
             if (Test-ObjectProperty $skill 'dependencies') {
                 $rawDependencies = $skill.dependencies
-                if ($null -eq $rawDependencies -or $rawDependencies -is [string] -or $rawDependencies -isnot [System.Collections.IEnumerable]) {
+                # ConvertFrom-Json represents an empty JSON array as $null in
+                # PowerShell, so $null is the backward-compatible empty closure.
+                if ($null -ne $rawDependencies -and ($rawDependencies -is [string] -or $rawDependencies -isnot [System.Collections.IEnumerable])) {
                     $catalogFindings.Add((New-RouterFinding 'skill_dependencies_invalid' ($pathPrefix + '.dependencies') 'Skill dependencies must be an array of skill names.')) | Out-Null
                 }
-                else {
+                elseif ($null -ne $rawDependencies) {
                     $dependencyNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
                     foreach ($rawDependency in @($rawDependencies)) {
                         $dependencyName = ([string]$rawDependency).Trim()

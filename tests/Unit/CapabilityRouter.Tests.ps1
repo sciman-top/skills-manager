@@ -35,7 +35,7 @@ Describe 'Capability router fallback' {
             decision_owner='host_ai'
             semantic_routing_performed=$false
             domains=@([ordered]@{name='engineering';purpose='Engineering';skill_names=@('codebase-design')})
-            skills=@([ordered]@{name='codebase-design';description='Design modules.';relative_path='..\codebase-design\SKILL.md';entrypoint_sha256=(Get-FileHash $skillPath -Algorithm SHA256).Hash.ToLowerInvariant();domains=@('engineering');load_side_effect='read_only';side_effect='read_only';routing_rules=@()})
+            skills=@([ordered]@{name='codebase-design';description='Design modules.';relative_path='..\codebase-design\SKILL.md';entrypoint_sha256=(Get-FileHash $skillPath -Algorithm SHA256).Hash.ToLowerInvariant();domains=@('engineering');load_side_effect='read_only';side_effect='read_only';dependencies=@();routing_rules=@()})
             capabilities=@()
         }
         Write-TestCatalog $document (Join-Path $routerRoot 'catalog.json')
@@ -83,7 +83,7 @@ Describe 'Capability router fallback' {
         Set-Content -LiteralPath $grillingPath -Encoding UTF8 -Value "---`nname: grilling`ndescription: Read-only grilling.`n---"
         Set-Content -LiteralPath $domainPath -Encoding UTF8 -Value "---`nname: domain-modeling`ndescription: Domain models.`n---"
         $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
-        $document.skills[0] | Add-Member -NotePropertyName dependencies -NotePropertyValue @('grilling')
+        $document.skills[0].dependencies = @('grilling')
         $document.skills += [pscustomobject][ordered]@{name='grilling';description='Read-only grilling.';relative_path='..\grilling\SKILL.md';entrypoint_sha256=(Get-FileHash $grillingPath -Algorithm SHA256).Hash.ToLowerInvariant();domains=@('engineering');load_side_effect='read_only';side_effect='read_only';dependencies=@('domain-modeling');routing_rules=@()}
         $document.skills += [pscustomobject][ordered]@{name='domain-modeling';description='Domain models.';relative_path='..\domain-modeling\SKILL.md';entrypoint_sha256=(Get-FileHash $domainPath -Algorithm SHA256).Hash.ToLowerInvariant();domains=@('engineering');load_side_effect='read_only';side_effect='controlled_write';dependencies=@();routing_rules=@()}
         $document.domains[0].skill_names += 'grilling','domain-modeling'
@@ -101,7 +101,7 @@ Describe 'Capability router fallback' {
 
     It 'fails closed when a dependency is missing from the catalog or stale on disk' {
         $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
-        $document.skills[0] | Add-Member -NotePropertyName dependencies -NotePropertyValue @('missing-skill')
+        $document.skills[0].dependencies = @('missing-skill')
         Write-TestCatalog $document $catalog
 
         $missing = & $router -Query 'design' -CatalogPath $catalog -Candidate 'skill|codebase-design' | ConvertFrom-Json
