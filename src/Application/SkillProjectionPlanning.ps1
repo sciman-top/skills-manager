@@ -78,6 +78,11 @@ function Get-SkillPackageContentHash([string]$SkillDirectory) {
     $parts = [Collections.Generic.List[string]]::new()
     foreach ($file in @(Get-ChildItem -LiteralPath $base -Recurse -File -Force -ErrorAction Stop | Sort-Object FullName)) {
         $relative = $file.FullName.Substring($base.Length).TrimStart('\', '/').Replace('\', '/')
+        # A package-root catalog.json is a generated projection artifact
+        # (Sync-SkillDiscoveryCatalog) rewritten by build/verify flows; it is
+        # derived from skills.json, not authored skill content, and must not
+        # affect package identity or the manifest would go stale on every sync.
+        if ($relative -eq 'catalog.json') { continue }
         $parts.Add(('{0}|{1}' -f $relative, (Get-FileContentHash $file.FullName))) | Out-Null
     }
     return Get-SkillProjectionTextHash ($parts.ToArray() -join "`n")

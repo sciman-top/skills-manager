@@ -37,6 +37,9 @@ function Get-NativeSkillProjectionPackageHash {
     $parts = [Collections.Generic.List[string]]::new()
     foreach ($file in @(Get-ChildItem -LiteralPath $base -Recurse -File -Force -ErrorAction Stop | Sort-Object FullName)) {
         $relative = $file.FullName.Substring($base.Length).TrimStart('\', '/').Replace('\', '/')
+        # Package-root catalog.json is a generated projection artifact (see
+        # Get-SkillPackageContentHash); it must not affect package identity.
+        if ($relative -eq 'catalog.json') { continue }
         $hash = ([string](Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash).ToLowerInvariant()
         $parts.Add(('{0}|{1}' -f $relative, $hash)) | Out-Null
     }

@@ -117,6 +117,21 @@ Describe 'Native skill projection' {
         $plan.writes | Should -Be 0
     }
 
+    It 'keeps package hash stable across generated catalog rewrites' {
+        $f = New-ProjectionFixture
+        $skillDir = Join-Path $f.source 'enabled'
+        $baseline = [string](@(New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config).skills | Where-Object name -eq 'enabled').package_hash
+        $baseline | Should -Match '^[a-f0-9]{64}$'
+
+        '{"catalog":"generated-v1"}' | Set-Content -LiteralPath (Join-Path $skillDir 'catalog.json') -Encoding utf8
+        [string](@(New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config).skills | Where-Object name -eq 'enabled').package_hash | Should -Be $baseline
+        '{"catalog":"generated-v2","domains":[]}' | Set-Content -LiteralPath (Join-Path $skillDir 'catalog.json') -Encoding utf8
+        [string](@(New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config).skills | Where-Object name -eq 'enabled').package_hash | Should -Be $baseline
+
+        Add-Content -LiteralPath (Join-Path $skillDir 'SKILL.md') -Value 'authored change'
+        [string](@(New-NativeSkillProjectionRuntimePlan -ManagedRoot $f.source -Config $f.config).skills | Where-Object name -eq 'enabled').package_hash | Should -Not -Be $baseline
+    }
+
     It 'removes an owned stale junction whose source directory no longer exists' {
         $f = New-ProjectionFixture
         New-Item -ItemType Directory -Path $f.target -Force | Out-Null
