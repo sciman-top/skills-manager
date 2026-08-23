@@ -70,16 +70,17 @@ router has returned all of the following for the same request:
   declared side effects for every member.
 
 Pass the complete validation result, original request, exact selected name, and
-an admission contract to the child. The child may read only the validated
-closure and must not treat validation as execution authorization. A read-only
-admission may execute a bounded read-only subset even when a skill's maximum
-declared side effect is `controlled_write`; it must never write. A
-`controlled_write` admission additionally records the user's implementation
-request, exact write set, minimum proof, and stop condition. For
-`external_read`, `unknown`, ambiguity, or any request to alter
-host/session/profile state, return an admission request to the parent instead.
-Never use the bridge as automatic middleware or make every natural-language
-request cold-discover skills.
+an admission contract to the child. The child must not treat validation as execution authorization. The result and receipt also carry the effective `execution_contract` for the selected dependency closure. The host must preserve it: `one_shot` may use `cold-capability-runner`;
+`parent_user_input` must stop for parent-mediated user input; and
+`multi_turn_user_decision` must use `design-griller`, relay exactly one
+question to the user, and wait for that answer before resuming the same child.
+Never send an interactive contract to `cold-capability-runner` with a request
+for a summary or final conclusion. A read-only admission may execute a bounded
+read-only subset even when a skill's maximum declared side effect is
+`controlled_write`; it must never write. A `controlled_write` admission
+additionally records the user's implementation request, exact write set,
+minimum proof, and stop condition. For `external_read`, `unknown`, ambiguity,
+a missing execution contract, or any request to alter host/session/profile state, return an admission request to the parent instead. Never use the bridge as automatic middleware or make every natural-language request cold-discover skills.
 
 ## Boundaries
 

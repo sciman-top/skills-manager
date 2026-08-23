@@ -150,7 +150,7 @@ ZCode 使用同一个项目根 `AGENTS.md`，不需要另建项目规则文件�
 
 Codex 与 Claude 默认只投影同一份小型 managed allowlist；其余已安装技能保留为 cold catalog，需要真实任务触发后再读取。这里的“可见”不代表每个请求都会加载或调用完整 `SKILL.md`。
 
-Codex 的 `core` 另保留显式 `$grill-me` 薄入口。`构建生效` 会从受控模板投影 `design-griller` 与 `cold-capability-runner` 两个原生 custom agent 到 `~/.codex/agents`，并为替换保留备份和 ignored receipt。前者只做一题一轮、无文件修改的设计审问；后者只接收 `capability-router` 已验证的一个候选及其依赖闭包。所有 closure entrypoint 都须有路径、hash 与最大 side-effect 声明：read-only admission 只可运行无写入子集；`controlled_write` 必须另有用户实施请求、精确 write set、最低验证与 stop。未声明的 cold 技能保持 `unknown`、拒绝 runner admission。它们不会切换共享 skill profile，也不会对每条自然语言请求自动 cold discovery。模板/文件存在只证明 `filesystem_projected`；父 task 的 live sandbox override 可覆盖子代理默认 sandbox，且多轮路由必须以 fresh Codex session 的实际行为另行验收。
+Codex 的 `core` 另保留显式 `$grill-me` 薄入口。`构建生效` 会从受控模板投影 `design-griller` 与 `cold-capability-runner` 两个原生 custom agent 到 `~/.codex/agents`，并为替换保留备份和 ignored receipt。所有 cold catalog 条目都带 execution contract：未显式声明的条目是 `host_admission_required`，可发现、可校验但不能交给 runner；带 side-effect 声明的可运行 entrypoint 必须另有精确 contract。`one_shot` 只能交给后者；`parent_user_input` 必须由父任务向用户取回输入；`multi_turn_user_decision` 必须交给前者一题一轮，父任务保留 child id、转发问题并等待用户答案，不能以“给出结论”降格为单轮摘要。所有 closure entrypoint 仍须有路径、hash 与最大 side-effect 声明：read-only admission 只可运行无写入子集；`controlled_write` 必须另有用户实施请求、精确 write set、最低验证与 stop。未声明副作用的 cold 技能保持 `unknown`、拒绝 runner admission。它们不会切换共享 skill profile，也不会对每条自然语言请求自动 cold discovery。模板/文件存在只证明 `filesystem_projected`；父 task 的 live sandbox override 可覆盖子代理默认 sandbox，且多轮路由必须以 fresh Codex session 的实际行为另行验收。
 
 ```powershell
 # 默认只读取仓库侧技能面，不调用宿主 CLI

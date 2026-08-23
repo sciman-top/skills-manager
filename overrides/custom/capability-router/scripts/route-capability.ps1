@@ -91,6 +91,58 @@ function Get-CatalogPayload($Catalog) {
     return $payload
 }
 
+function New-HostAdmissionExecutionContract([string]$StopCondition = 'admission_required') {
+    return [pscustomobject][ordered]@{
+        mode = 'host_admission_required'
+        native_agent = ''
+        conversation_owner = 'parent'
+        stop_condition = $StopCondition
+    }
+}
+
+function Resolve-ExecutionContract($Contract) {
+    $default = New-HostAdmissionExecutionContract
+    if ($null -eq $Contract) { return [pscustomobject]@{ valid = $true; contract = $default; finding = $null } }
+    if ($Contract -isnot [pscustomobject] -and $Contract -isnot [System.Collections.IDictionary]) {
+        return [pscustomobject]@{ valid = $false; contract = $default; finding = 'Execution contract must be an object.' }
+    }
+    $mode = ([string]$Contract.mode).Trim().ToLowerInvariant()
+    $nativeAgent = ([string]$Contract.native_agent).Trim()
+    $conversationOwner = ([string]$Contract.conversation_owner).Trim().ToLowerInvariant()
+    $stopCondition = ([string]$Contract.stop_condition).Trim().ToLowerInvariant()
+    $valid = switch ($mode) {
+        'one_shot' { $nativeAgent -eq 'cold-capability-runner' -and $conversationOwner -eq 'runner' -and $stopCondition -eq 'parent_contract' }
+        'parent_user_input' { [string]::IsNullOrWhiteSpace($nativeAgent) -and $conversationOwner -eq 'parent' -and $stopCondition -eq 'user_input_required' }
+        'multi_turn_user_decision' { $nativeAgent -eq 'design-griller' -and $conversationOwner -eq 'parent' -and $stopCondition -eq 'one_question_then_wait' }
+        'host_admission_required' { [string]::IsNullOrWhiteSpace($nativeAgent) -and $conversationOwner -eq 'parent' -and $stopCondition -in @('admission_required', 'contract_conflict') }
+        default { $false }
+    }
+    if (-not $valid) {
+        return [pscustomobject]@{ valid = $false; contract = $default; finding = 'Execution contract mode, native agent, conversation owner, or stop condition is invalid.' }
+    }
+    return [pscustomobject]@{
+        valid = $true
+        contract = [pscustomobject][ordered]@{
+            mode = $mode
+            native_agent = $nativeAgent
+            conversation_owner = $conversationOwner
+            stop_condition = $stopCondition
+        }
+        finding = $null
+    }
+}
+
+function Get-EffectiveExecutionContract([object[]]$Rows) {
+    if (@($Rows).Count -eq 0) { return New-HostAdmissionExecutionContract }
+    $contracts = @($Rows | ForEach-Object { $_.execution_contract })
+    if (@($contracts | Where-Object mode -eq 'host_admission_required').Count -gt 0) { return New-HostAdmissionExecutionContract }
+    $multiTurn = @($contracts | Where-Object mode -eq 'multi_turn_user_decision')
+    if ($multiTurn.Count -gt 0) { return $multiTurn[0] }
+    $parentInput = @($contracts | Where-Object mode -eq 'parent_user_input')
+    if ($parentInput.Count -gt 0) { return $parentInput[0] }
+    return @($contracts | Where-Object mode -eq 'one_shot')[0]
+}
+
 function Resolve-Catalog([string]$Explicit, [bool]$AllowAutoDiscovery) {
     if (-not [string]::IsNullOrWhiteSpace($Explicit)) {
         if (Test-Path -LiteralPath $Explicit -PathType Leaf) {
@@ -140,6 +192,7 @@ $catalogFile = ''
 $catalogRoot = ''
 $managedRoot = ''
 $catalogDependencies = @{}
+$catalogExecutionContracts = @{}
 $allAvailableRows = @()
 $requestValid = $true
 $stale = $false
@@ -248,6 +301,15 @@ if ($null -ne $catalog) {
             }
             if ([string]$skill.side_effect -notin @('read_only', 'external_read', 'controlled_write', 'unknown')) {
                 $catalogFindings.Add((New-RouterFinding 'workflow_side_effect_invalid' ($pathPrefix + '.side_effect') 'Workflow side effect must be read_only, external_read, controlled_write, or unknown.')) | Out-Null
+            }
+            $rawExecutionContract = $null
+            if (Test-ObjectProperty $skill 'execution_contract') { $rawExecutionContract = $skill.execution_contract }
+            $executionContractResult = Resolve-ExecutionContract $rawExecutionContract
+            if (-not $executionContractResult.valid) {
+                $catalogFindings.Add((New-RouterFinding 'execution_contract_invalid' ($pathPrefix + '.execution_contract') [string]$executionContractResult.finding)) | Out-Null
+            }
+            elseif ($uniqueName) {
+                $catalogExecutionContracts[$name] = $executionContractResult.contract
             }
             $dependencies = [System.Collections.Generic.List[string]]::new()
             if (Test-ObjectProperty $skill 'dependencies') {
@@ -362,6 +424,7 @@ if ($catalogFindings.Count -eq 0 -and $null -ne $catalog) {
                     availability = 'available'
                     load_side_effect = 'read_only'
                     side_effect = [string]$skill.side_effect
+                    execution_contract = if ($catalogExecutionContracts.ContainsKey($name)) { $catalogExecutionContracts[$name] } else { New-HostAdmissionExecutionContract }
                     dependencies = @($catalogDependencies[$name])
                     entrypoint_hash_validated = $true
                     contained = $true
@@ -427,16 +490,20 @@ if ($rootSelectionPass) {
 if (-not $closurePass) { $validatedClosure.Clear() }
 $validatedClosureRows = @($validatedClosure.ToArray())
 $loadPass = $rootSelectionPass -and $closurePass
+$effectiveExecutionContract = if ($loadPass) { Get-EffectiveExecutionContract $validatedClosureRows } else { New-HostAdmissionExecutionContract }
 $sideEffectRows = if ($loadPass) { $validatedClosureRows } else { $selectedRows }
 $requiresReview = @($sideEffectRows | Where-Object side_effect -ne 'read_only').Count -gt 0
 $authorizationReason = if ($selectedRows.Count -eq 0) { 'no_candidate_selected' }
+elseif ($effectiveExecutionContract.mode -eq 'host_admission_required') { 'execution_contract_requires_host_admission' }
+elseif ($effectiveExecutionContract.mode -eq 'parent_user_input') { 'execution_contract_requires_parent_user_input' }
+elseif ($effectiveExecutionContract.mode -eq 'multi_turn_user_decision') { 'execution_contract_requires_interactive_bridge' }
 elseif ($requiresReview) { 'workflow_side_effect_requires_host_review' }
 else { 'host_authorization_required' }
 $loadValidation = [ordered]@{
     requested = $requestedNames
     pass = $loadPass
     scope = 'skill_dependency_closure_load_only'
-    checks = @('catalog_schema', 'catalog_fingerprint', 'catalog_root_containment', 'entrypoint_hash', 'availability', 'dependency_closure')
+    checks = @('catalog_schema', 'catalog_fingerprint', 'catalog_root_containment', 'entrypoint_hash', 'availability', 'dependency_closure', 'execution_contract')
 }
 $routingReceiptInput = [ordered]@{
     query_sha256 = Get-TextSha256 $Query
@@ -456,6 +523,7 @@ $routingReceipt = [ordered]@{
     requested_candidates = $requestedNames
     validated_candidates = if ($loadPass) { @($selectedRows | ForEach-Object { [string]$_.name }) } else { @() }
     validated_closure = if ($loadPass) { @($validatedClosureRows | ForEach-Object { [string]$_.name }) } else { @() }
+    execution_contract = $effectiveExecutionContract
     status = if ($loadPass) { 'validated' } elseif ($catalogStatus -eq 'current' -and $requestValid) { 'candidates_returned' } else { 'blocked' }
     truth_boundary = if ($loadPass) { 'candidate_load_validated' } elseif ($catalogStatus -eq 'current' -and $requestValid) { 'candidate_discovery_only' } else { 'candidate_discovery_blocked' }
     writes_performed = $false
@@ -475,11 +543,12 @@ $routingReceipt = [ordered]@{
     retrieval = [ordered]@{ strategy = 'catalog_discovery'; candidates = $visible; truncated = $truncated }
     selected = $selectedRows
     validated_closure = $validatedClosureRows
+    execution_contract = $effectiveExecutionContract
     excluded = @($excluded.ToArray())
     load_validation = $loadValidation
     validation = $loadValidation
     routing_receipt = $routingReceipt
-    execution_authorization = [ordered]@{ status = 'not_granted'; requires_review = $requiresReview; reason = $authorizationReason }
+    execution_authorization = [ordered]@{ status = 'not_granted'; requires_review = $requiresReview; reason = $authorizationReason; execution_contract = $effectiveExecutionContract }
     writes_performed = $false
     provider_calls = 0
     native_mutations = 0

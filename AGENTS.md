@@ -9,7 +9,7 @@
 - 真值层级为 `repo_verified -> filesystem_projected -> host_loaded -> live_accepted`；低层证据不得外推。
 
 ## A. 仓库真值与领域不变量
-- `build.ps1` 从 `src/` 生成根 `skills.ps1`，并从 `overrides/{custom,patches,resources}` 生成 `agent/`；禁止手改生成物。
+- `build.ps1` 只从 `src/` 生成根 `skills.ps1`；`skills.ps1 构建生效` 才会从 `overrides/{custom,patches,resources}` 物化 `agent/` 并执行受控投影；禁止手改生成物。
 - `vendor/`、`imports/`、`agent/` 与 ignored `reports/` 是物化或运行目录；先改 source/config/override，再构建。
 - AuditTargets 运行包固定为同一 run 目录内的 `snapshot.json`、`recommendations.json`、`receipt.json`；freshness、target drift、授权、补偿/回滚与真值边界必须 fail closed。
 - Rule Estate 写入必须绑定 reviewed input、精确 scope/token/before-hash、receipt 与回滚；全局规则投影必须绑定 source/target hash、plan token、备份与精确回滚。

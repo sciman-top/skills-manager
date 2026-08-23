@@ -93,6 +93,11 @@ Describe 'Native agent bridge' {
 
         $runner | Should -Match 'Validation authorizes reading, never execution'
         $runner | Should -Match 'full validated dependency closure'
+        $runner | Should -Match 'effective execution contract'
+        $runner | Should -Match 'execution_contract.mode=one_shot'
+        $runner | Should -Match 'multi_turn_user_decision'
+        $runner | Should -Match 'interactive_bridge_required'
+        $runner | Should -Match 'never overrides an interactive contract'
         $runner | Should -Match 'validated closure contains the selected entry plus every declared dependency'
         $runner | Should -Match 'requested_operation=read_only'
         $runner | Should -Match 'even if a closure member declares controlled_write'
@@ -102,5 +107,9 @@ Describe 'Native agent bridge' {
         $runner | Should -Match 'requested_operation=controlled_write'
         $runner | Should -Match 'external_read, unknown side effects'
         $runner | Should -Match 'Never spawn subagents'
+
+        $griller = Get-BridgeTemplateText 'overrides\resources\native-agent-bridge\design-griller.toml'
+        $griller | Should -Match 'status=awaiting_user_answer'
+        $griller | Should -Match 'never overrides this wait state'
     }
 }

@@ -153,6 +153,11 @@ unified_exec = true
                     grilling = 'read_only'
                     'domain-modeling' = 'controlled_write'
                 }
+                execution_contracts = [pscustomobject]@{
+                    'grill-with-docs' = [pscustomobject]@{ mode = 'multi_turn_user_decision'; native_agent = 'design-griller'; conversation_owner = 'parent'; stop_condition = 'one_question_then_wait' }
+                    grilling = [pscustomobject]@{ mode = 'multi_turn_user_decision'; native_agent = 'design-griller'; conversation_owner = 'parent'; stop_condition = 'one_question_then_wait' }
+                    'domain-modeling' = [pscustomobject]@{ mode = 'one_shot'; native_agent = 'cold-capability-runner'; conversation_owner = 'runner'; stop_condition = 'parent_contract' }
+                }
             }
         }
 
@@ -162,8 +167,36 @@ unified_exec = true
 
         $grill.side_effect | Should -Be 'controlled_write'
         @($grill.dependencies) | Should -Be @('domain-modeling','grilling')
+        $grill.execution_contract.mode | Should -Be 'multi_turn_user_decision'
+        $grill.execution_contract.native_agent | Should -Be 'design-griller'
         $grilling.side_effect | Should -Be 'read_only'
+        $grilling.execution_contract.stop_condition | Should -Be 'one_question_then_wait'
         $grilling.dependencies.Count | Should -Be 0
+    }
+
+    It 'fails closed when a declared cold workflow side effect lacks an execution contract' {
+        $managed = Join-Path $TestDrive 'missing-contract-catalog-managed'
+        New-ProjectionSkill $managed 'demo' 'demo' | Out-Null
+        $projection = [pscustomobject]@{
+            managed_source_path = $managed
+            discovery_catalog = [pscustomobject]@{
+                side_effects = [pscustomobject]@{ demo = 'read_only' }
+            }
+        }
+
+        { New-SkillDiscoveryCatalogDocument $projection } | Should -Throw '*execution_contract*demo*'
+    }
+
+    It 'keeps undeclared cold skills discoverable but requires host admission before a runner may execute them' {
+        $managed = Join-Path $TestDrive 'default-contract-catalog-managed'
+        New-ProjectionSkill $managed 'demo' 'demo' | Out-Null
+        $catalog = New-SkillDiscoveryCatalogDocument ([pscustomobject]@{ managed_source_path = $managed })
+        $demo = @($catalog.skills | Where-Object name -eq 'demo')[0]
+
+        $demo.side_effect | Should -Be 'unknown'
+        $demo.execution_contract.mode | Should -Be 'host_admission_required'
+        $demo.execution_contract.conversation_owner | Should -Be 'parent'
+        $demo.execution_contract.stop_condition | Should -Be 'admission_required'
     }
 
     It 'rejects dangling cold side-effect and dependency declarations' {

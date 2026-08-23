@@ -69,7 +69,7 @@
 - Personalization、Work Web instructions 与本机 `AGENTS.md` 不等同或自动互投；多文件夹仅 primary 启动任务、Git 与自动发现，secondary 仅读写。
 ### B.2 诊断与强制
 - 最小诊断用 `codex --version/help`；加载核验优先新 run 的 `codex debug prompt-input`，必要时再用官方建议的指令摘要探针。扩展命令须由当前 help 证明；不可用按 `platform_na` 记录替代证据/复测条件，日志仅补证。
-- 宿主先按可见元数据选技能；仅当用户明确要求使用当前不可见的本地技能，或宿主高置信度判定可见技能不足且确需专门工作流时，才一次调用 `capability-router`（完整请求、至多两个宿主选择的 domain hint），由宿主在返回候选中语义选择并精确校验候选及依赖闭包，再按 admission 交给原生 cold runner；提及/讨论技能或语义不确定时不是调用，默认通用推理或可见技能；不得作每请求 middleware。
+- 宿主先按可见元数据选技能；仅当用户明确要求使用当前不可见的本地技能，或宿主高置信度判定可见技能不足且确需专门工作流时，才一次调用 `capability-router`（完整请求、至多两个宿主选择的 domain hint），由宿主在返回候选中语义选择并精确校验候选及依赖闭包。显式与隐式命中都必须保留 router 返回的 `execution_contract`：`one_shot` 才可按 admission 交给 `cold-capability-runner`；`parent_user_input` 必须停在用户输入；`multi_turn_user_decision` 必须由 `design-griller` 一题一轮、父任务转发并等待同一 child 的用户答案，禁止用“结论/停止”指令降格为单轮摘要；缺失/冲突契约或 `unknown`/external 副作用不得执行。提及/讨论技能或语义不确定时不是调用，默认通用推理或可见技能；不得作每请求 middleware。
 - 仅当至少两个切片可独立验证、write set 互斥且并行净收益为正时派代理；否则串行。委派只声明完成该切片所需的 scope、write set、proof 与 stop，不建立固定模型矩阵、代理层级或 wave 治理。
 - 指定非默认 `agent_type` 时，`fork_turns` 只允许 `"none"` 或正整数字符串，禁止 `"all"`；仅观察到 `started`、有效 child thread id 与终态 `completed` 才可报告子代理成功。spawn 失败可由主代理串行接管，但必须记录 `fallback=serial`。
 - 项目层规则仅在 trusted repo 生效。non-managed hook 按哈希 review/trust，变化后重信任；fresh session 只证明默认路径，specialized tools 可绕过。

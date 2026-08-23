@@ -72,6 +72,48 @@ Describe 'Capability router fallback' {
         $result.routing_receipt.truth_boundary | Should -Be 'candidate_load_validated'
         @($result.routing_receipt.validated_candidates) | Should -Be @('codebase-design')
         @($result.routing_receipt.validated_closure) | Should -Be @('codebase-design')
+        $result.execution_contract.mode | Should -Be 'host_admission_required'
+        $result.routing_receipt.execution_contract.stop_condition | Should -Be 'admission_required'
+        $result.execution_authorization.reason | Should -Be 'execution_contract_requires_host_admission'
+    }
+
+    It 'preserves an interactive closure contract and refuses to reduce it to one-shot runner execution' {
+        $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
+        $document.skills[0] | Add-Member -NotePropertyName execution_contract -NotePropertyValue ([pscustomobject]@{
+                mode = 'multi_turn_user_decision'
+                native_agent = 'design-griller'
+                conversation_owner = 'parent'
+                stop_condition = 'one_question_then_wait'
+            })
+        Write-TestCatalog $document $catalog
+
+        $result = & $router -Query 'grill this proposal' -CatalogPath $catalog -Candidate 'skill|codebase-design' | ConvertFrom-Json
+
+        $result.load_validation.pass | Should -Be $true
+        $result.load_validation.checks | Should -Contain 'execution_contract'
+        $result.execution_contract.mode | Should -Be 'multi_turn_user_decision'
+        $result.execution_contract.native_agent | Should -Be 'design-griller'
+        $result.execution_contract.conversation_owner | Should -Be 'parent'
+        $result.execution_contract.stop_condition | Should -Be 'one_question_then_wait'
+        $result.execution_authorization.reason | Should -Be 'execution_contract_requires_interactive_bridge'
+        $result.routing_receipt.execution_contract.mode | Should -Be 'multi_turn_user_decision'
+    }
+
+    It 'fails closed when a catalog execution contract is malformed' {
+        $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
+        $document.skills[0] | Add-Member -NotePropertyName execution_contract -NotePropertyValue ([pscustomobject]@{
+                mode = 'multi_turn_user_decision'
+                native_agent = 'cold-capability-runner'
+                conversation_owner = 'runner'
+                stop_condition = 'parent_contract'
+            })
+        Write-TestCatalog $document $catalog
+
+        $result = & $router -Query 'design' -CatalogPath $catalog -Candidate 'skill|codebase-design' | ConvertFrom-Json
+
+        $result.catalog.status | Should -Be 'invalid'
+        $result.load_validation.pass | Should -Be $false
+        @($result.catalog.findings.code) | Should -Contain 'execution_contract_invalid'
     }
 
     It 'validates the selected candidate dependency closure, including declared side effects' {
@@ -295,9 +337,12 @@ Describe 'Capability router fallback' {
         $skill | Should -Match 'routing_receipt'
         $skill | Should -Match 'candidate_load_validated'
         $skill | Should -Match 'Native cold-capability handoff'
+        $skill | Should -Match 'execution_contract'
+        $skill | Should -Match 'multi_turn_user_decision'
+        $skill | Should -Match 'design-griller'
         $skill | Should -Match 'not treat validation as execution authorization'
         $skill | Should -Match 'Never use the bridge as automatic middleware'
-        $skill | Should -Match 'exact write set, minimum proof, and stop condition'
+        $skill | Should -Match 'exact write set,\s+minimum proof, and stop condition'
         $skill | Should -Match 'reliable binary “skill request”'
         $skill | Should -Match 'high-confidence conclusion'
     }

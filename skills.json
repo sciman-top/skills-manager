@@ -104,6 +104,26 @@
         "grill-with-docs": "controlled_write",
         "grilling": "read_only"
       },
+      "execution_contracts": {
+        "domain-modeling": {
+          "mode": "one_shot",
+          "native_agent": "cold-capability-runner",
+          "conversation_owner": "runner",
+          "stop_condition": "parent_contract"
+        },
+        "grill-with-docs": {
+          "mode": "multi_turn_user_decision",
+          "native_agent": "design-griller",
+          "conversation_owner": "parent",
+          "stop_condition": "one_question_then_wait"
+        },
+        "grilling": {
+          "mode": "multi_turn_user_decision",
+          "native_agent": "design-griller",
+          "conversation_owner": "parent",
+          "stop_condition": "one_question_then_wait"
+        }
+      },
       "domain_memberships": {
         "browser": [
           "agent-browser",

@@ -60,6 +60,66 @@ function Get-SkillDiscoverySideEffects($discoveryCfg) {
     return $sideEffects
 }
 
+function New-DefaultSkillExecutionContract() {
+    return [pscustomobject][ordered]@{
+        mode = 'host_admission_required'
+        native_agent = ''
+        conversation_owner = 'parent'
+        stop_condition = 'admission_required'
+    }
+}
+
+function Get-SkillDiscoveryExecutionContracts($discoveryCfg) {
+    $contracts = @{}
+    if ($null -eq $discoveryCfg -or $discoveryCfg.PSObject.Properties.Match('execution_contracts').Count -eq 0 -or $null -eq $discoveryCfg.execution_contracts) {
+        return $contracts
+    }
+
+    $raw = $discoveryCfg.execution_contracts
+    Need ($raw -is [pscustomobject] -or $raw -is [System.Collections.IDictionary]) 'skill_projection.discovery_catalog.execution_contracts 必须是对象'
+    $properties = if ($raw -is [System.Collections.IDictionary]) {
+        @($raw.Keys | ForEach-Object { [pscustomobject]@{ Name = [string]$_; Value = $raw[$_] } })
+    }
+    else { @($raw.PSObject.Properties) }
+
+    foreach ($property in $properties) {
+        $name = ([string]$property.Name).Trim()
+        $contract = $property.Value
+        Need (-not [string]::IsNullOrWhiteSpace($name)) 'skill_projection.discovery_catalog.execution_contracts 不能包含空技能名'
+        Need ($null -ne $contract) ("skill_projection.discovery_catalog.execution_contracts.{0} 不能为空" -f $name)
+        Need ($contract -is [pscustomobject] -or $contract -is [System.Collections.IDictionary]) ("skill_projection.discovery_catalog.execution_contracts.{0} 必须是对象" -f $name)
+        $mode = ([string]$contract.mode).Trim().ToLowerInvariant()
+        $nativeAgent = ([string]$contract.native_agent).Trim()
+        $conversationOwner = ([string]$contract.conversation_owner).Trim().ToLowerInvariant()
+        $stopCondition = ([string]$contract.stop_condition).Trim().ToLowerInvariant()
+        Need ($mode -in @('one_shot', 'parent_user_input', 'multi_turn_user_decision')) ("skill_projection.discovery_catalog.execution_contracts.{0}.mode 不受支持" -f $name)
+        switch ($mode) {
+            'one_shot' {
+                Need ($nativeAgent -eq 'cold-capability-runner') ("skill_projection.discovery_catalog.execution_contracts.{0}.native_agent 必须是 cold-capability-runner" -f $name)
+                Need ($conversationOwner -eq 'runner') ("skill_projection.discovery_catalog.execution_contracts.{0}.conversation_owner 必须是 runner" -f $name)
+                Need ($stopCondition -eq 'parent_contract') ("skill_projection.discovery_catalog.execution_contracts.{0}.stop_condition 必须是 parent_contract" -f $name)
+            }
+            'parent_user_input' {
+                Need ([string]::IsNullOrWhiteSpace($nativeAgent)) ("skill_projection.discovery_catalog.execution_contracts.{0}.native_agent 必须为空" -f $name)
+                Need ($conversationOwner -eq 'parent') ("skill_projection.discovery_catalog.execution_contracts.{0}.conversation_owner 必须是 parent" -f $name)
+                Need ($stopCondition -eq 'user_input_required') ("skill_projection.discovery_catalog.execution_contracts.{0}.stop_condition 必须是 user_input_required" -f $name)
+            }
+            'multi_turn_user_decision' {
+                Need ($nativeAgent -eq 'design-griller') ("skill_projection.discovery_catalog.execution_contracts.{0}.native_agent 必须是 design-griller" -f $name)
+                Need ($conversationOwner -eq 'parent') ("skill_projection.discovery_catalog.execution_contracts.{0}.conversation_owner 必须是 parent" -f $name)
+                Need ($stopCondition -eq 'one_question_then_wait') ("skill_projection.discovery_catalog.execution_contracts.{0}.stop_condition 必须是 one_question_then_wait" -f $name)
+            }
+        }
+        $contracts[$name] = [pscustomobject][ordered]@{
+            mode = $mode
+            native_agent = $nativeAgent
+            conversation_owner = $conversationOwner
+            stop_condition = $stopCondition
+        }
+    }
+    return $contracts
+}
+
 function Get-SkillDiscoveryDependencyMap() {
     $contractPath = Join-Path $Root 'config\skill-dependency-closure.json'
     Need (Test-Path -LiteralPath $contractPath -PathType Leaf) '冷发现依赖闭包合同缺失：config/skill-dependency-closure.json'
@@ -90,12 +150,14 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
     $domainPurpose = [ordered]@{}
     $membership = @{}
     $sideEffects = @{}
+    $executionContracts = @{}
     $dependencyMap = Get-SkillDiscoveryDependencyMap
     $fallbackDomain = 'other'
     $fallbackPurpose = 'Installed cold skills not assigned to a narrower domain; inspect only when no specific domain covers the request.'
     if ($projectionCfg.PSObject.Properties.Match('discovery_catalog').Count -gt 0 -and $null -ne $projectionCfg.discovery_catalog) {
         $discoveryCfg = $projectionCfg.discovery_catalog
         $sideEffects = Get-SkillDiscoverySideEffects $discoveryCfg
+        $executionContracts = Get-SkillDiscoveryExecutionContracts $discoveryCfg
         if ($discoveryCfg.PSObject.Properties.Match('fallback_domain').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$discoveryCfg.fallback_domain)) { $fallbackDomain = [string]$discoveryCfg.fallback_domain }
         if ($discoveryCfg.PSObject.Properties.Match('fallback_purpose').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$discoveryCfg.fallback_purpose)) { $fallbackPurpose = [string]$discoveryCfg.fallback_purpose }
         if ($discoveryCfg.PSObject.Properties.Match('domain_memberships').Count -gt 0 -and $null -ne $discoveryCfg.domain_memberships) {
@@ -127,6 +189,7 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
                 domains = @($membership[$name] | Sort-Object)
                 load_side_effect = 'read_only'
                 side_effect = if ($sideEffects.ContainsKey($name)) { [string]$sideEffects[$name] } else { 'unknown' }
+                execution_contract = if ($executionContracts.ContainsKey($name)) { $executionContracts[$name] } else { New-DefaultSkillExecutionContract }
                 dependencies = if ($dependencyMap.ContainsKey($name)) { @($dependencyMap[$name]) } else { @() }
                 routing_rules = @()
             }) | Out-Null
@@ -137,6 +200,10 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
     }
     foreach ($configuredName in @($sideEffects.Keys | Sort-Object)) {
         Need ($actualNames.Contains([string]$configuredName)) ("skill_projection.discovery_catalog.side_effects 引用了不存在的 canonical skill：{0}" -f $configuredName)
+        Need ($executionContracts.ContainsKey([string]$configuredName)) ("skill_projection.discovery_catalog.side_effects 的可执行技能必须声明 execution_contract：{0}" -f $configuredName)
+    }
+    foreach ($configuredName in @($executionContracts.Keys | Sort-Object)) {
+        Need ($actualNames.Contains([string]$configuredName)) ("skill_projection.discovery_catalog.execution_contracts 引用了不存在的 canonical skill：{0}" -f $configuredName)
     }
     foreach ($caller in @($dependencyMap.Keys | Sort-Object)) {
         if (-not $actualNames.Contains($caller)) { continue }
