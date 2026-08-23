@@ -37,6 +37,15 @@
           ],
           "exclude": []
         },
+        "design": {
+          "include": [
+            "grill-me",
+            "grilling",
+            "grill-with-docs",
+            "domain-modeling"
+          ],
+          "exclude": []
+        },
         "full-compatible": {
           "include_all": true,
           "exclude": []
@@ -528,6 +537,11 @@
       "vendor": "manual"
     },
     {
+      "to": "grill-me",
+      "from": "grill-me",
+      "vendor": "manual"
+    },
+    {
       "from": "microsoft-code-reference",
       "vendor": "manual",
       "to": "microsoft-code-reference"
@@ -786,6 +800,14 @@
       "ref": "391a2701dd948f94f56a39f7533f8eea9a859c87",
       "skill": "skills\\engineering\\codebase-design",
       "repo": "https://github.com/mattpocock/skills.git",
+      "mode": "manual",
+      "sparse": true
+    },
+    {
+      "name": "grill-me",
+      "repo": "https://github.com/mattpocock/skills.git",
+      "ref": "main",
+      "skill": "skills\\productivity\\grill-me",
       "mode": "manual",
       "sparse": true
     },

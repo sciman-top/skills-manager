@@ -21,6 +21,15 @@
       "local_delta_reason": "Narrow implicit activation to explicit design grilling and preserve local domain-document and Codex invocation boundaries."
     },
     {
+      "name": "grilling",
+      "upstream_repo": "https://github.com/mattpocock/skills.git",
+      "upstream_path": "skills/productivity/grilling",
+      "base_revision": "5b15a47f2d7150f545fbcacbfe381787fc0230dc",
+      "reviewed_revision": "5b15a47f2d7150f545fbcacbfe381787fc0230dc",
+      "license": "MIT",
+      "local_delta_reason": "Use an explicit, one-question-at-a-time interview for Chinese-first design review; preserve agent-owned fact finding, user-owned decisions, and the no-action confirmation gate."
+    },
+    {
       "name": "find-skills",
       "upstream_repo": "https://github.com/vercel-labs/skills.git",
       "upstream_path": "skills/find-skills",

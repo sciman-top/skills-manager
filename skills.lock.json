@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-08-21T12:02:19.9465467Z",
+  "generated_at": "2026-08-23T05:36:44.1875940Z",
   "vendors": [
     {
       "name": "agent-skills",
@@ -156,6 +156,15 @@
       "skill": "skills\\find-skills",
       "sparse": true,
       "commit": "435076e78988e1e6ec40d00b0b1d76bdbbc5419a"
+    },
+    {
+      "name": "grill-me",
+      "mode": "manual",
+      "repo": "https://github.com/mattpocock/skills.git",
+      "ref": "main",
+      "skill": "skills\\productivity\\grill-me",
+      "sparse": true,
+      "commit": "5b15a47f2d7150f545fbcacbfe381787fc0230dc"
     },
     {
       "name": "grill-with-docs",
