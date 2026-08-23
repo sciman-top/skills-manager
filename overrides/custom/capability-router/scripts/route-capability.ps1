@@ -52,6 +52,37 @@ function Get-NormalizedNames([string[]]$Values) {
     return @($Values | ForEach-Object { ([string]$_ -split '\|')[-1].Trim() } | Where-Object { $_ })
 }
 
+function Get-DependencyClosure([string]$RootName, [System.Collections.IDictionary]$DependencyMap) {
+    $ordered = [System.Collections.Generic.List[string]]::new()
+    $visited = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $visiting = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $missing = [System.Collections.Generic.List[string]]::new()
+    $state = [pscustomobject]@{ has_cycle = $false }
+    $walk = $null
+    $walk = {
+        param([string]$Name)
+        if ($state.has_cycle -or $visited.Contains($Name)) { return }
+        if (-not $DependencyMap.Contains($Name)) {
+            if (-not $missing.Contains($Name)) { $missing.Add($Name) | Out-Null }
+            return
+        }
+        if (-not $visiting.Add($Name)) {
+            $state.has_cycle = $true
+            return
+        }
+        $ordered.Add($Name) | Out-Null
+        foreach ($dependency in @($DependencyMap[$Name])) { & $walk ([string]$dependency) }
+        $visiting.Remove($Name) | Out-Null
+        $visited.Add($Name) | Out-Null
+    }
+    & $walk $RootName
+    return [pscustomobject][ordered]@{
+        names = @($ordered.ToArray())
+        has_cycle = [bool]$state.has_cycle
+        missing = @($missing.ToArray())
+    }
+}
+
 function Get-CatalogPayload($Catalog) {
     $payload = [ordered]@{}
     foreach ($property in @($Catalog.PSObject.Properties)) {
@@ -108,6 +139,8 @@ $catalogSkillCount = 0
 $catalogFile = ''
 $catalogRoot = ''
 $managedRoot = ''
+$catalogDependencies = @{}
+$allAvailableRows = @()
 $requestValid = $true
 $stale = $false
 
@@ -181,12 +214,14 @@ if ($null -ne $catalog) {
         foreach ($skill in @($catalog.skills)) {
             $pathPrefix = "$.skills[{0}]" -f $skillIndex
             $name = ([string]$skill.name).Trim()
+            $uniqueName = $false
             if ([string]::IsNullOrWhiteSpace($name)) {
                 $catalogFindings.Add((New-RouterFinding 'skill_name_missing' ($pathPrefix + '.name') 'Skill name is required.')) | Out-Null
             }
             elseif (-not $skillNameSet.Add($name)) {
                 $catalogFindings.Add((New-RouterFinding 'skill_name_duplicate' ($pathPrefix + '.name') 'Skill names must be unique.')) | Out-Null
             }
+            else { $uniqueName = $true }
             if ([string]::IsNullOrWhiteSpace([string]$skill.description)) {
                 $catalogFindings.Add((New-RouterFinding 'skill_description_missing' ($pathPrefix + '.description') 'Skill description is required for host semantic selection.')) | Out-Null
             }
@@ -214,6 +249,30 @@ if ($null -ne $catalog) {
             if ([string]$skill.side_effect -notin @('read_only', 'external_read', 'controlled_write', 'unknown')) {
                 $catalogFindings.Add((New-RouterFinding 'workflow_side_effect_invalid' ($pathPrefix + '.side_effect') 'Workflow side effect must be read_only, external_read, controlled_write, or unknown.')) | Out-Null
             }
+            $dependencies = [System.Collections.Generic.List[string]]::new()
+            if (Test-ObjectProperty $skill 'dependencies') {
+                $rawDependencies = $skill.dependencies
+                if ($null -eq $rawDependencies -or $rawDependencies -is [string] -or $rawDependencies -isnot [System.Collections.IEnumerable]) {
+                    $catalogFindings.Add((New-RouterFinding 'skill_dependencies_invalid' ($pathPrefix + '.dependencies') 'Skill dependencies must be an array of skill names.')) | Out-Null
+                }
+                else {
+                    $dependencyNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+                    foreach ($rawDependency in @($rawDependencies)) {
+                        $dependencyName = ([string]$rawDependency).Trim()
+                        if ([string]::IsNullOrWhiteSpace($dependencyName)) {
+                            $catalogFindings.Add((New-RouterFinding 'skill_dependency_empty' ($pathPrefix + '.dependencies') 'Skill dependencies must not contain empty names.')) | Out-Null
+                        }
+                        elseif (-not $dependencyNames.Add($dependencyName)) {
+                            $catalogFindings.Add((New-RouterFinding 'skill_dependency_duplicate' ($pathPrefix + '.dependencies') 'Skill dependencies must be unique.')) | Out-Null
+                        }
+                        elseif ($dependencyName.Equals($name, [System.StringComparison]::OrdinalIgnoreCase)) {
+                            $catalogFindings.Add((New-RouterFinding 'skill_dependency_self' ($pathPrefix + '.dependencies') 'A skill must not depend on itself.')) | Out-Null
+                        }
+                        else { $dependencies.Add($dependencyName) | Out-Null }
+                    }
+                }
+            }
+            if ($uniqueName) { $catalogDependencies[$name] = @($dependencies.ToArray()) }
             $skillDomains = @($skill.domains | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
             if ($skillDomains.Count -eq 0) {
                 $catalogFindings.Add((New-RouterFinding 'skill_domains_missing' ($pathPrefix + '.domains') 'Each skill must belong to at least one discovery domain.')) | Out-Null
@@ -232,6 +291,22 @@ if ($null -ne $catalog) {
             foreach ($member in @($domainSkills[$domainName])) {
                 if (-not $skillNameSet.Contains([string]$member)) {
                     $catalogFindings.Add((New-RouterFinding 'domain_membership_unknown' ("$.domains[{0}].skill_names" -f $domainName) 'Domain references a skill absent from the catalog.')) | Out-Null
+                }
+            }
+        }
+        foreach ($caller in @($catalogDependencies.Keys | Sort-Object)) {
+            foreach ($dependency in @($catalogDependencies[$caller])) {
+                if (-not $skillNameSet.Contains([string]$dependency)) {
+                    $catalogFindings.Add((New-RouterFinding 'skill_dependency_unknown' ("$.skills[{0}].dependencies" -f $caller) 'Skill dependency must reference a catalog skill.')) | Out-Null
+                }
+            }
+        }
+        if ($catalogFindings.Count -eq 0) {
+            foreach ($name in @($catalogDependencies.Keys | Sort-Object)) {
+                $closure = Get-DependencyClosure $name $catalogDependencies
+                if ($closure.has_cycle) {
+                    $catalogFindings.Add((New-RouterFinding 'skill_dependency_cycle' '$.skills.dependencies' 'Skill dependency graph must be acyclic.')) | Out-Null
+                    break
                 }
             }
         }
@@ -257,17 +332,13 @@ if ($catalogFindings.Count -eq 0 -and $null -ne $catalog) {
     }
 
     if ($requestValid) {
+        $availableRows = [System.Collections.Generic.List[object]]::new()
         $allowedByDomain = if ($domainNames.Count -gt 0) {
             @($domainNames | ForEach-Object { @($domainSkills[$_]) } | Sort-Object -Unique)
         }
         else { @() }
         foreach ($skill in @($catalog.skills | Sort-Object name)) {
             $name = [string]$skill.name
-            if ($domainNames.Count -gt 0 -and $name -notin $allowedByDomain) { continue }
-            if ($name -in $excludedNames) {
-                $excluded.Add([pscustomobject][ordered]@{ kind = 'skill'; name = $name; reason = 'explicitly_excluded' }) | Out-Null
-                continue
-            }
             $path = [IO.Path]::GetFullPath((Join-Path $catalogRoot ([string]$skill.relative_path)))
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
                 $stale = $true
@@ -281,7 +352,7 @@ if ($catalogFindings.Count -eq 0 -and $null -ne $catalog) {
                 $excluded.Add([pscustomobject][ordered]@{ kind = 'skill'; name = $name; reason = 'catalog_stale' }) | Out-Null
                 continue
             }
-            $rows.Add([pscustomobject][ordered]@{
+            $row = [pscustomobject][ordered]@{
                     kind = 'skill'
                     name = $name
                     description = [string]$skill.description
@@ -289,9 +360,19 @@ if ($catalogFindings.Count -eq 0 -and $null -ne $catalog) {
                     availability = 'available'
                     load_side_effect = 'read_only'
                     side_effect = [string]$skill.side_effect
+                    dependencies = @($catalogDependencies[$name])
+                    entrypoint_hash_validated = $true
                     contained = $true
-                }) | Out-Null
+                }
+            $availableRows.Add($row) | Out-Null
+            if ($domainNames.Count -gt 0 -and $name -notin $allowedByDomain) { continue }
+            if ($name -in $excludedNames) {
+                $excluded.Add([pscustomobject][ordered]@{ kind = 'skill'; name = $name; reason = 'explicitly_excluded' }) | Out-Null
+                continue
+            }
+            $rows.Add($row) | Out-Null
         }
+        $allAvailableRows = @($availableRows.ToArray())
     }
     $catalogStatus = if ($stale) { 'stale' } else { 'current' }
 }
@@ -301,7 +382,13 @@ $truncated = $allRows.Count -gt $MaxCandidates
 $visible = @($allRows | Select-Object -First $MaxCandidates)
 if ($catalogStatus -eq 'current' -and $requestValid) {
     foreach ($name in $requestedNames) {
-        $match = @($allRows | Where-Object name -eq $name)
+        if ($name -in $excludedNames) {
+            if (@($excluded | Where-Object { $_.name -eq $name -and $_.reason -eq 'explicitly_excluded' }).Count -eq 0) {
+                $excluded.Add([pscustomobject][ordered]@{ kind = 'skill'; name = $name; reason = 'explicitly_excluded' }) | Out-Null
+            }
+            continue
+        }
+        $match = @($allAvailableRows | Where-Object name -eq $name)
         if ($match.Count -eq 1) { $selected.Add($match[0]) | Out-Null }
         elseif (@($excluded | Where-Object name -eq $name).Count -eq 0) {
             $excluded.Add([pscustomobject][ordered]@{ kind = 'skill'; name = $name; reason = 'not_available' }) | Out-Null
@@ -310,17 +397,44 @@ if ($catalogStatus -eq 'current' -and $requestValid) {
 }
 
 $selectedRows = @($selected.ToArray())
-$loadPass = $catalogStatus -eq 'current' -and $requestValid -and
+$rootSelectionPass = $catalogStatus -eq 'current' -and $requestValid -and
     $requestedNames.Count -gt 0 -and $requestedNames.Count -eq $selectedRows.Count
-$requiresReview = @($selectedRows | Where-Object side_effect -ne 'read_only').Count -gt 0
+$closurePass = $rootSelectionPass
+$validatedClosure = [System.Collections.Generic.List[object]]::new()
+if ($rootSelectionPass) {
+    $availableByName = @{}
+    foreach ($row in $allAvailableRows) { $availableByName[[string]$row.name] = $row }
+    $closureNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($selectedRow in $selectedRows) {
+        $closure = Get-DependencyClosure ([string]$selectedRow.name) $catalogDependencies
+        if ($closure.has_cycle -or @($closure.missing).Count -gt 0) {
+            $closurePass = $false
+            $excluded.Add([pscustomobject][ordered]@{ kind = 'skill'; name = [string]$selectedRow.name; reason = 'dependency_closure_invalid' }) | Out-Null
+            continue
+        }
+        foreach ($closureName in @($closure.names)) {
+            if (-not $availableByName.ContainsKey([string]$closureName)) {
+                $closurePass = $false
+                $excluded.Add([pscustomobject][ordered]@{ kind = 'skill'; name = [string]$closureName; reason = 'dependency_not_available'; required_by = [string]$selectedRow.name }) | Out-Null
+                continue
+            }
+            if ($closureNames.Add([string]$closureName)) { $validatedClosure.Add($availableByName[[string]$closureName]) | Out-Null }
+        }
+    }
+}
+if (-not $closurePass) { $validatedClosure.Clear() }
+$validatedClosureRows = @($validatedClosure.ToArray())
+$loadPass = $rootSelectionPass -and $closurePass
+$sideEffectRows = if ($loadPass) { $validatedClosureRows } else { $selectedRows }
+$requiresReview = @($sideEffectRows | Where-Object side_effect -ne 'read_only').Count -gt 0
 $authorizationReason = if ($selectedRows.Count -eq 0) { 'no_candidate_selected' }
 elseif ($requiresReview) { 'workflow_side_effect_requires_host_review' }
 else { 'host_authorization_required' }
 $loadValidation = [ordered]@{
     requested = $requestedNames
     pass = $loadPass
-    scope = 'skill_entrypoint_load_only'
-    checks = @('catalog_schema', 'catalog_fingerprint', 'catalog_root_containment', 'entrypoint_hash', 'availability')
+    scope = 'skill_dependency_closure_load_only'
+    checks = @('catalog_schema', 'catalog_fingerprint', 'catalog_root_containment', 'entrypoint_hash', 'availability', 'dependency_closure')
 }
 $routingReceiptInput = [ordered]@{
     query_sha256 = Get-TextSha256 $Query
@@ -338,7 +452,8 @@ $routingReceipt = [ordered]@{
     catalog_fingerprint = [string]$routingReceiptInput.catalog_fingerprint
     selection_required = $requestedNames.Count -eq 0
     requested_candidates = $requestedNames
-    validated_candidates = @($selectedRows | ForEach-Object { [string]$_.name })
+    validated_candidates = if ($loadPass) { @($selectedRows | ForEach-Object { [string]$_.name }) } else { @() }
+    validated_closure = if ($loadPass) { @($validatedClosureRows | ForEach-Object { [string]$_.name }) } else { @() }
     status = if ($loadPass) { 'validated' } elseif ($catalogStatus -eq 'current' -and $requestValid) { 'candidates_returned' } else { 'blocked' }
     truth_boundary = if ($loadPass) { 'candidate_load_validated' } elseif ($catalogStatus -eq 'current' -and $requestValid) { 'candidate_discovery_only' } else { 'candidate_discovery_blocked' }
     writes_performed = $false
@@ -357,6 +472,7 @@ $routingReceipt = [ordered]@{
     discovery_domains = if ($null -ne $catalog -and $catalogFindings.Count -eq 0) { @($catalog.domains | Select-Object name, purpose) } else { @() }
     retrieval = [ordered]@{ strategy = 'catalog_discovery'; candidates = $visible; truncated = $truncated }
     selected = $selectedRows
+    validated_closure = $validatedClosureRows
     excluded = @($excluded.ToArray())
     load_validation = $loadValidation
     validation = $loadValidation

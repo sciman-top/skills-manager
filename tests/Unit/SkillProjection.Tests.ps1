@@ -133,10 +133,53 @@ unified_exec = true
             $catalog = Get-ContentUtf8 $catalogPath | ConvertFrom-Json
             $catalog.skills[0].load_side_effect | Should -Be 'read_only'
             $catalog.skills[0].side_effect | Should -Be 'unknown'
+            $catalog.skills[0].dependencies.Count | Should -Be 0
             @($catalog.skills | Where-Object name -eq 'demo')[0].routing_rules.Count | Should -Be 0
             $catalog.catalog_fingerprint | Should -Match '^[0-9a-f]{64}$'
         }
         finally { $DryRun = $oldDryRun }
+    }
+
+    It 'projects declared cold side effects and the transitive dependency contract' {
+        $managed = Join-Path $TestDrive 'closure-catalog-managed'
+        New-ProjectionSkill $managed 'grill-with-docs' 'grill-with-docs' | Out-Null
+        New-ProjectionSkill $managed 'grilling' 'grilling' | Out-Null
+        New-ProjectionSkill $managed 'domain-modeling' 'domain-modeling' | Out-Null
+        $projection = [pscustomobject]@{
+            managed_source_path = $managed
+            discovery_catalog = [pscustomobject]@{
+                side_effects = [pscustomobject]@{
+                    'grill-with-docs' = 'controlled_write'
+                    grilling = 'read_only'
+                    'domain-modeling' = 'controlled_write'
+                }
+            }
+        }
+
+        $catalog = New-SkillDiscoveryCatalogDocument $projection
+        $grill = @($catalog.skills | Where-Object { $_.name -eq 'grill-with-docs' })[0]
+        $grilling = @($catalog.skills | Where-Object { $_.name -eq 'grilling' })[0]
+
+        $grill.side_effect | Should -Be 'controlled_write'
+        @($grill.dependencies) | Should -Be @('domain-modeling','grilling')
+        $grilling.side_effect | Should -Be 'read_only'
+        $grilling.dependencies.Count | Should -Be 0
+    }
+
+    It 'rejects dangling cold side-effect and dependency declarations' {
+        $managed = Join-Path $TestDrive 'invalid-cold-catalog-managed'
+        New-ProjectionSkill $managed 'demo' 'demo' | Out-Null
+        $sideEffectProjection = [pscustomobject]@{
+            managed_source_path = $managed
+            discovery_catalog = [pscustomobject]@{
+                side_effects = [pscustomobject]@{ 'missing-skill' = 'read_only' }
+            }
+        }
+        { New-SkillDiscoveryCatalogDocument $sideEffectProjection } | Should -Throw '*missing-skill*'
+
+        $closureProjection = [pscustomobject]@{ managed_source_path = $managed }
+        New-ProjectionSkill $managed 'grill-with-docs' 'grill-with-docs' | Out-Null
+        { New-SkillDiscoveryCatalogDocument $closureProjection } | Should -Throw '*grill-with-docs*domain-modeling*'
     }
 
     It 'rejects a discovery domain membership that is absent from the canonical inventory' {

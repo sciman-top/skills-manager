@@ -92,6 +92,10 @@ Describe 'Native agent bridge' {
         $runner = Get-BridgeTemplateText 'overrides\resources\native-agent-bridge\cold-capability-runner.toml'
 
         $runner | Should -Match 'Validation authorizes reading, never execution'
+        $runner | Should -Match 'full validated dependency closure'
+        $runner | Should -Match 'validated closure contains the selected entry plus every declared dependency'
+        $runner | Should -Match 'requested_operation=read_only'
+        $runner | Should -Match 'even if a closure member declares controlled_write'
         $runner | Should -Match 'user requested implementation'
         $runner | Should -Match 'exact non-empty write set'
         $runner | Should -Match 'minimum proof'

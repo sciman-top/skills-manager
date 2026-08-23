@@ -146,11 +146,11 @@ ZCode 使用同一个项目根 `AGENTS.md`，不需要另建项目规则文件�
 
 ### 技能投影与 fallback
 
-宿主原生 metadata 是普通请求的首选选择面。`capability-router` 允许宿主在可见 metadata 不足时按需选择，用于 cold discovery 或 policy validation；它接受 `DomainHint`，返回候选并校验宿主选择，不作普通请求前置，不执行语义排序、不切换 profile、不写宿主状态。输出中的 `routing_receipt` 只保存 query SHA-256、候选选择、catalog fingerprint、`truth_boundary` 和写入计数，不回显原始请求；它用于证明“候选发现/候选校验”边界，不等于宿主已加载或真实调用技能。
+宿主原生 metadata 是普通请求的首选选择面。只有用户明确要求使用当前不可见的本地技能，或宿主高置信度判定没有足够的可见技能匹配完整请求且确实需要专门工作流时，才调用一次 `capability-router` 做 cold discovery 或 policy validation；它接收完整请求和至多两个宿主选择的 `DomainHint`，返回小候选集，仍由宿主语义选择。提及或讨论技能、以及语义不确定的普通请求都不是调用；不确定时默认使用通用推理或可见技能。随后 router 校验一个精确候选及其依赖闭包，不作语义排序、不切换 profile、不写宿主状态。输出中的 `routing_receipt` 只保存 query SHA-256、候选/闭包、catalog fingerprint、`truth_boundary` 和写入计数，不回显原始请求；它用于证明“候选发现/候选校验”边界，不等于宿主已加载或真实调用技能。
 
 Codex 与 Claude 默认只投影同一份小型 managed allowlist；其余已安装技能保留为 cold catalog，需要真实任务触发后再读取。这里的“可见”不代表每个请求都会加载或调用完整 `SKILL.md`。
 
-Codex 的 `core` 另保留显式 `$grill-me` 薄入口。`构建生效` 会从受控模板投影 `design-griller` 与 `cold-capability-runner` 两个原生 custom agent 到 `~/.codex/agents`，并为替换保留备份和 ignored receipt。前者只做一题一轮、无文件修改的设计审问；后者只接收 `capability-router` 已验证的单个冷技能入口：`read_only` 工作保持只读，`controlled_write` 必须再由父 task 传入用户实施请求、精确 write set、最低验证与 stop 的 admission 合同，才可在该合同内执行。它们不会切换共享 skill profile，也不会对每条自然语言请求自动 cold discovery。模板/文件存在只证明 `filesystem_projected`；父 task 的 live sandbox override 可覆盖子代理默认 sandbox，且多轮路由必须以 fresh Codex session 的实际行为另行验收。
+Codex 的 `core` 另保留显式 `$grill-me` 薄入口。`构建生效` 会从受控模板投影 `design-griller` 与 `cold-capability-runner` 两个原生 custom agent 到 `~/.codex/agents`，并为替换保留备份和 ignored receipt。前者只做一题一轮、无文件修改的设计审问；后者只接收 `capability-router` 已验证的一个候选及其依赖闭包。所有 closure entrypoint 都须有路径、hash 与最大 side-effect 声明：read-only admission 只可运行无写入子集；`controlled_write` 必须另有用户实施请求、精确 write set、最低验证与 stop。未声明的 cold 技能保持 `unknown`、拒绝 runner admission。它们不会切换共享 skill profile，也不会对每条自然语言请求自动 cold discovery。模板/文件存在只证明 `filesystem_projected`；父 task 的 live sandbox override 可覆盖子代理默认 sandbox，且多轮路由必须以 fresh Codex session 的实际行为另行验收。
 
 ```powershell
 # 默认只读取仓库侧技能面，不调用宿主 CLI

@@ -9,7 +9,27 @@ This is a narrow fallback, not a normal task preflight and not a second semantic
 
 ## Cold discovery
 
-Use only when visible native metadata cannot expose the needed local skill:
+Use only in either of these cases:
+
+- the user explicitly names a local skill that is absent from the current visible
+  metadata; or
+- the host has determined that no visible native skill is a sufficient semantic
+  match for the complete request.
+
+The second case is a bounded fallback, not a blanket preflight. Pass the
+complete request and at most two host-chosen domain hints. The router retrieves
+descriptions; the host still makes the semantic choice from that small candidate
+set. For an explicitly named invisible skill, validate that exact candidate
+instead of declaring it unavailable before checking the cold catalog.
+
+Do not pretend that ordinary language has a reliable binary “skill request”
+classifier. A quoted name, a discussion of a skill, or an ambiguous task is
+not an invocation. If the host is uncertain and can complete the request with
+ordinary reasoning or a visible skill, do that instead of cold discovery. The
+only permitted implicit trigger is a high-confidence conclusion that visible
+capabilities are insufficient and a specialized workflow is materially needed.
+The router's read-only retrieval is deliberately separated from semantic
+selection so a false positive cannot load or execute a cold skill.
 
 ```powershell
 $result = pwsh -NoProfile -File <skill-dir>/scripts/route-capability.ps1 -Query '<complete request>' -AutoDiscover | ConvertFrom-Json
@@ -28,7 +48,12 @@ $result.load_validation
 $result.execution_authorization
 ```
 
-Load validation checks only catalog schema/fingerprint, catalog-root containment, entrypoint hash, and availability. A passing `load_validation` authorizes reading that `SKILL.md` only. `execution_authorization.status` is always `not_granted`; the host must separately review the selected skill's declared workflow side effect and apply ordinary approval, sandbox, MCP, and external-write controls.
+Load validation checks catalog schema/fingerprint, catalog-root containment,
+entrypoint hashes, availability, and the selected skill's declared dependency
+closure. A passing `load_validation` authorizes reading only that validated
+closure. `execution_authorization.status` is always `not_granted`; the host
+must separately review every closure member's declared workflow side effect and
+apply ordinary approval, sandbox, MCP, and external-write controls.
 
 Every response also includes a read-only `routing_receipt`. It contains a SHA-256 of the query rather than the raw request, catalog fingerprint, requested and validated candidate names, status, and `truth_boundary`. Use it to record `candidate_discovery_only`, `candidate_load_validated`, or `candidate_discovery_blocked`; it never proves host loading, invocation, model routing, or live acceptance.
 
@@ -41,18 +66,20 @@ router has returned all of the following for the same request:
 
 - `load_validation.pass=true`;
 - `routing_receipt.truth_boundary=candidate_load_validated`;
-- one selected candidate with its validated `path` and declared `side_effect`.
+- one selected candidate plus its `validated_closure`, with validated paths and
+  declared side effects for every member.
 
-Pass the complete validation result, the original request, and the exact
-selected name to the child. The child may read that entrypoint, but it must
-not treat validation as execution authorization. A `read_only` candidate may
-perform only a bounded read-only task. A `controlled_write` candidate needs a
-separate parent admission that records the user's implementation request, its
-exact write set, minimum proof, and stop condition; it may then write only
-within that contract. For `external_read`, `unknown`, ambiguity, or any
-request to alter host/session state, return an admission request to the parent
-instead. Never use the bridge as automatic middleware or make every
-natural-language request cold-discover skills.
+Pass the complete validation result, original request, exact selected name, and
+an admission contract to the child. The child may read only the validated
+closure and must not treat validation as execution authorization. A read-only
+admission may execute a bounded read-only subset even when a skill's maximum
+declared side effect is `controlled_write`; it must never write. A
+`controlled_write` admission additionally records the user's implementation
+request, exact write set, minimum proof, and stop condition. For
+`external_read`, `unknown`, ambiguity, or any request to alter
+host/session/profile state, return an admission request to the parent instead.
+Never use the bridge as automatic middleware or make every natural-language
+request cold-discover skills.
 
 ## Boundaries
 

@@ -1,6 +1,6 @@
 interface:
   display_name: "Capability Router"
-  short_description: "Validate host-selected skill metadata against local policy"
-  default_prompt: "Use $capability-router only when visible metadata is insufficient or deterministic policy validation is required; keep host AI semantic selection and negative constraints authoritative, and never use it as middleware, switch profiles, or mutate host state."
+  short_description: "Discover and validate a cold skill when visible skills are insufficient"
+  default_prompt: "Use $capability-router exactly once when the user explicitly asks to use a local skill absent from current visible metadata, or the host has high confidence that no visible skill is a sufficient semantic match and a specialized workflow is materially needed. A quoted name, skill discussion, or ambiguous ordinary request is not an invocation; when uncertain, use ordinary reasoning or a visible skill. Pass the complete request and at most two host-chosen domain hints; keep host AI semantic selection authoritative after retrieval, validate one exact candidate and its dependency closure, and never use it as per-request middleware, switch profiles, or mutate host state."
 policy:
   allow_implicit_invocation: true

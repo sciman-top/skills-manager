@@ -60,15 +60,73 @@ Describe 'Capability router fallback' {
     It 'validates an exact candidate and reports disclosed side effects' {
         $result=& $router -Query 'design' -CatalogPath $catalog -Candidate 'skill|codebase-design'|ConvertFrom-Json
         $result.validation.pass|Should -Be $true
-        $result.validation.scope|Should -Be 'skill_entrypoint_load_only'
+        $result.validation.scope|Should -Be 'skill_dependency_closure_load_only'
         $result.load_validation.pass|Should -Be $true
         $result.selected[0].contained|Should -Be $true
         $result.selected[0].load_side_effect|Should -Be 'read_only'
         $result.selected[0].side_effect|Should -Be 'read_only'
+        $result.selected[0].entrypoint_hash_validated|Should -Be $true
+        @($result.validated_closure.name) | Should -Be @('codebase-design')
         $result.execution_authorization.status|Should -Be 'not_granted'
         $result.routing_receipt.status | Should -Be 'validated'
         $result.routing_receipt.truth_boundary | Should -Be 'candidate_load_validated'
         @($result.routing_receipt.validated_candidates) | Should -Be @('codebase-design')
+        @($result.routing_receipt.validated_closure) | Should -Be @('codebase-design')
+    }
+
+    It 'validates the selected candidate dependency closure, including declared side effects' {
+        $grillingRoot = Join-Path $root 'grilling'
+        $domainRoot = Join-Path $root 'domain-modeling'
+        New-Item -ItemType Directory -Path $grillingRoot,$domainRoot -Force | Out-Null
+        $grillingPath = Join-Path $grillingRoot 'SKILL.md'
+        $domainPath = Join-Path $domainRoot 'SKILL.md'
+        Set-Content -LiteralPath $grillingPath -Encoding UTF8 -Value "---`nname: grilling`ndescription: Read-only grilling.`n---"
+        Set-Content -LiteralPath $domainPath -Encoding UTF8 -Value "---`nname: domain-modeling`ndescription: Domain models.`n---"
+        $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
+        $document.skills[0] | Add-Member -NotePropertyName dependencies -NotePropertyValue @('grilling')
+        $document.skills += [pscustomobject][ordered]@{name='grilling';description='Read-only grilling.';relative_path='..\grilling\SKILL.md';entrypoint_sha256=(Get-FileHash $grillingPath -Algorithm SHA256).Hash.ToLowerInvariant();domains=@('engineering');load_side_effect='read_only';side_effect='read_only';dependencies=@('domain-modeling');routing_rules=@()}
+        $document.skills += [pscustomobject][ordered]@{name='domain-modeling';description='Domain models.';relative_path='..\domain-modeling\SKILL.md';entrypoint_sha256=(Get-FileHash $domainPath -Algorithm SHA256).Hash.ToLowerInvariant();domains=@('engineering');load_side_effect='read_only';side_effect='controlled_write';dependencies=@();routing_rules=@()}
+        $document.domains[0].skill_names += 'grilling','domain-modeling'
+        Write-TestCatalog $document $catalog
+
+        $result = & $router -Query 'design' -CatalogPath $catalog -Candidate 'skill|codebase-design' | ConvertFrom-Json
+
+        $result.load_validation.pass | Should -Be $true
+        $result.load_validation.checks | Should -Contain 'dependency_closure'
+        @($result.validated_closure.name) | Should -Be @('codebase-design','grilling','domain-modeling')
+        @($result.validated_closure | Where-Object name -eq 'domain-modeling')[0].side_effect | Should -Be 'controlled_write'
+        @($result.routing_receipt.validated_closure) | Should -Be @('codebase-design','grilling','domain-modeling')
+        $result.execution_authorization.requires_review | Should -Be $true
+    }
+
+    It 'fails closed when a dependency is missing from the catalog or stale on disk' {
+        $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
+        $document.skills[0] | Add-Member -NotePropertyName dependencies -NotePropertyValue @('missing-skill')
+        Write-TestCatalog $document $catalog
+
+        $missing = & $router -Query 'design' -CatalogPath $catalog -Candidate 'skill|codebase-design' | ConvertFrom-Json
+
+        $missing.catalog.status | Should -Be 'invalid'
+        $missing.load_validation.pass | Should -Be $false
+        @($missing.catalog.findings.code) | Should -Contain 'skill_dependency_unknown'
+
+        $dependencyRoot = Join-Path $root 'grilling'
+        New-Item -ItemType Directory -Path $dependencyRoot -Force | Out-Null
+        $dependencyPath = Join-Path $dependencyRoot 'SKILL.md'
+        Set-Content -LiteralPath $dependencyPath -Encoding UTF8 -Value "---`nname: grilling`ndescription: Read-only grilling.`n---"
+        $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
+        $document.skills[0].dependencies = @('grilling')
+        $document.skills += [pscustomobject][ordered]@{name='grilling';description='Read-only grilling.';relative_path='..\grilling\SKILL.md';entrypoint_sha256=(Get-FileHash $dependencyPath -Algorithm SHA256).Hash.ToLowerInvariant();domains=@('engineering');load_side_effect='read_only';side_effect='read_only';dependencies=@();routing_rules=@()}
+        $document.domains[0].skill_names += 'grilling'
+        Write-TestCatalog $document $catalog
+        Add-Content -LiteralPath $dependencyPath -Value '# stale'
+
+        $stale = & $router -Query 'design' -CatalogPath $catalog -Candidate 'skill|codebase-design' | ConvertFrom-Json
+
+        $stale.catalog.status | Should -Be 'stale'
+        $stale.load_validation.pass | Should -Be $false
+        @($stale.excluded | Where-Object { $_.name -eq 'grilling' } | ForEach-Object reason) | Should -Contain 'catalog_stale'
+        @($stale.validated_closure).Count | Should -Be 0
     }
 
     It 'fails closed on catalog drift and explicit exclusion' {
@@ -230,8 +288,9 @@ Describe 'Capability router fallback' {
         $skill = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'overrides\custom\capability-router\SKILL.md')
 
         $metadata | Should -Match 'allow_implicit_invocation:\s*true'
-        $metadata | Should -Match 'visible metadata is insufficient'
-        $metadata | Should -Match 'never use it as middleware'
+        $metadata | Should -Match 'high confidence'
+        $metadata | Should -Match 'quoted name, skill discussion, or ambiguous ordinary request is not an invocation'
+        $metadata | Should -Match 'never use it as per-request middleware'
         $skill | Should -Match 'do not use as a normal preflight'
         $skill | Should -Match 'routing_receipt'
         $skill | Should -Match 'candidate_load_validated'
@@ -239,6 +298,8 @@ Describe 'Capability router fallback' {
         $skill | Should -Match 'not treat validation as execution authorization'
         $skill | Should -Match 'Never use the bridge as automatic middleware'
         $skill | Should -Match 'exact write set, minimum proof, and stop condition'
+        $skill | Should -Match 'reliable binary “skill request”'
+        $skill | Should -Match 'high-confidence conclusion'
     }
 
     It 'does not echo the raw query in the routing receipt' {

@@ -112,6 +112,9 @@ description: demo skill
                 }
             }
             SaveCfg $cfg
+            $closureDir = Join-Path $root 'config'
+            New-Item -ItemType Directory -Path $closureDir -Force | Out-Null
+            Copy-Item -LiteralPath (Join-Path $repoRoot 'config\skill-dependency-closure.json') -Destination (Join-Path $closureDir 'skill-dependency-closure.json')
 
             构建生效 -SkipHostProjection
 

@@ -99,6 +99,11 @@
       "catalog_path": "agent/.skills-manager/catalog.json",
       "fallback_domain": "other",
       "fallback_purpose": "Installed cold skills not assigned to a narrower domain; inspect only when no specific domain covers the request.",
+      "side_effects": {
+        "domain-modeling": "controlled_write",
+        "grill-with-docs": "controlled_write",
+        "grilling": "read_only"
+      },
       "domain_memberships": {
         "browser": [
           "agent-browser",

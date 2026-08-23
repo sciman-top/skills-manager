@@ -39,6 +39,48 @@ function Get-SkillDiscoveryPortableCatalogPath($projectionCfg) {
     return [IO.Path]::GetFullPath((Join-Path $routerRoot 'catalog.json'))
 }
 
+function Get-SkillDiscoverySideEffects($discoveryCfg) {
+    $sideEffects = @{}
+    if ($null -eq $discoveryCfg -or $discoveryCfg.PSObject.Properties.Match('side_effects').Count -eq 0 -or $null -eq $discoveryCfg.side_effects) {
+        return $sideEffects
+    }
+    $raw = $discoveryCfg.side_effects
+    Need ($raw -is [pscustomobject] -or $raw -is [System.Collections.IDictionary]) 'skill_projection.discovery_catalog.side_effects 必须是对象'
+    $properties = if ($raw -is [System.Collections.IDictionary]) {
+        @($raw.Keys | ForEach-Object { [pscustomobject]@{ Name = [string]$_; Value = $raw[$_] } })
+    }
+    else { @($raw.PSObject.Properties) }
+    foreach ($property in $properties) {
+        $name = ([string]$property.Name).Trim()
+        $sideEffect = ([string]$property.Value).Trim().ToLowerInvariant()
+        Need (-not [string]::IsNullOrWhiteSpace($name)) 'skill_projection.discovery_catalog.side_effects 不能包含空技能名'
+        Need ($sideEffect -in @('read_only', 'external_read', 'controlled_write')) ("skill_projection.discovery_catalog.side_effects.{0} 必须声明受支持的副作用" -f $name)
+        $sideEffects[$name] = $sideEffect
+    }
+    return $sideEffects
+}
+
+function Get-SkillDiscoveryDependencyMap() {
+    $contractPath = Join-Path $Root 'config\skill-dependency-closure.json'
+    Need (Test-Path -LiteralPath $contractPath -PathType Leaf) '冷发现依赖闭包合同缺失：config/skill-dependency-closure.json'
+    try { $contract = Get-ContentUtf8 $contractPath | ConvertFrom-Json }
+    catch { throw ('冷发现依赖闭包合同不是有效 JSON：{0}' -f $_.Exception.Message) }
+    Need ($contract.schema_version -eq 1) '冷发现依赖闭包合同 schema_version 必须为 1'
+    Need ($contract.PSObject.Properties.Match('dependencies').Count -gt 0 -and $contract.dependencies -is [System.Collections.IEnumerable]) '冷发现依赖闭包合同 dependencies 必须是数组'
+
+    $dependencyMap = @{}
+    foreach ($entry in @($contract.dependencies)) {
+        $name = ([string]$entry.skill).Trim()
+        $requires = @($entry.requires | ForEach-Object { ([string]$_).Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        Need (-not [string]::IsNullOrWhiteSpace($name)) '冷发现依赖闭包合同条目缺少 skill'
+        Need (-not $dependencyMap.ContainsKey($name)) ("冷发现依赖闭包合同重复技能：{0}" -f $name)
+        Need (@($requires | Sort-Object -Unique).Count -eq $requires.Count) ("冷发现依赖闭包合同存在重复依赖：{0}" -f $name)
+        Need (-not ($requires -contains $name)) ("冷发现依赖闭包合同不允许自依赖：{0}" -f $name)
+        $dependencyMap[$name] = @($requires | Sort-Object)
+    }
+    return $dependencyMap
+}
+
 function New-SkillDiscoveryCatalogDocument($projectionCfg) {
     Need ($null -ne $projectionCfg) 'skill_projection 配置为空'
     Need ($projectionCfg.PSObject.Properties.Match('managed_source_path').Count -gt 0) 'skill_projection 缺少 managed_source_path'
@@ -47,10 +89,13 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
 
     $domainPurpose = [ordered]@{}
     $membership = @{}
+    $sideEffects = @{}
+    $dependencyMap = Get-SkillDiscoveryDependencyMap
     $fallbackDomain = 'other'
     $fallbackPurpose = 'Installed cold skills not assigned to a narrower domain; inspect only when no specific domain covers the request.'
     if ($projectionCfg.PSObject.Properties.Match('discovery_catalog').Count -gt 0 -and $null -ne $projectionCfg.discovery_catalog) {
         $discoveryCfg = $projectionCfg.discovery_catalog
+        $sideEffects = Get-SkillDiscoverySideEffects $discoveryCfg
         if ($discoveryCfg.PSObject.Properties.Match('fallback_domain').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$discoveryCfg.fallback_domain)) { $fallbackDomain = [string]$discoveryCfg.fallback_domain }
         if ($discoveryCfg.PSObject.Properties.Match('fallback_purpose').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$discoveryCfg.fallback_purpose)) { $fallbackPurpose = [string]$discoveryCfg.fallback_purpose }
         if ($discoveryCfg.PSObject.Properties.Match('domain_memberships').Count -gt 0 -and $null -ne $discoveryCfg.domain_memberships) {
@@ -81,13 +126,23 @@ function New-SkillDiscoveryCatalogDocument($projectionCfg) {
                 entrypoint_sha256 = Get-FileContentHash ([string]$item.file)
                 domains = @($membership[$name] | Sort-Object)
                 load_side_effect = 'read_only'
-                side_effect = 'unknown'
+                side_effect = if ($sideEffects.ContainsKey($name)) { [string]$sideEffects[$name] } else { 'unknown' }
+                dependencies = if ($dependencyMap.ContainsKey($name)) { @($dependencyMap[$name]) } else { @() }
                 routing_rules = @()
             }) | Out-Null
     }
 
     foreach ($configuredName in @($membership.Keys | Sort-Object)) {
         Need ($actualNames.Contains([string]$configuredName)) ("skill_projection.discovery_catalog.domain_memberships 引用了不存在的 canonical skill：{0}" -f $configuredName)
+    }
+    foreach ($configuredName in @($sideEffects.Keys | Sort-Object)) {
+        Need ($actualNames.Contains([string]$configuredName)) ("skill_projection.discovery_catalog.side_effects 引用了不存在的 canonical skill：{0}" -f $configuredName)
+    }
+    foreach ($caller in @($dependencyMap.Keys | Sort-Object)) {
+        if (-not $actualNames.Contains($caller)) { continue }
+        foreach ($required in @($dependencyMap[$caller])) {
+            Need ($actualNames.Contains($required)) ("冷发现依赖闭包合同依赖不存在于 canonical skill：{0} -> {1}" -f $caller, $required)
+        }
     }
 
     $domainRows = New-Object System.Collections.Generic.List[object]
