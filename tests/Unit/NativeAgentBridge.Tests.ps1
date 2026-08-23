@@ -175,8 +175,17 @@ Describe 'Native agent bridge' {
 
         $grillingSkill = Get-BridgeTemplateText 'overrides\patches\grilling\SKILL.md'
         $grillingMetadata = Get-BridgeTemplateText 'overrides\patches\grilling\agents\openai.yaml'
+        $grillWithDocsSkill = Get-BridgeTemplateText 'overrides\patches\grill-with-docs\SKILL.md'
         $grillingSkill | Should -Match 'disable-model-invocation:\s*true'
         $grillingMetadata | Should -Match 'allow_implicit_invocation:\s*true'
+        foreach ($member in @($grillWithDocsSkill, $grillingSkill)) {
+            $member | Should -Match 'Native-child dispatch invariant'
+            $member | Should -Match 'spawn_agent'
+            $member | Should -Match 'design-griller'
+            $member | Should -Match 'non-empty child task or\s+thread identifier'
+            $member | Should -Match 'native_bridge_unavailable'
+            $member | Should -Match 'bare `wait`'
+        }
     }
 
     It 'requires an explicit bounded admission before a cold controlled-write skill can execute' {
