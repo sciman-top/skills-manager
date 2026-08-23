@@ -133,6 +133,53 @@ description: >-
         $result.selected[0].path | Should -Be (Join-Path $portableRoot 'codebase-design\SKILL.md')
     }
 
+    It 'canonicalizes an environment catalog path whose junction parent belongs to a foreign root' {
+        $residentRoot = Join-Path $TestDrive 'resident-skills-environment'
+        New-Item -ItemType Directory -Path $residentRoot -Force | Out-Null
+        $residentRouter = Join-Path $residentRoot 'capability-router'
+        New-Item -ItemType Junction -Path $residentRouter -Target $routerRoot | Out-Null
+
+        $env:SKILLS_MANAGER_CAPABILITY_CATALOG = Join-Path $residentRouter 'catalog.json'
+        try {
+            $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File $script:routerScript `
+                -Query '设计模块边界和工程终态' -Candidate 'skill|codebase-design' | ConvertFrom-Json
+        }
+        finally {
+            Remove-Item Env:\SKILLS_MANAGER_CAPABILITY_CATALOG -ErrorAction SilentlyContinue
+        }
+
+        $result.catalog_resolution.mode | Should -Be 'environment'
+        $result.catalog_path | Should -Be (Join-Path $routerRoot 'catalog.json')
+        $result.catalog.status | Should -Be 'current'
+        $result.load_validation.pass | Should -BeTrue
+        $result.selected[0].path | Should -Be (Join-Path $portableRoot 'codebase-design\SKILL.md')
+    }
+
+    It 'fails closed when a junction-form environment catalog has no physical counterpart' {
+        $emptyTarget = Join-Path $TestDrive 'router-without-catalog'
+        New-Item -ItemType Directory -Path $emptyTarget -Force | Out-Null
+        $residentRoot = Join-Path $TestDrive 'resident-skills-missing-catalog'
+        New-Item -ItemType Directory -Path $residentRoot -Force | Out-Null
+        $residentRouter = Join-Path $residentRoot 'capability-router'
+        New-Item -ItemType Junction -Path $residentRouter -Target $emptyTarget | Out-Null
+
+        $env:SKILLS_MANAGER_CAPABILITY_CATALOG = Join-Path $residentRouter 'catalog.json'
+        try {
+            $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File $script:routerScript `
+                -Query '设计模块边界和工程终态' -Candidate 'skill|codebase-design' | ConvertFrom-Json
+        }
+        finally {
+            Remove-Item Env:\SKILLS_MANAGER_CAPABILITY_CATALOG -ErrorAction SilentlyContinue
+        }
+
+        $result.catalog_resolution.mode | Should -Be 'environment'
+        $result.catalog_path | Should -Be ''
+        @($result.catalog.findings.code) | Should -Contain 'catalog_not_found'
+        @($result.retrieval.candidates).Count | Should -Be 0
+        $result.routing_receipt.truth_boundary | Should -Be 'candidate_discovery_blocked'
+    }
+
+
     It 'excludes a cold skill when its entrypoint no longer matches the catalog hash' {
         Add-Content -LiteralPath (Join-Path $targetRoot 'SKILL.md') -Encoding UTF8 -Value "`n# Drift after catalog projection"
 

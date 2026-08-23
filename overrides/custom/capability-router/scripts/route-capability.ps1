@@ -44,6 +44,35 @@ function Test-ReparsePathWithinRoot([string]$Path, [string]$Root) {
     return $false
 }
 
+function Resolve-PhysicalCatalogCounterpart([string]$Path) {
+    # A catalog referenced through a foreign host root's junction-form router
+    # package (for example SKILLS_MANAGER_CAPABILITY_CATALOG pointing at
+    # another projection of the same managed tree) makes every projected
+    # sibling skill register as a reparse escape.  When the catalog's
+    # immediate parent is a single-target reparse point, prefer the physical
+    # counterpart file inside that target; every other shape keeps the
+    # original path and stays subject to the normal fail-closed checks.
+    $candidate = [IO.Path]::GetFullPath($Path)
+    $parent = Split-Path $candidate -Parent
+    $fileName = Split-Path $candidate -Leaf
+    $parentItem = Get-Item -LiteralPath $parent -Force -ErrorAction SilentlyContinue
+    if ($null -eq $parentItem -or ($parentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) { return $candidate }
+    $targets = @($parentItem.Target | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
+    if ($targets.Count -ne 1) { return $candidate }
+
+    try {
+        $physicalRoot = [IO.Path]::GetFullPath($targets[0])
+        $physicalCandidate = [IO.Path]::GetFullPath((Join-Path $physicalRoot $fileName))
+        if (-not (Test-Within $physicalCandidate $physicalRoot) -or
+            (Test-ReparsePathWithinRoot $physicalCandidate $physicalRoot) -or
+            -not (Test-Path -LiteralPath $physicalCandidate -PathType Leaf)) {
+            return $candidate
+        }
+        return $physicalCandidate
+    }
+    catch { return $candidate }
+}
+
 function Resolve-RunningRouterCatalogPath([string]$Path) {
     # The native projection exposes each managed skill as a junction.  An
     # explicit path to *this* router's catalog therefore has a safe physical
@@ -52,7 +81,7 @@ function Resolve-RunningRouterCatalogPath([string]$Path) {
     # point remain subject to the normal fail-closed containment checks.
     $candidate = [IO.Path]::GetFullPath($Path)
     $routerRoot = Split-Path $PSScriptRoot -Parent
-    if (-not (Test-Within $candidate $routerRoot)) { return $candidate }
+    if (-not (Test-Within $candidate $routerRoot)) { return (Resolve-PhysicalCatalogCounterpart $candidate) }
 
     $routerItem = Get-Item -LiteralPath $routerRoot -Force -ErrorAction SilentlyContinue
     if ($null -eq $routerItem -or ($routerItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) { return $candidate }
