@@ -22,7 +22,7 @@
 - Implementation：`src/Config.ps1`、`src/Git.ps1`、install/update/build commands
 - Outputs：`vendor/`、`imports/`、`agent/`、targets
 
-配置 validator 负责 schema、path containment、duplicate name、mapping、MCP 与 projection invariants。source update 负责 revision/origin/dirty checks；build 只消费验证后的 source 和 override。
+配置 validator 负责 schema、path containment、duplicate name、mapping、MCP 与 projection invariants。当前 `skills.json` 仍为 schema v2，未知顶层字段保留迁移兼容，且已知宿主 runtime 字段由黑名单拒绝；目标态 schema v3 才使用 11 个受管顶层字段的 allowlist，并按 observe→enforce 两步落地（见 [HSM-CFG-300/310](skills-manager-hardening-implementation-plan.md)）。未知顶层字段不得成为新的 runtime/任务控制面入口。source update 负责 revision/origin/dirty checks；build 只消费验证后的 source 和 override。
 
 `scripts/weekly-skills-update.ps1` 是外部调用 seam 上的 skills-only maintenance adapter：它复用 update 与 quick gate，并限制分支、并发和 tracked write set。Windows Task Scheduler 的注册、更新、删除、运行账户与触发频率属于 host/operator lifecycle，不是本仓 module。
 
@@ -165,6 +165,8 @@ Tag release 在 checksum 与 ZIP 内 manifest 之外，为三个发布资产签�
 - hotspot：仅在真实性能/安全/发布风险存在时执行
 
 full gate 仅顺序执行一次 build、tests、committed generated bundle、lock、skill integrity 和 config contract。普通改动使用受影响验证，不重复 full。
+
+当前 CI 在 workflow 内联分类，本地只接受显式 profile；目标态在 [HSM-GAT-100/110/120](skills-manager-hardening-implementation-plan.md) 完成后，CI 与本地才共用 `scripts/quality/resolve-gate-profile.ps1`（`Resolve-QualityGateProfile`），本地提供 `-Profile auto`。目标态按可解析基线与当前工作区分类；base 缺失、变更集不可读、untracked 枚举失败或出现 non-ignored untracked file 时 fail-safe 选择 full。分类正则的唯一权威副本驻留在该脚本，CI 不维护第二份内联副本。
 
 ## 6. 删除原则
 

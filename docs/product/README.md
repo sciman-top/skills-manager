@@ -19,6 +19,7 @@ skills-manager 是 local-first 的技能/MCP curator、目标仓审查器和规�
 
 - [Reviewed rule-estate change-set](rule-estate-reviewed-change-set.md)：多目标规则写入的唯一 reviewed input 格式。
 - [Reference shelf](../EXTERNAL_REFERENCE_REPO_TIERS.md)：外置参考仓的 owned-root 与刷新边界。
+- [Hardening implementation plan](skills-manager-hardening-implementation-plan.md)：2026-08 双独立审计五轮交叉评审收敛的 P0–P3 任务卡（共享 gate 分类器、schema v3 allowlist、单宿主静态 guard POC、规则减法实验、工作区清理与投影决策）。
 
 运行真值不写入本目录：
 

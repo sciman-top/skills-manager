@@ -153,6 +153,7 @@ Truth boundary
 - **Stop condition**：差异只是假设、审美偏好或“未来可能需要”。
 - **Truth boundary**：设计决策，不是代码或宿主验收。
 - **Decision rule**：若 reviewed evidence 未显示可复现的 contract 缺口，输出 `no_code_needed`，不创建 Hermes adapter、consumer registry、task state、runtime bridge 或新的 projection transaction。HSM-CODE-100、HSM-CODE-110、HSM-CODE-120 保持 `not_eligible`，直至一个真实、重复的 consumer 需求表明现有 native projection 无法表达 `consumer_id + source fingerprint + target root + ownership/write policy + receipt + rollback`。
+- **决策记录**：本任务已裁决输出 `no_code_needed`；reviewed 决议位于 POC 仓 `D:\Archive\hermes-poc\docs\HSM-POC-010-brief.md` 的 "HSM-DEC-060 reviewed decision" 节（仅指针，receipt 原文不复制入本仓）。据此 HSM-CODE-100/110/120 维持 `not_eligible`；在出现新的 POC receipt 证明的可复现 contract gap 之前，策略、路线图与本文件不再做边界文案修改，仅允许事实性指针修正。
 
 ### HSM-CODE-100：最小 consumer contract（条件实现）
 
