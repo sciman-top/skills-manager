@@ -1,0 +1,3 @@
+{"type":"thread.started","thread_id":"fixture-root"}
+{"type":"item.completed","item":{"id":"validation","type":"command_execution","command":"pwsh route-capability.ps1 -Query request -AutoDiscover -Candidate skill|domain-modeling","status":"completed","exit_code":0}}
+{"type":"item.completed","item":{"id":"answer","type":"agent_message","text":"one-shot answer without native runner"}}

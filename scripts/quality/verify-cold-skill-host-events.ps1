@@ -87,7 +87,9 @@ if ($null -ne $scenario -and $events.Count -gt 0) {
         Add-Finding 'H004_MULTIPLE_DISCOVERY_ATTEMPTS' ("{0}: observed {1} AutoDiscover calls without a selected candidate" -f $ScenarioId, $discoveryCommands.Count)
     }
 
-    if ([string]$scenario.execution_contract -eq 'multi_turn_user_decision') {
+    $requiresNativeChild = ([string]$scenario.execution_contract -eq 'multi_turn_user_decision') -or
+        (-not [string]::IsNullOrWhiteSpace([string]$scenario.expected_native_agent))
+    if ($requiresNativeChild) {
         $collaborationEvents = @($completedItems | Where-Object { $_.type -eq 'collab_tool_call' })
         $spawnEvents = @($collaborationEvents | Where-Object { [string]$_.tool -eq 'spawn_agent' })
         $spawnWithChildId = @($spawnEvents | Where-Object { @($_.receiver_thread_ids | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -gt 0 })
@@ -96,7 +98,7 @@ if ($null -ne $scenario -and $events.Count -gt 0) {
         })
 
         if ($spawnEvents.Count -eq 0) {
-            Add-Finding 'H005_NATIVE_CHILD_SPAWN_MISSING' ("{0}: multi-turn contract has no completed spawn_agent event" -f $ScenarioId)
+            Add-Finding 'H005_NATIVE_CHILD_SPAWN_MISSING' ("{0}: native-child contract has no completed spawn_agent event" -f $ScenarioId)
         }
         elseif ($spawnWithChildId.Count -eq 0) {
             Add-Finding 'H007_SPAWN_IDENTIFIER_MISSING' ("{0}: spawn_agent event has no child identifier" -f $ScenarioId)

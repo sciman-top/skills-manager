@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"fixture-root"}
+{"type":"item.completed","item":{"id":"discovery","type":"command_execution","command":"pwsh route-capability.ps1 -Query request -AutoDiscover -Candidate skill|domain-modeling","status":"completed","exit_code":0}}
+{"type":"item.completed","item":{"id":"spawn","type":"collab_tool_call","tool":"spawn_agent","receiver_thread_ids":["/fixture/cold-capability-runner"],"status":"completed"}}
+{"type":"item.completed","item":{"id":"wait","type":"collab_tool_call","tool":"wait","receiver_thread_ids":["/fixture/cold-capability-runner"],"status":"completed"}}

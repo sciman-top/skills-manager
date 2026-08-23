@@ -24,10 +24,18 @@ Describe 'Cold skill raw host-event verifier' {
         $result.Output | Should -Match 'findings=0'
     }
 
+    It 'accepts a one-shot runner stream only with a native child identifier' {
+        $result = Invoke-HostEventVerifier 'valid-s31.jsonl' 'S31-live-derived'
+
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'findings=0'
+    }
+
     It 'rejects unbacked child claims, repeated discovery, and forbidden discovery' {
         $cases = @(
             @{ Fixture = 'invalid-s30-bare-wait.jsonl'; Scenario = 'S30-live-derived'; Code = 'H005_NATIVE_CHILD_SPAWN_MISSING' }
             @{ Fixture = 'invalid-s30-repeat-discovery.jsonl'; Scenario = 'S30-live-derived'; Code = 'H004_MULTIPLE_DISCOVERY_ATTEMPTS' }
+            @{ Fixture = 'invalid-s31-no-spawn.jsonl'; Scenario = 'S31-live-derived'; Code = 'H005_NATIVE_CHILD_SPAWN_MISSING' }
             @{ Fixture = 'invalid-s36-router.jsonl'; Scenario = 'S36-live-derived'; Code = 'H003_FORBIDDEN_DISCOVERY_OBSERVED' }
         )
 
