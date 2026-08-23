@@ -86,6 +86,11 @@
 3. 未产生未经批准的 skill/memory write。
 4. 清楚记录“可发现”只证明候选可见，不证明正确调用或业务效果。
 
+### 停止条件
+
+- Hermes 对项目技能、共享 root 或 POC repo 之外的路径发起未审批写入。
+- 运行前后基线 hash 不可复读，无法证明主 `~/.agents/skills` 未变化。
+
 ## 5. R3：Hermes → Codex 单任务 POC
 
 ### 进入条件
@@ -156,11 +161,20 @@ Rollback-ConsumerProjection
 - collision、stale target、ownership drift、reparse-point、partial write 都 fail closed。
 - 不触碰 `~/.hermes`、`~/.codex`、Gateway/cron/task database。
 
+### 停止条件
+
+- 实现退化为对现有 native projection 的薄转发，或需要表达 Hermes task/session/model 语义。
+- collision、drift、ownership 或 rollback 无法给出 fail-closed 的可重复测试。
+
 ## 8. R6：受控技能演进准入
 
 ### 设计目标
 
 将“AI 能写技能”变成一个可回滚的软件供应链动作，而不是一个永久自治学习系统。
+
+### 进入条件
+
+- HSM-EVO-200 试运行已证明 proposal 可自动验证，且人工 admission 的重复成本或缺口已被记录。
 
 ### 准入清单
 
@@ -181,6 +195,11 @@ Rollback-ConsumerProjection
 - AI 自审、自批、自发布。
 - 长期候选库、隐式训练集或在 skills-manager 中保留 Hermes task 历史。
 
+### 停止条件
+
+- 候选被自动复制到全局技能目录、自动进 lock、自动投影或自动发布。
+- AI author 与 admission approver 无法保持独立。
+
 ## 9. R7：受限规模化
 
 只有 R3、R5（如需要）和 R6 都有稳定证据后，才考虑：
@@ -192,3 +211,8 @@ Rollback-ConsumerProjection
 - 仅在不满足预先声明的本地 POC auto-merge envelope 时人工批准 merge；任何 push/release 仍由人工批准。
 
 任何并行写入必须满足“互斥 write set + 独立 gate + 串行集成”。若无法满足，保持串行。
+
+### 停止条件
+
+- 出现 write collision，或互斥 write set 与串行集成无法维持。
+- 任一环节要求无人监管的 merge/push/release 或自动业务验收。

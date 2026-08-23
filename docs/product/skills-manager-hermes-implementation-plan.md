@@ -1,6 +1,6 @@
 # Hermes + Codex 实施计划与任务清单
 
-**文档角色**：稳定的 14 项任务合同；动态执行状态、运行模式、commit、receipt 与当前 host 事实只保存于对应 POC 仓的任务 brief/receipt。
+**文档角色**：稳定的 15 项任务合同；动态执行状态、运行模式、commit、receipt 与当前 host 事实只保存于对应 POC 仓的任务 brief/receipt。
 **执行原则**：每个任务都是独立授权单元；未满足前置条件时返回 `not_started` / `blocked`，不以“继续”自动扩大到主机配置、安装、合并或发布。
 **并发原则**：文档任务可与不重叠的代码任务并行；同一 repo/worktree、同一 Hermes profile、同一 Codex config 的写任务必须串行。
 
@@ -31,7 +31,7 @@ Truth boundary
 | 授权域 | 典型资产 | 不能由其推导的授权 |
 | --- | --- | --- |
 | 仓库 | `src/`、tests、`skills.json`、tracked docs、generated `skills.ps1`/`agent/` | `~/.hermes`、`~/.codex`、安装软件、Gateway、Git push |
-| Hermes 宿主 | installer、profile、`.env`、Gateway、memory、cron | Codex config、共享技能 root、生产凭据、仓库 merge |
+| Hermes 宿主 | installer、profile、`.env`、Gateway、memory、cron、已安装 runtime 源码维护（仅 HSM-HER-230） | Codex config、共享技能 root、生产凭据、仓库 merge |
 | Codex 宿主 | login、plugins、MCP、sandbox、`~/.codex` | Hermes profile、skills-manager config、业务验收 |
 | Git/发布 | worktree、commit、push、merge、release | host_loaded、live_accepted |
 
@@ -49,9 +49,10 @@ Truth boundary
 | HSM-CODE-100 | conditional code authorization | HSM-DEC-060=add | 定义最小 consumer contract | skills-manager maintainer | source/tests/docs/generated seam |
 | HSM-CODE-110 | conditional code authorization | HSM-CODE-100 | 实现 projection transaction 或复用现有路径 | skills-manager maintainer | source/tests/config/generated seam |
 | HSM-CODE-120 | conditional code authorization | HSM-CODE-110 | 负例、rollback 与 host-boundary 验证 | skills-manager maintainer | tests/scripts/docs |
-| HSM-EVO-200 | POC write approval | HSM-DOC-001 | 受控技能演进的 proposal/review/admission 试运行 | human + host AI | sandbox/project skill + Git review |
+| HSM-EVO-200 | POC write approval | HSM-DOC-001、HSM-POC-010 | 受控技能演进的 proposal/review/admission 试运行 | human + host AI | sandbox/project skill + Git review |
 | HSM-EVO-210 | conditional code authorization | HSM-EVO-200 evidence | 增加最小 admission verifier | skills-manager maintainer | source/tests/config/generated seam |
 | HSM-OBS-220 | conditional code authorization | stable Hermes CLI contract | Hermes 只读 observer | skills-manager maintainer | source/tests/docs |
+| HSM-HER-230 | 当前 Hermes host 授权 | HSM-POC-040 的 app-server 路径评估与已实证维护需求 | 已安装 Hermes runtime 源码维护补丁的显式授权单元 | Hermes operator + skills-manager maintainer | installed Hermes source + POC repo record |
 | HSM-REF-300 | explicit reference refresh authorization | real consumer | Hermes reference shelf 准入 | maintainer | manifest + external checkout |
 
 ## 3. 原子任务卡
@@ -205,6 +206,17 @@ Truth boundary
 - **Goal**：报告 `not_observed`、`platform_na` 或 read-only observation，绝不推导 `host_loaded`。
 - **不得触及**：profile config、memory、Gateway、task DB、skill write、Codex config。
 - **Stop condition**：需要解析私有 Hermes 数据库/缓存，或 observer 被用于自动修复。
+
+### HSM-HER-230：已安装 Hermes runtime 源码维护（条件授权）
+
+- **仅在**：存在已实证的 Hermes 启动/配置迁移缺陷，且显式 refresh 后的比较显示上游登记 revision 仍不含等效修复时执行；每次执行都需要当前 Hermes host 授权。
+- **Goal**：为已安装 Hermes runtime 源码提供唯一的受控补丁授权单元；本地补丁层只记录在 POC 仓维护记录/authorization brief，不进入 manifest、参考 checkout 或本仓 runtime。
+- **Exact write set**：已安装 Hermes 源码仓内的最小修复提交，以及 POC 仓的维护记录与 authorization brief。不重装 Hermes、不改系统/用户 PATH、不 fetch/push 该仓 remote、不触碰 `~/.codex`、主 `~/.agents/skills` 或其他 profile。
+- **基线要求**：补丁必须落在可回退的 vendor 基线（该仓 `origin/main` 或已归档基线）之上；禁止在无基线提交的历史上叠加本地修复。
+- **Minimum proof**：补丁 diff 只覆盖维护记录命名的生产文件；基线与补丁哈希可复读；上游比较结论与 owner 决策记录在 POC 仓 authorization brief。
+- **Stop condition**：上游 release 已包含等效修复（以显式 refresh 后的比较为准），或补丁需要越出上述 write set。
+- **Rollback**：按维护记录回退本地提交或回到 vendor 基线，再按协议决定是否重放；不删除用户 profile、session 或技能资产。
+- **Truth boundary**：`filesystem_projected`（已安装源码）；不证明 app-server 持续可用、上游已合入、`host_loaded` 或 `live_accepted`。
 
 ### HSM-REF-300：Hermes reference shelf 准入（条件实现）
 

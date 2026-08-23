@@ -35,16 +35,16 @@ skills-manager（供给与治理侧车）
 | Codex 的定位 | 唯一代码执行 harness | Codex 在获分配的 worktree 内实现、测试、review；可在互斥 write set 下使用子代理。 |
 | skills-manager 的定位 | 技能与规则的受控供应链 | 不变成 task queue、agent runtime、知识库或自学习 daemon。 |
 | “自主学习/进化” | 受控技能演进，而非无界自修改 | 只能自动生成 proposal；review、admission、projection、host acceptance 分离。 |
-| Hermes 参考仓 | `conditional`、reference-only | HSM POC 已产生 Windows app-server 源码维护需求；登记 revision/license/consumer/retirement trigger，并且只在显式 refresh 时读取。 |
+| Hermes 参考仓 | `conditional`、reference-only | Windows app-server 源码维护按 HSM-HER-230 显式授权单元执行，补丁层只记录在 POC 仓维护记录；manifest 登记 revision/license/consumer/retirement trigger，仅在显式 refresh 时读取，manifest 与参考 checkout 不携带本地补丁。 |
 
-OpenAI 官方将 Codex app-server 定位为深度客户端集成，并建议自动化/CI 使用 Codex SDK；因此 Hermes app-server runtime 只能先承担本地 POC 与交互式协作，不能直接成为无人监管的 CI/发布关键路径。见 [Codex App Server](https://developers.openai.com/codex/app-server)。
+OpenAI 官方将 Codex app-server 定位为深度客户端集成，并建议自动化/CI 使用 Codex SDK；因此 Hermes app-server runtime 只能先承担本地 POC 与交互式协作，不能直接成为无人监管的 CI/发布关键路径。见 [Codex App Server](https://learn.chatgpt.com/docs/app-server)。
 
 ## 2. 所有权与禁止重叠
 
 | 资产或决策 | 唯一 owner | 允许协作者 | 禁止的交叉控制 |
 | --- | --- | --- | --- |
 | 产品目标、验收口径、风险授权 | 用户 + ChatGPT Desktop | Hermes/Codex 提供建议 | Hermes/Codex 自行扩大范围或接受业务验收 |
-| Hermes profile、memory、session、Gateway、cron | Hermes operator | ChatGPT Desktop 审批 | skills-manager 读写 `~/.hermes` 或管理 Gateway lifecycle |
+| Hermes profile、memory、session、Gateway、cron、已安装 runtime 源码（仅 HSM-HER-230） | Hermes operator | ChatGPT Desktop 审批 | skills-manager 读写 `~/.hermes` 或管理 Gateway lifecycle |
 | Codex auth、plugins、sandbox、`~/.codex` | Codex operator | Hermes 在隔离 POC 中按其官方 runtime 使用 | skills-manager 迁移 MCP/plugin、写入 managed block、替代 Codex 认证 |
 | worktree | 单个 task owner | Codex 子代理仅在互斥 write set 下协作 | Hermes、另一个 Codex turn 或其他 framework 并行写同一 worktree |
 | 技能 source/lock/mapping/projection receipt | skills-manager | Hermes/Codex 只读消费 | Hermes 自动修改全局受管技能 root |
@@ -149,7 +149,7 @@ hermes desktop
 ```yaml
 terminal:
   backend: local
-  cwd: 'D:\Archive\hermes-poc'
+  cwd: '<poc-repo-root>'
   home_mode: auto
 
 skills:
@@ -180,6 +180,8 @@ hermes -p codex-poc auth add openai-codex
 这些认证前置不启用 app-server，也不证明其已加载。`native_openai_codex` 的首次任务保持无工具或逐操作审批，并应证明 POC profile 与主 Codex config 未出现未授权写入。只有要验证 `codex_app_server` 时，才在档位 B 或 C 中先备份并比较隔离环境的 Codex config，再通过 Hermes 的 runtime 控件启用它。该动作可能写入 Hermes managed block、注册 Hermes MCP callback、迁移 MCP/plugin 描述，并设置 workspace 写入权限；所有这些都必须只发生在隔离环境。见 [Hermes Codex App-Server Runtime](https://hermes-agent.nousresearch.com/docs/user-guide/features/codex-app-server-runtime)。
 
 `codex_app_server` 的第一次任务使用 `:read-only` 或等效的逐操作审批策略；只在确认 worktree containment、managed-block diff 和工具审批路径正确后，才对该 POC worktree 放开 workspace 写入。
+
+对已安装 Hermes runtime 源码的维护补丁只能作为 HSM-HER-230 显式授权单元执行；补丁层记录保存在 POC 仓维护记录，不进入参考仓 checkout 或 runtime 投影。
 
 ## 4. 技能消费策略
 
