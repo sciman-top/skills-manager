@@ -89,7 +89,15 @@ router has returned all of the following for the same request:
   declared side effects for every member.
 
 Pass the complete validation result, original request, exact selected name, and
-an admission contract to the child. The child must not treat validation as execution authorization. The result and receipt also carry the effective `execution_contract` for the selected dependency closure. The host must preserve it: `one_shot` may use `cold-capability-runner`;
+an admission contract to the child. Once those conditions hold, dispatching to
+the contract's `native_agent` is the execution path, not an option: construct
+the admission (original request, complete validation result, the single
+selected name, `requested_operation`, an empty or exact write set, minimum
+proof, and stop condition) and hand it to the child. The router's `not_granted`
+is permanent by design and is upgraded only by this parent-side admission,
+never by the router. When the host has no native spawn tool, fall back to
+parent-mediated execution and record it as parent-mediated - never as a runner
+execution. The child must not treat validation as execution authorization. The result and receipt also carry the effective `execution_contract` for the selected dependency closure. The host must preserve it: `one_shot` may use `cold-capability-runner`;
 `parent_user_input` must stop for parent-mediated user input; and
 `multi_turn_user_decision` must use `design-griller`, relay exactly one
 question to the user, and wait for that answer before resuming the same child.
