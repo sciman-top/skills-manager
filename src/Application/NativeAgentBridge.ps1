@@ -79,7 +79,7 @@ function Sync-NativeAgentBridge($Config, $PromotionContext = $null) {
     $changed = New-Object System.Collections.Generic.List[string]
     $backups = New-Object System.Collections.Generic.List[string]
     try {
-        foreach ($definition in @($planned)) {
+        foreach ($definition in $planned.ToArray()) {
             $targetPath = [string]$definition.target_path
             $existingItem = if (Test-Path -LiteralPath $targetPath -PathType Leaf) { Get-Item -LiteralPath $targetPath -Force } else { $null }
             if ($null -ne $existingItem -and ($existingItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw ("native agent target must not be a reparse point: {0}" -f $targetPath) }
