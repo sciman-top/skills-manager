@@ -793,6 +793,23 @@
       "side_effect_ceiling": "read_only",
       "required_context": [],
       "verification_mode": "host_judgment"
+    },
+    {
+      "id": "S31-live-derived",
+      "source_index": 31,
+      "source_kind": "derived_test_case",
+      "derived_from": "CSR-160 runner-leg prerequisite: the tracked corpus has no verbatim that names domain-modeling and admits cold-capability-runner under one_shot read-only (S25-implicit explicitly forbids native children), authored for the fresh Codex single-shot runner acceptance",
+      "variant": "explicit",
+      "request_verbatim": "请用 domain-modeling 对本仓 capability routing 的领域模型（router、catalog、admission、execution contract）做一次单轮只读评审：指出模块边界错误、缺失的不变量和最值得深化的模块，一次性给出完整结论与依据；不修改文件，不进入多轮流程。",
+      "route_class": "cold_candidate",
+      "cold_discovery": "required",
+      "allowed_candidate_names": ["domain-modeling"],
+      "expected_native_agent": "cold-capability-runner",
+      "forbidden_events": ["second_discovery", "writes", "unadmitted_writes", "multi_turn_summary_substitution"],
+      "execution_contract": "one_shot",
+      "side_effect_ceiling": "read_only",
+      "required_context": [],
+      "verification_mode": "routing_only"
     }
   ]
 }
