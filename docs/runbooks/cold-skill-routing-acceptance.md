@@ -148,6 +148,12 @@ P0 是最小链路，不是 29 组场景的全量 live execution。每个场景�
 
 非零退出时逐条输出稳定 finding code（`E001_SCHEMA_INVALID` … `E019_LEGACY_SCHEMA_REQUIRES_MIGRATION`，见脚本注释）。矩阵交叉核对包含 scenario id 存在性与 `request_verbatim` 逐字一致；verifier 常规模式只读。
 
+对 fresh Codex CLI 的原始 `--json` 事件，另运行：
+
+    pwsh -NoProfile -File .\scripts\quality\verify-cold-skill-host-events.ps1 -EventsPath reports/cold-skill-eval/<run>/events.jsonl -ScenarioId <tracked-scenario-id>
+
+它不把父任务声称“已交给子代理”当作证据：`multi_turn_user_decision` 必须实际出现带 child id 的 `spawn_agent` 事件，随后 `wait` 必须绑定同一类 child id。bare `wait`、禁止 cold discovery 的 router event、或同一请求出现两次未选 candidate 的 discovery 都 fail closed；该失败本身是 host-specific observation，不得重写 prompt 或手填 receipt 掩盖。
+
 ## 5. Legacy receipt migration
 
 旧格式 receipt 保留为证据原件，尤其是 reports/cold-skill-eval/2026-08-23-cold-routing-p0/receipt.json。迁移必须创建同目录 receipt.v2.json，且不更改旧文件字节。

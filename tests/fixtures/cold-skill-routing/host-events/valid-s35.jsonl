@@ -1,0 +1,2 @@
+{"type":"thread.started","thread_id":"fixture-root"}
+{"type":"item.completed","item":{"id":"answer","type":"agent_message","text":"ordinary explanation"}}
