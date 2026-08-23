@@ -257,7 +257,7 @@ Describe 'Capability router fallback' {
         $result.routing_receipt.selection_required | Should -Be $true
     }
 
-    It 'fails a request with an unknown domain or duplicate requested candidate' {
+    It 'fails a request with an unknown domain, duplicate candidate, or multiple candidate roots' {
         $domain = & $router -Query 'design' -CatalogPath $catalog -DomainHint missing-domain | ConvertFrom-Json
         $domain.load_validation.pass | Should -Be $false
         @($domain.excluded.reason) | Should -Contain 'unknown_domain'
@@ -266,6 +266,25 @@ Describe 'Capability router fallback' {
         $duplicate = & $router -Query 'design' -CatalogPath $catalog -Candidate $duplicateCandidates | ConvertFrom-Json
         $duplicate.load_validation.pass | Should -Be $false
         @($duplicate.excluded.reason) | Should -Contain 'duplicate_candidate'
+
+        $secondRoot = Join-Path $root 'domain-modeling'
+        New-Item -ItemType Directory -Path $secondRoot -Force | Out-Null
+        $secondPath = Join-Path $secondRoot 'SKILL.md'
+        Set-Content -LiteralPath $secondPath -Encoding UTF8 -Value "---`nname: domain-modeling`ndescription: Model domains.`n---"
+        $document = Get-Content -LiteralPath $catalog -Raw -Encoding UTF8 | ConvertFrom-Json
+        $document.skills += [pscustomobject][ordered]@{name='domain-modeling';description='Model domains.';relative_path='..\domain-modeling\SKILL.md';entrypoint_sha256=(Get-FileHash $secondPath -Algorithm SHA256).Hash.ToLowerInvariant();domains=@('engineering');load_side_effect='read_only';side_effect='read_only';dependencies=@();routing_rules=@()}
+        $document.domains[0].skill_names += 'domain-modeling'
+        Write-TestCatalog $document $catalog
+
+        $multiple = & $router -Query 'design' -CatalogPath $catalog -Candidate @('skill|codebase-design','skill|domain-modeling') | ConvertFrom-Json
+
+        $multiple.load_validation.pass | Should -Be $false
+        @($multiple.selected).Count | Should -Be 0
+        @($multiple.validated_closure).Count | Should -Be 0
+        @($multiple.excluded.reason) | Should -Contain 'multiple_candidates_not_admissible'
+        $multiple.execution_authorization.reason | Should -Be 'multiple_candidates_not_admissible'
+        $multiple.routing_receipt.status | Should -Be 'blocked'
+        $multiple.routing_receipt.truth_boundary | Should -Be 'candidate_discovery_blocked'
     }
 
     It 'fails the whole catalog on duplicate identities or a path escape' {

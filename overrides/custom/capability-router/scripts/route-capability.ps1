@@ -446,6 +446,14 @@ if ($rawRequestedNames.Count -ne $requestedNames.Count) {
     $requestValid = $false
     $excluded.Add([pscustomobject][ordered]@{ kind = 'skill'; name = ''; reason = 'duplicate_candidate' }) | Out-Null
 }
+$multipleRootCandidates = $requestedNames.Count -gt 1
+if ($multipleRootCandidates) {
+    # Validation may load one dependency closure only.  Allowing several roots
+    # here would let a receipt overstate the single-root admission guaranteed
+    # to the native bridge.
+    $requestValid = $false
+    $excluded.Add([pscustomobject][ordered]@{ kind = 'request'; name = ''; reason = 'multiple_candidates_not_admissible'; candidate_count = $requestedNames.Count }) | Out-Null
+}
 
 if ($catalogFindings.Count -eq 0 -and $null -ne $catalog) {
     $unknownDomains = @($domainNames | Where-Object { -not $domainNameSet.Contains($_) })
@@ -543,7 +551,7 @@ if ($requestedNames.Count -gt 0) {
     $visible = @($selectedRows)
 }
 $rootSelectionPass = $catalogStatus -eq 'current' -and $requestValid -and
-    $requestedNames.Count -gt 0 -and $requestedNames.Count -eq $selectedRows.Count
+    $requestedNames.Count -eq 1 -and $selectedRows.Count -eq 1
 $closurePass = $rootSelectionPass
 $validatedClosure = [System.Collections.Generic.List[object]]::new()
 if ($rootSelectionPass) {
@@ -574,6 +582,7 @@ $effectiveExecutionContract = if ($loadPass) { Get-EffectiveExecutionContract $v
 $sideEffectRows = if ($loadPass) { $validatedClosureRows } else { $selectedRows }
 $requiresReview = @($sideEffectRows | Where-Object side_effect -ne 'read_only').Count -gt 0
 $authorizationReason = if ($discoveryScopeRequired) { 'domain_hint_required' }
+elseif ($multipleRootCandidates) { 'multiple_candidates_not_admissible' }
 elseif ($selectedRows.Count -eq 0) { 'no_candidate_selected' }
 elseif ($effectiveExecutionContract.mode -eq 'host_admission_required') { 'execution_contract_requires_host_admission' }
 elseif ($effectiveExecutionContract.mode -eq 'parent_user_input') { 'execution_contract_requires_parent_user_input' }
@@ -584,7 +593,7 @@ $loadValidation = [ordered]@{
     requested = $requestedNames
     pass = $loadPass
     scope = 'skill_dependency_closure_load_only'
-    checks = @('catalog_schema', 'catalog_fingerprint', 'catalog_root_containment', 'entrypoint_hash', 'availability', 'dependency_closure', 'execution_contract')
+    checks = @('catalog_schema', 'catalog_fingerprint', 'catalog_root_containment', 'entrypoint_hash', 'availability', 'single_root_candidate', 'dependency_closure', 'execution_contract')
 }
 $routingReceiptInput = [ordered]@{
     query_sha256 = Get-TextSha256 $Query
