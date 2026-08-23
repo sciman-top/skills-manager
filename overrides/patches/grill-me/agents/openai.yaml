@@ -1,0 +1,6 @@
+interface:
+  display_name: "Grill Me"
+  short_description: "Run a read-only native design interview"
+  default_prompt: "Use $grill-me to have design-griller challenge this proposal one decision at a time; do not modify files."
+policy:
+  allow_implicit_invocation: false

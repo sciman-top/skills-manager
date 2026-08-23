@@ -24,6 +24,7 @@ $Files = @(
     "Application/SkillProjection.ps1",
     "Application/NativeSkillProjection.ps1",
     "Application/NativeSkillProjectionCoordinator.ps1",
+    "Application/NativeAgentBridge.ps1",
     "Application/RuleDiscovery.ps1",
     "Application/RuleDiagnostics.ps1",
     "Application/RuleAdvisor.ps1",

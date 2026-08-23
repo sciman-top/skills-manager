@@ -130,6 +130,9 @@ function Invoke-ConfigVerifier([string]$ConfigPath, [string]$Mode = 'enforce', [
         @($schema.'$defs'.target.properties.host.enum) | Should -Be @('codex', 'claude', 'zcode')
         $schema.'$defs'.skillProjection.properties.projection_profiles.'$ref' | Should -Be '#/$defs/projectionProfiles'
         $schema.'$defs'.projectionProfiles.properties.schema_version.const | Should -Be 1
+        $schema.'$defs'.skillProjection.properties.native_agent_bridge.'$ref' | Should -Be '#/$defs/nativeAgentBridge'
+        $schema.'$defs'.nativeAgentBridge.properties.target_root.const | Should -Be '~/.codex/agents'
+        @($schema.'$defs'.nativeAgentBridge.required) | Should -Contain 'definitions'
         @($schema.'$defs'.skillProjection.properties.PSObject.Properties.Name) | Should -Not -Contain 'aliases'
         @($schema.'$defs'.nativeProjection.properties.PSObject.Properties.Name) | Should -Not -Contain 'apply_requires_token'
         $schema.'x-compatibility-policy'.missing_schema_version | Should -Be 'legacy-v1-observation'

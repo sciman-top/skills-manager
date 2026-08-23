@@ -124,6 +124,7 @@
         "managed_source_path": { "type": "string" },
         "user_skill_root": { "type": "string" },
         "native_projection": { "$ref": "#/$defs/nativeProjection" },
+        "native_agent_bridge": { "$ref": "#/$defs/nativeAgentBridge" },
         "managed_link_includes": { "$ref": "#/$defs/stringArray" },
         "managed_link_excludes": { "$ref": "#/$defs/stringArray" },
         "projection_profiles": { "$ref": "#/$defs/projectionProfiles" },
@@ -200,6 +201,24 @@
         "owner": { "$ref": "#/$defs/nonEmptyString" },
         "target_root": { "$ref": "#/$defs/nonEmptyString" },
         "receipt_path": { "type": "string", "pattern": "^reports[\\\\/]skill-projection[\\\\/][^\\\\/]+\\.json$" }
+      }
+    },
+    "nativeAgentBridge": {
+      "type": "object",
+      "required": ["enabled", "owner", "source_root", "target_root", "receipt_path", "definitions"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "owner": { "$ref": "#/$defs/nonEmptyString" },
+        "source_root": { "type": "string", "pattern": "^agent[\\\\/]" },
+        "target_root": { "const": "~/.codex/agents" },
+        "receipt_path": { "type": "string", "pattern": "^reports[\\\\/]native-agent-bridge[\\\\/][^\\\\/]+\\.json$" },
+        "definitions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }
+        }
       }
     }
   },

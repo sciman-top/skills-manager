@@ -43,7 +43,8 @@ Describe 'Skill projection profiles' {
             $selection = Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName $hostName
             $selection.profile | Should -Be 'core'
             $selection.include_all | Should -BeFalse
-            @($selection.included_names).Count | Should -Be 8
+            @($selection.included_names).Count | Should -Be 9
+            @($selection.included_names) | Should -Contain 'grill-me'
         }
         @(Resolve-SkillProjectionSelection -ProjectionConfig $config -HostName zcode).excluded_names | Should -Be @('agent-browser', 'skill-creator', 'web-artifacts-builder')
     }

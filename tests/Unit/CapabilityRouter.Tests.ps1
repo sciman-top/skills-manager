@@ -235,6 +235,10 @@ Describe 'Capability router fallback' {
         $skill | Should -Match 'do not use as a normal preflight'
         $skill | Should -Match 'routing_receipt'
         $skill | Should -Match 'candidate_load_validated'
+        $skill | Should -Match 'Native cold-capability handoff'
+        $skill | Should -Match 'not treat validation as execution authorization'
+        $skill | Should -Match 'Never use the bridge as automatic middleware'
+        $skill | Should -Match 'exact write set, minimum proof, and stop condition'
     }
 
     It 'does not echo the raw query in the routing receipt' {

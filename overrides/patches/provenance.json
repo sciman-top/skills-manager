@@ -3,6 +3,15 @@
   "reviewed_at": "2026-08-16",
   "patches": [
     {
+      "name": "grill-me",
+      "upstream_repo": "https://github.com/mattpocock/skills.git",
+      "upstream_path": "skills/productivity/grill-me",
+      "base_revision": "5b15a47f2d7150f545fbcacbfe381787fc0230dc",
+      "reviewed_revision": "5b15a47f2d7150f545fbcacbfe381787fc0230dc",
+      "license": "MIT",
+      "local_delta_reason": "Keep the explicit core entry thin and delegate the interview to the projected native design-griller, avoiding shared profile switching or in-thread implementation."
+    },
+    {
       "name": "code-review-and-quality",
       "upstream_repo": "https://github.com/addyosmani/agent-skills.git",
       "upstream_path": "skills/code-review-and-quality",

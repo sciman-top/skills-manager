@@ -31,6 +31,7 @@
             "code-review-and-quality",
             "custom-powerpoint-accessibility",
             "custom-powershell-windows-automation",
+            "grill-me",
             "research",
             "systematic-debugging",
             "verification-before-completion"
@@ -82,6 +83,17 @@
       "owner": "skills-manager",
       "target_root": "~/.agents/skills",
       "receipt_path": "reports/skill-projection/native-receipt.json"
+    },
+    "native_agent_bridge": {
+      "enabled": true,
+      "owner": "skills-manager",
+      "source_root": "agent/native-agent-bridge",
+      "target_root": "~/.codex/agents",
+      "receipt_path": "reports/native-agent-bridge/current.json",
+      "definitions": [
+        "design-griller",
+        "cold-capability-runner"
+      ]
     },
     "discovery_catalog": {
       "catalog_path": "agent/.skills-manager/catalog.json",

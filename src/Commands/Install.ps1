@@ -2297,6 +2297,18 @@ function 构建生效(
                     if ($syncFailures) { $failures += $syncFailures }
                 }
             }
+            if (-not $SkipHostProjection -and @($failures).Count -eq 0) {
+                try {
+                    $bridgeProjection = Sync-NativeAgentBridge $cfg
+                    if ([bool]$bridgeProjection.enabled) {
+                        Log ("原生子代理 bridge 已处理：definitions={0}，persisted={1}，truth_boundary={2}" -f (@($bridgeProjection.changed_names) -join ',', [bool]$bridgeProjection.persisted, [string]$bridgeProjection.truth_boundary))
+                    }
+                }
+                catch {
+                    Write-Host ("❌ 同步原生子代理 bridge 失败：{0}" -f $_.Exception.Message) -ForegroundColor Red
+                    $failures += ("native-agent-bridge => {0}" -f $_.Exception.Message)
+                }
+            }
             Write-FailureSummary "构建生效部分失败" $failures
             if ($failures.Count -gt 0 -and -not $promotionBlocked) { $needRollback = $true }
             Write-DryRunMirrorSummary "DRYRUN Robocopy 预览（构建生效）"

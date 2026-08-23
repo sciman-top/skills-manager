@@ -150,6 +150,8 @@ ZCode 使用同一个项目根 `AGENTS.md`，不需要另建项目规则文件�
 
 Codex 与 Claude 默认只投影同一份小型 managed allowlist；其余已安装技能保留为 cold catalog，需要真实任务触发后再读取。这里的“可见”不代表每个请求都会加载或调用完整 `SKILL.md`。
 
+Codex 的 `core` 另保留显式 `$grill-me` 薄入口。`构建生效` 会从受控模板投影 `design-griller` 与 `cold-capability-runner` 两个原生 custom agent 到 `~/.codex/agents`，并为替换保留备份和 ignored receipt。前者只做一题一轮、无文件修改的设计审问；后者只接收 `capability-router` 已验证的单个冷技能入口：`read_only` 工作保持只读，`controlled_write` 必须再由父 task 传入用户实施请求、精确 write set、最低验证与 stop 的 admission 合同，才可在该合同内执行。它们不会切换共享 skill profile，也不会对每条自然语言请求自动 cold discovery。模板/文件存在只证明 `filesystem_projected`；父 task 的 live sandbox override 可覆盖子代理默认 sandbox，且多轮路由必须以 fresh Codex session 的实际行为另行验收。
+
 ```powershell
 # 默认只读取仓库侧技能面，不调用宿主 CLI
 .\skills.ps1 capability-inventory --view skill-surfaces --json

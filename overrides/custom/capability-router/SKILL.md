@@ -32,6 +32,28 @@ Load validation checks only catalog schema/fingerprint, catalog-root containment
 
 Every response also includes a read-only `routing_receipt`. It contains a SHA-256 of the query rather than the raw request, catalog fingerprint, requested and validated candidate names, status, and `truth_boundary`. Use it to record `candidate_discovery_only`, `candidate_load_validated`, or `candidate_discovery_blocked`; it never proves host loading, invocation, model routing, or live acceptance.
 
+## Native cold-capability handoff
+
+When a matching native skill/tool is already visible, use it directly and do
+not involve this router or a bridge. Otherwise, the host may hand one exact
+candidate to the native `cold-capability-runner` subagent only when this
+router has returned all of the following for the same request:
+
+- `load_validation.pass=true`;
+- `routing_receipt.truth_boundary=candidate_load_validated`;
+- one selected candidate with its validated `path` and declared `side_effect`.
+
+Pass the complete validation result, the original request, and the exact
+selected name to the child. The child may read that entrypoint, but it must
+not treat validation as execution authorization. A `read_only` candidate may
+perform only a bounded read-only task. A `controlled_write` candidate needs a
+separate parent admission that records the user's implementation request, its
+exact write set, minimum proof, and stop condition; it may then write only
+within that contract. For `external_read`, `unknown`, ambiguity, or any
+request to alter host/session state, return an admission request to the parent
+instead. Never use the bridge as automatic middleware or make every
+natural-language request cold-discover skills.
+
 ## Boundaries
 
 - Do not invoke when a visible native skill/tool already matches.
