@@ -18,24 +18,31 @@ evidence, route through cold discovery to `grill-with-docs` (closure:
 grill-with-docs + domain-modeling + grilling) instead of spawning the plain
 design-griller; gather evidence per question, never instead of asking it.
 
-1. Use the host-native child-spawn tool to start the custom `design-griller`
-   with the user's proposal, stated constraints, and exact request to grill it.
-   A delegation is valid only when that tool returns a non-empty child task or
-   thread identifier.
-2. Keep the parent task as the user-facing conversation. Return the child's
+## Native-child dispatch invariant
+
+Before producing a user-facing question, conclusion, or delegation claim for a
+`multi_turn_user_decision` workflow, call the host-native `spawn_agent` tool
+for the custom `design-griller`. Pass the user's proposal, stated constraints,
+and exact request to grill it. A delegation is valid only when that tool returns
+a non-empty child task or thread identifier. Do not call `wait` until that
+identifier exists, and pass the same identifier to every later `wait` or
+follow-up call.
+
+If `spawn_agent` is unavailable, fails, or returns no identifier, stop with
+`native_bridge_unavailable` and name the missing spawn evidence. Do not call a
+bare `wait`, simulate a child question, claim that a child was started, or
+silently fall back to a parent or shared-profile interview.
+
+1. Keep the parent task as the user-facing conversation. Return the child's
    single question to the user only after receiving its result, then route each
    user answer back to that exact child identifier until it emits its decision
-   capsule. A `wait` call without that identifier is not a delegation receipt.
-3. The child may ask only decisions that can materially change the proposal.
+   capsule.
+2. The child may ask only decisions that can materially change the proposal.
    It must remain read-only: no repository edits, implementation, tickets,
    ADRs, host configuration, profile changes, or side effects.
-4. When the child closes, return its settled decisions, open risks, and
+3. When the child closes, return its settled decisions, open risks, and
    assumptions to the parent task. Resume normal `core` work; do not preserve
    a `design` profile or start another child unless the user asks again.
 
-If the native `design-griller` is unavailable, the child-spawn tool fails, or
-no child identifier/result is returned, report `native_bridge_unavailable` and
-explain the missing bridge evidence. Do not silently fall back to shared-profile
-switching, simulate a child question, or claim that delegation happened. Only
-offer `codex exec --ephemeral` when the user explicitly asks for a no-trace CLI
-fallback.
+Only offer `codex exec --ephemeral` when the user explicitly asks for a
+no-trace CLI fallback.
