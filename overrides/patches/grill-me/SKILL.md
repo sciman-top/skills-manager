@@ -9,11 +9,14 @@ disable-model-invocation: true
 This is the thin `core` entry for an explicit design interview. Do not perform
 the interview in the parent task and do not change a shared skill profile.
 
-1. Spawn the native `design-griller` custom subagent with the user's proposal,
-   stated constraints, and the exact request to grill it.
+1. Use the host-native child-spawn tool to start the custom `design-griller`
+   with the user's proposal, stated constraints, and exact request to grill it.
+   A delegation is valid only when that tool returns a non-empty child task or
+   thread identifier.
 2. Keep the parent task as the user-facing conversation. Return the child's
-   single question to the user, then route each user answer back to the same
-   child until it emits its decision capsule.
+   single question to the user only after receiving its result, then route each
+   user answer back to that exact child identifier until it emits its decision
+   capsule. A `wait` call without that identifier is not a delegation receipt.
 3. The child may ask only decisions that can materially change the proposal.
    It must remain read-only: no repository edits, implementation, tickets,
    ADRs, host configuration, profile changes, or side effects.
@@ -21,7 +24,9 @@ the interview in the parent task and do not change a shared skill profile.
    assumptions to the parent task. Resume normal `core` work; do not preserve
    a `design` profile or start another child unless the user asks again.
 
-If the native `design-griller` is unavailable, report
-`native_bridge_unavailable` and explain the missing projection. Do not silently
-fall back to shared-profile switching. Only offer `codex exec --ephemeral` when
-the user explicitly asks for a no-trace CLI fallback.
+If the native `design-griller` is unavailable, the child-spawn tool fails, or
+no child identifier/result is returned, report `native_bridge_unavailable` and
+explain the missing bridge evidence. Do not silently fall back to shared-profile
+switching, simulate a child question, or claim that delegation happened. Only
+offer `codex exec --ephemeral` when the user explicitly asks for a no-trace CLI
+fallback.

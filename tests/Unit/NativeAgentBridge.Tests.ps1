@@ -82,6 +82,9 @@ Describe 'Native agent bridge' {
         $skill | Should -Match '(?s)Do not perform\s+the interview in the parent task'
         $skill | Should -Match 'do not change a shared skill profile'
         $skill | Should -Match 'no repository edits'
+        $skill | Should -Match 'non-empty child task or\s+thread identifier'
+        $skill | Should -Match 'not a delegation receipt'
+        $skill | Should -Match 'simulate a child question'
         $skill | Should -Match '(?s)Do not silently\s+fall back'
     }
 
