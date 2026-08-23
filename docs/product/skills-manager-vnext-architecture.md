@@ -73,9 +73,11 @@ Canonical inventory 统一来源；eligibility 处理 enabled/dependency/placeme
 
 `capability-router` 是宿主按需选择的 fallback adapter，仅在可见 metadata 不足或需要确定性 policy validation 时适用。它从 portable catalog 读取候选，按 `DomainHint` 限定集合，并对宿主提供的 Candidate 做确定性 existence、containment、entrypoint hash、availability 与 side-effect disclosure 校验。它不作普通请求前置，不维护 session、preheat、activation plan 或 MCP/plugin 编排；语义选择始终属于宿主。
 
+可选 Codex native-agent bridge 是同一投影边界内的薄适配器：它只物化仓库 `agent/native-agent-bridge/` 中带 ownership marker 的 TOML 模板到固定 `~/.codex/agents`，不实现 agent runtime、队列、会话或模型路由。bridge-only 配置也必须进入 `Test-ConfiguredHostProjection` 的 host promotion 检查；写入前拒绝 reparse ancestor/target，写入后记录 source revision、promotion mode、模板 hash、备份与回滚信息。该能力的文件存在只证明 `filesystem_projected`，不证明 Codex fresh session 已加载或 live 任务接受。
+
 ### Hermes consumer 与受控技能演进（未来、POC 门禁）
 
-Hermes 不是本仓的第六条运行主链，也不是本仓需要嵌入的 runtime。它是一个可能消费技能的外部宿主；目前不存在 `HermesAdapter`、Gateway controller、Kanban bridge 或任何对 `~/.hermes` / `~/.codex` 的写路径。
+Hermes 不是本仓的第六条运行主链，也不是本仓需要嵌入的 runtime。它是一个可能消费技能的外部宿主；目前不存在 `HermesAdapter`、Gateway controller、Kanban bridge 或任何对 `~/.hermes` 的写路径。Codex `~/.codex/agents` 的 native-agent bridge 是独立、可选且受投影晋级合同约束的宿主适配，不改变 Hermes 边界。
 
 在隔离 POC 未证明真实差异前，Hermes 只应消费项目级 `.agents/skills`，或消费经 ACL/独立用户保护的只读副本。现有 native projection 已能表达 source、package hash、managed/external ownership、receipt 和 rollback 时，不新增 consumer module。
 

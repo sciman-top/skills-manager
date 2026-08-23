@@ -96,6 +96,7 @@
 - `FR-PRJ-004`：普通语义选择归宿主；router 只接受 `DomainHint` 和宿主选择，禁止 lexical ranking、profile switch 与 host mutation。
 - `FR-PRJ-005`：inventory/corpus 只能证明候选与 policy contract，不证明宿主真实 invocation。
 - `FR-PRJ-006`：只读 inventory 使用公开 plugin CLI JSON 识别 plugin/system/standalone 同名能力，优先建议 native plugin source；finding 仅报告，不安装、卸载、启用 plugin 或读写 cache。
+- `FR-PRJ-007`：可选 Codex native-agent bridge 只把仓库受控模板投影到固定 `~/.codex/agents`；写入必须经过既有 host promotion（clean commit 或明确 unverified override）、模板 ownership/reparse 校验、receipt 与回滚。bridge 不负责 agent runtime、队列、会话、模型选择或跨宿主编排。
 
 ### 5.6 Reference shelf
 
