@@ -66,6 +66,7 @@ Describe 'Capability router fallback' {
         $result.selected[0].load_side_effect|Should -Be 'read_only'
         $result.selected[0].side_effect|Should -Be 'read_only'
         $result.selected[0].entrypoint_hash_validated|Should -Be $true
+        @($result.retrieval.candidates.name) | Should -Be @('codebase-design')
         @($result.validated_closure.name) | Should -Be @('codebase-design')
         $result.execution_authorization.status|Should -Be 'not_granted'
         $result.routing_receipt.status | Should -Be 'validated'

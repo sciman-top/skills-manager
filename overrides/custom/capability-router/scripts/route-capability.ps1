@@ -474,6 +474,13 @@ if ($catalogStatus -eq 'current' -and $requestValid) {
 }
 
 $selectedRows = @($selected.ToArray())
+if ($requestedNames.Count -gt 0) {
+    # An explicit candidate has already made the semantic selection.  Do not
+    # leak an unrelated alphabetical discovery subset beside it: consumers
+    # must see exactly the candidate they asked us to validate (or an empty
+    # list when it is unavailable).
+    $visible = @($selectedRows)
+}
 $rootSelectionPass = $catalogStatus -eq 'current' -and $requestValid -and
     $requestedNames.Count -gt 0 -and $requestedNames.Count -eq $selectedRows.Count
 $closurePass = $rootSelectionPass
