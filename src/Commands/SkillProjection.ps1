@@ -504,6 +504,7 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
     $manifestPath = Resolve-SkillProjectionPath $manifestRaw
     $catalogProjection = Sync-SkillDiscoveryCatalog $projectionCfg
     $nativeProjectionPlan = $null
+    $nativeProjectionFingerprintPlan = $null
     $nativeProjectionApply = $null
     $nativeProjectionAuthoritative = $false
     $nativeSettings = Get-CfgObjectProperty $projectionCfg 'native_projection'
@@ -514,12 +515,18 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
         $capturedAt = [DateTimeOffset]::UtcNow.ToString('o')
         $nativeProjectionPlan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $managedRoot -Config ([pscustomobject]@{ skill_projection = $projectionCfg }) -IncludedNames $includedNames -ExcludedNames $excludedNames -GeneratedAt $capturedAt
         Need ([string]$nativeProjectionPlan.status -eq 'ready' -and [bool]$nativeProjectionPlan.pass) ("native skill projection blocked: enabled={0}, kept={1}, omitted={2}" -f [int]$nativeProjectionPlan.enabled_total, [int]$nativeProjectionPlan.kept_total, [int]$nativeProjectionPlan.omitted_total)
+        $nativeProjectionFingerprintPlan = $nativeProjectionPlan
         $nativeProjectionAuthoritative = $true
         if ($DryRun) {
             $nativeProjectionApply = [pscustomobject]@{ status = 'planned'; receipt_id = ''; receipt_path = [string]$nativeProjectionPlan.receipt_path; changed_names = @(); receipt = $null }
         }
         else {
             $nativeProjectionApply = Apply-NativeSkillProjection -Plan $nativeProjectionPlan
+            # The apply plan can contain owned links that are removed while switching
+            # profiles. Persist the post-apply steady state in the manifest
+            # fingerprint so a fresh validation does not treat that successful
+            # transition as source drift.
+            $nativeProjectionFingerprintPlan = New-NativeSkillProjectionRuntimePlan -ManagedRoot $managedRoot -Config ([pscustomobject]@{ skill_projection = $projectionCfg }) -IncludedNames $includedNames -ExcludedNames $excludedNames
         }
     }
     $plan = New-SkillProjectionPlan $projectionCfg
@@ -537,7 +544,7 @@ function Invoke-CodexSkillProjectionSyncCore($projectionCfg, $promotionContext =
                 if ($null -ne $transaction) { $transaction.config_backup_path = if ($null -eq $writtenBackupPath) { '' } else { [string]$writtenBackupPath } }
                 Set-ContentUtf8 $configPath $desired
             }
-            $projectionFingerprint = Get-SkillProjectionPlanFingerprint $plan $nativeProjectionPlan $selection
+            $projectionFingerprint = Get-SkillProjectionPlanFingerprint $plan $nativeProjectionFingerprintPlan $selection
             $promotion = Get-SkillProjectionPromotionRecord $manifestPath $promotionContext $projectionFingerprint
             $manifest = [ordered]@{
                 schema_version = 2

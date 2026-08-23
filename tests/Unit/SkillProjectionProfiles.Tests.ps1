@@ -165,4 +165,36 @@ Describe 'Skill projection profiles' {
         $validation.pass | Should -BeTrue
         $validation.freshness | Should -Be 'fresh'
     }
+
+    It 'keeps the manifest fresh after shrinking a native profile and removing owned links' {
+        $source = Join-Path $TestDrive 'transition-source'
+        $target = Join-Path $TestDrive 'transition-target'
+        $receipt = Join-Path $repoRoot ('reports\skill-projection\transition-{0}.json' -f ([guid]::NewGuid().ToString('N')))
+        $configPath = Join-Path $TestDrive 'transition-config.toml'
+        $manifestPath = Join-Path $TestDrive 'transition-manifest.json'
+        foreach ($name in @('alpha', 'beta')) { New-ProfileFixtureSkill $source $name }
+        $projection = New-ProfileFixtureProjection $source $target $receipt
+        $projection | Add-Member -NotePropertyName sources -NotePropertyValue @([pscustomobject]@{ id = 'fixture'; path = $source; priority = 1; platforms = @('codex') })
+        $projection | Add-Member -NotePropertyName codex_config_path -NotePropertyValue $configPath
+        $projection | Add-Member -NotePropertyName manifest_path -NotePropertyValue $manifestPath
+        $promotionContext = [pscustomobject]@{ source_revision = 'fixture'; source_worktree_dirty = $false; source_git_state = 'clean'; promotion_mode = 'test' }
+
+        try {
+            $fullSelection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName codex -RequestedProfile 'full-compatible'
+            (Sync-CodexSkillProjection (New-SkillProjectionHostConfig -ProjectionConfig $projection -Selection $fullSelection) $promotionContext).success | Should -BeTrue
+
+            $coreSelection = Resolve-SkillProjectionSelection -ProjectionConfig $projection -HostName codex -RequestedProfile core
+            (Sync-CodexSkillProjection (New-SkillProjectionHostConfig -ProjectionConfig $projection -Selection $coreSelection) $promotionContext).success | Should -BeTrue
+
+            Test-Path -LiteralPath (Join-Path $target 'beta') | Should -BeFalse
+            $manifest = Get-ContentUtf8 $manifestPath | ConvertFrom-Json
+            $validation = Test-SkillProjectionManifestCurrent $manifest $projection $repoRoot
+
+            $validation.pass | Should -BeTrue
+            $validation.freshness | Should -Be 'fresh'
+        }
+        finally {
+            if (Test-Path -LiteralPath $receipt -PathType Leaf) { Remove-Item -LiteralPath $receipt -Force }
+        }
+    }
 }
