@@ -117,6 +117,22 @@ description: >-
         $candidate.path | Should -Be (Join-Path $portableRoot 'codebase-design\SKILL.md')
     }
 
+    It 'canonicalizes an explicit catalog path through the router junction only' {
+        $residentRoot = Join-Path $TestDrive 'resident-skills-explicit'
+        New-Item -ItemType Directory -Path $residentRoot -Force | Out-Null
+        $residentRouter = Join-Path $residentRoot 'capability-router'
+        New-Item -ItemType Junction -Path $residentRouter -Target $routerRoot | Out-Null
+
+        $result = & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $residentRouter 'scripts\route-capability.ps1') `
+            -Query '设计模块边界和工程终态' -CatalogPath (Join-Path $residentRouter 'catalog.json') -Candidate 'skill|codebase-design' | ConvertFrom-Json
+
+        $result.catalog_resolution.mode | Should -Be 'explicit'
+        $result.catalog_path | Should -Be (Join-Path $routerRoot 'catalog.json')
+        $result.catalog.status | Should -Be 'current'
+        $result.load_validation.pass | Should -BeTrue
+        $result.selected[0].path | Should -Be (Join-Path $portableRoot 'codebase-design\SKILL.md')
+    }
+
     It 'excludes a cold skill when its entrypoint no longer matches the catalog hash' {
         Add-Content -LiteralPath (Join-Path $targetRoot 'SKILL.md') -Encoding UTF8 -Value "`n# Drift after catalog projection"
 

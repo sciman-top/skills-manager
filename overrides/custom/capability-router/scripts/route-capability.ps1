@@ -44,6 +44,36 @@ function Test-ReparsePathWithinRoot([string]$Path, [string]$Root) {
     return $false
 }
 
+function Resolve-RunningRouterCatalogPath([string]$Path) {
+    # The native projection exposes each managed skill as a junction.  An
+    # explicit path to *this* router's catalog therefore has a safe physical
+    # counterpart beneath the already-running router target.  Canonicalise
+    # only that narrow shape; arbitrary catalog paths that cross a reparse
+    # point remain subject to the normal fail-closed containment checks.
+    $candidate = [IO.Path]::GetFullPath($Path)
+    $routerRoot = Split-Path $PSScriptRoot -Parent
+    if (-not (Test-Within $candidate $routerRoot)) { return $candidate }
+
+    $routerItem = Get-Item -LiteralPath $routerRoot -Force -ErrorAction SilentlyContinue
+    if ($null -eq $routerItem -or ($routerItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) { return $candidate }
+    $targets = @($routerItem.Target | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
+    if ($targets.Count -ne 1) { return $candidate }
+
+    try {
+        $physicalRoot = [IO.Path]::GetFullPath($targets[0])
+        $relative = [IO.Path]::GetRelativePath($routerRoot, $candidate)
+        if ($relative -eq '.' -or $relative -match '^(?:\.\.[\\/]|\.\.$)') { return $candidate }
+        $physicalCandidate = [IO.Path]::GetFullPath((Join-Path $physicalRoot $relative))
+        if (-not (Test-Within $physicalCandidate $physicalRoot) -or
+            (Test-ReparsePathWithinRoot $physicalCandidate $physicalRoot) -or
+            -not (Test-Path -LiteralPath $physicalCandidate -PathType Leaf)) {
+            return $candidate
+        }
+        return $physicalCandidate
+    }
+    catch { return $candidate }
+}
+
 function Test-ObjectProperty($Object, [string]$Name) {
     return $null -ne $Object -and $Object.PSObject.Properties.Match($Name).Count -gt 0
 }
@@ -145,15 +175,17 @@ function Get-EffectiveExecutionContract([object[]]$Rows) {
 
 function Resolve-Catalog([string]$Explicit, [bool]$AllowAutoDiscovery) {
     if (-not [string]::IsNullOrWhiteSpace($Explicit)) {
-        if (Test-Path -LiteralPath $Explicit -PathType Leaf) {
-            return [pscustomobject]@{ path = [IO.Path]::GetFullPath($Explicit); mode = 'explicit'; finding = $null }
+        $resolvedExplicit = Resolve-RunningRouterCatalogPath $Explicit
+        if (Test-Path -LiteralPath $resolvedExplicit -PathType Leaf) {
+            return [pscustomobject]@{ path = $resolvedExplicit; mode = 'explicit'; finding = $null }
         }
         return [pscustomobject]@{ path = ''; mode = 'explicit'; finding = (New-RouterFinding 'catalog_not_found' '$.catalog_path' 'The explicit capability catalog does not exist.') }
     }
 
     if (-not [string]::IsNullOrWhiteSpace($env:SKILLS_MANAGER_CAPABILITY_CATALOG)) {
-        if (Test-Path -LiteralPath $env:SKILLS_MANAGER_CAPABILITY_CATALOG -PathType Leaf) {
-            return [pscustomobject]@{ path = [IO.Path]::GetFullPath($env:SKILLS_MANAGER_CAPABILITY_CATALOG); mode = 'environment'; finding = $null }
+        $resolvedEnvironment = Resolve-RunningRouterCatalogPath $env:SKILLS_MANAGER_CAPABILITY_CATALOG
+        if (Test-Path -LiteralPath $resolvedEnvironment -PathType Leaf) {
+            return [pscustomobject]@{ path = $resolvedEnvironment; mode = 'environment'; finding = $null }
         }
         return [pscustomobject]@{ path = ''; mode = 'environment'; finding = (New-RouterFinding 'catalog_not_found' '$.catalog_path' 'The environment capability catalog does not exist.') }
     }
