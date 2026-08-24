@@ -196,6 +196,7 @@ function Get-ExecutionAdmissionPayload($Admission) {
         stop_condition = Get-ExecutionAdmissionProperty $Admission 'stop_condition'
         validation_snapshot = Get-ExecutionAdmissionProperty $Admission 'validation_snapshot'
         prior_admission_id = Get-ExecutionAdmissionProperty $Admission 'prior_admission_id'
+        attributable_user_answer_sha256 = Get-ExecutionAdmissionProperty $Admission 'attributable_user_answer_sha256'
     }
 }
 
@@ -208,7 +209,8 @@ function New-ExecutionAdmission {
         [Parameter(Mandatory = $true)][string]$AuthorityBasis,
         [Parameter(Mandatory = $true)][string]$IssuedAt,
         [Parameter(Mandatory = $true)][string]$RepoRoot,
-        [string]$PriorAdmissionId = ''
+        [string]$PriorAdmissionId = '',
+        [string]$AttributableUserAnswer = ''
     )
 
     if ([string]::IsNullOrWhiteSpace($OriginalRequest) -or [string]::IsNullOrWhiteSpace($AdmittedGoal) -or [string]::IsNullOrWhiteSpace($AuthorityBasis)) { throw 'admission_required_field_missing' }
@@ -231,6 +233,7 @@ function New-ExecutionAdmission {
         stop_condition = $script:ExecutionAdmissionStopCondition
         validation_snapshot = $validationSnapshot
         prior_admission_id = $PriorAdmissionId
+        attributable_user_answer_sha256 = if ([string]::IsNullOrWhiteSpace($AttributableUserAnswer)) { '' } else { Get-OperationSha256 $AttributableUserAnswer }
     }
     $admission | Add-Member -NotePropertyName admission_id -NotePropertyValue (Get-ExecutionAdmissionDigest 'adm' (Get-ExecutionAdmissionPayload $admission))
     $contract = Test-ExecutionAdmissionContract -Admission $admission -RepoRoot $RepoRoot
@@ -263,6 +266,9 @@ function Test-ExecutionAdmissionContract {
     if ([string](Get-ExecutionAdmissionProperty $Admission 'stop_condition') -ne $script:ExecutionAdmissionStopCondition) { $findings.Add((New-ExecutionAdmissionFinding 'stop_condition_invalid' '$.stop_condition' 'P0 must stop after one question.')) | Out-Null }
     $priorAdmissionId = [string](Get-ExecutionAdmissionProperty $Admission 'prior_admission_id')
     if (-not [string]::IsNullOrWhiteSpace($priorAdmissionId) -and $priorAdmissionId -notmatch '^adm-[a-f0-9]{64}$') { $findings.Add((New-ExecutionAdmissionFinding 'prior_admission_id_invalid' '$.prior_admission_id' 'Prior admission id must be content-addressed.')) | Out-Null }
+    $answerHash = [string](Get-ExecutionAdmissionProperty $Admission 'attributable_user_answer_sha256')
+    if ([string]::IsNullOrWhiteSpace($priorAdmissionId) -and -not [string]::IsNullOrWhiteSpace($answerHash)) { $findings.Add((New-ExecutionAdmissionFinding 'initial_admission_has_user_answer' '$.attributable_user_answer_sha256' 'Only a successor admission may bind a user answer.')) | Out-Null }
+    if (-not [string]::IsNullOrWhiteSpace($priorAdmissionId) -and $answerHash -notmatch '^[a-f0-9]{64}$') { $findings.Add((New-ExecutionAdmissionFinding 'successor_user_answer_missing' '$.attributable_user_answer_sha256' 'A successor admission must bind one attributable user answer hash.')) | Out-Null }
 
     $readSet = Get-ExecutionAdmissionProperty $Admission 'allowed_read_set'
     if (-not (Test-ExecutionAdmissionArray $readSet) -or @($readSet).Count -eq 0) { $findings.Add((New-ExecutionAdmissionFinding 'allowed_read_set_invalid' '$.allowed_read_set' 'Read set must be a non-empty array.')) | Out-Null }
@@ -373,4 +379,65 @@ function Test-ExecutionAdmissionRevalidation {
         if ($actualHash -ne [string]$entry.sha256) { $findings.Add((New-ExecutionAdmissionFinding ([string]$entry.code) '$.snapshot' ('Snapshot file hash changed: {0}' -f $entry.path))) | Out-Null }
     }
     return [pscustomobject][ordered]@{ pass = ($findings.Count -eq 0); disposition = $(if ($findings.Count -eq 0) { 'admit' } else { 'reject' }); findings = @($findings.ToArray()) }
+}
+
+function Test-ExecutionAdmissionContinuation {
+    param(
+        [Parameter(Mandatory = $true)]$PriorAdmission,
+        [Parameter(Mandatory = $true)]$PriorPlan,
+        [Parameter(Mandatory = $true)]$SuccessorAdmission,
+        [Parameter(Mandatory = $true)]$SuccessorPlan,
+        [Parameter(Mandatory = $true)]$Validation,
+        [Parameter(Mandatory = $true)][string]$RepoRoot
+    )
+
+    $findings = New-Object System.Collections.Generic.List[object]
+    foreach ($finding in @((Test-ExecutionAdmissionRevalidation -Admission $PriorAdmission -Plan $PriorPlan -Validation $Validation -RepoRoot $RepoRoot).findings)) { $findings.Add($finding) | Out-Null }
+    foreach ($finding in @((Test-ExecutionAdmissionRevalidation -Admission $SuccessorAdmission -Plan $SuccessorPlan -Validation $Validation -RepoRoot $RepoRoot).findings)) { $findings.Add($finding) | Out-Null }
+    if ($findings.Count -gt 0) { return [pscustomobject][ordered]@{ pass = $false; disposition = 'reject'; findings = @($findings.ToArray()) } }
+
+    $priorId = [string](Get-ExecutionAdmissionProperty $PriorAdmission 'admission_id')
+    $successorId = [string](Get-ExecutionAdmissionProperty $SuccessorAdmission 'admission_id')
+    if ($priorId -eq $successorId) { $findings.Add((New-ExecutionAdmissionFinding 'continuation_admission_reused' '$.admission_id' 'A continuation must receive a new admission identity.')) | Out-Null }
+    if ([string](Get-ExecutionAdmissionProperty $SuccessorAdmission 'prior_admission_id') -ne $priorId) { $findings.Add((New-ExecutionAdmissionFinding 'continuation_prior_admission_mismatch' '$.prior_admission_id' 'Successor must bind the exact predecessor admission.')) | Out-Null }
+    if ([string](Get-ExecutionAdmissionProperty $SuccessorAdmission 'attributable_user_answer_sha256') -notmatch '^[a-f0-9]{64}$') { $findings.Add((New-ExecutionAdmissionFinding 'continuation_user_answer_missing' '$.attributable_user_answer_sha256' 'Successor must bind an attributable user answer hash.')) | Out-Null }
+    foreach ($field in @('request_sha256', 'admitted_goal', 'authority_basis', 'requested_operation', 'minimum_proof', 'stop_condition')) {
+        if ([string](Get-ExecutionAdmissionProperty $PriorAdmission $field) -ne [string](Get-ExecutionAdmissionProperty $SuccessorAdmission $field)) { $findings.Add((New-ExecutionAdmissionFinding 'continuation_scope_changed' ('.{0}' -f $field) 'Continuation cannot change the admitted scope.')) | Out-Null }
+    }
+    if ((ConvertTo-ExecutionAdmissionCanonicalJson @(Get-ExecutionAdmissionProperty $PriorAdmission 'allowed_read_set')) -ne (ConvertTo-ExecutionAdmissionCanonicalJson @(Get-ExecutionAdmissionProperty $SuccessorAdmission 'allowed_read_set'))) { $findings.Add((New-ExecutionAdmissionFinding 'continuation_read_set_changed' '$.allowed_read_set' 'Continuation cannot widen or alter the exact read set.')) | Out-Null }
+    if ((ConvertTo-ExecutionAdmissionCanonicalJson (Get-ExecutionAdmissionProperty $PriorAdmission 'validation_snapshot')) -ne (ConvertTo-ExecutionAdmissionCanonicalJson (Get-ExecutionAdmissionProperty $SuccessorAdmission 'validation_snapshot'))) { $findings.Add((New-ExecutionAdmissionFinding 'continuation_validation_snapshot_changed' '$.validation_snapshot' 'Continuation requires the same current validated selection.')) | Out-Null }
+    try {
+        $priorIssuedAt = [datetimeoffset]::Parse([string](Get-ExecutionAdmissionProperty $PriorAdmission 'issued_at'), [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+        $successorIssuedAt = [datetimeoffset]::Parse([string](Get-ExecutionAdmissionProperty $SuccessorAdmission 'issued_at'), [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+        if ($successorIssuedAt -le $priorIssuedAt) { $findings.Add((New-ExecutionAdmissionFinding 'continuation_issued_at_not_later' '$.issued_at' 'Successor must be issued after its predecessor.')) | Out-Null }
+    }
+    catch { $findings.Add((New-ExecutionAdmissionFinding 'continuation_issued_at_invalid' '$.issued_at' 'Continuation timestamps must be comparable RFC3339 values.')) | Out-Null }
+    return [pscustomobject][ordered]@{ pass = ($findings.Count -eq 0); disposition = $(if ($findings.Count -eq 0) { 'admit' } else { 'reject' }); findings = @($findings.ToArray()) }
+}
+
+function New-ExecutionAdmissionSuccessor {
+    param(
+        [Parameter(Mandatory = $true)]$PriorAdmission,
+        [Parameter(Mandatory = $true)]$PriorPlan,
+        [Parameter(Mandatory = $true)][string]$OriginalRequest,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$AttributableUserAnswer,
+        [Parameter(Mandatory = $true)]$Validation,
+        [Parameter(Mandatory = $true)][string]$IssuedAt,
+        [Parameter(Mandatory = $true)][string]$RepoRoot
+    )
+
+    if ([string]::IsNullOrWhiteSpace($AttributableUserAnswer)) { throw 'attributable_user_answer_missing' }
+    $priorRevalidation = Test-ExecutionAdmissionRevalidation -Admission $PriorAdmission -Plan $PriorPlan -Validation $Validation -RepoRoot $RepoRoot
+    if (-not $priorRevalidation.pass) { throw ('continuation_predecessor_not_revalidated: {0}' -f ((@($priorRevalidation.findings | ForEach-Object code) -join ','))) }
+    if ((Get-OperationSha256 $OriginalRequest) -ne [string](Get-ExecutionAdmissionProperty $PriorAdmission 'request_sha256')) { throw 'continuation_request_mismatch' }
+
+    $successor = New-ExecutionAdmission -OriginalRequest $OriginalRequest -AdmittedGoal ([string](Get-ExecutionAdmissionProperty $PriorAdmission 'admitted_goal')) -Validation $Validation -AllowedReadSet @((Get-ExecutionAdmissionProperty $PriorAdmission 'allowed_read_set') | ForEach-Object { [string](Get-ExecutionAdmissionProperty $_ 'path') }) -AuthorityBasis ([string](Get-ExecutionAdmissionProperty $PriorAdmission 'authority_basis')) -IssuedAt $IssuedAt -RepoRoot $RepoRoot -PriorAdmissionId ([string](Get-ExecutionAdmissionProperty $PriorAdmission 'admission_id')) -AttributableUserAnswer $AttributableUserAnswer
+    $plan = New-ExecutionPlan -Admission $successor
+    $continuation = Test-ExecutionAdmissionContinuation -PriorAdmission $PriorAdmission -PriorPlan $PriorPlan -SuccessorAdmission $successor -SuccessorPlan $plan -Validation $Validation -RepoRoot $RepoRoot
+    if (-not $continuation.pass) { throw ('execution_admission_continuation_invalid: {0}' -f ((@($continuation.findings | ForEach-Object code) -join ','))) }
+    return [pscustomobject][ordered]@{
+        admission = $successor
+        plan = $plan
+        enforcement = 'parent_side_soft_guard_only'
+    }
 }

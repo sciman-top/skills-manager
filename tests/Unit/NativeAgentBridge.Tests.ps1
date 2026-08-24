@@ -166,6 +166,8 @@ Describe 'Native agent bridge' {
         $skill | Should -Match 'native_bridge_unavailable'
         $skill | Should -Match 'simulate a child question'
         $skill | Should -Match 'silently fall back'
+        $skill | Should -Match 'New-ExecutionAdmissionSuccessor'
+        $skill | Should -Match 'parent-side soft guard'
 
         $skill | Should -Match 'still an interview'
         $skill | Should -Match 'one-shot analysis, report, or summary with trailing questions'

@@ -100,4 +100,34 @@ Describe 'Execution admission' {
 
         { New-ExecutionAdmission -OriginalRequest '请逐轮审问这份提案，不改文件。' -AdmittedGoal '审问 ExecutionAdmission 提案的接口和不变量。' -Validation $fixture.validation -AllowedReadSet $fixture.allowed_read_set -AuthorityBasis 'current_user_design_decision' -IssuedAt '2026-08-24T08:00:00Z' -RepoRoot $root } | Should -Throw '*execution_contract_invalid*'
     }
+
+    It 'derives a successor only after predecessor revalidation and an attributable user answer' {
+        $root = Join-Path $TestDrive 'successor'
+        $fixture = New-ExecutionAdmissionFixture $root
+        $request = '请逐轮审问这份提案，不改文件。'
+        $admission = New-ExecutionAdmission -OriginalRequest $request -AdmittedGoal '审问 ExecutionAdmission 提案的接口和不变量。' -Validation $fixture.validation -AllowedReadSet $fixture.allowed_read_set -AuthorityBasis 'current_user_design_decision' -IssuedAt '2026-08-24T08:00:00Z' -RepoRoot $root
+        $plan = New-ExecutionPlan -Admission $admission
+
+        $successor = New-ExecutionAdmissionSuccessor -PriorAdmission $admission -PriorPlan $plan -OriginalRequest $request -AttributableUserAnswer '接受推荐。' -Validation $fixture.validation -IssuedAt '2026-08-24T08:01:00Z' -RepoRoot $root
+        $result = Test-ExecutionAdmissionContinuation -PriorAdmission $admission -PriorPlan $plan -SuccessorAdmission $successor.admission -SuccessorPlan $successor.plan -Validation $fixture.validation -RepoRoot $root
+
+        $result.pass | Should -BeTrue
+        $successor.enforcement | Should -Be 'parent_side_soft_guard_only'
+        $successor.admission.prior_admission_id | Should -Be $admission.admission_id
+        $successor.admission.attributable_user_answer_sha256 | Should -Match '^[a-f0-9]{64}$'
+        $successor.admission.admission_id | Should -Not -Be $admission.admission_id
+        $successor.plan.admission_id | Should -Be $successor.admission.admission_id
+    }
+
+    It 'fails closed when a successor lacks an answer, reuses a request, or is not later than its predecessor' {
+        $root = Join-Path $TestDrive 'successor-reject'
+        $fixture = New-ExecutionAdmissionFixture $root
+        $request = '请逐轮审问这份提案，不改文件。'
+        $admission = New-ExecutionAdmission -OriginalRequest $request -AdmittedGoal '审问 ExecutionAdmission 提案的接口和不变量。' -Validation $fixture.validation -AllowedReadSet $fixture.allowed_read_set -AuthorityBasis 'current_user_design_decision' -IssuedAt '2026-08-24T08:00:00Z' -RepoRoot $root
+        $plan = New-ExecutionPlan -Admission $admission
+
+        { New-ExecutionAdmissionSuccessor -PriorAdmission $admission -PriorPlan $plan -OriginalRequest $request -AttributableUserAnswer '' -Validation $fixture.validation -IssuedAt '2026-08-24T08:01:00Z' -RepoRoot $root } | Should -Throw '*attributable_user_answer_missing*'
+        { New-ExecutionAdmissionSuccessor -PriorAdmission $admission -PriorPlan $plan -OriginalRequest '不同的请求' -AttributableUserAnswer '接受推荐。' -Validation $fixture.validation -IssuedAt '2026-08-24T08:01:00Z' -RepoRoot $root } | Should -Throw '*continuation_request_mismatch*'
+        { New-ExecutionAdmissionSuccessor -PriorAdmission $admission -PriorPlan $plan -OriginalRequest $request -AttributableUserAnswer '接受推荐。' -Validation $fixture.validation -IssuedAt '2026-08-24T08:00:00Z' -RepoRoot $root } | Should -Throw '*continuation_issued_at_not_later*'
+    }
 }

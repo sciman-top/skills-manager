@@ -36,7 +36,12 @@ silently fall back to a parent or shared-profile interview.
 1. Keep the parent task as the user-facing conversation. Return the child's
    single question to the user only after receiving its result, then route each
    user answer back to that exact child identifier until it emits its decision
-   capsule.
+   capsule. Before every later `followup_task`, the parent must call
+   `New-ExecutionAdmissionSuccessor` with the predecessor admission/plan,
+   current revalidation, original request, and the attributable user answer;
+   it must relay the returned successor `admission_id` and `plan_id`. A failed
+   guard stops the interview. This is a parent-side soft guard, not evidence
+   that the host supplied a hard pre-followup hook.
 2. The child may ask only decisions that can materially change the proposal.
    It must remain read-only: no repository edits, implementation, tickets,
    ADRs, host configuration, profile changes, or side effects.
