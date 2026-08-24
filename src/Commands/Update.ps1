@@ -670,10 +670,14 @@ function 更新Imports($cfg = $null, [switch]$SkipPreflight, $SkipForceClean = $
 function 更新 {
     & {
         $cfg = LoadCfg
-        if ($Locked -and ($Plan -or $Upgrade)) {
+        # `$Plan` was the former top-level switch name.  Keep only its boolean
+        # form for direct function callers; an execution-plan object assigned
+        # by a dot-sourcing caller must never be reinterpreted as this CLI flag.
+        $legacyPlanRequested = $Plan -is [bool] -and [bool]$Plan
+        if ($Locked -and ($RunPlan -or $legacyPlanRequested -or $Upgrade)) {
             throw "-Locked 不能与 -Plan 或 -Upgrade 同时使用。"
         }
-        if ($Plan) {
+        if ($RunPlan -or $legacyPlanRequested) {
             Preflight
             Show-UpdatePlan $cfg | Out-Null
             return

@@ -5,7 +5,8 @@ param(
     [string]$Filter = "",
     [switch]$DryRun,
     [switch]$Locked,
-    [switch]$Plan,
+    [Alias('Plan')]
+    [switch]$RunPlan,
     [switch]$Upgrade,
     [string]$SkillProfile = "",
     [switch]$AllowUnverifiedHostProjection,
